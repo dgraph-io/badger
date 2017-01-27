@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"io"
 	"os"
+	"sync"
+	"syscall"
 
 	"github.com/dgraph-io/dgraph/x"
 	"github.com/pkg/errors"
@@ -48,17 +50,26 @@ type Pointer struct {
 
 func (l *Log) Open(fname string) {
 	var err error
-	l.fd, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_SYNC, 0666)
-	x.Check(err)
-	_, err = l.fd.Write([]byte("test"))
+	l.fd, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE, 0666)
 	x.Check(err)
 }
 
-func (l *Log) Write(entries []Entry) ([]Pointer, error) {
-	var buf bytes.Buffer
-	var h header
+var bufPool = sync.Pool{
+	New: func() interface{} {
+		return &bytes.Buffer{}
+	},
+}
 
+func (l *Log) Write(entries []Entry) ([]Pointer, error) {
+	buf := bufPool.Get().(*bytes.Buffer)
+	defer func() {
+		buf.Reset()
+		bufPool.Put(buf)
+	}()
+
+	var h header
 	ptrs := make([]Pointer, 0, len(entries))
+
 	for _, e := range entries {
 		h.active = byte(0)
 		h.klen = uint32(len(e.Key))
@@ -88,6 +99,10 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 	}
 
 	_, err = l.fd.Write(buf.Bytes())
+	if err != nil {
+		return ptrs, errors.Wrap(err, "Unable to write to file")
+	}
+	err = syscall.Fdatasync(int(l.fd.Fd()))
 	return ptrs, errors.Wrap(err, "Unable to write to file")
 }
 

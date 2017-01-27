@@ -12,15 +12,15 @@ func BenchmarkReadWrite(b *testing.B) {
 		0.1, 0.2, 0.5, 1.0,
 	}
 	valueSize := []int{
-		64, 128, 256, 512, 1024, 2048, 4096,
+		/*64, 128, 256, 512, 1024, 2048,*/ 4096, 8192, 16384,
 	}
 
 	for _, vsz := range valueSize {
 		for _, rw := range rwRatio {
-			b.Run(fmt.Sprintf("rw-%3.1f-valuesize:%04d", rw, vsz), func(b *testing.B) {
+			b.Run(fmt.Sprintf("%3.1f,%04d", rw, vsz), func(b *testing.B) {
 				var vl Log
-				vl.Open("/tmp/vlog")
-				defer os.Remove("/tmp/vlog")
+				vl.Open("vlog")
+				defer os.Remove("vlog")
 				b.ResetTimer()
 
 				b.RunParallel(func(pb *testing.PB) {
