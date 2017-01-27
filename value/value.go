@@ -50,7 +50,7 @@ type Pointer struct {
 
 func (l *Log) Open(fname string) {
 	var err error
-	l.fd, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE, 0666)
+	l.fd, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE|syscall.O_DSYNC, 0666)
 	x.Check(err)
 }
 
@@ -99,10 +99,6 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 	}
 
 	_, err = l.fd.Write(buf.Bytes())
-	if err != nil {
-		return ptrs, errors.Wrap(err, "Unable to write to file")
-	}
-	err = syscall.Fdatasync(int(l.fd.Fd()))
 	return ptrs, errors.Wrap(err, "Unable to write to file")
 }
 
