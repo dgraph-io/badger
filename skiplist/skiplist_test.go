@@ -213,6 +213,34 @@ func BenchmarkReadParallel(b *testing.B) {
 	}
 }
 
+// Standard test. Some fraction is read. Some fraction is write. Writes have
+// to go through mutex lock.
+func BenchmarkReadWrite(b *testing.B) {
+	maxDepth := 10
+	branch := 3
+	for i := 0; i <= 10; i++ {
+		readFrac := float32(i) / 10.0
+		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
+			list := NewSkiplist(maxDepth, branch)
+			var m sync.Mutex
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					if rand.Float32() < readFrac {
+						it := list.Iterator()
+						it.Seek(randomKey())
+					} else {
+						m.Lock()
+						list.Insert(randomKey())
+						m.Unlock()
+					}
+				}
+			})
+
+		})
+	}
+}
+
 func TestMain(m *testing.M) {
 	x.Init()
 	os.Exit(m.Run())
