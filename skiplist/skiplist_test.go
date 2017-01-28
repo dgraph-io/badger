@@ -1,7 +1,11 @@
 package skiplist
 
 import (
+	"encoding/binary"
+	"fmt"
+	"math/rand"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -91,8 +95,125 @@ func TestPrev(t *testing.T) {
 	require.EqualValues(t, it.Key(), "abc")
 }
 
+func TestReadWrite(t *testing.T) {
+	list := NewSkiplist(10, 3)
+	var wg sync.WaitGroup
+
+	// Start writing first.
+	for i := 0; i < 100; i++ {
+		list.Insert(fmt.Sprintf("%05d", i))
+	}
+
+	wg.Add(1)
+	// Write in one goroutine.
+	go func() {
+		defer wg.Done()
+		for i := 100; i < 10000; i++ {
+			list.Insert(fmt.Sprintf("%05d", i))
+		}
+	}()
+
+	// Read from multiple goroutines. See if it will crash.
+	for i := 0; i < 200; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			it := list.Iterator()
+			var count int
+			for it.SeekToFirst(); it.Valid(); it.Next() {
+				count++
+			}
+			require.True(t, count >= 100)
+		}(i)
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			it := list.Iterator()
+			var count int
+			for it.SeekToLast(); it.Valid(); it.Prev() {
+				count++
+			}
+			require.True(t, count >= 100)
+		}(i)
+	}
+	wg.Wait()
+}
+
+func randomKey() string {
+	bs := make([]byte, 8)
+	key := rand.Uint32()
+	key2 := rand.Uint32()
+	binary.LittleEndian.PutUint32(bs, key)
+	binary.LittleEndian.PutUint32(bs[4:], key2)
+	return string(bs)
+}
+
+func BenchmarkWrite(b *testing.B) {
+	maxDepth := 10
+	for branch := 2; branch <= 7; branch++ {
+		b.Run(fmt.Sprintf("branch_%d", branch), func(b *testing.B) {
+			list := NewSkiplist(maxDepth, branch)
+			for i := 0; i < b.N; i++ {
+				list.Insert(randomKey())
+			}
+		})
+	}
+}
+
+func BenchmarkWriteParallel(b *testing.B) {
+	maxDepth := 10
+	for branch := 2; branch <= 7; branch++ {
+		b.Run(fmt.Sprintf("branch_%d", branch), func(b *testing.B) {
+			list := NewSkiplist(maxDepth, branch)
+			var m sync.Mutex // Skiplist object requires mutex lock for writes.
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					m.Lock()
+					list.Insert(randomKey())
+					m.Unlock()
+				}
+			})
+		})
+	}
+}
+
+func BenchmarkRead(b *testing.B) {
+	maxDepth := 10
+	for branch := 2; branch <= 7; branch++ {
+		b.Run(fmt.Sprintf("branch_%d", branch), func(b *testing.B) {
+			list := NewSkiplist(maxDepth, branch)
+			for i := 0; i < 100000; i++ {
+				list.Insert(randomKey())
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				it := list.Iterator()
+				it.Seek(randomKey())
+			}
+		})
+	}
+}
+
+func BenchmarkReadParallel(b *testing.B) {
+	maxDepth := 10
+	for branch := 2; branch <= 7; branch++ {
+		b.Run(fmt.Sprintf("branch_%d", branch), func(b *testing.B) {
+			list := NewSkiplist(maxDepth, branch)
+			for i := 0; i < 100000; i++ {
+				list.Insert(randomKey())
+			}
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					it := list.Iterator()
+					it.Seek(randomKey())
+				}
+			})
+		})
+	}
+}
+
 func TestMain(m *testing.M) {
-	x.SetTestRun()
 	x.Init()
 	os.Exit(m.Run())
 }

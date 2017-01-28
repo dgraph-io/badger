@@ -1,4 +1,9 @@
 // Adapted from https://github.com/facebook/rocksdb/blob/master/db/skiplist.h
+// Thread safety:
+// Writes require external synchronization, most likely a mutex.
+// Reads require a guarantee that the SkipList will not be destroyed
+// while the read is in progress.  Apart from that, reads progress
+// without any internal locking or synchronization.
 package skiplist
 
 import (
@@ -10,12 +15,12 @@ import (
 	"github.com/dgraph-io/dgraph/x"
 )
 
+// Node is a node in the skiplist.
 type Node struct {
 	key string
 
 	// next[i] is the next node on level i.
-	//	next []*Node
-	next []unsafe.Pointer
+	next []unsafe.Pointer // []*Node
 }
 
 // NewNode returns new node with given key and height.
@@ -46,7 +51,7 @@ type Skiplist struct {
 
 	// maxHeight modified only by Insert(). Read racily by readers but stale
 	// values are ok.
-	maxHeight int // Height for entire list.
+	maxHeight int32 // Height for entire list. Atomic.
 
 	// Used for optimizing sequential insert patterns.  Tricky.  prev_[i] for
 	// i up to max_height_ is the predecessor of prev_[0] and prev_height_
@@ -54,6 +59,11 @@ type Skiplist struct {
 	// insertion, in which case max_height_ and prev_height_ are 1.
 	prev       []*Node
 	prevHeight int
+}
+
+// MaxHeight returns maximum height of skiplist now.
+func (s *Skiplist) MaxHeight() int {
+	return int(atomic.LoadInt32(&s.maxHeight))
 }
 
 // randomHeight returns a random height for a new node.
@@ -81,7 +91,7 @@ func (s *Skiplist) findGreaterOrEqual(key string) *Node {
 	// A concurrent insert might occur after FindLessThan(key) but before
 	// we get a chance to call Next(0).
 	n := s.head
-	level := s.maxHeight - 1
+	level := s.MaxHeight() - 1
 	var lastBigger *Node
 	for {
 		next := n.Next(level)
@@ -113,7 +123,7 @@ func (s *Skiplist) findGreaterOrEqual(key string) *Node {
 // level in [0..max_height_-1], if prev is non-null.
 func (s *Skiplist) findLessThan(key string, prev []*Node) *Node {
 	n := s.head
-	level := s.maxHeight - 1
+	level := s.MaxHeight() - 1
 	// KeyIsAfter(key, lastNotAfter) is definitely false
 	var lastNotAfter *Node
 	for {
@@ -141,7 +151,7 @@ func (s *Skiplist) findLessThan(key string, prev []*Node) *Node {
 // Return head_ if list is empty.
 func (s *Skiplist) findLast() *Node {
 	n := s.head
-	level := s.maxHeight - 1
+	level := s.MaxHeight() - 1
 	for {
 		next := n.Next(level)
 		if next != nil {
@@ -160,7 +170,7 @@ func (s *Skiplist) findLast() *Node {
 func (s *Skiplist) EstimateCount(key string) int {
 	var count int
 	n := s.head
-	level := s.maxHeight - 1
+	level := s.MaxHeight() - 1
 	for {
 		x.AssertTrue(n == s.head || n.key < key)
 		next := n.Next(level)
@@ -203,9 +213,10 @@ func NewSkiplist(maxHeight, branchingFactor int) *Skiplist {
 // Insert inserts a new key into our skiplist.
 func (s *Skiplist) Insert(key string) {
 	// Fast path for sequential insertion.
-	if !keyIsAfterNode(key, s.prev[0]) &&
+	if !keyIsAfterNode(key, s.prev[0].Next(0)) &&
 		(s.prev[0] == s.head || keyIsAfterNode(key, s.prev[0])) {
-		x.AssertTrue(s.prev[0] != s.head || (s.prevHeight == 1 && s.maxHeight == 1))
+		x.AssertTrue(s.prev[0] != s.head ||
+			(s.prevHeight == 1 && s.MaxHeight() == 1))
 
 		// Outside of this method prev_[1..max_height_] is the predecessor
 		// of prev_[0], and prev_height_ refers to prev_[0].  Inside Insert
@@ -225,8 +236,8 @@ func (s *Skiplist) Insert(key string) {
 	x.AssertTrue(s.prev[0].Next(0) == nil || key != s.prev[0].Next(0).key)
 
 	height := s.randomHeight()
-	if height > s.maxHeight {
-		for i := s.maxHeight; i < height; i++ {
+	if height > s.MaxHeight() {
+		for i := s.MaxHeight(); i < height; i++ {
 			s.prev[i] = s.head
 		}
 		// It is ok to mutate max_height_ without any synchronization
@@ -236,7 +247,7 @@ func (s *Skiplist) Insert(key string) {
 		// the loop below.  In the former case the reader will
 		// immediately drop to the next level since nullptr sorts after all
 		// keys.  In the latter case the reader will use the new node.
-		s.maxHeight = height
+		atomic.StoreInt32(&s.maxHeight, int32(height))
 	}
 
 	n := NewNode(key, height)
