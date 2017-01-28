@@ -4,6 +4,8 @@ package skiplist
 import (
 	"math/rand"
 	"strings"
+	"sync/atomic"
+	"unsafe"
 
 	"github.com/dgraph-io/dgraph/x"
 )
@@ -12,15 +14,28 @@ type Node struct {
 	key string
 
 	// next[i] is the next node on level i.
-	next []*Node
+	//	next []*Node
+	next []unsafe.Pointer
 }
 
 // NewNode returns new node with given key and height.
 func NewNode(key string, height int) *Node {
 	return &Node{
 		key:  key,
-		next: make([]*Node, height),
+		next: make([]unsafe.Pointer, height),
 	}
+}
+
+// Next returns the next node for a level.
+func (s *Node) Next(n int) *Node {
+	x.AssertTrue(n >= 0)
+	return (*Node)(atomic.LoadPointer(&s.next[n]))
+}
+
+// SetNext sets node.Next[level].
+func (s *Node) SetNext(n int, node *Node) {
+	x.AssertTrue(n >= 0)
+	atomic.StorePointer(&s.next[n], unsafe.Pointer(node))
 }
 
 type Skiplist struct {
@@ -69,7 +84,7 @@ func (s *Skiplist) findGreaterOrEqual(key string) *Node {
 	level := s.maxHeight - 1
 	var lastBigger *Node
 	for {
-		next := n.next[level]
+		next := n.Next(level)
 		// Make sure the lists are sorted
 		x.AssertTrue(n == s.head || next == nil || keyIsAfterNode(next.key, n))
 		// Make sure we haven't overshot during our search
@@ -102,7 +117,7 @@ func (s *Skiplist) findLessThan(key string, prev []*Node) *Node {
 	// KeyIsAfter(key, lastNotAfter) is definitely false
 	var lastNotAfter *Node
 	for {
-		next := n.next[level]
+		next := n.Next(level)
 		x.AssertTrue(n == s.head || next == nil || keyIsAfterNode(next.key, n))
 		x.AssertTrue(n == s.head || keyIsAfterNode(key, n))
 		if next != lastNotAfter && keyIsAfterNode(key, next) {
@@ -128,7 +143,7 @@ func (s *Skiplist) findLast() *Node {
 	n := s.head
 	level := s.maxHeight - 1
 	for {
-		next := n.next[level]
+		next := n.Next(level)
 		if next != nil {
 			n = next
 			continue
@@ -148,7 +163,7 @@ func (s *Skiplist) EstimateCount(key string) int {
 	level := s.maxHeight - 1
 	for {
 		x.AssertTrue(n == s.head || n.key < key)
-		next := n.next[level]
+		next := n.Next(level)
 		if next != nil && next.key < key {
 			n = next
 			count++
@@ -207,7 +222,7 @@ func (s *Skiplist) Insert(key string) {
 	}
 
 	// Our data structure does not allow duplicate insertion.
-	x.AssertTrue(s.prev[0].next[0] == nil || key != s.prev[0].next[0].key)
+	x.AssertTrue(s.prev[0].Next(0) == nil || key != s.prev[0].Next(0).key)
 
 	height := s.randomHeight()
 	if height > s.maxHeight {
@@ -228,8 +243,8 @@ func (s *Skiplist) Insert(key string) {
 	for i := 0; i < height; i++ {
 		// NoBarrier_SetNext() suffices since we will add a barrier when
 		// we publish a pointer to "x" in prev[i].
-		n.next[i] = s.prev[i].next[i]
-		s.prev[i].next[i] = n
+		n.SetNext(i, s.prev[i].Next(i))
+		s.prev[i].SetNext(i, n)
 	}
 	s.prev[0] = n
 	s.prevHeight = height
@@ -265,7 +280,7 @@ func (s *Iterator) Key() string {
 // Next advances to the next position.
 func (s *Iterator) Next() {
 	x.AssertTrue(s.Valid())
-	s.node = s.node.next[0]
+	s.node = s.node.Next(0)
 }
 
 // Prev advances to the previous position.
@@ -298,7 +313,7 @@ func (s *Iterator) SeekForPrev(target string) {
 // SeekToFirst seeks position at the first entry in list.
 // Final state of iterator is Valid() iff list is not empty.
 func (s *Iterator) SeekToFirst() {
-	s.node = s.list.head.next[0]
+	s.node = s.list.head.Next(0)
 }
 
 // SeekToLast seeks position at the last entry in list.
