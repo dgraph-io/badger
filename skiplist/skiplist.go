@@ -1,3 +1,4 @@
+// Adapted from https://github.com/facebook/rocksdb/blob/master/db/skiplist.h
 package skiplist
 
 import (
