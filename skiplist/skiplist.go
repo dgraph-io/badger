@@ -9,6 +9,7 @@ package skiplist
 import (
 	"math/rand"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -44,6 +45,7 @@ func (s *Node) SetNext(n int, node *Node) {
 }
 
 type Skiplist struct {
+	sync.Mutex    // For inserts only.
 	kMaxHeight    int
 	kBranching    int
 	kInvBranching float32 // 1 / kBranching
@@ -259,6 +261,12 @@ func (s *Skiplist) Insert(key string) {
 	}
 	s.prev[0] = n
 	s.prevHeight = height
+}
+
+func (s *Skiplist) InsertConcurrently(key string) {
+	s.Lock()
+	s.Insert(key)
+	s.Unlock()
 }
 
 // Contains returns whether skiplist contains given key.

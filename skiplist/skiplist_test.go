@@ -165,12 +165,9 @@ func BenchmarkWriteParallel(b *testing.B) {
 	for branch := 2; branch <= 7; branch++ {
 		b.Run(fmt.Sprintf("branch_%d", branch), func(b *testing.B) {
 			list := NewSkiplist(maxDepth, branch)
-			var m sync.Mutex // Skiplist object requires mutex lock for writes.
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					m.Lock()
-					list.Insert(randomKey())
-					m.Unlock()
+					list.InsertConcurrently(randomKey())
 				}
 			})
 		})
@@ -222,7 +219,6 @@ func BenchmarkReadWrite(b *testing.B) {
 		readFrac := float32(i) / 10.0
 		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
 			list := NewSkiplist(maxDepth, branch)
-			var m sync.Mutex
 			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
@@ -230,9 +226,7 @@ func BenchmarkReadWrite(b *testing.B) {
 						it := list.Iterator()
 						it.Seek(randomKey())
 					} else {
-						m.Lock()
-						list.Insert(randomKey())
-						m.Unlock()
+						list.InsertConcurrently(randomKey())
 					}
 				}
 			})
