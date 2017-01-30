@@ -23,24 +23,21 @@ type Entry struct {
 }
 
 type header struct {
-	active byte
-	klen   uint32
-	vlen   uint32
+	klen uint32
+	vlen uint32
 }
 
 func (h header) Encode() []byte {
-	b := make([]byte, 1+4+4)
-	b[0] = byte(0)
-	binary.BigEndian.PutUint32(b[1:5], h.klen)
-	binary.BigEndian.PutUint32(b[5:9], h.vlen)
+	b := make([]byte, 4+4)
+	binary.BigEndian.PutUint32(b[0:4], h.klen)
+	binary.BigEndian.PutUint32(b[4:8], h.vlen)
 	return b
 }
 
 func (h *header) Decode(buf []byte) []byte {
-	h.active = buf[0]
-	h.klen = binary.BigEndian.Uint32(buf[1:5])
-	h.vlen = binary.BigEndian.Uint32(buf[5:9])
-	return buf[9:]
+	h.klen = binary.BigEndian.Uint32(buf[0:4])
+	h.vlen = binary.BigEndian.Uint32(buf[4:8])
+	return buf[8:]
 }
 
 type Pointer struct {
@@ -71,7 +68,6 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 	ptrs := make([]Pointer, 0, len(entries))
 
 	for _, e := range entries {
-		h.active = byte(0)
 		h.klen = uint32(len(e.Key))
 		h.vlen = uint32(len(e.Value))
 		header := h.Encode()
