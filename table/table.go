@@ -15,8 +15,6 @@ type keyOffset struct {
 	offset int64
 }
 
-var Size int64 = 50 << 20
-
 type Table struct {
 	sync.Mutex
 
@@ -42,13 +40,13 @@ func NewTable(fd *os.File, offset int64) *Table {
 
 func (t *Table) ReadIndex() error {
 	buf := make([]byte, 4)
-	if _, err := t.fd.ReadAt(buf, t.offset+Size-4); err != nil {
+	if _, err := t.fd.ReadAt(buf, t.offset+tableSize-4); err != nil {
 		return errors.Wrap(err, "While reading block index")
 	}
 	restartsLen := int(binary.BigEndian.Uint32(buf))
 
 	buf = make([]byte, 4*restartsLen)
-	if _, err := t.fd.ReadAt(buf, t.offset+Size-int64(len(buf))); err != nil {
+	if _, err := t.fd.ReadAt(buf, t.offset+tableSize-int64(len(buf))); err != nil {
 		return errors.Wrap(err, "While reading block index")
 	}
 
