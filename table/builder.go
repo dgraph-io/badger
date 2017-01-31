@@ -3,12 +3,14 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/dgraph-io/badger/y"
 	"github.com/dgraph-io/dgraph/x"
 )
 
 var tableSize int64 = 50 << 20
+var restartInterval int = 100
 
 type header struct {
 	plen int
@@ -32,8 +34,7 @@ func (h *header) Decode(buf []byte) int {
 }
 
 type TableBuilder struct {
-	RestartInterval int
-	counter         int
+	counter int
 
 	buf      *bytes.Buffer
 	lastKey  []byte
@@ -65,7 +66,7 @@ func (b *TableBuilder) Add(key, value []byte) error {
 		return y.Errorf("Exceeds table size")
 	}
 
-	if b.counter >= b.RestartInterval {
+	if b.counter >= restartInterval {
 		b.restarts = append(b.restarts, uint32(b.buf.Len()))
 		b.counter = 0
 		b.lastKey = []byte{}
@@ -85,6 +86,7 @@ func (b *TableBuilder) Add(key, value []byte) error {
 	b.buf.Write(h.Encode())
 	b.buf.Write(diffKey) // We only need to store the key difference.
 	b.buf.Write(value)
+	b.counter++
 	return nil
 }
 
@@ -104,6 +106,7 @@ func (b *TableBuilder) blockIndex() []byte {
 	out := make([]byte, sz)
 	buf := out
 	for _, r := range b.restarts {
+		fmt.Printf("Adding restart: %v\n", r)
 		binary.BigEndian.PutUint32(buf[:4], r)
 		buf = buf[4:]
 	}

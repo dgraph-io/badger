@@ -3,16 +3,19 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"sort"
 	"sync"
 
+	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
 )
 
 type keyOffset struct {
 	key    []byte
 	offset int64
+	len    int64
 }
 
 type Table struct {
@@ -44,46 +47,67 @@ func (t *Table) ReadIndex() error {
 		return errors.Wrap(err, "While reading block index")
 	}
 	restartsLen := int(binary.BigEndian.Uint32(buf))
+	fmt.Printf("restartlen=%v\n", restartsLen)
 
 	buf = make([]byte, 4*restartsLen)
-	if _, err := t.fd.ReadAt(buf, t.offset+tableSize-int64(len(buf))); err != nil {
+	if _, err := t.fd.ReadAt(buf, t.offset+tableSize-4-int64(len(buf))); err != nil {
 		return errors.Wrap(err, "While reading block index")
 	}
 
 	offsets := make([]uint32, restartsLen)
 	for i := 0; i < restartsLen; i++ {
-		offsets = append(offsets, binary.BigEndian.Uint32(buf[:4]))
+		offsets[i] = binary.BigEndian.Uint32(buf[:4])
 		buf = buf[4:]
 	}
 
-	che := make(chan error, len(offsets))
-	for i := range offsets {
-		go func(o int64) {
+	// The last offset stores the end of the last block.
+	for i := 0; i < len(offsets); i++ {
+		fmt.Printf("offset=%d\n", offsets[i])
+		var o int64
+		if i == 0 {
+			o = 0
+		} else {
+			o = int64(offsets[i-1])
+		}
+
+		ko := keyOffset{
+			offset: o,
+			len:    int64(offsets[i]) - o,
+		}
+		t.blockIndex = append(t.blockIndex, ko)
+	}
+
+	if len(t.blockIndex) == 1 {
+		return nil
+	}
+
+	che := make(chan error, len(t.blockIndex))
+	for i := 0; i < len(t.blockIndex); i++ {
+
+		bo := &t.blockIndex[i]
+		go func(ko *keyOffset) {
 			buf := make([]byte, 6)
-			if _, err := t.fd.ReadAt(buf, t.offset+o); err != nil {
+			if _, err := t.fd.ReadAt(buf, t.offset+ko.offset); err != nil {
 				che <- errors.Wrap(err, "While reading first header in block")
 				return
 			}
-			// x.Assertf h.plen == 0
+
 			var h header
 			h.Decode(buf)
+			y.AssertTrue(h.plen == 0)
+
 			buf = make([]byte, h.klen)
-			if _, err := t.fd.ReadAt(buf, t.offset+o+6); err != nil {
+			if _, err := t.fd.ReadAt(buf, t.offset+ko.offset+6); err != nil {
 				che <- errors.Wrap(err, "While reading first key in block")
 				return
 			}
-			ko := keyOffset{
-				key:    buf,
-				offset: o,
-			}
-			t.Lock()
-			t.blockIndex = append(t.blockIndex, ko)
-			t.Unlock()
+
+			ko.key = buf
 			che <- nil
-		}(int64(offsets[i]))
+		}(bo)
 	}
 
-	for _ = range offsets {
+	for _ = range t.blockIndex {
 		err := <-che
 		if err != nil {
 			return err
@@ -92,4 +116,24 @@ func (t *Table) ReadIndex() error {
 	sort.Sort(byKey(t.blockIndex))
 
 	return nil
+}
+
+func (t *Table) BlockIteratorForKey(k []byte) (*BlockIterator, error) {
+	idx := sort.Search(len(t.blockIndex), func(idx int) bool {
+		ko := t.blockIndex[idx]
+		return bytes.Compare(k, ko.key) < 0
+	})
+
+	if idx > 0 {
+		idx--
+	}
+	ko := t.blockIndex[idx]
+
+	block := new(Block)
+	block.data = make([]byte, int(ko.len))
+	if _, err := t.fd.ReadAt(block.data, ko.offset+t.offset); err != nil {
+		return nil, err
+	}
+
+	return &BlockIterator{data: block.data}, nil
 }
