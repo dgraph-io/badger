@@ -10,10 +10,6 @@ import (
 	"github.com/dgraph-io/dgraph/x"
 )
 
-type Block struct {
-	data []byte
-}
-
 /*
  *itr.Seek(key)
  *for itr.Seek(key); itr.Valid(); itr.Next() {
@@ -94,6 +90,9 @@ func (itr *BlockIterator) Seek(seek []byte, whence int) {
 			break
 		}
 	}
+	if !done {
+		itr.err = io.EOF
+	}
 }
 
 func (itr *BlockIterator) parseKV(h header) {
@@ -120,7 +119,6 @@ func (itr *BlockIterator) Next() {
 		return
 	}
 
-	fmt.Printf("POS: %v\n", itr.pos)
 	var h header
 	itr.pos += h.Decode(itr.data[itr.pos:])
 	itr.last = h // Store the last header.
@@ -170,4 +168,87 @@ func (itr *BlockIterator) KV(fn func(k, v []byte)) {
 	}
 
 	fn(itr.key, itr.val)
+}
+
+type TableIterator struct {
+	t    *Table
+	bpos int
+	bi   *BlockIterator
+	err  error
+	init bool
+}
+
+func (itr *TableIterator) Reset() {
+	itr.bpos = 0
+	itr.err = nil
+}
+
+func (itr *TableIterator) Valid() bool {
+	return itr.err == nil
+}
+
+func (itr *TableIterator) Error() error {
+	return itr.err
+}
+
+func (itr *TableIterator) Init() {
+	if !itr.init {
+		itr.Next()
+	}
+}
+
+func (itr *TableIterator) Seek(seek []byte, whence int) {
+	itr.err = nil
+
+	switch whence {
+	case ORIGIN:
+		itr.Reset()
+	case CURRENT:
+	}
+
+	itr.bpos = itr.t.blockIndexFor(seek)
+	if itr.bpos < 0 {
+		itr.err = io.EOF
+		return
+	}
+
+	block, err := itr.t.block(itr.bpos)
+	if err != nil {
+		itr.err = err
+		return
+	}
+
+	itr.bi = block.NewIterator()
+	itr.bi.Seek(seek, ORIGIN)
+	itr.err = itr.bi.Error()
+}
+
+func (itr *TableIterator) Next() {
+	itr.err = nil
+
+	if itr.bpos >= len(itr.t.blockIndex) {
+		itr.err = io.EOF
+		return
+	}
+
+	if itr.bi == nil {
+		block, err := itr.t.block(itr.bpos)
+		if err != nil {
+			itr.err = err
+			return
+		}
+		itr.bi = block.NewIterator()
+	}
+
+	itr.bi.Next()
+	if !itr.bi.Valid() {
+		itr.bpos++
+		itr.bi = nil
+		itr.Next()
+		return
+	}
+}
+
+func (itr *TableIterator) KV(fn func(k, v []byte)) {
+	itr.bi.KV(fn)
 }

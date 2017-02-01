@@ -26,6 +26,15 @@ type Table struct {
 	blockIndex []keyOffset
 }
 
+type Block struct {
+	offset int64
+	data   []byte
+}
+
+func (b Block) NewIterator() *BlockIterator {
+	return &BlockIterator{data: b.data}
+}
+
 type byKey []keyOffset
 
 func (b byKey) Len() int               { return len(b) }
@@ -118,7 +127,7 @@ func (t *Table) ReadIndex() error {
 	return nil
 }
 
-func (t *Table) BlockIteratorForKey(k []byte) (*BlockIterator, error) {
+func (t *Table) blockIndexFor(k []byte) int {
 	idx := sort.Search(len(t.blockIndex), func(idx int) bool {
 		ko := t.blockIndex[idx]
 		return bytes.Compare(k, ko.key) < 0
@@ -127,13 +136,41 @@ func (t *Table) BlockIteratorForKey(k []byte) (*BlockIterator, error) {
 	if idx > 0 {
 		idx--
 	}
-	ko := t.blockIndex[idx]
 
-	block := new(Block)
-	block.data = make([]byte, int(ko.len))
-	if _, err := t.fd.ReadAt(block.data, ko.offset+t.offset); err != nil {
-		return nil, err
+	ko := t.blockIndex[idx]
+	if bytes.Compare(k, ko.key) < 0 {
+		return -1
+	}
+	return idx
+}
+
+func (t *Table) block(idx int) (Block, error) {
+	if idx >= len(t.blockIndex) {
+		return Block{}, errors.New("Block out of index.")
 	}
 
-	return &BlockIterator{data: block.data}, nil
+	ko := t.blockIndex[idx]
+
+	// TODO: add Block caching here.
+	block := Block{
+		offset: ko.offset + t.offset,
+		data:   make([]byte, int(ko.len)),
+	}
+	if _, err := t.fd.ReadAt(block.data, block.offset); err != nil {
+		return block, err
+	}
+	return block, nil
+}
+
+func (t *Table) BlockForKey(k []byte) (Block, error) {
+	idx := t.blockIndexFor(k)
+	if idx == -1 {
+		return Block{}, errors.New("No Block found")
+	}
+
+	return t.block(idx)
+}
+
+func (t *Table) NewIterator() *TableIterator {
+	return &TableIterator{t: t}
 }
