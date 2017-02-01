@@ -3,7 +3,6 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"os"
 	"sort"
 	"sync"
@@ -47,7 +46,6 @@ func (t *Table) ReadIndex() error {
 		return errors.Wrap(err, "While reading block index")
 	}
 	restartsLen := int(binary.BigEndian.Uint32(buf))
-	fmt.Printf("restartlen=%v\n", restartsLen)
 
 	buf = make([]byte, 4*restartsLen)
 	if _, err := t.fd.ReadAt(buf, t.offset+tableSize-4-int64(len(buf))); err != nil {
@@ -62,7 +60,6 @@ func (t *Table) ReadIndex() error {
 
 	// The last offset stores the end of the last block.
 	for i := 0; i < len(offsets); i++ {
-		fmt.Printf("offset=%d\n", offsets[i])
 		var o int64
 		if i == 0 {
 			o = 0
@@ -86,18 +83,21 @@ func (t *Table) ReadIndex() error {
 
 		bo := &t.blockIndex[i]
 		go func(ko *keyOffset) {
-			buf := make([]byte, 6)
-			if _, err := t.fd.ReadAt(buf, t.offset+ko.offset); err != nil {
+			var h header
+
+			offset := t.offset + ko.offset
+			buf := make([]byte, h.Size())
+			if _, err := t.fd.ReadAt(buf, offset); err != nil {
 				che <- errors.Wrap(err, "While reading first header in block")
 				return
 			}
 
-			var h header
 			h.Decode(buf)
 			y.AssertTrue(h.plen == 0)
 
+			offset += int64(h.Size())
 			buf = make([]byte, h.klen)
-			if _, err := t.fd.ReadAt(buf, t.offset+ko.offset+6); err != nil {
+			if _, err := t.fd.ReadAt(buf, offset); err != nil {
 				che <- errors.Wrap(err, "While reading first key in block")
 				return
 			}

@@ -2,7 +2,7 @@ package table
 
 import (
 	"encoding/binary"
-	"fmt"
+	"math"
 
 	"github.com/dgraph-io/badger/y"
 )
@@ -45,6 +45,8 @@ type TableBuilder struct {
 	pos int
 
 	baseKey    []byte
+	baseOffset int
+
 	restarts   []uint32
 	prevOffset int
 }
@@ -84,6 +86,8 @@ func (b *TableBuilder) Add(key, value []byte) error {
 		b.restarts = append(b.restarts, uint32(b.pos))
 		b.counter = 0
 		b.baseKey = []byte{}
+		b.baseOffset = b.pos
+		b.prevOffset = math.MaxUint16
 	}
 
 	// diffKey stores the difference of key with baseKey.
@@ -101,7 +105,7 @@ func (b *TableBuilder) Add(key, value []byte) error {
 		vlen: len(value),
 		prev: b.prevOffset,
 	}
-	b.prevOffset = b.pos
+	b.prevOffset = b.pos - b.baseOffset
 
 	b.write(h.Encode())
 	b.write(diffKey) // We only need to store the key difference.
@@ -122,7 +126,6 @@ func (b *TableBuilder) blockIndex() []byte {
 	out := make([]byte, sz)
 	buf := out
 	for _, r := range b.restarts {
-		fmt.Printf("Adding restart: %v\n", r)
 		binary.BigEndian.PutUint32(buf[:4], r)
 		buf = buf[4:]
 	}

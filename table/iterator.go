@@ -2,7 +2,9 @@ package table
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"math"
 
 	"github.com/dgraph-io/badger/y"
 	"github.com/dgraph-io/dgraph/x"
@@ -40,6 +42,7 @@ func (itr *BlockIterator) Reset() {
 	itr.key = []byte{}
 	itr.val = []byte{}
 	itr.init = false
+	itr.last = header{}
 }
 
 func (itr *BlockIterator) Init() {
@@ -117,9 +120,16 @@ func (itr *BlockIterator) Next() {
 		return
 	}
 
+	fmt.Printf("POS: %v\n", itr.pos)
 	var h header
 	itr.pos += h.Decode(itr.data[itr.pos:])
 	itr.last = h // Store the last header.
+
+	if h.klen == 0 && h.plen == 0 {
+		// last entry in the block.
+		itr.err = io.EOF
+		return
+	}
 
 	// Populate baseKey if it isn't set yet. This would only happen for the first Next.
 	if len(itr.baseKey) == 0 {
@@ -131,15 +141,23 @@ func (itr *BlockIterator) Next() {
 }
 
 func (itr *BlockIterator) Prev() {
-	y.AssertTrue(itr.init) // A Next() must have been called.
-	itr.err = nil
+	if !itr.init {
+		return
+	}
+	fmt.Printf("LAST: %+v\n", itr.last)
 
-	if itr.pos == 0 && itr.last.prev == 0 {
+	if itr.last.prev == math.MaxUint16 {
+		// if itr.pos == 0 && itr.last.prev == 0 {
 		itr.err = io.EOF
+		itr.pos = 0
 		return
 	}
 
 	itr.pos = itr.last.prev
+	if itr.err != nil {
+		itr.Next()
+	}
+
 	var h header
 	itr.pos += h.Decode(itr.data[itr.pos:])
 	itr.parseKV(h)
