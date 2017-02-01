@@ -1,7 +1,6 @@
 package table
 
 import (
-	"bytes"
 	"fmt"
 	"io/ioutil"
 	"sort"
@@ -9,9 +8,8 @@ import (
 )
 
 func TestBuild(t *testing.T) {
-	b := TableBuilder{
-		buf: &bytes.Buffer{},
-	}
+	b := TableBuilder{}
+	b.Reset()
 
 	f, err := ioutil.TempFile("", "badger")
 	if err != nil {

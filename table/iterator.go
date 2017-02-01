@@ -22,19 +22,21 @@ type BlockIterator struct {
 	data    []byte
 	pos     int
 	err     error
-	lastKey []byte
+	baseKey []byte
 
 	ikey []byte
 
 	key  []byte
 	val  []byte
 	init bool
+
+	last header
 }
 
 func (itr *BlockIterator) Reset() {
 	itr.pos = 0
 	itr.err = nil
-	itr.lastKey = []byte{}
+	itr.baseKey = []byte{}
 	itr.key = []byte{}
 	itr.val = []byte{}
 	itr.init = false
@@ -54,7 +56,7 @@ func (itr *BlockIterator) Error() error {
 	return itr.err
 }
 
-func (itr *BlockIterator) adjustSize(h header) {
+func (itr *BlockIterator) ensureKeyCap(h header) {
 	if cap(itr.ikey) < h.plen+h.klen {
 		sz := h.plen + h.klen
 		if sz < 2*cap(itr.ikey) {
@@ -70,6 +72,8 @@ var (
 )
 
 func (itr *BlockIterator) Seek(seek []byte, whence int) {
+	itr.err = nil
+
 	switch whence {
 	case ORIGIN:
 		itr.Reset()
@@ -89,28 +93,11 @@ func (itr *BlockIterator) Seek(seek []byte, whence int) {
 	}
 }
 
-func (itr *BlockIterator) Next() {
-	itr.init = true
-	if itr.pos >= len(itr.data) {
-		itr.err = io.EOF
-		return
-	}
-
-	var h header
-	itr.pos += h.Decode(itr.data[itr.pos:])
-
-	if len(itr.lastKey) == 0 {
-		y.AssertTrue(h.plen == 0)
-	}
-	itr.adjustSize(h)
-
+func (itr *BlockIterator) parseKV(h header) {
+	itr.ensureKeyCap(h)
 	itr.key = itr.ikey[:h.plen+h.klen]
-	x.AssertTrue(h.plen == copy(itr.key, itr.lastKey[:h.plen]))
+	x.AssertTrue(h.plen == copy(itr.key, itr.baseKey[:h.plen]))
 	x.AssertTrue(h.klen == copy(itr.key[h.plen:], itr.data[itr.pos:itr.pos+h.klen]))
-	if h.plen == 0 {
-		// If prefix length was zero, update the lastKey.
-		itr.lastKey = itr.data[itr.pos : itr.pos+h.klen]
-	}
 	itr.pos += h.klen
 
 	if itr.pos+h.vlen > len(itr.data) {
@@ -120,6 +107,43 @@ func (itr *BlockIterator) Next() {
 
 	itr.val = itr.data[itr.pos : itr.pos+h.vlen]
 	itr.pos += h.vlen
+}
+
+func (itr *BlockIterator) Next() {
+	itr.init = true
+	itr.err = nil
+	if itr.pos >= len(itr.data) {
+		itr.err = io.EOF
+		return
+	}
+
+	var h header
+	itr.pos += h.Decode(itr.data[itr.pos:])
+	itr.last = h // Store the last header.
+
+	// Populate baseKey if it isn't set yet. This would only happen for the first Next.
+	if len(itr.baseKey) == 0 {
+		// This should be the first Next() for this block. Hence, prefix length should be zero.
+		y.AssertTrue(h.plen == 0)
+		itr.baseKey = itr.data[itr.pos : itr.pos+h.klen]
+	}
+	itr.parseKV(h)
+}
+
+func (itr *BlockIterator) Prev() {
+	y.AssertTrue(itr.init) // A Next() must have been called.
+	itr.err = nil
+
+	if itr.pos == 0 && itr.last.prev == 0 {
+		itr.err = io.EOF
+		return
+	}
+
+	itr.pos = itr.last.prev
+	var h header
+	itr.pos += h.Decode(itr.data[itr.pos:])
+	itr.parseKV(h)
+	itr.last = h
 }
 
 func (itr *BlockIterator) KV(fn func(k, v []byte)) {
