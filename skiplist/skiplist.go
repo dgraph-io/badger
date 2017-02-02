@@ -8,7 +8,6 @@ package skiplist
 
 import (
 	"math/rand"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -18,14 +17,17 @@ import (
 
 // Node is a node in the skiplist.
 type Node struct {
-	key string
+	key []byte
 
 	// next[i] is the next node on level i.
 	next []unsafe.Pointer // []*Node
 }
 
+// Comparator compares two byte slices. Return -1 or 0 or 1.
+type Comparator func(a, b []byte) int
+
 // NewNode returns new node with given key and height.
-func NewNode(key string, height int) *Node {
+func NewNode(key []byte, height int) *Node {
 	return &Node{
 		key:  key,
 		next: make([]unsafe.Pointer, height),
@@ -61,6 +63,7 @@ type Skiplist struct {
 	// insertion, in which case max_height_ and prev_height_ are 1.
 	prev       []*Node
 	prevHeight int
+	cmp        Comparator
 }
 
 // MaxHeight returns maximum height of skiplist now.
@@ -80,13 +83,13 @@ func (s *Skiplist) randomHeight() int {
 }
 
 // keyIsAfterNode returns true if key is greater than the data stored in "n".
-func keyIsAfterNode(key string, n *Node) bool {
-	return (n != nil) && (n.key < key)
+func (s *Skiplist) keyIsAfterNode(key []byte, n *Node) bool {
+	return (n != nil) && (s.cmp(n.key, key) < 0)
 }
 
 // findGreaterOrEqual returns the earliest node with a key >= key.
 // Return nullptr if there is no such node.
-func (s *Skiplist) findGreaterOrEqual(key string) *Node {
+func (s *Skiplist) findGreaterOrEqual(key []byte) *Node {
 	// Note: It looks like we could reduce duplication by implementing
 	// this function as FindLessThan(key)->Next(0), but we wouldn't be able
 	// to exit early on equality and the result wouldn't even be correct.
@@ -98,14 +101,14 @@ func (s *Skiplist) findGreaterOrEqual(key string) *Node {
 	for {
 		next := n.Next(level)
 		// Make sure the lists are sorted
-		x.AssertTrue(n == s.head || next == nil || keyIsAfterNode(next.key, n))
+		x.AssertTrue(n == s.head || next == nil || s.keyIsAfterNode(next.key, n))
 		// Make sure we haven't overshot during our search
-		x.AssertTrue(n == s.head || keyIsAfterNode(key, n))
+		x.AssertTrue(n == s.head || s.keyIsAfterNode(key, n))
 		var cmp int
 		if next == nil || next == lastBigger {
 			cmp = 1
 		} else {
-			cmp = strings.Compare(next.key, key)
+			cmp = s.cmp(next.key, key)
 		}
 		if cmp == 0 || (cmp > 0 && level == 0) {
 			return next
@@ -123,16 +126,16 @@ func (s *Skiplist) findGreaterOrEqual(key string) *Node {
 // Return head_ if there is no such node.
 // Fills prev[level] with pointer to previous node at "level" for every
 // level in [0..max_height_-1], if prev is non-null.
-func (s *Skiplist) findLessThan(key string, prev []*Node) *Node {
+func (s *Skiplist) findLessThan(key []byte, prev []*Node) *Node {
 	n := s.head
 	level := s.MaxHeight() - 1
 	// KeyIsAfter(key, lastNotAfter) is definitely false
 	var lastNotAfter *Node
 	for {
 		next := n.Next(level)
-		x.AssertTrue(n == s.head || next == nil || keyIsAfterNode(next.key, n))
-		x.AssertTrue(n == s.head || keyIsAfterNode(key, n))
-		if next != lastNotAfter && keyIsAfterNode(key, next) {
+		x.AssertTrue(n == s.head || next == nil || s.keyIsAfterNode(next.key, n))
+		x.AssertTrue(n == s.head || s.keyIsAfterNode(key, n))
+		if next != lastNotAfter && s.keyIsAfterNode(key, next) {
 			// Keep searching in this list
 			n = next
 			continue
@@ -169,14 +172,14 @@ func (s *Skiplist) findLast() *Node {
 }
 
 // EstimateCount estimates number of items strictly smaller than key.
-func (s *Skiplist) EstimateCount(key string) int {
+func (s *Skiplist) EstimateCount(key []byte) int {
 	var count int
 	n := s.head
 	level := s.MaxHeight() - 1
 	for {
-		x.AssertTrue(n == s.head || n.key < key)
+		x.AssertTrue(n == s.head || s.cmp(n.key, key) < 0)
 		next := n.Next(level)
-		if next != nil && next.key < key {
+		if next != nil && s.cmp(next.key, key) < 0 {
 			n = next
 			count++
 			continue
@@ -191,16 +194,17 @@ func (s *Skiplist) EstimateCount(key string) int {
 }
 
 // NewSkiplist creates a new skiplist.
-func NewSkiplist(maxHeight, branchingFactor int) *Skiplist {
+func NewSkiplist(maxHeight, branchingFactor int, cmp Comparator) *Skiplist {
 	x.AssertTrue(maxHeight > 0)
 	x.AssertTrue(branchingFactor > 1)
 	s := &Skiplist{
 		kMaxHeight:    maxHeight,
 		kBranching:    branchingFactor,
 		kInvBranching: 1.0 / float32(branchingFactor),
-		head:          NewNode("", maxHeight),
+		head:          NewNode([]byte{}, maxHeight),
 		maxHeight:     1,
 		prevHeight:    1,
+		cmp:           cmp,
 	}
 	// Allocate the prev_ Node* array, directly from the passed-in allocator.
 	// prev_ does not need to be freed, as its life cycle is tied up with
@@ -213,10 +217,10 @@ func NewSkiplist(maxHeight, branchingFactor int) *Skiplist {
 }
 
 // Insert inserts a new key into our skiplist.
-func (s *Skiplist) Insert(key string) {
+func (s *Skiplist) Insert(key []byte) {
 	// Fast path for sequential insertion.
-	if !keyIsAfterNode(key, s.prev[0].Next(0)) &&
-		(s.prev[0] == s.head || keyIsAfterNode(key, s.prev[0])) {
+	if !s.keyIsAfterNode(key, s.prev[0].Next(0)) &&
+		(s.prev[0] == s.head || s.keyIsAfterNode(key, s.prev[0])) {
 		x.AssertTrue(s.prev[0] != s.head ||
 			(s.prevHeight == 1 && s.MaxHeight() == 1))
 
@@ -235,7 +239,7 @@ func (s *Skiplist) Insert(key string) {
 	}
 
 	// Our data structure does not allow duplicate insertion.
-	x.AssertTrue(s.prev[0].Next(0) == nil || key != s.prev[0].Next(0).key)
+	x.AssertTrue(s.prev[0].Next(0) == nil || s.cmp(key, s.prev[0].Next(0).key) != 0)
 
 	height := s.randomHeight()
 	if height > s.MaxHeight() {
@@ -263,16 +267,16 @@ func (s *Skiplist) Insert(key string) {
 	s.prevHeight = height
 }
 
-func (s *Skiplist) InsertConcurrently(key string) {
+func (s *Skiplist) InsertConcurrently(key []byte) {
 	s.Lock()
 	s.Insert(key)
 	s.Unlock()
 }
 
 // Contains returns whether skiplist contains given key.
-func (s *Skiplist) Contains(key string) bool {
+func (s *Skiplist) Contains(key []byte) bool {
 	n := s.findGreaterOrEqual(key)
-	return n != nil && key == n.key
+	return (n != nil) && (s.cmp(key, n.key) == 0)
 }
 
 // Iterator is an iterator over skiplist object. For new objects, you just
@@ -291,7 +295,7 @@ func (s *Skiplist) Iterator() *Iterator {
 func (s *Iterator) Valid() bool { return s.node != nil }
 
 // Key returns the key at the current position.
-func (s *Iterator) Key() string {
+func (s *Iterator) Key() []byte {
 	x.AssertTrue(s.Valid())
 	return s.node.key
 }
@@ -314,17 +318,17 @@ func (s *Iterator) Prev() {
 }
 
 // Seek advances to the first entry with a key >= target.
-func (s *Iterator) Seek(target string) {
+func (s *Iterator) Seek(target []byte) {
 	s.node = s.list.findGreaterOrEqual(target)
 }
 
 // SeekForPrev retreats to the last entry with a key <= target.
-func (s *Iterator) SeekForPrev(target string) {
+func (s *Iterator) SeekForPrev(target []byte) {
 	s.Seek(target)
 	if !s.Valid() {
 		s.SeekToLast()
 	}
-	for s.Valid() && target < s.node.key {
+	for s.Valid() && s.list.cmp(target, s.node.key) < 0 {
 		s.Prev()
 	}
 }
