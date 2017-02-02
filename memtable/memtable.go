@@ -1,25 +1,26 @@
 package memtable
 
 import (
+	//	"bytes"
 	"encoding/binary"
-	"os"
 	//	"log"
+	"os"
 
 	"github.com/dgraph-io/badger/skiplist"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 )
 
+type KeyComparator struct {
+	userCmp skiplist.Comparator // For comparing user keys.
+}
+
 type Memtable struct {
 	table *skiplist.Skiplist
-	cmp   skiplist.Comparator // User key comparator.
+	cmp   KeyComparator // User key comparator.
 }
 
-type keyComparator struct {
-	cmp skiplist.Comparator // For comparing user keys.
-}
-
-func (s keyComparator) Compare(a, b []byte) int {
+func (s KeyComparator) Compare(a, b []byte) int {
 	// Read the length prefix to get internal key length.
 	// Grab "internal key length" many bytes.
 	// Compare user keys. If the same, compare the extra bits which comprise
@@ -32,7 +33,7 @@ func (s keyComparator) Compare(a, b []byte) int {
 	// Compare user keys. Remove the last 8 bytes.
 	u1 := k1[:len(k1)-8]
 	u2 := k2[:len(k2)-8]
-	r := s.cmp.Compare(u1, u2) // Compare user keys.
+	r := s.userCmp.Compare(u1, u2) // Compare user keys.
 	if r != 0 {
 		return r
 	}
@@ -49,12 +50,12 @@ func (s keyComparator) Compare(a, b []byte) int {
 	return 0
 }
 
-var DefaultKeyComparator = keyComparator{
-	cmp: skiplist.DefaultComparator,
+var DefaultKeyComparator = KeyComparator{
+	userCmp: skiplist.DefaultComparator,
 }
 
 // NewMemtable creates a new memtable. Input is the user key comparator.
-func NewMemtable(cmp skiplist.Comparator) *Memtable {
+func NewMemtable(cmp KeyComparator) *Memtable {
 	return &Memtable{
 		cmp: cmp,
 		// For now, just use some default values. Can be exposed as options later.
@@ -162,4 +163,29 @@ func (s *Iterator) Value() []byte {
 	_, val := y.GetLengthPrefixedSlice(s.iter.Key())
 	valSlice, _ := y.GetLengthPrefixedSlice(val)
 	return valSlice
+}
+
+// Get looks up a key. Returns nil if not found. TODO: GetOrTouch.
+func (s *Memtable) Get(lkey *y.LookupKey) []byte {
+	it := s.Iterator()
+	it.Seek(lkey.InternalKey())
+	if !it.Valid() {
+		return nil
+	}
+
+	key := it.Key()
+	keyLen := len(key)
+
+	// Compare user keys.
+	if s.cmp.userCmp.Compare(lkey.UserKey(), key[:keyLen-8]) != 0 {
+		return nil
+	}
+
+	// Check value type.
+	tag := binary.BigEndian.Uint64(key[keyLen-8:])
+	if (tag & 0xFF) != y.ValueTypeValue {
+		// Probably a deletion.
+		return nil
+	}
+	return it.Value()
 }

@@ -1,7 +1,6 @@
 package memtable
 
 import (
-	//	"log"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -12,17 +11,17 @@ import (
 func TestBasic(t *testing.T) {
 	m := NewMemtable(DefaultKeyComparator)
 	require.NotNil(t, m)
-	m.Add(123, y.TypeValue, []byte("somekey"), []byte("hohoho"))
-	m.Add(120, y.TypeValue, []byte("somekey"), []byte("hohoho"))
+	m.Add(123, y.ValueTypeValue, []byte("somekey"), []byte("hohoho"))
+	m.Add(120, y.ValueTypeValue, []byte("somekey"), []byte("hohoho"))
 }
 
 func TestIterateAll(t *testing.T) {
 	m := NewMemtable(DefaultKeyComparator)
 	require.NotNil(t, m)
-	m.Add(123, y.TypeValue, []byte("somekey"), []byte("hohoho1"))
-	m.Add(120, y.TypeValue, []byte("somekey"), []byte("hohoho3"))
-	m.Add(200, y.TypeValue, []byte("zzz"), []byte("hohoho4"))
-	m.Add(123, y.TypeDeletion, []byte("somekey"), []byte("hohoho2"))
+	m.Add(123, y.ValueTypeValue, []byte("somekey"), []byte("hohoho1"))
+	m.Add(120, y.ValueTypeValue, []byte("somekey"), []byte("hohoho3"))
+	m.Add(200, y.ValueTypeValue, []byte("zzz"), []byte("hohoho4"))
+	m.Add(123, y.ValueTypeDeletion, []byte("somekey"), []byte("hohoho2"))
 
 	it := m.Iterator()
 	it.SeekToFirst()
@@ -60,4 +59,30 @@ func TestIterateAll(t *testing.T) {
 
 	it.Next()
 	require.False(t, it.Valid())
+}
+
+func TestGet(t *testing.T) {
+	m := NewMemtable(DefaultKeyComparator)
+	require.NotNil(t, m)
+	m.Add(223, y.ValueTypeValue, []byte("somekey"), []byte("hohoho"))
+	m.Add(123, y.ValueTypeDeletion, []byte("somekey"), []byte("aaa"))
+	m.Add(23, y.ValueTypeValue, []byte("somekey"), []byte("nonono"))
+	m.Add(200, y.ValueTypeValue, []byte("abckey"), []byte("bbb"))
+
+	v := m.Get(y.NewLookupKey([]byte("abckey"), y.MaxSequenceNumber))
+	require.EqualValues(t, "bbb", v)
+
+	// Try a key that looks like existing keys.
+	v = m.Get(y.NewLookupKey([]byte("somekeyaaa"), y.MaxSequenceNumber))
+	require.Nil(t, v)
+
+	// Try different sequence numbers to get different values.
+	v = m.Get(y.NewLookupKey([]byte("somekey"), y.MaxSequenceNumber))
+	require.EqualValues(t, "hohoho", v)
+
+	v = m.Get(y.NewLookupKey([]byte("somekey"), 200))
+	require.Nil(t, v)
+
+	v = m.Get(y.NewLookupKey([]byte("somekey"), 100))
+	require.EqualValues(t, "nonono", v)
 }

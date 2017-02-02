@@ -106,3 +106,8 @@ func Errorf(format string, args ...interface{}) error {
 func Fatalf(format string, args ...interface{}) {
 	log.Fatalf("%+v", Errorf(format, args...))
 }
+
+// Printf printfs.
+func Printf(format string, args ...interface{}) {
+	fmt.Printf(format, args...)
+}
