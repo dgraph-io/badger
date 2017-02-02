@@ -16,7 +16,7 @@ const MaxSequenceNumber = (1 << 56) - 1
 type ValueType uint8
 
 const (
-	TypeDeletion = 1
+	TypeDeletion = iota
 	TypeValue    = iota
 
 	// More next time.
@@ -38,12 +38,12 @@ func UnpackSeqAndType(packed uint64) (SequenceNumber, ValueType) {
 	return SequenceNumber(seq), ValueType(t)
 }
 
-// GetLengthPrefixedSlice gets the length from prefix, then returns that
-// number of bytes.
-func GetLengthPrefixedSlice(data []byte) []byte {
+// GetLengthPrefixedSlice gets the length from prefix, then returns a slice of
+// those bytes. And it also returns the remainder slice.
+func GetLengthPrefixedSlice(data []byte) ([]byte, []byte) {
 	n, numRead := binary.Uvarint(data)
 	AssertTruef(numRead > 0, "%d", numRead)
 	data = data[numRead:]
 	AssertTruef(len(data) >= int(n), "%d %d", len(data), n)
-	return data[:n]
+	return data[:n], data[n:]
 }

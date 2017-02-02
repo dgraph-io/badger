@@ -22,8 +22,8 @@ func (s keyComparator) Compare(a, b []byte) int {
 	// Grab "internal key length" many bytes.
 	// Compare user keys. If the same, compare the extra bits which comprise
 	// the sequence number and value type.
-	k1 := y.GetLengthPrefixedSlice(a)
-	k2 := y.GetLengthPrefixedSlice(b)
+	k1, _ := y.GetLengthPrefixedSlice(a)
+	k2, _ := y.GetLengthPrefixedSlice(b)
 	y.AssertTrue(len(k1) >= 8)
 	y.AssertTrue(len(k2) >= 8)
 
@@ -98,4 +98,53 @@ func (s *Memtable) Add(seqNum y.SequenceNumber, typ y.ValueType, key []byte,
 
 	y.AssertTrue(len(p) == 0)
 	s.table.Insert(out)
+}
+
+// Encode a suitable internal key target for "target" and return it.
+// Uses *scratch as scratch space, and the returned pointer will point
+// into this scratch space.
+func encodeKey(key []byte) []byte {
+	buf := make([]byte, 8)
+	l := binary.PutUvarint(buf, uint64(len(key)))
+	out := make([]byte, l+len(key)+1)
+	// Last byte is zero to denote valSize=0.
+	y.AssertTrue(l == copy(out, buf[:l]))
+	y.AssertTrue(len(key) == copy(out[l:], key))
+	return out
+}
+
+type Iterator struct {
+	iter *skiplist.Iterator
+}
+
+func (s *Memtable) Iterator() *Iterator {
+	return &Iterator{
+		iter: s.table.Iterator(),
+	}
+}
+
+func (s *Iterator) Valid() bool { return s.iter.Valid() }
+
+func (s *Iterator) Seek(internalKey []byte) {
+	s.iter.Seek(encodeKey(internalKey))
+}
+
+func (s *Iterator) SeekToFirst() { s.iter.SeekToFirst() }
+
+func (s *Iterator) SeekToLast() { s.iter.SeekToLast() }
+
+func (s *Iterator) Next() { s.iter.Next() }
+
+func (s *Iterator) Prev() { s.iter.Prev() }
+
+// key returns the internal key, which is user key + seqNum + valueType.
+func (s *Iterator) Key() []byte {
+	k, _ := y.GetLengthPrefixedSlice(s.iter.Key())
+	return k
+}
+
+func (s *Iterator) Value() []byte {
+	_, val := y.GetLengthPrefixedSlice(s.iter.Key())
+	valSlice, _ := y.GetLengthPrefixedSlice(val)
+	return valSlice
 }
