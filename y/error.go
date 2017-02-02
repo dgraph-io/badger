@@ -35,7 +35,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-var debugMode bool
+var debugMode = true
 
 // Check logs fatal if err != nil.
 func Check(err error) {

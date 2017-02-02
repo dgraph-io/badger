@@ -1,7 +1,6 @@
 package skiplist
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -15,7 +14,7 @@ import (
 )
 
 func TestSeek(t *testing.T) {
-	list := NewSkiplist(10, 3, bytes.Compare)
+	list := NewSkiplist(10, 3, DefaultComparator)
 	it := list.Iterator()
 
 	require.False(t, it.Valid())
@@ -40,7 +39,7 @@ func TestSeek(t *testing.T) {
 }
 
 func TestSeekForPrev(t *testing.T) {
-	list := NewSkiplist(10, 3, bytes.Compare)
+	list := NewSkiplist(10, 3, DefaultComparator)
 	it := list.Iterator()
 
 	require.False(t, it.Valid())
@@ -65,7 +64,7 @@ func TestSeekForPrev(t *testing.T) {
 }
 
 func TestNext(t *testing.T) {
-	list := NewSkiplist(10, 3, bytes.Compare)
+	list := NewSkiplist(10, 3, DefaultComparator)
 	it := list.Iterator()
 
 	list.Insert([]byte("abc"))
@@ -81,7 +80,7 @@ func TestNext(t *testing.T) {
 }
 
 func TestPrev(t *testing.T) {
-	list := NewSkiplist(10, 3, bytes.Compare)
+	list := NewSkiplist(10, 3, DefaultComparator)
 	it := list.Iterator()
 
 	list.Insert([]byte("def"))
@@ -97,7 +96,7 @@ func TestPrev(t *testing.T) {
 }
 
 func TestReadWrite(t *testing.T) {
-	list := NewSkiplist(10, 3, bytes.Compare)
+	list := NewSkiplist(10, 3, DefaultComparator)
 	var wg sync.WaitGroup
 
 	// Start writing first.
@@ -153,7 +152,7 @@ func BenchmarkWrite(b *testing.B) {
 	maxDepth := 10
 	for branch := 2; branch <= 7; branch++ {
 		b.Run(fmt.Sprintf("branch_%d", branch), func(b *testing.B) {
-			list := NewSkiplist(maxDepth, branch, bytes.Compare)
+			list := NewSkiplist(maxDepth, branch, DefaultComparator)
 			for i := 0; i < b.N; i++ {
 				list.Insert(randomKey())
 			}
@@ -165,7 +164,7 @@ func BenchmarkWriteParallel(b *testing.B) {
 	maxDepth := 10
 	for branch := 2; branch <= 7; branch++ {
 		b.Run(fmt.Sprintf("branch_%d", branch), func(b *testing.B) {
-			list := NewSkiplist(maxDepth, branch, bytes.Compare)
+			list := NewSkiplist(maxDepth, branch, DefaultComparator)
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					list.InsertConcurrently(randomKey())
@@ -179,7 +178,7 @@ func BenchmarkRead(b *testing.B) {
 	maxDepth := 10
 	for branch := 2; branch <= 7; branch++ {
 		b.Run(fmt.Sprintf("branch_%d", branch), func(b *testing.B) {
-			list := NewSkiplist(maxDepth, branch, bytes.Compare)
+			list := NewSkiplist(maxDepth, branch, DefaultComparator)
 			for i := 0; i < 100000; i++ {
 				list.Insert(randomKey())
 			}
@@ -196,7 +195,7 @@ func BenchmarkReadParallel(b *testing.B) {
 	maxDepth := 10
 	for branch := 2; branch <= 7; branch++ {
 		b.Run(fmt.Sprintf("branch_%d", branch), func(b *testing.B) {
-			list := NewSkiplist(maxDepth, branch, bytes.Compare)
+			list := NewSkiplist(maxDepth, branch, DefaultComparator)
 			for i := 0; i < 100000; i++ {
 				list.Insert(randomKey())
 			}
@@ -219,7 +218,7 @@ func BenchmarkReadWrite(b *testing.B) {
 	for i := 0; i <= 10; i++ {
 		readFrac := float32(i) / 10.0
 		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
-			list := NewSkiplist(maxDepth, branch, bytes.Compare)
+			list := NewSkiplist(maxDepth, branch, DefaultComparator)
 			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
