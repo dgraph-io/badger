@@ -57,4 +57,7 @@ func TestIterateAll(t *testing.T) {
 	require.EqualValues(t, "zzz", key[:3])
 	require.EqualValues(t, []byte{0, 0, 0, 0, 0, 0, 200, 1}, key[3:])
 	require.EqualValues(t, "hohoho4", it.Value())
+
+	it.Next()
+	require.False(t, it.Valid())
 }

@@ -2,9 +2,11 @@ package memtable
 
 import (
 	"encoding/binary"
+	"os"
 	//	"log"
 
 	"github.com/dgraph-io/badger/skiplist"
+	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -111,6 +113,19 @@ func encodeKey(key []byte) []byte {
 	y.AssertTrue(l == copy(out, buf[:l]))
 	y.AssertTrue(len(key) == copy(out[l:], key))
 	return out
+}
+
+func (s *Memtable) WriteLevel0Table(f *os.File) error {
+	iter := s.Iterator()
+	b := table.TableBuilder{}
+	b.Reset()
+	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
+		if err := b.Add(iter.Key(), iter.Value()); err != nil {
+			return err
+		}
+	}
+	f.Write(b.Finish())
+	return nil
 }
 
 type Iterator struct {
