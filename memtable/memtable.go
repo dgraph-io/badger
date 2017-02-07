@@ -63,7 +63,7 @@ func NewMemtable(cmp KeyComparator) *Memtable {
 	}
 }
 
-func (s *Memtable) Add(seqNum y.SequenceNumber, typ y.ValueType, key []byte,
+func (s *Memtable) Add(seqNum uint64, typ y.ValueType, key []byte,
 	value []byte) {
 
 	keySize := len(key)
@@ -167,6 +167,9 @@ func (s *Iterator) Value() []byte {
 
 // Get looks up a key. Returns nil if not found. TODO: GetOrTouch.
 func (s *Memtable) Get(lkey *y.LookupKey) []byte {
+	if s == nil {
+		return nil
+	}
 	it := s.Iterator()
 	it.Seek(lkey.InternalKey())
 	if !it.Valid() {

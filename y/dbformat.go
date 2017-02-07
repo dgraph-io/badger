@@ -1,11 +1,10 @@
 package y
 
 import (
+	//	"bytes"
 	"encoding/binary"
 	//	"log"
 )
-
-type SequenceNumber uint64
 
 const MaxSequenceNumber = (1 << 56) - 1
 
@@ -32,18 +31,18 @@ const (
 const ValueTypeForSeek = ValueTypeSingleDeletion
 const ValueTypeForSeekForPrev = ValueTypeDeletion
 
-func PackSeqAndType(seq SequenceNumber, t ValueType) uint64 {
+func PackSeqAndType(seq uint64, t ValueType) uint64 {
 	AssertTruef(seq <= MaxSequenceNumber, "%d", seq)
 	AssertTruef(t <= ValueTypeMax, "%d", t)
 	return uint64(seq<<8) | uint64(t)
 }
 
-func UnpackSeqAndType(packed uint64) (SequenceNumber, ValueType) {
+func UnpackSeqAndType(packed uint64) (uint64, ValueType) {
 	seq := packed >> 8
 	t := packed & 0xFF
 	AssertTruef(seq <= MaxSequenceNumber, "%d", seq)
 	AssertTruef(t <= ValueTypeMax, "%d", t)
-	return SequenceNumber(seq), ValueType(t)
+	return seq, ValueType(t)
 }
 
 // GetLengthPrefixedSlice gets the length from prefix, then returns a slice of
@@ -70,7 +69,7 @@ type LookupKey struct {
 }
 
 // NewLookupKey is a helper class useful for DBImpl::Get().
-func NewLookupKey(userKey []byte, seq SequenceNumber) *LookupKey {
+func NewLookupKey(userKey []byte, seq uint64) *LookupKey {
 	usize := len(userKey)
 	needed := usize + 13 // Conservative estimate.
 	s := new(LookupKey)
