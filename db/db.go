@@ -49,7 +49,7 @@ func (s *VersionSet) AppendVersion(v *Version) {
 }
 
 type DB struct {
-	imm      *memtable.Memtable
+	imm      *memtable.Memtable // Immutable, memtable being flushed.
 	mem      *memtable.Memtable
 	versions *VersionSet
 }
@@ -58,6 +58,7 @@ func NewDB() *DB {
 	// VersionEdit strongly tied to table files. Omit for now.
 	db := &DB{
 		versions: NewVersionSet(),
+		mem:      memtable.NewMemtable(memtable.DefaultKeyComparator),
 	}
 	// TODO: Add TableCache here.
 	return db
@@ -65,13 +66,40 @@ func NewDB() *DB {
 
 // Get looks for key and returns value. If not found, return nil.
 func (s *DB) Get(key []byte) []byte {
-	lkey := y.NewLookupKey(key, s.versions.lastSeq)
-	if v := s.mem.Get(lkey); v != nil {
+	// TODO: Allow snapshotting. Set snapshot here.
+	snapshot := s.versions.lastSeq
+	lkey := y.NewLookupKey(key, snapshot)
+	if v, hit := s.mem.Get(lkey); hit {
 		return v
 	}
-	if v := s.imm.Get(lkey); v != nil {
+	if v, hit := s.imm.Get(lkey); hit {
 		return v
 	}
 	// TODO: Call s.current.Get. It should use disk here.
 	return nil
+}
+
+// Write applies a WriteBatch.
+func (s *DB) Write(wb *WriteBatch) error {
+	// Parallelize this later.
+	wb.SetSequence(s.versions.lastSeq + 1)
+	s.versions.lastSeq += uint64(wb.Count())
+	if err := wb.InsertInto(s.mem); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Put puts a key-val pair.
+func (s *DB) Put(key []byte, val []byte) error {
+	wb := NewWriteBatch(0)
+	wb.Put(key, val)
+	return s.Write(wb)
+}
+
+// Delete deletes a key.
+func (s *DB) Delete(key []byte) error {
+	wb := NewWriteBatch(0)
+	wb.Delete(key)
+	return s.Write(wb)
 }

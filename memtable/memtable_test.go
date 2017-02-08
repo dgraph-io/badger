@@ -69,20 +69,25 @@ func TestGet(t *testing.T) {
 	m.Add(23, y.ValueTypeValue, []byte("somekey"), []byte("nonono"))
 	m.Add(200, y.ValueTypeValue, []byte("abckey"), []byte("bbb"))
 
-	v := m.Get(y.NewLookupKey([]byte("abckey"), y.MaxSequenceNumber))
+	v, hit := m.Get(y.NewLookupKey([]byte("abckey"), y.MaxSequenceNumber))
 	require.EqualValues(t, "bbb", v)
+	require.True(t, hit)
 
 	// Try a key that looks like existing keys.
-	v = m.Get(y.NewLookupKey([]byte("somekeyaaa"), y.MaxSequenceNumber))
+	v, hit = m.Get(y.NewLookupKey([]byte("somekeyaaa"), y.MaxSequenceNumber))
 	require.Nil(t, v)
+	require.False(t, hit)
 
 	// Try different sequence numbers to get different values.
-	v = m.Get(y.NewLookupKey([]byte("somekey"), y.MaxSequenceNumber))
+	v, hit = m.Get(y.NewLookupKey([]byte("somekey"), y.MaxSequenceNumber))
 	require.EqualValues(t, "hohoho", v)
+	require.True(t, hit)
 
-	v = m.Get(y.NewLookupKey([]byte("somekey"), 200))
+	v, hit = m.Get(y.NewLookupKey([]byte("somekey"), 200))
 	require.Nil(t, v)
+	require.True(t, hit) // There's a hit but key has been deleted.
 
-	v = m.Get(y.NewLookupKey([]byte("somekey"), 100))
+	v, hit = m.Get(y.NewLookupKey([]byte("somekey"), 100))
 	require.EqualValues(t, "nonono", v)
+	require.True(t, hit)
 }

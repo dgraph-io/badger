@@ -63,9 +63,7 @@ func NewMemtable(cmp KeyComparator) *Memtable {
 	}
 }
 
-func (s *Memtable) Add(seqNum uint64, typ y.ValueType, key []byte,
-	value []byte) {
-
+func (s *Memtable) Add(seqNum uint64, typ y.ValueType, key []byte, value []byte) {
 	keySize := len(key)
 	valSize := len(value)
 	internalKeySize := keySize + 8
@@ -165,15 +163,15 @@ func (s *Iterator) Value() []byte {
 	return valSlice
 }
 
-// Get looks up a key. Returns nil if not found. TODO: GetOrTouch.
-func (s *Memtable) Get(lkey *y.LookupKey) []byte {
+// Get looks up a key. Returns the value and whether we found the key in this table.
+func (s *Memtable) Get(lkey *y.LookupKey) ([]byte, bool) {
 	if s == nil {
-		return nil
+		return nil, false // No hit.
 	}
 	it := s.Iterator()
 	it.Seek(lkey.InternalKey())
 	if !it.Valid() {
-		return nil
+		return nil, false // No hit.
 	}
 
 	key := it.Key()
@@ -181,14 +179,19 @@ func (s *Memtable) Get(lkey *y.LookupKey) []byte {
 
 	// Compare user keys.
 	if s.cmp.userCmp.Compare(lkey.UserKey(), key[:keyLen-8]) != 0 {
-		return nil
+		return nil, false // No hit.
 	}
 
 	// Check value type.
 	tag := binary.BigEndian.Uint64(key[keyLen-8:])
-	if (tag & 0xFF) != y.ValueTypeValue {
-		// Probably a deletion.
-		return nil
+	typ := tag & 0xFF
+	switch typ {
+	case y.ValueTypeValue:
+		return it.Value(), true
+	case y.ValueTypeDeletion:
+		return nil, true // We have a hit, and we know this key is deleted.
+	default:
+		y.Fatalf("Unknown value type: %v", typ)
 	}
-	return it.Value()
+	return nil, false // No hit.
 }

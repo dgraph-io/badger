@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/binary"
 
+	"github.com/dgraph-io/badger/memtable"
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -106,7 +107,43 @@ func (s *WriteBatch) Iterate(h WriteBatchHandler) error {
 	return nil
 }
 
+func (s *WriteBatch) InsertInto(mem *memtable.Memtable) error {
+	inserter := &MemtableInserter{
+		seq: s.Sequence(),
+		mem: mem,
+	}
+	return s.Iterate(inserter)
+}
+
+func (s *WriteBatch) SetContents(contents []byte) {
+	y.AssertTrue(len(contents) >= headerSize)
+	s.rep = contents
+}
+
+// Append adds input w to this WriteBatch.
+func (s *WriteBatch) Append(w *WriteBatch) {
+	s.SetCount(s.Count() + w.Count())
+	s.rep = append(s.rep, w.rep[headerSize:]...)
+}
+
+// WriteBatch's Iterate will communicate with this interface.
 type WriteBatchHandler interface {
 	Put(key []byte, val []byte)
 	Delete(key []byte)
+}
+
+// MemtableInserter is a WriteBatchHandler. Applies WriteBatch to memtable.
+type MemtableInserter struct {
+	seq uint64
+	mem *memtable.Memtable
+}
+
+func (s *MemtableInserter) Put(key []byte, val []byte) {
+	s.mem.Add(s.seq, y.ValueTypeValue, key, val)
+	s.seq++
+}
+
+func (s *MemtableInserter) Delete(key []byte) {
+	s.mem.Add(s.seq, y.ValueTypeDeletion, key, y.EmptySlice)
+	s.seq++
 }
