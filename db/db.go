@@ -103,3 +103,7 @@ func (s *DB) Delete(key []byte) error {
 	wb.Delete(key)
 	return s.Write(wb)
 }
+
+func (s *DB) MakeRoomForWrite() {
+	// TODO: Check memory usage. Swap mem_ and imm_.
+}

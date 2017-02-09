@@ -18,6 +18,7 @@ type KeyComparator struct {
 type Memtable struct {
 	table *skiplist.Skiplist
 	cmp   KeyComparator // User key comparator.
+	arena *y.Arena
 }
 
 func (s KeyComparator) Compare(a, b []byte) int {
@@ -56,11 +57,13 @@ var DefaultKeyComparator = KeyComparator{
 
 // NewMemtable creates a new memtable. Input is the user key comparator.
 func NewMemtable(cmp KeyComparator) *Memtable {
-	return &Memtable{
-		cmp: cmp,
-		// For now, just use some default values. Can be exposed as options later.
+	out := &Memtable{
+		cmp:   cmp,
+		arena: new(y.Arena),
 		table: skiplist.NewSkiplist(12, 4, cmp),
 	}
+	// For now, just use some default values. Can be exposed as options later.
+	return out
 }
 
 func (s *Memtable) Add(seqNum uint64, typ y.ValueType, key []byte, value []byte) {
@@ -69,13 +72,16 @@ func (s *Memtable) Add(seqNum uint64, typ y.ValueType, key []byte, value []byte)
 	internalKeySize := keySize + 8
 
 	// buf1, buf2 should go on stack.
-	buf1 := make([]byte, 8)
-	l1 := binary.PutUvarint(buf1, uint64(internalKeySize))
+	var buf1 [20]byte
+	//	buf1 := make([]byte, 8)
+	l1 := binary.PutUvarint(buf1[:], uint64(internalKeySize))
 
-	buf2 := make([]byte, 8)
-	l2 := binary.PutUvarint(buf2, uint64(valSize))
+	//	buf2 := make([]byte, 8)
+	var buf2 [20]byte
+	l2 := binary.PutUvarint(buf2[:], uint64(valSize))
 
-	out := make([]byte, l1+internalKeySize+l2+valSize)
+	//	out := make([]byte, l1+internalKeySize+l2+valSize)
+	out := s.arena.Allocate(l1 + internalKeySize + l2 + valSize)
 
 	// Internal key size.
 	y.AssertTrue(l1 == copy(out, buf1[:l1]))
@@ -105,8 +111,9 @@ func (s *Memtable) Add(seqNum uint64, typ y.ValueType, key []byte, value []byte)
 // Uses *scratch as scratch space, and the returned pointer will point
 // into this scratch space.
 func encodeKey(key []byte) []byte {
-	buf := make([]byte, 8)
-	l := binary.PutUvarint(buf, uint64(len(key)))
+	var buf [20]byte
+	//	buf := make([]byte, 8)
+	l := binary.PutUvarint(buf[:], uint64(len(key)))
 	out := make([]byte, l+len(key)+1)
 	// Last byte is zero to denote valSize=0.
 	y.AssertTrue(l == copy(out, buf[:l]))
@@ -137,19 +144,15 @@ func (s *Memtable) Iterator() *Iterator {
 	}
 }
 
-func (s *Iterator) Valid() bool { return s.iter.Valid() }
-
 func (s *Iterator) Seek(internalKey []byte) {
 	s.iter.Seek(encodeKey(internalKey))
 }
 
+func (s *Iterator) Valid() bool  { return s.iter.Valid() }
 func (s *Iterator) SeekToFirst() { s.iter.SeekToFirst() }
-
-func (s *Iterator) SeekToLast() { s.iter.SeekToLast() }
-
-func (s *Iterator) Next() { s.iter.Next() }
-
-func (s *Iterator) Prev() { s.iter.Prev() }
+func (s *Iterator) SeekToLast()  { s.iter.SeekToLast() }
+func (s *Iterator) Next()        { s.iter.Next() }
+func (s *Iterator) Prev()        { s.iter.Prev() }
 
 // key returns the internal key, which is user key + seqNum + valueType.
 func (s *Iterator) Key() []byte {
@@ -194,4 +197,8 @@ func (s *Memtable) Get(lkey *y.LookupKey) ([]byte, bool) {
 		y.Fatalf("Unknown value type: %v", typ)
 	}
 	return nil, false // No hit.
+}
+
+func (s *Memtable) ApproximateMemoryUsage() int {
+	return s.arena.MemUsage()
 }

@@ -1,6 +1,7 @@
 package memtable
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -90,4 +91,23 @@ func TestGet(t *testing.T) {
 	v, hit = m.Get(y.NewLookupKey([]byte("somekey"), 100))
 	require.EqualValues(t, "nonono", v)
 	require.True(t, hit)
+}
+
+func TestMemUssage(t *testing.T) {
+	m := NewMemtable(DefaultKeyComparator)
+	for i := 0; i < 10000; i++ {
+		m.Add(uint64(i), y.ValueTypeValue, []byte(fmt.Sprintf("k%05d", i)),
+			[]byte(fmt.Sprintf("v%05d", i)))
+	}
+	expected := 10000 * (8 + 6 + 1 + 1 + 6)
+	require.InEpsilon(t, expected, m.ApproximateMemoryUsage(), 0.1)
+}
+
+// BenchmarkAdd-4   	 1000000	      1320 ns/op
+func BenchmarkAdd(b *testing.B) {
+	m := NewMemtable(DefaultKeyComparator)
+	for i := 0; i < b.N; i++ {
+		m.Add(uint64(i), y.ValueTypeValue, []byte(fmt.Sprintf("k%09d", i)),
+			[]byte(fmt.Sprintf("v%09d", i)))
+	}
 }
