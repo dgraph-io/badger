@@ -8,7 +8,7 @@ import (
 )
 
 func TestDBWrite(t *testing.T) {
-	db := NewDB()
+	db := NewDB(DefaultDBOptions)
 	wb := NewWriteBatch(10)
 	for i := 0; i < 100; i++ {
 		wb.Put([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)))
@@ -25,7 +25,7 @@ func TestDBWrite(t *testing.T) {
 }
 
 func TestDBGet(t *testing.T) {
-	db := NewDB()
+	db := NewDB(DefaultDBOptions)
 	require.NoError(t, db.Put([]byte("key1"), []byte("val1")))
 	require.EqualValues(t, "val1", db.Get([]byte("key1")))
 

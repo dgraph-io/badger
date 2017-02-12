@@ -199,6 +199,7 @@ func (s *Memtable) Get(lkey *y.LookupKey) ([]byte, bool) {
 	return nil, false // No hit.
 }
 
-func (s *Memtable) ApproximateMemoryUsage() int {
+// MemUsage returns an approximate mem usage.
+func (s *Memtable) MemUsage() int {
 	return s.arena.MemUsage()
 }

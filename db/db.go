@@ -1,9 +1,28 @@
 package db
 
 import (
+	"os"
+	"sync"
+
 	"github.com/dgraph-io/badger/memtable"
 	"github.com/dgraph-io/badger/y"
 )
+
+type DBOptions struct {
+	WriteBufferSize int
+}
+
+var DefaultDBOptions = &DBOptions{
+	WriteBufferSize: 1 << 10,
+}
+
+type DB struct {
+	imm       *memtable.Memtable // Immutable, memtable being flushed.
+	mem       *memtable.Memtable
+	versions  *VersionSet
+	immWg     sync.WaitGroup // Nonempty when flushing immutable memtable.
+	dbOptions DBOptions
+}
 
 type Version struct {
 	vset *VersionSet
@@ -48,17 +67,12 @@ func (s *VersionSet) AppendVersion(v *Version) {
 	v.next.prev = v
 }
 
-type DB struct {
-	imm      *memtable.Memtable // Immutable, memtable being flushed.
-	mem      *memtable.Memtable
-	versions *VersionSet
-}
-
-func NewDB() *DB {
+func NewDB(opt *DBOptions) *DB {
 	// VersionEdit strongly tied to table files. Omit for now.
 	db := &DB{
-		versions: NewVersionSet(),
-		mem:      memtable.NewMemtable(memtable.DefaultKeyComparator),
+		versions:  NewVersionSet(),
+		mem:       memtable.NewMemtable(memtable.DefaultKeyComparator),
+		dbOptions: *opt, // Make a copy.
 	}
 	// TODO: Add TableCache here.
 	return db
@@ -81,7 +95,9 @@ func (s *DB) Get(key []byte) []byte {
 
 // Write applies a WriteBatch.
 func (s *DB) Write(wb *WriteBatch) error {
-	// Parallelize this later.
+	if err := s.makeRoomForWrite(); err != nil {
+		return err
+	}
 	wb.SetSequence(s.versions.lastSeq + 1)
 	s.versions.lastSeq += uint64(wb.Count())
 	if err := wb.InsertInto(s.mem); err != nil {
@@ -104,6 +120,26 @@ func (s *DB) Delete(key []byte) error {
 	return s.Write(wb)
 }
 
-func (s *DB) MakeRoomForWrite() {
-	// TODO: Check memory usage. Swap mem_ and imm_.
+func (s *DB) makeRoomForWrite() error {
+	if s.mem.MemUsage() < s.dbOptions.WriteBufferSize {
+		// Nothing to do. We have enough space.
+		return nil
+	}
+	s.immWg.Wait() // Make sure we finish flushing immutable memtable.
+	s.imm = s.mem
+	s.mem = memtable.NewMemtable(memtable.DefaultKeyComparator)
+	s.compactMemtable() // This is for imm.
+	return nil
+}
+
+func (s *DB) compactMemtable() {
+	y.AssertTrue(s.imm != nil)
+	s.immWg.Add(1)
+	go func() {
+		defer s.immWg.Done()
+		f, err := os.Open("/tmp/l0") // Fix later.
+		y.Check(err)
+		defer f.Close()
+		y.Check(s.imm.WriteLevel0Table(f))
+	}()
 }
