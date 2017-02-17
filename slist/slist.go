@@ -35,6 +35,7 @@ The number of nodes in level 0 is equal to the number of nodes in base level.
 
 import (
 	"bytes"
+	"log"
 	"math/rand"
 	"sync/atomic"
 	"unsafe"
@@ -65,7 +66,10 @@ type Skiplist struct {
 }
 
 // If baseNode.value == kBaseNodeHeader, then this baseNode is a header node.
-var kBaseNodeHeader = unsafe.Pointer(new(int))
+var (
+	kBaseNodeHeader = unsafe.Pointer(new(int))
+	kNilValue       = unsafe.Pointer(new(int)) // Avoid unsafe.Pointer(nil).
+)
 
 // NewSkiplist returns a new Skiplist object.
 func NewSkiplist() *Skiplist {
@@ -253,6 +257,7 @@ restart:
 			if cmp == 0 {
 				// We found the key.
 				if onlyIfAbsent || n.casValue(v, value) {
+					log.Printf("~~~[%v] [%v] %v", key, n.key, v)
 					return v // Returns old value.
 				}
 				goto restart // onlyIfAbsent=false and we try to replace the value but failed. Restart.
@@ -270,5 +275,6 @@ restart:
 		}
 		// Insert index nodes.
 		s.insertIndex(z, randomNumLevels())
+		return kNilValue
 	}
 }
