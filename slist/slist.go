@@ -1,8 +1,7 @@
 package slist
 
 /*
-Simplification of java.util.concurrent.ConcurrentSkipListMap. This is a lock-free skiplist that
-supports only inserts and updates.
+Adapted from java.util.concurrent.ConcurrentSkipListMap. This is a lock-free skiplist.
 
 ===============
 KEY DIFFERENCES
@@ -11,9 +10,10 @@ We are able to simplify the code substantially because of the following differen
 
 (1) We do not support deletes because our application requires us to distinguish between a
     deleted key VS a key that has never been seen. To do that, the application should use a
-		special []byte to indicate a deleted value.
+    special value (unsafe.Pointer) to indicate a deleted value.
 (2) No custom comparator.
-(3) We pre-initialize all levels. We do not autotomatically reduce or increase number of levels.
+(3) We pre-initialize all levels. We do not have to CAS the top head node or keep level in each
+    head node.
 
 ============
 HOW IT WORKS
@@ -35,7 +35,7 @@ The number of nodes in level 0 is equal to the number of nodes in base level.
 
 import (
 	"bytes"
-	"log"
+	//	"log"
 	"math/rand"
 	"sync/atomic"
 	"unsafe"
@@ -44,8 +44,8 @@ import (
 )
 
 const (
-	kNumIndexLevels     = 30 // Number of index levels.
-	kProbHeightIncrease = 0.3
+	kNumIndexLevels     = 30  // Number of index levels.
+	kProbHeightIncrease = 0.5 // With this probability height increases by 1.
 )
 
 type baseNode struct {
@@ -68,7 +68,6 @@ type Skiplist struct {
 // If baseNode.value == kBaseNodeHeader, then this baseNode is a header node.
 var (
 	kBaseNodeHeader = unsafe.Pointer(new(int))
-	kNilValue       = unsafe.Pointer(new(int)) // Avoid unsafe.Pointer(nil).
 )
 
 // NewSkiplist returns a new Skiplist object.
@@ -90,6 +89,7 @@ func NewSkiplist() *Skiplist {
 
 func (s *baseNode) isHead() bool  { return s.value == kBaseNodeHeader }
 func (s *indexNode) isHead() bool { return s.base.isHead() }
+
 func (s *baseNode) casValue(old, val unsafe.Pointer) bool {
 	return atomic.CompareAndSwapPointer(&s.value, old, val)
 }
@@ -257,7 +257,6 @@ restart:
 			if cmp == 0 {
 				// We found the key.
 				if onlyIfAbsent || n.casValue(v, value) {
-					log.Printf("~~~[%v] [%v] %v", key, n.key, v)
 					return v // Returns old value.
 				}
 				goto restart // onlyIfAbsent=false and we try to replace the value but failed. Restart.
@@ -275,6 +274,6 @@ restart:
 		}
 		// Insert index nodes.
 		s.insertIndex(z, randomNumLevels())
-		return kNilValue
+		return unsafe.Pointer(nil)
 	}
 }
