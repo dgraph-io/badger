@@ -1,7 +1,9 @@
 package slist
 
 import (
+	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"sync"
 	"testing"
 	"unsafe"
@@ -210,4 +212,51 @@ func TestIteratorSeek(t *testing.T) {
 	it.SeekForPrev([]byte("99999"))
 	require.True(t, it.Valid())
 	require.EqualValues(t, 1990, getValue(it.Value()))
+}
+
+func randomKey() []byte {
+	b := make([]byte, 8)
+	key := rand.Uint32()
+	key2 := rand.Uint32()
+	binary.LittleEndian.PutUint32(b, key)
+	binary.LittleEndian.PutUint32(b[4:], key2)
+	return b
+}
+
+func BenchmarkReadParallel(b *testing.B) {
+	value := newValue(123)
+	list := NewSkiplist()
+	for i := 0; i < 100000; i++ {
+		list.Put(randomKey(), value, true)
+	}
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			it := list.NewIterator()
+			it.Seek(randomKey())
+		}
+	})
+}
+
+// Standard test. Some fraction is read. Some fraction is write. Writes have
+// to go through mutex lock.
+func BenchmarkReadWrite(b *testing.B) {
+	value := newValue(123)
+	for i := 0; i <= 10; i++ {
+		readFrac := float32(i) / 10.0
+		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
+			list := NewSkiplist()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					if rand.Float32() < readFrac {
+						it := list.NewIterator()
+						it.Seek(randomKey())
+					} else {
+						list.Put(randomKey(), value, true)
+					}
+				}
+			})
+		})
+	}
 }
