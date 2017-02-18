@@ -118,3 +118,96 @@ func TestOneKey(t *testing.T) {
 	wg.Wait()
 	require.True(t, sawValue)
 }
+
+// TestIteratorNext tests a basic iteration over all nodes from the beginning.
+func TestIteratorNext(t *testing.T) {
+	const n = 100
+	l := NewSkiplist()
+	it := l.NewIterator()
+	require.False(t, it.Valid())
+	it.SeekToFirst()
+	require.False(t, it.Valid())
+	for i := n - 1; i >= 0; i-- {
+		require.True(t, nil == l.Put([]byte(fmt.Sprintf("%05d", i)), newValue(i), true))
+	}
+	it.SeekToFirst()
+	for i := 0; i < n; i++ {
+		require.True(t, it.Valid())
+		require.EqualValues(t, i, getValue(it.Value()))
+		it.Next()
+	}
+	require.False(t, it.Valid())
+}
+
+// TestIteratorPrev tests a basic iteration over all nodes from the end.
+func TestIteratorPrev(t *testing.T) {
+	const n = 100
+	l := NewSkiplist()
+	it := l.NewIterator()
+	require.False(t, it.Valid())
+	it.SeekToFirst()
+	require.False(t, it.Valid())
+	for i := 0; i < n; i++ {
+		require.True(t, nil == l.Put([]byte(fmt.Sprintf("%05d", i)), newValue(i), true))
+	}
+	it.SeekToLast()
+	for i := n - 1; i >= 0; i-- {
+		require.True(t, it.Valid())
+		require.EqualValues(t, i, getValue(it.Value()))
+		it.Prev()
+	}
+	require.False(t, it.Valid())
+}
+
+// TestIteratorSeek tests Seek and SeekForPrev.
+func TestIteratorSeek(t *testing.T) {
+	const n = 100
+	l := NewSkiplist()
+	it := l.NewIterator()
+	require.False(t, it.Valid())
+	it.SeekToFirst()
+	require.False(t, it.Valid())
+	// 1000, 1010, 1020, ..., 1990.
+	for i := n - 1; i >= 0; i-- {
+		v := i*10 + 1000
+		require.True(t, nil == l.Put([]byte(fmt.Sprintf("%05d", i*10+1000)), newValue(v), true))
+	}
+	it.Seek([]byte(""))
+	require.True(t, it.Valid())
+	require.EqualValues(t, 1000, getValue(it.Value()))
+
+	it.Seek([]byte("01000"))
+	require.True(t, it.Valid())
+	require.EqualValues(t, 1000, getValue(it.Value()))
+
+	it.Seek([]byte("01005"))
+	require.True(t, it.Valid())
+	require.EqualValues(t, 1010, getValue(it.Value()))
+
+	it.Seek([]byte("01010"))
+	require.True(t, it.Valid())
+	require.EqualValues(t, 1010, getValue(it.Value()))
+
+	it.Seek([]byte("99999"))
+	require.False(t, it.Valid())
+
+	// Try SeekForPrev.
+	it.SeekForPrev([]byte(""))
+	require.False(t, it.Valid())
+
+	it.SeekForPrev([]byte("01000"))
+	require.True(t, it.Valid())
+	require.EqualValues(t, 1000, getValue(it.Value()))
+
+	it.SeekForPrev([]byte("01005"))
+	require.True(t, it.Valid())
+	require.EqualValues(t, 1000, getValue(it.Value()))
+
+	it.SeekForPrev([]byte("01010"))
+	require.True(t, it.Valid())
+	require.EqualValues(t, 1010, getValue(it.Value()))
+
+	it.SeekForPrev([]byte("99999"))
+	require.True(t, it.Valid())
+	require.EqualValues(t, 1990, getValue(it.Value()))
+}
