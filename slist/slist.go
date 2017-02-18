@@ -37,7 +37,6 @@ The number of nodes in level 0 is equal to the number of nodes in the base level
 
 import (
 	"bytes"
-	//	"log"
 	"math/rand"
 	"sync/atomic"
 	"unsafe"
@@ -52,7 +51,7 @@ const (
 
 type baseNode struct {
 	key   []byte
-	value unsafe.Pointer // *[]byte.
+	value unsafe.Pointer
 	next  unsafe.Pointer // *baseNode
 }
 
