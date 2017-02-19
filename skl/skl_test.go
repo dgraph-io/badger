@@ -42,6 +42,18 @@ func TestEmpty(t *testing.T) {
 			require.False(t, found)
 		}
 	}
+
+	it := l.NewIterator()
+	require.False(t, it.Valid())
+
+	it.SeekToFirst()
+	require.False(t, it.Valid())
+
+	it.SeekToLast()
+	require.False(t, it.Valid())
+
+	it.Seek(key)
+	require.False(t, it.Valid())
 }
 
 // TestBasic tests single-threaded inserts and updates and gets.

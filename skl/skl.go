@@ -238,6 +238,8 @@ func (s *Skiplist) Put(key []byte, val unsafe.Pointer, onlyIfAbsent bool) unsafe
 	return nil
 }
 
+// findLast returns the last element. If head (empty list), we return nil. All the find functions
+// will NEVER return the head nodes.
 func (s *Skiplist) findLast() *node {
 	n := s.head
 	level := int(s.height) - 1
@@ -248,6 +250,9 @@ func (s *Skiplist) findLast() *node {
 			continue
 		}
 		if level == 0 {
+			if n == s.head {
+				return nil
+			}
 			return n
 		}
 		level--
@@ -323,7 +328,4 @@ func (s *Iterator) SeekToFirst() {
 // Final state of iterator is Valid() iff list is not empty.
 func (s *Iterator) SeekToLast() {
 	s.n = s.list.findLast()
-	if s.n == s.list.head {
-		s.n = nil
-	}
 }
