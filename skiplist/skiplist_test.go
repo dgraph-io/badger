@@ -174,6 +174,22 @@ func BenchmarkWriteParallel(b *testing.B) {
 	}
 }
 
+// Alternate version to WriteParallel that fixes the number of writes to be decently large. This
+// is needed for the lock-free skiplist benchmark and we need this here for a fairer comparison.
+// If we do intend to keep multiple skiplist implementations in the codebase, we can refactor
+// this benchmarking code.
+func BenchmarkWriteParallelAlt(b *testing.B) {
+	maxDepth := 10
+	branch := 3
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		list := NewSkiplist(maxDepth, branch, DefaultComparator)
+		for i := 0; i < 10000; i++ {
+			list.InsertConcurrently(randomKey())
+		}
+	}
+}
+
 func BenchmarkRead(b *testing.B) {
 	maxDepth := 10
 	for branch := 2; branch <= 7; branch++ {
@@ -191,6 +207,7 @@ func BenchmarkRead(b *testing.B) {
 	}
 }
 
+// For comparison with lock-free skiplist.
 func BenchmarkReadParallel(b *testing.B) {
 	maxDepth := 10
 	for branch := 2; branch <= 7; branch++ {
@@ -230,7 +247,6 @@ func BenchmarkReadWrite(b *testing.B) {
 					}
 				}
 			})
-
 		})
 	}
 }

@@ -37,3 +37,10 @@ BenchmarkReadWrite/frac_8-4               	 1000000	      2070 ns/op
 BenchmarkReadWrite/frac_9-4               	 1000000	      1201 ns/op
 BenchmarkReadWrite/frac_10-4              	 5000000	       456 ns/o
 ```
+
+For comparison with lock-free skiplist
+
+```
+BenchmarkReadParallel/branch_4-4         	 1000000	      1358 ns/op
+BenchmarkWriteParallelAlt-4   	     100	  19644625 ns/op
+```

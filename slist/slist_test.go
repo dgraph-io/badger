@@ -260,3 +260,27 @@ func BenchmarkReadWrite(b *testing.B) {
 		})
 	}
 }
+
+// Test takes a long time because early parallel writes tend to lead to a lot of starts and
+// variance in the running time.
+func BenchmarkWriteParallel(b *testing.B) {
+	value := newValue(123)
+	list := NewSkiplist()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			list.Put(randomKey(), value, true)
+		}
+	})
+}
+
+// Alternate version to WriteParallel that fixes the number of writes to be decently large.
+func BenchmarkWriteParallelAlt(b *testing.B) {
+	value := newValue(123)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		list := NewSkiplist()
+		for i := 0; i < 10000; i++ {
+			list.Put(randomKey(), value, true)
+		}
+	}
+}

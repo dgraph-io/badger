@@ -46,7 +46,7 @@ import (
 
 const (
 	kNumIndexLevels     = 30  // Number of index levels.
-	kProbHeightIncrease = 0.5 // With this probability height increases by 1.
+	kProbHeightIncrease = 0.4 // With this probability height increases by 1.
 )
 
 type baseNode struct {
