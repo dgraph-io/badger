@@ -11,7 +11,7 @@ Key differences:
 - We discard all non-concurrent code.
 - We do not support Splices. This simplifies the code a lot.
 - No AllocateNode or other pointer arithmetic.
-- We make some simplifications to findLt and findGeq.
+- We combine the findLessThan, findGreaterOrEqual, etc into one function.
 */
 
 package skl
@@ -92,74 +92,60 @@ func randomHeight() int {
 	return h
 }
 
-// findGeq finds leftmost node such that node.key >= key. Returns true if we have equality.
-// Note: It looks like we could reduce duplication by implementing this function as
-// findLt(key)->getNext(0), but we wouldn't be able to exit early on equality and the result
-// might not even be correct. A concurrent insert might occur between findLt and the insert,
-// before we are done with that getNext(0) call. That would require a restart which will slow
-// us down a lot.
-func (s *Skiplist) findGeq(key []byte) (*node, bool) {
+// findLess finds rightmost node such that node.key < key (if allowEqual=false) or
+// node.key <= key (if allowEqual=true). Returns the node found. The bool returned is true if
+// the node has key equal to given key.
+func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool) {
 	x := s.head
 	level := int(s.height - 1)
 	for {
 		// Assume x.key < key.
 		next := x.getNext(level)
 		if next == nil {
-			// We hit the end of the list. If on base level, we are done. Otherwise, descend.
-			if level == 0 {
+			// x.key < key < END OF LIST
+			if level > 0 {
+				// Can descend further to iterate closer to the end.
+				level--
+				continue
+			}
+			// Level=0. Cannot descend further. Let's return something that makes sense.
+			if !less {
 				return nil, false
 			}
+			// Try to return x. Make sure it is not a head node.
+			if x == s.head {
+				return nil, false
+			}
+			return x, false
+		}
+		// 12 cases.
+		// cmp=0, <0, >0            (X3)
+		// less=true, false         (X2)
+		// allowEqual=true, false   (X2)
+		cmp := bytes.Compare(key, next.key)
+		if cmp > 0 {
+			// 4 cases: key > next.key. We can continue moving right on this level.
+			x = next
+			continue
+		}
+		if cmp == 0 && allowEqual {
+			// 2 cases: We have equality and we are ok with equality. Return right away.
+			return next, true
+		}
+		// 6 cases left: x.key < key < next.key. Unless level=0, we should descend.
+		if level > 0 {
 			level--
 			continue
 		}
-		cmp := bytes.Compare(key, next.key)
-		if cmp == 0 {
-			// We have equality. Return right away. No need to descend.
-			return next, true
-		} else if cmp > 0 {
-			// key > next.key. We should continue to move right.
-			x = next
-			continue
-		}
-		// Assume key < next.key. We cannot move right anymore.
-		if level == 0 {
-			// Base level reached. We have the answer.
+		// We are at level 0. Time to return something.
+		if !less {
 			return next, false
 		}
-		level-- // Descend and continue looking.
-	}
-}
-
-// findLt finds rightmost node such that node.key < key. This is a strict inequality.
-func (s *Skiplist) findLt(key []byte) *node {
-	x := s.head
-	level := int(s.height - 1)
-	for {
-		// Assume x.key < key.
-		next := x.getNext(level)
-		if next == nil {
-			// We hit the end of the list. If on base level, we are done. Otherwise, descend.
-			if level == 0 {
-				if x == s.head {
-					// Be careful about returning x. It could be the head node.
-					// Be sure to include test cases where we query an empty list!
-					return nil
-				}
-				return x
-			}
-			level-- // Not on base level and can descend.
-			continue
+		// Try to return x. Make sure it is not a head node.
+		if x == s.head {
+			return nil, false
 		}
-		if bytes.Compare(key, next.key) > 0 {
-			// key > next.key. We can continue moving right on this level.
-			x = next
-			continue
-		}
-		// key <= next.key. We cannot move right anymore. Try moving down.
-		if level == 0 {
-			return x
-		}
-		level--
+		return x, false
 	}
 }
 
@@ -269,12 +255,14 @@ func (s *Skiplist) findLast() *node {
 }
 
 func (s *Skiplist) Get(key []byte) unsafe.Pointer {
-	n, found := s.findGeq(key)
+	n, found := s.findNear(key, false, true) // findGreaterOrEqual.
 	if !found {
 		return nil
 	}
 	return n.value
 }
+
+func (s *Skiplist) NewIterator() *Iterator { return &Iterator{list: s} }
 
 // Iterator is an iterator over skiplist object. For new objects, you just
 // need to initialize Iterator.list.
@@ -297,6 +285,12 @@ func (s *Iterator) Key() []byte {
 	return s.n.key
 }
 
+// Value returns value.
+func (s *Iterator) Value() unsafe.Pointer {
+	y.AssertTrue(s.Valid())
+	return s.n.value
+}
+
 // Next advances to the next position.
 func (s *Iterator) Next() {
 	y.AssertTrue(s.Valid())
@@ -306,27 +300,18 @@ func (s *Iterator) Next() {
 // Prev advances to the previous position.
 func (s *Iterator) Prev() {
 	y.AssertTrue(s.Valid())
-	s.n = s.list.findLt(s.n.key)
-	if s.n == s.list.head {
-		s.n = nil
-	}
+	s.n, _ = s.list.findNear(s.n.key, true, false) // find <. No equality allowed.
 }
 
 // Seek advances to the first entry with a key >= target.
 func (s *Iterator) Seek(target []byte) {
-	s.n, _ = s.list.findGeq(target)
+	s.n, _ = s.list.findNear(target, false, true) // find >=.
 }
 
-// SeekForPrev retreats to the last entry with a key <= target.
-//func (s *Iterator) SeekForPrev(target []byte) {
-//	s.Seek(target)
-//	if !s.Valid() {
-//		s.SeekToLast()
-//	}
-//	for s.Valid() && s.list.cmp.Compare(target, s.node.key) < 0 {
-//		s.Prev()
-//	}
-//}
+// SeekForPrev finds an entry with key <= target.
+func (s *Iterator) SeekForPrev(target []byte) {
+	s.n, _ = s.list.findNear(target, true, true) // find <=.
+}
 
 // SeekToFirst seeks position at the first entry in list.
 // Final state of iterator is Valid() iff list is not empty.
