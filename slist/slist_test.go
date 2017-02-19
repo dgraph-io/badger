@@ -232,8 +232,7 @@ func BenchmarkReadParallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			it := list.NewIterator()
-			it.Seek(randomKey())
+			list.Get(randomKey())
 		}
 	})
 }
