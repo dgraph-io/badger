@@ -1,9 +1,6 @@
 package memtable
 
 import (
-	//	"bytes"
-	//	"encoding/binary"
-	//	"log"
 	"os"
 	"unsafe"
 

@@ -5,8 +5,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	//	"github.com/dgraph-io/badger/y"
 )
 
 func extract(m *Memtable) ([]string, []string) {
