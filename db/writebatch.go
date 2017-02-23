@@ -2,7 +2,6 @@ package db
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/dgraph-io/badger/memtable"
 	"github.com/dgraph-io/badger/y"
