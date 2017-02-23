@@ -1,7 +1,6 @@
 package db
 
 import (
-	//	"log"
 	"testing"
 
 	"github.com/stretchr/testify/require"

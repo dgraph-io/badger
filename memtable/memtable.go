@@ -15,6 +15,8 @@ type Memtable struct {
 	arena *y.Arena
 }
 
+// Values have their first byte being byteData or byteDelete. This helps us distinguish between
+// a key that has never been seen and a key that has been explicitly deleted.
 const (
 	byteData   = 0
 	byteDelete = 1
@@ -30,7 +32,7 @@ func NewMemtable() *Memtable {
 
 // Put sets a key-value pair. We don't use onlyIfAbsent now. And we ignore the old value returned
 // by the skiplist. These can be used later on to support more operations, e.g., GetOrCreate can
-// be a put with an empty value with onlyIfAbsent=true.
+// be a Put with an empty value with onlyIfAbsent=true.
 func (s *Memtable) Put(key, value []byte) {
 	data := s.arena.Allocate(1 + len(key) + len(value))
 	y.AssertTrue(len(key) == copy(data[:len(key)], key))
@@ -63,7 +65,7 @@ func (s *Memtable) WriteLevel0Table(f *os.File) error {
 	return nil
 }
 
-// Iterator is an iterator over memtable. It takes special care of deleteValue.
+// Iterator is an iterator over memtable.
 type Iterator struct {
 	iter *skl.Iterator
 }
