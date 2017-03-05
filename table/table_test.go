@@ -1,56 +1,58 @@
 package table
 
 import (
-	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"sort"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/dgraph-io/badger/y"
 )
 
-func key(i int) []byte {
-	return []byte(fmt.Sprintf("%04d-%04d", i/37, i))
+func key(i int) string {
+	return fmt.Sprintf("%04d-%04d", i/37, i)
 }
 
-func writeData(t *testing.T) *os.File {
+func buildTestTable(t *testing.T) *os.File {
+	keyValues := make([][]string, 10000)
+	for i := 0; i < 10000; i++ {
+		k := key(i)
+		v := fmt.Sprintf("%d", i)
+		keyValues[i] = []string{k, v}
+	}
+	return buildTable(t, keyValues)
+}
+
+// keyValues is n by 2 where n is number of pairs.
+func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	b := TableBuilder{}
 	b.Reset()
-
 	f, err := ioutil.TempFile("", "badger")
-	if err != nil {
-		t.Error(err)
-		t.Fail()
-	}
-	keys := make([]string, 0, 10000)
-	for i := 0; i < 10000; i++ {
-		keys = append(keys, string(key(i)))
-	}
-	sort.Strings(keys)
-	for idx, key := range keys {
-		val := []byte(fmt.Sprintf("%d", idx))
-		if err := b.Add([]byte(key), val); err != nil {
-			t.Logf("Stopped adding more keys")
-			// Stop adding.
-			break
-		}
+	require.NoError(t, err)
+
+	sort.Slice(keyValues, func(i, j int) bool {
+		return keyValues[i][0] < keyValues[j][0]
+	})
+	for _, kv := range keyValues {
+		y.AssertTrue(len(kv) == 2)
+		require.NoError(t, b.Add([]byte(kv[0]), []byte(kv[1])))
 	}
 	f.Write(b.Finish())
 	return f
 }
 
 func TestBuild(t *testing.T) {
-	f := writeData(t)
+	f := buildTestTable(t)
 	table := Table{
 		offset: 0,
 		fd:     f,
 	}
-	if err := table.ReadIndex(); err != nil {
-		t.Error(err)
-		t.Fail()
-	}
+	require.NoError(t, table.ReadIndex())
 
-	seek := key(1010)
+	seek := []byte(key(1010))
 	t.Logf("Seeking to: %q", seek)
 	block, err := table.BlockForKey(seek)
 	if err != nil {
@@ -77,84 +79,62 @@ func TestBuild(t *testing.T) {
 
 	bi.Seek(seek, 0)
 	bi.KV(func(k, v []byte) {
-		if bytes.Compare(k, seek) != 0 {
-			t.Error("Wrong seek. Wanted: %q. Got: %q", seek, k)
-		}
+		require.EqualValues(t, k, seek)
 	})
 
 	bi.Prev()
 	bi.Prev()
 	bi.KV(func(k, v []byte) {
-		if bytes.Compare(k, key(1008)) != 0 {
-			t.Error("Wrong prev. Wanted: %q. Got: %q", key(1008), k)
-		}
+		require.EqualValues(t, string(k), key(1008))
 	})
 	bi.Next()
 	bi.Next()
 	bi.KV(func(k, v []byte) {
-		if bytes.Compare(k, seek) != 0 {
-			t.Error("Wrong next. Wanted: %q. Got: %q", seek, k)
-		}
+		require.EqualValues(t, k, seek)
 	})
 
-	for bi.Seek(key(2000), 1); bi.Valid(); bi.Next() {
+	for bi.Seek([]byte(key(2000)), 1); bi.Valid(); bi.Next() {
 		t.Fatalf("This shouldn't be triggered.")
 	}
-	bi.Seek(key(1010), 0)
-	for bi.Seek(key(2000), 1); bi.Valid(); bi.Prev() {
+	bi.Seek([]byte(key(1010)), 0)
+	for bi.Seek([]byte(key(2000)), 1); bi.Valid(); bi.Prev() {
 		t.Fatalf("This shouldn't be triggered.")
 	}
-	bi.Seek(key(2000), 0)
+	bi.Seek([]byte(key(2000)), 0)
 	bi.Prev()
-	if !bi.Valid() {
-		t.Fatalf("This should point to the last element in the block.")
-	}
+	require.True(t, bi.Valid(), "This should point to the last element in the block.")
 	bi.KV(func(k, v []byte) {
-		if bytes.Compare(k, key(1099)) != 0 {
-			t.Errorf("Wrong prev. Wanted: %q. Got: %q", key(1099), k)
-		}
+		require.EqualValues(t, string(k), key(1099))
 	})
 
 	bi.Reset()
 	bi.Prev()
 	bi.Next()
 	bi.KV(func(k, v []byte) {
-		if bytes.Compare(k, key(1000)) != 0 {
-			t.Errorf("Wrong prev. Wanted: %q. Got: %q", key(1000), k)
-		}
+		require.EqualValues(t, string(k), key(1000))
 	})
 
-	bi.Seek(key(1001), 0)
+	bi.Seek([]byte(key(1001)), 0)
 	bi.Prev()
 	bi.KV(func(k, v []byte) {
-		if bytes.Compare(k, key(1000)) != 0 {
-			t.Errorf("Wrong prev. Wanted: %q. Got: %q", key(1000), k)
-		}
+		require.EqualValues(t, string(k), key(1000))
 	})
 	bi.Prev()
-	if bi.Valid() {
-		t.Errorf("Shouldn't be valid")
-	}
+	require.False(t, bi.Valid())
 	bi.Next()
 	bi.KV(func(k, v []byte) {
-		if bytes.Compare(k, key(1000)) != 0 {
-			t.Errorf("Wrong next. Wanted: %q. Got: %q", key(1000), k)
-		}
+		require.EqualValues(t, string(k), key(1000))
 	})
 	bi.Prev()
-	if bi.Valid() {
-		t.Errorf("Shouldn't be valid")
-	}
+	require.False(t, bi.Valid())
 	bi.Next()
 	bi.KV(func(k, v []byte) {
-		if bytes.Compare(k, key(1000)) != 0 {
-			t.Errorf("Wrong next. Wanted: %q. Got: %q", key(1000), k)
-		}
+		require.EqualValues(t, string(k), key(1000))
 	})
 }
 
 func TestTable(t *testing.T) {
-	f := writeData(t)
+	f := buildTestTable(t)
 	table := Table{
 		offset: 0,
 		fd:     f,
@@ -166,12 +146,10 @@ func TestTable(t *testing.T) {
 
 	ti := table.NewIterator()
 	kid := 1010
-	seek := key(kid)
+	seek := []byte(key(kid))
 	for ti.Seek(seek, 0); ti.Valid(); ti.Next() {
 		ti.KV(func(k, v []byte) {
-			if bytes.Compare(k, key(kid)) != 0 {
-				t.Errorf("Wrong Next. Wanted: %q. Got: %q", key(kid), k)
-			}
+			require.EqualValues(t, k, key(kid))
 		})
 		kid++
 	}
@@ -179,22 +157,128 @@ func TestTable(t *testing.T) {
 		t.Errorf("Expected kid: 10000. Got: %v", kid)
 	}
 
-	ti.Seek(key(99999), 0)
-	if ti.Valid() {
-		t.Errorf("Should be invalid")
-	}
+	ti.Seek([]byte(key(99999)), 0)
+	require.False(t, ti.Valid())
 
-	ti.Seek(key(-1), 0)
-	if ti.Valid() {
-		t.Errorf("Should be invalid")
-	}
+	ti.Seek([]byte(key(-1)), 0)
+	require.False(t, ti.Valid())
+
 	ti.Next()
-	if !ti.Valid() {
-		t.Errorf("Should be valid")
-	}
+	require.True(t, ti.Valid())
+
 	ti.KV(func(k, v []byte) {
-		if bytes.Compare(k, key(0)) != 0 {
-			t.Errorf("Wrong Next. Wanted: %q. Got: %q", key(0), k)
-		}
+		require.EqualValues(t, k, key(0))
 	})
 }
+
+func TestIterateFromStart(t *testing.T) {
+	f := buildTestTable(t)
+	table := Table{
+		offset: 0,
+		fd:     f,
+	}
+	require.NoError(t, table.ReadIndex())
+	ti := table.NewIterator()
+	ti.Reset()
+	ti.Seek([]byte(""), ORIGIN)
+	ti.Next()
+
+	var count int
+	for ; ti.Valid(); ti.Next() {
+		ti.KV(func(k, v []byte) {
+			require.EqualValues(t, fmt.Sprintf("%d", count), string(v))
+			count++
+		})
+	}
+	require.EqualValues(t, 10000, count)
+}
+
+func TestConcatIterator(t *testing.T) {
+	f := buildTestTable(t)
+	fname := f.Name()
+	fCopy := buildTestTable(t)
+	fnameCopy := fCopy.Name()
+	f.Close() // The ConcatIterator will re-open these files.
+	fCopy.Close()
+
+	it := NewConcatIterator([]string{fname, fnameCopy})
+	defer it.Close()
+	require.True(t, it.Valid())
+
+	var count int
+	for ; it.Valid(); it.Next() {
+		_, v := it.KeyValue()
+		require.EqualValues(t, fmt.Sprintf("%d", count%10000), string(v))
+		count++
+	}
+	require.EqualValues(t, 20000, count)
+}
+
+// Try having only one table.
+func TestConcatIteratorOne(t *testing.T) {
+	a := make([][]string, 2)
+	a[0] = []string{"k1", "a1"}
+	a[1] = []string{"k2", "a2"}
+	//	f := buildTable(t, [][]string{
+	//		[]string{"k1", "a1"},
+	//		[]string{"k2", "a2"},
+	//	})
+	f := buildTable(t, a)
+
+	fname := f.Name()
+	f.Close() // The ConcatIterator will re-open this file.
+
+	it := NewConcatIterator([]string{fname})
+	defer it.Close()
+	require.True(t, it.Valid())
+	k, v := it.KeyValue()
+	require.EqualValues(t, "a1", string(v))
+	require.EqualValues(t, "k1", string(k))
+}
+
+func TestAAA(t *testing.T) {
+	b := TableBuilder{}
+	b.Reset()
+	f, err := ioutil.TempFile("", "badger")
+	require.NoError(t, err)
+	fmt.Printf("~~~filename=%s\n", f.Name())
+	require.NoError(t, b.Add([]byte("k1"), []byte("a1")))
+	require.NoError(t, b.Add([]byte("k2"), []byte("a2")))
+	f.Write(b.Finish())
+	fname := f.Name()
+	f.Close()
+
+	it := NewConcatIterator([]string{fname})
+	defer it.Close()
+	kk, vv := it.KeyValue()
+	fmt.Printf("~~~~%s %s\n", string(kk), string(vv))
+}
+
+//func TestMergingIterator(t *testing.T) {
+//	f1 := buildTable(t, [][]string{
+//		{"k1", "a1"},
+//		{"k2", "a2"},
+//	})
+//	f2 := buildTable(t, [][]string{
+//		{"k1", "b1"},
+//		{"k2", "b2"},
+//	})
+//	fname1, fname2 := f1.Name(), f2.Name()
+//	f1.Close()
+//	f2.Close()
+//	it1 := NewConcatIterator([]string{fname1})
+//	defer it1.Close()
+//	kk, vv := it1.KeyValue()
+//	fmt.Printf("~~~~~~~~initial %s %s\n", string(kk), string(vv))
+//	it1.Next()
+//	kk, vv = it1.KeyValue()
+//	fmt.Printf("~~~~~~~~initial %s %s\n", string(kk), string(vv))
+
+//	it2 := NewConcatIterator([]string{fname2})
+//	defer it2.Close()
+//	it := NewMergingIterator(it1, it2)
+//	require.True(t, it.Valid())
+//	k, v := it.KeyValue()
+//	require.EqualValues(t, "k1", string(k))
+//	require.EqualValues(t, "a1", string(v))
+//}

@@ -2,12 +2,13 @@ package table
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"os"
 
 	"github.com/dgraph-io/badger/y"
-	"github.com/dgraph-io/dgraph/x"
 )
 
 /*
@@ -48,7 +49,7 @@ func (itr *BlockIterator) Init() {
 }
 
 func (itr *BlockIterator) Valid() bool {
-	return itr.err == nil
+	return itr != nil && itr.err == nil
 }
 
 func (itr *BlockIterator) Error() error {
@@ -98,8 +99,8 @@ func (itr *BlockIterator) Seek(seek []byte, whence int) {
 func (itr *BlockIterator) parseKV(h header) {
 	itr.ensureKeyCap(h)
 	itr.key = itr.ikey[:h.plen+h.klen]
-	x.AssertTrue(h.plen == copy(itr.key, itr.baseKey[:h.plen]))
-	x.AssertTrue(h.klen == copy(itr.key[h.plen:], itr.data[itr.pos:itr.pos+h.klen]))
+	y.AssertTrue(h.plen == copy(itr.key, itr.baseKey[:h.plen]))
+	y.AssertTrue(h.klen == copy(itr.key[h.plen:], itr.data[itr.pos:itr.pos+h.klen]))
 	itr.pos += h.klen
 
 	if itr.pos+h.vlen > len(itr.data) {
@@ -197,6 +198,13 @@ func (itr *TableIterator) Init() {
 	}
 }
 
+func (itr *TableIterator) SeekToFirst() {
+	itr.Seek([]byte{}, 0)
+	if itr.Valid() {
+		itr.Next()
+	}
+}
+
 func (itr *TableIterator) Seek(seek []byte, whence int) {
 	itr.err = nil
 
@@ -251,4 +259,164 @@ func (itr *TableIterator) Next() {
 
 func (itr *TableIterator) KV(fn func(k, v []byte)) {
 	itr.bi.KV(fn)
+}
+
+// ConcatIterator iterates over some tables in the given order.
+type ConcatIterator struct {
+	filenames []string
+	idx       int // Which table does the iterator point to currently.
+	it        *TableIterator
+	f         *os.File
+}
+
+func NewConcatIterator(filenames []string) *ConcatIterator {
+	y.AssertTrue(len(filenames) > 0)
+	s := &ConcatIterator{filenames: filenames}
+	s.openFile(0)
+	return s
+}
+
+// openFile is an internal helper function for opening i-th file.
+func (s *ConcatIterator) openFile(i int) error {
+	s.Close() // Try to close current file.
+	s.idx = i // Set the index.
+	var err error
+	s.f, err = os.Open(s.filenames[i])
+	if err != nil {
+		return err
+	}
+	tbl := Table{fd: s.f}
+	if err = tbl.ReadIndex(); err != nil {
+		return err
+	}
+	s.it = tbl.NewIterator()
+	s.it.Reset()
+	s.it.Seek([]byte(""), ORIGIN) // Assume no such key.
+	fmt.Printf("~~ConcatIter: %v\n", s.it.Valid())
+	// Some weird behavior for table iterator. It seems that sometimes we need to call s.it.Next().
+	// Sometimes, we shouldn't. TODO: Look into this.
+	// Example 1: The usual test case where we insert 10000 entries. Iter will be invalid initially.
+	// Example 2: Insert two entries. Iter is valid initially. Calling next will skip the first entry.
+	if !s.it.Valid() {
+		s.it.Next()
+	}
+	return nil
+}
+
+// Close cleans up the iterator. Not really needed if you just run Next to the end.
+// But just in case we did not, it is good to always close it.
+func (s *ConcatIterator) Close() {
+	if s.f == nil {
+		return
+	}
+	s.f.Close()
+	s.f = nil
+	s.it = nil
+}
+
+func (s *ConcatIterator) Valid() bool {
+	return s.it.Valid()
+}
+
+// KeyValue returns key, value at current position.
+func (s *ConcatIterator) KeyValue() ([]byte, []byte) {
+	y.AssertTrue(s.Valid())
+	var key, val []byte
+	s.it.KV(func(k, v []byte) {
+		key = k
+		val = v
+	})
+	return key, val
+}
+
+// Next advances our concat iterator.
+func (s *ConcatIterator) Next() error {
+	s.it.Next()
+	if s.it.Valid() {
+		return nil
+	}
+	// Iterator became invalid. Needs to open the next file.
+	if s.idx+1 >= len(s.filenames) {
+		return errors.New("End of list") // TODO: Define error constant.
+	}
+	return s.openFile(s.idx + 1)
+}
+
+// TODO: Consider having a universal iterator interface so that MergingIterator can be
+// built from any of these iterators. For now, we assume it reads from two ConcatIterators.
+// Note: If both iterators have the same key, the first one gets returned first.
+// Typical usage:
+// it0 := NewConcatIterator(...)
+// defer it0.Close()
+// it1 := NewConcatIterator(...)
+// defer it1.Close()
+// it := NewMergingIterator(it0, it1)
+// for ; it.Valid(); it.Next() {
+//   k, v := it.KeyValue()
+// }
+// No need to close "it".
+type MergingIterator struct {
+	it0, it1 *ConcatIterator // We do not own this.
+	idx      int             // Which ConcatIterator holds the current element.
+}
+
+// NewMergingIterator creates a new merging iterator.
+func NewMergingIterator(it0, it1 *ConcatIterator) *MergingIterator {
+	s := &MergingIterator{
+		it0: it0,
+		it1: it1,
+	}
+	s.updateIdx()
+	return s
+}
+
+func (s *MergingIterator) updateIdx() {
+	v0 := s.it0.Valid()
+	v1 := s.it1.Valid()
+	if !v0 && !v1 {
+		return
+	}
+	if !v0 {
+		s.idx = 1
+		return
+	}
+	if !v1 {
+		s.idx = 0
+		return
+	}
+	k0, _ := s.it0.KeyValue()
+	k1, _ := s.it1.KeyValue()
+	fmt.Printf("~~updateIdx: %s %s\n", string(k0), string(k1))
+	if bytes.Compare(k0, k1) <= 0 {
+		s.idx = 0
+	} else {
+		s.idx = 1
+	}
+}
+
+func (s *MergingIterator) Next() {
+	y.AssertTrue(s.it0.Valid() || s.it1.Valid())
+	if s.idx == 0 {
+		s.it0.Next()
+	} else if s.idx == 1 {
+		s.it1.Next()
+	}
+	s.updateIdx()
+}
+
+func (s *MergingIterator) Valid() bool {
+	return s.it0.Valid() || s.it1.Valid()
+}
+
+func (s *MergingIterator) KeyValue() ([]byte, []byte) {
+	y.AssertTrue(s.Valid())
+	fmt.Printf("~~~s.idx=%d\n", s.idx)
+	k, v := s.it0.KeyValue()
+	fmt.Printf("~~~%s %s\n", string(k), string(v))
+	k, v = s.it1.KeyValue()
+	fmt.Printf("~~~%s %s\n", string(k), string(v))
+	if s.idx == 0 {
+		return s.it0.KeyValue()
+	}
+	return s.it1.KeyValue()
 }
