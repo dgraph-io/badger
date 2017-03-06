@@ -49,6 +49,15 @@ func NewTable(fd *os.File, offset int64) *Table {
 	return t
 }
 
+// OpenTable assumes file has only one table and opens it.
+func OpenTable(fd *os.File) (*Table, error) {
+	t := NewTable(fd, 0)
+	if err := t.ReadIndex(); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
 func (t *Table) ReadIndex() error {
 	buf := make([]byte, 4)
 	if _, err := t.fd.ReadAt(buf, t.offset+tableSize-4); err != nil {

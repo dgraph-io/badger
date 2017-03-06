@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
 
 	"github.com/dgraph-io/badger/y"
 )
@@ -200,7 +199,7 @@ func (itr *TableIterator) Init() {
 
 func (itr *TableIterator) SeekToFirst() {
 	itr.Seek([]byte{}, 0)
-	if itr.Valid() {
+	if !itr.Valid() {
 		itr.Next()
 	}
 }
@@ -263,57 +262,58 @@ func (itr *TableIterator) KV(fn func(k, v []byte)) {
 
 // ConcatIterator iterates over some tables in the given order.
 type ConcatIterator struct {
-	filenames []string
-	idx       int // Which table does the iterator point to currently.
-	it        *TableIterator
-	f         *os.File
+	idx    int // Which table does the iterator point to currently.
+	tables []*Table
+	it     *TableIterator
 }
 
-func NewConcatIterator(filenames []string) *ConcatIterator {
-	y.AssertTrue(len(filenames) > 0)
-	s := &ConcatIterator{filenames: filenames}
-	s.openFile(0)
+func NewConcatIterator(tables []*Table) *ConcatIterator {
+	y.AssertTrue(len(tables) > 0)
+	s := &ConcatIterator{tables: tables}
+	s.it = tables[0].NewIterator()
+	s.it.SeekToFirst()
+	//	s.openFile(0)
 	return s
 }
 
 // openFile is an internal helper function for opening i-th file.
-func (s *ConcatIterator) openFile(i int) error {
-	s.Close() // Try to close current file.
-	s.idx = i // Set the index.
-	var err error
-	s.f, err = os.Open(s.filenames[i])
-	if err != nil {
-		return err
-	}
-	tbl := Table{fd: s.f}
-	if err = tbl.ReadIndex(); err != nil {
-		return err
-	}
-	s.it = tbl.NewIterator()
-	s.it.Reset()
-	s.it.Seek([]byte(""), ORIGIN) // Assume no such key.
+//func (s *ConcatIterator) openFile(i int) error {
+//	s.Close() // Try to close current file.
+//	s.idx = i // Set the index.
+//	var err error
+//	s.f, err = os.Open(s.filenames[i])
+//	if err != nil {
+//		return err
+//	}
+//	tbl := Table{fd: s.f}
+//	if err = tbl.ReadIndex(); err != nil {
+//		return err
+//	}
+//	s.it = tbl.NewIterator()
+//	s.it.Reset()
+//	s.it.Seek([]byte(""), ORIGIN) // Assume no such key.
 
-	// Some weird behavior for table iterator. It seems that sometimes we need to call s.it.Next().
-	// Sometimes, we shouldn't. TODO: Look into this.
-	// Example 1: The usual test case where we insert 10000 entries. Iter will be invalid initially.
-	// Example 2: Insert two entries. Iter is valid initially. Calling next will skip the first entry.
-	// See table_test.go for the above examples.
-	if !s.it.Valid() {
-		s.it.Next() // Necessary due to unexpected behavior of table iterator.
-	}
-	return nil
-}
+// Some weird behavior for table iterator. It seems that sometimes we need to call s.it.Next().
+// Sometimes, we shouldn't. TODO: Look into this.
+// Example 1: The usual test case where we insert 10000 entries. Iter will be invalid initially.
+// Example 2: Insert two entries. Iter is valid initially. Calling next will skip the first entry.
+// See table_test.go for the above examples.
+//	if !s.it.Valid() {
+//		s.it.Next() // Necessary due to unexpected behavior of table iterator.
+//	}
+//	return nil
+//}
 
 // Close cleans up the iterator. Not really needed if you just run Next to the end.
 // But just in case we did not, it is good to always close it.
-func (s *ConcatIterator) Close() {
-	if s.f == nil {
-		return
-	}
-	s.f.Close()
-	s.f = nil
-	s.it = nil
-}
+//func (s *ConcatIterator) Close() {
+//	if s.f == nil {
+//		return
+//	}
+//	s.f.Close()
+//	s.f = nil
+//	s.it = nil
+//}
 
 func (s *ConcatIterator) Valid() bool {
 	return s.it.Valid()
@@ -336,11 +336,18 @@ func (s *ConcatIterator) Next() error {
 	if s.it.Valid() {
 		return nil
 	}
-	// Iterator became invalid. Needs to open the next file.
-	if s.idx+1 >= len(s.filenames) {
-		return errors.New("End of list") // TODO: Define error constant.
+	for { // In case there are empty tables.
+		s.idx++
+		if s.idx >= len(s.tables) {
+			return errors.New("End of list") // TODO: Define error constant.
+		}
+		s.it = s.tables[s.idx].NewIterator() // Assume tables are nonempty.
+		s.it.SeekToFirst()
+		if s.it.Valid() {
+			break
+		}
 	}
-	return s.openFile(s.idx + 1)
+	return nil
 }
 
 // TODO: Consider having a universal iterator interface so that MergingIterator can be
