@@ -292,13 +292,14 @@ func (s *ConcatIterator) openFile(i int) error {
 	s.it = tbl.NewIterator()
 	s.it.Reset()
 	s.it.Seek([]byte(""), ORIGIN) // Assume no such key.
-	fmt.Printf("~~ConcatIter: %v\n", s.it.Valid())
+
 	// Some weird behavior for table iterator. It seems that sometimes we need to call s.it.Next().
 	// Sometimes, we shouldn't. TODO: Look into this.
 	// Example 1: The usual test case where we insert 10000 entries. Iter will be invalid initially.
 	// Example 2: Insert two entries. Iter is valid initially. Calling next will skip the first entry.
+	// See table_test.go for the above examples.
 	if !s.it.Valid() {
-		s.it.Next()
+		s.it.Next() // Necessary due to unexpected behavior of table iterator.
 	}
 	return nil
 }
@@ -386,7 +387,6 @@ func (s *MergingIterator) updateIdx() {
 	}
 	k0, _ := s.it0.KeyValue()
 	k1, _ := s.it1.KeyValue()
-	fmt.Printf("~~updateIdx: %s %s\n", string(k0), string(k1))
 	if bytes.Compare(k0, k1) <= 0 {
 		s.idx = 0
 	} else {
@@ -410,11 +410,6 @@ func (s *MergingIterator) Valid() bool {
 
 func (s *MergingIterator) KeyValue() ([]byte, []byte) {
 	y.AssertTrue(s.Valid())
-	fmt.Printf("~~~s.idx=%d\n", s.idx)
-	k, v := s.it0.KeyValue()
-	fmt.Printf("~~~%s %s\n", string(k), string(v))
-	k, v = s.it1.KeyValue()
-	fmt.Printf("~~~%s %s\n", string(k), string(v))
 	if s.idx == 0 {
 		return s.it0.KeyValue()
 	}

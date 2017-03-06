@@ -193,6 +193,55 @@ func TestIterateFromStart(t *testing.T) {
 	require.EqualValues(t, 10000, count)
 }
 
+// Seek of table is a bit strange. Sometimes we need to Next. Sometimes we should not.
+func TestSeekUnusual(t *testing.T) {
+	f := buildTestTable(t)
+	tbl := Table{fd: f}
+	require.NoError(t, tbl.ReadIndex())
+
+	it := tbl.NewIterator()
+	it.Reset()
+	it.Seek([]byte(""), ORIGIN) // Assume no such key.
+	require.False(t, it.Valid())
+	it.Next()
+	it.KV(func(k, v []byte) {
+		require.EqualValues(t, "0000-0000", string(k)) // First key.
+		require.EqualValues(t, "0", string(v))
+	})
+	f.Close()
+
+	// Now try a different setup.
+	fCopy := buildTable(t, [][]string{{"0000-0000", "0"}})
+	tblCopy := Table{fd: fCopy}
+	require.NoError(t, tblCopy.ReadIndex())
+
+	itCopy := tblCopy.NewIterator()
+	itCopy.Reset()
+	itCopy.Seek([]byte(""), ORIGIN) // Assume no such key.
+	require.True(t, itCopy.Valid()) // Unlike the earlier case, Valid returns true!
+	itCopy.KV(func(k, v []byte) {
+		require.EqualValues(t, "0000-0000", string(k)) // First key.
+		require.EqualValues(t, "0", string(v))
+	})
+	fCopy.Close()
+}
+
+// Try having only one table.
+func TestConcatIteratorOneTable(t *testing.T) {
+	f := buildTable(t, [][]string{
+		[]string{"k1", "a1"},
+		[]string{"k2", "a2"},
+	})
+	fname := f.Name()
+	f.Close() // The ConcatIterator will re-open this file.
+	it := NewConcatIterator([]string{fname})
+	defer it.Close()
+	require.True(t, it.Valid())
+	k, v := it.KeyValue()
+	require.EqualValues(t, "a1", string(v))
+	require.EqualValues(t, "k1", string(k))
+}
+
 func TestConcatIterator(t *testing.T) {
 	f := buildTestTable(t)
 	fname := f.Name()
@@ -214,71 +263,112 @@ func TestConcatIterator(t *testing.T) {
 	require.EqualValues(t, 20000, count)
 }
 
-// Try having only one table.
-func TestConcatIteratorOne(t *testing.T) {
-	a := make([][]string, 2)
-	a[0] = []string{"k1", "a1"}
-	a[1] = []string{"k2", "a2"}
-	//	f := buildTable(t, [][]string{
-	//		[]string{"k1", "a1"},
-	//		[]string{"k2", "a2"},
-	//	})
-	f := buildTable(t, a)
+func TestMergingIterator(t *testing.T) {
+	f1 := buildTable(t, [][]string{
+		{"k1", "a1"},
+		{"k2", "a2"},
+	})
+	f2 := buildTable(t, [][]string{
+		{"k1", "b1"},
+		{"k2", "b2"},
+	})
+	fname1, fname2 := f1.Name(), f2.Name()
+	f1.Close()
+	f2.Close()
+	it1 := NewConcatIterator([]string{fname1})
+	defer it1.Close()
 
-	fname := f.Name()
-	f.Close() // The ConcatIterator will re-open this file.
+	it2 := NewConcatIterator([]string{fname2})
+	defer it2.Close()
+	it := NewMergingIterator(it1, it2)
 
-	it := NewConcatIterator([]string{fname})
-	defer it.Close()
 	require.True(t, it.Valid())
 	k, v := it.KeyValue()
-	require.EqualValues(t, "a1", string(v))
 	require.EqualValues(t, "k1", string(k))
+	require.EqualValues(t, "a1", string(v))
+	it.Next()
+
+	require.True(t, it.Valid())
+	k, v = it.KeyValue()
+	require.EqualValues(t, "k1", string(k))
+	require.EqualValues(t, "b1", string(v))
+	it.Next()
+
+	require.True(t, it.Valid())
+	k, v = it.KeyValue()
+	require.EqualValues(t, "k2", string(k))
+	require.EqualValues(t, "a2", string(v))
+	it.Next()
+
+	require.True(t, it.Valid())
+	k, v = it.KeyValue()
+	require.EqualValues(t, "k2", string(k))
+	require.EqualValues(t, "b2", string(v))
+	it.Next()
+
+	require.False(t, it.Valid())
 }
 
-func TestAAA(t *testing.T) {
-	b := TableBuilder{}
-	b.Reset()
-	f, err := ioutil.TempFile("", "badger")
-	require.NoError(t, err)
-	fmt.Printf("~~~filename=%s\n", f.Name())
-	require.NoError(t, b.Add([]byte("k1"), []byte("a1")))
-	require.NoError(t, b.Add([]byte("k2"), []byte("a2")))
-	f.Write(b.Finish())
-	fname := f.Name()
-	f.Close()
+// Take only the first iterator.
+func TestMergingIteratorTwo(t *testing.T) {
+	f1 := buildTable(t, [][]string{
+		{"k1", "a1"},
+		{"k2", "a2"},
+	})
+	f2 := buildTable(t, [][]string{})
+	fname1, fname2 := f1.Name(), f2.Name()
+	f1.Close()
+	f2.Close()
+	it1 := NewConcatIterator([]string{fname1})
+	defer it1.Close()
 
-	it := NewConcatIterator([]string{fname})
-	defer it.Close()
-	kk, vv := it.KeyValue()
-	fmt.Printf("~~~~%s %s\n", string(kk), string(vv))
+	it2 := NewConcatIterator([]string{fname2})
+	defer it2.Close()
+	it := NewMergingIterator(it1, it2)
+
+	require.True(t, it.Valid())
+	k, v := it.KeyValue()
+	require.EqualValues(t, "k1", string(k))
+	require.EqualValues(t, "a1", string(v))
+	it.Next()
+
+	require.True(t, it.Valid())
+	k, v = it.KeyValue()
+	require.EqualValues(t, "k2", string(k))
+	require.EqualValues(t, "a2", string(v))
+	it.Next()
+
+	require.False(t, it.Valid())
 }
 
-//func TestMergingIterator(t *testing.T) {
-//	f1 := buildTable(t, [][]string{
-//		{"k1", "a1"},
-//		{"k2", "a2"},
-//	})
-//	f2 := buildTable(t, [][]string{
-//		{"k1", "b1"},
-//		{"k2", "b2"},
-//	})
-//	fname1, fname2 := f1.Name(), f2.Name()
-//	f1.Close()
-//	f2.Close()
-//	it1 := NewConcatIterator([]string{fname1})
-//	defer it1.Close()
-//	kk, vv := it1.KeyValue()
-//	fmt.Printf("~~~~~~~~initial %s %s\n", string(kk), string(vv))
-//	it1.Next()
-//	kk, vv = it1.KeyValue()
-//	fmt.Printf("~~~~~~~~initial %s %s\n", string(kk), string(vv))
+// Take only the second iterator.
+func TestMergingIteratorOne(t *testing.T) {
+	f1 := buildTable(t, [][]string{})
+	f2 := buildTable(t, [][]string{
+		{"k1", "a1"},
+		{"k2", "a2"},
+	})
+	fname1, fname2 := f1.Name(), f2.Name()
+	f1.Close()
+	f2.Close()
+	it1 := NewConcatIterator([]string{fname1})
+	defer it1.Close()
 
-//	it2 := NewConcatIterator([]string{fname2})
-//	defer it2.Close()
-//	it := NewMergingIterator(it1, it2)
-//	require.True(t, it.Valid())
-//	k, v := it.KeyValue()
-//	require.EqualValues(t, "k1", string(k))
-//	require.EqualValues(t, "a1", string(v))
-//}
+	it2 := NewConcatIterator([]string{fname2})
+	defer it2.Close()
+	it := NewMergingIterator(it1, it2)
+
+	require.True(t, it.Valid())
+	k, v := it.KeyValue()
+	require.EqualValues(t, "k1", string(k))
+	require.EqualValues(t, "a1", string(v))
+	it.Next()
+
+	require.True(t, it.Valid())
+	k, v = it.KeyValue()
+	require.EqualValues(t, "k2", string(k))
+	require.EqualValues(t, "a2", string(v))
+	it.Next()
+
+	require.False(t, it.Valid())
+}
