@@ -41,7 +41,13 @@ func (h header) Size() int {
 type TableBuilder struct {
 	counter int
 
+	// TODO: Now that each file is one table, this table can get really big. The builder will
+	// have to be initialized with a file object that we can keep appending to.
+	// Builder cannot afford to store everything in memory.
+	// And that is not needed because the header is at the end.
 	buf []byte
+
+	// TODO: Consider removing this var. It just tracks size of buf.
 	pos int
 
 	baseKey    []byte
@@ -50,6 +56,8 @@ type TableBuilder struct {
 	restarts   []uint32
 	prevOffset int
 }
+
+func (b *TableBuilder) Empty() bool { return len(b.buf) == 0 }
 
 func (b *TableBuilder) Reset() {
 	b.counter = 0
@@ -116,9 +124,10 @@ func (b *TableBuilder) Add(key, value []byte) error {
 	return nil
 }
 
-// length returns the exact final size of the array, given its current state.
-// Takes into account the header which has not been written into b.buf.
-func (b *TableBuilder) length() int {
+// FinalSize returns the *rough* final size of the array, counting the header which is not yet written.
+// TODO: Look into why there is a discrepancy. I suspect it is because of Write(empty, empty)
+// at the end. The diff can vary.
+func (b *TableBuilder) FinalSize() int {
 	return b.pos + 6 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
 }
 

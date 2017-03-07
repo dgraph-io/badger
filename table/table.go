@@ -22,7 +22,7 @@ type Table struct {
 
 	offset    int64
 	fd        *os.File // Do not own.
-	tableSize int64    // Initialized in OpenTable.
+	tableSize int64    // Initialized in OpenTable, using fd.Stat().
 
 	blockIndex []keyOffset
 }

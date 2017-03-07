@@ -95,6 +95,24 @@ func (itr *BlockIterator) Seek(seek []byte, whence int) {
 	}
 }
 
+func (itr *BlockIterator) SeekToLast() {
+	itr.err = nil
+	// There is probably a better way to do this. Maybe we could just load the whole block into mem.
+	for itr.Init(); itr.Valid(); itr.Next() {
+	}
+	itr.Prev()
+	// TODO: Temporary hack!!! We need an extra Prev sometimes. Has to do with the last key-value
+	// being added. We need to remove that soon.
+	var key []byte
+	itr.KV(func(k, v []byte) {
+		key = k
+	})
+	if len(key) == 0 {
+		itr.Prev()
+	}
+	// END OF HACK
+}
+
 func (itr *BlockIterator) parseKV(h header) {
 	itr.ensureKeyCap(h)
 	itr.key = itr.ikey[:h.plen+h.klen]
@@ -202,6 +220,24 @@ func (itr *TableIterator) SeekToFirst() {
 	if !itr.Valid() {
 		itr.Next()
 	}
+}
+
+func (itr *TableIterator) SeekToLast() {
+	numBlocks := len(itr.t.blockIndex)
+	if numBlocks == 0 {
+		itr.err = io.EOF
+		return
+	}
+	itr.bpos = numBlocks - 1
+	block, err := itr.t.block(itr.bpos)
+	if err != nil {
+		itr.err = err
+		return
+	}
+	// Go to the last block and seek to last.
+	itr.bi = block.NewIterator()
+	itr.bi.SeekToLast()
+	itr.err = itr.bi.Error()
 }
 
 func (itr *TableIterator) Seek(seek []byte, whence int) {

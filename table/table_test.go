@@ -40,19 +40,32 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 		y.AssertTrue(len(kv) == 2)
 		require.NoError(t, b.Add([]byte(kv[0]), []byte(kv[1])))
 	}
+
+	//	expectedSize := b.FinalSize()
 	f.Write(b.Finish())
+	//	fileInfo, err := f.Stat()
+	//	require.NoError(t, err)
+	//	require.EqualValues(t, fileInfo.Size(), expectedSize)
+	// TODO: Enable this check after we figure out the discrepancy.
 	return f
+}
+
+func TestSeekToLast(t *testing.T) {
+	f := buildTestTable(t)
+	table, err := OpenTable(f)
+	require.NoError(t, err)
+	it := table.NewIterator()
+	it.SeekToLast()
+	require.True(t, it.Valid())
+	it.KV(func(k, v []byte) {
+		require.EqualValues(t, "9999", string(v))
+	})
 }
 
 func TestBuild(t *testing.T) {
 	f := buildTestTable(t)
 	table, err := OpenTable(f)
 	require.NoError(t, err)
-	//	table := Table{
-	//		offset: 0,
-	//		fd:     f,
-	//	}
-	//	require.NoError(t, table.ReadIndex())
 
 	seek := []byte(key(1010))
 	t.Logf("Seeking to: %q", seek)
@@ -69,12 +82,12 @@ func TestBuild(t *testing.T) {
 	for bi.Init(); bi.Valid(); bi.Next() {
 		bi.KV(fn)
 	}
-	fmt.Println("SEEKING")
+	t.Log("SEEKING")
 	for bi.Seek(seek, 0); bi.Valid(); bi.Next() {
 		bi.KV(fn)
 	}
 
-	fmt.Println("SEEKING BACKWARDS")
+	t.Log("SEEKING BACKWARDS")
 	for bi.Seek(seek, 0); bi.Valid(); bi.Prev() {
 		bi.KV(fn)
 	}
@@ -139,14 +152,6 @@ func TestTable(t *testing.T) {
 	f := buildTestTable(t)
 	table, err := OpenTable(f)
 	require.NoError(t, err)
-	//	table := Table{
-	//		offset: 0,
-	//		fd:     f,
-	//	}
-	//	if err := table.ReadIndex(); err != nil {
-	//		t.Error(err)
-	//		t.Fail()
-	//	}
 
 	ti := table.NewIterator()
 	kid := 1010
@@ -179,11 +184,7 @@ func TestIterateFromStart(t *testing.T) {
 	f := buildTestTable(t)
 	table, err := OpenTable(f)
 	require.NoError(t, err)
-	//	table := Table{
-	//		offset: 0,
-	//		fd:     f,
-	//	}
-	//	require.NoError(t, table.ReadIndex())
+
 	ti := table.NewIterator()
 	ti.Reset()
 	ti.Seek([]byte(""), ORIGIN)
@@ -204,8 +205,6 @@ func TestSeekUnusual(t *testing.T) {
 	f := buildTestTable(t)
 	tbl, err := OpenTable(f)
 	require.NoError(t, err)
-	//	tbl := Table{fd: f}
-	//	require.NoError(t, tbl.ReadIndex())
 
 	it := tbl.NewIterator()
 	it.Reset()
@@ -222,8 +221,6 @@ func TestSeekUnusual(t *testing.T) {
 	fCopy := buildTable(t, [][]string{{"0000-0000", "0"}})
 	tblCopy, err := OpenTable(fCopy)
 	require.NoError(t, err)
-	//	tblCopy := Table{fd: fCopy}
-	//	require.NoError(t, tblCopy.ReadIndex())
 
 	itCopy := tblCopy.NewIterator()
 	itCopy.Reset()
@@ -316,66 +313,66 @@ func TestMergingIterator(t *testing.T) {
 	require.False(t, it.Valid())
 }
 
-//// Take only the first iterator.
-//func TestMergingIteratorTwo(t *testing.T) {
-//	f1 := buildTable(t, [][]string{
-//		{"k1", "a1"},
-//		{"k2", "a2"},
-//	})
-//	f2 := buildTable(t, [][]string{})
-//	fname1, fname2 := f1.Name(), f2.Name()
-//	f1.Close()
-//	f2.Close()
-//	it1 := NewConcatIterator([]string{fname1})
-//	defer it1.Close()
+// Take only the first iterator.
+func TestMergingIteratorTakeOne(t *testing.T) {
+	f1 := buildTable(t, [][]string{
+		{"k1", "a1"},
+		{"k2", "a2"},
+	})
+	f2 := buildTable(t, [][]string{})
 
-//	it2 := NewConcatIterator([]string{fname2})
-//	defer it2.Close()
-//	it := NewMergingIterator(it1, it2)
+	t1, err := OpenTable(f1)
+	require.NoError(t, err)
+	t2, err := OpenTable(f2)
+	require.NoError(t, err)
 
-//	require.True(t, it.Valid())
-//	k, v := it.KeyValue()
-//	require.EqualValues(t, "k1", string(k))
-//	require.EqualValues(t, "a1", string(v))
-//	it.Next()
+	it1 := NewConcatIterator([]*Table{t1})
+	it2 := NewConcatIterator([]*Table{t2})
+	it := NewMergingIterator(it1, it2)
 
-//	require.True(t, it.Valid())
-//	k, v = it.KeyValue()
-//	require.EqualValues(t, "k2", string(k))
-//	require.EqualValues(t, "a2", string(v))
-//	it.Next()
+	require.True(t, it.Valid())
+	k, v := it.KeyValue()
+	require.EqualValues(t, "k1", string(k))
+	require.EqualValues(t, "a1", string(v))
+	it.Next()
 
-//	require.False(t, it.Valid())
-//}
+	require.True(t, it.Valid())
+	k, v = it.KeyValue()
+	require.EqualValues(t, "k2", string(k))
+	require.EqualValues(t, "a2", string(v))
+	it.Next()
 
-//// Take only the second iterator.
-//func TestMergingIteratorOne(t *testing.T) {
-//	f1 := buildTable(t, [][]string{})
-//	f2 := buildTable(t, [][]string{
-//		{"k1", "a1"},
-//		{"k2", "a2"},
-//	})
-//	fname1, fname2 := f1.Name(), f2.Name()
-//	f1.Close()
-//	f2.Close()
-//	it1 := NewConcatIterator([]string{fname1})
-//	defer it1.Close()
+	require.False(t, it.Valid())
+}
 
-//	it2 := NewConcatIterator([]string{fname2})
-//	defer it2.Close()
-//	it := NewMergingIterator(it1, it2)
+// Take only the second iterator.
+func TestMergingIteratorTakeTwo(t *testing.T) {
+	f1 := buildTable(t, [][]string{})
+	f2 := buildTable(t, [][]string{
+		{"k1", "a1"},
+		{"k2", "a2"},
+	})
 
-//	require.True(t, it.Valid())
-//	k, v := it.KeyValue()
-//	require.EqualValues(t, "k1", string(k))
-//	require.EqualValues(t, "a1", string(v))
-//	it.Next()
+	t1, err := OpenTable(f1)
+	require.NoError(t, err)
+	t2, err := OpenTable(f2)
+	require.NoError(t, err)
 
-//	require.True(t, it.Valid())
-//	k, v = it.KeyValue()
-//	require.EqualValues(t, "k2", string(k))
-//	require.EqualValues(t, "a2", string(v))
-//	it.Next()
+	it1 := NewConcatIterator([]*Table{t1})
+	it2 := NewConcatIterator([]*Table{t2})
+	it := NewMergingIterator(it1, it2)
 
-//	require.False(t, it.Valid())
-//}
+	require.True(t, it.Valid())
+	k, v := it.KeyValue()
+	require.EqualValues(t, "k1", string(k))
+	require.EqualValues(t, "a1", string(v))
+	it.Next()
+
+	require.True(t, it.Valid())
+	k, v = it.KeyValue()
+	require.EqualValues(t, "k2", string(k))
+	require.EqualValues(t, "a2", string(v))
+	it.Next()
+
+	require.False(t, it.Valid())
+}
