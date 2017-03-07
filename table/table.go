@@ -20,8 +20,9 @@ type keyOffset struct {
 type Table struct {
 	sync.Mutex
 
-	offset int64
-	fd     *os.File
+	offset    int64
+	fd        *os.File // Do not own.
+	tableSize int64    // Initialized in OpenTable.
 
 	blockIndex []keyOffset
 }
@@ -41,32 +42,33 @@ func (b byKey) Len() int               { return len(b) }
 func (b byKey) Swap(i int, j int)      { b[i], b[j] = b[j], b[i] }
 func (b byKey) Less(i int, j int) bool { return bytes.Compare(b[i].key, b[j].key) < 0 }
 
-func NewTable(fd *os.File, offset int64) *Table {
-	t := &Table{
-		fd:     fd,
-		offset: offset,
-	}
-	return t
-}
-
 // OpenTable assumes file has only one table and opens it.
 func OpenTable(fd *os.File) (*Table, error) {
-	t := NewTable(fd, 0)
-	if err := t.ReadIndex(); err != nil {
+	t := &Table{
+		fd:     fd,
+		offset: 0, // Consider removing this field.
+	}
+	fileInfo, err := fd.Stat()
+	if err != nil {
+		return nil, err
+	}
+	t.tableSize = fileInfo.Size()
+
+	if err := t.readIndex(); err != nil {
 		return nil, err
 	}
 	return t, nil
 }
 
-func (t *Table) ReadIndex() error {
+func (t *Table) readIndex() error {
 	buf := make([]byte, 4)
-	if _, err := t.fd.ReadAt(buf, t.offset+tableSize-4); err != nil {
+	if _, err := t.fd.ReadAt(buf, t.offset+t.tableSize-4); err != nil {
 		return errors.Wrap(err, "While reading block index")
 	}
 	restartsLen := int(binary.BigEndian.Uint32(buf))
 
 	buf = make([]byte, 4*restartsLen)
-	if _, err := t.fd.ReadAt(buf, t.offset+tableSize-4-int64(len(buf))); err != nil {
+	if _, err := t.fd.ReadAt(buf, t.offset+t.tableSize-4-int64(len(buf))); err != nil {
 		return errors.Wrap(err, "While reading block index")
 	}
 

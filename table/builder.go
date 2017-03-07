@@ -4,10 +4,10 @@ import (
 	"encoding/binary"
 	"math"
 
-	"github.com/dgraph-io/badger/y"
+	//	"github.com/dgraph-io/badger/y"
 )
 
-var tableSize int64 = 50 << 20
+//var tableSize int64 = 50 << 20
 var restartInterval int = 100
 
 type header struct {
@@ -53,9 +53,10 @@ type TableBuilder struct {
 
 func (b *TableBuilder) Reset() {
 	b.counter = 0
-	if cap(b.buf) < int(tableSize) {
-		b.buf = make([]byte, tableSize)
-	}
+	//	if cap(b.buf) < int(tableSize) {
+	//		b.buf = make([]byte, tableSize)
+	//	}
+	b.buf = make([]byte, 0, 1<<20)
 	b.pos = 0
 
 	b.baseKey = []byte{}
@@ -63,7 +64,8 @@ func (b *TableBuilder) Reset() {
 }
 
 func (b *TableBuilder) write(d []byte) {
-	y.AssertTrue(len(d) == copy(b.buf[b.pos:], d))
+	//	y.AssertTrue(len(d) == copy(b.buf[b.pos:], d))
+	b.buf = append(b.buf, d...)
 	b.pos += len(d)
 }
 
@@ -78,9 +80,9 @@ func (b TableBuilder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *TableBuilder) Add(key, value []byte) error {
-	if len(key)+len(value)+b.length() > int(tableSize) {
-		return y.Errorf("Exceeds table size")
-	}
+	//	if len(key)+len(value)+b.length() > int(tableSize) {
+	//		return y.Errorf("Exceeds table size")
+	//	}
 
 	if b.counter >= restartInterval {
 		b.restarts = append(b.restarts, uint32(b.pos))
@@ -114,6 +116,8 @@ func (b *TableBuilder) Add(key, value []byte) error {
 	return nil
 }
 
+// length returns the exact final size of the array, given its current state.
+// Takes into account the header which has not been written into b.buf.
 func (b *TableBuilder) length() int {
 	return b.pos + 6 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
 }
@@ -135,15 +139,16 @@ func (b *TableBuilder) blockIndex() []byte {
 
 var emptySlice = make([]byte, 100)
 
+// Finish finishes the table by appending the index.
 func (b *TableBuilder) Finish() []byte {
 	b.Add([]byte{}, []byte{}) // Empty record to indicate the end.
 
 	index := b.blockIndex()
-	newpos := int(tableSize) - len(index)
-	y.AssertTrue(b.pos <= newpos)
-	b.pos = newpos
+	//	newpos := int(tableSize) - len(index)
+	//	y.AssertTrue(b.pos <= newpos)
+	//	b.pos = newpos
 
 	b.write(index)
-	y.AssertTrue(b.pos == int(tableSize))
+	//	y.AssertTrue(b.pos == int(tableSize))
 	return b.buf
 }

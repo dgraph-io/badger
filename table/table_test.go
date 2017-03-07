@@ -46,11 +46,13 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 
 func TestBuild(t *testing.T) {
 	f := buildTestTable(t)
-	table := Table{
-		offset: 0,
-		fd:     f,
-	}
-	require.NoError(t, table.ReadIndex())
+	table, err := OpenTable(f)
+	require.NoError(t, err)
+	//	table := Table{
+	//		offset: 0,
+	//		fd:     f,
+	//	}
+	//	require.NoError(t, table.ReadIndex())
 
 	seek := []byte(key(1010))
 	t.Logf("Seeking to: %q", seek)
@@ -135,14 +137,16 @@ func TestBuild(t *testing.T) {
 
 func TestTable(t *testing.T) {
 	f := buildTestTable(t)
-	table := Table{
-		offset: 0,
-		fd:     f,
-	}
-	if err := table.ReadIndex(); err != nil {
-		t.Error(err)
-		t.Fail()
-	}
+	table, err := OpenTable(f)
+	require.NoError(t, err)
+	//	table := Table{
+	//		offset: 0,
+	//		fd:     f,
+	//	}
+	//	if err := table.ReadIndex(); err != nil {
+	//		t.Error(err)
+	//		t.Fail()
+	//	}
 
 	ti := table.NewIterator()
 	kid := 1010
@@ -173,11 +177,13 @@ func TestTable(t *testing.T) {
 
 func TestIterateFromStart(t *testing.T) {
 	f := buildTestTable(t)
-	table := Table{
-		offset: 0,
-		fd:     f,
-	}
-	require.NoError(t, table.ReadIndex())
+	table, err := OpenTable(f)
+	require.NoError(t, err)
+	//	table := Table{
+	//		offset: 0,
+	//		fd:     f,
+	//	}
+	//	require.NoError(t, table.ReadIndex())
 	ti := table.NewIterator()
 	ti.Reset()
 	ti.Seek([]byte(""), ORIGIN)
@@ -196,8 +202,10 @@ func TestIterateFromStart(t *testing.T) {
 // Seek of table is a bit strange. Sometimes we need to Next. Sometimes we should not.
 func TestSeekUnusual(t *testing.T) {
 	f := buildTestTable(t)
-	tbl := Table{fd: f}
-	require.NoError(t, tbl.ReadIndex())
+	tbl, err := OpenTable(f)
+	require.NoError(t, err)
+	//	tbl := Table{fd: f}
+	//	require.NoError(t, tbl.ReadIndex())
 
 	it := tbl.NewIterator()
 	it.Reset()
@@ -212,8 +220,10 @@ func TestSeekUnusual(t *testing.T) {
 
 	// Now try a different setup.
 	fCopy := buildTable(t, [][]string{{"0000-0000", "0"}})
-	tblCopy := Table{fd: fCopy}
-	require.NoError(t, tblCopy.ReadIndex())
+	tblCopy, err := OpenTable(fCopy)
+	require.NoError(t, err)
+	//	tblCopy := Table{fd: fCopy}
+	//	require.NoError(t, tblCopy.ReadIndex())
 
 	itCopy := tblCopy.NewIterator()
 	itCopy.Reset()
