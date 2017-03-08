@@ -262,28 +262,58 @@ func randomKey() []byte {
 	return b
 }
 
-// Alternate version to WriteParallel that fixes the number of writes to be decently large.
-func BenchmarkWriteParallelAlt(b *testing.B) {
+// Standard test. Some fraction is read. Some fraction is write. Writes have
+// to go through mutex lock.
+func BenchmarkReadWrite(b *testing.B) {
 	value := newValue(123)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		list := NewSkiplist()
-		for i := 0; i < 10000; i++ {
-			list.Put(randomKey(), value, true)
-		}
+	for i := 0; i <= 10; i++ {
+		readFrac := float32(i) / 10.0
+		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
+			list := NewSkiplist()
+			b.ResetTimer()
+			var count int
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					if rand.Float32() < readFrac {
+						if list.Get(randomKey()) != nil {
+							count++
+						}
+					} else {
+						list.Put(randomKey(), value, true)
+					}
+				}
+			})
+		})
 	}
 }
 
-func BenchmarkReadParallel(b *testing.B) {
+// Standard test. Some fraction is read. Some fraction is write. Writes have
+// to go through mutex lock.
+func BenchmarkReadWriteMap(b *testing.B) {
 	value := newValue(123)
-	list := NewSkiplist()
-	for i := 0; i < 100000; i++ {
-		list.Put(randomKey(), value, true)
+	for i := 0; i <= 10; i++ {
+		readFrac := float32(i) / 10.0
+		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
+			m := make(map[string]unsafe.Pointer)
+			var mutex sync.RWMutex
+			b.ResetTimer()
+			var count int
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					if rand.Float32() < readFrac {
+						mutex.RLock()
+						_, ok := m[string(randomKey())]
+						mutex.RUnlock()
+						if ok {
+							count++
+						}
+					} else {
+						mutex.Lock()
+						m[string(randomKey())] = value
+						mutex.Unlock()
+					}
+				}
+			})
+		})
 	}
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			list.Get(randomKey())
-		}
-	})
 }

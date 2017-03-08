@@ -223,22 +223,12 @@ func randomKey() []byte {
 	return b
 }
 
-func BenchmarkReadParallel(b *testing.B) {
-	value := newValue(123)
-	list := NewSkiplist()
-	for i := 0; i < 100000; i++ {
-		list.Put(randomKey(), value, true)
-	}
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			list.Get(randomKey())
-		}
-	})
-}
-
 // Standard test. Some fraction is read. Some fraction is write. Writes have
 // to go through mutex lock.
+// NOTE: For this implementation, this test doesn't seem to terminate sometimes.
+// I think the reason is that this skiplist likes to restart and there is high variance in
+// the running time. As a result, the benchmark framework is unsure and keeps retrying.
+// We used to have a read-parallel and write-parallel test. But let's just delete this lib soon.
 func BenchmarkReadWrite(b *testing.B) {
 	value := newValue(123)
 	for i := 0; i <= 10; i++ {
@@ -246,40 +236,18 @@ func BenchmarkReadWrite(b *testing.B) {
 		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
 			list := NewSkiplist()
 			b.ResetTimer()
+			var count int
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					if rand.Float32() < readFrac {
-						it := list.NewIterator()
-						it.Seek(randomKey())
+						if list.Get(randomKey()) != nil {
+							count++
+						}
 					} else {
 						list.Put(randomKey(), value, true)
 					}
 				}
 			})
 		})
-	}
-}
-
-// Test takes a long time because early parallel writes tend to lead to a lot of starts and
-// variance in the running time.
-func BenchmarkWriteParallel(b *testing.B) {
-	value := newValue(123)
-	list := NewSkiplist()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			list.Put(randomKey(), value, true)
-		}
-	})
-}
-
-// Alternate version to WriteParallel that fixes the number of writes to be decently large.
-func BenchmarkWriteParallelAlt(b *testing.B) {
-	value := newValue(123)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		list := NewSkiplist()
-		for i := 0; i < 10000; i++ {
-			list.Put(randomKey(), value, true)
-		}
 	}
 }
