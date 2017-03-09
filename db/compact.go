@@ -170,6 +170,7 @@ func (s *levelHandler) overlappingTables(begin, end []byte) (int, int) {
 
 func (s *levelsController) init() {
 	s.levels = make([]*levelHandler, maxLevels)
+	s.beingCompacted = make([]bool, maxLevels)
 	for i := 0; i < maxLevels; i++ {
 		s.levels[i] = &levelHandler{
 			level: i,
@@ -177,7 +178,7 @@ func (s *levelsController) init() {
 		if i == 0 {
 			// For level 0, as long as there is a table there, we want to compact it away.
 			// Otherwise, if there are too many tables on level 0, a query will be very expensive.
-			s.levels[i].maxTotalSize = -1
+			s.levels[i].maxTotalSize = 0
 		} else if i == 1 {
 			// Level 1 probably shouldn't be too much bigger than level 0.
 			s.levels[i].maxTotalSize = baseSize
@@ -186,17 +187,17 @@ func (s *levelsController) init() {
 		}
 	}
 	for i := 0; i < numCompactWorkers; i++ {
-		go s.compact()
+		go s.compact(i)
 	}
 }
 
-func (s *levelsController) compact() {
+func (s *levelsController) compact(workerID int) {
 	timeChan := time.Tick(time.Second)
 	for {
 		select {
 		// Can add a done channel or other stuff.
 		case <-timeChan:
-			s.tryCompact()
+			s.tryCompact(workerID)
 		}
 	}
 }
@@ -211,7 +212,7 @@ func (s *levelsController) pickCompactLevel() int {
 		if s.beingCompacted[i] || s.beingCompacted[i+1] {
 			continue
 		}
-		if s.levels[i].getTotalSize() < s.levels[i].maxTotalSize {
+		if s.levels[i].getTotalSize() <= s.levels[i].maxTotalSize {
 			continue
 		}
 		// Mark these two levels while locking s.
@@ -223,13 +224,15 @@ func (s *levelsController) pickCompactLevel() int {
 	return -1
 }
 
-func (s *levelsController) tryCompact() {
+func (s *levelsController) tryCompact(workerID int) {
 	l := s.pickCompactLevel()
 	if l < 0 {
 		// Level is negative. Nothing to compact.
+		log.Printf("tryCompact(%d) found nothing to do", workerID)
 		return
 	}
 
+	log.Printf("Trying to compact level %d to %d", l, l+1)
 	if err := s.doCompact(l); err != nil {
 		log.Printf("tryCompact encountered an error: %+v", err)
 		// Don't return yet. We need to unmark beingCompacted.

@@ -84,5 +84,7 @@ func TestDoCompact(t *testing.T) {
 }
 
 func TestCompactBasic(t *testing.T) {
-
+	for {
+		//		time.Sleep(3 * time.Second)
+	}
 }
