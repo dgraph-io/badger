@@ -185,3 +185,5 @@ func (t *Table) BlockForKey(k []byte) (Block, error) {
 func (t *Table) NewIterator() *TableIterator {
 	return &TableIterator{t: t}
 }
+
+func (t *Table) Size() int64 { return t.tableSize }
