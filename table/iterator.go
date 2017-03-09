@@ -3,7 +3,7 @@ package table
 import (
 	"bytes"
 	"errors"
-	"fmt"
+	//	"fmt"
 	"io"
 	"math"
 
@@ -160,7 +160,7 @@ func (itr *BlockIterator) Prev() {
 	if !itr.init {
 		return
 	}
-	fmt.Printf("LAST: %+v\n", itr.last)
+	//	fmt.Printf("LAST: %+v\n", itr.last)
 
 	if itr.last.prev == math.MaxUint16 {
 		// if itr.pos == 0 && itr.last.prev == 0 {
