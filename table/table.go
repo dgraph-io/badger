@@ -155,28 +155,6 @@ func (t *Table) readIndex() error {
 	return nil
 }
 
-// blockIndexFor finds the block that might contain k.
-//func (t *Table) blockIndexFor(k []byte) int {
-//	idx := sort.Search(len(t.blockIndex), func(idx int) bool {
-//		ko := t.blockIndex[idx]
-//		return bytes.Compare(ko.key, k) > 0
-//	})
-//	// k cannot be in block[idx] because block[idx].smallest is strictly > k.
-//	// If k is in the table, it would have to be in block[idx-1].
-//	// If idx=0, then table does not contain k.
-//	fmt.Printf("~~~blockIndexFor: k=%v idx=%d\n", k, idx)
-
-//	if idx > 0 {
-//		idx--
-//	}
-
-//	ko := t.blockIndex[idx]
-//	if bytes.Compare(k, ko.key) < 0 {
-//		return -1
-//	}
-//	return idx
-//}
-
 func (t *Table) block(idx int) (Block, error) {
 	if idx >= len(t.blockIndex) {
 		return Block{}, errors.New("Block out of index.")
@@ -194,14 +172,6 @@ func (t *Table) block(idx int) (Block, error) {
 	}
 	return block, nil
 }
-
-//func (t *Table) BlockForKey(k []byte) (Block, error) {
-//	idx := t.blockIndexFor(k)
-//	if idx == -1 {
-//		return Block{}, errors.New("No Block found")
-//	}
-//	return t.block(idx)
-//}
 
 func (t *Table) NewIterator() *TableIterator {
 	return &TableIterator{t: t}
