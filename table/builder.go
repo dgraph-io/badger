@@ -39,6 +39,7 @@ func (h header) Size() int {
 }
 
 type TableBuilder struct {
+	numKeys int
 	counter int
 
 	// TODO: Now that each file is one table, this table can get really big. The builder will
@@ -59,7 +60,10 @@ type TableBuilder struct {
 
 func (b *TableBuilder) Empty() bool { return len(b.buf) == 0 }
 
+func (b *TableBuilder) NumKeys() int { return b.numKeys }
+
 func (b *TableBuilder) Reset() {
+	b.numKeys = 0
 	b.counter = 0
 	//	if cap(b.buf) < int(tableSize) {
 	//		b.buf = make([]byte, tableSize)
@@ -88,6 +92,7 @@ func (b TableBuilder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *TableBuilder) Add(key, value []byte) error {
+	b.numKeys++
 	//	if len(key)+len(value)+b.length() > int(tableSize) {
 	//		return y.Errorf("Exceeds table size")
 	//	}
@@ -150,7 +155,9 @@ var emptySlice = make([]byte, 100)
 
 // Finish finishes the table by appending the index.
 func (b *TableBuilder) Finish() []byte {
-	b.Add([]byte{}, []byte{}) // Empty record to indicate the end.
+	if b.NumKeys()%restartInterval != 0 {
+		b.Add([]byte{}, []byte{}) // Empty record to indicate the end.
+	}
 
 	index := b.blockIndex()
 	//	newpos := int(tableSize) - len(index)

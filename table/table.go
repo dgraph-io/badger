@@ -3,6 +3,7 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
+	//	"fmt"
 	"os"
 	"sort"
 	"sync"
@@ -134,6 +135,9 @@ func (t *Table) readIndex() error {
 		}
 	}
 	sort.Sort(byKey(t.blockIndex))
+	//	for _, bi := range t.blockIndex {
+	//		fmt.Printf("~~~bi: %v\n", bi)
+	//	}
 
 	return nil
 }
@@ -156,11 +160,13 @@ func (t *Table) blockIndexFor(k []byte) int {
 }
 
 func (t *Table) block(idx int) (Block, error) {
+	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= len(t.blockIndex) {
 		return Block{}, errors.New("Block out of index.")
 	}
 
 	ko := t.blockIndex[idx]
+	//	fmt.Printf("~~~block: idx=%d %v\n", idx, ko)
 
 	// TODO: add Block caching here.
 	block := Block{

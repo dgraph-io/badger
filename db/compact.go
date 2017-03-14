@@ -15,10 +15,11 @@ import (
 )
 
 type CompactOptions struct {
-	LevelOneSize      int64
-	MaxLevels         int
-	NumCompactWorkers int
-	MaxTableSize      int64
+	NumLevelZeroTables int   // Maximum number of Level 0 tables before we start compacting.
+	LevelOneSize       int64 // Maximum total size for Level 1.
+	MaxLevels          int   // Maximum number of levels of compaction. May be made variable later.
+	NumCompactWorkers  int   // Number of goroutines ddoing compaction.
+	MaxTableSize       int64 // Each table (or file) is at most this size.
 }
 
 type tableHandler struct {
@@ -41,6 +42,7 @@ type levelHandler struct {
 	// The following are initialized once and const.
 	level        int
 	maxTotalSize int64
+	opt          CompactOptions
 }
 
 type levelsController struct {
@@ -60,10 +62,11 @@ var (
 
 func DefaultCompactOptions() *CompactOptions {
 	return &CompactOptions{
-		LevelOneSize:      1 << 20,
-		MaxLevels:         10,
-		NumCompactWorkers: 3,
-		MaxTableSize:      50 << 20,
+		NumLevelZeroTables: 3,
+		LevelOneSize:       1 << 20,
+		MaxLevels:          10,
+		NumCompactWorkers:  3,
+		MaxTableSize:       50 << 20,
 	}
 }
 
@@ -102,14 +105,17 @@ func newTableHandler(f *os.File) (*tableHandler, error) {
 	it.KV(func(k, v []byte) {
 		out.smallest = k
 	})
-	it.SeekToLast()
-	y.AssertTrue(it.Valid())
-	it.KV(func(k, v []byte) {
+
+	it2 := t.NewIterator() // For now, safer to use a different iterator.
+	it2.SeekToLast()
+	y.AssertTrue(it2.Valid())
+	it2.KV(func(k, v []byte) {
 		out.biggest = k
 	})
 	// Make sure we did populate smallest and biggest.
 	y.AssertTrue(len(out.smallest) > 0) // We do not allow empty keys...
 	y.AssertTrue(len(out.biggest) > 0)
+	// It is possible that smallest=biggest. In that case, table has only one element.
 	return out, nil
 }
 
@@ -127,6 +133,7 @@ func (s *levelHandler) deleteTable(idx int) {
 	t := s.tables[idx]
 	s.totalSize -= t.size()
 	s.tables = append(s.tables[:idx], s.tables[idx+1:]...)
+	fmt.Printf("Deleting table: level=%d idx=%d\n", s.level, idx)
 }
 
 // replaceTables will replace tables[left:right] with newTables. Note this EXCLUDES tables[right].
@@ -155,9 +162,15 @@ func (s *levelHandler) replaceTables(left, right int, newTables []*tableHandler)
 }
 
 func (s *levelHandler) pickCompactTable() int {
-	y.AssertTrue(len(s.tables) > 0) // We expect at least one table to pick.
 	s.RLock()
 	defer s.RUnlock()
+
+	if s.level == 0 {
+		// For level 0, return the oldest table.
+		return 0
+	}
+
+	// For other levels, pick the largest table.
 	var idx int
 	mx := s.tables[0].size()
 	for i := 1; i < len(s.tables); i++ {
@@ -173,7 +186,8 @@ func (s *levelHandler) pickCompactTable() int {
 func (s *levelHandler) getTable(idx int) *tableHandler {
 	s.RLock()
 	defer s.RUnlock()
-	y.AssertTrue(0 <= idx && idx < len(s.tables))
+	y.AssertTruef(0 <= idx && idx < len(s.tables), "level=%d idx=%d len=%d",
+		s.level, idx, len(s.tables))
 	return s.tables[idx]
 }
 
@@ -205,6 +219,7 @@ func (s *levelsController) init(opt *CompactOptions) {
 	for i := 0; i < s.opt.MaxLevels; i++ {
 		s.levels[i] = &levelHandler{
 			level: i,
+			opt:   *opt,
 		}
 		if i == 0 {
 			// For level 0, as long as there is a table there, we want to compact it away.
@@ -238,7 +253,7 @@ func (s *levelsController) pickCompactLevel() int {
 	s.Lock() // For access to beingCompacted.
 	defer s.Unlock()
 
-	// Some temporary logging here.
+	///////// Some temporary logging here.
 	for i := 0; i < s.opt.MaxLevels; i++ {
 		var busy int
 		if s.beingCompacted[i] {
@@ -247,6 +262,7 @@ func (s *levelsController) pickCompactLevel() int {
 		fmt.Printf("(i=%d, size=%d, busy=%d, numTables=%d) ", i, s.levels[i].getTotalSize(), busy, len(s.levels[i].tables))
 	}
 	fmt.Printf("\n")
+	///////// End of temporary logging.
 
 	for i := 0; i+1 < s.opt.MaxLevels; i++ {
 		// Lower levels take priority. Most important is level 0. It should only have one table.
@@ -254,7 +270,13 @@ func (s *levelsController) pickCompactLevel() int {
 		if s.beingCompacted[i] || s.beingCompacted[i+1] {
 			continue
 		}
-		if s.levels[i].getTotalSize() <= s.levels[i].maxTotalSize {
+		if i == 0 && len(s.levels[0].tables) <= s.opt.NumLevelZeroTables {
+			continue
+		}
+		//		if i == 0 {
+		//			fmt.Printf("~~~level0 looks full: %d\n", len(s.levels[0].tables))
+		//		}
+		if i > 0 && s.levels[i].getTotalSize() <= s.levels[i].maxTotalSize {
 			continue
 		}
 		// Mark these two levels while locking s.
@@ -270,11 +292,11 @@ func (s *levelsController) tryCompact(workerID int) {
 	l := s.pickCompactLevel()
 	if l < 0 {
 		// Level is negative. Nothing to compact.
-		fmt.Printf("tryCompact(%d) nop\n", workerID)
+		fmt.Printf("tryCompact(worker=%d) nop\n", workerID)
 		return
 	}
 
-	fmt.Printf("tryCompact(%d): Merging level %d to %d\n", workerID, l, l+1)
+	fmt.Printf("tryCompact(worker=%d): Merging level %d to %d\n", workerID, l, l+1)
 	if err := s.doCompact(l); err != nil {
 		log.Printf("tryCompact encountered an error: %+v", err)
 		// Don't return yet. We need to unmark beingCompacted.
@@ -330,32 +352,82 @@ func (s *levelsController) doCompact(l int) error {
 
 	for ; it.Valid(); it.Next() {
 		if int64(builder.FinalSize()) > s.opt.MaxTableSize {
+			//			fmt.Printf("EndTable: largestKey=%s\n", string(lastKey))
 			if err := finishTable(); err != nil {
 				return err
 			}
 		}
 		kSlice, vSlice := it.KeyValue()
+		//		if builder.Empty() {
+		//			fmt.Printf("StartTable: smallestKey=%s\n", string(kSlice))
+		//		}
 		// We need to make copies of these as table might use them as "last".
 		key := doCopy(kSlice)
 		val := doCopy(vSlice)
 		//		fmt.Printf("key=%s val=%s lastKey=%s\n", string(key), string(val), string(lastKey))
-		if bytes.Equal(key, lastKey) {
+		cmp := bytes.Compare(key, lastKey)
+		if cmp == 0 {
 			// Ignore duplicate keys. The first iterator takes precedence.
 			continue
 		}
+		y.AssertTrue(cmp > 0)
 		if err := builder.Add(key, val); err != nil {
 			return err
 		}
 		lastKey = key
 	}
-	y.AssertTrue(!builder.Empty())
-	if err := finishTable(); err != nil {
-		return err
+	if !builder.Empty() {
+		//		fmt.Printf("EndTable: largestKey=%s size=%d\n", string(lastKey), builder.NumKeys())
+		if err := finishTable(); err != nil {
+			return err
+		}
 	}
 
 	nextLevel.replaceTables(left, right, newTables)
 	y.AssertTrue(thisLevel.tables[tableIdx] == t) // We do not expect any change here.
 	thisLevel.deleteTable(tableIdx)               // Function will acquire level lock.
-	fmt.Printf("Merge: Replace table %d to %d with %d new tables\n", left, right, len(newTables))
+	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
+	// However, the tables are added only to the end, so it is ok to just delete the first table.
+	// Do a assert as a sanity check.
+	y.AssertTrue(l != 0 || tableIdx == 0)
+	fmt.Printf("Level %d: Replace table %d to %d with %d new tables\n", l+1, left, right, len(newTables))
 	return nil
+}
+
+func (s *levelsController) addLevel0Table(t *tableHandler) {
+	for !s.levels[0].tryAddLevel0Table(t) {
+		fmt.Printf("Stalled on level 0\n")
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func (s *levelHandler) tryAddLevel0Table(t *tableHandler) bool {
+	y.AssertTrue(s.level == 0)
+	// Need lock as we may be deleting the first table during a level 0 compaction.
+	s.Lock()
+	defer s.Unlock()
+	if len(s.tables) > s.opt.NumLevelZeroTables {
+		return false
+	}
+	s.tables = append(s.tables, t)
+	s.totalSize += t.size()
+	return true
+}
+
+func (s *levelHandler) check() {
+	if s.level == 0 {
+		return
+	}
+	s.RLock()
+	defer s.RUnlock()
+	numTables := len(s.tables)
+	for j := 1; j < numTables; j++ {
+		y.AssertTruef(j < len(s.tables), "Level %d, j=%d numTables=%d", s.level, j, numTables)
+		y.AssertTruef(bytes.Compare(s.tables[j-1].biggest, s.tables[j].smallest) < 0,
+			"%s vs %s: level=%d j=%d numTables=%d",
+			string(s.tables[j-1].biggest), string(s.tables[j].smallest), s.level, j, numTables)
+		y.AssertTruef(bytes.Compare(s.tables[j].smallest, s.tables[j].biggest) <= 0,
+			"%s vs %s: level=%d j=%d numTables=%d",
+			string(s.tables[j].smallest), string(s.tables[j].biggest), s.level, j, numTables)
+	}
 }

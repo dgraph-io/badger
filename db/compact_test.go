@@ -1,13 +1,12 @@
 package db
 
 import (
-	"bytes"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"sort"
 	"testing"
-	"time"
+	//	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -94,15 +93,18 @@ func randomKey() string {
 func TestCompactBasic(t *testing.T) {
 	// Set smaller values so that we get to see more compaction.
 	opt := &CompactOptions{
-		LevelOneSize:      100,
-		MaxLevels:         4,
-		NumCompactWorkers: 3,
-		MaxTableSize:      100,
+		NumLevelZeroTables: 5,
+		LevelOneSize:       1 << 20,
+		MaxLevels:          4,
+		NumCompactWorkers:  3,
+		MaxTableSize:       1 << 18,
 	}
 	InitCompact(opt)
-	level0 := lvlsController.levels[0]
 
-	n := 100
+	// TODO: Allow multiples of 100. Right now, something is broken about table.
+	// Seek will not work if the last table has key="".
+	// TODO: If last table is empty, do not output that empty header!
+	n := 205
 	keyValues := make([][]string, n)
 	for i := 0; i < n; i++ {
 		keyValues[i] = []string{"", ""}
@@ -115,29 +117,10 @@ func TestCompactBasic(t *testing.T) {
 			keyValues[i][1] = k
 		}
 		tbl := buildTable(t, keyValues)
-		// Try to add to level 0.
-		for {
-			if level0.getTotalSize() > 0 {
-				time.Sleep(100 * time.Millisecond) // Stalled!
-				continue
-			}
-			level0.Lock()
-			fmt.Printf("Adding table of size %d\n", tbl.size())
-			level0.tables = []*tableHandler{tbl}
-			level0.totalSize = tbl.table.Size()
-			level0.Unlock()
+		lvlsController.addLevel0Table(tbl)
 
-			// Let's do a check on the data.
-			for _, level := range lvlsController.levels {
-				level.RLock()
-				for i := 1; i < len(level.tables); i++ {
-					require.True(t, bytes.Compare(level.tables[i-1].biggest, level.tables[i].smallest) < 0)
-					require.True(t, bytes.Compare(level.tables[i].smallest, level.tables[i].biggest) < 0)
-				}
-				level.RUnlock()
-			}
-
-			break
+		for _, level := range lvlsController.levels {
+			level.check()
 		}
 	}
 }

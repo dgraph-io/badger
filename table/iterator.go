@@ -95,6 +95,14 @@ func (itr *BlockIterator) Seek(seek []byte, whence int) {
 	}
 }
 
+func (itr *BlockIterator) SeekToFirst() {
+	itr.Reset()
+	itr.Init()
+	itr.Next()
+	//	fmt.Printf("~~hey data=%v\n", itr.data)
+	y.AssertTrue(itr.Valid())
+}
+
 func (itr *BlockIterator) SeekToLast() {
 	itr.err = nil
 	// There is probably a better way to do this. Maybe we could just load the whole block into mem.
@@ -216,10 +224,21 @@ func (itr *TableIterator) Init() {
 }
 
 func (itr *TableIterator) SeekToFirst() {
-	itr.Seek([]byte{}, 0)
-	if !itr.Valid() {
-		itr.Next()
+	numBlocks := len(itr.t.blockIndex)
+	if numBlocks == 0 {
+		itr.err = io.EOF
+		return
 	}
+	itr.bpos = 0
+	block, err := itr.t.block(itr.bpos)
+	if err != nil {
+		itr.err = err
+		return
+	}
+	//	fmt.Printf("~~~Table.SeekToFirst %d %d\n", numBlocks, len(block.data))
+	itr.bi = block.NewIterator()
+	itr.bi.SeekToFirst()
+	itr.err = itr.bi.Error()
 }
 
 func (itr *TableIterator) SeekToLast() {
@@ -234,7 +253,6 @@ func (itr *TableIterator) SeekToLast() {
 		itr.err = err
 		return
 	}
-	// Go to the last block and seek to last.
 	itr.bi = block.NewIterator()
 	itr.bi.SeekToLast()
 	itr.err = itr.bi.Error()
