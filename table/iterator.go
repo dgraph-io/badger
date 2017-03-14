@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 
 	"github.com/dgraph-io/badger/y"
 )
@@ -28,7 +29,8 @@ type BlockIterator struct {
 	val  []byte
 	init bool
 
-	last header
+	lastPos int
+	last    header // The last header we saw.
 }
 
 func (itr *BlockIterator) Reset() {
@@ -70,7 +72,8 @@ var (
 	CURRENT = 1
 )
 
-func (itr *BlockIterator) Seek(seek []byte, whence int) {
+// Seek brings us to the first block element that is >= input key.
+func (itr *BlockIterator) Seek(key []byte, whence int) {
 	itr.err = nil
 
 	switch whence {
@@ -82,7 +85,8 @@ func (itr *BlockIterator) Seek(seek []byte, whence int) {
 	var done bool
 	for itr.Init(); itr.Valid(); itr.Next() {
 		itr.KV(func(k, v []byte) {
-			if bytes.Compare(k, seek) >= 0 {
+			if bytes.Compare(k, key) >= 0 {
+				// We are done as k is >= key.
 				done = true
 			}
 		})
@@ -95,22 +99,26 @@ func (itr *BlockIterator) Seek(seek []byte, whence int) {
 	}
 }
 
+func (itr *BlockIterator) SeekToFirst() {
+	itr.err = nil
+	itr.Init()
+}
+
+// SeekToLast brings us to the last element. Valid should return true.
+// CAUTION: This will only work for the last block which contains a dummy header which records
+// the offset.
 func (itr *BlockIterator) SeekToLast() {
 	itr.err = nil
-	// There is probably a better way to do this. Maybe we could just load the whole block into mem.
+	fmt.Printf("~~Block SeekToLast\n")
+	var count int
 	for itr.Init(); itr.Valid(); itr.Next() {
+		count++
 	}
-	itr.Prev()
-	// TODO: Temporary hack!!! We need an extra Prev sometimes. Has to do with the last key-value
-	// being added. We need to remove that soon.
-	var key []byte
+	fmt.Printf("~~Block SeekToLast count=%d\n", count)
 	itr.KV(func(k, v []byte) {
-		key = k
+		fmt.Printf("~~~Block SeekToLast k=%s v=%s\n", string(k), string(v))
 	})
-	if len(key) == 0 {
-		itr.Prev()
-	}
-	// END OF HACK
+	itr.Prev()
 }
 
 func (itr *BlockIterator) parseKV(h header) {
@@ -142,7 +150,7 @@ func (itr *BlockIterator) Next() {
 	itr.last = h // Store the last header.
 
 	if h.klen == 0 && h.plen == 0 {
-		// last entry in the block.
+		// Last entry in the table.
 		itr.err = io.EOF
 		return
 	}
@@ -160,19 +168,17 @@ func (itr *BlockIterator) Prev() {
 	if !itr.init {
 		return
 	}
-	fmt.Printf("LAST: %+v\n", itr.last)
-
+	itr.err = nil
 	if itr.last.prev == math.MaxUint16 {
-		// if itr.pos == 0 && itr.last.prev == 0 {
+		// This is the first element of the block!
 		itr.err = io.EOF
 		itr.pos = 0
 		return
 	}
 
+	fmt.Printf("~~BI Prev\n")
+	// Move back using current header's prev.
 	itr.pos = itr.last.prev
-	if itr.err != nil {
-		itr.Next()
-	}
 
 	var h header
 	itr.pos += h.Decode(itr.data[itr.pos:])
@@ -235,35 +241,63 @@ func (itr *TableIterator) SeekToLast() {
 		return
 	}
 	// Go to the last block and seek to last.
+	fmt.Printf("~~~Table SeekToLast bpos=%d\n", itr.bpos)
 	itr.bi = block.NewIterator()
 	itr.bi.SeekToLast()
 	itr.err = itr.bi.Error()
 }
 
-func (itr *TableIterator) Seek(seek []byte, whence int) {
-	itr.err = nil
+func (itr *TableIterator) seekHelper(blockIdx int, key []byte) {
+	y.AssertTrue(blockIdx >= 0)
+	itr.bpos = blockIdx
+	block, err := itr.t.block(blockIdx)
+	if err != nil {
+		itr.err = err
+		return
+	}
+	itr.bi = block.NewIterator()
+	itr.bi.Seek(key, ORIGIN)
+	itr.err = itr.bi.Error()
+}
 
+// Seek brings us to a key that is >= input key.
+func (itr *TableIterator) Seek(key []byte, whence int) {
+	itr.err = nil
 	switch whence {
 	case ORIGIN:
 		itr.Reset()
 	case CURRENT:
 	}
 
-	itr.bpos = itr.t.blockIndexFor(seek)
-	if itr.bpos < 0 {
-		itr.err = io.EOF
+	idx := sort.Search(len(itr.t.blockIndex), func(idx int) bool {
+		ko := itr.t.blockIndex[idx]
+		return bytes.Compare(ko.key, key) > 0
+	})
+	if idx == 0 {
+		// The smallest key in our table is already strictly > key. We can return that.
+		// This is like a SeekToFirst.
+		itr.seekHelper(0, key)
 		return
 	}
 
-	block, err := itr.t.block(itr.bpos)
-	if err != nil {
-		itr.err = err
-		return
+	// block[idx].smallest is > key.
+	// Since idx>0, we know block[idx-1].smallest is <= key.
+	// There are two cases.
+	// 1) Everything in block[idx-1] is strictly < key. In this case, we should go to the first
+	//    element of block[idx].
+	// 2) Some element in block[idx-1] is >= key. We should go to that element.
+	itr.seekHelper(idx-1, key)
+	if itr.err == io.EOF {
+		// Case 1. Need to visit block[idx].
+		// Here is a subcase. If idx == len(itr.t.blockIndex), then
+		if idx == len(itr.t.blockIndex) {
+			// Input key is greater than ANY element of the table.
+			// There's nothing we can do. Valid() should return false as we seek ot table.End.
+			return
+		}
+		// Since block[idx].smallest is > key. This is essentially a block[idx].SeekToFirst.
+		itr.seekHelper(idx, key)
 	}
-
-	itr.bi = block.NewIterator()
-	itr.bi.Seek(seek, ORIGIN)
-	itr.err = itr.bi.Error()
 }
 
 func (itr *TableIterator) Next() {
@@ -281,6 +315,8 @@ func (itr *TableIterator) Next() {
 			return
 		}
 		itr.bi = block.NewIterator()
+		itr.bi.SeekToFirst()
+		return
 	}
 
 	itr.bi.Next()
@@ -288,6 +324,40 @@ func (itr *TableIterator) Next() {
 		itr.bpos++
 		itr.bi = nil
 		itr.Next()
+		return
+	}
+}
+
+func (itr *TableIterator) Prev() {
+	fmt.Printf("~~~Table Prev\n")
+	itr.err = nil
+
+	if itr.bpos < 0 {
+		itr.err = io.EOF
+		return
+	}
+
+	if itr.bi == nil {
+		block, err := itr.t.block(itr.bpos)
+		if err != nil {
+			itr.err = err
+			return
+		}
+		itr.bi = block.NewIterator()
+		itr.bi.SeekToLast()
+		fmt.Printf("~~~itr.bpos=%d %v\n", itr.bpos, itr.bi.Valid())
+		itr.bi.KV(func(k, v []byte) {
+			fmt.Printf("~~~k=%s v=%s\n", string(k), string(v))
+		})
+		return
+	}
+
+	itr.bi.Prev()
+	if !itr.bi.Valid() {
+		fmt.Printf("~~~Recurring %d to %d\n", itr.bpos, itr.bpos-1)
+		itr.bpos--
+		itr.bi = nil
+		itr.Prev()
 		return
 	}
 }
@@ -308,7 +378,6 @@ func NewConcatIterator(tables []*Table) *ConcatIterator {
 	s := &ConcatIterator{tables: tables}
 	s.it = tables[0].NewIterator()
 	s.it.SeekToFirst()
-	//	s.openFile(0)
 	return s
 }
 
