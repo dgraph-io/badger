@@ -1,3 +1,19 @@
+/*
+ * Copyright 2017 Dgraph Labs, Inc. and Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package table
 
 import (
@@ -135,28 +151,7 @@ func (t *Table) readIndex() error {
 		}
 	}
 	sort.Sort(byKey(t.blockIndex))
-	//	for _, bi := range t.blockIndex {
-	//		fmt.Printf("~~~bi: %v\n", bi)
-	//	}
-
 	return nil
-}
-
-func (t *Table) blockIndexFor(k []byte) int {
-	idx := sort.Search(len(t.blockIndex), func(idx int) bool {
-		ko := t.blockIndex[idx]
-		return bytes.Compare(k, ko.key) < 0
-	})
-
-	if idx > 0 {
-		idx--
-	}
-
-	ko := t.blockIndex[idx]
-	if bytes.Compare(k, ko.key) < 0 {
-		return -1
-	}
-	return idx
 }
 
 func (t *Table) block(idx int) (Block, error) {
@@ -177,15 +172,6 @@ func (t *Table) block(idx int) (Block, error) {
 		return block, err
 	}
 	return block, nil
-}
-
-func (t *Table) BlockForKey(k []byte) (Block, error) {
-	idx := t.blockIndexFor(k)
-	if idx == -1 {
-		return Block{}, errors.New("No Block found")
-	}
-
-	return t.block(idx)
 }
 
 func (t *Table) NewIterator() *TableIterator {

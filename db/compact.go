@@ -1,3 +1,19 @@
+/*
+ * Copyright 2017 Dgraph Labs, Inc. and Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package db
 
 import (
@@ -219,12 +235,10 @@ func (s *levelsController) init(opt *CompactOptions) {
 	for i := 0; i < s.opt.MaxLevels; i++ {
 		s.levels[i] = &levelHandler{
 			level: i,
-			opt:   *opt,
+			opt:   s.opt,
 		}
 		if i == 0 {
-			// For level 0, as long as there is a table there, we want to compact it away.
-			// Otherwise, if there are too many tables on level 0, a query will be very expensive.
-			s.levels[i].maxTotalSize = 0
+			// Do nothing.
 		} else if i == 1 {
 			// Level 1 probably shouldn't be too much bigger than level 0.
 			s.levels[i].maxTotalSize = s.opt.LevelOneSize
@@ -308,7 +322,7 @@ func (s *levelsController) tryCompact(workerID int) {
 	s.beingCompacted[l+1] = false
 }
 
-// doCompact compacts level l.
+// doCompact picks some table on level l and compacts it away to the next level.
 func (s *levelsController) doCompact(l int) error {
 	y.AssertTrue(l+1 < s.opt.MaxLevels) // Sanity check.
 	thisLevel := s.levels[l]
@@ -366,18 +380,18 @@ func (s *levelsController) doCompact(l int) error {
 		val := doCopy(vSlice)
 		//		fmt.Printf("key=%s val=%s lastKey=%s\n", string(key), string(val), string(lastKey))
 		cmp := bytes.Compare(key, lastKey)
+		y.AssertTruef(cmp >= 0, "%v %v", key, lastKey)
 		if cmp == 0 {
 			// Ignore duplicate keys. The first iterator takes precedence.
 			continue
 		}
-		y.AssertTrue(cmp > 0)
 		if err := builder.Add(key, val); err != nil {
 			return err
 		}
 		lastKey = key
 	}
 	if !builder.Empty() {
-		//		fmt.Printf("EndTable: largestKey=%s size=%d\n", string(lastKey), builder.NumKeys())
+		fmt.Printf("EndTable: largestKey=%s size=%d\n", string(lastKey), builder.FinalSize())
 		if err := finishTable(); err != nil {
 			return err
 		}
@@ -390,7 +404,7 @@ func (s *levelsController) doCompact(l int) error {
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
 	// Do a assert as a sanity check.
 	y.AssertTrue(l != 0 || tableIdx == 0)
-	fmt.Printf("Level %d: Replace table %d to %d with %d new tables\n", l+1, left, right, len(newTables))
+	fmt.Printf("Level %d: Replace table [%d, %d) with %d new tables\n", l+1, left, right, len(newTables))
 	return nil
 }
 

@@ -1,3 +1,19 @@
+/*
+ * Copyright 2017 Dgraph Labs, Inc. and Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package table
 
 import (
@@ -13,12 +29,13 @@ import (
 )
 
 func key(i int) string {
-	return fmt.Sprintf("%04d-%04d", i/37, i)
+	return fmt.Sprintf("k%04d", i)
 }
 
-func buildTestTable(t *testing.T) *os.File {
-	keyValues := make([][]string, 10000)
-	for i := 0; i < 10000; i++ {
+func buildTestTable(t *testing.T, n int) *os.File {
+	y.AssertTrue(n <= 10000)
+	keyValues := make([][]string, n)
+	for i := 0; i < n; i++ {
 		k := key(i)
 		v := fmt.Sprintf("%d", i)
 		keyValues[i] = []string{k, v}
@@ -50,106 +67,141 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	return f
 }
 
-func TestSeekToLast(t *testing.T) {
-	f := buildTestTable(t)
-	table, err := OpenTable(f)
-	require.NoError(t, err)
-	it := table.NewIterator()
-	it.SeekToLast()
-	require.True(t, it.Valid())
-	it.KV(func(k, v []byte) {
-		require.EqualValues(t, "9999", string(v))
-	})
+func TestSeekToFirst(t *testing.T) {
+	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
+		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
+			f := buildTestTable(t, n)
+			table, err := OpenTable(f)
+			require.NoError(t, err)
+			it := table.NewIterator()
+			it.SeekToFirst()
+			require.True(t, it.Valid())
+			it.KV(func(k, v []byte) {
+				require.EqualValues(t, "0", string(v))
+			})
+		})
+	}
 }
 
-func TestBuild(t *testing.T) {
-	f := buildTestTable(t)
+func TestSeekToLast(t *testing.T) {
+	//	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
+	for _, n := range []int{101} {
+		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
+			f := buildTestTable(t, n)
+			table, err := OpenTable(f)
+			require.NoError(t, err)
+			it := table.NewIterator()
+			it.SeekToLast()
+			require.True(t, it.Valid())
+			it.KV(func(k, v []byte) {
+				require.EqualValues(t, fmt.Sprintf("%d", n-1), string(v))
+			})
+			it.Prev()
+			require.True(t, it.Valid())
+			it.KV(func(k, v []byte) {
+				require.EqualValues(t, fmt.Sprintf("%d", n-2), string(v))
+			})
+		})
+	}
+}
+
+func TestSeek(t *testing.T) {
+	f := buildTestTable(t, 10000)
 	table, err := OpenTable(f)
 	require.NoError(t, err)
 
-	seek := []byte(key(1010))
-	t.Logf("Seeking to: %q", seek)
-	block, err := table.BlockForKey(seek)
-	if err != nil {
-		t.Fatalf("While getting iterator: %v", err)
+	it := table.NewIterator()
+
+	var data = []struct {
+		in    string
+		valid bool
+		out   string
+	}{
+		{"abc", true, "k0000"},
+		{"k0100", true, "k0100"},
+		{"k0100b", true, "k0101"}, // Test case where we jump to next block.
+		{"k1234", true, "k1234"},
+		{"k1234b", true, "k1235"},
+		{"k9999", true, "k9999"},
+		{"z", false, ""}, // Test case where every element is < input key.
 	}
 
-	fn := func(k, v []byte) {
-		t.Logf("ITERATOR key=%q. val=%q.\n", k, v)
+	for _, tt := range data {
+		it.Seek([]byte(tt.in), ORIGIN)
+		if !tt.valid {
+			require.False(t, it.Valid())
+			continue
+		}
+		require.True(t, it.Valid())
+		var hit bool
+		it.KV(func(k, v []byte) {
+			require.EqualValues(t, tt.out, string(k))
+			hit = true
+			// This KV interface is somewhat clumsy. Also, it potentially invokes an additional
+			// function call where k, v have to be passed around anyway. And if there is an error,
+			// the KV routine is not called. People might forget to check error.
+		})
+		require.True(t, hit)
 	}
+}
 
-	bi := block.NewIterator()
-	for bi.Init(); bi.Valid(); bi.Next() {
-		bi.KV(fn)
+func TestIterateFromStart(t *testing.T) {
+	// Vary the number of elements added.
+	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
+		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
+			f := buildTestTable(t, n)
+			table, err := OpenTable(f)
+			require.NoError(t, err)
+
+			ti := table.NewIterator()
+			ti.Reset()
+			ti.Seek([]byte(""), ORIGIN)
+			require.True(t, ti.Valid())
+			// No need to do a Next.
+			// ti.Seek brings us to the first key >= "". Essentially a SeekToFirst.
+			var count int
+			for ; ti.Valid(); ti.Next() {
+				var hit bool
+				ti.KV(func(k, v []byte) {
+					require.EqualValues(t, fmt.Sprintf("%d", count), string(v))
+					count++
+					hit = true
+				})
+				require.True(t, hit)
+			}
+			require.EqualValues(t, n, count)
+		})
 	}
-	t.Log("SEEKING")
-	for bi.Seek(seek, 0); bi.Valid(); bi.Next() {
-		bi.KV(fn)
+}
+
+func TestIterateFromEnd(t *testing.T) {
+	// Vary the number of elements added.
+	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
+		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
+			f := buildTestTable(t, n)
+			table, err := OpenTable(f)
+			require.NoError(t, err)
+			ti := table.NewIterator()
+			ti.Reset()
+			ti.Seek([]byte("zzzzzz"), ORIGIN) // Seek to end, an invalid element.
+			require.False(t, ti.Valid())
+
+			for i := n - 1; i >= 0; i-- {
+				ti.Prev()
+				require.True(t, ti.Valid())
+				var hit bool
+				ti.KV(func(k, v []byte) {
+					require.EqualValues(t, fmt.Sprintf("%d", i), string(v))
+					hit = true
+				})
+				require.True(t, hit)
+			}
+		})
 	}
-
-	t.Log("SEEKING BACKWARDS")
-	for bi.Seek(seek, 0); bi.Valid(); bi.Prev() {
-		bi.KV(fn)
-	}
-
-	bi.Seek(seek, 0)
-	bi.KV(func(k, v []byte) {
-		require.EqualValues(t, k, seek)
-	})
-
-	bi.Prev()
-	bi.Prev()
-	bi.KV(func(k, v []byte) {
-		require.EqualValues(t, string(k), key(1008))
-	})
-	bi.Next()
-	bi.Next()
-	bi.KV(func(k, v []byte) {
-		require.EqualValues(t, k, seek)
-	})
-
-	for bi.Seek([]byte(key(2000)), 1); bi.Valid(); bi.Next() {
-		t.Fatalf("This shouldn't be triggered.")
-	}
-	bi.Seek([]byte(key(1010)), 0)
-	for bi.Seek([]byte(key(2000)), 1); bi.Valid(); bi.Prev() {
-		t.Fatalf("This shouldn't be triggered.")
-	}
-	bi.Seek([]byte(key(2000)), 0)
-	bi.Prev()
-	require.True(t, bi.Valid(), "This should point to the last element in the block.")
-	bi.KV(func(k, v []byte) {
-		require.EqualValues(t, string(k), key(1099))
-	})
-
-	bi.Reset()
-	bi.Prev()
-	bi.Next()
-	bi.KV(func(k, v []byte) {
-		require.EqualValues(t, string(k), key(1000))
-	})
-
-	bi.Seek([]byte(key(1001)), 0)
-	bi.Prev()
-	bi.KV(func(k, v []byte) {
-		require.EqualValues(t, string(k), key(1000))
-	})
-	bi.Prev()
-	require.False(t, bi.Valid())
-	bi.Next()
-	bi.KV(func(k, v []byte) {
-		require.EqualValues(t, string(k), key(1000))
-	})
-	bi.Prev()
-	require.False(t, bi.Valid())
-	bi.Next()
-	bi.KV(func(k, v []byte) {
-		require.EqualValues(t, string(k), key(1000))
-	})
 }
 
 func TestTable(t *testing.T) {
-	f := buildTestTable(t)
+	f := buildTestTable(t, 10000)
 	table, err := OpenTable(f)
 	require.NoError(t, err)
 
@@ -170,9 +222,6 @@ func TestTable(t *testing.T) {
 	require.False(t, ti.Valid())
 
 	ti.Seek([]byte(key(-1)), 0)
-	require.False(t, ti.Valid())
-
-	ti.Next()
 	require.True(t, ti.Valid())
 
 	ti.KV(func(k, v []byte) {
@@ -180,57 +229,49 @@ func TestTable(t *testing.T) {
 	})
 }
 
-func TestIterateFromStart(t *testing.T) {
-	f := buildTestTable(t)
+func TestIterateBackAndForth(t *testing.T) {
+	f := buildTestTable(t, 10000)
 	table, err := OpenTable(f)
 	require.NoError(t, err)
 
-	ti := table.NewIterator()
-	ti.Reset()
-	ti.Seek([]byte(""), ORIGIN)
-	ti.Next()
-
-	var count int
-	for ; ti.Valid(); ti.Next() {
-		ti.KV(func(k, v []byte) {
-			require.EqualValues(t, fmt.Sprintf("%d", count), string(v))
-			count++
-		})
-	}
-	require.EqualValues(t, 10000, count)
-}
-
-// Seek of table is a bit strange. Sometimes we need to Next. Sometimes we should not.
-func TestSeekUnusual(t *testing.T) {
-	f := buildTestTable(t)
-	tbl, err := OpenTable(f)
-	require.NoError(t, err)
-
-	it := tbl.NewIterator()
-	it.Reset()
-	it.Seek([]byte(""), ORIGIN) // Assume no such key.
-	require.False(t, it.Valid())
-	it.Next()
+	seek := []byte(key(1010))
+	it := table.NewIterator()
+	it.Seek(seek, 0)
+	require.True(t, it.Valid())
 	it.KV(func(k, v []byte) {
-		require.EqualValues(t, "0000-0000", string(k)) // First key.
-		require.EqualValues(t, "0", string(v))
+		require.EqualValues(t, seek, k)
 	})
-	f.Close()
 
-	// Now try a different setup.
-	fCopy := buildTable(t, [][]string{{"0000-0000", "0"}})
-	tblCopy, err := OpenTable(fCopy)
-	require.NoError(t, err)
-
-	itCopy := tblCopy.NewIterator()
-	itCopy.Reset()
-	itCopy.Seek([]byte(""), ORIGIN) // Assume no such key.
-	require.True(t, itCopy.Valid()) // Unlike the earlier case, Valid returns true!
-	itCopy.KV(func(k, v []byte) {
-		require.EqualValues(t, "0000-0000", string(k)) // First key.
-		require.EqualValues(t, "0", string(v))
+	it.Prev()
+	it.Prev()
+	require.True(t, it.Valid())
+	it.KV(func(k, v []byte) {
+		require.EqualValues(t, key(1008), string(k))
 	})
-	fCopy.Close()
+
+	it.Next()
+	it.Next()
+	require.True(t, it.Valid())
+	it.KV(func(k, v []byte) {
+		require.EqualValues(t, key(1010), k)
+	})
+
+	it.Seek([]byte(key(2000)), 1)
+	require.True(t, it.Valid())
+	it.KV(func(k, v []byte) {
+		require.EqualValues(t, key(2000), k)
+	})
+
+	it.Prev()
+	require.True(t, it.Valid())
+	it.KV(func(k, v []byte) {
+		require.EqualValues(t, key(1999), k)
+	})
+
+	it.SeekToFirst()
+	it.KV(func(k, v []byte) {
+		require.EqualValues(t, key(0), string(k))
+	})
 }
 
 // Try having only one table.
@@ -251,8 +292,8 @@ func TestConcatIteratorOneTable(t *testing.T) {
 }
 
 func TestConcatIterator(t *testing.T) {
-	f := buildTestTable(t)
-	f2 := buildTestTable(t)
+	f := buildTestTable(t, 10000)
+	f2 := buildTestTable(t, 10000)
 	tbl, err := OpenTable(f)
 	require.NoError(t, err)
 	tbl2, err := OpenTable(f2)

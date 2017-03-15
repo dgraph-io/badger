@@ -1,3 +1,19 @@
+/*
+ * Copyright 2017 Dgraph Labs, Inc. and Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package table
 
 import (
@@ -6,6 +22,7 @@ import (
 	//	"fmt"
 	"io"
 	"math"
+	"sort"
 
 	"github.com/dgraph-io/badger/y"
 )
@@ -28,7 +45,8 @@ type BlockIterator struct {
 	val  []byte
 	init bool
 
-	last header
+	lastPos int
+	last    header // The last header we saw.
 }
 
 func (itr *BlockIterator) Reset() {
@@ -70,7 +88,8 @@ var (
 	CURRENT = 1
 )
 
-func (itr *BlockIterator) Seek(seek []byte, whence int) {
+// Seek brings us to the first block element that is >= input key.
+func (itr *BlockIterator) Seek(key []byte, whence int) {
 	itr.err = nil
 
 	switch whence {
@@ -82,7 +101,8 @@ func (itr *BlockIterator) Seek(seek []byte, whence int) {
 	var done bool
 	for itr.Init(); itr.Valid(); itr.Next() {
 		itr.KV(func(k, v []byte) {
-			if bytes.Compare(k, seek) >= 0 {
+			if bytes.Compare(k, key) >= 0 {
+				// We are done as k is >= key.
 				done = true
 			}
 		})
@@ -96,29 +116,18 @@ func (itr *BlockIterator) Seek(seek []byte, whence int) {
 }
 
 func (itr *BlockIterator) SeekToFirst() {
-	itr.Reset()
+	itr.err = nil
 	itr.Init()
-	itr.Next()
-	//	fmt.Printf("~~hey data=%v\n", itr.data)
-	y.AssertTrue(itr.Valid())
 }
 
+// SeekToLast brings us to the last element. Valid should return true.
 func (itr *BlockIterator) SeekToLast() {
 	itr.err = nil
-	// There is probably a better way to do this. Maybe we could just load the whole block into mem.
+	var count int
 	for itr.Init(); itr.Valid(); itr.Next() {
+		count++
 	}
 	itr.Prev()
-	// TODO: Temporary hack!!! We need an extra Prev sometimes. Has to do with the last key-value
-	// being added. We need to remove that soon.
-	var key []byte
-	itr.KV(func(k, v []byte) {
-		key = k
-	})
-	if len(key) == 0 {
-		itr.Prev()
-	}
-	// END OF HACK
 }
 
 func (itr *BlockIterator) parseKV(h header) {
@@ -150,7 +159,7 @@ func (itr *BlockIterator) Next() {
 	itr.last = h // Store the last header.
 
 	if h.klen == 0 && h.plen == 0 {
-		// last entry in the block.
+		// Last entry in the table.
 		itr.err = io.EOF
 		return
 	}
@@ -168,21 +177,19 @@ func (itr *BlockIterator) Prev() {
 	if !itr.init {
 		return
 	}
-	//	fmt.Printf("LAST: %+v\n", itr.last)
-
+	itr.err = nil
 	if itr.last.prev == math.MaxUint16 {
-		// if itr.pos == 0 && itr.last.prev == 0 {
+		// This is the first element of the block!
 		itr.err = io.EOF
 		itr.pos = 0
 		return
 	}
 
+	// Move back using current header's prev.
 	itr.pos = itr.last.prev
-	if itr.err != nil {
-		itr.Next()
-	}
 
 	var h header
+	y.AssertTruef(itr.pos >= 0 && itr.pos < len(itr.data), "%d %d", itr.pos, len(itr.data))
 	itr.pos += h.Decode(itr.data[itr.pos:])
 	itr.parseKV(h)
 	itr.last = h
@@ -235,7 +242,6 @@ func (itr *TableIterator) SeekToFirst() {
 		itr.err = err
 		return
 	}
-	//	fmt.Printf("~~~Table.SeekToFirst %d %d\n", numBlocks, len(block.data))
 	itr.bi = block.NewIterator()
 	itr.bi.SeekToFirst()
 	itr.err = itr.bi.Error()
@@ -258,30 +264,57 @@ func (itr *TableIterator) SeekToLast() {
 	itr.err = itr.bi.Error()
 }
 
-func (itr *TableIterator) Seek(seek []byte, whence int) {
-	itr.err = nil
+func (itr *TableIterator) seekHelper(blockIdx int, key []byte) {
+	y.AssertTrue(blockIdx >= 0)
+	itr.bpos = blockIdx
+	block, err := itr.t.block(blockIdx)
+	if err != nil {
+		itr.err = err
+		return
+	}
+	itr.bi = block.NewIterator()
+	itr.bi.Seek(key, ORIGIN)
+	itr.err = itr.bi.Error()
+}
 
+// Seek brings us to a key that is >= input key.
+func (itr *TableIterator) Seek(key []byte, whence int) {
+	itr.err = nil
 	switch whence {
 	case ORIGIN:
 		itr.Reset()
 	case CURRENT:
 	}
 
-	itr.bpos = itr.t.blockIndexFor(seek)
-	if itr.bpos < 0 {
-		itr.err = io.EOF
+	idx := sort.Search(len(itr.t.blockIndex), func(idx int) bool {
+		ko := itr.t.blockIndex[idx]
+		return bytes.Compare(ko.key, key) > 0
+	})
+	if idx == 0 {
+		// The smallest key in our table is already strictly > key. We can return that.
+		// This is like a SeekToFirst.
+		itr.seekHelper(0, key)
 		return
 	}
 
-	block, err := itr.t.block(itr.bpos)
-	if err != nil {
-		itr.err = err
-		return
+	// block[idx].smallest is > key.
+	// Since idx>0, we know block[idx-1].smallest is <= key.
+	// There are two cases.
+	// 1) Everything in block[idx-1] is strictly < key. In this case, we should go to the first
+	//    element of block[idx].
+	// 2) Some element in block[idx-1] is >= key. We should go to that element.
+	itr.seekHelper(idx-1, key)
+	if itr.err == io.EOF {
+		// Case 1. Need to visit block[idx].
+		if idx == len(itr.t.blockIndex) {
+			// If idx == len(itr.t.blockIndex), then input key is greater than ANY element of table.
+			// There's nothing we can do. Valid() should return false as we seek to end of table.
+			return
+		}
+		// Since block[idx].smallest is > key. This is essentially a block[idx].SeekToFirst.
+		itr.seekHelper(idx, key)
 	}
-
-	itr.bi = block.NewIterator()
-	itr.bi.Seek(seek, ORIGIN)
-	itr.err = itr.bi.Error()
+	// Case 2: No need to do anything. We already did the seek in block[idx-1].
 }
 
 func (itr *TableIterator) Next() {
@@ -299,6 +332,8 @@ func (itr *TableIterator) Next() {
 			return
 		}
 		itr.bi = block.NewIterator()
+		itr.bi.SeekToFirst()
+		return
 	}
 
 	itr.bi.Next()
@@ -306,6 +341,34 @@ func (itr *TableIterator) Next() {
 		itr.bpos++
 		itr.bi = nil
 		itr.Next()
+		return
+	}
+}
+
+func (itr *TableIterator) Prev() {
+	itr.err = nil
+
+	if itr.bpos < 0 {
+		itr.err = io.EOF
+		return
+	}
+
+	if itr.bi == nil {
+		block, err := itr.t.block(itr.bpos)
+		if err != nil {
+			itr.err = err
+			return
+		}
+		itr.bi = block.NewIterator()
+		itr.bi.SeekToLast()
+		return
+	}
+
+	itr.bi.Prev()
+	if !itr.bi.Valid() {
+		itr.bpos--
+		itr.bi = nil
+		itr.Prev()
 		return
 	}
 }
@@ -326,48 +389,8 @@ func NewConcatIterator(tables []*Table) *ConcatIterator {
 	s := &ConcatIterator{tables: tables}
 	s.it = tables[0].NewIterator()
 	s.it.SeekToFirst()
-	//	s.openFile(0)
 	return s
 }
-
-// openFile is an internal helper function for opening i-th file.
-//func (s *ConcatIterator) openFile(i int) error {
-//	s.Close() // Try to close current file.
-//	s.idx = i // Set the index.
-//	var err error
-//	s.f, err = os.Open(s.filenames[i])
-//	if err != nil {
-//		return err
-//	}
-//	tbl := Table{fd: s.f}
-//	if err = tbl.ReadIndex(); err != nil {
-//		return err
-//	}
-//	s.it = tbl.NewIterator()
-//	s.it.Reset()
-//	s.it.Seek([]byte(""), ORIGIN) // Assume no such key.
-
-// Some weird behavior for table iterator. It seems that sometimes we need to call s.it.Next().
-// Sometimes, we shouldn't. TODO: Look into this.
-// Example 1: The usual test case where we insert 10000 entries. Iter will be invalid initially.
-// Example 2: Insert two entries. Iter is valid initially. Calling next will skip the first entry.
-// See table_test.go for the above examples.
-//	if !s.it.Valid() {
-//		s.it.Next() // Necessary due to unexpected behavior of table iterator.
-//	}
-//	return nil
-//}
-
-// Close cleans up the iterator. Not really needed if you just run Next to the end.
-// But just in case we did not, it is good to always close it.
-//func (s *ConcatIterator) Close() {
-//	if s.f == nil {
-//		return
-//	}
-//	s.f.Close()
-//	s.f = nil
-//	s.it = nil
-//}
 
 func (s *ConcatIterator) Valid() bool {
 	return s.it.Valid()
@@ -409,9 +432,7 @@ func (s *ConcatIterator) Next() error {
 // Note: If both iterators have the same key, the first one gets returned first.
 // Typical usage:
 // it0 := NewConcatIterator(...)
-// defer it0.Close()
 // it1 := NewConcatIterator(...)
-// defer it1.Close()
 // it := NewMergingIterator(it0, it1)
 // for ; it.Valid(); it.Next() {
 //   k, v := it.KeyValue()
