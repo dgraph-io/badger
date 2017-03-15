@@ -151,16 +151,17 @@ func (t *Table) readIndex() error {
 		}
 	}
 	sort.Sort(byKey(t.blockIndex))
-
 	return nil
 }
 
 func (t *Table) block(idx int) (Block, error) {
+	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= len(t.blockIndex) {
 		return Block{}, errors.New("Block out of index.")
 	}
 
 	ko := t.blockIndex[idx]
+	//	fmt.Printf("~~~block: idx=%d %v\n", idx, ko)
 
 	// TODO: add Block caching here.
 	block := Block{
@@ -176,3 +177,5 @@ func (t *Table) block(idx int) (Block, error) {
 func (t *Table) NewIterator() *TableIterator {
 	return &TableIterator{t: t}
 }
+
+func (t *Table) Size() int64 { return t.tableSize }

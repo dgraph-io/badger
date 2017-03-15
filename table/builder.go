@@ -20,7 +20,8 @@ import (
 	"encoding/binary"
 	//	"fmt"
 	"math"
-	//	"github.com/dgraph-io/badger/y"
+
+	"github.com/dgraph-io/badger/y"
 )
 
 //var tableSize int64 = 50 << 20
@@ -79,6 +80,7 @@ func (b *TableBuilder) Reset() {
 	b.counter = 0
 	b.buf = make([]byte, 0, 1<<20)
 	b.pos = 0
+	b.baseOffset = 0
 
 	b.baseKey = []byte{}
 	b.restarts = b.restarts[:0]
@@ -88,6 +90,7 @@ func (b *TableBuilder) Reset() {
 func (b *TableBuilder) write(d []byte) {
 	b.buf = append(b.buf, d...)
 	b.pos += len(d)
+	y.AssertTruef(b.pos >= b.baseOffset, "b.pos=%d b.baseOffset=%d d=%v", b.pos, b.baseOffset, d)
 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
@@ -177,7 +180,7 @@ var emptySlice = make([]byte, 100)
 
 // Finish finishes the table by appending the index.
 func (b *TableBuilder) Finish() []byte {
-	b.finishBlock()
+	b.finishBlock() // This will never start a new block.
 	index := b.blockIndex()
 	b.write(index)
 	return b.buf

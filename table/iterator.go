@@ -19,7 +19,7 @@ package table
 import (
 	"bytes"
 	"errors"
-	"fmt"
+	//	"fmt"
 	"io"
 	"math"
 	"sort"
@@ -121,8 +121,6 @@ func (itr *BlockIterator) SeekToFirst() {
 }
 
 // SeekToLast brings us to the last element. Valid should return true.
-// CAUTION: This will only work for the last block which contains a dummy header which records
-// the offset.
 func (itr *BlockIterator) SeekToLast() {
 	itr.err = nil
 	var count int
@@ -191,6 +189,7 @@ func (itr *BlockIterator) Prev() {
 	itr.pos = itr.last.prev
 
 	var h header
+	y.AssertTruef(itr.pos >= 0 && itr.pos < len(itr.data), "%d %d", itr.pos, len(itr.data))
 	itr.pos += h.Decode(itr.data[itr.pos:])
 	itr.parseKV(h)
 	itr.last = h
@@ -232,10 +231,20 @@ func (itr *TableIterator) Init() {
 }
 
 func (itr *TableIterator) SeekToFirst() {
-	itr.Seek([]byte{}, 0)
-	if !itr.Valid() {
-		itr.Next()
+	numBlocks := len(itr.t.blockIndex)
+	if numBlocks == 0 {
+		itr.err = io.EOF
+		return
 	}
+	itr.bpos = 0
+	block, err := itr.t.block(itr.bpos)
+	if err != nil {
+		itr.err = err
+		return
+	}
+	itr.bi = block.NewIterator()
+	itr.bi.SeekToFirst()
+	itr.err = itr.bi.Error()
 }
 
 func (itr *TableIterator) SeekToLast() {
@@ -250,7 +259,6 @@ func (itr *TableIterator) SeekToLast() {
 		itr.err = err
 		return
 	}
-	// Go to the last block and seek to last.
 	itr.bi = block.NewIterator()
 	itr.bi.SeekToLast()
 	itr.err = itr.bi.Error()
