@@ -107,7 +107,7 @@ func randomKey() string {
 }
 
 func TestCompactBasic(t *testing.T) {
-	// Set smaller values so that we get to see more compaction.
+	n := 200 // Vary these settings. Be sure to try n being non-multiples of 100.
 	opt := &CompactOptions{
 		NumLevelZeroTables: 5,
 		LevelOneSize:       5 << 14,
@@ -116,11 +116,6 @@ func TestCompactBasic(t *testing.T) {
 		MaxTableSize:       1 << 14,
 	}
 	InitCompact(opt)
-
-	// TODO: Allow multiples of 100. Right now, something is broken about table.
-	// Seek will not work if the last table has key="".
-	// TODO: If last table is empty, do not output that empty header!
-	n := 205
 	keyValues := make([][]string, n)
 	for i := 0; i < n; i++ {
 		keyValues[i] = []string{"", ""}
@@ -135,6 +130,7 @@ func TestCompactBasic(t *testing.T) {
 		tbl := buildTable(t, keyValues)
 		lvlsController.addLevel0Table(tbl)
 
+		// Ensure that every level makes sense.
 		for _, level := range lvlsController.levels {
 			level.check()
 		}
