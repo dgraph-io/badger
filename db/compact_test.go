@@ -63,7 +63,7 @@ func extractTable(table *tableHandler) [][]string {
 // TestDoCompact tests the merging logic which is done in internal doCompact function.
 // We might remove this internal test eventually.
 func TestDoCompact(t *testing.T) {
-	c := newLevelsController(nil)
+	c := newLevelsController(DefaultCompactOptions())
 	t0 := buildTable(t, [][]string{
 		{"k2", "z2"},
 		{"k22", "z22"},
@@ -109,7 +109,7 @@ func randomKey() string {
 
 func TestCompactBasic(t *testing.T) {
 	n := 200 // Vary these settings. Be sure to try n being non-multiples of 100.
-	opt := &CompactOptions{
+	opt := CompactOptions{
 		NumLevelZeroTables: 5,
 		LevelOneSize:       5 << 14,
 		MaxLevels:          4,
@@ -138,9 +138,9 @@ func TestCompactBasic(t *testing.T) {
 	}
 }
 
-func TestSingleLevelGet(t *testing.T) {
+func TestGet(t *testing.T) {
 	n := 200 // Vary these settings. Be sure to try n being non-multiples of 100.
-	opt := &CompactOptions{
+	opt := CompactOptions{
 		NumLevelZeroTables: 5,
 		LevelOneSize:       5 << 14,
 		MaxLevels:          4,

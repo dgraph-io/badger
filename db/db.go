@@ -17,19 +17,22 @@
 package db
 
 import (
-	"os"
+	"io/ioutil"
 	"sync"
 
 	"github.com/dgraph-io/badger/memtable"
 	"github.com/dgraph-io/badger/y"
 )
 
+// DBOptions are params for creating DB object.
 type DBOptions struct {
 	WriteBufferSize int
+	CompactOpt      CompactOptions
 }
 
-var DefaultDBOptions = &DBOptions{
+var DefaultDBOptions = DBOptions{
 	WriteBufferSize: 1 << 10,
+	CompactOpt:      DefaultCompactOptions(),
 }
 
 type DB struct {
@@ -37,15 +40,16 @@ type DB struct {
 	mem       *memtable.Memtable
 	immWg     sync.WaitGroup // Nonempty when flushing immutable memtable.
 	dbOptions DBOptions
+	lc        *levelsController
 }
 
-func NewDB(opt *DBOptions) *DB {
-	// VersionEdit strongly tied to table files. Omit for now.
-	db := &DB{
+// NewDB returns a new DB object. Compact levels are created as well.
+func NewDB(opt DBOptions) *DB {
+	return &DB{
 		mem:       memtable.NewMemtable(),
-		dbOptions: *opt, // Make a copy.
+		dbOptions: opt, // Make a copy.
+		lc:        newLevelsController(opt.CompactOpt),
 	}
-	return db
 }
 
 // Get looks for key and returns value. If not found, return nil.
@@ -101,9 +105,13 @@ func (s *DB) compactMemtable() {
 	s.immWg.Add(1)
 	go func() {
 		defer s.immWg.Done()
-		f, err := os.Create("/tmp/l0") // Fix later.
+		f, err := ioutil.TempFile("", "badger") // TODO: Stop using temp files.
+		// TODO: Relax these y.Checks.
+		// TODO: Add file closing logic. Maybe use runtime finalizer and let GC close the file.
 		y.Check(err)
-		defer f.Close()
 		y.Check(s.imm.WriteLevel0Table(f))
+		tbl, err := newTableHandler(f)
+		y.Check(err)
+		s.lc.addLevel0Table(tbl)
 	}()
 }

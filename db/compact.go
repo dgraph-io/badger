@@ -72,8 +72,8 @@ type levelsController struct {
 	opt    CompactOptions
 }
 
-func DefaultCompactOptions() *CompactOptions {
-	return &CompactOptions{
+func DefaultCompactOptions() CompactOptions {
+	return CompactOptions{
 		NumLevelZeroTables: 3,
 		LevelOneSize:       1 << 20,
 		MaxLevels:          10,
@@ -216,15 +216,12 @@ func (s *levelHandler) overlappingTables(begin, end []byte) (int, int) {
 	return left, right
 }
 
-func newLevelsController(opt *CompactOptions) *levelsController {
-	s := new(levelsController)
-	if opt == nil {
-		s.opt = *DefaultCompactOptions()
-	} else {
-		s.opt = *opt
+func newLevelsController(opt CompactOptions) *levelsController {
+	s := &levelsController{
+		opt:            opt,
+		levels:         make([]*levelHandler, opt.MaxLevels),
+		beingCompacted: make([]bool, opt.MaxLevels),
 	}
-	s.levels = make([]*levelHandler, s.opt.MaxLevels)
-	s.beingCompacted = make([]bool, s.opt.MaxLevels)
 	for i := 0; i < s.opt.MaxLevels; i++ {
 		s.levels[i] = &levelHandler{
 			level: i,
