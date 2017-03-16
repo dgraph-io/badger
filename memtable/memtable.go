@@ -109,15 +109,6 @@ func (s *Iterator) Value() []byte {
 // IsDeleted returns whether the value returned denotes a deletion.
 func IsDeleted(v []byte) bool { return v[0] == byteDelete }
 
-// ExtractValue extracts the value from v. If it is a deletion, we return nil.
-func ExtractValue(v []byte) []byte {
-	y.AssertTrue(len(v) >= 1)
-	if v[0] == byteDelete {
-		return nil
-	}
-	return v[1:]
-}
-
 // Get looks up a key. Returns value which could indicate a deletion. If not found, returns nil.
 func (s *Memtable) Get(key []byte) []byte {
 	v := s.table.Get(key)
