@@ -70,6 +70,8 @@ func TestDBGetMore(t *testing.T) {
 		k := fmt.Sprintf("%09d", i)
 		require.EqualValues(t, k, string(db.Get([]byte(k))))
 	}
+
+	// Overwrite value.
 	for i := n - 1; i >= 0; i-- {
 		k := []byte(fmt.Sprintf("%09d", i))
 		v := []byte(fmt.Sprintf("val%09d", i))
@@ -83,5 +85,19 @@ func TestDBGetMore(t *testing.T) {
 		k := []byte(fmt.Sprintf("%09d", i))
 		expectedValue := fmt.Sprintf("val%09d", i)
 		require.EqualValues(t, expectedValue, string(db.Get(k)))
+	}
+
+	// "Delete" key.
+	for i := 0; i < n; i++ {
+		k := []byte(fmt.Sprintf("%09d", i))
+		require.NoError(t, db.Delete(k))
+	}
+	for i := 0; i < n; i++ {
+		if (i % 100000) == 0 {
+			// Display some progress. Right now, it's not very fast with no caching.
+			fmt.Printf("Testing i=%d\n", i)
+		}
+		k := fmt.Sprintf("%09d", i)
+		require.Nil(t, db.Get([]byte(k)))
 	}
 }
