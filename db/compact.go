@@ -72,10 +72,6 @@ type levelsController struct {
 	opt    CompactOptions
 }
 
-var (
-	lvlsController levelsController
-)
-
 func DefaultCompactOptions() *CompactOptions {
 	return &CompactOptions{
 		NumLevelZeroTables: 3,
@@ -84,10 +80,6 @@ func DefaultCompactOptions() *CompactOptions {
 		NumCompactWorkers:  3,
 		MaxTableSize:       50 << 20,
 	}
-}
-
-func InitCompact(opt *CompactOptions) {
-	lvlsController.init(opt)
 }
 
 // doCopy creates a copy of []byte. Needed because table package uses []byte a lot.
@@ -224,7 +216,8 @@ func (s *levelHandler) overlappingTables(begin, end []byte) (int, int) {
 	return left, right
 }
 
-func (s *levelsController) init(opt *CompactOptions) {
+func newLevelsController(opt *CompactOptions) *levelsController {
+	s := new(levelsController)
 	if opt == nil {
 		s.opt = *DefaultCompactOptions()
 	} else {
@@ -249,6 +242,7 @@ func (s *levelsController) init(opt *CompactOptions) {
 	for i := 0; i < s.opt.NumCompactWorkers; i++ {
 		go s.compact(i)
 	}
+	return s
 }
 
 func (s *levelsController) compact(workerID int) {
@@ -391,7 +385,7 @@ func (s *levelsController) doCompact(l int) error {
 		lastKey = key
 	}
 	if !builder.Empty() {
-		fmt.Printf("EndTable: largestKey=%s size=%d\n", string(lastKey), builder.FinalSize())
+		//		fmt.Printf("EndTable: largestKey=%s size=%d\n", string(lastKey), builder.FinalSize())
 		if err := finishTable(); err != nil {
 			return err
 		}
@@ -444,4 +438,59 @@ func (s *levelHandler) check() {
 			"%s vs %s: level=%d j=%d numTables=%d",
 			string(s.tables[j].smallest), string(s.tables[j].biggest), s.level, j, numTables)
 	}
+}
+
+// get returns the found value if any. If not found, we return nil.
+func (s *levelsController) get(key []byte) []byte {
+	// No need to lock anything as we just iterate over the currently immutable levelHandlers.
+	for _, h := range s.levels {
+		if v := h.get(key); v != nil {
+			return v
+		}
+	}
+	return nil
+}
+
+// getHelper acquires a read-lock to access s.tables. It returns a list of tableHandlers.
+func (s *levelHandler) getHelper(key []byte) []*tableHandler {
+	s.RLock()
+	defer s.RUnlock()
+	if s.level == 0 {
+		// For level 0, we need to check every table. Remember to make a copy as s.tables may change
+		// once we exit this function, and we don't want to lock s.tables while seeking in tables.
+		out := make([]*tableHandler, len(s.tables))
+		y.AssertTrue(len(s.tables) == copy(out, s.tables))
+		return out
+	}
+	// For level >= 1, we can do a binary search as key range does not overlap.
+	idx := sort.Search(len(s.tables), func(i int) bool {
+		return bytes.Compare(s.tables[i].biggest, key) >= 0
+	})
+	if idx >= len(s.tables) {
+		// Given key is strictly > than every element we have.
+		return nil
+	}
+	return []*tableHandler{s.tables[idx]}
+}
+
+// get returns value for a given key. If not found, return nil.
+func (s *levelHandler) get(key []byte) []byte {
+	tables := s.getHelper(key)
+	for _, th := range tables {
+		it := th.table.NewIterator()
+		it.Seek(key, 0)
+		if !it.Valid() {
+			continue
+		}
+		var out []byte
+		it.KV(func(k, v []byte) {
+			if bytes.Equal(key, k) {
+				out = v
+			}
+		})
+		if out != nil {
+			return out
+		}
+	}
+	return nil
 }

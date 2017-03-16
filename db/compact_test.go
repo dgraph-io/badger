@@ -63,7 +63,7 @@ func extractTable(table *tableHandler) [][]string {
 // TestDoCompact tests the merging logic which is done in internal doCompact function.
 // We might remove this internal test eventually.
 func TestDoCompact(t *testing.T) {
-	InitCompact(nil)
+	c := newLevelsController(nil)
 	t0 := buildTable(t, [][]string{
 		{"k2", "z2"},
 		{"k22", "z22"},
@@ -81,16 +81,17 @@ func TestDoCompact(t *testing.T) {
 		{"k4", "v4"},
 	})
 
-	lvlsController.levels[0].tables = []*tableHandler{t0}
-	lvlsController.levels[1].tables = []*tableHandler{t1a, t1b, t1c}
-	lvlsController.doCompact(0)
+	// Very low-level setup to do this low-level test.
+	c.levels[0].tables = []*tableHandler{t0}
+	c.levels[1].tables = []*tableHandler{t1a, t1b, t1c}
+	c.doCompact(0)
 
-	require.Len(t, lvlsController.levels[1].tables, 2)
-	require.Empty(t, lvlsController.levels[0].tables)
+	require.Len(t, c.levels[1].tables, 2)
+	require.Empty(t, c.levels[0].tables)
 
 	require.EqualValues(t, [][]string{
 		{"k0", "v0"},
-	}, extractTable(lvlsController.levels[1].tables[0]))
+	}, extractTable(c.levels[1].tables[0]))
 
 	require.EqualValues(t, [][]string{
 		{"k1", "v1"},
@@ -99,7 +100,7 @@ func TestDoCompact(t *testing.T) {
 		{"k3", "v3"},
 		{"k4", "v4"},
 		{"k5", "z5"},
-	}, extractTable(lvlsController.levels[1].tables[1]))
+	}, extractTable(c.levels[1].tables[1]))
 }
 
 func randomKey() string {
@@ -115,7 +116,7 @@ func TestCompactBasic(t *testing.T) {
 		NumCompactWorkers:  3,
 		MaxTableSize:       1 << 14,
 	}
-	InitCompact(opt)
+	c := newLevelsController(opt)
 	keyValues := make([][]string, n)
 	for i := 0; i < n; i++ {
 		keyValues[i] = []string{"", ""}
@@ -128,11 +129,52 @@ func TestCompactBasic(t *testing.T) {
 			keyValues[i][1] = k
 		}
 		tbl := buildTable(t, keyValues)
-		lvlsController.addLevel0Table(tbl)
+		c.addLevel0Table(tbl)
 
 		// Ensure that every level makes sense.
-		for _, level := range lvlsController.levels {
+		for _, level := range c.levels {
 			level.check()
 		}
 	}
+}
+
+func TestSingleLevelGet(t *testing.T) {
+	n := 200 // Vary these settings. Be sure to try n being non-multiples of 100.
+	opt := &CompactOptions{
+		NumLevelZeroTables: 5,
+		LevelOneSize:       5 << 14,
+		MaxLevels:          4,
+		NumCompactWorkers:  3,
+		MaxTableSize:       1 << 14,
+	}
+	c := newLevelsController(opt)
+	keyValues := make([][]string, n)
+	for i := 0; i < n; i++ {
+		keyValues[i] = []string{"", ""}
+	}
+	for j := 0; j < 10; j++ {
+		for i := 0; i < n; i++ {
+			k := fmt.Sprintf("%05d_%05d", j, i)
+			v := fmt.Sprintf("v%05d_%05d", j, i)
+			keyValues[i][0] = k
+			keyValues[i][1] = v
+		}
+		tbl := buildTable(t, keyValues)
+		c.addLevel0Table(tbl)
+	}
+	require.Nil(t, c.get([]byte("abc")))
+	require.EqualValues(t, "v00002_00123", c.get([]byte("00002_00123")))
+	// Overwrite.
+	for j := 0; j < 10; j++ {
+		for i := 0; i < n; i++ {
+			k := fmt.Sprintf("%05d_%05d", j, i)
+			v := fmt.Sprintf("z%05d_%05d", j, i)
+			keyValues[i][0] = k
+			keyValues[i][1] = v
+		}
+		tbl := buildTable(t, keyValues)
+		c.addLevel0Table(tbl)
+	}
+	require.Nil(t, c.get([]byte("abc")))
+	require.EqualValues(t, "z00002_00123", c.get([]byte("00002_00123")))
 }
