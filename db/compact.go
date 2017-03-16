@@ -75,7 +75,7 @@ type levelsController struct {
 func DefaultCompactOptions() CompactOptions {
 	return CompactOptions{
 		NumLevelZeroTables: 3,
-		LevelOneSize:       1 << 20,
+		LevelOneSize:       5 << 20,
 		MaxLevels:          10,
 		NumCompactWorkers:  3,
 		MaxTableSize:       50 << 20,

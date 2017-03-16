@@ -52,3 +52,36 @@ func TestDBGet(t *testing.T) {
 	require.NoError(t, db.Put([]byte("key1"), []byte("val3")))
 	require.EqualValues(t, "val3", db.Get([]byte("key1")))
 }
+
+// Put a lot of data to move some data to disk.
+func TestDBGetMore(t *testing.T) {
+	db := NewDB(DefaultDBOptions)
+	n := 500000
+	//	n := 10000000
+	for i := 0; i < n; i++ {
+		k := []byte(fmt.Sprintf("%09d", i))
+		require.NoError(t, db.Put(k, k))
+	}
+	for i := 0; i < n; i++ {
+		if (i % 100000) == 0 {
+			// Display some progress. Right now, it's not very fast with no caching.
+			fmt.Printf("Testing i=%d\n", i)
+		}
+		k := fmt.Sprintf("%09d", i)
+		require.EqualValues(t, k, string(db.Get([]byte(k))))
+	}
+	for i := n - 1; i >= 0; i-- {
+		k := []byte(fmt.Sprintf("%09d", i))
+		v := []byte(fmt.Sprintf("val%09d", i))
+		require.NoError(t, db.Put(k, v))
+	}
+	for i := 0; i < n; i++ {
+		if (i % 100000) == 0 {
+			// Display some progress. Right now, it's not very fast with no caching.
+			fmt.Printf("Testing i=%d\n", i)
+		}
+		k := []byte(fmt.Sprintf("%09d", i))
+		expectedValue := fmt.Sprintf("val%09d", i)
+		require.EqualValues(t, expectedValue, string(db.Get(k)))
+	}
+}

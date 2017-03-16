@@ -31,7 +31,7 @@ type DBOptions struct {
 }
 
 var DefaultDBOptions = DBOptions{
-	WriteBufferSize: 1 << 10,
+	WriteBufferSize: 1 << 20,
 	CompactOpt:      DefaultCompactOptions(),
 }
 
@@ -57,13 +57,17 @@ func (s *DB) Get(key []byte) []byte {
 	if v := s.mem.Get(key); v != nil {
 		// v is not nil means we either have an explicit deletion or we have a value.
 		// v is nil means there is nothing about "key" in "mem". We need to look deeper.
-		return memtable.ExtractValue(v)
+		return y.ExtractValue(v)
 	}
 	if v := s.imm.Get(key); v != nil {
-		return memtable.ExtractValue(v)
+		return y.ExtractValue(v)
 	}
-	// TODO: Get data from disk.
-	return nil
+	// Check disk.
+	out := s.lc.get(key)
+	if out == nil {
+		return nil
+	}
+	return y.ExtractValue(out)
 }
 
 // Write applies a WriteBatch.
