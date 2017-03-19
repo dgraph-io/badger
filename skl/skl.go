@@ -134,26 +134,39 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 			}
 			return x, false
 		}
-		// 12 cases.
-		// cmp=0, <0, >0            (X3)
-		// less=true, false         (X2)
-		// allowEqual=true, false   (X2)
+
 		cmp := bytes.Compare(key, next.key)
 		if cmp > 0 {
-			// 4 cases: key > next.key. We can continue moving right on this level.
+			// x.key < next.key < key. We can continue to move right.
 			x = next
 			continue
 		}
-		if cmp == 0 && allowEqual {
-			// 2 cases: We have equality and we are ok with equality. Return right away.
-			return next, true
+		if cmp == 0 {
+			// x.key < key == next.key.
+			if allowEqual {
+				return next, true
+			}
+			if !less {
+				// We want >, so go to base level to grab the next bigger note.
+				return next.getNext(0), false
+			}
+			// We want <. If not base level, we should go closer in the next level.
+			if level > 0 {
+				level--
+				continue
+			}
+			// On base level. Return x.
+			if x == s.head {
+				return nil, false
+			}
+			return x, false
 		}
-		// 6 cases left: x.key < key < next.key. Unless level=0, we should descend.
+		// cmp < 0. In other words, x.key < key < next.
 		if level > 0 {
 			level--
 			continue
 		}
-		// We are at level 0. Time to return something.
+		// At base level. Need to return something.
 		if !less {
 			return next, false
 		}
