@@ -17,6 +17,7 @@
 package memtable
 
 import (
+	"fmt"
 	"os"
 	"unsafe"
 
@@ -126,4 +127,13 @@ func (s *Memtable) Get(key []byte) []byte {
 // MemUsage returns an approximate mem usage.
 func (s *Memtable) MemUsage() int {
 	return s.arena.MemUsage()
+}
+
+func (s *Memtable) DebugString() string {
+	it := s.NewIterator()
+	it.SeekToFirst()
+	k1, _ := it.KeyValue()
+	it.SeekToLast()
+	k2, _ := it.KeyValue()
+	return fmt.Sprintf("memtable: %s %s", string(k1), string(k2))
 }

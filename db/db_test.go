@@ -18,7 +18,9 @@ package db
 
 import (
 	"fmt"
+	//	"strconv"
 	"testing"
+	//	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -132,25 +134,9 @@ func TestDBIterateBasic(t *testing.T) {
 	for it.SeekToFirst(); it.Valid(); it.Next() {
 		key, val := it.KeyValue()
 		v := y.ExtractValue(val)
-
-		//		fmt.Printf("~~~%s %s\n", string(key), string(v))
 		require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
 		require.EqualValues(t, fmt.Sprintf("%09d", count), string(v))
 		count++
 	}
 	require.EqualValues(t, count, n)
-
-	// Overwrite value.
-	//	for i := n - 1; i >= 0; i-- {
-	//		k := []byte(fmt.Sprintf("%09d", i))
-	//		v := []byte(fmt.Sprintf("val%09d", i))
-	//		require.NoError(t, db.Put(k, v))
-	//	}
-
-	// "Delete" key.
-	//	for i := 0; i < n; i++ {
-	//		k := []byte(fmt.Sprintf("%09d", i))
-	//		require.NoError(t, db.Delete(k))
-	//	}
-
 }

@@ -117,19 +117,14 @@ func (s *DB) makeRoomForWrite() error {
 	// Changing imm, mem requires lock.
 	s.imm = s.mem
 	s.mem = memtable.NewMemtable()
-	s.Unlock()
 
-	s.compactMemtable() // This is for imm.
-	return nil
-}
-
-func (s *DB) compactMemtable() {
-	y.AssertTrue(s.imm != nil)
+	// Note: It is important to start the compaction within this lock.
+	// Otherwise, you might be compactng the wrong imm!
 	s.immWg.Add(1)
 	go func() {
 		defer s.immWg.Done()
+		y.Printf("Flushing imm, %s\n", s.imm.DebugString())
 		f, err := ioutil.TempFile("", "badger") // TODO: Stop using temp files.
-		// TODO: Relax these y.Checks.
 		// TODO: Add file closing logic. Maybe use runtime finalizer and let GC close the file.
 		y.Check(err)
 		y.Check(s.imm.WriteLevel0Table(f))
@@ -137,10 +132,16 @@ func (s *DB) compactMemtable() {
 		y.Check(err)
 		s.lc.addLevel0Table(tbl)
 	}()
+	s.Unlock()
+	return nil
 }
 
 // NewIterator returns a MergeIterator over iterators of memtable and compaction levels.
 func (s *DB) NewIterator() y.Iterator {
+	// The order we add these iterators is important.
+	// Imagine you add level0 first, then add imm. In between, the initial imm might be moved into
+	// level0, and be completely missed. On the other hand, if you add imm first and it got moved
+	// to level 0, you would just have that data appear twice which is fine.
 	mem, imm := s.getMemImm()
 	var iters []y.Iterator
 	if mem != nil {
@@ -149,7 +150,6 @@ func (s *DB) NewIterator() y.Iterator {
 	if imm != nil {
 		iters = append(iters, imm.NewIterator())
 	}
-	// Get iterators from levels.
-	iters = append(iters, s.lc.newIterators()...)
+	iters = s.lc.AppendIterators(iters)
 	return y.NewMergeIterator(iters)
 }

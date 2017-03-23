@@ -19,7 +19,7 @@ package db
 import (
 	"bytes"
 	"fmt"
-	"io"
+	//	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -481,121 +481,24 @@ func (s *levelHandler) get(key []byte) []byte {
 	return nil
 }
 
-// While iterating over a level, tables may be modified or deleted.
-// To handle that, we keep a table iterator. When this table iterator is done, we lock the level
-// and do another seek to find the next table.
-type levelIterator struct {
-	lh   *levelHandler
-	iter *table.TableIterator
-}
-
-func (s *levelHandler) NewIterator() y.Iterator {
-	if s.level > 0 {
-		return &levelIterator{lh: s}
-	}
-	// For level 0, we will return a merge iterator across all tables. The newer table at the end
-	// of levelHandler.tables should take precedence.
-	// It's ok that new tables are added while we are iterating, because the overall MergeIterator
-	// will include the current memtable(s) which will include the table being added.
-	// It's ok that tables are being removed while we are iterating. They are being compacted to
-	// the next level and will just appear twice, but will be consistent.
+// AppendIterators appends iterators to an array of iterators, for merging.
+func (s *levelHandler) AppendIterators(iters []y.Iterator) []y.Iterator {
 	s.RLock()
 	defer s.RUnlock()
-	iters := make([]y.Iterator, 0, len(s.tables))
-	for i := len(s.tables) - 1; i >= 0; i-- {
-		iters = append(iters, s.tables[i].table.NewIterator())
+	if s.level == 0 {
+		// Remember to add in reverse order!
+		// The newer table at the end of s.tables should be added first as it takes precedence.
+		for i := len(s.tables) - 1; i >= 0; i-- {
+			iters = append(iters, s.tables[i].table.NewIterator())
+		}
+		return iters
 	}
-	return y.NewMergeIterator(iters)
+	return append(iters, table.NewConcatIterator(getTables(s.tables)))
 }
 
-func (s *levelIterator) Valid() bool {
-	return s.iter != nil && s.iter.Valid()
-}
-
-// findTable finds the first table such that table.biggest > or >= key.
-func (s *levelHandler) findTable(key []byte, allowEqual bool) *tableHandler {
-	s.RLock()
-	defer s.RUnlock()
-
-	var idx int
-	if allowEqual {
-		idx = sort.Search(len(s.tables), func(i int) bool {
-			return bytes.Compare(s.tables[i].biggest, key) >= 0
-		})
-	} else {
-		idx = sort.Search(len(s.tables), func(i int) bool {
-			return bytes.Compare(s.tables[i].biggest, key) > 0
-		})
+func (s *levelsController) AppendIterators(iters []y.Iterator) []y.Iterator {
+	for _, level := range s.levels {
+		iters = level.AppendIterators(iters)
 	}
-	if idx == len(s.tables) {
-		return nil
-	}
-	return s.tables[idx]
-}
-
-func (s *levelIterator) KeyValue() ([]byte, []byte) {
-	y.AssertTrue(s.iter.Valid())
-	return s.iter.KeyValue()
-}
-
-func (s *levelIterator) SeekToFirst() {
-	s.iter = nil
-	tbl := s.lh.getFirstTable()
-	if tbl == nil {
-		// Leave iterator as invalid.
-		return
-	}
-	s.iter = tbl.table.NewIterator()
-	s.iter.SeekToFirst()
-}
-
-// Seek seeks to element with key >= given key.
-func (s *levelIterator) Seek(key []byte) {
-	s.iter = nil                    // Reset.
-	th := s.lh.findTable(key, true) // allowEqual=true.
-	if th == nil {
-		return
-	}
-	// Note that while doing this table seek, we do not lock the level.
-	s.iter = th.table.NewIterator()
-	s.iter.Seek(key)
-}
-
-func (s *levelIterator) Next() {
-	y.AssertTrue(s.Valid())
-	currentKey, _ := s.KeyValue()
-	s.iter.Next()
-	if s.iter.Valid() {
-		return // We can remain in the current table.
-	}
-	y.AssertTrue(s.iter.Error() == io.EOF) // Relax later.
-	// Need to do a re-seek table. But this is not the usual seek.
-	// allowEqual=false so that new table contains an element that is strictly > current key.
-	// We do not like to do hacks like append the key with something like "0".
-	th := s.lh.findTable(currentKey, false)
-	if th == nil {
-		return
-	}
-	s.iter = th.table.NewIterator()
-	s.iter.Seek(currentKey) // We expect key to be found as table.biggest > key.
-	y.AssertTrue(s.Valid())
-	key, _ := s.iter.KeyValue()
-	y.AssertTrue(key != nil)
-	if bytes.Equal(key, currentKey) {
-		// Currently, tableIterator is not able to seek to key strictly > given key.
-		// Hence, we have to do an extra comparison.
-		s.iter.Next()
-		y.AssertTrue(s.Valid())
-	}
-}
-
-// newIterators returns a list of level iterators.
-// We could have returned one single MergeIterator but that has to be merged with memtable
-// iterators as well. Let's do the merging only once, at the DB object level.
-func (s *levelsController) newIterators() []y.Iterator {
-	var out []y.Iterator
-	for _, l := range s.levels {
-		out = append(out, l.NewIterator())
-	}
-	return out
+	return iters
 }

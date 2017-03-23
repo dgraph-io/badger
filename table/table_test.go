@@ -311,20 +311,8 @@ func TestMergingIterator(t *testing.T) {
 
 	require.True(t, it.Valid())
 	k, v = it.KeyValue()
-	require.EqualValues(t, "k1", string(k))
-	require.EqualValues(t, "b1", string(v))
-	it.Next()
-
-	require.True(t, it.Valid())
-	k, v = it.KeyValue()
 	require.EqualValues(t, "k2", string(k))
 	require.EqualValues(t, "a2", string(v))
-	it.Next()
-
-	require.True(t, it.Valid())
-	k, v = it.KeyValue()
-	require.EqualValues(t, "k2", string(k))
-	require.EqualValues(t, "b2", string(v))
 	it.Next()
 
 	require.False(t, it.Valid())

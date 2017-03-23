@@ -386,7 +386,7 @@ type ConcatIterator struct {
 }
 
 func NewConcatIterator(tables []*Table) *ConcatIterator {
-	y.AssertTrue(len(tables) > 0)
+	//	y.AssertTrue(len(tables) > 0)
 	return &ConcatIterator{
 		tables: tables,
 		idx:    -1, // Not really necessary because s.it.Valid()=false, but good to have.
