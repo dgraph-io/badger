@@ -22,7 +22,7 @@ import (
 	"math/rand"
 	"sort"
 	"testing"
-	//	"time"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -53,9 +53,8 @@ func extractTable(table *tableHandler) [][]string {
 	var out [][]string
 	it := table.table.NewIterator()
 	for it.SeekToFirst(); it.Valid(); it.Next() {
-		it.KV(func(k, v []byte) {
-			out = append(out, []string{string(k), string(v)})
-		})
+		k, v := it.KeyValue()
+		out = append(out, []string{string(k), string(v)})
 	}
 	return out
 }
@@ -107,6 +106,7 @@ func randomKey() string {
 	return fmt.Sprintf("%09d", rand.Uint32()%10000000)
 }
 
+// Not really a test! Just run with -v and leave it running as a "stress test".
 func TestCompactBasic(t *testing.T) {
 	n := 200 // Vary these settings. Be sure to try n being non-multiples of 100.
 	opt := CompactOptions{
@@ -177,4 +177,145 @@ func TestGet(t *testing.T) {
 	}
 	require.Nil(t, c.get([]byte("abc")))
 	require.EqualValues(t, "z00002_00123", c.get([]byte("00002_00123")))
+}
+
+// Try iterating over a level as we compact. Check that we don't skip any keys.
+// WARNING: Test might be flaky!
+func TestLevelIterator(t *testing.T) {
+	n := 200 // Vary these settings. Be sure to try n being non-multiples of 100.
+	opt := CompactOptions{
+		NumLevelZeroTables: 5,
+		LevelOneSize:       5 << 14,
+		MaxLevels:          2, // Very few levels so that everything is on level 0 or 1.
+		NumCompactWorkers:  3,
+		MaxTableSize:       1 << 14,
+	}
+	c := newLevelsController(opt)
+	keyValues := make([][]string, n)
+	for i := 0; i < n; i++ {
+		keyValues[i] = []string{"", ""}
+	}
+
+	// Populate around 3 levels.
+	for j := 0; j < 50; j++ {
+		for i := 0; i < n; i++ {
+			k := fmt.Sprintf("k%05d_%05d", j, i)
+			v := fmt.Sprintf("v%05d_%05d", j, i)
+			keyValues[i][0] = k
+			keyValues[i][1] = v
+		}
+		tbl := buildTable(t, keyValues)
+		c.addLevel0Table(tbl)
+	}
+
+	// Force level 0 to all compact to level 1. Everything should be on level 1 now. A bit hackish.
+	c.opt.NumLevelZeroTables = 0
+	time.Sleep(5 * time.Second) // Wait a while for level 0 to be completely moved to level 1.
+
+	// Rewrite all the values while we iterate over level 1.
+	levelIter := c.levels[1].NewIterator()
+	require.False(t, levelIter.Valid())
+	levelIter.Seek([]byte("k00005_00003")) // SEEK.
+	require.True(t, levelIter.Valid())
+	itKey, itVal := levelIter.KeyValue()
+	require.EqualValues(t, "k00005_00003", string(itKey))
+	require.EqualValues(t, "v00005_00003", string(itVal))
+
+	// Allow level 0 to have stuff again.
+	c.opt.NumLevelZeroTables = 5
+
+	// While iterating, we will push some stuff.
+	var hasOverwritten, hasFinishedOverwriting bool
+	go func() {
+		// Replace from the back so that the forward iterating will "clash" with this.
+		for j := 49; j >= 0; j-- {
+			for i := 0; i < n; i++ {
+				k := fmt.Sprintf("k%05d_%05d", j, i)
+				v := fmt.Sprintf("z%05d_%05d", j, i) // New value.
+				keyValues[i][0] = k
+				keyValues[i][1] = v
+			}
+			tbl := buildTable(t, keyValues)
+			c.addLevel0Table(tbl)
+			hasOverwritten = true
+		}
+		hasFinishedOverwriting = true
+	}()
+	// Give the above a bit of time.
+	time.Sleep(100 * time.Millisecond)
+	require.True(t, hasOverwritten)
+	require.False(t, hasFinishedOverwriting)
+
+	// We expect to see a mix of old and new values.
+	// But all the keys should be available and in ascending order.
+	var numKeys int
+	var lastKey string
+	var hasOldVal, hasNewVal bool
+	for ; levelIter.Valid(); levelIter.Next() {
+		keyBytes, valBytes := levelIter.KeyValue()
+		key := string(keyBytes)
+		val := string(valBytes)
+		require.True(t, lastKey < key)
+		if val[0] == 'v' {
+			hasOldVal = true
+		} else if val[0] == 'z' {
+			hasNewVal = true
+		}
+		//		fmt.Printf("%s %s\n", key, val)
+		lastKey = key
+		numKeys++
+	}
+	// Rather delicate test with some timing hacks...
+	// Make sure while iterating, we have started overwriting but NOT finished overwriting.
+	require.True(t, hasOverwritten)
+	require.False(t, hasFinishedOverwriting)
+
+	// Make sure counts is right.
+	require.EqualValues(t, n*45-3, numKeys)
+	// Make sure we see a mix of old and new values.
+	require.True(t, hasOldVal)
+	require.True(t, hasNewVal)
+}
+
+func TestMergeLevelIterator(t *testing.T) {
+	n := 200 // Vary these settings. Be sure to try n being non-multiples of 100.
+	opt := CompactOptions{
+		NumLevelZeroTables: 5,
+		LevelOneSize:       5 << 14,
+		MaxLevels:          3, // Very few levels so that everything is on level 0 or 1.
+		NumCompactWorkers:  3,
+		MaxTableSize:       1 << 14,
+	}
+	c := newLevelsController(opt)
+	keyValues := make([][]string, n)
+	for i := 0; i < n; i++ {
+		keyValues[i] = []string{"", ""}
+	}
+
+	for j := 0; j < 50; j++ {
+		for i := 0; i < n; i++ {
+			k := fmt.Sprintf("k%05d_%05d", j, i)
+			v := fmt.Sprintf("v%05d_%05d", j, i)
+			keyValues[i][0] = k
+			keyValues[i][1] = v
+		}
+		tbl := buildTable(t, keyValues)
+		c.addLevel0Table(tbl)
+	}
+
+	it0 := c.levels[0].NewIterator()
+	it1 := c.levels[1].NewIterator()
+	it2 := c.levels[2].NewIterator()
+	it := y.NewMergeIterator([]y.Iterator{it0, it1, it2})
+	var lastKey string
+	var count int
+	for it.SeekToFirst(); it.Valid(); it.Next() {
+		k, _ := it.KeyValue()
+		key := string(k)
+		require.True(t, lastKey <= key)
+		lastKey = key
+		count++
+	}
+	// The compaction here doesn't remove any entry. The count should be the number of items added.
+	require.EqualValues(t, n*50, count)
 }

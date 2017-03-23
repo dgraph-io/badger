@@ -36,6 +36,8 @@ var DefaultDBOptions = DBOptions{
 }
 
 type DB struct {
+	sync.RWMutex // Guards imm, mem.
+
 	imm       *memtable.Memtable // Immutable, memtable being flushed.
 	mem       *memtable.Memtable
 	immWg     sync.WaitGroup // Nonempty when flushing immutable memtable.
@@ -52,16 +54,28 @@ func NewDB(opt DBOptions) *DB {
 	}
 }
 
+func (s *DB) getMemImm() (*memtable.Memtable, *memtable.Memtable) {
+	s.RLock()
+	defer s.RUnlock()
+	return s.mem, s.imm
+}
+
 // Get looks for key and returns value. If not found, return nil.
 func (s *DB) Get(key []byte) []byte {
-	if v := s.mem.Get(key); v != nil {
-		// v is not nil means we either have an explicit deletion or we have a value.
-		// v is nil means there is nothing about "key" in "mem". We need to look deeper.
-		return y.ExtractValue(v)
+	mem, imm := s.getMemImm() // Lock should be released.
+	if mem != nil {
+		if v := mem.Get(key); v != nil {
+			// v is not nil means we either have an explicit deletion or we have a value.
+			// v is nil means there is nothing about "key" in "mem". We need to look deeper.
+			return y.ExtractValue(v)
+		}
 	}
-	if v := s.imm.Get(key); v != nil {
-		return y.ExtractValue(v)
+	if imm != nil {
+		if v := s.imm.Get(key); v != nil {
+			return y.ExtractValue(v)
+		}
 	}
+
 	// Check disk.
 	out := s.lc.get(key)
 	if out == nil {
@@ -98,8 +112,13 @@ func (s *DB) makeRoomForWrite() error {
 		return nil
 	}
 	s.immWg.Wait() // Make sure we finish flushing immutable memtable.
+
+	s.Lock()
+	// Changing imm, mem requires lock.
 	s.imm = s.mem
 	s.mem = memtable.NewMemtable()
+	s.Unlock()
+
 	s.compactMemtable() // This is for imm.
 	return nil
 }
@@ -118,4 +137,19 @@ func (s *DB) compactMemtable() {
 		y.Check(err)
 		s.lc.addLevel0Table(tbl)
 	}()
+}
+
+// NewIterator returns a MergeIterator over iterators of memtable and compaction levels.
+func (s *DB) NewIterator() y.Iterator {
+	mem, imm := s.getMemImm()
+	var iters []y.Iterator
+	if mem != nil {
+		iters = append(iters, mem.NewIterator())
+	}
+	if imm != nil {
+		iters = append(iters, imm.NewIterator())
+	}
+	// Get iterators from levels.
+	iters = append(iters, s.lc.newIterators()...)
+	return y.NewMergeIterator(iters)
 }

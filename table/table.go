@@ -161,7 +161,6 @@ func (t *Table) block(idx int) (Block, error) {
 	}
 
 	ko := t.blockIndex[idx]
-	//	fmt.Printf("~~~block: idx=%d %v\n", idx, ko)
 
 	// TODO: add Block caching here.
 	block := Block{

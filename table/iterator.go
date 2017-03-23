@@ -18,7 +18,7 @@ package table
 
 import (
 	"bytes"
-	"errors"
+	//	"errors"
 	//	"fmt"
 	"io"
 	"math"
@@ -100,13 +100,10 @@ func (itr *BlockIterator) Seek(key []byte, whence int) {
 
 	var done bool
 	for itr.Init(); itr.Valid(); itr.Next() {
-		itr.KV(func(k, v []byte) {
-			if bytes.Compare(k, key) >= 0 {
-				// We are done as k is >= key.
-				done = true
-			}
-		})
-		if done {
+		k, _ := itr.KeyValue()
+		if bytes.Compare(k, key) >= 0 {
+			// We are done as k is >= key.
+			done = true
 			break
 		}
 	}
@@ -195,12 +192,11 @@ func (itr *BlockIterator) Prev() {
 	itr.last = h
 }
 
-func (itr *BlockIterator) KV(fn func(k, v []byte)) {
+func (itr *BlockIterator) KeyValue() ([]byte, []byte) {
 	if itr.err != nil {
-		return
+		return nil, nil
 	}
-
-	fn(itr.key, itr.val)
+	return itr.key, itr.val
 }
 
 type TableIterator struct {
@@ -217,7 +213,7 @@ func (itr *TableIterator) Reset() {
 }
 
 func (itr *TableIterator) Valid() bool {
-	return itr.err == nil
+	return itr != nil && itr.err == nil
 }
 
 func (itr *TableIterator) Error() error {
@@ -278,7 +274,7 @@ func (itr *TableIterator) seekHelper(blockIdx int, key []byte) {
 }
 
 // Seek brings us to a key that is >= input key.
-func (itr *TableIterator) Seek(key []byte, whence int) {
+func (itr *TableIterator) seek(key []byte, whence int) {
 	itr.err = nil
 	switch whence {
 	case ORIGIN:
@@ -315,6 +311,11 @@ func (itr *TableIterator) Seek(key []byte, whence int) {
 		itr.seekHelper(idx, key)
 	}
 	// Case 2: No need to do anything. We already did the seek in block[idx-1].
+}
+
+// Seek will reset iterator and seek to >= key.
+func (itr *TableIterator) Seek(key []byte) {
+	itr.seek(key, ORIGIN)
 }
 
 func (itr *TableIterator) Next() {
@@ -373,8 +374,8 @@ func (itr *TableIterator) Prev() {
 	}
 }
 
-func (itr *TableIterator) KV(fn func(k, v []byte)) {
-	itr.bi.KV(fn)
+func (itr *TableIterator) KeyValue() ([]byte, []byte) {
+	return itr.bi.KeyValue()
 }
 
 // ConcatIterator iterates over some tables in the given order.
@@ -386,37 +387,48 @@ type ConcatIterator struct {
 
 func NewConcatIterator(tables []*Table) *ConcatIterator {
 	y.AssertTrue(len(tables) > 0)
-	s := &ConcatIterator{tables: tables}
-	s.it = tables[0].NewIterator()
+	return &ConcatIterator{
+		tables: tables,
+		idx:    -1, // Not really necessary because s.it.Valid()=false, but good to have.
+	}
+}
+
+func (s *ConcatIterator) SeekToFirst() {
+	if len(s.tables) == 0 {
+		return
+	}
+	s.idx = 0
+	s.it = s.tables[0].NewIterator()
 	s.it.SeekToFirst()
-	return s
 }
 
 func (s *ConcatIterator) Valid() bool {
-	return s.it.Valid()
+	return s.idx >= 0 && s.idx < len(s.tables) && s.it.Valid()
 }
 
 // KeyValue returns key, value at current position.
 func (s *ConcatIterator) KeyValue() ([]byte, []byte) {
 	y.AssertTrue(s.Valid())
-	var key, val []byte
-	s.it.KV(func(k, v []byte) {
-		key = k
-		val = v
-	})
-	return key, val
+	return s.it.KeyValue()
+}
+
+func (s *ConcatIterator) Seek(key []byte) {
+	// CURRENTLY NOT IMPLEMENTED.
+	y.Fatalf("ConcatIterator.Seek is currently not implemented")
 }
 
 // Next advances our concat iterator.
-func (s *ConcatIterator) Next() error {
+func (s *ConcatIterator) Next() {
 	s.it.Next()
 	if s.it.Valid() {
-		return nil
+		// Nothing to do. Just stay with the current table.
+		return
 	}
 	for { // In case there are empty tables.
 		s.idx++
 		if s.idx >= len(s.tables) {
-			return errors.New("End of list") // TODO: Define error constant.
+			// End of list. Valid will become false.
+			return
 		}
 		s.it = s.tables[s.idx].NewIterator() // Assume tables are nonempty.
 		s.it.SeekToFirst()
@@ -424,76 +436,5 @@ func (s *ConcatIterator) Next() error {
 			break
 		}
 	}
-	return nil
-}
-
-// TODO: Consider having a universal iterator interface so that MergingIterator can be
-// built from any of these iterators. For now, we assume it reads from two ConcatIterators.
-// Note: If both iterators have the same key, the first one gets returned first.
-// Typical usage:
-// it0 := NewConcatIterator(...)
-// it1 := NewConcatIterator(...)
-// it := NewMergingIterator(it0, it1)
-// for ; it.Valid(); it.Next() {
-//   k, v := it.KeyValue()
-// }
-// No need to close "it".
-type MergingIterator struct {
-	it0, it1 *ConcatIterator // We do not own this.
-	idx      int             // Which ConcatIterator holds the current element.
-}
-
-// NewMergingIterator creates a new merging iterator.
-func NewMergingIterator(it0, it1 *ConcatIterator) *MergingIterator {
-	s := &MergingIterator{
-		it0: it0,
-		it1: it1,
-	}
-	s.updateIdx()
-	return s
-}
-
-func (s *MergingIterator) updateIdx() {
-	v0 := s.it0.Valid()
-	v1 := s.it1.Valid()
-	if !v0 && !v1 {
-		return
-	}
-	if !v0 {
-		s.idx = 1
-		return
-	}
-	if !v1 {
-		s.idx = 0
-		return
-	}
-	k0, _ := s.it0.KeyValue()
-	k1, _ := s.it1.KeyValue()
-	if bytes.Compare(k0, k1) <= 0 {
-		s.idx = 0
-	} else {
-		s.idx = 1
-	}
-}
-
-func (s *MergingIterator) Next() {
-	y.AssertTrue(s.it0.Valid() || s.it1.Valid())
-	if s.idx == 0 {
-		s.it0.Next()
-	} else if s.idx == 1 {
-		s.it1.Next()
-	}
-	s.updateIdx()
-}
-
-func (s *MergingIterator) Valid() bool {
-	return s.it0.Valid() || s.it1.Valid()
-}
-
-func (s *MergingIterator) KeyValue() ([]byte, []byte) {
-	y.AssertTrue(s.Valid())
-	if s.idx == 0 {
-		return s.it0.KeyValue()
-	}
-	return s.it1.KeyValue()
+	return
 }

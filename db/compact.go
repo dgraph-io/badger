@@ -19,6 +19,7 @@ package db
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -82,13 +83,6 @@ func DefaultCompactOptions() CompactOptions {
 	}
 }
 
-// doCopy creates a copy of []byte. Needed because table package uses []byte a lot.
-func doCopy(src []byte) []byte {
-	out := make([]byte, len(src))
-	y.AssertTrue(len(src) == copy(out, src))
-	return out
-}
-
 // Will not be needed if we move ConcatIterator, MergingIterator to this package.
 func getTables(tables []*tableHandler) []*table.Table {
 	var out []*table.Table
@@ -110,16 +104,13 @@ func newTableHandler(f *os.File) (*tableHandler, error) {
 	it := t.NewIterator()
 	it.SeekToFirst()
 	y.AssertTrue(it.Valid())
-	it.KV(func(k, v []byte) {
-		out.smallest = k
-	})
+	out.smallest, _ = it.KeyValue()
 
 	it2 := t.NewIterator() // For now, safer to use a different iterator.
 	it2.SeekToLast()
 	y.AssertTrue(it2.Valid())
-	it2.KV(func(k, v []byte) {
-		out.biggest = k
-	})
+	out.biggest, _ = it2.KeyValue()
+
 	// Make sure we did populate smallest and biggest.
 	y.AssertTrue(len(out.smallest) > 0) // We do not allow empty keys...
 	y.AssertTrue(len(out.biggest) > 0)
@@ -189,6 +180,16 @@ func (s *levelHandler) pickCompactTable() int {
 		}
 	}
 	return idx
+}
+
+// getFirstTable returns the first table. If level is empty, we return nil.
+func (s *levelHandler) getFirstTable() *tableHandler {
+	s.RLock()
+	defer s.RUnlock()
+	if len(s.tables) == 0 {
+		return nil
+	}
+	return s.tables[0]
 }
 
 func (s *levelHandler) getTable(idx int) *tableHandler {
@@ -295,6 +296,7 @@ func (s *levelsController) pickCompactLevel() int {
 
 func (s *levelsController) tryCompact(workerID int) {
 	l := s.pickCompactLevel()
+	// We expect beingCompacted to be marked for the chosen two levels, in pickCompactLevel.
 	if l < 0 {
 		// Level is negative. Nothing to compact.
 		fmt.Printf("tryCompact(worker=%d) nop\n", workerID)
@@ -320,6 +322,9 @@ func (s *levelsController) doCompact(l int) error {
 	nextLevel := s.levels[l+1]
 	tableIdx := thisLevel.pickCompactTable()
 	t := thisLevel.getTable(tableIdx) // Want to compact away t.
+	// In case you worry that levelHandler.tables[tableIdx] is no longer the same as before,
+	// note that the code is delicate. These two levels are already marked for compaction, so
+	// nobody should be able to mutate levelHandler.tables.
 	left, right := nextLevel.overlappingTables(t.smallest, t.biggest)
 	// Merge t with tables[left:right]. Excludes tables[right].
 	if left >= right {
@@ -332,16 +337,15 @@ func (s *levelsController) doCompact(l int) error {
 		return nil
 	}
 
-	it1 := table.NewConcatIterator([]*table.Table{t.table})
-	it2 := table.NewConcatIterator(getTables(nextLevel.tables[left:right]))
-	it := table.NewMergingIterator(it1, it2)
+	it := y.NewMergeIterator([]y.Iterator{
+		t.table.NewIterator(),
+		table.NewConcatIterator(getTables(nextLevel.tables[left:right])),
+	})
 	// Currently, when the iterator is constructed, we automatically SeekToFirst.
 	// We may not want to do that.
 	var newTables []*tableHandler
 	var builder table.TableBuilder
 	builder.Reset()
-
-	var lastKey []byte
 
 	finishTable := func() error {
 		fd, err := ioutil.TempFile("", "badger")
@@ -355,31 +359,21 @@ func (s *levelsController) doCompact(l int) error {
 		return nil
 	}
 
-	for ; it.Valid(); it.Next() {
+	for it.SeekToFirst(); it.Valid(); it.Next() {
 		if int64(builder.FinalSize()) > s.opt.MaxTableSize {
-			//			fmt.Printf("EndTable: largestKey=%s\n", string(lastKey))
 			if err := finishTable(); err != nil {
 				return err
 			}
 		}
 		kSlice, vSlice := it.KeyValue()
-		//		if builder.Empty() {
-		//			fmt.Printf("StartTable: smallestKey=%s\n", string(kSlice))
-		//		}
-		// We need to make copies of these as table might use them as "last".
-		key := doCopy(kSlice)
-		val := doCopy(vSlice)
-		//		fmt.Printf("key=%s val=%s lastKey=%s\n", string(key), string(val), string(lastKey))
-		cmp := bytes.Compare(key, lastKey)
-		y.AssertTruef(cmp >= 0, "%v %v", key, lastKey)
-		if cmp == 0 {
-			// Ignore duplicate keys. The first iterator takes precedence.
-			continue
-		}
+		// Safer to make copies as table uses []byte and might overwrite.
+		key := make([]byte, len(kSlice))
+		val := make([]byte, len(vSlice))
+		y.AssertTrue(len(kSlice) == copy(key, kSlice))
+		y.AssertTrue(len(vSlice) == copy(val, vSlice))
 		if err := builder.Add(key, val); err != nil {
 			return err
 		}
-		lastKey = key
 	}
 	if !builder.Empty() {
 		//		fmt.Printf("EndTable: largestKey=%s size=%d\n", string(lastKey), builder.FinalSize())
@@ -475,19 +469,133 @@ func (s *levelHandler) get(key []byte) []byte {
 	tables := s.getHelper(key)
 	for _, th := range tables {
 		it := th.table.NewIterator()
-		it.Seek(key, 0)
+		it.Seek(key)
 		if !it.Valid() {
 			continue
 		}
-		var out []byte
-		it.KV(func(k, v []byte) {
-			if bytes.Equal(key, k) {
-				out = v
-			}
-		})
-		if out != nil {
-			return out
+		itKey, itVal := it.KeyValue()
+		if bytes.Equal(key, itKey) {
+			return itVal
 		}
 	}
 	return nil
+}
+
+// While iterating over a level, tables may be modified or deleted.
+// To handle that, we keep a table iterator. When this table iterator is done, we lock the level
+// and do another seek to find the next table.
+type levelIterator struct {
+	lh   *levelHandler
+	iter *table.TableIterator
+}
+
+func (s *levelHandler) NewIterator() y.Iterator {
+	if s.level > 0 {
+		return &levelIterator{lh: s}
+	}
+	// For level 0, we will return a merge iterator across all tables. The newer table at the end
+	// of levelHandler.tables should take precedence.
+	// It's ok that new tables are added while we are iterating, because the overall MergeIterator
+	// will include the current memtable(s) which will include the table being added.
+	// It's ok that tables are being removed while we are iterating. They are being compacted to
+	// the next level and will just appear twice, but will be consistent.
+	s.RLock()
+	defer s.RUnlock()
+	iters := make([]y.Iterator, 0, len(s.tables))
+	for i := len(s.tables) - 1; i >= 0; i-- {
+		iters = append(iters, s.tables[i].table.NewIterator())
+	}
+	return y.NewMergeIterator(iters)
+}
+
+func (s *levelIterator) Valid() bool {
+	return s.iter != nil && s.iter.Valid()
+}
+
+// findTable finds the first table such that table.biggest > or >= key.
+func (s *levelHandler) findTable(key []byte, allowEqual bool) *tableHandler {
+	s.RLock()
+	defer s.RUnlock()
+
+	var idx int
+	if allowEqual {
+		idx = sort.Search(len(s.tables), func(i int) bool {
+			return bytes.Compare(s.tables[i].biggest, key) >= 0
+		})
+	} else {
+		idx = sort.Search(len(s.tables), func(i int) bool {
+			return bytes.Compare(s.tables[i].biggest, key) > 0
+		})
+	}
+	if idx == len(s.tables) {
+		return nil
+	}
+	return s.tables[idx]
+}
+
+func (s *levelIterator) KeyValue() ([]byte, []byte) {
+	y.AssertTrue(s.iter.Valid())
+	return s.iter.KeyValue()
+}
+
+func (s *levelIterator) SeekToFirst() {
+	s.iter = nil
+	tbl := s.lh.getFirstTable()
+	if tbl == nil {
+		// Leave iterator as invalid.
+		return
+	}
+	s.iter = tbl.table.NewIterator()
+	s.iter.SeekToFirst()
+}
+
+// Seek seeks to element with key >= given key.
+func (s *levelIterator) Seek(key []byte) {
+	s.iter = nil                    // Reset.
+	th := s.lh.findTable(key, true) // allowEqual=true.
+	if th == nil {
+		return
+	}
+	// Note that while doing this table seek, we do not lock the level.
+	s.iter = th.table.NewIterator()
+	s.iter.Seek(key)
+}
+
+func (s *levelIterator) Next() {
+	y.AssertTrue(s.Valid())
+	currentKey, _ := s.KeyValue()
+	s.iter.Next()
+	if s.iter.Valid() {
+		return // We can remain in the current table.
+	}
+	y.AssertTrue(s.iter.Error() == io.EOF) // Relax later.
+	// Need to do a re-seek table. But this is not the usual seek.
+	// allowEqual=false so that new table contains an element that is strictly > current key.
+	// We do not like to do hacks like append the key with something like "0".
+	th := s.lh.findTable(currentKey, false)
+	if th == nil {
+		return
+	}
+	s.iter = th.table.NewIterator()
+	s.iter.Seek(currentKey) // We expect key to be found as table.biggest > key.
+	y.AssertTrue(s.Valid())
+	key, _ := s.iter.KeyValue()
+	y.AssertTrue(key != nil)
+	if bytes.Equal(key, currentKey) {
+		// Currently, tableIterator is not able to seek to key strictly > given key.
+		// Hence, we have to do an extra comparison.
+		s.iter.Next()
+		y.AssertTrue(s.Valid())
+	}
+}
+
+// newIterators returns a list of level iterators.
+// We could have returned one single MergeIterator but that has to be merged with memtable
+// iterators as well. Let's do the merging only once, at the DB object level.
+func (s *levelsController) newIterators() []y.Iterator {
+	var out []y.Iterator
+	for _, l := range s.levels {
+		out = append(out, l.NewIterator())
+	}
+	return out
 }

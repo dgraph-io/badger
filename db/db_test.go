@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/dgraph-io/badger/y"
 )
 
 func TestDBWrite(t *testing.T) {
@@ -54,6 +56,7 @@ func TestDBGet(t *testing.T) {
 }
 
 // Put a lot of data to move some data to disk.
+// WARNING: This test might take a while but it should pass!
 func TestDBGetMore(t *testing.T) {
 	db := NewDB(DefaultDBOptions)
 	n := 500000
@@ -100,4 +103,54 @@ func TestDBGetMore(t *testing.T) {
 		k := fmt.Sprintf("%09d", i)
 		require.Nil(t, db.Get([]byte(k)))
 	}
+}
+
+// Put a lot of data to move some data to disk. Then iterate.
+// This is a simple test. We do not write or compact or do anything when iterating.
+// We want to check that the basic logic is correct, without worrying about concurrency.
+func TestDBIterateBasic(t *testing.T) {
+	opt := DBOptions{
+		WriteBufferSize: 1 << 20,
+		CompactOpt: CompactOptions{
+			NumLevelZeroTables: 3,
+			LevelOneSize:       5 << 20,
+			MaxLevels:          3,
+			NumCompactWorkers:  3,
+			MaxTableSize:       50 << 20,
+		},
+	}
+	db := NewDB(opt)
+
+	n := 500000
+	for i := 0; i < n; i++ {
+		k := []byte(fmt.Sprintf("%09d", i))
+		require.NoError(t, db.Put(k, k))
+	}
+
+	it := db.NewIterator()
+	var count int
+	for it.SeekToFirst(); it.Valid(); it.Next() {
+		key, val := it.KeyValue()
+		v := y.ExtractValue(val)
+
+		//		fmt.Printf("~~~%s %s\n", string(key), string(v))
+		require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
+		require.EqualValues(t, fmt.Sprintf("%09d", count), string(v))
+		count++
+	}
+	require.EqualValues(t, count, n)
+
+	// Overwrite value.
+	//	for i := n - 1; i >= 0; i-- {
+	//		k := []byte(fmt.Sprintf("%09d", i))
+	//		v := []byte(fmt.Sprintf("val%09d", i))
+	//		require.NoError(t, db.Put(k, v))
+	//	}
+
+	// "Delete" key.
+	//	for i := 0; i < n; i++ {
+	//		k := []byte(fmt.Sprintf("%09d", i))
+	//		require.NoError(t, db.Delete(k))
+	//	}
+
 }

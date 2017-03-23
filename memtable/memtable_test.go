@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/dgraph-io/badger/y"
 )
 
 func extract(m *Memtable) ([]string, []string) {
@@ -66,6 +68,13 @@ func TestMemUssage(t *testing.T) {
 	}
 	expected := 10000 * (6 + 6 + 1)
 	require.InEpsilon(t, expected, m.MemUsage(), 0.1)
+}
+
+func TestMergeIterator(t *testing.T) {
+	m := NewMemtable()
+	it := m.NewIterator()
+	mergeIt := y.NewMergeIterator([]y.Iterator{it})
+	require.False(t, mergeIt.Valid())
 }
 
 // BenchmarkAdd-4   	 1000000	      1289 ns/op

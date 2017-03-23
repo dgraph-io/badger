@@ -106,6 +106,10 @@ func (s *Iterator) Value() []byte {
 	return *(*[]byte)(v)
 }
 
+func (s *Iterator) KeyValue() ([]byte, []byte) {
+	return s.Key(), s.Value()
+}
+
 // IsDeleted returns whether the value returned denotes a deletion.
 func IsDeleted(v []byte) bool { return v[0] == byteDelete }
 
