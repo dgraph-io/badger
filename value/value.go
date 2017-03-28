@@ -61,6 +61,13 @@ type Pointer struct {
 	Offset int64
 }
 
+func (p Pointer) Encode() []byte {
+	b := make([]byte, 4+8)
+	binary.BigEndian.PutUint32(b[0:4], p.Len)
+	binary.BigEndian.PutUint64(b[4:12], uint64(p.Offset)) // Might want to use uint64 for Offset.
+	return b
+}
+
 func (l *Log) Open(fname string) {
 	var err error
 	l.fd, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE|syscall.O_DSYNC, 0666)

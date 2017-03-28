@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/dgraph-io/badger/memtable"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 )
@@ -107,27 +108,39 @@ func randomKey() string {
 
 // Not really a test! Just run with -v and leave it running as a "stress test".
 func TestCompactBasic(t *testing.T) {
-	n := 200 // Vary these settings. Be sure to try n being non-multiples of 100.
+	//	n := 200 // Vary these settings. Be sure to try n being non-multiples of 100.
 	opt := CompactOptions{
-		NumLevelZeroTables: 5,
-		LevelOneSize:       5 << 14,
-		MaxLevels:          4,
-		NumCompactWorkers:  3,
-		MaxTableSize:       1 << 14,
+		NumLevelZeroTables:      5,
+		NumLevelZeroTablesStall: 10,
+		LevelOneSize:            10 << 20,
+		MaxLevels:               4,
+		NumCompactWorkers:       3,
+		MaxTableSize:            2 << 20,
+		Verbose:                 true,
 	}
+
+	//	opt := CompactOptions{
+	//		NumLevelZeroTables: 5,
+	//		LevelOneSize:       5 << 14,
+	//		MaxLevels:          4,
+	//		NumCompactWorkers:  3,
+	//		MaxTableSize:       1 << 14,
+	//	}
+
 	c := newLevelsController(opt)
-	keyValues := make([][]string, n)
-	for i := 0; i < n; i++ {
-		keyValues[i] = []string{"", ""}
-	}
+	value := make([]byte, 300)
 	for {
-		// Keep writing random keys to level 0.
-		for i := 0; i < n; i++ {
-			k := randomKey()
-			keyValues[i][0] = k
-			keyValues[i][1] = k
+		mt := memtable.NewMemtable()
+		// Each memtable is about 1M. Level 0 is ~10 to 20 memtables. That is 10M to 20M. Level 1 should be about this size.
+		for mt.MemUsage() < 1<<20 {
+			mt.Put([]byte(randomKey()), value)
 		}
-		tbl := buildTable(t, keyValues)
+		f, err := ioutil.TempFile("", "badger") // TODO: Stop using temp files.
+		// TODO: Add file closing logic. Maybe use runtime finalizer and let GC close the file.
+		y.Check(err)
+		y.Check(mt.WriteLevel0Table(f))
+		tbl, err := newTableHandler(f)
+		y.Check(err)
 		c.addLevel0Table(tbl)
 
 		// Ensure that every level makes sense.

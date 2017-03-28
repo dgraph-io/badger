@@ -18,9 +18,11 @@ package db
 
 import (
 	"io/ioutil"
+	"os"
 	"sync"
 
 	"github.com/dgraph-io/badger/memtable"
+	"github.com/dgraph-io/badger/value"
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -31,7 +33,7 @@ type DBOptions struct {
 }
 
 var DefaultDBOptions = DBOptions{
-	WriteBufferSize: 1 << 20,
+	WriteBufferSize: 1 << 20, // Size of each memtable.
 	CompactOpt:      DefaultCompactOptions(),
 }
 
@@ -43,15 +45,24 @@ type DB struct {
 	immWg     sync.WaitGroup // Nonempty when flushing immutable memtable.
 	dbOptions DBOptions
 	lc        *levelsController
+	vlog      value.Log
 }
 
 // NewDB returns a new DB object. Compact levels are created as well.
 func NewDB(opt DBOptions) *DB {
-	return &DB{
+	out := &DB{
 		mem:       memtable.NewMemtable(),
 		dbOptions: opt, // Make a copy.
 		lc:        newLevelsController(opt.CompactOpt),
 	}
+	out.vlog.Open("/tmp/vlog")
+	return out
+}
+
+// Close closes a DB.
+func (s *DB) Close() {
+	// For now, we just delete the value log. This should be removed eventually.
+	os.Remove("/tmp/vlog")
 }
 
 func (s *DB) getMemImm() (*memtable.Memtable, *memtable.Memtable) {
@@ -94,8 +105,16 @@ func (s *DB) Write(wb *WriteBatch) error {
 
 // Put puts a key-val pair.
 func (s *DB) Put(key []byte, val []byte) error {
+	entry := value.Entry{
+		Key:   key,
+		Value: val,
+	}
+	pt, err := s.vlog.Write([]value.Entry{entry})
+	y.Check(err)
+	y.AssertTrue(len(pt) == 1)
+
 	wb := NewWriteBatch(0)
-	wb.Put(key, val)
+	wb.Put(key, pt[0].Encode())
 	return s.Write(wb)
 }
 
@@ -123,7 +142,6 @@ func (s *DB) makeRoomForWrite() error {
 	s.immWg.Add(1)
 	go func() {
 		defer s.immWg.Done()
-		y.Printf("Flushing imm, %s\n", s.imm.DebugString())
 		f, err := ioutil.TempFile("", "badger") // TODO: Stop using temp files.
 		// TODO: Add file closing logic. Maybe use runtime finalizer and let GC close the file.
 		y.Check(err)

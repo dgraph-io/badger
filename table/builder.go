@@ -25,7 +25,7 @@ import (
 )
 
 //var tableSize int64 = 50 << 20
-var restartInterval int = 100
+var restartInterval int = 100 // Might want to change this to be based on total size instead of numKeys.
 
 type header struct {
 	plen int // Overlap with base key.
@@ -37,10 +37,15 @@ type header struct {
 // Encode encodes the header.
 func (h header) Encode() []byte {
 	b := make([]byte, h.Size())
+	y.AssertTrue(h.plen >= 0 && h.plen <= math.MaxUint16)
+	y.AssertTrue(h.klen >= 0 && h.klen <= math.MaxUint16)
+	y.AssertTrue(h.vlen >= 0 && h.vlen <= math.MaxUint16)
+	y.AssertTrue(h.prev >= 0 && h.prev <= math.MaxUint32)
+
 	binary.BigEndian.PutUint16(b[0:2], uint16(h.plen))
 	binary.BigEndian.PutUint16(b[2:4], uint16(h.klen))
 	binary.BigEndian.PutUint16(b[4:6], uint16(h.vlen))
-	binary.BigEndian.PutUint16(b[6:8], uint16(h.prev))
+	binary.BigEndian.PutUint32(b[6:10], uint32(h.prev))
 	return b
 }
 
@@ -49,12 +54,12 @@ func (h *header) Decode(buf []byte) int {
 	h.plen = int(binary.BigEndian.Uint16(buf[0:2]))
 	h.klen = int(binary.BigEndian.Uint16(buf[2:4]))
 	h.vlen = int(binary.BigEndian.Uint16(buf[4:6]))
-	h.prev = int(binary.BigEndian.Uint16(buf[6:8]))
+	h.prev = int(binary.BigEndian.Uint32(buf[6:10]))
 	return h.Size()
 }
 
 // Size returns size of the header. Currently it's just a constant.
-func (h header) Size() int { return 8 }
+func (h header) Size() int { return 10 }
 
 type TableBuilder struct {
 	counter int // Number of keys written for the current block.
@@ -145,7 +150,7 @@ func (b *TableBuilder) Add(key, value []byte) error {
 		b.counter = 0
 		b.baseKey = []byte{}
 		b.baseOffset = b.pos
-		b.prevOffset = math.MaxUint16 // First key-value pair of block has header.prev=MaxUint16.
+		b.prevOffset = math.MaxUint32 // First key-value pair of block has header.prev=MaxUint32.
 	}
 	b.addHelper(key, value)
 	return nil // Currently, there is no meaningful error.
@@ -155,7 +160,7 @@ func (b *TableBuilder) Add(key, value []byte) error {
 // TODO: Look into why there is a discrepancy. I suspect it is because of Write(empty, empty)
 // at the end. The diff can vary.
 func (b *TableBuilder) FinalSize() int {
-	return b.pos + 6 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
+	return b.pos + 8 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
 }
 
 // blockIndex generates the block index for the table.

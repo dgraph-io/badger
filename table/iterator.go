@@ -45,8 +45,7 @@ type BlockIterator struct {
 	val  []byte
 	init bool
 
-	lastPos int
-	last    header // The last header we saw.
+	last header // The last header we saw.
 }
 
 func (itr *BlockIterator) Reset() {
@@ -120,9 +119,7 @@ func (itr *BlockIterator) SeekToFirst() {
 // SeekToLast brings us to the last element. Valid should return true.
 func (itr *BlockIterator) SeekToLast() {
 	itr.err = nil
-	var count int
 	for itr.Init(); itr.Valid(); itr.Next() {
-		count++
 	}
 	itr.Prev()
 }
@@ -130,12 +127,13 @@ func (itr *BlockIterator) SeekToLast() {
 func (itr *BlockIterator) parseKV(h header) {
 	itr.ensureKeyCap(h)
 	itr.key = itr.ikey[:h.plen+h.klen]
+	// TODO: We shouldn't have to do a copy here.
 	y.AssertTrue(h.plen == copy(itr.key, itr.baseKey[:h.plen]))
 	y.AssertTrue(h.klen == copy(itr.key[h.plen:], itr.data[itr.pos:itr.pos+h.klen]))
 	itr.pos += h.klen
 
 	if itr.pos+h.vlen > len(itr.data) {
-		itr.err = y.Errorf("Value exceeded size of block.")
+		itr.err = y.Errorf("Value exceeded size of block: %d %d %d %d %v", itr.pos, h.klen, h.vlen, len(itr.data), h)
 		return
 	}
 
@@ -175,7 +173,7 @@ func (itr *BlockIterator) Prev() {
 		return
 	}
 	itr.err = nil
-	if itr.last.prev == math.MaxUint16 {
+	if itr.last.prev == math.MaxUint32 {
 		// This is the first element of the block!
 		itr.err = io.EOF
 		itr.pos = 0

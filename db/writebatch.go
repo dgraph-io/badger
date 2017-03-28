@@ -40,6 +40,13 @@ func NewWriteBatch(reserved int) *WriteBatch {
 	}
 }
 
+func (s *WriteBatch) Clear() {
+	s.rep = s.rep[:headerSize]
+	for i := 0; i < headerSize; i++ {
+		s.rep[i] = 0
+	}
+}
+
 func (s *WriteBatch) Count() int { return int(binary.BigEndian.Uint32(s.rep)) }
 
 func (s *WriteBatch) SetCount(n int) {
