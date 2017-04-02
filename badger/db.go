@@ -41,6 +41,7 @@ type DBOptions struct {
 }
 
 var DefaultDBOptions = DBOptions{
+	Dir:                     "/tmp",
 	WriteBufferSize:         1 << 20, // Size of each memtable.
 	NumLevelZeroTables:      5,
 	NumLevelZeroTablesStall: 10,
@@ -88,28 +89,39 @@ func (s *DB) getMemImm() (*memtable.Memtable, *memtable.Memtable) {
 	return s.mem, s.imm
 }
 
-// Get looks for key and returns value. If not found, return nil.
-func (s *DB) Get(key []byte) []byte {
+func (s *DB) getValueOffset(key []byte) []byte {
 	mem, imm := s.getMemImm() // Lock should be released.
 	if mem != nil {
 		if v := mem.Get(key); v != nil {
-			// v is not nil means we either have an explicit deletion or we have a value.
-			// v is nil means there is nothing about "key" in "mem". We need to look deeper.
-			return y.ExtractValue(v)
+			return v
 		}
 	}
 	if imm != nil {
 		if v := s.imm.Get(key); v != nil {
-			return y.ExtractValue(v)
+			return v
 		}
 	}
+	return s.lc.get(key)
+}
 
-	// Check disk.
-	out := s.lc.get(key)
-	if out == nil {
+// Get looks for key and returns value. If not found, return nil.
+func (s *DB) Get(key []byte) []byte {
+	valueOffset := s.getValueOffset(key)
+	if valueOffset == nil {
 		return nil
 	}
-	return y.ExtractValue(out)
+	v := y.ExtractValue(valueOffset)
+	if v == nil {
+		// Tombstone encountered.
+		return nil
+	}
+	var vp value.Pointer
+	vp.Decode(v)
+	var out []byte
+	s.vlog.Read(vp, func(entry value.Entry) {
+		out = y.ExtractValue(entry.Value)
+	})
+	return out
 }
 
 type vlogWriter struct {
@@ -117,8 +129,13 @@ type vlogWriter struct {
 	entries []value.Entry
 }
 
+/*
+Currently, there are two WriteBatches. The first one has values=byteData/byteDelete + value.
+The vlogWriter here pushes WriteBatch into valueLog and gets Pointers.
+The data sent to valueLog is the same: byteData/byteDelete + value.
+After we get these Pointers, we want to insert that into our memtable.
+*/
 func (s *vlogWriter) Put(key []byte, val []byte) {
-	// This shouldn't be necessary. We should be able to just copy data directly from WriteBatch.
 	v := make([]byte, len(val)+1)
 	v[0] = byteData
 	y.AssertTrue(len(val) == copy(v[1:], val))
@@ -135,22 +152,40 @@ func (s *vlogWriter) Delete(key []byte) {
 	})
 }
 
+// Reduces original WriteBatch containing value data to WriteBatch containing value offsets.
+type writebatchRewriter struct {
+	out  *WriteBatch
+	ptrs []value.Pointer
+	idx  int
+}
+
+func (s *writebatchRewriter) Put(key []byte, val []byte) {
+	s.out.Put(key, s.ptrs[s.idx].Encode())
+	s.idx++
+}
+
+func (s *writebatchRewriter) Delete(key []byte) {
+	s.out.Delete(key)
+	s.idx++
+}
+
 // Write applies a WriteBatch.
 func (s *DB) Write(wb *WriteBatch) error {
-	writer := &vlogWriter{
+	writer := vlogWriter{
 		vlog: &s.vlog,
 	}
-	y.Check(wb.Iterate(writer))
-	pt, err := s.vlog.Write(writer.entries)
+	y.Check(wb.Iterate(&writer))
+	ptrs, err := s.vlog.Write(writer.entries)
 	y.Check(err)
-	y.AssertTrue(len(pt) == wb.Count())
+	y.AssertTrue(len(ptrs) == wb.Count())
 
-	// For now, we create another WriteBatch.
-	// It is possible to avoid this by modifying MemtableInserter.
-	wbReduced := NewWriteBatch(len(pt))
-	for i := 0; i < len(pt); i++ {
-		wbReduced.Put(writer.entries[i].Key, pt[i].Encode())
+	// Create a new WriteBatch for offsets. Could consider using a different inserter for WriteBatch.
+	wbReduced := NewWriteBatch(len(ptrs))
+	writebatchRewriter := writebatchRewriter{
+		out:  wbReduced,
+		ptrs: ptrs,
 	}
+	y.Check(wb.Iterate(&writebatchRewriter))
 	if err := s.makeRoomForWrite(); err != nil {
 		return err
 	}
@@ -199,6 +234,48 @@ func (s *DB) makeRoomForWrite() error {
 	return nil
 }
 
+type DBIterator struct {
+	it y.Iterator
+	db *DB
+}
+
+func (s *DBIterator) Next() {
+	s.it.Next()
+	s.nextValid()
+}
+
+func (s *DBIterator) SeekToFirst() {
+	s.it.SeekToFirst()
+	s.nextValid()
+}
+
+func (s *DBIterator) Seek(key []byte) {
+	s.it.Seek(key)
+	s.nextValid()
+}
+
+func (s *DBIterator) Valid() bool { return s.it.Valid() }
+
+func (s *DBIterator) KeyValue() ([]byte, []byte) {
+	key, val := s.it.KeyValue()
+	v := y.ExtractValue(val)
+	y.AssertTrue(v != nil)
+
+	var vp value.Pointer
+	vp.Decode(v)
+	var out []byte
+	s.db.vlog.Read(vp, func(entry value.Entry) {
+		out = y.ExtractValue(entry.Value)
+	})
+	return key, out
+}
+
+func (s *DBIterator) nextValid() {
+
+}
+
+func (s *DBIterator) Name() string { return "DBIterator" }
+
 // NewIterator returns a MergeIterator over iterators of memtable and compaction levels.
 func (s *DB) NewIterator() y.Iterator {
 	// The order we add these iterators is important.
@@ -214,5 +291,8 @@ func (s *DB) NewIterator() y.Iterator {
 		iters = append(iters, imm.NewIterator())
 	}
 	iters = s.lc.AppendIterators(iters)
-	return y.NewMergeIterator(iters)
+	return &DBIterator{
+		it: y.NewMergeIterator(iters),
+		db: s,
+	}
 }

@@ -92,6 +92,8 @@ func (s *Memtable) NewIterator() *Iterator {
 	return &Iterator{iter: s.table.NewIterator()}
 }
 
+func (s *Iterator) Name() string { return "MemtableIterator" }
+
 func (s *Iterator) Seek(key []byte) { s.iter.Seek(key) }
 func (s *Iterator) Valid() bool     { return s.iter.Valid() }
 func (s *Iterator) SeekToFirst()    { s.iter.SeekToFirst() }

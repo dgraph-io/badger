@@ -24,6 +24,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/dgraph-io/badger/y"
 	"github.com/dgraph-io/dgraph/x"
 	"github.com/pkg/errors"
 )
@@ -63,15 +64,21 @@ type Pointer struct {
 
 func (p Pointer) Encode() []byte {
 	b := make([]byte, 4+8)
-	binary.BigEndian.PutUint32(b[0:4], p.Len)
+	binary.BigEndian.PutUint32(b[:4], p.Len)
 	binary.BigEndian.PutUint64(b[4:12], uint64(p.Offset)) // Might want to use uint64 for Offset.
 	return b
+}
+
+func (p *Pointer) Decode(b []byte) {
+	y.AssertTrue(len(b) >= 12)
+	p.Len = binary.BigEndian.Uint32(b[:4])
+	p.Offset = int64(binary.BigEndian.Uint64(b[4:12]))
 }
 
 func (l *Log) Open(fname string) {
 	var err error
 	l.fd, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE|syscall.O_DSYNC, 0666)
-	x.Check(err)
+	y.Check(err)
 }
 
 var bufPool = sync.Pool{
@@ -121,10 +128,10 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 	return ptrs, errors.Wrap(err, "Unable to write to file")
 }
 
-func (l *Log) Read(offset int64, len uint32, fn func(Entry)) error {
+func (l *Log) Read(p Pointer, fn func(Entry)) error {
 	var e Entry
-	buf := make([]byte, len)
-	if _, err := l.fd.ReadAt(buf, offset); err != nil {
+	buf := make([]byte, p.Len)
+	if _, err := l.fd.ReadAt(buf, p.Offset); err != nil {
 		return err
 	}
 	var h header

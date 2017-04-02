@@ -376,6 +376,8 @@ func (itr *TableIterator) KeyValue() ([]byte, []byte) {
 	return itr.bi.KeyValue()
 }
 
+func (itr *TableIterator) Name() string { return "TableIterator" }
+
 // ConcatIterator iterates over some tables in the given order.
 type ConcatIterator struct {
 	idx    int // Which table does the iterator point to currently.
@@ -403,6 +405,8 @@ func (s *ConcatIterator) SeekToFirst() {
 func (s *ConcatIterator) Valid() bool {
 	return s.idx >= 0 && s.idx < len(s.tables) && s.it.Valid()
 }
+
+func (s *ConcatIterator) Name() string { return "ConcatIterator" }
 
 // KeyValue returns key, value at current position.
 func (s *ConcatIterator) KeyValue() ([]byte, []byte) {

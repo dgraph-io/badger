@@ -16,6 +16,8 @@ type Iterator interface {
 	//	SeekForPrev(key []byte)
 	KeyValue() ([]byte, []byte)
 	Valid() bool
+
+	Name() string // Mainly for debug or testing.
 }
 
 // mergeHeap is an internal structure to remember which iterator has the smallest element.
@@ -68,6 +70,8 @@ func NewMergeIterator(iters []Iterator) *MergeIterator {
 		keys:  make([][]byte, len(iters)),
 	}
 }
+
+func (s *MergeIterator) Name() string { return "MergeIterator" }
 
 // Valid returns whether the MergeIterator is at a valid element.
 func (s *MergeIterator) Valid() bool {

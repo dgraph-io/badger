@@ -387,7 +387,7 @@ func (s *levelsController) doCompact(l int) error {
 	//	it1 := )
 	var iters []y.Iterator
 	if l == 0 {
-		iters = getIteratorsReversed(thisLevel.tables[srcIdx0:srcIdx1])
+		iters = appendIteratorsReversed(iters, thisLevel.tables[srcIdx0:srcIdx1])
 	} else {
 		y.AssertTrue(srcIdx0+1 == srcIdx1) // For now, for level >=1, we expect exactly one table.
 		iters = []y.Iterator{thisLevel.tables[srcIdx0].table.NewIterator()}
@@ -400,6 +400,7 @@ func (s *levelsController) doCompact(l int) error {
 	// Currently, when the iterator is constructed, we automatically SeekToFirst.
 	// We may not want to do that.
 	var newTables []*tableHandler
+
 	var builder table.TableBuilder
 	builder.Reset()
 
@@ -466,21 +467,11 @@ func (s *levelsController) addLevel0Table(t *tableHandler) {
 			s.debugPrint()
 			timeStart = time.Now()
 		}
+		// Before we unstall, we need to make sure that level 0 and 1 are healthy. Otherwise, we
+		// will very quickly fill up level 0 again and if the compaction strategy favors level 0,
+		// then level 1 is going to super full.
 		for {
-			ok := true
-			// TODO: NEED TO CLEANUP
-			for i := 0; i+1 < s.opt.MaxLevels; i++ {
-				if i == 0 && len(s.levels[0].tables) == 0 {
-					continue
-				}
-				// Just i=1
-				if i > 0 && s.levels[i].getTotalSize() <= s.levels[i].maxTotalSize {
-					continue
-				}
-				ok = false
-				break
-			}
-			if ok {
+			if s.levels[0].getTotalSize() > 0 && s.levels[1].getTotalSize() > s.levels[1].maxTotalSize {
 				break
 			}
 			time.Sleep(10 * time.Millisecond)
@@ -579,8 +570,7 @@ func (s *levelHandler) get(key []byte) []byte {
 	return nil
 }
 
-func getIteratorsReversed(th []*tableHandler) []y.Iterator {
-	var out []y.Iterator
+func appendIteratorsReversed(out []y.Iterator, th []*tableHandler) []y.Iterator {
 	for i := len(th) - 1; i >= 0; i-- {
 		out = append(out, th[i].table.NewIterator())
 	}
@@ -594,7 +584,7 @@ func (s *levelHandler) AppendIterators(iters []y.Iterator) []y.Iterator {
 	if s.level == 0 {
 		// Remember to add in reverse order!
 		// The newer table at the end of s.tables should be added first as it takes precedence.
-		return getIteratorsReversed(s.tables)
+		return appendIteratorsReversed(iters, s.tables)
 	}
 	return append(iters, table.NewConcatIterator(getTables(s.tables)))
 }

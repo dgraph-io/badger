@@ -19,10 +19,11 @@ package badger
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/badger/y"
+	//	"github.com/dgraph-io/badger/y"
 )
 
 func TestDBWrite(t *testing.T) {
@@ -109,30 +110,23 @@ func TestDBGetMore(t *testing.T) {
 // This is a simple test. We do not write or compact or do anything when iterating.
 // We want to check that the basic logic is correct, without worrying about concurrency.
 func TestDBIterateBasic(t *testing.T) {
-	opt := DBOptions{
-		WriteBufferSize:    1 << 20,
-		NumLevelZeroTables: 3,
-		LevelOneSize:       5 << 20,
-		MaxLevels:          3,
-		NumCompactWorkers:  3,
-		MaxTableSize:       50 << 20,
-	}
-	db := NewDB(opt)
-
+	db := NewDB(DefaultDBOptions)
 	n := 500000
+	//	n := 100
 	for i := 0; i < n; i++ {
 		k := []byte(fmt.Sprintf("%09d", i))
 		require.NoError(t, db.Put(k, k))
 	}
 
+	time.Sleep(100 * time.Millisecond)
+
 	it := db.NewIterator()
 	var count int
 	for it.SeekToFirst(); it.Valid(); it.Next() {
 		key, val := it.KeyValue()
-		v := y.ExtractValue(val)
 		require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
-		require.EqualValues(t, fmt.Sprintf("%09d", count), string(v))
+		require.EqualValues(t, fmt.Sprintf("%09d", count), string(val))
 		count++
 	}
-	require.EqualValues(t, count, n)
+	require.EqualValues(t, n, count)
 }

@@ -67,8 +67,7 @@ func BenchmarkReadWrite(b *testing.B) {
 								b.Fatalf("Zero length of ptrs")
 							}
 							idx := rand.Intn(ln)
-							p := ptrs[idx]
-							if err := vl.Read(p.Offset, p.Len, func(e Entry) {
+							if err := vl.Read(ptrs[idx], func(e Entry) {
 								if len(e.Key) != 16 {
 									b.Fatalf("Key is invalid")
 								}
