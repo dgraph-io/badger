@@ -14,13 +14,11 @@
  * limitations under the License.
  */
 
-package db
+package badger
 
 import (
 	"fmt"
-	//	"strconv"
 	"testing"
-	//	"time"
 
 	"github.com/stretchr/testify/require"
 
