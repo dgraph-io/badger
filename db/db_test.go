@@ -112,14 +112,12 @@ func TestDBGetMore(t *testing.T) {
 // We want to check that the basic logic is correct, without worrying about concurrency.
 func TestDBIterateBasic(t *testing.T) {
 	opt := DBOptions{
-		WriteBufferSize: 1 << 20,
-		CompactOpt: CompactOptions{
-			NumLevelZeroTables: 3,
-			LevelOneSize:       5 << 20,
-			MaxLevels:          3,
-			NumCompactWorkers:  3,
-			MaxTableSize:       50 << 20,
-		},
+		WriteBufferSize:    1 << 20,
+		NumLevelZeroTables: 3,
+		LevelOneSize:       5 << 20,
+		MaxLevels:          3,
+		NumCompactWorkers:  3,
+		MaxTableSize:       50 << 20,
 	}
 	db := NewDB(opt)
 

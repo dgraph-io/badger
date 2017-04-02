@@ -18,7 +18,6 @@ package db
 
 import (
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"sort"
 	"testing"
@@ -34,7 +33,7 @@ import (
 func buildTable(t *testing.T, keyValues [][]string) *tableHandler {
 	b := table.TableBuilder{}
 	b.Reset()
-	f, err := ioutil.TempFile("", "badger")
+	f, err := y.TempFile("/tmp")
 	require.NoError(t, err)
 	sort.Slice(keyValues, func(i, j int) bool {
 		return keyValues[i][0] < keyValues[j][0]
@@ -62,7 +61,7 @@ func extractTable(table *tableHandler) [][]string {
 // TestDoCompact tests the merging logic which is done in internal doCompact function.
 // We might remove this internal test eventually.
 func TestDoCompact(t *testing.T) {
-	c := newLevelsController(DefaultCompactOptions())
+	c := newLevelsController(DefaultDBOptions)
 	t0 := buildTable(t, [][]string{
 		{"k2", "z2"},
 		{"k22", "z22"},
@@ -109,7 +108,7 @@ func randomKey() string {
 // Not really a test! Just run with -v and leave it running as a "stress test".
 func TestCompactBasic(t *testing.T) {
 	//	n := 200 // Vary these settings. Be sure to try n being non-multiples of 100.
-	opt := CompactOptions{
+	opt := DBOptions{
 		NumLevelZeroTables:      5,
 		NumLevelZeroTablesStall: 10,
 		LevelOneSize:            10 << 20,
@@ -135,7 +134,7 @@ func TestCompactBasic(t *testing.T) {
 		for mt.MemUsage() < 1<<20 {
 			mt.Put([]byte(randomKey()), value)
 		}
-		f, err := ioutil.TempFile("", "badger") // TODO: Stop using temp files.
+		f, err := y.TempFile("/tmp") // TODO: Stop using temp files.
 		// TODO: Add file closing logic. Maybe use runtime finalizer and let GC close the file.
 		y.Check(err)
 		y.Check(mt.WriteLevel0Table(f))
@@ -152,7 +151,7 @@ func TestCompactBasic(t *testing.T) {
 
 func TestGet(t *testing.T) {
 	n := 200 // Vary these settings. Be sure to try n being non-multiples of 100.
-	opt := CompactOptions{
+	opt := DBOptions{
 		NumLevelZeroTables: 5,
 		LevelOneSize:       5 << 14,
 		MaxLevels:          4,

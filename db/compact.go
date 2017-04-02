@@ -19,9 +19,6 @@ package db
 import (
 	"bytes"
 	"fmt"
-	//	"io"
-	"io/ioutil"
-	//	"log"
 	"math/rand"
 	"os"
 	"sort"
@@ -31,17 +28,6 @@ import (
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 )
-
-type CompactOptions struct {
-	NumLevelZeroTables      int   // Maximum number of Level 0 tables before we start compacting.
-	NumLevelZeroTablesStall int   // If we hit this number of Level 0 tables, we will stall until level 0 is compacted away.
-	LevelOneSize            int64 // Maximum total size for Level 1.
-	MaxLevels               int   // Maximum number of levels of compaction. May be made variable later.
-	NumCompactWorkers       int   // Number of goroutines ddoing compaction.
-	MaxTableSize            int64 // Each table (or file) is at most this size.
-	LevelSizeMultiplier     int
-	Verbose                 bool
-}
 
 type tableHandler struct {
 	// The following are initialized once and const.
@@ -63,7 +49,7 @@ type levelHandler struct {
 	// The following are initialized once and const.
 	level        int
 	maxTotalSize int64
-	opt          CompactOptions
+	opt          DBOptions
 }
 
 type levelsController struct {
@@ -74,20 +60,7 @@ type levelsController struct {
 
 	// The following are initialized once and const.
 	levels []*levelHandler
-	opt    CompactOptions
-}
-
-func DefaultCompactOptions() CompactOptions {
-	return CompactOptions{
-		NumLevelZeroTables:      5,
-		NumLevelZeroTablesStall: 10,
-		LevelOneSize:            11 << 20,
-		MaxLevels:               7,
-		NumCompactWorkers:       3,
-		MaxTableSize:            2 << 20,
-		LevelSizeMultiplier:     5,
-		Verbose:                 true,
-	}
+	opt    DBOptions
 }
 
 // Will not be needed if we move ConcatIterator, MergingIterator to this package.
@@ -241,7 +214,7 @@ func (s *levelHandler) overlappingTables(begin, end []byte) (int, int) {
 	return left, right
 }
 
-func newLevelsController(opt CompactOptions) *levelsController {
+func newLevelsController(opt DBOptions) *levelsController {
 	y.AssertTrue(opt.NumLevelZeroTablesStall > opt.NumLevelZeroTables)
 	s := &levelsController{
 		opt:            opt,
@@ -431,13 +404,12 @@ func (s *levelsController) doCompact(l int) error {
 	builder.Reset()
 
 	finishTable := func() error {
-		fd, err := ioutil.TempFile("", "badger")
-		if err != nil {
-			return err
-		}
+		fd, err := y.TempFile(s.opt.Dir)
+		y.Check(err)
 		fd.Write(builder.Finish())
 		builder.Reset()
 		newTable, err := newTableHandler(fd)
+		y.Check(err)
 		newTables = append(newTables, newTable)
 		return nil
 	}

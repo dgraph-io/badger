@@ -17,8 +17,8 @@
 package db
 
 import (
-	"io/ioutil"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/dgraph-io/badger/memtable"
@@ -28,34 +28,51 @@ import (
 
 // DBOptions are params for creating DB object.
 type DBOptions struct {
-	WriteBufferSize int
-	CompactOpt      CompactOptions
+	Dir                     string
+	WriteBufferSize         int   // Memtable size.
+	NumLevelZeroTables      int   // Maximum number of Level 0 tables before we start compacting.
+	NumLevelZeroTablesStall int   // If we hit this number of Level 0 tables, we will stall until level 0 is compacted away.
+	LevelOneSize            int64 // Maximum total size for Level 1.
+	MaxLevels               int   // Maximum number of levels of compaction. May be made variable later.
+	NumCompactWorkers       int   // Number of goroutines ddoing compaction.
+	MaxTableSize            int64 // Each table (or file) is at most this size.
+	LevelSizeMultiplier     int
+	Verbose                 bool
 }
 
 var DefaultDBOptions = DBOptions{
-	WriteBufferSize: 1 << 20, // Size of each memtable.
-	CompactOpt:      DefaultCompactOptions(),
+	WriteBufferSize:         1 << 20, // Size of each memtable.
+	NumLevelZeroTables:      5,
+	NumLevelZeroTablesStall: 10,
+	LevelOneSize:            11 << 20,
+	MaxLevels:               7,
+	NumCompactWorkers:       3,
+	MaxTableSize:            2 << 20,
+	LevelSizeMultiplier:     5,
+	Verbose:                 true,
 }
 
 type DB struct {
 	sync.RWMutex // Guards imm, mem.
 
-	imm       *memtable.Memtable // Immutable, memtable being flushed.
-	mem       *memtable.Memtable
-	immWg     sync.WaitGroup // Nonempty when flushing immutable memtable.
-	dbOptions DBOptions
-	lc        *levelsController
-	vlog      value.Log
+	imm   *memtable.Memtable // Immutable, memtable being flushed.
+	mem   *memtable.Memtable
+	immWg sync.WaitGroup // Nonempty when flushing immutable memtable.
+	opt   DBOptions
+	lc    *levelsController
+	vlog  value.Log
 }
 
 // NewDB returns a new DB object. Compact levels are created as well.
 func NewDB(opt DBOptions) *DB {
+	y.AssertTrue(len(opt.Dir) > 0)
 	out := &DB{
-		mem:       memtable.NewMemtable(),
-		dbOptions: opt, // Make a copy.
-		lc:        newLevelsController(opt.CompactOpt),
+		mem: memtable.NewMemtable(),
+		opt: opt, // Make a copy.
+		lc:  newLevelsController(opt),
 	}
-	out.vlog.Open("/tmp/vlog")
+	vlogPath := filepath.Join(opt.Dir, "vlog")
+	out.vlog.Open(vlogPath)
 	return out
 }
 
@@ -95,38 +112,67 @@ func (s *DB) Get(key []byte) []byte {
 	return y.ExtractValue(out)
 }
 
+type vlogWriter struct {
+	vlog    *value.Log
+	entries []value.Entry
+}
+
+func (s *vlogWriter) Put(key []byte, val []byte) {
+	// This shouldn't be necessary. We should be able to just copy data directly from WriteBatch.
+	v := make([]byte, len(val)+1)
+	v[0] = byteData
+	y.AssertTrue(len(val) == copy(v[1:], val))
+	s.entries = append(s.entries, value.Entry{
+		Key:   key,
+		Value: v,
+	})
+}
+
+func (s *vlogWriter) Delete(key []byte) {
+	s.entries = append(s.entries, value.Entry{
+		Key:   key,
+		Value: []byte{byteDelete},
+	})
+}
+
 // Write applies a WriteBatch.
 func (s *DB) Write(wb *WriteBatch) error {
+	writer := &vlogWriter{
+		vlog: &s.vlog,
+	}
+	y.Check(wb.Iterate(writer))
+	pt, err := s.vlog.Write(writer.entries)
+	y.Check(err)
+	y.AssertTrue(len(pt) == wb.Count())
+
+	// For now, we create another WriteBatch.
+	// It is possible to avoid this by modifying MemtableInserter.
+	wbReduced := NewWriteBatch(len(pt))
+	for i := 0; i < len(pt); i++ {
+		wbReduced.Put(writer.entries[i].Key, pt[i].Encode())
+	}
 	if err := s.makeRoomForWrite(); err != nil {
 		return err
 	}
-	return wb.InsertInto(s.mem)
+	return wbReduced.InsertInto(s.mem)
 }
 
 // Put puts a key-val pair.
 func (s *DB) Put(key []byte, val []byte) error {
-	entry := value.Entry{
-		Key:   key,
-		Value: val,
-	}
-	pt, err := s.vlog.Write([]value.Entry{entry})
-	y.Check(err)
-	y.AssertTrue(len(pt) == 1)
-
-	wb := NewWriteBatch(0)
-	wb.Put(key, pt[0].Encode())
+	wb := NewWriteBatch(1)
+	wb.Put(key, val)
 	return s.Write(wb)
 }
 
 // Delete deletes a key.
 func (s *DB) Delete(key []byte) error {
-	wb := NewWriteBatch(0)
+	wb := NewWriteBatch(1)
 	wb.Delete(key)
 	return s.Write(wb)
 }
 
 func (s *DB) makeRoomForWrite() error {
-	if s.mem.MemUsage() < s.dbOptions.WriteBufferSize {
+	if s.mem.MemUsage() < s.opt.WriteBufferSize {
 		// Nothing to do. We have enough space.
 		return nil
 	}
@@ -142,8 +188,7 @@ func (s *DB) makeRoomForWrite() error {
 	s.immWg.Add(1)
 	go func() {
 		defer s.immWg.Done()
-		f, err := ioutil.TempFile("", "badger") // TODO: Stop using temp files.
-		// TODO: Add file closing logic. Maybe use runtime finalizer and let GC close the file.
+		f, err := y.TempFile(s.opt.Dir)
 		y.Check(err)
 		y.Check(s.imm.WriteLevel0Table(f))
 		tbl, err := newTableHandler(f)
