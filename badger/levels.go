@@ -283,21 +283,20 @@ func (s *levelsController) pickCompactLevel() int {
 	//		fmt.Printf("\n")
 	//	}
 
-	for i := 0; i+1 < s.opt.MaxLevels; i++ {
+	// Going from higher levels to lower levels offers a small gain.
+	// It probably has to do with level 1 being smaller when level 0 has to merge with the whole of
+	// level 1.
+	for i := s.opt.MaxLevels - 2; i >= 0; i-- {
 		// Lower levels take priority. Most important is level 0. It should only have one table.
 		// See if we want to compact i to i+1.
 		if s.beingCompacted[i] || s.beingCompacted[i+1] {
 			continue
 		}
-		if i == 0 && len(s.levels[0].tables) <= s.opt.NumLevelZeroTables {
-			continue
+		if (i == 0 && len(s.levels[0].tables) > s.opt.NumLevelZeroTables) ||
+			(i > 0 && s.levels[i].getTotalSize() > s.levels[i].maxTotalSize) {
+			s.beingCompacted[i], s.beingCompacted[i+1] = true, true
+			return i
 		}
-		if i > 0 && s.levels[i].getTotalSize() <= s.levels[i].maxTotalSize {
-			continue
-		}
-		// Mark these two levels while locking s.
-		s.beingCompacted[i], s.beingCompacted[i+1] = true, true
-		return i
 	}
 	// Didn't find anything that is really bad.
 	// Let's do level 0 if it is not empty. Let's do a level that is close to its maxTotalSize.
@@ -305,19 +304,21 @@ func (s *levelsController) pickCompactLevel() int {
 		s.beingCompacted[0], s.beingCompacted[1] = true, true
 		return 0
 	}
-	for i := 0; i+1 < s.opt.MaxLevels; i++ {
-		if s.beingCompacted[i] || s.beingCompacted[i+1] {
-			continue
-		}
-		if i == 0 && len(s.levels[0].tables) <= s.opt.NumLevelZeroTables { // Can be different from above.
-			continue
-		}
-		if float64(s.levels[i].getTotalSize()) < 0.75*float64(s.levels[i].maxTotalSize) {
-			continue
-		}
-		s.beingCompacted[i], s.beingCompacted[i+1] = true, true
-		return i
-	}
+
+	//// Doing work preemptively seems to make us slower.
+	//	for i := s.opt.MaxLevels - 2; i >= 0; i-- {
+	//		if s.beingCompacted[i] || s.beingCompacted[i+1] {
+	//			continue
+	//		}
+	//		if i == 0 && len(s.levels[0].tables) <= s.opt.NumLevelZeroTables { // Can be different from above.
+	//			continue
+	//		}
+	//		if float64(s.levels[i].getTotalSize()) < 0.75*float64(s.levels[i].maxTotalSize) {
+	//			continue
+	//		}
+	//		s.beingCompacted[i], s.beingCompacted[i+1] = true, true
+	//		return i
+	//	}
 	return -1
 }
 
@@ -394,32 +395,40 @@ func (s *levelsController) doCompact(l int) error {
 	}
 	iters = append(iters, table.NewConcatIterator(getTables(nextLevel.tables[left:right])))
 	it := y.NewMergeIterator(iters)
-	//		table.NewConcatIterator(getTables(thisLevel.tables[srcIdx0:srcIdx1])),
-	//		it1,
-	//	})
-	// Currently, when the iterator is constructed, we automatically SeekToFirst.
-	// We may not want to do that.
+
 	var newTables []*tableHandler
-
-	var builder table.TableBuilder
-	builder.Reset()
-
-	finishTable := func() error {
-		fd, err := y.TempFile(s.opt.Dir)
-		y.Check(err)
-		fd.Write(builder.Finish())
-		builder.Reset()
-		newTable, err := newTableHandler(fd)
-		y.Check(err)
-		newTables = append(newTables, newTable)
-		return nil
+	var wg sync.WaitGroup
+	finishTable := func(builder *table.TableBuilder) {
+		n := len(newTables)
+		newTables = append(newTables, nil)
+		wg.Add(1)
+		go func(builder *table.TableBuilder, n int) {
+			defer wg.Done()
+			fd, err := y.TempFile(s.opt.Dir)
+			y.Check(err)
+			fd.Write(builder.Finish())
+			newTable, err := newTableHandler(fd)
+			y.Check(err)
+			newTables[n] = newTable
+		}(builder, n)
 	}
 
+	//// If we do not want to start a Go routine:
+	//	finishTable := func(builder *table.TableBuilder) {
+	//		fd, err := y.TempFile(s.opt.Dir)
+	//		y.Check(err)
+	//		fd.Write(builder.Finish())
+	//		newTable, err := newTableHandler(fd)
+	//		y.Check(err)
+	//		newTables = append(newTables, newTable)
+	//	}
+
+	builder := new(table.TableBuilder)
 	for it.SeekToFirst(); it.Valid(); it.Next() {
 		if int64(builder.FinalSize()) > s.opt.MaxTableSize {
-			if err := finishTable(); err != nil {
-				return err
-			}
+			finishTable(builder)
+			// If we do not want a Go routine, replace the following with builder.Reset().
+			builder = new(table.TableBuilder)
 		}
 		kSlice, vSlice := it.KeyValue()
 		// Safer to make copies as table uses []byte and might overwrite.
@@ -432,11 +441,9 @@ func (s *levelsController) doCompact(l int) error {
 		}
 	}
 	if !builder.Empty() {
-		////		fmt.Printf("EndTable: largestKey=%s size=%d\n", string(lastKey), builder.FinalSize())
-		if err := finishTable(); err != nil {
-			return err
-		}
+		finishTable(builder)
 	}
+	wg.Wait()
 
 	if s.opt.Verbose {
 		fmt.Printf("LOG Compact %d->%d: Del [%d,%d), Del [%d,%d), Add [%d,%d), took %v\n",
