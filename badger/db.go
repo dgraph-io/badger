@@ -37,6 +37,7 @@ type DBOptions struct {
 	NumCompactWorkers       int   // Number of goroutines ddoing compaction.
 	MaxTableSize            int64 // Each table (or file) is at most this size.
 	LevelSizeMultiplier     int
+	ValueThreshold          int // If value size >= this threshold, we store offsets in value log.
 	Verbose                 bool
 }
 
@@ -50,6 +51,7 @@ var DefaultDBOptions = DBOptions{
 	NumCompactWorkers:       3,
 	MaxTableSize:            2 << 20,
 	LevelSizeMultiplier:     5,
+	ValueThreshold:          20,
 	Verbose:                 true,
 }
 
@@ -89,7 +91,7 @@ func (s *DB) getMemImm() (*memtable.Memtable, *memtable.Memtable) {
 	return s.mem, s.imm
 }
 
-func (s *DB) getValueOffset(key []byte) []byte {
+func (s *DB) getValueHelper(key []byte) []byte {
 	mem, imm := s.getMemImm() // Lock should be released.
 	if mem != nil {
 		if v := mem.Get(key); v != nil {
@@ -104,24 +106,32 @@ func (s *DB) getValueOffset(key []byte) []byte {
 	return s.lc.get(key)
 }
 
-// Get looks for key and returns value. If not found, return nil.
-func (s *DB) Get(key []byte) []byte {
-	valueOffset := s.getValueOffset(key)
-	if valueOffset == nil {
-		return nil
-	}
-	v := y.ExtractValue(valueOffset)
-	if v == nil {
+func decodeValue(val []byte, vlog *value.Log) []byte {
+	if (val[0] & y.BitDelete) != 0 {
 		// Tombstone encountered.
 		return nil
 	}
-	var vp value.Pointer
-	vp.Decode(v)
-	var out []byte
-	s.vlog.Read(vp, func(entry value.Entry) {
-		out = y.ExtractValue(entry.Value)
-	})
-	return out
+	if (val[0] & y.BitValueOffset) != 0 {
+		var vp value.Pointer
+		vp.Decode(val[1:])
+		var out []byte
+		vlog.Read(vp, func(entry value.Entry) {
+			if (entry.Value[0] & y.BitDelete) == 0 { // Not tombstone.
+				out = entry.Value[1:]
+			}
+		})
+		return out
+	}
+	return val[1:]
+}
+
+// Get looks for key and returns value. If not found, return nil.
+func (s *DB) Get(key []byte) []byte {
+	val := s.getValueHelper(key)
+	if val == nil {
+		return nil
+	}
+	return decodeValue(val, &s.vlog)
 }
 
 type vlogWriter struct {
@@ -135,20 +145,13 @@ The vlogWriter here pushes WriteBatch into valueLog and gets Pointers.
 The data sent to valueLog is the same: byteData/byteDelete + value.
 After we get these Pointers, we want to insert that into our memtable.
 */
-func (s *vlogWriter) Put(key []byte, val []byte) {
+func (s *vlogWriter) RawPut(key []byte, headerByte byte, val []byte) {
 	v := make([]byte, len(val)+1)
-	v[0] = byteData
+	v[0] = headerByte
 	y.AssertTrue(len(val) == copy(v[1:], val))
 	s.entries = append(s.entries, value.Entry{
 		Key:   key,
 		Value: v,
-	})
-}
-
-func (s *vlogWriter) Delete(key []byte) {
-	s.entries = append(s.entries, value.Entry{
-		Key:   key,
-		Value: []byte{byteDelete},
 	})
 }
 
@@ -157,15 +160,17 @@ type writebatchRewriter struct {
 	out  *WriteBatch
 	ptrs []value.Pointer
 	idx  int
+	db   *DB
 }
 
-func (s *writebatchRewriter) Put(key []byte, val []byte) {
-	s.out.Put(key, s.ptrs[s.idx].Encode())
-	s.idx++
-}
-
-func (s *writebatchRewriter) Delete(key []byte) {
-	s.out.Delete(key)
+func (s *writebatchRewriter) RawPut(key []byte, headerByte byte, val []byte) {
+	if (headerByte & y.BitDelete) != 0 {
+		s.out.RawPut(key, headerByte, nil)
+	} else if len(val) >= s.db.opt.ValueThreshold {
+		s.out.RawPut(key, y.BitValueOffset, s.ptrs[s.idx].Encode())
+	} else {
+		s.out.RawPut(key, 0, val)
+	}
 	s.idx++
 }
 
@@ -184,6 +189,7 @@ func (s *DB) Write(wb *WriteBatch) error {
 	writebatchRewriter := writebatchRewriter{
 		out:  wbReduced,
 		ptrs: ptrs,
+		db:   s,
 	}
 	y.Check(wb.Iterate(&writebatchRewriter))
 	if err := s.makeRoomForWrite(); err != nil {
@@ -258,16 +264,7 @@ func (s *DBIterator) Valid() bool { return s.it.Valid() }
 
 func (s *DBIterator) KeyValue() ([]byte, []byte) {
 	key, val := s.it.KeyValue()
-	v := y.ExtractValue(val)
-	y.AssertTrue(v != nil)
-
-	var vp value.Pointer
-	vp.Decode(v)
-	var out []byte
-	s.db.vlog.Read(vp, func(entry value.Entry) {
-		out = y.ExtractValue(entry.Value)
-	})
-	return key, out
+	return key, decodeValue(val, &s.db.vlog)
 }
 
 func (s *DBIterator) nextValid() {

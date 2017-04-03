@@ -15,6 +15,8 @@ type SimpleIterator struct {
 	idx  int
 }
 
+func (s *SimpleIterator) Name() string { return "SimpleIterator" }
+
 func (s *SimpleIterator) Next() {
 	s.idx++
 }

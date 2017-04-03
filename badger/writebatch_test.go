@@ -20,18 +20,20 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/dgraph-io/badger/y"
 )
 
 type debugHandler struct {
 	out [][]string
 }
 
-func (s *debugHandler) Put(key []byte, val []byte) {
-	s.out = append(s.out, []string{string(key), string(val)})
-}
-
-func (s *debugHandler) Delete(key []byte) {
-	s.out = append(s.out, []string{string(key)})
+func (s *debugHandler) RawPut(key []byte, headerByte byte, val []byte) {
+	if (headerByte & y.BitDelete) == 0 {
+		s.out = append(s.out, []string{string(key), string(val)})
+	} else {
+		s.out = append(s.out, []string{string(key)})
+	}
 }
 
 func TestWriteBatchBasic(t *testing.T) {

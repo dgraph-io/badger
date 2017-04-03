@@ -54,6 +54,10 @@ func TestDBGet(t *testing.T) {
 
 	require.NoError(t, db.Put([]byte("key1"), []byte("val3")))
 	require.EqualValues(t, "val3", db.Get([]byte("key1")))
+
+	longVal := make([]byte, 1000)
+	require.NoError(t, db.Put([]byte("key1"), longVal))
+	require.EqualValues(t, longVal, db.Get([]byte("key1")))
 }
 
 // Put a lot of data to move some data to disk.

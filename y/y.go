@@ -28,17 +28,17 @@ var EmptySlice = []byte{}
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	byteData   = 0
-	byteDelete = 1
+	BitDelete      = 1
+	BitValueOffset = 2
 )
 
 // ExtractValue extracts the value from v. If it is a deletion, we return nil.
-func ExtractValue(v []byte) []byte {
+func ExtractValue(v []byte) ([]byte, byte) {
 	AssertTrue(len(v) >= 1)
-	if v[0] == byteDelete {
-		return nil
+	if (v[0] & BitDelete) != 0 {
+		return nil, 0
 	}
-	return v[1:]
+	return v[1:], v[0]
 }
 
 // TempFile returns a tempfile in given directory. It sets a finalizer to delete the file.

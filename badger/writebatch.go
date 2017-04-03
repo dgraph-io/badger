@@ -25,8 +25,6 @@ import (
 
 // Similar to memtable. Might go to y.
 const (
-	byteData   = 0
-	byteDelete = 1
 	headerSize = 4
 )
 
@@ -54,21 +52,14 @@ func (s *WriteBatch) SetCount(n int) {
 }
 
 func (s *WriteBatch) Put(key []byte, val []byte) {
-	s.SetCount(s.Count() + 1)
-
-	var tmp [10]byte
-	n := binary.PutUvarint(tmp[:], uint64(len(key)))
-	s.rep = append(s.rep, tmp[:n]...)
-	s.rep = append(s.rep, key...)
-
-	s.rep = append(s.rep, byteData)
-
-	n = binary.PutUvarint(tmp[:], uint64(len(val)))
-	s.rep = append(s.rep, tmp[:n]...)
-	s.rep = append(s.rep, val...)
+	s.RawPut(key, 0, val)
 }
 
 func (s *WriteBatch) Delete(key []byte) {
+	s.RawPut(key, y.BitDelete, nil)
+}
+
+func (s *WriteBatch) RawPut(key []byte, headerByte byte, val []byte) {
 	s.SetCount(s.Count() + 1)
 
 	var tmp [10]byte
@@ -76,7 +67,16 @@ func (s *WriteBatch) Delete(key []byte) {
 	s.rep = append(s.rep, tmp[:n]...)
 	s.rep = append(s.rep, key...)
 
-	s.rep = append(s.rep, byteDelete)
+	s.rep = append(s.rep, headerByte)
+
+	if val != nil {
+		y.AssertTrue((headerByte & y.BitDelete) == 0)
+		n = binary.PutUvarint(tmp[:], uint64(len(val)))
+		s.rep = append(s.rep, tmp[:n]...)
+		s.rep = append(s.rep, val...)
+	} else {
+		y.AssertTrue((headerByte & y.BitDelete) != 0)
+	}
 }
 
 func (s *WriteBatch) Iterate(h WriteBatchHandler) error {
@@ -85,16 +85,13 @@ func (s *WriteBatch) Iterate(h WriteBatchHandler) error {
 	n := s.Count()
 	for i := 0; i < n; i++ {
 		key, input = y.GetLengthPrefixedSlice(input)
-		b := input[0]
+		headerByte := input[0]
 		input = input[1:]
-		switch b {
-		case byteData:
+		if (headerByte & y.BitDelete) == 0 {
 			val, input = y.GetLengthPrefixedSlice(input)
-			h.Put(key, val)
-		case byteDelete:
-			h.Delete(key)
-		default:
-			return y.Errorf("Unknown WriteBatch op: %v", b)
+			h.RawPut(key, headerByte, val)
+		} else {
+			h.RawPut(key, headerByte, nil)
 		}
 	}
 	return nil
@@ -118,8 +115,7 @@ func (s *WriteBatch) Append(w *WriteBatch) {
 
 // WriteBatch's Iterate will communicate with this interface.
 type WriteBatchHandler interface {
-	Put(key []byte, val []byte)
-	Delete(key []byte)
+	RawPut(key []byte, headerByte byte, val []byte)
 }
 
 // MemtableInserter is a WriteBatchHandler. Applies WriteBatch to memtable.
@@ -127,5 +123,10 @@ type MemtableInserter struct {
 	mem *memtable.Memtable
 }
 
-func (s *MemtableInserter) Put(key []byte, val []byte) { s.mem.Put(key, val) }
-func (s *MemtableInserter) Delete(key []byte)          { s.mem.Delete(key) }
+func (s *MemtableInserter) RawPut(key []byte, headerByte byte, val []byte) {
+	// This WriteBatch logic is unnecessarily complicated. Need to clean up.
+	newVal := make([]byte, len(val)+1)
+	newVal[0] = headerByte
+	y.AssertTrue(len(val) == copy(newVal[1:], val))
+	s.mem.Put(key, newVal)
+}
