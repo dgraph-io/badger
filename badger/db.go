@@ -29,6 +29,7 @@ import (
 // DBOptions are params for creating DB object.
 type DBOptions struct {
 	Dir                     string
+	DirLowLevels            string
 	WriteBufferSize         int   // Memtable size.
 	NumLevelZeroTables      int   // Maximum number of Level 0 tables before we start compacting.
 	NumLevelZeroTablesStall int   // If we hit this number of Level 0 tables, we will stall until level 0 is compacted away.
@@ -43,6 +44,7 @@ type DBOptions struct {
 
 var DefaultDBOptions = DBOptions{
 	Dir:                     "/tmp",
+	DirLowLevels:            "/tmp",
 	WriteBufferSize:         1 << 20, // Size of each memtable.
 	NumLevelZeroTables:      5,
 	NumLevelZeroTablesStall: 10,
@@ -109,18 +111,18 @@ func (s *DB) getValueHelper(key []byte) []byte {
 }
 
 func decodeValue(val []byte, vlog *value.Log) []byte {
-	if (val[0] & y.BitDelete) != 0 {
+	if (val[0] & value.BitDelete) != 0 {
 		// Tombstone encountered.
 		return nil
 	}
-	if (val[0] & y.BitValueOffset) == 0 {
+	if (val[0] & value.BitValueOffset) == 0 {
 		return val[1:]
 	}
 	var vp value.Pointer
 	vp.Decode(val[1:])
 	var out []byte
 	vlog.Read(vp, func(entry value.Entry) {
-		if (entry.Value[0] & y.BitDelete) == 0 { // Not tombstone.
+		if (entry.Value[0] & value.BitDelete) == 0 { // Not tombstone.
 			out = entry.Value
 		}
 	})
@@ -171,7 +173,7 @@ func (s *DB) Write(entries []value.Entry) error {
 		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
 			s.mem.Put(entry.Key, entry.Value, entry.Meta)
 		} else {
-			s.mem.Put(entry.Key, ptrs[i].Encode(offsetBuf[:]), entry.Meta|y.BitValueOffset)
+			s.mem.Put(entry.Key, ptrs[i].Encode(offsetBuf[:]), entry.Meta|value.BitValueOffset)
 		}
 	}
 	return nil
@@ -192,7 +194,7 @@ func (s *DB) Delete(key []byte) error {
 	return s.Write([]value.Entry{
 		{
 			Key:  key,
-			Meta: y.BitDelete,
+			Meta: value.BitDelete,
 		},
 	})
 }
@@ -214,7 +216,7 @@ func (s *DB) makeRoomForWrite() error {
 	s.immWg.Add(1)
 	go func() {
 		defer s.immWg.Done()
-		f, err := y.TempFile(s.opt.Dir)
+		f, err := y.TempFile(s.opt.DirLowLevels)
 		y.Check(err)
 		y.Check(s.imm.WriteLevel0Table(f))
 		tbl, err := newTableHandler(f)
@@ -253,7 +255,7 @@ func (s *DBIterator) KeyValue() ([]byte, []byte) {
 }
 
 func (s *DBIterator) nextValid() {
-
+	// TODO: Keep moving next if we see deleted entries.
 }
 
 func (s *DBIterator) Name() string { return "DBIterator" }

@@ -61,7 +61,7 @@ func TestDBGet(t *testing.T) {
 func TestDBGetMore(t *testing.T) {
 	db := NewDB(DefaultDBOptions)
 	n := 500000
-	//	n := 10000000
+	//	n := 100000
 	for i := 0; i < n; i++ {
 		k := []byte(fmt.Sprintf("%09d", i))
 		require.NoError(t, db.Put(k, k))

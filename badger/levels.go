@@ -63,6 +63,11 @@ type levelsController struct {
 	opt    DBOptions
 }
 
+var (
+	// This is for getting timings between stalls.
+	lastUnstalled time.Time
+)
+
 // Will not be needed if we move ConcatIterator, MergingIterator to this package.
 func getTables(tables []*tableHandler) []*table.Table {
 	var out []*table.Table
@@ -106,15 +111,6 @@ func (s *levelHandler) getTotalSize() int64 {
 	return s.totalSize
 }
 
-//func (s *levelHandler) deleteTable(idx int) {
-//	s.Lock()
-//	defer s.Unlock()
-//	t := s.tables[idx]
-//	s.totalSize -= t.size()
-//	s.tables = append(s.tables[:idx], s.tables[idx+1:]...)
-//	fmt.Printf("Deleting table: level=%d idx=%d\n", s.level, idx)
-//}
-
 // deleteTables remove tables idx0, ..., idx1-1.
 func (s *levelHandler) deleteTables(idx0, idx1 int) {
 	s.Lock()
@@ -123,10 +119,6 @@ func (s *levelHandler) deleteTables(idx0, idx1 int) {
 		s.totalSize -= s.tables[i].size()
 	}
 	s.tables = append(s.tables[:idx0], s.tables[idx1:]...)
-	//	t := s.tables[idx]
-	//	s.totalSize -= t.size()
-	//	s.tables = append(s.tables[:idx], s.tables[idx+1:]...)
-	//	fmt.Printf("Deleting table: level=%d idx=%d\n", s.level, idx)
 }
 
 // replaceTables will replace tables[left:right] with newTables. Note this EXCLUDES tables[right].
@@ -272,17 +264,6 @@ func (s *levelsController) pickCompactLevel() int {
 	s.Lock() // For access to beingCompacted.
 	defer s.Unlock()
 
-	//	if s.opt.Verbose {
-	//		for i := 0; i < s.opt.MaxLevels; i++ {
-	//			var busy int
-	//			if s.beingCompacted[i] {
-	//				busy = 1
-	//			}
-	//			fmt.Printf("(i=%d, size=%d, busy=%d, numTables=%d) ", i, s.levels[i].getTotalSize(), busy, len(s.levels[i].tables))
-	//		}
-	//		fmt.Printf("\n")
-	//	}
-
 	// Going from higher levels to lower levels offers a small gain.
 	// It probably has to do with level 1 being smaller when level 0 has to merge with the whole of
 	// level 1.
@@ -304,21 +285,8 @@ func (s *levelsController) pickCompactLevel() int {
 		s.beingCompacted[0], s.beingCompacted[1] = true, true
 		return 0
 	}
-
-	//// Doing work preemptively seems to make us slower.
-	//	for i := s.opt.MaxLevels - 2; i >= 0; i-- {
-	//		if s.beingCompacted[i] || s.beingCompacted[i+1] {
-	//			continue
-	//		}
-	//		if i == 0 && len(s.levels[0].tables) <= s.opt.NumLevelZeroTables { // Can be different from above.
-	//			continue
-	//		}
-	//		if float64(s.levels[i].getTotalSize()) < 0.75*float64(s.levels[i].maxTotalSize) {
-	//			continue
-	//		}
-	//		s.beingCompacted[i], s.beingCompacted[i+1] = true, true
-	//		return i
-	//	}
+	// Doing work preemptively seems to make us slower.
+	// If you want to try that, add a weaker condition here such as >0.75*totalSize.
 	return -1
 }
 
@@ -328,12 +296,7 @@ func (s *levelsController) tryCompact(workerID int) {
 	if l < 0 {
 		return
 	}
-
-	//	if s.opt.Verbose {
-	//		fmt.Printf("tryCompact(worker=%d): Merging level %d to %d\n", workerID, l, l+1)
-	//	}
 	y.Check(s.doCompact(l)) // May relax check later.
-
 	s.Lock()
 	defer s.Unlock()
 	s.beingCompacted[l] = false
@@ -383,7 +346,6 @@ func (s *levelsController) doCompact(l int) error {
 	}
 
 	// Next level has level>=1 and we can use ConcatIterator as key ranges do not overlap.
-	//	it1 := )
 	var iters []y.Iterator
 	if l == 0 {
 		iters = appendIteratorsReversed(iters, thisLevel.tables[srcIdx0:srcIdx1])
@@ -402,7 +364,16 @@ func (s *levelsController) doCompact(l int) error {
 		wg.Add(1)
 		go func(builder *table.TableBuilder, n int) {
 			defer wg.Done()
-			fd, err := y.TempFile(s.opt.Dir)
+			defer builder.Close()
+
+			var fd *os.File
+			var err error
+			if l == 0 {
+				fd, err = y.TempFile(s.opt.DirLowLevels)
+			} else {
+				fd, err = y.TempFile(s.opt.Dir)
+			}
+
 			y.Check(err)
 			fd.Write(builder.Finish())
 			newTable, err := newTableHandler(fd)
@@ -411,35 +382,22 @@ func (s *levelsController) doCompact(l int) error {
 		}(builder, n)
 	}
 
-	//// If we do not want to start a Go routine:
-	//	finishTable := func(builder *table.TableBuilder) {
-	//		fd, err := y.TempFile(s.opt.Dir)
-	//		y.Check(err)
-	//		fd.Write(builder.Finish())
-	//		newTable, err := newTableHandler(fd)
-	//		y.Check(err)
-	//		newTables = append(newTables, newTable)
-	//	}
-
-	builder := new(table.TableBuilder)
+	builder := table.NewTableBuilder()
 	for it.SeekToFirst(); it.Valid(); it.Next() {
 		if int64(builder.FinalSize()) > s.opt.MaxTableSize {
 			finishTable(builder)
-			// If we do not want a Go routine, replace the following with builder.Reset().
-			builder = new(table.TableBuilder)
+			builder = table.NewTableBuilder()
 		}
 		kSlice, vSlice := it.KeyValue()
-		// Safer to make copies as table uses []byte and might overwrite.
-		key := make([]byte, len(kSlice))
-		val := make([]byte, len(vSlice))
-		y.AssertTrue(len(kSlice) == copy(key, kSlice))
-		y.AssertTrue(len(vSlice) == copy(val, vSlice))
-		if err := builder.Add(key, val); err != nil {
+		// Builder will make copies into some byte buffer that will be written to a file.
+		if err := builder.Add(kSlice, vSlice); err != nil {
 			return err
 		}
 	}
 	if !builder.Empty() {
 		finishTable(builder)
+	} else {
+		builder.Close() // Remember to still close the builder.
 	}
 	wg.Wait()
 
@@ -448,19 +406,11 @@ func (s *levelsController) doCompact(l int) error {
 			l, l+1, srcIdx0, srcIdx1, left, right, left, left+len(newTables), time.Since(timeStart))
 	}
 	nextLevel.replaceTables(left, right, newTables)
-	//	y.AssertTrue(thisLevel.tables[tableIdx] == t) // We do not expect any change here.
 	thisLevel.deleteTables(srcIdx0, srcIdx1) // Function will acquire level lock.
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
-	// Do a assert as a sanity check.
-	//	y.AssertTrue(l != 0 || tableIdx == 0)
 	return nil
 }
-
-var (
-	// Temporary. Want to get timings between stalls.
-	lastUnstalled time.Time
-)
 
 func (s *levelsController) addLevel0Table(t *tableHandler) {
 	for !s.levels[0].tryAddLevel0Table(t, s.opt.Verbose) {
@@ -582,7 +532,7 @@ func appendIteratorsReversed(out []y.Iterator, th []*tableHandler) []y.Iterator 
 	return out
 }
 
-// AppendIterators appends iterators to an array of iterators, for merging.
+// appendIterators appends iterators to an array of iterators, for merging.
 func (s *levelHandler) appendIterators(iters []y.Iterator) []y.Iterator {
 	s.RLock()
 	defer s.RUnlock()
@@ -594,6 +544,7 @@ func (s *levelHandler) appendIterators(iters []y.Iterator) []y.Iterator {
 	return append(iters, table.NewConcatIterator(getTables(s.tables)))
 }
 
+// appendIterators appends iterators to an array of iterators, for merging.
 func (s *levelsController) appendIterators(iters []y.Iterator) []y.Iterator {
 	for _, level := range s.levels {
 		iters = level.appendIterators(iters)
