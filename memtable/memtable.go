@@ -50,31 +50,14 @@ func NewMemtable() *Memtable {
 // Put sets a key-value pair. We don't use onlyIfAbsent now. And we ignore the old value returned
 // by the skiplist. These can be used later on to support more operations, e.g., GetOrCreate can
 // be a Put with an empty value with onlyIfAbsent=true.
-func (s *Memtable) Put(key, value []byte) {
-	data := s.arena.Allocate(len(key) + len(value))
+func (s *Memtable) Put(key, value []byte, meta byte) {
+	data := s.arena.Allocate(len(key) + len(value) + 1)
 	y.AssertTrue(len(key) == copy(data[:len(key)], key))
 	v := data[len(key):]
-	y.AssertTrue(len(value) == copy(v, value))
+	v[0] = meta
+	y.AssertTrue(len(value) == copy(v[1:], value))
 	s.table.Put(data[:len(key)], unsafe.Pointer(&v), false)
 }
-
-//func (s *Memtable) Put(key, value []byte) {
-//	data := s.arena.Allocate(1 + len(key) + len(value))
-//	y.AssertTrue(len(key) == copy(data[:len(key)], key))
-//	v := data[len(key):]
-//	v[0] = byteData
-//	y.AssertTrue(len(value) == copy(v[1:], value))
-//	s.table.Put(data[:len(key)], unsafe.Pointer(&v), false)
-//}
-
-// Delete deletes a key from the table.
-//func (s *Memtable) Delete(key []byte) {
-//	data := s.arena.Allocate(1 + len(key))
-//	y.AssertTrue(len(key) == copy(data[:len(key)], key))
-//	v := data[len(key):]
-//	v[0] = byteDelete
-//	s.table.Put(data[:len(key)], unsafe.Pointer(&v), false)
-//}
 
 // WriteLevel0Table flushes memtable. It drops deleteValues.
 func (s *Memtable) WriteLevel0Table(f *os.File) error {
@@ -121,10 +104,7 @@ func (s *Iterator) KeyValue() ([]byte, []byte) {
 	return s.Key(), s.Value()
 }
 
-// IsDeleted returns whether the value returned denotes a deletion.
-//func IsDeleted(v []byte) bool { return v[0] == byteDelete }
-
-// Get looks up a key. Returns value which could indicate a deletion. If not found, returns nil.
+// Get looks up a key. This includes the meta byte.
 func (s *Memtable) Get(key []byte) []byte {
 	v := s.table.Get(key)
 	if v == nil {

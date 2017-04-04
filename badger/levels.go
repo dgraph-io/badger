@@ -365,7 +365,6 @@ func (s *levelsController) doCompact(l int) error {
 	nextLevel := s.levels[l+1]
 	srcIdx0, srcIdx1 := thisLevel.pickCompactTables()
 	smallest, biggest := thisLevel.keyRange(srcIdx0, srcIdx1)
-	//	t := thisLevel.getTable(tableIdx) // Want to compact away t.
 	// In case you worry that levelHandler.tables[tableIdx] is no longer the same as before,
 	// note that the code is delicate. These two levels are already marked for compaction, so
 	// nobody should be able to mutate levelHandler.tables.
@@ -376,7 +375,6 @@ func (s *levelsController) doCompact(l int) error {
 		// No overlap with the next level. Just move the file(s) down to the next level.
 		// Function will acquire level lock.
 		nextLevel.replaceTables(left, right, thisLevel.tables[srcIdx0:srcIdx1])
-		//		y.AssertTrue(thisLevel.tables[tableIdx] == t)            // We do not expect any change here.
 		thisLevel.deleteTables(srcIdx0, srcIdx1) // Function will acquire level lock.
 		if s.opt.Verbose {
 			fmt.Printf("Merge: Move table [%d,%d) from level %d to %d\n", srcIdx0, srcIdx1, l, l+1)
@@ -585,7 +583,7 @@ func appendIteratorsReversed(out []y.Iterator, th []*tableHandler) []y.Iterator 
 }
 
 // AppendIterators appends iterators to an array of iterators, for merging.
-func (s *levelHandler) AppendIterators(iters []y.Iterator) []y.Iterator {
+func (s *levelHandler) appendIterators(iters []y.Iterator) []y.Iterator {
 	s.RLock()
 	defer s.RUnlock()
 	if s.level == 0 {
@@ -596,9 +594,9 @@ func (s *levelHandler) AppendIterators(iters []y.Iterator) []y.Iterator {
 	return append(iters, table.NewConcatIterator(getTables(s.tables)))
 }
 
-func (s *levelsController) AppendIterators(iters []y.Iterator) []y.Iterator {
+func (s *levelsController) appendIterators(iters []y.Iterator) []y.Iterator {
 	for _, level := range s.levels {
-		iters = level.AppendIterators(iters)
+		iters = level.appendIterators(iters)
 	}
 	return iters
 }

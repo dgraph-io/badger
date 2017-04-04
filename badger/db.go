@@ -91,6 +91,8 @@ func (s *DB) getMemImm() (*memtable.Memtable, *memtable.Memtable) {
 	return s.mem, s.imm
 }
 
+// getValueHelper returns the value in memtable or disk for given key.
+// Note that value will include meta byte.
 func (s *DB) getValueHelper(key []byte) []byte {
 	mem, imm := s.getMemImm() // Lock should be released.
 	if mem != nil {
@@ -111,18 +113,18 @@ func decodeValue(val []byte, vlog *value.Log) []byte {
 		// Tombstone encountered.
 		return nil
 	}
-	if (val[0] & y.BitValueOffset) != 0 {
-		var vp value.Pointer
-		vp.Decode(val[1:])
-		var out []byte
-		vlog.Read(vp, func(entry value.Entry) {
-			if (entry.Value[0] & y.BitDelete) == 0 { // Not tombstone.
-				out = entry.Value[1:]
-			}
-		})
-		return out
+	if (val[0] & y.BitValueOffset) == 0 {
+		return val[1:]
 	}
-	return val[1:]
+	var vp value.Pointer
+	vp.Decode(val[1:])
+	var out []byte
+	vlog.Read(vp, func(entry value.Entry) {
+		if (entry.Value[0] & y.BitDelete) == 0 { // Not tombstone.
+			out = entry.Value
+		}
+	})
+	return out
 }
 
 // Get looks for key and returns value. If not found, return nil.
@@ -134,82 +136,65 @@ func (s *DB) Get(key []byte) []byte {
 	return decodeValue(val, &s.vlog)
 }
 
-type vlogWriter struct {
-	vlog    *value.Log
-	entries []value.Entry
-}
+// Write applies a list of value.Entry to our memtable.
+func (s *DB) Write(entries []value.Entry) error {
+	//	writer := vlogWriter{
+	//		vlog: &s.vlog,
+	//	}
+	//	y.Check(wb.Iterate(&writer))
+	//	ptrs, err := s.vlog.Write(writer.entries)
+	//	y.Check(err)
+	//	y.AssertTrue(len(ptrs) == wb.Count())
 
-/*
-Currently, there are two WriteBatches. The first one has values=byteData/byteDelete + value.
-The vlogWriter here pushes WriteBatch into valueLog and gets Pointers.
-The data sent to valueLog is the same: byteData/byteDelete + value.
-After we get these Pointers, we want to insert that into our memtable.
-*/
-func (s *vlogWriter) RawPut(key []byte, headerByte byte, val []byte) {
-	v := make([]byte, len(val)+1)
-	v[0] = headerByte
-	y.AssertTrue(len(val) == copy(v[1:], val))
-	s.entries = append(s.entries, value.Entry{
-		Key:   key,
-		Value: v,
-	})
-}
-
-// Reduces original WriteBatch containing value data to WriteBatch containing value offsets.
-type writebatchRewriter struct {
-	out  *WriteBatch
-	ptrs []value.Pointer
-	idx  int
-	db   *DB
-}
-
-func (s *writebatchRewriter) RawPut(key []byte, headerByte byte, val []byte) {
-	if (headerByte & y.BitDelete) != 0 {
-		s.out.RawPut(key, headerByte, nil)
-	} else if len(val) >= s.db.opt.ValueThreshold {
-		s.out.RawPut(key, y.BitValueOffset, s.ptrs[s.idx].Encode())
-	} else {
-		s.out.RawPut(key, 0, val)
-	}
-	s.idx++
-}
-
-// Write applies a WriteBatch.
-func (s *DB) Write(wb *WriteBatch) error {
-	writer := vlogWriter{
-		vlog: &s.vlog,
-	}
-	y.Check(wb.Iterate(&writer))
-	ptrs, err := s.vlog.Write(writer.entries)
+	//	// Create a new WriteBatch for offsets. Could consider using a different inserter for WriteBatch.
+	//	wbReduced := NewWriteBatch(len(ptrs))
+	//	writebatchRewriter := writebatchRewriter{
+	//		out:  wbReduced,
+	//		ptrs: ptrs,
+	//		db:   s,
+	//	}
+	//	y.Check(wb.Iterate(&writebatchRewriter))
+	//	if err := s.makeRoomForWrite(); err != nil {
+	//		return err
+	//	}
+	//	return wbReduced.InsertInto(s.mem)
+	ptrs, err := s.vlog.Write(entries)
 	y.Check(err)
-	y.AssertTrue(len(ptrs) == wb.Count())
+	y.AssertTrue(len(ptrs) == len(entries))
 
-	// Create a new WriteBatch for offsets. Could consider using a different inserter for WriteBatch.
-	wbReduced := NewWriteBatch(len(ptrs))
-	writebatchRewriter := writebatchRewriter{
-		out:  wbReduced,
-		ptrs: ptrs,
-		db:   s,
-	}
-	y.Check(wb.Iterate(&writebatchRewriter))
 	if err := s.makeRoomForWrite(); err != nil {
 		return err
 	}
-	return wbReduced.InsertInto(s.mem)
+
+	var offsetBuf [20]byte
+	for i, entry := range entries {
+		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
+			s.mem.Put(entry.Key, entry.Value, entry.Meta)
+		} else {
+			s.mem.Put(entry.Key, ptrs[i].Encode(offsetBuf[:]), entry.Meta|y.BitValueOffset)
+		}
+	}
+	return nil
 }
 
 // Put puts a key-val pair.
 func (s *DB) Put(key []byte, val []byte) error {
-	wb := NewWriteBatch(1)
-	wb.Put(key, val)
-	return s.Write(wb)
+	return s.Write([]value.Entry{
+		{
+			Key:   key,
+			Value: val,
+		},
+	})
 }
 
 // Delete deletes a key.
 func (s *DB) Delete(key []byte) error {
-	wb := NewWriteBatch(1)
-	wb.Delete(key)
-	return s.Write(wb)
+	return s.Write([]value.Entry{
+		{
+			Key:  key,
+			Meta: y.BitDelete,
+		},
+	})
 }
 
 func (s *DB) makeRoomForWrite() error {
@@ -287,7 +272,7 @@ func (s *DB) NewIterator() y.Iterator {
 	if imm != nil {
 		iters = append(iters, imm.NewIterator())
 	}
-	iters = s.lc.AppendIterators(iters)
+	iters = s.lc.appendIterators(iters)
 	return &DBIterator{
 		it: y.NewMergeIterator(iters),
 		db: s,

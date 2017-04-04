@@ -132,7 +132,7 @@ func TestCompactBasic(t *testing.T) {
 		mt := memtable.NewMemtable()
 		// Each memtable is about 1M. Level 0 is ~10 to 20 memtables. That is 10M to 20M. Level 1 should be about this size.
 		for mt.MemUsage() < 1<<20 {
-			mt.Put([]byte(randomKey()), value)
+			mt.Put([]byte(randomKey()), value, 0)
 		}
 		f, err := y.TempFile("/tmp") // TODO: Stop using temp files.
 		// TODO: Add file closing logic. Maybe use runtime finalizer and let GC close the file.

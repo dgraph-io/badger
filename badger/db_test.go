@@ -19,26 +19,22 @@ package badger
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
-	//	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/value"
 )
 
 func TestDBWrite(t *testing.T) {
 	db := NewDB(DefaultDBOptions)
-	wb := NewWriteBatch(10)
+	var entries []value.Entry
 	for i := 0; i < 100; i++ {
-		wb.Put([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)))
+		entries = append(entries, value.Entry{
+			Key:   []byte(fmt.Sprintf("key%d", i)),
+			Value: []byte(fmt.Sprintf("val%d", i)),
+		})
 	}
-	require.NoError(t, db.Write(wb))
-
-	wb2 := NewWriteBatch(10)
-	for i := 0; i < 100; i++ {
-		wb2.Put([]byte(fmt.Sprintf("KEY%d", i)), []byte(fmt.Sprintf("VAL%d", i)))
-	}
-	require.NoError(t, db.Write(wb2))
+	require.NoError(t, db.Write(entries))
 }
 
 func TestDBGet(t *testing.T) {
@@ -111,8 +107,6 @@ func TestDBGetMore(t *testing.T) {
 }
 
 // Put a lot of data to move some data to disk. Then iterate.
-// This is a simple test. We do not write or compact or do anything when iterating.
-// We want to check that the basic logic is correct, without worrying about concurrency.
 func TestDBIterateBasic(t *testing.T) {
 	db := NewDB(DefaultDBOptions)
 	n := 500000
@@ -121,8 +115,6 @@ func TestDBIterateBasic(t *testing.T) {
 		k := []byte(fmt.Sprintf("%09d", i))
 		require.NoError(t, db.Put(k, k))
 	}
-
-	time.Sleep(100 * time.Millisecond)
 
 	it := db.NewIterator()
 	var count int

@@ -36,6 +36,7 @@ type Log struct {
 
 type Entry struct {
 	Key   []byte
+	Meta  byte
 	Value []byte
 }
 
@@ -62,11 +63,12 @@ type Pointer struct {
 	Offset int64
 }
 
-func (p Pointer) Encode() []byte {
-	b := make([]byte, 4+8)
+// Encode encodes Pointer into byte buffer. We don't return because this can avoid mem allocation.
+func (p Pointer) Encode(b []byte) []byte {
+	y.AssertTrue(len(b) >= 12)
 	binary.BigEndian.PutUint32(b[:4], p.Len)
 	binary.BigEndian.PutUint64(b[4:12], uint64(p.Offset)) // Might want to use uint64 for Offset.
-	return b
+	return b[:12]
 }
 
 func (p *Pointer) Decode(b []byte) {
@@ -103,12 +105,13 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 		header := h.Encode()
 
 		var p Pointer
-		p.Len = uint32(len(header)) + h.klen + h.vlen
+		p.Len = uint32(len(header)) + h.klen + h.vlen + 1
 		p.Offset = int64(buf.Len())
 		ptrs = append(ptrs, p)
 
 		buf.Write(header)
 		buf.Write(e.Key)
+		buf.WriteByte(e.Meta)
 		buf.Write(e.Value)
 	}
 
@@ -137,7 +140,8 @@ func (l *Log) Read(p Pointer, fn func(Entry)) error {
 	var h header
 	buf = h.Decode(buf)
 	e.Key = buf[0:h.klen]
-	buf = buf[h.klen:]
+	e.Meta = buf[h.klen]
+	buf = buf[h.klen+1:]
 	e.Value = buf[0:h.vlen]
 	fn(e)
 	return nil

@@ -18,10 +18,43 @@ package value
 
 import (
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/dgraph-io/badger/y"
 )
+
+func TestBasic(t *testing.T) {
+	fd, err := ioutil.TempFile("", "badger_")
+	y.Check(err)
+
+	var log Log
+	log.Open(fd.Name())
+	ptrs, err := log.Write([]Entry{
+		{
+			Key:   []byte("samplekey"),
+			Value: []byte("sampleval"),
+			Meta:  123,
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, ptrs, 1)
+	var readEntries []Entry
+	log.Read(ptrs[0], func(e Entry) {
+		readEntries = append(readEntries, e)
+	})
+	require.EqualValues(t, []Entry{
+		{
+			Key:   []byte("samplekey"),
+			Value: []byte("sampleval"),
+			Meta:  123,
+		},
+	}, readEntries)
+}
 
 func BenchmarkReadWrite(b *testing.B) {
 	rwRatio := []float32{
