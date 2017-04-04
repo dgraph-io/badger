@@ -355,17 +355,33 @@ func (s *levelsController) doCompact(l int) error {
 	}
 	iters = append(iters, table.NewConcatIterator(getTables(nextLevel.tables[left:right])))
 	it := y.NewMergeIterator(iters)
+	it.SeekToFirst()
 
-	var newTables []*tableHandler
+	var newTables [100]*tableHandler
 	var wg sync.WaitGroup
-	finishTable := func(builder *table.TableBuilder) {
-		n := len(newTables)
-		newTables = append(newTables, nil)
-		wg.Add(1)
-		go func(builder *table.TableBuilder, n int) {
-			defer wg.Done()
-			defer builder.Close()
+	var i int
+	for ; it.Valid(); i++ {
+		y.AssertTruef(i < len(newTables), "Rewriting too many tables: %d %d", i, len(newTables))
+		builder := table.NewTableBuilder()
+		for ; it.Valid(); it.Next() {
+			if int64(builder.FinalSize()) > s.opt.MaxTableSize {
+				break
+			}
+			key, val := it.KeyValue()
+			if err := builder.Add(key, val); err != nil {
+				builder.Close()
+				return err
+			}
+		}
+		if builder.Empty() {
+			builder.Close()
+			continue
+		}
 
+		wg.Add(1)
+		go func(idx int, builder *table.TableBuilder) {
+			defer builder.Close()
+			defer wg.Done()
 			var fd *os.File
 			var err error
 			if l == 0 {
@@ -373,39 +389,20 @@ func (s *levelsController) doCompact(l int) error {
 			} else {
 				fd, err = y.TempFile(s.opt.Dir)
 			}
-
 			y.Check(err)
 			fd.Write(builder.Finish())
-			newTable, err := newTableHandler(fd)
+			newTables[idx], err = newTableHandler(fd)
 			y.Check(err)
-			newTables[n] = newTable
-		}(builder, n)
-	}
-
-	builder := table.NewTableBuilder()
-	for it.SeekToFirst(); it.Valid(); it.Next() {
-		if int64(builder.FinalSize()) > s.opt.MaxTableSize {
-			finishTable(builder)
-			builder = table.NewTableBuilder()
-		}
-		kSlice, vSlice := it.KeyValue()
-		// Builder will make copies into some byte buffer that will be written to a file.
-		if err := builder.Add(kSlice, vSlice); err != nil {
-			return err
-		}
-	}
-	if !builder.Empty() {
-		finishTable(builder)
-	} else {
-		builder.Close() // Remember to still close the builder.
+		}(i, builder)
 	}
 	wg.Wait()
 
+	newTablesSlice := newTables[:i]
 	if s.opt.Verbose {
 		fmt.Printf("LOG Compact %d->%d: Del [%d,%d), Del [%d,%d), Add [%d,%d), took %v\n",
-			l, l+1, srcIdx0, srcIdx1, left, right, left, left+len(newTables), time.Since(timeStart))
+			l, l+1, srcIdx0, srcIdx1, left, right, left, left+len(newTablesSlice), time.Since(timeStart))
 	}
-	nextLevel.replaceTables(left, right, newTables)
+	nextLevel.replaceTables(left, right, newTablesSlice)
 	thisLevel.deleteTables(srcIdx0, srcIdx1) // Function will acquire level lock.
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
@@ -457,7 +454,8 @@ func (s *levelHandler) tryAddLevel0Table(t *tableHandler, verbose bool) bool {
 	return true
 }
 
-func (s *levelHandler) check() {
+// Check does some sanity check on one level of data or in-memory index.
+func (s *levelHandler) Check() {
 	if s.level == 0 {
 		return
 	}
@@ -550,4 +548,11 @@ func (s *levelsController) appendIterators(iters []y.Iterator) []y.Iterator {
 		iters = level.appendIterators(iters)
 	}
 	return iters
+}
+
+// Check does some sanity check on our levels data or in-memory index for all levels.
+func (s *levelsController) Check() {
+	for _, l := range s.levels {
+		l.Check()
+	}
 }

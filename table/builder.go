@@ -17,15 +17,23 @@
 package table
 
 import (
+	"bytes"
 	"encoding/binary"
-	//	"fmt"
 	"math"
+	"sync"
 
 	"github.com/dgraph-io/badger/y"
 )
 
 //var tableSize int64 = 50 << 20
-var restartInterval int = 100 // Might want to change this to be based on total size instead of numKeys.
+var (
+	restartInterval int = 100 // Might want to change this to be based on total size instead of numKeys.
+	bufPool             = sync.Pool{
+		New: func() interface{} {
+			return &bytes.Buffer{}
+		},
+	}
+)
 
 type header struct {
 	plen int // Overlap with base key.
@@ -65,7 +73,7 @@ type TableBuilder struct {
 	counter int // Number of keys written for the current block.
 
 	// Typically tens or hundreds of meg. This is for one single file.
-	buf []byte
+	buf *bytes.Buffer
 
 	// TODO: Consider removing this var. It just tracks size of buf.
 	pos int
@@ -79,9 +87,27 @@ type TableBuilder struct {
 	prevOffset int
 }
 
-func (b *TableBuilder) Empty() bool { return len(b.buf) == 0 }
+func NewTableBuilder() *TableBuilder {
+	return &TableBuilder{
+		buf: bufPool.Get().(*bytes.Buffer),
+	}
+}
 
-func (b *TableBuilder) Reset() {
+// Close closes the TableBuilder. Do not use buf field anymore.
+func (b *TableBuilder) Close() {
+	b.buf.Reset()
+	bufPool.Put(b.buf)
+}
+
+//buf := bufPool.Get().(*bytes.Buffer)
+//	defer func() {
+//		buf.Reset()
+//		bufPool.Put(buf)
+//	}()
+
+func (b *TableBuilder) Empty() bool { return b.buf.Len() == 0 }
+
+/*func (b *TableBuilder) Reset() {
 	b.counter = 0
 	b.buf = make([]byte, 0, 1<<20)
 	b.pos = 0
@@ -89,11 +115,12 @@ func (b *TableBuilder) Reset() {
 
 	b.baseKey = []byte{}
 	b.restarts = b.restarts[:0]
-}
+}*/
 
 // write appends d to our buffer.
 func (b *TableBuilder) write(d []byte) {
-	b.buf = append(b.buf, d...)
+	//	b.buf = append(b.buf, d...)
+	b.buf.Write(d)
 	b.pos += len(d)
 	y.AssertTruef(b.pos >= b.baseOffset, "b.pos=%d b.baseOffset=%d d=%v", b.pos, b.baseOffset, d)
 }
@@ -113,7 +140,9 @@ func (b *TableBuilder) addHelper(key, value []byte) {
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
 	if len(b.baseKey) == 0 {
-		b.baseKey = key
+		// Make a copy. Builder should not keep references. Otherwise, caller has to be very careful
+		// and will have to make copies of keys every time they add to builder, which is even worse.
+		b.baseKey = append(b.baseKey[:0], key...)
 		diffKey = key
 	} else {
 		diffKey = b.keyDiff(key)
@@ -188,5 +217,5 @@ func (b *TableBuilder) Finish() []byte {
 	b.finishBlock() // This will never start a new block.
 	index := b.blockIndex()
 	b.write(index)
-	return b.buf
+	return b.buf.Bytes()
 }

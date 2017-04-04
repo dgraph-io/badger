@@ -19,7 +19,6 @@ package value
 import (
 	"bytes"
 	"encoding/binary"
-	"io"
 	"os"
 	"sync"
 	"syscall"
@@ -29,9 +28,19 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Values have their first byte being byteData or byteDelete. This helps us distinguish between
+// a key that has never been seen and a key that has been explicitly deleted.
+const (
+	BitDelete      = 1
+	BitValueOffset = 2
+)
+
 type Log struct {
 	x.SafeMutex
 	fd *os.File
+
+	// Keep track of how many bytes written so that we don't have to seek to end of file.
+	written uint64
 }
 
 type Entry struct {
@@ -60,7 +69,7 @@ func (h *header) Decode(buf []byte) []byte {
 
 type Pointer struct {
 	Len    uint32
-	Offset int64
+	Offset uint64
 }
 
 // Encode encodes Pointer into byte buffer. We don't return because this can avoid mem allocation.
@@ -74,7 +83,7 @@ func (p Pointer) Encode(b []byte) []byte {
 func (p *Pointer) Decode(b []byte) {
 	y.AssertTrue(len(b) >= 12)
 	p.Len = binary.BigEndian.Uint32(b[:4])
-	p.Offset = int64(binary.BigEndian.Uint64(b[4:12]))
+	p.Offset = binary.BigEndian.Uint64(b[4:12])
 }
 
 func (l *Log) Open(fname string) {
@@ -89,6 +98,7 @@ var bufPool = sync.Pool{
 	},
 }
 
+// Write batches the write of an array of entries to value log.
 func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 	buf := bufPool.Get().(*bytes.Buffer)
 	defer func() {
@@ -106,7 +116,7 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 
 		var p Pointer
 		p.Len = uint32(len(header)) + h.klen + h.vlen + 1
-		p.Offset = int64(buf.Len())
+		p.Offset = uint64(buf.Len()) + l.written
 		ptrs = append(ptrs, p)
 
 		buf.Write(header)
@@ -117,24 +127,16 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 
 	l.Lock()
 	defer l.Unlock()
-
-	off, err := l.fd.Seek(0, io.SeekEnd)
-	if err != nil {
-		return ptrs, errors.Wrap(err, "Unable to seek")
-	}
-	for i := range ptrs {
-		p := &ptrs[i]
-		p.Offset += off
-	}
-
-	_, err = l.fd.Write(buf.Bytes())
+	written, err := l.fd.Write(buf.Bytes())
+	l.written += uint64(written)
 	return ptrs, errors.Wrap(err, "Unable to write to file")
 }
 
+// Read reads the value log at a given location.
 func (l *Log) Read(p Pointer, fn func(Entry)) error {
 	var e Entry
 	buf := make([]byte, p.Len)
-	if _, err := l.fd.ReadAt(buf, p.Offset); err != nil {
+	if _, err := l.fd.ReadAt(buf, int64(p.Offset)); err != nil {
 		return err
 	}
 	var h header

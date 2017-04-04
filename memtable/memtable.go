@@ -62,8 +62,8 @@ func (s *Memtable) Put(key, value []byte, meta byte) {
 // WriteLevel0Table flushes memtable. It drops deleteValues.
 func (s *Memtable) WriteLevel0Table(f *os.File) error {
 	iter := s.NewIterator()
-	b := table.TableBuilder{}
-	b.Reset()
+	b := table.NewTableBuilder()
+	defer b.Close()
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 		if err := b.Add(iter.Key(), iter.Value()); err != nil {
 			return err

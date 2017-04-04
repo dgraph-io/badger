@@ -60,12 +60,13 @@ func TestDBGet(t *testing.T) {
 // WARNING: This test might take a while but it should pass!
 func TestDBGetMore(t *testing.T) {
 	db := NewDB(DefaultDBOptions)
-	n := 500000
-	//	n := 100000
+	//	n := 500000
+	n := 100000
 	for i := 0; i < n; i++ {
 		k := []byte(fmt.Sprintf("%09d", i))
 		require.NoError(t, db.Put(k, k))
 	}
+	db.Check()
 	for i := 0; i < n; i++ {
 		if (i % 100000) == 0 {
 			// Display some progress. Right now, it's not very fast with no caching.
@@ -81,6 +82,7 @@ func TestDBGetMore(t *testing.T) {
 		v := []byte(fmt.Sprintf("val%09d", i))
 		require.NoError(t, db.Put(k, v))
 	}
+	db.Check()
 	for i := 0; i < n; i++ {
 		if (i % 100000) == 0 {
 			// Display some progress. Right now, it's not very fast with no caching.
@@ -96,6 +98,7 @@ func TestDBGetMore(t *testing.T) {
 		k := []byte(fmt.Sprintf("%09d", i))
 		require.NoError(t, db.Delete(k))
 	}
+	db.Check()
 	for i := 0; i < n; i++ {
 		if (i % 100000) == 0 {
 			// Display some progress. Right now, it's not very fast with no caching.

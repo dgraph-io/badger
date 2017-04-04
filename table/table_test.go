@@ -45,8 +45,8 @@ func buildTestTable(t *testing.T, n int) *os.File {
 
 // keyValues is n by 2 where n is number of pairs.
 func buildTable(t *testing.T, keyValues [][]string) *os.File {
-	b := TableBuilder{}
-	b.Reset()
+	b := NewTableBuilder()
+	defer b.Close()
 	f, err := y.TempFile("/tmp")
 	require.NoError(t, err)
 

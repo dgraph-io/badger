@@ -127,7 +127,6 @@ func (itr *BlockIterator) SeekToLast() {
 func (itr *BlockIterator) parseKV(h header) {
 	itr.ensureKeyCap(h)
 	itr.key = itr.ikey[:h.plen+h.klen]
-	// TODO: We shouldn't have to do a copy here.
 	y.AssertTrue(h.plen == copy(itr.key, itr.baseKey[:h.plen]))
 	y.AssertTrue(h.klen == copy(itr.key[h.plen:], itr.data[itr.pos:itr.pos+h.klen]))
 	itr.pos += h.klen

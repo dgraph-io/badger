@@ -140,26 +140,6 @@ func (s *DB) Get(key []byte) []byte {
 
 // Write applies a list of value.Entry to our memtable.
 func (s *DB) Write(entries []value.Entry) error {
-	//	writer := vlogWriter{
-	//		vlog: &s.vlog,
-	//	}
-	//	y.Check(wb.Iterate(&writer))
-	//	ptrs, err := s.vlog.Write(writer.entries)
-	//	y.Check(err)
-	//	y.AssertTrue(len(ptrs) == wb.Count())
-
-	//	// Create a new WriteBatch for offsets. Could consider using a different inserter for WriteBatch.
-	//	wbReduced := NewWriteBatch(len(ptrs))
-	//	writebatchRewriter := writebatchRewriter{
-	//		out:  wbReduced,
-	//		ptrs: ptrs,
-	//		db:   s,
-	//	}
-	//	y.Check(wb.Iterate(&writebatchRewriter))
-	//	if err := s.makeRoomForWrite(); err != nil {
-	//		return err
-	//	}
-	//	return wbReduced.InsertInto(s.mem)
 	ptrs, err := s.vlog.Write(entries)
 	y.Check(err)
 	y.AssertTrue(len(ptrs) == len(entries))
