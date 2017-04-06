@@ -260,3 +260,5 @@ func (s *DB) NewIterator() y.Iterator {
 		db: s,
 	}
 }
+
+func (s *DB) Check() { s.lc.Check() }

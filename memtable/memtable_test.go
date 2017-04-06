@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/dgraph-io/badger/value"
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -31,7 +32,7 @@ func extract(m *Memtable) ([]string, []string) {
 	for it.SeekToFirst(); it.Valid(); it.Next() {
 		keys = append(keys, string(it.Key()))
 		v := it.Value()
-		if (y.BitDelete & v[0]) != 0 {
+		if (value.BitDelete & v[0]) != 0 {
 			vals = append(vals, "DEL")
 		} else {
 			vals = append(vals, string(v[1:]))
@@ -49,8 +50,8 @@ func TestBasic(t *testing.T) {
 	require.EqualValues(t, []string{"somekey"}, k)
 	require.EqualValues(t, []string{"hahaha"}, v)
 
-	m.Put([]byte("akey"), nil, y.BitDelete)
-	m.Put([]byte("somekey"), nil, y.BitDelete)
+	m.Put([]byte("akey"), nil, value.BitDelete)
+	m.Put([]byte("somekey"), nil, value.BitDelete)
 	k, v = extract(m)
 	require.EqualValues(t, []string{"akey", "somekey"}, k)
 	require.EqualValues(t, []string{"DEL", "DEL"}, v)

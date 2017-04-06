@@ -19,6 +19,7 @@ package value
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"os"
 	"sync"
 	"syscall"
@@ -38,9 +39,6 @@ const (
 type Log struct {
 	x.SafeMutex
 	fd *os.File
-
-	// Keep track of how many bytes written so that we don't have to seek to end of file.
-	written uint64
 }
 
 type Entry struct {
@@ -116,7 +114,7 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 
 		var p Pointer
 		p.Len = uint32(len(header)) + h.klen + h.vlen + 1
-		p.Offset = uint64(buf.Len()) + l.written
+		p.Offset = uint64(buf.Len())
 		ptrs = append(ptrs, p)
 
 		buf.Write(header)
@@ -127,8 +125,17 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 
 	l.Lock()
 	defer l.Unlock()
-	written, err := l.fd.Write(buf.Bytes())
-	l.written += uint64(written)
+
+	off, err := l.fd.Seek(0, io.SeekEnd)
+	y.AssertTrue(off >= 0)
+	if err != nil {
+		return ptrs, errors.Wrap(err, "Unable to seek")
+	}
+	for i := range ptrs {
+		p := &ptrs[i]
+		p.Offset += uint64(off)
+	}
+	_, err = l.fd.Write(buf.Bytes())
 	return ptrs, errors.Wrap(err, "Unable to write to file")
 }
 
