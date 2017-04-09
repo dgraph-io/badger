@@ -92,6 +92,7 @@ func (s *Iterator) SeekToLast()     { s.iter.SeekToLast() }
 func (s *Iterator) Next()           { s.iter.Next() }
 func (s *Iterator) Prev()           { s.iter.Prev() }
 func (s *Iterator) Key() []byte     { return s.iter.Key() }
+func (s *Iterator) Close()          {}
 
 // Value returns the value and whether the key is deleted.
 func (s *Iterator) Value() []byte {

@@ -42,6 +42,8 @@ func buildTable(t *testing.T, keyValues [][]string) *tableHandler {
 	}
 	f.Write(b.Finish())
 	table, err := newTableHandler(f)
+	defer table.decrRef()
+
 	require.NoError(t, err)
 	return table
 }

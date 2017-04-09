@@ -18,6 +18,9 @@ type Iterator interface {
 	Valid() bool
 
 	Name() string // Mainly for debug or testing.
+
+	// All iterators should be closed so that file garbage collection works.
+	Close()
 }
 
 // mergeHeap is an internal structure to remember which iterator has the smallest element.
@@ -57,6 +60,7 @@ func (s *mergeHeap) Pop() interface{} {
 }
 
 // MergeIterator merges multiple iterators.
+// NOTE: MergeIterator owns the array of iterators and is responsible for closing them.
 type MergeIterator struct {
 	iters []Iterator
 	keys  [][]byte
@@ -149,5 +153,77 @@ func (s *MergeIterator) initHeap() {
 		}
 		s.keys[i], _ = it.KeyValue()
 		heap.Push(s.h, i)
+	}
+}
+
+func (s *MergeIterator) Close() {
+	for _, it := range s.iters {
+		it.Close()
+	}
+}
+
+// ConcatIterator iterates over some tables in the given order.
+// NOTE: ConcatIterator owns the array of iterators and is responsible for closing them.
+type ConcatIterator struct {
+	idx   int // Which iterator is active now.
+	iters []Iterator
+}
+
+func NewConcatIterator(iters []Iterator) *ConcatIterator {
+	return &ConcatIterator{
+		iters: iters,
+		idx:   -1, // Not really necessary because s.it.Valid()=false, but good to have.
+	}
+}
+
+func (s *ConcatIterator) SeekToFirst() {
+	if len(s.iters) == 0 {
+		return
+	}
+	s.idx = 0
+	s.iters[0].SeekToFirst()
+}
+
+func (s *ConcatIterator) Valid() bool {
+	return s.idx >= 0 && s.idx < len(s.iters) && s.iters[s.idx].Valid()
+}
+
+func (s *ConcatIterator) Name() string { return "ConcatIterator" }
+
+// KeyValue returns key, value at current position.
+func (s *ConcatIterator) KeyValue() ([]byte, []byte) {
+	AssertTrue(s.Valid())
+	return s.iters[s.idx].KeyValue()
+}
+
+func (s *ConcatIterator) Seek(key []byte) {
+	// CURRENTLY NOT IMPLEMENTED.
+	Fatalf("ConcatIterator.Seek is currently not implemented")
+}
+
+// Next advances our concat iterator.
+func (s *ConcatIterator) Next() {
+	s.iters[s.idx].Next()
+	if s.iters[s.idx].Valid() {
+		// Nothing to do. Just stay with the current table.
+		return
+	}
+	for { // In case there are empty tables.
+		s.idx++
+		if s.idx >= len(s.iters) {
+			// End of list. Valid will become false.
+			return
+		}
+		s.iters[s.idx].SeekToFirst()
+		if s.iters[s.idx].Valid() {
+			break
+		}
+	}
+	return
+}
+
+func (s *ConcatIterator) Close() {
+	for _, it := range s.iters {
+		it.Close()
 	}
 }

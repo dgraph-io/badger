@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"os"
 	"path/filepath"
 	"sync"
 
@@ -83,8 +82,6 @@ func NewDB(opt DBOptions) *DB {
 
 // Close closes a DB.
 func (s *DB) Close() {
-	// For now, we just delete the value log. This should be removed eventually.
-	os.Remove("/tmp/vlog")
 }
 
 func (s *DB) getMemImm() (*memtable.Memtable, *memtable.Memtable) {
@@ -194,15 +191,16 @@ func (s *DB) makeRoomForWrite() error {
 	// Note: It is important to start the compaction within this lock.
 	// Otherwise, you might be compactng the wrong imm!
 	s.immWg.Add(1)
-	go func() {
+	go func(imm *memtable.Memtable) {
 		defer s.immWg.Done()
 		f, err := y.TempFile(s.opt.DirLowLevels)
 		y.Check(err)
-		y.Check(s.imm.WriteLevel0Table(f))
+		y.Check(imm.WriteLevel0Table(f))
 		tbl, err := newTableHandler(f)
+		defer tbl.decrRef()
 		y.Check(err)
-		s.lc.addLevel0Table(tbl)
-	}()
+		s.lc.addLevel0Table(tbl) // This will incrRef again.
+	}(s.imm)
 	s.Unlock()
 	return nil
 }
@@ -240,7 +238,10 @@ func (s *DBIterator) nextValid() {
 
 func (s *DBIterator) Name() string { return "DBIterator" }
 
+func (s *DBIterator) Close() { s.it.Close() }
+
 // NewIterator returns a MergeIterator over iterators of memtable and compaction levels.
+// Note: This acquires references to underlying tables. Remember to close the returned iterator.
 func (s *DB) NewIterator() y.Iterator {
 	// The order we add these iterators is important.
 	// Imagine you add level0 first, then add imm. In between, the initial imm might be moved into
@@ -254,11 +255,12 @@ func (s *DB) NewIterator() y.Iterator {
 	if imm != nil {
 		iters = append(iters, imm.NewIterator())
 	}
-	iters = s.lc.appendIterators(iters)
+	iters = s.lc.appendIterators(iters) // This will increment references.
 	return &DBIterator{
 		it: y.NewMergeIterator(iters),
 		db: s,
 	}
 }
 
+// Check checks if DB makes sense.
 func (s *DB) Check() { s.lc.Check() }

@@ -17,10 +17,8 @@
 package y
 
 import (
-	//	"fmt"
 	"io/ioutil"
 	"os"
-	"runtime"
 )
 
 var EmptySlice = []byte{}
@@ -33,10 +31,5 @@ func TempFile(dir string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Note: A finalizer is not guaranteed to be run. We need to clean this up.
-	runtime.SetFinalizer(f, func(f *os.File) {
-		f.Close()
-		os.Remove(f.Name()) // Might put on a channel to be deleted instead.
-	})
 	return f, nil
 }

@@ -29,13 +29,6 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-type tableHandler struct {
-	// The following are initialized once and const.
-	smallest, biggest []byte       // Smallest and largest keys.
-	fd                *os.File     // Owns fd.
-	table             *table.Table // Does not own fd.
-}
-
 type levelHandler struct {
 	// Guards tables, totalSize.
 	sync.RWMutex
@@ -68,43 +61,6 @@ var (
 	lastUnstalled time.Time
 )
 
-// Will not be needed if we move ConcatIterator, MergingIterator to this package.
-func getTables(tables []*tableHandler) []*table.Table {
-	var out []*table.Table
-	for _, t := range tables {
-		out = append(out, t.table)
-	}
-	return out
-}
-
-func newTableHandler(f *os.File) (*tableHandler, error) {
-	t, err := table.OpenTable(f)
-	if err != nil {
-		return nil, err
-	}
-	out := &tableHandler{
-		fd:    f,
-		table: t,
-	}
-	it := t.NewIterator()
-	it.SeekToFirst()
-	y.AssertTrue(it.Valid())
-	out.smallest, _ = it.KeyValue()
-
-	it2 := t.NewIterator() // For now, safer to use a different iterator.
-	it2.SeekToLast()
-	y.AssertTrue(it2.Valid())
-	out.biggest, _ = it2.KeyValue()
-
-	// Make sure we did populate smallest and biggest.
-	y.AssertTrue(len(out.smallest) > 0) // We do not allow empty keys...
-	y.AssertTrue(len(out.biggest) > 0)
-	// It is possible that smallest=biggest. In that case, table has only one element.
-	return out, nil
-}
-
-func (s *tableHandler) size() int64 { return s.table.Size() }
-
 func (s *levelHandler) getTotalSize() int64 {
 	s.RLock()
 	defer s.RUnlock()
@@ -117,6 +73,7 @@ func (s *levelHandler) deleteTables(idx0, idx1 int) {
 	defer s.Unlock()
 	for i := idx0; i < idx1; i++ {
 		s.totalSize -= s.tables[i].size()
+		s.tables[i].decrRef()
 	}
 	s.tables = append(s.tables[:idx0], s.tables[idx1:]...)
 }
@@ -129,9 +86,11 @@ func (s *levelHandler) replaceTables(left, right int, newTables []*tableHandler)
 	// Update totalSize first.
 	for _, tbl := range newTables {
 		s.totalSize += tbl.size()
+		tbl.incrRef()
 	}
 	for i := left; i < right; i++ {
 		s.totalSize -= s.tables[i].size()
+		s.tables[i].decrRef()
 	}
 
 	// To be safe, just make a copy. TODO: Be more careful and avoid copying.
@@ -351,13 +310,15 @@ func (s *levelsController) doCompact(l int) error {
 		iters = appendIteratorsReversed(iters, thisLevel.tables[srcIdx0:srcIdx1])
 	} else {
 		y.AssertTrue(srcIdx0+1 == srcIdx1) // For now, for level >=1, we expect exactly one table.
-		iters = []y.Iterator{thisLevel.tables[srcIdx0].table.NewIterator()}
+		iters = []y.Iterator{thisLevel.tables[srcIdx0].newIterator()}
 	}
-	iters = append(iters, table.NewConcatIterator(getTables(nextLevel.tables[left:right])))
+	iters = append(iters, newConcatIterator(nextLevel.tables[left:right]))
 	it := y.NewMergeIterator(iters)
+	defer it.Close() // Important to close the iterator to do ref counting.
+
 	it.SeekToFirst()
 
-	var newTables [100]*tableHandler
+	var newTables [200]*tableHandler
 	var wg sync.WaitGroup
 	var i int
 	for ; it.Valid(); i++ {
@@ -392,12 +353,19 @@ func (s *levelsController) doCompact(l int) error {
 			y.Check(err)
 			fd.Write(builder.Finish())
 			newTables[idx], err = newTableHandler(fd)
+			// decrRef is added below.
 			y.Check(err)
 		}(i, builder)
 	}
 	wg.Wait()
 
 	newTablesSlice := newTables[:i]
+	defer func() {
+		for _, t := range newTablesSlice {
+			t.decrRef() // replaceTables will increment reference.
+		}
+	}()
+
 	if s.opt.Verbose {
 		fmt.Printf("LOG Compact %d->%d: Del [%d,%d), Del [%d,%d), Add [%d,%d), took %v\n",
 			l, l+1, srcIdx0, srcIdx1, left, right, left, left+len(newTablesSlice), time.Since(timeStart))
@@ -446,8 +414,11 @@ func (s *levelHandler) tryAddLevel0Table(t *tableHandler, verbose bool) bool {
 	if len(s.tables) > s.opt.NumLevelZeroTablesStall {
 		return false
 	}
+
 	s.tables = append(s.tables, t)
+	t.incrRef()
 	s.totalSize += t.size()
+
 	if verbose {
 		fmt.Printf("Num level 0 tables increased from %d to %d\n", len(s.tables)-1, len(s.tables))
 	}
@@ -484,8 +455,8 @@ func (s *levelsController) get(key []byte) []byte {
 	return nil
 }
 
-// getHelper acquires a read-lock to access s.tables. It returns a list of tableHandlers.
-func (s *levelHandler) getHelper(key []byte) []*tableHandler {
+// getTableForKey acquires a read-lock to access s.tables. It returns a list of tableHandlers.
+func (s *levelHandler) getTableForKey(key []byte) []*tableHandler {
 	s.RLock()
 	defer s.RUnlock()
 	if s.level == 0 {
@@ -508,7 +479,7 @@ func (s *levelHandler) getHelper(key []byte) []*tableHandler {
 
 // get returns value for a given key. If not found, return nil.
 func (s *levelHandler) get(key []byte) []byte {
-	tables := s.getHelper(key)
+	tables := s.getTableForKey(key)
 	for _, th := range tables {
 		it := th.table.NewIterator()
 		it.Seek(key)
@@ -525,12 +496,23 @@ func (s *levelHandler) get(key []byte) []byte {
 
 func appendIteratorsReversed(out []y.Iterator, th []*tableHandler) []y.Iterator {
 	for i := len(th) - 1; i >= 0; i-- {
-		out = append(out, th[i].table.NewIterator())
+		// This will increment the reference of the table handler.
+		out = append(out, th[i].newIterator())
 	}
 	return out
 }
 
+func newConcatIterator(th []*tableHandler) y.Iterator {
+	iters := make([]y.Iterator, 0, len(th))
+	for _, t := range th {
+		// This will increment the reference of the table handler.
+		iters = append(iters, t.newIterator())
+	}
+	return y.NewConcatIterator(iters)
+}
+
 // appendIterators appends iterators to an array of iterators, for merging.
+// Note: This obtains references for the table handlers. Remember to close these iterators.
 func (s *levelHandler) appendIterators(iters []y.Iterator) []y.Iterator {
 	s.RLock()
 	defer s.RUnlock()
@@ -539,10 +521,11 @@ func (s *levelHandler) appendIterators(iters []y.Iterator) []y.Iterator {
 		// The newer table at the end of s.tables should be added first as it takes precedence.
 		return appendIteratorsReversed(iters, s.tables)
 	}
-	return append(iters, table.NewConcatIterator(getTables(s.tables)))
+	return append(iters, newConcatIterator(s.tables))
 }
 
 // appendIterators appends iterators to an array of iterators, for merging.
+// Note: This obtains references for the table handlers. Remember to close these iterators.
 func (s *levelsController) appendIterators(iters []y.Iterator) []y.Iterator {
 	for _, level := range s.levels {
 		iters = level.appendIterators(iters)

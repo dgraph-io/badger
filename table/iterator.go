@@ -27,12 +27,6 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-/*
- *itr.Seek(key)
- *for itr.Seek(key); itr.Valid(); itr.Next() {
- *  f(itr.key(), itr.value())
- *}
- */
 type BlockIterator struct {
 	data    []byte
 	pos     int
@@ -81,6 +75,8 @@ func (itr *BlockIterator) ensureKeyCap(h header) {
 		itr.ikey = make([]byte, sz)
 	}
 }
+
+func (itr *BlockIterator) Close() {}
 
 var (
 	ORIGIN  = 0
@@ -203,6 +199,8 @@ type TableIterator struct {
 	err  error
 	init bool
 }
+
+func (itr *TableIterator) Close() {}
 
 func (itr *TableIterator) Reset() {
 	itr.bpos = 0
@@ -376,66 +374,3 @@ func (itr *TableIterator) KeyValue() ([]byte, []byte) {
 }
 
 func (itr *TableIterator) Name() string { return "TableIterator" }
-
-// ConcatIterator iterates over some tables in the given order.
-type ConcatIterator struct {
-	idx    int // Which table does the iterator point to currently.
-	tables []*Table
-	it     *TableIterator
-}
-
-func NewConcatIterator(tables []*Table) *ConcatIterator {
-	//	y.AssertTrue(len(tables) > 0)
-	return &ConcatIterator{
-		tables: tables,
-		idx:    -1, // Not really necessary because s.it.Valid()=false, but good to have.
-	}
-}
-
-func (s *ConcatIterator) SeekToFirst() {
-	if len(s.tables) == 0 {
-		return
-	}
-	s.idx = 0
-	s.it = s.tables[0].NewIterator()
-	s.it.SeekToFirst()
-}
-
-func (s *ConcatIterator) Valid() bool {
-	return s.idx >= 0 && s.idx < len(s.tables) && s.it.Valid()
-}
-
-func (s *ConcatIterator) Name() string { return "ConcatIterator" }
-
-// KeyValue returns key, value at current position.
-func (s *ConcatIterator) KeyValue() ([]byte, []byte) {
-	y.AssertTrue(s.Valid())
-	return s.it.KeyValue()
-}
-
-func (s *ConcatIterator) Seek(key []byte) {
-	// CURRENTLY NOT IMPLEMENTED.
-	y.Fatalf("ConcatIterator.Seek is currently not implemented")
-}
-
-// Next advances our concat iterator.
-func (s *ConcatIterator) Next() {
-	s.it.Next()
-	if s.it.Valid() {
-		// Nothing to do. Just stay with the current table.
-		return
-	}
-	for { // In case there are empty tables.
-		s.idx++
-		if s.idx >= len(s.tables) {
-			// End of list. Valid will become false.
-			return
-		}
-		s.it = s.tables[s.idx].NewIterator() // Assume tables are nonempty.
-		s.it.SeekToFirst()
-		if s.it.Valid() {
-			break
-		}
-	}
-	return
-}

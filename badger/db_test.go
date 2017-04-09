@@ -64,11 +64,15 @@ func TestDBGetMore(t *testing.T) {
 	n := 100000
 	for i := 0; i < n; i++ {
 		k := []byte(fmt.Sprintf("%09d", i))
+		if (i % 10000) == 0 {
+			// Display some progress. Right now, it's not very fast with no caching.
+			fmt.Printf("Putting i=%d\n", i)
+		}
 		require.NoError(t, db.Put(k, k))
 	}
 	db.Check()
 	for i := 0; i < n; i++ {
-		if (i % 100000) == 0 {
+		if (i % 10000) == 0 {
 			// Display some progress. Right now, it's not very fast with no caching.
 			fmt.Printf("Testing i=%d\n", i)
 		}

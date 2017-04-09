@@ -247,17 +247,27 @@ func TestIterateBackAndForth(t *testing.T) {
 	require.EqualValues(t, key(0), string(k))
 }
 
+func newConcatIterator(tables []*Table) y.Iterator {
+	iters := make([]y.Iterator, 0, len(tables))
+	for _, t := range tables {
+		iters = append(iters, t.NewIterator())
+	}
+	return y.NewConcatIterator(iters)
+}
+
 // Try having only one table.
 func TestConcatIteratorOneTable(t *testing.T) {
 	f := buildTable(t, [][]string{
-		[]string{"k1", "a1"},
-		[]string{"k2", "a2"},
+		{"k1", "a1"},
+		{"k2", "a2"},
 	})
 
 	tbl, err := OpenTable(f)
 	require.NoError(t, err)
 
-	it := NewConcatIterator([]*Table{tbl})
+	it := newConcatIterator([]*Table{tbl})
+	defer it.Close()
+
 	it.SeekToFirst()
 	require.True(t, it.Valid())
 	k, v := it.KeyValue()
@@ -272,10 +282,12 @@ func TestConcatIterator(t *testing.T) {
 	require.NoError(t, err)
 	tbl2, err := OpenTable(f2)
 	require.NoError(t, err)
-	it := NewConcatIterator([]*Table{tbl, tbl2})
+
+	it := newConcatIterator([]*Table{tbl, tbl2})
+	defer it.Close()
+
 	it.SeekToFirst()
 	require.True(t, it.Valid())
-
 	var count int
 	for ; it.Valid(); it.Next() {
 		_, v := it.KeyValue()
@@ -299,8 +311,9 @@ func TestMergingIterator(t *testing.T) {
 	tbl2, err := OpenTable(f2)
 	require.NoError(t, err)
 	it1 := tbl1.NewIterator()
-	it2 := NewConcatIterator([]*Table{tbl2})
+	it2 := newConcatIterator([]*Table{tbl2})
 	it := y.NewMergeIterator([]y.Iterator{it1, it2})
+	defer it.Close()
 
 	it.SeekToFirst()
 	require.True(t, it.Valid())
@@ -331,9 +344,11 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 	t2, err := OpenTable(f2)
 	require.NoError(t, err)
 
-	it1 := NewConcatIterator([]*Table{t1})
-	it2 := NewConcatIterator([]*Table{t2})
+	it1 := newConcatIterator([]*Table{t1})
+	it2 := newConcatIterator([]*Table{t2})
 	it := y.NewMergeIterator([]y.Iterator{it1, it2})
+	defer it.Close()
+
 	it.SeekToFirst()
 	require.True(t, it.Valid())
 	k, v := it.KeyValue()
@@ -363,9 +378,11 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 	t2, err := OpenTable(f2)
 	require.NoError(t, err)
 
-	it1 := NewConcatIterator([]*Table{t1})
-	it2 := NewConcatIterator([]*Table{t2})
+	it1 := newConcatIterator([]*Table{t1})
+	it2 := newConcatIterator([]*Table{t2})
 	it := y.NewMergeIterator([]y.Iterator{it1, it2})
+	defer it.Close()
+
 	it.SeekToFirst()
 	require.True(t, it.Valid())
 	k, v := it.KeyValue()

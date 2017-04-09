@@ -15,6 +15,14 @@ type SimpleIterator struct {
 	idx  int
 }
 
+var (
+	closeCount int
+)
+
+func (s *SimpleIterator) Close() {
+	closeCount++
+}
+
 func (s *SimpleIterator) Name() string { return "SimpleIterator" }
 
 func (s *SimpleIterator) Next() {
@@ -64,6 +72,12 @@ func getAll(it Iterator) ([]string, []string) {
 	return keys, vals
 }
 
+func closeAndCheck(t *testing.T, it Iterator, expected int) {
+	closeCount = 0
+	it.Close()
+	require.EqualValues(t, expected, closeCount)
+}
+
 func TestSimpleIterator(t *testing.T) {
 	keys := []string{"1", "2", "3"}
 	vals := []string{"v1", "v2", "v3"}
@@ -72,17 +86,23 @@ func TestSimpleIterator(t *testing.T) {
 	k, v := getAll(it)
 	require.EqualValues(t, keys, k)
 	require.EqualValues(t, vals, v)
+
+	closeAndCheck(t, it, 1)
 }
 
 func TestMergeSingle(t *testing.T) {
 	keys := []string{"1", "2", "3"}
 	vals := []string{"v1", "v2", "v3"}
 	it := newSimpleIterator(keys, vals)
+
 	mergeIt := NewMergeIterator([]Iterator{it})
+
 	mergeIt.SeekToFirst()
 	k, v := getAll(mergeIt)
 	require.EqualValues(t, keys, k)
 	require.EqualValues(t, vals, v)
+
+	closeAndCheck(t, mergeIt, 1)
 }
 
 func TestMergeMore(t *testing.T) {
@@ -92,17 +112,13 @@ func TestMergeMore(t *testing.T) {
 	it4 := newSimpleIterator([]string{"1", "7", "9"}, []string{"d1", "d7", "d9"})
 
 	mergeIt := NewMergeIterator([]Iterator{it, it2, it3, it4})
+
 	mergeIt.SeekToFirst()
 	k, v := getAll(mergeIt)
 	require.EqualValues(t, []string{"1", "2", "3", "5", "7", "9"}, k)
-	require.EqualValues(t, []string{
-		"a1",
-		"b2",
-		"a3",
-		"b5",
-		"a7",
-		"d9",
-	}, v)
+	require.EqualValues(t, []string{"a1", "b2", "a3", "b5", "a7", "d9"}, v)
+
+	closeAndCheck(t, mergeIt, 4)
 }
 
 // Ensure MergeIterator satisfies the Iterator interface
@@ -112,10 +128,13 @@ func TestMergeIteratorNested(t *testing.T) {
 	it := newSimpleIterator(keys, vals)
 	mergeIt := NewMergeIterator([]Iterator{it})
 	mergeIt2 := NewMergeIterator([]Iterator{mergeIt})
+
 	mergeIt2.SeekToFirst()
 	k, v := getAll(mergeIt2)
 	require.EqualValues(t, keys, k)
 	require.EqualValues(t, vals, v)
+
+	closeAndCheck(t, mergeIt2, 1)
 }
 
 func TestMergeIteratorSeek(t *testing.T) {
@@ -128,11 +147,9 @@ func TestMergeIteratorSeek(t *testing.T) {
 	mergeIt.Seek([]byte("4"))
 	k, v := getAll(mergeIt)
 	require.EqualValues(t, []string{"5", "7", "9"}, k)
-	require.EqualValues(t, []string{
-		"b5",
-		"a7",
-		"d9",
-	}, v)
+	require.EqualValues(t, []string{"b5", "a7", "d9"}, v)
+
+	closeAndCheck(t, mergeIt, 4)
 }
 
 func TestMergeIteratorSeekInvalid(t *testing.T) {
@@ -144,4 +161,22 @@ func TestMergeIteratorSeekInvalid(t *testing.T) {
 	mergeIt := NewMergeIterator([]Iterator{it, it2, it3, it4})
 	mergeIt.Seek([]byte("f"))
 	require.False(t, mergeIt.Valid())
+	closeAndCheck(t, mergeIt, 4)
+}
+
+func TestConcatIterator(t *testing.T) {
+	it := newSimpleIterator([]string{"1", "3", "7"}, []string{"a1", "a3", "a7"})
+	it2 := newSimpleIterator([]string{}, []string{})
+	it3 := newSimpleIterator([]string{"1"}, []string{"c1"})
+	it4 := newSimpleIterator([]string{}, []string{})
+
+	concatIt := NewConcatIterator([]Iterator{it, it2, it3, it4})
+
+	concatIt.SeekToFirst()
+	require.True(t, concatIt.Valid())
+	k, v := getAll(concatIt)
+	require.EqualValues(t, []string{"1", "3", "7", "1"}, k)
+	require.EqualValues(t, []string{"a1", "a3", "a7", "c1"}, v)
+
+	closeAndCheck(t, concatIt, 4)
 }
