@@ -65,11 +65,6 @@ func (s *tableHandler) size() int64 { return s.table.Size() }
 
 // newTableHandler returns a new table given file. Please remember to decrRef.
 func newTableHandler(id uint64, f *os.File) (*tableHandler, error) {
-  // f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0755)
-  // if err != nil {
-  //   return nil, err
-  // }
-
   t, err := table.OpenTable(f)
   if err != nil {
     return nil, err
