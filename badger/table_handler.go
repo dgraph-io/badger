@@ -1,7 +1,10 @@
 package badger
 
 import (
+  "fmt"
+  "math/rand"
   "os"
+  "path/filepath"
   "sync/atomic"
 
   "github.com/dgraph-io/badger/table"
@@ -15,6 +18,7 @@ type tableHandler struct {
   smallest, biggest []byte       // Smallest and largest keys.
   fd                *os.File     // Owns fd.
   table             *table.Table // Does not own fd.
+  id                uint64
 }
 
 // tableIterator is a thin wrapper around table.TableIterator.
@@ -60,12 +64,18 @@ func (s *tableHandler) decrRef() {
 func (s *tableHandler) size() int64 { return s.table.Size() }
 
 // newTableHandler returns a new table given file. Please remember to decrRef.
-func newTableHandler(f *os.File) (*tableHandler, error) {
+func newTableHandler(id uint64, f *os.File) (*tableHandler, error) {
+  // f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0755)
+  // if err != nil {
+  //   return nil, err
+  // }
+
   t, err := table.OpenTable(f)
   if err != nil {
     return nil, err
   }
   out := &tableHandler{
+    id:    id,
     fd:    f,
     table: t,
     ref:   1, // Caller is given one reference.
@@ -86,4 +96,20 @@ func newTableHandler(f *os.File) (*tableHandler, error) {
   y.AssertTrue(len(out.biggest) > 0)
   // It is possible that smallest=biggest. In that case, table has only one element.
   return out, nil
+}
+
+// tempFile returns a unique filename and the uint64.
+func tempFile(dir string) (uint64, *os.File) {
+  var id uint64
+  for {
+    id = rand.Uint64()
+    name := fmt.Sprintf("table_%016x", id)
+    filename := filepath.Join(dir, name)
+    if _, err := os.Stat(filename); os.IsNotExist(err) {
+      // File does not exist.
+      fd, err := os.Create(filename)
+      y.Check(err)
+      return id, fd
+    }
+  }
 }

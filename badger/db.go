@@ -28,7 +28,6 @@ import (
 // DBOptions are params for creating DB object.
 type DBOptions struct {
 	Dir                     string
-	DirLowLevels            string
 	WriteBufferSize         int   // Memtable size.
 	NumLevelZeroTables      int   // Maximum number of Level 0 tables before we start compacting.
 	NumLevelZeroTablesStall int   // If we hit this number of Level 0 tables, we will stall until level 0 is compacted away.
@@ -43,7 +42,6 @@ type DBOptions struct {
 
 var DefaultDBOptions = DBOptions{
 	Dir:                     "/tmp",
-	DirLowLevels:            "/tmp",
 	WriteBufferSize:         1 << 20, // Size of each memtable.
 	NumLevelZeroTables:      5,
 	NumLevelZeroTablesStall: 10,
@@ -193,10 +191,9 @@ func (s *DB) makeRoomForWrite() error {
 	s.immWg.Add(1)
 	go func(imm *memtable.Memtable) {
 		defer s.immWg.Done()
-		f, err := y.TempFile(s.opt.DirLowLevels)
-		y.Check(err)
+		fileID, f := tempFile(s.opt.Dir)
 		y.Check(imm.WriteLevel0Table(f))
-		tbl, err := newTableHandler(f)
+		tbl, err := newTableHandler(fileID, f)
 		defer tbl.decrRef()
 		y.Check(err)
 		s.lc.addLevel0Table(tbl) // This will incrRef again.

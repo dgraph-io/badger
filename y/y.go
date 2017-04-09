@@ -16,20 +16,4 @@
 
 package y
 
-import (
-	"io/ioutil"
-	"os"
-)
-
 var EmptySlice = []byte{}
-
-// TempFile returns a tempfile in given directory. It sets a finalizer to delete the file.
-// This is necessary especially if we use the RAM disk.
-// If putting level 0, 1 on RAM gains us a lot, we will refactor to use a bigger skiplist instead.
-func TempFile(dir string) (*os.File, error) {
-	f, err := ioutil.TempFile(dir, "table_")
-	if err != nil {
-		return nil, err
-	}
-	return f, nil
-}

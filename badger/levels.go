@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	"math/rand"
-	"os"
 	"sort"
 	"sync"
 	"time"
@@ -165,6 +164,13 @@ func (s *levelHandler) overlappingTables(begin, end []byte) (int, int) {
 	return left, right
 }
 
+func newLevelHandler(opt DBOptions, level int) *levelHandler {
+	return &levelHandler{
+		level: level,
+		opt:   opt,
+	}
+}
+
 func newLevelsController(opt DBOptions) *levelsController {
 	y.AssertTrue(opt.NumLevelZeroTablesStall > opt.NumLevelZeroTables)
 	s := &levelsController{
@@ -173,10 +179,7 @@ func newLevelsController(opt DBOptions) *levelsController {
 		beingCompacted: make([]bool, opt.MaxLevels),
 	}
 	for i := 0; i < s.opt.MaxLevels; i++ {
-		s.levels[i] = &levelHandler{
-			level: i,
-			opt:   s.opt,
-		}
+		s.levels[i] = newLevelHandler(opt, i)
 		if i == 0 {
 			// Do nothing.
 		} else if i == 1 {
@@ -343,16 +346,11 @@ func (s *levelsController) doCompact(l int) error {
 		go func(idx int, builder *table.TableBuilder) {
 			defer builder.Close()
 			defer wg.Done()
-			var fd *os.File
-			var err error
-			if l == 0 {
-				fd, err = y.TempFile(s.opt.DirLowLevels)
-			} else {
-				fd, err = y.TempFile(s.opt.Dir)
-			}
-			y.Check(err)
+
+			fileID, fd := tempFile(s.opt.Dir)
 			fd.Write(builder.Finish())
-			newTables[idx], err = newTableHandler(fd)
+			var err error
+			newTables[idx], err = newTableHandler(fileID, fd)
 			// decrRef is added below.
 			y.Check(err)
 		}(i, builder)

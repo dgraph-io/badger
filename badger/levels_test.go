@@ -19,6 +19,7 @@ package badger
 import (
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -31,8 +32,7 @@ func buildTable(t *testing.T, keyValues [][]string) *tableHandler {
 	b := table.NewTableBuilder()
 	defer b.Close()
 
-	f, err := y.TempFile("/tmp")
-	require.NoError(t, err)
+	fileID, f := tempFile("/tmp")
 	sort.Slice(keyValues, func(i, j int) bool {
 		return keyValues[i][0] < keyValues[j][0]
 	})
@@ -41,8 +41,7 @@ func buildTable(t *testing.T, keyValues [][]string) *tableHandler {
 		require.NoError(t, b.Add([]byte(kv[0]), []byte(kv[1])))
 	}
 	f.Write(b.Finish())
-	table, err := newTableHandler(f)
-	defer table.decrRef()
+	table, err := newTableHandler(fileID, f)
 
 	require.NoError(t, err)
 	return table
@@ -67,22 +66,28 @@ func TestDoCompact(t *testing.T) {
 		{"k22", "z22"},
 		{"k5", "z5"},
 	})
+	defer t0.decrRef()
+
 	t1a := buildTable(t, [][]string{
 		{"k0", "v0"},
 	})
+	defer t1a.decrRef()
+
 	t1b := buildTable(t, [][]string{
 		{"k1", "v1"},
 		{"k2", "v2"},
 	})
+	defer t1b.decrRef()
+
 	t1c := buildTable(t, [][]string{
 		{"k3", "v3"},
 		{"k4", "v4"},
 	})
+	defer t1c.decrRef()
 
-	// Very low-level setup to do this low-level test.
-	c.levels[0].tables = []*tableHandler{t0}
-	c.levels[1].tables = []*tableHandler{t1a, t1b, t1c}
-	c.doCompact(0)
+	c.levels[0].replaceTables(0, 0, []*tableHandler{t0})
+	c.levels[1].replaceTables(0, 0, []*tableHandler{t1a, t1b, t1c})
+	c.doCompact(0) // Assume this happens before the compact workers start work.
 
 	require.Len(t, c.levels[1].tables, 2)
 	require.Empty(t, c.levels[0].tables)

@@ -118,8 +118,8 @@ func TestDBIterateBasic(t *testing.T) {
 	db := NewDB(DefaultDBOptions)
 	defer db.Close()
 
-	n := 500000
-	// n := 100
+	// n := 500000
+	n := 1000
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Put i=%d\n", i)
