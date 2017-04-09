@@ -116,14 +116,21 @@ func TestDBGetMore(t *testing.T) {
 // Put a lot of data to move some data to disk. Then iterate.
 func TestDBIterateBasic(t *testing.T) {
 	db := NewDB(DefaultDBOptions)
+	defer db.Close()
+
 	n := 500000
-	//	n := 100
+	// n := 100
 	for i := 0; i < n; i++ {
+		if (i % 10000) == 0 {
+			fmt.Printf("Put i=%d\n", i)
+		}
 		k := []byte(fmt.Sprintf("%09d", i))
 		require.NoError(t, db.Put(k, k))
 	}
 
 	it := db.NewIterator()
+	defer it.Close()
+
 	var count int
 	for it.SeekToFirst(); it.Valid(); it.Next() {
 		key, val := it.KeyValue()
