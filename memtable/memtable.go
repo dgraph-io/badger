@@ -116,8 +116,8 @@ func (s *Memtable) Get(key []byte) []byte {
 }
 
 // MemUsage returns an approximate mem usage.
-func (s *Memtable) MemUsage() int {
-	return s.arena.MemUsage()
+func (s *Memtable) MemUsage() int64 {
+	return int64(s.arena.MemUsage())
 }
 
 func (s *Memtable) DebugString() string {

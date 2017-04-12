@@ -28,7 +28,6 @@ import (
 // DBOptions are params for creating DB object.
 type DBOptions struct {
 	Dir                     string
-	WriteBufferSize         int   // Memtable size.
 	NumLevelZeroTables      int   // Maximum number of Level 0 tables before we start compacting.
 	NumLevelZeroTablesStall int   // If we hit this number of Level 0 tables, we will stall until level 0 is compacted away.
 	LevelOneSize            int64 // Maximum total size for Level 1.
@@ -42,14 +41,13 @@ type DBOptions struct {
 
 var DefaultDBOptions = DBOptions{
 	Dir:                     "/tmp",
-	WriteBufferSize:         1 << 20, // Size of each memtable.
 	NumLevelZeroTables:      5,
 	NumLevelZeroTablesStall: 10,
-	LevelOneSize:            11 << 20,
+	LevelOneSize:            256 << 20,
 	MaxLevels:               7,
-	NumCompactWorkers:       3,
-	MaxTableSize:            2 << 20,
-	LevelSizeMultiplier:     5,
+	NumCompactWorkers:       3, // MRJN: Can we increase these?
+	MaxTableSize:            64 << 20,
+	LevelSizeMultiplier:     10,
 	ValueThreshold:          20,
 	Verbose:                 true,
 }
@@ -82,16 +80,36 @@ func NewDB(opt DBOptions) *DB {
 func (s *DB) Close() {
 }
 
-func (s *DB) getMemImm() (*memtable.Memtable, *memtable.Memtable) {
+func (s *DB) getMemTables() (*memtable.Memtable, *memtable.Memtable) {
 	s.RLock()
 	defer s.RUnlock()
 	return s.mem, s.imm
 }
 
+func decodeValue(val []byte, vlog *value.Log) []byte {
+	if (val[0] & value.BitDelete) != 0 {
+		// Tombstone encountered.
+		return nil
+	}
+	if (val[0] & value.BitValuePointer) == 0 {
+		return val[1:]
+	}
+
+	var vp value.Pointer
+	vp.Decode(val[1:])
+	entry, err := vlog.Read(vp)
+	y.Checkf(err, "Unable to read from value log: %+v", vp)
+
+	if (entry.Value[0] & value.BitDelete) == 0 { // Not tombstone.
+		return entry.Value
+	}
+	return []byte{}
+}
+
 // getValueHelper returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
-func (s *DB) getValueHelper(key []byte) []byte {
-	mem, imm := s.getMemImm() // Lock should be released.
+func (s *DB) get(key []byte) []byte {
+	mem, imm := s.getMemTables() // Lock should be released.
 	if mem != nil {
 		if v := mem.Get(key); v != nil {
 			return v
@@ -105,28 +123,9 @@ func (s *DB) getValueHelper(key []byte) []byte {
 	return s.lc.get(key)
 }
 
-func decodeValue(val []byte, vlog *value.Log) []byte {
-	if (val[0] & value.BitDelete) != 0 {
-		// Tombstone encountered.
-		return nil
-	}
-	if (val[0] & value.BitValueOffset) == 0 {
-		return val[1:]
-	}
-	var vp value.Pointer
-	vp.Decode(val[1:])
-	var out []byte
-	vlog.Read(vp, func(entry value.Entry) {
-		if (entry.Value[0] & value.BitDelete) == 0 { // Not tombstone.
-			out = entry.Value
-		}
-	})
-	return out
-}
-
 // Get looks for key and returns value. If not found, return nil.
 func (s *DB) Get(key []byte) []byte {
-	val := s.getValueHelper(key)
+	val := s.get(key)
 	if val == nil {
 		return nil
 	}
@@ -148,7 +147,7 @@ func (s *DB) Write(entries []value.Entry) error {
 		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
 			s.mem.Put(entry.Key, entry.Value, entry.Meta)
 		} else {
-			s.mem.Put(entry.Key, ptrs[i].Encode(offsetBuf[:]), entry.Meta|value.BitValueOffset)
+			s.mem.Put(entry.Key, ptrs[i].Encode(offsetBuf[:]), entry.Meta|value.BitValuePointer)
 		}
 	}
 	return nil
@@ -175,7 +174,7 @@ func (s *DB) Delete(key []byte) error {
 }
 
 func (s *DB) makeRoomForWrite() error {
-	if s.mem.MemUsage() < s.opt.WriteBufferSize {
+	if s.mem.MemUsage() < s.opt.MaxTableSize {
 		// Nothing to do. We have enough space.
 		return nil
 	}
@@ -244,7 +243,7 @@ func (s *DB) NewIterator() y.Iterator {
 	// Imagine you add level0 first, then add imm. In between, the initial imm might be moved into
 	// level0, and be completely missed. On the other hand, if you add imm first and it got moved
 	// to level 0, you would just have that data appear twice which is fine.
-	mem, imm := s.getMemImm()
+	mem, imm := s.getMemTables()
 	var iters []y.Iterator
 	if mem != nil {
 		iters = append(iters, mem.NewIterator())
