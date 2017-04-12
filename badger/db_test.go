@@ -169,7 +169,7 @@ func TestCrash(t *testing.T) {
 		}
 		entries = append(entries, e)
 
-		if len(entries) == 10 {
+		if len(entries) == 100 {
 			err := db.Write(entries)
 			require.Nil(t, err)
 			entries = entries[:0]
@@ -187,7 +187,8 @@ func TestCrash(t *testing.T) {
 
 	db.lc.tryCompact(1)
 	db.lc.tryCompact(1)
-	val := db.lc.levels[1].get(Head)
+	val := db.Get(Head)
+	// val := db.lc.levels[1].get(Head)
 	require.True(t, len(val) > 0)
 	voffset := binary.BigEndian.Uint64(val)
 	fmt.Printf("level 1 val: %v\n", voffset)
