@@ -41,7 +41,7 @@ type levelHandler struct {
 	// The following are initialized once and const.
 	level        int
 	maxTotalSize int64
-	opt          DBOptions
+	opt          Options
 }
 
 type levelsController struct {
@@ -52,7 +52,7 @@ type levelsController struct {
 
 	// The following are initialized once and const.
 	levels []*levelHandler
-	opt    DBOptions
+	opt    Options
 }
 
 var (
@@ -164,14 +164,14 @@ func (s *levelHandler) overlappingTables(begin, end []byte) (int, int) {
 	return left, right
 }
 
-func newLevelHandler(opt DBOptions, level int) *levelHandler {
+func newLevelHandler(opt Options, level int) *levelHandler {
 	return &levelHandler{
 		level: level,
 		opt:   opt,
 	}
 }
 
-func newLevelsController(opt DBOptions) *levelsController {
+func newLevelsController(opt Options) *levelsController {
 	y.AssertTrue(opt.NumLevelZeroTablesStall > opt.NumLevelZeroTables)
 	s := &levelsController{
 		opt:            opt,
@@ -190,12 +190,17 @@ func newLevelsController(opt DBOptions) *levelsController {
 		}
 	}
 	for i := 0; i < s.opt.NumCompactWorkers; i++ {
-		go s.compact(i)
+		go s.runWorker(i)
 	}
 	return s
 }
 
-func (s *levelsController) compact(workerID int) {
+func (s *levelsController) runWorker(workerID int) {
+	if s.opt.DoNotCompact {
+		fmt.Println("NOT running any compactions due to DB options.")
+		return
+	}
+
 	time.Sleep(time.Duration(rand.Int31n(1000)) * time.Millisecond)
 	timeChan := time.Tick(10 * time.Millisecond)
 	for {

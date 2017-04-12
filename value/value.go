@@ -17,8 +17,10 @@
 package value
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -88,6 +90,50 @@ func (l *Log) Open(fname string) {
 	var err error
 	l.fd, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE|syscall.O_DSYNC, 0666)
 	y.Check(err)
+}
+
+func (l *Log) Replay(offset uint64, fn func(k, v []byte, meta byte)) {
+	fmt.Printf("Seeking at offset: %v\n", offset)
+
+	read := func(r *bufio.Reader, buf []byte) error {
+		for {
+			n, err := r.Read(buf)
+			if err != nil {
+				return err
+			}
+			if n == len(buf) {
+				return nil
+			}
+			buf = buf[n:]
+		}
+	}
+
+	_, err := l.fd.Seek(int64(offset), 0)
+	y.Check(err)
+	reader := bufio.NewReader(l.fd)
+
+	hbuf := make([]byte, 8)
+	var h header
+	var count int
+	for {
+		if err := read(reader, hbuf); err == io.EOF {
+			break
+		}
+		h.Decode(hbuf)
+		// fmt.Printf("[%d] Header read: %+v\n", count, h)
+
+		k := make([]byte, h.klen)
+		v := make([]byte, h.vlen)
+
+		y.Check(read(reader, k))
+		meta, err := reader.ReadByte()
+		y.Check(err)
+		y.Check(read(reader, v))
+
+		fn(k, v, meta)
+		count++
+	}
+	fmt.Printf("Replayed %d KVs\n", count)
 }
 
 var bufPool = sync.Pool{

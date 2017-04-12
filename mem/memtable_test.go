@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package memtable
+package mem
 
 import (
 	"fmt"
@@ -26,7 +26,7 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-func extract(m *Memtable) ([]string, []string) {
+func extract(m *Table) ([]string, []string) {
 	var keys, vals []string
 	it := m.NewIterator()
 	for it.SeekToFirst(); it.Valid(); it.Next() {
@@ -42,7 +42,7 @@ func extract(m *Memtable) ([]string, []string) {
 }
 
 func TestBasic(t *testing.T) {
-	m := NewMemtable()
+	m := NewTable()
 	require.NotNil(t, m)
 	m.Put([]byte("somekey"), []byte("hohoho"), 0)
 	m.Put([]byte("somekey"), []byte("hahaha"), 0)
@@ -63,7 +63,7 @@ func TestBasic(t *testing.T) {
 }
 
 func TestMemUssage(t *testing.T) {
-	m := NewMemtable()
+	m := NewTable()
 	for i := 0; i < 10000; i++ {
 		m.Put([]byte(fmt.Sprintf("k%05d", i)), []byte(fmt.Sprintf("v%05d", i)), 0)
 	}
@@ -72,7 +72,7 @@ func TestMemUssage(t *testing.T) {
 }
 
 func TestMergeIterator(t *testing.T) {
-	m := NewMemtable()
+	m := NewTable()
 	it := m.NewIterator()
 	mergeIt := y.NewMergeIterator([]y.Iterator{it})
 	require.False(t, mergeIt.Valid())
@@ -80,7 +80,7 @@ func TestMergeIterator(t *testing.T) {
 
 // BenchmarkAdd-4   	 1000000	      1289 ns/op
 func BenchmarkAdd(b *testing.B) {
-	m := NewMemtable()
+	m := NewTable()
 	for i := 0; i < b.N; i++ {
 		m.Put([]byte(fmt.Sprintf("k%09d", i)), []byte(fmt.Sprintf("v%09d", i)), 0)
 	}
