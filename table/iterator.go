@@ -18,8 +18,6 @@ package table
 
 import (
 	"bytes"
-	//	"errors"
-	//	"fmt"
 	"io"
 	"math"
 	"sort"

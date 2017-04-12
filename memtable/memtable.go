@@ -69,8 +69,8 @@ func (s *Memtable) WriteLevel0Table(f *os.File) error {
 			return err
 		}
 	}
-	f.Write(b.Finish())
-	return nil
+	_, err := f.Write(b.Finish())
+	return err
 }
 
 // Iterator is an iterator over memtable.
@@ -116,8 +116,8 @@ func (s *Memtable) Get(key []byte) []byte {
 }
 
 // MemUsage returns an approximate mem usage.
-func (s *Memtable) MemUsage() int {
-	return s.arena.MemUsage()
+func (s *Memtable) MemUsage() int64 {
+	return int64(s.arena.MemUsage())
 }
 
 func (s *Memtable) DebugString() string {

@@ -32,8 +32,8 @@ import (
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete      = 1
-	BitValueOffset = 2
+	BitDelete       = 1 // Set if the key has been deleted.
+	BitValuePointer = 2 // Set if the value is NOT stored directly next to key.
 )
 
 type Log struct {
@@ -70,11 +70,11 @@ type Pointer struct {
 	Offset uint64
 }
 
-// Encode encodes Pointer into byte buffer. We don't return because this can avoid mem allocation.
+// Encode encodes Pointer into byte buffer.
 func (p Pointer) Encode(b []byte) []byte {
 	y.AssertTrue(len(b) >= 12)
 	binary.BigEndian.PutUint32(b[:4], p.Len)
-	binary.BigEndian.PutUint64(b[4:12], uint64(p.Offset)) // Might want to use uint64 for Offset.
+	binary.BigEndian.PutUint64(b[4:12], uint64(p.Offset))
 	return b[:12]
 }
 
@@ -140,11 +140,10 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 }
 
 // Read reads the value log at a given location.
-func (l *Log) Read(p Pointer, fn func(Entry)) error {
-	var e Entry
+func (l *Log) Read(p Pointer) (e Entry, err error) {
 	buf := make([]byte, p.Len)
 	if _, err := l.fd.ReadAt(buf, int64(p.Offset)); err != nil {
-		return err
+		return e, err
 	}
 	var h header
 	buf = h.Decode(buf)
@@ -152,6 +151,5 @@ func (l *Log) Read(p Pointer, fn func(Entry)) error {
 	e.Meta = buf[h.klen]
 	buf = buf[h.klen+1:]
 	e.Value = buf[0:h.vlen]
-	fn(e)
-	return nil
+	return e, nil
 }
