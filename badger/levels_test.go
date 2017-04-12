@@ -19,7 +19,6 @@ package badger
 import (
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 

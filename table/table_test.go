@@ -18,7 +18,7 @@ package table
 
 import (
 	"fmt"
-	//	"io/ioutil"
+	"io/ioutil"
 	"os"
 	"sort"
 	"testing"
@@ -47,7 +47,7 @@ func buildTestTable(t *testing.T, n int) *os.File {
 func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	b := NewTableBuilder()
 	defer b.Close()
-	f, err := y.TempFile("/tmp")
+	f, err := ioutil.TempFile("", "")
 	require.NoError(t, err)
 
 	sort.Slice(keyValues, func(i, j int) bool {
