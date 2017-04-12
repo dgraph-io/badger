@@ -45,7 +45,7 @@ var DefaultDBOptions = DBOptions{
 	NumLevelZeroTablesStall: 10,
 	LevelOneSize:            256 << 20,
 	MaxLevels:               7,
-	NumCompactWorkers:       3, // MRJN: Can we increase these?
+	NumCompactWorkers:       3, // Max possible = num levels / 2.
 	MaxTableSize:            64 << 20,
 	LevelSizeMultiplier:     10,
 	ValueThreshold:          20,
@@ -186,10 +186,11 @@ func (s *DB) makeRoomForWrite() error {
 	s.mem = memtable.NewMemtable()
 
 	// Note: It is important to start the compaction within this lock.
-	// Otherwise, you might be compactng the wrong imm!
+	// Otherwise, you might be compacting the wrong imm!
 	s.immWg.Add(1)
 	go func(imm *memtable.Memtable) {
 		defer s.immWg.Done()
+
 		fileID, f := tempFile(s.opt.Dir)
 		y.Check(imm.WriteLevel0Table(f))
 		tbl, err := newTableHandler(fileID, f)

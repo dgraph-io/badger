@@ -69,8 +69,8 @@ func (s *Memtable) WriteLevel0Table(f *os.File) error {
 			return err
 		}
 	}
-	f.Write(b.Finish())
-	return nil
+	_, err := f.Write(b.Finish())
+	return err
 }
 
 // Iterator is an iterator over memtable.

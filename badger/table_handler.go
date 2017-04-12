@@ -83,6 +83,7 @@ func newTableHandler(id uint64, f *os.File) (*tableHandler, error) {
 	y.AssertTrue(it.Valid())
 	out.smallest, _ = it.KeyValue()
 
+	// TODO: We shouldn't need to create another iterator.
 	it2 := t.NewIterator() // For now, safer to use a different iterator.
 	it2.SeekToLast()
 	y.AssertTrue(it2.Valid())
