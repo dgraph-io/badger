@@ -24,7 +24,6 @@ import (
 	"io"
 	"os"
 	"sync"
-	"syscall"
 
 	"github.com/dgraph-io/badger/y"
 	"github.com/dgraph-io/dgraph/x"
@@ -88,7 +87,7 @@ func (p *Pointer) Decode(b []byte) {
 
 func (l *Log) Open(fname string) {
 	var err error
-	l.fd, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE|syscall.O_DSYNC, 0666)
+	l.fd, err = y.OpenSyncedFile(fname)
 	y.Check(err)
 }
 

@@ -18,9 +18,15 @@ package badger
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
+	//	"os"
+	"path"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,7 +47,7 @@ type levelHandler struct {
 	// The following are initialized once and const.
 	level        int
 	maxTotalSize int64
-	opt          Options
+	db           *DB
 }
 
 type levelsController struct {
@@ -52,7 +58,11 @@ type levelsController struct {
 
 	// The following are initialized once and const.
 	levels []*levelHandler
-	opt    Options
+	db     *DB
+
+	// For ending compactions.
+	compactDone chan struct{}
+	compactJobs sync.WaitGroup
 }
 
 var (
@@ -64,6 +74,28 @@ func (s *levelHandler) getTotalSize() int64 {
 	s.RLock()
 	defer s.RUnlock()
 	return s.totalSize
+}
+
+// initTables replaces s.tables with given tables. This is done during loading.
+func (s *levelHandler) initTables(tables []*tableHandler) {
+	s.Lock()
+	defer s.Unlock()
+	s.tables = tables
+	s.totalSize = 0
+	for _, t := range tables {
+		s.totalSize += t.size()
+	}
+	if s.level == 0 {
+		// Key range will overlap. Just sort by fileID in ascending order
+		// because newer tables are at the end of level 0.
+		sort.Slice(s.tables, func(i, j int) bool {
+			return s.tables[i].id < s.tables[j].id
+		})
+	} else {
+		sort.Slice(s.tables, func(i, j int) bool {
+			return bytes.Compare(s.tables[i].smallest, s.tables[j].smallest) < 0
+		})
+	}
 }
 
 // deleteTables remove tables idx0, ..., idx1-1.
@@ -164,59 +196,108 @@ func (s *levelHandler) overlappingTables(begin, end []byte) (int, int) {
 	return left, right
 }
 
-func newLevelHandler(opt Options, level int) *levelHandler {
+func newLevelHandler(db *DB, level int) *levelHandler {
 	return &levelHandler{
 		level: level,
-		opt:   opt,
+		db:    db,
 	}
 }
 
-func newLevelsController(opt Options) *levelsController {
-	y.AssertTrue(opt.NumLevelZeroTablesStall > opt.NumLevelZeroTables)
+func newLevelsController(db *DB) (*levelsController, uint64) {
+	y.AssertTrue(db.opt.NumLevelZeroTablesStall > db.opt.NumLevelZeroTables)
 	s := &levelsController{
-		opt:            opt,
-		levels:         make([]*levelHandler, opt.MaxLevels),
-		beingCompacted: make([]bool, opt.MaxLevels),
+		db:             db,
+		levels:         make([]*levelHandler, db.opt.MaxLevels),
+		beingCompacted: make([]bool, db.opt.MaxLevels),
 	}
-	for i := 0; i < s.opt.MaxLevels; i++ {
-		s.levels[i] = newLevelHandler(opt, i)
+
+	for i := 0; i < db.opt.MaxLevels; i++ {
+		s.levels[i] = newLevelHandler(db, i)
 		if i == 0 {
 			// Do nothing.
 		} else if i == 1 {
 			// Level 1 probably shouldn't be too much bigger than level 0.
-			s.levels[i].maxTotalSize = s.opt.LevelOneSize
+			s.levels[i].maxTotalSize = db.opt.LevelOneSize
 		} else {
-			s.levels[i].maxTotalSize = s.levels[i-1].maxTotalSize * int64(opt.LevelSizeMultiplier)
+			s.levels[i].maxTotalSize = s.levels[i-1].maxTotalSize * int64(db.opt.LevelSizeMultiplier)
 		}
 	}
-	for i := 0; i < s.opt.NumCompactWorkers; i++ {
+
+	// Scan directory and load the tables.
+	fileInfos, err := ioutil.ReadDir(db.opt.Dir)
+	y.Check(err)
+
+	tables := make([][]*tableHandler, db.opt.MaxLevels)
+	var maxFileID uint64
+	for _, info := range fileInfos {
+		if info.IsDir() {
+			continue
+		}
+		name := info.Name() // Expected to be base name but let's be safe.
+		name = path.Base(name)
+		if !strings.HasPrefix(name, filePrefix) {
+			continue
+		}
+		suffix := name[len(filePrefix):]
+		id, err := strconv.Atoi(suffix)
+		if err != nil {
+			continue
+		}
+		y.AssertTrue(id >= 0)
+		fileID := uint64(id)
+		if fileID >= maxFileID {
+			maxFileID = fileID
+		}
+		fd, err := y.OpenSyncedFile(newFilename(fileID, db.opt.Dir))
+		y.Check(err)
+		t, err := newTableHandler(fileID, fd)
+		y.Check(err)
+		y.AssertTrue(t.level >= 0 && t.level < db.opt.MaxLevels)
+		tables[t.level] = append(tables[t.level], t)
+	}
+	for i, tbls := range tables {
+		s.levels[i].initTables(tbls)
+		s.levels[i].Check() // Make sure key ranges do not overlap etc.
+	}
+
+	return s, maxFileID
+}
+
+func (s *levelsController) startCompact() {
+	n := s.db.opt.NumCompactWorkers
+	s.compactDone = make(chan struct{}, n)
+	s.compactJobs.Add(n)
+	for i := 0; i < n; i++ {
 		go s.runWorker(i)
 	}
-	return s
 }
 
 func (s *levelsController) runWorker(workerID int) {
-	if s.opt.DoNotCompact {
+	if s.db.opt.DoNotCompact {
 		fmt.Println("NOT running any compactions due to DB options.")
 		return
 	}
 
 	time.Sleep(time.Duration(rand.Int31n(1000)) * time.Millisecond)
 	timeChan := time.Tick(10 * time.Millisecond)
-	for {
+	var done bool
+	for !done {
 		select {
 		// Can add a done channel or other stuff.
 		case <-timeChan:
 			s.tryCompact(workerID)
+		case <-s.compactDone:
+			done = true
 		}
 	}
+	s.compactJobs.Done() // Indicate worker is done.
 }
 
 // Requires read lock over levelsController.
 func (s *levelsController) debugPrint() {
 	s.Lock()
 	defer s.Unlock()
-	for i := 0; i < s.opt.MaxLevels; i++ {
+	for i := 0; i < s.db.opt.MaxLevels; i++ {
 		var busy int
 		if s.beingCompacted[i] {
 			busy = 1
@@ -234,13 +315,13 @@ func (s *levelsController) pickCompactLevel() int {
 	// Going from higher levels to lower levels offers a small gain.
 	// It probably has to do with level 1 being smaller when level 0 has to merge with the whole of
 	// level 1.
-	for i := s.opt.MaxLevels - 2; i >= 0; i-- {
+	for i := s.db.opt.MaxLevels - 2; i >= 0; i-- {
 		// Lower levels take priority. Most important is level 0. It should only have one table.
 		// See if we want to compact i to i+1.
 		if s.beingCompacted[i] || s.beingCompacted[i+1] {
 			continue
 		}
-		if (i == 0 && len(s.levels[0].tables) > s.opt.NumLevelZeroTables) ||
+		if (i == 0 && len(s.levels[0].tables) > s.db.opt.NumLevelZeroTables) ||
 			(i > 0 && s.levels[i].getTotalSize() > s.levels[i].maxTotalSize) {
 			s.beingCompacted[i], s.beingCompacted[i+1] = true, true
 			return i
@@ -289,7 +370,7 @@ func (s *levelHandler) keyRange(idx0, idx1 int) ([]byte, []byte) {
 
 // doCompact picks some table on level l and compacts it away to the next level.
 func (s *levelsController) doCompact(l int) error {
-	y.AssertTrue(l+1 < s.opt.MaxLevels) // Sanity check.
+	y.AssertTrue(l+1 < s.db.opt.MaxLevels) // Sanity check.
 	timeStart := time.Now()
 	thisLevel := s.levels[l]
 	nextLevel := s.levels[l+1]
@@ -306,7 +387,12 @@ func (s *levelsController) doCompact(l int) error {
 		// Function will acquire level lock.
 		nextLevel.replaceTables(left, right, thisLevel.tables[srcIdx0:srcIdx1])
 		thisLevel.deleteTables(srcIdx0, srcIdx1) // Function will acquire level lock.
-		if s.opt.Verbose {
+		for i := srcIdx0; i < srcIdx1; i++ {
+			tbl := thisLevel.tables[i]
+			// Need to update table metadata to reflect the new level.
+			tbl.updateLevel(l + 1)
+		}
+		if s.db.opt.Verbose {
 			fmt.Printf("Merge: Move table [%d,%d) from level %d to %d\n", srcIdx0, srcIdx1, l, l+1)
 		}
 		return nil
@@ -333,7 +419,7 @@ func (s *levelsController) doCompact(l int) error {
 		y.AssertTruef(i < len(newTables), "Rewriting too many tables: %d %d", i, len(newTables))
 		builder := table.NewTableBuilder()
 		for ; it.Valid(); it.Next() {
-			if int64(builder.FinalSize()) > s.opt.MaxTableSize {
+			if int64(builder.FinalSize()) > s.db.opt.MaxTableSize {
 				break
 			}
 			key, val := it.KeyValue()
@@ -352,8 +438,12 @@ func (s *levelsController) doCompact(l int) error {
 			defer builder.Close()
 			defer wg.Done()
 
-			fileID, fd := tempFile(s.opt.Dir)
-			fd.Write(builder.Finish())
+			fileID, fd := s.db.newFile()
+			// Encode the level number as table metadata.
+			var levelNum [2]byte
+			binary.BigEndian.PutUint16(levelNum[:], uint16(l+1))
+
+			fd.Write(builder.Finish(levelNum[:]))
 			var err error
 			newTables[idx], err = newTableHandler(fileID, fd)
 			// decrRef is added below.
@@ -369,7 +459,7 @@ func (s *levelsController) doCompact(l int) error {
 		}
 	}()
 
-	if s.opt.Verbose {
+	if s.db.opt.Verbose {
 		fmt.Printf("LOG Compact %d->%d: Del [%d,%d), Del [%d,%d), Add [%d,%d), took %v\n",
 			l, l+1, srcIdx0, srcIdx1, left, right, left, left+len(newTablesSlice), time.Since(timeStart))
 	}
@@ -381,10 +471,10 @@ func (s *levelsController) doCompact(l int) error {
 }
 
 func (s *levelsController) addLevel0Table(t *tableHandler) {
-	for !s.levels[0].tryAddLevel0Table(t, s.opt.Verbose) {
+	for !s.levels[0].tryAddLevel0Table(t, s.db.opt.Verbose) {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time
-		if s.opt.Verbose {
+		if s.db.opt.Verbose {
 			fmt.Printf("STALLED STALLED STALLED STALLED STALLED STALLED STALLED STALLED: %v\n",
 				time.Since(lastUnstalled))
 			s.debugPrint()
@@ -394,12 +484,12 @@ func (s *levelsController) addLevel0Table(t *tableHandler) {
 		// will very quickly fill up level 0 again and if the compaction strategy favors level 0,
 		// then level 1 is going to super full.
 		for {
-			if s.levels[0].getTotalSize() > 0 && s.levels[1].getTotalSize() > s.levels[1].maxTotalSize {
+			if s.levels[0].getTotalSize() == 0 && s.levels[1].getTotalSize() < s.levels[1].maxTotalSize {
 				break
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		if s.opt.Verbose {
+		if s.db.opt.Verbose {
 			fmt.Printf("UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED: %v\n",
 				time.Since(timeStart))
 			s.debugPrint()
@@ -414,7 +504,7 @@ func (s *levelHandler) tryAddLevel0Table(t *tableHandler, verbose bool) bool {
 	// Need lock as we may be deleting the first table during a level 0 compaction.
 	s.Lock()
 	defer s.Unlock()
-	if len(s.tables) > s.opt.NumLevelZeroTablesStall {
+	if len(s.tables) > s.db.opt.NumLevelZeroTablesStall {
 		return false
 	}
 
@@ -444,6 +534,27 @@ func (s *levelHandler) Check() {
 		y.AssertTruef(bytes.Compare(s.tables[j].smallest, s.tables[j].biggest) <= 0,
 			"%s vs %s: level=%d j=%d numTables=%d",
 			string(s.tables[j].smallest), string(s.tables[j].biggest), s.level, j, numTables)
+	}
+}
+
+func (s *levelsController) close() {
+	for i := 0; i < s.db.opt.NumCompactWorkers; i++ {
+		s.compactDone <- struct{}{}
+	}
+	// Wait for all compactions to be done. We want to be in a stable state.
+	// Also, closing tables while merge iterators have references will also lead to crash.
+	s.compactJobs.Wait()
+
+	for _, l := range s.levels {
+		l.close()
+	}
+}
+
+func (s *levelHandler) close() {
+	s.RLock()
+	defer s.RUnlock()
+	for _, t := range s.tables {
+		t.close()
 	}
 }
 

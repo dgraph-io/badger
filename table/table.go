@@ -42,6 +42,8 @@ type Table struct {
 	tableSize int64    // Initialized in OpenTable, using fd.Stat().
 
 	blockIndex []keyOffset
+
+	metadata []byte
 }
 
 type Block struct {
@@ -77,15 +79,38 @@ func OpenTable(fd *os.File) (*Table, error) {
 	return t, nil
 }
 
+// SetMetadata updates our metadata to the new metadata.
+// For now, they must be of the same size.
+func (t *Table) SetMetadata(meta []byte) error {
+	y.AssertTrue(len(meta) == len(t.metadata))
+	pos := int64(t.offset + t.tableSize - 4 - int64(len(t.metadata)))
+	written, err := t.fd.WriteAt(meta, pos)
+	y.AssertTrue(written == len(meta))
+	return err
+}
+
 func (t *Table) readIndex() error {
 	buf := make([]byte, 4)
+	readPos := int64(t.offset + t.tableSize - 4)
 	if _, err := t.fd.ReadAt(buf, t.offset+t.tableSize-4); err != nil {
+		return errors.Wrap(err, "While reading metadata size")
+	}
+	metadataSize := int64(binary.BigEndian.Uint32(buf))
+	t.metadata = make([]byte, metadataSize)
+	readPos -= int64(len(t.metadata))
+	if _, err := t.fd.ReadAt(t.metadata, readPos); err != nil {
+		return errors.Wrap(err, "While reading metadata")
+	}
+
+	readPos -= 4
+	if _, err := t.fd.ReadAt(buf, readPos); err != nil {
 		return errors.Wrap(err, "While reading block index")
 	}
 	restartsLen := int(binary.BigEndian.Uint32(buf))
 
 	buf = make([]byte, 4*restartsLen)
-	if _, err := t.fd.ReadAt(buf, t.offset+t.tableSize-4-int64(len(buf))); err != nil {
+	readPos -= int64(len(buf))
+	if _, err := t.fd.ReadAt(buf, readPos); err != nil {
 		return errors.Wrap(err, "While reading block index")
 	}
 
@@ -153,6 +178,9 @@ func (t *Table) readIndex() error {
 	sort.Sort(byKey(t.blockIndex))
 	return nil
 }
+
+// Metadata returns metadata. Do not mutate this.
+func (t *Table) Metadata() []byte { return t.metadata }
 
 func (t *Table) block(idx int) (Block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)

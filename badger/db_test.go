@@ -28,8 +28,23 @@ import (
 	"github.com/dgraph-io/badger/value"
 )
 
+func testOptions(dir string) *Options {
+	opt := new(Options)
+	*opt = DefaultOptions
+	opt.MaxTableSize = 1 << 20 // Force more compactions.
+	opt.LevelOneSize = 10 << 20
+	//	opt.Verbose = true
+	opt.Dir = dir
+	return opt
+}
+
 func TestDBWrite(t *testing.T) {
-	db := NewDB(DefaultOptions)
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	db := NewDB(testOptions(dir))
+	defer db.Close()
+
 	var entries []value.Entry
 	for i := 0; i < 100; i++ {
 		entries = append(entries, value.Entry{
@@ -41,7 +56,12 @@ func TestDBWrite(t *testing.T) {
 }
 
 func TestDBGet(t *testing.T) {
-	db := NewDB(DefaultOptions)
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	db := NewDB(testOptions(dir))
+	defer db.Close()
+
 	require.NoError(t, db.Put([]byte("key1"), []byte("val1")))
 	require.EqualValues(t, "val1", db.Get([]byte("key1")))
 
@@ -62,21 +82,24 @@ func TestDBGet(t *testing.T) {
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestDBGetMore(t *testing.T) {
-	db := NewDB(DefaultOptions)
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	db := NewDB(testOptions(dir))
+	defer db.Close()
+
 	//	n := 500000
 	n := 100000
 	for i := 0; i < n; i++ {
-		k := []byte(fmt.Sprintf("%09d", i))
 		if (i % 10000) == 0 {
-			// Display some progress. Right now, it's not very fast with no caching.
 			fmt.Printf("Putting i=%d\n", i)
 		}
+		k := []byte(fmt.Sprintf("%09d", i))
 		require.NoError(t, db.Put(k, k))
 	}
 	db.Check()
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
-			// Display some progress. Right now, it's not very fast with no caching.
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
@@ -85,14 +108,16 @@ func TestDBGetMore(t *testing.T) {
 
 	// Overwrite value.
 	for i := n - 1; i >= 0; i-- {
+		if (i % 10000) == 0 {
+			fmt.Printf("Overwriting i=%d\n", i)
+		}
 		k := []byte(fmt.Sprintf("%09d", i))
 		v := []byte(fmt.Sprintf("val%09d", i))
 		require.NoError(t, db.Put(k, v))
 	}
 	db.Check()
 	for i := 0; i < n; i++ {
-		if (i % 100000) == 0 {
-			// Display some progress. Right now, it's not very fast with no caching.
+		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := []byte(fmt.Sprintf("%09d", i))
@@ -102,23 +127,30 @@ func TestDBGetMore(t *testing.T) {
 
 	// "Delete" key.
 	for i := 0; i < n; i++ {
+		if (i % 10000) == 0 {
+			fmt.Printf("Deleting i=%d\n", i)
+		}
 		k := []byte(fmt.Sprintf("%09d", i))
 		require.NoError(t, db.Delete(k))
 	}
 	db.Check()
 	for i := 0; i < n; i++ {
-		if (i % 100000) == 0 {
+		if (i % 10000) == 0 {
 			// Display some progress. Right now, it's not very fast with no caching.
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
 		require.Nil(t, db.Get([]byte(k)))
 	}
+	fmt.Println("Done and closing")
 }
 
 // Put a lot of data to move some data to disk. Then iterate.
 func TestDBIterateBasic(t *testing.T) {
-	db := NewDB(DefaultOptions)
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	db := NewDB(testOptions(dir))
 	defer db.Close()
 
 	// n := 500000
@@ -144,6 +176,36 @@ func TestDBIterateBasic(t *testing.T) {
 	require.EqualValues(t, n, count)
 }
 
+func TestDBLoad(t *testing.T) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	n := 100000
+	{
+		db := NewDB(testOptions(dir))
+		for i := 0; i < n; i++ {
+			if (i % 10000) == 0 {
+				fmt.Printf("Putting i=%d\n", i)
+			}
+			k := []byte(fmt.Sprintf("%09d", i))
+			require.NoError(t, db.Put(k, k))
+		}
+		db.Close()
+	}
+
+	{
+		db := NewDB(testOptions(dir))
+		for i := 0; i < n; i++ {
+			if (i % 10000) == 0 {
+				fmt.Printf("Testing i=%d\n", i)
+			}
+			k := fmt.Sprintf("%09d", i)
+			require.EqualValues(t, k, string(db.Get([]byte(k))))
+		}
+		db.Close()
+	}
+}
+
 func TestCrash(t *testing.T) {
 	dir, err := ioutil.TempDir("", "")
 	require.Nil(t, err)
@@ -153,8 +215,9 @@ func TestCrash(t *testing.T) {
 	opt.MaxTableSize = 1 << 20
 	opt.Dir = dir
 	opt.DoNotCompact = true
+	opt.Verbose = true
 
-	db := NewDB(opt)
+	db := NewDB(&opt)
 	var keys [][]byte
 	for i := 0; i < 150000; i++ {
 		k := []byte(fmt.Sprintf("%09d", i))
@@ -179,8 +242,9 @@ func TestCrash(t *testing.T) {
 	for _, k := range keys {
 		require.Equal(t, k, db.Get(k))
 	}
+	// Do not close db.
 
-	db2 := NewDB(opt)
+	db2 := NewDB(&opt)
 	for _, k := range keys {
 		require.Equal(t, k, db2.Get(k), "Key: %s", k)
 	}
@@ -193,7 +257,7 @@ func TestCrash(t *testing.T) {
 	voffset := binary.BigEndian.Uint64(val)
 	fmt.Printf("level 1 val: %v\n", voffset)
 
-	db3 := NewDB(opt)
+	db3 := NewDB(&opt)
 	for _, k := range keys {
 		require.Equal(t, k, db3.Get(k), "Key: %s", k)
 	}

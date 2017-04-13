@@ -213,9 +213,15 @@ func (b *TableBuilder) blockIndex() []byte {
 var emptySlice = make([]byte, 100)
 
 // Finish finishes the table by appending the index.
-func (b *TableBuilder) Finish() []byte {
+func (b *TableBuilder) Finish(metadata []byte) []byte {
 	b.finishBlock() // This will never start a new block.
 	index := b.blockIndex()
 	b.write(index)
+
+	b.write(metadata)
+	var buf [4]byte
+	binary.BigEndian.PutUint32(buf[:], uint32(len(metadata)))
+	b.write(buf[:])
+
 	return b.buf.Bytes()
 }

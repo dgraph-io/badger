@@ -44,9 +44,9 @@ func TestBasic(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, ptrs, 1)
 	var readEntries []Entry
-	log.Read(ptrs[0], func(e Entry) {
-		readEntries = append(readEntries, e)
-	})
+	e, err := log.Read(ptrs[0])
+	require.NoError(t, err)
+	readEntries = append(readEntries, e)
 	require.EqualValues(t, []Entry{
 		{
 			Key:   []byte("samplekey"),
@@ -100,15 +100,15 @@ func BenchmarkReadWrite(b *testing.B) {
 								b.Fatalf("Zero length of ptrs")
 							}
 							idx := rand.Intn(ln)
-							if err := vl.Read(ptrs[idx], func(e Entry) {
-								if len(e.Key) != 16 {
-									b.Fatalf("Key is invalid")
-								}
-								if len(e.Value) != vsz {
-									b.Fatalf("Value is invalid")
-								}
-							}); err != nil {
-								b.Fatalf("Benchmark Read:", err)
+							e, err := vl.Read(ptrs[idx])
+							if err != nil {
+								b.Fatalf("Entry read failed: ", err)
+							}
+							if len(e.Key) != 16 {
+								b.Fatalf("Key is invalid")
+							}
+							if len(e.Value) != vsz {
+								b.Fatalf("Value is invalid")
 							}
 						}
 					}

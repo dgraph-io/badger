@@ -59,23 +59,26 @@ var DefaultOptions = Options{
 type DB struct {
 	sync.RWMutex // Guards imm, mem.
 
-	imm     *mem.Table // Immutable, memtable being flushed.
-	mt      *mem.Table
-	immWg   sync.WaitGroup // Nonempty when flushing immutable memtable.
-	opt     Options
-	lc      *levelsController
-	vlog    value.Log
-	voffset uint64
+	imm       *mem.Table // Immutable, memtable being flushed.
+	mt        *mem.Table
+	immWg     sync.WaitGroup // Nonempty when flushing immutable memtable.
+	opt       Options
+	lc        *levelsController
+	vlog      value.Log
+	voffset   uint64
+	maxFileID uint64
 }
 
 // NewDB returns a new DB object. Compact levels are created as well.
-func NewDB(opt Options) *DB {
+func NewDB(opt *Options) *DB {
 	y.AssertTrue(len(opt.Dir) > 0)
 	out := &DB{
 		mt:  mem.NewTable(),
-		opt: opt, // Make a copy.
-		lc:  newLevelsController(opt),
+		opt: *opt, // Make a copy.
 	}
+	// newLevelsController potentially loads files in directory.
+	out.lc, out.maxFileID = newLevelsController(out)
+	out.lc.startCompact()
 	vlogPath := filepath.Join(opt.Dir, "vlog")
 	out.vlog.Open(vlogPath)
 
@@ -97,6 +100,10 @@ func NewDB(opt Options) *DB {
 
 // Close closes a DB.
 func (s *DB) Close() {
+	// TODO(ganesh): Block writes to mem.
+	s.makeRoomForWrite(true) // Force mem to be emptied. Initiate new imm flush.
+	s.immWg.Wait()           // Wait for imm to go to disk.
+	s.lc.close()
 }
 
 func (s *DB) getMemTables() (*mem.Table, *mem.Table) {
@@ -168,7 +175,7 @@ func (s *DB) Write(entries []value.Entry) error {
 	y.AssertTrue(len(ptrs) == len(entries))
 	s.updateOffset(ptrs)
 
-	if err := s.makeRoomForWrite(); err != nil {
+	if err := s.makeRoomForWrite(false); err != nil {
 		return err
 	}
 
@@ -207,9 +214,17 @@ var (
 	Head = []byte("_head_")
 )
 
-func (s *DB) makeRoomForWrite() error {
-	if s.mt.MemUsage() < s.opt.MaxTableSize {
+// makeRoomForWrite may create a new memtable and make imm <- mem.
+// But before that, it will make sure that imm is flushed.
+// If force==true, we will always proceed to make the above change.
+// Note: After function returns, we may still be flushing the new imm to disk.
+func (s *DB) makeRoomForWrite(force bool) error {
+	if !force && s.mt.MemUsage() < s.opt.MaxTableSize {
 		// Nothing to do. We have enough space.
+		return nil
+	}
+	if s.mt.MemUsage() == 0 {
+		// Even if forced, we do not attempt to write an empty table!
 		return nil
 	}
 	s.immWg.Wait() // Make sure we finish flushing immutable memtable.
@@ -232,7 +247,7 @@ func (s *DB) makeRoomForWrite() error {
 	go func(imm *mem.Table) {
 		defer s.immWg.Done()
 
-		fileID, f := tempFile(s.opt.Dir)
+		fileID, f := s.newFile()
 		y.Check(imm.WriteLevel0Table(f))
 		tbl, err := newTableHandler(fileID, f)
 		defer tbl.decrRef()

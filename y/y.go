@@ -16,4 +16,13 @@
 
 package y
 
+import (
+	"os"
+	"syscall"
+)
+
 var EmptySlice = []byte{}
+
+func OpenSyncedFile(filename string) (*os.File, error) {
+	return os.OpenFile(filename, os.O_RDWR|os.O_CREATE|syscall.O_DSYNC, 0666)
+}

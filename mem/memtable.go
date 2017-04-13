@@ -69,7 +69,8 @@ func (s *Table) WriteLevel0Table(f *os.File) error {
 			return err
 		}
 	}
-	_, err := f.Write(b.Finish())
+	var buf [2]byte // Level 0. Leave it initialized as 0.
+	_, err := f.Write(b.Finish(buf[:]))
 	return err
 }
 

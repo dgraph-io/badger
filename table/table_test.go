@@ -59,7 +59,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	}
 
 	//	expectedSize := b.FinalSize()
-	f.Write(b.Finish())
+	f.Write(b.Finish([]byte("somemetadata")))
 	//	fileInfo, err := f.Stat()
 	//	require.NoError(t, err)
 	//	require.EqualValues(t, fileInfo.Size(), expectedSize)
@@ -73,6 +73,7 @@ func TestSeekToFirst(t *testing.T) {
 			f := buildTestTable(t, n)
 			table, err := OpenTable(f)
 			require.NoError(t, err)
+			require.EqualValues(t, "somemetadata", string(table.metadata))
 			it := table.NewIterator()
 			it.SeekToFirst()
 			require.True(t, it.Valid())
