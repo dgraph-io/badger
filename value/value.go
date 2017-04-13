@@ -40,7 +40,8 @@ const (
 
 type Log struct {
 	x.SafeMutex
-	fd *os.File
+	fd     *os.File
+	offset int64
 }
 
 type Entry struct {
@@ -134,6 +135,12 @@ func (l *Log) Replay(offset uint64, fn func(k, v []byte, meta byte)) {
 		count++
 	}
 	fmt.Printf("Replayed %d KVs\n", count)
+
+	// Seek to the end to start writing.
+	l.offset, err = l.fd.Seek(0, io.SeekEnd)
+	if err != nil {
+		y.Fatalf("Unable to seek to the end. Error: %v", err)
+	}
 }
 
 var bufPool = sync.Pool{
@@ -172,16 +179,12 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 	l.Lock()
 	defer l.Unlock()
 
-	off, err := l.fd.Seek(0, io.SeekEnd)
-	y.AssertTrue(off >= 0)
-	if err != nil {
-		return ptrs, errors.Wrap(err, "Unable to seek")
-	}
 	for i := range ptrs {
 		p := &ptrs[i]
-		p.Offset += uint64(off)
+		p.Offset += uint64(l.offset)
 	}
-	_, err = l.fd.Write(buf.Bytes())
+	n, err := l.fd.Write(buf.Bytes())
+	l.offset += int64(n)
 	return ptrs, errors.Wrap(err, "Unable to write to file")
 }
 
