@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -64,13 +65,42 @@ func TestBasic(t *testing.T) {
 	require.EqualValues(t, []string{"DEL", "yes"}, v)
 }
 
-func TestMemUssage(t *testing.T) {
+func TestSize(t *testing.T) {
 	m := NewTable()
 	for i := 0; i < 10000; i++ {
 		m.Put([]byte(fmt.Sprintf("k%05d", i)), []byte(fmt.Sprintf("v%05d", i)), 0)
 	}
 	expected := 10000 * (6 + 6 + 1)
 	require.InEpsilon(t, expected, m.Size(), 0.1)
+}
+
+func TestConcurrentWrite(t *testing.T) {
+	tbl := NewTable()
+	n := 20
+	m := 50000
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < m; j++ {
+				tbl.Put([]byte(fmt.Sprintf("k%05d_%08d", i, j)),
+					[]byte(fmt.Sprintf("v%05d_%08d", i, j)), 5)
+			}
+		}(i)
+	}
+	wg.Wait()
+	it := tbl.NewIterator()
+	it.SeekToFirst()
+	for i := 0; i < n; i++ {
+		for j := 0; j < m; j++ {
+			require.True(t, it.Valid(), "%d %d", i, j)
+			k, v := it.KeyValue()
+			require.EqualValues(t, fmt.Sprintf("k%05d_%08d", i, j), string(k))
+			require.EqualValues(t, fmt.Sprintf("v%05d_%08d", i, j), string(v[1:]))
+			it.Next()
+		}
+	}
 }
 
 func TestMergeIterator(t *testing.T) {
@@ -80,7 +110,6 @@ func TestMergeIterator(t *testing.T) {
 	require.False(t, mergeIt.Valid())
 }
 
-// BenchmarkAdd-4   	 1000000	      1289 ns/op
 func BenchmarkAdd(b *testing.B) {
 	m := NewTable()
 	for i := 0; i < b.N; i++ {
