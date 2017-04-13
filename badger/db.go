@@ -180,16 +180,16 @@ func (s *DB) updateOffset(ptrs []value.Pointer) {
 
 // Write applies a list of value.Entry to our memtable.
 func (s *DB) Write(ctx context.Context, entries []value.Entry) error {
+	y.Trace(ctx, "Making room for writes")
+	if err := s.makeRoomForWrite(false); err != nil {
+		return err
+	}
+
 	y.Trace(ctx, "Writing to value log.")
 	ptrs, err := s.vlog.Write(entries)
 	y.Check(err)
 	y.AssertTrue(len(ptrs) == len(entries))
 	s.updateOffset(ptrs)
-
-	y.Trace(ctx, "Making room for writes")
-	if err := s.makeRoomForWrite(false); err != nil {
-		return err
-	}
 
 	y.Trace(ctx, "Writing to memtable")
 	var offsetBuf [20]byte
@@ -225,7 +225,8 @@ func (s *DB) Delete(ctx context.Context, key []byte) error {
 }
 
 var (
-	Head = []byte("_head_")
+	//	Head = []byte("_head_")
+	Head = []byte("/head/")
 )
 
 // makeRoomForWrite may create a new memtable and make imm <- mem.

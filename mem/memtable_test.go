@@ -17,7 +17,9 @@
 package mem
 
 import (
+	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -68,7 +70,7 @@ func TestMemUssage(t *testing.T) {
 		m.Put([]byte(fmt.Sprintf("k%05d", i)), []byte(fmt.Sprintf("v%05d", i)), 0)
 	}
 	expected := 10000 * (6 + 6 + 1)
-	require.InEpsilon(t, expected, m.MemUsage(), 0.1)
+	require.InEpsilon(t, expected, m.Size(), 0.1)
 }
 
 func TestMergeIterator(t *testing.T) {
@@ -83,5 +85,37 @@ func BenchmarkAdd(b *testing.B) {
 	m := NewTable()
 	for i := 0; i < b.N; i++ {
 		m.Put([]byte(fmt.Sprintf("k%09d", i)), []byte(fmt.Sprintf("v%09d", i)), 0)
+	}
+}
+
+func randomKey() []byte {
+	b := make([]byte, 8)
+	key := rand.Uint32()
+	key2 := rand.Uint32()
+	binary.LittleEndian.PutUint32(b, key)
+	binary.LittleEndian.PutUint32(b[4:], key2)
+	return b
+}
+
+func BenchmarkReadWrite(b *testing.B) {
+	for i := 0; i <= 10; i++ {
+		readFrac := float32(i) / 10.0
+		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
+			list := NewTable()
+			b.ResetTimer()
+			var count int
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					if rand.Float32() < readFrac {
+						if list.Get(randomKey()) != nil {
+							count++
+						}
+					} else {
+						newVal := make([]byte, 10)
+						list.Put(randomKey(), newVal, 0)
+					}
+				}
+			})
+		})
 	}
 }

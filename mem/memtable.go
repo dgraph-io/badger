@@ -19,6 +19,7 @@ package mem
 import (
 	"fmt"
 	"os"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/dgraph-io/badger/skl"
@@ -29,7 +30,7 @@ import (
 // Table is a thin wrapper over Skiplist, at least for now.
 type Table struct {
 	table *skl.Skiplist
-	arena *y.Arena
+	size  int64
 }
 
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
@@ -42,7 +43,6 @@ const (
 // NewTable creates a new memtable. Input is the user key comparator.
 func NewTable() *Table {
 	return &Table{
-		arena: new(y.Arena),
 		table: skl.NewSkiplist(),
 	}
 }
@@ -51,7 +51,9 @@ func NewTable() *Table {
 // by the skiplist. These can be used later on to support more operations, e.g., GetOrCreate can
 // be a Put with an empty value with onlyIfAbsent=true.
 func (s *Table) Put(key, value []byte, meta byte) {
-	data := s.arena.Allocate(len(key) + len(value) + 1)
+	data := make([]byte, len(key)+len(value)+1)
+	atomic.AddInt64(&s.size, int64(len(key)+len(value)+1))
+
 	y.AssertTrue(len(key) == copy(data[:len(key)], key))
 	v := data[len(key):]
 	v[0] = meta
@@ -116,9 +118,9 @@ func (s *Table) Get(key []byte) []byte {
 	return *(*[]byte)(v)
 }
 
-// MemUsage returns an approximate mem usage.
-func (s *Table) MemUsage() int64 {
-	return int64(s.arena.MemUsage())
+// Size returns number of bytes used for keys and values.
+func (s *Table) Size() int64 {
+	return atomic.LoadInt64(&s.size)
 }
 
 func (s *Table) DebugString() string {

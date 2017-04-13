@@ -23,6 +23,7 @@ import (
 	"io/ioutil"
 	"os"
 	"testing"
+	//	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -254,6 +255,12 @@ func TestCrash(t *testing.T) {
 	db2 := NewDB(&opt)
 	for _, k := range keys {
 		require.Equal(t, k, db2.Get(ctx, k), "Key: %s", k)
+	}
+
+	{
+		val := db.Get(ctx, Head)
+		voffset := binary.BigEndian.Uint64(val)
+		fmt.Printf("level 1 val: %v\n", voffset)
 	}
 
 	db.lc.tryCompact(1)
