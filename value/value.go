@@ -137,7 +137,7 @@ func (l *Log) Replay(offset uint64, fn func(k, v []byte, meta byte)) {
 	fmt.Printf("Replayed %d KVs\n", count)
 
 	// Seek to the end to start writing.
-	l.offset, err := l.fd.Seek(0, io.SeekEnd)
+	l.offset, err = l.fd.Seek(0, io.SeekEnd)
 	if err != nil {
 		y.Fatalf("Unable to seek to the end. Error: %v", err)
 	}
@@ -183,8 +183,8 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 		p := &ptrs[i]
 		p.Offset += uint64(l.offset)
 	}
-	n, err = l.fd.Write(buf.Bytes())
-	l.offset += n
+	n, err := l.fd.Write(buf.Bytes())
+	l.offset += int64(n)
 	return ptrs, errors.Wrap(err, "Unable to write to file")
 }
 
