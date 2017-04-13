@@ -17,6 +17,7 @@
 package value
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -29,6 +30,7 @@ import (
 )
 
 func TestBasic(t *testing.T) {
+	ctx := context.Background()
 	fd, err := ioutil.TempFile("", "badger_")
 	y.Check(err)
 
@@ -43,8 +45,9 @@ func TestBasic(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, ptrs, 1)
+
 	var readEntries []Entry
-	e, err := log.Read(ptrs[0])
+	e, err := log.Read(ctx, ptrs[0])
 	require.NoError(t, err)
 	readEntries = append(readEntries, e)
 	require.EqualValues(t, []Entry{
@@ -57,6 +60,7 @@ func TestBasic(t *testing.T) {
 }
 
 func BenchmarkReadWrite(b *testing.B) {
+	ctx := context.Background()
 	rwRatio := []float32{
 		0.1, 0.2, 0.5, 1.0,
 	}
@@ -100,9 +104,9 @@ func BenchmarkReadWrite(b *testing.B) {
 								b.Fatalf("Zero length of ptrs")
 							}
 							idx := rand.Intn(ln)
-							e, err := vl.Read(ptrs[idx])
+							e, err := vl.Read(ctx, ptrs[idx])
 							if err != nil {
-								b.Fatalf("Entry read failed: ", err)
+								b.Fatalf("Benchmark Read:", err)
 							}
 							if len(e.Key) != 16 {
 								b.Fatalf("Key is invalid")

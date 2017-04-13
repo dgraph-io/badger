@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
@@ -52,36 +53,39 @@ func TestDBWrite(t *testing.T) {
 			Value: []byte(fmt.Sprintf("val%d", i)),
 		})
 	}
-	require.NoError(t, db.Write(entries))
+	ctx := context.Background()
+	require.NoError(t, db.Write(ctx, entries))
 }
 
 func TestDBGet(t *testing.T) {
+	ctx := context.Background()
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	db := NewDB(testOptions(dir))
 	defer db.Close()
 
-	require.NoError(t, db.Put([]byte("key1"), []byte("val1")))
-	require.EqualValues(t, "val1", db.Get([]byte("key1")))
+	require.NoError(t, db.Put(ctx, []byte("key1"), []byte("val1")))
+	require.EqualValues(t, "val1", db.Get(ctx, []byte("key1")))
 
-	require.NoError(t, db.Put([]byte("key1"), []byte("val2")))
-	require.EqualValues(t, "val2", db.Get([]byte("key1")))
+	require.NoError(t, db.Put(ctx, []byte("key1"), []byte("val2")))
+	require.EqualValues(t, "val2", db.Get(ctx, []byte("key1")))
 
-	require.NoError(t, db.Delete([]byte("key1")))
-	require.Nil(t, db.Get([]byte("key1")))
+	require.NoError(t, db.Delete(ctx, []byte("key1")))
+	require.Nil(t, db.Get(ctx, []byte("key1")))
 
-	require.NoError(t, db.Put([]byte("key1"), []byte("val3")))
-	require.EqualValues(t, "val3", db.Get([]byte("key1")))
+	require.NoError(t, db.Put(ctx, []byte("key1"), []byte("val3")))
+	require.EqualValues(t, "val3", db.Get(ctx, []byte("key1")))
 
 	longVal := make([]byte, 1000)
-	require.NoError(t, db.Put([]byte("key1"), longVal))
-	require.EqualValues(t, longVal, db.Get([]byte("key1")))
+	require.NoError(t, db.Put(ctx, []byte("key1"), longVal))
+	require.EqualValues(t, longVal, db.Get(ctx, []byte("key1")))
 }
 
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestDBGetMore(t *testing.T) {
+	ctx := context.Background()
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -95,7 +99,7 @@ func TestDBGetMore(t *testing.T) {
 			fmt.Printf("Putting i=%d\n", i)
 		}
 		k := []byte(fmt.Sprintf("%09d", i))
-		require.NoError(t, db.Put(k, k))
+		require.NoError(t, db.Put(ctx, k, k))
 	}
 	db.Check()
 	for i := 0; i < n; i++ {
@@ -103,7 +107,7 @@ func TestDBGetMore(t *testing.T) {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		require.EqualValues(t, k, string(db.Get([]byte(k))))
+		require.EqualValues(t, k, string(db.Get(ctx, []byte(k))))
 	}
 
 	// Overwrite value.
@@ -113,7 +117,7 @@ func TestDBGetMore(t *testing.T) {
 		}
 		k := []byte(fmt.Sprintf("%09d", i))
 		v := []byte(fmt.Sprintf("val%09d", i))
-		require.NoError(t, db.Put(k, v))
+		require.NoError(t, db.Put(ctx, k, v))
 	}
 	db.Check()
 	for i := 0; i < n; i++ {
@@ -122,7 +126,7 @@ func TestDBGetMore(t *testing.T) {
 		}
 		k := []byte(fmt.Sprintf("%09d", i))
 		expectedValue := fmt.Sprintf("val%09d", i)
-		require.EqualValues(t, expectedValue, string(db.Get(k)))
+		require.EqualValues(t, expectedValue, string(db.Get(ctx, k)))
 	}
 
 	// "Delete" key.
@@ -131,7 +135,7 @@ func TestDBGetMore(t *testing.T) {
 			fmt.Printf("Deleting i=%d\n", i)
 		}
 		k := []byte(fmt.Sprintf("%09d", i))
-		require.NoError(t, db.Delete(k))
+		require.NoError(t, db.Delete(ctx, k))
 	}
 	db.Check()
 	for i := 0; i < n; i++ {
@@ -140,13 +144,14 @@ func TestDBGetMore(t *testing.T) {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		require.Nil(t, db.Get([]byte(k)))
+		require.Nil(t, db.Get(ctx, []byte(k)))
 	}
 	fmt.Println("Done and closing")
 }
 
 // Put a lot of data to move some data to disk. Then iterate.
 func TestDBIterateBasic(t *testing.T) {
+	ctx := context.Background()
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -160,10 +165,10 @@ func TestDBIterateBasic(t *testing.T) {
 			fmt.Printf("Put i=%d\n", i)
 		}
 		k := []byte(fmt.Sprintf("%09d", i))
-		require.NoError(t, db.Put(k, k))
+		require.NoError(t, db.Put(ctx, k, k))
 	}
 
-	it := db.NewIterator()
+	it := db.NewIterator(ctx)
 	defer it.Close()
 
 	var count int
@@ -177,6 +182,7 @@ func TestDBIterateBasic(t *testing.T) {
 }
 
 func TestDBLoad(t *testing.T) {
+	ctx := context.Background()
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -188,7 +194,7 @@ func TestDBLoad(t *testing.T) {
 				fmt.Printf("Putting i=%d\n", i)
 			}
 			k := []byte(fmt.Sprintf("%09d", i))
-			require.NoError(t, db.Put(k, k))
+			require.NoError(t, db.Put(ctx, k, k))
 		}
 		db.Close()
 	}
@@ -200,13 +206,14 @@ func TestDBLoad(t *testing.T) {
 				fmt.Printf("Testing i=%d\n", i)
 			}
 			k := fmt.Sprintf("%09d", i)
-			require.EqualValues(t, k, string(db.Get([]byte(k))))
+			require.EqualValues(t, k, string(db.Get(ctx, []byte(k))))
 		}
 		db.Close()
 	}
 }
 
 func TestCrash(t *testing.T) {
+	ctx := context.Background()
 	dir, err := ioutil.TempDir("", "")
 	require.Nil(t, err)
 	defer os.RemoveAll(dir)
@@ -233,25 +240,25 @@ func TestCrash(t *testing.T) {
 		entries = append(entries, e)
 
 		if len(entries) == 100 {
-			err := db.Write(entries)
+			err := db.Write(ctx, entries)
 			require.Nil(t, err)
 			entries = entries[:0]
 		}
 	}
 
 	for _, k := range keys {
-		require.Equal(t, k, db.Get(k))
+		require.Equal(t, k, db.Get(ctx, k))
 	}
 	// Do not close db.
 
 	db2 := NewDB(&opt)
 	for _, k := range keys {
-		require.Equal(t, k, db2.Get(k), "Key: %s", k)
+		require.Equal(t, k, db2.Get(ctx, k), "Key: %s", k)
 	}
 
 	db.lc.tryCompact(1)
 	db.lc.tryCompact(1)
-	val := db.Get(Head)
+	val := db.Get(ctx, Head)
 	// val := db.lc.levels[1].get(Head)
 	require.True(t, len(val) > 0)
 	voffset := binary.BigEndian.Uint64(val)
@@ -259,6 +266,6 @@ func TestCrash(t *testing.T) {
 
 	db3 := NewDB(&opt)
 	for _, k := range keys {
-		require.Equal(t, k, db3.Get(k), "Key: %s", k)
+		require.Equal(t, k, db3.Get(ctx, k), "Key: %s", k)
 	}
 }

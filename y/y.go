@@ -17,11 +17,23 @@
 package y
 
 import (
+	"context"
+
 	"os"
 	"syscall"
+
+	"golang.org/x/net/trace"
 )
 
 var EmptySlice = []byte{}
+
+func Trace(ctx context.Context, format string, args ...interface{}) {
+	tr, ok := trace.FromContext(ctx)
+	if !ok {
+		return
+	}
+	tr.LazyPrintf(format, args...)
+}
 
 func OpenSyncedFile(filename string) (*os.File, error) {
 	return os.OpenFile(filename, os.O_RDWR|os.O_CREATE|syscall.O_DSYNC, 0666)

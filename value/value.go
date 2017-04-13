@@ -19,6 +19,7 @@ package value
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -185,7 +186,10 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 }
 
 // Read reads the value log at a given location.
-func (l *Log) Read(p Pointer) (e Entry, err error) {
+func (l *Log) Read(ctx context.Context, p Pointer) (e Entry, err error) {
+	y.Trace(ctx, "Reading value with pointer: %+v", p)
+	defer y.Trace(ctx, "Read done")
+
 	buf := make([]byte, p.Len)
 	if _, err := l.fd.ReadAt(buf, int64(p.Offset)); err != nil {
 		return e, err

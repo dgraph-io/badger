@@ -18,11 +18,11 @@ package badger
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
-	//	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -559,10 +559,11 @@ func (s *levelHandler) close() {
 }
 
 // get returns the found value if any. If not found, we return nil.
-func (s *levelsController) get(key []byte) []byte {
+func (s *levelsController) get(ctx context.Context, key []byte) []byte {
 	// No need to lock anything as we just iterate over the currently immutable levelHandlers.
 	for _, h := range s.levels {
-		if v := h.get(key); v != nil {
+		if v := h.get(ctx, key); v != nil {
+			y.Trace(ctx, "Found key")
 			return v
 		}
 	}
@@ -592,7 +593,8 @@ func (s *levelHandler) getTableForKey(key []byte) []*tableHandler {
 }
 
 // get returns value for a given key. If not found, return nil.
-func (s *levelHandler) get(key []byte) []byte {
+func (s *levelHandler) get(ctx context.Context, key []byte) []byte {
+	y.Trace(ctx, "get key at level %d", s.level)
 	tables := s.getTableForKey(key)
 	for _, th := range tables {
 		it := th.table.NewIterator()

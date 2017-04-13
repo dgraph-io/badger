@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"path/filepath"
@@ -82,7 +83,7 @@ func NewDB(opt *Options) *DB {
 	vlogPath := filepath.Join(opt.Dir, "vlog")
 	out.vlog.Open(vlogPath)
 
-	val := out.Get(Head)
+	val := out.Get(context.Background(), Head)
 	var voffset uint64
 	if len(val) == 0 {
 		voffset = 0
@@ -90,7 +91,12 @@ func NewDB(opt *Options) *DB {
 		voffset = binary.BigEndian.Uint64(val)
 	}
 
+	first := true
 	fn := func(k, v []byte, meta byte) {
+		if first {
+			fmt.Printf("key=%s\n", k)
+		}
+		first = false
 		out.mt.Put(k, v, meta)
 	}
 	out.vlog.Replay(voffset, fn)
@@ -112,18 +118,19 @@ func (s *DB) getMemTables() (*mem.Table, *mem.Table) {
 	return s.mt, s.imm
 }
 
-func decodeValue(val []byte, vlog *value.Log) []byte {
+func decodeValue(ctx context.Context, val []byte, vlog *value.Log) []byte {
 	if (val[0] & value.BitDelete) != 0 {
 		// Tombstone encountered.
 		return nil
 	}
 	if (val[0] & value.BitValuePointer) == 0 {
+		y.Trace(ctx, "Value stored with key")
 		return val[1:]
 	}
 
 	var vp value.Pointer
 	vp.Decode(val[1:])
-	entry, err := vlog.Read(vp)
+	entry, err := vlog.Read(ctx, vp)
 	y.Checkf(err, "Unable to read from value log: %+v", vp)
 
 	if (entry.Value[0] & value.BitDelete) == 0 { // Not tombstone.
@@ -134,7 +141,8 @@ func decodeValue(val []byte, vlog *value.Log) []byte {
 
 // getValueHelper returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
-func (s *DB) get(key []byte) []byte {
+func (s *DB) get(ctx context.Context, key []byte) []byte {
+	y.Trace(ctx, "Retrieving key from memtables")
 	mem, imm := s.getMemTables() // Lock should be released.
 	if mem != nil {
 		if v := mem.Get(key); v != nil {
@@ -146,16 +154,17 @@ func (s *DB) get(key []byte) []byte {
 			return v
 		}
 	}
-	return s.lc.get(key)
+	y.Trace(ctx, "Not found in memtables. Getting from levels")
+	return s.lc.get(ctx, key)
 }
 
 // Get looks for key and returns value. If not found, return nil.
-func (s *DB) Get(key []byte) []byte {
-	val := s.get(key)
+func (s *DB) Get(ctx context.Context, key []byte) []byte {
+	val := s.get(ctx, key)
 	if val == nil {
 		return nil
 	}
-	return decodeValue(val, &s.vlog)
+	return decodeValue(ctx, val, &s.vlog)
 }
 
 func (s *DB) updateOffset(ptrs []value.Pointer) {
@@ -164,21 +173,25 @@ func (s *DB) updateOffset(ptrs []value.Pointer) {
 	s.Lock()
 	defer s.Unlock()
 	if s.voffset < ptr.Offset {
-		s.voffset = ptr.Offset + uint64(ptr.Len)
+		// s.voffset = ptr.Offset + uint64(ptr.Len)
+		s.voffset = ptr.Offset
 	}
 }
 
 // Write applies a list of value.Entry to our memtable.
-func (s *DB) Write(entries []value.Entry) error {
+func (s *DB) Write(ctx context.Context, entries []value.Entry) error {
+	y.Trace(ctx, "Writing to value log.")
 	ptrs, err := s.vlog.Write(entries)
 	y.Check(err)
 	y.AssertTrue(len(ptrs) == len(entries))
 	s.updateOffset(ptrs)
 
+	y.Trace(ctx, "Making room for writes")
 	if err := s.makeRoomForWrite(false); err != nil {
 		return err
 	}
 
+	y.Trace(ctx, "Writing to memtable")
 	var offsetBuf [20]byte
 	for i, entry := range entries {
 		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
@@ -187,12 +200,13 @@ func (s *DB) Write(entries []value.Entry) error {
 			s.mt.Put(entry.Key, ptrs[i].Encode(offsetBuf[:]), entry.Meta|value.BitValuePointer)
 		}
 	}
+	y.Trace(ctx, "Wrote %d entries.", len(entries))
 	return nil
 }
 
 // Put puts a key-val pair.
-func (s *DB) Put(key []byte, val []byte) error {
-	return s.Write([]value.Entry{
+func (s *DB) Put(ctx context.Context, key []byte, val []byte) error {
+	return s.Write(ctx, []value.Entry{
 		{
 			Key:   key,
 			Value: val,
@@ -201,8 +215,8 @@ func (s *DB) Put(key []byte, val []byte) error {
 }
 
 // Delete deletes a key.
-func (s *DB) Delete(key []byte) error {
-	return s.Write([]value.Entry{
+func (s *DB) Delete(ctx context.Context, key []byte) error {
+	return s.Write(ctx, []value.Entry{
 		{
 			Key:  key,
 			Meta: value.BitDelete,
@@ -259,8 +273,9 @@ func (s *DB) makeRoomForWrite(force bool) error {
 }
 
 type DBIterator struct {
-	it y.Iterator
-	db *DB
+	it  y.Iterator
+	db  *DB
+	ctx context.Context
 }
 
 func (s *DBIterator) Next() {
@@ -282,7 +297,7 @@ func (s *DBIterator) Valid() bool { return s.it.Valid() }
 
 func (s *DBIterator) KeyValue() ([]byte, []byte) {
 	key, val := s.it.KeyValue()
-	return key, decodeValue(val, &s.db.vlog)
+	return key, decodeValue(s.ctx, val, &s.db.vlog)
 }
 
 func (s *DBIterator) nextValid() {
@@ -295,7 +310,7 @@ func (s *DBIterator) Close() { s.it.Close() }
 
 // NewIterator returns a MergeIterator over iterators of memtable and compaction levels.
 // Note: This acquires references to underlying tables. Remember to close the returned iterator.
-func (s *DB) NewIterator() y.Iterator {
+func (s *DB) NewIterator(ctx context.Context) y.Iterator {
 	// The order we add these iterators is important.
 	// Imagine you add level0 first, then add imm. In between, the initial imm might be moved into
 	// level0, and be completely missed. On the other hand, if you add imm first and it got moved
@@ -310,8 +325,9 @@ func (s *DB) NewIterator() y.Iterator {
 	}
 	iters = s.lc.appendIterators(iters) // This will increment references.
 	return &DBIterator{
-		it: y.NewMergeIterator(iters),
-		db: s,
+		it:  y.NewMergeIterator(iters),
+		db:  s,
+		ctx: ctx,
 	}
 }
 
