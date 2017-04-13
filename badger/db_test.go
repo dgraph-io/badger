@@ -17,7 +17,10 @@
 package badger
 
 import (
+	"encoding/binary"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,7 +29,7 @@ import (
 )
 
 func TestDBWrite(t *testing.T) {
-	db := NewDB(DefaultDBOptions)
+	db := NewDB(DefaultOptions)
 	var entries []value.Entry
 	for i := 0; i < 100; i++ {
 		entries = append(entries, value.Entry{
@@ -38,7 +41,7 @@ func TestDBWrite(t *testing.T) {
 }
 
 func TestDBGet(t *testing.T) {
-	db := NewDB(DefaultDBOptions)
+	db := NewDB(DefaultOptions)
 	require.NoError(t, db.Put([]byte("key1"), []byte("val1")))
 	require.EqualValues(t, "val1", db.Get([]byte("key1")))
 
@@ -59,7 +62,7 @@ func TestDBGet(t *testing.T) {
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestDBGetMore(t *testing.T) {
-	db := NewDB(DefaultDBOptions)
+	db := NewDB(DefaultOptions)
 	//	n := 500000
 	n := 100000
 	for i := 0; i < n; i++ {
@@ -115,7 +118,7 @@ func TestDBGetMore(t *testing.T) {
 
 // Put a lot of data to move some data to disk. Then iterate.
 func TestDBIterateBasic(t *testing.T) {
-	db := NewDB(DefaultDBOptions)
+	db := NewDB(DefaultOptions)
 	defer db.Close()
 
 	// n := 500000
@@ -139,4 +142,59 @@ func TestDBIterateBasic(t *testing.T) {
 		count++
 	}
 	require.EqualValues(t, n, count)
+}
+
+func TestCrash(t *testing.T) {
+	dir, err := ioutil.TempDir("", "")
+	require.Nil(t, err)
+	defer os.RemoveAll(dir)
+
+	opt := DefaultOptions
+	opt.MaxTableSize = 1 << 20
+	opt.Dir = dir
+	opt.DoNotCompact = true
+
+	db := NewDB(opt)
+	var keys [][]byte
+	for i := 0; i < 150000; i++ {
+		k := []byte(fmt.Sprintf("%09d", i))
+		keys = append(keys, k)
+	}
+
+	entries := make([]value.Entry, 0, 10)
+	for _, k := range keys {
+		e := value.Entry{
+			Key:   k,
+			Value: k,
+		}
+		entries = append(entries, e)
+
+		if len(entries) == 100 {
+			err := db.Write(entries)
+			require.Nil(t, err)
+			entries = entries[:0]
+		}
+	}
+
+	for _, k := range keys {
+		require.Equal(t, k, db.Get(k))
+	}
+
+	db2 := NewDB(opt)
+	for _, k := range keys {
+		require.Equal(t, k, db2.Get(k), "Key: %s", k)
+	}
+
+	db.lc.tryCompact(1)
+	db.lc.tryCompact(1)
+	val := db.Get(Head)
+	// val := db.lc.levels[1].get(Head)
+	require.True(t, len(val) > 0)
+	voffset := binary.BigEndian.Uint64(val)
+	fmt.Printf("level 1 val: %v\n", voffset)
+
+	db3 := NewDB(opt)
+	for _, k := range keys {
+		require.Equal(t, k, db3.Get(k), "Key: %s", k)
+	}
 }

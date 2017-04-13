@@ -59,7 +59,7 @@ func extractTable(table *tableHandler) [][]string {
 // TestDoCompact tests the merging logic which is done in internal doCompact function.
 // We might remove this internal test eventually.
 func TestDoCompact(t *testing.T) {
-	c := newLevelsController(DefaultDBOptions)
+	c := newLevelsController(DefaultOptions)
 	t0 := buildTable(t, [][]string{
 		{"k2", "z2"},
 		{"k22", "z22"},

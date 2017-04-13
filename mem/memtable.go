@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package memtable
+package mem
 
 import (
 	"fmt"
@@ -26,8 +26,8 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-// Memtable is a thin wrapper over Skiplist, at least for now.
-type Memtable struct {
+// Table is a thin wrapper over Skiplist, at least for now.
+type Table struct {
 	table *skl.Skiplist
 	arena *y.Arena
 }
@@ -39,9 +39,9 @@ const (
 	byteDelete = 1
 )
 
-// NewMemtable creates a new memtable. Input is the user key comparator.
-func NewMemtable() *Memtable {
-	return &Memtable{
+// NewTable creates a new memtable. Input is the user key comparator.
+func NewTable() *Table {
+	return &Table{
 		arena: new(y.Arena),
 		table: skl.NewSkiplist(),
 	}
@@ -50,7 +50,7 @@ func NewMemtable() *Memtable {
 // Put sets a key-value pair. We don't use onlyIfAbsent now. And we ignore the old value returned
 // by the skiplist. These can be used later on to support more operations, e.g., GetOrCreate can
 // be a Put with an empty value with onlyIfAbsent=true.
-func (s *Memtable) Put(key, value []byte, meta byte) {
+func (s *Table) Put(key, value []byte, meta byte) {
 	data := s.arena.Allocate(len(key) + len(value) + 1)
 	y.AssertTrue(len(key) == copy(data[:len(key)], key))
 	v := data[len(key):]
@@ -60,7 +60,7 @@ func (s *Memtable) Put(key, value []byte, meta byte) {
 }
 
 // WriteLevel0Table flushes memtable. It drops deleteValues.
-func (s *Memtable) WriteLevel0Table(f *os.File) error {
+func (s *Table) WriteLevel0Table(f *os.File) error {
 	iter := s.NewIterator()
 	b := table.NewTableBuilder()
 	defer b.Close()
@@ -79,7 +79,7 @@ type Iterator struct {
 }
 
 // NewIterator returns a memtable iterator.
-func (s *Memtable) NewIterator() *Iterator {
+func (s *Table) NewIterator() *Iterator {
 	return &Iterator{iter: s.table.NewIterator()}
 }
 
@@ -106,7 +106,7 @@ func (s *Iterator) KeyValue() ([]byte, []byte) {
 }
 
 // Get looks up a key. This includes the meta byte.
-func (s *Memtable) Get(key []byte) []byte {
+func (s *Table) Get(key []byte) []byte {
 	v := s.table.Get(key)
 	if v == nil {
 		// This is different from unsafe.Pointer(nil).
@@ -116,11 +116,11 @@ func (s *Memtable) Get(key []byte) []byte {
 }
 
 // MemUsage returns an approximate mem usage.
-func (s *Memtable) MemUsage() int64 {
+func (s *Table) MemUsage() int64 {
 	return int64(s.arena.MemUsage())
 }
 
-func (s *Memtable) DebugString() string {
+func (s *Table) DebugString() string {
 	it := s.NewIterator()
 	it.SeekToFirst()
 	k1, _ := it.KeyValue()

@@ -17,16 +17,18 @@
 package badger
 
 import (
+	"encoding/binary"
+	"fmt"
 	"path/filepath"
 	"sync"
 
-	"github.com/dgraph-io/badger/memtable"
+	"github.com/dgraph-io/badger/mem"
 	"github.com/dgraph-io/badger/value"
 	"github.com/dgraph-io/badger/y"
 )
 
-// DBOptions are params for creating DB object.
-type DBOptions struct {
+// Options are params for creating DB object.
+type Options struct {
 	Dir                     string
 	NumLevelZeroTables      int   // Maximum number of Level 0 tables before we start compacting.
 	NumLevelZeroTablesStall int   // If we hit this number of Level 0 tables, we will stall until level 0 is compacted away.
@@ -37,9 +39,10 @@ type DBOptions struct {
 	LevelSizeMultiplier     int
 	ValueThreshold          int // If value size >= this threshold, we store offsets in value log.
 	Verbose                 bool
+	DoNotCompact            bool
 }
 
-var DefaultDBOptions = DBOptions{
+var DefaultOptions = Options{
 	Dir:                     "/tmp",
 	NumLevelZeroTables:      5,
 	NumLevelZeroTablesStall: 10,
@@ -50,29 +53,45 @@ var DefaultDBOptions = DBOptions{
 	LevelSizeMultiplier:     10,
 	ValueThreshold:          20,
 	Verbose:                 true,
+	DoNotCompact:            false, // Only for testing.
 }
 
 type DB struct {
 	sync.RWMutex // Guards imm, mem.
 
-	imm   *memtable.Memtable // Immutable, memtable being flushed.
-	mem   *memtable.Memtable
-	immWg sync.WaitGroup // Nonempty when flushing immutable memtable.
-	opt   DBOptions
-	lc    *levelsController
-	vlog  value.Log
+	imm     *mem.Table // Immutable, memtable being flushed.
+	mt      *mem.Table
+	immWg   sync.WaitGroup // Nonempty when flushing immutable memtable.
+	opt     Options
+	lc      *levelsController
+	vlog    value.Log
+	voffset uint64
 }
 
 // NewDB returns a new DB object. Compact levels are created as well.
-func NewDB(opt DBOptions) *DB {
+func NewDB(opt Options) *DB {
 	y.AssertTrue(len(opt.Dir) > 0)
 	out := &DB{
-		mem: memtable.NewMemtable(),
+		mt:  mem.NewTable(),
 		opt: opt, // Make a copy.
 		lc:  newLevelsController(opt),
 	}
 	vlogPath := filepath.Join(opt.Dir, "vlog")
 	out.vlog.Open(vlogPath)
+
+	val := out.Get(Head)
+	var voffset uint64
+	if len(val) == 0 {
+		voffset = 0
+	} else {
+		voffset = binary.BigEndian.Uint64(val)
+	}
+
+	fn := func(k, v []byte, meta byte) {
+		out.mt.Put(k, v, meta)
+	}
+	out.vlog.Replay(voffset, fn)
+
 	return out
 }
 
@@ -80,10 +99,10 @@ func NewDB(opt DBOptions) *DB {
 func (s *DB) Close() {
 }
 
-func (s *DB) getMemTables() (*memtable.Memtable, *memtable.Memtable) {
+func (s *DB) getMemTables() (*mem.Table, *mem.Table) {
 	s.RLock()
 	defer s.RUnlock()
-	return s.mem, s.imm
+	return s.mt, s.imm
 }
 
 func decodeValue(val []byte, vlog *value.Log) []byte {
@@ -132,11 +151,22 @@ func (s *DB) Get(key []byte) []byte {
 	return decodeValue(val, &s.vlog)
 }
 
+func (s *DB) updateOffset(ptrs []value.Pointer) {
+	ptr := ptrs[len(ptrs)-1]
+
+	s.Lock()
+	defer s.Unlock()
+	if s.voffset < ptr.Offset {
+		s.voffset = ptr.Offset + uint64(ptr.Len)
+	}
+}
+
 // Write applies a list of value.Entry to our memtable.
 func (s *DB) Write(entries []value.Entry) error {
 	ptrs, err := s.vlog.Write(entries)
 	y.Check(err)
 	y.AssertTrue(len(ptrs) == len(entries))
+	s.updateOffset(ptrs)
 
 	if err := s.makeRoomForWrite(); err != nil {
 		return err
@@ -145,9 +175,9 @@ func (s *DB) Write(entries []value.Entry) error {
 	var offsetBuf [20]byte
 	for i, entry := range entries {
 		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
-			s.mem.Put(entry.Key, entry.Value, entry.Meta)
+			s.mt.Put(entry.Key, entry.Value, entry.Meta)
 		} else {
-			s.mem.Put(entry.Key, ptrs[i].Encode(offsetBuf[:]), entry.Meta|value.BitValuePointer)
+			s.mt.Put(entry.Key, ptrs[i].Encode(offsetBuf[:]), entry.Meta|value.BitValuePointer)
 		}
 	}
 	return nil
@@ -173,22 +203,33 @@ func (s *DB) Delete(key []byte) error {
 	})
 }
 
+var (
+	Head = []byte("_head_")
+)
+
 func (s *DB) makeRoomForWrite() error {
-	if s.mem.MemUsage() < s.opt.MaxTableSize {
+	if s.mt.MemUsage() < s.opt.MaxTableSize {
 		// Nothing to do. We have enough space.
 		return nil
 	}
 	s.immWg.Wait() // Make sure we finish flushing immutable memtable.
 
 	s.Lock()
+	if s.voffset > 0 {
+		fmt.Printf("Storing offset: %v\n", s.voffset)
+		offset := make([]byte, 8)
+		binary.BigEndian.PutUint64(offset, s.voffset)
+		s.mt.Put(Head, offset, 0)
+	}
+
 	// Changing imm, mem requires lock.
-	s.imm = s.mem
-	s.mem = memtable.NewMemtable()
+	s.imm = s.mt
+	s.mt = mem.NewTable()
 
 	// Note: It is important to start the compaction within this lock.
 	// Otherwise, you might be compacting the wrong imm!
 	s.immWg.Add(1)
-	go func(imm *memtable.Memtable) {
+	go func(imm *mem.Table) {
 		defer s.immWg.Done()
 
 		fileID, f := tempFile(s.opt.Dir)
