@@ -101,6 +101,7 @@ func TestConcurrentWrite(t *testing.T) {
 			it.Next()
 		}
 	}
+	require.False(t, it.Valid())
 }
 
 func TestMergeIterator(t *testing.T) {
