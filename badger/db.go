@@ -234,11 +234,11 @@ var (
 // If force==true, we will always proceed to make the above change.
 // Note: After function returns, we may still be flushing the new imm to disk.
 func (s *DB) makeRoomForWrite(force bool) error {
-	if !force && s.mt.MemUsage() < s.opt.MaxTableSize {
+	if !force && s.mt.Size() < s.opt.MaxTableSize {
 		// Nothing to do. We have enough space.
 		return nil
 	}
-	if s.mt.MemUsage() == 0 {
+	if s.mt.Size() == 0 {
 		// Even if forced, we do not attempt to write an empty table!
 		return nil
 	}
