@@ -103,6 +103,7 @@ func (s *MergeIterator) Next() {
 	AssertTrue(s.Valid())
 	k, _ := s.KeyValue()
 	oldKey := make([]byte, len(k))
+	// TODO: Remove this?
 	AssertTrue(len(k) == copy(oldKey, k))
 	for {
 		idx := s.h.idx[0] // Which iterator.
@@ -164,6 +165,7 @@ func (s *MergeIterator) Close() {
 
 // ConcatIterator iterates over some tables in the given order.
 // NOTE: ConcatIterator owns the array of iterators and is responsible for closing them.
+// TODO: Remove this.
 type ConcatIterator struct {
 	idx   int // Which iterator is active now.
 	iters []Iterator

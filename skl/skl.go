@@ -315,13 +315,11 @@ func (s *Iterator) Valid() bool { return s.n != nil }
 
 // Key returns the key at the current position.
 func (s *Iterator) Key() []byte {
-	y.AssertTrue(s.Valid())
 	return s.n.key
 }
 
 // Value returns value.
 func (s *Iterator) Value() unsafe.Pointer {
-	y.AssertTrue(s.Valid())
 	return s.n.value
 }
 

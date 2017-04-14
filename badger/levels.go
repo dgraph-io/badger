@@ -387,6 +387,7 @@ func (s *levelsController) doCompact(l int) error {
 	left, right := nextLevel.overlappingTables(smallest, biggest)
 	// Merge thisLevel's selected tables with nextLevel.tables[left:right]. Excludes tables[right].
 	y.AssertTrue(left <= right)
+
 	if (thisLevel.level >= 1) && left == right {
 		// No overlap with the next level. Just move the file(s) down to the next level.
 		// Function will acquire level lock.
@@ -420,6 +421,7 @@ func (s *levelsController) doCompact(l int) error {
 	var newTables [200]*table.Table
 	var wg sync.WaitGroup
 	var i int
+	iterTime := time.Now()
 	for ; it.Valid(); i++ {
 		y.AssertTruef(i < len(newTables), "Rewriting too many tables: %d %d", i, len(newTables))
 		builder := table.NewTableBuilder()
@@ -437,6 +439,8 @@ func (s *levelsController) doCompact(l int) error {
 			builder.Close()
 			continue
 		}
+		fmt.Printf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(iterTime))
+		iterTime = time.Now()
 
 		wg.Add(1)
 		go func(idx int, builder *table.TableBuilder) {
@@ -465,7 +469,7 @@ func (s *levelsController) doCompact(l int) error {
 	}()
 
 	if s.db.opt.Verbose {
-		fmt.Printf("LOG Compact %d->%d: Del [%d,%d), Del [%d,%d), Add [%d,%d), took %v\n",
+		fmt.Printf("LOG Compact %d{Del [%d,%d)} => %d{Del [%d,%d), Add [%d,%d)}, took %v\n",
 			l, l+1, srcIdx0, srcIdx1, left, right, left, left+len(newTablesSlice), time.Since(timeStart))
 	}
 	nextLevel.replaceTables(left, right, newTablesSlice)

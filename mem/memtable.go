@@ -54,6 +54,7 @@ func (s *Table) Put(key, value []byte, meta byte) {
 	data := make([]byte, len(key)+len(value)+1)
 	atomic.AddInt64(&s.size, int64(len(key)+len(value)+1))
 
+	// TODO: Remove these copies.
 	y.AssertTrue(len(key) == copy(data[:len(key)], key))
 	v := data[len(key):]
 	v[0] = meta
