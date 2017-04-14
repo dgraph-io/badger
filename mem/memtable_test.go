@@ -91,6 +91,7 @@ func TestConcurrentWrite(t *testing.T) {
 	}
 	wg.Wait()
 	it := tbl.NewIterator()
+	defer it.Close()
 	it.SeekToFirst()
 	for i := 0; i < n; i++ {
 		for j := 0; j < m; j++ {

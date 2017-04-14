@@ -245,6 +245,7 @@ func (s *DB) makeRoomForWrite(force bool) error {
 	s.immWg.Wait() // Make sure we finish flushing immutable memtable.
 
 	s.Lock()
+	defer s.Unlock()
 	if s.voffset > 0 {
 		fmt.Printf("Storing offset: %v\n", s.voffset)
 		offset := make([]byte, 8)
@@ -255,13 +256,9 @@ func (s *DB) makeRoomForWrite(force bool) error {
 	// Changing imm, mem requires lock.
 	s.imm = s.mt
 	s.mt = mem.NewTable()
-
-	// Note: It is important to start the compaction within this lock.
-	// Otherwise, you might be compacting the wrong imm!
 	s.immWg.Add(1)
 	go func(imm *mem.Table) {
 		defer s.immWg.Done()
-
 		fileID, f := s.newFile()
 		y.Check(imm.WriteLevel0Table(f))
 		tbl, err := newTableHandler(fileID, f)
@@ -269,7 +266,6 @@ func (s *DB) makeRoomForWrite(force bool) error {
 		y.Check(err)
 		s.lc.addLevel0Table(tbl) // This will incrRef again.
 	}(s.imm)
-	s.Unlock()
 	return nil
 }
 
