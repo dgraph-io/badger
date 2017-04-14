@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"sync/atomic"
+	"syscall"
 	//	"fmt"
 	"os"
 	"sort"
@@ -31,20 +32,21 @@ import (
 
 type keyOffset struct {
 	key    []byte
-	offset int64
-	len    int64
+	offset int
+	len    int
 }
 
 type Table struct {
 	sync.Mutex
 
-	offset    int64
 	fd        *os.File // Own fd.
-	tableSize int64    // Initialized in OpenTable, using fd.Stat().
+	tableSize int      // Initialized in OpenTable, using fd.Stat().
 
 	blockIndex []keyOffset
 	metadata   []byte
 	ref        int32 // For file garbage collection.
+
+	mmap []byte // Memory mapped.
 
 	// The following are initialized once and const.
 	smallest, biggest []byte // Smallest and largest keys.
@@ -66,7 +68,7 @@ func (s *Table) DecrRef() {
 }
 
 type Block struct {
-	offset int64
+	offset int
 	data   []byte
 }
 
@@ -83,15 +85,20 @@ func (b byKey) Less(i int, j int) bool { return bytes.Compare(b[i].key, b[j].key
 // OpenTable assumes file has only one table and opens it.
 func OpenTable(fd *os.File) (*Table, error) {
 	t := &Table{
-		fd:     fd,
-		offset: 0, // Consider removing this field.
-		ref:    1, // Caller is given one reference.
+		fd:  fd,
+		ref: 1, // Caller is given one reference.
 	}
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		return nil, err
 	}
-	t.tableSize = fileInfo.Size()
+	t.tableSize = int(fileInfo.Size())
+
+	t.mmap, err = syscall.Mmap(int(fd.Fd()), 0, int(fileInfo.Size()),
+		syscall.PROT_READ, syscall.MAP_PRIVATE|syscall.MAP_POPULATE)
+	if err != nil {
+		y.Fatalf("Unable to map file: %v", err)
+	}
 
 	if err := t.readIndex(); err != nil {
 		return nil, err
@@ -115,61 +122,68 @@ func OpenTable(fd *os.File) (*Table, error) {
 
 func (s *Table) Close() {
 	s.fd.Close()
+	syscall.Munmap(s.mmap)
 }
 
 // SetMetadata updates our metadata to the new metadata.
 // For now, they must be of the same size.
 func (t *Table) SetMetadata(meta []byte) error {
 	y.AssertTrue(len(meta) == len(t.metadata))
-	pos := int64(t.offset + t.tableSize - 4 - int64(len(t.metadata)))
-	written, err := t.fd.WriteAt(meta, pos)
+	pos := t.tableSize - 4 - len(t.metadata)
+	written, err := t.fd.WriteAt(meta, int64(pos))
 	y.AssertTrue(written == len(meta))
 	return err
 }
 
+var EOF = errors.New("End of mapped region")
+
+func (t *Table) read(off int, sz int) ([]byte, error) {
+	y.AssertTrue(t.mmap != nil && len(t.mmap) > 0)
+	if len(t.mmap[off:]) < sz {
+		return nil, EOF
+	}
+	return t.mmap[off : off+sz], nil
+}
+
+func (t *Table) readNoFail(off int, sz int) []byte {
+	res, err := t.read(off, sz)
+	y.Check(err)
+	return res
+}
+
 func (t *Table) readIndex() error {
-	buf := make([]byte, 4)
-	readPos := int64(t.offset + t.tableSize - 4)
-	if _, err := t.fd.ReadAt(buf, t.offset+t.tableSize-4); err != nil {
-		return errors.Wrap(err, "While reading metadata size")
-	}
-	metadataSize := int64(binary.BigEndian.Uint32(buf))
-	t.metadata = make([]byte, metadataSize)
-	readPos -= int64(len(t.metadata))
-	if _, err := t.fd.ReadAt(t.metadata, readPos); err != nil {
-		return errors.Wrap(err, "While reading metadata")
-	}
+	readPos := t.tableSize - 4
+	buf := t.readNoFail(t.tableSize-4, 4)
+
+	metadataSize := int(binary.BigEndian.Uint32(buf))
+	readPos -= metadataSize
+	t.metadata = t.readNoFail(readPos, metadataSize)
 
 	readPos -= 4
-	if _, err := t.fd.ReadAt(buf, readPos); err != nil {
-		return errors.Wrap(err, "While reading block index")
-	}
+	buf = t.readNoFail(readPos, 4)
 	restartsLen := int(binary.BigEndian.Uint32(buf))
 
-	buf = make([]byte, 4*restartsLen)
-	readPos -= int64(len(buf))
-	if _, err := t.fd.ReadAt(buf, readPos); err != nil {
-		return errors.Wrap(err, "While reading block index")
-	}
+	readPos -= 4 * restartsLen
+	buf = t.readNoFail(readPos, 4*restartsLen)
 
-	offsets := make([]uint32, restartsLen)
+	offsets := make([]int, restartsLen)
 	for i := 0; i < restartsLen; i++ {
-		offsets[i] = binary.BigEndian.Uint32(buf[:4])
+		offsets[i] = int(binary.BigEndian.Uint32(buf[:4]))
 		buf = buf[4:]
 	}
 
 	// The last offset stores the end of the last block.
 	for i := 0; i < len(offsets); i++ {
-		var o int64
+		var o int
 		if i == 0 {
 			o = 0
 		} else {
-			o = int64(offsets[i-1])
+			o = offsets[i-1]
 		}
 
 		ko := keyOffset{
 			offset: o,
-			len:    int64(offsets[i]) - o,
+			len:    offsets[i] - o,
 		}
 		t.blockIndex = append(t.blockIndex, ko)
 	}
@@ -185,9 +199,9 @@ func (t *Table) readIndex() error {
 		go func(ko *keyOffset) {
 			var h header
 
-			offset := t.offset + ko.offset
-			buf := make([]byte, h.Size())
-			if _, err := t.fd.ReadAt(buf, offset); err != nil {
+			offset := ko.offset
+			buf, err := t.read(offset, h.Size())
+			if err != nil {
 				che <- errors.Wrap(err, "While reading first header in block")
 				return
 			}
@@ -195,11 +209,13 @@ func (t *Table) readIndex() error {
 			h.Decode(buf)
 			y.AssertTrue(h.plen == 0)
 
-			offset += int64(h.Size())
+			offset += h.Size()
 			buf = make([]byte, h.klen)
-			if _, err := t.fd.ReadAt(buf, offset); err != nil {
+			if out, err := t.read(offset, h.klen); err != nil {
 				che <- errors.Wrap(err, "While reading first key in block")
 				return
+			} else {
+				y.AssertTrue(len(buf) == copy(buf, out))
 			}
 
 			ko.key = buf
@@ -227,19 +243,17 @@ func (t *Table) block(idx int) (Block, error) {
 	}
 
 	ko := t.blockIndex[idx]
-
-	// TODO: add Block caching here.
 	block := Block{
-		offset: ko.offset + t.offset,
-		data:   make([]byte, int(ko.len)),
+		offset: ko.offset,
 	}
-	if _, err := t.fd.ReadAt(block.data, block.offset); err != nil {
+	var err error
+	if block.data, err = t.read(block.offset, ko.len); err != nil {
 		return block, err
 	}
 	return block, nil
 }
 
-func (t *Table) Size() int64      { return t.tableSize }
+func (t *Table) Size() int64      { return int64(t.tableSize) }
 func (t *Table) Smallest() []byte { return t.smallest }
 func (t *Table) Biggest() []byte  { return t.biggest }
 func (t *Table) Filename() string { return t.fd.Name() }
