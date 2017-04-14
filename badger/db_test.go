@@ -133,7 +133,7 @@ func TestDBGetMore(t *testing.T) {
 	defer db.Close()
 
 	//	n := 500000
-	n := 100000
+	n := 10000
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Putting i=%d\n", i)
@@ -226,7 +226,7 @@ func TestDBLoad(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	n := 100000
+	n := 1000
 	{
 		db := NewDB(getTestOptions(dir))
 		for i := 0; i < n; i++ {

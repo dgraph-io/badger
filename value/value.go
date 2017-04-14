@@ -25,10 +25,11 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
+
+	"golang.org/x/net/trace"
 
 	"github.com/dgraph-io/badger/y"
-	"github.com/dgraph-io/dgraph/x"
-	"github.com/pkg/errors"
 )
 
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
@@ -39,9 +40,12 @@ const (
 )
 
 type Log struct {
-	x.SafeMutex
+	sync.RWMutex
 	fd     *os.File
 	offset int64
+	elog   trace.EventLog
+	bch    chan *block
+	done   sync.WaitGroup
 }
 
 type Entry struct {
@@ -91,6 +95,18 @@ func (l *Log) Open(fname string) {
 	var err error
 	l.fd, err = y.OpenSyncedFile(fname)
 	y.Check(err)
+	l.elog = trace.NewEventLog("Badger", "Valuelog")
+
+	l.bch = make(chan *block, 1000)
+	l.done.Add(1)
+	go l.writeToDisk()
+}
+
+func (l *Log) Close() {
+	close(l.bch)
+	l.done.Wait()
+	l.fd.Close()
+	l.elog.Finish()
 }
 
 func (l *Log) Replay(offset uint64, fn func(k, v []byte, meta byte)) {
@@ -149,43 +165,87 @@ var bufPool = sync.Pool{
 	},
 }
 
+type block struct {
+	entries []Entry
+	ptrs    []Pointer
+	wg      *sync.WaitGroup
+}
+
+func (l *Log) writeToDisk() {
+	l.elog.Printf("Starting write to disk routine")
+	buf := new(bytes.Buffer)
+	buf.Grow(10 << 20)
+
+	blocks := make([]*block, 0, 1000)
+	write := func() {
+		l.elog.Printf("Buffering %d blocks", len(blocks))
+		for i := range blocks {
+			b := blocks[i]
+			for j := range b.entries {
+				e := b.entries[j]
+
+				var h header
+				h.klen = uint32(len(e.Key))
+				h.vlen = uint32(len(e.Value))
+				header := h.Encode()
+
+				var p Pointer
+				p.Len = uint32(len(header)) + h.klen + h.vlen + 1
+				p.Offset = uint64(l.offset) + uint64(buf.Len())
+				b.ptrs = append(b.ptrs, p)
+
+				buf.Write(header)
+				buf.Write(e.Key)
+				buf.WriteByte(e.Meta)
+				buf.Write(e.Value)
+			}
+		}
+		l.elog.Printf("Created buffer of size: %d", buf.Len())
+		n, err := l.fd.Write(buf.Bytes())
+		if err != nil {
+			y.Fatalf("Unable to write to value log: %v", err)
+		}
+		buf.Reset()
+
+		l.elog.Printf("Wrote %d bytes to disk", n)
+		l.offset += int64(n)
+		for i := range blocks {
+			b := blocks[i]
+			b.wg.Done()
+		}
+		blocks = blocks[:0]
+	}
+
+LOOP:
+	for {
+		select {
+		case b, open := <-l.bch:
+			if !open {
+				write()
+				break LOOP
+			}
+			blocks = append(blocks, b)
+
+		default:
+			if len(blocks) == 0 {
+				time.Sleep(time.Millisecond)
+				break
+			}
+			write()
+		}
+	}
+	l.done.Done()
+}
+
 // Write batches the write of an array of entries to value log.
 func (l *Log) Write(entries []Entry) ([]Pointer, error) {
-	buf := bufPool.Get().(*bytes.Buffer)
-	defer func() {
-		buf.Reset()
-		bufPool.Put(buf)
-	}()
-
-	var h header
-	ptrs := make([]Pointer, 0, len(entries))
-
-	for _, e := range entries {
-		h.klen = uint32(len(e.Key))
-		h.vlen = uint32(len(e.Value))
-		header := h.Encode()
-
-		var p Pointer
-		p.Len = uint32(len(header)) + h.klen + h.vlen + 1
-		p.Offset = uint64(buf.Len())
-		ptrs = append(ptrs, p)
-
-		buf.Write(header)
-		buf.Write(e.Key)
-		buf.WriteByte(e.Meta)
-		buf.Write(e.Value)
-	}
-
-	l.Lock()
-	defer l.Unlock()
-
-	for i := range ptrs {
-		p := &ptrs[i]
-		p.Offset += uint64(l.offset)
-	}
-	n, err := l.fd.Write(buf.Bytes())
-	l.offset += int64(n)
-	return ptrs, errors.Wrap(err, "Unable to write to file")
+	b := new(block)
+	b.entries = entries
+	b.wg = new(sync.WaitGroup)
+	b.wg.Add(1)
+	l.bch <- b
+	b.wg.Wait()
+	return b.ptrs, nil
 }
 
 // Read reads the value log at a given location.

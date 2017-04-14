@@ -36,6 +36,8 @@ func TestBasic(t *testing.T) {
 
 	var log Log
 	log.Open(fd.Name())
+	defer log.Close()
+
 	ptrs, err := log.Write([]Entry{
 		{
 			Key:   []byte("samplekey"),
