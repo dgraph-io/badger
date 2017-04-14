@@ -198,7 +198,14 @@ type TableIterator struct {
 	init bool
 }
 
-func (itr *TableIterator) Close() {}
+func (t *Table) NewIterator() *TableIterator {
+	t.IncrRef() // Important.
+	return &TableIterator{t: t}
+}
+
+func (itr *TableIterator) Close() {
+	itr.t.DecrRef()
+}
 
 func (itr *TableIterator) Reset() {
 	itr.bpos = 0

@@ -41,7 +41,7 @@ type levelHandler struct {
 	// For level >= 1, tables are sorted by key ranges, which do not overlap.
 	// For level 0, tables are sorted by time.
 	// For level 0, newest table are at the back. Compact the oldest one first, which is at the front.
-	tables    []*tableHandler
+	tables    []*table.Table
 	totalSize int64
 
 	// The following are initialized once and const.
@@ -77,23 +77,23 @@ func (s *levelHandler) getTotalSize() int64 {
 }
 
 // initTables replaces s.tables with given tables. This is done during loading.
-func (s *levelHandler) initTables(tables []*tableHandler) {
+func (s *levelHandler) initTables(tables []*table.Table) {
 	s.Lock()
 	defer s.Unlock()
 	s.tables = tables
 	s.totalSize = 0
 	for _, t := range tables {
-		s.totalSize += t.size()
+		s.totalSize += t.Size()
 	}
 	if s.level == 0 {
 		// Key range will overlap. Just sort by fileID in ascending order
 		// because newer tables are at the end of level 0.
 		sort.Slice(s.tables, func(i, j int) bool {
-			return s.tables[i].id < s.tables[j].id
+			return path.Base(s.tables[i].Filename()) < path.Base(s.tables[j].Filename())
 		})
 	} else {
 		sort.Slice(s.tables, func(i, j int) bool {
-			return bytes.Compare(s.tables[i].smallest, s.tables[j].smallest) < 0
+			return bytes.Compare(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
 		})
 	}
 }
@@ -103,31 +103,31 @@ func (s *levelHandler) deleteTables(idx0, idx1 int) {
 	s.Lock()
 	defer s.Unlock()
 	for i := idx0; i < idx1; i++ {
-		s.totalSize -= s.tables[i].size()
-		s.tables[i].decrRef()
+		s.totalSize -= s.tables[i].Size()
+		s.tables[i].DecrRef()
 	}
 	s.tables = append(s.tables[:idx0], s.tables[idx1:]...)
 }
 
 // replaceTables will replace tables[left:right] with newTables. Note this EXCLUDES tables[right].
-func (s *levelHandler) replaceTables(left, right int, newTables []*tableHandler) {
+func (s *levelHandler) replaceTables(left, right int, newTables []*table.Table) {
 	s.Lock()
 	defer s.Unlock()
 
 	// Update totalSize first.
 	for _, tbl := range newTables {
-		s.totalSize += tbl.size()
-		tbl.incrRef()
+		s.totalSize += tbl.Size()
+		tbl.IncrRef()
 	}
 	for i := left; i < right; i++ {
-		s.totalSize -= s.tables[i].size()
-		s.tables[i].decrRef()
+		s.totalSize -= s.tables[i].Size()
+		s.tables[i].DecrRef()
 	}
 
 	// To be safe, just make a copy. TODO: Be more careful and avoid copying.
 	numDeleted := right - left
 	numAdded := len(newTables)
-	tables := make([]*tableHandler, len(s.tables)-numDeleted+numAdded)
+	tables := make([]*table.Table, len(s.tables)-numDeleted+numAdded)
 	y.AssertTrue(left == copy(tables, s.tables[:left]))
 	t := tables[left:]
 	y.AssertTrue(numAdded == copy(t, newTables))
@@ -150,9 +150,9 @@ func (s *levelHandler) pickCompactTables() (int, int) {
 
 	// For other levels, pick the largest table.
 	var idx int
-	mx := s.tables[0].size()
+	mx := s.tables[0].Size()
 	for i := 1; i < len(s.tables); i++ {
-		size := s.tables[i].size()
+		size := s.tables[i].Size()
 		if size > mx {
 			mx = size
 			idx = i
@@ -162,7 +162,7 @@ func (s *levelHandler) pickCompactTables() (int, int) {
 }
 
 // getFirstTable returns the first table. If level is empty, we return nil.
-func (s *levelHandler) getFirstTable() *tableHandler {
+func (s *levelHandler) getFirstTable() *table.Table {
 	s.RLock()
 	defer s.RUnlock()
 	if len(s.tables) == 0 {
@@ -171,7 +171,7 @@ func (s *levelHandler) getFirstTable() *tableHandler {
 	return s.tables[0]
 }
 
-func (s *levelHandler) getTable(idx int) *tableHandler {
+func (s *levelHandler) getTable(idx int) *table.Table {
 	s.RLock()
 	defer s.RUnlock()
 	y.AssertTruef(0 <= idx && idx < len(s.tables), "level=%d idx=%d len=%d",
@@ -188,10 +188,10 @@ func (s *levelHandler) overlappingTables(begin, end []byte) (int, int) {
 	y.AssertTrue(s.level > 0)
 	// Binary search.
 	left := sort.Search(len(s.tables), func(i int) bool {
-		return bytes.Compare(s.tables[i].biggest, begin) >= 0
+		return bytes.Compare(s.tables[i].Biggest(), begin) >= 0
 	})
 	right := sort.Search(len(s.tables), func(i int) bool {
-		return bytes.Compare(s.tables[i].smallest, end) > 0
+		return bytes.Compare(s.tables[i].Smallest(), end) > 0
 	})
 	return left, right
 }
@@ -227,7 +227,7 @@ func newLevelsController(db *DB) (*levelsController, uint64) {
 	fileInfos, err := ioutil.ReadDir(db.opt.Dir)
 	y.Check(err)
 
-	tables := make([][]*tableHandler, db.opt.MaxLevels)
+	tables := make([][]*table.Table, db.opt.MaxLevels)
 	var maxFileID uint64
 	for _, info := range fileInfos {
 		if info.IsDir() {
@@ -250,10 +250,15 @@ func newLevelsController(db *DB) (*levelsController, uint64) {
 		}
 		fd, err := y.OpenSyncedFile(newFilename(fileID, db.opt.Dir))
 		y.Check(err)
-		t, err := newTableHandler(fileID, fd)
+		t, err := table.OpenTable(fd)
 		y.Check(err)
-		y.AssertTrue(t.level >= 0 && t.level < db.opt.MaxLevels)
-		tables[t.level] = append(tables[t.level], t)
+
+		// Check metadata for level information.
+		tableMeta := t.Metadata()
+		y.AssertTrue(len(tableMeta) == 2)
+		level := int(binary.BigEndian.Uint16(tableMeta))
+		y.AssertTrue(level < db.opt.MaxLevels)
+		tables[level] = append(tables[level], t)
 	}
 	for i, tbls := range tables {
 		s.levels[i].initTables(tbls)
@@ -355,14 +360,14 @@ func (s *levelHandler) keyRange(idx0, idx1 int) ([]byte, []byte) {
 	y.AssertTrue(idx0 < idx1)
 	s.RLock() // For access to s.tables.
 	defer s.RUnlock()
-	smallest := s.tables[idx0].smallest
-	biggest := s.tables[idx0].biggest
+	smallest := s.tables[idx0].Smallest()
+	biggest := s.tables[idx0].Biggest()
 	for i := idx0 + 1; i < idx1; i++ {
-		if bytes.Compare(s.tables[i].smallest, smallest) < 0 {
-			smallest = s.tables[i].smallest
+		if bytes.Compare(s.tables[i].Smallest(), smallest) < 0 {
+			smallest = s.tables[i].Smallest()
 		}
-		if bytes.Compare(s.tables[i].biggest, biggest) > 0 {
-			biggest = s.tables[i].biggest
+		if bytes.Compare(s.tables[i].Biggest(), biggest) > 0 {
+			biggest = s.tables[i].Biggest()
 		}
 	}
 	return smallest, biggest
@@ -390,7 +395,7 @@ func (s *levelsController) doCompact(l int) error {
 		for i := srcIdx0; i < srcIdx1; i++ {
 			tbl := thisLevel.tables[i]
 			// Need to update table metadata to reflect the new level.
-			tbl.updateLevel(l + 1)
+			updateLevel(tbl, l+1)
 		}
 		if s.db.opt.Verbose {
 			fmt.Printf("Merge: Move table [%d,%d) from level %d to %d\n", srcIdx0, srcIdx1, l, l+1)
@@ -404,7 +409,7 @@ func (s *levelsController) doCompact(l int) error {
 		iters = appendIteratorsReversed(iters, thisLevel.tables[srcIdx0:srcIdx1])
 	} else {
 		y.AssertTrue(srcIdx0+1 == srcIdx1) // For now, for level >=1, we expect exactly one table.
-		iters = []y.Iterator{thisLevel.tables[srcIdx0].newIterator()}
+		iters = []y.Iterator{thisLevel.tables[srcIdx0].NewIterator()}
 	}
 	iters = append(iters, newConcatIterator(nextLevel.tables[left:right]))
 	it := y.NewMergeIterator(iters)
@@ -412,7 +417,7 @@ func (s *levelsController) doCompact(l int) error {
 
 	it.SeekToFirst()
 
-	var newTables [200]*tableHandler
+	var newTables [200]*table.Table
 	var wg sync.WaitGroup
 	var i int
 	for ; it.Valid(); i++ {
@@ -438,14 +443,14 @@ func (s *levelsController) doCompact(l int) error {
 			defer builder.Close()
 			defer wg.Done()
 
-			fileID, fd := s.db.newFile()
+			fd := s.db.newFile()
 			// Encode the level number as table metadata.
 			var levelNum [2]byte
 			binary.BigEndian.PutUint16(levelNum[:], uint16(l+1))
 
 			fd.Write(builder.Finish(levelNum[:]))
 			var err error
-			newTables[idx], err = newTableHandler(fileID, fd)
+			newTables[idx], err = table.OpenTable(fd)
 			// decrRef is added below.
 			y.Check(err)
 		}(i, builder)
@@ -455,7 +460,7 @@ func (s *levelsController) doCompact(l int) error {
 	newTablesSlice := newTables[:i]
 	defer func() {
 		for _, t := range newTablesSlice {
-			t.decrRef() // replaceTables will increment reference.
+			t.DecrRef() // replaceTables will increment reference.
 		}
 	}()
 
@@ -470,7 +475,7 @@ func (s *levelsController) doCompact(l int) error {
 	return nil
 }
 
-func (s *levelsController) addLevel0Table(t *tableHandler) {
+func (s *levelsController) addLevel0Table(t *table.Table) {
 	for !s.levels[0].tryAddLevel0Table(t, s.db.opt.Verbose) {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time
@@ -499,7 +504,7 @@ func (s *levelsController) addLevel0Table(t *tableHandler) {
 }
 
 // tryAddLevel0Table returns true if ok and no stalling.
-func (s *levelHandler) tryAddLevel0Table(t *tableHandler, verbose bool) bool {
+func (s *levelHandler) tryAddLevel0Table(t *table.Table, verbose bool) bool {
 	y.AssertTrue(s.level == 0)
 	// Need lock as we may be deleting the first table during a level 0 compaction.
 	s.Lock()
@@ -509,8 +514,8 @@ func (s *levelHandler) tryAddLevel0Table(t *tableHandler, verbose bool) bool {
 	}
 
 	s.tables = append(s.tables, t)
-	t.incrRef()
-	s.totalSize += t.size()
+	t.IncrRef()
+	s.totalSize += t.Size()
 
 	if verbose {
 		fmt.Printf("Num level 0 tables increased from %d to %d\n", len(s.tables)-1, len(s.tables))
@@ -528,12 +533,12 @@ func (s *levelHandler) Check() {
 	numTables := len(s.tables)
 	for j := 1; j < numTables; j++ {
 		y.AssertTruef(j < len(s.tables), "Level %d, j=%d numTables=%d", s.level, j, numTables)
-		y.AssertTruef(bytes.Compare(s.tables[j-1].biggest, s.tables[j].smallest) < 0,
+		y.AssertTruef(bytes.Compare(s.tables[j-1].Biggest(), s.tables[j].Smallest()) < 0,
 			"%s vs %s: level=%d j=%d numTables=%d",
-			string(s.tables[j-1].biggest), string(s.tables[j].smallest), s.level, j, numTables)
-		y.AssertTruef(bytes.Compare(s.tables[j].smallest, s.tables[j].biggest) <= 0,
+			string(s.tables[j-1].Biggest()), string(s.tables[j].Smallest()), s.level, j, numTables)
+		y.AssertTruef(bytes.Compare(s.tables[j].Smallest(), s.tables[j].Biggest()) <= 0,
 			"%s vs %s: level=%d j=%d numTables=%d",
-			string(s.tables[j].smallest), string(s.tables[j].biggest), s.level, j, numTables)
+			string(s.tables[j].Smallest()), string(s.tables[j].Biggest()), s.level, j, numTables)
 	}
 }
 
@@ -554,7 +559,7 @@ func (s *levelHandler) close() {
 	s.RLock()
 	defer s.RUnlock()
 	for _, t := range s.tables {
-		t.close()
+		t.Close()
 	}
 }
 
@@ -571,25 +576,25 @@ func (s *levelsController) get(ctx context.Context, key []byte) []byte {
 }
 
 // getTableForKey acquires a read-lock to access s.tables. It returns a list of tableHandlers.
-func (s *levelHandler) getTableForKey(key []byte) []*tableHandler {
+func (s *levelHandler) getTableForKey(key []byte) []*table.Table {
 	s.RLock()
 	defer s.RUnlock()
 	if s.level == 0 {
 		// For level 0, we need to check every table. Remember to make a copy as s.tables may change
 		// once we exit this function, and we don't want to lock s.tables while seeking in tables.
-		out := make([]*tableHandler, len(s.tables))
+		out := make([]*table.Table, len(s.tables))
 		y.AssertTrue(len(s.tables) == copy(out, s.tables))
 		return out
 	}
 	// For level >= 1, we can do a binary search as key range does not overlap.
 	idx := sort.Search(len(s.tables), func(i int) bool {
-		return bytes.Compare(s.tables[i].biggest, key) >= 0
+		return bytes.Compare(s.tables[i].Biggest(), key) >= 0
 	})
 	if idx >= len(s.tables) {
 		// Given key is strictly > than every element we have.
 		return nil
 	}
-	return []*tableHandler{s.tables[idx]}
+	return []*table.Table{s.tables[idx]}
 }
 
 // get returns value for a given key. If not found, return nil.
@@ -597,7 +602,7 @@ func (s *levelHandler) get(ctx context.Context, key []byte) []byte {
 	y.Trace(ctx, "get key at level %d", s.level)
 	tables := s.getTableForKey(key)
 	for _, th := range tables {
-		it := th.table.NewIterator()
+		it := th.NewIterator()
 		it.Seek(key)
 		if !it.Valid() {
 			continue
@@ -610,19 +615,19 @@ func (s *levelHandler) get(ctx context.Context, key []byte) []byte {
 	return nil
 }
 
-func appendIteratorsReversed(out []y.Iterator, th []*tableHandler) []y.Iterator {
+func appendIteratorsReversed(out []y.Iterator, th []*table.Table) []y.Iterator {
 	for i := len(th) - 1; i >= 0; i-- {
 		// This will increment the reference of the table handler.
-		out = append(out, th[i].newIterator())
+		out = append(out, th[i].NewIterator())
 	}
 	return out
 }
 
-func newConcatIterator(th []*tableHandler) y.Iterator {
+func newConcatIterator(th []*table.Table) y.Iterator {
 	iters := make([]y.Iterator, 0, len(th))
 	for _, t := range th {
 		// This will increment the reference of the table handler.
-		iters = append(iters, t.newIterator())
+		iters = append(iters, t.NewIterator())
 	}
 	return y.NewConcatIterator(iters)
 }

@@ -24,6 +24,7 @@ import (
 	"sync"
 
 	"github.com/dgraph-io/badger/mem"
+	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/value"
 	"github.com/dgraph-io/badger/y"
 )
@@ -259,10 +260,10 @@ func (s *DB) makeRoomForWrite(force bool) error {
 	s.immWg.Add(1)
 	go func(imm *mem.Table) {
 		defer s.immWg.Done()
-		fileID, f := s.newFile()
+		f := s.newFile()
 		y.Check(imm.WriteLevel0Table(f))
-		tbl, err := newTableHandler(fileID, f)
-		defer tbl.decrRef()
+		tbl, err := table.OpenTable(f)
+		defer tbl.DecrRef()
 		y.Check(err)
 		s.lc.addLevel0Table(tbl) // This will incrRef again.
 	}(s.imm)

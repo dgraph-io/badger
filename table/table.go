@@ -19,6 +19,7 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
+	"sync/atomic"
 	//	"fmt"
 	"os"
 	"sort"
@@ -38,12 +39,30 @@ type Table struct {
 	sync.Mutex
 
 	offset    int64
-	fd        *os.File // Do not own.
+	fd        *os.File // Own fd.
 	tableSize int64    // Initialized in OpenTable, using fd.Stat().
 
 	blockIndex []keyOffset
+	metadata   []byte
+	ref        int32 // For file garbage collection.
 
-	metadata []byte
+	// The following are initialized once and const.
+	smallest, biggest []byte // Smallest and largest keys.
+}
+
+func (s *Table) IncrRef() {
+	atomic.AddInt32(&s.ref, 1)
+}
+
+func (s *Table) DecrRef() {
+	newRef := atomic.AddInt32(&s.ref, -1)
+	if newRef == 0 {
+		// We can safely delete this file, because for all the current files, we always have
+		// at least one reference pointing to them.
+		filename := s.fd.Name()
+		y.Check(s.fd.Close())
+		os.Remove(filename)
+	}
 }
 
 type Block struct {
@@ -66,6 +85,7 @@ func OpenTable(fd *os.File) (*Table, error) {
 	t := &Table{
 		fd:     fd,
 		offset: 0, // Consider removing this field.
+		ref:    1, // Caller is given one reference.
 	}
 	fileInfo, err := fd.Stat()
 	if err != nil {
@@ -76,7 +96,25 @@ func OpenTable(fd *os.File) (*Table, error) {
 	if err := t.readIndex(); err != nil {
 		return nil, err
 	}
+
+	it := t.NewIterator()
+	defer it.Close()
+	it.SeekToFirst()
+	if it.Valid() {
+		t.smallest, _ = it.KeyValue()
+	}
+
+	it2 := t.NewIterator()
+	defer it2.Close()
+	it2.SeekToLast()
+	if it2.Valid() {
+		t.biggest, _ = it2.KeyValue()
+	}
 	return t, nil
+}
+
+func (s *Table) Close() {
+	s.fd.Close()
 }
 
 // SetMetadata updates our metadata to the new metadata.
@@ -201,8 +239,7 @@ func (t *Table) block(idx int) (Block, error) {
 	return block, nil
 }
 
-func (t *Table) NewIterator() *TableIterator {
-	return &TableIterator{t: t}
-}
-
-func (t *Table) Size() int64 { return t.tableSize }
+func (t *Table) Size() int64      { return t.tableSize }
+func (t *Table) Smallest() []byte { return t.smallest }
+func (t *Table) Biggest() []byte  { return t.biggest }
+func (t *Table) Filename() string { return t.fd.Name() }
