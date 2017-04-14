@@ -11,7 +11,9 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-const filePrefix = "table_"
+const (
+	filePrefix = "table_"
+)
 
 func newFilename(fileID uint64, dir string) string {
 	return filepath.Join(dir, filePrefix+fmt.Sprintf("%010d", fileID))
