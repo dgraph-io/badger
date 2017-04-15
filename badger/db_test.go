@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -34,8 +35,8 @@ import (
 func getTestOptions(dir string) *Options {
 	opt := new(Options)
 	*opt = DefaultOptions
-	opt.MaxTableSize = 1 << 20 // Force more compactions.
-	opt.LevelOneSize = 10 << 20
+	opt.MaxTableSize = 1 << 15 // Force more compaction.
+	opt.LevelOneSize = 4 << 15 // Force more compaction.
 	//	opt.Verbose = true
 	opt.Dir = dir
 	return opt
@@ -84,17 +85,24 @@ func TestConcurrentWrite(t *testing.T) {
 	wg.Wait()
 	it := db.NewIterator(ctx)
 	defer it.Close()
-	it.SeekToFirst()
-	for i := 0; i < n; i++ {
-		for j := 0; j < m; j++ {
-			require.True(t, it.Valid(), "%d %d", i, j)
-			k, v := it.KeyValue()
-			require.EqualValues(t, fmt.Sprintf("k%05d_%08d", i, j), string(k))
-			require.EqualValues(t, fmt.Sprintf("v%05d_%08d", i, j), string(v))
-			it.Next()
+
+	var i, j int
+	for it.SeekToFirst(); it.Valid(); it.Next() {
+		k := it.Key()
+		if bytes.Equal(k, Head) {
+			continue
+		}
+		require.EqualValues(t, fmt.Sprintf("k%05d_%08d", i, j), string(k))
+		v := it.Value()
+		require.EqualValues(t, fmt.Sprintf("v%05d_%08d", i, j), string(v))
+		j++
+		if j == m {
+			i++
+			j = 0
 		}
 	}
-	require.False(t, it.Valid())
+	require.EqualValues(t, n, i)
+	require.EqualValues(t, 0, j)
 }
 
 func TestDBGet(t *testing.T) {
@@ -199,7 +207,7 @@ func TestDBIterateBasic(t *testing.T) {
 	defer db.Close()
 
 	// n := 500000
-	n := 1000
+	n := 10000
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Put i=%d\n", i)
@@ -213,8 +221,12 @@ func TestDBIterateBasic(t *testing.T) {
 
 	var count int
 	for it.SeekToFirst(); it.Valid(); it.Next() {
-		key, val := it.KeyValue()
+		key := it.Key()
+		if bytes.Equal(key, Head) {
+			continue
+		}
 		require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
+		val := it.Value()
 		require.EqualValues(t, fmt.Sprintf("%09d", count), string(val))
 		count++
 	}

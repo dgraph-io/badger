@@ -39,8 +39,12 @@ func (s *SimpleIterator) Seek(key []byte) {
 	})
 }
 
-func (s *SimpleIterator) KeyValue() ([]byte, []byte) {
-	return s.keys[s.idx], s.vals[s.idx]
+func (s *SimpleIterator) Key() []byte {
+	return s.keys[s.idx]
+}
+
+func (s *SimpleIterator) Value() ([]byte, byte) {
+	return s.vals[s.idx], 55
 }
 
 func (s *SimpleIterator) Valid() bool {
@@ -65,8 +69,9 @@ func newSimpleIterator(keys []string, vals []string) *SimpleIterator {
 func getAll(it Iterator) ([]string, []string) {
 	var keys, vals []string
 	for ; it.Valid(); it.Next() {
-		k, v := it.KeyValue()
+		k := it.Key()
 		keys = append(keys, string(k))
+		v, _ := it.Value()
 		vals = append(vals, string(v))
 	}
 	return keys, vals

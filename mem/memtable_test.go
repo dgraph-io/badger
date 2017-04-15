@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/value"
-	"github.com/dgraph-io/badger/y"
 )
 
 func extract(m *Table) ([]string, []string) {
@@ -34,11 +33,11 @@ func extract(m *Table) ([]string, []string) {
 	it := m.NewIterator()
 	for it.SeekToFirst(); it.Valid(); it.Next() {
 		keys = append(keys, string(it.Key()))
-		v := it.Value()
-		if (value.BitDelete & v[0]) != 0 {
+		v, meta := it.Value()
+		if (value.BitDelete & meta) != 0 {
 			vals = append(vals, "DEL")
 		} else {
-			vals = append(vals, string(v[1:]))
+			vals = append(vals, string(v))
 		}
 	}
 	return keys, vals
@@ -96,20 +95,15 @@ func TestConcurrentWrite(t *testing.T) {
 	for i := 0; i < n; i++ {
 		for j := 0; j < m; j++ {
 			require.True(t, it.Valid(), "%d %d", i, j)
-			k, v := it.KeyValue()
+			k := it.Key()
 			require.EqualValues(t, fmt.Sprintf("k%05d_%08d", i, j), string(k))
-			require.EqualValues(t, fmt.Sprintf("v%05d_%08d", i, j), string(v[1:]))
+			v, meta := it.Value()
+			require.EqualValues(t, fmt.Sprintf("v%05d_%08d", i, j), string(v))
+			require.EqualValues(t, 5, meta)
 			it.Next()
 		}
 	}
 	require.False(t, it.Valid())
-}
-
-func TestMergeIterator(t *testing.T) {
-	m := NewTable()
-	it := m.NewIterator()
-	mergeIt := y.NewMergeIterator([]y.Iterator{it})
-	require.False(t, mergeIt.Valid())
 }
 
 func BenchmarkAdd(b *testing.B) {
@@ -138,7 +132,8 @@ func BenchmarkReadWrite(b *testing.B) {
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					if rand.Float32() < readFrac {
-						if list.Get(randomKey()) != nil {
+						val, _ := list.Get(randomKey())
+						if val != nil {
 							count++
 						}
 					} else {

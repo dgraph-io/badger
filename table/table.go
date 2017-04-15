@@ -108,14 +108,14 @@ func OpenTable(fd *os.File) (*Table, error) {
 	defer it.Close()
 	it.SeekToFirst()
 	if it.Valid() {
-		t.smallest, _ = it.KeyValue()
+		t.smallest = it.Key()
 	}
 
 	it2 := t.NewIterator()
 	defer it2.Close()
 	it2.SeekToLast()
 	if it2.Valid() {
-		t.biggest, _ = it2.KeyValue()
+		t.biggest = it2.Key()
 	}
 	return t, nil
 }

@@ -119,22 +119,22 @@ func (s *DB) getMemTables() (*mem.Table, *mem.Table) {
 	return s.mt, s.imm
 }
 
-func decodeValue(ctx context.Context, val []byte, vlog *value.Log) []byte {
-	if (val[0] & value.BitDelete) != 0 {
+func decodeValue(ctx context.Context, val []byte, meta byte, vlog *value.Log) []byte {
+	if (meta & value.BitDelete) != 0 {
 		// Tombstone encountered.
 		return nil
 	}
-	if (val[0] & value.BitValuePointer) == 0 {
+	if (meta & value.BitValuePointer) == 0 {
 		y.Trace(ctx, "Value stored with key")
-		return val[1:]
+		return val
 	}
 
 	var vp value.Pointer
-	vp.Decode(val[1:])
+	vp.Decode(val)
 	entry, err := vlog.Read(ctx, vp)
 	y.Checkf(err, "Unable to read from value log: %+v", vp)
 
-	if (entry.Value[0] & value.BitDelete) == 0 { // Not tombstone.
+	if (entry.Meta & value.BitDelete) == 0 { // Not tombstone.
 		return entry.Value
 	}
 	return []byte{}
@@ -142,17 +142,19 @@ func decodeValue(ctx context.Context, val []byte, vlog *value.Log) []byte {
 
 // getValueHelper returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
-func (s *DB) get(ctx context.Context, key []byte) []byte {
+func (s *DB) get(ctx context.Context, key []byte) ([]byte, byte) {
 	y.Trace(ctx, "Retrieving key from memtables")
 	mem, imm := s.getMemTables() // Lock should be released.
 	if mem != nil {
-		if v := mem.Get(key); v != nil {
-			return v
+		v, meta := mem.Get(key)
+		if meta != 0 || v != nil {
+			return v, meta
 		}
 	}
 	if imm != nil {
-		if v := s.imm.Get(key); v != nil {
-			return v
+		v, meta := imm.Get(key)
+		if meta != 0 || v != nil {
+			return v, meta
 		}
 	}
 	y.Trace(ctx, "Not found in memtables. Getting from levels")
@@ -161,11 +163,8 @@ func (s *DB) get(ctx context.Context, key []byte) []byte {
 
 // Get looks for key and returns value. If not found, return nil.
 func (s *DB) Get(ctx context.Context, key []byte) []byte {
-	val := s.get(ctx, key)
-	if val == nil {
-		return nil
-	}
-	return decodeValue(ctx, val, &s.vlog)
+	val, meta := s.get(ctx, key)
+	return decodeValue(ctx, val, meta, &s.vlog)
 }
 
 func (s *DB) updateOffset(ptrs []value.Pointer) {
@@ -293,9 +292,13 @@ func (s *DBIterator) Seek(key []byte) {
 
 func (s *DBIterator) Valid() bool { return s.it.Valid() }
 
-func (s *DBIterator) KeyValue() ([]byte, []byte) {
-	key, val := s.it.KeyValue()
-	return key, decodeValue(s.ctx, val, &s.db.vlog)
+func (s *DBIterator) Key() []byte {
+	return s.it.Key()
+}
+
+func (s *DBIterator) Value() []byte {
+	val, meta := s.it.Value()
+	return decodeValue(s.ctx, val, meta, &s.db.vlog)
 }
 
 func (s *DBIterator) nextValid() {
@@ -308,7 +311,7 @@ func (s *DBIterator) Close() { s.it.Close() }
 
 // NewIterator returns a MergeIterator over iterators of memtable and compaction levels.
 // Note: This acquires references to underlying tables. Remember to close the returned iterator.
-func (s *DB) NewIterator(ctx context.Context) y.Iterator {
+func (s *DB) NewIterator(ctx context.Context) *DBIterator {
 	// The order we add these iterators is important.
 	// Imagine you add level0 first, then add imm. In between, the initial imm might be moved into
 	// level0, and be completely missed. On the other hand, if you add imm first and it got moved

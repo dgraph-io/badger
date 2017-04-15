@@ -56,15 +56,9 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	})
 	for _, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		require.NoError(t, b.Add([]byte(kv[0]), []byte(kv[1])))
+		require.NoError(t, b.Add([]byte(kv[0]), []byte(kv[1]), 'A'))
 	}
-
-	//	expectedSize := b.FinalSize()
 	f.Write(b.Finish([]byte("somemetadata")))
-	//	fileInfo, err := f.Stat()
-	//	require.NoError(t, err)
-	//	require.EqualValues(t, fileInfo.Size(), expectedSize)
-	// TODO: Enable this check after we figure out the discrepancy.
 	return f
 }
 
@@ -80,8 +74,9 @@ func TestSeekToFirst(t *testing.T) {
 			defer it.Close()
 			it.SeekToFirst()
 			require.True(t, it.Valid())
-			_, v := it.KeyValue()
+			v, meta := it.Value()
 			require.EqualValues(t, "0", string(v))
+			require.EqualValues(t, 'A', meta)
 		})
 	}
 }
@@ -98,12 +93,14 @@ func TestSeekToLast(t *testing.T) {
 			defer it.Close()
 			it.SeekToLast()
 			require.True(t, it.Valid())
-			_, v := it.KeyValue()
+			v, meta := it.Value()
 			require.EqualValues(t, fmt.Sprintf("%d", n-1), string(v))
+			require.EqualValues(t, 'A', meta)
 			it.Prev()
 			require.True(t, it.Valid())
-			_, v = it.KeyValue()
+			v, meta = it.Value()
 			require.EqualValues(t, fmt.Sprintf("%d", n-2), string(v))
+			require.EqualValues(t, 'A', meta)
 		})
 	}
 }
@@ -138,7 +135,7 @@ func TestSeek(t *testing.T) {
 			continue
 		}
 		require.True(t, it.Valid())
-		k, _ := it.KeyValue()
+		k := it.Key()
 		require.EqualValues(t, tt.out, string(k))
 	}
 }
@@ -160,8 +157,9 @@ func TestIterateFromStart(t *testing.T) {
 			// ti.Seek brings us to the first key >= "". Essentially a SeekToFirst.
 			var count int
 			for ; ti.Valid(); ti.Next() {
-				_, v := ti.KeyValue()
+				v, meta := ti.Value()
 				require.EqualValues(t, fmt.Sprintf("%d", count), string(v))
+				require.EqualValues(t, 'A', meta)
 				count++
 			}
 			require.EqualValues(t, n, count)
@@ -186,8 +184,9 @@ func TestIterateFromEnd(t *testing.T) {
 			for i := n - 1; i >= 0; i-- {
 				ti.Prev()
 				require.True(t, ti.Valid())
-				_, v := ti.KeyValue()
+				v, meta := ti.Value()
 				require.EqualValues(t, fmt.Sprintf("%d", i), string(v))
+				require.EqualValues(t, 'A', meta)
 			}
 		})
 	}
@@ -203,7 +202,7 @@ func TestTable(t *testing.T) {
 	kid := 1010
 	seek := []byte(key(kid))
 	for ti.Seek(seek); ti.Valid(); ti.Next() {
-		k, _ := ti.KeyValue()
+		k := ti.Key()
 		require.EqualValues(t, k, key(kid))
 		kid++
 	}
@@ -216,7 +215,7 @@ func TestTable(t *testing.T) {
 
 	ti.Seek([]byte(key(-1)))
 	require.True(t, ti.Valid())
-	k, _ := ti.KeyValue()
+	k := ti.Key()
 	require.EqualValues(t, k, key(0))
 }
 
@@ -231,33 +230,33 @@ func TestIterateBackAndForth(t *testing.T) {
 	defer it.Close()
 	it.Seek(seek)
 	require.True(t, it.Valid())
-	k, _ := it.KeyValue()
+	k := it.Key()
 	require.EqualValues(t, seek, k)
 
 	it.Prev()
 	it.Prev()
 	require.True(t, it.Valid())
-	k, _ = it.KeyValue()
+	k = it.Key()
 	require.EqualValues(t, key(1008), string(k))
 
 	it.Next()
 	it.Next()
 	require.True(t, it.Valid())
-	k, _ = it.KeyValue()
+	k = it.Key()
 	require.EqualValues(t, key(1010), k)
 
 	it.Seek([]byte(key(2000)))
 	require.True(t, it.Valid())
-	k, _ = it.KeyValue()
+	k = it.Key()
 	require.EqualValues(t, key(2000), k)
 
 	it.Prev()
 	require.True(t, it.Valid())
-	k, _ = it.KeyValue()
+	k = it.Key()
 	require.EqualValues(t, key(1999), k)
 
 	it.SeekToFirst()
-	k, _ = it.KeyValue()
+	k = it.Key()
 	require.EqualValues(t, key(0), string(k))
 }
 
@@ -285,9 +284,11 @@ func TestConcatIteratorOneTable(t *testing.T) {
 
 	it.SeekToFirst()
 	require.True(t, it.Valid())
-	k, v := it.KeyValue()
-	require.EqualValues(t, "a1", string(v))
+	k := it.Key()
 	require.EqualValues(t, "k1", string(k))
+	v, meta := it.Value()
+	require.EqualValues(t, "a1", string(v))
+	require.EqualValues(t, 'A', meta)
 }
 
 func TestConcatIterator(t *testing.T) {
@@ -307,8 +308,9 @@ func TestConcatIterator(t *testing.T) {
 	require.True(t, it.Valid())
 	var count int
 	for ; it.Valid(); it.Next() {
-		_, v := it.KeyValue()
+		v, meta := it.Value()
 		require.EqualValues(t, fmt.Sprintf("%d", count%10000), string(v))
+		require.EqualValues(t, 'A', meta)
 		count++
 	}
 	require.EqualValues(t, 20000, count)
@@ -336,15 +338,19 @@ func TestMergingIterator(t *testing.T) {
 
 	it.SeekToFirst()
 	require.True(t, it.Valid())
-	k, v := it.KeyValue()
+	k := it.Key()
 	require.EqualValues(t, "k1", string(k))
+	v, meta := it.Value()
 	require.EqualValues(t, "a1", string(v))
+	require.EqualValues(t, 'A', meta)
 	it.Next()
 
 	require.True(t, it.Valid())
-	k, v = it.KeyValue()
+	k = it.Key()
 	require.EqualValues(t, "k2", string(k))
+	v, meta = it.Value()
 	require.EqualValues(t, "a2", string(v))
+	require.EqualValues(t, 'A', meta)
 	it.Next()
 
 	require.False(t, it.Valid())
@@ -372,15 +378,19 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 
 	it.SeekToFirst()
 	require.True(t, it.Valid())
-	k, v := it.KeyValue()
+	k := it.Key()
 	require.EqualValues(t, "k1", string(k))
+	v, meta := it.Value()
 	require.EqualValues(t, "a1", string(v))
+	require.EqualValues(t, 'A', meta)
 	it.Next()
 
 	require.True(t, it.Valid())
-	k, v = it.KeyValue()
+	k = it.Key()
 	require.EqualValues(t, "k2", string(k))
+	v, meta = it.Value()
 	require.EqualValues(t, "a2", string(v))
+	require.EqualValues(t, 'A', meta)
 	it.Next()
 
 	require.False(t, it.Valid())
@@ -408,15 +418,19 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 
 	it.SeekToFirst()
 	require.True(t, it.Valid())
-	k, v := it.KeyValue()
+	k := it.Key()
 	require.EqualValues(t, "k1", string(k))
+	v, meta := it.Value()
 	require.EqualValues(t, "a1", string(v))
+	require.EqualValues(t, 'A', meta)
 	it.Next()
 
 	require.True(t, it.Valid())
-	k, v = it.KeyValue()
+	k = it.Key()
 	require.EqualValues(t, "k2", string(k))
+	v, meta = it.Value()
 	require.EqualValues(t, "a2", string(v))
+	require.EqualValues(t, 'A', meta)
 	it.Next()
 
 	require.False(t, it.Valid())

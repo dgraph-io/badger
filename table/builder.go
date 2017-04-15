@@ -136,7 +136,7 @@ func (b TableBuilder) keyDiff(newKey []byte) []byte {
 	return newKey[i:]
 }
 
-func (b *TableBuilder) addHelper(key, value []byte) {
+func (b *TableBuilder) addHelper(key, value []byte, meta byte) {
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
 	if len(b.baseKey) == 0 {
@@ -151,14 +151,15 @@ func (b *TableBuilder) addHelper(key, value []byte) {
 	h := header{
 		plen: len(key) - len(diffKey),
 		klen: len(diffKey),
-		vlen: len(value),
-		prev: b.prevOffset, // prevOffset is the location of the last key-value added.
+		vlen: len(value) + 1, // Include meta byte.
+		prev: b.prevOffset,   // prevOffset is the location of the last key-value added.
 	}
 	b.prevOffset = b.pos - b.baseOffset // Remember current offset for the next Add call.
 
 	// Layout: header, diffKey, value.
 	b.write(h.Encode())
-	b.write(diffKey) // We only need to store the key difference.
+	b.write(diffKey)      // We only need to store the key difference.
+	b.write([]byte{meta}) // Meta byte precedes actual value.
 	b.write(value)
 	b.counter++ // Increment number of keys added for this current block.
 }
@@ -166,12 +167,12 @@ func (b *TableBuilder) addHelper(key, value []byte) {
 func (b *TableBuilder) finishBlock() {
 	// When we are at the end of the block and Valid=false, and the user wants to do a Prev,
 	// we need a dummy header to tell us the offset of the previous key-value pair.
-	b.addHelper([]byte{}, []byte{})
+	b.addHelper([]byte{}, []byte{}, 0)
 }
 
 // Add adds a key-value pair to the block.
 // If doNotRestart is true, we will not restart even if b.counter >= restartInterval.
-func (b *TableBuilder) Add(key, value []byte) error {
+func (b *TableBuilder) Add(key, value []byte, meta byte) error {
 	if b.counter >= restartInterval {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
@@ -181,7 +182,7 @@ func (b *TableBuilder) Add(key, value []byte) error {
 		b.baseOffset = b.pos
 		b.prevOffset = math.MaxUint32 // First key-value pair of block has header.prev=MaxUint32.
 	}
-	b.addHelper(key, value)
+	b.addHelper(key, value, meta)
 	return nil // Currently, there is no meaningful error.
 }
 

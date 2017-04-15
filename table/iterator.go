@@ -93,7 +93,7 @@ func (itr *BlockIterator) Seek(key []byte, whence int) {
 
 	var done bool
 	for itr.Init(); itr.Valid(); itr.Next() {
-		k, _ := itr.KeyValue()
+		k := itr.Key()
 		if bytes.Compare(k, key) >= 0 {
 			// We are done as k is >= key.
 			done = true
@@ -183,11 +183,18 @@ func (itr *BlockIterator) Prev() {
 	itr.last = h
 }
 
-func (itr *BlockIterator) KeyValue() ([]byte, []byte) {
+func (itr *BlockIterator) Key() []byte {
 	if itr.err != nil {
-		return nil, nil
+		return nil
 	}
-	return itr.key, itr.val
+	return itr.key
+}
+
+func (itr *BlockIterator) Value() []byte {
+	if itr.err != nil {
+		return nil
+	}
+	return itr.val
 }
 
 type TableIterator struct {
@@ -374,8 +381,13 @@ func (itr *TableIterator) Prev() {
 	}
 }
 
-func (itr *TableIterator) KeyValue() ([]byte, []byte) {
-	return itr.bi.KeyValue()
+func (itr *TableIterator) Key() []byte {
+	return itr.bi.Key()
+}
+
+func (itr *TableIterator) Value() ([]byte, byte) {
+	v := itr.bi.Value()
+	return v[1:], v[0]
 }
 
 func (itr *TableIterator) Name() string { return "TableIterator" }

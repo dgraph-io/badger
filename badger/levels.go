@@ -429,8 +429,9 @@ func (s *levelsController) doCompact(l int) error {
 			if int64(builder.FinalSize()) > s.db.opt.MaxTableSize {
 				break
 			}
-			key, val := it.KeyValue()
-			if err := builder.Add(key, val); err != nil {
+			key := it.Key()
+			val, meta := it.Value()
+			if err := builder.Add(key, val, meta); err != nil {
 				builder.Close()
 				return err
 			}
@@ -568,15 +569,17 @@ func (s *levelHandler) close() {
 }
 
 // get returns the found value if any. If not found, we return nil.
-func (s *levelsController) get(ctx context.Context, key []byte) []byte {
+func (s *levelsController) get(ctx context.Context, key []byte) ([]byte, byte) {
 	// No need to lock anything as we just iterate over the currently immutable levelHandlers.
 	for _, h := range s.levels {
-		if v := h.get(ctx, key); v != nil {
-			y.Trace(ctx, "Found key")
-			return v
+		v, meta := h.get(ctx, key)
+		if v == nil && meta == 0 {
+			continue
 		}
+		y.Trace(ctx, "Found key")
+		return v, meta
 	}
-	return nil
+	return nil, 0
 }
 
 // getTableForKey acquires a read-lock to access s.tables. It returns a list of tableHandlers.
@@ -602,7 +605,7 @@ func (s *levelHandler) getTableForKey(key []byte) []*table.Table {
 }
 
 // get returns value for a given key. If not found, return nil.
-func (s *levelHandler) get(ctx context.Context, key []byte) []byte {
+func (s *levelHandler) get(ctx context.Context, key []byte) ([]byte, byte) {
 	y.Trace(ctx, "get key at level %d", s.level)
 	tables := s.getTableForKey(key)
 	for _, th := range tables {
@@ -611,12 +614,12 @@ func (s *levelHandler) get(ctx context.Context, key []byte) []byte {
 		if !it.Valid() {
 			continue
 		}
-		itKey, itVal := it.KeyValue()
-		if bytes.Equal(key, itKey) {
-			return itVal
+		if bytes.Equal(key, it.Key()) {
+			return it.Value()
 		}
+
 	}
-	return nil
+	return nil, 0
 }
 
 func appendIteratorsReversed(out []y.Iterator, th []*table.Table) []y.Iterator {

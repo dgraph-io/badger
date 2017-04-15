@@ -17,7 +17,6 @@
 package mem
 
 import (
-	"fmt"
 	"os"
 	"sync/atomic"
 	"unsafe"
@@ -33,13 +32,6 @@ type Table struct {
 	size  int64
 }
 
-// Values have their first byte being byteData or byteDelete. This helps us distinguish between
-// a key that has never been seen and a key that has been explicitly deleted.
-const (
-	byteData   = 0
-	byteDelete = 1
-)
-
 // NewTable creates a new memtable. Input is the user key comparator.
 func NewTable() *Table {
 	return &Table{
@@ -51,15 +43,8 @@ func NewTable() *Table {
 // by the skiplist. These can be used later on to support more operations, e.g., GetOrCreate can
 // be a Put with an empty value with onlyIfAbsent=true.
 func (s *Table) Put(key, value []byte, meta byte) {
-	data := make([]byte, len(key)+len(value)+1)
-	atomic.AddInt64(&s.size, int64(len(key)+len(value)+1))
-
-	// TODO: Remove these copies.
-	y.AssertTrue(len(key) == copy(data[:len(key)], key))
-	v := data[len(key):]
-	v[0] = meta
-	y.AssertTrue(len(value) == copy(v[1:], value))
-	s.table.Put(data[:len(key)], unsafe.Pointer(&v), false)
+	atomic.AddInt64(&s.size, int64(len(key)+len(value)+1)) // This is not right when key already exists.
+	s.table.Put(key, unsafe.Pointer(&value), meta)
 }
 
 // WriteLevel0Table flushes memtable. It drops deleteValues.
@@ -68,7 +53,8 @@ func (s *Table) WriteLevel0Table(f *os.File) error {
 	b := table.NewTableBuilder()
 	defer b.Close()
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
-		if err := b.Add(iter.Key(), iter.Value()); err != nil {
+		val, meta := iter.Value()
+		if err := b.Add(iter.Key(), val, meta); err != nil {
 			return err
 		}
 	}
@@ -99,36 +85,23 @@ func (s *Iterator) Key() []byte     { return s.iter.Key() }
 func (s *Iterator) Close()          {}
 
 // Value returns the value and whether the key is deleted.
-func (s *Iterator) Value() []byte {
-	v := s.iter.Value()
+func (s *Iterator) Value() ([]byte, byte) {
+	v, meta := s.iter.Value()
 	y.AssertTrue(v != nil)
-	return *(*[]byte)(v)
-}
-
-func (s *Iterator) KeyValue() ([]byte, []byte) {
-	return s.Key(), s.Value()
+	return *(*[]byte)(v), meta
 }
 
 // Get looks up a key. This includes the meta byte.
-func (s *Table) Get(key []byte) []byte {
-	v := s.table.Get(key)
+func (s *Table) Get(key []byte) ([]byte, byte) {
+	v, meta := s.table.Get(key)
 	if v == nil {
 		// This is different from unsafe.Pointer(nil).
-		return nil
+		return nil, meta
 	}
-	return *(*[]byte)(v)
+	return *(*[]byte)(v), meta
 }
 
 // Size returns number of bytes used for keys and values.
 func (s *Table) Size() int64 {
 	return atomic.LoadInt64(&s.size)
-}
-
-func (s *Table) DebugString() string {
-	it := s.NewIterator()
-	it.SeekToFirst()
-	k1, _ := it.KeyValue()
-	it.SeekToLast()
-	k2, _ := it.KeyValue()
-	return fmt.Sprintf("memtable: %s %s", string(k1), string(k2))
 }

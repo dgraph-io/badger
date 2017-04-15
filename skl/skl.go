@@ -48,9 +48,15 @@ const (
 )
 
 type node struct {
-	key   []byte           // Immutable. Left nil for head node.
-	value unsafe.Pointer   // CAS.
-	next  []unsafe.Pointer // []*node. Size is <=kMaxNumLevels. CAS.
+	key  []byte           // Immutable. Left nil for head node.
+	next []unsafe.Pointer // []*node. Size is <=kMaxNumLevels. CAS.
+
+	value unsafe.Pointer // Atomic.
+	meta  uint32         // Byte. Made uint32 for atomic.
+	// TODO: Consider use of lock for value, meta so that they are always changed together.
+	// Note: atomic.Value is not efficient.
+
+	size uint64 // Tracks space used for keys, values, meta.
 }
 
 type Skiplist struct {
@@ -58,33 +64,26 @@ type Skiplist struct {
 	head   *node
 }
 
-func newNode(key []byte, value unsafe.Pointer, height int) *node {
+func newNode(key []byte, value unsafe.Pointer, meta byte, height int) *node {
 	return &node{
 		key:   key,
 		next:  make([]unsafe.Pointer, height),
 		value: value,
+		meta:  uint32(meta),
 	}
 }
 
 func NewSkiplist() *Skiplist {
-	head := newNode(nil, nil, kMaxHeight)
+	head := newNode(nil, nil, 0, kMaxHeight)
 	return &Skiplist{
 		height: 1,
 		head:   head,
 	}
 }
 
-func (s *node) setValue(val unsafe.Pointer, onlyIfAbsent bool) unsafe.Pointer {
-	if onlyIfAbsent {
-		// Not going to overwrite. Just return old value.
-		return s.value
-	}
-	for {
-		old := s.value
-		if atomic.CompareAndSwapPointer(&s.value, old, val) {
-			return old
-		}
-	}
+func (s *node) setValue(val unsafe.Pointer, meta byte) {
+	atomic.StorePointer(&s.value, val)
+	atomic.StoreUint32(&s.meta, uint32(meta))
 }
 
 func (s *node) getNext(h int) *node { return (*node)(s.next[h]) }
@@ -202,10 +201,8 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 	}
 }
 
-// Put inserts the key-value pair. Two cases.
-// If key already exists, we return the previous value. We will not overwrite value if
-// onlyIfAbsent is true. Otherwise, we will try to overwrite the value.
-func (s *Skiplist) Put(key []byte, val unsafe.Pointer, onlyIfAbsent bool) unsafe.Pointer {
+// Put inserts the key-value pair.
+func (s *Skiplist) Put(key []byte, val unsafe.Pointer, meta byte) {
 	// Since we allow overwrite, we may not need to create a new node. We might not even need to
 	// increase the height. Let's defer these actions.
 
@@ -218,13 +215,14 @@ func (s *Skiplist) Put(key []byte, val unsafe.Pointer, onlyIfAbsent bool) unsafe
 		// Use higher level to speed up for current level.
 		prev[i], next[i] = s.findSpliceForLevel(key, prev[i+1], i)
 		if prev[i] == next[i] {
-			return prev[i].setValue(val, onlyIfAbsent)
+			prev[i].setValue(val, meta)
+			return
 		}
 	}
 
 	// We do need to create a new node.
 	height := randomHeight()
-	x := newNode(key, val, height)
+	x := newNode(key, val, meta, height)
 
 	// Try to increase s.height via CAS.
 	listHeight = s.height
@@ -260,11 +258,11 @@ func (s *Skiplist) Put(key []byte, val unsafe.Pointer, onlyIfAbsent bool) unsafe
 			prev[i], next[i] = s.findSpliceForLevel(key, prev[i], i)
 			if prev[i] == next[i] {
 				y.AssertTruef(i == 0, "Equality can happen only on base level: %d", i)
-				return prev[i].setValue(val, onlyIfAbsent)
+				prev[i].setValue(val, meta)
+				return
 			}
 		}
 	}
-	return nil
 }
 
 // findLast returns the last element. If head (empty list), we return nil. All the find functions
@@ -288,12 +286,12 @@ func (s *Skiplist) findLast() *node {
 	}
 }
 
-func (s *Skiplist) Get(key []byte) unsafe.Pointer {
+func (s *Skiplist) Get(key []byte) (unsafe.Pointer, byte) {
 	n, found := s.findNear(key, false, true) // findGreaterOrEqual.
 	if !found {
-		return nil
+		return nil, 0
 	}
-	return n.value
+	return n.value, byte(n.meta)
 }
 
 func (s *Skiplist) NewIterator() *Iterator { return &Iterator{list: s} }
@@ -319,8 +317,8 @@ func (s *Iterator) Key() []byte {
 }
 
 // Value returns value.
-func (s *Iterator) Value() unsafe.Pointer {
-	return s.n.value
+func (s *Iterator) Value() (unsafe.Pointer, byte) {
+	return s.n.value, byte(s.n.meta)
 }
 
 // Next advances to the next position.

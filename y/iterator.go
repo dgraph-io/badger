@@ -14,7 +14,8 @@ type Iterator interface {
 	//	SeekToLast()
 	Seek(key []byte)
 	//	SeekForPrev(key []byte)
-	KeyValue() ([]byte, []byte)
+	Key() []byte
+	Value() ([]byte, byte)
 	Valid() bool
 
 	Name() string // Mainly for debug or testing.
@@ -90,20 +91,27 @@ func (s *MergeIterator) Valid() bool {
 	return false
 }
 
-// KeyValue returns the current key-value pair.
-func (s *MergeIterator) KeyValue() ([]byte, []byte) {
+func (s *MergeIterator) Key() []byte {
 	if len(s.h.idx) == 0 {
-		return nil, nil
+		return nil
 	}
-	return s.iters[s.h.idx[0]].KeyValue()
+	return s.iters[s.h.idx[0]].Key()
+}
+
+func (s *MergeIterator) Value() ([]byte, byte) {
+	if len(s.h.idx) == 0 {
+		return nil, 0
+	}
+	return s.iters[s.h.idx[0]].Value()
 }
 
 // Next returns the next element. If it is the same as the current key, ignore it.
 func (s *MergeIterator) Next() {
 	AssertTrue(s.Valid())
-	k, _ := s.KeyValue()
+	k := s.Key()
 	oldKey := make([]byte, len(k))
-	// TODO: Remove this?
+	// This copy is necessary because the underlying iterator is going to not make
+	// copies and the same key buffer may be reused.
 	AssertTrue(len(k) == copy(oldKey, k))
 	for {
 		idx := s.h.idx[0] // Which iterator.
@@ -113,14 +121,14 @@ func (s *MergeIterator) Next() {
 		it.Next()
 		if it.Valid() {
 			// Need to push back the idx and update keys.
-			s.keys[idx], _ = it.KeyValue()
+			s.keys[idx] = it.Key()
 			heap.Push(s.h, idx) // Consider using Fix instead of Pop, Push.
 		}
 		if !s.Valid() {
 			break
 		}
 		// Check the new key. If it is equal to the old key, we continue popping.
-		newKey, _ := s.KeyValue()
+		newKey := s.Key()
 		if !bytes.Equal(newKey, oldKey) {
 			break
 		}
@@ -152,7 +160,7 @@ func (s *MergeIterator) initHeap() {
 		if !it.Valid() {
 			continue
 		}
-		s.keys[i], _ = it.KeyValue()
+		s.keys[i] = it.Key()
 		heap.Push(s.h, i)
 	}
 }
@@ -192,10 +200,14 @@ func (s *ConcatIterator) Valid() bool {
 
 func (s *ConcatIterator) Name() string { return "ConcatIterator" }
 
-// KeyValue returns key, value at current position.
-func (s *ConcatIterator) KeyValue() ([]byte, []byte) {
+func (s *ConcatIterator) Key() []byte {
 	AssertTrue(s.Valid())
-	return s.iters[s.idx].KeyValue()
+	return s.iters[s.idx].Key()
+}
+
+func (s *ConcatIterator) Value() ([]byte, byte) {
+	AssertTrue(s.Valid())
+	return s.iters[s.idx].Value()
 }
 
 func (s *ConcatIterator) Seek(key []byte) {
