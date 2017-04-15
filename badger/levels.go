@@ -471,7 +471,7 @@ func (s *levelsController) doCompact(l int) error {
 
 	if s.db.opt.Verbose {
 		fmt.Printf("LOG Compact %d{Del [%d,%d)} => %d{Del [%d,%d), Add [%d,%d)}, took %v\n",
-			l, l+1, srcIdx0, srcIdx1, left, right, left, left+len(newTablesSlice), time.Since(timeStart))
+			l, srcIdx0, srcIdx1, l+1, left, right, left, left+len(newTablesSlice), time.Since(timeStart))
 	}
 	nextLevel.replaceTables(left, right, newTablesSlice)
 	thisLevel.deleteTables(srcIdx0, srcIdx1) // Function will acquire level lock.
