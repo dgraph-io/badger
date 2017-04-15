@@ -547,7 +547,7 @@ func (s *levelHandler) Check() {
 	}
 }
 
-func (s *levelsController) close() {
+func (s *levelsController) close(summary *dbSummary) {
 	for i := 0; i < s.db.opt.NumCompactWorkers; i++ {
 		s.compactDone <- struct{}{}
 	}
@@ -556,14 +556,15 @@ func (s *levelsController) close() {
 	s.compactJobs.Wait()
 
 	for _, l := range s.levels {
-		l.close()
+		l.close(summary)
 	}
 }
 
-func (s *levelHandler) close() {
+func (s *levelHandler) close(summary *dbSummary) {
 	s.RLock()
 	defer s.RUnlock()
 	for _, t := range s.tables {
+		summary.filenames[path.Base(t.Filename())] = true
 		t.Close()
 	}
 }

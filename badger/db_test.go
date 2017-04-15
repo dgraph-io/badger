@@ -23,6 +23,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	//	"time"
@@ -238,7 +241,7 @@ func TestDBLoad(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	n := 1000
+	n := 10000
 	{
 		db := NewDB(getTestOptions(dir))
 		for i := 0; i < n; i++ {
@@ -251,23 +254,44 @@ func TestDBLoad(t *testing.T) {
 		db.Close()
 	}
 
-	{
-		db := NewDB(getTestOptions(dir))
-		for i := 0; i < n; i++ {
-			if (i % 10000) == 0 {
-				fmt.Printf("Testing i=%d\n", i)
-			}
-			k := fmt.Sprintf("%09d", i)
-			require.EqualValues(t, k, string(db.Get(ctx, []byte(k))))
+	db := NewDB(getTestOptions(dir))
+	for i := 0; i < n; i++ {
+		if (i % 10000) == 0 {
+			fmt.Printf("Testing i=%d\n", i)
 		}
-		db.Close()
+		k := fmt.Sprintf("%09d", i)
+		require.EqualValues(t, k, string(db.Get(ctx, []byte(k))))
 	}
+	summary := db.Close()
+
+	// Check that files are garbage collected.
+	fileInfos, err := ioutil.ReadDir(dir)
+	require.NoError(t, err)
+	var numTables int
+	for _, info := range fileInfos {
+		if info.IsDir() {
+			continue
+		}
+		name := info.Name() // Expected to be base name but let's be safe.
+		name = path.Base(name)
+		if !strings.HasPrefix(name, filePrefix) {
+			continue
+		}
+		suffix := name[len(filePrefix):]
+		_, err := strconv.Atoi(suffix)
+		if err == nil {
+			// Check that name is in summary.filenames.
+			require.True(t, summary.filenames[name])
+			numTables++
+		}
+	}
+	require.EqualValues(t, numTables, len(summary.filenames))
 }
 
 func TestCrash(t *testing.T) {
 	ctx := context.Background()
-	dir, err := ioutil.TempDir("", "")
-	require.Nil(t, err)
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
 	opt := DefaultOptions

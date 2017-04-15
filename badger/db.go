@@ -71,6 +71,11 @@ type DB struct {
 	maxFileID uint64
 }
 
+// dbSummary is produced when DB is closed. Currently it is used only for testing.
+type dbSummary struct {
+	filenames map[string]bool
+}
+
 // NewDB returns a new DB object. Compact levels are created as well.
 func NewDB(opt *Options) *DB {
 	y.AssertTrue(len(opt.Dir) > 0)
@@ -106,11 +111,15 @@ func NewDB(opt *Options) *DB {
 }
 
 // Close closes a DB.
-func (s *DB) Close() {
+func (s *DB) Close() *dbSummary {
 	// TODO(ganesh): Block writes to mem.
 	s.makeRoomForWrite(true) // Force mem to be emptied. Initiate new imm flush.
 	s.immWg.Wait()           // Wait for imm to go to disk.
-	s.lc.close()
+	summary := &dbSummary{
+		filenames: make(map[string]bool),
+	}
+	s.lc.close(summary)
+	return summary
 }
 
 func (s *DB) getMemTables() (*mem.Table, *mem.Table) {
