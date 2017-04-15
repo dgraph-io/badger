@@ -125,6 +125,12 @@ func (b *TableBuilder) write(d []byte) {
 	y.AssertTruef(b.pos >= b.baseOffset, "b.pos=%d b.baseOffset=%d d=%v", b.pos, b.baseOffset, d)
 }
 
+func (b *TableBuilder) writeByte(d byte) {
+	b.buf.WriteByte(d)
+	b.pos += 1
+	y.AssertTruef(b.pos >= b.baseOffset, "b.pos=%d b.baseOffset=%d d=%v", b.pos, b.baseOffset, d)
+}
+
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
 func (b TableBuilder) keyDiff(newKey []byte) []byte {
 	var i int
@@ -158,8 +164,8 @@ func (b *TableBuilder) addHelper(key, value []byte, meta byte) {
 
 	// Layout: header, diffKey, value.
 	b.write(h.Encode())
-	b.write(diffKey)      // We only need to store the key difference.
-	b.write([]byte{meta}) // Meta byte precedes actual value.
+	b.write(diffKey)  // We only need to store the key difference.
+	b.writeByte(meta) // Meta byte precedes actual value.
 	b.write(value)
 	b.counter++ // Increment number of keys added for this current block.
 }
