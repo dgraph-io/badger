@@ -66,7 +66,7 @@ func TestSeekToFirst(t *testing.T) {
 	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, n)
-			table, err := OpenTable(f)
+			table, err := OpenTable(f, MemoryMap)
 			require.NoError(t, err)
 			defer table.DecrRef()
 			require.EqualValues(t, "somemetadata", string(table.metadata))
@@ -86,7 +86,7 @@ func TestSeekToLast(t *testing.T) {
 	for _, n := range []int{101} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, n)
-			table, err := OpenTable(f)
+			table, err := OpenTable(f, MemoryMap)
 			require.NoError(t, err)
 			defer table.DecrRef()
 			it := table.NewIterator()
@@ -107,7 +107,7 @@ func TestSeekToLast(t *testing.T) {
 
 func TestSeek(t *testing.T) {
 	f := buildTestTable(t, 10000)
-	table, err := OpenTable(f)
+	table, err := OpenTable(f, MemoryMap)
 	require.NoError(t, err)
 	defer table.DecrRef()
 
@@ -145,7 +145,7 @@ func TestIterateFromStart(t *testing.T) {
 	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, n)
-			table, err := OpenTable(f)
+			table, err := OpenTable(f, MemoryMap)
 			require.NoError(t, err)
 			defer table.DecrRef()
 			ti := table.NewIterator()
@@ -172,7 +172,7 @@ func TestIterateFromEnd(t *testing.T) {
 	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, n)
-			table, err := OpenTable(f)
+			table, err := OpenTable(f, Nothing)
 			require.NoError(t, err)
 			defer table.DecrRef()
 			ti := table.NewIterator()
@@ -194,7 +194,7 @@ func TestIterateFromEnd(t *testing.T) {
 
 func TestTable(t *testing.T) {
 	f := buildTestTable(t, 10000)
-	table, err := OpenTable(f)
+	table, err := OpenTable(f, Nothing)
 	require.NoError(t, err)
 	defer table.DecrRef()
 	ti := table.NewIterator()
@@ -221,7 +221,7 @@ func TestTable(t *testing.T) {
 
 func TestIterateBackAndForth(t *testing.T) {
 	f := buildTestTable(t, 10000)
-	table, err := OpenTable(f)
+	table, err := OpenTable(f, MemoryMap)
 	require.NoError(t, err)
 	defer table.DecrRef()
 
@@ -275,7 +275,7 @@ func TestConcatIteratorOneTable(t *testing.T) {
 		{"k2", "a2"},
 	})
 
-	tbl, err := OpenTable(f)
+	tbl, err := OpenTable(f, MemoryMap)
 	require.NoError(t, err)
 	defer tbl.DecrRef()
 
@@ -294,10 +294,10 @@ func TestConcatIteratorOneTable(t *testing.T) {
 func TestConcatIterator(t *testing.T) {
 	f := buildTestTable(t, 10000)
 	f2 := buildTestTable(t, 10000)
-	tbl, err := OpenTable(f)
+	tbl, err := OpenTable(f, MemoryMap)
 	require.NoError(t, err)
 	defer tbl.DecrRef()
-	tbl2, err := OpenTable(f2)
+	tbl2, err := OpenTable(f2, LoadToRAM)
 	require.NoError(t, err)
 	defer tbl2.DecrRef()
 
@@ -325,10 +325,10 @@ func TestMergingIterator(t *testing.T) {
 		{"k1", "b1"},
 		{"k2", "b2"},
 	})
-	tbl1, err := OpenTable(f1)
+	tbl1, err := OpenTable(f1, LoadToRAM)
 	require.NoError(t, err)
 	defer tbl1.DecrRef()
-	tbl2, err := OpenTable(f2)
+	tbl2, err := OpenTable(f2, LoadToRAM)
 	require.NoError(t, err)
 	defer tbl2.DecrRef()
 	it1 := tbl1.NewIterator()
@@ -364,10 +364,10 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 	})
 	f2 := buildTable(t, [][]string{})
 
-	t1, err := OpenTable(f1)
+	t1, err := OpenTable(f1, LoadToRAM)
 	require.NoError(t, err)
 	defer t1.DecrRef()
-	t2, err := OpenTable(f2)
+	t2, err := OpenTable(f2, LoadToRAM)
 	require.NoError(t, err)
 	defer t2.DecrRef()
 
@@ -404,10 +404,10 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 		{"k2", "a2"},
 	})
 
-	t1, err := OpenTable(f1)
+	t1, err := OpenTable(f1, LoadToRAM)
 	require.NoError(t, err)
 	defer t1.DecrRef()
-	t2, err := OpenTable(f2)
+	t2, err := OpenTable(f2, LoadToRAM)
 	require.NoError(t, err)
 	defer t2.DecrRef()
 

@@ -38,9 +38,10 @@ type Options struct {
 	MaxLevels               int   // Maximum number of levels of compaction. May be made variable later.
 	MaxTableSize            int64 // Each table (or file) is at most this size.
 	LevelSizeMultiplier     int
-	ValueThreshold          int // If value size >= this threshold, we store offsets in value log.
+	ValueThreshold          int // If value size >= this threshold, we store value offsets in tables.
 	Verbose                 bool
 	DoNotCompact            bool
+	MapTablesTo             int
 }
 
 var DefaultOptions = Options{
@@ -54,6 +55,7 @@ var DefaultOptions = Options{
 	ValueThreshold:          20,
 	Verbose:                 true,
 	DoNotCompact:            false, // Only for testing.
+	MapTablesTo:             table.MemoryMap,
 }
 
 type KV struct {
@@ -266,7 +268,7 @@ func (s *KV) makeRoomForWrite(force bool) error {
 		defer s.immWg.Done()
 		f := s.newFile()
 		y.Check(imm.WriteLevel0Table(f))
-		tbl, err := table.OpenTable(f)
+		tbl, err := table.OpenTable(f, s.opt.MapTablesTo)
 		defer tbl.DecrRef()
 		y.Check(err)
 		s.lc.addLevel0Table(tbl) // This will incrRef again.

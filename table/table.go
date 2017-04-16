@@ -30,6 +30,12 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	Nothing = iota
+	MemoryMap
+	LoadToRAM
+)
+
 type keyOffset struct {
 	key    []byte
 	offset int
@@ -46,7 +52,8 @@ type Table struct {
 	metadata   []byte
 	ref        int32 // For file garbage collection.
 
-	mmap []byte // Memory mapped.
+	mapTableTo int
+	mmap       []byte // Memory mapped.
 
 	// The following are initialized once and const.
 	smallest, biggest []byte // Smallest and largest keys.
@@ -83,10 +90,11 @@ func (b byKey) Swap(i int, j int)      { b[i], b[j] = b[j], b[i] }
 func (b byKey) Less(i int, j int) bool { return bytes.Compare(b[i].key, b[j].key) < 0 }
 
 // OpenTable assumes file has only one table and opens it.
-func OpenTable(fd *os.File) (*Table, error) {
+func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	t := &Table{
-		fd:  fd,
-		ref: 1, // Caller is given one reference.
+		fd:         fd,
+		ref:        1, // Caller is given one reference.
+		mapTableTo: mapTableTo,
 	}
 	fileInfo, err := fd.Stat()
 	if err != nil {
@@ -94,10 +102,18 @@ func OpenTable(fd *os.File) (*Table, error) {
 	}
 	t.tableSize = int(fileInfo.Size())
 
-	t.mmap, err = syscall.Mmap(int(fd.Fd()), 0, int(fileInfo.Size()),
-		syscall.PROT_READ, syscall.MAP_PRIVATE|syscall.MAP_POPULATE)
-	if err != nil {
-		y.Fatalf("Unable to map file: %v", err)
+	if mapTableTo == MemoryMap {
+		t.mmap, err = syscall.Mmap(int(fd.Fd()), 0, int(fileInfo.Size()),
+			syscall.PROT_READ, syscall.MAP_PRIVATE|syscall.MAP_POPULATE)
+		if err != nil {
+			y.Fatalf("Unable to map file: %v", err)
+		}
+	} else if mapTableTo == LoadToRAM {
+		t.mmap = make([]byte, t.tableSize)
+		read, err := t.fd.ReadAt(t.mmap, 0)
+		if err != nil || read != t.tableSize {
+			y.Fatalf("Unable to load file in memory: %v. Read: %v", err, read)
+		}
 	}
 
 	if err := t.readIndex(); err != nil {
@@ -122,7 +138,9 @@ func OpenTable(fd *os.File) (*Table, error) {
 
 func (s *Table) Close() {
 	s.fd.Close()
-	syscall.Munmap(s.mmap)
+	if s.mapTableTo == MemoryMap {
+		syscall.Munmap(s.mmap)
+	}
 }
 
 // SetMetadata updates our metadata to the new metadata.
@@ -138,11 +156,16 @@ func (t *Table) SetMetadata(meta []byte) error {
 var EOF = errors.New("End of mapped region")
 
 func (t *Table) read(off int, sz int) ([]byte, error) {
-	y.AssertTrue(t.mmap != nil && len(t.mmap) > 0)
-	if len(t.mmap[off:]) < sz {
-		return nil, EOF
+	if t.mmap != nil {
+		if len(t.mmap[off:]) < sz {
+			return nil, EOF
+		}
+		return t.mmap[off : off+sz], nil
 	}
-	return t.mmap[off : off+sz], nil
+
+	res := make([]byte, sz)
+	_, err := t.fd.ReadAt(res, int64(off))
+	return res, err
 }
 
 func (t *Table) readNoFail(off int, sz int) []byte {

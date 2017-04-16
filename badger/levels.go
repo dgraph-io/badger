@@ -250,7 +250,7 @@ func newLevelsController(db *KV) (*levelsController, uint64) {
 		}
 		fd, err := y.OpenSyncedFile(newFilename(fileID, db.opt.Dir))
 		y.Check(err)
-		t, err := table.OpenTable(fd)
+		t, err := table.OpenTable(fd, db.opt.MapTablesTo)
 		y.Check(err)
 
 		// Check metadata for level information.
@@ -455,7 +455,7 @@ func (s *levelsController) doCompact(l int) error {
 
 			fd.Write(builder.Finish(levelNum[:]))
 			var err error
-			newTables[idx], err = table.OpenTable(fd)
+			newTables[idx], err = table.OpenTable(fd, s.db.opt.MapTablesTo)
 			// decrRef is added below.
 			y.Check(err)
 		}(i, builder)
