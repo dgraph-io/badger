@@ -9,13 +9,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	//	"github.com/dgraph-io/badger/y"
 )
 
 func TestCompactLogEncode(t *testing.T) {
 	// Test basic serialization and deserialization.
-	//	ctx := context.Background()
 	fd, err := ioutil.TempFile("", "badger_")
 	require.NoError(t, err)
 	filename := fd.Name()
