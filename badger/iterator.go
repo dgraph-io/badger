@@ -48,12 +48,11 @@ func (op iteratorOp) Set(i y.Iterator) {
 }
 
 type Iterator struct {
-	wg      sync.WaitGroup
 	ctx     context.Context
 	cancel  context.CancelFunc
 	ch      chan *KVItem
 	fetchCh chan *KVItem
-	db      *KV
+	kv      *KV
 	iitr    y.Iterator
 	seekCh  chan iteratorOp
 }
@@ -96,21 +95,25 @@ TOP:
 				continue
 			}
 
-			kv := &KVItem{
+			item := &KVItem{
 				key:  i.Key(),
 				vptr: vptr,
 				meta: meta,
 			}
-			kv.Add(1)
+			item.Add(1)
 
 			select {
 			case op = <-itr.seekCh:
 				y.Trace(itr.ctx, "Got op: %+v", op)
 				itr.clearCh()
 				break INTERNAL
-			case itr.ch <- kv: // We must have incremented sync.WaitGroup before pushing to ch.
-				y.Trace(itr.ctx, "Pushed key to ch: %s\n", kv.Key())
-				itr.fetchCh <- kv
+			case itr.ch <- item: // We must have incremented sync.WaitGroup before pushing to ch.
+				y.Trace(itr.ctx, "Pushed key to ch: %s\n", item.Key())
+				if itr.fetchCh != nil {
+					itr.fetchCh <- item
+				} else {
+					item.Done()
+				}
 			case <-itr.ctx.Done():
 				return
 			}
@@ -135,7 +138,7 @@ func (itr *Iterator) fetchValue() {
 	for {
 		select {
 		case kv := <-itr.fetchCh:
-			kv.val = itr.db.decodeValue(itr.ctx, kv.vptr, kv.meta)
+			kv.val = itr.kv.decodeValue(itr.ctx, kv.vptr, kv.meta)
 			kv.Done()
 		case <-itr.ctx.Done():
 			return
@@ -149,13 +152,21 @@ func (itr *Iterator) Close() {
 	itr.iitr.Close()
 }
 
-// NewIterator returns a store wide iterator.
+// NewIterator returns a store wide iterator. You can control how many key-value pairs would be
+// prefetched by setting the prefetchSize. Most values would need to be retrieved from the value
+// log. You can control how many goroutines would be doing random seeks in value log to fill
+// the values by passing numWorkers.
+// If you set numWorkers to zero, the values won't be retrieved.
 // Note: This acquires references to underlying tables. Remember to close the returned iterator.
-func (s *KV) NewIterator(ctx context.Context, prefetchSize, workers int) *Iterator {
+func (s *KV) NewIterator(ctx context.Context, prefetchSize, numWorkers int) *Iterator {
 	// The order we add these iterators is important.
 	// Imagine you add level0 first, then add imm. In between, the initial imm might be moved into
 	// level0, and be completely missed. On the other hand, if you add imm first and it got moved
 	// to level 0, you would just have that data appear twice which is fine.
+	if numWorkers < 0 {
+		return nil
+	}
+
 	mem, imm := s.getMemTables()
 	var iters []y.Iterator
 	if mem != nil {
@@ -167,17 +178,18 @@ func (s *KV) NewIterator(ctx context.Context, prefetchSize, workers int) *Iterat
 	iters = s.lc.appendIterators(iters) // This will increment references.
 
 	itr := &Iterator{
-		db:      s,
-		iitr:    y.NewMergeIterator(iters),
-		ch:      make(chan *KVItem, prefetchSize),
-		fetchCh: make(chan *KVItem, prefetchSize),
-		seekCh:  make(chan iteratorOp), // unbuffered channel
+		kv:     s,
+		iitr:   y.NewMergeIterator(iters),
+		ch:     make(chan *KVItem, prefetchSize),
+		seekCh: make(chan iteratorOp), // unbuffered channel
 	}
 	itr.ctx, itr.cancel = context.WithCancel(ctx)
-	for i := 0; i < workers; i++ {
-		go itr.fetchValue()
+	if numWorkers > 0 {
+		itr.fetchCh = make(chan *KVItem, prefetchSize)
+		for i := 0; i < numWorkers; i++ {
+			go itr.fetchValue()
+		}
 	}
-	itr.wg.Add(workers)
 	go itr.prefetch()
 	return itr
 }

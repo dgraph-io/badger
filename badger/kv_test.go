@@ -45,7 +45,7 @@ func getTestOptions(dir string) *Options {
 	return opt
 }
 
-func TestDBWrite(t *testing.T) {
+func TestWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -95,6 +95,7 @@ func TestConcurrentWrite(t *testing.T) {
 	var i, j int
 	for kv := range it.Ch() {
 		k := kv.Key()
+		// fmt.Printf("Key=%s\n", k)
 		if k == nil {
 			break // end of iteration.
 		}
@@ -113,25 +114,9 @@ func TestConcurrentWrite(t *testing.T) {
 	}
 	require.EqualValues(t, n, i)
 	require.EqualValues(t, 0, j)
-
-	// for it.SeekToFirst(); it.Valid(); it.Next() {
-	// 	k := it.Key()
-	// 	if bytes.Equal(k, Head) {
-	// 		continue
-	// 	}
-	// 	require.EqualValues(t, fmt.Sprintf("k%05d_%08d", i, j), string(k))
-	// 	v := it.Value()
-	// 	require.EqualValues(t, fmt.Sprintf("v%05d_%08d", i, j), string(v))
-	// 	j++
-	// 	if j == m {
-	// 		i++
-	// 		j = 0
-	// 	}
-	// }
-
 }
 
-func TestDBGet(t *testing.T) {
+func TestGet(t *testing.T) {
 	ctx := context.Background()
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
@@ -158,7 +143,7 @@ func TestDBGet(t *testing.T) {
 
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
-func TestDBGetMore(t *testing.T) {
+func TestGetMore(t *testing.T) {
 	ctx := context.Background()
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
@@ -224,7 +209,7 @@ func TestDBGetMore(t *testing.T) {
 }
 
 // Put a lot of data to move some data to disk. Then iterate.
-func TestDBIterateBasic(t *testing.T) {
+func TestIterateBasic(t *testing.T) {
 	ctx := context.Background()
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
@@ -269,9 +254,25 @@ func TestDBIterateBasic(t *testing.T) {
 		count++
 	}
 	require.EqualValues(t, n, count)
+
+	it = db.NewIterator(ctx, 10, 0)
+	it.SeekToFirst()
+	defer it.Close()
+	count = 0
+	for item := range it.Ch() {
+		key := item.Key()
+		if key == nil {
+			break
+		}
+		if bytes.Equal(key, Head) {
+			continue
+		}
+		require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
+		count++
+	}
 }
 
-func TestDBLoad(t *testing.T) {
+func TestLoad(t *testing.T) {
 	ctx := context.Background()
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
