@@ -58,7 +58,7 @@ var DefaultOptions = Options{
 	DoNotCompact:            false, // Only for testing.
 }
 
-type DB struct {
+type KV struct {
 	sync.RWMutex // Guards imm, mem.
 
 	imm       *mem.Table // Immutable, memtable being flushed.
@@ -76,10 +76,10 @@ type dbSummary struct {
 	filenames map[string]bool
 }
 
-// NewDB returns a new DB object. Compact levels are created as well.
-func NewDB(opt *Options) *DB {
+// NewKV returns a new KV object. Compact levels are created as well.
+func NewKV(opt *Options) *KV {
 	y.AssertTrue(len(opt.Dir) > 0)
-	out := &DB{
+	out := &KV{
 		mt:  mem.NewTable(),
 		opt: *opt, // Make a copy.
 	}
@@ -110,8 +110,8 @@ func NewDB(opt *Options) *DB {
 	return out
 }
 
-// Close closes a DB.
-func (s *DB) Close() *dbSummary {
+// Close closes a KV.
+func (s *KV) Close() *dbSummary {
 	// TODO(ganesh): Block writes to mem.
 	s.makeRoomForWrite(true) // Force mem to be emptied. Initiate new imm flush.
 	s.immWg.Wait()           // Wait for imm to go to disk.
@@ -122,13 +122,13 @@ func (s *DB) Close() *dbSummary {
 	return summary
 }
 
-func (s *DB) getMemTables() (*mem.Table, *mem.Table) {
+func (s *KV) getMemTables() (*mem.Table, *mem.Table) {
 	s.RLock()
 	defer s.RUnlock()
 	return s.mt, s.imm
 }
 
-func decodeValue(ctx context.Context, val []byte, meta byte, vlog *value.Log) []byte {
+func (s *KV) decodeValue(ctx context.Context, val []byte, meta byte) []byte {
 	if (meta & value.BitDelete) != 0 {
 		// Tombstone encountered.
 		return nil
@@ -140,7 +140,7 @@ func decodeValue(ctx context.Context, val []byte, meta byte, vlog *value.Log) []
 
 	var vp value.Pointer
 	vp.Decode(val)
-	entry, err := vlog.Read(ctx, vp)
+	entry, err := s.vlog.Read(ctx, vp)
 	y.Checkf(err, "Unable to read from value log: %+v", vp)
 
 	if (entry.Meta & value.BitDelete) == 0 { // Not tombstone.
@@ -151,7 +151,7 @@ func decodeValue(ctx context.Context, val []byte, meta byte, vlog *value.Log) []
 
 // getValueHelper returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
-func (s *DB) get(ctx context.Context, key []byte) ([]byte, byte) {
+func (s *KV) get(ctx context.Context, key []byte) ([]byte, byte) {
 	y.Trace(ctx, "Retrieving key from memtables")
 	mem, imm := s.getMemTables() // Lock should be released.
 	if mem != nil {
@@ -171,24 +171,23 @@ func (s *DB) get(ctx context.Context, key []byte) ([]byte, byte) {
 }
 
 // Get looks for key and returns value. If not found, return nil.
-func (s *DB) Get(ctx context.Context, key []byte) []byte {
+func (s *KV) Get(ctx context.Context, key []byte) []byte {
 	val, meta := s.get(ctx, key)
-	return decodeValue(ctx, val, meta, &s.vlog)
+	return s.decodeValue(ctx, val, meta)
 }
 
-func (s *DB) updateOffset(ptrs []value.Pointer) {
+func (s *KV) updateOffset(ptrs []value.Pointer) {
 	ptr := ptrs[len(ptrs)-1]
 
 	s.Lock()
 	defer s.Unlock()
 	if s.voffset < ptr.Offset {
-		// s.voffset = ptr.Offset + uint64(ptr.Len)
-		s.voffset = ptr.Offset
+		s.voffset = ptr.Offset + uint64(ptr.Len)
 	}
 }
 
 // Write applies a list of value.Entry to our memtable.
-func (s *DB) Write(ctx context.Context, entries []value.Entry) error {
+func (s *KV) Write(ctx context.Context, entries []value.Entry) error {
 	y.Trace(ctx, "Making room for writes")
 	if err := s.makeRoomForWrite(false); err != nil {
 		return err
@@ -214,7 +213,7 @@ func (s *DB) Write(ctx context.Context, entries []value.Entry) error {
 }
 
 // Put puts a key-val pair.
-func (s *DB) Put(ctx context.Context, key []byte, val []byte) error {
+func (s *KV) Put(ctx context.Context, key []byte, val []byte) error {
 	return s.Write(ctx, []value.Entry{
 		{
 			Key:   key,
@@ -224,7 +223,7 @@ func (s *DB) Put(ctx context.Context, key []byte, val []byte) error {
 }
 
 // Delete deletes a key.
-func (s *DB) Delete(ctx context.Context, key []byte) error {
+func (s *KV) Delete(ctx context.Context, key []byte) error {
 	return s.Write(ctx, []value.Entry{
 		{
 			Key:  key,
@@ -234,7 +233,6 @@ func (s *DB) Delete(ctx context.Context, key []byte) error {
 }
 
 var (
-	//	Head = []byte("_head_")
 	Head = []byte("/head/")
 )
 
@@ -242,7 +240,7 @@ var (
 // But before that, it will make sure that imm is flushed.
 // If force==true, we will always proceed to make the above change.
 // Note: After function returns, we may still be flushing the new imm to disk.
-func (s *DB) makeRoomForWrite(force bool) error {
+func (s *KV) makeRoomForWrite(force bool) error {
 	if !force && s.mt.Size() < s.opt.MaxTableSize {
 		// Nothing to do. We have enough space.
 		return nil
@@ -278,68 +276,5 @@ func (s *DB) makeRoomForWrite(force bool) error {
 	return nil
 }
 
-type DBIterator struct {
-	it  y.Iterator
-	db  *DB
-	ctx context.Context
-}
-
-func (s *DBIterator) Next() {
-	s.it.Next()
-	s.nextValid()
-}
-
-func (s *DBIterator) SeekToFirst() {
-	s.it.SeekToFirst()
-	s.nextValid()
-}
-
-func (s *DBIterator) Seek(key []byte) {
-	s.it.Seek(key)
-	s.nextValid()
-}
-
-func (s *DBIterator) Valid() bool { return s.it.Valid() }
-
-func (s *DBIterator) Key() []byte {
-	return s.it.Key()
-}
-
-func (s *DBIterator) Value() []byte {
-	val, meta := s.it.Value()
-	return decodeValue(s.ctx, val, meta, &s.db.vlog)
-}
-
-func (s *DBIterator) nextValid() {
-	// TODO: Keep moving next if we see deleted entries.
-}
-
-func (s *DBIterator) Name() string { return "DBIterator" }
-
-func (s *DBIterator) Close() { s.it.Close() }
-
-// NewIterator returns a MergeIterator over iterators of memtable and compaction levels.
-// Note: This acquires references to underlying tables. Remember to close the returned iterator.
-func (s *DB) NewIterator(ctx context.Context) *DBIterator {
-	// The order we add these iterators is important.
-	// Imagine you add level0 first, then add imm. In between, the initial imm might be moved into
-	// level0, and be completely missed. On the other hand, if you add imm first and it got moved
-	// to level 0, you would just have that data appear twice which is fine.
-	mem, imm := s.getMemTables()
-	var iters []y.Iterator
-	if mem != nil {
-		iters = append(iters, mem.NewIterator())
-	}
-	if imm != nil {
-		iters = append(iters, imm.NewIterator())
-	}
-	iters = s.lc.appendIterators(iters) // This will increment references.
-	return &DBIterator{
-		it:  y.NewMergeIterator(iters),
-		db:  s,
-		ctx: ctx,
-	}
-}
-
 // Check checks if DB makes sense.
-func (s *DB) Check() { s.lc.Check() }
+func (s *KV) Check() { s.lc.Check() }

@@ -20,7 +20,7 @@ func newFilename(fileID uint64, dir string) string {
 }
 
 // tempFile returns a unique filename and the uint64.
-func (s *DB) newFile() *os.File {
+func (s *KV) newFile() *os.File {
 	for {
 		id := atomic.AddUint64(&s.maxFileID, 1)
 		filename := newFilename(id, s.opt.Dir)

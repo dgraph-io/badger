@@ -47,7 +47,7 @@ type levelHandler struct {
 	// The following are initialized once and const.
 	level        int
 	maxTotalSize int64
-	db           *DB
+	db           *KV
 }
 
 type levelsController struct {
@@ -58,7 +58,7 @@ type levelsController struct {
 
 	// The following are initialized once and const.
 	levels []*levelHandler
-	db     *DB
+	db     *KV
 
 	// For ending compactions.
 	compactDone chan struct{}
@@ -196,14 +196,14 @@ func (s *levelHandler) overlappingTables(begin, end []byte) (int, int) {
 	return left, right
 }
 
-func newLevelHandler(db *DB, level int) *levelHandler {
+func newLevelHandler(db *KV, level int) *levelHandler {
 	return &levelHandler{
 		level: level,
 		db:    db,
 	}
 }
 
-func newLevelsController(db *DB) (*levelsController, uint64) {
+func newLevelsController(db *KV) (*levelsController, uint64) {
 	y.AssertTrue(db.opt.NumLevelZeroTablesStall > db.opt.NumLevelZeroTables)
 	s := &levelsController{
 		db:             db,

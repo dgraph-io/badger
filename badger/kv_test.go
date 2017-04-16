@@ -49,7 +49,7 @@ func TestDBWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	db := NewDB(getTestOptions(dir))
+	db := NewKV(getTestOptions(dir))
 	defer db.Close()
 
 	var entries []value.Entry
@@ -68,7 +68,7 @@ func TestConcurrentWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	db := NewDB(getTestOptions(dir))
+	db := NewKV(getTestOptions(dir))
 	defer db.Close()
 
 	// Not a benchmark. Just a simple test for concurrent writes.
@@ -86,17 +86,24 @@ func TestConcurrentWrite(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	it := db.NewIterator(ctx)
+
+	fmt.Println("Starting iteration")
+	it := db.NewIterator(ctx, 10, 5)
+	it.SeekToFirst()
 	defer it.Close()
 
 	var i, j int
-	for it.SeekToFirst(); it.Valid(); it.Next() {
-		k := it.Key()
+	for kv := range it.Ch() {
+		k := kv.Key()
+		if k == nil {
+			break // end of iteration.
+		}
+
 		if bytes.Equal(k, Head) {
 			continue
 		}
 		require.EqualValues(t, fmt.Sprintf("k%05d_%08d", i, j), string(k))
-		v := it.Value()
+		v := kv.Value()
 		require.EqualValues(t, fmt.Sprintf("v%05d_%08d", i, j), string(v))
 		j++
 		if j == m {
@@ -106,6 +113,22 @@ func TestConcurrentWrite(t *testing.T) {
 	}
 	require.EqualValues(t, n, i)
 	require.EqualValues(t, 0, j)
+
+	// for it.SeekToFirst(); it.Valid(); it.Next() {
+	// 	k := it.Key()
+	// 	if bytes.Equal(k, Head) {
+	// 		continue
+	// 	}
+	// 	require.EqualValues(t, fmt.Sprintf("k%05d_%08d", i, j), string(k))
+	// 	v := it.Value()
+	// 	require.EqualValues(t, fmt.Sprintf("v%05d_%08d", i, j), string(v))
+	// 	j++
+	// 	if j == m {
+	// 		i++
+	// 		j = 0
+	// 	}
+	// }
+
 }
 
 func TestDBGet(t *testing.T) {
@@ -113,7 +136,7 @@ func TestDBGet(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	db := NewDB(getTestOptions(dir))
+	db := NewKV(getTestOptions(dir))
 	defer db.Close()
 
 	require.NoError(t, db.Put(ctx, []byte("key1"), []byte("val1")))
@@ -140,7 +163,7 @@ func TestDBGetMore(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	db := NewDB(getTestOptions(dir))
+	db := NewKV(getTestOptions(dir))
 	defer db.Close()
 
 	//	n := 500000
@@ -206,7 +229,7 @@ func TestDBIterateBasic(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	db := NewDB(getTestOptions(dir))
+	db := NewKV(getTestOptions(dir))
 	defer db.Close()
 
 	// n := 500000
@@ -219,17 +242,29 @@ func TestDBIterateBasic(t *testing.T) {
 		require.NoError(t, db.Put(ctx, k, k))
 	}
 
-	it := db.NewIterator(ctx)
+	it := db.NewIterator(ctx, 10, 5)
+	it.SeekToFirst()
 	defer it.Close()
 
 	var count int
-	for it.SeekToFirst(); it.Valid(); it.Next() {
-		key := it.Key()
+	rewind := true
+	for kv := range it.Ch() {
+		key := kv.Key()
+		if key == nil {
+			break
+		}
 		if bytes.Equal(key, Head) {
 			continue
 		}
+		if rewind && count == 5000 {
+			count = 0
+			it.SeekToFirst()
+			t.Log("Rewinding from 5000 to zero.")
+			rewind = false
+			continue
+		}
 		require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
-		val := it.Value()
+		val := kv.Value()
 		require.EqualValues(t, fmt.Sprintf("%09d", count), string(val))
 		count++
 	}
@@ -243,7 +278,7 @@ func TestDBLoad(t *testing.T) {
 	defer os.RemoveAll(dir)
 	n := 10000
 	{
-		db := NewDB(getTestOptions(dir))
+		db := NewKV(getTestOptions(dir))
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
 				fmt.Printf("Putting i=%d\n", i)
@@ -254,7 +289,7 @@ func TestDBLoad(t *testing.T) {
 		db.Close()
 	}
 
-	db := NewDB(getTestOptions(dir))
+	db := NewKV(getTestOptions(dir))
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
@@ -300,7 +335,7 @@ func TestCrash(t *testing.T) {
 	opt.DoNotCompact = true
 	opt.Verbose = true
 
-	db := NewDB(&opt)
+	db := NewKV(&opt)
 	var keys [][]byte
 	for i := 0; i < 150000; i++ {
 		k := []byte(fmt.Sprintf("%09d", i))
@@ -327,7 +362,7 @@ func TestCrash(t *testing.T) {
 	}
 	// Do not close db.
 
-	db2 := NewDB(&opt)
+	db2 := NewKV(&opt)
 	for _, k := range keys {
 		require.Equal(t, k, db2.Get(ctx, k), "Key: %s", k)
 	}
@@ -346,7 +381,7 @@ func TestCrash(t *testing.T) {
 	voffset := binary.BigEndian.Uint64(val)
 	fmt.Printf("level 1 val: %v\n", voffset)
 
-	db3 := NewDB(&opt)
+	db3 := NewKV(&opt)
 	for _, k := range keys {
 		require.Equal(t, k, db3.Get(ctx, k), "Key: %s", k)
 	}

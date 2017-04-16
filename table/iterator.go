@@ -118,9 +118,11 @@ func (itr *BlockIterator) SeekToLast() {
 	itr.Prev()
 }
 
+// parseKV would allocate a new byte slice for key and for value.
 func (itr *BlockIterator) parseKV(h header) {
-	itr.ensureKeyCap(h)
-	itr.key = itr.ikey[:h.plen+h.klen]
+	// itr.ensureKeyCap(h)
+	itr.key = make([]byte, h.plen+h.klen)
+	// itr.key = itr.ikey[:h.plen+h.klen]
 	y.AssertTrue(h.plen == copy(itr.key, itr.baseKey[:h.plen]))
 	y.AssertTrue(h.klen == copy(itr.key[h.plen:], itr.data[itr.pos:itr.pos+h.klen]))
 	itr.pos += h.klen
@@ -130,6 +132,8 @@ func (itr *BlockIterator) parseKV(h header) {
 		return
 	}
 
+	itr.val = make([]byte, h.vlen)
+	y.AssertTrue(h.vlen == copy(itr.val, itr.data[itr.pos:itr.pos+h.vlen]))
 	itr.val = itr.data[itr.pos : itr.pos+h.vlen]
 	itr.pos += h.vlen
 }
