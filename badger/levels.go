@@ -21,12 +21,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
-	"path"
+	"os"
+	"path/filepath"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -47,7 +45,7 @@ type levelHandler struct {
 	// The following are initialized once and const.
 	level        int
 	maxTotalSize int64
-	db           *KV
+	kv           *KV
 }
 
 type levelsController struct {
@@ -58,7 +56,12 @@ type levelsController struct {
 
 	// The following are initialized once and const.
 	levels []*levelHandler
-	db     *KV
+	clog   compactLog
+	kv     *KV
+
+	// Atomic.
+	maxFileID    uint64 // Next ID to be used.
+	maxCompactID uint64
 
 	// For ending compactions.
 	compactDone chan struct{}
@@ -89,7 +92,7 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 		// Key range will overlap. Just sort by fileID in ascending order
 		// because newer tables are at the end of level 0.
 		sort.Slice(s.tables, func(i, j int) bool {
-			return path.Base(s.tables[i].Filename()) < path.Base(s.tables[j].Filename())
+			return s.tables[i].ID() < s.tables[j].ID()
 		})
 	} else {
 		sort.Slice(s.tables, func(i, j int) bool {
@@ -196,80 +199,75 @@ func (s *levelHandler) overlappingTables(begin, end []byte) (int, int) {
 	return left, right
 }
 
-func newLevelHandler(db *KV, level int) *levelHandler {
+func newLevelHandler(kv *KV, level int) *levelHandler {
 	return &levelHandler{
 		level: level,
-		db:    db,
+		kv:    kv,
 	}
 }
 
-func newLevelsController(db *KV) (*levelsController, uint64) {
-	y.AssertTrue(db.opt.NumLevelZeroTablesStall > db.opt.NumLevelZeroTables)
+func newLevelsController(kv *KV) *levelsController {
+	y.AssertTrue(kv.opt.NumLevelZeroTablesStall > kv.opt.NumLevelZeroTables)
 	s := &levelsController{
-		db:             db,
-		levels:         make([]*levelHandler, db.opt.MaxLevels),
-		beingCompacted: make([]bool, db.opt.MaxLevels),
+		kv:             kv,
+		levels:         make([]*levelHandler, kv.opt.MaxLevels),
+		beingCompacted: make([]bool, kv.opt.MaxLevels),
 	}
 
-	for i := 0; i < db.opt.MaxLevels; i++ {
-		s.levels[i] = newLevelHandler(db, i)
+	for i := 0; i < kv.opt.MaxLevels; i++ {
+		s.levels[i] = newLevelHandler(kv, i)
 		if i == 0 {
 			// Do nothing.
 		} else if i == 1 {
 			// Level 1 probably shouldn't be too much bigger than level 0.
-			s.levels[i].maxTotalSize = db.opt.LevelOneSize
+			s.levels[i].maxTotalSize = kv.opt.LevelOneSize
 		} else {
-			s.levels[i].maxTotalSize = s.levels[i-1].maxTotalSize * int64(db.opt.LevelSizeMultiplier)
+			s.levels[i].maxTotalSize = s.levels[i-1].maxTotalSize * int64(kv.opt.LevelSizeMultiplier)
 		}
 	}
 
-	// Scan directory and load the tables.
-	fileInfos, err := ioutil.ReadDir(db.opt.Dir)
-	y.Check(err)
+	// Replay compact log. Check against files in directory.
+	clogName := filepath.Join(kv.opt.Dir, "clog")
+	_, err := os.Stat(clogName)
+	if err == nil {
+		y.Printf("Replaying compact log: %s\n", clogName)
+		compactLogReplay(clogName, kv.opt.Dir, getIDMap(kv.opt.Dir))
+		y.Check(os.Remove(clogName)) // Everything is ok. Clear compact log.
+	}
 
-	tables := make([][]*table.Table, db.opt.MaxLevels)
-	var maxFileID uint64
-	for _, info := range fileInfos {
-		if info.IsDir() {
-			continue
-		}
-		name := info.Name() // Expected to be base name but let's be safe.
-		name = path.Base(name)
-		if !strings.HasPrefix(name, filePrefix) {
-			continue
-		}
-		suffix := name[len(filePrefix):]
-		id, err := strconv.Atoi(suffix)
-		if err != nil {
-			continue
-		}
-		y.AssertTrue(id >= 0)
-		fileID := uint64(id)
-		if fileID >= maxFileID {
-			maxFileID = fileID
-		}
-		fd, err := y.OpenSyncedFile(newFilename(fileID, db.opt.Dir))
+	// Some files may be deleted. Let's reload.
+	tables := make([][]*table.Table, kv.opt.MaxLevels)
+	for fileID := range getIDMap(kv.opt.Dir) {
+		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, kv.opt.Dir))
 		y.Check(err)
-		t, err := table.OpenTable(fd, db.opt.MapTablesTo)
+		t, err := table.OpenTable(fd, kv.opt.MapTablesTo)
 		y.Check(err)
 
 		// Check metadata for level information.
 		tableMeta := t.Metadata()
 		y.AssertTrue(len(tableMeta) == 2)
 		level := int(binary.BigEndian.Uint16(tableMeta))
-		y.AssertTrue(level < db.opt.MaxLevels)
+		y.AssertTrue(level < kv.opt.MaxLevels)
 		tables[level] = append(tables[level], t)
+
+		if fileID > s.maxFileID {
+			s.maxFileID = fileID
+		}
 	}
+	s.maxFileID++
 	for i, tbls := range tables {
 		s.levels[i].initTables(tbls)
-		s.levels[i].Check() // Make sure key ranges do not overlap etc.
 	}
+	//	s.debugPrintMore()
+	s.validate() // Make sure key ranges do not overlap etc.
 
-	return s, maxFileID
+	// Create new compact log.
+	s.clog.init(clogName)
+	return s
 }
 
 func (s *levelsController) startCompact() {
-	n := s.db.opt.MaxLevels / 2
+	n := s.kv.opt.MaxLevels / 2
 	s.compactDone = make(chan struct{}, n)
 	s.compactJobs.Add(n)
 	for i := 0; i < n; i++ {
@@ -278,7 +276,8 @@ func (s *levelsController) startCompact() {
 }
 
 func (s *levelsController) runWorker(workerID int) {
-	if s.db.opt.DoNotCompact {
+	defer s.compactJobs.Done() // Indicate worker is done.
+	if s.kv.opt.DoNotCompact {
 		fmt.Println("NOT running any compactions due to DB options.")
 		return
 	}
@@ -295,14 +294,13 @@ func (s *levelsController) runWorker(workerID int) {
 			done = true
 		}
 	}
-	s.compactJobs.Done() // Indicate worker is done.
 }
 
-// Requires read lock over levelsController.
+// debugPrint shows the general state.
 func (s *levelsController) debugPrint() {
 	s.Lock()
 	defer s.Unlock()
-	for i := 0; i < s.db.opt.MaxLevels; i++ {
+	for i := 0; i < s.kv.opt.MaxLevels; i++ {
 		var busy int
 		if s.beingCompacted[i] {
 			busy = 1
@@ -310,6 +308,15 @@ func (s *levelsController) debugPrint() {
 		fmt.Printf("(i=%d, size=%d, busy=%d, numTables=%d) ", i, s.levels[i].getTotalSize(), busy, len(s.levels[i].tables))
 	}
 	fmt.Printf("\n")
+}
+
+// debugPrintMore shows key ranges of each level.
+func (s *levelsController) debugPrintMore() {
+	s.Lock()
+	defer s.Unlock()
+	for i := 0; i < s.kv.opt.MaxLevels; i++ {
+		s.levels[i].debugPrintMore()
+	}
 }
 
 // pickCompactLevel determines which level to compact. Return -1 if not found.
@@ -320,13 +327,13 @@ func (s *levelsController) pickCompactLevel() int {
 	// Going from higher levels to lower levels offers a small gain.
 	// It probably has to do with level 1 being smaller when level 0 has to merge with the whole of
 	// level 1.
-	for i := s.db.opt.MaxLevels - 2; i >= 0; i-- {
+	for i := s.kv.opt.MaxLevels - 2; i >= 0; i-- {
 		// Lower levels take priority. Most important is level 0. It should only have one table.
 		// See if we want to compact i to i+1.
 		if s.beingCompacted[i] || s.beingCompacted[i+1] {
 			continue
 		}
-		if (i == 0 && len(s.levels[0].tables) > s.db.opt.NumLevelZeroTables) ||
+		if (i == 0 && len(s.levels[0].tables) > s.kv.opt.NumLevelZeroTables) ||
 			(i > 0 && s.levels[i].getTotalSize() > s.levels[i].maxTotalSize) {
 			s.beingCompacted[i], s.beingCompacted[i+1] = true, true
 			return i
@@ -375,7 +382,7 @@ func (s *levelHandler) keyRange(idx0, idx1 int) ([]byte, []byte) {
 
 // doCompact picks some table on level l and compacts it away to the next level.
 func (s *levelsController) doCompact(l int) error {
-	y.AssertTrue(l+1 < s.db.opt.MaxLevels) // Sanity check.
+	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
 	timeStart := time.Now()
 	thisLevel := s.levels[l]
 	nextLevel := s.levels[l+1]
@@ -391,17 +398,42 @@ func (s *levelsController) doCompact(l int) error {
 	if (thisLevel.level >= 1) && left == right {
 		// No overlap with the next level. Just move the file(s) down to the next level.
 		// Function will acquire level lock.
+		y.AssertTruef(srcIdx0+1 == srcIdx1, "Expect to move only one table")
+		tbl := thisLevel.tables[srcIdx0]
 		nextLevel.replaceTables(left, right, thisLevel.tables[srcIdx0:srcIdx1])
 		thisLevel.deleteTables(srcIdx0, srcIdx1) // Function will acquire level lock.
-		for i := srcIdx0; i < srcIdx1; i++ {
-			tbl := thisLevel.tables[i]
-			// Need to update table metadata to reflect the new level.
-			updateLevel(tbl, l+1)
-		}
-		if s.db.opt.Verbose {
-			fmt.Printf("Merge: Move table [%d,%d) from level %d to %d\n", srcIdx0, srcIdx1, l, l+1)
+		updateLevel(tbl, l+1)
+		if s.kv.opt.Verbose {
+			fmt.Printf("LOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
+				l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
 		}
 		return nil
+	}
+
+	var c compaction
+	var newIDMin, newIDMax uint64
+	{
+		// Prepare compaction object.
+		c.compactID = s.reserveCompactID()
+		var estSize int64
+		for _, t := range thisLevel.tables[srcIdx0:srcIdx1] {
+			c.toDelete = append(c.toDelete, t.ID())
+			estSize += t.Size()
+		}
+		for _, t := range nextLevel.tables[left:right] {
+			c.toDelete = append(c.toDelete, t.ID())
+			estSize += t.Size()
+		}
+		estNumTables := (estSize + s.kv.opt.MaxTableSize - 1) / s.kv.opt.MaxTableSize
+		newIDMin, newIDMax = s.reserveFileIDs(int(estNumTables))
+		// TODO: Consider storing just two numbers for toInsert.
+		for i := newIDMin; i < newIDMax; i++ {
+			c.toInsert = append(c.toInsert, uint64(i))
+		}
+	}
+	s.clog.add(&c)
+	if s.kv.opt.Verbose {
+		y.Printf("Compact start: %v\n", c)
 	}
 
 	// Next level has level>=1 and we can use ConcatIterator as key ranges do not overlap.
@@ -421,12 +453,13 @@ func (s *levelsController) doCompact(l int) error {
 	var newTables [200]*table.Table
 	var wg sync.WaitGroup
 	var i int
+	newID := newIDMin
 	iterTime := time.Now()
 	for ; it.Valid(); i++ {
 		y.AssertTruef(i < len(newTables), "Rewriting too many tables: %d %d", i, len(newTables))
 		builder := table.NewTableBuilder()
 		for ; it.Valid(); it.Next() {
-			if int64(builder.FinalSize()) > s.db.opt.MaxTableSize {
+			if int64(builder.FinalSize()) > s.kv.opt.MaxTableSize {
 				break
 			}
 			key := it.Key()
@@ -444,21 +477,22 @@ func (s *levelsController) doCompact(l int) error {
 		iterTime = time.Now()
 
 		wg.Add(1)
-		go func(idx int, builder *table.TableBuilder) {
+		y.AssertTruef(newID < newIDMax, "%d %d", newID, newIDMax)
+		go func(idx int, fileID uint64, builder *table.TableBuilder) {
 			defer builder.Close()
 			defer wg.Done()
-
-			fd := s.db.newFile()
+			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir))
+			y.Check(err)
 			// Encode the level number as table metadata.
 			var levelNum [2]byte
 			binary.BigEndian.PutUint16(levelNum[:], uint16(l+1))
 
 			fd.Write(builder.Finish(levelNum[:]))
-			var err error
-			newTables[idx], err = table.OpenTable(fd, s.db.opt.MapTablesTo)
+			newTables[idx], err = table.OpenTable(fd, s.kv.opt.MapTablesTo)
 			// decrRef is added below.
 			y.Check(err)
-		}(i, builder)
+		}(i, newID, builder)
+		newID++
 	}
 	wg.Wait()
 
@@ -469,7 +503,7 @@ func (s *levelsController) doCompact(l int) error {
 		}
 	}()
 
-	if s.db.opt.Verbose {
+	if s.kv.opt.Verbose {
 		fmt.Printf("LOG Compact %d{Del [%d,%d)} => %d{Del [%d,%d), Add [%d,%d)}, took %v\n",
 			l, srcIdx0, srcIdx1, l+1, left, right, left, left+len(newTablesSlice), time.Since(timeStart))
 	}
@@ -477,14 +511,18 @@ func (s *levelsController) doCompact(l int) error {
 	thisLevel.deleteTables(srcIdx0, srcIdx1) // Function will acquire level lock.
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
+
+	// Write to compact log.
+	c.done = 1
+	s.clog.add(&c)
 	return nil
 }
 
 func (s *levelsController) addLevel0Table(t *table.Table) {
-	for !s.levels[0].tryAddLevel0Table(t, s.db.opt.Verbose) {
+	for !s.levels[0].tryAddLevel0Table(t, s.kv.opt.Verbose) {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time
-		if s.db.opt.Verbose {
+		if s.kv.opt.Verbose {
 			fmt.Printf("STALLED STALLED STALLED STALLED STALLED STALLED STALLED STALLED: %v\n",
 				time.Since(lastUnstalled))
 			s.debugPrint()
@@ -499,7 +537,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) {
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		if s.db.opt.Verbose {
+		if s.kv.opt.Verbose {
 			fmt.Printf("UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED: %v\n",
 				time.Since(timeStart))
 			s.debugPrint()
@@ -514,7 +552,7 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table, verbose bool) bool {
 	// Need lock as we may be deleting the first table during a level 0 compaction.
 	s.Lock()
 	defer s.Unlock()
-	if len(s.tables) > s.db.opt.NumLevelZeroTablesStall {
+	if len(s.tables) > s.kv.opt.NumLevelZeroTablesStall {
 		return false
 	}
 
@@ -529,7 +567,7 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table, verbose bool) bool {
 }
 
 // Check does some sanity check on one level of data or in-memory index.
-func (s *levelHandler) Check() {
+func (s *levelHandler) validate() {
 	if s.level == 0 {
 		return
 	}
@@ -539,34 +577,67 @@ func (s *levelHandler) Check() {
 	for j := 1; j < numTables; j++ {
 		y.AssertTruef(j < len(s.tables), "Level %d, j=%d numTables=%d", s.level, j, numTables)
 		y.AssertTruef(bytes.Compare(s.tables[j-1].Biggest(), s.tables[j].Smallest()) < 0,
-			"%s vs %s: level=%d j=%d numTables=%d",
+			"Inter: %s vs %s: level=%d j=%d numTables=%d",
 			string(s.tables[j-1].Biggest()), string(s.tables[j].Smallest()), s.level, j, numTables)
 		y.AssertTruef(bytes.Compare(s.tables[j].Smallest(), s.tables[j].Biggest()) <= 0,
-			"%s vs %s: level=%d j=%d numTables=%d",
+			"Intra: %s vs %s: level=%d j=%d numTables=%d",
 			string(s.tables[j].Smallest()), string(s.tables[j].Biggest()), s.level, j, numTables)
 	}
 }
 
-func (s *levelsController) close(summary *dbSummary) {
-	n := s.db.opt.MaxLevels / 2
+func (s *levelHandler) debugPrintMore() {
+	s.RLock()
+	defer s.RUnlock()
+	y.Printf("Level %d:", s.level)
+	for _, t := range s.tables {
+		y.Printf(" [%s, %s]", t.Smallest(), t.Biggest())
+	}
+	y.Printf("\n")
+}
+
+func (s *levelsController) close() {
+	if s.kv.opt.Verbose {
+		y.Printf("Sending close signal to compact workers\n")
+	}
+	n := s.kv.opt.MaxLevels / 2
 	for i := 0; i < n; i++ {
 		s.compactDone <- struct{}{}
 	}
 	// Wait for all compactions to be done. We want to be in a stable state.
 	// Also, closing tables while merge iterators have references will also lead to crash.
 	s.compactJobs.Wait()
-
-	for _, l := range s.levels {
-		l.close(summary)
+	if s.kv.opt.Verbose {
+		y.Printf("Compaction is all done\n")
 	}
+	for _, l := range s.levels {
+		l.close()
+	}
+	s.clog.close()
 }
 
-func (s *levelHandler) close(summary *dbSummary) {
+func (s *levelHandler) close() {
 	s.RLock()
 	defer s.RUnlock()
 	for _, t := range s.tables {
-		summary.filenames[path.Base(t.Filename())] = true
 		t.Close()
+	}
+}
+
+func (s *levelsController) getSummary() *Summary {
+	out := &Summary{
+		fileIDs: make(map[uint64]bool),
+	}
+	for _, l := range s.levels {
+		l.getSummary(out)
+	}
+	return out
+}
+
+func (s *levelHandler) getSummary(summary *Summary) {
+	s.RLock()
+	defer s.RUnlock()
+	for _, t := range s.tables {
+		summary.fileIDs[t.ID()] = true
 	}
 }
 
@@ -612,6 +683,7 @@ func (s *levelHandler) get(ctx context.Context, key []byte) ([]byte, byte) {
 	tables := s.getTableForKey(key)
 	for _, th := range tables {
 		it := th.NewIterator()
+		defer it.Close()
 		it.Seek(key)
 		if !it.Valid() {
 			continue
@@ -664,8 +736,8 @@ func (s *levelsController) appendIterators(iters []y.Iterator) []y.Iterator {
 }
 
 // Check does some sanity check on our levels data or in-memory index for all levels.
-func (s *levelsController) Check() {
+func (s *levelsController) validate() {
 	for _, l := range s.levels {
-		l.Check()
+		l.validate()
 	}
 }

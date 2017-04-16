@@ -23,9 +23,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path"
-	"strconv"
-	"strings"
+	//	"path"
+	"sort"
 	"sync"
 	"testing"
 	//	"time"
@@ -40,7 +39,7 @@ func getTestOptions(dir string) *Options {
 	*opt = DefaultOptions
 	opt.MaxTableSize = 1 << 15 // Force more compaction.
 	opt.LevelOneSize = 4 << 15 // Force more compaction.
-	//	opt.Verbose = true
+	opt.Verbose = true
 	opt.Dir = dir
 	return opt
 }
@@ -160,7 +159,7 @@ func TestGetMore(t *testing.T) {
 		k := []byte(fmt.Sprintf("%09d", i))
 		require.NoError(t, db.Put(ctx, k, k))
 	}
-	db.Check()
+	db.Validate()
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
@@ -178,7 +177,7 @@ func TestGetMore(t *testing.T) {
 		v := []byte(fmt.Sprintf("val%09d", i))
 		require.NoError(t, db.Put(ctx, k, v))
 	}
-	db.Check()
+	db.Validate()
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
@@ -196,7 +195,7 @@ func TestGetMore(t *testing.T) {
 		k := []byte(fmt.Sprintf("%09d", i))
 		require.NoError(t, db.Delete(ctx, k))
 	}
-	db.Check()
+	db.Validate()
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			// Display some progress. Right now, it's not very fast with no caching.
@@ -275,6 +274,7 @@ func TestIterateBasic(t *testing.T) {
 func TestLoad(t *testing.T) {
 	ctx := context.Background()
 	dir, err := ioutil.TempDir("/tmp", "badger")
+	fmt.Printf("Writing to dir %s\n", dir)
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	n := 10000
@@ -298,30 +298,23 @@ func TestLoad(t *testing.T) {
 		k := fmt.Sprintf("%09d", i)
 		require.EqualValues(t, k, string(db.Get(ctx, []byte(k))))
 	}
-	summary := db.Close()
+	db.Close()
+	summary := db.lc.getSummary()
 
 	// Check that files are garbage collected.
-	fileInfos, err := ioutil.ReadDir(dir)
-	require.NoError(t, err)
-	var numTables int
-	for _, info := range fileInfos {
-		if info.IsDir() {
-			continue
-		}
-		name := info.Name() // Expected to be base name but let's be safe.
-		name = path.Base(name)
-		if !strings.HasPrefix(name, filePrefix) {
-			continue
-		}
-		suffix := name[len(filePrefix):]
-		_, err := strconv.Atoi(suffix)
-		if err == nil {
-			// Check that name is in summary.filenames.
-			require.True(t, summary.filenames[name])
-			numTables++
-		}
+	idMap := getIDMap(dir)
+	for fileID := range idMap {
+		// Check that name is in summary.filenames.
+		require.True(t, summary.fileIDs[fileID], "%d", fileID)
 	}
-	require.EqualValues(t, numTables, len(summary.filenames))
+	require.EqualValues(t, len(idMap), len(summary.fileIDs))
+
+	var fileIDs []uint64
+	for k := range summary.fileIDs { // Map to array.
+		fileIDs = append(fileIDs, k)
+	}
+	sort.Slice(fileIDs, func(i, j int) bool { return fileIDs[i] < fileIDs[j] })
+	fmt.Printf("FileIDs: %v\n", fileIDs)
 }
 
 func TestCrash(t *testing.T) {

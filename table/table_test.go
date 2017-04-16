@@ -48,7 +48,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	b := NewTableBuilder()
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
-	f, err := ioutil.TempFile("/tmp", "badgertable_")
+	f, err := ioutil.TempFile("/tmp", "table_")
 	require.NoError(t, err)
 
 	sort.Slice(keyValues, func(i, j int) bool {

@@ -2,36 +2,33 @@ package badger
 
 import (
 	"encoding/binary"
-	"fmt"
-	"os"
-	"path/filepath"
+	"io/ioutil"
 	"sync/atomic"
 
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 )
 
-const (
-	filePrefix = "table_"
-)
-
-func newFilename(fileID uint64, dir string) string {
-	return filepath.Join(dir, filePrefix+fmt.Sprintf("%010d", fileID))
+// reserveFileIDs reserve k fileIDs. Returns pair is a half-interval. For example,
+// (3, 10] means 4, 5, ..., 10. It has 7 IDs.
+func (s *levelsController) reserveFileIDs(k int) (uint64, uint64) {
+	id := atomic.AddUint64(&s.maxFileID, uint64(k))
+	return id - uint64(k), id
 }
 
-// tempFile returns a unique filename and the uint64.
-func (s *KV) newFile() *os.File {
-	for {
-		id := atomic.AddUint64(&s.maxFileID, 1)
-		filename := newFilename(id, s.opt.Dir)
-		if _, err := os.Stat(filename); os.IsNotExist(err) {
-			// File does not exist.
-			fd, err := y.OpenSyncedFile(filename)
-			y.Check(err)
-			return fd
-		}
-	}
-}
+//// newFile returns a unique filename.
+//func (s *levelsController) newFile() *os.File {
+//	for {
+//		id := atomic.AddUint64(&s.maxFileID, 1)
+//		filename := table.NewFilename(id, s.kv.opt.Dir)
+//		if _, err := os.Stat(filename); os.IsNotExist(err) {
+//			// File does not exist.
+//			fd, err := y.OpenSyncedFile(filename)
+//			y.Check(err)
+//			return fd
+//		}
+//	}
+//}
 
 // updateLevel is called only when moving table to the next level, when there is no overlap
 // with the next level. Here, we update the table metadata.
@@ -42,4 +39,25 @@ func updateLevel(t *table.Table, newLevel int) error {
 		return err
 	}
 	return nil
+}
+
+func (s *levelsController) reserveCompactID() uint64 {
+	return atomic.AddUint64(&s.maxCompactID, 1)
+}
+
+func getIDMap(dir string) map[uint64]struct{} {
+	fileInfos, err := ioutil.ReadDir(dir)
+	y.Check(err)
+	idMap := make(map[uint64]struct{})
+	for _, info := range fileInfos {
+		if info.IsDir() {
+			continue
+		}
+		fileID, ok := table.ParseFileID(info.Name())
+		if !ok {
+			continue
+		}
+		idMap[fileID] = struct{}{}
+	}
+	return idMap
 }

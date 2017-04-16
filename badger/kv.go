@@ -29,6 +29,10 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
+var (
+	Head = []byte("/head/") // For storing value offset for replay.
+)
+
 // Options are params for creating DB object.
 type Options struct {
 	Dir                     string
@@ -61,19 +65,18 @@ var DefaultOptions = Options{
 type KV struct {
 	sync.RWMutex // Guards imm, mem.
 
-	imm       *mem.Table // Immutable, memtable being flushed.
-	mt        *mem.Table
-	immWg     sync.WaitGroup // Nonempty when flushing immutable memtable.
-	opt       Options
-	lc        *levelsController
-	vlog      value.Log
-	voffset   uint64
-	maxFileID uint64
+	imm     *mem.Table // Immutable, memtable being flushed.
+	mt      *mem.Table
+	immWg   sync.WaitGroup // Nonempty when flushing immutable memtable.
+	opt     Options
+	lc      *levelsController
+	vlog    value.Log
+	voffset uint64
 }
 
-// dbSummary is produced when DB is closed. Currently it is used only for testing.
-type dbSummary struct {
-	filenames map[string]bool
+// Summary is produced when DB is closed. Currently it is used only for testing.
+type Summary struct {
+	fileIDs map[uint64]bool
 }
 
 // NewKV returns a new KV object. Compact levels are created as well.
@@ -83,8 +86,9 @@ func NewKV(opt *Options) *KV {
 		mt:  mem.NewTable(),
 		opt: *opt, // Make a copy.
 	}
+
 	// newLevelsController potentially loads files in directory.
-	out.lc, out.maxFileID = newLevelsController(out)
+	out.lc = newLevelsController(out)
 	out.lc.startCompact()
 	vlogPath := filepath.Join(opt.Dir, "vlog")
 	out.vlog.Open(vlogPath)
@@ -106,20 +110,25 @@ func NewKV(opt *Options) *KV {
 		out.mt.Put(k, v, meta)
 	}
 	out.vlog.Replay(voffset, fn)
-
 	return out
 }
 
 // Close closes a KV.
-func (s *KV) Close() *dbSummary {
+func (s *KV) Close() {
+	if s.opt.Verbose {
+		y.Printf("Closing database\n")
+	}
+
 	// TODO(ganesh): Block writes to mem.
 	s.makeRoomForWrite(true) // Force mem to be emptied. Initiate new imm flush.
-	s.immWg.Wait()           // Wait for imm to go to disk.
-	summary := &dbSummary{
-		filenames: make(map[string]bool),
+	if s.opt.Verbose {
+		y.Printf("Memtable emptied\n")
 	}
-	s.lc.close(summary)
-	return summary
+	s.immWg.Wait() // Wait for imm to go to disk.
+	if s.opt.Verbose {
+		y.Printf("Memtable flushed\n")
+	}
+	s.lc.close()
 }
 
 func (s *KV) getMemTables() (*mem.Table, *mem.Table) {
@@ -232,10 +241,6 @@ func (s *KV) Delete(ctx context.Context, key []byte) error {
 	})
 }
 
-var (
-	Head = []byte("/head/")
-)
-
 // makeRoomForWrite may create a new memtable and make imm <- mem.
 // But before that, it will make sure that imm is flushed.
 // If force==true, we will always proceed to make the above change.
@@ -266,9 +271,11 @@ func (s *KV) makeRoomForWrite(force bool) error {
 	s.immWg.Add(1)
 	go func(imm *mem.Table) {
 		defer s.immWg.Done()
-		f := s.newFile()
-		y.Check(imm.WriteLevel0Table(f))
-		tbl, err := table.OpenTable(f, s.opt.MapTablesTo)
+		fileID, _ := s.lc.reserveFileIDs(1)
+		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir))
+		y.Check(err)
+		y.Check(imm.WriteLevel0Table(fd))
+		tbl, err := table.OpenTable(fd, s.opt.MapTablesTo)
 		defer tbl.DecrRef()
 		y.Check(err)
 		s.lc.addLevel0Table(tbl) // This will incrRef again.
@@ -276,5 +283,6 @@ func (s *KV) makeRoomForWrite(force bool) error {
 	return nil
 }
 
-// Check checks if DB makes sense.
-func (s *KV) Check() { s.lc.Check() }
+func (s *KV) Validate() { s.lc.validate() }
+
+func (s *KV) DebugPrintMore() { s.lc.debugPrintMore() }

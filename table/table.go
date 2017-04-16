@@ -19,16 +19,22 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
+	"os"
+	"path"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
-	//	"fmt"
-	"os"
-	"sort"
-	"sync"
 
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
 )
+
+const filePrefix = "table_"
 
 const (
 	Nothing = iota
@@ -57,6 +63,7 @@ type Table struct {
 
 	// The following are initialized once and const.
 	smallest, biggest []byte // Smallest and largest keys.
+	id                uint64
 }
 
 func (s *Table) IncrRef() {
@@ -91,9 +98,14 @@ func (b byKey) Less(i int, j int) bool { return bytes.Compare(b[i].key, b[j].key
 
 // OpenTable assumes file has only one table and opens it.
 func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
+	id, ok := ParseFileID(fd.Name())
+	if !ok {
+		return nil, y.Errorf("Invalid filename: %s", fd.Name())
+	}
 	t := &Table{
 		fd:         fd,
 		ref:        1, // Caller is given one reference.
+		id:         id,
 		mapTableTo: mapTableTo,
 	}
 	fileInfo, err := fd.Stat()
@@ -280,3 +292,22 @@ func (t *Table) Size() int64      { return int64(t.tableSize) }
 func (t *Table) Smallest() []byte { return t.smallest }
 func (t *Table) Biggest() []byte  { return t.biggest }
 func (t *Table) Filename() string { return t.fd.Name() }
+func (t *Table) ID() uint64       { return t.id }
+
+func ParseFileID(name string) (uint64, bool) {
+	name = path.Base(name)
+	if !strings.HasPrefix(name, filePrefix) {
+		return 0, false
+	}
+	suffix := name[len(filePrefix):]
+	id, err := strconv.Atoi(suffix)
+	if err != nil {
+		return 0, false
+	}
+	y.AssertTrue(id >= 0)
+	return uint64(id), true
+}
+
+func NewFilename(id uint64, dir string) string {
+	return filepath.Join(dir, filePrefix+fmt.Sprintf("%010d", id))
+}
