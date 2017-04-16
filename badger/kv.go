@@ -36,7 +36,6 @@ type Options struct {
 	NumLevelZeroTablesStall int   // If we hit this number of Level 0 tables, we will stall until level 0 is compacted away.
 	LevelOneSize            int64 // Maximum total size for Level 1.
 	MaxLevels               int   // Maximum number of levels of compaction. May be made variable later.
-	NumCompactWorkers       int   // Number of goroutines ddoing compaction.
 	MaxTableSize            int64 // Each table (or file) is at most this size.
 	LevelSizeMultiplier     int
 	ValueThreshold          int // If value size >= this threshold, we store offsets in value log.
@@ -50,7 +49,6 @@ var DefaultOptions = Options{
 	NumLevelZeroTablesStall: 10,
 	LevelOneSize:            256 << 20,
 	MaxLevels:               7,
-	NumCompactWorkers:       3, // Max possible = num levels / 2.
 	MaxTableSize:            64 << 20,
 	LevelSizeMultiplier:     10,
 	ValueThreshold:          20,

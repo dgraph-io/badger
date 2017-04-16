@@ -269,7 +269,7 @@ func newLevelsController(db *KV) (*levelsController, uint64) {
 }
 
 func (s *levelsController) startCompact() {
-	n := s.db.opt.NumCompactWorkers
+	n := s.db.opt.MaxLevels / 2
 	s.compactDone = make(chan struct{}, n)
 	s.compactJobs.Add(n)
 	for i := 0; i < n; i++ {
@@ -548,7 +548,8 @@ func (s *levelHandler) Check() {
 }
 
 func (s *levelsController) close(summary *dbSummary) {
-	for i := 0; i < s.db.opt.NumCompactWorkers; i++ {
+	n := s.db.opt.MaxLevels / 2
+	for i := 0; i < n; i++ {
 		s.compactDone <- struct{}{}
 	}
 	// Wait for all compactions to be done. We want to be in a stable state.
