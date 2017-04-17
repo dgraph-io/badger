@@ -18,9 +18,7 @@ package badger
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -75,12 +73,12 @@ type KV struct {
 	opt       Options
 	lc        *levelsController
 	vlog      value.Log
-	voffset   uint64
+	vptr      value.Pointer
 }
 
 type flushTask struct {
-	mt      *mem.Table
-	voffset uint64
+	mt   *mem.Table
+	vptr value.Pointer
 }
 
 // Summary is produced when DB is closed. Currently it is used only for testing.
@@ -101,12 +99,12 @@ func (s *KV) flushMemtable() {
 				done = true
 				break
 			}
-			if ft.voffset > 0 {
+			if ft.vptr.Fid > 0 || ft.vptr.Offset > 0 {
 				if s.opt.Verbose {
-					fmt.Printf("Storing offset: %v\n", ft.voffset)
+					fmt.Printf("Storing offset: %+v\n", ft.vptr)
 				}
-				offset := make([]byte, 8)
-				binary.BigEndian.PutUint64(offset, ft.voffset)
+				offset := make([]byte, 16)
+				s.vptr.Encode(offset)
 				ft.mt.Put(Head, offset, 0)
 			}
 			fileID, _ := s.lc.reserveFileIDs(1)
@@ -144,15 +142,12 @@ func NewKV(opt *Options) *KV {
 	out.lc.startCompact()
 	go out.flushMemtable() // Need levels controller to be up.
 
-	vlogPath := filepath.Join(opt.Dir, "vlog")
-	out.vlog.Open(vlogPath)
+	out.vlog.Open(opt.Dir, "vlog")
 
 	val := out.Get(context.Background(), Head)
-	var voffset uint64
-	if len(val) == 0 {
-		voffset = 0
-	} else {
-		voffset = binary.BigEndian.Uint64(val)
+	var vptr value.Pointer
+	if len(val) > 0 {
+		vptr.Decode(val)
 	}
 
 	first := true
@@ -163,7 +158,7 @@ func NewKV(opt *Options) *KV {
 		first = false
 		out.mt.Put(k, v, meta)
 	}
-	out.vlog.Replay(voffset, fn)
+	out.vlog.Replay(vptr, fn)
 	return out
 }
 
@@ -180,13 +175,13 @@ func (s *KV) Close() {
 			y.Printf("Flushing memtable\n")
 		}
 		y.AssertTrue(s.mt != nil)
-		s.flushChan <- flushTask{s.mt, s.voffset}
+		s.flushChan <- flushTask{s.mt, s.vptr}
 		s.imm = append(s.imm, s.mt) // Flusher will attempt to remove this from s.imm.
 		s.mt = nil                  // Will segfault if we try writing!
 		s.Unlock()
 	}
-	s.flushChan <- flushTask{nil, 0} // Tell flusher to quit.
-	<-s.flushDone                    // Wait for flusher to be done.
+	s.flushChan <- flushTask{nil, value.Pointer{}} // Tell flusher to quit.
+	<-s.flushDone                                  // Wait for flusher to be done.
 	if s.opt.Verbose {
 		y.Printf("Memtable flushed\n")
 	}
@@ -252,8 +247,10 @@ func (s *KV) updateOffset(ptrs []value.Pointer) {
 
 	s.Lock()
 	defer s.Unlock()
-	if s.voffset < ptr.Offset {
-		s.voffset = ptr.Offset + uint64(ptr.Len)
+	if s.vptr.Fid < ptr.Fid {
+		s.vptr = ptr
+	} else if s.vptr.Offset < ptr.Offset {
+		s.vptr = ptr
 	}
 }
 
@@ -315,7 +312,7 @@ func (s *KV) hasRoomForWrite() bool {
 
 	y.AssertTrue(s.mt != nil) // A nil mt indicates that KV is being closed.
 	select {
-	case s.flushChan <- flushTask{s.mt, s.voffset}:
+	case s.flushChan <- flushTask{s.mt, s.vptr}:
 		if s.opt.Verbose {
 			y.Printf("Flushing memtable, size of flushChan: %d\n", len(s.flushChan))
 		}

@@ -31,11 +31,11 @@ import (
 
 func TestBasic(t *testing.T) {
 	ctx := context.Background()
-	fd, err := ioutil.TempFile("", "badger_")
+	dir, err := ioutil.TempDir("", "")
 	y.Check(err)
 
 	var log Log
-	log.Open(fd.Name())
+	log.Open(dir, "vlog")
 	defer log.Close()
 
 	ptrs, err := log.Write([]Entry{
@@ -47,6 +47,7 @@ func TestBasic(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, ptrs, 1)
+	fmt.Printf("Pointer written: %+v", ptrs[0])
 
 	var readEntries []Entry
 	e, err := log.Read(ctx, ptrs[0])
@@ -74,7 +75,7 @@ func BenchmarkReadWrite(b *testing.B) {
 		for _, rw := range rwRatio {
 			b.Run(fmt.Sprintf("%3.1f,%04d", rw, vsz), func(b *testing.B) {
 				var vl Log
-				vl.Open("vlog")
+				vl.Open(".", "vlog")
 				defer os.Remove("vlog")
 				b.ResetTimer()
 

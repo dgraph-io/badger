@@ -21,9 +21,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,17 +40,29 @@ import (
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete       = 1 // Set if the key has been deleted.
-	BitValuePointer = 2 // Set if the value is NOT stored directly next to key.
+	BitDelete             = 1 // Set if the key has been deleted.
+	BitValuePointer       = 2 // Set if the value is NOT stored directly next to key.
+	LogSize         int64 = 1 << 30
 )
+
+var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
+
+type logFile struct {
+	fd     *os.File
+	fid    int32
+	offset int64
+}
 
 type Log struct {
 	sync.RWMutex
-	fd     *os.File
-	offset int64
-	elog   trace.EventLog
-	bch    chan *block
-	done   sync.WaitGroup
+	files []logFile
+	// fds    []*os.File
+	offset    int64
+	elog      trace.EventLog
+	bch       chan *block
+	done      sync.WaitGroup
+	logPrefix string
+	dirPath   string
 }
 
 type Entry struct {
@@ -73,30 +90,83 @@ func (h *header) Decode(buf []byte) []byte {
 }
 
 type Pointer struct {
+	Fid    uint32
 	Len    uint32
 	Offset uint64
 }
 
 // Encode encodes Pointer into byte buffer.
 func (p Pointer) Encode(b []byte) []byte {
-	y.AssertTrue(len(b) >= 12)
-	binary.BigEndian.PutUint32(b[:4], p.Len)
-	binary.BigEndian.PutUint64(b[4:12], uint64(p.Offset))
-	return b[:12]
+	y.AssertTrue(len(b) >= 16)
+	binary.BigEndian.PutUint32(b[:4], p.Fid)
+	binary.BigEndian.PutUint32(b[4:8], p.Len)
+	binary.BigEndian.PutUint64(b[8:16], uint64(p.Offset))
+	return b[:16]
 }
 
 func (p *Pointer) Decode(b []byte) {
-	y.AssertTrue(len(b) >= 12)
-	p.Len = binary.BigEndian.Uint32(b[:4])
-	p.Offset = binary.BigEndian.Uint64(b[4:12])
+	y.AssertTrue(len(b) >= 16)
+	p.Fid = binary.BigEndian.Uint32(b[:4])
+	p.Len = binary.BigEndian.Uint32(b[4:8])
+	p.Offset = binary.BigEndian.Uint64(b[8:16])
 }
 
-func (l *Log) Open(fname string) {
-	var err error
-	l.fd, err = y.OpenSyncedFile(fname)
-	y.Check(err)
-	l.elog = trace.NewEventLog("Badger", "Valuelog")
+func (l *Log) fpath(fid int32) string {
+	return fmt.Sprintf("%s/%s_%06d", l.dirPath, l.logPrefix, fid)
+}
 
+func (l *Log) openOrCreateFiles() {
+	files, err := ioutil.ReadDir(l.dirPath)
+	y.Check(err)
+
+	found := make(map[int]struct{})
+	for _, file := range files {
+		if !strings.HasPrefix(file.Name(), l.logPrefix+"-") {
+			continue
+		}
+		fid, err := strconv.Atoi(file.Name()[len(l.logPrefix)+1:])
+		y.Check(err)
+		if _, ok := found[fid]; ok {
+			y.Fatalf("Found the same file twice: %d", fid)
+		}
+		found[fid] = struct{}{}
+
+		lf := logFile{fid: int32(fid)}
+		l.files = append(l.files, lf)
+	}
+
+	sort.Slice(l.files, func(i, j int) bool {
+		return l.files[i].fid < l.files[i].fid
+	})
+
+	// Open all previous log files as read only. Open the last log file
+	// as read write.
+	for i := range l.files {
+		lf := &l.files[i]
+		if i == len(l.files)-1 {
+			lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid))
+			y.Check(err)
+		} else {
+			lf.fd, err = os.OpenFile(l.fpath(lf.fid), os.O_RDONLY, 0666)
+			y.Check(err)
+		}
+	}
+
+	// If no files are found, then create a new file.
+	if len(l.files) == 0 {
+		lf := logFile{fid: 0}
+		lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid))
+		y.Check(err)
+		l.files = append(l.files, lf)
+	}
+}
+
+func (l *Log) Open(dir, prefix string) {
+	l.logPrefix = prefix
+	l.dirPath = dir
+	l.openOrCreateFiles()
+
+	l.elog = trace.NewEventLog("Badger", "Valuelog")
 	l.bch = make(chan *block, 1000)
 	l.done.Add(1)
 	go l.writeToDisk()
@@ -105,12 +175,16 @@ func (l *Log) Open(fname string) {
 func (l *Log) Close() {
 	close(l.bch)
 	l.done.Wait()
-	l.fd.Close()
+	for _, f := range l.files {
+		f.fd.Close()
+	}
 	l.elog.Finish()
 }
 
-func (l *Log) Replay(offset uint64, fn func(k, v []byte, meta byte)) {
-	fmt.Printf("Seeking at offset: %v\n", offset)
+func (l *Log) Replay(ptr Pointer, fn func(k, v []byte, meta byte)) {
+	fid := int32(ptr.Fid)
+	offset := int64(ptr.Offset)
+	fmt.Printf("Seeking at value pointer: %+v\n", ptr)
 
 	read := func(r *bufio.Reader, buf []byte) error {
 		for {
@@ -125,38 +199,49 @@ func (l *Log) Replay(offset uint64, fn func(k, v []byte, meta byte)) {
 		}
 	}
 
-	_, err := l.fd.Seek(int64(offset), 0)
-	y.Check(err)
-	reader := bufio.NewReader(l.fd)
-
-	hbuf := make([]byte, 8)
-	var h header
 	var count int
-	for {
-		if err := read(reader, hbuf); err == io.EOF {
-			break
+	for _, f := range l.files {
+		if f.fid < fid {
+			continue
 		}
-		h.Decode(hbuf)
-		// fmt.Printf("[%d] Header read: %+v\n", count, h)
+		if f.fid == fid {
+			_, err := f.fd.Seek(offset, 0)
+			y.Check(err)
+		} else {
+			_, err := f.fd.Seek(0, 0)
+			y.Check(err)
+		}
 
-		k := make([]byte, h.klen)
-		v := make([]byte, h.vlen)
+		reader := bufio.NewReader(f.fd)
+		hbuf := make([]byte, 8)
+		var h header
+		var count int
+		for {
+			if err := read(reader, hbuf); err == io.EOF {
+				break
+			}
+			h.Decode(hbuf)
+			// fmt.Printf("[%d] Header read: %+v\n", count, h)
 
-		y.Check(read(reader, k))
-		meta, err := reader.ReadByte()
-		y.Check(err)
-		y.Check(read(reader, v))
+			k := make([]byte, h.klen)
+			v := make([]byte, h.vlen)
 
-		fn(k, v, meta)
-		count++
+			y.Check(read(reader, k))
+			meta, err := reader.ReadByte()
+			y.Check(err)
+			y.Check(read(reader, v))
+
+			fn(k, v, meta)
+			count++
+		}
 	}
 	fmt.Printf("Replayed %d KVs\n", count)
 
 	// Seek to the end to start writing.
-	l.offset, err = l.fd.Seek(0, io.SeekEnd)
-	if err != nil {
-		y.Fatalf("Unable to seek to the end. Error: %v", err)
-	}
+	var err error
+	last := &l.files[len(l.files)-1]
+	last.offset, err = last.fd.Seek(0, io.SeekEnd)
+	y.Checkf(err, "Unable to seek to the end")
 }
 
 var bufPool = sync.Pool{
@@ -177,6 +262,8 @@ func (l *Log) writeToDisk() {
 	buf.Grow(10 << 20)
 
 	blocks := make([]*block, 0, 1000)
+	curlf := &l.files[len(l.files)-1]
+
 	write := func() {
 		l.elog.Printf("Buffering %d blocks", len(blocks))
 		for i := range blocks {
@@ -190,8 +277,9 @@ func (l *Log) writeToDisk() {
 				header := h.Encode()
 
 				var p Pointer
+				p.Fid = uint32(curlf.fid)
 				p.Len = uint32(len(header)) + h.klen + h.vlen + 1
-				p.Offset = uint64(l.offset) + uint64(buf.Len())
+				p.Offset = uint64(curlf.offset) + uint64(buf.Len())
 				b.ptrs = append(b.ptrs, p)
 
 				buf.Write(header)
@@ -201,14 +289,32 @@ func (l *Log) writeToDisk() {
 			}
 		}
 		l.elog.Printf("Created buffer of size: %d", buf.Len())
-		n, err := l.fd.Write(buf.Bytes())
+		n, err := curlf.fd.Write(buf.Bytes())
 		if err != nil {
 			y.Fatalf("Unable to write to value log: %v", err)
 		}
 		buf.Reset()
 
 		l.elog.Printf("Wrote %d bytes to disk", n)
-		l.offset += int64(n)
+		curlf.offset += int64(n)
+
+		// Acquire mutex locks around this manipulation, so that the reads don't try to use
+		// an invalid file descriptor.
+		if curlf.offset > LogSize {
+			l.Lock()
+			y.Check(curlf.fd.Close())
+			curlf.fd, err = os.OpenFile(l.fpath(curlf.fid), os.O_RDONLY, 0666)
+			y.Check(err)
+
+			newlf := logFile{fid: curlf.fid + 1, offset: 0}
+			newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid))
+			y.Check(err)
+			l.files = append(l.files, newlf)
+
+			curlf = &newlf
+			l.Unlock()
+		}
+
 		for i := range blocks {
 			b := blocks[i]
 			b.wg.Done()
@@ -248,13 +354,31 @@ func (l *Log) Write(entries []Entry) ([]Pointer, error) {
 	return b.ptrs, nil
 }
 
+func (l *Log) getFile(fid int32) (*logFile, error) {
+	l.RLock()
+	defer l.RUnlock()
+
+	idx := sort.Search(len(l.files), func(idx int) bool {
+		return l.files[idx].fid >= fid
+	})
+	if idx == len(l.files) || l.files[idx].fid != fid {
+		return nil, Corrupt
+	}
+	return &l.files[idx], nil
+}
+
 // Read reads the value log at a given location.
 func (l *Log) Read(ctx context.Context, p Pointer) (e Entry, err error) {
 	y.Trace(ctx, "Reading value with pointer: %+v", p)
 	defer y.Trace(ctx, "Read done")
 
+	lf, err := l.getFile(int32(p.Fid))
+	if err != nil {
+		return e, err
+	}
+
 	buf := make([]byte, p.Len)
-	if _, err := l.fd.ReadAt(buf, int64(p.Offset)); err != nil {
+	if _, err := lf.fd.ReadAt(buf, int64(p.Offset)); err != nil {
 		return e, err
 	}
 	var h header
