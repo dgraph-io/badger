@@ -30,11 +30,19 @@ BenchmarkReadWriteMap/frac_9-4         	 3000000	       521 ns/op
 BenchmarkReadWriteMap/frac_10-4        	 3000000	       479 ns/op
 ```
 
-Node Pooling
+# Node Pooling
+
+Command used
 
 ```
 rm -Rf tmp && /usr/bin/time -l ./populate -keys_mil 10
-Original
+```
+
+Results seem to vary quite a bit between runs.
+
+## Before node pooling
+
+```
 1311.53MB of 1338.69MB total (97.97%)
 Dropped 30 nodes (cum <= 6.69MB)
 Showing top 10 nodes out of 37 (cum >= 12.50MB)
@@ -65,8 +73,11 @@ Showing top 10 nodes out of 37 (cum >= 12.50MB)
          0  signals received
      49173  voluntary context switches
     599922  involuntary context switches
+```
 
-With node pool
+## After node pooling
+
+```
 1963.13MB of 2026.09MB total (96.89%)
 Dropped 29 nodes (cum <= 10.13MB)
 Showing top 10 nodes out of 41 (cum >= 185.62MB)
