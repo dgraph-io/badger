@@ -172,8 +172,8 @@ func (s *KV) NewIterator(ctx context.Context, prefetchSize, numWorkers int) *Ite
 	if mem != nil {
 		iters = append(iters, mem.NewIterator())
 	}
-	if imm != nil {
-		iters = append(iters, imm.NewIterator())
+	for i := len(imm) - 1; i >= 0; i-- {
+		iters = append(iters, imm[i].NewIterator())
 	}
 	iters = s.lc.appendIterators(iters) // This will increment references.
 

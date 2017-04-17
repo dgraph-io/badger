@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/dgraph-io/badger/mem"
 	"github.com/dgraph-io/badger/table"
@@ -46,6 +47,7 @@ type Options struct {
 	Verbose                 bool
 	DoNotCompact            bool
 	MapTablesTo             int
+	NumMemtables            int
 }
 
 var DefaultOptions = Options{
@@ -60,17 +62,24 @@ var DefaultOptions = Options{
 	Verbose:                 true,
 	DoNotCompact:            false, // Only for testing.
 	MapTablesTo:             table.MemoryMap,
+	NumMemtables:            3,
 }
 
 type KV struct {
 	sync.RWMutex // Guards imm, mem.
 
-	imm     *mem.Table // Immutable, memtable being flushed.
+	mt        *mem.Table
+	imm       []*mem.Table   // Add here only AFTER pushing to flushChan.
+	flushChan chan flushTask // For flushing memtables.
+	flushDone chan struct{}
+	opt       Options
+	lc        *levelsController
+	vlog      value.Log
+	voffset   uint64
+}
+
+type flushTask struct {
 	mt      *mem.Table
-	immWg   sync.WaitGroup // Nonempty when flushing immutable memtable.
-	opt     Options
-	lc      *levelsController
-	vlog    value.Log
 	voffset uint64
 }
 
@@ -79,17 +88,62 @@ type Summary struct {
 	fileIDs map[uint64]bool
 }
 
+func (s *KV) flushMemtable() {
+	var done bool
+	for !done {
+		select {
+		case ft := <-s.flushChan:
+			if ft.mt == nil {
+				if s.opt.Verbose {
+					y.Printf("Closing flushChan\n")
+				}
+				close(s.flushChan) // This is our close signal.
+				done = true
+				break
+			}
+			if ft.voffset > 0 {
+				if s.opt.Verbose {
+					fmt.Printf("Storing offset: %v\n", ft.voffset)
+				}
+				offset := make([]byte, 8)
+				binary.BigEndian.PutUint64(offset, ft.voffset)
+				ft.mt.Put(Head, offset, 0)
+			}
+			fileID, _ := s.lc.reserveFileIDs(1)
+			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir))
+			y.Check(err)
+			y.Check(ft.mt.WriteLevel0Table(fd))
+			tbl, err := table.OpenTable(fd, s.opt.MapTablesTo)
+			defer tbl.DecrRef()
+			y.Check(err)
+			s.lc.addLevel0Table(tbl) // This will incrRef again.
+
+			// Update s.imm. Need a lock.
+			s.Lock()
+			y.AssertTrue(ft.mt == s.imm[0]) //For now, single threaded.
+			s.imm = s.imm[1:]
+			s.Unlock()
+		}
+	}
+	s.flushDone <- struct{}{}
+}
+
 // NewKV returns a new KV object. Compact levels are created as well.
 func NewKV(opt *Options) *KV {
 	y.AssertTrue(len(opt.Dir) > 0)
 	out := &KV{
-		mt:  mem.NewTable(),
-		opt: *opt, // Make a copy.
+		mt:        mem.NewTable(),
+		imm:       make([]*mem.Table, 0, opt.NumMemtables),
+		flushChan: make(chan flushTask, opt.NumMemtables),
+		flushDone: make(chan struct{}),
+		opt:       *opt, // Make a copy.
 	}
 
 	// newLevelsController potentially loads files in directory.
 	out.lc = newLevelsController(out)
 	out.lc.startCompact()
+	go out.flushMemtable() // Need levels controller to be up.
+
 	vlogPath := filepath.Join(opt.Dir, "vlog")
 	out.vlog.Open(vlogPath)
 
@@ -120,18 +174,26 @@ func (s *KV) Close() {
 	}
 
 	// TODO(ganesh): Block writes to mem.
-	s.makeRoomForWrite(true) // Force mem to be emptied. Initiate new imm flush.
-	if s.opt.Verbose {
-		y.Printf("Memtable emptied\n")
+	if s.mt.Size() > 0 {
+		s.Lock()
+		if s.opt.Verbose {
+			y.Printf("Flushing memtable\n")
+		}
+		y.AssertTrue(s.mt != nil)
+		s.flushChan <- flushTask{s.mt, s.voffset}
+		s.imm = append(s.imm, s.mt) // Flusher will attempt to remove this from s.imm.
+		s.mt = nil                  // Will segfault if we try writing!
+		s.Unlock()
 	}
-	s.immWg.Wait() // Wait for imm to go to disk.
+	s.flushChan <- flushTask{nil, 0} // Tell flusher to quit.
+	<-s.flushDone                    // Wait for flusher to be done.
 	if s.opt.Verbose {
 		y.Printf("Memtable flushed\n")
 	}
 	s.lc.close()
 }
 
-func (s *KV) getMemTables() (*mem.Table, *mem.Table) {
+func (s *KV) getMemTables() (*mem.Table, []*mem.Table) {
 	s.RLock()
 	defer s.RUnlock()
 	return s.mt, s.imm
@@ -169,8 +231,8 @@ func (s *KV) get(ctx context.Context, key []byte) ([]byte, byte) {
 			return v, meta
 		}
 	}
-	if imm != nil {
-		v, meta := imm.Get(key)
+	for i := len(imm) - 1; i >= 0; i-- {
+		v, meta := imm[i].Get(key)
 		if meta != 0 || v != nil {
 			return v, meta
 		}
@@ -198,8 +260,8 @@ func (s *KV) updateOffset(ptrs []value.Pointer) {
 // Write applies a list of value.Entry to our memtable.
 func (s *KV) Write(ctx context.Context, entries []value.Entry) error {
 	y.Trace(ctx, "Making room for writes")
-	if err := s.makeRoomForWrite(false); err != nil {
-		return err
+	for !s.hasRoomForWrite() {
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	y.Trace(ctx, "Writing to value log.")
@@ -241,46 +303,28 @@ func (s *KV) Delete(ctx context.Context, key []byte) error {
 	})
 }
 
-// makeRoomForWrite may create a new memtable and make imm <- mem.
-// But before that, it will make sure that imm is flushed.
-// If force==true, we will always proceed to make the above change.
-// Note: After function returns, we may still be flushing the new imm to disk.
-func (s *KV) makeRoomForWrite(force bool) error {
-	if !force && s.mt.Size() < s.opt.MaxTableSize {
-		// Nothing to do. We have enough space.
-		return nil
-	}
-	if s.mt.Size() == 0 {
-		// Even if forced, we do not attempt to write an empty table!
-		return nil
-	}
-	s.immWg.Wait() // Make sure we finish flushing immutable memtable.
-
+func (s *KV) hasRoomForWrite() bool {
 	s.Lock()
 	defer s.Unlock()
-	if s.voffset > 0 {
-		fmt.Printf("Storing offset: %v\n", s.voffset)
-		offset := make([]byte, 8)
-		binary.BigEndian.PutUint64(offset, s.voffset)
-		s.mt.Put(Head, offset, 0)
+	if s.mt.Size() < s.opt.MaxTableSize {
+		return true
 	}
 
-	// Changing imm, mem requires lock.
-	s.imm = s.mt
-	s.mt = mem.NewTable()
-	s.immWg.Add(1)
-	go func(imm *mem.Table) {
-		defer s.immWg.Done()
-		fileID, _ := s.lc.reserveFileIDs(1)
-		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir))
-		y.Check(err)
-		y.Check(imm.WriteLevel0Table(fd))
-		tbl, err := table.OpenTable(fd, s.opt.MapTablesTo)
-		defer tbl.DecrRef()
-		y.Check(err)
-		s.lc.addLevel0Table(tbl) // This will incrRef again.
-	}(s.imm)
-	return nil
+	y.AssertTrue(s.mt != nil) // A nil mt indicates that KV is being closed.
+	select {
+	case s.flushChan <- flushTask{s.mt, s.voffset}:
+		if s.opt.Verbose {
+			y.Printf("Flushing memtable, size of flushChan: %d\n", len(s.flushChan))
+		}
+		// We manage to push this task. Let's modify imm.
+		s.imm = append(s.imm, s.mt)
+		s.mt = mem.NewTable()
+		// New memtable is empty. We certainly have room.
+		return true
+	default:
+		// We need to do this to unlock and allow the flusher to modify imm.
+		return false
+	}
 }
 
 func (s *KV) Validate() { s.lc.validate() }
