@@ -38,6 +38,8 @@ Command used
 rm -Rf tmp && /usr/bin/time -l ./populate -keys_mil 10
 ```
 
+For pprof results, we run without using /usr/bin/time. There are four runs below.
+
 Results seem to vary quite a bit between runs.
 
 ## Before node pooling
