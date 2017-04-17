@@ -261,9 +261,9 @@ func (s *KV) updateOffset(ptrs []value.Pointer) {
 func (s *KV) Write(ctx context.Context, entries []value.Entry) error {
 	y.Trace(ctx, "Making room for writes")
 	for !s.hasRoomForWrite() {
-		// We need to poll a bit because if both hasRoomForWrite and the flusher need
-		// access to s.imm. When flushChan is full and you are blocked there, and the flusher
-		// is trying to update s.imm, you will get a deadlock.
+		// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
+		// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
+		// you will get a deadlock.
 		time.Sleep(10 * time.Millisecond)
 	}
 
