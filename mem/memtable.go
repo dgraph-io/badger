@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+// TODO: Consider merging memtable and skl.
 package mem
 
 import (
@@ -50,6 +51,7 @@ func (s *Table) Put(key, value []byte, meta byte) {
 // WriteLevel0Table flushes memtable. It drops deleteValues.
 func (s *Table) WriteLevel0Table(f *os.File) error {
 	iter := s.NewIterator()
+	defer iter.Close()
 	b := table.NewTableBuilder()
 	defer b.Close()
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
@@ -61,6 +63,14 @@ func (s *Table) WriteLevel0Table(f *os.File) error {
 	var buf [2]byte // Level 0. Leave it initialized as 0.
 	_, err := f.Write(b.Finish(buf[:]))
 	return err
+}
+
+func (s *Table) IncrRef() {
+	s.table.IncrRef()
+}
+
+func (s *Table) DecrRef() {
+	s.table.DecrRef()
 }
 
 // Iterator is an iterator over memtable.
@@ -82,7 +92,7 @@ func (s *Iterator) SeekToLast()     { s.iter.SeekToLast() }
 func (s *Iterator) Next()           { s.iter.Next() }
 func (s *Iterator) Prev()           { s.iter.Prev() }
 func (s *Iterator) Key() []byte     { return s.iter.Key() }
-func (s *Iterator) Close()          {}
+func (s *Iterator) Close()          { s.iter.Close() }
 
 // Value returns the value and whether the key is deleted.
 func (s *Iterator) Value() ([]byte, byte) {

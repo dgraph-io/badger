@@ -106,6 +106,19 @@ func TestConcurrentWrite(t *testing.T) {
 	require.False(t, it.Valid())
 }
 
+func TestIteratorRef(t *testing.T) {
+	m := NewTable()
+	m.Put([]byte("abc"), []byte("vala"), 5)
+	it := m.NewIterator()
+	defer it.Close()
+	m.DecrRef()
+	it.Seek([]byte("abc"))
+	require.EqualValues(t, "abc", string(it.Key()))
+	v, meta := it.Value()
+	require.EqualValues(t, "vala", string(v))
+	require.EqualValues(t, 5, meta)
+}
+
 func BenchmarkAdd(b *testing.B) {
 	m := NewTable()
 	for i := 0; i < b.N; i++ {

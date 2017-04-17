@@ -36,6 +36,7 @@ import (
 	"bytes"
 	"math"
 	"math/rand"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -43,7 +44,7 @@ import (
 )
 
 const (
-	kMaxHeight      = 20
+	kMaxHeight      = 12
 	kHeightIncrease = math.MaxUint32 / 3
 )
 
@@ -62,14 +63,29 @@ type node struct {
 type Skiplist struct {
 	height int32 // Current height. 1 <= height <= kMaxHeight. CAS.
 	head   *node
+	ref    int32
+}
+
+var nodePool = sync.Pool{
+	New: func() interface{} {
+		return new(node)
+	},
 }
 
 func newNode(key []byte, value unsafe.Pointer, meta byte, height int) *node {
+	//	out := nodePool.Get().(*node)
+	//	out.key = key
+	//	out.value = value
+	//	out.meta = uint32(meta)
+	//	for i := 0; i < height; i++ {
+	//		out.next[i] = nil
+	//	}
+	//	return out
 	return &node{
 		key:   key,
-		next:  make([]unsafe.Pointer, height),
 		value: value,
 		meta:  uint32(meta),
+		next:  make([]unsafe.Pointer, height),
 	}
 }
 
@@ -78,7 +94,26 @@ func NewSkiplist() *Skiplist {
 	return &Skiplist{
 		height: 1,
 		head:   head,
+		ref:    1,
 	}
+}
+
+func (s *Skiplist) IncrRef() {
+	atomic.AddInt32(&s.ref, 1)
+}
+
+func (s *Skiplist) DecrRef() {
+	newRef := atomic.AddInt32(&s.ref, -1)
+	if newRef > 0 {
+		return
+	}
+	// Deallocate all nodes.
+	//	x := s.head
+	//	for x != nil {
+	//		next := x.getNext(0)
+	//		nodePool.Put(x)
+	//		x = next
+	//	}
 }
 
 func (s *node) setValue(val unsafe.Pointer, meta byte) {
@@ -294,7 +329,10 @@ func (s *Skiplist) Get(key []byte) (unsafe.Pointer, byte) {
 	return n.value, byte(n.meta)
 }
 
-func (s *Skiplist) NewIterator() *Iterator { return &Iterator{list: s} }
+func (s *Skiplist) NewIterator() *Iterator {
+	s.IncrRef()
+	return &Iterator{list: s}
+}
 
 // Iterator is an iterator over skiplist object. For new objects, you just
 // need to initialize Iterator.list.
@@ -306,6 +344,10 @@ type Iterator struct {
 // Iterator returns a new iterator for our skiplist.
 func (s *Skiplist) Iterator() *Iterator {
 	return &Iterator{list: s}
+}
+
+func (s *Iterator) Close() {
+	s.list.DecrRef()
 }
 
 // Valid returns true iff the iterator is positioned at a valid node.

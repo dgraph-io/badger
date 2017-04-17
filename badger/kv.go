@@ -120,6 +120,7 @@ func (s *KV) flushMemtable() {
 			s.Lock()
 			y.AssertTrue(ft.mt == s.imm[0]) //For now, single threaded.
 			s.imm = s.imm[1:]
+			ft.mt.DecrRef() // Return memory.
 			s.Unlock()
 		}
 	}
