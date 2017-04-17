@@ -62,7 +62,7 @@ var DefaultOptions = Options{
 	Verbose:                 true,
 	DoNotCompact:            false, // Only for testing.
 	MapTablesTo:             table.MemoryMap,
-	NumMemtables:            3,
+	NumMemtables:            5,
 }
 
 type KV struct {
@@ -261,6 +261,9 @@ func (s *KV) updateOffset(ptrs []value.Pointer) {
 func (s *KV) Write(ctx context.Context, entries []value.Entry) error {
 	y.Trace(ctx, "Making room for writes")
 	for !s.hasRoomForWrite() {
+		// We need to poll a bit because if both hasRoomForWrite and the flusher need
+		// access to s.imm. When flushChan is full and you are blocked there, and the flusher
+		// is trying to update s.imm, you will get a deadlock.
 		time.Sleep(10 * time.Millisecond)
 	}
 
