@@ -44,13 +44,13 @@ import (
 )
 
 const (
-	kMaxHeight      = 20
+	kMaxHeight      = 15
 	kHeightIncrease = math.MaxUint32 / 3
 )
 
 type node struct {
-	key  []byte                     // Immutable. Left nil for head node.
-	next [kMaxHeight]unsafe.Pointer // []*node. Size is <=kMaxNumLevels. CAS.
+	key  []byte           // Immutable. Left nil for head node.
+	next []unsafe.Pointer // []*node. Size is <=kMaxNumLevels. CAS.
 
 	value unsafe.Pointer // Atomic.
 	meta  uint32         // Byte. Made uint32 for atomic.
@@ -77,16 +77,15 @@ func newNode(key []byte, value unsafe.Pointer, meta byte, height int) *node {
 	out.key = key
 	out.value = value
 	out.meta = uint32(meta)
-	for i := 0; i < height; i++ {
-		out.next[i] = nil
+	if cap(out.next) < height {
+		out.next = make([]unsafe.Pointer, height)
+	} else {
+		out.next = out.next[:height]
+		for i := 0; i < height; i++ {
+			out.next[i] = nil
+		}
 	}
 	return out
-	//	return &node{
-	//		key:   key,
-	//		value: value,
-	//		meta:  uint32(meta),
-	//		next:  make([]unsafe.Pointer, height),
-	//	}
 }
 
 func NewSkiplist() *Skiplist {
