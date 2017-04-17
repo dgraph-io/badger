@@ -44,13 +44,13 @@ import (
 )
 
 const (
-	kMaxHeight      = 12
+	kMaxHeight      = 20
 	kHeightIncrease = math.MaxUint32 / 3
 )
 
 type node struct {
-	key  []byte           // Immutable. Left nil for head node.
-	next []unsafe.Pointer // []*node. Size is <=kMaxNumLevels. CAS.
+	key  []byte                     // Immutable. Left nil for head node.
+	next [kMaxHeight]unsafe.Pointer // []*node. Size is <=kMaxNumLevels. CAS.
 
 	value unsafe.Pointer // Atomic.
 	meta  uint32         // Byte. Made uint32 for atomic.
@@ -73,20 +73,20 @@ var nodePool = sync.Pool{
 }
 
 func newNode(key []byte, value unsafe.Pointer, meta byte, height int) *node {
-	//	out := nodePool.Get().(*node)
-	//	out.key = key
-	//	out.value = value
-	//	out.meta = uint32(meta)
-	//	for i := 0; i < height; i++ {
-	//		out.next[i] = nil
-	//	}
-	//	return out
-	return &node{
-		key:   key,
-		value: value,
-		meta:  uint32(meta),
-		next:  make([]unsafe.Pointer, height),
+	out := nodePool.Get().(*node)
+	out.key = key
+	out.value = value
+	out.meta = uint32(meta)
+	for i := 0; i < height; i++ {
+		out.next[i] = nil
 	}
+	return out
+	//	return &node{
+	//		key:   key,
+	//		value: value,
+	//		meta:  uint32(meta),
+	//		next:  make([]unsafe.Pointer, height),
+	//	}
 }
 
 func NewSkiplist() *Skiplist {
@@ -108,12 +108,13 @@ func (s *Skiplist) DecrRef() {
 		return
 	}
 	// Deallocate all nodes.
-	//	x := s.head
-	//	for x != nil {
-	//		next := x.getNext(0)
-	//		nodePool.Put(x)
-	//		x = next
-	//	}
+	y.Printf("=======> Deallocating skiplist\n")
+	x := s.head
+	for x != nil {
+		next := x.getNext(0)
+		nodePool.Put(x)
+		x = next
+	}
 }
 
 func (s *node) setValue(val unsafe.Pointer, meta byte) {
