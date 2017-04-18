@@ -67,10 +67,11 @@ type node struct {
 }
 
 type Skiplist struct {
-	height int32 // Current height. 1 <= height <= kMaxHeight. CAS.
-	head   *node
-	ref    int32
-	arena  *Arena
+	height    int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	head      *node
+	ref       int32
+	arena     *Arena
+	arenaPool *sync.Pool
 }
 
 var (
@@ -107,6 +108,7 @@ func (s *Skiplist) DecrRef() {
 		nodePools[len(x.next)].Put(x)
 		x = next
 	}
+	s.arenaPool.Put(s.arena)
 	s.arena = nil // Indicate we are closed. Good for testing.
 }
 
@@ -124,13 +126,15 @@ func newNode(arena *Arena, key, val []byte, meta byte, height int) *node {
 	}
 }
 
-func NewSkiplist(arena *Arena) *Skiplist {
+func NewSkiplist(arenaPool *sync.Pool) *Skiplist {
+	arena := arenaPool.Get().(*Arena)
 	head := newNode(arena, nil, nil, 0, kMaxHeight)
 	return &Skiplist{
-		height: 1,
-		head:   head,
-		arena:  arena,
-		ref:    1,
+		height:    1,
+		head:      head,
+		arena:     arena,
+		arenaPool: arenaPool,
+		ref:       1,
 	}
 }
 

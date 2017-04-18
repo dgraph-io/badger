@@ -29,6 +29,12 @@ import (
 	//	"github.com/dgraph-io/badger/y"
 )
 
+var arenaPool = &sync.Pool{
+	New: func() interface{} {
+		return NewArena(1 << 20)
+	},
+}
+
 func newValue(v int) []byte {
 	return []byte(fmt.Sprintf("%05d", v))
 }
@@ -46,8 +52,7 @@ func length(s *Skiplist) int {
 
 func TestEmpty(t *testing.T) {
 	key := []byte("aaa")
-	arena := NewArena(1 << 10)
-	l := NewSkiplist(arena)
+	l := NewSkiplist(arenaPool)
 
 	val, _ := l.Get(key)
 	require.True(t, val == nil) // Cannot use require.Nil for unsafe.Pointer nil.
@@ -81,8 +86,7 @@ func TestEmpty(t *testing.T) {
 
 // TestBasic tests single-threaded inserts and updates and gets.
 func TestBasic(t *testing.T) {
-	arena := NewArena(1 << 10)
-	l := NewSkiplist(arena)
+	l := NewSkiplist(arenaPool)
 	val1 := newValue(42)
 	val2 := newValue(52)
 	val3 := newValue(62)
@@ -121,8 +125,7 @@ func TestBasic(t *testing.T) {
 // TestConcurrentBasic tests concurrent writes followed by concurrent reads.
 func TestConcurrentBasic(t *testing.T) {
 	const n = 1000
-	arena := NewArena(1 << 20)
-	l := NewSkiplist(arena)
+	l := NewSkiplist(arenaPool)
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
@@ -150,8 +153,9 @@ func TestConcurrentBasic(t *testing.T) {
 func TestOneKey(t *testing.T) {
 	const n = 100
 	key := []byte("thekey")
-	arena := NewArena(1 << 20)
-	l := NewSkiplist(arena)
+	l := NewSkiplist(arenaPool)
+	defer l.DecrRef()
+
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
@@ -182,8 +186,8 @@ func TestOneKey(t *testing.T) {
 }
 
 func TestFindNear(t *testing.T) {
-	arena := NewArena(1 << 20)
-	l := NewSkiplist(arena)
+	l := NewSkiplist(arenaPool)
+	defer l.DecrRef()
 	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("%05d", i*10+5)
 		l.Put([]byte(key), newValue(i), 0)
@@ -191,11 +195,11 @@ func TestFindNear(t *testing.T) {
 
 	n, eq := l.findNear([]byte("00001"), false, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "00005", string(n.key(arena)))
+	require.EqualValues(t, "00005", string(n.key(l.arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("00001"), false, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "00005", string(n.key(arena)))
+	require.EqualValues(t, "00005", string(n.key(l.arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("00001"), true, false)
 	require.Nil(t, n)
@@ -206,52 +210,52 @@ func TestFindNear(t *testing.T) {
 
 	n, eq = l.findNear([]byte("00005"), false, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "00015", string(n.key(arena)))
+	require.EqualValues(t, "00015", string(n.key(l.arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("00005"), false, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "00005", string(n.key(arena)))
+	require.EqualValues(t, "00005", string(n.key(l.arena)))
 	require.True(t, eq)
 	n, eq = l.findNear([]byte("00005"), true, false)
 	require.Nil(t, n)
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("00005"), true, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "00005", string(n.key(arena)))
+	require.EqualValues(t, "00005", string(n.key(l.arena)))
 	require.True(t, eq)
 
 	n, eq = l.findNear([]byte("05555"), false, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05565", string(n.key(arena)))
+	require.EqualValues(t, "05565", string(n.key(l.arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("05555"), false, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05555", string(n.key(arena)))
+	require.EqualValues(t, "05555", string(n.key(l.arena)))
 	require.True(t, eq)
 	n, eq = l.findNear([]byte("05555"), true, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05545", string(n.key(arena)))
+	require.EqualValues(t, "05545", string(n.key(l.arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("05555"), true, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05555", string(n.key(arena)))
+	require.EqualValues(t, "05555", string(n.key(l.arena)))
 	require.True(t, eq)
 
 	n, eq = l.findNear([]byte("05558"), false, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05565", string(n.key(arena)))
+	require.EqualValues(t, "05565", string(n.key(l.arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("05558"), false, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05565", string(n.key(arena)))
+	require.EqualValues(t, "05565", string(n.key(l.arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("05558"), true, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05555", string(n.key(arena)))
+	require.EqualValues(t, "05555", string(n.key(l.arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("05558"), true, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05555", string(n.key(arena)))
+	require.EqualValues(t, "05555", string(n.key(l.arena)))
 	require.False(t, eq)
 
 	n, eq = l.findNear([]byte("09995"), false, false)
@@ -259,15 +263,15 @@ func TestFindNear(t *testing.T) {
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("09995"), false, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "09995", string(n.key(arena)))
+	require.EqualValues(t, "09995", string(n.key(l.arena)))
 	require.True(t, eq)
 	n, eq = l.findNear([]byte("09995"), true, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "09985", string(n.key(arena)))
+	require.EqualValues(t, "09985", string(n.key(l.arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("09995"), true, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "09995", string(n.key(arena)))
+	require.EqualValues(t, "09995", string(n.key(l.arena)))
 	require.True(t, eq)
 
 	n, eq = l.findNear([]byte("59995"), false, false)
@@ -278,20 +282,21 @@ func TestFindNear(t *testing.T) {
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("59995"), true, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "09995", string(n.key(arena)))
+	require.EqualValues(t, "09995", string(n.key(l.arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("59995"), true, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "09995", string(n.key(arena)))
+	require.EqualValues(t, "09995", string(n.key(l.arena)))
 	require.False(t, eq)
 }
 
 // TestIteratorNext tests a basic iteration over all nodes from the beginning.
 func TestIteratorNext(t *testing.T) {
 	const n = 100
-	arena := NewArena(1 << 20)
-	l := NewSkiplist(arena)
+	l := NewSkiplist(arenaPool)
+	defer l.DecrRef()
 	it := l.NewIterator()
+	defer it.Close()
 	require.False(t, it.Valid())
 	it.SeekToFirst()
 	require.False(t, it.Valid())
@@ -311,9 +316,10 @@ func TestIteratorNext(t *testing.T) {
 // TestIteratorPrev tests a basic iteration over all nodes from the end.
 func TestIteratorPrev(t *testing.T) {
 	const n = 100
-	arena := NewArena(1 << 20)
-	l := NewSkiplist(arena)
+	l := NewSkiplist(arenaPool)
+	defer l.DecrRef()
 	it := l.NewIterator()
+	defer it.Close()
 	require.False(t, it.Valid())
 	it.SeekToFirst()
 	require.False(t, it.Valid())
@@ -333,9 +339,12 @@ func TestIteratorPrev(t *testing.T) {
 // TestIteratorSeek tests Seek and SeekForPrev.
 func TestIteratorSeek(t *testing.T) {
 	const n = 100
-	arena := NewArena(1 << 20)
-	l := NewSkiplist(arena)
+	l := NewSkiplist(arenaPool)
+	defer l.DecrRef()
+
 	it := l.NewIterator()
+	defer it.Close()
+
 	require.False(t, it.Valid())
 	it.SeekToFirst()
 	require.False(t, it.Valid())
@@ -408,19 +417,19 @@ func BenchmarkReadWrite(b *testing.B) {
 	for i := 0; i <= 10; i++ {
 		readFrac := float32(i) / 10.0
 		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
-			arena := NewArena(b.N * 30)
-			list := NewSkiplist(arena)
+			l := NewSkiplist(arenaPool) // TODO: Fix this. Allow arena size to vary with b.N.
+			defer l.DecrRef()
 			b.ResetTimer()
 			var count int
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					if rand.Float32() < readFrac {
-						val, _ := list.Get(randomKey())
+						val, _ := l.Get(randomKey())
 						if val != nil {
 							count++
 						}
 					} else {
-						list.Put(randomKey(), value, 0)
+						l.Put(randomKey(), value, 0)
 					}
 				}
 			})

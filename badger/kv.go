@@ -33,10 +33,6 @@ var (
 	Head = []byte("/head/") // For storing value offset for replay.
 )
 
-const (
-	arenaSlack = 1 << 20
-)
-
 // Options are params for creating DB object.
 type Options struct {
 	Dir                     string
@@ -45,6 +41,7 @@ type Options struct {
 	LevelOneSize            int64 // Maximum total size for Level 1.
 	MaxLevels               int   // Maximum number of levels of compaction. May be made variable later.
 	MaxTableSize            int64 // Each table (or file) is at most this size.
+	MemtableSlack           int64 // Arena has to be slightly bigger than MaxTableSize.
 	LevelSizeMultiplier     int
 	ValueThreshold          int // If value size >= this threshold, we store value offsets in tables.
 	Verbose                 bool
@@ -66,6 +63,7 @@ var DefaultOptions = Options{
 	DoNotCompact:            false, // Only for testing.
 	MapTablesTo:             table.MemoryMap,
 	NumMemtables:            5,
+	MemtableSlack:           10 << 20,
 }
 
 type KV struct {
@@ -79,6 +77,7 @@ type KV struct {
 	lc        *levelsController
 	vlog      value.Log
 	vptr      value.Pointer
+	arenaPool *sync.Pool
 }
 
 type flushTask struct {
@@ -135,14 +134,18 @@ func (s *KV) flushMemtable() {
 // NewKV returns a new KV object. Compact levels are created as well.
 func NewKV(opt *Options) *KV {
 	y.AssertTrue(len(opt.Dir) > 0)
-	arena := skl.NewArena(opt.MaxTableSize + int64(arenaSlack)) //TODO
 	out := &KV{
-		mt:        skl.NewSkiplist(arena),
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan: make(chan flushTask, opt.NumMemtables),
 		flushDone: make(chan struct{}),
 		opt:       *opt, // Make a copy.
 	}
+	out.arenaPool = &sync.Pool{
+		New: func() interface{} {
+			return skl.NewArena(out.opt.MaxTableSize + out.opt.MemtableSlack)
+		},
+	}
+	out.mt = skl.NewSkiplist(out.arenaPool)
 
 	// newLevelsController potentially loads files in directory.
 	out.lc = newLevelsController(out)
@@ -329,8 +332,7 @@ func (s *KV) hasRoomForWrite() bool {
 		}
 		// We manage to push this task. Let's modify imm.
 		s.imm = append(s.imm, s.mt)
-		arena := skl.NewArena(s.opt.MaxTableSize + arenaSlack)
-		s.mt = skl.NewSkiplist(arena)
+		s.mt = skl.NewSkiplist(s.arenaPool)
 		// New memtable is empty. We certainly have room.
 		return true
 	default:

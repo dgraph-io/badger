@@ -35,6 +35,9 @@ func (s *Arena) Reset() {
 func (s *Arena) PutVal(val []byte, meta byte) uint32 {
 	l := uint32(len(val)) + 1
 	n := atomic.AddUint32(&s.n, l)
+	y.AssertTruef(int(n) <= len(s.buf),
+		"Arena too small, toWrite:%d newTotal:%d limit:%d",
+		l, n, len(s.buf))
 	m := n - l
 	s.buf[m] = meta
 	y.AssertTrue(len(val) == copy(s.buf[m+1:n], val))
@@ -44,6 +47,9 @@ func (s *Arena) PutVal(val []byte, meta byte) uint32 {
 func (s *Arena) PutKey(key []byte) uint32 {
 	l := uint32(len(key))
 	n := atomic.AddUint32(&s.n, l)
+	y.AssertTruef(int(n) <= len(s.buf),
+		"Arena too small, toWrite:%d newTotal:%d limit:%d",
+		l, n, len(s.buf))
 	m := n - l
 	y.AssertTrue(len(key) == copy(s.buf[m:n], key))
 	return m
