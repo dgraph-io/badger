@@ -20,22 +20,18 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"sync"
 	"testing"
-	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
 	//	"github.com/dgraph-io/badger/y"
 )
 
-func newValue(v int) unsafe.Pointer {
-	p := new(int)
-	*p = v
-	return unsafe.Pointer(p)
+func newValue(v int) []byte {
+	return []byte(fmt.Sprintf("%05d", v))
 }
-
-func getValue(p unsafe.Pointer) int { return *(*int)(p) }
 
 // length iterates over skiplist to give exact size.
 func length(s *Skiplist) int {
@@ -50,7 +46,9 @@ func length(s *Skiplist) int {
 
 func TestEmpty(t *testing.T) {
 	key := []byte("aaa")
-	l := NewSkiplist()
+	arena := NewArena(1 << 10)
+	l := NewSkiplist(arena)
+
 	val, _ := l.Get(key)
 	require.True(t, val == nil) // Cannot use require.Nil for unsafe.Pointer nil.
 
@@ -77,7 +75,8 @@ func TestEmpty(t *testing.T) {
 
 // TestBasic tests single-threaded inserts and updates and gets.
 func TestBasic(t *testing.T) {
-	l := NewSkiplist()
+	arena := NewArena(1 << 10)
+	l := NewSkiplist(arena)
 	val1 := newValue(42)
 	val2 := newValue(52)
 	val3 := newValue(62)
@@ -94,29 +93,30 @@ func TestBasic(t *testing.T) {
 
 	v, meta = l.Get([]byte("key1"))
 	require.True(t, v != nil)
-	require.EqualValues(t, 42, getValue(v))
+	require.EqualValues(t, "00042", string(v))
 	require.EqualValues(t, 55, meta)
 
 	v, meta = l.Get([]byte("key2"))
 	require.True(t, v != nil)
-	require.EqualValues(t, 52, getValue(v))
+	require.EqualValues(t, "00052", string(v))
 	require.EqualValues(t, 57, meta)
 
 	v, meta = l.Get([]byte("key3"))
 	require.True(t, v != nil)
-	require.EqualValues(t, 62, getValue(v))
+	require.EqualValues(t, "00062", string(v))
 	require.EqualValues(t, 56, meta)
 
 	l.Put([]byte("key2"), val4, 0)
 	v, _ = l.Get([]byte("key2"))
 	require.True(t, v != nil)
-	require.EqualValues(t, 72, getValue(v))
+	require.EqualValues(t, "00072", string(v))
 }
 
 // TestConcurrentBasic tests concurrent writes followed by concurrent reads.
 func TestConcurrentBasic(t *testing.T) {
 	const n = 1000
-	l := NewSkiplist()
+	arena := NewArena(1 << 20)
+	l := NewSkiplist(arena)
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
@@ -133,7 +133,7 @@ func TestConcurrentBasic(t *testing.T) {
 			defer wg.Done()
 			v, _ := l.Get([]byte(fmt.Sprintf("%05d", i)))
 			require.True(t, v != nil)
-			require.EqualValues(t, i, getValue(v))
+			require.EqualValues(t, newValue(i), v)
 		}(i)
 	}
 	wg.Wait()
@@ -144,7 +144,8 @@ func TestConcurrentBasic(t *testing.T) {
 func TestOneKey(t *testing.T) {
 	const n = 100
 	key := []byte("thekey")
-	l := NewSkiplist()
+	arena := NewArena(1 << 20)
+	l := NewSkiplist(arena)
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
@@ -164,7 +165,8 @@ func TestOneKey(t *testing.T) {
 				return
 			}
 			sawValue = true
-			v := getValue(p)
+			v, err := strconv.Atoi(string(p))
+			require.NoError(t, err)
 			require.True(t, 0 <= v && v < n)
 		}()
 	}
@@ -174,7 +176,8 @@ func TestOneKey(t *testing.T) {
 }
 
 func TestFindNear(t *testing.T) {
-	l := NewSkiplist()
+	arena := NewArena(1 << 20)
+	l := NewSkiplist(arena)
 	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("%05d", i*10+5)
 		l.Put([]byte(key), newValue(i), 0)
@@ -182,11 +185,11 @@ func TestFindNear(t *testing.T) {
 
 	n, eq := l.findNear([]byte("00001"), false, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "00005", string(n.key))
+	require.EqualValues(t, "00005", string(n.key(arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("00001"), false, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "00005", string(n.key))
+	require.EqualValues(t, "00005", string(n.key(arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("00001"), true, false)
 	require.Nil(t, n)
@@ -197,52 +200,52 @@ func TestFindNear(t *testing.T) {
 
 	n, eq = l.findNear([]byte("00005"), false, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "00015", string(n.key))
+	require.EqualValues(t, "00015", string(n.key(arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("00005"), false, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "00005", string(n.key))
+	require.EqualValues(t, "00005", string(n.key(arena)))
 	require.True(t, eq)
 	n, eq = l.findNear([]byte("00005"), true, false)
 	require.Nil(t, n)
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("00005"), true, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "00005", string(n.key))
+	require.EqualValues(t, "00005", string(n.key(arena)))
 	require.True(t, eq)
 
 	n, eq = l.findNear([]byte("05555"), false, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05565", string(n.key))
+	require.EqualValues(t, "05565", string(n.key(arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("05555"), false, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05555", string(n.key))
+	require.EqualValues(t, "05555", string(n.key(arena)))
 	require.True(t, eq)
 	n, eq = l.findNear([]byte("05555"), true, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05545", string(n.key))
+	require.EqualValues(t, "05545", string(n.key(arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("05555"), true, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05555", string(n.key))
+	require.EqualValues(t, "05555", string(n.key(arena)))
 	require.True(t, eq)
 
 	n, eq = l.findNear([]byte("05558"), false, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05565", string(n.key))
+	require.EqualValues(t, "05565", string(n.key(arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("05558"), false, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05565", string(n.key))
+	require.EqualValues(t, "05565", string(n.key(arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("05558"), true, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05555", string(n.key))
+	require.EqualValues(t, "05555", string(n.key(arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("05558"), true, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "05555", string(n.key))
+	require.EqualValues(t, "05555", string(n.key(arena)))
 	require.False(t, eq)
 
 	n, eq = l.findNear([]byte("09995"), false, false)
@@ -250,15 +253,15 @@ func TestFindNear(t *testing.T) {
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("09995"), false, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "09995", string(n.key))
+	require.EqualValues(t, "09995", string(n.key(arena)))
 	require.True(t, eq)
 	n, eq = l.findNear([]byte("09995"), true, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "09985", string(n.key))
+	require.EqualValues(t, "09985", string(n.key(arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("09995"), true, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "09995", string(n.key))
+	require.EqualValues(t, "09995", string(n.key(arena)))
 	require.True(t, eq)
 
 	n, eq = l.findNear([]byte("59995"), false, false)
@@ -269,18 +272,19 @@ func TestFindNear(t *testing.T) {
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("59995"), true, false)
 	require.NotNil(t, n)
-	require.EqualValues(t, "09995", string(n.key))
+	require.EqualValues(t, "09995", string(n.key(arena)))
 	require.False(t, eq)
 	n, eq = l.findNear([]byte("59995"), true, true)
 	require.NotNil(t, n)
-	require.EqualValues(t, "09995", string(n.key))
+	require.EqualValues(t, "09995", string(n.key(arena)))
 	require.False(t, eq)
 }
 
 // TestIteratorNext tests a basic iteration over all nodes from the beginning.
 func TestIteratorNext(t *testing.T) {
 	const n = 100
-	l := NewSkiplist()
+	arena := NewArena(1 << 20)
+	l := NewSkiplist(arena)
 	it := l.NewIterator()
 	require.False(t, it.Valid())
 	it.SeekToFirst()
@@ -292,7 +296,7 @@ func TestIteratorNext(t *testing.T) {
 	for i := 0; i < n; i++ {
 		require.True(t, it.Valid())
 		val, _ := it.Value()
-		require.EqualValues(t, i, getValue(val))
+		require.EqualValues(t, newValue(i), val)
 		it.Next()
 	}
 	require.False(t, it.Valid())
@@ -301,7 +305,8 @@ func TestIteratorNext(t *testing.T) {
 // TestIteratorPrev tests a basic iteration over all nodes from the end.
 func TestIteratorPrev(t *testing.T) {
 	const n = 100
-	l := NewSkiplist()
+	arena := NewArena(1 << 20)
+	l := NewSkiplist(arena)
 	it := l.NewIterator()
 	require.False(t, it.Valid())
 	it.SeekToFirst()
@@ -313,7 +318,7 @@ func TestIteratorPrev(t *testing.T) {
 	for i := n - 1; i >= 0; i-- {
 		require.True(t, it.Valid())
 		val, _ := it.Value()
-		require.EqualValues(t, i, getValue(val))
+		require.EqualValues(t, newValue(i), val)
 		it.Prev()
 	}
 	require.False(t, it.Valid())
@@ -322,7 +327,8 @@ func TestIteratorPrev(t *testing.T) {
 // TestIteratorSeek tests Seek and SeekForPrev.
 func TestIteratorSeek(t *testing.T) {
 	const n = 100
-	l := NewSkiplist()
+	arena := NewArena(1 << 20)
+	l := NewSkiplist(arena)
 	it := l.NewIterator()
 	require.False(t, it.Valid())
 	it.SeekToFirst()
@@ -335,22 +341,22 @@ func TestIteratorSeek(t *testing.T) {
 	it.Seek([]byte(""))
 	require.True(t, it.Valid())
 	val, _ := it.Value()
-	require.EqualValues(t, 1000, getValue(val))
+	require.EqualValues(t, "01000", val)
 
 	it.Seek([]byte("01000"))
 	require.True(t, it.Valid())
 	val, _ = it.Value()
-	require.EqualValues(t, 1000, getValue(val))
+	require.EqualValues(t, "01000", val)
 
 	it.Seek([]byte("01005"))
 	require.True(t, it.Valid())
 	val, _ = it.Value()
-	require.EqualValues(t, 1010, getValue(val))
+	require.EqualValues(t, "01010", val)
 
 	it.Seek([]byte("01010"))
 	require.True(t, it.Valid())
 	val, _ = it.Value()
-	require.EqualValues(t, 1010, getValue(val))
+	require.EqualValues(t, "01010", val)
 
 	it.Seek([]byte("99999"))
 	require.False(t, it.Valid())
@@ -362,22 +368,22 @@ func TestIteratorSeek(t *testing.T) {
 	it.SeekForPrev([]byte("01000"))
 	require.True(t, it.Valid())
 	val, _ = it.Value()
-	require.EqualValues(t, 1000, getValue(val))
+	require.EqualValues(t, "01000", val)
 
 	it.SeekForPrev([]byte("01005"))
 	require.True(t, it.Valid())
 	val, _ = it.Value()
-	require.EqualValues(t, 1000, getValue(val))
+	require.EqualValues(t, "01000", val)
 
 	it.SeekForPrev([]byte("01010"))
 	require.True(t, it.Valid())
 	val, _ = it.Value()
-	require.EqualValues(t, 1010, getValue(val))
+	require.EqualValues(t, "01010", val)
 
 	it.SeekForPrev([]byte("99999"))
 	require.True(t, it.Valid())
 	val, _ = it.Value()
-	require.EqualValues(t, 1990, getValue(val))
+	require.EqualValues(t, "01990", val)
 }
 
 func randomKey() []byte {
@@ -396,7 +402,8 @@ func BenchmarkReadWrite(b *testing.B) {
 	for i := 0; i <= 10; i++ {
 		readFrac := float32(i) / 10.0
 		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
-			list := NewSkiplist()
+			arena := NewArena(b.N * 30)
+			list := NewSkiplist(arena)
 			b.ResetTimer()
 			var count int
 			b.RunParallel(func(pb *testing.PB) {
@@ -422,7 +429,7 @@ func BenchmarkReadWriteMap(b *testing.B) {
 	for i := 0; i <= 10; i++ {
 		readFrac := float32(i) / 10.0
 		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
-			m := make(map[string]unsafe.Pointer)
+			m := make(map[string][]byte)
 			var mutex sync.RWMutex
 			b.ResetTimer()
 			var count int
