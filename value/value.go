@@ -42,7 +42,7 @@ import (
 const (
 	BitDelete             = 1 // Set if the key has been deleted.
 	BitValuePointer       = 2 // Set if the value is NOT stored directly next to key.
-	LogSize         int64 = 1 << 30
+	LogSize         int64 = 512 << 20
 )
 
 var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
@@ -51,6 +51,71 @@ type logFile struct {
 	fd     *os.File
 	fid    int32
 	offset int64
+}
+
+type LogEntry func(e Entry)
+
+// iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
+// Therefore, the kv pair is only valid for the duration of fn call.
+func (f *logFile) iterate(offset int64, fn LogEntry) error {
+	_, err := f.fd.Seek(offset, 0)
+	y.Check(err)
+
+	read := func(r *bufio.Reader, buf []byte) error {
+		for {
+			n, err := r.Read(buf)
+			if err != nil {
+				return err
+			}
+			if n == len(buf) {
+				return nil
+			}
+			buf = buf[n:]
+		}
+	}
+
+	reader := bufio.NewReader(f.fd)
+	hbuf := make([]byte, 8)
+	var h header
+	var count int
+	k := make([]byte, 1<<10)
+	v := make([]byte, 1<<20)
+	var e Entry
+	recordOffset := offset
+	for {
+		if err = read(reader, hbuf); err == io.EOF {
+			break
+		}
+		h.Decode(hbuf)
+		// fmt.Printf("[%d] Header read: %+v\n", count, h)
+
+		kl := int(h.klen)
+		vl := int(h.vlen)
+		if cap(k) < kl {
+			k = make([]byte, 2*kl)
+		}
+		if cap(v) < vl {
+			v = make([]byte, 2*vl)
+		}
+		e.Offset = recordOffset
+		e.Key = k[:kl]
+		e.Value = v[:vl]
+
+		if err = read(reader, e.Key); err != nil {
+			return err
+		}
+		if e.Meta, err = reader.ReadByte(); err != nil {
+			return err
+		}
+		if err = read(reader, e.Value); err != nil {
+			return err
+		}
+
+		fn(e)
+		count++
+		recordOffset += int64(8 + kl + vl + 1)
+	}
+	return nil
 }
 
 type Log struct {
@@ -66,9 +131,10 @@ type Log struct {
 }
 
 type Entry struct {
-	Key   []byte
-	Meta  byte
-	Value []byte
+	Key    []byte
+	Meta   byte
+	Value  []byte
+	Offset int64
 }
 
 type header struct {
@@ -181,73 +247,29 @@ func (l *Log) Close() {
 	l.elog.Finish()
 }
 
-func (l *Log) Replay(ptr Pointer, fn func(k, v []byte, meta byte)) {
+// Replay replays the value log. The kv provided is only valid for the lifetime of function call.
+func (l *Log) Replay(ptr Pointer, fn LogEntry) {
 	fid := int32(ptr.Fid)
 	offset := int64(ptr.Offset)
 	fmt.Printf("Seeking at value pointer: %+v\n", ptr)
 
-	read := func(r *bufio.Reader, buf []byte) error {
-		for {
-			n, err := r.Read(buf)
-			if err != nil {
-				return err
-			}
-			if n == len(buf) {
-				return nil
-			}
-			buf = buf[n:]
-		}
-	}
-
-	var count int
 	for _, f := range l.files {
 		if f.fid < fid {
 			continue
 		}
-		if f.fid == fid {
-			_, err := f.fd.Seek(offset, 0)
-			y.Check(err)
-		} else {
-			_, err := f.fd.Seek(0, 0)
-			y.Check(err)
+		of := offset
+		if f.fid > fid {
+			of = 0
 		}
-
-		reader := bufio.NewReader(f.fd)
-		hbuf := make([]byte, 8)
-		var h header
-		var count int
-		for {
-			if err := read(reader, hbuf); err == io.EOF {
-				break
-			}
-			h.Decode(hbuf)
-			// fmt.Printf("[%d] Header read: %+v\n", count, h)
-
-			k := make([]byte, h.klen)
-			v := make([]byte, h.vlen)
-
-			y.Check(read(reader, k))
-			meta, err := reader.ReadByte()
-			y.Check(err)
-			y.Check(read(reader, v))
-
-			fn(k, v, meta)
-			count++
-		}
+		err := f.iterate(of, fn)
+		y.Check(err)
 	}
-	fmt.Printf("Replayed %d KVs\n", count)
 
 	// Seek to the end to start writing.
 	var err error
 	last := &l.files[len(l.files)-1]
 	last.offset, err = last.fd.Seek(0, io.SeekEnd)
 	y.Checkf(err, "Unable to seek to the end")
-}
-
-var bufPool = sync.Pool{
-	New: func() interface{} {
-		return &bytes.Buffer{}
-	},
 }
 
 type block struct {
@@ -388,4 +410,41 @@ func (l *Log) Read(ctx context.Context, p Pointer) (e Entry, err error) {
 	buf = buf[h.klen+1:]
 	e.Value = buf[0:h.vlen]
 	return e, nil
+}
+
+func (l *Log) RunGC(getKey func(k []byte) ([]byte, byte)) {
+	var lf *logFile
+	l.RLock()
+	if len(l.files) <= 1 {
+		return
+	}
+	// This file shouldn't be being written to.
+	lf = &l.files[0]
+	l.RUnlock()
+
+	var discard, keep int
+	err := lf.iterate(0, func(e Entry) {
+		fmt.Printf("iterate. key: %s\n", e.Key)
+		vptr, meta := getKey(e.Key)
+		if (meta & BitValuePointer) == 0 {
+			discard++
+			fmt.Printf("got value stored along with key: %s\n", e.Key)
+		} else {
+			fmt.Printf("got vptr key: %s\n", e.Key)
+			y.AssertTrue(len(vptr) > 0)
+			var vp Pointer
+			vp.Decode(vptr)
+			if int32(vp.Fid) > lf.fid {
+				discard++
+			} else if int64(vp.Offset) > e.Offset {
+				discard++
+			} else if int32(vp.Fid) == lf.fid && int64(vp.Offset) == e.Offset {
+				keep++
+			} else {
+				y.Fatalf("This shouldn't happen. Entry:%+v Latest Pointer:%+v", e, vp)
+			}
+		}
+	})
+	y.Checkf(err, "While iterating for RunGC.")
+	fmt.Printf("Records to discard: %d. to keep: %d\n", discard, keep)
 }
