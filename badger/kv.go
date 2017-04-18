@@ -275,12 +275,12 @@ func (s *KV) Write(ctx context.Context, entries []value.Entry) error {
 	s.updateOffset(ptrs)
 
 	y.Trace(ctx, "Writing to memtable")
-	var offsetBuf [20]byte
 	for i, entry := range entries {
 		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
 			s.mt.Put(entry.Key, entry.Value, entry.Meta)
 		} else {
-			s.mt.Put(entry.Key, ptrs[i].Encode(offsetBuf[:]), entry.Meta|value.BitValuePointer)
+			offsetBuf := make([]byte, 16) // TODO: Move to arena.
+			s.mt.Put(entry.Key, ptrs[i].Encode(offsetBuf), entry.Meta|value.BitValuePointer)
 		}
 	}
 	y.Trace(ctx, "Wrote %d entries.", len(entries))
