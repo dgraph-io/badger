@@ -44,7 +44,7 @@ import (
 )
 
 const (
-	kMaxHeight      = 15
+	kMaxHeight      = 20
 	kHeightIncrease = math.MaxUint32 / 3
 )
 
@@ -66,24 +66,30 @@ type Skiplist struct {
 	ref    int32
 }
 
-var nodePool = sync.Pool{
-	New: func() interface{} {
-		return new(node)
-	},
+var (
+	nodePools []sync.Pool
+)
+
+func init() {
+	nodePools = make([]sync.Pool, kMaxHeight+1)
+	for i := 1; i <= kMaxHeight; i++ {
+		func(i int) { // Need a function here in order to capture variable i.
+			nodePools[i].New = func() interface{} {
+				return &node{
+					next: make([]unsafe.Pointer, i),
+				}
+			}
+		}(i)
+	}
 }
 
 func newNode(key []byte, value unsafe.Pointer, meta byte, height int) *node {
-	out := nodePool.Get().(*node)
+	out := nodePools[height].Get().(*node)
 	out.key = key
 	out.value = value
 	out.meta = uint32(meta)
-	if cap(out.next) < height {
-		out.next = make([]unsafe.Pointer, height)
-	} else {
-		out.next = out.next[:height]
-		for i := 0; i < height; i++ {
-			out.next[i] = nil
-		}
+	for i := 0; i < height; i++ {
+		out.next[i] = nil
 	}
 	return out
 }
@@ -111,7 +117,7 @@ func (s *Skiplist) DecrRef() {
 	x := s.head
 	for x != nil {
 		next := x.getNext(0)
-		nodePool.Put(x)
+		nodePools[len(x.next)].Put(x)
 		x = next
 	}
 }
