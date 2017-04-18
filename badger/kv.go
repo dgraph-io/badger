@@ -19,10 +19,11 @@ package badger
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
-	"github.com/dgraph-io/badger/mem"
+	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/value"
 	"github.com/dgraph-io/badger/y"
@@ -30,6 +31,10 @@ import (
 
 var (
 	Head = []byte("/head/") // For storing value offset for replay.
+)
+
+const (
+	arenaSlack = 1 << 20
 )
 
 // Options are params for creating DB object.
@@ -66,9 +71,9 @@ var DefaultOptions = Options{
 type KV struct {
 	sync.RWMutex // Guards imm, mem.
 
-	mt        *mem.Table
-	imm       []*mem.Table   // Add here only AFTER pushing to flushChan.
-	flushChan chan flushTask // For flushing memtables.
+	mt        *skl.Skiplist
+	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+	flushChan chan flushTask  // For flushing memtables.
 	flushDone chan struct{}
 	opt       Options
 	lc        *levelsController
@@ -77,7 +82,7 @@ type KV struct {
 }
 
 type flushTask struct {
-	mt   *mem.Table
+	mt   *skl.Skiplist
 	vptr value.Pointer
 }
 
@@ -110,7 +115,7 @@ func (s *KV) flushMemtable() {
 			fileID, _ := s.lc.reserveFileIDs(1)
 			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir))
 			y.Check(err)
-			y.Check(ft.mt.WriteLevel0Table(fd))
+			y.Check(writeLevel0Table(ft.mt, fd))
 			tbl, err := table.OpenTable(fd, s.opt.MapTablesTo)
 			defer tbl.DecrRef()
 			y.Check(err)
@@ -130,9 +135,10 @@ func (s *KV) flushMemtable() {
 // NewKV returns a new KV object. Compact levels are created as well.
 func NewKV(opt *Options) *KV {
 	y.AssertTrue(len(opt.Dir) > 0)
+	arena := skl.NewArena(opt.MaxTableSize + int64(arenaSlack)) //TODO
 	out := &KV{
-		mt:        mem.NewTable(),
-		imm:       make([]*mem.Table, 0, opt.NumMemtables),
+		mt:        skl.NewSkiplist(arena),
+		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan: make(chan flushTask, opt.NumMemtables),
 		flushDone: make(chan struct{}),
 		opt:       *opt, // Make a copy.
@@ -193,7 +199,7 @@ func (s *KV) Close() {
 	s.lc.close()
 }
 
-func (s *KV) getMemTables() (*mem.Table, []*mem.Table) {
+func (s *KV) getMemTables() (*skl.Skiplist, []*skl.Skiplist) {
 	s.RLock()
 	defer s.RUnlock()
 	return s.mt, s.imm
@@ -323,7 +329,8 @@ func (s *KV) hasRoomForWrite() bool {
 		}
 		// We manage to push this task. Let's modify imm.
 		s.imm = append(s.imm, s.mt)
-		s.mt = mem.NewTable()
+		arena := skl.NewArena(s.opt.MaxTableSize + arenaSlack)
+		s.mt = skl.NewSkiplist(arena)
 		// New memtable is empty. We certainly have room.
 		return true
 	default:
@@ -335,3 +342,20 @@ func (s *KV) hasRoomForWrite() bool {
 func (s *KV) Validate() { s.lc.validate() }
 
 func (s *KV) DebugPrintMore() { s.lc.debugPrintMore() }
+
+// WriteLevel0Table flushes memtable. It drops deleteValues.
+func writeLevel0Table(s *skl.Skiplist, f *os.File) error {
+	iter := s.NewIterator()
+	defer iter.Close()
+	b := table.NewTableBuilder()
+	defer b.Close()
+	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
+		val, meta := iter.Value()
+		if err := b.Add(iter.Key(), val, meta); err != nil {
+			return err
+		}
+	}
+	var buf [2]byte // Level 0. Leave it initialized as 0.
+	_, err := f.Write(b.Finish(buf[:]))
+	return err
+}

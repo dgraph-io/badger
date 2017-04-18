@@ -13,15 +13,15 @@ type Arena struct {
 }
 
 // NewArena returns a new arena.
-func NewArena(n int) *Arena {
+func NewArena(n int64) *Arena {
 	out := &Arena{
 		buf: make([]byte, n),
 	}
 	return out
 }
 
-func (s *Arena) Size() int {
-	return int(atomic.LoadUint32(&s.n))
+func (s *Arena) Size() int64 {
+	return int64(atomic.LoadUint32(&s.n))
 }
 
 func (s *Arena) Reset() {

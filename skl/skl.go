@@ -69,8 +69,48 @@ type node struct {
 type Skiplist struct {
 	height int32 // Current height. 1 <= height <= kMaxHeight. CAS.
 	head   *node
+	ref    int32
 	arena  *Arena
 }
+
+var (
+	nodePools []sync.Pool
+)
+
+func init() {
+	nodePools = make([]sync.Pool, kMaxHeight+1)
+	for i := 1; i <= kMaxHeight; i++ {
+		func(i int) { // Need a function here in order to capture variable i.
+			nodePools[i].New = func() interface{} {
+				return &node{
+					next: make([]unsafe.Pointer, i),
+				}
+			}
+		}(i)
+	}
+}
+
+func (s *Skiplist) IncrRef() {
+	atomic.AddInt32(&s.ref, 1)
+}
+
+func (s *Skiplist) DecrRef() {
+	newRef := atomic.AddInt32(&s.ref, -1)
+	if newRef > 0 {
+		return
+	}
+	// Deallocate all nodes.
+	y.Printf("=======> Deallocating skiplist\n")
+	x := s.head
+	for x != nil {
+		next := x.getNext(0)
+		nodePools[len(x.next)].Put(x)
+		x = next
+	}
+	s.arena = nil // Indicate we are closed. Good for testing.
+}
+
+func (s *Skiplist) Valid() bool { return s.arena != nil }
 
 func newNode(arena *Arena, key, val []byte, meta byte, height int) *node {
 	keyOffset := arena.PutKey(key)
@@ -90,6 +130,7 @@ func NewSkiplist(arena *Arena) *Skiplist {
 		height: 1,
 		head:   head,
 		arena:  arena,
+		ref:    1,
 	}
 }
 
@@ -322,7 +363,12 @@ func (s *Skiplist) Get(key []byte) ([]byte, byte) {
 	return s.arena.GetVal(valOffset, valSize)
 }
 
-func (s *Skiplist) NewIterator() *Iterator { return &Iterator{list: s} }
+func (s *Skiplist) NewIterator() *Iterator {
+	s.IncrRef()
+	return &Iterator{list: s}
+}
+
+func (s *Skiplist) Size() int64 { return s.arena.Size() }
 
 // Iterator is an iterator over skiplist object. For new objects, you just
 // need to initialize Iterator.list.
@@ -331,9 +377,8 @@ type Iterator struct {
 	n    *node
 }
 
-// Iterator returns a new iterator for our skiplist.
-func (s *Skiplist) Iterator() *Iterator {
-	return &Iterator{list: s}
+func (s *Iterator) Close() {
+	s.list.DecrRef()
 }
 
 // Valid returns true iff the iterator is positioned at a valid node.
@@ -383,3 +428,5 @@ func (s *Iterator) SeekToFirst() {
 func (s *Iterator) SeekToLast() {
 	s.n = s.list.findLast()
 }
+
+func (s *Iterator) Name() string { return "SkiplistIterator" }

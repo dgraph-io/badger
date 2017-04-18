@@ -71,6 +71,12 @@ func TestEmpty(t *testing.T) {
 
 	it.Seek(key)
 	require.False(t, it.Valid())
+
+	l.DecrRef()
+	require.True(t, l.Valid()) // Check the reference counting.
+
+	it.Close()
+	require.False(t, l.Valid()) // Check the reference counting.
 }
 
 // TestBasic tests single-threaded inserts and updates and gets.
