@@ -424,7 +424,7 @@ func (s *levelsController) doCompact(l int) error {
 			c.toDelete = append(c.toDelete, t.ID())
 			estSize += t.Size()
 		}
-		estNumTables := (estSize + s.kv.opt.MaxTableSize - 1) / s.kv.opt.MaxTableSize
+		estNumTables := 1 + (estSize+s.kv.opt.MaxTableSize-1)/s.kv.opt.MaxTableSize
 		newIDMin, newIDMax = s.reserveFileIDs(int(estNumTables))
 		// TODO: Consider storing just two numbers for toInsert.
 		for i := newIDMin; i < newIDMax; i++ {

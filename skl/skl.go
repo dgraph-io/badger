@@ -71,7 +71,7 @@ type Skiplist struct {
 	head      *node
 	ref       int32
 	arena     *Arena
-	arenaPool *sync.Pool
+	arenaPool *ArenaPool
 }
 
 var (
@@ -126,8 +126,8 @@ func newNode(arena *Arena, key, val []byte, meta byte, height int) *node {
 	}
 }
 
-func NewSkiplist(arenaPool *sync.Pool) *Skiplist {
-	arena := arenaPool.Get().(*Arena)
+func NewSkiplist(arenaPool *ArenaPool) *Skiplist {
+	arena := arenaPool.Get()
 	head := newNode(arena, nil, nil, 0, kMaxHeight)
 	return &Skiplist{
 		height:    1,

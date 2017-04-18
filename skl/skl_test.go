@@ -29,11 +29,7 @@ import (
 	//	"github.com/dgraph-io/badger/y"
 )
 
-var arenaPool = &sync.Pool{
-	New: func() interface{} {
-		return NewArena(1 << 20)
-	},
-}
+var arenaPool = NewArenaPool(1<<20, 3)
 
 func newValue(v int) []byte {
 	return []byte(fmt.Sprintf("%05d", v))

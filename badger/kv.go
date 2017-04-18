@@ -77,7 +77,7 @@ type KV struct {
 	lc        *levelsController
 	vlog      value.Log
 	vptr      value.Pointer
-	arenaPool *sync.Pool
+	arenaPool *skl.ArenaPool
 }
 
 type flushTask struct {
@@ -139,11 +139,7 @@ func NewKV(opt *Options) *KV {
 		flushChan: make(chan flushTask, opt.NumMemtables),
 		flushDone: make(chan struct{}),
 		opt:       *opt, // Make a copy.
-	}
-	out.arenaPool = &sync.Pool{
-		New: func() interface{} {
-			return skl.NewArena(out.opt.MaxTableSize + out.opt.MemtableSlack)
-		},
+		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MemtableSlack, opt.NumMemtables+5),
 	}
 	out.mt = skl.NewSkiplist(out.arenaPool)
 
