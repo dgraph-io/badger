@@ -152,12 +152,16 @@ func NewKV(opt *Options) *KV {
 	}
 
 	first := true
-	fn := func(k, v []byte, meta byte) {
+	fn := func(e value.Entry) {
 		if first {
-			fmt.Printf("key=%s\n", k)
+			fmt.Printf("key=%s\n", e.Key)
 		}
 		first = false
-		out.mt.Put(k, v, meta)
+		nk := make([]byte, len(e.Key))
+		copy(nk, e.Key)
+		nv := make([]byte, len(e.Value))
+		copy(nv, e.Value)
+		out.mt.Put(nk, nv, e.Meta)
 	}
 	out.vlog.Replay(vptr, fn)
 	return out
@@ -272,12 +276,12 @@ func (s *KV) Write(ctx context.Context, entries []value.Entry) error {
 	s.updateOffset(ptrs)
 
 	y.Trace(ctx, "Writing to memtable")
-	var offsetBuf [20]byte
 	for i, entry := range entries {
 		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
 			s.mt.Put(entry.Key, entry.Value, entry.Meta)
 		} else {
-			s.mt.Put(entry.Key, ptrs[i].Encode(offsetBuf[:]), entry.Meta|value.BitValuePointer)
+			offsetBuf := make([]byte, 16) // TODO: Move to arena.
+			s.mt.Put(entry.Key, ptrs[i].Encode(offsetBuf), entry.Meta|value.BitValuePointer)
 		}
 	}
 	y.Trace(ctx, "Wrote %d entries.", len(entries))

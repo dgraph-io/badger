@@ -152,12 +152,19 @@ func TestGetMore(t *testing.T) {
 
 	//	n := 500000
 	n := 10000
-	for i := 0; i < n; i++ {
+	m := 100
+	for i := 0; i < n; i += m {
 		if (i % 10000) == 0 {
 			fmt.Printf("Putting i=%d\n", i)
 		}
-		k := []byte(fmt.Sprintf("%09d", i))
-		require.NoError(t, db.Put(ctx, k, k))
+		var entries []value.Entry
+		for j := i; j < i+m && j < n; j++ {
+			entries = append(entries, value.Entry{
+				Key:   []byte(fmt.Sprintf("%09d", j)),
+				Value: []byte(fmt.Sprintf("%09d", j)),
+			})
+		}
+		require.NoError(t, db.Write(ctx, entries))
 	}
 	db.Validate()
 	for i := 0; i < n; i++ {
@@ -169,13 +176,19 @@ func TestGetMore(t *testing.T) {
 	}
 
 	// Overwrite value.
-	for i := n - 1; i >= 0; i-- {
+	for i := n - 1; i >= 0; i -= m {
 		if (i % 10000) == 0 {
 			fmt.Printf("Overwriting i=%d\n", i)
 		}
-		k := []byte(fmt.Sprintf("%09d", i))
-		v := []byte(fmt.Sprintf("val%09d", i))
-		require.NoError(t, db.Put(ctx, k, v))
+		var entries []value.Entry
+		for j := i; j > i-m && j >= 0; j-- {
+			entries = append(entries, value.Entry{
+				Key: []byte(fmt.Sprintf("%09d", j)),
+				// Use a long value that will certainly exceed value threshold.
+				Value: []byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", j)),
+			})
+		}
+		require.NoError(t, db.Write(ctx, entries))
 	}
 	db.Validate()
 	for i := 0; i < n; i++ {
@@ -183,17 +196,23 @@ func TestGetMore(t *testing.T) {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := []byte(fmt.Sprintf("%09d", i))
-		expectedValue := fmt.Sprintf("val%09d", i)
+		expectedValue := fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", i)
 		require.EqualValues(t, expectedValue, string(db.Get(ctx, k)))
 	}
 
 	// "Delete" key.
-	for i := 0; i < n; i++ {
+	for i := 0; i < n; i += m {
 		if (i % 10000) == 0 {
 			fmt.Printf("Deleting i=%d\n", i)
 		}
-		k := []byte(fmt.Sprintf("%09d", i))
-		require.NoError(t, db.Delete(ctx, k))
+		var entries []value.Entry
+		for j := i; j < i+m && j < n; j++ {
+			entries = append(entries, value.Entry{
+				Key:  []byte(fmt.Sprintf("%09d", j)),
+				Meta: value.BitDelete,
+			})
+		}
+		require.NoError(t, db.Write(ctx, entries))
 	}
 	db.Validate()
 	for i := 0; i < n; i++ {
