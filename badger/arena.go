@@ -1,4 +1,4 @@
-//package badger
+package badger
 
 //import (
 //	"sync"
