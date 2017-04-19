@@ -42,12 +42,8 @@ func (aos *compressedAoS) lookupAoS(idx int, length int) []byte {
 		foundIdx := sort.Search(len(aos.charIndexes), func(id int) bool {
 			return aos.charIndexes[id] >= idx1
 		})
-		if foundIdx == len(aos.charIndexes) { // idx1 not found
-			foundIdx = foundIdx - 1
-		}
-
 		// If there is no idx1 in charIndexes, we want it's lower bound.
-		if aos.charIndexes[foundIdx] > idx1 {
+		if foundIdx == len(aos.charIndexes) || aos.charIndexes[foundIdx] > idx1 {
 			foundIdx = foundIdx - 1
 		}
 
