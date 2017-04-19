@@ -115,10 +115,10 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	t.tableSize = int(fileInfo.Size())
 
 	if mapTableTo == MemoryMap {
-		//		t.mmap, err = syscall.Mmap(int(fd.Fd()), 0, int(fileInfo.Size()),
-		//			syscall.PROT_READ, syscall.MAP_PRIVATE|syscall.MAP_POPULATE)
 		t.mmap, err = syscall.Mmap(int(fd.Fd()), 0, int(fileInfo.Size()),
-			syscall.PROT_READ, syscall.MAP_PRIVATE)
+			syscall.PROT_READ, syscall.MAP_PRIVATE|syscall.MAP_POPULATE)
+		//		t.mmap, err = syscall.Mmap(int(fd.Fd()), 0, int(fileInfo.Size()),
+		//			syscall.PROT_READ, syscall.MAP_PRIVATE)
 		if err != nil {
 			y.Fatalf("Unable to map file: %v", err)
 		}
