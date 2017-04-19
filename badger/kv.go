@@ -265,7 +265,7 @@ func (s *KV) updateOffset(ptrs []value.Pointer) {
 }
 
 // Write applies a list of value.Entry to our memtable.
-func (s *KV) Write(ctx context.Context, entries []value.Entry) error {
+func (s *KV) Write(ctx context.Context, entries []*value.Entry) error {
 	y.Trace(ctx, "Making room for writes")
 	for !s.hasRoomForWrite() {
 		// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
@@ -280,12 +280,12 @@ func (s *KV) Write(ctx context.Context, entries []value.Entry) error {
 	y.AssertTrue(len(ptrs) == len(entries))
 	s.updateOffset(ptrs)
 
+	offsetBuf := make([]byte, 16)
 	y.Trace(ctx, "Writing to memtable")
 	for i, entry := range entries {
 		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
 			s.mt.Put(entry.Key, entry.Value, entry.Meta)
 		} else {
-			offsetBuf := make([]byte, 16) // TODO: Move to arena.
 			s.mt.Put(entry.Key, ptrs[i].Encode(offsetBuf), entry.Meta|value.BitValuePointer)
 		}
 	}
@@ -295,22 +295,21 @@ func (s *KV) Write(ctx context.Context, entries []value.Entry) error {
 
 // Put puts a key-val pair.
 func (s *KV) Put(ctx context.Context, key []byte, val []byte) error {
-	return s.Write(ctx, []value.Entry{
-		{
-			Key:   key,
-			Value: val,
-		},
-	})
+	e := &value.Entry{
+		Key:   key,
+		Value: val,
+	}
+
+	return s.Write(ctx, []*value.Entry{e})
 }
 
 // Delete deletes a key.
 func (s *KV) Delete(ctx context.Context, key []byte) error {
-	return s.Write(ctx, []value.Entry{
-		{
-			Key:  key,
-			Meta: value.BitDelete,
-		},
-	})
+	e := &value.Entry{
+		Key:  key,
+		Meta: value.BitDelete,
+	}
+	return s.Write(ctx, []*value.Entry{e})
 }
 
 func (s *KV) hasRoomForWrite() bool {

@@ -42,7 +42,7 @@ import (
 const (
 	BitDelete             = 1 // Set if the key has been deleted.
 	BitValuePointer       = 2 // Set if the value is NOT stored directly next to key.
-	LogSize         int64 = 512 << 20
+	LogSize         int64 = 1 << 30
 	bufSize         int   = 4 << 20
 )
 
@@ -143,11 +143,10 @@ type header struct {
 	vlen uint32
 }
 
-func (h header) Encode() []byte {
-	b := make([]byte, 4+4)
-	binary.BigEndian.PutUint32(b[0:4], h.klen)
-	binary.BigEndian.PutUint32(b[4:8], h.vlen)
-	return b
+func (h header) Encode(out []byte) {
+	y.AssertTrue(len(out) >= 8)
+	binary.BigEndian.PutUint32(out[0:4], h.klen)
+	binary.BigEndian.PutUint32(out[4:8], h.vlen)
 }
 
 func (h *header) Decode(buf []byte) []byte {
@@ -273,10 +272,16 @@ func (l *Log) Replay(ptr Pointer, fn LogEntry) {
 	y.Checkf(err, "Unable to seek to the end")
 }
 
+var blockPool = sync.Pool{
+	New: func() interface{} {
+		return new(block)
+	},
+}
+
 type block struct {
-	entries []Entry
+	entries []*Entry
 	ptrs    []Pointer
-	wg      *sync.WaitGroup
+	wg      sync.WaitGroup
 }
 
 func (l *Log) writeToDisk() {
@@ -304,23 +309,27 @@ func (l *Log) writeToDisk() {
 
 	write := func() {
 		l.elog.Printf("Buffering %d blocks", len(blocks))
+
+		var h header
+		headerEnc := make([]byte, 8)
+
 		for i := range blocks {
 			b := blocks[i]
+			b.ptrs = b.ptrs[:0]
 			for j := range b.entries {
 				e := b.entries[j]
 
-				var h header
 				h.klen = uint32(len(e.Key))
 				h.vlen = uint32(len(e.Value))
-				header := h.Encode()
+				h.Encode(headerEnc)
 
 				var p Pointer
 				p.Fid = uint32(curlf.fid)
-				p.Len = uint32(len(header)) + h.klen + h.vlen + 1
+				p.Len = uint32(len(headerEnc)) + h.klen + h.vlen + 1
 				p.Offset = uint64(curlf.offset) + uint64(buf.Len())
 				b.ptrs = append(b.ptrs, p)
 
-				buf.Write(header)
+				buf.Write(headerEnc)
 				buf.Write(e.Key)
 				buf.WriteByte(e.Meta)
 				buf.Write(e.Value)
@@ -360,7 +369,6 @@ func (l *Log) writeToDisk() {
 			b := blocks[i]
 			b.wg.Done()
 		}
-		blocks = blocks[:0]
 	}
 
 LOOP:
@@ -379,19 +387,21 @@ LOOP:
 				break
 			}
 			write()
+			blocks = blocks[:0]
 		}
 	}
 	l.done.Done()
 }
 
 // Write batches the write of an array of entries to value log.
-func (l *Log) Write(entries []Entry) ([]Pointer, error) {
-	b := new(block)
+func (l *Log) Write(entries []*Entry) ([]Pointer, error) {
+	b := blockPool.Get().(*block)
 	b.entries = entries
-	b.wg = new(sync.WaitGroup)
+	b.wg = sync.WaitGroup{}
 	b.wg.Add(1)
 	l.bch <- b
 	b.wg.Wait()
+	defer blockPool.Put(b)
 	return b.ptrs, nil
 }
 
