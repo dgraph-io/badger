@@ -292,11 +292,11 @@ func (l *Log) writeToDisk() {
 	blocks := make([]*block, 0, 1000)
 	curlf := &l.files[len(l.files)-1]
 
-	toDisk := func() {
+	toDisk := func(force bool) {
 		if buf.Len() == 0 {
 			return
 		}
-		if buf.Len() > bufSize {
+		if force || buf.Len() > bufSize {
 			l.elog.Printf("Flushing buffer of size: %d", buf.Len())
 			n, err := curlf.fd.Write(buf.Bytes())
 			if err != nil {
@@ -333,24 +333,20 @@ func (l *Log) writeToDisk() {
 				buf.Write(e.Key)
 				buf.WriteByte(e.Meta)
 				buf.Write(e.Value)
-				toDisk()
+				toDisk(false)
 			}
 		}
-		toDisk()
+		toDisk(true)
 		y.Check(curlf.fd.Sync())
 
-		n, err := curlf.fd.Write(buf.Bytes())
-		if err != nil {
-			y.Fatalf("Unable to write to value log: %v", err)
+		for i := range blocks {
+			b := blocks[i]
+			b.wg.Done()
 		}
-		buf.Reset()
-
-		l.elog.Printf("Wrote %d bytes to disk", n)
-		curlf.offset += int64(n)
-
 		// Acquire mutex locks around this manipulation, so that the reads don't try to use
 		// an invalid file descriptor.
 		if curlf.offset > LogSize {
+			var err error
 			l.Lock()
 			y.Check(curlf.fd.Close())
 			curlf.fd, err = os.OpenFile(l.fpath(curlf.fid), os.O_RDONLY, 0666)
@@ -363,11 +359,6 @@ func (l *Log) writeToDisk() {
 
 			curlf = &newlf
 			l.Unlock()
-		}
-
-		for i := range blocks {
-			b := blocks[i]
-			b.wg.Done()
 		}
 	}
 

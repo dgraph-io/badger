@@ -38,13 +38,12 @@ func TestBasic(t *testing.T) {
 	log.Open(dir, "vlog")
 	defer log.Close()
 
-	ptrs, err := log.Write([]Entry{
-		{
-			Key:   []byte("samplekey"),
-			Value: []byte("sampleval"),
-			Meta:  123,
-		},
-	})
+	entry := &Entry{
+		Key:   []byte("samplekey"),
+		Value: []byte("sampleval"),
+		Meta:  123,
+	}
+	ptrs, err := log.Write([]*Entry{entry})
 	require.NoError(t, err)
 	require.Len(t, ptrs, 1)
 	fmt.Printf("Pointer written: %+v", ptrs[0])
@@ -80,13 +79,13 @@ func BenchmarkReadWrite(b *testing.B) {
 				b.ResetTimer()
 
 				b.RunParallel(func(pb *testing.PB) {
-					var e Entry
+					e := new(Entry)
 					e.Key = make([]byte, 16)
 					e.Value = make([]byte, vsz)
 
 					var ptrs []Pointer
 
-					pt, err := vl.Write([]Entry{e})
+					pt, err := vl.Write([]*Entry{e})
 					if err != nil {
 						b.Fatalf("Benchmark Write: ", err)
 					}
@@ -95,7 +94,7 @@ func BenchmarkReadWrite(b *testing.B) {
 					for pb.Next() {
 						f := rand.Float32()
 						if f < rw {
-							pt, err := vl.Write([]Entry{e})
+							pt, err := vl.Write([]*Entry{e})
 							if err != nil {
 								b.Fatalf("Benchmark Write: ", err)
 							}

@@ -43,8 +43,9 @@ func main() {
 
 	// Keep writing random keys.
 	val := make([]byte, 10)
-	entries := make([]value.Entry, 1000)
+	entries := make([]*value.Entry, 1000)
 	for i := 0; i < len(entries); i++ {
+		entries[i] = new(value.Entry)
 		entries[i].Value = val
 	}
 
