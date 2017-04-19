@@ -42,7 +42,6 @@ func (aos *compressedAoS) lookupAoS(idx int, length int) []byte {
 		foundIdx := sort.Search(len(aos.charIndexes), func(id int) bool {
 			return aos.charIndexes[id] >= idx1
 		})
-
 		if foundIdx == len(aos.charIndexes) { // idx1 not found
 			foundIdx = foundIdx - 1
 		}
@@ -84,19 +83,17 @@ func (store *SuccinctStore) Search(str []byte) []int {
 	firstOccurence := sort.Search(length, func(id int) bool {
 		return bytes.Compare(store.aos.lookupAoS(id, len(str)), str) >= 0
 	})
-
 	if firstOccurence == length {
 		return make([]int, 0)
 	}
 
-	afterLastOccurence := sort.Search(length, func(id int) bool {
-		return bytes.Compare(store.aos.lookupAoS(id, len(str)), str) > 0
+	resultLength := sort.Search(length-firstOccurence, func(id int) bool {
+		return bytes.Compare(store.aos.lookupAoS(id+firstOccurence, len(str)), str) > 0
 	})
 
-	resultLength := afterLastOccurence - firstOccurence
-	res := make([]int, resultLength)
-	for i := firstOccurence; i < afterLastOccurence; i++ {
-		res[i-firstOccurence] = store.aoS2Input[i]
+	occurences := make([]int, resultLength)
+	for i := firstOccurence; i < firstOccurence+resultLength; i++ {
+		occurences[i-firstOccurence] = store.aoS2Input[i]
 	}
-	return res
+	return occurences
 }
