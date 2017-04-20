@@ -43,7 +43,6 @@ const (
 	BitDelete             = 1 // Set if the key has been deleted.
 	BitValuePointer       = 2 // Set if the value is NOT stored directly next to key.
 	LogSize         int64 = 1 << 30
-	bufSize         int   = 4 << 20
 )
 
 var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
@@ -210,7 +209,8 @@ func (l *Log) openOrCreateFiles() {
 	for i := range l.files {
 		lf := &l.files[i]
 		if i == len(l.files)-1 {
-			lf.fd, err = os.OpenFile(l.fpath(lf.fid), os.O_RDWR|os.O_CREATE, 0666)
+			lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid))
+			// lf.fd, err = os.OpenFile(l.fpath(lf.fid), os.O_RDWR|os.O_CREATE, 0666)
 			y.Check(err)
 		} else {
 			lf.fd, err = os.OpenFile(l.fpath(lf.fid), os.O_RDONLY, 0666)
@@ -287,29 +287,25 @@ type block struct {
 func (l *Log) writeToDisk() {
 	l.elog.Printf("Starting write to disk routine")
 	buf := new(bytes.Buffer)
-	buf.Grow(2 * bufSize)
 
 	blocks := make([]*block, 0, 1000)
 	curlf := &l.files[len(l.files)-1]
 
-	toDisk := func(force bool) {
+	toDisk := func() {
 		if buf.Len() == 0 {
 			return
 		}
-		if force || buf.Len() > bufSize {
-			l.elog.Printf("Flushing buffer of size: %d", buf.Len())
-			n, err := curlf.fd.Write(buf.Bytes())
-			if err != nil {
-				y.Fatalf("Unable to write to value log: %v", err)
-			}
-			curlf.offset += int64(n)
-			buf.Reset()
+		l.elog.Printf("Flushing %d blocks of total size: %d", len(blocks), buf.Len())
+		n, err := curlf.fd.Write(buf.Bytes())
+		if err != nil {
+			y.Fatalf("Unable to write to value log: %v", err)
 		}
+		l.elog.Printf("Done")
+		curlf.offset += int64(n)
+		buf.Reset()
 	}
 
 	write := func() {
-		l.elog.Printf("Buffering %d blocks", len(blocks))
-
 		var h header
 		headerEnc := make([]byte, 8)
 
@@ -333,11 +329,10 @@ func (l *Log) writeToDisk() {
 				buf.Write(e.Key)
 				buf.WriteByte(e.Meta)
 				buf.Write(e.Value)
-				toDisk(false)
 			}
 		}
-		toDisk(true)
-		y.Check(curlf.fd.Sync())
+		toDisk()
+		// y.Check(curlf.fd.Sync())
 
 		for i := range blocks {
 			b := blocks[i]
