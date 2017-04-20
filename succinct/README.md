@@ -47,7 +47,7 @@ First, we observe that we need only the first char for each suffix. If we want t
 
 Second, now we look at the first chars we have in the suffix array. The array is sorted by the first char, so it has many duplicates like in `[a, a, a, b, b, n]`. So instead of keeping the whole array we just need to track on which position the next letter begins. More precisely, we store this information as 2 arrays: one contains sorted alphabet (called `characters`) and the second one at the position `i` contains the index where char `characters[i]` begins in the suffix array.
 
-## Compressing `AoS2Input`
+## Compressing `AoS2Input` & `Input2AoS`
 
 **Note 1** We can represent a permutation either by target positions or an order.
 
@@ -69,6 +69,10 @@ So, as long as we have `NextCharIdx`, we can store only some values in the `AoS2
 The easiest way to compress `AoS2Input` is by using every `k`-th value. This is good, but Succinct does a bit better. It stores only `k`-th value, but chooses the values to store not by index but by value. So stores only values that are a multiple of `k`. As a result they need lower number of bits for each value, because they substitute each value `v` with `v/k`.
 
 Note: `k` is called `α` in the paper.
+
+### Adding `Input2AoS`
+
+First, we observe that `Input2AoS` is an inverse of `AoS2Input`. We will use this fact to compress `Input2AoS`.
 
 ## Compressing `NextCharIdx`
 
