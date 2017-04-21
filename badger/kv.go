@@ -169,6 +169,8 @@ func NewKV(opt *Options) *KV {
 		out.mt.Put(nk, nv, e.Meta)
 	}
 	out.vlog.Replay(vptr, fn)
+
+	go out.gcValues()
 	return out
 }
 
@@ -198,10 +200,16 @@ func (s *KV) Close() {
 	s.lc.close()
 }
 
-func (s *KV) getMemTables() (*skl.Skiplist, []*skl.Skiplist) {
+func (s *KV) getMemTables() []*skl.Skiplist {
 	s.RLock()
 	defer s.RUnlock()
-	return s.mt, s.imm
+	tables := make([]*skl.Skiplist, len(s.imm)+1)
+	tables[0] = s.mt
+	last := len(s.imm) - 1
+	for i := range s.imm {
+		tables[i+1] = s.imm[last-i]
+	}
+	return tables
 }
 
 func (s *KV) decodeValue(ctx context.Context, val []byte, meta byte) []byte {
@@ -229,15 +237,9 @@ func (s *KV) decodeValue(ctx context.Context, val []byte, meta byte) []byte {
 // Note that value will include meta byte.
 func (s *KV) get(ctx context.Context, key []byte) ([]byte, byte) {
 	y.Trace(ctx, "Retrieving key from memtables")
-	mem, imm := s.getMemTables() // Lock should be released.
-	if mem != nil {
-		v, meta := mem.Get(key)
-		if meta != 0 || v != nil {
-			return v, meta
-		}
-	}
-	for i := len(imm) - 1; i >= 0; i-- {
-		v, meta := imm[i].Get(key)
+	tables := s.getMemTables() // Lock should be released.
+	for i := 0; i < len(tables); i++ {
+		v, meta := tables[i].Get(key)
 		if meta != 0 || v != nil {
 			return v, meta
 		}
@@ -339,6 +341,17 @@ func (s *KV) hasRoomForWrite() bool {
 func (s *KV) Validate() { s.lc.validate() }
 
 func (s *KV) DebugPrintMore() { s.lc.debugPrintMore() }
+
+func (s *KV) gcValues() {
+	ctx := context.Background()
+	tick := time.NewTicker(10 * time.Second)
+	for range tick.C {
+		fmt.Println("Starting vlog runGC")
+		s.vlog.RunGC(func(k []byte) ([]byte, byte) {
+			return s.get(ctx, k)
+		})
+	}
+}
 
 // WriteLevel0Table flushes memtable. It drops deleteValues.
 func writeLevel0Table(s *skl.Skiplist, f *os.File) error {

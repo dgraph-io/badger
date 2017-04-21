@@ -137,6 +137,11 @@ type Entry struct {
 	Offset int64
 }
 
+func (e Entry) print(prefix string) {
+	fmt.Printf("%s Key: %s Meta: %d Offset: %d len(val)=%d\n",
+		prefix, e.Key, e.Meta, e.Offset, len(e.Value))
+}
+
 type header struct {
 	klen uint32
 	vlen uint32
@@ -431,35 +436,66 @@ func (l *Log) RunGC(getKey func(k []byte) ([]byte, byte)) {
 	var lf *logFile
 	l.RLock()
 	if len(l.files) <= 1 {
+		fmt.Println("Need at least 2 value log files to run GC.")
+		l.RUnlock()
 		return
 	}
 	// This file shouldn't be being written to.
 	lf = &l.files[0]
 	l.RUnlock()
 
-	var discard, keep int
+	reason := make(map[string]int)
 	err := lf.iterate(0, func(e Entry) {
 		fmt.Printf("iterate. key: %s\n", e.Key)
+		esz := len(e.Key) + len(e.Value) + 1
 		vptr, meta := getKey(e.Key)
-		if (meta & BitValuePointer) == 0 {
-			discard++
-			fmt.Printf("got value stored along with key: %s\n", e.Key)
+
+		if (meta & BitDelete) > 0 {
+			// Key has been deleted. Discard.
+			reason["discard"] += esz
+			reason["discard-deleted"] += esz
+
+		} else if (meta & BitValuePointer) == 0 {
+			// Value is stored alongside key. Discard.
+			reason["discard"] += esz
+			reason["discard-value-alongside"] += esz
+
 		} else {
-			fmt.Printf("got vptr key: %s\n", e.Key)
+			// Value is still present in value log.
 			y.AssertTrue(len(vptr) > 0)
 			var vp Pointer
 			vp.Decode(vptr)
+
 			if int32(vp.Fid) > lf.fid {
-				discard++
+				// Value is present in a later log. Discard.
+				reason["discard"] += esz
+				reason["discard-new-value-higher-fid"] += esz
+
 			} else if int64(vp.Offset) > e.Offset {
-				discard++
+				// Value is present in a later offset, but in the same log.
+				reason["discard"] += esz
+				reason["discard-new-value-higher-offset"] += esz
+
 			} else if int32(vp.Fid) == lf.fid && int64(vp.Offset) == e.Offset {
-				keep++
+				// This is still the active entry. This would need to be rewritten.
+				reason["keep"] += esz
+
 			} else {
-				y.Fatalf("This shouldn't happen. Entry:%+v Latest Pointer:%+v", e, vp)
+				for k, v := range reason {
+					fmt.Printf("%s = %d\n", k, v)
+				}
+				ne, err := l.Read(context.Background(), vp)
+				y.Check(err)
+				ne.Offset = int64(vp.Offset)
+				ne.print("Latest Entry in LSM")
+				e.print("Latest Entry in Log")
+				y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, meta)
 			}
 		}
 	})
 	y.Checkf(err, "While iterating for RunGC.")
-	fmt.Printf("Records to discard: %d. to keep: %d\n", discard, keep)
+	for k, v := range reason {
+		fmt.Printf("%s = %d\n", k, v)
+	}
+	fmt.Printf("Keep: %d. Discard: %d\n", reason["keep"], reason["discard"])
 }

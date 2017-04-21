@@ -167,13 +167,10 @@ func (s *KV) NewIterator(ctx context.Context, prefetchSize, numWorkers int) *Ite
 		return nil
 	}
 
-	mem, imm := s.getMemTables()
+	tables := s.getMemTables()
 	var iters []y.Iterator
-	if mem != nil {
-		iters = append(iters, mem.NewIterator())
-	}
-	for i := len(imm) - 1; i >= 0; i-- {
-		iters = append(iters, imm[i].NewIterator())
+	for i := 0; i < len(tables); i++ {
+		iters = append(iters, tables[i].NewIterator())
 	}
 	iters = s.lc.appendIterators(iters) // This will increment references.
 
