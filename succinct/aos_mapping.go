@@ -41,13 +41,38 @@ type rankSelect interface {
 }
 
 // AoSMapping is a struct that contains aoS2Input and input2AoS
-// tables.
+// tables that are sampled.
 type AoSMapping struct {
-	alpha     int8
+	alpha     uint8
 	next      array
 	aoS2Input []uint32 // can use uint8 later
 	bPos      *roaring.Bitmap
 	input2AoS []uint32 // can use uint8 later
+}
+
+func NewMapping(aoS2Input []uint32, next array, alpha uint8) *AoSMapping {
+	sampledNo := (len(aoS2Input) + 1) / int(alpha)
+	sampledAoS2Input := make([]uint32, sampledNo)
+	sampledInput2AoS := make([]uint32, sampledNo)
+	bPos := roaring.New()
+
+	nextSampledFree := uint32(0)
+	for i, val := range aoS2Input {
+		if val%uint32(alpha) == 0 {
+			bPos.AddInt(i)
+			sampledVal := val / uint32(alpha)
+			sampledAoS2Input[nextSampledFree] = sampledVal
+			sampledInput2AoS[sampledVal] = nextSampledFree
+			nextSampledFree++
+		}
+	}
+	return &AoSMapping{
+		alpha:     alpha,
+		next:      next,
+		aoS2Input: sampledAoS2Input,
+		bPos:      bPos,
+		input2AoS: sampledInput2AoS,
+	}
 }
 
 // LookupAoS2Input returns index of a suffix from AoS
