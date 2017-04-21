@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"sort"
 	"strconv"
@@ -42,6 +43,7 @@ const (
 	BitDelete             = 1 // Set if the key has been deleted.
 	BitValuePointer       = 2 // Set if the value is NOT stored directly next to key.
 	LogSize         int64 = 1 << 30
+	M               int   = 1 << 20
 )
 
 var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
@@ -61,10 +63,11 @@ func (lf *logFile) read(buf []byte, offset int64) error {
 	return err
 }
 
-func (lf *logFile) doneWriting(path string) {
+func (lf *logFile) doneWriting() {
 	var err error
 	lf.Lock()
 	defer lf.Unlock()
+	path := lf.fd.Name()
 	y.Check(lf.fd.Close())
 	lf.fd, err = os.OpenFile(path, os.O_RDONLY, 0666)
 	y.Check(err)
@@ -345,8 +348,7 @@ func (l *Log) Write(blocks []*Block) {
 	// an invalid file descriptor.
 	if curlf.offset > LogSize {
 		var err error
-		curpath := l.fpath(curlf.fid + 1)
-		curlf.doneWriting(curpath)
+		curlf.doneWriting()
 
 		newlf := logFile{fid: curlf.fid + 1, offset: 0}
 		newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid))
@@ -406,7 +408,7 @@ func (l *Log) Read(ctx context.Context, p Pointer) (e Entry, err error) {
 	return e, nil
 }
 
-func (l *Log) RunGC(getKey func(k []byte) ([]byte, byte)) {
+func (l *Log) RunGC(getKey func(k []byte) ([]byte, byte, bool)) {
 	var lf *logFile
 	l.RLock()
 	if len(l.files) <= 1 {
@@ -415,13 +417,17 @@ func (l *Log) RunGC(getKey func(k []byte) ([]byte, byte)) {
 		return
 	}
 	// This file shouldn't be being written to.
-	lf = &l.files[0]
+	lfi := rand.Intn(len(l.files) - 1)
+	lf = &l.files[lfi]
 	l.RUnlock()
 
 	reason := make(map[string]int)
 	err := lf.iterate(0, func(e Entry) {
 		esz := len(e.Key) + len(e.Value) + 1
-		vptr, meta := getKey(e.Key)
+		vptr, meta, ok := getKey(e.Key)
+		if !ok {
+			return
+		}
 
 		if (meta & BitDelete) > 0 {
 			// Key has been deleted. Discard.
@@ -470,5 +476,5 @@ func (l *Log) RunGC(getKey func(k []byte) ([]byte, byte)) {
 	for k, v := range reason {
 		fmt.Printf("%s = %d\n", k, v)
 	}
-	fmt.Printf("Keep: %d. Discard: %d\n", reason["keep"], reason["discard"])
+	fmt.Printf("\nFid: %d Keep: %d. Discard: %d\n", lfi, reason["keep"]/M, reason["discard"]/M)
 }

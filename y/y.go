@@ -74,6 +74,10 @@ func (c *Closer) Signal() {
 	}
 }
 
+func (c *Closer) GotSignal() bool {
+	return atomic.LoadInt32(&c.nomore) == 0
+}
+
 func (c *Closer) Done() {
 	running := atomic.AddInt32(&c.running, -1)
 	if running == 0 {

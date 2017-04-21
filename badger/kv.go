@@ -422,8 +422,10 @@ func (s *KV) gcValues() {
 	for {
 		select {
 		case <-tick.C:
-			s.vlog.RunGC(func(k []byte) ([]byte, byte) {
-				return s.get(ctx, k)
+			s.vlog.RunGC(func(k []byte) ([]byte, byte, bool) {
+				val, meta := s.get(ctx, k)
+				signal := s.closer.GotSignal()
+				return val, meta, signal
 			})
 		case <-s.closer.HasBeenClosed():
 			return
