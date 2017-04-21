@@ -30,7 +30,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"golang.org/x/net/trace"
 
@@ -124,10 +123,9 @@ type Log struct {
 	// fds    []*os.File
 	offset    int64
 	elog      trace.EventLog
-	bch       chan *block
-	done      sync.WaitGroup
 	logPrefix string
 	dirPath   string
+	buf       bytes.Buffer
 }
 
 type Entry struct {
@@ -238,14 +236,9 @@ func (l *Log) Open(dir, prefix string) {
 	l.openOrCreateFiles()
 
 	l.elog = trace.NewEventLog("Badger", "Valuelog")
-	l.bch = make(chan *block, 1000)
-	l.done.Add(1)
-	go l.writeToDisk()
 }
 
 func (l *Log) Close() {
-	close(l.bch)
-	l.done.Wait()
 	for _, f := range l.files {
 		f.fd.Close()
 	}
@@ -277,124 +270,89 @@ func (l *Log) Replay(ptr Pointer, fn LogEntry) {
 	y.Checkf(err, "Unable to seek to the end")
 }
 
-var blockPool = sync.Pool{
-	New: func() interface{} {
-		return new(block)
-	},
-}
-
-type block struct {
+type Block struct {
 	entries []*Entry
 	ptrs    []Pointer
 	wg      sync.WaitGroup
 }
 
-func (l *Log) writeToDisk() {
-	l.elog.Printf("Starting write to disk routine")
-	buf := new(bytes.Buffer)
-
-	blocks := make([]*block, 0, 1000)
+// Write is thread-unsafe by design and should not be called concurrently.
+func (l *Log) Write(blocks []*Block) {
+	l.RLock()
 	curlf := &l.files[len(l.files)-1]
+	l.RUnlock()
 
 	toDisk := func() {
-		if buf.Len() == 0 {
+		if l.buf.Len() == 0 {
 			return
 		}
-		l.elog.Printf("Flushing %d blocks of total size: %d", len(blocks), buf.Len())
-		n, err := curlf.fd.Write(buf.Bytes())
+		l.elog.Printf("Flushing %d blocks of total size: %d", len(blocks), l.buf.Len())
+		n, err := curlf.fd.Write(l.buf.Bytes())
 		if err != nil {
 			y.Fatalf("Unable to write to value log: %v", err)
 		}
 		l.elog.Printf("Done")
 		curlf.offset += int64(n)
-		buf.Reset()
+		l.buf.Reset()
 	}
 
-	write := func() {
-		var h header
-		headerEnc := make([]byte, 8)
+	var h header
+	headerEnc := make([]byte, 8)
 
-		for i := range blocks {
-			b := blocks[i]
-			b.ptrs = b.ptrs[:0]
-			for j := range b.entries {
-				e := b.entries[j]
+	for i := range blocks {
+		b := blocks[i]
+		b.ptrs = b.ptrs[:0]
+		for j := range b.entries {
+			e := b.entries[j]
 
-				h.klen = uint32(len(e.Key))
-				h.vlen = uint32(len(e.Value))
-				h.Encode(headerEnc)
+			h.klen = uint32(len(e.Key))
+			h.vlen = uint32(len(e.Value))
+			h.Encode(headerEnc)
 
-				var p Pointer
-				p.Fid = uint32(curlf.fid)
-				p.Len = uint32(len(headerEnc)) + h.klen + h.vlen + 1
-				p.Offset = uint64(curlf.offset) + uint64(buf.Len())
-				b.ptrs = append(b.ptrs, p)
+			var p Pointer
+			p.Fid = uint32(curlf.fid)
+			p.Len = uint32(len(headerEnc)) + h.klen + h.vlen + 1
+			p.Offset = uint64(curlf.offset) + uint64(l.buf.Len())
+			b.ptrs = append(b.ptrs, p)
 
-				buf.Write(headerEnc)
-				buf.Write(e.Key)
-				buf.WriteByte(e.Meta)
-				buf.Write(e.Value)
-			}
-		}
-		toDisk()
-		// y.Check(curlf.fd.Sync())
-
-		for i := range blocks {
-			b := blocks[i]
-			b.wg.Done()
-		}
-		// Acquire mutex locks around this manipulation, so that the reads don't try to use
-		// an invalid file descriptor.
-		if curlf.offset > LogSize {
-			var err error
-			l.Lock()
-			y.Check(curlf.fd.Close())
-			curlf.fd, err = os.OpenFile(l.fpath(curlf.fid), os.O_RDONLY, 0666)
-			y.Check(err)
-
-			newlf := logFile{fid: curlf.fid + 1, offset: 0}
-			newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid))
-			y.Check(err)
-			l.files = append(l.files, newlf)
-
-			curlf = &newlf
-			l.Unlock()
+			l.buf.Write(headerEnc)
+			l.buf.Write(e.Key)
+			l.buf.WriteByte(e.Meta)
+			l.buf.Write(e.Value)
 		}
 	}
+	toDisk()
 
-LOOP:
-	for {
-		select {
-		case b, open := <-l.bch:
-			if !open {
-				write()
-				break LOOP
-			}
-			blocks = append(blocks, b)
+	// Acquire mutex locks around this manipulation, so that the reads don't try to use
+	// an invalid file descriptor.
+	if curlf.offset > LogSize {
+		var err error
+		l.Lock()
+		y.Check(curlf.fd.Close())
+		curlf.fd, err = os.OpenFile(l.fpath(curlf.fid), os.O_RDONLY, 0666)
+		y.Check(err)
 
-		default:
-			if len(blocks) == 0 {
-				time.Sleep(time.Millisecond)
-				break
-			}
-			write()
-			blocks = blocks[:0]
-		}
+		newlf := logFile{fid: curlf.fid + 1, offset: 0}
+		newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid))
+		y.Check(err)
+		l.files = append(l.files, newlf)
+
+		curlf = &newlf
+		l.Unlock()
 	}
-	l.done.Done()
 }
 
 // Write batches the write of an array of entries to value log.
-func (l *Log) Write(entries []*Entry) ([]Pointer, error) {
-	b := blockPool.Get().(*block)
-	b.entries = entries
-	b.wg = sync.WaitGroup{}
-	b.wg.Add(1)
-	l.bch <- b
-	b.wg.Wait()
-	defer blockPool.Put(b)
-	return b.ptrs, nil
-}
+// func (l *Log) Write(entries []*Entry) ([]Pointer, error) {
+// 	b := blockPool.Get().(*block)
+// 	b.entries = entries
+// 	b.wg = sync.WaitGroup{}
+// 	b.wg.Add(1)
+// 	l.bch <- b
+// 	b.wg.Wait()
+// 	defer blockPool.Put(b)
+// 	return b.ptrs, nil
+// }
 
 func (l *Log) getFile(fid int32) (*logFile, error) {
 	l.RLock()

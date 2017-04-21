@@ -78,6 +78,7 @@ type KV struct {
 	vlog      value.Log
 	vptr      value.Pointer
 	arenaPool *skl.ArenaPool
+	writeCh   chan *block
 }
 
 type flushTask struct {
@@ -138,6 +139,7 @@ func NewKV(opt *Options) *KV {
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan: make(chan flushTask, opt.NumMemtables),
 		flushDone: make(chan struct{}),
+		writeCh:   make(chan *block, 1000),
 		opt:       *opt, // Make a copy.
 		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MemtableSlack, opt.NumMemtables+5),
 	}
@@ -266,32 +268,71 @@ func (s *KV) updateOffset(ptrs []value.Pointer) {
 	}
 }
 
-// Write applies a list of value.Entry to our memtable.
-func (s *KV) Write(ctx context.Context, entries []*value.Entry) error {
-	y.Trace(ctx, "Making room for writes")
-	for !s.hasRoomForWrite() {
-		// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
-		// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
-		// you will get a deadlock.
-		time.Sleep(10 * time.Millisecond)
+var blockPool = sync.Pool{
+	New: func() interface{} {
+		return new(block)
+	},
+}
+
+func (s *KV) doWrites() {
+	blocks := make([]*block, 0, 10)
+	write := func() {
+		for !s.hasRoomForWrite() {
+			y.Trace(ctx, "Making room for writes")
+			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
+			// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
+			// you will get a deadlock.
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		y.Trace(ctx, "Writing to value log.")
+		ptrs, err := s.vlog.Write(entries)
+		y.Check(err)
+		y.AssertTrue(len(ptrs) == len(entries))
+		s.updateOffset(ptrs)
+
+		offsetBuf := make([]byte, 16)
+		y.Trace(ctx, "Writing to memtable")
+		for i, entry := range entries {
+			if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
+				s.mt.Put(entry.Key, entry.Value, entry.Meta)
+			} else {
+				s.mt.Put(entry.Key, ptrs[i].Encode(offsetBuf), entry.Meta|value.BitValuePointer)
+			}
+		}
+		y.Trace(ctx, "Wrote %d entries.", len(entries))
 	}
 
-	y.Trace(ctx, "Writing to value log.")
-	ptrs, err := s.vlog.Write(entries)
-	y.Check(err)
-	y.AssertTrue(len(ptrs) == len(entries))
-	s.updateOffset(ptrs)
-
-	offsetBuf := make([]byte, 16)
-	y.Trace(ctx, "Writing to memtable")
-	for i, entry := range entries {
-		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
-			s.mt.Put(entry.Key, entry.Value, entry.Meta)
-		} else {
-			s.mt.Put(entry.Key, ptrs[i].Encode(offsetBuf), entry.Meta|value.BitValuePointer)
+LOOP:
+	for {
+		select {
+		case b, open := <-s.writeCh:
+			if !open {
+				write()
+				break LOOP
+			}
+		default:
+			if len(blocks) == 0 {
+				time.Sleep(time.Millisecond)
+				break
+			}
+			write()
+			blocks = blocks[:0]
 		}
 	}
-	y.Trace(ctx, "Wrote %d entries.", len(entries))
+}
+
+// Write applies a list of value.Entry to our memtable.
+func (s *KV) Write(ctx context.Context, entries []*value.Entry) error {
+	b := blockPool.Get().(*block)
+	defer blockPool.Put(b)
+
+	b.entries = entries
+	b.wg = sync.WaitGroup{}
+	b.wg.Add(1)
+	s.writeCh <- b
+	b.wg.Wait()
+
 	return nil
 }
 
