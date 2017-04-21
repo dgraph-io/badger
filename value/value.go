@@ -47,9 +47,27 @@ const (
 var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
 
 type logFile struct {
+	sync.RWMutex
 	fd     *os.File
 	fid    int32
 	offset int64
+}
+
+func (lf *logFile) read(buf []byte, offset int64) error {
+	lf.RLock()
+	defer lf.RUnlock()
+
+	_, err := lf.fd.ReadAt(buf, offset)
+	return err
+}
+
+func (lf *logFile) doneWriting(path string) {
+	var err error
+	lf.Lock()
+	defer lf.Unlock()
+	y.Check(lf.fd.Close())
+	lf.fd, err = os.OpenFile(path, os.O_RDONLY, 0666)
+	y.Check(err)
 }
 
 type LogEntry func(e Entry)
@@ -271,9 +289,9 @@ func (l *Log) Replay(ptr Pointer, fn LogEntry) {
 }
 
 type Block struct {
-	entries []*Entry
-	ptrs    []Pointer
-	wg      sync.WaitGroup
+	Entries []*Entry
+	Ptrs    []Pointer
+	Wg      sync.WaitGroup
 }
 
 // Write is thread-unsafe by design and should not be called concurrently.
@@ -301,9 +319,9 @@ func (l *Log) Write(blocks []*Block) {
 
 	for i := range blocks {
 		b := blocks[i]
-		b.ptrs = b.ptrs[:0]
-		for j := range b.entries {
-			e := b.entries[j]
+		b.Ptrs = b.Ptrs[:0]
+		for j := range b.Entries {
+			e := b.Entries[j]
 
 			h.klen = uint32(len(e.Key))
 			h.vlen = uint32(len(e.Value))
@@ -313,7 +331,7 @@ func (l *Log) Write(blocks []*Block) {
 			p.Fid = uint32(curlf.fid)
 			p.Len = uint32(len(headerEnc)) + h.klen + h.vlen + 1
 			p.Offset = uint64(curlf.offset) + uint64(l.buf.Len())
-			b.ptrs = append(b.ptrs, p)
+			b.Ptrs = append(b.Ptrs, p)
 
 			l.buf.Write(headerEnc)
 			l.buf.Write(e.Key)
@@ -327,17 +345,15 @@ func (l *Log) Write(blocks []*Block) {
 	// an invalid file descriptor.
 	if curlf.offset > LogSize {
 		var err error
-		l.Lock()
-		y.Check(curlf.fd.Close())
-		curlf.fd, err = os.OpenFile(l.fpath(curlf.fid), os.O_RDONLY, 0666)
-		y.Check(err)
+		curpath := l.fpath(curlf.fid + 1)
+		curlf.doneWriting(curpath)
 
 		newlf := logFile{fid: curlf.fid + 1, offset: 0}
 		newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid))
 		y.Check(err)
-		l.files = append(l.files, newlf)
 
-		curlf = &newlf
+		l.Lock()
+		l.files = append(l.files, newlf)
 		l.Unlock()
 	}
 }
@@ -404,7 +420,6 @@ func (l *Log) RunGC(getKey func(k []byte) ([]byte, byte)) {
 
 	reason := make(map[string]int)
 	err := lf.iterate(0, func(e Entry) {
-		fmt.Printf("iterate. key: %s\n", e.Key)
 		esz := len(e.Key) + len(e.Value) + 1
 		vptr, meta := getKey(e.Key)
 

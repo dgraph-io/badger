@@ -18,6 +18,8 @@ package y
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 
 	"os"
 	"syscall"
@@ -37,4 +39,48 @@ func Trace(ctx context.Context, format string, args ...interface{}) {
 
 func OpenSyncedFile(filename string) (*os.File, error) {
 	return os.OpenFile(filename, os.O_RDWR|os.O_CREATE|syscall.O_DSYNC, 0666)
+}
+
+type Closer struct {
+	running int32
+	nomore  int32
+	closed  chan struct{}
+	waiting chan struct{}
+}
+
+func NewCloser() *Closer {
+	c := &Closer{
+		closed:  make(chan struct{}, 10),
+		waiting: make(chan struct{}),
+	}
+	return c
+}
+
+func (c *Closer) Register() {
+	AssertTruef(atomic.LoadInt32(&c.nomore) == 0, "Can't register with closer after signal.")
+	atomic.AddInt32(&c.running, 1)
+}
+
+func (c *Closer) HasBeenClosed() <-chan struct{} {
+	return c.closed
+}
+
+func (c *Closer) Signal() {
+	atomic.StoreInt32(&c.nomore, 1)
+	running := int(atomic.LoadInt32(&c.running))
+	fmt.Printf("Sending signal to %d registered\n", running)
+	for i := 0; i < running; i++ {
+		c.closed <- struct{}{}
+	}
+}
+
+func (c *Closer) Done() {
+	running := atomic.AddInt32(&c.running, -1)
+	if running == 0 {
+		c.waiting <- struct{}{}
+	}
+}
+
+func (c *Closer) Wait() {
+	<-c.waiting
 }

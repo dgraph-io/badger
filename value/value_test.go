@@ -43,13 +43,15 @@ func TestBasic(t *testing.T) {
 		Value: []byte("sampleval"),
 		Meta:  123,
 	}
-	ptrs, err := log.Write([]*Entry{entry})
-	require.NoError(t, err)
-	require.Len(t, ptrs, 1)
-	fmt.Printf("Pointer written: %+v", ptrs[0])
+	b := new(Block)
+	b.Entries = []*Entry{entry}
+
+	log.Write([]*Block{b})
+	require.Len(t, b.Ptrs, 1)
+	fmt.Printf("Pointer written: %+v", b.Ptrs[0])
 
 	var readEntries []Entry
-	e, err := log.Read(ctx, ptrs[0])
+	e, err := log.Read(ctx, b.Ptrs[0])
 	require.NoError(t, err)
 	readEntries = append(readEntries, e)
 	require.EqualValues(t, []Entry{
@@ -78,47 +80,41 @@ func BenchmarkReadWrite(b *testing.B) {
 				defer os.Remove("vlog")
 				b.ResetTimer()
 
-				b.RunParallel(func(pb *testing.PB) {
+				for i := 0; i < b.N; i++ {
 					e := new(Entry)
 					e.Key = make([]byte, 16)
 					e.Value = make([]byte, vsz)
+					bl := new(Block)
+					bl.Entries = []*Entry{e}
 
 					var ptrs []Pointer
 
-					pt, err := vl.Write([]*Entry{e})
-					if err != nil {
-						b.Fatalf("Benchmark Write: ", err)
-					}
-					ptrs = append(ptrs, pt...)
+					vl.Write([]*Block{bl})
+					ptrs = append(ptrs, bl.Ptrs...)
 
-					for pb.Next() {
-						f := rand.Float32()
-						if f < rw {
-							pt, err := vl.Write([]*Entry{e})
-							if err != nil {
-								b.Fatalf("Benchmark Write: ", err)
-							}
-							ptrs = append(ptrs, pt...)
+					f := rand.Float32()
+					if f < rw {
+						vl.Write([]*Block{bl})
+						ptrs = append(ptrs, bl.Ptrs...)
 
-						} else {
-							ln := len(ptrs)
-							if ln == 0 {
-								b.Fatalf("Zero length of ptrs")
-							}
-							idx := rand.Intn(ln)
-							e, err := vl.Read(ctx, ptrs[idx])
-							if err != nil {
-								b.Fatalf("Benchmark Read:", err)
-							}
-							if len(e.Key) != 16 {
-								b.Fatalf("Key is invalid")
-							}
-							if len(e.Value) != vsz {
-								b.Fatalf("Value is invalid")
-							}
+					} else {
+						ln := len(ptrs)
+						if ln == 0 {
+							b.Fatalf("Zero length of ptrs")
+						}
+						idx := rand.Intn(ln)
+						e, err := vl.Read(ctx, ptrs[idx])
+						if err != nil {
+							b.Fatalf("Benchmark Read:", err)
+						}
+						if len(e.Key) != 16 {
+							b.Fatalf("Key is invalid")
+						}
+						if len(e.Value) != vsz {
+							b.Fatalf("Value is invalid")
 						}
 					}
-				})
+				}
 			})
 		}
 	}

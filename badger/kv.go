@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/trace"
+
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/value"
@@ -69,16 +71,17 @@ var DefaultOptions = Options{
 type KV struct {
 	sync.RWMutex // Guards imm, mem.
 
+	closer    *y.Closer
+	elog      trace.EventLog
 	mt        *skl.Skiplist
 	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
-	flushChan chan flushTask  // For flushing memtables.
-	flushDone chan struct{}
 	opt       Options
 	lc        *levelsController
 	vlog      value.Log
 	vptr      value.Pointer
 	arenaPool *skl.ArenaPool
-	writeCh   chan *block
+	writeCh   chan *value.Block
+	flushChan chan flushTask // For flushing memtables.
 }
 
 type flushTask struct {
@@ -92,18 +95,15 @@ type Summary struct {
 }
 
 func (s *KV) flushMemtable() {
-	var done bool
-	for !done {
+	defer s.closer.Done()
+
+	for {
 		select {
 		case ft := <-s.flushChan:
 			if ft.mt == nil {
-				if s.opt.Verbose {
-					y.Printf("Closing flushChan\n")
-				}
-				close(s.flushChan) // This is our close signal.
-				done = true
-				break
+				return
 			}
+
 			if ft.vptr.Fid > 0 || ft.vptr.Offset > 0 {
 				if s.opt.Verbose {
 					fmt.Printf("Storing offset: %+v\n", ft.vptr)
@@ -116,8 +116,10 @@ func (s *KV) flushMemtable() {
 			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir))
 			y.Check(err)
 			y.Check(writeLevel0Table(ft.mt, fd))
+
 			tbl, err := table.OpenTable(fd, s.opt.MapTablesTo)
 			defer tbl.DecrRef()
+
 			y.Check(err)
 			s.lc.addLevel0Table(tbl) // This will incrRef again.
 
@@ -129,7 +131,6 @@ func (s *KV) flushMemtable() {
 			s.Unlock()
 		}
 	}
-	s.flushDone <- struct{}{}
 }
 
 // NewKV returns a new KV object. Compact levels are created as well.
@@ -138,16 +139,19 @@ func NewKV(opt *Options) *KV {
 	out := &KV{
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan: make(chan flushTask, opt.NumMemtables),
-		flushDone: make(chan struct{}),
-		writeCh:   make(chan *block, 1000),
+		writeCh:   make(chan *value.Block, 1000),
 		opt:       *opt, // Make a copy.
 		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MemtableSlack, opt.NumMemtables+5),
+		closer:    y.NewCloser(),
+		elog:      trace.NewEventLog("badger", "kv"),
 	}
 	out.mt = skl.NewSkiplist(out.arenaPool)
 
 	// newLevelsController potentially loads files in directory.
 	out.lc = newLevelsController(out)
 	out.lc.startCompact()
+
+	out.closer.Register()
 	go out.flushMemtable() // Need levels controller to be up.
 
 	out.vlog.Open(opt.Dir, "vlog")
@@ -172,7 +176,10 @@ func NewKV(opt *Options) *KV {
 	}
 	out.vlog.Replay(vptr, fn)
 
+	out.closer.Register()
+	out.closer.Register()
 	go out.gcValues()
+	go out.doWrites()
 	return out
 }
 
@@ -181,6 +188,8 @@ func (s *KV) Close() {
 	if s.opt.Verbose {
 		y.Printf("Closing database\n")
 	}
+	s.elog.Printf("Closing database")
+	s.closer.Signal()
 
 	// TODO(ganesh): Block writes to mem.
 	if s.mt.Size() > 0 {
@@ -195,11 +204,14 @@ func (s *KV) Close() {
 		s.Unlock()
 	}
 	s.flushChan <- flushTask{nil, value.Pointer{}} // Tell flusher to quit.
-	<-s.flushDone                                  // Wait for flusher to be done.
 	if s.opt.Verbose {
 		y.Printf("Memtable flushed\n")
 	}
 	s.lc.close()
+	s.elog.Printf("Waiting for closer")
+	s.closer.Wait()
+	s.elog.Finish()
+	s.vlog.Close()
 }
 
 func (s *KV) getMemTables() []*skl.Skiplist {
@@ -270,53 +282,72 @@ func (s *KV) updateOffset(ptrs []value.Pointer) {
 
 var blockPool = sync.Pool{
 	New: func() interface{} {
-		return new(block)
+		return new(value.Block)
 	},
 }
 
-func (s *KV) doWrites() {
-	blocks := make([]*block, 0, 10)
-	write := func() {
-		for !s.hasRoomForWrite() {
-			y.Trace(ctx, "Making room for writes")
-			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
-			// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
-			// you will get a deadlock.
-			time.Sleep(10 * time.Millisecond)
-		}
+func (s *KV) writeBlocks(blocks []*value.Block) {
+	if len(blocks) == 0 {
+		return
+	}
+	s.elog.Printf("writeBlocks called")
 
-		y.Trace(ctx, "Writing to value log.")
-		ptrs, err := s.vlog.Write(entries)
-		y.Check(err)
-		y.AssertTrue(len(ptrs) == len(entries))
-		s.updateOffset(ptrs)
+	for !s.hasRoomForWrite() {
+		s.elog.Printf("Making room for writes")
+		// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
+		// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
+		// you will get a deadlock.
+		time.Sleep(10 * time.Millisecond)
+	}
 
-		offsetBuf := make([]byte, 16)
-		y.Trace(ctx, "Writing to memtable")
-		for i, entry := range entries {
+	s.elog.Printf("Writing to value log")
+	s.vlog.Write(blocks)
+	offsetBuf := make([]byte, 16)
+	s.elog.Printf("Writing to memtable")
+
+	for i, b := range blocks {
+		y.AssertTrue(len(b.Ptrs) == len(b.Entries))
+
+		for i, entry := range b.Entries {
 			if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
 				s.mt.Put(entry.Key, entry.Value, entry.Meta)
 			} else {
-				s.mt.Put(entry.Key, ptrs[i].Encode(offsetBuf), entry.Meta|value.BitValuePointer)
+				s.mt.Put(entry.Key, b.Ptrs[i].Encode(offsetBuf), entry.Meta|value.BitValuePointer)
 			}
 		}
-		y.Trace(ctx, "Wrote %d entries.", len(entries))
+		s.elog.Printf("Wrote %d entries from block %d", len(b.Entries), i)
 	}
+	lastb := len(blocks) - 1
+	s.updateOffset(blocks[lastb].Ptrs)
+	for _, b := range blocks {
+		b.Wg.Done()
+	}
+}
 
-LOOP:
+func (s *KV) doWrites() {
+	defer s.closer.Done()
+
+	blocks := make([]*value.Block, 0, 10)
 	for {
 		select {
-		case b, open := <-s.writeCh:
-			if !open {
-				write()
-				break LOOP
+		case b := <-s.writeCh:
+			blocks = append(blocks, b)
+
+		case <-s.closer.HasBeenClosed():
+			close(s.writeCh)
+
+			for b := range s.writeCh { // Flush the channel.
+				blocks = append(blocks, b)
 			}
+			s.writeBlocks(blocks)
+			return
+
 		default:
 			if len(blocks) == 0 {
 				time.Sleep(time.Millisecond)
 				break
 			}
-			write()
+			s.writeBlocks(blocks)
 			blocks = blocks[:0]
 		}
 	}
@@ -324,14 +355,14 @@ LOOP:
 
 // Write applies a list of value.Entry to our memtable.
 func (s *KV) Write(ctx context.Context, entries []*value.Entry) error {
-	b := blockPool.Get().(*block)
+	b := blockPool.Get().(*value.Block)
 	defer blockPool.Put(b)
 
-	b.entries = entries
-	b.wg = sync.WaitGroup{}
-	b.wg.Add(1)
+	b.Entries = entries
+	b.Wg = sync.WaitGroup{}
+	b.Wg.Add(1)
 	s.writeCh <- b
-	b.wg.Wait()
+	b.Wg.Wait()
 
 	return nil
 }
@@ -384,13 +415,19 @@ func (s *KV) Validate() { s.lc.validate() }
 func (s *KV) DebugPrintMore() { s.lc.debugPrintMore() }
 
 func (s *KV) gcValues() {
+	defer s.closer.Done()
+
 	ctx := context.Background()
 	tick := time.NewTicker(10 * time.Second)
-	for range tick.C {
-		fmt.Println("Starting vlog runGC")
-		s.vlog.RunGC(func(k []byte) ([]byte, byte) {
-			return s.get(ctx, k)
-		})
+	for {
+		select {
+		case <-tick.C:
+			s.vlog.RunGC(func(k []byte) ([]byte, byte) {
+				return s.get(ctx, k)
+			})
+		case <-s.closer.HasBeenClosed():
+			return
+		}
 	}
 }
 
