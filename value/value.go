@@ -31,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/net/trace"
 
@@ -147,6 +148,7 @@ type Log struct {
 	logPrefix string
 	dirPath   string
 	buf       bytes.Buffer
+	maxFid    int32
 }
 
 type Entry struct {
@@ -154,6 +156,19 @@ type Entry struct {
 	Meta   byte
 	Value  []byte
 	Offset int64
+}
+
+func (e Entry) EncodeTo(buf *bytes.Buffer) {
+	var headerEnc [8]byte
+	var h header
+	h.klen = uint32(len(e.Key))
+	h.vlen = uint32(len(e.Value))
+	h.Encode(headerEnc[:])
+
+	buf.Write(headerEnc[:])
+	buf.Write(e.Key)
+	buf.WriteByte(e.Meta)
+	buf.Write(e.Value)
 }
 
 func (e Entry) print(prefix string) {
@@ -236,6 +251,8 @@ func (l *Log) openOrCreateFiles() {
 			lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid))
 			// lf.fd, err = os.OpenFile(l.fpath(lf.fid), os.O_RDWR|os.O_CREATE, 0666)
 			y.Check(err)
+			l.maxFid = lf.fid
+
 		} else {
 			lf.fd, err = os.OpenFile(l.fpath(lf.fid), os.O_RDONLY, 0666)
 			y.Check(err)
@@ -317,29 +334,19 @@ func (l *Log) Write(blocks []*Block) {
 		l.buf.Reset()
 	}
 
-	var h header
-	headerEnc := make([]byte, 8)
-
 	for i := range blocks {
 		b := blocks[i]
 		b.Ptrs = b.Ptrs[:0]
 		for j := range b.Entries {
 			e := b.Entries[j]
 
-			h.klen = uint32(len(e.Key))
-			h.vlen = uint32(len(e.Value))
-			h.Encode(headerEnc)
-
 			var p Pointer
 			p.Fid = uint32(curlf.fid)
-			p.Len = uint32(len(headerEnc)) + h.klen + h.vlen + 1
+			p.Len = uint32(8 + len(e.Key) + len(e.Value) + 1)
 			p.Offset = uint64(curlf.offset) + uint64(l.buf.Len())
 			b.Ptrs = append(b.Ptrs, p)
 
-			l.buf.Write(headerEnc)
-			l.buf.Write(e.Key)
-			l.buf.WriteByte(e.Meta)
-			l.buf.Write(e.Value)
+			e.EncodeTo(&l.buf)
 		}
 	}
 	toDisk()
@@ -350,7 +357,7 @@ func (l *Log) Write(blocks []*Block) {
 		var err error
 		curlf.doneWriting()
 
-		newlf := logFile{fid: curlf.fid + 1, offset: 0}
+		newlf := logFile{fid: atomic.AddInt32(&l.maxFid, 1), offset: 0}
 		newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid))
 		y.Check(err)
 
@@ -421,7 +428,16 @@ func (l *Log) RunGC(getKey func(k []byte) ([]byte, byte, bool)) {
 	lf = &l.files[lfi]
 	l.RUnlock()
 
+	type bufEntry struct {
+		key []byte
+		enc []byte
+	}
+
+	bentries := make([]bufEntry, 0, 1000)
+
 	reason := make(map[string]int)
+	var buf bytes.Buffer
+
 	err := lf.iterate(0, func(e Entry) {
 		esz := len(e.Key) + len(e.Value) + 1
 		vptr, meta, ok := getKey(e.Key)
@@ -459,6 +475,18 @@ func (l *Log) RunGC(getKey func(k []byte) ([]byte, byte, bool)) {
 				// This is still the active entry. This would need to be rewritten.
 				reason["keep"] += esz
 
+				be := bufEntry{}
+				be.key = make([]byte, len(e.Key))
+				copy(be.key, e.Key)
+
+				e.EncodeTo(&buf)
+				byt := buf.Bytes()
+				be.enc = make([]byte, len(byt))
+				copy(be.enc, byt)
+				buf.Reset()
+
+				bentries = append(bentries, be)
+
 			} else {
 				for k, v := range reason {
 					fmt.Printf("%s = %d\n", k, v)
@@ -472,9 +500,32 @@ func (l *Log) RunGC(getKey func(k []byte) ([]byte, byte, bool)) {
 			}
 		}
 	})
+	sort.Slice(bentries, func(i, j int) bool {
+		bi := bentries[i]
+		bj := bentries[j]
+		return bytes.Compare(bi.enc, bj.enc) < 0
+	})
+
 	y.Checkf(err, "While iterating for RunGC.")
 	for k, v := range reason {
 		fmt.Printf("%s = %d\n", k, v)
 	}
 	fmt.Printf("\nFid: %d Keep: %d. Discard: %d\n", lfi, reason["keep"]/M, reason["discard"]/M)
+	if reason["keep"]/M >= 800 {
+		return
+	}
+
+	newlf := logFile{fid: atomic.AddInt32(&l.maxFid, 1), offset: 0}
+	newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid))
+	y.Check(err)
+	fmt.Printf("REWRITING VLOG %d to NEW %d\n", lf.fid, newlf.fid)
+
+	var lbuf bytes.Buffer
+	lbuf.Grow(reason["keep"] / M)
+	for _, be := range bentries {
+		lbuf.Write(be.enc)
+	}
+	n, err := newlf.fd.Write(lbuf.Bytes())
+	fmt.Printf("NEWFD: %d Bytes written: %d. Error: %v", newlf.fid, n, err)
+	newlf.fd.Close()
 }
