@@ -64,8 +64,8 @@ type levelsController struct {
 	maxCompactID uint64
 
 	// For ending compactions.
-	compactDone chan struct{}
-	compactJobs sync.WaitGroup
+	compactWorkersDone chan struct{}
+	compactWorkersWg   sync.WaitGroup
 }
 
 var (
@@ -102,36 +102,51 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 }
 
 // deleteTables remove tables idx0, ..., idx1-1.
-func (s *levelHandler) deleteTables(idx0, idx1 int) {
+func (s *levelHandler) deleteTables(toDel []*table.Table) {
 	s.Lock()
 	defer s.Unlock()
-	for i := idx0; i < idx1; i++ {
-		s.totalSize -= s.tables[i].Size()
-		s.tables[i].DecrRef()
+	toDelMap := make(map[uint64]struct{})
+	for _, t := range toDel {
+		toDelMap[t.ID()] = struct{}{}
 	}
 	// Make a copy as iterators might be keeping a slice of tables.
-	var tables []*table.Table
-	tables = append(tables, s.tables[:idx0]...)
-	tables = append(tables, s.tables[idx1:]...)
-	s.tables = tables
+	var newTables []*table.Table
+	for _, t := range s.tables {
+		_, found := toDelMap[t.ID()]
+		if !found {
+			newTables = append(newTables, t)
+			continue
+		}
+		s.totalSize -= t.Size()
+		t.DecrRef()
+	}
+	s.tables = newTables
 }
 
 // replaceTables will replace tables[left:right] with newTables. Note this EXCLUDES tables[right].
-func (s *levelHandler) replaceTables(left, right int, newTables []*table.Table) {
+func (s *levelHandler) replaceTables(newTables []*table.Table) {
 	s.Lock()
 	defer s.Unlock()
+	// Need to re-search the range of tables in this level to be replaced as
+	// other goroutines might be changing it as well.
+	y.AssertTrue(len(newTables) > 0)
 
-	// Update totalSize first.
+	// Increase totalSize first.
 	for _, tbl := range newTables {
 		s.totalSize += tbl.Size()
 		tbl.IncrRef()
 	}
+
+	left, right := overlappingTables(
+		newTables[0].Smallest(), newTables[len(newTables)-1].Biggest(),
+		s.tables)
+	// Update totalSize and reference counts.
 	for i := left; i < right; i++ {
 		s.totalSize -= s.tables[i].Size()
 		s.tables[i].DecrRef()
 	}
 
-	// Make a copy as iterators might be keeping a slice of tables.
+	// To be safe, just make a copy. TODO: Be more careful and avoid copying.
 	numDeleted := right - left
 	numAdded := len(newTables)
 	tables := make([]*table.Table, len(s.tables)-numDeleted+numAdded)
@@ -145,7 +160,7 @@ func (s *levelHandler) replaceTables(left, right int, newTables []*table.Table) 
 
 // pickCompactTables returns a range of tables to be compacted away.
 func (s *levelHandler) pickCompactTables() (int, int) {
-	s.RLock()
+	s.RLock() // Not really necessary.
 	defer s.RUnlock()
 
 	if s.level == 0 {
@@ -166,41 +181,6 @@ func (s *levelHandler) pickCompactTables() (int, int) {
 		}
 	}
 	return idx, idx + 1
-}
-
-// getFirstTable returns the first table. If level is empty, we return nil.
-func (s *levelHandler) getFirstTable() *table.Table {
-	s.RLock()
-	defer s.RUnlock()
-	if len(s.tables) == 0 {
-		return nil
-	}
-	return s.tables[0]
-}
-
-func (s *levelHandler) getTable(idx int) *table.Table {
-	s.RLock()
-	defer s.RUnlock()
-	y.AssertTruef(0 <= idx && idx < len(s.tables), "level=%d idx=%d len=%d",
-		s.level, idx, len(s.tables))
-	return s.tables[idx]
-}
-
-// overlappingTables returns the tables that intersect with key range.
-// s.tables[left] to s.tables[right-1] overlap with the closed key-range [begin, end].
-func (s *levelHandler) overlappingTables(begin, end []byte) (int, int) {
-	s.RLock()
-	defer s.RUnlock()
-
-	y.AssertTrue(s.level > 0)
-	// Binary search.
-	left := sort.Search(len(s.tables), func(i int) bool {
-		return bytes.Compare(s.tables[i].Biggest(), begin) >= 0
-	})
-	right := sort.Search(len(s.tables), func(i int) bool {
-		return bytes.Compare(s.tables[i].Smallest(), end) > 0
-	})
-	return left, right
 }
 
 func newLevelHandler(kv *KV, level int) *levelHandler {
@@ -272,15 +252,15 @@ func newLevelsController(kv *KV) *levelsController {
 
 func (s *levelsController) startCompact() {
 	n := s.kv.opt.MaxLevels / 2
-	s.compactDone = make(chan struct{}, n)
-	s.compactJobs.Add(n)
+	s.compactWorkersDone = make(chan struct{}, n)
+	s.compactWorkersWg.Add(n)
 	for i := 0; i < n; i++ {
 		go s.runWorker(i)
 	}
 }
 
 func (s *levelsController) runWorker(workerID int) {
-	defer s.compactJobs.Done() // Indicate worker is done.
+	defer s.compactWorkersWg.Done() // Indicate worker is done.
 	if s.kv.opt.DoNotCompact {
 		fmt.Println("NOT running any compactions due to DB options.")
 		return
@@ -294,32 +274,9 @@ func (s *levelsController) runWorker(workerID int) {
 		// Can add a done channel or other stuff.
 		case <-timeChan:
 			s.tryCompact(workerID)
-		case <-s.compactDone:
+		case <-s.compactWorkersDone:
 			done = true
 		}
-	}
-}
-
-// debugPrint shows the general state.
-func (s *levelsController) debugPrint() {
-	s.Lock()
-	defer s.Unlock()
-	for i := 0; i < s.kv.opt.MaxLevels; i++ {
-		var busy int
-		if s.beingCompacted[i] {
-			busy = 1
-		}
-		fmt.Printf("(i=%d, size=%d, busy=%d, numTables=%d) ", i, s.levels[i].getTotalSize(), busy, len(s.levels[i].tables))
-	}
-	fmt.Printf("\n")
-}
-
-// debugPrintMore shows key ranges of each level.
-func (s *levelsController) debugPrintMore() {
-	s.Lock()
-	defer s.Unlock()
-	for i := 0; i < s.kv.opt.MaxLevels; i++ {
-		s.levels[i].debugPrintMore()
 	}
 }
 
@@ -367,96 +324,28 @@ func (s *levelsController) tryCompact(workerID int) {
 	s.beingCompacted[l+1] = false
 }
 
-func (s *levelHandler) keyRange(idx0, idx1 int) ([]byte, []byte) {
-	y.AssertTrue(idx0 < idx1)
-	s.RLock() // For access to s.tables.
-	defer s.RUnlock()
-	smallest := s.tables[idx0].Smallest()
-	biggest := s.tables[idx0].Biggest()
-	for i := idx0 + 1; i < idx1; i++ {
-		if bytes.Compare(s.tables[i].Smallest(), smallest) < 0 {
-			smallest = s.tables[i].Smallest()
-		}
-		if bytes.Compare(s.tables[i].Biggest(), biggest) > 0 {
-			biggest = s.tables[i].Biggest()
-		}
-	}
-	return smallest, biggest
-}
-
-// doCompact picks some table on level l and compacts it away to the next level.
-func (s *levelsController) doCompact(l int) error {
-	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
-	timeStart := time.Now()
-	thisLevel := s.levels[l]
-	nextLevel := s.levels[l+1]
-	srcIdx0, srcIdx1 := thisLevel.pickCompactTables()
-	smallest, biggest := thisLevel.keyRange(srcIdx0, srcIdx1)
-	// In case you worry that levelHandler.tables[tableIdx] is no longer the same as before,
-	// note that the code is delicate. These two levels are already marked for compaction, so
-	// nobody should be able to mutate levelHandler.tables.
-	left, right := nextLevel.overlappingTables(smallest, biggest)
-	// Merge thisLevel's selected tables with nextLevel.tables[left:right]. Excludes tables[right].
-	y.AssertTrue(left <= right)
-
-	if (thisLevel.level >= 1) && left == right {
-		// No overlap with the next level. Just move the file(s) down to the next level.
-		// Function will acquire level lock.
-		y.AssertTruef(srcIdx0+1 == srcIdx1, "Expect to move only one table")
-		tbl := thisLevel.tables[srcIdx0]
-		nextLevel.replaceTables(left, right, thisLevel.tables[srcIdx0:srcIdx1])
-		thisLevel.deleteTables(srcIdx0, srcIdx1) // Function will acquire level lock.
-		updateLevel(tbl, l+1)
-		if s.kv.opt.Verbose {
-			fmt.Printf("LOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
-				l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
-		}
-		return nil
-	}
-
-	var c compaction
-	var newIDMin, newIDMax uint64
-	{
-		// Prepare compaction object.
-		c.compactID = s.reserveCompactID()
-		var estSize int64
-		for _, t := range thisLevel.tables[srcIdx0:srcIdx1] {
-			c.toDelete = append(c.toDelete, t.ID())
-			estSize += t.Size()
-		}
-		for _, t := range nextLevel.tables[left:right] {
-			c.toDelete = append(c.toDelete, t.ID())
-			estSize += t.Size()
-		}
-		estNumTables := 1 + (estSize+s.kv.opt.MaxTableSize-1)/s.kv.opt.MaxTableSize
-		newIDMin, newIDMax = s.reserveFileIDs(int(estNumTables))
-		// TODO: Consider storing just two numbers for toInsert.
-		for i := newIDMin; i < newIDMax; i++ {
-			c.toInsert = append(c.toInsert, uint64(i))
-		}
-	}
-	s.clog.add(&c)
-	if s.kv.opt.Verbose {
-		y.Printf("Compact start: %v\n", c)
-	}
-
+// compactBuildTables merge topTables and botTables to form a list of new tables.
+func (s *levelsController) compactBuildTables(
+	l int, topTables, botTables []*table.Table, c *compaction) ([]*table.Table, func()) {
 	// Next level has level>=1 and we can use ConcatIterator as key ranges do not overlap.
 	var iters []y.Iterator
 	if l == 0 {
-		iters = appendIteratorsReversed(iters, thisLevel.tables[srcIdx0:srcIdx1])
+		iters = appendIteratorsReversed(iters, topTables)
 	} else {
-		y.AssertTrue(srcIdx0+1 == srcIdx1) // For now, for level >=1, we expect exactly one table.
-		iters = []y.Iterator{thisLevel.tables[srcIdx0].NewIterator()}
+		y.AssertTrue(len(topTables) == 1)
+		iters = []y.Iterator{topTables[0].NewIterator()}
 	}
-	iters = append(iters, table.NewConcatIterator(nextLevel.tables[left:right]))
+
+	iters = append(iters, table.NewConcatIterator(botTables))
 	it := y.NewMergeIterator(iters)
 	defer it.Close() // Important to close the iterator to do ref counting.
 
 	it.SeekToFirst()
 
-	var newTables [200]*table.Table
+	newTables := make([]*table.Table, len(c.toInsert))
 	var wg sync.WaitGroup
 	var i int
+	newIDMin, newIDMax := c.toInsert[0], c.toInsert[len(c.toInsert)-1]
 	newID := newIDMin
 	iterTime := time.Now()
 	for ; it.Valid(); i++ {
@@ -468,10 +357,7 @@ func (s *levelsController) doCompact(l int) error {
 			}
 			key := it.Key()
 			val, meta := it.Value()
-			if err := builder.Add(key, val, meta); err != nil {
-				builder.Close()
-				return err
-			}
+			y.Check(builder.Add(key, val, meta))
 		}
 		if builder.Empty() {
 			builder.Close()
@@ -481,7 +367,7 @@ func (s *levelsController) doCompact(l int) error {
 		iterTime = time.Now()
 
 		wg.Add(1)
-		y.AssertTruef(newID < newIDMax, "%d %d", newID, newIDMax)
+		y.AssertTruef(newID <= newIDMax, "%d %d", newID, newIDMax)
 		go func(idx int, fileID uint64, builder *table.TableBuilder) {
 			defer builder.Close()
 			defer wg.Done()
@@ -500,25 +386,123 @@ func (s *levelsController) doCompact(l int) error {
 	}
 	wg.Wait()
 
-	newTablesSlice := newTables[:i]
-	defer func() {
-		for _, t := range newTablesSlice {
+	out := newTables[:i]
+	return out, func() {
+		for _, t := range out {
 			t.DecrRef() // replaceTables will increment reference.
 		}
-	}()
-
-	if s.kv.opt.Verbose {
-		fmt.Printf("LOG Compact %d{Del [%d,%d)} => %d{Del [%d,%d), Add [%d,%d)}, took %v\n",
-			l, srcIdx0, srcIdx1, l+1, left, right, left, left+len(newTablesSlice), time.Since(timeStart))
 	}
-	nextLevel.replaceTables(left, right, newTablesSlice)
-	thisLevel.deleteTables(srcIdx0, srcIdx1) // Function will acquire level lock.
-	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
-	// However, the tables are added only to the end, so it is ok to just delete the first table.
+}
 
-	// Write to compact log.
-	c.done = 1
-	s.clog.add(&c)
+type compactDef struct {
+	top []*table.Table
+	bot []*table.Table
+}
+
+// doCompact picks some table on level l and compacts it away to the next level.
+func (s *levelsController) doCompact(l int) error {
+	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
+	thisLevel := s.levels[l]
+	nextLevel := s.levels[l+1]
+
+	//	srcIdx0, srcIdx1 := thisLevel.pickCompactTables()
+	// While picking tables to be compacted, both levels' tables are expected to
+	// remain unchanged.
+	var cds []compactDef
+	if l == 0 {
+		top := make([]*table.Table, len(thisLevel.tables))
+		y.AssertTrue(len(thisLevel.tables) == copy(top, thisLevel.tables))
+		smallest, biggest := keyRange(top)
+		left, right := overlappingTables(smallest, biggest, nextLevel.tables)
+		bot := make([]*table.Table, right-left)
+		copy(bot, nextLevel.tables[left:right])
+		cds = append(cds, compactDef{
+			top: top,
+			bot: bot,
+		})
+	} else {
+		// Sort tables by size, descending.
+		// TODO: This does not seem to speed up much. Consider ordering by
+		// tables that require the least amount of work, i.e., min overlap with
+		// the next level.
+		tbls := make([]*table.Table, len(thisLevel.tables))
+		copy(tbls, thisLevel.tables)
+		sort.Slice(tbls, func(i, j int) bool {
+			return tbls[i].Size() > tbls[j].Size()
+		})
+		type intPair struct {
+			left, right int
+		}
+		var ranges []intPair
+		for _, t := range tbls {
+			left, right := overlappingTables(t.Smallest(), t.Biggest(), nextLevel.tables)
+			var hasOverlap bool
+			for _, r := range ranges {
+				if !(left >= r.right || right <= r.left) {
+					hasOverlap = true
+					break
+				}
+			}
+			if !hasOverlap {
+				bot := make([]*table.Table, right-left)
+				copy(bot, nextLevel.tables[left:right])
+				cds = append(cds, compactDef{
+					top: []*table.Table{t},
+					bot: bot,
+				})
+				ranges = append(ranges, intPair{left, right})
+				// TODO: Number of tables to be compacted together. We have tried different values.
+				if len(cds) >= 2 {
+					break
+				}
+			}
+		}
+	}
+
+	var wg sync.WaitGroup
+	for _, cd := range cds {
+		wg.Add(1)
+		go func(cd compactDef) {
+			defer wg.Done()
+			timeStart := time.Now()
+			if thisLevel.level >= 1 && len(cd.bot) == 0 {
+				y.AssertTrue(len(cd.top) == 1)
+				tbl := cd.top[0]
+				nextLevel.replaceTables(cd.top)
+				thisLevel.deleteTables(cd.top)
+				updateLevel(tbl, l+1)
+				if s.kv.opt.Verbose {
+					fmt.Printf("LOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
+						l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
+				}
+				return
+			}
+
+			c := s.buildCompaction(&cd)
+			if s.kv.opt.Verbose {
+				y.Printf("Compact start: %v\n", c)
+			}
+			s.clog.add(c)
+			newTables, decr := s.compactBuildTables(l, cd.top, cd.bot, c)
+			defer decr()
+
+			nextLevel.replaceTables(newTables)
+			thisLevel.deleteTables(cd.top) // Function will acquire level lock.
+			// Note: For level 0, while doCompact is running, it is possible that new tables are added.
+			// However, the tables are added only to the end, so it is ok to just delete the first table.
+
+			// Write to compact log.
+			c.done = 1
+			s.clog.add(c)
+
+			//		if s.kv.opt.Verbose {
+			//			fmt.Printf("LOG Compact %d{Del [%d,%d)} => %d{Del [%d,%d), Add [%d,%d)}, took %v\n",
+			//				l, srcIdx0, srcIdx1, l+1, left, right, left, left+len(newTables), time.Since(timeStart))
+			//		}
+		}(cd)
+	}
+	wg.Wait()
+	//	s.validate()
 	return nil
 }
 
@@ -570,46 +554,17 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table, verbose bool) bool {
 	return true
 }
 
-// Check does some sanity check on one level of data or in-memory index.
-func (s *levelHandler) validate() {
-	if s.level == 0 {
-		return
-	}
-	s.RLock()
-	defer s.RUnlock()
-	numTables := len(s.tables)
-	for j := 1; j < numTables; j++ {
-		y.AssertTruef(j < len(s.tables), "Level %d, j=%d numTables=%d", s.level, j, numTables)
-		y.AssertTruef(bytes.Compare(s.tables[j-1].Biggest(), s.tables[j].Smallest()) < 0,
-			"Inter: %s vs %s: level=%d j=%d numTables=%d",
-			string(s.tables[j-1].Biggest()), string(s.tables[j].Smallest()), s.level, j, numTables)
-		y.AssertTruef(bytes.Compare(s.tables[j].Smallest(), s.tables[j].Biggest()) <= 0,
-			"Intra: %s vs %s: level=%d j=%d numTables=%d",
-			string(s.tables[j].Smallest()), string(s.tables[j].Biggest()), s.level, j, numTables)
-	}
-}
-
-func (s *levelHandler) debugPrintMore() {
-	s.RLock()
-	defer s.RUnlock()
-	y.Printf("Level %d:", s.level)
-	for _, t := range s.tables {
-		y.Printf(" [%s, %s]", t.Smallest(), t.Biggest())
-	}
-	y.Printf("\n")
-}
-
 func (s *levelsController) close() {
 	if s.kv.opt.Verbose {
 		y.Printf("Sending close signal to compact workers\n")
 	}
 	n := s.kv.opt.MaxLevels / 2
 	for i := 0; i < n; i++ {
-		s.compactDone <- struct{}{}
+		s.compactWorkersDone <- struct{}{}
 	}
 	// Wait for all compactions to be done. We want to be in a stable state.
 	// Also, closing tables while merge iterators have references will also lead to crash.
-	s.compactJobs.Wait()
+	s.compactWorkersWg.Wait()
 	if s.kv.opt.Verbose {
 		y.Printf("Compaction is all done\n")
 	}
@@ -624,24 +579,6 @@ func (s *levelHandler) close() {
 	defer s.RUnlock()
 	for _, t := range s.tables {
 		t.Close()
-	}
-}
-
-func (s *levelsController) getSummary() *Summary {
-	out := &Summary{
-		fileIDs: make(map[uint64]bool),
-	}
-	for _, l := range s.levels {
-		l.getSummary(out)
-	}
-	return out
-}
-
-func (s *levelHandler) getSummary(summary *Summary) {
-	s.RLock()
-	defer s.RUnlock()
-	for _, t := range s.tables {
-		summary.fileIDs[t.ID()] = true
 	}
 }
 
@@ -728,11 +665,4 @@ func (s *levelsController) appendIterators(iters []y.Iterator) []y.Iterator {
 		iters = level.appendIterators(iters)
 	}
 	return iters
-}
-
-// Check does some sanity check on our levels data or in-memory index for all levels.
-func (s *levelsController) validate() {
-	for _, l := range s.levels {
-		l.validate()
-	}
 }

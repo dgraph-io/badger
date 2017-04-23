@@ -89,11 +89,6 @@ type flushTask struct {
 	vptr value.Pointer
 }
 
-// Summary is produced when DB is closed. Currently it is used only for testing.
-type Summary struct {
-	fileIDs map[uint64]bool
-}
-
 func (s *KV) flushMemtable() {
 	defer s.closer.Done()
 
@@ -193,10 +188,10 @@ func (s *KV) Close() {
 
 	// TODO(ganesh): Block writes to mem.
 	if s.mt.Size() > 0 {
-		s.Lock()
 		if s.opt.Verbose {
 			y.Printf("Flushing memtable\n")
 		}
+		s.Lock()
 		y.AssertTrue(s.mt != nil)
 		s.flushChan <- flushTask{s.mt, s.vptr}
 		s.imm = append(s.imm, s.mt) // Flusher will attempt to remove this from s.imm.
@@ -397,7 +392,8 @@ func (s *KV) hasRoomForWrite() bool {
 	select {
 	case s.flushChan <- flushTask{s.mt, s.vptr}:
 		if s.opt.Verbose {
-			y.Printf("Flushing memtable, size of flushChan: %d\n", len(s.flushChan))
+			y.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
+				s.mt.Size(), len(s.flushChan))
 		}
 		// We manage to push this task. Let's modify imm.
 		s.imm = append(s.imm, s.mt)
@@ -409,10 +405,6 @@ func (s *KV) hasRoomForWrite() bool {
 		return false
 	}
 }
-
-func (s *KV) Validate() { s.lc.validate() }
-
-func (s *KV) DebugPrintMore() { s.lc.debugPrintMore() }
 
 func (s *KV) gcValues() {
 	defer s.closer.Done()
