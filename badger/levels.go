@@ -109,7 +109,11 @@ func (s *levelHandler) deleteTables(idx0, idx1 int) {
 		s.totalSize -= s.tables[i].Size()
 		s.tables[i].DecrRef()
 	}
-	s.tables = append(s.tables[:idx0], s.tables[idx1:]...)
+	// Make a copy as iterators might be keeping a slice of tables.
+	var tables []*table.Table
+	tables = append(tables, s.tables[:idx0]...)
+	tables = append(tables, s.tables[idx1:]...)
+	s.tables = tables
 }
 
 // replaceTables will replace tables[left:right] with newTables. Note this EXCLUDES tables[right].
@@ -127,7 +131,7 @@ func (s *levelHandler) replaceTables(left, right int, newTables []*table.Table) 
 		s.tables[i].DecrRef()
 	}
 
-	// To be safe, just make a copy. TODO: Be more careful and avoid copying.
+	// Make a copy as iterators might be keeping a slice of tables.
 	numDeleted := right - left
 	numAdded := len(newTables)
 	tables := make([]*table.Table, len(s.tables)-numDeleted+numAdded)
@@ -444,7 +448,7 @@ func (s *levelsController) doCompact(l int) error {
 		y.AssertTrue(srcIdx0+1 == srcIdx1) // For now, for level >=1, we expect exactly one table.
 		iters = []y.Iterator{thisLevel.tables[srcIdx0].NewIterator()}
 	}
-	iters = append(iters, newConcatIterator(nextLevel.tables[left:right]))
+	iters = append(iters, table.NewConcatIterator(nextLevel.tables[left:right]))
 	it := y.NewMergeIterator(iters)
 	defer it.Close() // Important to close the iterator to do ref counting.
 
@@ -704,15 +708,6 @@ func appendIteratorsReversed(out []y.Iterator, th []*table.Table) []y.Iterator {
 	return out
 }
 
-func newConcatIterator(th []*table.Table) y.Iterator {
-	iters := make([]y.Iterator, 0, len(th))
-	for _, t := range th {
-		// This will increment the reference of the table handler.
-		iters = append(iters, t.NewIterator())
-	}
-	return y.NewConcatIterator(iters)
-}
-
 // appendIterators appends iterators to an array of iterators, for merging.
 // Note: This obtains references for the table handlers. Remember to close these iterators.
 func (s *levelHandler) appendIterators(iters []y.Iterator) []y.Iterator {
@@ -723,7 +718,7 @@ func (s *levelHandler) appendIterators(iters []y.Iterator) []y.Iterator {
 		// The newer table at the end of s.tables should be added first as it takes precedence.
 		return appendIteratorsReversed(iters, s.tables)
 	}
-	return append(iters, newConcatIterator(s.tables))
+	return append(iters, table.NewConcatIterator(s.tables))
 }
 
 // appendIterators appends iterators to an array of iterators, for merging.

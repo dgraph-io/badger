@@ -27,7 +27,7 @@ type Iterator interface {
 	Next()
 	//	Prev()
 	SeekToFirst()
-	//	SeekToLast()
+	SeekToLast()
 	Seek(key []byte)
 	//	SeekForPrev(key []byte)
 	Key() []byte
@@ -42,8 +42,9 @@ type Iterator interface {
 
 // mergeHeap is an internal structure to remember which iterator has the smallest element.
 type mergeHeap struct {
-	it  *MergeIterator
-	idx []int
+	it       *MergeIterator
+	idx      []int
+	reversed bool
 }
 
 func (s *mergeHeap) Len() int { return len(s.idx) }
@@ -52,10 +53,10 @@ func (s *mergeHeap) Less(i, j int) bool {
 	idx1, idx2 := s.idx[i], s.idx[j]
 	cmp := bytes.Compare(s.it.keys[idx1], s.it.keys[idx2])
 	if cmp < 0 {
-		return true
+		return !s.reversed
 	}
 	if cmp > 0 {
-		return false
+		return s.reversed
 	}
 	// The keys are equal. In this case, lower indices take precedence. This is important.
 	return idx1 < idx2
@@ -160,6 +161,14 @@ func (s *MergeIterator) SeekToFirst() {
 	s.initHeap()
 }
 
+// SeekToLast seeks to last element.
+func (s *MergeIterator) SeekToLast() {
+	for _, it := range s.iters {
+		it.SeekToFirst()
+	}
+	s.initHeap()
+}
+
 // Seek brings us to element with key >= given key.
 func (s *MergeIterator) Seek(key []byte) {
 	for _, it := range s.iters {
@@ -182,77 +191,6 @@ func (s *MergeIterator) initHeap() {
 }
 
 func (s *MergeIterator) Close() {
-	for _, it := range s.iters {
-		it.Close()
-	}
-}
-
-// ConcatIterator iterates over some tables in the given order.
-// NOTE: ConcatIterator owns the array of iterators and is responsible for closing them.
-// TODO: Remove this.
-type ConcatIterator struct {
-	idx   int // Which iterator is active now.
-	iters []Iterator
-}
-
-func NewConcatIterator(iters []Iterator) *ConcatIterator {
-	return &ConcatIterator{
-		iters: iters,
-		idx:   -1, // Not really necessary because s.it.Valid()=false, but good to have.
-	}
-}
-
-func (s *ConcatIterator) SeekToFirst() {
-	if len(s.iters) == 0 {
-		return
-	}
-	s.idx = 0
-	s.iters[0].SeekToFirst()
-}
-
-func (s *ConcatIterator) Valid() bool {
-	return s.idx >= 0 && s.idx < len(s.iters) && s.iters[s.idx].Valid()
-}
-
-func (s *ConcatIterator) Name() string { return "ConcatIterator" }
-
-func (s *ConcatIterator) Key() []byte {
-	AssertTrue(s.Valid())
-	return s.iters[s.idx].Key()
-}
-
-func (s *ConcatIterator) Value() ([]byte, byte) {
-	AssertTrue(s.Valid())
-	return s.iters[s.idx].Value()
-}
-
-func (s *ConcatIterator) Seek(key []byte) {
-	// CURRENTLY NOT IMPLEMENTED.
-	Fatalf("ConcatIterator.Seek is currently not implemented")
-}
-
-// Next advances our concat iterator.
-func (s *ConcatIterator) Next() {
-	s.iters[s.idx].Next()
-	if s.iters[s.idx].Valid() {
-		// Nothing to do. Just stay with the current table.
-		return
-	}
-	for { // In case there are empty tables.
-		s.idx++
-		if s.idx >= len(s.iters) {
-			// End of list. Valid will become false.
-			return
-		}
-		s.iters[s.idx].SeekToFirst()
-		if s.iters[s.idx].Valid() {
-			break
-		}
-	}
-	return
-}
-
-func (s *ConcatIterator) Close() {
 	for _, it := range s.iters {
 		it.Close()
 	}

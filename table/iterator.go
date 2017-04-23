@@ -359,7 +359,6 @@ func (itr *TableIterator) Next() {
 
 func (itr *TableIterator) Prev() {
 	itr.err = nil
-
 	if itr.bpos < 0 {
 		itr.err = io.EOF
 		return
@@ -395,3 +394,115 @@ func (itr *TableIterator) Value() ([]byte, byte) {
 }
 
 func (itr *TableIterator) Name() string { return "TableIterator" }
+
+type ConcatIterator struct {
+	idx    int // Which iterator is active now.
+	iters  []*TableIterator
+	tables []*Table
+}
+
+func NewConcatIterator(tbls []*Table) *ConcatIterator {
+	iters := make([]*TableIterator, len(tbls))
+	for i := 0; i < len(tbls); i++ {
+		iters[i] = tbls[i].NewIterator()
+	}
+	return &ConcatIterator{
+		iters:  iters,
+		tables: tbls,
+		idx:    -1, // Not really necessary because s.it.Valid()=false, but good to have.
+	}
+}
+
+func (s *ConcatIterator) SeekToFirst() {
+	if len(s.iters) == 0 {
+		return
+	}
+	s.idx = 0
+	s.iters[0].SeekToFirst()
+}
+
+func (s *ConcatIterator) Valid() bool {
+	return s.idx >= 0 && s.idx < len(s.iters) && s.iters[s.idx].Valid()
+}
+
+func (s *ConcatIterator) Name() string { return "ConcatIterator" }
+
+func (s *ConcatIterator) Key() []byte {
+	y.AssertTrue(s.Valid())
+	return s.iters[s.idx].Key()
+}
+
+func (s *ConcatIterator) Value() ([]byte, byte) {
+	y.AssertTrue(s.Valid())
+	return s.iters[s.idx].Value()
+}
+
+// Seek brings us to element >= key.
+func (s *ConcatIterator) Seek(key []byte) {
+	idx := sort.Search(len(s.tables), func(i int) bool {
+		return bytes.Compare(s.tables[i].Biggest(), key) >= 0
+	})
+	if idx >= len(s.tables) {
+		s.idx = -1 // Invalid.
+		return
+	}
+	// We know s.tables[i-1].Biggest() < key. Thus, the previous table cannot
+	// possibly contain key.
+	s.idx = idx
+	s.iters[idx].Seek(key)
+
+}
+
+func (s *ConcatIterator) SeekToLast() {
+	if len(s.iters) == 0 {
+		return
+	}
+	s.idx = len(s.iters) - 1
+	s.iters[s.idx].SeekToLast()
+}
+
+// Next advances our concat iterator.
+func (s *ConcatIterator) Next() {
+	s.iters[s.idx].Next()
+	if s.iters[s.idx].Valid() {
+		// Nothing to do. Just stay with the current table.
+		return
+	}
+	for { // In case there are empty tables.
+		s.idx++
+		if s.idx >= len(s.iters) {
+			// End of list. Valid will become false.
+			return
+		}
+		s.iters[s.idx].SeekToFirst()
+		if s.iters[s.idx].Valid() {
+			break
+		}
+	}
+}
+
+// Next advances our concat iterator.
+func (s *ConcatIterator) Prev() {
+	s.iters[s.idx].Prev()
+	if s.iters[s.idx].Valid() {
+		// Nothing to do. Just stay with the current table.
+		return
+	}
+	for { // In case there are empty tables.
+		s.idx--
+		if s.idx < 0 {
+			// End of list. Valid will become false.
+			return
+		}
+		s.iters[s.idx].SeekToLast()
+		if s.iters[s.idx].Valid() {
+			break
+		}
+	}
+}
+
+func (s *ConcatIterator) Close() {
+	for _, it := range s.iters {
+		it.Close()
+	}
+}

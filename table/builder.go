@@ -89,7 +89,8 @@ type TableBuilder struct {
 
 func NewTableBuilder() *TableBuilder {
 	return &TableBuilder{
-		buf: bufPool.Get().(*bytes.Buffer),
+		buf:        bufPool.Get().(*bytes.Buffer),
+		prevOffset: math.MaxUint32, // Used for the first element!
 	}
 }
 
