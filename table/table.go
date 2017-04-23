@@ -34,7 +34,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-const filePrefix = "table_"
+const fileSuffix = ".sst"
 
 const (
 	Nothing = iota
@@ -298,11 +298,12 @@ func (t *Table) ID() uint64       { return t.id }
 
 func ParseFileID(name string) (uint64, bool) {
 	name = path.Base(name)
-	if !strings.HasPrefix(name, filePrefix) {
+	if !strings.HasSuffix(name, fileSuffix) {
 		return 0, false
 	}
-	suffix := name[len(filePrefix):]
-	id, err := strconv.Atoi(suffix)
+	//	suffix := name[len(fileSuffix):]
+	name = strings.TrimSuffix(name, fileSuffix)
+	id, err := strconv.Atoi(name)
 	if err != nil {
 		return 0, false
 	}
@@ -311,5 +312,5 @@ func ParseFileID(name string) (uint64, bool) {
 }
 
 func NewFilename(id uint64, dir string) string {
-	return filepath.Join(dir, filePrefix+fmt.Sprintf("%010d", id))
+	return filepath.Join(dir, fmt.Sprintf("%010d", id)+fileSuffix)
 }
