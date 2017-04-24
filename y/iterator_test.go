@@ -35,19 +35,12 @@ var (
 	closeCount int
 )
 
-func (s *SimpleIterator) Close() {
-	closeCount++
-}
-
+func (s *SimpleIterator) Close()       { closeCount++ }
 func (s *SimpleIterator) Name() string { return "SimpleIterator" }
-
-func (s *SimpleIterator) Next() {
-	s.idx++
-}
-
-func (s *SimpleIterator) SeekToFirst() {
-	s.idx = 0
-}
+func (s *SimpleIterator) Next()        { s.idx++ }
+func (s *SimpleIterator) Prev()        { s.idx-- }
+func (s *SimpleIterator) SeekToFirst() { s.idx = 0 }
+func (s *SimpleIterator) SeekToLast()  { s.idx = len(s.keys) - 1 }
 
 func (s *SimpleIterator) Seek(key []byte) {
 	s.idx = sort.Search(len(s.keys), func(i int) bool {
@@ -55,14 +48,8 @@ func (s *SimpleIterator) Seek(key []byte) {
 	})
 }
 
-func (s *SimpleIterator) Key() []byte {
-	return s.keys[s.idx]
-}
-
-func (s *SimpleIterator) Value() ([]byte, byte) {
-	return s.vals[s.idx], 55
-}
-
+func (s *SimpleIterator) Key() []byte           { return s.keys[s.idx] }
+func (s *SimpleIterator) Value() ([]byte, byte) { return s.vals[s.idx], 55 }
 func (s *SimpleIterator) Valid() bool {
 	return s.idx >= 0 && s.idx < len(s.keys)
 }

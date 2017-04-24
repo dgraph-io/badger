@@ -25,7 +25,7 @@ import (
 // Iterator is an interface for a basic iterator.
 type Iterator interface {
 	Next()
-	//	Prev()
+	Prev()
 	SeekToFirst()
 	SeekToLast()
 	Seek(key []byte)
@@ -151,6 +151,11 @@ func (s *MergeIterator) Next() {
 		}
 		// If equal, we need to continue popping elements.
 	}
+}
+
+func (s *MergeIterator) Prev() {
+	// TODO: Need to track direction in MergeIterator. If reversed, we need to
+	// repopulate the heap.
 }
 
 // SeekToFirst seeks to first element.
