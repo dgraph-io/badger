@@ -70,6 +70,7 @@ var DefaultOptions = Options{
 type KV struct {
 	sync.RWMutex // Guards imm, mem.
 
+	gcCloser  *y.Closer
 	closer    *y.Closer
 	elog      trace.EventLog
 	mt        *skl.Skiplist
@@ -83,50 +84,6 @@ type KV struct {
 	flushChan chan flushTask // For flushing memtables.
 }
 
-type flushTask struct {
-	mt   *skl.Skiplist
-	vptr valuePointer
-}
-
-func (s *KV) flushMemtable() {
-	defer s.closer.Done()
-
-	for {
-		select {
-		case ft := <-s.flushChan:
-			if ft.mt == nil {
-				return
-			}
-
-			if ft.vptr.Fid > 0 || ft.vptr.Offset > 0 {
-				if s.opt.Verbose {
-					fmt.Printf("Storing offset: %+v\n", ft.vptr)
-				}
-				offset := make([]byte, 16)
-				s.vptr.Encode(offset)
-				ft.mt.Put(Head, offset, 0)
-			}
-			fileID, _ := s.lc.reserveFileIDs(1)
-			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir))
-			y.Check(err)
-			y.Check(writeLevel0Table(ft.mt, fd))
-
-			tbl, err := table.OpenTable(fd, s.opt.MapTablesTo)
-			defer tbl.DecrRef()
-
-			y.Check(err)
-			s.lc.addLevel0Table(tbl) // This will incrRef again.
-
-			// Update s.imm. Need a lock.
-			s.Lock()
-			y.AssertTrue(ft.mt == s.imm[0]) //For now, single threaded.
-			s.imm = s.imm[1:]
-			ft.mt.DecrRef() // Return memory.
-			s.Unlock()
-		}
-	}
-}
-
 // NewKV returns a new KV object. Compact levels are created as well.
 func NewKV(opt *Options) *KV {
 	y.AssertTrue(len(opt.Dir) > 0)
@@ -137,6 +94,7 @@ func NewKV(opt *Options) *KV {
 		opt:       *opt, // Make a copy.
 		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MemtableSlack, opt.NumMemtables+5),
 		closer:    y.NewCloser(),
+		gcCloser:  y.NewCloser(),
 		elog:      trace.NewEventLog("badger", "kv"),
 	}
 	out.mt = skl.NewSkiplist(out.arenaPool)
@@ -170,9 +128,10 @@ func NewKV(opt *Options) *KV {
 	}
 	out.vlog.Replay(vptr, fn)
 
-	out.closer.Register()
-	out.closer.Register()
+	out.gcCloser.Register()
 	go out.gcValues()
+
+	out.closer.Register()
 	go out.doWrites()
 	return out
 }
@@ -182,6 +141,12 @@ func (s *KV) Close() {
 	if s.opt.Verbose {
 		y.Printf("Closing database\n")
 	}
+
+	// Let's stop the value GC first.
+	s.elog.Printf("Stopping garbage collection of values.")
+	s.gcCloser.Signal()
+	s.gcCloser.Wait()
+
 	s.elog.Printf("Closing database")
 	s.closer.Signal()
 
@@ -406,7 +371,7 @@ func (s *KV) hasRoomForWrite() bool {
 }
 
 func (s *KV) gcValues() {
-	defer s.closer.Done()
+	defer s.gcCloser.Done()
 
 	ctx := context.Background()
 	tick := time.NewTicker(10 * time.Second)
@@ -415,10 +380,10 @@ func (s *KV) gcValues() {
 		case <-tick.C:
 			s.vlog.RunGC(func(k []byte) ([]byte, byte, bool) {
 				val, meta := s.get(ctx, k)
-				signal := s.closer.GotSignal()
+				signal := s.gcCloser.GotSignal()
 				return val, meta, signal
 			})
-		case <-s.closer.HasBeenClosed():
+		case <-s.gcCloser.HasBeenClosed():
 			return
 		}
 	}
@@ -439,4 +404,48 @@ func writeLevel0Table(s *skl.Skiplist, f *os.File) error {
 	var buf [2]byte // Level 0. Leave it initialized as 0.
 	_, err := f.Write(b.Finish(buf[:]))
 	return err
+}
+
+type flushTask struct {
+	mt   *skl.Skiplist
+	vptr valuePointer
+}
+
+func (s *KV) flushMemtable() {
+	defer s.closer.Done()
+
+	for {
+		select {
+		case ft := <-s.flushChan:
+			if ft.mt == nil {
+				return
+			}
+
+			if ft.vptr.Fid > 0 || ft.vptr.Offset > 0 {
+				if s.opt.Verbose {
+					fmt.Printf("Storing offset: %+v\n", ft.vptr)
+				}
+				offset := make([]byte, 16)
+				s.vptr.Encode(offset)
+				ft.mt.Put(Head, offset, 0)
+			}
+			fileID, _ := s.lc.reserveFileIDs(1)
+			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir))
+			y.Check(err)
+			y.Check(writeLevel0Table(ft.mt, fd))
+
+			tbl, err := table.OpenTable(fd, s.opt.MapTablesTo)
+			defer tbl.DecrRef()
+
+			y.Check(err)
+			s.lc.addLevel0Table(tbl) // This will incrRef again.
+
+			// Update s.imm. Need a lock.
+			s.Lock()
+			y.AssertTrue(ft.mt == s.imm[0]) //For now, single threaded.
+			s.imm = s.imm[1:]
+			ft.mt.DecrRef() // Return memory.
+			s.Unlock()
+		}
+	}
 }
