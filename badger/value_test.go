@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package value
+package badger
 
 import (
 	"context"
@@ -34,7 +34,7 @@ func TestBasic(t *testing.T) {
 	dir, err := ioutil.TempDir("", "")
 	y.Check(err)
 
-	var log Log
+	var log valueLog
 	log.Open(dir, "vlog")
 	defer log.Close()
 
@@ -43,10 +43,10 @@ func TestBasic(t *testing.T) {
 		Value: []byte("sampleval"),
 		Meta:  123,
 	}
-	b := new(Block)
+	b := new(block)
 	b.Entries = []*Entry{entry}
 
-	log.Write([]*Block{b})
+	log.Write([]*block{b})
 	require.Len(t, b.Ptrs, 1)
 	fmt.Printf("Pointer written: %+v", b.Ptrs[0])
 
@@ -75,7 +75,7 @@ func BenchmarkReadWrite(b *testing.B) {
 	for _, vsz := range valueSize {
 		for _, rw := range rwRatio {
 			b.Run(fmt.Sprintf("%3.1f,%04d", rw, vsz), func(b *testing.B) {
-				var vl Log
+				var vl valueLog
 				vl.Open(".", "vlog")
 				defer os.Remove("vlog")
 				b.ResetTimer()
@@ -84,17 +84,17 @@ func BenchmarkReadWrite(b *testing.B) {
 					e := new(Entry)
 					e.Key = make([]byte, 16)
 					e.Value = make([]byte, vsz)
-					bl := new(Block)
+					bl := new(block)
 					bl.Entries = []*Entry{e}
 
-					var ptrs []Pointer
+					var ptrs []valuePointer
 
-					vl.Write([]*Block{bl})
+					vl.Write([]*block{bl})
 					ptrs = append(ptrs, bl.Ptrs...)
 
 					f := rand.Float32()
 					if f < rw {
-						vl.Write([]*Block{bl})
+						vl.Write([]*block{bl})
 						ptrs = append(ptrs, bl.Ptrs...)
 
 					} else {

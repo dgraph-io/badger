@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package value
+package badger
 
 import (
 	"bufio"
@@ -74,11 +74,11 @@ func (lf *logFile) doneWriting() {
 	y.Check(err)
 }
 
-type LogEntry func(e Entry)
+type logEntry func(e Entry)
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
-func (f *logFile) iterate(offset int64, fn LogEntry) error {
+func (f *logFile) iterate(offset int64, fn logEntry) error {
 	_, err := f.fd.Seek(offset, 0)
 	y.Check(err)
 
@@ -139,7 +139,7 @@ func (f *logFile) iterate(offset int64, fn LogEntry) error {
 	return nil
 }
 
-type Log struct {
+type valueLog struct {
 	sync.RWMutex
 	files []logFile
 	// fds    []*os.File
@@ -193,14 +193,14 @@ func (h *header) Decode(buf []byte) []byte {
 	return buf[8:]
 }
 
-type Pointer struct {
+type valuePointer struct {
 	Fid    uint32
 	Len    uint32
 	Offset uint64
 }
 
 // Encode encodes Pointer into byte buffer.
-func (p Pointer) Encode(b []byte) []byte {
+func (p valuePointer) Encode(b []byte) []byte {
 	y.AssertTrue(len(b) >= 16)
 	binary.BigEndian.PutUint32(b[:4], p.Fid)
 	binary.BigEndian.PutUint32(b[4:8], p.Len)
@@ -208,18 +208,18 @@ func (p Pointer) Encode(b []byte) []byte {
 	return b[:16]
 }
 
-func (p *Pointer) Decode(b []byte) {
+func (p *valuePointer) Decode(b []byte) {
 	y.AssertTrue(len(b) >= 16)
 	p.Fid = binary.BigEndian.Uint32(b[:4])
 	p.Len = binary.BigEndian.Uint32(b[4:8])
 	p.Offset = binary.BigEndian.Uint64(b[8:16])
 }
 
-func (l *Log) fpath(fid int32) string {
+func (l *valueLog) fpath(fid int32) string {
 	return fmt.Sprintf("%s/%s_%06d", l.dirPath, l.logPrefix, fid)
 }
 
-func (l *Log) openOrCreateFiles() {
+func (l *valueLog) openOrCreateFiles() {
 	files, err := ioutil.ReadDir(l.dirPath)
 	y.Check(err)
 
@@ -268,7 +268,7 @@ func (l *Log) openOrCreateFiles() {
 	}
 }
 
-func (l *Log) Open(dir, prefix string) {
+func (l *valueLog) Open(dir, prefix string) {
 	l.logPrefix = prefix
 	l.dirPath = dir
 	l.openOrCreateFiles()
@@ -276,7 +276,7 @@ func (l *Log) Open(dir, prefix string) {
 	l.elog = trace.NewEventLog("Badger", "Valuelog")
 }
 
-func (l *Log) Close() {
+func (l *valueLog) Close() {
 	for _, f := range l.files {
 		f.fd.Close()
 	}
@@ -284,7 +284,7 @@ func (l *Log) Close() {
 }
 
 // Replay replays the value log. The kv provided is only valid for the lifetime of function call.
-func (l *Log) Replay(ptr Pointer, fn LogEntry) {
+func (l *valueLog) Replay(ptr valuePointer, fn logEntry) {
 	fid := int32(ptr.Fid)
 	offset := int64(ptr.Offset)
 	fmt.Printf("Seeking at value pointer: %+v\n", ptr)
@@ -308,14 +308,14 @@ func (l *Log) Replay(ptr Pointer, fn LogEntry) {
 	y.Checkf(err, "Unable to seek to the end")
 }
 
-type Block struct {
+type block struct {
 	Entries []*Entry
-	Ptrs    []Pointer
+	Ptrs    []valuePointer
 	Wg      sync.WaitGroup
 }
 
 // Write is thread-unsafe by design and should not be called concurrently.
-func (l *Log) Write(blocks []*Block) {
+func (l *valueLog) Write(blocks []*block) {
 	l.RLock()
 	curlf := &l.files[len(l.files)-1]
 	l.RUnlock()
@@ -340,7 +340,7 @@ func (l *Log) Write(blocks []*Block) {
 		for j := range b.Entries {
 			e := b.Entries[j]
 
-			var p Pointer
+			var p valuePointer
 			p.Fid = uint32(curlf.fid)
 			p.Len = uint32(8 + len(e.Key) + len(e.Value) + 1)
 			p.Offset = uint64(curlf.offset) + uint64(l.buf.Len())
@@ -379,7 +379,7 @@ func (l *Log) Write(blocks []*Block) {
 // 	return b.ptrs, nil
 // }
 
-func (l *Log) getFile(fid int32) (*logFile, error) {
+func (l *valueLog) getFile(fid int32) (*logFile, error) {
 	l.RLock()
 	defer l.RUnlock()
 
@@ -393,7 +393,7 @@ func (l *Log) getFile(fid int32) (*logFile, error) {
 }
 
 // Read reads the value log at a given location.
-func (l *Log) Read(ctx context.Context, p Pointer) (e Entry, err error) {
+func (l *valueLog) Read(ctx context.Context, p valuePointer) (e Entry, err error) {
 	y.Trace(ctx, "Reading value with pointer: %+v", p)
 	defer y.Trace(ctx, "Read done")
 
@@ -415,7 +415,7 @@ func (l *Log) Read(ctx context.Context, p Pointer) (e Entry, err error) {
 	return e, nil
 }
 
-func (l *Log) RunGC(getKey func(k []byte) ([]byte, byte, bool)) {
+func (l *valueLog) RunGC(getKey func(k []byte) ([]byte, byte, bool)) {
 	var lf *logFile
 	l.RLock()
 	if len(l.files) <= 1 {
@@ -458,7 +458,7 @@ func (l *Log) RunGC(getKey func(k []byte) ([]byte, byte, bool)) {
 		} else {
 			// Value is still present in value log.
 			y.AssertTrue(len(vptr) > 0)
-			var vp Pointer
+			var vp valuePointer
 			vp.Decode(vptr)
 
 			if int32(vp.Fid) > lf.fid {

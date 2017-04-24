@@ -18,7 +18,7 @@ package table
 
 import (
 	"fmt"
-	"io/ioutil"
+	"math/rand"
 	"os"
 	"sort"
 	"testing"
@@ -28,15 +28,15 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-func key(i int) string {
-	return fmt.Sprintf("k%04d", i)
+func key(prefix string, i int) string {
+	return prefix + fmt.Sprintf("%04d", i)
 }
 
-func buildTestTable(t *testing.T, n int) *os.File {
+func buildTestTable(t *testing.T, prefix string, n int) *os.File {
 	y.AssertTrue(n <= 10000)
 	keyValues := make([][]string, n)
 	for i := 0; i < n; i++ {
-		k := key(i)
+		k := key(prefix, i)
 		v := fmt.Sprintf("%d", i)
 		keyValues[i] = []string{k, v}
 	}
@@ -48,7 +48,9 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	b := NewTableBuilder()
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
-	f, err := ioutil.TempFile("/tmp", "table_")
+
+	filename := fmt.Sprintf("/tmp/%d.sst", rand.Int63())
+	f, err := y.OpenSyncedFile(filename)
 	require.NoError(t, err)
 
 	sort.Slice(keyValues, func(i, j int) bool {
@@ -65,7 +67,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 func TestSeekToFirst(t *testing.T) {
 	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
-			f := buildTestTable(t, n)
+			f := buildTestTable(t, "key", n)
 			table, err := OpenTable(f, MemoryMap)
 			require.NoError(t, err)
 			defer table.DecrRef()
@@ -82,10 +84,9 @@ func TestSeekToFirst(t *testing.T) {
 }
 
 func TestSeekToLast(t *testing.T) {
-	//	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
-	for _, n := range []int{101} {
+	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
-			f := buildTestTable(t, n)
+			f := buildTestTable(t, "key", n)
 			table, err := OpenTable(f, MemoryMap)
 			require.NoError(t, err)
 			defer table.DecrRef()
@@ -106,7 +107,7 @@ func TestSeekToLast(t *testing.T) {
 }
 
 func TestSeek(t *testing.T) {
-	f := buildTestTable(t, 10000)
+	f := buildTestTable(t, "k", 10000)
 	table, err := OpenTable(f, MemoryMap)
 	require.NoError(t, err)
 	defer table.DecrRef()
@@ -144,7 +145,7 @@ func TestIterateFromStart(t *testing.T) {
 	// Vary the number of elements added.
 	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
-			f := buildTestTable(t, n)
+			f := buildTestTable(t, "key", n)
 			table, err := OpenTable(f, MemoryMap)
 			require.NoError(t, err)
 			defer table.DecrRef()
@@ -171,7 +172,7 @@ func TestIterateFromEnd(t *testing.T) {
 	// Vary the number of elements added.
 	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
-			f := buildTestTable(t, n)
+			f := buildTestTable(t, "key", n)
 			table, err := OpenTable(f, Nothing)
 			require.NoError(t, err)
 			defer table.DecrRef()
@@ -180,7 +181,6 @@ func TestIterateFromEnd(t *testing.T) {
 			ti.Reset()
 			ti.Seek([]byte("zzzzzz")) // Seek to end, an invalid element.
 			require.False(t, ti.Valid())
-
 			for i := n - 1; i >= 0; i-- {
 				ti.Prev()
 				require.True(t, ti.Valid())
@@ -188,44 +188,46 @@ func TestIterateFromEnd(t *testing.T) {
 				require.EqualValues(t, fmt.Sprintf("%d", i), string(v))
 				require.EqualValues(t, 'A', meta)
 			}
+			ti.Prev()
+			require.False(t, ti.Valid())
 		})
 	}
 }
 
 func TestTable(t *testing.T) {
-	f := buildTestTable(t, 10000)
+	f := buildTestTable(t, "key", 10000)
 	table, err := OpenTable(f, Nothing)
 	require.NoError(t, err)
 	defer table.DecrRef()
 	ti := table.NewIterator()
 	defer ti.Close()
 	kid := 1010
-	seek := []byte(key(kid))
+	seek := []byte(key("key", kid))
 	for ti.Seek(seek); ti.Valid(); ti.Next() {
 		k := ti.Key()
-		require.EqualValues(t, k, key(kid))
+		require.EqualValues(t, k, key("key", kid))
 		kid++
 	}
 	if kid != 10000 {
 		t.Errorf("Expected kid: 10000. Got: %v", kid)
 	}
 
-	ti.Seek([]byte(key(99999)))
+	ti.Seek([]byte(key("key", 99999)))
 	require.False(t, ti.Valid())
 
-	ti.Seek([]byte(key(-1)))
+	ti.Seek([]byte(key("key", -1)))
 	require.True(t, ti.Valid())
 	k := ti.Key()
-	require.EqualValues(t, k, key(0))
+	require.EqualValues(t, k, key("key", 0))
 }
 
 func TestIterateBackAndForth(t *testing.T) {
-	f := buildTestTable(t, 10000)
+	f := buildTestTable(t, "key", 10000)
 	table, err := OpenTable(f, MemoryMap)
 	require.NoError(t, err)
 	defer table.DecrRef()
 
-	seek := []byte(key(1010))
+	seek := []byte(key("key", 1010))
 	it := table.NewIterator()
 	defer it.Close()
 	it.Seek(seek)
@@ -237,35 +239,27 @@ func TestIterateBackAndForth(t *testing.T) {
 	it.Prev()
 	require.True(t, it.Valid())
 	k = it.Key()
-	require.EqualValues(t, key(1008), string(k))
+	require.EqualValues(t, key("key", 1008), string(k))
 
 	it.Next()
 	it.Next()
 	require.True(t, it.Valid())
 	k = it.Key()
-	require.EqualValues(t, key(1010), k)
+	require.EqualValues(t, key("key", 1010), k)
 
-	it.Seek([]byte(key(2000)))
+	it.Seek([]byte(key("key", 2000)))
 	require.True(t, it.Valid())
 	k = it.Key()
-	require.EqualValues(t, key(2000), k)
+	require.EqualValues(t, key("key", 2000), k)
 
 	it.Prev()
 	require.True(t, it.Valid())
 	k = it.Key()
-	require.EqualValues(t, key(1999), k)
+	require.EqualValues(t, key("key", 1999), k)
 
 	it.SeekToFirst()
 	k = it.Key()
-	require.EqualValues(t, key(0), string(k))
-}
-
-func newConcatIterator(tables []*Table) y.Iterator {
-	iters := make([]y.Iterator, 0, len(tables))
-	for _, t := range tables {
-		iters = append(iters, t.NewIterator())
-	}
-	return y.NewConcatIterator(iters)
+	require.EqualValues(t, key("key", 0), string(k))
 }
 
 // Try having only one table.
@@ -279,7 +273,7 @@ func TestConcatIteratorOneTable(t *testing.T) {
 	require.NoError(t, err)
 	defer tbl.DecrRef()
 
-	it := newConcatIterator([]*Table{tbl})
+	it := NewConcatIterator([]*Table{tbl})
 	defer it.Close()
 
 	it.SeekToFirst()
@@ -292,28 +286,61 @@ func TestConcatIteratorOneTable(t *testing.T) {
 }
 
 func TestConcatIterator(t *testing.T) {
-	f := buildTestTable(t, 10000)
-	f2 := buildTestTable(t, 10000)
+	f := buildTestTable(t, "keya", 10000)
+	f2 := buildTestTable(t, "keyb", 10000)
+	f3 := buildTestTable(t, "keyc", 10000)
 	tbl, err := OpenTable(f, MemoryMap)
 	require.NoError(t, err)
 	defer tbl.DecrRef()
 	tbl2, err := OpenTable(f2, LoadToRAM)
 	require.NoError(t, err)
 	defer tbl2.DecrRef()
+	tbl3, err := OpenTable(f3, LoadToRAM)
+	require.NoError(t, err)
+	defer tbl3.DecrRef()
 
-	it := newConcatIterator([]*Table{tbl, tbl2})
+	it := NewConcatIterator([]*Table{tbl, tbl2, tbl3})
 	defer it.Close()
 
-	it.SeekToFirst()
-	require.True(t, it.Valid())
-	var count int
-	for ; it.Valid(); it.Next() {
-		v, meta := it.Value()
-		require.EqualValues(t, fmt.Sprintf("%d", count%10000), string(v))
-		require.EqualValues(t, 'A', meta)
-		count++
+	{
+		it.SeekToFirst()
+		require.True(t, it.Valid())
+		var count int
+		for ; it.Valid(); it.Next() {
+			v, meta := it.Value()
+			require.EqualValues(t, fmt.Sprintf("%d", count%10000), string(v))
+			require.EqualValues(t, 'A', meta)
+			count++
+		}
+		require.EqualValues(t, 30000, count)
 	}
-	require.EqualValues(t, 20000, count)
+	{
+		it.SeekToLast()
+		require.True(t, it.Valid())
+		var count int
+		for ; it.Valid(); it.Prev() {
+			v, meta := it.Value()
+			require.EqualValues(t, fmt.Sprintf("%d", 10000-(count%10000)-1), string(v))
+			require.EqualValues(t, 'A', meta)
+			count++
+		}
+		require.EqualValues(t, 30000, count)
+	}
+	{
+		// Test seek.
+		it.Seek([]byte("keyb"))
+		require.EqualValues(t, "keyb0000", string(it.Key()))
+		v, _ := it.Value()
+		require.EqualValues(t, "0", string(v))
+
+		it.Seek([]byte("keyc5"))
+		require.EqualValues(t, "keyc5000", string(it.Key()))
+		v, _ = it.Value()
+		require.EqualValues(t, "5000", string(v))
+
+		it.Seek([]byte("keyd"))
+		require.False(t, it.Valid())
+	}
 }
 
 func TestMergingIterator(t *testing.T) {
@@ -332,7 +359,7 @@ func TestMergingIterator(t *testing.T) {
 	require.NoError(t, err)
 	defer tbl2.DecrRef()
 	it1 := tbl1.NewIterator()
-	it2 := newConcatIterator([]*Table{tbl2})
+	it2 := NewConcatIterator([]*Table{tbl2})
 	it := y.NewMergeIterator([]y.Iterator{it1, it2})
 	defer it.Close()
 
@@ -371,8 +398,8 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 	require.NoError(t, err)
 	defer t2.DecrRef()
 
-	it1 := newConcatIterator([]*Table{t1})
-	it2 := newConcatIterator([]*Table{t2})
+	it1 := NewConcatIterator([]*Table{t1})
+	it2 := NewConcatIterator([]*Table{t2})
 	it := y.NewMergeIterator([]y.Iterator{it1, it2})
 	defer it.Close()
 
@@ -411,8 +438,8 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 	require.NoError(t, err)
 	defer t2.DecrRef()
 
-	it1 := newConcatIterator([]*Table{t1})
-	it2 := newConcatIterator([]*Table{t2})
+	it1 := NewConcatIterator([]*Table{t1})
+	it2 := NewConcatIterator([]*Table{t2})
 	it := y.NewMergeIterator([]y.Iterator{it1, it2})
 	defer it.Close()
 

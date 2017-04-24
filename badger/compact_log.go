@@ -16,6 +16,7 @@ type compactLog struct {
 	fd *os.File
 }
 
+// compaction is our compaction in a easily serializable form.
 type compaction struct {
 	compactID uint64
 	done      byte
@@ -161,4 +162,26 @@ func compactLogReplay(filename, dir string, idMap map[uint64]struct{}) {
 			y.Check(err)
 		}
 	}
+}
+
+func (s *levelsController) buildCompaction(def *compactDef) *compaction {
+	var newIDMin, newIDMax uint64
+	c := new(compaction)
+	c.compactID = s.reserveCompactID()
+	var estSize int64
+	for _, t := range def.top {
+		c.toDelete = append(c.toDelete, t.ID())
+		estSize += t.Size()
+	}
+	for _, t := range def.bot {
+		c.toDelete = append(c.toDelete, t.ID())
+		estSize += t.Size()
+	}
+	estNumTables := 1 + (estSize+s.kv.opt.MaxTableSize-1)/s.kv.opt.MaxTableSize
+	newIDMin, newIDMax = s.reserveFileIDs(int(estNumTables))
+	// TODO: Consider storing just two numbers for toInsert.
+	for i := newIDMin; i < newIDMax; i++ {
+		c.toInsert = append(c.toInsert, uint64(i))
+	}
+	return c
 }

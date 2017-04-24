@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/dgraph-io/badger/value"
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -90,7 +89,7 @@ TOP:
 	INTERNAL:
 		for ; i.Valid(); i.Next() {
 			vptr, meta := i.Value()
-			if (meta & value.BitDelete) != 0 {
+			if (meta & BitDelete) != 0 {
 				// Tombstone encountered.
 				continue
 			}

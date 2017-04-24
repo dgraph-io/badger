@@ -184,20 +184,3 @@ func TestMergeIteratorSeekInvalid(t *testing.T) {
 	require.False(t, mergeIt.Valid())
 	closeAndCheck(t, mergeIt, 4)
 }
-
-func TestConcatIterator(t *testing.T) {
-	it := newSimpleIterator([]string{"1", "3", "7"}, []string{"a1", "a3", "a7"})
-	it2 := newSimpleIterator([]string{}, []string{})
-	it3 := newSimpleIterator([]string{"1"}, []string{"c1"})
-	it4 := newSimpleIterator([]string{}, []string{})
-
-	concatIt := NewConcatIterator([]Iterator{it, it2, it3, it4})
-
-	concatIt.SeekToFirst()
-	require.True(t, concatIt.Valid())
-	k, v := getAll(concatIt)
-	require.EqualValues(t, []string{"1", "3", "7", "1"}, k)
-	require.EqualValues(t, []string{"a1", "a3", "a7", "c1"}, v)
-
-	closeAndCheck(t, concatIt, 4)
-}
