@@ -50,7 +50,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
 	filename := fmt.Sprintf("/tmp/%d.sst", rand.Int63())
-	f, err := y.OpenSyncedFile(filename)
+	f, err := y.OpenSyncedFile(filename, true)
 	require.NoError(t, err)
 
 	sort.Slice(keyValues, func(i, j int) bool {
@@ -126,11 +126,46 @@ func TestSeek(t *testing.T) {
 		{"k1234", true, "k1234"},
 		{"k1234b", true, "k1235"},
 		{"k9999", true, "k9999"},
-		{"z", false, ""}, // Test case where every element is < input key.
+		{"z", false, ""},
 	}
 
 	for _, tt := range data {
 		it.Seek([]byte(tt.in))
+		if !tt.valid {
+			require.False(t, it.Valid())
+			continue
+		}
+		require.True(t, it.Valid())
+		k := it.Key()
+		require.EqualValues(t, tt.out, string(k))
+	}
+}
+
+func TestSeekForPrev(t *testing.T) {
+	f := buildTestTable(t, "k", 10000)
+	table, err := OpenTable(f, MemoryMap)
+	require.NoError(t, err)
+	defer table.DecrRef()
+
+	it := table.NewIterator()
+	defer it.Close()
+
+	var data = []struct {
+		in    string
+		valid bool
+		out   string
+	}{
+		{"abc", false, ""},
+		{"k0100", true, "k0100"},
+		{"k0100b", true, "k0100"}, // Test case where we jump to next block.
+		{"k1234", true, "k1234"},
+		{"k1234b", true, "k1234"},
+		{"k9999", true, "k9999"},
+		{"z", true, "k9999"},
+	}
+
+	for _, tt := range data {
+		it.SeekForPrev([]byte(tt.in))
 		if !tt.valid {
 			require.False(t, it.Valid())
 			continue
@@ -262,6 +297,37 @@ func TestIterateBackAndForth(t *testing.T) {
 	require.EqualValues(t, key("key", 0), string(k))
 }
 
+func TestUniIterator(t *testing.T) {
+	f := buildTestTable(t, "key", 10000)
+	table, err := OpenTable(f, MemoryMap)
+	require.NoError(t, err)
+	defer table.DecrRef()
+	{
+		it := table.NewUniIterator(false)
+		defer it.Close()
+		var count int
+		for it.Rewind(); it.Valid(); it.Next() {
+			v, meta := it.Value()
+			require.EqualValues(t, fmt.Sprintf("%d", count), string(v))
+			require.EqualValues(t, 'A', meta)
+			count++
+		}
+		require.EqualValues(t, 10000, count)
+	}
+	{
+		it := table.NewUniIterator(true)
+		defer it.Close()
+		var count int
+		for it.Rewind(); it.Valid(); it.Next() {
+			v, meta := it.Value()
+			require.EqualValues(t, fmt.Sprintf("%d", 10000-1-count), string(v))
+			require.EqualValues(t, 'A', meta)
+			count++
+		}
+		require.EqualValues(t, 10000, count)
+	}
+}
+
 // Try having only one table.
 func TestConcatIteratorOneTable(t *testing.T) {
 	f := buildTable(t, [][]string{
@@ -273,10 +339,10 @@ func TestConcatIteratorOneTable(t *testing.T) {
 	require.NoError(t, err)
 	defer tbl.DecrRef()
 
-	it := NewConcatIterator([]*Table{tbl})
+	it := NewConcatIterator([]*Table{tbl}, false)
 	defer it.Close()
 
-	it.SeekToFirst()
+	it.Rewind()
 	require.True(t, it.Valid())
 	k := it.Key()
 	require.EqualValues(t, "k1", string(k))
@@ -299,11 +365,10 @@ func TestConcatIterator(t *testing.T) {
 	require.NoError(t, err)
 	defer tbl3.DecrRef()
 
-	it := NewConcatIterator([]*Table{tbl, tbl2, tbl3})
-	defer it.Close()
-
 	{
-		it.SeekToFirst()
+		it := NewConcatIterator([]*Table{tbl, tbl2, tbl3}, false)
+		defer it.Close()
+		it.Rewind()
 		require.True(t, it.Valid())
 		var count int
 		for ; it.Valid(); it.Next() {
@@ -313,33 +378,56 @@ func TestConcatIterator(t *testing.T) {
 			count++
 		}
 		require.EqualValues(t, 30000, count)
+
+		it.Seek([]byte("a"))
+		require.EqualValues(t, "keya0000", string(it.Key()))
+		v, _ := it.Value()
+		require.EqualValues(t, "0", string(v))
+
+		it.Seek([]byte("keyb"))
+		require.EqualValues(t, "keyb0000", string(it.Key()))
+		v, _ = it.Value()
+		require.EqualValues(t, "0", string(v))
+
+		it.Seek([]byte("keyb9999b"))
+		require.EqualValues(t, "keyc0000", string(it.Key()))
+		v, _ = it.Value()
+		require.EqualValues(t, "0", string(v))
+
+		it.Seek([]byte("keyd"))
+		require.False(t, it.Valid())
 	}
 	{
-		it.SeekToLast()
+		it := NewConcatIterator([]*Table{tbl, tbl2, tbl3}, true)
+		defer it.Close()
+		it.Rewind()
 		require.True(t, it.Valid())
 		var count int
-		for ; it.Valid(); it.Prev() {
+		for ; it.Valid(); it.Next() {
 			v, meta := it.Value()
 			require.EqualValues(t, fmt.Sprintf("%d", 10000-(count%10000)-1), string(v))
 			require.EqualValues(t, 'A', meta)
 			count++
 		}
 		require.EqualValues(t, 30000, count)
-	}
-	{
-		// Test seek.
-		it.Seek([]byte("keyb"))
-		require.EqualValues(t, "keyb0000", string(it.Key()))
-		v, _ := it.Value()
-		require.EqualValues(t, "0", string(v))
 
-		it.Seek([]byte("keyc5"))
-		require.EqualValues(t, "keyc5000", string(it.Key()))
+		it.Seek([]byte("a"))
+		require.False(t, it.Valid())
+
+		it.Seek([]byte("keyb"))
+		require.EqualValues(t, "keya9999", string(it.Key()))
+		v, _ := it.Value()
+		require.EqualValues(t, "9999", string(v))
+
+		it.Seek([]byte("keyb9999b"))
+		require.EqualValues(t, "keyb9999", string(it.Key()))
 		v, _ = it.Value()
-		require.EqualValues(t, "5000", string(v))
+		require.EqualValues(t, "9999", string(v))
 
 		it.Seek([]byte("keyd"))
-		require.False(t, it.Valid())
+		require.EqualValues(t, "keyc9999", string(it.Key()))
+		v, _ = it.Value()
+		require.EqualValues(t, "9999", string(v))
 	}
 }
 
@@ -358,12 +446,12 @@ func TestMergingIterator(t *testing.T) {
 	tbl2, err := OpenTable(f2, LoadToRAM)
 	require.NoError(t, err)
 	defer tbl2.DecrRef()
-	it1 := tbl1.NewIterator()
-	it2 := NewConcatIterator([]*Table{tbl2})
-	it := y.NewMergeIterator([]y.Iterator{it1, it2})
+	it1 := tbl1.NewUniIterator(false)
+	it2 := NewConcatIterator([]*Table{tbl2}, false)
+	it := y.NewMergeIterator([]y.Iterator{it1, it2}, false)
 	defer it.Close()
 
-	it.SeekToFirst()
+	it.Rewind()
 	require.True(t, it.Valid())
 	k := it.Key()
 	require.EqualValues(t, "k1", string(k))
@@ -383,82 +471,122 @@ func TestMergingIterator(t *testing.T) {
 	require.False(t, it.Valid())
 }
 
-// Take only the first iterator.
-func TestMergingIteratorTakeOne(t *testing.T) {
+func TestMergingIteratorReversed(t *testing.T) {
 	f1 := buildTable(t, [][]string{
 		{"k1", "a1"},
 		{"k2", "a2"},
 	})
-	f2 := buildTable(t, [][]string{})
-
-	t1, err := OpenTable(f1, LoadToRAM)
-	require.NoError(t, err)
-	defer t1.DecrRef()
-	t2, err := OpenTable(f2, LoadToRAM)
-	require.NoError(t, err)
-	defer t2.DecrRef()
-
-	it1 := NewConcatIterator([]*Table{t1})
-	it2 := NewConcatIterator([]*Table{t2})
-	it := y.NewMergeIterator([]y.Iterator{it1, it2})
-	defer it.Close()
-
-	it.SeekToFirst()
-	require.True(t, it.Valid())
-	k := it.Key()
-	require.EqualValues(t, "k1", string(k))
-	v, meta := it.Value()
-	require.EqualValues(t, "a1", string(v))
-	require.EqualValues(t, 'A', meta)
-	it.Next()
-
-	require.True(t, it.Valid())
-	k = it.Key()
-	require.EqualValues(t, "k2", string(k))
-	v, meta = it.Value()
-	require.EqualValues(t, "a2", string(v))
-	require.EqualValues(t, 'A', meta)
-	it.Next()
-
-	require.False(t, it.Valid())
-}
-
-// Take only the second iterator.
-func TestMergingIteratorTakeTwo(t *testing.T) {
-	f1 := buildTable(t, [][]string{})
 	f2 := buildTable(t, [][]string{
-		{"k1", "a1"},
-		{"k2", "a2"},
+		{"k1", "b1"},
+		{"k2", "b2"},
 	})
-
-	t1, err := OpenTable(f1, LoadToRAM)
+	tbl1, err := OpenTable(f1, LoadToRAM)
 	require.NoError(t, err)
-	defer t1.DecrRef()
-	t2, err := OpenTable(f2, LoadToRAM)
+	defer tbl1.DecrRef()
+	tbl2, err := OpenTable(f2, LoadToRAM)
 	require.NoError(t, err)
-	defer t2.DecrRef()
-
-	it1 := NewConcatIterator([]*Table{t1})
-	it2 := NewConcatIterator([]*Table{t2})
-	it := y.NewMergeIterator([]y.Iterator{it1, it2})
+	defer tbl2.DecrRef()
+	it1 := tbl1.NewUniIterator(true)
+	it2 := NewConcatIterator([]*Table{tbl2}, true)
+	it := y.NewMergeIterator([]y.Iterator{it1, it2}, true)
 	defer it.Close()
 
-	it.SeekToFirst()
+	it.Rewind()
 	require.True(t, it.Valid())
 	k := it.Key()
-	require.EqualValues(t, "k1", string(k))
+	require.EqualValues(t, "k2", string(k))
 	v, meta := it.Value()
-	require.EqualValues(t, "a1", string(v))
+	require.EqualValues(t, "a2", string(v))
 	require.EqualValues(t, 'A', meta)
 	it.Next()
 
 	require.True(t, it.Valid())
 	k = it.Key()
-	require.EqualValues(t, "k2", string(k))
+	require.EqualValues(t, "k1", string(k))
 	v, meta = it.Value()
-	require.EqualValues(t, "a2", string(v))
+	require.EqualValues(t, "a1", string(v))
 	require.EqualValues(t, 'A', meta)
 	it.Next()
 
 	require.False(t, it.Valid())
 }
+
+//// Take only the first iterator.
+//func TestMergingIteratorTakeOne(t *testing.T) {
+//	f1 := buildTable(t, [][]string{
+//		{"k1", "a1"},
+//		{"k2", "a2"},
+//	})
+//	f2 := buildTable(t, [][]string{})
+
+//	t1, err := OpenTable(f1, LoadToRAM)
+//	require.NoError(t, err)
+//	defer t1.DecrRef()
+//	t2, err := OpenTable(f2, LoadToRAM)
+//	require.NoError(t, err)
+//	defer t2.DecrRef()
+
+//	it1 := NewConcatIterator([]*Table{t1})
+//	it2 := NewConcatIterator([]*Table{t2})
+//	it := y.NewMergeIterator([]y.Iterator{it1, it2})
+//	defer it.Close()
+
+//	it.SeekToFirst()
+//	require.True(t, it.Valid())
+//	k := it.Key()
+//	require.EqualValues(t, "k1", string(k))
+//	v, meta := it.Value()
+//	require.EqualValues(t, "a1", string(v))
+//	require.EqualValues(t, 'A', meta)
+//	it.Next()
+
+//	require.True(t, it.Valid())
+//	k = it.Key()
+//	require.EqualValues(t, "k2", string(k))
+//	v, meta = it.Value()
+//	require.EqualValues(t, "a2", string(v))
+//	require.EqualValues(t, 'A', meta)
+//	it.Next()
+
+//	require.False(t, it.Valid())
+//}
+
+//// Take only the second iterator.
+//func TestMergingIteratorTakeTwo(t *testing.T) {
+//	f1 := buildTable(t, [][]string{})
+//	f2 := buildTable(t, [][]string{
+//		{"k1", "a1"},
+//		{"k2", "a2"},
+//	})
+
+//	t1, err := OpenTable(f1, LoadToRAM)
+//	require.NoError(t, err)
+//	defer t1.DecrRef()
+//	t2, err := OpenTable(f2, LoadToRAM)
+//	require.NoError(t, err)
+//	defer t2.DecrRef()
+
+//	it1 := NewConcatIterator([]*Table{t1})
+//	it2 := NewConcatIterator([]*Table{t2})
+//	it := y.NewMergeIterator([]y.Iterator{it1, it2})
+//	defer it.Close()
+
+//	it.SeekToFirst()
+//	require.True(t, it.Valid())
+//	k := it.Key()
+//	require.EqualValues(t, "k1", string(k))
+//	v, meta := it.Value()
+//	require.EqualValues(t, "a1", string(v))
+//	require.EqualValues(t, 'A', meta)
+//	it.Next()
+
+//	require.True(t, it.Valid())
+//	k = it.Key()
+//	require.EqualValues(t, "k2", string(k))
+//	v, meta = it.Value()
+//	require.EqualValues(t, "a2", string(v))
+//	require.EqualValues(t, 'A', meta)
+//	it.Next()
+
+//	require.False(t, it.Valid())
+//}

@@ -25,15 +25,11 @@ import (
 // Iterator is an interface for a basic iterator.
 type Iterator interface {
 	Next()
-	Prev()
-	SeekToFirst()
-	SeekToLast()
+	Rewind()
 	Seek(key []byte)
-	//	SeekForPrev(key []byte)
 	Key() []byte
 	Value() ([]byte, byte)
 	Valid() bool
-
 	Name() string // Mainly for debug or testing.
 
 	// All iterators should be closed so that file garbage collection works.
@@ -80,16 +76,18 @@ func (s *mergeHeap) Pop() interface{} {
 // MergeIterator merges multiple iterators.
 // NOTE: MergeIterator owns the array of iterators and is responsible for closing them.
 type MergeIterator struct {
-	iters []Iterator
-	keys  [][]byte
-	h     *mergeHeap
+	iters    []Iterator
+	keys     [][]byte
+	h        *mergeHeap
+	reversed bool
 }
 
 // NewMergeIterator returns a new MergeIterator from a list of Iterators.
-func NewMergeIterator(iters []Iterator) *MergeIterator {
+func NewMergeIterator(iters []Iterator, reversed bool) *MergeIterator {
 	return &MergeIterator{
-		iters: iters,
-		keys:  make([][]byte, len(iters)),
+		iters:    iters,
+		keys:     make([][]byte, len(iters)),
+		reversed: reversed,
 	}
 }
 
@@ -153,23 +151,10 @@ func (s *MergeIterator) Next() {
 	}
 }
 
-func (s *MergeIterator) Prev() {
-	// TODO: Need to track direction in MergeIterator. If reversed, we need to
-	// repopulate the heap.
-}
-
-// SeekToFirst seeks to first element.
-func (s *MergeIterator) SeekToFirst() {
+// Rewind seeks to first element (or last element for reverse iterator).
+func (s *MergeIterator) Rewind() {
 	for _, it := range s.iters {
-		it.SeekToFirst()
-	}
-	s.initHeap()
-}
-
-// SeekToLast seeks to last element.
-func (s *MergeIterator) SeekToLast() {
-	for _, it := range s.iters {
-		it.SeekToFirst()
+		it.Rewind()
 	}
 	s.initHeap()
 }
@@ -183,8 +168,12 @@ func (s *MergeIterator) Seek(key []byte) {
 }
 
 // initHeap checks all iterators and initializes our heap and array of keys.
+// Whenever we reverse direction, we need to run this.
 func (s *MergeIterator) initHeap() {
-	s.h = &mergeHeap{it: s}
+	s.h = &mergeHeap{
+		it:       s,
+		reversed: s.reversed,
+	}
 	for i, it := range s.iters {
 		s.keys[i] = nil
 		if !it.Valid() {

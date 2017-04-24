@@ -284,7 +284,7 @@ func (itr *TableIterator) seekHelper(blockIdx int, key []byte) {
 	itr.err = itr.bi.Error()
 }
 
-// Seek brings us to a key that is >= input key.
+// seek brings us to a key that is >= input key.
 func (itr *TableIterator) seek(key []byte, whence int) {
 	itr.err = nil
 	switch whence {
@@ -327,6 +327,15 @@ func (itr *TableIterator) seek(key []byte, whence int) {
 // Seek will reset iterator and seek to >= key.
 func (itr *TableIterator) Seek(key []byte) {
 	itr.seek(key, ORIGIN)
+}
+
+// SeekForPrev will reset iterator and seek to <= key.
+func (itr *TableIterator) SeekForPrev(key []byte) {
+	// TODO: Optimize this. We shouldn't have to take a Prev step.
+	itr.seek(key, ORIGIN)
+	if !bytes.Equal(itr.Key(), key) {
+		itr.Prev()
+	}
 }
 
 func (itr *TableIterator) Next() {
@@ -393,32 +402,81 @@ func (itr *TableIterator) Value() ([]byte, byte) {
 	return v[1:], v[0]
 }
 
-func (itr *TableIterator) Name() string { return "TableIterator" }
+// UniIterator is a unidirectional TableIterator. It is a thin wrapper around
+// TableIterator. We like to keep TableIterator as before, because it is more
+// powerful and we might support bidirectional iterators in the future.
+type UniIterator struct {
+	iter     *TableIterator
+	reversed bool
+}
+
+func (t *Table) NewUniIterator(reversed bool) *UniIterator {
+	return &UniIterator{
+		iter:     t.NewIterator(),
+		reversed: reversed,
+	}
+}
+
+func (s *UniIterator) Next() {
+	if !s.reversed {
+		s.iter.Next()
+	} else {
+		s.iter.Prev()
+	}
+}
+
+func (s *UniIterator) Rewind() {
+	if !s.reversed {
+		s.iter.SeekToFirst()
+	} else {
+		s.iter.SeekToLast()
+	}
+}
+
+func (s *UniIterator) Seek(key []byte) {
+	if !s.reversed {
+		s.iter.Seek(key)
+	} else {
+		s.iter.SeekForPrev(key)
+	}
+}
+
+func (s *UniIterator) Key() []byte           { return s.iter.Key() }
+func (s *UniIterator) Value() ([]byte, byte) { return s.iter.Value() }
+func (s *UniIterator) Valid() bool           { return s.iter.Valid() }
+func (s *UniIterator) Name() string          { return "UniTableIterator" }
+func (s *UniIterator) Close()                { s.iter.Close() }
 
 type ConcatIterator struct {
-	idx    int // Which iterator is active now.
-	iters  []*TableIterator
-	tables []*Table
+	idx      int            // Which iterator is active now.
+	iters    []*UniIterator // Corresponds to tables.
+	tables   []*Table       // Disregarding reversed, this is in ascending order.
+	reversed bool
 }
 
-func NewConcatIterator(tbls []*Table) *ConcatIterator {
-	iters := make([]*TableIterator, len(tbls))
+func NewConcatIterator(tbls []*Table, reversed bool) *ConcatIterator {
+	iters := make([]*UniIterator, len(tbls))
 	for i := 0; i < len(tbls); i++ {
-		iters[i] = tbls[i].NewIterator()
+		iters[i] = tbls[i].NewUniIterator(reversed)
 	}
 	return &ConcatIterator{
-		iters:  iters,
-		tables: tbls,
-		idx:    -1, // Not really necessary because s.it.Valid()=false, but good to have.
+		reversed: reversed,
+		iters:    iters,
+		tables:   tbls,
+		idx:      -1, // Not really necessary because s.it.Valid()=false, but good to have.
 	}
 }
 
-func (s *ConcatIterator) SeekToFirst() {
+func (s *ConcatIterator) Rewind() {
 	if len(s.iters) == 0 {
 		return
 	}
-	s.idx = 0
-	s.iters[0].SeekToFirst()
+	if !s.reversed {
+		s.idx = 0
+	} else {
+		s.idx = len(s.iters) - 1
+	}
+	s.iters[s.idx].Rewind()
 }
 
 func (s *ConcatIterator) Valid() bool {
@@ -437,28 +495,27 @@ func (s *ConcatIterator) Value() ([]byte, byte) {
 	return s.iters[s.idx].Value()
 }
 
-// Seek brings us to element >= key.
+// Seek brings us to element >= key if reversed is false. Otherwise, <= key.
 func (s *ConcatIterator) Seek(key []byte) {
-	idx := sort.Search(len(s.tables), func(i int) bool {
-		return bytes.Compare(s.tables[i].Biggest(), key) >= 0
-	})
-	if idx >= len(s.tables) {
+	var idx int
+	if !s.reversed {
+		idx = sort.Search(len(s.tables), func(i int) bool {
+			return bytes.Compare(s.tables[i].Biggest(), key) >= 0
+		})
+	} else {
+		n := len(s.tables)
+		idx = n - 1 - sort.Search(n, func(i int) bool {
+			return bytes.Compare(s.tables[n-1-i].Smallest(), key) <= 0
+		})
+	}
+	if idx >= len(s.tables) || idx < 0 {
 		s.idx = -1 // Invalid.
 		return
 	}
-	// We know s.tables[i-1].Biggest() < key. Thus, the previous table cannot
-	// possibly contain key.
+	// For reversed=false, we know s.tables[i-1].Biggest() < key. Thus, the
+	// previous table cannot possibly contain key.
 	s.idx = idx
 	s.iters[idx].Seek(key)
-
-}
-
-func (s *ConcatIterator) SeekToLast() {
-	if len(s.iters) == 0 {
-		return
-	}
-	s.idx = len(s.iters) - 1
-	s.iters[s.idx].SeekToLast()
 }
 
 // Next advances our concat iterator.
@@ -469,32 +526,16 @@ func (s *ConcatIterator) Next() {
 		return
 	}
 	for { // In case there are empty tables.
-		s.idx++
-		if s.idx >= len(s.iters) {
+		if !s.reversed {
+			s.idx++
+		} else {
+			s.idx--
+		}
+		if s.idx >= len(s.iters) || s.idx < 0 {
 			// End of list. Valid will become false.
 			return
 		}
-		s.iters[s.idx].SeekToFirst()
-		if s.iters[s.idx].Valid() {
-			break
-		}
-	}
-}
-
-// Next advances our concat iterator.
-func (s *ConcatIterator) Prev() {
-	s.iters[s.idx].Prev()
-	if s.iters[s.idx].Valid() {
-		// Nothing to do. Just stay with the current table.
-		return
-	}
-	for { // In case there are empty tables.
-		s.idx--
-		if s.idx < 0 {
-			// End of list. Valid will become false.
-			return
-		}
-		s.iters[s.idx].SeekToLast()
+		s.iters[s.idx].Rewind()
 		if s.iters[s.idx].Valid() {
 			break
 		}

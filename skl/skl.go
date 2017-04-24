@@ -434,3 +434,48 @@ func (s *Iterator) SeekToLast() {
 }
 
 func (s *Iterator) Name() string { return "SkiplistIterator" }
+
+// UniIterator is a unidirectional memtable iterator. It is a thin wrapper around
+// Iterator. We like to keep Iterator as before, because it is more powerful and
+// we might support bidirectional iterators in the future.
+type UniIterator struct {
+	iter     *Iterator
+	reversed bool
+}
+
+func (s *Skiplist) NewUniIterator(reversed bool) *UniIterator {
+	return &UniIterator{
+		iter:     s.NewIterator(),
+		reversed: reversed,
+	}
+}
+
+func (s *UniIterator) Next() {
+	if !s.reversed {
+		s.iter.Next()
+	} else {
+		s.iter.Prev()
+	}
+}
+
+func (s *UniIterator) Rewind() {
+	if !s.reversed {
+		s.iter.SeekToFirst()
+	} else {
+		s.iter.SeekToLast()
+	}
+}
+
+func (s *UniIterator) Seek(key []byte) {
+	if !s.reversed {
+		s.iter.Seek(key)
+	} else {
+		s.iter.SeekForPrev(key)
+	}
+}
+
+func (s *UniIterator) Key() []byte           { return s.iter.Key() }
+func (s *UniIterator) Value() ([]byte, byte) { return s.iter.Value() }
+func (s *UniIterator) Valid() bool           { return s.iter.Valid() }
+func (s *UniIterator) Name() string          { return "UniMemtableIterator" }
+func (s *UniIterator) Close()                { s.iter.Close() }

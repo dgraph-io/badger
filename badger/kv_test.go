@@ -39,7 +39,8 @@ func getTestOptions(dir string) *Options {
 	opt.LevelOneSize = 4 << 15 // Force more compaction.
 	opt.Verbose = true
 	opt.Dir = dir
-	opt.DoNotRunValueGC = true
+	//	opt.ValueGCThreshold = 0.0
+	opt.SyncWrites = true // Some tests seem to need this to pass.
 	return opt
 }
 
@@ -47,8 +48,8 @@ func TestWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	db := NewKV(getTestOptions(dir))
-	defer db.Close()
+	kv := NewKV(getTestOptions(dir))
+	defer kv.Close()
 
 	var entries []*Entry
 	for i := 0; i < 100; i++ {
@@ -58,7 +59,7 @@ func TestWrite(t *testing.T) {
 		})
 	}
 	ctx := context.Background()
-	require.NoError(t, db.Write(ctx, entries))
+	require.NoError(t, kv.Write(ctx, entries))
 }
 
 func TestConcurrentWrite(t *testing.T) {
@@ -66,8 +67,8 @@ func TestConcurrentWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	db := NewKV(getTestOptions(dir))
-	defer db.Close()
+	kv := NewKV(getTestOptions(dir))
+	defer kv.Close()
 
 	// Not a benchmark. Just a simple test for concurrent writes.
 	n := 20
@@ -78,7 +79,7 @@ func TestConcurrentWrite(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			for j := 0; j < m; j++ {
-				db.Put(ctx, []byte(fmt.Sprintf("k%05d_%08d", i, j)),
+				kv.Put(ctx, []byte(fmt.Sprintf("k%05d_%08d", i, j)),
 					[]byte(fmt.Sprintf("v%05d_%08d", i, j)))
 			}
 		}(i)
@@ -86,8 +87,8 @@ func TestConcurrentWrite(t *testing.T) {
 	wg.Wait()
 
 	fmt.Println("Starting iteration")
-	it := db.NewIterator(ctx, 10, 5)
-	it.SeekToFirst()
+	it := kv.NewIterator(ctx, 10, 5, false)
+	it.Rewind()
 	defer it.Close()
 
 	var i, j int
@@ -119,24 +120,24 @@ func TestGet(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	db := NewKV(getTestOptions(dir))
-	defer db.Close()
+	kv := NewKV(getTestOptions(dir))
+	defer kv.Close()
 
-	require.NoError(t, db.Put(ctx, []byte("key1"), []byte("val1")))
-	require.EqualValues(t, "val1", db.Get(ctx, []byte("key1")))
+	require.NoError(t, kv.Put(ctx, []byte("key1"), []byte("val1")))
+	require.EqualValues(t, "val1", kv.Get(ctx, []byte("key1")))
 
-	require.NoError(t, db.Put(ctx, []byte("key1"), []byte("val2")))
-	require.EqualValues(t, "val2", db.Get(ctx, []byte("key1")))
+	require.NoError(t, kv.Put(ctx, []byte("key1"), []byte("val2")))
+	require.EqualValues(t, "val2", kv.Get(ctx, []byte("key1")))
 
-	require.NoError(t, db.Delete(ctx, []byte("key1")))
-	require.Nil(t, db.Get(ctx, []byte("key1")))
+	require.NoError(t, kv.Delete(ctx, []byte("key1")))
+	require.Nil(t, kv.Get(ctx, []byte("key1")))
 
-	require.NoError(t, db.Put(ctx, []byte("key1"), []byte("val3")))
-	require.EqualValues(t, "val3", db.Get(ctx, []byte("key1")))
+	require.NoError(t, kv.Put(ctx, []byte("key1"), []byte("val3")))
+	require.EqualValues(t, "val3", kv.Get(ctx, []byte("key1")))
 
 	longVal := make([]byte, 1000)
-	require.NoError(t, db.Put(ctx, []byte("key1"), longVal))
-	require.EqualValues(t, longVal, db.Get(ctx, []byte("key1")))
+	require.NoError(t, kv.Put(ctx, []byte("key1"), longVal))
+	require.EqualValues(t, longVal, kv.Get(ctx, []byte("key1")))
 }
 
 // Put a lot of data to move some data to disk.
@@ -146,8 +147,8 @@ func TestGetMore(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	db := NewKV(getTestOptions(dir))
-	defer db.Close()
+	kv := NewKV(getTestOptions(dir))
+	defer kv.Close()
 
 	//	n := 500000
 	n := 10000
@@ -163,15 +164,15 @@ func TestGetMore(t *testing.T) {
 				Value: []byte(fmt.Sprintf("%09d", j)),
 			})
 		}
-		require.NoError(t, db.Write(ctx, entries))
+		require.NoError(t, kv.Write(ctx, entries))
 	}
-	db.Validate()
+	kv.Validate()
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		require.EqualValues(t, k, string(db.Get(ctx, []byte(k))))
+		require.EqualValues(t, k, string(kv.Get(ctx, []byte(k))))
 	}
 
 	// Overwrite
@@ -187,16 +188,16 @@ func TestGetMore(t *testing.T) {
 				Value: []byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", j)),
 			})
 		}
-		require.NoError(t, db.Write(ctx, entries))
+		require.NoError(t, kv.Write(ctx, entries))
 	}
-	db.Validate()
+	kv.Validate()
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := []byte(fmt.Sprintf("%09d", i))
 		expectedValue := fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", i)
-		require.EqualValues(t, expectedValue, string(db.Get(ctx, k)))
+		require.EqualValues(t, expectedValue, string(kv.Get(ctx, k)))
 	}
 
 	// "Delete" key.
@@ -211,16 +212,16 @@ func TestGetMore(t *testing.T) {
 				Meta: BitDelete,
 			})
 		}
-		require.NoError(t, db.Write(ctx, entries))
+		require.NoError(t, kv.Write(ctx, entries))
 	}
-	db.Validate()
+	kv.Validate()
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			// Display some progress. Right now, it's not very fast with no caching.
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		require.Nil(t, db.Get(ctx, []byte(k)))
+		require.Nil(t, kv.Get(ctx, []byte(k)))
 	}
 	fmt.Println("Done and closing")
 }
@@ -231,8 +232,8 @@ func TestIterateBasic(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	db := NewKV(getTestOptions(dir))
-	defer db.Close()
+	kv := NewKV(getTestOptions(dir))
+	defer kv.Close()
 
 	// n := 500000
 	n := 10000
@@ -241,51 +242,83 @@ func TestIterateBasic(t *testing.T) {
 			fmt.Printf("Put i=%d\n", i)
 		}
 		k := []byte(fmt.Sprintf("%09d", i))
-		require.NoError(t, db.Put(ctx, k, k))
+		require.NoError(t, kv.Put(ctx, k, k))
 	}
 
-	it := db.NewIterator(ctx, 10, 5)
-	it.SeekToFirst()
-	defer it.Close()
+	{
+		it := kv.NewIterator(ctx, 10, 5, false)
+		it.Rewind()
+		defer it.Close()
 
-	var count int
-	rewind := true
-	for kv := range it.Ch() {
-		key := kv.Key()
-		if key == nil {
-			break
+		var count int
+		rewind := true
+		for kv := range it.Ch() {
+			key := kv.Key()
+			if key == nil {
+				break
+			}
+			if bytes.Equal(key, Head) {
+				continue
+			}
+			if rewind && count == 5000 {
+				count = 0
+				it.Rewind()
+				t.Log("Rewinding from 5000 to zero.")
+				rewind = false
+				continue
+			}
+			require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
+			val := kv.Value()
+			require.EqualValues(t, fmt.Sprintf("%09d", count), string(val))
+			count++
 		}
-		if bytes.Equal(key, Head) {
-			continue
-		}
-		if rewind && count == 5000 {
-			count = 0
-			it.SeekToFirst()
-			t.Log("Rewinding from 5000 to zero.")
-			rewind = false
-			continue
-		}
-		require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
-		val := kv.Value()
-		require.EqualValues(t, fmt.Sprintf("%09d", count), string(val))
-		count++
+		require.EqualValues(t, n, count)
 	}
-	require.EqualValues(t, n, count)
+	{
+		it := kv.NewIterator(ctx, 10, 5, true)
+		it.Rewind()
+		defer it.Close()
 
-	it = db.NewIterator(ctx, 10, 0)
-	it.SeekToFirst()
-	defer it.Close()
-	count = 0
-	for item := range it.Ch() {
-		key := item.Key()
-		if key == nil {
-			break
+		var count int
+		rewind := true
+		for kv := range it.Ch() {
+			key := kv.Key()
+			if key == nil {
+				break
+			}
+			if bytes.Equal(key, Head) {
+				continue
+			}
+			if rewind && count == 5000 {
+				count = 0
+				it.Rewind()
+				t.Log("Rewinding from 5000 to zero.")
+				rewind = false
+				continue
+			}
+			require.EqualValues(t, fmt.Sprintf("%09d", n-1-count), string(key))
+			val := kv.Value()
+			require.EqualValues(t, fmt.Sprintf("%09d", n-1-count), string(val))
+			count++
 		}
-		if bytes.Equal(key, Head) {
-			continue
+		require.EqualValues(t, n, count)
+	}
+	{
+		it := kv.NewIterator(ctx, 10, 0, false)
+		it.Rewind()
+		defer it.Close()
+		var count int
+		for item := range it.Ch() {
+			key := item.Key()
+			if key == nil {
+				break
+			}
+			if bytes.Equal(key, Head) {
+				continue
+			}
+			require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
+			count++
 		}
-		require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
-		count++
 	}
 }
 
@@ -297,27 +330,27 @@ func TestLoad(t *testing.T) {
 	defer os.RemoveAll(dir)
 	n := 10000
 	{
-		db := NewKV(getTestOptions(dir))
+		kv := NewKV(getTestOptions(dir))
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
 				fmt.Printf("Putting i=%d\n", i)
 			}
 			k := []byte(fmt.Sprintf("%09d", i))
-			require.NoError(t, db.Put(ctx, k, k))
+			require.NoError(t, kv.Put(ctx, k, k))
 		}
-		db.Close()
+		kv.Close()
 	}
 
-	db := NewKV(getTestOptions(dir))
+	kv := NewKV(getTestOptions(dir))
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		require.EqualValues(t, k, string(db.Get(ctx, []byte(k))))
+		require.EqualValues(t, k, string(kv.Get(ctx, []byte(k))))
 	}
-	db.Close()
-	summary := db.lc.getSummary()
+	kv.Close()
+	summary := kv.lc.getSummary()
 
 	// Check that files are garbage collected.
 	idMap := getIDMap(dir)
@@ -347,7 +380,7 @@ func TestCrash(t *testing.T) {
 	opt.DoNotCompact = true
 	opt.Verbose = true
 
-	db := NewKV(&opt)
+	kv := NewKV(&opt)
 	var keys [][]byte
 	for i := 0; i < 150000; i++ {
 		k := []byte(fmt.Sprintf("%09d", i))
@@ -363,38 +396,37 @@ func TestCrash(t *testing.T) {
 		entries = append(entries, e)
 
 		if len(entries) == 100 {
-			err := db.Write(ctx, entries)
+			err := kv.Write(ctx, entries)
 			require.Nil(t, err)
 			entries = entries[:0]
 		}
 	}
 
 	for _, k := range keys {
-		require.Equal(t, k, db.Get(ctx, k))
+		require.Equal(t, k, kv.Get(ctx, k))
 	}
-	// Do not close db.
+	// Do not close kv store (!!) for this test to make sense.
 
-	db2 := NewKV(&opt)
+	kv2 := NewKV(&opt)
 	for _, k := range keys {
-		require.Equal(t, k, db2.Get(ctx, k), "Key: %s", k)
+		require.Equal(t, k, kv2.Get(ctx, k), "Key: %s", k)
 	}
 
 	{
-		val := db.Get(ctx, Head)
+		val := kv.Get(ctx, Head)
 		voffset := binary.BigEndian.Uint64(val)
 		fmt.Printf("level 1 val: %v\n", voffset)
 	}
 
-	db.lc.tryCompact(1)
-	db.lc.tryCompact(1)
-	val := db.Get(ctx, Head)
-	// val := db.lc.levels[1].get(Head)
+	kv.lc.tryCompact(1)
+	kv.lc.tryCompact(1)
+	val := kv.Get(ctx, Head)
 	require.True(t, len(val) > 0)
 	voffset := binary.BigEndian.Uint64(val)
 	fmt.Printf("level 1 val: %v\n", voffset)
 
-	db3 := NewKV(&opt)
+	kv3 := NewKV(&opt)
 	for _, k := range keys {
-		require.Equal(t, k, db3.Get(ctx, k), "Key: %s", k)
+		require.Equal(t, k, kv3.Get(ctx, k), "Key: %s", k)
 	}
 }

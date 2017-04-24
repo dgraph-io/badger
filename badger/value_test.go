@@ -96,7 +96,7 @@ func TestGC(t *testing.T) {
 	// })
 
 	newlf := &logFile{fid: atomic.AddInt32(&db.vlog.maxFid, 1), offset: 0}
-	newlf.fd, err = y.OpenSyncedFile(db.vlog.fpath(newlf.fid))
+	newlf.fd, err = y.OpenSyncedFile(db.vlog.fpath(newlf.fid), true)
 	y.Check(err)
 
 	db.vlog.move(lf, newlf)

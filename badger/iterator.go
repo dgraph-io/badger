@@ -40,20 +40,21 @@ func (op iteratorOp) Set(i y.Iterator) {
 		return
 	}
 	if op.seekExtreme == 0 {
-		i.SeekToFirst()
+		i.Rewind() // Either a seek to first or end.
 		return
 	}
 	y.Fatalf("Unhandled seek operation.")
 }
 
 type Iterator struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	ch      chan *KVItem
-	fetchCh chan *KVItem
-	kv      *KV
-	iitr    y.Iterator
-	seekCh  chan iteratorOp
+	ctx      context.Context
+	cancel   context.CancelFunc
+	ch       chan *KVItem
+	fetchCh  chan *KVItem
+	kv       *KV
+	iitr     y.Iterator
+	seekCh   chan iteratorOp
+	reversed bool
 }
 
 func (itr *Iterator) Ch() <-chan *KVItem {
@@ -125,7 +126,7 @@ TOP:
 	}
 }
 
-func (itr *Iterator) SeekToFirst() {
+func (itr *Iterator) Rewind() {
 	itr.seekCh <- iteratorOp{seekExtreme: 0}
 }
 
@@ -157,7 +158,8 @@ func (itr *Iterator) Close() {
 // the values by passing numWorkers.
 // If you set numWorkers to zero, the values won't be retrieved.
 // Note: This acquires references to underlying tables. Remember to close the returned iterator.
-func (s *KV) NewIterator(ctx context.Context, prefetchSize, numWorkers int) *Iterator {
+func (s *KV) NewIterator(
+	ctx context.Context, prefetchSize, numWorkers int, reversed bool) *Iterator {
 	// The order we add these iterators is important.
 	// Imagine you add level0 first, then add imm. In between, the initial imm might be moved into
 	// level0, and be completely missed. On the other hand, if you add imm first and it got moved
@@ -169,13 +171,13 @@ func (s *KV) NewIterator(ctx context.Context, prefetchSize, numWorkers int) *Ite
 	tables := s.getMemTables()
 	var iters []y.Iterator
 	for i := 0; i < len(tables); i++ {
-		iters = append(iters, tables[i].NewIterator())
+		iters = append(iters, tables[i].NewUniIterator(reversed))
 	}
-	iters = s.lc.appendIterators(iters) // This will increment references.
+	iters = s.lc.appendIterators(iters, reversed) // This will increment references.
 
 	itr := &Iterator{
 		kv:     s,
-		iitr:   y.NewMergeIterator(iters),
+		iitr:   y.NewMergeIterator(iters, reversed),
 		ch:     make(chan *KVItem, prefetchSize),
 		seekCh: make(chan iteratorOp), // unbuffered channel
 	}

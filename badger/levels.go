@@ -330,17 +330,17 @@ func (s *levelsController) compactBuildTables(
 	// Next level has level>=1 and we can use ConcatIterator as key ranges do not overlap.
 	var iters []y.Iterator
 	if l == 0 {
-		iters = appendIteratorsReversed(iters, topTables)
+		iters = appendIteratorsReversed(iters, topTables, false)
 	} else {
 		y.AssertTrue(len(topTables) == 1)
-		iters = []y.Iterator{topTables[0].NewIterator()}
+		iters = []y.Iterator{topTables[0].NewUniIterator(false)}
 	}
 
-	iters = append(iters, table.NewConcatIterator(botTables))
-	it := y.NewMergeIterator(iters)
+	iters = append(iters, table.NewConcatIterator(botTables, false))
+	it := y.NewMergeIterator(iters, false)
 	defer it.Close() // Important to close the iterator to do ref counting.
 
-	it.SeekToFirst()
+	it.Rewind()
 
 	newTables := make([]*table.Table, len(c.toInsert))
 	var wg sync.WaitGroup
@@ -637,32 +637,33 @@ func (s *levelHandler) get(ctx context.Context, key []byte) ([]byte, byte) {
 	return nil, 0
 }
 
-func appendIteratorsReversed(out []y.Iterator, th []*table.Table) []y.Iterator {
+func appendIteratorsReversed(out []y.Iterator, th []*table.Table, reversed bool) []y.Iterator {
 	for i := len(th) - 1; i >= 0; i-- {
 		// This will increment the reference of the table handler.
-		out = append(out, th[i].NewIterator())
+		out = append(out, th[i].NewUniIterator(reversed))
 	}
 	return out
 }
 
 // appendIterators appends iterators to an array of iterators, for merging.
 // Note: This obtains references for the table handlers. Remember to close these iterators.
-func (s *levelHandler) appendIterators(iters []y.Iterator) []y.Iterator {
+func (s *levelHandler) appendIterators(iters []y.Iterator, reversed bool) []y.Iterator {
 	s.RLock()
 	defer s.RUnlock()
 	if s.level == 0 {
 		// Remember to add in reverse order!
 		// The newer table at the end of s.tables should be added first as it takes precedence.
-		return appendIteratorsReversed(iters, s.tables)
+		return appendIteratorsReversed(iters, s.tables, reversed)
 	}
-	return append(iters, table.NewConcatIterator(s.tables))
+	return append(iters, table.NewConcatIterator(s.tables, reversed))
 }
 
 // appendIterators appends iterators to an array of iterators, for merging.
 // Note: This obtains references for the table handlers. Remember to close these iterators.
-func (s *levelsController) appendIterators(iters []y.Iterator) []y.Iterator {
+func (s *levelsController) appendIterators(
+	iters []y.Iterator, reversed bool) []y.Iterator {
 	for _, level := range s.levels {
-		iters = level.appendIterators(iters)
+		iters = level.appendIterators(iters, reversed)
 	}
 	return iters
 }
