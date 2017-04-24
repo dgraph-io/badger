@@ -25,7 +25,7 @@ type compaction struct {
 }
 
 func (s *compactLog) init(filename string) {
-	fd, err := y.OpenSyncedFile(filename)
+	fd, err := y.OpenSyncedFile(filename, true)
 	y.Check(err)
 	s.fd = fd
 }

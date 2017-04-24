@@ -141,13 +141,15 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 }
 
 func (lf *valueLog) move(f *logFile, newlf *logFile) {
+	fmt.Println("move callled")
 	tr := trace.New("badger", "valuelog-move")
 	ctx := trace.NewContext(context.Background(), tr)
 
 	var b block
 	var buf bytes.Buffer
 
-	f.iterate(0, func(e Entry) {
+	y.AssertTrue(lf.kv != nil)
+	fe := func(e Entry) {
 		vptr, meta := lf.kv.get(ctx, e.Key)
 
 		if (meta & BitDelete) > 0 {
@@ -171,7 +173,7 @@ func (lf *valueLog) move(f *logFile, newlf *logFile) {
 		if int32(vp.Fid) == f.fid && int64(vp.Offset) == e.Offset {
 			// This new entry only contains the key, and a pointer to the value.
 			var ne Entry
-			ne.Meta = e.Meta
+			ne.Meta = e.Meta | BitValuePointer
 			ne.Key = make([]byte, len(e.Key))
 			copy(ne.Key, e.Key)
 			b.Entries = append(b.Entries, &ne)
@@ -187,16 +189,30 @@ func (lf *valueLog) move(f *logFile, newlf *logFile) {
 		} else {
 			y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, meta)
 		}
+	}
+
+	f.iterate(0, func(e Entry) {
+		fe(e)
 	})
 
 	n, err := newlf.fd.Write(buf.Bytes())
-	fmt.Printf("NEWFD: %d Bytes written: %d. Error: %v", newlf.fid, n, err)
+	fmt.Printf("NEWFD: %d Bytes written: %d. Error: %v\n", newlf.fid, n, err)
 	y.Check(err)
 	newlf.doneWriting()
 
 	// Remove f from files. Push newlf to files.
 	lf.swapFiles(f, newlf)
+
+	fmt.Printf("block has %d entries\n", len(b.Entries))
 	lf.kv.writeToLSM(&b)
+	// This should NOT update the value log offset, because we still have
+	// an older fid doing newer writes. So, when that finishes, the offset would automatically
+	// jump through the newlf here, to a newer log file with fid > newlf.fid.
+
+	// Entries written to LSM. Remove the older file now.
+	rem := lf.fpath(f.fid)
+	lf.elog.Printf("Removing %s", rem)
+	y.Check(os.Remove(rem))
 }
 
 type Entry struct {
@@ -265,20 +281,20 @@ func (p *valuePointer) Decode(b []byte) {
 
 type valueLog struct {
 	sync.RWMutex
+	opt   Options
 	files []*logFile
 	// fds    []*os.File
-	offset    int64
-	elog      trace.EventLog
-	logPrefix string
-	dirPath   string
-	buf       bytes.Buffer
-	maxFid    int32
-	kv        *KV
-	closer    *y.Closer
+	offset  int64
+	elog    trace.EventLog
+	dirPath string
+	buf     bytes.Buffer
+	maxFid  int32
+	kv      *KV
+	closer  *y.Closer
 }
 
 func (l *valueLog) fpath(fid int32) string {
-	return fmt.Sprintf("%s/%s_%06d", l.dirPath, l.logPrefix, fid)
+	return fmt.Sprintf("%s/%06d.vlog", l.dirPath, fid)
 }
 
 func (l *valueLog) swapFiles(rem *logFile, add *logFile) {
@@ -307,10 +323,11 @@ func (l *valueLog) openOrCreateFiles() {
 
 	found := make(map[int]struct{})
 	for _, file := range files {
-		if !strings.HasPrefix(file.Name(), l.logPrefix+"-") {
+		if !strings.HasSuffix(file.Name(), ".vlog") {
 			continue
 		}
-		fid, err := strconv.Atoi(file.Name()[len(l.logPrefix)+1:])
+		fsz := len(file.Name())
+		fid, err := strconv.Atoi(file.Name()[:fsz-5])
 		y.Check(err)
 		if _, ok := found[fid]; ok {
 			y.Fatalf("Found the same file twice: %d", fid)
@@ -330,7 +347,7 @@ func (l *valueLog) openOrCreateFiles() {
 	for i := range l.files {
 		lf := l.files[i]
 		if i == len(l.files)-1 {
-			lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid))
+			lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
 			// lf.fd, err = os.OpenFile(l.fpath(lf.fid), os.O_RDWR|os.O_CREATE, 0666)
 			y.Check(err)
 			l.maxFid = lf.fid
@@ -344,17 +361,19 @@ func (l *valueLog) openOrCreateFiles() {
 	// If no files are found, then create a new file.
 	if len(l.files) == 0 {
 		lf := &logFile{fid: 0}
-		lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid))
+		lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
 		y.Check(err)
 		l.files = append(l.files, lf)
 	}
 }
 
-func (l *valueLog) Open(dir, prefix string) {
-	l.logPrefix = prefix
-	l.dirPath = dir
+func (l *valueLog) Open(kv *KV, opt *Options) {
+	l.dirPath = opt.Dir
 	l.openOrCreateFiles()
-	l.closer = y.NewCloser()
+	l.closer = y.NewCloser(1)
+	l.opt = *opt
+	l.kv = kv
+	go l.runGCInLoop()
 
 	l.elog = trace.NewEventLog("Badger", "Valuelog")
 }
@@ -445,7 +464,7 @@ func (l *valueLog) Write(blocks []*block) {
 		curlf.doneWriting()
 
 		newlf := &logFile{fid: atomic.AddInt32(&l.maxFid, 1), offset: 0}
-		newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid))
+		newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid), l.opt.SyncWrites)
 		y.Check(err)
 
 		l.Lock()
@@ -504,26 +523,22 @@ func (l *valueLog) Read(ctx context.Context, p valuePointer) (e Entry, err error
 
 func (l *valueLog) runGCInLoop() {
 	defer l.closer.Done()
+	if l.opt.DoNotRunValueGC {
+		return
+	}
 
-	buf := new(bytes.Buffer)
-	buf.Grow(int(LogSize))
-	relocated := make([]Entry, 0, 1000)
 	tick := time.NewTicker(10 * time.Second)
-
 	for {
 		select {
 		case <-tick.C:
-			l.RunGC(relocated, buf)
+			l.doRunGC()
 		case <-l.closer.HasBeenClosed():
 			return
 		}
 	}
 }
 
-func (l *valueLog) RunGC(relocated []Entry, buf *bytes.Buffer) {
-	relocated = relocated[:0]
-	buf.Reset()
-
+func (l *valueLog) doRunGC() {
 	var lf *logFile
 	l.RLock()
 	if len(l.files) <= 1 {
@@ -574,21 +589,6 @@ func (l *valueLog) RunGC(relocated []Entry, buf *bytes.Buffer) {
 				// This is still the active entry. This would need to be rewritten.
 				reason["keep"] += esz
 
-				// This new entry only contains the key, and a pointer to the value.
-				var ne Entry
-				ne.Meta = e.Meta
-				ne.Key = make([]byte, len(e.Key))
-				copy(ne.Key, e.Key)
-
-				var p valuePointer
-				p.Len = uint32(8 + len(e.Key) + len(e.Value) + 1)
-				p.Offset = uint64(buf.Len())
-				ne.Value = make([]byte, 16)
-				p.Encode(ne.Value)
-
-				relocated = append(relocated, ne)
-				e.EncodeTo(buf) // This would be written to file. Note the usage of e, not ne.
-
 			} else {
 				for k, v := range reason {
 					fmt.Printf("%s = %d\n", k, v)
@@ -613,7 +613,7 @@ func (l *valueLog) RunGC(relocated []Entry, buf *bytes.Buffer) {
 	}
 
 	newlf := &logFile{fid: atomic.AddInt32(&l.maxFid, 1), offset: 0}
-	newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid))
+	newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid), false)
 	y.Check(err)
 	fmt.Printf("REWRITING VLOG %d to NEW %d\n", lf.fid, newlf.fid)
 	l.move(lf, newlf)

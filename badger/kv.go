@@ -49,6 +49,8 @@ type Options struct {
 	DoNotCompact            bool
 	MapTablesTo             int
 	NumMemtables            int
+	DoNotRunValueGC         bool
+	SyncWrites              bool
 }
 
 var DefaultOptions = Options{
@@ -65,6 +67,8 @@ var DefaultOptions = Options{
 	MapTablesTo:             table.MemoryMap,
 	NumMemtables:            5,
 	MemtableSlack:           10 << 20,
+	DoNotRunValueGC:         false, // Only for testing.
+	SyncWrites:              true,
 }
 
 type KV struct {
@@ -92,7 +96,7 @@ func NewKV(opt *Options) *KV {
 		writeCh:   make(chan *block, 1000),
 		opt:       *opt, // Make a copy.
 		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MemtableSlack, opt.NumMemtables+5),
-		closer:    y.NewCloser(),
+		closer:    y.NewCloser(0),
 		elog:      trace.NewEventLog("badger", "kv"),
 	}
 	out.mt = skl.NewSkiplist(out.arenaPool)
@@ -104,7 +108,7 @@ func NewKV(opt *Options) *KV {
 	out.closer.Register()
 	go out.flushMemtable() // Need levels controller to be up.
 
-	out.vlog.Open(opt.Dir, "vlog")
+	out.vlog.Open(out, opt)
 
 	val := out.Get(context.Background(), Head)
 	var vptr valuePointer
@@ -407,7 +411,7 @@ func (s *KV) flushMemtable() {
 				ft.mt.Put(Head, offset, 0)
 			}
 			fileID, _ := s.lc.reserveFileIDs(1)
-			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir))
+			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
 			y.Check(err)
 			y.Check(writeLevel0Table(ft.mt, fd))
 

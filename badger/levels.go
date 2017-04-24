@@ -222,7 +222,7 @@ func newLevelsController(kv *KV) *levelsController {
 	// Some files may be deleted. Let's reload.
 	tables := make([][]*table.Table, kv.opt.MaxLevels)
 	for fileID := range getIDMap(kv.opt.Dir) {
-		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, kv.opt.Dir))
+		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, kv.opt.Dir), true)
 		y.Check(err)
 		t, err := table.OpenTable(fd, kv.opt.MapTablesTo)
 		y.Check(err)
@@ -371,7 +371,7 @@ func (s *levelsController) compactBuildTables(
 		go func(idx int, fileID uint64, builder *table.TableBuilder) {
 			defer builder.Close()
 			defer wg.Done()
-			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir))
+			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
 			y.Check(err)
 			// Encode the level number as table metadata.
 			var levelNum [2]byte

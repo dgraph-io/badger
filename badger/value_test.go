@@ -22,6 +22,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,9 +35,9 @@ func TestBasic(t *testing.T) {
 	dir, err := ioutil.TempDir("", "")
 	y.Check(err)
 
-	var log valueLog
-	log.Open(dir, "vlog")
-	defer log.Close()
+	kv := NewKV(getTestOptions(dir))
+	defer kv.Close()
+	log := kv.vlog
 
 	entry := &Entry{
 		Key:   []byte("samplekey"),
@@ -63,6 +64,57 @@ func TestBasic(t *testing.T) {
 	}, readEntries)
 }
 
+func TestGC(t *testing.T) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	db := NewKV(getTestOptions(dir))
+	defer db.Close()
+
+	var entries []*Entry
+	for i := 0; i < 100; i++ {
+		v := make([]byte, 32)
+		rand.Read(v)
+		entries = append(entries, &Entry{
+			Key:   []byte(fmt.Sprintf("key%d", i)),
+			Value: v,
+		})
+	}
+	ctx := context.Background()
+	require.NoError(t, db.Write(ctx, entries))
+
+	for i := 0; i < 45; i++ {
+		db.Delete(ctx, []byte(fmt.Sprintf("key%d", i)))
+	}
+
+	db.vlog.RLock()
+	lf := db.vlog.files[0]
+	db.vlog.RUnlock()
+
+	// lf.iterate(0, func(e Entry) {
+	// 	e.print("lf")
+	// })
+
+	newlf := &logFile{fid: atomic.AddInt32(&db.vlog.maxFid, 1), offset: 0}
+	newlf.fd, err = y.OpenSyncedFile(db.vlog.fpath(newlf.fid))
+	y.Check(err)
+
+	db.vlog.move(lf, newlf)
+
+	idx := 0
+	newlf.iterate(0, func(e Entry) {
+		// e.print("newlf")
+		require.Equal(t, []byte(fmt.Sprintf("key%d", 45+idx)), e.Key)
+		idx++
+	})
+
+	for i := 45; i < 100; i++ {
+		val := db.Get(ctx, []byte(fmt.Sprintf("key%d", i)))
+		require.NotNil(t, val)
+		require.True(t, len(val) == 32, "Size found: %d", len(val))
+	}
+}
+
 func BenchmarkReadWrite(b *testing.B) {
 	ctx := context.Background()
 	rwRatio := []float32{
@@ -76,7 +128,7 @@ func BenchmarkReadWrite(b *testing.B) {
 		for _, rw := range rwRatio {
 			b.Run(fmt.Sprintf("%3.1f,%04d", rw, vsz), func(b *testing.B) {
 				var vl valueLog
-				vl.Open(".", "vlog")
+				vl.Open(nil, getTestOptions("vlog"))
 				defer os.Remove("vlog")
 				b.ResetTimer()
 

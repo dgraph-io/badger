@@ -37,8 +37,12 @@ func Trace(ctx context.Context, format string, args ...interface{}) {
 	tr.LazyPrintf(format, args...)
 }
 
-func OpenSyncedFile(filename string) (*os.File, error) {
-	return os.OpenFile(filename, os.O_RDWR|os.O_CREATE|syscall.O_DSYNC, 0666)
+func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
+	flags := os.O_RDWR | os.O_CREATE
+	if sync {
+		flags |= syscall.O_DSYNC
+	}
+	return os.OpenFile(filename, flags, 0666)
 }
 
 type Closer struct {
@@ -48,11 +52,13 @@ type Closer struct {
 	waiting chan struct{}
 }
 
-func NewCloser() *Closer {
+func NewCloser(running int) *Closer {
 	c := &Closer{
 		closed:  make(chan struct{}, 10),
 		waiting: make(chan struct{}),
 	}
+	AssertTrue(running >= 0)
+	c.running = int32(running)
 	return c
 }
 
