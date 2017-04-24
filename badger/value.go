@@ -384,7 +384,7 @@ func (l *valueLog) Close() {
 	l.closer.Wait()
 
 	for _, f := range l.files {
-		f.fd.Close()
+		y.Check(f.fd.Close())
 	}
 	l.elog.Finish()
 }

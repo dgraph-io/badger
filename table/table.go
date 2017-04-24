@@ -312,5 +312,5 @@ func ParseFileID(name string) (uint64, bool) {
 }
 
 func NewFilename(id uint64, dir string) string {
-	return filepath.Join(dir, fmt.Sprintf("%010d", id)+fileSuffix)
+	return filepath.Join(dir, fmt.Sprintf("%06d", id)+fileSuffix)
 }
