@@ -30,8 +30,6 @@ import (
 	//	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/dgraph-io/badger/value"
 )
 
 func getTestOptions(dir string) *Options {
@@ -51,9 +49,9 @@ func TestWrite(t *testing.T) {
 	db := NewKV(getTestOptions(dir))
 	defer db.Close()
 
-	var entries []*value.Entry
+	var entries []*Entry
 	for i := 0; i < 100; i++ {
-		entries = append(entries, &value.Entry{
+		entries = append(entries, &Entry{
 			Key:   []byte(fmt.Sprintf("key%d", i)),
 			Value: []byte(fmt.Sprintf("val%d", i)),
 		})
@@ -157,9 +155,9 @@ func TestGetMore(t *testing.T) {
 		if (i % 10000) == 0 {
 			fmt.Printf("Putting i=%d\n", i)
 		}
-		var entries []*value.Entry
+		var entries []*Entry
 		for j := i; j < i+m && j < n; j++ {
-			entries = append(entries, &value.Entry{
+			entries = append(entries, &Entry{
 				Key:   []byte(fmt.Sprintf("%09d", j)),
 				Value: []byte(fmt.Sprintf("%09d", j)),
 			})
@@ -175,14 +173,14 @@ func TestGetMore(t *testing.T) {
 		require.EqualValues(t, k, string(db.Get(ctx, []byte(k))))
 	}
 
-	// Overwrite value.
+	// Overwrite
 	for i := n - 1; i >= 0; i -= m {
 		if (i % 10000) == 0 {
 			fmt.Printf("Overwriting i=%d\n", i)
 		}
-		var entries []*value.Entry
+		var entries []*Entry
 		for j := i; j > i-m && j >= 0; j-- {
-			entries = append(entries, &value.Entry{
+			entries = append(entries, &Entry{
 				Key: []byte(fmt.Sprintf("%09d", j)),
 				// Use a long value that will certainly exceed value threshold.
 				Value: []byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", j)),
@@ -205,11 +203,11 @@ func TestGetMore(t *testing.T) {
 		if (i % 10000) == 0 {
 			fmt.Printf("Deleting i=%d\n", i)
 		}
-		var entries []*value.Entry
+		var entries []*Entry
 		for j := i; j < i+m && j < n; j++ {
-			entries = append(entries, &value.Entry{
+			entries = append(entries, &Entry{
 				Key:  []byte(fmt.Sprintf("%09d", j)),
-				Meta: value.BitDelete,
+				Meta: BitDelete,
 			})
 		}
 		require.NoError(t, db.Write(ctx, entries))
@@ -355,9 +353,9 @@ func TestCrash(t *testing.T) {
 		keys = append(keys, k)
 	}
 
-	entries := make([]*value.Entry, 0, 10)
+	entries := make([]*Entry, 0, 10)
 	for _, k := range keys {
-		e := &value.Entry{
+		e := &Entry{
 			Key:   k,
 			Value: k,
 		}

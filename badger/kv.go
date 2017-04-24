@@ -27,7 +27,6 @@ import (
 
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/badger/value"
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -77,16 +76,16 @@ type KV struct {
 	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
 	opt       Options
 	lc        *levelsController
-	vlog      value.Log
-	vptr      value.Pointer
+	vlog      valueLog
+	vptr      valuePointer
 	arenaPool *skl.ArenaPool
-	writeCh   chan *value.Block
+	writeCh   chan *block
 	flushChan chan flushTask // For flushing memtables.
 }
 
 type flushTask struct {
 	mt   *skl.Skiplist
-	vptr value.Pointer
+	vptr valuePointer
 }
 
 func (s *KV) flushMemtable() {
@@ -134,7 +133,7 @@ func NewKV(opt *Options) *KV {
 	out := &KV{
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan: make(chan flushTask, opt.NumMemtables),
-		writeCh:   make(chan *value.Block, 1000),
+		writeCh:   make(chan *block, 1000),
 		opt:       *opt, // Make a copy.
 		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MemtableSlack, opt.NumMemtables+5),
 		closer:    y.NewCloser(),
@@ -152,13 +151,13 @@ func NewKV(opt *Options) *KV {
 	out.vlog.Open(opt.Dir, "vlog")
 
 	val := out.Get(context.Background(), Head)
-	var vptr value.Pointer
+	var vptr valuePointer
 	if len(val) > 0 {
 		vptr.Decode(val)
 	}
 
 	first := true
-	fn := func(e value.Entry) {
+	fn := func(e Entry) {
 		if first {
 			fmt.Printf("key=%s\n", e.Key)
 		}
@@ -198,7 +197,7 @@ func (s *KV) Close() {
 		s.mt = nil                  // Will segfault if we try writing!
 		s.Unlock()
 	}
-	s.flushChan <- flushTask{nil, value.Pointer{}} // Tell flusher to quit.
+	s.flushChan <- flushTask{nil, valuePointer{}} // Tell flusher to quit.
 	if s.opt.Verbose {
 		y.Printf("Memtable flushed\n")
 	}
@@ -222,21 +221,21 @@ func (s *KV) getMemTables() []*skl.Skiplist {
 }
 
 func (s *KV) decodeValue(ctx context.Context, val []byte, meta byte) []byte {
-	if (meta & value.BitDelete) != 0 {
+	if (meta & BitDelete) != 0 {
 		// Tombstone encountered.
 		return nil
 	}
-	if (meta & value.BitValuePointer) == 0 {
+	if (meta & BitValuePointer) == 0 {
 		y.Trace(ctx, "Value stored with key")
 		return val
 	}
 
-	var vp value.Pointer
+	var vp valuePointer
 	vp.Decode(val)
 	entry, err := s.vlog.Read(ctx, vp)
 	y.Checkf(err, "Unable to read from value log: %+v", vp)
 
-	if (entry.Meta & value.BitDelete) == 0 { // Not tombstone.
+	if (entry.Meta & BitDelete) == 0 { // Not tombstone.
 		return entry.Value
 	}
 	return []byte{}
@@ -263,7 +262,7 @@ func (s *KV) Get(ctx context.Context, key []byte) []byte {
 	return s.decodeValue(ctx, val, meta)
 }
 
-func (s *KV) updateOffset(ptrs []value.Pointer) {
+func (s *KV) updateOffset(ptrs []valuePointer) {
 	ptr := ptrs[len(ptrs)-1]
 
 	s.Lock()
@@ -277,11 +276,11 @@ func (s *KV) updateOffset(ptrs []value.Pointer) {
 
 var blockPool = sync.Pool{
 	New: func() interface{} {
-		return new(value.Block)
+		return new(block)
 	},
 }
 
-func (s *KV) writeBlocks(blocks []*value.Block) {
+func (s *KV) writeBlocks(blocks []*block) {
 	if len(blocks) == 0 {
 		return
 	}
@@ -307,7 +306,7 @@ func (s *KV) writeBlocks(blocks []*value.Block) {
 			if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
 				s.mt.Put(entry.Key, entry.Value, entry.Meta)
 			} else {
-				s.mt.Put(entry.Key, b.Ptrs[i].Encode(offsetBuf), entry.Meta|value.BitValuePointer)
+				s.mt.Put(entry.Key, b.Ptrs[i].Encode(offsetBuf), entry.Meta|BitValuePointer)
 			}
 		}
 		s.elog.Printf("Wrote %d entries from block %d", len(b.Entries), i)
@@ -322,7 +321,7 @@ func (s *KV) writeBlocks(blocks []*value.Block) {
 func (s *KV) doWrites() {
 	defer s.closer.Done()
 
-	blocks := make([]*value.Block, 0, 10)
+	blocks := make([]*block, 0, 10)
 	for {
 		select {
 		case b := <-s.writeCh:
@@ -349,8 +348,8 @@ func (s *KV) doWrites() {
 }
 
 // Write applies a list of value.Entry to our memtable.
-func (s *KV) Write(ctx context.Context, entries []*value.Entry) error {
-	b := blockPool.Get().(*value.Block)
+func (s *KV) Write(ctx context.Context, entries []*Entry) error {
+	b := blockPool.Get().(*block)
 	defer blockPool.Put(b)
 
 	b.Entries = entries
@@ -364,21 +363,21 @@ func (s *KV) Write(ctx context.Context, entries []*value.Entry) error {
 
 // Put puts a key-val pair.
 func (s *KV) Put(ctx context.Context, key []byte, val []byte) error {
-	e := &value.Entry{
+	e := &Entry{
 		Key:   key,
 		Value: val,
 	}
 
-	return s.Write(ctx, []*value.Entry{e})
+	return s.Write(ctx, []*Entry{e})
 }
 
 // Delete deletes a key.
 func (s *KV) Delete(ctx context.Context, key []byte) error {
-	e := &value.Entry{
+	e := &Entry{
 		Key:  key,
-		Meta: value.BitDelete,
+		Meta: BitDelete,
 	}
-	return s.Write(ctx, []*value.Entry{e})
+	return s.Write(ctx, []*Entry{e})
 }
 
 func (s *KV) hasRoomForWrite() bool {

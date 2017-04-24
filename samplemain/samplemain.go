@@ -12,7 +12,6 @@ import (
 	"math/rand"
 
 	"github.com/dgraph-io/badger/badger"
-	"github.com/dgraph-io/badger/value"
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -43,9 +42,9 @@ func main() {
 
 	// Keep writing random keys.
 	val := make([]byte, 10)
-	entries := make([]*value.Entry, 1000)
+	entries := make([]*badger.Entry, 1000)
 	for i := 0; i < len(entries); i++ {
-		entries[i] = new(value.Entry)
+		entries[i] = new(badger.Entry)
 		entries[i].Value = val
 	}
 
