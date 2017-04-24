@@ -70,7 +70,6 @@ var DefaultOptions = Options{
 type KV struct {
 	sync.RWMutex // Guards imm, mem.
 
-	gcCloser  *y.Closer
 	closer    *y.Closer
 	elog      trace.EventLog
 	mt        *skl.Skiplist
@@ -94,7 +93,6 @@ func NewKV(opt *Options) *KV {
 		opt:       *opt, // Make a copy.
 		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MemtableSlack, opt.NumMemtables+5),
 		closer:    y.NewCloser(),
-		gcCloser:  y.NewCloser(),
 		elog:      trace.NewEventLog("badger", "kv"),
 	}
 	out.mt = skl.NewSkiplist(out.arenaPool)
@@ -128,9 +126,6 @@ func NewKV(opt *Options) *KV {
 	}
 	out.vlog.Replay(vptr, fn)
 
-	out.gcCloser.Register()
-	go out.gcValues()
-
 	out.closer.Register()
 	go out.doWrites()
 	return out
@@ -142,11 +137,7 @@ func (s *KV) Close() {
 		y.Printf("Closing database\n")
 	}
 
-	// Let's stop the value GC first.
-	s.elog.Printf("Stopping garbage collection of values.")
-	s.gcCloser.Signal()
-	s.gcCloser.Wait()
-
+	s.vlog.Close() // Close value log first, because it still needs KV to be active.
 	s.elog.Printf("Closing database")
 	s.closer.Signal()
 
@@ -166,11 +157,11 @@ func (s *KV) Close() {
 	if s.opt.Verbose {
 		y.Printf("Memtable flushed\n")
 	}
+
 	s.lc.close()
 	s.elog.Printf("Waiting for closer")
 	s.closer.Wait()
 	s.elog.Finish()
-	s.vlog.Close()
 }
 
 func (s *KV) getMemTables() []*skl.Skiplist {
@@ -245,6 +236,20 @@ var blockPool = sync.Pool{
 	},
 }
 
+func (s *KV) writeToLSM(b *block) {
+	var offsetBuf [16]byte
+	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
+	for i, entry := range b.Entries {
+		isPointer := entry.Meta&BitValuePointer > 0
+
+		if !isPointer && len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
+			s.mt.Put(entry.Key, entry.Value, entry.Meta)
+		} else {
+			s.mt.Put(entry.Key, b.Ptrs[i].Encode(offsetBuf[:]), entry.Meta|BitValuePointer)
+		}
+	}
+}
+
 func (s *KV) writeBlocks(blocks []*block) {
 	if len(blocks) == 0 {
 		return
@@ -261,19 +266,10 @@ func (s *KV) writeBlocks(blocks []*block) {
 
 	s.elog.Printf("Writing to value log")
 	s.vlog.Write(blocks)
-	offsetBuf := make([]byte, 16)
 	s.elog.Printf("Writing to memtable")
 
 	for i, b := range blocks {
-		y.AssertTrue(len(b.Ptrs) == len(b.Entries))
-
-		for i, entry := range b.Entries {
-			if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
-				s.mt.Put(entry.Key, entry.Value, entry.Meta)
-			} else {
-				s.mt.Put(entry.Key, b.Ptrs[i].Encode(offsetBuf), entry.Meta|BitValuePointer)
-			}
-		}
+		s.writeToLSM(b)
 		s.elog.Printf("Wrote %d entries from block %d", len(b.Entries), i)
 	}
 	lastb := len(blocks) - 1
@@ -367,25 +363,6 @@ func (s *KV) hasRoomForWrite() bool {
 	default:
 		// We need to do this to unlock and allow the flusher to modify imm.
 		return false
-	}
-}
-
-func (s *KV) gcValues() {
-	defer s.gcCloser.Done()
-
-	ctx := context.Background()
-	tick := time.NewTicker(10 * time.Second)
-	for {
-		select {
-		case <-tick.C:
-			s.vlog.RunGC(func(k []byte) ([]byte, byte, bool) {
-				val, meta := s.get(ctx, k)
-				signal := s.gcCloser.GotSignal()
-				return val, meta, signal
-			})
-		case <-s.gcCloser.HasBeenClosed():
-			return
-		}
 	}
 }
 

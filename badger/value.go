@@ -32,6 +32,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/net/trace"
 
@@ -139,16 +140,63 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 	return nil
 }
 
-type valueLog struct {
-	sync.RWMutex
-	files []logFile
-	// fds    []*os.File
-	offset    int64
-	elog      trace.EventLog
-	logPrefix string
-	dirPath   string
-	buf       bytes.Buffer
-	maxFid    int32
+func (lf *valueLog) move(f *logFile, newlf *logFile) {
+	tr := trace.New("badger", "valuelog-move")
+	ctx := trace.NewContext(context.Background(), tr)
+
+	var b block
+	var buf bytes.Buffer
+
+	f.iterate(0, func(e Entry) {
+		vptr, meta := lf.kv.get(ctx, e.Key)
+
+		if (meta & BitDelete) > 0 {
+			return
+		}
+		if (meta & BitValuePointer) == 0 {
+			return
+		}
+
+		// Value is still present in value log.
+		y.AssertTrue(len(vptr) > 0)
+		var vp valuePointer
+		vp.Decode(vptr)
+
+		if int32(vp.Fid) > f.fid {
+			return
+		}
+		if int64(vp.Offset) > e.Offset {
+			return
+		}
+		if int32(vp.Fid) == f.fid && int64(vp.Offset) == e.Offset {
+			// This new entry only contains the key, and a pointer to the value.
+			var ne Entry
+			ne.Meta = e.Meta
+			ne.Key = make([]byte, len(e.Key))
+			copy(ne.Key, e.Key)
+			b.Entries = append(b.Entries, &ne)
+
+			var np valuePointer
+			np.Fid = uint32(newlf.fid)
+			np.Len = uint32(8 + len(e.Key) + len(e.Value) + 1)
+			np.Offset = uint64(buf.Len())
+			b.Ptrs = append(b.Ptrs, np)
+
+			e.EncodeTo(&buf) // This would be written to file. Note the usage of e, not ne.
+
+		} else {
+			y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, meta)
+		}
+	})
+
+	n, err := newlf.fd.Write(buf.Bytes())
+	fmt.Printf("NEWFD: %d Bytes written: %d. Error: %v", newlf.fid, n, err)
+	y.Check(err)
+	newlf.doneWriting()
+
+	// Remove f from files. Push newlf to files.
+	lf.swapFiles(f, newlf)
+	lf.kv.writeToLSM(&b)
 }
 
 type Entry struct {
@@ -215,8 +263,42 @@ func (p *valuePointer) Decode(b []byte) {
 	p.Offset = binary.BigEndian.Uint64(b[8:16])
 }
 
+type valueLog struct {
+	sync.RWMutex
+	files []*logFile
+	// fds    []*os.File
+	offset    int64
+	elog      trace.EventLog
+	logPrefix string
+	dirPath   string
+	buf       bytes.Buffer
+	maxFid    int32
+	kv        *KV
+	closer    *y.Closer
+}
+
 func (l *valueLog) fpath(fid int32) string {
 	return fmt.Sprintf("%s/%s_%06d", l.dirPath, l.logPrefix, fid)
+}
+
+func (l *valueLog) swapFiles(rem *logFile, add *logFile) {
+	rem.Lock()
+	defer rem.Unlock()
+	rem.fd.Close()
+
+	l.Lock()
+	defer l.Unlock()
+
+	idx := sort.Search(len(l.files), func(idx int) bool {
+		return l.files[idx].fid >= rem.fid
+	})
+	if idx == len(l.files) || l.files[idx].fid != rem.fid {
+		y.Fatalf("Unable to find fid: %d\n", rem.fid)
+	}
+	l.files[idx] = add
+	sort.Slice(l.files, func(i, j int) bool {
+		return l.files[i].fid < l.files[i].fid
+	})
 }
 
 func (l *valueLog) openOrCreateFiles() {
@@ -235,7 +317,7 @@ func (l *valueLog) openOrCreateFiles() {
 		}
 		found[fid] = struct{}{}
 
-		lf := logFile{fid: int32(fid)}
+		lf := &logFile{fid: int32(fid)}
 		l.files = append(l.files, lf)
 	}
 
@@ -246,7 +328,7 @@ func (l *valueLog) openOrCreateFiles() {
 	// Open all previous log files as read only. Open the last log file
 	// as read write.
 	for i := range l.files {
-		lf := &l.files[i]
+		lf := l.files[i]
 		if i == len(l.files)-1 {
 			lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid))
 			// lf.fd, err = os.OpenFile(l.fpath(lf.fid), os.O_RDWR|os.O_CREATE, 0666)
@@ -261,7 +343,7 @@ func (l *valueLog) openOrCreateFiles() {
 
 	// If no files are found, then create a new file.
 	if len(l.files) == 0 {
-		lf := logFile{fid: 0}
+		lf := &logFile{fid: 0}
 		lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid))
 		y.Check(err)
 		l.files = append(l.files, lf)
@@ -272,11 +354,16 @@ func (l *valueLog) Open(dir, prefix string) {
 	l.logPrefix = prefix
 	l.dirPath = dir
 	l.openOrCreateFiles()
+	l.closer = y.NewCloser()
 
 	l.elog = trace.NewEventLog("Badger", "Valuelog")
 }
 
 func (l *valueLog) Close() {
+	l.elog.Printf("Stopping garbage collection of values.")
+	l.closer.Signal()
+	l.closer.Wait()
+
 	for _, f := range l.files {
 		f.fd.Close()
 	}
@@ -303,7 +390,7 @@ func (l *valueLog) Replay(ptr valuePointer, fn logEntry) {
 
 	// Seek to the end to start writing.
 	var err error
-	last := &l.files[len(l.files)-1]
+	last := l.files[len(l.files)-1]
 	last.offset, err = last.fd.Seek(0, io.SeekEnd)
 	y.Checkf(err, "Unable to seek to the end")
 }
@@ -317,7 +404,7 @@ type block struct {
 // Write is thread-unsafe by design and should not be called concurrently.
 func (l *valueLog) Write(blocks []*block) {
 	l.RLock()
-	curlf := &l.files[len(l.files)-1]
+	curlf := l.files[len(l.files)-1]
 	l.RUnlock()
 
 	toDisk := func() {
@@ -357,7 +444,7 @@ func (l *valueLog) Write(blocks []*block) {
 		var err error
 		curlf.doneWriting()
 
-		newlf := logFile{fid: atomic.AddInt32(&l.maxFid, 1), offset: 0}
+		newlf := &logFile{fid: atomic.AddInt32(&l.maxFid, 1), offset: 0}
 		newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid))
 		y.Check(err)
 
@@ -389,7 +476,7 @@ func (l *valueLog) getFile(fid int32) (*logFile, error) {
 	if idx == len(l.files) || l.files[idx].fid != fid {
 		return nil, Corrupt
 	}
-	return &l.files[idx], nil
+	return l.files[idx], nil
 }
 
 // Read reads the value log at a given location.
@@ -415,7 +502,28 @@ func (l *valueLog) Read(ctx context.Context, p valuePointer) (e Entry, err error
 	return e, nil
 }
 
-func (l *valueLog) RunGC(getKey func(k []byte) ([]byte, byte, bool)) {
+func (l *valueLog) runGCInLoop() {
+	defer l.closer.Done()
+
+	buf := new(bytes.Buffer)
+	buf.Grow(int(LogSize))
+	relocated := make([]Entry, 0, 1000)
+	tick := time.NewTicker(10 * time.Second)
+
+	for {
+		select {
+		case <-tick.C:
+			l.RunGC(relocated, buf)
+		case <-l.closer.HasBeenClosed():
+			return
+		}
+	}
+}
+
+func (l *valueLog) RunGC(relocated []Entry, buf *bytes.Buffer) {
+	relocated = relocated[:0]
+	buf.Reset()
+
 	var lf *logFile
 	l.RLock()
 	if len(l.files) <= 1 {
@@ -425,25 +533,16 @@ func (l *valueLog) RunGC(getKey func(k []byte) ([]byte, byte, bool)) {
 	}
 	// This file shouldn't be being written to.
 	lfi := rand.Intn(len(l.files) - 1)
-	lf = &l.files[lfi]
+	lf = l.files[lfi]
 	l.RUnlock()
 
-	type bufEntry struct {
-		key []byte
-		enc []byte
-	}
-
-	bentries := make([]bufEntry, 0, 1000)
-
 	reason := make(map[string]int)
-	var buf bytes.Buffer
+	tr := trace.New("badger", "value-gc")
+	ctx := trace.NewContext(context.Background(), tr)
 
 	err := lf.iterate(0, func(e Entry) {
 		esz := len(e.Key) + len(e.Value) + 1
-		vptr, meta, ok := getKey(e.Key)
-		if !ok {
-			return
-		}
+		vptr, meta := l.kv.get(ctx, e.Key)
 
 		if (meta & BitDelete) > 0 {
 			// Key has been deleted. Discard.
@@ -475,17 +574,20 @@ func (l *valueLog) RunGC(getKey func(k []byte) ([]byte, byte, bool)) {
 				// This is still the active entry. This would need to be rewritten.
 				reason["keep"] += esz
 
-				be := bufEntry{}
-				be.key = make([]byte, len(e.Key))
-				copy(be.key, e.Key)
+				// This new entry only contains the key, and a pointer to the value.
+				var ne Entry
+				ne.Meta = e.Meta
+				ne.Key = make([]byte, len(e.Key))
+				copy(ne.Key, e.Key)
 
-				e.EncodeTo(&buf)
-				byt := buf.Bytes()
-				be.enc = make([]byte, len(byt))
-				copy(be.enc, byt)
-				buf.Reset()
+				var p valuePointer
+				p.Len = uint32(8 + len(e.Key) + len(e.Value) + 1)
+				p.Offset = uint64(buf.Len())
+				ne.Value = make([]byte, 16)
+				p.Encode(ne.Value)
 
-				bentries = append(bentries, be)
+				relocated = append(relocated, ne)
+				e.EncodeTo(buf) // This would be written to file. Note the usage of e, not ne.
 
 			} else {
 				for k, v := range reason {
@@ -500,11 +602,6 @@ func (l *valueLog) RunGC(getKey func(k []byte) ([]byte, byte, bool)) {
 			}
 		}
 	})
-	sort.Slice(bentries, func(i, j int) bool {
-		bi := bentries[i]
-		bj := bentries[j]
-		return bytes.Compare(bi.enc, bj.enc) < 0
-	})
 
 	y.Checkf(err, "While iterating for RunGC.")
 	for k, v := range reason {
@@ -515,17 +612,10 @@ func (l *valueLog) RunGC(getKey func(k []byte) ([]byte, byte, bool)) {
 		return
 	}
 
-	newlf := logFile{fid: atomic.AddInt32(&l.maxFid, 1), offset: 0}
+	newlf := &logFile{fid: atomic.AddInt32(&l.maxFid, 1), offset: 0}
 	newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid))
 	y.Check(err)
 	fmt.Printf("REWRITING VLOG %d to NEW %d\n", lf.fid, newlf.fid)
-
-	var lbuf bytes.Buffer
-	lbuf.Grow(reason["keep"] / M)
-	for _, be := range bentries {
-		lbuf.Write(be.enc)
-	}
-	n, err := newlf.fd.Write(lbuf.Bytes())
-	fmt.Printf("NEWFD: %d Bytes written: %d. Error: %v", newlf.fid, n, err)
-	newlf.fd.Close()
+	l.move(lf, newlf)
+	l.elog.Printf("Done rewriting.")
 }
