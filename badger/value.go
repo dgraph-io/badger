@@ -157,6 +157,8 @@ func (vlog *valueLog) move(f *logFile) {
 	b := &block{
 		Wg: sync.WaitGroup{},
 	}
+	blocks := make([]*block, 0, 10)
+	blocks = append(blocks, b)
 
 	y.AssertTrue(vlog.kv != nil)
 	fe := func(e Entry) {
@@ -190,6 +192,12 @@ func (vlog *valueLog) move(f *logFile) {
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
 			b.Entries = append(b.Entries, &ne)
+			if len(b.Entries) >= 1000 {
+				b = &block{
+					Wg: sync.WaitGroup{},
+				}
+				blocks = append(blocks, b)
+			}
 
 		} else {
 			y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, meta)
@@ -201,10 +209,15 @@ func (vlog *valueLog) move(f *logFile) {
 		return true
 	})
 
-	fmt.Printf("block has %d entries\n", len(b.Entries))
-	b.Wg.Add(1)
-	vlog.kv.writeCh <- b
-	b.Wg.Wait()
+	for i, b := range blocks {
+		fmt.Printf("block %d has %d entries\n", i, len(b.Entries))
+		b.Wg.Add(1)
+		vlog.kv.writeCh <- b
+	}
+	for i, b := range blocks {
+		fmt.Printf("block %d done\n", i)
+		b.Wg.Wait()
+	}
 
 	// Entries written to LSM. Remove the older file now.
 	{
@@ -466,18 +479,6 @@ func (l *valueLog) Write(blocks []*block) {
 	// Acquire mutex locks around this manipulation, so that the reads don't try to use
 	// an invalid file descriptor.
 }
-
-// Write batches the write of an array of entries to value log.
-// func (l *Log) Write(entries []*Entry) ([]Pointer, error) {
-// 	b := blockPool.Get().(*block)
-// 	b.entries = entries
-// 	b.wg = sync.WaitGroup{}
-// 	b.wg.Add(1)
-// 	l.bch <- b
-// 	b.wg.Wait()
-// 	defer blockPool.Put(b)
-// 	return b.ptrs, nil
-// }
 
 func (l *valueLog) getFile(fid int32) (*logFile, error) {
 	l.RLock()
