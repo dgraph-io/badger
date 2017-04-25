@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math"
-	"sync"
 
 	"github.com/dgraph-io/badger/y"
 )
@@ -28,12 +27,35 @@ import (
 //var tableSize int64 = 50 << 20
 var (
 	restartInterval int = 100 // Might want to change this to be based on total size instead of numKeys.
-	bufPool             = sync.Pool{
-		New: func() interface{} {
-			return &bytes.Buffer{}
-		},
-	}
+	bufPool             = new(bufferPool)
 )
+
+func init() {
+	bufPool.Ch = make(chan *bytes.Buffer, 10)
+}
+
+type bufferPool struct {
+	Ch chan *bytes.Buffer
+}
+
+func (p *bufferPool) Put(b *bytes.Buffer) {
+	b.Reset()
+
+	select {
+	case p.Ch <- b:
+	default:
+		// ignore
+	}
+}
+
+func (p *bufferPool) Get() *bytes.Buffer {
+	select {
+	case b := <-p.Ch:
+		return b
+	default:
+		return new(bytes.Buffer)
+	}
+}
 
 type header struct {
 	plen int // Overlap with base key.
@@ -89,34 +111,17 @@ type TableBuilder struct {
 
 func NewTableBuilder() *TableBuilder {
 	return &TableBuilder{
-		buf:        bufPool.Get().(*bytes.Buffer),
+		buf:        bufPool.Get(),
 		prevOffset: math.MaxUint32, // Used for the first element!
 	}
 }
 
 // Close closes the TableBuilder. Do not use buf field anymore.
 func (b *TableBuilder) Close() {
-	b.buf.Reset()
 	bufPool.Put(b.buf)
 }
 
-//buf := bufPool.Get().(*bytes.Buffer)
-//	defer func() {
-//		buf.Reset()
-//		bufPool.Put(buf)
-//	}()
-
 func (b *TableBuilder) Empty() bool { return b.buf.Len() == 0 }
-
-/*func (b *TableBuilder) Reset() {
-	b.counter = 0
-	b.buf = make([]byte, 0, 1<<20)
-	b.pos = 0
-	b.baseOffset = 0
-
-	b.baseKey = []byte{}
-	b.restarts = b.restarts[:0]
-}*/
 
 // write appends d to our buffer.
 func (b *TableBuilder) write(d []byte) {
