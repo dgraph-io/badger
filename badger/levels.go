@@ -336,6 +336,14 @@ func (s *levelsController) compactBuildTables(
 		iters = []y.Iterator{topTables[0].NewUniIterator(false)}
 	}
 
+	// Load to RAM for tables to be deleted.
+	//	for _, tbl := range topTables {
+	//		tbl.LoadToRAM()
+	//	}
+	//	for _, tbl := range botTables {
+	//		tbl.LoadToRAM()
+	//	}
+
 	iters = append(iters, table.NewConcatIterator(botTables, false))
 	it := y.NewMergeIterator(iters, false)
 	defer it.Close() // Important to close the iterator to do ref counting.
@@ -347,9 +355,9 @@ func (s *levelsController) compactBuildTables(
 	var i int
 	newIDMin, newIDMax := c.toInsert[0], c.toInsert[len(c.toInsert)-1]
 	newID := newIDMin
-	iterTime := time.Now()
 	for ; it.Valid(); i++ {
 		y.AssertTruef(i < len(newTables), "Rewriting too many tables: %d %d", i, len(newTables))
+		timeStart := time.Now()
 		builder := table.NewTableBuilder()
 		for ; it.Valid(); it.Next() {
 			if int64(builder.FinalSize()) > s.kv.opt.MaxTableSize {
@@ -363,8 +371,7 @@ func (s *levelsController) compactBuildTables(
 			builder.Close()
 			continue
 		}
-		fmt.Printf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(iterTime))
-		iterTime = time.Now()
+		fmt.Printf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
 
 		wg.Add(1)
 		y.AssertTruef(newID <= newIDMax, "%d %d", newID, newIDMax)
@@ -465,6 +472,14 @@ func (s *levelsController) doCompact(l int) error {
 		go func(cd compactDef) {
 			defer wg.Done()
 			timeStart := time.Now()
+			var readSize int64
+			for _, tbl := range cd.top {
+				readSize += tbl.Size()
+			}
+			for _, tbl := range cd.bot {
+				readSize += tbl.Size()
+			}
+
 			if thisLevel.level >= 1 && len(cd.bot) == 0 {
 				y.AssertTrue(len(cd.top) == 1)
 				tbl := cd.top[0]
@@ -479,9 +494,9 @@ func (s *levelsController) doCompact(l int) error {
 			}
 
 			c := s.buildCompaction(&cd)
-			if s.kv.opt.Verbose {
-				y.Printf("Compact start: %v\n", c)
-			}
+			//			if s.kv.opt.Verbose {
+			//				y.Printf("Compact start: %v\n", c)
+			//			}
 			s.clog.add(c)
 			newTables, decr := s.compactBuildTables(l, cd.top, cd.bot, c)
 			defer decr()
@@ -495,10 +510,10 @@ func (s *levelsController) doCompact(l int) error {
 			c.done = 1
 			s.clog.add(c)
 
-			//		if s.kv.opt.Verbose {
-			//			fmt.Printf("LOG Compact %d{Del [%d,%d)} => %d{Del [%d,%d), Add [%d,%d)}, took %v\n",
-			//				l, srcIdx0, srcIdx1, l+1, left, right, left, left+len(newTables), time.Since(timeStart))
-			//		}
+			if s.kv.opt.Verbose {
+				fmt.Printf("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
+					l, l+1, len(cd.top)+len(cd.bot), len(newTables), time.Since(timeStart))
+			}
 		}(cd)
 	}
 	wg.Wait()

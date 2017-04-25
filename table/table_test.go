@@ -51,14 +51,23 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 
 	filename := fmt.Sprintf("/tmp/%d.sst", rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
-	require.NoError(t, err)
+	if t != nil {
+		require.NoError(t, err)
+	} else {
+		y.Check(err)
+	}
 
 	sort.Slice(keyValues, func(i, j int) bool {
 		return keyValues[i][0] < keyValues[j][0]
 	})
 	for _, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		require.NoError(t, b.Add([]byte(kv[0]), []byte(kv[1]), 'A'))
+		err := b.Add([]byte(kv[0]), []byte(kv[1]), 'A')
+		if t != nil {
+			require.NoError(t, err)
+		} else {
+			y.Check(err)
+		}
 	}
 	f.Write(b.Finish([]byte("somemetadata")))
 	return f
@@ -590,3 +599,107 @@ func TestMergingIteratorReversed(t *testing.T) {
 
 //	require.False(t, it.Valid())
 //}
+
+func BenchmarkRead(b *testing.B) {
+	n := 5 << 20
+	builder := NewTableBuilder()
+	filename := fmt.Sprintf("/tmp/%d.sst", rand.Int63())
+	f, err := y.OpenSyncedFile(filename, true)
+	y.Check(err)
+	for i := 0; i < n; i++ {
+		k := fmt.Sprintf("%016x", i)
+		v := fmt.Sprintf("%d", i)
+		y.Check(builder.Add([]byte(k), []byte(v), 123))
+	}
+
+	f.Write(builder.Finish([]byte("somemetadata")))
+	tbl, err := OpenTable(f, MemoryMap)
+	y.Check(err)
+	defer tbl.DecrRef()
+
+	//	y.Printf("Size of table: %d\n", tbl.Size())
+	b.ResetTimer()
+	// Iterate b.N times over the entire table.
+	for i := 0; i < b.N; i++ {
+		func() {
+			it := tbl.NewIterator()
+			defer it.Close()
+			for it.SeekToFirst(); it.Valid(); it.Next() {
+			}
+		}()
+	}
+}
+
+func BenchmarkReadAndBuild(b *testing.B) {
+	n := 5 << 20
+	builder := NewTableBuilder()
+	filename := fmt.Sprintf("/tmp/%d.sst", rand.Int63())
+	f, err := y.OpenSyncedFile(filename, true)
+	y.Check(err)
+	for i := 0; i < n; i++ {
+		k := fmt.Sprintf("%016x", i)
+		v := fmt.Sprintf("%d", i)
+		y.Check(builder.Add([]byte(k), []byte(v), 123))
+	}
+
+	f.Write(builder.Finish([]byte("somemetadata")))
+	tbl, err := OpenTable(f, MemoryMap)
+	y.Check(err)
+	defer tbl.DecrRef()
+
+	//	y.Printf("Size of table: %d\n", tbl.Size())
+	b.ResetTimer()
+	// Iterate b.N times over the entire table.
+	for i := 0; i < b.N; i++ {
+		func() {
+			newBuilder := NewTableBuilder()
+			it := tbl.NewIterator()
+			defer it.Close()
+			for it.SeekToFirst(); it.Valid(); it.Next() {
+				v, meta := it.Value()
+				newBuilder.Add(it.Key(), v, meta)
+			}
+			newBuilder.Finish([]byte("somemetadata"))
+		}()
+	}
+}
+
+func BenchmarkReadMerged(b *testing.B) {
+	n := 5 << 20
+	m := 5 // Number of tables.
+	y.AssertTrue((n % m) == 0)
+	tableSize := n / m
+	var tables []*Table
+	for i := 0; i < m; i++ {
+		filename := fmt.Sprintf("/tmp/%d.sst", rand.Int63())
+		builder := NewTableBuilder()
+		f, err := y.OpenSyncedFile(filename, true)
+		for j := 0; j < tableSize; j++ {
+			id := j*m + i // Arrays are interleaved.
+			// id := i*tableSize+j (not interleaved)
+			k := fmt.Sprintf("%016x", id)
+			v := fmt.Sprintf("%d", id)
+			y.Check(builder.Add([]byte(k), []byte(v), 123))
+		}
+		f.Write(builder.Finish([]byte("somemetadata")))
+		tbl, err := OpenTable(f, MemoryMap)
+		y.Check(err)
+		tables = append(tables, tbl)
+		defer tbl.DecrRef()
+	}
+
+	b.ResetTimer()
+	// Iterate b.N times over the entire table.
+	for i := 0; i < b.N; i++ {
+		func() {
+			var iters []y.Iterator
+			for _, tbl := range tables {
+				iters = append(iters, tbl.NewUniIterator(false))
+			}
+			it := y.NewMergeIterator(iters, false)
+			defer it.Close()
+			for it.Rewind(); it.Valid(); it.Next() {
+			}
+		}()
+	}
+}

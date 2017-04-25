@@ -123,11 +123,7 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 			y.Fatalf("Unable to map file: %v", err)
 		}
 	} else if mapTableTo == LoadToRAM {
-		t.mmap = make([]byte, t.tableSize)
-		read, err := t.fd.ReadAt(t.mmap, 0)
-		if err != nil || read != t.tableSize {
-			y.Fatalf("Unable to load file in memory: %v. Read: %v", err, read)
-		}
+		t.LoadToRAM()
 	}
 
 	if err := t.readIndex(); err != nil {
@@ -313,4 +309,12 @@ func ParseFileID(name string) (uint64, bool) {
 
 func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, fmt.Sprintf("%06d", id)+fileSuffix)
+}
+
+func (t *Table) LoadToRAM() {
+	t.mmap = make([]byte, t.tableSize)
+	read, err := t.fd.ReadAt(t.mmap, 0)
+	if err != nil || read != t.tableSize {
+		y.Fatalf("Unable to load file in memory: %v. Read: %v", err, read)
+	}
 }
