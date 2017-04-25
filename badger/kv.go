@@ -97,7 +97,7 @@ func NewKV(opt *Options) *KV {
 		opt:       *opt, // Make a copy.
 		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MemtableSlack, opt.NumMemtables+5),
 		closer:    y.NewCloser(0),
-		elog:      trace.NewEventLog("badger", "kv"),
+		elog:      trace.NewEventLog("Badger", "KV"),
 	}
 	out.mt = skl.NewSkiplist(out.arenaPool)
 
