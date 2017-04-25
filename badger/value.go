@@ -147,6 +147,9 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 }
 
 func (vlog *valueLog) move(f *logFile) {
+	maxFid := atomic.LoadInt32(&vlog.maxFid)
+	y.AssertTruef(f.fid < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
+
 	fmt.Println("move callled")
 	tr := trace.New("badger", "valuelog-move")
 	ctx := trace.NewContext(context.Background(), tr)

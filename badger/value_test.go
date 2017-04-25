@@ -70,9 +70,10 @@ func TestGC(t *testing.T) {
 	db := NewKV(getTestOptions(dir))
 	defer db.Close()
 
+	sz := 16 << 20
 	var entries []*Entry
 	for i := 0; i < 100; i++ {
-		v := make([]byte, 32)
+		v := make([]byte, sz)
 		rand.Read(v)
 		entries = append(entries, &Entry{
 			Key:   []byte(fmt.Sprintf("key%d", i)),
@@ -98,7 +99,7 @@ func TestGC(t *testing.T) {
 	for i := 45; i < 100; i++ {
 		val := db.Get(ctx, []byte(fmt.Sprintf("key%d", i)))
 		require.NotNil(t, val)
-		require.True(t, len(val) == 32, "Size found: %d", len(val))
+		require.True(t, len(val) == sz, "Size found: %d", len(val))
 	}
 }
 
