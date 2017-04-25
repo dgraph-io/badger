@@ -146,13 +146,15 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 	return nil
 }
 
-func (vlog *valueLog) move(f *logFile) {
+func (vlog *valueLog) rewrite(f *logFile) {
 	maxFid := atomic.LoadInt32(&vlog.maxFid)
 	y.AssertTruef(f.fid < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
 
-	fmt.Println("move callled")
-	tr := trace.New("badger", "valuelog-move")
-	ctx := trace.NewContext(context.Background(), tr)
+	elog := trace.NewEventLog("badger", "vlog-rewrite")
+	defer elog.Finish()
+	elog.Printf("Rewriting fid: %d", f.fid)
+	fmt.Println("rewrite called")
+	ctx := context.Background()
 
 	b := &block{
 		Wg: sync.WaitGroup{},
@@ -161,7 +163,13 @@ func (vlog *valueLog) move(f *logFile) {
 	blocks = append(blocks, b)
 
 	y.AssertTrue(vlog.kv != nil)
+	var count int
 	fe := func(e Entry) {
+		count++
+		if count%10000 == 0 {
+			elog.Printf("Processing entry %d", count)
+		}
+
 		vptr, meta := vlog.kv.get(ctx, e.Key)
 
 		if (meta & BitDelete) > 0 {
@@ -208,17 +216,21 @@ func (vlog *valueLog) move(f *logFile) {
 		fe(e)
 		return true
 	})
+	elog.Printf("Processed %d entries in total", count)
 
 	for i, b := range blocks {
+		elog.Printf("block %d has %d entries", i, len(b.Entries))
 		fmt.Printf("block %d has %d entries\n", i, len(b.Entries))
 		b.Wg.Add(1)
 		vlog.kv.writeCh <- b
 	}
 	for i, b := range blocks {
+		elog.Printf("block %d done", i)
 		fmt.Printf("block %d done\n", i)
 		b.Wg.Wait()
 	}
 
+	elog.Printf("Removing fid: %d", f.fid)
 	// Entries written to LSM. Remove the older file now.
 	{
 		vlog.RLock()
@@ -233,7 +245,7 @@ func (vlog *valueLog) move(f *logFile) {
 	}
 
 	rem := vlog.fpath(f.fid)
-	vlog.elog.Printf("Removing %s", rem)
+	elog.Printf("Removing %s", rem)
 	y.Check(os.Remove(rem))
 }
 
@@ -657,7 +669,7 @@ func (vlog *valueLog) doRunGC() {
 
 	y.Trace(ctx, "Rewriting fid: %d", lf.fid)
 	fmt.Printf("=====> REWRITING VLOG %d\n", lf.fid)
-	vlog.move(lf)
+	vlog.rewrite(lf)
 	fmt.Println("REWRITE DONE")
 	vlog.elog.Printf("Done rewriting.")
 }

@@ -95,7 +95,7 @@ func TestGC(t *testing.T) {
 	// 	e.print("lf")
 	// })
 
-	db.vlog.move(lf)
+	db.vlog.rewrite(lf)
 	for i := 45; i < 100; i++ {
 		val := db.Get(ctx, []byte(fmt.Sprintf("key%d", i)))
 		require.NotNil(t, val)
