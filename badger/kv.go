@@ -259,25 +259,21 @@ func (s *KV) writeBlocks(blocks []*block) {
 	}
 	s.elog.Printf("writeBlocks called")
 
-	for !s.hasRoomForWrite() {
-		s.elog.Printf("Making room for writes")
-		// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
-		// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
-		// you will get a deadlock.
-		time.Sleep(10 * time.Millisecond)
-	}
-
 	s.elog.Printf("Writing to value log")
 	s.vlog.Write(blocks)
-	s.elog.Printf("Writing to memtable")
 
+	s.elog.Printf("Writing to memtable")
 	for i, b := range blocks {
+		for !s.hasRoomForWrite() {
+			s.elog.Printf("Making room for writes")
+			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
+			// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
+			// you will get a deadlock.
+			time.Sleep(10 * time.Millisecond)
+		}
 		s.writeToLSM(b)
 		s.elog.Printf("Wrote %d entries from block %d", len(b.Entries), i)
-	}
-	lastb := len(blocks) - 1
-	s.updateOffset(blocks[lastb].Ptrs)
-	for _, b := range blocks {
+		s.updateOffset(b.Ptrs)
 		b.Wg.Done()
 	}
 }
