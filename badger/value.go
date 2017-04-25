@@ -559,7 +559,6 @@ func (vlog *valueLog) doRunGC() {
 	if lf == nil {
 		return
 	}
-	fmt.Printf("Picked fid: %d for GC\n", lf.fid)
 
 	type reason struct {
 		total   float64
@@ -567,18 +566,22 @@ func (vlog *valueLog) doRunGC() {
 		discard float64
 	}
 
-	var r reason
 	tr := trace.New("badger", "value-gc")
+	defer tr.Finish()
 	ctx := trace.NewContext(context.Background(), tr)
+
+	var r reason
+	var window float64 = 100.0
 	count := 0
 
-	var window float64 = 100.0
-
+	y.Trace(ctx, "Picked fid: %d for GC", lf.fid)
+	fmt.Printf("Picked fid: %d for GC\n", lf.fid)
 	// Pick a random start point for the log.
 	skipFirstM := float64(rand.Int63n(LogSize/int64(M))) - window
 	var skipped float64
 	fmt.Printf("Skipping first %5.2f MB\n", skipFirstM)
 
+	start := time.Now()
 	y.AssertTrue(vlog.kv != nil)
 	err := lf.iterate(0, func(e Entry) bool {
 		esz := float64(len(e.Key)+len(e.Value)+1) / (1 << 20) // in MBs.
@@ -593,6 +596,9 @@ func (vlog *valueLog) doRunGC() {
 		}
 		r.total += esz
 		if r.total > window {
+			return false
+		}
+		if time.Since(start) > 10*time.Second {
 			return false
 		}
 
@@ -640,13 +646,16 @@ func (vlog *valueLog) doRunGC() {
 	})
 
 	y.Checkf(err, "While iterating for RunGC.")
+	y.Trace(ctx, "Fid: %d Data status=%+v\n", lf.fid, r)
 	fmt.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
 
-	if r.keep >= vlog.opt.ValueGCThreshold*r.total {
+	if r.total < 10.0 || r.keep >= vlog.opt.ValueGCThreshold*r.total {
+		y.Trace(ctx, "Skipping GC on fid: %d", lf.fid)
 		fmt.Printf("Skipping GC on fid: %d\n\n", lf.fid)
 		return
 	}
 
+	y.Trace(ctx, "Rewriting fid: %d", lf.fid)
 	fmt.Printf("=====> REWRITING VLOG %d\n", lf.fid)
 	vlog.move(lf)
 	fmt.Println("REWRITE DONE")
