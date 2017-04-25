@@ -79,7 +79,7 @@ func (lf *logFile) doneWriting() {
 	lf.size = fi.Size()
 }
 
-type logEntry func(e Entry)
+type logEntry func(e Entry) bool
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
@@ -137,7 +137,9 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 			return err
 		}
 
-		fn(e)
+		if !fn(e) {
+			break
+		}
 		count++
 		recordOffset += int64(8 + kl + vl + 1)
 	}
@@ -191,8 +193,9 @@ func (vlog *valueLog) move(f *logFile) {
 		}
 	}
 
-	f.iterate(0, func(e Entry) {
+	f.iterate(0, func(e Entry) bool {
 		fe(e)
+		return true
 	})
 
 	fmt.Printf("block has %d entries\n", len(b.Entries))
@@ -520,7 +523,7 @@ func (l *valueLog) runGCInLoop() {
 		return
 	}
 
-	tick := time.NewTicker(10 * time.Second)
+	tick := time.NewTicker(time.Minute)
 	for {
 		select {
 		case <-l.closer.HasBeenClosed():
@@ -554,32 +557,51 @@ func (vlog *valueLog) doRunGC() {
 	}
 	fmt.Printf("Picked fid: %d for GC\n", lf.fid)
 
-	reason := make(map[string]int)
+	type reason struct {
+		total   float64
+		keep    float64
+		discard float64
+	}
+
+	var r reason
 	tr := trace.New("badger", "value-gc")
 	ctx := trace.NewContext(context.Background(), tr)
 	count := 0
 
+	var window float64 = 100.0
+
+	// Pick a random start point for the log.
+	skipFirstM := float64(rand.Int63n(LogSize/int64(M))) - window
+	var skipped float64
+	fmt.Printf("Skipping first %5.2f MB\n", skipFirstM)
+
 	y.AssertTrue(vlog.kv != nil)
-	err := lf.iterate(0, func(e Entry) {
-		count++
-		if count%1000 == 0 {
-			time.Sleep(time.Millisecond)
+	err := lf.iterate(0, func(e Entry) bool {
+		esz := float64(len(e.Key)+len(e.Value)+1) / (1 << 20) // in MBs.
+		skipped += esz
+		if skipped < skipFirstM {
+			return true
 		}
 
-		esz := len(e.Key) + len(e.Value) + 1
-		vptr, meta := vlog.kv.get(ctx, e.Key)
+		count++
+		if count%100 == 0 {
+			time.Sleep(time.Millisecond)
+		}
+		r.total += esz
+		if r.total > window {
+			return false
+		}
 
+		vptr, meta := vlog.kv.get(ctx, e.Key)
 		if (meta & BitDelete) > 0 {
 			// Key has been deleted. Discard.
-			reason["discard"] += esz
-			reason["discard-deleted"] += esz
-			return
+			r.discard += esz
+			return true
 		}
 		if (meta & BitValuePointer) == 0 {
 			// Value is stored alongside key. Discard.
-			reason["discard"] += esz
-			reason["discard-value-alongside"] += esz
-			return
+			r.discard += esz
+			return true
 		}
 
 		// Value is still present in value log.
@@ -589,24 +611,20 @@ func (vlog *valueLog) doRunGC() {
 
 		if int32(vp.Fid) > lf.fid {
 			// Value is present in a later log. Discard.
-			reason["discard"] += esz
-			reason["discard-new-value-higher-fid"] += esz
-			return
+			r.discard += esz
+			return true
 		}
 		if int64(vp.Offset) > e.Offset {
 			// Value is present in a later offset, but in the same log.
-			reason["discard"] += esz
-			reason["discard-new-value-higher-offset"] += esz
-			return
+			r.discard += esz
+			return true
 		}
 		if int32(vp.Fid) == lf.fid && int64(vp.Offset) == e.Offset {
 			// This is still the active entry. This would need to be rewritten.
-			reason["keep"] += esz
+			r.keep += esz
 
 		} else {
-			for k, v := range reason {
-				fmt.Printf("%s = %d\n", k, v)
-			}
+			fmt.Printf("Reason=%+v\n", r)
 			ne, err := vlog.Read(context.Background(), vp)
 			y.Check(err)
 			ne.Offset = int64(vp.Offset)
@@ -614,18 +632,18 @@ func (vlog *valueLog) doRunGC() {
 			e.print("Latest Entry in Log")
 			y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, meta)
 		}
+		return true
 	})
 
 	y.Checkf(err, "While iterating for RunGC.")
-	for k, v := range reason {
-		fmt.Printf("%s = %d\n", k, v)
-	}
-	fmt.Printf("Fid: %d Keep: %d. Discard: %d\n\n", lf.fid, reason["keep"]/M, reason["discard"]/M)
-	if reason["keep"] >= int(vlog.opt.ValueGCThreshold*float64(lf.size)) {
+	fmt.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
+
+	if r.keep >= vlog.opt.ValueGCThreshold*r.total {
+		fmt.Printf("Skipping GC on fid: %d\n\n", lf.fid)
 		return
 	}
 
-	fmt.Printf("REWRITING VLOG %d\n", lf.fid)
+	fmt.Printf("=====> REWRITING VLOG %d\n", lf.fid)
 	vlog.move(lf)
 	fmt.Println("REWRITE DONE")
 	vlog.elog.Printf("Done rewriting.")

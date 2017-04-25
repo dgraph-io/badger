@@ -117,7 +117,7 @@ func NewKV(opt *Options) *KV {
 	}
 
 	first := true
-	fn := func(e Entry) {
+	fn := func(e Entry) bool {
 		if first {
 			fmt.Printf("key=%s\n", e.Key)
 		}
@@ -127,6 +127,7 @@ func NewKV(opt *Options) *KV {
 		nv := make([]byte, len(e.Value))
 		copy(nv, e.Value)
 		out.mt.Put(nk, nv, e.Meta)
+		return true
 	}
 	out.vlog.Replay(vptr, fn)
 
