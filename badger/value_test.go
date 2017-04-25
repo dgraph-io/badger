@@ -22,7 +22,6 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -95,19 +94,7 @@ func TestGC(t *testing.T) {
 	// 	e.print("lf")
 	// })
 
-	newlf := &logFile{fid: atomic.AddInt32(&db.vlog.maxFid, 1), offset: 0}
-	newlf.fd, err = y.OpenSyncedFile(db.vlog.fpath(newlf.fid), true)
-	y.Check(err)
-
-	db.vlog.move(lf, newlf)
-
-	idx := 0
-	newlf.iterate(0, func(e Entry) {
-		// e.print("newlf")
-		require.Equal(t, []byte(fmt.Sprintf("key%d", 45+idx)), e.Key)
-		idx++
-	})
-
+	db.vlog.move(lf)
 	for i := 45; i < 100; i++ {
 		val := db.Get(ctx, []byte(fmt.Sprintf("key%d", i)))
 		require.NotNil(t, val)

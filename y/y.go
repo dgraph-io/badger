@@ -81,7 +81,7 @@ func (c *Closer) Signal() {
 }
 
 func (c *Closer) GotSignal() bool {
-	return atomic.LoadInt32(&c.nomore) == 0
+	return atomic.LoadInt32(&c.nomore) == 1
 }
 
 func (c *Closer) Done() {

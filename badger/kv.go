@@ -49,7 +49,7 @@ type Options struct {
 	DoNotCompact            bool
 	MapTablesTo             int
 	NumMemtables            int
-	DoNotRunValueGC         bool
+	ValueGCThreshold        float64
 	SyncWrites              bool
 }
 
@@ -67,7 +67,7 @@ var DefaultOptions = Options{
 	MapTablesTo:             table.MemoryMap,
 	NumMemtables:            5,
 	MemtableSlack:           10 << 20,
-	DoNotRunValueGC:         false, // Only for testing.
+	ValueGCThreshold:        0.8, // Set to zero to not run GC.
 	SyncWrites:              true,
 }
 
@@ -244,9 +244,7 @@ func (s *KV) writeToLSM(b *block) {
 	var offsetBuf [16]byte
 	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
 	for i, entry := range b.Entries {
-		isPointer := entry.Meta&BitValuePointer > 0
-
-		if !isPointer && len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
+		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
 			s.mt.Put(entry.Key, entry.Value, entry.Meta)
 		} else {
 			s.mt.Put(entry.Key, b.Ptrs[i].Encode(offsetBuf[:]), entry.Meta|BitValuePointer)
