@@ -398,8 +398,10 @@ type UniIterator struct {
 }
 
 func (t *Table) NewUniIterator(reversed bool) *UniIterator {
+	ti := t.NewIterator()
+	ti.Init()
 	return &UniIterator{
-		iter:     t.NewIterator(),
+		iter:     ti,
 		reversed: reversed,
 	}
 }
