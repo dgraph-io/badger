@@ -151,7 +151,8 @@ func (s *KV) Close() {
 	// Make sure that block writer is done pushing stuff into memtable!
 	// Otherwise, you will have a race condition: we are trying to flush memtables
 	// and remove them completely, while the block / memtable writer is still
-	// trying to push stuff into the memtable.
+	// trying to push stuff into the memtable. This will also resolve the value
+	// offset problem: as we push into memtable, we update value offsets there.
 	// TODO: Closer framework doesn't care about order. We need to improve it and clean this up.
 	s.blockWriterWg.Wait()
 

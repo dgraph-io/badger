@@ -160,7 +160,6 @@ func (s *node) setValue(arena *Arena, val []byte, meta byte) {
 }
 
 func (s *node) getNext(h int) *node {
-	//	return (*node)(s.next[h])
 	return (*node)(atomic.LoadPointer(&s.next[h]))
 }
 
