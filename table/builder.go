@@ -20,8 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math"
-
-	"github.com/dgraph-io/badger/y"
 )
 
 //var tableSize int64 = 50 << 20
@@ -53,7 +51,9 @@ func (p *bufferPool) Get() *bytes.Buffer {
 	case b := <-p.Ch:
 		return b
 	default:
-		return new(bytes.Buffer)
+		b := new(bytes.Buffer)
+		b.Grow(64 << 20)
+		return b
 	}
 }
 
@@ -65,18 +65,11 @@ type header struct {
 }
 
 // Encode encodes the header.
-func (h header) Encode() []byte {
-	b := make([]byte, h.Size())
-	y.AssertTrue(h.plen >= 0 && h.plen <= math.MaxUint16)
-	y.AssertTrue(h.klen >= 0 && h.klen <= math.MaxUint16)
-	y.AssertTrue(h.vlen >= 0 && h.vlen <= math.MaxUint16)
-	y.AssertTrue(h.prev >= 0 && h.prev <= math.MaxUint32)
-
+func (h header) Encode(b []byte) {
 	binary.BigEndian.PutUint16(b[0:2], uint16(h.plen))
 	binary.BigEndian.PutUint16(b[2:4], uint16(h.klen))
 	binary.BigEndian.PutUint16(b[4:6], uint16(h.vlen))
 	binary.BigEndian.PutUint32(b[6:10], uint32(h.prev))
-	return b
 }
 
 // Decode decodes the header.
@@ -96,9 +89,6 @@ type TableBuilder struct {
 
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf *bytes.Buffer
-
-	// TODO: Consider removing this var. It just tracks size of buf.
-	pos int
 
 	baseKey    []byte // Base key for the current block.
 	baseOffset int    // Offset for the current block.
@@ -122,20 +112,6 @@ func (b *TableBuilder) Close() {
 }
 
 func (b *TableBuilder) Empty() bool { return b.buf.Len() == 0 }
-
-// write appends d to our buffer.
-func (b *TableBuilder) write(d []byte) {
-	//	b.buf = append(b.buf, d...)
-	b.buf.Write(d)
-	b.pos += len(d)
-	y.AssertTruef(b.pos >= b.baseOffset, "b.pos=%d b.baseOffset=%d d=%v", b.pos, b.baseOffset, d)
-}
-
-func (b *TableBuilder) writeByte(d byte) {
-	b.buf.WriteByte(d)
-	b.pos += 1
-	y.AssertTruef(b.pos >= b.baseOffset, "b.pos=%d b.baseOffset=%d d=%v", b.pos, b.baseOffset, d)
-}
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
 func (b TableBuilder) keyDiff(newKey []byte) []byte {
@@ -166,13 +142,15 @@ func (b *TableBuilder) addHelper(key, value []byte, meta byte) {
 		vlen: len(value) + 1, // Include meta byte.
 		prev: b.prevOffset,   // prevOffset is the location of the last key-value added.
 	}
-	b.prevOffset = b.pos - b.baseOffset // Remember current offset for the next Add call.
+	b.prevOffset = b.buf.Len() - b.baseOffset // Remember current offset for the next Add call.
 
 	// Layout: header, diffKey, value.
-	b.write(h.Encode())
-	b.write(diffKey)  // We only need to store the key difference.
-	b.writeByte(meta) // Meta byte precedes actual value.
-	b.write(value)
+	var hbuf [10]byte
+	h.Encode(hbuf[:])
+	b.buf.Write(hbuf[:])
+	b.buf.Write(diffKey)  // We only need to store the key difference.
+	b.buf.WriteByte(meta) // Meta byte precedes actual value.
+	b.buf.Write(value)
 	b.counter++ // Increment number of keys added for this current block.
 }
 
@@ -188,10 +166,10 @@ func (b *TableBuilder) Add(key, value []byte, meta byte) error {
 	if b.counter >= restartInterval {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
-		b.restarts = append(b.restarts, uint32(b.pos))
+		b.restarts = append(b.restarts, uint32(b.buf.Len()))
 		b.counter = 0
 		b.baseKey = []byte{}
-		b.baseOffset = b.pos
+		b.baseOffset = b.buf.Len()
 		b.prevOffset = math.MaxUint32 // First key-value pair of block has header.prev=MaxUint32.
 	}
 	b.addHelper(key, value, meta)
@@ -202,14 +180,14 @@ func (b *TableBuilder) Add(key, value []byte, meta byte) error {
 // TODO: Look into why there is a discrepancy. I suspect it is because of Write(empty, empty)
 // at the end. The diff can vary.
 func (b *TableBuilder) FinalSize() int {
-	return b.pos + 8 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
+	return b.buf.Len() + 8 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
 }
 
 // blockIndex generates the block index for the table.
 // It is mainly a list of all the block base offsets.
 func (b *TableBuilder) blockIndex() []byte {
 	// Store the end offset, so we know the length of the final block.
-	b.restarts = append(b.restarts, uint32(b.pos))
+	b.restarts = append(b.restarts, uint32(b.buf.Len()))
 
 	// Add 4 because we want to write out number of restarts at the end.
 	sz := 4*len(b.restarts) + 4
@@ -229,12 +207,12 @@ var emptySlice = make([]byte, 100)
 func (b *TableBuilder) Finish(metadata []byte) []byte {
 	b.finishBlock() // This will never start a new block.
 	index := b.blockIndex()
-	b.write(index)
+	b.buf.Write(index)
 
-	b.write(metadata)
+	b.buf.Write(metadata)
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(len(metadata)))
-	b.write(buf[:])
+	b.buf.Write(buf[:])
 
 	return b.buf.Bytes()
 }

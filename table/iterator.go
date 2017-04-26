@@ -31,8 +31,6 @@ type BlockIterator struct {
 	err     error
 	baseKey []byte
 
-	ikey []byte
-
 	key  []byte
 	val  []byte
 	init bool
@@ -62,16 +60,6 @@ func (itr *BlockIterator) Valid() bool {
 
 func (itr *BlockIterator) Error() error {
 	return itr.err
-}
-
-func (itr *BlockIterator) ensureKeyCap(h header) {
-	if cap(itr.ikey) < h.plen+h.klen {
-		sz := h.plen + h.klen
-		if sz < 2*cap(itr.ikey) {
-			sz = 2 * cap(itr.ikey)
-		}
-		itr.ikey = make([]byte, sz)
-	}
 }
 
 func (itr *BlockIterator) Close() {}
@@ -120,9 +108,10 @@ func (itr *BlockIterator) SeekToLast() {
 
 // parseKV would allocate a new byte slice for key and for value.
 func (itr *BlockIterator) parseKV(h header) {
-	// itr.ensureKeyCap(h)
-	itr.key = make([]byte, h.plen+h.klen)
-	// itr.key = itr.ikey[:h.plen+h.klen]
+	if cap(itr.key) < h.plen+h.klen {
+		itr.key = make([]byte, 2*(h.plen+h.klen))
+	}
+	itr.key = itr.key[:h.plen+h.klen]
 	y.AssertTrue(h.plen == copy(itr.key, itr.baseKey[:h.plen]))
 	y.AssertTrue(h.klen == copy(itr.key[h.plen:], itr.data[itr.pos:itr.pos+h.klen]))
 	itr.pos += h.klen
@@ -132,8 +121,6 @@ func (itr *BlockIterator) parseKV(h header) {
 		return
 	}
 
-	itr.val = make([]byte, h.vlen)
-	y.AssertTrue(h.vlen == copy(itr.val, itr.data[itr.pos:itr.pos+h.vlen]))
 	itr.val = itr.data[itr.pos : itr.pos+h.vlen]
 	itr.pos += h.vlen
 }

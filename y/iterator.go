@@ -36,58 +36,83 @@ type Iterator interface {
 	Close()
 }
 
-// mergeHeap is an internal structure to remember which iterator has the smallest element.
-type mergeHeap struct {
-	it       *MergeIterator
-	idx      []int
+type elem struct {
+	itr      Iterator
+	nice     int
 	reversed bool
 }
 
-func (s *mergeHeap) Len() int { return len(s.idx) }
+type elemHeap []*elem
 
-func (s *mergeHeap) Less(i, j int) bool {
-	idx1, idx2 := s.idx[i], s.idx[j]
-	cmp := bytes.Compare(s.it.keys[idx1], s.it.keys[idx2])
+func (eh elemHeap) Len() int            { return len(eh) }
+func (eh elemHeap) Swap(i, j int)       { eh[i], eh[j] = eh[j], eh[i] }
+func (eh *elemHeap) Push(x interface{}) { *eh = append(*eh, x.(*elem)) }
+func (eh *elemHeap) Pop() interface{} {
+	// Remove the last element, because Go has already swapped 0th elem <-> last.
+	old := *eh
+	n := len(old)
+	x := old[n-1]
+	*eh = old[0 : n-1]
+	return x
+}
+func (eh elemHeap) Less(i, j int) bool {
+	cmp := bytes.Compare(eh[i].itr.Key(), eh[j].itr.Key())
 	if cmp < 0 {
-		return !s.reversed
+		return !eh[i].reversed
 	}
 	if cmp > 0 {
-		return s.reversed
+		return eh[i].reversed
 	}
-	// The keys are equal. In this case, lower indices take precedence. This is important.
-	return idx1 < idx2
-}
-
-func (s *mergeHeap) Swap(i, j int) {
-	s.idx[i], s.idx[j] = s.idx[j], s.idx[i]
-}
-
-func (s *mergeHeap) Push(x interface{}) {
-	s.idx = append(s.idx, x.(int))
-}
-
-func (s *mergeHeap) Pop() interface{} {
-	n := len(s.idx)
-	out := s.idx[n-1]
-	s.idx = s.idx[:n-1]
-	return out
+	// The keys are equal. In this case, lower nice take precedence. This is important.
+	return eh[i].nice < eh[j].nice
 }
 
 // MergeIterator merges multiple iterators.
 // NOTE: MergeIterator owns the array of iterators and is responsible for closing them.
 type MergeIterator struct {
-	iters    []Iterator
-	keys     [][]byte
-	h        *mergeHeap
+	h        elemHeap
+	curKey   []byte
 	reversed bool
+
+	all []Iterator
 }
 
 // NewMergeIterator returns a new MergeIterator from a list of Iterators.
 func NewMergeIterator(iters []Iterator, reversed bool) *MergeIterator {
-	return &MergeIterator{
-		iters:    iters,
-		keys:     make([][]byte, len(iters)),
-		reversed: reversed,
+	m := &MergeIterator{all: iters, reversed: reversed}
+	m.h = make(elemHeap, 0, len(iters))
+	m.initHeap()
+	return m
+}
+
+func (s *MergeIterator) storeKey(smallest Iterator) {
+	if cap(s.curKey) < len(smallest.Key()) {
+		s.curKey = make([]byte, 2*len(smallest.Key()))
+	}
+	s.curKey = s.curKey[:len(smallest.Key())]
+	copy(s.curKey, smallest.Key())
+}
+
+// initHeap checks all iterators and initializes our heap and array of keys.
+// Whenever we reverse direction, we need to run this.
+func (s *MergeIterator) initHeap() {
+	s.h = s.h[:0]
+	for idx, itr := range s.all {
+		if !itr.Valid() {
+			continue
+		}
+		e := &elem{itr: itr, nice: idx, reversed: s.reversed}
+		s.h = append(s.h, e)
+	}
+	heap.Init(&s.h)
+	for len(s.h) > 0 {
+		it := s.h[0].itr
+		if it == nil || !it.Valid() {
+			heap.Pop(&s.h)
+			continue
+		}
+		s.storeKey(s.h[0].itr)
+		break
 	}
 }
 
@@ -98,94 +123,71 @@ func (s *MergeIterator) Valid() bool {
 	if s == nil {
 		return false
 	}
-	for _, it := range s.iters {
-		if it.Valid() {
-			return true
-		}
+	if len(s.h) == 0 {
+		return false
 	}
-	return false
+	return s.h[0].itr.Valid()
 }
 
 func (s *MergeIterator) Key() []byte {
-	if len(s.h.idx) == 0 {
+	if len(s.h) == 0 {
 		return nil
 	}
-	return s.iters[s.h.idx[0]].Key()
+	return s.h[0].itr.Key()
 }
 
 func (s *MergeIterator) Value() ([]byte, byte) {
-	if len(s.h.idx) == 0 {
+	if len(s.h) == 0 {
 		return nil, 0
 	}
-	return s.iters[s.h.idx[0]].Value()
+	return s.h[0].itr.Value()
 }
 
 // Next returns the next element. If it is the same as the current key, ignore it.
 func (s *MergeIterator) Next() {
-	AssertTrue(s.Valid())
-	k := s.Key()
-	oldKey := make([]byte, len(k))
-	// This copy is necessary because the underlying iterator is going to not make
-	// copies and the same key buffer may be reused.
-	AssertTrue(len(k) == copy(oldKey, k))
-	for {
-		idx := s.h.idx[0] // Which iterator.
-		it := s.iters[idx]
-		heap.Pop(s.h)
-		AssertTrue(it.Valid())
-		it.Next()
-		if it.Valid() {
-			// Need to push back the idx and update keys.
-			s.keys[idx] = it.Key()
-			heap.Push(s.h, idx) // Consider using Fix instead of Pop, Push.
+	smallest := s.h[0].itr
+	smallest.Next()
+
+	for len(s.h) > 0 {
+		smallest = s.h[0].itr
+		if !smallest.Valid() {
+			heap.Pop(&s.h)
+			continue
 		}
-		if !s.Valid() {
-			break
+
+		heap.Fix(&s.h, 0)
+		smallest = s.h[0].itr
+		if smallest.Valid() {
+			if !bytes.Equal(smallest.Key(), s.curKey) {
+				break
+			}
+			smallest.Next()
 		}
-		// Check the new key. If it is equal to the old key, we continue popping.
-		newKey := s.Key()
-		if !bytes.Equal(newKey, oldKey) {
-			break
-		}
-		// If equal, we need to continue popping elements.
 	}
+	if !smallest.Valid() {
+		return
+	}
+	s.storeKey(smallest)
 }
 
 // Rewind seeks to first element (or last element for reverse iterator).
 func (s *MergeIterator) Rewind() {
-	for _, it := range s.iters {
-		it.Rewind()
+	for _, itr := range s.all {
+		itr.Rewind()
 	}
 	s.initHeap()
 }
 
 // Seek brings us to element with key >= given key.
 func (s *MergeIterator) Seek(key []byte) {
-	for _, it := range s.iters {
-		it.Seek(key)
+	for _, itr := range s.all {
+		itr.Seek(key)
 	}
 	s.initHeap()
 }
 
-// initHeap checks all iterators and initializes our heap and array of keys.
-// Whenever we reverse direction, we need to run this.
-func (s *MergeIterator) initHeap() {
-	s.h = &mergeHeap{
-		it:       s,
-		reversed: s.reversed,
-	}
-	for i, it := range s.iters {
-		s.keys[i] = nil
-		if !it.Valid() {
-			continue
-		}
-		s.keys[i] = it.Key()
-		heap.Push(s.h, i)
-	}
-}
-
 func (s *MergeIterator) Close() {
-	for _, it := range s.iters {
-		it.Close()
+	for _, itr := range s.all {
+		itr.Close()
 	}
 }

@@ -95,9 +95,15 @@ TOP:
 				continue
 			}
 
+			keyCopy := make([]byte, len(i.Key()))
+			copy(keyCopy, i.Key())
+
+			vptrCopy := make([]byte, len(vptr))
+			copy(vptrCopy, vptr)
+
 			item := &KVItem{
-				key:  i.Key(),
-				vptr: vptr,
+				key:  keyCopy,
+				vptr: vptrCopy,
 				meta: meta,
 			}
 			item.Add(1)
