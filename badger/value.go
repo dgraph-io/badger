@@ -36,15 +36,17 @@ import (
 
 	"golang.org/x/net/trace"
 
+	"github.com/bkaradzic/go-lz4"
 	"github.com/dgraph-io/badger/y"
 )
 
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete             = 1 // Set if the key has been deleted.
-	BitValuePointer       = 2 // Set if the value is NOT stored directly next to key.
-	LogSize         int64 = 1 << 30
+	BitDelete             = 1       // Set if the key has been deleted.
+	BitValuePointer       = 2       // Set if the value is NOT stored directly next to key.
+	BitCompressed         = 4       // Set if the value is compressed in the value log.
+	LogSize         int64 = 1 << 30 // ~1GB
 	M               int   = 1 << 20
 )
 
@@ -335,18 +337,22 @@ func (h *header) Decode(buf []byte) []byte {
 }
 
 type valuePointer struct {
-	Fid    uint32
-	Len    uint32
-	Offset uint64
+	Fid               uint32
+	Len               uint32
+	Offset            uint64
+	InsideBlockOffset uint16
+	Meta              byte
 }
 
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode(b []byte) []byte {
-	y.AssertTrue(len(b) >= 16)
+	y.AssertTrue(len(b) >= 19)
 	binary.BigEndian.PutUint32(b[:4], p.Fid)
 	binary.BigEndian.PutUint32(b[4:8], p.Len)
-	binary.BigEndian.PutUint64(b[8:16], uint64(p.Offset))
-	return b[:16]
+	binary.BigEndian.PutUint64(b[8:16], p.Offset)
+	binary.BigEndian.PutUint16(b[16:18], p.InsideBlockOffset)
+	b[18] = p.Meta
+	return b[:19]
 }
 
 func (p *valuePointer) Decode(b []byte) {
@@ -354,6 +360,8 @@ func (p *valuePointer) Decode(b []byte) {
 	p.Fid = binary.BigEndian.Uint32(b[:4])
 	p.Len = binary.BigEndian.Uint32(b[4:8])
 	p.Offset = binary.BigEndian.Uint64(b[8:16])
+	p.InsideBlockOffset = binary.BigEndian.Uint16(b[16:18])
+	p.Meta = b[18]
 }
 
 type valueLog struct {
@@ -468,66 +476,13 @@ type request struct {
 	Wg      sync.WaitGroup
 }
 
+// Write writes entries from blocks to the disk and updates the valuePointers
+// for this entries.
+//
 // Write is thread-unsafe by design and should not be called concurrently.
 func (l *valueLog) Write(reqs []*request) {
-	l.RLock()
-	curlf := l.files[len(l.files)-1]
-	l.RUnlock()
-
-	toDisk := func() {
-		if l.buf.Len() == 0 {
-			return
-		}
-		l.elog.Printf("Flushing %d blocks of total size: %d", len(reqs), l.buf.Len())
-		n, err := curlf.fd.Write(l.buf.Bytes())
-		if err != nil {
-			y.Fatalf("Unable to write to value log: %v", err)
-		}
-		l.elog.Printf("Done")
-		curlf.offset += int64(n)
-		l.buf.Reset()
-
-		if curlf.offset > LogSize {
-			var err error
-			curlf.doneWriting()
-
-			newlf := &logFile{fid: atomic.AddInt32(&l.maxFid, 1), offset: 0}
-			newlf.path = l.fpath(newlf.fid)
-			newlf.fd, err = y.OpenSyncedFile(newlf.path, l.opt.SyncWrites)
-			y.Check(err)
-
-			l.Lock()
-			l.files = append(l.files, newlf)
-			l.Unlock()
-			curlf = newlf
-		}
-	}
-
-	for i := range reqs {
-		b := reqs[i]
-		b.Ptrs = b.Ptrs[:0]
-		for j := range b.Entries {
-			e := b.Entries[j]
-			var p valuePointer
-
-			if !l.opt.SyncWrites && len(e.Value) < l.opt.ValueThreshold {
-				// No need to write to value log.
-				b.Ptrs = append(b.Ptrs, p)
-				continue
-			}
-
-			p.Fid = uint32(curlf.fid)
-			p.Len = uint32(8 + len(e.Key) + len(e.Value) + 1 + 4) // +4 for CAS stuff.
-			p.Offset = uint64(curlf.offset) + uint64(l.buf.Len())
-			b.Ptrs = append(b.Ptrs, p)
-
-			e.EncodeTo(&l.buf)
-			if p.Offset > uint64(LogSize) {
-				toDisk()
-			}
-		}
-	}
-	toDisk()
+	writer := newWriter(l)
+	writer.write(reqs)
 
 	// Acquire mutex locks around this manipulation, so that the reads don't try to use
 	// an invalid file descriptor.
@@ -560,10 +515,18 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	if err := lf.read(buf, int64(p.Offset)); err != nil {
 		return e, err
 	}
+
+	if p.Meta&BitCompressed != 0 {
+		decoded, err := lz4.Decode(nil, buf)
+		y.Check(err)
+
+		buf = decoded[p.InsideBlockOffset:]
+	}
+
 	var h header
 	buf = h.Decode(buf)
 	e.Key = buf[0:h.klen]
-	e.Meta = buf[h.klen]
+	e.Meta = buf[h.klen] | (p.Meta & BitCompressed)
 	e.casCounter = binary.BigEndian.Uint16(buf[h.klen+1 : h.klen+3])
 	e.CASCounterCheck = binary.BigEndian.Uint16(buf[h.klen+3 : h.klen+5])
 	buf = buf[h.klen+5:]
