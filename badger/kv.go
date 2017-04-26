@@ -22,6 +22,7 @@ import (
 	"os"
 	"sync"
 	"time"
+	"unsafe"
 
 	"golang.org/x/net/trace"
 
@@ -242,7 +243,7 @@ var blockPool = sync.Pool{
 }
 
 func (s *KV) writeToLSM(b *block) {
-	var offsetBuf [16]byte
+	var offsetBuf [19]byte
 	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
 	for i, entry := range b.Entries {
 		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
@@ -401,7 +402,7 @@ func (s *KV) flushMemtable() {
 				if s.opt.Verbose {
 					fmt.Printf("Storing offset: %+v\n", ft.vptr)
 				}
-				offset := make([]byte, 16)
+				offset := make([]byte, unsafe.Sizeof(s.vptr))
 				s.vptr.Encode(offset)
 				ft.mt.Put(Head, offset, 0)
 			}

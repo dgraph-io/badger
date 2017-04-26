@@ -63,6 +63,69 @@ func TestBasic(t *testing.T) {
 	}, readEntries)
 }
 
+func repeat(c byte, size int) (b []byte) {
+	b = make([]byte, size)
+	for i := 0; i < size; i++ {
+		b[i] = c
+	}
+	return
+}
+
+func TestCompression(t *testing.T) {
+	ctx := context.Background()
+	dir, err := ioutil.TempDir("", "")
+	y.Check(err)
+
+	kv := NewKV(getTestOptions(dir))
+	defer kv.Close()
+	log := kv.vlog
+
+	manyA := repeat('a', (1 << 10)) // ~ 1KB
+
+	fmt.Println(len(manyA))
+
+	manyB := repeat('b', 65*(1<<10)) // ~ 65KB
+	fmt.Println(len(manyB))
+	entry1 := &Entry{
+		Key:   []byte("key1"),
+		Value: manyA,
+		Meta:  BitValuePointer,
+	}
+	entry2 := &Entry{
+		Key:   []byte("key2"),
+		Value: manyB,
+		Meta:  BitValuePointer,
+	}
+	b := new(block)
+	b.Entries = []*Entry{entry1, entry2}
+
+	log.Write([]*block{b})
+	require.Len(t, b.Ptrs, 2)
+	fmt.Printf("Pointer written: %+v, %+v\n", b.Ptrs[0], b.Ptrs[1])
+
+	require.NotZero(t, b.Ptrs[0].Meta&BitCompressed)
+	require.EqualValues(t, 0, b.Ptrs[0].Offset)
+	require.EqualValues(t, 0, b.Ptrs[0].InsideBlockOffset)
+
+	require.NotZero(t, b.Ptrs[1].Meta&BitCompressed)
+	require.NotZero(t, b.Ptrs[1].InsideBlockOffset)
+	require.EqualValues(t, 0, b.Ptrs[1].Offset)
+
+	require.EqualValues(t, b.Ptrs[0].Len, b.Ptrs[1].Len)
+	require.True(t, b.Ptrs[0].Len < 400) // Check whether the block is small
+
+	var readEntries []Entry
+	e, err := log.Read(ctx, b.Ptrs[0])
+	require.NoError(t, err)
+	readEntries = append(readEntries, e)
+	e, err = log.Read(ctx, b.Ptrs[1])
+	require.NoError(t, err)
+	readEntries = append(readEntries, e)
+
+	require.EqualValues(t, readEntries[0].Value, manyA)
+	require.EqualValues(t, readEntries[1].Value, manyB)
+}
+
 func TestGC(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)

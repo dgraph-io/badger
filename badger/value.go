@@ -43,12 +43,11 @@ import (
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete                  = 1       // Set if the key has been deleted.
-	BitValuePointer            = 2       // Set if the value is NOT stored directly next to key.
-	BitCompressed              = 4       // Set if the value is compressed in the value log.
-	LogSize              int64 = 1 << 30 // ~1GB
-	M                    int   = 1 << 20
-	CompressionThreshold       = 1.0 // We compress values only if compression provides specified space gain.
+	BitDelete             = 1       // Set if the key has been deleted.
+	BitValuePointer       = 2       // Set if the value is NOT stored directly next to key.
+	BitCompressed         = 4       // Set if the value is compressed in the value log.
+	LogSize         int64 = 1 << 30 // ~1GB
+	M               int   = 1 << 20
 )
 
 var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
@@ -298,18 +297,19 @@ type valuePointer struct {
 	Fid               uint32
 	Len               uint32
 	Offset            uint64
-	BlockOffset       uint64 // we can use uint32 in the future
 	InsideBlockOffset uint16
-	// TODO(szm): we use either Offset or BlockOffset + InsideBlockOffset <- we should spare this place
+	Meta              byte
 }
 
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode(b []byte) []byte {
-	y.AssertTrue(len(b) >= 16)
+	y.AssertTrue(len(b) >= 19)
 	binary.BigEndian.PutUint32(b[:4], p.Fid)
 	binary.BigEndian.PutUint32(b[4:8], p.Len)
-	binary.BigEndian.PutUint64(b[8:16], uint64(p.Offset))
-	return b[:16]
+	binary.BigEndian.PutUint64(b[8:16], p.Offset)
+	binary.BigEndian.PutUint16(b[16:18], p.InsideBlockOffset)
+	b[18] = p.Meta
+	return b[:19]
 }
 
 func (p *valuePointer) Decode(b []byte) {
@@ -317,6 +317,8 @@ func (p *valuePointer) Decode(b []byte) {
 	p.Fid = binary.BigEndian.Uint32(b[:4])
 	p.Len = binary.BigEndian.Uint32(b[4:8])
 	p.Offset = binary.BigEndian.Uint64(b[8:16])
+	p.InsideBlockOffset = binary.BigEndian.Uint16(b[16:18])
+	p.Meta = b[18]
 }
 
 type valueLog struct {
@@ -440,132 +442,13 @@ type block struct {
 	Wg      sync.WaitGroup
 }
 
-type entryPosition struct {
-	block uint16
-	id    uint16
-}
-
-func (e *entryPosition) String() string {
-	return fmt.Sprintf("Block %d, id: %d", e.block, e.id)
-}
-
 // Write writes entries from blocks to the disk and updates the valuePointers
 // for this entries.
 //
 // Write is thread-unsafe by design and should not be called concurrently.
 func (l *valueLog) Write(blocks []*block) {
-	l.RLock()
-	curlf := l.files[len(l.files)-1]
-	l.RUnlock()
-
-	var firstBufferEntry entryPosition
-
-	compress := func(buffer []byte) ([]byte, error) {
-		// TODO(szm): We should reuse the compressed buffer.
-		compressed, err := lz4.Encode(nil, buffer)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(compressed)*CompressionThreshold > len(buffer) {
-			return nil, errors.New("no significant space gain")
-		}
-
-		return compressed, nil
-	}
-
-	next := func(e entryPosition) entryPosition {
-		if uint16(len(blocks[e.block].Entries)) == e.id-1 {
-			// last entry in block
-			return entryPosition{e.block + 1, 0}
-		}
-		return entryPosition{e.block, e.id + 1}
-	}
-
-	// Traverses blocks entries between from and to (excluding to) and sets
-	// BlockOffset and InsideBlockOffset values.
-	updatePointers := func(from, to entryPosition) {
-		blockStart := uint64(curlf.fid)
-		for pos := from; pos.block < to.block && pos.id < to.id; pos = next(pos) {
-			ptr := &blocks[pos.block].Ptrs[pos.id]
-			ptr.BlockOffset = blockStart
-			ptr.InsideBlockOffset = uint16(ptr.Offset - blockStart)
-
-			entry := blocks[pos.block].Entries[pos.id]
-			entry.Meta = entry.Meta | BitCompressed
-		}
-	}
-
-	toDisk := func(from, to entryPosition, buffer *bytes.Buffer) {
-		if buffer.Len() == 0 {
-			return
-		}
-
-		compressed, err := compress(buffer.Bytes())
-
-		var n int
-
-		if err != nil {
-			l.elog.Printf("Flushing from %+v to %+v of total size: %d", from, to, l.buf.Len())
-			n, err = curlf.fd.Write(l.buf.Bytes())
-			if err != nil {
-				y.Fatalf("Unable to write to value log: %v", err)
-			}
-		} else {
-			// we store entries in this buffer compressed
-			l.elog.Printf("Flushing compressed from %+v to %+v of total size: %d", from, to, l.buf.Len())
-			n, err = curlf.fd.Write(compressed)
-			if err != nil {
-				y.Fatalf("Unable to write to value log: %v", err)
-			}
-			updatePointers(from, to)
-		}
-		curlf.offset += int64(n)
-		l.buf.Reset()
-		l.elog.Printf("Done")
-
-		if curlf.offset > LogSize {
-			var err error
-			curlf.doneWriting()
-
-			newlf := &logFile{fid: atomic.AddInt32(&l.maxFid, 1), offset: 0}
-			newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid), l.opt.SyncWrites)
-			y.Check(err)
-
-			l.Lock()
-			l.files = append(l.files, newlf)
-			l.Unlock()
-			curlf = newlf
-		}
-	}
-
-	for i := range blocks {
-		b := blocks[i]
-		b.Ptrs = b.Ptrs[:0]
-		for j := range b.Entries {
-			e := b.Entries[j]
-
-			var p valuePointer
-			p.Fid = uint32(curlf.fid)
-			p.Len = uint32(8 + len(e.Key) + len(e.Value) + 1)
-			p.Offset = uint64(curlf.offset) + uint64(l.buf.Len())
-			b.Ptrs = append(b.Ptrs, p)
-
-			e.EncodeTo(&l.buf)
-			if p.Offset > uint64(LogSize) {
-				afterLast := next(entryPosition{uint16(i), uint16(j)})
-				toDisk(
-					firstBufferEntry,
-					afterLast,
-					&l.buf)
-			}
-		}
-	}
-	lastEntryPosition := entryPosition{
-		block: uint16(len(blocks)),
-		id:    uint16(len(blocks[len(blocks)-1].Entries)),
-	}
-	toDisk(firstBufferEntry, lastEntryPosition, &l.buf)
+	writer := newWriter(l)
+	writer.write(blocks)
 
 	// Acquire mutex locks around this manipulation, so that the reads don't try to use
 	// an invalid file descriptor.
@@ -594,14 +477,22 @@ func (l *valueLog) Read(ctx context.Context, p valuePointer) (e Entry, err error
 		return e, err
 	}
 
+	var h header
 	buf := make([]byte, p.Len)
 	if _, err := lf.fd.ReadAt(buf, int64(p.Offset)); err != nil {
 		return e, err
 	}
-	var h header
+
+	if p.Meta&BitCompressed != 0 {
+		decoded, err := lz4.Decode(nil, buf)
+		y.Check(err)
+
+		buf = decoded[p.InsideBlockOffset:]
+	}
+
 	buf = h.Decode(buf)
 	e.Key = buf[0:h.klen]
-	e.Meta = buf[h.klen]
+	e.Meta = buf[h.klen] | (p.Meta & BitCompressed)
 	buf = buf[h.klen+1:]
 	e.Value = buf[0:h.vlen]
 	return e, nil
