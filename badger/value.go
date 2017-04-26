@@ -36,16 +36,19 @@ import (
 
 	"golang.org/x/net/trace"
 
+	"github.com/bkaradzic/go-lz4"
 	"github.com/dgraph-io/badger/y"
 )
 
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete             = 1 // Set if the key has been deleted.
-	BitValuePointer       = 2 // Set if the value is NOT stored directly next to key.
-	LogSize         int64 = 1 << 30
-	M               int   = 1 << 20
+	BitDelete                  = 1       // Set if the key has been deleted.
+	BitValuePointer            = 2       // Set if the value is NOT stored directly next to key.
+	BitCompressed              = 4       // Set if the value is compressed in the value log.
+	LogSize              int64 = 1 << 30 // ~1GB
+	M                    int   = 1 << 20
+	CompressionThreshold       = 1.0 // We compress values only if compression provides specified space gain.
 )
 
 var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
@@ -292,9 +295,12 @@ func (h *header) Decode(buf []byte) []byte {
 }
 
 type valuePointer struct {
-	Fid    uint32
-	Len    uint32
-	Offset uint64
+	Fid               uint32
+	Len               uint32
+	Offset            uint64
+	BlockOffset       uint64 // we can use uint32 in the future
+	InsideBlockOffset uint16
+	// TODO(szm): we use either Offset or BlockOffset + InsideBlockOffset <- we should spare this place
 }
 
 // Encode encodes Pointer into byte buffer.
@@ -434,24 +440,89 @@ type block struct {
 	Wg      sync.WaitGroup
 }
 
+type entryPosition struct {
+	block uint16
+	id    uint16
+}
+
+func (e *entryPosition) String() string {
+	return fmt.Sprintf("Block %d, id: %d", e.block, e.id)
+}
+
+// Write writes entries from blocks to the disk and updates the valuePointers
+// for this entries.
+//
 // Write is thread-unsafe by design and should not be called concurrently.
 func (l *valueLog) Write(blocks []*block) {
 	l.RLock()
 	curlf := l.files[len(l.files)-1]
 	l.RUnlock()
 
-	toDisk := func() {
-		if l.buf.Len() == 0 {
+	var firstBufferEntry entryPosition
+
+	compress := func(buffer []byte) ([]byte, error) {
+		// TODO(szm): We should reuse the compressed buffer.
+		compressed, err := lz4.Encode(nil, buffer)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(compressed)*CompressionThreshold > len(buffer) {
+			return nil, errors.New("no significant space gain")
+		}
+
+		return compressed, nil
+	}
+
+	next := func(e entryPosition) entryPosition {
+		if uint16(len(blocks[e.block].Entries)) == e.id-1 {
+			// last entry in block
+			return entryPosition{e.block + 1, 0}
+		}
+		return entryPosition{e.block, e.id + 1}
+	}
+
+	// Traverses blocks entries between from and to (excluding to) and sets
+	// BlockOffset and InsideBlockOffset values.
+	updatePointers := func(from, to entryPosition) {
+		blockStart := uint64(curlf.fid)
+		for pos := from; pos.block < to.block && pos.id < to.id; pos = next(pos) {
+			ptr := &blocks[pos.block].Ptrs[pos.id]
+			ptr.BlockOffset = blockStart
+			ptr.InsideBlockOffset = uint16(ptr.Offset - blockStart)
+
+			entry := blocks[pos.block].Entries[pos.id]
+			entry.Meta = entry.Meta | BitCompressed
+		}
+	}
+
+	toDisk := func(from, to entryPosition, buffer *bytes.Buffer) {
+		if buffer.Len() == 0 {
 			return
 		}
-		l.elog.Printf("Flushing %d blocks of total size: %d", len(blocks), l.buf.Len())
-		n, err := curlf.fd.Write(l.buf.Bytes())
+
+		compressed, err := compress(buffer.Bytes())
+
+		var n int
+
 		if err != nil {
-			y.Fatalf("Unable to write to value log: %v", err)
+			l.elog.Printf("Flushing from %+v to %+v of total size: %d", from, to, l.buf.Len())
+			n, err = curlf.fd.Write(l.buf.Bytes())
+			if err != nil {
+				y.Fatalf("Unable to write to value log: %v", err)
+			}
+		} else {
+			// we store entries in this buffer compressed
+			l.elog.Printf("Flushing compressed from %+v to %+v of total size: %d", from, to, l.buf.Len())
+			n, err = curlf.fd.Write(compressed)
+			if err != nil {
+				y.Fatalf("Unable to write to value log: %v", err)
+			}
+			updatePointers(from, to)
 		}
-		l.elog.Printf("Done")
 		curlf.offset += int64(n)
 		l.buf.Reset()
+		l.elog.Printf("Done")
 
 		if curlf.offset > LogSize {
 			var err error
@@ -482,11 +553,19 @@ func (l *valueLog) Write(blocks []*block) {
 
 			e.EncodeTo(&l.buf)
 			if p.Offset > uint64(LogSize) {
-				toDisk()
+				afterLast := next(entryPosition{uint16(i), uint16(j)})
+				toDisk(
+					firstBufferEntry,
+					afterLast,
+					&l.buf)
 			}
 		}
 	}
-	toDisk()
+	lastEntryPosition := entryPosition{
+		block: uint16(len(blocks)),
+		id:    uint16(len(blocks[len(blocks)-1].Entries)),
+	}
+	toDisk(firstBufferEntry, lastEntryPosition, &l.buf)
 
 	// Acquire mutex locks around this manipulation, so that the reads don't try to use
 	// an invalid file descriptor.
