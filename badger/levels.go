@@ -294,7 +294,7 @@ func (s *levelsController) pickCompactLevel() int {
 		if s.beingCompacted[i] || s.beingCompacted[i+1] {
 			continue
 		}
-		if (i == 0 && len(s.levels[0].tables) > s.kv.opt.NumLevelZeroTables) ||
+		if (i == 0 && s.levels[0].numTables() > s.kv.opt.NumLevelZeroTables) ||
 			(i > 0 && s.levels[i].getTotalSize() > s.levels[i].maxTotalSize) {
 			s.beingCompacted[i], s.beingCompacted[i+1] = true, true
 			return i
@@ -417,10 +417,15 @@ func (s *levelsController) doCompact(l int) error {
 	// remain unchanged.
 	var cds []compactDef
 	if l == 0 {
+		thisLevel.RLock() // For accessing tables. We may be adding new table into level 0.
 		top := make([]*table.Table, len(thisLevel.tables))
 		y.AssertTrue(len(thisLevel.tables) == copy(top, thisLevel.tables))
+		thisLevel.RUnlock()
+
 		smallest, biggest := keyRange(top)
+		//		nextLevel.RLock() // Shouldn't be necessary.
 		left, right := overlappingTables(smallest, biggest, nextLevel.tables)
+		//		nextLevel.RUnlock()
 		bot := make([]*table.Table, right-left)
 		copy(bot, nextLevel.tables[left:right])
 		cds = append(cds, compactDef{
@@ -567,6 +572,12 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table, verbose bool) bool {
 		fmt.Printf("Num level 0 tables increased from %d to %d\n", len(s.tables)-1, len(s.tables))
 	}
 	return true
+}
+
+func (s *levelHandler) numTables() int {
+	s.RLock()
+	defer s.RUnlock()
+	return len(s.tables)
 }
 
 func (s *levelsController) close() {

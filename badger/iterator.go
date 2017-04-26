@@ -174,7 +174,8 @@ func (s *KV) NewIterator(
 		return nil
 	}
 
-	tables := s.getMemTables()
+	tables, decr := s.getMemTables()
+	defer decr()
 	var iters []y.Iterator
 	for i := 0; i < len(tables); i++ {
 		iters = append(iters, tables[i].NewUniIterator(reversed))

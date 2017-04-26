@@ -94,7 +94,6 @@ func TestConcurrentWrite(t *testing.T) {
 	var i, j int
 	for kv := range it.Ch() {
 		k := kv.Key()
-		// fmt.Printf("Key=%s\n", k)
 		if k == nil {
 			break // end of iteration.
 		}

@@ -109,7 +109,10 @@ func (s *Skiplist) DecrRef() {
 		x = next
 	}
 	s.arenaPool.Put(s.arena)
-	s.arena = nil // Indicate we are closed. Good for testing.
+	// Indicate we are closed. Good for testing.
+	// Race condition here would suggest we are accessing skiplist when we are
+	// supposed to have no reference!
+	s.arena = nil
 }
 
 func (s *Skiplist) Valid() bool { return s.arena != nil }
@@ -156,7 +159,10 @@ func (s *node) setValue(arena *Arena, val []byte, meta byte) {
 	s.valueSize = uint16(len(val))
 }
 
-func (s *node) getNext(h int) *node { return (*node)(s.next[h]) }
+func (s *node) getNext(h int) *node {
+	//	return (*node)(s.next[h])
+	return (*node)(atomic.LoadPointer(&s.next[h]))
+}
 
 func (s *node) casNext(h int, old, val *node) bool {
 	return atomic.CompareAndSwapPointer(&s.next[h], unsafe.Pointer(old), unsafe.Pointer(val))
@@ -273,12 +279,16 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 	}
 }
 
+func (s *Skiplist) Height() int32 {
+	return atomic.LoadInt32(&s.height)
+}
+
 // Put inserts the key-value pair.
 func (s *Skiplist) Put(key []byte, val []byte, meta byte) {
 	// Since we allow overwrite, we may not need to create a new node. We might not even need to
 	// increase the height. Let's defer these actions.
 
-	listHeight := s.height
+	listHeight := s.Height()
 	var prev [kMaxHeight + 1]*node
 	var next [kMaxHeight + 1]*node
 	prev[listHeight] = s.head
@@ -297,7 +307,7 @@ func (s *Skiplist) Put(key []byte, val []byte, meta byte) {
 	x := newNode(s.arena, key, val, meta, height)
 
 	// Try to increase s.height via CAS.
-	listHeight = s.height
+	listHeight = s.Height()
 	for height > int(listHeight) {
 		if atomic.CompareAndSwapInt32(&s.height, listHeight, int32(height)) {
 			// Successfully increased skiplist.height.

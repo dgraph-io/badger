@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -161,7 +162,7 @@ func TestOneKey(t *testing.T) {
 		}(i)
 	}
 	// We expect that at least some write made it such that some read returns a value.
-	var sawValue bool
+	var sawValue int32
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func() {
@@ -170,14 +171,14 @@ func TestOneKey(t *testing.T) {
 			if p == nil {
 				return
 			}
-			sawValue = true
+			atomic.StoreInt32(&sawValue, 1)
 			v, err := strconv.Atoi(string(p))
 			require.NoError(t, err)
 			require.True(t, 0 <= v && v < n)
 		}()
 	}
 	wg.Wait()
-	require.True(t, sawValue)
+	require.True(t, sawValue > 0)
 	require.EqualValues(t, 1, length(l))
 }
 

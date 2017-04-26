@@ -74,17 +74,18 @@ var DefaultOptions = Options{
 type KV struct {
 	sync.RWMutex // Guards imm, mem.
 
-	closer    *y.Closer
-	elog      trace.EventLog
-	mt        *skl.Skiplist
-	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
-	opt       Options
-	lc        *levelsController
-	vlog      valueLog
-	vptr      valuePointer
-	arenaPool *skl.ArenaPool
-	writeCh   chan *block
-	flushChan chan flushTask // For flushing memtables.
+	closer        *y.Closer
+	elog          trace.EventLog
+	mt            *skl.Skiplist
+	imm           []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+	opt           Options
+	lc            *levelsController
+	vlog          valueLog
+	vptr          valuePointer
+	arenaPool     *skl.ArenaPool
+	writeCh       chan *block
+	flushChan     chan flushTask // For flushing memtables.
+	blockWriterWg sync.WaitGroup
 }
 
 // NewKV returns a new KV object. Compact levels are created as well.
@@ -132,6 +133,7 @@ func NewKV(opt *Options) *KV {
 	out.vlog.Replay(vptr, fn)
 
 	out.closer.Register()
+	out.blockWriterWg.Add(1)
 	go out.doWrites()
 	return out
 }
@@ -146,7 +148,13 @@ func (s *KV) Close() {
 	s.elog.Printf("Closing database")
 	s.closer.Signal()
 
-	// TODO(ganesh): Block writes to mem.
+	// Make sure that block writer is done pushing stuff into memtable!
+	// Otherwise, you will have a race condition: we are trying to flush memtables
+	// and remove them completely, while the block / memtable writer is still
+	// trying to push stuff into the memtable.
+	// TODO: Closer framework doesn't care about order. We need to improve it and clean this up.
+	s.blockWriterWg.Wait()
+
 	if s.mt.Size() > 0 {
 		if s.opt.Verbose {
 			y.Printf("Flushing memtable\n")
@@ -169,16 +177,23 @@ func (s *KV) Close() {
 	s.elog.Finish()
 }
 
-func (s *KV) getMemTables() []*skl.Skiplist {
+// getMemtables returns the current memtables and get references.
+func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 	s.RLock()
 	defer s.RUnlock()
 	tables := make([]*skl.Skiplist, len(s.imm)+1)
 	tables[0] = s.mt
+	tables[0].IncrRef()
 	last := len(s.imm) - 1
 	for i := range s.imm {
 		tables[i+1] = s.imm[last-i]
+		tables[i+1].IncrRef()
 	}
-	return tables
+	return tables, func() {
+		for _, tbl := range tables {
+			tbl.DecrRef()
+		}
+	}
 }
 
 func (s *KV) decodeValue(ctx context.Context, val []byte, meta byte) []byte {
@@ -206,7 +221,8 @@ func (s *KV) decodeValue(ctx context.Context, val []byte, meta byte) []byte {
 // Note that value will include meta byte.
 func (s *KV) get(ctx context.Context, key []byte) ([]byte, byte) {
 	y.Trace(ctx, "Retrieving key from memtables")
-	tables := s.getMemTables() // Lock should be released.
+	tables, decr := s.getMemTables() // Lock should be released.
+	defer decr()
 	for i := 0; i < len(tables); i++ {
 		v, meta := tables[i].Get(key)
 		if meta != 0 || v != nil {
@@ -280,6 +296,7 @@ func (s *KV) writeBlocks(blocks []*block) {
 
 func (s *KV) doWrites() {
 	defer s.closer.Done()
+	defer s.blockWriterWg.Done()
 
 	blocks := make([]*block, 0, 10)
 	for {
@@ -402,7 +419,9 @@ func (s *KV) flushMemtable() {
 					fmt.Printf("Storing offset: %+v\n", ft.vptr)
 				}
 				offset := make([]byte, 16)
+				s.Lock() // For vptr.
 				s.vptr.Encode(offset)
+				s.Unlock()
 				ft.mt.Put(Head, offset, 0)
 			}
 			fileID, _ := s.lc.reserveFileIDs(1)
