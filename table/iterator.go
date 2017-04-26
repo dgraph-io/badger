@@ -112,8 +112,8 @@ func (itr *BlockIterator) parseKV(h header) {
 		itr.key = make([]byte, 2*(h.plen+h.klen))
 	}
 	itr.key = itr.key[:h.plen+h.klen]
-	y.AssertTrue(h.plen == copy(itr.key, itr.baseKey[:h.plen]))
-	y.AssertTrue(h.klen == copy(itr.key[h.plen:], itr.data[itr.pos:itr.pos+h.klen]))
+	copy(itr.key, itr.baseKey[:h.plen])
+	copy(itr.key[h.plen:], itr.data[itr.pos:itr.pos+h.klen])
 	itr.pos += h.klen
 
 	if itr.pos+h.vlen > len(itr.data) {
