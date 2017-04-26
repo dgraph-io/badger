@@ -194,18 +194,24 @@ type TableIterator struct {
 	bi   *BlockIterator
 	err  error
 	init bool
+
+	// Internally, TableIterator is bidirectional. However, we only expose the
+	// unidirectional functionality for now.
+	reversed bool
 }
 
-func (t *Table) NewIterator() *TableIterator {
+func (t *Table) NewIterator(reversed bool) *TableIterator {
 	t.IncrRef() // Important.
-	return &TableIterator{t: t}
+	ti := &TableIterator{t: t, reversed: reversed}
+	ti.Init()
+	return ti
 }
 
 func (itr *TableIterator) Close() {
 	itr.t.DecrRef()
 }
 
-func (itr *TableIterator) Reset() {
+func (itr *TableIterator) reset() {
 	itr.bpos = 0
 	itr.err = nil
 }
@@ -220,11 +226,11 @@ func (itr *TableIterator) Error() error {
 
 func (itr *TableIterator) Init() {
 	if !itr.init {
-		itr.Next()
+		itr.next()
 	}
 }
 
-func (itr *TableIterator) SeekToFirst() {
+func (itr *TableIterator) seekToFirst() {
 	numBlocks := len(itr.t.blockIndex)
 	if numBlocks == 0 {
 		itr.err = io.EOF
@@ -241,7 +247,7 @@ func (itr *TableIterator) SeekToFirst() {
 	itr.err = itr.bi.Error()
 }
 
-func (itr *TableIterator) SeekToLast() {
+func (itr *TableIterator) seekToLast() {
 	numBlocks := len(itr.t.blockIndex)
 	if numBlocks == 0 {
 		itr.err = io.EOF
@@ -271,12 +277,12 @@ func (itr *TableIterator) seekHelper(blockIdx int, key []byte) {
 	itr.err = itr.bi.Error()
 }
 
-// seek brings us to a key that is >= input key.
-func (itr *TableIterator) seek(key []byte, whence int) {
+// seekFrom brings us to a key that is >= input key.
+func (itr *TableIterator) seekFrom(key []byte, whence int) {
 	itr.err = nil
 	switch whence {
 	case ORIGIN:
-		itr.Reset()
+		itr.reset()
 	case CURRENT:
 	}
 
@@ -311,21 +317,21 @@ func (itr *TableIterator) seek(key []byte, whence int) {
 	// Case 2: No need to do anything. We already did the seek in block[idx-1].
 }
 
-// Seek will reset iterator and seek to >= key.
-func (itr *TableIterator) Seek(key []byte) {
-	itr.seek(key, ORIGIN)
+// seek will reset iterator and seek to >= key.
+func (itr *TableIterator) seek(key []byte) {
+	itr.seekFrom(key, ORIGIN)
 }
 
-// SeekForPrev will reset iterator and seek to <= key.
-func (itr *TableIterator) SeekForPrev(key []byte) {
+// seekForPrev will reset iterator and seek to <= key.
+func (itr *TableIterator) seekForPrev(key []byte) {
 	// TODO: Optimize this. We shouldn't have to take a Prev step.
-	itr.seek(key, ORIGIN)
+	itr.seekFrom(key, ORIGIN)
 	if !bytes.Equal(itr.Key(), key) {
-		itr.Prev()
+		itr.prev()
 	}
 }
 
-func (itr *TableIterator) Next() {
+func (itr *TableIterator) next() {
 	itr.err = nil
 
 	if itr.bpos >= len(itr.t.blockIndex) {
@@ -348,12 +354,12 @@ func (itr *TableIterator) Next() {
 	if !itr.bi.Valid() {
 		itr.bpos++
 		itr.bi = nil
-		itr.Next()
+		itr.next()
 		return
 	}
 }
 
-func (itr *TableIterator) Prev() {
+func (itr *TableIterator) prev() {
 	itr.err = nil
 	if itr.bpos < 0 {
 		itr.err = io.EOF
@@ -375,7 +381,7 @@ func (itr *TableIterator) Prev() {
 	if !itr.bi.Valid() {
 		itr.bpos--
 		itr.bi = nil
-		itr.Prev()
+		itr.prev()
 		return
 	}
 }
@@ -389,64 +395,43 @@ func (itr *TableIterator) Value() ([]byte, byte) {
 	return v[1:], v[0]
 }
 
-// UniIterator is a unidirectional TableIterator. It is a thin wrapper around
-// TableIterator. We like to keep TableIterator as before, because it is more
-// powerful and we might support bidirectional iterators in the future.
-type UniIterator struct {
-	iter     *TableIterator
-	reversed bool
-}
-
-func (t *Table) NewUniIterator(reversed bool) *UniIterator {
-	ti := t.NewIterator()
-	ti.Init()
-	return &UniIterator{
-		iter:     ti,
-		reversed: reversed,
-	}
-}
-
-func (s *UniIterator) Next() {
+func (s *TableIterator) Next() {
 	if !s.reversed {
-		s.iter.Next()
+		s.next()
 	} else {
-		s.iter.Prev()
+		s.prev()
 	}
 }
 
-func (s *UniIterator) Rewind() {
+func (s *TableIterator) Rewind() {
 	if !s.reversed {
-		s.iter.SeekToFirst()
+		s.seekToFirst()
 	} else {
-		s.iter.SeekToLast()
+		s.seekToLast()
 	}
 }
 
-func (s *UniIterator) Seek(key []byte) {
+func (s *TableIterator) Seek(key []byte) {
 	if !s.reversed {
-		s.iter.Seek(key)
+		s.seek(key)
 	} else {
-		s.iter.SeekForPrev(key)
+		s.seekForPrev(key)
 	}
 }
 
-func (s *UniIterator) Key() []byte           { return s.iter.Key() }
-func (s *UniIterator) Value() ([]byte, byte) { return s.iter.Value() }
-func (s *UniIterator) Valid() bool           { return s.iter.Valid() }
-func (s *UniIterator) Name() string          { return "UniTableIterator" }
-func (s *UniIterator) Close()                { s.iter.Close() }
+func (s *TableIterator) Name() string { return "TableIterator" }
 
 type ConcatIterator struct {
-	idx      int            // Which iterator is active now.
-	iters    []*UniIterator // Corresponds to tables.
-	tables   []*Table       // Disregarding reversed, this is in ascending order.
+	idx      int              // Which iterator is active now.
+	iters    []*TableIterator // Corresponds to tables.
+	tables   []*Table         // Disregarding reversed, this is in ascending order.
 	reversed bool
 }
 
 func NewConcatIterator(tbls []*Table, reversed bool) *ConcatIterator {
-	iters := make([]*UniIterator, len(tbls))
+	iters := make([]*TableIterator, len(tbls))
 	for i := 0; i < len(tbls); i++ {
-		iters[i] = tbls[i].NewUniIterator(reversed)
+		iters[i] = tbls[i].NewIterator(reversed)
 	}
 	return &ConcatIterator{
 		reversed: reversed,

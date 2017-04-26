@@ -531,7 +531,7 @@ func (l *valueLog) Read(ctx context.Context, p valuePointer) (e Entry, err error
 func (l *valueLog) runGCInLoop() {
 	defer l.closer.Done()
 	defer func() {
-		fmt.Printf("Stopping runGCInLoop. Signal: %v", l.closer.GotSignal())
+		fmt.Printf("Stopping runGCInLoop. Signal: %v\n", l.closer.GotSignal())
 	}()
 
 	if l.opt.ValueGCThreshold == 0.0 {

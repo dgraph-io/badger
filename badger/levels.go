@@ -333,7 +333,7 @@ func (s *levelsController) compactBuildTables(
 		iters = appendIteratorsReversed(iters, topTables, false)
 	} else {
 		y.AssertTrue(len(topTables) == 1)
-		iters = []y.Iterator{topTables[0].NewUniIterator(false)}
+		iters = []y.Iterator{topTables[0].NewIterator(false)}
 	}
 
 	// Load to RAM for tables to be deleted.
@@ -638,7 +638,7 @@ func (s *levelHandler) get(ctx context.Context, key []byte) ([]byte, byte) {
 	y.Trace(ctx, "get key at level %d", s.level)
 	tables := s.getTableForKey(key)
 	for _, th := range tables {
-		it := th.NewIterator()
+		it := th.NewIterator(false)
 		defer it.Close()
 		it.Seek(key)
 		if !it.Valid() {
@@ -655,7 +655,7 @@ func (s *levelHandler) get(ctx context.Context, key []byte) ([]byte, byte) {
 func appendIteratorsReversed(out []y.Iterator, th []*table.Table, reversed bool) []y.Iterator {
 	for i := len(th) - 1; i >= 0; i-- {
 		// This will increment the reference of the table handler.
-		out = append(out, th[i].NewUniIterator(reversed))
+		out = append(out, th[i].NewIterator(reversed))
 	}
 	return out
 }

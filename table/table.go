@@ -130,16 +130,16 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 		return nil, err
 	}
 
-	it := t.NewIterator()
+	it := t.NewIterator(false)
 	defer it.Close()
-	it.SeekToFirst()
+	it.Rewind()
 	if it.Valid() {
 		t.smallest = it.Key()
 	}
 
-	it2 := t.NewIterator()
+	it2 := t.NewIterator(true)
 	defer it2.Close()
-	it2.SeekToLast()
+	it2.Rewind()
 	if it2.Valid() {
 		t.biggest = it2.Key()
 	}
