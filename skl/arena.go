@@ -1,6 +1,7 @@
 package skl
 
 import (
+	"encoding/binary"
 	"sync/atomic"
 
 	"github.com/dgraph-io/badger/y"
@@ -32,15 +33,16 @@ func (s *Arena) Reset() {
 // val buffer. Returns an offset into buf. User is responsible for remembering
 // size of val. We could also store this size inside arena but the encoding and
 // decoding will incur some overhead.
-func (s *Arena) PutVal(val []byte, meta byte) uint32 {
-	l := uint32(len(val)) + 1
+func (s *Arena) PutVal(v y.ValueStruct) uint32 {
+	l := uint32(len(v.Value)) + 3
 	n := atomic.AddUint32(&s.n, l)
 	y.AssertTruef(int(n) <= len(s.buf),
 		"Arena too small, toWrite:%d newTotal:%d limit:%d",
 		l, n, len(s.buf))
 	m := n - l
-	s.buf[m] = meta
-	y.AssertTrue(len(val) == copy(s.buf[m+1:n], val))
+	s.buf[m] = v.Meta
+	binary.BigEndian.PutUint16(s.buf[m+1:m+3], v.CASCounter)
+	copy(s.buf[m+3:n], v.Value)
 	return m
 }
 
@@ -62,8 +64,12 @@ func (s *Arena) GetKey(offset uint32, size uint16) []byte {
 
 // GetVal returns byte slice at offset. The given size should be just the value
 // size and should NOT include the meta byte.
-func (s *Arena) GetVal(offset uint32, size uint16) ([]byte, byte) {
-	return s.buf[offset+1 : offset+1+uint32(size)], s.buf[offset]
+func (s *Arena) GetVal(offset uint32, size uint16) y.ValueStruct {
+	return y.ValueStruct{
+		Value:      s.buf[offset+3 : offset+3+uint32(size)],
+		Meta:       s.buf[offset],
+		CASCounter: binary.BigEndian.Uint16(s.buf[offset+1 : offset+3]),
+	}
 }
 
 type ArenaPool struct {

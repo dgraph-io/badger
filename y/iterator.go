@@ -22,13 +22,19 @@ import (
 	//	"fmt"
 )
 
+type ValueStruct struct {
+	Value      []byte
+	Meta       byte
+	CASCounter uint16
+}
+
 // Iterator is an interface for a basic iterator.
 type Iterator interface {
 	Next()
 	Rewind()
 	Seek(key []byte)
 	Key() []byte
-	Value() ([]byte, byte)
+	Value() ValueStruct
 	Valid() bool
 	Name() string // Mainly for debug or testing.
 
@@ -136,9 +142,9 @@ func (s *MergeIterator) Key() []byte {
 	return s.h[0].itr.Key()
 }
 
-func (s *MergeIterator) Value() ([]byte, byte) {
+func (s *MergeIterator) Value() ValueStruct {
 	if len(s.h) == 0 {
-		return nil, 0
+		return ValueStruct{}
 	}
 	return s.h[0].itr.Value()
 }

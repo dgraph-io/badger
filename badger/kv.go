@@ -31,8 +31,13 @@ import (
 )
 
 var (
-	Head = []byte("/head/") // For storing value offset for replay.
+	Head          = []byte("/head/") // For storing value offset for replay.
+	backgroundCtx context.Context
 )
+
+func init() {
+	backgroundCtx = context.Background()
+}
 
 // Options are params for creating DB object.
 type Options struct {
@@ -111,14 +116,14 @@ func NewKV(opt *Options) *KV {
 
 	out.vlog.Open(out, opt)
 
-	val := out.Get(context.Background(), Head)
+	val, _ := out.Get(backgroundCtx, Head) // casCounter ignored.
 	var vptr valuePointer
 	if len(val) > 0 {
 		vptr.Decode(val)
 	}
 
 	first := true
-	fn := func(e Entry) bool {
+	fn := func(e Entry) bool { // Function for replaying.
 		if first {
 			fmt.Printf("key=%s\n", e.Key)
 		}
@@ -127,7 +132,11 @@ func NewKV(opt *Options) *KV {
 		copy(nk, e.Key)
 		nv := make([]byte, len(e.Value))
 		copy(nv, e.Value)
-		out.mt.Put(nk, nv, e.Meta)
+
+		// Currently, we do not save casCounters in value log. Instead, when
+		// replaying, we generate new casCounters.
+		v := y.ValueStruct{nv, e.Meta, newCASCounter()}
+		out.mt.Put(nk, v)
 		return true
 	}
 	out.vlog.Replay(vptr, fn)
@@ -220,14 +229,14 @@ func (s *KV) decodeValue(ctx context.Context, val []byte, meta byte) []byte {
 
 // getValueHelper returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
-func (s *KV) get(ctx context.Context, key []byte) ([]byte, byte) {
+func (s *KV) get(ctx context.Context, key []byte) y.ValueStruct {
 	y.Trace(ctx, "Retrieving key from memtables")
 	tables, decr := s.getMemTables() // Lock should be released.
 	defer decr()
 	for i := 0; i < len(tables); i++ {
-		v, meta := tables[i].Get(key)
-		if meta != 0 || v != nil {
-			return v, meta
+		vs := tables[i].Get(key)
+		if vs.Meta != 0 || vs.Value != nil {
+			return vs
 		}
 	}
 	y.Trace(ctx, "Not found in memtables. Getting from levels")
@@ -235,9 +244,9 @@ func (s *KV) get(ctx context.Context, key []byte) ([]byte, byte) {
 }
 
 // Get looks for key and returns value. If not found, return nil.
-func (s *KV) Get(ctx context.Context, key []byte) []byte {
-	val, meta := s.get(ctx, key)
-	return s.decodeValue(ctx, val, meta)
+func (s *KV) Get(ctx context.Context, key []byte) ([]byte, uint16) {
+	vs := s.get(ctx, key)
+	return s.decodeValue(ctx, vs.Value, vs.Meta), vs.CASCounter
 }
 
 func (s *KV) updateOffset(ptrs []valuePointer) {
@@ -262,10 +271,18 @@ func (s *KV) writeToLSM(b *block) {
 	var offsetBuf [16]byte
 	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
 	for i, entry := range b.Entries {
+		if entry.skip {
+			continue
+		}
 		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
-			s.mt.Put(entry.Key, entry.Value, entry.Meta)
+			s.mt.Put(entry.Key,
+				y.ValueStruct{entry.Value, entry.Meta, entry.casCounter})
 		} else {
-			s.mt.Put(entry.Key, b.Ptrs[i].Encode(offsetBuf[:]), entry.Meta|BitValuePointer)
+			s.mt.Put(entry.Key,
+				y.ValueStruct{
+					Value:      b.Ptrs[i].Encode(offsetBuf[:]),
+					Meta:       entry.Meta | BitValuePointer,
+					CASCounter: entry.casCounter})
 		}
 	}
 }
@@ -277,6 +294,23 @@ func (s *KV) writeBlocks(blocks []*block) {
 	s.elog.Printf("writeBlocks called")
 
 	s.elog.Printf("Writing to value log")
+	// Before writing to value log, generate the random CAS counters. Also check
+	// CAS counters if asked to.
+	// TODO: If the same key appears in the same list of blocks, the get here
+	// will be insufficient for comparing CAS counters.
+	for _, block := range blocks {
+		for _, e := range block.Entries {
+			e.skip = false // To be sure.
+			if e.CASCounterCheck != 0 {
+				oldValue := s.get(backgroundCtx, e.Key) // No need to decode existing value. Just need old CAS counter.
+				if oldValue.CASCounter != e.CASCounterCheck {
+					e.skip = true
+					continue
+				}
+			}
+			e.casCounter = newCASCounter()
+		}
+	}
 	s.vlog.Write(blocks)
 
 	s.elog.Printf("Writing to memtable")
@@ -345,7 +379,16 @@ func (s *KV) Put(ctx context.Context, key []byte, val []byte) error {
 		Key:   key,
 		Value: val,
 	}
+	return s.Write(ctx, []*Entry{e})
+}
 
+// CASPut attempts to put given value. Nop if existing key has different casCounter,
+func (s *KV) CASPut(ctx context.Context, key []byte, val []byte, casCounter uint16) error {
+	e := &Entry{
+		Key:             key,
+		Value:           val,
+		CASCounterCheck: casCounter,
+	}
 	return s.Write(ctx, []*Entry{e})
 }
 
@@ -354,6 +397,16 @@ func (s *KV) Delete(ctx context.Context, key []byte) error {
 	e := &Entry{
 		Key:  key,
 		Meta: BitDelete,
+	}
+	return s.Write(ctx, []*Entry{e})
+}
+
+// CASDelete deletes a key. Nop if existing key has different casCounter,
+func (s *KV) CASDelete(ctx context.Context, key []byte, casCounter uint16) error {
+	e := &Entry{
+		Key:             key,
+		Meta:            BitDelete,
+		CASCounterCheck: casCounter,
 	}
 	return s.Write(ctx, []*Entry{e})
 }
@@ -390,8 +443,7 @@ func writeLevel0Table(s *skl.Skiplist, f *os.File) error {
 	b := table.NewTableBuilder()
 	defer b.Close()
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
-		val, meta := iter.Value()
-		if err := b.Add(iter.Key(), val, meta); err != nil {
+		if err := b.Add(iter.Key(), iter.Value()); err != nil {
 			return err
 		}
 	}
@@ -423,7 +475,7 @@ func (s *KV) flushMemtable() {
 				s.Lock() // For vptr.
 				s.vptr.Encode(offset)
 				s.Unlock()
-				ft.mt.Put(Head, offset, 0)
+				ft.mt.Put(Head, y.ValueStruct{Value: offset}) // casCounter not needed.
 			}
 			fileID, _ := s.lc.reserveFileIDs(1)
 			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)

@@ -27,7 +27,7 @@ import (
 	"sort"
 	"sync"
 	"testing"
-	//	"time"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -114,6 +114,74 @@ func TestConcurrentWrite(t *testing.T) {
 	require.EqualValues(t, 0, j)
 }
 
+func TestCAS(t *testing.T) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv := NewKV(getTestOptions(dir))
+	defer kv.Close()
+
+	var entries []*Entry
+	for i := 0; i < 100; i++ {
+		entries = append(entries, &Entry{
+			Key:   []byte(fmt.Sprintf("key%d", i)),
+			Value: []byte(fmt.Sprintf("val%d", i)),
+		})
+	}
+	ctx := context.Background()
+	require.NoError(t, kv.Write(ctx, entries))
+	time.Sleep(time.Second)
+
+	for i := 0; i < 100; i++ {
+		k := []byte(fmt.Sprintf("key%d", i))
+		v := []byte(fmt.Sprintf("val%d", i))
+		value, casCounter := kv.Get(ctx, k)
+		require.EqualValues(t, v, value)
+		require.EqualValues(t, entries[i].casCounter, casCounter)
+	}
+
+	for i := 0; i < 100; i++ {
+		k := []byte(fmt.Sprintf("key%d", i))
+		v := []byte(fmt.Sprintf("zzz%d", i))
+		require.NoError(t, kv.CASPut(ctx, k, v, entries[i].casCounter+1))
+	}
+	time.Sleep(time.Second)
+	for i := 0; i < 100; i++ {
+		k := []byte(fmt.Sprintf("key%d", i))
+		v := []byte(fmt.Sprintf("val%d", i))
+		value, casCounter := kv.Get(ctx, k)
+		require.EqualValues(t, v, value)
+		require.EqualValues(t, entries[i].casCounter, casCounter)
+	}
+
+	for i := 0; i < 100; i++ {
+		k := []byte(fmt.Sprintf("key%d", i))
+		require.NoError(t, kv.CASDelete(ctx, k, entries[i].casCounter+1))
+	}
+	time.Sleep(time.Second)
+	for i := 0; i < 100; i++ {
+		k := []byte(fmt.Sprintf("key%d", i))
+		v := []byte(fmt.Sprintf("val%d", i))
+		value, casCounter := kv.Get(ctx, k)
+		require.EqualValues(t, v, value)
+		require.EqualValues(t, entries[i].casCounter, casCounter)
+	}
+
+	for i := 0; i < 100; i++ {
+		k := []byte(fmt.Sprintf("key%d", i))
+		v := []byte(fmt.Sprintf("zzz%d", i))
+		require.NoError(t, kv.CASPut(ctx, k, v, entries[i].casCounter))
+	}
+	time.Sleep(time.Second)
+	for i := 0; i < 100; i++ {
+		k := []byte(fmt.Sprintf("key%d", i))
+		v := []byte(fmt.Sprintf("zzz%d", i)) // Value should be changed.
+		value, casCounter := kv.Get(ctx, k)
+		require.EqualValues(t, v, value)
+		require.True(t, casCounter != 0)
+	}
+}
+
 func TestGet(t *testing.T) {
 	ctx := context.Background()
 	dir, err := ioutil.TempDir("/tmp", "badger")
@@ -123,20 +191,30 @@ func TestGet(t *testing.T) {
 	defer kv.Close()
 
 	require.NoError(t, kv.Put(ctx, []byte("key1"), []byte("val1")))
-	require.EqualValues(t, "val1", kv.Get(ctx, []byte("key1")))
+	value, casCounter := kv.Get(ctx, []byte("key1"))
+	require.EqualValues(t, "val1", value)
+	require.True(t, casCounter != 0)
 
 	require.NoError(t, kv.Put(ctx, []byte("key1"), []byte("val2")))
-	require.EqualValues(t, "val2", kv.Get(ctx, []byte("key1")))
+	value, casCounter = kv.Get(ctx, []byte("key1"))
+	require.EqualValues(t, "val2", value)
+	require.True(t, casCounter != 0)
 
 	require.NoError(t, kv.Delete(ctx, []byte("key1")))
-	require.Nil(t, kv.Get(ctx, []byte("key1")))
+	value, casCounter = kv.Get(ctx, []byte("key1"))
+	require.Nil(t, value)
+	require.True(t, casCounter != 0)
 
 	require.NoError(t, kv.Put(ctx, []byte("key1"), []byte("val3")))
-	require.EqualValues(t, "val3", kv.Get(ctx, []byte("key1")))
+	value, casCounter = kv.Get(ctx, []byte("key1"))
+	require.EqualValues(t, "val3", value)
+	require.True(t, casCounter != 0)
 
 	longVal := make([]byte, 1000)
 	require.NoError(t, kv.Put(ctx, []byte("key1"), longVal))
-	require.EqualValues(t, longVal, kv.Get(ctx, []byte("key1")))
+	value, casCounter = kv.Get(ctx, []byte("key1"))
+	require.EqualValues(t, longVal, value)
+	require.True(t, casCounter != 0)
 }
 
 // Put a lot of data to move some data to disk.
@@ -171,7 +249,8 @@ func TestGetMore(t *testing.T) {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		require.EqualValues(t, k, string(kv.Get(ctx, []byte(k))))
+		value, _ := kv.Get(ctx, []byte(k))
+		require.EqualValues(t, k, string(value))
 	}
 
 	// Overwrite
@@ -196,7 +275,8 @@ func TestGetMore(t *testing.T) {
 		}
 		k := []byte(fmt.Sprintf("%09d", i))
 		expectedValue := fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", i)
-		require.EqualValues(t, expectedValue, string(kv.Get(ctx, k)))
+		value, _ := kv.Get(ctx, []byte(k))
+		require.EqualValues(t, expectedValue, string(value))
 	}
 
 	// "Delete" key.
@@ -220,7 +300,8 @@ func TestGetMore(t *testing.T) {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		require.Nil(t, kv.Get(ctx, []byte(k)))
+		value, _ := kv.Get(ctx, []byte(k))
+		require.Nil(t, value)
 	}
 	fmt.Println("Done and closing")
 }
@@ -346,7 +427,8 @@ func TestLoad(t *testing.T) {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		require.EqualValues(t, k, string(kv.Get(ctx, []byte(k))))
+		value, _ := kv.Get(ctx, []byte(k))
+		require.EqualValues(t, k, string(value))
 	}
 	kv.Close()
 	summary := kv.lc.getSummary()
@@ -402,30 +484,35 @@ func TestCrash(t *testing.T) {
 	}
 
 	for _, k := range keys {
-		require.Equal(t, k, kv.Get(ctx, k))
+		value, _ := kv.Get(ctx, k)
+		require.Equal(t, k, value)
 	}
 	// Do not close kv store (!!) for this test to make sense.
 
 	kv2 := NewKV(&opt)
 	for _, k := range keys {
-		require.Equal(t, k, kv2.Get(ctx, k), "Key: %s", k)
+		value, casCounter := kv2.Get(ctx, k)
+		require.Equal(t, k, value, "Key: %s", k)
+		require.True(t, casCounter != 0)
 	}
 
 	{
-		val := kv.Get(ctx, Head)
+		val, _ := kv.Get(ctx, Head)
 		voffset := binary.BigEndian.Uint64(val)
 		fmt.Printf("level 1 val: %v\n", voffset)
 	}
 
 	kv.lc.tryCompact(1)
 	kv.lc.tryCompact(1)
-	val := kv.Get(ctx, Head)
+	val, _ := kv.Get(ctx, Head)
 	require.True(t, len(val) > 0)
 	voffset := binary.BigEndian.Uint64(val)
 	fmt.Printf("level 1 val: %v\n", voffset)
 
 	kv3 := NewKV(&opt)
 	for _, k := range keys {
-		require.Equal(t, k, kv3.Get(ctx, k), "Key: %s", k)
+		value, casCounter := kv3.Get(ctx, k)
+		require.True(t, casCounter != 0)
+		require.Equal(t, k, value, "Key: %s", k)
 	}
 }

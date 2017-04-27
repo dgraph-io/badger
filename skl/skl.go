@@ -117,21 +117,21 @@ func (s *Skiplist) DecrRef() {
 
 func (s *Skiplist) Valid() bool { return s.arena != nil }
 
-func newNode(arena *Arena, key, val []byte, meta byte, height int) *node {
+func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 	keyOffset := arena.PutKey(key)
-	valOffset := arena.PutVal(val, meta)
+	valOffset := arena.PutVal(v)
 	return &node{
 		keyOffset:   keyOffset,
 		keySize:     uint16(len(key)),
 		valueOffset: valOffset,
-		valueSize:   uint16(len(val)),
+		valueSize:   uint16(len(v.Value)),
 		next:        make([]unsafe.Pointer, height),
 	}
 }
 
 func NewSkiplist(arenaPool *ArenaPool) *Skiplist {
 	arena := arenaPool.Get()
-	head := newNode(arena, nil, nil, 0, kMaxHeight)
+	head := newNode(arena, nil, y.ValueStruct{}, kMaxHeight)
 	return &Skiplist{
 		height:    1,
 		head:      head,
@@ -151,12 +151,12 @@ func (s *node) key(arena *Arena) []byte {
 	return arena.GetKey(s.keyOffset, s.keySize)
 }
 
-func (s *node) setValue(arena *Arena, val []byte, meta byte) {
-	valOffset := arena.PutVal(val, meta)
+func (s *node) setValue(arena *Arena, v y.ValueStruct) {
+	valOffset := arena.PutVal(v)
 	s.Lock()
 	defer s.Unlock()
 	s.valueOffset = valOffset
-	s.valueSize = uint16(len(val))
+	s.valueSize = uint16(len(v.Value))
 }
 
 func (s *node) getNext(h int) *node {
@@ -283,7 +283,7 @@ func (s *Skiplist) Height() int32 {
 }
 
 // Put inserts the key-value pair.
-func (s *Skiplist) Put(key []byte, val []byte, meta byte) {
+func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	// Since we allow overwrite, we may not need to create a new node. We might not even need to
 	// increase the height. Let's defer these actions.
 
@@ -296,14 +296,14 @@ func (s *Skiplist) Put(key []byte, val []byte, meta byte) {
 		// Use higher level to speed up for current level.
 		prev[i], next[i] = s.findSpliceForLevel(key, prev[i+1], i)
 		if prev[i] == next[i] {
-			prev[i].setValue(s.arena, val, meta)
+			prev[i].setValue(s.arena, v)
 			return
 		}
 	}
 
 	// We do need to create a new node.
 	height := randomHeight()
-	x := newNode(s.arena, key, val, meta, height)
+	x := newNode(s.arena, key, v, height)
 
 	// Try to increase s.height via CAS.
 	listHeight = s.Height()
@@ -339,7 +339,7 @@ func (s *Skiplist) Put(key []byte, val []byte, meta byte) {
 			prev[i], next[i] = s.findSpliceForLevel(key, prev[i], i)
 			if prev[i] == next[i] {
 				y.AssertTruef(i == 0, "Equality can happen only on base level: %d", i)
-				prev[i].setValue(s.arena, val, meta)
+				prev[i].setValue(s.arena, v)
 				return
 			}
 		}
@@ -367,10 +367,10 @@ func (s *Skiplist) findLast() *node {
 	}
 }
 
-func (s *Skiplist) Get(key []byte) ([]byte, byte) {
+func (s *Skiplist) Get(key []byte) y.ValueStruct {
 	n, found := s.findNear(key, false, true) // findGreaterOrEqual.
 	if !found {
-		return nil, 0
+		return y.ValueStruct{}
 	}
 	valOffset, valSize := n.getValueOffset()
 	return s.arena.GetVal(valOffset, valSize)
@@ -403,7 +403,7 @@ func (s *Iterator) Key() []byte {
 }
 
 // Value returns value.
-func (s *Iterator) Value() ([]byte, byte) {
+func (s *Iterator) Value() y.ValueStruct {
 	valOffset, valSize := s.n.getValueOffset()
 	return s.list.arena.GetVal(valOffset, valSize)
 }
@@ -483,8 +483,8 @@ func (s *UniIterator) Seek(key []byte) {
 	}
 }
 
-func (s *UniIterator) Key() []byte           { return s.iter.Key() }
-func (s *UniIterator) Value() ([]byte, byte) { return s.iter.Value() }
-func (s *UniIterator) Valid() bool           { return s.iter.Valid() }
-func (s *UniIterator) Name() string          { return "UniMemtableIterator" }
-func (s *UniIterator) Close()                { s.iter.Close() }
+func (s *UniIterator) Key() []byte          { return s.iter.Key() }
+func (s *UniIterator) Value() y.ValueStruct { return s.iter.Value() }
+func (s *UniIterator) Valid() bool          { return s.iter.Valid() }
+func (s *UniIterator) Name() string         { return "UniMemtableIterator" }
+func (s *UniIterator) Close()               { s.iter.Close() }

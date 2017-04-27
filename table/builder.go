@@ -19,7 +19,10 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
+	//	"fmt"
 	"math"
+
+	"github.com/dgraph-io/badger/y"
 )
 
 //var tableSize int64 = 50 << 20
@@ -124,7 +127,7 @@ func (b TableBuilder) keyDiff(newKey []byte) []byte {
 	return newKey[i:]
 }
 
-func (b *TableBuilder) addHelper(key, value []byte, meta byte) {
+func (b *TableBuilder) addHelper(key []byte, v y.ValueStruct) {
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
 	if len(b.baseKey) == 0 {
@@ -139,8 +142,8 @@ func (b *TableBuilder) addHelper(key, value []byte, meta byte) {
 	h := header{
 		plen: len(key) - len(diffKey),
 		klen: len(diffKey),
-		vlen: len(value) + 1, // Include meta byte.
-		prev: b.prevOffset,   // prevOffset is the location of the last key-value added.
+		vlen: len(v.Value) + 1 + 2, // Include meta byte and casCounter.
+		prev: b.prevOffset,         // prevOffset is the location of the last key-value added.
 	}
 	b.prevOffset = b.buf.Len() - b.baseOffset // Remember current offset for the next Add call.
 
@@ -148,21 +151,24 @@ func (b *TableBuilder) addHelper(key, value []byte, meta byte) {
 	var hbuf [10]byte
 	h.Encode(hbuf[:])
 	b.buf.Write(hbuf[:])
-	b.buf.Write(diffKey)  // We only need to store the key difference.
-	b.buf.WriteByte(meta) // Meta byte precedes actual value.
-	b.buf.Write(value)
+	b.buf.Write(diffKey)    // We only need to store the key difference.
+	b.buf.WriteByte(v.Meta) // Meta byte precedes actual value.
+	var casBytes [2]byte
+	binary.BigEndian.PutUint16(casBytes[:], v.CASCounter)
+	b.buf.Write(casBytes[:])
+	b.buf.Write(v.Value)
 	b.counter++ // Increment number of keys added for this current block.
 }
 
 func (b *TableBuilder) finishBlock() {
 	// When we are at the end of the block and Valid=false, and the user wants to do a Prev,
 	// we need a dummy header to tell us the offset of the previous key-value pair.
-	b.addHelper([]byte{}, []byte{}, 0)
+	b.addHelper([]byte{}, y.ValueStruct{})
 }
 
 // Add adds a key-value pair to the block.
 // If doNotRestart is true, we will not restart even if b.counter >= restartInterval.
-func (b *TableBuilder) Add(key, value []byte, meta byte) error {
+func (b *TableBuilder) Add(key []byte, value y.ValueStruct) error {
 	if b.counter >= restartInterval {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
@@ -172,7 +178,7 @@ func (b *TableBuilder) Add(key, value []byte, meta byte) error {
 		b.baseOffset = b.buf.Len()
 		b.prevOffset = math.MaxUint32 // First key-value pair of block has header.prev=MaxUint32.
 	}
-	b.addHelper(key, value, meta)
+	b.addHelper(key, value)
 	return nil // Currently, there is no meaningful error.
 }
 

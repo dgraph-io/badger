@@ -363,9 +363,7 @@ func (s *levelsController) compactBuildTables(
 			if int64(builder.FinalSize()) > s.kv.opt.MaxTableSize {
 				break
 			}
-			key := it.Key()
-			val, meta := it.Value()
-			y.Check(builder.Add(key, val, meta))
+			y.Check(builder.Add(it.Key(), it.Value()))
 		}
 		if builder.Empty() {
 			builder.Close()
@@ -609,17 +607,17 @@ func (s *levelHandler) close() {
 }
 
 // get returns the found value if any. If not found, we return nil.
-func (s *levelsController) get(ctx context.Context, key []byte) ([]byte, byte) {
+func (s *levelsController) get(ctx context.Context, key []byte) y.ValueStruct {
 	// No need to lock anything as we just iterate over the currently immutable levelHandlers.
 	for _, h := range s.levels {
-		v, meta := h.get(ctx, key)
-		if v == nil && meta == 0 {
+		vs := h.get(ctx, key)
+		if vs.Value == nil && vs.Meta == 0 {
 			continue
 		}
 		y.Trace(ctx, "Found key")
-		return v, meta
+		return vs
 	}
-	return nil, 0
+	return y.ValueStruct{}
 }
 
 // getTableForKey acquires a read-lock to access s.tables. It returns a list of tableHandlers.
@@ -645,7 +643,7 @@ func (s *levelHandler) getTableForKey(key []byte) []*table.Table {
 }
 
 // get returns value for a given key. If not found, return nil.
-func (s *levelHandler) get(ctx context.Context, key []byte) ([]byte, byte) {
+func (s *levelHandler) get(ctx context.Context, key []byte) y.ValueStruct {
 	y.Trace(ctx, "get key at level %d", s.level)
 	tables := s.getTableForKey(key)
 	for _, th := range tables {
@@ -660,7 +658,7 @@ func (s *levelHandler) get(ctx context.Context, key []byte) ([]byte, byte) {
 		}
 
 	}
-	return nil, 0
+	return y.ValueStruct{}
 }
 
 func appendIteratorsReversed(out []y.Iterator, th []*table.Table, reversed bool) []y.Iterator {

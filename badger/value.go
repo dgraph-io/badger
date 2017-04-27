@@ -170,19 +170,18 @@ func (vlog *valueLog) rewrite(f *logFile) {
 			elog.Printf("Processing entry %d", count)
 		}
 
-		vptr, meta := vlog.kv.get(ctx, e.Key)
-
-		if (meta & BitDelete) > 0 {
+		vs := vlog.kv.get(ctx, e.Key)
+		if (vs.Meta & BitDelete) > 0 {
 			return
 		}
-		if (meta & BitValuePointer) == 0 {
+		if (vs.Meta & BitValuePointer) == 0 {
 			return
 		}
 
 		// Value is still present in value log.
-		y.AssertTrue(len(vptr) > 0)
+		y.AssertTrue(len(vs.Value) > 0)
 		var vp valuePointer
-		vp.Decode(vptr)
+		vp.Decode(vs.Value)
 
 		if int32(vp.Fid) > f.fid {
 			return
@@ -199,6 +198,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 			copy(ne.Key, e.Key)
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
+			ne.CASCounterCheck = vs.CASCounter // CAS counter check.
 			b.Entries = append(b.Entries, &ne)
 			if len(b.Entries) >= 1000 {
 				b = &block{
@@ -208,7 +208,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 			}
 
 		} else {
-			y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, meta)
+			y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
 		}
 	}
 
@@ -222,7 +222,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 		elog.Printf("block %d has %d entries", i, len(b.Entries))
 		fmt.Printf("block %d has %d entries\n", i, len(b.Entries))
 		b.Wg.Add(1)
-		vlog.kv.writeCh <- b
+		vlog.kv.writeCh <- b // Write out these blocks with newer value offsets.
 	}
 	for i, b := range blocks {
 		elog.Printf("block %d done", i)
@@ -250,10 +250,15 @@ func (vlog *valueLog) rewrite(f *logFile) {
 }
 
 type Entry struct {
-	Key    []byte
-	Meta   byte
-	Value  []byte
-	Offset int64
+	Key             []byte
+	Meta            byte
+	Value           []byte
+	Offset          int64
+	CASCounterCheck uint16 // If nonzero, we will check if existing casCounter matches.
+
+	// Fields maintained internally.
+	casCounter uint16
+	skip       bool // Failed CAS check. Note: this field is not updated immediately.
 }
 
 func (e Entry) EncodeTo(buf *bytes.Buffer) {
@@ -614,22 +619,22 @@ func (vlog *valueLog) doRunGC() {
 			return false
 		}
 
-		vptr, meta := vlog.kv.get(ctx, e.Key)
-		if (meta & BitDelete) > 0 {
+		vs := vlog.kv.get(ctx, e.Key)
+		if (vs.Meta & BitDelete) > 0 {
 			// Key has been deleted. Discard.
 			r.discard += esz
 			return true
 		}
-		if (meta & BitValuePointer) == 0 {
+		if (vs.Meta & BitValuePointer) == 0 {
 			// Value is stored alongside key. Discard.
 			r.discard += esz
 			return true
 		}
 
 		// Value is still present in value log.
-		y.AssertTrue(len(vptr) > 0)
+		y.AssertTrue(len(vs.Value) > 0)
 		var vp valuePointer
-		vp.Decode(vptr)
+		vp.Decode(vs.Value)
 
 		if int32(vp.Fid) > lf.fid {
 			// Value is present in a later log. Discard.
@@ -652,7 +657,7 @@ func (vlog *valueLog) doRunGC() {
 			ne.Offset = int64(vp.Offset)
 			ne.print("Latest Entry in LSM")
 			e.print("Latest Entry in Log")
-			y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, meta)
+			y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
 		}
 		return true
 	})

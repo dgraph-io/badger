@@ -18,6 +18,7 @@ package table
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
 	"math"
 	"sort"
@@ -120,7 +121,6 @@ func (itr *BlockIterator) parseKV(h header) {
 		itr.err = y.Errorf("Value exceeded size of block: %d %d %d %d %v", itr.pos, h.klen, h.vlen, len(itr.data), h)
 		return
 	}
-
 	itr.val = itr.data[itr.pos : itr.pos+h.vlen]
 	itr.pos += h.vlen
 }
@@ -390,9 +390,13 @@ func (itr *TableIterator) Key() []byte {
 	return itr.bi.Key()
 }
 
-func (itr *TableIterator) Value() ([]byte, byte) {
+func (itr *TableIterator) Value() y.ValueStruct {
 	v := itr.bi.Value()
-	return v[1:], v[0]
+	return y.ValueStruct{
+		Value:      v[3:],
+		Meta:       v[0],
+		CASCounter: binary.BigEndian.Uint16(v[1:3]),
+	}
 }
 
 func (s *TableIterator) Next() {
@@ -464,7 +468,7 @@ func (s *ConcatIterator) Key() []byte {
 	return s.iters[s.idx].Key()
 }
 
-func (s *ConcatIterator) Value() ([]byte, byte) {
+func (s *ConcatIterator) Value() y.ValueStruct {
 	y.AssertTrue(s.Valid())
 	return s.iters[s.idx].Value()
 }

@@ -29,7 +29,7 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-func TestBasic(t *testing.T) {
+func TestValueBasic(t *testing.T) {
 	ctx := context.Background()
 	dir, err := ioutil.TempDir("", "")
 	y.Check(err)
@@ -63,7 +63,7 @@ func TestBasic(t *testing.T) {
 	}, readEntries)
 }
 
-func TestGC(t *testing.T) {
+func TestValueGC(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -97,7 +97,7 @@ func TestGC(t *testing.T) {
 
 	db.vlog.rewrite(lf)
 	for i := 45; i < 100; i++ {
-		val := db.Get(ctx, []byte(fmt.Sprintf("key%d", i)))
+		val, _ := db.Get(ctx, []byte(fmt.Sprintf("key%d", i)))
 		require.NotNil(t, val)
 		require.True(t, len(val) == sz, "Size found: %d", len(val))
 	}

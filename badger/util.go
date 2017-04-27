@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"sort"
 	"sync/atomic"
 
@@ -162,4 +163,20 @@ func overlappingTables(begin, end []byte, tables []*table.Table) (int, int) {
 		return bytes.Compare(tables[i].Smallest(), end) > 0
 	})
 	return left, right
+}
+
+// mod65535 mods by 65535 fast.
+func mod65535(a uint32) uint32 {
+	a = (a >> 16) + (a & 0xFFFF) /* sum base 2**16 digits */
+	if a < 65535 {
+		return a
+	}
+	if a < (2 * 65535) {
+		return a - 65535
+	}
+	return a - (2 * 65535)
+}
+
+func newCASCounter() uint16 {
+	return uint16(1 + mod65535(rand.Uint32()))
 }

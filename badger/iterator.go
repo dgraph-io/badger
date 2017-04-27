@@ -9,10 +9,11 @@ import (
 
 type KVItem struct {
 	sync.WaitGroup
-	key  []byte
-	vptr []byte
-	meta byte
-	val  []byte
+	key        []byte
+	vptr       []byte
+	meta       byte
+	val        []byte
+	casCounter uint16
 }
 
 // Key returns the key. If nil, the iteration is done and you should break out of channel loop.
@@ -89,8 +90,8 @@ TOP:
 		op.Set(i)
 	INTERNAL:
 		for ; i.Valid(); i.Next() {
-			vptr, meta := i.Value()
-			if (meta & BitDelete) != 0 {
+			vs := i.Value()
+			if (vs.Meta & BitDelete) != 0 {
 				// Tombstone encountered.
 				continue
 			}
@@ -98,13 +99,14 @@ TOP:
 			keyCopy := make([]byte, len(i.Key()))
 			copy(keyCopy, i.Key())
 
-			vptrCopy := make([]byte, len(vptr))
-			copy(vptrCopy, vptr)
+			vptrCopy := make([]byte, len(vs.Value))
+			copy(vptrCopy, vs.Value)
 
 			item := &KVItem{
-				key:  keyCopy,
-				vptr: vptrCopy,
-				meta: meta,
+				key:        keyCopy,
+				vptr:       vptrCopy,
+				meta:       vs.Meta,
+				casCounter: vs.CASCounter,
 			}
 			item.Add(1)
 

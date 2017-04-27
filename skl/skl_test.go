@@ -27,7 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	//	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/y"
 )
 
 var arenaPool = NewArenaPool(1<<20, 3)
@@ -51,8 +51,8 @@ func TestEmpty(t *testing.T) {
 	key := []byte("aaa")
 	l := NewSkiplist(arenaPool)
 
-	val, _ := l.Get(key)
-	require.True(t, val == nil) // Cannot use require.Nil for unsafe.Pointer nil.
+	v := l.Get(key)
+	require.True(t, v.Value == nil) // Cannot use require.Nil for unsafe.Pointer nil.
 
 	for _, less := range []bool{true, false} {
 		for _, allowEqual := range []bool{true, false} {
@@ -91,32 +91,37 @@ func TestBasic(t *testing.T) {
 
 	// Try inserting values.
 	// Somehow require.Nil doesn't work when checking for unsafe.Pointer(nil).
-	l.Put([]byte("key1"), val1, 55)
-	l.Put([]byte("key3"), val3, 56)
-	l.Put([]byte("key2"), val2, 57)
+	l.Put([]byte("key1"), y.ValueStruct{val1, 55, 60000})
+	l.Put([]byte("key3"), y.ValueStruct{val3, 56, 60001})
+	l.Put([]byte("key2"), y.ValueStruct{val2, 57, 60002})
 
-	v, meta := l.Get([]byte("key"))
-	require.True(t, v == nil)
+	v := l.Get([]byte("key"))
+	require.True(t, v.Value == nil)
 
-	v, meta = l.Get([]byte("key1"))
-	require.True(t, v != nil)
-	require.EqualValues(t, "00042", string(v))
-	require.EqualValues(t, 55, meta)
+	v = l.Get([]byte("key1"))
+	require.True(t, v.Value != nil)
+	require.EqualValues(t, "00042", string(v.Value))
+	require.EqualValues(t, 55, v.Meta)
+	require.EqualValues(t, 60000, v.CASCounter)
 
-	v, meta = l.Get([]byte("key2"))
-	require.True(t, v != nil)
-	require.EqualValues(t, "00052", string(v))
-	require.EqualValues(t, 57, meta)
+	v = l.Get([]byte("key2"))
+	require.True(t, v.Value != nil)
+	require.EqualValues(t, "00052", string(v.Value))
+	require.EqualValues(t, 57, v.Meta)
+	require.EqualValues(t, 60002, v.CASCounter)
 
-	v, meta = l.Get([]byte("key3"))
-	require.True(t, v != nil)
-	require.EqualValues(t, "00062", string(v))
-	require.EqualValues(t, 56, meta)
+	v = l.Get([]byte("key3"))
+	require.True(t, v.Value != nil)
+	require.EqualValues(t, "00062", string(v.Value))
+	require.EqualValues(t, 56, v.Meta)
+	require.EqualValues(t, 60001, v.CASCounter)
 
-	l.Put([]byte("key2"), val4, 0)
-	v, _ = l.Get([]byte("key2"))
-	require.True(t, v != nil)
-	require.EqualValues(t, "00072", string(v))
+	l.Put([]byte("key2"), y.ValueStruct{val4, 12, 50000})
+	v = l.Get([]byte("key2"))
+	require.True(t, v.Value != nil)
+	require.EqualValues(t, "00072", string(v.Value))
+	require.EqualValues(t, 12, v.Meta)
+	require.EqualValues(t, 50000, v.CASCounter)
 }
 
 // TestConcurrentBasic tests concurrent writes followed by concurrent reads.
@@ -128,7 +133,8 @@ func TestConcurrentBasic(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			l.Put([]byte(fmt.Sprintf("%05d", i)), newValue(i), 0)
+			l.Put([]byte(fmt.Sprintf("%05d", i)),
+				y.ValueStruct{newValue(i), 0, uint16(i)})
 		}(i)
 	}
 	wg.Wait()
@@ -137,9 +143,10 @@ func TestConcurrentBasic(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			v, _ := l.Get([]byte(fmt.Sprintf("%05d", i)))
-			require.True(t, v != nil)
-			require.EqualValues(t, newValue(i), v)
+			v := l.Get([]byte(fmt.Sprintf("%05d", i)))
+			require.True(t, v.Value != nil)
+			require.EqualValues(t, newValue(i), v.Value)
+			require.EqualValues(t, i, v.CASCounter)
 		}(i)
 	}
 	wg.Wait()
@@ -158,7 +165,7 @@ func TestOneKey(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			l.Put(key, newValue(i), 0)
+			l.Put(key, y.ValueStruct{newValue(i), 0, uint16(i)})
 		}(i)
 	}
 	// We expect that at least some write made it such that some read returns a value.
@@ -167,14 +174,15 @@ func TestOneKey(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p, _ := l.Get(key)
-			if p == nil {
+			p := l.Get(key)
+			if p.Value == nil {
 				return
 			}
 			atomic.StoreInt32(&sawValue, 1)
-			v, err := strconv.Atoi(string(p))
+			v, err := strconv.Atoi(string(p.Value))
 			require.NoError(t, err)
 			require.True(t, 0 <= v && v < n)
+			require.EqualValues(t, v, p.CASCounter)
 		}()
 	}
 	wg.Wait()
@@ -187,7 +195,7 @@ func TestFindNear(t *testing.T) {
 	defer l.DecrRef()
 	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("%05d", i*10+5)
-		l.Put([]byte(key), newValue(i), 0)
+		l.Put([]byte(key), y.ValueStruct{newValue(i), 0, uint16(i)})
 	}
 
 	n, eq := l.findNear([]byte("00001"), false, false)
@@ -298,13 +306,14 @@ func TestIteratorNext(t *testing.T) {
 	it.SeekToFirst()
 	require.False(t, it.Valid())
 	for i := n - 1; i >= 0; i-- {
-		l.Put([]byte(fmt.Sprintf("%05d", i)), newValue(i), 0)
+		l.Put([]byte(fmt.Sprintf("%05d", i)),
+			y.ValueStruct{newValue(i), 0, uint16(i)})
 	}
 	it.SeekToFirst()
 	for i := 0; i < n; i++ {
 		require.True(t, it.Valid())
-		val, _ := it.Value()
-		require.EqualValues(t, newValue(i), val)
+		v := it.Value()
+		require.EqualValues(t, newValue(i), v.Value)
 		it.Next()
 	}
 	require.False(t, it.Valid())
@@ -321,13 +330,15 @@ func TestIteratorPrev(t *testing.T) {
 	it.SeekToFirst()
 	require.False(t, it.Valid())
 	for i := 0; i < n; i++ {
-		l.Put([]byte(fmt.Sprintf("%05d", i)), newValue(i), 0)
+		l.Put([]byte(fmt.Sprintf("%05d", i)),
+			y.ValueStruct{newValue(i), 0, uint16(i)})
 	}
 	it.SeekToLast()
 	for i := n - 1; i >= 0; i-- {
 		require.True(t, it.Valid())
-		val, _ := it.Value()
-		require.EqualValues(t, newValue(i), val)
+		v := it.Value()
+		require.EqualValues(t, newValue(i), v.Value)
+		require.EqualValues(t, i, v.CASCounter)
 		it.Prev()
 	}
 	require.False(t, it.Valid())
@@ -348,27 +359,27 @@ func TestIteratorSeek(t *testing.T) {
 	// 1000, 1010, 1020, ..., 1990.
 	for i := n - 1; i >= 0; i-- {
 		v := i*10 + 1000
-		l.Put([]byte(fmt.Sprintf("%05d", i*10+1000)), newValue(v), 0)
+		l.Put([]byte(fmt.Sprintf("%05d", i*10+1000)), y.ValueStruct{newValue(v), 0, 555})
 	}
 	it.Seek([]byte(""))
 	require.True(t, it.Valid())
-	val, _ := it.Value()
-	require.EqualValues(t, "01000", val)
+	v := it.Value()
+	require.EqualValues(t, "01000", v.Value)
 
 	it.Seek([]byte("01000"))
 	require.True(t, it.Valid())
-	val, _ = it.Value()
-	require.EqualValues(t, "01000", val)
+	v = it.Value()
+	require.EqualValues(t, "01000", v.Value)
 
 	it.Seek([]byte("01005"))
 	require.True(t, it.Valid())
-	val, _ = it.Value()
-	require.EqualValues(t, "01010", val)
+	v = it.Value()
+	require.EqualValues(t, "01010", v.Value)
 
 	it.Seek([]byte("01010"))
 	require.True(t, it.Valid())
-	val, _ = it.Value()
-	require.EqualValues(t, "01010", val)
+	v = it.Value()
+	require.EqualValues(t, "01010", v.Value)
 
 	it.Seek([]byte("99999"))
 	require.False(t, it.Valid())
@@ -379,23 +390,23 @@ func TestIteratorSeek(t *testing.T) {
 
 	it.SeekForPrev([]byte("01000"))
 	require.True(t, it.Valid())
-	val, _ = it.Value()
-	require.EqualValues(t, "01000", val)
+	v = it.Value()
+	require.EqualValues(t, "01000", v.Value)
 
 	it.SeekForPrev([]byte("01005"))
 	require.True(t, it.Valid())
-	val, _ = it.Value()
-	require.EqualValues(t, "01000", val)
+	v = it.Value()
+	require.EqualValues(t, "01000", v.Value)
 
 	it.SeekForPrev([]byte("01010"))
 	require.True(t, it.Valid())
-	val, _ = it.Value()
-	require.EqualValues(t, "01010", val)
+	v = it.Value()
+	require.EqualValues(t, "01010", v.Value)
 
 	it.SeekForPrev([]byte("99999"))
 	require.True(t, it.Valid())
-	val, _ = it.Value()
-	require.EqualValues(t, "01990", val)
+	v = it.Value()
+	require.EqualValues(t, "01990", v.Value)
 }
 
 func randomKey() []byte {
@@ -421,12 +432,12 @@ func BenchmarkReadWrite(b *testing.B) {
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					if rand.Float32() < readFrac {
-						val, _ := l.Get(randomKey())
-						if val != nil {
+						v := l.Get(randomKey())
+						if v.Value != nil {
 							count++
 						}
 					} else {
-						l.Put(randomKey(), value, 0)
+						l.Put(randomKey(), y.ValueStruct{value, 0, 0})
 					}
 				}
 			})
