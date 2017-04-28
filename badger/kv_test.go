@@ -318,7 +318,7 @@ func TestIterateBasic(t *testing.T) {
 	// n := 500000
 	n := 10000
 	for i := 0; i < n; i++ {
-		if (i % 10000) == 0 {
+		if (i % 1000) == 0 {
 			fmt.Printf("Put i=%d\n", i)
 		}
 		k := []byte(fmt.Sprintf("%09d", i))
@@ -326,18 +326,20 @@ func TestIterateBasic(t *testing.T) {
 	}
 
 	{
+		fmt.Println("Starting first basic iteration")
 		it := kv.NewIterator(ctx, 10, 5, false)
 		it.Rewind()
 		defer it.Close()
 
 		var count int
 		rewind := true
-		for kv := range it.Ch() {
-			key := kv.Key()
+		for item := range it.Ch() {
+			key := item.Key()
 			if key == nil {
 				break
 			}
 			if bytes.Equal(key, Head) {
+				it.Recycle(item)
 				continue
 			}
 			if rewind && count == 5000 {
@@ -348,25 +350,28 @@ func TestIterateBasic(t *testing.T) {
 				continue
 			}
 			require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
-			val := kv.Value()
+			val := item.Value()
 			require.EqualValues(t, fmt.Sprintf("%09d", count), string(val))
 			count++
+			it.Recycle(item)
 		}
 		require.EqualValues(t, n, count)
 	}
 	{
+		fmt.Println("Starting second basic iteration")
 		it := kv.NewIterator(ctx, 10, 5, true)
 		it.Rewind()
 		defer it.Close()
 
 		var count int
 		rewind := true
-		for kv := range it.Ch() {
-			key := kv.Key()
+		for item := range it.Ch() {
+			key := item.Key()
 			if key == nil {
 				break
 			}
 			if bytes.Equal(key, Head) {
+				it.Recycle(item)
 				continue
 			}
 			if rewind && count == 5000 {
@@ -377,9 +382,10 @@ func TestIterateBasic(t *testing.T) {
 				continue
 			}
 			require.EqualValues(t, fmt.Sprintf("%09d", n-1-count), string(key))
-			val := kv.Value()
+			val := item.Value()
 			require.EqualValues(t, fmt.Sprintf("%09d", n-1-count), string(val))
 			count++
+			it.Recycle(item)
 		}
 		require.EqualValues(t, n, count)
 	}
@@ -394,10 +400,12 @@ func TestIterateBasic(t *testing.T) {
 				break
 			}
 			if bytes.Equal(key, Head) {
+				it.Recycle(item)
 				continue
 			}
 			require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
 			count++
+			it.Recycle(item)
 		}
 	}
 }

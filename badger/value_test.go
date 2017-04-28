@@ -30,7 +30,6 @@ import (
 )
 
 func TestValueBasic(t *testing.T) {
-	ctx := context.Background()
 	dir, err := ioutil.TempDir("", "")
 	y.Check(err)
 
@@ -51,7 +50,7 @@ func TestValueBasic(t *testing.T) {
 	fmt.Printf("Pointer written: %+v", b.Ptrs[0])
 
 	var readEntries []Entry
-	e, err := log.Read(ctx, b.Ptrs[0])
+	e, err := log.Read(b.Ptrs[0], nil)
 	require.NoError(t, err)
 	readEntries = append(readEntries, e)
 	require.EqualValues(t, []Entry{
@@ -104,7 +103,6 @@ func TestValueGC(t *testing.T) {
 }
 
 func BenchmarkReadWrite(b *testing.B) {
-	ctx := context.Background()
 	rwRatio := []float32{
 		0.1, 0.2, 0.5, 1.0,
 	}
@@ -143,7 +141,7 @@ func BenchmarkReadWrite(b *testing.B) {
 							b.Fatalf("Zero length of ptrs")
 						}
 						idx := rand.Intn(ln)
-						e, err := vl.Read(ctx, ptrs[idx])
+						e, err := vl.Read(ptrs[idx], nil)
 						if err != nil {
 							b.Fatalf("Benchmark Read:", err)
 						}

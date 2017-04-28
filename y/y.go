@@ -46,6 +46,17 @@ func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
 	return os.OpenFile(filename, flags, 0666)
 }
 
+type Slice struct {
+	buf []byte
+}
+
+func (s *Slice) Resize(sz int) []byte {
+	if cap(s.buf) < sz {
+		s.buf = make([]byte, sz)
+	}
+	return s.buf[0:sz]
+}
+
 type LevelCloser struct {
 	Name    string
 	running int32

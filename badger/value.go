@@ -504,16 +504,16 @@ func (l *valueLog) getFile(fid int32) (*logFile, error) {
 }
 
 // Read reads the value log at a given location.
-func (l *valueLog) Read(ctx context.Context, p valuePointer) (e Entry, err error) {
-	y.Trace(ctx, "Reading value with pointer: %+v", p)
-	defer y.Trace(ctx, "Read done")
-
+func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	lf, err := l.getFile(int32(p.Fid))
 	if err != nil {
 		return e, err
 	}
 
-	buf := make([]byte, p.Len)
+	if s == nil {
+		s = new(y.Slice)
+	}
+	buf := s.Resize(int(p.Len))
 	if _, err := lf.fd.ReadAt(buf, int64(p.Offset)); err != nil {
 		return e, err
 	}
@@ -641,7 +641,7 @@ func (vlog *valueLog) doRunGC() {
 
 		} else {
 			fmt.Printf("Reason=%+v\n", r)
-			ne, err := vlog.Read(context.Background(), vp)
+			ne, err := vlog.Read(vp, nil)
 			y.Check(err)
 			ne.Offset = int64(vp.Offset)
 			ne.print("Latest Entry in LSM")

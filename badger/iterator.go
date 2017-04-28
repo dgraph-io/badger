@@ -3,17 +3,20 @@ package badger
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/dgraph-io/badger/y"
 )
 
 type KVItem struct {
-	sync.WaitGroup
+	wg         sync.WaitGroup
 	key        []byte
 	vptr       []byte
 	meta       byte
 	val        []byte
 	casCounter uint16
+	slice      *y.Slice
+	ref        int32
 }
 
 // Key returns the key. If nil, the iteration is done and you should break out of channel loop.
@@ -24,7 +27,7 @@ func (kv *KVItem) Key() []byte {
 // Value returns the value, generally fetched from the value log. This can block while
 // the fetch workers populate the value.
 func (kv *KVItem) Value() []byte {
-	kv.Wait()
+	kv.wg.Wait()
 	return kv.val
 }
 
@@ -56,18 +59,72 @@ type Iterator struct {
 	iitr     y.Iterator
 	seekCh   chan iteratorOp
 	reversed bool
+
+	recycler chan *KVItem
+}
+
+// func debugItem(item *KVItem, msg string) {
+// 	fmt.Printf("[%x] %s\n", item.uuid, msg)
+// }
+
+func (itr *Iterator) newItem() (item *KVItem) {
+LOOP:
+	for {
+		select {
+		case item = <-itr.recycler:
+			if atomic.LoadInt32(&item.ref) > 0 {
+				itr.doRecycle(item) // Don't change the ref count.
+				continue LOOP
+			}
+
+			item.wg = sync.WaitGroup{}
+			item.meta = 0
+			item.casCounter = 0
+			break LOOP
+		default:
+			item = &KVItem{slice: new(y.Slice)}
+			break LOOP
+		}
+	}
+	item.wg.Add(1)
+	atomic.AddInt32(&item.ref, 1)
+	return item
 }
 
 func (itr *Iterator) Ch() <-chan *KVItem {
 	return itr.ch
 }
 
+func (itr *Iterator) doRecycle(item *KVItem) {
+	select {
+	case itr.recycler <- item:
+	default:
+		// Don't do anything, Go GC will take care of this.
+	}
+}
+
+// Recycle would reuse the memory allocated for KVItem.
+func (itr *Iterator) Recycle(item *KVItem) {
+	atomic.AddInt32(&item.ref, -1)
+	itr.doRecycle(item)
+}
+
 func (itr *Iterator) clearCh() {
 	for {
 		select {
-		case <-itr.ch:
-		case <-itr.fetchCh:
+		case item := <-itr.ch:
+			itr.Recycle(item)
+		case item := <-itr.fetchCh:
+			atomic.AddInt32(&item.ref, -1)
 			// These will continue until channels are empty.
+			//
+			// Best not to recycle items from here to avoid this race cond:
+			// - Item is already being processed by fetchValue
+			// - We pick this item from itr.Ch, and push it to recycler.
+			// - Recycler recirculates this item, which then goes back into fetchCh.
+			// - previous fetchValue finishes, calles Done().
+			// - fetchCh -> fetchValue -> also calls Done on the same item.
+			// Avoid this by just not recycling these items.
 		default:
 			return
 		}
@@ -75,6 +132,15 @@ func (itr *Iterator) clearCh() {
 }
 
 func (itr *Iterator) prefetch() {
+	safecopy := func(a []byte, src []byte) []byte {
+		if cap(a) < len(src) {
+			a = make([]byte, len(src))
+		}
+		a = a[:len(src)]
+		copy(a, src)
+		return a
+	}
+
 	i := itr.iitr
 	var op iteratorOp
 TOP:
@@ -96,19 +162,11 @@ TOP:
 				continue
 			}
 
-			keyCopy := make([]byte, len(i.Key()))
-			copy(keyCopy, i.Key())
-
-			vptrCopy := make([]byte, len(vs.Value))
-			copy(vptrCopy, vs.Value)
-
-			item := &KVItem{
-				key:        keyCopy,
-				vptr:       vptrCopy,
-				meta:       vs.Meta,
-				casCounter: vs.CASCounter,
-			}
-			item.Add(1)
+			item := itr.newItem()
+			item.meta = vs.Meta
+			item.casCounter = vs.CASCounter
+			item.key = safecopy(item.key, i.Key())
+			item.vptr = safecopy(item.vptr, vs.Value)
 
 			select {
 			case op = <-itr.seekCh:
@@ -118,9 +176,10 @@ TOP:
 			case itr.ch <- item: // We must have incremented sync.WaitGroup before pushing to ch.
 				y.Trace(itr.ctx, "Pushed key to ch: %s\n", item.Key())
 				if itr.fetchCh != nil {
+					atomic.AddInt32(&item.ref, 1)
 					itr.fetchCh <- item
 				} else {
-					item.Done()
+					item.wg.Done()
 				}
 			case <-itr.ctx.Done():
 				return
@@ -145,9 +204,10 @@ func (itr *Iterator) Seek(key []byte) {
 func (itr *Iterator) fetchValue() {
 	for {
 		select {
-		case kv := <-itr.fetchCh:
-			kv.val = itr.kv.decodeValue(itr.ctx, kv.vptr, kv.meta)
-			kv.Done()
+		case item := <-itr.fetchCh:
+			item.val = itr.kv.decodeValue(item.vptr, item.meta, item.slice)
+			item.wg.Done()
+			atomic.AddInt32(&item.ref, -1)
 		case <-itr.ctx.Done():
 			return
 		}
@@ -185,10 +245,11 @@ func (s *KV) NewIterator(
 	iters = s.lc.appendIterators(iters, reversed) // This will increment references.
 
 	itr := &Iterator{
-		kv:     s,
-		iitr:   y.NewMergeIterator(iters, reversed),
-		ch:     make(chan *KVItem, prefetchSize),
-		seekCh: make(chan iteratorOp), // unbuffered channel
+		kv:       s,
+		iitr:     y.NewMergeIterator(iters, reversed),
+		ch:       make(chan *KVItem, prefetchSize),
+		seekCh:   make(chan iteratorOp), // unbuffered channel
+		recycler: make(chan *KVItem, 2*prefetchSize),
 	}
 	itr.ctx, itr.cancel = context.WithCancel(ctx)
 	if numWorkers > 0 {

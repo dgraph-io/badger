@@ -216,19 +216,18 @@ func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 	}
 }
 
-func (s *KV) decodeValue(ctx context.Context, val []byte, meta byte) []byte {
+func (s *KV) decodeValue(val []byte, meta byte, slice *y.Slice) []byte {
 	if (meta & BitDelete) != 0 {
 		// Tombstone encountered.
 		return nil
 	}
 	if (meta & BitValuePointer) == 0 {
-		y.Trace(ctx, "Value stored with key")
 		return val
 	}
 
 	var vp valuePointer
 	vp.Decode(val)
-	entry, err := s.vlog.Read(ctx, vp)
+	entry, err := s.vlog.Read(vp, slice)
 	y.Checkf(err, "Unable to read from value log: %+v", vp)
 
 	if (entry.Meta & BitDelete) == 0 { // Not tombstone.
@@ -256,7 +255,8 @@ func (s *KV) get(ctx context.Context, key []byte) y.ValueStruct {
 // Get looks for key and returns value. If not found, return nil.
 func (s *KV) Get(ctx context.Context, key []byte) ([]byte, uint16) {
 	vs := s.get(ctx, key)
-	return s.decodeValue(ctx, vs.Value, vs.Meta), vs.CASCounter
+	slice := new(y.Slice)
+	return s.decodeValue(vs.Value, vs.Meta, slice), vs.CASCounter
 }
 
 func (s *KV) updateOffset(ptrs []valuePointer) {
