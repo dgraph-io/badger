@@ -83,6 +83,10 @@ func (lf *logFile) doneWriting() {
 
 type logEntry func(e Entry) bool
 
+func iterateEntries(reader bufio.Reader, fn logEntry) error {
+
+}
+
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
 func (f *logFile) iterate(offset int64, fn logEntry) error {
@@ -103,31 +107,27 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 	}
 
 	reader := bufio.NewReader(f.fd)
+
+	// we could extract entry reader from here
 	hbuf := make([]byte, 8)
 	var h header
 	var count int
 	k := make([]byte, 1<<10)
 	v := make([]byte, 1<<20)
-	var e Entry
-	recordOffset := offset
-	for {
-		if err = read(reader, hbuf); err == io.EOF {
-			break
-		}
-		h.Decode(hbuf)
-		// fmt.Printf("[%d] Header read: %+v\n", count, h)
 
-		kl := int(h.klen)
-		vl := int(h.vlen)
-		if cap(k) < kl {
-			k = make([]byte, 2*kl)
+	ensureCapacity := func() {
+		if cap(k) < int(h.klen) {
+			k = make([]byte, 2*h.klen)
 		}
-		if cap(v) < vl {
-			v = make([]byte, 2*vl)
+		if cap(v) < int(h.vlen) {
+			v = make([]byte, 2*h.vlen)
 		}
-		e.Offset = recordOffset
-		e.Key = k[:kl]
-		e.Value = v[:vl]
+	}
+
+	var e Entry
+	decodeEntry := func() (err error) {
+		e.Key = k[:h.klen]
+		e.Value = v[:h.vlen]
 
 		if err = read(reader, e.Key); err != nil {
 			return err
@@ -138,12 +138,71 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 		if err = read(reader, e.Value); err != nil {
 			return err
 		}
+		return
+	}
 
-		if !fn(e) {
+	recordOffset := offset
+OUTER:
+	for {
+		if err = read(reader, hbuf); err == io.EOF {
 			break
 		}
-		count++
-		recordOffset += int64(8 + kl + vl + 1)
+		h.Decode(hbuf)
+		// fmt.Printf("[%d] Header read: %+v\n", count, h)
+
+		kl := int(h.klen)
+
+		if kl > 0 {
+			vl := int(h.vlen)
+
+			ensureCapacity()
+
+			e.Offset = recordOffset
+
+			err = decodeEntry()
+			if err != nil {
+				return err
+			}
+			if !fn(e) {
+				break
+			}
+			count++
+			recordOffset += int64(8 + kl + vl + 1)
+		} else { // key length == 0 => beginning of compressed block
+			bl := int(h.vlen)
+			block := make([]byte, bl)
+			if err = read(reader, block); err != nil {
+				return err
+			}
+			decoded, err := lz4.Decode(nil, block)
+			if err != nil {
+				return err
+			}
+
+			blockOffset := recordOffset + 8
+			for i := 0; i < bl; i++ {
+				h.Decode(decoded)
+
+				kl = int(h.klen)
+				vl := int(h.vlen)
+
+				ensureCapacity()
+
+				// hack: we can't have an offset for
+				// compressed entry... what is this offset for?
+				e.Offset = blockOffset + int64(i)
+
+				err = decodeEntry()
+				if err != nil {
+					return err
+				}
+				if !fn(e) {
+					break OUTER
+				}
+				count++
+			}
+			recordOffset = blockOffset + int64(bl)
+		}
 	}
 	return nil
 }
@@ -276,6 +335,8 @@ func (e Entry) print(prefix string) {
 		prefix, e.Key, e.Meta, e.Offset, len(e.Value))
 }
 
+// klen == 0 means that it's a start of a compressed block of entries.
+// In this case vlen denotes the length of the block.
 type header struct {
 	klen uint32
 	vlen uint32
