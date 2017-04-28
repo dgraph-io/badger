@@ -9,6 +9,7 @@ import (
 
 	"bytes"
 	"github.com/dgraph-io/badger/y"
+	"unsafe"
 )
 
 const (
@@ -110,7 +111,7 @@ func (w *valueLogWriter) saveToDisk(buffer []byte) (err error) {
 // Traverses blocks entries between from and to (excluding to) and sets
 // BlockOffset and InsideBlockOffset values.
 func (w *valueLogWriter) updateCompressedPointers(blocks []*request, from, to entryPosition,
-	blockStart uint64, blockLen uint32) {
+	blockStart, headerSize uint64, blockLen uint32) {
 	beforeTo := func(e entryPosition) bool {
 		return e.block < to.block || (e.block == to.block && e.id < to.id)
 	}
@@ -119,13 +120,15 @@ func (w *valueLogWriter) updateCompressedPointers(blocks []*request, from, to en
 		ptr := &blocks[pos.block].Ptrs[pos.id]
 
 		ptr.InsideBlockOffset = uint16(ptr.Offset - blockStart)
-		ptr.Offset = blockStart
+		ptr.Offset = blockStart + headerSize
 		ptr.Len = blockLen
 		ptr.Meta = ptr.Meta | BitCompressed
 	}
 }
 
 func (w *valueLogWriter) write(blocks []*request) {
+	headerBuffer := make([]byte, 8)
+
 	var firstCompressionEntry entryPosition
 
 	flushWithoutCompression := func() {
@@ -146,6 +149,8 @@ func (w *valueLogWriter) write(blocks []*request) {
 		for j := range b.Entries {
 			e := b.Entries[j]
 
+			y.AssertTruef(len(e.Key) > 0, "key empty")
+
 			// We set the pointer if entries were not compressed.
 			var p valuePointer
 			p.Fid = uint32(w.curlf.fid)
@@ -162,13 +167,20 @@ func (w *valueLogWriter) write(blocks []*request) {
 				if err == nil {
 					w.l.elog.Printf("Adding compressed block.")
 					blockStart := uint64(w.curlf.offset + int64(w.writeBuf.Len()))
+
+					var h header
+					h.klen = 0
+					h.vlen = uint32(len(compressed))
+					h.Encode(headerBuffer)
+					w.writeBuf.Write(headerBuffer)
+
 					w.writeBuf.Write(compressed)
 					fmt.Printf("Copied block of size %d bytes compressed from %d bytes.\n",
 						len(compressed), w.compressionBlock.Len())
 					w.compressionBlock.Reset()
 
-					w.updateCompressedPointers(blocks, firstCompressionEntry, nextEntry, blockStart,
-						uint32(len(compressed)))
+					w.updateCompressedPointers(blocks, firstCompressionEntry, nextEntry,
+						blockStart, uint64(unsafe.Sizeof(h)), uint32(len(compressed)))
 
 					w.l.elog.Printf("Saved compressed block of size %d bytes from %d bytes.\n",
 						len(compressed), w.writeBuf.Len())

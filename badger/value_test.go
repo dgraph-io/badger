@@ -98,12 +98,8 @@ func TestCompression(t *testing.T) {
 	defer kv.Close()
 	log := kv.vlog
 
-	manyA := repeat('a', (1 << 10)) // ~ 1KB
-
-	fmt.Println(len(manyA))
-
+	manyA := repeat('a', (1 << 10))  // ~ 1KB
 	manyB := repeat('b', 65*(1<<10)) // ~ 65KB
-	fmt.Println(len(manyB))
 	entry1 := &Entry{
 		Key:   []byte("key1"),
 		Value: manyA,
@@ -122,12 +118,12 @@ func TestCompression(t *testing.T) {
 	fmt.Printf("Pointer written: %+v, %+v\n", b.Ptrs[0], b.Ptrs[1])
 
 	require.NotZero(t, b.Ptrs[0].Meta&BitCompressed)
-	require.EqualValues(t, 0, b.Ptrs[0].Offset)
+	require.EqualValues(t, 8, b.Ptrs[0].Offset) // first 8 bytes are for compressed block header
 	require.EqualValues(t, 0, b.Ptrs[0].InsideBlockOffset)
 
 	require.NotZero(t, b.Ptrs[1].Meta&BitCompressed)
 	require.NotZero(t, b.Ptrs[1].InsideBlockOffset)
-	require.EqualValues(t, 0, b.Ptrs[1].Offset)
+	require.EqualValues(t, 8, b.Ptrs[1].Offset)
 
 	require.EqualValues(t, b.Ptrs[0].Len, b.Ptrs[1].Len)
 	require.True(t, b.Ptrs[0].Len < 400) // Check whether the block is small
