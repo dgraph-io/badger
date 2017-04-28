@@ -366,13 +366,13 @@ func (p *valuePointer) Decode(b []byte) {
 
 type valueLog struct {
 	sync.RWMutex
-	buf     bytes.Buffer
-	dirPath string
+	files []*logFile
+	// fds    []*os.File
+	offset  int64
 	elog    trace.EventLog
-	files   []*logFile
+	dirPath string
 	kv      *KV
 	maxFid  int32
-	offset  int64
 	opt     Options
 }
 

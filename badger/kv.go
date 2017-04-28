@@ -57,6 +57,7 @@ type Options struct {
 	NumMemtables            int
 	ValueGCThreshold        float64
 	SyncWrites              bool
+	CompressionEnabled      bool
 }
 
 var DefaultOptions = Options{
@@ -75,6 +76,7 @@ var DefaultOptions = Options{
 	MemtableSlack:           10 << 20,
 	ValueGCThreshold:        0.5, // Set to zero to not run GC.
 	SyncWrites:              true,
+	CompressionEnabled:      true,
 }
 
 type KV struct {
