@@ -19,6 +19,7 @@ package y
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"os"
@@ -45,52 +46,111 @@ func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
 	return os.OpenFile(filename, flags, 0666)
 }
 
-type Closer struct {
+type LevelCloser struct {
+	Name    string
 	running int32
 	nomore  int32
 	closed  chan struct{}
-	waiting chan struct{}
+	waiting sync.WaitGroup
 }
 
-func NewCloser(running int) *Closer {
-	c := &Closer{
-		closed:  make(chan struct{}, 10),
-		waiting: make(chan struct{}),
+type Closer struct {
+	sync.RWMutex
+	levels map[string]*LevelCloser
+}
+
+func NewCloser() *Closer {
+	return &Closer{
+		levels: make(map[string]*LevelCloser),
 	}
-	AssertTrue(running >= 0)
-	c.running = int32(running)
-	return c
 }
 
-func (c *Closer) Register() {
-	AssertTruef(atomic.LoadInt32(&c.nomore) == 0, "Can't register with closer after signal.")
-	atomic.AddInt32(&c.running, 1)
+func (c *Closer) Register(name string) *LevelCloser {
+	c.Lock()
+	defer c.Unlock()
+
+	lc, has := c.levels[name]
+	if !has {
+		lc = &LevelCloser{Name: name, closed: make(chan struct{}, 10)}
+		lc.waiting.Add(1)
+		c.levels[name] = lc
+	}
+
+	AssertTruef(atomic.LoadInt32(&lc.nomore) == 0, "Can't register with closer after signal.")
+	atomic.AddInt32(&lc.running, 1)
+	return lc
 }
 
-func (c *Closer) HasBeenClosed() <-chan struct{} {
-	return c.closed
+func (c *Closer) Get(name string) *LevelCloser {
+	c.RLock()
+	defer c.RUnlock()
+
+	lc, has := c.levels[name]
+	if !has {
+		Fatalf("%q not present in Closer", name)
+		return nil
+	}
+	return lc
 }
 
-func (c *Closer) Signal() {
-	atomic.StoreInt32(&c.nomore, 1)
-	running := int(atomic.LoadInt32(&c.running))
-	fmt.Printf("Sending signal to %d registered\n", running)
+func (c *Closer) SignalAll() {
+	c.RLock()
+	c.RUnlock()
+
+	for _, l := range c.levels {
+		l.Signal()
+	}
+}
+
+func (c *Closer) WaitForAll() {
+	c.RLock()
+	c.RUnlock()
+
+	for _, l := range c.levels {
+		l.Wait()
+	}
+}
+
+func (lc *LevelCloser) NumRunning() int {
+	return int(atomic.LoadInt32(&lc.running))
+}
+
+func (lc *LevelCloser) Signal() {
+	if !atomic.CompareAndSwapInt32(&lc.nomore, 0, 1) {
+		fmt.Printf("Level %q already got signal\n", lc.Name)
+		return
+	}
+	running := int(atomic.LoadInt32(&lc.running))
+	fmt.Printf("Sending signal to %d registered with name %q\n", running, lc.Name)
 	for i := 0; i < running; i++ {
-		c.closed <- struct{}{}
+		lc.closed <- struct{}{}
 	}
 }
 
-func (c *Closer) GotSignal() bool {
-	return atomic.LoadInt32(&c.nomore) == 1
+func (lc *LevelCloser) HasBeenClosed() <-chan struct{} {
+	return lc.closed
 }
 
-func (c *Closer) Done() {
-	running := atomic.AddInt32(&c.running, -1)
+func (lc *LevelCloser) GotSignal() bool {
+	return atomic.LoadInt32(&lc.nomore) == 1
+}
+
+func (lc *LevelCloser) Done() {
+	if atomic.LoadInt32(&lc.running) <= 0 {
+		return
+	}
+
+	running := atomic.AddInt32(&lc.running, -1)
 	if running == 0 {
-		c.waiting <- struct{}{}
+		lc.waiting.Done()
 	}
 }
 
-func (c *Closer) Wait() {
-	<-c.waiting
+func (lc *LevelCloser) Wait() {
+	lc.waiting.Wait()
+}
+
+func (lc *LevelCloser) SignalAndWait() {
+	lc.Signal()
+	lc.Wait()
 }

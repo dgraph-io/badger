@@ -79,18 +79,17 @@ var DefaultOptions = Options{
 type KV struct {
 	sync.RWMutex // Guards imm, mem.
 
-	closer        *y.Closer
-	elog          trace.EventLog
-	mt            *skl.Skiplist
-	imm           []*skl.Skiplist // Add here only AFTER pushing to flushChan.
-	opt           Options
-	lc            *levelsController
-	vlog          valueLog
-	vptr          valuePointer
-	arenaPool     *skl.ArenaPool
-	writeCh       chan *block
-	flushChan     chan flushTask // For flushing memtables.
-	blockWriterWg sync.WaitGroup
+	closer    *y.Closer
+	elog      trace.EventLog
+	mt        *skl.Skiplist
+	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+	opt       Options
+	lc        *levelsController
+	vlog      valueLog
+	vptr      valuePointer
+	arenaPool *skl.ArenaPool
+	writeCh   chan *block
+	flushChan chan flushTask // For flushing memtables.
 }
 
 // NewKV returns a new KV object. Compact levels are created as well.
@@ -102,7 +101,7 @@ func NewKV(opt *Options) *KV {
 		writeCh:   make(chan *block, 1000),
 		opt:       *opt, // Make a copy.
 		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MemtableSlack, opt.NumMemtables+5),
-		closer:    y.NewCloser(0),
+		closer:    y.NewCloser(),
 		elog:      trace.NewEventLog("Badger", "KV"),
 	}
 	out.mt = skl.NewSkiplist(out.arenaPool)
@@ -111,10 +110,13 @@ func NewKV(opt *Options) *KV {
 	out.lc = newLevelsController(out)
 	out.lc.startCompact()
 
-	out.closer.Register()
-	go out.flushMemtable() // Need levels controller to be up.
+	lc := out.closer.Register("memtable")
+	go out.flushMemtable(lc) // Need levels controller to be up.
 
 	out.vlog.Open(out, opt)
+
+	lc = out.closer.Register("value-gc")
+	go out.vlog.runGCInLoop(lc)
 
 	val, _ := out.Get(backgroundCtx, Head) // casCounter ignored.
 	var vptr valuePointer
@@ -141,9 +143,9 @@ func NewKV(opt *Options) *KV {
 	}
 	out.vlog.Replay(vptr, fn)
 
-	out.closer.Register()
-	out.blockWriterWg.Add(1)
-	go out.doWrites()
+	lc = out.closer.Register("writes")
+	go out.doWrites(lc)
+
 	return out
 }
 
@@ -152,19 +154,23 @@ func (s *KV) Close() {
 	if s.opt.Verbose {
 		y.Printf("Closing database\n")
 	}
-
-	s.vlog.Close() // Close value log first, because it still needs KV to be active.
 	s.elog.Printf("Closing database")
-	s.closer.Signal()
+	// Stop value GC first.
+	lc := s.closer.Get("value-gc")
+	lc.SignalAndWait()
+
+	// Stop writes next.
+	lc = s.closer.Get("writes")
+	lc.SignalAndWait()
+
+	// Now close the value log.
+	s.vlog.Close()
 
 	// Make sure that block writer is done pushing stuff into memtable!
 	// Otherwise, you will have a race condition: we are trying to flush memtables
 	// and remove them completely, while the block / memtable writer is still
 	// trying to push stuff into the memtable. This will also resolve the value
 	// offset problem: as we push into memtable, we update value offsets there.
-	// TODO: Closer framework doesn't care about order. We need to improve it and clean this up.
-	s.blockWriterWg.Wait()
-
 	if s.mt.Size() > 0 {
 		if s.opt.Verbose {
 			y.Printf("Flushing memtable\n")
@@ -177,13 +183,17 @@ func (s *KV) Close() {
 		s.Unlock()
 	}
 	s.flushChan <- flushTask{nil, valuePointer{}} // Tell flusher to quit.
+
+	lc = s.closer.Get("memtable")
+	lc.Wait()
 	if s.opt.Verbose {
 		y.Printf("Memtable flushed\n")
 	}
 
 	s.lc.close()
 	s.elog.Printf("Waiting for closer")
-	s.closer.Wait()
+	s.closer.SignalAll()
+	s.closer.WaitForAll()
 	s.elog.Finish()
 }
 
@@ -329,9 +339,8 @@ func (s *KV) writeBlocks(blocks []*block) {
 	}
 }
 
-func (s *KV) doWrites() {
-	defer s.closer.Done()
-	defer s.blockWriterWg.Done()
+func (s *KV) doWrites(lc *y.LevelCloser) {
+	defer lc.Done()
 
 	blocks := make([]*block, 0, 10)
 	for {
@@ -339,7 +348,7 @@ func (s *KV) doWrites() {
 		case b := <-s.writeCh:
 			blocks = append(blocks, b)
 
-		case <-s.closer.HasBeenClosed():
+		case <-lc.HasBeenClosed():
 			close(s.writeCh)
 
 			for b := range s.writeCh { // Flush the channel.
@@ -457,8 +466,8 @@ type flushTask struct {
 	vptr valuePointer
 }
 
-func (s *KV) flushMemtable() {
-	defer s.closer.Done()
+func (s *KV) flushMemtable(lc *y.LevelCloser) {
+	defer lc.Done()
 
 	for {
 		select {

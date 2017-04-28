@@ -320,16 +320,14 @@ func (p *valuePointer) Decode(b []byte) {
 
 type valueLog struct {
 	sync.RWMutex
-	opt   Options
-	files []*logFile
-	// fds    []*os.File
-	offset  int64
-	elog    trace.EventLog
-	dirPath string
 	buf     bytes.Buffer
-	maxFid  int32
+	dirPath string
+	elog    trace.EventLog
+	files   []*logFile
 	kv      *KV
-	closer  *y.Closer
+	maxFid  int32
+	offset  int64
+	opt     Options
 }
 
 func (l *valueLog) fpath(fid int32) string {
@@ -389,19 +387,14 @@ func (l *valueLog) openOrCreateFiles() {
 func (l *valueLog) Open(kv *KV, opt *Options) {
 	l.dirPath = opt.Dir
 	l.openOrCreateFiles()
-	l.closer = y.NewCloser(1)
 	l.opt = *opt
 	l.kv = kv
-	go l.runGCInLoop()
 
 	l.elog = trace.NewEventLog("Badger", "Valuelog")
 }
 
 func (l *valueLog) Close() {
 	l.elog.Printf("Stopping garbage collection of values.")
-	l.closer.Signal()
-	l.closer.Wait()
-
 	for _, f := range l.files {
 		y.Check(f.fd.Close())
 	}
@@ -533,21 +526,17 @@ func (l *valueLog) Read(ctx context.Context, p valuePointer) (e Entry, err error
 	return e, nil
 }
 
-func (l *valueLog) runGCInLoop() {
-	defer l.closer.Done()
-	defer func() {
-		fmt.Printf("Stopping runGCInLoop. Signal: %v\n", l.closer.GotSignal())
-	}()
-
+func (l *valueLog) runGCInLoop(lc *y.LevelCloser) {
+	defer lc.Done()
 	if l.opt.ValueGCThreshold == 0.0 {
-		fmt.Println("l.opt.ValueGCThreshold = 0.0")
+		fmt.Println("l.opt.ValueGCThreshold = 0.0. Exiting runGCInLoop")
 		return
 	}
 
 	tick := time.NewTicker(time.Minute)
 	for {
 		select {
-		case <-l.closer.HasBeenClosed():
+		case <-lc.HasBeenClosed():
 			fmt.Println("has been closed")
 			return
 		case <-tick.C:
