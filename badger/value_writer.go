@@ -7,6 +7,7 @@ import (
 
 	"github.com/bkaradzic/go-lz4"
 
+	"bytes"
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -16,12 +17,18 @@ const (
 )
 
 type valueLogWriter struct {
-	l     *valueLog
-	curlf *logFile
+	l                  *valueLog
+	curlf              *logFile
+	compressionEnabled bool
+	writeBuf           bytes.Buffer
+	compressionBlock   bytes.Buffer
 }
 
 func newWriter(l *valueLog) *valueLogWriter {
-	writer := &valueLogWriter{l: l}
+	writer := &valueLogWriter{
+		l:                  l,
+		compressionEnabled: l.opt.CompressionEnabled,
+	}
 
 	l.RLock()
 	writer.curlf = l.files[len(l.files)-1]
@@ -102,7 +109,7 @@ func (w *valueLogWriter) saveToDisk(buffer []byte) (err error) {
 
 // Traverses blocks entries between from and to (excluding to) and sets
 // BlockOffset and InsideBlockOffset values.
-func (w *valueLogWriter) updatePointers(blocks []*block, from, to entryPosition,
+func (w *valueLogWriter) updateCompressedPointers(blocks []*block, from, to entryPosition,
 	blockStart uint64, blockLen uint32) {
 	beforeTo := func(e entryPosition) bool {
 		return e.block < to.block || (e.block == to.block && e.id < to.id)
@@ -119,9 +126,19 @@ func (w *valueLogWriter) updatePointers(blocks []*block, from, to entryPosition,
 }
 
 func (w *valueLogWriter) write(blocks []*block) {
-	var firstBufferEntry entryPosition
+	var firstCompressionEntry entryPosition
 
-	useCompression := true
+	flushWithoutCompression := func() {
+		w.writeBuf.Write(w.compressionBlock.Bytes())
+		w.compressionBlock.Reset()
+	}
+
+	save := func() {
+		flushWithoutCompression()
+		err := w.saveToDisk(w.writeBuf.Bytes())
+		y.Checkf(err, "unable to write to value log: %v", err)
+		w.writeBuf.Reset()
+	}
 
 	for i := range blocks {
 		b := blocks[i]
@@ -129,52 +146,45 @@ func (w *valueLogWriter) write(blocks []*block) {
 		for j := range b.Entries {
 			e := b.Entries[j]
 
+			// We set the pointer if entries were not compressed.
 			var p valuePointer
 			p.Fid = uint32(w.curlf.fid)
 			p.Len = uint32(8 + len(e.Key) + len(e.Value) + 1)
-			p.Offset = uint64(w.curlf.offset) + uint64(w.l.buf.Len())
+			p.Offset = uint64(w.curlf.offset) + uint64(w.writeBuf.Len()+w.compressionBlock.Len())
 			b.Ptrs = append(b.Ptrs, p)
 
-			e.EncodeTo(&w.l.buf)
-			if useCompression && w.l.buf.Len() > optimalLz4BlockSize {
-				compressed, err := compress(w.l.buf.Bytes())
+			e.EncodeTo(&w.compressionBlock)
+			nextEntry := next(entryPosition{uint16(i), uint16(j)}, blocks)
+
+			if w.compressionEnabled && w.compressionBlock.Len() > optimalLz4BlockSize {
+				compressed, err := compress(w.compressionBlock.Bytes())
 
 				if err == nil {
-					w.l.elog.Printf("Writing compressed block.")
-					blockStart := uint64(w.curlf.offset)
-					err := w.saveToDisk(compressed)
-					fmt.Printf("Saved compressed block of size %d bytes from %d bytes.\n", len(compressed), w.l.buf.Len())
+					w.l.elog.Printf("Adding compressed block.")
+					blockStart := uint64(w.curlf.offset + int64(w.writeBuf.Len()))
+					w.writeBuf.Write(compressed)
+					fmt.Printf("Copied block of size %d bytes compressed from %d bytes.\n",
+						len(compressed), w.compressionBlock.Len())
+					w.compressionBlock.Reset()
 
-					if err != nil {
-						y.Fatalf("Unable to write to value log: %v", err)
-					}
-					w.l.buf.Reset()
+					w.updateCompressedPointers(blocks, firstCompressionEntry, nextEntry, blockStart,
+						uint32(len(compressed)))
 
-					next := next(entryPosition{uint16(i), uint16(j)}, blocks)
-					w.updatePointers(blocks, firstBufferEntry, next, blockStart, uint32(len(compressed)))
-
-					w.l.elog.Printf("Saved compressed block of size %d bytes from %d bytes.\n", len(compressed), w.l.buf.Len())
-
-					firstBufferEntry = next
+					w.l.elog.Printf("Saved compressed block of size %d bytes from %d bytes.\n",
+						len(compressed), w.writeBuf.Len())
 				} else {
-					// We are not going to try compression for this file again.
-					fmt.Println(err)
-					useCompression = false
+					w.l.elog.Printf("Flushing withour compression %v\n", err)
+					flushWithoutCompression()
 				}
+				firstCompressionEntry = nextEntry
 			}
-			if p.Offset > uint64(LogSize) {
-				afterLast := next(entryPosition{uint16(i), uint16(j)}, blocks)
-				w.l.elog.Printf("Flushing from %+v to %+v of total size: %d",
-					firstBufferEntry, afterLast, w.l.buf.Len())
-				err := w.saveToDisk(w.l.buf.Bytes())
-				y.Checkf(err, "unable to write to value log: %v", err)
-				w.l.buf.Reset()
+			if uint32(p.Offset)+p.Len > uint32(LogSize) {
+				w.l.elog.Printf("Saving from %+v to %+v of total size: %d",
+					firstCompressionEntry, nextEntry, w.writeBuf.Len())
+				save()
 				w.l.elog.Printf("Done")
-				useCompression = true
 			}
 		}
 	}
-	err := w.saveToDisk(w.l.buf.Bytes())
-	y.Checkf(err, "unable to write to value log: %v", err)
-	w.l.buf.Reset()
+	save()
 }

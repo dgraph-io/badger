@@ -329,7 +329,6 @@ type valueLog struct {
 	offset  int64
 	elog    trace.EventLog
 	dirPath string
-	buf     bytes.Buffer
 	maxFid  int32
 	kv      *KV
 	closer  *y.Closer
