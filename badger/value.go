@@ -156,10 +156,10 @@ func (vlog *valueLog) rewrite(f *logFile) {
 	fmt.Println("rewrite called")
 	ctx := context.Background()
 
-	b := &block{
+	b := &request{
 		Wg: sync.WaitGroup{},
 	}
-	blocks := make([]*block, 0, 10)
+	blocks := make([]*request, 0, 10)
 	blocks = append(blocks, b)
 
 	y.AssertTrue(vlog.kv != nil)
@@ -201,7 +201,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 			ne.CASCounterCheck = vs.CASCounter // CAS counter check.
 			b.Entries = append(b.Entries, &ne)
 			if len(b.Entries) >= 1000 {
-				b = &block{
+				b = &request{
 					Wg: sync.WaitGroup{},
 				}
 				blocks = append(blocks, b)
@@ -426,14 +426,14 @@ func (l *valueLog) Replay(ptr valuePointer, fn logEntry) {
 	y.Checkf(err, "Unable to seek to the end")
 }
 
-type block struct {
+type request struct {
 	Entries []*Entry
 	Ptrs    []valuePointer
 	Wg      sync.WaitGroup
 }
 
 // Write is thread-unsafe by design and should not be called concurrently.
-func (l *valueLog) Write(blocks []*block) {
+func (l *valueLog) Write(reqs []*request) {
 	l.RLock()
 	curlf := l.files[len(l.files)-1]
 	l.RUnlock()
@@ -442,7 +442,7 @@ func (l *valueLog) Write(blocks []*block) {
 		if l.buf.Len() == 0 {
 			return
 		}
-		l.elog.Printf("Flushing %d blocks of total size: %d", len(blocks), l.buf.Len())
+		l.elog.Printf("Flushing %d blocks of total size: %d", len(reqs), l.buf.Len())
 		n, err := curlf.fd.Write(l.buf.Bytes())
 		if err != nil {
 			y.Fatalf("Unable to write to value log: %v", err)
@@ -466,13 +466,19 @@ func (l *valueLog) Write(blocks []*block) {
 		}
 	}
 
-	for i := range blocks {
-		b := blocks[i]
+	for i := range reqs {
+		b := reqs[i]
 		b.Ptrs = b.Ptrs[:0]
 		for j := range b.Entries {
 			e := b.Entries[j]
-
 			var p valuePointer
+
+			if !l.opt.SyncWrites && len(e.Value) < l.opt.ValueThreshold {
+				// No need to write to value log.
+				b.Ptrs = append(b.Ptrs, p)
+				continue
+			}
+
 			p.Fid = uint32(curlf.fid)
 			p.Len = uint32(8 + len(e.Key) + len(e.Value) + 1)
 			p.Offset = uint64(curlf.offset) + uint64(l.buf.Len())

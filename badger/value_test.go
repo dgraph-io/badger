@@ -42,10 +42,10 @@ func TestValueBasic(t *testing.T) {
 		Value: []byte("sampleval"),
 		Meta:  123,
 	}
-	b := new(block)
+	b := new(request)
 	b.Entries = []*Entry{entry}
 
-	log.Write([]*block{b})
+	log.Write([]*request{b})
 	require.Len(t, b.Ptrs, 1)
 	fmt.Printf("Pointer written: %+v", b.Ptrs[0])
 
@@ -122,17 +122,17 @@ func BenchmarkReadWrite(b *testing.B) {
 					e := new(Entry)
 					e.Key = make([]byte, 16)
 					e.Value = make([]byte, vsz)
-					bl := new(block)
+					bl := new(request)
 					bl.Entries = []*Entry{e}
 
 					var ptrs []valuePointer
 
-					vl.Write([]*block{bl})
+					vl.Write([]*request{bl})
 					ptrs = append(ptrs, bl.Ptrs...)
 
 					f := rand.Float32()
 					if f < rw {
-						vl.Write([]*block{bl})
+						vl.Write([]*request{bl})
 						ptrs = append(ptrs, bl.Ptrs...)
 
 					} else {

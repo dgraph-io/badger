@@ -88,7 +88,7 @@ type KV struct {
 	vlog      valueLog
 	vptr      valuePointer
 	arenaPool *skl.ArenaPool
-	writeCh   chan *block
+	writeCh   chan *request
 	flushChan chan flushTask // For flushing memtables.
 }
 
@@ -98,7 +98,7 @@ func NewKV(opt *Options) *KV {
 	out := &KV{
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan: make(chan flushTask, opt.NumMemtables),
-		writeCh:   make(chan *block, 1000),
+		writeCh:   make(chan *request, 1000),
 		opt:       *opt, // Make a copy.
 		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MemtableSlack, opt.NumMemtables+5),
 		closer:    y.NewCloser(),
@@ -271,13 +271,13 @@ func (s *KV) updateOffset(ptrs []valuePointer) {
 	}
 }
 
-var blockPool = sync.Pool{
+var requestPool = sync.Pool{
 	New: func() interface{} {
-		return new(block)
+		return new(request)
 	},
 }
 
-func (s *KV) writeToLSM(b *block) {
+func (s *KV) writeToLSM(b *request) {
 	var offsetBuf [16]byte
 	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
 	for i, entry := range b.Entries {
@@ -297,19 +297,19 @@ func (s *KV) writeToLSM(b *block) {
 	}
 }
 
-func (s *KV) writeBlocks(blocks []*block) {
-	if len(blocks) == 0 {
+func (s *KV) writeRequests(reqs []*request) {
+	if len(reqs) == 0 {
 		return
 	}
-	s.elog.Printf("writeBlocks called")
+	s.elog.Printf("writeRequests called")
 
 	s.elog.Printf("Writing to value log")
 	// Before writing to value log, generate the random CAS counters. Also check
 	// CAS counters if asked to.
 	// TODO: If the same key appears in the same list of blocks, the get here
 	// will be insufficient for comparing CAS counters.
-	for _, block := range blocks {
-		for _, e := range block.Entries {
+	for _, req := range reqs {
+		for _, e := range req.Entries {
 			e.skip = false // To be sure.
 			if e.CASCounterCheck != 0 {
 				oldValue := s.get(backgroundCtx, e.Key) // No need to decode existing value. Just need old CAS counter.
@@ -321,10 +321,10 @@ func (s *KV) writeBlocks(blocks []*block) {
 			e.casCounter = newCASCounter()
 		}
 	}
-	s.vlog.Write(blocks)
+	s.vlog.Write(reqs)
 
 	s.elog.Printf("Writing to memtable")
-	for i, b := range blocks {
+	for i, b := range reqs {
 		for !s.hasRoomForWrite() {
 			s.elog.Printf("Making room for writes")
 			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
@@ -342,7 +342,7 @@ func (s *KV) writeBlocks(blocks []*block) {
 func (s *KV) doWrites(lc *y.LevelCloser) {
 	defer lc.Done()
 
-	blocks := make([]*block, 0, 10)
+	blocks := make([]*request, 0, 10)
 	for {
 		select {
 		case b := <-s.writeCh:
@@ -354,7 +354,7 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 			for b := range s.writeCh { // Flush the channel.
 				blocks = append(blocks, b)
 			}
-			s.writeBlocks(blocks)
+			s.writeRequests(blocks)
 			return
 
 		default:
@@ -362,7 +362,7 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 				time.Sleep(time.Millisecond)
 				break
 			}
-			s.writeBlocks(blocks)
+			s.writeRequests(blocks)
 			blocks = blocks[:0]
 		}
 	}
@@ -370,8 +370,8 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 
 // Write applies a list of value.Entry to our memtable.
 func (s *KV) Write(ctx context.Context, entries []*Entry) error {
-	b := blockPool.Get().(*block)
-	defer blockPool.Put(b)
+	b := requestPool.Get().(*request)
+	defer requestPool.Put(b)
 
 	b.Entries = entries
 	b.Wg = sync.WaitGroup{}
