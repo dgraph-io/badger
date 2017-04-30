@@ -143,7 +143,13 @@ func TestCAS(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		k := []byte(fmt.Sprintf("key%d", i))
 		v := []byte(fmt.Sprintf("zzz%d", i))
-		require.NoError(t, kv.CASPut(ctx, k, v, entries[i].casCounter+1))
+		cc := entries[i].casCounter
+		if cc == 5 {
+			cc = 6
+		} else {
+			cc = 5
+		}
+		require.NoError(t, kv.CASPut(ctx, k, v, cc))
 	}
 	time.Sleep(time.Second)
 	for i := 0; i < 100; i++ {
@@ -156,7 +162,13 @@ func TestCAS(t *testing.T) {
 
 	for i := 0; i < 100; i++ {
 		k := []byte(fmt.Sprintf("key%d", i))
-		require.NoError(t, kv.CASDelete(ctx, k, entries[i].casCounter+1))
+		cc := entries[i].casCounter
+		if cc == 5 {
+			cc = 6
+		} else {
+			cc = 5
+		}
+		require.NoError(t, kv.CASDelete(ctx, k, cc))
 	}
 	time.Sleep(time.Second)
 	for i := 0; i < 100; i++ {
@@ -522,5 +534,108 @@ func TestCrash(t *testing.T) {
 		value, casCounter := kv3.Get(ctx, k)
 		require.True(t, casCounter != 0)
 		require.Equal(t, k, value, "Key: %s", k)
+	}
+}
+
+// Test replay of log when there are CAS entries.
+func TestCrashCAS(t *testing.T) {
+	ctx := context.Background()
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opt := DefaultOptions
+	opt.MaxTableSize = 1 << 20
+	opt.Dir = dir
+	opt.DoNotCompact = true
+	opt.Verbose = true
+
+	kv := NewKV(&opt)
+	var keys [][]byte
+	for i := 0; i < 150000; i++ {
+		k := []byte(fmt.Sprintf("%09d", i))
+		keys = append(keys, k)
+	}
+
+	entries := make([]*Entry, 0, 10)
+	for _, k := range keys {
+		e := &Entry{
+			Key:   k,
+			Value: k,
+		}
+		entries = append(entries, e)
+	}
+	err = kv.Write(ctx, entries)
+	require.Nil(t, err)
+
+	oldEntries := entries
+	entries = make([]*Entry, 0, 10)
+
+	for i := 0; i < 150000; i++ {
+		k := []byte(fmt.Sprintf("%09d", i))
+		vs := kv.get(ctx, k)
+		require.EqualValues(t, oldEntries[i].casCounter, vs.CASCounter)
+
+		e := &Entry{
+			Key:             k,
+			Value:           []byte(fmt.Sprintf("changed%d", i)),
+			CASCounterCheck: vs.CASCounter,
+		}
+		if (i % 2) == 1 {
+			// Be careful with writing "vs.CASCounter+1" as it may overflow and the test can fail.
+			if e.CASCounterCheck != 5 {
+				e.CASCounterCheck = 5
+			} else {
+				e.CASCounterCheck = 6
+			}
+		}
+		entries = append(entries, e)
+	}
+	err = kv.Write(ctx, entries)
+	require.Nil(t, err)
+
+	for i, k := range keys {
+		value, casCounter := kv.Get(ctx, k)
+		if (i % 2) == 0 {
+			require.EqualValues(t, fmt.Sprintf("changed%d", i), string(value), "%d", casCounter)
+		} else {
+			require.EqualValues(t, string(k), string(value), "%d %d", casCounter, entries[i].CASCounterCheck)
+		}
+	}
+	entries = entries[:0]
+
+	//	// Do not close kv store (!!) for this test to make sense.
+
+	kv2 := NewKV(&opt)
+	for i, k := range keys {
+		value, _ := kv2.Get(ctx, k)
+		if (i % 2) == 0 {
+			require.EqualValues(t, fmt.Sprintf("changed%d", i), string(value))
+		} else {
+			require.EqualValues(t, string(k), string(value))
+		}
+	}
+
+	{
+		val, _ := kv.Get(ctx, Head)
+		voffset := binary.BigEndian.Uint64(val)
+		fmt.Printf("level 1 val: %v\n", voffset)
+	}
+
+	kv.lc.tryCompact(1)
+	kv.lc.tryCompact(1)
+	val, _ := kv.Get(ctx, Head)
+	require.True(t, len(val) > 0)
+	voffset := binary.BigEndian.Uint64(val)
+	fmt.Printf("level 1 val: %v\n", voffset)
+
+	kv3 := NewKV(&opt)
+	for i, k := range keys {
+		value, _ := kv3.Get(ctx, k)
+		if (i % 2) == 0 {
+			require.EqualValues(t, fmt.Sprintf("changed%d", i), string(value))
+		} else {
+			require.EqualValues(t, string(k), string(value))
+		}
 	}
 }

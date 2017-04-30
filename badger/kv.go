@@ -130,14 +130,23 @@ func NewKV(opt *Options) *KV {
 			fmt.Printf("key=%s\n", e.Key)
 		}
 		first = false
+
+		if e.CASCounterCheck != 0 {
+			oldValue := out.get(backgroundCtx, e.Key)
+			if oldValue.CASCounter != e.CASCounterCheck {
+				return true
+			}
+		}
 		nk := make([]byte, len(e.Key))
 		copy(nk, e.Key)
 		nv := make([]byte, len(e.Value))
 		copy(nv, e.Value)
 
-		// Currently, we do not save casCounters in value log. Instead, when
-		// replaying, we generate new casCounters.
-		v := y.ValueStruct{nv, e.Meta, newCASCounter()}
+		v := y.ValueStruct{
+			Value:      nv,
+			Meta:       e.Meta,
+			CASCounter: e.casCounter,
+		}
 		out.mt.Put(nk, v)
 		return true
 	}
@@ -281,9 +290,13 @@ func (s *KV) writeToLSM(b *request) {
 	var offsetBuf [16]byte
 	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
 	for i, entry := range b.Entries {
-		if entry.skip {
-			continue
+		if entry.CASCounterCheck != 0 {
+			oldValue := s.get(backgroundCtx, entry.Key) // No need to decode existing value. Just need old CAS counter.
+			if oldValue.CASCounter != entry.CASCounterCheck {
+				continue
+			}
 		}
+
 		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
 			s.mt.Put(entry.Key,
 				y.ValueStruct{entry.Value, entry.Meta, entry.casCounter})
@@ -304,20 +317,12 @@ func (s *KV) writeRequests(reqs []*request) {
 	s.elog.Printf("writeRequests called")
 
 	s.elog.Printf("Writing to value log")
-	// Before writing to value log, generate the random CAS counters. Also check
-	// CAS counters if asked to.
-	// TODO: If the same key appears in the same list of blocks, the get here
-	// will be insufficient for comparing CAS counters.
+
+	// CAS counter for all operations has to go onto value log. Otherwise, if it is just in memtable for
+	// a long time, and following CAS operations use that as a check, when replaying, we will think that
+	// these CAS operations should fail, when they are actually valid.
 	for _, req := range reqs {
 		for _, e := range req.Entries {
-			e.skip = false // To be sure.
-			if e.CASCounterCheck != 0 {
-				oldValue := s.get(backgroundCtx, e.Key) // No need to decode existing value. Just need old CAS counter.
-				if oldValue.CASCounter != e.CASCounterCheck {
-					e.skip = true
-					continue
-				}
-			}
 			e.casCounter = newCASCounter()
 		}
 	}

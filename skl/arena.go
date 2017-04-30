@@ -65,11 +65,12 @@ func (s *Arena) GetKey(offset uint32, size uint16) []byte {
 // GetVal returns byte slice at offset. The given size should be just the value
 // size and should NOT include the meta byte.
 func (s *Arena) GetVal(offset uint32, size uint16) y.ValueStruct {
-	return y.ValueStruct{
+	out := y.ValueStruct{
 		Value:      s.buf[offset+3 : offset+3+uint32(size)],
 		Meta:       s.buf[offset],
 		CASCounter: binary.BigEndian.Uint16(s.buf[offset+1 : offset+3]),
 	}
+	return out
 }
 
 type ArenaPool struct {

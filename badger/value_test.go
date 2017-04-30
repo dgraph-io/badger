@@ -38,26 +38,46 @@ func TestValueBasic(t *testing.T) {
 	log := kv.vlog
 
 	entry := &Entry{
-		Key:   []byte("samplekey"),
-		Value: []byte("sampleval"),
-		Meta:  123,
+		Key:             []byte("samplekey"),
+		Value:           []byte("sampleval"),
+		Meta:            123,
+		CASCounterCheck: 22222,
+		casCounter:      33333,
 	}
+	entry2 := &Entry{
+		Key:             []byte("samplekeyb"),
+		Value:           []byte("samplevalb"),
+		Meta:            125,
+		CASCounterCheck: 22225,
+		casCounter:      33335,
+	}
+
 	b := new(request)
-	b.Entries = []*Entry{entry}
+	b.Entries = []*Entry{entry, entry2}
 
 	log.Write([]*request{b})
-	require.Len(t, b.Ptrs, 1)
-	fmt.Printf("Pointer written: %+v", b.Ptrs[0])
+	require.Len(t, b.Ptrs, 2)
+	fmt.Printf("Pointer written: %+v", b.Ptrs[0], b.Ptrs[1])
 
-	var readEntries []Entry
 	e, err := log.Read(b.Ptrs[0], nil)
+	e2, err := log.Read(b.Ptrs[1], nil)
+
 	require.NoError(t, err)
-	readEntries = append(readEntries, e)
+	readEntries := []Entry{e, e2}
 	require.EqualValues(t, []Entry{
 		{
-			Key:   []byte("samplekey"),
-			Value: []byte("sampleval"),
-			Meta:  123,
+			Key:             []byte("samplekey"),
+			Value:           []byte("sampleval"),
+			Meta:            123,
+			CASCounterCheck: 22222,
+			casCounter:      33333,
+		},
+		{
+			Key:             []byte("samplekeyb"),
+			Value:           []byte("samplevalb"),
+			Meta:            125,
+			CASCounterCheck: 22225,
+			casCounter:      33335,
 		},
 	}, readEntries)
 }
@@ -66,8 +86,8 @@ func TestValueGC(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	db := NewKV(getTestOptions(dir))
-	defer db.Close()
+	kv := NewKV(getTestOptions(dir))
+	defer kv.Close()
 
 	sz := 16 << 20
 	var entries []*Entry
@@ -80,23 +100,24 @@ func TestValueGC(t *testing.T) {
 		})
 	}
 	ctx := context.Background()
-	require.NoError(t, db.Write(ctx, entries))
+	require.NoError(t, kv.Write(ctx, entries))
 
 	for i := 0; i < 45; i++ {
-		db.Delete(ctx, []byte(fmt.Sprintf("key%d", i)))
+		kv.Delete(ctx, []byte(fmt.Sprintf("key%d", i)))
 	}
 
-	db.vlog.RLock()
-	lf := db.vlog.files[0]
-	db.vlog.RUnlock()
+	kv.vlog.RLock()
+	lf := kv.vlog.files[0]
+	kv.vlog.RUnlock()
 
-	// lf.iterate(0, func(e Entry) {
-	// 	e.print("lf")
-	// })
+	//	lf.iterate(0, func(e Entry) bool {
+	//		e.print("lf")
+	//		return true
+	//	})
 
-	db.vlog.rewrite(lf)
+	kv.vlog.rewrite(lf)
 	for i := 45; i < 100; i++ {
-		val, _ := db.Get(ctx, []byte(fmt.Sprintf("key%d", i)))
+		val, _ := kv.Get(ctx, []byte(fmt.Sprintf("key%d", i)))
 		require.NotNil(t, val)
 		require.True(t, len(val) == sz, "Size found: %d", len(val))
 	}

@@ -133,6 +133,13 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 		if e.Meta, err = reader.ReadByte(); err != nil {
 			return err
 		}
+		// TODO: Add casCounter.
+		var casBytes [4]byte
+		if err = read(reader, casBytes[:]); err != nil {
+			return err
+		}
+		e.casCounter = binary.BigEndian.Uint16(casBytes[:2])
+		e.CASCounterCheck = binary.BigEndian.Uint16(casBytes[2:])
 		if err = read(reader, e.Value); err != nil {
 			return err
 		}
@@ -141,7 +148,7 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 			break
 		}
 		count++
-		recordOffset += int64(8 + kl + vl + 1)
+		recordOffset += int64(8 + kl + vl + 1 + 4) // +1 for meta, +4 for CAS stuff.
 	}
 	return nil
 }
@@ -198,7 +205,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 			copy(ne.Key, e.Key)
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
-			ne.CASCounterCheck = vs.CASCounter // CAS counter check.
+			ne.CASCounterCheck = vs.CASCounter // CAS counter check. Do not rewrite if key has a newer value.
 			b.Entries = append(b.Entries, &ne)
 			if len(b.Entries) >= 1000 {
 				b = &request{
@@ -222,6 +229,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 		elog.Printf("block %d has %d entries", i, len(b.Entries))
 		fmt.Printf("block %d has %d entries\n", i, len(b.Entries))
 		b.Wg.Add(1)
+		y.AssertTrue(len(b.Entries) > 0)
 		vlog.kv.writeCh <- b // Write out these blocks with newer value offsets.
 	}
 	for i, b := range blocks {
@@ -258,7 +266,6 @@ type Entry struct {
 
 	// Fields maintained internally.
 	casCounter uint16
-	skip       bool // Failed CAS check. Note: this field is not updated immediately.
 }
 
 func (e Entry) EncodeTo(buf *bytes.Buffer) {
@@ -271,6 +278,14 @@ func (e Entry) EncodeTo(buf *bytes.Buffer) {
 	buf.Write(headerEnc[:])
 	buf.Write(e.Key)
 	buf.WriteByte(e.Meta)
+
+	// TODO: Reduce space used here.
+	var b [2]byte
+	binary.BigEndian.PutUint16(b[:], e.casCounter)
+	buf.Write(b[:])
+	binary.BigEndian.PutUint16(b[:], e.CASCounterCheck)
+	buf.Write(b[:])
+
 	buf.Write(e.Value)
 }
 
@@ -480,7 +495,7 @@ func (l *valueLog) Write(reqs []*request) {
 			}
 
 			p.Fid = uint32(curlf.fid)
-			p.Len = uint32(8 + len(e.Key) + len(e.Value) + 1)
+			p.Len = uint32(8 + len(e.Key) + len(e.Value) + 1 + 4) // +4 for CAS stuff.
 			p.Offset = uint64(curlf.offset) + uint64(l.buf.Len())
 			b.Ptrs = append(b.Ptrs, p)
 
@@ -527,7 +542,10 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	buf = h.Decode(buf)
 	e.Key = buf[0:h.klen]
 	e.Meta = buf[h.klen]
-	buf = buf[h.klen+1:]
+	e.casCounter = binary.BigEndian.Uint16(buf[h.klen+1 : h.klen+3])
+	e.CASCounterCheck = binary.BigEndian.Uint16(buf[h.klen+3 : h.klen+5])
+	buf = buf[h.klen+5:]
+
 	e.Value = buf[0:h.vlen]
 	return e, nil
 }
@@ -596,7 +614,7 @@ func (vlog *valueLog) doRunGC() {
 	start := time.Now()
 	y.AssertTrue(vlog.kv != nil)
 	err := lf.iterate(0, func(e Entry) bool {
-		esz := float64(len(e.Key)+len(e.Value)+1) / (1 << 20) // in MBs.
+		esz := float64(len(e.Key)+len(e.Value)+1+4) / (1 << 20) // in MBs. +4 for the CAS stuff.
 		skipped += esz
 		if skipped < skipFirstM {
 			return true
