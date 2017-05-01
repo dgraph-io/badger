@@ -32,7 +32,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"golang.org/x/net/trace"
@@ -58,7 +57,6 @@ type logFile struct {
 	fid    int32
 	offset int64
 	size   int64
-	mmap   []byte
 }
 
 // openReadOnly assumes that we have a write lock on logFile.
@@ -70,21 +68,12 @@ func (lf *logFile) openReadOnly() {
 	fi, err := lf.fd.Stat()
 	y.Check(err)
 	lf.size = fi.Size()
-
-	lf.mmap, err = syscall.Mmap(int(lf.fd.Fd()), 0, int(fi.Size()),
-		syscall.PROT_READ, syscall.MAP_SHARED)
-	y.Check(err)
 }
 
 func (lf *logFile) read(buf []byte, offset int64) error {
 	lf.RLock()
 	defer lf.RUnlock()
 
-	if len(lf.mmap) > 0 {
-		o := int(offset)
-		copy(buf, lf.mmap[o:o+len(buf)])
-		return nil
-	}
 	_, err := lf.fd.ReadAt(buf, offset)
 	return err
 }
@@ -441,9 +430,6 @@ func (l *valueLog) Open(kv *KV, opt *Options) {
 func (l *valueLog) Close() {
 	l.elog.Printf("Stopping garbage collection of values.")
 	for _, f := range l.files {
-		if len(f.mmap) > 0 {
-			y.Check(syscall.Munmap(f.mmap))
-		}
 		y.Check(f.fd.Close())
 	}
 	l.elog.Finish()
