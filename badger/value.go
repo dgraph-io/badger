@@ -32,6 +32,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/trace"
@@ -52,31 +53,48 @@ var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
 
 type logFile struct {
 	sync.RWMutex
+	path   string
 	fd     *os.File
 	fid    int32
 	offset int64
 	size   int64
+	mmap   []byte
+}
+
+// openReadOnly assumes that we have a write lock on logFile.
+func (lf *logFile) openReadOnly() {
+	var err error
+	lf.fd, err = os.OpenFile(lf.path, os.O_RDONLY, 0666)
+	y.Check(err)
+
+	fi, err := lf.fd.Stat()
+	y.Check(err)
+	lf.size = fi.Size()
+
+	lf.mmap, err = syscall.Mmap(int(lf.fd.Fd()), 0, int(fi.Size()),
+		syscall.PROT_READ, syscall.MAP_SHARED)
+	y.Check(err)
 }
 
 func (lf *logFile) read(buf []byte, offset int64) error {
 	lf.RLock()
 	defer lf.RUnlock()
 
+	if len(lf.mmap) > 0 {
+		o := int(offset)
+		copy(buf, lf.mmap[o:o+len(buf)])
+		return nil
+	}
 	_, err := lf.fd.ReadAt(buf, offset)
 	return err
 }
 
 func (lf *logFile) doneWriting() {
-	var err error
 	lf.Lock()
 	defer lf.Unlock()
-	path := lf.fd.Name()
 	y.Check(lf.fd.Close())
-	lf.fd, err = os.OpenFile(path, os.O_RDONLY, 0666)
-	y.Check(err)
 
-	fi, err := lf.fd.Stat()
-	lf.size = fi.Size()
+	lf.openReadOnly()
 }
 
 type logEntry func(e Entry) bool
@@ -153,6 +171,8 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 	return nil
 }
 
+var entries = make([]*Entry, 0, 1000000)
+
 func (vlog *valueLog) rewrite(f *logFile) {
 	maxFid := atomic.LoadInt32(&vlog.maxFid)
 	y.AssertTruef(f.fid < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
@@ -163,12 +183,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 	fmt.Println("rewrite called")
 	ctx := context.Background()
 
-	b := &request{
-		Wg: sync.WaitGroup{},
-	}
-	blocks := make([]*request, 0, 10)
-	blocks = append(blocks, b)
-
+	entries = entries[:0]
 	y.AssertTrue(vlog.kv != nil)
 	var count int
 	fe := func(e Entry) {
@@ -206,13 +221,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
 			ne.CASCounterCheck = vs.CASCounter // CAS counter check. Do not rewrite if key has a newer value.
-			b.Entries = append(b.Entries, &ne)
-			if len(b.Entries) >= 1000 {
-				b = &request{
-					Wg: sync.WaitGroup{},
-				}
-				blocks = append(blocks, b)
-			}
+			entries = append(entries, &ne)
 
 		} else {
 			y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
@@ -224,19 +233,11 @@ func (vlog *valueLog) rewrite(f *logFile) {
 		return true
 	})
 	elog.Printf("Processed %d entries in total", count)
-
-	for i, b := range blocks {
-		elog.Printf("block %d has %d entries", i, len(b.Entries))
-		fmt.Printf("block %d has %d entries\n", i, len(b.Entries))
-		b.Wg.Add(1)
-		y.AssertTrue(len(b.Entries) > 0)
-		vlog.kv.writeCh <- b // Write out these blocks with newer value offsets.
-	}
-	for i, b := range blocks {
-		elog.Printf("block %d done", i)
-		fmt.Printf("block %d done\n", i)
-		b.Wg.Wait()
-	}
+	// Sort the entries, so lookups can potentially use page cache better.
+	sort.Slice(entries, func(i, j int) bool {
+		return bytes.Compare(entries[i].Key, entries[j].Key) < 0
+	})
+	vlog.writeToKV(elog)
 
 	elog.Printf("Removing fid: %d", f.fid)
 	// Entries written to LSM. Remove the older file now.
@@ -255,6 +256,37 @@ func (vlog *valueLog) rewrite(f *logFile) {
 	rem := vlog.fpath(f.fid)
 	elog.Printf("Removing %s", rem)
 	y.Check(os.Remove(rem))
+}
+
+func (vlog *valueLog) writeToKV(elog trace.EventLog) {
+	req := &request{
+		Wg:      sync.WaitGroup{},
+		Entries: make([]*Entry, 0, 1000),
+	}
+	requests := make([]*request, 0, 10)
+	requests = append(requests, req)
+	for _, e := range entries {
+		req.Entries = append(req.Entries, e)
+		if len(req.Entries) >= 1000 {
+			req = &request{
+				Wg:      sync.WaitGroup{},
+				Entries: make([]*Entry, 0, 1000),
+			}
+			requests = append(requests, req)
+		}
+	}
+	for i, b := range requests {
+		elog.Printf("req %d has %d entries", i, len(b.Entries))
+		fmt.Printf("req %d has %d entries\n", i, len(b.Entries))
+		b.Wg.Add(1)
+		y.AssertTrue(len(b.Entries) > 0)
+		vlog.kv.writeCh <- b // Write out these blocks with newer value offsets.
+	}
+	for i, b := range requests {
+		elog.Printf("req %d done", i)
+		fmt.Printf("req %d done\n", i)
+		b.Wg.Wait()
+	}
 }
 
 type Entry struct {
@@ -366,7 +398,7 @@ func (l *valueLog) openOrCreateFiles() {
 		}
 		found[fid] = struct{}{}
 
-		lf := &logFile{fid: int32(fid)}
+		lf := &logFile{fid: int32(fid), path: l.fpath(int32(fid))}
 		l.files = append(l.files, lf)
 	}
 
@@ -380,19 +412,17 @@ func (l *valueLog) openOrCreateFiles() {
 		lf := l.files[i]
 		if i == len(l.files)-1 {
 			lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
-			// lf.fd, err = os.OpenFile(l.fpath(lf.fid), os.O_RDWR|os.O_CREATE, 0666)
 			y.Check(err)
 			l.maxFid = lf.fid
 
 		} else {
-			lf.fd, err = os.OpenFile(l.fpath(lf.fid), os.O_RDONLY, 0666)
-			y.Check(err)
+			lf.openReadOnly()
 		}
 	}
 
 	// If no files are found, then create a new file.
 	if len(l.files) == 0 {
-		lf := &logFile{fid: 0}
+		lf := &logFile{fid: 0, path: l.fpath(0)}
 		lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
 		y.Check(err)
 		l.files = append(l.files, lf)
@@ -411,6 +441,9 @@ func (l *valueLog) Open(kv *KV, opt *Options) {
 func (l *valueLog) Close() {
 	l.elog.Printf("Stopping garbage collection of values.")
 	for _, f := range l.files {
+		if len(f.mmap) > 0 {
+			y.Check(syscall.Munmap(f.mmap))
+		}
 		y.Check(f.fd.Close())
 	}
 	l.elog.Finish()
@@ -471,7 +504,8 @@ func (l *valueLog) Write(reqs []*request) {
 			curlf.doneWriting()
 
 			newlf := &logFile{fid: atomic.AddInt32(&l.maxFid, 1), offset: 0}
-			newlf.fd, err = y.OpenSyncedFile(l.fpath(newlf.fid), l.opt.SyncWrites)
+			newlf.path = l.fpath(newlf.fid)
+			newlf.fd, err = y.OpenSyncedFile(newlf.path, l.opt.SyncWrites)
 			y.Check(err)
 
 			l.Lock()
@@ -535,7 +569,7 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 		s = new(y.Slice)
 	}
 	buf := s.Resize(int(p.Len))
-	if _, err := lf.fd.ReadAt(buf, int64(p.Offset)); err != nil {
+	if err := lf.read(buf, int64(p.Offset)); err != nil {
 		return e, err
 	}
 	var h header
