@@ -43,11 +43,11 @@ import (
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete             = 1       // Set if the key has been deleted.
-	BitValuePointer       = 2       // Set if the value is NOT stored directly next to key.
-	BitCompressed         = 4       // Set if the value is compressed in the value log.
-	LogSize         int64 = 1 << 30 // ~1GB
-	M               int   = 1 << 20
+	BitDelete           = 1       // Set if the key has been deleted.
+	BitValuePointer     = 2       // Set if the value is NOT stored directly next to key.
+	BitCompressed       = 1 << 15 // Set if the value is compressed in the value log.
+	LogSize             = 1 << 30 // ~1GB
+	M               int = 1 << 20
 )
 
 var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
@@ -56,8 +56,8 @@ type logFile struct {
 	sync.RWMutex
 	path   string
 	fd     *os.File
-	fid    int32
-	offset int64
+	fid    uint16
+	offset uint32
 	size   int64
 }
 
@@ -90,98 +90,131 @@ func (lf *logFile) doneWriting() {
 
 type logEntry func(e Entry) bool
 
+type entryDecoder struct {
+	reader  io.Reader
+	header  header
+	hbuf    []byte
+	keybuf  []byte
+	valbuf  []byte
+	metabuf []byte
+	entry   Entry
+}
+
+func newEntryDecoder(reader io.Reader) (ed entryDecoder) {
+	ed.reader = reader
+	ed.hbuf = make([]byte, 8)
+	ed.keybuf = make([]byte, 1<<10)
+	ed.valbuf = make([]byte, 1<<20)
+	ed.metabuf = make([]byte, 1)
+	return
+}
+
+// read reads bytes from the reader untill fills buf.
+func (ed *entryDecoder) read(buf []byte) error {
+	for {
+		n, err := ed.reader.Read(buf)
+		if err != nil {
+			return err
+		}
+		if n == len(buf) {
+			return nil
+		}
+		buf = buf[n:]
+	}
+}
+
+// fills the ed.header from ed.hbuf.
+func (ed *entryDecoder) readHeader() error {
+	err := ed.read(ed.hbuf)
+	if err != nil {
+		return err
+	}
+	ed.header.Decode(ed.hbuf)
+	return nil
+}
+
+// ensures that ed.keybuf and ed.valbuf have
+// enough space to read next entry specified by ed.header.
+func (ed *entryDecoder) ensureCapacity() {
+	if cap(ed.keybuf) < int(ed.header.klen) {
+		ed.keybuf = make([]byte, 2*ed.header.klen)
+	}
+	if cap(ed.valbuf) < int(ed.header.vlen) {
+		ed.valbuf = make([]byte, 2*ed.header.vlen)
+	}
+}
+
+// readEntry reads and decodes entry from ed.reader to
+// ed.entry
+func (ed *entryDecoder) readEntry() (err error) {
+	ed.ensureCapacity()
+
+	ed.entry.Key = ed.keybuf[:ed.header.klen]
+	ed.entry.Value = ed.valbuf[:ed.header.vlen]
+
+	if err = ed.read(ed.entry.Key); err != nil {
+		return err
+	}
+	if err = ed.read(ed.metabuf); err != nil {
+		return err
+	}
+	ed.entry.Meta = ed.metabuf[0]
+
+	// TODO: Add casCounter.
+	var casBytes [4]byte
+	if err = read(reader, casBytes[:]); err != nil {
+		return err
+	}
+	e.casCounter = binary.BigEndian.Uint16(casBytes[:2])
+	e.CASCounterCheck = binary.BigEndian.Uint16(casBytes[2:])
+
+	if err = ed.read(ed.entry.Value); err != nil {
+		return err
+	}
+	return
+}
+
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
-func (f *logFile) iterate(offset int64, fn logEntry) error {
-	_, err := f.fd.Seek(offset, 0)
+func (f *logFile) iterate(offset uint32, fn logEntry) error {
+	_, err := f.fd.Seek(int64(offset), 0)
 	y.Check(err)
 
-	read := func(r *bufio.Reader, buf []byte) error {
-		for {
-			n, err := r.Read(buf)
-			if err != nil {
-				return err
-			}
-			if n == len(buf) {
-				return nil
-			}
-			buf = buf[n:]
-		}
-	}
-
 	reader := bufio.NewReader(f.fd)
+	entryDecoder := newEntryDecoder(reader)
 
-	// we could extract entry reader from here
-	hbuf := make([]byte, 8)
-	var h header
 	var count int
-	k := make([]byte, 1<<10)
-	v := make([]byte, 1<<20)
 
-	ensureCapacity := func() {
-		if cap(k) < int(h.klen) {
-			k = make([]byte, 2*h.klen)
-		}
-		if cap(v) < int(h.vlen) {
-			v = make([]byte, 2*h.vlen)
-		}
-	}
+	fileOffset := offset
 
-	var e Entry
-	decodeEntry := func() (err error) {
-		e.Key = k[:h.klen]
-		e.Value = v[:h.vlen]
-
-		if err = read(reader, e.Key); err != nil {
-			return err
-		}
-		if e.Meta, err = reader.ReadByte(); err != nil {
-			return err
-		}
-		// TODO: Add casCounter.
-		var casBytes [4]byte
-		if err = read(reader, casBytes[:]); err != nil {
-			return err
-		}
-		e.casCounter = binary.BigEndian.Uint16(casBytes[:2])
-		e.CASCounterCheck = binary.BigEndian.Uint16(casBytes[2:])
-		if err = read(reader, e.Value); err != nil {
-			return err
-		}
-		return
-	}
-
-	recordOffset := offset
+	e := &entryDecoder.entry
 OUTER:
 	for {
-		if err = read(reader, hbuf); err == io.EOF {
+		if err = entryDecoder.readHeader(); err == io.EOF {
 			break
 		}
-		h.Decode(hbuf)
-		// fmt.Printf("[%d] Header read: %+v\n", count, h)
+		// fmt.Printf("[%d] Header read: %+v\n", count, entryDecoder.header)
 
-		kl := int(h.klen)
+		kl := int(entryDecoder.header.klen)
 
 		if kl > 0 {
-			vl := int(h.vlen)
+			vl := int(entryDecoder.header.vlen)
 
-			ensureCapacity()
+			e.Offset = fileOffset
 
-			e.Offset = recordOffset
-
-			err = decodeEntry()
+			err = entryDecoder.readEntry()
 			if err != nil {
 				return err
 			}
-			if !fn(e) {
+			if !fn(*e) {
 				break
 			}
 			count++
 			recordOffset += int64(8 + kl + vl + 1 + 4) // +1 for meta, +4 for CAS stuff.
 		} else { // key length == 0 => beginning of compressed block
-			bl := int(h.vlen)
+			bl := entryDecoder.header.vlen
 			block := make([]byte, bl)
-			if err = read(reader, block); err != nil {
+			if err = entryDecoder.read(block); err != nil {
 				return err
 			}
 			decoded, err := lz4.Decode(nil, block)
@@ -189,27 +222,27 @@ OUTER:
 				return err
 			}
 
-			blockOffset := recordOffset + 8
-			for i := 0; i < bl; i++ {
-				h.Decode(decoded)
+			entryDecoder.reader = bytes.NewReader(decoded)
+		INNER:
+			for {
+				err = entryDecoder.readHeader()
+				if err == io.EOF {
+					break INNER
+				}
+				y.Check(err)
 
-				kl = int(h.klen)
-				ensureCapacity()
-
-				// hack: we can't have an offset for
-				// compressed entry... what is this offset for?
-				e.Offset = blockOffset + int64(i)
-
-				err = decodeEntry()
+				err = entryDecoder.readEntry()
+				e.Offset = fileOffset
 				if err != nil {
 					return err
 				}
-				if !fn(e) {
+				if !fn(*e) {
 					break OUTER
 				}
 				count++
 			}
-			recordOffset = blockOffset + int64(bl)
+			fileOffset = fileOffset + 8 + bl
+			entryDecoder.reader = reader
 		}
 	}
 	return nil
@@ -218,8 +251,8 @@ OUTER:
 var entries = make([]*Entry, 0, 1000000)
 
 func (vlog *valueLog) rewrite(f *logFile) {
-	maxFid := atomic.LoadInt32(&vlog.maxFid)
-	y.AssertTruef(f.fid < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
+	maxFid := atomic.LoadUint32(&vlog.maxFid)
+	y.AssertTruef(uint32(f.fid) < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
 
 	elog := trace.NewEventLog("badger", "vlog-rewrite")
 	defer elog.Finish()
@@ -249,13 +282,13 @@ func (vlog *valueLog) rewrite(f *logFile) {
 		var vp valuePointer
 		vp.Decode(vs.Value)
 
-		if int32(vp.Fid) > f.fid {
+		if vp.Fid > f.fid {
 			return
 		}
-		if int64(vp.Offset) > e.Offset {
+		if vp.Offset > e.Offset {
 			return
 		}
-		if int32(vp.Fid) == f.fid && int64(vp.Offset) == e.Offset {
+		if vp.Fid == f.fid && vp.Offset == e.Offset {
 			// This new entry only contains the key, and a pointer to the value.
 			var ne Entry
 			y.AssertTruef(e.Meta == 0, "Got meta: %v", e.Meta)
@@ -391,32 +424,36 @@ func (h *header) Decode(buf []byte) []byte {
 	return buf[8:]
 }
 
+// Pointer to the entry. The entry is stored in a compressed entries block
+// iff first bit of InsideBlockOffset is set to 1.
+// If not compressed, the entry is encoded in the file at Offset and has Len (including header).
+// If compressed, Offset specifies the beginning of the compressed entries block
+// and Len -- length of the block.
+// This block contains header (key=0, value=length of the data block) and data.
+// InsideBlockOffset indicates the entry position in the uncompressed data.
 type valuePointer struct {
-	Fid               uint32
+	Fid               uint16
 	Len               uint32
-	Offset            uint64
+	Offset            uint32
 	InsideBlockOffset uint16
-	Meta              byte
 }
 
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode(b []byte) []byte {
-	y.AssertTrue(len(b) >= 19)
-	binary.BigEndian.PutUint32(b[:4], p.Fid)
-	binary.BigEndian.PutUint32(b[4:8], p.Len)
-	binary.BigEndian.PutUint64(b[8:16], p.Offset)
-	binary.BigEndian.PutUint16(b[16:18], p.InsideBlockOffset)
-	b[18] = p.Meta
-	return b[:19]
+	y.AssertTrue(len(b) >= 12)
+	binary.BigEndian.PutUint16(b[:2], p.Fid)
+	binary.BigEndian.PutUint32(b[2:6], p.Len)
+	binary.BigEndian.PutUint32(b[6:10], p.Offset)
+	binary.BigEndian.PutUint16(b[10:12], p.InsideBlockOffset)
+	return b[:12]
 }
 
 func (p *valuePointer) Decode(b []byte) {
-	y.AssertTrue(len(b) >= 16)
-	p.Fid = binary.BigEndian.Uint32(b[:4])
-	p.Len = binary.BigEndian.Uint32(b[4:8])
-	p.Offset = binary.BigEndian.Uint64(b[8:16])
-	p.InsideBlockOffset = binary.BigEndian.Uint16(b[16:18])
-	p.Meta = b[18]
+	y.AssertTrue(len(b) >= 12)
+	p.Fid = binary.BigEndian.Uint16(b[:2])
+	p.Len = binary.BigEndian.Uint32(b[2:6])
+	p.Offset = binary.BigEndian.Uint32(b[6:10])
+	p.InsideBlockOffset = binary.BigEndian.Uint16(b[10:12])
 }
 
 type valueLog struct {
@@ -427,11 +464,11 @@ type valueLog struct {
 	elog    trace.EventLog
 	dirPath string
 	kv      *KV
-	maxFid  int32
+	maxFid  uint32
 	opt     Options
 }
 
-func (l *valueLog) fpath(fid int32) string {
+func (l *valueLog) fpath(fid uint16) string {
 	return fmt.Sprintf("%s/%06d.vlog", l.dirPath, fid)
 }
 
@@ -452,7 +489,7 @@ func (l *valueLog) openOrCreateFiles() {
 		}
 		found[fid] = struct{}{}
 
-		lf := &logFile{fid: int32(fid), path: l.fpath(int32(fid))}
+		lf := &logFile{fid: uint16(fid), path: l.fpath(int32(fid))}
 		l.files = append(l.files, lf)
 	}
 
@@ -467,7 +504,7 @@ func (l *valueLog) openOrCreateFiles() {
 		if i == len(l.files)-1 {
 			lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
 			y.Check(err)
-			l.maxFid = lf.fid
+			l.maxFid = uint32(lf.fid)
 
 		} else {
 			lf.openReadOnly()
@@ -502,8 +539,8 @@ func (l *valueLog) Close() {
 
 // Replay replays the value log. The kv provided is only valid for the lifetime of function call.
 func (l *valueLog) Replay(ptr valuePointer, fn logEntry) {
-	fid := int32(ptr.Fid)
-	offset := int64(ptr.Offset)
+	fid := ptr.Fid
+	offset := ptr.Offset
 	fmt.Printf("Seeking at value pointer: %+v\n", ptr)
 
 	for _, f := range l.files {
@@ -519,9 +556,10 @@ func (l *valueLog) Replay(ptr valuePointer, fn logEntry) {
 	}
 
 	// Seek to the end to start writing.
-	var err error
 	last := l.files[len(l.files)-1]
-	last.offset, err = last.fd.Seek(0, io.SeekEnd)
+	n, err := last.fd.Seek(0, io.SeekEnd)
+	y.AssertTrue(n < 1<<32)
+	last.offset = uint32(n)
 	y.Checkf(err, "Unable to seek to the end")
 }
 
@@ -543,7 +581,7 @@ func (l *valueLog) Write(reqs []*request) {
 	// an invalid file descriptor.
 }
 
-func (l *valueLog) getFile(fid int32) (*logFile, error) {
+func (l *valueLog) getFile(fid uint16) (*logFile, error) {
 	l.RLock()
 	defer l.RUnlock()
 
@@ -558,7 +596,7 @@ func (l *valueLog) getFile(fid int32) (*logFile, error) {
 
 // Read reads the value log at a given location.
 func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
-	lf, err := l.getFile(int32(p.Fid))
+	lf, err := l.getFile(p.Fid)
 	if err != nil {
 		return e, err
 	}
@@ -571,11 +609,11 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 		return e, err
 	}
 
-	if p.Meta&BitCompressed != 0 {
-		decoded, err := lz4.Decode(nil, buf)
+	if p.InsideBlockOffset&BitCompressed > 0 {
+		decoded, err := lz4.Decode(nil, buf[8:])
 		y.Check(err)
 
-		buf = decoded[p.InsideBlockOffset:]
+		buf = decoded[(p.InsideBlockOffset - BitCompressed):]
 	}
 
 	var h header
@@ -585,8 +623,8 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	e.casCounter = binary.BigEndian.Uint16(buf[h.klen+1 : h.klen+3])
 	e.CASCounterCheck = binary.BigEndian.Uint16(buf[h.klen+3 : h.klen+5])
 	buf = buf[h.klen+5:]
-
 	e.Value = buf[0:h.vlen]
+	e.Offset = p.Offset
 	return e, nil
 }
 
@@ -689,17 +727,17 @@ func (vlog *valueLog) doRunGC() {
 		var vp valuePointer
 		vp.Decode(vs.Value)
 
-		if int32(vp.Fid) > lf.fid {
+		if vp.Fid > lf.fid {
 			// Value is present in a later log. Discard.
 			r.discard += esz
 			return true
 		}
-		if int64(vp.Offset) > e.Offset {
+		if vp.Offset > e.Offset {
 			// Value is present in a later offset, but in the same log.
 			r.discard += esz
 			return true
 		}
-		if int32(vp.Fid) == lf.fid && int64(vp.Offset) == e.Offset {
+		if vp.Fid == lf.fid && vp.Offset == e.Offset {
 			// This is still the active entry. This would need to be rewritten.
 			r.keep += esz
 
@@ -707,7 +745,7 @@ func (vlog *valueLog) doRunGC() {
 			fmt.Printf("Reason=%+v\n", r)
 			ne, err := vlog.Read(vp, nil)
 			y.Check(err)
-			ne.Offset = int64(vp.Offset)
+			ne.Offset = vp.Offset
 			if ne.casCounter == e.casCounter {
 				ne.print("Latest Entry in LSM")
 				e.print("Latest Entry in Log")

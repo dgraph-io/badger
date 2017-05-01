@@ -9,7 +9,6 @@ import (
 
 	"bytes"
 	"github.com/dgraph-io/badger/y"
-	"unsafe"
 )
 
 const (
@@ -28,7 +27,7 @@ type valueLogWriter struct {
 func newWriter(l *valueLog) *valueLogWriter {
 	writer := &valueLogWriter{
 		l:                  l,
-		compressionEnabled: l.opt.CompressionEnabled,
+		compressionEnabled: l.opt.ValueCompression,
 	}
 
 	l.RLock()
@@ -73,7 +72,7 @@ func (w *valueLogWriter) newFile() (newlf *logFile) {
 	var err error
 	w.curlf.doneWriting()
 
-	newlf = &logFile{fid: atomic.AddInt32(&w.l.maxFid, 1), offset: 0}
+	newlf = &logFile{fid: uint16(atomic.AddUint32(&w.l.maxFid, 1)), offset: 0}
 	newlf.fd, err = y.OpenSyncedFile(w.l.fpath(newlf.fid), w.l.opt.SyncWrites)
 	y.Check(err)
 
@@ -97,7 +96,7 @@ func (w *valueLogWriter) saveToDisk(buffer []byte) (err error) {
 		return
 	}
 
-	w.curlf.offset += int64(n)
+	w.curlf.offset += uint32(n)
 
 	if w.curlf.offset > LogSize {
 		w.curlf = w.newFile()
@@ -111,7 +110,7 @@ func (w *valueLogWriter) saveToDisk(buffer []byte) (err error) {
 // Traverses blocks entries between from and to (excluding to) and sets
 // BlockOffset and InsideBlockOffset values.
 func (w *valueLogWriter) updateCompressedPointers(blocks []*request, from, to entryPosition,
-	blockStart, headerSize uint64, blockLen uint32) {
+	blockStart, headerSize, blockLen uint32) {
 	beforeTo := func(e entryPosition) bool {
 		return e.block < to.block || (e.block == to.block && e.id < to.id)
 	}
@@ -119,10 +118,9 @@ func (w *valueLogWriter) updateCompressedPointers(blocks []*request, from, to en
 	for pos := from; beforeTo(pos); pos = next(pos, blocks) {
 		ptr := &blocks[pos.block].Ptrs[pos.id]
 
-		ptr.InsideBlockOffset = uint16(ptr.Offset - blockStart)
-		ptr.Offset = blockStart + headerSize
-		ptr.Len = blockLen
-		ptr.Meta = ptr.Meta | BitCompressed
+		ptr.InsideBlockOffset = uint16(ptr.Offset-blockStart) | BitCompressed
+		ptr.Offset = blockStart
+		ptr.Len = blockLen + headerSize
 	}
 }
 
@@ -153,9 +151,9 @@ func (w *valueLogWriter) write(blocks []*request) {
 
 			// We set the pointer if entries were not compressed.
 			var p valuePointer
-			p.Fid = uint32(w.curlf.fid)
+			p.Fid = w.curlf.fid
 			p.Len = uint32(8 + len(e.Key) + len(e.Value) + 1 + 4) // +4 for CAS stuff.
-			p.Offset = uint64(w.curlf.offset) + uint64(w.writeBuf.Len()+w.compressionBlock.Len())
+			p.Offset = w.curlf.offset + uint32(w.writeBuf.Len()+w.compressionBlock.Len())
 			b.Ptrs = append(b.Ptrs, p)
 
 			e.EncodeTo(&w.compressionBlock)
@@ -166,7 +164,7 @@ func (w *valueLogWriter) write(blocks []*request) {
 
 				if err == nil {
 					w.l.elog.Printf("Adding compressed block.")
-					blockStart := uint64(w.curlf.offset + int64(w.writeBuf.Len()))
+					blockStart := w.curlf.offset + uint32(w.writeBuf.Len())
 
 					var h header
 					h.klen = 0
@@ -180,7 +178,7 @@ func (w *valueLogWriter) write(blocks []*request) {
 					w.compressionBlock.Reset()
 
 					w.updateCompressedPointers(blocks, firstCompressionEntry, nextEntry,
-						blockStart, uint64(unsafe.Sizeof(h)), uint32(len(compressed)))
+						blockStart, 8, uint32(len(compressed)))
 
 					w.l.elog.Printf("Saved compressed block of size %d bytes from %d bytes.\n",
 						len(compressed), w.writeBuf.Len())
@@ -190,7 +188,7 @@ func (w *valueLogWriter) write(blocks []*request) {
 				}
 				firstCompressionEntry = nextEntry
 			}
-			if uint32(p.Offset)+p.Len > uint32(LogSize) {
+			if p.Offset+p.Len > uint32(LogSize) {
 				w.l.elog.Printf("Saving from %+v to %+v of total size: %d",
 					firstCompressionEntry, nextEntry, w.writeBuf.Len())
 				save()

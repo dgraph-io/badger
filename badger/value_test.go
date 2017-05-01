@@ -117,13 +117,11 @@ func TestCompression(t *testing.T) {
 	require.Len(t, b.Ptrs, 2)
 	fmt.Printf("Pointer written: %+v, %+v\n", b.Ptrs[0], b.Ptrs[1])
 
-	require.NotZero(t, b.Ptrs[0].Meta&BitCompressed)
-	require.EqualValues(t, 8, b.Ptrs[0].Offset) // first 8 bytes are for compressed block header
-	require.EqualValues(t, 0, b.Ptrs[0].InsideBlockOffset)
+	require.EqualValues(t, 0, b.Ptrs[0].Offset)
+	require.EqualValues(t, 0, b.Ptrs[0].InsideBlockOffset-BitCompressed)
 
-	require.NotZero(t, b.Ptrs[1].Meta&BitCompressed)
 	require.NotZero(t, b.Ptrs[1].InsideBlockOffset)
-	require.EqualValues(t, 8, b.Ptrs[1].Offset)
+	require.EqualValues(t, 0, b.Ptrs[1].Offset)
 
 	require.EqualValues(t, b.Ptrs[0].Len, b.Ptrs[1].Len)
 	require.True(t, b.Ptrs[0].Len < 400) // Check whether the block is small
@@ -138,6 +136,81 @@ func TestCompression(t *testing.T) {
 
 	require.EqualValues(t, readEntries[0].Value, manyA)
 	require.EqualValues(t, readEntries[1].Value, manyB)
+}
+
+func TestVLIterate(t *testing.T) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	db := NewKV(getTestOptions(dir))
+	defer db.Close()
+
+	var entries []*Entry
+
+	keys := [][]byte{
+		[]byte("small1"),
+		[]byte("small2"),
+		[]byte("big3"),
+		[]byte("big4"),
+		[]byte("small5"),
+		[]byte("big6"),
+	}
+
+	values := [][]byte{
+		repeat('a', 10),
+		repeat('b', 10),
+		repeat('c', 65*(1<<10)),
+		repeat('d', 1024*(1<<10)),
+		repeat('e', 100),
+		repeat('f', 2048*(1<<10)),
+	}
+
+	for i := 0; i < 6; i++ {
+		entries = append(entries, &Entry{
+			Key:   keys[i],
+			Value: values[i],
+		})
+	}
+
+	ctx := context.Background()
+	require.NoError(t, db.Write(ctx, entries))
+
+	db.vlog.RLock()
+	lf := db.vlog.files[0]
+	db.vlog.RUnlock()
+
+	type kv struct {
+		k []byte
+		v string
+	}
+
+	buffer := make([]kv, 0, 6)
+
+	copied := func(a []byte) (b []byte) {
+		b = make([]byte, len(a))
+		copy(b, a)
+		return b
+	}
+
+	err = lf.iterate(0, func(e Entry) bool {
+		buffer = append(buffer, kv{
+			copied(e.Key),
+			fmt.Sprintf("%s", e.Value[:1]),
+		})
+		return true
+	})
+	require.NoError(t, err)
+
+	expected := []kv{
+		kv{[]byte("small1"), "a"},
+		kv{[]byte("small2"), "b"},
+		kv{[]byte("big3"), "c"},
+		kv{[]byte("big4"), "d"},
+		kv{[]byte("small5"), "e"},
+		kv{[]byte("big6"), "f"},
+	}
+	require.EqualValues(t, expected, buffer)
 }
 
 func TestValueGC(t *testing.T) {

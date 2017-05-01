@@ -22,7 +22,6 @@ import (
 	"os"
 	"sync"
 	"time"
-	"unsafe"
 
 	"golang.org/x/net/trace"
 
@@ -57,7 +56,7 @@ type Options struct {
 	NumMemtables            int
 	ValueGCThreshold        float64
 	SyncWrites              bool
-	CompressionEnabled      bool
+	ValueCompression        bool
 }
 
 var DefaultOptions = Options{
@@ -76,7 +75,7 @@ var DefaultOptions = Options{
 	MemtableSlack:           10 << 20,
 	ValueGCThreshold:        0.5, // Set to zero to not run GC.
 	SyncWrites:              true,
-	CompressionEnabled:      true,
+	ValueCompression:        true,
 }
 
 type KV struct {
@@ -507,7 +506,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) {
 				if s.opt.Verbose {
 					fmt.Printf("Storing offset: %+v\n", ft.vptr)
 				}
-				offset := make([]byte, unsafe.Sizeof(s.vptr))
+				offset := make([]byte, 12)
 				s.Lock() // For vptr.
 				s.vptr.Encode(offset)
 				s.Unlock()
