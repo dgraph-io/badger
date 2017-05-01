@@ -174,7 +174,6 @@ TOP:
 				itr.clearCh()
 				break INTERNAL
 			case itr.ch <- item: // We must have incremented sync.WaitGroup before pushing to ch.
-				y.Trace(itr.ctx, "Pushed key to ch: %s\n", item.Key())
 				if itr.fetchCh != nil {
 					atomic.AddInt32(&item.ref, 1)
 					itr.fetchCh <- item

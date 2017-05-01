@@ -265,7 +265,6 @@ func (itr *TableIterator) seekToLast() {
 }
 
 func (itr *TableIterator) seekHelper(blockIdx int, key []byte) {
-	y.AssertTrue(blockIdx >= 0)
 	itr.bpos = blockIdx
 	block, err := itr.t.block(blockIdx)
 	if err != nil {
@@ -464,12 +463,10 @@ func (s *ConcatIterator) Valid() bool {
 func (s *ConcatIterator) Name() string { return "ConcatIterator" }
 
 func (s *ConcatIterator) Key() []byte {
-	y.AssertTrue(s.Valid())
 	return s.iters[s.idx].Key()
 }
 
 func (s *ConcatIterator) Value() y.ValueStruct {
-	y.AssertTrue(s.Valid())
 	return s.iters[s.idx].Value()
 }
 
