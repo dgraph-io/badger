@@ -61,7 +61,7 @@ func (e entryPosition) String() string {
 }
 
 func next(e entryPosition, blocks []*request) entryPosition {
-	if uint16(len(blocks[e.block].Entries)) == e.id-1 {
+	if uint16(len(blocks[e.block].Entries)) == e.id+1 {
 		// last entry in block
 		return entryPosition{e.block + 1, 0}
 	}
@@ -173,8 +173,6 @@ func (w *valueLogWriter) write(blocks []*request) {
 					w.writeBuf.Write(headerBuffer)
 
 					w.writeBuf.Write(compressed)
-					fmt.Printf("Copied block of size %d bytes compressed from %d bytes.\n",
-						len(compressed), w.compressionBlock.Len())
 					w.compressionBlock.Reset()
 
 					w.updateCompressedPointers(blocks, firstCompressionEntry, nextEntry,
@@ -183,14 +181,13 @@ func (w *valueLogWriter) write(blocks []*request) {
 					w.l.elog.Printf("Saved compressed block of size %d bytes from %d bytes.\n",
 						len(compressed), w.writeBuf.Len())
 				} else {
-					w.l.elog.Printf("Flushing withour compression %v\n", err)
+					w.l.elog.Printf("Flushing without compression: %v\n", err)
 					flushWithoutCompression()
 				}
 				firstCompressionEntry = nextEntry
 			}
 			if p.Offset+p.Len > uint32(LogSize) {
-				w.l.elog.Printf("Saving from %+v to %+v of total size: %d",
-					firstCompressionEntry, nextEntry, w.writeBuf.Len())
+				w.l.elog.Printf("Saving entries of total size: %d", w.writeBuf.Len())
 				save()
 				w.l.elog.Printf("Done")
 			}

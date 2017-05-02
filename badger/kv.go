@@ -305,7 +305,7 @@ var requestPool = sync.Pool{
 }
 
 func (s *KV) writeToLSM(b *request) {
-	var offsetBuf [19]byte
+	var offsetBuf [12]byte
 	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
 	for i, entry := range b.Entries {
 		if entry.CASCounterCheck != 0 {

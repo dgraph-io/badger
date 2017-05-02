@@ -162,11 +162,11 @@ func (ed *entryDecoder) readEntry() (err error) {
 
 	// TODO: Add casCounter.
 	var casBytes [4]byte
-	if err = read(reader, casBytes[:]); err != nil {
+	if err = ed.read(casBytes[:]); err != nil {
 		return err
 	}
-	e.casCounter = binary.BigEndian.Uint16(casBytes[:2])
-	e.CASCounterCheck = binary.BigEndian.Uint16(casBytes[2:])
+	ed.entry.casCounter = binary.BigEndian.Uint16(casBytes[:2])
+	ed.entry.CASCounterCheck = binary.BigEndian.Uint16(casBytes[2:])
 
 	if err = ed.read(ed.entry.Value); err != nil {
 		return err
@@ -210,7 +210,7 @@ OUTER:
 				break
 			}
 			count++
-			recordOffset += int64(8 + kl + vl + 1 + 4) // +1 for meta, +4 for CAS stuff.
+			fileOffset += uint32(8 + kl + vl + 1 + 4) // +1 for meta, +4 for CAS stuff.
 		} else { // key length == 0 => beginning of compressed block
 			bl := entryDecoder.header.vlen
 			block := make([]byte, bl)
@@ -372,7 +372,7 @@ type Entry struct {
 	Key             []byte
 	Meta            byte
 	Value           []byte
-	Offset          int64
+	Offset          uint32
 	CASCounterCheck uint16 // If nonzero, we will check if existing casCounter matches.
 
 	// Fields maintained internally.
@@ -489,7 +489,7 @@ func (l *valueLog) openOrCreateFiles() {
 		}
 		found[fid] = struct{}{}
 
-		lf := &logFile{fid: uint16(fid), path: l.fpath(int32(fid))}
+		lf := &logFile{fid: uint16(fid), path: l.fpath(uint16(fid))}
 		l.files = append(l.files, lf)
 	}
 
@@ -619,7 +619,7 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	var h header
 	buf = h.Decode(buf)
 	e.Key = buf[0:h.klen]
-	e.Meta = buf[h.klen] | (p.Meta & BitCompressed)
+	e.Meta = buf[h.klen]
 	e.casCounter = binary.BigEndian.Uint16(buf[h.klen+1 : h.klen+3])
 	e.CASCounterCheck = binary.BigEndian.Uint16(buf[h.klen+3 : h.klen+5])
 	buf = buf[h.klen+5:]
