@@ -673,42 +673,43 @@ func TestUniIterator(t *testing.T) {
 //	}
 //}
 
-//func BenchmarkReadMerged(b *testing.B) {
-//	n := 5 << 20
-//	m := 5 // Number of tables.
-//	y.AssertTrue((n % m) == 0)
-//	tableSize := n / m
-//	var tables []*Table
-//	for i := 0; i < m; i++ {
-//		filename := fmt.Sprintf("/tmp/%d.sst", rand.Int63())
-//		builder := NewTableBuilder()
-//		f, err := y.OpenSyncedFile(filename, true)
-//		for j := 0; j < tableSize; j++ {
-//			id := j*m + i // Arrays are interleaved.
-//			// id := i*tableSize+j (not interleaved)
-//			k := fmt.Sprintf("%016x", id)
-//			v := fmt.Sprintf("%d", id)
-//			y.Check(builder.Add([]byte(k), []byte(v), 123))
-//		}
-//		f.Write(builder.Finish([]byte("somemetadata")))
-//		tbl, err := OpenTable(f, MemoryMap)
-//		y.Check(err)
-//		tables = append(tables, tbl)
-//		defer tbl.DecrRef()
-//	}
+func BenchmarkReadMerged(b *testing.B) {
+	n := 5 << 20
+	m := 5 // Number of tables.
+	y.AssertTrue((n % m) == 0)
+	tableSize := n / m
+	var tables []*Table
+	for i := 0; i < m; i++ {
+		filename := fmt.Sprintf("/tmp/%d.sst", rand.Int63())
+		builder := NewTableBuilder()
+		f, err := y.OpenSyncedFile(filename, true)
+		for j := 0; j < tableSize; j++ {
+			id := j*m + i // Arrays are interleaved.
+			// id := i*tableSize+j (not interleaved)
+			k := fmt.Sprintf("%016x", id)
+			var yv y.ValueStruct
+			yv.Value = []byte(fmt.Sprintf("%d", id))
+			y.Check(builder.Add([]byte(k), yv))
+		}
+		f.Write(builder.Finish([]byte("somemetadata")))
+		tbl, err := OpenTable(f, MemoryMap)
+		y.Check(err)
+		tables = append(tables, tbl)
+		defer tbl.DecrRef()
+	}
 
-//	b.ResetTimer()
-//	// Iterate b.N times over the entire table.
-//	for i := 0; i < b.N; i++ {
-//		func() {
-//			var iters []y.Iterator
-//			for _, tbl := range tables {
-//				iters = append(iters, tbl.NewIterator(false))
-//			}
-//			it := y.NewMergeIterator(iters, false)
-//			defer it.Close()
-//			for it.Rewind(); it.Valid(); it.Next() {
-//			}
-//		}()
-//	}
-//}
+	b.ResetTimer()
+	// Iterate b.N times over the entire table.
+	for i := 0; i < b.N; i++ {
+		func() {
+			var iters []y.Iterator
+			for _, tbl := range tables {
+				iters = append(iters, tbl.NewIterator(false))
+			}
+			it := y.NewMergeIterator(iters, false)
+			defer it.Close()
+			for it.Rewind(); it.Valid(); it.Next() {
+			}
+		}()
+	}
+}
