@@ -23,12 +23,14 @@ import (
 	"math"
 
 	"github.com/dgraph-io/badger/y"
+	"github.com/willf/bloom"
 )
 
 //var tableSize int64 = 50 << 20
 var (
 	restartInterval int = 100 // Might want to change this to be based on total size instead of numKeys.
 	bufPool             = new(bufferPool)
+	Mi              int = 1000000
 )
 
 func init() {
@@ -100,12 +102,16 @@ type TableBuilder struct {
 
 	// Tracks offset for the previous key-value pair. Offset is relative to block base offset.
 	prevOffset int
+
+	total int // Total keys written
+	bf    *bloom.BloomFilter
 }
 
 func NewTableBuilder() *TableBuilder {
 	return &TableBuilder{
 		buf:        bufPool.Get(),
-		prevOffset: math.MaxUint32, // Used for the first element!
+		prevOffset: math.MaxUint32,                         // Used for the first element!
+		bf:         bloom.NewWithEstimates(uint(Mi), 0.01), // Size = 1198160
 	}
 }
 
@@ -128,6 +134,10 @@ func (b TableBuilder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *TableBuilder) addHelper(key []byte, v y.ValueStruct) {
+	// Add key to bloom filter.
+	b.bf.Add(key)
+	b.total++
+
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
 	if len(b.baseKey) == 0 {
@@ -185,8 +195,12 @@ func (b *TableBuilder) Add(key []byte, value y.ValueStruct) error {
 // FinalSize returns the *rough* final size of the array, counting the header which is not yet written.
 // TODO: Look into why there is a discrepancy. I suspect it is because of Write(empty, empty)
 // at the end. The diff can vary.
-func (b *TableBuilder) FinalSize() int {
-	return b.buf.Len() + 8 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
+func (b *TableBuilder) ReachedCapacity(cap int64) bool {
+	if b.total > Mi {
+		return true
+	}
+	estimateSz := /*1198160 +*/ b.buf.Len() + 8 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
+	return int64(estimateSz) > cap
 }
 
 // blockIndex generates the block index for the table.
@@ -215,8 +229,14 @@ func (b *TableBuilder) Finish(metadata []byte) []byte {
 	index := b.blockIndex()
 	b.buf.Write(index)
 
-	b.buf.Write(metadata)
+	// Write bloom filter.
+	n, err := b.bf.WriteTo(b.buf)
+	y.Check(err)
 	var buf [4]byte
+	binary.BigEndian.PutUint32(buf[:], uint32(n))
+	b.buf.Write(buf[:])
+
+	b.buf.Write(metadata)
 	binary.BigEndian.PutUint32(buf[:], uint32(len(metadata)))
 	b.buf.Write(buf[:])
 

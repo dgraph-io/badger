@@ -32,6 +32,7 @@ import (
 
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
+	"github.com/willf/bloom"
 )
 
 const fileSuffix = ".sst"
@@ -64,6 +65,8 @@ type Table struct {
 	// The following are initialized once and const.
 	smallest, biggest []byte // Smallest and largest keys.
 	id                uint64
+
+	bf bloom.BloomFilter
 }
 
 func (s *Table) IncrRef() {
@@ -190,6 +193,14 @@ func (t *Table) readIndex() error {
 	readPos -= metadataSize
 	t.metadata = t.readNoFail(readPos, metadataSize)
 
+	// Read bloom filter.
+	readPos -= 4
+	buf = t.readNoFail(readPos, 4)
+	bloomLen := int(binary.BigEndian.Uint32(buf))
+	readPos -= bloomLen
+	data := t.readNoFail(readPos, bloomLen)
+	y.Check(t.bf.GobDecode(data))
+
 	readPos -= 4
 	buf = t.readNoFail(readPos, 4)
 	restartsLen := int(binary.BigEndian.Uint32(buf))
@@ -284,11 +295,12 @@ func (t *Table) block(idx int) (Block, error) {
 	return block, nil
 }
 
-func (t *Table) Size() int64      { return int64(t.tableSize) }
-func (t *Table) Smallest() []byte { return t.smallest }
-func (t *Table) Biggest() []byte  { return t.biggest }
-func (t *Table) Filename() string { return t.fd.Name() }
-func (t *Table) ID() uint64       { return t.id }
+func (t *Table) Size() int64                 { return int64(t.tableSize) }
+func (t *Table) Smallest() []byte            { return t.smallest }
+func (t *Table) Biggest() []byte             { return t.biggest }
+func (t *Table) Filename() string            { return t.fd.Name() }
+func (t *Table) ID() uint64                  { return t.id }
+func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Test(key) }
 
 func ParseFileID(name string) (uint64, bool) {
 	name = path.Base(name)
