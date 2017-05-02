@@ -46,6 +46,15 @@ func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
 	return os.OpenFile(filename, flags, 0666)
 }
 
+func Safecopy(a []byte, src []byte) []byte {
+	if cap(a) < len(src) {
+		a = make([]byte, len(src))
+	}
+	a = a[:len(src)]
+	copy(a, src)
+	return a
+}
+
 type Slice struct {
 	buf []byte
 }

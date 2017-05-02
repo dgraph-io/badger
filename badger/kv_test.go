@@ -86,14 +86,18 @@ func TestConcurrentWrite(t *testing.T) {
 	}
 	wg.Wait()
 
-	fmt.Println("Starting iteration")
-	it := kv.NewIterator(ctx, 10, 5, false)
-	it.Rewind()
-	defer it.Close()
+	t.Log("Starting iteration")
 
+	opt := IteratorOptions{}
+	opt.Reversed = false
+	opt.PrefetchSize = 10
+	opt.FetchValues = true
+
+	it := kv.NewIterator(opt)
 	var i, j int
-	for kv := range it.Ch() {
-		k := kv.Key()
+	for it.Rewind(); it.Valid(); it.Next() {
+		item := it.Item()
+		k := item.Key()
 		if k == nil {
 			break // end of iteration.
 		}
@@ -102,7 +106,7 @@ func TestConcurrentWrite(t *testing.T) {
 			continue
 		}
 		require.EqualValues(t, fmt.Sprintf("k%05d_%08d", i, j), string(k))
-		v := kv.Value()
+		v := item.Value()
 		require.EqualValues(t, fmt.Sprintf("v%05d_%08d", i, j), string(v))
 		j++
 		if j == m {
@@ -318,8 +322,7 @@ func TestGetMore(t *testing.T) {
 	fmt.Println("Done and closing")
 }
 
-// Put a lot of data to move some data to disk. Then iterate.
-func TestIterateBasic(t *testing.T) {
+func TestIterate2Basic(t *testing.T) {
 	ctx := context.Background()
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
@@ -327,31 +330,35 @@ func TestIterateBasic(t *testing.T) {
 	kv := NewKV(getTestOptions(dir))
 	defer kv.Close()
 
+	bkey := func(i int) []byte {
+		return []byte(fmt.Sprintf("%09d", i))
+	}
+	bval := func(i int) []byte {
+		return []byte(fmt.Sprintf("%025d", i))
+	}
+
 	// n := 500000
 	n := 10000
 	for i := 0; i < n; i++ {
 		if (i % 1000) == 0 {
-			fmt.Printf("Put i=%d\n", i)
+			t.Logf("Put i=%d\n", i)
 		}
-		k := []byte(fmt.Sprintf("%09d", i))
-		require.NoError(t, kv.Put(ctx, k, k))
+		require.NoError(t, kv.Put(ctx, bkey(i), bval(i)))
 	}
 
-	{
-		fmt.Println("Starting first basic iteration")
-		it := kv.NewIterator(ctx, 10, 5, false)
-		it.Rewind()
-		defer it.Close()
+	opt := IteratorOptions{}
+	opt.FetchValues = true
+	opt.PrefetchSize = 10
 
+	{
 		var count int
 		rewind := true
-		for item := range it.Ch() {
+		t.Log("Starting first basic iteration")
+		it := kv.NewIterator(opt)
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
 			key := item.Key()
-			if key == nil {
-				break
-			}
 			if bytes.Equal(key, Head) {
-				it.Recycle(item)
 				continue
 			}
 			if rewind && count == 5000 {
@@ -361,63 +368,24 @@ func TestIterateBasic(t *testing.T) {
 				rewind = false
 				continue
 			}
-			require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
+			require.EqualValues(t, bkey(count), string(key))
 			val := item.Value()
-			require.EqualValues(t, fmt.Sprintf("%09d", count), string(val))
+			require.EqualValues(t, bval(count), string(val))
 			count++
-			it.Recycle(item)
 		}
 		require.EqualValues(t, n, count)
 	}
-	{
-		fmt.Println("Starting second basic iteration")
-		it := kv.NewIterator(ctx, 10, 5, true)
-		it.Rewind()
-		defer it.Close()
 
-		var count int
-		rewind := true
-		for item := range it.Ch() {
-			key := item.Key()
-			if key == nil {
-				break
-			}
-			if bytes.Equal(key, Head) {
-				it.Recycle(item)
-				continue
-			}
-			if rewind && count == 5000 {
-				count = 0
-				it.Rewind()
-				t.Log("Rewinding from 5000 to zero.")
-				rewind = false
-				continue
-			}
-			require.EqualValues(t, fmt.Sprintf("%09d", n-1-count), string(key))
-			val := item.Value()
-			require.EqualValues(t, fmt.Sprintf("%09d", n-1-count), string(val))
-			count++
-			it.Recycle(item)
-		}
-		require.EqualValues(t, n, count)
-	}
 	{
-		it := kv.NewIterator(ctx, 10, 0, false)
-		it.Rewind()
-		defer it.Close()
-		var count int
-		for item := range it.Ch() {
-			key := item.Key()
-			if key == nil {
-				break
-			}
-			if bytes.Equal(key, Head) {
-				it.Recycle(item)
-				continue
-			}
-			require.EqualValues(t, fmt.Sprintf("%09d", count), string(key))
-			count++
-			it.Recycle(item)
+		t.Log("Starting second basic iteration")
+		it := kv.NewIterator(opt)
+		idx := 5030
+		start := bkey(idx)
+		for it.Seek(start); it.Valid(); it.Next() {
+			item := it.Item()
+			require.EqualValues(t, bkey(idx), string(item.Key()))
+			require.EqualValues(t, bval(idx), string(item.Value()))
+			idx++
 		}
 	}
 }
