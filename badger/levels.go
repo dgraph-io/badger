@@ -627,8 +627,11 @@ func (s *levelHandler) getTableForKey(key []byte) []*table.Table {
 	if s.level == 0 {
 		// For level 0, we need to check every table. Remember to make a copy as s.tables may change
 		// once we exit this function, and we don't want to lock s.tables while seeking in tables.
-		out := make([]*table.Table, len(s.tables))
-		y.AssertTrue(len(s.tables) == copy(out, s.tables))
+		// CAUTION: Reverse the tables.
+		out := make([]*table.Table, 0, len(s.tables))
+		for i := len(s.tables) - 1; i >= 0; i-- {
+			out = append(out, s.tables[i])
+		}
 		return out
 	}
 	// For level >= 1, we can do a binary search as key range does not overlap.
