@@ -19,7 +19,7 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	//	"fmt"
+	"fmt"
 	"math"
 
 	"github.com/dgraph-io/badger/y"
@@ -30,7 +30,6 @@ import (
 var (
 	restartInterval int = 100 // Might want to change this to be based on total size instead of numKeys.
 	bufPool             = new(bufferPool)
-	Mi              int = 1000000
 )
 
 func init() {
@@ -103,15 +102,14 @@ type TableBuilder struct {
 	// Tracks offset for the previous key-value pair. Offset is relative to block base offset.
 	prevOffset int
 
-	total int // Total keys written
-	bf    *bloom.BloomFilter
+	bf      *bloom.BloomFilter
+	allKeys [][]byte
 }
 
 func NewTableBuilder() *TableBuilder {
 	return &TableBuilder{
 		buf:        bufPool.Get(),
-		prevOffset: math.MaxUint32,                         // Used for the first element!
-		bf:         bloom.NewWithEstimates(uint(Mi), 0.01), // Size = 1198160
+		prevOffset: math.MaxUint32, // Used for the first element!
 	}
 }
 
@@ -135,8 +133,9 @@ func (b TableBuilder) keyDiff(newKey []byte) []byte {
 
 func (b *TableBuilder) addHelper(key []byte, v y.ValueStruct) {
 	// Add key to bloom filter.
-	b.bf.Add(key)
-	b.total++
+	k := make([]byte, len(key))
+	copy(k, key)
+	b.allKeys = append(b.allKeys, k)
 
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
@@ -196,10 +195,7 @@ func (b *TableBuilder) Add(key []byte, value y.ValueStruct) error {
 // TODO: Look into why there is a discrepancy. I suspect it is because of Write(empty, empty)
 // at the end. The diff can vary.
 func (b *TableBuilder) ReachedCapacity(cap int64) bool {
-	if b.total > Mi {
-		return true
-	}
-	estimateSz := /*1198160 +*/ b.buf.Len() + 8 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
+	estimateSz := b.buf.Len() + 8 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
 	return int64(estimateSz) > cap
 }
 
@@ -225,6 +221,11 @@ var emptySlice = make([]byte, 100)
 
 // Finish finishes the table by appending the index.
 func (b *TableBuilder) Finish(metadata []byte) []byte {
+	b.bf = bloom.NewWithEstimates(uint(len(b.allKeys)), 0.01)
+	for _, k := range b.allKeys {
+		b.bf.Add(k)
+	}
+
 	b.finishBlock() // This will never start a new block.
 	index := b.blockIndex()
 	b.buf.Write(index)
@@ -232,6 +233,7 @@ func (b *TableBuilder) Finish(metadata []byte) []byte {
 	// Write bloom filter.
 	n, err := b.bf.WriteTo(b.buf)
 	y.Check(err)
+	fmt.Printf("\n--->> Size of bloom filter: %d\n", n)
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	b.buf.Write(buf[:])
