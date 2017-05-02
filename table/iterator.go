@@ -425,7 +425,8 @@ func (s *TableIterator) Seek(key []byte) {
 func (s *TableIterator) Name() string { return "TableIterator" }
 
 type ConcatIterator struct {
-	idx      int              // Which iterator is active now.
+	idx      int // Which iterator is active now.
+	cur      *TableIterator
 	iters    []*TableIterator // Corresponds to tables.
 	tables   []*Table         // Disregarding reversed, this is in ascending order.
 	reversed bool
@@ -444,30 +445,39 @@ func NewConcatIterator(tbls []*Table, reversed bool) *ConcatIterator {
 	}
 }
 
+func (s *ConcatIterator) setIdx(idx int) {
+	s.idx = idx
+	if idx < 0 || idx >= len(s.iters) {
+		s.cur = nil
+	} else {
+		s.cur = s.iters[s.idx]
+	}
+}
+
 func (s *ConcatIterator) Rewind() {
 	if len(s.iters) == 0 {
 		return
 	}
 	if !s.reversed {
-		s.idx = 0
+		s.setIdx(0)
 	} else {
-		s.idx = len(s.iters) - 1
+		s.setIdx(len(s.iters) - 1)
 	}
-	s.iters[s.idx].Rewind()
+	s.cur.Rewind()
 }
 
 func (s *ConcatIterator) Valid() bool {
-	return s.idx >= 0 && s.idx < len(s.iters) && s.iters[s.idx].Valid()
+	return s.cur.Valid()
 }
 
 func (s *ConcatIterator) Name() string { return "ConcatIterator" }
 
 func (s *ConcatIterator) Key() []byte {
-	return s.iters[s.idx].Key()
+	return s.cur.Key()
 }
 
 func (s *ConcatIterator) Value() y.ValueStruct {
-	return s.iters[s.idx].Value()
+	return s.cur.Value()
 }
 
 // Seek brings us to element >= key if reversed is false. Otherwise, <= key.
@@ -484,34 +494,34 @@ func (s *ConcatIterator) Seek(key []byte) {
 		})
 	}
 	if idx >= len(s.tables) || idx < 0 {
-		s.idx = -1 // Invalid.
+		s.setIdx(-1)
 		return
 	}
 	// For reversed=false, we know s.tables[i-1].Biggest() < key. Thus, the
 	// previous table cannot possibly contain key.
-	s.idx = idx
-	s.iters[idx].Seek(key)
+	s.setIdx(idx)
+	s.cur.Seek(key)
 }
 
 // Next advances our concat iterator.
 func (s *ConcatIterator) Next() {
-	s.iters[s.idx].Next()
-	if s.iters[s.idx].Valid() {
+	s.cur.Next()
+	if s.cur.Valid() {
 		// Nothing to do. Just stay with the current table.
 		return
 	}
 	for { // In case there are empty tables.
 		if !s.reversed {
-			s.idx++
+			s.setIdx(s.idx + 1)
 		} else {
-			s.idx--
+			s.setIdx(s.idx - 1)
 		}
-		if s.idx >= len(s.iters) || s.idx < 0 {
+		if s.cur == nil {
 			// End of list. Valid will become false.
 			return
 		}
-		s.iters[s.idx].Rewind()
-		if s.iters[s.idx].Valid() {
+		s.cur.Rewind()
+		if s.cur.Valid() {
 			break
 		}
 	}
