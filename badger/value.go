@@ -213,7 +213,9 @@ func (vlog *valueLog) rewrite(f *logFile) {
 			entries = append(entries, &ne)
 
 		} else {
-			y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
+			// This can now happen because we can move some entries forward, but then not write
+			// them to LSM tree due to CAS check failure.
+			// y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
 		}
 	}
 
@@ -311,8 +313,8 @@ func (e Entry) EncodeTo(buf *bytes.Buffer) {
 }
 
 func (e Entry) print(prefix string) {
-	fmt.Printf("%s Key: %s Meta: %d Offset: %d len(val)=%d\n",
-		prefix, e.Key, e.Meta, e.Offset, len(e.Value))
+	fmt.Printf("%s Key: %s Meta: %d Offset: %d len(val)=%d cas=%d check=%d\n",
+		prefix, e.Key, e.Meta, e.Offset, len(e.Value), e.casCounter, e.CASCounterCheck)
 }
 
 type header struct {
@@ -688,9 +690,11 @@ func (vlog *valueLog) doRunGC() {
 			ne, err := vlog.Read(vp, nil)
 			y.Check(err)
 			ne.Offset = int64(vp.Offset)
-			ne.print("Latest Entry in LSM")
-			e.print("Latest Entry in Log")
-			y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
+			if ne.casCounter == e.casCounter {
+				ne.print("Latest Entry in LSM")
+				e.print("Latest Entry in Log")
+				y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
+			}
 		}
 		return true
 	})
