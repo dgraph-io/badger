@@ -184,12 +184,28 @@ func (s *KV) Close() {
 		if s.opt.Verbose {
 			y.Printf("Flushing memtable\n")
 		}
-		s.Lock()
-		y.AssertTrue(s.mt != nil)
-		s.flushChan <- flushTask{s.mt, s.vptr}
-		s.imm = append(s.imm, s.mt) // Flusher will attempt to remove this from s.imm.
-		s.mt = nil                  // Will segfault if we try writing!
-		s.Unlock()
+		for {
+			pushedFlushTask := func() bool {
+				s.Lock()
+				defer s.Unlock()
+				y.AssertTrue(s.mt != nil)
+				select {
+				case s.flushChan <- flushTask{s.mt, s.vptr}:
+					s.imm = append(s.imm, s.mt) // Flusher will attempt to remove this from s.imm.
+					s.mt = nil                  // Will segfault if we try writing!
+					return true
+				default:
+					// If we fail to push, we need to unlock and wait for a short while.
+					// The flushing operation needs to update s.imm. Otherwise, we have a deadlock.
+					// TODO: Think about how to do this more cleanly, maybe without any locks.
+				}
+				return false
+			}()
+			if pushedFlushTask {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 	s.flushChan <- flushTask{nil, valuePointer{}} // Tell flusher to quit.
 
