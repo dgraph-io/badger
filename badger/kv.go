@@ -72,7 +72,7 @@ var DefaultOptions = Options{
 	MapTablesTo:             table.MemoryMap,
 	NumMemtables:            5,
 	MemtableSlack:           10 << 20,
-	ValueGCThreshold:        0.8, // Set to zero to not run GC.
+	ValueGCThreshold:        0.5, // Set to zero to not run GC.
 	SyncWrites:              true,
 }
 
