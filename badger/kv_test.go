@@ -94,6 +94,7 @@ func TestConcurrentWrite(t *testing.T) {
 	opt.FetchValues = true
 
 	it := kv.NewIterator(opt)
+	defer it.Close()
 	var i, j int
 	for it.Rewind(); it.Valid(); it.Next() {
 		item := it.Item()
@@ -374,6 +375,7 @@ func TestIterate2Basic(t *testing.T) {
 			count++
 		}
 		require.EqualValues(t, n, count)
+		it.Close()
 	}
 
 	{
@@ -387,6 +389,7 @@ func TestIterate2Basic(t *testing.T) {
 			require.EqualValues(t, bval(idx), string(item.Value()))
 			idx++
 		}
+		it.Close()
 	}
 }
 

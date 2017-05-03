@@ -72,7 +72,7 @@ var DefaultOptions = Options{
 	MapTablesTo:             table.MemoryMap,
 	NumMemtables:            5,
 	MemtableSlack:           10 << 20,
-	ValueGCThreshold:        0.8, // Set to zero to not run GC.
+	ValueGCThreshold:        0.5, // Set to zero to not run GC.
 	SyncWrites:              true,
 }
 
@@ -315,7 +315,10 @@ func (s *KV) writeToLSM(b *request) {
 
 		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
 			s.mt.Put(entry.Key,
-				y.ValueStruct{entry.Value, entry.Meta, entry.casCounter})
+				y.ValueStruct{
+					Value:      entry.Value,
+					Meta:       entry.Meta,
+					CASCounter: entry.casCounter})
 		} else {
 			s.mt.Put(entry.Key,
 				y.ValueStruct{

@@ -97,6 +97,10 @@ func (it *Iterator) Valid() bool {
 	return it.item != nil
 }
 
+func (it *Iterator) Close() {
+	it.iitr.Close()
+}
+
 func (it *Iterator) Next() {
 	// Reuse current item
 	it.item.wg.Wait() // Just cleaner to wait before pushing to avoid doing ref counting.

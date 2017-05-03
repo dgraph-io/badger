@@ -360,7 +360,7 @@ func (s *levelsController) compactBuildTables(
 		timeStart := time.Now()
 		builder := table.NewTableBuilder()
 		for ; it.Valid(); it.Next() {
-			if int64(builder.FinalSize()) > s.kv.opt.MaxTableSize {
+			if builder.ReachedCapacity(s.kv.opt.MaxTableSize) {
 				break
 			}
 			y.Check(builder.Add(it.Key(), it.Value()))
@@ -650,6 +650,9 @@ func (s *levelHandler) get(ctx context.Context, key []byte) y.ValueStruct {
 	y.Trace(ctx, "get key at level %d", s.level)
 	tables := s.getTableForKey(key)
 	for _, th := range tables {
+		if th.DoesNotHave(key) {
+			continue
+		}
 		it := th.NewIterator(false)
 		defer it.Close()
 		it.Seek(key)
