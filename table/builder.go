@@ -19,9 +19,11 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	//	"fmt"
+	"fmt"
+	"io"
 	"math"
 
+	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -100,10 +102,14 @@ type TableBuilder struct {
 
 	// Tracks offset for the previous key-value pair. Offset is relative to block base offset.
 	prevOffset int
+
+	keyBuf   *bytes.Buffer
+	keyCount int
 }
 
 func NewTableBuilder() *TableBuilder {
 	return &TableBuilder{
+		keyBuf:     bufPool.Get(),
 		buf:        bufPool.Get(),
 		prevOffset: math.MaxUint32, // Used for the first element!
 	}
@@ -112,6 +118,7 @@ func NewTableBuilder() *TableBuilder {
 // Close closes the TableBuilder. Do not use buf field anymore.
 func (b *TableBuilder) Close() {
 	bufPool.Put(b.buf)
+	bufPool.Put(b.keyBuf)
 }
 
 func (b *TableBuilder) Empty() bool { return b.buf.Len() == 0 }
@@ -128,6 +135,13 @@ func (b TableBuilder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *TableBuilder) addHelper(key []byte, v y.ValueStruct) {
+	// Add key to bloom filter.
+	var klen [2]byte
+	binary.BigEndian.PutUint16(klen[:], uint16(len(key)))
+	b.keyBuf.Write(klen[:])
+	b.keyBuf.Write(key)
+	b.keyCount++
+
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
 	if len(b.baseKey) == 0 {
@@ -185,8 +199,9 @@ func (b *TableBuilder) Add(key []byte, value y.ValueStruct) error {
 // FinalSize returns the *rough* final size of the array, counting the header which is not yet written.
 // TODO: Look into why there is a discrepancy. I suspect it is because of Write(empty, empty)
 // at the end. The diff can vary.
-func (b *TableBuilder) FinalSize() int {
-	return b.buf.Len() + 8 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
+func (b *TableBuilder) ReachedCapacity(cap int64) bool {
+	estimateSz := b.buf.Len() + 8 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
+	return int64(estimateSz) > cap
 }
 
 // blockIndex generates the block index for the table.
@@ -211,12 +226,38 @@ var emptySlice = make([]byte, 100)
 
 // Finish finishes the table by appending the index.
 func (b *TableBuilder) Finish(metadata []byte) []byte {
+	bf := bbloom.New(float64(b.keyCount), 0.01)
+	var klen [2]byte
+	key := make([]byte, 1024)
+	for {
+		if _, err := b.keyBuf.Read(klen[:]); err == io.EOF {
+			break
+		} else if err != nil {
+			y.Check(err)
+		}
+		kl := int(binary.BigEndian.Uint16(klen[:]))
+		if cap(key) < kl {
+			key = make([]byte, 2*kl)
+		}
+		key = key[:kl]
+		y.Check2(b.keyBuf.Read(key))
+		bf.Add(key)
+	}
+
 	b.finishBlock() // This will never start a new block.
 	index := b.blockIndex()
 	b.buf.Write(index)
 
-	b.buf.Write(metadata)
+	// Write bloom filter.
+	bdata := bf.JSONMarshal()
+	n, err := b.buf.Write(bdata)
+	y.Check(err)
+	fmt.Printf("--->> Size of bloom filter: %d\n", n)
 	var buf [4]byte
+	binary.BigEndian.PutUint32(buf[:], uint32(n))
+	b.buf.Write(buf[:])
+
+	b.buf.Write(metadata)
 	binary.BigEndian.PutUint32(buf[:], uint32(len(metadata)))
 	b.buf.Write(buf[:])
 

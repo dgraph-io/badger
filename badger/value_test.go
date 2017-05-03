@@ -35,7 +35,7 @@ func TestValueBasic(t *testing.T) {
 
 	kv := NewKV(getTestOptions(dir))
 	defer kv.Close()
-	log := kv.vlog
+	log := &kv.vlog
 
 	entry := &Entry{
 		Key:             []byte("samplekey"),
@@ -57,7 +57,7 @@ func TestValueBasic(t *testing.T) {
 
 	log.Write([]*request{b})
 	require.Len(t, b.Ptrs, 2)
-	fmt.Printf("Pointer written: %+v", b.Ptrs[0], b.Ptrs[1])
+	fmt.Printf("Pointer written: %+v %+v", b.Ptrs[0], b.Ptrs[1])
 
 	e, err := log.Read(b.Ptrs[0], nil)
 	e2, err := log.Read(b.Ptrs[1], nil)
@@ -164,7 +164,7 @@ func BenchmarkReadWrite(b *testing.B) {
 						idx := rand.Intn(ln)
 						e, err := vl.Read(ptrs[idx], nil)
 						if err != nil {
-							b.Fatalf("Benchmark Read:", err)
+							b.Fatalf("Benchmark Read: %v", err)
 						}
 						if len(e.Key) != 16 {
 							b.Fatalf("Key is invalid")
