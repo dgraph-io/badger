@@ -30,9 +30,9 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
-	"github.com/willf/bloom"
 )
 
 const fileSuffix = ".sst"
@@ -66,7 +66,7 @@ type Table struct {
 	smallest, biggest []byte // Smallest and largest keys.
 	id                uint64
 
-	bf bloom.BloomFilter
+	bf bbloom.Bloom
 }
 
 func (s *Table) IncrRef() {
@@ -199,7 +199,7 @@ func (t *Table) readIndex() error {
 	bloomLen := int(binary.BigEndian.Uint32(buf))
 	readPos -= bloomLen
 	data := t.readNoFail(readPos, bloomLen)
-	y.Check(t.bf.GobDecode(data))
+	t.bf = bbloom.JSONUnmarshal(data)
 
 	readPos -= 4
 	buf = t.readNoFail(readPos, 4)
@@ -300,7 +300,7 @@ func (t *Table) Smallest() []byte            { return t.smallest }
 func (t *Table) Biggest() []byte             { return t.biggest }
 func (t *Table) Filename() string            { return t.fd.Name() }
 func (t *Table) ID() uint64                  { return t.id }
-func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Test(key) }
+func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(key) }
 
 func ParseFileID(name string) (uint64, bool) {
 	name = path.Base(name)

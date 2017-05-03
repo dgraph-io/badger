@@ -20,10 +20,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 
+	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/y"
-	"github.com/willf/bloom"
 )
 
 //var tableSize int64 = 50 << 20
@@ -102,12 +103,13 @@ type TableBuilder struct {
 	// Tracks offset for the previous key-value pair. Offset is relative to block base offset.
 	prevOffset int
 
-	bf      *bloom.BloomFilter
-	allKeys [][]byte
+	keyBuf   *bytes.Buffer
+	keyCount int
 }
 
 func NewTableBuilder() *TableBuilder {
 	return &TableBuilder{
+		keyBuf:     bufPool.Get(),
 		buf:        bufPool.Get(),
 		prevOffset: math.MaxUint32, // Used for the first element!
 	}
@@ -116,6 +118,7 @@ func NewTableBuilder() *TableBuilder {
 // Close closes the TableBuilder. Do not use buf field anymore.
 func (b *TableBuilder) Close() {
 	bufPool.Put(b.buf)
+	bufPool.Put(b.keyBuf)
 }
 
 func (b *TableBuilder) Empty() bool { return b.buf.Len() == 0 }
@@ -133,9 +136,11 @@ func (b TableBuilder) keyDiff(newKey []byte) []byte {
 
 func (b *TableBuilder) addHelper(key []byte, v y.ValueStruct) {
 	// Add key to bloom filter.
-	k := make([]byte, len(key))
-	copy(k, key)
-	b.allKeys = append(b.allKeys, k)
+	var klen [2]byte
+	binary.BigEndian.PutUint16(klen[:], uint16(len(key)))
+	b.keyBuf.Write(klen[:])
+	b.keyBuf.Write(key)
+	b.keyCount++
 
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
@@ -221,9 +226,22 @@ var emptySlice = make([]byte, 100)
 
 // Finish finishes the table by appending the index.
 func (b *TableBuilder) Finish(metadata []byte) []byte {
-	b.bf = bloom.NewWithEstimates(uint(len(b.allKeys)), 0.01)
-	for _, k := range b.allKeys {
-		b.bf.Add(k)
+	bf := bbloom.New(float64(b.keyCount), 0.01)
+	var klen [2]byte
+	key := make([]byte, 1024)
+	for {
+		if _, err := b.keyBuf.Read(klen[:]); err == io.EOF {
+			break
+		} else if err != nil {
+			y.Check(err)
+		}
+		kl := int(binary.BigEndian.Uint16(klen[:]))
+		if cap(key) < kl {
+			key = make([]byte, 2*kl)
+		}
+		key = key[:kl]
+		y.Check2(b.keyBuf.Read(key))
+		bf.Add(key)
 	}
 
 	b.finishBlock() // This will never start a new block.
@@ -231,9 +249,10 @@ func (b *TableBuilder) Finish(metadata []byte) []byte {
 	b.buf.Write(index)
 
 	// Write bloom filter.
-	n, err := b.bf.WriteTo(b.buf)
+	bdata := bf.JSONMarshal()
+	n, err := b.buf.Write(bdata)
 	y.Check(err)
-	fmt.Printf("\n--->> Size of bloom filter: %d\n", n)
+	fmt.Printf("--->> Size of bloom filter: %d\n", n)
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	b.buf.Write(buf[:])
