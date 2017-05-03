@@ -299,7 +299,10 @@ func (s *KV) writeToLSM(b *request) {
 
 		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
 			s.mt.Put(entry.Key,
-				y.ValueStruct{entry.Value, entry.Meta, entry.casCounter})
+				y.ValueStruct{
+					Value:      entry.Value,
+					Meta:       entry.Meta,
+					CASCounter: entry.casCounter})
 		} else {
 			s.mt.Put(entry.Key,
 				y.ValueStruct{
