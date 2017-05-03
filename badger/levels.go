@@ -621,7 +621,7 @@ func (s *levelsController) get(ctx context.Context, key []byte) y.ValueStruct {
 }
 
 // getTableForKey acquires a read-lock to access s.tables. It returns a list of tableHandlers.
-func (s *levelHandler) getTableForKey(key []byte) []*table.Table {
+func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func()) {
 	s.RLock()
 	defer s.RUnlock()
 	if s.level == 0 {
@@ -631,8 +631,13 @@ func (s *levelHandler) getTableForKey(key []byte) []*table.Table {
 		out := make([]*table.Table, 0, len(s.tables))
 		for i := len(s.tables) - 1; i >= 0; i-- {
 			out = append(out, s.tables[i])
+			s.tables[i].IncrRef()
 		}
-		return out
+		return out, func() {
+			for _, t := range out {
+				t.DecrRef()
+			}
+		}
 	}
 	// For level >= 1, we can do a binary search as key range does not overlap.
 	idx := sort.Search(len(s.tables), func(i int) bool {
@@ -640,17 +645,20 @@ func (s *levelHandler) getTableForKey(key []byte) []*table.Table {
 	})
 	if idx >= len(s.tables) {
 		// Given key is strictly > than every element we have.
-		return nil
+		return nil, func() {}
 	}
-	return []*table.Table{s.tables[idx]}
+	tbl := s.tables[idx]
+	tbl.IncrRef()
+	return []*table.Table{tbl}, func() { tbl.DecrRef() }
 }
 
 // get returns value for a given key. If not found, return nil.
 func (s *levelHandler) get(ctx context.Context, key []byte) y.ValueStruct {
 	y.Trace(ctx, "get key at level %d", s.level)
-	tables := s.getTableForKey(key)
+	tables, decr := s.getTableForKey(key)
+	defer decr()
 	for _, th := range tables {
-		it := th.NewIterator(false)
+		it := th.NewIterator(false) // This increments ref.
 		defer it.Close()
 		it.Seek(key)
 		if !it.Valid() {
@@ -659,7 +667,6 @@ func (s *levelHandler) get(ctx context.Context, key []byte) y.ValueStruct {
 		if bytes.Equal(key, it.Key()) {
 			return it.Value()
 		}
-
 	}
 	return y.ValueStruct{}
 }

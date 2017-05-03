@@ -66,6 +66,8 @@ type Table struct {
 	id                uint64
 }
 
+func (s *Table) Ref() int32 { return atomic.LoadInt32(&s.ref) }
+
 func (s *Table) IncrRef() {
 	atomic.AddInt32(&s.ref, 1)
 }
