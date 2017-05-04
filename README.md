@@ -1,6 +1,8 @@
 # Badger
 
-An embeddable, simple and fast key value (KV) store, written natively in Go.
+An embeddable, persistent, simple and fast key-value (KV) store, written natively in Go.
+
+![Badger sketch](/images/sketch.jpg)
 
 ## About
 
@@ -47,11 +49,28 @@ This improves random get performance significantly compared to traditional LSM t
 | -------             | ------                                       | -------            | ------    |
 | Design              | LSM tree with value log                      | LSM tree only      | B+ tree   |
 | High RW Performance | Yes                                          | Yes                | No        |
-| Designed for SSDs   | Yes (with latest research*)                  | Not specifically   | No        |
+| Designed for SSDs   | Yes (with latest research*)                  | Not specifically** | No        |
 | Embeddable          | Yes                                          | Yes                | Yes       |
 | Sorted KV access    | Yes                                          | Yes                | Yes       |
 | Go Native (no Cgo)  | Yes                                          | No                 | Yes       |
 | Transactions        | No (but provides compare and set operations) | Yes (but non-ACID) | Yes, ACID |
 | Snapshots           | No                                           | Yes                | Yes       |
 
-* Badger is based on a paper called [WiscKey by University of Wisconsin, Madison](https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf), where they separate values from keys, which significantly reduces the write amplification compared to a typical LSM tree.
+* Badger is based on a paper called [WiscKey by University of Wisconsin, Madison](https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf), which saw big wins with separating values from keys, significantly reducing the write amplification compared to a typical LSM tree.
+
+** RocksDB is an SSD optimized version of LevelDB, which was designed specifically for rotating disks.
+As such RocksDB's design isn't aimed at SSDs.
+
+## Crash Consistency
+
+Badger is crash resistent. Any update which was applied successfully before a crash, would be available after the crash.
+Badger achieves this via its value log.
+
+Badger's value log is a write-ahead log (WAL). Every update to Badger is written to this log first, before being applied to the LSM tree.
+Badger maintains a monotonically increasing pointer (head) in the LSM tree, pointing to the last update offset in the value log.
+As and when LSM table is persisted, the head gets persisted along with.
+Thus, the head always points to the latest persisted offset in the value log.
+Every time Badger opens the directory, it would first replay the updates after the head in order, bringing the updates back into the LSM tree; before it allows any reads or writes.
+This technique ensures data persistence in face of crashes.
+
+Furthermore, Badger can be run with `SyncWrites` option, which would open the WAL with O_DSYNC flag, hence syncing the writes to disk on every write.
