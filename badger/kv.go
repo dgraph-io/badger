@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -31,13 +30,8 @@ import (
 )
 
 var (
-	Head          = []byte("/head/") // For storing value offset for replay.
-	backgroundCtx context.Context
+	head = []byte("/head/") // For storing value offset for replay.
 )
-
-func init() {
-	backgroundCtx = context.Background()
-}
 
 // Options are params for creating DB object.
 type Options struct {
@@ -118,7 +112,7 @@ func NewKV(opt *Options) *KV {
 	lc = out.closer.Register("value-gc")
 	go out.vlog.runGCInLoop(lc)
 
-	val, _ := out.Get(backgroundCtx, Head) // casCounter ignored.
+	val, _ := out.Get(head) // casCounter ignored.
 	var vptr valuePointer
 	if len(val) > 0 {
 		vptr.Decode(val)
@@ -132,7 +126,7 @@ func NewKV(opt *Options) *KV {
 		first = false
 
 		if e.CASCounterCheck != 0 {
-			oldValue := out.get(backgroundCtx, e.Key)
+			oldValue := out.get(e.Key)
 			if oldValue.CASCounter != e.CASCounterCheck {
 				return true
 			}
@@ -263,8 +257,7 @@ func (s *KV) decodeValue(val []byte, meta byte, slice *y.Slice) []byte {
 
 // getValueHelper returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
-func (s *KV) get(ctx context.Context, key []byte) y.ValueStruct {
-	y.Trace(ctx, "Retrieving key from memtables")
+func (s *KV) get(key []byte) y.ValueStruct {
 	tables, decr := s.getMemTables() // Lock should be released.
 	defer decr()
 	for i := 0; i < len(tables); i++ {
@@ -273,13 +266,12 @@ func (s *KV) get(ctx context.Context, key []byte) y.ValueStruct {
 			return vs
 		}
 	}
-	y.Trace(ctx, "Not found in memtables. Getting from levels")
-	return s.lc.get(ctx, key)
+	return s.lc.get(key)
 }
 
 // Get looks for key and returns value. If not found, return nil.
-func (s *KV) Get(ctx context.Context, key []byte) ([]byte, uint16) {
-	vs := s.get(ctx, key)
+func (s *KV) Get(key []byte) ([]byte, uint16) {
+	vs := s.get(key)
 	slice := new(y.Slice)
 	return s.decodeValue(vs.Value, vs.Meta, slice), vs.CASCounter
 }
@@ -307,7 +299,7 @@ func (s *KV) writeToLSM(b *request) {
 	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
 	for i, entry := range b.Entries {
 		if entry.CASCounterCheck != 0 {
-			oldValue := s.get(backgroundCtx, entry.Key) // No need to decode existing value. Just need old CAS counter.
+			oldValue := s.get(entry.Key) // No need to decode existing value. Just need old CAS counter.
 			if oldValue.CASCounter != entry.CASCounterCheck {
 				continue
 			}
@@ -392,8 +384,8 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 	}
 }
 
-// Write applies a list of value.Entry to our memtable.
-func (s *KV) Write(ctx context.Context, entries []*Entry) error {
+// BatchSet applies a list of value.Entry to our memtable.
+func (s *KV) BatchSet(entries []*Entry) error {
 	b := requestPool.Get().(*request)
 	defer requestPool.Put(b)
 
@@ -406,42 +398,42 @@ func (s *KV) Write(ctx context.Context, entries []*Entry) error {
 	return nil
 }
 
-// Put puts a key-val pair.
-func (s *KV) Put(ctx context.Context, key []byte, val []byte) error {
+// Set puts a key-val pair.
+func (s *KV) Set(key []byte, val []byte) error {
 	e := &Entry{
 		Key:   key,
 		Value: val,
 	}
-	return s.Write(ctx, []*Entry{e})
+	return s.BatchSet([]*Entry{e})
 }
 
-// CASPut attempts to put given value. Nop if existing key has different casCounter,
-func (s *KV) CASPut(ctx context.Context, key []byte, val []byte, casCounter uint16) error {
+// CompareAndSet attempts to put given value. Nop if existing key has different casCounter,
+func (s *KV) CompareAndSet(key []byte, val []byte, casCounter uint16) error {
 	e := &Entry{
 		Key:             key,
 		Value:           val,
 		CASCounterCheck: casCounter,
 	}
-	return s.Write(ctx, []*Entry{e})
+	return s.BatchSet([]*Entry{e})
 }
 
 // Delete deletes a key.
-func (s *KV) Delete(ctx context.Context, key []byte) error {
+func (s *KV) Delete(key []byte) error {
 	e := &Entry{
 		Key:  key,
 		Meta: BitDelete,
 	}
-	return s.Write(ctx, []*Entry{e})
+	return s.BatchSet([]*Entry{e})
 }
 
-// CASDelete deletes a key. Nop if existing key has different casCounter,
-func (s *KV) CASDelete(ctx context.Context, key []byte, casCounter uint16) error {
+// CompareAndDelete deletes a key. Nop if existing key has different casCounter,
+func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
 	e := &Entry{
 		Key:             key,
 		Meta:            BitDelete,
 		CASCounterCheck: casCounter,
 	}
-	return s.Write(ctx, []*Entry{e})
+	return s.BatchSet([]*Entry{e})
 }
 
 func (s *KV) hasRoomForWrite() bool {
@@ -508,7 +500,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) {
 				s.Lock() // For vptr.
 				s.vptr.Encode(offset)
 				s.Unlock()
-				ft.mt.Put(Head, y.ValueStruct{Value: offset}) // casCounter not needed.
+				ft.mt.Put(head, y.ValueStruct{Value: offset}) // casCounter not needed.
 			}
 			fileID, _ := s.lc.reserveFileIDs(1)
 			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)

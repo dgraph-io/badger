@@ -19,7 +19,6 @@ package badger
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -170,7 +169,6 @@ func (vlog *valueLog) rewrite(f *logFile) {
 	defer elog.Finish()
 	elog.Printf("Rewriting fid: %d", f.fid)
 	fmt.Println("rewrite called")
-	ctx := context.Background()
 
 	entries = entries[:0]
 	y.AssertTrue(vlog.kv != nil)
@@ -181,7 +179,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 			elog.Printf("Processing entry %d", count)
 		}
 
-		vs := vlog.kv.get(ctx, e.Key)
+		vs := vlog.kv.get(e.Key)
 		if (vs.Meta & BitDelete) > 0 {
 			return
 		}
@@ -618,15 +616,10 @@ func (vlog *valueLog) doRunGC() {
 		discard float64
 	}
 
-	tr := trace.New("badger", "value-gc")
-	defer tr.Finish()
-	ctx := trace.NewContext(context.Background(), tr)
-
 	var r reason
 	var window float64 = 100.0
 	count := 0
 
-	y.Trace(ctx, "Picked fid: %d for GC", lf.fid)
 	fmt.Printf("Picked fid: %d for GC\n", lf.fid)
 	// Pick a random start point for the log.
 	skipFirstM := float64(rand.Int63n(LogSize/int64(M))) - window
@@ -654,7 +647,7 @@ func (vlog *valueLog) doRunGC() {
 			return false
 		}
 
-		vs := vlog.kv.get(ctx, e.Key)
+		vs := vlog.kv.get(e.Key)
 		if (vs.Meta & BitDelete) > 0 {
 			// Key has been deleted. Discard.
 			r.discard += esz
@@ -700,16 +693,13 @@ func (vlog *valueLog) doRunGC() {
 	})
 
 	y.Checkf(err, "While iterating for RunGC.")
-	y.Trace(ctx, "Fid: %d Data status=%+v\n", lf.fid, r)
 	fmt.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
 
 	if r.total < 10.0 || r.keep >= vlog.opt.ValueGCThreshold*r.total {
-		y.Trace(ctx, "Skipping GC on fid: %d", lf.fid)
 		fmt.Printf("Skipping GC on fid: %d\n\n", lf.fid)
 		return
 	}
 
-	y.Trace(ctx, "Rewriting fid: %d", lf.fid)
 	fmt.Printf("=====> REWRITING VLOG %d\n", lf.fid)
 	vlog.rewrite(lf)
 	fmt.Println("REWRITE DONE")

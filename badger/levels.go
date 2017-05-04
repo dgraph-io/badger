@@ -18,7 +18,6 @@ package badger
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -607,14 +606,13 @@ func (s *levelHandler) close() {
 }
 
 // get returns the found value if any. If not found, we return nil.
-func (s *levelsController) get(ctx context.Context, key []byte) y.ValueStruct {
+func (s *levelsController) get(key []byte) y.ValueStruct {
 	// No need to lock anything as we just iterate over the currently immutable levelHandlers.
 	for _, h := range s.levels {
-		vs := h.get(ctx, key)
+		vs := h.get(key)
 		if vs.Value == nil && vs.Meta == 0 {
 			continue
 		}
-		y.Trace(ctx, "Found key")
 		return vs
 	}
 	return y.ValueStruct{}
@@ -653,8 +651,7 @@ func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func()) {
 }
 
 // get returns value for a given key. If not found, return nil.
-func (s *levelHandler) get(ctx context.Context, key []byte) y.ValueStruct {
-	y.Trace(ctx, "get key at level %d", s.level)
+func (s *levelHandler) get(key []byte) y.ValueStruct {
 	tables, decr := s.getTableForKey(key)
 	defer decr()
 	for _, th := range tables {

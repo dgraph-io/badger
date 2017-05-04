@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -99,11 +98,10 @@ func TestValueGC(t *testing.T) {
 			Value: v,
 		})
 	}
-	ctx := context.Background()
-	require.NoError(t, kv.Write(ctx, entries))
+	require.NoError(t, kv.BatchSet(entries))
 
 	for i := 0; i < 45; i++ {
-		kv.Delete(ctx, []byte(fmt.Sprintf("key%d", i)))
+		kv.Delete([]byte(fmt.Sprintf("key%d", i)))
 	}
 
 	kv.vlog.RLock()
@@ -117,7 +115,7 @@ func TestValueGC(t *testing.T) {
 
 	kv.vlog.rewrite(lf)
 	for i := 45; i < 100; i++ {
-		val, _ := kv.Get(ctx, []byte(fmt.Sprintf("key%d", i)))
+		val, _ := kv.Get([]byte(fmt.Sprintf("key%d", i)))
 		require.NotNil(t, val)
 		require.True(t, len(val) == sz, "Size found: %d", len(val))
 	}

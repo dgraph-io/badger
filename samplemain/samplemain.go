@@ -5,7 +5,6 @@ supposed to make it easier.
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -38,7 +37,6 @@ func main() {
 
 	y.AssertTrue(len(*flagDir) > 0)
 	kv := badger.NewKV(getOptions(*flagDir))
-	ctx := context.Background()
 
 	// Keep writing random keys.
 	val := make([]byte, 10)
@@ -56,6 +54,6 @@ func main() {
 		for j := 0; j < len(entries); j++ {
 			entries[j].Key = []byte(fmt.Sprintf("%16x", rand.Int63()))
 		}
-		kv.Write(ctx, entries)
+		kv.BatchSet(entries)
 	}
 }

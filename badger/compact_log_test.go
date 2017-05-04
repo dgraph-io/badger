@@ -1,7 +1,6 @@
 package badger
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -50,7 +49,6 @@ func TestCompactLogEncode(t *testing.T) {
 }
 
 func TestCompactLogBasic(t *testing.T) {
-	ctx := context.Background()
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -64,16 +62,16 @@ func TestCompactLogBasic(t *testing.T) {
 				fmt.Printf("Putting i=%d\n", i)
 			}
 			k := []byte(fmt.Sprintf("%16x", rand.Int63()))
-			require.NoError(t, kv.Put(ctx, k, k))
+			require.NoError(t, kv.Set(k, k))
 		}
-		require.NoError(t, kv.Put(ctx, []byte("testkey"), []byte("testval")))
+		require.NoError(t, kv.Set([]byte("testkey"), []byte("testval")))
 		kv.Validate()
 		kv.DebugPrintMore()
 		kv.Close()
 	}
 
 	kv := NewKV(opt)
-	val, _ := kv.Get(ctx, []byte("testkey"))
+	val, _ := kv.Get([]byte("testkey"))
 	require.EqualValues(t, "testval", string(val))
 	kv.Close()
 }
@@ -82,7 +80,6 @@ func TestCompactLogBasic(t *testing.T) {
 func TestCompactLogUnclosedIter(t *testing.T) {
 	// Create unclosed iterators. This will leave a lot of files in the directory.
 	// Then re-open the database and check that everything is cleanup.
-	ctx := context.Background()
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -102,7 +99,7 @@ func TestCompactLogUnclosedIter(t *testing.T) {
 				kv.NewIterator(iterOpt) // NOTE: Hold reference for test.
 			}
 			k := []byte(fmt.Sprintf("%16x", rand.Int63()))
-			require.NoError(t, kv.Put(ctx, k, k))
+			require.NoError(t, kv.Set(k, k))
 		}
 		// Don't close kv.
 		summary = kv.lc.getSummary()
