@@ -38,6 +38,7 @@ import (
 
 	"github.com/bkaradzic/go-lz4"
 	"github.com/dgraph-io/badger/y"
+	"github.com/hashicorp/golang-lru"
 )
 
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
@@ -460,12 +461,13 @@ type valueLog struct {
 	sync.RWMutex
 	files []*logFile
 	// fds    []*os.File
-	offset  int64
-	elog    trace.EventLog
-	dirPath string
-	kv      *KV
-	maxFid  uint32
-	opt     Options
+	offset                int64
+	elog                  trace.EventLog
+	dirPath               string
+	kv                    *KV
+	maxFid                uint32
+	opt                   Options
+	compressedBlocksCache *lru.Cache
 }
 
 func (l *valueLog) fpath(fid uint16) string {
@@ -525,6 +527,9 @@ func (l *valueLog) Open(kv *KV, opt *Options) {
 	l.openOrCreateFiles()
 	l.opt = *opt
 	l.kv = kv
+	var err error
+	l.compressedBlocksCache, err = lru.New(opt.BlockCacheSize)
+	y.Check(err)
 
 	l.elog = trace.NewEventLog("Badger", "Valuelog")
 }
@@ -594,6 +599,11 @@ func (l *valueLog) getFile(fid uint16) (*logFile, error) {
 	return l.files[idx], nil
 }
 
+type fileOffset struct {
+	fid    uint16
+	offset uint32
+}
+
 // Read reads the value log at a given location.
 func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	lf, err := l.getFile(p.Fid)
@@ -604,19 +614,44 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	if s == nil {
 		s = new(y.Slice)
 	}
-	buf := s.Resize(int(p.Len))
-	if err := lf.read(buf, int64(p.Offset)); err != nil {
-		return e, err
-	}
+	var h header
+	var buf []byte
 
 	if p.InsideBlockOffset&BitCompressed > 0 {
-		decoded, err := lz4.Decode(nil, buf[8:])
-		y.Check(err)
+		var decoded []byte
 
-		buf = decoded[(p.InsideBlockOffset - BitCompressed):]
+		d, cached := l.compressedBlocksCache.Get(fileOffset{p.Fid, p.Offset})
+
+		if cached {
+			// fmt.Println("in cache")
+			decoded = d.([]byte)
+		} else {
+			// fmt.Println("not in cache")
+			buf = s.Resize(int(p.Len))
+			if err := lf.read(buf, int64(p.Offset)); err != nil {
+				return e, err
+			}
+
+			buf = h.Decode(buf)
+			y.AssertTrue(h.klen == 0)
+			y.AssertTruef(h.vlen+8 == p.Len, "%d+8 != %d", h.vlen, p.Len)
+
+			decoded, err = lz4.Decode(nil, buf)
+			if err != nil {
+				y.Fatalf("failed to decode compressed block vpt: %+v, size: %d", p, len(buf))
+			}
+			y.Check(err)
+
+			l.compressedBlocksCache.Add(fileOffset{p.Fid, p.Offset}, decoded)
+		}
+		buf = decoded[(p.InsideBlockOffset - BitCompressed):len(decoded)] // seting first bit to 0
+	} else {
+		buf = s.Resize(int(p.Len))
+		if err := lf.read(buf, int64(p.Offset)); err != nil {
+			return e, err
+		}
 	}
 
-	var h header
 	buf = h.Decode(buf)
 	e.Key = buf[0:h.klen]
 	e.Meta = buf[h.klen]
@@ -624,7 +659,7 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	e.CASCounterCheck = binary.BigEndian.Uint16(buf[h.klen+3 : h.klen+5])
 	buf = buf[h.klen+5:]
 	e.Value = buf[0:h.vlen]
-	e.Offset = p.Offset
+
 	return e, nil
 }
 

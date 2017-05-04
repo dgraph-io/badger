@@ -57,6 +57,7 @@ type Options struct {
 	ValueGCThreshold        float64
 	SyncWrites              bool
 	ValueCompression        bool
+	BlockCacheSize          int
 }
 
 var DefaultOptions = Options{
@@ -76,6 +77,7 @@ var DefaultOptions = Options{
 	ValueGCThreshold:        0.5, // Set to zero to not run GC.
 	SyncWrites:              true,
 	ValueCompression:        true,
+	BlockCacheSize:          10000,
 }
 
 type KV struct {
