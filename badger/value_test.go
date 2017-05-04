@@ -69,7 +69,6 @@ func TestValueBasic(t *testing.T) {
 			Key:             []byte("samplekey"),
 			Value:           []byte("sampleval"),
 			Meta:            123,
-			Offset:          0,
 			CASCounterCheck: 22222,
 			casCounter:      33333,
 		},
@@ -77,7 +76,6 @@ func TestValueBasic(t *testing.T) {
 			Key:             []byte("samplekeyb"),
 			Value:           []byte("samplevalb"),
 			Meta:            125,
-			Offset:          uint32(8 + len(entry.Key) + 1 + 4 + len(entry.Value)),
 			CASCounterCheck: 22225,
 			casCounter:      33335,
 		},
@@ -96,7 +94,9 @@ func TestCompression(t *testing.T) {
 	dir, err := ioutil.TempDir("", "")
 	y.Check(err)
 
-	kv := NewKV(getTestOptions(dir))
+	opt := getTestOptions(dir)
+	opt.BlockCacheSize = 1
+	kv := NewKV(opt)
 	defer kv.Close()
 	log := kv.vlog
 
@@ -120,7 +120,7 @@ func TestCompression(t *testing.T) {
 	fmt.Printf("Pointer written: %+v, %+v\n", b.Ptrs[0], b.Ptrs[1])
 
 	require.EqualValues(t, 0, b.Ptrs[0].Offset)
-	require.EqualValues(t, 0, b.Ptrs[0].InsideBlockOffset-BitCompressed)
+	require.EqualValues(t, 0, b.Ptrs[0].InsideBlockOffset^BitCompressed)
 
 	require.NotZero(t, b.Ptrs[1].InsideBlockOffset)
 	require.EqualValues(t, 0, b.Ptrs[1].Offset)

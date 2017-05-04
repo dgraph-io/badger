@@ -44,11 +44,11 @@ import (
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete           = 1       // Set if the key has been deleted.
-	BitValuePointer     = 2       // Set if the value is NOT stored directly next to key.
-	BitCompressed       = 1 << 15 // Set if the value is compressed in the value log.
-	LogSize             = 1 << 30 // ~1GB
-	M               int = 1 << 20
+	BitDelete              = 1       // Set if the key has been deleted.
+	BitValuePointer        = 2       // Set if the value is NOT stored directly next to key.
+	BitCompressed   uint16 = 1 << 15 // Set if the value is compressed in the value log.
+	LogSize                = 1 << 30 // ~1GB
+	M               int    = 1 << 20
 )
 
 var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
@@ -66,7 +66,9 @@ type logFile struct {
 func (lf *logFile) openReadOnly() {
 	var err error
 	lf.fd, err = os.OpenFile(lf.path, os.O_RDONLY, 0666)
-	y.Check(err)
+	if err != nil {
+		y.Fatalf("Unable to open file %s: %+v", lf.path, err)
+	}
 
 	fi, err := lf.fd.Stat()
 	y.Check(err)
@@ -78,6 +80,7 @@ func (lf *logFile) read(buf []byte, offset int64) error {
 	defer lf.RUnlock()
 
 	_, err := lf.fd.ReadAt(buf, offset)
+	// y.AssertTruef(len(buf) == n, "%d != %d", len(buf), n)
 	return err
 }
 
@@ -189,6 +192,8 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 	fileOffset := offset
 
 	e := &entryDecoder.entry
+
+	var commpressedBlocksBuffer []byte
 OUTER:
 	for {
 		if err = entryDecoder.readHeader(); err == io.EOF {
@@ -218,7 +223,7 @@ OUTER:
 			if err = entryDecoder.read(block); err != nil {
 				return err
 			}
-			decoded, err := lz4.Decode(nil, block)
+			decoded, err := lz4.Decode(commpressedBlocksBuffer, block)
 			if err != nil {
 				return err
 			}
@@ -644,7 +649,7 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 
 			l.compressedBlocksCache.Add(fileOffset{p.Fid, p.Offset}, decoded)
 		}
-		buf = decoded[(p.InsideBlockOffset - BitCompressed):len(decoded)] // seting first bit to 0
+		buf = decoded[(p.InsideBlockOffset - BitCompressed):] // seting first bit to 0
 	} else {
 		buf = s.Resize(int(p.Len))
 		if err := lf.read(buf, int64(p.Offset)); err != nil {
@@ -653,6 +658,8 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	}
 
 	buf = h.Decode(buf)
+	y.AssertTrue(h.klen > 0)
+	y.AssertTruef(len(buf) >= int(h.klen+5+h.vlen), "chuj %+v %d, %d %+v", p, len(buf), int(h.klen+5+h.vlen), h)
 	e.Key = buf[0:h.klen]
 	e.Meta = buf[h.klen]
 	e.casCounter = binary.BigEndian.Uint16(buf[h.klen+1 : h.klen+3])

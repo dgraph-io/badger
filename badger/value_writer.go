@@ -2,7 +2,6 @@ package badger
 
 import (
 	"errors"
-	"fmt"
 	"sync/atomic"
 
 	"github.com/bkaradzic/go-lz4"
@@ -12,16 +11,59 @@ import (
 )
 
 const (
-	optimalLz4BlockSize  = 64 * (1 << 10) // 64 KB
-	compressionThreshold = 1.0            // We compress values only if compression provides specified space gain.
+	optimalLz4BlockSize  = 1<<15 - 1 //64 * (1 << 10) // Needs to be less than CompressedBit
+	compressionThreshold = 1.5       // We compress values only if compression provides specified space gain.
 )
+
+var (
+	errNoSpaceGain = errors.New("no significant space gain")
+)
+
+type block struct {
+	entries  []*Entry
+	offsets  []uint16
+	requests []*request
+	buf      bytes.Buffer
+}
+
+func (b *block) append(e *Entry, r *request) {
+	b.entries = append(b.entries, e)
+	y.AssertTruef(b.buf.Len() <= int(BitCompressed)-1, "current offset: %d %d", b.buf.Len(), int(BitCompressed))
+	b.offsets = append(b.offsets, uint16(b.buf.Len()))
+	b.requests = append(b.requests, r)
+
+	e.EncodeTo(&b.buf)
+}
+
+func (b *block) reset() {
+	b.buf.Reset()
+
+	b.offsets = b.offsets[:0]
+	b.entries = b.entries[:0]
+	b.requests = b.requests[:0]
+}
+
+func (b *block) flushWithoutCompression(dest *bytes.Buffer, lf *logFile) {
+	for j, e := range b.entries {
+		var p valuePointer
+		p.Fid = lf.fid
+		p.Len = uint32(8 + len(e.Key) + len(e.Value) + 1 + 4) // +4 for CAS stuff.
+		p.Offset = lf.offset + uint32(dest.Len()) + uint32(b.offsets[j])
+		y.AssertTrue(p.InsideBlockOffset == 0)
+
+		b.requests[j].Ptrs = append(b.requests[j].Ptrs, p)
+	}
+
+	dest.Write(b.buf.Bytes())
+	b.reset()
+}
 
 type valueLogWriter struct {
 	l                  *valueLog
 	curlf              *logFile
 	compressionEnabled bool
 	writeBuf           bytes.Buffer
-	compressionBlock   bytes.Buffer
+	compressionBuf     []byte
 }
 
 func newWriter(l *valueLog) *valueLogWriter {
@@ -37,43 +79,26 @@ func newWriter(l *valueLog) *valueLogWriter {
 	return writer
 }
 
-func compress(buffer []byte) ([]byte, error) {
-	// TODO(szm): We should reuse the compressed buffer.
-	compressed, err := lz4.Encode(nil, buffer)
+func (w *valueLogWriter) compress(buffer []byte) ([]byte, error) {
+	compressed, err := lz4.Encode(w.compressionBuf, buffer)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(compressed)*compressionThreshold > len(buffer) {
-		return nil, errors.New("no significant space gain")
+	if float32(len(compressed))*compressionThreshold > float32(len(buffer)) {
+		return nil, errNoSpaceGain
 	}
 
 	return compressed, nil
-}
-
-type entryPosition struct {
-	block uint16
-	id    uint16
-}
-
-func (e entryPosition) String() string {
-	return fmt.Sprintf("Block %d, id: %d", e.block, e.id)
-}
-
-func next(e entryPosition, blocks []*request) entryPosition {
-	if uint16(len(blocks[e.block].Entries)) == e.id+1 {
-		// last entry in block
-		return entryPosition{e.block + 1, 0}
-	}
-	return entryPosition{e.block, e.id + 1}
 }
 
 func (w *valueLogWriter) newFile() (newlf *logFile) {
 	var err error
 	w.curlf.doneWriting()
 
-	newlf = &logFile{fid: uint16(atomic.AddUint32(&w.l.maxFid, 1)), offset: 0}
-	newlf.fd, err = y.OpenSyncedFile(w.l.fpath(newlf.fid), w.l.opt.SyncWrites)
+	newfid := uint16(atomic.AddUint32(&w.l.maxFid, 1))
+	newlf = &logFile{fid: newfid, path: w.l.fpath(newfid)}
+	newlf.fd, err = y.OpenSyncedFile(newlf.path, w.l.opt.SyncWrites)
 	y.Check(err)
 
 	w.l.Lock()
@@ -83,8 +108,8 @@ func (w *valueLogWriter) newFile() (newlf *logFile) {
 	return
 }
 
-// Saves buffer to the logFile and updates curlf.offset.
-func (w *valueLogWriter) saveToDisk(buffer []byte) (err error) {
+// Writes buffer to the logFile and updates curlf.offset.
+func (w *valueLogWriter) writeToDisk(buffer []byte) (err error) {
 	if len(buffer) == 0 {
 		return
 	}
@@ -104,39 +129,14 @@ func (w *valueLogWriter) saveToDisk(buffer []byte) (err error) {
 	return
 }
 
-// Saves compressed block of entries to curlf and updated appriopriate poitners.
-// Resets the buffer and updates curlf.offset.
-
-// Traverses blocks entries between from and to (excluding to) and sets
-// BlockOffset and InsideBlockOffset values.
-func (w *valueLogWriter) updateCompressedPointers(blocks []*request, from, to entryPosition,
-	blockStart, headerSize, blockLen uint32) {
-	beforeTo := func(e entryPosition) bool {
-		return e.block < to.block || (e.block == to.block && e.id < to.id)
-	}
-
-	for pos := from; beforeTo(pos); pos = next(pos, blocks) {
-		ptr := &blocks[pos.block].Ptrs[pos.id]
-
-		ptr.InsideBlockOffset = uint16(ptr.Offset-blockStart) | BitCompressed
-		ptr.Offset = blockStart
-		ptr.Len = blockLen + headerSize
-	}
-}
-
 func (w *valueLogWriter) write(blocks []*request) {
-	headerBuffer := make([]byte, 8)
+	var headerBuffer [8]byte
 
-	var firstCompressionEntry entryPosition
+	var currentBlock block
 
-	flushWithoutCompression := func() {
-		w.writeBuf.Write(w.compressionBlock.Bytes())
-		w.compressionBlock.Reset()
-	}
-
-	save := func() {
-		flushWithoutCompression()
-		err := w.saveToDisk(w.writeBuf.Bytes())
+	flushBuffers := func() {
+		currentBlock.flushWithoutCompression(&w.writeBuf, w.curlf)
+		err := w.writeToDisk(w.writeBuf.Bytes())
 		y.Checkf(err, "unable to write to value log: %v", err)
 		w.writeBuf.Reset()
 	}
@@ -149,49 +149,50 @@ func (w *valueLogWriter) write(blocks []*request) {
 
 			y.AssertTruef(len(e.Key) > 0, "key empty")
 
-			// We set the pointer if entries were not compressed.
-			var p valuePointer
-			p.Fid = w.curlf.fid
-			p.Len = uint32(8 + len(e.Key) + len(e.Value) + 1 + 4) // +4 for CAS stuff.
-			p.Offset = w.curlf.offset + uint32(w.writeBuf.Len()+w.compressionBlock.Len())
-			b.Ptrs = append(b.Ptrs, p)
+			currentBlock.append(e, b)
 
-			e.EncodeTo(&w.compressionBlock)
-			nextEntry := next(entryPosition{uint16(i), uint16(j)}, blocks)
+			if w.compressionEnabled && currentBlock.buf.Len() > optimalLz4BlockSize {
+				compressed, err := w.compress(currentBlock.buf.Bytes())
 
-			if w.compressionEnabled && w.compressionBlock.Len() > optimalLz4BlockSize {
-				compressed, err := compress(w.compressionBlock.Bytes())
+				if err != nil {
+					if err == errNoSpaceGain {
+						w.l.elog.Printf("Flushing without compression: %v\n", err)
 
-				if err == nil {
+						currentBlock.flushWithoutCompression(&w.writeBuf, w.curlf)
+					} else {
+						y.Check(err)
+					}
+				} else {
 					w.l.elog.Printf("Adding compressed block.")
-					blockStart := w.curlf.offset + uint32(w.writeBuf.Len())
 
-					var h header
-					h.klen = 0
-					h.vlen = uint32(len(compressed))
-					h.Encode(headerBuffer)
-					w.writeBuf.Write(headerBuffer)
+					for j := range currentBlock.entries {
+						var p valuePointer
+						p.Fid = w.curlf.fid
+						p.Len = uint32(len(compressed) + 8) // + header size
+						p.Offset = w.curlf.offset + uint32(w.writeBuf.Len())
+						y.AssertTrue(currentBlock.offsets[j]&BitCompressed == 0)
+						p.InsideBlockOffset = currentBlock.offsets[j] ^ BitCompressed
+
+						currentBlock.requests[j].Ptrs = append(currentBlock.requests[j].Ptrs, p)
+					}
+
+					h := header{0, uint32(len(compressed))}
+					h.Encode(headerBuffer[:])
+					w.writeBuf.Write(headerBuffer[:])
 
 					w.writeBuf.Write(compressed)
-					w.compressionBlock.Reset()
-
-					w.updateCompressedPointers(blocks, firstCompressionEntry, nextEntry,
-						blockStart, 8, uint32(len(compressed)))
+					currentBlock.reset()
 
 					w.l.elog.Printf("Saved compressed block of size %d bytes from %d bytes.\n",
 						len(compressed), w.writeBuf.Len())
-				} else {
-					w.l.elog.Printf("Flushing without compression: %v\n", err)
-					flushWithoutCompression()
 				}
-				firstCompressionEntry = nextEntry
 			}
-			if p.Offset+p.Len > uint32(LogSize) {
-				w.l.elog.Printf("Saving entries of total size: %d", w.writeBuf.Len())
-				save()
+			if w.curlf.offset+uint32(w.writeBuf.Len()) > uint32(LogSize) {
+				w.l.elog.Printf("Writing to disk entries of total size: %d", w.writeBuf.Len())
+				flushBuffers()
 				w.l.elog.Printf("Done")
 			}
 		}
 	}
-	save()
+	flushBuffers()
 }
