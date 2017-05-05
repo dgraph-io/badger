@@ -1,6 +1,7 @@
 package badger
 
 import (
+	"bytes"
 	"sync"
 
 	"github.com/dgraph-io/badger/y"
@@ -89,12 +90,17 @@ func (it *Iterator) fetchOneValue(item *KVItem) {
 	item.wg.Done()
 }
 
-func (it *Iterator) Item() *KVItem {
-	return it.item
-}
+func (it *Iterator) Item() *KVItem { return it.item }
+func (it *Iterator) Key() []byte   { return it.item.Key() }
+func (it *Iterator) Value() []byte { return it.item.Value() }
+func (it *Iterator) Valid() bool   { return it.item != nil }
 
-func (it *Iterator) Valid() bool {
-	return it.item != nil
+func (it *Iterator) ValidForPrefix(prefix []byte) bool {
+	if it.item == nil {
+		return false
+	}
+	key := it.item.Key()
+	return bytes.HasPrefix(key, prefix)
 }
 
 func (it *Iterator) Close() {
@@ -173,6 +179,8 @@ func (it *Iterator) Rewind() {
 	it.iitr.Rewind()
 	it.prefetch()
 }
+
+func (it *Iterator) Err() error { return nil }
 
 func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 	tables, decr := s.getMemTables()
