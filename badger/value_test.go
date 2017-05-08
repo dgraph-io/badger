@@ -81,6 +81,59 @@ func TestValueBasic(t *testing.T) {
 	}, readEntries)
 }
 
+func TestCompression(t *testing.T) {
+	dir, err := ioutil.TempDir("", "")
+	y.Check(err)
+
+	opt := getTestOptions(dir)
+	opt.ValueCompressionMinimalSize = 16
+
+	kv := NewKV(opt)
+	defer kv.Close()
+	log := &kv.vlog
+
+	entry := &Entry{
+		Key:             []byte("key1"),
+		Value:           []byte("shortval"),
+		Meta:            123,
+		CASCounterCheck: 22222,
+		casCounter:      33333,
+	}
+	entry2 := &Entry{ // This entry will be compressed
+		Key:             []byte("aaaaaaaaaaaaaaaaaaaaaaaaaa"),
+		Value:           []byte("aaaaaaaaaaaaaaaaaaaaaaaaaa"),
+		Meta:            125,
+		CASCounterCheck: 22225,
+		casCounter:      33335,
+	}
+	entry3 := &Entry{
+		Key:             []byte("highentropy"),
+		Value:           []byte("uncompressable"),
+		Meta:            125,
+		CASCounterCheck: 22225,
+		casCounter:      33335,
+	}
+
+	b := new(request)
+	b.Entries = []*Entry{entry, entry2, entry3}
+
+	log.Write([]*request{b})
+	require.Len(t, b.Ptrs, 3)
+	fmt.Printf("Pointer written: %+v %+v %+v", b.Ptrs[0], b.Ptrs[1], b.Ptrs[2])
+
+	e, err := log.Read(b.Ptrs[0], nil)
+	e2, err := log.Read(b.Ptrs[1], nil)
+	e3, err := log.Read(b.Ptrs[2], nil)
+
+	require.NoError(t, err)
+	readEntries := []Entry{e, e2, e3}
+	require.EqualValues(t, []Entry{
+		*entry,
+		*entry2,
+		*entry3,
+	}, readEntries)
+}
+
 func TestValueGC(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
@@ -88,11 +141,11 @@ func TestValueGC(t *testing.T) {
 	kv := NewKV(getTestOptions(dir))
 	defer kv.Close()
 
-	sz := 16 << 20
+	sz := 20 << 20
 	var entries []*Entry
 	for i := 0; i < 100; i++ {
 		v := make([]byte, sz)
-		rand.Read(v)
+		rand.Read(v[:rand.Intn(sz)]) // some values can be compressed
 		entries = append(entries, &Entry{
 			Key:   []byte(fmt.Sprintf("key%d", i)),
 			Value: v,
