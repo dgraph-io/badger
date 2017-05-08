@@ -41,10 +41,9 @@ import (
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete             = 1 // Set if the key has been deleted.
-	BitValuePointer       = 2 // Set if the value is NOT stored directly next to key.
-	LogSize         int64 = 1 << 30
-	M               int   = 1 << 20
+	BitDelete           = 1 // Set if the key has been deleted.
+	BitValuePointer     = 2 // Set if the value is NOT stored directly next to key.
+	M               int = 1 << 20
 )
 
 var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
@@ -485,7 +484,7 @@ func (l *valueLog) Write(reqs []*request) {
 		curlf.offset += int64(n)
 		l.buf.Reset()
 
-		if curlf.offset > LogSize {
+		if curlf.offset > l.opt.ValueLogFileSize {
 			var err error
 			curlf.doneWriting()
 
@@ -520,7 +519,7 @@ func (l *valueLog) Write(reqs []*request) {
 			b.Ptrs = append(b.Ptrs, p)
 
 			e.EncodeTo(&l.buf)
-			if p.Offset > uint64(LogSize) {
+			if p.Offset > uint64(l.opt.ValueLogFileSize) {
 				toDisk()
 			}
 		}
@@ -622,7 +621,7 @@ func (vlog *valueLog) doRunGC() {
 
 	fmt.Printf("Picked fid: %d for GC\n", lf.fid)
 	// Pick a random start point for the log.
-	skipFirstM := float64(rand.Int63n(LogSize/int64(M))) - window
+	skipFirstM := float64(rand.Int63n(vlog.opt.ValueLogFileSize/int64(M))) - window
 	var skipped float64
 	fmt.Printf("Skipping first %5.2f MB\n", skipFirstM)
 

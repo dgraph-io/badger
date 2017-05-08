@@ -85,10 +85,13 @@ func TestValueGC(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv := NewKV(getTestOptions(dir))
+	opt := getTestOptions(dir)
+	opt.ValueLogFileSize = 1 << 20
+
+	kv := NewKV(opt)
 	defer kv.Close()
 
-	sz := 16 << 20
+	sz := 16 << 10
 	var entries []*Entry
 	for i := 0; i < 100; i++ {
 		v := make([]byte, sz)
