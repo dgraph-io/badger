@@ -50,6 +50,8 @@ type Options struct {
 	NumMemtables            int
 	ValueGCThreshold        float64
 	SyncWrites              bool
+	ValueCompression        bool
+	BlockCacheSize          int
 }
 
 var DefaultOptions = Options{
@@ -68,6 +70,8 @@ var DefaultOptions = Options{
 	MemtableSlack:           10 << 20,
 	ValueGCThreshold:        0.5, // Set to zero to not run GC.
 	SyncWrites:              true,
+	ValueCompression:        true,
+	BlockCacheSize:          10000,
 }
 
 type KV struct {
@@ -295,7 +299,7 @@ var requestPool = sync.Pool{
 }
 
 func (s *KV) writeToLSM(b *request) {
-	var offsetBuf [16]byte
+	var offsetBuf [12]byte
 	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
 	for i, entry := range b.Entries {
 		if entry.CASCounterCheck != 0 {
@@ -496,7 +500,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) {
 				if s.opt.Verbose {
 					fmt.Printf("Storing offset: %+v\n", ft.vptr)
 				}
-				offset := make([]byte, 16)
+				offset := make([]byte, 12)
 				s.Lock() // For vptr.
 				s.vptr.Encode(offset)
 				s.Unlock()
