@@ -60,6 +60,9 @@ type Options struct {
 	// Run value log garbage collection if we can reclaim at least this much space. This is a ratio.
 	ValueGCThreshold float64
 
+	// Size of single value log file.
+	ValueLogFileSize int64
+
 	// The following affect value compression in value log.
 	ValueCompressionMinSize  int     // Minimal size in bytes of KV pair to be compressed.
 	ValueCompressionMinRatio float64 // Minimal compression ratio of KV pair to be compressed.
@@ -89,6 +92,7 @@ var DefaultOptions = Options{
 	ValueCompressionMinRatio: 2.0,
 	ValueCompressionMinSize:  1024,
 	ValueGCThreshold:         0.5, // Set to zero to not run GC.
+	ValueLogFileSize:         1 << 30,
 	ValueThreshold:           20,
 	Verbose:                  false,
 }
