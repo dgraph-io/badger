@@ -50,9 +50,8 @@ type Options struct {
 	NumMemtables                int
 	ValueGCThreshold            float64
 	SyncWrites                  bool
-	ValueCompression            bool
 	ValueCompressionMinimalSize int     // Minimal size in bytes of kv pair to be compressed.
-	MinimalCompressionRatio     float64 // Minimal compression ratio of kv pair to be compressed.
+	ValueCompressionMinRatio    float64 // Minimal compression ratio of kv pair to be compressed.
 }
 
 var DefaultOptions = Options{
@@ -71,9 +70,8 @@ var DefaultOptions = Options{
 	MemtableSlack:               10 << 20,
 	ValueGCThreshold:            0.5, // Set to zero to not run GC.
 	SyncWrites:                  true,
-	ValueCompression:            true,
 	ValueCompressionMinimalSize: 128,
-	MinimalCompressionRatio:     2.0,
+	ValueCompressionMinRatio:    2.0,
 }
 
 type KV struct {

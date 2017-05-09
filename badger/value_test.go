@@ -39,14 +39,14 @@ func TestValueBasic(t *testing.T) {
 	entry := &Entry{
 		Key:             []byte("samplekey"),
 		Value:           []byte("sampleval"),
-		Meta:            123,
+		Meta:            BitValuePointer,
 		CASCounterCheck: 22222,
 		casCounter:      33333,
 	}
 	entry2 := &Entry{
 		Key:             []byte("samplekeyb"),
 		Value:           []byte("samplevalb"),
-		Meta:            125,
+		Meta:            BitValuePointer,
 		CASCounterCheck: 22225,
 		casCounter:      33335,
 	}
@@ -67,14 +67,14 @@ func TestValueBasic(t *testing.T) {
 		{
 			Key:             []byte("samplekey"),
 			Value:           []byte("sampleval"),
-			Meta:            123,
+			Meta:            BitValuePointer,
 			CASCounterCheck: 22222,
 			casCounter:      33333,
 		},
 		{
 			Key:             []byte("samplekeyb"),
 			Value:           []byte("samplevalb"),
-			Meta:            125,
+			Meta:            BitValuePointer,
 			CASCounterCheck: 22225,
 			casCounter:      33335,
 		},
@@ -95,23 +95,23 @@ func TestCompression(t *testing.T) {
 	entry := &Entry{
 		Key:             []byte("key1"),
 		Value:           []byte("shortval"),
-		Meta:            123,
+		Meta:            BitValuePointer,
 		CASCounterCheck: 22222,
 		casCounter:      33333,
 	}
 	entry2 := &Entry{ // This entry will be compressed
 		Key:             []byte("aaaaaaaaaaaaaaaaaaaaaaaaaa"),
 		Value:           []byte("aaaaaaaaaaaaaaaaaaaaaaaaaa"),
-		Meta:            125,
+		Meta:            BitValuePointer,
 		CASCounterCheck: 22225,
 		casCounter:      33335,
 	}
 	entry3 := &Entry{
 		Key:             []byte("highentropy"),
 		Value:           []byte("uncompressable"),
-		Meta:            125,
-		CASCounterCheck: 22225,
-		casCounter:      33335,
+		Meta:            BitValuePointer,
+		CASCounterCheck: 22226,
+		casCounter:      33336,
 	}
 
 	b := new(request)
