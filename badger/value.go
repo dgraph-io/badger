@@ -43,9 +43,9 @@ import (
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete             = 1 // Set if the key has been deleted.
-	BitValuePointer       = 2 // Set if the value is NOT stored directly next to key.
-	BitCompressed         = 4 // Set if the key value pair is stored compressed.
+	BitDelete       byte  = 1 // Set if the key has been deleted.
+	BitValuePointer byte  = 2 // Set if the value is NOT stored directly next to key.
+	BitCompressed   byte  = 4 // Set if the key value pair is stored compressed.
 	LogSize         int64 = 1 << 30
 	M               int   = 1 << 20
 )
@@ -110,7 +110,7 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 	}
 
 	reader := bufio.NewReader(f.fd)
-	hbuf := make([]byte, 13)
+	var hbuf [13]byte
 	var h header
 	var count int
 	k := make([]byte, 1<<10)
@@ -121,12 +121,12 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 	var hlen int
 	recordOffset := offset
 	for {
-		if err = read(reader, hbuf); err == io.EOF {
+		if err = read(reader, hbuf[:]); err == io.EOF {
 			break
 		}
 
 		e.Offset = recordOffset
-		_, hlen = h.Decode(hbuf)
+		_, hlen = h.Decode(hbuf[:])
 		// fmt.Printf("[%d] Header read: %+v\n", count, h)
 		vl := int(h.vlen)
 		if cap(v) < vl {
@@ -139,10 +139,10 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 			}
 			decompressed, err = lz4.Decode(decompressed, v[:vl])
 
-			e.Key = decompressed[:h.klen]
 			e.Meta = h.meta
 			e.casCounter = h.casCounter
 			e.CASCounterCheck = h.casCounterCheck
+			e.Key = decompressed[:h.klen]
 			e.Value = decompressed[h.klen:]
 
 			recordOffset += int64(hlen + vl)
@@ -218,7 +218,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 			// This new entry only contains the key, and a pointer to the value.
 			var ne Entry
 			y.AssertTruef(e.Meta&^BitCompressed == 0, "Got meta: %v", e.Meta)
-			ne.Meta = e.Meta
+			ne.Meta = e.Meta & (^BitCompressed)
 			ne.Key = make([]byte, len(e.Key))
 			copy(ne.Key, e.Key)
 			ne.Value = make([]byte, len(e.Value))
@@ -307,7 +307,7 @@ type Entry struct {
 
 type entryEncoder struct {
 	opt          Options
-	decompressed *bytes.Buffer
+	decompressed *bytes.Buffer // buffer for data prepared for compression
 	compressed   []byte
 }
 
@@ -317,7 +317,7 @@ func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) int {
 	var headerEnc [13]byte
 	var h header
 
-	if enc.opt.ValueCompressionMinimalSize < len(e.Key)+len(e.Value) {
+	if enc.opt.ValueCompressionMinSize < len(e.Key)+len(e.Value) {
 		var err error
 
 		enc.decompressed.Reset()
@@ -329,20 +329,19 @@ func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) int {
 		if err != nil {
 			// Unable to compress value
 			y.Fatalf("Error while compressing file: %s", err.Error())
-		} else {
-			compressionRatio := float64(enc.decompressed.Len()) / float64(len(enc.compressed))
-			if compressionRatio >= enc.opt.ValueCompressionMinRatio {
-				h.klen = uint32(len(e.Key))
-				h.vlen = uint32(len(enc.compressed))
-				h.meta = e.Meta | BitCompressed
-				h.casCounter = e.casCounter
-				h.casCounterCheck = e.CASCounterCheck
-				h.Encode(headerEnc[:])
+		}
+		compressionRatio := float64(enc.decompressed.Len()) / float64(len(enc.compressed))
+		if compressionRatio >= enc.opt.ValueCompressionMinRatio {
+			h.klen = uint32(len(e.Key))
+			h.vlen = uint32(len(enc.compressed))
+			h.meta = e.Meta | BitCompressed
+			h.casCounter = e.casCounter
+			h.casCounterCheck = e.CASCounterCheck
+			h.Encode(headerEnc[:])
 
-				buf.Write(headerEnc[:])
-				buf.Write(enc.compressed)
-				return len(headerEnc) + len(enc.compressed)
-			}
+			buf.Write(headerEnc[:])
+			buf.Write(enc.compressed)
+			return len(headerEnc) + len(enc.compressed)
 		}
 	}
 
@@ -571,6 +570,7 @@ func (l *valueLog) Write(reqs []*request) {
 		b.Ptrs = b.Ptrs[:0]
 		for j := range b.Entries {
 			e := b.Entries[j]
+			y.AssertTruef(e.Meta&BitCompressed == 0, "Cannot set BitCompressed outside valueLog")
 			var p valuePointer
 
 			if !l.opt.SyncWrites && len(e.Value) < l.opt.ValueThreshold {
@@ -635,7 +635,7 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 		buf = decoded
 	}
 	e.Key = buf[0:h.klen]
-	e.Meta = h.meta &^ BitCompressed
+	e.Meta = h.meta
 	e.casCounter = h.casCounter
 	e.CASCounterCheck = h.casCounterCheck
 	e.Value = buf[h.klen : h.klen+h.vlen]

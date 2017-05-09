@@ -35,43 +35,43 @@ var (
 
 // Options are params for creating DB object.
 type Options struct {
-	Dir                         string
-	NumLevelZeroTables          int   // Maximum number of Level 0 tables before we start compacting.
-	NumLevelZeroTablesStall     int   // If we hit this number of Level 0 tables, we will stall until level 0 is compacted away.
-	LevelOneSize                int64 // Maximum total size for Level 1.
-	MaxLevels                   int   // Maximum number of levels of compaction. May be made variable later.
-	MaxTableSize                int64 // Each table (or file) is at most this size.
-	MemtableSlack               int64 // Arena has to be slightly bigger than MaxTableSize.
-	LevelSizeMultiplier         int
-	ValueThreshold              int // If value size >= this threshold, we store value offsets in tables.
-	Verbose                     bool
-	DoNotCompact                bool
-	MapTablesTo                 int
-	NumMemtables                int
-	ValueGCThreshold            float64
-	SyncWrites                  bool
-	ValueCompressionMinimalSize int     // Minimal size in bytes of kv pair to be compressed.
-	ValueCompressionMinRatio    float64 // Minimal compression ratio of kv pair to be compressed.
+	Dir                      string
+	NumLevelZeroTables       int   // Maximum number of Level 0 tables before we start compacting.
+	NumLevelZeroTablesStall  int   // If we hit this number of Level 0 tables, we will stall until level 0 is compacted away.
+	LevelOneSize             int64 // Maximum total size for Level 1.
+	MaxLevels                int   // Maximum number of levels of compaction. May be made variable later.
+	MaxTableSize             int64 // Each table (or file) is at most this size.
+	MemtableSlack            int64 // Arena has to be slightly bigger than MaxTableSize.
+	LevelSizeMultiplier      int
+	ValueThreshold           int // If value size >= this threshold, we store value offsets in tables.
+	Verbose                  bool
+	DoNotCompact             bool
+	MapTablesTo              int
+	NumMemtables             int
+	ValueGCThreshold         float64
+	SyncWrites               bool
+	ValueCompressionMinSize  int     // Minimal size in bytes of kv pair to be compressed.
+	ValueCompressionMinRatio float64 // Minimal compression ratio of kv pair to be compressed.
 }
 
 var DefaultOptions = Options{
-	Dir:                         "/tmp",
-	NumLevelZeroTables:          5,
-	NumLevelZeroTablesStall:     10,
-	LevelOneSize:                256 << 20,
-	MaxLevels:                   7,
-	MaxTableSize:                64 << 20,
-	LevelSizeMultiplier:         10,
-	ValueThreshold:              20,
-	Verbose:                     true,
-	DoNotCompact:                false, // Only for testing.
-	MapTablesTo:                 table.MemoryMap,
-	NumMemtables:                5,
-	MemtableSlack:               10 << 20,
-	ValueGCThreshold:            0.5, // Set to zero to not run GC.
-	SyncWrites:                  true,
-	ValueCompressionMinimalSize: 128,
-	ValueCompressionMinRatio:    2.0,
+	Dir:                      "/tmp",
+	NumLevelZeroTables:       5,
+	NumLevelZeroTablesStall:  10,
+	LevelOneSize:             256 << 20,
+	MaxLevels:                7,
+	MaxTableSize:             64 << 20,
+	LevelSizeMultiplier:      10,
+	ValueThreshold:           20,
+	Verbose:                  true,
+	DoNotCompact:             false, // Only for testing.
+	MapTablesTo:              table.MemoryMap,
+	NumMemtables:             5,
+	MemtableSlack:            10 << 20,
+	ValueGCThreshold:         0.5, // Set to zero to not run GC.
+	SyncWrites:               true,
+	ValueCompressionMinSize:  1024,
+	ValueCompressionMinRatio: 2.0,
 }
 
 type KV struct {

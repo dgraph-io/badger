@@ -86,7 +86,7 @@ func TestCompression(t *testing.T) {
 	y.Check(err)
 
 	opt := getTestOptions(dir)
-	opt.ValueCompressionMinimalSize = 16
+	opt.ValueCompressionMinSize = 16
 
 	kv := NewKV(opt)
 	defer kv.Close()
@@ -123,6 +123,8 @@ func TestCompression(t *testing.T) {
 
 	e, err := log.Read(b.Ptrs[0], nil)
 	e2, err := log.Read(b.Ptrs[1], nil)
+	require.True(t, e2.Meta&BitCompressed > 0)
+	entry2.Meta = entry2.Meta | BitCompressed
 	e3, err := log.Read(b.Ptrs[2], nil)
 
 	require.NoError(t, err)
