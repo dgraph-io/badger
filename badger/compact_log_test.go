@@ -89,7 +89,7 @@ func TestCompactLogUnclosedIter(t *testing.T) {
 	iterOpt.PrefetchSize = 10
 
 	opt := getTestOptions(dir)
-	var summary *Summary
+	var sum *summary
 	{
 		kv := NewKV(opt)
 		n := 5000
@@ -102,13 +102,13 @@ func TestCompactLogUnclosedIter(t *testing.T) {
 			kv.Set(k, k)
 		}
 		// Don't close kv.
-		summary = kv.lc.getSummary()
+		sum = kv.lc.getSummary()
 	}
 
 	// Make sure our test makes sense. There should be dirty files.
-	require.True(t, len(summary.fileIDs) < len(getIDMap(dir)))
+	require.True(t, len(sum.fileIDs) < len(getIDMap(dir)))
 
 	kv := NewKV(opt) // This should clean up.
 	summary2 := kv.lc.getSummary()
-	require.Len(t, summary.fileIDs, len(summary2.fileIDs))
+	require.Len(t, sum.fileIDs, len(summary2.fileIDs))
 }

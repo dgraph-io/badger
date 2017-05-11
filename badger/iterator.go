@@ -1,7 +1,6 @@
 package badger
 
 import (
-	"bytes"
 	"sync"
 
 	"github.com/dgraph-io/badger/y"
@@ -20,7 +19,7 @@ type KVItem struct {
 	next       *KVItem
 }
 
-// Key returns the key. Remember to copy if you need access it outside the iteration loop.
+// Key returns the key. Remember to copy if you need to access it outside the iteration loop.
 func (item *KVItem) Key() []byte {
 	return item.key
 }
@@ -65,11 +64,18 @@ func (l *list) pop() *KVItem {
 }
 
 type IteratorOptions struct {
-	PrefetchSize int
-	FetchValues  bool
-	Reverse      bool
+	PrefetchSize int  // How many KV pairs to prefetch while iterating.
+	FetchValues  bool // Controls whether the values should be fetched from the value log.
+	Reverse      bool // Direction of iteration. False is forward, true is backward.
 }
 
+var DefaultIteratorOptions = IteratorOptions{
+	PrefetchSize: 100,
+	FetchValues:  true,
+	Reverse:      false,
+}
+
+// Iterator helps iterating over the KV pairs in a lexicographically sorted order.
 type Iterator struct {
 	kv   *KV
 	iitr y.Iterator
@@ -93,23 +99,20 @@ func (it *Iterator) fetchOneValue(item *KVItem) {
 	item.wg.Done()
 }
 
+// Item returns pointer to the current KVItem.
+// This item is only valid until it.Next() gets called.
 func (it *Iterator) Item() *KVItem { return it.item }
-func (it *Iterator) Key() []byte   { return it.item.Key() }
-func (it *Iterator) Value() []byte { return it.item.Value() }
-func (it *Iterator) Valid() bool   { return it.item != nil }
 
-func (it *Iterator) ValidForPrefix(prefix []byte) bool {
-	if it.item == nil {
-		return false
-	}
-	key := it.item.Key()
-	return bytes.HasPrefix(key, prefix)
-}
+// Valid returns false when iteration is done.
+func (it *Iterator) Valid() bool { return it.item != nil }
 
+// Close would close the iterator. It is important to call this when you're done with iteration.
 func (it *Iterator) Close() {
 	it.iitr.Close()
 }
 
+// Next would advance the iterator by one. Always check it.Valid() after a Next()
+// to ensure you have access to a valid it.Item().
 func (it *Iterator) Next() {
 	// Reuse current item
 	it.item.wg.Wait() // Just cleaner to wait before pushing to avoid doing ref counting.
@@ -162,6 +165,9 @@ func (it *Iterator) prefetch() {
 	}
 }
 
+// Seek would seek to the provided key if present. If absent, it would seek to the next smallest key
+// greater than provided if iterating in the forward direction. Behavior would be reversed is
+// iterating backwards.
 func (it *Iterator) Seek(key []byte) {
 	for i := it.data.pop(); i != nil; {
 		i.wg.Wait()
@@ -171,10 +177,13 @@ func (it *Iterator) Seek(key []byte) {
 	it.prefetch()
 }
 
+// Rewind would rewind the iterator cursor all the way to zero-th position, which would be the
+// smallest key if iterating forward, and largest if iterating backward. It does not keep track of
+// whether the cursor started with a Seek().
 func (it *Iterator) Rewind() {
 	i := it.data.pop()
 	for i != nil {
-		i.wg.Wait() // Just cleaner to wait before pushing. No ref count is needed.
+		i.wg.Wait() // Just cleaner to wait before pushing. No ref counting needed.
 		it.waste.push(i)
 		i = it.data.pop()
 	}
@@ -183,10 +192,22 @@ func (it *Iterator) Rewind() {
 	it.prefetch()
 }
 
-func (it *Iterator) Err() error { return nil }
-
 // NewIterator returns a new iterator. Depending upon the options, either only keys, or both
 // key-value pairs would be fetched. The keys are returned in lexicographically sorted order.
+// Usage:
+//   opt := badger.DefaultIteratorOptions
+//   itr := kv.NewIterator(opt)
+//   for itr.Rewind(); itr.Valid(); itr.Next() {
+//     item := itr.Item()
+//     key := item.Key()
+//     val := item.Value() // This could block while value is fetched from value log.
+//                         // For key only iteration, set opt.FetchValues to false, and don't call
+//                         // item.Value().
+//
+//     // Remember that both key, val would become invalid in the next iteration of the loop.
+//     // So, if you need access to them outside, copy them or parse them.
+//   }
+//   itr.Close()
 func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 	tables, decr := s.getMemTables()
 	defer decr()

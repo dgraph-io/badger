@@ -13,13 +13,13 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-// Summary is produced when DB is closed. Currently it is used only for testing.
-type Summary struct {
+// summary is produced when DB is closed. Currently it is used only for testing.
+type summary struct {
 	fileIDs map[uint64]bool
 }
 
-func (s *levelsController) getSummary() *Summary {
-	out := &Summary{
+func (s *levelsController) getSummary() *summary {
+	out := &summary{
 		fileIDs: make(map[uint64]bool),
 	}
 	for _, l := range s.levels {
@@ -28,11 +28,11 @@ func (s *levelsController) getSummary() *Summary {
 	return out
 }
 
-func (s *levelHandler) getSummary(summary *Summary) {
+func (s *levelHandler) getSummary(sum *summary) {
 	s.RLock()
 	defer s.RUnlock()
 	for _, t := range s.tables {
-		summary.fileIDs[t.ID()] = true
+		sum.fileIDs[t.ID()] = true
 	}
 }
 

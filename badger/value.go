@@ -45,7 +45,7 @@ import (
 const (
 	BitDelete       byte  = 1 // Set if the key has been deleted.
 	BitValuePointer byte  = 2 // Set if the value is NOT stored directly next to key.
-	BitCompressed   byte  = 4 // Set if the key value pair is stored compressed.
+	BitCompressed   byte  = 4 // Set if the key value pair is stored compressed in value log.
 	LogSize         int64 = 1 << 30
 	M               int   = 1 << 20
 )
