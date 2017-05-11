@@ -1,4 +1,4 @@
-# Badger
+# Badger [![GoDoc](https://godoc.org/github.com/dgraph-io/badger?status.svg)](https://godoc.org/github.com/dgraph-io/badger)
 
 An embeddable, persistent, simple and fast key-value (KV) store, written natively in Go.
 
