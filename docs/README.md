@@ -7,7 +7,7 @@ https://badger.dgraph.io.
 
 **Prerequisite**
 
-* Latest version of [Hugo])http://gohugo.io/)
+* Latest version of [Hugo](http://gohugo.io/)
 
 1. Clone [badger-doc-theme](https://github.com/dgraph-io/badger-doc-theme) to
 `docs/_src/themes/`.
