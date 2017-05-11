@@ -285,40 +285,6 @@ function isElementInViewport(el) {
 
   });
 
-  // version selector
-  var currentVersion = location.pathname.split("/")[1];
-  document
-    .getElementsByClassName("version-selector")[0]
-    .addEventListener("change", function(e) {
-      var targetVersion = e.target.value;
-
-      if (currentVersion !== targetVersion) {
-        // Getting everything after targetVersion and concatenating it with the hash part.
-        var targetPath = "/" +
-          targetVersion +
-          "/" +
-          location.pathname.split("/").slice(2).join("/") +
-          location.hash;
-        location.assign(targetPath);
-      }
-    });
-
-  var versionSelector = document.getElementsByClassName("version-selector")[0],
-    options = versionSelector.options;
-
-  for (var i = 0; i < options.length; i++) {
-    if (options[i].value.indexOf("latest") != -1) {
-      options[i].value = options[i].value.replace(/\s\(latest\)/, "");
-    }
-  }
-
-  for (var i = 0; i < options.length; i++) {
-    if (options[i].value === currentVersion) {
-      options[i].selected = true;
-      break;
-    }
-  }
-
   // Add target = _blank to all external links.
   var links = document.links;
 
