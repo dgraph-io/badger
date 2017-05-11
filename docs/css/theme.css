@@ -235,7 +235,7 @@ pre.collapsed .showmore span {
   opacity: 0.99;
 }
 #header .logo {
-  width: 118px;
+  width: 45px;
 }
 #header .menu-container {
   /*margin-top: 15px;*/
@@ -266,8 +266,15 @@ pre.collapsed .showmore span {
   text-decoration: none;
 }
 #header .brand {
-  margin-top: 14px;
+  margin-top: 9px;
   display: inline-block;
+}
+#header .brand .brand-name {
+  color: #000;
+  letter-spacing: 0.8px;
+  font-size: 20px;
+  vertical-align: middle;
+  margin-left: 10px;
 }
 
 #sidebar-toggle {
@@ -342,7 +349,7 @@ pre.collapsed .showmore span {
 }
 .topics .main-topic.active > a {
   font-weight: 600;
-  color: #fb5812;
+  color: #367ede;
 }
 
 .topic {
@@ -361,11 +368,11 @@ pre.collapsed .showmore span {
 
 .topic:hover > .fa {
   visibility: visible;
-  color: #fb5812;
+  color: #4384dc;
 }
 .topic.active > .fa {
   visibility: visible;
-  color: #fb5812;
+  color: #4384dc;
 }
 
 .sub-topics {
@@ -377,8 +384,7 @@ pre.collapsed .showmore span {
   color: #707070;
 }
 .sub-topics li.active {
-  /*color: #ff6929;*/
-  color: #fb5812;
+  color: #4384dc;
 }
 .sub-topics li a {
   color: inherit;
