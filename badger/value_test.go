@@ -153,7 +153,10 @@ func TestValueGC(t *testing.T) {
 			Value: v,
 		})
 	}
-	require.NoError(t, kv.BatchSet(entries))
+	kv.BatchSet(entries)
+	for _, e := range entries {
+		require.NoError(t, e.Error, "entry with error: %+v", e)
+	}
 
 	for i := 0; i < 45; i++ {
 		kv.Delete([]byte(fmt.Sprintf("key%d", i)))

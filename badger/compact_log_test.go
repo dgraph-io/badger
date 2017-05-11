@@ -62,11 +62,11 @@ func TestCompactLogBasic(t *testing.T) {
 				fmt.Printf("Putting i=%d\n", i)
 			}
 			k := []byte(fmt.Sprintf("%16x", rand.Int63()))
-			require.NoError(t, kv.Set(k, k))
+			kv.Set(k, k)
 		}
-		require.NoError(t, kv.Set([]byte("testkey"), []byte("testval")))
-		kv.Validate()
-		kv.DebugPrintMore()
+		kv.Set([]byte("testkey"), []byte("testval"))
+		kv.validate()
+		kv.debugPrintMore()
 		kv.Close()
 	}
 
@@ -99,7 +99,7 @@ func TestCompactLogUnclosedIter(t *testing.T) {
 				kv.NewIterator(iterOpt) // NOTE: Hold reference for test.
 			}
 			k := []byte(fmt.Sprintf("%16x", rand.Int63()))
-			require.NoError(t, kv.Set(k, k))
+			kv.Set(k, k)
 		}
 		// Don't close kv.
 		summary = kv.lc.getSummary()

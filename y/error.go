@@ -36,6 +36,7 @@ import (
 )
 
 var debugMode = true
+var VerboseMode = false
 
 // Check logs fatal if err != nil.
 func Check(err error) {
@@ -109,5 +110,7 @@ func Fatalf(format string, args ...interface{}) {
 
 // Printf printfs.
 func Printf(format string, args ...interface{}) {
-	fmt.Printf(format, args...)
+	if VerboseMode {
+		fmt.Printf(format, args...)
+	}
 }

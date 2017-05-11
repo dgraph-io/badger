@@ -35,47 +35,68 @@ var (
 
 // Options are params for creating DB object.
 type Options struct {
-	Dir                      string
-	NumLevelZeroTables       int   // Maximum number of Level 0 tables before we start compacting.
-	NumLevelZeroTablesStall  int   // If we hit this number of Level 0 tables, we will stall until level 0 is compacted away.
-	LevelOneSize             int64 // Maximum total size for Level 1.
-	MaxLevels                int   // Maximum number of levels of compaction. May be made variable later.
-	MaxTableSize             int64 // Each table (or file) is at most this size.
-	MemtableSlack            int64 // Arena has to be slightly bigger than MaxTableSize.
-	LevelSizeMultiplier      int
-	ValueThreshold           int // If value size >= this threshold, we store value offsets in tables.
-	Verbose                  bool
-	DoNotCompact             bool
-	MapTablesTo              int
-	NumMemtables             int
-	ValueGCThreshold         float64
-	SyncWrites               bool
-	ValueCompressionMinSize  int     // Minimal size in bytes of kv pair to be compressed.
-	ValueCompressionMinRatio float64 // Minimal compression ratio of kv pair to be compressed.
+	Dir string // Directory to store the data in.
+
+	// The following affect all levels of LSM tree.
+	MaxTableSize        int64 // Each table (or file) is at most this size.
+	LevelSizeMultiplier int   // Equals SizeOf(Li+1)/SizeOf(Li).
+	MaxLevels           int   // Maximum number of levels of compaction.
+	ValueThreshold      int   // If value size >= this threshold, only store value offsets in tree.
+	MapTablesTo         int   // How should LSM tree be accessed.
+
+	// The following affect only memtables in LSM tree.
+	MemtableSlack int64 // Arena has to be slightly bigger than MaxTableSize.
+	NumMemtables  int   // Maximum number of tables to keep in memory, before stalling.
+
+	// The following affect how we handle LSM tree L0.
+	// Maximum number of Level 0 tables before we start compacting.
+	NumLevelZeroTables int
+	// If we hit this number of Level 0 tables, we will stall until L0 is compacted away.
+	NumLevelZeroTablesStall int
+
+	// Maximum total size for L1.
+	LevelOneSize int64
+
+	// Run value log garbage collection if we can reclaim at least this much space. This is a ratio.
+	ValueGCThreshold float64
+
+	// The following affect value compression in value log.
+	ValueCompressionMinSize  int     // Minimal size in bytes of KV pair to be compressed.
+	ValueCompressionMinRatio float64 // Minimal compression ratio of KV pair to be compressed.
+
+	// Sync all writes to disk. Setting this to true would slow down data loading significantly.
+	SyncWrites bool
+
+	// Flags for testing purposes.
+	DoNotCompact bool // Stops LSM tree from compactions.
+	Verbose      bool // Turns on verbose mode.
 }
 
+// DefaultOptions sets a list of safe recommended options. Feel free to modify these to suit your needs.
 var DefaultOptions = Options{
 	Dir:                      "/tmp",
-	NumLevelZeroTables:       5,
-	NumLevelZeroTablesStall:  10,
+	DoNotCompact:             false,
 	LevelOneSize:             256 << 20,
+	LevelSizeMultiplier:      10,
+	MapTablesTo:              table.MemoryMap,
 	MaxLevels:                7,
 	MaxTableSize:             64 << 20,
-	LevelSizeMultiplier:      10,
-	ValueThreshold:           20,
-	Verbose:                  true,
-	DoNotCompact:             false, // Only for testing.
-	MapTablesTo:              table.MemoryMap,
-	NumMemtables:             5,
 	MemtableSlack:            10 << 20,
-	ValueGCThreshold:         0.5, // Set to zero to not run GC.
-	SyncWrites:               true,
-	ValueCompressionMinSize:  1024,
+	NumLevelZeroTables:       5,
+	NumLevelZeroTablesStall:  10,
+	NumMemtables:             5,
+	SyncWrites:               false,
 	ValueCompressionMinRatio: 2.0,
+	ValueCompressionMinSize:  1024,
+	ValueGCThreshold:         0.5, // Set to zero to not run GC.
+	ValueThreshold:           20,
+	Verbose:                  false,
 }
 
+// KV provides the various functions required to interact with Badger.
+// KV is thread-safe.
 type KV struct {
-	sync.RWMutex // Guards imm, mem.
+	sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
 
 	closer    *y.Closer
 	elog      trace.EventLog
@@ -90,7 +111,7 @@ type KV struct {
 	flushChan chan flushTask // For flushing memtables.
 }
 
-// NewKV returns a new KV object. Compact levels are created as well.
+// NewKV returns a new KV object.
 func NewKV(opt *Options) *KV {
 	y.AssertTrue(len(opt.Dir) > 0)
 	out := &KV{
@@ -103,6 +124,7 @@ func NewKV(opt *Options) *KV {
 		elog:      trace.NewEventLog("Badger", "KV"),
 	}
 	out.mt = skl.NewSkiplist(out.arenaPool)
+	y.VerboseMode = opt.Verbose
 
 	// newLevelsController potentially loads files in directory.
 	out.lc = newLevelsController(out)
@@ -125,7 +147,7 @@ func NewKV(opt *Options) *KV {
 	first := true
 	fn := func(e Entry) bool { // Function for replaying.
 		if first {
-			fmt.Printf("key=%s\n", e.Key)
+			y.Printf("First key=%s\n", e.Key)
 		}
 		first = false
 
@@ -156,7 +178,8 @@ func NewKV(opt *Options) *KV {
 	return out
 }
 
-// Close closes a KV.
+// Close closes a KV. It's crucial to call it to ensure all the pending updates
+// make their way to disk.
 func (s *KV) Close() {
 	if s.opt.Verbose {
 		y.Printf("Closing database\n")
@@ -256,7 +279,7 @@ func (s *KV) decodeValue(val []byte, meta byte, slice *y.Slice) []byte {
 	if (entry.Meta & BitDelete) == 0 { // Not tombstone.
 		return entry.Value
 	}
-	return []byte{}
+	return nil
 }
 
 // getValueHelper returns the value in memtable or disk for given key.
@@ -273,7 +296,8 @@ func (s *KV) get(key []byte) y.ValueStruct {
 	return s.lc.get(key)
 }
 
-// Get looks for key and returns value. If not found, return nil.
+// Get looks for key and returns value along with the current CAS counter.
+// If key is not found, value returned is nil.
 func (s *KV) Get(key []byte) ([]byte, uint16) {
 	vs := s.get(key)
 	slice := new(y.Slice)
@@ -301,10 +325,13 @@ var requestPool = sync.Pool{
 func (s *KV) writeToLSM(b *request) {
 	var offsetBuf [16]byte
 	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
+
 	for i, entry := range b.Entries {
+		entry.Error = nil
 		if entry.CASCounterCheck != 0 {
 			oldValue := s.get(entry.Key) // No need to decode existing value. Just need old CAS counter.
 			if oldValue.CASCounter != entry.CASCounterCheck {
+				entry.Error = CasMismatch
 				continue
 			}
 		}
@@ -388,8 +415,11 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 	}
 }
 
-// BatchSet applies a list of value.Entry to our memtable.
-func (s *KV) BatchSet(entries []*Entry) error {
+// BatchSet applies a list of badger.Entry. Errors are set on each Entry invidividually.
+//   for _, e := range entries {
+//      Check(e.Error)
+//   }
+func (s *KV) BatchSet(entries []*Entry) {
 	b := requestPool.Get().(*request)
 	defer requestPool.Put(b)
 
@@ -398,46 +428,51 @@ func (s *KV) BatchSet(entries []*Entry) error {
 	b.Wg.Add(1)
 	s.writeCh <- b
 	b.Wg.Wait()
-
-	return nil
 }
 
-// Set puts a key-val pair.
-func (s *KV) Set(key []byte, val []byte) error {
+// Set sets the provided value for a given key. If key is not present, it is created.
+// If it is present, the existing value is overwritten with the one provided.
+func (s *KV) Set(key []byte, val []byte) {
 	e := &Entry{
 		Key:   key,
 		Value: val,
 	}
-	return s.BatchSet([]*Entry{e})
+	s.BatchSet([]*Entry{e})
 }
 
-// CompareAndSet attempts to put given value. Nop if existing key has different casCounter,
+// CompareAndSet sets the given value, ensuring that the no other Set operation has happened,
+// since last read. If the key has a different casCounter, this would not update the key
+// and return an error.
 func (s *KV) CompareAndSet(key []byte, val []byte, casCounter uint16) error {
 	e := &Entry{
 		Key:             key,
 		Value:           val,
 		CASCounterCheck: casCounter,
 	}
-	return s.BatchSet([]*Entry{e})
+	s.BatchSet([]*Entry{e})
+	return e.Error
 }
 
 // Delete deletes a key.
-func (s *KV) Delete(key []byte) error {
+func (s *KV) Delete(key []byte) {
 	e := &Entry{
 		Key:  key,
 		Meta: BitDelete,
 	}
-	return s.BatchSet([]*Entry{e})
+
+	s.BatchSet([]*Entry{e})
 }
 
-// CompareAndDelete deletes a key. Nop if existing key has different casCounter,
+// CompareAndDelete deletes a key ensuring that the it has not been changed since last read.
+// If existing key has different casCounter, this would not delete the key and return an error.
 func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
 	e := &Entry{
 		Key:             key,
 		Meta:            BitDelete,
 		CASCounterCheck: casCounter,
 	}
-	return s.BatchSet([]*Entry{e})
+	s.BatchSet([]*Entry{e})
+	return e.Error
 }
 
 func (s *KV) hasRoomForWrite() bool {

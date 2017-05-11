@@ -57,7 +57,10 @@ func TestWrite(t *testing.T) {
 			Value: []byte(fmt.Sprintf("val%d", i)),
 		})
 	}
-	require.NoError(t, kv.BatchSet(entries))
+	kv.BatchSet(entries)
+	for _, e := range entries {
+		require.NoError(t, e.Error, "entry with error: %+v", e)
+	}
 }
 
 func TestConcurrentWrite(t *testing.T) {
@@ -86,7 +89,7 @@ func TestConcurrentWrite(t *testing.T) {
 	t.Log("Starting iteration")
 
 	opt := IteratorOptions{}
-	opt.Reversed = false
+	opt.Reverse = false
 	opt.PrefetchSize = 10
 	opt.FetchValues = true
 
@@ -130,7 +133,11 @@ func TestCAS(t *testing.T) {
 			Value: []byte(fmt.Sprintf("val%d", i)),
 		})
 	}
-	require.NoError(t, kv.BatchSet(entries))
+	kv.BatchSet(entries)
+	for _, e := range entries {
+		require.NoError(t, e.Error, "entry with error: %+v", e)
+	}
+
 	time.Sleep(time.Second)
 
 	for i := 0; i < 100; i++ {
@@ -150,7 +157,7 @@ func TestCAS(t *testing.T) {
 		} else {
 			cc = 5
 		}
-		require.NoError(t, kv.CompareAndSet(k, v, cc))
+		require.Error(t, kv.CompareAndSet(k, v, cc))
 	}
 	time.Sleep(time.Second)
 	for i := 0; i < 100; i++ {
@@ -169,7 +176,7 @@ func TestCAS(t *testing.T) {
 		} else {
 			cc = 5
 		}
-		require.NoError(t, kv.CompareAndDelete(k, cc))
+		require.Error(t, kv.CompareAndDelete(k, cc))
 	}
 	time.Sleep(time.Second)
 	for i := 0; i < 100; i++ {
@@ -202,28 +209,28 @@ func TestGet(t *testing.T) {
 	kv := NewKV(getTestOptions(dir))
 	defer kv.Close()
 
-	require.NoError(t, kv.Set([]byte("key1"), []byte("val1")))
+	kv.Set([]byte("key1"), []byte("val1"))
 	value, casCounter := kv.Get([]byte("key1"))
 	require.EqualValues(t, "val1", value)
 	require.True(t, casCounter != 0)
 
-	require.NoError(t, kv.Set([]byte("key1"), []byte("val2")))
+	kv.Set([]byte("key1"), []byte("val2"))
 	value, casCounter = kv.Get([]byte("key1"))
 	require.EqualValues(t, "val2", value)
 	require.True(t, casCounter != 0)
 
-	require.NoError(t, kv.Delete([]byte("key1")))
+	kv.Delete([]byte("key1"))
 	value, casCounter = kv.Get([]byte("key1"))
 	require.Nil(t, value)
 	require.True(t, casCounter != 0)
 
-	require.NoError(t, kv.Set([]byte("key1"), []byte("val3")))
+	kv.Set([]byte("key1"), []byte("val3"))
 	value, casCounter = kv.Get([]byte("key1"))
 	require.EqualValues(t, "val3", value)
 	require.True(t, casCounter != 0)
 
 	longVal := make([]byte, 1000)
-	require.NoError(t, kv.Set([]byte("key1"), longVal))
+	kv.Set([]byte("key1"), longVal)
 	value, casCounter = kv.Get([]byte("key1"))
 	require.EqualValues(t, longVal, value)
 	require.True(t, casCounter != 0)
@@ -252,9 +259,12 @@ func TestGetMore(t *testing.T) {
 				Value: []byte(fmt.Sprintf("%09d", j)),
 			})
 		}
-		require.NoError(t, kv.BatchSet(entries))
+		kv.BatchSet(entries)
+		for _, e := range entries {
+			require.NoError(t, e.Error, "entry with error: %+v", e)
+		}
 	}
-	kv.Validate()
+	kv.validate()
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
@@ -277,9 +287,12 @@ func TestGetMore(t *testing.T) {
 				Value: []byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", j)),
 			})
 		}
-		require.NoError(t, kv.BatchSet(entries))
+		kv.BatchSet(entries)
+		for _, e := range entries {
+			require.NoError(t, e.Error, "entry with error: %+v", e)
+		}
 	}
-	kv.Validate()
+	kv.validate()
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
@@ -302,9 +315,12 @@ func TestGetMore(t *testing.T) {
 				Meta: BitDelete,
 			})
 		}
-		require.NoError(t, kv.BatchSet(entries))
+		kv.BatchSet(entries)
+		for _, e := range entries {
+			require.NoError(t, e.Error, "entry with error: %+v", e)
+		}
 	}
-	kv.Validate()
+	kv.validate()
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			// Display some progress. Right now, it's not very fast with no caching.
@@ -337,7 +353,7 @@ func TestIterate2Basic(t *testing.T) {
 		if (i % 1000) == 0 {
 			t.Logf("Put i=%d\n", i)
 		}
-		require.NoError(t, kv.Set(bkey(i), bval(i)))
+		kv.Set(bkey(i), bval(i))
 	}
 
 	opt := IteratorOptions{}
@@ -399,7 +415,7 @@ func TestLoad(t *testing.T) {
 				fmt.Printf("Putting i=%d\n", i)
 			}
 			k := []byte(fmt.Sprintf("%09d", i))
-			require.NoError(t, kv.Set(k, k))
+			kv.Set(k, k)
 		}
 		kv.Close()
 	}
@@ -442,6 +458,7 @@ func TestCrash(t *testing.T) {
 	opt.Dir = dir
 	opt.DoNotCompact = true
 	opt.Verbose = true
+	opt.SyncWrites = true // Important for this test to pass.
 
 	kv := NewKV(&opt)
 	var keys [][]byte
@@ -459,8 +476,10 @@ func TestCrash(t *testing.T) {
 		entries = append(entries, e)
 
 		if len(entries) == 100 {
-			err := kv.BatchSet(entries)
-			require.Nil(t, err)
+			kv.BatchSet(entries)
+			for _, e := range entries {
+				require.NoError(t, e.Error, "entry with error: %+v", e)
+			}
 			entries = entries[:0]
 		}
 	}
@@ -510,6 +529,7 @@ func TestCrashCAS(t *testing.T) {
 	opt.Dir = dir
 	opt.DoNotCompact = true
 	opt.Verbose = true
+	opt.SyncWrites = true // Important for this test to pass.
 
 	kv := NewKV(&opt)
 	var keys [][]byte
@@ -526,7 +546,10 @@ func TestCrashCAS(t *testing.T) {
 		}
 		entries = append(entries, e)
 	}
-	err = kv.BatchSet(entries)
+	kv.BatchSet(entries)
+	for _, e := range entries {
+		require.NoError(t, e.Error, "entry with error: %+v", e)
+	}
 	require.Nil(t, err)
 
 	oldEntries := entries
@@ -552,8 +575,7 @@ func TestCrashCAS(t *testing.T) {
 		}
 		entries = append(entries, e)
 	}
-	err = kv.BatchSet(entries)
-	require.Nil(t, err)
+	kv.BatchSet(entries)
 
 	for i, k := range keys {
 		value, casCounter := kv.Get(k)

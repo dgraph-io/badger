@@ -24,6 +24,8 @@ Badger has these design goals in mind:
 
 ## Design
 
+Badger is based on [WiscKey paper by University of Wisconsin, Madison](https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf).
+
 In simplest terms, keys are stored in LSM trees along with pointers to values, which would be stored in write-ahead log files, aka value logs.
 Keys would typically be kept in RAM, values would be served directly off SSD.
 
@@ -31,16 +33,20 @@ Keys would typically be kept in RAM, values would be served directly off SSD.
 
 SSDs are best at doing serial writes (like HDD) and random reads (unlike HDD).
 Each write reduces the lifecycle of an SSD, so Badger aims to reduce the write amplification of a typical LSM tree.
+
 It achieves this by separating the keys from values. Keys tend to be smaller in size and are stored in the LSM tree.
 Values (which tend to be larger in size) are stored in value logs, which also double as write ahead logs for fault tolerance.
+
 Only a pointer to the value is stored along with the key, which significantly reduces the size of each KV pair in LSM tree.
 This allows storing lot more KV pairs per table. For e.g., a table of size 64MB can store 2 million KV pairs assuming an average key size of 16 bytes, and a value pointer of 16 bytes (with prefix diffing in Badger, the average key sizes stored in a table would be lower).
+Thus, lesser compactions are required to achieve stability for the LSM tree, which results in fewer writes (all writes being serial).
 
 ### Nature of LSM trees
 
 Because only keys (and value pointers) are stored in LSM tree, Badger generates much smaller LSM trees.
 Even for huge datasets, these smaller trees can fit nicely in RAM allowing for lot quicker accesses to and iteration through keys.
-For random gets, keys can be quickly looked up from within RAM, and only pointed reads from SSD are done to retrieve value.
+For random gets, keys can be quickly looked up from within RAM, giving access to the value pointer.
+Then only a single pointed read from SSD (random read) is done to retrieve value.
 This improves random get performance significantly compared to traditional LSM tree design used by other KV stores.
 
 ## Comparisons
@@ -49,16 +55,16 @@ This improves random get performance significantly compared to traditional LSM t
 | -------             | ------                                       | -------            | ------    |
 | Design              | LSM tree with value log                      | LSM tree only      | B+ tree   |
 | High RW Performance | Yes                                          | Yes                | No        |
-| Designed for SSDs   | Yes (with latest research*)                  | Not specifically** | No        |
+| Designed for SSDs   | Yes (with latest research <sup>1</sup>)                  | Not specifically <sup>2</sup> | No        |
 | Embeddable          | Yes                                          | Yes                | Yes       |
 | Sorted KV access    | Yes                                          | Yes                | Yes       |
 | Go Native (no Cgo)  | Yes                                          | No                 | Yes       |
 | Transactions        | No (but provides compare and set operations) | Yes (but non-ACID) | Yes, ACID |
 | Snapshots           | No                                           | Yes                | Yes       |
 
-* Badger is based on a paper called [WiscKey by University of Wisconsin, Madison](https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf), which saw big wins with separating values from keys, significantly reducing the write amplification compared to a typical LSM tree.
+<sup>1</sup> Badger is based on a paper called [WiscKey by University of Wisconsin, Madison](https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf), which saw big wins with separating values from keys, significantly reducing the write amplification compared to a typical LSM tree.
 
-** RocksDB is an SSD optimized version of LevelDB, which was designed specifically for rotating disks.
+<sup>2</sup> RocksDB is an SSD optimized version of LevelDB, which was designed specifically for rotating disks.
 As such RocksDB's design isn't aimed at SSDs.
 
 ## Crash Consistency

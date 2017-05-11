@@ -36,7 +36,7 @@ func (s *levelHandler) getSummary(summary *Summary) {
 	}
 }
 
-func (s *KV) Validate() { s.lc.validate() }
+func (s *KV) validate() { s.lc.validate() }
 
 func (s *levelsController) validate() {
 	for _, l := range s.levels {
@@ -63,7 +63,7 @@ func (s *levelHandler) validate() {
 	}
 }
 
-func (s *KV) DebugPrintMore() { s.lc.debugPrintMore() }
+func (s *KV) debugPrintMore() { s.lc.debugPrintMore() }
 
 // debugPrint shows the general state.
 func (s *levelsController) debugPrint() {

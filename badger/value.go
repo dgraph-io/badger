@@ -51,6 +51,7 @@ const (
 )
 
 var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
+var CasMismatch error = errors.New("CompareAndSet failed due to counter mismatch.")
 
 type logFile struct {
 	sync.RWMutex
@@ -125,7 +126,7 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 			break
 		}
 
-		e.Offset = recordOffset
+		e.offset = recordOffset
 		_, hlen = h.Decode(hbuf[:])
 		// fmt.Printf("[%d] Header read: %+v\n", count, h)
 		vl := int(h.vlen)
@@ -184,7 +185,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 	elog := trace.NewEventLog("badger", "vlog-rewrite")
 	defer elog.Finish()
 	elog.Printf("Rewriting fid: %d", f.fid)
-	fmt.Println("rewrite called")
+	y.Printf("rewrite called\n")
 
 	entries = entries[:0]
 	y.AssertTrue(vlog.kv != nil)
@@ -211,10 +212,10 @@ func (vlog *valueLog) rewrite(f *logFile) {
 		if int32(vp.Fid) > f.fid {
 			return
 		}
-		if int64(vp.Offset) > e.Offset {
+		if int64(vp.Offset) > e.offset {
 			return
 		}
-		if int32(vp.Fid) == f.fid && int64(vp.Offset) == e.Offset {
+		if int32(vp.Fid) == f.fid && int64(vp.Offset) == e.offset {
 			// This new entry only contains the key, and a pointer to the value.
 			var ne Entry
 			y.AssertTruef(e.Meta&^BitCompressed == 0, "Got meta: %v", e.Meta)
@@ -282,26 +283,28 @@ func (vlog *valueLog) writeToKV(elog trace.EventLog) {
 	}
 	for i, b := range requests {
 		elog.Printf("req %d has %d entries", i, len(b.Entries))
-		fmt.Printf("req %d has %d entries\n", i, len(b.Entries))
 		b.Wg.Add(1)
 		y.AssertTrue(len(b.Entries) > 0)
 		vlog.kv.writeCh <- b // Write out these blocks with newer value offsets.
 	}
 	for i, b := range requests {
 		elog.Printf("req %d done", i)
-		fmt.Printf("req %d done\n", i)
 		b.Wg.Wait()
 	}
 }
 
+// Entry provides Key, Value and if required, CASCounterCheck to kv.BatchSet() API.
+// If CASCounterCheck is provided, it would be compared against the current casCounter
+// assigned to this key-value. Set be done on this key only if the counters match.
 type Entry struct {
 	Key             []byte
 	Meta            byte
 	Value           []byte
-	Offset          int64
 	CASCounterCheck uint16 // If nonzero, we will check if existing casCounter matches.
+	Error           error  // Error if any.
 
 	// Fields maintained internally.
+	offset     int64
 	casCounter uint16
 }
 
@@ -359,8 +362,8 @@ func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) int {
 }
 
 func (e Entry) print(prefix string) {
-	fmt.Printf("%s Key: %s Meta: %d Offset: %d len(val)=%d cas=%d check=%d\n",
-		prefix, e.Key, e.Meta, e.Offset, len(e.Value), e.casCounter, e.CASCounterCheck)
+	y.Printf("%s Key: %s Meta: %d Offset: %d len(val)=%d cas=%d check=%d\n",
+		prefix, e.Key, e.Meta, e.offset, len(e.Value), e.casCounter, e.CASCounterCheck)
 }
 
 type header struct {
@@ -497,7 +500,7 @@ func (l *valueLog) Close() {
 func (l *valueLog) Replay(ptr valuePointer, fn logEntry) {
 	fid := int32(ptr.Fid)
 	offset := int64(ptr.Offset)
-	fmt.Printf("Seeking at value pointer: %+v\n", ptr)
+	y.Printf("Seeking at value pointer: %+v\n", ptr)
 
 	for _, f := range l.files {
 		if f.fid < fid {
@@ -645,7 +648,6 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 func (l *valueLog) runGCInLoop(lc *y.LevelCloser) {
 	defer lc.Done()
 	if l.opt.ValueGCThreshold == 0.0 {
-		fmt.Println("l.opt.ValueGCThreshold = 0.0. Exiting runGCInLoop")
 		return
 	}
 
@@ -653,7 +655,6 @@ func (l *valueLog) runGCInLoop(lc *y.LevelCloser) {
 	for {
 		select {
 		case <-lc.HasBeenClosed():
-			fmt.Println("has been closed")
 			return
 		case <-tick.C:
 			l.doRunGC()
@@ -665,7 +666,6 @@ func (l *valueLog) pickLog() *logFile {
 	l.RLock()
 	defer l.RUnlock()
 	if len(l.files) <= 1 {
-		fmt.Println("Need at least 2 value log files to run GC.")
 		return nil
 	}
 	// This file shouldn't be being written to.
@@ -692,11 +692,9 @@ func (vlog *valueLog) doRunGC() {
 	var window float64 = 100.0
 	count := 0
 
-	fmt.Printf("Picked fid: %d for GC\n", lf.fid)
 	// Pick a random start point for the log.
 	skipFirstM := float64(rand.Int63n(LogSize/int64(M))) - window
 	var skipped float64
-	fmt.Printf("Skipping first %5.2f MB\n", skipFirstM)
 
 	start := time.Now()
 	y.AssertTrue(vlog.kv != nil)
@@ -741,12 +739,12 @@ func (vlog *valueLog) doRunGC() {
 			r.discard += esz
 			return true
 		}
-		if int64(vp.Offset) > e.Offset {
+		if int64(vp.Offset) > e.offset {
 			// Value is present in a later offset, but in the same log.
 			r.discard += esz
 			return true
 		}
-		if int32(vp.Fid) == lf.fid && int64(vp.Offset) == e.Offset {
+		if int32(vp.Fid) == lf.fid && int64(vp.Offset) == e.offset {
 			// This is still the active entry. This would need to be rewritten.
 			r.keep += esz
 
@@ -754,7 +752,7 @@ func (vlog *valueLog) doRunGC() {
 			fmt.Printf("Reason=%+v\n", r)
 			ne, err := vlog.Read(vp, nil)
 			y.Check(err)
-			ne.Offset = int64(vp.Offset)
+			ne.offset = int64(vp.Offset)
 			if ne.casCounter == e.casCounter {
 				ne.print("Latest Entry in LSM")
 				e.print("Latest Entry in Log")
@@ -765,15 +763,15 @@ func (vlog *valueLog) doRunGC() {
 	})
 
 	y.Checkf(err, "While iterating for RunGC.")
-	fmt.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
+	y.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
 
 	if r.total < 10.0 || r.keep >= vlog.opt.ValueGCThreshold*r.total {
-		fmt.Printf("Skipping GC on fid: %d\n\n", lf.fid)
+		y.Printf("Skipping GC on fid: %d\n\n", lf.fid)
 		return
 	}
 
-	fmt.Printf("=====> REWRITING VLOG %d\n", lf.fid)
+	y.Printf("=====> REWRITING VLOG %d\n", lf.fid)
 	vlog.rewrite(lf)
-	fmt.Println("REWRITE DONE")
+	y.Printf("REWRITE DONE\n")
 	vlog.elog.Printf("Done rewriting.")
 }

@@ -7,6 +7,8 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
+// KVItem is returned during iteration. Both the Key() and Value() output is only valid until
+// iterator.Next() is called.
 type KVItem struct {
 	wg         sync.WaitGroup
 	key        []byte
@@ -18,13 +20,14 @@ type KVItem struct {
 	next       *KVItem
 }
 
-// Key returns the key. If nil, the iteration is done and you should break out of channel loop.
+// Key returns the key. Remember to copy if you need access it outside the iteration loop.
 func (item *KVItem) Key() []byte {
 	return item.key
 }
 
-// Value returns the value, generally fetched from the value log. This can block while
-// the fetch workers populate the value.
+// Value returns the value, generally fetched from the value log. This call can block while
+// the value is populated asynchronously via a disk read. Remember to parse or copy it if you
+// need to access it outside the iterator loop.
 func (item *KVItem) Value() []byte {
 	item.wg.Wait()
 	return item.val
@@ -64,7 +67,7 @@ func (l *list) pop() *KVItem {
 type IteratorOptions struct {
 	PrefetchSize int
 	FetchValues  bool
-	Reversed     bool
+	Reverse      bool
 }
 
 type Iterator struct {
@@ -182,17 +185,19 @@ func (it *Iterator) Rewind() {
 
 func (it *Iterator) Err() error { return nil }
 
+// NewIterator returns a new iterator. Depending upon the options, either only keys, or both
+// key-value pairs would be fetched. The keys are returned in lexicographically sorted order.
 func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 	tables, decr := s.getMemTables()
 	defer decr()
 	var iters []y.Iterator
 	for i := 0; i < len(tables); i++ {
-		iters = append(iters, tables[i].NewUniIterator(opt.Reversed))
+		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
 	}
-	iters = s.lc.appendIterators(iters, opt.Reversed) // This will increment references.
+	iters = s.lc.appendIterators(iters, opt.Reverse) // This will increment references.
 	res := &Iterator{
 		kv:   s,
-		iitr: y.NewMergeIterator(iters, opt.Reversed),
+		iitr: y.NewMergeIterator(iters, opt.Reverse),
 		opt:  opt,
 	}
 	return res
