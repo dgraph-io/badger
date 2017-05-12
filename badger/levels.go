@@ -377,11 +377,13 @@ func (s *levelsController) compactBuildTables(
 			defer wg.Done()
 			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
 			y.Check(err)
+
 			// Encode the level number as table metadata.
 			var levelNum [2]byte
 			binary.BigEndian.PutUint16(levelNum[:], uint16(l+1))
+			_, err = fd.Write(builder.Finish(levelNum[:]))
+			y.Checkf(err, "Unable to write to file: %d", fileID)
 
-			fd.Write(builder.Finish(levelNum[:]))
 			newTables[idx], err = table.OpenTable(fd, s.kv.opt.MapTablesTo)
 			// decrRef is added below.
 			y.Check(err)
