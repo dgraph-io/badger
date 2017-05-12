@@ -158,12 +158,12 @@ func (s *Table) Close() {
 
 // SetMetadata updates our metadata to the new metadata.
 // For now, they must be of the same size.
-func (t *Table) SetMetadata(meta []byte) error {
+func (t *Table) SetMetadata(meta []byte) {
 	y.AssertTrue(len(meta) == len(t.metadata))
 	pos := t.tableSize - 4 - len(t.metadata)
 	written, err := t.fd.WriteAt(meta, int64(pos))
 	y.AssertTrue(written == len(meta))
-	return err
+	y.Check(err)
 }
 
 var EOF = errors.New("End of mapped region")

@@ -107,13 +107,10 @@ func (s *levelsController) reserveFileIDs(k int) (uint64, uint64) {
 
 // updateLevel is called only when moving table to the next level, when there is no overlap
 // with the next level. Here, we update the table metadata.
-func updateLevel(t *table.Table, newLevel int) error {
+func updateLevel(t *table.Table, newLevel int) {
 	var metadata [2]byte
 	binary.BigEndian.PutUint16(metadata[:], uint16(newLevel))
-	if err := t.SetMetadata(metadata[:]); err != nil {
-		return err
-	}
-	return nil
+	t.SetMetadata(metadata[:])
 }
 
 func (s *levelsController) reserveCompactID() uint64 {

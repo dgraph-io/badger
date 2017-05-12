@@ -233,10 +233,12 @@ func (vlog *valueLog) rewrite(f *logFile) {
 		}
 	}
 
-	f.iterate(0, func(e Entry) bool {
+	err := f.iterate(0, func(e Entry) bool {
 		fe(e)
 		return true
 	})
+	y.Check(err)
+
 	elog.Printf("Processed %d entries in total", count)
 	// Sort the entries, so lookups can potentially use page cache better.
 	sort.Slice(entries, func(i, j int) bool {
