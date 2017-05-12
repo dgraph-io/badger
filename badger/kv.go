@@ -432,12 +432,21 @@ func (s *KV) BatchSet(entries []*Entry) {
 
 // Set sets the provided value for a given key. If key is not present, it is created.
 // If it is present, the existing value is overwritten with the one provided.
-func (s *KV) Set(key []byte, val []byte) {
+func (s *KV) Set(key, val []byte) {
 	e := &Entry{
 		Key:   key,
 		Value: val,
 	}
 	s.BatchSet([]*Entry{e})
+}
+
+// EntriesSet adds a Set to the list of entries.
+// Exposing this so that user does not have to specify the Entry directly.
+func EntriesSet(s []*Entry, key, val []byte) []*Entry {
+	return append(s, &Entry{
+		Key:   key,
+		Value: val,
+	})
 }
 
 // CompareAndSet sets the given value, ensuring that the no other Set operation has happened,
@@ -454,6 +463,8 @@ func (s *KV) CompareAndSet(key []byte, val []byte, casCounter uint16) error {
 }
 
 // Delete deletes a key.
+// Exposing this so that user does not have to specify the Entry directly.
+// For example, BitDelete seems internal to badger.
 func (s *KV) Delete(key []byte) {
 	e := &Entry{
 		Key:  key,
@@ -461,6 +472,14 @@ func (s *KV) Delete(key []byte) {
 	}
 
 	s.BatchSet([]*Entry{e})
+}
+
+// EntriesDelete adds a Del to the list of entries.
+func EntriesDelete(s []*Entry, key []byte) []*Entry {
+	return append(s, &Entry{
+		Key:  key,
+		Meta: BitDelete,
+	})
 }
 
 // CompareAndDelete deletes a key ensuring that the it has not been changed since last read.
