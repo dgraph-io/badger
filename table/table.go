@@ -169,7 +169,7 @@ func (t *Table) SetMetadata(meta []byte) error {
 var EOF = errors.New("End of mapped region")
 
 func (t *Table) read(off int, sz int) ([]byte, error) {
-	if t.mmap != nil {
+	if len(t.mmap) > 0 {
 		if len(t.mmap[off:]) < sz {
 			return nil, EOF
 		}
