@@ -40,11 +40,11 @@ type compressedAoS struct {
 	characters  []byte
 	charIndexes []int
 
-	// We leave compresion of nextCharIdx for later
+	// We leave compression of nextCharIdx for later
 	nextCharIdx []int
 }
 
-// Returns number of bytes len1 and prefix of lenght len1 < len
+// Returns number of bytes len1 and prefix of length len1 < len
 // from the suffix on idx pos in AoS
 func (aos *compressedAoS) lookupAoS(idx int, length int) []byte {
 	var buffer bytes.Buffer
@@ -103,9 +103,9 @@ func (store *SuccinctStore) Search(str []byte) []int {
 		return bytes.Compare(store.aos.lookupAoS(id+firstOccurence, len(str)), str) > 0
 	})
 
-	occurences := make([]int, resultLength)
+	occurrences := make([]int, resultLength)
 	for i := firstOccurence; i < firstOccurence+resultLength; i++ {
-		occurences[i-firstOccurence] = store.aoS2Input[i]
+		occurrences[i-firstOccurence] = store.aoS2Input[i]
 	}
-	return occurences
+	return occurrences
 }
