@@ -56,9 +56,9 @@ type logFile struct {
 	sync.RWMutex
 	path   string
 	fd     *os.File
-	fid    int32
-	offset int64
-	size   int64
+	fid    uint16
+	offset uint32
+	size   uint32
 }
 
 // openReadOnly assumes that we have a write lock on logFile.
@@ -69,7 +69,7 @@ func (lf *logFile) openReadOnly() {
 
 	fi, err := lf.fd.Stat()
 	y.Check(err)
-	lf.size = fi.Size()
+	lf.size = uint32(fi.Size())
 }
 
 func (lf *logFile) read(buf []byte, offset int64) error {
@@ -92,8 +92,8 @@ type logEntry func(e Entry) bool
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
-func (f *logFile) iterate(offset int64, fn logEntry) error {
-	_, err := f.fd.Seek(offset, 0)
+func (f *logFile) iterate(offset uint32, fn logEntry) error {
+	_, err := f.fd.Seek(int64(offset), 0)
 	y.Check(err)
 
 	read := func(r *bufio.Reader, buf []byte) error {
@@ -148,7 +148,7 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 			e.Key = decompressed[:h.klen]
 			e.Value = decompressed[h.klen:]
 
-			recordOffset += int64(hlen + vl)
+			recordOffset += uint32(hlen + vl)
 		} else {
 			kl := int(h.klen)
 			if cap(k) < kl {
@@ -167,7 +167,7 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 				return err
 			}
 
-			recordOffset += int64(hlen + kl + vl)
+			recordOffset += uint32(hlen + kl + vl)
 		}
 
 		if !fn(e) {
@@ -181,8 +181,8 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 var entries = make([]*Entry, 0, 1000000)
 
 func (vlog *valueLog) rewrite(f *logFile) {
-	maxFid := atomic.LoadInt32(&vlog.maxFid)
-	y.AssertTruef(f.fid < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
+	maxFid := atomic.LoadUint32(&vlog.maxFid)
+	y.AssertTruef(uint32(f.fid) < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
 
 	elog := trace.NewEventLog("badger", "vlog-rewrite")
 	defer elog.Finish()
@@ -211,13 +211,13 @@ func (vlog *valueLog) rewrite(f *logFile) {
 		var vp valuePointer
 		vp.Decode(vs.Value)
 
-		if int32(vp.Fid) > f.fid {
+		if vp.Fid > f.fid {
 			return
 		}
-		if int64(vp.Offset) > e.offset {
+		if vp.Offset > e.offset {
 			return
 		}
-		if int32(vp.Fid) == f.fid && int64(vp.Offset) == e.offset {
+		if vp.Fid == f.fid && vp.Offset == e.offset {
 			// This new entry only contains the key, and a pointer to the value.
 			var ne Entry
 			y.AssertTruef(e.Meta&^BitCompressed == 0, "Got meta: %v", e.Meta)
@@ -308,7 +308,7 @@ type Entry struct {
 	Error           error  // Error if any.
 
 	// Fields maintained internally.
-	offset     int64
+	offset     uint32
 	casCounter uint16
 }
 
@@ -398,25 +398,25 @@ func (h *header) Decode(buf []byte) ([]byte, int) {
 }
 
 type valuePointer struct {
-	Fid    uint32
+	Fid    uint16
 	Len    uint32
-	Offset uint64
+	Offset uint32
 }
 
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode(b []byte) []byte {
-	y.AssertTrue(len(b) >= 16)
-	binary.BigEndian.PutUint32(b[:4], p.Fid)
-	binary.BigEndian.PutUint32(b[4:8], p.Len)
-	binary.BigEndian.PutUint64(b[8:16], uint64(p.Offset))
-	return b[:16]
+	y.AssertTrue(len(b) >= 10)
+	binary.BigEndian.PutUint16(b[:2], p.Fid)
+	binary.BigEndian.PutUint32(b[2:6], p.Len)
+	binary.BigEndian.PutUint32(b[6:10], p.Offset)
+	return b[:10]
 }
 
 func (p *valuePointer) Decode(b []byte) {
-	y.AssertTrue(len(b) >= 16)
-	p.Fid = binary.BigEndian.Uint32(b[:4])
-	p.Len = binary.BigEndian.Uint32(b[4:8])
-	p.Offset = binary.BigEndian.Uint64(b[8:16])
+	y.AssertTrue(len(b) >= 10)
+	p.Fid = binary.BigEndian.Uint16(b[:2])
+	p.Len = binary.BigEndian.Uint32(b[2:6])
+	p.Offset = binary.BigEndian.Uint32(b[6:10])
 }
 
 type valueLog struct {
@@ -426,12 +426,12 @@ type valueLog struct {
 	elog    trace.EventLog
 	files   []*logFile
 	kv      *KV
-	maxFid  int32
-	offset  int64
+	maxFid  uint32
+	offset  uint32
 	opt     Options
 }
 
-func (l *valueLog) fpath(fid int32) string {
+func (l *valueLog) fpath(fid uint16) string {
 	return fmt.Sprintf("%s/%06d.vlog", l.dirPath, fid)
 }
 
@@ -452,7 +452,7 @@ func (l *valueLog) openOrCreateFiles() {
 		}
 		found[fid] = struct{}{}
 
-		lf := &logFile{fid: int32(fid), path: l.fpath(int32(fid))}
+		lf := &logFile{fid: uint16(fid), path: l.fpath(uint16(fid))}
 		l.files = append(l.files, lf)
 	}
 
@@ -467,7 +467,7 @@ func (l *valueLog) openOrCreateFiles() {
 		if i == len(l.files)-1 {
 			lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
 			y.Check(err)
-			l.maxFid = lf.fid
+			l.maxFid = uint32(lf.fid)
 
 		} else {
 			lf.openReadOnly()
@@ -502,8 +502,8 @@ func (l *valueLog) Close() {
 
 // Replay replays the value log. The kv provided is only valid for the lifetime of function call.
 func (l *valueLog) Replay(ptr valuePointer, fn logEntry) {
-	fid := int32(ptr.Fid)
-	offset := int64(ptr.Offset)
+	fid := ptr.Fid
+	offset := ptr.Offset
 	y.Printf("Seeking at value pointer: %+v\n", ptr)
 
 	for _, f := range l.files {
@@ -521,7 +521,8 @@ func (l *valueLog) Replay(ptr valuePointer, fn logEntry) {
 	// Seek to the end to start writing.
 	var err error
 	last := l.files[len(l.files)-1]
-	last.offset, err = last.fd.Seek(0, io.SeekEnd)
+	lastOffset, err := last.fd.Seek(0, io.SeekEnd)
+	last.offset = uint32(lastOffset)
 	y.Checkf(err, "Unable to seek to the end")
 }
 
@@ -547,14 +548,14 @@ func (l *valueLog) Write(reqs []*request) {
 			y.Fatalf("Unable to write to value log: %v", err)
 		}
 		l.elog.Printf("Done")
-		curlf.offset += int64(n)
+		curlf.offset += uint32(n)
 		l.buf.Reset()
 
-		if curlf.offset > l.opt.ValueLogFileSize {
+		if curlf.offset > uint32(l.opt.ValueLogFileSize) {
 			var err error
 			curlf.doneWriting()
 
-			newlf := &logFile{fid: atomic.AddInt32(&l.maxFid, 1), offset: 0}
+			newlf := &logFile{fid: uint16(atomic.AddUint32(&l.maxFid, 1)), offset: 0}
 			newlf.path = l.fpath(newlf.fid)
 			newlf.fd, err = y.OpenSyncedFile(newlf.path, l.opt.SyncWrites)
 			y.Check(err)
@@ -586,13 +587,13 @@ func (l *valueLog) Write(reqs []*request) {
 				continue
 			}
 
-			p.Fid = uint32(curlf.fid)
-			p.Offset = uint64(curlf.offset) + uint64(l.buf.Len()) // Use the offset including buffer length so far.
-			plen := entryEncoder.Encode(e, &l.buf)                // Now encode the entry into buffer.
+			p.Fid = curlf.fid
+			p.Offset = curlf.offset + uint32(l.buf.Len()) // Use the offset including buffer length so far.
+			plen := entryEncoder.Encode(e, &l.buf)        // Now encode the entry into buffer.
 			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
 
-			if p.Offset > uint64(l.opt.ValueLogFileSize) {
+			if p.Offset > uint32(l.opt.ValueLogFileSize) {
 				toDisk()
 			}
 		}
@@ -603,7 +604,7 @@ func (l *valueLog) Write(reqs []*request) {
 	// an invalid file descriptor.
 }
 
-func (l *valueLog) getFile(fid int32) (*logFile, error) {
+func (l *valueLog) getFile(fid uint16) (*logFile, error) {
 	l.RLock()
 	defer l.RUnlock()
 
@@ -618,7 +619,7 @@ func (l *valueLog) getFile(fid int32) (*logFile, error) {
 
 // Read reads the value log at a given location.
 func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
-	lf, err := l.getFile(int32(p.Fid))
+	lf, err := l.getFile(p.Fid)
 	if err != nil {
 		return e, err
 	}
@@ -698,7 +699,7 @@ func (vlog *valueLog) doRunGC() {
 	count := 0
 
 	// Pick a random start point for the log.
-	skipFirstM := float64(rand.Int63n(vlog.opt.ValueLogFileSize/int64(M))) - window
+	skipFirstM := float64(rand.Intn(vlog.opt.ValueLogFileSize/M)) - window
 	var skipped float64
 
 	start := time.Now()
@@ -739,17 +740,17 @@ func (vlog *valueLog) doRunGC() {
 		var vp valuePointer
 		vp.Decode(vs.Value)
 
-		if int32(vp.Fid) > lf.fid {
+		if vp.Fid > lf.fid {
 			// Value is present in a later log. Discard.
 			r.discard += esz
 			return true
 		}
-		if int64(vp.Offset) > e.offset {
+		if vp.Offset > e.offset {
 			// Value is present in a later offset, but in the same log.
 			r.discard += esz
 			return true
 		}
-		if int32(vp.Fid) == lf.fid && int64(vp.Offset) == e.offset {
+		if vp.Fid == lf.fid && vp.Offset == e.offset {
 			// This is still the active entry. This would need to be rewritten.
 			r.keep += esz
 
@@ -757,7 +758,7 @@ func (vlog *valueLog) doRunGC() {
 			fmt.Printf("Reason=%+v\n", r)
 			ne, err := vlog.Read(vp, nil)
 			y.Check(err)
-			ne.offset = int64(vp.Offset)
+			ne.offset = vp.Offset
 			if ne.casCounter == e.casCounter {
 				ne.print("Latest Entry in LSM")
 				e.print("Latest Entry in Log")

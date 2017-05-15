@@ -61,7 +61,7 @@ type Options struct {
 	ValueGCThreshold float64
 
 	// Size of single value log file.
-	ValueLogFileSize int64
+	ValueLogFileSize int
 
 	// The following affect value compression in value log.
 	ValueCompressionMinSize  int     // Minimal size in bytes of KV pair to be compressed.
@@ -331,7 +331,7 @@ var requestPool = sync.Pool{
 }
 
 func (s *KV) writeToLSM(b *request) {
-	var offsetBuf [16]byte
+	var offsetBuf [10]byte
 	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
 
 	for i, entry := range b.Entries {
@@ -564,7 +564,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) {
 			if s.opt.Verbose {
 				fmt.Printf("Storing offset: %+v\n", ft.vptr)
 			}
-			offset := make([]byte, 16)
+			offset := make([]byte, 10)
 			s.Lock() // For vptr.
 			s.vptr.Encode(offset)
 			s.Unlock()
