@@ -380,6 +380,10 @@ func (s *KV) writeRequests(reqs []*request) {
 
 	s.elog.Printf("Writing to memtable")
 	for i, b := range reqs {
+		if len(b.Entries) == 0 {
+			b.Wg.Done()
+			continue
+		}
 		for !s.hasRoomForWrite() {
 			s.elog.Printf("Making room for writes")
 			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
