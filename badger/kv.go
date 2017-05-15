@@ -148,6 +148,9 @@ func NewKV(opt *Options) *KV {
 		vptr.Decode(val)
 	}
 
+	lc = out.closer.Register("writes")
+	go out.doWrites(lc)
+
 	first := true
 	fn := func(e Entry) bool { // Function for replaying.
 		if first {
@@ -171,13 +174,14 @@ func NewKV(opt *Options) *KV {
 			Meta:       e.Meta,
 			CASCounter: e.casCounter,
 		}
+		for !out.hasRoomForWrite() {
+			y.Printf("Replay: Making room for writes")
+			time.Sleep(10 * time.Millisecond)
+		}
 		out.mt.Put(nk, v)
 		return true
 	}
 	out.vlog.Replay(vptr, fn)
-
-	lc = out.closer.Register("writes")
-	go out.doWrites(lc)
 
 	return out
 }
