@@ -139,9 +139,6 @@ func NewKV(opt *Options) *KV {
 
 	out.vlog.Open(out, opt)
 
-	lc = out.closer.Register("value-gc")
-	go out.vlog.runGCInLoop(lc)
-
 	val, _ := out.Get(head) // casCounter ignored.
 	var vptr valuePointer
 	if len(val) > 0 {
@@ -174,7 +171,7 @@ func NewKV(opt *Options) *KV {
 		} else {
 			nv = make([]byte, 16)
 			vp.Encode(nv)
-			meta = meta | BitValuePointer // BitValuePointer is 0 since valueLog does not know it.
+			meta = meta | BitValuePointer
 		}
 
 		v := y.ValueStruct{
@@ -190,6 +187,9 @@ func NewKV(opt *Options) *KV {
 		return true
 	}
 	out.vlog.Replay(vptr, fn)
+
+	lc = out.closer.Register("value-gc")
+	go out.vlog.runGCInLoop(lc)
 
 	return out
 }

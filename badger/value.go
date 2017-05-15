@@ -91,10 +91,10 @@ func (lf *logFile) doneWriting() {
 type logEntry func(e Entry, vp valuePointer) bool
 
 // iterate iterates over log file.
-// valuePointer is the pointer returned when writting entry to disk. It may not
-// be the last valuePointer for entry key that is stored in the LSM tree.
-// It does not allocate new memory for every entry and valuePointer. Therefore,
-// the they are only valid for the duration of fn call.
+// There is no guarantee that the valuePointer is consistent with the valuePointer
+// stored in the LSM tree for the key.
+// It doesn't allocate new memory for every entry and valuePointer. Therefore,
+// they are only valid for the duration of fn call.
 func (f *logFile) iterate(offset int64, fn logEntry) error {
 	_, err := f.fd.Seek(offset, 0)
 	y.Check(err)
@@ -153,7 +153,8 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 			e.Value = decompressed[h.klen:]
 
 			recordOffset += int64(hlen + vl)
-			vp.Len = uint32(len(hbuf)) + h.vlen
+			vp.Len = uint32(len(hbuf)) + h.vlen // h.vlen is sufficient, because key is
+			// compressed inside the block
 		} else {
 			kl := int(h.klen)
 			if cap(k) < kl {
@@ -712,8 +713,8 @@ func (vlog *valueLog) doRunGC() {
 
 	start := time.Now()
 	y.AssertTrue(vlog.kv != nil)
-	err := lf.iterate(0, func(e Entry, vpVL valuePointer) bool {
-		esz := float64(vpVL.Len) / (1 << 20) // in MBs. +4 for the CAS stuff.
+	err := lf.iterate(0, func(e Entry, vp valuePointer) bool {
+		esz := float64(vp.Len) / (1 << 20) // in MBs. +4 for the CAS stuff.
 		skipped += esz
 		if skipped < skipFirstM {
 			return true
@@ -732,7 +733,6 @@ func (vlog *valueLog) doRunGC() {
 		}
 
 		vs := vlog.kv.get(e.Key)
-		// TODO: can vs be nil if GC is run before replay after crash?
 		if (vs.Meta & BitDelete) > 0 {
 			// Key has been deleted. Discard.
 			r.discard += esz
@@ -746,7 +746,7 @@ func (vlog *valueLog) doRunGC() {
 
 		// Value is still present in value log.
 		y.AssertTrue(len(vs.Value) > 0)
-		var vp valuePointer
+
 		vp.Decode(vs.Value)
 
 		if int32(vp.Fid) > lf.fid {
