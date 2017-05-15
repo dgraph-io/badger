@@ -88,10 +88,13 @@ func (lf *logFile) doneWriting() {
 	lf.openReadOnly()
 }
 
-type logEntry func(e Entry) bool
+type logEntry func(e Entry, vp valuePointer) bool
 
-// iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
-// Therefore, the kv pair is only valid for the duration of fn call.
+// iterate iterates over log file.
+// valuePointer is the pointer returned when writting entry to disk. It may not
+// be the last valuePointer for entry key that is stored in the LSM tree.
+// It does not allocate new memory for every entry and valuePointer. Therefore,
+// the they are only valid for the duration of fn call.
 func (f *logFile) iterate(offset int64, fn logEntry) error {
 	_, err := f.fd.Seek(offset, 0)
 	y.Check(err)
@@ -118,6 +121,7 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 	decompressed := make([]byte, 1<<20)
 
 	var e Entry
+	var vp valuePointer
 	var hlen int
 	recordOffset := offset
 	for {
@@ -149,6 +153,7 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 			e.Value = decompressed[h.klen:]
 
 			recordOffset += int64(hlen + vl)
+			vp.Len = uint32(len(hbuf)) + h.vlen
 		} else {
 			kl := int(h.klen)
 			if cap(k) < kl {
@@ -168,9 +173,13 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 			}
 
 			recordOffset += int64(hlen + kl + vl)
+			vp.Len = uint32(len(hbuf)) + h.klen + h.vlen
 		}
 
-		if !fn(e) {
+		vp.Offset = uint64(e.offset)
+		vp.Fid = uint32(f.fid)
+
+		if !fn(e, vp) {
 			break
 		}
 		count++
@@ -236,7 +245,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 		}
 	}
 
-	err := f.iterate(0, func(e Entry) bool {
+	err := f.iterate(0, func(e Entry, vp valuePointer) bool {
 		fe(e)
 		return true
 	})
@@ -703,8 +712,8 @@ func (vlog *valueLog) doRunGC() {
 
 	start := time.Now()
 	y.AssertTrue(vlog.kv != nil)
-	err := lf.iterate(0, func(e Entry) bool {
-		esz := float64(len(e.Key)+len(e.Value)+1+4) / (1 << 20) // in MBs. +4 for the CAS stuff.
+	err := lf.iterate(0, func(e Entry, vpVL valuePointer) bool {
+		esz := float64(vpVL.Len) / (1 << 20) // in MBs. +4 for the CAS stuff.
 		skipped += esz
 		if skipped < skipFirstM {
 			return true
@@ -723,6 +732,7 @@ func (vlog *valueLog) doRunGC() {
 		}
 
 		vs := vlog.kv.get(e.Key)
+		// TODO: can vs be nil if GC is run before replay after crash?
 		if (vs.Meta & BitDelete) > 0 {
 			// Key has been deleted. Discard.
 			r.discard += esz
