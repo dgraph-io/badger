@@ -104,7 +104,7 @@ func (c *Closer) Get(name string) *LevelCloser {
 
 func (c *Closer) SignalAll() {
 	c.RLock()
-	c.RUnlock()
+	defer c.RUnlock()
 
 	for _, l := range c.levels {
 		l.Signal()
@@ -113,7 +113,7 @@ func (c *Closer) SignalAll() {
 
 func (c *Closer) WaitForAll() {
 	c.RLock()
-	c.RUnlock()
+	defer c.RUnlock()
 
 	for _, l := range c.levels {
 		l.Wait()
