@@ -587,8 +587,9 @@ func (l *valueLog) Write(reqs []*request) {
 			}
 
 			p.Fid = uint32(curlf.fid)
-			p.Offset = uint64(curlf.offset) + uint64(l.buf.Len())
-			p.Len = uint32(entryEncoder.Encode(e, &l.buf))
+			p.Offset = uint64(curlf.offset) + uint64(l.buf.Len()) // Use the offset including buffer length so far.
+			plen := entryEncoder.Encode(e, &l.buf)                // Now encode the entry into buffer.
+			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
 
 			if p.Offset > uint64(l.opt.ValueLogFileSize) {
