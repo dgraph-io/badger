@@ -80,6 +80,7 @@ func (s *Table) DecrRef() {
 	if newRef == 0 {
 		// We can safely delete this file, because for all the current files, we always have
 		// at least one reference pointing to them.
+		s.fd.Truncate(0) // This is very important to let the FS know that the file is deleted.
 		filename := s.fd.Name()
 		y.Check(s.fd.Close())
 		os.Remove(filename)
