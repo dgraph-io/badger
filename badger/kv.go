@@ -547,40 +547,37 @@ type flushTask struct {
 func (s *KV) flushMemtable(lc *y.LevelCloser) {
 	defer lc.Done()
 
-	for {
-		select {
-		case ft := <-s.flushChan:
-			if ft.mt == nil {
-				return
-			}
-
-			if ft.vptr.Fid > 0 || ft.vptr.Offset > 0 {
-				if s.opt.Verbose {
-					fmt.Printf("Storing offset: %+v\n", ft.vptr)
-				}
-				offset := make([]byte, 16)
-				s.Lock() // For vptr.
-				s.vptr.Encode(offset)
-				s.Unlock()
-				ft.mt.Put(head, y.ValueStruct{Value: offset}) // casCounter not needed.
-			}
-			fileID, _ := s.lc.reserveFileIDs(1)
-			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
-			y.Check(err)
-			y.Check(writeLevel0Table(ft.mt, fd))
-
-			tbl, err := table.OpenTable(fd, s.opt.MapTablesTo)
-			defer tbl.DecrRef()
-
-			y.Check(err)
-			s.lc.addLevel0Table(tbl) // This will incrRef again.
-
-			// Update s.imm. Need a lock.
-			s.Lock()
-			y.AssertTrue(ft.mt == s.imm[0]) //For now, single threaded.
-			s.imm = s.imm[1:]
-			ft.mt.DecrRef() // Return memory.
-			s.Unlock()
+	for ft := range s.flushChan {
+		if ft.mt == nil {
+			return
 		}
+
+		if ft.vptr.Fid > 0 || ft.vptr.Offset > 0 {
+			if s.opt.Verbose {
+				fmt.Printf("Storing offset: %+v\n", ft.vptr)
+			}
+			offset := make([]byte, 16)
+			s.Lock() // For vptr.
+			s.vptr.Encode(offset)
+			s.Unlock()
+			ft.mt.Put(head, y.ValueStruct{Value: offset}) // casCounter not needed.
+		}
+		fileID, _ := s.lc.reserveFileIDs(1)
+		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
+		y.Check(err)
+		y.Check(writeLevel0Table(ft.mt, fd))
+
+		tbl, err := table.OpenTable(fd, s.opt.MapTablesTo)
+		defer tbl.DecrRef()
+
+		y.Check(err)
+		s.lc.addLevel0Table(tbl) // This will incrRef again.
+
+		// Update s.imm. Need a lock.
+		s.Lock()
+		y.AssertTrue(ft.mt == s.imm[0]) //For now, single threaded.
+		s.imm = s.imm[1:]
+		ft.mt.DecrRef() // Return memory.
+		s.Unlock()
 	}
 }
