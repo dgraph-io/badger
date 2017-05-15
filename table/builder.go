@@ -222,8 +222,6 @@ func (b *TableBuilder) blockIndex() []byte {
 	return out
 }
 
-var emptySlice = make([]byte, 100)
-
 // Finish finishes the table by appending the index.
 func (b *TableBuilder) Finish(metadata []byte) []byte {
 	bf := bbloom.New(float64(b.keyCount), 0.01)

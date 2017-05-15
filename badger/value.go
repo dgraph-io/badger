@@ -457,7 +457,7 @@ func (l *valueLog) openOrCreateFiles() {
 	}
 
 	sort.Slice(l.files, func(i, j int) bool {
-		return l.files[i].fid < l.files[i].fid
+		return l.files[i].fid < l.files[j].fid
 	})
 
 	// Open all previous log files as read only. Open the last log file

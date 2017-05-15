@@ -267,7 +267,7 @@ func (t *Table) readIndex() error {
 		}(bo)
 	}
 
-	for _ = range t.blockIndex {
+	for range t.blockIndex {
 		err := <-che
 		if err != nil {
 			return err
@@ -291,10 +291,8 @@ func (t *Table) block(idx int) (Block, error) {
 		offset: ko.offset,
 	}
 	var err error
-	if block.data, err = t.read(block.offset, ko.len); err != nil {
-		return block, err
-	}
-	return block, nil
+	block.data, err = t.read(block.offset, ko.len)
+	return block, err
 }
 
 func (t *Table) Size() int64                 { return int64(t.tableSize) }
