@@ -449,6 +449,7 @@ func TestLoad(t *testing.T) {
 }
 
 func TestCrash(t *testing.T) {
+	t.Skip()
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
