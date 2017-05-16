@@ -61,7 +61,7 @@ type Options struct {
 	ValueGCThreshold float64
 
 	// Size of single value log file.
-	ValueLogFileSize int64
+	ValueLogFileSize int
 
 	// The following affect value compression in value log.
 	ValueCompressionMinSize  int     // Minimal size in bytes of KV pair to be compressed.
@@ -118,6 +118,7 @@ type KV struct {
 // NewKV returns a new KV object.
 func NewKV(opt *Options) *KV {
 	y.AssertTrue(len(opt.Dir) > 0)
+	y.AssertTrue(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20)
 	out := &KV{
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan: make(chan flushTask, opt.NumMemtables),
@@ -348,7 +349,7 @@ func (s *KV) shouldWriteValueToLSM(e Entry) bool {
 }
 
 func (s *KV) writeToLSM(b *request) {
-	var offsetBuf [16]byte
+	var offsetBuf [10]byte
 	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
 
 	for i, entry := range b.Entries {
@@ -581,7 +582,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) {
 			if s.opt.Verbose {
 				fmt.Printf("Storing offset: %+v\n", ft.vptr)
 			}
-			offset := make([]byte, 16)
+			offset := make([]byte, 10)
 			s.Lock() // For vptr.
 			s.vptr.Encode(offset)
 			s.Unlock()

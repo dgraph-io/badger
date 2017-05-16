@@ -19,7 +19,6 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"math"
 
@@ -250,7 +249,6 @@ func (b *TableBuilder) Finish(metadata []byte) []byte {
 	bdata := bf.JSONMarshal()
 	n, err := b.buf.Write(bdata)
 	y.Check(err)
-	fmt.Printf("--->> Size of bloom filter: %d\n", n)
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	b.buf.Write(buf[:])
