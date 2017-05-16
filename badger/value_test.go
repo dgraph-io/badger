@@ -32,7 +32,7 @@ func TestValueBasic(t *testing.T) {
 	dir, err := ioutil.TempDir("", "")
 	y.Check(err)
 
-	kv := NewKV(getTestOptions(dir))
+	kv, _ := NewKV(getTestOptions(dir))
 	defer kv.Close()
 	log := &kv.vlog
 
@@ -88,7 +88,7 @@ func TestCompression(t *testing.T) {
 	opt := getTestOptions(dir)
 	opt.ValueCompressionMinSize = 16
 
-	kv := NewKV(opt)
+	kv, _ := NewKV(opt)
 	defer kv.Close()
 	log := &kv.vlog
 
@@ -143,7 +143,7 @@ func TestValueGC(t *testing.T) {
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 
-	kv := NewKV(opt)
+	kv, _ := NewKV(opt)
 	defer kv.Close()
 
 	sz := 32 << 10

@@ -35,7 +35,7 @@ var (
 
 // Options are params for creating DB object.
 type Options struct {
-	Dir string // Directory to store the data in.
+	Dir string // Directory to store the data in. Should exist and be writable.
 
 	// The following affect all levels of LSM tree.
 	MaxTableSize        int64 // Each table (or file) is at most this size.
@@ -116,10 +116,18 @@ type KV struct {
 }
 
 // NewKV returns a new KV object.
-func NewKV(opt *Options) *KV {
-	y.AssertTrue(len(opt.Dir) > 0)
-	y.AssertTrue(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20)
-	out := &KV{
+func NewKV(opt *Options) (out *KV, err error) {
+	dirExists, err := exists(opt.Dir)
+	if err != nil {
+		return nil, y.Wrapf(err, "Incorrect Dir parameter")
+	}
+	if !dirExists {
+		return nil, y.Errorf("Directory '%s' does not exist.", opt.Dir)
+	}
+	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
+		return nil, y.Errorf("ValueLogFileSize should be between 1MB and 1GB")
+	}
+	out = &KV{
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan: make(chan flushTask, opt.NumMemtables),
 		writeCh:   make(chan *request, 1000),
@@ -197,7 +205,7 @@ func NewKV(opt *Options) *KV {
 	lc = out.closer.Register("value-gc")
 	go out.vlog.runGCInLoop(lc)
 
-	return out
+	return out, nil
 }
 
 // Close closes a KV. It's crucial to call it to ensure all the pending updates
@@ -606,4 +614,15 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) {
 		ft.mt.DecrRef() // Return memory.
 		s.Unlock()
 	}
+}
+
+func exists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return true, err
 }
