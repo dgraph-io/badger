@@ -118,6 +118,7 @@ type KV struct {
 // NewKV returns a new KV object.
 func NewKV(opt *Options) *KV {
 	y.AssertTrue(len(opt.Dir) > 0)
+	y.AssertTrue(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20)
 	out := &KV{
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan: make(chan flushTask, opt.NumMemtables),
