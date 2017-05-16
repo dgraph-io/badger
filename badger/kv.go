@@ -140,9 +140,6 @@ func NewKV(opt *Options) *KV {
 
 	out.vlog.Open(out, opt)
 
-	lc = out.closer.Register("value-gc")
-	go out.vlog.runGCInLoop(lc)
-
 	val, _ := out.Get(head) // casCounter ignored.
 	var vptr valuePointer
 	if len(val) > 0 {
@@ -153,7 +150,7 @@ func NewKV(opt *Options) *KV {
 	go out.doWrites(lc)
 
 	first := true
-	fn := func(e Entry) bool { // Function for replaying.
+	fn := func(e Entry, vp valuePointer) bool { // Function for replaying.
 		if first {
 			y.Printf("First key=%s\n", e.Key)
 		}
@@ -167,12 +164,20 @@ func NewKV(opt *Options) *KV {
 		}
 		nk := make([]byte, len(e.Key))
 		copy(nk, e.Key)
-		nv := make([]byte, len(e.Value))
-		copy(nv, e.Value)
+		var nv []byte
+		meta := e.Meta
+		if out.shouldWriteValueToLSM(e) {
+			nv = make([]byte, len(e.Value))
+			copy(nv, e.Value)
+		} else {
+			nv = make([]byte, 16)
+			vp.Encode(nv)
+			meta = meta | BitValuePointer
+		}
 
 		v := y.ValueStruct{
 			Value:      nv,
-			Meta:       e.Meta,
+			Meta:       meta,
 			CASCounter: e.casCounter,
 		}
 		for !out.hasRoomForWrite() {
@@ -183,6 +188,9 @@ func NewKV(opt *Options) *KV {
 		return true
 	}
 	out.vlog.Replay(vptr, fn)
+
+	lc = out.closer.Register("value-gc")
+	go out.vlog.runGCInLoop(lc)
 
 	return out
 }
@@ -331,6 +339,10 @@ var requestPool = sync.Pool{
 	},
 }
 
+func (s *KV) shouldWriteValueToLSM(e Entry) bool {
+	return len(e.Value) < s.opt.ValueThreshold
+}
+
 func (s *KV) writeToLSM(b *request) {
 	var offsetBuf [10]byte
 	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
@@ -345,7 +357,7 @@ func (s *KV) writeToLSM(b *request) {
 			}
 		}
 
-		if len(entry.Value) < s.opt.ValueThreshold { // Will include deletion / tombstone case.
+		if s.shouldWriteValueToLSM(*entry) { // Will include deletion / tombstone case.
 			s.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:      entry.Value,
