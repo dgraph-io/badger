@@ -88,10 +88,11 @@ func (lf *logFile) doneWriting() {
 	lf.openReadOnly()
 }
 
-type logEntry func(e Entry) bool
+type logEntry func(e Entry, vp valuePointer) bool
 
-// iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
-// Therefore, the kv pair is only valid for the duration of fn call.
+// iterate iterates over log file.
+// It doesn't allocate new memory for every entry and valuePointer. Therefore,
+// they are only valid for the duration of fn call.
 func (f *logFile) iterate(offset int64, fn logEntry) error {
 	_, err := f.fd.Seek(offset, 0)
 	y.Check(err)
@@ -118,6 +119,7 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 	decompressed := make([]byte, 1<<20)
 
 	var e Entry
+	var vp valuePointer
 	var hlen int
 	recordOffset := offset
 	for {
@@ -149,6 +151,8 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 			e.Value = decompressed[h.klen:]
 
 			recordOffset += int64(hlen + vl)
+			vp.Len = uint32(len(hbuf)) + h.vlen // h.vlen is sufficient, because key is
+			// compressed inside the block
 		} else {
 			kl := int(h.klen)
 			if cap(k) < kl {
@@ -168,9 +172,13 @@ func (f *logFile) iterate(offset int64, fn logEntry) error {
 			}
 
 			recordOffset += int64(hlen + kl + vl)
+			vp.Len = uint32(len(hbuf)) + h.klen + h.vlen
 		}
 
-		if !fn(e) {
+		vp.Offset = uint64(e.offset)
+		vp.Fid = uint32(f.fid)
+
+		if !fn(e, vp) {
 			break
 		}
 		count++
@@ -236,7 +244,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 		}
 	}
 
-	err := f.iterate(0, func(e Entry) bool {
+	err := f.iterate(0, func(e Entry, vp valuePointer) bool {
 		fe(e)
 		return true
 	})
@@ -703,8 +711,8 @@ func (vlog *valueLog) doRunGC() {
 
 	start := time.Now()
 	y.AssertTrue(vlog.kv != nil)
-	err := lf.iterate(0, func(e Entry) bool {
-		esz := float64(len(e.Key)+len(e.Value)+1+4) / (1 << 20) // in MBs. +4 for the CAS stuff.
+	err := lf.iterate(0, func(e Entry, vp valuePointer) bool {
+		esz := float64(vp.Len) / (1 << 20) // in MBs. +4 for the CAS stuff.
 		skipped += esz
 		if skipped < skipFirstM {
 			return true
@@ -736,7 +744,7 @@ func (vlog *valueLog) doRunGC() {
 
 		// Value is still present in value log.
 		y.AssertTrue(len(vs.Value) > 0)
-		var vp valuePointer
+
 		vp.Decode(vs.Value)
 
 		if int32(vp.Fid) > lf.fid {
