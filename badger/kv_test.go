@@ -46,7 +46,7 @@ func TestWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv := NewKV(getTestOptions(dir))
+	kv, _ := NewKV(getTestOptions(dir))
 	defer kv.Close()
 
 	var entries []*Entry
@@ -66,7 +66,7 @@ func TestConcurrentWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv := NewKV(getTestOptions(dir))
+	kv, _ := NewKV(getTestOptions(dir))
 	defer kv.Close()
 
 	// Not a benchmark. Just a simple test for concurrent writes.
@@ -122,7 +122,7 @@ func TestCAS(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv := NewKV(getTestOptions(dir))
+	kv, _ := NewKV(getTestOptions(dir))
 	defer kv.Close()
 
 	var entries []*Entry
@@ -205,7 +205,7 @@ func TestGet(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv := NewKV(getTestOptions(dir))
+	kv, _ := NewKV(getTestOptions(dir))
 	defer kv.Close()
 
 	kv.Set([]byte("key1"), []byte("val1"))
@@ -241,7 +241,7 @@ func TestGetMore(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv := NewKV(getTestOptions(dir))
+	kv, _ := NewKV(getTestOptions(dir))
 	defer kv.Close()
 
 	//	n := 500000
@@ -336,7 +336,7 @@ func TestIterate2Basic(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv := NewKV(getTestOptions(dir))
+	kv, _ := NewKV(getTestOptions(dir))
 	defer kv.Close()
 
 	bkey := func(i int) []byte {
@@ -408,7 +408,7 @@ func TestLoad(t *testing.T) {
 	defer os.RemoveAll(dir)
 	n := 10000
 	{
-		kv := NewKV(getTestOptions(dir))
+		kv, _ := NewKV(getTestOptions(dir))
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
 				fmt.Printf("Putting i=%d\n", i)
@@ -419,7 +419,7 @@ func TestLoad(t *testing.T) {
 		kv.Close()
 	}
 
-	kv := NewKV(getTestOptions(dir))
+	kv, _ := NewKV(getTestOptions(dir))
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
@@ -499,4 +499,8 @@ func TestIterateDeleted(t *testing.T) {
 			require.Equal(t, 0, len(idxKeys))
 		})
 	}
+
+func TestDirNotExists(t *testing.T) {
+	_, err := NewKV(getTestOptions("not-exists"))
+	require.Error(t, err)
 }

@@ -35,7 +35,7 @@ var (
 
 // Options are params for creating DB object.
 type Options struct {
-	Dir string // Directory to store the data in.
+	Dir string // Directory to store the data in. Should exist and be writable.
 
 	// The following affect all levels of LSM tree.
 	MaxTableSize        int64 // Each table (or file) is at most this size.
@@ -115,11 +115,29 @@ type KV struct {
 	flushChan chan flushTask // For flushing memtables.
 }
 
+type ErrWrongParameter struct {
+	Msg   string
+	Param string
+}
+
+func (e ErrWrongParameter) Error() string {
+	return fmt.Sprintf("Incorrect parameter %q: %s", e.Param, e.Msg)
+}
+
 // NewKV returns a new KV object.
-func NewKV(opt *Options) *KV {
-	y.AssertTrue(len(opt.Dir) > 0)
-	y.AssertTrue(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20)
-	out := &KV{
+func NewKV(opt *Options) (out *KV, err error) {
+	dirExists, err := exists(opt.Dir)
+	if err != nil {
+		return nil, y.Wrap(ErrWrongParameter{Msg: err.Error(), Param: "Dir"})
+	}
+	if !dirExists {
+		return nil, y.Wrap(ErrWrongParameter{Msg: "directory does not exist", Param: "Dir"})
+	}
+	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
+		return nil, y.Wrap(ErrWrongParameter{Msg: "must be between 1MB and 1GB",
+			Param: "ValueLogFileSize"})
+	}
+	out = &KV{
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan: make(chan flushTask, opt.NumMemtables),
 		writeCh:   make(chan *request, 1000),
@@ -197,7 +215,7 @@ func NewKV(opt *Options) *KV {
 	lc = out.closer.Register("value-gc")
 	go out.vlog.runGCInLoop(lc)
 
-	return out
+	return out, nil
 }
 
 // Close closes a KV. It's crucial to call it to ensure all the pending updates
@@ -614,4 +632,15 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) {
 		ft.mt.DecrRef() // Return memory.
 		s.Unlock()
 	}
+}
+
+func exists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return true, err
 }
