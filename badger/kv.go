@@ -146,7 +146,7 @@ func NewKV(opt *Options) *KV {
 		vptr.Decode(val)
 	}
 
-	lc = out.closer.Register("writes")
+	lc = out.closer.Register("replay")
 	go out.doWrites(lc)
 
 	first := true
@@ -188,6 +188,11 @@ func NewKV(opt *Options) *KV {
 		return true
 	}
 	out.vlog.Replay(vptr, fn)
+	lc.SignalAndWait() // Wait for replay to be applied first.
+
+	out.writeCh = make(chan *request, 1000)
+	lc = out.closer.Register("writes")
+	go out.doWrites(lc)
 
 	lc = out.closer.Register("value-gc")
 	go out.vlog.runGCInLoop(lc)
