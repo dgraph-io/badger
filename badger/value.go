@@ -562,7 +562,9 @@ func (l *valueLog) Write(reqs []*request) {
 			var err error
 			curlf.doneWriting()
 
-			newlf := &logFile{fid: uint16(atomic.AddUint32(&l.maxFid, 1)), offset: 0}
+			newid := atomic.AddUint32(&l.maxFid, 1)
+			y.AssertTruef(newid < 1<<16, "newid will overflow uint16: %v", newid)
+			newlf := &logFile{fid: uint16(newid), offset: 0}
 			newlf.path = l.fpath(newlf.fid)
 			newlf.fd, err = y.OpenSyncedFile(newlf.path, l.opt.SyncWrites)
 			y.Check(err)
