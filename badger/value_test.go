@@ -54,7 +54,7 @@ func TestValueBasic(t *testing.T) {
 	b := new(request)
 	b.Entries = []*Entry{entry, entry2}
 
-	log.Write([]*request{b})
+	log.write([]*request{b})
 	require.Len(t, b.Ptrs, 2)
 	fmt.Printf("Pointer written: %+v %+v", b.Ptrs[0], b.Ptrs[1])
 
@@ -117,7 +117,7 @@ func TestCompression(t *testing.T) {
 	b := new(request)
 	b.Entries = []*Entry{entry, entry2, entry3}
 
-	log.Write([]*request{b})
+	log.write([]*request{b})
 	require.Len(t, b.Ptrs, 3)
 	fmt.Printf("Pointer written: %+v %+v %+v", b.Ptrs[0], b.Ptrs[1], b.Ptrs[2])
 
@@ -207,12 +207,12 @@ func BenchmarkReadWrite(b *testing.B) {
 
 					var ptrs []valuePointer
 
-					vl.Write([]*request{bl})
+					vl.write([]*request{bl})
 					ptrs = append(ptrs, bl.Ptrs...)
 
 					f := rand.Float32()
 					if f < rw {
-						vl.Write([]*request{bl})
+						vl.write([]*request{bl})
 						ptrs = append(ptrs, bl.Ptrs...)
 
 					} else {

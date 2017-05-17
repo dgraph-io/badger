@@ -541,8 +541,27 @@ type request struct {
 
 var encoder *entryEncoder
 
-// Write is thread-unsafe by design and should not be called concurrently.
-func (l *valueLog) Write(reqs []*request) {
+// sync is thread-unsafe and should not be called concurrently with write.
+func (l *valueLog) sync() error {
+	if l.opt.SyncWrites {
+		return nil
+	}
+
+	l.RLock()
+	if len(l.files) == 0 {
+		l.RUnlock()
+		return nil
+	}
+	curlf := l.files[len(l.files)-1]
+	l.RUnlock()
+
+	curlf.RLock()
+	defer curlf.RUnlock()
+	return curlf.fd.Sync()
+}
+
+// write is thread-unsafe by design and should not be called concurrently.
+func (l *valueLog) write(reqs []*request) {
 	l.RLock()
 	curlf := l.files[len(l.files)-1]
 	l.RUnlock()

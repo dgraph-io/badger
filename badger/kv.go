@@ -378,6 +378,7 @@ func (s *KV) writeToLSM(b *request) {
 	}
 }
 
+// writeRequests is called serially by only one goroutine.
 func (s *KV) writeRequests(reqs []*request) {
 	if len(reqs) == 0 {
 		return
@@ -394,7 +395,7 @@ func (s *KV) writeRequests(reqs []*request) {
 			e.casCounter = newCASCounter()
 		}
 	}
-	s.vlog.Write(reqs)
+	s.vlog.write(reqs)
 
 	s.elog.Printf("Writing to memtable")
 	for i, b := range reqs {
@@ -524,6 +525,7 @@ func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
 	return e.Error
 }
 
+// hasRoomForWrite is always called serially.
 func (s *KV) hasRoomForWrite() bool {
 	s.Lock()
 	defer s.Unlock()
@@ -534,6 +536,12 @@ func (s *KV) hasRoomForWrite() bool {
 	y.AssertTrue(s.mt != nil) // A nil mt indicates that KV is being closed.
 	select {
 	case s.flushChan <- flushTask{s.mt, s.vptr}:
+		if s.opt.Verbose {
+			y.Printf("Flushing value log to disk if async mode.")
+		}
+		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
+		s.vlog.sync()
+
 		if s.opt.Verbose {
 			y.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 				s.mt.Size(), len(s.flushChan))
