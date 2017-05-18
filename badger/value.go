@@ -441,6 +441,8 @@ type valueLog struct {
 	maxFid  uint32
 	offset  uint32
 	opt     Options
+
+	encoder *entryEncoder
 }
 
 func (l *valueLog) fpath(fid uint16) string {
@@ -562,8 +564,6 @@ type request struct {
 	Wg      sync.WaitGroup
 }
 
-var encoder *entryEncoder
-
 // sync is thread-unsafe and should not be called concurrently with write.
 func (l *valueLog) sync() error {
 	if l.opt.SyncWrites {
@@ -589,8 +589,8 @@ func (l *valueLog) write(reqs []*request) {
 	curlf := l.files[len(l.files)-1]
 	l.RUnlock()
 
-	if encoder == nil {
-		encoder = &entryEncoder{
+	if l.encoder == nil {
+		l.encoder = &entryEncoder{
 			opt:          l.opt,
 			decompressed: bytes.NewBuffer(make([]byte, 1<<20)),
 			compressed:   make([]byte, 1<<20),
@@ -644,7 +644,7 @@ func (l *valueLog) write(reqs []*request) {
 
 			p.Fid = curlf.fid
 			p.Offset = curlf.offset + uint32(l.buf.Len()) // Use the offset including buffer length so far.
-			plen := encoder.Encode(e, &l.buf)             // Now encode the entry into buffer.
+			plen := l.encoder.Encode(e, &l.buf)           // Now encode the entry into buffer.
 			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
 
