@@ -24,6 +24,7 @@ import (
 
 	"golang.org/x/net/trace"
 
+	"errors"
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
@@ -115,27 +116,20 @@ type KV struct {
 	flushChan chan flushTask // For flushing memtables.
 }
 
-type ErrWrongParameter struct {
-	Msg   string
-	Param string
-}
-
-func (e ErrWrongParameter) Error() string {
-	return fmt.Sprintf("Incorrect parameter %q: %s", e.Param, e.Msg)
-}
+var ErrInvalidDir error = errors.New("Invalid Dir, directory does not exist")
+var ErrInvalidValueLogFileSize error = errors.New("Invalid ValueLogFileSize, must be between 1MB and 1GB")
 
 // NewKV returns a new KV object.
 func NewKV(opt *Options) (out *KV, err error) {
 	dirExists, err := exists(opt.Dir)
 	if err != nil {
-		return nil, y.Wrap(ErrWrongParameter{Msg: err.Error(), Param: "Dir"})
+		return nil, y.Wrapf(err, "Invalid Dir: %q", opt.Dir)
 	}
 	if !dirExists {
-		return nil, y.Wrap(ErrWrongParameter{Msg: "directory does not exist", Param: "Dir"})
+		return nil, ErrInvalidDir
 	}
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
-		return nil, y.Wrap(ErrWrongParameter{Msg: "must be between 1MB and 1GB",
-			Param: "ValueLogFileSize"})
+		return nil, ErrInvalidValueLogFileSize
 	}
 	out = &KV{
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),

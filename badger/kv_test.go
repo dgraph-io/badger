@@ -455,7 +455,8 @@ func TestIterateDeleted(t *testing.T) {
 	opt := DefaultOptions
 	opt.SyncWrites = true
 	opt.Dir = dir
-	ps := NewKV(&opt)
+	ps, err := NewKV(&opt)
+	require.NoError(t, err)
 	defer ps.Close()
 	ps.Set([]byte("Key1"), []byte("Value1"))
 	ps.Set([]byte("Key2"), []byte("Value2"))
@@ -499,6 +500,7 @@ func TestIterateDeleted(t *testing.T) {
 			require.Equal(t, 0, len(idxKeys))
 		})
 	}
+}
 
 func TestDirNotExists(t *testing.T) {
 	_, err := NewKV(getTestOptions("not-exists"))
