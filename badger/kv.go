@@ -150,7 +150,10 @@ func NewKV(opt *Options) (out *KV, err error) {
 	lc := out.closer.Register("memtable")
 	go out.flushMemtable(lc) // Need levels controller to be up.
 
-	out.vlog.Open(out, opt)
+	err = out.vlog.Open(out, opt)
+	if err != nil {
+		return out, err
+	}
 
 	val, _ := out.Get(head) // casCounter ignored.
 	var vptr valuePointer
@@ -162,7 +165,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 	go out.doWrites(lc)
 
 	first := true
-	fn := func(e Entry, vp valuePointer) bool { // Function for replaying.
+	fn := func(e Entry, vp valuePointer) (bool, error) { // Function for replaying.
 		if first {
 			y.Printf("First key=%s\n", e.Key)
 		}
@@ -171,7 +174,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 		if e.CASCounterCheck != 0 {
 			oldValue := out.get(e.Key)
 			if oldValue.CASCounter != e.CASCounterCheck {
-				return true
+				return true, nil
 			}
 		}
 		nk := make([]byte, len(e.Key))
@@ -192,14 +195,17 @@ func NewKV(opt *Options) (out *KV, err error) {
 			Meta:       meta,
 			CASCounter: e.casCounter,
 		}
-		for !out.hasRoomForWrite() {
+		for r, err := out.hasRoomForWrite(); err != nil && !r; r, err = out.hasRoomForWrite() {
 			y.Printf("Replay: Making room for writes")
 			time.Sleep(10 * time.Millisecond)
 		}
 		out.mt.Put(nk, v)
-		return true
+		return true, nil
 	}
-	out.vlog.Replay(vptr, fn)
+	err = out.vlog.Replay(vptr, fn)
+	if err != nil {
+		return out, err
+	}
 	lc.SignalAndWait() // Wait for replay to be applied first.
 
 	out.writeCh = make(chan *request, 1000)
@@ -391,9 +397,9 @@ func (s *KV) writeToLSM(b *request) {
 }
 
 // writeRequests is called serially by only one goroutine.
-func (s *KV) writeRequests(reqs []*request) {
+func (s *KV) writeRequests(reqs []*request) error {
 	if len(reqs) == 0 {
-		return
+		return nil
 	}
 	s.elog.Printf("writeRequests called")
 
@@ -407,7 +413,10 @@ func (s *KV) writeRequests(reqs []*request) {
 			e.casCounter = newCASCounter()
 		}
 	}
-	s.vlog.write(reqs)
+	err := s.vlog.write(reqs)
+	if err != nil {
+		return err
+	}
 
 	s.elog.Printf("Writing to memtable")
 	for i, b := range reqs {
@@ -415,18 +424,22 @@ func (s *KV) writeRequests(reqs []*request) {
 			b.Wg.Done()
 			continue
 		}
-		for !s.hasRoomForWrite() {
+		for r, err := s.hasRoomForWrite(); err != nil && !r; r, err = s.hasRoomForWrite() {
 			s.elog.Printf("Making room for writes")
 			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
 			// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
 			// you will get a deadlock.
 			time.Sleep(10 * time.Millisecond)
 		}
+		if err != nil {
+			return err
+		}
 		s.writeToLSM(b)
 		s.elog.Printf("Wrote %d entries from block %d", len(b.Entries), i)
 		s.updateOffset(b.Ptrs)
 		b.Wg.Done()
 	}
+	return nil
 }
 
 func (s *KV) doWrites(lc *y.LevelCloser) {
@@ -538,11 +551,12 @@ func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
 }
 
 // hasRoomForWrite is always called serially.
-func (s *KV) hasRoomForWrite() bool {
+func (s *KV) hasRoomForWrite() (bool, error) {
+	var err error
 	s.Lock()
 	defer s.Unlock()
 	if s.mt.Size() < s.opt.MaxTableSize {
-		return true
+		return true, nil
 	}
 
 	y.AssertTrue(s.mt != nil) // A nil mt indicates that KV is being closed.
@@ -552,7 +566,10 @@ func (s *KV) hasRoomForWrite() bool {
 			y.Printf("Flushing value log to disk if async mode.")
 		}
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
-		s.vlog.sync()
+		err = s.vlog.sync()
+		if err != nil {
+			return false, err
+		}
 
 		if s.opt.Verbose {
 			y.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
@@ -562,10 +579,10 @@ func (s *KV) hasRoomForWrite() bool {
 		s.imm = append(s.imm, s.mt)
 		s.mt = skl.NewSkiplist(s.arenaPool)
 		// New memtable is empty. We certainly have room.
-		return true
+		return true, nil
 	default:
 		// We need to do this to unlock and allow the flusher to modify imm.
-		return false
+		return false, nil
 	}
 }
 
@@ -590,12 +607,12 @@ type flushTask struct {
 	vptr valuePointer
 }
 
-func (s *KV) flushMemtable(lc *y.LevelCloser) {
+func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 	defer lc.Done()
 
 	for ft := range s.flushChan {
 		if ft.mt == nil {
-			return
+			return nil
 		}
 
 		if ft.vptr.Fid > 0 || ft.vptr.Offset > 0 {
@@ -610,13 +627,20 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) {
 		}
 		fileID, _ := s.lc.reserveFileIDs(1)
 		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
-		y.Check(err)
-		y.Check(writeLevel0Table(ft.mt, fd))
+		if err != nil {
+			return y.Wrap(err)
+		}
+		err = writeLevel0Table(ft.mt, fd)
+		if err != nil {
+			return err
+		}
 
 		tbl, err := table.OpenTable(fd, s.opt.MapTablesTo)
 		defer tbl.DecrRef()
 
-		y.Check(err)
+		if err != nil {
+			return err
+		}
 		s.lc.addLevel0Table(tbl) // This will incrRef again.
 
 		// Update s.imm. Need a lock.
@@ -626,6 +650,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) {
 		ft.mt.DecrRef() // Return memory.
 		s.Unlock()
 	}
+	return nil
 }
 
 func exists(path string) (bool, error) {

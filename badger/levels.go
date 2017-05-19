@@ -368,7 +368,7 @@ func (s *levelsController) compactBuildTables(
 			builder.Close()
 			continue
 		}
-		fmt.Printf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
+		y.Printf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
 
 		wg.Add(1)
 		y.AssertTruef(newID <= newIDMax, "%d %d", newID, newIDMax)
