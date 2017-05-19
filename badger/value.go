@@ -85,12 +85,14 @@ func (lf *logFile) read(buf []byte, offset int64) error {
 	return err
 }
 
-func (lf *logFile) doneWriting() {
+func (lf *logFile) doneWriting() error {
 	lf.Lock()
 	defer lf.Unlock()
-	y.Check(lf.fd.Close())
+	if err := lf.fd.Close(); err != nil {
+		return errors.Wrapf(err, "Unable to close value log: %q", lf.path)
+	}
 
-	lf.openReadOnly()
+	return lf.openReadOnly()
 }
 
 type logEntry func(e Entry, vp valuePointer) bool
@@ -332,7 +334,7 @@ type entryEncoder struct {
 
 // Encodes e to buf either plain or compressed.
 // Returns number of bytes written.
-func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) int {
+func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) (int, error) {
 	var headerEnc [13]byte
 	var h header
 
@@ -346,8 +348,7 @@ func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) int {
 		enc.compressed, err = lz4.Encode(enc.compressed, enc.decompressed.Bytes())
 
 		if err != nil {
-			// Unable to compress value
-			y.Fatalf("Error while compressing file: %s", err.Error())
+			return 0, errors.Wrap(err, "Unable to compress value")
 		}
 		compressionRatio := float64(enc.decompressed.Len()) / float64(len(enc.compressed))
 		if compressionRatio >= enc.opt.ValueCompressionMinRatio {
@@ -360,7 +361,7 @@ func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) int {
 
 			buf.Write(headerEnc[:])
 			buf.Write(enc.compressed)
-			return len(headerEnc) + len(enc.compressed)
+			return len(headerEnc) + len(enc.compressed), nil
 		}
 	}
 
@@ -374,7 +375,7 @@ func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) int {
 	buf.Write(headerEnc[:])
 	buf.Write(e.Key)
 	buf.Write(e.Value)
-	return len(headerEnc) + len(e.Key) + len(e.Value)
+	return len(headerEnc) + len(e.Key) + len(e.Value), nil
 }
 
 func (e Entry) print(prefix string) {
@@ -540,7 +541,7 @@ func (l *valueLog) Close() error {
 }
 
 // Replay replays the value log. The kv provided is only valid for the lifetime of function call.
-func (l *valueLog) Replay(ptr valuePointer, fn logEntry) {
+func (l *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 	fid := ptr.Fid
 	offset := ptr.Offset
 	y.Printf("Seeking at value pointer: %+v\n", ptr)
@@ -554,7 +555,9 @@ func (l *valueLog) Replay(ptr valuePointer, fn logEntry) {
 			of = 0
 		}
 		err := f.iterate(of, fn)
-		y.Check(err)
+		if err != nil {
+			return errors.Wrapf(err, "Unable to replay value log: %q", f.path)
+		}
 	}
 
 	// Seek to the end to start writing.
@@ -562,7 +565,7 @@ func (l *valueLog) Replay(ptr valuePointer, fn logEntry) {
 	last := l.files[len(l.files)-1]
 	lastOffset, err := last.fd.Seek(0, io.SeekEnd)
 	last.offset = uint32(lastOffset)
-	y.Checkf(err, "Unable to seek to the end")
+	return errors.Wrapf(err, "Unable to seek to end of value log: %q", last.path)
 }
 
 type request struct {
@@ -591,19 +594,19 @@ func (l *valueLog) sync() error {
 }
 
 // write is thread-unsafe by design and should not be called concurrently.
-func (l *valueLog) write(reqs []*request) {
+func (l *valueLog) write(reqs []*request) error {
 	l.RLock()
 	curlf := l.files[len(l.files)-1]
 	l.RUnlock()
 
-	toDisk := func() {
+	toDisk := func() error {
 		if l.buf.Len() == 0 {
-			return
+			return nil
 		}
 		l.elog.Printf("Flushing %d blocks of total size: %d", len(reqs), l.buf.Len())
 		n, err := curlf.fd.Write(l.buf.Bytes())
 		if err != nil {
-			y.Fatalf("Unable to write to value log: %v", err)
+			return errors.Wrapf(err, "Unable to write to value log file: %q", curlf.path)
 		}
 		l.elog.Printf("Done")
 		curlf.offset += uint32(n)
@@ -611,13 +614,18 @@ func (l *valueLog) write(reqs []*request) {
 
 		if curlf.offset > uint32(l.opt.ValueLogFileSize) {
 			var err error
-			curlf.doneWriting()
+			if err = curlf.doneWriting(); err != nil {
+				return err
+			}
 
 			newid := atomic.AddUint32(&l.maxFid, 1)
 			y.AssertTruef(newid < 1<<16, "newid will overflow uint16: %v", newid)
 			newlf := &logFile{fid: uint16(newid), offset: 0}
 			newlf.path = l.fpath(newlf.fid)
 			newlf.fd, err = y.OpenSyncedFile(newlf.path, l.opt.SyncWrites)
+			if err != nil {
+				return errors.Wrapf(err, "While creating new value log: %q", newlf.path)
+			}
 			y.Check(err)
 
 			l.Lock()
@@ -625,6 +633,7 @@ func (l *valueLog) write(reqs []*request) {
 			l.Unlock()
 			curlf = newlf
 		}
+		return nil
 	}
 
 	for i := range reqs {
@@ -643,16 +652,21 @@ func (l *valueLog) write(reqs []*request) {
 
 			p.Fid = curlf.fid
 			p.Offset = curlf.offset + uint32(l.buf.Len()) // Use the offset including buffer length so far.
-			plen := l.encoder.Encode(e, &l.buf)           // Now encode the entry into buffer.
+			plen, err := l.encoder.Encode(e, &l.buf)      // Now encode the entry into buffer.
+			if err != nil {
+				return err
+			}
 			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
 
 			if p.Offset > uint32(l.opt.ValueLogFileSize) {
-				toDisk()
+				if err := toDisk(); err != nil {
+					return err
+				}
 			}
 		}
 	}
-	toDisk()
+	return toDisk()
 
 	// Acquire mutex locks around this manipulation, so that the reads don't try to use
 	// an invalid file descriptor.
