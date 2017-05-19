@@ -75,16 +75,26 @@ func (s *Table) IncrRef() {
 	atomic.AddInt32(&s.ref, 1)
 }
 
-func (s *Table) DecrRef() {
+func (s *Table) DecrRef() error {
 	newRef := atomic.AddInt32(&s.ref, -1)
 	if newRef == 0 {
 		// We can safely delete this file, because for all the current files, we always have
 		// at least one reference pointing to them.
-		s.fd.Truncate(0) // This is very important to let the FS know that the file is deleted.
+		err := s.fd.Truncate(0) // This is very important to let the FS know that the file is deleted.
+		if err != nil {
+			return err
+		}
 		filename := s.fd.Name()
-		y.Check(s.fd.Close())
-		os.Remove(filename)
+		err = s.fd.Close()
+		if err != nil {
+			return err
+		}
+		err = os.Remove(filename)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 type Block struct {
@@ -124,10 +134,13 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 		t.mmap, err = syscall.Mmap(int(fd.Fd()), 0, int(fileInfo.Size()),
 			syscall.PROT_READ, syscall.MAP_SHARED)
 		if err != nil {
-			y.Fatalf("Unable to map file: %v", err)
+			return t, y.Wrapf(err, "Unable to map file")
 		}
 	} else if mapTableTo == LoadToRAM {
-		t.LoadToRAM()
+		err = t.LoadToRAM()
+		if err != nil {
+			return t, err
+		}
 	}
 
 	if err := t.readIndex(); err != nil {
@@ -159,12 +172,15 @@ func (s *Table) Close() {
 
 // SetMetadata updates our metadata to the new metadata.
 // For now, they must be of the same size.
-func (t *Table) SetMetadata(meta []byte) {
+func (t *Table) SetMetadata(meta []byte) error {
 	y.AssertTrue(len(meta) == len(t.metadata))
 	pos := t.tableSize - 4 - len(t.metadata)
 	written, err := t.fd.WriteAt(meta, int64(pos))
 	y.AssertTrue(written == len(meta))
-	y.Check(err)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 var EOF = errors.New("End of mapped region")
@@ -323,10 +339,11 @@ func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, fmt.Sprintf("%06d", id)+fileSuffix)
 }
 
-func (t *Table) LoadToRAM() {
+func (t *Table) LoadToRAM() error {
 	t.mmap = make([]byte, t.tableSize)
 	read, err := t.fd.ReadAt(t.mmap, 0)
 	if err != nil || read != t.tableSize {
-		y.Fatalf("Unable to load file in memory: %v. Read: %v", err, read)
+		return y.Wrapf(err, "Unable to load file in memory. Read: %v", read)
 	}
+	return nil
 }
