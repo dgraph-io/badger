@@ -446,3 +446,57 @@ func TestLoad(t *testing.T) {
 	sort.Slice(fileIDs, func(i, j int) bool { return fileIDs[i] < fileIDs[j] })
 	fmt.Printf("FileIDs: %v\n", fileIDs)
 }
+
+func TestIterateDeleted(t *testing.T) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opt := DefaultOptions
+	opt.SyncWrites = true
+	opt.Dir = dir
+	ps := NewKV(&opt)
+	defer ps.Close()
+	ps.Set([]byte("Key1"), []byte("Value1"))
+	ps.Set([]byte("Key2"), []byte("Value2"))
+
+	iterOpt := DefaultIteratorOptions
+	iterOpt.FetchValues = false
+	idxIt := ps.NewIterator(iterOpt)
+	defer idxIt.Close()
+
+	wb := make([]*Entry, 0, 100)
+	prefix := []byte("Key")
+	for idxIt.Seek(prefix); idxIt.Valid(); idxIt.Next() {
+		key := idxIt.Item().Key()
+		if !bytes.HasPrefix(key, prefix) {
+			break
+		}
+		wb = EntriesDelete(wb, key)
+	}
+	require.Equal(t, 2, len(wb))
+	ps.BatchSet(wb)
+
+	for _, e := range wb {
+		require.NoError(t, e.Error)
+	}
+
+	for _, prefetch := range [...]bool{true, false} {
+		t.Run(fmt.Sprintf("Prefetch=%t", prefetch), func(t *testing.T) {
+			iterOpt = DefaultIteratorOptions
+			iterOpt.FetchValues = prefetch
+			idxIt = ps.NewIterator(iterOpt)
+
+			var idxKeys []string
+			for idxIt.Seek(prefix); idxIt.Valid(); idxIt.Next() {
+				key := idxIt.Item().Key()
+				if !bytes.HasPrefix(key, prefix) {
+					break
+				}
+				idxKeys = append(idxKeys, string(key))
+				t.Logf("%+v\n", idxIt.Item())
+			}
+			require.Equal(t, 0, len(idxKeys))
+		})
+	}
+}
