@@ -129,7 +129,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 		return nil, ErrInvalidDir
 	}
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
-		return nil, ErrInvalidValueLogFileSize
+		return nil, ErrValueLogSize
 	}
 	out = &KV{
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
