@@ -71,7 +71,7 @@ func TestCompactLogBasic(t *testing.T) {
 
 	opt := getTestOptions(dir)
 	{
-		kv := NewKV(opt)
+		kv, _ := NewKV(opt)
 		n := 5000
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
@@ -86,7 +86,7 @@ func TestCompactLogBasic(t *testing.T) {
 		kv.Close()
 	}
 
-	kv := NewKV(opt)
+	kv, _ := NewKV(opt)
 	val, _ := kv.Get([]byte("testkey"))
 	require.EqualValues(t, "testval", string(val))
 	kv.Close()
@@ -107,7 +107,7 @@ func TestCompactLogUnclosedIter(t *testing.T) {
 	opt := getTestOptions(dir)
 	var sum *summary
 	{
-		kv := NewKV(opt)
+		kv, _ := NewKV(opt)
 		n := 5000
 		for i := 0; i < n; i++ {
 			if (i % 1000) == 0 {
@@ -124,7 +124,7 @@ func TestCompactLogUnclosedIter(t *testing.T) {
 	// Make sure our test makes sense. There should be dirty files.
 	require.True(t, len(sum.fileIDs) < len(getIDMap(dir)))
 
-	kv := NewKV(opt) // This should clean up.
+	kv, _ := NewKV(opt) // This should clean up.
 	summary2 := kv.lc.getSummary()
 	require.Len(t, sum.fileIDs, len(summary2.fileIDs))
 }
