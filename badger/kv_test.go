@@ -447,14 +447,16 @@ func TestLoad(t *testing.T) {
 	fmt.Printf("FileIDs: %v\n", fileIDs)
 }
 
-func TestIterateAndDelete(t *testing.T) {
-	dir, err := ioutil.TempDir("", "storetest_")
+func TestIterateDeleted(t *testing.T) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
+	defer os.RemoveAll(dir)
 
 	opt := DefaultOptions
 	opt.SyncWrites = true
 	opt.Dir = dir
 	ps := NewKV(&opt)
+	defer ps.Close()
 	ps.Set([]byte("Key1"), []byte("Value1"))
 	ps.Set([]byte("Key2"), []byte("Value2"))
 
@@ -479,17 +481,22 @@ func TestIterateAndDelete(t *testing.T) {
 		require.NoError(t, e.Error)
 	}
 
-	iterOpt = DefaultIteratorOptions
-	idxIt = ps.NewIterator(iterOpt)
+	for _, prefetch := range [...]bool{true, false} {
+		t.Run(fmt.Sprintf("Prefetch=%t", prefetch), func(t *testing.T) {
+			iterOpt = DefaultIteratorOptions
+			iterOpt.FetchValues = prefetch
+			idxIt = ps.NewIterator(iterOpt)
 
-	var idxKeys []string
-	for idxIt.Seek(prefix); idxIt.Valid(); idxIt.Next() {
-		key := idxIt.Item().Key()
-		if !bytes.HasPrefix(key, prefix) {
-			break
-		}
-		idxKeys = append(idxKeys, string(key))
-		t.Logf("%+v\n", idxIt.Item())
+			var idxKeys []string
+			for idxIt.Seek(prefix); idxIt.Valid(); idxIt.Next() {
+				key := idxIt.Item().Key()
+				if !bytes.HasPrefix(key, prefix) {
+					break
+				}
+				idxKeys = append(idxKeys, string(key))
+				t.Logf("%+v\n", idxIt.Item())
+			}
+			require.Equal(t, 0, len(idxKeys))
+		})
 	}
-	require.Equal(t, 0, len(idxKeys))
 }

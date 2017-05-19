@@ -137,9 +137,12 @@ func (it *Iterator) Next() {
 	// Set next item to current
 	it.item = it.data.pop()
 
-	// Advance internal iterator
-	if it.iitr.Valid() {
+	// Advance internal iterator until entry is not deleted
+	for it.iitr.Valid() {
 		it.iitr.Next()
+		if it.iitr.Value().Meta&BitDelete == 0 {
+			break
+		}
 	}
 	if !it.iitr.Valid() {
 		return
@@ -166,6 +169,9 @@ func (it *Iterator) prefetch() {
 	var count int
 	it.item = nil
 	for ; i.Valid(); i.Next() {
+		if i.Value().Meta&BitDelete > 0 {
+			continue
+		}
 		count++
 
 		item := it.newItem()
