@@ -191,11 +191,9 @@ func (it *Iterator) prefetch() {
 // greater than provided if iterating in the forward direction. Behavior would be reversed is
 // iterating backwards.
 func (it *Iterator) Seek(key []byte) {
-	i := it.data.pop()
-	for i != nil {
+	for i := it.data.pop(); i != nil; i = it.data.pop() {
 		i.wg.Wait()
 		it.waste.push(i)
-		i = it.data.pop()
 	}
 	it.iitr.Seek(key)
 	it.prefetch()
