@@ -97,10 +97,11 @@ type Iterator struct {
 	kv   *KV
 	iitr y.Iterator
 
-	opt   IteratorOptions
-	item  *KVItem
-	data  list
-	waste list
+	opt      IteratorOptions
+	item     *KVItem
+	data     list
+	waste    list
+	pastHead bool
 }
 
 func (it *Iterator) newItem() *KVItem {
@@ -137,14 +138,15 @@ func (it *Iterator) Next() {
 
 	// Set next item to current
 	it.item = it.data.pop()
-	if bytes.Equal(it.item.Key(), head) {
+	if it.item != nil && bytes.Equal(it.item.Key(), head) {
 		it.item = it.data.pop()
 	}
 
 	// Advance internal iterator until entry is not deleted
 	for it.iitr.Valid() {
 		it.iitr.Next()
-		if bytes.Equal(it.iitr.Key(), head) {
+		if !it.pastHead && bytes.Equal(it.iitr.Key(), head) {
+			it.pastHead = true
 			continue
 		}
 		if it.iitr.Value().Meta&BitDelete == 0 {
@@ -205,6 +207,7 @@ func (it *Iterator) Seek(key []byte) {
 	it.iitr.Seek(key)
 	if bytes.Equal(it.iitr.Key(), head) {
 		it.iitr.Next()
+		it.pastHead = true
 	}
 	it.prefetch()
 }
@@ -221,7 +224,9 @@ func (it *Iterator) Rewind() {
 	}
 
 	it.iitr.Rewind()
+	it.pastHead = false
 	if bytes.Equal(it.iitr.Key(), head) {
+		it.pastHead = true
 		it.iitr.Next()
 	}
 	it.prefetch()
