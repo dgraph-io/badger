@@ -182,9 +182,12 @@ func randomHeight() int {
 	return h
 }
 
-// findLess finds rightmost node such that node.key < key (if allowEqual=false) or
-// node.key <= key (if allowEqual=true). Returns the node found. The bool returned is true if
-// the node has key equal to given key.
+// findNear finds the node near to key.
+// If less=true, it finds rightmost node such that node.key < key (if allowEqual=false) or
+// node.key <= key (if allowEqual=true).
+// If less=false, it finds leftmost node such that node.key > key (if allowEqual=false) or
+// node.key >= key (if allowEqual=true).
+// Returns the node found. The bool returned is true if the node has key equal to given key.
 func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool) {
 	x := s.head
 	level := int(s.height - 1)
