@@ -102,9 +102,6 @@ func TestConcurrentWrite(t *testing.T) {
 			break // end of iteration.
 		}
 
-		if bytes.Equal(k, head) {
-			continue
-		}
 		require.EqualValues(t, fmt.Sprintf("k%05d_%08d", i, j), string(k))
 		v := item.Value()
 		require.EqualValues(t, fmt.Sprintf("v%05d_%08d", i, j), string(v))
@@ -367,11 +364,9 @@ func TestIterate2Basic(t *testing.T) {
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
 			key := item.Key()
-			if bytes.Equal(key, head) {
-				continue
-			}
 			if rewind && count == 5000 {
-				count = 0
+				// Rewind would skip /head/ key, and it.Next() would skip 0.
+				count = 1
 				it.Rewind()
 				t.Log("Rewinding from 5000 to zero.")
 				rewind = false
