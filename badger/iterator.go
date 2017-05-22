@@ -97,11 +97,10 @@ type Iterator struct {
 	kv   *KV
 	iitr y.Iterator
 
-	opt      IteratorOptions
-	item     *KVItem
-	data     list
-	waste    list
-	pastHead bool
+	opt   IteratorOptions
+	item  *KVItem
+	data  list
+	waste list
 }
 
 func (it *Iterator) newItem() *KVItem {
@@ -142,8 +141,7 @@ func (it *Iterator) Next() {
 	// Advance internal iterator until entry is not deleted
 	for it.iitr.Valid() {
 		it.iitr.Next()
-		if !it.pastHead && bytes.Equal(it.iitr.Key(), head) {
-			it.pastHead = true
+		if bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
 			continue
 		}
 		if it.iitr.Value().Meta&BitDelete == 0 {
@@ -175,7 +173,7 @@ func (it *Iterator) prefetch() {
 	var count int
 	it.item = nil
 	for ; i.Valid(); i.Next() {
-		if bytes.Equal(it.iitr.Key(), head) {
+		if bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
 			continue
 		}
 		if i.Value().Meta&BitDelete > 0 {
@@ -205,9 +203,8 @@ func (it *Iterator) Seek(key []byte) {
 		it.waste.push(i)
 	}
 	it.iitr.Seek(key)
-	if !it.pastHead && bytes.Equal(it.iitr.Key(), head) {
+	for bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
 		it.iitr.Next()
-		it.pastHead = true
 	}
 	it.prefetch()
 }
@@ -224,9 +221,7 @@ func (it *Iterator) Rewind() {
 	}
 
 	it.iitr.Rewind()
-	it.pastHead = false
-	if bytes.Equal(it.iitr.Key(), head) {
-		it.pastHead = true
+	for bytes.HasPrefix(it.iitr.Key(), head) {
 		it.iitr.Next()
 	}
 	it.prefetch()
