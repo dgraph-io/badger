@@ -378,7 +378,6 @@ func TestIterate2Basic(t *testing.T) {
 			count++
 		}
 		require.EqualValues(t, n, count)
-		it.Close()
 	}
 
 	{
@@ -391,8 +390,8 @@ func TestIterate2Basic(t *testing.T) {
 			require.EqualValues(t, bval(idx), string(item.Value()))
 			idx++
 		}
-		it.Close()
 	}
+	it.Close()
 }
 
 func TestLoad(t *testing.T) {
