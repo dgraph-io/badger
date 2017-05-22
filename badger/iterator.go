@@ -203,7 +203,7 @@ func (it *Iterator) Seek(key []byte) {
 		it.waste.push(i)
 	}
 	it.iitr.Seek(key)
-	for bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
+	for it.iitr.Valid() && bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
 		it.iitr.Next()
 	}
 	it.prefetch()
@@ -221,7 +221,7 @@ func (it *Iterator) Rewind() {
 	}
 
 	it.iitr.Rewind()
-	for bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
+	for it.iitr.Valid() && bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
 		it.iitr.Next()
 	}
 	it.prefetch()
