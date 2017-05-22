@@ -221,7 +221,7 @@ func (it *Iterator) Rewind() {
 	}
 
 	it.iitr.Rewind()
-	for bytes.HasPrefix(it.iitr.Key(), head) {
+	for bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
 		it.iitr.Next()
 	}
 	it.prefetch()
