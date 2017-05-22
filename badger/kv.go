@@ -149,8 +149,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 	lc := out.closer.Register("memtable")
 	go out.flushMemtable(lc) // Need levels controller to be up.
 
-	err = out.vlog.Open(out, opt)
-	if err != nil {
+	if err = out.vlog.Open(out, opt); err != nil {
 		return out, err
 	}
 
@@ -164,7 +163,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 	go out.doWrites(lc)
 
 	first := true
-	fn := func(e Entry, vp valuePointer) (bool, error) { // Function for replaying.
+	fn := func(e Entry, vp valuePointer) error { // Function for replaying.
 		if first {
 			y.Printf("First key=%s\n", e.Key)
 		}
@@ -173,7 +172,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 		if e.CASCounterCheck != 0 {
 			oldValue := out.get(e.Key)
 			if oldValue.CASCounter != e.CASCounterCheck {
-				return true, nil
+				return nil
 			}
 		}
 		nk := make([]byte, len(e.Key))
@@ -194,15 +193,14 @@ func NewKV(opt *Options) (out *KV, err error) {
 			Meta:       meta,
 			CASCounter: e.casCounter,
 		}
-		for r, err := out.hasRoomForWrite(); err != nil && !r; r, err = out.hasRoomForWrite() {
+		for err := out.ensureRoomForWrite(); err != nil; err = out.ensureRoomForWrite() {
 			y.Printf("Replay: Making room for writes")
 			time.Sleep(10 * time.Millisecond)
 		}
 		out.mt.Put(nk, v)
-		return true, nil
+		return nil
 	}
-	err = out.vlog.Replay(vptr, fn)
-	if err != nil {
+	if err = out.vlog.Replay(vptr, fn); err != nil {
 		return out, err
 	}
 	lc.SignalAndWait() // Wait for replay to be applied first.
@@ -417,7 +415,7 @@ func (s *KV) writeRequests(reqs []*request) error {
 			b.Wg.Done()
 			continue
 		}
-		for r, err := s.hasRoomForWrite(); err != nil && !r; r, err = s.hasRoomForWrite() {
+		for err := s.ensureRoomForWrite(); err != nil; err = s.ensureRoomForWrite() {
 			s.elog.Printf("Making room for writes")
 			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
 			// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
@@ -543,13 +541,15 @@ func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
 	return e.Error
 }
 
-// hasRoomForWrite is always called serially.
-func (s *KV) hasRoomForWrite() (bool, error) {
+var ErrNoRoom = errors.New("No room for write")
+
+// ensureRoomForWrite is always called serially.
+func (s *KV) ensureRoomForWrite() error {
 	var err error
 	s.Lock()
 	defer s.Unlock()
 	if s.mt.Size() < s.opt.MaxTableSize {
-		return true, nil
+		return nil
 	}
 
 	y.AssertTrue(s.mt != nil) // A nil mt indicates that KV is being closed.
@@ -559,7 +559,7 @@ func (s *KV) hasRoomForWrite() (bool, error) {
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
 		err = s.vlog.sync()
 		if err != nil {
-			return false, err
+			return err
 		}
 
 		y.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
@@ -568,10 +568,10 @@ func (s *KV) hasRoomForWrite() (bool, error) {
 		s.imm = append(s.imm, s.mt)
 		s.mt = skl.NewSkiplist(s.arenaPool)
 		// New memtable is empty. We certainly have room.
-		return true, nil
+		return nil
 	default:
 		// We need to do this to unlock and allow the flusher to modify imm.
-		return false, nil
+		return ErrNoRoom
 	}
 }
 

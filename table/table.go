@@ -69,23 +69,23 @@ type Table struct {
 	bf bbloom.Bloom
 }
 
-func (s *Table) Ref() int32 { return atomic.LoadInt32(&s.ref) }
+func (t *Table) Ref() int32 { return atomic.LoadInt32(&t.ref) }
 
-func (s *Table) IncrRef() {
-	atomic.AddInt32(&s.ref, 1)
+func (t *Table) IncrRef() {
+	atomic.AddInt32(&t.ref, 1)
 }
 
-func (s *Table) DecrRef() error {
-	newRef := atomic.AddInt32(&s.ref, -1)
+func (t *Table) DecrRef() error {
+	newRef := atomic.AddInt32(&t.ref, -1)
 	if newRef == 0 {
 		// We can safely delete this file, because for all the current files, we always have
 		// at least one reference pointing to them.
-		err := s.fd.Truncate(0) // This is very important to let the FS know that the file is deleted.
+		err := t.fd.Truncate(0) // This is very important to let the FS know that the file is deleted.
 		if err != nil {
 			return err
 		}
-		filename := s.fd.Name()
-		err = s.fd.Close()
+		filename := t.fd.Name()
+		err = t.fd.Close()
 		if err != nil {
 			return err
 		}
@@ -126,7 +126,7 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	}
 	fileInfo, err := fd.Stat()
 	if err != nil {
-		return nil, err
+		return nil, y.Wrap(err)
 	}
 	t.tableSize = int(fileInfo.Size())
 
@@ -139,12 +139,12 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	} else if mapTableTo == LoadToRAM {
 		err = t.LoadToRAM()
 		if err != nil {
-			return t, err
+			return t, y.Wrap(err)
 		}
 	}
 
 	if err := t.readIndex(); err != nil {
-		return nil, err
+		return nil, y.Wrap(err)
 	}
 
 	it := t.NewIterator(false)
@@ -163,10 +163,10 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	return t, nil
 }
 
-func (s *Table) Close() {
-	s.fd.Close()
-	if s.mapTableTo == MemoryMap {
-		syscall.Munmap(s.mmap)
+func (t *Table) Close() {
+	t.fd.Close()
+	if t.mapTableTo == MemoryMap {
+		syscall.Munmap(t.mmap)
 	}
 }
 
@@ -175,12 +175,8 @@ func (s *Table) Close() {
 func (t *Table) SetMetadata(meta []byte) error {
 	y.AssertTrue(len(meta) == len(t.metadata))
 	pos := t.tableSize - 4 - len(t.metadata)
-	written, err := t.fd.WriteAt(meta, int64(pos))
-	y.AssertTrue(written == len(meta))
-	if err != nil {
-		return err
-	}
-	return nil
+	_, err := t.fd.WriteAt(meta, int64(pos))
+	return y.Wrap(err)
 }
 
 var EOF = errors.New("End of mapped region")
@@ -273,12 +269,12 @@ func (t *Table) readIndex() error {
 
 			offset += h.Size()
 			buf = make([]byte, h.klen)
-			if out, err := t.read(offset, h.klen); err != nil {
+			var out []byte
+			if out, err = t.read(offset, h.klen); err != nil {
 				che <- errors.Wrap(err, "While reading first key in block")
 				return
-			} else {
-				y.AssertTrue(len(buf) == copy(buf, out))
 			}
+			y.AssertTrue(len(buf) == copy(buf, out))
 
 			ko.key = buf
 			che <- nil
@@ -327,8 +323,9 @@ func ParseFileID(name string) (uint64, bool) {
 	}
 	//	suffix := name[len(fileSuffix):]
 	name = strings.TrimSuffix(name, fileSuffix)
-	id, err := strconv.Atoi(name)
-	if err != nil {
+	var id int
+	var err error
+	if id, err = strconv.Atoi(name); err != nil {
 		return 0, false
 	}
 	y.AssertTrue(id >= 0)
@@ -343,7 +340,7 @@ func (t *Table) LoadToRAM() error {
 	t.mmap = make([]byte, t.tableSize)
 	read, err := t.fd.ReadAt(t.mmap, 0)
 	if err != nil || read != t.tableSize {
-		return y.Wrapf(err, "Unable to load file in memory. Read: %v", read)
+		return y.Wrapf(err, "Unable to load file in memory. Table file: %s", t.Filename())
 	}
 	return nil
 }
