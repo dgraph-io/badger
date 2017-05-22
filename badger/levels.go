@@ -368,7 +368,7 @@ func (s *levelsController) compactBuildTables(
 			builder.Close()
 			continue
 		}
-		fmt.Printf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
+		y.Printf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
 
 		wg.Add(1)
 		y.AssertTruef(newID <= newIDMax, "%d %d", newID, newIDMax)
@@ -490,10 +490,8 @@ func (s *levelsController) doCompact(l int) error {
 				nextLevel.replaceTables(cd.top)
 				thisLevel.deleteTables(cd.top)
 				updateLevel(tbl, l+1)
-				if s.kv.opt.Verbose {
-					fmt.Printf("LOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
-						l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
-				}
+				y.Printf("LOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
+					l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
 				return
 			}
 
@@ -514,10 +512,8 @@ func (s *levelsController) doCompact(l int) error {
 			c.done = 1
 			s.clog.add(c)
 
-			if s.kv.opt.Verbose {
-				fmt.Printf("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
-					l, l+1, len(cd.top)+len(cd.bot), len(newTables), time.Since(timeStart))
-			}
+			y.Printf("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
+				l, l+1, len(cd.top)+len(cd.bot), len(newTables), time.Since(timeStart))
 		}(cd)
 	}
 	wg.Wait()
@@ -526,11 +522,11 @@ func (s *levelsController) doCompact(l int) error {
 }
 
 func (s *levelsController) addLevel0Table(t *table.Table) {
-	for !s.levels[0].tryAddLevel0Table(t, s.kv.opt.Verbose) {
+	for !s.levels[0].tryAddLevel0Table(t) {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time
 		if s.kv.opt.Verbose {
-			fmt.Printf("STALLED STALLED STALLED STALLED STALLED STALLED STALLED STALLED: %v\n",
+			y.Printf("STALLED STALLED STALLED STALLED STALLED STALLED STALLED STALLED: %v\n",
 				time.Since(lastUnstalled))
 			s.debugPrint()
 			timeStart = time.Now()
@@ -545,7 +541,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) {
 			time.Sleep(10 * time.Millisecond)
 		}
 		if s.kv.opt.Verbose {
-			fmt.Printf("UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED: %v\n",
+			y.Printf("UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED: %v\n",
 				time.Since(timeStart))
 			s.debugPrint()
 			lastUnstalled = time.Now()
@@ -554,7 +550,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) {
 }
 
 // tryAddLevel0Table returns true if ok and no stalling.
-func (s *levelHandler) tryAddLevel0Table(t *table.Table, verbose bool) bool {
+func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 	y.AssertTrue(s.level == 0)
 	// Need lock as we may be deleting the first table during a level 0 compaction.
 	s.Lock()
@@ -567,9 +563,7 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table, verbose bool) bool {
 	t.IncrRef()
 	s.totalSize += t.Size()
 
-	if verbose {
-		fmt.Printf("Num level 0 tables increased from %d to %d\n", len(s.tables)-1, len(s.tables))
-	}
+	y.Printf("Num level 0 tables increased from %d to %d\n", len(s.tables)-1, len(s.tables))
 	return true
 }
 
@@ -580,9 +574,7 @@ func (s *levelHandler) numTables() int {
 }
 
 func (s *levelsController) close() {
-	if s.kv.opt.Verbose {
-		y.Printf("Sending close signal to compact workers\n")
-	}
+	y.Printf("Sending close signal to compact workers\n")
 	n := s.kv.opt.MaxLevels / 2
 	for i := 0; i < n; i++ {
 		s.compactWorkersDone <- struct{}{}
@@ -590,9 +582,7 @@ func (s *levelsController) close() {
 	// Wait for all compactions to be done. We want to be in a stable state.
 	// Also, closing tables while merge iterators have references will also lead to crash.
 	s.compactWorkersWg.Wait()
-	if s.kv.opt.Verbose {
-		y.Printf("Compaction is all done\n")
-	}
+	y.Printf("Compaction is all done\n")
 	for _, l := range s.levels {
 		l.close()
 	}

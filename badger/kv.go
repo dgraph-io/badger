@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"fmt"
 	"os"
 	"sync"
 	"time"
@@ -215,9 +214,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 // Close closes a KV. It's crucial to call it to ensure all the pending updates
 // make their way to disk.
 func (s *KV) Close() {
-	if s.opt.Verbose {
-		y.Printf("Closing database\n")
-	}
+	y.Printf("Closing database\n")
 	s.elog.Printf("Closing database")
 	// Stop value GC first.
 	lc := s.closer.Get("value-gc")
@@ -236,9 +233,7 @@ func (s *KV) Close() {
 	// trying to push stuff into the memtable. This will also resolve the value
 	// offset problem: as we push into memtable, we update value offsets there.
 	if s.mt.Size() > 0 {
-		if s.opt.Verbose {
-			y.Printf("Flushing memtable\n")
-		}
+		y.Printf("Flushing memtable\n")
 		for {
 			pushedFlushTask := func() bool {
 				s.Lock()
@@ -266,9 +261,7 @@ func (s *KV) Close() {
 
 	lc = s.closer.Get("memtable")
 	lc.Wait()
-	if s.opt.Verbose {
-		y.Printf("Memtable flushed\n")
-	}
+	y.Printf("Memtable flushed\n")
 
 	s.lc.close()
 	s.elog.Printf("Waiting for closer")
@@ -548,16 +541,12 @@ func (s *KV) hasRoomForWrite() bool {
 	y.AssertTrue(s.mt != nil) // A nil mt indicates that KV is being closed.
 	select {
 	case s.flushChan <- flushTask{s.mt, s.vptr}:
-		if s.opt.Verbose {
-			y.Printf("Flushing value log to disk if async mode.")
-		}
+		y.Printf("Flushing value log to disk if async mode.")
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
 		s.vlog.sync()
 
-		if s.opt.Verbose {
-			y.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
-				s.mt.Size(), len(s.flushChan))
-		}
+		y.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
+			s.mt.Size(), len(s.flushChan))
 		// We manage to push this task. Let's modify imm.
 		s.imm = append(s.imm, s.mt)
 		s.mt = skl.NewSkiplist(s.arenaPool)
@@ -599,9 +588,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) {
 		}
 
 		if ft.vptr.Fid > 0 || ft.vptr.Offset > 0 {
-			if s.opt.Verbose {
-				fmt.Printf("Storing offset: %+v\n", ft.vptr)
-			}
+			y.Printf("Storing offset: %+v\n", ft.vptr)
 			offset := make([]byte, 10)
 			s.Lock() // For vptr.
 			s.vptr.Encode(offset)

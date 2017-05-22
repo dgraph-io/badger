@@ -823,7 +823,7 @@ func (vlog *valueLog) doRunGC() {
 			r.keep += esz
 
 		} else {
-			fmt.Printf("Reason=%+v\n", r)
+			y.Printf("Reason=%+v\n", r)
 			ne, err := vlog.Read(vp, nil)
 			y.Check(err)
 			ne.offset = vp.Offset

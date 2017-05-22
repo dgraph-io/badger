@@ -19,7 +19,6 @@ package badger
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"sort"
@@ -90,9 +89,9 @@ func (s *levelsController) debugPrint() {
 		if s.beingCompacted[i] {
 			busy = 1
 		}
-		fmt.Printf("(i=%d, size=%d, busy=%d, numTables=%d) ", i, s.levels[i].getTotalSize(), busy, len(s.levels[i].tables))
+		y.Printf("(i=%d, size=%d, busy=%d, numTables=%d) ", i, s.levels[i].getTotalSize(), busy, len(s.levels[i].tables))
 	}
-	fmt.Printf("\n")
+	y.Printf("\n")
 }
 
 // debugPrintMore shows key ranges of each level.
