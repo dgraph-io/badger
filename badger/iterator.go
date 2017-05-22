@@ -205,7 +205,7 @@ func (it *Iterator) Seek(key []byte) {
 		it.waste.push(i)
 	}
 	it.iitr.Seek(key)
-	if bytes.Equal(it.iitr.Key(), head) {
+	if !it.pastHead && bytes.Equal(it.iitr.Key(), head) {
 		it.iitr.Next()
 		it.pastHead = true
 	}
