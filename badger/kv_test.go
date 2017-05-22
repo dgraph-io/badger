@@ -383,7 +383,6 @@ func TestIterate2Basic(t *testing.T) {
 
 	{
 		t.Log("Starting second basic iteration")
-		it = kv.NewIterator(opt)
 		idx := 5030
 		start := bkey(idx)
 		for it.Seek(start); it.Valid(); it.Next() {
