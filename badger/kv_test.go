@@ -356,11 +356,11 @@ func TestIterate2Basic(t *testing.T) {
 	opt.FetchValues = true
 	opt.PrefetchSize = 10
 
+	it := kv.NewIterator(opt)
 	{
 		var count int
 		rewind := true
 		t.Log("Starting first basic iteration")
-		it := kv.NewIterator(opt)
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
 			key := item.Key()
@@ -383,7 +383,7 @@ func TestIterate2Basic(t *testing.T) {
 
 	{
 		t.Log("Starting second basic iteration")
-		it := kv.NewIterator(opt)
+		it = kv.NewIterator(opt)
 		idx := 5030
 		start := bkey(idx)
 		for it.Seek(start); it.Valid(); it.Next() {
