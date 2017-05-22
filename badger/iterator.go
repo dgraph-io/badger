@@ -138,9 +138,6 @@ func (it *Iterator) Next() {
 
 	// Set next item to current
 	it.item = it.data.pop()
-	if it.item != nil && bytes.Equal(it.item.Key(), head) {
-		it.item = it.data.pop()
-	}
 
 	// Advance internal iterator until entry is not deleted
 	for it.iitr.Valid() {
@@ -178,6 +175,9 @@ func (it *Iterator) prefetch() {
 	var count int
 	it.item = nil
 	for ; i.Valid(); i.Next() {
+		if bytes.Equal(it.iitr.Key(), head) {
+			continue
+		}
 		if i.Value().Meta&BitDelete > 0 {
 			continue
 		}
