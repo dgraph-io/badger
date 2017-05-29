@@ -151,6 +151,10 @@ func (s *MergeIterator) Value() ValueStruct {
 
 // Next returns the next element. If it is the same as the current key, ignore it.
 func (s *MergeIterator) Next() {
+	if len(s.h) == 0 {
+		return
+	}
+
 	smallest := s.h[0].itr
 	smallest.Next()
 

@@ -138,12 +138,12 @@ func (it *Iterator) Next() {
 	it.item = it.data.pop()
 
 	// Advance internal iterator until entry is not deleted
-	for it.iitr.Valid() {
-		it.iitr.Next()
-		if it.iitr.Value().Meta&BitDelete == 0 {
+	for it.iitr.Next(); it.iitr.Valid(); it.iitr.Next() {
+		if it.iitr.Value().Meta&BitDelete == 0 { // Not deleted.
 			break
 		}
 	}
+
 	if !it.iitr.Valid() {
 		return
 	}
