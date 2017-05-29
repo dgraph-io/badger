@@ -252,8 +252,7 @@ func (t *Table) readIndex() error {
 			}
 
 			h.Decode(buf)
-			y.AssertTruef(h.plen == 0, "Block index: %d, Key offset: %+v, h.plen = %d",
-				i, *ko, h.plen)
+			y.AssertTruef(h.plen == 0, "Key offset: %+v, h.plen = %d", *ko, h.plen)
 
 			offset += h.Size()
 			buf = make([]byte, h.klen)

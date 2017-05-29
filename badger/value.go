@@ -192,8 +192,6 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 	return nil
 }
 
-var entries = make([]*Entry, 0, 1000000)
-
 func (vlog *valueLog) rewrite(f *logFile) {
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	y.AssertTruef(uint32(f.fid) < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
@@ -203,7 +201,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 	elog.Printf("Rewriting fid: %d", f.fid)
 	y.Printf("rewrite called\n")
 
-	entries = entries[:0]
+	vlog.entries = vlog.entries[:0]
 	y.AssertTrue(vlog.kv != nil)
 	var count int
 	fe := func(e Entry) {
@@ -241,7 +239,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
 			ne.CASCounterCheck = vs.CASCounter // CAS counter check. Do not rewrite if key has a newer value.
-			entries = append(entries, &ne)
+			vlog.entries = append(vlog.entries, &ne)
 
 		} else {
 			// This can now happen because we can move some entries forward, but then not write
@@ -258,8 +256,8 @@ func (vlog *valueLog) rewrite(f *logFile) {
 
 	elog.Printf("Processed %d entries in total", count)
 	// Sort the entries, so lookups can potentially use page cache better.
-	sort.Slice(entries, func(i, j int) bool {
-		return bytes.Compare(entries[i].Key, entries[j].Key) < 0
+	sort.Slice(vlog.entries, func(i, j int) bool {
+		return bytes.Compare(vlog.entries[i].Key, vlog.entries[j].Key) < 0
 	})
 	vlog.writeToKV(elog)
 
@@ -289,7 +287,7 @@ func (vlog *valueLog) writeToKV(elog trace.EventLog) {
 	}
 	requests := make([]*request, 0, 10)
 	requests = append(requests, req)
-	for _, e := range entries {
+	for _, e := range vlog.entries {
 		req.Entries = append(req.Entries, e)
 		if len(req.Entries) >= 1000 {
 			req = &request{
@@ -444,6 +442,7 @@ type valueLog struct {
 	opt     Options
 
 	encoder *entryEncoder
+	entries []*Entry
 }
 
 func (l *valueLog) fpath(fid uint16) string {
