@@ -323,8 +323,9 @@ func ParseFileID(name string) (uint64, bool) {
 	}
 	//	suffix := name[len(fileSuffix):]
 	name = strings.TrimSuffix(name, fileSuffix)
-	id, err := strconv.Atoi(name)
-	if err != nil {
+	var id int
+	var err error
+	if id, err = strconv.Atoi(name); err != nil {
 		return 0, false
 	}
 	y.AssertTrue(id >= 0)
