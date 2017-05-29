@@ -145,7 +145,9 @@ func NewKV(opt *Options) (out *KV, err error) {
 	y.VerboseMode = opt.Verbose
 
 	// newLevelsController potentially loads files in directory.
-	out.lc = newLevelsController(out)
+	if out.lc, err = newLevelsController(out); err != nil {
+		return nil, err
+	}
 	out.lc.startCompact()
 
 	lc := out.closer.Register("memtable")

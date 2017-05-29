@@ -21,11 +21,11 @@ import (
 	"encoding/binary"
 	"io/ioutil"
 	"math/rand"
-	"sort"
 	"sync/atomic"
 
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
+	"github.com/pkg/errors"
 )
 
 // summary is produced when DB is closed. Currently it is used only for testing.
@@ -53,29 +53,42 @@ func (s *levelHandler) getSummary(sum *summary) {
 
 func (s *KV) validate() { s.lc.validate() }
 
-func (s *levelsController) validate() {
+func (s *levelsController) validate() error {
 	for _, l := range s.levels {
-		l.validate()
+		if err := l.validate(); err != nil {
+			return errors.Wrap(err, "Levels Controller")
+		}
 	}
+	return nil
 }
 
 // Check does some sanity check on one level of data or in-memory index.
-func (s *levelHandler) validate() {
+func (s *levelHandler) validate() error {
 	if s.level == 0 {
-		return
+		return nil
 	}
+
 	s.RLock()
 	defer s.RUnlock()
 	numTables := len(s.tables)
 	for j := 1; j < numTables; j++ {
-		y.AssertTruef(j < len(s.tables), "Level %d, j=%d numTables=%d", s.level, j, numTables)
-		y.AssertTruef(bytes.Compare(s.tables[j-1].Biggest(), s.tables[j].Smallest()) < 0,
-			"Inter: %s vs %s: level=%d j=%d numTables=%d",
-			string(s.tables[j-1].Biggest()), string(s.tables[j].Smallest()), s.level, j, numTables)
-		y.AssertTruef(bytes.Compare(s.tables[j].Smallest(), s.tables[j].Biggest()) <= 0,
-			"Intra: %s vs %s: level=%d j=%d numTables=%d",
-			string(s.tables[j].Smallest()), string(s.tables[j].Biggest()), s.level, j, numTables)
+		if j >= len(s.tables) {
+			return errors.Errorf("Level %d, j=%d numTables=%d", s.level, j, numTables)
+		}
+
+		if bytes.Compare(s.tables[j-1].Biggest(), s.tables[j].Smallest()) >= 0 {
+			return errors.Errorf(
+				"Inter: %s vs %s: level=%d j=%d numTables=%d",
+				string(s.tables[j-1].Biggest()), string(s.tables[j].Smallest()), s.level, j, numTables)
+		}
+
+		if bytes.Compare(s.tables[j].Smallest(), s.tables[j].Biggest()) > 0 {
+			return errors.Errorf(
+				"Intra: %q vs %q: level=%d j=%d numTables=%d",
+				s.tables[j].Smallest(), s.tables[j].Biggest(), s.level, j, numTables)
+		}
 	}
+	return nil
 }
 
 func (s *KV) debugPrintMore() { s.lc.debugPrintMore() }
@@ -89,7 +102,8 @@ func (s *levelsController) debugPrint() {
 		if s.beingCompacted[i] {
 			busy = 1
 		}
-		y.Printf("(i=%d, size=%d, busy=%d, numTables=%d) ", i, s.levels[i].getTotalSize(), busy, len(s.levels[i].tables))
+		y.Printf("(i=%d, size=%d, busy=%d, numTables=%d) ",
+			i, s.levels[i].getTotalSize(), busy, len(s.levels[i].tables))
 	}
 	y.Printf("\n")
 }
@@ -128,10 +142,6 @@ func updateLevel(t *table.Table, newLevel int) {
 	t.SetMetadata(metadata[:])
 }
 
-func (s *levelsController) reserveCompactID() uint64 {
-	return atomic.AddUint64(&s.maxCompactID, 1)
-}
-
 func getIDMap(dir string) map[uint64]struct{} {
 	fileInfos, err := ioutil.ReadDir(dir)
 	y.Check(err)
@@ -162,19 +172,6 @@ func keyRange(tables []*table.Table) ([]byte, []byte) {
 		}
 	}
 	return smallest, biggest
-}
-
-// overlappingTables returns the tables that intersect with key range.
-// The input tables have to be sorted and non-overlapping.
-// Returns a half-interval.
-func overlappingTables(begin, end []byte, tables []*table.Table) (int, int) {
-	left := sort.Search(len(tables), func(i int) bool {
-		return bytes.Compare(tables[i].Biggest(), begin) >= 0
-	})
-	right := sort.Search(len(tables), func(i int) bool {
-		return bytes.Compare(tables[i].Smallest(), end) > 0
-	})
-	return left, right
 }
 
 // mod65535 mods by 65535 fast.

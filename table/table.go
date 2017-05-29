@@ -80,17 +80,18 @@ func (t *Table) DecrRef() error {
 	if newRef == 0 {
 		// We can safely delete this file, because for all the current files, we always have
 		// at least one reference pointing to them.
-		err := t.fd.Truncate(0) // This is very important to let the FS know that the file is deleted.
-		if err != nil {
+
+		if err := t.fd.Truncate(0); err != nil {
+			// This is very important to let the FS know that the file is deleted.
 			return err
 		}
+
 		filename := t.fd.Name()
-		err = t.fd.Close()
-		if err != nil {
+		if err := t.fd.Close(); err != nil {
 			return err
 		}
-		err = os.Remove(filename)
-		if err != nil {
+
+		if err := os.Remove(filename); err != nil {
 			return err
 		}
 	}

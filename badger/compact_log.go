@@ -23,9 +23,11 @@ import (
 	"encoding/binary"
 	"io"
 	"os"
+	"sync/atomic"
 
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
+	"github.com/pkg/errors"
 )
 
 type compactLog struct {
@@ -40,14 +42,14 @@ type compaction struct {
 	toInsert  []uint64
 }
 
-func (s *compactLog) init(filename string) {
+func (s *compactLog) init(filename string) error {
 	fd, err := y.OpenSyncedFile(filename, true)
-	y.Check(err)
 	s.fd = fd
+	return errors.Wrapf(err, "Opening file: %q", filename)
 }
 
-func (s *compactLog) close() {
-	s.fd.Close()
+func (s *compactLog) close() error {
+	return s.fd.Close()
 }
 
 func (s *compactLog) add(c *compaction) error {
@@ -183,7 +185,8 @@ func compactLogReplay(filename, dir string, idMap map[uint64]struct{}) {
 func (s *levelsController) buildCompaction(def *compactDef) *compaction {
 	var newIDMin, newIDMax uint64
 	c := new(compaction)
-	c.compactID = s.reserveCompactID()
+	c.compactID = atomic.AddUint64(&s.maxCompactID, 1)
+
 	var estSize int64
 	for _, t := range def.top {
 		c.toDelete = append(c.toDelete, t.ID())
