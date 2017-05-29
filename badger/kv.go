@@ -24,13 +24,15 @@ import (
 	"golang.org/x/net/trace"
 
 	"errors"
+
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 )
 
 var (
-	head = []byte("/head/") // For storing value offset for replay.
+	badgerPrefix = []byte("!badger!")     // Prefix for internal keys used by badger.
+	head         = []byte("!badger!head") // For storing value offset for replay.
 )
 
 // Options are params for creating DB object.

@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"sync"
 
 	"github.com/dgraph-io/badger/y"
@@ -139,6 +140,9 @@ func (it *Iterator) Next() {
 
 	// Advance internal iterator until entry is not deleted
 	for it.iitr.Next(); it.iitr.Valid(); it.iitr.Next() {
+		if bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
+			continue
+		}
 		if it.iitr.Value().Meta&BitDelete == 0 { // Not deleted.
 			break
 		}
@@ -169,6 +173,9 @@ func (it *Iterator) prefetch() {
 	var count int
 	it.item = nil
 	for ; i.Valid(); i.Next() {
+		if bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
+			continue
+		}
 		if i.Value().Meta&BitDelete > 0 {
 			continue
 		}
@@ -196,6 +203,9 @@ func (it *Iterator) Seek(key []byte) {
 		it.waste.push(i)
 	}
 	it.iitr.Seek(key)
+	for it.iitr.Valid() && bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
+		it.iitr.Next()
+	}
 	it.prefetch()
 }
 
@@ -211,6 +221,9 @@ func (it *Iterator) Rewind() {
 	}
 
 	it.iitr.Rewind()
+	for it.iitr.Valid() && bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
+		it.iitr.Next()
+	}
 	it.prefetch()
 }
 
