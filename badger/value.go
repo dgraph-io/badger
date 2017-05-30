@@ -273,7 +273,10 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	sort.Slice(vlog.entries, func(i, j int) bool {
 		return bytes.Compare(vlog.entries[i].Key, vlog.entries[j].Key) < 0
 	})
-	vlog.writeToKV(elog)
+
+	if len(vlog.entries) > 0 {
+		vlog.writeToKV(elog)
+	}
 
 	elog.Printf("Removing fid: %d", f.fid)
 	// Entries written to LSM. Remove the older file now.
@@ -314,7 +317,7 @@ func (vlog *valueLog) writeToKV(elog trace.EventLog) {
 	for i, b := range requests {
 		elog.Printf("req %d has %d entries", i, len(b.Entries))
 		b.Wg.Add(1)
-		y.AssertTrue(len(b.Entries) > 0)
+		y.AssertTruef(len(b.Entries) > 0, "len(requests): %d", len(requests))
 		vlog.kv.writeCh <- b // Write out these blocks with newer value offsets.
 	}
 	for i, b := range requests {
@@ -738,7 +741,7 @@ func (l *valueLog) runGCInLoop(lc *y.LevelCloser) {
 		return
 	}
 
-	tick := time.NewTicker(10 * time.Minute)
+	tick := time.NewTicker(1 * time.Minute)
 	for {
 		select {
 		case <-lc.HasBeenClosed():
