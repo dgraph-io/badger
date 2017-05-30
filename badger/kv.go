@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -156,7 +157,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 		return out, err
 	}
 
-	var item KVItem // casCounter ignored.
+	var item KVItem
 	if err := out.Get(head, &item); err != nil {
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
@@ -228,7 +229,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 
 // Close closes a KV. It's crucial to call it to ensure all the pending updates
 // make their way to disk.
-func (s *KV) Close() {
+func (s *KV) Close() error {
 	y.Printf("Closing database\n")
 	s.elog.Printf("Closing database")
 	// Stop value GC first.
@@ -240,7 +241,9 @@ func (s *KV) Close() {
 	lc.SignalAndWait()
 
 	// Now close the value log.
-	s.vlog.Close()
+	if err := s.vlog.Close(); err != nil {
+		return errors.Wrapf(err, "Close()")
+	}
 
 	// Make sure that block writer is done pushing stuff into memtable!
 	// Otherwise, you will have a race condition: we are trying to flush memtables
@@ -278,11 +281,14 @@ func (s *KV) Close() {
 	lc.Wait()
 	y.Printf("Memtable flushed\n")
 
-	s.lc.close()
+	if err := s.lc.close(); err != nil {
+		return errors.Wrap(err, "KV.Close")
+	}
 	s.elog.Printf("Waiting for closer")
 	s.closer.SignalAll()
 	s.closer.WaitForAll()
 	s.elog.Finish()
+	return nil
 }
 
 // getMemtables returns the current memtables and get references.
@@ -326,11 +332,10 @@ func (s *KV) fillItem(item *KVItem) error {
 	if err != nil {
 		return errors.Wrapf(err, "Unable to read from value log: %+v", vp)
 	}
-
-	// Why should this deletion not already be reflected in the LSM tree.
-	// if (entry.Meta & BitDelete) == 0 { // Not tombstone.
-	// 	return entry.Value, nil
-	// }
+	if (entry.Meta & BitDelete) != 0 { // Not tombstone.
+		item.val = nil
+		return nil
+	}
 	item.val = entry.Value
 	return nil
 }
@@ -357,7 +362,6 @@ func (s *KV) Get(key []byte, item *KVItem) error {
 	if err != nil {
 		return errors.Wrapf(err, "KV::Get key: %q", key)
 	}
-
 	if item.slice == nil {
 		item.slice = new(y.Slice)
 	}
@@ -403,11 +407,11 @@ func (s *KV) writeToLSM(b *request) error {
 	for i, entry := range b.Entries {
 		entry.Error = nil
 		if entry.CASCounterCheck != 0 {
-			oldValue, err := s.get(entry.Key) // No need to decode existing value. Just need old CAS counter.
+			oldValue, err := s.get(entry.Key)
 			if err != nil {
 				return errors.Wrap(err, "writeToLSM")
 			}
-
+			// No need to decode existing value. Just need old CAS counter.
 			if oldValue.CASCounter != entry.CASCounterCheck {
 				entry.Error = CasMismatch
 				continue
@@ -436,9 +440,15 @@ func (s *KV) writeRequests(reqs []*request) error {
 	if len(reqs) == 0 {
 		return nil
 	}
-	s.elog.Printf("writeRequests called")
 
-	s.elog.Printf("Writing to value log")
+	done := func(err error) {
+		for _, r := range reqs {
+			r.Err = err
+			r.Wg.Done()
+		}
+	}
+
+	s.elog.Printf("writeRequests called. Writing to value log")
 
 	// CAS counter for all operations has to go onto value log. Otherwise, if it is just in memtable for
 	// a long time, and following CAS operations use that as a check, when replaying, we will think that
@@ -450,13 +460,13 @@ func (s *KV) writeRequests(reqs []*request) error {
 	}
 	err := s.vlog.write(reqs)
 	if err != nil {
+		done(err)
 		return err
 	}
 
 	s.elog.Printf("Writing to memtable")
 	for i, b := range reqs {
 		if len(b.Entries) == 0 {
-			b.Wg.Done()
 			continue
 		}
 		for err := s.ensureRoomForWrite(); err != nil; err = s.ensureRoomForWrite() {
@@ -467,43 +477,49 @@ func (s *KV) writeRequests(reqs []*request) error {
 			time.Sleep(10 * time.Millisecond)
 		}
 		if err != nil {
-			return err
+			done(err)
+			return errors.Wrap(err, "writeRequests")
 		}
 		if err := s.writeToLSM(b); err != nil {
+			done(err)
 			return errors.Wrap(err, "writeRequests")
 		}
 		s.elog.Printf("Wrote %d entries from block %d", len(b.Entries), i)
 		s.updateOffset(b.Ptrs)
-		b.Wg.Done()
 	}
+	done(nil)
 	return nil
 }
 
 func (s *KV) doWrites(lc *y.LevelCloser) {
 	defer lc.Done()
 
-	blocks := make([]*request, 0, 10)
+	reqs := make([]*request, 0, 10)
 	for {
 		select {
-		case b := <-s.writeCh:
-			blocks = append(blocks, b)
+		case r := <-s.writeCh:
+			reqs = append(reqs, r)
 
 		case <-lc.HasBeenClosed():
 			close(s.writeCh)
 
-			for b := range s.writeCh { // Flush the channel.
-				blocks = append(blocks, b)
+			for r := range s.writeCh { // Flush the channel.
+				reqs = append(reqs, r)
 			}
-			s.writeRequests(blocks)
+			if err := s.writeRequests(reqs); err != nil {
+				log.Printf("ERROR in Badger::writeRequests: %v", err)
+			}
 			return
 
 		default:
-			if len(blocks) == 0 {
+			if len(reqs) == 0 {
 				time.Sleep(time.Millisecond)
 				break
 			}
-			s.writeRequests(blocks)
-			blocks = blocks[:0]
+			if err := s.writeRequests(reqs); err != nil {
+				log.Printf("ERROR in Badger::writeRequests: %v", err)
+			}
+			reqs = reqs[:0]
 		}
 	}
 }
@@ -512,7 +528,7 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 //   for _, e := range entries {
 //      Check(e.Error)
 //   }
-func (s *KV) BatchSet(entries []*Entry) {
+func (s *KV) BatchSet(entries []*Entry) error {
 	b := requestPool.Get().(*request)
 	defer requestPool.Put(b)
 
@@ -521,16 +537,17 @@ func (s *KV) BatchSet(entries []*Entry) {
 	b.Wg.Add(1)
 	s.writeCh <- b
 	b.Wg.Wait()
+	return b.Err
 }
 
 // Set sets the provided value for a given key. If key is not present, it is created.
 // If it is present, the existing value is overwritten with the one provided.
-func (s *KV) Set(key, val []byte) {
+func (s *KV) Set(key, val []byte) error {
 	e := &Entry{
 		Key:   key,
 		Value: val,
 	}
-	s.BatchSet([]*Entry{e})
+	return s.BatchSet([]*Entry{e})
 }
 
 // EntriesSet adds a Set to the list of entries.
@@ -551,20 +568,22 @@ func (s *KV) CompareAndSet(key []byte, val []byte, casCounter uint16) error {
 		Value:           val,
 		CASCounterCheck: casCounter,
 	}
-	s.BatchSet([]*Entry{e})
+	if err := s.BatchSet([]*Entry{e}); err != nil {
+		return err
+	}
 	return e.Error
 }
 
 // Delete deletes a key.
 // Exposing this so that user does not have to specify the Entry directly.
 // For example, BitDelete seems internal to badger.
-func (s *KV) Delete(key []byte) {
+func (s *KV) Delete(key []byte) error {
 	e := &Entry{
 		Key:  key,
 		Meta: BitDelete,
 	}
 
-	s.BatchSet([]*Entry{e})
+	return s.BatchSet([]*Entry{e})
 }
 
 // EntriesDelete adds a Del to the list of entries.
@@ -583,7 +602,9 @@ func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
 		Meta:            BitDelete,
 		CASCounterCheck: casCounter,
 	}
-	s.BatchSet([]*Entry{e})
+	if err := s.BatchSet([]*Entry{e}); err != nil {
+		return err
+	}
 	return e.Error
 }
 

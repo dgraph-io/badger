@@ -585,6 +585,7 @@ type request struct {
 	Entries []*Entry
 	Ptrs    []valuePointer
 	Wg      sync.WaitGroup
+	Err     error
 }
 
 // sync is thread-unsafe and should not be called concurrently with write.
@@ -847,7 +848,8 @@ func (vlog *valueLog) doRunGC() error {
 			if ne.casCounter == e.casCounter {
 				ne.print("Latest Entry in LSM")
 				e.print("Latest Entry in Log")
-				y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
+				return errors.Errorf(
+					"This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
 			}
 		}
 		return nil

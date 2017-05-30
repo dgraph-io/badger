@@ -433,7 +433,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) {
 	}
 }
 
-func (s *levelsController) close() {
+func (s *levelsController) close() error {
 	y.Printf("Sending close signal to compact workers\n")
 	n := s.kv.opt.MaxLevels / 2
 	for i := 0; i < n; i++ {
@@ -444,9 +444,11 @@ func (s *levelsController) close() {
 	s.compactWorkersWg.Wait()
 	y.Printf("Compaction is all done\n")
 	for _, l := range s.levels {
-		l.close()
+		if err := l.close(); err != nil {
+			return errors.Wrap(err, "levelsController.Close")
+		}
 	}
-	s.clog.close()
+	return s.clog.close()
 }
 
 // get returns the found value if any. If not found, we return nil.

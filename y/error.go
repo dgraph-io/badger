@@ -60,14 +60,14 @@ func Check2(_ interface{}, err error) {
 // AssertTrue asserts that b is true. Otherwise, it would log fatal.
 func AssertTrue(b bool) {
 	if !b {
-		log.Fatalf("%+v", Errorf("Assert failed"))
+		log.Fatalf("%+v", errors.Errorf("Assert failed"))
 	}
 }
 
 // AssertTruef is AssertTrue with extra info.
 func AssertTruef(b bool, format string, args ...interface{}) {
 	if !b {
-		log.Fatalf("%+v", Errorf(format, args...))
+		log.Fatalf("%+v", errors.Errorf(format, args...))
 	}
 }
 
@@ -88,19 +88,6 @@ func Wrapf(err error, format string, args ...interface{}) error {
 		return fmt.Errorf(format+" error: %+v", append(args, err)...)
 	}
 	return errors.Wrapf(err, format, args...)
-}
-
-// Errorf creates a new error with stack trace, etc.
-func Errorf(format string, args ...interface{}) error {
-	if !debugMode {
-		return fmt.Errorf(format, args...)
-	}
-	return errors.Errorf(format, args...)
-}
-
-// Fatalf logs fatal.
-func Fatalf(format string, args ...interface{}) {
-	log.Fatalf("%+v", Errorf(format, args...))
 }
 
 // Printf printfs.
