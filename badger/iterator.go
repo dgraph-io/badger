@@ -49,6 +49,11 @@ func (item *KVItem) Value() []byte {
 	return item.val
 }
 
+// Counter returns the CAS counter associated with the value.
+func (item *KVItem) Counter() uint16 {
+	return item.casCounter
+}
+
 type list struct {
 	head *KVItem
 	tail *KVItem
@@ -111,11 +116,6 @@ func (it *Iterator) newItem() *KVItem {
 	return item
 }
 
-func (it *Iterator) fetchOneValue(item *KVItem) {
-	item.val = it.kv.decodeValue(item.vptr, item.meta, item.slice)
-	item.wg.Done()
-}
-
 // Item returns pointer to the current KVItem.
 // This item is only valid until it.Next() gets called.
 func (it *Iterator) Item() *KVItem { return it.item }
@@ -164,7 +164,10 @@ func (it *Iterator) fill(item *KVItem) {
 	item.vptr = y.Safecopy(item.vptr, vs.Value)
 	if it.opt.FetchValues {
 		item.wg.Add(1)
-		go it.fetchOneValue(item)
+		go func() {
+			it.kv.fillItem(item)
+			item.wg.Done()
+		}()
 	}
 }
 

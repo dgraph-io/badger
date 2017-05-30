@@ -136,12 +136,15 @@ func TestCAS(t *testing.T) {
 
 	time.Sleep(time.Second)
 
+	var item KVItem
 	for i := 0; i < 100; i++ {
 		k := []byte(fmt.Sprintf("key%d", i))
 		v := []byte(fmt.Sprintf("val%d", i))
-		value, casCounter := kv.Get(k)
-		require.EqualValues(t, v, value)
-		require.EqualValues(t, entries[i].casCounter, casCounter)
+		if err := kv.Get(k, &item); err != nil {
+			t.Error(err)
+		}
+		require.EqualValues(t, v, item.Value())
+		require.EqualValues(t, entries[i].casCounter, item.Counter())
 	}
 
 	for i := 0; i < 100; i++ {
@@ -159,9 +162,11 @@ func TestCAS(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		k := []byte(fmt.Sprintf("key%d", i))
 		v := []byte(fmt.Sprintf("val%d", i))
-		value, casCounter := kv.Get(k)
-		require.EqualValues(t, v, value)
-		require.EqualValues(t, entries[i].casCounter, casCounter)
+		if err := kv.Get(k, &item); err != nil {
+			t.Error(err)
+		}
+		require.EqualValues(t, v, item.Value())
+		require.EqualValues(t, entries[i].casCounter, item.Counter())
 	}
 
 	for i := 0; i < 100; i++ {
@@ -178,9 +183,11 @@ func TestCAS(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		k := []byte(fmt.Sprintf("key%d", i))
 		v := []byte(fmt.Sprintf("val%d", i))
-		value, casCounter := kv.Get(k)
-		require.EqualValues(t, v, value)
-		require.EqualValues(t, entries[i].casCounter, casCounter)
+		if err := kv.Get(k, &item); err != nil {
+			t.Error(err)
+		}
+		require.EqualValues(t, v, item.Value())
+		require.EqualValues(t, entries[i].casCounter, item.Counter())
 	}
 
 	for i := 0; i < 100; i++ {
@@ -192,9 +199,11 @@ func TestCAS(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		k := []byte(fmt.Sprintf("key%d", i))
 		v := []byte(fmt.Sprintf("zzz%d", i)) // Value should be changed.
-		value, casCounter := kv.Get(k)
-		require.EqualValues(t, v, value)
-		require.True(t, casCounter != 0)
+		if err := kv.Get(k, &item); err != nil {
+			t.Error(err)
+		}
+		require.EqualValues(t, v, item.Value())
+		require.True(t, item.Counter() != 0)
 	}
 }
 
@@ -202,34 +211,49 @@ func TestGet(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, _ := NewKV(getTestOptions(dir))
+	kv, err := NewKV(getTestOptions(dir))
+	if err != nil {
+		t.Error(err)
+	}
 	defer kv.Close()
 
+	var item KVItem
 	kv.Set([]byte("key1"), []byte("val1"))
-	value, casCounter := kv.Get([]byte("key1"))
-	require.EqualValues(t, "val1", value)
-	require.True(t, casCounter != 0)
+
+	if err := kv.Get([]byte("key1"), &item); err != nil {
+		t.Error(err)
+	}
+	require.EqualValues(t, "val1", item.Value())
+	require.True(t, item.Counter() != 0)
 
 	kv.Set([]byte("key1"), []byte("val2"))
-	value, casCounter = kv.Get([]byte("key1"))
-	require.EqualValues(t, "val2", value)
-	require.True(t, casCounter != 0)
+	if err := kv.Get([]byte("key1"), &item); err != nil {
+		t.Error(err)
+	}
+	require.EqualValues(t, "val2", item.Value())
+	require.True(t, item.Counter() != 0)
 
 	kv.Delete([]byte("key1"))
-	value, casCounter = kv.Get([]byte("key1"))
-	require.Nil(t, value)
-	require.True(t, casCounter != 0)
+	if err := kv.Get([]byte("key1"), &item); err != nil {
+		t.Error(err)
+	}
+	require.Nil(t, item.Value())
+	require.True(t, item.Counter() != 0)
 
 	kv.Set([]byte("key1"), []byte("val3"))
-	value, casCounter = kv.Get([]byte("key1"))
-	require.EqualValues(t, "val3", value)
-	require.True(t, casCounter != 0)
+	if err := kv.Get([]byte("key1"), &item); err != nil {
+		t.Error(err)
+	}
+	require.EqualValues(t, "val3", item.Value())
+	require.True(t, item.Counter() != 0)
 
 	longVal := make([]byte, 1000)
 	kv.Set([]byte("key1"), longVal)
-	value, casCounter = kv.Get([]byte("key1"))
-	require.EqualValues(t, longVal, value)
-	require.True(t, casCounter != 0)
+	if err := kv.Get([]byte("key1"), &item); err != nil {
+		t.Error(err)
+	}
+	require.EqualValues(t, longVal, item.Value())
+	require.True(t, item.Counter() != 0)
 }
 
 // Put a lot of data to move some data to disk.
@@ -238,7 +262,11 @@ func TestGetMore(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, _ := NewKV(getTestOptions(dir))
+	kv, err := NewKV(getTestOptions(dir))
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
 	defer kv.Close()
 
 	//	n := 500000
@@ -261,13 +289,17 @@ func TestGetMore(t *testing.T) {
 		}
 	}
 	kv.validate()
+
+	var item KVItem
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		value, _ := kv.Get([]byte(k))
-		require.EqualValues(t, k, string(value))
+		if err := kv.Get([]byte(k), &item); err != nil {
+			t.Error(err)
+		}
+		require.EqualValues(t, k, string(item.Value()))
 	}
 
 	// Overwrite
@@ -295,8 +327,10 @@ func TestGetMore(t *testing.T) {
 		}
 		k := []byte(fmt.Sprintf("%09d", i))
 		expectedValue := fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", i)
-		value, _ := kv.Get([]byte(k))
-		require.EqualValues(t, expectedValue, string(value))
+		if err := kv.Get([]byte(k), &item); err != nil {
+			t.Error(err)
+		}
+		require.EqualValues(t, expectedValue, string(item.Value()))
 	}
 
 	// "Delete" key.
@@ -323,8 +357,10 @@ func TestGetMore(t *testing.T) {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		value, _ := kv.Get([]byte(k))
-		require.Nil(t, value)
+		if err := kv.Get([]byte(k), &item); err != nil {
+			t.Error(err)
+		}
+		require.Nil(t, item.Value())
 	}
 	fmt.Println("Done and closing")
 }
@@ -413,13 +449,16 @@ func TestLoad(t *testing.T) {
 	}
 
 	kv, _ := NewKV(getTestOptions(dir))
+	var item KVItem
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		value, _ := kv.Get([]byte(k))
-		require.EqualValues(t, k, string(value))
+		if err := kv.Get([]byte(k), &item); err != nil {
+			t.Error(err)
+		}
+		require.EqualValues(t, k, string(item.Value()))
 	}
 	kv.Close()
 	summary := kv.lc.getSummary()

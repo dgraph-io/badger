@@ -17,17 +17,17 @@
 package badger
 
 import (
+	"log"
 	"os"
 	"sync"
 	"time"
 
 	"golang.org/x/net/trace"
 
-	"errors"
-
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -157,7 +157,12 @@ func NewKV(opt *Options) (out *KV, err error) {
 		return out, err
 	}
 
-	val, _ := out.Get(head) // casCounter ignored.
+	var item KVItem
+	if err := out.Get(head, &item); err != nil {
+		return nil, errors.Wrap(err, "Retrieving head")
+	}
+	val := item.Value()
+
 	var vptr valuePointer
 	if len(val) > 0 {
 		vptr.Decode(val)
@@ -174,7 +179,10 @@ func NewKV(opt *Options) (out *KV, err error) {
 		first = false
 
 		if e.CASCounterCheck != 0 {
-			oldValue := out.get(e.Key)
+			oldValue, err := out.get(e.Key)
+			if err != nil {
+				return err
+			}
 			if oldValue.CASCounter != e.CASCounterCheck {
 				return nil
 			}
@@ -221,7 +229,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 
 // Close closes a KV. It's crucial to call it to ensure all the pending updates
 // make their way to disk.
-func (s *KV) Close() {
+func (s *KV) Close() error {
 	y.Printf("Closing database\n")
 	s.elog.Printf("Closing database")
 	// Stop value GC first.
@@ -233,7 +241,9 @@ func (s *KV) Close() {
 	lc.SignalAndWait()
 
 	// Now close the value log.
-	s.vlog.Close()
+	if err := s.vlog.Close(); err != nil {
+		return errors.Wrapf(err, "Close()")
+	}
 
 	// Make sure that block writer is done pushing stuff into memtable!
 	// Otherwise, you will have a race condition: we are trying to flush memtables
@@ -271,20 +281,28 @@ func (s *KV) Close() {
 	lc.Wait()
 	y.Printf("Memtable flushed\n")
 
-	s.lc.close()
+	if err := s.lc.close(); err != nil {
+		return errors.Wrap(err, "KV.Close")
+	}
 	s.elog.Printf("Waiting for closer")
 	s.closer.SignalAll()
 	s.closer.WaitForAll()
 	s.elog.Finish()
+	return nil
 }
 
 // getMemtables returns the current memtables and get references.
 func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 	s.RLock()
 	defer s.RUnlock()
+
 	tables := make([]*skl.Skiplist, len(s.imm)+1)
+
+	// Get mutable memtable.
 	tables[0] = s.mt
 	tables[0].IncrRef()
+
+	// Get immutable memtables.
 	last := len(s.imm) - 1
 	for i := range s.imm {
 		tables[i+1] = s.imm[last-i]
@@ -297,46 +315,65 @@ func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 	}
 }
 
-func (s *KV) decodeValue(val []byte, meta byte, slice *y.Slice) []byte {
-	if (meta & BitDelete) != 0 {
+func (s *KV) fillItem(item *KVItem) error {
+	if (item.meta & BitDelete) != 0 {
 		// Tombstone encountered.
+		item.val = nil
 		return nil
 	}
-	if (meta & BitValuePointer) == 0 {
-		return val
+	if (item.meta & BitValuePointer) == 0 {
+		item.val = item.vptr
+		return nil
 	}
 
 	var vp valuePointer
-	vp.Decode(val)
-	entry, err := s.vlog.Read(vp, slice)
-	y.Checkf(err, "Unable to read from value log: %+v", vp)
-
-	if (entry.Meta & BitDelete) == 0 { // Not tombstone.
-		return entry.Value
+	vp.Decode(item.vptr)
+	entry, err := s.vlog.Read(vp, item.slice)
+	if err != nil {
+		return errors.Wrapf(err, "Unable to read from value log: %+v", vp)
 	}
+	if (entry.Meta & BitDelete) != 0 { // Not tombstone.
+		item.val = nil
+		return nil
+	}
+	item.val = entry.Value
 	return nil
 }
 
 // getValueHelper returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
-func (s *KV) get(key []byte) y.ValueStruct {
+func (s *KV) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getMemTables() // Lock should be released.
 	defer decr()
+
 	for i := 0; i < len(tables); i++ {
 		vs := tables[i].Get(key)
 		if vs.Meta != 0 || vs.Value != nil {
-			return vs
+			return vs, nil
 		}
 	}
 	return s.lc.get(key)
 }
 
-// Get looks for key and returns value along with the current CAS counter.
+// Get looks for key and returns a KVItem.
 // If key is not found, value returned is nil.
-func (s *KV) Get(key []byte) ([]byte, uint16) {
-	vs := s.get(key)
-	slice := new(y.Slice)
-	return s.decodeValue(vs.Value, vs.Meta, slice), vs.CASCounter
+func (s *KV) Get(key []byte, item *KVItem) error {
+	vs, err := s.get(key)
+	if err != nil {
+		return errors.Wrapf(err, "KV::Get key: %q", key)
+	}
+	if item.slice == nil {
+		item.slice = new(y.Slice)
+	}
+	item.meta = vs.Meta
+	item.casCounter = vs.CASCounter
+	item.key = key
+	item.vptr = vs.Value
+
+	if err := s.fillItem(item); err != nil {
+		return errors.Wrapf(err, "KV::Get key: %q", key)
+	}
+	return nil
 }
 
 func (s *KV) updateOffset(ptrs []valuePointer) {
@@ -361,14 +398,20 @@ func (s *KV) shouldWriteValueToLSM(e Entry) bool {
 	return len(e.Value) < s.opt.ValueThreshold
 }
 
-func (s *KV) writeToLSM(b *request) {
+func (s *KV) writeToLSM(b *request) error {
 	var offsetBuf [10]byte
-	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
+	if len(b.Ptrs) != len(b.Entries) {
+		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
+	}
 
 	for i, entry := range b.Entries {
 		entry.Error = nil
 		if entry.CASCounterCheck != 0 {
-			oldValue := s.get(entry.Key) // No need to decode existing value. Just need old CAS counter.
+			oldValue, err := s.get(entry.Key)
+			if err != nil {
+				return errors.Wrap(err, "writeToLSM")
+			}
+			// No need to decode existing value. Just need old CAS counter.
 			if oldValue.CASCounter != entry.CASCounterCheck {
 				entry.Error = CasMismatch
 				continue
@@ -389,6 +432,7 @@ func (s *KV) writeToLSM(b *request) {
 					CASCounter: entry.casCounter})
 		}
 	}
+	return nil
 }
 
 // writeRequests is called serially by only one goroutine.
@@ -396,9 +440,15 @@ func (s *KV) writeRequests(reqs []*request) error {
 	if len(reqs) == 0 {
 		return nil
 	}
-	s.elog.Printf("writeRequests called")
 
-	s.elog.Printf("Writing to value log")
+	done := func(err error) {
+		for _, r := range reqs {
+			r.Err = err
+			r.Wg.Done()
+		}
+	}
+
+	s.elog.Printf("writeRequests called. Writing to value log")
 
 	// CAS counter for all operations has to go onto value log. Otherwise, if it is just in memtable for
 	// a long time, and following CAS operations use that as a check, when replaying, we will think that
@@ -410,13 +460,13 @@ func (s *KV) writeRequests(reqs []*request) error {
 	}
 	err := s.vlog.write(reqs)
 	if err != nil {
+		done(err)
 		return err
 	}
 
 	s.elog.Printf("Writing to memtable")
 	for i, b := range reqs {
 		if len(b.Entries) == 0 {
-			b.Wg.Done()
 			continue
 		}
 		for err := s.ensureRoomForWrite(); err != nil; err = s.ensureRoomForWrite() {
@@ -427,41 +477,49 @@ func (s *KV) writeRequests(reqs []*request) error {
 			time.Sleep(10 * time.Millisecond)
 		}
 		if err != nil {
-			return err
+			done(err)
+			return errors.Wrap(err, "writeRequests")
 		}
-		s.writeToLSM(b)
+		if err := s.writeToLSM(b); err != nil {
+			done(err)
+			return errors.Wrap(err, "writeRequests")
+		}
 		s.elog.Printf("Wrote %d entries from block %d", len(b.Entries), i)
 		s.updateOffset(b.Ptrs)
-		b.Wg.Done()
 	}
+	done(nil)
 	return nil
 }
 
 func (s *KV) doWrites(lc *y.LevelCloser) {
 	defer lc.Done()
 
-	blocks := make([]*request, 0, 10)
+	reqs := make([]*request, 0, 10)
 	for {
 		select {
-		case b := <-s.writeCh:
-			blocks = append(blocks, b)
+		case r := <-s.writeCh:
+			reqs = append(reqs, r)
 
 		case <-lc.HasBeenClosed():
 			close(s.writeCh)
 
-			for b := range s.writeCh { // Flush the channel.
-				blocks = append(blocks, b)
+			for r := range s.writeCh { // Flush the channel.
+				reqs = append(reqs, r)
 			}
-			s.writeRequests(blocks)
+			if err := s.writeRequests(reqs); err != nil {
+				log.Printf("ERROR in Badger::writeRequests: %v", err)
+			}
 			return
 
 		default:
-			if len(blocks) == 0 {
+			if len(reqs) == 0 {
 				time.Sleep(time.Millisecond)
 				break
 			}
-			s.writeRequests(blocks)
-			blocks = blocks[:0]
+			if err := s.writeRequests(reqs); err != nil {
+				log.Printf("ERROR in Badger::writeRequests: %v", err)
+			}
+			reqs = reqs[:0]
 		}
 	}
 }
@@ -470,7 +528,7 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 //   for _, e := range entries {
 //      Check(e.Error)
 //   }
-func (s *KV) BatchSet(entries []*Entry) {
+func (s *KV) BatchSet(entries []*Entry) error {
 	b := requestPool.Get().(*request)
 	defer requestPool.Put(b)
 
@@ -479,16 +537,17 @@ func (s *KV) BatchSet(entries []*Entry) {
 	b.Wg.Add(1)
 	s.writeCh <- b
 	b.Wg.Wait()
+	return b.Err
 }
 
 // Set sets the provided value for a given key. If key is not present, it is created.
 // If it is present, the existing value is overwritten with the one provided.
-func (s *KV) Set(key, val []byte) {
+func (s *KV) Set(key, val []byte) error {
 	e := &Entry{
 		Key:   key,
 		Value: val,
 	}
-	s.BatchSet([]*Entry{e})
+	return s.BatchSet([]*Entry{e})
 }
 
 // EntriesSet adds a Set to the list of entries.
@@ -509,20 +568,22 @@ func (s *KV) CompareAndSet(key []byte, val []byte, casCounter uint16) error {
 		Value:           val,
 		CASCounterCheck: casCounter,
 	}
-	s.BatchSet([]*Entry{e})
+	if err := s.BatchSet([]*Entry{e}); err != nil {
+		return err
+	}
 	return e.Error
 }
 
 // Delete deletes a key.
 // Exposing this so that user does not have to specify the Entry directly.
 // For example, BitDelete seems internal to badger.
-func (s *KV) Delete(key []byte) {
+func (s *KV) Delete(key []byte) error {
 	e := &Entry{
 		Key:  key,
 		Meta: BitDelete,
 	}
 
-	s.BatchSet([]*Entry{e})
+	return s.BatchSet([]*Entry{e})
 }
 
 // EntriesDelete adds a Del to the list of entries.
@@ -541,7 +602,9 @@ func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
 		Meta:            BitDelete,
 		CASCounterCheck: casCounter,
 	}
-	s.BatchSet([]*Entry{e})
+	if err := s.BatchSet([]*Entry{e}); err != nil {
+		return err
+	}
 	return e.Error
 }
 

@@ -23,6 +23,7 @@ import (
 
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
+	"github.com/pkg/errors"
 )
 
 type levelHandler struct {
@@ -76,6 +77,7 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 func (s *levelHandler) deleteTables(toDel []*table.Table) {
 	s.Lock()
 	defer s.Unlock()
+
 	toDelMap := make(map[uint64]struct{})
 	for _, t := range toDel {
 		toDelMap[t.ID()] = struct{}{}
@@ -186,18 +188,22 @@ func (s *levelHandler) numTables() int {
 	return len(s.tables)
 }
 
-func (s *levelHandler) close() {
+func (s *levelHandler) close() error {
 	s.RLock()
 	defer s.RUnlock()
 	for _, t := range s.tables {
-		t.Close()
+		if err := t.Close(); err != nil {
+			return errors.Wrap(err, "levelHandler.Close")
+		}
 	}
+	return nil
 }
 
 // getTableForKey acquires a read-lock to access s.tables. It returns a list of tableHandlers.
-func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func()) {
+func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func() error) {
 	s.RLock()
 	defer s.RUnlock()
+
 	if s.level == 0 {
 		// For level 0, we need to check every table. Remember to make a copy as s.tables may change
 		// once we exit this function, and we don't want to lock s.tables while seeking in tables.
@@ -207,10 +213,13 @@ func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func()) {
 			out = append(out, s.tables[i])
 			s.tables[i].IncrRef()
 		}
-		return out, func() {
+		return out, func() error {
 			for _, t := range out {
-				t.DecrRef()
+				if err := t.DecrRef(); err != nil {
+					return err
+				}
 			}
+			return nil
 		}
 	}
 	// For level >= 1, we can do a binary search as key range does not overlap.
@@ -219,32 +228,34 @@ func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func()) {
 	})
 	if idx >= len(s.tables) {
 		// Given key is strictly > than every element we have.
-		return nil, func() {}
+		return nil, func() error { return nil }
 	}
 	tbl := s.tables[idx]
 	tbl.IncrRef()
-	return []*table.Table{tbl}, func() { tbl.DecrRef() }
+	return []*table.Table{tbl}, tbl.DecrRef
 }
 
 // get returns value for a given key. If not found, return nil.
-func (s *levelHandler) get(key []byte) y.ValueStruct {
+func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getTableForKey(key)
-	defer decr()
+
 	for _, th := range tables {
 		if th.DoesNotHave(key) {
 			continue
 		}
+
 		it := th.NewIterator(false)
 		defer it.Close()
+
 		it.Seek(key)
 		if !it.Valid() {
 			continue
 		}
 		if bytes.Equal(key, it.Key()) {
-			return it.Value()
+			return it.Value(), decr()
 		}
 	}
-	return y.ValueStruct{}
+	return y.ValueStruct{}, decr()
 }
 
 // appendIterators appends iterators to an array of iterators, for merging.
@@ -252,6 +263,7 @@ func (s *levelHandler) get(key []byte) y.ValueStruct {
 func (s *levelHandler) appendIterators(iters []y.Iterator, reversed bool) []y.Iterator {
 	s.RLock()
 	defer s.RUnlock()
+
 	if s.level == 0 {
 		// Remember to add in reverse order!
 		// The newer table at the end of s.tables should be added first as it takes precedence.
@@ -262,6 +274,7 @@ func (s *levelHandler) appendIterators(iters []y.Iterator, reversed bool) []y.It
 
 // overlappingTables returns the tables that intersect with key range.
 // Returns a half-interval.
+// This function should already have acquired a read lock.
 func (s *levelHandler) overlappingTables(begin, end []byte) (int, int) {
 	left := sort.Search(len(s.tables), func(i int) bool {
 		return bytes.Compare(begin, s.tables[i].Biggest()) <= 0

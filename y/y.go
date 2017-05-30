@@ -17,6 +17,7 @@
 package y
 
 import (
+	"log"
 	"sync"
 	"sync/atomic"
 
@@ -95,7 +96,7 @@ func (c *Closer) Get(name string) *LevelCloser {
 
 	lc, has := c.levels[name]
 	if !has {
-		Fatalf("%q not present in Closer", name)
+		log.Fatalf("%q not present in Closer", name)
 		return nil
 	}
 	return lc

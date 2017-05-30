@@ -24,6 +24,7 @@ import (
 	"sort"
 
 	"github.com/dgraph-io/badger/y"
+	"github.com/pkg/errors"
 )
 
 type BlockIterator struct {
@@ -118,7 +119,8 @@ func (itr *BlockIterator) parseKV(h header) {
 	itr.pos += h.klen
 
 	if itr.pos+h.vlen > len(itr.data) {
-		itr.err = y.Errorf("Value exceeded size of block: %d %d %d %d %v", itr.pos, h.klen, h.vlen, len(itr.data), h)
+		itr.err = errors.Errorf("Value exceeded size of block: %d %d %d %d %v",
+			itr.pos, h.klen, h.vlen, len(itr.data), h)
 		return
 	}
 	itr.val = itr.data[itr.pos : itr.pos+h.vlen]

@@ -85,12 +85,10 @@ func (t *Table) DecrRef() error {
 			// This is very important to let the FS know that the file is deleted.
 			return err
 		}
-
 		filename := t.fd.Name()
 		if err := t.fd.Close(); err != nil {
 			return err
 		}
-
 		if err := os.Remove(filename); err != nil {
 			return err
 		}
@@ -117,7 +115,7 @@ func (b byKey) Less(i int, j int) bool { return bytes.Compare(b[i].key, b[j].key
 func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	id, ok := ParseFileID(fd.Name())
 	if !ok {
-		return nil, y.Errorf("Invalid filename: %s", fd.Name())
+		return nil, errors.Errorf("Invalid filename: %s", fd.Name())
 	}
 	t := &Table{
 		fd:         fd,
@@ -164,11 +162,14 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	return t, nil
 }
 
-func (t *Table) Close() {
-	t.fd.Close()
-	if t.mapTableTo == MemoryMap {
-		syscall.Munmap(t.mmap)
+func (t *Table) Close() error {
+	if err := t.fd.Close(); err != nil {
+		return err
 	}
+	if t.mapTableTo == MemoryMap {
+		return syscall.Munmap(t.mmap)
+	}
+	return nil
 }
 
 // SetMetadata updates our metadata to the new metadata.

@@ -211,30 +211,36 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	vlog.entries = vlog.entries[:0]
 	y.AssertTrue(vlog.kv != nil)
 	var count int
-	fe := func(e Entry) {
+	fe := func(e Entry) error {
 		count++
 		if count%10000 == 0 {
 			elog.Printf("Processing entry %d", count)
 		}
 
-		vs := vlog.kv.get(e.Key)
+		vs, err := vlog.kv.get(e.Key)
+		if err != nil {
+			return err
+		}
+
 		if (vs.Meta & BitDelete) > 0 {
-			return
+			return nil
 		}
 		if (vs.Meta & BitValuePointer) == 0 {
-			return
+			return nil
 		}
 
 		// Value is still present in value log.
-		y.AssertTrue(len(vs.Value) > 0)
+		if len(vs.Value) == 0 {
+			return errors.Errorf("Empty value: %+v", vs)
+		}
 		var vp valuePointer
 		vp.Decode(vs.Value)
 
 		if vp.Fid > f.fid {
-			return
+			return nil
 		}
 		if vp.Offset > e.offset {
-			return
+			return nil
 		}
 		if vp.Fid == f.fid && vp.Offset == e.offset {
 			// This new entry only contains the key, and a pointer to the value.
@@ -252,11 +258,11 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			// This can now happen because we can move some entries forward, but then not write
 			// them to LSM tree due to CAS check failure.
 		}
+		return nil
 	}
 
 	err := f.iterate(0, func(e Entry, vp valuePointer) error {
-		fe(e)
-		return nil
+		return fe(e)
 	})
 	if err != nil {
 		return err
@@ -285,11 +291,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 
 	rem := vlog.fpath(f.fid)
 	elog.Printf("Removing %s", rem)
-	err = os.Remove(rem)
-	if err != nil {
-		return err
-	}
-	return nil
+	return os.Remove(rem)
 }
 
 func (vlog *valueLog) writeToKV(elog trace.EventLog) {
@@ -583,6 +585,7 @@ type request struct {
 	Entries []*Entry
 	Ptrs    []valuePointer
 	Wg      sync.WaitGroup
+	Err     error
 }
 
 // sync is thread-unsafe and should not be called concurrently with write.
@@ -801,7 +804,10 @@ func (vlog *valueLog) doRunGC() error {
 			return errStop
 		}
 
-		vs := vlog.kv.get(e.Key)
+		vs, err := vlog.kv.get(e.Key)
+		if err != nil {
+			return err
+		}
 		if (vs.Meta & BitDelete) > 0 {
 			// Key has been deleted. Discard.
 			r.discard += esz
@@ -842,7 +848,8 @@ func (vlog *valueLog) doRunGC() error {
 			if ne.casCounter == e.casCounter {
 				ne.print("Latest Entry in LSM")
 				e.print("Latest Entry in Log")
-				y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
+				return errors.Errorf(
+					"This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
 			}
 		}
 		return nil
