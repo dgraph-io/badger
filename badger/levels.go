@@ -450,16 +450,19 @@ func (s *levelsController) close() {
 }
 
 // get returns the found value if any. If not found, we return nil.
-func (s *levelsController) get(key []byte) y.ValueStruct {
+func (s *levelsController) get(key []byte) (y.ValueStruct, error) {
 	// No need to lock anything as we just iterate over the currently immutable levelHandlers.
 	for _, h := range s.levels {
-		vs := h.get(key)
+		vs, err := h.get(key)
+		if err != nil {
+			return y.ValueStruct{}, errors.Wrapf(err, "get key: %q", key)
+		}
 		if vs.Value == nil && vs.Meta == 0 {
 			continue
 		}
-		return vs
+		return vs, nil
 	}
-	return y.ValueStruct{}
+	return y.ValueStruct{}, nil
 }
 
 func appendIteratorsReversed(out []y.Iterator, th []*table.Table, reversed bool) []y.Iterator {

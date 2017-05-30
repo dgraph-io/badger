@@ -85,12 +85,10 @@ func (t *Table) DecrRef() error {
 			// This is very important to let the FS know that the file is deleted.
 			return err
 		}
-
 		filename := t.fd.Name()
 		if err := t.fd.Close(); err != nil {
 			return err
 		}
-
 		if err := os.Remove(filename); err != nil {
 			return err
 		}

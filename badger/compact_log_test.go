@@ -87,8 +87,12 @@ func TestCompactLogBasic(t *testing.T) {
 	}
 
 	kv, _ := NewKV(opt)
-	val, _ := kv.Get([]byte("testkey"))
-	require.EqualValues(t, "testval", string(val))
+
+	var item KVItem
+	if err := kv.Get([]byte("testkey"), &item); err != nil {
+		t.Error(err)
+	}
+	require.EqualValues(t, "testval", string(item.Value()))
 	kv.Close()
 }
 

@@ -175,8 +175,13 @@ func TestValueGC(t *testing.T) {
 	//	})
 
 	kv.vlog.rewrite(lf)
+	var item KVItem
 	for i := 45; i < 100; i++ {
-		val, _ := kv.Get([]byte(fmt.Sprintf("key%d", i)))
+		key := []byte(fmt.Sprintf("key%d", i))
+		if err := kv.Get(key, &item); err != nil {
+			t.Error(err)
+		}
+		val := item.Value()
 		require.NotNil(t, val)
 		require.True(t, len(val) == sz, "Size found: %d", len(val))
 	}

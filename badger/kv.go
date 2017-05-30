@@ -23,11 +23,10 @@ import (
 
 	"golang.org/x/net/trace"
 
-	"errors"
-
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -157,7 +156,12 @@ func NewKV(opt *Options) (out *KV, err error) {
 		return out, err
 	}
 
-	val, _ := out.Get(head) // casCounter ignored.
+	var item KVItem // casCounter ignored.
+	if err := out.Get(head, &item); err != nil {
+		return nil, errors.Wrap(err, "Retrieving head")
+	}
+	val := item.Value()
+
 	var vptr valuePointer
 	if len(val) > 0 {
 		vptr.Decode(val)
@@ -174,7 +178,10 @@ func NewKV(opt *Options) (out *KV, err error) {
 		first = false
 
 		if e.CASCounterCheck != 0 {
-			oldValue := out.get(e.Key)
+			oldValue, err := out.get(e.Key)
+			if err != nil {
+				return err
+			}
 			if oldValue.CASCounter != e.CASCounterCheck {
 				return nil
 			}
@@ -282,9 +289,14 @@ func (s *KV) Close() {
 func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 	s.RLock()
 	defer s.RUnlock()
+
 	tables := make([]*skl.Skiplist, len(s.imm)+1)
+
+	// Get mutable memtable.
 	tables[0] = s.mt
 	tables[0].IncrRef()
+
+	// Get immutable memtables.
 	last := len(s.imm) - 1
 	for i := range s.imm {
 		tables[i+1] = s.imm[last-i]
@@ -297,46 +309,67 @@ func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 	}
 }
 
-func (s *KV) decodeValue(val []byte, meta byte, slice *y.Slice) []byte {
-	if (meta & BitDelete) != 0 {
+func (s *KV) fillItem(item *KVItem) error {
+	if (item.meta & BitDelete) != 0 {
 		// Tombstone encountered.
+		item.val = nil
 		return nil
 	}
-	if (meta & BitValuePointer) == 0 {
-		return val
+	if (item.meta & BitValuePointer) == 0 {
+		item.val = item.vptr
+		return nil
 	}
 
 	var vp valuePointer
-	vp.Decode(val)
-	entry, err := s.vlog.Read(vp, slice)
-	y.Checkf(err, "Unable to read from value log: %+v", vp)
-
-	if (entry.Meta & BitDelete) == 0 { // Not tombstone.
-		return entry.Value
+	vp.Decode(item.vptr)
+	entry, err := s.vlog.Read(vp, item.slice)
+	if err != nil {
+		return errors.Wrapf(err, "Unable to read from value log: %+v", vp)
 	}
+
+	// Why should this deletion not already be reflected in the LSM tree.
+	// if (entry.Meta & BitDelete) == 0 { // Not tombstone.
+	// 	return entry.Value, nil
+	// }
+	item.val = entry.Value
 	return nil
 }
 
 // getValueHelper returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
-func (s *KV) get(key []byte) y.ValueStruct {
+func (s *KV) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getMemTables() // Lock should be released.
 	defer decr()
+
 	for i := 0; i < len(tables); i++ {
 		vs := tables[i].Get(key)
 		if vs.Meta != 0 || vs.Value != nil {
-			return vs
+			return vs, nil
 		}
 	}
 	return s.lc.get(key)
 }
 
-// Get looks for key and returns value along with the current CAS counter.
+// Get looks for key and returns a KVItem.
 // If key is not found, value returned is nil.
-func (s *KV) Get(key []byte) ([]byte, uint16) {
-	vs := s.get(key)
-	slice := new(y.Slice)
-	return s.decodeValue(vs.Value, vs.Meta, slice), vs.CASCounter
+func (s *KV) Get(key []byte, item *KVItem) error {
+	vs, err := s.get(key)
+	if err != nil {
+		return errors.Wrapf(err, "KV::Get key: %q", key)
+	}
+
+	if item.slice == nil {
+		item.slice = new(y.Slice)
+	}
+	item.meta = vs.Meta
+	item.casCounter = vs.CASCounter
+	item.key = key
+	item.vptr = vs.Value
+
+	if err := s.fillItem(item); err != nil {
+		return errors.Wrapf(err, "KV::Get key: %q", key)
+	}
+	return nil
 }
 
 func (s *KV) updateOffset(ptrs []valuePointer) {
@@ -361,14 +394,20 @@ func (s *KV) shouldWriteValueToLSM(e Entry) bool {
 	return len(e.Value) < s.opt.ValueThreshold
 }
 
-func (s *KV) writeToLSM(b *request) {
+func (s *KV) writeToLSM(b *request) error {
 	var offsetBuf [10]byte
-	y.AssertTrue(len(b.Ptrs) == len(b.Entries))
+	if len(b.Ptrs) != len(b.Entries) {
+		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
+	}
 
 	for i, entry := range b.Entries {
 		entry.Error = nil
 		if entry.CASCounterCheck != 0 {
-			oldValue := s.get(entry.Key) // No need to decode existing value. Just need old CAS counter.
+			oldValue, err := s.get(entry.Key) // No need to decode existing value. Just need old CAS counter.
+			if err != nil {
+				return errors.Wrap(err, "writeToLSM")
+			}
+
 			if oldValue.CASCounter != entry.CASCounterCheck {
 				entry.Error = CasMismatch
 				continue
@@ -389,6 +428,7 @@ func (s *KV) writeToLSM(b *request) {
 					CASCounter: entry.casCounter})
 		}
 	}
+	return nil
 }
 
 // writeRequests is called serially by only one goroutine.
@@ -429,7 +469,9 @@ func (s *KV) writeRequests(reqs []*request) error {
 		if err != nil {
 			return err
 		}
-		s.writeToLSM(b)
+		if err := s.writeToLSM(b); err != nil {
+			return errors.Wrap(err, "writeRequests")
+		}
 		s.elog.Printf("Wrote %d entries from block %d", len(b.Entries), i)
 		s.updateOffset(b.Ptrs)
 		b.Wg.Done()
