@@ -209,8 +209,8 @@ func (t *Table) NewIterator(reversed bool) *TableIterator {
 	return ti
 }
 
-func (itr *TableIterator) Close() {
-	itr.t.DecrRef()
+func (itr *TableIterator) Close() error {
+	return itr.t.DecrRef()
 }
 
 func (itr *TableIterator) reset() {
@@ -529,8 +529,11 @@ func (s *ConcatIterator) Next() {
 	}
 }
 
-func (s *ConcatIterator) Close() {
+func (s *ConcatIterator) Close() error {
 	for _, it := range s.iters {
-		it.Close()
+		if err := it.Close(); err != nil {
+			return errors.Wrap(err, "ConcatIterator")
+		}
 	}
+	return nil
 }

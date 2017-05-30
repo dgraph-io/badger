@@ -393,8 +393,9 @@ type Iterator struct {
 	n    *node
 }
 
-func (s *Iterator) Close() {
+func (s *Iterator) Close() error {
 	s.list.DecrRef()
+	return nil
 }
 
 // Valid returns true iff the iterator is positioned at a valid node.
@@ -490,4 +491,4 @@ func (s *UniIterator) Key() []byte          { return s.iter.Key() }
 func (s *UniIterator) Value() y.ValueStruct { return s.iter.Value() }
 func (s *UniIterator) Valid() bool          { return s.iter.Valid() }
 func (s *UniIterator) Name() string         { return "UniMemtableIterator" }
-func (s *UniIterator) Close()               { s.iter.Close() }
+func (s *UniIterator) Close() error         { return s.iter.Close() }

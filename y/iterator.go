@@ -19,6 +19,8 @@ package y
 import (
 	"bytes"
 	"container/heap"
+
+	"github.com/pkg/errors"
 	//	"fmt"
 )
 
@@ -39,7 +41,7 @@ type Iterator interface {
 	Name() string // Mainly for debug or testing.
 
 	// All iterators should be closed so that file garbage collection works.
-	Close()
+	Close() error
 }
 
 type elem struct {
@@ -196,8 +198,11 @@ func (s *MergeIterator) Seek(key []byte) {
 	s.initHeap()
 }
 
-func (s *MergeIterator) Close() {
+func (s *MergeIterator) Close() error {
 	for _, itr := range s.all {
-		itr.Close()
+		if err := itr.Close(); err != nil {
+			return errors.Wrap(err, "MergeIterator")
+		}
 	}
+	return nil
 }

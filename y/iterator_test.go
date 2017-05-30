@@ -36,7 +36,7 @@ var (
 	closeCount int
 )
 
-func (s *SimpleIterator) Close()       { closeCount++ }
+func (s *SimpleIterator) Close() error { closeCount++; return nil }
 func (s *SimpleIterator) Name() string { return "SimpleIterator" }
 
 func (s *SimpleIterator) Next() {
