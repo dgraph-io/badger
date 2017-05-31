@@ -741,7 +741,7 @@ func (l *valueLog) runGCInLoop(lc *y.LevelCloser) {
 		return
 	}
 
-	tick := time.NewTicker(1 * time.Minute)
+	tick := time.NewTicker(10 * time.Minute)
 	for {
 		select {
 		case <-lc.HasBeenClosed():
