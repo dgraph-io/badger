@@ -150,21 +150,6 @@ func getIDMap(dir string) map[uint64]struct{} {
 	return idMap
 }
 
-func keyRange(tables []*table.Table) ([]byte, []byte) {
-	y.AssertTrue(len(tables) > 0)
-	smallest := tables[0].Smallest()
-	biggest := tables[0].Biggest()
-	for i := 1; i < len(tables); i++ {
-		if bytes.Compare(tables[i].Smallest(), smallest) < 0 {
-			smallest = tables[i].Smallest()
-		}
-		if bytes.Compare(tables[i].Biggest(), biggest) > 0 {
-			biggest = tables[i].Biggest()
-		}
-	}
-	return smallest, biggest
-}
-
 // mod65535 mods by 65535 fast.
 func mod65535(a uint32) uint32 {
 	a = (a >> 16) + (a & 0xFFFF) /* sum base 2**16 digits */

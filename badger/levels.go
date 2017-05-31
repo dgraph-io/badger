@@ -164,36 +164,28 @@ func (s *levelsController) runWorker(workerID int) {
 }
 
 // pickCompactLevel determines which level to compact. Return -1 if not found.
-// TODO: Implement this here
-// https://github.com/facebook/rocksdb/wiki/Leveled-Compaction
+// Based on: https://github.com/facebook/rocksdb/wiki/Leveled-Compaction
 func (s *levelsController) pickCompactLevel() int {
 	s.Lock() // For access to beingCompacted.
 	defer s.Unlock()
 
-	// Going from higher levels to lower levels offers a small gain.
-	// It probably has to do with level 1 being smaller when level 0 has to merge with the whole of
-	// level 1.
-	for i := s.kv.opt.MaxLevels - 2; i >= 0; i-- {
-		// Lower levels take priority. Most important is level 0. It should only have one table.
-		// See if we want to compact i to i+1.
-		if s.beingCompacted[i] || s.beingCompacted[i+1] {
-			continue
-		}
-		if (i == 0 && s.levels[0].numTables() > s.kv.opt.NumLevelZeroTables) ||
-			(i > 0 && s.levels[i].getTotalSize() > s.levels[i].maxTotalSize) {
-			s.beingCompacted[i], s.beingCompacted[i+1] = true, true
-			return i
+	var maxScore float64
+	level := -1
+	if s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTables {
+		maxScore = float64(s.levels[0].numTables()) / float64(s.kv.opt.NumLevelZeroTables)
+		level = 0
+	}
+	for i, l := range s.levels[1:] {
+		if l.getTotalSize() >= l.maxTotalSize {
+			// TODO: Don't consider those tables which are being compacted right now.
+			score := float64(l.getTotalSize()) / float64(l.maxTotalSize)
+			if maxScore < score {
+				maxScore = score
+				level = i
+			}
 		}
 	}
-	// Didn't find anything that is really bad.
-	// Let's do level 0 if it is not empty. Let's do a level that is close to its maxTotalSize.
-	if s.levels[0].getTotalSize() > 0 && !s.beingCompacted[0] && !s.beingCompacted[1] {
-		s.beingCompacted[0], s.beingCompacted[1] = true, true
-		return 0
-	}
-	// Doing work preemptively seems to make us slower.
-	// If you want to try that, add a weaker condition here such as >0.75*totalSize.
-	return -1
+	return level
 }
 
 func (s *levelsController) tryCompact(workerID int) {
@@ -202,7 +194,7 @@ func (s *levelsController) tryCompact(workerID int) {
 	if l < 0 {
 		return
 	}
-	y.Check(s.doCompact(l)) // May relax check later.
+	s.doCompact(l)
 	s.Lock()
 	defer s.Unlock()
 	s.beingCompacted[l] = false
@@ -330,9 +322,16 @@ func (cd *compactDef) fillTablesL0() error {
 		return errNoTableFound
 	}
 
-	smallest, biggest := keyRange(cd.top)
+	keyRange := getKeyRange(cd.top)
+	left, right := cd.nextLevel.overlappingTables(keyRange)
 
-	left, right := cd.nextLevel.overlappingTables(smallest, biggest)
+	if !cd.nextLevel.cstatus.compareAndAdd(keyRange) {
+		return errNoTableFound
+	}
+	if !cd.thisLevel.cstatus.compareAndAdd(infRange) {
+		return errNoTableFound
+	}
+
 	cd.bot = make([]*table.Table, right-left)
 	copy(cd.bot, cd.nextLevel.tables[left:right])
 	return nil
@@ -357,7 +356,11 @@ func (cd *compactDef) fillTables() error {
 	t := tbls[0]
 	cd.top = []*table.Table{t}
 
-	left, right := cd.nextLevel.overlappingTables(t.Smallest(), t.Biggest())
+	kr := keyRange{
+		left:  t.Smallest(),
+		right: t.Biggest(),
+	}
+	left, right := cd.nextLevel.overlappingTables(kr)
 	cd.bot = make([]*table.Table, right-left)
 	copy(cd.bot, cd.nextLevel.tables[left:right])
 	return nil
