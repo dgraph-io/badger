@@ -61,6 +61,8 @@ type Options struct {
 
 	// Run value log garbage collection if we can reclaim at least this much space. This is a ratio.
 	ValueGCThreshold float64
+	// How often to run value log garbage collector.
+	ValueGCRunInterval time.Duration
 
 	// Size of single value log file.
 	ValueLogFileSize int
@@ -94,6 +96,7 @@ var DefaultOptions = Options{
 	ValueCompressionMinRatio: 2.0,
 	ValueCompressionMinSize:  1024,
 	ValueGCThreshold:         0.5, // Set to zero to not run GC.
+	ValueGCRunInterval:       10 * time.Minute,
 	ValueLogFileSize:         1 << 30,
 	ValueThreshold:           20,
 	Verbose:                  false,
