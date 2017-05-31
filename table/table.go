@@ -181,6 +181,14 @@ func (t *Table) SetMetadata(meta []byte) error {
 	return y.Wrap(err)
 }
 
+// updateLevel is called only when moving table to the next level, when there is no overlap
+// with the next level. Here, we update the table metadata.
+func (t *Table) UpdateLevel(newLevel int) {
+	var metadata [2]byte
+	binary.BigEndian.PutUint16(metadata[:], uint16(newLevel))
+	t.SetMetadata(metadata[:])
+}
+
 var EOF = errors.New("End of mapped region")
 
 func (t *Table) read(off int, sz int) ([]byte, error) {

@@ -18,7 +18,6 @@ package badger
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io/ioutil"
 	"math/rand"
 	"sync/atomic"
@@ -132,14 +131,6 @@ func (s *levelHandler) debugPrintMore() {
 func (s *levelsController) reserveFileIDs(k int) (uint64, uint64) {
 	id := atomic.AddUint64(&s.maxFileID, uint64(k))
 	return id - uint64(k), id
-}
-
-// updateLevel is called only when moving table to the next level, when there is no overlap
-// with the next level. Here, we update the table metadata.
-func updateLevel(t *table.Table, newLevel int) {
-	var metadata [2]byte
-	binary.BigEndian.PutUint16(metadata[:], uint16(newLevel))
-	t.SetMetadata(metadata[:])
 }
 
 func getIDMap(dir string) map[uint64]struct{} {

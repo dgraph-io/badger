@@ -182,7 +182,7 @@ func compactLogReplay(filename, dir string, idMap map[uint64]struct{}) {
 	}
 }
 
-func (s *levelsController) buildCompaction(def *compactDef) *compaction {
+func (s *levelsController) buildCompactionLogEntry(def *compactDef) *compaction {
 	var newIDMin, newIDMax uint64
 	c := new(compaction)
 	c.compactID = atomic.AddUint64(&s.maxCompactID, 1)
