@@ -305,7 +305,6 @@ func (vlog *valueLog) writeToKV(elog trace.EventLog) {
 	requests := make([]*request, 0, 10)
 	requests = append(requests, req)
 	for _, e := range vlog.entries {
-		req.Entries = append(req.Entries, e)
 		if len(req.Entries) >= 1000 {
 			req = &request{
 				Wg:      sync.WaitGroup{},
@@ -313,6 +312,7 @@ func (vlog *valueLog) writeToKV(elog trace.EventLog) {
 			}
 			requests = append(requests, req)
 		}
+		req.Entries = append(req.Entries, e)
 	}
 	for i, b := range requests {
 		elog.Printf("req %d has %d entries", i, len(b.Entries))
