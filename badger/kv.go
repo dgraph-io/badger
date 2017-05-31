@@ -37,7 +37,8 @@ var (
 
 // Options are params for creating DB object.
 type Options struct {
-	Dir string // Directory to store the data in. Should exist and be writable.
+	Dir      string // Directory to store the data in. Should exist and be writable.
+	ValueDir string // Directory to store the value log in. By Default same ad Dir. Should exist and be writable.
 
 	// The following affect all levels of LSM tree.
 	MaxTableSize        int64 // Each table (or file) is at most this size.
@@ -82,6 +83,7 @@ type Options struct {
 // DefaultOptions sets a list of safe recommended options. Feel free to modify these to suit your needs.
 var DefaultOptions = Options{
 	Dir:                      "/tmp",
+	ValueDir:                 "/tmp",
 	DoNotCompact:             false,
 	LevelOneSize:             256 << 20,
 	LevelSizeMultiplier:      10,
@@ -125,12 +127,14 @@ var ErrValueLogSize error = errors.New("Invalid ValueLogFileSize, must be betwee
 
 // NewKV returns a new KV object.
 func NewKV(opt *Options) (out *KV, err error) {
-	dirExists, err := exists(opt.Dir)
-	if err != nil {
-		return nil, y.Wrapf(err, "Invalid Dir: %q", opt.Dir)
-	}
-	if !dirExists {
-		return nil, ErrInvalidDir
+	for _, path := range []string{opt.Dir, opt.ValueDir} {
+		dirExists, err := exists(path)
+		if err != nil {
+			return nil, y.Wrapf(err, "Invalid Dir: %q", path)
+		}
+		if !dirExists {
+			return nil, ErrInvalidDir
+		}
 	}
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
