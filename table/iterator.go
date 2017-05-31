@@ -123,7 +123,7 @@ func (itr *BlockIterator) parseKV(h header) {
 			itr.pos, h.klen, h.vlen, len(itr.data), h)
 		return
 	}
-	itr.val = itr.data[itr.pos : itr.pos+h.vlen]
+	itr.val = y.Safecopy(itr.val, itr.data[itr.pos:itr.pos+h.vlen])
 	itr.pos += h.vlen
 }
 
