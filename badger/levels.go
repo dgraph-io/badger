@@ -176,15 +176,19 @@ func (s *levelsController) pickCompactLevel() int {
 
 	var maxScore float64
 	level := -1
-	if s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTables {
+	if !s.cstatus.overlapsWith(0, infRange) && // already being compacted.
+		s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTables {
 		maxScore = float64(s.levels[0].numTables()) / float64(s.kv.opt.NumLevelZeroTables)
 		level = 0
 	}
+
 	fmt.Printf("maxscore=%f level=%d\n", maxScore, level)
 	for i, l := range s.levels[1:] {
-		if l.getTotalSize() >= l.maxTotalSize {
-			// TODO: Don't consider those tables which are being compacted right now.
-			score := float64(l.getTotalSize()) / float64(l.maxTotalSize)
+		// Don't consider those tables that are being compacted right now.
+		delSize := s.cstatus.delSize(i + 1)
+
+		if l.getTotalSize()-delSize >= l.maxTotalSize {
+			score := float64(l.getTotalSize()-delSize) / float64(l.maxTotalSize)
 			if maxScore < score {
 				maxScore = score
 				level = i + 1
@@ -295,6 +299,8 @@ type compactDef struct {
 
 	thisRange keyRange
 	nextRange keyRange
+
+	thisSize int64
 }
 
 func (cd *compactDef) lockLevels() {
@@ -331,7 +337,7 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 		cd.nextRange = getKeyRange(cd.bot)
 	}
 
-	if !s.cstatus.compareAndAdd(0, cd.thisRange, cd.nextRange) {
+	if !s.cstatus.compareAndAdd(*cd) {
 		return false
 	}
 	fmt.Printf("=====> cs level 0: %s\n", s.cstatus.levels[0].debug())
@@ -357,6 +363,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	})
 
 	for _, t := range tbls {
+		cd.thisSize = t.Size()
 		cd.thisRange = keyRange{
 			left:  t.Smallest(),
 			right: t.Biggest(),
@@ -374,7 +381,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 		if len(cd.bot) == 0 {
 			cd.bot = []*table.Table{}
 			cd.nextRange = cd.thisRange
-			if !s.cstatus.compareAndAdd(cd.thisLevel.level, cd.thisRange, cd.nextRange) {
+			if !s.cstatus.compareAndAdd(*cd) {
 				continue
 			}
 			return true
@@ -385,7 +392,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 			continue
 		}
 
-		if !s.cstatus.compareAndAdd(cd.thisLevel.level, cd.thisRange, cd.nextRange) {
+		if !s.cstatus.compareAndAdd(*cd) {
 			continue
 		}
 		fmt.Println("fill tables")
@@ -480,7 +487,7 @@ func (s *levelsController) doCompact(l int) bool {
 
 	// Done with compaction. So, remove the ranges from compaction status.
 	s.cstatus.print()
-	s.cstatus.delete(l, cd.thisRange, cd.nextRange)
+	s.cstatus.delete(cd)
 	fmt.Printf("====> DONE compaction for level: %d\n", cd.thisLevel.level)
 	fmt.Printf("====> cstatus next level: %s\n", s.cstatus.levels[cd.thisLevel.level+1].debug())
 	return true

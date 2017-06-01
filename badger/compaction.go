@@ -61,8 +61,8 @@ func getKeyRange(tables []*table.Table) keyRange {
 }
 
 type levelCompactStatus struct {
-	ranges []keyRange
-	// delSize int64 // TODO: Implement this.
+	ranges  []keyRange
+	delSize int64
 }
 
 func (lcs levelCompactStatus) debug() string {
@@ -119,37 +119,54 @@ func (cs *compactStatus) overlapsWith(level int, this keyRange) bool {
 	return thisLevel.overlapsWith(this)
 }
 
-func (cs *compactStatus) compareAndAdd(level int, this, next keyRange) bool {
+func (cs *compactStatus) delSize(l int) int64 {
+	cs.RLock()
+	defer cs.RUnlock()
+	return cs.levels[l].delSize
+}
+
+func (cs *compactStatus) compareAndAdd(cd compactDef) bool {
 	cs.Lock()
 	defer cs.Unlock()
+
+	level := cd.thisLevel.level
 
 	y.AssertTruef(level < len(cs.levels)-1, "Got level %d. Max levels: %d", level, len(cs.levels))
 	thisLevel := cs.levels[level]
 	nextLevel := cs.levels[level+1]
 
-	if thisLevel.overlapsWith(this) {
+	if thisLevel.overlapsWith(cd.thisRange) {
 		return false
 	}
-	if nextLevel.overlapsWith(next) {
+	if nextLevel.overlapsWith(cd.nextRange) {
 		return false
 	}
-	thisLevel.ranges = append(thisLevel.ranges, this)
-	nextLevel.ranges = append(nextLevel.ranges, next)
+
+	thisLevel.ranges = append(thisLevel.ranges, cd.thisRange)
+	nextLevel.ranges = append(nextLevel.ranges, cd.nextRange)
+	thisLevel.delSize += cd.thisSize
+
 	fmt.Printf("======> compace and add. this level: %s next level: %s\n", thisLevel.debug(), nextLevel.debug())
 	return true
 }
 
-func (cs *compactStatus) delete(level int, this, next keyRange) {
+func (cs *compactStatus) delete(cd compactDef) {
 	cs.Lock()
 	defer cs.Unlock()
 
+	level := cd.thisLevel.level
 	y.AssertTruef(level < len(cs.levels)-1, "Got level %d. Max levels: %d", level, len(cs.levels))
+
 	thisLevel := cs.levels[level]
 	nextLevel := cs.levels[level+1]
 
-	found := thisLevel.remove(this)
-	found = nextLevel.remove(next) && found
+	thisLevel.delSize -= cd.thisSize
+	found := thisLevel.remove(cd.thisRange)
+	found = nextLevel.remove(cd.nextRange) && found
+
 	if !found {
+		this := cd.thisRange
+		next := cd.nextRange
 		fmt.Printf("Looking for: [%q, %q, %v] in this level.\n", this.left, this.right, this.inf)
 		fmt.Printf("This Level:\n%s\n", thisLevel.debug())
 		fmt.Println()
