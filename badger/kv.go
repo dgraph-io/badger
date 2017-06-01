@@ -75,6 +75,9 @@ type Options struct {
 	// Sync all writes to disk. Setting this to true would slow down data loading significantly.
 	SyncWrites bool
 
+	// Number of compaction workers to run concurrently.
+	NumCompactors int
+
 	// Flags for testing purposes.
 	DoNotCompact bool // Stops LSM tree from compactions.
 	Verbose      bool // Turns on verbose mode.
@@ -90,14 +93,15 @@ var DefaultOptions = Options{
 	MaxLevels:                7,
 	MaxTableSize:             64 << 20,
 	MemtableSlack:            10 << 20,
+	NumCompactors:            3,
 	NumLevelZeroTables:       5,
 	NumLevelZeroTablesStall:  10,
 	NumMemtables:             5,
 	SyncWrites:               false,
 	ValueCompressionMinRatio: 2.0,
 	ValueCompressionMinSize:  1024,
-	ValueGCThreshold:         0.5, // Set to zero to not run GC.
 	ValueGCRunInterval:       10 * time.Minute,
+	ValueGCThreshold:         0.5, // Set to zero to not run GC.
 	ValueLogFileSize:         1 << 30,
 	ValueThreshold:           20,
 	Verbose:                  false,
@@ -152,9 +156,11 @@ func NewKV(opt *Options) (out *KV, err error) {
 	if out.lc, err = newLevelsController(out); err != nil {
 		return nil, err
 	}
-	out.lc.startCompact()
 
-	lc := out.closer.Register("memtable")
+	lc := out.closer.Register("compactors")
+	out.lc.startCompact(lc)
+
+	lc = out.closer.Register("memtable")
 	go out.flushMemtable(lc) // Need levels controller to be up.
 
 	if err = out.vlog.Open(out, opt); err != nil {
@@ -285,6 +291,10 @@ func (s *KV) Close() error {
 	lc = s.closer.Get("memtable")
 	lc.Wait()
 	y.Printf("Memtable flushed\n")
+
+	lc = s.closer.Get("compactors")
+	lc.SignalAndWait()
+	y.Printf("Compaction finished\n")
 
 	if err := s.lc.close(); err != nil {
 		return errors.Wrap(err, "KV.Close")

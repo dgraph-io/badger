@@ -134,32 +134,36 @@ func newLevelsController(kv *KV) (*levelsController, error) {
 	return s, nil
 }
 
-func (s *levelsController) startCompact() {
-	n := s.kv.opt.MaxLevels / 2
-	s.compactWorkersDone = make(chan struct{}, n)
-	s.compactWorkersWg.Add(n)
+func (s *levelsController) startCompact(lc *y.LevelCloser) {
+	n := s.kv.opt.NumCompactors
+	lc.AddRunning(int32(n - 1))
 	for i := 0; i < n; i++ {
-		go s.runWorker(i)
+		go s.runWorker(lc)
 	}
 }
 
-func (s *levelsController) runWorker(workerID int) {
-	defer s.compactWorkersWg.Done() // Indicate worker is done.
+func (s *levelsController) runWorker(lc *y.LevelCloser) {
+	defer lc.Done()
+
 	if s.kv.opt.DoNotCompact {
 		fmt.Println("NOT running any compactions due to DB options.")
 		return
 	}
 
 	time.Sleep(time.Duration(rand.Int31n(1000)) * time.Millisecond)
-	timeChan := time.Tick(1 * time.Second)
-	var done bool
-	for !done {
+	timeChan := time.Tick(100 * time.Microsecond)
+
+	for {
 		select {
 		// Can add a done channel or other stuff.
 		case <-timeChan:
-			s.tryCompact(workerID)
-		case <-s.compactWorkersDone:
-			done = true
+			l := s.pickCompactLevel()
+			if l < 0 {
+				return
+			}
+			s.doCompact(l)
+		case <-lc.HasBeenClosed():
+			return
 		}
 	}
 }
@@ -189,18 +193,6 @@ func (s *levelsController) pickCompactLevel() int {
 		}
 	}
 	return level
-}
-
-func (s *levelsController) tryCompact(workerID int) {
-	l := s.pickCompactLevel()
-	// We expect pickCompactLevel to read and update beingCompacted.
-	if l < 0 {
-		return
-	}
-	// fmt.Printf("\tTrying compaction for level: %d\n", l)
-	status := s.doCompact(l)
-	_ = status
-	// fmt.Printf("\tCompaction at level: %d status: %v\n", l, status)
 }
 
 // compactBuildTables merge topTables and botTables to form a list of new tables.
@@ -529,15 +521,6 @@ func (s *levelsController) addLevel0Table(t *table.Table) {
 }
 
 func (s *levelsController) close() error {
-	y.Printf("Sending close signal to compact workers\n")
-	n := s.kv.opt.MaxLevels / 2
-	for i := 0; i < n; i++ {
-		s.compactWorkersDone <- struct{}{}
-	}
-	// Wait for all compactions to be done. We want to be in a stable state.
-	// Also, closing tables while merge iterators have references will also lead to crash.
-	s.compactWorkersWg.Wait()
-	y.Printf("Compaction is all done\n")
 	for _, l := range s.levels {
 		if err := l.close(); err != nil {
 			return errors.Wrap(err, "levelsController.Close")
