@@ -2,6 +2,8 @@ package badger
 
 import (
 	"bytes"
+	"fmt"
+	"log"
 	"sync"
 
 	"github.com/dgraph-io/badger/table"
@@ -15,6 +17,16 @@ type keyRange struct {
 }
 
 var infRange = keyRange{inf: true}
+
+func (r keyRange) String() string {
+	return fmt.Sprintf("left=%q, right=%q, inf=%v", r.left, r.right, r.inf)
+}
+
+func (r keyRange) equals(dst keyRange) bool {
+	return bytes.Compare(r.left, dst.left) == 0 &&
+		bytes.Compare(r.right, dst.right) == 0 &&
+		r.inf == dst.inf
+}
 
 func (r keyRange) overlapsWith(dst keyRange) bool {
 	if r.inf || dst.inf {
@@ -48,41 +60,101 @@ func getKeyRange(tables []*table.Table) keyRange {
 	return keyRange{left: smallest, right: biggest}
 }
 
-type compactStatus struct {
-	sync.Mutex
+type levelCompactStatus struct {
 	ranges []keyRange
 	// delSize int64 // TODO: Implement this.
 }
 
-func (cs *compactStatus) compareAndAdd(dst keyRange) bool {
+func (lcs levelCompactStatus) debug() string {
+	var b bytes.Buffer
+	for _, r := range lcs.ranges {
+		b.WriteString(fmt.Sprintf("left=%q, right=%q inf=%v\n", r.left, r.right, r.inf))
+	}
+	return b.String()
+}
+
+func (lcs levelCompactStatus) overlapsWith(dst keyRange) bool {
+	for _, r := range lcs.ranges {
+		if r.overlapsWith(dst) {
+			return true
+		}
+	}
+	return false
+}
+
+func (lcs *levelCompactStatus) remove(dst keyRange) bool {
+	final := lcs.ranges[:0]
+	var found bool
+	for _, r := range lcs.ranges {
+		if !r.equals(dst) {
+			final = append(final, r)
+		} else {
+			found = true
+		}
+	}
+	lcs.ranges = final
+	return found
+}
+
+type compactStatus struct {
+	sync.RWMutex
+	levels []*levelCompactStatus
+}
+
+func (cs *compactStatus) print() {
+	cs.RLock()
+	defer cs.RUnlock()
+
+	fmt.Println("compaction status")
+	for i, l := range cs.levels {
+		fmt.Printf("[%d] %s\n", i, l.debug())
+	}
+}
+
+func (cs *compactStatus) overlapsWith(level int, this keyRange) bool {
+	cs.RLock()
+	defer cs.RUnlock()
+
+	thisLevel := cs.levels[level]
+	return thisLevel.overlapsWith(this)
+}
+
+func (cs *compactStatus) compareAndAdd(level int, this, next keyRange) bool {
 	cs.Lock()
 	defer cs.Unlock()
 
-	for _, r := range cs.ranges {
-		if r.overlapsWith(dst) {
-			return false
-		}
+	y.AssertTruef(level < len(cs.levels)-1, "Got level %d. Max levels: %d", level, len(cs.levels))
+	thisLevel := cs.levels[level]
+	nextLevel := cs.levels[level+1]
+
+	if thisLevel.overlapsWith(this) {
+		return false
 	}
-	cs.ranges = append(cs.ranges, dst)
+	if nextLevel.overlapsWith(next) {
+		return false
+	}
+	thisLevel.ranges = append(thisLevel.ranges, this)
+	nextLevel.ranges = append(nextLevel.ranges, next)
+	fmt.Printf("======> compace and add. this level: %s next level: %s\n", thisLevel.debug(), nextLevel.debug())
 	return true
 }
 
-func (cs *compactStatus) delete(dst keyRange) {
+func (cs *compactStatus) delete(level int, this, next keyRange) {
 	cs.Lock()
 	defer cs.Unlock()
 
-	var found bool
-	final := cs.ranges[:0]
-	for _, r := range cs.ranges {
-		if bytes.Compare(r.left, dst.left) == 0 &&
-			bytes.Compare(r.right, dst.right) == 0 &&
-			r.inf == dst.inf {
+	y.AssertTruef(level < len(cs.levels)-1, "Got level %d. Max levels: %d", level, len(cs.levels))
+	thisLevel := cs.levels[level]
+	nextLevel := cs.levels[level+1]
 
-			found = true
-		} else {
-			final = append(final, r)
-		}
+	found := thisLevel.remove(this)
+	found = nextLevel.remove(next) && found
+	if !found {
+		fmt.Printf("Looking for: [%q, %q, %v] in this level.\n", this.left, this.right, this.inf)
+		fmt.Printf("This Level:\n%s\n", thisLevel.debug())
+		fmt.Println()
+		fmt.Printf("Looking for: [%q, %q, %v] in next level.\n", next.left, next.right, next.inf)
+		fmt.Printf("Next Level:\n%s\n", nextLevel.debug())
+		log.Fatal("keyRange not found")
 	}
-	cs.ranges = final
-	y.AssertTruef(found, "keyRange not found in compactStatus: %+v", dst)
 }

@@ -92,21 +92,6 @@ func (s *levelHandler) validate() error {
 
 func (s *KV) debugPrintMore() { s.lc.debugPrintMore() }
 
-// debugPrint shows the general state.
-func (s *levelsController) debugPrint() {
-	s.Lock()
-	defer s.Unlock()
-	for i := 0; i < s.kv.opt.MaxLevels; i++ {
-		var busy int
-		if s.beingCompacted[i] {
-			busy = 1
-		}
-		y.Printf("(i=%d, size=%d, busy=%d, numTables=%d) ",
-			i, s.levels[i].getTotalSize(), busy, len(s.levels[i].tables))
-	}
-	y.Printf("\n")
-}
-
 // debugPrintMore shows key ranges of each level.
 func (s *levelsController) debugPrintMore() {
 	s.Lock()

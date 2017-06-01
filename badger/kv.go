@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -264,6 +265,7 @@ func (s *KV) Close() error {
 				case s.flushChan <- flushTask{s.mt, s.vptr}:
 					s.imm = append(s.imm, s.mt) // Flusher will attempt to remove this from s.imm.
 					s.mt = nil                  // Will segfault if we try writing!
+					y.Printf("pushed to flush chan\n")
 					return true
 				default:
 					// If we fail to push, we need to unlock and wait for a short while.
@@ -668,8 +670,10 @@ type flushTask struct {
 
 func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 	defer lc.Done()
+	defer func() { fmt.Printf("EXITING flushmemtable\n") }()
 
 	for ft := range s.flushChan {
+		fmt.Printf("Got ft: %+v\n", ft)
 		if ft.mt == nil {
 			return nil
 		}
@@ -689,6 +693,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 		}
 		err = writeLevel0Table(ft.mt, fd)
 		if err != nil {
+			fmt.Printf("ERROR while writing to level 0: %v", err)
 			return err
 		}
 
@@ -696,6 +701,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 		defer tbl.DecrRef()
 
 		if err != nil {
+			fmt.Printf("ERROR while opening table: %v", err)
 			return err
 		}
 		s.lc.addLevel0Table(tbl) // This will incrRef again.

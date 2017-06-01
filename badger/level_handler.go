@@ -39,8 +39,6 @@ type levelHandler struct {
 	level        int
 	maxTotalSize int64
 	kv           *KV
-
-	cstatus compactStatus
 }
 
 func (s *levelHandler) getTotalSize() int64 {
