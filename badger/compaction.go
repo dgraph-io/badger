@@ -141,6 +141,11 @@ func (cs *compactStatus) compareAndAdd(cd compactDef) bool {
 	if nextLevel.overlapsWith(cd.nextRange) {
 		return false
 	}
+	// Check whether this level really needs compaction or not. Otherwise, we'll end up
+	// running parallel compactions for the same level.
+	if cd.thisLevel.getTotalSize()-thisLevel.delSize < cd.thisLevel.maxTotalSize {
+		return false
+	}
 
 	thisLevel.ranges = append(thisLevel.ranges, cd.thisRange)
 	nextLevel.ranges = append(nextLevel.ranges, cd.nextRange)
