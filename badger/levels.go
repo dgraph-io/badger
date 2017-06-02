@@ -157,46 +157,58 @@ func (s *levelsController) runWorker(lc *y.LevelCloser) {
 		select {
 		// Can add a done channel or other stuff.
 		case <-timeChan:
-			l := s.pickCompactLevel()
-			if l < 0 {
-				return
+			prios := s.pickCompactLevels()
+			for _, p := range prios {
+				fmt.Printf("Attempting compaction: %+v\n", p)
+				if s.doCompact(p.level) {
+					break
+				}
 			}
-			s.doCompact(l)
 		case <-lc.HasBeenClosed():
 			return
 		}
 	}
 }
 
+type compactionPriority struct {
+	level int
+	score float64
+}
+
 // pickCompactLevel determines which level to compact. Return -1 if not found.
 // Based on: https://github.com/facebook/rocksdb/wiki/Leveled-Compaction
-func (s *levelsController) pickCompactLevel() int {
+func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	s.Lock() // For access to beingCompacted.
 	defer s.Unlock()
 
-	var maxScore float64
-	level := -1
 	if !s.cstatus.overlapsWith(0, infRange) && // already being compacted.
 		s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTables {
-		maxScore = float64(s.levels[0].numTables()) / float64(s.kv.opt.NumLevelZeroTables)
-		level = 0
+		pri := compactionPriority{
+			level: 0,
+			score: float64(s.levels[0].numTables()) / float64(s.kv.opt.NumLevelZeroTables),
+		}
+		prios = append(prios, pri)
 	}
 
-	fmt.Printf("maxscore=%f level=%d\n", maxScore, level)
 	for i, l := range s.levels[1:] {
 		// Don't consider those tables that are being compacted right now.
 		delSize := s.cstatus.delSize(i + 1)
 
 		if l.getTotalSize()-delSize >= l.maxTotalSize {
-			score := float64(l.getTotalSize()-delSize) / float64(l.maxTotalSize)
-			if maxScore < score {
-				maxScore = score
-				level = i + 1
-				fmt.Printf("maxscore=%f level=%d\n", maxScore, level)
+			pri := compactionPriority{
+				level: i + 1,
+				score: float64(l.getTotalSize()-delSize) / float64(l.maxTotalSize),
 			}
+			prios = append(prios, pri)
 		}
 	}
-	return level
+	sort.Slice(prios, func(i, j int) bool {
+		return prios[i].score > prios[j].score
+	})
+	if len(prios) > 0 {
+		fmt.Printf("Got compaction prioriry: %+v\n", prios)
+	}
+	return prios
 }
 
 // compactBuildTables merge topTables and botTables to form a list of new tables.
