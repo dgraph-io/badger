@@ -101,14 +101,16 @@ type compactStatus struct {
 	levels []*levelCompactStatus
 }
 
-func (cs *compactStatus) print() {
+func (cs *compactStatus) debug() string {
 	cs.RLock()
 	defer cs.RUnlock()
 
-	fmt.Println("compaction status")
+	var buf bytes.Buffer
+	buf.WriteString(fmt.Sprintln("compaction status"))
 	for i, l := range cs.levels {
-		fmt.Printf("[%d] %s\n", i, l.debug())
+		buf.WriteString(fmt.Sprintf("[%d] %s\n", i, l.debug()))
 	}
+	return buf.String()
 }
 
 func (cs *compactStatus) overlapsWith(level int, this keyRange) bool {

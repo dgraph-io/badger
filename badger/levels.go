@@ -26,6 +26,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/trace"
+
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
@@ -144,9 +146,11 @@ func (s *levelsController) startCompact(lc *y.LevelCloser) {
 
 func (s *levelsController) runWorker(lc *y.LevelCloser) {
 	defer lc.Done()
+	elog := trace.NewEventLog("Badger", "compactor")
+	defer elog.Finish()
 
 	if s.kv.opt.DoNotCompact {
-		fmt.Println("NOT running any compactions due to DB options.")
+		elog.Printf("NOT running any compactions due to DB options.")
 		return
 	}
 
@@ -159,8 +163,9 @@ func (s *levelsController) runWorker(lc *y.LevelCloser) {
 		case <-timeChan:
 			prios := s.pickCompactLevels()
 			for _, p := range prios {
-				fmt.Printf("Attempting compaction: %+v\n", p)
-				if s.doCompact(p.level) {
+				elog.Printf("Got compaction prioriry: %+v", p)
+				if s.doCompact(elog, p.level) {
+					elog.Printf("Compaction for level %d DONE.", p.level)
 					break
 				}
 			}
@@ -205,9 +210,6 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	sort.Slice(prios, func(i, j int) bool {
 		return prios[i].score > prios[j].score
 	})
-	if len(prios) > 0 {
-		fmt.Printf("Got compaction prioriry: %+v\n", prios)
-	}
 	return prios
 }
 
@@ -254,7 +256,7 @@ func (s *levelsController) compactBuildTables(
 			builder.Close()
 			continue
 		}
-		y.Printf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
+		cd.elog.Printf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
 
 		y.AssertTruef(newID <= newIDMax, "%d %d", newID, newIDMax)
 		go func(idx int, fileID uint64, builder *table.TableBuilder) {
@@ -303,6 +305,8 @@ func (s *levelsController) compactBuildTables(
 }
 
 type compactDef struct {
+	elog trace.EventLog
+
 	thisLevel *levelHandler
 	nextLevel *levelHandler
 
@@ -364,7 +368,6 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	tbls := make([]*table.Table, len(cd.thisLevel.tables))
 	copy(tbls, cd.thisLevel.tables)
 	if len(tbls) == 0 {
-		fmt.Println("no tables found")
 		return false
 	}
 
@@ -381,7 +384,6 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 			right: t.Biggest(),
 		}
 		if s.cstatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
-			fmt.Printf("got overlap: %s\ncstatus=%s", cd.thisRange, s.cstatus.levels[cd.thisLevel.level].debug())
 			continue
 		}
 		cd.top = []*table.Table{t}
@@ -407,8 +409,6 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 		if !s.cstatus.compareAndAdd(*cd) {
 			continue
 		}
-		fmt.Println("fill tables")
-		s.cstatus.print()
 		return true
 	}
 	return false
@@ -435,7 +435,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 
 		tbl := cd.top[0]
 		tbl.UpdateLevel(l + 1)
-		fmt.Printf("\tLOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
+		cd.elog.Printf("\tLOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
 			l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
 		return
 	}
@@ -449,7 +449,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	if newTables == nil {
 		err := decr()
 		// This compaction couldn't be done successfully.
-		fmt.Printf("\tLOG Compact FAILED with error: %+v: %+v %+v", err, cd, c)
+		cd.elog.Printf("\tLOG Compact FAILED with error: %+v: %+v %+v", err, cd, c)
 		return
 	}
 	defer decr()
@@ -464,15 +464,16 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	c.done = 1
 	s.clog.add(c)
 
-	y.Printf("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
+	cd.elog.Printf("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
 		l, l+1, len(cd.top)+len(cd.bot), len(newTables), time.Since(timeStart))
 }
 
 // doCompact picks some table on level l and compacts it away to the next level.
-func (s *levelsController) doCompact(l int) bool {
+func (s *levelsController) doCompact(elog trace.EventLog, l int) bool {
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
 
 	cd := compactDef{
+		elog:      elog,
 		thisLevel: s.levels[l],
 		nextLevel: s.levels[l+1],
 	}
@@ -481,27 +482,25 @@ func (s *levelsController) doCompact(l int) bool {
 	// remain unchanged.
 	if l == 0 {
 		if !s.fillTablesL0(&cd) {
-			fmt.Printf("doCompact failed for level: %d\n", l)
+			elog.Printf("fillTables failed for level: %d\n", l)
 			return false
 		}
 
 	} else {
 		if !s.fillTables(&cd) {
-			fmt.Printf("doCompact failed for level: %d\n", l)
+			elog.Printf("fillTables failed for level: %d\n", l)
 			return false
 		}
 	}
 
-	fmt.Printf("====> Running for level: %d\n", cd.thisLevel.level)
-	fmt.Printf("====> Running cd with ranges: %s %s\n", cd.thisRange, cd.nextRange)
-	s.cstatus.print()
+	elog.Printf("Running for level: %d\n", cd.thisLevel.level)
+	elog.Printf(s.cstatus.debug())
 	s.runCompactDef(l, cd)
 
 	// Done with compaction. So, remove the ranges from compaction status.
-	s.cstatus.print()
 	s.cstatus.delete(cd)
-	fmt.Printf("====> DONE compaction for level: %d\n", cd.thisLevel.level)
-	fmt.Printf("====> cstatus next level: %s\n", s.cstatus.levels[cd.thisLevel.level+1].debug())
+	elog.Printf("DONE compaction for level: %d\n", cd.thisLevel.level)
+	elog.Printf(s.cstatus.debug())
 	return true
 }
 
