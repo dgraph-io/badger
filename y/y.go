@@ -44,15 +44,13 @@ func Safecopy(a []byte, src []byte) []byte {
 	return a
 }
 
-type Slice struct {
-	buf []byte
-}
+type Slice []byte
 
 func (s *Slice) Resize(sz int) []byte {
-	if cap(s.buf) < sz {
-		s.buf = make([]byte, sz)
+	if cap(*s) < sz {
+		*s = make([]byte, sz)
 	}
-	return s.buf[0:sz]
+	return (*s)[:sz]
 }
 
 type LevelCloser struct {
