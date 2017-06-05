@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -240,7 +239,6 @@ func NewKV(opt *Options) (out *KV, err error) {
 // Close closes a KV. It's crucial to call it to ensure all the pending updates
 // make their way to disk.
 func (s *KV) Close() error {
-	y.Printf("Closing database\n")
 	s.elog.Printf("Closing database")
 	// Stop value GC first.
 	lc := s.closer.Get("value-gc")
@@ -261,7 +259,7 @@ func (s *KV) Close() error {
 	// trying to push stuff into the memtable. This will also resolve the value
 	// offset problem: as we push into memtable, we update value offsets there.
 	if s.mt.Size() > 0 {
-		y.Printf("Flushing memtable\n")
+		s.elog.Printf("Flushing memtable")
 		for {
 			pushedFlushTask := func() bool {
 				s.Lock()
@@ -290,11 +288,11 @@ func (s *KV) Close() error {
 
 	lc = s.closer.Get("memtable")
 	lc.Wait()
-	y.Printf("Memtable flushed\n")
+	s.elog.Printf("Memtable flushed")
 
 	lc = s.closer.Get("compactors")
 	lc.SignalAndWait()
-	y.Printf("Compaction finished\n")
+	s.elog.Printf("Compaction finished")
 
 	if err := s.lc.close(); err != nil {
 		return errors.Wrap(err, "KV.Close")
@@ -637,14 +635,14 @@ func (s *KV) ensureRoomForWrite() error {
 	y.AssertTrue(s.mt != nil) // A nil mt indicates that KV is being closed.
 	select {
 	case s.flushChan <- flushTask{s.mt, s.vptr}:
-		y.Printf("Flushing value log to disk if async mode.")
+		s.elog.Printf("Flushing value log to disk if async mode.")
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
 		err = s.vlog.sync()
 		if err != nil {
 			return err
 		}
 
-		y.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
+		s.elog.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 			s.mt.Size(), len(s.flushChan))
 		// We manage to push this task. Let's modify imm.
 		s.imm = append(s.imm, s.mt)
@@ -680,10 +678,8 @@ type flushTask struct {
 
 func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 	defer lc.Done()
-	defer func() { fmt.Printf("EXITING flushmemtable\n") }()
 
 	for ft := range s.flushChan {
-		fmt.Printf("Got ft: %+v\n", ft)
 		if ft.mt == nil {
 			return nil
 		}
@@ -703,7 +699,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 		}
 		err = writeLevel0Table(ft.mt, fd)
 		if err != nil {
-			fmt.Printf("ERROR while writing to level 0: %v", err)
+			s.elog.Errorf("ERROR while writing to level 0: %v", err)
 			return err
 		}
 
@@ -711,7 +707,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 		defer tbl.DecrRef()
 
 		if err != nil {
-			fmt.Printf("ERROR while opening table: %v", err)
+			s.elog.Printf("ERROR while opening table: %v", err)
 			return err
 		}
 		s.lc.addLevel0Table(tbl) // This will incrRef again.

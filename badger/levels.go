@@ -18,7 +18,6 @@ package badger
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -155,7 +154,7 @@ func (s *levelsController) runWorker(lc *y.LevelCloser) {
 	}
 
 	time.Sleep(time.Duration(rand.Int31n(1000)) * time.Millisecond)
-	timeChan := time.Tick(100 * time.Microsecond)
+	timeChan := time.Tick(time.Second)
 
 	for {
 		select {
@@ -356,7 +355,6 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	if !s.cstatus.compareAndAdd(*cd) {
 		return false
 	}
-	fmt.Printf("=====> cs level 0: %s\n", s.cstatus.levels[0].debug())
 
 	return true
 }
@@ -494,13 +492,12 @@ func (s *levelsController) doCompact(elog trace.EventLog, l int) bool {
 	}
 
 	elog.Printf("Running for level: %d\n", cd.thisLevel.level)
-	elog.Printf(s.cstatus.debug())
+	s.cstatus.toLog(elog)
 	s.runCompactDef(l, cd)
 
 	// Done with compaction. So, remove the ranges from compaction status.
 	s.cstatus.delete(cd)
-	elog.Printf("DONE compaction for level: %d\n", cd.thisLevel.level)
-	elog.Printf(s.cstatus.debug())
+	s.cstatus.toLog(elog)
 	return true
 }
 
@@ -513,7 +510,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) {
 				time.Since(lastUnstalled))
 			s.cstatus.RLock()
 			for i := 0; i < s.kv.opt.MaxLevels; i++ {
-				fmt.Printf("level=%d. Status=%s Size=%d\n",
+				y.Printf("level=%d. Status=%s Size=%d\n",
 					i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
 			}
 			s.cstatus.RUnlock()

@@ -6,6 +6,8 @@ import (
 	"log"
 	"sync"
 
+	"golang.org/x/net/trace"
+
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 )
@@ -101,16 +103,17 @@ type compactStatus struct {
 	levels []*levelCompactStatus
 }
 
-func (cs *compactStatus) debug() string {
+func (cs *compactStatus) toLog(elog trace.EventLog) {
 	cs.RLock()
 	defer cs.RUnlock()
 
-	var buf bytes.Buffer
-	buf.WriteString(fmt.Sprintln("compaction status"))
+	elog.Printf("Compaction status:")
 	for i, l := range cs.levels {
-		buf.WriteString(fmt.Sprintf("[%d] %s\n", i, l.debug()))
+		if len(l.debug()) == 0 {
+			continue
+		}
+		elog.Printf("[%d] %s", i, l.debug())
 	}
-	return buf.String()
 }
 
 func (cs *compactStatus) overlapsWith(level int, this keyRange) bool {
@@ -153,7 +156,6 @@ func (cs *compactStatus) compareAndAdd(cd compactDef) bool {
 	nextLevel.ranges = append(nextLevel.ranges, cd.nextRange)
 	thisLevel.delSize += cd.thisSize
 
-	fmt.Printf("======> compace and add. this level: %s next level: %s\n", thisLevel.debug(), nextLevel.debug())
 	return true
 }
 
