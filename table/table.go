@@ -43,6 +43,8 @@ const (
 	LoadToRAM
 )
 
+const MaxInt = int(^uint(0) >> 1)
+
 type keyOffset struct {
 	key    []byte
 	offset int
