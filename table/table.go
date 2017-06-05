@@ -279,7 +279,7 @@ func (t *Table) readIndex() error {
 			offset += h.Size()
 			buf = make([]byte, h.klen)
 			var out []byte
-			if out, err = t.read(offset, h.klen); err != nil {
+			if out, err = t.read(offset, int(h.klen)); err != nil {
 				che <- errors.Wrap(err, "While reading first key in block")
 				return
 			}
