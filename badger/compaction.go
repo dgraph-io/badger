@@ -21,7 +21,7 @@ type keyRange struct {
 var infRange = keyRange{inf: true}
 
 func (r keyRange) String() string {
-	return fmt.Sprintf("left=%q, right=%q, inf=%v", r.left, r.right, r.inf)
+	return fmt.Sprintf("[left=%q, right=%q, inf=%v]", r.left, r.right, r.inf)
 }
 
 func (r keyRange) equals(dst keyRange) bool {
@@ -67,15 +67,15 @@ type levelCompactStatus struct {
 	delSize int64
 }
 
-func (lcs levelCompactStatus) debug() string {
+func (lcs *levelCompactStatus) debug() string {
 	var b bytes.Buffer
 	for _, r := range lcs.ranges {
-		b.WriteString(fmt.Sprintf("left=%q, right=%q inf=%v\n", r.left, r.right, r.inf))
+		b.WriteString(r.String())
 	}
 	return b.String()
 }
 
-func (lcs levelCompactStatus) overlapsWith(dst keyRange) bool {
+func (lcs *levelCompactStatus) overlapsWith(dst keyRange) bool {
 	for _, r := range lcs.ranges {
 		if r.overlapsWith(dst) {
 			return true
@@ -130,6 +130,8 @@ func (cs *compactStatus) delSize(l int) int64 {
 	return cs.levels[l].delSize
 }
 
+// compareAndAdd will check whether we can run this compactDef. That it doesn't overlap with any
+// other running compaction. If it can be run, it would store this run in the compactStatus state.
 func (cs *compactStatus) compareAndAdd(cd compactDef) bool {
 	cs.Lock()
 	defer cs.Unlock()

@@ -33,9 +33,6 @@ import (
 )
 
 type levelsController struct {
-	// Guards beingCompacted.
-	sync.Mutex
-
 	elog trace.EventLog
 
 	// The following are initialized once and const.
@@ -179,9 +176,6 @@ type compactionPriority struct {
 // pickCompactLevel determines which level to compact. Return -1 if not found.
 // Based on: https://github.com/facebook/rocksdb/wiki/Leveled-Compaction
 func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
-	s.Lock() // For access to beingCompacted.
-	defer s.Unlock()
-
 	if !s.cstatus.overlapsWith(0, infRange) && // already being compacted.
 		s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTables {
 		pri := compactionPriority{
