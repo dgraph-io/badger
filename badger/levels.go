@@ -145,11 +145,7 @@ func (s *levelsController) startCompact(lc *y.LevelCloser) {
 
 func (s *levelsController) runWorker(lc *y.LevelCloser) {
 	defer lc.Done()
-	elog := trace.NewEventLog("Badger", "compactor")
-	defer elog.Finish()
-
 	if s.kv.opt.DoNotCompact {
-		elog.Printf("NOT running any compactions due to DB options.")
 		return
 	}
 
@@ -162,9 +158,7 @@ func (s *levelsController) runWorker(lc *y.LevelCloser) {
 		case <-timeChan:
 			prios := s.pickCompactLevels()
 			for _, p := range prios {
-				elog.Printf("Got compaction priority: %+v", p)
-				if s.doCompact(p.level) {
-					elog.Printf("Compaction for level %d DONE.", p.level)
+				if s.doCompact(p) {
 					break
 				}
 			}
@@ -467,7 +461,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 }
 
 // doCompact picks some table on level l and compacts it away to the next level.
-func (s *levelsController) doCompact(l int) bool {
+func (s *levelsController) doCompact(p compactionPriority) bool {
+	l := p.level
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
 
 	cd := compactDef{
@@ -476,6 +471,8 @@ func (s *levelsController) doCompact(l int) bool {
 		nextLevel: s.levels[l+1],
 	}
 	defer cd.elog.Finish()
+
+	cd.elog.LazyPrintf("Got compaction priority: %+v", p)
 
 	// While picking tables to be compacted, both levels' tables are expected to
 	// remain unchanged.
@@ -499,6 +496,7 @@ func (s *levelsController) doCompact(l int) bool {
 	// Done with compaction. So, remove the ranges from compaction status.
 	s.cstatus.delete(cd)
 	s.cstatus.toLog(cd.elog)
+	cd.elog.LazyPrintf("Compaction for level: %d DONE", cd.thisLevel.level)
 	return true
 }
 

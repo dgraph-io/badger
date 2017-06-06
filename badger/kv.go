@@ -478,10 +478,12 @@ func (s *KV) writeRequests(reqs []*request) error {
 	}
 
 	s.elog.Printf("Writing to memtable")
-	for i, b := range reqs {
+	var count int
+	for _, b := range reqs {
 		if len(b.Entries) == 0 {
 			continue
 		}
+		count += len(b.Entries)
 		for err := s.ensureRoomForWrite(); err != nil; err = s.ensureRoomForWrite() {
 			s.elog.Printf("Making room for writes")
 			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
@@ -497,10 +499,10 @@ func (s *KV) writeRequests(reqs []*request) error {
 			done(err)
 			return errors.Wrap(err, "writeRequests")
 		}
-		s.elog.Printf("Wrote %d entries from block %d", len(b.Entries), i)
 		s.updateOffset(b.Ptrs)
 	}
 	done(nil)
+	s.elog.Printf("%d entries written", count)
 	return nil
 }
 
