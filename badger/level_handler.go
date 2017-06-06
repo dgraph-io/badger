@@ -112,8 +112,11 @@ func (s *levelHandler) replaceTables(newTables []*table.Table) {
 		tbl.IncrRef()
 	}
 
-	left, right := s.overlappingTables(
-		newTables[0].Smallest(), newTables[len(newTables)-1].Biggest())
+	kr := keyRange{
+		left:  newTables[0].Smallest(),
+		right: newTables[len(newTables)-1].Biggest(),
+	}
+	left, right := s.overlappingTables(kr)
 
 	// Update totalSize and reference counts.
 	for i := left; i < right; i++ {
@@ -131,31 +134,6 @@ func (s *levelHandler) replaceTables(newTables []*table.Table) {
 	t = t[numAdded:]
 	y.AssertTrue(len(s.tables[right:]) == copy(t, s.tables[right:]))
 	s.tables = tables
-}
-
-// pickCompactTables returns a range of tables to be compacted away.
-func (s *levelHandler) pickCompactTables() (int, int) {
-	s.RLock() // Not really necessary.
-	defer s.RUnlock()
-
-	if s.level == 0 {
-		// For now, for level 0, we return all the tables.
-		// Note that during compaction, s.tables might grow longer. This is fine. The indices into
-		// s.tables remain valid because these new tables are appended to the back of s.tables.
-		return 0, len(s.tables)
-	}
-
-	// For other levels, pick the largest table.
-	var idx int
-	mx := s.tables[0].Size()
-	for i := 1; i < len(s.tables); i++ {
-		size := s.tables[i].Size()
-		if size > mx {
-			mx = size
-			idx = i
-		}
-	}
-	return idx, idx + 1
 }
 
 func newLevelHandler(kv *KV, level int) *levelHandler {
@@ -179,7 +157,6 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 	t.IncrRef()
 	s.totalSize += t.Size()
 
-	y.Printf("Num level 0 tables increased from %d to %d\n", len(s.tables)-1, len(s.tables))
 	return true
 }
 
@@ -276,14 +253,14 @@ func (s *levelHandler) appendIterators(iters []y.Iterator, reversed bool) []y.It
 // overlappingTables returns the tables that intersect with key range.
 // Returns a half-interval.
 // This function should already have acquired a read lock.
-func (s *levelHandler) overlappingTables(begin, end []byte) (int, int) {
+func (s *levelHandler) overlappingTables(kr keyRange) (int, int) {
 	s.AssertRLock()
 
 	left := sort.Search(len(s.tables), func(i int) bool {
-		return bytes.Compare(begin, s.tables[i].Biggest()) <= 0
+		return bytes.Compare(kr.left, s.tables[i].Biggest()) <= 0
 	})
 	right := sort.Search(len(s.tables), func(i int) bool {
-		return bytes.Compare(end, s.tables[i].Smallest()) < 0
+		return bytes.Compare(kr.right, s.tables[i].Smallest()) < 0
 	})
 	return left, right
 }

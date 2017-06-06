@@ -101,7 +101,6 @@ func (s *Skiplist) DecrRef() {
 		return
 	}
 	// Deallocate all nodes.
-	y.Printf("=======> Deallocating skiplist\n")
 	x := s.head
 	for x != nil {
 		next := x.getNext(0)

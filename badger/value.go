@@ -206,7 +206,6 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	elog := trace.NewEventLog("badger", "vlog-rewrite")
 	defer elog.Finish()
 	elog.Printf("Rewriting fid: %d", f.fid)
-	y.Printf("rewrite called\n")
 
 	vlog.entries = vlog.entries[:0]
 	y.AssertTrue(vlog.kv != nil)
@@ -394,7 +393,7 @@ func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) (int, error) {
 }
 
 func (e Entry) print(prefix string) {
-	y.Printf("%s Key: %s Meta: %d Offset: %d len(val)=%d cas=%d check=%d\n",
+	fmt.Printf("%s Key: %s Meta: %d Offset: %d len(val)=%d cas=%d check=%d\n",
 		prefix, e.Key, e.Meta, e.offset, len(e.Value), e.casCounter, e.CASCounterCheck)
 }
 
@@ -560,7 +559,7 @@ func (l *valueLog) Close() error {
 func (l *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 	fid := ptr.Fid
 	offset := ptr.Offset
-	y.Printf("Seeking at value pointer: %+v\n", ptr)
+	l.elog.Printf("Seeking at value pointer: %+v\n", ptr)
 
 	for _, f := range l.files {
 		if f.fid < fid {
@@ -842,7 +841,7 @@ func (vlog *valueLog) doRunGC() error {
 			r.keep += esz
 
 		} else {
-			y.Printf("Reason=%+v\n", r)
+			vlog.elog.Printf("Reason=%+v\n", r)
 			ne, err := vlog.Read(vp, nil)
 			if err != nil {
 				return errStop
@@ -865,15 +864,14 @@ func (vlog *valueLog) doRunGC() error {
 	vlog.elog.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
 
 	if r.total < 10.0 || r.keep >= vlog.opt.ValueGCThreshold*r.total {
-		y.Printf("Skipping GC on fid: %d\n\n", lf.fid)
+		vlog.elog.Printf("Skipping GC on fid: %d\n\n", lf.fid)
 		return nil
 	}
 
-	y.Printf("=====> REWRITING VLOG %d\n", lf.fid)
+	vlog.elog.Printf("REWRITING VLOG %d\n", lf.fid)
 	if err = vlog.rewrite(lf); err != nil {
 		return err
 	}
-	y.Printf("REWRITE DONE\n")
 	vlog.elog.Printf("Done rewriting.")
 	return nil
 }
