@@ -90,26 +90,26 @@ func (s *levelHandler) validate() error {
 	return nil
 }
 
-func (s *KV) debugPrintMore() { s.lc.debugPrintMore() }
+// func (s *KV) debugPrintMore() { s.lc.debugPrintMore() }
 
-// debugPrintMore shows key ranges of each level.
-func (s *levelsController) debugPrintMore() {
-	s.Lock()
-	defer s.Unlock()
-	for i := 0; i < s.kv.opt.MaxLevels; i++ {
-		s.levels[i].debugPrintMore()
-	}
-}
+// // debugPrintMore shows key ranges of each level.
+// func (s *levelsController) debugPrintMore() {
+// 	s.Lock()
+// 	defer s.Unlock()
+// 	for i := 0; i < s.kv.opt.MaxLevels; i++ {
+// 		s.levels[i].debugPrintMore()
+// 	}
+// }
 
-func (s *levelHandler) debugPrintMore() {
-	s.RLock()
-	defer s.RUnlock()
-	y.Printf("Level %d:", s.level)
-	for _, t := range s.tables {
-		y.Printf(" [%s, %s]", t.Smallest(), t.Biggest())
-	}
-	y.Printf("\n")
-}
+// func (s *levelHandler) debugPrintMore() {
+// 	s.RLock()
+// 	defer s.RUnlock()
+// 	s.elog.Printf("Level %d:", s.level)
+// 	for _, t := range s.tables {
+// 		y.Printf(" [%s, %s]", t.Smallest(), t.Biggest())
+// 	}
+// 	y.Printf("\n")
+// }
 
 // reserveFileIDs reserve k fileIDs. Returns pair is a half-interval.
 // If we return [3, 6), it means use 3, 4, 5.

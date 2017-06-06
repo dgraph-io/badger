@@ -139,8 +139,7 @@ func deleteIfPresent(id uint64, dir string) {
 	fn := table.NewFilename(id, dir)
 	_, err := os.Stat(fn)
 	if err == nil {
-		y.Printf("CLEANUP: Del %s\n", fn)
-		y.Check(os.Remove(fn))
+		os.Remove(fn)
 	}
 }
 
@@ -163,7 +162,6 @@ func compactLogReplay(filename, dir string, idMap map[uint64]struct{}) {
 	}))
 
 	if len(cMap) == 0 {
-		y.Printf("All compactions in compact log are done.\n")
 		return
 	}
 
@@ -171,7 +169,6 @@ func compactLogReplay(filename, dir string, idMap map[uint64]struct{}) {
 	// compactions. Inserted files should be deleted. Deleted files are expected
 	// to be present.
 	for _, c := range cMap {
-		y.Printf("CLEANUP: Undo compaction ID %d\n", c.compactID)
 		for _, id := range c.toInsert {
 			deleteIfPresent(id, dir)
 		}

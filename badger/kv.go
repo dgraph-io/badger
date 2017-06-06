@@ -79,7 +79,6 @@ type Options struct {
 
 	// Flags for testing purposes.
 	DoNotCompact bool // Stops LSM tree from compactions.
-	Verbose      bool // Turns on verbose mode.
 }
 
 // DefaultOptions sets a list of safe recommended options. Feel free to modify these to suit your needs.
@@ -103,7 +102,6 @@ var DefaultOptions = Options{
 	ValueGCThreshold:         0.5, // Set to zero to not run GC.
 	ValueLogFileSize:         1 << 30,
 	ValueThreshold:           20,
-	Verbose:                  false,
 }
 
 // KV provides the various functions required to interact with Badger.
@@ -149,7 +147,6 @@ func NewKV(opt *Options) (out *KV, err error) {
 		elog:      trace.NewEventLog("Badger", "KV"),
 	}
 	out.mt = skl.NewSkiplist(out.arenaPool)
-	y.VerboseMode = opt.Verbose
 
 	// newLevelsController potentially loads files in directory.
 	if out.lc, err = newLevelsController(out); err != nil {
@@ -183,7 +180,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 	first := true
 	fn := func(e Entry, vp valuePointer) error { // Function for replaying.
 		if first {
-			y.Printf("First key=%s\n", e.Key)
+			out.elog.Printf("First key=%s\n", e.Key)
 		}
 		first = false
 
@@ -215,7 +212,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 			CASCounter: e.casCounter,
 		}
 		for err := out.ensureRoomForWrite(); err != nil; err = out.ensureRoomForWrite() {
-			y.Printf("Replay: Making room for writes")
+			out.elog.Printf("Replay: Making room for writes")
 			time.Sleep(10 * time.Millisecond)
 		}
 		out.mt.Put(nk, v)
@@ -269,7 +266,7 @@ func (s *KV) Close() error {
 				case s.flushChan <- flushTask{s.mt, s.vptr}:
 					s.imm = append(s.imm, s.mt) // Flusher will attempt to remove this from s.imm.
 					s.mt = nil                  // Will segfault if we try writing!
-					y.Printf("pushed to flush chan\n")
+					s.elog.Printf("pushed to flush chan\n")
 					return true
 				default:
 					// If we fail to push, we need to unlock and wait for a short while.
@@ -687,7 +684,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 		}
 
 		if ft.vptr.Fid > 0 || ft.vptr.Offset > 0 {
-			y.Printf("Storing offset: %+v\n", ft.vptr)
+			s.elog.Printf("Storing offset: %+v\n", ft.vptr)
 			offset := make([]byte, 10)
 			s.Lock() // For vptr.
 			s.vptr.Encode(offset)

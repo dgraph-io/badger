@@ -36,6 +36,8 @@ type levelsController struct {
 	// Guards beingCompacted.
 	sync.Mutex
 
+	elog trace.EventLog
+
 	// The following are initialized once and const.
 	levels []*levelHandler
 	clog   compactLog
@@ -61,6 +63,7 @@ func newLevelsController(kv *KV) (*levelsController, error) {
 	y.AssertTrue(kv.opt.NumLevelZeroTablesStall > kv.opt.NumLevelZeroTables)
 	s := &levelsController{
 		kv:     kv,
+		elog:   kv.elog,
 		levels: make([]*levelHandler, kv.opt.MaxLevels),
 	}
 	s.cstatus.levels = make([]*levelCompactStatus, kv.opt.MaxLevels)
@@ -82,7 +85,7 @@ func newLevelsController(kv *KV) (*levelsController, error) {
 	clogName := filepath.Join(kv.opt.Dir, "clog")
 	_, err := os.Stat(clogName)
 	if err == nil {
-		y.Printf("Replaying compact log: %s\n", clogName)
+		kv.elog.Printf("Replaying compact log: %s\n", clogName)
 		compactLogReplay(clogName, kv.opt.Dir, getIDMap(kv.opt.Dir))
 
 		if err := os.Remove(clogName); err != nil { // Everything is ok. Clear compact log.
@@ -504,12 +507,12 @@ func (s *levelsController) addLevel0Table(t *table.Table) {
 	for !s.levels[0].tryAddLevel0Table(t) {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time
-		if s.kv.opt.Verbose {
-			y.Printf("STALLED STALLED STALLED STALLED STALLED STALLED STALLED STALLED: %v\n",
+		{
+			s.elog.Printf("STALLED STALLED STALLED STALLED STALLED STALLED STALLED STALLED: %v\n",
 				time.Since(lastUnstalled))
 			s.cstatus.RLock()
 			for i := 0; i < s.kv.opt.MaxLevels; i++ {
-				y.Printf("level=%d. Status=%s Size=%d\n",
+				s.elog.Printf("level=%d. Status=%s Size=%d\n",
 					i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
 			}
 			s.cstatus.RUnlock()
@@ -526,8 +529,8 @@ func (s *levelsController) addLevel0Table(t *table.Table) {
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		if s.kv.opt.Verbose {
-			y.Printf("UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED: %v\n",
+		{
+			s.elog.Printf("UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED: %v\n",
 				time.Since(timeStart))
 			lastUnstalled = time.Now()
 		}

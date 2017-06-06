@@ -157,7 +157,6 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 	t.IncrRef()
 	s.totalSize += t.Size()
 
-	y.Printf("Num level 0 tables increased from %d to %d\n", len(s.tables)-1, len(s.tables))
 	return true
 }
 

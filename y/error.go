@@ -36,19 +36,11 @@ import (
 )
 
 var debugMode = true
-var VerboseMode = false
 
 // Check logs fatal if err != nil.
 func Check(err error) {
 	if err != nil {
 		log.Fatalf("%+v", Wrap(err))
-	}
-}
-
-// Checkf is Check with extra info.
-func Checkf(err error, format string, args ...interface{}) {
-	if err != nil {
-		log.Fatalf("%+v", Wrapf(err, format, args...))
 	}
 }
 
@@ -88,11 +80,4 @@ func Wrapf(err error, format string, args ...interface{}) error {
 		return fmt.Errorf(format+" error: %+v", append(args, err)...)
 	}
 	return errors.Wrapf(err, format, args...)
-}
-
-// Printf printfs.
-func Printf(format string, args ...interface{}) {
-	if VerboseMode {
-		fmt.Printf(format, args...)
-	}
 }
