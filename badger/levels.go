@@ -162,8 +162,8 @@ func (s *levelsController) runWorker(lc *y.LevelCloser) {
 		case <-timeChan:
 			prios := s.pickCompactLevels()
 			for _, p := range prios {
-				elog.Printf("Got compaction prioriry: %+v", p)
-				if s.doCompact(elog, p.level) {
+				elog.Printf("Got compaction priority: %+v", p)
+				if s.doCompact(p.level) {
 					elog.Printf("Compaction for level %d DONE.", p.level)
 					break
 				}
@@ -467,7 +467,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 }
 
 // doCompact picks some table on level l and compacts it away to the next level.
-func (s *levelsController) doCompact(elog trace.EventLog, l int) bool {
+func (s *levelsController) doCompact(l int) bool {
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
 
 	cd := compactDef{
@@ -475,29 +475,30 @@ func (s *levelsController) doCompact(elog trace.EventLog, l int) bool {
 		thisLevel: s.levels[l],
 		nextLevel: s.levels[l+1],
 	}
+	defer cd.elog.Finish()
 
 	// While picking tables to be compacted, both levels' tables are expected to
 	// remain unchanged.
 	if l == 0 {
 		if !s.fillTablesL0(&cd) {
-			elog.Printf("fillTables failed for level: %d\n", l)
+			cd.elog.LazyPrintf("fillTables failed for level: %d\n", l)
 			return false
 		}
 
 	} else {
 		if !s.fillTables(&cd) {
-			elog.Printf("fillTables failed for level: %d\n", l)
+			cd.elog.LazyPrintf("fillTables failed for level: %d\n", l)
 			return false
 		}
 	}
 
-	elog.Printf("Running for level: %d\n", cd.thisLevel.level)
-	s.cstatus.toLog(elog)
+	cd.elog.LazyPrintf("Running for level: %d\n", cd.thisLevel.level)
+	s.cstatus.toLog(cd.elog)
 	s.runCompactDef(l, cd)
 
 	// Done with compaction. So, remove the ranges from compaction status.
 	s.cstatus.delete(cd)
-	s.cstatus.toLog(elog)
+	s.cstatus.toLog(cd.elog)
 	return true
 }
 

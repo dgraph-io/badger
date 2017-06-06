@@ -103,16 +103,16 @@ type compactStatus struct {
 	levels []*levelCompactStatus
 }
 
-func (cs *compactStatus) toLog(elog trace.EventLog) {
+func (cs *compactStatus) toLog(tr trace.Trace) {
 	cs.RLock()
 	defer cs.RUnlock()
 
-	elog.Printf("Compaction status:")
+	tr.LazyPrintf("Compaction status:")
 	for i, l := range cs.levels {
 		if len(l.debug()) == 0 {
 			continue
 		}
-		elog.Printf("[%d] %s", i, l.debug())
+		tr.LazyPrintf("[%d] %s", i, l.debug())
 	}
 }
 
