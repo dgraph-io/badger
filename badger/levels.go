@@ -255,7 +255,7 @@ func (s *levelsController) compactBuildTables(
 			builder.Close()
 			continue
 		}
-		cd.elog.Printf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
+		cd.elog.LazyPrintf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
 
 		y.AssertTruef(newID <= newIDMax, "%d %d", newID, newIDMax)
 		go func(idx int, fileID uint64, builder *table.TableBuilder) {
@@ -304,7 +304,7 @@ func (s *levelsController) compactBuildTables(
 }
 
 type compactDef struct {
-	elog trace.EventLog
+	elog trace.Trace
 
 	thisLevel *levelHandler
 	nextLevel *levelHandler
@@ -433,7 +433,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 
 		tbl := cd.top[0]
 		tbl.UpdateLevel(l + 1)
-		cd.elog.Printf("\tLOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
+		cd.elog.LazyPrintf("\tLOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
 			l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
 		return
 	}
@@ -447,7 +447,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	if newTables == nil {
 		err := decr()
 		// This compaction couldn't be done successfully.
-		cd.elog.Printf("\tLOG Compact FAILED with error: %+v: %+v %+v", err, cd, c)
+		cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v %+v", err, cd, c)
 		return
 	}
 	defer decr()
@@ -462,7 +462,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	c.done = 1
 	s.clog.add(c)
 
-	cd.elog.Printf("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
+	cd.elog.LazyPrintf("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
 		l, l+1, len(cd.top)+len(cd.bot), len(newTables), time.Since(timeStart))
 }
 
@@ -471,7 +471,7 @@ func (s *levelsController) doCompact(elog trace.EventLog, l int) bool {
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
 
 	cd := compactDef{
-		elog:      elog,
+		elog:      trace.New("Badger", "Compact"),
 		thisLevel: s.levels[l],
 		nextLevel: s.levels[l+1],
 	}
