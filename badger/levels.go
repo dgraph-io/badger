@@ -473,6 +473,7 @@ func (s *levelsController) doCompact(p compactionPriority) bool {
 		thisLevel: s.levels[l],
 		nextLevel: s.levels[l+1],
 	}
+	cd.elog.SetMaxEvents(100)
 	defer cd.elog.Finish()
 
 	cd.elog.LazyPrintf("Got compaction priority: %+v", p)
