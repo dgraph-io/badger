@@ -62,26 +62,26 @@ func (p *bufferPool) Get() *bytes.Buffer {
 }
 
 type header struct {
-	plen int // Overlap with base key.
-	klen int // Length of the diff.
-	vlen int // Length of value.
-	prev int // Offset for the previous key-value pair. The offset is relative to block base offset.
+	plen uint16 // Overlap with base key.
+	klen uint16 // Length of the diff.
+	vlen uint16 // Length of value.
+	prev uint32 // Offset for the previous key-value pair. The offset is relative to block base offset.
 }
 
 // Encode encodes the header.
 func (h header) Encode(b []byte) {
-	binary.BigEndian.PutUint16(b[0:2], uint16(h.plen))
-	binary.BigEndian.PutUint16(b[2:4], uint16(h.klen))
-	binary.BigEndian.PutUint16(b[4:6], uint16(h.vlen))
-	binary.BigEndian.PutUint32(b[6:10], uint32(h.prev))
+	binary.BigEndian.PutUint16(b[0:2], h.plen)
+	binary.BigEndian.PutUint16(b[2:4], h.klen)
+	binary.BigEndian.PutUint16(b[4:6], h.vlen)
+	binary.BigEndian.PutUint32(b[6:10], h.prev)
 }
 
 // Decode decodes the header.
 func (h *header) Decode(buf []byte) int {
-	h.plen = int(binary.BigEndian.Uint16(buf[0:2]))
-	h.klen = int(binary.BigEndian.Uint16(buf[2:4]))
-	h.vlen = int(binary.BigEndian.Uint16(buf[4:6]))
-	h.prev = int(binary.BigEndian.Uint32(buf[6:10]))
+	h.plen = binary.BigEndian.Uint16(buf[0:2])
+	h.klen = binary.BigEndian.Uint16(buf[2:4])
+	h.vlen = binary.BigEndian.Uint16(buf[4:6])
+	h.prev = binary.BigEndian.Uint32(buf[6:10])
 	return h.Size()
 }
 
@@ -95,12 +95,12 @@ type TableBuilder struct {
 	buf *bytes.Buffer
 
 	baseKey    []byte // Base key for the current block.
-	baseOffset int    // Offset for the current block.
+	baseOffset uint32 // Offset for the current block.
 
 	restarts []uint32 // Base offsets of every block.
 
 	// Tracks offset for the previous key-value pair. Offset is relative to block base offset.
-	prevOffset int
+	prevOffset uint32
 
 	keyBuf   *bytes.Buffer
 	keyCount int
@@ -153,12 +153,12 @@ func (b *TableBuilder) addHelper(key []byte, v y.ValueStruct) {
 	}
 
 	h := header{
-		plen: len(key) - len(diffKey),
-		klen: len(diffKey),
-		vlen: len(v.Value) + 1 + 2, // Include meta byte and casCounter.
-		prev: b.prevOffset,         // prevOffset is the location of the last key-value added.
+		plen: uint16(len(key) - len(diffKey)),
+		klen: uint16(len(diffKey)),
+		vlen: uint16(len(v.Value) + 1 + 2), // Include meta byte and casCounter.
+		prev: b.prevOffset,                 // prevOffset is the location of the last key-value added.
 	}
-	b.prevOffset = b.buf.Len() - b.baseOffset // Remember current offset for the next Add call.
+	b.prevOffset = uint32(b.buf.Len()) - b.baseOffset // Remember current offset for the next Add call.
 
 	// Layout: header, diffKey, value.
 	var hbuf [10]byte
@@ -188,8 +188,8 @@ func (b *TableBuilder) Add(key []byte, value y.ValueStruct) error {
 		b.restarts = append(b.restarts, uint32(b.buf.Len()))
 		b.counter = 0
 		b.baseKey = []byte{}
-		b.baseOffset = b.buf.Len()
-		b.prevOffset = math.MaxUint32 // First key-value pair of block has header.prev=MaxUint32.
+		b.baseOffset = uint32(b.buf.Len())
+		b.prevOffset = math.MaxUint32 // First key-value pair of block has header.prev=MaxInt.
 	}
 	b.addHelper(key, value)
 	return nil // Currently, there is no meaningful error.

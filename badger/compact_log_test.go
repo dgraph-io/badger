@@ -82,7 +82,6 @@ func TestCompactLogBasic(t *testing.T) {
 		}
 		kv.Set([]byte("testkey"), []byte("testval"))
 		kv.validate()
-		kv.debugPrintMore()
 		kv.Close()
 	}
 
@@ -94,41 +93,4 @@ func TestCompactLogBasic(t *testing.T) {
 	}
 	require.EqualValues(t, "testval", string(item.Value()))
 	kv.Close()
-}
-
-// TODO: Fix test. There seems to be some compaction being undone which is unexpected.
-func TestCompactLogUnclosedIter(t *testing.T) {
-	// Create unclosed iterators. This will leave a lot of files in the directory.
-	// Then re-open the database and check that everything is cleanup.
-	dir, err := ioutil.TempDir("/tmp", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	iterOpt := IteratorOptions{}
-	iterOpt.FetchValues = true
-	iterOpt.PrefetchSize = 10
-
-	opt := getTestOptions(dir)
-	var sum *summary
-	{
-		kv, _ := NewKV(opt)
-		n := 5000
-		for i := 0; i < n; i++ {
-			if (i % 1000) == 0 {
-				fmt.Printf("Putting i=%d\n", i)
-				kv.NewIterator(iterOpt) // NOTE: Hold reference for test.
-			}
-			k := []byte(fmt.Sprintf("%16x", rand.Int63()))
-			kv.Set(k, k)
-		}
-		// Don't close kv.
-		sum = kv.lc.getSummary()
-	}
-
-	// Make sure our test makes sense. There should be dirty files.
-	require.True(t, len(sum.fileIDs) < len(getIDMap(dir)))
-
-	kv, _ := NewKV(opt) // This should clean up.
-	summary2 := kv.lc.getSummary()
-	require.Len(t, sum.fileIDs, len(summary2.fileIDs))
 }

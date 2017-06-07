@@ -90,41 +90,26 @@ func (s *levelHandler) validate() error {
 	return nil
 }
 
-func (s *KV) debugPrintMore() { s.lc.debugPrintMore() }
+// func (s *KV) debugPrintMore() { s.lc.debugPrintMore() }
 
-// debugPrint shows the general state.
-func (s *levelsController) debugPrint() {
-	s.Lock()
-	defer s.Unlock()
-	for i := 0; i < s.kv.opt.MaxLevels; i++ {
-		var busy int
-		if s.beingCompacted[i] {
-			busy = 1
-		}
-		y.Printf("(i=%d, size=%d, busy=%d, numTables=%d) ",
-			i, s.levels[i].getTotalSize(), busy, len(s.levels[i].tables))
-	}
-	y.Printf("\n")
-}
+// // debugPrintMore shows key ranges of each level.
+// func (s *levelsController) debugPrintMore() {
+// 	s.Lock()
+// 	defer s.Unlock()
+// 	for i := 0; i < s.kv.opt.MaxLevels; i++ {
+// 		s.levels[i].debugPrintMore()
+// 	}
+// }
 
-// debugPrintMore shows key ranges of each level.
-func (s *levelsController) debugPrintMore() {
-	s.Lock()
-	defer s.Unlock()
-	for i := 0; i < s.kv.opt.MaxLevels; i++ {
-		s.levels[i].debugPrintMore()
-	}
-}
-
-func (s *levelHandler) debugPrintMore() {
-	s.RLock()
-	defer s.RUnlock()
-	y.Printf("Level %d:", s.level)
-	for _, t := range s.tables {
-		y.Printf(" [%s, %s]", t.Smallest(), t.Biggest())
-	}
-	y.Printf("\n")
-}
+// func (s *levelHandler) debugPrintMore() {
+// 	s.RLock()
+// 	defer s.RUnlock()
+// 	s.elog.Printf("Level %d:", s.level)
+// 	for _, t := range s.tables {
+// 		y.Printf(" [%s, %s]", t.Smallest(), t.Biggest())
+// 	}
+// 	y.Printf("\n")
+// }
 
 // reserveFileIDs reserve k fileIDs. Returns pair is a half-interval.
 // If we return [3, 6), it means use 3, 4, 5.
@@ -148,21 +133,6 @@ func getIDMap(dir string) map[uint64]struct{} {
 		idMap[fileID] = struct{}{}
 	}
 	return idMap
-}
-
-func keyRange(tables []*table.Table) ([]byte, []byte) {
-	y.AssertTrue(len(tables) > 0)
-	smallest := tables[0].Smallest()
-	biggest := tables[0].Biggest()
-	for i := 1; i < len(tables); i++ {
-		if bytes.Compare(tables[i].Smallest(), smallest) < 0 {
-			smallest = tables[i].Smallest()
-		}
-		if bytes.Compare(tables[i].Biggest(), biggest) > 0 {
-			biggest = tables[i].Biggest()
-		}
-	}
-	return smallest, biggest
 }
 
 // mod65535 mods by 65535 fast.

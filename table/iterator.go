@@ -29,7 +29,7 @@ import (
 
 type BlockIterator struct {
 	data    []byte
-	pos     int
+	pos     uint32
 	err     error
 	baseKey []byte
 
@@ -110,33 +110,33 @@ func (itr *BlockIterator) SeekToLast() {
 
 // parseKV would allocate a new byte slice for key and for value.
 func (itr *BlockIterator) parseKV(h header) {
-	if cap(itr.key) < h.plen+h.klen {
+	if cap(itr.key) < int(h.plen+h.klen) {
 		itr.key = make([]byte, 2*(h.plen+h.klen))
 	}
 	itr.key = itr.key[:h.plen+h.klen]
 	copy(itr.key, itr.baseKey[:h.plen])
-	copy(itr.key[h.plen:], itr.data[itr.pos:itr.pos+h.klen])
-	itr.pos += h.klen
+	copy(itr.key[h.plen:], itr.data[itr.pos:itr.pos+uint32(h.klen)])
+	itr.pos += uint32(h.klen)
 
-	if itr.pos+h.vlen > len(itr.data) {
+	if itr.pos+uint32(h.vlen) > uint32(len(itr.data)) {
 		itr.err = errors.Errorf("Value exceeded size of block: %d %d %d %d %v",
 			itr.pos, h.klen, h.vlen, len(itr.data), h)
 		return
 	}
-	itr.val = y.Safecopy(itr.val, itr.data[itr.pos:itr.pos+h.vlen])
-	itr.pos += h.vlen
+	itr.val = y.Safecopy(itr.val, itr.data[itr.pos:itr.pos+uint32(h.vlen)])
+	itr.pos += uint32(h.vlen)
 }
 
 func (itr *BlockIterator) Next() {
 	itr.init = true
 	itr.err = nil
-	if itr.pos >= len(itr.data) {
+	if itr.pos >= uint32(len(itr.data)) {
 		itr.err = io.EOF
 		return
 	}
 
 	var h header
-	itr.pos += h.Decode(itr.data[itr.pos:])
+	itr.pos += uint32(h.Decode(itr.data[itr.pos:]))
 	itr.last = h // Store the last header.
 
 	if h.klen == 0 && h.plen == 0 {
@@ -149,7 +149,7 @@ func (itr *BlockIterator) Next() {
 	if len(itr.baseKey) == 0 {
 		// This should be the first Next() for this block. Hence, prefix length should be zero.
 		y.AssertTrue(h.plen == 0)
-		itr.baseKey = itr.data[itr.pos : itr.pos+h.klen]
+		itr.baseKey = itr.data[itr.pos : itr.pos+uint32(h.klen)]
 	}
 	itr.parseKV(h)
 }
@@ -170,8 +170,8 @@ func (itr *BlockIterator) Prev() {
 	itr.pos = itr.last.prev
 
 	var h header
-	y.AssertTruef(itr.pos >= 0 && itr.pos < len(itr.data), "%d %d", itr.pos, len(itr.data))
-	itr.pos += h.Decode(itr.data[itr.pos:])
+	y.AssertTruef(itr.pos >= 0 && itr.pos < uint32(len(itr.data)), "%d %d", itr.pos, len(itr.data))
+	itr.pos += uint32(h.Decode(itr.data[itr.pos:]))
 	itr.parseKV(h)
 	itr.last = h
 }

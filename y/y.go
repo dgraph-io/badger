@@ -120,6 +120,10 @@ func (c *Closer) WaitForAll() {
 	}
 }
 
+func (lc *LevelCloser) AddRunning(delta int32) {
+	atomic.AddInt32(&lc.running, delta)
+}
+
 func (lc *LevelCloser) NumRunning() int {
 	return int(atomic.LoadInt32(&lc.running))
 }

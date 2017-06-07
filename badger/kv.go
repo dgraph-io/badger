@@ -75,9 +75,11 @@ type Options struct {
 	// Sync all writes to disk. Setting this to true would slow down data loading significantly.
 	SyncWrites bool
 
+	// Number of compaction workers to run concurrently.
+	NumCompactors int
+
 	// Flags for testing purposes.
 	DoNotCompact bool // Stops LSM tree from compactions.
-	Verbose      bool // Turns on verbose mode.
 }
 
 // DefaultOptions sets a list of safe recommended options. Feel free to modify these to suit your needs.
@@ -91,17 +93,17 @@ var DefaultOptions = Options{
 	MaxLevels:                7,
 	MaxTableSize:             64 << 20,
 	MemtableSlack:            10 << 20,
+	NumCompactors:            3,
 	NumLevelZeroTables:       5,
 	NumLevelZeroTablesStall:  10,
 	NumMemtables:             5,
 	SyncWrites:               false,
 	ValueCompressionMinRatio: 2.0,
 	ValueCompressionMinSize:  1024,
-	ValueGCThreshold:         0.5, // Set to zero to not run GC.
 	ValueGCRunInterval:       10 * time.Minute,
+	ValueGCThreshold:         0.5, // Set to zero to not run GC.
 	ValueLogFileSize:         1 << 30,
 	ValueThreshold:           20,
-	Verbose:                  false,
 }
 
 // KV provides the various functions required to interact with Badger.
@@ -149,15 +151,16 @@ func NewKV(opt *Options) (out *KV, err error) {
 		elog:      trace.NewEventLog("Badger", "KV"),
 	}
 	out.mt = skl.NewSkiplist(out.arenaPool)
-	y.VerboseMode = opt.Verbose
 
 	// newLevelsController potentially loads files in directory.
 	if out.lc, err = newLevelsController(out); err != nil {
 		return nil, err
 	}
-	out.lc.startCompact()
 
-	lc := out.closer.Register("memtable")
+	lc := out.closer.Register("compactors")
+	out.lc.startCompact(lc)
+
+	lc = out.closer.Register("memtable")
 	go out.flushMemtable(lc) // Need levels controller to be up.
 
 	if err = out.vlog.Open(out, opt); err != nil {
@@ -181,7 +184,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 	first := true
 	fn := func(e Entry, vp valuePointer) error { // Function for replaying.
 		if first {
-			y.Printf("First key=%s\n", e.Key)
+			out.elog.Printf("First key=%s\n", e.Key)
 		}
 		first = false
 
@@ -213,7 +216,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 			CASCounter: e.casCounter,
 		}
 		for err := out.ensureRoomForWrite(); err != nil; err = out.ensureRoomForWrite() {
-			y.Printf("Replay: Making room for writes")
+			out.elog.Printf("Replay: Making room for writes")
 			time.Sleep(10 * time.Millisecond)
 		}
 		out.mt.Put(nk, v)
@@ -237,7 +240,6 @@ func NewKV(opt *Options) (out *KV, err error) {
 // Close closes a KV. It's crucial to call it to ensure all the pending updates
 // make their way to disk.
 func (s *KV) Close() error {
-	y.Printf("Closing database\n")
 	s.elog.Printf("Closing database")
 	// Stop value GC first.
 	lc := s.closer.Get("value-gc")
@@ -258,7 +260,7 @@ func (s *KV) Close() error {
 	// trying to push stuff into the memtable. This will also resolve the value
 	// offset problem: as we push into memtable, we update value offsets there.
 	if s.mt.Size() > 0 {
-		y.Printf("Flushing memtable\n")
+		s.elog.Printf("Flushing memtable")
 		for {
 			pushedFlushTask := func() bool {
 				s.Lock()
@@ -268,6 +270,7 @@ func (s *KV) Close() error {
 				case s.flushChan <- flushTask{s.mt, s.vptr}:
 					s.imm = append(s.imm, s.mt) // Flusher will attempt to remove this from s.imm.
 					s.mt = nil                  // Will segfault if we try writing!
+					s.elog.Printf("pushed to flush chan\n")
 					return true
 				default:
 					// If we fail to push, we need to unlock and wait for a short while.
@@ -286,7 +289,11 @@ func (s *KV) Close() error {
 
 	lc = s.closer.Get("memtable")
 	lc.Wait()
-	y.Printf("Memtable flushed\n")
+	s.elog.Printf("Memtable flushed")
+
+	lc = s.closer.Get("compactors")
+	lc.SignalAndWait()
+	s.elog.Printf("Compaction finished")
 
 	if err := s.lc.close(); err != nil {
 		return errors.Wrap(err, "KV.Close")
@@ -472,10 +479,12 @@ func (s *KV) writeRequests(reqs []*request) error {
 	}
 
 	s.elog.Printf("Writing to memtable")
-	for i, b := range reqs {
+	var count int
+	for _, b := range reqs {
 		if len(b.Entries) == 0 {
 			continue
 		}
+		count += len(b.Entries)
 		for err := s.ensureRoomForWrite(); err != nil; err = s.ensureRoomForWrite() {
 			s.elog.Printf("Making room for writes")
 			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
@@ -491,10 +500,10 @@ func (s *KV) writeRequests(reqs []*request) error {
 			done(err)
 			return errors.Wrap(err, "writeRequests")
 		}
-		s.elog.Printf("Wrote %d entries from block %d", len(b.Entries), i)
 		s.updateOffset(b.Ptrs)
 	}
 	done(nil)
+	s.elog.Printf("%d entries written", count)
 	return nil
 }
 
@@ -629,14 +638,14 @@ func (s *KV) ensureRoomForWrite() error {
 	y.AssertTrue(s.mt != nil) // A nil mt indicates that KV is being closed.
 	select {
 	case s.flushChan <- flushTask{s.mt, s.vptr}:
-		y.Printf("Flushing value log to disk if async mode.")
+		s.elog.Printf("Flushing value log to disk if async mode.")
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
 		err = s.vlog.sync()
 		if err != nil {
 			return err
 		}
 
-		y.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
+		s.elog.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 			s.mt.Size(), len(s.flushChan))
 		// We manage to push this task. Let's modify imm.
 		s.imm = append(s.imm, s.mt)
@@ -679,7 +688,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 		}
 
 		if ft.vptr.Fid > 0 || ft.vptr.Offset > 0 {
-			y.Printf("Storing offset: %+v\n", ft.vptr)
+			s.elog.Printf("Storing offset: %+v\n", ft.vptr)
 			offset := make([]byte, 10)
 			s.Lock() // For vptr.
 			s.vptr.Encode(offset)
@@ -693,6 +702,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 		}
 		err = writeLevel0Table(ft.mt, fd)
 		if err != nil {
+			s.elog.Errorf("ERROR while writing to level 0: %v", err)
 			return err
 		}
 
@@ -700,6 +710,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 		defer tbl.DecrRef()
 
 		if err != nil {
+			s.elog.Printf("ERROR while opening table: %v", err)
 			return err
 		}
 		s.lc.addLevel0Table(tbl) // This will incrRef again.
