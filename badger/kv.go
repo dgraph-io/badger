@@ -38,7 +38,8 @@ var (
 // Options are params for creating DB object.
 type Options struct {
 	Dir      string // Directory to store the data in. Should exist and be writable.
-	ValueDir string // Directory to store the value log in. By Default same ad Dir. Should exist and be writable.
+	ValueDir string // Directory to store the value log in. Can be the same as Dir.
+	// Should exist and be writable.
 
 	// The following affect all levels of LSM tree.
 	MaxTableSize        int64 // Each table (or file) is at most this size.
