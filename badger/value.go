@@ -525,7 +525,7 @@ func (l *valueLog) openOrCreateFiles() error {
 }
 
 func (l *valueLog) Open(kv *KV, opt *Options) error {
-	l.dirPath = opt.Dir
+	l.dirPath = opt.ValueDir
 	if err := l.openOrCreateFiles(); err != nil {
 		return errors.Wrapf(err, "Unable to open value log")
 	}
