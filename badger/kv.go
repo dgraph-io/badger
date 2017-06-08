@@ -85,8 +85,6 @@ type Options struct {
 
 // DefaultOptions sets a list of safe recommended options. Feel free to modify these to suit your needs.
 var DefaultOptions = Options{
-	Dir:                      "/tmp",
-	ValueDir:                 "/tmp",
 	DoNotCompact:             false,
 	LevelOneSize:             256 << 20,
 	LevelSizeMultiplier:      10,
