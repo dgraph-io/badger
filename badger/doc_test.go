@@ -18,6 +18,7 @@ package badger_test
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/dgraph-io/badger/badger"
 )
@@ -26,7 +27,8 @@ var d string = "doc"
 
 func Example() {
 	opt := badger.DefaultOptions
-	opt.Dir = "/tmp"
+	opt.Dir = os.TempDir()
+	opt.ValueDir = opt.Dir
 	kv, _ := badger.NewKV(&opt)
 
 	key := []byte("hello")

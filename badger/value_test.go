@@ -23,14 +23,14 @@ import (
 	"os"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/dgraph-io/badger/y"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValueBasic(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
+	dir, err := ioutil.TempDir("", "badger")
 	y.Check(err)
+	defer os.RemoveAll(dir)
 
 	kv, _ := NewKV(getTestOptions(dir))
 	defer kv.Close()
@@ -82,8 +82,9 @@ func TestValueBasic(t *testing.T) {
 }
 
 func TestCompression(t *testing.T) {
-	dir, err := ioutil.TempDir("", "")
+	dir, err := ioutil.TempDir("", "badger")
 	y.Check(err)
+	defer os.RemoveAll(dir)
 
 	opt := getTestOptions(dir)
 	opt.ValueCompressionMinSize = 16
@@ -137,7 +138,7 @@ func TestCompression(t *testing.T) {
 }
 
 func TestValueGC(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
