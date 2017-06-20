@@ -27,6 +27,7 @@ var d string = "doc"
 func Example() {
 	opt := badger.DefaultOptions
 	opt.Dir = "/tmp"
+	opt.ValueDir = "/tmp"
 	kv, _ := badger.NewKV(&opt)
 
 	key := []byte("hello")
