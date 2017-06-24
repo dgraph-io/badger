@@ -71,7 +71,7 @@ func Example() {
 // 	itrOpt := IteratorOptions{
 // 		PrefetchSize: 1000,
 // 		FetchValues:  true,
-// 		Reversed:     false,
+// 		Reverse:      false,
 // 	}
 // 	itr := kv.NewIterator(itrOpt)
 // 	for itr.Rewind(); itr.Valid(); itr.Next() {
