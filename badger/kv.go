@@ -389,6 +389,27 @@ func (s *KV) Get(key []byte, item *KVItem) error {
 	return nil
 }
 
+// Exists looks if a key exists. Returns true if the
+// key exists otherwises return false. if err is not nil an error occurs during
+// the key lookup and the existence of the key is unknown
+func (s *KV) Exists(key []byte) (bool, error) {
+	vs, err := s.get(key)
+	if err != nil {
+		return false, errors.Wrapf(err, "KV::Get key: %q", key)
+	}
+
+	if vs.Value == nil && vs.Meta == 0 {
+		return false, nil
+	}
+
+	if (vs.Meta & BitDelete) != 0 {
+		// Tombstone encountered.
+		return false, nil
+	}
+
+	return true, nil
+}
+
 func (s *KV) updateOffset(ptrs []valuePointer) {
 	ptr := ptrs[len(ptrs)-1]
 

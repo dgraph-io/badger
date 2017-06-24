@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -256,6 +257,47 @@ func TestGet(t *testing.T) {
 	require.True(t, item.Counter() != 0)
 }
 
+func TestExists(t *testing.T) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, err := NewKV(getTestOptions(dir))
+	if err != nil {
+		t.Error(err)
+	}
+	defer kv.Close()
+
+	// populate with one entry
+	err = kv.Set([]byte("key1"), []byte("val1"))
+	require.NoError(t, err)
+
+	tt := []struct {
+		key    []byte
+		exists bool
+		name   string
+	}{
+		{
+			key:    []byte("key1"),
+			exists: true,
+			name:   " valid key",
+		},
+		{
+			key:    []byte("non-exits"),
+			exists: false,
+			name:   "non exist key",
+		},
+	}
+
+	for _, test := range tt {
+		t.Run(test.name, func(t *testing.T) {
+			exists, err := kv.Exists(test.key)
+			assert.NoError(t, err)
+			assert.Equal(t, test.exists, exists)
+		})
+	}
+
+}
+
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestGetMore(t *testing.T) {
@@ -361,6 +403,91 @@ func TestGetMore(t *testing.T) {
 			t.Error(err)
 		}
 		require.Nil(t, item.Value())
+	}
+	fmt.Println("Done and closing")
+}
+
+// Put a lot of data to move some data to disk.
+// WARNING: This test might take a while but it should pass!
+func TestExistsMore(t *testing.T) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, err := NewKV(getTestOptions(dir))
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+	defer kv.Close()
+
+	//	n := 500000
+	n := 10000
+	m := 100
+	for i := 0; i < n; i += m {
+		if (i % 1000) == 0 {
+			fmt.Printf("Putting i=%d\n", i)
+		}
+		var entries []*Entry
+		for j := i; j < i+m && j < n; j++ {
+			entries = append(entries, &Entry{
+				Key:   []byte(fmt.Sprintf("%09d", j)),
+				Value: []byte(fmt.Sprintf("%09d", j)),
+			})
+		}
+		kv.BatchSet(entries)
+		for _, e := range entries {
+			require.NoError(t, e.Error, "entry with error: %+v", e)
+		}
+	}
+	kv.validate()
+
+	var found bool
+	for i := 0; i < n; i++ {
+		if (i % 1000) == 0 {
+			fmt.Printf("Testing i=%d\n", i)
+		}
+		k := fmt.Sprintf("%09d", i)
+		found, err = kv.Exists([]byte(k))
+		if err != nil {
+			t.Error(err)
+		}
+		require.EqualValues(t, true, found)
+	}
+	found, err = kv.Exists([]byte("non-exists"))
+	if err != nil {
+		t.Error(err)
+	}
+	require.EqualValues(t, false, found)
+
+	// "Delete" key.
+	for i := 0; i < n; i += m {
+		if (i % 1000) == 0 {
+			fmt.Printf("Deleting i=%d\n", i)
+		}
+		var entries []*Entry
+		for j := i; j < i+m && j < n; j++ {
+			entries = append(entries, &Entry{
+				Key:  []byte(fmt.Sprintf("%09d", j)),
+				Meta: BitDelete,
+			})
+		}
+		kv.BatchSet(entries)
+		for _, e := range entries {
+			require.NoError(t, e.Error, "entry with error: %+v", e)
+		}
+	}
+	kv.validate()
+	for i := 0; i < n; i++ {
+		if (i % 10000) == 0 {
+			// Display some progress. Right now, it's not very fast with no caching.
+			fmt.Printf("Testing i=%d\n", i)
+		}
+		k := fmt.Sprintf("%09d", i)
+		found, err := kv.Exists([]byte(k))
+		if err != nil {
+			t.Error(err)
+		}
+		require.False(t, found, fmt.Sprintf("key=%s", k))
 	}
 	fmt.Println("Done and closing")
 }
@@ -487,6 +614,7 @@ func TestIterateDeleted(t *testing.T) {
 	opt := DefaultOptions
 	opt.SyncWrites = true
 	opt.Dir = dir
+	opt.ValueDir = dir
 	ps, err := NewKV(&opt)
 	require.NoError(t, err)
 	defer ps.Close()
@@ -537,4 +665,68 @@ func TestIterateDeleted(t *testing.T) {
 func TestDirNotExists(t *testing.T) {
 	_, err := NewKV(getTestOptions("not-exists"))
 	require.Error(t, err)
+}
+
+func BenchmarkExists(b *testing.B) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(b, err)
+	defer os.RemoveAll(dir)
+	kv, err := NewKV(getTestOptions(dir))
+	if err != nil {
+		b.Error(err)
+		b.Fail()
+	}
+	defer kv.Close()
+
+	n := 50000
+	m := 100
+	for i := 0; i < n; i += m {
+		if (i % 10000) == 0 {
+			fmt.Printf("Putting i=%d\n", i)
+		}
+		var entries []*Entry
+		for j := i; j < i+m && j < n; j++ {
+			entries = append(entries, &Entry{
+				Key:   []byte(fmt.Sprintf("%09d", j)),
+				Value: []byte(fmt.Sprintf("%09d", j)),
+			})
+		}
+		kv.BatchSet(entries)
+		for _, e := range entries {
+			require.NoError(b, e.Error, "entry with error: %+v", e)
+		}
+	}
+	kv.validate()
+
+	// rand.Seed(int64(time.Now().Nanosecond()))
+
+	b.Run("WithGet", func(b *testing.B) {
+		b.ResetTimer()
+		item := &KVItem{}
+		for i := 0; i < b.N; i++ {
+			k := fmt.Sprintf("%09d", i%n)
+			err := kv.Get([]byte(k), item)
+			if err != nil {
+				b.Error(err)
+			}
+			found := item.Value() == nil
+			_ = found
+		}
+	})
+
+	b.Run("WithExists", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// k := fmt.Sprintf("%09d", rand.Intn(n))
+			k := fmt.Sprintf("%09d", i%n)
+			// k := fmt.Sprintf("%09d", 0)
+			found, err := kv.Exists([]byte(k))
+			if err != nil {
+				b.Error(err)
+			}
+			_ = found
+		}
+	})
+
+	fmt.Println("Done and closing")
 }
