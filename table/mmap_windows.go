@@ -7,7 +7,8 @@ import (
 )
 
 func mmap(fd *os.File, size int64) ([]byte, error) {
-	handler, err := syscall.CreateFileMapping(syscall.Handle(fd.Fd()), nil, syscall.PAGE_READONLY, uint32(size>>32), uint32(size), nil)
+	handler, err := syscall.CreateFileMapping(syscall.Handle(fd.Fd()), nil,
+		syscall.PAGE_READONLY, uint32(size>>32), uint32(size), nil)
 	if err != nil {
 		return nil, err
 	}

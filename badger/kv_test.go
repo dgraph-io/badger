@@ -257,7 +257,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestExists(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	kv, err := NewKV(getTestOptions(dir))
@@ -409,7 +409,7 @@ func TestGetMore(t *testing.T) {
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestExistsMore(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	kv, err := NewKV(getTestOptions(dir))
@@ -667,7 +667,7 @@ func TestDirNotExists(t *testing.T) {
 }
 
 func BenchmarkExists(b *testing.B) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(b, err)
 	defer os.RemoveAll(dir)
 	kv, err := NewKV(getTestOptions(dir))
