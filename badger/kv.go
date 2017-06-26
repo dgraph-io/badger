@@ -46,10 +46,9 @@ type Options struct {
 	LevelSizeMultiplier int   // Equals SizeOf(Li+1)/SizeOf(Li).
 	MaxLevels           int   // Maximum number of levels of compaction.
 	ValueThreshold      int   // If value size >= this threshold, only store value offsets in tree.
+	MaxBatchSize        int   // Max size of batch in bytes
 	MapTablesTo         int   // How should LSM tree be accessed.
 
-	// The following affect only memtables in LSM tree.
-	MemtableSlack int64 // Arena has to be slightly bigger than MaxTableSize.
 	NumMemtables  int   // Maximum number of tables to keep in memory, before stalling.
 
 	// The following affect how we handle LSM tree L0.
@@ -90,8 +89,8 @@ var DefaultOptions = Options{
 	LevelSizeMultiplier:      10,
 	MapTablesTo:              table.MemoryMap,
 	MaxLevels:                7,
+	MaxBatchSize:             10 << 20,
 	MaxTableSize:             64 << 20,
-	MemtableSlack:            10 << 20,
 	NumCompactors:            3,
 	NumLevelZeroTables:       5,
 	NumLevelZeroTablesStall:  10,
@@ -145,7 +144,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 		flushChan: make(chan flushTask, opt.NumMemtables),
 		writeCh:   make(chan *request, 1000),
 		opt:       *opt, // Make a copy.
-		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MemtableSlack, opt.NumMemtables+5),
+		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MaxBatchSize, opt.NumMemtables+5),
 		closer:    y.NewCloser(),
 		elog:      trace.NewEventLog("Badger", "KV"),
 	}
@@ -565,15 +564,42 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 //      Check(e.Error)
 //   }
 func (s *KV) BatchSet(entries []*Entry) error {
-	b := requestPool.Get().(*request)
-	defer requestPool.Put(b)
+	var reqs []*request
+	var size int
+	var err error
+	var b *request
+	for _, entry := range entries {
+		if b == nil {
+			b = requestPool.Get().(*request)
+			b.Entries = b.Entries[:0]
+		}
+		size += s.estimateSize(entry)
+		b.Entries = append(b.Entries, entry)
+		if size >= s.opt.MaxBatchSizeB {
+			b.Wg = sync.WaitGroup{}
+			b.Wg.Add(1)
+			s.writeCh <- b
+			reqs = append(reqs, b)
+			size = 0
+			b = nil
+		}
+	}
 
-	b.Entries = entries
-	b.Wg = sync.WaitGroup{}
-	b.Wg.Add(1)
-	s.writeCh <- b
-	b.Wg.Wait()
-	return b.Err
+	if size > 0 {
+		b.Wg = sync.WaitGroup{}
+		b.Wg.Add(1)
+		s.writeCh <- b
+		reqs = append(reqs, b)
+	}
+
+	for _, req := range reqs {
+		req.Wg.Wait()
+		if req.Err != nil {
+			err = req.Err
+		}
+		requestPool.Put(req)
+	}
+	return err
 }
 
 // Set sets the provided value for a given key. If key is not present, it is created.
