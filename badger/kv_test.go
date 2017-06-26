@@ -667,6 +667,39 @@ func TestDirNotExists(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestDeleteWithoutSyncWrite(t *testing.T) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opt := new(Options)
+	*opt = DefaultOptions
+	opt.Dir = dir
+	opt.ValueDir = dir
+	kv, err := NewKV(opt)
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+
+	key := []byte("k1")
+	// Set a value with size > value threshold so that its written to value log.
+	require.NoError(t, kv.Set(key, []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789FOOBARZOGZOG")))
+	require.NoError(t, kv.Delete(key))
+	kv.Close()
+
+	// Reopen KV
+	kv, err = NewKV(opt)
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+	defer kv.Close()
+
+	item := KVItem{}
+	require.NoError(t, kv.Get(key, &item))
+	require.Equal(t, 0, len(item.Value()))
+}
+
 func BenchmarkExists(b *testing.B) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(b, err)
