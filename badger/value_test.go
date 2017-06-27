@@ -200,8 +200,12 @@ func BenchmarkReadWrite(b *testing.B) {
 		for _, rw := range rwRatio {
 			b.Run(fmt.Sprintf("%3.1f,%04d", rw, vsz), func(b *testing.B) {
 				var vl valueLog
-				vl.Open(nil, getTestOptions("vlog"))
-				defer os.Remove("vlog")
+				dir, err := ioutil.TempDir("", "vlog")
+				y.Check(err)
+				defer os.RemoveAll(dir)
+				err = vl.Open(nil, getTestOptions(dir))
+				y.Check(err)
+				defer vl.Close()
 				b.ResetTimer()
 
 				for i := 0; i < b.N; i++ {
