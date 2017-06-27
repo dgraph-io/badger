@@ -18,19 +18,20 @@ package y
 
 import (
 	"log"
+	"os"
 	"sync"
 	"sync/atomic"
-
-	"os"
-	"syscall"
 )
 
-var EmptySlice = []byte{}
+var (
+	EmptySlice   = []byte{}
+	syncFileFlag = 0x0
+)
 
 func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
 	flags := os.O_RDWR | os.O_CREATE
 	if sync {
-		flags |= syscall.O_DSYNC
+		flags |= syncFileFlag
 	}
 	return os.OpenFile(filename, flags, 0666)
 }

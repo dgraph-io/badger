@@ -23,9 +23,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/dgraph-io/badger/y"
+	"github.com/stretchr/testify/require"
 )
 
 func key(prefix string, i int) string {
@@ -49,7 +48,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
-	filename := fmt.Sprintf("/tmp/%d.sst", rand.Int63())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
 	if t != nil {
 		require.NoError(t, err)
@@ -612,7 +611,7 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 func BenchmarkRead(b *testing.B) {
 	n := 5 << 20
 	builder := NewTableBuilder()
-	filename := fmt.Sprintf("/tmp/%d.sst", rand.Int63())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
 	y.Check(err)
 	for i := 0; i < n; i++ {
@@ -642,7 +641,7 @@ func BenchmarkRead(b *testing.B) {
 func BenchmarkReadAndBuild(b *testing.B) {
 	n := 5 << 20
 	builder := NewTableBuilder()
-	filename := fmt.Sprintf("/tmp/%d.sst", rand.Int63())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
 	y.Check(err)
 	for i := 0; i < n; i++ {
@@ -680,7 +679,7 @@ func BenchmarkReadMerged(b *testing.B) {
 	tableSize := n / m
 	var tables []*Table
 	for i := 0; i < m; i++ {
-		filename := fmt.Sprintf("/tmp/%d.sst", rand.Int63())
+		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 		builder := NewTableBuilder()
 		f, err := y.OpenSyncedFile(filename, true)
 		for j := 0; j < tableSize; j++ {

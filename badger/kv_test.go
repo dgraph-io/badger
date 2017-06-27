@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	//	"path"
 	"sort"
 	"sync"
 	"testing"
@@ -44,7 +43,7 @@ func getTestOptions(dir string) *Options {
 }
 
 func TestWrite(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	kv, _ := NewKV(getTestOptions(dir))
@@ -64,7 +63,7 @@ func TestWrite(t *testing.T) {
 }
 
 func TestConcurrentWrite(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	kv, _ := NewKV(getTestOptions(dir))
@@ -117,7 +116,7 @@ func TestConcurrentWrite(t *testing.T) {
 }
 
 func TestCAS(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	kv, _ := NewKV(getTestOptions(dir))
@@ -209,7 +208,7 @@ func TestCAS(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	kv, err := NewKV(getTestOptions(dir))
@@ -258,7 +257,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestExists(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	kv, err := NewKV(getTestOptions(dir))
@@ -301,7 +300,7 @@ func TestExists(t *testing.T) {
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestGetMore(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	kv, err := NewKV(getTestOptions(dir))
@@ -410,7 +409,7 @@ func TestGetMore(t *testing.T) {
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestExistsMore(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	kv, err := NewKV(getTestOptions(dir))
@@ -493,7 +492,7 @@ func TestExistsMore(t *testing.T) {
 }
 
 func TestIterate2Basic(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	kv, _ := NewKV(getTestOptions(dir))
@@ -558,7 +557,7 @@ func TestIterate2Basic(t *testing.T) {
 }
 
 func TestLoad(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	fmt.Printf("Writing to dir %s\n", dir)
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -607,7 +606,7 @@ func TestLoad(t *testing.T) {
 }
 
 func TestIterateDeleted(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -701,7 +700,7 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 }
 
 func BenchmarkExists(b *testing.B) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(b, err)
 	defer os.RemoveAll(dir)
 	kv, err := NewKV(getTestOptions(dir))

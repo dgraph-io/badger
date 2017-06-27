@@ -32,12 +32,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/net/trace"
-
+	"github.com/bkaradzic/go-lz4"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
-
-	"github.com/bkaradzic/go-lz4"
+	"golang.org/x/net/trace"
 )
 
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
@@ -292,6 +290,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	}
 
 	rem := vlog.fpath(f.fid)
+	f.fd.Close() // close file previous to remove it
 	elog.Printf("Removing %s", rem)
 	return os.Remove(rem)
 }
@@ -462,7 +461,7 @@ type valueLog struct {
 }
 
 func (l *valueLog) fpath(fid uint16) string {
-	return fmt.Sprintf("%s/%06d.vlog", l.dirPath, fid)
+	return fmt.Sprintf("%s%s%06d.vlog", l.dirPath, string(os.PathSeparator), fid)
 }
 
 func (l *valueLog) openOrCreateFiles() error {

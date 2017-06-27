@@ -28,7 +28,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 
 	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/y"
@@ -81,6 +80,10 @@ func (t *Table) DecrRef() error {
 		// We can safely delete this file, because for all the current files, we always have
 		// at least one reference pointing to them.
 
+		// It's necessary to delete windows files
+		if t.mapTableTo == MemoryMap {
+			munmap(t.mmap)
+		}
 		if err := t.fd.Truncate(0); err != nil {
 			// This is very important to let the FS know that the file is deleted.
 			return err
@@ -113,7 +116,12 @@ func (b byKey) Less(i int, j int) bool { return bytes.Compare(b[i].key, b[j].key
 
 // OpenTable assumes file has only one table and opens it.
 func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
-	id, ok := ParseFileID(fd.Name())
+	fileInfo, err := fd.Stat()
+	if err != nil {
+		return nil, y.Wrap(err)
+	}
+
+	id, ok := ParseFileID(fileInfo.Name())
 	if !ok {
 		return nil, errors.Errorf("Invalid filename: %s", fd.Name())
 	}
@@ -123,15 +131,11 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 		id:         id,
 		mapTableTo: mapTableTo,
 	}
-	fileInfo, err := fd.Stat()
-	if err != nil {
-		return nil, y.Wrap(err)
-	}
+
 	t.tableSize = int(fileInfo.Size())
 
 	if mapTableTo == MemoryMap {
-		t.mmap, err = syscall.Mmap(int(fd.Fd()), 0, int(fileInfo.Size()),
-			syscall.PROT_READ, syscall.MAP_SHARED)
+		t.mmap, err = mmap(fd, fileInfo.Size())
 		if err != nil {
 			return t, y.Wrapf(err, "Unable to map file")
 		}
@@ -163,11 +167,11 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 }
 
 func (t *Table) Close() error {
+	if t.mapTableTo == MemoryMap {
+		munmap(t.mmap)
+	}
 	if err := t.fd.Close(); err != nil {
 		return err
-	}
-	if t.mapTableTo == MemoryMap {
-		return syscall.Munmap(t.mmap)
 	}
 	return nil
 }
