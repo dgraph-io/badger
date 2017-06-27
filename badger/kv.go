@@ -46,7 +46,6 @@ type Options struct {
 	LevelSizeMultiplier int   // Equals SizeOf(Li+1)/SizeOf(Li).
 	MaxLevels           int   // Maximum number of levels of compaction.
 	ValueThreshold      int   // If value size >= this threshold, only store value offsets in tree.
-	MaxBatchSize        int64 // Max size of batch in bytes
 	MapTablesTo         int   // How should LSM tree be accessed.
 
 	NumMemtables int // Maximum number of tables to keep in memory, before stalling.
@@ -80,6 +79,8 @@ type Options struct {
 
 	// Flags for testing purposes.
 	DoNotCompact bool // Stops LSM tree from compactions.
+
+	maxBatchSize int64 // max batch size in bytes
 }
 
 // DefaultOptions sets a list of safe recommended options. Feel free to modify these to suit your needs.
@@ -89,7 +90,6 @@ var DefaultOptions = Options{
 	LevelSizeMultiplier:      10,
 	MapTablesTo:              table.MemoryMap,
 	MaxLevels:                7,
-	MaxBatchSize:             10 << 20,
 	MaxTableSize:             64 << 20,
 	NumCompactors:            3,
 	NumLevelZeroTables:       5,
@@ -144,11 +144,12 @@ func NewKV(opt *Options) (out *KV, err error) {
 		flushChan: make(chan flushTask, opt.NumMemtables),
 		writeCh:   make(chan *request, 1000),
 		opt:       *opt, // Make a copy.
-		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MaxBatchSize, opt.NumMemtables+5),
+		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.maxBatchSize, opt.NumMemtables+5),
 		closer:    y.NewCloser(),
 		elog:      trace.NewEventLog("Badger", "KV"),
 	}
 	out.mt = skl.NewSkiplist(out.arenaPool)
+	out.opt.maxBatchSize = (15 * out.opt.MaxTableSize) / 100
 
 	// newLevelsController potentially loads files in directory.
 	if out.lc, err = newLevelsController(out); err != nil {
@@ -580,12 +581,12 @@ func (s *KV) BatchSet(entries []*Entry) error {
 		if b == nil {
 			b = requestPool.Get().(*request)
 			b.Entries = b.Entries[:0]
+			b.Wg = sync.WaitGroup{}
+			b.Wg.Add(1)
 		}
 		size += int64(s.estimateSize(entry))
 		b.Entries = append(b.Entries, entry)
-		if size >= s.opt.MaxBatchSize {
-			b.Wg = sync.WaitGroup{}
-			b.Wg.Add(1)
+		if size >= s.opt.maxBatchSize {
 			s.writeCh <- b
 			reqs = append(reqs, b)
 			size = 0
@@ -594,8 +595,6 @@ func (s *KV) BatchSet(entries []*Entry) error {
 	}
 
 	if size > 0 {
-		b.Wg = sync.WaitGroup{}
-		b.Wg.Add(1)
 		s.writeCh <- b
 		reqs = append(reqs, b)
 	}
