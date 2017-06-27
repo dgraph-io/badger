@@ -663,7 +663,7 @@ func EntriesDelete(s []*Entry, key []byte) []*Entry {
 	})
 }
 
-// CompareAndDelete deletes a key ensuring that the it has not been changed since last read.
+// CompareAndDelete deletes a key ensuring that it has not been changed since last read.
 // If existing key has different casCounter, this would not delete the key and return an error.
 func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
 	e := &Entry{
