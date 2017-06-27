@@ -43,7 +43,7 @@ func (item *KVItem) Key() []byte {
 
 // Value returns the value, generally fetched from the value log. This call can block while
 // the value is populated asynchronously via a disk read. Remember to parse or copy it if you
-// need to access it outside the iterator loop.
+// need to reuse it. DO NOT append to this slice, it would result in internal data overwrite.
 func (item *KVItem) Value() []byte {
 	item.wg.Wait()
 	return item.val
