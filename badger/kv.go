@@ -48,9 +48,7 @@ type Options struct {
 	ValueThreshold      int   // If value size >= this threshold, only store value offsets in tree.
 	MapTablesTo         int   // How should LSM tree be accessed.
 
-	// The following affect only memtables in LSM tree.
-	MemtableSlack int64 // Arena has to be slightly bigger than MaxTableSize.
-	NumMemtables  int   // Maximum number of tables to keep in memory, before stalling.
+	NumMemtables int // Maximum number of tables to keep in memory, before stalling.
 
 	// The following affect how we handle LSM tree L0.
 	// Maximum number of Level 0 tables before we start compacting.
@@ -81,6 +79,8 @@ type Options struct {
 
 	// Flags for testing purposes.
 	DoNotCompact bool // Stops LSM tree from compactions.
+
+	maxBatchSize int64 // max batch size in bytes
 }
 
 // DefaultOptions sets a list of safe recommended options. Feel free to modify these to suit your needs.
@@ -91,7 +91,6 @@ var DefaultOptions = Options{
 	MapTablesTo:              table.MemoryMap,
 	MaxLevels:                7,
 	MaxTableSize:             64 << 20,
-	MemtableSlack:            10 << 20,
 	NumCompactors:            3,
 	NumLevelZeroTables:       5,
 	NumLevelZeroTablesStall:  10,
@@ -140,12 +139,13 @@ func NewKV(opt *Options) (out *KV, err error) {
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
+	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	out = &KV{
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan: make(chan flushTask, opt.NumMemtables),
 		writeCh:   make(chan *request, 1000),
 		opt:       *opt, // Make a copy.
-		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.MemtableSlack, opt.NumMemtables+5),
+		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.maxBatchSize, opt.NumMemtables+5),
 		closer:    y.NewCloser(),
 		elog:      trace.NewEventLog("Badger", "KV"),
 	}
@@ -560,20 +560,53 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 	}
 }
 
+func (s *KV) estimateSize(entry *Entry) int {
+	if len(entry.Value) < s.opt.ValueThreshold {
+		// 3 is for cas + meta
+		return len(entry.Key) + len(entry.Value) + 3
+	}
+	return len(entry.Key) + 16 + 3
+}
+
 // BatchSet applies a list of badger.Entry. Errors are set on each Entry invidividually.
 //   for _, e := range entries {
 //      Check(e.Error)
 //   }
 func (s *KV) BatchSet(entries []*Entry) error {
-	b := requestPool.Get().(*request)
-	defer requestPool.Put(b)
+	var reqs []*request
+	var size int64
+	var err error
+	var b *request
+	for _, entry := range entries {
+		if b == nil {
+			b = requestPool.Get().(*request)
+			b.Entries = b.Entries[:0]
+			b.Wg = sync.WaitGroup{}
+			b.Wg.Add(1)
+		}
+		size += int64(s.estimateSize(entry))
+		b.Entries = append(b.Entries, entry)
+		if size >= s.opt.maxBatchSize {
+			s.writeCh <- b
+			reqs = append(reqs, b)
+			size = 0
+			b = nil
+		}
+	}
 
-	b.Entries = entries
-	b.Wg = sync.WaitGroup{}
-	b.Wg.Add(1)
-	s.writeCh <- b
-	b.Wg.Wait()
-	return b.Err
+	if size > 0 {
+		s.writeCh <- b
+		reqs = append(reqs, b)
+	}
+
+	for _, req := range reqs {
+		req.Wg.Wait()
+		if req.Err != nil {
+			err = req.Err
+		}
+		requestPool.Put(req)
+	}
+	return err
 }
 
 // Set sets the provided value for a given key. If key is not present, it is created.
