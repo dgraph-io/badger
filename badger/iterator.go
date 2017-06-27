@@ -126,7 +126,7 @@ func (it *Iterator) Valid() bool { return it.item != nil }
 // ValidForPrefix returns false when iteration is done
 // or when the current key is not prefixed by the specified prefix.
 func (it *Iterator) ValidForPrefix(prefix []byte) bool {
-	return it.Valid() && bytes.HasPrefix(it.Item().Key(), prefix)
+	return it.item != nil && bytes.HasPrefix(it.item.key, prefix)
 }
 
 // Close would close the iterator. It is important to call this when you're done with iteration.
