@@ -88,7 +88,7 @@ var DefaultOptions = Options{
 	DoNotCompact:             false,
 	LevelOneSize:             256 << 20,
 	LevelSizeMultiplier:      10,
-	MapTablesTo:              table.MemoryMap,
+	MapTablesTo:              table.LoadToRAM,
 	MaxLevels:                7,
 	MaxTableSize:             64 << 20,
 	NumCompactors:            3,
