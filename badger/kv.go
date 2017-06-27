@@ -46,10 +46,10 @@ type Options struct {
 	LevelSizeMultiplier int   // Equals SizeOf(Li+1)/SizeOf(Li).
 	MaxLevels           int   // Maximum number of levels of compaction.
 	ValueThreshold      int   // If value size >= this threshold, only store value offsets in tree.
-	MaxBatchSize        int   // Max size of batch in bytes
+	MaxBatchSize        int64 // Max size of batch in bytes
 	MapTablesTo         int   // How should LSM tree be accessed.
 
-	NumMemtables  int   // Maximum number of tables to keep in memory, before stalling.
+	NumMemtables int // Maximum number of tables to keep in memory, before stalling.
 
 	// The following affect how we handle LSM tree L0.
 	// Maximum number of Level 0 tables before we start compacting.
@@ -559,13 +559,21 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 	}
 }
 
+func (s *KV) estimateSize(entry *Entry) int {
+	if len(entry.Value) < s.opt.ValueThreshold {
+		// 3 is for cas + meta
+		return len(entry.Key) + len(entry.Value) + 3
+	}
+	return len(entry.Key) + 16 + 3
+}
+
 // BatchSet applies a list of badger.Entry. Errors are set on each Entry invidividually.
 //   for _, e := range entries {
 //      Check(e.Error)
 //   }
 func (s *KV) BatchSet(entries []*Entry) error {
 	var reqs []*request
-	var size int
+	var size int64
 	var err error
 	var b *request
 	for _, entry := range entries {
@@ -573,9 +581,9 @@ func (s *KV) BatchSet(entries []*Entry) error {
 			b = requestPool.Get().(*request)
 			b.Entries = b.Entries[:0]
 		}
-		size += s.estimateSize(entry)
+		size += int64(s.estimateSize(entry))
 		b.Entries = append(b.Entries, entry)
-		if size >= s.opt.MaxBatchSizeB {
+		if size >= s.opt.MaxBatchSize {
 			b.Wg = sync.WaitGroup{}
 			b.Wg.Add(1)
 			s.writeCh <- b
