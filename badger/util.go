@@ -21,6 +21,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"sync/atomic"
+	"time"
 
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
@@ -149,4 +150,8 @@ func mod65535(a uint32) uint32 {
 
 func newCASCounter() uint16 {
 	return uint16(1 + mod65535(rand.Uint32()))
+}
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
 }
