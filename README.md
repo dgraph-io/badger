@@ -90,3 +90,18 @@ Every time Badger opens the directory, it would first replay the updates after t
 This technique ensures data persistence in face of crashes.
 
 Furthermore, Badger can be run with `SyncWrites` option, which would open the WAL with O_DSYNC flag, hence syncing the writes to disk on every write.
+
+## Frequently Asked Questions
+
+- **My writes are really slow. Why?**
+
+You're probably doing writes serially, using `Set`. To get the best write performance, use `BatchSet`, and call it
+concurrently from multiple goroutines.
+
+- **I don't see any disk write. Why?**
+
+If you're using Badger with `SyncWrites=false`, then your writes might not be written to value log
+and won't get synced to disk immediately. Writes to LSM tree are done inmemory first, before they
+get compacted to disk. The compaction would only happen once `MaxTableSize` has been reached. So, if
+you're doing a few writes and then checking, you might not see anything on disk. Once you `Close`
+the store, you'll see these writes on disk.
