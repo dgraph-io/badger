@@ -24,6 +24,10 @@ Badger has these design goals in mind:
 
 - Try to be a database.
 
+## Video Tutorials
+
+- **[Getting Started - Opening your first database, and basic setting and getting](https://www.youtube.com/watch?v=XBKq39caRZ8)** by [1lann](https://github.com/1lann)
+
 ## Users
 
 Badger is currently being used by [Dgraph](https://github.com/dgraph-io/dgraph).
