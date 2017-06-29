@@ -398,7 +398,7 @@ func (e Entry) print(prefix string) {
 
 type header struct {
 	klen            uint32
-	vlen            uint32 // len of value or length of compressed kv if entry storessed compressed
+	vlen            uint32 // len of value or length of compressed kv if entry stored compressed
 	meta            byte
 	casCounter      uint16
 	casCounterCheck uint16
@@ -557,7 +557,7 @@ func (l *valueLog) Close() error {
 // Replay replays the value log. The kv provided is only valid for the lifetime of function call.
 func (l *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 	fid := ptr.Fid
-	offset := ptr.Offset
+	offset := ptr.Offset + ptr.Len
 	l.elog.Printf("Seeking at value pointer: %+v\n", ptr)
 
 	for _, f := range l.files {
@@ -658,7 +658,7 @@ func (l *valueLog) write(reqs []*request) error {
 			y.AssertTruef(e.Meta&BitCompressed == 0, "Cannot set BitCompressed outside valueLog")
 			var p valuePointer
 
-			if !l.opt.SyncWrites && (e.Meta != BitDelete) && len(e.Value) < l.opt.ValueThreshold {
+			if !l.opt.SyncWrites && len(e.Value) < l.opt.ValueThreshold {
 				// No need to write to value log.
 				b.Ptrs = append(b.Ptrs, p)
 				continue
