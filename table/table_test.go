@@ -70,7 +70,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	}
 	f.Write(b.Finish([]byte("somemetadata")))
 	f.Close()
-	f, err = y.OpenSyncedFile(filename, true)
+	f, _ = y.OpenSyncedFile(filename, true)
 	return f
 }
 
