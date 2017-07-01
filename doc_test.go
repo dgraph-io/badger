@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dgraph-io/badger/badger"
+	"github.com/dgraph-io/badger"
 )
 
 var d string = "doc"
