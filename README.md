@@ -11,16 +11,6 @@ Badger aims to provide an equal or better speed compared to industry leading KV 
 
 **You can read more about Badger in [our blog post](https://open.dgraph.io/post/badger/).**
 
-## Installation and Usage
-
-`go get -v github.com/dgraph-io/badger`
-
-If you want to run tests, also get testing dependencies by passing in `-t` flag.
-
-`go get -t -v github.com/dgraph-io/badger`
-
-From here, follow [docs](https://godoc.org/github.com/dgraph-io/badger) for usage.
-
 ## Design Goals
 
 Badger has these design goals in mind:
