@@ -65,7 +65,7 @@ type Options struct {
 	ValueGCRunInterval time.Duration
 
 	// Size of single value log file.
-	ValueLogFileSize int
+	ValueLogFileSize int64
 
 	// The following affect value compression in value log.
 	ValueCompressionMinSize  int     // Minimal size in bytes of KV pair to be compressed.

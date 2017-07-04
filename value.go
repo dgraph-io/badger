@@ -41,10 +41,10 @@ import (
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete       byte = 1 // Set if the key has been deleted.
-	BitValuePointer byte = 2 // Set if the value is NOT stored directly next to key.
-	BitCompressed   byte = 4 // Set if the key value pair is stored compressed in value log.
-	M               int  = 1 << 20
+	BitDelete       byte  = 1 // Set if the key has been deleted.
+	BitValuePointer byte  = 2 // Set if the value is NOT stored directly next to key.
+	BitCompressed   byte  = 4 // Set if the key value pair is stored compressed in value log.
+	M               int64 = 1 << 20
 )
 
 var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
@@ -781,7 +781,7 @@ func (vlog *valueLog) doRunGC() error {
 	count := 0
 
 	// Pick a random start point for the log.
-	skipFirstM := float64(rand.Intn(vlog.opt.ValueLogFileSize/M)) - window
+	skipFirstM := float64(rand.Intn(int(vlog.opt.ValueLogFileSize/M))) - window
 	var skipped float64
 
 	start := time.Now()
