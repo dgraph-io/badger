@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -389,23 +390,25 @@ func (s *KV) Get(key []byte, item *KVItem) error {
 	return nil
 }
 
-// GetOrTouch looks for key, if it finds it then it returns
+// Touch looks for key, if it finds it then it returns
 // else it puts the key in the LSM tree.
-func (s *KV) GetOrTouch(key []byte) error {
-	vs, err := s.get(key)
-	// Found key lets return
+func (s *KV) Touch(key []byte) error {
+	exists, err := s.Exists(key)
 	if err != nil {
 		return err
 	}
-
-	if vs.Value != nil {
+	// Found the key, return.
+	if exists {
 		return nil
 	}
+
 	e := &Entry{
 		Key:  key,
 		Meta: BitTouch,
 	}
-	return s.BatchSet([]*Entry{e})
+	// Dont need to worry about key being written to disk.
+	go s.BatchSet([]*Entry{e})
+	return nil
 }
 
 // Exists looks if a key exists. Returns true if the
@@ -414,7 +417,7 @@ func (s *KV) GetOrTouch(key []byte) error {
 func (s *KV) Exists(key []byte) (bool, error) {
 	vs, err := s.get(key)
 	if err != nil {
-		return false, errors.Wrapf(err, "KV::Get key: %q", key)
+		return false, fmt.Errorf("KV::Get key: %q, err: %+v", key, err)
 	}
 
 	if vs.Value == nil && vs.Meta == 0 {
@@ -473,14 +476,16 @@ func (s *KV) writeToLSM(b *request) error {
 		}
 
 		if entry.Meta == BitTouch {
-			vs, err := s.get(entry.Key)
+			// Someone else might have written a value, so lets check again if
+			// key exists.
+			exists, err := s.Exists(entry.Key)
 			if err != nil {
 				return err
 			}
-			if vs.Value != nil {
+			// Value already exists, don't write.
+			if exists {
 				continue
 			}
-
 		}
 
 		if s.shouldWriteValueToLSM(*entry) { // Will include deletion / tombstone case.

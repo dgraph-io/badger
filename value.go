@@ -659,7 +659,7 @@ func (l *valueLog) write(reqs []*request) error {
 			y.AssertTruef(e.Meta&BitCompressed == 0, "Cannot set BitCompressed outside valueLog")
 			var p valuePointer
 
-			if !l.opt.SyncWrites && len(e.Value) < l.opt.ValueThreshold {
+			if (!l.opt.SyncWrites && len(e.Value) < l.opt.ValueThreshold) || e.Meta == BitTouch {
 				// No need to write to value log.
 				b.Ptrs = append(b.Ptrs, p)
 				continue

@@ -699,14 +699,9 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 	require.Equal(t, 0, len(item.Value()))
 }
 
-func TestGetOrTouch(t *testing.T) {
+func TestTouch(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	opt := new(Options)
-	*opt = DefaultOptions
-	opt.Dir = dir
-	opt.ValueDir = dir
+	opt := getTestOptions(dir)
 	kv, err := NewKV(opt)
 	require.NoError(t, err)
 
@@ -714,11 +709,11 @@ func TestGetOrTouch(t *testing.T) {
 	err = kv.Set(key, []byte("val"))
 	require.NoError(t, err)
 
-	err = kv.GetOrTouch(key)
+	err = kv.Touch(key)
 	require.NoError(t, err)
 
 	key = []byte("k2")
-	err = kv.GetOrTouch(key)
+	err = kv.Touch(key)
 	require.NoError(t, err)
 
 	key = []byte("k3")
