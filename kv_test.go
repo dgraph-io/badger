@@ -699,6 +699,43 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 	require.Equal(t, 0, len(item.Value()))
 }
 
+func TestGetOrTouch(t *testing.T) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opt := new(Options)
+	*opt = DefaultOptions
+	opt.Dir = dir
+	opt.ValueDir = dir
+	kv, err := NewKV(opt)
+	require.NoError(t, err)
+
+	key := []byte("k1")
+	err = kv.Set(key, []byte("val"))
+	require.NoError(t, err)
+
+	err = kv.GetOrTouch(key)
+	require.NoError(t, err)
+
+	key = []byte("k2")
+	err = kv.GetOrTouch(key)
+	require.NoError(t, err)
+
+	key = []byte("k3")
+	err = kv.Set(key, []byte("val"))
+	require.NoError(t, err)
+
+	iterOpt := DefaultIteratorOptions
+	iterOpt.FetchValues = false
+
+	it := kv.NewIterator(iterOpt)
+	var count int
+	for it.Rewind(); it.Valid(); it.Next() {
+		count++
+	}
+	require.Equal(t, 3, count)
+}
+
 func BenchmarkExists(b *testing.B) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(b, err)

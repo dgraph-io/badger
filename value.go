@@ -44,6 +44,7 @@ const (
 	BitDelete       byte  = 1 // Set if the key has been deleted.
 	BitValuePointer byte  = 2 // Set if the value is NOT stored directly next to key.
 	BitCompressed   byte  = 4 // Set if the key value pair is stored compressed in value log.
+	BitTouch        byte  = 8 // Set if the key is set using GetOrTouch.
 	M               int64 = 1 << 20
 )
 

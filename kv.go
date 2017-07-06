@@ -353,7 +353,7 @@ func (s *KV) fillItem(item *KVItem) error {
 	return nil
 }
 
-// getValueHelper returns the value in memtable or disk for given key.
+// get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
 func (s *KV) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getMemTables() // Lock should be released.
@@ -387,6 +387,25 @@ func (s *KV) Get(key []byte, item *KVItem) error {
 		return errors.Wrapf(err, "KV::Get key: %q", key)
 	}
 	return nil
+}
+
+// GetOrTouch looks for key, if it finds it then it returns
+// else it puts the key in the LSM tree.
+func (s *KV) GetOrTouch(key []byte) error {
+	vs, err := s.get(key)
+	// Found key lets return
+	if err != nil {
+		return err
+	}
+
+	if vs.Value != nil {
+		return nil
+	}
+	e := &Entry{
+		Key:  key,
+		Meta: BitTouch,
+	}
+	return s.BatchSet([]*Entry{e})
 }
 
 // Exists looks if a key exists. Returns true if the
@@ -451,6 +470,17 @@ func (s *KV) writeToLSM(b *request) error {
 				entry.Error = CasMismatch
 				continue
 			}
+		}
+
+		if entry.Meta == BitTouch {
+			vs, err := s.get(entry.Key)
+			if err != nil {
+				return err
+			}
+			if vs.Value != nil {
+				continue
+			}
+
 		}
 
 		if s.shouldWriteValueToLSM(*entry) { // Will include deletion / tombstone case.

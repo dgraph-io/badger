@@ -21,7 +21,6 @@ import (
 	"container/heap"
 
 	"github.com/pkg/errors"
-	//	"fmt"
 )
 
 type ValueStruct struct {
