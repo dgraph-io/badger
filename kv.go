@@ -353,7 +353,7 @@ func (s *KV) fillItem(item *KVItem) error {
 	return nil
 }
 
-// getValueHelper returns the value in memtable or disk for given key.
+// get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
 func (s *KV) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getMemTables() // Lock should be released.
@@ -389,13 +389,34 @@ func (s *KV) Get(key []byte, item *KVItem) error {
 	return nil
 }
 
+// Touch looks for key, if it finds it then it returns
+// else it puts the key in the LSM tree.
+func (s *KV) Touch(key []byte) error {
+	exists, err := s.Exists(key)
+	if err != nil {
+		return err
+	}
+	// Found the key, return.
+	if exists {
+		return nil
+	}
+
+	e := &Entry{
+		Key:  key,
+		Meta: BitTouch,
+	}
+	// Don't wait for the key being written to disk.
+	go s.BatchSet([]*Entry{e})
+	return nil
+}
+
 // Exists looks if a key exists. Returns true if the
 // key exists otherwises return false. if err is not nil an error occurs during
 // the key lookup and the existence of the key is unknown
 func (s *KV) Exists(key []byte) (bool, error) {
 	vs, err := s.get(key)
 	if err != nil {
-		return false, errors.Wrapf(err, "KV::Get key: %q", key)
+		return false, err
 	}
 
 	if vs.Value == nil && vs.Meta == 0 {
@@ -449,6 +470,18 @@ func (s *KV) writeToLSM(b *request) error {
 			// No need to decode existing value. Just need old CAS counter.
 			if oldValue.CASCounter != entry.CASCounterCheck {
 				entry.Error = CasMismatch
+				continue
+			}
+		}
+
+		if entry.Meta == BitTouch {
+			// Someone else might have written a value, so lets check again if key exists.
+			exists, err := s.Exists(entry.Key)
+			if err != nil {
+				return err
+			}
+			// Value already exists, don't write.
+			if exists {
 				continue
 			}
 		}

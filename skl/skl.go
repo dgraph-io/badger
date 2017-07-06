@@ -314,7 +314,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 			// Successfully increased skiplist.height.
 			break
 		}
-		listHeight = s.height
+		listHeight = s.Height()
 	}
 
 	// We always insert from the base level and up. After you add a node in base level, we cannot
