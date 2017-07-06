@@ -405,9 +405,7 @@ func (s *KV) Touch(key []byte) error {
 		Key:  key,
 		Meta: BitTouch,
 	}
-	// Don't wait for the key being written to disk.
-	go s.BatchSet([]*Entry{e})
-	return nil
+	return s.BatchSet([]*Entry{e})
 }
 
 // Exists looks if a key exists. Returns true if the
