@@ -21,8 +21,13 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"sort"
 	"testing"
 
+	"golang.org/x/net/trace"
+
+	"github.com/dgraph-io/badger/table"
+	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -93,4 +98,97 @@ func TestCompactLogBasic(t *testing.T) {
 	}
 	require.EqualValues(t, "testval", string(item.Value()))
 	kv.Close()
+}
+
+func key(prefix string, i int) string {
+	return prefix + fmt.Sprintf("%04d", i)
+}
+
+func buildTestTable(t *testing.T, prefix string, n int) *os.File {
+	y.AssertTrue(n <= 10000)
+	keyValues := make([][]string, n)
+	for i := 0; i < n; i++ {
+		k := key(prefix, i)
+		v := fmt.Sprintf("%d", i)
+		keyValues[i] = []string{k, v}
+	}
+	return buildTable(t, keyValues)
+}
+
+// TODO - Move these to somewhere where table package can also use it.
+// keyValues is n by 2 where n is number of pairs.
+func buildTable(t *testing.T, keyValues [][]string) *os.File {
+	b := table.NewTableBuilder()
+	defer b.Close()
+	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
+
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
+	f, err := y.OpenSyncedFile(filename, true)
+	if t != nil {
+		require.NoError(t, err)
+	} else {
+		y.Check(err)
+	}
+
+	sort.Slice(keyValues, func(i, j int) bool {
+		return keyValues[i][0] < keyValues[j][0]
+	})
+	for i, kv := range keyValues {
+		y.AssertTrue(len(kv) == 2)
+		err := b.Add([]byte(kv[0]), y.ValueStruct{[]byte(kv[1]), 'A', uint16(i)})
+		if t != nil {
+			require.NoError(t, err)
+		} else {
+			y.Check(err)
+		}
+	}
+	f.Write(b.Finish([]byte("somemetadata")))
+	f.Close()
+	f, _ = y.OpenSyncedFile(filename, true)
+	return f
+}
+
+func TestOverlappingKeyRangeError(t *testing.T) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	opt := DefaultOptions
+	opt.Dir = dir
+	opt.ValueDir = dir
+	kv, err := NewKV(&opt)
+	require.NoError(t, err)
+
+	lh0 := newLevelHandler(kv, 0)
+	lh1 := newLevelHandler(kv, 1)
+	f := buildTestTable(t, "k", 2)
+	t1, err := table.OpenTable(f, table.MemoryMap)
+	require.NoError(t, err)
+	defer t1.DecrRef()
+	done := lh0.tryAddLevel0Table(t1)
+	require.Equal(t, true, done)
+
+	cd := compactDef{
+		thisLevel: lh0,
+		nextLevel: lh1,
+		elog:      trace.New("Badger", "Compact"),
+	}
+
+	lc, err := newLevelsController(kv)
+	require.NoError(t, err)
+	done = lc.fillTablesL0(&cd)
+	require.Equal(t, true, done)
+	lc.runCompactDef(0, cd)
+
+	f = buildTestTable(t, "l", 2)
+	t2, err := table.OpenTable(f, table.MemoryMap)
+	done = lh0.tryAddLevel0Table(t2)
+	require.Equal(t, true, done)
+
+	cd = compactDef{
+		thisLevel: lh0,
+		nextLevel: lh1,
+		elog:      trace.New("Badger", "Compact"),
+	}
+	done = lc.fillTablesL0(&cd)
+	require.Equal(t, true, done)
+	lc.runCompactDef(0, cd)
 }
