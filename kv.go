@@ -18,6 +18,7 @@ package badger
 
 import (
 	"log"
+	"math"
 	"os"
 	"sync"
 	"time"
@@ -67,8 +68,9 @@ type Options struct {
 	// Size of single value log file.
 	ValueLogFileSize int64
 
-	// The following affect value compression in value log.
-	ValueCompressionMinSize  int     // Minimal size in bytes of KV pair to be compressed.
+	// The following affect value compression in value log. Note that compression
+	// can significantly slow down the loading and lookup time.
+	ValueCompressionMinSize  int32   // Minimal size in bytes of KV pair to be compressed.
 	ValueCompressionMinRatio float64 // Minimal compression ratio of KV pair to be compressed.
 
 	// Sync all writes to disk. Setting this to true would slow down data loading significantly.
@@ -83,12 +85,15 @@ type Options struct {
 	maxBatchSize int64 // max batch size in bytes
 }
 
-// DefaultOptions sets a list of safe recommended options. Feel free to modify these to suit your needs.
+// DefaultOptions sets a list of recommended options for good performance.
+// Feel free to modify these to suit your needs.
 var DefaultOptions = Options{
-	DoNotCompact:             false,
-	LevelOneSize:             256 << 20,
-	LevelSizeMultiplier:      10,
-	MapTablesTo:              table.LoadToRAM,
+	DoNotCompact:        false,
+	LevelOneSize:        256 << 20,
+	LevelSizeMultiplier: 10,
+	MapTablesTo:         table.LoadToRAM,
+	// table.MemoryMap to mmap() the tables.
+	// table.Nothing to not preload the tables.
 	MaxLevels:                7,
 	MaxTableSize:             64 << 20,
 	NumCompactors:            3,
@@ -97,7 +102,7 @@ var DefaultOptions = Options{
 	NumMemtables:             5,
 	SyncWrites:               false,
 	ValueCompressionMinRatio: 2.0,
-	ValueCompressionMinSize:  1024,
+	ValueCompressionMinSize:  math.MaxInt32, // Turn off by default.
 	ValueGCRunInterval:       10 * time.Minute,
 	ValueGCThreshold:         0.5, // Set to zero to not run GC.
 	ValueLogFileSize:         1 << 30,

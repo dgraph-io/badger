@@ -352,7 +352,7 @@ func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) (int, error) {
 	var headerEnc [13]byte
 	var h header
 
-	if enc.opt.ValueCompressionMinSize < len(e.Key)+len(e.Value) {
+	if int32(len(e.Key)+len(e.Value)) > enc.opt.ValueCompressionMinSize {
 		var err error
 
 		enc.decompressed.Reset()
