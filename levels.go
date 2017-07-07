@@ -331,15 +331,13 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	cd.thisRange = infRange
 
 	kr := getKeyRange(cd.top)
-	if len(cd.nextLevel.tables) == 0 {
-		cd.bot = []*table.Table{}
+	left, right := cd.nextLevel.overlappingTables(kr)
+	cd.bot = make([]*table.Table, right-left)
+	copy(cd.bot, cd.nextLevel.tables[left:right])
+
+	if len(cd.bot) == 0 {
 		cd.nextRange = kr
 	} else {
-		left, right := cd.nextLevel.overlappingTables(kr)
-
-		cd.bot = make([]*table.Table, right-left)
-		copy(cd.bot, cd.nextLevel.tables[left:right])
-
 		cd.nextRange = getKeyRange(cd.bot)
 	}
 
