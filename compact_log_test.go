@@ -188,7 +188,6 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 		nextLevel: lh1,
 		elog:      trace.New("Badger", "Compact"),
 	}
-	done = lc.fillTablesL0(&cd)
-	require.Equal(t, true, done)
+	lc.fillTablesL0(&cd)
 	lc.runCompactDef(0, cd)
 }
