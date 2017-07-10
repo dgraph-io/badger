@@ -130,6 +130,10 @@ type KV struct {
 var ErrInvalidDir error = errors.New("Invalid Dir, directory does not exist")
 var ErrValueLogSize error = errors.New("Invalid ValueLogFileSize, must be between 1MB and 1GB")
 
+const (
+	kvWriteChCapacity = 1000
+)
+
 // NewKV returns a new KV object.
 func NewKV(opt *Options) (out *KV, err error) {
 	for _, path := range []string{opt.Dir, opt.ValueDir} {
@@ -148,7 +152,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 	out = &KV{
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan: make(chan flushTask, opt.NumMemtables),
-		writeCh:   make(chan *request, 1000),
+		writeCh:   make(chan *request, kvWriteChCapacity),
 		opt:       *opt, // Make a copy.
 		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.maxBatchSize, opt.NumMemtables+5),
 		closer:    y.NewCloser(),
@@ -231,7 +235,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 	}
 	lc.SignalAndWait() // Wait for replay to be applied first.
 
-	out.writeCh = make(chan *request, 1000)
+	out.writeCh = make(chan *request, kvWriteChCapacity)
 	lc = out.closer.Register("writes")
 	go out.doWrites(lc)
 
@@ -564,36 +568,50 @@ func (s *KV) writeRequests(reqs []*request) error {
 	return nil
 }
 
+func writeRequestsOrLogError(s *KV, reqs []*request) {
+	if err := s.writeRequests(reqs); err != nil {
+		log.Printf("ERROR in Badger::writeRequests: %v", err)
+	}
+}
+
 func (s *KV) doWrites(lc *y.LevelCloser) {
 	defer lc.Done()
 
 	reqs := make([]*request, 0, 10)
 	for {
+		var r *request
 		select {
-		case r := <-s.writeCh:
-			reqs = append(reqs, r)
-
+		case r = <-s.writeCh:
 		case <-lc.HasBeenClosed():
-			close(s.writeCh)
-
-			for r := range s.writeCh { // Flush the channel.
-				reqs = append(reqs, r)
-			}
-			if err := s.writeRequests(reqs); err != nil {
-				log.Printf("ERROR in Badger::writeRequests: %v", err)
-			}
-			return
-
-		default:
-			if len(reqs) == 0 {
-				time.Sleep(time.Millisecond)
-				break
-			}
-			if err := s.writeRequests(reqs); err != nil {
-				log.Printf("ERROR in Badger::writeRequests: %v", err)
-			}
-			reqs = reqs[:0]
+			goto closedCase
 		}
+
+		for {
+			reqs = append(reqs, r)
+			if len(reqs) == kvWriteChCapacity {
+				goto defaultCase
+			}
+			select {
+			case r = <-s.writeCh:
+			case <-lc.HasBeenClosed():
+				goto closedCase
+			default:
+				goto defaultCase
+			}
+		}
+
+	closedCase:
+		close(s.writeCh)
+
+		for r := range s.writeCh { // Flush the channel.
+			reqs = append(reqs, r)
+		}
+		writeRequestsOrLogError(s, reqs)
+		return
+
+	defaultCase:
+		writeRequestsOrLogError(s, reqs)
+		reqs = reqs[:0]
 	}
 }
 
