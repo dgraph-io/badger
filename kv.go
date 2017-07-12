@@ -690,19 +690,17 @@ func (s *KV) BatchSetAsync(entries []*Entry, f func()) {
 		reqs = append(reqs, b)
 	}
 
-	markDone := func(reqs []*request) {
+	go func() {
 		for _, req := range reqs {
 			req.Wg.Wait()
 			if req.Err != nil {
 				s.elog.Printf("Error while doing async write: %+v.", req.Err)
-
 			}
 			requestPool.Put(req)
 		}
 		// All writes complete, lets call the callback function now.
 		f()
-	}
-	go markDone(reqs)
+	}()
 }
 
 // Set sets the provided value for a given key. If key is not present, it is created.
