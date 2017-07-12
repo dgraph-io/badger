@@ -664,6 +664,47 @@ func (s *KV) BatchSet(entries []*Entry) error {
 	return err
 }
 
+func (s *KV) BatchSetAsync(entries []*Entry, f func()) {
+	var reqs []*request
+	var size int64
+	var b *request
+	for _, entry := range entries {
+		if b == nil {
+			b = requestPool.Get().(*request)
+			b.Entries = b.Entries[:0]
+			b.Wg = sync.WaitGroup{}
+			b.Wg.Add(1)
+		}
+		size += int64(s.estimateSize(entry))
+		b.Entries = append(b.Entries, entry)
+		if size >= s.opt.maxBatchSize {
+			s.writeCh <- b
+			reqs = append(reqs, b)
+			size = 0
+			b = nil
+		}
+	}
+
+	if size > 0 {
+		s.writeCh <- b
+		reqs = append(reqs, b)
+	}
+
+	markDone := func(reqs []*request) {
+		for _, req := range reqs {
+			req.Wg.Wait()
+			if req.Err != nil {
+				s.elog.Printf("Error while doing async write: %+v.", req.Err)
+
+			}
+			requestPool.Put(req)
+		}
+		// All writes complete, lets call the callback function now.
+		f()
+	}
+	go markDone(reqs)
+}
+
 // Set sets the provided value for a given key. If key is not present, it is created.
 // If it is present, the existing value is overwritten with the one provided.
 func (s *KV) Set(key, val []byte) error {
