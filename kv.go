@@ -651,7 +651,10 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 	return reqs
 }
 
-// BatchSet applies a list of badger.Entry. Errors if any are returned to the caller.
+// BatchSet applies a list of badger.Entry. Errors are set on each Entry invidividually.
+//   for _, e := range entries {
+//      Check(e.Error)
+//   }
 func (s *KV) BatchSet(entries []*Entry) error {
 	reqs := s.sendToWriteCh(entries)
 
@@ -680,6 +683,13 @@ func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
 				err = req.Err
 			}
 			requestPool.Put(req)
+		}
+
+		for _, e := range entries {
+			// e.Error could be non-nil if the user supplies a CasCounter.
+			if e.Error != nil {
+				err = e.Error
+			}
 		}
 		// All writes complete, lets call the callback function now.
 		f(err)
