@@ -651,7 +651,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 	return reqs
 }
 
-// BatchSet applies a list of badger.Entry. Errors are set on each Entry invidividually.
+// BatchSet applies a list of badger.Entry. Errors are set on each Entry individually.
 //   for _, e := range entries {
 //      Check(e.Error)
 //   }
@@ -781,6 +781,9 @@ func (s *KV) Delete(key []byte) error {
 	return s.BatchSet([]*Entry{e})
 }
 
+// DeleteAsync deletes the key in an async manner. It calls the callback function after deletion
+// is complete. Any errors encountered during the execution are passed as an argument to the
+// callback function.
 func (s *KV) DeleteAsync(key []byte, f func(error)) {
 	e := &Entry{
 		Key:  key,
