@@ -706,8 +706,7 @@ func (s *KV) SetAsync(key, val []byte, f func(error)) {
 		Key:   key,
 		Value: val,
 	}
-
-	s.BatchSetAsync(e, f)
+	s.BatchSetAsync([]*Entry{e}, f)
 }
 
 // EntriesSet adds a Set to the list of entries.
@@ -744,10 +743,20 @@ func (s *KV) CompareAndSetAsync(key []byte, val []byte, casCounter uint16, f fun
 		Value:           val,
 		CASCounterCheck: casCounter,
 	}
-	if err := s.BatchSet([]*Entry{e},f) err != nil {
-		return err
-	}
-	return e.Error
+
+	b := requestPool.Get().(*request)
+	b.Wg = sync.WaitGroup{}
+	b.Wg.Add(1)
+	s.writeCh <- b
+
+	go func() {
+		b.Wg.Wait()
+		if b.Err != nil {
+			f(b.Err)
+			return
+		}
+		f(e.Error)
+	}()
 }
 
 // Delete deletes a key.
@@ -760,6 +769,14 @@ func (s *KV) Delete(key []byte) error {
 	}
 
 	return s.BatchSet([]*Entry{e})
+}
+
+func (s *KV) DeleteAsync(key []byte, f func(error)) {
+	e := &Entry{
+		Key:  key,
+		Meta: BitDelete,
+	}
+	s.BatchSetAsync([]*Entry{e}, f)
 }
 
 // EntriesDelete adds a Del to the list of entries.
