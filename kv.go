@@ -751,7 +751,7 @@ func (s *KV) compareAsync(e *Entry, f func(error)) {
 }
 
 // CompareAndSetAsync is the asynchronous version of CompareAndSet. It accepts a callback function
-// which is called when the CompareAndSet completes.Any error encountered during execution is
+// which is called when the CompareAndSet completes. Any error encountered during execution is
 // passed as an argument to the callback function.
 func (s *KV) CompareAndSetAsync(key []byte, val []byte, casCounter uint16, f func(error)) {
 	e := &Entry{
