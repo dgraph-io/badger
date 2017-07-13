@@ -19,7 +19,7 @@ package badger_test
 import (
 	"fmt"
 	"io/ioutil"
-	"time"
+	"sync"
 
 	"github.com/dgraph-io/badger"
 )
@@ -90,23 +90,34 @@ func ExampleKV_BatchSetAsync() {
 	opt.SyncWrites = true
 	opt.ValueDir = dir
 	kv, _ := badger.NewKV(&opt)
+	wg := new(sync.WaitGroup)
+	wb := make([]*badger.Entry, 0, 100)
 
+	wg.Add(1)
 	// Async writes would be useful if you want to write some key-value pairs without waiting
 	// for them to be complete and perform some cleanup when they are written.
 
 	// In Dgraph we keep on flushing posting lists periodically to badger. We do it an async
 	// manner and provide a callback to it which can do the cleanup when the writes are done.
 	f := func(err error) {
+		wg.Done()
+
+		// Check for error in entries which could be non-nil if the user supplies a CasCounter.
+		for _, e := range wb {
+			if e.Error != nil {
+				err = e.Error
+			}
+		}
 		if err != nil {
 			fmt.Printf("Got error: %+v\n", err)
 			// At this point you can retry writing keys or send error over a channel to handle
 			// in some other goroutine.
 		}
+
 		// No error. You can do cleanup now. Like deleting keys from cache.
 		fmt.Println("All async sets complete. Got no error.")
 	}
 
-	wb := make([]*badger.Entry, 0, 100)
 	for i := 0; i < 100; i++ {
 		k := []byte(fmt.Sprintf("%09d", i))
 		wb = append(wb, &badger.Entry{
@@ -116,9 +127,8 @@ func ExampleKV_BatchSetAsync() {
 	}
 	kv.BatchSetAsync(wb, f)
 	fmt.Println("Finished writing keys to badger.")
-	time.Sleep(time.Second)
+	wg.Wait()
 
 	// Output: Finished writing keys to badger.
 	// All async sets complete. Got no error.
-
 }

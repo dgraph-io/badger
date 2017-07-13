@@ -669,9 +669,9 @@ func (s *KV) BatchSet(entries []*Entry) error {
 	return err
 }
 
-// BatchSetAsync applies a list of badger.Entry in an async manner. It accepts a callback function
-// which is called when all the sets are complete. Any error during execution is made available
-// as an argument to the callback function.
+// BatchSetAsync is the asynchronous version of BatchSet. It accepts a callback function
+// which is called when all the sets are complete. Any error during execution is passed as an
+// argument to the callback function.
 func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
 	reqs := s.sendToWriteCh(entries)
 
@@ -683,13 +683,6 @@ func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
 				err = req.Err
 			}
 			requestPool.Put(req)
-		}
-
-		for _, e := range entries {
-			// e.Error could be non-nil if the user supplies a CasCounter.
-			if e.Error != nil {
-				err = e.Error
-			}
 		}
 		// All writes complete, lets call the callback function now.
 		f(err)
@@ -706,11 +699,9 @@ func (s *KV) Set(key, val []byte) error {
 	return s.BatchSet([]*Entry{e})
 }
 
-// SetAsync sets the provided value for a given key in an async manner. It accepts a callback
-// function which is called when the set is complete. Any errors encountered during execution
-// are passed as an argument to the callback function.
-// If key is not present, it is created. If it is present, the existing value is overwritten
-// with the one provided.
+// SetAsync is the asynchronous version of Set. It accepts a callback function which is called
+// when the set is complete. Any error encountered during execution is passed as an argument
+// to the callback function.
 func (s *KV) SetAsync(key, val []byte, f func(error)) {
 	e := &Entry{
 		Key:   key,
@@ -743,17 +734,7 @@ func (s *KV) CompareAndSet(key []byte, val []byte, casCounter uint16) error {
 	return e.Error
 }
 
-// CompareAndSetAsync sets the given value, ensuring that the no other Set operation has happened,
-// since last read in an async manner. It accepts a callback function which is called when the
-// CompareAndSet completes. If the key has a different casCounter, this would not update the key
-// and the error would be passed to the callback function.
-func (s *KV) CompareAndSetAsync(key []byte, val []byte, casCounter uint16, f func(error)) {
-	e := &Entry{
-		Key:             key,
-		Value:           val,
-		CASCounterCheck: casCounter,
-	}
-
+func (s *KV) compareAsync(e *Entry, f func(error)) {
 	b := requestPool.Get().(*request)
 	b.Wg = sync.WaitGroup{}
 	b.Wg.Add(1)
@@ -769,6 +750,18 @@ func (s *KV) CompareAndSetAsync(key []byte, val []byte, casCounter uint16, f fun
 	}()
 }
 
+// CompareAndSetAsync is the asynchronous version of CompareAndSet. It accepts a callback function
+// which is called when the CompareAndSet completes.Any error encountered during execution is
+// passed as an argument to the callback function.
+func (s *KV) CompareAndSetAsync(key []byte, val []byte, casCounter uint16, f func(error)) {
+	e := &Entry{
+		Key:             key,
+		Value:           val,
+		CASCounterCheck: casCounter,
+	}
+	s.compareAsync(e, f)
+}
+
 // Delete deletes a key.
 // Exposing this so that user does not have to specify the Entry directly.
 // For example, BitDelete seems internal to badger.
@@ -781,8 +774,8 @@ func (s *KV) Delete(key []byte) error {
 	return s.BatchSet([]*Entry{e})
 }
 
-// DeleteAsync deletes the key in an async manner. It calls the callback function after deletion
-// is complete. Any errors encountered during the execution are passed as an argument to the
+// DeleteAsync is the asynchronous version of Delete. It calls the callback function after deletion
+// is complete. Any error encountered during the execution is passed as an argument to the
 // callback function.
 func (s *KV) DeleteAsync(key []byte, f func(error)) {
 	e := &Entry{
@@ -812,6 +805,18 @@ func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
 		return err
 	}
 	return e.Error
+}
+
+// CompareAndDeleteAsync is the asynchronous version of CompareAndDelete. It accepts a callback
+// function which is called when the CompareAndDelete completes. Any error encountered during execution
+// is passed as an argument to the callback function.
+func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint16, f func(error)) {
+	e := &Entry{
+		Key:             key,
+		Meta:            BitDelete,
+		CASCounterCheck: casCounter,
+	}
+	s.compareAsync(e, f)
 }
 
 var ErrNoRoom = errors.New("No room for write")

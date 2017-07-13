@@ -765,16 +765,16 @@ func (l *valueLog) pickLog() *logFile {
 	return l.files[lfi]
 }
 
-type reason struct {
-	total   float64
-	keep    float64
-	discard float64
-}
-
 func (vlog *valueLog) doRunGC() error {
 	lf := vlog.pickLog()
 	if lf == nil {
 		return nil
+	}
+
+	type reason struct {
+		total   float64
+		keep    float64
+		discard float64
 	}
 
 	var r reason
