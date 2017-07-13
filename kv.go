@@ -666,7 +666,7 @@ func (s *KV) BatchSet(entries []*Entry) error {
 	return err
 }
 
-// BatchSet applies a list of badger.Entry in an async manner. It accepts a callback function
+// BatchSetAsync applies a list of badger.Entry in an async manner. It accepts a callback function
 // which is called when all the sets are complete. Any error during execution is made available
 // as an argument to the callback function.
 func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
