@@ -623,14 +623,9 @@ func (s *KV) estimateSize(entry *Entry) int {
 	return len(entry.Key) + 16 + 3
 }
 
-// BatchSet applies a list of badger.Entry. Errors are set on each Entry invidividually.
-//   for _, e := range entries {
-//      Check(e.Error)
-//   }
-func (s *KV) BatchSet(entries []*Entry) error {
+func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 	var reqs []*request
 	var size int64
-	var err error
 	var b *request
 	for _, entry := range entries {
 		if b == nil {
@@ -653,7 +648,14 @@ func (s *KV) BatchSet(entries []*Entry) error {
 		s.writeCh <- b
 		reqs = append(reqs, b)
 	}
+	return reqs
+}
 
+// BatchSet applies a list of badger.Entry. Errors if any are returned to the caller.
+func (s *KV) BatchSet(entries []*Entry) error {
+	reqs := s.sendToWriteCh(entries)
+
+	var err error
 	for _, req := range reqs {
 		req.Wg.Wait()
 		if req.Err != nil {
@@ -664,42 +666,23 @@ func (s *KV) BatchSet(entries []*Entry) error {
 	return err
 }
 
-func (s *KV) BatchSetAsync(entries []*Entry, f func()) {
-	var reqs []*request
-	var size int64
-	var b *request
-	for _, entry := range entries {
-		if b == nil {
-			b = requestPool.Get().(*request)
-			b.Entries = b.Entries[:0]
-			b.Wg = sync.WaitGroup{}
-			b.Wg.Add(1)
-		}
-		size += int64(s.estimateSize(entry))
-		b.Entries = append(b.Entries, entry)
-		if size >= s.opt.maxBatchSize {
-			s.writeCh <- b
-			reqs = append(reqs, b)
-			size = 0
-			b = nil
-		}
-	}
-
-	if size > 0 {
-		s.writeCh <- b
-		reqs = append(reqs, b)
-	}
+// BatchSet applies a list of badger.Entry in an async manner. It accepts a callback function
+// which is called when all the sets are complete. Any error during execution is made available
+// as an argument to the callback function.
+func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
+	reqs := s.sendToWriteCh(entries)
 
 	go func() {
+		var err error
 		for _, req := range reqs {
 			req.Wg.Wait()
 			if req.Err != nil {
-				s.elog.Printf("Error while doing async write: %+v.", req.Err)
+				err = req.Err
 			}
 			requestPool.Put(req)
 		}
 		// All writes complete, lets call the callback function now.
-		f()
+		f(err)
 	}()
 }
 
@@ -711,6 +694,20 @@ func (s *KV) Set(key, val []byte) error {
 		Value: val,
 	}
 	return s.BatchSet([]*Entry{e})
+}
+
+// SetAsync sets the provided value for a given key in an async manner. It accepts a callback
+// function which is called when the set is complete. Any errors encountered during execution
+// are passed as an argument to the callback function.
+// If key is not present, it is created. If it is present, the existing value is overwritten
+// with the one provided.
+func (s *KV) SetAsync(key, val []byte, f func(error)) {
+	e := &Entry{
+		Key:   key,
+		Value: val,
+	}
+
+	s.BatchSetAsync(e, f)
 }
 
 // EntriesSet adds a Set to the list of entries.
@@ -732,6 +729,22 @@ func (s *KV) CompareAndSet(key []byte, val []byte, casCounter uint16) error {
 		CASCounterCheck: casCounter,
 	}
 	if err := s.BatchSet([]*Entry{e}); err != nil {
+		return err
+	}
+	return e.Error
+}
+
+// CompareAndSetAsync sets the given value, ensuring that the no other Set operation has happened,
+// since last read in an async manner. It accepts a callback function which is called when the
+// CompareAndSet completes. If the key has a different casCounter, this would not update the key
+// and the error would be passed to the callback function.
+func (s *KV) CompareAndSetAsync(key []byte, val []byte, casCounter uint16, f func(error)) {
+	e := &Entry{
+		Key:             key,
+		Value:           val,
+		CASCounterCheck: casCounter,
+	}
+	if err := s.BatchSet([]*Entry{e},f) err != nil {
 		return err
 	}
 	return e.Error

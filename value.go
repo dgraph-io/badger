@@ -588,7 +588,6 @@ type request struct {
 	Ptrs    []valuePointer
 	Wg      sync.WaitGroup
 	Err     error
-	Idx     int
 }
 
 // sync is thread-unsafe and should not be called concurrently with write.
