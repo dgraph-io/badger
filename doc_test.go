@@ -100,22 +100,22 @@ func ExampleKV_BatchSetAsync() {
 	// In Dgraph we keep on flushing posting lists periodically to badger. We do it an async
 	// manner and provide a callback to it which can do the cleanup when the writes are done.
 	f := func(err error) {
-		wg.Done()
+		defer wg.Done()
+		if err != nil {
+			// At this point you can retry writing keys or send error over a channel to handle
+			// in some other goroutine.
+			fmt.Printf("Got error: %+v\n", err)
+		}
 
 		// Check for error in entries which could be non-nil if the user supplies a CasCounter.
 		for _, e := range wb {
 			if e.Error != nil {
-				err = e.Error
+				fmt.Printf("Got error: %+v\n", e.Error)
 			}
 		}
-		if err != nil {
-			fmt.Printf("Got error: %+v\n", err)
-			// At this point you can retry writing keys or send error over a channel to handle
-			// in some other goroutine.
-		}
 
-		// No error. You can do cleanup now. Like deleting keys from cache.
-		fmt.Println("All async sets complete. Got no error.")
+		// You can do cleanup now. Like deleting keys from cache.
+		fmt.Println("All async sets complete.")
 	}
 
 	for i := 0; i < 100; i++ {
@@ -130,5 +130,5 @@ func ExampleKV_BatchSetAsync() {
 	wg.Wait()
 
 	// Output: Finished writing keys to badger.
-	// All async sets complete. Got no error.
+	// All async sets complete.
 }

@@ -808,8 +808,8 @@ func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
 }
 
 // CompareAndDeleteAsync is the asynchronous version of CompareAndDelete. It accepts a callback
-// function which is called when the CompareAndDelete completes. Any error encountered during execution
-// is passed as an argument to the callback function.
+// function which is called when the CompareAndDelete completes. Any error encountered during
+// execution is passed as an argument to the callback function.
 func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint16, f func(error)) {
 	e := &Entry{
 		Key:             key,
