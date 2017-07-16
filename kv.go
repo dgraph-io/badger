@@ -953,12 +953,11 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 		}
 
 		tbl, err := table.OpenTable(fd, s.opt.MapTablesTo)
-		defer tbl.DecrRef()
-
 		if err != nil {
 			s.elog.Printf("ERROR while opening table: %v", err)
 			return err
 		}
+		defer tbl.DecrRef()
 		s.lc.addLevel0Table(tbl) // This will incrRef again.
 
 		// Update s.imm. Need a lock.
