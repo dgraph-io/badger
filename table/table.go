@@ -115,8 +115,8 @@ func (b byKey) Swap(i int, j int)      { b[i], b[j] = b[j], b[i] }
 func (b byKey) Less(i int, j int) bool { return bytes.Compare(b[i].key, b[j].key) < 0 }
 
 // OpenTable assumes file has only one table and opens it.  Takes ownership of fd upon function
-// entry.  Returns a table with one "reference" to it (which keeps us from deleting the file! --
-// call table.Close() if you don't want that).
+// entry.  Returns a table with one reference count on it (decrementing which may delete the file!
+// -- consider t.Close() instead).
 func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	fileInfo, err := fd.Stat()
 	if err != nil {
