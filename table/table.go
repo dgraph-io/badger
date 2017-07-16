@@ -114,16 +114,23 @@ func (b byKey) Len() int               { return len(b) }
 func (b byKey) Swap(i int, j int)      { b[i], b[j] = b[j], b[i] }
 func (b byKey) Less(i int, j int) bool { return bytes.Compare(b[i].key, b[j].key) < 0 }
 
-// OpenTable assumes file has only one table and opens it.
+// OpenTable assumes file has only one table and opens it.  Takes ownership of fd upon function
+// entry.  Returns a table with one "reference" to it (which keeps us from deleting the file! --
+// call table.Close() if you don't want that).
 func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	fileInfo, err := fd.Stat()
 	if err != nil {
+		// It's OK to ignore fd.Close() errs in this function because we have only read
+		// from the file.
+		_ = fd.Close()
 		return nil, y.Wrap(err)
 	}
 
-	id, ok := ParseFileID(fileInfo.Name())
+	filename := fileInfo.Name()
+	id, ok := ParseFileID(filename)
 	if !ok {
-		return nil, errors.Errorf("Invalid filename: %s", fd.Name())
+		_ = fd.Close()
+		return nil, errors.Errorf("Invalid filename: %s", filename)
 	}
 	t := &Table{
 		fd:         fd,
@@ -137,12 +144,14 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	if mapTableTo == MemoryMap {
 		t.mmap, err = mmap(fd, fileInfo.Size())
 		if err != nil {
-			return t, y.Wrapf(err, "Unable to map file")
+			_ = fd.Close()
+			return nil, y.Wrapf(err, "Unable to map file")
 		}
 	} else if mapTableTo == LoadToRAM {
 		err = t.LoadToRAM()
 		if err != nil {
-			return t, y.Wrap(err)
+			_ = fd.Close()
+			return nil, y.Wrap(err)
 		}
 	}
 
