@@ -266,10 +266,10 @@ func (s *levelsController) compactBuildTables(
 			}
 			y.Check(builder.Add(it.Key(), it.Value()))
 		}
-		if builder.Empty() {
-			builder.Close()
-			continue
-		}
+		// it.Valid() at least once in the loop above, hence we called .Add, hence
+		// !builder.Empty.
+		y.AssertTruef(!builder.Empty(), "compactBuildTables builder cannot be empty")
+
 		cd.elog.LazyPrintf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
 
 		y.AssertTruef(newID <= newIDMax, "%d %d", newID, newIDMax)
