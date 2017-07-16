@@ -794,3 +794,16 @@ func BenchmarkExists(b *testing.B) {
 
 	fmt.Println("Done and closing")
 }
+
+func TestPidFile(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	options := getTestOptions(dir)
+	kv1, err := NewKV(options)
+	require.NoError(t, err)
+	defer kv1.Close()
+	_, err = NewKV(options)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), cannotCreateErrMsg)
+}
