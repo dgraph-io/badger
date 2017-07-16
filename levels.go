@@ -569,7 +569,7 @@ func (s *levelsController) close() error {
 	cleanupErr := cleanupLevels(s)
 	err := s.clog.close()
 	if cleanupErr != nil {
-		return errors.Wrap(err, "levelsController.Close")
+		return errors.Wrap(cleanupErr, "levelsController.Close")
 	}
 	return err
 }
