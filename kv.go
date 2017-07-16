@@ -17,9 +17,11 @@
 package badger
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -145,6 +147,9 @@ func NewKV(opt *Options) (out *KV, err error) {
 			return nil, ErrInvalidDir
 		}
 	}
+	if err := createLockFile(filepath.Join(opt.Dir, lockFile)); err != nil {
+		return nil, err
+	}
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
@@ -259,7 +264,7 @@ func (s *KV) Close() error {
 
 	// Now close the value log.
 	if err := s.vlog.Close(); err != nil {
-		return errors.Wrapf(err, "Close()")
+		return errors.Wrapf(err, "KV.Close")
 	}
 
 	// Make sure that block writer is done pushing stuff into memtable!
@@ -310,7 +315,51 @@ func (s *KV) Close() error {
 	s.closer.SignalAll()
 	s.closer.WaitForAll()
 	s.elog.Finish()
+	if err := os.Remove(filepath.Join(s.opt.Dir, lockFile)); err != nil {
+		return errors.Wrap(err, "KV.Close")
+	}
+	// Sync Dir so that pid file is guaranteed removed from directory entries.
+	if err := syncDir(s.opt.Dir); err != nil {
+		return errors.Wrap(err, "KV.Close cannot sync Dir")
+	}
 	return nil
+}
+
+const (
+	lockFile = "LOCK"
+)
+
+// Opens a file, errors if it exists, and writes the process id to the file
+func createLockFile(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
+	if err != nil {
+		return errors.Wrap(err, "cannot create pid lock file")
+	}
+	_, err = fmt.Fprintf(f, "%d\n", os.Getpid())
+	closeErr := f.Close()
+	if err != nil {
+		return errors.Wrap(err, "cannot write to pid lock file")
+	}
+	if closeErr != nil {
+		return errors.Wrap(closeErr, "cannot close pid lock file")
+	}
+	return nil
+}
+
+// When you create or delete a file, you have to ensure the directory entry for the file is synced
+// in order to guarantee the file is visible (if the system crashes).  (See the man page for fsync,
+// or see https://github.com/coreos/etcd/issues/6368 for an example.)
+func syncDir(dir string) error {
+	f, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = f.Sync()
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
 }
 
 // getMemtables returns the current memtables and get references.
