@@ -152,7 +152,7 @@ func closeAllUnmodifiedTables(tables [][]*table.Table) {
 func cleanupLevels(s *levelsController) error {
 	var firstErr error
 	for _, l := range s.levels {
-		if err := l.close(); err != nil && firstErr != nil {
+		if err := l.close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
