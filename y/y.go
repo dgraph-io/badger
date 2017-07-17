@@ -24,14 +24,14 @@ import (
 )
 
 var (
-	EmptySlice   = []byte{}
-	syncFileFlag = 0x0
+	// This is O_DSYNC (datasync) on platforms that support it -- see file_unix.go
+	datasyncFileFlag = 0x0
 )
 
 func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
 	flags := os.O_RDWR | os.O_CREATE
 	if sync {
-		flags |= syncFileFlag
+		flags |= datasyncFileFlag
 	}
 	return os.OpenFile(filename, flags, 0666)
 }

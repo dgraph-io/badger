@@ -7,5 +7,5 @@ import (
 )
 
 func init() {
-	syncFileFlag = unix.O_DSYNC
+	datasyncFileFlag = unix.O_DSYNC
 }
