@@ -805,5 +805,5 @@ func TestPidFile(t *testing.T) {
 	defer kv1.Close()
 	_, err = NewKV(options)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), cannotCreateErrMsg)
+	require.Contains(t, err.Error(), "cannot create pid lock file")
 }

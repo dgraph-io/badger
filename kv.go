@@ -147,7 +147,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 			return nil, ErrInvalidDir
 		}
 	}
-	if err := createPidFile(opt.Dir); err != nil {
+	if err := createLockFile(filepath.Join(opt.Dir, lockFile)); err != nil {
 		return nil, err
 	}
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
@@ -315,7 +315,7 @@ func (s *KV) Close() error {
 	s.closer.SignalAll()
 	s.closer.WaitForAll()
 	s.elog.Finish()
-	if err := destroyPidFile(s.opt.Dir); err != nil {
+	if err := os.Remove(filepath.Join(s.opt.Dir, lockFile)); err != nil {
 		return errors.Wrap(err, "KV.Close")
 	}
 	// Sync Dir so that pid file is guaranteed removed from directory entries.
@@ -326,15 +326,14 @@ func (s *KV) Close() error {
 }
 
 const (
-	pidFileName        = "pid.lock"
-	cannotCreateErrMsg = "cannot create pid lock file"
+	lockFile = "LOCK"
 )
 
-func createPidFile(dir string) error {
-	path := filepath.Join(dir, pidFileName)
+// Opens a file, errors if it exists, and writes the process id to the file
+func createLockFile(path string) error {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
 	if err != nil {
-		return errors.Wrap(err, cannotCreateErrMsg)
+		return errors.Wrap(err, "cannot create pid lock file")
 	}
 	_, err = fmt.Fprintf(f, "%d\n", os.Getpid())
 	closeErr := f.Close()
@@ -342,16 +341,9 @@ func createPidFile(dir string) error {
 		return errors.Wrap(err, "cannot write to pid lock file")
 	}
 	if closeErr != nil {
-		return errors.Wrap(err, "cannot close pid lock file")
+		return errors.Wrap(closeErr, "cannot close pid lock file")
 	}
 	return nil
-}
-
-// destroyPidFile removes the pid file.  Don't forget to syncDir after this, to ensure the changes
-// are permanently written to the file system.
-func destroyPidFile(dir string) error {
-	path := filepath.Join(dir, pidFileName)
-	return os.Remove(path)
 }
 
 // When you create or delete a file, you have to ensure the directory entry for the file is synced
