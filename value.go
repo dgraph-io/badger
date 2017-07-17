@@ -520,6 +520,11 @@ func (l *valueLog) openOrCreateFiles() error {
 			return errors.Wrapf(err, "Unable to open value log file as RDWR")
 		}
 		l.files = append(l.files, lf)
+		// We created a file -- ensure that its directory entry is persisted.
+		err = syncDir(l.dirPath)
+		if err != nil {
+			return errors.Wrapf(err, "Unable to sync value log file dir")
+		}
 	}
 	return nil
 }
@@ -641,6 +646,11 @@ func (l *valueLog) write(reqs []*request) error {
 			newlf.fd, err = y.OpenSyncedFile(newlf.path, l.opt.SyncWrites)
 			if err != nil {
 				return errors.Wrapf(err, "While creating new value log: %q", newlf.path)
+			}
+			if err := syncDir(l.dirPath); err != nil {
+				return errors.Wrapf(err,
+					"Could not sync directory entry of value log: %q",
+					newlf.path)
 			}
 
 			l.Lock()
