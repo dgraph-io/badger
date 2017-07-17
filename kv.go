@@ -313,12 +313,18 @@ func (s *KV) Close() error {
 	s.closer.SignalAll()
 	s.closer.WaitForAll()
 	s.elog.Finish()
+
 	if err := os.Remove(filepath.Join(s.opt.Dir, lockFile)); err != nil {
 		return errors.Wrap(err, "KV.Close")
 	}
-	// Sync Dir so that pid file is guaranteed removed from directory entries.
+	// Fsync directories to ensure that lock file, and any other removed files whose directory
+	// we haven't specifically fsynced, are guaranteed to have their directory entry removal
+	// persisted to disk.
 	if err := syncDir(s.opt.Dir); err != nil {
-		return errors.Wrap(err, "KV.Close cannot sync Dir")
+		return errors.Wrap(err, "KV.Close")
+	}
+	if err := syncDir(s.opt.ValueDir); err != nil {
+		return errors.Wrap(err, "KV.Close")
 	}
 	return nil
 }
@@ -946,9 +952,20 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 		if err != nil {
 			return y.Wrap(err)
 		}
+
+		// Don't block just to sync the directory entry.
+		dirSyncCh := make(chan error)
+		go func() { dirSyncCh <- syncDir(s.opt.Dir) }()
+
 		err = writeLevel0Table(ft.mt, fd)
+		dirSyncErr := <-dirSyncCh
+
 		if err != nil {
 			s.elog.Errorf("ERROR while writing to level 0: %v", err)
+			return err
+		}
+		if dirSyncErr != nil {
+			s.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 			return err
 		}
 

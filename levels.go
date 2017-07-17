@@ -135,6 +135,13 @@ func newLevelsController(kv *KV) (*levelsController, error) {
 		_ = s.cleanupLevels()
 		return nil, errors.Wrap(err, "Compaction Log")
 	}
+
+	// Sync directory (because we have at least removed/created compaction log files)
+	if err := syncDir(kv.opt.Dir); err != nil {
+		_ = s.close()
+		return nil, errors.Wrap(err, "Directory entry for compaction log")
+	}
+
 	return s, nil
 }
 
@@ -307,6 +314,13 @@ func (s *levelsController) compactBuildTables(
 		if err := <-che; err != nil && firstErr == nil {
 			firstErr = err
 		}
+	}
+
+	if firstErr == nil {
+		// Ensure created files' directory entries are visible.  We don't mind the extra latency
+		// from not doing this ASAP after all file creation has finished because this is a
+		// background operation.
+		firstErr = syncDir(s.kv.opt.Dir)
 	}
 
 	if firstErr != nil {
