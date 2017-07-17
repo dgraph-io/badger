@@ -126,21 +126,23 @@ func newLevelsController(kv *KV) (*levelsController, error) {
 
 	// Make sure key ranges do not overlap etc.
 	if err := s.validate(); err != nil {
-		_ = cleanupLevels(s)
+		_ = s.cleanupLevels()
 		return nil, errors.Wrap(err, "Level validation")
 	}
 
 	// Create new compact log.
 	if err := s.clog.init(clogName); err != nil {
-		_ = cleanupLevels(s)
+		_ = s.cleanupLevels()
 		return nil, errors.Wrap(err, "Compaction Log")
 	}
 	return s, nil
 }
 
-// This is for "unmodified" tables -- we ignore errors when closing the table, which is OK because
-// we haven't modified the table.  (It's an LSM tree, so why would we?  Apparently we do with
-// SetMetadata.)
+// Closes the tables, for cleanup in newLevelsController.  (We Close() instead of using DecrRef()
+// because that would delete the underlying files.)  We ignore errors when closing the table, which
+// is OK because we haven't modified the table.  (It's an LSM tree, but we do hypothetically modify
+// the file with SetMetadata.)  (Even then, we open the files with O_DSYNC, so the only plausible
+// error on Close() would have been from writing file metadata.)
 func closeAllUnmodifiedTables(tables [][]*table.Table) {
 	for _, tableSlice := range tables {
 		for _, table := range tableSlice {
@@ -149,7 +151,7 @@ func closeAllUnmodifiedTables(tables [][]*table.Table) {
 	}
 }
 
-func cleanupLevels(s *levelsController) error {
+func (s *levelsController) cleanupLevels() error {
 	var firstErr error
 	for _, l := range s.levels {
 		if err := l.close(); err != nil && firstErr == nil {
@@ -266,9 +268,9 @@ func (s *levelsController) compactBuildTables(
 			}
 			y.Check(builder.Add(it.Key(), it.Value()))
 		}
-		// it.Valid() at least once in the loop above, hence we called .Add, hence
-		// !builder.Empty.
-		y.AssertTruef(!builder.Empty(), "compactBuildTables builder cannot be empty")
+		// It was true that it.Valid() at least once in the loop above, which means we
+		// called Add() at least once, and builder is not Empty().
+		y.AssertTrue(!builder.Empty())
 
 		cd.elog.LazyPrintf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
 
@@ -308,9 +310,11 @@ func (s *levelsController) compactBuildTables(
 	}
 
 	if firstErr != nil {
+		// An error happened.  Delete all the newly created table files (by calling DecrRef
+		// -- we're the only holders of a ref).
 		for _, table := range newTables[:i] {
 			if table != nil {
-				_ = table.Close()
+				_ = table.DecrRef()
 			}
 		}
 		errorReturn := errors.Wrapf(firstErr, "While running compaction for: %+v", c)
@@ -566,12 +570,12 @@ func (s *levelsController) addLevel0Table(t *table.Table) {
 }
 
 func (s *levelsController) close() error {
-	cleanupErr := cleanupLevels(s)
+	cleanupErr := s.cleanupLevels()
 	err := s.clog.close()
 	if cleanupErr != nil {
-		return errors.Wrap(cleanupErr, "levelsController.Close")
+		err = cleanupErr
 	}
-	return err
+	return errors.Wrap(err, "levelsController.Close")
 }
 
 // get returns the found value if any. If not found, we return nil.
