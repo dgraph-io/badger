@@ -358,7 +358,7 @@ func destroyPidFile(dir string) error {
 // in order to guarantee the file is visible (if the system crashes).
 func syncDir(dir string) error {
 	// Is WR necessary for Sync()?  Not on Linux, but I'm not going to test every platform.
-	f, err := os.OpenFile(dir, os.O_RDWR, 0666)
+	f, err := os.Open(dir)
 	if err != nil {
 		return err
 	}

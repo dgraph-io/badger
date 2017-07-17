@@ -76,7 +76,8 @@ func TestCompactLogBasic(t *testing.T) {
 
 	opt := getTestOptions(dir)
 	{
-		kv, _ := NewKV(opt)
+		kv, err := NewKV(opt)
+		require.NoError(t, err)
 		n := 5000
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
@@ -87,17 +88,18 @@ func TestCompactLogBasic(t *testing.T) {
 		}
 		kv.Set([]byte("testkey"), []byte("testval"))
 		kv.validate()
-		kv.Close()
+		require.NoError(t, kv.Close())
 	}
 
-	kv, _ := NewKV(opt)
+	kv, err := NewKV(opt)
+	require.NoError(t, err)
 
 	var item KVItem
 	if err := kv.Get([]byte("testkey"), &item); err != nil {
 		t.Error(err)
 	}
 	require.EqualValues(t, "testval", string(item.Value()))
-	kv.Close()
+	require.NoError(t, kv.Close())
 }
 
 func key(prefix string, i int) string {
