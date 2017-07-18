@@ -128,10 +128,6 @@ type KV struct {
 	flushChan chan flushTask // For flushing memtables.
 }
 
-func arenaSize(opt *Options) int64 {
-	return opt.MaxTableSize + opt.maxBatchSize
-}
-
 var ErrInvalidDir error = errors.New("Invalid Dir, directory does not exist")
 var ErrValueLogSize error = errors.New("Invalid ValueLogFileSize, must be between 1MB and 1GB")
 
@@ -902,6 +898,10 @@ func (s *KV) ensureRoomForWrite() error {
 		// We need to do this to unlock and allow the flusher to modify imm.
 		return ErrNoRoom
 	}
+}
+
+func arenaSize(opt *Options) int64 {
+	return opt.MaxTableSize + opt.maxBatchSize
 }
 
 // WriteLevel0Table flushes memtable. It drops deleteValues.
