@@ -94,6 +94,12 @@ func (lf *logFile) doneWriting() error {
 	return lf.openReadOnly()
 }
 
+func (lf *logFile) sync() error {
+	lf.RLock()
+	defer lf.RUnlock()
+	return lf.fd.Sync()
+}
+
 var errStop = errors.New("Stop iteration")
 
 type logEntry func(e Entry, vp valuePointer) error
@@ -609,9 +615,14 @@ func (l *valueLog) sync() error {
 	curlf := l.files[len(l.files)-1]
 	l.RUnlock()
 
-	curlf.RLock()
-	defer curlf.RUnlock()
-	return curlf.fd.Sync()
+	dirSyncCh := make(chan error)
+	go func() { dirSyncCh <- syncDir(l.opt.ValueDir) }()
+	err := curlf.sync()
+	dirSyncErr := <-dirSyncCh
+	if err != nil {
+		err = dirSyncErr
+	}
+	return err
 }
 
 // write is thread-unsafe by design and should not be called concurrently.
@@ -647,10 +658,12 @@ func (l *valueLog) write(reqs []*request) error {
 			if err != nil {
 				return errors.Wrapf(err, "While creating new value log: %q", newlf.path)
 			}
-			if err := syncDir(l.dirPath); err != nil {
-				return errors.Wrapf(err,
-					"Could not sync directory entry of value log: %q",
-					newlf.path)
+			if l.opt.SyncWrites {
+				if err := syncDir(l.dirPath); err != nil {
+					return errors.Wrapf(err,
+						"Could not sync directory entry of value log: %q",
+						newlf.path)
+				}
 			}
 
 			l.Lock()

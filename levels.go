@@ -260,7 +260,6 @@ func (s *levelsController) compactBuildTables(
 	// Start generating new tables.
 	newTables := make([]*table.Table, len(c.toInsert))
 	che := make(chan error, len(c.toInsert))
-	fileCreated := make(chan struct{}, len(c.toInsert))
 	var i int
 	newIDMin, newIDMax := c.toInsert[0], c.toInsert[len(c.toInsert)-1]
 	newID := newIDMin
@@ -285,7 +284,6 @@ func (s *levelsController) compactBuildTables(
 			defer builder.Close()
 
 			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
-			fileCreated <- struct{}{}
 			if err != nil {
 				che <- errors.Wrapf(err, "While opening new table: %d", fileID)
 				return
@@ -308,14 +306,6 @@ func (s *levelsController) compactBuildTables(
 		newID++
 	}
 
-	// Wait for the files to be created (or error on creation, sure) then fsync the directory
-	// they were created, to ensure their directory entries are visible.  (Specifically, we
-	// sync the directory as early as possible for concurrency.)
-	for x := 0; x < i; x++ {
-		<-fileCreated
-	}
-	syncErr := syncDir(s.kv.opt.Dir)
-
 	// Wait for all table builders to finish.
 	var firstErr error
 	for x := 0; x < i; x++ {
@@ -324,8 +314,11 @@ func (s *levelsController) compactBuildTables(
 		}
 	}
 
-	if syncErr != nil && firstErr == nil {
-		firstErr = syncErr
+	if firstErr == nil {
+		// Ensure created files' directory entries are visible.  We don't mind the extra latency
+		// from not doing this ASAP after all file creation has finished because this is a
+		// background operation.
+		firstErr = syncDir(s.kv.opt.Dir)
 	}
 
 	if firstErr != nil {

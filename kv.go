@@ -315,14 +315,17 @@ func (s *KV) Close() error {
 	s.closer.SignalAll()
 	s.closer.WaitForAll()
 	s.elog.Finish()
+
 	if err := destroyPidFile(s.opt.Dir); err != nil {
 		return errors.Wrap(err, "KV.Close")
 	}
-
-	// Fsync directories so that pid file, and any other removed files whose directory we
-	// haven't specifically fsynced, are guaranteed to have their directory entry removal
+	// Fsync directories to ensure that lock file, and any other removed files whose directory
+	// we haven't specifically fsynced, are guaranteed to have their directory entry removal
 	// persisted to disk.
-	if err := syncBothDirs(s.opt.Dir, s.opt.ValueDir); err != nil {
+	if err := syncDir(s.opt.Dir); err != nil {
+		return errors.Wrap(err, "KV.Close")
+	}
+	if err := syncDir(s.opt.ValueDir); err != nil {
 		return errors.Wrap(err, "KV.Close")
 	}
 	return nil
@@ -370,29 +373,6 @@ func syncDir(dir string) error {
 		return err
 	}
 	return closeErr
-}
-
-// Syncs two dirs.
-func syncBothDirs(dir1, dir2 string) error {
-	// Fsync directories so that pid file, and any other removed files whose directory we
-	// haven't specifically fsynced, are guaranteed to have their directory entry removal
-	// persisted to disk.
-	dir2ErrCh := make(chan error, 1)
-	if dir1 != dir2 {
-		go func() { dir2ErrCh <- syncDir(dir2) }()
-	} else {
-		dir2ErrCh <- nil
-	}
-	err := syncDir(dir1)
-	dir2Err := <-dir2ErrCh
-
-	if err != nil {
-		return err
-	}
-	if dir2Err != nil {
-		return dir2Err
-	}
-	return nil
 }
 
 // getMemtables returns the current memtables and get references.
