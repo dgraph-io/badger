@@ -124,7 +124,6 @@ type KV struct {
 	lc        *levelsController
 	vlog      valueLog
 	vptr      valuePointer
-	arenaPool *skl.ArenaPool
 	writeCh   chan *request
 	flushChan chan flushTask // For flushing memtables.
 }
@@ -159,11 +158,10 @@ func NewKV(opt *Options) (out *KV, err error) {
 		flushChan: make(chan flushTask, opt.NumMemtables),
 		writeCh:   make(chan *request, kvWriteChCapacity),
 		opt:       *opt, // Make a copy.
-		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.maxBatchSize, opt.NumMemtables+5),
 		closer:    y.NewCloser(),
 		elog:      trace.NewEventLog("Badger", "KV"),
 	}
-	out.mt = skl.NewSkiplist(out.arenaPool)
+	out.mt = skl.NewSkiplist(arenaSize(opt))
 
 	// newLevelsController potentially loads files in directory.
 	if out.lc, err = newLevelsController(out); err != nil {
@@ -893,13 +891,17 @@ func (s *KV) ensureRoomForWrite() error {
 			s.mt.Size(), len(s.flushChan))
 		// We manage to push this task. Let's modify imm.
 		s.imm = append(s.imm, s.mt)
-		s.mt = skl.NewSkiplist(s.arenaPool)
+		s.mt = skl.NewSkiplist(arenaSize(&s.opt))
 		// New memtable is empty. We certainly have room.
 		return nil
 	default:
 		// We need to do this to unlock and allow the flusher to modify imm.
 		return ErrNoRoom
 	}
+}
+
+func arenaSize(opt *Options) int64 {
+	return opt.MaxTableSize + opt.maxBatchSize
 }
 
 // WriteLevel0Table flushes memtable. It drops deleteValues.
