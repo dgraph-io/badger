@@ -661,8 +661,7 @@ func (l *valueLog) write(reqs []*request) error {
 			if l.opt.SyncWrites {
 				if err := syncDir(l.dirPath); err != nil {
 					return errors.Wrapf(err,
-						"Could not sync directory entry of value log: %q",
-						newlf.path)
+						"Could not sync directory entry of value log: %q", newlf.path)
 				}
 			}
 
