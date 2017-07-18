@@ -88,31 +88,3 @@ func (s *Arena) GetVal(offset uint32, size uint16) y.ValueStruct {
 	}
 	return out
 }
-
-type ArenaPool struct {
-	size int64
-	pool chan *Arena // Immutable.
-}
-
-func NewArenaPool(size int64, numArenas int) *ArenaPool {
-	return &ArenaPool{size, make(chan *Arena, numArenas)}
-}
-
-func (s *ArenaPool) Get() *Arena {
-	var arena *Arena
-	select {
-	case arena = <-s.pool:
-	default:
-		arena = NewArena(s.size)
-	}
-	return arena
-}
-
-func (s *ArenaPool) Put(arena *Arena) {
-	arena.Reset()
-	select {
-	case s.pool <- arena:
-	default:
-		// Just ignore the returned arena.
-	}
-}

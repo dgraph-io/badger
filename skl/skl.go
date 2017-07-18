@@ -67,11 +67,10 @@ type node struct {
 }
 
 type Skiplist struct {
-	height    int32 // Current height. 1 <= height <= kMaxHeight. CAS.
-	head      *node
-	ref       int32
-	arena     *Arena
-	arenaPool *ArenaPool
+	height int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	head   *node
+	ref    int32
+	arena  *Arena
 }
 
 var (
@@ -107,10 +106,9 @@ func (s *Skiplist) DecrRef() {
 		nodePools[len(x.next)].Put(x)
 		x = next
 	}
-	s.arenaPool.Put(s.arena)
-	// Indicate we are closed. Good for testing.
-	// Race condition here would suggest we are accessing skiplist when we are
-	// supposed to have no reference!
+	s.arena.Reset()
+	// Indicate we are closed. Good for testing.  Also, lets GC reclaim memory. Race condition
+	// here would suggest we are accessing skiplist when we are supposed to have no reference!
 	s.arena = nil
 }
 
@@ -128,15 +126,14 @@ func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 	}
 }
 
-func NewSkiplist(arenaPool *ArenaPool) *Skiplist {
-	arena := arenaPool.Get()
+func NewSkiplist(arenaSize int64) *Skiplist {
+	arena := NewArena(arenaSize)
 	head := newNode(arena, nil, y.ValueStruct{}, kMaxHeight)
 	return &Skiplist{
-		height:    1,
-		head:      head,
-		arena:     arena,
-		arenaPool: arenaPool,
-		ref:       1,
+		height: 1,
+		head:   head,
+		arena:  arena,
+		ref:    1,
 	}
 }
 
