@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"fmt"
 	"log"
 	"math"
 	"os"
@@ -116,6 +115,10 @@ var DefaultOptions = Options{
 type KV struct {
 	sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
 
+	dirLockGuard *y.DirectoryLockGuard
+	// nil if Dir and ValueDir are the same
+	valueDirGuard *y.DirectoryLockGuard
+
 	closer    *y.Closer
 	elog      trace.EventLog
 	mt        *skl.Skiplist
@@ -146,20 +149,49 @@ func NewKV(opt *Options) (out *KV, err error) {
 			return nil, ErrInvalidDir
 		}
 	}
-	if err := createLockFile(filepath.Join(opt.Dir, lockFile)); err != nil {
+	absDir, err := filepath.Abs(opt.Dir)
+	if err != nil {
 		return nil, err
 	}
+	absValueDir, err := filepath.Abs(opt.ValueDir)
+	if err != nil {
+		return nil, err
+	}
+
+	dirLockGuard, err := y.AcquireDirectoryLock(opt.Dir, lockFile)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if dirLockGuard != nil {
+			_ = dirLockGuard.Release()
+		}
+	}()
+	var valueDirLockGuard *y.DirectoryLockGuard
+	if absValueDir != absDir {
+		valueDirLockGuard, err = y.AcquireDirectoryLock(opt.ValueDir, lockFile)
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer func() {
+		if valueDirLockGuard != nil {
+			_ = valueDirLockGuard.Release()
+		}
+	}()
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	out = &KV{
-		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
-		flushChan: make(chan flushTask, opt.NumMemtables),
-		writeCh:   make(chan *request, kvWriteChCapacity),
-		opt:       *opt, // Make a copy.
-		closer:    y.NewCloser(),
-		elog:      trace.NewEventLog("Badger", "KV"),
+		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
+		flushChan:     make(chan flushTask, opt.NumMemtables),
+		writeCh:       make(chan *request, kvWriteChCapacity),
+		opt:           *opt, // Make a copy.
+		closer:        y.NewCloser(),
+		elog:          trace.NewEventLog("Badger", "KV"),
+		dirLockGuard:  dirLockGuard,
+		valueDirGuard: valueDirLockGuard,
 	}
 	out.mt = skl.NewSkiplist(arenaSize(opt))
 
@@ -245,12 +277,34 @@ func NewKV(opt *Options) (out *KV, err error) {
 	lc = out.closer.Register("value-gc")
 	go out.vlog.runGCInLoop(lc)
 
+	valueDirLockGuard = nil
+	dirLockGuard = nil
 	return out, nil
 }
 
 // Close closes a KV. It's crucial to call it to ensure all the pending updates
 // make their way to disk.
-func (s *KV) Close() error {
+func (s *KV) Close() (err error) {
+	defer func() {
+		if guardErr := s.dirLockGuard.Release(); err == nil {
+			err = errors.Wrap(guardErr, "KV.Close")
+		}
+		if s.valueDirGuard != nil {
+			if guardErr := s.valueDirGuard.Release(); err == nil {
+				err = errors.Wrap(guardErr, "KV.Close")
+			}
+		}
+		// Fsync directories to ensure that lock file, and any other removed files whose directory
+		// we haven't specifically fsynced, are guaranteed to have their directory entry removal
+		// persisted to disk.
+		if syncErr := syncDir(s.opt.Dir); err == nil {
+			err = errors.Wrap(syncErr, "KV.Close")
+		}
+		if syncErr := syncDir(s.opt.ValueDir); err == nil {
+			err = errors.Wrap(syncErr, "KV.Close")
+		}
+	}()
+
 	s.elog.Printf("Closing database")
 	// Stop value GC first.
 	lc := s.closer.Get("value-gc")
@@ -314,41 +368,12 @@ func (s *KV) Close() error {
 	s.closer.WaitForAll()
 	s.elog.Finish()
 
-	if err := os.Remove(filepath.Join(s.opt.Dir, lockFile)); err != nil {
-		return errors.Wrap(err, "KV.Close")
-	}
-	// Fsync directories to ensure that lock file, and any other removed files whose directory
-	// we haven't specifically fsynced, are guaranteed to have their directory entry removal
-	// persisted to disk.
-	if err := syncDir(s.opt.Dir); err != nil {
-		return errors.Wrap(err, "KV.Close")
-	}
-	if err := syncDir(s.opt.ValueDir); err != nil {
-		return errors.Wrap(err, "KV.Close")
-	}
 	return nil
 }
 
 const (
 	lockFile = "LOCK"
 )
-
-// Opens a file, errors if it exists, and writes the process id to the file
-func createLockFile(path string) error {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
-	if err != nil {
-		return errors.Wrap(err, "cannot create pid lock file")
-	}
-	_, err = fmt.Fprintf(f, "%d\n", os.Getpid())
-	closeErr := f.Close()
-	if err != nil {
-		return errors.Wrap(err, "cannot write to pid lock file")
-	}
-	if closeErr != nil {
-		return errors.Wrap(closeErr, "cannot close pid lock file")
-	}
-	return nil
-}
 
 // When you create or delete a file, you have to ensure the directory entry for the file is synced
 // in order to guarantee the file is visible (if the system crashes).  (See the man page for fsync,
