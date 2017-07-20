@@ -805,5 +805,18 @@ func TestPidFile(t *testing.T) {
 	defer kv1.Close()
 	_, err = NewKV(options)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "cannot create pid lock file")
+	require.Contains(t, err.Error(), "Some other process is using the store. Cannot acquire LOCK")
+}
+
+func TestPidFile2(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	options := getTestOptions(dir)
+	kv1, err := NewKV(options)
+	require.NoError(t, err)
+	kv1.Close()
+
+	_, err = NewKV(options)
+	require.NoError(t, err)
 }

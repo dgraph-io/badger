@@ -17,12 +17,17 @@
 package badger
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/trace"
@@ -146,7 +151,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 			return nil, ErrInvalidDir
 		}
 	}
-	if err := createLockFile(filepath.Join(opt.Dir, lockFile)); err != nil {
+	if err := updateLockFile(filepath.Join(opt.Dir, lockFile)); err != nil {
 		return nil, err
 	}
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
@@ -333,13 +338,24 @@ const (
 	lockFile = "LOCK"
 )
 
-// Opens a file, errors if it exists, and writes the process id to the file
-func createLockFile(path string) error {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
+func processExists(p string) bool {
+	pid, err := strconv.Atoi(p)
 	if err != nil {
-		return errors.Wrap(err, "cannot create pid lock file")
+		log.Fatal(err)
 	}
-	_, err = fmt.Fprintf(f, "%d\n", os.Getpid())
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return true
+	}
+	// On Unix systems FindProcess always succeeds even if the process doesn't exist.
+	// Sending 0 signal doesn't send a signal but can be used to check for the existence
+	// of a process.
+	err = process.Signal(syscall.Signal(0))
+	return err == nil
+}
+
+func writeAndClose(f *os.File) error {
+	_, err := fmt.Fprintf(f, "%d\n", os.Getpid())
 	closeErr := f.Close()
 	if err != nil {
 		return errors.Wrap(err, "cannot write to pid lock file")
@@ -348,6 +364,41 @@ func createLockFile(path string) error {
 		return errors.Wrap(closeErr, "cannot close pid lock file")
 	}
 	return nil
+}
+
+func updateLockFile(path string) error {
+	// If LOCK file doesn't exist, then we create a new one and write PID to it.
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return createLockFile(path)
+	}
+
+	// It already exists, lets check if the process for the PID exists. If it does then error out,
+	// else overwrite the PID.
+	f, err := os.OpenFile(path, os.O_RDWR, 0666)
+	if err != nil {
+		return errors.Wrap(err, "cannot open pid lock file")
+	}
+	buf := bytes.NewBuffer(nil)
+	io.Copy(buf, f)
+	if exists := processExists(strings.TrimSpace(buf.String())); exists {
+		return errors.Errorf("Some other process is using the store. Cannot acquire LOCK.")
+	}
+	if err := f.Truncate(0); err != nil {
+		return errors.Wrap(err, "While truncating LOCK file.")
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return errors.Wrap(err, "While seeking to start of LOCK file")
+	}
+	return writeAndClose(f)
+}
+
+// Opens a file, errors if it exists, and writes the process id to the file
+func createLockFile(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0666)
+	if err != nil {
+		return errors.Wrap(err, "cannot create pid lock file")
+	}
+	return writeAndClose(f)
 }
 
 // When you create or delete a file, you have to ensure the directory entry for the file is synced
