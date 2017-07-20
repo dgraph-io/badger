@@ -338,20 +338,20 @@ const (
 	lockFile = "LOCK"
 )
 
-func processExists(p string) bool {
+func processExists(p string) (bool, error) {
 	pid, err := strconv.Atoi(p)
 	if err != nil {
-		log.Fatal(err)
+		return false, err
 	}
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		return true
+		return true, nil
 	}
 	// On Unix systems FindProcess always succeeds even if the process doesn't exist.
 	// Sending 0 signal doesn't send a signal but can be used to check for the existence
 	// of a process.
 	err = process.Signal(syscall.Signal(0))
-	return err == nil
+	return err == nil, nil
 }
 
 func writeAndClose(f *os.File) error {
@@ -367,7 +367,7 @@ func writeAndClose(f *os.File) error {
 }
 
 func updateLockFile(path string) error {
-	// If LOCK file doesn't exist, then we create a new one and write PID to it.
+	// If LOCK file doesn't exist, then we create it and write PID to it.
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return createLockFile(path)
 	}
@@ -379,8 +379,14 @@ func updateLockFile(path string) error {
 		return errors.Wrap(err, "cannot open pid lock file")
 	}
 	buf := bytes.NewBuffer(nil)
-	io.Copy(buf, f)
-	if exists := processExists(strings.TrimSpace(buf.String())); exists {
+	if _, err := io.Copy(buf, f); err != nil {
+		return errors.Wrapf(err, "While reading LOCK file")
+	}
+	exists, err := processExists(strings.TrimSpace(buf.String()))
+	if err != nil {
+		return errors.Wrapf(err, "While checking LOCK file")
+	}
+	if exists {
 		return errors.Errorf("Some other process is using the store. Cannot acquire LOCK.")
 	}
 	if err := f.Truncate(0); err != nil {

@@ -816,7 +816,6 @@ func TestPidFile2(t *testing.T) {
 	kv1, err := NewKV(options)
 	require.NoError(t, err)
 	kv1.Close()
-
 	_, err = NewKV(options)
 	require.NoError(t, err)
 }
