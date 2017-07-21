@@ -125,20 +125,11 @@ func (lc *LevelCloser) AddRunning(delta int32) {
 	atomic.AddInt32(&lc.running, delta)
 }
 
-func (lc *LevelCloser) NumRunning() int {
-	return int(atomic.LoadInt32(&lc.running))
-}
-
 func (lc *LevelCloser) Signal() {
 	if !atomic.CompareAndSwapInt32(&lc.nomore, 0, 1) {
-		// fmt.Printf("Level %q already got signal\n", lc.Name)
 		return
 	}
-	running := int(atomic.LoadInt32(&lc.running))
-	// fmt.Printf("Sending signal to %d registered with name %q\n", running, lc.Name)
-	for i := 0; i < running; i++ {
-		lc.closed <- struct{}{}
-	}
+	close(lc.closed)
 }
 
 func (lc *LevelCloser) HasBeenClosed() <-chan struct{} {
