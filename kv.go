@@ -117,7 +117,7 @@ type KV struct {
 
 	dirLockGuard *y.DirectoryLockGuard
 	// nil if Dir and ValueDir are the same
-	valueDirLockGuardOrNil *y.DirectoryLockGuard
+	valueDirGuard *y.DirectoryLockGuard
 
 	closer    *y.Closer
 	elog      trace.EventLog
@@ -184,14 +184,14 @@ func NewKV(opt *Options) (out *KV, err error) {
 	}
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	out = &KV{
-		imm:                    make([]*skl.Skiplist, 0, opt.NumMemtables),
-		flushChan:              make(chan flushTask, opt.NumMemtables),
-		writeCh:                make(chan *request, kvWriteChCapacity),
-		opt:                    *opt, // Make a copy.
-		closer:                 y.NewCloser(),
-		elog:                   trace.NewEventLog("Badger", "KV"),
-		dirLockGuard:           dirLockGuard,
-		valueDirLockGuardOrNil: valueDirLockGuard,
+		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
+		flushChan:     make(chan flushTask, opt.NumMemtables),
+		writeCh:       make(chan *request, kvWriteChCapacity),
+		opt:           *opt, // Make a copy.
+		closer:        y.NewCloser(),
+		elog:          trace.NewEventLog("Badger", "KV"),
+		dirLockGuard:  dirLockGuard,
+		valueDirGuard: valueDirLockGuard,
 	}
 	out.mt = skl.NewSkiplist(arenaSize(opt))
 
@@ -289,8 +289,8 @@ func (s *KV) Close() (err error) {
 		if guardErr := s.dirLockGuard.Release(); err == nil {
 			err = errors.Wrap(guardErr, "KV.Close")
 		}
-		if s.valueDirLockGuardOrNil != nil {
-			if guardErr := s.valueDirLockGuardOrNil.Release(); err == nil {
+		if s.valueDirGuard != nil {
+			if guardErr := s.valueDirGuard.Release(); err == nil {
 				err = errors.Wrap(guardErr, "KV.Close")
 			}
 		}
