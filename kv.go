@@ -477,7 +477,7 @@ func (s *KV) Get(key []byte, item *KVItem) error {
 }
 
 // Touch looks for key, if it finds it then it returns
-// else it puts the key in the LSM tree.
+// else it puts the key and the value of an empty byte slice in the LSM tree.
 func (s *KV) Touch(key []byte) error {
 	exists, err := s.Exists(key)
 	if err != nil {
