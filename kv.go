@@ -733,6 +733,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 //   for _, e := range entries {
 //      Check(e.Error)
 //   }
+// It returns the last error set on entries, or nil if no error is set on entries.
 func (s *KV) BatchSet(entries []*Entry) error {
 	reqs := s.sendToWriteCh(entries)
 
