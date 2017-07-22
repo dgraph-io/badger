@@ -715,6 +715,11 @@ func TestTouch(t *testing.T) {
 	key = []byte("k2")
 	err = kv.Touch(key)
 	require.NoError(t, err)
+	// Make sure the value created by Touch is an byte slice of length 0.
+	item := KVItem{}
+	require.NoError(t, kv.Get(key, &item))
+	require.NotNil(t, item.Value())
+	require.Equal(t, 0, len(item.Value()))
 
 	key = []byte("k3")
 	err = kv.Set(key, []byte("val"))
