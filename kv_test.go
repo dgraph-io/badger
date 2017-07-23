@@ -699,6 +699,20 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 	require.Equal(t, 0, len(item.Value()))
 }
 
+func TestSetIfAbsent(t *testing.T) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	opt := getTestOptions(dir)
+	kv, err := NewKV(opt)
+	require.NoError(t, err)
+
+	key := []byte("k1")
+	err = kv.SetIfAbsent(key, []byte("val"))
+	require.NoError(t, err)
+
+	err = kv.SetIfAbsent(key, []byte("val2"))
+	require.EqualError(t, err, KeyExists.Error())
+}
+
 func TestTouch(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	opt := getTestOptions(dir)

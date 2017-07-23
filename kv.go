@@ -569,6 +569,17 @@ func (s *KV) writeToLSM(b *request) error {
 			if exists {
 				continue
 			}
+		} else if entry.Meta == BitSetIfAbsent {
+			// Someone else might have written a value, so lets check again if key exists.
+			exists, err := s.Exists(entry.Key)
+			if err != nil {
+				return err
+			}
+			// Value already exists, don't write.
+			if exists {
+				entry.Error = KeyExists
+				continue
+			}
 		}
 
 		if s.shouldWriteValueToLSM(*entry) { // Will include deletion / tombstone case.
@@ -786,6 +797,29 @@ func (s *KV) SetAsync(key, val []byte, f func(error)) {
 		Value: val,
 	}
 	s.BatchSetAsync([]*Entry{e}, f)
+}
+
+// SetIfAbsent sets value of key if key is not present.
+// If it is present, it returns the KeyExists error.
+func (s *KV) SetIfAbsent(key, val []byte) error {
+	exists, err := s.Exists(key)
+	if err != nil {
+		return err
+	}
+	// Found the key, return KeyExists
+	if exists {
+		return KeyExists
+	}
+
+	e := &Entry{
+		Key:   key,
+		Meta:  BitSetIfAbsent,
+		Value: val,
+	}
+	if err := s.BatchSet([]*Entry{e}); err != nil {
+		return err
+	}
+	return e.Error
 }
 
 // EntriesSet adds a Set to the list of entries.

@@ -41,15 +41,17 @@ import (
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete       byte  = 1 // Set if the key has been deleted.
-	BitValuePointer byte  = 2 // Set if the value is NOT stored directly next to key.
-	BitCompressed   byte  = 4 // Set if the key value pair is stored compressed in value log.
-	BitTouch        byte  = 8 // Set if the key is set using GetOrTouch.
+	BitDelete       byte  = 1  // Set if the key has been deleted.
+	BitValuePointer byte  = 2  // Set if the value is NOT stored directly next to key.
+	BitCompressed   byte  = 4  // Set if the key value pair is stored compressed in value log.
+	BitTouch        byte  = 8  // Set if the key is set using GetOrTouch.
+	BitSetIfAbsent  byte  = 16 // Set if the key is set using SetIfAbsent.
 	M               int64 = 1 << 20
 )
 
 var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
 var CasMismatch error = errors.New("CompareAndSet failed due to counter mismatch.")
+var KeyExists error = errors.New("SetIfAbsent failed since key already exists.")
 
 type logFile struct {
 	sync.RWMutex
