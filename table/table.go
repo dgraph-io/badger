@@ -190,8 +190,9 @@ func (t *Table) Close() error {
 func (t *Table) SetMetadata(meta []byte) error {
 	y.AssertTrue(len(meta) == len(t.metadata))
 	pos := t.tableSize - 4 - len(t.metadata)
-	_, err := t.fd.WriteAt(meta, int64(pos))
+	nbw, err := t.fd.WriteAt(meta, int64(pos))
 	y.NumWrites.Add(1)
+	y.NumBytesWritten.Add(int64(nbw))
 	return y.Wrap(err)
 }
 
@@ -214,8 +215,9 @@ func (t *Table) read(off int, sz int) ([]byte, error) {
 	}
 
 	res := make([]byte, sz)
-	_, err := t.fd.ReadAt(res, int64(off))
+	nbr, err := t.fd.ReadAt(res, int64(off))
 	y.NumReads.Add(1)
+	y.NumBytesRead.Add(int64(nbr))
 	return res, err
 }
 
@@ -366,5 +368,6 @@ func (t *Table) LoadToRAM() error {
 		return y.Wrapf(err, "Unable to load file in memory. Table file: %s", t.Filename())
 	}
 	y.NumReads.Add(1)
+	y.NumBytesRead.Add(int64(read))
 	return nil
 }

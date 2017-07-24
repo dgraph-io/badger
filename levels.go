@@ -294,12 +294,13 @@ func (s *levelsController) compactBuildTables(
 			// Encode the level number as table metadata.
 			var levelNum [2]byte
 			binary.BigEndian.PutUint16(levelNum[:], uint16(l+1))
-			_, err = fd.Write(builder.Finish(levelNum[:]))
+			nbw, err := fd.Write(builder.Finish(levelNum[:]))
 			if err != nil {
 				che <- errors.Wrapf(err, "Unable to write to file: %d", fileID)
 				return
 			}
 			y.NumWrites.Add(1)
+			y.NumBytesWritten.Add(int64(nbw))
 
 			newTables[idx], err = table.OpenTable(fd, s.kv.opt.MapTablesTo)
 			// decrRef is added below.
