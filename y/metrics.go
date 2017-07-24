@@ -22,27 +22,19 @@ import (
 
 var (
 	// These are cummulative
-	NumGets                   *expvar.Int
-	NumPuts                   *expvar.Int
-	NumReads                  *expvar.Int
-	NumWrites                 *expvar.Int
-	NumCompactLogReads        *expvar.Int
-	NumCompactLogWrites       *expvar.Int
-	NumCompactLogBytesRead    *expvar.Int
-	NumCompactLogBytesWritten *expvar.Int
-	NumBytesRead              *expvar.Int
-	NumBytesWritten           *expvar.Int
+	NumGets         *expvar.Int
+	NumPuts         *expvar.Int
+	NumReads        *expvar.Int
+	NumWrites       *expvar.Int
+	NumBytesRead    *expvar.Int
+	NumBytesWritten *expvar.Int
 )
 
 func init() {
 	NumReads = expvar.NewInt("NumBadgerDiskReads")
 	NumWrites = expvar.NewInt("NumBadgerDiskWrites")
-	NumCompactLogReads = expvar.NewInt("NumCompactLogDiskReads")
-	NumCompactLogWrites = expvar.NewInt("NumCompactLogDiskWrites")
 	NumGets = expvar.NewInt("NumBadgerGets")
 	NumPuts = expvar.NewInt("NumBadgerPuts")
-	NumCompactLogBytesRead = expvar.NewInt("CompactLogBytesRead")
-	NumCompactLogBytesWritten = expvar.NewInt("CompactLogBytesWritten")
 	NumBytesRead = expvar.NewInt("BadgerBytesRead")
 	NumBytesWritten = expvar.NewInt("BadgerBytesWritten")
 }

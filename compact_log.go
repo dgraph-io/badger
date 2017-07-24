@@ -78,8 +78,6 @@ func (s *compactLog) add(c *compaction) error {
 	}
 	b := buf.Bytes()
 	nbw, err := s.fd.Write(b) // Write in one sync.
-	y.NumCompactLogBytesWritten.Add(int64(nbw))
-	y.NumCompactLogWrites.Add(1)
 	return err
 }
 
@@ -105,8 +103,6 @@ func compactLogIterate(filename string, f func(c *compaction)) error {
 		if err != nil {
 			return err
 		}
-		y.NumCompactLogBytesRead.Add(int64(nbr))
-		y.NumCompactLogReads.Add(1)
 		c.done = buf[0]
 		if c.done == 0 {
 			if err := binary.Read(fd, binary.BigEndian, &size); err != nil {
