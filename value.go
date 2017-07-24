@@ -250,7 +250,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		}
 		if vp.Fid == f.fid && vp.Offset == e.offset {
 			// This new entry only contains the key, and a pointer to the value.
-			var ne Entry
+			ne := new(Entry)
 			y.AssertTruef(e.Meta&^BitCompressed == 0, "Got meta: %v", e.Meta)
 			ne.Meta = e.Meta & (^BitCompressed)
 			ne.Key = make([]byte, len(e.Key))
@@ -258,8 +258,8 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
 			ne.CASCounterCheck = vs.CASCounter // CAS counter check. Do not rewrite if key has a newer value.
-			wb = append(wb, &ne)
-			size += int64(vlog.kv.estimateSize(&ne))
+			wb = append(wb, ne)
+			size += int64(vlog.opt.estimateSize(ne))
 			if size >= 64*M {
 				elog.Printf("request has %d entries, size %d", len(wb), size)
 				if err := vlog.kv.BatchSet(wb); err != nil {
