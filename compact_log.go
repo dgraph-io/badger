@@ -78,6 +78,7 @@ func (s *compactLog) add(c *compaction) error {
 	}
 	b := buf.Bytes()
 	_, err := s.fd.Write(b) // Write in one sync.
+	y.NumWrites.Add(1)
 	return err
 }
 

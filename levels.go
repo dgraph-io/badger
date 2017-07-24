@@ -299,6 +299,7 @@ func (s *levelsController) compactBuildTables(
 				che <- errors.Wrapf(err, "Unable to write to file: %d", fileID)
 				return
 			}
+			y.NumWrites.Add(1)
 
 			newTables[idx], err = table.OpenTable(fd, s.kv.opt.MapTablesTo)
 			// decrRef is added below.

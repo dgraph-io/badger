@@ -81,6 +81,7 @@ func (lf *logFile) read(buf []byte, offset int64) error {
 	defer lf.RUnlock()
 
 	_, err := lf.fd.ReadAt(buf, offset)
+	y.NumReads.Add(1)
 	return err
 }
 
@@ -640,6 +641,7 @@ func (l *valueLog) write(reqs []*request) error {
 		if err != nil {
 			return errors.Wrapf(err, "Unable to write to value log file: %q", curlf.path)
 		}
+		y.NumWrites.Add(1)
 		l.elog.Printf("Done")
 		curlf.offset += uint32(n)
 		l.buf.Reset()
