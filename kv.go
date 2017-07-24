@@ -110,6 +110,14 @@ var DefaultOptions = Options{
 	ValueThreshold:           20,
 }
 
+func (opt *Options) estimateSize(entry *Entry) int {
+	if len(entry.Value) < opt.ValueThreshold {
+		// 3 is for cas + meta
+		return len(entry.Key) + len(entry.Value) + 3
+	}
+	return len(entry.Key) + 16 + 3
+}
+
 // KV provides the various functions required to interact with Badger.
 // KV is thread-safe.
 type KV struct {
@@ -693,14 +701,6 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 	}
 }
 
-func (s *KV) estimateSize(entry *Entry) int {
-	if len(entry.Value) < s.opt.ValueThreshold {
-		// 3 is for cas + meta
-		return len(entry.Key) + len(entry.Value) + 3
-	}
-	return len(entry.Key) + 16 + 3
-}
-
 func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 	var reqs []*request
 	var size int64
@@ -712,7 +712,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 			b.Wg = sync.WaitGroup{}
 			b.Wg.Add(1)
 		}
-		size += int64(s.estimateSize(entry))
+		size += int64(s.opt.estimateSize(entry))
 		b.Entries = append(b.Entries, entry)
 		if size >= s.opt.maxBatchSize {
 			s.writeCh <- b

@@ -212,7 +212,9 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	defer elog.Finish()
 	elog.Printf("Rewriting fid: %d", f.fid)
 
-	vlog.entries = vlog.entries[:0]
+	wb := make([]*Entry, 0, 1000)
+	var size int64
+
 	y.AssertTrue(vlog.kv != nil)
 	var count int
 	fe := func(e Entry) error {
@@ -248,7 +250,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		}
 		if vp.Fid == f.fid && vp.Offset == e.offset {
 			// This new entry only contains the key, and a pointer to the value.
-			var ne Entry
+			ne := new(Entry)
 			y.AssertTruef(e.Meta&^BitCompressed == 0, "Got meta: %v", e.Meta)
 			ne.Meta = e.Meta & (^BitCompressed)
 			ne.Key = make([]byte, len(e.Key))
@@ -256,8 +258,16 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
 			ne.CASCounterCheck = vs.CASCounter // CAS counter check. Do not rewrite if key has a newer value.
-			vlog.entries = append(vlog.entries, &ne)
-
+			wb = append(wb, ne)
+			size += int64(vlog.opt.estimateSize(ne))
+			if size >= 64*M {
+				elog.Printf("request has %d entries, size %d", len(wb), size)
+				if err := vlog.kv.BatchSet(wb); err != nil {
+					return err
+				}
+				size = 0
+				wb = wb[:0]
+			}
 		} else {
 			// This can now happen because we can move some entries forward, but then not write
 			// them to LSM tree due to CAS check failure.
@@ -272,15 +282,13 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		return err
 	}
 
-	elog.Printf("Processed %d entries in total", count)
-	// Sort the entries, so lookups can potentially use page cache better.
-	sort.Slice(vlog.entries, func(i, j int) bool {
-		return bytes.Compare(vlog.entries[i].Key, vlog.entries[j].Key) < 0
-	})
-
-	if len(vlog.entries) > 0 {
-		vlog.writeToKV(elog)
+	if len(wb) > 0 {
+		elog.Printf("request has %d entries, size %d", len(wb), size)
+		if err := vlog.kv.BatchSet(wb); err != nil {
+			return err
+		}
 	}
+	elog.Printf("Processed %d entries in total", count)
 
 	elog.Printf("Removing fid: %d", f.fid)
 	// Entries written to LSM. Remove the older file now.
@@ -300,35 +308,6 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	f.fd.Close() // close file previous to remove it
 	elog.Printf("Removing %s", rem)
 	return os.Remove(rem)
-}
-
-func (vlog *valueLog) writeToKV(elog trace.EventLog) {
-	req := &request{
-		Wg:      sync.WaitGroup{},
-		Entries: make([]*Entry, 0, 1000),
-	}
-	requests := make([]*request, 0, 10)
-	requests = append(requests, req)
-	for _, e := range vlog.entries {
-		if len(req.Entries) >= 1000 {
-			req = &request{
-				Wg:      sync.WaitGroup{},
-				Entries: make([]*Entry, 0, 1000),
-			}
-			requests = append(requests, req)
-		}
-		req.Entries = append(req.Entries, e)
-	}
-	for i, b := range requests {
-		elog.Printf("req %d has %d entries", i, len(b.Entries))
-		b.Wg.Add(1)
-		y.AssertTruef(len(b.Entries) > 0, "len(requests): %d", len(requests))
-		vlog.kv.writeCh <- b // Write out these blocks with newer value offsets.
-	}
-	for i, b := range requests {
-		elog.Printf("req %d done", i)
-		b.Wg.Wait()
-	}
 }
 
 // Entry provides Key, Value and if required, CASCounterCheck to kv.BatchSet() API.
@@ -464,7 +443,6 @@ type valueLog struct {
 	opt     Options
 
 	encoder *entryEncoder
-	entries []*Entry
 }
 
 func (l *valueLog) fpath(fid uint16) string {
