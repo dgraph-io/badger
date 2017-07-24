@@ -22,15 +22,15 @@ import (
 
 var (
 	// These are cumulative
-	NumGets           *expvar.Int
-	NumPuts           *expvar.Int
-	NumReads          *expvar.Int
-	NumWrites         *expvar.Int
-	NumBytesRead      *expvar.Int
-	NumBytesWritten   *expvar.Int
-	NumMemtableGets   *expvar.Int
-	NumMemtableHits   *expvar.Map
-	NumMemtableMisses *expvar.Map
+	NumGets         *expvar.Int
+	NumPuts         *expvar.Int
+	NumReads        *expvar.Int
+	NumWrites       *expvar.Int
+	NumBytesRead    *expvar.Int
+	NumBytesWritten *expvar.Int
+	NumMemtableGets *expvar.Int
+	NumLSMGets      *expvar.Map
+	NumLSMBloomHits *expvar.Map
 )
 
 func init() {
@@ -41,6 +41,6 @@ func init() {
 	NumGets = expvar.NewInt("badger_gets_total")
 	NumPuts = expvar.NewInt("badger_puts_total")
 	NumMemtableGets = expvar.NewInt("badger_memtable_gets_total")
-	NumMemtableHits = expvar.NewMap("badger_memtable_level_hit_total")
-	NumMemtableMisses = expvar.NewMap("badger_memtable_level_misses_total")
+	NumLSMGets = expvar.NewMap("badger_lsm_level_gets_total")
+	NumLSMBloomHits = expvar.NewMap("badger_lsm_bloom_hits_total")
 }

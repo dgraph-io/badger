@@ -222,22 +222,22 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 
 	for _, th := range tables {
 		if th.DoesNotHave(key) {
+			y.NumLSMBloomHits.Add(s.strLevel, 1)
 			continue
 		}
 
 		it := th.NewIterator(false)
 		defer it.Close()
 
+		y.NumLSMGets.Add(s.strLevel, 1)
 		it.Seek(key)
 		if !it.Valid() {
 			continue
 		}
 		if bytes.Equal(key, it.Key()) {
-			y.NumMemtableHits.Add(s.strLevel, 1)
 			return it.Value(), decr()
 		}
 	}
-	y.NumMemtableMisses.Add(s.strLevel, 1)
 	return y.ValueStruct{}, decr()
 }
 
