@@ -212,7 +212,12 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	defer elog.Finish()
 	elog.Printf("Rewriting fid: %d", f.fid)
 
-	vlog.entries = vlog.entries[:0]
+	req := &request{
+		Wg: sync.WaitGroup{},
+	}
+	requests := make([]*sync.WaitGroup, 0, 10)
+	requests = append(requests, &req.Wg)
+
 	y.AssertTrue(vlog.kv != nil)
 	var count int
 	fe := func(e Entry) error {
@@ -256,7 +261,16 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
 			ne.CASCounterCheck = vs.CASCounter // CAS counter check. Do not rewrite if key has a newer value.
-			vlog.entries = append(vlog.entries, &ne)
+			req.Entries = append(req.Entries, &ne)
+			if len(req.Entries) >= 1000 {
+				elog.Printf("request has %d entries", len(req.Entries))
+				req.Wg.Add(1)
+				vlog.kv.writeCh <- req
+				req = &request{
+					Wg: sync.WaitGroup{},
+				}
+				requests = append(requests, &req.Wg)
+			}
 
 		} else {
 			// This can now happen because we can move some entries forward, but then not write
@@ -272,14 +286,18 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		return err
 	}
 
-	elog.Printf("Processed %d entries in total", count)
-	// Sort the entries, so lookups can potentially use page cache better.
-	sort.Slice(vlog.entries, func(i, j int) bool {
-		return bytes.Compare(vlog.entries[i].Key, vlog.entries[j].Key) < 0
-	})
+	if len(req.Entries) > 0 {
+		elog.Printf("request has %d entries", len(req.Entries))
+		req.Wg.Add(1)
+		vlog.kv.writeCh <- req
+	} else {
+		requests = requests[:len(requests)-1]
+	}
 
-	if len(vlog.entries) > 0 {
-		vlog.writeToKV(elog)
+	elog.Printf("Processed %d entries in total", count)
+	for i, wg := range requests {
+		wg.Wait()
+		elog.Printf("requests %d done", i)
 	}
 
 	elog.Printf("Removing fid: %d", f.fid)
@@ -300,35 +318,6 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	f.fd.Close() // close file previous to remove it
 	elog.Printf("Removing %s", rem)
 	return os.Remove(rem)
-}
-
-func (vlog *valueLog) writeToKV(elog trace.EventLog) {
-	req := &request{
-		Wg:      sync.WaitGroup{},
-		Entries: make([]*Entry, 0, 1000),
-	}
-	requests := make([]*request, 0, 10)
-	requests = append(requests, req)
-	for _, e := range vlog.entries {
-		if len(req.Entries) >= 1000 {
-			req = &request{
-				Wg:      sync.WaitGroup{},
-				Entries: make([]*Entry, 0, 1000),
-			}
-			requests = append(requests, req)
-		}
-		req.Entries = append(req.Entries, e)
-	}
-	for i, b := range requests {
-		elog.Printf("req %d has %d entries", i, len(b.Entries))
-		b.Wg.Add(1)
-		y.AssertTruef(len(b.Entries) > 0, "len(requests): %d", len(requests))
-		vlog.kv.writeCh <- b // Write out these blocks with newer value offsets.
-	}
-	for i, b := range requests {
-		elog.Printf("req %d done", i)
-		b.Wg.Wait()
-	}
 }
 
 // Entry provides Key, Value and if required, CASCounterCheck to kv.BatchSet() API.
@@ -464,7 +453,6 @@ type valueLog struct {
 	opt     Options
 
 	encoder *entryEncoder
-	entries []*Entry
 }
 
 func (l *valueLog) fpath(fid uint16) string {
