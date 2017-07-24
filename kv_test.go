@@ -713,43 +713,6 @@ func TestSetIfAbsent(t *testing.T) {
 	require.EqualError(t, err, KeyExists.Error())
 }
 
-func TestTouch(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
-	opt := getTestOptions(dir)
-	kv, err := NewKV(opt)
-	require.NoError(t, err)
-
-	key := []byte("k1")
-	err = kv.Set(key, []byte("val"))
-	require.NoError(t, err)
-
-	err = kv.Touch(key)
-	require.NoError(t, err)
-
-	key = []byte("k2")
-	err = kv.Touch(key)
-	require.NoError(t, err)
-	// Make sure the value created by Touch is an byte slice of length 0.
-	item := KVItem{}
-	require.NoError(t, kv.Get(key, &item))
-	require.NotNil(t, item.Value())
-	require.Equal(t, 0, len(item.Value()))
-
-	key = []byte("k3")
-	err = kv.Set(key, []byte("val"))
-	require.NoError(t, err)
-
-	iterOpt := DefaultIteratorOptions
-	iterOpt.FetchValues = false
-
-	it := kv.NewIterator(iterOpt)
-	var count int
-	for it.Rewind(); it.Valid(); it.Next() {
-		count++
-	}
-	require.Equal(t, 3, count)
-}
-
 func BenchmarkExists(b *testing.B) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(b, err)

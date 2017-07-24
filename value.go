@@ -41,11 +41,10 @@ import (
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete       byte  = 1  // Set if the key has been deleted.
-	BitValuePointer byte  = 2  // Set if the value is NOT stored directly next to key.
-	BitCompressed   byte  = 4  // Set if the key value pair is stored compressed in value log.
-	BitTouch        byte  = 8  // Set if the key is set using GetOrTouch.
-	BitSetIfAbsent  byte  = 16 // Set if the key is set using SetIfAbsent.
+	BitDelete       byte  = 1 // Set if the key has been deleted.
+	BitValuePointer byte  = 2 // Set if the value is NOT stored directly next to key.
+	BitCompressed   byte  = 4 // Set if the key value pair is stored compressed in value log.
+	BitSetIfAbsent  byte  = 8 // Set if the key is set using SetIfAbsent.
 	M               int64 = 1 << 20
 )
 
@@ -683,7 +682,7 @@ func (l *valueLog) write(reqs []*request) error {
 			y.AssertTruef(e.Meta&BitCompressed == 0, "Cannot set BitCompressed outside valueLog")
 			var p valuePointer
 
-			if (!l.opt.SyncWrites && len(e.Value) < l.opt.ValueThreshold) || e.Meta == BitTouch {
+			if !l.opt.SyncWrites && len(e.Value) < l.opt.ValueThreshold {
 				// No need to write to value log.
 				b.Ptrs = append(b.Ptrs, p)
 				continue
