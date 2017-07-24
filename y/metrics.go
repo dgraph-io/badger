@@ -21,20 +21,26 @@ import (
 )
 
 var (
-	// These are cummulative
-	NumGets         *expvar.Int
-	NumPuts         *expvar.Int
-	NumReads        *expvar.Int
-	NumWrites       *expvar.Int
-	NumBytesRead    *expvar.Int
-	NumBytesWritten *expvar.Int
+	// These are cumulative
+	NumGets           *expvar.Int
+	NumPuts           *expvar.Int
+	NumReads          *expvar.Int
+	NumWrites         *expvar.Int
+	NumBytesRead      *expvar.Int
+	NumBytesWritten   *expvar.Int
+	NumMemtableGets   *expvar.Int
+	NumMemtableHits   *expvar.Map
+	NumMemtableMisses *expvar.Map
 )
 
 func init() {
-	NumReads = expvar.NewInt("NumBadgerDiskReads")
-	NumWrites = expvar.NewInt("NumBadgerDiskWrites")
-	NumGets = expvar.NewInt("NumBadgerGets")
-	NumPuts = expvar.NewInt("NumBadgerPuts")
-	NumBytesRead = expvar.NewInt("BadgerBytesRead")
-	NumBytesWritten = expvar.NewInt("BadgerBytesWritten")
+	NumReads = expvar.NewInt("badger_disk_reads_total")
+	NumWrites = expvar.NewInt("badger_disk_writes_total")
+	NumBytesRead = expvar.NewInt("badger_read_bytes")
+	NumBytesWritten = expvar.NewInt("badger_written_bytes")
+	NumGets = expvar.NewInt("badger_gets_total")
+	NumPuts = expvar.NewInt("badger_puts_total")
+	NumMemtableGets = expvar.NewInt("badger_memtable_gets_total")
+	NumMemtableHits = expvar.NewMap("badger_memtable_level_hit_total")
+	NumMemtableMisses = expvar.NewMap("badger_memtable_level_misses_total")
 }

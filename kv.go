@@ -449,6 +449,7 @@ func (s *KV) get(key []byte) (y.ValueStruct, error) {
 	y.NumGets.Add(1)
 	for i := 0; i < len(tables); i++ {
 		vs := tables[i].Get(key)
+		y.NumMemtableGets.Add(1)
 		if vs.Meta != 0 || vs.Value != nil {
 			return vs, nil
 		}
@@ -715,9 +716,9 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 		}
 		size += int64(s.estimateSize(entry))
 		b.Entries = append(b.Entries, entry)
-		y.NumPuts.Add(1)
 		if size >= s.opt.maxBatchSize {
 			s.writeCh <- b
+			y.NumPuts.Add(int64(len(b.Entries)))
 			reqs = append(reqs, b)
 			size = 0
 			b = nil
@@ -726,6 +727,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 
 	if size > 0 {
 		s.writeCh <- b
+		y.NumPuts.Add(int64(len(b.Entries)))
 		reqs = append(reqs, b)
 	}
 	return reqs

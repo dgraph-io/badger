@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 
 	"github.com/dgraph-io/badger/table"
@@ -37,6 +38,7 @@ type levelHandler struct {
 
 	// The following are initialized once and const.
 	level        int
+	strLevel     string
 	maxTotalSize int64
 	kv           *KV
 }
@@ -138,8 +140,9 @@ func (s *levelHandler) replaceTables(newTables []*table.Table) {
 
 func newLevelHandler(kv *KV, level int) *levelHandler {
 	return &levelHandler{
-		level: level,
-		kv:    kv,
+		level:    level,
+		strLevel: fmt.Sprintf("%d", level),
+		kv:       kv,
 	}
 }
 
@@ -230,9 +233,11 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 			continue
 		}
 		if bytes.Equal(key, it.Key()) {
+			y.NumMemtableHits.Add(s.strLevel, 1)
 			return it.Value(), decr()
 		}
 	}
+	y.NumMemtableMisses.Add(s.strLevel, 1)
 	return y.ValueStruct{}, decr()
 }
 

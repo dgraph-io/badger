@@ -77,7 +77,7 @@ func (s *compactLog) add(c *compaction) error {
 		}
 	}
 	b := buf.Bytes()
-	nbw, err := s.fd.Write(b) // Write in one sync.
+	_, err := s.fd.Write(b) // Write in one sync.
 	return err
 }
 
@@ -99,8 +99,7 @@ func compactLogIterate(filename string, f func(c *compaction)) error {
 		if err != nil {
 			return err
 		}
-		nbr, err := fd.Read(buf[:1])
-		if err != nil {
+		if _, err = fd.Read(buf[:1]); err != nil {
 			return err
 		}
 		c.done = buf[0]

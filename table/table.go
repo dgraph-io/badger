@@ -190,9 +190,7 @@ func (t *Table) Close() error {
 func (t *Table) SetMetadata(meta []byte) error {
 	y.AssertTrue(len(meta) == len(t.metadata))
 	pos := t.tableSize - 4 - len(t.metadata)
-	nbw, err := t.fd.WriteAt(meta, int64(pos))
-	y.NumWrites.Add(1)
-	y.NumBytesWritten.Add(int64(nbw))
+	_, err := t.fd.WriteAt(meta, int64(pos))
 	return y.Wrap(err)
 }
 
