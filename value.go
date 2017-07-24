@@ -212,11 +212,8 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	defer elog.Finish()
 	elog.Printf("Rewriting fid: %d", f.fid)
 
-	req := &request{
-		Wg: sync.WaitGroup{},
-	}
-	requests := make([]*sync.WaitGroup, 0, 10)
-	requests = append(requests, &req.Wg)
+	wb := make([]*Entry, 0, 1000)
+	var size int64
 
 	y.AssertTrue(vlog.kv != nil)
 	var count int
@@ -261,17 +258,16 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
 			ne.CASCounterCheck = vs.CASCounter // CAS counter check. Do not rewrite if key has a newer value.
-			req.Entries = append(req.Entries, &ne)
-			if len(req.Entries) >= 1000 {
-				elog.Printf("request has %d entries", len(req.Entries))
-				req.Wg.Add(1)
-				vlog.kv.writeCh <- req
-				req = &request{
-					Wg: sync.WaitGroup{},
+			wb = append(wb, &ne)
+			size += int64(vlog.kv.estimateSize(&ne))
+			if size >= 64*M {
+				elog.Printf("request has %d entries, size %d", len(wb), size)
+				if err := vlog.kv.BatchSet(wb); err != nil {
+					return err
 				}
-				requests = append(requests, &req.Wg)
+				size = 0
+				wb = wb[:0]
 			}
-
 		} else {
 			// This can now happen because we can move some entries forward, but then not write
 			// them to LSM tree due to CAS check failure.
@@ -286,19 +282,13 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		return err
 	}
 
-	if len(req.Entries) > 0 {
-		elog.Printf("request has %d entries", len(req.Entries))
-		req.Wg.Add(1)
-		vlog.kv.writeCh <- req
-	} else {
-		requests = requests[:len(requests)-1]
+	if len(wb) > 0 {
+		elog.Printf("request has %d entries, size %d", len(wb), size)
+		if err := vlog.kv.BatchSet(wb); err != nil {
+			return err
+		}
 	}
-
 	elog.Printf("Processed %d entries in total", count)
-	for i, wg := range requests {
-		wg.Wait()
-		elog.Printf("requests %d done", i)
-	}
 
 	elog.Printf("Removing fid: %d", f.fid)
 	// Entries written to LSM. Remove the older file now.
