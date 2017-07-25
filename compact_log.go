@@ -99,7 +99,7 @@ func compactLogIterate(filename string, f func(c *compaction)) error {
 		if err != nil {
 			return err
 		}
-		if _, err := fd.Read(buf[:1]); err != nil {
+		if _, err = fd.Read(buf[:1]); err != nil {
 			return err
 		}
 		c.done = buf[0]

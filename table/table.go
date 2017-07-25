@@ -213,7 +213,9 @@ func (t *Table) read(off int, sz int) ([]byte, error) {
 	}
 
 	res := make([]byte, sz)
-	_, err := t.fd.ReadAt(res, int64(off))
+	nbr, err := t.fd.ReadAt(res, int64(off))
+	y.NumReads.Add(1)
+	y.NumBytesRead.Add(int64(nbr))
 	return res, err
 }
 
@@ -363,5 +365,7 @@ func (t *Table) LoadToRAM() error {
 	if err != nil || read != t.tableSize {
 		return y.Wrapf(err, "Unable to load file in memory. Table file: %s", t.Filename())
 	}
+	y.NumReads.Add(1)
+	y.NumBytesRead.Add(int64(read))
 	return nil
 }
