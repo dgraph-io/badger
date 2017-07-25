@@ -21,5 +21,5 @@ import (
 )
 
 func init() {
-	syncFileFlag = syscall.O_SYNC
+	datasyncFileFlag = syscall.O_SYNC
 }
