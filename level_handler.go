@@ -141,7 +141,7 @@ func (s *levelHandler) replaceTables(newTables []*table.Table) {
 func newLevelHandler(kv *KV, level int) *levelHandler {
 	return &levelHandler{
 		level:    level,
-		strLevel: fmt.Sprintf("L%d", level),
+		strLevel: fmt.Sprintf("l%d", level),
 		kv:       kv,
 	}
 }
