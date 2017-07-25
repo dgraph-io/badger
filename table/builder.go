@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"io"
 	"math"
+	"sync"
 
 	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/y"
@@ -29,36 +30,14 @@ import (
 //var tableSize int64 = 50 << 20
 var (
 	restartInterval int = 100 // Might want to change this to be based on total size instead of numKeys.
-	bufPool             = new(bufferPool)
 )
 
-func init() {
-	bufPool.Ch = make(chan *bytes.Buffer, 10)
-}
-
-type bufferPool struct {
-	Ch chan *bytes.Buffer
-}
-
-func (p *bufferPool) Put(b *bytes.Buffer) {
-	b.Reset()
-
-	select {
-	case p.Ch <- b:
-	default:
-		// ignore
-	}
-}
-
-func (p *bufferPool) Get() *bytes.Buffer {
-	select {
-	case b := <-p.Ch:
-		return b
-	default:
+var bufPool = sync.Pool{
+	New: func() interface{} {
 		b := new(bytes.Buffer)
 		b.Grow(64 << 20)
 		return b
-	}
+	},
 }
 
 type header struct {
@@ -108,14 +87,16 @@ type TableBuilder struct {
 
 func NewTableBuilder() *TableBuilder {
 	return &TableBuilder{
-		keyBuf:     bufPool.Get(),
-		buf:        bufPool.Get(),
+		keyBuf:     bufPool.Get().(*bytes.Buffer),
+		buf:        bufPool.Get().(*bytes.Buffer),
 		prevOffset: math.MaxUint32, // Used for the first element!
 	}
 }
 
 // Close closes the TableBuilder. Do not use buf field anymore.
 func (b *TableBuilder) Close() {
+	b.buf.Reset()
+	b.keyBuf.Reset()
 	bufPool.Put(b.buf)
 	bufPool.Put(b.keyBuf)
 }

@@ -188,6 +188,87 @@ func TestValueGC(t *testing.T) {
 	}
 }
 
+func TestValueGC2(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opt := getTestOptions(dir)
+	opt.ValueLogFileSize = 1 << 20
+
+	kv, _ := NewKV(opt)
+	defer kv.Close()
+
+	sz := 32 << 10
+	var entries []*Entry
+	for i := 0; i < 100; i++ {
+		v := make([]byte, sz)
+		rand.Read(v[:rand.Intn(sz)]) // some values can be compressed
+		entries = append(entries, &Entry{
+			Key:   []byte(fmt.Sprintf("key%d", i)),
+			Value: v,
+		})
+	}
+	kv.BatchSet(entries)
+	for _, e := range entries {
+		require.NoError(t, e.Error, "entry with error: %+v", e)
+	}
+
+	for i := 0; i < 5; i++ {
+		kv.Delete([]byte(fmt.Sprintf("key%d", i)))
+	}
+
+	entries = entries[:0]
+	for i := 5; i < 10; i++ {
+		v := []byte(fmt.Sprintf("value%d", i))
+		entries = append(entries, &Entry{
+			Key:   []byte(fmt.Sprintf("key%d", i)),
+			Value: v,
+		})
+	}
+	kv.BatchSet(entries)
+	for _, e := range entries {
+		require.NoError(t, e.Error, "entry with error: %+v", e)
+	}
+
+	kv.vlog.RLock()
+	lf := kv.vlog.files[0]
+	kv.vlog.RUnlock()
+
+	//	lf.iterate(0, func(e Entry) bool {
+	//		e.print("lf")
+	//		return true
+	//	})
+
+	kv.vlog.rewrite(lf)
+	var item KVItem
+	for i := 0; i < 5; i++ {
+		key := []byte(fmt.Sprintf("key%d", i))
+		if err := kv.Get(key, &item); err != nil {
+			t.Error(err)
+		}
+		val := item.Value()
+		require.True(t, len(val) == 0, "Size found: %d", len(val))
+	}
+	for i := 5; i < 10; i++ {
+		key := []byte(fmt.Sprintf("key%d", i))
+		if err := kv.Get(key, &item); err != nil {
+			t.Error(err)
+		}
+		val := item.Value()
+		require.NotNil(t, val)
+		require.Equal(t, string(val), fmt.Sprintf("value%d", i))
+	}
+	for i := 10; i < 100; i++ {
+		key := []byte(fmt.Sprintf("key%d", i))
+		if err := kv.Get(key, &item); err != nil {
+			t.Error(err)
+		}
+		val := item.Value()
+		require.NotNil(t, val)
+		require.True(t, len(val) == sz, "Size found: %d", len(val))
+	}
+}
+
 func BenchmarkReadWrite(b *testing.B) {
 	rwRatio := []float32{
 		0.1, 0.2, 0.5, 1.0,
