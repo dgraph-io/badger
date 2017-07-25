@@ -21,5 +21,5 @@ import (
 )
 
 func init() {
-	syncFileFlag = unix.O_SYNC
+	datasyncFileFlag = unix.O_SYNC
 }
