@@ -484,25 +484,6 @@ func (s *KV) Get(key []byte, item *KVItem) error {
 	return nil
 }
 
-// Touch looks for key, if it finds it then it returns
-// else it puts the key and the value of an empty byte slice in the LSM tree.
-func (s *KV) Touch(key []byte) error {
-	exists, err := s.Exists(key)
-	if err != nil {
-		return err
-	}
-	// Found the key, return.
-	if exists {
-		return nil
-	}
-
-	e := &Entry{
-		Key:  key,
-		Meta: BitTouch,
-	}
-	return s.BatchSet([]*Entry{e})
-}
-
 // Exists looks if a key exists. Returns true if the
 // key exists otherwises return false. if err is not nil an error occurs during
 // the key lookup and the existence of the key is unknown
@@ -567,7 +548,7 @@ func (s *KV) writeToLSM(b *request) error {
 			}
 		}
 
-		if entry.Meta == BitTouch {
+		if entry.Meta == BitSetIfAbsent {
 			// Someone else might have written a value, so lets check again if key exists.
 			exists, err := s.Exists(entry.Key)
 			if err != nil {
@@ -575,6 +556,7 @@ func (s *KV) writeToLSM(b *request) error {
 			}
 			// Value already exists, don't write.
 			if exists {
+				entry.Error = KeyExists
 				continue
 			}
 		}
@@ -786,6 +768,29 @@ func (s *KV) SetAsync(key, val []byte, f func(error)) {
 		Value: val,
 	}
 	s.BatchSetAsync([]*Entry{e}, f)
+}
+
+// SetIfAbsent sets value of key if key is not present.
+// If it is present, it returns the KeyExists error.
+func (s *KV) SetIfAbsent(key, val []byte) error {
+	exists, err := s.Exists(key)
+	if err != nil {
+		return err
+	}
+	// Found the key, return KeyExists
+	if exists {
+		return KeyExists
+	}
+
+	e := &Entry{
+		Key:   key,
+		Meta:  BitSetIfAbsent,
+		Value: val,
+	}
+	if err := s.BatchSet([]*Entry{e}); err != nil {
+		return err
+	}
+	return e.Error
 }
 
 // EntriesSet adds a Set to the list of entries.
