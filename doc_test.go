@@ -35,7 +35,7 @@ func Example() {
 
 	key := []byte("hello")
 
-	kv.Set(key, []byte("world"))
+	kv.Set(key, []byte("world"), 0x00)
 	fmt.Printf("SET %s world\n", key)
 
 	var item badger.KVItem

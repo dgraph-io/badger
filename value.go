@@ -127,7 +127,7 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 	}
 
 	reader := bufio.NewReader(f.fd)
-	var hbuf [13]byte
+	var hbuf [14]byte
 	var h header
 	var count int
 	k := make([]byte, 1<<10)
@@ -161,6 +161,7 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 			}
 
 			e.Meta = h.meta
+			e.UserMeta = h.userMeta
 			e.casCounter = h.casCounter
 			e.CASCounterCheck = h.casCounterCheck
 			e.Key = decompressed[:h.klen]
@@ -181,6 +182,7 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 				return err
 			}
 			e.Meta = h.meta
+			e.UserMeta = h.userMeta
 			e.casCounter = h.casCounter
 			e.CASCounterCheck = h.casCounterCheck
 			if err = read(reader, e.Value); err != nil {
@@ -254,6 +256,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			ne := new(Entry)
 			y.AssertTruef(e.Meta&^BitCompressed == 0, "Got meta: %v", e.Meta)
 			ne.Meta = e.Meta & (^BitCompressed)
+			ne.UserMeta = e.UserMeta
 			ne.Key = make([]byte, len(e.Key))
 			copy(ne.Key, e.Key)
 			ne.Value = make([]byte, len(e.Value))
@@ -317,6 +320,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 type Entry struct {
 	Key             []byte
 	Meta            byte
+	UserMeta        byte
 	Value           []byte
 	CASCounterCheck uint16 // If nonzero, we will check if existing casCounter matches.
 	Error           error  // Error if any.
@@ -335,7 +339,7 @@ type entryEncoder struct {
 // Encodes e to buf either plain or compressed.
 // Returns number of bytes written.
 func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) (int, error) {
-	var headerEnc [13]byte
+	var headerEnc [14]byte
 	var h header
 
 	if int32(len(e.Key)+len(e.Value)) > enc.opt.ValueCompressionMinSize {
@@ -355,6 +359,7 @@ func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) (int, error) {
 			h.klen = uint32(len(e.Key))
 			h.vlen = uint32(len(enc.compressed))
 			h.meta = e.Meta | BitCompressed
+			h.userMeta = e.UserMeta
 			h.casCounter = e.casCounter
 			h.casCounterCheck = e.CASCounterCheck
 			h.Encode(headerEnc[:])
@@ -368,6 +373,7 @@ func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) (int, error) {
 	h.klen = uint32(len(e.Key))
 	h.vlen = uint32(len(e.Value))
 	h.meta = e.Meta
+	h.userMeta = e.UserMeta
 	h.casCounter = e.casCounter
 	h.casCounterCheck = e.CASCounterCheck
 	h.Encode(headerEnc[:])
@@ -379,25 +385,27 @@ func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) (int, error) {
 }
 
 func (e Entry) print(prefix string) {
-	fmt.Printf("%s Key: %s Meta: %d Offset: %d len(val)=%d cas=%d check=%d\n",
-		prefix, e.Key, e.Meta, e.offset, len(e.Value), e.casCounter, e.CASCounterCheck)
+	fmt.Printf("%s Key: %s Meta: %d UserMeta: %d Offset: %d len(val)=%d cas=%d check=%d\n",
+		prefix, e.Key, e.Meta, e.UserMeta, e.offset, len(e.Value), e.casCounter, e.CASCounterCheck)
 }
 
 type header struct {
 	klen            uint32
 	vlen            uint32 // len of value or length of compressed kv if entry stored compressed
 	meta            byte
+	userMeta        byte
 	casCounter      uint16
 	casCounterCheck uint16
 }
 
 func (h header) Encode(out []byte) {
-	y.AssertTrue(len(out) >= 13)
+	y.AssertTrue(len(out) >= 14)
 	binary.BigEndian.PutUint32(out[0:4], h.klen)
 	binary.BigEndian.PutUint32(out[4:8], h.vlen)
 	out[8] = h.meta
-	binary.BigEndian.PutUint16(out[9:11], h.casCounter)
-	binary.BigEndian.PutUint16(out[11:13], h.casCounterCheck)
+	out[9] = h.userMeta
+	binary.BigEndian.PutUint16(out[10:12], h.casCounter)
+	binary.BigEndian.PutUint16(out[12:14], h.casCounterCheck)
 }
 
 // Decodes h from buf. Returns buf without header and number of bytes read.
@@ -405,9 +413,10 @@ func (h *header) Decode(buf []byte) ([]byte, int) {
 	h.klen = binary.BigEndian.Uint32(buf[0:4])
 	h.vlen = binary.BigEndian.Uint32(buf[4:8])
 	h.meta = buf[8]
-	h.casCounter = binary.BigEndian.Uint16(buf[9:11])
-	h.casCounterCheck = binary.BigEndian.Uint16(buf[11:13])
-	return buf[13:], 13
+	h.userMeta = buf[9]
+	h.casCounter = binary.BigEndian.Uint16(buf[10:12])
+	h.casCounterCheck = binary.BigEndian.Uint16(buf[12:14])
+	return buf[14:], 14
 }
 
 type valuePointer struct {
@@ -729,6 +738,7 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	}
 	e.Key = buf[0:h.klen]
 	e.Meta = h.meta
+	e.UserMeta = h.userMeta
 	e.casCounter = h.casCounter
 	e.CASCounterCheck = h.casCounterCheck
 	e.Value = buf[h.klen : h.klen+h.vlen]

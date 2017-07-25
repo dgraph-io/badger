@@ -84,9 +84,9 @@ func TestCompactLogBasic(t *testing.T) {
 				fmt.Printf("Putting i=%d\n", i)
 			}
 			k := []byte(fmt.Sprintf("%16x", rand.Int63()))
-			kv.Set(k, k)
+			kv.Set(k, k, 0x00)
 		}
-		kv.Set([]byte("testkey"), []byte("testval"))
+		kv.Set([]byte("testkey"), []byte("testval"), 0x05)
 		kv.validate()
 		require.NoError(t, kv.Close())
 	}
@@ -99,6 +99,7 @@ func TestCompactLogBasic(t *testing.T) {
 		t.Error(err)
 	}
 	require.EqualValues(t, "testval", string(item.Value()))
+	require.EqualValues(t, byte(0x05), item.UserMeta())
 	require.NoError(t, kv.Close())
 }
 
@@ -137,7 +138,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	})
 	for i, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		err := b.Add([]byte(kv[0]), y.ValueStruct{[]byte(kv[1]), 'A', uint16(i)})
+		err := b.Add([]byte(kv[0]), y.ValueStruct{[]byte(kv[1]), 'A', uint16(i), 0})
 		if t != nil {
 			require.NoError(t, err)
 		} else {

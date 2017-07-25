@@ -112,10 +112,10 @@ var DefaultOptions = Options{
 
 func (opt *Options) estimateSize(entry *Entry) int {
 	if len(entry.Value) < opt.ValueThreshold {
-		// 3 is for cas + meta
-		return len(entry.Key) + len(entry.Value) + 3
+		// 4 is for cas + meta
+		return len(entry.Key) + len(entry.Value) + 4
 	}
-	return len(entry.Key) + 16 + 3
+	return len(entry.Key) + 16 + 4
 }
 
 // KV provides the various functions required to interact with Badger.
@@ -264,6 +264,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 		v := y.ValueStruct{
 			Value:      nv,
 			Meta:       meta,
+			UserMeta:   e.UserMeta,
 			CASCounter: e.casCounter,
 		}
 		for err := out.ensureRoomForWrite(); err != nil; err = out.ensureRoomForWrite() {
@@ -474,6 +475,7 @@ func (s *KV) Get(key []byte, item *KVItem) error {
 		item.slice = new(y.Slice)
 	}
 	item.meta = vs.Meta
+	item.userMeta = vs.UserMeta
 	item.casCounter = vs.CASCounter
 	item.key = key
 	item.vptr = vs.Value
@@ -566,12 +568,14 @@ func (s *KV) writeToLSM(b *request) error {
 				y.ValueStruct{
 					Value:      entry.Value,
 					Meta:       entry.Meta,
+					UserMeta:   entry.UserMeta,
 					CASCounter: entry.casCounter})
 		} else {
 			s.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:      b.Ptrs[i].Encode(offsetBuf[:]),
 					Meta:       entry.Meta | BitValuePointer,
+					UserMeta:   entry.UserMeta,
 					CASCounter: entry.casCounter})
 		}
 	}
@@ -751,10 +755,11 @@ func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
 
 // Set sets the provided value for a given key. If key is not present, it is created.
 // If it is present, the existing value is overwritten with the one provided.
-func (s *KV) Set(key, val []byte) error {
+func (s *KV) Set(key, val []byte, userMeta byte) error {
 	e := &Entry{
-		Key:   key,
-		Value: val,
+		Key:      key,
+		Value:    val,
+		UserMeta: userMeta,
 	}
 	return s.BatchSet([]*Entry{e})
 }
@@ -762,17 +767,18 @@ func (s *KV) Set(key, val []byte) error {
 // SetAsync is the asynchronous version of Set. It accepts a callback function which is called
 // when the set is complete. Any error encountered during execution is passed as an argument
 // to the callback function.
-func (s *KV) SetAsync(key, val []byte, f func(error)) {
+func (s *KV) SetAsync(key, val []byte, userMeta byte, f func(error)) {
 	e := &Entry{
-		Key:   key,
-		Value: val,
+		Key:      key,
+		Value:    val,
+		UserMeta: userMeta,
 	}
 	s.BatchSetAsync([]*Entry{e}, f)
 }
 
 // SetIfAbsent sets value of key if key is not present.
 // If it is present, it returns the KeyExists error.
-func (s *KV) SetIfAbsent(key, val []byte) error {
+func (s *KV) SetIfAbsent(key, val []byte, userMeta byte) error {
 	exists, err := s.Exists(key)
 	if err != nil {
 		return err
@@ -783,9 +789,10 @@ func (s *KV) SetIfAbsent(key, val []byte) error {
 	}
 
 	e := &Entry{
-		Key:   key,
-		Meta:  BitSetIfAbsent,
-		Value: val,
+		Key:      key,
+		Meta:     BitSetIfAbsent,
+		Value:    val,
+		UserMeta: userMeta,
 	}
 	if err := s.BatchSet([]*Entry{e}); err != nil {
 		return err
