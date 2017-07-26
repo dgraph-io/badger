@@ -138,7 +138,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	})
 	for i, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		err := b.Add([]byte(kv[0]), y.ValueStruct{[]byte(kv[1]), 'A', uint16(i), 0})
+		err := b.Add([]byte(kv[0]), y.ValueStruct{[]byte(kv[1]), 'A', 0, uint16(i)})
 		if t != nil {
 			require.NoError(t, err)
 		} else {

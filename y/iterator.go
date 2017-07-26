@@ -34,8 +34,8 @@ const (
 type ValueStruct struct {
 	Value      []byte
 	Meta       byte
-	CASCounter uint16
 	UserMeta   byte
+	CASCounter uint16
 }
 
 // Converts a value size to the full serialized size of value + metadata.
