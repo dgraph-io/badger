@@ -28,11 +28,6 @@ const (
 	MetaSize     = 1
 	UserMetaSize = 1
 	CasSize      = 2
-
-	ValueMetaOffset     = 0
-	ValueUserMetaOffset = ValueMetaOffset + MetaSize
-	ValueCasOffset      = ValueUserMetaOffset + UserMetaSize
-	ValueValueOffset    = ValueCasOffset + CasSize
 )
 
 var (

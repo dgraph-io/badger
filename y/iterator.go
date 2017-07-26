@@ -19,8 +19,16 @@ package y
 import (
 	"bytes"
 	"container/heap"
+	"encoding/binary"
 
 	"github.com/pkg/errors"
+)
+
+const (
+	ValueMetaOffset     = 0
+	ValueUserMetaOffset = ValueMetaOffset + MetaSize
+	ValueCasOffset      = ValueUserMetaOffset + UserMetaSize
+	ValueValueOffset    = ValueCasOffset + CasSize
 )
 
 type ValueStruct struct {
@@ -28,6 +36,21 @@ type ValueStruct struct {
 	Meta       byte
 	CASCounter uint16
 	UserMeta   byte
+}
+
+// Converts a value size to the full serialized size of value + metadata.
+func ValueStructSerializedSize(size uint16) int {
+	return int(size) + ValueValueOffset
+}
+
+// DecodeValueStruct uses the length of the slice to infer the length of the Value field.
+func DecodeValueStruct(b []byte) ValueStruct {
+	return ValueStruct{
+		Value:      b[ValueValueOffset:],
+		Meta:       b[ValueMetaOffset],
+		UserMeta:   b[ValueUserMetaOffset],
+		CASCounter: binary.BigEndian.Uint16(b[ValueCasOffset : ValueCasOffset+CasSize]),
+	}
 }
 
 // Iterator is an interface for a basic iterator.
