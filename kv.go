@@ -997,19 +997,13 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 		if ft.vptr.Fid > 0 || ft.vptr.Offset > 0 || ft.vptr.Len > 0 {
 			s.elog.Printf("Storing offset: %+v\n", ft.vptr)
 			offset := make([]byte, 10)
-			s.Lock() // For vptr.
+			s.Lock() // For vptr and casAsOfVptr.
 			s.vptr.Encode(offset)
 			casAsOfVptr := s.casAsOfVptr
 			s.Unlock()
-			// CAS counter is needed and is desirable -- it's the first value log entry
-			// we replay, so to speak, perhaps the only, and we use it to re-initialize
-			// the CAS counter.
-			//
-			// In the write loop, the s.vptr value gets updated _after_ the values are
-			// written to the value log.  This means we might store a !badger!head with
-			// a later CAS counter (because it's accessed atomically and not tied to
-			// the vptr value by any mechanism, and then replay value log entries with
-			// a smaller CAS counter.
+			// We write the CAS counter in !badger!head because we use it at startup
+			// when replaying the value log and reconstructing the last used CAS
+			// counter.
 			ft.mt.Put(head, y.ValueStruct{Value: offset, CASCounter: casAsOfVptr})
 		}
 		fileID, _ := s.lc.reserveFileIDs(1)
