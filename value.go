@@ -322,12 +322,12 @@ type Entry struct {
 	Meta            byte
 	UserMeta        byte
 	Value           []byte
-	CASCounterCheck uint16 // If nonzero, we will check if existing casCounter matches.
+	CASCounterCheck uint64 // If nonzero, we will check if existing casCounter matches.
 	Error           error  // Error if any.
 
 	// Fields maintained internally.
 	offset     uint32
-	casCounter uint16
+	casCounter uint64
 }
 
 type entryEncoder struct {
@@ -394,12 +394,12 @@ type header struct {
 	vlen            uint32 // len of value or length of compressed kv if entry stored compressed
 	meta            byte
 	userMeta        byte
-	casCounter      uint16
-	casCounterCheck uint16
+	casCounter      uint64
+	casCounterCheck uint64
 }
 
 const (
-	headerBufSize = 14
+	headerBufSize = 26
 )
 
 func (h header) Encode(out []byte) {
@@ -408,8 +408,8 @@ func (h header) Encode(out []byte) {
 	binary.BigEndian.PutUint32(out[4:8], h.vlen)
 	out[8] = h.meta
 	out[9] = h.userMeta
-	binary.BigEndian.PutUint16(out[10:12], h.casCounter)
-	binary.BigEndian.PutUint16(out[12:14], h.casCounterCheck)
+	binary.BigEndian.PutUint64(out[10:18], h.casCounter)
+	binary.BigEndian.PutUint64(out[18:26], h.casCounterCheck)
 }
 
 // Decodes h from buf. Returns buf without header and number of bytes read.
@@ -418,9 +418,9 @@ func (h *header) Decode(buf []byte) ([]byte, int) {
 	h.vlen = binary.BigEndian.Uint32(buf[4:8])
 	h.meta = buf[8]
 	h.userMeta = buf[9]
-	h.casCounter = binary.BigEndian.Uint16(buf[10:12])
-	h.casCounterCheck = binary.BigEndian.Uint16(buf[12:14])
-	return buf[14:], 14
+	h.casCounter = binary.BigEndian.Uint64(buf[10:18])
+	h.casCounterCheck = binary.BigEndian.Uint64(buf[18:26])
+	return buf[26:], 26
 }
 
 type valuePointer struct {

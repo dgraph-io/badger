@@ -134,7 +134,7 @@ func TestConcurrentBasic(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			l.Put([]byte(fmt.Sprintf("%05d", i)),
-				y.ValueStruct{newValue(i), 0, 0, uint16(i)})
+				y.ValueStruct{newValue(i), 0, 0, uint64(i)})
 		}(i)
 	}
 	wg.Wait()
@@ -165,7 +165,7 @@ func TestOneKey(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			l.Put(key, y.ValueStruct{newValue(i), 0, 0, uint16(i)})
+			l.Put(key, y.ValueStruct{newValue(i), 0, 0, uint64(i)})
 		}(i)
 	}
 	// We expect that at least some write made it such that some read returns a value.
@@ -195,7 +195,7 @@ func TestFindNear(t *testing.T) {
 	defer l.DecrRef()
 	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("%05d", i*10+5)
-		l.Put([]byte(key), y.ValueStruct{newValue(i), 0, 0, uint16(i)})
+		l.Put([]byte(key), y.ValueStruct{newValue(i), 0, 0, uint64(i)})
 	}
 
 	n, eq := l.findNear([]byte("00001"), false, false)
@@ -307,7 +307,7 @@ func TestIteratorNext(t *testing.T) {
 	require.False(t, it.Valid())
 	for i := n - 1; i >= 0; i-- {
 		l.Put([]byte(fmt.Sprintf("%05d", i)),
-			y.ValueStruct{newValue(i), 0, 0, uint16(i)})
+			y.ValueStruct{newValue(i), 0, 0, uint64(i)})
 	}
 	it.SeekToFirst()
 	for i := 0; i < n; i++ {
@@ -331,7 +331,7 @@ func TestIteratorPrev(t *testing.T) {
 	require.False(t, it.Valid())
 	for i := 0; i < n; i++ {
 		l.Put([]byte(fmt.Sprintf("%05d", i)),
-			y.ValueStruct{newValue(i), 0, 0, uint16(i)})
+			y.ValueStruct{newValue(i), 0, 0, uint64(i)})
 	}
 	it.SeekToLast()
 	for i := n - 1; i >= 0; i-- {

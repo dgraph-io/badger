@@ -27,7 +27,7 @@ import (
 const (
 	MetaSize     = 1
 	UserMetaSize = 1
-	CasSize      = 2
+	CasSize      = 8
 )
 
 var (

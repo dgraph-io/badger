@@ -149,7 +149,7 @@ func (b *TableBuilder) addHelper(key []byte, v y.ValueStruct) {
 	b.buf.WriteByte(v.Meta) // Meta byte precedes actual value.
 	b.buf.WriteByte(v.UserMeta)
 	var casBytes [y.CasSize]byte
-	binary.BigEndian.PutUint16(casBytes[:], v.CASCounter)
+	binary.BigEndian.PutUint64(casBytes[:], v.CASCounter)
 	b.buf.Write(casBytes[:])
 	b.buf.Write(v.Value)
 	b.counter++ // Increment number of keys added for this current block.

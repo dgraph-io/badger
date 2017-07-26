@@ -35,7 +35,7 @@ type ValueStruct struct {
 	Value      []byte
 	Meta       byte
 	UserMeta   byte
-	CASCounter uint16
+	CASCounter uint64
 }
 
 func (v *ValueStruct) EncodedSize() int {
@@ -53,7 +53,7 @@ func DecodeValueStruct(b []byte) ValueStruct {
 		Value:      b[ValueValueOffset:],
 		Meta:       b[ValueMetaOffset],
 		UserMeta:   b[ValueUserMetaOffset],
-		CASCounter: binary.BigEndian.Uint16(b[ValueCasOffset : ValueCasOffset+CasSize]),
+		CASCounter: binary.BigEndian.Uint64(b[ValueCasOffset : ValueCasOffset+CasSize]),
 	}
 }
 
@@ -61,7 +61,7 @@ func DecodeValueStruct(b []byte) ValueStruct {
 func EncodeValueStruct(b []byte, v *ValueStruct) {
 	b[ValueMetaOffset] = v.Meta
 	b[ValueUserMetaOffset] = v.UserMeta
-	binary.BigEndian.PutUint16(b[ValueCasOffset:ValueCasOffset+CasSize], v.CASCounter)
+	binary.BigEndian.PutUint64(b[ValueCasOffset:ValueCasOffset+CasSize], v.CASCounter)
 	copy(b[ValueValueOffset:ValueValueOffset+len(v.Value)], v.Value)
 }
 

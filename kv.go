@@ -812,7 +812,7 @@ func EntriesSet(s []*Entry, key, val []byte) []*Entry {
 // CompareAndSet sets the given value, ensuring that the no other Set operation has happened,
 // since last read. If the key has a different casCounter, this would not update the key
 // and return an error.
-func (s *KV) CompareAndSet(key []byte, val []byte, casCounter uint16) error {
+func (s *KV) CompareAndSet(key []byte, val []byte, casCounter uint64) error {
 	e := &Entry{
 		Key:             key,
 		Value:           val,
@@ -843,7 +843,7 @@ func (s *KV) compareAsync(e *Entry, f func(error)) {
 // CompareAndSetAsync is the asynchronous version of CompareAndSet. It accepts a callback function
 // which is called when the CompareAndSet completes. Any error encountered during execution is
 // passed as an argument to the callback function.
-func (s *KV) CompareAndSetAsync(key []byte, val []byte, casCounter uint16, f func(error)) {
+func (s *KV) CompareAndSetAsync(key []byte, val []byte, casCounter uint64, f func(error)) {
 	e := &Entry{
 		Key:             key,
 		Value:           val,
@@ -885,7 +885,7 @@ func EntriesDelete(s []*Entry, key []byte) []*Entry {
 
 // CompareAndDelete deletes a key ensuring that it has not been changed since last read.
 // If existing key has different casCounter, this would not delete the key and return an error.
-func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
+func (s *KV) CompareAndDelete(key []byte, casCounter uint64) error {
 	e := &Entry{
 		Key:             key,
 		Meta:            BitDelete,
@@ -900,7 +900,7 @@ func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
 // CompareAndDeleteAsync is the asynchronous version of CompareAndDelete. It accepts a callback
 // function which is called when the CompareAndDelete completes. Any error encountered during
 // execution is passed as an argument to the callback function.
-func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint16, f func(error)) {
+func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint64, f func(error)) {
 	e := &Entry{
 		Key:             key,
 		Meta:            BitDelete,
