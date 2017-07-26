@@ -596,6 +596,13 @@ func (s *KV) newCASCounter() uint64 {
 	return atomic.AddUint64(&s.lastUsedCasCounter, 1)
 }
 
+// newCASCounters generates a set of unique CAS counters -- the interval [x, x + howMany) where x
+// is the return value.
+func (s *KV) newCASCounters(howMany uint64) uint64 {
+	last := atomic.AddUint64(&s.lastUsedCasCounter, howMany)
+	return last - howMany + 1
+}
+
 // writeRequests is called serially by only one goroutine.
 func (s *KV) writeRequests(reqs []*request) error {
 	if len(reqs) == 0 {
@@ -615,8 +622,9 @@ func (s *KV) writeRequests(reqs []*request) error {
 	// a long time, and following CAS operations use that as a check, when replaying, we will think that
 	// these CAS operations should fail, when they are actually valid.
 	for _, req := range reqs {
-		for _, e := range req.Entries {
-			e.casCounter = s.newCASCounter()
+		counterBase := s.newCASCounters(uint64(len(req.Entries)))
+		for i, e := range req.Entries {
+			e.casCounter = counterBase + uint64(i)
 		}
 	}
 	err := s.vlog.write(reqs)
