@@ -17,7 +17,6 @@
 package skl
 
 import (
-	"encoding/binary"
 	"sync/atomic"
 
 	"github.com/dgraph-io/badger/y"
@@ -50,16 +49,13 @@ func (s *Arena) Reset() {
 // size of val. We could also store this size inside arena but the encoding and
 // decoding will incur some overhead.
 func (s *Arena) PutVal(v y.ValueStruct) uint32 {
-	l := uint32(len(v.Value)) + y.MetaSize + y.UserMetaSize + y.CasSize
+	l := uint32(v.EncodedSize())
 	n := atomic.AddUint32(&s.n, l)
 	y.AssertTruef(int(n) <= len(s.buf),
 		"Arena too small, toWrite:%d newTotal:%d limit:%d",
 		l, n, len(s.buf))
 	m := n - l
-	s.buf[m] = v.Meta
-	s.buf[m+1] = v.UserMeta
-	binary.BigEndian.PutUint16(s.buf[m+2:m+2+y.CasSize], v.CASCounter)
-	copy(s.buf[m+2+y.CasSize:n], v.Value)
+	y.EncodeValueStruct(s.buf[m:], &v)
 	return m
 }
 

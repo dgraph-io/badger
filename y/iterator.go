@@ -38,6 +38,10 @@ type ValueStruct struct {
 	CASCounter uint16
 }
 
+func (v *ValueStruct) EncodedSize() int {
+	return len(v.Value) + ValueValueOffset
+}
+
 // Converts a value size to the full serialized size of value + metadata.
 func ValueStructSerializedSize(size uint16) int {
 	return int(size) + ValueValueOffset
@@ -51,6 +55,14 @@ func DecodeValueStruct(b []byte) ValueStruct {
 		UserMeta:   b[ValueUserMetaOffset],
 		CASCounter: binary.BigEndian.Uint16(b[ValueCasOffset : ValueCasOffset+CasSize]),
 	}
+}
+
+// EncodeValueStruct expects a slice of length v.EncodedSize().
+func EncodeValueStruct(b []byte, v *ValueStruct) {
+	b[ValueMetaOffset] = v.Meta
+	b[ValueUserMetaOffset] = v.UserMeta
+	binary.BigEndian.PutUint16(b[ValueCasOffset:ValueCasOffset+CasSize], v.CASCounter)
+	copy(b[ValueValueOffset:ValueValueOffset+len(v.Value)], v.Value)
 }
 
 // Iterator is an interface for a basic iterator.
