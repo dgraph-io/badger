@@ -108,7 +108,7 @@ type logEntry func(e Entry, vp valuePointer) error
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
 func (f *logFile) iterate(offset uint32, fn logEntry) error {
-	_, err := f.fd.Seek(int64(offset), 0)
+	_, err := f.fd.Seek(int64(offset), io.SeekStart)
 	if err != nil {
 		return y.Wrap(err)
 	}
