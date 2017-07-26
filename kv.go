@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/trace"
@@ -137,6 +138,11 @@ type KV struct {
 	vptr      valuePointer
 	writeCh   chan *request
 	flushChan chan flushTask // For flushing memtables.
+
+	// Incremented in the non-concurrently accessed write loop.  But also incremented outside.
+	// So we use an atomic op.
+	// TODO: Don't use an atomic op.
+	lastUsedCasCounter uint64
 }
 
 var ErrInvalidDir error = errors.New("Invalid Dir, directory does not exist")
@@ -223,6 +229,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
 	val := item.Value()
+	out.lastUsedCasCounter = item.casCounter
 
 	var vptr valuePointer
 	if len(val) > 0 {
@@ -238,6 +245,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 			out.elog.Printf("First key=%s\n", e.Key)
 		}
 		first = false
+		out.lastUsedCasCounter = e.casCounter
 
 		if e.CASCounterCheck != 0 {
 			oldValue, err := out.get(e.Key)
@@ -582,6 +590,12 @@ func (s *KV) writeToLSM(b *request) error {
 	return nil
 }
 
+// newCASCounter is called serially by only one goroutine.
+// TODO: Actually, we also call it when setting the !badger!head entry.
+func (s *KV) newCASCounter() uint64 {
+	return atomic.AddUint64(&s.lastUsedCasCounter, 1)
+}
+
 // writeRequests is called serially by only one goroutine.
 func (s *KV) writeRequests(reqs []*request) error {
 	if len(reqs) == 0 {
@@ -602,7 +616,7 @@ func (s *KV) writeRequests(reqs []*request) error {
 	// these CAS operations should fail, when they are actually valid.
 	for _, req := range reqs {
 		for _, e := range req.Entries {
-			e.casCounter = newCASCounter()
+			e.casCounter = s.newCASCounter()
 		}
 	}
 	err := s.vlog.write(reqs)
@@ -983,9 +997,9 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			s.vptr.Encode(offset)
 			s.Unlock()
 			// CAS counter is needed and is desirable -- it's the first value log entry
-			// we reply, perhaps the only, and we use it to re-initialize the CAS
-			// counter.
-			ft.mt.Put(head, y.ValueStruct{Value: offset, CASCounter: newCASCounter()})
+			// we replay, so to speak, perhaps the only, and we use it to re-initialize
+			// the CAS counter.
+			ft.mt.Put(head, y.ValueStruct{Value: offset, CASCounter: s.newCASCounter()})
 		}
 		fileID, _ := s.lc.reserveFileIDs(1)
 		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)

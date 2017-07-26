@@ -136,12 +136,6 @@ func getIDMap(dir string) map[uint64]struct{} {
 	return idMap
 }
 
-func newCASCounter() uint64 {
-	// Oh well, only 63 bits of randomness.  Doing this gross thing because we expect to switch to
-	// an actual incrementing counter anyway.  (We can't return zero.)
-	return rand.Uint64() | 1
-}
-
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
