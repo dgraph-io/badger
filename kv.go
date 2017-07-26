@@ -982,7 +982,10 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			s.Lock() // For vptr.
 			s.vptr.Encode(offset)
 			s.Unlock()
-			ft.mt.Put(head, y.ValueStruct{Value: offset}) // casCounter not needed.
+			// CAS counter is needed and is desirable -- it's the first value log entry
+			// we reply, perhaps the only, and we use it to re-initialize the CAS
+			// counter.
+			ft.mt.Put(head, y.ValueStruct{Value: offset, CASCounter: newCASCounter()})
 		}
 		fileID, _ := s.lc.reserveFileIDs(1)
 		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
