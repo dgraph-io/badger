@@ -113,9 +113,9 @@ var DefaultOptions = Options{
 func (opt *Options) estimateSize(entry *Entry) int {
 	if len(entry.Value) < opt.ValueThreshold {
 		// 4 is for cas + meta
-		return len(entry.Key) + len(entry.Value) + 4
+		return len(entry.Key) + len(entry.Value) + y.MetaSize + y.UserMetaSize + y.CasSize
 	}
-	return len(entry.Key) + 16 + 4
+	return len(entry.Key) + 16 + y.MetaSize + y.UserMetaSize + y.CasSize
 }
 
 // KV provides the various functions required to interact with Badger.

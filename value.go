@@ -127,7 +127,7 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 	}
 
 	reader := bufio.NewReader(f.fd)
-	var hbuf [14]byte
+	var hbuf [headerBufSize]byte
 	var h header
 	var count int
 	k := make([]byte, 1<<10)
@@ -339,7 +339,7 @@ type entryEncoder struct {
 // Encodes e to buf either plain or compressed.
 // Returns number of bytes written.
 func (enc *entryEncoder) Encode(e *Entry, buf *bytes.Buffer) (int, error) {
-	var headerEnc [14]byte
+	var headerEnc [headerBufSize]byte
 	var h header
 
 	if int32(len(e.Key)+len(e.Value)) > enc.opt.ValueCompressionMinSize {
@@ -398,8 +398,12 @@ type header struct {
 	casCounterCheck uint16
 }
 
+const (
+	headerBufSize = 14
+)
+
 func (h header) Encode(out []byte) {
-	y.AssertTrue(len(out) >= 14)
+	y.AssertTrue(len(out) >= headerBufSize)
 	binary.BigEndian.PutUint32(out[0:4], h.klen)
 	binary.BigEndian.PutUint32(out[4:8], h.vlen)
 	out[8] = h.meta
