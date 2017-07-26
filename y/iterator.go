@@ -47,18 +47,16 @@ func ValueStructSerializedSize(size uint16) int {
 	return int(size) + ValueValueOffset
 }
 
-// DecodeValueStruct uses the length of the slice to infer the length of the Value field.
-func DecodeValueStruct(b []byte) ValueStruct {
-	return ValueStruct{
-		Value:      b[ValueValueOffset:],
-		Meta:       b[ValueMetaOffset],
-		UserMeta:   b[ValueUserMetaOffset],
-		CASCounter: binary.BigEndian.Uint64(b[ValueCasOffset : ValueCasOffset+CasSize]),
-	}
+// DecodeEntireSlice uses the length of the slice to infer the length of the Value field.
+func (v *ValueStruct) DecodeEntireSlice(b []byte) {
+	v.Value = b[ValueValueOffset:]
+	v.Meta = b[ValueMetaOffset]
+	v.UserMeta = b[ValueUserMetaOffset]
+	v.CASCounter = binary.BigEndian.Uint64(b[ValueCasOffset : ValueCasOffset+CasSize])
 }
 
-// EncodeValueStruct expects a slice of length v.EncodedSize().
-func EncodeValueStruct(b []byte, v *ValueStruct) {
+// Encode expects a slice of length at least v.EncodedSize().
+func (v *ValueStruct) Encode(b []byte) {
 	b[ValueMetaOffset] = v.Meta
 	b[ValueUserMetaOffset] = v.UserMeta
 	binary.BigEndian.PutUint64(b[ValueCasOffset:ValueCasOffset+CasSize], v.CASCounter)

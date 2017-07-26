@@ -55,7 +55,7 @@ func (s *Arena) PutVal(v y.ValueStruct) uint32 {
 		"Arena too small, toWrite:%d newTotal:%d limit:%d",
 		l, n, len(s.buf))
 	m := n - l
-	y.EncodeValueStruct(s.buf[m:], &v)
+	v.Encode(s.buf[m:])
 	return m
 }
 
@@ -77,6 +77,7 @@ func (s *Arena) GetKey(offset uint32, size uint16) []byte {
 
 // GetVal returns byte slice at offset. The given size should be just the value
 // size and should NOT include the meta bytes.
-func (s *Arena) GetVal(offset uint32, size uint16) y.ValueStruct {
-	return y.DecodeValueStruct(s.buf[offset : offset+uint32(y.ValueStructSerializedSize(size))])
+func (s *Arena) GetVal(offset uint32, size uint16) (ret y.ValueStruct) {
+	ret.DecodeEntireSlice(s.buf[offset : offset+uint32(y.ValueStructSerializedSize(size))])
+	return
 }

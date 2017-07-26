@@ -390,8 +390,9 @@ func (itr *TableIterator) Key() []byte {
 	return itr.bi.Key()
 }
 
-func (itr *TableIterator) Value() y.ValueStruct {
-	return y.DecodeValueStruct(itr.bi.Value())
+func (itr *TableIterator) Value() (ret y.ValueStruct) {
+	ret.DecodeEntireSlice(itr.bi.Value())
+	return
 }
 
 func (s *TableIterator) Next() {
