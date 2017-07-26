@@ -1007,6 +1007,12 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			// CAS counter is needed and is desirable -- it's the first value log entry
 			// we replay, so to speak, perhaps the only, and we use it to re-initialize
 			// the CAS counter.
+			//
+			// In the write loop, the s.vptr value gets updated _after_ the values are
+			// written to the value log.  This means we might store a !badger!head with
+			// a later CAS counter (because it's accessed atomically and not tied to
+			// the vptr value by any mechanism, and then replay value log entries with
+			// a smaller CAS counter.
 			ft.mt.Put(head, y.ValueStruct{Value: offset, CASCounter: s.newCASCounter()})
 		}
 		fileID, _ := s.lc.reserveFileIDs(1)
