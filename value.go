@@ -587,10 +587,12 @@ func (l *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 }
 
 type request struct {
+	// Input values
 	Entries []*Entry
-	Ptrs    []valuePointer
-	Wg      sync.WaitGroup
-	Err     error
+	// Output values
+	Ptrs []valuePointer
+	Wg   sync.WaitGroup
+	Err  error
 }
 
 // sync is thread-unsafe and should not be called concurrently with write.
