@@ -112,7 +112,6 @@ var DefaultOptions = Options{
 
 func (opt *Options) estimateSize(entry *Entry) int {
 	if len(entry.Value) < opt.ValueThreshold {
-		// 4 is for cas + meta
 		return len(entry.Key) + len(entry.Value) + y.MetaSize + y.UserMetaSize + y.CasSize
 	}
 	return len(entry.Key) + 16 + y.MetaSize + y.UserMetaSize + y.CasSize
@@ -128,19 +127,19 @@ type KV struct {
 	// nil if Dir and ValueDir are the same
 	valueDirGuard *y.DirectoryLockGuard
 
-	closer      *y.Closer
-	elog        trace.EventLog
-	mt          *skl.Skiplist
-	imm         []*skl.Skiplist // Add here only AFTER pushing to flushChan.
-	opt         Options
-	lc          *levelsController
-	vlog        valueLog
-	vptr        valuePointer
-	casAsOfVptr uint64 // The last-written cas counter as of the write at vptr.
-	writeCh     chan *request
-	flushChan   chan flushTask // For flushing memtables.
+	closer    *y.Closer
+	elog      trace.EventLog
+	mt        *skl.Skiplist
+	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+	opt       Options
+	lc        *levelsController
+	vlog      valueLog
+	vptr      valuePointer
+	casAtvptr uint64 // The last-written cas counter as of the write at vptr.
+	writeCh   chan *request
+	flushChan chan flushTask // For flushing memtables.
 
-	// Incremented/accessed in the non-concurrently accessed write loop.
+	// Incremented serially in the write loop.
 	lastUsedCasCounter uint64
 }
 
@@ -516,19 +515,15 @@ func (s *KV) Exists(key []byte) (bool, error) {
 
 func (s *KV) updateOffset(ptrs []valuePointer, casAsOfVptr uint64) {
 	ptr := ptrs[len(ptrs)-1]
+
 	s.Lock()
+	oldVptr := s.vptr
+	s.vptr = ptr
+	s.casAtvptr = casAsOfVptr
 	defer s.Unlock()
-	// TODO: We should always hit a case where we assign, right?
-	if s.vptr.Fid < ptr.Fid {
-		s.vptr = ptr
-		s.casAsOfVptr = casAsOfVptr
-	} else if s.vptr.Offset < ptr.Offset {
-		s.vptr = ptr
-		s.casAsOfVptr = casAsOfVptr
-	} else if s.vptr.Fid == ptr.Fid && s.vptr.Offset == ptr.Offset && s.vptr.Len < ptr.Len {
-		s.vptr = ptr
-		s.casAsOfVptr = casAsOfVptr
-	}
+
+	y.AssertTrue(oldVptr.Fid < ptr.Fid ||
+		(oldVptr.Fid == ptr.Fid && oldVptr.Offset+oldVptr.Len < ptr.Offset+ptr.Len))
 }
 
 var requestPool = sync.Pool{
@@ -999,7 +994,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			offset := make([]byte, 10)
 			s.Lock() // For vptr and casAsOfVptr.
 			s.vptr.Encode(offset)
-			casAsOfVptr := s.casAsOfVptr
+			casAsOfVptr := s.casAtvptr
 			s.Unlock()
 			// We write the CAS counter in !badger!head because we use it at startup
 			// when replaying the value log and reconstructing the last used CAS
