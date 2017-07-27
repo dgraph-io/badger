@@ -511,9 +511,11 @@ func (s *KV) Exists(key []byte) (bool, error) {
 
 func (s *KV) updateOffset(ptrs []valuePointer) {
 	var ptr valuePointer
-	for _, p := range ptrs {
-		if ptr.Less(p) {
+	for i := len(ptrs) - 1; i >= 0; i-- {
+		p := ptrs[i]
+		if !p.IsZero() {
 			ptr = p
+			break
 		}
 	}
 

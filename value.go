@@ -437,6 +437,19 @@ func (p valuePointer) Less(o valuePointer) bool {
 	return p.Len < o.Len
 }
 
+func (p valuePointer) IsZero() bool {
+	if p.Fid > 0 {
+		return false
+	}
+	if p.Offset > 0 {
+		return false
+	}
+	if p.Len > 0 {
+		return false
+	}
+	return true
+}
+
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode(b []byte) []byte {
 	y.AssertTrue(len(b) >= 10)
