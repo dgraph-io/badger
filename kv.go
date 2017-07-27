@@ -140,7 +140,6 @@ type KV struct {
 
 	// Incremented in the non-concurrently accessed write loop.  But also incremented outside.
 	// So we use an atomic op.
-	// TODO: Don't use an atomic op.
 	lastUsedCasCounter uint64
 }
 
