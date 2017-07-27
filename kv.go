@@ -595,10 +595,9 @@ func (s *KV) writeToLSM(b *request) error {
 	return nil
 }
 
-// newCASCounter is called serially by only one goroutine.
-// TODO: Actually, we also call it when setting the !badger!head entry.
-func (s *KV) newCASCounter() uint64 {
-	return atomic.AddUint64(&s.lastUsedCasCounter, 1)
+// lastCASCounter returns the last-used cas counter.
+func (s *KV) lastCASCounter() uint64 {
+	return atomic.LoadUint64(&s.lastUsedCasCounter)
 }
 
 // newCASCounters generates a set of unique CAS counters -- the interval [x, x + howMany) where x
@@ -623,9 +622,13 @@ func (s *KV) writeRequests(reqs []*request) error {
 
 	s.elog.Printf("writeRequests called. Writing to value log")
 
-	// CAS counter for all operations has to go onto value log. Otherwise, if it is just in memtable for
-	// a long time, and following CAS operations use that as a check, when replaying, we will think that
-	// these CAS operations should fail, when they are actually valid.
+	// CAS counter for all operations has to go onto value log. Otherwise, if it is just in
+	// memtable for a long time, and following CAS operations use that as a check, when
+	// replaying, we will think that these CAS operations should fail, when they are actually
+	// valid.
+
+	// There is code (in flushMemtable) whose correctness depends on us generating CAS Counter
+	// values _before_ we modify s.vptr here.
 	for _, req := range reqs {
 		counterBase := s.newCASCounters(uint64(len(req.Entries)))
 		for i, e := range req.Entries {
@@ -1013,12 +1016,11 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			// we replay, so to speak, perhaps the only, and we use it to re-initialize
 			// the CAS counter.
 			//
-			// In the write loop, the s.vptr value gets updated _after_ the values are
-			// written to the value log.  This means we might store a !badger!head with
-			// a later CAS counter (because it's accessed atomically and not tied to
-			// the vptr value by any mechanism, and then replay value log entries with
-			// a smaller CAS counter.
-			ft.mt.Put(head, y.ValueStruct{Value: offset, CASCounter: s.newCASCounter()})
+			// The write loop generates CAS counter values _before_ it sets vptr.  It
+			// is crucial that we read the cas counter here _after_ reading vptr.  That
+			// way, our value here is guaranteed to be >= the CASCounter values written
+			// before vptr (because they don't get replayed).
+			ft.mt.Put(head, y.ValueStruct{Value: offset, CASCounter: s.lastCASCounter()})
 		}
 		fileID, _ := s.lc.reserveFileIDs(1)
 		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
