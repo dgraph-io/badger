@@ -24,13 +24,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-const (
-	valueMetaOffset     = 0
-	valueUserMetaOffset = valueMetaOffset + MetaSize
-	valueCasOffset      = valueUserMetaOffset + UserMetaSize
-	valueValueOffset    = valueCasOffset + CasSize
-)
-
 type ValueStruct struct {
 	Value      []byte
 	Meta       byte
@@ -46,6 +39,13 @@ func (v *ValueStruct) EncodedSize() int {
 func ValueStructSerializedSize(size uint16) int {
 	return int(size) + valueValueOffset
 }
+
+const (
+	valueMetaOffset     = 0
+	valueUserMetaOffset = valueMetaOffset + MetaSize
+	valueCasOffset      = valueUserMetaOffset + UserMetaSize
+	valueValueOffset    = valueCasOffset + CasSize
+)
 
 // DecodeEntireSlice uses the length of the slice to infer the length of the Value field.
 func (v *ValueStruct) DecodeEntireSlice(b []byte) {
