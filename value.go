@@ -580,7 +580,6 @@ func (l *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 
 	// Seek to the end to start writing.
 	var err error
-	// TODO: Why is there no l.RLock() here?
 	last := l.files[len(l.files)-1]
 	lastOffset, err := last.fd.Seek(0, io.SeekEnd)
 	last.offset = uint32(lastOffset)
