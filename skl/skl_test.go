@@ -91,9 +91,9 @@ func TestBasic(t *testing.T) {
 
 	// Try inserting values.
 	// Somehow require.Nil doesn't work when checking for unsafe.Pointer(nil).
-	l.Put([]byte("key1"), y.ValueStruct{val1, 55, 60000})
-	l.Put([]byte("key3"), y.ValueStruct{val3, 56, 60001})
-	l.Put([]byte("key2"), y.ValueStruct{val2, 57, 60002})
+	l.Put([]byte("key1"), y.ValueStruct{val1, 55, 60000, 0})
+	l.Put([]byte("key3"), y.ValueStruct{val3, 56, 60001, 0})
+	l.Put([]byte("key2"), y.ValueStruct{val2, 57, 60002, 0})
 
 	v := l.Get([]byte("key"))
 	require.True(t, v.Value == nil)
@@ -116,7 +116,7 @@ func TestBasic(t *testing.T) {
 	require.EqualValues(t, 56, v.Meta)
 	require.EqualValues(t, 60001, v.CASCounter)
 
-	l.Put([]byte("key2"), y.ValueStruct{val4, 12, 50000})
+	l.Put([]byte("key2"), y.ValueStruct{val4, 12, 50000, 0})
 	v = l.Get([]byte("key2"))
 	require.True(t, v.Value != nil)
 	require.EqualValues(t, "00072", string(v.Value))
@@ -134,7 +134,7 @@ func TestConcurrentBasic(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			l.Put([]byte(fmt.Sprintf("%05d", i)),
-				y.ValueStruct{newValue(i), 0, uint16(i)})
+				y.ValueStruct{newValue(i), 0, uint16(i), 0})
 		}(i)
 	}
 	wg.Wait()
@@ -165,7 +165,7 @@ func TestOneKey(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			l.Put(key, y.ValueStruct{newValue(i), 0, uint16(i)})
+			l.Put(key, y.ValueStruct{newValue(i), 0, uint16(i), 0})
 		}(i)
 	}
 	// We expect that at least some write made it such that some read returns a value.
@@ -195,7 +195,7 @@ func TestFindNear(t *testing.T) {
 	defer l.DecrRef()
 	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("%05d", i*10+5)
-		l.Put([]byte(key), y.ValueStruct{newValue(i), 0, uint16(i)})
+		l.Put([]byte(key), y.ValueStruct{newValue(i), 0, uint16(i), 0})
 	}
 
 	n, eq := l.findNear([]byte("00001"), false, false)
@@ -307,7 +307,7 @@ func TestIteratorNext(t *testing.T) {
 	require.False(t, it.Valid())
 	for i := n - 1; i >= 0; i-- {
 		l.Put([]byte(fmt.Sprintf("%05d", i)),
-			y.ValueStruct{newValue(i), 0, uint16(i)})
+			y.ValueStruct{newValue(i), 0, uint16(i), 0})
 	}
 	it.SeekToFirst()
 	for i := 0; i < n; i++ {
@@ -331,7 +331,7 @@ func TestIteratorPrev(t *testing.T) {
 	require.False(t, it.Valid())
 	for i := 0; i < n; i++ {
 		l.Put([]byte(fmt.Sprintf("%05d", i)),
-			y.ValueStruct{newValue(i), 0, uint16(i)})
+			y.ValueStruct{newValue(i), 0, uint16(i), 0})
 	}
 	it.SeekToLast()
 	for i := n - 1; i >= 0; i-- {
@@ -359,7 +359,7 @@ func TestIteratorSeek(t *testing.T) {
 	// 1000, 1010, 1020, ..., 1990.
 	for i := n - 1; i >= 0; i-- {
 		v := i*10 + 1000
-		l.Put([]byte(fmt.Sprintf("%05d", i*10+1000)), y.ValueStruct{newValue(v), 0, 555})
+		l.Put([]byte(fmt.Sprintf("%05d", i*10+1000)), y.ValueStruct{newValue(v), 0, 555, 0})
 	}
 	it.Seek([]byte(""))
 	require.True(t, it.Valid())
@@ -437,7 +437,7 @@ func BenchmarkReadWrite(b *testing.B) {
 							count++
 						}
 					} else {
-						l.Put(randomKey(), y.ValueStruct{value, 0, 0})
+						l.Put(randomKey(), y.ValueStruct{value, 0, 0, 0})
 					}
 				}
 			})

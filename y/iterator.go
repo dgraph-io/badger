@@ -27,6 +27,7 @@ type ValueStruct struct {
 	Value      []byte
 	Meta       byte
 	CASCounter uint16
+	UserMeta   byte
 }
 
 // Iterator is an interface for a basic iterator.

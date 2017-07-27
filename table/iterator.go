@@ -394,9 +394,10 @@ func (itr *TableIterator) Key() []byte {
 func (itr *TableIterator) Value() y.ValueStruct {
 	v := itr.bi.Value()
 	return y.ValueStruct{
-		Value:      v[3:],
+		Value:      v[4:],
 		Meta:       v[0],
-		CASCounter: binary.BigEndian.Uint16(v[1:3]),
+		UserMeta:   v[1],
+		CASCounter: binary.BigEndian.Uint16(v[2:4]),
 	}
 }
 

@@ -30,6 +30,7 @@ type KVItem struct {
 	key        []byte
 	vptr       []byte
 	meta       byte
+	userMeta   byte
 	val        []byte
 	casCounter uint16
 	slice      *y.Slice
@@ -52,6 +53,11 @@ func (item *KVItem) Value() []byte {
 // Counter returns the CAS counter associated with the value.
 func (item *KVItem) Counter() uint16 {
 	return item.casCounter
+}
+
+// UserMeta returns the userMeta set by the user
+func (item *KVItem) UserMeta() byte {
+	return item.userMeta
 }
 
 type list struct {
@@ -165,6 +171,7 @@ func (it *Iterator) Next() {
 func (it *Iterator) fill(item *KVItem) {
 	vs := it.iitr.Value()
 	item.meta = vs.Meta
+	item.userMeta = vs.UserMeta
 	item.casCounter = vs.CASCounter
 	item.key = y.Safecopy(item.key, it.iitr.Key())
 	item.vptr = y.Safecopy(item.vptr, vs.Value)

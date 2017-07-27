@@ -50,15 +50,16 @@ func (s *Arena) Reset() {
 // size of val. We could also store this size inside arena but the encoding and
 // decoding will incur some overhead.
 func (s *Arena) PutVal(v y.ValueStruct) uint32 {
-	l := uint32(len(v.Value)) + 3
+	l := uint32(len(v.Value)) + 4
 	n := atomic.AddUint32(&s.n, l)
 	y.AssertTruef(int(n) <= len(s.buf),
 		"Arena too small, toWrite:%d newTotal:%d limit:%d",
 		l, n, len(s.buf))
 	m := n - l
 	s.buf[m] = v.Meta
-	binary.BigEndian.PutUint16(s.buf[m+1:m+3], v.CASCounter)
-	copy(s.buf[m+3:n], v.Value)
+	s.buf[m+1] = v.UserMeta
+	binary.BigEndian.PutUint16(s.buf[m+2:m+4], v.CASCounter)
+	copy(s.buf[m+4:n], v.Value)
 	return m
 }
 
@@ -82,9 +83,10 @@ func (s *Arena) GetKey(offset uint32, size uint16) []byte {
 // size and should NOT include the meta byte.
 func (s *Arena) GetVal(offset uint32, size uint16) y.ValueStruct {
 	out := y.ValueStruct{
-		Value:      s.buf[offset+3 : offset+3+uint32(size)],
+		Value:      s.buf[offset+4 : offset+4+uint32(size)],
 		Meta:       s.buf[offset],
-		CASCounter: binary.BigEndian.Uint16(s.buf[offset+1 : offset+3]),
+		UserMeta:   s.buf[offset+1],
+		CASCounter: binary.BigEndian.Uint16(s.buf[offset+2 : offset+4]),
 	}
 	return out
 }
