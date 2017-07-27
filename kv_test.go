@@ -794,3 +794,17 @@ func TestPidFile(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Another process is using this Badger database")
 }
+
+func TestGetEmptyStore(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	options := getTestOptions(dir)
+	kv1, err := NewKV(options)
+	require.NoError(t, err)
+	kv1.Close()
+
+	var item KVItem
+	err = kv1.Get([]byte("key"), &item)
+	require.Error(t, err)
+}

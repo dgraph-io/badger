@@ -33,8 +33,9 @@ import (
 )
 
 var (
-	badgerPrefix = []byte("!badger!")     // Prefix for internal keys used by badger.
-	head         = []byte("!badger!head") // For storing value offset for replay.
+	badgerPrefix  = []byte("!badger!")     // Prefix for internal keys used by badger.
+	head          = []byte("!badger!head") // For storing value offset for replay.
+	ErrEmptyStore = errors.New("KV Store is uninitialized.")
 )
 
 // Options are params for creating DB object.
@@ -452,6 +453,10 @@ func (s *KV) fillItem(item *KVItem) error {
 // get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
 func (s *KV) get(key []byte) (y.ValueStruct, error) {
+	if s.mt == nil {
+		return y.ValueStruct{}, ErrEmptyStore
+	}
+
 	tables, decr := s.getMemTables() // Lock should be released.
 	defer decr()
 
@@ -724,6 +729,9 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 //      Check(e.Error)
 //   }
 func (s *KV) BatchSet(entries []*Entry) error {
+	if s.mt == nil {
+		return ErrEmptyStore
+	}
 	reqs := s.sendToWriteCh(entries)
 
 	var err error
@@ -741,6 +749,10 @@ func (s *KV) BatchSet(entries []*Entry) error {
 // which is called when all the sets are complete. Any error during execution is passed as an
 // argument to the callback function.
 func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
+	if s.mt == nil {
+		f(ErrEmptyStore)
+		return
+	}
 	reqs := s.sendToWriteCh(entries)
 
 	go func() {
