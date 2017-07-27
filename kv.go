@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/trace"
@@ -120,8 +121,7 @@ func (opt *Options) estimateSize(entry *Entry) int {
 // KV provides the various functions required to interact with Badger.
 // KV is thread-safe.
 type KV struct {
-	// Guards list of inmemory tables, and vptr, casAsOfVptr, not individual reads and writes.
-	sync.RWMutex
+	sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
 
 	dirLockGuard *y.DirectoryLockGuard
 	// nil if Dir and ValueDir are the same
@@ -135,11 +135,12 @@ type KV struct {
 	lc        *levelsController
 	vlog      valueLog
 	vptr      valuePointer
-	casAtvptr uint64 // The last-written cas counter as of the write at vptr.
 	writeCh   chan *request
 	flushChan chan flushTask // For flushing memtables.
 
-	// Incremented serially in the write loop.
+	// Incremented in the non-concurrently accessed write loop.  But also incremented outside.
+	// So we use an atomic op.
+	// TODO: Don't use an atomic op.
 	lastUsedCasCounter uint64
 }
 
@@ -519,20 +520,16 @@ func (s *KV) Exists(key []byte) (bool, error) {
 	return true, nil
 }
 
-func (s *KV) updateOffset(ptrs []valuePointer, casAtvptr uint64) {
+func (s *KV) updateOffset(ptrs []valuePointer) {
 	ptr := ptrs[len(ptrs)-1]
 	s.Lock()
 	defer s.Unlock()
-
 	if s.vptr.Fid < ptr.Fid {
 		s.vptr = ptr
-		s.casAtvptr = casAtvptr
 	} else if s.vptr.Offset < ptr.Offset {
 		s.vptr = ptr
-		s.casAtvptr = casAtvptr
 	} else if s.vptr.Fid == ptr.Fid && s.vptr.Offset == ptr.Offset && s.vptr.Len < ptr.Len {
 		s.vptr = ptr
-		s.casAtvptr = casAtvptr
 	}
 }
 
@@ -598,6 +595,19 @@ func (s *KV) writeToLSM(b *request) error {
 	return nil
 }
 
+// newCASCounter is called serially by only one goroutine.
+// TODO: Actually, we also call it when setting the !badger!head entry.
+func (s *KV) newCASCounter() uint64 {
+	return atomic.AddUint64(&s.lastUsedCasCounter, 1)
+}
+
+// newCASCounters generates a set of unique CAS counters -- the interval [x, x + howMany) where x
+// is the return value.
+func (s *KV) newCASCounters(howMany uint64) uint64 {
+	last := atomic.AddUint64(&s.lastUsedCasCounter, howMany)
+	return last - howMany + 1
+}
+
 // writeRequests is called serially by only one goroutine.
 func (s *KV) writeRequests(reqs []*request) error {
 	if len(reqs) == 0 {
@@ -616,11 +626,10 @@ func (s *KV) writeRequests(reqs []*request) error {
 	// CAS counter for all operations has to go onto value log. Otherwise, if it is just in memtable for
 	// a long time, and following CAS operations use that as a check, when replaying, we will think that
 	// these CAS operations should fail, when they are actually valid.
-
 	for _, req := range reqs {
-		for _, e := range req.Entries {
-			s.lastUsedCasCounter++
-			e.casCounter = s.lastUsedCasCounter
+		counterBase := s.newCASCounters(uint64(len(req.Entries)))
+		for i, e := range req.Entries {
+			e.casCounter = counterBase + uint64(i)
 		}
 	}
 	err := s.vlog.write(reqs)
@@ -651,7 +660,7 @@ func (s *KV) writeRequests(reqs []*request) error {
 			done(err)
 			return errors.Wrap(err, "writeRequests")
 		}
-		s.updateOffset(b.Ptrs, b.Entries[len(b.Entries)-1].casCounter)
+		s.updateOffset(b.Ptrs)
 	}
 	done(nil)
 	s.elog.Printf("%d entries written", count)
@@ -999,12 +1008,17 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			offset := make([]byte, 10)
 			s.Lock() // For vptr and casAsOfVptr.
 			s.vptr.Encode(offset)
-			casAsOfVptr := s.casAtvptr
 			s.Unlock()
-			// We write the CAS counter in !badger!head because we use it at startup
-			// when replaying the value log and reconstructing the last used CAS
-			// counter.
-			ft.mt.Put(head, y.ValueStruct{Value: offset, CASCounter: casAsOfVptr})
+			// CAS counter is needed and is desirable -- it's the first value log entry
+			// we replay, so to speak, perhaps the only, and we use it to re-initialize
+			// the CAS counter.
+			//
+			// In the write loop, the s.vptr value gets updated _after_ the values are
+			// written to the value log.  This means we might store a !badger!head with
+			// a later CAS counter (because it's accessed atomically and not tied to
+			// the vptr value by any mechanism, and then replay value log entries with
+			// a smaller CAS counter.
+			ft.mt.Put(head, y.ValueStruct{Value: offset, CASCounter: s.newCASCounter()})
 		}
 		fileID, _ := s.lc.reserveFileIDs(1)
 		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
