@@ -427,6 +427,16 @@ type valuePointer struct {
 	Offset uint32
 }
 
+func (p valuePointer) Less(o valuePointer) bool {
+	if p.Fid != o.Fid {
+		return p.Fid < o.Fid
+	}
+	if p.Offset != o.Offset {
+		return p.Offset < o.Offset
+	}
+	return p.Len < o.Len
+}
+
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode(b []byte) []byte {
 	y.AssertTrue(len(b) >= 10)

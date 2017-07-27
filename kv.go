@@ -510,14 +510,16 @@ func (s *KV) Exists(key []byte) (bool, error) {
 }
 
 func (s *KV) updateOffset(ptrs []valuePointer) {
-	ptr := ptrs[len(ptrs)-1]
+	var ptr valuePointer
+	for _, p := range ptrs {
+		if ptr.Less(p) {
+			ptr = p
+		}
+	}
+
 	s.Lock()
 	defer s.Unlock()
-	if s.vptr.Fid < ptr.Fid {
-		s.vptr = ptr
-	} else if s.vptr.Offset < ptr.Offset {
-		s.vptr = ptr
-	} else if s.vptr.Fid == ptr.Fid && s.vptr.Offset == ptr.Offset && s.vptr.Len < ptr.Len {
+	if s.vptr.Less(ptr) {
 		s.vptr = ptr
 	}
 }
