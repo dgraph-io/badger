@@ -519,17 +519,21 @@ func (s *KV) Exists(key []byte) (bool, error) {
 	return true, nil
 }
 
-func (s *KV) updateOffset(ptrs []valuePointer, casAsOfVptr uint64) {
+func (s *KV) updateOffset(ptrs []valuePointer, casAtvptr uint64) {
 	ptr := ptrs[len(ptrs)-1]
-
 	s.Lock()
-	oldVptr := s.vptr
-	s.vptr = ptr
-	s.casAtvptr = casAsOfVptr
 	defer s.Unlock()
 
-	y.AssertTrue(oldVptr.Fid < ptr.Fid ||
-		(oldVptr.Fid == ptr.Fid && oldVptr.Offset+oldVptr.Len < ptr.Offset+ptr.Len))
+	if s.vptr.Fid < ptr.Fid {
+		s.vptr = ptr
+		s.casAtvptr = casAtvptr
+	} else if s.vptr.Offset < ptr.Offset {
+		s.vptr = ptr
+		s.casAtvptr = casAtvptr
+	} else if s.vptr.Fid == ptr.Fid && s.vptr.Offset == ptr.Offset && s.vptr.Len < ptr.Len {
+		s.vptr = ptr
+		s.casAtvptr = casAtvptr
+	}
 }
 
 var requestPool = sync.Pool{
