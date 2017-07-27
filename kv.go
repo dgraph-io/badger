@@ -227,6 +227,10 @@ func NewKV(opt *Options) (out *KV, err error) {
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
 	val := item.Value()
+	// lastUsedCasCounter will either be the value stored in !badger!head, or some subsequently
+	// written value log entry that we replay.  (Subsequent value log entries might be _less_
+	// than lastUsedCasCounter, if there was value log gc so we have to max() values while
+	// replaying.)
 	out.lastUsedCasCounter = item.casCounter
 
 	var vptr valuePointer
@@ -243,7 +247,9 @@ func NewKV(opt *Options) (out *KV, err error) {
 			out.elog.Printf("First key=%s\n", e.Key)
 		}
 		first = false
-		out.lastUsedCasCounter = e.casCounter
+		if out.lastUsedCasCounter < e.casCounter {
+			out.lastUsedCasCounter = e.casCounter
+		}
 
 		if e.CASCounterCheck != 0 {
 			oldValue, err := out.get(e.Key)
@@ -588,12 +594,6 @@ func (s *KV) writeToLSM(b *request) error {
 	return nil
 }
 
-// newCASCounter generates a new unique CAS counter.  Is never zero.
-func (s *KV) newCASCounter() uint64 {
-	s.lastUsedCasCounter++
-	return s.lastUsedCasCounter
-}
-
 // writeRequests is called serially by only one goroutine.
 func (s *KV) writeRequests(reqs []*request) error {
 	if len(reqs) == 0 {
@@ -615,7 +615,8 @@ func (s *KV) writeRequests(reqs []*request) error {
 
 	for _, req := range reqs {
 		for _, e := range req.Entries {
-			e.casCounter = s.newCASCounter()
+			s.lastUsedCasCounter++
+			e.casCounter = s.lastUsedCasCounter
 		}
 	}
 	err := s.vlog.write(reqs)
