@@ -35,6 +35,8 @@ var (
 	datasyncFileFlag = 0x0
 )
 
+// TODO: For almost every file, we should have an expectation of whether it exists or not.  Remove
+// most usage of this function.
 func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
 	flags := os.O_RDWR | os.O_CREATE
 	if sync {
