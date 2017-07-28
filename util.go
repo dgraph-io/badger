@@ -115,7 +115,7 @@ func (s *levelHandler) validate() error {
 // reserveFileIDs reserve k fileIDs. Returns pair is a half-interval.
 // If we return [3, 6), it means use 3, 4, 5.
 func (s *levelsController) reserveFileIDs(k int) (uint64, uint64) {
-	id := atomic.AddUint64(&s.maxFileID, uint64(k))
+	id := atomic.AddUint64(&s.nextFileID, uint64(k))
 	return id - uint64(k), id
 }
 

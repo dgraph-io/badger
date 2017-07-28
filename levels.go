@@ -41,7 +41,7 @@ type levelsController struct {
 	kv     *KV
 
 	// Atomic.
-	maxFileID    uint64 // Next ID to be used.
+	nextFileID   uint64
 	maxCompactID uint64
 
 	// For ending compactions.
@@ -91,6 +91,7 @@ func newLevelsController(kv *KV) (*levelsController, error) {
 
 	// Some files may be deleted. Let's reload.
 	tables := make([][]*table.Table, kv.opt.MaxLevels)
+	var maxFileID uint64
 	for fileID := range getIDMap(kv.opt.Dir) {
 		fname := table.NewFilename(fileID, kv.opt.Dir)
 		fd, err := y.OpenSyncedFile(fname, true)
@@ -114,11 +115,11 @@ func newLevelsController(kv *KV) (*levelsController, error) {
 			kv.opt.MaxLevels, level)
 		tables[level] = append(tables[level], t)
 
-		if fileID > s.maxFileID {
-			s.maxFileID = fileID
+		if fileID > maxFileID {
+			maxFileID = fileID
 		}
 	}
-	s.maxFileID++
+	s.nextFileID = maxFileID + 1
 	for i, tbls := range tables {
 		s.levels[i].initTables(tbls)
 	}
