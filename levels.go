@@ -483,9 +483,6 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	}
 
 	c := s.buildCompactionLogEntry(&cd)
-	//			if s.kv.opt.Verbose {
-	//				y.Printf("Compact start: %v\n", c)
-	//			}
 	s.clog.add(c)
 	newTables, decr := s.compactBuildTables(l, cd, c)
 	if newTables == nil {
