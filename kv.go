@@ -208,7 +208,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
 	}
-	out.mt = skl.NewSkiplist(arenaSize(opt))
+	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
 	// newLevelsController potentially loads files in directory.
 	if out.lc, err = newLevelsController(out); err != nil {
@@ -221,7 +221,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	lc = out.closer.Register("memtable")
 	go out.flushMemtable(lc) // Need levels controller to be up.
 
-	if err = out.vlog.Open(out, opt); err != nil {
+	if err = out.vlog.Open(out, &opt); err != nil {
 		return out, err
 	}
 
