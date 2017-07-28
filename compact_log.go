@@ -88,8 +88,6 @@ func compactLogIterate(filename string, f func(c *compaction)) error {
 	}
 	defer fd.Close()
 
-	var buf [5]byte // Temp buffer.
-	var size uint32
 	for {
 		var c compaction
 		err := binary.Read(fd, binary.BigEndian, &c.compactID)
@@ -99,11 +97,13 @@ func compactLogIterate(filename string, f func(c *compaction)) error {
 		if err != nil {
 			return err
 		}
-		if _, err = fd.Read(buf[:1]); err != nil {
+		var buf [1]byte // Temp buffer.
+		if _, err = fd.Read(buf[:]); err != nil {
 			return err
 		}
 		c.done = buf[0]
 		if c.done == 0 {
+			var size uint32
 			if err := binary.Read(fd, binary.BigEndian, &size); err != nil {
 				return err
 			}
