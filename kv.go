@@ -132,6 +132,7 @@ type KV struct {
 	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
 	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
 	opt       Options
+	manifest  *manifestFile
 	lc        *levelsController
 	vlog      valueLog
 	vptr      valuePointer // less than or equal to a pointer to the last vlog value put into mt
