@@ -56,7 +56,7 @@ type Table struct {
 
 	blockIndex []keyOffset
 	metadata   []byte
-	ref        int32 // For file garbage collection.
+	ref        int32 // For file garbage collection.  Atomic.
 
 	mapTableTo int
 	mmap       []byte // Memory mapped.
