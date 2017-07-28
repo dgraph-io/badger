@@ -91,6 +91,8 @@ func compactLogIterate(filename string, f func(c *compaction)) error {
 	reader := bufio.NewReader(fd)
 
 	for {
+		// TODO: If we have a compact log we should be able to read an incompletely written
+		// one.
 		var c compaction
 		err := binary.Read(reader, binary.BigEndian, &c.compactID)
 		if err == io.EOF {
