@@ -438,16 +438,7 @@ func (p valuePointer) Less(o valuePointer) bool {
 }
 
 func (p valuePointer) IsZero() bool {
-	if p.Fid > 0 {
-		return false
-	}
-	if p.Offset > 0 {
-		return false
-	}
-	if p.Len > 0 {
-		return false
-	}
-	return true
+	return p.Fid == 0 && p.Offset == 0 && p.Len == 0
 }
 
 // Encode encodes Pointer into byte buffer.
