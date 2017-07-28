@@ -99,7 +99,7 @@ func compactLogIterate(filename string, f func(c *compaction)) error {
 		if err != nil {
 			return err
 		}
-		var buf [1]byte // Temp buffer.
+		var buf [1]byte
 		if _, err = reader.Read(buf[:]); err != nil {
 			return err
 		}
