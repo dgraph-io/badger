@@ -45,8 +45,7 @@ type levelsController struct {
 	maxCompactID uint64
 
 	// For ending compactions.
-	compactWorkersDone chan struct{}
-	compactWorkersWg   sync.WaitGroup
+	compactWorkersWg sync.WaitGroup
 
 	cstatus compactStatus
 }
