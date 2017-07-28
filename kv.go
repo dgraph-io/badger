@@ -1,4 +1,4 @@
-/*
+
  * Copyright 2017 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -151,7 +151,11 @@ const (
 )
 
 // NewKV returns a new KV object.
-func NewKV(opt *Options) (out *KV, err error) {
+func NewKV(optParam *Options) (out *KV, err error) {
+	// Make a copy early and fill in maxBatchSize
+	opt := *optParam
+	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
+
 	for _, path := range []string{opt.Dir, opt.ValueDir} {
 		dirExists, err := exists(path)
 		if err != nil {
@@ -194,12 +198,11 @@ func NewKV(opt *Options) (out *KV, err error) {
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
-	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	out = &KV{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
-		opt:           *opt, // Make a copy.
+		opt:           opt,
 		closer:        y.NewCloser(),
 		elog:          trace.NewEventLog("Badger", "KV"),
 		dirLockGuard:  dirLockGuard,
