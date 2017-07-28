@@ -19,6 +19,7 @@ package badger
 // Might consider moving this into a separate package.
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"io"
@@ -87,10 +88,11 @@ func compactLogIterate(filename string, f func(c *compaction)) error {
 		return err
 	}
 	defer fd.Close()
+	reader := bufio.NewReader(fd)
 
 	for {
 		var c compaction
-		err := binary.Read(fd, binary.BigEndian, &c.compactID)
+		err := binary.Read(reader, binary.BigEndian, &c.compactID)
 		if err == io.EOF {
 			break
 		}
@@ -98,29 +100,29 @@ func compactLogIterate(filename string, f func(c *compaction)) error {
 			return err
 		}
 		var buf [1]byte // Temp buffer.
-		if _, err = fd.Read(buf[:]); err != nil {
+		if _, err = reader.Read(buf[:]); err != nil {
 			return err
 		}
 		c.done = buf[0]
 		if c.done == 0 {
 			var size uint32
-			if err := binary.Read(fd, binary.BigEndian, &size); err != nil {
+			if err := binary.Read(reader, binary.BigEndian, &size); err != nil {
 				return err
 			}
 			n := int(size)
 			c.toDelete = make([]uint64, n)
 			for i := 0; i < n; i++ {
-				if err := binary.Read(fd, binary.BigEndian, &c.toDelete[i]); err != nil {
+				if err := binary.Read(reader, binary.BigEndian, &c.toDelete[i]); err != nil {
 					return err
 				}
 			}
-			if err := binary.Read(fd, binary.BigEndian, &size); err != nil {
+			if err := binary.Read(reader, binary.BigEndian, &size); err != nil {
 				return err
 			}
 			n = int(size)
 			c.toInsert = make([]uint64, n)
 			for i := 0; i < n; i++ {
-				if err := binary.Read(fd, binary.BigEndian, &c.toInsert[i]); err != nil {
+				if err := binary.Read(reader, binary.BigEndian, &c.toInsert[i]); err != nil {
 					return err
 				}
 			}
