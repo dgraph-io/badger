@@ -199,12 +199,23 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
+	manifestFile, _, err := openManifestFile(filepath.Join(opt.Dir, "MANIFEST"))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if manifestFile != nil {
+			_ = manifestFile.close()
+		}
+	}()
+
 	out = &KV{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
 		opt:           opt,
 		closer:        y.NewCloser(),
+		manifest:      manifestFile,
 		elog:          trace.NewEventLog("Badger", "KV"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
@@ -304,6 +315,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 
 	valueDirLockGuard = nil
 	dirLockGuard = nil
+	manifestFile = nil
 	return out, nil
 }
 

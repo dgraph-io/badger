@@ -23,6 +23,16 @@ import "github.com/dgraph-io/badger/y"
 // and their sizes (except the last value log file), what level they're at, key range info for each
 // LSM file.
 type manifest struct {
+	levels []levelManifest
+}
+
+type levelManifest struct {
+	tables map[uint64]tableManifest // Maps table id to manifest info
+}
+
+type tableManifest struct {
+	tableSize         uint64 // Filesize
+	smallest, biggest []byte // Smallest and largest keys, just like in Table
 }
 
 // manifestFile holds the file pointer (and other info) about the manifest file, which is a log
@@ -31,9 +41,17 @@ type manifestFile struct {
 	fp *os.File
 }
 
-func openManifestFile(path string) (ret *manifestFile, err error) {
-	ret.fp, err = y.OpenSyncedFile(path, true)
-	return
+func openManifestFile(path string) (ret *manifestFile, result manifest, err error) {
+	fp, err := y.OpenSyncedFile(path, true)
+	if err != nil {
+		return nil, manifest{}, err
+	}
+	_, err = fp.Seek(0, os.SEEK_END)
+	if err != nil {
+		_ = fp.Close()
+		return nil, manifest{}, err
+	}
+	return &manifestFile{fp}, manifest{}, nil
 }
 
 func (mf *manifestFile) close() error {
