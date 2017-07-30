@@ -331,6 +331,10 @@ func (s *KV) Close() (err error) {
 				err = errors.Wrap(guardErr, "KV.Close")
 			}
 		}
+		if manifestErr := s.manifest.close(); err == nil {
+			err = errors.Wrap(manifestErr, "KV.Close")
+		}
+
 		// Fsync directories to ensure that lock file, and any other removed files whose directory
 		// we haven't specifically fsynced, are guaranteed to have their directory entry removal
 		// persisted to disk.
