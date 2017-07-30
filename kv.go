@@ -129,12 +129,12 @@ type KV struct {
 
 	closer    *y.Closer
 	elog      trace.EventLog
-	mt        *skl.Skiplist
+	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
 	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
 	opt       Options
 	lc        *levelsController
 	vlog      valueLog
-	vptr      valuePointer
+	vptr      valuePointer // less than or equal to a pointer to the last vlog value put into mt
 	writeCh   chan *request
 	flushChan chan flushTask // For flushing memtables.
 
