@@ -1016,12 +1016,11 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			return nil
 		}
 
-		if ft.vptr.Fid > 0 || ft.vptr.Offset > 0 || ft.vptr.Len > 0 {
+		// TODO: Can this ever be zero?  That'd just be nuts.
+		if !ft.vptr.IsZero() {
 			s.elog.Printf("Storing offset: %+v\n", ft.vptr)
 			offset := make([]byte, 10)
-			s.Lock() // For vptr and casAsOfVptr.
-			s.vptr.Encode(offset)
-			s.Unlock()
+			ft.vptr.Encode(offset)
 			// CAS counter is needed and is desirable -- it's the first value log entry
 			// we replay, so to speak, perhaps the only, and we use it to re-initialize
 			// the CAS counter.
