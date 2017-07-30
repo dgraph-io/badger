@@ -63,7 +63,7 @@ type Table struct {
 
 	// The following are initialized once and const.
 	smallest, biggest []byte // Smallest and largest keys.
-	id                uint64
+	id                uint64 // file id, part of filename
 
 	bf bbloom.Bloom
 }
