@@ -1018,7 +1018,6 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			return nil
 		}
 
-		// TODO: Can this ever be zero?  That'd just be nuts.
 		if !ft.vptr.IsZero() {
 			s.elog.Printf("Storing offset: %+v\n", ft.vptr)
 			offset := make([]byte, 10)
