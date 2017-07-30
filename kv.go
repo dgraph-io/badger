@@ -533,12 +533,14 @@ func (s *KV) updateOffset(ptrs []valuePointer) {
 			break
 		}
 	}
+	if ptr.IsZero() {
+		return
+	}
 
 	s.Lock()
 	defer s.Unlock()
-	if s.vptr.Less(ptr) {
-		s.vptr = ptr
-	}
+	y.AssertTrue(!ptr.Less(s.vptr))
+	s.vptr = ptr
 }
 
 var requestPool = sync.Pool{
