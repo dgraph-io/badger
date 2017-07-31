@@ -472,6 +472,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 		decrReplace := nextLevel.replaceTables(cd.top)
 		decrDelete := thisLevel.deleteTables(cd.top)
 
+		// TODO: Update manifest (and get rid of SetMetadata here)
 		decrReplace()
 		decrDelete()
 
@@ -495,6 +496,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 
 	decrReplace := nextLevel.replaceTables(newTables)
 	decrDelete := thisLevel.deleteTables(cd.top)
+
+	// TODO: Update manifest
 
 	// TODO: We should sync the dir or something first, for file creation.  Do we need to?
 

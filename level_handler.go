@@ -99,8 +99,10 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) (decr func() error) {
 	return func() error { return decrRefs(toDel) }
 }
 
+// TODO: Remove the reference to the "compaction log" in the comment here once that's gone.
+
 // replaceTables will replace tables[left:right] with newTables. Note this EXCLUDES tables[right].
-// You must call decr() to delete the old tables _after_ updating the compaction log.
+// You must call decr() to delete the old tables _after_ updating the compaction log or MANIFEST.
 func (s *levelHandler) replaceTables(newTables []*table.Table) (decr func() error) {
 	s.Lock()
 	defer s.Unlock()
