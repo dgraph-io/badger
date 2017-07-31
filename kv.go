@@ -446,7 +446,8 @@ func (s *KV) fillItem(item *KVItem) error {
 		return nil
 	}
 	if (item.meta & BitValuePointer) == 0 {
-		item.val = item.vptr
+		item.val = item.slice.Resize(len(item.vptr))
+		copy(item.val, item.vptr)
 		return nil
 	}
 
