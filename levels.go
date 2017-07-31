@@ -557,6 +557,17 @@ func (s *levelsController) doCompact(p compactionPriority) bool {
 }
 
 func (s *levelsController) addLevel0Table(t *table.Table) {
+	// We want to update the manifest _before_ we actually add the table.  This way we add to the
+	// manifest before we do compaction operations on the table
+	tc := tableChange{id: t.ID(), op: tableCreate, level: 0,
+		tableSize: uint32(t.Size()), smallest: t.Smallest(), biggest: t.Biggest()}
+
+	// TODO: We do need some kind of lock around manifest file updates, no?  Maybe on some platforms.
+	_ = s.kv.manifest.addChanges(manifestChangeSet{changes: []manifestChange{manifestChange{tc}}})
+
+	// ^^ TODO handle error
+	// ^^ TODO handle uint32() conversion above
+
 	for !s.levels[0].tryAddLevel0Table(t) {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time

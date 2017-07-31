@@ -37,6 +37,7 @@ var (
 
 // TODO: For almost every file, we should have an expectation of whether it exists or not.  Remove
 // most usage of this function.
+// TODO: ^^ do this with manifest changes
 func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
 	flags := os.O_RDWR | os.O_CREATE
 	if sync {
