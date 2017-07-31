@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"log"
 	"os"
 
 	"github.com/dgraph-io/badger/y"
@@ -31,13 +32,25 @@ import (
 // LSM file.
 type manifest struct {
 	levels []levelManifest
+	tables map[uint64]tableManifest
+}
+
+func createManifest() manifest {
+	// TODO: There's some constant for the size of this.
+	levels := make([]levelManifest, 10)
+	for i := 0; i < 10; i++ {
+		levels[i].tables = make(map[uint64]bool)
+	}
+	return manifest{levels: levels,
+		tables: make(map[uint64]tableManifest)}
 }
 
 type levelManifest struct {
-	tables map[uint64]tableManifest // Maps table id to manifest info
+	tables map[uint64]bool // Maps table id to true
 }
 
 type tableManifest struct {
+	level             uint8
 	tableSize         uint64 // Filesize
 	smallest, biggest []byte // Smallest and largest keys, just like in Table
 }
@@ -133,8 +146,45 @@ func replayManifestFile(fp *os.File) (ret manifest, err error) {
 	return manifest{}, err
 }
 
+func applyTableChange(build *manifest, tc *tableChange) {
+	switch tc.op {
+	case tableCreate:
+		if _, ok := build.tables[tc.id]; ok {
+			log.Fatalf("MANIFEST invalid, table %d exists\n", tc.id)
+		}
+		// TODO: tableSize
+		build.tables[tc.id] = tableManifest{
+			level:     tc.level,
+			tableSize: 0,
+			smallest:  tc.smallest,
+			biggest:   tc.biggest}
+		build.levels[tc.level].tables[tc.id] = true
+	case tableSetLevel:
+		tm, ok := build.tables[tc.id]
+		if !ok {
+			log.Fatalf("MANIFEST sets level on non-existing table %d\n", tc.id)
+		}
+		oldLevel := tm.level
+		tm.level = tc.level
+		build.tables[tc.id] = tm
+		delete(build.levels[oldLevel].tables, tc.id)
+		build.levels[tc.level].tables[tc.id] = true
+	case tableDelete:
+		tm, ok := build.tables[tc.id]
+		if !ok {
+			log.Fatalf("MANIFEST removes non-existing table %d\n", tc.id)
+		}
+		delete(build.levels[tm.level].tables, tc.id)
+		delete(build.tables, tc.id)
+	default:
+		log.Fatalf("Invalid tableChange op\n")
+	}
+}
+
 func applyChangeSet(build *manifest, changeSet *manifestChangeSet) {
-	// TODO: Do something.
+	for _, change := range changeSet.changes {
+		applyTableChange(build, &change.tc)
+	}
 }
 
 func (mcs *manifestChangeSet) Encode(w *bytes.Buffer) {
