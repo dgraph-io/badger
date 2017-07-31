@@ -16,8 +16,14 @@
 
 package badger
 
-import "os"
-import "github.com/dgraph-io/badger/y"
+import (
+	"bytes"
+	"encoding/binary"
+	"io"
+	"os"
+
+	"github.com/dgraph-io/badger/y"
+)
 
 // The MANIFEST file describes the startup state of the db -- all value log files and LSM files,
 // and their sizes (except the last value log file), what level they're at, key range info for each
@@ -41,19 +47,101 @@ type manifestFile struct {
 	fp *os.File
 }
 
+const (
+	tableCreate   = 1
+	tableSetLevel = 2
+	tableDelete   = 3
+)
+
+type tableChange struct {
+	id                uint64
+	op                byte   // has value tableCreate, tableSetLevel, or tableDelete
+	level             uint8  // set if tableCreate, tableSetLevel
+	smallest, biggest []byte // set if tableCreate
+}
+
+type manifestChange struct {
+	tc tableChange
+}
+
 func openManifestFile(path string) (ret *manifestFile, result manifest, err error) {
 	fp, err := y.OpenSyncedFile(path, true)
 	if err != nil {
 		return nil, manifest{}, err
 	}
-	_, err = fp.Seek(0, os.SEEK_END)
+
+	m, err := replayManifestFile(fp)
 	if err != nil {
 		_ = fp.Close()
 		return nil, manifest{}, err
 	}
-	return &manifestFile{fp}, manifest{}, nil
+
+	return &manifestFile{fp}, m, nil
 }
 
 func (mf *manifestFile) close() error {
 	return mf.fp.Close()
+}
+
+func replayManifestFile(fp *os.File) (ret manifest, err error) {
+	// TODO: Replay, truncate or report if incomplete manifest entry at the end.
+	_, err = fp.Seek(0, os.SEEK_END)
+	return manifest{}, err
+}
+
+func (mc *manifestChange) Encode(w *bytes.Buffer) {
+	mc.tc.Encode(w)
+}
+
+func (mc *manifestChange) Decode(r io.Reader) error {
+	return mc.tc.Decode(r)
+}
+
+// TODO: How do we know keys have 16 bit size?  We need to encapsulate that somehow.
+func encodeKey(w *bytes.Buffer, x []byte) {
+	var size [2]byte
+	binary.BigEndian.PutUint16(size[:], uint16(len(x)))
+	w.Write(size[:])
+	w.Write(x)
+}
+
+func decodeKey(r io.Reader) ([]byte, error) {
+	var size [2]byte
+	if _, err := io.ReadFull(r, size[:]); err != nil {
+		return nil, err
+	}
+	n := binary.BigEndian.Uint16(size[:])
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+func (tc *tableChange) Encode(w *bytes.Buffer) {
+	var bytes [10]byte
+	binary.BigEndian.PutUint64(bytes[:8], tc.id)
+	bytes[8] = tc.op
+	bytes[9] = tc.level
+	w.Write(bytes[:])
+	encodeKey(w, tc.smallest)
+	encodeKey(w, tc.biggest)
+}
+
+func (tc *tableChange) Decode(r io.Reader) error {
+	var bytes [10]byte
+	if _, err := io.ReadFull(r, bytes[:]); err != nil {
+		return err
+	}
+	tc.id = binary.BigEndian.Uint64(bytes[:8])
+	tc.op = bytes[8]
+	tc.level = bytes[9]
+	var err error
+	if tc.smallest, err = decodeKey(r); err != nil {
+		return err
+	}
+	if tc.biggest, err = decodeKey(r); err != nil {
+		return err
+	}
+	return nil
 }
