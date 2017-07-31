@@ -461,10 +461,13 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	if thisLevel.level >= 1 && len(cd.bot) == 0 {
 		y.AssertTrue(len(cd.top) == 1)
 
-		decrReplace := nextLevel.replaceTables(cd.top)
-		decrDelete := thisLevel.deleteTables(cd.top)
+		var changeSet manifestChangeSet
+		decrReplace := nextLevel.replaceTables(cd.top, &changeSet)
+		decrDelete := thisLevel.deleteTables(cd.top, &changeSet)
 
-		// TODO: Update manifest (and get rid of SetMetadata here)
+		_ = s.kv.manifest.addChanges(changeSet) // TODO: Handle error
+		// TODO: Probably sync before running decr functions
+
 		decrReplace()
 		decrDelete()
 
@@ -486,8 +489,10 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	}
 	defer decr()
 
-	decrReplace := nextLevel.replaceTables(newTables)
-	decrDelete := thisLevel.deleteTables(cd.top)
+	var changeSet manifestChangeSet
+
+	decrReplace := nextLevel.replaceTables(newTables, &changeSet)
+	decrDelete := thisLevel.deleteTables(cd.top, &changeSet)
 
 	// TODO: Update manifest
 
@@ -500,9 +505,11 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	c.done = 1
 	s.clog.add(c)
 
-	// TODO: Sync the clog before we run decr functions?
-	decrReplace()
-	decrDelete()
+	_ = s.kv.manifest.addChanges(changeSet) // TODO: Handle error
+
+	// TODO: Sync the clog or manifest before we run decr functions?
+	_ = decrReplace() // TODO handle error
+	_ = decrDelete()  // TODO handle error
 
 	cd.elog.LazyPrintf("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
 		l, l+1, len(cd.top)+len(cd.bot), len(newTables), time.Since(timeStart))

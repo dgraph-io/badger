@@ -65,7 +65,8 @@ type manifestFile struct {
 }
 
 const (
-	tableCreate   = 1
+	tableCreate = 1
+	// TODO: Probably just remove SetLevel.
 	tableSetLevel = 2
 	tableDelete   = 3
 )
