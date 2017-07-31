@@ -111,8 +111,9 @@ func (s *levelHandler) replaceTables(
 	s.Lock()
 	defer s.Unlock()
 
-	// Need to re-search the range of tables in this level to be replaced as
-	// other goroutines might be changing it as well.
+	// Need to re-search the range of tables in this level to be replaced as other goroutines might
+	// be changing it as well.  (They can't touch our tables, but if they add/remove other tables,
+	// the indices get shifted around.)
 	if len(newTables) == 0 {
 		return
 	}
