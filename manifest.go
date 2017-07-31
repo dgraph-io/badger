@@ -21,11 +21,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/dgraph/x"
 )
 
 // The MANIFEST file describes the startup state of the db -- all value log files and LSM files,
@@ -138,7 +138,9 @@ func replayManifestFile(maxLevels int, fp *os.File) (ret manifest, err error) {
 			}
 			return manifest{}, err
 		}
-		applyChangeSet(&build, &changeSet)
+		if err := applyChangeSet(&build, &changeSet); err != nil {
+			return manifest{}, err
+		}
 	}
 
 	// Truncate file so we don't have a half-written entry at the end.
@@ -148,11 +150,11 @@ func replayManifestFile(maxLevels int, fp *os.File) (ret manifest, err error) {
 	return manifest{}, err
 }
 
-func applyTableChange(build *manifest, tc *tableChange) {
+func applyTableChange(build *manifest, tc *tableChange) error {
 	switch tc.op {
 	case tableCreate:
 		if _, ok := build.tables[tc.id]; ok {
-			log.Fatalf("MANIFEST invalid, table %d exists\n", tc.id)
+			return x.Errorf("MANIFEST invalid, table %d exists\n", tc.id)
 		}
 		build.tables[tc.id] = tableManifest{
 			level:     tc.level,
@@ -163,7 +165,7 @@ func applyTableChange(build *manifest, tc *tableChange) {
 	case tableSetLevel:
 		tm, ok := build.tables[tc.id]
 		if !ok {
-			log.Fatalf("MANIFEST sets level on non-existing table %d\n", tc.id)
+			return x.Errorf("MANIFEST sets level on non-existing table %d\n", tc.id)
 		}
 		oldLevel := tm.level
 		tm.level = tc.level
@@ -173,19 +175,25 @@ func applyTableChange(build *manifest, tc *tableChange) {
 	case tableDelete:
 		tm, ok := build.tables[tc.id]
 		if !ok {
-			log.Fatalf("MANIFEST removes non-existing table %d\n", tc.id)
+			return x.Errorf("MANIFEST removes non-existing table %d\n", tc.id)
 		}
 		delete(build.levels[tm.level].tables, tc.id)
 		delete(build.tables, tc.id)
 	default:
-		log.Fatalf("Invalid tableChange op\n")
+		return x.Errorf("MANIFEST file has invalid tableChange op\n")
 	}
+	return nil
 }
 
-func applyChangeSet(build *manifest, changeSet *manifestChangeSet) {
+// This is not a "recoverable" error -- opening the KV store fails because the MANIFEST file is
+// just plain broken.
+func applyChangeSet(build *manifest, changeSet *manifestChangeSet) error {
 	for _, change := range changeSet.changes {
-		applyTableChange(build, &change.tc)
+		if err := applyTableChange(build, &change.tc); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (mcs *manifestChangeSet) Encode(w *bytes.Buffer) {
