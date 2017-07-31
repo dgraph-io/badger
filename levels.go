@@ -461,6 +461,9 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	if thisLevel.level >= 1 && len(cd.bot) == 0 {
 		y.AssertTrue(len(cd.top) == 1)
 
+		// TODO: Actually update manifest before in-memory table mappings (so that manifest updates
+		// can't happen in wrong order)
+
 		var changeSet manifestChangeSet
 		decrReplace := nextLevel.replaceTables(cd.top, &changeSet)
 		decrDelete := thisLevel.deleteTables(cd.top, &changeSet)
@@ -490,6 +493,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	defer decr()
 
 	var changeSet manifestChangeSet
+
+	// TODO: Update manifest here, before we update in-memory table mappings.
 
 	decrReplace := nextLevel.replaceTables(newTables, &changeSet)
 	decrDelete := thisLevel.deleteTables(cd.top, &changeSet)
