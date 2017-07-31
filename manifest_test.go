@@ -23,9 +23,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestManifest(t *testing.T) {
+func TestManifestChange(t *testing.T) {
 	var buf bytes.Buffer
-	change := manifestChange{tableChange{33, tableCreate, 3, []byte("bar"), []byte("foo")}}
+	change := manifestChange{tableChange{33, tableCreate, 3, 66, []byte("bar"), []byte("foo")}}
 	change.Encode(&buf)
 	var newChange manifestChange
 	err := newChange.Decode(bytes.NewReader(buf.Bytes()))
