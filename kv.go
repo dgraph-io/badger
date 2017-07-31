@@ -445,6 +445,10 @@ func (s *KV) fillItem(item *KVItem) error {
 		item.val = nil
 		return nil
 	}
+
+	if item.slice == nil {
+		item.slice = new(y.Slice)
+	}
 	if (item.meta & BitValuePointer) == 0 {
 		item.val = item.slice.Resize(len(item.vptr))
 		copy(item.val, item.vptr)
@@ -457,7 +461,7 @@ func (s *KV) fillItem(item *KVItem) error {
 	if err != nil {
 		return errors.Wrapf(err, "Unable to read from value log: %+v", vp)
 	}
-	if (entry.Meta & BitDelete) != 0 { // Not tombstone.
+	if (entry.Meta & BitDelete) != 0 { // Is a tombstone.
 		item.val = nil
 		return nil
 	}
