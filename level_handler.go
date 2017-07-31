@@ -75,7 +75,7 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 }
 
 // deleteTables remove tables idx0, ..., idx1-1.
-func (s *levelHandler) deleteTables(toDel []*table.Table) {
+func (s *levelHandler) deleteTables(toDel []*table.Table) (decr func() error) {
 	s.Lock()
 	defer s.Unlock()
 
@@ -83,6 +83,7 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) {
 	for _, t := range toDel {
 		toDelMap[t.ID()] = struct{}{}
 	}
+
 	// Make a copy as iterators might be keeping a slice of tables.
 	var newTables []*table.Table
 	for _, t := range s.tables {
@@ -92,13 +93,15 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) {
 			continue
 		}
 		s.totalSize -= t.Size()
-		t.DecrRef()
 	}
 	s.tables = newTables
+
+	return func() error { return decrRefs(toDel) }
 }
 
 // replaceTables will replace tables[left:right] with newTables. Note this EXCLUDES tables[right].
-func (s *levelHandler) replaceTables(newTables []*table.Table) {
+// You must call decr() to delete the old tables _after_ updating the compaction log.
+func (s *levelHandler) replaceTables(newTables []*table.Table) (decr func() error) {
 	s.Lock()
 	defer s.Unlock()
 
@@ -120,10 +123,12 @@ func (s *levelHandler) replaceTables(newTables []*table.Table) {
 	}
 	left, right := s.overlappingTables(kr)
 
+	toDecr := make([]*table.Table, right-left)
+
 	// Update totalSize and reference counts.
 	for i := left; i < right; i++ {
 		s.totalSize -= s.tables[i].Size()
-		s.tables[i].DecrRef()
+		toDecr[i] = s.tables[i]
 	}
 
 	// To be safe, just make a copy. TODO: Be more careful and avoid copying.
@@ -136,6 +141,16 @@ func (s *levelHandler) replaceTables(newTables []*table.Table) {
 	t = t[numAdded:]
 	y.AssertTrue(len(s.tables[right:]) == copy(t, s.tables[right:]))
 	s.tables = tables
+	return func() error { return decrRefs(toDecr) }
+}
+
+func decrRefs(tables []*table.Table) error {
+	for _, table := range tables {
+		if err := table.DecrRef(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newLevelHandler(kv *KV, level int) *levelHandler {

@@ -469,8 +469,11 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	if thisLevel.level >= 1 && len(cd.bot) == 0 {
 		y.AssertTrue(len(cd.top) == 1)
 
-		nextLevel.replaceTables(cd.top)
-		thisLevel.deleteTables(cd.top)
+		decrReplace := nextLevel.replaceTables(cd.top)
+		decrDelete := thisLevel.deleteTables(cd.top)
+
+		decrReplace()
+		decrDelete()
 
 		tbl := cd.top[0]
 		tbl.UpdateLevel(l + 1)
@@ -493,15 +496,21 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	}
 	defer decr()
 
-	nextLevel.replaceTables(newTables)
-	thisLevel.deleteTables(cd.top) // Function will acquire level lock.
+	decrReplace := nextLevel.replaceTables(newTables)
+	decrDelete := thisLevel.deleteTables(cd.top)
+
+	// TODO: We should sync the dir or something first, for file creation.  Do we need to?
 
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
 
-	// Write to compact log.
+	// Write to compaction log _after_ creating the new files and _before_ deleting the old ones.
 	c.done = 1
 	s.clog.add(c)
+
+	// TODO: Sync the clog before we run decr functions?
+	decrReplace()
+	decrDelete()
 
 	cd.elog.LazyPrintf("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
 		l, l+1, len(cd.top)+len(cd.bot), len(newTables), time.Since(timeStart))
