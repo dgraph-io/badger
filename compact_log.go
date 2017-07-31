@@ -203,5 +203,6 @@ func (s *levelsController) buildCompactionLogEntry(def *compactDef) *compaction 
 	for i := newIDMin; i < newIDMax; i++ {
 		c.toInsert = append(c.toInsert, uint64(i))
 	}
+
 	return c
 }

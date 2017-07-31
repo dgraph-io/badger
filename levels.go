@@ -239,7 +239,6 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 // compactBuildTables merge topTables and botTables to form a list of new tables.
 func (s *levelsController) compactBuildTables(
 	l int, cd compactDef, c *compaction) ([]*table.Table, func() error) {
-
 	topTables := cd.top
 	botTables := cd.bot
 
@@ -335,7 +334,30 @@ func (s *levelsController) compactBuildTables(
 	}
 
 	out := newTables[:i]
+
 	return out, func() error { return decrRefs(out) }
+}
+
+func buildChangeSet(cd *compactDef, newTables []*table.Table) manifestChangeSet {
+
+	changes := []manifestChange{}
+	for _, table := range newTables {
+		changes = append(changes, manifestChange{tableChange{
+			id:        table.ID(),
+			op:        tableCreate,
+			level:     0,                    // TODO
+			tableSize: uint32(table.Size()), // TODO deal with cast
+			smallest:  table.Smallest(),
+			biggest:   table.Biggest(),
+		}})
+	}
+	for _, table := range cd.top {
+		changes = append(changes, manifestChange{tableChange{id: table.ID(), op: tableDelete}})
+	}
+	for _, table := range cd.bot {
+		changes = append(changes, manifestChange{tableChange{id: table.ID(), op: tableDelete}})
+	}
+	return manifestChangeSet{changes: changes}
 }
 
 type compactDef struct {
@@ -460,21 +482,32 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 
 	if thisLevel.level >= 1 && len(cd.bot) == 0 {
 		y.AssertTrue(len(cd.top) == 1)
+		tbl := cd.top[0]
 
 		// TODO: Actually update manifest before in-memory table mappings (so that manifest updates
 		// can't happen in wrong order)
 
-		var changeSet manifestChangeSet
-		decrReplace := nextLevel.replaceTables(cd.top, &changeSet)
-		decrDelete := thisLevel.deleteTables(cd.top, &changeSet)
+		// TODO: Get rid of tableSetLevel or whatever it's called.
 
-		_ = s.kv.manifest.addChanges(changeSet) // TODO: Handle error
-		// TODO: Probably sync before running decr functions
+		changeSet := manifestChangeSet{
+			changes: []manifestChange{
+				manifestChange{tableChange{id: tbl.ID(), op: tableDelete}},
+				manifestChange{tableChange{id: tbl.ID(), op: tableCreate, level: uint8(nextLevel.level),
+					tableSize: uint32(tbl.Size()), smallest: tbl.Smallest(), biggest: tbl.Biggest()}},
+			},
+		}
+		_ = s.kv.manifest.addChanges(changeSet)
 
-		decrReplace()
-		decrDelete()
+		// TODO: Should the in-memory operation happen atomically?  Put these behind the same lock?
 
-		tbl := cd.top[0]
+		var chSet manifestChangeSet
+		decrReplace := nextLevel.replaceTables(cd.top, &chSet)
+		decrDelete := thisLevel.deleteTables(cd.top, &chSet)
+
+		_ = decrReplace() // TODO handle error
+		_ = decrDelete()  // TODO handle error
+
+		// TODO: vvv if there's anything to do here, do it above.
 		tbl.UpdateLevel(l + 1)
 		cd.elog.LazyPrintf("\tLOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
 			l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
@@ -491,15 +524,15 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 		return
 	}
 	defer decr()
+	changeSet := buildChangeSet(&cd, newTables)
 
-	var changeSet manifestChangeSet
+	_ = s.kv.manifest.addChanges(changeSet) // TODO: Handle error
+	// TODO: comment about addChanges ordering
 
 	// TODO: Update manifest here, before we update in-memory table mappings.
 
 	decrReplace := nextLevel.replaceTables(newTables, &changeSet)
 	decrDelete := thisLevel.deleteTables(cd.top, &changeSet)
-
-	// TODO: Update manifest
 
 	// TODO: We should sync the dir or something first, for file creation.  Do we need to?
 
@@ -509,8 +542,6 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	// Write to compaction log _after_ creating the new files and _before_ deleting the old ones.
 	c.done = 1
 	s.clog.add(c)
-
-	_ = s.kv.manifest.addChanges(changeSet) // TODO: Handle error
 
 	// TODO: Sync the clog or manifest before we run decr functions?
 	_ = decrReplace() // TODO handle error
