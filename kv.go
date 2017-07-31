@@ -1064,8 +1064,9 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			s.elog.Printf("ERROR while opening table: %v", err)
 			return err
 		}
-		defer tbl.DecrRef()
-		s.lc.addLevel0Table(tbl) // This will incrRef again.
+		// We own a ref on tbl.
+		s.lc.addLevel0Table(tbl) // This will incrRef.
+		tbl.DecrRef()            // Releases our ref.
 
 		// Update s.imm. Need a lock.
 		s.Lock()
