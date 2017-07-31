@@ -88,10 +88,53 @@ func (mf *manifestFile) close() error {
 	return mf.fp.Close()
 }
 
+type countingReader struct {
+	wrapped *bufio.Reader
+	count   int64
+}
+
+func (r *countingReader) Read(p []byte) (n int, err error) {
+	n, err = r.wrapped.Read(p)
+	r.count += int64(n)
+	return
+}
+
+func (r *countingReader) ReadByte() (b byte, err error) {
+	b, err = r.wrapped.ReadByte()
+	if err == nil {
+		r.count++
+	}
+	return
+}
+
 func replayManifestFile(fp *os.File) (ret manifest, err error) {
-	// TODO: Replay, truncate or report if incomplete manifest entry at the end.
+	r := countingReader{wrapped: bufio.NewReader(fp)}
+
+	offset := r.count
+
+	var build manifest
+	for {
+		offset = r.count
+		var changeSet manifestChangeSet
+		err := changeSet.Decode(&r)
+		if err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				break
+			}
+			return manifest{}, err
+		}
+		applyChangeSet(&build, &changeSet)
+	}
+
+	// Truncate file so we don't have a half-written entry at the end.
+	fp.Truncate(offset)
+
 	_, err = fp.Seek(0, os.SEEK_END)
 	return manifest{}, err
+}
+
+func applyChangeSet(build *manifest, changeSet *manifestChangeSet) {
+	// TODO: Do something.
 }
 
 func (mcs *manifestChangeSet) Encode(w *bytes.Buffer) {
@@ -103,7 +146,7 @@ func (mcs *manifestChangeSet) Encode(w *bytes.Buffer) {
 	}
 }
 
-func (mcs *manifestChangeSet) Decode(r *bufio.Reader) error {
+func (mcs *manifestChangeSet) Decode(r *countingReader) error {
 	n, err := binary.ReadUvarint(r)
 	if err != nil {
 		return err
