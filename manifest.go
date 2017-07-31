@@ -23,6 +23,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/dgraph-io/badger/y"
 )
@@ -35,10 +36,9 @@ type manifest struct {
 	tables map[uint64]tableManifest
 }
 
-func createManifest() manifest {
-	// TODO: There's some constant for the size of this.
-	levels := make([]levelManifest, 10)
-	for i := 0; i < 10; i++ {
+func createManifest(maxLevels int) manifest {
+	levels := make([]levelManifest, maxLevels)
+	for i := 0; i < maxLevels; i++ {
 		levels[i].tables = make(map[uint64]bool)
 	}
 	return manifest{levels: levels,
@@ -83,13 +83,14 @@ type manifestChangeSet struct {
 	changes []manifestChange
 }
 
-func openManifestFile(path string) (ret *manifestFile, result manifest, err error) {
+func openManifestFile(opt *Options) (ret *manifestFile, result manifest, err error) {
+	path := filepath.Join(opt.Dir, "MANIFEST")
 	fp, err := y.OpenSyncedFile(path, true)
 	if err != nil {
 		return nil, manifest{}, err
 	}
 
-	m, err := replayManifestFile(fp)
+	m, err := replayManifestFile(opt.MaxLevels, fp)
 	if err != nil {
 		_ = fp.Close()
 		return nil, manifest{}, err
@@ -121,12 +122,12 @@ func (r *countingReader) ReadByte() (b byte, err error) {
 	return
 }
 
-func replayManifestFile(fp *os.File) (ret manifest, err error) {
+func replayManifestFile(maxLevels int, fp *os.File) (ret manifest, err error) {
 	r := countingReader{wrapped: bufio.NewReader(fp)}
 
 	offset := r.count
 
-	var build manifest
+	build := createManifest(maxLevels)
 	for {
 		offset = r.count
 		var changeSet manifestChangeSet

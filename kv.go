@@ -199,7 +199,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
-	manifestFile, _, err := openManifestFile(filepath.Join(opt.Dir, "MANIFEST"))
+	manifestFile, _, err := openManifestFile(&opt)
 	if err != nil {
 		return nil, err
 	}
