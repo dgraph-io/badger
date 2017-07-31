@@ -103,6 +103,16 @@ func (mf *manifestFile) close() error {
 	return mf.fp.Close()
 }
 
+// addChanges writes a batch of changes, atomically, to the file.  By "atomically" that means when
+// we replay the MANIFEST file, we'll either replay all the changes or none of them.  (The truth of
+// this depends on the filesystem.)
+func (mf *manifestFile) addChanges(changes manifestChangeSet) error {
+	var buf bytes.Buffer
+	changes.Encode(&buf)
+	_, err := mf.fp.Write(buf.Bytes())
+	return err
+}
+
 type countingReader struct {
 	wrapped *bufio.Reader
 	count   int64
