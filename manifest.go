@@ -28,6 +28,9 @@ import (
 	"github.com/dgraph-io/dgraph/x"
 )
 
+// TODO: Put some basic versioning info at the top of the manifest file.  Or do we have that in
+// another file?
+
 // The MANIFEST file describes the startup state of the db -- all value log files and LSM files,
 // and their sizes (except the last value log file), what level they're at, key range info for each
 // LSM file.
