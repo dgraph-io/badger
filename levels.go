@@ -335,15 +335,7 @@ func (s *levelsController) compactBuildTables(
 	}
 
 	out := newTables[:i]
-	return out, func() error {
-		for _, t := range out {
-			// replaceTables will increment reference.
-			if err := t.DecrRef(); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
+	return out, func() error { return decrRefs(out) }
 }
 
 type compactDef struct {
