@@ -286,6 +286,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 
 	rem := vlog.fpath(f.fid)
 	f.fd.Close() // close file previous to remove it
+
 	elog.Printf("Removing %s", rem)
 	return os.Remove(rem)
 }
@@ -439,6 +440,7 @@ func (l *valueLog) openOrCreateFiles() error {
 
 		lf := &logFile{fid: uint16(fid), path: l.fpath(uint16(fid))}
 		l.files = append(l.files, lf)
+
 	}
 
 	sort.Slice(l.files, func(i, j int) bool {
@@ -450,7 +452,7 @@ func (l *valueLog) openOrCreateFiles() error {
 	for i := range l.files {
 		lf := l.files[i]
 		if i == len(l.files)-1 {
-			lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
+			lf.fd, err = y.OpenExistingSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
 			if err != nil {
 				return errors.Wrapf(err, "Unable to open value log file as RDWR")
 			}
@@ -465,28 +467,39 @@ func (l *valueLog) openOrCreateFiles() error {
 
 	// If no files are found, then create a new file.
 	if len(l.files) == 0 {
-		lf := &logFile{fid: 0, path: l.fpath(0)}
-		lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
+		_, err := l.createVlogFile(0)
 		if err != nil {
-			return errors.Wrapf(err, "Unable to open value log file as RDWR")
-		}
-		l.files = append(l.files, lf)
-		// We created a file -- ensure that its directory entry is persisted.
-		err = syncDir(l.dirPath)
-		if err != nil {
-			return errors.Wrapf(err, "Unable to sync value log file dir")
+			return err
 		}
 	}
 	return nil
 }
 
+func (l *valueLog) createVlogFile(fid uint16) (*logFile, error) {
+	path := l.fpath(fid)
+	lf := &logFile{fid: fid, offset: 0, path: path}
+	var err error
+	lf.fd, err = y.CreateSyncedFile(path, l.opt.SyncWrites)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Unable to create value log file")
+	}
+	err = syncDir(l.dirPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Unable to sync value log file dir")
+	}
+	l.Lock()
+	l.files = append(l.files, lf)
+	l.Unlock()
+	return lf, nil
+}
+
 func (l *valueLog) Open(kv *KV, opt *Options) error {
 	l.dirPath = opt.ValueDir
 	l.opt = *opt
+	l.kv = kv
 	if err := l.openOrCreateFiles(); err != nil {
 		return errors.Wrapf(err, "Unable to open value log")
 	}
-	l.kv = kv
 
 	l.elog = trace.NewEventLog("Badger", "Valuelog")
 
@@ -595,22 +608,11 @@ func (l *valueLog) write(reqs []*request) error {
 
 			newid := atomic.AddUint32(&l.maxFid, 1)
 			y.AssertTruef(newid < 1<<16, "newid will overflow uint16: %v", newid)
-			newlf := &logFile{fid: uint16(newid), offset: 0}
-			newlf.path = l.fpath(newlf.fid)
-			newlf.fd, err = y.OpenSyncedFile(newlf.path, l.opt.SyncWrites)
+			newlf, err := l.createVlogFile(uint16(newid))
 			if err != nil {
-				return errors.Wrapf(err, "While creating new value log: %q", newlf.path)
-			}
-			if l.opt.SyncWrites {
-				if err := syncDir(l.dirPath); err != nil {
-					return errors.Wrapf(err,
-						"Could not sync directory entry of value log: %q", newlf.path)
-				}
+				return err
 			}
 
-			l.Lock()
-			l.files = append(l.files, newlf)
-			l.Unlock()
 			curlf = newlf
 		}
 		return nil

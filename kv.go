@@ -125,6 +125,7 @@ type KV struct {
 	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
 	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
 	opt       Options
+	manifest  *manifestFile
 	lc        *levelsController
 	vlog      valueLog
 	vptr      valuePointer // less than or equal to a pointer to the last vlog value put into mt
@@ -192,12 +193,23 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
+	manifestFile, manifest, err := openOrCreateManifestFile(&opt)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if manifestFile != nil {
+			_ = manifestFile.close()
+		}
+	}()
+
 	out = &KV{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
 		opt:           opt,
 		closer:        y.NewCloser(),
+		manifest:      manifestFile,
 		elog:          trace.NewEventLog("Badger", "KV"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
@@ -207,7 +219,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
 	// newLevelsController potentially loads files in directory.
-	if out.lc, err = newLevelsController(out); err != nil {
+	if out.lc, err = newLevelsController(out, &manifest); err != nil {
 		return nil, err
 	}
 
@@ -299,6 +311,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 
 	valueDirLockGuard = nil
 	dirLockGuard = nil
+	manifestFile = nil
 	return out, nil
 }
 
@@ -314,6 +327,10 @@ func (s *KV) Close() (err error) {
 				err = errors.Wrap(guardErr, "KV.Close")
 			}
 		}
+		if manifestErr := s.manifest.close(); err == nil {
+			err = errors.Wrap(manifestErr, "KV.Close")
+		}
+
 		// Fsync directories to ensure that lock file, and any other removed files whose directory
 		// we haven't specifically fsynced, are guaranteed to have their directory entry removal
 		// persisted to disk.
@@ -1002,8 +1019,7 @@ func writeLevel0Table(s *skl.Skiplist, f *os.File) error {
 			return err
 		}
 	}
-	var buf [2]byte // Level 0. Leave it initialized as 0.
-	_, err := f.Write(b.Finish(buf[:]))
+	_, err := f.Write(b.Finish())
 	return err
 }
 
@@ -1034,8 +1050,8 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			// before vptr (because they don't get replayed).
 			ft.mt.Put(head, y.ValueStruct{Value: offset, CASCounter: s.lastCASCounter()})
 		}
-		fileID, _ := s.lc.reserveFileIDs(1)
-		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
+		fileID := s.lc.reserveFileID()
+		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
 		if err != nil {
 			return y.Wrap(err)
 		}
@@ -1062,8 +1078,11 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			return err
 		}
 		// We own a ref on tbl.
-		s.lc.addLevel0Table(tbl) // This will incrRef.
-		tbl.DecrRef()            // Releases our ref.
+		err = s.lc.addLevel0Table(tbl) // This will incrRef (if we don't error, sure)
+		tbl.DecrRef()                  // Releases our ref.
+		if err != nil {
+			return err
+		}
 
 		// Update s.imm. Need a lock.
 		s.Lock()
