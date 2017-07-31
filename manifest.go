@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"io"
@@ -64,6 +65,10 @@ type manifestChange struct {
 	tc tableChange
 }
 
+type manifestChangeSet struct {
+	changes []manifestChange
+}
+
 func openManifestFile(path string) (ret *manifestFile, result manifest, err error) {
 	fp, err := y.OpenSyncedFile(path, true)
 	if err != nil {
@@ -87,6 +92,29 @@ func replayManifestFile(fp *os.File) (ret manifest, err error) {
 	// TODO: Replay, truncate or report if incomplete manifest entry at the end.
 	_, err = fp.Seek(0, os.SEEK_END)
 	return manifest{}, err
+}
+
+func (mcs *manifestChangeSet) Encode(w *bytes.Buffer) {
+	var b [binary.MaxVarintLen64]byte
+	n := binary.PutUvarint(b[:], uint64(len(mcs.changes)))
+	w.Write(b[:n])
+	for _, change := range mcs.changes {
+		change.Encode(w)
+	}
+}
+
+func (mcs *manifestChangeSet) Decode(r *bufio.Reader) error {
+	n, err := binary.ReadUvarint(r)
+	if err != nil {
+		return err
+	}
+	changes := make([]manifestChange, n)
+	for i := uint64(0); i < n; i++ {
+		if err := changes[i].Decode(r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (mc *manifestChange) Encode(w *bytes.Buffer) {
