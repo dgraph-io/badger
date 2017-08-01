@@ -55,8 +55,6 @@ func revertToManifest(kv *KV, manifest *manifest, idMap map[uint64]struct{}) err
 	// 1. Check all files in manifest exist.
 	for id := range manifest.tables {
 		if _, ok := idMap[id]; !ok {
-			// We could verify their file size.  But we don't.
-			// TODO: Check file size when we stat in OpenTable.
 			return fmt.Errorf("file does not exist for table %d", id)
 		}
 	}
@@ -335,12 +333,9 @@ func (s *levelsController) compactBuildTables(
 
 func makeTableCreateChange(table *table.Table, level int) manifestChange {
 	return manifestChange{tableChange{
-		id:        table.ID(),
-		op:        tableCreate,
-		level:     uint8(level),
-		tableSize: uint64(table.Size()),
-		smallest:  table.Smallest(),
-		biggest:   table.Biggest(),
+		id:    table.ID(),
+		op:    tableCreate,
+		level: uint8(level),
 	}}
 }
 

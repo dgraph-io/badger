@@ -51,9 +51,7 @@ type levelManifest struct {
 }
 
 type tableManifest struct {
-	level             uint8
-	tableSize         uint64 // Filesize
-	smallest, biggest []byte // Smallest and largest keys, just like in Table
+	level uint8
 }
 
 // manifestFile holds the file pointer (and other info) about the manifest file, which is a log
@@ -72,11 +70,9 @@ const (
 // If we change a table's level, we just do a delete followed by a create.  (In the same changeset,
 // so that they're atomically applied, of course.)
 type tableChange struct {
-	id                uint64
-	op                byte   // has value tableCreate, or tableDelete
-	level             uint8  // set if tableCreate
-	tableSize         uint64 // set if tableCreate
-	smallest, biggest []byte // set if tableCreate
+	id    uint64
+	op    byte  // has value tableCreate, or tableDelete
+	level uint8 // set if tableCreate
 }
 
 type manifestChange struct {
@@ -178,10 +174,7 @@ func applyTableChange(build *manifest, tc *tableChange) error {
 			return x.Errorf("MANIFEST invalid, table %d exists\n", tc.id)
 		}
 		build.tables[tc.id] = tableManifest{
-			level:     tc.level,
-			tableSize: tc.tableSize,
-			smallest:  tc.smallest,
-			biggest:   tc.biggest}
+			level: tc.level}
 		build.levels[tc.level].tables[tc.id] = struct{}{}
 	case tableDelete:
 		tm, ok := build.tables[tc.id]
@@ -239,52 +232,21 @@ func (mc *manifestChange) Decode(r io.Reader) error {
 	return mc.tc.Decode(r)
 }
 
-func encodeKey(w *bytes.Buffer, x []byte) {
-	var size [2]byte
-	binary.BigEndian.PutUint16(size[:], uint16(len(x)))
-	w.Write(size[:])
-	w.Write(x)
-}
-
-func decodeKey(r io.Reader) ([]byte, error) {
-	var size [2]byte
-	if _, err := io.ReadFull(r, size[:]); err != nil {
-		return nil, err
-	}
-	n := binary.BigEndian.Uint16(size[:])
-	buf := make([]byte, n)
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return nil, err
-	}
-	return buf, nil
-}
-
 func (tc *tableChange) Encode(w *bytes.Buffer) {
-	var bytes [18]byte
+	var bytes [10]byte
 	binary.BigEndian.PutUint64(bytes[0:8], tc.id)
 	bytes[8] = tc.op
 	bytes[9] = tc.level
-	binary.BigEndian.PutUint64(bytes[10:18], tc.tableSize)
 	w.Write(bytes[:])
-	encodeKey(w, tc.smallest)
-	encodeKey(w, tc.biggest)
 }
 
 func (tc *tableChange) Decode(r io.Reader) error {
-	var bytes [18]byte
+	var bytes [10]byte
 	if _, err := io.ReadFull(r, bytes[:]); err != nil {
 		return err
 	}
 	tc.id = binary.BigEndian.Uint64(bytes[0:8])
 	tc.op = bytes[8]
 	tc.level = bytes[9]
-	tc.tableSize = binary.BigEndian.Uint64(bytes[10:18])
-	var err error
-	if tc.smallest, err = decodeKey(r); err != nil {
-		return err
-	}
-	if tc.biggest, err = decodeKey(r); err != nil {
-		return err
-	}
 	return nil
 }
