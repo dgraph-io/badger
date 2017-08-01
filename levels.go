@@ -545,9 +545,6 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
 
-	// Write to compaction log _after_ creating the new files and _before_ deleting the old ones.
-	c.done = 1
-
 	// TODO: Sync the clog or manifest before we run decr functions?
 	_ = decrReplace() // TODO handle error
 	_ = decrDelete()  // TODO handle error
