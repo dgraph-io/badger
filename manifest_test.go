@@ -48,7 +48,7 @@ func TestManifestEncoding(t *testing.T) {
 	require.Equal(t, changeSet, newChangeSet)
 }
 
-func TestCompactLogBasic(t *testing.T) {
+func TestManifestBasic(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
