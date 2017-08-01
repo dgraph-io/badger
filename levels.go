@@ -246,7 +246,7 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 
 // compactBuildTables merge topTables and botTables to form a list of new tables.
 func (s *levelsController) compactBuildTables(
-	l int, cd compactDef, c *compaction) ([]*table.Table, func() error) {
+	l int, cd compactDef, newIDMin, newIDLimit uint64) ([]*table.Table, func() error) {
 	topTables := cd.top
 	botTables := cd.bot
 
@@ -267,10 +267,9 @@ func (s *levelsController) compactBuildTables(
 	it.Rewind()
 
 	// Start generating new tables.
-	newTables := make([]*table.Table, len(c.toInsert))
-	che := make(chan error, len(c.toInsert))
+	newTables := make([]*table.Table, newIDLimit-newIDMin)
+	che := make(chan error, newIDLimit-newIDMin)
 	var i int
-	newIDMin, newIDMax := c.toInsert[0], c.toInsert[len(c.toInsert)-1]
 	newID := newIDMin
 	for ; it.Valid(); i++ {
 		y.AssertTruef(i < len(newTables), "Rewriting too many tables: %d %d", i, len(newTables))
@@ -288,7 +287,7 @@ func (s *levelsController) compactBuildTables(
 
 		cd.elog.LazyPrintf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
 
-		y.AssertTruef(newID <= newIDMax, "%d %d", newID, newIDMax)
+		y.AssertTruef(newID < newIDLimit, "%d %d", newID, newIDLimit)
 		go func(idx int, fileID uint64, builder *table.TableBuilder) {
 			defer builder.Close()
 
@@ -337,7 +336,7 @@ func (s *levelsController) compactBuildTables(
 				_ = table.DecrRef()
 			}
 		}
-		errorReturn := errors.Wrapf(firstErr, "While running compaction for: %+v", c)
+		errorReturn := errors.Wrapf(firstErr, "While running compaction for: %+v", cd)
 		return nil, func() error { return errorReturn }
 	}
 
@@ -475,6 +474,20 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	return false
 }
 
+// TODO: Move to levels.go or something.
+func (s *levelsController) reserveCompactionFileIDs(def *compactDef) (uint64, uint64) {
+	var estSize int64
+	for _, t := range def.top {
+		estSize += t.Size()
+	}
+	for _, t := range def.bot {
+		estSize += t.Size()
+	}
+	estNumTables := 1 + (estSize+s.kv.opt.MaxTableSize-1)/s.kv.opt.MaxTableSize
+	newIDMin, newIDLimit := s.reserveFileIDs(int(estNumTables))
+	return newIDMin, newIDLimit
+}
+
 func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	timeStart := time.Now()
 	var readSize int64
@@ -521,12 +534,12 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 		return
 	}
 
-	c := s.buildCompactionLogEntry(&cd)
-	newTables, decr := s.compactBuildTables(l, cd, c)
+	newIDMin, newIDLimit := s.reserveCompactionFileIDs(&cd)
+	newTables, decr := s.compactBuildTables(l, cd, newIDMin, newIDLimit)
 	if newTables == nil {
 		err := decr()
 		// This compaction couldn't be done successfully.
-		cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v %+v", err, cd, c)
+		cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v", err, cd)
 		return
 	}
 	defer decr()
