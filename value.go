@@ -513,7 +513,7 @@ func (l *valueLog) openOrCreateFiles() error {
 	for i := range l.files {
 		lf := l.files[i]
 		if i == len(l.files)-1 {
-			lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
+			lf.fd, err = y.OpenExistingSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
 			if err != nil {
 				return errors.Wrapf(err, "Unable to open value log file as RDWR")
 			}
@@ -529,7 +529,7 @@ func (l *valueLog) openOrCreateFiles() error {
 	// If no files are found, then create a new file.
 	if len(l.files) == 0 {
 		lf := &logFile{fid: 0, path: l.fpath(0)}
-		lf.fd, err = y.OpenSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
+		lf.fd, err = y.CreateSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to open value log file as RDWR")
 		}
@@ -666,7 +666,7 @@ func (l *valueLog) write(reqs []*request) error {
 			y.AssertTruef(newid < 1<<16, "newid will overflow uint16: %v", newid)
 			newlf := &logFile{fid: uint16(newid), offset: 0}
 			newlf.path = l.fpath(newlf.fid)
-			newlf.fd, err = y.OpenSyncedFile(newlf.path, l.opt.SyncWrites)
+			newlf.fd, err = y.CreateSyncedFile(newlf.path, l.opt.SyncWrites)
 			if err != nil {
 				return errors.Wrapf(err, "While creating new value log: %q", newlf.path)
 			}

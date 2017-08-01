@@ -35,18 +35,7 @@ var (
 	datasyncFileFlag = 0x0
 )
 
-// TODO: For almost every file, we should have an expectation of whether it exists or not.  Remove
-// most usage of this function.
-// TODO: ^^ do this with manifest changes
-func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
-	flags := os.O_RDWR | os.O_CREATE
-	if sync {
-		flags |= datasyncFileFlag
-	}
-	return os.OpenFile(filename, flags, 0666)
-}
-
-// OpenExistingSyncedFile opens an existing file.  It does not create the file.
+// OpenExistingSyncedFile opens an existing file, errors if it doesn't exist.
 func OpenExistingSyncedFile(filename string, sync bool) (*os.File, error) {
 	flags := os.O_RDWR
 	if sync {
@@ -55,9 +44,18 @@ func OpenExistingSyncedFile(filename string, sync bool) (*os.File, error) {
 	return os.OpenFile(filename, flags, 0)
 }
 
-// CreateSyncedFile creates a file (using O_EXCL), which must not have existed.
+// CreateSyncedFile creates a new file (using O_EXCL), errors if it already existed.
 func CreateSyncedFile(filename string, sync bool) (*os.File, error) {
 	flags := os.O_RDWR | os.O_CREATE | os.O_EXCL
+	if sync {
+		flags |= datasyncFileFlag
+	}
+	return os.OpenFile(filename, flags, 0666)
+}
+
+// OpenSyncedFile creates the file if one doesn't exist.
+func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
+	flags := os.O_RDWR | os.O_CREATE
 	if sync {
 		flags |= datasyncFileFlag
 	}
