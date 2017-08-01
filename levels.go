@@ -344,7 +344,7 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) manifestChangeSet 
 			id:        table.ID(),
 			op:        tableCreate,
 			level:     level,
-			tableSize: uint32(table.Size()), // TODO deal with cast
+			tableSize: uint64(table.Size()),
 			smallest:  table.Smallest(),
 			biggest:   table.Biggest(),
 		}})
@@ -503,7 +503,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 			changes: []manifestChange{
 				manifestChange{tableChange{id: tbl.ID(), op: tableDelete}},
 				manifestChange{tableChange{id: tbl.ID(), op: tableCreate, level: uint8(nextLevel.level),
-					tableSize: uint32(tbl.Size()), smallest: tbl.Smallest(), biggest: tbl.Biggest()}},
+					tableSize: uint64(tbl.Size()), smallest: tbl.Smallest(), biggest: tbl.Biggest()}},
 			},
 		}
 		if err := s.kv.manifest.addChanges(changeSet); err != nil {
@@ -612,7 +612,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) {
 	// We want to update the manifest _before_ we actually add the table.  This way we add to the
 	// manifest before we do compaction operations on the table
 	tc := tableChange{id: t.ID(), op: tableCreate, level: 0,
-		tableSize: uint32(t.Size()), smallest: t.Smallest(), biggest: t.Biggest()}
+		tableSize: uint64(t.Size()), smallest: t.Smallest(), biggest: t.Biggest()}
 
 	// TODO: We do need some kind of lock around manifest file updates, no?  Maybe on some platforms.
 	_ = s.kv.manifest.addChanges(manifestChangeSet{changes: []manifestChange{manifestChange{tc}}})

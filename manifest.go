@@ -51,7 +51,7 @@ type levelManifest struct {
 
 type tableManifest struct {
 	level             uint8
-	tableSize         uint32 // Filesize
+	tableSize         uint64 // Filesize
 	smallest, biggest []byte // Smallest and largest keys, just like in Table
 }
 
@@ -72,7 +72,7 @@ type tableChange struct {
 	id                uint64
 	op                byte   // has value tableCreate, or tableDelete
 	level             uint8  // set if tableCreate
-	tableSize         uint32 // set if tableCreate
+	tableSize         uint64 // set if tableCreate
 	smallest, biggest []byte // set if tableCreate
 }
 
@@ -251,25 +251,25 @@ func decodeKey(r io.Reader) ([]byte, error) {
 }
 
 func (tc *tableChange) Encode(w *bytes.Buffer) {
-	var bytes [14]byte
+	var bytes [18]byte
 	binary.BigEndian.PutUint64(bytes[0:8], tc.id)
 	bytes[8] = tc.op
 	bytes[9] = tc.level
-	binary.BigEndian.PutUint32(bytes[10:14], tc.tableSize)
+	binary.BigEndian.PutUint64(bytes[10:18], tc.tableSize)
 	w.Write(bytes[:])
 	encodeKey(w, tc.smallest)
 	encodeKey(w, tc.biggest)
 }
 
 func (tc *tableChange) Decode(r io.Reader) error {
-	var bytes [14]byte
+	var bytes [18]byte
 	if _, err := io.ReadFull(r, bytes[:]); err != nil {
 		return err
 	}
 	tc.id = binary.BigEndian.Uint64(bytes[0:8])
 	tc.op = bytes[8]
 	tc.level = bytes[9]
-	tc.tableSize = binary.BigEndian.Uint32(bytes[10:14])
+	tc.tableSize = binary.BigEndian.Uint64(bytes[10:18])
 	var err error
 	if tc.smallest, err = decodeKey(r); err != nil {
 		return err
