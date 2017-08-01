@@ -605,15 +605,17 @@ func (s *levelsController) doCompact(p compactionPriority) (bool, error) {
 	return true, nil
 }
 
-func (s *levelsController) addLevel0Table(t *table.Table) {
+func (s *levelsController) addLevel0Table(t *table.Table) error {
 	// We want to update the manifest _before_ we actually add the table to memory.
 
-	// TODO: We do need some kind of lock around manifest file updates, no?  Maybe on some platforms.
-	_ = s.kv.manifest.addChanges(manifestChangeSet{changes: []manifestChange{
+	// TODO: We do need some kind of lock around manifest file updates, no?  Maybe on some
+	// platforms.  Maybe we need O_APPEND.
+	err := s.kv.manifest.addChanges(manifestChangeSet{changes: []manifestChange{
 		makeTableCreateChange(t, 0),
 	}})
-
-	// ^^ TODO handle error
+	if err != nil {
+		return err
+	}
 
 	for !s.levels[0].tryAddLevel0Table(t) {
 		// Stall. Make sure all levels are healthy before we unstall.
@@ -646,6 +648,8 @@ func (s *levelsController) addLevel0Table(t *table.Table) {
 			lastUnstalled = time.Now()
 		}
 	}
+
+	return nil
 }
 
 func (s *levelsController) close() error {

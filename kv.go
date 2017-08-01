@@ -1081,8 +1081,11 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			return err
 		}
 		// We own a ref on tbl.
-		s.lc.addLevel0Table(tbl) // This will incrRef.
-		tbl.DecrRef()            // Releases our ref.
+		err = s.lc.addLevel0Table(tbl) // This will incrRef (if we don't error, sure)
+		tbl.DecrRef()                  // Releases our ref.
+		if err != nil {
+			return err
+		}
 
 		// Update s.imm. Need a lock.
 		s.Lock()
