@@ -152,7 +152,7 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 	// Need lock as we may be deleting the first table during a level 0 compaction.
 	s.Lock()
 	defer s.Unlock()
-	if len(s.tables) > s.kv.opt.NumLevelZeroTablesStall {
+	if len(s.tables) >= s.kv.opt.NumLevelZeroTablesStall {
 		return false
 	}
 
