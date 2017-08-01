@@ -67,15 +67,15 @@ type manifestFile struct {
 
 const (
 	tableCreate = 1
-	// TODO: Probably just remove SetLevel.
-	tableSetLevel = 2
-	tableDelete   = 3
+	tableDelete = 2
 )
 
+// If we change a table's level, we just do a delete followed by a create.  (In the same changeset,
+// so that they're atomically applied, of course.)
 type tableChange struct {
 	id                uint64
-	op                byte   // has value tableCreate, tableSetLevel, or tableDelete
-	level             uint8  // set if tableCreate, tableSetLevel
+	op                byte   // has value tableCreate, or tableDelete
+	level             uint8  // set if tableCreate
 	tableSize         uint32 // set if tableCreate
 	smallest, biggest []byte // set if tableCreate
 }
@@ -176,16 +176,6 @@ func applyTableChange(build *manifest, tc *tableChange) error {
 			tableSize: tc.tableSize,
 			smallest:  tc.smallest,
 			biggest:   tc.biggest}
-		build.levels[tc.level].tables[tc.id] = true
-	case tableSetLevel:
-		tm, ok := build.tables[tc.id]
-		if !ok {
-			return x.Errorf("MANIFEST sets level on non-existing table %d\n", tc.id)
-		}
-		oldLevel := tm.level
-		tm.level = tc.level
-		build.tables[tc.id] = tm
-		delete(build.levels[oldLevel].tables, tc.id)
 		build.levels[tc.level].tables[tc.id] = true
 	case tableDelete:
 		tm, ok := build.tables[tc.id]

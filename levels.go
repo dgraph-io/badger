@@ -494,10 +494,10 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 		y.AssertTrue(len(cd.top) == 1)
 		tbl := cd.top[0]
 
-		// TODO: Get rid of tableSetLevel or whatever it's called.
-
 		// We write to the manifest _before_ we delete files (and after we created files)
 
+		// The order matters here.  We have to delete the table from one level before adding it to
+		// the next.  (Manifest replay logic can't handle the opposite.)
 		changeSet := manifestChangeSet{
 			changes: []manifestChange{
 				manifestChange{tableChange{id: tbl.ID(), op: tableDelete}},
