@@ -192,7 +192,9 @@ func (s *levelsController) runWorker(lc *y.LevelCloser) {
 		case <-timeChan:
 			prios := s.pickCompactLevels()
 			for _, p := range prios {
-				if s.doCompact(p) {
+				// TODO: Handle error.  (We don't)
+				didCompact, _ := s.doCompact(p)
+				if didCompact {
 					break
 				}
 			}
@@ -477,7 +479,7 @@ func (s *levelsController) reserveCompactionFileIDs(def *compactDef) (uint64, ui
 	return newIDMin, newIDLimit
 }
 
-func (s *levelsController) runCompactDef(l int, cd compactDef) {
+func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	timeStart := time.Now()
 	var readSize int64
 	for _, tbl := range cd.top {
@@ -505,47 +507,67 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 					tableSize: uint32(tbl.Size()), smallest: tbl.Smallest(), biggest: tbl.Biggest()}},
 			},
 		}
-		_ = s.kv.manifest.addChanges(changeSet)
+		if err := s.kv.manifest.addChanges(changeSet); err != nil {
+			return err
+		}
 		// TODO: Sync manifest?  Sync dir before manifest?
 
 		// TODO: Should the in-memory operation happen atomically?  Put these behind the same lock?
 
-		_ = nextLevel.replaceTables(cd.top) // TODO handle error
-		_ = thisLevel.deleteTables(cd.top)  // TODO handle error
+		if err := nextLevel.replaceTables(cd.top); err != nil {
+			return err
+		}
+		if err := thisLevel.deleteTables(cd.top); err != nil {
+			return err
+		}
 
 		cd.elog.LazyPrintf("\tLOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
 			l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
-		return
+		return nil
 	}
 
 	newIDMin, newIDLimit := s.reserveCompactionFileIDs(&cd)
+	// TODO: This is p much bonkers -- we check for an error here, in advance..! and then retrieve it.
 	newTables, decr := s.compactBuildTables(l, cd, newIDMin, newIDLimit)
 	if newTables == nil {
 		err := decr()
 		// This compaction couldn't be done successfully.
 		cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v", err, cd)
-		return
+		// TODO: We didn't return the error before.  We should, no?
+		return nil
 	}
-	defer decr()
+	defer func() {
+		if decErr := decr(); err == nil {
+			err = decErr
+		}
+	}()
 	changeSet := buildChangeSet(&cd, newTables)
 
 	// We write to the manifest _before_ we delete files (and after we created files)
 
-	_ = s.kv.manifest.addChanges(changeSet) // TODO: Handle error
+	if err := s.kv.manifest.addChanges(changeSet); err != nil {
+		return err
+	}
+
 	// TODO: Sync manifest?  Sync dir before manifest?
 
-	_ = nextLevel.replaceTables(newTables) // TODO handle error
-	_ = thisLevel.deleteTables(cd.top)     // TODO handle error
+	if err := nextLevel.replaceTables(newTables); err != nil {
+		return err
+	}
+	if err := thisLevel.deleteTables(cd.top); err != nil {
+		return err
+	}
 
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
 
 	cd.elog.LazyPrintf("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
 		l, l+1, len(cd.top)+len(cd.bot), len(newTables), time.Since(timeStart))
+	return nil
 }
 
 // doCompact picks some table on level l and compacts it away to the next level.
-func (s *levelsController) doCompact(p compactionPriority) bool {
+func (s *levelsController) doCompact(p compactionPriority) (bool, error) {
 	l := p.level
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
 
@@ -564,25 +586,27 @@ func (s *levelsController) doCompact(p compactionPriority) bool {
 	if l == 0 {
 		if !s.fillTablesL0(&cd) {
 			cd.elog.LazyPrintf("fillTables failed for level: %d\n", l)
-			return false
+			return false, nil
 		}
 
 	} else {
 		if !s.fillTables(&cd) {
 			cd.elog.LazyPrintf("fillTables failed for level: %d\n", l)
-			return false
+			return false, nil
 		}
 	}
 
 	cd.elog.LazyPrintf("Running for level: %d\n", cd.thisLevel.level)
 	s.cstatus.toLog(cd.elog)
-	s.runCompactDef(l, cd)
+	if err := s.runCompactDef(l, cd); err != nil {
+		return false, err
+	}
 
 	// Done with compaction. So, remove the ranges from compaction status.
 	s.cstatus.delete(cd)
 	s.cstatus.toLog(cd.elog)
 	cd.elog.LazyPrintf("Compaction for level: %d DONE", cd.thisLevel.level)
-	return true
+	return true, nil
 }
 
 func (s *levelsController) addLevel0Table(t *table.Table) {
