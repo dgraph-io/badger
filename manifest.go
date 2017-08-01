@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/dgraph-io/badger/y"
 	"github.com/dgraph-io/dgraph/x"
@@ -59,6 +60,8 @@ type tableManifest struct {
 // file we append to.
 type manifestFile struct {
 	fp *os.File
+
+	appendLock sync.Mutex
 }
 
 const (
@@ -86,7 +89,7 @@ type manifestChangeSet struct {
 
 func openOrCreateManifestFile(opt *Options) (ret *manifestFile, result manifest, err error) {
 	path := filepath.Join(opt.Dir, "MANIFEST")
-	fp, err := y.OpenSyncedFile(path, true)
+	fp, err := y.OpenSyncedFile(path, false) // We explicitly sync in addChanges, outside the lock.
 	if err != nil {
 		return nil, manifest{}, err
 	}
@@ -97,7 +100,7 @@ func openOrCreateManifestFile(opt *Options) (ret *manifestFile, result manifest,
 		return nil, manifest{}, err
 	}
 
-	return &manifestFile{fp}, m, nil
+	return &manifestFile{fp: fp}, m, nil
 }
 
 func (mf *manifestFile) close() error {
@@ -106,12 +109,19 @@ func (mf *manifestFile) close() error {
 
 // addChanges writes a batch of changes, atomically, to the file.  By "atomically" that means when
 // we replay the MANIFEST file, we'll either replay all the changes or none of them.  (The truth of
-// this depends on the filesystem.)
+// this depends on the filesystem -- some might append garbage data if a system crash happens at
+// the wrong time.)
 func (mf *manifestFile) addChanges(changes manifestChangeSet) error {
 	var buf bytes.Buffer
 	changes.Encode(&buf)
+	// Maybe we could use O_APPEND instead (on certain file systems)
+	mf.appendLock.Lock()
 	_, err := mf.fp.Write(buf.Bytes())
-	return err
+	mf.appendLock.Unlock()
+	if err != nil {
+		return err
+	}
+	return mf.fp.Sync()
 }
 
 type countingReader struct {
