@@ -111,7 +111,6 @@ func newLevelsController(kv *KV, manifest *manifest) (*levelsController, error) 
 		// TODO: Don't open with O_CREATE
 		fd, err := y.OpenSyncedFile(fname, true)
 		if err != nil {
-			// TODO: Rename closeAllUnmodifiedTables
 			closeAllTables(tables)
 			return nil, errors.Wrapf(err, "Opening file: %q", fname)
 		}
