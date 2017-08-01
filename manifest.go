@@ -84,7 +84,7 @@ type manifestChangeSet struct {
 	changes []manifestChange
 }
 
-func openManifestFile(opt *Options) (ret *manifestFile, result manifest, err error) {
+func openOrCreateManifestFile(opt *Options) (ret *manifestFile, result manifest, err error) {
 	path := filepath.Join(opt.Dir, "MANIFEST")
 	fp, err := y.OpenSyncedFile(path, true)
 	if err != nil {

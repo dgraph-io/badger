@@ -138,7 +138,8 @@ func newLevelsController(kv *KV, manifest *manifest) (*levelsController, error) 
 		return nil, errors.Wrap(err, "Level validation")
 	}
 
-	// Sync directory (because we have at least removed some files)
+	// Sync directory (because we have at least removed some files, or previously created the
+	// manifest file).
 	if err := syncDir(kv.opt.Dir); err != nil {
 		_ = s.close()
 		return nil, errors.Wrap(err, "Directory entry for compaction log")
@@ -507,9 +508,12 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		if err := s.kv.manifest.addChanges(changeSet); err != nil {
 			return err
 		}
-		// TODO: Sync manifest?  Sync dir before manifest?
 
-		// TODO: Should the in-memory operation happen atomically?  Put these behind the same lock?
+		// We have to add to nextLevel before we remove from thisLevel -- in the opposite order
+		// there'd be a moment of time where reads would see keys missing from both levels.
+
+		// TODO: Double check that reads traverse levels in some sort of order.  If they did it in
+		// parallel, or higher-numbered levels first, we could miss data!
 
 		if err := nextLevel.replaceTables(cd.top); err != nil {
 			return err
@@ -539,12 +543,9 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	changeSet := buildChangeSet(&cd, newTables)
 
 	// We write to the manifest _before_ we delete files (and after we created files)
-
 	if err := s.kv.manifest.addChanges(changeSet); err != nil {
 		return err
 	}
-
-	// TODO: Sync manifest?  Sync dir before manifest?
 
 	if err := nextLevel.replaceTables(newTables); err != nil {
 		return err
