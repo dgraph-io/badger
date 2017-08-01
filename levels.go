@@ -500,9 +500,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 
 		// TODO: Should the in-memory operation happen atomically?  Put these behind the same lock?
 
-		var chSet manifestChangeSet
-		decrReplace := nextLevel.replaceTables(cd.top, &chSet)
-		decrDelete := thisLevel.deleteTables(cd.top, &chSet)
+		decrReplace := nextLevel.replaceTables(cd.top)
+		decrDelete := thisLevel.deleteTables(cd.top)
 
 		_ = decrReplace() // TODO handle error
 		_ = decrDelete()  // TODO handle error
@@ -531,8 +530,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 
 	// TODO: Update manifest here, before we update in-memory table mappings.
 
-	decrReplace := nextLevel.replaceTables(newTables, &changeSet)
-	decrDelete := thisLevel.deleteTables(cd.top, &changeSet)
+	decrReplace := nextLevel.replaceTables(newTables)
+	decrDelete := thisLevel.deleteTables(cd.top)
 
 	// TODO: We should sync the dir or something first, for file creation.  Do we need to?
 

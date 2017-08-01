@@ -77,7 +77,7 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 // TODO: There are other places to add to manifest -- such as initial table creation.
 
 // deleteTables remove tables idx0, ..., idx1-1.
-func (s *levelHandler) deleteTables(toDel []*table.Table, set *manifestChangeSet) (decr func() error) {
+func (s *levelHandler) deleteTables(toDel []*table.Table) (decr func() error) {
 	s.Lock()
 	defer s.Unlock()
 
@@ -95,7 +95,6 @@ func (s *levelHandler) deleteTables(toDel []*table.Table, set *manifestChangeSet
 			continue
 		}
 		s.totalSize -= t.Size()
-		set.changes = append(set.changes, manifestChange{tableChange{id: t.ID(), op: tableDelete}})
 	}
 	s.tables = newTables
 
@@ -107,7 +106,7 @@ func (s *levelHandler) deleteTables(toDel []*table.Table, set *manifestChangeSet
 // replaceTables will replace tables[left:right] with newTables. Note this EXCLUDES tables[right].
 // You must call decr() to delete the old tables _after_ updating the compaction log or MANIFEST.
 func (s *levelHandler) replaceTables(
-	newTables []*table.Table, set *manifestChangeSet) (decr func() error) {
+	newTables []*table.Table) (decr func() error) {
 	s.Lock()
 	defer s.Unlock()
 
@@ -121,11 +120,6 @@ func (s *levelHandler) replaceTables(
 	// Increase totalSize first.
 	for _, tbl := range newTables {
 		s.totalSize += tbl.Size()
-		// TODO: Deal with uint8 and uint32 casts.
-		tc := tableChange{id: tbl.ID(), op: tableCreate, level: uint8(s.level),
-			tableSize: uint32(tbl.Size()),
-			smallest:  tbl.Smallest(), biggest: tbl.Biggest()}
-		set.changes = append(set.changes, manifestChange{tc})
 		tbl.IncrRef()
 	}
 
@@ -145,8 +139,6 @@ func (s *levelHandler) replaceTables(
 		tbl := s.tables[i]
 		s.totalSize -= tbl.Size()
 		toDecr[i] = tbl
-		tc := tableChange{id: tbl.ID(), op: tableDelete}
-		set.changes = append(set.changes, manifestChange{tc})
 	}
 
 	// To be safe, just make a copy. TODO: Be more careful and avoid copying.
