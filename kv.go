@@ -1022,8 +1022,7 @@ func writeLevel0Table(s *skl.Skiplist, f *os.File) error {
 			return err
 		}
 	}
-	var buf [2]byte // Level 0. Leave it initialized as 0.
-	_, err := f.Write(b.Finish(buf[:]))
+	_, err := f.Write(b.Finish())
 	return err
 }
 

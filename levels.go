@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"os"
@@ -65,7 +64,7 @@ func revertToManifest(manifest *manifest, dir string, idMap map[uint64]struct{})
 	// 2. Delete files that shouldn't exist.
 	for id := range idMap {
 		if _, ok := manifest.tables[id]; !ok {
-			// TODO: Print error message?  Where?
+			// TODO: Print message?  Where?
 			filename := table.NewFilename(id, dir)
 			err := os.Remove(filename)
 			if err != nil {
@@ -113,13 +112,13 @@ func newLevelsController(kv *KV, manifest *manifest) (*levelsController, error) 
 		fd, err := y.OpenSyncedFile(fname, true)
 		if err != nil {
 			// TODO: Rename closeAllUnmodifiedTables
-			closeAllUnmodifiedTables(tables)
+			closeAllTables(tables)
 			return nil, errors.Wrapf(err, "Opening file: %q", fname)
 		}
 
 		t, err := table.OpenTable(fd, kv.opt.MapTablesTo)
 		if err != nil {
-			closeAllUnmodifiedTables(tables)
+			closeAllTables(tables)
 			return nil, errors.Wrapf(err, "Opening table: %q", fname)
 		}
 
@@ -151,11 +150,9 @@ func newLevelsController(kv *KV, manifest *manifest) (*levelsController, error) 
 }
 
 // Closes the tables, for cleanup in newLevelsController.  (We Close() instead of using DecrRef()
-// because that would delete the underlying files.)  We ignore errors when closing the table, which
-// is OK because we haven't modified the table.  (It's an LSM tree, but we do hypothetically modify
-// the file with SetMetadata.)  (Even then, we open the files with O_DSYNC, so the only plausible
-// error on Close() would have been from writing file metadata.)
-func closeAllUnmodifiedTables(tables [][]*table.Table) {
+// because that would delete the underlying files.)  We ignore errors, which is OK because tables
+// are read-only.
+func closeAllTables(tables [][]*table.Table) {
 	for _, tableSlice := range tables {
 		for _, table := range tableSlice {
 			_ = table.Close()
@@ -294,10 +291,7 @@ func (s *levelsController) compactBuildTables(
 				return
 			}
 
-			// Encode the level number as table metadata.
-			var levelNum [2]byte
-			binary.BigEndian.PutUint16(levelNum[:], uint16(l+1))
-			if _, err := fd.Write(builder.Finish(levelNum[:])); err != nil {
+			if _, err := fd.Write(builder.Finish()); err != nil {
 				che <- errors.Wrapf(err, "Unable to write to file: %d", fileID)
 				return
 			}
@@ -524,8 +518,6 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 		_ = decrReplace() // TODO handle error
 		_ = decrDelete()  // TODO handle error
 
-		// TODO: vvv if there's anything to do here, do it above.
-		tbl.UpdateLevel(l + 1)
 		cd.elog.LazyPrintf("\tLOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
 			l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
 		return

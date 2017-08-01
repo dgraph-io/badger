@@ -55,7 +55,6 @@ type Table struct {
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
 
 	blockIndex []keyOffset
-	metadata   []byte
 	ref        int32 // For file garbage collection.  Atomic.
 
 	mapTableTo int
@@ -185,23 +184,6 @@ func (t *Table) Close() error {
 	return nil
 }
 
-// SetMetadata updates our metadata to the new metadata.
-// For now, they must be of the same size.
-func (t *Table) SetMetadata(meta []byte) error {
-	y.AssertTrue(len(meta) == len(t.metadata))
-	pos := t.tableSize - 4 - len(t.metadata)
-	_, err := t.fd.WriteAt(meta, int64(pos))
-	return y.Wrap(err)
-}
-
-// updateLevel is called only when moving table to the next level, when there is no overlap
-// with the next level. Here, we update the table metadata.
-func (t *Table) UpdateLevel(newLevel int) {
-	var metadata [2]byte
-	binary.BigEndian.PutUint16(metadata[:], uint16(newLevel))
-	t.SetMetadata(metadata[:])
-}
-
 var EOF = errors.New("End of mapped region")
 
 func (t *Table) read(off int, sz int) ([]byte, error) {
@@ -226,16 +208,11 @@ func (t *Table) readNoFail(off int, sz int) []byte {
 }
 
 func (t *Table) readIndex() error {
-	readPos := t.tableSize - 4
-	buf := t.readNoFail(t.tableSize-4, 4)
-
-	metadataSize := int(binary.BigEndian.Uint32(buf))
-	readPos -= metadataSize
-	t.metadata = t.readNoFail(readPos, metadataSize)
+	readPos := t.tableSize
 
 	// Read bloom filter.
 	readPos -= 4
-	buf = t.readNoFail(readPos, 4)
+	buf := t.readNoFail(readPos, 4)
 	bloomLen := int(binary.BigEndian.Uint32(buf))
 	readPos -= bloomLen
 	data := t.readNoFail(readPos, bloomLen)
@@ -314,9 +291,6 @@ func (t *Table) readIndex() error {
 	sort.Sort(byKey(t.blockIndex))
 	return nil
 }
-
-// Metadata returns metadata. Do not mutate this.
-func (t *Table) Metadata() []byte { return t.metadata }
 
 func (t *Table) block(idx int) (Block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)

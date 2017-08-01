@@ -126,12 +126,11 @@ func (s *levelHandler) replaceTables(
 	left, right := s.overlappingTables(kr)
 
 	toDecr := make([]*table.Table, right-left)
-
 	// Update totalSize and reference counts.
 	for i := left; i < right; i++ {
 		tbl := s.tables[i]
 		s.totalSize -= tbl.Size()
-		toDecr[i] = tbl
+		toDecr[i-left] = tbl
 	}
 
 	// To be safe, just make a copy. TODO: Be more careful and avoid copying.

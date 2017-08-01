@@ -204,7 +204,7 @@ func (b *TableBuilder) blockIndex() []byte {
 }
 
 // Finish finishes the table by appending the index.
-func (b *TableBuilder) Finish(metadata []byte) []byte {
+func (b *TableBuilder) Finish() []byte {
 	bf := bbloom.New(float64(b.keyCount), 0.01)
 	var klen [2]byte
 	key := make([]byte, 1024)
@@ -233,10 +233,6 @@ func (b *TableBuilder) Finish(metadata []byte) []byte {
 	y.Check(err)
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
-	b.buf.Write(buf[:])
-
-	b.buf.Write(metadata)
-	binary.BigEndian.PutUint32(buf[:], uint32(len(metadata)))
 	b.buf.Write(buf[:])
 
 	return b.buf.Bytes()
