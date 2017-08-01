@@ -115,7 +115,8 @@ func (b byKey) Less(i int, j int) bool { return bytes.Compare(b[i].key, b[j].key
 
 // OpenTable assumes file has only one table and opens it.  Takes ownership of fd upon function
 // entry.  Returns a table with one reference count on it (decrementing which may delete the file!
-// -- consider t.Close() instead).
+// -- consider t.Close() instead).  The fd has to writeable because we call Truncate on it before
+// deleting.
 func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	fileInfo, err := fd.Stat()
 	if err != nil {

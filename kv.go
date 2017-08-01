@@ -1054,7 +1054,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			ft.mt.Put(head, y.ValueStruct{Value: offset, CASCounter: s.lastCASCounter()})
 		}
 		fileID, _ := s.lc.reserveFileIDs(1)
-		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
+		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
 		if err != nil {
 			return y.Wrap(err)
 		}

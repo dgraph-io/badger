@@ -46,6 +46,24 @@ func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
 	return os.OpenFile(filename, flags, 0666)
 }
 
+// OpenExistingSyncedFile opens an existing file.  It does not create the file.
+func OpenExistingSyncedFile(filename string, sync bool) (*os.File, error) {
+	flags := os.O_RDWR
+	if sync {
+		flags |= datasyncFileFlag
+	}
+	return os.OpenFile(filename, flags, 0)
+}
+
+// CreateSyncedFile creates a file (using O_EXCL), which must not have existed.
+func CreateSyncedFile(filename string, sync bool) (*os.File, error) {
+	flags := os.O_RDWR | os.O_CREATE | os.O_EXCL
+	if sync {
+		flags |= datasyncFileFlag
+	}
+	return os.OpenFile(filename, flags, 0666)
+}
+
 func Safecopy(a []byte, src []byte) []byte {
 	if cap(a) < len(src) {
 		a = make([]byte, len(src))

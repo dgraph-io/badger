@@ -108,8 +108,7 @@ func newLevelsController(kv *KV, manifest *manifest) (*levelsController, error) 
 	var maxFileID uint64
 	for fileID, tableManifest := range manifest.tables {
 		fname := table.NewFilename(fileID, kv.opt.Dir)
-		// TODO: Don't open with O_CREATE
-		fd, err := y.OpenSyncedFile(fname, true)
+		fd, err := y.OpenExistingSyncedFile(fname, true)
 		if err != nil {
 			closeAllTables(tables)
 			return nil, errors.Wrapf(err, "Opening file: %q", fname)
@@ -286,7 +285,7 @@ func (s *levelsController) compactBuildTables(
 		go func(idx int, fileID uint64, builder *table.TableBuilder) {
 			defer builder.Close()
 
-			fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
+			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
 			if err != nil {
 				che <- errors.Wrapf(err, "While opening new table: %d", fileID)
 				return
