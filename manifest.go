@@ -42,15 +42,14 @@ type manifest struct {
 func createManifest(maxLevels int) manifest {
 	levels := make([]levelManifest, maxLevels)
 	for i := 0; i < maxLevels; i++ {
-		levels[i].tables = make(map[uint64]bool)
+		levels[i].tables = make(map[uint64]struct{})
 	}
 	return manifest{levels: levels,
 		tables: make(map[uint64]tableManifest)}
 }
 
 type levelManifest struct {
-	// TODO: Use struct{}
-	tables map[uint64]bool // Maps table id to true
+	tables map[uint64]struct{} // Set of table id's
 }
 
 type tableManifest struct {
@@ -176,7 +175,7 @@ func applyTableChange(build *manifest, tc *tableChange) error {
 			tableSize: tc.tableSize,
 			smallest:  tc.smallest,
 			biggest:   tc.biggest}
-		build.levels[tc.level].tables[tc.id] = true
+		build.levels[tc.level].tables[tc.id] = struct{}{}
 	case tableDelete:
 		tm, ok := build.tables[tc.id]
 		if !ok {
