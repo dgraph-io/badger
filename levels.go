@@ -37,11 +37,11 @@ type levelsController struct {
 
 	// The following are initialized once and const.
 	levels []*levelHandler
-	clog   compactLog
 	kv     *KV
 
 	// Atomic.
-	nextFileID   uint64
+	nextFileID uint64
+	// TODO: Remove maxCompactID?
 	maxCompactID uint64
 
 	// For ending compactions.
@@ -522,7 +522,6 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	}
 
 	c := s.buildCompactionLogEntry(&cd)
-	s.clog.add(c)
 	newTables, decr := s.compactBuildTables(l, cd, c)
 	if newTables == nil {
 		err := decr()
@@ -548,7 +547,6 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 
 	// Write to compaction log _after_ creating the new files and _before_ deleting the old ones.
 	c.done = 1
-	s.clog.add(c)
 
 	// TODO: Sync the clog or manifest before we run decr functions?
 	_ = decrReplace() // TODO handle error
@@ -645,11 +643,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) {
 }
 
 func (s *levelsController) close() error {
-	cleanupErr := s.cleanupLevels()
-	err := s.clog.close()
-	if cleanupErr != nil {
-		err = cleanupErr
-	}
+	err := s.cleanupLevels()
 	return errors.Wrap(err, "levelsController.Close")
 }
 
