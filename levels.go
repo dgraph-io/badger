@@ -336,18 +336,21 @@ func (s *levelsController) compactBuildTables(
 	return out, func() error { return decrRefs(out) }
 }
 
+func makeTableCreateChange(table *table.Table, level int) manifestChange {
+	return manifestChange{tableChange{
+		id:        table.ID(),
+		op:        tableCreate,
+		level:     uint8(level),
+		tableSize: uint64(table.Size()),
+		smallest:  table.Smallest(),
+		biggest:   table.Biggest(),
+	}}
+}
+
 func buildChangeSet(cd *compactDef, newTables []*table.Table) manifestChangeSet {
-	level := uint8(cd.nextLevel.level)
 	changes := []manifestChange{}
 	for _, table := range newTables {
-		changes = append(changes, manifestChange{tableChange{
-			id:        table.ID(),
-			op:        tableCreate,
-			level:     level,
-			tableSize: uint64(table.Size()),
-			smallest:  table.Smallest(),
-			biggest:   table.Biggest(),
-		}})
+		changes = append(changes, makeTableCreateChange(table, cd.nextLevel.level))
 	}
 	for _, table := range cd.top {
 		changes = append(changes, manifestChange{tableChange{id: table.ID(), op: tableDelete}})
@@ -502,8 +505,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		changeSet := manifestChangeSet{
 			changes: []manifestChange{
 				manifestChange{tableChange{id: tbl.ID(), op: tableDelete}},
-				manifestChange{tableChange{id: tbl.ID(), op: tableCreate, level: uint8(nextLevel.level),
-					tableSize: uint64(tbl.Size()), smallest: tbl.Smallest(), biggest: tbl.Biggest()}},
+				makeTableCreateChange(tbl, nextLevel.level),
 			},
 		}
 		if err := s.kv.manifest.addChanges(changeSet); err != nil {
@@ -609,13 +611,12 @@ func (s *levelsController) doCompact(p compactionPriority) (bool, error) {
 }
 
 func (s *levelsController) addLevel0Table(t *table.Table) {
-	// We want to update the manifest _before_ we actually add the table.  This way we add to the
-	// manifest before we do compaction operations on the table
-	tc := tableChange{id: t.ID(), op: tableCreate, level: 0,
-		tableSize: uint64(t.Size()), smallest: t.Smallest(), biggest: t.Biggest()}
+	// We want to update the manifest _before_ we actually add the table to memory.
 
 	// TODO: We do need some kind of lock around manifest file updates, no?  Maybe on some platforms.
-	_ = s.kv.manifest.addChanges(manifestChangeSet{changes: []manifestChange{manifestChange{tc}}})
+	_ = s.kv.manifest.addChanges(manifestChangeSet{changes: []manifestChange{
+		makeTableCreateChange(t, 0),
+	}})
 
 	// ^^ TODO handle error
 	// ^^ TODO handle uint32() conversion above
