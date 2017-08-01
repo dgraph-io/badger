@@ -119,9 +119,6 @@ func (s *levelHandler) replaceTables(
 		tbl.IncrRef()
 	}
 
-	// TODO: We shouldn't need to recompute overlappingTables because we already computed
-	// compactDef.bot.
-
 	kr := keyRange{
 		left:  newTables[0].Smallest(),
 		right: newTables[len(newTables)-1].Biggest(),
