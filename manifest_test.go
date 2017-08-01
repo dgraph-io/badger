@@ -17,18 +17,24 @@
 package badger
 
 import (
+	"bufio"
 	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestManifestChange(t *testing.T) {
+func TestManifestEncoding(t *testing.T) {
 	var buf bytes.Buffer
-	change := manifestChange{tableChange{33, tableCreate, 3, 66, []byte("bar"), []byte("foo")}}
-	change.Encode(&buf)
-	var newChange manifestChange
-	err := newChange.Decode(bytes.NewReader(buf.Bytes()))
+	changeSet := manifestChangeSet{
+		[]manifestChange{
+			manifestChange{tableChange{33, tableCreate, 3, 66, []byte("bar"), []byte("foo")}},
+		},
+	}
+	changeSet.Encode(&buf)
+	var newChangeSet manifestChangeSet
+	r := countingReader{bufio.NewReader(bytes.NewReader(buf.Bytes())), 0}
+	err := newChangeSet.Decode(&r)
 	require.NoError(t, err)
-	require.Equal(t, change, newChange)
+	require.Equal(t, changeSet, newChangeSet)
 }

@@ -162,7 +162,7 @@ func replayManifestFile(maxLevels int, fp *os.File) (ret manifest, err error) {
 	fp.Truncate(offset)
 
 	_, err = fp.Seek(0, os.SEEK_END)
-	return manifest{}, err
+	return build, err
 }
 
 func applyTableChange(build *manifest, tc *tableChange) error {
@@ -231,6 +231,7 @@ func (mcs *manifestChangeSet) Decode(r *countingReader) error {
 			return err
 		}
 	}
+	mcs.changes = changes
 	return nil
 }
 
