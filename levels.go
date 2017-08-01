@@ -510,11 +510,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 
 		// TODO: Should the in-memory operation happen atomically?  Put these behind the same lock?
 
-		decrReplace := nextLevel.replaceTables(cd.top)
-		decrDelete := thisLevel.deleteTables(cd.top)
-
-		_ = decrReplace() // TODO handle error
-		_ = decrDelete()  // TODO handle error
+		_ = nextLevel.replaceTables(cd.top) // TODO handle error
+		_ = thisLevel.deleteTables(cd.top)  // TODO handle error
 
 		cd.elog.LazyPrintf("\tLOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
 			l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
@@ -537,14 +534,11 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	_ = s.kv.manifest.addChanges(changeSet) // TODO: Handle error
 	// TODO: Sync manifest?  Sync dir before manifest?
 
-	decrReplace := nextLevel.replaceTables(newTables)
-	decrDelete := thisLevel.deleteTables(cd.top)
+	_ = nextLevel.replaceTables(newTables) // TODO handle error
+	_ = thisLevel.deleteTables(cd.top)     // TODO handle error
 
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
-
-	_ = decrReplace() // TODO handle error
-	_ = decrDelete()  // TODO handle error
 
 	cd.elog.LazyPrintf("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
 		l, l+1, len(cd.top)+len(cd.bot), len(newTables), time.Since(timeStart))
