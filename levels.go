@@ -614,7 +614,6 @@ func (s *levelsController) addLevel0Table(t *table.Table) {
 	}})
 
 	// ^^ TODO handle error
-	// ^^ TODO handle uint32() conversion above
 
 	for !s.levels[0].tryAddLevel0Table(t) {
 		// Stall. Make sure all levels are healthy before we unstall.
