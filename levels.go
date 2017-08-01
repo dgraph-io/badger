@@ -39,10 +39,7 @@ type levelsController struct {
 	levels []*levelHandler
 	kv     *KV
 
-	// Atomic.
-	nextFileID uint64
-	// TODO: Remove maxCompactID?
-	maxCompactID uint64
+	nextFileID uint64 // Atomic
 
 	// For ending compactions.
 	compactWorkersWg sync.WaitGroup
