@@ -51,7 +51,7 @@ var (
 	lastUnstalled time.Time
 )
 
-func revertToManifest(manifest *manifest, dir string, idMap map[uint64]struct{}) error {
+func revertToManifest(kv *KV, manifest *manifest, idMap map[uint64]struct{}) error {
 	// 1. Check all files in manifest exist.
 	for id := range manifest.tables {
 		if _, ok := idMap[id]; !ok {
@@ -64,8 +64,8 @@ func revertToManifest(manifest *manifest, dir string, idMap map[uint64]struct{})
 	// 2. Delete files that shouldn't exist.
 	for id := range idMap {
 		if _, ok := manifest.tables[id]; !ok {
-			// TODO: Print message?  Where?
-			filename := table.NewFilename(id, dir)
+			kv.elog.Printf("Table file %d not referenced in MANIFEST\n", id)
+			filename := table.NewFilename(id, kv.opt.Dir)
 			err := os.Remove(filename)
 			if err != nil {
 				return y.Wrapf(err, "While removing table %d", id)
@@ -99,7 +99,7 @@ func newLevelsController(kv *KV, manifest *manifest) (*levelsController, error) 
 	}
 
 	// Compare manifest against directory, check for existant/non-existant files, and remove.
-	if err := revertToManifest(manifest, kv.opt.Dir, getIDMap(kv.opt.Dir)); err != nil {
+	if err := revertToManifest(kv, manifest, getIDMap(kv.opt.Dir)); err != nil {
 		return nil, err
 	}
 
