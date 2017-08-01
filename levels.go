@@ -660,7 +660,6 @@ func (s *levelsController) get(key []byte) (y.ValueStruct, error) {
 	// read level L's tables post-compaction and level L+1's tables pre-compaction.  (If we do
 	// parallelize this, we will need to call the h.RLock() function by increasing order of level
 	// number.)
-	// TODO: What about iteration?  How does it access table lists?
 	for _, h := range s.levels {
 		vs, err := h.get(key) // Calls h.RLock() and h.RUnlock().
 		if err != nil {
@@ -686,6 +685,8 @@ func appendIteratorsReversed(out []y.Iterator, th []*table.Table, reversed bool)
 // Note: This obtains references for the table handlers. Remember to close these iterators.
 func (s *levelsController) appendIterators(
 	iters []y.Iterator, reversed bool) []y.Iterator {
+	// Just like with get, it's important we iterate the levels from 0 on upward, to avoid missing
+	// data when there's a compaction.
 	for _, level := range s.levels {
 		iters = level.appendIterators(iters, reversed)
 	}
