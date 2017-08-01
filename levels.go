@@ -336,13 +336,13 @@ func (s *levelsController) compactBuildTables(
 }
 
 func buildChangeSet(cd *compactDef, newTables []*table.Table) manifestChangeSet {
-
+	level := uint8(cd.nextLevel.level)
 	changes := []manifestChange{}
 	for _, table := range newTables {
 		changes = append(changes, manifestChange{tableChange{
 			id:        table.ID(),
 			op:        tableCreate,
-			level:     0,                    // TODO
+			level:     level,
 			tableSize: uint32(table.Size()), // TODO deal with cast
 			smallest:  table.Smallest(),
 			biggest:   table.Biggest(),
