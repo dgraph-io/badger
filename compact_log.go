@@ -139,6 +139,7 @@ func compactLogIterate(filename string, f func(c *compaction)) error {
 //    Some files may linger around because of iterators holding references.
 // 2) Compaction is not done: We need to undo the compaction.
 
+// TODO: Remove all uses of this function, probably.
 func deleteIfPresent(id uint64, dir string) {
 	fn := table.NewFilename(id, dir)
 	_, err := os.Stat(fn)

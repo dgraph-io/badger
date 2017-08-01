@@ -18,9 +18,9 @@ package badger
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/rand"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -55,7 +55,32 @@ var (
 	lastUnstalled time.Time
 )
 
-func newLevelsController(kv *KV) (*levelsController, error) {
+func revertToManifest(manifest *manifest, dir string, idMap map[uint64]struct{}) error {
+	// 1. Check all files in manifest exist.
+	for id := range manifest.tables {
+		if _, ok := idMap[id]; !ok {
+			// We could verify their file size.  But we don't.
+			// TODO: Check file size when we stat in OpenTable.
+			return fmt.Errorf("file does not exist for table %d", id)
+		}
+	}
+
+	// 2. Delete files that shouldn't exist.
+	for id := range idMap {
+		if _, ok := manifest.tables[id]; !ok {
+			// TODO: Print error message?  Where?
+			filename := table.NewFilename(id, dir)
+			err := os.Remove(filename)
+			if err != nil {
+				return y.Wrapf(err, "While removing table %d", id)
+			}
+		}
+	}
+
+	return nil
+}
+
+func newLevelsController(kv *KV, manifest *manifest) (*levelsController, error) {
 	y.AssertTrue(kv.opt.NumLevelZeroTablesStall > kv.opt.NumLevelZeroTables)
 	s := &levelsController{
 		kv:     kv,
@@ -77,25 +102,20 @@ func newLevelsController(kv *KV) (*levelsController, error) {
 		s.cstatus.levels[i] = new(levelCompactStatus)
 	}
 
-	// Replay compact log. Check against files in directory.
-	clogName := filepath.Join(kv.opt.Dir, "clog")
-	_, err := os.Stat(clogName)
-	if err == nil {
-		kv.elog.Printf("Replaying compact log: %s\n", clogName)
-		compactLogReplay(clogName, kv.opt.Dir, getIDMap(kv.opt.Dir))
-
-		if err := os.Remove(clogName); err != nil { // Everything is ok. Clear compact log.
-			return nil, errors.Wrapf(err, "Removing compaction log: %q", clogName)
-		}
+	// Compare manifest against directory, check for existant/non-existant files, and remove.
+	if err := revertToManifest(manifest, kv.opt.Dir, getIDMap(kv.opt.Dir)); err != nil {
+		return nil, err
 	}
 
 	// Some files may be deleted. Let's reload.
 	tables := make([][]*table.Table, kv.opt.MaxLevels)
 	var maxFileID uint64
-	for fileID := range getIDMap(kv.opt.Dir) {
+	for fileID, tableManifest := range manifest.tables {
 		fname := table.NewFilename(fileID, kv.opt.Dir)
+		// TODO: Don't open with O_CREATE
 		fd, err := y.OpenSyncedFile(fname, true)
 		if err != nil {
+			// TODO: Rename closeAllUnmodifiedTables
 			closeAllUnmodifiedTables(tables)
 			return nil, errors.Wrapf(err, "Opening file: %q", fname)
 		}
@@ -106,13 +126,7 @@ func newLevelsController(kv *KV) (*levelsController, error) {
 			return nil, errors.Wrapf(err, "Opening table: %q", fname)
 		}
 
-		// Check metadata for level information.
-		tableMeta := t.Metadata()
-		y.AssertTruef(len(tableMeta) == 2, "len(tableMeta). Expected=2. Actual=%d", len(tableMeta))
-
-		level := int(binary.BigEndian.Uint16(tableMeta))
-		y.AssertTruef(level < kv.opt.MaxLevels, "max(level). Expected=%d. Actual=%d",
-			kv.opt.MaxLevels, level)
+		level := tableManifest.level
 		tables[level] = append(tables[level], t)
 
 		if fileID > maxFileID {
@@ -130,13 +144,7 @@ func newLevelsController(kv *KV) (*levelsController, error) {
 		return nil, errors.Wrap(err, "Level validation")
 	}
 
-	// Create new compact log.
-	if err := s.clog.init(clogName); err != nil {
-		_ = s.cleanupLevels()
-		return nil, errors.Wrap(err, "Compaction Log")
-	}
-
-	// Sync directory (because we have at least removed/created compaction log files)
+	// Sync directory (because we have at least removed some files)
 	if err := syncDir(kv.opt.Dir); err != nil {
 		_ = s.close()
 		return nil, errors.Wrap(err, "Directory entry for compaction log")

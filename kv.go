@@ -199,7 +199,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
-	manifestFile, _, err := openManifestFile(&opt)
+	manifestFile, manifest, err := openManifestFile(&opt)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +223,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
 	// newLevelsController potentially loads files in directory.
-	if out.lc, err = newLevelsController(out); err != nil {
+	if out.lc, err = newLevelsController(out, &manifest); err != nil {
 		return nil, err
 	}
 

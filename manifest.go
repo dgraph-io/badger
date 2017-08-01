@@ -49,6 +49,7 @@ func createManifest(maxLevels int) manifest {
 }
 
 type levelManifest struct {
+	// TODO: Use struct{}
 	tables map[uint64]bool // Maps table id to true
 }
 

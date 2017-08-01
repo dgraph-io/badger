@@ -176,7 +176,20 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 		elog:      trace.New("Badger", "Compact"),
 	}
 
-	lc, err := newLevelsController(kv)
+	manifest := createManifest(opt.MaxLevels)
+	err = applyChangeSet(&manifest, &manifestChangeSet{changes: []manifestChange{
+		// TODO: We construct these often enough there ought to be a function
+		manifestChange{tableChange{
+			id:        t1.ID(),
+			op:        tableCreate,
+			level:     0,
+			tableSize: uint32(t1.Size()), // something something cast
+			smallest:  t1.Smallest(),
+			biggest:   t1.Biggest(),
+		}},
+	}})
+	require.NoError(t, err)
+	lc, err := newLevelsController(kv, &manifest)
 	require.NoError(t, err)
 	done = lc.fillTablesL0(&cd)
 	require.Equal(t, true, done)
