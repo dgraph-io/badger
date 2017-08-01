@@ -74,8 +74,6 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 	}
 }
 
-// TODO: There are other places to add to manifest -- such as initial table creation.
-
 // deleteTables remove tables idx0, ..., idx1-1.
 func (s *levelHandler) deleteTables(toDel []*table.Table) (decr func() error) {
 	s.Lock()
@@ -101,10 +99,8 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) (decr func() error) {
 	return func() error { return decrRefs(toDel) }
 }
 
-// TODO: Remove the reference to the "compaction log" in the comment here once that's gone.
-
 // replaceTables will replace tables[left:right] with newTables. Note this EXCLUDES tables[right].
-// You must call decr() to delete the old tables _after_ updating the compaction log or MANIFEST.
+// You must call decr() to delete the old tables _after_ writing the update to the manifest.
 func (s *levelHandler) replaceTables(
 	newTables []*table.Table) (decr func() error) {
 	s.Lock()
