@@ -192,7 +192,7 @@ func (s *levelsController) runWorker(lc *y.LevelCloser) {
 		case <-timeChan:
 			prios := s.pickCompactLevels()
 			for _, p := range prios {
-				// TODO: Handle error.  (We don't)
+				// TODO: Handle error.
 				didCompact, _ := s.doCompact(p)
 				if didCompact {
 					break
