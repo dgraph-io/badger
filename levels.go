@@ -512,8 +512,10 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		// We have to add to nextLevel before we remove from thisLevel -- in the opposite order
 		// there'd be a moment of time where reads would see keys missing from both levels.
 
-		// TODO: Double check that reads traverse levels in some sort of order.  If they did it in
-		// parallel, or higher-numbered levels first, we could miss data!
+		// Note: It's critical that we add tables (replace them) in nextLevel before deleting them
+		// in thisLevel.  (We could finagle it atomically somehow.)  Also, when reading we must
+		// read, or at least acquire s.RLock(), in increasing order by level, so that we don't skip
+		// a compaction.
 
 		if err := nextLevel.replaceTables(cd.top); err != nil {
 			return err
@@ -546,6 +548,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		return err
 	}
 
+	// See comment earlier in this function about the ordering of these ops, and the order in which
+	// we access levels when reading.
 	if err := nextLevel.replaceTables(newTables); err != nil {
 		return err
 	}
@@ -655,9 +659,15 @@ func (s *levelsController) close() error {
 
 // get returns the found value if any. If not found, we return nil.
 func (s *levelsController) get(key []byte) (y.ValueStruct, error) {
-	// No need to lock anything as we just iterate over the currently immutable levelHandlers.
+
+	// It's important that we iterate the levels from 0 on upward.  The reason is, if we iterated
+	// in opposite order, or in parallel (naively calling all the h.RLock() in some order) we could
+	// read level L's tables post-compaction and level L+1's tables pre-compaction.  (If we do
+	// parallelize this, we will need to call the h.RLock() function by increasing order of level
+	// number.)
+	// TODO: What about iteration?  How does it access table lists?
 	for _, h := range s.levels {
-		vs, err := h.get(key)
+		vs, err := h.get(key) // Calls h.RLock() and h.RUnlock().
 		if err != nil {
 			return y.ValueStruct{}, errors.Wrapf(err, "get key: %q", key)
 		}
