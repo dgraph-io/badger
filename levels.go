@@ -464,7 +464,6 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	return false
 }
 
-// TODO: Move to levels.go or something.
 func (s *levelsController) reserveCompactionFileIDs(def *compactDef) (uint64, uint64) {
 	var estSize int64
 	for _, t := range def.top {
@@ -495,10 +494,9 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 		y.AssertTrue(len(cd.top) == 1)
 		tbl := cd.top[0]
 
-		// TODO: Actually update manifest before in-memory table mappings (so that manifest updates
-		// can't happen in wrong order)
-
 		// TODO: Get rid of tableSetLevel or whatever it's called.
+
+		// We write to the manifest _before_ we delete files (and after we created files)
 
 		changeSet := manifestChangeSet{
 			changes: []manifestChange{
@@ -508,6 +506,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 			},
 		}
 		_ = s.kv.manifest.addChanges(changeSet)
+		// TODO: Sync manifest?  Sync dir before manifest?
 
 		// TODO: Should the in-memory operation happen atomically?  Put these behind the same lock?
 
@@ -533,20 +532,17 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) {
 	defer decr()
 	changeSet := buildChangeSet(&cd, newTables)
 
-	_ = s.kv.manifest.addChanges(changeSet) // TODO: Handle error
-	// TODO: comment about addChanges ordering
+	// We write to the manifest _before_ we delete files (and after we created files)
 
-	// TODO: Update manifest here, before we update in-memory table mappings.
+	_ = s.kv.manifest.addChanges(changeSet) // TODO: Handle error
+	// TODO: Sync manifest?  Sync dir before manifest?
 
 	decrReplace := nextLevel.replaceTables(newTables)
 	decrDelete := thisLevel.deleteTables(cd.top)
 
-	// TODO: We should sync the dir or something first, for file creation.  Do we need to?
-
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
 
-	// TODO: Sync the clog or manifest before we run decr functions?
 	_ = decrReplace() // TODO handle error
 	_ = decrDelete()  // TODO handle error
 
