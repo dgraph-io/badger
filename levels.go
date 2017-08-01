@@ -240,7 +240,7 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 
 // compactBuildTables merge topTables and botTables to form a list of new tables.
 func (s *levelsController) compactBuildTables(
-	l int, cd compactDef, newIDMin, newIDLimit uint64) ([]*table.Table, func() error) {
+	l int, cd compactDef, newIDMin, newIDLimit uint64) ([]*table.Table, func() error, error) {
 	topTables := cd.top
 	botTables := cd.bot
 
@@ -322,18 +322,14 @@ func (s *levelsController) compactBuildTables(
 	if firstErr != nil {
 		// An error happened.  Delete all the newly created table files (by calling DecrRef
 		// -- we're the only holders of a ref).
-		for _, table := range newTables[:i] {
-			if table != nil {
-				_ = table.DecrRef()
-			}
-		}
+		_ = decrRefs(newTables[:i])
 		errorReturn := errors.Wrapf(firstErr, "While running compaction for: %+v", cd)
-		return nil, func() error { return errorReturn }
+		return nil, nil, errorReturn
 	}
 
 	out := newTables[:i]
 
-	return out, func() error { return decrRefs(out) }
+	return out, func() error { return decrRefs(out) }, nil
 }
 
 func makeTableCreateChange(table *table.Table, level int) manifestChange {
@@ -528,10 +524,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	}
 
 	newIDMin, newIDLimit := s.reserveCompactionFileIDs(&cd)
-	// TODO: This is p much bonkers -- we check for an error here, in advance..! and then retrieve it.
-	newTables, decr := s.compactBuildTables(l, cd, newIDMin, newIDLimit)
-	if newTables == nil {
-		err := decr()
+	newTables, decr, err := s.compactBuildTables(l, cd, newIDMin, newIDLimit)
+	if err != nil {
 		// This compaction couldn't be done successfully.
 		cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v", err, cd)
 		// TODO: We didn't return the error before.  We should, no?
