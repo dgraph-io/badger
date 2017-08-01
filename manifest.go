@@ -229,7 +229,6 @@ func (mc *manifestChange) Decode(r io.Reader) error {
 	return mc.tc.Decode(r)
 }
 
-// TODO: How do we know keys have 16 bit size?  We need to encapsulate that somehow.
 func encodeKey(w *bytes.Buffer, x []byte) {
 	var size [2]byte
 	binary.BigEndian.PutUint16(size[:], uint16(len(x)))
