@@ -532,8 +532,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	if err != nil {
 		// This compaction couldn't be done successfully.
 		cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v", err, cd)
-		// TODO: We didn't return the error before.  We should, no?
-		return nil
+		return err
 	}
 	defer func() {
 		if decErr := decr(); err == nil {
