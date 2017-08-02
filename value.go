@@ -312,6 +312,19 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 
 	rem := vlog.fpath(f.fid)
 	f.fd.Close() // close file previous to remove it
+
+	vlog.kv.manifest.addChanges(manifestChangeSet{
+		changes: []manifestChange{
+			manifestChange{
+				tag: manifestValueLogChange,
+				vlc: valueLogChange{
+					id: uint64(f.fid),
+					op: valueLogDelete,
+				},
+			},
+		},
+	})
+
 	elog.Printf("Removing %s", rem)
 	return os.Remove(rem)
 }
@@ -479,12 +492,13 @@ func (l *valueLog) fpath(fid uint16) string {
 	return fmt.Sprintf("%s%s%06d.vlog", l.dirPath, string(os.PathSeparator), fid)
 }
 
-func (l *valueLog) openOrCreateFiles() error {
+func (l *valueLog) openOrCreateFiles(mf *manifest) error {
 	files, err := ioutil.ReadDir(l.dirPath)
 	if err != nil {
 		return errors.Wrapf(err, "Error while opening value log")
 	}
 
+	// TODO: Generally, don't delete files not in manifest -- rename them.
 	found := make(map[int]struct{})
 	for _, file := range files {
 		if !strings.HasSuffix(file.Name(), ".vlog") {
@@ -495,6 +509,10 @@ func (l *valueLog) openOrCreateFiles() error {
 		if err != nil {
 			return errors.Wrapf(err, "Error while parsing value log id for file: %q", file.Name())
 		}
+		if _, ok := mf.valueLogFiles[uint64(fid)]; !ok {
+			// TODO: Delete (or rename/move) files not in manifest
+			continue
+		}
 		if _, ok := found[fid]; ok {
 			return errors.Errorf("Found the same value log file twice: %d", fid)
 		}
@@ -502,11 +520,18 @@ func (l *valueLog) openOrCreateFiles() error {
 
 		lf := &logFile{fid: uint16(fid), path: l.fpath(uint16(fid))}
 		l.files = append(l.files, lf)
+
 	}
 
 	sort.Slice(l.files, func(i, j int) bool {
 		return l.files[i].fid < l.files[j].fid
 	})
+
+	for id := range mf.valueLogFiles {
+		if _, ok := found[int(id)]; !ok {
+			return errors.Errorf("Value log file %d (seen in MANIFEST) is missing", id)
+		}
+	}
 
 	// Open all previous log files as read only. Open the last log file
 	// as read write.
@@ -528,28 +553,51 @@ func (l *valueLog) openOrCreateFiles() error {
 
 	// If no files are found, then create a new file.
 	if len(l.files) == 0 {
-		lf := &logFile{fid: 0, path: l.fpath(0)}
-		lf.fd, err = y.CreateSyncedFile(l.fpath(lf.fid), l.opt.SyncWrites)
+		// TODO: Do we need to encapsulate value log file creation?
+		_, err := l.createVlogFile(0)
 		if err != nil {
-			return errors.Wrapf(err, "Unable to open value log file as RDWR")
-		}
-		l.files = append(l.files, lf)
-		// We created a file -- ensure that its directory entry is persisted.
-		err = syncDir(l.dirPath)
-		if err != nil {
-			return errors.Wrapf(err, "Unable to sync value log file dir")
+			return err
 		}
 	}
 	return nil
 }
 
-func (l *valueLog) Open(kv *KV, opt *Options) error {
+func (l *valueLog) createVlogFile(fid uint16) (*logFile, error) {
+	path := l.fpath(fid)
+	lf := &logFile{fid: fid, offset: 0, path: path}
+	var err error
+	lf.fd, err = y.CreateSyncedFile(path, l.opt.SyncWrites)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Unable to create value log file")
+	}
+	err = syncDir(l.dirPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Unable to sync value log file dir")
+	}
+	l.kv.manifest.addChanges(manifestChangeSet{
+		changes: []manifestChange{
+			manifestChange{
+				tag: manifestValueLogChange,
+				vlc: valueLogChange{
+					id: uint64(fid),
+					op: valueLogCreate,
+				},
+			},
+		},
+	})
+	l.Lock()
+	l.files = append(l.files, lf)
+	l.Unlock()
+	return lf, nil
+}
+
+func (l *valueLog) Open(kv *KV, opt *Options, mf *manifest) error {
 	l.dirPath = opt.ValueDir
 	l.opt = *opt
-	if err := l.openOrCreateFiles(); err != nil {
+	l.kv = kv
+	if err := l.openOrCreateFiles(mf); err != nil {
 		return errors.Wrapf(err, "Unable to open value log")
 	}
-	l.kv = kv
 
 	l.elog = trace.NewEventLog("Badger", "Valuelog")
 
@@ -664,22 +712,11 @@ func (l *valueLog) write(reqs []*request) error {
 
 			newid := atomic.AddUint32(&l.maxFid, 1)
 			y.AssertTruef(newid < 1<<16, "newid will overflow uint16: %v", newid)
-			newlf := &logFile{fid: uint16(newid), offset: 0}
-			newlf.path = l.fpath(newlf.fid)
-			newlf.fd, err = y.CreateSyncedFile(newlf.path, l.opt.SyncWrites)
+			newlf, err := l.createVlogFile(uint16(newid))
 			if err != nil {
-				return errors.Wrapf(err, "While creating new value log: %q", newlf.path)
-			}
-			if l.opt.SyncWrites {
-				if err := syncDir(l.dirPath); err != nil {
-					return errors.Wrapf(err,
-						"Could not sync directory entry of value log: %q", newlf.path)
-				}
+				return err
 			}
 
-			l.Lock()
-			l.files = append(l.files, newlf)
-			l.Unlock()
 			curlf = newlf
 		}
 		return nil

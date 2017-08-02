@@ -579,7 +579,8 @@ func TestLoad(t *testing.T) {
 		kv.Close()
 	}
 
-	kv, _ := NewKV(getTestOptions(dir))
+	kv, err := NewKV(getTestOptions(dir))
+	require.NoError(t, err)
 	var item KVItem
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {

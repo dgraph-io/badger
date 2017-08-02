@@ -80,9 +80,14 @@ type tableChange struct {
 	level uint8 // set if tableCreate
 }
 
+const (
+	valueLogCreate = 1
+	valueLogDelete = 2
+)
+
 type valueLogChange struct {
-	// TODO: create/delete op?
 	id uint64
+	op byte // has value valueLogCreate, valueLogDelete
 }
 
 type manifestChangeType byte
@@ -209,10 +214,21 @@ func applyTableChange(build *manifest, tc *tableChange) error {
 }
 
 func applyValueLogChange(build *manifest, vlc *valueLogChange) error {
-	if _, ok := build.valueLogFiles[vlc.id]; ok {
-		return x.Errorf("MANIFEST invalid, value log %d exists\n", vlc.id)
+	_, ok := build.valueLogFiles[vlc.id]
+	switch vlc.op {
+	case valueLogCreate:
+		if ok {
+			return x.Errorf("MANIFEST invalid, value log %d exists\n", vlc.id)
+		}
+		build.valueLogFiles[vlc.id] = struct{}{}
+	case valueLogDelete:
+		if !ok {
+			return fmt.Errorf("MANIFEST invalid, value log %d does not exist\n", vlc.id)
+		}
+		delete(build.valueLogFiles, vlc.id)
+	default:
+		return fmt.Errorf("MANIFEST file has invalid valueLogChange op\n")
 	}
-	build.valueLogFiles[vlc.id] = struct{}{}
 	return nil
 }
 
@@ -300,21 +316,29 @@ func (tc *tableChange) Decode(r io.Reader) error {
 	}
 	tc.id = binary.BigEndian.Uint64(bytes[0:8])
 	tc.op = bytes[8]
+	if tc.op != tableCreate && tc.op != tableDelete {
+		return fmt.Errorf("decoded invalid tableChange op")
+	}
 	tc.level = bytes[9]
 	return nil
 }
 
 func (vlc *valueLogChange) Encode(w *bytes.Buffer) {
-	var bytes [8]byte
+	var bytes [9]byte
 	binary.BigEndian.PutUint64(bytes[0:8], vlc.id)
+	bytes[8] = vlc.op
 	w.Write(bytes[:])
 }
 
 func (vlc *valueLogChange) Decode(r io.Reader) error {
-	var bytes [8]byte
+	var bytes [9]byte
 	if _, err := io.ReadFull(r, bytes[:]); err != nil {
 		return err
 	}
 	vlc.id = binary.BigEndian.Uint64(bytes[0:8])
+	vlc.op = bytes[8]
+	if vlc.op != valueLogCreate && vlc.op != valueLogDelete {
+		return fmt.Errorf("decoded invalid valueLogChange op")
+	}
 	return nil
 }

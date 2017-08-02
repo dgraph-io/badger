@@ -43,7 +43,10 @@ func TestManifestEncoding(t *testing.T) {
 			},
 			manifestChange{
 				tag: manifestValueLogChange,
-				vlc: valueLogChange{23},
+				vlc: valueLogChange{
+					id: 23,
+					op: valueLogCreate,
+				},
 			},
 		},
 	}

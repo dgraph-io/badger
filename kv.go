@@ -233,7 +233,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	lc = out.closer.Register("memtable")
 	go out.flushMemtable(lc) // Need levels controller to be up.
 
-	if err = out.vlog.Open(out, &opt); err != nil {
+	if err = out.vlog.Open(out, &opt, &manifest); err != nil {
 		return out, err
 	}
 
