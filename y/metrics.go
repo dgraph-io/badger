@@ -95,7 +95,7 @@ func Init(elog trace.EventLog, dir, valueDir string) Metrics {
 	m.elog = elog
 	m.dir = dir
 	m.valueDir = valueDir
-	m.Ticker = time.NewTicker(5 * time.Second)
+	m.Ticker = time.NewTicker(5 * time.Minute)
 
 	go m.updateSize()
 	return m
