@@ -553,7 +553,6 @@ func (l *valueLog) openOrCreateFiles(mf *manifest) error {
 
 	// If no files are found, then create a new file.
 	if len(l.files) == 0 {
-		// TODO: Do we need to encapsulate value log file creation?
 		_, err := l.createVlogFile(0)
 		if err != nil {
 			return err
