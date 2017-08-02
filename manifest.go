@@ -37,6 +37,11 @@ type manifest struct {
 	levels        []levelManifest
 	tables        map[uint64]tableManifest
 	valueLogFiles map[uint64]struct{}
+
+	// Contains total number of creation and deletion changes in the manifest -- used to compute
+	// whether it'd be useful to rewrite the manifest.
+	creations uint64
+	deletions uint64
 }
 
 func createManifest(maxLevels int) manifest {
@@ -64,6 +69,9 @@ type tableManifest struct {
 type manifestFile struct {
 	fp *os.File
 
+	manifest manifest
+
+	// Guards appends, which includes access to creations/deletions.
 	appendLock sync.Mutex
 }
 
@@ -114,13 +122,13 @@ func openOrCreateManifestFile(opt *Options) (ret *manifestFile, result manifest,
 		return nil, manifest{}, err
 	}
 
-	m, err := replayManifestFile(opt.MaxLevels, fp)
+	m1, m2, err := replayManifestFile(opt.MaxLevels, fp)
 	if err != nil {
 		_ = fp.Close()
 		return nil, manifest{}, err
 	}
 
-	return &manifestFile{fp: fp}, m, nil
+	return &manifestFile{fp: fp, manifest: m1}, m2, nil
 }
 
 func (mf *manifestFile) close() error {
@@ -134,13 +142,17 @@ func (mf *manifestFile) close() error {
 func (mf *manifestFile) addChanges(changes manifestChangeSet) error {
 	var buf bytes.Buffer
 	changes.Encode(&buf)
-	// Maybe we could use O_APPEND instead (on certain file systems)
-	mf.appendLock.Lock()
-	_, err := mf.fp.Write(buf.Bytes())
-	mf.appendLock.Unlock()
-	if err != nil {
+	if err := applyChangeSet(&mf.manifest, &changes); err != nil {
 		return err
 	}
+	// Maybe we could use O_APPEND instead (on certain file systems)
+	mf.appendLock.Lock()
+	if _, err := mf.fp.Write(buf.Bytes()); err != nil {
+		mf.appendLock.Unlock()
+		return err
+	}
+
+	mf.appendLock.Unlock()
 	return mf.fp.Sync()
 }
 
@@ -163,12 +175,15 @@ func (r *countingReader) ReadByte() (b byte, err error) {
 	return
 }
 
-func replayManifestFile(maxLevels int, fp *os.File) (ret manifest, err error) {
+// We need one immutable copy and one mutable copy of the manifest.  Easiest way is to construct
+// two of them.
+func replayManifestFile(maxLevels int, fp *os.File) (ret1 manifest, ret2 manifest, err error) {
 	r := countingReader{wrapped: bufio.NewReader(fp)}
 
 	offset := r.count
 
-	build := createManifest(maxLevels)
+	build1 := createManifest(maxLevels)
+	build2 := createManifest(maxLevels)
 	for {
 		offset = r.count
 		var changeSet manifestChangeSet
@@ -177,10 +192,13 @@ func replayManifestFile(maxLevels int, fp *os.File) (ret manifest, err error) {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				break
 			}
-			return manifest{}, err
+			return manifest{}, manifest{}, err
 		}
-		if err := applyChangeSet(&build, &changeSet); err != nil {
-			return manifest{}, err
+		if err := applyChangeSet(&build1, &changeSet); err != nil {
+			return manifest{}, manifest{}, err
+		}
+		if err := applyChangeSet(&build2, &changeSet); err != nil {
+			return manifest{}, manifest{}, err
 		}
 	}
 
@@ -188,7 +206,7 @@ func replayManifestFile(maxLevels int, fp *os.File) (ret manifest, err error) {
 	fp.Truncate(offset)
 
 	_, err = fp.Seek(0, os.SEEK_END)
-	return build, err
+	return build1, build2, err
 }
 
 func applyTableChange(build *manifest, tc *tableChange) error {
@@ -200,6 +218,7 @@ func applyTableChange(build *manifest, tc *tableChange) error {
 		build.tables[tc.id] = tableManifest{
 			level: tc.level}
 		build.levels[tc.level].tables[tc.id] = struct{}{}
+		build.creations++
 	case tableDelete:
 		tm, ok := build.tables[tc.id]
 		if !ok {
@@ -207,6 +226,7 @@ func applyTableChange(build *manifest, tc *tableChange) error {
 		}
 		delete(build.levels[tm.level].tables, tc.id)
 		delete(build.tables, tc.id)
+		build.deletions++
 	default:
 		return x.Errorf("MANIFEST file has invalid tableChange op\n")
 	}
@@ -221,11 +241,13 @@ func applyValueLogChange(build *manifest, vlc *valueLogChange) error {
 			return x.Errorf("MANIFEST invalid, value log %d exists\n", vlc.id)
 		}
 		build.valueLogFiles[vlc.id] = struct{}{}
+		build.creations++
 	case valueLogDelete:
 		if !ok {
 			return fmt.Errorf("MANIFEST invalid, value log %d does not exist\n", vlc.id)
 		}
 		delete(build.valueLogFiles, vlc.id)
+		build.deletions++
 	default:
 		return fmt.Errorf("MANIFEST file has invalid valueLogChange op\n")
 	}
