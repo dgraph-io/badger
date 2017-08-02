@@ -332,11 +332,24 @@ func (s *levelsController) compactBuildTables(
 }
 
 func makeTableCreateChange(table *table.Table, level int) manifestChange {
-	return manifestChange{tableChange{
-		id:    table.ID(),
-		op:    tableCreate,
-		level: uint8(level),
-	}}
+	return manifestChange{
+		tag: manifestTableChange,
+		tc: tableChange{
+			id:    table.ID(),
+			op:    tableCreate,
+			level: uint8(level),
+		},
+	}
+}
+
+func makeTableDeleteChange(id uint64) manifestChange {
+	return manifestChange{
+		tag: manifestTableChange,
+		tc: tableChange{
+			id: id,
+			op: tableDelete,
+		},
+	}
 }
 
 func buildChangeSet(cd *compactDef, newTables []*table.Table) manifestChangeSet {
@@ -345,10 +358,10 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) manifestChangeSet 
 		changes = append(changes, makeTableCreateChange(table, cd.nextLevel.level))
 	}
 	for _, table := range cd.top {
-		changes = append(changes, manifestChange{tableChange{id: table.ID(), op: tableDelete}})
+		changes = append(changes, makeTableDeleteChange(table.ID()))
 	}
 	for _, table := range cd.bot {
-		changes = append(changes, manifestChange{tableChange{id: table.ID(), op: tableDelete}})
+		changes = append(changes, makeTableDeleteChange(table.ID()))
 	}
 	return manifestChangeSet{changes: changes}
 }
@@ -496,7 +509,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		// the next.  (Manifest replay logic can't handle the opposite.)
 		changeSet := manifestChangeSet{
 			changes: []manifestChange{
-				manifestChange{tableChange{id: tbl.ID(), op: tableDelete}},
+				makeTableDeleteChange(tbl.ID()),
 				makeTableCreateChange(tbl, nextLevel.level),
 			},
 		}

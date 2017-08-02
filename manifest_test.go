@@ -37,7 +37,14 @@ func TestManifestEncoding(t *testing.T) {
 	var buf bytes.Buffer
 	changeSet := manifestChangeSet{
 		[]manifestChange{
-			manifestChange{tableChange{33, tableCreate, 3}},
+			manifestChange{
+				tag: manifestTableChange,
+				tc:  tableChange{33, tableCreate, 3},
+			},
+			manifestChange{
+				tag: manifestValueLogChange,
+				vlc: valueLogChange{23},
+			},
 		},
 	}
 	changeSet.Encode(&buf)
