@@ -141,6 +141,7 @@ type KV struct {
 	// Incremented in the non-concurrently accessed write loop.  But also accessed outside. So
 	// we use an atomic op.
 	lastUsedCasCounter uint64
+	metrics            y.Metrics
 }
 
 var ErrInvalidDir error = errors.New("Invalid Dir, directory does not exist")
@@ -208,6 +209,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
 	}
+	out.metrics = y.Init(out.elog, opt.Dir, opt.ValueDir)
 	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
 	// newLevelsController potentially loads files in directory.
@@ -387,6 +389,7 @@ func (s *KV) Close() (err error) {
 	if err := s.lc.close(); err != nil {
 		return errors.Wrap(err, "KV.Close")
 	}
+	s.metrics.Ticker.Stop()
 	s.elog.Printf("Waiting for closer")
 	s.closer.SignalAll()
 	s.closer.WaitForAll()
@@ -475,10 +478,10 @@ func (s *KV) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getMemTables() // Lock should be released.
 	defer decr()
 
-	y.NumGets.Add(1)
+	s.metrics.NumGets.Add(1)
 	for i := 0; i < len(tables); i++ {
 		vs := tables[i].Get(key)
-		y.NumMemtableGets.Add(1)
+		s.metrics.NumMemtableGets.Add(1)
 		if vs.Meta != 0 || vs.Value != nil {
 			return vs, nil
 		}
@@ -747,7 +750,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 		b.Entries = append(b.Entries, entry)
 		if size >= s.opt.maxBatchSize {
 			s.writeCh <- b
-			y.NumPuts.Add(int64(len(b.Entries)))
+			s.metrics.NumPuts.Add(int64(len(b.Entries)))
 			reqs = append(reqs, b)
 			size = 0
 			b = nil
@@ -756,7 +759,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 
 	if size > 0 {
 		s.writeCh <- b
-		y.NumPuts.Add(int64(len(b.Entries)))
+		s.metrics.NumPuts.Add(int64(len(b.Entries)))
 		reqs = append(reqs, b)
 	}
 	return reqs
