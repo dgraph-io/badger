@@ -187,3 +187,60 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lc.fillTablesL0(&cd)
 	lc.runCompactDef(0, cd)
 }
+
+func TestManifestRewrite(t *testing.T) {
+	dir, err := ioutil.TempDir("/tmp", "badger")
+	require.NoError(t, err)
+	opt := DefaultOptions
+	opt.Dir = dir
+	deletionsThreshold := 10
+	mf, m, err := helpOpenOrCreateManifestFile(&opt, deletionsThreshold)
+	defer func() {
+		if mf != nil {
+			mf.close()
+		}
+	}()
+	require.NoError(t, err)
+	require.Equal(t, 0, m.creations)
+	require.Equal(t, 0, m.deletions)
+
+	err = mf.addChanges(manifestChangeSet{[]manifestChange{
+		manifestChange{
+			tag: manifestValueLogChange,
+			vlc: valueLogChange{
+				id: 0,
+				op: valueLogCreate,
+			},
+		},
+	}})
+	require.NoError(t, err)
+
+	for i := 0; i < deletionsThreshold*3; i++ {
+		ch := []manifestChange{
+			manifestChange{
+				tag: manifestValueLogChange,
+				vlc: valueLogChange{
+					id: uint64(i + 1),
+					op: valueLogCreate,
+				},
+			},
+			manifestChange{
+				tag: manifestValueLogChange,
+				vlc: valueLogChange{
+					id: uint64(i),
+					op: valueLogDelete,
+				},
+			},
+		}
+		err := mf.addChanges(manifestChangeSet{ch})
+		require.NoError(t, err)
+	}
+	err = mf.close()
+	require.NoError(t, err)
+	mf = nil
+	mf, m, err = helpOpenOrCreateManifestFile(&opt, deletionsThreshold)
+	require.NoError(t, err)
+	require.Equal(t, map[uint64]struct{}{
+		uint64(deletionsThreshold * 3): struct{}{},
+	}, m.valueLogFiles)
+}

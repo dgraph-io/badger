@@ -69,6 +69,8 @@ type tableManifest struct {
 type manifestFile struct {
 	fp        *os.File
 	directory string
+	// We make this configurable so that unit tests can hit rewrite() code quickly
+	deletionsRewriteThreshold int
 
 	manifest manifest
 
@@ -117,11 +119,17 @@ type manifestChangeSet struct {
 }
 
 const (
-	manifestFilename        = "MANIFEST"
-	manifestRewriteFilename = "MANIFEST-REWRITE"
+	manifestFilename                  = "MANIFEST"
+	manifestRewriteFilename           = "MANIFEST-REWRITE"
+	manifestDeletionsRewriteThreshold = 100000
+	manifestDeletionsRatio            = 10
 )
 
 func openOrCreateManifestFile(opt *Options) (ret *manifestFile, result manifest, err error) {
+	return helpOpenOrCreateManifestFile(opt, manifestDeletionsRewriteThreshold)
+}
+
+func helpOpenOrCreateManifestFile(opt *Options, deletionsThreshold int) (ret *manifestFile, result manifest, err error) {
 	path := filepath.Join(opt.Dir, manifestFilename)
 	fp, err := y.OpenSyncedFile(path, false) // We explicitly sync in addChanges, outside the lock.
 	if err != nil {
@@ -155,8 +163,8 @@ func (mf *manifestFile) addChanges(changes manifestChangeSet) error {
 		return err
 	}
 	// Rewrite manifest if it'd shrink by 1/10 and it's big enough to care
-	if mf.manifest.deletions > 100000 &&
-		mf.manifest.deletions > 10*(mf.manifest.creations-mf.manifest.deletions) {
+	if mf.manifest.deletions > mf.deletionsRewriteThreshold &&
+		mf.manifest.deletions > manifestDeletionsRatio*(mf.manifest.creations-mf.manifest.deletions) {
 		if err := mf.rewrite(); err != nil {
 			mf.appendLock.Unlock()
 			return err
@@ -172,7 +180,6 @@ func (mf *manifestFile) addChanges(changes manifestChangeSet) error {
 	return mf.fp.Sync()
 }
 
-// TODO: This function needs test coverage.
 // Must be called while appendLock is held.
 func (mf *manifestFile) rewrite() error {
 	// We explicitly sync.
