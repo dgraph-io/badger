@@ -84,14 +84,22 @@ func init() {
 	NumLSMBloomHits = expvar.NewMap("badger_lsm_bloom_hits_total")
 }
 
+// expvar panics if you try to set an already set variable. So we try get first else get new.
+func getInt(k string) *expvar.Int {
+	if val := expvar.Get(k); val != nil {
+		return val.(*expvar.Int)
+	}
+	return expvar.NewInt(k)
+}
+
 func Init(elog trace.EventLog, dir, valueDir string) Metrics {
 	var m Metrics
-	m.NumGets = expvar.NewInt(fmt.Sprintf("badger_%s_gets_total", dir))
-	m.NumPuts = expvar.NewInt(fmt.Sprintf("badger_%s_puts_total", dir))
-	m.NumMemtableGets = expvar.NewInt(fmt.Sprintf("badger_%s_memtable_gets_total", dir))
+	m.NumGets = getInt(fmt.Sprintf("badger_%s_gets_total", dir))
+	m.NumPuts = getInt(fmt.Sprintf("badger_%s_puts_total", dir))
+	m.NumMemtableGets = getInt(fmt.Sprintf("badger_%s_memtable_gets_total", dir))
 
-	m.lsmSize = expvar.NewInt(fmt.Sprintf("badger_%s_lsm_size", dir))
-	m.valueLogSize = expvar.NewInt(fmt.Sprintf("badger_%s_value_log_size", valueDir))
+	m.lsmSize = getInt(fmt.Sprintf("badger_%s_lsm_size", dir))
+	m.valueLogSize = getInt(fmt.Sprintf("badger_%s_value_log_size", valueDir))
 	m.elog = elog
 	m.dir = dir
 	m.valueDir = valueDir
