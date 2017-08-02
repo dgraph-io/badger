@@ -545,10 +545,10 @@ func (l *valueLog) openOrCreateFiles() error {
 
 func (l *valueLog) Open(kv *KV, opt *Options) error {
 	l.dirPath = opt.ValueDir
+	l.opt = *opt
 	if err := l.openOrCreateFiles(); err != nil {
 		return errors.Wrapf(err, "Unable to open value log")
 	}
-	l.opt = *opt
 	l.kv = kv
 
 	l.elog = trace.NewEventLog("Badger", "Valuelog")
