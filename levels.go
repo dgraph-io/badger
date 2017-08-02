@@ -51,9 +51,9 @@ var (
 	lastUnstalled time.Time
 )
 
-func revertToManifest(kv *KV, manifest *manifest, idMap map[uint64]struct{}) error {
+func revertToManifest(kv *KV, mf *manifest, idMap map[uint64]struct{}) error {
 	// 1. Check all files in manifest exist.
-	for id := range manifest.tables {
+	for id := range mf.tables {
 		if _, ok := idMap[id]; !ok {
 			return fmt.Errorf("file does not exist for table %d", id)
 		}
@@ -61,7 +61,7 @@ func revertToManifest(kv *KV, manifest *manifest, idMap map[uint64]struct{}) err
 
 	// 2. Delete files that shouldn't exist.
 	for id := range idMap {
-		if _, ok := manifest.tables[id]; !ok {
+		if _, ok := mf.tables[id]; !ok {
 			kv.elog.Printf("Table file %d not referenced in MANIFEST\n", id)
 			filename := table.NewFilename(id, kv.opt.Dir)
 			err := os.Remove(filename)
@@ -74,7 +74,7 @@ func revertToManifest(kv *KV, manifest *manifest, idMap map[uint64]struct{}) err
 	return nil
 }
 
-func newLevelsController(kv *KV, manifest *manifest) (*levelsController, error) {
+func newLevelsController(kv *KV, mf *manifest) (*levelsController, error) {
 	y.AssertTrue(kv.opt.NumLevelZeroTablesStall > kv.opt.NumLevelZeroTables)
 	s := &levelsController{
 		kv:     kv,
@@ -97,14 +97,14 @@ func newLevelsController(kv *KV, manifest *manifest) (*levelsController, error) 
 	}
 
 	// Compare manifest against directory, check for existant/non-existant files, and remove.
-	if err := revertToManifest(kv, manifest, getIDMap(kv.opt.Dir)); err != nil {
+	if err := revertToManifest(kv, mf, getIDMap(kv.opt.Dir)); err != nil {
 		return nil, err
 	}
 
 	// Some files may be deleted. Let's reload.
 	tables := make([][]*table.Table, kv.opt.MaxLevels)
 	var maxFileID uint64
-	for fileID, tableManifest := range manifest.tables {
+	for fileID, tableManifest := range mf.tables {
 		fname := table.NewFilename(fileID, kv.opt.Dir)
 		fd, err := y.OpenExistingSyncedFile(fname, true)
 		if err != nil {
