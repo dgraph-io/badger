@@ -40,8 +40,8 @@ type manifest struct {
 
 	// Contains total number of creation and deletion changes in the manifest -- used to compute
 	// whether it'd be useful to rewrite the manifest.
-	creations uint64
-	deletions uint64
+	creations int
+	deletions int
 }
 
 func createManifest(maxLevels int) manifest {
@@ -67,7 +67,8 @@ type tableManifest struct {
 // manifestFile holds the file pointer (and other info) about the manifest file, which is a log
 // file we append to.
 type manifestFile struct {
-	fp *os.File
+	fp        *os.File
+	directory string
 
 	manifest manifest
 
@@ -115,8 +116,13 @@ type manifestChangeSet struct {
 	changes []manifestChange
 }
 
+const (
+	manifestFilename        = "MANIFEST"
+	manifestRewriteFilename = "MANIFEST-REWRITE"
+)
+
 func openOrCreateManifestFile(opt *Options) (ret *manifestFile, result manifest, err error) {
-	path := filepath.Join(opt.Dir, "MANIFEST")
+	path := filepath.Join(opt.Dir, manifestFilename)
 	fp, err := y.OpenSyncedFile(path, false) // We explicitly sync in addChanges, outside the lock.
 	if err != nil {
 		return nil, manifest{}, err
@@ -142,18 +148,84 @@ func (mf *manifestFile) close() error {
 func (mf *manifestFile) addChanges(changes manifestChangeSet) error {
 	var buf bytes.Buffer
 	changes.Encode(&buf)
-	if err := applyChangeSet(&mf.manifest, &changes); err != nil {
-		return err
-	}
 	// Maybe we could use O_APPEND instead (on certain file systems)
 	mf.appendLock.Lock()
-	if _, err := mf.fp.Write(buf.Bytes()); err != nil {
+	if err := applyChangeSet(&mf.manifest, &changes); err != nil {
 		mf.appendLock.Unlock()
 		return err
+	}
+	// Rewrite manifest if it'd shrink by 1/10 and it's big enough to care
+	if mf.manifest.deletions > 100000 &&
+		mf.manifest.deletions > 10*(mf.manifest.creations-mf.manifest.deletions) {
+		if err := mf.rewrite(); err != nil {
+			mf.appendLock.Unlock()
+			return err
+		}
+	} else {
+		if _, err := mf.fp.Write(buf.Bytes()); err != nil {
+			mf.appendLock.Unlock()
+			return err
+		}
 	}
 
 	mf.appendLock.Unlock()
 	return mf.fp.Sync()
+}
+
+// TODO: This function needs test coverage.
+// Must be called while appendLock is held.
+func (mf *manifestFile) rewrite() error {
+	// We explicitly sync.
+	rewritePath := filepath.Join(mf.directory, manifestRewriteFilename)
+	fp, err := y.OpenTruncFile(rewritePath, false)
+	if err != nil {
+		return err
+	}
+	netCreations := len(mf.manifest.tables) + len(mf.manifest.valueLogFiles)
+	changes := make([]manifestChange, 0, netCreations)
+	for id, tm := range mf.manifest.tables {
+		changes = append(changes, manifestChange{
+			tag: manifestTableChange,
+			tc: tableChange{
+				id:    id,
+				op:    tableCreate,
+				level: tm.level,
+			},
+		})
+	}
+	for id := range mf.manifest.valueLogFiles {
+		changes = append(changes, manifestChange{
+			tag: manifestValueLogChange,
+			vlc: valueLogChange{
+				id: id,
+				op: valueLogCreate,
+			},
+		})
+	}
+	set := manifestChangeSet{changes: changes}
+
+	var buf bytes.Buffer
+	set.Encode(&buf)
+	if _, err := fp.Write(buf.Bytes()); err != nil {
+		fp.Close()
+		return err
+	}
+	if err := fp.Sync(); err != nil {
+		fp.Close()
+		return err
+	}
+	mf.manifest.creations = netCreations
+	mf.manifest.deletions = 0
+	if err := os.Rename(rewritePath, filepath.Join(mf.directory, manifestFilename)); err != nil {
+		fp.Close()
+		return err
+	}
+	mf.fp.Close()
+	mf.fp = fp
+	if err := syncDir(mf.directory); err != nil {
+		return err
+	}
+	return nil
 }
 
 type countingReader struct {
