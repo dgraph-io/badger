@@ -134,7 +134,7 @@ func openOrCreateManifestFile(opt *Options) (ret *manifestFile, result manifest,
 		return nil, manifest{}, err
 	}
 
-	return &manifestFile{fp: fp, manifest: m1}, m2, nil
+	return &manifestFile{fp: fp, directory: opt.Dir, manifest: m1}, m2, nil
 }
 
 func (mf *manifestFile) close() error {
