@@ -27,7 +27,6 @@ import (
 	"sync"
 
 	"github.com/dgraph-io/badger/y"
-	"github.com/dgraph-io/dgraph/x"
 )
 
 // The MANIFEST file describes the startup state of the db -- all value log files and LSM files,
@@ -292,7 +291,7 @@ func applyTableChange(build *manifest, tc *tableChange) error {
 	switch tc.op {
 	case tableCreate:
 		if _, ok := build.tables[tc.id]; ok {
-			return x.Errorf("MANIFEST invalid, table %d exists\n", tc.id)
+			return fmt.Errorf("MANIFEST invalid, table %d exists\n", tc.id)
 		}
 		build.tables[tc.id] = tableManifest{
 			level: tc.level}
@@ -301,13 +300,13 @@ func applyTableChange(build *manifest, tc *tableChange) error {
 	case tableDelete:
 		tm, ok := build.tables[tc.id]
 		if !ok {
-			return x.Errorf("MANIFEST removes non-existing table %d\n", tc.id)
+			return fmt.Errorf("MANIFEST removes non-existing table %d\n", tc.id)
 		}
 		delete(build.levels[tm.level].tables, tc.id)
 		delete(build.tables, tc.id)
 		build.deletions++
 	default:
-		return x.Errorf("MANIFEST file has invalid tableChange op\n")
+		return fmt.Errorf("MANIFEST file has invalid tableChange op\n")
 	}
 	return nil
 }
@@ -317,7 +316,7 @@ func applyValueLogChange(build *manifest, vlc *valueLogChange) error {
 	switch vlc.op {
 	case valueLogCreate:
 		if ok {
-			return x.Errorf("MANIFEST invalid, value log %d exists\n", vlc.id)
+			return fmt.Errorf("MANIFEST invalid, value log %d exists\n", vlc.id)
 		}
 		build.valueLogFiles[vlc.id] = struct{}{}
 		build.creations++
