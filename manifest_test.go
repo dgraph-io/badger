@@ -143,6 +143,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 func TestOverlappingKeyRangeError(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
+	defer os.RemoveAll(dir)
 	opt := DefaultOptions
 	opt.Dir = dir
 	opt.ValueDir = dir
@@ -191,6 +192,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 func TestManifestRewrite(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
+	defer os.RemoveAll(dir)
 	opt := DefaultOptions
 	opt.Dir = dir
 	deletionsThreshold := 10
