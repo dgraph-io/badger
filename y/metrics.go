@@ -86,12 +86,12 @@ func init() {
 
 func Init(elog trace.EventLog, dir, valueDir string) Metrics {
 	var m Metrics
-	m.NumGets = expvar.NewInt(fmt.Sprintf("badger_gets_total_%s", dir))
-	m.NumPuts = expvar.NewInt(fmt.Sprintf("badger_puts_total_%s", dir))
-	m.NumMemtableGets = expvar.NewInt(fmt.Sprintf("badger_memtable_gets_total_%s", dir))
+	m.NumGets = expvar.NewInt(fmt.Sprintf("badger_%s_gets_total", dir))
+	m.NumPuts = expvar.NewInt(fmt.Sprintf("badger_%s_puts_total", dir))
+	m.NumMemtableGets = expvar.NewInt(fmt.Sprintf("badger_%s_memtable_gets_total", dir))
 
-	m.lsmSize = expvar.NewInt(fmt.Sprintf("badger_lsm_size_%s", dir))
-	m.valueLogSize = expvar.NewInt(fmt.Sprintf("badger_value_log_size_%s", valueDir))
+	m.lsmSize = expvar.NewInt(fmt.Sprintf("badger_%s_lsm_size", dir))
+	m.valueLogSize = expvar.NewInt(fmt.Sprintf("badger_%s_value_log_size", valueDir))
 	m.elog = elog
 	m.dir = dir
 	m.valueDir = valueDir
