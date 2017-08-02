@@ -442,3 +442,24 @@ func (vlc *valueLogChange) Decode(r io.Reader) error {
 	}
 	return nil
 }
+
+func makeTableCreateChange(id uint64, level int) manifestChange {
+	return manifestChange{
+		tag: manifestTableChange,
+		tc: tableChange{
+			id:    id,
+			op:    tableCreate,
+			level: uint8(level),
+		},
+	}
+}
+
+func makeTableDeleteChange(id uint64) manifestChange {
+	return manifestChange{
+		tag: manifestTableChange,
+		tc: tableChange{
+			id: id,
+			op: tableDelete,
+		},
+	}
+}

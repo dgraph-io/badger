@@ -331,31 +331,10 @@ func (s *levelsController) compactBuildTables(
 	return out, func() error { return decrRefs(out) }, nil
 }
 
-func makeTableCreateChange(table *table.Table, level int) manifestChange {
-	return manifestChange{
-		tag: manifestTableChange,
-		tc: tableChange{
-			id:    table.ID(),
-			op:    tableCreate,
-			level: uint8(level),
-		},
-	}
-}
-
-func makeTableDeleteChange(id uint64) manifestChange {
-	return manifestChange{
-		tag: manifestTableChange,
-		tc: tableChange{
-			id: id,
-			op: tableDelete,
-		},
-	}
-}
-
 func buildChangeSet(cd *compactDef, newTables []*table.Table) manifestChangeSet {
 	changes := []manifestChange{}
 	for _, table := range newTables {
-		changes = append(changes, makeTableCreateChange(table, cd.nextLevel.level))
+		changes = append(changes, makeTableCreateChange(table.ID(), cd.nextLevel.level))
 	}
 	for _, table := range cd.top {
 		changes = append(changes, makeTableDeleteChange(table.ID()))
@@ -510,7 +489,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		changeSet := manifestChangeSet{
 			changes: []manifestChange{
 				makeTableDeleteChange(tbl.ID()),
-				makeTableCreateChange(tbl, nextLevel.level),
+				makeTableCreateChange(tbl.ID(), nextLevel.level),
 			},
 		}
 		if err := s.kv.manifest.addChanges(changeSet); err != nil {
@@ -619,7 +598,7 @@ func (s *levelsController) doCompact(p compactionPriority) (bool, error) {
 func (s *levelsController) addLevel0Table(t *table.Table) error {
 	// We want to update the manifest _before_ we actually add the table to memory.
 	err := s.kv.manifest.addChanges(manifestChangeSet{changes: []manifestChange{
-		makeTableCreateChange(t, 0),
+		makeTableCreateChange(t.ID(), 0),
 	}})
 	if err != nil {
 		return err
