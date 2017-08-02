@@ -498,7 +498,6 @@ func (l *valueLog) openOrCreateFiles(mf *manifest) error {
 		return errors.Wrapf(err, "Error while opening value log")
 	}
 
-	// TODO: Generally, don't delete files not in manifest -- rename them.
 	found := make(map[int]struct{})
 	for _, file := range files {
 		if !strings.HasSuffix(file.Name(), ".vlog") {
@@ -510,7 +509,9 @@ func (l *valueLog) openOrCreateFiles(mf *manifest) error {
 			return errors.Wrapf(err, "Error while parsing value log id for file: %q", file.Name())
 		}
 		if _, ok := mf.valueLogFiles[uint64(fid)]; !ok {
-			// TODO: Delete (or rename/move) files not in manifest
+			if err := os.Remove(file.Name()); err != nil {
+				return y.Wrapf(err, "Removing %q which was not in manifest", file.Name())
+			}
 			continue
 		}
 		if _, ok := found[fid]; ok {
