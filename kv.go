@@ -389,7 +389,7 @@ func (s *KV) Close() (err error) {
 	if err := s.lc.close(); err != nil {
 		return errors.Wrap(err, "KV.Close")
 	}
-	s.metrics.Ticker.Stop()
+	s.metrics.ticker.Stop()
 	s.elog.Printf("Waiting for closer")
 	s.closer.SignalAll()
 	s.closer.WaitForAll()
@@ -478,10 +478,10 @@ func (s *KV) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getMemTables() // Lock should be released.
 	defer decr()
 
-	s.metrics.NumGets.Add(1)
+	y.NumGets.Add(s.opt.Dir, 1)
 	for i := 0; i < len(tables); i++ {
 		vs := tables[i].Get(key)
-		s.metrics.NumMemtableGets.Add(1)
+		y.NumMemtableGets.Add(s.opt.Dir, 1)
 		if vs.Meta != 0 || vs.Value != nil {
 			return vs, nil
 		}
@@ -750,7 +750,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 		b.Entries = append(b.Entries, entry)
 		if size >= s.opt.maxBatchSize {
 			s.writeCh <- b
-			s.metrics.NumPuts.Add(int64(len(b.Entries)))
+			y.NumPuts.Add(s.opt.Dir, int64(len(b.Entries)))
 			reqs = append(reqs, b)
 			size = 0
 			b = nil
@@ -759,7 +759,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 
 	if size > 0 {
 		s.writeCh <- b
-		s.metrics.NumPuts.Add(int64(len(b.Entries)))
+		y.NumPuts.Add(s.opt.Dir, int64(len(b.Entries)))
 		reqs = append(reqs, b)
 	}
 	return reqs

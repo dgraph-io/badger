@@ -18,22 +18,18 @@ package badger
 
 import (
 	"expvar"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/dgraph-io/badger/y"
 
 	"golang.org/x/net/trace"
 )
 
 type metrics struct {
-	NumGets         *expvar.Int
-	NumPuts         *expvar.Int
-	NumMemtableGets *expvar.Int
-	Ticker          *time.Ticker
+	ticker *time.Ticker
 
-	lsmSize  *expvar.Int
-	vlogSize *expvar.Int
 	dir      string
 	valueDir string
 	elog     trace.EventLog
@@ -59,38 +55,31 @@ func (m *metrics) totalSize(dir string) (int64, int64) {
 	return lsmSize, vlogSize
 }
 
+func getNewInt(val int64) *expvar.Int {
+	v := new(expvar.Int)
+	v.Add(val)
+	return v
+}
+
 func (m *metrics) updateSize() {
-	for range m.Ticker.C {
+	for range m.ticker.C {
 		lsmSize, vlogSize := m.totalSize(m.dir)
-		m.lsmSize.Set(lsmSize)
+		y.LSMSize.Set(m.dir, getNewInt(lsmSize))
 		// If valueDir is different from dir, we'd have to do another walk.
 		if m.valueDir != m.dir {
 			_, vlogSize = m.totalSize(m.valueDir)
 		}
-		m.vlogSize.Set(vlogSize)
+		y.VlogSize.Set(m.dir, getNewInt(vlogSize))
 	}
-}
-
-// expvar panics if you try to set an already set variable. So we try get first else get new.
-func getInt(k string) *expvar.Int {
-	if val := expvar.Get(k); val != nil {
-		return val.(*expvar.Int)
-	}
-	return expvar.NewInt(k)
 }
 
 func newMetrics(elog trace.EventLog, dir, valueDir string) *metrics {
 	m := new(metrics)
-	m.NumGets = getInt(fmt.Sprintf("badger_%s_gets_total", dir))
-	m.NumPuts = getInt(fmt.Sprintf("badger_%s_puts_total", dir))
-	m.NumMemtableGets = getInt(fmt.Sprintf("badger_%s_memtable_gets_total", dir))
 
-	m.lsmSize = getInt(fmt.Sprintf("badger_%s_lsm_size", dir))
-	m.vlogSize = getInt(fmt.Sprintf("badger_%s_value_log_size", valueDir))
 	m.elog = elog
 	m.dir = dir
 	m.valueDir = valueDir
-	m.Ticker = time.NewTicker(5 * time.Minute)
+	m.ticker = time.NewTicker(5 * time.Second)
 
 	go m.updateSize()
 	return m

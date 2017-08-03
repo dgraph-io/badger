@@ -26,6 +26,11 @@ var (
 	NumBytesWritten *expvar.Int
 	NumLSMGets      *expvar.Map
 	NumLSMBloomHits *expvar.Map
+	NumGets         *expvar.Map
+	NumPuts         *expvar.Map
+	NumMemtableGets *expvar.Map
+	LSMSize         *expvar.Map
+	VlogSize        *expvar.Map
 )
 
 // these variables are global and would have cummulative values for all kv stores.
@@ -36,4 +41,9 @@ func init() {
 	NumBytesWritten = expvar.NewInt("badger_written_bytes")
 	NumLSMGets = expvar.NewMap("badger_lsm_level_gets_total")
 	NumLSMBloomHits = expvar.NewMap("badger_lsm_bloom_hits_total")
+	NumGets = expvar.NewMap("badger_gets_total")
+	NumPuts = expvar.NewMap("badger_puts_total")
+	NumMemtableGets = expvar.NewMap("badger_memtable_gets_total")
+	LSMSize = expvar.NewMap("badger_lsm_size")
+	VlogSize = expvar.NewMap("badger_vlog_size")
 }
