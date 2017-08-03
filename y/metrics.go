@@ -19,6 +19,9 @@ package y
 import "expvar"
 
 var (
+	LSMSize  *expvar.Map
+	VlogSize *expvar.Map
+
 	// These are cumulative
 	NumReads        *expvar.Int
 	NumWrites       *expvar.Int
@@ -29,8 +32,6 @@ var (
 	NumGets         *expvar.Map
 	NumPuts         *expvar.Map
 	NumMemtableGets *expvar.Map
-	LSMSize         *expvar.Map
-	VlogSize        *expvar.Map
 )
 
 // these variables are global and would have cummulative values for all kv stores.
