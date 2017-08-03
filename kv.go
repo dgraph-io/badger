@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"expvar"
 	"log"
 	"math"
 	"os"
@@ -141,7 +142,7 @@ type KV struct {
 	// Incremented in the non-concurrently accessed write loop.  But also accessed outside. So
 	// we use an atomic op.
 	lastUsedCasCounter uint64
-	metrics            *metrics
+	metricsTicker      *time.Ticker
 }
 
 var ErrInvalidDir error = errors.New("Invalid Dir, directory does not exist")
@@ -208,8 +209,9 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		elog:          trace.NewEventLog("Badger", "KV"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
+		metricsTicker: time.NewTicker(5 * time.Minute),
 	}
-	out.metrics = newMetrics(out.elog, opt.Dir, opt.ValueDir)
+	go out.updateSize()
 	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
 	// newLevelsController potentially loads files in directory.
@@ -389,7 +391,7 @@ func (s *KV) Close() (err error) {
 	if err := s.lc.close(); err != nil {
 		return errors.Wrap(err, "KV.Close")
 	}
-	s.metrics.ticker.Stop()
+	s.metricsTicker.Stop()
 	s.elog.Printf("Waiting for closer")
 	s.closer.SignalAll()
 	s.closer.WaitForAll()
@@ -1090,4 +1092,43 @@ func exists(path string) (bool, error) {
 		return false, nil
 	}
 	return true, err
+}
+
+func (s *KV) updateSize() {
+	getNewInt := func(val int64) *expvar.Int {
+		v := new(expvar.Int)
+		v.Add(val)
+		return v
+	}
+
+	totalSize := func(dir string) (int64, int64) {
+		var lsmSize, vlogSize int64
+		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			ext := filepath.Ext(path)
+			if ext == ".sst" {
+				lsmSize += info.Size()
+			} else if ext == ".vlog" {
+				vlogSize += info.Size()
+			}
+			return nil
+		})
+		if err != nil {
+			s.elog.Printf("Got error while calculating total size of directory: %s", dir)
+		}
+		return lsmSize, vlogSize
+	}
+
+	for range s.metricsTicker.C {
+		lsmSize, vlogSize := totalSize(s.opt.Dir)
+		y.LSMSize.Set(s.opt.Dir, getNewInt(lsmSize))
+		// If valueDir is different from dir, we'd have to do another walk.
+		if s.opt.ValueDir != s.opt.Dir {
+			_, vlogSize = totalSize(s.opt.ValueDir)
+		}
+		y.VlogSize.Set(s.opt.Dir, getNewInt(vlogSize))
+	}
+
 }
