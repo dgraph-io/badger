@@ -313,18 +313,6 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	rem := vlog.fpath(f.fid)
 	f.fd.Close() // close file previous to remove it
 
-	vlog.kv.manifest.addChanges(manifestChangeSet{
-		changes: []manifestChange{
-			manifestChange{
-				tag: manifestValueLogChange,
-				vlc: valueLogChange{
-					id: uint64(f.fid),
-					op: valueLogDelete,
-				},
-			},
-		},
-	})
-
 	elog.Printf("Removing %s", rem)
 	return os.Remove(rem)
 }
@@ -492,7 +480,7 @@ func (l *valueLog) fpath(fid uint16) string {
 	return fmt.Sprintf("%s%s%06d.vlog", l.dirPath, string(os.PathSeparator), fid)
 }
 
-func (l *valueLog) openOrCreateFiles(mf *manifest) error {
+func (l *valueLog) openOrCreateFiles() error {
 	files, err := ioutil.ReadDir(l.dirPath)
 	if err != nil {
 		return errors.Wrapf(err, "Error while opening value log")
@@ -508,12 +496,6 @@ func (l *valueLog) openOrCreateFiles(mf *manifest) error {
 		if err != nil {
 			return errors.Wrapf(err, "Error while parsing value log id for file: %q", file.Name())
 		}
-		if _, ok := mf.valueLogFiles[uint64(fid)]; !ok {
-			if err := os.Remove(file.Name()); err != nil {
-				return y.Wrapf(err, "Removing %q which was not in manifest", file.Name())
-			}
-			continue
-		}
 		if _, ok := found[fid]; ok {
 			return errors.Errorf("Found the same value log file twice: %d", fid)
 		}
@@ -527,12 +509,6 @@ func (l *valueLog) openOrCreateFiles(mf *manifest) error {
 	sort.Slice(l.files, func(i, j int) bool {
 		return l.files[i].fid < l.files[j].fid
 	})
-
-	for id := range mf.valueLogFiles {
-		if _, ok := found[int(id)]; !ok {
-			return errors.Errorf("Value log file %d (seen in MANIFEST) is missing", id)
-		}
-	}
 
 	// Open all previous log files as read only. Open the last log file
 	// as read write.
@@ -574,28 +550,17 @@ func (l *valueLog) createVlogFile(fid uint16) (*logFile, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "Unable to sync value log file dir")
 	}
-	l.kv.manifest.addChanges(manifestChangeSet{
-		changes: []manifestChange{
-			manifestChange{
-				tag: manifestValueLogChange,
-				vlc: valueLogChange{
-					id: uint64(fid),
-					op: valueLogCreate,
-				},
-			},
-		},
-	})
 	l.Lock()
 	l.files = append(l.files, lf)
 	l.Unlock()
 	return lf, nil
 }
 
-func (l *valueLog) Open(kv *KV, opt *Options, mf *manifest) error {
+func (l *valueLog) Open(kv *KV, opt *Options) error {
 	l.dirPath = opt.ValueDir
 	l.opt = *opt
 	l.kv = kv
-	if err := l.openOrCreateFiles(mf); err != nil {
+	if err := l.openOrCreateFiles(); err != nil {
 		return errors.Wrapf(err, "Unable to open value log")
 	}
 

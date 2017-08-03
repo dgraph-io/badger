@@ -41,13 +41,6 @@ func TestManifestEncoding(t *testing.T) {
 				tag: manifestTableChange,
 				tc:  tableChange{33, tableCreate, 3},
 			},
-			manifestChange{
-				tag: manifestValueLogChange,
-				vlc: valueLogChange{
-					id: 23,
-					op: valueLogCreate,
-				},
-			},
 		},
 	}
 	changeSet.Encode(&buf)

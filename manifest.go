@@ -33,9 +33,8 @@ import (
 // and their sizes (except the last value log file), what level they're at, key range info for each
 // LSM file.
 type manifest struct {
-	levels        []levelManifest
-	tables        map[uint64]tableManifest
-	valueLogFiles map[uint64]struct{}
+	levels []levelManifest
+	tables map[uint64]tableManifest
 
 	// Contains total number of creation and deletion changes in the manifest -- used to compute
 	// whether it'd be useful to rewrite the manifest.
@@ -49,9 +48,8 @@ func createManifest(maxLevels int) manifest {
 		levels[i].tables = make(map[uint64]struct{})
 	}
 	return manifest{
-		levels:        levels,
-		tables:        make(map[uint64]tableManifest),
-		valueLogFiles: make(map[uint64]struct{}),
+		levels: levels,
+		tables: make(map[uint64]tableManifest),
 	}
 }
 
@@ -90,27 +88,15 @@ type tableChange struct {
 	level uint8 // set if tableCreate
 }
 
-const (
-	valueLogCreate = 1
-	valueLogDelete = 2
-)
-
-type valueLogChange struct {
-	id uint64
-	op byte // has value valueLogCreate, valueLogDelete
-}
-
 type manifestChangeType byte
 
 const (
-	manifestTableChange    = 0
-	manifestValueLogChange = 1
+	manifestTableChange = 0
 )
 
 type manifestChange struct {
 	tag manifestChangeType
 	tc  tableChange
-	vlc valueLogChange
 }
 
 type manifestChangeSet struct {
@@ -187,7 +173,7 @@ func (mf *manifestFile) rewrite() error {
 	if err != nil {
 		return err
 	}
-	netCreations := len(mf.manifest.tables) + len(mf.manifest.valueLogFiles)
+	netCreations := len(mf.manifest.tables)
 	changes := make([]manifestChange, 0, netCreations)
 	for id, tm := range mf.manifest.tables {
 		changes = append(changes, manifestChange{
@@ -196,15 +182,6 @@ func (mf *manifestFile) rewrite() error {
 				id:    id,
 				op:    tableCreate,
 				level: tm.level,
-			},
-		})
-	}
-	for id := range mf.manifest.valueLogFiles {
-		changes = append(changes, manifestChange{
-			tag: manifestValueLogChange,
-			vlc: valueLogChange{
-				id: id,
-				op: valueLogCreate,
 			},
 		})
 	}
@@ -311,27 +288,6 @@ func applyTableChange(build *manifest, tc *tableChange) error {
 	return nil
 }
 
-func applyValueLogChange(build *manifest, vlc *valueLogChange) error {
-	_, ok := build.valueLogFiles[vlc.id]
-	switch vlc.op {
-	case valueLogCreate:
-		if ok {
-			return fmt.Errorf("MANIFEST invalid, value log %d exists\n", vlc.id)
-		}
-		build.valueLogFiles[vlc.id] = struct{}{}
-		build.creations++
-	case valueLogDelete:
-		if !ok {
-			return fmt.Errorf("MANIFEST invalid, value log %d does not exist\n", vlc.id)
-		}
-		delete(build.valueLogFiles, vlc.id)
-		build.deletions++
-	default:
-		return fmt.Errorf("MANIFEST file has invalid valueLogChange op\n")
-	}
-	return nil
-}
-
 // This is not a "recoverable" error -- opening the KV store fails because the MANIFEST file is
 // just plain broken.
 func applyChangeSet(build *manifest, changeSet *manifestChangeSet) error {
@@ -339,10 +295,6 @@ func applyChangeSet(build *manifest, changeSet *manifestChangeSet) error {
 		switch change.tag {
 		case manifestTableChange:
 			if err := applyTableChange(build, &change.tc); err != nil {
-				return err
-			}
-		case manifestValueLogChange:
-			if err := applyValueLogChange(build, &change.vlc); err != nil {
 				return err
 			}
 		}
@@ -379,8 +331,6 @@ func (mc *manifestChange) Encode(w *bytes.Buffer) {
 	switch mc.tag {
 	case manifestTableChange:
 		mc.tc.Encode(w)
-	case manifestValueLogChange:
-		mc.vlc.Encode(w)
 	}
 }
 
@@ -393,9 +343,6 @@ func (mc *manifestChange) Decode(r *countingReader) error {
 	case manifestTableChange:
 		mc.tag = manifestTableChange
 		return mc.tc.Decode(r)
-	case manifestValueLogChange:
-		mc.tag = manifestValueLogChange
-		return mc.vlc.Decode(r)
 	default:
 		return fmt.Errorf("invalid manifestChange byte")
 	}
@@ -420,26 +367,6 @@ func (tc *tableChange) Decode(r io.Reader) error {
 		return fmt.Errorf("decoded invalid tableChange op")
 	}
 	tc.level = bytes[9]
-	return nil
-}
-
-func (vlc *valueLogChange) Encode(w *bytes.Buffer) {
-	var bytes [9]byte
-	binary.BigEndian.PutUint64(bytes[0:8], vlc.id)
-	bytes[8] = vlc.op
-	w.Write(bytes[:])
-}
-
-func (vlc *valueLogChange) Decode(r io.Reader) error {
-	var bytes [9]byte
-	if _, err := io.ReadFull(r, bytes[:]); err != nil {
-		return err
-	}
-	vlc.id = binary.BigEndian.Uint64(bytes[0:8])
-	vlc.op = bytes[8]
-	if vlc.op != valueLogCreate && vlc.op != valueLogDelete {
-		return fmt.Errorf("decoded invalid valueLogChange op")
-	}
 	return nil
 }
 
