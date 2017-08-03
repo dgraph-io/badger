@@ -29,9 +29,13 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-// The MANIFEST file describes the startup state of the db -- all value log files and LSM files,
-// and their sizes (except the last value log file), what level they're at, key range info for each
-// LSM file.
+// The MANIFEST file describes the startup state of the db -- all LSM files and what level they're
+// at.
+//
+// It consists of a sequence of manifestChangeSet objects.  Each of these is treated atomically,
+// and contains a sequence of manifestChanges (file creations/deletions) which we use to
+// reconstruct the manifest at startup.
+
 type manifest struct {
 	levels []levelManifest
 	tables map[uint64]tableManifest
@@ -69,10 +73,11 @@ type manifestFile struct {
 	// We make this configurable so that unit tests can hit rewrite() code quickly
 	deletionsRewriteThreshold int
 
-	manifest manifest
-
-	// Guards appends, which includes access to creations/deletions.
+	// Guards appends, which includes access to the manifest field.
 	appendLock sync.Mutex
+
+	// Used to track the current state of the manifest, used when rewriting.
+	manifest manifest
 }
 
 const (
