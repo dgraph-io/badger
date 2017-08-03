@@ -88,15 +88,8 @@ type tableChange struct {
 	level uint8 // set if tableCreate
 }
 
-type manifestChangeType byte
-
-const (
-	manifestTableChange = 0
-)
-
 type manifestChange struct {
-	tag manifestChangeType
-	tc  tableChange
+	tc tableChange
 }
 
 type manifestChangeSet struct {
@@ -176,14 +169,11 @@ func (mf *manifestFile) rewrite() error {
 	netCreations := len(mf.manifest.tables)
 	changes := make([]manifestChange, 0, netCreations)
 	for id, tm := range mf.manifest.tables {
-		changes = append(changes, manifestChange{
-			tag: manifestTableChange,
-			tc: tableChange{
-				id:    id,
-				op:    tableCreate,
-				level: tm.level,
-			},
-		})
+		changes = append(changes, manifestChange{tableChange{
+			id:    id,
+			op:    tableCreate,
+			level: tm.level,
+		}})
 	}
 	set := manifestChangeSet{changes: changes}
 
@@ -292,11 +282,8 @@ func applyTableChange(build *manifest, tc *tableChange) error {
 // just plain broken.
 func applyChangeSet(build *manifest, changeSet *manifestChangeSet) error {
 	for _, change := range changeSet.changes {
-		switch change.tag {
-		case manifestTableChange:
-			if err := applyTableChange(build, &change.tc); err != nil {
-				return err
-			}
+		if err := applyTableChange(build, &change.tc); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -327,25 +314,11 @@ func (mcs *manifestChangeSet) Decode(r *countingReader) error {
 }
 
 func (mc *manifestChange) Encode(w *bytes.Buffer) {
-	w.WriteByte(byte(mc.tag))
-	switch mc.tag {
-	case manifestTableChange:
-		mc.tc.Encode(w)
-	}
+	mc.tc.Encode(w)
 }
 
 func (mc *manifestChange) Decode(r *countingReader) error {
-	b, err := r.ReadByte()
-	if err != nil {
-		return err
-	}
-	switch b {
-	case manifestTableChange:
-		mc.tag = manifestTableChange
-		return mc.tc.Decode(r)
-	default:
-		return fmt.Errorf("invalid manifestChange byte")
-	}
+	return mc.tc.Decode(r)
 }
 
 func (tc *tableChange) Encode(w *bytes.Buffer) {
@@ -371,22 +344,16 @@ func (tc *tableChange) Decode(r io.Reader) error {
 }
 
 func makeTableCreateChange(id uint64, level int) manifestChange {
-	return manifestChange{
-		tag: manifestTableChange,
-		tc: tableChange{
-			id:    id,
-			op:    tableCreate,
-			level: uint8(level),
-		},
-	}
+	return manifestChange{tableChange{
+		id:    id,
+		op:    tableCreate,
+		level: uint8(level),
+	}}
 }
 
 func makeTableDeleteChange(id uint64) manifestChange {
-	return manifestChange{
-		tag: manifestTableChange,
-		tc: tableChange{
-			id: id,
-			op: tableDelete,
-		},
-	}
+	return manifestChange{tableChange{
+		id: id,
+		op: tableDelete,
+	}}
 }
