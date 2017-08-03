@@ -284,8 +284,9 @@ func BenchmarkReadWrite(b *testing.B) {
 				dir, err := ioutil.TempDir("", "vlog")
 				y.Check(err)
 				defer os.RemoveAll(dir)
-				var mf manifest
-				err = vl.Open(nil, getTestOptions(dir), &mf)
+				opt := getTestOptions(dir)
+				mf := createManifest(opt.MaxLevels)
+				err = vl.Open(nil, opt, &mf)
 				y.Check(err)
 				defer vl.Close()
 				b.ResetTimer()

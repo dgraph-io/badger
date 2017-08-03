@@ -102,8 +102,7 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) error {
 
 // replaceTables will replace tables[left:right] with newTables. Note this EXCLUDES tables[right].
 // You must call decr() to delete the old tables _after_ writing the update to the manifest.
-func (s *levelHandler) replaceTables(
-	newTables []*table.Table) error {
+func (s *levelHandler) replaceTables(newTables []*table.Table) error {
 	// Need to re-search the range of tables in this level to be replaced as other goroutines might
 	// be changing it as well.  (They can't touch our tables, but if they add/remove other tables,
 	// the indices get shifted around.)
@@ -143,9 +142,7 @@ func (s *levelHandler) replaceTables(
 	t = t[numAdded:]
 	y.AssertTrue(len(s.tables[right:]) == copy(t, s.tables[right:]))
 	s.tables = tables
-
 	s.Unlock() // s.Unlock before we DecrRef tables -- that can be slow.
-
 	return decrRefs(toDecr)
 }
 

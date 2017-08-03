@@ -51,6 +51,9 @@ var (
 	lastUnstalled time.Time
 )
 
+// revertToManifest checks that all necessary table files exist and removes all table files not
+// referenced by the manifest.  idMap is a set of table file id's that were read from the directory
+// listing.
 func revertToManifest(kv *KV, mf *manifest, idMap map[uint64]struct{}) error {
 	// 1. Check all files in manifest exist.
 	for id := range mf.tables {
@@ -64,8 +67,7 @@ func revertToManifest(kv *KV, mf *manifest, idMap map[uint64]struct{}) error {
 		if _, ok := mf.tables[id]; !ok {
 			kv.elog.Printf("Table file %d not referenced in MANIFEST\n", id)
 			filename := table.NewFilename(id, kv.opt.Dir)
-			err := os.Remove(filename)
-			if err != nil {
+			if err := os.Remove(filename); err != nil {
 				return y.Wrapf(err, "While removing table %d", id)
 			}
 		}
@@ -327,7 +329,6 @@ func (s *levelsController) compactBuildTables(
 	}
 
 	out := newTables[:i]
-
 	return out, func() error { return decrRefs(out) }, nil
 }
 
@@ -482,12 +483,11 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		y.AssertTrue(len(cd.top) == 1)
 		tbl := cd.top[0]
 
-		// We write to the manifest _before_ we delete files (and after we created files)
-
-		// The order matters here.  We have to delete the table from one level before adding it to
-		// the next.  (Manifest replay logic can't handle the opposite.)
+		// We write to the manifest _before_ we delete files (and after we created files).
 		changeSet := manifestChangeSet{
 			changes: []manifestChange{
+				// The order matters here -- you can't temporarily have two copies of the same
+				// table id when reloading the manifest.
 				makeTableDeleteChange(tbl.ID()),
 				makeTableCreateChange(tbl.ID(), nextLevel.level),
 			},
@@ -496,8 +496,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 			return err
 		}
 
-		// We have to add to nextLevel before we remove from thisLevel -- in the opposite order
-		// there'd be a moment of time where reads would see keys missing from both levels.
+		// We have to add to nextLevel before we remove from thisLevel, not after.  This way, we
+		// don't have a bug where reads would see keys missing from both levels.
 
 		// Note: It's critical that we add tables (replace them) in nextLevel before deleting them
 		// in thisLevel.  (We could finagle it atomically somehow.)  Also, when reading we must
@@ -524,6 +524,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		return err
 	}
 	defer func() {
+		// Only assign to err, if it's not already nil.
 		if decErr := decr(); err == nil {
 			err = decErr
 		}
@@ -596,7 +597,10 @@ func (s *levelsController) doCompact(p compactionPriority) (bool, error) {
 }
 
 func (s *levelsController) addLevel0Table(t *table.Table) error {
-	// We want to update the manifest _before_ we actually add the table to memory.
+	// We update the manifest _before_ the table becomes part of a levelHandler, because at that
+	// point it could get used in some compaction.  This ensures the manifest file gets updated in
+	// the proper order. (That means this update happens before that of some compaction which
+	// deletes the table.)
 	err := s.kv.manifest.addChanges(manifestChangeSet{changes: []manifestChange{
 		makeTableCreateChange(t.ID(), 0),
 	}})
