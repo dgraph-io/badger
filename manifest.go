@@ -82,14 +82,10 @@ const (
 
 // If we change a table's level, we just do a delete followed by a create.  (In the same changeset,
 // so that they're atomically applied, of course.)
-type tableChange struct {
+type manifestChange struct {
 	id    uint64
 	op    byte  // has value tableCreate, or tableDelete
 	level uint8 // set if tableCreate
-}
-
-type manifestChange struct {
-	tc tableChange
 }
 
 type manifestChangeSet struct {
@@ -169,11 +165,11 @@ func (mf *manifestFile) rewrite() error {
 	netCreations := len(mf.manifest.tables)
 	changes := make([]manifestChange, 0, netCreations)
 	for id, tm := range mf.manifest.tables {
-		changes = append(changes, manifestChange{tableChange{
+		changes = append(changes, manifestChange{
 			id:    id,
 			op:    tableCreate,
 			level: tm.level,
-		}})
+		})
 	}
 	set := manifestChangeSet{changes: changes}
 
@@ -254,11 +250,11 @@ func replayManifestFile(maxLevels int, fp *os.File) (ret1 manifest, ret2 manifes
 	return build1, build2, err
 }
 
-func applyTableChange(build *manifest, tc *tableChange) error {
+func applyManifestChange(build *manifest, tc *manifestChange) error {
 	switch tc.op {
 	case tableCreate:
 		if _, ok := build.tables[tc.id]; ok {
-			return fmt.Errorf("MANIFEST invalid, table %d exists\n", tc.id)
+			return fmt.Errorf("MANIFEST invalid, table %d exists", tc.id)
 		}
 		build.tables[tc.id] = tableManifest{
 			level: tc.level}
@@ -267,13 +263,13 @@ func applyTableChange(build *manifest, tc *tableChange) error {
 	case tableDelete:
 		tm, ok := build.tables[tc.id]
 		if !ok {
-			return fmt.Errorf("MANIFEST removes non-existing table %d\n", tc.id)
+			return fmt.Errorf("MANIFEST removes non-existing table %d", tc.id)
 		}
 		delete(build.levels[tm.level].tables, tc.id)
 		delete(build.tables, tc.id)
 		build.deletions++
 	default:
-		return fmt.Errorf("MANIFEST file has invalid tableChange op\n")
+		return fmt.Errorf("MANIFEST file has invalid manifestChange op")
 	}
 	return nil
 }
@@ -282,7 +278,7 @@ func applyTableChange(build *manifest, tc *tableChange) error {
 // just plain broken.
 func applyChangeSet(build *manifest, changeSet *manifestChangeSet) error {
 	for _, change := range changeSet.changes {
-		if err := applyTableChange(build, &change.tc); err != nil {
+		if err := applyManifestChange(build, &change); err != nil {
 			return err
 		}
 	}
@@ -313,15 +309,7 @@ func (mcs *manifestChangeSet) Decode(r *countingReader) error {
 	return nil
 }
 
-func (mc *manifestChange) Encode(w *bytes.Buffer) {
-	mc.tc.Encode(w)
-}
-
-func (mc *manifestChange) Decode(r *countingReader) error {
-	return mc.tc.Decode(r)
-}
-
-func (tc *tableChange) Encode(w *bytes.Buffer) {
+func (tc *manifestChange) Encode(w *bytes.Buffer) {
 	var bytes [10]byte
 	binary.BigEndian.PutUint64(bytes[0:8], tc.id)
 	bytes[8] = tc.op
@@ -329,7 +317,7 @@ func (tc *tableChange) Encode(w *bytes.Buffer) {
 	w.Write(bytes[:])
 }
 
-func (tc *tableChange) Decode(r io.Reader) error {
+func (tc *manifestChange) Decode(r io.Reader) error {
 	var bytes [10]byte
 	if _, err := io.ReadFull(r, bytes[:]); err != nil {
 		return err
@@ -344,16 +332,16 @@ func (tc *tableChange) Decode(r io.Reader) error {
 }
 
 func makeTableCreateChange(id uint64, level int) manifestChange {
-	return manifestChange{tableChange{
+	return manifestChange{
 		id:    id,
 		op:    tableCreate,
 		level: uint8(level),
-	}}
+	}
 }
 
 func makeTableDeleteChange(id uint64) manifestChange {
-	return manifestChange{tableChange{
+	return manifestChange{
 		id: id,
 		op: tableDelete,
-	}}
+	}
 }

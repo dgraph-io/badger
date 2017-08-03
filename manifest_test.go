@@ -37,7 +37,7 @@ func TestManifestEncoding(t *testing.T) {
 	var buf bytes.Buffer
 	changeSet := manifestChangeSet{
 		[]manifestChange{
-			manifestChange{tableChange{33, tableCreate, 3}},
+			manifestChange{33, tableCreate, 3},
 		},
 	}
 	changeSet.Encode(&buf)
@@ -197,25 +197,25 @@ func TestManifestRewrite(t *testing.T) {
 	require.Equal(t, 0, m.deletions)
 
 	err = mf.addChanges(manifestChangeSet{[]manifestChange{
-		manifestChange{tableChange{
+		manifestChange{
 			id:    0,
 			op:    tableCreate,
 			level: 0,
-		}},
+		},
 	}})
 	require.NoError(t, err)
 
 	for i := 0; i < deletionsThreshold*3; i++ {
 		ch := []manifestChange{
-			manifestChange{tableChange{
+			manifestChange{
 				id:    uint64(i + 1),
 				op:    tableCreate,
 				level: 0,
-			}},
-			manifestChange{tableChange{
+			},
+			manifestChange{
 				id: uint64(i),
 				op: tableDelete,
-			}},
+			},
 		}
 		err := mf.addChanges(manifestChangeSet{ch})
 		require.NoError(t, err)
