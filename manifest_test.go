@@ -208,10 +208,11 @@ func TestManifestRewrite(t *testing.T) {
 
 	err = mf.addChanges(manifestChangeSet{[]manifestChange{
 		manifestChange{
-			tag: manifestValueLogChange,
-			vlc: valueLogChange{
-				id: 0,
-				op: valueLogCreate,
+			tag: manifestTableChange,
+			tc: tableChange{
+				id:    0,
+				op:    tableCreate,
+				level: 0,
 			},
 		},
 	}})
@@ -220,17 +221,18 @@ func TestManifestRewrite(t *testing.T) {
 	for i := 0; i < deletionsThreshold*3; i++ {
 		ch := []manifestChange{
 			manifestChange{
-				tag: manifestValueLogChange,
-				vlc: valueLogChange{
-					id: uint64(i + 1),
-					op: valueLogCreate,
+				tag: manifestTableChange,
+				tc: tableChange{
+					id:    uint64(i + 1),
+					op:    tableCreate,
+					level: 0,
 				},
 			},
 			manifestChange{
-				tag: manifestValueLogChange,
-				vlc: valueLogChange{
+				tag: manifestTableChange,
+				tc: tableChange{
 					id: uint64(i),
-					op: valueLogDelete,
+					op: tableDelete,
 				},
 			},
 		}
@@ -242,7 +244,7 @@ func TestManifestRewrite(t *testing.T) {
 	mf = nil
 	mf, m, err = helpOpenOrCreateManifestFile(&opt, deletionsThreshold)
 	require.NoError(t, err)
-	require.Equal(t, map[uint64]struct{}{
-		uint64(deletionsThreshold * 3): struct{}{},
-	}, m.valueLogFiles)
+	require.Equal(t, map[uint64]tableManifest{
+		uint64(deletionsThreshold * 3): tableManifest{level: 0},
+	}, m.tables)
 }
