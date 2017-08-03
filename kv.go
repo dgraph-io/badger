@@ -480,10 +480,10 @@ func (s *KV) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getMemTables() // Lock should be released.
 	defer decr()
 
-	y.NumGets.Add(s.opt.Dir, 1)
+	y.NumGets.Add(1)
 	for i := 0; i < len(tables); i++ {
 		vs := tables[i].Get(key)
-		y.NumMemtableGets.Add(s.opt.Dir, 1)
+		y.NumMemtableGets.Add(1)
 		if vs.Meta != 0 || vs.Value != nil {
 			return vs, nil
 		}
@@ -752,7 +752,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 		b.Entries = append(b.Entries, entry)
 		if size >= s.opt.maxBatchSize {
 			s.writeCh <- b
-			y.NumPuts.Add(s.opt.Dir, int64(len(b.Entries)))
+			y.NumPuts.Add(int64(len(b.Entries)))
 			reqs = append(reqs, b)
 			size = 0
 			b = nil
@@ -761,7 +761,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 
 	if size > 0 {
 		s.writeCh <- b
-		y.NumPuts.Add(s.opt.Dir, int64(len(b.Entries)))
+		y.NumPuts.Add(int64(len(b.Entries)))
 		reqs = append(reqs, b)
 	}
 	return reqs
