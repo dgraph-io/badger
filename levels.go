@@ -519,8 +519,6 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	newIDMin, newIDLimit := s.reserveCompactionFileIDs(&cd)
 	newTables, decr, err := s.compactBuildTables(l, cd, newIDMin, newIDLimit)
 	if err != nil {
-		// This compaction couldn't be done successfully.
-		cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v", err, cd)
 		return err
 	}
 	defer func() {
@@ -586,6 +584,8 @@ func (s *levelsController) doCompact(p compactionPriority) (bool, error) {
 	cd.elog.LazyPrintf("Running for level: %d\n", cd.thisLevel.level)
 	s.cstatus.toLog(cd.elog)
 	if err := s.runCompactDef(l, cd); err != nil {
+		// This compaction couldn't be done successfully.
+		cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v", err, cd)
 		return false, err
 	}
 
