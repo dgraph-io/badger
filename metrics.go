@@ -28,8 +28,7 @@ import (
 )
 
 type metrics struct {
-	ticker *time.Ticker
-
+	ticker   *time.Ticker
 	dir      string
 	valueDir string
 	elog     trace.EventLog
