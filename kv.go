@@ -141,7 +141,7 @@ type KV struct {
 	// Incremented in the non-concurrently accessed write loop.  But also accessed outside. So
 	// we use an atomic op.
 	lastUsedCasCounter uint64
-	metrics            y.Metrics
+	metrics            *metrics
 }
 
 var ErrInvalidDir error = errors.New("Invalid Dir, directory does not exist")
@@ -209,7 +209,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
 	}
-	out.metrics = y.Init(out.elog, opt.Dir, opt.ValueDir)
+	out.metrics = newMetrics(out.elog, opt.Dir, opt.ValueDir)
 	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
 	// newLevelsController potentially loads files in directory.
