@@ -241,7 +241,7 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 
 // compactBuildTables merge topTables and botTables to form a list of new tables.
 func (s *levelsController) compactBuildTables(
-	l int, cd compactDef, newIDMin, newIDLimit uint64) ([]*table.Table, func() error, error) {
+	l int, cd compactDef) ([]*table.Table, func() error, error) {
 	topTables := cd.top
 	botTables := cd.bot
 
@@ -262,12 +262,10 @@ func (s *levelsController) compactBuildTables(
 	it.Rewind()
 
 	// Start generating new tables.
-	newTables := make([]*table.Table, newIDLimit-newIDMin)
-	che := make(chan error, newIDLimit-newIDMin)
+	newTables := []**table.Table{}
+	che := make(chan error)
 	var i int
-	newID := newIDMin
 	for ; it.Valid(); i++ {
-		y.AssertTruef(i < len(newTables), "Rewriting too many tables: %d %d", i, len(newTables))
 		timeStart := time.Now()
 		builder := table.NewTableBuilder()
 		for ; it.Valid(); it.Next() {
@@ -282,8 +280,10 @@ func (s *levelsController) compactBuildTables(
 
 		cd.elog.LazyPrintf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
 
-		y.AssertTruef(newID < newIDLimit, "%d %d", newID, newIDLimit)
-		go func(idx int, fileID uint64, builder *table.TableBuilder) {
+		tablePtr := new(*table.Table)
+		newTables = append(newTables, tablePtr)
+		fileID := s.reserveFileID()
+		go func(builder *table.TableBuilder) {
 			defer builder.Close()
 
 			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
@@ -297,12 +297,11 @@ func (s *levelsController) compactBuildTables(
 				return
 			}
 
-			newTables[idx], err = table.OpenTable(fd, s.kv.opt.MapTablesTo)
+			*tablePtr, err = table.OpenTable(fd, s.kv.opt.MapTablesTo)
 			// decrRef is added below.
 			che <- errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 
-		}(i, newID, builder)
-		newID++
+		}(builder)
 	}
 
 	// Wait for all table builders to finish.
@@ -323,12 +322,17 @@ func (s *levelsController) compactBuildTables(
 	if firstErr != nil {
 		// An error happened.  Delete all the newly created table files (by calling DecrRef
 		// -- we're the only holders of a ref).
-		_ = decrRefs(newTables[:i])
+		for j := 0; j < i; j++ {
+			(*newTables[j]).DecrRef()
+		}
 		errorReturn := errors.Wrapf(firstErr, "While running compaction for: %+v", cd)
 		return nil, nil, errorReturn
 	}
 
-	out := newTables[:i]
+	out := make([]*table.Table, i)
+	for j := 0; j < i; j++ {
+		out[j] = *newTables[j]
+	}
 	return out, func() error { return decrRefs(out) }, nil
 }
 
@@ -453,19 +457,6 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	return false
 }
 
-func (s *levelsController) reserveCompactionFileIDs(def *compactDef) (uint64, uint64) {
-	var estSize int64
-	for _, t := range def.top {
-		estSize += t.Size()
-	}
-	for _, t := range def.bot {
-		estSize += t.Size()
-	}
-	estNumTables := 1 + (estSize+s.kv.opt.MaxTableSize-1)/s.kv.opt.MaxTableSize
-	newIDMin, newIDLimit := s.reserveFileIDs(int(estNumTables))
-	return newIDMin, newIDLimit
-}
-
 func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	timeStart := time.Now()
 	var readSize int64
@@ -516,8 +507,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		return nil
 	}
 
-	newIDMin, newIDLimit := s.reserveCompactionFileIDs(&cd)
-	newTables, decr, err := s.compactBuildTables(l, cd, newIDMin, newIDLimit)
+	newTables, decr, err := s.compactBuildTables(l, cd)
 	if err != nil {
 		return err
 	}

@@ -1053,7 +1053,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			// before vptr (because they don't get replayed).
 			ft.mt.Put(head, y.ValueStruct{Value: offset, CASCounter: s.lastCASCounter()})
 		}
-		fileID, _ := s.lc.reserveFileIDs(1)
+		fileID := s.lc.reserveFileID()
 		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
 		if err != nil {
 			return y.Wrap(err)
