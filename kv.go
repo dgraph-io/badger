@@ -19,7 +19,6 @@ package badger
 import (
 	"expvar"
 	"log"
-	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -71,11 +70,6 @@ type Options struct {
 	// Size of single value log file.
 	ValueLogFileSize int64
 
-	// The following affect value compression in value log. Note that compression
-	// can significantly slow down the loading and lookup time.
-	ValueCompressionMinSize  int32   // Minimal size in bytes of KV pair to be compressed.
-	ValueCompressionMinRatio float64 // Minimal compression ratio of KV pair to be compressed.
-
 	// Sync all writes to disk. Setting this to true would slow down data loading significantly.
 	SyncWrites bool
 
@@ -97,19 +91,17 @@ var DefaultOptions = Options{
 	MapTablesTo:         table.LoadToRAM,
 	// table.MemoryMap to mmap() the tables.
 	// table.Nothing to not preload the tables.
-	MaxLevels:                7,
-	MaxTableSize:             64 << 20,
-	NumCompactors:            3,
-	NumLevelZeroTables:       5,
-	NumLevelZeroTablesStall:  10,
-	NumMemtables:             5,
-	SyncWrites:               false,
-	ValueCompressionMinRatio: 2.0,
-	ValueCompressionMinSize:  math.MaxInt32, // Turn off by default.
-	ValueGCRunInterval:       10 * time.Minute,
-	ValueGCThreshold:         0.5, // Set to zero to not run GC.
-	ValueLogFileSize:         1 << 30,
-	ValueThreshold:           20,
+	MaxLevels:               7,
+	MaxTableSize:            64 << 20,
+	NumCompactors:           3,
+	NumLevelZeroTables:      5,
+	NumLevelZeroTablesStall: 10,
+	NumMemtables:            5,
+	SyncWrites:              false,
+	ValueGCRunInterval:      10 * time.Minute,
+	ValueGCThreshold:        0.5, // Set to zero to not run GC.
+	ValueLogFileSize:        1 << 30,
+	ValueThreshold:          20,
 }
 
 func (opt *Options) estimateSize(entry *Entry) int {
