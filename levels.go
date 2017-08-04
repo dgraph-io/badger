@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
 	"os"
@@ -263,8 +264,11 @@ func (s *levelsController) compactBuildTables(
 	it.Rewind()
 
 	// Start generating new tables.
-	newTables := []**table.Table{}
-	che := make(chan error)
+	type newTableResult struct {
+		table *table.Table
+		err   error
+	}
+	resultCh := make(chan newTableResult)
 	var i int
 	for ; it.Valid(); i++ {
 		timeStart := time.Now()
@@ -281,35 +285,36 @@ func (s *levelsController) compactBuildTables(
 
 		cd.elog.LazyPrintf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
 
-		tablePtr := new(*table.Table)
-		newTables = append(newTables, tablePtr)
 		fileID := s.reserveFileID()
 		go func(builder *table.TableBuilder) {
 			defer builder.Close()
 
 			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
 			if err != nil {
-				che <- errors.Wrapf(err, "While opening new table: %d", fileID)
+				resultCh <- newTableResult{nil, errors.Wrapf(err, "While opening new table: %d", fileID)}
 				return
 			}
 
 			if _, err := fd.Write(builder.Finish()); err != nil {
-				che <- errors.Wrapf(err, "Unable to write to file: %d", fileID)
+				resultCh <- newTableResult{nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)}
 				return
 			}
 
-			*tablePtr, err = table.OpenTable(fd, s.kv.opt.MapTablesTo)
+			tbl, err := table.OpenTable(fd, s.kv.opt.MapTablesTo)
 			// decrRef is added below.
-			che <- errors.Wrapf(err, "Unable to open table: %q", fd.Name())
-
+			resultCh <- newTableResult{tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())}
 		}(builder)
 	}
+
+	newTables := make([]*table.Table, 0, 20)
 
 	// Wait for all table builders to finish.
 	var firstErr error
 	for x := 0; x < i; x++ {
-		if err := <-che; err != nil && firstErr == nil {
-			firstErr = err
+		res := <-resultCh
+		newTables = append(newTables, res.table)
+		if firstErr == nil {
+			firstErr = res.err
 		}
 	}
 
@@ -324,16 +329,19 @@ func (s *levelsController) compactBuildTables(
 		// An error happened.  Delete all the newly created table files (by calling DecrRef
 		// -- we're the only holders of a ref).
 		for j := 0; j < i; j++ {
-			(*newTables[j]).DecrRef()
+			if newTables[j] != nil {
+				newTables[j].DecrRef()
+			}
 		}
 		errorReturn := errors.Wrapf(firstErr, "While running compaction for: %+v", cd)
 		return nil, nil, errorReturn
 	}
 
-	out := make([]*table.Table, i)
-	for j := 0; j < i; j++ {
-		out[j] = *newTables[j]
-	}
+	sort.Slice(newTables, func(i, j int) bool {
+		return bytes.Compare(newTables[i].Biggest(), newTables[j].Biggest()) < 0
+	})
+
+	out := newTables[:i]
 	return out, func() error { return decrRefs(out) }, nil
 }
 
