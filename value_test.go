@@ -81,62 +81,6 @@ func TestValueBasic(t *testing.T) {
 	}, readEntries)
 }
 
-func TestCompression(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	y.Check(err)
-	defer os.RemoveAll(dir)
-
-	opt := getTestOptions(dir)
-	opt.ValueCompressionMinSize = 16
-
-	kv, _ := NewKV(opt)
-	defer kv.Close()
-	log := &kv.vlog
-
-	entry := &Entry{
-		Key:             []byte("key1"),
-		Value:           []byte("shortval"),
-		Meta:            BitValuePointer,
-		CASCounterCheck: 22222,
-		casCounter:      33333,
-	}
-	entry2 := &Entry{ // This entry will be compressed
-		Key:             []byte("aaaaaaaaaaaaaaaaaaaaaaaaaa"),
-		Value:           []byte("aaaaaaaaaaaaaaaaaaaaaaaaaa"),
-		Meta:            BitValuePointer,
-		CASCounterCheck: 22225,
-		casCounter:      33335,
-	}
-	entry3 := &Entry{
-		Key:             []byte("highentropy"),
-		Value:           []byte("uncompressable"),
-		Meta:            BitValuePointer,
-		CASCounterCheck: 22226,
-		casCounter:      33336,
-	}
-
-	b := new(request)
-	b.Entries = []*Entry{entry, entry2, entry3}
-
-	log.write([]*request{b})
-	require.Len(t, b.Ptrs, 3)
-	fmt.Printf("Pointer written: %+v %+v %+v", b.Ptrs[0], b.Ptrs[1], b.Ptrs[2])
-
-	e, err := log.Read(b.Ptrs[0], nil)
-	e2, err := log.Read(b.Ptrs[1], nil)
-	require.True(t, e2.Meta&BitCompressed > 0)
-	entry2.Meta = entry2.Meta | BitCompressed
-	e3, err := log.Read(b.Ptrs[2], nil)
-
-	require.NoError(t, err)
-	readEntries := []Entry{e, e2, e3}
-	require.EqualValues(t, []Entry{
-		*entry,
-		*entry2,
-		*entry3,
-	}, readEntries)
-}
-
 func TestValueGC(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
@@ -151,7 +95,7 @@ func TestValueGC(t *testing.T) {
 	var entries []*Entry
 	for i := 0; i < 100; i++ {
 		v := make([]byte, sz)
-		rand.Read(v[:rand.Intn(sz)]) // some values can be compressed
+		rand.Read(v[:rand.Intn(sz)])
 		entries = append(entries, &Entry{
 			Key:   []byte(fmt.Sprintf("key%d", i)),
 			Value: v,
@@ -202,7 +146,7 @@ func TestValueGC2(t *testing.T) {
 	var entries []*Entry
 	for i := 0; i < 100; i++ {
 		v := make([]byte, sz)
-		rand.Read(v[:rand.Intn(sz)]) // some values can be compressed
+		rand.Read(v[:rand.Intn(sz)])
 		entries = append(entries, &Entry{
 			Key:   []byte(fmt.Sprintf("key%d", i)),
 			Value: v,
