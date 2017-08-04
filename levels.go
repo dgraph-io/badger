@@ -26,6 +26,7 @@ import (
 
 	"golang.org/x/net/trace"
 
+	"github.com/dgraph-io/badger/protos"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
@@ -336,8 +337,8 @@ func (s *levelsController) compactBuildTables(
 	return out, func() error { return decrRefs(out) }, nil
 }
 
-func buildChangeSet(cd *compactDef, newTables []*table.Table) manifestChangeSet {
-	changes := []manifestChange{}
+func buildChangeSet(cd *compactDef, newTables []*table.Table) protos.ManifestChangeSet {
+	changes := []*protos.ManifestChange{}
 	for _, table := range newTables {
 		changes = append(changes, makeTableCreateChange(table.ID(), cd.nextLevel.level))
 	}
@@ -347,7 +348,7 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) manifestChangeSet 
 	for _, table := range cd.bot {
 		changes = append(changes, makeTableDeleteChange(table.ID()))
 	}
-	return manifestChangeSet{changes: changes}
+	return protos.ManifestChangeSet{Changes: changes}
 }
 
 type compactDef struct {
@@ -475,8 +476,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		tbl := cd.top[0]
 
 		// We write to the manifest _before_ we delete files (and after we created files).
-		changeSet := manifestChangeSet{
-			changes: []manifestChange{
+		changeSet := protos.ManifestChangeSet{
+			Changes: []*protos.ManifestChange{
 				// The order matters here -- you can't temporarily have two copies of the same
 				// table id when reloading the manifest.
 				makeTableDeleteChange(tbl.ID()),
@@ -591,7 +592,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	// point it could get used in some compaction.  This ensures the manifest file gets updated in
 	// the proper order. (That means this update happens before that of some compaction which
 	// deletes the table.)
-	err := s.kv.manifest.addChanges(manifestChangeSet{changes: []manifestChange{
+	err := s.kv.manifest.addChanges(protos.ManifestChangeSet{Changes: []*protos.ManifestChange{
 		makeTableCreateChange(t.ID(), 0),
 	}})
 	if err != nil {

@@ -17,8 +17,6 @@
 package badger
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -28,25 +26,11 @@ import (
 
 	"golang.org/x/net/trace"
 
+	"github.com/dgraph-io/badger/protos"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
-
-func TestManifestEncoding(t *testing.T) {
-	var buf bytes.Buffer
-	changeSet := manifestChangeSet{
-		[]manifestChange{
-			manifestChange{33, tableCreate, 3},
-		},
-	}
-	changeSet.Encode(&buf)
-	var newChangeSet manifestChangeSet
-	r := countingReader{bufio.NewReader(bytes.NewReader(buf.Bytes())), 0}
-	err := newChangeSet.Decode(&r)
-	require.NoError(t, err)
-	require.Equal(t, changeSet, newChangeSet)
-}
 
 func TestManifestBasic(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
@@ -196,28 +180,17 @@ func TestManifestRewrite(t *testing.T) {
 	require.Equal(t, 0, m.creations)
 	require.Equal(t, 0, m.deletions)
 
-	err = mf.addChanges(manifestChangeSet{[]manifestChange{
-		manifestChange{
-			id:    0,
-			op:    tableCreate,
-			level: 0,
-		},
+	err = mf.addChanges(protos.ManifestChangeSet{[]*protos.ManifestChange{
+		makeTableCreateChange(0, 0),
 	}})
 	require.NoError(t, err)
 
-	for i := 0; i < deletionsThreshold*3; i++ {
-		ch := []manifestChange{
-			manifestChange{
-				id:    uint64(i + 1),
-				op:    tableCreate,
-				level: 0,
-			},
-			manifestChange{
-				id: uint64(i),
-				op: tableDelete,
-			},
+	for i := uint64(0); i < uint64(deletionsThreshold*3); i++ {
+		ch := []*protos.ManifestChange{
+			makeTableCreateChange(i+1, 0),
+			makeTableDeleteChange(i),
 		}
-		err := mf.addChanges(manifestChangeSet{ch})
+		err := mf.addChanges(protos.ManifestChangeSet{ch})
 		require.NoError(t, err)
 	}
 	err = mf.close()

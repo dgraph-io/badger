@@ -18,7 +18,6 @@ package badger
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -26,14 +25,15 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/dgraph-io/badger/protos"
 	"github.com/dgraph-io/badger/y"
 )
 
 // The MANIFEST file describes the startup state of the db -- all LSM files and what level they're
 // at.
 //
-// It consists of a sequence of manifestChangeSet objects.  Each of these is treated atomically,
-// and contains a sequence of manifestChanges (file creations/deletions) which we use to
+// It consists of a sequence of ManifestChangeSet objects.  Each of these is treated atomically,
+// and contains a sequence of ManifestChange's (file creations/deletions) which we use to
 // reconstruct the manifest at startup.
 
 type manifest struct {
@@ -81,23 +81,6 @@ type manifestFile struct {
 }
 
 const (
-	tableCreate = 1
-	tableDelete = 2
-)
-
-// If we change a table's level, we just do a delete followed by a create.  (In the same changeset,
-// so that they're atomically applied, of course.)
-type manifestChange struct {
-	id    uint64
-	op    byte  // has value tableCreate, or tableDelete
-	level uint8 // set if tableCreate
-}
-
-type manifestChangeSet struct {
-	changes []manifestChange
-}
-
-const (
 	manifestFilename                  = "MANIFEST"
 	manifestRewriteFilename           = "MANIFEST-REWRITE"
 	manifestDeletionsRewriteThreshold = 100000
@@ -132,9 +115,12 @@ func (mf *manifestFile) close() error {
 // we replay the MANIFEST file, we'll either replay all the changes or none of them.  (The truth of
 // this depends on the filesystem -- some might append garbage data if a system crash happens at
 // the wrong time.)
-func (mf *manifestFile) addChanges(changes manifestChangeSet) error {
-	var buf bytes.Buffer
-	changes.Encode(&buf)
+func (mf *manifestFile) addChanges(changes protos.ManifestChangeSet) error {
+	buf, err := changes.Marshal()
+	if err != nil {
+		return err
+	}
+
 	// Maybe we could use O_APPEND instead (on certain file systems)
 	mf.appendLock.Lock()
 	if err := applyChangeSet(&mf.manifest, &changes); err != nil {
@@ -149,7 +135,10 @@ func (mf *manifestFile) addChanges(changes manifestChangeSet) error {
 			return err
 		}
 	} else {
-		if _, err := mf.fp.Write(buf.Bytes()); err != nil {
+		var lenbuf [4]byte
+		binary.BigEndian.PutUint32(lenbuf[:], uint32(len(buf)))
+		buf = append(lenbuf[:], buf...)
+		if _, err := mf.fp.Write(buf); err != nil {
 			mf.appendLock.Unlock()
 			return err
 		}
@@ -168,19 +157,20 @@ func (mf *manifestFile) rewrite() error {
 		return err
 	}
 	netCreations := len(mf.manifest.tables)
-	changes := make([]manifestChange, 0, netCreations)
+	changes := make([]*protos.ManifestChange, 0, netCreations)
 	for id, tm := range mf.manifest.tables {
-		changes = append(changes, manifestChange{
-			id:    id,
-			op:    tableCreate,
-			level: tm.level,
-		})
+		changes = append(changes, makeTableCreateChange(id, int(tm.level)))
 	}
-	set := manifestChangeSet{changes: changes}
+	set := protos.ManifestChangeSet{Changes: changes}
 
-	var buf bytes.Buffer
-	set.Encode(&buf)
-	if _, err := fp.Write(buf.Bytes()); err != nil {
+	buf, err := set.Marshal()
+	if err != nil {
+		fp.Close()
+		return err
+	}
+	var lenbuf [4]byte
+	binary.BigEndian.PutUint32(lenbuf[:], uint32(len(buf)))
+	if _, err := fp.Write(append(lenbuf[:], buf...)); err != nil {
 		fp.Close()
 		return err
 	}
@@ -232,14 +222,28 @@ func replayManifestFile(maxLevels int, fp *os.File) (ret1 manifest, ret2 manifes
 	build2 := createManifest(maxLevels)
 	for {
 		offset = r.count
-		var changeSet manifestChangeSet
-		err := changeSet.Decode(&r)
+		var lenbuf [4]byte
+		_, err := io.ReadFull(&r, lenbuf[:])
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				break
 			}
 			return manifest{}, manifest{}, err
 		}
+		length := binary.BigEndian.Uint32(lenbuf[:])
+		var buf = make([]byte, length)
+		if _, err := io.ReadFull(&r, buf); err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				break
+			}
+			return manifest{}, manifest{}, err
+		}
+
+		var changeSet protos.ManifestChangeSet
+		if err := changeSet.Unmarshal(buf); err != nil {
+			return manifest{}, manifest{}, err
+		}
+
 		if err := applyChangeSet(&build1, &changeSet); err != nil {
 			return manifest{}, manifest{}, err
 		}
@@ -255,23 +259,24 @@ func replayManifestFile(maxLevels int, fp *os.File) (ret1 manifest, ret2 manifes
 	return build1, build2, err
 }
 
-func applyManifestChange(build *manifest, tc *manifestChange) error {
-	switch tc.op {
-	case tableCreate:
-		if _, ok := build.tables[tc.id]; ok {
-			return fmt.Errorf("MANIFEST invalid, table %d exists", tc.id)
+func applyManifestChange(build *manifest, tc *protos.ManifestChange) error {
+	switch tc.Op {
+	case protos.ManifestChange_CREATE:
+		if _, ok := build.tables[tc.Id]; ok {
+			return fmt.Errorf("MANIFEST invalid, table %d exists", tc.Id)
 		}
-		build.tables[tc.id] = tableManifest{
-			level: tc.level}
-		build.levels[tc.level].tables[tc.id] = struct{}{}
+		build.tables[tc.Id] = tableManifest{
+			level: uint8(tc.Level),
+		}
+		build.levels[tc.Level].tables[tc.Id] = struct{}{}
 		build.creations++
-	case tableDelete:
-		tm, ok := build.tables[tc.id]
+	case protos.ManifestChange_DELETE:
+		tm, ok := build.tables[tc.Id]
 		if !ok {
-			return fmt.Errorf("MANIFEST removes non-existing table %d", tc.id)
+			return fmt.Errorf("MANIFEST removes non-existing table %d", tc.Id)
 		}
-		delete(build.levels[tm.level].tables, tc.id)
-		delete(build.tables, tc.id)
+		delete(build.levels[tm.level].tables, tc.Id)
+		delete(build.tables, tc.Id)
 		build.deletions++
 	default:
 		return fmt.Errorf("MANIFEST file has invalid manifestChange op")
@@ -281,72 +286,26 @@ func applyManifestChange(build *manifest, tc *manifestChange) error {
 
 // This is not a "recoverable" error -- opening the KV store fails because the MANIFEST file is
 // just plain broken.
-func applyChangeSet(build *manifest, changeSet *manifestChangeSet) error {
-	for _, change := range changeSet.changes {
-		if err := applyManifestChange(build, &change); err != nil {
+func applyChangeSet(build *manifest, changeSet *protos.ManifestChangeSet) error {
+	for _, change := range changeSet.Changes {
+		if err := applyManifestChange(build, change); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (mcs *manifestChangeSet) Encode(w *bytes.Buffer) {
-	var b [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(b[:], uint64(len(mcs.changes)))
-	w.Write(b[:n])
-	for _, change := range mcs.changes {
-		change.Encode(w)
+func makeTableCreateChange(id uint64, level int) *protos.ManifestChange {
+	return &protos.ManifestChange{
+		Id:    id,
+		Op:    protos.ManifestChange_CREATE,
+		Level: uint32(level),
 	}
 }
 
-func (mcs *manifestChangeSet) Decode(r *countingReader) error {
-	n, err := binary.ReadUvarint(r)
-	if err != nil {
-		return err
-	}
-	changes := make([]manifestChange, n)
-	for i := uint64(0); i < n; i++ {
-		if err := changes[i].Decode(r); err != nil {
-			return err
-		}
-	}
-	mcs.changes = changes
-	return nil
-}
-
-func (tc *manifestChange) Encode(w *bytes.Buffer) {
-	var bytes [10]byte
-	binary.BigEndian.PutUint64(bytes[0:8], tc.id)
-	bytes[8] = tc.op
-	bytes[9] = tc.level
-	w.Write(bytes[:])
-}
-
-func (tc *manifestChange) Decode(r io.Reader) error {
-	var bytes [10]byte
-	if _, err := io.ReadFull(r, bytes[:]); err != nil {
-		return err
-	}
-	tc.id = binary.BigEndian.Uint64(bytes[0:8])
-	tc.op = bytes[8]
-	if tc.op != tableCreate && tc.op != tableDelete {
-		return fmt.Errorf("decoded invalid tableChange op")
-	}
-	tc.level = bytes[9]
-	return nil
-}
-
-func makeTableCreateChange(id uint64, level int) manifestChange {
-	return manifestChange{
-		id:    id,
-		op:    tableCreate,
-		level: uint8(level),
-	}
-}
-
-func makeTableDeleteChange(id uint64) manifestChange {
-	return manifestChange{
-		id: id,
-		op: tableDelete,
+func makeTableDeleteChange(id uint64) *protos.ManifestChange {
+	return &protos.ManifestChange{
+		Id: id,
+		Op: protos.ManifestChange_DELETE,
 	}
 }

@@ -28,7 +28,7 @@ message ManifestChange {
         uint64 Id = 1;
         enum Operation {
                 CREATE = 0;
-                DESTROY = 1;
+                DELETE = 1;
         }
         Operation Op = 2;
         uint32 Level = 3;  // Only used for CREATE
