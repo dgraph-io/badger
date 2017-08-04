@@ -105,6 +105,10 @@ func (lf *logFile) sync() error {
 
 var errStop = errors.New("Stop iteration")
 
+var entryHashTable = crc32.MakeTable(crc32.Koopman)
+
+const entryHashSize = 4
+
 type logEntry func(e Entry, vp valuePointer) error
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
@@ -322,10 +326,6 @@ type Entry struct {
 	offset     uint32
 	casCounter uint64
 }
-
-var entryHashTable = crc32.MakeTable(crc32.Koopman)
-
-const entryHashSize = 4
 
 // Encodes e to buf. Returns number of bytes written.
 func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
@@ -704,14 +704,24 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 		return e, err
 	}
 	var h header
-	buf, _ = h.Decode(buf)
+	h.Decode(buf)
+	n := uint32(headerBufSize)
 
-	e.Key = buf[0:h.klen]
+	e.Key = buf[n : n+h.klen]
+	n += h.klen
 	e.Meta = h.meta
 	e.UserMeta = h.userMeta
 	e.casCounter = h.casCounter
 	e.CASCounterCheck = h.casCounterCheck
-	e.Value = buf[h.klen : h.klen+h.vlen]
+	e.Value = buf[n : n+h.vlen]
+	n += h.vlen
+
+	storedCRC := binary.BigEndian.Uint32(buf[n:])
+	calculatedCRC := crc32.Checksum(buf[:n], entryHashTable)
+	if storedCRC != calculatedCRC {
+		return e, errors.New("CRC checksum mismatch")
+	}
+
 	return e, nil
 }
 
