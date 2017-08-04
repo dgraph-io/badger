@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -114,7 +115,7 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 		return y.Wrap(err)
 	}
 
-	read := func(r *bufio.Reader, buf []byte) error {
+	read := func(r io.Reader, buf []byte) error {
 		for {
 			n, err := r.Read(buf)
 			if err != nil {
@@ -135,7 +136,11 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 
 	recordOffset := offset
 	for {
-		if err = read(reader, hbuf[:]); err == io.EOF {
+
+		hash := crc32.New(entryHashTable)
+		tee := io.TeeReader(reader, hash)
+
+		if err = read(tee, hbuf[:]); err == io.EOF {
 			break
 		}
 
@@ -154,21 +159,30 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 		e.Key = k[:kl]
 		e.Value = v[:vl]
 
-		if err = read(reader, e.Key); err != nil {
+		if err = read(tee, e.Key); err != nil {
 			return err
 		}
 		e.Meta = h.meta
 		e.UserMeta = h.userMeta
 		e.casCounter = h.casCounter
 		e.CASCounterCheck = h.casCounterCheck
-		if err = read(reader, e.Value); err != nil {
+		if err = read(tee, e.Value); err != nil {
 			return err
+		}
+
+		var crcBuf [entryHashSize]byte
+		if err = read(reader, crcBuf[:]); err != nil {
+			return err
+		}
+		crc := binary.BigEndian.Uint32(crcBuf[:])
+		if crc != hash.Sum32() {
+			// TODO(peter): Check the read CRC against the calculated CRC.
 		}
 
 		var vp valuePointer
 
-		recordOffset += uint32(hlen + kl + vl)
-		vp.Len = uint32(len(hbuf)) + h.klen + h.vlen
+		recordOffset += uint32(hlen + kl + vl + entryHashSize)
+		vp.Len = uint32(len(hbuf)) + h.klen + h.vlen + entryHashSize
 
 		vp.Offset = e.offset
 		vp.Fid = f.fid
@@ -306,6 +320,10 @@ type Entry struct {
 	casCounter uint64
 }
 
+var entryHashTable = crc32.MakeTable(crc32.Koopman)
+
+const entryHashSize = 4
+
 // Encodes e to buf. Returns number of bytes written.
 func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	var h header
@@ -319,10 +337,14 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	var headerEnc [headerBufSize]byte
 	h.Encode(headerEnc[:])
 
-	buf.Write(headerEnc[:])
-	buf.Write(e.Key)
-	buf.Write(e.Value)
-	return len(headerEnc) + len(e.Key) + len(e.Value), nil
+	hash := crc32.New(entryHashTable)
+	w := io.MultiWriter(hash, buf)
+
+	w.Write(headerEnc[:])
+	w.Write(e.Key)
+	w.Write(e.Value)
+	binary.Write(buf, binary.BigEndian, hash.Sum32())
+	return len(headerEnc) + len(e.Key) + len(e.Value) + entryHashSize, nil
 }
 
 func (e Entry) print(prefix string) {

@@ -56,7 +56,7 @@ func TestValueBasic(t *testing.T) {
 
 	log.write([]*request{b})
 	require.Len(t, b.Ptrs, 2)
-	fmt.Printf("Pointer written: %+v %+v", b.Ptrs[0], b.Ptrs[1])
+	fmt.Printf("Pointer written: %+v %+v\n", b.Ptrs[0], b.Ptrs[1])
 
 	e, err := log.Read(b.Ptrs[0], nil)
 	e2, err := log.Read(b.Ptrs[1], nil)
