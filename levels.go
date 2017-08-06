@@ -341,8 +341,7 @@ func (s *levelsController) compactBuildTables(
 		return bytes.Compare(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
 
-	out := newTables[:i]
-	return out, func() error { return decrRefs(out) }, nil
+	return newTables, func() error { return decrRefs(newTables) }, nil
 }
 
 func buildChangeSet(cd *compactDef, newTables []*table.Table) protos.ManifestChangeSet {
