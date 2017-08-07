@@ -95,8 +95,15 @@ func helpOpenOrCreateManifestFile(dir string, deletionsThreshold int) (ret *mani
 		return nil, manifest{}, err
 	}
 
-	m1, m2, err := replayManifestFile(fp)
-	if err != nil {
+	m1, m2, truncOffset, err := ReplayManifestFile(fp)
+
+	// Truncate file so we don't have a half-written entry at the end.
+	if err := fp.Truncate(truncOffset); err != nil {
+		_ = fp.Close()
+		return nil, manifest{}, err
+	}
+
+	if _, err = fp.Seek(0, os.SEEK_END); err != nil {
 		_ = fp.Close()
 		return nil, manifest{}, err
 	}
@@ -208,9 +215,12 @@ func (r *countingReader) ReadByte() (b byte, err error) {
 	return
 }
 
-// We need one immutable copy and one mutable copy of the manifest.  Easiest way is to construct
-// two of them.
-func replayManifestFile(fp *os.File) (ret1 manifest, ret2 manifest, err error) {
+// ReplayManifestFile reads the manifest file and constructs two manifest objects.  (We need one
+// immutable copy and one mutable copy of the manifest.  Easiest way is to construct two of them.)
+// Also, returns the last offset after a completely read manifest entry -- the file must be
+// truncated at that point before further appends are made (if there is a partial entry after
+// that).  In normal conditions, truncOffset is the file size.
+func ReplayManifestFile(fp *os.File) (ret1 manifest, ret2 manifest, truncOffset int64, err error) {
 	r := countingReader{wrapped: bufio.NewReader(fp)}
 
 	offset := r.count
@@ -225,7 +235,7 @@ func replayManifestFile(fp *os.File) (ret1 manifest, ret2 manifest, err error) {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				break
 			}
-			return manifest{}, manifest{}, err
+			return manifest{}, manifest{}, 0, err
 		}
 		length := binary.BigEndian.Uint32(lenbuf[:])
 		var buf = make([]byte, length)
@@ -233,27 +243,23 @@ func replayManifestFile(fp *os.File) (ret1 manifest, ret2 manifest, err error) {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				break
 			}
-			return manifest{}, manifest{}, err
+			return manifest{}, manifest{}, 0, err
 		}
 
 		var changeSet protos.ManifestChangeSet
 		if err := changeSet.Unmarshal(buf); err != nil {
-			return manifest{}, manifest{}, err
+			return manifest{}, manifest{}, 0, err
 		}
 
 		if err := applyChangeSet(&build1, &changeSet); err != nil {
-			return manifest{}, manifest{}, err
+			return manifest{}, manifest{}, 0, err
 		}
 		if err := applyChangeSet(&build2, &changeSet); err != nil {
-			return manifest{}, manifest{}, err
+			return manifest{}, manifest{}, 0, err
 		}
 	}
 
-	// Truncate file so we don't have a half-written entry at the end.
-	fp.Truncate(offset)
-
-	_, err = fp.Seek(0, os.SEEK_END)
-	return build1, build2, err
+	return build1, build2, offset, err
 }
 
 func applyManifestChange(build *manifest, tc *protos.ManifestChange) error {
