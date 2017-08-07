@@ -18,9 +18,10 @@
 
 Usage: badger_info --dir x [--value-dir y]
 
-This command prints information about the badger database.  It reads MANIFEST and prints its info.
-It also prints info about missing/extra files, and general information about the value log files
-(which are not referenced by the manifest).
+This command prints information about the badger key-value store.  It reads MANIFEST and prints its
+info. It also prints info about missing/extra files, and general information about the value log
+files (which are not referenced by the manifest).  Use this tool to report any issues about Badger
+to the Dgraph team.
 */
 package main
 
