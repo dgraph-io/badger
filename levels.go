@@ -56,9 +56,9 @@ var (
 // revertToManifest checks that all necessary table files exist and removes all table files not
 // referenced by the manifest.  idMap is a set of table file id's that were read from the directory
 // listing.
-func revertToManifest(kv *KV, mf *manifest, idMap map[uint64]struct{}) error {
+func revertToManifest(kv *KV, mf *Manifest, idMap map[uint64]struct{}) error {
 	// 1. Check all files in manifest exist.
-	for id := range mf.tables {
+	for id := range mf.Tables {
 		if _, ok := idMap[id]; !ok {
 			return fmt.Errorf("file does not exist for table %d", id)
 		}
@@ -66,7 +66,7 @@ func revertToManifest(kv *KV, mf *manifest, idMap map[uint64]struct{}) error {
 
 	// 2. Delete files that shouldn't exist.
 	for id := range idMap {
-		if _, ok := mf.tables[id]; !ok {
+		if _, ok := mf.Tables[id]; !ok {
 			kv.elog.Printf("Table file %d not referenced in MANIFEST\n", id)
 			filename := table.NewFilename(id, kv.opt.Dir)
 			if err := os.Remove(filename); err != nil {
@@ -78,7 +78,7 @@ func revertToManifest(kv *KV, mf *manifest, idMap map[uint64]struct{}) error {
 	return nil
 }
 
-func newLevelsController(kv *KV, mf *manifest) (*levelsController, error) {
+func newLevelsController(kv *KV, mf *Manifest) (*levelsController, error) {
 	y.AssertTrue(kv.opt.NumLevelZeroTablesStall > kv.opt.NumLevelZeroTables)
 	s := &levelsController{
 		kv:     kv,
@@ -108,7 +108,7 @@ func newLevelsController(kv *KV, mf *manifest) (*levelsController, error) {
 	// Some files may be deleted. Let's reload.
 	tables := make([][]*table.Table, kv.opt.MaxLevels)
 	var maxFileID uint64
-	for fileID, tableManifest := range mf.tables {
+	for fileID, tableManifest := range mf.Tables {
 		fname := table.NewFilename(fileID, kv.opt.Dir)
 		fd, err := y.OpenExistingSyncedFile(fname, true)
 		if err != nil {
@@ -122,7 +122,7 @@ func newLevelsController(kv *KV, mf *manifest) (*levelsController, error) {
 			return nil, errors.Wrapf(err, "Opening table: %q", fname)
 		}
 
-		level := tableManifest.level
+		level := tableManifest.Level
 		tables[level] = append(tables[level], t)
 
 		if fileID > maxFileID {

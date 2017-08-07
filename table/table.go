@@ -330,8 +330,12 @@ func ParseFileID(name string) (uint64, bool) {
 	return uint64(id), true
 }
 
+func TableFilename(id uint64) string {
+	return fmt.Sprintf("%06d", id) + fileSuffix
+}
+
 func NewFilename(id uint64, dir string) string {
-	return filepath.Join(dir, fmt.Sprintf("%06d", id)+fileSuffix)
+	return filepath.Join(dir, TableFilename(id))
 }
 
 func (t *Table) LoadToRAM() error {
