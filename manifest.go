@@ -46,8 +46,11 @@ type manifest struct {
 	deletions int
 }
 
-func createManifest() manifest {
-	levels := make([]levelManifest, 0)
+func createManifest(maxLevels int) manifest {
+	levels := make([]levelManifest, maxLevels)
+	for i := 0; i < maxLevels; i++ {
+		levels[i].tables = make(map[uint64]struct{})
+	}
 	return manifest{
 		levels: levels,
 		tables: make(map[uint64]tableManifest),
@@ -84,31 +87,24 @@ const (
 	manifestDeletionsRatio            = 10
 )
 
-func OpenOrCreateManifestFile(dir string) (ret *manifestFile, result manifest, err error) {
-	return helpOpenOrCreateManifestFile(dir, manifestDeletionsRewriteThreshold)
+func openOrCreateManifestFile(opt *Options) (ret *manifestFile, result manifest, err error) {
+	return helpOpenOrCreateManifestFile(opt, manifestDeletionsRewriteThreshold)
 }
 
-func helpOpenOrCreateManifestFile(dir string, deletionsThreshold int) (ret *manifestFile, result manifest, err error) {
-	path := filepath.Join(dir, manifestFilename)
+func helpOpenOrCreateManifestFile(opt *Options, deletionsThreshold int) (ret *manifestFile, result manifest, err error) {
+	path := filepath.Join(opt.Dir, manifestFilename)
 	fp, err := y.OpenSyncedFile(path, false) // We explicitly sync in addChanges, outside the lock.
 	if err != nil {
 		return nil, manifest{}, err
 	}
 
-	m1, m2, truncOffset, err := ReplayManifestFile(fp)
-
-	// Truncate file so we don't have a half-written entry at the end.
-	if err := fp.Truncate(truncOffset); err != nil {
+	m1, m2, err := replayManifestFile(opt.MaxLevels, fp)
+	if err != nil {
 		_ = fp.Close()
 		return nil, manifest{}, err
 	}
 
-	if _, err = fp.Seek(0, os.SEEK_END); err != nil {
-		_ = fp.Close()
-		return nil, manifest{}, err
-	}
-
-	return &manifestFile{fp: fp, directory: dir, manifest: m1}, m2, nil
+	return &manifestFile{fp: fp, directory: opt.Dir, manifest: m1}, m2, nil
 }
 
 func (mf *manifestFile) close() error {
@@ -215,18 +211,15 @@ func (r *countingReader) ReadByte() (b byte, err error) {
 	return
 }
 
-// ReplayManifestFile reads the manifest file and constructs two manifest objects.  (We need one
-// immutable copy and one mutable copy of the manifest.  Easiest way is to construct two of them.)
-// Also, returns the last offset after a completely read manifest entry -- the file must be
-// truncated at that point before further appends are made (if there is a partial entry after
-// that).  In normal conditions, truncOffset is the file size.
-func ReplayManifestFile(fp *os.File) (ret1 manifest, ret2 manifest, truncOffset int64, err error) {
+// We need one immutable copy and one mutable copy of the manifest.  Easiest way is to construct
+// two of them.
+func replayManifestFile(maxLevels int, fp *os.File) (ret1 manifest, ret2 manifest, err error) {
 	r := countingReader{wrapped: bufio.NewReader(fp)}
 
 	offset := r.count
 
-	build1 := createManifest()
-	build2 := createManifest()
+	build1 := createManifest(maxLevels)
+	build2 := createManifest(maxLevels)
 	for {
 		offset = r.count
 		var lenbuf [4]byte
@@ -235,7 +228,7 @@ func ReplayManifestFile(fp *os.File) (ret1 manifest, ret2 manifest, truncOffset 
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				break
 			}
-			return manifest{}, manifest{}, 0, err
+			return manifest{}, manifest{}, err
 		}
 		length := binary.BigEndian.Uint32(lenbuf[:])
 		var buf = make([]byte, length)
@@ -243,23 +236,27 @@ func ReplayManifestFile(fp *os.File) (ret1 manifest, ret2 manifest, truncOffset 
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				break
 			}
-			return manifest{}, manifest{}, 0, err
+			return manifest{}, manifest{}, err
 		}
 
 		var changeSet protos.ManifestChangeSet
 		if err := changeSet.Unmarshal(buf); err != nil {
-			return manifest{}, manifest{}, 0, err
+			return manifest{}, manifest{}, err
 		}
 
 		if err := applyChangeSet(&build1, &changeSet); err != nil {
-			return manifest{}, manifest{}, 0, err
+			return manifest{}, manifest{}, err
 		}
 		if err := applyChangeSet(&build2, &changeSet); err != nil {
-			return manifest{}, manifest{}, 0, err
+			return manifest{}, manifest{}, err
 		}
 	}
 
-	return build1, build2, offset, err
+	// Truncate file so we don't have a half-written entry at the end.
+	fp.Truncate(offset)
+
+	_, err = fp.Seek(0, os.SEEK_END)
+	return build1, build2, err
 }
 
 func applyManifestChange(build *manifest, tc *protos.ManifestChange) error {
@@ -270,9 +267,6 @@ func applyManifestChange(build *manifest, tc *protos.ManifestChange) error {
 		}
 		build.tables[tc.Id] = tableManifest{
 			level: uint8(tc.Level),
-		}
-		for len(build.levels) <= int(tc.Level) {
-			build.levels = append(build.levels, levelManifest{make(map[uint64]struct{})})
 		}
 		build.levels[tc.Level].tables[tc.Id] = struct{}{}
 		build.creations++
