@@ -84,6 +84,23 @@ const (
 	manifestDeletionsRatio            = 10
 )
 
+// AsChanges returns a sequence of changes that could be used to recreate the Manifest in its
+// present state.
+func (m *Manifest) AsChanges() []*protos.ManifestChange {
+	changes := make([]*protos.ManifestChange, 0, len(m.Tables))
+	for id, tm := range m.Tables {
+		changes = append(changes, makeTableCreateChange(id, int(tm.Level)))
+	}
+	return changes
+}
+
+func (m *Manifest) clone() Manifest {
+	changeSet := protos.ManifestChangeSet{m.AsChanges()}
+	ret := createManifest()
+	y.Check(applyChangeSet(&ret, &changeSet))
+	return ret
+}
+
 func OpenOrCreateManifestFile(dir string) (ret *manifestFile, result Manifest, err error) {
 	return helpOpenOrCreateManifestFile(dir, manifestDeletionsRewriteThreshold)
 }
@@ -95,7 +112,7 @@ func helpOpenOrCreateManifestFile(dir string, deletionsThreshold int) (ret *mani
 		return nil, Manifest{}, err
 	}
 
-	m1, m2, truncOffset, err := ReplayManifestFile(fp)
+	manifest, truncOffset, err := ReplayManifestFile(fp)
 	if err != nil {
 		_ = fp.Close()
 		return nil, Manifest{}, err
@@ -112,7 +129,7 @@ func helpOpenOrCreateManifestFile(dir string, deletionsThreshold int) (ret *mani
 		return nil, Manifest{}, err
 	}
 
-	return &manifestFile{fp: fp, directory: dir, manifest: m1}, m2, nil
+	return &manifestFile{fp: fp, directory: dir, manifest: manifest.clone()}, manifest, nil
 }
 
 func (mf *manifestFile) close() error {
@@ -165,10 +182,7 @@ func (mf *manifestFile) rewrite() error {
 		return err
 	}
 	netCreations := len(mf.manifest.Tables)
-	changes := make([]*protos.ManifestChange, 0, netCreations)
-	for id, tm := range mf.manifest.Tables {
-		changes = append(changes, makeTableCreateChange(id, int(tm.Level)))
-	}
+	changes := mf.manifest.AsChanges()
 	set := protos.ManifestChangeSet{Changes: changes}
 
 	buf, err := set.Marshal()
@@ -224,13 +238,12 @@ func (r *countingReader) ReadByte() (b byte, err error) {
 // Also, returns the last offset after a completely read manifest entry -- the file must be
 // truncated at that point before further appends are made (if there is a partial entry after
 // that).  In normal conditions, truncOffset is the file size.
-func ReplayManifestFile(fp *os.File) (ret1 Manifest, ret2 Manifest, truncOffset int64, err error) {
+func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error) {
 	r := countingReader{wrapped: bufio.NewReader(fp)}
 
 	offset := r.count
 
-	build1 := createManifest()
-	build2 := createManifest()
+	build := createManifest()
 	for {
 		offset = r.count
 		var lenbuf [4]byte
@@ -239,7 +252,7 @@ func ReplayManifestFile(fp *os.File) (ret1 Manifest, ret2 Manifest, truncOffset 
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				break
 			}
-			return Manifest{}, Manifest{}, 0, err
+			return Manifest{}, 0, err
 		}
 		length := binary.BigEndian.Uint32(lenbuf[:])
 		var buf = make([]byte, length)
@@ -247,23 +260,20 @@ func ReplayManifestFile(fp *os.File) (ret1 Manifest, ret2 Manifest, truncOffset 
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				break
 			}
-			return Manifest{}, Manifest{}, 0, err
+			return Manifest{}, 0, err
 		}
 
 		var changeSet protos.ManifestChangeSet
 		if err := changeSet.Unmarshal(buf); err != nil {
-			return Manifest{}, Manifest{}, 0, err
+			return Manifest{}, 0, err
 		}
 
-		if err := applyChangeSet(&build1, &changeSet); err != nil {
-			return Manifest{}, Manifest{}, 0, err
-		}
-		if err := applyChangeSet(&build2, &changeSet); err != nil {
-			return Manifest{}, Manifest{}, 0, err
+		if err := applyChangeSet(&build, &changeSet); err != nil {
+			return Manifest{}, 0, err
 		}
 	}
 
-	return build1, build2, offset, err
+	return build, offset, err
 }
 
 func applyManifestChange(build *Manifest, tc *protos.ManifestChange) error {
