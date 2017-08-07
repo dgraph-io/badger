@@ -84,12 +84,12 @@ const (
 	manifestDeletionsRatio            = 10
 )
 
-func OpenOrCreateManifestFile(opt *Options) (ret *manifestFile, result manifest, err error) {
-	return helpOpenOrCreateManifestFile(opt, manifestDeletionsRewriteThreshold)
+func OpenOrCreateManifestFile(dir string) (ret *manifestFile, result manifest, err error) {
+	return helpOpenOrCreateManifestFile(dir, manifestDeletionsRewriteThreshold)
 }
 
-func helpOpenOrCreateManifestFile(opt *Options, deletionsThreshold int) (ret *manifestFile, result manifest, err error) {
-	path := filepath.Join(opt.Dir, manifestFilename)
+func helpOpenOrCreateManifestFile(dir string, deletionsThreshold int) (ret *manifestFile, result manifest, err error) {
+	path := filepath.Join(dir, manifestFilename)
 	fp, err := y.OpenSyncedFile(path, false) // We explicitly sync in addChanges, outside the lock.
 	if err != nil {
 		return nil, manifest{}, err
@@ -101,7 +101,7 @@ func helpOpenOrCreateManifestFile(opt *Options, deletionsThreshold int) (ret *ma
 		return nil, manifest{}, err
 	}
 
-	return &manifestFile{fp: fp, directory: opt.Dir, manifest: m1}, m2, nil
+	return &manifestFile{fp: fp, directory: dir, manifest: m1}, m2, nil
 }
 
 func (mf *manifestFile) close() error {
