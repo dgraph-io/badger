@@ -84,9 +84,9 @@ const (
 	manifestDeletionsRatio            = 10
 )
 
-// AsChanges returns a sequence of changes that could be used to recreate the Manifest in its
+// asChanges returns a sequence of changes that could be used to recreate the Manifest in its
 // present state.
-func (m *Manifest) AsChanges() []*protos.ManifestChange {
+func (m *Manifest) asChanges() []*protos.ManifestChange {
 	changes := make([]*protos.ManifestChange, 0, len(m.Tables))
 	for id, tm := range m.Tables {
 		changes = append(changes, makeTableCreateChange(id, int(tm.Level)))
@@ -95,7 +95,7 @@ func (m *Manifest) AsChanges() []*protos.ManifestChange {
 }
 
 func (m *Manifest) clone() Manifest {
-	changeSet := protos.ManifestChangeSet{m.AsChanges()}
+	changeSet := protos.ManifestChangeSet{m.asChanges()}
 	ret := createManifest()
 	y.Check(applyChangeSet(&ret, &changeSet))
 	return ret
@@ -182,7 +182,7 @@ func (mf *manifestFile) rewrite() error {
 		return err
 	}
 	netCreations := len(mf.manifest.Tables)
-	changes := mf.manifest.AsChanges()
+	changes := mf.manifest.asChanges()
 	set := protos.ManifestChangeSet{Changes: changes}
 
 	buf, err := set.Marshal()
