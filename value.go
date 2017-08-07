@@ -138,14 +138,18 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 	k := make([]byte, 1<<10)
 	v := make([]byte, 1<<20)
 
+	truncate := false
 	recordOffset := offset
 	for {
 
 		hash := crc32.New(entryHashTable)
 		tee := io.TeeReader(reader, hash)
 
-		if err = read(tee, hbuf[:]); err == io.EOF {
-			break
+		if err = read(tee, hbuf[:]); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
 		}
 
 		var e Entry
@@ -164,6 +168,10 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 		e.Value = v[:vl]
 
 		if err = read(tee, e.Key); err != nil {
+			if err == io.EOF {
+				truncate = true
+				break
+			}
 			return err
 		}
 		e.Meta = h.meta
@@ -171,21 +179,24 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 		e.casCounter = h.casCounter
 		e.CASCounterCheck = h.casCounterCheck
 		if err = read(tee, e.Value); err != nil {
+			if err == io.EOF {
+				truncate = true
+				break
+			}
 			return err
 		}
 
 		var crcBuf [entryHashSize]byte
 		if err = read(reader, crcBuf[:]); err != nil {
+			if err == io.EOF {
+				truncate = true
+				break
+			}
 			return err
 		}
 		crc := binary.BigEndian.Uint32(crcBuf[:])
 		if crc != hash.Sum32() {
-			f.Lock()
-			if err := f.fd.Truncate(int64(recordOffset)); err != nil {
-				f.Unlock()
-				return err
-			}
-			f.Unlock()
+			truncate = true
 			break
 		}
 
@@ -204,6 +215,16 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 			return y.Wrap(err)
 		}
 	}
+
+	if truncate {
+		f.Lock()
+		if err := f.fd.Truncate(int64(recordOffset)); err != nil {
+			f.Unlock()
+			return err
+		}
+		f.Unlock()
+	}
+
 	return nil
 }
 
