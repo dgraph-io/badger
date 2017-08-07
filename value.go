@@ -180,10 +180,13 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 		}
 		crc := binary.BigEndian.Uint32(crcBuf[:])
 		if crc != hash.Sum32() {
-			// TODO(peter): What to do when CRC doesn't match?
-			// 1. Return error.
-			// 2. Break out of loop (returning nil).
-			// Do we need to erase the remainder of the log file? Otherwise it would be broken 'forever'.
+			f.Lock()
+			if err := f.fd.Truncate(int64(recordOffset)); err != nil {
+				f.Unlock()
+				return err
+			}
+			f.Unlock()
+			break
 		}
 
 		var vp valuePointer
