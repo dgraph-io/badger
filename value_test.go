@@ -269,8 +269,8 @@ func TestChecksums(t *testing.T) {
 	require.NoError(t, kv.Set(k3, v3, 0))
 	require.NoError(t, kv.Close())
 
-	// Make sure that the vlog was truncated when corrupted K2 was found. The
-	// vlog should contain K1 and K3.
+	// The vlog should contain K1 and K3 (K2 was lost when Badger started up
+	// last due to checksum failure).
 	kv, err = NewKV(getTestOptions(b1))
 	require.NoError(t, err)
 	iter := kv.NewIterator(IteratorOptions{FetchValues: true})
