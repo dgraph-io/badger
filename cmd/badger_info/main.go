@@ -46,6 +46,7 @@ func main() {
 	err := printInfo(*dirFlag, *valueDirFlag)
 	if err != nil {
 		fmt.Println("Error:", err.Error())
+		os.Exit(1)
 	}
 }
 
