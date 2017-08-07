@@ -21,6 +21,8 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/dgraph-io/badger/y"
@@ -211,6 +213,79 @@ func TestValueGC2(t *testing.T) {
 		require.NotNil(t, val)
 		require.True(t, len(val) == sz, "Size found: %d", len(val))
 	}
+}
+
+func TestChecksums(t *testing.T) {
+	var (
+		k1 = []byte("k1")
+		k2 = []byte("k2")
+		k3 = []byte("k3")
+		v1 = []byte("value1")
+		v2 = []byte("value2")
+		v3 = []byte("value3")
+	)
+
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	// Use badger #1 to set K1=V1.
+	b1 := filepath.Join(dir, "b1")
+	require.NoError(t, os.Mkdir(b1, 0777))
+	kv, err := NewKV(getTestOptions(b1))
+	require.NoError(t, err)
+	require.NoError(t, kv.Set(k1, v1, 0))
+	require.NoError(t, kv.Close())
+
+	// Copy badger #1 to badger #2. Set K2=V2 in badger #2.
+	b2 := filepath.Join(dir, "b2")
+	require.NoError(t, exec.Command("cp", "-r", b1, b2).Run())
+	kv, err = NewKV(getTestOptions(b2))
+	require.NoError(t, err)
+	require.NoError(t, kv.Set(k2, v2, 0))
+	require.NoError(t, kv.Close())
+
+	// Copy the vlog from #2 to #1, corrupting the last entry during the copy.
+	// Badger #1 should now have K1 in its SST, but V1 and V2(corrupted) in its vlog.
+	const vlog = "000000.vlog"
+	b1vlog := filepath.Join(b1, vlog)
+	b2vlog := filepath.Join(b2, vlog)
+	buf, err := ioutil.ReadFile(b2vlog)
+	require.NoError(t, err)
+	buf[len(buf)-1] += 1 // Corrupt last byte
+	require.NoError(t, ioutil.WriteFile(b1vlog, buf, 0777))
+
+	// Badger #1 now has K1 in its SST and vlog...
+	kv, err = NewKV(getTestOptions(b1))
+	require.NoError(t, err)
+	var item KVItem
+	require.NoError(t, kv.Get(k1, &item))
+	require.Equal(t, item.Value(), v1)
+	// ...and corrupted K2 in its vlog (will be ignored).
+	ok, err := kv.Exists(k2)
+	require.NoError(t, err)
+	require.False(t, ok)
+	// Write K3 at the end of the vlog.
+	require.NoError(t, kv.Set(k3, v3, 0))
+	require.NoError(t, kv.Close())
+
+	// Make sure that the vlog was truncated when corrupted K2 was found. The
+	// vlog should contain K1 and K3.
+	kv, err = NewKV(getTestOptions(b1))
+	require.NoError(t, err)
+	iter := kv.NewIterator(IteratorOptions{FetchValues: true})
+	iter.Seek(k1)
+	require.True(t, iter.Valid())
+	it := iter.Item()
+	require.Equal(t, it.Key(), k1)
+	require.Equal(t, it.Value(), v1)
+	iter.Next()
+	require.True(t, iter.Valid())
+	it = iter.Item()
+	require.Equal(t, it.Key(), k3)
+	require.Equal(t, it.Value(), v3)
+	iter.Close()
+	require.NoError(t, kv.Close())
 }
 
 func BenchmarkReadWrite(b *testing.B) {
