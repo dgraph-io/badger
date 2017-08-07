@@ -140,7 +140,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 		elog:      trace.New("Badger", "Compact"),
 	}
 
-	manifest := createManifest(opt.MaxLevels)
+	manifest := createManifest()
 	lc, err := newLevelsController(kv, &manifest)
 	require.NoError(t, err)
 	done = lc.fillTablesL0(&cd)
@@ -167,18 +167,16 @@ func TestManifestRewrite(t *testing.T) {
 	dir, err := ioutil.TempDir("/tmp", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opt := DefaultOptions
-	opt.Dir = dir
 	deletionsThreshold := 10
-	mf, m, err := helpOpenOrCreateManifestFile(&opt, deletionsThreshold)
+	mf, m, err := helpOpenOrCreateManifestFile(dir, deletionsThreshold)
 	defer func() {
 		if mf != nil {
 			mf.close()
 		}
 	}()
 	require.NoError(t, err)
-	require.Equal(t, 0, m.creations)
-	require.Equal(t, 0, m.deletions)
+	require.Equal(t, 0, m.Creations)
+	require.Equal(t, 0, m.Deletions)
 
 	err = mf.addChanges(protos.ManifestChangeSet{[]*protos.ManifestChange{
 		makeTableCreateChange(0, 0),
@@ -196,9 +194,9 @@ func TestManifestRewrite(t *testing.T) {
 	err = mf.close()
 	require.NoError(t, err)
 	mf = nil
-	mf, m, err = helpOpenOrCreateManifestFile(&opt, deletionsThreshold)
+	mf, m, err = helpOpenOrCreateManifestFile(dir, deletionsThreshold)
 	require.NoError(t, err)
-	require.Equal(t, map[uint64]tableManifest{
-		uint64(deletionsThreshold * 3): tableManifest{level: 0},
-	}, m.tables)
+	require.Equal(t, map[uint64]TableManifest{
+		uint64(deletionsThreshold * 3): TableManifest{Level: 0},
+	}, m.Tables)
 }
