@@ -140,7 +140,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 		elog:      trace.New("Badger", "Compact"),
 	}
 
-	manifest := createManifest(opt.MaxLevels)
+	manifest := createManifest()
 	lc, err := newLevelsController(kv, &manifest)
 	require.NoError(t, err)
 	done = lc.fillTablesL0(&cd)

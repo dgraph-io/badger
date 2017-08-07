@@ -46,11 +46,8 @@ type manifest struct {
 	deletions int
 }
 
-func createManifest(maxLevels int) manifest {
-	levels := make([]levelManifest, maxLevels)
-	for i := 0; i < maxLevels; i++ {
-		levels[i].tables = make(map[uint64]struct{})
-	}
+func createManifest() manifest {
+	levels := make([]levelManifest, 0)
 	return manifest{
 		levels: levels,
 		tables: make(map[uint64]tableManifest),
@@ -87,7 +84,7 @@ const (
 	manifestDeletionsRatio            = 10
 )
 
-func openOrCreateManifestFile(opt *Options) (ret *manifestFile, result manifest, err error) {
+func OpenOrCreateManifestFile(opt *Options) (ret *manifestFile, result manifest, err error) {
 	return helpOpenOrCreateManifestFile(opt, manifestDeletionsRewriteThreshold)
 }
 
@@ -98,7 +95,7 @@ func helpOpenOrCreateManifestFile(opt *Options, deletionsThreshold int) (ret *ma
 		return nil, manifest{}, err
 	}
 
-	m1, m2, err := replayManifestFile(opt.MaxLevels, fp)
+	m1, m2, err := replayManifestFile(fp)
 	if err != nil {
 		_ = fp.Close()
 		return nil, manifest{}, err
@@ -213,13 +210,13 @@ func (r *countingReader) ReadByte() (b byte, err error) {
 
 // We need one immutable copy and one mutable copy of the manifest.  Easiest way is to construct
 // two of them.
-func replayManifestFile(maxLevels int, fp *os.File) (ret1 manifest, ret2 manifest, err error) {
+func replayManifestFile(fp *os.File) (ret1 manifest, ret2 manifest, err error) {
 	r := countingReader{wrapped: bufio.NewReader(fp)}
 
 	offset := r.count
 
-	build1 := createManifest(maxLevels)
-	build2 := createManifest(maxLevels)
+	build1 := createManifest()
+	build2 := createManifest()
 	for {
 		offset = r.count
 		var lenbuf [4]byte
@@ -267,6 +264,9 @@ func applyManifestChange(build *manifest, tc *protos.ManifestChange) error {
 		}
 		build.tables[tc.Id] = tableManifest{
 			level: uint8(tc.Level),
+		}
+		for len(build.levels) <= int(tc.Level) {
+			build.levels = append(build.levels, levelManifest{make(map[uint64]struct{})})
 		}
 		build.levels[tc.Level].tables[tc.Id] = struct{}{}
 		build.creations++
