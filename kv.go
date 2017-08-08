@@ -417,16 +417,15 @@ const (
 // in order to guarantee the file is visible (if the system crashes).  (See the man page for fsync,
 // or see https://github.com/coreos/etcd/issues/6368 for an example.)
 func syncDir(dir string) error {
-	f, err := os.Open(dir)
+	f, err := OpenDir(dir)
 	if err != nil {
 		return err
 	}
 	err = f.Sync()
-	closeErr := f.Close()
 	if err != nil {
 		return err
 	}
-	return closeErr
+	return f.Close()
 }
 
 // getMemtables returns the current memtables and get references.

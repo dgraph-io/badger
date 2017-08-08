@@ -33,7 +33,7 @@ import (
 )
 
 func TestManifestBasic(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir(os.TempDir(), "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -115,7 +115,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 }
 
 func TestOverlappingKeyRangeError(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir(os.TempDir(), "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := DefaultOptions
@@ -164,7 +164,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 }
 
 func TestManifestRewrite(t *testing.T) {
-	dir, err := ioutil.TempDir("/tmp", "badger")
+	dir, err := ioutil.TempDir(os.TempDir(), "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	deletionsThreshold := 10

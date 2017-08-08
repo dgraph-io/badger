@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"sync"
+	"os"
 
 	"github.com/dgraph-io/badger"
 )
@@ -28,7 +29,7 @@ var d string = "doc"
 
 func Example() {
 	opt := badger.DefaultOptions
-	dir, _ := ioutil.TempDir("/tmp", "badger")
+	dir, _ := ioutil.TempDir(os.TempDir(), "badger")
 	opt.Dir = dir
 	opt.ValueDir = dir
 	kv, _ := badger.NewKV(&opt)
@@ -85,7 +86,7 @@ func Example() {
 
 func ExampleKV_BatchSetAsync() {
 	opt := badger.DefaultOptions
-	dir, _ := ioutil.TempDir("/tmp", "badger")
+	dir, _ := ioutil.TempDir(os.TempDir(), "badger")
 	opt.Dir = dir
 	opt.SyncWrites = true
 	opt.ValueDir = dir
