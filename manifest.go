@@ -213,11 +213,15 @@ func (mf *manifestFile) rewrite() error {
 	if err := os.Rename(rewritePath, filepath.Join(mf.directory, ManifestFilename)); err != nil {
 		return err
 	}
-	mf.fp, err = y.OpenExistingSyncedFile(filepath.Join(mf.directory, ManifestFilename), false)
+	newFp, err := y.OpenExistingSyncedFile(filepath.Join(mf.directory, ManifestFilename), false)
 	if err != nil {
 		return err
 	}
-
+	if _, err := newFp.Seek(0, os.SEEK_END); err != nil {
+		newFp.Close()
+		return err
+	}
+	mf.fp = newFp
 	if err := syncDir(mf.directory); err != nil {
 		return err
 	}
