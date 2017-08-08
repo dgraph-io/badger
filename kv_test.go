@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,7 +47,7 @@ func TestWrite(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	kv, err := NewKV(getTestOptions(dir))
-	y.Check(err)
+	require.NoError(t, err)
 	defer kv.Close()
 
 	var entries []*Entry

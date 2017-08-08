@@ -207,10 +207,6 @@ func (mf *manifestFile) rewrite() error {
 	if err = fp.Close(); err != nil {
 		return err
 	}
-	if err = mf.fp.Sync(); err != nil {
-		mf.fp.Close()
-		return err
-	}
 	if err = mf.fp.Close(); err != nil {
 		return err
 	}
