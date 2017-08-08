@@ -104,7 +104,6 @@ func (lf *logFile) sync() error {
 }
 
 var errStop = errors.New("Stop iteration")
-
 var entryHashTable = crc32.MakeTable(crc32.Castagnoli)
 
 const entryHashSize = 4
@@ -143,7 +142,7 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 
 		var e Entry
 		e.offset = recordOffset
-		_, hlen := h.Decode(hbuf[:])
+		h.Decode(hbuf[:])
 		vl := int(h.vlen)
 		if cap(v) < vl {
 			v = make([]byte, 2*vl)
@@ -191,8 +190,8 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 
 		var vp valuePointer
 
-		recordOffset += uint32(hlen + kl + vl + entryHashSize)
-		vp.Len = uint32(len(hbuf)) + h.klen + h.vlen + entryHashSize
+		vp.Len = headerBufSize + h.klen + h.vlen + entryHashSize
+		recordOffset += vp.Len
 
 		vp.Offset = e.offset
 		vp.Fid = f.fid
@@ -391,15 +390,14 @@ func (h header) Encode(out []byte) {
 	binary.BigEndian.PutUint64(out[18:26], h.casCounterCheck)
 }
 
-// Decodes h from buf. Returns buf without header and number of bytes read.
-func (h *header) Decode(buf []byte) ([]byte, int) {
+// Decodes h from buf.
+func (h *header) Decode(buf []byte) {
 	h.klen = binary.BigEndian.Uint32(buf[0:4])
 	h.vlen = binary.BigEndian.Uint32(buf[4:8])
 	h.meta = buf[8]
 	h.userMeta = buf[9]
 	h.casCounter = binary.BigEndian.Uint64(buf[10:18])
 	h.casCounterCheck = binary.BigEndian.Uint64(buf[18:26])
-	return buf[26:], 26
 }
 
 type valuePointer struct {
