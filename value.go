@@ -205,12 +205,9 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 	}
 
 	if truncate {
-		f.Lock()
 		if err := f.fd.Truncate(int64(recordOffset)); err != nil {
-			f.Unlock()
 			return err
 		}
-		f.Unlock()
 	}
 
 	return nil
