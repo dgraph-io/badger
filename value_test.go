@@ -274,7 +274,7 @@ func TestChecksums(t *testing.T) {
 	require.NoError(t, kv.Close())
 }
 
-func TestPatialAppendToValueLog(t *testing.T) {
+func TestPartialAppendToValueLog(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)

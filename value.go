@@ -119,19 +119,6 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 		return y.Wrap(err)
 	}
 
-	read := func(r io.Reader, buf []byte) error {
-		for {
-			n, err := r.Read(buf)
-			if err != nil {
-				return err
-			}
-			if n == len(buf) {
-				return nil
-			}
-			buf = buf[n:]
-		}
-	}
-
 	reader := bufio.NewReader(f.fd)
 	var hbuf [headerBufSize]byte
 	var h header
@@ -141,12 +128,14 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 	truncate := false
 	recordOffset := offset
 	for {
-
 		hash := crc32.New(entryHashTable)
 		tee := io.TeeReader(reader, hash)
 
-		if err = read(tee, hbuf[:]); err != nil {
+		if _, err = io.ReadFull(tee, hbuf[:]); err != nil {
 			if err == io.EOF {
+				break
+			} else if err == io.ErrUnexpectedEOF {
+				truncate = true
 				break
 			}
 			return err
@@ -167,8 +156,8 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 		e.Key = k[:kl]
 		e.Value = v[:vl]
 
-		if err = read(tee, e.Key); err != nil {
-			if err == io.EOF {
+		if _, err = io.ReadFull(tee, e.Key); err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				truncate = true
 				break
 			}
@@ -178,8 +167,8 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 		e.UserMeta = h.userMeta
 		e.casCounter = h.casCounter
 		e.CASCounterCheck = h.casCounterCheck
-		if err = read(tee, e.Value); err != nil {
-			if err == io.EOF {
+		if _, err = io.ReadFull(tee, e.Value); err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				truncate = true
 				break
 			}
@@ -187,8 +176,8 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 		}
 
 		var crcBuf [entryHashSize]byte
-		if err = read(reader, crcBuf[:]); err != nil {
-			if err == io.EOF {
+		if _, err = io.ReadFull(reader, crcBuf[:]); err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				truncate = true
 				break
 			}
