@@ -116,9 +116,9 @@ func (opt *Options) estimateSize(entry *Entry) int {
 type KV struct {
 	sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
 
-	dirLockGuard *y.DirectoryLockGuard
+	dirLockGuard *DirectoryLockGuard
 	// nil if Dir and ValueDir are the same
-	valueDirGuard *y.DirectoryLockGuard
+	valueDirGuard *DirectoryLockGuard
 
 	closer    *y.Closer
 	elog      trace.EventLog
@@ -169,7 +169,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		return nil, err
 	}
 
-	dirLockGuard, err := y.AcquireDirectoryLock(opt.Dir, lockFile)
+	dirLockGuard, err := AcquireDirectoryLock(opt.Dir, lockFile)
 	if err != nil {
 		return nil, err
 	}
@@ -178,9 +178,9 @@ func NewKV(optParam *Options) (out *KV, err error) {
 			_ = dirLockGuard.Release()
 		}
 	}()
-	var valueDirLockGuard *y.DirectoryLockGuard
+	var valueDirLockGuard *DirectoryLockGuard
 	if absValueDir != absDir {
-		valueDirLockGuard, err = y.AcquireDirectoryLock(opt.ValueDir, lockFile)
+		valueDirLockGuard, err = AcquireDirectoryLock(opt.ValueDir, lockFile)
 		if err != nil {
 			return nil, err
 		}
