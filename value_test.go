@@ -29,7 +29,7 @@ import (
 )
 
 func TestValueBasic(t *testing.T) {
-	dir, err := ioutil.TempDir(os.TempDir(), "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	y.Check(err)
 	defer os.RemoveAll(dir)
 
@@ -224,7 +224,7 @@ var (
 )
 
 func TestChecksums(t *testing.T) {
-	dir, err := ioutil.TempDir(os.TempDir(), "badger")
+	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 

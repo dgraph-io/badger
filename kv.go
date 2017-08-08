@@ -422,10 +422,11 @@ func syncDir(dir string) error {
 		return err
 	}
 	err = f.Sync()
+	closeErr := f.Close()
 	if err != nil {
 		return err
 	}
-	return f.Close()
+	return closeErr
 }
 
 // getMemtables returns the current memtables and get references.

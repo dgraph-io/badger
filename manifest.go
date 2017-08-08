@@ -202,12 +202,26 @@ func (mf *manifestFile) rewrite() error {
 	}
 	mf.manifest.Creations = netCreations
 	mf.manifest.Deletions = 0
-	if err := os.Rename(rewritePath, filepath.Join(mf.directory, ManifestFilename)); err != nil {
-		fp.Close()
+
+	// In Windows the files should be closed before doing a Rename.
+	if err = fp.Close(); err != nil {
 		return err
 	}
-	mf.fp.Close()
-	mf.fp = fp
+	if err = mf.fp.Sync(); err != nil {
+		mf.fp.Close()
+		return err
+	}
+	if err = mf.fp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(rewritePath, filepath.Join(mf.directory, ManifestFilename)); err != nil {
+		return err
+	}
+	mf.fp, err = y.OpenExistingSyncedFile(filepath.Join(mf.directory, ManifestFilename), false)
+	if err != nil {
+		return err
+	}
+
 	if err := syncDir(mf.directory); err != nil {
 		return err
 	}
