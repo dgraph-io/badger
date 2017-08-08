@@ -105,7 +105,7 @@ func (lf *logFile) sync() error {
 
 var errStop = errors.New("Stop iteration")
 
-var entryHashTable = crc32.MakeTable(crc32.Koopman)
+var entryHashTable = crc32.MakeTable(crc32.Castagnoli)
 
 const entryHashSize = 4
 
