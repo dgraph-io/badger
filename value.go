@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -103,6 +104,9 @@ func (lf *logFile) sync() error {
 }
 
 var errStop = errors.New("Stop iteration")
+var entryHashTable = crc32.MakeTable(crc32.Castagnoli)
+
+const entryHashSize = 4
 
 type logEntry func(e Entry, vp valuePointer) error
 
@@ -114,34 +118,31 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 		return y.Wrap(err)
 	}
 
-	read := func(r *bufio.Reader, buf []byte) error {
-		for {
-			n, err := r.Read(buf)
-			if err != nil {
-				return err
-			}
-			if n == len(buf) {
-				return nil
-			}
-			buf = buf[n:]
-		}
-	}
-
 	reader := bufio.NewReader(f.fd)
 	var hbuf [headerBufSize]byte
 	var h header
 	k := make([]byte, 1<<10)
 	v := make([]byte, 1<<20)
 
+	truncate := false
 	recordOffset := offset
 	for {
-		if err = read(reader, hbuf[:]); err == io.EOF {
-			break
+		hash := crc32.New(entryHashTable)
+		tee := io.TeeReader(reader, hash)
+
+		if _, err = io.ReadFull(tee, hbuf[:]); err != nil {
+			if err == io.EOF {
+				break
+			} else if err == io.ErrUnexpectedEOF {
+				truncate = true
+				break
+			}
+			return err
 		}
 
 		var e Entry
 		e.offset = recordOffset
-		_, hlen := h.Decode(hbuf[:])
+		h.Decode(hbuf[:])
 		vl := int(h.vlen)
 		if cap(v) < vl {
 			v = make([]byte, 2*vl)
@@ -154,21 +155,43 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 		e.Key = k[:kl]
 		e.Value = v[:vl]
 
-		if err = read(reader, e.Key); err != nil {
+		if _, err = io.ReadFull(tee, e.Key); err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				truncate = true
+				break
+			}
 			return err
 		}
 		e.Meta = h.meta
 		e.UserMeta = h.userMeta
 		e.casCounter = h.casCounter
 		e.CASCounterCheck = h.casCounterCheck
-		if err = read(reader, e.Value); err != nil {
+		if _, err = io.ReadFull(tee, e.Value); err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				truncate = true
+				break
+			}
 			return err
+		}
+
+		var crcBuf [entryHashSize]byte
+		if _, err = io.ReadFull(reader, crcBuf[:]); err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				truncate = true
+				break
+			}
+			return err
+		}
+		crc := binary.BigEndian.Uint32(crcBuf[:])
+		if crc != hash.Sum32() {
+			truncate = true
+			break
 		}
 
 		var vp valuePointer
 
-		recordOffset += uint32(hlen + kl + vl)
-		vp.Len = uint32(len(hbuf)) + h.klen + h.vlen
+		vp.Len = headerBufSize + h.klen + h.vlen + entryHashSize
+		recordOffset += vp.Len
 
 		vp.Offset = e.offset
 		vp.Fid = f.fid
@@ -180,6 +203,13 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 			return y.Wrap(err)
 		}
 	}
+
+	if truncate {
+		if err := f.fd.Truncate(int64(recordOffset)); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -320,10 +350,14 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	var headerEnc [headerBufSize]byte
 	h.Encode(headerEnc[:])
 
-	buf.Write(headerEnc[:])
-	buf.Write(e.Key)
-	buf.Write(e.Value)
-	return len(headerEnc) + len(e.Key) + len(e.Value), nil
+	hash := crc32.New(entryHashTable)
+	w := io.MultiWriter(hash, buf)
+
+	w.Write(headerEnc[:])
+	w.Write(e.Key)
+	w.Write(e.Value)
+	binary.Write(buf, binary.BigEndian, hash.Sum32())
+	return len(headerEnc) + len(e.Key) + len(e.Value) + entryHashSize, nil
 }
 
 func (e Entry) print(prefix string) {
@@ -354,15 +388,14 @@ func (h header) Encode(out []byte) {
 	binary.BigEndian.PutUint64(out[18:26], h.casCounterCheck)
 }
 
-// Decodes h from buf. Returns buf without header and number of bytes read.
-func (h *header) Decode(buf []byte) ([]byte, int) {
+// Decodes h from buf.
+func (h *header) Decode(buf []byte) {
 	h.klen = binary.BigEndian.Uint32(buf[0:4])
 	h.vlen = binary.BigEndian.Uint32(buf[4:8])
 	h.meta = buf[8]
 	h.userMeta = buf[9]
 	h.casCounter = binary.BigEndian.Uint64(buf[10:18])
 	h.casCounterCheck = binary.BigEndian.Uint64(buf[18:26])
-	return buf[26:], 26
 }
 
 type valuePointer struct {
@@ -681,14 +714,24 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 		return e, err
 	}
 	var h header
-	buf, _ = h.Decode(buf)
+	h.Decode(buf)
+	n := uint32(headerBufSize)
 
-	e.Key = buf[0:h.klen]
+	e.Key = buf[n : n+h.klen]
+	n += h.klen
 	e.Meta = h.meta
 	e.UserMeta = h.userMeta
 	e.casCounter = h.casCounter
 	e.CASCounterCheck = h.casCounterCheck
-	e.Value = buf[h.klen : h.klen+h.vlen]
+	e.Value = buf[n : n+h.vlen]
+	n += h.vlen
+
+	storedCRC := binary.BigEndian.Uint32(buf[n:])
+	calculatedCRC := crc32.Checksum(buf[:n], entryHashTable)
+	if storedCRC != calculatedCRC {
+		return e, errors.New("CRC checksum mismatch")
+	}
+
 	return e, nil
 }
 

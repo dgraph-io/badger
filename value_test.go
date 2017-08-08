@@ -21,6 +21,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/dgraph-io/badger/y"
@@ -56,7 +57,7 @@ func TestValueBasic(t *testing.T) {
 
 	log.write([]*request{b})
 	require.Len(t, b.Ptrs, 2)
-	fmt.Printf("Pointer written: %+v %+v", b.Ptrs[0], b.Ptrs[1])
+	fmt.Printf("Pointer written: %+v %+v\n", b.Ptrs[0], b.Ptrs[1])
 
 	e, err := log.Read(b.Ptrs[0], nil)
 	e2, err := log.Read(b.Ptrs[1], nil)
@@ -211,6 +212,130 @@ func TestValueGC2(t *testing.T) {
 		require.NotNil(t, val)
 		require.True(t, len(val) == sz, "Size found: %d", len(val))
 	}
+}
+
+var (
+	k1 = []byte("k1")
+	k2 = []byte("k2")
+	k3 = []byte("k3")
+	v1 = []byte("value1")
+	v2 = []byte("value2")
+	v3 = []byte("value3")
+)
+
+func TestChecksums(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	// Set up SST with K1=V1
+	kv, err := NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+	require.NoError(t, kv.Set(k1, v1, 0))
+	require.NoError(t, kv.Close())
+
+	// Use a vlog with K1=V1 and a (corrupted) K2=V2
+	buf := createVlog(t, []*Entry{
+		&Entry{Key: k1, Value: v1},
+		&Entry{Key: k2, Value: v2},
+	})
+	buf[len(buf)-1]++ // Corrupt last byte
+	require.NoError(t, ioutil.WriteFile(filepath.Join(dir, "000000.vlog"), buf, 0777))
+
+	// K1 should exist, but K2 shouldn't.
+	kv, err = NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+	var item KVItem
+	require.NoError(t, kv.Get(k1, &item))
+	require.Equal(t, item.Value(), v1)
+	ok, err := kv.Exists(k2)
+	require.NoError(t, err)
+	require.False(t, ok)
+	// Write K3 at the end of the vlog.
+	require.NoError(t, kv.Set(k3, v3, 0))
+	require.NoError(t, kv.Close())
+
+	// The vlog should contain K1 and K3 (K2 was lost when Badger started up
+	// last due to checksum failure).
+	kv, err = NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+	iter := kv.NewIterator(IteratorOptions{FetchValues: true})
+	iter.Seek(k1)
+	require.True(t, iter.Valid())
+	it := iter.Item()
+	require.Equal(t, it.Key(), k1)
+	require.Equal(t, it.Value(), v1)
+	iter.Next()
+	require.True(t, iter.Valid())
+	it = iter.Item()
+	require.Equal(t, it.Key(), k3)
+	require.Equal(t, it.Value(), v3)
+	iter.Close()
+	require.NoError(t, kv.Close())
+}
+
+func TestPartialAppendToValueLog(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	// Create skeleton files.
+	kv, err := NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+	require.NoError(t, kv.Close())
+
+	// Create truncated vlog to simulate a partial append.
+	buf := createVlog(t, []*Entry{
+		&Entry{Key: k1, Value: v1},
+		&Entry{Key: k2, Value: v2},
+	})
+	buf = buf[:len(buf)-6]
+	require.NoError(t, ioutil.WriteFile(filepath.Join(dir, "000000.vlog"), buf, 0777))
+
+	// Badger should now start up, but with only K1.
+	kv, err = NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+	var item KVItem
+	require.NoError(t, kv.Get(k1, &item))
+	ok, err := kv.Exists(k2)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Equal(t, item.Key(), k1)
+	require.Equal(t, item.Value(), v1)
+
+	// When K3 is set, it should be persisted after a restart.
+	require.NoError(t, kv.Set(k3, v3, 0))
+	require.NoError(t, kv.Close())
+	kv, err = NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+	checkKeys(t, kv, [][]byte{k1, k3})
+	require.NoError(t, kv.Close())
+}
+
+func createVlog(t *testing.T, entries []*Entry) []byte {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	kv, err := NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+	require.NoError(t, kv.BatchSet(entries))
+	require.NoError(t, kv.Close())
+
+	filename := filepath.Join(dir, "000000.vlog")
+	buf, err := ioutil.ReadFile(filename)
+	require.NoError(t, err)
+	return buf
+}
+
+func checkKeys(t *testing.T, kv *KV, keys [][]byte) {
+	i := 0
+	iter := kv.NewIterator(IteratorOptions{})
+	for iter.Seek(keys[0]); iter.Valid(); iter.Next() {
+		require.Equal(t, iter.Item().Key(), keys[i])
+		i++
+	}
+	require.Equal(t, i, len(keys))
 }
 
 func BenchmarkReadWrite(b *testing.B) {
