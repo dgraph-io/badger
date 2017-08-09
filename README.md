@@ -1,4 +1,4 @@
-# Badger [![GoDoc](https://godoc.org/github.com/dgraph-io/badger?status.svg)](https://godoc.org/github.com/dgraph-io/badger) [![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger)](https://goreportcard.com/report/github.com/dgraph-io/badger)
+# Badger [![GoDoc](https://godoc.org/github.com/dgraph-io/badger?status.svg)](https://godoc.org/github.com/dgraph-io/badger) [![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger)](https://goreportcard.com/report/github.com/dgraph-io/badger) [![Build Status](https://travis-ci.org/dgraph-io/badger.svg?branch=master)](https://travis-ci.org/dgraph-io/badger)
 
 An embeddable, persistent, simple and fast key-value (KV) store, written purely in Go. It's meant to be an alternative to [RocksDB](https://github.com/facebook/rocksdb).
 
