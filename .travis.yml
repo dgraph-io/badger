@@ -1,5 +1,9 @@
 language: go
 go: 1.8
+matrix:
+  include:
+    - os: linux
+    - os: osx
 notifications:
   email: false
   slack:
