@@ -26,6 +26,7 @@ build_script:
   # We need to disable firewall - https://github.com/appveyor/ci/issues/1579#issuecomment-309830648
   - ps: Disable-NetFirewallRule -DisplayName 'File and Printer Sharing (SMB-Out)'
   - cd c:\gopath\src\github.com\dgraph-io\badger
+  - go get -u -t github.com/dgraph-io/badger
 
 # To run your custom scripts instead of automatic tests
 test_script:
