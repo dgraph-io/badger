@@ -90,6 +90,9 @@ func (lf *logFile) read(buf []byte, offset int64) error {
 func (lf *logFile) doneWriting() error {
 	lf.Lock()
 	defer lf.Unlock()
+	if err := lf.fd.Sync(); err != nil {
+		return errors.Wrapf(err, "Unable to sync value log: %q", lf.path)
+	}
 	if err := lf.fd.Close(); err != nil {
 		return errors.Wrapf(err, "Unable to close value log: %q", lf.path)
 	}
