@@ -864,7 +864,7 @@ func (vlog *valueLog) doRunGC() error {
 	}
 	vlog.elog.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
 
-	if r.total < 10.0 || r.keep >= vlog.opt.ValueGCThreshold*r.total {
+	if r.total < 10.0 || r.discard < vlog.opt.ValueGCThreshold*r.total {
 		vlog.elog.Printf("Skipping GC on fid: %d\n\n", lf.fid)
 		return nil
 	}
