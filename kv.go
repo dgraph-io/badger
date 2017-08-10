@@ -454,6 +454,10 @@ func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 }
 
 func (s *KV) fillItem(item *KVItem) error {
+	if item.meta == 0 && item.vptr == nil {
+		item.val = nil // key not found
+		return nil
+	}
 	if (item.meta & BitDelete) != 0 {
 		// Tombstone encountered.
 		item.val = nil
