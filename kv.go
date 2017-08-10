@@ -116,9 +116,9 @@ func (opt *Options) estimateSize(entry *Entry) int {
 type KV struct {
 	sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
 
-	dirLockGuard *y.DirectoryLockGuard
+	dirLockGuard *DirectoryLockGuard
 	// nil if Dir and ValueDir are the same
-	valueDirGuard *y.DirectoryLockGuard
+	valueDirGuard *DirectoryLockGuard
 
 	closer    *y.Closer
 	elog      trace.EventLog
@@ -169,7 +169,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		return nil, err
 	}
 
-	dirLockGuard, err := y.AcquireDirectoryLock(opt.Dir, lockFile)
+	dirLockGuard, err := AcquireDirectoryLock(opt.Dir, lockFile)
 	if err != nil {
 		return nil, err
 	}
@@ -178,9 +178,9 @@ func NewKV(optParam *Options) (out *KV, err error) {
 			_ = dirLockGuard.Release()
 		}
 	}()
-	var valueDirLockGuard *y.DirectoryLockGuard
+	var valueDirLockGuard *DirectoryLockGuard
 	if absValueDir != absDir {
-		valueDirLockGuard, err = y.AcquireDirectoryLock(opt.ValueDir, lockFile)
+		valueDirLockGuard, err = AcquireDirectoryLock(opt.ValueDir, lockFile)
 		if err != nil {
 			return nil, err
 		}
@@ -417,7 +417,7 @@ const (
 // in order to guarantee the file is visible (if the system crashes).  (See the man page for fsync,
 // or see https://github.com/coreos/etcd/issues/6368 for an example.)
 func syncDir(dir string) error {
-	f, err := os.Open(dir)
+	f, err := OpenDir(dir)
 	if err != nil {
 		return err
 	}
