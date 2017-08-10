@@ -1,3 +1,5 @@
+// +build !windows
+
 /*
  * Copyright 2017 Dgraph Labs, Inc. and Contributors
  *
@@ -13,8 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-// +build !windows
 
 package table
 
