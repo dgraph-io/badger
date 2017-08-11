@@ -63,6 +63,9 @@ Only a pointer to the value is stored along with the key, which significantly re
 This allows storing lot more KV pairs per table. For e.g., a table of size 64MB can store 2 million KV pairs assuming an average key size of 16 bytes, and a value pointer of 16 bytes (with prefix diffing in Badger, the average key sizes stored in a table would be lower).
 Thus, lesser compactions are required to achieve stability for the LSM tree, which results in fewer writes (all writes being serial).
 
+It might be a good idea on ext4 to periodically invoke `fstrim` in case the file system [does not quickly reuse space from deleted files](http://www.ogris.de/blkalloc/).
+We're currently investigating the situation.
+
 ### Nature of LSM trees
 
 Because only keys (and value pointers) are stored in LSM tree, Badger generates much smaller LSM trees.
