@@ -805,14 +805,15 @@ func TestBigKeyValuePairs(t *testing.T) {
 	kv, err := NewKV(getTestOptions(dir))
 	require.NoError(t, err)
 
-	big := make([]byte, maxKeyValueSize+1)
+	bigK := make([]byte, maxKeySize+1)
+	bigV := make([]byte, maxValueSize+1)
 	small := make([]byte, 10)
 
-	require.Equal(t, ErrExceedsMaxKeyValueSize, kv.Set(big, small, 0))
-	require.Equal(t, ErrExceedsMaxKeyValueSize, kv.Set(small, big, 0))
+	require.Equal(t, ErrExceedsMaxKeyValueSize, kv.Set(bigK, small, 0))
+	require.Equal(t, ErrExceedsMaxKeyValueSize, kv.Set(small, bigV, 0))
 
 	e1 := Entry{Key: small, Value: small}
-	e2 := Entry{Key: big, Value: big}
+	e2 := Entry{Key: bigK, Value: bigV}
 	err = kv.BatchSet([]*Entry{&e1, &e2})
 	require.Equal(t, ErrExceedsMaxKeyValueSize, err)
 	require.Nil(t, e1.Error)

@@ -140,7 +140,7 @@ type KV struct {
 
 var ErrInvalidDir error = errors.New("Invalid Dir, directory does not exist")
 var ErrValueLogSize error = errors.New("Invalid ValueLogFileSize, must be between 1MB and 1GB")
-var ErrExceedsMaxKeyValueSize error = errors.New("Key/value size exceeded 1GB limit")
+var ErrExceedsMaxKeyValueSize error = errors.New("Key (value) size exceeded 1MB (1GB) limit")
 
 const (
 	kvWriteChCapacity = 1000
@@ -753,7 +753,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 	var b *request
 	var bad []*Entry
 	for _, entry := range entries {
-		if len(entry.Key) > maxKeyValueSize || len(entry.Value) > maxKeyValueSize {
+		if len(entry.Key) > maxKeySize || len(entry.Value) > maxValueSize {
 			entry.Error = ErrExceedsMaxKeyValueSize
 			bad = append(bad, entry)
 			continue
