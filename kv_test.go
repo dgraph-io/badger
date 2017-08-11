@@ -815,7 +815,7 @@ func TestBigKeyValuePairs(t *testing.T) {
 	e1 := Entry{Key: small, Value: small}
 	e2 := Entry{Key: bigK, Value: bigV}
 	err = kv.BatchSet([]*Entry{&e1, &e2})
-	require.Equal(t, ErrExceedsMaxKeyValueSize, err)
+	require.Nil(t, err)
 	require.Nil(t, e1.Error)
 	require.Equal(t, ErrExceedsMaxKeyValueSize, e2.Error)
 

@@ -785,7 +785,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 		b := requestPool.Get().(*request)
 		b.Entries = bad
 		b.Wg = sync.WaitGroup{}
-		b.Err = ErrExceedsMaxKeyValueSize
+		b.Err = nil
 		b.Ptrs = nil
 		reqs = append(reqs, b)
 	}
@@ -793,11 +793,13 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 	return reqs
 }
 
-// BatchSet applies a list of badger.Entry. Errors are set on each Entry individually.
+// BatchSet applies a list of badger.Entry. If a request level error occurs it
+// will be returned. Errors are also set on each Entry and must be checked
+// individually.
+//   Check(kv.BatchSet(entries))
 //   for _, e := range entries {
 //      Check(e.Error)
 //   }
-// The returned error will be one of the entry errors (or nil if there were no errors).
 func (s *KV) BatchSet(entries []*Entry) error {
 	reqs := s.sendToWriteCh(entries)
 
@@ -812,9 +814,16 @@ func (s *KV) BatchSet(entries []*Entry) error {
 	return err
 }
 
-// BatchSetAsync is the asynchronous version of BatchSet. It accepts a callback function
-// which is called when all the sets are complete. Any error during execution is passed as an
-// argument to the callback function.
+// BatchSetAsync is the asynchronous version of BatchSet. It accepts a callback
+// function which is called when all the sets are complete. If a request level
+// error occurs, it will be passed back via the callback. The caller should
+// still check for errors set on each Entry individually.
+//   kv.BatchSetAsync(entries, func(err error)) {
+//      Check(err)
+//      for _, e := range entries {
+//         Check(e.Error)
+//      }
+//   }
 func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
 	reqs := s.sendToWriteCh(entries)
 
@@ -827,9 +836,9 @@ func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
 			}
 			requestPool.Put(req)
 		}
+		// All writes complete, let's call the callback function now.
+		f(err)
 	}()
-	// All writes complete, let's call the callback function now.
-	return err
 }
 
 // Set sets the provided value for a given key. If key is not present, it is created.
@@ -840,7 +849,10 @@ func (s *KV) Set(key, val []byte, userMeta byte) error {
 		Value:    val,
 		UserMeta: userMeta,
 	}
-	return s.BatchSet([]*Entry{e})
+	if err := s.BatchSet([]*Entry{e}); err != nil {
+		return err
+	}
+	return e.Error
 }
 
 // SetAsync is the asynchronous version of Set. It accepts a callback function which is called
@@ -852,7 +864,17 @@ func (s *KV) SetAsync(key, val []byte, userMeta byte, f func(error)) {
 		Value:    val,
 		UserMeta: userMeta,
 	}
-	s.BatchSetAsync([]*Entry{e}, f)
+	s.BatchSetAsync([]*Entry{e}, func(err error) {
+		if err != nil {
+			f(err)
+			return
+		}
+		if e.Error != nil {
+			f(e.Error)
+			return
+		}
+		f(nil)
+	})
 }
 
 // SetIfAbsent sets value of key if key is not present.
