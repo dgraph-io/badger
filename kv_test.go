@@ -796,3 +796,33 @@ func TestPidFile(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Another process is using this Badger database")
 }
+
+func TestBigKeyValuePairs(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	kv, err := NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+
+	big := make([]byte, (1<<30)+1)
+	small := make([]byte, 10)
+
+	require.Equal(t, ErrExceedsMaxKeyValueSize, kv.Set(big, small, 0))
+	require.Equal(t, ErrExceedsMaxKeyValueSize, kv.Set(small, big, 0))
+
+	e1 := Entry{Key: small, Value: small}
+	e2 := Entry{Key: big, Value: big}
+	err = kv.BatchSet([]*Entry{&e1, &e2})
+	require.Equal(t, ErrExceedsMaxKeyValueSize, err)
+	require.Nil(t, e1.Error)
+	require.Equal(t, ErrExceedsMaxKeyValueSize, e2.Error)
+
+	// make sure e1 was actually set:
+	var item KVItem
+	require.NoError(t, kv.Get(small, &item))
+	require.Equal(t, item.Key(), small)
+	require.Equal(t, item.Value(), small)
+
+	require.NoError(t, kv.Close())
+}

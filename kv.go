@@ -140,6 +140,7 @@ type KV struct {
 
 var ErrInvalidDir error = errors.New("Invalid Dir, directory does not exist")
 var ErrValueLogSize error = errors.New("Invalid ValueLogFileSize, must be between 1MB and 1GB")
+var ErrExceedsMaxKeyValueSize error = errors.New("Key/value size exceeded 1GB limit")
 
 const (
 	kvWriteChCapacity = 1000
@@ -750,7 +751,13 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 	var reqs []*request
 	var size int64
 	var b *request
+	var bad []*Entry
 	for _, entry := range entries {
+		if len(entry.Key) > maxKeyValueSize || len(entry.Value) > maxKeyValueSize {
+			entry.Error = ErrExceedsMaxKeyValueSize
+			bad = append(bad, entry)
+			continue
+		}
 		if b == nil {
 			b = requestPool.Get().(*request)
 			b.Entries = b.Entries[:0]
@@ -773,6 +780,16 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 		y.NumPuts.Add(int64(len(b.Entries)))
 		reqs = append(reqs, b)
 	}
+
+	if len(bad) > 0 {
+		b := requestPool.Get().(*request)
+		b.Entries = bad
+		b.Wg = sync.WaitGroup{}
+		b.Err = ErrExceedsMaxKeyValueSize
+		b.Ptrs = nil
+		reqs = append(reqs, b)
+	}
+
 	return reqs
 }
 
@@ -780,6 +797,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 //   for _, e := range entries {
 //      Check(e.Error)
 //   }
+// The returned error will be one of the entry errors (or nil if there were no errors).
 func (s *KV) BatchSet(entries []*Entry) error {
 	reqs := s.sendToWriteCh(entries)
 
@@ -798,18 +816,8 @@ func (s *KV) BatchSet(entries []*Entry) error {
 // which is called when all the sets are complete. Any error during execution is passed as an
 // argument to the callback function.
 func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
-	reqs := s.sendToWriteCh(entries)
-
 	go func() {
-		var err error
-		for _, req := range reqs {
-			req.Wg.Wait()
-			if req.Err != nil {
-				err = req.Err
-			}
-			requestPool.Put(req)
-		}
-		// All writes complete, lets call the callback function now.
+		err := s.BatchSet(entries)
 		f(err)
 	}()
 }
