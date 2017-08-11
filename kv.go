@@ -816,10 +816,20 @@ func (s *KV) BatchSet(entries []*Entry) error {
 // which is called when all the sets are complete. Any error during execution is passed as an
 // argument to the callback function.
 func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
+	reqs := s.sendToWriteCh(entries)
+
 	go func() {
-		err := s.BatchSet(entries)
-		f(err)
+		var err error
+		for _, req := range reqs {
+			req.Wg.Wait()
+			if req.Err != nil {
+				err = req.Err
+			}
+			requestPool.Put(req)
+		}
 	}()
+	// All writes complete, let's call the callback function now.
+	return err
 }
 
 // Set sets the provided value for a given key. If key is not present, it is created.
