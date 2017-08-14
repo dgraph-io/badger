@@ -107,7 +107,6 @@ func (lf *logFile) sync() error {
 }
 
 var errStop = errors.New("Stop iteration")
-var entryHashTable = crc32.MakeTable(crc32.Castagnoli)
 
 const entryHashSize = 4
 
@@ -130,7 +129,7 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 	truncate := false
 	recordOffset := offset
 	for {
-		hash := crc32.New(entryHashTable)
+		hash := crc32.New(y.CastagnoliCrcTable)
 		tee := io.TeeReader(reader, hash)
 
 		if _, err = io.ReadFull(tee, hbuf[:]); err != nil {
@@ -353,7 +352,7 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	var headerEnc [headerBufSize]byte
 	h.Encode(headerEnc[:])
 
-	hash := crc32.New(entryHashTable)
+	hash := crc32.New(y.CastagnoliCrcTable)
 	w := io.MultiWriter(hash, buf)
 
 	w.Write(headerEnc[:])
@@ -730,7 +729,7 @@ func (l *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	n += h.vlen
 
 	storedCRC := binary.BigEndian.Uint32(buf[n:])
-	calculatedCRC := crc32.Checksum(buf[:n], entryHashTable)
+	calculatedCRC := crc32.Checksum(buf[:n], y.CastagnoliCrcTable)
 	if storedCRC != calculatedCRC {
 		return e, errors.New("CRC checksum mismatch")
 	}
