@@ -788,7 +788,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 		b.Err = nil
 		b.Ptrs = nil
 		reqs = append(reqs, b)
-		y.NumBlockedLargePuts.Add(int64(len(bad)))
+		y.NumBlockedPuts.Add(int64(len(bad)))
 	}
 
 	return reqs

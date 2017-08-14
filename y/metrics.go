@@ -23,16 +23,16 @@ var (
 	VlogSize *expvar.Map
 
 	// These are cumulative
-	NumReads            *expvar.Int
-	NumWrites           *expvar.Int
-	NumBytesRead        *expvar.Int
-	NumBytesWritten     *expvar.Int
-	NumLSMGets          *expvar.Map
-	NumLSMBloomHits     *expvar.Map
-	NumGets             *expvar.Int
-	NumPuts             *expvar.Int
-	NumBlockedLargePuts *expvar.Int
-	NumMemtableGets     *expvar.Int
+	NumReads        *expvar.Int
+	NumWrites       *expvar.Int
+	NumBytesRead    *expvar.Int
+	NumBytesWritten *expvar.Int
+	NumLSMGets      *expvar.Map
+	NumLSMBloomHits *expvar.Map
+	NumGets         *expvar.Int
+	NumPuts         *expvar.Int
+	NumBlockedPuts  *expvar.Int
+	NumMemtableGets *expvar.Int
 )
 
 // these variables are global and would have cummulative values for all kv stores.
@@ -45,7 +45,7 @@ func init() {
 	NumLSMBloomHits = expvar.NewMap("badger_lsm_bloom_hits_total")
 	NumGets = expvar.NewInt("badger_gets_total")
 	NumPuts = expvar.NewInt("badger_puts_total")
-	NumBlockedLargePuts = expvar.NewInt("badger_blocked_large_puts")
+	NumBlockedPuts = expvar.NewInt("badger_blocked_puts_total")
 	NumMemtableGets = expvar.NewInt("badger_memtable_gets_total")
 	LSMSize = expvar.NewMap("badger_lsm_size")
 	VlogSize = expvar.NewMap("badger_vlog_size")
