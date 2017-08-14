@@ -345,6 +345,12 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	}
 }
 
+// Empty returns if the Skiplist is empty.
+func (s *Skiplist) Empty() bool {
+	// TODO: We should make a more efficient implementation.
+	return s.findLast() == nil
+}
+
 // findLast returns the last element. If head (empty list), we return nil. All the find functions
 // will NEVER return the head nodes.
 func (s *Skiplist) findLast() *node {
