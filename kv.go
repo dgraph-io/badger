@@ -361,7 +361,7 @@ func (s *KV) Close() (err error) {
 	// and remove them completely, while the block / memtable writer is still
 	// trying to push stuff into the memtable. This will also resolve the value
 	// offset problem: as we push into memtable, we update value offsets there.
-	if s.mt.Size() > 0 {
+	if !s.mt.Empty() {
 		s.elog.Printf("Flushing memtable")
 		for {
 			pushedFlushTask := func() bool {
