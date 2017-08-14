@@ -981,7 +981,7 @@ func (s *KV) ensureRoomForWrite() error {
 	var err error
 	s.Lock()
 	defer s.Unlock()
-	if s.mt.Size() < s.opt.MaxTableSize {
+	if s.mt.MemSize() < s.opt.MaxTableSize {
 		return nil
 	}
 
@@ -996,7 +996,7 @@ func (s *KV) ensureRoomForWrite() error {
 		}
 
 		s.elog.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
-			s.mt.Size(), len(s.flushChan))
+			s.mt.MemSize(), len(s.flushChan))
 		// We manage to push this task. Let's modify imm.
 		s.imm = append(s.imm, s.mt)
 		s.mt = skl.NewSkiplist(arenaSize(&s.opt))
