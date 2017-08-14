@@ -108,8 +108,6 @@ func (lf *logFile) sync() error {
 
 var errStop = errors.New("Stop iteration")
 
-const entryHashSize = 4
-
 type logEntry func(e Entry, vp valuePointer) error
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
@@ -176,7 +174,7 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 			return err
 		}
 
-		var crcBuf [entryHashSize]byte
+		var crcBuf [4]byte
 		if _, err = io.ReadFull(reader, crcBuf[:]); err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				truncate = true
@@ -192,7 +190,7 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 
 		var vp valuePointer
 
-		vp.Len = headerBufSize + h.klen + h.vlen + entryHashSize
+		vp.Len = headerBufSize + h.klen + h.vlen + uint32(len(crcBuf))
 		recordOffset += vp.Len
 
 		vp.Offset = e.offset
@@ -353,13 +351,21 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	h.Encode(headerEnc[:])
 
 	hash := crc32.New(y.CastagnoliCrcTable)
-	w := io.MultiWriter(hash, buf)
 
-	w.Write(headerEnc[:])
-	w.Write(e.Key)
-	w.Write(e.Value)
-	binary.Write(buf, binary.BigEndian, hash.Sum32())
-	return len(headerEnc) + len(e.Key) + len(e.Value) + entryHashSize, nil
+	buf.Write(headerEnc[:])
+	hash.Write(headerEnc[:])
+
+	buf.Write(e.Key)
+	hash.Write(e.Key)
+
+	buf.Write(e.Value)
+	hash.Write(e.Value)
+
+	var crcBuf [4]byte
+	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
+	buf.Write(crcBuf[:])
+
+	return len(headerEnc) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
 func (e Entry) print(prefix string) {

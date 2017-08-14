@@ -280,7 +280,6 @@ func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error
 			return Manifest{}, 0, err
 		}
 		if crc32.Checksum(buf, y.CastagnoliCrcTable) != binary.BigEndian.Uint32(lenCrcBuf[4:8]) {
-			fmt.Println("CRC mismatch")
 			break
 		}
 
