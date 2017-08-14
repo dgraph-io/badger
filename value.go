@@ -52,6 +52,11 @@ var Corrupt error = errors.New("Unable to find log. Potential data corruption.")
 var CasMismatch error = errors.New("CompareAndSet failed due to counter mismatch.")
 var KeyExists error = errors.New("SetIfAbsent failed since key already exists.")
 
+const (
+	maxKeySize   = 1 << 20
+	maxValueSize = 1 << 30
+)
+
 type logFile struct {
 	sync.RWMutex
 	path   string
@@ -143,6 +148,10 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 		var e Entry
 		e.offset = recordOffset
 		h.Decode(hbuf[:])
+		if h.klen > maxKeySize || h.vlen > maxValueSize {
+			truncate = true
+			break
+		}
 		vl := int(h.vlen)
 		if cap(v) < vl {
 			v = make([]byte, 2*vl)
