@@ -6,7 +6,7 @@ An embeddable, persistent, simple and fast key-value (KV) store, written purely 
 
 ## About
 
-Badger is written out of frustration with existing KV stores which are either purely written in Go and slow, or fast but require usage of Cgo.
+Badger is written out of frustration with existing KV stores which are either written in pure Go and slow, or fast but require usage of Cgo.
 Badger aims to provide an equal or better speed compared to industry leading KV stores (like RocksDB), while maintaining the entire code base in pure Go.
 
 **You can read more about Badger in [our blog post](https://open.dgraph.io/post/badger/).**
