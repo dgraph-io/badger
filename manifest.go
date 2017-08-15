@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/dgraph-io/badger/protos"
 	"github.com/dgraph-io/badger/y"
+	"github.com/pkg/errors"
 )
 
 // The MANIFEST file describes the startup state of the db -- all LSM files and what level they're
@@ -197,6 +199,11 @@ func (mf *manifestFile) addChanges(changes protos.ManifestChangeSet) error {
 	return mf.fp.Sync()
 }
 
+const (
+	magicText    = "Bdgr"
+	magicVersion = 1
+)
+
 func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 	rewritePath := filepath.Join(dir, manifestRewriteFilename)
 	// We explicitly sync.
@@ -204,19 +211,26 @@ func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+
+	buf := make([]byte, 8)
+	copy(buf[0:4], []byte(magicText))
+	binary.BigEndian.PutUint32(buf[4:8], magicVersion)
+
 	netCreations := len(m.Tables)
 	changes := m.asChanges()
 	set := protos.ManifestChangeSet{Changes: changes}
 
-	buf, err := set.Marshal()
+	changeBuf, err := set.Marshal()
 	if err != nil {
 		fp.Close()
 		return nil, 0, err
 	}
 	var lenCrcBuf [8]byte
-	binary.BigEndian.PutUint32(lenCrcBuf[0:4], uint32(len(buf)))
-	binary.BigEndian.PutUint32(lenCrcBuf[4:8], crc32.Checksum(buf, y.CastagnoliCrcTable))
-	if _, err := fp.Write(append(lenCrcBuf[:], buf...)); err != nil {
+	binary.BigEndian.PutUint32(lenCrcBuf[0:4], uint32(len(changeBuf)))
+	binary.BigEndian.PutUint32(lenCrcBuf[4:8], crc32.Checksum(changeBuf, y.CastagnoliCrcTable))
+	buf = append(buf, lenCrcBuf[:]...)
+	buf = append(buf, changeBuf...)
+	if _, err := fp.Write(buf); err != nil {
 		fp.Close()
 		return nil, 0, err
 	}
@@ -285,6 +299,11 @@ func (r *countingReader) ReadByte() (b byte, err error) {
 	return
 }
 
+var (
+	errBadMagic        = errors.New("manifest has bad magic")
+	errBadMagicVersion = errors.New("manifest has unsupported version")
+)
+
 // ReplayManifestFile reads the manifest file and constructs two manifest objects.  (We need one
 // immutable copy and one mutable copy of the manifest.  Easiest way is to construct two of them.)
 // Also, returns the last offset after a completely read manifest entry -- the file must be
@@ -292,6 +311,18 @@ func (r *countingReader) ReadByte() (b byte, err error) {
 // that).  In normal conditions, truncOffset is the file size.
 func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error) {
 	r := countingReader{wrapped: bufio.NewReader(fp)}
+
+	var magicBuf [8]byte
+	if _, err := io.ReadFull(&r, magicBuf[:]); err != nil {
+		return Manifest{}, 0, errBadMagic
+	}
+	if bytes.Compare(magicBuf[0:4], []byte(magicText)) != 0 {
+		return Manifest{}, 0, errBadMagic
+	}
+	version := binary.BigEndian.Uint32(magicBuf[4:8])
+	if version != magicVersion {
+		return Manifest{}, 0, errBadMagicVersion
+	}
 
 	offset := r.count
 
