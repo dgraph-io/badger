@@ -108,9 +108,25 @@ func OpenOrCreateManifestFile(dir string) (ret *manifestFile, result Manifest, e
 
 func helpOpenOrCreateManifestFile(dir string, deletionsThreshold int) (ret *manifestFile, result Manifest, err error) {
 	path := filepath.Join(dir, ManifestFilename)
-	fp, err := y.OpenSyncedFile(path, false) // We explicitly sync in addChanges, outside the lock.
+	fp, err := y.OpenExistingSyncedFile(path, false) // We explicitly sync in addChanges, outside the lock.
 	if err != nil {
-		return nil, Manifest{}, err
+		if !os.IsNotExist(err) {
+			fmt.Println(err)
+			return nil, Manifest{}, err
+		}
+		m := createManifest()
+		fp, netCreations, err := helpRewrite(dir, &m)
+		if err != nil {
+			return nil, Manifest{}, err
+		}
+		y.AssertTrue(netCreations == 0)
+		mf := &manifestFile{
+			fp:                        fp,
+			directory:                 dir,
+			manifest:                  m.clone(),
+			deletionsRewriteThreshold: deletionsThreshold,
+		}
+		return mf, m, nil
 	}
 
 	manifest, truncOffset, err := ReplayManifestFile(fp)
