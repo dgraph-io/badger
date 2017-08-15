@@ -21,6 +21,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sort"
 	"testing"
 
@@ -64,6 +65,41 @@ func TestManifestBasic(t *testing.T) {
 	require.EqualValues(t, "testval", string(item.Value()))
 	require.EqualValues(t, byte(0x05), item.UserMeta())
 	require.NoError(t, kv.Close())
+}
+
+func helpTestManifestFileCorruption(t *testing.T, off int64, errorContent string) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opt := getTestOptions(dir)
+	{
+		kv, err := NewKV(opt)
+		require.NoError(t, err)
+		require.NoError(t, kv.Close())
+	}
+	fp, err := os.OpenFile(filepath.Join(dir, ManifestFilename), os.O_RDWR, 0)
+	require.NoError(t, err)
+	// Mess with magic value or version to force error
+	_, err = fp.WriteAt([]byte{'X'}, off)
+	require.NoError(t, err)
+	require.NoError(t, fp.Close())
+	kv, err := NewKV(opt)
+	defer func() {
+		if kv != nil {
+			kv.Close()
+		}
+	}()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), errorContent)
+}
+
+func TestManifestMagic(t *testing.T) {
+	helpTestManifestFileCorruption(t, 3, "bad magic")
+}
+
+func TestManifestVersion(t *testing.T) {
+	helpTestManifestFileCorruption(t, 4, "unsupported version")
 }
 
 func key(prefix string, i int) string {
