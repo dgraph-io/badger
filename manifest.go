@@ -181,9 +181,10 @@ func (mf *manifestFile) addChanges(changes protos.ManifestChangeSet) error {
 	return mf.fp.Sync()
 }
 
-func helpRewrite(path string, m *Manifest) (*os.File, int, error) {
+func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
+	rewritePath := filepath.Join(dir, manifestRewriteFilename)
 	// We explicitly sync.
-	fp, err := y.OpenTruncFile(path, false)
+	fp, err := y.OpenTruncFile(rewritePath, false)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -207,42 +208,45 @@ func helpRewrite(path string, m *Manifest) (*os.File, int, error) {
 		fp.Close()
 		return nil, 0, err
 	}
+
+	// In Windows the files should be closed before doing a Rename.
+	if err = fp.Close(); err != nil {
+		return nil, 0, err
+	}
+	manifestPath := filepath.Join(dir, ManifestFilename)
+	if err := os.Rename(rewritePath, manifestPath); err != nil {
+		return nil, 0, err
+	}
+	fp, err = y.OpenExistingSyncedFile(manifestPath, false)
+	if err != nil {
+		return nil, 0, err
+	}
+	if _, err := fp.Seek(0, os.SEEK_END); err != nil {
+		fp.Close()
+		return nil, 0, err
+	}
+	if err := syncDir(dir); err != nil {
+		fp.Close()
+		return nil, 0, err
+	}
+
 	return fp, netCreations, nil
 }
 
 // Must be called while appendLock is held.
 func (mf *manifestFile) rewrite() error {
-	rewritePath := filepath.Join(mf.directory, manifestRewriteFilename)
-	fp, netCreations, err := helpRewrite(rewritePath, &mf.manifest)
+	// In Windows the files should be closed before doing a Rename.
+	if err := mf.fp.Close(); err != nil {
+		return err
+	}
+	fp, netCreations, err := helpRewrite(mf.directory, &mf.manifest)
 	if err != nil {
 		return err
 	}
+	mf.fp = fp
 	mf.manifest.Creations = netCreations
 	mf.manifest.Deletions = 0
 
-	// In Windows the files should be closed before doing a Rename.
-	if err = fp.Close(); err != nil {
-		return err
-	}
-	if err = mf.fp.Close(); err != nil {
-		return err
-	}
-	manifestPath := filepath.Join(mf.directory, ManifestFilename)
-	if err := os.Rename(rewritePath, manifestPath); err != nil {
-		return err
-	}
-	newFp, err := y.OpenExistingSyncedFile(manifestPath, false)
-	if err != nil {
-		return err
-	}
-	if _, err := newFp.Seek(0, os.SEEK_END); err != nil {
-		newFp.Close()
-		return err
-	}
-	mf.fp = newFp
-	if err := syncDir(mf.directory); err != nil {
-		return err
-	}
 	return nil
 }
 
