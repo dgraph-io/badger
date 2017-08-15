@@ -181,32 +181,40 @@ func (mf *manifestFile) addChanges(changes protos.ManifestChangeSet) error {
 	return mf.fp.Sync()
 }
 
-// Must be called while appendLock is held.
-func (mf *manifestFile) rewrite() error {
+func helpRewrite(path string, m *Manifest) (*os.File, int, error) {
 	// We explicitly sync.
-	rewritePath := filepath.Join(mf.directory, manifestRewriteFilename)
-	fp, err := y.OpenTruncFile(rewritePath, false)
+	fp, err := y.OpenTruncFile(path, false)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
-	netCreations := len(mf.manifest.Tables)
-	changes := mf.manifest.asChanges()
+	netCreations := len(m.Tables)
+	changes := m.asChanges()
 	set := protos.ManifestChangeSet{Changes: changes}
 
 	buf, err := set.Marshal()
 	if err != nil {
 		fp.Close()
-		return err
+		return nil, 0, err
 	}
 	var lenCrcBuf [8]byte
 	binary.BigEndian.PutUint32(lenCrcBuf[0:4], uint32(len(buf)))
 	binary.BigEndian.PutUint32(lenCrcBuf[4:8], crc32.Checksum(buf, y.CastagnoliCrcTable))
 	if _, err := fp.Write(append(lenCrcBuf[:], buf...)); err != nil {
 		fp.Close()
-		return err
+		return nil, 0, err
 	}
 	if err := fp.Sync(); err != nil {
 		fp.Close()
+		return nil, 0, err
+	}
+	return fp, netCreations, nil
+}
+
+// Must be called while appendLock is held.
+func (mf *manifestFile) rewrite() error {
+	rewritePath := filepath.Join(mf.directory, manifestRewriteFilename)
+	fp, netCreations, err := helpRewrite(rewritePath, &mf.manifest)
+	if err != nil {
 		return err
 	}
 	mf.manifest.Creations = netCreations
@@ -219,10 +227,11 @@ func (mf *manifestFile) rewrite() error {
 	if err = mf.fp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(rewritePath, filepath.Join(mf.directory, ManifestFilename)); err != nil {
+	manifestPath := filepath.Join(mf.directory, ManifestFilename)
+	if err := os.Rename(rewritePath, manifestPath); err != nil {
 		return err
 	}
-	newFp, err := y.OpenExistingSyncedFile(filepath.Join(mf.directory, ManifestFilename), false)
+	newFp, err := y.OpenExistingSyncedFile(manifestPath, false)
 	if err != nil {
 		return err
 	}
