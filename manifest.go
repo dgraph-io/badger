@@ -81,7 +81,7 @@ type manifestFile struct {
 const (
 	ManifestFilename                  = "MANIFEST"
 	manifestRewriteFilename           = "MANIFEST-REWRITE"
-	manifestDeletionsRewriteThreshold = 100000
+	manifestDeletionsRewriteThreshold = 10000
 	manifestDeletionsRatio            = 10
 )
 
@@ -130,7 +130,13 @@ func helpOpenOrCreateManifestFile(dir string, deletionsThreshold int) (ret *mani
 		return nil, Manifest{}, err
 	}
 
-	return &manifestFile{fp: fp, directory: dir, manifest: manifest.clone()}, manifest, nil
+	mf := &manifestFile{
+		fp:                        fp,
+		directory:                 dir,
+		manifest:                  manifest.clone(),
+		deletionsRewriteThreshold: deletionsThreshold,
+	}
+	return mf, manifest, nil
 }
 
 func (mf *manifestFile) close() error {
