@@ -827,3 +827,49 @@ func TestBigKeyValuePairs(t *testing.T) {
 
 	require.NoError(t, kv.Close())
 }
+
+func TestIteratorPrefetchSize(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, _ := NewKV(getTestOptions(dir))
+	defer kv.Close()
+
+	bkey := func(i int) []byte {
+		return []byte(fmt.Sprintf("%09d", i))
+	}
+	bval := func(i int) []byte {
+		return []byte(fmt.Sprintf("%025d", i))
+	}
+
+	n := 100
+	for i := 0; i < n; i++ {
+		if (i % 10) == 0 {
+			t.Logf("Put i=%d\n", i)
+		}
+		kv.Set(bkey(i), bval(i), byte(i%127))
+	}
+
+	getIteratorCount := func(prefetchSize int) int {
+		opt := IteratorOptions{}
+		opt.FetchValues = true
+		opt.PrefetchSize = prefetchSize
+
+		var count int
+		it := kv.NewIterator(opt)
+		{
+			t.Log("Starting first basic iteration")
+			for it.Rewind(); it.Valid(); it.Next() {
+				count++
+			}
+			require.EqualValues(t, n, count)
+		}
+		return count
+	}
+
+	var sizes = []int{-10, 0, 1, 10}
+	for _, size := range sizes {
+		c := getIteratorCount(size)
+		require.Equal(t, 100, c)
+	}
+}
