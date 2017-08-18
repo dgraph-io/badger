@@ -134,7 +134,8 @@ provide local SSDs which clock 100K IOPS over 4KB blocks easily.
 
 We *highly* recommend setting a high number for GOMAXPROCS, which allows Go to
 observe the full IOPS throughput provided by modern SSDs. In Dgraph, we have set
-it to 128. For more details, [see this thread](https://groups.google.com/d/msg/golang-nuts/jPb_h3TvlKE/qdoHhxXeAwAJ).
+it to 128. For more details, [see this
+thread](https://groups.google.com/d/topic/golang-nuts/jPb_h3TvlKE/discussion).
 
 ## Contact
 - Please use [discuss.dgraph.io](https://discuss.dgraph.io) for documentation, questions, feature requests and discussions.
