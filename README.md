@@ -9,7 +9,10 @@ An embeddable, persistent, simple and fast key-value (KV) store, written purely 
 Badger is written out of frustration with existing KV stores which are either written in pure Go and slow, or fast but require usage of Cgo.
 Badger aims to provide an equal or better speed compared to industry leading KV stores (like RocksDB), while maintaining the entire code base in pure Go.
 
-**You can read more about Badger in [our blog post](https://open.dgraph.io/post/badger/).**
+## Related Blog Posts
+
+1. [Introducing Badger: A fast key-value store written natively in Go](https://open.dgraph.io/post/badger/)
+2. [Make Badger crash resilient with ALICE](https://blog.dgraph.io/post/alice/)
 
 ## Installation and Usage
 
@@ -120,6 +123,18 @@ and won't get synced to disk immediately. Writes to LSM tree are done inmemory f
 get compacted to disk. The compaction would only happen once `MaxTableSize` has been reached. So, if
 you're doing a few writes and then checking, you might not see anything on disk. Once you `Close`
 the store, you'll see these writes on disk.
+
+- Which instances should I use for Badger?
+
+We recommend using instances which provide local SSD storage, without any limit
+on the maximum IOPS. In AWS, these are storage optimized instances like i3. They
+provide local SSDs which clock 100K IOPS over 4KB blocks easily.
+
+- Are there any Go specific settings that I should use?
+
+We *highly* recommend setting a high number for GOMAXPROCS, which allows Go to
+observe the full IOPS throughput provided by modern SSDs. In Dgraph, we have set
+it to 128. For more details, [see this thread](https://groups.google.com/d/msg/golang-nuts/jPb_h3TvlKE/qdoHhxXeAwAJ).
 
 ## Contact
 - Please use [discuss.dgraph.io](https://discuss.dgraph.io) for documentation, questions, feature requests and discussions.
