@@ -124,13 +124,13 @@ get compacted to disk. The compaction would only happen once `MaxTableSize` has 
 you're doing a few writes and then checking, you might not see anything on disk. Once you `Close`
 the store, you'll see these writes on disk.
 
-- Which instances should I use for Badger?
+- **Which instances should I use for Badger?**
 
 We recommend using instances which provide local SSD storage, without any limit
 on the maximum IOPS. In AWS, these are storage optimized instances like i3. They
 provide local SSDs which clock 100K IOPS over 4KB blocks easily.
 
-- Are there any Go specific settings that I should use?
+- **Are there any Go specific settings that I should use?**
 
 We *highly* recommend setting a high number for GOMAXPROCS, which allows Go to
 observe the full IOPS throughput provided by modern SSDs. In Dgraph, we have set
