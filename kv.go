@@ -420,14 +420,14 @@ const (
 func syncDir(dir string) error {
 	f, err := OpenDir(dir)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "While opening directory: %s.", dir)
 	}
 	err = f.Sync()
 	closeErr := f.Close()
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "While syncing directory: %s.", dir)
 	}
-	return closeErr
+	return errors.Wrapf(closeErr, "While closing directory: %s.", dir)
 }
 
 // getMemtables returns the current memtables and get references.

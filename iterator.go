@@ -185,6 +185,12 @@ func (it *Iterator) fill(item *KVItem) {
 }
 
 func (it *Iterator) prefetch() {
+	prefetchSize := it.opt.PrefetchSize
+	if it.opt.PrefetchSize <= 1 {
+		// Try prefetching atleast the first two items to put into it.item and it.data.
+		prefetchSize = 2
+	}
+
 	i := it.iitr
 	var count int
 	it.item = nil
@@ -204,7 +210,7 @@ func (it *Iterator) prefetch() {
 		} else {
 			it.data.push(item)
 		}
-		if count == it.opt.PrefetchSize {
+		if count == prefetchSize {
 			break
 		}
 	}
