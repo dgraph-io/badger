@@ -97,7 +97,7 @@ As such RocksDB's design isn't aimed at SSDs.
 
 ## Crash Consistency
 
-Badger is crash resistent. Any update which was applied successfully before a crash, would be available after the crash.
+Badger is crash resilient. Any update which was applied successfully before a crash, would be available after the crash.
 Badger achieves this via its value log.
 
 Badger's value log is a write-ahead log (WAL). Every update to Badger is written to this log first, before being applied to the LSM tree.
