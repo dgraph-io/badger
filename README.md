@@ -67,7 +67,6 @@ This allows storing lot more KV pairs per table. For e.g., a table of size 64MB 
 Thus, lesser compactions are required to achieve stability for the LSM tree, which results in fewer writes (all writes being serial).
 
 It might be a good idea on ext4 to periodically invoke `fstrim` in case the file system [does not quickly reuse space from deleted files](http://www.ogris.de/blkalloc/).
-We're currently investigating the situation.
 
 ### Nature of LSM trees
 
