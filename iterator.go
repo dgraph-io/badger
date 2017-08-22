@@ -176,6 +176,7 @@ func (it *Iterator) fill(item *KVItem) {
 	item.key = y.Safecopy(item.key, it.iitr.Key())
 	item.vptr = y.Safecopy(item.vptr, vs.Value)
 	if it.opt.FetchValues {
+		item.wg.Wait() // wait for any pending fill
 		item.wg.Add(1)
 		go func() {
 			it.kv.fillItem(item)
