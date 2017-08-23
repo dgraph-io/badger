@@ -454,6 +454,27 @@ func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 	}
 }
 
+// FillItem populates item with a value.
+//
+// item must be a valid KVItem returned by Badger during iteration. This method
+// could be used to fetch values explicitly during a key-only iteration
+// (FetchValues is set to false). It is useful for example, if values are
+// required for some keys only.
+//
+// This method should not be called when iteration is performed with
+// FetchValues set to true, as it will cause additional copying.
+//
+// Multiple calls to this method will result in multiple copies from the value
+// log. It is the caller’s responsibility to make sure they don’t call this
+// method more than once.
+func (s *KV) FillItem(item *KVItem) error {
+	// Wait for any pending fill operations to finish.
+	item.wg.Wait()
+	item.wg.Add(1)
+	defer item.wg.Done()
+	return s.fillItem(item)
+}
+
 func (s *KV) fillItem(item *KVItem) error {
 	if item.meta == 0 && item.vptr == nil {
 		item.val = nil // key not found

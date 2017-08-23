@@ -873,3 +873,52 @@ func TestIteratorPrefetchSize(t *testing.T) {
 		require.Equal(t, 100, c)
 	}
 }
+
+func TestFillItem(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, err := NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+	defer kv.Close()
+
+	bkey := func(i int) []byte {
+		return []byte(fmt.Sprintf("%09d", i))
+	}
+	bval := func(i int) []byte {
+		return []byte(fmt.Sprintf("%025d", i))
+	}
+
+	n := 1000
+	for i := 0; i < n; i++ {
+		kv.Set(bkey(i), bval(i), 0)
+	}
+	opt := IteratorOptions{}
+	opt.FetchValues = false
+
+	it := kv.NewIterator(opt)
+	var count int
+	for it.Rewind(); it.Valid(); it.Next() {
+		item := it.Item()
+		val := item.Value()
+		require.Nil(t, val) // Should initially be nil
+		kv.FillItem(item)
+		val = item.Value()
+		require.EqualValues(t, bval(count), string(val))
+		count++
+	}
+	require.EqualValues(t, n, count)
+
+	opt.FetchValues = true
+	it = kv.NewIterator(opt)
+	count = 0
+	for it.Rewind(); it.Valid(); it.Next() {
+		item := it.Item()
+		val1 := item.Value()
+		require.EqualValues(t, bval(count), string(val1))
+		kv.FillItem(item)
+		val2 := item.Value()
+		require.EqualValues(t, val1, val2)
+		count++
+	}
+}
