@@ -119,6 +119,9 @@ func (it *Iterator) newItem() *KVItem {
 	if item == nil {
 		item = &KVItem{slice: new(y.Slice)}
 	}
+	// Clean up old values
+	item.key, item.vptr, item.val, item.next = nil, nil, nil, nil
+	item.meta, item.userMeta = 0, 0
 	return item
 }
 
