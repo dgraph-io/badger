@@ -252,42 +252,72 @@ func (t *Table) readIndex() error {
 		return nil
 	}
 
-	che := make(chan error, len(t.blockIndex))
-	for i := 0; i < len(t.blockIndex); i++ {
-
-		bo := &t.blockIndex[i]
-		go func(ko *keyOffset) {
-			var h header
-
-			offset := ko.offset
-			buf, err := t.read(offset, h.Size())
-			if err != nil {
-				che <- errors.Wrap(err, "While reading first header in block")
-				return
-			}
-
-			h.Decode(buf)
-			y.AssertTruef(h.plen == 0, "Key offset: %+v, h.plen = %d", *ko, h.plen)
-
-			offset += h.Size()
-			buf = make([]byte, h.klen)
-			var out []byte
-			if out, err = t.read(offset, int(h.klen)); err != nil {
-				che <- errors.Wrap(err, "While reading first key in block")
-				return
-			}
-			y.AssertTrue(len(buf) == copy(buf, out))
-
-			ko.key = buf
-			che <- nil
-		}(bo)
+	numConcurrentLoads := len(t.blockIndex)
+	if numConcurrentLoads > 64 {
+		numConcurrentLoads = 64
 	}
 
-	for range t.blockIndex {
-		err := <-che
-		if err != nil {
-			return err
-		}
+	var wg sync.WaitGroup
+
+	wg.Add(len(t.blockIndex))
+
+	var errorMutex sync.Mutex
+	var readError error
+
+	commands := make(chan int, numConcurrentLoads*2)
+
+	for i := 0; i < numConcurrentLoads; i++ {
+
+		go func() {
+			var h header
+
+			for index := range commands {
+				ko := &t.blockIndex[index]
+
+				offset := ko.offset
+				buf, err := t.read(offset, h.Size())
+				if err != nil {
+					errorMutex.Lock()
+					if readError != nil {
+						readError = errors.Wrap(err, "While reading first header in block")
+					}
+					errorMutex.Unlock()
+					wg.Done()
+					continue
+				}
+
+				h.Decode(buf)
+				y.AssertTruef(h.plen == 0, "Key offset: %+v, h.plen = %d", *ko, h.plen)
+
+				offset += h.Size()
+				buf = make([]byte, h.klen)
+				var out []byte
+				if out, err = t.read(offset, int(h.klen)); err != nil {
+					errorMutex.Lock()
+					if readError != nil {
+						readError = errors.Wrap(err, "While reading first key in block")
+					}
+					errorMutex.Unlock()
+					wg.Done()
+					continue
+				}
+				y.AssertTrue(len(buf) == copy(buf, out))
+
+				ko.key = buf
+				wg.Done()
+			}
+		}()
+	}
+
+	for i := 0; i < len(t.blockIndex); i++ {
+		commands <- i
+	}
+
+	wg.Wait()
+	close(commands) // to stop reading goroutines
+
+	if readError != nil {
+		return readError
 	}
 	sort.Sort(byKey(t.blockIndex))
 	return nil
