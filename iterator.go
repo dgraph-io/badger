@@ -175,6 +175,7 @@ func (it *Iterator) fill(item *KVItem) {
 	item.casCounter = vs.CASCounter
 	item.key = y.Safecopy(item.key, it.iitr.Key())
 	item.vptr = y.Safecopy(item.vptr, vs.Value)
+	item.val = nil
 	if it.opt.FetchValues {
 		item.wg.Add(1)
 		go func() {
