@@ -138,9 +138,9 @@ type KV struct {
 	metricsTicker      *time.Ticker
 }
 
-var ErrInvalidDir error = errors.New("Invalid Dir, directory does not exist")
-var ErrValueLogSize error = errors.New("Invalid ValueLogFileSize, must be between 1MB and 1GB")
-var ErrExceedsMaxKeyValueSize error = errors.New("Key (value) size exceeded 1MB (1GB) limit")
+var ErrInvalidDir = errors.New("Invalid Dir, directory does not exist")
+var ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be between 1MB and 1GB")
+var ErrExceedsMaxKeyValueSize = errors.New("Key (value) size exceeded 1MB (1GB) limit")
 
 const (
 	kvWriteChCapacity = 1000
