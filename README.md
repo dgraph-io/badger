@@ -16,7 +16,7 @@ Badger aims to provide an equal or better speed compared to industry leading KV 
 
 ## Video Tutorials
 
-- **[Getting Started - Opening your first database, and basic setting and getting](https://www.youtube.com/watch?v=XBKq39caRZ8)** by [1lann](https://github.com/1lann)
+- [Getting Started](https://www.youtube.com/watch?v=XBKq39caRZ8) by [1lann](https://github.com/1lann)
 
 ## Installation and Usage
 
