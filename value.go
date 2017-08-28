@@ -48,6 +48,12 @@ const (
 	M               int64 = 1 << 20
 )
 
+// The value log can either be read directly from the file, or mmap-ed.
+const (
+	Nothing   = iota
+	MemoryMap // use mmap to read value log
+)
+
 var Corrupt = errors.New("Unable to find log. Potential data corruption")
 var CasMismatch = errors.New("CompareAndSet failed due to counter mismatch")
 var KeyExists = errors.New("SetIfAbsent failed since key already exists")
@@ -61,13 +67,14 @@ type logFile struct {
 	sync.RWMutex
 	path   string
 	fd     *os.File
+	mmap   []byte
 	fid    uint16
 	offset uint32
 	size   uint32
 }
 
 // openReadOnly assumes that we have a write lock on logFile.
-func (lf *logFile) openReadOnly() error {
+func (lf *logFile) openReadOnly(mmap bool) error {
 	var err error
 	lf.fd, err = os.OpenFile(lf.path, os.O_RDONLY, 0666)
 	if err != nil {
@@ -79,14 +86,45 @@ func (lf *logFile) openReadOnly() error {
 		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
 	}
 	lf.size = uint32(fi.Size())
+
+	if mmap {
+		lf.mmap, err = y.Mmap(lf.fd, false, fi.Size())
+		if err != nil {
+			_ = lf.fd.Close()
+			return y.Wrapf(err, "Unable to map file")
+		}
+		// FIXME should I close the lf.fd file handle if mmap is true
+	}
 	return nil
 }
+
+// FIXME move to common package?
+var EOF = errors.New("End of mapped region")
 
 func (lf *logFile) read(buf []byte, offset int64) error {
 	lf.RLock()
 	defer lf.RUnlock()
 
-	nbr, err := lf.fd.ReadAt(buf, offset)
+	var nbr int
+	var err error
+	if len(lf.mmap) > 0 {
+		size := int64(len(lf.mmap))
+		if offset >= size {
+			return EOF
+		}
+
+		bufsz := int64(len(buf))
+		avail := size - offset
+		// FIXME what if there is less data available than len(buf)?
+		if bufsz < avail {
+			nbr = int(bufsz)
+		} else {
+			nbr = int(avail)
+		}
+		copy(buf[0:nbr], lf.mmap[offset:offset+int64(nbr)])
+	} else {
+		nbr, err = lf.fd.ReadAt(buf, offset)
+	}
 	y.NumReads.Add(1)
 	y.NumBytesRead.Add(int64(nbr))
 	return err
@@ -102,7 +140,7 @@ func (lf *logFile) doneWriting() error {
 		return errors.Wrapf(err, "Unable to close value log: %q", lf.path)
 	}
 
-	return lf.openReadOnly()
+	return lf.openReadOnly(len(lf.mmap) != 0) // FIXME this looks flaky
 }
 
 func (lf *logFile) sync() error {
@@ -509,7 +547,7 @@ func (vlog *valueLog) openOrCreateFiles() error {
 			vlog.maxFid = uint32(lf.fid)
 
 		} else {
-			if err := lf.openReadOnly(); err != nil {
+			if err := lf.openReadOnly(vlog.opt.MapValueLogTo == MemoryMap); err != nil {
 				return err
 			}
 		}
