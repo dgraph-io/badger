@@ -312,7 +312,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	elog.Printf("Removing fid: %d", f.fid)
 	// Entries written to LSM. Remove the older file now.
 	{
-		vlog.RLock()
+		vlog.Lock()
 		idx := sort.Search(len(vlog.files), func(idx int) bool {
 			return vlog.files[idx].fid >= f.fid
 		})
@@ -320,7 +320,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			return errors.Errorf("Unable to find fid: %d", f.fid)
 		}
 		vlog.files = append(vlog.files[:idx], vlog.files[idx+1:]...)
-		vlog.RUnlock()
+		vlog.Unlock()
 	}
 
 	rem := vlog.fpath(f.fid)
