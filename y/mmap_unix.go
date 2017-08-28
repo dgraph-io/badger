@@ -24,8 +24,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func Mmap(fd *os.File, size int64) ([]byte, error) {
-	return unix.Mmap(int(fd.Fd()), 0, int(size), unix.PROT_READ, unix.MAP_SHARED)
+func Mmap(fd *os.File, write bool, size int64) ([]byte, error) {
+	mtype := unix.PROT_READ
+	if write {
+		mtype |= unix.PROT_WRITE
+	}
+	return unix.Mmap(int(fd.Fd()), 0, int(size), mtype, unix.MAP_SHARED)
 }
 
 func Munmap(b []byte) (err error) {

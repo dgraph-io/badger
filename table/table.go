@@ -142,7 +142,7 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	t.tableSize = int(fileInfo.Size())
 
 	if mapTableTo == MemoryMap {
-		t.mmap, err = y.Mmap(fd, fileInfo.Size())
+		t.mmap, err = y.Mmap(fd, false, fileInfo.Size())
 		if err != nil {
 			_ = fd.Close()
 			return nil, y.Wrapf(err, "Unable to map file")

@@ -24,15 +24,22 @@ import (
 	"unsafe"
 )
 
-func mmap(fd *os.File, size int64) ([]byte, error) {
+func Mmap(fd *os.File, write bool, size int64) ([]byte, error) {
+	protect := syscall.PAGE_READONLY
+	access := syscall.FILE_MAP_READ
+
+	if write {
+		protect = syscall.PAGE_READWRITE
+		access = syscall.FILE_MAP_WRITE
+	}
 	handler, err := syscall.CreateFileMapping(syscall.Handle(fd.Fd()), nil,
-		syscall.PAGE_READONLY, uint32(size>>32), uint32(size), nil)
+		protect, uint32(size>>32), uint32(size), nil)
 	if err != nil {
 		return nil, err
 	}
 	defer syscall.CloseHandle(handler)
 
-	mapData, err := syscall.MapViewOfFile(handler, syscall.FILE_MAP_READ, 0, 0, 0)
+	mapData, err := syscall.MapViewOfFile(handler, access, 0, 0, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -41,6 +48,6 @@ func mmap(fd *os.File, size int64) ([]byte, error) {
 	return data, nil
 }
 
-func munmap(b []byte) error {
+func Munmap(b []byte) error {
 	return syscall.UnmapViewOfFile(uintptr(unsafe.Pointer(&b[0])))
 }
