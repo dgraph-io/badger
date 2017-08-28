@@ -14,6 +14,10 @@ Badger aims to provide an equal or better speed compared to industry leading KV 
 1. [Introducing Badger: A fast key-value store written natively in Go](https://open.dgraph.io/post/badger/)
 2. [Make Badger crash resilient with ALICE](https://blog.dgraph.io/post/alice/)
 
+## Video Tutorials
+
+- **[Getting Started - Opening your first database, and basic setting and getting](https://www.youtube.com/watch?v=XBKq39caRZ8)** by [1lann](https://github.com/1lann)
+
 ## Installation and Usage
 
 `go get -v github.com/dgraph-io/badger`
@@ -40,10 +44,6 @@ Badger has these design goals in mind:
 ### Non-Goals
 
 - Try to be a database.
-
-## Video Tutorials
-
-- **[Getting Started - Opening your first database, and basic setting and getting](https://www.youtube.com/watch?v=XBKq39caRZ8)** by [1lann](https://github.com/1lann)
 
 ## Users
 
