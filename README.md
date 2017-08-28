@@ -1,6 +1,6 @@
 # Badger [![GoDoc](https://godoc.org/github.com/dgraph-io/badger?status.svg)](https://godoc.org/github.com/dgraph-io/badger) [![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger)](https://goreportcard.com/report/github.com/dgraph-io/badger) [![Build Status](https://travis-ci.org/dgraph-io/badger.svg?branch=master)](https://travis-ci.org/dgraph-io/badger) ![Appveyor](https://ci.appveyor.com/api/projects/status/github/dgraph-io/badger?branch=master&svg=true)
 
-An embeddable, persistent, simple and fast key-value (KV) store, written purely in Go. It's meant to be an alternative to [RocksDB](https://github.com/facebook/rocksdb).
+An embeddable, persistent, simple and fast key-value (KV) store, written purely in Go. It's meant to be a performant alternative to non Go based key-value stores like [RocksDB](https://github.com/facebook/rocksdb).
 
 ![Badger sketch](/images/sketch.jpg)
 
@@ -93,6 +93,12 @@ This improves random get performance significantly compared to traditional LSM t
 
 <sup>2</sup> RocksDB is an SSD optimized version of LevelDB, which was designed specifically for rotating disks.
 As such RocksDB's design isn't aimed at SSDs.
+
+## Benchmarks
+
+### RocksDB ([Link to blog post](https://blog.dgraph.io/post/badger/))
+
+![RocksDB Benchmarks](/images/benchmarks-rocksdb.png)
 
 ## Crash Consistency
 
