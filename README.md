@@ -24,6 +24,10 @@ If you want to run tests, also get testing dependencies by passing in `-t` flag.
 
 From here, follow [docs](https://godoc.org/github.com/dgraph-io/badger) for usage.
 
+## Documentation
+
+badger documentation is located at [godoc.org](https://godoc.org/github.com/dgraph-io/badger).
+
 ## Design Goals
 
 Badger has these design goals in mind:
@@ -143,7 +147,7 @@ it to 128. For more details, [see this
 thread](https://groups.google.com/d/topic/golang-nuts/jPb_h3TvlKE/discussion).
 
 ## Contact
-- Please use [discuss.dgraph.io](https://discuss.dgraph.io) for documentation, questions, feature requests and discussions.
+- Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, feature requests and discussions.
 - Please use [Github issue tracker](https://github.com/dgraph-io/badger/issues) for filing bugs or feature requests.
 - Join [![Slack Status](http://slack.dgraph.io/badge.svg)](http://slack.dgraph.io).
 - Follow us on Twitter [@dgraphlabs](https://twitter.com/dgraphlabs).
