@@ -26,7 +26,7 @@ From here, follow [docs](https://godoc.org/github.com/dgraph-io/badger) for usag
 
 ## Documentation
 
-badger documentation is located at [godoc.org](https://godoc.org/github.com/dgraph-io/badger).
+Badger documentation is located at [godoc.org](https://godoc.org/github.com/dgraph-io/badger).
 
 ## Design Goals
 
