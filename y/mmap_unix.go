@@ -1,3 +1,5 @@
+// +build !windows
+
 /*
  * Copyright 2017 Dgraph Labs, Inc. and Contributors
  *
@@ -14,33 +16,18 @@
  * limitations under the License.
  */
 
-// +build windows
-
-package table
+package y
 
 import (
 	"os"
-	"syscall"
-	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
-func mmap(fd *os.File, size int64) ([]byte, error) {
-	handler, err := syscall.CreateFileMapping(syscall.Handle(fd.Fd()), nil,
-		syscall.PAGE_READONLY, uint32(size>>32), uint32(size), nil)
-	if err != nil {
-		return nil, err
-	}
-	defer syscall.CloseHandle(handler)
-
-	mapData, err := syscall.MapViewOfFile(handler, syscall.FILE_MAP_READ, 0, 0, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	data := (*[1 << 30]byte)(unsafe.Pointer(mapData))[:size]
-	return data, nil
+func Mmap(fd *os.File, size int64) ([]byte, error) {
+	return unix.Mmap(int(fd.Fd()), 0, int(size), unix.PROT_READ, unix.MAP_SHARED)
 }
 
-func munmap(b []byte) error {
-	return syscall.UnmapViewOfFile(uintptr(unsafe.Pointer(&b[0])))
+func Munmap(b []byte) (err error) {
+	return unix.Munmap(b)
 }
