@@ -902,7 +902,7 @@ func TestFillItem(t *testing.T) {
 		item := it.Item()
 		val := item.Value()
 		require.Nil(t, val) // Should initially be nil
-		kv.FillItem(item)
+		kv.FillValue(item)
 		val = item.Value()
 		require.EqualValues(t, bval(count), string(val))
 		count++
@@ -916,7 +916,7 @@ func TestFillItem(t *testing.T) {
 		item := it.Item()
 		val1 := item.Value()
 		require.EqualValues(t, bval(count), string(val1))
-		kv.FillItem(item)
+		kv.FillValue(item)
 		val2 := item.Value()
 		require.EqualValues(t, val1, val2)
 		count++
