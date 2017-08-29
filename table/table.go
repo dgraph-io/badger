@@ -81,7 +81,7 @@ func (t *Table) DecrRef() error {
 
 		// It's necessary to delete windows files
 		if t.mapTableTo == MemoryMap {
-			munmap(t.mmap)
+			y.Munmap(t.mmap)
 		}
 		if err := t.fd.Truncate(0); err != nil {
 			// This is very important to let the FS know that the file is deleted.
@@ -142,7 +142,7 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	t.tableSize = int(fileInfo.Size())
 
 	if mapTableTo == MemoryMap {
-		t.mmap, err = mmap(fd, fileInfo.Size())
+		t.mmap, err = y.Mmap(fd, false, fileInfo.Size())
 		if err != nil {
 			_ = fd.Close()
 			return nil, y.Wrapf(err, "Unable to map file")
@@ -177,7 +177,7 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 
 func (t *Table) Close() error {
 	if t.mapTableTo == MemoryMap {
-		munmap(t.mmap)
+		y.Munmap(t.mmap)
 	}
 	if err := t.fd.Close(); err != nil {
 		return err
