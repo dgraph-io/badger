@@ -52,7 +52,7 @@ type node struct {
 	// ONLY guards valueOffset, valueSize. To do without lock, we need to encode
 	// valueSize in arena. Consider this next time.
 	// RWMutex takes 24 bytes whereas Mutex takes 8 bytes.
-	sync.Mutex
+	sync.RWMutex
 
 	// A byte slice is 24 bytes. We are trying to save space here.
 	keyOffset uint32 // Immutable. No need to lock to access key.
@@ -137,10 +137,11 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 	}
 }
 
-func (s *node) getValueOffset() (uint32, uint16) {
-	s.Lock()
-	defer s.Unlock()
-	return s.valueOffset, s.valueSize
+func (s *node) getValueOffset() (offset uint32, size uint16) {
+	s.RLock()
+	offset, size = s.valueOffset, s.valueSize
+	s.RUnlock()
+	return
 }
 
 func (s *node) key(arena *Arena) []byte {
@@ -150,9 +151,9 @@ func (s *node) key(arena *Arena) []byte {
 func (s *node) setValue(arena *Arena, v y.ValueStruct) {
 	valOffset := arena.PutVal(v)
 	s.Lock()
-	defer s.Unlock()
 	s.valueOffset = valOffset
 	s.valueSize = uint16(len(v.Value))
+	s.Unlock()
 }
 
 func (s *node) getNext(h int) *node {
