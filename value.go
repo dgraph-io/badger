@@ -61,13 +61,14 @@ type logFile struct {
 	sync.RWMutex
 	path   string
 	fd     *os.File
+	mmap   []byte
 	fid    uint16
 	offset uint32
 	size   uint32
 }
 
 // openReadOnly assumes that we have a write lock on logFile.
-func (lf *logFile) openReadOnly() error {
+func (lf *logFile) openReadOnly(mmap bool) error {
 	var err error
 	lf.fd, err = os.OpenFile(lf.path, os.O_RDONLY, 0666)
 	if err != nil {
@@ -79,20 +80,49 @@ func (lf *logFile) openReadOnly() error {
 		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
 	}
 	lf.size = uint32(fi.Size())
+
+	if mmap {
+		lf.mmap, err = y.Mmap(lf.fd, false, fi.Size())
+		if err != nil {
+			_ = lf.fd.Close()
+			return y.Wrapf(err, "Unable to map file")
+		}
+		err = y.Madvise(lf.mmap, false) // Disable readahead
+		if err != nil {
+			_ = lf.fd.Close()
+			return y.Wrapf(err, "madvise: Unable to disable readahead")
+		}
+	}
 	return nil
 }
+
+var errTooFewBytes = errors.New("Too few bytes read")
 
 func (lf *logFile) read(buf []byte, offset int64) error {
 	lf.RLock()
 	defer lf.RUnlock()
 
-	nbr, err := lf.fd.ReadAt(buf, offset)
+	var nbr int
+	var err error
+	if len(lf.mmap) > 0 {
+		size := int64(len(lf.mmap))
+		if offset >= size {
+			return y.ErrEOF
+		}
+
+		nbr = copy(buf, lf.mmap[offset:])
+		if nbr < len(buf) {
+			err = errTooFewBytes
+		}
+	} else {
+		nbr, err = lf.fd.ReadAt(buf, offset)
+	}
 	y.NumReads.Add(1)
 	y.NumBytesRead.Add(int64(nbr))
 	return err
 }
 
-func (lf *logFile) doneWriting() error {
+func (lf *logFile) doneWriting(mmap bool) error {
 	lf.Lock()
 	defer lf.Unlock()
 	if err := lf.fd.Sync(); err != nil {
@@ -102,7 +132,7 @@ func (lf *logFile) doneWriting() error {
 		return errors.Wrapf(err, "Unable to close value log: %q", lf.path)
 	}
 
-	return lf.openReadOnly()
+	return lf.openReadOnly(mmap)
 }
 
 func (lf *logFile) sync() error {
@@ -509,7 +539,7 @@ func (vlog *valueLog) openOrCreateFiles() error {
 			vlog.maxFid = uint32(lf.fid)
 
 		} else {
-			if err := lf.openReadOnly(); err != nil {
+			if err := lf.openReadOnly(vlog.opt.MapValueLogTo == MemoryMap); err != nil {
 				return err
 			}
 		}
@@ -652,7 +682,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 		if curlf.offset > uint32(vlog.opt.ValueLogFileSize) {
 			var err error
-			if err = curlf.doneWriting(); err != nil {
+			if err = curlf.doneWriting(vlog.opt.MapValueLogTo == MemoryMap); err != nil {
 				return err
 			}
 
