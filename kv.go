@@ -38,6 +38,16 @@ var (
 	head         = []byte("!badger!head") // For storing value offset for replay.
 )
 
+// Setting to control how LSM tables are read.
+const (
+	// read the files normally
+	Nothing = iota
+	// load the files directly into RAM
+	LoadToRAM
+	// memory map the files
+	MemoryMap
+)
+
 // Options are params for creating DB object.
 type Options struct {
 	Dir      string // Directory to store the data in. Should exist and be writable.
@@ -61,6 +71,9 @@ type Options struct {
 
 	// Maximum total size for L1.
 	LevelOneSize int64
+
+	// Control how value log is accessed (using file r/w or mmap)
+	MapValueLogTo int
 
 	// Run value log garbage collection if we can reclaim at least this much space. This is a ratio.
 	ValueGCThreshold float64
@@ -98,10 +111,13 @@ var DefaultOptions = Options{
 	NumLevelZeroTablesStall: 10,
 	NumMemtables:            5,
 	SyncWrites:              false,
-	ValueGCRunInterval:      10 * time.Minute,
-	ValueGCThreshold:        0.5, // Set to zero to not run GC.
-	ValueLogFileSize:        1 << 30,
-	ValueThreshold:          20,
+	MapValueLogTo:           Nothing,
+	// Nothing to read/write value log using standard File I/O
+	// MemoryMap to mmap() the value log files
+	ValueGCRunInterval: 10 * time.Minute,
+	ValueGCThreshold:   0.5, // Set to zero to not run GC.
+	ValueLogFileSize:   1 << 30,
+	ValueThreshold:     20,
 }
 
 func (opt *Options) estimateSize(entry *Entry) int {
