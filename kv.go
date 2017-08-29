@@ -138,8 +138,16 @@ type KV struct {
 	metricsTicker      *time.Ticker
 }
 
+// ErrInvalidDir is returned when Badger cannot find the directory
+// from where it is supposed to load the key-value store.
 var ErrInvalidDir = errors.New("Invalid Dir, directory does not exist")
+
+// ErrValueLogSize is returned when opt.ValueLogFileSize option is not within the valid
+// range.
 var ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be between 1MB and 1GB")
+
+// ErrExceedsMaxKeyValueSize is returned as part of Entry when the size of the key or value
+// exceeds the specified limits.
 var ErrExceedsMaxKeyValueSize = errors.New("Key (value) size exceeded 1MB (1GB) limit")
 
 const (
@@ -613,7 +621,7 @@ func (s *KV) writeToLSM(b *request) error {
 			}
 			// No need to decode existing value. Just need old CAS counter.
 			if oldValue.CASCounter != entry.CASCounterCheck {
-				entry.Error = CasMismatch
+				entry.Error = ErrCasMismatch
 				continue
 			}
 		}
@@ -626,7 +634,7 @@ func (s *KV) writeToLSM(b *request) error {
 			}
 			// Value already exists, don't write.
 			if exists {
-				entry.Error = KeyExists
+				entry.Error = ErrKeyExists
 				continue
 			}
 		}
@@ -912,7 +920,7 @@ func (s *KV) SetIfAbsent(key, val []byte, userMeta byte) error {
 	}
 	// Found the key, return KeyExists
 	if exists {
-		return KeyExists
+		return ErrKeyExists
 	}
 
 	e := &Entry{
@@ -1036,7 +1044,7 @@ func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint64, f func(error))
 	s.compareAsync(e, f)
 }
 
-var ErrNoRoom = errors.New("No room for write")
+var errNoRoom = errors.New("No room for write")
 
 // ensureRoomForWrite is always called serially.
 func (s *KV) ensureRoomForWrite() error {
@@ -1066,7 +1074,7 @@ func (s *KV) ensureRoomForWrite() error {
 		return nil
 	default:
 		// We need to do this to unlock and allow the flusher to modify imm.
-		return ErrNoRoom
+		return errNoRoom
 	}
 }
 

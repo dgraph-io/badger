@@ -717,7 +717,7 @@ func TestSetIfAbsent(t *testing.T) {
 	require.NoError(t, err)
 
 	err = kv.SetIfAbsent(key, []byte("val2"), 0x00)
-	require.EqualError(t, err, KeyExists.Error())
+	require.EqualError(t, err, ErrKeyExists.Error())
 }
 
 func BenchmarkExists(b *testing.B) {
