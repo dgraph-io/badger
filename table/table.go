@@ -36,10 +36,14 @@ import (
 
 const fileSuffix = ".sst"
 
+// Setting to control how LSM tables are read.
 const (
+	// read the files normally
 	Nothing = iota
-	MemoryMap
+	// load the files directly into RAM
 	LoadToRAM
+	// memory map the files
+	MemoryMap
 )
 
 type keyOffset struct {
