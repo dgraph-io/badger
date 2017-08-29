@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package table
+package y
 
 import (
 	"os"
@@ -24,10 +24,22 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func mmap(fd *os.File, size int64) ([]byte, error) {
-	return unix.Mmap(int(fd.Fd()), 0, int(size), unix.PROT_READ, unix.MAP_SHARED)
+func Mmap(fd *os.File, writable bool, size int64) ([]byte, error) {
+	mtype := unix.PROT_READ
+	if writable {
+		mtype |= unix.PROT_WRITE
+	}
+	return unix.Mmap(int(fd.Fd()), 0, int(size), mtype, unix.MAP_SHARED)
 }
 
-func munmap(b []byte) (err error) {
+func Munmap(b []byte) error {
 	return unix.Munmap(b)
+}
+
+func Madvise(b []byte, readahead bool) error {
+	flags := unix.MADV_NORMAL
+	if !readahead {
+		flags = unix.MADV_RANDOM
+	}
+	return unix.Madvise(b, flags)
 }
