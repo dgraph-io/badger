@@ -43,14 +43,21 @@ import (
 const (
 	BitDelete       byte  = 1 // Set if the key has been deleted.
 	BitValuePointer byte  = 2 // Set if the value is NOT stored directly next to key.
-	Bit_UNUSED      byte  = 4
+	BitUnused       byte  = 4
 	BitSetIfAbsent  byte  = 8 // Set if the key is set using SetIfAbsent.
 	M               int64 = 1 << 20
 )
 
-var Corrupt = errors.New("Unable to find log. Potential data corruption")
-var CasMismatch = errors.New("CompareAndSet failed due to counter mismatch")
-var KeyExists = errors.New("SetIfAbsent failed since key already exists")
+// ErrCorrupt is returned when a value log file is corrupted.
+var ErrCorrupt = errors.New("Unable to find log. Potential data corruption")
+
+// ErrCasMismatch is returned when a CompareAndSet operation has failed due
+// to a counter mismatch.
+var ErrCasMismatch = errors.New("CompareAndSet failed due to counter mismatch")
+
+// ErrKeyExists is returned by SetIfAbsent metadata bit is set, but the
+// key already exists in the store.
+var ErrKeyExists = errors.New("SetIfAbsent failed since key already exists")
 
 const (
 	maxKeySize   = 1 << 20
@@ -711,7 +718,7 @@ func (vlog *valueLog) getFile(fid uint16) (*logFile, error) {
 		return vlog.files[idx].fid >= fid
 	})
 	if idx == len(vlog.files) || vlog.files[idx].fid != fid {
-		return nil, Corrupt
+		return nil, ErrCorrupt
 	}
 	return vlog.files[idx], nil
 }
