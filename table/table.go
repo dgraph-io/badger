@@ -257,32 +257,25 @@ func (t *Table) readIndex() error {
 		numConcurrentLoads = 64
 	}
 
-	var wg sync.WaitGroup
+	che := make(chan error, len(t.blockIndex))
+	blocks := make(chan int, len(t.blockIndex))
 
-	wg.Add(len(t.blockIndex))
-
-	var errorMutex sync.Mutex
-	var readError error
-
-	commands := make(chan int, numConcurrentLoads*2)
+	for i := 0; i < len(t.blockIndex); i++ {
+		blocks <- i
+	}
 
 	for i := 0; i < numConcurrentLoads; i++ {
 
 		go func() {
 			var h header
 
-			for index := range commands {
+			for index := range blocks {
 				ko := &t.blockIndex[index]
 
 				offset := ko.offset
 				buf, err := t.read(offset, h.Size())
 				if err != nil {
-					errorMutex.Lock()
-					if readError != nil {
-						readError = errors.Wrap(err, "While reading first header in block")
-					}
-					errorMutex.Unlock()
-					wg.Done()
+					che <- errors.Wrap(err, "While reading first header in block")
 					continue
 				}
 
@@ -293,32 +286,31 @@ func (t *Table) readIndex() error {
 				buf = make([]byte, h.klen)
 				var out []byte
 				if out, err = t.read(offset, int(h.klen)); err != nil {
-					errorMutex.Lock()
-					if readError != nil {
-						readError = errors.Wrap(err, "While reading first key in block")
-					}
-					errorMutex.Unlock()
-					wg.Done()
+					che <- errors.Wrap(err, "While reading first key in block")
 					continue
 				}
 				y.AssertTrue(len(buf) == copy(buf, out))
 
 				ko.key = buf
-				wg.Done()
+				che <- nil
 			}
 		}()
 	}
 
-	for i := 0; i < len(t.blockIndex); i++ {
-		commands <- i
-	}
+	close(blocks) // to stop reading goroutines
 
-	wg.Wait()
-	close(commands) // to stop reading goroutines
+	var readError error
+	for i := 0; i < len(t.blockIndex); i++ {
+		err := <-che
+		if err != nil && readError == nil {
+			readError = err
+		}
+	}
 
 	if readError != nil {
 		return readError
 	}
+
 	sort.Sort(byKey(t.blockIndex))
 	return nil
 }
