@@ -875,8 +875,11 @@ func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
 	}()
 }
 
-// Set sets the provided value for a given key. If key is not present, it is created.
-// If it is present, the existing value is overwritten with the one provided.
+// Set sets the provided value for a given key. If key is not present, it is created.  If it is
+// present, the existing value is overwritten with the one provided.
+// Along with key and value, Set can also take an optional userMeta byte. This byte is stored
+// alongside the key, and can be used as an aid to interpret the value or store other contextual
+// bits corresponding to the key-value pair.
 func (s *KV) Set(key, val []byte, userMeta byte) error {
 	e := &Entry{
 		Key:      key,

@@ -55,7 +55,8 @@ func (item *KVItem) Counter() uint64 {
 	return item.casCounter
 }
 
-// UserMeta returns the userMeta set by the user
+// UserMeta returns the userMeta set by the user. Typically, this byte, optionally set by the user
+// is used to interpret the value.
 func (item *KVItem) UserMeta() byte {
 	return item.userMeta
 }
