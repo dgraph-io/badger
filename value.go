@@ -324,6 +324,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			return vlog.files[idx].fid >= f.fid
 		})
 		if idx == len(vlog.files) || vlog.files[idx].fid != f.fid {
+			vlog.Unlock()
 			return errors.Errorf("Unable to find fid: %d", f.fid)
 		}
 		vlog.files = append(vlog.files[:idx], vlog.files[idx+1:]...)
