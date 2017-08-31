@@ -714,7 +714,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 // Gets the logFile and acquires an RLock() on it too.  You must call RUnlock on the file (if
 // non-nil).
-func (vlog *valueLog) getFileRLock(fid uint16) (*logFile, error) {
+func (vlog *valueLog) getFileRLocked(fid uint16) (*logFile, error) {
 	vlog.RLock()
 	defer vlog.RUnlock()
 
@@ -731,11 +731,11 @@ func (vlog *valueLog) getFileRLock(fid uint16) (*logFile, error) {
 
 // Read reads the value log at a given location.
 func (vlog *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
-	lf, err := vlog.getFileRLock(p.Fid)
-	defer lf.lock.RUnlock()
+	lf, err := vlog.getFileRLocked(p.Fid)
 	if err != nil {
 		return e, err
 	}
+	defer lf.lock.RUnlock()
 
 	if s == nil {
 		s = new(y.Slice)
