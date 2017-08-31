@@ -464,7 +464,7 @@ type valueLog struct {
 	dirPath string
 	elog    trace.EventLog
 
-	// locks our view of which files exist
+	// guards our view of which files exist
 	filesLock sync.RWMutex
 	files     []*logFile
 
