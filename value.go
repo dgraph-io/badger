@@ -65,7 +65,7 @@ const (
 )
 
 type logFile struct {
-	sync.RWMutex
+	lock   sync.RWMutex
 	path   string
 	fd     *os.File
 	fid    uint16
@@ -90,8 +90,8 @@ func (lf *logFile) openReadOnly() error {
 }
 
 func (lf *logFile) read(buf []byte, offset int64) error {
-	lf.RLock()
-	defer lf.RUnlock()
+	lf.lock.RLock()
+	defer lf.lock.RUnlock()
 
 	nbr, err := lf.fd.ReadAt(buf, offset)
 	y.NumReads.Add(1)
@@ -100,8 +100,8 @@ func (lf *logFile) read(buf []byte, offset int64) error {
 }
 
 func (lf *logFile) doneWriting() error {
-	lf.Lock()
-	defer lf.Unlock()
+	lf.lock.Lock()
+	defer lf.lock.Unlock()
 	if err := lf.fd.Sync(); err != nil {
 		return errors.Wrapf(err, "Unable to sync value log: %q", lf.path)
 	}
@@ -113,8 +113,8 @@ func (lf *logFile) doneWriting() error {
 }
 
 func (lf *logFile) sync() error {
-	lf.RLock()
-	defer lf.RUnlock()
+	lf.lock.RLock()
+	defer lf.lock.RUnlock()
 	return lf.fd.Sync()
 }
 
