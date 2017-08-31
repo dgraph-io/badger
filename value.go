@@ -748,13 +748,6 @@ func (vlog *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	e.casCounter = h.casCounter
 	e.CASCounterCheck = h.casCounterCheck
 	e.Value = buf[n : n+h.vlen]
-	n += h.vlen
-
-	storedCRC := binary.BigEndian.Uint32(buf[n:])
-	calculatedCRC := crc32.Checksum(buf[:n], y.CastagnoliCrcTable)
-	if storedCRC != calculatedCRC {
-		return e, errors.New("CRC checksum mismatch")
-	}
 
 	return e, nil
 }
