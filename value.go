@@ -104,6 +104,11 @@ func (lf *logFile) doneWriting() error {
 		return errors.Wrapf(err, "Unable to sync value log: %q", lf.path)
 	}
 	// Close and reopen the file read-only.  Acquire lock because fd will become invalid for a bit.
+	// Acquiring the lock is bad because, while we don't hold the lock for a long time, it forces
+	// one batch of readers wait for the preceding batch of readers to finish.
+	//
+	// If there's a benefit to reopening the file read-only, it might be on Windows.  I don't know
+	// what the benefit is.  Consider keeping the file read-write, or use fcntl to change permissions.
 	lf.lock.Lock()
 	defer lf.lock.Unlock()
 	if err := lf.fd.Close(); err != nil {
