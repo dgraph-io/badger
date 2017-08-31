@@ -252,11 +252,6 @@ func (t *Table) readIndex() error {
 		return nil
 	}
 
-	numConcurrentLoads := len(t.blockIndex)
-	if numConcurrentLoads > 64 {
-		numConcurrentLoads = 64
-	}
-
 	che := make(chan error, len(t.blockIndex))
 	blocks := make(chan int, len(t.blockIndex))
 
@@ -264,8 +259,7 @@ func (t *Table) readIndex() error {
 		blocks <- i
 	}
 
-	for i := 0; i < numConcurrentLoads; i++ {
-
+	for i := 0; i < 64; i++ { // Run 64 goroutines.
 		go func() {
 			var h header
 
@@ -296,17 +290,14 @@ func (t *Table) readIndex() error {
 			}
 		}()
 	}
-
 	close(blocks) // to stop reading goroutines
 
 	var readError error
 	for i := 0; i < len(t.blockIndex); i++ {
-		err := <-che
-		if err != nil && readError == nil {
+		if err := <-che; err != nil && readError == nil {
 			readError = err
 		}
 	}
-
 	if readError != nil {
 		return readError
 	}
