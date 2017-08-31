@@ -110,9 +110,8 @@ func (lf *logFile) doneWriting() error {
 	return lf.openReadOnly()
 }
 
+// You must hold lf.lock to sync()
 func (lf *logFile) sync() error {
-	lf.lock.RLock()
-	defer lf.lock.RUnlock()
 	return lf.fd.Sync()
 }
 
@@ -626,11 +625,13 @@ func (vlog *valueLog) sync() error {
 		return nil
 	}
 	curlf := vlog.files[len(vlog.files)-1]
+	curlf.lock.RLock()
 	vlog.RUnlock()
 
 	dirSyncCh := make(chan error)
 	go func() { dirSyncCh <- syncDir(vlog.opt.ValueDir) }()
 	err := curlf.sync()
+	curlf.lock.RUnlock()
 	dirSyncErr := <-dirSyncCh
 	if err != nil {
 		err = dirSyncErr
