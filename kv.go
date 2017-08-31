@@ -145,7 +145,6 @@ type KV struct {
 	// Incremented in the non-concurrently accessed write loop.  But also accessed outside. So
 	// we use an atomic op.
 	lastUsedCasCounter uint64
-	metricsTicker      *time.Ticker
 }
 
 // ErrInvalidDir is returned when Badger cannot find the directory
@@ -222,12 +221,6 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		}
 	}()
 
-	metricsTicker := time.NewTicker(5 * time.Minute)
-	defer func() {
-		if metricsTicker != nil {
-			metricsTicker.Stop()
-		}
-	}()
 	out = &KV{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
@@ -238,10 +231,10 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		elog:          trace.NewEventLog("Badger", "KV"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
-		metricsTicker: metricsTicker,
 	}
 
-	go out.updateSize()
+	lc := out.closer.Register("updateSize")
+	go out.updateSize(lc)
 	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
 	// newLevelsController potentially loads files in directory.
@@ -249,7 +242,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		return nil, err
 	}
 
-	lc := out.closer.Register("compactors")
+	lc = out.closer.Register("compactors")
 	out.lc.startCompact(lc)
 
 	lc = out.closer.Register("memtable")
@@ -338,7 +331,6 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	valueDirLockGuard = nil
 	dirLockGuard = nil
 	manifestFile = nil
-	metricsTicker = nil
 	return out, nil
 }
 
@@ -427,7 +419,6 @@ func (s *KV) Close() (err error) {
 	if err := s.lc.close(); err != nil {
 		return errors.Wrap(err, "KV.Close")
 	}
-	s.metricsTicker.Stop()
 	s.elog.Printf("Waiting for closer")
 	s.closer.SignalAll()
 	s.closer.WaitForAll()
@@ -1232,7 +1223,12 @@ func exists(path string) (bool, error) {
 	return true, err
 }
 
-func (s *KV) updateSize() {
+func (s *KV) updateSize(lc *y.LevelCloser) {
+	defer lc.Done()
+
+	metricsTicker := time.NewTicker(5 * time.Minute)
+	defer metricsTicker.Stop()
+
 	getNewInt := func(val int64) *expvar.Int {
 		v := new(expvar.Int)
 		v.Add(val)
@@ -1259,14 +1255,18 @@ func (s *KV) updateSize() {
 		return lsmSize, vlogSize
 	}
 
-	for range s.metricsTicker.C {
-		lsmSize, vlogSize := totalSize(s.opt.Dir)
-		y.LSMSize.Set(s.opt.Dir, getNewInt(lsmSize))
-		// If valueDir is different from dir, we'd have to do another walk.
-		if s.opt.ValueDir != s.opt.Dir {
-			_, vlogSize = totalSize(s.opt.ValueDir)
+	for {
+		select {
+		case <-metricsTicker.C:
+			lsmSize, vlogSize := totalSize(s.opt.Dir)
+			y.LSMSize.Set(s.opt.Dir, getNewInt(lsmSize))
+			// If valueDir is different from dir, we'd have to do another walk.
+			if s.opt.ValueDir != s.opt.Dir {
+				_, vlogSize = totalSize(s.opt.ValueDir)
+			}
+			y.VlogSize.Set(s.opt.Dir, getNewInt(vlogSize))
+		case <-lc.HasBeenClosed():
+			return
 		}
-		y.VlogSize.Set(s.opt.Dir, getNewInt(vlogSize))
 	}
-
 }
