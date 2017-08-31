@@ -116,7 +116,7 @@ func newLevelsController(kv *KV, mf *Manifest) (*levelsController, error) {
 			return nil, errors.Wrapf(err, "Opening file: %q", fname)
 		}
 
-		t, err := table.OpenTable(fd, kv.opt.MapTablesTo)
+		t, err := table.OpenTable(fd, kv.opt.TableLoadingMode)
 		if err != nil {
 			closeAllTables(tables)
 			return nil, errors.Wrapf(err, "Opening table: %q", fname)
@@ -317,7 +317,7 @@ func (s *levelsController) compactBuildTables(
 				return
 			}
 
-			tbl, err := table.OpenTable(fd, s.kv.opt.MapTablesTo)
+			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode)
 			// decrRef is added below.
 			resultCh <- newTableResult{tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())}
 		}(builder)
