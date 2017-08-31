@@ -911,16 +911,14 @@ func (s *KV) SetAsync(key, val []byte, userMeta byte, f func(error)) {
 	})
 }
 
-// SetIfAbsent sets value of key if key is not present.
-// If it is present, it returns the KeyExists error.
-func (s *KV) SetIfAbsent(key, val []byte, userMeta byte) error {
+func (s *KV) setIfAbsent(key, val []byte, userMeta byte) (*Entry, error) {
 	exists, err := s.Exists(key)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Found the key, return KeyExists
 	if exists {
-		return ErrKeyExists
+		return nil, ErrKeyExists
 	}
 
 	e := &Entry{
@@ -929,10 +927,44 @@ func (s *KV) SetIfAbsent(key, val []byte, userMeta byte) error {
 		Value:    val,
 		UserMeta: userMeta,
 	}
+	return e, nil
+}
+
+// SetIfAbsent sets value of key if key is not present.
+// If it is present, it returns the KeyExists error.
+func (s *KV) SetIfAbsent(key, val []byte, userMeta byte) error {
+	e, err := s.setIfAbsent(key, val, userMeta)
+	if err != nil {
+		return err
+	}
+
 	if err := s.BatchSet([]*Entry{e}); err != nil {
 		return err
 	}
 	return e.Error
+}
+
+// SetIfAbsentAsync is the asynchronous version of SetIfAbsent. It accepts a callback function which
+// is called when the operation is complete. Any error encountered during execution is passed as an
+// argument to the callback function.
+func (s *KV) SetIfAbsentAsync(key, val []byte, userMeta byte, f func(error)) error {
+	e, err := s.setIfAbsent(key, val, userMeta)
+	if err != nil {
+		return err
+	}
+
+	s.BatchSetAsync([]*Entry{e}, func(err error) {
+		if err != nil {
+			f(err)
+			return
+		}
+		if e.Error != nil {
+			f(e.Error)
+			return
+		}
+		f(nil)
+	})
+	return nil
 }
 
 // EntriesSet adds a Set to the list of entries.
