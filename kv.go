@@ -222,6 +222,12 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		}
 	}()
 
+	metricsTicker := time.NewTicker(5 * time.Minute)
+	defer func() {
+		if metricsTicker != nil {
+			metricsTicker.Stop()
+		}
+	}()
 	out = &KV{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
@@ -232,8 +238,9 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		elog:          trace.NewEventLog("Badger", "KV"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
-		metricsTicker: time.NewTicker(5 * time.Minute),
+		metricsTicker: metricsTicker,
 	}
+
 	go out.updateSize()
 	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
@@ -331,6 +338,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	valueDirLockGuard = nil
 	dirLockGuard = nil
 	manifestFile = nil
+	metricsTicker = nil
 	return out, nil
 }
 
