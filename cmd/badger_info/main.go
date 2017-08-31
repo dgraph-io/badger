@@ -31,6 +31,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -107,7 +108,15 @@ func printInfo(dir, valueDir string) error {
 
 	for level, lm := range manifest.Levels {
 		fmt.Printf("[Level %d]\n", level)
-		for tableID := range lm.Tables {
+		// We create a sorted list of table ID's so that output is in consistent order.
+		tableIDs := make([]uint64, 0, len(lm.Tables))
+		for id := range lm.Tables {
+			tableIDs = append(tableIDs, id)
+		}
+		sort.Slice(tableIDs, func(i, j int) bool {
+			return tableIDs[i] < tableIDs[j]
+		})
+		for _, tableID := range tableIDs {
 			tableFile := table.TableFilename(tableID)
 			file, ok := fileinfoByName[tableFile]
 			if ok {
