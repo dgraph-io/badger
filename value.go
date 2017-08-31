@@ -33,6 +33,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
@@ -68,13 +69,14 @@ type logFile struct {
 	sync.RWMutex
 	path   string
 	fd     *os.File
+	mmap   []byte
 	fid    uint16
 	offset uint32
 	size   uint32
 }
 
 // openReadOnly assumes that we have a write lock on logFile.
-func (lf *logFile) openReadOnly() error {
+func (lf *logFile) openReadOnly(mmap bool) error {
 	var err error
 	lf.fd, err = os.OpenFile(lf.path, os.O_RDONLY, 0666)
 	if err != nil {
@@ -86,20 +88,51 @@ func (lf *logFile) openReadOnly() error {
 		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
 	}
 	lf.size = uint32(fi.Size())
+
+	if mmap {
+		lf.mmap, err = y.Mmap(lf.fd, false, fi.Size())
+		if err != nil {
+			_ = lf.fd.Close()
+			return y.Wrapf(err, "Unable to map file")
+		}
+		err = y.Madvise(lf.mmap, false) // Disable readahead
+		if err != nil {
+			_ = lf.fd.Close()
+			return y.Wrapf(err, "madvise: Unable to disable readahead")
+		}
+	}
 	return nil
 }
 
-func (lf *logFile) read(buf []byte, offset int64) error {
+var errTooFewBytes = errors.New("Too few bytes read")
+
+func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 	lf.RLock()
 	defer lf.RUnlock()
 
-	nbr, err := lf.fd.ReadAt(buf, offset)
+	var nbr int
+	offset := int64(p.Offset)
+	if len(lf.mmap) > 0 {
+		size := int64(len(lf.mmap))
+		valsz := int64(p.Len)
+		if offset >= size {
+			err = y.ErrEOF
+		} else if offset+valsz > size {
+			err = errTooFewBytes
+		} else {
+			buf = lf.mmap[offset : offset+valsz]
+			nbr = int(valsz)
+		}
+	} else {
+		buf = s.Resize(int(p.Len))
+		nbr, err = lf.fd.ReadAt(buf, offset)
+	}
 	y.NumReads.Add(1)
 	y.NumBytesRead.Add(int64(nbr))
-	return err
+	return buf, err
 }
 
-func (lf *logFile) doneWriting() error {
+func (lf *logFile) doneWriting(mmap bool) error {
 	lf.Lock()
 	defer lf.Unlock()
 	if err := lf.fd.Sync(); err != nil {
@@ -109,7 +142,7 @@ func (lf *logFile) doneWriting() error {
 		return errors.Wrapf(err, "Unable to close value log: %q", lf.path)
 	}
 
-	return lf.openReadOnly()
+	return lf.openReadOnly(mmap)
 }
 
 func (lf *logFile) sync() error {
@@ -516,7 +549,7 @@ func (vlog *valueLog) openOrCreateFiles() error {
 			vlog.maxFid = uint32(lf.fid)
 
 		} else {
-			if err := lf.openReadOnly(); err != nil {
+			if err := lf.openReadOnly(vlog.opt.ValueLogLoadingMode == options.MemoryMap); err != nil {
 				return err
 			}
 		}
@@ -659,7 +692,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 		if curlf.offset > uint32(vlog.opt.ValueLogFileSize) {
 			var err error
-			if err = curlf.doneWriting(); err != nil {
+			if err = curlf.doneWriting(vlog.opt.ValueLogLoadingMode == options.MemoryMap); err != nil {
 				return err
 			}
 
@@ -733,10 +766,12 @@ func (vlog *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	if s == nil {
 		s = new(y.Slice)
 	}
-	buf := s.Resize(int(p.Len))
-	if err := lf.read(buf, int64(p.Offset)); err != nil {
+	var buf []byte
+
+	if buf, err = lf.read(p, s); err != nil {
 		return e, err
 	}
+
 	var h header
 	h.Decode(buf)
 	n := uint32(headerBufSize)
