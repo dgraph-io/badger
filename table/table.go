@@ -30,17 +30,12 @@ import (
 	"sync/atomic"
 
 	"github.com/AndreasBriese/bbloom"
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
 )
 
 const fileSuffix = ".sst"
-
-const (
-	Nothing = iota
-	MemoryMap
-	LoadToRAM
-)
 
 type keyOffset struct {
 	key    []byte
@@ -57,8 +52,8 @@ type Table struct {
 	blockIndex []keyOffset
 	ref        int32 // For file garbage collection.  Atomic.
 
-	mapTableTo int
-	mmap       []byte // Memory mapped.
+	loadingMode options.FileLoadingMode
+	mmap        []byte // Memory mapped.
 
 	// The following are initialized once and const.
 	smallest, biggest []byte // Smallest and largest keys.
@@ -80,7 +75,7 @@ func (t *Table) DecrRef() error {
 		// at least one reference pointing to them.
 
 		// It's necessary to delete windows files
-		if t.mapTableTo == MemoryMap {
+		if t.loadingMode == options.MemoryMap {
 			y.Munmap(t.mmap)
 		}
 		if err := t.fd.Truncate(0); err != nil {
@@ -117,7 +112,7 @@ func (b byKey) Less(i int, j int) bool { return bytes.Compare(b[i].key, b[j].key
 // entry.  Returns a table with one reference count on it (decrementing which may delete the file!
 // -- consider t.Close() instead).  The fd has to writeable because we call Truncate on it before
 // deleting.
-func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
+func OpenTable(fd *os.File, loadingMode options.FileLoadingMode) (*Table, error) {
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -133,21 +128,21 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 		return nil, errors.Errorf("Invalid filename: %s", filename)
 	}
 	t := &Table{
-		fd:         fd,
-		ref:        1, // Caller is given one reference.
-		id:         id,
-		mapTableTo: mapTableTo,
+		fd:          fd,
+		ref:         1, // Caller is given one reference.
+		id:          id,
+		loadingMode: loadingMode,
 	}
 
 	t.tableSize = int(fileInfo.Size())
 
-	if mapTableTo == MemoryMap {
+	if loadingMode == options.MemoryMap {
 		t.mmap, err = y.Mmap(fd, false, fileInfo.Size())
 		if err != nil {
 			_ = fd.Close()
 			return nil, y.Wrapf(err, "Unable to map file")
 		}
-	} else if mapTableTo == LoadToRAM {
+	} else if loadingMode == options.LoadToRAM {
 		err = t.LoadToRAM()
 		if err != nil {
 			_ = fd.Close()
@@ -176,7 +171,7 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 }
 
 func (t *Table) Close() error {
-	if t.mapTableTo == MemoryMap {
+	if t.loadingMode == options.MemoryMap {
 		y.Munmap(t.mmap)
 	}
 	if err := t.fd.Close(); err != nil {
