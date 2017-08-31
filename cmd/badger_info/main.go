@@ -106,6 +106,7 @@ func printInfo(dir, valueDir string) error {
 	numMissing := 0
 	numEmpty := 0
 
+	levelSizes := make([]int64, len(manifest.Levels))
 	for level, lm := range manifest.Levels {
 		fmt.Printf("[Level %d]\n", level)
 		// We create a sorted list of table ID's so that output is in consistent order.
@@ -122,12 +123,14 @@ func printInfo(dir, valueDir string) error {
 			if ok {
 				fileinfoMarked[tableFile] = true
 				emptyString := ""
-				if file.Size() == 0 {
+				fileSize := file.Size()
+				if fileSize == 0 {
 					emptyString = " [EMPTY]"
 					numEmpty++
 				}
+				levelSizes[level] += fileSize
 				// (Put level on every line to make easier to process with sed/perl.)
-				fmt.Printf("%-12s %10d  %s %d%s\n", tableFile, file.Size(),
+				fmt.Printf("%-12s %10d  %s %d%s\n", tableFile, fileSize,
 					file.ModTime().Format(time.RFC3339), level, emptyString)
 			} else {
 				fmt.Printf("%s [MISSING]\n", tableFile)
@@ -147,6 +150,7 @@ func printInfo(dir, valueDir string) error {
 	// If valueDir is different from dir, holds extra files in the value dir.
 	valueDirExtras := []os.FileInfo{}
 
+	valueLogSize := int64(0)
 	fmt.Print("[Value Log]\n")
 	for _, file := range valueDirFileinfos {
 		if !strings.HasSuffix(file.Name(), ".vlog") {
@@ -156,12 +160,14 @@ func printInfo(dir, valueDir string) error {
 			continue
 		}
 
+		fileSize := file.Size()
 		emptyString := ""
-		if file.Size() == 0 {
+		if fileSize == 0 {
 			emptyString = " [EMPTY]"
 			numEmpty++
 		}
-		fmt.Printf("%-12s %10d  %s%s\n", file.Name(), file.Size(),
+		valueLogSize += fileSize
+		fmt.Printf("%-12s %10d  %s%s\n", file.Name(), fileSize,
 			file.ModTime().Format(time.RFC3339), emptyString)
 
 		fileinfoMarked[file.Name()] = true
@@ -188,6 +194,14 @@ func printInfo(dir, valueDir string) error {
 		numValueDirExtra++
 	}
 
+	fmt.Print("[Summary]\n")
+	totalIndexSize := int64(0)
+	for i, sz := range levelSizes {
+		fmt.Printf("Level %d size: %d\n", i, sz)
+		totalIndexSize += sz
+	}
+	fmt.Printf("Total index size: %d\n", totalIndexSize)
+	fmt.Printf("Value log size: %d\n", valueLogSize)
 	totalExtra := numExtra + numValueDirExtra
 	if totalExtra == 0 && numMissing == 0 && numEmpty == 0 && !manifestTruncated {
 		fmt.Println("Abnormalities: None.")
