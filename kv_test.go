@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/options"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -39,6 +40,7 @@ func getTestOptions(dir string) *Options {
 	opt.ValueDir = dir
 	opt.SyncWrites = true // Some tests seem to need this to pass.
 	opt.ValueGCThreshold = 0.0
+	opt.ValueLogLoadingMode = options.MemoryMap // FIXME set this via a flag
 	return opt
 }
 
