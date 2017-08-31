@@ -922,3 +922,41 @@ func TestFillItem(t *testing.T) {
 		count++
 	}
 }
+
+func TestSetIfAbsentAsync(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, _ := NewKV(getTestOptions(dir))
+
+	bkey := func(i int) []byte {
+		return []byte(fmt.Sprintf("%09d", i))
+	}
+
+	f := func(err error) {}
+
+	n := 1000
+	for i := 0; i < n; i++ {
+		if (i % 10) == 0 {
+			t.Logf("Put i=%d\n", i)
+		}
+		kv.SetIfAbsentAsync(bkey(i), nil, byte(i%127), f)
+	}
+
+	require.NoError(t, kv.Close())
+	kv, err = NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+
+	opt := DefaultIteratorOptions
+	var count int
+	it := kv.NewIterator(opt)
+	{
+		t.Log("Starting first basic iteration")
+		for it.Rewind(); it.Valid(); it.Next() {
+			count++
+		}
+		require.EqualValues(t, n, count)
+	}
+	require.Equal(t, n, count)
+	require.NoError(t, kv.Close())
+}
