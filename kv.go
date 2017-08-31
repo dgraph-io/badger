@@ -40,18 +40,32 @@ var (
 
 // Options are params for creating DB object.
 type Options struct {
-	Dir      string // Directory to store the data in. Should exist and be writable.
-	ValueDir string // Directory to store the value log in. Can be the same as Dir.
-	// Should exist and be writable.
+	// 1. Mandatory flags
+	// -------------------
+	// Directory to store the data in. Should exist and be writable.
+	Dir string
+	// Directory to store the value log in. Can be the same as Dir. Should exist and be writable.
+	ValueDir string
 
+	// 2. Frequently modified flags
+	// -----------------------------
+	// Sync all writes to disk. Setting this to true would slow down data loading significantly.
+	SyncWrites bool
+	// How should LSM tree be accessed.
+	MapTablesTo int
+	// How often to run value log garbage collector. Every time it runs, there'd be a spike in LSM
+	// tree activity. But, running it frequently allows reclaiming disk space from an ever-growing
+	// value log.
+	ValueGCRunInterval time.Duration
+
+	// 3. Flags that user might want to review
+	// ----------------------------------------
 	// The following affect all levels of LSM tree.
 	MaxTableSize        int64 // Each table (or file) is at most this size.
 	LevelSizeMultiplier int   // Equals SizeOf(Li+1)/SizeOf(Li).
 	MaxLevels           int   // Maximum number of levels of compaction.
 	ValueThreshold      int   // If value size >= this threshold, only store value offsets in tree.
-	MapTablesTo         int   // How should LSM tree be accessed.
-
-	NumMemtables int // Maximum number of tables to keep in memory, before stalling.
+	NumMemtables        int   // Maximum number of tables to keep in memory, before stalling.
 
 	// The following affect how we handle LSM tree L0.
 	// Maximum number of Level 0 tables before we start compacting.
@@ -64,19 +78,15 @@ type Options struct {
 
 	// Run value log garbage collection if we can reclaim at least this much space. This is a ratio.
 	ValueGCThreshold float64
-	// How often to run value log garbage collector.
-	ValueGCRunInterval time.Duration
 
 	// Size of single value log file.
 	ValueLogFileSize int64
 
-	// Sync all writes to disk. Setting this to true would slow down data loading significantly.
-	SyncWrites bool
-
 	// Number of compaction workers to run concurrently.
 	NumCompactors int
 
-	// Flags for testing purposes.
+	// 4. Flags for testing purposes
+	// ------------------------------
 	DoNotCompact bool // Stops LSM tree from compactions.
 
 	maxBatchSize int64 // max batch size in bytes
