@@ -48,8 +48,10 @@ const (
 	M               int64 = 1 << 20
 )
 
-// ErrCorrupt is returned when a value log file is corrupted.
-var ErrCorrupt = errors.New("Unable to find log. Potential data corruption")
+// ErrRetry is returned when a log file containing the value is not found.
+// This usually indicates that it may have been garbage collected, and the
+// operation needs to be retried.
+var ErrRetry = errors.New("Unable to find log file. Please retry")
 
 // ErrCasMismatch is returned when a CompareAndSet operation has failed due
 // to a counter mismatch.
@@ -72,6 +74,7 @@ type logFile struct {
 	fdLock sync.RWMutex
 	fd     *os.File
 	fid    uint32
+	mmap   []byte
 	offset uint32
 	size   uint32
 }
@@ -89,15 +92,47 @@ func (lf *logFile) openReadOnly() error {
 		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
 	}
 	lf.size = uint32(fi.Size())
+
+	lf.mmap, err = y.Mmap(lf.fd, false, fi.Size())
+	if err != nil {
+		_ = lf.fd.Close()
+		return y.Wrapf(err, "Unable to map file")
+	}
+	err = y.Madvise(lf.mmap, false) // Disable readahead
+	if err != nil {
+		_ = lf.fd.Close()
+		return y.Wrapf(err, "madvise: Unable to disable readahead")
+	}
 	return nil
 }
 
+var errTooFewBytes = errors.New("Too few bytes read")
+
 // lf must be RLocked (or exclusively locked) if you call this.
-func (lf *logFile) read(buf []byte, offset int64) error {
-	nbr, err := lf.fd.ReadAt(buf, offset)
+func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
+	if s == nil {
+		s = new(y.Slice)
+	}
+	var nbr int64
+	offset := int64(p.Offset)
+	if len(lf.mmap) > 0 {
+		size := int64(len(lf.mmap))
+		valsz := int64(p.Len)
+		if offset >= size || offset+valsz > size {
+			err = y.ErrEOF
+		} else {
+			buf = lf.mmap[offset : offset+valsz]
+			nbr = valsz
+		}
+	} else {
+		buf = s.Resize(int(p.Len))
+		var n int
+		n, err = lf.fd.ReadAt(buf, offset)
+		nbr = int64(n)
+	}
 	y.NumReads.Add(1)
-	y.NumBytesRead.Add(int64(nbr))
-	return err
+	y.NumBytesRead.Add(nbr)
+	return buf, err
 }
 
 func (lf *logFile) doneWriting() error {
@@ -111,7 +146,8 @@ func (lf *logFile) doneWriting() error {
 	// one batch of readers wait for the preceding batch of readers to finish.
 	//
 	// If there's a benefit to reopening the file read-only, it might be on Windows.  I don't know
-	// what the benefit is.  Consider keeping the file read-write, or use fcntl to change permissions.
+	// what the benefit is.  Consider keeping the file read-write, or use fcntl to change
+	// permissions.
 	lf.fdLock.Lock()
 	defer lf.fdLock.Unlock()
 	if err := lf.fd.Close(); err != nil {
@@ -297,7 +333,8 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			copy(ne.Key, e.Key)
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
-			ne.CASCounterCheck = vs.CASCounter // CAS counter check. Do not rewrite if key has a newer value.
+			// CAS counter check. Do not rewrite if key has a newer value.
+			ne.CASCounterCheck = vs.CASCounter
 			wb = append(wb, ne)
 			size += int64(vlog.opt.estimateSize(ne))
 			if size >= 64*M {
@@ -729,8 +766,9 @@ func (vlog *valueLog) write(reqs []*request) error {
 			}
 
 			p.Fid = curlf.fid
-			p.Offset = curlf.offset + uint32(vlog.buf.Len()) // Use the offset including buffer length so far.
-			plen, err := encodeEntry(e, &vlog.buf)           // Now encode the entry into buffer.
+			// Use the offset including buffer length so far.
+			p.Offset = curlf.offset + uint32(vlog.buf.Len())
+			plen, err := encodeEntry(e, &vlog.buf) // Now encode the entry into buffer.
 			if err != nil {
 				return err
 			}
@@ -757,27 +795,55 @@ func (vlog *valueLog) getFileRLocked(fid uint32) (*logFile, error) {
 	defer vlog.filesLock.RUnlock()
 	ret, ok := vlog.filesMap[fid]
 	if !ok {
-		return nil, ErrCorrupt
+		// log file has gone away, will need to retry the operation.
+		return nil, ErrRetry
 	}
 	ret.fdLock.RLock()
 	return ret, nil
 }
 
 // Read reads the value log at a given location.
-func (vlog *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
-	lf, err := vlog.getFileRLocked(p.Fid)
+//
+// FIXME once mmap is in place for writable log as well, we can
+// stop passing a reference to slice.
+func (vlog *valueLog) Read(vp valuePointer, slice *y.Slice, consumer func([]byte)) error {
+	buf, err := vlog.readValueBytes(vp, slice)
+
 	if err != nil {
-		return e, err
+		return err
+	}
+
+	var h header
+	h.Decode(buf)
+	if (h.meta & BitDelete) != 0 {
+		// Tombstone key
+		consumer(nil)
+		return nil
+	}
+	n := uint32(headerBufSize)
+	n += h.klen
+	consumer(buf[n : n+h.vlen])
+
+	return nil
+}
+
+func (vlog *valueLog) readValueBytes(vp valuePointer, slice *y.Slice) ([]byte, error) {
+	lf, err := vlog.getFileRLocked(vp.Fid)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Unable to read from value log: %+v", vp)
 	}
 	defer lf.fdLock.RUnlock()
 
-	if s == nil {
-		s = new(y.Slice)
+	var buf []byte
+	if buf, err = lf.read(vp, slice); err != nil {
+		return nil, errors.Wrapf(err, "Unable to read from value log: %+v", vp)
 	}
-	buf := s.Resize(int(p.Len))
-	if err := lf.read(buf, int64(p.Offset)); err != nil {
-		return e, err
-	}
+
+	return buf, nil
+}
+
+// Test helper
+func valueBytesToEntry(buf []byte) (e Entry) {
 	var h header
 	h.Decode(buf)
 	n := uint32(headerBufSize)
@@ -789,8 +855,7 @@ func (vlog *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	e.casCounter = h.casCounter
 	e.CASCounterCheck = h.casCounterCheck
 	e.Value = buf[n : n+h.vlen]
-
-	return e, nil
+	return
 }
 
 func (vlog *valueLog) runGCInLoop(lc *y.Closer) {
@@ -903,13 +968,16 @@ func (vlog *valueLog) doRunGC() error {
 
 		} else {
 			vlog.elog.Printf("Reason=%+v\n", r)
-			ne, err := vlog.Read(vp, nil)
+
+			s := new(y.Slice)
+			buf, err := vlog.readValueBytes(vp, s)
 			if err != nil {
 				return errStop
 			}
+			ne := valueBytesToEntry(buf)
 			ne.offset = vp.Offset
 			if ne.casCounter == e.casCounter {
-				ne.print("Latest Entry in LSM")
+				ne.print("Latest Entry Header in LSM")
 				e.print("Latest Entry in Log")
 				return errors.Errorf(
 					"This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)

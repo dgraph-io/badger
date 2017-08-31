@@ -63,7 +63,7 @@ func TestManifestBasic(t *testing.T) {
 	if err := kv.Get([]byte("testkey"), &item); err != nil {
 		t.Error(err)
 	}
-	require.EqualValues(t, "testval", string(item.Value()))
+	require.EqualValues(t, "testval", string(getItemValue(t, &item)))
 	require.EqualValues(t, byte(0x05), item.UserMeta())
 	require.NoError(t, kv.Close())
 }
