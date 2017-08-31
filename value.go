@@ -98,11 +98,14 @@ func (lf *logFile) read(buf []byte, offset int64) error {
 }
 
 func (lf *logFile) doneWriting() error {
-	lf.lock.Lock()
-	defer lf.lock.Unlock()
+	// Sync before acquiring lock.  (We call this from write() and thus know we have shared access
+	// to the fd.)
 	if err := lf.fd.Sync(); err != nil {
 		return errors.Wrapf(err, "Unable to sync value log: %q", lf.path)
 	}
+	// Close and reopen the file read-only.  Acquire lock because fd will become invalid for a bit.
+	lf.lock.Lock()
+	defer lf.lock.Unlock()
 	if err := lf.fd.Close(); err != nil {
 		return errors.Wrapf(err, "Unable to close value log: %q", lf.path)
 	}
