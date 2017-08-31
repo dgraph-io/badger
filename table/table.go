@@ -185,12 +185,10 @@ func (t *Table) Close() error {
 	return nil
 }
 
-var EOF = errors.New("End of mapped region")
-
 func (t *Table) read(off int, sz int) ([]byte, error) {
 	if len(t.mmap) > 0 {
 		if len(t.mmap[off:]) < sz {
-			return nil, EOF
+			return nil, y.ErrEOF
 		}
 		return t.mmap[off : off+sz], nil
 	}
