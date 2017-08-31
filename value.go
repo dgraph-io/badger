@@ -89,10 +89,8 @@ func (lf *logFile) openReadOnly() error {
 	return nil
 }
 
+// lf must be RLocked (or exclusively locked) if you call this.
 func (lf *logFile) read(buf []byte, offset int64) error {
-	lf.lock.RLock()
-	defer lf.lock.RUnlock()
-
 	nbr, err := lf.fd.ReadAt(buf, offset)
 	y.NumReads.Add(1)
 	y.NumBytesRead.Add(int64(nbr))
@@ -331,8 +329,11 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		vlog.Unlock()
 	}
 
+	// Exclusively lock the file so that there are no readers before closing/destroying it
+	f.lock.Lock()
 	rem := vlog.fpath(f.fid)
 	f.fd.Close() // close file previous to remove it
+	f.lock.Unlock()
 
 	elog.Printf("Removing %s", rem)
 	return os.Remove(rem)
@@ -711,7 +712,9 @@ func (vlog *valueLog) write(reqs []*request) error {
 	// an invalid file descriptor.
 }
 
-func (vlog *valueLog) getFile(fid uint16) (*logFile, error) {
+// Gets the logFile and acquires an RLock() on it too.  You must call RUnlock on the file (if
+// non-nil).
+func (vlog *valueLog) getFileRLock(fid uint16) (*logFile, error) {
 	vlog.RLock()
 	defer vlog.RUnlock()
 
@@ -721,12 +724,15 @@ func (vlog *valueLog) getFile(fid uint16) (*logFile, error) {
 	if idx == len(vlog.files) || vlog.files[idx].fid != fid {
 		return nil, ErrCorrupt
 	}
-	return vlog.files[idx], nil
+	ret := vlog.files[idx]
+	ret.lock.RLock()
+	return ret, nil
 }
 
 // Read reads the value log at a given location.
 func (vlog *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
-	lf, err := vlog.getFile(p.Fid)
+	lf, err := vlog.getFileRLock(p.Fid)
+	defer lf.lock.RUnlock()
 	if err != nil {
 		return e, err
 	}
