@@ -111,9 +111,9 @@ func TestValueGC(t *testing.T) {
 		kv.Delete([]byte(fmt.Sprintf("key%d", i)))
 	}
 
-	kv.vlog.lock.RLock()
+	kv.vlog.filesLock.RLock()
 	lf := kv.vlog.files[0]
-	kv.vlog.lock.RUnlock()
+	kv.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
 	//		e.print("lf")
@@ -175,9 +175,9 @@ func TestValueGC2(t *testing.T) {
 		require.NoError(t, e.Error, "entry with error: %+v", e)
 	}
 
-	kv.vlog.lock.RLock()
+	kv.vlog.filesLock.RLock()
 	lf := kv.vlog.files[0]
-	kv.vlog.lock.RUnlock()
+	kv.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
 	//		e.print("lf")

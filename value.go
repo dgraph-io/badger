@@ -316,16 +316,16 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	elog.Printf("Removing fid: %d", f.fid)
 	// Entries written to LSM. Remove the older file now.
 	{
-		vlog.lock.Lock()
+		vlog.filesLock.Lock()
 		idx := sort.Search(len(vlog.files), func(idx int) bool {
 			return vlog.files[idx].fid >= f.fid
 		})
 		if idx == len(vlog.files) || vlog.files[idx].fid != f.fid {
-			vlog.lock.Unlock()
+			vlog.filesLock.Unlock()
 			return errors.Errorf("Unable to find fid: %d", f.fid)
 		}
 		vlog.files = append(vlog.files[:idx], vlog.files[idx+1:]...)
-		vlog.lock.Unlock()
+		vlog.filesLock.Unlock()
 	}
 
 	// Exclusively lock the file so that there are no readers before closing/destroying it
@@ -460,15 +460,18 @@ func (p *valuePointer) Decode(b []byte) {
 }
 
 type valueLog struct {
-	lock    sync.RWMutex
 	buf     bytes.Buffer
 	dirPath string
 	elog    trace.EventLog
-	files   []*logFile
-	kv      *KV
-	maxFid  uint32
-	offset  uint32
-	opt     Options
+
+	// locks our view of which files exist
+	filesLock sync.RWMutex
+	files     []*logFile
+
+	kv     *KV
+	maxFid uint32
+	offset uint32
+	opt    Options
 }
 
 func (vlog *valueLog) fpath(fid uint16) string {
@@ -545,9 +548,9 @@ func (vlog *valueLog) createVlogFile(fid uint16) (*logFile, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "Unable to sync value log file dir")
 	}
-	vlog.lock.Lock()
+	vlog.filesLock.Lock()
 	vlog.files = append(vlog.files, lf)
-	vlog.lock.Unlock()
+	vlog.filesLock.Unlock()
 	return lf, nil
 }
 
@@ -619,14 +622,14 @@ func (vlog *valueLog) sync() error {
 		return nil
 	}
 
-	vlog.lock.RLock()
+	vlog.filesLock.RLock()
 	if len(vlog.files) == 0 {
-		vlog.lock.RUnlock()
+		vlog.filesLock.RUnlock()
 		return nil
 	}
 	curlf := vlog.files[len(vlog.files)-1]
 	curlf.lock.RLock()
-	vlog.lock.RUnlock()
+	vlog.filesLock.RUnlock()
 
 	dirSyncCh := make(chan error)
 	go func() { dirSyncCh <- syncDir(vlog.opt.ValueDir) }()
@@ -641,9 +644,9 @@ func (vlog *valueLog) sync() error {
 
 // write is thread-unsafe by design and should not be called concurrently.
 func (vlog *valueLog) write(reqs []*request) error {
-	vlog.lock.RLock()
+	vlog.filesLock.RLock()
 	curlf := vlog.files[len(vlog.files)-1]
-	vlog.lock.RUnlock()
+	vlog.filesLock.RUnlock()
 
 	toDisk := func() error {
 		if vlog.buf.Len() == 0 {
@@ -716,8 +719,8 @@ func (vlog *valueLog) write(reqs []*request) error {
 // Gets the logFile and acquires an RLock() on it too.  You must call RUnlock on the file (if
 // non-nil).
 func (vlog *valueLog) getFileRLocked(fid uint16) (*logFile, error) {
-	vlog.lock.RLock()
-	defer vlog.lock.RUnlock()
+	vlog.filesLock.RLock()
+	defer vlog.filesLock.RUnlock()
 
 	idx := sort.Search(len(vlog.files), func(idx int) bool {
 		return vlog.files[idx].fid >= fid
@@ -778,8 +781,8 @@ func (vlog *valueLog) runGCInLoop(lc *y.LevelCloser) {
 }
 
 func (vlog *valueLog) pickLog() *logFile {
-	vlog.lock.RLock()
-	defer vlog.lock.RUnlock()
+	vlog.filesLock.RLock()
+	defer vlog.filesLock.RUnlock()
 	if len(vlog.files) <= 1 {
 		return nil
 	}
