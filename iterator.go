@@ -65,16 +65,16 @@ func (item *KVItem) hasValue() bool {
 // EstimatedSize returns approximate size of the key-value pair.  This can be called with
 // FetchValues=false, to quickly iterate through and estimate the size of a range of key-value
 // pairs (without fetching the corresponding values).
-func (item *KVItem) EstimatedSize() int {
+func (item *KVItem) EstimatedSize() int64 {
 	if !item.hasValue() {
 		return 0
 	}
 	if (item.meta & BitValuePointer) == 0 {
-		return len(item.key) + len(item.vptr)
+		return int64(len(item.key) + len(item.vptr))
 	}
 	var vp valuePointer
 	vp.Decode(item.vptr)
-	return int(vp.Len) // includes key length.
+	return int64(vp.Len) // includes key length.
 }
 
 // Counter returns the CAS counter associated with the value.

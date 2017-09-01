@@ -654,7 +654,7 @@ func TestIterateDeleted(t *testing.T) {
 			iterOpt.FetchValues = prefetch
 			idxIt = ps.NewIterator(iterOpt)
 
-			var estSize int
+			var estSize int64
 			var idxKeys []string
 			for idxIt.Seek(prefix); idxIt.Valid(); idxIt.Next() {
 				item := idxIt.Item()
@@ -667,7 +667,7 @@ func TestIterateDeleted(t *testing.T) {
 				t.Logf("%+v\n", idxIt.Item())
 			}
 			require.Equal(t, 0, len(idxKeys))
-			require.Equal(t, 0, estSize)
+			require.Equal(t, int64(0), estSize)
 		})
 	}
 }
@@ -900,7 +900,7 @@ func TestFillItem(t *testing.T) {
 	opt := IteratorOptions{}
 	opt.FetchValues = false
 
-	var estSize int
+	var estSize int64
 	it := kv.NewIterator(opt)
 	var count int
 	for it.Rewind(); it.Valid(); it.Next() {
@@ -915,7 +915,7 @@ func TestFillItem(t *testing.T) {
 	}
 	require.EqualValues(t, n, count)
 
-	var estSize2 int
+	var estSize2 int64
 	opt.FetchValues = true
 	it = kv.NewIterator(opt)
 	count = 0
