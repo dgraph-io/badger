@@ -423,7 +423,7 @@ func (s *KV) Close() (err error) {
 		err = errors.Wrap(syncErr, "KV.Close")
 	}
 
-	return nil
+	return err
 }
 
 const (
