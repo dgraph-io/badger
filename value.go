@@ -65,8 +65,11 @@ const (
 )
 
 type logFile struct {
-	lock   sync.RWMutex
-	path   string
+	path string
+	// This is a lock on the file descriptor's value and the file's existence.  Use shared
+	// ownership when reading/writing the file, use exclusive ownership to open/close the
+	// descriptor or remove the file.
+	fdLock sync.RWMutex
 	fd     *os.File
 	fid    uint16
 	offset uint32
@@ -109,8 +112,8 @@ func (lf *logFile) doneWriting() error {
 	//
 	// If there's a benefit to reopening the file read-only, it might be on Windows.  I don't know
 	// what the benefit is.  Consider keeping the file read-write, or use fcntl to change permissions.
-	lf.lock.Lock()
-	defer lf.lock.Unlock()
+	lf.fdLock.Lock()
+	defer lf.fdLock.Unlock()
 	if err := lf.fd.Close(); err != nil {
 		return errors.Wrapf(err, "Unable to close value log: %q", lf.path)
 	}
@@ -337,10 +340,10 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	}
 
 	// Exclusively lock the file so that there are no readers before closing/destroying it
-	f.lock.Lock()
+	f.fdLock.Lock()
 	rem := vlog.fpath(f.fid)
 	f.fd.Close() // close file previous to remove it
-	f.lock.Unlock()
+	f.fdLock.Unlock()
 
 	elog.Printf("Removing %s", rem)
 	return os.Remove(rem)
@@ -636,13 +639,13 @@ func (vlog *valueLog) sync() error {
 		return nil
 	}
 	curlf := vlog.files[len(vlog.files)-1]
-	curlf.lock.RLock()
+	curlf.fdLock.RLock()
 	vlog.filesLock.RUnlock()
 
 	dirSyncCh := make(chan error)
 	go func() { dirSyncCh <- syncDir(vlog.opt.ValueDir) }()
 	err := curlf.sync()
-	curlf.lock.RUnlock()
+	curlf.fdLock.RUnlock()
 	dirSyncErr := <-dirSyncCh
 	if err != nil {
 		err = dirSyncErr
@@ -737,7 +740,7 @@ func (vlog *valueLog) getFileRLocked(fid uint16) (*logFile, error) {
 		return nil, ErrCorrupt
 	}
 	ret := vlog.files[idx]
-	ret.lock.RLock()
+	ret.fdLock.RLock()
 	return ret, nil
 }
 
@@ -747,7 +750,7 @@ func (vlog *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	if err != nil {
 		return e, err
 	}
-	defer lf.lock.RUnlock()
+	defer lf.fdLock.RUnlock()
 
 	if s == nil {
 		s = new(y.Slice)
