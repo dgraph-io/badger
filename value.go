@@ -567,12 +567,13 @@ func (vlog *valueLog) Close() error {
 	vlog.elog.Printf("Stopping garbage collection of values.")
 	defer vlog.elog.Finish()
 
+	var err error
 	for _, f := range vlog.files {
-		if err := f.fd.Close(); err != nil {
-			return err
+		if closeErr := f.fd.Close(); closeErr != nil && err == nil {
+			err = closeErr
 		}
 	}
-	return nil
+	return err
 }
 
 // Replay replays the value log. The kv provided is only valid for the lifetime of function call.

@@ -145,7 +145,6 @@ type KV struct {
 	// Incremented in the non-concurrently accessed write loop.  But also accessed outside. So
 	// we use an atomic op.
 	lastUsedCasCounter uint64
-	metricsTicker      *time.Ticker
 }
 
 // ErrInvalidDir is returned when Badger cannot find the directory
@@ -232,9 +231,10 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		elog:          trace.NewEventLog("Badger", "KV"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
-		metricsTicker: time.NewTicker(5 * time.Minute),
 	}
-	go out.updateSize()
+
+	lc := out.closer.Register("updateSize")
+	go out.updateSize(lc)
 	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
 	// newLevelsController potentially loads files in directory.
@@ -242,14 +242,14 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		return nil, err
 	}
 
-	lc := out.closer.Register("compactors")
+	lc = out.closer.Register("compactors")
 	out.lc.startCompact(lc)
 
 	lc = out.closer.Register("memtable")
 	go out.flushMemtable(lc) // Need levels controller to be up.
 
 	if err = out.vlog.Open(out, &opt); err != nil {
-		return out, err
+		return nil, err
 	}
 
 	var item KVItem
@@ -337,30 +337,6 @@ func NewKV(optParam *Options) (out *KV, err error) {
 // Close closes a KV. It's crucial to call it to ensure all the pending updates
 // make their way to disk.
 func (s *KV) Close() (err error) {
-	defer func() {
-		if guardErr := s.dirLockGuard.Release(); err == nil {
-			err = errors.Wrap(guardErr, "KV.Close")
-		}
-		if s.valueDirGuard != nil {
-			if guardErr := s.valueDirGuard.Release(); err == nil {
-				err = errors.Wrap(guardErr, "KV.Close")
-			}
-		}
-		if manifestErr := s.manifest.close(); err == nil {
-			err = errors.Wrap(manifestErr, "KV.Close")
-		}
-
-		// Fsync directories to ensure that lock file, and any other removed files whose directory
-		// we haven't specifically fsynced, are guaranteed to have their directory entry removal
-		// persisted to disk.
-		if syncErr := syncDir(s.opt.Dir); err == nil {
-			err = errors.Wrap(syncErr, "KV.Close")
-		}
-		if syncErr := syncDir(s.opt.ValueDir); err == nil {
-			err = errors.Wrap(syncErr, "KV.Close")
-		}
-	}()
-
 	s.elog.Printf("Closing database")
 	// Stop value GC first.
 	lc := s.closer.Get("value-gc")
@@ -371,8 +347,8 @@ func (s *KV) Close() (err error) {
 	lc.SignalAndWait()
 
 	// Now close the value log.
-	if err := s.vlog.Close(); err != nil {
-		return errors.Wrapf(err, "KV.Close")
+	if vlogErr := s.vlog.Close(); err == nil {
+		err = errors.Wrap(vlogErr, "KV.Close")
 	}
 
 	// Make sure that block writer is done pushing stuff into memtable!
@@ -416,16 +392,38 @@ func (s *KV) Close() (err error) {
 	lc.SignalAndWait()
 	s.elog.Printf("Compaction finished")
 
-	if err := s.lc.close(); err != nil {
-		return errors.Wrap(err, "KV.Close")
+	if lcErr := s.lc.close(); err == nil {
+		err = errors.Wrap(lcErr, "KV.Close")
 	}
-	s.metricsTicker.Stop()
 	s.elog.Printf("Waiting for closer")
 	s.closer.SignalAll()
 	s.closer.WaitForAll()
+
 	s.elog.Finish()
 
-	return nil
+	if guardErr := s.dirLockGuard.Release(); err == nil {
+		err = errors.Wrap(guardErr, "KV.Close")
+	}
+	if s.valueDirGuard != nil {
+		if guardErr := s.valueDirGuard.Release(); err == nil {
+			err = errors.Wrap(guardErr, "KV.Close")
+		}
+	}
+	if manifestErr := s.manifest.close(); err == nil {
+		err = errors.Wrap(manifestErr, "KV.Close")
+	}
+
+	// Fsync directories to ensure that lock file, and any other removed files whose directory
+	// we haven't specifically fsynced, are guaranteed to have their directory entry removal
+	// persisted to disk.
+	if syncErr := syncDir(s.opt.Dir); err == nil {
+		err = errors.Wrap(syncErr, "KV.Close")
+	}
+	if syncErr := syncDir(s.opt.ValueDir); err == nil {
+		err = errors.Wrap(syncErr, "KV.Close")
+	}
+
+	return err
 }
 
 const (
@@ -1219,7 +1217,12 @@ func exists(path string) (bool, error) {
 	return true, err
 }
 
-func (s *KV) updateSize() {
+func (s *KV) updateSize(lc *y.LevelCloser) {
+	defer lc.Done()
+
+	metricsTicker := time.NewTicker(5 * time.Minute)
+	defer metricsTicker.Stop()
+
 	getNewInt := func(val int64) *expvar.Int {
 		v := new(expvar.Int)
 		v.Add(val)
@@ -1246,14 +1249,18 @@ func (s *KV) updateSize() {
 		return lsmSize, vlogSize
 	}
 
-	for range s.metricsTicker.C {
-		lsmSize, vlogSize := totalSize(s.opt.Dir)
-		y.LSMSize.Set(s.opt.Dir, getNewInt(lsmSize))
-		// If valueDir is different from dir, we'd have to do another walk.
-		if s.opt.ValueDir != s.opt.Dir {
-			_, vlogSize = totalSize(s.opt.ValueDir)
+	for {
+		select {
+		case <-metricsTicker.C:
+			lsmSize, vlogSize := totalSize(s.opt.Dir)
+			y.LSMSize.Set(s.opt.Dir, getNewInt(lsmSize))
+			// If valueDir is different from dir, we'd have to do another walk.
+			if s.opt.ValueDir != s.opt.Dir {
+				_, vlogSize = totalSize(s.opt.ValueDir)
+			}
+			y.VlogSize.Set(s.opt.Dir, getNewInt(vlogSize))
+		case <-lc.HasBeenClosed():
+			return
 		}
-		y.VlogSize.Set(s.opt.Dir, getNewInt(vlogSize))
 	}
-
 }
