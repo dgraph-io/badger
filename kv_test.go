@@ -654,9 +654,12 @@ func TestIterateDeleted(t *testing.T) {
 			iterOpt.FetchValues = prefetch
 			idxIt = ps.NewIterator(iterOpt)
 
+			var estSize int64
 			var idxKeys []string
 			for idxIt.Seek(prefix); idxIt.Valid(); idxIt.Next() {
-				key := idxIt.Item().Key()
+				item := idxIt.Item()
+				key := item.Key()
+				estSize += item.EstimatedSize()
 				if !bytes.HasPrefix(key, prefix) {
 					break
 				}
@@ -664,6 +667,7 @@ func TestIterateDeleted(t *testing.T) {
 				t.Logf("%+v\n", idxIt.Item())
 			}
 			require.Equal(t, 0, len(idxKeys))
+			require.Equal(t, int64(0), estSize)
 		})
 	}
 }
@@ -896,6 +900,7 @@ func TestFillItem(t *testing.T) {
 	opt := IteratorOptions{}
 	opt.FetchValues = false
 
+	var estSize int64
 	it := kv.NewIterator(opt)
 	var count int
 	for it.Rewind(); it.Valid(); it.Next() {
@@ -906,9 +911,11 @@ func TestFillItem(t *testing.T) {
 		val = item.Value()
 		require.EqualValues(t, bval(count), string(val))
 		count++
+		estSize += item.EstimatedSize()
 	}
 	require.EqualValues(t, n, count)
 
+	var estSize2 int64
 	opt.FetchValues = true
 	it = kv.NewIterator(opt)
 	count = 0
@@ -920,7 +927,9 @@ func TestFillItem(t *testing.T) {
 		val2 := item.Value()
 		require.EqualValues(t, val1, val2)
 		count++
+		estSize2 += item.EstimatedSize()
 	}
+	require.Equal(t, estSize, estSize2)
 }
 
 func TestSetIfAbsentAsync(t *testing.T) {
