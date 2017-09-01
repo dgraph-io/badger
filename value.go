@@ -588,14 +588,14 @@ func (vlog *valueLog) Close() error {
 	return err
 }
 
-// sortedFiles returns the filesMap sorted by fid.  Assumes we have shared access to filesMap
-func (vlog *valueLog) sortedFiles() []*logFile {
-	ret := make([]*logFile, 0, len(vlog.filesMap))
-	for _, f := range vlog.filesMap {
-		ret = append(ret, f)
+// sortedFids returns the file id's, sorted.  Assumes we have shared access to filesMap.
+func (vlog *valueLog) sortedFids() []uint16 {
+	ret := make([]uint16, 0, len(vlog.filesMap))
+	for fid := range vlog.filesMap {
+		ret = append(ret, fid)
 	}
 	sort.Slice(ret, func(i, j int) bool {
-		return ret[i].fid < ret[j].fid
+		return ret[i] < ret[j]
 	})
 	return ret
 }
@@ -606,16 +606,17 @@ func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 	offset := ptr.Offset + ptr.Len
 	vlog.elog.Printf("Seeking at value pointer: %+v\n", ptr)
 
-	files := vlog.sortedFiles()
+	fids := vlog.sortedFids()
 
-	for _, f := range files {
-		if f.fid < fid {
+	for _, id := range fids {
+		if id < fid {
 			continue
 		}
 		of := offset
-		if f.fid > fid {
+		if id > fid {
 			of = 0
 		}
+		f := vlog.filesMap[id]
 		err := f.iterate(of, fn)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to replay value log: %q", f.path)
@@ -624,7 +625,7 @@ func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 
 	// Seek to the end to start writing.
 	var err error
-	last := files[len(files)-1]
+	last := vlog.filesMap[uint16(vlog.maxFid)]
 	lastOffset, err := last.fd.Seek(0, io.SeekEnd)
 	last.offset = uint32(lastOffset)
 	return errors.Wrapf(err, "Unable to seek to end of value log: %q", last.path)
@@ -805,13 +806,13 @@ func (vlog *valueLog) pickLog() *logFile {
 	if len(vlog.filesMap) <= 1 {
 		return nil
 	}
-	files := vlog.sortedFiles()
+	fids := vlog.sortedFids()
 	// This file shouldn't be being written to.
-	lfi := rand.Intn(len(files))
-	if lfi > 0 {
-		lfi = rand.Intn(lfi) // Another level of rand to favor smaller fids.
+	idx := rand.Intn(len(fids))
+	if idx > 0 {
+		idx = rand.Intn(idx) // Another level of rand to favor smaller fids.
 	}
-	return files[lfi]
+	return vlog.filesMap[fids[idx]]
 }
 
 func (vlog *valueLog) doRunGC() error {

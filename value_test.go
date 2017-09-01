@@ -112,7 +112,7 @@ func TestValueGC(t *testing.T) {
 	}
 
 	kv.vlog.filesLock.RLock()
-	lf := kv.vlog.sortedFiles()[0]
+	lf := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
@@ -176,7 +176,7 @@ func TestValueGC2(t *testing.T) {
 	}
 
 	kv.vlog.filesLock.RLock()
-	lf := kv.vlog.sortedFiles()[0]
+	lf := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
