@@ -65,8 +65,11 @@ const (
 )
 
 type logFile struct {
-	sync.RWMutex
-	path   string
+	path string
+	// This is a lock on the file descriptor's value and the file's existence.  Use shared
+	// ownership when reading/writing the file, use exclusive ownership to open/close the
+	// descriptor or remove the file.
+	fdLock sync.RWMutex
 	fd     *os.File
 	fid    uint16
 	offset uint32
@@ -89,10 +92,8 @@ func (lf *logFile) openReadOnly() error {
 	return nil
 }
 
+// lf must be RLocked (or exclusively locked) if you call this.
 func (lf *logFile) read(buf []byte, offset int64) error {
-	lf.RLock()
-	defer lf.RUnlock()
-
 	nbr, err := lf.fd.ReadAt(buf, offset)
 	y.NumReads.Add(1)
 	y.NumBytesRead.Add(int64(nbr))
@@ -100,11 +101,19 @@ func (lf *logFile) read(buf []byte, offset int64) error {
 }
 
 func (lf *logFile) doneWriting() error {
-	lf.Lock()
-	defer lf.Unlock()
+	// Sync before acquiring lock.  (We call this from write() and thus know we have shared access
+	// to the fd.)
 	if err := lf.fd.Sync(); err != nil {
 		return errors.Wrapf(err, "Unable to sync value log: %q", lf.path)
 	}
+	// Close and reopen the file read-only.  Acquire lock because fd will become invalid for a bit.
+	// Acquiring the lock is bad because, while we don't hold the lock for a long time, it forces
+	// one batch of readers wait for the preceding batch of readers to finish.
+	//
+	// If there's a benefit to reopening the file read-only, it might be on Windows.  I don't know
+	// what the benefit is.  Consider keeping the file read-write, or use fcntl to change permissions.
+	lf.fdLock.Lock()
+	defer lf.fdLock.Unlock()
 	if err := lf.fd.Close(); err != nil {
 		return errors.Wrapf(err, "Unable to close value log: %q", lf.path)
 	}
@@ -112,9 +121,8 @@ func (lf *logFile) doneWriting() error {
 	return lf.openReadOnly()
 }
 
+// You must hold lf.lock to sync()
 func (lf *logFile) sync() error {
-	lf.RLock()
-	defer lf.RUnlock()
 	return lf.fd.Sync()
 }
 
@@ -319,19 +327,23 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	elog.Printf("Removing fid: %d", f.fid)
 	// Entries written to LSM. Remove the older file now.
 	{
-		vlog.Lock()
+		vlog.filesLock.Lock()
 		idx := sort.Search(len(vlog.files), func(idx int) bool {
 			return vlog.files[idx].fid >= f.fid
 		})
 		if idx == len(vlog.files) || vlog.files[idx].fid != f.fid {
+			vlog.filesLock.Unlock()
 			return errors.Errorf("Unable to find fid: %d", f.fid)
 		}
 		vlog.files = append(vlog.files[:idx], vlog.files[idx+1:]...)
-		vlog.Unlock()
+		vlog.filesLock.Unlock()
 	}
 
+	// Exclusively lock the file so that there are no readers before closing/destroying it
+	f.fdLock.Lock()
 	rem := vlog.fpath(f.fid)
 	f.fd.Close() // close file previous to remove it
+	f.fdLock.Unlock()
 
 	elog.Printf("Removing %s", rem)
 	return os.Remove(rem)
@@ -459,15 +471,18 @@ func (p *valuePointer) Decode(b []byte) {
 }
 
 type valueLog struct {
-	sync.RWMutex
 	buf     bytes.Buffer
 	dirPath string
 	elog    trace.EventLog
-	files   []*logFile
-	kv      *KV
-	maxFid  uint32
-	offset  uint32
-	opt     Options
+
+	// guards our view of which files exist
+	filesLock sync.RWMutex
+	files     []*logFile
+
+	kv     *KV
+	maxFid uint32
+	offset uint32
+	opt    Options
 }
 
 func (vlog *valueLog) fpath(fid uint16) string {
@@ -544,9 +559,9 @@ func (vlog *valueLog) createVlogFile(fid uint16) (*logFile, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "Unable to sync value log file dir")
 	}
-	vlog.Lock()
+	vlog.filesLock.Lock()
 	vlog.files = append(vlog.files, lf)
-	vlog.Unlock()
+	vlog.filesLock.Unlock()
 	return lf, nil
 }
 
@@ -619,17 +634,19 @@ func (vlog *valueLog) sync() error {
 		return nil
 	}
 
-	vlog.RLock()
+	vlog.filesLock.RLock()
 	if len(vlog.files) == 0 {
-		vlog.RUnlock()
+		vlog.filesLock.RUnlock()
 		return nil
 	}
 	curlf := vlog.files[len(vlog.files)-1]
-	vlog.RUnlock()
+	curlf.fdLock.RLock()
+	vlog.filesLock.RUnlock()
 
 	dirSyncCh := make(chan error)
 	go func() { dirSyncCh <- syncDir(vlog.opt.ValueDir) }()
 	err := curlf.sync()
+	curlf.fdLock.RUnlock()
 	dirSyncErr := <-dirSyncCh
 	if err != nil {
 		err = dirSyncErr
@@ -639,9 +656,9 @@ func (vlog *valueLog) sync() error {
 
 // write is thread-unsafe by design and should not be called concurrently.
 func (vlog *valueLog) write(reqs []*request) error {
-	vlog.RLock()
+	vlog.filesLock.RLock()
 	curlf := vlog.files[len(vlog.files)-1]
-	vlog.RUnlock()
+	vlog.filesLock.RUnlock()
 
 	toDisk := func() error {
 		if vlog.buf.Len() == 0 {
@@ -711,9 +728,11 @@ func (vlog *valueLog) write(reqs []*request) error {
 	// an invalid file descriptor.
 }
 
-func (vlog *valueLog) getFile(fid uint16) (*logFile, error) {
-	vlog.RLock()
-	defer vlog.RUnlock()
+// Gets the logFile and acquires an RLock() on it too.  You must call RUnlock on the file (if
+// non-nil).
+func (vlog *valueLog) getFileRLocked(fid uint16) (*logFile, error) {
+	vlog.filesLock.RLock()
+	defer vlog.filesLock.RUnlock()
 
 	idx := sort.Search(len(vlog.files), func(idx int) bool {
 		return vlog.files[idx].fid >= fid
@@ -721,15 +740,18 @@ func (vlog *valueLog) getFile(fid uint16) (*logFile, error) {
 	if idx == len(vlog.files) || vlog.files[idx].fid != fid {
 		return nil, ErrCorrupt
 	}
-	return vlog.files[idx], nil
+	ret := vlog.files[idx]
+	ret.fdLock.RLock()
+	return ret, nil
 }
 
 // Read reads the value log at a given location.
 func (vlog *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
-	lf, err := vlog.getFile(p.Fid)
+	lf, err := vlog.getFileRLocked(p.Fid)
 	if err != nil {
 		return e, err
 	}
+	defer lf.fdLock.RUnlock()
 
 	if s == nil {
 		s = new(y.Slice)
@@ -771,8 +793,8 @@ func (vlog *valueLog) runGCInLoop(lc *y.LevelCloser) {
 }
 
 func (vlog *valueLog) pickLog() *logFile {
-	vlog.RLock()
-	defer vlog.RUnlock()
+	vlog.filesLock.RLock()
+	defer vlog.filesLock.RUnlock()
 	if len(vlog.files) <= 1 {
 		return nil
 	}
