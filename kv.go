@@ -249,7 +249,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	go out.flushMemtable(lc) // Need levels controller to be up.
 
 	if err = out.vlog.Open(out, &opt); err != nil {
-		return out, err
+		return nil, err
 	}
 
 	var item KVItem
