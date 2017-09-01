@@ -337,30 +337,6 @@ func NewKV(optParam *Options) (out *KV, err error) {
 // Close closes a KV. It's crucial to call it to ensure all the pending updates
 // make their way to disk.
 func (s *KV) Close() (err error) {
-	defer func() {
-		if guardErr := s.dirLockGuard.Release(); err == nil {
-			err = errors.Wrap(guardErr, "KV.Close")
-		}
-		if s.valueDirGuard != nil {
-			if guardErr := s.valueDirGuard.Release(); err == nil {
-				err = errors.Wrap(guardErr, "KV.Close")
-			}
-		}
-		if manifestErr := s.manifest.close(); err == nil {
-			err = errors.Wrap(manifestErr, "KV.Close")
-		}
-
-		// Fsync directories to ensure that lock file, and any other removed files whose directory
-		// we haven't specifically fsynced, are guaranteed to have their directory entry removal
-		// persisted to disk.
-		if syncErr := syncDir(s.opt.Dir); err == nil {
-			err = errors.Wrap(syncErr, "KV.Close")
-		}
-		if syncErr := syncDir(s.opt.ValueDir); err == nil {
-			err = errors.Wrap(syncErr, "KV.Close")
-		}
-	}()
-
 	s.elog.Printf("Closing database")
 	// Stop value GC first.
 	lc := s.closer.Get("value-gc")
@@ -371,8 +347,8 @@ func (s *KV) Close() (err error) {
 	lc.SignalAndWait()
 
 	// Now close the value log.
-	if err := s.vlog.Close(); err != nil {
-		return errors.Wrapf(err, "KV.Close")
+	if vlogErr := s.vlog.Close(); err == nil {
+		err = errors.Wrap(vlogErr, "KV.Close")
 	}
 
 	// Make sure that block writer is done pushing stuff into memtable!
@@ -416,13 +392,36 @@ func (s *KV) Close() (err error) {
 	lc.SignalAndWait()
 	s.elog.Printf("Compaction finished")
 
-	if err := s.lc.close(); err != nil {
-		return errors.Wrap(err, "KV.Close")
+	if lcErr := s.lc.close(); err == nil {
+		err = errors.Wrap(lcErr, "KV.Close")
 	}
 	s.elog.Printf("Waiting for closer")
 	s.closer.SignalAll()
 	s.closer.WaitForAll()
+
 	s.elog.Finish()
+
+	if guardErr := s.dirLockGuard.Release(); err == nil {
+		err = errors.Wrap(guardErr, "KV.Close")
+	}
+	if s.valueDirGuard != nil {
+		if guardErr := s.valueDirGuard.Release(); err == nil {
+			err = errors.Wrap(guardErr, "KV.Close")
+		}
+	}
+	if manifestErr := s.manifest.close(); err == nil {
+		err = errors.Wrap(manifestErr, "KV.Close")
+	}
+
+	// Fsync directories to ensure that lock file, and any other removed files whose directory
+	// we haven't specifically fsynced, are guaranteed to have their directory entry removal
+	// persisted to disk.
+	if syncErr := syncDir(s.opt.Dir); err == nil {
+		err = errors.Wrap(syncErr, "KV.Close")
+	}
+	if syncErr := syncDir(s.opt.ValueDir); err == nil {
+		err = errors.Wrap(syncErr, "KV.Close")
+	}
 
 	return nil
 }
