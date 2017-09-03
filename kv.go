@@ -298,7 +298,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 			nv = make([]byte, len(e.Value))
 			copy(nv, e.Value)
 		} else {
-			nv = make([]byte, 16)
+			nv = make([]byte, valuePointerEncodedSize)
 			vp.Encode(nv)
 			meta = meta | BitValuePointer
 		}
@@ -610,7 +610,6 @@ func (s *KV) shouldWriteValueToLSM(e Entry) bool {
 }
 
 func (s *KV) writeToLSM(b *request) error {
-	var offsetBuf [10]byte
 	if len(b.Ptrs) != len(b.Entries) {
 		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
@@ -650,6 +649,7 @@ func (s *KV) writeToLSM(b *request) error {
 					UserMeta:   entry.UserMeta,
 					CASCounter: entry.casCounter})
 		} else {
+			var offsetBuf [valuePointerEncodedSize]byte
 			s.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:      b.Ptrs[i].Encode(offsetBuf[:]),
@@ -1150,7 +1150,7 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 
 		if !ft.vptr.IsZero() {
 			s.elog.Printf("Storing offset: %+v\n", ft.vptr)
-			offset := make([]byte, 10)
+			offset := make([]byte, valuePointerEncodedSize)
 			ft.vptr.Encode(offset)
 			// CAS counter is needed and is desirable -- it's the first value log entry
 			// we replay, so to speak, perhaps the only, and we use it to re-initialize
