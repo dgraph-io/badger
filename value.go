@@ -328,14 +328,12 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	// Entries written to LSM. Remove the older file now.
 	{
 		vlog.filesLock.Lock()
-		idx := sort.Search(len(vlog.files), func(idx int) bool {
-			return vlog.files[idx].fid >= f.fid
-		})
-		if idx == len(vlog.files) || vlog.files[idx].fid != f.fid {
+		// Just a sanity-check.
+		if _, ok := vlog.filesMap[f.fid]; !ok {
 			vlog.filesLock.Unlock()
 			return errors.Errorf("Unable to find fid: %d", f.fid)
 		}
-		vlog.files = append(vlog.files[:idx], vlog.files[idx+1:]...)
+		delete(vlog.filesMap, f.fid)
 		vlog.filesLock.Unlock()
 	}
 
@@ -477,7 +475,7 @@ type valueLog struct {
 
 	// guards our view of which files exist
 	filesLock sync.RWMutex
-	files     []*logFile
+	filesMap  map[uint16]*logFile
 
 	kv     *KV
 	maxFid uint32
@@ -496,6 +494,7 @@ func (vlog *valueLog) openOrCreateFiles() error {
 	}
 
 	found := make(map[int]struct{})
+	var maxFid uint16 // Beware len(files) == 0 case, this starts at 0.
 	for _, file := range files {
 		if !strings.HasSuffix(file.Name(), ".vlog") {
 			continue
@@ -511,25 +510,21 @@ func (vlog *valueLog) openOrCreateFiles() error {
 		found[fid] = struct{}{}
 
 		lf := &logFile{fid: uint16(fid), path: vlog.fpath(uint16(fid))}
-		vlog.files = append(vlog.files, lf)
-
+		vlog.filesMap[uint16(fid)] = lf
+		if uint16(fid) > maxFid {
+			maxFid = uint16(fid)
+		}
 	}
-
-	sort.Slice(vlog.files, func(i, j int) bool {
-		return vlog.files[i].fid < vlog.files[j].fid
-	})
+	vlog.maxFid = uint32(maxFid)
 
 	// Open all previous log files as read only. Open the last log file
 	// as read write.
-	for i := range vlog.files {
-		lf := vlog.files[i]
-		if i == len(vlog.files)-1 {
-			lf.fd, err = y.OpenExistingSyncedFile(vlog.fpath(lf.fid), vlog.opt.SyncWrites)
+	for fid, lf := range vlog.filesMap {
+		if fid == maxFid {
+			lf.fd, err = y.OpenExistingSyncedFile(vlog.fpath(fid), vlog.opt.SyncWrites)
 			if err != nil {
 				return errors.Wrapf(err, "Unable to open value log file as RDWR")
 			}
-			vlog.maxFid = uint32(lf.fid)
-
 		} else {
 			if err := lf.openReadOnly(); err != nil {
 				return err
@@ -538,7 +533,8 @@ func (vlog *valueLog) openOrCreateFiles() error {
 	}
 
 	// If no files are found, then create a new file.
-	if len(vlog.files) == 0 {
+	if len(vlog.filesMap) == 0 {
+		// We already set vlog.maxFid above
 		_, err := vlog.createVlogFile(0)
 		if err != nil {
 			return err
@@ -560,7 +556,7 @@ func (vlog *valueLog) createVlogFile(fid uint16) (*logFile, error) {
 		return nil, errors.Wrapf(err, "Unable to sync value log file dir")
 	}
 	vlog.filesLock.Lock()
-	vlog.files = append(vlog.files, lf)
+	vlog.filesMap[fid] = lf
 	vlog.filesLock.Unlock()
 	return lf, nil
 }
@@ -569,6 +565,7 @@ func (vlog *valueLog) Open(kv *KV, opt *Options) error {
 	vlog.dirPath = opt.ValueDir
 	vlog.opt = *opt
 	vlog.kv = kv
+	vlog.filesMap = make(map[uint16]*logFile)
 	if err := vlog.openOrCreateFiles(); err != nil {
 		return errors.Wrapf(err, "Unable to open value log")
 	}
@@ -583,12 +580,24 @@ func (vlog *valueLog) Close() error {
 	defer vlog.elog.Finish()
 
 	var err error
-	for _, f := range vlog.files {
+	for _, f := range vlog.filesMap {
 		if closeErr := f.fd.Close(); closeErr != nil && err == nil {
 			err = closeErr
 		}
 	}
 	return err
+}
+
+// sortedFids returns the file id's, sorted.  Assumes we have shared access to filesMap.
+func (vlog *valueLog) sortedFids() []uint16 {
+	ret := make([]uint16, 0, len(vlog.filesMap))
+	for fid := range vlog.filesMap {
+		ret = append(ret, fid)
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return ret[i] < ret[j]
+	})
+	return ret
 }
 
 // Replay replays the value log. The kv provided is only valid for the lifetime of function call.
@@ -597,14 +606,17 @@ func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 	offset := ptr.Offset + ptr.Len
 	vlog.elog.Printf("Seeking at value pointer: %+v\n", ptr)
 
-	for _, f := range vlog.files {
-		if f.fid < fid {
+	fids := vlog.sortedFids()
+
+	for _, id := range fids {
+		if id < fid {
 			continue
 		}
 		of := offset
-		if f.fid > fid {
+		if id > fid {
 			of = 0
 		}
+		f := vlog.filesMap[id]
 		err := f.iterate(of, fn)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to replay value log: %q", f.path)
@@ -613,7 +625,7 @@ func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 
 	// Seek to the end to start writing.
 	var err error
-	last := vlog.files[len(vlog.files)-1]
+	last := vlog.filesMap[uint16(vlog.maxFid)]
 	lastOffset, err := last.fd.Seek(0, io.SeekEnd)
 	last.offset = uint32(lastOffset)
 	return errors.Wrapf(err, "Unable to seek to end of value log: %q", last.path)
@@ -635,11 +647,11 @@ func (vlog *valueLog) sync() error {
 	}
 
 	vlog.filesLock.RLock()
-	if len(vlog.files) == 0 {
+	if len(vlog.filesMap) == 0 {
 		vlog.filesLock.RUnlock()
 		return nil
 	}
-	curlf := vlog.files[len(vlog.files)-1]
+	curlf := vlog.filesMap[uint16(vlog.maxFid)]
 	curlf.fdLock.RLock()
 	vlog.filesLock.RUnlock()
 
@@ -657,7 +669,7 @@ func (vlog *valueLog) sync() error {
 // write is thread-unsafe by design and should not be called concurrently.
 func (vlog *valueLog) write(reqs []*request) error {
 	vlog.filesLock.RLock()
-	curlf := vlog.files[len(vlog.files)-1]
+	curlf := vlog.filesMap[uint16(vlog.maxFid)]
 	vlog.filesLock.RUnlock()
 
 	toDisk := func() error {
@@ -733,14 +745,10 @@ func (vlog *valueLog) write(reqs []*request) error {
 func (vlog *valueLog) getFileRLocked(fid uint16) (*logFile, error) {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
-
-	idx := sort.Search(len(vlog.files), func(idx int) bool {
-		return vlog.files[idx].fid >= fid
-	})
-	if idx == len(vlog.files) || vlog.files[idx].fid != fid {
+	ret, ok := vlog.filesMap[fid]
+	if !ok {
 		return nil, ErrCorrupt
 	}
-	ret := vlog.files[idx]
 	ret.fdLock.RLock()
 	return ret, nil
 }
@@ -795,15 +803,16 @@ func (vlog *valueLog) runGCInLoop(lc *y.LevelCloser) {
 func (vlog *valueLog) pickLog() *logFile {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
-	if len(vlog.files) <= 1 {
+	if len(vlog.filesMap) <= 1 {
 		return nil
 	}
+	fids := vlog.sortedFids()
 	// This file shouldn't be being written to.
-	lfi := rand.Intn(len(vlog.files))
-	if lfi > 0 {
-		lfi = rand.Intn(lfi) // Another level of rand to favor smaller fids.
+	idx := rand.Intn(len(fids))
+	if idx > 0 {
+		idx = rand.Intn(idx) // Another level of rand to favor smaller fids.
 	}
-	return vlog.files[lfi]
+	return vlog.filesMap[fids[idx]]
 }
 
 func (vlog *valueLog) doRunGC() error {
