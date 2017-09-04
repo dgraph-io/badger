@@ -71,7 +71,7 @@ type logFile struct {
 	// descriptor or remove the file.
 	fdLock sync.RWMutex
 	fd     *os.File
-	fid    uint16
+	fid    uint32
 	offset uint32
 	size   uint32
 }
@@ -433,7 +433,7 @@ func (h *header) Decode(buf []byte) {
 }
 
 type valuePointer struct {
-	Fid    uint16
+	Fid    uint32
 	Len    uint32
 	Offset uint32
 }
@@ -452,20 +452,20 @@ func (p valuePointer) IsZero() bool {
 	return p.Fid == 0 && p.Offset == 0 && p.Len == 0
 }
 
+const valuePointerEncodedSize = 12
+
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode(b []byte) []byte {
-	y.AssertTrue(len(b) >= 10)
-	binary.BigEndian.PutUint16(b[:2], p.Fid)
-	binary.BigEndian.PutUint32(b[2:6], p.Len)
-	binary.BigEndian.PutUint32(b[6:10], p.Offset)
-	return b[:10]
+	binary.BigEndian.PutUint32(b[:4], p.Fid)
+	binary.BigEndian.PutUint32(b[4:8], p.Len)
+	binary.BigEndian.PutUint32(b[8:valuePointerEncodedSize], p.Offset)
+	return b[:valuePointerEncodedSize]
 }
 
 func (p *valuePointer) Decode(b []byte) {
-	y.AssertTrue(len(b) >= 10)
-	p.Fid = binary.BigEndian.Uint16(b[:2])
-	p.Len = binary.BigEndian.Uint32(b[2:6])
-	p.Offset = binary.BigEndian.Uint32(b[6:10])
+	p.Fid = binary.BigEndian.Uint32(b[:4])
+	p.Len = binary.BigEndian.Uint32(b[4:8])
+	p.Offset = binary.BigEndian.Uint32(b[8:valuePointerEncodedSize])
 }
 
 type valueLog struct {
@@ -475,7 +475,7 @@ type valueLog struct {
 
 	// guards our view of which files exist
 	filesLock sync.RWMutex
-	filesMap  map[uint16]*logFile
+	filesMap  map[uint32]*logFile
 
 	kv     *KV
 	maxFid uint32
@@ -483,8 +483,12 @@ type valueLog struct {
 	opt    Options
 }
 
-func (vlog *valueLog) fpath(fid uint16) string {
-	return fmt.Sprintf("%s%s%06d.vlog", vlog.dirPath, string(os.PathSeparator), fid)
+func vlogFilePath(dirPath string, fid uint32) string {
+	return fmt.Sprintf("%s%s%09d.vlog", dirPath, string(os.PathSeparator), fid)
+}
+
+func (vlog *valueLog) fpath(fid uint32) string {
+	return vlogFilePath(vlog.dirPath, fid)
 }
 
 func (vlog *valueLog) openOrCreateFiles() error {
@@ -493,14 +497,14 @@ func (vlog *valueLog) openOrCreateFiles() error {
 		return errors.Wrapf(err, "Error while opening value log")
 	}
 
-	found := make(map[int]struct{})
-	var maxFid uint16 // Beware len(files) == 0 case, this starts at 0.
+	found := make(map[uint64]struct{})
+	var maxFid uint32 // Beware len(files) == 0 case, this starts at 0.
 	for _, file := range files {
 		if !strings.HasSuffix(file.Name(), ".vlog") {
 			continue
 		}
 		fsz := len(file.Name())
-		fid, err := strconv.Atoi(file.Name()[:fsz-5])
+		fid, err := strconv.ParseUint(file.Name()[:fsz-5], 10, 32)
 		if err != nil {
 			return errors.Wrapf(err, "Error while parsing value log id for file: %q", file.Name())
 		}
@@ -509,10 +513,10 @@ func (vlog *valueLog) openOrCreateFiles() error {
 		}
 		found[fid] = struct{}{}
 
-		lf := &logFile{fid: uint16(fid), path: vlog.fpath(uint16(fid))}
-		vlog.filesMap[uint16(fid)] = lf
-		if uint16(fid) > maxFid {
-			maxFid = uint16(fid)
+		lf := &logFile{fid: uint32(fid), path: vlog.fpath(uint32(fid))}
+		vlog.filesMap[uint32(fid)] = lf
+		if uint32(fid) > maxFid {
+			maxFid = uint32(fid)
 		}
 	}
 	vlog.maxFid = uint32(maxFid)
@@ -543,7 +547,7 @@ func (vlog *valueLog) openOrCreateFiles() error {
 	return nil
 }
 
-func (vlog *valueLog) createVlogFile(fid uint16) (*logFile, error) {
+func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	path := vlog.fpath(fid)
 	lf := &logFile{fid: fid, offset: 0, path: path}
 	var err error
@@ -565,7 +569,7 @@ func (vlog *valueLog) Open(kv *KV, opt *Options) error {
 	vlog.dirPath = opt.ValueDir
 	vlog.opt = *opt
 	vlog.kv = kv
-	vlog.filesMap = make(map[uint16]*logFile)
+	vlog.filesMap = make(map[uint32]*logFile)
 	if err := vlog.openOrCreateFiles(); err != nil {
 		return errors.Wrapf(err, "Unable to open value log")
 	}
@@ -589,8 +593,8 @@ func (vlog *valueLog) Close() error {
 }
 
 // sortedFids returns the file id's, sorted.  Assumes we have shared access to filesMap.
-func (vlog *valueLog) sortedFids() []uint16 {
-	ret := make([]uint16, 0, len(vlog.filesMap))
+func (vlog *valueLog) sortedFids() []uint32 {
+	ret := make([]uint32, 0, len(vlog.filesMap))
 	for fid := range vlog.filesMap {
 		ret = append(ret, fid)
 	}
@@ -625,7 +629,7 @@ func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 
 	// Seek to the end to start writing.
 	var err error
-	last := vlog.filesMap[uint16(vlog.maxFid)]
+	last := vlog.filesMap[vlog.maxFid]
 	lastOffset, err := last.fd.Seek(0, io.SeekEnd)
 	last.offset = uint32(lastOffset)
 	return errors.Wrapf(err, "Unable to seek to end of value log: %q", last.path)
@@ -651,7 +655,7 @@ func (vlog *valueLog) sync() error {
 		vlog.filesLock.RUnlock()
 		return nil
 	}
-	curlf := vlog.filesMap[uint16(vlog.maxFid)]
+	curlf := vlog.filesMap[vlog.maxFid]
 	curlf.fdLock.RLock()
 	vlog.filesLock.RUnlock()
 
@@ -669,7 +673,7 @@ func (vlog *valueLog) sync() error {
 // write is thread-unsafe by design and should not be called concurrently.
 func (vlog *valueLog) write(reqs []*request) error {
 	vlog.filesLock.RLock()
-	curlf := vlog.filesMap[uint16(vlog.maxFid)]
+	curlf := vlog.filesMap[vlog.maxFid]
 	vlog.filesLock.RUnlock()
 
 	toDisk := func() error {
@@ -695,7 +699,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 			newid := atomic.AddUint32(&vlog.maxFid, 1)
 			y.AssertTruef(newid < 1<<16, "newid will overflow uint16: %v", newid)
-			newlf, err := vlog.createVlogFile(uint16(newid))
+			newlf, err := vlog.createVlogFile(newid)
 			if err != nil {
 				return err
 			}
@@ -742,7 +746,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 // Gets the logFile and acquires an RLock() on it too.  You must call RUnlock on the file (if
 // non-nil).
-func (vlog *valueLog) getFileRLocked(fid uint16) (*logFile, error) {
+func (vlog *valueLog) getFileRLocked(fid uint32) (*logFile, error) {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
 	ret, ok := vlog.filesMap[fid]

@@ -21,7 +21,6 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/dgraph-io/badger/y"
@@ -240,7 +239,7 @@ func TestChecksums(t *testing.T) {
 		&Entry{Key: k2, Value: v2},
 	})
 	buf[len(buf)-1]++ // Corrupt last byte
-	require.NoError(t, ioutil.WriteFile(filepath.Join(dir, "000000.vlog"), buf, 0777))
+	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
 
 	// K1 should exist, but K2 shouldn't.
 	kv, err = NewKV(getTestOptions(dir))
@@ -290,7 +289,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 		&Entry{Key: k2, Value: v2},
 	})
 	buf = buf[:len(buf)-6]
-	require.NoError(t, ioutil.WriteFile(filepath.Join(dir, "000000.vlog"), buf, 0777))
+	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
 
 	// Badger should now start up, but with only K1.
 	kv, err = NewKV(getTestOptions(dir))
@@ -322,7 +321,7 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 	require.NoError(t, kv.BatchSet(entries))
 	require.NoError(t, kv.Close())
 
-	filename := filepath.Join(dir, "000000.vlog")
+	filename := vlogFilePath(dir, 0)
 	buf, err := ioutil.ReadFile(filename)
 	require.NoError(t, err)
 	return buf
