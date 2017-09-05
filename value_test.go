@@ -126,7 +126,7 @@ func TestValueGC(t *testing.T) {
 		if err := kv.Get(key, &item); err != nil {
 			t.Error(err)
 		}
-		val := item.Value()
+		val := getItemValue(t, &item)
 		require.NotNil(t, val)
 		require.True(t, len(val) == sz, "Size found: %d", len(val))
 	}
@@ -190,7 +190,7 @@ func TestValueGC2(t *testing.T) {
 		if err := kv.Get(key, &item); err != nil {
 			t.Error(err)
 		}
-		val := item.Value()
+		val := getItemValue(t, &item)
 		require.True(t, len(val) == 0, "Size found: %d", len(val))
 	}
 	for i := 5; i < 10; i++ {
@@ -198,7 +198,7 @@ func TestValueGC2(t *testing.T) {
 		if err := kv.Get(key, &item); err != nil {
 			t.Error(err)
 		}
-		val := item.Value()
+		val := getItemValue(t, &item)
 		require.NotNil(t, val)
 		require.Equal(t, string(val), fmt.Sprintf("value%d", i))
 	}
@@ -207,7 +207,7 @@ func TestValueGC2(t *testing.T) {
 		if err := kv.Get(key, &item); err != nil {
 			t.Error(err)
 		}
-		val := item.Value()
+		val := getItemValue(t, &item)
 		require.NotNil(t, val)
 		require.True(t, len(val) == sz, "Size found: %d", len(val))
 	}
@@ -246,7 +246,7 @@ func TestChecksums(t *testing.T) {
 	require.NoError(t, err)
 	var item KVItem
 	require.NoError(t, kv.Get(k1, &item))
-	require.Equal(t, item.Value(), v1)
+	require.Equal(t, getItemValue(t, &item), v1)
 	ok, err := kv.Exists(k2)
 	require.NoError(t, err)
 	require.False(t, ok)
@@ -258,17 +258,17 @@ func TestChecksums(t *testing.T) {
 	// last due to checksum failure).
 	kv, err = NewKV(getTestOptions(dir))
 	require.NoError(t, err)
-	iter := kv.NewIterator(IteratorOptions{FetchValues: true})
+	iter := kv.NewIterator(DefaultIteratorOptions)
 	iter.Seek(k1)
 	require.True(t, iter.Valid())
 	it := iter.Item()
 	require.Equal(t, it.Key(), k1)
-	require.Equal(t, it.Value(), v1)
+	require.Equal(t, getItemValue(t, it), v1)
 	iter.Next()
 	require.True(t, iter.Valid())
 	it = iter.Item()
 	require.Equal(t, it.Key(), k3)
-	require.Equal(t, it.Value(), v3)
+	require.Equal(t, getItemValue(t, it), v3)
 	iter.Close()
 	require.NoError(t, kv.Close())
 }
@@ -300,7 +300,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok)
 	require.Equal(t, item.Key(), k1)
-	require.Equal(t, item.Value(), v1)
+	require.Equal(t, getItemValue(t, &item), v1)
 
 	// When K3 is set, it should be persisted after a restart.
 	require.NoError(t, kv.Set(k3, v3, 0))

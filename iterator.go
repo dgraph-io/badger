@@ -18,7 +18,6 @@ package badger
 
 import (
 	"bytes"
-	"sync"
 
 	"github.com/dgraph-io/badger/y"
 )
@@ -26,14 +25,13 @@ import (
 // KVItem is returned during iteration. Both the Key() and Value() output is only valid until
 // iterator.Next() is called.
 type KVItem struct {
-	wg         sync.WaitGroup
+	kv         *KV
 	key        []byte
 	vptr       []byte
 	meta       byte
 	userMeta   byte
-	val        []byte
 	casCounter uint64
-	slice      *y.Slice
+	slice      *y.Slice // FIXME get rid of this once writes are integrated with mmap
 	next       *KVItem
 }
 
@@ -42,12 +40,13 @@ func (item *KVItem) Key() []byte {
 	return item.key
 }
 
-// Value returns the value, generally fetched from the value log. This call can block while the
-// value is populated asynchronously via a disk read. Remember to parse or copy it if you need to
-// reuse it. DO NOT modify or append to this slice; it would result in internal data overwrite.
-func (item *KVItem) Value() []byte {
-	item.wg.Wait()
-	return item.val
+// Value retrieves the value of the item from the value log. It calls the
+// consumer function with a slice argument representing the value.
+//
+// Remember to parse or copy it if you need to reuse it. DO NOT modify or
+// append to this slice; it would result in a panic.
+func (item *KVItem) Value(consumer func([]byte)) error {
+	return item.kv.fillItem(item, consumer)
 }
 
 func (item *KVItem) hasValue() bool {
@@ -62,8 +61,8 @@ func (item *KVItem) hasValue() bool {
 	return true
 }
 
-// EstimatedSize returns approximate size of the key-value pair.  This can be called with
-// FetchValues=false, to quickly iterate through and estimate the size of a range of key-value
+// EstimatedSize returns approximate size of the key-value pair.  This can be called
+// to quickly iterate through and estimate the size of a range of key-value
 // pairs (without fetching the corresponding values).
 func (item *KVItem) EstimatedSize() int64 {
 	if !item.hasValue() {
@@ -120,17 +119,15 @@ func (l *list) pop() *KVItem {
 }
 
 // IteratorOptions is used to set options when iterating over Badger key-value stores.
+//
+// FIXME: Get rid of it? We could just pass reverse as a boolean argument into NewIterator.
 type IteratorOptions struct {
-	PrefetchSize int  // How many KV pairs to prefetch while iterating.
-	FetchValues  bool // Controls whether the values should be fetched from the value log.
-	Reverse      bool // Direction of iteration. False is forward, true is backward.
+	Reverse bool // Direction of iteration. False is forward, true is backward.
 }
 
 // DefaultIteratorOptions contains default options when iterating over Badger key-value stores.
 var DefaultIteratorOptions = IteratorOptions{
-	PrefetchSize: 100,
-	FetchValues:  true,
-	Reverse:      false,
+	Reverse: false,
 }
 
 // Iterator helps iterating over the KV pairs in a lexicographically sorted order.
@@ -147,7 +144,7 @@ type Iterator struct {
 func (it *Iterator) newItem() *KVItem {
 	item := it.waste.pop()
 	if item == nil {
-		item = &KVItem{slice: new(y.Slice)}
+		item = &KVItem{slice: new(y.Slice), kv: it.kv}
 	}
 	return item
 }
@@ -174,7 +171,6 @@ func (it *Iterator) Close() {
 // to ensure you have access to a valid it.Item().
 func (it *Iterator) Next() {
 	// Reuse current item
-	it.item.wg.Wait() // Just cleaner to wait before pushing to avoid doing ref counting.
 	it.waste.push(it.item)
 
 	// Set next item to current
@@ -205,22 +201,10 @@ func (it *Iterator) fill(item *KVItem) {
 	item.casCounter = vs.CASCounter
 	item.key = y.Safecopy(item.key, it.iitr.Key())
 	item.vptr = y.Safecopy(item.vptr, vs.Value)
-	item.val = nil
-	if it.opt.FetchValues {
-		item.wg.Add(1)
-		go func() {
-			it.kv.fillItem(item)
-			item.wg.Done()
-		}()
-	}
 }
 
 func (it *Iterator) prefetch() {
-	prefetchSize := it.opt.PrefetchSize
-	if it.opt.PrefetchSize <= 1 {
-		// Try prefetching atleast the first two items to put into it.item and it.data.
-		prefetchSize = 2
-	}
+	prefetchSize := 2
 
 	i := it.iitr
 	var count int
@@ -252,7 +236,6 @@ func (it *Iterator) prefetch() {
 // iterating backwards.
 func (it *Iterator) Seek(key []byte) {
 	for i := it.data.pop(); i != nil; i = it.data.pop() {
-		i.wg.Wait()
 		it.waste.push(i)
 	}
 	it.iitr.Seek(key)
@@ -268,7 +251,6 @@ func (it *Iterator) Seek(key []byte) {
 func (it *Iterator) Rewind() {
 	i := it.data.pop()
 	for i != nil {
-		i.wg.Wait() // Just cleaner to wait before pushing. No ref counting needed.
 		it.waste.push(i)
 		i = it.data.pop()
 	}

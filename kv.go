@@ -173,7 +173,16 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	if err := out.Get(head, &item); err != nil {
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
-	val := item.Value()
+
+	var val []byte
+	err = item.Value(func(v []byte) {
+		val = make([]byte, len(v))
+		copy(val, v)
+	})
+
+	if err != nil {
+		return nil, errors.Wrap(err, "Retrieving head value")
+	}
 	// lastUsedCasCounter will either be the value stored in !badger!head, or some subsequently
 	// written value log entry that we replay.  (Subsequent value log entries might be _less_
 	// than lastUsedCasCounter, if there was value log gc so we have to max() values while
@@ -387,30 +396,9 @@ func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 	}
 }
 
-// FillValue populates item with a value.
-//
-// item must be a valid KVItem returned by Badger during iteration. This method
-// could be used to fetch values explicitly during a key-only iteration
-// (FetchValues is set to false). It is useful for example, if values are
-// required for some keys only.
-//
-// This method should not be called when iteration is performed with
-// FetchValues set to true, as it will cause additional copying.
-//
-// Multiple calls to this method will result in multiple copies from the value
-// log. It is the caller’s responsibility to make sure they don’t call this
-// method more than once.
-func (s *KV) FillValue(item *KVItem) error {
-	// Wait for any pending fill operations to finish.
-	item.wg.Wait()
-	item.wg.Add(1)
-	defer item.wg.Done()
-	return s.fillItem(item)
-}
-
-func (s *KV) fillItem(item *KVItem) error {
+func (s *KV) fillItem(item *KVItem, consumer func([]byte)) error {
 	if !item.hasValue() {
-		item.val = nil
+		consumer(nil)
 		return nil
 	}
 
@@ -418,8 +406,9 @@ func (s *KV) fillItem(item *KVItem) error {
 		item.slice = new(y.Slice)
 	}
 	if (item.meta & BitValuePointer) == 0 {
-		item.val = item.slice.Resize(len(item.vptr))
-		copy(item.val, item.vptr)
+		val := item.slice.Resize(len(item.vptr))
+		copy(val, item.vptr)
+		consumer(val)
 		return nil
 	}
 
@@ -430,10 +419,10 @@ func (s *KV) fillItem(item *KVItem) error {
 		return errors.Wrapf(err, "Unable to read from value log: %+v", vp)
 	}
 	if (entry.Meta & BitDelete) != 0 { // Is a tombstone.
-		item.val = nil
+		consumer(nil)
 		return nil
 	}
-	item.val = entry.Value
+	consumer(entry.Value)
 	return nil
 }
 
@@ -468,11 +457,9 @@ func (s *KV) Get(key []byte, item *KVItem) error {
 	item.userMeta = vs.UserMeta
 	item.casCounter = vs.CASCounter
 	item.key = key
+	item.kv = s
 	item.vptr = vs.Value
 
-	if err := s.fillItem(item); err != nil {
-		return errors.Wrapf(err, "KV::Get key: %q", key)
-	}
 	return nil
 }
 
