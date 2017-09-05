@@ -147,10 +147,15 @@ func TestValueGC2(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		v := make([]byte, sz)
 		rand.Read(v[:rand.Intn(sz)])
-		entries = append(entries, &Entry{
+		entry := &Entry{
 			Key:   []byte(fmt.Sprintf("key%d", i)),
 			Value: v,
-		})
+		}
+		entries = append(entries, entry)
+		// We don't overwrite these values later in the test
+		if i == 10 || i == 11 {
+			entry.Meta = BitSetIfAbsent
+		}
 	}
 	kv.BatchSet(entries)
 	for _, e := range entries {
