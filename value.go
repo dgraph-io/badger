@@ -285,6 +285,8 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			// This new entry only contains the key, and a pointer to the value.
 			ne := new(Entry)
 			if e.Meta == BitSetIfAbsent {
+				// If we rewrite this entry without removing BitSetIfAbsent, lsm would see that
+				// the key is already present and won't update the vptr to the new file.
 				e.Meta = 0
 			}
 			y.AssertTruef(e.Meta == 0, "Got meta: 0")
