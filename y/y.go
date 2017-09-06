@@ -97,14 +97,14 @@ type LevelCloser struct {
 	waiting sync.WaitGroup
 }
 
-func NewLevelCloser(initial int32) *LevelCloser {
+func NewLevelCloser(initial int) *LevelCloser {
 	ret := &LevelCloser{closed: make(chan struct{}, 10)}
-	ret.waiting.Add(int(initial))
+	ret.waiting.Add(initial)
 	return ret
 }
 
-func (lc *LevelCloser) AddRunning(delta int32) {
-	lc.waiting.Add(int(delta))
+func (lc *LevelCloser) AddRunning(delta int) {
+	lc.waiting.Add(delta)
 }
 
 func (lc *LevelCloser) Signal() {

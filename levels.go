@@ -173,7 +173,7 @@ func (s *levelsController) cleanupLevels() error {
 
 func (s *levelsController) startCompact(lc *y.LevelCloser) {
 	n := s.kv.opt.NumCompactors
-	lc.AddRunning(int32(n - 1))
+	lc.AddRunning(n - 1)
 	for i := 0; i < n; i++ {
 		go s.runWorker(lc)
 	}
