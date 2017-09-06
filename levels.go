@@ -216,7 +216,7 @@ func (s *levelsController) runWorker(lc *y.LevelCloser) {
 
 // Returns true if level zero may be compacted, without accounting for compactions that already
 // might be happening.
-func (s *levelsController) levelZeroCompactable() bool {
+func (s *levelsController) level0Compactable() bool {
 	return s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTables
 }
 
@@ -235,9 +235,12 @@ type compactionPriority struct {
 // pickCompactLevel determines which level to compact.
 // Based on: https://github.com/facebook/rocksdb/wiki/Leveled-Compaction
 func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
+	// This function must use identical criteria for guaranteeing compaction's progress that
+	// addLevel0Table uses.
+
 	zeroOverlaps := s.cstatus.overlapsWith(0, infRange)
 	if !zeroOverlaps && // already being compacted.
-		s.levelZeroCompactable() {
+		s.level0Compactable() {
 		pri := compactionPriority{
 			level: 0,
 			score: float64(s.levels[0].numTables()) / float64(s.kv.opt.NumLevelZeroTables),
@@ -649,8 +652,9 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		for {
 			// Passing 0 for delSize to compactable means we're treating incomplete compactions as
 			// not having finished -- we wait for them to finish.  Also, it's crucial this behavior
-			// replicates pickCompactLevels' behavior in computing compactability.
-			if !s.levelZeroCompactable() && !s.levels[1].compactable(0) {
+			// replicates pickCompactLevels' behavior in computing compactability in order to
+			// guarantee progress.
+			if !s.level0Compactable() && !s.levels[1].compactable(0) {
 				break
 			}
 			fmt.Printf("Level 0 size: %d, level 1 size: %d, max %d\n", s.levels[0].getTotalSize(),
