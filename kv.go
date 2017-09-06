@@ -138,7 +138,6 @@ type KV struct {
 	// nil if Dir and ValueDir are the same
 	valueDirGuard *DirectoryLockGuard
 
-	closer    *y.Closer
 	closer2   Closer
 	elog      trace.EventLog
 	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
@@ -235,7 +234,6 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
 		opt:           opt,
-		closer:        y.NewCloser(),
 		manifest:      manifestFile,
 		elog:          trace.NewEventLog("Badger", "KV"),
 		dirLockGuard:  dirLockGuard,
@@ -401,10 +399,7 @@ func (s *KV) Close() (err error) {
 		err = errors.Wrap(lcErr, "KV.Close")
 	}
 	s.elog.Printf("Waiting for closer")
-	s.closer.SignalAll()
-	s.closer2.updateSize.Signal()
-	s.closer2.updateSize.Wait()
-	s.closer.WaitForAll()
+	s.closer2.updateSize.SignalAndWait()
 
 	s.elog.Finish()
 
