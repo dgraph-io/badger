@@ -23,7 +23,6 @@ import (
 	"os"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/trace"
@@ -180,8 +179,6 @@ func (s *levelsController) startCompact(lc *y.LevelCloser) {
 	}
 }
 
-var compactCount int32
-
 func (s *levelsController) runWorker(lc *y.LevelCloser) {
 	defer lc.Done()
 	if s.kv.opt.DoNotCompact {
@@ -197,13 +194,8 @@ func (s *levelsController) runWorker(lc *y.LevelCloser) {
 		case <-timeChan:
 			prios := s.pickCompactLevels()
 			for _, p := range prios {
-				atomic.AddInt32(&compactCount, 1)
-				didCompact, err := s.doCompact(p)
-				if err != nil {
-					// TODO: Exit on error, make the whole store error
-					fmt.Printf("runWorker error: %+v\n", err)
-				}
-				atomic.AddInt32(&compactCount, -1)
+				// TODO: Handle error.
+				didCompact, _ := s.doCompact(p)
 				if didCompact {
 					break
 				}
@@ -238,8 +230,7 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	// This function must use identical criteria for guaranteeing compaction's progress that
 	// addLevel0Table uses.
 
-	zeroOverlaps := s.cstatus.overlapsWith(0, infRange)
-	if !zeroOverlaps && // already being compacted.
+	if !s.cstatus.overlapsWith(0, infRange) && // already being compacted.
 		s.level0Compactable() {
 		pri := compactionPriority{
 			level: 0,
@@ -263,7 +254,6 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	sort.Slice(prios, func(i, j int) bool {
 		return prios[i].score > prios[j].score
 	})
-	fmt.Printf("Prios %+v, amidst %d, overlap %v\n", prios, atomic.LoadInt32(&compactCount), zeroOverlaps)
 	return prios
 }
 
@@ -657,8 +647,6 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 			if !s.level0Compactable() && !s.levels[1].compactable(0) {
 				break
 			}
-			fmt.Printf("Level 0 size: %d, level 1 size: %d, max %d\n", s.levels[0].getTotalSize(),
-				s.levels[1].getTotalSize(), s.levels[1].maxTotalSize)
 			time.Sleep(10 * time.Millisecond)
 		}
 		{
