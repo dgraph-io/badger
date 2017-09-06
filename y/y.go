@@ -172,10 +172,6 @@ func (lc *LevelCloser) HasBeenClosed() <-chan struct{} {
 	return lc.closed
 }
 
-func (lc *LevelCloser) GotSignal() bool {
-	return atomic.LoadInt32(&lc.nomore) == 1
-}
-
 func (lc *LevelCloser) Done() {
 	lc.waiting.Done()
 }
