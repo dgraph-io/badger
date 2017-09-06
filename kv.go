@@ -275,8 +275,8 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		vptr.Decode(val)
 	}
 
-	lc := out.closer.Register("replay")
-	go out.doWrites(lc)
+	replayCloser := y.NewLevelCloser("replay", 1)
+	go out.doWrites(replayCloser)
 
 	first := true
 	fn := func(e Entry, vp valuePointer) error { // Function for replaying.
@@ -326,10 +326,10 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	if err = out.vlog.Replay(vptr, fn); err != nil {
 		return out, err
 	}
-	lc.SignalAndWait() // Wait for replay to be applied first.
+	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 
 	out.writeCh = make(chan *request, kvWriteChCapacity)
-	lc = out.closer.Register("writes")
+	lc := out.closer.Register("writes")
 	go out.doWrites(lc)
 
 	lc = out.closer.Register("value-gc")
