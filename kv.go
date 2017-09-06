@@ -121,6 +121,14 @@ func (opt *Options) estimateSize(entry *Entry) int {
 	return len(entry.Key) + 16 + y.MetaSize + y.UserMetaSize + y.CasSize
 }
 
+type closers struct {
+	updateSize *y.LevelCloser
+	compactors *y.LevelCloser
+	memtable   *y.LevelCloser
+	writes     *y.LevelCloser
+	valueGC    *y.LevelCloser
+}
+
 // KV provides the various functions required to interact with Badger.
 // KV is thread-safe.
 type KV struct {
@@ -130,7 +138,7 @@ type KV struct {
 	// nil if Dir and ValueDir are the same
 	valueDirGuard *DirectoryLockGuard
 
-	closer    *y.Closer
+	closers   closers
 	elog      trace.EventLog
 	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
 	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
@@ -226,15 +234,14 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
 		opt:           opt,
-		closer:        y.NewCloser(),
 		manifest:      manifestFile,
 		elog:          trace.NewEventLog("Badger", "KV"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
 	}
 
-	lc := out.closer.Register("updateSize")
-	go out.updateSize(lc)
+	out.closers.updateSize = y.NewLevelCloser(1)
+	go out.updateSize(out.closers.updateSize)
 	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
 	// newLevelsController potentially loads files in directory.
@@ -242,11 +249,11 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		return nil, err
 	}
 
-	lc = out.closer.Register("compactors")
-	out.lc.startCompact(lc)
+	out.closers.compactors = y.NewLevelCloser(1)
+	out.lc.startCompact(out.closers.compactors)
 
-	lc = out.closer.Register("memtable")
-	go out.flushMemtable(lc) // Need levels controller to be up.
+	out.closers.memtable = y.NewLevelCloser(1)
+	go out.flushMemtable(out.closers.memtable) // Need levels controller to be up.
 
 	if err = out.vlog.Open(out, &opt); err != nil {
 		return nil, err
@@ -268,8 +275,8 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		vptr.Decode(val)
 	}
 
-	lc = out.closer.Register("replay")
-	go out.doWrites(lc)
+	replayCloser := y.NewLevelCloser(1)
+	go out.doWrites(replayCloser)
 
 	first := true
 	fn := func(e Entry, vp valuePointer) error { // Function for replaying.
@@ -319,14 +326,14 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	if err = out.vlog.Replay(vptr, fn); err != nil {
 		return out, err
 	}
-	lc.SignalAndWait() // Wait for replay to be applied first.
+	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 
 	out.writeCh = make(chan *request, kvWriteChCapacity)
-	lc = out.closer.Register("writes")
-	go out.doWrites(lc)
+	out.closers.writes = y.NewLevelCloser(1)
+	go out.doWrites(out.closers.writes)
 
-	lc = out.closer.Register("value-gc")
-	go out.vlog.runGCInLoop(lc)
+	out.closers.valueGC = y.NewLevelCloser(1)
+	go out.vlog.runGCInLoop(out.closers.valueGC)
 
 	valueDirLockGuard = nil
 	dirLockGuard = nil
@@ -339,12 +346,10 @@ func NewKV(optParam *Options) (out *KV, err error) {
 func (s *KV) Close() (err error) {
 	s.elog.Printf("Closing database")
 	// Stop value GC first.
-	lc := s.closer.Get("value-gc")
-	lc.SignalAndWait()
+	s.closers.valueGC.SignalAndWait()
 
 	// Stop writes next.
-	lc = s.closer.Get("writes")
-	lc.SignalAndWait()
+	s.closers.writes.SignalAndWait()
 
 	// Now close the value log.
 	if vlogErr := s.vlog.Close(); err == nil {
@@ -384,20 +389,17 @@ func (s *KV) Close() (err error) {
 	}
 	s.flushChan <- flushTask{nil, valuePointer{}} // Tell flusher to quit.
 
-	lc = s.closer.Get("memtable")
-	lc.Wait()
+	s.closers.memtable.Wait()
 	s.elog.Printf("Memtable flushed")
 
-	lc = s.closer.Get("compactors")
-	lc.SignalAndWait()
+	s.closers.compactors.SignalAndWait()
 	s.elog.Printf("Compaction finished")
 
 	if lcErr := s.lc.close(); err == nil {
 		err = errors.Wrap(lcErr, "KV.Close")
 	}
 	s.elog.Printf("Waiting for closer")
-	s.closer.SignalAll()
-	s.closer.WaitForAll()
+	s.closers.updateSize.SignalAndWait()
 
 	s.elog.Finish()
 
