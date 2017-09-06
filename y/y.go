@@ -96,7 +96,6 @@ func (s *Slice) Resize(sz int) []byte {
 
 type LevelCloser struct {
 	Name    string
-	running int32
 	nomore  int32
 	closed  chan struct{}
 	waiting sync.WaitGroup
@@ -120,12 +119,11 @@ func (c *Closer) Register(name string) *LevelCloser {
 	lc, has := c.levels[name]
 	if !has {
 		lc = &LevelCloser{Name: name, closed: make(chan struct{}, 10)}
-		lc.waiting.Add(1)
 		c.levels[name] = lc
 	}
 
 	AssertTruef(atomic.LoadInt32(&lc.nomore) == 0, "Can't register with closer after signal.")
-	atomic.AddInt32(&lc.running, 1)
+	lc.waiting.Add(1)
 	return lc
 }
 
@@ -160,7 +158,7 @@ func (c *Closer) WaitForAll() {
 }
 
 func (lc *LevelCloser) AddRunning(delta int32) {
-	atomic.AddInt32(&lc.running, delta)
+	lc.waiting.Add(int(delta))
 }
 
 func (lc *LevelCloser) Signal() {
@@ -179,14 +177,7 @@ func (lc *LevelCloser) GotSignal() bool {
 }
 
 func (lc *LevelCloser) Done() {
-	if atomic.LoadInt32(&lc.running) <= 0 {
-		return
-	}
-
-	running := atomic.AddInt32(&lc.running, -1)
-	if running == 0 {
-		lc.waiting.Done()
-	}
+	lc.waiting.Done()
 }
 
 func (lc *LevelCloser) Wait() {
