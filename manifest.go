@@ -209,7 +209,8 @@ func (mf *manifestFile) addChanges(changes protos.ManifestChangeSet) error {
 // Has to be 4 bytes.  The value can never change, ever, anyway.
 var magicText = [4]byte{'B', 'd', 'g', 'r'}
 
-const magicVersion = 1
+// The magic version number.
+const magicVersion = 2
 
 func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 	rewritePath := filepath.Join(dir, manifestRewriteFilename)
@@ -307,8 +308,7 @@ func (r *countingReader) ReadByte() (b byte, err error) {
 }
 
 var (
-	errBadMagic        = errors.New("manifest has bad magic")
-	errBadMagicVersion = errors.New("manifest has unsupported version")
+	errBadMagic = errors.New("manifest has bad magic")
 )
 
 // ReplayManifestFile reads the manifest file and constructs two manifest objects.  (We need one
@@ -328,7 +328,8 @@ func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error
 	}
 	version := binary.BigEndian.Uint32(magicBuf[4:8])
 	if version != magicVersion {
-		return Manifest{}, 0, errBadMagicVersion
+		return Manifest{}, 0,
+			fmt.Errorf("manifest has unsupported version: %d (we support %d)", version, magicVersion)
 	}
 
 	offset := r.count
