@@ -125,7 +125,8 @@ type Closer struct {
 	updateSize *y.LevelCloser
 	compactors *y.LevelCloser
 	memtable   *y.LevelCloser
-	writes *y.LevelCloser
+	writes     *y.LevelCloser
+	valueGC    *y.LevelCloser
 }
 
 // KV provides the various functions required to interact with Badger.
@@ -333,8 +334,8 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	out.closer2.writes = y.NewLevelCloser("writes", 1)
 	go out.doWrites(out.closer2.writes)
 
-	lc := out.closer.Register("value-gc")
-	go out.vlog.runGCInLoop(lc)
+	out.closer2.valueGC = y.NewLevelCloser("value-gc", 1)
+	go out.vlog.runGCInLoop(out.closer2.valueGC)
 
 	valueDirLockGuard = nil
 	dirLockGuard = nil
@@ -347,12 +348,10 @@ func NewKV(optParam *Options) (out *KV, err error) {
 func (s *KV) Close() (err error) {
 	s.elog.Printf("Closing database")
 	// Stop value GC first.
-	lc := s.closer.Get("value-gc")
-	lc.SignalAndWait()
+	s.closer2.valueGC.SignalAndWait()
 
 	// Stop writes next.
-	lc = s.closer2.writes
-	lc.SignalAndWait()
+	s.closer2.writes.SignalAndWait()
 
 	// Now close the value log.
 	if vlogErr := s.vlog.Close(); err == nil {
