@@ -123,6 +123,7 @@ func (opt *Options) estimateSize(entry *Entry) int {
 
 type Closer struct {
 	updateSize *y.LevelCloser
+	compactors *y.LevelCloser
 }
 
 // KV provides the various functions required to interact with Badger.
@@ -247,10 +248,10 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		return nil, err
 	}
 
-	lc := out.closer.Register("compactors")
-	out.lc.startCompact(lc)
+	out.closer2.compactors = y.NewLevelCloser("compactors", 1)
+	out.lc.startCompact(out.closer2.compactors)
 
-	lc = out.closer.Register("memtable")
+	lc := out.closer.Register("memtable")
 	go out.flushMemtable(lc) // Need levels controller to be up.
 
 	if err = out.vlog.Open(out, &opt); err != nil {
@@ -393,8 +394,7 @@ func (s *KV) Close() (err error) {
 	lc.Wait()
 	s.elog.Printf("Memtable flushed")
 
-	lc = s.closer.Get("compactors")
-	lc.SignalAndWait()
+	s.closer2.compactors.SignalAndWait()
 	s.elog.Printf("Compaction finished")
 
 	if lcErr := s.lc.close(); err == nil {
