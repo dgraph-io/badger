@@ -240,7 +240,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		valueDirGuard: valueDirLockGuard,
 	}
 
-	out.closer2.updateSize = y.NewLevelCloser("updateSize", 1)
+	out.closer2.updateSize = y.NewLevelCloser(1)
 	go out.updateSize(out.closer2.updateSize)
 	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
@@ -249,10 +249,10 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		return nil, err
 	}
 
-	out.closer2.compactors = y.NewLevelCloser("compactors", 1)
+	out.closer2.compactors = y.NewLevelCloser(1)
 	out.lc.startCompact(out.closer2.compactors)
 
-	out.closer2.memtable = y.NewLevelCloser("memtable", 1)
+	out.closer2.memtable = y.NewLevelCloser(1)
 	go out.flushMemtable(out.closer2.memtable) // Need levels controller to be up.
 
 	if err = out.vlog.Open(out, &opt); err != nil {
@@ -275,7 +275,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		vptr.Decode(val)
 	}
 
-	replayCloser := y.NewLevelCloser("replay", 1)
+	replayCloser := y.NewLevelCloser(1)
 	go out.doWrites(replayCloser)
 
 	first := true
@@ -329,10 +329,10 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 
 	out.writeCh = make(chan *request, kvWriteChCapacity)
-	out.closer2.writes = y.NewLevelCloser("writes", 1)
+	out.closer2.writes = y.NewLevelCloser(1)
 	go out.doWrites(out.closer2.writes)
 
-	out.closer2.valueGC = y.NewLevelCloser("value-gc", 1)
+	out.closer2.valueGC = y.NewLevelCloser(1)
 	go out.vlog.runGCInLoop(out.closer2.valueGC)
 
 	valueDirLockGuard = nil

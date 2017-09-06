@@ -20,7 +20,6 @@ import (
 	"hash/crc32"
 	"os"
 	"sync"
-	"sync/atomic"
 )
 
 // Constants used in serialization sizes, and in ValueStruct serialization
@@ -94,14 +93,12 @@ func (s *Slice) Resize(sz int) []byte {
 }
 
 type LevelCloser struct {
-	Name    string
-	nomore  int32
 	closed  chan struct{}
 	waiting sync.WaitGroup
 }
 
-func NewLevelCloser(name string, initial int32) *LevelCloser {
-	ret := &LevelCloser{Name: name, closed: make(chan struct{}, 10)}
+func NewLevelCloser(initial int32) *LevelCloser {
+	ret := &LevelCloser{closed: make(chan struct{}, 10)}
 	ret.waiting.Add(int(initial))
 	return ret
 }
@@ -111,9 +108,6 @@ func (lc *LevelCloser) AddRunning(delta int32) {
 }
 
 func (lc *LevelCloser) Signal() {
-	if !atomic.CompareAndSwapInt32(&lc.nomore, 0, 1) {
-		return
-	}
 	close(lc.closed)
 }
 
