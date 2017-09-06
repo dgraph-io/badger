@@ -121,6 +121,10 @@ func (opt *Options) estimateSize(entry *Entry) int {
 	return len(entry.Key) + 16 + y.MetaSize + y.UserMetaSize + y.CasSize
 }
 
+type Closer struct {
+	updateSize *y.LevelCloser
+}
+
 // KV provides the various functions required to interact with Badger.
 // KV is thread-safe.
 type KV struct {
@@ -131,6 +135,7 @@ type KV struct {
 	valueDirGuard *DirectoryLockGuard
 
 	closer    *y.Closer
+	closer2   Closer
 	elog      trace.EventLog
 	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
 	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
@@ -233,8 +238,8 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		valueDirGuard: valueDirLockGuard,
 	}
 
-	lc := out.closer.Register("updateSize")
-	go out.updateSize(lc)
+	out.closer2.updateSize = y.NewLevelCloser("updateSize", 1)
+	go out.updateSize(out.closer2.updateSize)
 	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
 	// newLevelsController potentially loads files in directory.
@@ -242,7 +247,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		return nil, err
 	}
 
-	lc = out.closer.Register("compactors")
+	lc := out.closer.Register("compactors")
 	out.lc.startCompact(lc)
 
 	lc = out.closer.Register("memtable")
@@ -397,6 +402,8 @@ func (s *KV) Close() (err error) {
 	}
 	s.elog.Printf("Waiting for closer")
 	s.closer.SignalAll()
+	s.closer2.updateSize.Signal()
+	s.closer2.updateSize.Wait()
 	s.closer.WaitForAll()
 
 	s.elog.Finish()

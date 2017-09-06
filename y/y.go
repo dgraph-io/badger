@@ -157,6 +157,12 @@ func (c *Closer) WaitForAll() {
 	}
 }
 
+func NewLevelCloser(name string, initial int32) *LevelCloser {
+	ret := &LevelCloser{Name: name, closed: make(chan struct{}, 10)}
+	ret.waiting.Add(int(initial))
+	return ret
+}
+
 func (lc *LevelCloser) AddRunning(delta int32) {
 	lc.waiting.Add(int(delta))
 }
