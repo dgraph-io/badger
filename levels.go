@@ -186,12 +186,13 @@ func (s *levelsController) runWorker(lc *y.LevelCloser) {
 	}
 
 	time.Sleep(time.Duration(rand.Int31n(1000)) * time.Millisecond)
-	timeChan := time.Tick(time.Second)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
 		// Can add a done channel or other stuff.
-		case <-timeChan:
+		case <-ticker.C:
 			prios := s.pickCompactLevels()
 			for _, p := range prios {
 				// TODO: Handle error.
