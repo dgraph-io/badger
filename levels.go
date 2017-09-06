@@ -206,16 +206,32 @@ func (s *levelsController) runWorker(lc *y.LevelCloser) {
 	}
 }
 
+// Returns true if level zero may be compacted, without accounting for compactions that already
+// might be happening.
+func (s *levelsController) level0Compactable() bool {
+	return s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTables
+}
+
+// Returns true if the non-zero level may be compacted.  delSize provides the size of the tables
+// which are currently being compacted so that we treat them as already having started being
+// compacted (because they have been, yet their size is already counted in getTotalSize).
+func (l *levelHandler) compactable(delSize int64) bool {
+	return l.getTotalSize()-delSize >= l.maxTotalSize
+}
+
 type compactionPriority struct {
 	level int
 	score float64
 }
 
-// pickCompactLevel determines which level to compact. Return -1 if not found.
+// pickCompactLevel determines which level to compact.
 // Based on: https://github.com/facebook/rocksdb/wiki/Leveled-Compaction
 func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
+	// This function must use identical criteria for guaranteeing compaction's progress that
+	// addLevel0Table uses.
+
 	if !s.cstatus.overlapsWith(0, infRange) && // already being compacted.
-		s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTables {
+		s.level0Compactable() {
 		pri := compactionPriority{
 			level: 0,
 			score: float64(s.levels[0].numTables()) / float64(s.kv.opt.NumLevelZeroTables),
@@ -227,7 +243,7 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 		// Don't consider those tables that are being compacted right now.
 		delSize := s.cstatus.delSize(i + 1)
 
-		if l.getTotalSize()-delSize >= l.maxTotalSize {
+		if l.compactable(delSize) {
 			pri := compactionPriority{
 				level: i + 1,
 				score: float64(l.getTotalSize()-delSize) / float64(l.maxTotalSize),
@@ -624,9 +640,11 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		// will very quickly fill up level 0 again and if the compaction strategy favors level 0,
 		// then level 1 is going to super full.
 		for {
-			// fmt.Printf("level zero size=%d\n", s.levels[0].getTotalSize())
-			// fmt.Printf("level one size=%d/%d\n", s.levels[1].getTotalSize(), s.levels[1].maxTotalSize)
-			if s.levels[0].getTotalSize() == 0 && s.levels[1].getTotalSize() < s.levels[1].maxTotalSize {
+			// Passing 0 for delSize to compactable means we're treating incomplete compactions as
+			// not having finished -- we wait for them to finish.  Also, it's crucial this behavior
+			// replicates pickCompactLevels' behavior in computing compactability in order to
+			// guarantee progress.
+			if !s.level0Compactable() && !s.levels[1].compactable(0) {
 				break
 			}
 			time.Sleep(10 * time.Millisecond)
