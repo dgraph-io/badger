@@ -18,7 +18,6 @@ package y
 
 import (
 	"hash/crc32"
-	"log"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -99,62 +98,6 @@ type LevelCloser struct {
 	nomore  int32
 	closed  chan struct{}
 	waiting sync.WaitGroup
-}
-
-type Closer struct {
-	sync.RWMutex
-	levels map[string]*LevelCloser
-}
-
-func NewCloser() *Closer {
-	return &Closer{
-		levels: make(map[string]*LevelCloser),
-	}
-}
-
-func (c *Closer) Register(name string) *LevelCloser {
-	c.Lock()
-	defer c.Unlock()
-
-	lc, has := c.levels[name]
-	if !has {
-		lc = &LevelCloser{Name: name, closed: make(chan struct{}, 10)}
-		c.levels[name] = lc
-	}
-
-	AssertTruef(atomic.LoadInt32(&lc.nomore) == 0, "Can't register with closer after signal.")
-	lc.waiting.Add(1)
-	return lc
-}
-
-func (c *Closer) Get(name string) *LevelCloser {
-	c.RLock()
-	defer c.RUnlock()
-
-	lc, has := c.levels[name]
-	if !has {
-		log.Fatalf("%q not present in Closer", name)
-		return nil
-	}
-	return lc
-}
-
-func (c *Closer) SignalAll() {
-	c.RLock()
-	defer c.RUnlock()
-
-	for _, l := range c.levels {
-		l.Signal()
-	}
-}
-
-func (c *Closer) WaitForAll() {
-	c.RLock()
-	defer c.RUnlock()
-
-	for _, l := range c.levels {
-		l.Wait()
-	}
 }
 
 func NewLevelCloser(name string, initial int32) *LevelCloser {
