@@ -23,10 +23,19 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
+type prefetchStatus uint8
+
+const (
+	empty prefetchStatus = iota
+	prefetched
+)
+
 // KVItem is returned during iteration. Both the Key() and Value() output is only valid until
 // iterator.Next() is called.
 type KVItem struct {
+	status     prefetchStatus
 	wg         sync.WaitGroup
+	kv         *KV
 	key        []byte
 	vptr       []byte
 	meta       byte
@@ -42,12 +51,17 @@ func (item *KVItem) Key() []byte {
 	return item.key
 }
 
-// Value returns the value, generally fetched from the value log. This call can block while the
-// value is populated asynchronously via a disk read. Remember to parse or copy it if you need to
-// reuse it. DO NOT modify or append to this slice; it would result in internal data overwrite.
-func (item *KVItem) Value() []byte {
+// Value retrieves the value of the item from the value log. It calls the
+// consumer function with a slice argument representing the value.
+//
+// Remember to parse or copy it if you need to reuse it. DO NOT modify or
+// append to this slice; it would result in a panic.
+func (item *KVItem) Value(consumer func([]byte)) error {
 	item.wg.Wait()
-	return item.val
+	if item.status == prefetched {
+		consumer(item.val)
+	}
+	return item.kv.yieldItemValue(item, consumer)
 }
 
 func (item *KVItem) hasValue() bool {
@@ -62,9 +76,25 @@ func (item *KVItem) hasValue() bool {
 	return true
 }
 
-// EstimatedSize returns approximate size of the key-value pair.  This can be called with
-// FetchValues=false, to quickly iterate through and estimate the size of a range of key-value
-// pairs (without fetching the corresponding values).
+func (item *KVItem) prefetchValue() error {
+	return item.kv.yieldItemValue(item, func(val []byte) {
+		if val == nil {
+			return
+		}
+		buf := item.slice.Resize(len(val))
+		// FIXME in case of non-mmaped read buf and val might be the same location, in
+		// which case this is redundant. Not sure if this is a no-op in that case.
+		copy(buf, val)
+		item.val = buf
+		item.status = prefetched
+	})
+}
+
+// EstimatedSize returns approximate size of the key-value pair.
+//
+// This can be called while iterating through a store to quickly estimate the
+// size of a range of key-value pairs (without fetching the corresponding
+// values).
 func (item *KVItem) EstimatedSize() int64 {
 	if !item.hasValue() {
 		return 0
@@ -121,16 +151,18 @@ func (l *list) pop() *KVItem {
 
 // IteratorOptions is used to set options when iterating over Badger key-value stores.
 type IteratorOptions struct {
-	PrefetchSize int  // How many KV pairs to prefetch while iterating.
-	FetchValues  bool // Controls whether the values should be fetched from the value log.
-	Reverse      bool // Direction of iteration. False is forward, true is backward.
+	// Indicates whether we should prefetch values during iteration and store them. Note that this involves an additional
+	// copy because values have to be made available ahead of time.
+	PrefetchValues bool
+	PrefetchSize   int  // How many KV pairs to prefetch while iterating. Valid only if PrefetchValues is true.
+	Reverse        bool // Direction of iteration. False is forward, true is backward.
 }
 
 // DefaultIteratorOptions contains default options when iterating over Badger key-value stores.
 var DefaultIteratorOptions = IteratorOptions{
-	PrefetchSize: 100,
-	FetchValues:  true,
-	Reverse:      false,
+	PrefetchValues: false,
+	PrefetchSize:   100,
+	Reverse:        false,
 }
 
 // Iterator helps iterating over the KV pairs in a lexicographically sorted order.
@@ -147,7 +179,7 @@ type Iterator struct {
 func (it *Iterator) newItem() *KVItem {
 	item := it.waste.pop()
 	if item == nil {
-		item = &KVItem{slice: new(y.Slice)}
+		item = &KVItem{slice: new(y.Slice), kv: it.kv}
 	}
 	return item
 }
@@ -206,20 +238,20 @@ func (it *Iterator) fill(item *KVItem) {
 	item.key = y.Safecopy(item.key, it.iitr.Key())
 	item.vptr = y.Safecopy(item.vptr, vs.Value)
 	item.val = nil
-	if it.opt.FetchValues {
+	if it.opt.PrefetchValues {
 		item.wg.Add(1)
 		go func() {
-			it.kv.fillItem(item)
+			// FIXME we are not handling errors here.
+			item.prefetchValue()
 			item.wg.Done()
 		}()
 	}
 }
 
 func (it *Iterator) prefetch() {
-	prefetchSize := it.opt.PrefetchSize
-	if it.opt.PrefetchSize <= 1 {
-		// Try prefetching atleast the first two items to put into it.item and it.data.
-		prefetchSize = 2
+	prefetchSize := 2
+	if it.opt.PrefetchValues && it.opt.PrefetchSize > 1 {
+		prefetchSize = it.opt.PrefetchSize
 	}
 
 	i := it.iitr

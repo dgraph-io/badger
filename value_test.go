@@ -58,11 +58,12 @@ func TestValueBasic(t *testing.T) {
 	require.Len(t, b.Ptrs, 2)
 	fmt.Printf("Pointer written: %+v %+v\n", b.Ptrs[0], b.Ptrs[1])
 
-	e, err := log.Read(b.Ptrs[0], nil)
-	e2, err := log.Read(b.Ptrs[1], nil)
+	buf1, err1 := log.readRawValueBytes(b.Ptrs[0], new(y.Slice))
+	buf2, err2 := log.readRawValueBytes(b.Ptrs[1], new(y.Slice))
 
-	require.NoError(t, err)
-	readEntries := []Entry{e, e2}
+	require.NoError(t, err1)
+	require.NoError(t, err2)
+	readEntries := []Entry{valueBytesToEntry(buf1), valueBytesToEntry(buf2)}
 	require.EqualValues(t, []Entry{
 		{
 			Key:             []byte("samplekey"),
@@ -126,7 +127,7 @@ func TestValueGC(t *testing.T) {
 		if err := kv.Get(key, &item); err != nil {
 			t.Error(err)
 		}
-		val := item.Value()
+		val := getItemValue(t, &item)
 		require.NotNil(t, val)
 		require.True(t, len(val) == sz, "Size found: %d", len(val))
 	}
@@ -195,7 +196,7 @@ func TestValueGC2(t *testing.T) {
 		if err := kv.Get(key, &item); err != nil {
 			t.Error(err)
 		}
-		val := item.Value()
+		val := getItemValue(t, &item)
 		require.True(t, len(val) == 0, "Size found: %d", len(val))
 	}
 	for i := 5; i < 10; i++ {
@@ -203,7 +204,7 @@ func TestValueGC2(t *testing.T) {
 		if err := kv.Get(key, &item); err != nil {
 			t.Error(err)
 		}
-		val := item.Value()
+		val := getItemValue(t, &item)
 		require.NotNil(t, val)
 		require.Equal(t, string(val), fmt.Sprintf("value%d", i))
 	}
@@ -212,7 +213,7 @@ func TestValueGC2(t *testing.T) {
 		if err := kv.Get(key, &item); err != nil {
 			t.Error(err)
 		}
-		val := item.Value()
+		val := getItemValue(t, &item)
 		require.NotNil(t, val)
 		require.True(t, len(val) == sz, "Size found: %d", len(val))
 	}
@@ -251,7 +252,7 @@ func TestChecksums(t *testing.T) {
 	require.NoError(t, err)
 	var item KVItem
 	require.NoError(t, kv.Get(k1, &item))
-	require.Equal(t, item.Value(), v1)
+	require.Equal(t, getItemValue(t, &item), v1)
 	ok, err := kv.Exists(k2)
 	require.NoError(t, err)
 	require.False(t, ok)
@@ -263,17 +264,17 @@ func TestChecksums(t *testing.T) {
 	// last due to checksum failure).
 	kv, err = NewKV(getTestOptions(dir))
 	require.NoError(t, err)
-	iter := kv.NewIterator(IteratorOptions{FetchValues: true})
+	iter := kv.NewIterator(DefaultIteratorOptions)
 	iter.Seek(k1)
 	require.True(t, iter.Valid())
 	it := iter.Item()
 	require.Equal(t, it.Key(), k1)
-	require.Equal(t, it.Value(), v1)
+	require.Equal(t, getItemValue(t, it), v1)
 	iter.Next()
 	require.True(t, iter.Valid())
 	it = iter.Item()
 	require.Equal(t, it.Key(), k3)
-	require.Equal(t, it.Value(), v3)
+	require.Equal(t, getItemValue(t, it), v3)
 	iter.Close()
 	require.NoError(t, kv.Close())
 }
@@ -305,7 +306,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok)
 	require.Equal(t, item.Key(), k1)
-	require.Equal(t, item.Value(), v1)
+	require.Equal(t, getItemValue(t, &item), v1)
 
 	// When K3 is set, it should be persisted after a restart.
 	require.NoError(t, kv.Set(k3, v3, 0))
@@ -385,10 +386,11 @@ func BenchmarkReadWrite(b *testing.B) {
 							b.Fatalf("Zero length of ptrs")
 						}
 						idx := rand.Intn(ln)
-						e, err := vl.Read(ptrs[idx], nil)
+						buf, err := vl.readRawValueBytes(ptrs[idx], new(y.Slice))
 						if err != nil {
 							b.Fatalf("Benchmark Read: %v", err)
 						}
+						e := valueBytesToEntry(buf)
 						if len(e.Key) != 16 {
 							b.Fatalf("Key is invalid")
 						}

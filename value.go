@@ -111,6 +111,9 @@ var errTooFewBytes = errors.New("Too few bytes read")
 
 // lf must be RLocked (or exclusively locked) if you call this.
 func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
+	if s == nil {
+		s = new(y.Slice)
+	}
 	var nbr int64
 	offset := int64(p.Offset)
 	if len(lf.mmap) > 0 {
@@ -797,22 +800,47 @@ func (vlog *valueLog) getFileRLocked(fid uint32) (*logFile, error) {
 }
 
 // Read reads the value log at a given location.
-func (vlog *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
-	lf, err := vlog.getFileRLocked(p.Fid)
+//
+// FIXME once mmap is in place for writable log as well, we can
+// stop passing a reference to slice.
+func (vlog *valueLog) Read(vp valuePointer, slice *y.Slice, consumer func([]byte)) error {
+	buf, err := vlog.readRawValueBytes(vp, slice)
+
 	if err != nil {
-		return e, err
+		return err
+	}
+
+	var h header
+	h.Decode(buf)
+	if (h.meta & BitDelete) != 0 {
+		consumer(nil)
+		return nil
+	}
+	n := uint32(headerBufSize)
+	n += h.klen
+	consumer(buf[n : n+h.vlen])
+
+	return nil
+}
+
+func (vlog *valueLog) readRawValueBytes(vp valuePointer, slice *y.Slice) ([]byte, error) {
+	lf, err := vlog.getFileRLocked(vp.Fid)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Unable to read from value log: %+v", vp)
 	}
 	defer lf.fdLock.RUnlock()
 
-	if s == nil {
-		s = new(y.Slice)
-	}
 	var buf []byte
 
-	if buf, err = lf.read(p, s); err != nil {
-		return e, err
+	if buf, err = lf.read(vp, slice); err != nil {
+		return nil, errors.Wrapf(err, "Unable to read from value log: %+v", vp)
 	}
 
+	return buf, nil
+}
+
+// Test helper
+func valueBytesToEntry(buf []byte) (e Entry) {
 	var h header
 	h.Decode(buf)
 	n := uint32(headerBufSize)
@@ -824,8 +852,7 @@ func (vlog *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	e.casCounter = h.casCounter
 	e.CASCounterCheck = h.casCounterCheck
 	e.Value = buf[n : n+h.vlen]
-
-	return e, nil
+	return
 }
 
 func (vlog *valueLog) runGCInLoop(lc *y.LevelCloser) {
@@ -937,13 +964,16 @@ func (vlog *valueLog) doRunGC() error {
 
 		} else {
 			vlog.elog.Printf("Reason=%+v\n", r)
-			ne, err := vlog.Read(vp, nil)
+
+			s := new(y.Slice)
+			buf, err := vlog.readRawValueBytes(vp, s)
 			if err != nil {
 				return errStop
 			}
+			ne := valueBytesToEntry(buf)
 			ne.offset = vp.Offset
 			if ne.casCounter == e.casCounter {
-				ne.print("Latest Entry in LSM")
+				ne.print("Latest Entry Header in LSM")
 				e.print("Latest Entry in Log")
 				return errors.Errorf(
 					"This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
