@@ -241,8 +241,8 @@ func TestChecksums(t *testing.T) {
 
 	// Use a vlog with K1=V1 and a (corrupted) K2=V2
 	buf := createVlog(t, []*Entry{
-		&Entry{Key: k1, Value: v1},
-		&Entry{Key: k2, Value: v2},
+		{Key: k1, Value: v1},
+		{Key: k2, Value: v2},
 	})
 	buf[len(buf)-1]++ // Corrupt last byte
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
@@ -291,8 +291,8 @@ func TestPartialAppendToValueLog(t *testing.T) {
 
 	// Create truncated vlog to simulate a partial append.
 	buf := createVlog(t, []*Entry{
-		&Entry{Key: k1, Value: v1},
-		&Entry{Key: k2, Value: v2},
+		{Key: k1, Value: v1},
+		{Key: k2, Value: v2},
 	})
 	buf = buf[:len(buf)-6]
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
