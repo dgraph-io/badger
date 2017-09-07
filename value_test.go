@@ -21,6 +21,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/dgraph-io/badger/y"
@@ -226,6 +227,84 @@ func TestValueGC2(t *testing.T) {
 		require.NotNil(t, val)
 		require.True(t, len(val) == sz, "Size found: %d", len(val))
 	}
+}
+
+func TestValueGC3(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opt := getTestOptions(dir)
+	opt.ValueLogFileSize = 1 << 20
+
+	kv, err := NewKV(opt)
+	require.NoError(t, err)
+	defer kv.Close()
+
+	// We want to test whether an iterator can continue through a value log GC.
+
+	valueSize := 32 << 10
+
+	var value3 []byte
+	var entries []*Entry
+	for i := 0; i < 100; i++ {
+		v := make([]byte, valueSize) // 32K * 100 will take >=3'276'800 B.
+		if i == 3 {
+			value3 = v
+		}
+		rand.Read(v[:])
+		// Keys key000, key001, key002, such that sorted order matches insertion order
+		entry := &Entry{
+			Key:   []byte(fmt.Sprintf("key%03d", i)),
+			Value: v,
+		}
+		entries = append(entries, entry)
+	}
+	err = kv.BatchSet(entries)
+	require.NoError(t, err)
+	for _, e := range entries {
+		require.NoError(t, e.Error)
+	}
+
+	// Start an iterator to keys in the first value log file
+	itOpt := IteratorOptions{
+		PrefetchValues: false,
+		PrefetchSize:   0,
+		Reverse:        false,
+	}
+
+	it := kv.NewIterator(itOpt)
+	defer it.Close()
+	// Walk a few keys
+	it.Rewind()
+	require.True(t, it.Valid())
+	item := it.Item()
+	require.Equal(t, []byte("key000"), item.Key())
+	it.Next()
+	require.True(t, it.Valid())
+	item = it.Item()
+	require.Equal(t, []byte("key001"), item.Key())
+	it.Next()
+	require.True(t, it.Valid())
+	item = it.Item()
+	require.Equal(t, []byte("key002"), item.Key())
+
+	// Like other tests, we pull out a logFile to rewrite it directly
+
+	kv.vlog.filesLock.RLock()
+	logFile := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
+	kv.vlog.filesLock.RUnlock()
+
+	kv.vlog.rewrite(logFile)
+	it.Next()
+	require.True(t, it.Valid())
+	item = it.Item()
+	require.Equal(t, []byte("key003"), item.Key())
+	var v3 []byte
+	var wg sync.WaitGroup
+	wg.Add(1)
+	item.Value(func(x []byte) error { v3 = x; wg.Done(); return nil })
+	wg.Wait()
+	require.Equal(t, value3, v3)
 }
 
 var (
