@@ -100,7 +100,7 @@ func newLevelsController(kv *KV, mf *Manifest) (*levelsController, error) {
 		s.cstatus.levels[i] = new(levelCompactStatus)
 	}
 
-	// Compare manifest against directory, check for existant/non-existant files, and remove.
+	// Compare manifest against directory, check for existent/non-existent files, and remove.
 	if err := revertToManifest(kv, mf, getIDMap(kv.opt.Dir)); err != nil {
 		return nil, err
 	}
