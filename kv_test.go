@@ -38,7 +38,7 @@ func getTestOptions(dir string) *Options {
 	opt.Dir = dir
 	opt.ValueDir = dir
 	opt.SyncWrites = true // Some tests seem to need this to pass.
-	opt.ValueGCThreshold = 0.0
+	opt.ValueGCThreshold = 0.8
 	return opt
 }
 
