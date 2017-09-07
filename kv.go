@@ -38,89 +38,6 @@ var (
 	head         = []byte("!badger!head") // For storing value offset for replay.
 )
 
-// Options are params for creating DB object.
-type Options struct {
-	// 1. Mandatory flags
-	// -------------------
-	// Directory to store the data in. Should exist and be writable.
-	Dir string
-	// Directory to store the value log in. Can be the same as Dir. Should exist and be writable.
-	ValueDir string
-
-	// 2. Frequently modified flags
-	// -----------------------------
-	// Sync all writes to disk. Setting this to true would slow down data loading significantly.
-	SyncWrites bool
-	// How should LSM tree be accessed.
-	MapTablesTo int
-	// How often to run value log garbage collector. Every time it runs, there'd be a spike in LSM
-	// tree activity. But, running it frequently allows reclaiming disk space from an ever-growing
-	// value log.
-	ValueGCRunInterval time.Duration
-
-	// 3. Flags that user might want to review
-	// ----------------------------------------
-	// The following affect all levels of LSM tree.
-	MaxTableSize        int64 // Each table (or file) is at most this size.
-	LevelSizeMultiplier int   // Equals SizeOf(Li+1)/SizeOf(Li).
-	MaxLevels           int   // Maximum number of levels of compaction.
-	ValueThreshold      int   // If value size >= this threshold, only store value offsets in tree.
-	NumMemtables        int   // Maximum number of tables to keep in memory, before stalling.
-
-	// The following affect how we handle LSM tree L0.
-	// Maximum number of Level 0 tables before we start compacting.
-	NumLevelZeroTables int
-	// If we hit this number of Level 0 tables, we will stall until L0 is compacted away.
-	NumLevelZeroTablesStall int
-
-	// Maximum total size for L1.
-	LevelOneSize int64
-
-	// Run value log garbage collection if we can reclaim at least this much space. This is a ratio.
-	ValueGCThreshold float64
-
-	// Size of single value log file.
-	ValueLogFileSize int64
-
-	// Number of compaction workers to run concurrently.
-	NumCompactors int
-
-	// 4. Flags for testing purposes
-	// ------------------------------
-	DoNotCompact bool // Stops LSM tree from compactions.
-
-	maxBatchSize int64 // max batch size in bytes
-}
-
-// DefaultOptions sets a list of recommended options for good performance.
-// Feel free to modify these to suit your needs.
-var DefaultOptions = Options{
-	DoNotCompact:        false,
-	LevelOneSize:        256 << 20,
-	LevelSizeMultiplier: 10,
-	MapTablesTo:         table.LoadToRAM,
-	// table.MemoryMap to mmap() the tables.
-	// table.Nothing to not preload the tables.
-	MaxLevels:               7,
-	MaxTableSize:            64 << 20,
-	NumCompactors:           3,
-	NumLevelZeroTables:      5,
-	NumLevelZeroTablesStall: 10,
-	NumMemtables:            5,
-	SyncWrites:              false,
-	ValueGCRunInterval:      10 * time.Minute,
-	ValueGCThreshold:        0.5, // Set to zero to not run GC.
-	ValueLogFileSize:        1 << 30,
-	ValueThreshold:          20,
-}
-
-func (opt *Options) estimateSize(entry *Entry) int {
-	if len(entry.Value) < opt.ValueThreshold {
-		return len(entry.Key) + len(entry.Value) + y.MetaSize + y.UserMetaSize + y.CasSize
-	}
-	return len(entry.Key) + 16 + y.MetaSize + y.UserMetaSize + y.CasSize
-}
-
 type closers struct {
 	updateSize *y.Closer
 	compactors *y.Closer
@@ -263,7 +180,16 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	if err := out.Get(head, &item); err != nil {
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
-	val := item.Value()
+
+	var val []byte
+	err = item.Value(func(v []byte) {
+		val = make([]byte, len(v))
+		copy(val, v)
+	})
+
+	if err != nil {
+		return nil, errors.Wrap(err, "Retrieving head value")
+	}
 	// lastUsedCasCounter will either be the value stored in !badger!head, or some subsequently
 	// written value log entry that we replay.  (Subsequent value log entries might be _less_
 	// than lastUsedCasCounter, if there was value log gc so we have to max() values while
@@ -472,53 +398,29 @@ func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 	}
 }
 
-// FillValue populates item with a value.
-//
-// item must be a valid KVItem returned by Badger during iteration. This method
-// could be used to fetch values explicitly during a key-only iteration
-// (FetchValues is set to false). It is useful for example, if values are
-// required for some keys only.
-//
-// This method should not be called when iteration is performed with
-// FetchValues set to true, as it will cause additional copying.
-//
-// Multiple calls to this method will result in multiple copies from the value
-// log. It is the caller’s responsibility to make sure they don’t call this
-// method more than once.
-func (s *KV) FillValue(item *KVItem) error {
-	// Wait for any pending fill operations to finish.
-	item.wg.Wait()
-	item.wg.Add(1)
-	defer item.wg.Done()
-	return s.fillItem(item)
-}
-
-func (s *KV) fillItem(item *KVItem) error {
+func (s *KV) yieldItemValue(item *KVItem, consumer func([]byte)) error {
 	if !item.hasValue() {
-		item.val = nil
+		consumer(nil)
 		return nil
 	}
 
 	if item.slice == nil {
 		item.slice = new(y.Slice)
 	}
+
 	if (item.meta & BitValuePointer) == 0 {
-		item.val = item.slice.Resize(len(item.vptr))
-		copy(item.val, item.vptr)
+		val := item.slice.Resize(len(item.vptr))
+		copy(val, item.vptr)
+		consumer(val)
 		return nil
 	}
 
 	var vp valuePointer
 	vp.Decode(item.vptr)
-	entry, err := s.vlog.Read(vp, item.slice)
+	err := s.vlog.Read(vp, item.slice, consumer)
 	if err != nil {
-		return errors.Wrapf(err, "Unable to read from value log: %+v", vp)
+		return err
 	}
-	if (entry.Meta & BitDelete) != 0 { // Is a tombstone.
-		item.val = nil
-		return nil
-	}
-	item.val = entry.Value
 	return nil
 }
 
@@ -546,18 +448,14 @@ func (s *KV) Get(key []byte, item *KVItem) error {
 	if err != nil {
 		return errors.Wrapf(err, "KV::Get key: %q", key)
 	}
-	if item.slice == nil {
-		item.slice = new(y.Slice)
-	}
+
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta
 	item.casCounter = vs.CASCounter
 	item.key = key
+	item.kv = s
 	item.vptr = vs.Value
 
-	if err := s.fillItem(item); err != nil {
-		return errors.Wrapf(err, "KV::Get key: %q", key)
-	}
 	return nil
 }
 
@@ -1186,7 +1084,7 @@ func (s *KV) flushMemtable(lc *y.Closer) error {
 			return err
 		}
 
-		tbl, err := table.OpenTable(fd, s.opt.MapTablesTo)
+		tbl, err := table.OpenTable(fd, s.opt.TableLoadingMode)
 		if err != nil {
 			s.elog.Printf("ERROR while opening table: %v", err)
 			return err
