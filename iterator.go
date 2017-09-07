@@ -54,7 +54,9 @@ func (item *KVItem) Key() []byte {
 
 // Value retrieves the value of the item from the value log. It calls the
 // consumer function with a slice argument representing the value. In case
-// of error, the consumer function is not called
+// of error, the consumer function is not called.
+//
+// Note that the call to the consumer func happens synchronously.
 //
 // Remember to parse or copy it if you need to reuse it. DO NOT modify or
 // append to this slice; it would result in a panic.
@@ -84,12 +86,16 @@ func (item *KVItem) hasValue() bool {
 func (item *KVItem) prefetchValue() {
 	item.err = item.kv.yieldItemValue(item, func(val []byte) {
 		if val == nil {
+			item.status = prefetched
 			return
 		}
 		buf := item.slice.Resize(len(val))
-		// FIXME in case of non-mmaped read buf and val might be the same location, in
-		// which case this is redundant. Not sure if this is a no-op in that case.
-		copy(buf, val)
+
+		// Check if we are using the same backing array,
+		// and avoid copying if that is the case.
+		if &buf[0] != &val[0] {
+			copy(buf, val)
+		}
 		item.val = buf
 		item.status = prefetched
 	})
