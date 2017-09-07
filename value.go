@@ -800,6 +800,7 @@ func (vlog *valueLog) runGCInLoop(lc *y.Closer) {
 	}
 
 	tick := time.NewTicker(vlog.opt.ValueGCRunInterval)
+	defer tick.Stop()
 	for {
 		select {
 		case <-lc.HasBeenClosed():
