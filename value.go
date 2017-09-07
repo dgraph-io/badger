@@ -793,7 +793,7 @@ func (vlog *valueLog) Read(p valuePointer, s *y.Slice) (e Entry, err error) {
 	return e, nil
 }
 
-func (vlog *valueLog) runGCInLoop(lc *y.LevelCloser) {
+func (vlog *valueLog) runGCInLoop(lc *y.Closer) {
 	defer lc.Done()
 	if vlog.opt.ValueGCThreshold == 0.0 {
 		return
