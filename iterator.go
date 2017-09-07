@@ -173,7 +173,7 @@ var DefaultIteratorOptions = IteratorOptions{
 // Iterator helps iterating over the KV pairs in a lexicographically sorted order.
 type Iterator struct {
 	kv   *KV
-	iitr y.Iterator
+	iitr *y.MergeIterator
 
 	opt   IteratorOptions
 	item  *KVItem
