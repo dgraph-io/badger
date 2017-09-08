@@ -522,7 +522,6 @@ type valueLog struct {
 
 	kv     *KV
 	maxFid uint32
-	offset uint32
 	opt    Options
 }
 

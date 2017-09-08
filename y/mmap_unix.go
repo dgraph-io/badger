@@ -24,6 +24,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// Mmap wraps mmap.  Don't forget to munmap the memory later.
 func Mmap(fd *os.File, writable bool, size int64) ([]byte, error) {
 	mtype := unix.PROT_READ
 	if writable {
@@ -32,10 +33,12 @@ func Mmap(fd *os.File, writable bool, size int64) ([]byte, error) {
 	return unix.Mmap(int(fd.Fd()), 0, int(size), mtype, unix.MAP_SHARED)
 }
 
+// Munmap wraps munmap.
 func Munmap(b []byte) error {
 	return unix.Munmap(b)
 }
 
+// Madvise wraps the madvise syscall.
 func Madvise(b []byte, readahead bool) error {
 	flags := unix.MADV_NORMAL
 	if !readahead {

@@ -138,7 +138,12 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	})
 	for i, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		err := b.Add([]byte(kv[0]), y.ValueStruct{[]byte(kv[1]), 'A', 0, uint64(i)})
+		err := b.Add([]byte(kv[0]), y.ValueStruct{
+			Value:      []byte(kv[1]),
+			Meta:       'A',
+			UserMeta:   0,
+			CASCounter: uint64(i),
+		})
 		if t != nil {
 			require.NoError(t, err)
 		} else {
@@ -215,9 +220,9 @@ func TestManifestRewrite(t *testing.T) {
 	require.Equal(t, 0, m.Creations)
 	require.Equal(t, 0, m.Deletions)
 
-	err = mf.addChanges(protos.ManifestChangeSet{[]*protos.ManifestChange{
+	err = mf.addChanges([]*protos.ManifestChange{
 		makeTableCreateChange(0, 0),
-	}})
+	})
 	require.NoError(t, err)
 
 	for i := uint64(0); i < uint64(deletionsThreshold*3); i++ {
@@ -225,7 +230,7 @@ func TestManifestRewrite(t *testing.T) {
 			makeTableCreateChange(i+1, 0),
 			makeTableDeleteChange(i),
 		}
-		err := mf.addChanges(protos.ManifestChangeSet{ch})
+		err := mf.addChanges(ch)
 		require.NoError(t, err)
 	}
 	err = mf.close()

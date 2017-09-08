@@ -70,6 +70,7 @@ func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
 	return os.OpenFile(filename, flags, 0666)
 }
 
+// OpenTruncFile opens the file with O_RDWR | O_CREATE | O_TRUNC
 func OpenTruncFile(filename string, sync bool) (*os.File, error) {
 	flags := os.O_RDWR | os.O_CREATE | os.O_TRUNC
 	if sync {
@@ -78,19 +79,19 @@ func OpenTruncFile(filename string, sync bool) (*os.File, error) {
 	return os.OpenFile(filename, flags, 0666)
 }
 
+// Safecopy does append(a[:0], src...).
 func Safecopy(a []byte, src []byte) []byte {
-	if cap(a) < len(src) {
-		a = make([]byte, len(src))
-	}
-	a = a[:len(src)]
-	copy(a, src)
-	return a
+	return append(a[:0], src...)
 }
 
+// Slice holds a reusable buf, will reallocate if you request a larger size than ever before.
+// One problem is with n distinct sizes in random order it'll reallocate log(n) times.
 type Slice struct {
 	buf []byte
 }
 
+// Resize reuses the Slice's buffer (or makes a new one) and returns a slice in that buffer of
+// length sz.
 func (s *Slice) Resize(sz int) []byte {
 	if cap(s.buf) < sz {
 		s.buf = make([]byte, sz)
@@ -106,32 +107,40 @@ type Closer struct {
 	waiting sync.WaitGroup
 }
 
+// NewCloser constructs a new Closer, with an initial count on the WaitGroup.
 func NewCloser(initial int) *Closer {
-	ret := &Closer{closed: make(chan struct{}, 10)}
+	ret := &Closer{closed: make(chan struct{})}
 	ret.waiting.Add(initial)
 	return ret
 }
 
+// AddRunning Add()'s delta to the WaitGroup.
 func (lc *Closer) AddRunning(delta int) {
 	lc.waiting.Add(delta)
 }
 
+// Signal signals the HasBeenClosed signal.
 func (lc *Closer) Signal() {
 	close(lc.closed)
 }
 
+// HasBeenClosed gets signaled when Signal() is called.
 func (lc *Closer) HasBeenClosed() <-chan struct{} {
 	return lc.closed
 }
 
+// Done calls Done() on the WaitGroup.
 func (lc *Closer) Done() {
 	lc.waiting.Done()
 }
 
+// Wait waits on the WaitGroup.  (It waits for NewCloser's initial value, AddRunning, and Done
+// calls to balance out.)
 func (lc *Closer) Wait() {
 	lc.waiting.Wait()
 }
 
+// SignalAndWait calls Signal(), then Wait().
 func (lc *Closer) SignalAndWait() {
 	lc.Signal()
 	lc.Wait()
