@@ -19,8 +19,9 @@ package y
 import "expvar"
 
 var (
-	LSMSize  *expvar.Map
-	VlogSize *expvar.Map
+	LSMSize    *expvar.Map
+	VlogSize   *expvar.Map
+	WriteChLen *expvar.Int
 
 	// These are cumulative
 	NumReads        *expvar.Int
@@ -49,4 +50,5 @@ func init() {
 	NumMemtableGets = expvar.NewInt("badger_memtable_gets_total")
 	LSMSize = expvar.NewMap("badger_lsm_size_bytes")
 	VlogSize = expvar.NewMap("badger_vlog_size_bytes")
+	WriteChLen = expvar.NewInt("badger_write_ch_len")
 }
