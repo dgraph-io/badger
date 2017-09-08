@@ -93,12 +93,12 @@ func (t *Table) DecrRef() error {
 	return nil
 }
 
-type Block struct {
+type block struct {
 	offset int
 	data   []byte
 }
 
-func (b Block) NewIterator() *blockIterator {
+func (b block) NewIterator() *blockIterator {
 	return &blockIterator{data: b.data}
 }
 
@@ -299,19 +299,19 @@ func (t *Table) readIndex() error {
 	return nil
 }
 
-func (t *Table) block(idx int) (Block, error) {
+func (t *Table) block(idx int) (block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= len(t.blockIndex) {
-		return Block{}, errors.New("Block out of index.")
+		return block{}, errors.New("Block out of index.")
 	}
 
 	ko := t.blockIndex[idx]
-	block := Block{
+	blk := block{
 		offset: ko.offset,
 	}
 	var err error
-	block.data, err = t.read(block.offset, ko.len)
-	return block, err
+	blk.data, err = t.read(blk.offset, ko.len)
+	return blk, err
 }
 
 func (t *Table) Size() int64                 { return int64(t.tableSize) }
