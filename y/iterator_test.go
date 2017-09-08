@@ -37,7 +37,6 @@ var (
 )
 
 func (s *SimpleIterator) Close() error { closeCount++; return nil }
-func (s *SimpleIterator) Name() string { return "SimpleIterator" }
 
 func (s *SimpleIterator) Next() {
 	if !s.reversed {

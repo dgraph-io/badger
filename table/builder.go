@@ -26,9 +26,8 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-//var tableSize int64 = 50 << 20
 var (
-	restartInterval int = 100 // Might want to change this to be based on total size instead of numKeys.
+	restartInterval = 100 // Might want to change this to be based on total size instead of numKeys.
 )
 
 func newBuffer(sz int) *bytes.Buffer {
@@ -64,6 +63,7 @@ func (h *header) Decode(buf []byte) int {
 // Size returns size of the header. Currently it's just a constant.
 func (h header) Size() int { return 10 }
 
+// TableBuilder is used in building a table.
 type TableBuilder struct {
 	counter int // Number of keys written for the current block.
 
@@ -82,6 +82,7 @@ type TableBuilder struct {
 	keyCount int
 }
 
+// NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder() *TableBuilder {
 	return &TableBuilder{
 		keyBuf:     newBuffer(32 << 20),
@@ -93,6 +94,7 @@ func NewTableBuilder() *TableBuilder {
 // Close closes the TableBuilder.
 func (b *TableBuilder) Close() {}
 
+// Empty returns whether it's empty.
 func (b *TableBuilder) Empty() bool { return b.buf.Len() == 0 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
@@ -169,9 +171,12 @@ func (b *TableBuilder) Add(key []byte, value y.ValueStruct) error {
 	return nil // Currently, there is no meaningful error.
 }
 
+// TODO: vvv this was the comment on ReachedCapacity.
 // FinalSize returns the *rough* final size of the array, counting the header which is not yet written.
 // TODO: Look into why there is a discrepancy. I suspect it is because of Write(empty, empty)
 // at the end. The diff can vary.
+
+// ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *TableBuilder) ReachedCapacity(cap int64) bool {
 	estimateSz := b.buf.Len() + 8 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
 	return int64(estimateSz) > cap

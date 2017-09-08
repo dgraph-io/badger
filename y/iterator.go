@@ -74,7 +74,6 @@ type Iterator interface {
 	Key() []byte
 	Value() ValueStruct
 	Valid() bool
-	Name() string // Mainly for debug or testing.
 
 	// All iterators should be closed so that file garbage collection works.
 	Close() error
@@ -160,8 +159,6 @@ func (s *MergeIterator) initHeap() {
 	}
 }
 
-func (s *MergeIterator) Name() string { return "MergeIterator" }
-
 // Valid returns whether the MergeIterator is at a valid element.
 func (s *MergeIterator) Valid() bool {
 	if s == nil {
@@ -173,6 +170,7 @@ func (s *MergeIterator) Valid() bool {
 	return s.h[0].itr.Valid()
 }
 
+// Key returns the key associated with the current iterator
 func (s *MergeIterator) Key() []byte {
 	if len(s.h) == 0 {
 		return nil
@@ -180,6 +178,7 @@ func (s *MergeIterator) Key() []byte {
 	return s.h[0].itr.Key()
 }
 
+// Value returns the value associated with the iterator.
 func (s *MergeIterator) Value() ValueStruct {
 	if len(s.h) == 0 {
 		return ValueStruct{}

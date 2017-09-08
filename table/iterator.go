@@ -419,8 +419,6 @@ func (s *TableIterator) Seek(key []byte) {
 	}
 }
 
-func (s *TableIterator) Name() string { return "TableIterator" }
-
 type ConcatIterator struct {
 	idx      int // Which iterator is active now.
 	cur      *TableIterator
@@ -466,8 +464,6 @@ func (s *ConcatIterator) Rewind() {
 func (s *ConcatIterator) Valid() bool {
 	return s.cur != nil && s.cur.Valid()
 }
-
-func (s *ConcatIterator) Name() string { return "ConcatIterator" }
 
 func (s *ConcatIterator) Key() []byte {
 	return s.cur.Key()
