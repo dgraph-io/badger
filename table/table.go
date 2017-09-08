@@ -43,6 +43,7 @@ type keyOffset struct {
 	len    int
 }
 
+// Table represents a loaded table file with the info we have about it
 type Table struct {
 	sync.Mutex
 
@@ -61,8 +62,6 @@ type Table struct {
 
 	bf bbloom.Bloom
 }
-
-func (t *Table) Ref() int32 { return atomic.LoadInt32(&t.ref) }
 
 func (t *Table) IncrRef() {
 	atomic.AddInt32(&t.ref, 1)
