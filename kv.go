@@ -680,6 +680,7 @@ func (s *KV) doWrites(lc *y.Closer) {
 	defaultCase:
 		writeRequestsOrLogError(s, reqs)
 		reqs = reqs[:0]
+		y.WriteChLen.Set(int64(len(s.writeCh)))
 	}
 }
 
