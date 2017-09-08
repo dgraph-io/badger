@@ -233,6 +233,7 @@ func (s *MergeIterator) Seek(key []byte) {
 	s.initHeap()
 }
 
+// Close implements y.Iterator
 func (s *MergeIterator) Close() error {
 	for _, itr := range s.all {
 		if err := itr.Close(); err != nil {

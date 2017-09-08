@@ -412,7 +412,7 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	cd.thisRange = infRange
 
 	kr := getKeyRange(cd.top)
-	left, right := cd.nextLevel.overlappingTables(kr)
+	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, kr)
 	cd.bot = make([]*table.Table, right-left)
 	copy(cd.bot, cd.nextLevel.tables[left:right])
 
@@ -422,7 +422,7 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 		cd.nextRange = getKeyRange(cd.bot)
 	}
 
-	if !s.cstatus.compareAndAdd(*cd) {
+	if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
 		return false
 	}
 
@@ -455,7 +455,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 			continue
 		}
 		cd.top = []*table.Table{t}
-		left, right := cd.nextLevel.overlappingTables(cd.thisRange)
+		left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, cd.thisRange)
 
 		cd.bot = make([]*table.Table, right-left)
 		copy(cd.bot, cd.nextLevel.tables[left:right])
@@ -463,7 +463,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 		if len(cd.bot) == 0 {
 			cd.bot = []*table.Table{}
 			cd.nextRange = cd.thisRange
-			if !s.cstatus.compareAndAdd(*cd) {
+			if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
 				continue
 			}
 			return true
@@ -474,7 +474,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 			continue
 		}
 
-		if !s.cstatus.compareAndAdd(*cd) {
+		if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
 			continue
 		}
 		return true
