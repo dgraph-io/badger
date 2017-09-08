@@ -24,6 +24,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+// ValueStruct represents the value info that can be associated with a key, but also the internal
+// Meta field.
 type ValueStruct struct {
 	Value      []byte
 	Meta       byte
@@ -31,11 +33,12 @@ type ValueStruct struct {
 	CASCounter uint64
 }
 
+// EncodedSize is the size of the ValueStruct when encoded
 func (v *ValueStruct) EncodedSize() int {
 	return len(v.Value) + valueValueOffset
 }
 
-// Converts a value size to the full serialized size of value + metadata.
+// ValueStructSerializedSize converts a value size to the full serialized size of value + metadata.
 func ValueStructSerializedSize(size uint16) int {
 	return int(size) + valueValueOffset
 }
