@@ -189,7 +189,7 @@ func (itr *blockIterator) Value() []byte {
 	return itr.val
 }
 
-type TableIterator struct {
+type tableIterator struct {
 	t    *Table
 	bpos int
 	bi   *blockIterator
@@ -201,37 +201,37 @@ type TableIterator struct {
 	reversed bool
 }
 
-func (t *Table) NewIterator(reversed bool) *TableIterator {
+func (t *Table) NewIterator(reversed bool) *tableIterator {
 	t.IncrRef() // Important.
-	ti := &TableIterator{t: t, reversed: reversed}
+	ti := &tableIterator{t: t, reversed: reversed}
 	ti.Init()
 	return ti
 }
 
-func (itr *TableIterator) Close() error {
+func (itr *tableIterator) Close() error {
 	return itr.t.DecrRef()
 }
 
-func (itr *TableIterator) reset() {
+func (itr *tableIterator) reset() {
 	itr.bpos = 0
 	itr.err = nil
 }
 
-func (itr *TableIterator) Valid() bool {
+func (itr *tableIterator) Valid() bool {
 	return itr.err == nil
 }
 
-func (itr *TableIterator) Error() error {
+func (itr *tableIterator) Error() error {
 	return itr.err
 }
 
-func (itr *TableIterator) Init() {
+func (itr *tableIterator) Init() {
 	if !itr.init {
 		itr.next()
 	}
 }
 
-func (itr *TableIterator) seekToFirst() {
+func (itr *tableIterator) seekToFirst() {
 	numBlocks := len(itr.t.blockIndex)
 	if numBlocks == 0 {
 		itr.err = io.EOF
@@ -248,7 +248,7 @@ func (itr *TableIterator) seekToFirst() {
 	itr.err = itr.bi.Error()
 }
 
-func (itr *TableIterator) seekToLast() {
+func (itr *tableIterator) seekToLast() {
 	numBlocks := len(itr.t.blockIndex)
 	if numBlocks == 0 {
 		itr.err = io.EOF
@@ -265,7 +265,7 @@ func (itr *TableIterator) seekToLast() {
 	itr.err = itr.bi.Error()
 }
 
-func (itr *TableIterator) seekHelper(blockIdx int, key []byte) {
+func (itr *tableIterator) seekHelper(blockIdx int, key []byte) {
 	itr.bpos = blockIdx
 	block, err := itr.t.block(blockIdx)
 	if err != nil {
@@ -278,7 +278,7 @@ func (itr *TableIterator) seekHelper(blockIdx int, key []byte) {
 }
 
 // seekFrom brings us to a key that is >= input key.
-func (itr *TableIterator) seekFrom(key []byte, whence int) {
+func (itr *tableIterator) seekFrom(key []byte, whence int) {
 	itr.err = nil
 	switch whence {
 	case origin:
@@ -318,12 +318,12 @@ func (itr *TableIterator) seekFrom(key []byte, whence int) {
 }
 
 // seek will reset iterator and seek to >= key.
-func (itr *TableIterator) seek(key []byte) {
+func (itr *tableIterator) seek(key []byte) {
 	itr.seekFrom(key, origin)
 }
 
 // seekForPrev will reset iterator and seek to <= key.
-func (itr *TableIterator) seekForPrev(key []byte) {
+func (itr *tableIterator) seekForPrev(key []byte) {
 	// TODO: Optimize this. We shouldn't have to take a Prev step.
 	itr.seekFrom(key, origin)
 	if !bytes.Equal(itr.Key(), key) {
@@ -331,7 +331,7 @@ func (itr *TableIterator) seekForPrev(key []byte) {
 	}
 }
 
-func (itr *TableIterator) next() {
+func (itr *tableIterator) next() {
 	itr.err = nil
 
 	if itr.bpos >= len(itr.t.blockIndex) {
@@ -359,7 +359,7 @@ func (itr *TableIterator) next() {
 	}
 }
 
-func (itr *TableIterator) prev() {
+func (itr *tableIterator) prev() {
 	itr.err = nil
 	if itr.bpos < 0 {
 		itr.err = io.EOF
@@ -386,16 +386,16 @@ func (itr *TableIterator) prev() {
 	}
 }
 
-func (itr *TableIterator) Key() []byte {
+func (itr *tableIterator) Key() []byte {
 	return itr.bi.Key()
 }
 
-func (itr *TableIterator) Value() (ret y.ValueStruct) {
+func (itr *tableIterator) Value() (ret y.ValueStruct) {
 	ret.DecodeEntireSlice(itr.bi.Value())
 	return
 }
 
-func (s *TableIterator) Next() {
+func (s *tableIterator) Next() {
 	if !s.reversed {
 		s.next()
 	} else {
@@ -403,7 +403,7 @@ func (s *TableIterator) Next() {
 	}
 }
 
-func (s *TableIterator) Rewind() {
+func (s *tableIterator) Rewind() {
 	if !s.reversed {
 		s.seekToFirst()
 	} else {
@@ -411,7 +411,7 @@ func (s *TableIterator) Rewind() {
 	}
 }
 
-func (s *TableIterator) Seek(key []byte) {
+func (s *tableIterator) Seek(key []byte) {
 	if !s.reversed {
 		s.seek(key)
 	} else {
@@ -421,14 +421,14 @@ func (s *TableIterator) Seek(key []byte) {
 
 type ConcatIterator struct {
 	idx      int // Which iterator is active now.
-	cur      *TableIterator
-	iters    []*TableIterator // Corresponds to tables.
+	cur      *tableIterator
+	iters    []*tableIterator // Corresponds to tables.
 	tables   []*Table         // Disregarding reversed, this is in ascending order.
 	reversed bool
 }
 
 func NewConcatIterator(tbls []*Table, reversed bool) *ConcatIterator {
-	iters := make([]*TableIterator, len(tbls))
+	iters := make([]*tableIterator, len(tbls))
 	for i := 0; i < len(tbls); i++ {
 		iters[i] = tbls[i].NewIterator(reversed)
 	}
