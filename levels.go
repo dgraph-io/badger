@@ -500,15 +500,13 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		tbl := cd.top[0]
 
 		// We write to the manifest _before_ we delete files (and after we created files).
-		changeSet := protos.ManifestChangeSet{
-			Changes: []*protos.ManifestChange{
-				// The order matters here -- you can't temporarily have two copies of the same
-				// table id when reloading the manifest.
-				makeTableDeleteChange(tbl.ID()),
-				makeTableCreateChange(tbl.ID(), nextLevel.level),
-			},
+		changes := []*protos.ManifestChange{
+			// The order matters here -- you can't temporarily have two copies of the same
+			// table id when reloading the manifest.
+			makeTableDeleteChange(tbl.ID()),
+			makeTableCreateChange(tbl.ID(), nextLevel.level),
 		}
-		if err := s.kv.manifest.addChanges(changeSet); err != nil {
+		if err := s.kv.manifest.addChanges(changes); err != nil {
 			return err
 		}
 
@@ -545,7 +543,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	changeSet := buildChangeSet(&cd, newTables)
 
 	// We write to the manifest _before_ we delete files (and after we created files)
-	if err := s.kv.manifest.addChanges(changeSet); err != nil {
+	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
 		return err
 	}
 
@@ -616,9 +614,9 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	// point it could get used in some compaction.  This ensures the manifest file gets updated in
 	// the proper order. (That means this update happens before that of some compaction which
 	// deletes the table.)
-	err := s.kv.manifest.addChanges(protos.ManifestChangeSet{Changes: []*protos.ManifestChange{
+	err := s.kv.manifest.addChanges([]*protos.ManifestChange{
 		makeTableCreateChange(t.ID(), 0),
-	}})
+	})
 	if err != nil {
 		return err
 	}
