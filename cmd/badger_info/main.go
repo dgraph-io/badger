@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-/* badger_info
+/*
+badger_info
 
 Usage: badger_info --dir x [--value-dir y]
 
@@ -118,7 +119,7 @@ func printInfo(dir, valueDir string) error {
 			return tableIDs[i] < tableIDs[j]
 		})
 		for _, tableID := range tableIDs {
-			tableFile := table.TableFilename(tableID)
+			tableFile := table.IDToFilename(tableID)
 			file, ok := fileinfoByName[tableFile]
 			if ok {
 				fileinfoMarked[tableFile] = true

@@ -130,12 +130,11 @@ func (cs *compactStatus) delSize(l int) int64 {
 	return cs.levels[l].delSize
 }
 
+type thisAndNextLevelRLocked struct{}
+
 // compareAndAdd will check whether we can run this compactDef. That it doesn't overlap with any
 // other running compaction. If it can be run, it would store this run in the compactStatus state.
-func (cs *compactStatus) compareAndAdd(cd compactDef) bool {
-	cd.thisLevel.AssertRLock()
-	cd.nextLevel.AssertRLock()
-
+func (cs *compactStatus) compareAndAdd(_ thisAndNextLevelRLocked, cd compactDef) bool {
 	cs.Lock()
 	defer cs.Unlock()
 

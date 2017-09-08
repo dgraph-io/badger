@@ -303,7 +303,7 @@ func (s *levelsController) compactBuildTables(
 		cd.elog.LazyPrintf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
 
 		fileID := s.reserveFileID()
-		go func(builder *table.TableBuilder) {
+		go func(builder *table.Builder) {
 			defer builder.Close()
 
 			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
@@ -412,7 +412,7 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	cd.thisRange = infRange
 
 	kr := getKeyRange(cd.top)
-	left, right := cd.nextLevel.overlappingTables(kr)
+	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, kr)
 	cd.bot = make([]*table.Table, right-left)
 	copy(cd.bot, cd.nextLevel.tables[left:right])
 
@@ -422,7 +422,7 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 		cd.nextRange = getKeyRange(cd.bot)
 	}
 
-	if !s.cstatus.compareAndAdd(*cd) {
+	if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
 		return false
 	}
 
@@ -455,7 +455,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 			continue
 		}
 		cd.top = []*table.Table{t}
-		left, right := cd.nextLevel.overlappingTables(cd.thisRange)
+		left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, cd.thisRange)
 
 		cd.bot = make([]*table.Table, right-left)
 		copy(cd.bot, cd.nextLevel.tables[left:right])
@@ -463,7 +463,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 		if len(cd.bot) == 0 {
 			cd.bot = []*table.Table{}
 			cd.nextRange = cd.thisRange
-			if !s.cstatus.compareAndAdd(*cd) {
+			if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
 				continue
 			}
 			return true
@@ -474,7 +474,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 			continue
 		}
 
-		if !s.cstatus.compareAndAdd(*cd) {
+		if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
 			continue
 		}
 		return true
@@ -500,15 +500,13 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		tbl := cd.top[0]
 
 		// We write to the manifest _before_ we delete files (and after we created files).
-		changeSet := protos.ManifestChangeSet{
-			Changes: []*protos.ManifestChange{
-				// The order matters here -- you can't temporarily have two copies of the same
-				// table id when reloading the manifest.
-				makeTableDeleteChange(tbl.ID()),
-				makeTableCreateChange(tbl.ID(), nextLevel.level),
-			},
+		changes := []*protos.ManifestChange{
+			// The order matters here -- you can't temporarily have two copies of the same
+			// table id when reloading the manifest.
+			makeTableDeleteChange(tbl.ID()),
+			makeTableCreateChange(tbl.ID(), nextLevel.level),
 		}
-		if err := s.kv.manifest.addChanges(changeSet); err != nil {
+		if err := s.kv.manifest.addChanges(changes); err != nil {
 			return err
 		}
 
@@ -545,7 +543,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	changeSet := buildChangeSet(&cd, newTables)
 
 	// We write to the manifest _before_ we delete files (and after we created files)
-	if err := s.kv.manifest.addChanges(changeSet); err != nil {
+	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
 		return err
 	}
 
@@ -616,9 +614,9 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	// point it could get used in some compaction.  This ensures the manifest file gets updated in
 	// the proper order. (That means this update happens before that of some compaction which
 	// deletes the table.)
-	err := s.kv.manifest.addChanges(protos.ManifestChangeSet{Changes: []*protos.ManifestChange{
+	err := s.kv.manifest.addChanges([]*protos.ManifestChange{
 		makeTableCreateChange(t.ID(), 0),
-	}})
+	})
 	if err != nil {
 		return err
 	}
