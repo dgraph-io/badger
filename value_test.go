@@ -58,8 +58,14 @@ func TestValueBasic(t *testing.T) {
 	require.Len(t, b.Ptrs, 2)
 	fmt.Printf("Pointer written: %+v %+v\n", b.Ptrs[0], b.Ptrs[1])
 
-	buf1, err1 := log.readValueBytes(b.Ptrs[0], new(y.Slice))
-	buf2, err2 := log.readValueBytes(b.Ptrs[1], new(y.Slice))
+	var buf1, buf2 []byte
+	var err1, err2 error
+	err1 = log.readValueBytes(b.Ptrs[0], func(val []byte) {
+		buf1 = y.Safecopy(buf1, val)
+	})
+	err2 = log.readValueBytes(b.Ptrs[1], func(val []byte) {
+		buf2 = y.Safecopy(buf2, val)
+	})
 
 	require.NoError(t, err1)
 	require.NoError(t, err2)
@@ -386,16 +392,17 @@ func BenchmarkReadWrite(b *testing.B) {
 							b.Fatalf("Zero length of ptrs")
 						}
 						idx := rand.Intn(ln)
-						buf, err := vl.readValueBytes(ptrs[idx], new(y.Slice))
+						err := vl.readValueBytes(ptrs[idx], func(buf []byte) {
+							e := valueBytesToEntry(buf)
+							if len(e.Key) != 16 {
+								b.Fatalf("Key is invalid")
+							}
+							if len(e.Value) != vsz {
+								b.Fatalf("Value is invalid")
+							}
+						})
 						if err != nil {
 							b.Fatalf("Benchmark Read: %v", err)
-						}
-						e := valueBytesToEntry(buf)
-						if len(e.Key) != 16 {
-							b.Fatalf("Key is invalid")
-						}
-						if len(e.Value) != vsz {
-							b.Fatalf("Value is invalid")
 						}
 					}
 				}
