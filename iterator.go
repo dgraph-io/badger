@@ -89,13 +89,9 @@ func (item *KVItem) prefetchValue() {
 			item.status = prefetched
 			return
 		}
-		buf := item.slice.Resize(len(val))
 
-		// Check if we are using the same backing array,
-		// and avoid copying if that is the case.
-		if &buf[0] != &val[0] {
-			copy(buf, val)
-		}
+		buf := item.slice.Resize(len(val))
+		copy(buf, val)
 		item.val = buf
 		item.status = prefetched
 	})
