@@ -175,8 +175,9 @@ var DefaultIteratorOptions = IteratorOptions{
 
 // Iterator helps iterating over the KV pairs in a lexicographically sorted order.
 type Iterator struct {
-	kv   *KV
-	iitr *y.MergeIterator
+	kv          *KV
+	iitr        *y.MergeIterator
+	actionToken fileDeleterActionToken
 
 	opt   IteratorOptions
 	item  *KVItem
@@ -208,6 +209,7 @@ func (it *Iterator) ValidForPrefix(prefix []byte) bool {
 // Close would close the iterator. It is important to call this when you're done with iteration.
 func (it *Iterator) Close() {
 	it.iitr.Close()
+	it.kv.fileDeleter.doneAction(it.actionToken)
 }
 
 // Next would advance the iterator by one. Always check it.Valid() after a Next()
@@ -341,6 +343,7 @@ func (it *Iterator) Rewind() {
 //   }
 //   itr.Close()
 func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
+	actionToken := s.fileDeleter.addAction()
 	tables, decr := s.getMemTables()
 	defer decr()
 	var iters []y.Iterator
@@ -349,9 +352,10 @@ func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 	}
 	iters = s.lc.appendIterators(iters, opt.Reverse) // This will increment references.
 	res := &Iterator{
-		kv:   s,
-		iitr: y.NewMergeIterator(iters, opt.Reverse),
-		opt:  opt,
+		kv:          s,
+		iitr:        y.NewMergeIterator(iters, opt.Reverse),
+		actionToken: actionToken,
+		opt:         opt,
 	}
 	return res
 }

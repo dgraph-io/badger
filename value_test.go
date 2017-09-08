@@ -122,7 +122,7 @@ func TestValueGC(t *testing.T) {
 	}
 
 	kv.vlog.filesLock.RLock()
-	lf := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
+	lf := kv.vlog.allFiles[kv.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
@@ -191,7 +191,7 @@ func TestValueGC2(t *testing.T) {
 	}
 
 	kv.vlog.filesLock.RLock()
-	lf := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
+	lf := kv.vlog.allFiles[kv.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
@@ -229,8 +229,7 @@ func TestValueGC2(t *testing.T) {
 	}
 }
 
-// TODO: Enable
-func DisabledTestValueGC3(t *testing.T) {
+func TestValueGC3(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -292,7 +291,7 @@ func DisabledTestValueGC3(t *testing.T) {
 	// Like other tests, we pull out a logFile to rewrite it directly
 
 	kv.vlog.filesLock.RLock()
-	logFile := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
+	logFile := kv.vlog.allFiles[kv.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
 	kv.vlog.rewrite(logFile)
@@ -447,7 +446,8 @@ func BenchmarkReadWrite(b *testing.B) {
 				dir, err := ioutil.TempDir("", "vlog")
 				y.Check(err)
 				defer os.RemoveAll(dir)
-				err = vl.Open(nil, getTestOptions(dir))
+				mf := createManifest()
+				err = vl.Open(nil, getTestOptions(dir), &mf)
 				y.Check(err)
 				defer vl.Close()
 				b.ResetTimer()

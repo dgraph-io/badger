@@ -41,8 +41,9 @@ import (
 // and contains a sequence of ManifestChange's (file creations/deletions) which we use to
 // reconstruct the manifest at startup.
 type Manifest struct {
-	Levels []LevelManifest
-	Tables map[uint64]TableManifest
+	Levels    []LevelManifest
+	Tables    map[uint64]TableManifest
+	VlogFiles map[uint64]struct{}
 
 	// Contains total number of creation and deletion changes in the manifest -- used to compute
 	// whether it'd be useful to rewrite the manifest.
@@ -53,8 +54,9 @@ type Manifest struct {
 func createManifest() Manifest {
 	levels := make([]LevelManifest, 0)
 	return Manifest{
-		Levels: levels,
-		Tables: make(map[uint64]TableManifest),
+		Levels:    levels,
+		Tables:    make(map[uint64]TableManifest),
+		VlogFiles: make(map[uint64]struct{}),
 	}
 }
 
@@ -83,6 +85,9 @@ type manifestFile struct {
 
 	// Used to track the current state of the manifest, used when rewriting.
 	manifest Manifest
+
+	// Atomic.  Incremented every time we call addChanges.
+	lastManifestOpNumber int64
 }
 
 const (
@@ -99,6 +104,9 @@ func (m *Manifest) asChanges() []*protos.ManifestChange {
 	changes := make([]*protos.ManifestChange, 0, len(m.Tables))
 	for id, tm := range m.Tables {
 		changes = append(changes, makeTableCreateChange(id, int(tm.Level)))
+	}
+	for id := range m.VlogFiles {
+		changes = append(changes, makeLogFileCreateChange(id))
 	}
 	return changes
 }
@@ -225,7 +233,7 @@ func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 	copy(buf[0:4], magicText[:])
 	binary.BigEndian.PutUint32(buf[4:8], magicVersion)
 
-	netCreations := len(m.Tables)
+	netCreations := len(m.Tables) + len(m.VlogFiles)
 	changes := m.asChanges()
 	set := protos.ManifestChangeSet{Changes: changes}
 
@@ -372,29 +380,48 @@ func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error
 }
 
 func applyManifestChange(build *Manifest, tc *protos.ManifestChange) error {
-	switch tc.Op {
-	case protos.ManifestChange_CREATE:
-		if _, ok := build.Tables[tc.Id]; ok {
-			return fmt.Errorf("MANIFEST invalid, table %d exists", tc.Id)
+	switch tc.Cat {
+	case protos.ManifestChange_VLOG:
+		switch tc.Op {
+		case protos.ManifestChange_CREATE:
+			if _, ok := build.VlogFiles[tc.Id]; ok {
+				return fmt.Errorf("MANIFEST invalid, log file %d exists", tc.Id)
+			}
+			build.VlogFiles[tc.Id] = struct{}{}
+			build.Creations++
+		case protos.ManifestChange_DELETE:
+			_, ok := build.VlogFiles[tc.Id]
+			if !ok {
+				return fmt.Errorf("MANIFEST removes non-existing log file %d", tc.Id)
+			}
+			delete(build.VlogFiles, tc.Id)
+			build.Deletions++
 		}
-		build.Tables[tc.Id] = TableManifest{
-			Level: uint8(tc.Level),
+	case protos.ManifestChange_TABLE:
+		switch tc.Op {
+		case protos.ManifestChange_CREATE:
+			if _, ok := build.Tables[tc.Id]; ok {
+				return fmt.Errorf("MANIFEST invalid, table %d exists", tc.Id)
+			}
+			build.Tables[tc.Id] = TableManifest{
+				Level: uint8(tc.Level),
+			}
+			for len(build.Levels) <= int(tc.Level) {
+				build.Levels = append(build.Levels, LevelManifest{make(map[uint64]struct{})})
+			}
+			build.Levels[tc.Level].Tables[tc.Id] = struct{}{}
+			build.Creations++
+		case protos.ManifestChange_DELETE:
+			tm, ok := build.Tables[tc.Id]
+			if !ok {
+				return fmt.Errorf("MANIFEST removes non-existing table %d", tc.Id)
+			}
+			delete(build.Levels[tm.Level].Tables, tc.Id)
+			delete(build.Tables, tc.Id)
+			build.Deletions++
+		default:
+			return fmt.Errorf("MANIFEST file has invalid manifestChange op")
 		}
-		for len(build.Levels) <= int(tc.Level) {
-			build.Levels = append(build.Levels, LevelManifest{make(map[uint64]struct{})})
-		}
-		build.Levels[tc.Level].Tables[tc.Id] = struct{}{}
-		build.Creations++
-	case protos.ManifestChange_DELETE:
-		tm, ok := build.Tables[tc.Id]
-		if !ok {
-			return fmt.Errorf("MANIFEST removes non-existing table %d", tc.Id)
-		}
-		delete(build.Levels[tm.Level].Tables, tc.Id)
-		delete(build.Tables, tc.Id)
-		build.Deletions++
-	default:
-		return fmt.Errorf("MANIFEST file has invalid manifestChange op")
 	}
 	return nil
 }
@@ -413,6 +440,7 @@ func applyChangeSet(build *Manifest, changeSet *protos.ManifestChangeSet) error 
 func makeTableCreateChange(id uint64, level int) *protos.ManifestChange {
 	return &protos.ManifestChange{
 		Id:    id,
+		Cat:   protos.ManifestChange_TABLE,
 		Op:    protos.ManifestChange_CREATE,
 		Level: uint32(level),
 	}
@@ -420,7 +448,24 @@ func makeTableCreateChange(id uint64, level int) *protos.ManifestChange {
 
 func makeTableDeleteChange(id uint64) *protos.ManifestChange {
 	return &protos.ManifestChange{
-		Id: id,
-		Op: protos.ManifestChange_DELETE,
+		Id:  id,
+		Cat: protos.ManifestChange_TABLE,
+		Op:  protos.ManifestChange_DELETE,
+	}
+}
+
+func makeLogFileCreateChange(id uint64) *protos.ManifestChange {
+	return &protos.ManifestChange{
+		Id:  id,
+		Cat: protos.ManifestChange_VLOG,
+		Op:  protos.ManifestChange_CREATE,
+	}
+}
+
+func makeLogFileDeleteChange(id uint64) *protos.ManifestChange {
+	return &protos.ManifestChange{
+		Id:  id,
+		Cat: protos.ManifestChange_VLOG,
+		Op:  protos.ManifestChange_DELETE,
 	}
 }

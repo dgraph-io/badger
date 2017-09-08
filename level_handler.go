@@ -76,7 +76,7 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 }
 
 // deleteTables remove tables idx0, ..., idx1-1.
-func (s *levelHandler) deleteTables(toDel []*table.Table) error {
+func (s *levelHandler) deleteTables(toDel []*table.Table) {
 	s.Lock() // s.Unlock() below
 
 	toDelMap := make(map[uint64]struct{})
@@ -96,19 +96,23 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) error {
 	}
 	s.tables = newTables
 
-	s.Unlock() // Unlock s _before_ we DecrRef our tables, which can be slow.
+	newCounter := s.kv.fileDeleter.getCounter()
 
-	return decrRefs(toDel)
+	s.Unlock()
+
+	s.kv.fileDeleter.consumeDeletionSet(deletionSet{
+		counter: newCounter,
+		tables:  toDel,
+	})
 }
 
 // replaceTables will replace tables[left:right] with newTables. Note this EXCLUDES tables[right].
-// You must call decr() to delete the old tables _after_ writing the update to the manifest.
-func (s *levelHandler) replaceTables(newTables []*table.Table) error {
+func (s *levelHandler) replaceTables(newTables []*table.Table) {
 	// Need to re-search the range of tables in this level to be replaced as other goroutines might
 	// be changing it as well.  (They can't touch our tables, but if they add/remove other tables,
 	// the indices get shifted around.)
 	if len(newTables) == 0 {
-		return nil
+		return
 	}
 
 	s.Lock() // We s.Unlock() below.
@@ -143,8 +147,12 @@ func (s *levelHandler) replaceTables(newTables []*table.Table) error {
 	t = t[numAdded:]
 	y.AssertTrue(len(s.tables[right:]) == copy(t, s.tables[right:]))
 	s.tables = tables
+	newCounter := s.kv.fileDeleter.getCounter()
 	s.Unlock() // s.Unlock before we DecrRef tables -- that can be slow.
-	return decrRefs(toDecr)
+	s.kv.fileDeleter.consumeDeletionSet(deletionSet{
+		counter: newCounter,
+		tables:  toDecr,
+	})
 }
 
 func decrRefs(tables []*table.Table) error {

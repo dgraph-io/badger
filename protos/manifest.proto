@@ -26,10 +26,15 @@ message ManifestChangeSet {
 
 message ManifestChange {
         uint64 Id = 1;
+        enum Category {
+                TABLE = 0;
+                VLOG = 1;
+        }
+        Category Cat = 2;
         enum Operation {
                 CREATE = 0;
                 DELETE = 1;
         }
-        Operation Op = 2;
-        uint32 Level = 3;  // Only used for CREATE
+        Operation Op = 3;
+        uint32 Level = 4;  // Only used for TABLE, CREATE
 }

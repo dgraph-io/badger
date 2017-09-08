@@ -511,12 +511,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		// read, or at least acquire s.RLock(), in increasing order by level, so that we don't skip
 		// a compaction.
 
-		if err := nextLevel.replaceTables(cd.top); err != nil {
-			return err
-		}
-		if err := thisLevel.deleteTables(cd.top); err != nil {
-			return err
-		}
+		nextLevel.replaceTables(cd.top)
+		thisLevel.deleteTables(cd.top)
 
 		cd.elog.LazyPrintf("\tLOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
 			l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
@@ -542,12 +538,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 
 	// See comment earlier in this function about the ordering of these ops, and the order in which
 	// we access levels when reading.
-	if err := nextLevel.replaceTables(newTables); err != nil {
-		return err
-	}
-	if err := thisLevel.deleteTables(cd.top); err != nil {
-		return err
-	}
+	nextLevel.replaceTables(newTables)
+	thisLevel.deleteTables(cd.top)
 
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.

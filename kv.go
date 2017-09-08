@@ -39,11 +39,12 @@ var (
 )
 
 type closers struct {
-	updateSize *y.Closer
-	compactors *y.Closer
-	memtable   *y.Closer
-	writes     *y.Closer
-	valueGC    *y.Closer
+	updateSize    *y.Closer
+	fileDeletions *y.Closer
+	compactors    *y.Closer
+	memtable      *y.Closer
+	writes        *y.Closer
+	valueGC       *y.Closer
 }
 
 // KV provides the various functions required to interact with Badger.
@@ -70,6 +71,8 @@ type KV struct {
 	// Incremented in the non-concurrently accessed write loop.  But also accessed outside. So
 	// we use an atomic op.
 	lastUsedCasCounter uint64
+
+	fileDeleter fileDeleter
 }
 
 // ErrInvalidDir is returned when Badger cannot find the directory
@@ -157,6 +160,8 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		valueDirGuard: valueDirLockGuard,
 	}
 
+	out.fileDeleter.init(&out.vlog)
+
 	out.closers.updateSize = y.NewCloser(1)
 	go out.updateSize(out.closers.updateSize)
 	out.mt = skl.NewSkiplist(arenaSize(&opt))
@@ -172,7 +177,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	out.closers.memtable = y.NewCloser(1)
 	go out.flushMemtable(out.closers.memtable) // Need levels controller to be up.
 
-	if err = out.vlog.Open(out, &opt); err != nil {
+	if err = out.vlog.Open(out, &opt, &manifest); err != nil {
 		return nil, err
 	}
 
@@ -321,6 +326,9 @@ func (s *KV) Close() (err error) {
 
 	s.closers.compactors.SignalAndWait()
 	s.elog.Printf("Compaction finished")
+
+	s.fileDeleter.close()
+	s.elog.Printf("File Deletions finished")
 
 	if lcErr := s.lc.close(); err == nil {
 		err = errors.Wrap(lcErr, "KV.Close")
@@ -1174,5 +1182,229 @@ func (s *KV) updateSize(lc *y.Closer) {
 		case <-lc.HasBeenClosed():
 			return
 		}
+	}
+}
+
+type deletionSet struct {
+	// First counter value for which the tables do not exist.
+	counter uint64
+	tables  []*table.Table
+}
+
+type logFileDeletion struct {
+	counter uint64
+	lf      *logFile
+}
+
+type fileGroup struct {
+	tables   []*table.Table
+	logFiles []*logFile
+}
+
+type fileDeletion struct {
+	// True if a sender to this chan is never going to send again.  We need to wait for all
+	// senders to shutdown before we kill the runDeletions loop.
+	shutdown bool
+	counter  uint64
+	tables   []*table.Table
+	lf       *logFile
+}
+
+type fileDeleter struct {
+	actionCounter uint64
+	totalSends    uint64
+	doneCh        chan uint64
+	deletionCh    chan fileDeletion
+	closer        *y.Closer
+}
+
+type fileDeleterActionToken struct {
+	counter uint64
+}
+
+func (s *fileDeleter) getCounter() uint64 {
+	return atomic.LoadUint64(&s.actionCounter)
+}
+
+func (s *fileDeleter) init(vlog *valueLog) {
+	atomic.StoreUint64(&s.actionCounter, 0)
+	s.doneCh = make(chan uint64, 1000)
+	s.deletionCh = make(chan fileDeletion, 10)
+	s.closer = y.NewCloser(1)
+	go s.runDeletions(vlog)
+}
+
+func (s *fileDeleter) close() {
+	s.closer.SignalAndWait()
+}
+
+type runDeletionsState struct {
+	// Stable states -- which means we can make no progress towards deleting files: if
+	// beforeDoneCount < beforeActions, we're stable -- we have to wait before clearing out
+	// "before" stuff. Otherwise, if afterTables is empty and afterLogFiles is empty, we're stable
+	// because there's no progress to be made by moving after-> before.
+
+	switchCounter   uint64
+	beforeTables    []*table.Table
+	beforeLogFiles  []*logFile
+	beforeDoneCount uint64
+	beforeActions   uint64
+	afterTables     []*table.Table
+	afterLogFiles   []*logFile
+	afterDoneCount  uint64
+}
+
+func removeBeforeStuff(vlog *valueLog, state *runDeletionsState) error {
+	err := removeTableFiles(state.beforeTables)
+	for _, lf := range state.beforeLogFiles {
+		// Check err == nil because we return first error we see.
+		if err2 := removeLogFile(vlog, lf); err == nil {
+			err = err2
+		}
+	}
+
+	state.beforeTables = nil
+	state.beforeLogFiles = nil
+	return err
+}
+
+// Puts the state back into a "stable" state.  Returns false if, at the time that we return, we're
+// still waiting to be able to delete any files.  Return value meaningless if we return an error
+func (s *fileDeleter) kickFlush(vlog *valueLog, state *runDeletionsState) (bool, error) {
+	if state.beforeDoneCount < state.beforeActions {
+		return false, nil
+	}
+	// We're done waiting on "before" actions -- flush tables/logFiles.
+	if err := removeBeforeStuff(vlog, state); err != nil {
+		return false, err
+	}
+
+	if len(state.afterTables) == 0 && len(state.afterLogFiles) == 0 {
+		return true, nil
+	}
+
+	counter := atomic.LoadUint64(&s.actionCounter)
+
+	state.beforeTables = state.afterTables
+	state.afterTables = []*table.Table{}
+	state.beforeLogFiles = state.afterLogFiles
+	state.afterLogFiles = []*logFile{}
+	state.beforeDoneCount = state.afterDoneCount
+	state.afterDoneCount = 0
+	state.beforeActions = counter - state.switchCounter
+	state.switchCounter = counter
+
+	if state.beforeDoneCount == state.beforeActions {
+		if err := removeBeforeStuff(vlog, state); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func (s *fileDeleter) runDeletions(vlog *valueLog) {
+	defer s.closer.Done()
+	var state runDeletionsState
+
+	shuttingDown := false
+	totalRecvs := uint64(0)
+
+	for {
+		select {
+		case counter := <-s.doneCh:
+			if counter <= state.switchCounter {
+				state.beforeDoneCount++
+				// TODO: Handle error.  Or at least report it.
+				_, _ = s.kickFlush(vlog, &state)
+			} else {
+				state.afterDoneCount++
+				// No point in calling kickFlush in this case
+			}
+
+		case del := <-s.deletionCh:
+			totalRecvs++
+			if del.counter >= state.switchCounter {
+				if del.tables != nil {
+					state.afterTables = append(state.afterTables, del.tables...)
+				}
+				if del.lf != nil {
+					state.afterLogFiles = append(state.afterLogFiles, del.lf)
+				}
+			} else {
+				if del.tables != nil {
+					state.beforeTables = append(state.beforeTables, del.tables...)
+				}
+				if del.lf != nil {
+					state.beforeLogFiles = append(state.beforeLogFiles, del.lf)
+				}
+			}
+			s.kickFlush(vlog, &state)
+		case <-s.closer.HasBeenClosed():
+			shuttingDown = true
+		}
+		if shuttingDown {
+			// We shutdown if (a) we've been told of all tables/vlogs we should process, and
+			if atomic.LoadUint64(&s.totalSends) == totalRecvs {
+				// if (b) we have deleted them all.
+				// TODO: Handle error.  Or at least report it.
+				doneKicking, _ := s.kickFlush(vlog, &state)
+				if doneKicking {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (s *fileDeleter) addAction() fileDeleterActionToken {
+	counter := atomic.AddUint64(&s.actionCounter, 1)
+	return fileDeleterActionToken{counter: counter}
+}
+
+func (s *fileDeleter) doneAction(token fileDeleterActionToken) {
+	s.doneCh <- token.counter
+}
+
+func removeTableFiles(tables []*table.Table) error {
+	return decrRefs(tables)
+}
+
+func removeLogFile(vlog *valueLog, lf *logFile) error {
+	vlog.filesLock.Lock()
+
+	// Just a sanity-check.
+	if _, ok := vlog.allFiles[lf.fid]; !ok {
+		vlog.filesLock.Unlock()
+		return errors.Errorf("Unable to find fid: %d", lf.fid)
+	}
+	delete(vlog.allFiles, lf.fid)
+	vlog.filesLock.Unlock()
+
+	// TODO: This fdLock is unnecessary, all readers are done.  (Completely so?)
+	// Exclusively lock the file (for now) so that there are no readers before closing/destroying it
+	lf.lock.Lock()
+	path := vlog.fpath(lf.fid)
+	y.Munmap(lf.fmap)
+	lf.fd.Close()
+	lf.lock.Unlock()
+
+	return os.Remove(path)
+}
+
+func (s *fileDeleter) consumeDeletionSet(delSet deletionSet) {
+	atomic.AddUint64(&s.totalSends, 1)
+	s.deletionCh <- fileDeletion{
+		counter: delSet.counter,
+		tables:  delSet.tables,
+	}
+
+}
+
+func (s *fileDeleter) consumeLogFileDeletion(vlog *valueLog, counter uint64, lf *logFile) {
+	atomic.AddUint64(&s.totalSends, 1)
+	s.deletionCh <- fileDeletion{
+		counter: counter,
+		lf:      lf,
 	}
 }
