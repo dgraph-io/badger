@@ -351,15 +351,15 @@ func ParseFileID(name string) (uint64, bool) {
 	return uint64(id), true
 }
 
-// TableFilename does the inverse of ParseFileID
-func TableFilename(id uint64) string {
+// IDToFilename does the inverse of ParseFileID
+func IDToFilename(id uint64) string {
 	return fmt.Sprintf("%06d", id) + fileSuffix
 }
 
 // NewFilename should be named TableFilepath -- it combines the dir with the ID to make a table
 // filepath.
 func NewFilename(id uint64, dir string) string {
-	return filepath.Join(dir, TableFilename(id))
+	return filepath.Join(dir, IDToFilename(id))
 }
 
 func (t *Table) loadToRAM() error {
