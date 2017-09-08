@@ -70,6 +70,7 @@ func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
 	return os.OpenFile(filename, flags, 0666)
 }
 
+// OpenTruncFile opens the file with O_RDWR | O_CREATE | O_TRUNC
 func OpenTruncFile(filename string, sync bool) (*os.File, error) {
 	flags := os.O_RDWR | os.O_CREATE | os.O_TRUNC
 	if sync {
@@ -79,12 +80,7 @@ func OpenTruncFile(filename string, sync bool) (*os.File, error) {
 }
 
 func Safecopy(a []byte, src []byte) []byte {
-	if cap(a) < len(src) {
-		a = make([]byte, len(src))
-	}
-	a = a[:len(src)]
-	copy(a, src)
-	return a
+	return append(a[:0], src...)
 }
 
 type Slice struct {
