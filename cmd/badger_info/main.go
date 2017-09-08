@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-/* badger_info
+/*
+badger_info
 
 Usage: badger_info --dir x [--value-dir y]
 

@@ -110,9 +110,9 @@ func (m *Manifest) clone() Manifest {
 	return ret
 }
 
-// OpenOrCreateManifestFile opens a Badger manifest file if it exists, or creates on if
+// openOrCreateManifestFile opens a Badger manifest file if it exists, or creates on if
 // one doesn’t.
-func OpenOrCreateManifestFile(dir string) (ret *manifestFile, result Manifest, err error) {
+func openOrCreateManifestFile(dir string) (ret *manifestFile, result Manifest, err error) {
 	return helpOpenOrCreateManifestFile(dir, manifestDeletionsRewriteThreshold)
 }
 

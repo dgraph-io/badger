@@ -303,7 +303,7 @@ func (s *levelsController) compactBuildTables(
 		cd.elog.LazyPrintf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
 
 		fileID := s.reserveFileID()
-		go func(builder *table.TableBuilder) {
+		go func(builder *table.Builder) {
 			defer builder.Close()
 
 			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
