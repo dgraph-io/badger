@@ -104,7 +104,7 @@ func (m *Manifest) asChanges() []*protos.ManifestChange {
 }
 
 func (m *Manifest) clone() Manifest {
-	changeSet := protos.ManifestChangeSet{m.asChanges()}
+	changeSet := protos.ManifestChangeSet{Changes: m.asChanges()}
 	ret := createManifest()
 	y.Check(applyChangeSet(&ret, &changeSet))
 	return ret
@@ -172,8 +172,8 @@ func (mf *manifestFile) close() error {
 // we replay the MANIFEST file, we'll either replay all the changes or none of them.  (The truth of
 // this depends on the filesystem -- some might append garbage data if a system crash happens at
 // the wrong time.)
-func (mf *manifestFile) addChanges(changes2 []*protos.ManifestChange) error {
-	changes := protos.ManifestChangeSet{Changes: changes2}
+func (mf *manifestFile) addChanges(changesParam []*protos.ManifestChange) error {
+	changes := protos.ManifestChangeSet{Changes: changesParam}
 	buf, err := changes.Marshal()
 	if err != nil {
 		return err

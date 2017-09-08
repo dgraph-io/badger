@@ -33,6 +33,12 @@ type ValueStruct struct {
 	CASCounter uint64
 }
 
+// MakeValueStruct is the most convenient way for unit tests to make a ValueStruct.  (Also, the
+// code will break if we add another field.)
+func MakeValueStruct(value []byte, meta byte, userMeta byte, casCounter uint64) ValueStruct {
+	return ValueStruct{Value: value, Meta: meta, UserMeta: userMeta, CASCounter: casCounter}
+}
+
 // EncodedSize is the size of the ValueStruct when encoded
 func (v *ValueStruct) EncodedSize() int {
 	return len(v.Value) + valueValueOffset

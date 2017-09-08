@@ -62,7 +62,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	})
 	for i, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		err := b.Add([]byte(kv[0]), y.ValueStruct{[]byte(kv[1]), 'A', 0, uint64(i)})
+		err := b.Add([]byte(kv[0]), y.MakeValueStruct([]byte(kv[1]), 'A', 0, uint64(i)))
 		if t != nil {
 			require.NoError(t, err)
 		} else {
@@ -617,7 +617,7 @@ func BenchmarkRead(b *testing.B) {
 	for i := 0; i < n; i++ {
 		k := fmt.Sprintf("%016x", i)
 		v := fmt.Sprintf("%d", i)
-		y.Check(builder.Add([]byte(k), y.ValueStruct{[]byte(v), 123, 0, 5555}))
+		y.Check(builder.Add([]byte(k), y.MakeValueStruct([]byte(v), 123, 0, 5555)))
 	}
 
 	f.Write(builder.Finish())
@@ -647,7 +647,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 	for i := 0; i < n; i++ {
 		k := fmt.Sprintf("%016x", i)
 		v := fmt.Sprintf("%d", i)
-		y.Check(builder.Add([]byte(k), y.ValueStruct{[]byte(v), 123, 0, 5555}))
+		y.Check(builder.Add([]byte(k), y.MakeValueStruct([]byte(v), 123, 0, 5555)))
 	}
 
 	f.Write(builder.Finish())
@@ -687,7 +687,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			// id := i*tableSize+j (not interleaved)
 			k := fmt.Sprintf("%016x", id)
 			v := fmt.Sprintf("%d", id)
-			y.Check(builder.Add([]byte(k), y.ValueStruct{[]byte(v), 123, 0, 5555}))
+			y.Check(builder.Add([]byte(k), y.MakeValueStruct([]byte(v), 123, 0, 5555)))
 		}
 		f.Write(builder.Finish())
 		tbl, err := OpenTable(f, options.MemoryMap)
