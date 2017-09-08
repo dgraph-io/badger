@@ -229,7 +229,8 @@ func TestValueGC2(t *testing.T) {
 	}
 }
 
-func TestValueGC3(t *testing.T) {
+// TODO: Enable
+func DisabledTestValueGC3(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
