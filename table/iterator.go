@@ -26,7 +26,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-type BlockIterator struct {
+type blockIterator struct {
 	data    []byte
 	pos     uint32
 	err     error
@@ -39,7 +39,7 @@ type BlockIterator struct {
 	last header // The last header we saw.
 }
 
-func (itr *BlockIterator) Reset() {
+func (itr *blockIterator) Reset() {
 	itr.pos = 0
 	itr.err = nil
 	itr.baseKey = []byte{}
@@ -49,21 +49,21 @@ func (itr *BlockIterator) Reset() {
 	itr.last = header{}
 }
 
-func (itr *BlockIterator) Init() {
+func (itr *blockIterator) Init() {
 	if !itr.init {
 		itr.Next()
 	}
 }
 
-func (itr *BlockIterator) Valid() bool {
+func (itr *blockIterator) Valid() bool {
 	return itr != nil && itr.err == nil
 }
 
-func (itr *BlockIterator) Error() error {
+func (itr *blockIterator) Error() error {
 	return itr.err
 }
 
-func (itr *BlockIterator) Close() {}
+func (itr *blockIterator) Close() {}
 
 var (
 	ORIGIN  = 0
@@ -71,7 +71,7 @@ var (
 )
 
 // Seek brings us to the first block element that is >= input key.
-func (itr *BlockIterator) Seek(key []byte, whence int) {
+func (itr *blockIterator) Seek(key []byte, whence int) {
 	itr.err = nil
 
 	switch whence {
@@ -94,13 +94,13 @@ func (itr *BlockIterator) Seek(key []byte, whence int) {
 	}
 }
 
-func (itr *BlockIterator) SeekToFirst() {
+func (itr *blockIterator) SeekToFirst() {
 	itr.err = nil
 	itr.Init()
 }
 
 // SeekToLast brings us to the last element. Valid should return true.
-func (itr *BlockIterator) SeekToLast() {
+func (itr *blockIterator) SeekToLast() {
 	itr.err = nil
 	for itr.Init(); itr.Valid(); itr.Next() {
 	}
@@ -108,7 +108,7 @@ func (itr *BlockIterator) SeekToLast() {
 }
 
 // parseKV would allocate a new byte slice for key and for value.
-func (itr *BlockIterator) parseKV(h header) {
+func (itr *blockIterator) parseKV(h header) {
 	if cap(itr.key) < int(h.plen+h.klen) {
 		itr.key = make([]byte, 2*(h.plen+h.klen))
 	}
@@ -126,7 +126,7 @@ func (itr *BlockIterator) parseKV(h header) {
 	itr.pos += uint32(h.vlen)
 }
 
-func (itr *BlockIterator) Next() {
+func (itr *blockIterator) Next() {
 	itr.init = true
 	itr.err = nil
 	if itr.pos >= uint32(len(itr.data)) {
@@ -153,7 +153,7 @@ func (itr *BlockIterator) Next() {
 	itr.parseKV(h)
 }
 
-func (itr *BlockIterator) Prev() {
+func (itr *blockIterator) Prev() {
 	if !itr.init {
 		return
 	}
@@ -175,14 +175,14 @@ func (itr *BlockIterator) Prev() {
 	itr.last = h
 }
 
-func (itr *BlockIterator) Key() []byte {
+func (itr *blockIterator) Key() []byte {
 	if itr.err != nil {
 		return nil
 	}
 	return itr.key
 }
 
-func (itr *BlockIterator) Value() []byte {
+func (itr *blockIterator) Value() []byte {
 	if itr.err != nil {
 		return nil
 	}
@@ -192,7 +192,7 @@ func (itr *BlockIterator) Value() []byte {
 type TableIterator struct {
 	t    *Table
 	bpos int
-	bi   *BlockIterator
+	bi   *blockIterator
 	err  error
 	init bool
 

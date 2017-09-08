@@ -98,8 +98,8 @@ type Block struct {
 	data   []byte
 }
 
-func (b Block) NewIterator() *BlockIterator {
-	return &BlockIterator{data: b.data}
+func (b Block) NewIterator() *blockIterator {
+	return &blockIterator{data: b.data}
 }
 
 type byKey []keyOffset
