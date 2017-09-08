@@ -417,7 +417,7 @@ func (s *KV) yieldItemValue(item *KVItem, consumer func([]byte)) error {
 
 	var vp valuePointer
 	vp.Decode(item.vptr)
-	err := s.vlog.Read(vp, item.slice, consumer)
+	err := s.vlog.Read(vp, consumer)
 	if err != nil {
 		return err
 	}
