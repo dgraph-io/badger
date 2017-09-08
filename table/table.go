@@ -302,7 +302,7 @@ func (t *Table) readIndex() error {
 func (t *Table) block(idx int) (block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= len(t.blockIndex) {
-		return block{}, errors.New("Block out of index.")
+		return block{}, errors.New("block out of index")
 	}
 
 	ko := t.blockIndex[idx]

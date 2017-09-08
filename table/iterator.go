@@ -66,8 +66,8 @@ func (itr *blockIterator) Error() error {
 func (itr *blockIterator) Close() {}
 
 var (
-	ORIGIN  = 0
-	CURRENT = 1
+	origin  = 0
+	current = 1
 )
 
 // Seek brings us to the first block element that is >= input key.
@@ -75,9 +75,9 @@ func (itr *blockIterator) Seek(key []byte, whence int) {
 	itr.err = nil
 
 	switch whence {
-	case ORIGIN:
+	case origin:
 		itr.Reset()
-	case CURRENT:
+	case current:
 	}
 
 	var done bool
@@ -273,7 +273,7 @@ func (itr *TableIterator) seekHelper(blockIdx int, key []byte) {
 		return
 	}
 	itr.bi = block.NewIterator()
-	itr.bi.Seek(key, ORIGIN)
+	itr.bi.Seek(key, origin)
 	itr.err = itr.bi.Error()
 }
 
@@ -281,9 +281,9 @@ func (itr *TableIterator) seekHelper(blockIdx int, key []byte) {
 func (itr *TableIterator) seekFrom(key []byte, whence int) {
 	itr.err = nil
 	switch whence {
-	case ORIGIN:
+	case origin:
 		itr.reset()
-	case CURRENT:
+	case current:
 	}
 
 	idx := sort.Search(len(itr.t.blockIndex), func(idx int) bool {
@@ -319,13 +319,13 @@ func (itr *TableIterator) seekFrom(key []byte, whence int) {
 
 // seek will reset iterator and seek to >= key.
 func (itr *TableIterator) seek(key []byte) {
-	itr.seekFrom(key, ORIGIN)
+	itr.seekFrom(key, origin)
 }
 
 // seekForPrev will reset iterator and seek to <= key.
 func (itr *TableIterator) seekForPrev(key []byte) {
 	// TODO: Optimize this. We shouldn't have to take a Prev step.
-	itr.seekFrom(key, ORIGIN)
+	itr.seekFrom(key, origin)
 	if !bytes.Equal(itr.Key(), key) {
 		itr.prev()
 	}
