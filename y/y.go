@@ -79,10 +79,13 @@ func OpenTruncFile(filename string, sync bool) (*os.File, error) {
 	return os.OpenFile(filename, flags, 0666)
 }
 
+// Safecopy does append(a[:0], src...).
 func Safecopy(a []byte, src []byte) []byte {
 	return append(a[:0], src...)
 }
 
+// Slice holds a reusable buf, will reallocate if you request a larger size than ever before.
+// One problem is with n distinct sizes in random order it'll reallocate log(n) times.
 type Slice struct {
 	buf []byte
 }
