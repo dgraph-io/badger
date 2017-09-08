@@ -90,6 +90,8 @@ type Slice struct {
 	buf []byte
 }
 
+// Resize reuses the Slice's buffer (or makes a new one) and returns a slice in that buffer of
+// length sz.
 func (s *Slice) Resize(sz int) []byte {
 	if cap(s.buf) < sz {
 		s.buf = make([]byte, sz)
@@ -105,32 +107,40 @@ type Closer struct {
 	waiting sync.WaitGroup
 }
 
+// NewCloser constructs a new Closer, with an initial count on the WaitGroup.
 func NewCloser(initial int) *Closer {
-	ret := &Closer{closed: make(chan struct{}, 10)}
+	ret := &Closer{closed: make(chan struct{})}
 	ret.waiting.Add(initial)
 	return ret
 }
 
+// AddRunning Add()'s delta to the WaitGroup.
 func (lc *Closer) AddRunning(delta int) {
 	lc.waiting.Add(delta)
 }
 
+// Signal signals the HasBeenClosed signal.
 func (lc *Closer) Signal() {
 	close(lc.closed)
 }
 
+// HasBeenClosed gets signaled when Signal() is called.
 func (lc *Closer) HasBeenClosed() <-chan struct{} {
 	return lc.closed
 }
 
+// Done calls Done() on the WaitGroup.
 func (lc *Closer) Done() {
 	lc.waiting.Done()
 }
 
+// Wait waits on the WaitGroup.  (It waits for NewCloser's initial value, AddRunning, and Done
+// calls to balance out.)
 func (lc *Closer) Wait() {
 	lc.waiting.Wait()
 }
 
+// SignalAndWait calls Signal(), then Wait().
 func (lc *Closer) SignalAndWait() {
 	lc.Signal()
 	lc.Wait()
