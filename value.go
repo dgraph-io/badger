@@ -75,7 +75,6 @@ type logFile struct {
 	fd     *os.File
 	fid    uint32
 	mmap   []byte
-	offset uint32
 	size   uint32
 }
 
@@ -520,10 +519,10 @@ type valueLog struct {
 	filesLock sync.RWMutex
 	filesMap  map[uint32]*logFile
 
-	kv     *KV
-	maxFid uint32
-	offset uint32
-	opt    Options
+	kv                *KV
+	maxFid            uint32
+	writableLogOffset uint32
+	opt               Options
 }
 
 func vlogFilePath(dirPath string, fid uint32) string {
@@ -592,7 +591,8 @@ func (vlog *valueLog) openOrCreateFiles() error {
 
 func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	path := vlog.fpath(fid)
-	lf := &logFile{fid: fid, offset: 0, path: path}
+	lf := &logFile{fid: fid, path: path}
+	vlog.writableLogOffset = 0
 	var err error
 	lf.fd, err = y.CreateSyncedFile(path, vlog.opt.SyncWrites)
 	if err != nil {
@@ -674,7 +674,7 @@ func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 	var err error
 	last := vlog.filesMap[vlog.maxFid]
 	lastOffset, err := last.fd.Seek(0, io.SeekEnd)
-	last.offset = uint32(lastOffset)
+	vlog.writableLogOffset = uint32(lastOffset)
 	return errors.Wrapf(err, "Unable to seek to end of value log: %q", last.path)
 }
 
@@ -731,10 +731,10 @@ func (vlog *valueLog) write(reqs []*request) error {
 		y.NumWrites.Add(1)
 		y.NumBytesWritten.Add(int64(n))
 		vlog.elog.Printf("Done")
-		curlf.offset += uint32(n)
+		vlog.writableLogOffset += uint32(n)
 		vlog.buf.Reset()
 
-		if curlf.offset > uint32(vlog.opt.ValueLogFileSize) {
+		if vlog.writableLogOffset > uint32(vlog.opt.ValueLogFileSize) {
 			var err error
 			if err = curlf.doneWriting(); err != nil {
 				return err
@@ -767,7 +767,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 			p.Fid = curlf.fid
 			// Use the offset including buffer length so far.
-			p.Offset = curlf.offset + uint32(vlog.buf.Len())
+			p.Offset = vlog.writableLogOffset + uint32(vlog.buf.Len())
 			plen, err := encodeEntry(e, &vlog.buf) // Now encode the entry into buffer.
 			if err != nil {
 				return err
