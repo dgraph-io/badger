@@ -325,9 +325,13 @@ func (it *Iterator) Rewind() {
 //   for itr.Rewind(); itr.Valid(); itr.Next() {
 //     item := itr.Item()
 //     key := item.Key()
-//     val := item.Value() // This could block while value is fetched from value log.
-//                         // For key only iteration, set opt.FetchValues to false, and don't call
-//                         // item.Value().
+//     var val []byte
+//     err = item.Value(func(v []byte) {
+//         val = make([]byte, len(v))
+// 	       copy(val, v)
+//     }) 	// This could block while value is fetched from value log.
+//          // For key only iteration, set opt.PrefetchValues to false, and don't call
+//          // item.Value(func(v []byte)).
 //
 //     // Remember that both key, val would become invalid in the next iteration of the loop.
 //     // So, if you need access to them outside, copy them or parse them.

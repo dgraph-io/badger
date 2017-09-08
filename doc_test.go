@@ -94,14 +94,18 @@ func Example() {
 
 // 	itrOpt := IteratorOptions{
 // 		PrefetchSize: 1000,
-// 		FetchValues:  true,
+// 		PrefetchValues:  true,
 // 		Reverse:      false,
 // 	}
 // 	itr := kv.NewIterator(itrOpt)
 // 	for itr.Rewind(); itr.Valid(); itr.Next() {
 // 		item := itr.Item()
 // 		item.Key()
-// 		item.Value()
+// 		var val []byte
+// 		err = item.Value(func(v []byte) {
+// 			val = make([]byte, len(v))
+// 			copy(val, v)
+// 		})
 // 	}
 // }
 
