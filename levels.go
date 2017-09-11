@@ -484,13 +484,6 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 
 func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	timeStart := time.Now()
-	var readSize int64
-	for _, tbl := range cd.top {
-		readSize += tbl.Size()
-	}
-	for _, tbl := range cd.bot {
-		readSize += tbl.Size()
-	}
 
 	thisLevel := cd.thisLevel
 	nextLevel := cd.nextLevel
