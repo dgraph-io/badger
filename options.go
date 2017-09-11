@@ -1,3 +1,19 @@
+/*
+ * Copyright 2017 Dgraph Labs, Inc. and Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package badger
 
 import (
@@ -7,26 +23,31 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
+// NOTE: Keep the comments in the following to 75 chars width, so they
+// format nicely in godoc.
+
 // Options are params for creating DB object.
 type Options struct {
 	// 1. Mandatory flags
 	// -------------------
 	// Directory to store the data in. Should exist and be writable.
 	Dir string
-	// Directory to store the value log in. Can be the same as Dir. Should exist and be writable.
+	// Directory to store the value log in. Can be the same as Dir. Should
+	// exist and be writable.
 	ValueDir string
 
 	// 2. Frequently modified flags
 	// -----------------------------
-	// Sync all writes to disk. Setting this to true would slow down data loading significantly.
+	// Sync all writes to disk. Setting this to true would slow down data
+	// loading significantly.
 	SyncWrites bool
 
 	// How should LSM tree be accessed.
 	TableLoadingMode options.FileLoadingMode
 
-	// How often to run value log garbage collector. Every time it runs, there'd be a spike in LSM
-	// tree activity. But, running it frequently allows reclaiming disk space from an ever-growing
-	// value log.
+	// How often to run value log garbage collector. Every time it runs,
+	// there'd be a spike in LSM tree activity. But, running it frequently
+	// allows reclaiming disk space from an ever-growing value log.
 	ValueGCRunInterval time.Duration
 
 	// 3. Flags that user might want to review
@@ -35,20 +56,23 @@ type Options struct {
 	MaxTableSize        int64 // Each table (or file) is at most this size.
 	LevelSizeMultiplier int   // Equals SizeOf(Li+1)/SizeOf(Li).
 	MaxLevels           int   // Maximum number of levels of compaction.
-	ValueThreshold      int   // If value size >= this threshold, only store value offsets in tree.
-	NumMemtables        int   // Maximum number of tables to keep in memory, before stalling.
-
+	// If value size >= this threshold, only store value offsets in tree.
+	ValueThreshold int
+	// Maximum number of tables to keep in memory, before stalling.
+	NumMemtables int
 	// The following affect how we handle LSM tree L0.
 	// Maximum number of Level 0 tables before we start compacting.
 	NumLevelZeroTables int
 
-	// If we hit this number of Level 0 tables, we will stall until L0 is compacted away.
+	// If we hit this number of Level 0 tables, we will stall until L0 is
+	// compacted away.
 	NumLevelZeroTablesStall int
 
 	// Maximum total size for L1.
 	LevelOneSize int64
 
-	// Run value log garbage collection if we can reclaim at least this much space. This is a ratio.
+	// Run value log garbage collection if we can reclaim at least this
+	// much space. This is a ratio.
 	ValueGCThreshold float64
 
 	// Size of single value log file.
