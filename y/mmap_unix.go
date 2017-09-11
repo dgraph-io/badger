@@ -20,6 +20,8 @@ package y
 
 import (
 	"os"
+	"syscall"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -47,5 +49,14 @@ func Madvise(b []byte, readahead bool) error {
 	if !readahead {
 		flags = unix.MADV_RANDOM
 	}
-	return unix.Madvise(b, flags)
+	return madvise(b, flags)
+}
+
+// This is required because the unix package does not support the madvise system call on OS X.
+func madvise(b []byte, advice int) (err error) {
+	_, _, e1 := syscall.Syscall(syscall.SYS_MADVISE, uintptr(unsafe.Pointer(&b[0])), uintptr(len(b)), uintptr(advice))
+	if e1 != 0 {
+		err = e1
+	}
+	return
 }
