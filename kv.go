@@ -780,7 +780,7 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 	defaultCase:
 		writeRequestsOrLogError(s, reqs)
 		reqs = reqs[:0]
-		y.WriteChLen.Set(int64(len(s.writeCh)))
+		y.WriteChLen.Set(s.opt.Dir, getNewInt(int64(len(s.writeCh))))
 	}
 }
 
@@ -1218,17 +1218,18 @@ func exists(path string) (bool, error) {
 	return true, err
 }
 
+// generates a new expvar.Int instance, sets its value to val and returns it.
+func getNewInt(val int64) *expvar.Int {
+	v := new(expvar.Int)
+	v.Add(val)
+	return v
+}
+
 func (s *KV) updateSize(lc *y.LevelCloser) {
 	defer lc.Done()
 
 	metricsTicker := time.NewTicker(5 * time.Minute)
 	defer metricsTicker.Stop()
-
-	getNewInt := func(val int64) *expvar.Int {
-		v := new(expvar.Int)
-		v.Add(val)
-		return v
-	}
 
 	totalSize := func(dir string) (int64, int64) {
 		var lsmSize, vlogSize int64
