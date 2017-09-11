@@ -24,7 +24,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Mmap wraps mmap.  Don't forget to munmap the memory later.
+// Mmap uses the mmap system call to memory-map a file. If writable is true,
+// memory protection of the pages is set so that they may be written to as well.
 func Mmap(fd *os.File, writable bool, size int64) ([]byte, error) {
 	mtype := unix.PROT_READ
 	if writable {
@@ -33,12 +34,14 @@ func Mmap(fd *os.File, writable bool, size int64) ([]byte, error) {
 	return unix.Mmap(int(fd.Fd()), 0, int(size), mtype, unix.MAP_SHARED)
 }
 
-// Munmap wraps munmap.
+// Munmap unmaps a previously mapped slice.
 func Munmap(b []byte) error {
 	return unix.Munmap(b)
 }
 
-// Madvise wraps the madvise syscall.
+// Madvise uses the madvise system call to give advise about the use of memory
+// when using a slice that is memory-mapped to a file. Set the readahead flag to
+// false if page references are expected in random order.
 func Madvise(b []byte, readahead bool) error {
 	flags := unix.MADV_NORMAL
 	if !readahead {
