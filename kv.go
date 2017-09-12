@@ -1217,13 +1217,6 @@ func exists(path string) (bool, error) {
 	return true, err
 }
 
-// generates a new expvar.Int instance, sets its value to val and returns it.
-func getNewInt(val int64) *expvar.Int {
-	v := new(expvar.Int)
-	v.Add(val)
-	return v
-}
-
 func (s *KV) updateSize(lc *y.LevelCloser) {
 	defer lc.Done()
 
@@ -1261,7 +1254,7 @@ func (s *KV) updateSize(lc *y.LevelCloser) {
 	for {
 		select {
 		case <-writeChTicker.C:
-			y.WriteChLen.Set(s.opt.Dir, getNewInt(int64(len(s.writeCh))))
+			y.WriteChLen.Set(s.opt.Dir, newInt(int64(len(s.writeCh))))
 		case <-metricsTicker.C:
 			lsmSize, vlogSize := totalSize(s.opt.Dir)
 			y.LSMSize.Set(s.opt.Dir, newInt(lsmSize))
