@@ -170,6 +170,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	out.lc.startCompact(out.closers.compactors)
 
 	out.closers.memtable = y.NewCloser(1)
+	// FIXME why are we dropping an error here?
 	go out.flushMemtable(out.closers.memtable) // Need levels controller to be up.
 
 	if err = out.vlog.Open(out, &opt); err != nil {
@@ -1103,7 +1104,11 @@ func (s *KV) flushMemtable(lc *y.Closer) error {
 		}
 		// We own a ref on tbl.
 		err = s.lc.addLevel0Table(tbl) // This will incrRef (if we don't error, sure)
-		tbl.DecrRef()                  // Releases our ref.
+		if err != nil {
+			return err
+		}
+
+		err = tbl.DecrRef() // Releases our ref.
 		if err != nil {
 			return err
 		}

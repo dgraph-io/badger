@@ -52,7 +52,7 @@ func AcquireDirectoryLock(dirPath string, pidFileName string) (*DirectoryLockGua
 	}
 	err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, errors.Wrapf(err,
 			"Cannot acquire directory lock on %q.  Another process is using this Badger database.",
 			dirPath)
@@ -62,7 +62,7 @@ func AcquireDirectoryLock(dirPath string, pidFileName string) (*DirectoryLockGua
 	// directory.
 	err = ioutil.WriteFile(absPidFilePath, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0666)
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, errors.Wrapf(err,
 			"Cannot write pid file %q", absPidFilePath)
 	}
