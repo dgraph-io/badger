@@ -647,6 +647,10 @@ func (s *KV) doWrites(lc *y.Closer) {
 		<-pendingCh
 	}
 
+	// This variable tracks the number of pending writes.
+	reqLen := new(expvar.Int)
+	y.PendingWrites.Set(s.opt.Dir, reqLen)
+
 	reqs := make([]*request, 0, 10)
 	for {
 		var r *request
@@ -658,6 +662,8 @@ func (s *KV) doWrites(lc *y.Closer) {
 
 		for {
 			reqs = append(reqs, r)
+			reqLen.Set(int64(len(reqs)))
+
 			if len(reqs) >= 3*kvWriteChCapacity {
 				pendingCh <- struct{}{} // blocking.
 				goto writeCase
@@ -686,6 +692,7 @@ func (s *KV) doWrites(lc *y.Closer) {
 	writeCase:
 		go writeRequests(reqs)
 		reqs = make([]*request, 0, 10)
+		reqLen.Set(0)
 	}
 }
 
@@ -1127,9 +1134,7 @@ func (s *KV) updateSize(lc *y.Closer) {
 	defer lc.Done()
 
 	metricsTicker := time.NewTicker(5 * time.Minute)
-	writeChTicker := time.NewTicker(time.Second)
 	defer metricsTicker.Stop()
-	defer writeChTicker.Stop()
 
 	newInt := func(val int64) *expvar.Int {
 		v := new(expvar.Int)
@@ -1159,8 +1164,6 @@ func (s *KV) updateSize(lc *y.Closer) {
 
 	for {
 		select {
-		case <-writeChTicker.C:
-			y.WriteChLen.Set(s.opt.Dir, newInt(int64(len(s.writeCh))))
 		case <-metricsTicker.C:
 			lsmSize, vlogSize := totalSize(s.opt.Dir)
 			y.LSMSize.Set(s.opt.Dir, newInt(lsmSize))
