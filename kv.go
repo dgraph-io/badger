@@ -157,8 +157,6 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		valueDirGuard: valueDirLockGuard,
 	}
 
-	out.closers.updateSize = y.NewCloser(1)
-	go out.updateSize(out.closers.updateSize)
 	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
 	// newLevelsController potentially loads files in directory.
@@ -257,6 +255,9 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	out.writeCh = make(chan *request, kvWriteChCapacity)
 	out.closers.writes = y.NewCloser(1)
 	go out.doWrites(out.closers.writes)
+
+	out.closers.updateSize = y.NewCloser(1)
+	go out.updateSize(out.closers.updateSize)
 
 	out.closers.valueGC = y.NewCloser(1)
 	go out.vlog.runGCInLoop(out.closers.valueGC)
