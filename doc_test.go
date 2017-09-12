@@ -44,9 +44,10 @@ func Example() {
 		return
 	}
 	var val []byte
-	err := item.Value(func(v []byte) {
+	err := item.Value(func(v []byte) error {
 		val = make([]byte, len(v))
 		copy(val, v)
+		return nil
 	})
 	if err != nil {
 		fmt.Printf("Error while getting value for key: %q", key)
@@ -62,9 +63,10 @@ func Example() {
 			fmt.Printf("Error while getting key: %q", key)
 		}
 
-		err := item.Value(func(v []byte) {
+		err := item.Value(func(v []byte) error {
 			val = make([]byte, len(v))
 			copy(val, v)
+			return nil
 		})
 
 		if err != nil {

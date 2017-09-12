@@ -43,12 +43,13 @@ func getTestOptions(dir string) *Options {
 }
 
 func getItemValue(t *testing.T, item *KVItem) (val []byte) {
-	err := item.Value(func(v []byte) {
+	err := item.Value(func(v []byte) error {
 		if v == nil {
-			return
+			return nil
 		}
 		val = make([]byte, len(v))
 		copy(val, v)
+		return nil
 	})
 
 	if err != nil {
@@ -782,9 +783,10 @@ func BenchmarkExists(b *testing.B) {
 				b.Error(err)
 			}
 			var val []byte
-			err = item.Value(func(v []byte) {
+			err = item.Value(func(v []byte) error {
 				val = make([]byte, len(v))
 				copy(val, v)
+				return nil
 			})
 			if err != nil {
 				b.Error(err)
