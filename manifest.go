@@ -231,7 +231,7 @@ func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 
 	changeBuf, err := set.Marshal()
 	if err != nil {
-		fp.Close()
+		_ = fp.Close()
 		return nil, 0, err
 	}
 	var lenCrcBuf [8]byte
@@ -240,11 +240,11 @@ func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 	buf = append(buf, lenCrcBuf[:]...)
 	buf = append(buf, changeBuf...)
 	if _, err := fp.Write(buf); err != nil {
-		fp.Close()
+		_ = fp.Close()
 		return nil, 0, err
 	}
 	if err := fp.Sync(); err != nil {
-		fp.Close()
+		_ = fp.Close()
 		return nil, 0, err
 	}
 
@@ -261,11 +261,11 @@ func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 		return nil, 0, err
 	}
 	if _, err := fp.Seek(0, os.SEEK_END); err != nil {
-		fp.Close()
+		_ = fp.Close()
 		return nil, 0, err
 	}
 	if err := syncDir(dir); err != nil {
-		fp.Close()
+		_ = fp.Close()
 		return nil, 0, err
 	}
 

@@ -381,8 +381,8 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	// Exclusively lock the file so that there are no readers before closing/destroying it
 	f.lock.Lock()
 	rem := vlog.fpath(f.fid)
-	y.Munmap(f.fmap)
-	f.fd.Close() // close file previous to remove it
+	_ = y.Munmap(f.fmap)
+	_ = f.fd.Close() // close file previous to remove it
 	f.lock.Unlock()
 
 	elog.Printf("Removing %s", rem)
@@ -421,13 +421,13 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	hash := crc32.New(y.CastagnoliCrcTable)
 
 	buf.Write(headerEnc[:])
-	hash.Write(headerEnc[:])
+	_, _ = hash.Write(headerEnc[:])
 
 	buf.Write(e.Key)
-	hash.Write(e.Key)
+	_, _ = hash.Write(e.Key)
 
 	buf.Write(e.Value)
-	hash.Write(e.Value)
+	_, _ = hash.Write(e.Value)
 
 	var crcBuf [4]byte
 	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
@@ -884,6 +884,7 @@ func (vlog *valueLog) runGCInLoop(lc *y.Closer) {
 		case <-lc.HasBeenClosed():
 			return
 		case <-tick.C:
+			// FIXME we do not check for here.
 			vlog.doRunGC()
 		}
 	}

@@ -207,7 +207,7 @@ func (it *Iterator) ValidForPrefix(prefix []byte) bool {
 
 // Close would close the iterator. It is important to call this when you're done with iteration.
 func (it *Iterator) Close() {
-	it.iitr.Close()
+	_ = it.iitr.Close()
 }
 
 // Next would advance the iterator by one. Always check it.Valid() after a Next()
