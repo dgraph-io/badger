@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"io/ioutil"
 	"sync"
 
 	"github.com/dgraph-io/badger/y"
@@ -25,16 +26,10 @@ import (
 
 type prefetchStatus uint8
 
-const (
-	empty prefetchStatus = iota
-	prefetched
-)
-
 // KVItem is returned during iteration. Both the Key() and Value() output is only valid until
 // iterator.Next() is called.
 type KVItem struct {
 	status     prefetchStatus
-	err        error
 	wg         sync.WaitGroup
 	kv         *KV
 	key        []byte
@@ -62,12 +57,6 @@ func (item *KVItem) Key() []byte {
 // append to this slice; it would result in a panic.
 func (item *KVItem) Value(consumer func([]byte) error) error {
 	item.wg.Wait()
-	if item.status == prefetched {
-		if item.err != nil {
-			return item.err
-		}
-		return consumer(item.val)
-	}
 	return item.kv.yieldItemValue(item, consumer)
 }
 
@@ -84,17 +73,10 @@ func (item *KVItem) hasValue() bool {
 }
 
 func (item *KVItem) prefetchValue() {
-	item.err = item.kv.yieldItemValue(item, func(val []byte) error {
-		if val == nil {
-			item.status = prefetched
-			return nil
-		}
-
-		buf := item.slice.Resize(len(val))
-		copy(buf, val)
-		item.val = buf
-		item.status = prefetched
-		return nil
+	// We just prime the mmap to load data from file to RAM
+	_ = item.kv.yieldItemValue(item, func(val []byte) error {
+		_, err := ioutil.Discard.Write(val)
+		return err
 	})
 }
 
