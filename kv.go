@@ -404,23 +404,13 @@ func (s *KV) yieldItemValue(item *KVItem, consumer func([]byte) error) error {
 		return consumer(nil)
 	}
 
-	if item.slice == nil {
-		item.slice = new(y.Slice)
-	}
-
 	if (item.meta & BitValuePointer) == 0 {
-		val := item.slice.Resize(len(item.vptr))
-		copy(val, item.vptr)
-		return consumer(val)
+		return consumer(item.vptr)
 	}
 
 	var vp valuePointer
 	vp.Decode(item.vptr)
-	err := s.vlog.Read(vp, consumer)
-	if err != nil {
-		return err
-	}
-	return nil
+	return s.vlog.Read(vp, consumer)
 }
 
 // get returns the value in memtable or disk for given key.
