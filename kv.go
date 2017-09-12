@@ -780,7 +780,6 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 	defaultCase:
 		writeRequestsOrLogError(s, reqs)
 		reqs = reqs[:0]
-		y.WriteChLen.Set(s.opt.Dir, getNewInt(int64(len(s.writeCh))))
 	}
 }
 
@@ -1229,7 +1228,15 @@ func (s *KV) updateSize(lc *y.LevelCloser) {
 	defer lc.Done()
 
 	metricsTicker := time.NewTicker(5 * time.Minute)
+	writeChTicker := time.NewTicker(time.Second)
 	defer metricsTicker.Stop()
+	defer writeChTicker.Stop()
+
+	newInt := func(val int64) *expvar.Int {
+		v := new(expvar.Int)
+		v.Add(val)
+		return v
+	}
 
 	totalSize := func(dir string) (int64, int64) {
 		var lsmSize, vlogSize int64
@@ -1253,14 +1260,16 @@ func (s *KV) updateSize(lc *y.LevelCloser) {
 
 	for {
 		select {
+		case <-writeChTicker.C:
+			y.WriteChLen.Set(s.opt.Dir, getNewInt(int64(len(s.writeCh))))
 		case <-metricsTicker.C:
 			lsmSize, vlogSize := totalSize(s.opt.Dir)
-			y.LSMSize.Set(s.opt.Dir, getNewInt(lsmSize))
+			y.LSMSize.Set(s.opt.Dir, newInt(lsmSize))
 			// If valueDir is different from dir, we'd have to do another walk.
 			if s.opt.ValueDir != s.opt.Dir {
 				_, vlogSize = totalSize(s.opt.ValueDir)
 			}
-			y.VlogSize.Set(s.opt.Dir, getNewInt(vlogSize))
+			y.VlogSize.Set(s.opt.Dir, newInt(vlogSize))
 		case <-lc.HasBeenClosed():
 			return
 		}
