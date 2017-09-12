@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/dgraph-io/badger/y"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -60,11 +61,13 @@ func TestValueBasic(t *testing.T) {
 
 	var buf1, buf2 []byte
 	var err1, err2 error
-	err1 = log.readValueBytes(b.Ptrs[0], func(val []byte) {
+	err1 = log.readValueBytes(b.Ptrs[0], func(val []byte) error {
 		buf1 = y.Safecopy(nil, val)
+		return nil
 	})
-	err2 = log.readValueBytes(b.Ptrs[1], func(val []byte) {
+	err2 = log.readValueBytes(b.Ptrs[1], func(val []byte) error {
 		buf2 = y.Safecopy(nil, val)
+		return nil
 	})
 
 	require.NoError(t, err1)
@@ -392,14 +395,15 @@ func BenchmarkReadWrite(b *testing.B) {
 							b.Fatalf("Zero length of ptrs")
 						}
 						idx := rand.Intn(ln)
-						err := vl.readValueBytes(ptrs[idx], func(buf []byte) {
+						err := vl.readValueBytes(ptrs[idx], func(buf []byte) error {
 							e := valueBytesToEntry(buf)
 							if len(e.Key) != 16 {
-								b.Fatalf("Key is invalid")
+								return errors.New("Key is invalid")
 							}
 							if len(e.Value) != vsz {
-								b.Fatalf("Value is invalid")
+								return errors.New("Value is invalid")
 							}
+							return nil
 						})
 						if err != nil {
 							b.Fatalf("Benchmark Read: %v", err)

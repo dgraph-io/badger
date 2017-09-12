@@ -182,9 +182,10 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	}
 
 	var val []byte
-	err = item.Value(func(v []byte) {
+	err = item.Value(func(v []byte) error {
 		val = make([]byte, len(v))
 		copy(val, v)
+		return nil
 	})
 
 	if err != nil {
@@ -398,10 +399,9 @@ func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 	}
 }
 
-func (s *KV) yieldItemValue(item *KVItem, consumer func([]byte)) error {
+func (s *KV) yieldItemValue(item *KVItem, consumer func([]byte) error) error {
 	if !item.hasValue() {
-		consumer(nil)
-		return nil
+		return consumer(nil)
 	}
 
 	if item.slice == nil {
@@ -411,8 +411,7 @@ func (s *KV) yieldItemValue(item *KVItem, consumer func([]byte)) error {
 	if (item.meta & BitValuePointer) == 0 {
 		val := item.slice.Resize(len(item.vptr))
 		copy(val, item.vptr)
-		consumer(val)
-		return nil
+		return consumer(val)
 	}
 
 	var vp valuePointer
