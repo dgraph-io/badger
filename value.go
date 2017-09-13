@@ -391,6 +391,35 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	return nil
 }
 
+func (vlog *valueLog) incrIteratorCount() {
+	vlog.filesLock.Lock()
+	vlog.numActiveIterators++
+	vlog.filesLock.Unlock()
+}
+
+func (vlog *valueLog) decrIteratorCount() error {
+	vlog.filesLock.Lock()
+	defer vlog.filesLock.Unlock()
+
+	vlog.numActiveIterators--
+	if vlog.numActiveIterators == 0 {
+		lfs := make([]*logFile, 0, len(vlog.filesToBeDeleted))
+		for _, id := range vlog.filesToBeDeleted {
+			lfs = append(lfs, vlog.filesMap[id])
+			delete(vlog.filesMap, id)
+		}
+		vlog.filesToBeDeleted = nil
+		vlog.filesLock.Unlock()
+
+		for _, lf := range lfs {
+			if err := vlog.deleteLogFile(lf); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 	path := vlog.fpath(lf.fid)
 	if err := y.Munmap(lf.fmap); err != nil {
