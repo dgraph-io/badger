@@ -366,6 +366,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	elog.Printf("Processed %d entries in total", count)
 
 	elog.Printf("Removing fid: %d", f.fid)
+	var deleteFileNow bool
 	// Entries written to LSM. Remove the older file now.
 	{
 		vlog.filesLock.Lock()
@@ -374,19 +375,32 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			vlog.filesLock.Unlock()
 			return errors.Errorf("Unable to find fid: %d", f.fid)
 		}
-		delete(vlog.filesMap, f.fid)
+		if vlog.numActiveIterators == 0 {
+			delete(vlog.filesMap, f.fid)
+			deleteFileNow = true
+		} else {
+			vlog.filesToBeDeleted = append(vlog.filesToBeDeleted, f.fid)
+		}
 		vlog.filesLock.Unlock()
 	}
 
-	// Exclusively lock the file so that there are no readers before closing/destroying it
-	f.lock.Lock()
-	rem := vlog.fpath(f.fid)
-	y.Munmap(f.fmap)
-	f.fd.Close() // close file previous to remove it
-	f.lock.Unlock()
+	if deleteFileNow {
+		vlog.deleteLogFile(f)
+	}
 
-	elog.Printf("Removing %s", rem)
-	return os.Remove(rem)
+	return nil
+}
+
+func (vlog *valueLog) deleteLogFile(lf *logFile) error {
+	path := vlog.fpath(lf.fid)
+	if err := y.Munmap(lf.fmap); err != nil {
+		_ = lf.fd.Close()
+		return err
+	}
+	if err := lf.fd.Close(); err != nil {
+		return err
+	}
+	return os.Remove(path)
 }
 
 // Entry provides Key, Value and if required, CASCounterCheck to kv.BatchSet() API.
@@ -515,9 +529,12 @@ type valueLog struct {
 	dirPath string
 	elog    trace.EventLog
 
-	// guards our view of which files exist
-	filesLock sync.RWMutex
-	filesMap  map[uint32]*logFile
+	// guards our view of which files exist, which to be deleted, how many active iterators
+	filesLock        sync.RWMutex
+	filesMap         map[uint32]*logFile
+	filesToBeDeleted []uint32
+	// A refcount of iterators -- when this hits zero, we can delete the filesToBeDeleted.
+	numActiveIterators int
 
 	kv                *KV
 	maxFid            uint32
@@ -651,11 +668,18 @@ func (vlog *valueLog) Close() error {
 	return err
 }
 
-// sortedFids returns the file id's, sorted.  Assumes we have shared access to filesMap.
+// sortedFids returns the file id's not pending deletion, sorted.  Assumes we have shared access to
+// filesMap.
 func (vlog *valueLog) sortedFids() []uint32 {
+	toBeDeleted := make(map[uint32]struct{})
+	for _, fid := range vlog.filesToBeDeleted {
+		toBeDeleted[fid] = struct{}{}
+	}
 	ret := make([]uint32, 0, len(vlog.filesMap))
 	for fid := range vlog.filesMap {
-		ret = append(ret, fid)
+		if _, ok := toBeDeleted[fid]; !ok {
+			ret = append(ret, fid)
+		}
 	}
 	sort.Slice(ret, func(i, j int) bool {
 		return ret[i] < ret[j]
@@ -892,10 +916,10 @@ func (vlog *valueLog) runGCInLoop(lc *y.Closer) {
 func (vlog *valueLog) pickLog() *logFile {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
-	if len(vlog.filesMap) <= 1 {
+	fids := vlog.sortedFids()
+	if len(fids) <= 1 {
 		return nil
 	}
-	fids := vlog.sortedFids()
 	// This file shouldn't be being written to.
 	idx := rand.Intn(len(fids))
 	if idx > 0 {

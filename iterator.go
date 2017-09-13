@@ -208,6 +208,26 @@ func (it *Iterator) ValidForPrefix(prefix []byte) bool {
 // Close would close the iterator. It is important to call this when you're done with iteration.
 func (it *Iterator) Close() {
 	it.iitr.Close()
+	vlog := &it.kv.vlog
+	vlog.filesLock.Lock()
+	vlog.numActiveIterators--
+	if vlog.numActiveIterators == 0 {
+		lfs := make([]*logFile, 0, len(vlog.filesToBeDeleted))
+		for _, id := range vlog.filesToBeDeleted {
+			lfs = append(lfs, vlog.filesMap[id])
+			delete(vlog.filesMap, id)
+		}
+		vlog.filesToBeDeleted = nil
+		vlog.filesLock.Unlock()
+
+		for _, lf := range lfs {
+			// TODO: Could handle (and return error)
+			vlog.deleteLogFile(lf)
+		}
+
+		return
+	}
+	vlog.filesLock.Unlock()
 }
 
 // Next would advance the iterator by one. Always check it.Valid() after a Next()
@@ -343,6 +363,9 @@ func (it *Iterator) Rewind() {
 func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 	tables, decr := s.getMemTables()
 	defer decr()
+	s.vlog.filesLock.Lock()
+	s.vlog.numActiveIterators++
+	s.vlog.filesLock.Unlock()
 	var iters []y.Iterator
 	for i := 0; i < len(tables); i++ {
 		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
