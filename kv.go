@@ -385,8 +385,8 @@ func (s *KV) immutablyGetMemTables() ([]*skl.Skiplist, func()) {
 	tables := make([]*skl.Skiplist, 0, n+1)
 	// We make a copy of the mutable skiplist.
 
-	// TODO: What's to stop somebody from mutating the skiplist while we're in the midst of making
-	// a copy?
+	// TODO: Nothing stops the write loop from modifying s.mt while NewCopy runs.  This means it
+	// can be in an inconsistent state.
 	tables[0] = s.mt.NewCopy()
 	// tables[0] already has refcount 1.
 
