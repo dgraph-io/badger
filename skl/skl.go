@@ -510,3 +510,14 @@ func (s *UniIterator) Valid() bool { return s.iter.Valid() }
 
 // Close implements y.Interface (and frees up the iter's resources)
 func (s *UniIterator) Close() error { return s.iter.Close() }
+
+// NewCopy copies the skiplist -- creating a new one with refcount 1.
+func (s *Skiplist) NewCopy() *Skiplist {
+	it := s.NewUniIterator(false)
+	defer it.Close()
+	skl := NewSkiplist(s.arena.size())
+	for it.Rewind(); it.Valid(); it.Next() {
+		skl.Put(it.Key(), it.Value())
+	}
+	return skl
+}

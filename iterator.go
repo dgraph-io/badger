@@ -360,11 +360,17 @@ func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 }
 
 // newBackupIterator returns an iterator that produces changes in the level controller (but not
-// memtables!).  Call decrVlog() after calling iter.Close().
+// memtables!).  Call decrVlog() after calling iter.Close().  This may omit tables whose max cas
+// value is <= afterCas.  (But it might not.)
 func (s *KV) newBackupIterator(afterCas uint64) (iter *y.MergeIterator, decrVlog func()) {
+	// For simplicity's sake we don't filter memtables by cas value.
+	tables, decr := s.immutablyGetMemTables()
+	defer decr()
 	s.vlog.incrIteratorCount()
-	// TODO: We should skip tables with an older CAS value.
-	iters := []y.Iterator{}
-	s.lc.appendIterators(iters, false, afterCas)
+	var iters []y.Iterator
+	for i := 0; i < len(tables); i++ {
+		iters = append(iters, tables[i].NewUniIterator(false))
+	}
+	iters = s.lc.appendIterators(iters, false, afterCas) // This will increment references.
 	return y.NewMergeIterator(iters, false), func() { s.vlog.decrIteratorCount() }
 }

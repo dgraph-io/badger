@@ -375,6 +375,33 @@ func syncDir(dir string) error {
 	return errors.Wrapf(closeErr, "While closing directory: %s.", dir)
 }
 
+// immutablyGetMemtables gets the same memtables as getMemTables -- except the mutable memtable is
+// copied, so it cannot be changed during usage.
+func (s *KV) immutablyGetMemTables() ([]*skl.Skiplist, func()) {
+	s.RLock()
+	defer s.RUnlock()
+
+	n := len(s.imm)
+	tables := make([]*skl.Skiplist, 0, n+1)
+	// We make a copy of the mutable skiplist.
+
+	// TODO: What's to stop somebody from mutating the skiplist while we're in the midst of making
+	// a copy?
+	tables[0] = s.mt.NewCopy()
+	// tables[0] already has refcount 1.
+
+	for i := n; i > 0; {
+		i--
+		s.imm[i].IncrRef()
+		tables = append(tables, s.imm[i])
+	}
+	return tables, func() {
+		for _, tbl := range tables {
+			tbl.DecrRef()
+		}
+	}
+}
+
 // getMemtables returns the current memtables and get references.
 func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 	s.RLock()
@@ -1031,6 +1058,7 @@ func (s *KV) StreamBackup(afterCas uint64, consumer func(BackupItem) error) erro
 			} else {
 				var vp valuePointer
 				vp.Decode(vs.Value)
+
 				err := s.vlog.Read(vp, func(data []byte) error {
 					item.Value = append([]byte{}, data...)
 					return nil
