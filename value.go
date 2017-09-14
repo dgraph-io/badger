@@ -399,22 +399,23 @@ func (vlog *valueLog) incrIteratorCount() {
 
 func (vlog *valueLog) decrIteratorCount() error {
 	vlog.filesLock.Lock()
-	defer vlog.filesLock.Unlock()
 
 	vlog.numActiveIterators--
-	if vlog.numActiveIterators == 0 {
-		lfs := make([]*logFile, 0, len(vlog.filesToBeDeleted))
-		for _, id := range vlog.filesToBeDeleted {
-			lfs = append(lfs, vlog.filesMap[id])
-			delete(vlog.filesMap, id)
-		}
-		vlog.filesToBeDeleted = nil
+	if vlog.numActiveIterators != 0 {
 		vlog.filesLock.Unlock()
+		return nil
+	}
+	lfs := make([]*logFile, 0, len(vlog.filesToBeDeleted))
+	for _, id := range vlog.filesToBeDeleted {
+		lfs = append(lfs, vlog.filesMap[id])
+		delete(vlog.filesMap, id)
+	}
+	vlog.filesToBeDeleted = nil
+	vlog.filesLock.Unlock()
 
-		for _, lf := range lfs {
-			if err := vlog.deleteLogFile(lf); err != nil {
-				return err
-			}
+	for _, lf := range lfs {
+		if err := vlog.deleteLogFile(lf); err != nil {
+			return err
 		}
 	}
 	return nil
