@@ -388,7 +388,7 @@ func (s *KV) immutablyGetMemTables() ([]*skl.Skiplist, func()) {
 	// TODO: Nothing stops the write loop from modifying s.mt while NewCopy runs.  This means it
 	// can be in an inconsistent state.
 	tables[0] = s.mt.NewCopy()
-	// tables[0] already has refcount 1.
+	// tables[0] already has refcount 1, don't IncrRef.
 
 	for i := n; i > 0; {
 		i--
