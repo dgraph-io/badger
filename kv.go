@@ -27,6 +27,7 @@ import (
 
 	"golang.org/x/net/trace"
 
+	"github.com/dgraph-io/badger/protos"
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
@@ -1021,18 +1022,9 @@ func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint64, f func(error))
 	s.compareAsync(e, f)
 }
 
-// BackupItem holds the new information for a specific key: whether it has a value, and what that
-// value is.  Also the CasCounter value for that item.
-type BackupItem struct {
-	Key        []byte
-	CASCounter uint64
-	HasValue   bool // False if the value was deleted (this is a "tombstone backup item")
-	Value      []byte
-}
-
 // StreamBackup sends a stream of backup items by calling `f` over and over again, until it's done,
 // at which point it returns.
-func (s *KV) StreamBackup(afterCas uint64, consumer func(BackupItem) error) error {
+func (s *KV) StreamBackup(afterCas uint64, consumer func(protos.BackupItem) error) error {
 	it, decrVlog := s.newBackupIterator(afterCas)
 	defer decrVlog()
 	defer it.Close()
@@ -1045,7 +1037,7 @@ func (s *KV) StreamBackup(afterCas uint64, consumer func(BackupItem) error) erro
 			continue
 		}
 
-		var item BackupItem
+		var item protos.BackupItem
 		item.Key = key
 		item.CASCounter = vs.CASCounter
 		if (vs.Meta & BitDelete) != 0 {
