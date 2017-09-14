@@ -566,7 +566,7 @@ func (s *KV) lastCASCounter() uint64 {
 }
 
 // newCASCounters generates a set of unique CAS counters -- the interval [x, x + howMany) where x
-// is the return value.
+// is the return value.  Never returns zero.
 func (s *KV) newCASCounters(howMany uint64) uint64 {
 	last := atomic.AddUint64(&s.lastUsedCasCounter, howMany)
 	return last - howMany + 1
@@ -994,6 +994,62 @@ func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint64, f func(error))
 	s.compareAsync(e, f)
 }
 
+// BackupItem holds the new information for a specific key: whether it has a value, and what that
+// value is.  Also the CasCounter value for that item.
+type BackupItem struct {
+	Key        []byte
+	CASCounter uint64
+	HasValue   bool // False if the value was deleted (this is a "tombstone backup item")
+	Value      []byte
+}
+
+// StreamBackup sends a stream of backup items by calling `f` over and over again, until it's done,
+// at which point it returns.
+func (s *KV) StreamBackup(afterCas uint64, consumer func(BackupItem) error) error {
+	it, decrVlog := s.newBackupIterator(afterCas)
+	defer decrVlog()
+	defer it.Close()
+
+	for it.Rewind(); it.Valid(); it.Next() {
+		key := append([]byte{}, it.Key()...)
+		vs := it.Value()
+
+		if vs.CASCounter <= afterCas {
+			continue
+		}
+
+		var item BackupItem
+		item.Key = key
+		item.CASCounter = vs.CASCounter
+		if (vs.Meta & BitDelete) != 0 {
+			// Tombstone
+			item.HasValue = false
+		} else {
+			item.HasValue = true
+			if (vs.Meta & BitValuePointer) == 0 {
+				item.Value = append([]byte{}, vs.Value...)
+			} else {
+				var vp valuePointer
+				vp.Decode(vs.Value)
+				err := s.vlog.Read(vp, func(data []byte) error {
+					item.Value = append([]byte{}, data...)
+					return nil
+				})
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		if err := consumer(item); err != nil {
+			// f can tell us to stop.
+			return err
+		}
+	}
+
+	return nil
+}
+
 var errNoRoom = errors.New("No room for write")
 
 // ensureRoomForWrite is always called serially.
@@ -1033,18 +1089,26 @@ func arenaSize(opt *Options) int64 {
 }
 
 // WriteLevel0Table flushes memtable. It drops deleteValues.
-func writeLevel0Table(s *skl.Skiplist, f *os.File) error {
+func writeLevel0Table(s *skl.Skiplist, f *os.File) (maxCasCounter uint64, err error) {
 	iter := s.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder()
 	defer b.Close()
+	maxCas := uint64(0)
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
-		if err := b.Add(iter.Key(), iter.Value()); err != nil {
-			return err
+		value := iter.Value()
+		if maxCas < value.CASCounter {
+			maxCas = value.CASCounter
+		}
+		if err := b.Add(iter.Key(), value); err != nil {
+			return 0, err
 		}
 	}
-	_, err := f.Write(b.Finish())
-	return err
+	_, err = f.Write(b.Finish())
+	if err != nil {
+		return 0, err
+	}
+	return maxCas, nil
 }
 
 type flushTask struct {
@@ -1084,7 +1148,7 @@ func (s *KV) flushMemtable(lc *y.Closer) error {
 		dirSyncCh := make(chan error)
 		go func() { dirSyncCh <- syncDir(s.opt.Dir) }()
 
-		err = writeLevel0Table(ft.mt, fd)
+		maxCasCounter, err := writeLevel0Table(ft.mt, fd)
 		dirSyncErr := <-dirSyncCh
 
 		if err != nil {
@@ -1096,7 +1160,7 @@ func (s *KV) flushMemtable(lc *y.Closer) error {
 			return err
 		}
 
-		tbl, err := table.OpenTable(fd, s.opt.TableLoadingMode)
+		tbl, err := table.OpenTable(fd, maxCasCounter, s.opt.TableLoadingMode)
 		if err != nil {
 			s.elog.Printf("ERROR while opening table: %v", err)
 			return err

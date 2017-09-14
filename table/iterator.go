@@ -428,10 +428,12 @@ type ConcatIterator struct {
 }
 
 // NewConcatIterator creates a new concatenated iterator
-func NewConcatIterator(tbls []*Table, reversed bool) *ConcatIterator {
-	iters := make([]*Iterator, len(tbls))
+func NewConcatIterator(tbls []*Table, reversed bool, afterCas uint64) *ConcatIterator {
+	iters := make([]*Iterator, 0, len(tbls))
 	for i := 0; i < len(tbls); i++ {
-		iters[i] = tbls[i].NewIterator(reversed)
+		if tbls[i].MaxCasCounter() > afterCas {
+			iters = append(iters, tbls[i].NewIterator(reversed))
+		}
 	}
 	return &ConcatIterator{
 		reversed: reversed,

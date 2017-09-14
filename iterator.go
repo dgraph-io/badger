@@ -350,11 +350,21 @@ func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 	for i := 0; i < len(tables); i++ {
 		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
 	}
-	iters = s.lc.appendIterators(iters, opt.Reverse) // This will increment references.
+	iters = s.lc.appendIterators(iters, opt.Reverse, 0) // This will increment references.
 	res := &Iterator{
 		kv:   s,
 		iitr: y.NewMergeIterator(iters, opt.Reverse),
 		opt:  opt,
 	}
 	return res
+}
+
+// newBackupIterator returns an iterator that produces changes in the level controller (but not
+// memtables!).  Call decrVlog() after calling iter.Close().
+func (s *KV) newBackupIterator(afterCas uint64) (iter *y.MergeIterator, decrVlog func()) {
+	s.vlog.incrIteratorCount()
+	// TODO: We should skip tables with an older CAS value.
+	iters := []y.Iterator{}
+	s.lc.appendIterators(iters, false, afterCas)
+	return y.NewMergeIterator(iters, false), func() { s.vlog.decrIteratorCount() }
 }

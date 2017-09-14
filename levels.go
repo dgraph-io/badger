@@ -116,7 +116,7 @@ func newLevelsController(kv *KV, mf *Manifest) (*levelsController, error) {
 			return nil, errors.Wrapf(err, "Opening file: %q", fname)
 		}
 
-		t, err := table.OpenTable(fd, kv.opt.TableLoadingMode)
+		t, err := table.OpenTable(fd, tableManifest.MaxCasCounter, kv.opt.TableLoadingMode)
 		if err != nil {
 			closeAllTables(tables)
 			return nil, errors.Wrapf(err, "Opening table: %q", fname)
@@ -274,7 +274,7 @@ func (s *levelsController) compactBuildTables(
 	}
 
 	// Next level has level>=1 and we can use ConcatIterator as key ranges do not overlap.
-	iters = append(iters, table.NewConcatIterator(botTables, false))
+	iters = append(iters, table.NewConcatIterator(botTables, false, 0))
 	it := y.NewMergeIterator(iters, false)
 	defer it.Close() // Important to close the iterator to do ref counting.
 
@@ -290,11 +290,16 @@ func (s *levelsController) compactBuildTables(
 	for ; it.Valid(); i++ {
 		timeStart := time.Now()
 		builder := table.NewTableBuilder()
+		maxCas := uint64(0)
 		for ; it.Valid(); it.Next() {
 			if builder.ReachedCapacity(s.kv.opt.MaxTableSize) {
 				break
 			}
-			y.Check(builder.Add(it.Key(), it.Value()))
+			value := it.Value()
+			if maxCas < value.CASCounter {
+				maxCas = value.CASCounter
+			}
+			y.Check(builder.Add(it.Key(), value))
 		}
 		// It was true that it.Valid() at least once in the loop above, which means we
 		// called Add() at least once, and builder is not Empty().
@@ -317,7 +322,7 @@ func (s *levelsController) compactBuildTables(
 				return
 			}
 
-			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode)
+			tbl, err := table.OpenTable(fd, maxCas, s.kv.opt.TableLoadingMode)
 			// decrRef is added below.
 			resultCh <- newTableResult{tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())}
 		}(builder)
@@ -364,7 +369,8 @@ func (s *levelsController) compactBuildTables(
 func buildChangeSet(cd *compactDef, newTables []*table.Table) protos.ManifestChangeSet {
 	changes := []*protos.ManifestChange{}
 	for _, table := range newTables {
-		changes = append(changes, makeTableCreateChange(table.ID(), cd.nextLevel.level))
+		changes = append(changes,
+			makeTableCreateChange(table.ID(), cd.nextLevel.level, table.MaxCasCounter()))
 	}
 	for _, table := range cd.top {
 		changes = append(changes, makeTableDeleteChange(table.ID()))
@@ -497,7 +503,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 			// The order matters here -- you can't temporarily have two copies of the same
 			// table id when reloading the manifest.
 			makeTableDeleteChange(tbl.ID()),
-			makeTableCreateChange(tbl.ID(), nextLevel.level),
+			makeTableCreateChange(tbl.ID(), nextLevel.level, tbl.MaxCasCounter()),
 		}
 		if err := s.kv.manifest.addChanges(changes); err != nil {
 			return err
@@ -608,7 +614,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	// the proper order. (That means this update happens before that of some compaction which
 	// deletes the table.)
 	err := s.kv.manifest.addChanges([]*protos.ManifestChange{
-		makeTableCreateChange(t.ID(), 0),
+		makeTableCreateChange(t.ID(), 0, t.MaxCasCounter()),
 	})
 	if err != nil {
 		return err
@@ -687,11 +693,11 @@ func appendIteratorsReversed(out []y.Iterator, th []*table.Table, reversed bool)
 // appendIterators appends iterators to an array of iterators, for merging.
 // Note: This obtains references for the table handlers. Remember to close these iterators.
 func (s *levelsController) appendIterators(
-	iters []y.Iterator, reversed bool) []y.Iterator {
+	iters []y.Iterator, reversed bool, afterCas uint64) []y.Iterator {
 	// Just like with get, it's important we iterate the levels from 0 on upward, to avoid missing
 	// data when there's a compaction.
 	for _, level := range s.levels {
-		iters = level.appendIterators(iters, reversed)
+		iters = level.appendIterators(iters, reversed, afterCas)
 	}
 	return iters
 }

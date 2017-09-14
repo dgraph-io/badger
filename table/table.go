@@ -59,6 +59,7 @@ type Table struct {
 	// The following are initialized once and const.
 	smallest, biggest []byte // Smallest and largest keys.
 	id                uint64 // file id, part of filename
+	maxCasCounter     uint64 // maximum CasCounter value of any records
 
 	bf bbloom.Bloom
 }
@@ -113,7 +114,7 @@ func (b byKey) Less(i int, j int) bool { return bytes.Compare(b[i].key, b[j].key
 // entry.  Returns a table with one reference count on it (decrementing which may delete the file!
 // -- consider t.Close() instead).  The fd has to writeable because we call Truncate on it before
 // deleting.
-func OpenTable(fd *os.File, loadingMode options.FileLoadingMode) (*Table, error) {
+func OpenTable(fd *os.File, maxCasCounter uint64, loadingMode options.FileLoadingMode) (*Table, error) {
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -168,6 +169,7 @@ func OpenTable(fd *os.File, loadingMode options.FileLoadingMode) (*Table, error)
 	if it2.Valid() {
 		t.biggest = it2.Key()
 	}
+	t.maxCasCounter = maxCasCounter
 	return t, nil
 }
 
@@ -324,6 +326,9 @@ func (t *Table) Smallest() []byte { return t.smallest }
 
 // Biggest is its biggest key, or nil if there are none
 func (t *Table) Biggest() []byte { return t.biggest }
+
+// MaxCasCounter is its maximum cas counter value (never zero), or 0 if there are no keys
+func (t *Table) MaxCasCounter() uint64 { return t.maxCasCounter }
 
 // Filename is NOT the file name.  Just kidding, it is.
 func (t *Table) Filename() string { return t.fd.Name() }

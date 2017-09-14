@@ -67,7 +67,8 @@ type LevelManifest struct {
 // TableManifest contains information about a specific level
 // in the LSM tree.
 type TableManifest struct {
-	Level uint8
+	Level         uint8
+	MaxCasCounter uint64
 }
 
 // manifestFile holds the file pointer (and other info) about the manifest file, which is a log
@@ -98,7 +99,7 @@ const (
 func (m *Manifest) asChanges() []*protos.ManifestChange {
 	changes := make([]*protos.ManifestChange, 0, len(m.Tables))
 	for id, tm := range m.Tables {
-		changes = append(changes, makeTableCreateChange(id, int(tm.Level)))
+		changes = append(changes, makeTableCreateChange(id, int(tm.Level), tm.MaxCasCounter))
 	}
 	return changes
 }
@@ -211,7 +212,7 @@ func (mf *manifestFile) addChanges(changesParam []*protos.ManifestChange) error 
 var magicText = [4]byte{'B', 'd', 'g', 'r'}
 
 // The magic version number.
-const magicVersion = 2
+const magicVersion = 3
 
 func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 	rewritePath := filepath.Join(dir, manifestRewriteFilename)
@@ -378,7 +379,8 @@ func applyManifestChange(build *Manifest, tc *protos.ManifestChange) error {
 			return fmt.Errorf("MANIFEST invalid, table %d exists", tc.Id)
 		}
 		build.Tables[tc.Id] = TableManifest{
-			Level: uint8(tc.Level),
+			Level:         uint8(tc.Level),
+			MaxCasCounter: tc.MaxCasCounter,
 		}
 		for len(build.Levels) <= int(tc.Level) {
 			build.Levels = append(build.Levels, LevelManifest{make(map[uint64]struct{})})
@@ -410,11 +412,12 @@ func applyChangeSet(build *Manifest, changeSet *protos.ManifestChangeSet) error 
 	return nil
 }
 
-func makeTableCreateChange(id uint64, level int) *protos.ManifestChange {
+func makeTableCreateChange(id uint64, level int, maxCasCounter uint64) *protos.ManifestChange {
 	return &protos.ManifestChange{
-		Id:    id,
-		Op:    protos.ManifestChange_CREATE,
-		Level: uint32(level),
+		Id:            id,
+		Op:            protos.ManifestChange_CREATE,
+		Level:         uint32(level),
+		MaxCasCounter: maxCasCounter,
 	}
 }
 

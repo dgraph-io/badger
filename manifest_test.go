@@ -107,7 +107,7 @@ func key(prefix string, i int) string {
 	return prefix + fmt.Sprintf("%04d", i)
 }
 
-func buildTestTable(t *testing.T, prefix string, n int) *os.File {
+func buildTestTable(t *testing.T, prefix string, n int) (f *os.File, maxCasCounter uint64) {
 	y.AssertTrue(n <= 10000)
 	keyValues := make([][]string, n)
 	for i := 0; i < n; i++ {
@@ -120,7 +120,7 @@ func buildTestTable(t *testing.T, prefix string, n int) *os.File {
 
 // TODO - Move these to somewhere where table package can also use it.
 // keyValues is n by 2 where n is number of pairs.
-func buildTable(t *testing.T, keyValues [][]string) *os.File {
+func buildTable(t *testing.T, keyValues [][]string) (f *os.File, maxCasCounter uint64) {
 	b := table.NewTableBuilder()
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
@@ -136,13 +136,14 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	sort.Slice(keyValues, func(i, j int) bool {
 		return keyValues[i][0] < keyValues[j][0]
 	})
+	maxCasCounter = uint64(len(keyValues))
 	for i, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
 		err := b.Add([]byte(kv[0]), y.ValueStruct{
 			Value:      []byte(kv[1]),
 			Meta:       'A',
 			UserMeta:   0,
-			CASCounter: uint64(i),
+			CASCounter: uint64(i + 1),
 		})
 		if t != nil {
 			require.NoError(t, err)
@@ -153,7 +154,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	f.Write(b.Finish())
 	f.Close()
 	f, _ = y.OpenSyncedFile(filename, true)
-	return f
+	return f, maxCasCounter
 }
 
 func TestOverlappingKeyRangeError(t *testing.T) {
@@ -168,8 +169,8 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 
 	lh0 := newLevelHandler(kv, 0)
 	lh1 := newLevelHandler(kv, 1)
-	f := buildTestTable(t, "k", 2)
-	t1, err := table.OpenTable(f, options.MemoryMap)
+	f, maxCas := buildTestTable(t, "k", 2)
+	t1, err := table.OpenTable(f, maxCas, options.MemoryMap)
 	require.NoError(t, err)
 	defer t1.DecrRef()
 
@@ -189,8 +190,8 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	require.Equal(t, true, done)
 	lc.runCompactDef(0, cd)
 
-	f = buildTestTable(t, "l", 2)
-	t2, err := table.OpenTable(f, options.MemoryMap)
+	f, maxCas = buildTestTable(t, "l", 2)
+	t2, err := table.OpenTable(f, maxCas, options.MemoryMap)
 	require.NoError(t, err)
 	defer t2.DecrRef()
 	done = lh0.tryAddLevel0Table(t2)
@@ -220,14 +221,15 @@ func TestManifestRewrite(t *testing.T) {
 	require.Equal(t, 0, m.Creations)
 	require.Equal(t, 0, m.Deletions)
 
+	const casCounter = 5
 	err = mf.addChanges([]*protos.ManifestChange{
-		makeTableCreateChange(0, 0),
+		makeTableCreateChange(0, 0, casCounter),
 	})
 	require.NoError(t, err)
 
 	for i := uint64(0); i < uint64(deletionsThreshold*3); i++ {
 		ch := []*protos.ManifestChange{
-			makeTableCreateChange(i+1, 0),
+			makeTableCreateChange(i+1, 0, casCounter),
 			makeTableDeleteChange(i),
 		}
 		err := mf.addChanges(ch)
@@ -239,6 +241,6 @@ func TestManifestRewrite(t *testing.T) {
 	mf, m, err = helpOpenOrCreateManifestFile(dir, deletionsThreshold)
 	require.NoError(t, err)
 	require.Equal(t, map[uint64]TableManifest{
-		uint64(deletionsThreshold * 3): {Level: 0},
+		uint64(deletionsThreshold * 3): {Level: 0, MaxCasCounter: casCounter},
 	}, m.Tables)
 }
