@@ -18,12 +18,14 @@ package badger
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 
 	"github.com/dgraph-io/badger/protos"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -61,17 +63,47 @@ func backupFileName(id uint64) string {
 	return fmt.Sprintf("backup-%d", id)
 }
 
-// TODO: Enforce that backups arrive in increasing key order.  (So that merging works properly.)
-
-// RestoreBackup streams all changes in increasing key order to itemCh.  Does so in batches.
+// RestoreBackup streams all changes in increasing key order to itemCh.  Does so in batches.  Omits
+// changes with cas counter <= thresholdCasCounter.  Pass 0 for thresholdCASCounter to include all
+// changes (because 1 is the minimum possible cas counter value).
 func RestoreBackup(path string, thresholdCASCounter uint64, itemCh <-chan []protos.BackupItem) (err error) {
+	status, err := ReadBackupStatus(path)
+	if err != nil {
+		return err
+	}
+
+	ids := []uint64{}
+	for _, backup := range status.Backups {
+		if backup.MaxCASCounter <= thresholdCASCounter {
+			continue
+		}
+		ids = append(ids, backup.BackupID)
+	}
+
 	// TODO: Implement.
 	return nil
 }
 
-// NewBackup stores a new backup onto an existing backup store.  itemCh is finished when it returns
-// an empty slice.
-func NewBackup(path string, maxCASCounter uint64, itemCh <-chan []protos.BackupItem) (err error) {
+var (
+	// ErrBackupKeysOutOfOrder means you tried storing a backup without supplying the keys in order.
+	ErrBackupKeysOutOfOrder = errors.New("backup keys out of order")
+	// ErrBackupAborted means the user aborted the backup.
+	ErrBackupAborted = errors.New("backup aborted")
+)
+
+// BackupMessage holds a message passed to NewBackup.  'finished'
+type BackupMessage struct {
+	// if true, items is nil and we're done backing up.  If false, items must be non-nil (or the
+	// channel will be deemed closed and backup will fail).
+	finished bool
+	items    []protos.BackupItem
+}
+
+// NewBackup stores a new backup onto an existing backup store.  itemCh is deemed finished when it
+// produces an empty slice.  Keys must be distinct and arrive in increasing order.  (Each slice
+// must be in order, and the last key of the current slice must be less than the first key of the
+// next slice.)
+func NewBackup(path string, maxCASCounter uint64, itemCh <-chan BackupMessage) (err error) {
 	// TODO: Some sort of flocking to prevent multiple people from trying to add a backup
 	// simultaneously?
 	status, err := ReadBackupStatus(path)
@@ -103,11 +135,24 @@ func NewBackup(path string, maxCASCounter uint64, itemCh <-chan []protos.BackupI
 
 	// Just give it a generous buffer, even though file is not in sync mode.
 	writer := bufio.NewWriterSize(f, 1<<20)
-	for items := range itemCh {
-		if items == nil {
+
+	prevKey := []byte{} // used to enforce key ordering
+	first := true
+	for msg := range itemCh {
+		if msg.finished {
 			break
 		}
-		for _, item := range items {
+		if msg.items == nil {
+			fileName := f.Name()
+			_ = f.Close()
+			f = nil
+			_ = os.Remove(fileName)
+			return ErrBackupAborted
+		}
+		for _, item := range msg.items {
+			if bytes.Compare(prevKey, item.Key) >= 0 && !first {
+				return ErrBackupKeysOutOfOrder
+			}
 			data, err := item.Marshal()
 			if err != nil {
 				return err
@@ -115,6 +160,7 @@ func NewBackup(path string, maxCASCounter uint64, itemCh <-chan []protos.BackupI
 			if _, err := writer.Write(data); err != nil {
 				return err
 			}
+			first = false
 		}
 	}
 	if err := writer.Flush(); err != nil {
