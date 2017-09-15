@@ -44,44 +44,6 @@ func CreateBackupStore(path string) (err error) {
 
 }
 
-func writeBackupStatus(path string, status protos.BackupStatus) (err error) {
-	// TODO: dir file syncing?  Locking?
-	data, err := status.Marshal()
-	if err != nil {
-		return err
-	}
-	f, err := ioutil.TempFile(path, "partial-manifest-")
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if f != nil {
-			// Error case hit already
-			_ = f.Close()
-		}
-	}()
-	tmpName := f.Name()
-	if f != nil {
-
-	}
-	if _, err := f.Write(data); err != nil {
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	err = f.Close()
-	f = nil
-	if err != nil {
-		return err
-	}
-	if err := os.Rename(filepath.Join(path, tmpName),
-		filepath.Join(path, backupManifestFilename)); err != nil {
-		return err
-	}
-	return nil
-}
-
 var backupFilenameRegex = regexp.MustCompile("^backup-([1-9][0-9])+-([1-9][0-9]+)$")
 
 // ReadBackupStatus reads the BackupStatus description from the backup directory.
@@ -149,21 +111,12 @@ func NewBackup(path string, maxCASCounter uint64, itemCh <-chan []protos.BackupI
 		}
 	}
 
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	err = f.Close()
+	newBackupID := maxBackupID + 1
+	err = syncCloseRename(f, tmpName, filepath.Join(path, backupFileName(newBackupID)))
 	f = nil
 	if err != nil {
 		return err
 	}
-
-	newBackupID := maxBackupID + 1
-	if err := os.Rename(filepath.Join(path, tmpName),
-		filepath.Join(path, backupFileName(newBackupID))); err != nil {
-		return err
-	}
-
 	// TODO: Sync dir?  Yadda yadda.
 
 	status.Backups = append(status.Backups, &protos.BackupStatusItem{
@@ -172,4 +125,44 @@ func NewBackup(path string, maxCASCounter uint64, itemCh <-chan []protos.BackupI
 	})
 
 	return writeBackupStatus(path, status)
+}
+
+func writeBackupStatus(path string, status protos.BackupStatus) (err error) {
+	// TODO: dir file syncing?  Locking?
+	data, err := status.Marshal()
+	if err != nil {
+		return err
+	}
+	f, err := ioutil.TempFile(path, "partial-manifest-")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if f != nil {
+			// Error case hit already
+			_ = f.Close()
+		}
+	}()
+	tmpName := f.Name()
+
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	err = syncCloseRename(f, tmpName, filepath.Join(path, backupManifestFilename))
+	f = nil
+	return err
+}
+
+// Always closes the file
+func syncCloseRename(f *os.File, oldPath string, newPath string) (err error) {
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	err = f.Close()
+	f = nil
+	if err != nil {
+		return err
+	}
+	return os.Rename(oldPath, newPath)
 }
