@@ -25,7 +25,9 @@ message BackupItem {
         bytes Key = 1;
         uint64 CASCounter = 2;
         bool HasValue = 3;
-        bytes Value = 4;
+        // UserMeta always holds a value 0 <= ... < 256.
+        uint32 UserMeta = 4;
+        bytes Value = 5;
 }
 
 // BackupStatus describes the state of a backup store -- what backups are made, their max cas

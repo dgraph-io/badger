@@ -1045,6 +1045,7 @@ func (s *KV) StreamBackup(afterCas uint64, consumer func(protos.BackupItem) erro
 			item.HasValue = false
 		} else {
 			item.HasValue = true
+			item.UserMeta = uint32(vs.UserMeta)
 			if (vs.Meta & BitValuePointer) == 0 {
 				item.Value = append([]byte{}, vs.Value...)
 			} else {
