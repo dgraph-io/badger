@@ -27,3 +27,17 @@ message BackupItem {
         bool HasValue = 3;
         bytes Value = 4;
 }
+
+// BackupStatus describes the state of a backup store -- what backups are made, their max cas
+// values, other info
+message BackupStatus {
+        repeated BackupStatusItem Backups = 1;
+}
+
+// BackupStatusItem describes a single backup.  (It might identify the original backup or an
+// incremental backup after that.)
+message BackupStatusItem {
+        uint64 BackupID = 1;
+        uint64 MaxCASCounter = 2;
+}
+
