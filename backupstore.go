@@ -19,12 +19,16 @@ package badger
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/dgraph-io/badger/protos"
+	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
 )
 
@@ -66,7 +70,7 @@ func backupFileName(id uint64) string {
 // RestoreBackup streams all changes in increasing key order to itemCh.  Does so in batches.  Omits
 // changes with cas counter <= thresholdCasCounter.  Pass 0 for thresholdCASCounter to include all
 // changes (because 1 is the minimum possible cas counter value).
-func RestoreBackup(path string, thresholdCASCounter uint64, itemCh <-chan []protos.BackupItem) (err error) {
+func RestoreBackup(path string, thresholdCASCounter uint64, itemCh chan<- []protos.BackupItem) (err error) {
 	status, err := ReadBackupStatus(path)
 	if err != nil {
 		return err
@@ -80,8 +84,151 @@ func RestoreBackup(path string, thresholdCASCounter uint64, itemCh <-chan []prot
 		ids = append(ids, backup.BackupID)
 	}
 
-	// TODO: Implement.
-	return nil
+	// Sort by increasing ID (because MergeIterator expects order by age)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	const memUsage = 2 << 30
+	bufferSize := memUsage / len(ids)
+
+	fileIters := []y.Iterator{}
+	defer func() {
+		for _, iter := range fileIters {
+			iter.Close()
+		}
+	}()
+
+	for _, id := range ids {
+		iter, err := makeBackupFileIterator(path, id, bufferSize)
+		if err != nil {
+			return err
+		}
+		fileIters = append(fileIters, iter)
+	}
+
+	// TODO: Ensure fileIters is actually in the right order
+	mergeIter := y.NewMergeIterator(fileIters, false)
+
+	for mergeIter.Rewind(); mergeIter.Valid(); mergeIter.Next() {
+		key := mergeIter.Key()
+		value := mergeIter.Value()
+
+		items := []protos.BackupItem{
+			protos.BackupItem{
+				Key:        key,
+				CASCounter: value.CASCounter,
+				HasValue:   value.Meta == 0,
+				UserMeta:   uint32(value.UserMeta),
+				Value:      value.Value,
+			},
+		}
+
+		itemCh <- items
+	}
+
+	// TODO: Check that mergeIter.Close handles our errors nicely
+	return mergeIter.Close()
+}
+
+type backupFileIterator struct {
+	fp         *os.File
+	reader     *bufio.Reader
+	firstKey   []byte
+	firstValue y.ValueStruct
+	err        error
+}
+
+func makeBackupFileIterator(path string, id uint64, bufferSize int) (*backupFileIterator, error) {
+	fp, err := os.Open(filepath.Join(path, backupFileName(id)))
+	if err != nil {
+		return nil, err
+	}
+	return &backupFileIterator{fp: fp}, nil
+}
+
+func (bit *backupFileIterator) Rewind() {
+	if bit.err != nil {
+		bit.err = nil
+	}
+	_, err := bit.fp.Seek(0, os.SEEK_SET)
+	if err != nil {
+		bit.err = err
+		bit.firstKey = nil
+		bit.firstValue = y.ValueStruct{}
+		return
+	}
+	bit.reader = bufio.NewReader(bit.fp)
+	bit.Next()
+}
+
+func (bit *backupFileIterator) Key() []byte {
+	return bit.firstKey
+}
+
+func (bit *backupFileIterator) Value() y.ValueStruct {
+	return bit.firstValue
+}
+
+func (bit *backupFileIterator) Next() {
+	if bit.err != nil {
+		return
+	}
+	len, err := binary.ReadUvarint(bit.reader)
+	if err != nil {
+		bit.err = err
+		bit.firstKey = nil
+		bit.firstValue = y.ValueStruct{}
+		return
+	}
+
+	data := make([]byte, len)
+	if _, err := io.ReadFull(bit.reader, data); err != nil {
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
+		bit.err = err
+		bit.firstKey = nil
+		bit.firstValue = y.ValueStruct{}
+		return
+	}
+
+	var item protos.BackupItem
+	if err := item.Unmarshal(data); err != nil {
+		bit.err = err
+		bit.firstKey = nil
+		bit.firstValue = y.ValueStruct{}
+		return
+	}
+	bit.firstKey = item.Key
+	var meta byte
+	if !item.HasValue {
+		meta = BitDelete
+	}
+	bit.firstValue = y.ValueStruct{
+		// This is typically a vptr but in our case it's a value -- we're just using MergeIterator.
+		Value:      item.Value,
+		Meta:       meta,
+		UserMeta:   uint8(item.UserMeta),
+		CASCounter: item.CASCounter,
+	}
+}
+
+func (bit *backupFileIterator) Valid() bool {
+	return bit.firstKey != nil
+}
+
+func (bit *backupFileIterator) Close() error {
+	err := bit.err
+	if err == io.EOF {
+		err = nil
+	}
+	if closeErr := bit.fp.Close(); err == nil {
+		err = closeErr
+	}
+	return err
+}
+
+func (bit *backupFileIterator) Seek([]byte) {
+	panic("Seek not implemented")
 }
 
 var (
@@ -155,6 +302,11 @@ func NewBackup(path string, maxCASCounter uint64, itemCh <-chan BackupMessage) (
 			}
 			data, err := item.Marshal()
 			if err != nil {
+				return err
+			}
+			var lenBuf [binary.MaxVarintLen64]byte
+			lenLen := binary.PutUvarint(lenBuf[:], uint64(len(data)))
+			if _, err := writer.Write(lenBuf[:lenLen]); err != nil {
 				return err
 			}
 			if _, err := writer.Write(data); err != nil {
