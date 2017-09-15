@@ -22,7 +22,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"regexp"
 
 	"github.com/dgraph-io/badger/protos"
 )
@@ -45,8 +44,6 @@ func CreateBackupStore(path string) (err error) {
 
 }
 
-var backupFilenameRegex = regexp.MustCompile("^backup-([1-9][0-9])+-([1-9][0-9]+)$")
-
 // ReadBackupStatus reads the BackupStatus description from the backup directory.
 func ReadBackupStatus(path string) (protos.BackupStatus, error) {
 	data, err := ioutil.ReadFile(filepath.Join(path, backupManifestFilename))
@@ -62,6 +59,14 @@ func ReadBackupStatus(path string) (protos.BackupStatus, error) {
 
 func backupFileName(id uint64) string {
 	return fmt.Sprintf("backup-%d", id)
+}
+
+// TODO: Enforce that backups arrive in increasing key order.  (So that merging works properly.)
+
+// RestoreBackup streams all changes in increasing key order to itemCh.  Does so in batches.
+func RestoreBackup(path string, thresholdCASCounter uint64, itemCh <-chan []protos.BackupItem) (err error) {
+	// TODO: Implement.
+	return nil
 }
 
 // NewBackup stores a new backup onto an existing backup store.  itemCh is finished when it returns
