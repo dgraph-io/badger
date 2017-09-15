@@ -962,8 +962,6 @@ func (vlog *valueLog) pickLog() *logFile {
 }
 
 func (vlog *valueLog) doRunGC(gcThreshold float64) error {
-	defer func() { <-vlog.garbageCh }()
-
 	lf := vlog.pickLog()
 	if lf == nil {
 		return ErrNoRewrite
@@ -1091,7 +1089,9 @@ func (vlog *valueLog) waitOnGC(lc *y.Closer) {
 func (vlog *valueLog) runGC(gcThreshold float64) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
-		return vlog.doRunGC(gcThreshold)
+		err := vlog.doRunGC(gcThreshold)
+		<-vlog.garbageCh
+		return err
 	default:
 		return ErrRejected
 	}
