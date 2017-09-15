@@ -260,7 +260,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	go out.doWrites(out.closers.writes)
 
 	out.closers.valueGC = y.NewCloser(1)
-	go out.vlog.runGCInLoop(out.closers.valueGC)
+	go out.vlog.waitOnGC(out.closers.valueGC)
 
 	valueDirLockGuard = nil
 	dirLockGuard = nil
@@ -1175,4 +1175,31 @@ func (s *KV) updateSize(lc *y.Closer) {
 			return
 		}
 	}
+}
+
+// RunValueLogGC would trigger a value log garbage collection with no guarantees that a call would
+// result in a space reclaim. Every run would in the best case rewrite only one log file. So,
+// repeated calls may be necessary.
+//
+// The way it currently works is that it would randomly pick up a value log file, and sample it. If
+// the sample shows that we can discard at least discardRatio space of that file, it would be
+// rewritten. Else, an ErrNoRewrite error would be returned indicating that the GC didn't result in
+// any file rewrite.
+//
+// We recommend setting discardRatio to 0.5, thus indicating that a file be rewritten if half the
+// space can be discarded.  This results in a lifetime value log write amplification of 2 (1 from
+// original write + 0.5 rewrite + 0.25 + 0.125 + ... = 2). Setting it to higher value would result
+// in fewer space reclaims, while setting it to a lower value would result in more space reclaims at
+// the cost of increased activity on the LSM tree. discardRatio must be lower than 1.0, otherwise an
+// ErrInvalidRequest is returned.
+//
+// Only one GC is allowed at a time. If another value log GC is running, or KV has been closed, this
+// would return an ErrRejected.
+//
+// Note: Every time GC is run, it would produce a spike of activity on the LSM tree.
+func (s *KV) RunValueLogGC(discardRatio float64) error {
+	if discardRatio > 0.99 || discardRatio < 0.0 {
+		return ErrInvalidRequest
+	}
+	return s.vlog.runGC(discardRatio)
 }

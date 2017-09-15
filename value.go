@@ -49,18 +49,36 @@ const (
 	M               int64 = 1 << 20
 )
 
-// ErrRetry is returned when a log file containing the value is not found.
-// This usually indicates that it may have been garbage collected, and the
-// operation needs to be retried.
-var ErrRetry = errors.New("Unable to find log file. Please retry")
+var (
+	// ErrRetry is returned when a log file containing the value is not found.
+	// This usually indicates that it may have been garbage collected, and the
+	// operation needs to be retried.
+	ErrRetry = errors.New("Unable to find log file. Please retry")
 
-// ErrCasMismatch is returned when a CompareAndSet operation has failed due
-// to a counter mismatch.
-var ErrCasMismatch = errors.New("CompareAndSet failed due to counter mismatch")
+	// ErrCasMismatch is returned when a CompareAndSet operation has failed due
+	// to a counter mismatch.
+	ErrCasMismatch = errors.New("CompareAndSet failed due to counter mismatch")
 
-// ErrKeyExists is returned by SetIfAbsent metadata bit is set, but the
-// key already exists in the store.
-var ErrKeyExists = errors.New("SetIfAbsent failed since key already exists")
+	// ErrKeyExists is returned by SetIfAbsent metadata bit is set, but the
+	// key already exists in the store.
+	ErrKeyExists = errors.New("SetIfAbsent failed since key already exists")
+
+	// ErrThresholdZero is returned if threshold is set to zero, and value log GC is called.
+	// In such a case, GC can't be run.
+	ErrThresholdZero = errors.New(
+		"Value log GC can't run because threshold is set to zero.")
+
+	// ErrNoRewrite is returned if a call for value log GC doesn't result in a log file rewrite.
+	ErrNoRewrite = errors.New(
+		"Value log GC attempt didn't result in any cleanup.")
+
+	// ErrRejected is returned if a value log GC is called either while another GC is running, or
+	// after KV::Close has been called.
+	ErrRejected = errors.New("Value log GC request rejected.")
+
+	// ErrInvalidRequest is returned if the user request is invalid.
+	ErrInvalidRequest = errors.New("Invalid request")
+)
 
 const (
 	maxKeySize   = 1 << 20
@@ -570,6 +588,8 @@ type valueLog struct {
 	maxFid            uint32
 	writableLogOffset uint32
 	opt               Options
+
+	garbageCh chan struct{}
 }
 
 func vlogFilePath(dirPath string, fid uint32) string {
@@ -675,6 +695,7 @@ func (vlog *valueLog) Open(kv *KV, opt *Options) error {
 	}
 
 	vlog.elog = trace.NewEventLog("Badger", "Valuelog")
+	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 
 	return nil
 }
@@ -925,24 +946,6 @@ func valueBytesToEntry(buf []byte) (e Entry) {
 	return
 }
 
-func (vlog *valueLog) runGCInLoop(lc *y.Closer) {
-	defer lc.Done()
-	if vlog.opt.ValueGCThreshold == 0.0 {
-		return
-	}
-
-	tick := time.NewTicker(vlog.opt.ValueGCRunInterval)
-	defer tick.Stop()
-	for {
-		select {
-		case <-lc.HasBeenClosed():
-			return
-		case <-tick.C:
-			vlog.doRunGC()
-		}
-	}
-}
-
 func (vlog *valueLog) pickLog() *logFile {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
@@ -958,10 +961,12 @@ func (vlog *valueLog) pickLog() *logFile {
 	return vlog.filesMap[fids[idx]]
 }
 
-func (vlog *valueLog) doRunGC() error {
+func (vlog *valueLog) doRunGC(gcThreshold float64) error {
+	defer func() { <-vlog.garbageCh }()
+
 	lf := vlog.pickLog()
 	if lf == nil {
-		return nil
+		return ErrNoRewrite
 	}
 
 	type reason struct {
@@ -1060,9 +1065,9 @@ func (vlog *valueLog) doRunGC() error {
 	}
 	vlog.elog.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
 
-	if r.total < 10.0 || r.discard < vlog.opt.ValueGCThreshold*r.total {
+	if r.total < 10.0 || r.discard < gcThreshold*r.total {
 		vlog.elog.Printf("Skipping GC on fid: %d\n\n", lf.fid)
-		return nil
+		return ErrNoRewrite
 	}
 
 	vlog.elog.Printf("REWRITING VLOG %d\n", lf.fid)
@@ -1071,4 +1076,23 @@ func (vlog *valueLog) doRunGC() error {
 	}
 	vlog.elog.Printf("Done rewriting.")
 	return nil
+}
+
+func (vlog *valueLog) waitOnGC(lc *y.Closer) {
+	defer lc.Done()
+
+	<-lc.HasBeenClosed() // Wait for lc to be closed.
+
+	// Block any GC in progress to finish, and don't allow any more writes to runGC by filling up
+	// the channel of size 1.
+	vlog.garbageCh <- struct{}{}
+}
+
+func (vlog *valueLog) runGC(gcThreshold float64) error {
+	select {
+	case vlog.garbageCh <- struct{}{}:
+		return vlog.doRunGC(gcThreshold)
+	default:
+		return ErrRejected
+	}
 }

@@ -235,7 +235,6 @@ func TestValueGC3(t *testing.T) {
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
-	opt.ValueGCThreshold = 0.0 // Disable
 
 	kv, err := NewKV(opt)
 	require.NoError(t, err)
@@ -404,6 +403,55 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	require.NoError(t, err)
 	checkKeys(t, kv, [][]byte{k1, k3})
 	require.NoError(t, kv.Close())
+}
+
+func TestValueLogTrigger(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opt := getTestOptions(dir)
+	opt.ValueLogFileSize = 1 << 20
+	kv, err := NewKV(opt)
+	require.NoError(t, err)
+
+	// Write a lot of data, so it creates some work for valug log GC.
+	sz := 32 << 10
+	var entries []*Entry
+	for i := 0; i < 100; i++ {
+		v := make([]byte, sz)
+		rand.Read(v[:rand.Intn(sz)])
+		entries = append(entries, &Entry{
+			Key:   []byte(fmt.Sprintf("key%d", i)),
+			Value: v,
+		})
+	}
+	kv.BatchSet(entries)
+	for _, e := range entries {
+		require.NoError(t, e.Error, "entry with error: %+v", e)
+	}
+
+	for i := 0; i < 45; i++ {
+		kv.Delete([]byte(fmt.Sprintf("key%d", i)))
+	}
+
+	// Now attempt to run 5 value log GCs simultaneously.
+	errCh := make(chan error, 5)
+	for i := 0; i < 5; i++ {
+		go func() { errCh <- kv.RunValueLogGC(0.5) }()
+	}
+	var numRejected int
+	for i := 0; i < 5; i++ {
+		err := <-errCh
+		if err == ErrRejected {
+			numRejected++
+		}
+	}
+	require.True(t, numRejected > 0, "Should have found at least one value log GC request rejected.")
+	require.NoError(t, kv.Close())
+
+	err = kv.RunValueLogGC(0.5)
+	require.Equal(t, ErrRejected, err, "Error should be returned after closing KV.")
 }
 
 func createVlog(t *testing.T, entries []*Entry) []byte {
