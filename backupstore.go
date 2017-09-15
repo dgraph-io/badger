@@ -89,7 +89,6 @@ func NewBackup(path string, maxCASCounter uint64, itemCh <-chan []protos.BackupI
 	if err != nil {
 		return err
 	}
-	tmpName := f.Name()
 	defer func() {
 		if closeErr := f.Close(); err == nil {
 			err = closeErr
@@ -112,7 +111,7 @@ func NewBackup(path string, maxCASCounter uint64, itemCh <-chan []protos.BackupI
 	}
 
 	newBackupID := maxBackupID + 1
-	err = syncCloseRename(f, tmpName, filepath.Join(path, backupFileName(newBackupID)))
+	err = syncCloseRename(f, f.Name(), filepath.Join(path, backupFileName(newBackupID)))
 	f = nil
 	if err != nil {
 		return err
@@ -143,12 +142,10 @@ func writeBackupStatus(path string, status protos.BackupStatus) (err error) {
 			_ = f.Close()
 		}
 	}()
-	tmpName := f.Name()
-
 	if _, err := f.Write(data); err != nil {
 		return err
 	}
-	err = syncCloseRename(f, tmpName, filepath.Join(path, backupManifestFilename))
+	err = syncCloseRename(f, f.Name(), filepath.Join(path, backupManifestFilename))
 	f = nil
 	return err
 }
