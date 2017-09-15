@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bufio"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -95,6 +96,8 @@ func NewBackup(path string, maxCASCounter uint64, itemCh <-chan []protos.BackupI
 		}
 	}()
 
+	// Just give it a generous buffer, even though file is not in sync mode.
+	writer := bufio.NewWriterSize(f, 1<<20)
 	for items := range itemCh {
 		if items == nil {
 			break
@@ -104,10 +107,13 @@ func NewBackup(path string, maxCASCounter uint64, itemCh <-chan []protos.BackupI
 			if err != nil {
 				return err
 			}
-			if _, err := f.Write(data); err != nil {
+			if _, err := writer.Write(data); err != nil {
 				return err
 			}
 		}
+	}
+	if err := writer.Flush(); err != nil {
+		return err
 	}
 
 	newBackupID := maxBackupID + 1
@@ -142,7 +148,11 @@ func writeBackupStatus(path string, status protos.BackupStatus) (err error) {
 			_ = f.Close()
 		}
 	}()
-	if _, err := f.Write(data); err != nil {
+	writer := bufio.NewWriter(f)
+	if _, err := writer.Write(data); err != nil {
+		return err
+	}
+	if err := writer.Flush(); err != nil {
 		return err
 	}
 	err = syncCloseRename(f, f.Name(), filepath.Join(path, backupManifestFilename))
