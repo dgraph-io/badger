@@ -94,7 +94,7 @@ func RestoreBackup(path string, thresholdCASCounter uint64, consumer func(protos
 	fileIters := []y.Iterator{}
 	defer func() {
 		for _, iter := range fileIters {
-			iter.Close()
+			_ = iter.Close()
 		}
 	}()
 
@@ -109,6 +109,12 @@ func RestoreBackup(path string, thresholdCASCounter uint64, consumer func(protos
 	// In MergeIterator, keys returned by the iterators closer to the beginning of the array take
 	// precedence.
 	mergeIter := y.NewMergeIterator(fileIters, false)
+	fileIters = nil
+	defer func() {
+		if closeErr := mergeIter.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 
 	for mergeIter.Rewind(); mergeIter.Valid(); mergeIter.Next() {
 		key := mergeIter.Key()
@@ -125,7 +131,7 @@ func RestoreBackup(path string, thresholdCASCounter uint64, consumer func(protos
 		}
 	}
 
-	return mergeIter.Close()
+	return nil
 }
 
 type backupFileIterator struct {
