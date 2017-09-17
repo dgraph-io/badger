@@ -1,33 +1,33 @@
 This is much better than `skiplist` and `slist`.
 
 ```
-BenchmarkReadWrite/frac_0-8         	 2000000	      1056 ns/op
-BenchmarkReadWrite/frac_1-8         	 2000000	       945 ns/op
-BenchmarkReadWrite/frac_2-8         	 2000000	       854 ns/op
-BenchmarkReadWrite/frac_3-8         	 2000000	       777 ns/op
-BenchmarkReadWrite/frac_4-8         	 2000000	       721 ns/op
-BenchmarkReadWrite/frac_5-8         	 3000000	       660 ns/op
-BenchmarkReadWrite/frac_6-8         	 5000000	       553 ns/op
-BenchmarkReadWrite/frac_7-8         	 5000000	       518 ns/op
-BenchmarkReadWrite/frac_8-8         	 5000000	       435 ns/op
-BenchmarkReadWrite/frac_9-8         	10000000	       385 ns/op
-BenchmarkReadWrite/frac_10-8        	100000000	        21.5 ns/op
+BenchmarkReadWrite/frac_0-8         	 3000000	       537 ns/op
+BenchmarkReadWrite/frac_1-8         	 3000000	       503 ns/op
+BenchmarkReadWrite/frac_2-8         	 3000000	       492 ns/op
+BenchmarkReadWrite/frac_3-8         	 3000000	       475 ns/op
+BenchmarkReadWrite/frac_4-8         	 3000000	       440 ns/op
+BenchmarkReadWrite/frac_5-8         	 5000000	       442 ns/op
+BenchmarkReadWrite/frac_6-8         	 5000000	       380 ns/op
+BenchmarkReadWrite/frac_7-8         	 5000000	       338 ns/op
+BenchmarkReadWrite/frac_8-8         	 5000000	       294 ns/op
+BenchmarkReadWrite/frac_9-8         	10000000	       268 ns/op
+BenchmarkReadWrite/frac_10-8        	100000000	        26.3 ns/op
 ```
 
-But compared to a simple map with read-write lock, it is still slower.
+And even better than a simple map with read-write lock:
 
 ```
-BenchmarkReadWriteMap/frac_0-8      	 2000000	       780 ns/op
-BenchmarkReadWriteMap/frac_1-8      	 2000000	       669 ns/op
-BenchmarkReadWriteMap/frac_2-8      	 3000000	       625 ns/op
-BenchmarkReadWriteMap/frac_3-8      	 3000000	       611 ns/op
-BenchmarkReadWriteMap/frac_4-8      	 3000000	       483 ns/op
-BenchmarkReadWriteMap/frac_5-8      	 3000000	       478 ns/op
-BenchmarkReadWriteMap/frac_6-8      	 5000000	       558 ns/op
-BenchmarkReadWriteMap/frac_7-8      	 3000000	       469 ns/op
-BenchmarkReadWriteMap/frac_8-8      	 5000000	       452 ns/op
-BenchmarkReadWriteMap/frac_9-8      	 5000000	       370 ns/op
-BenchmarkReadWriteMap/frac_10-8     	10000000	       228 ns/op
+BenchmarkReadWriteMap/frac_0-8         	 2000000	       774 ns/op
+BenchmarkReadWriteMap/frac_1-8         	 2000000	       647 ns/op
+BenchmarkReadWriteMap/frac_2-8         	 3000000	       605 ns/op
+BenchmarkReadWriteMap/frac_3-8         	 3000000	       603 ns/op
+BenchmarkReadWriteMap/frac_4-8         	 3000000	       556 ns/op
+BenchmarkReadWriteMap/frac_5-8         	 3000000	       472 ns/op
+BenchmarkReadWriteMap/frac_6-8         	 3000000	       476 ns/op
+BenchmarkReadWriteMap/frac_7-8         	 3000000	       457 ns/op
+BenchmarkReadWriteMap/frac_8-8         	 5000000	       444 ns/op
+BenchmarkReadWriteMap/frac_9-8         	 5000000	       361 ns/op
+BenchmarkReadWriteMap/frac_10-8        	10000000	       212 ns/op
 ```
 
 # Node Pooling

@@ -39,11 +39,11 @@ func newValue(v int) []byte {
 
 // length iterates over skiplist to give exact size.
 func length(s *Skiplist) int {
-	x := s.head.getNext(0)
+	x := s.getNext(s.head, 0)
 	count := 0
 	for x != nil {
 		count++
-		x = x.getNext(0)
+		x = s.getNext(x, 0)
 	}
 	return count
 }
@@ -426,7 +426,7 @@ func BenchmarkReadWrite(b *testing.B) {
 	for i := 0; i <= 10; i++ {
 		readFrac := float32(i) / 10.0
 		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
-			l := NewSkiplist(arenaSize * 64) // TODO: Fix this. Allow arena size to vary with b.N.
+			l := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
 			defer l.DecrRef()
 			b.ResetTimer()
 			var count int

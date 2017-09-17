@@ -74,7 +74,8 @@ type Options struct {
 	// ------------------------------
 	DoNotCompact bool // Stops LSM tree from compactions.
 
-	maxBatchSize int64 // max batch size in bytes
+	maxBatchCount int64 // max entries in batch
+	maxBatchSize  int64 // max batch size in bytes
 }
 
 // DefaultOptions sets a list of recommended options for good performance.

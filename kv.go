@@ -93,6 +93,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	// Make a copy early and fill in maxBatchSize
 	opt := *optParam
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
+	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
 	for _, path := range []string{opt.Dir, opt.ValueDir} {
 		dirExists, err := exists(path)
@@ -697,7 +698,7 @@ func (s *KV) doWrites(lc *y.Closer) {
 
 func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 	var reqs []*request
-	var size int64
+	var count, size int64
 	var b *request
 	var bad []*Entry
 	for _, entry := range entries {
@@ -712,12 +713,14 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 			b.Wg = sync.WaitGroup{}
 			b.Wg.Add(1)
 		}
+		count++
 		size += int64(s.opt.estimateSize(entry))
 		b.Entries = append(b.Entries, entry)
-		if size >= s.opt.maxBatchSize {
+		if count >= s.opt.maxBatchCount || size >= s.opt.maxBatchSize {
 			s.writeCh <- b
 			y.NumPuts.Add(int64(len(b.Entries)))
 			reqs = append(reqs, b)
+			count = 0
 			size = 0
 			b = nil
 		}
@@ -1029,7 +1032,7 @@ func (s *KV) ensureRoomForWrite() error {
 }
 
 func arenaSize(opt *Options) int64 {
-	return opt.MaxTableSize + opt.maxBatchSize
+	return opt.MaxTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
 
 // WriteLevel0Table flushes memtable. It drops deleteValues.
