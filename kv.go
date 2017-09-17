@@ -1072,8 +1072,9 @@ func (s *KV) StreamBackup(afterCas uint64, consumer func(protos.BackupItem) erro
 }
 
 // BuildKVFromBackup creates a new badger instance from a backup.  opt.Dir and opt.ValueDir must
-// not exist.
-func BuildKVFromBackup(opt *Options, itemCh <-chan []protos.BackupItem) (err error) {
+// not exist.  `source` supplies BackupItems (in increasing key order, hopefully) until it returns
+// a nil slice (or an error).
+func BuildKVFromBackup(opt *Options, source func() ([]protos.BackupItem, error)) (err error) {
 	// First create the directories we're restoring our backup into.
 	if err := os.Mkdir(opt.Dir, 0755); err != nil {
 		return err
@@ -1096,7 +1097,14 @@ func BuildKVFromBackup(opt *Options, itemCh <-chan []protos.BackupItem) (err err
 
 	size := int64(0)
 	batch := []*Entry{}
-	for items := range itemCh {
+	for {
+		items, err := source()
+		if err != nil {
+			return err
+		}
+		if items == nil {
+			break
+		}
 		for _, item := range items {
 			if item.HasValue {
 				e := &Entry{
