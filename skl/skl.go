@@ -49,17 +49,15 @@ const (
 )
 
 type node struct {
-	// ONLY guards valueOffset, valueSize. To do without lock, we need to encode
-	// valueSize in arena. Consider this next time.
-	// RWMutex takes 24 bytes whereas Mutex takes 8 bytes.
-	sync.Mutex
-
 	// A byte slice is 24 bytes. We are trying to save space here.
 	keyOffset uint32 // Immutable. No need to lock to access key.
 	keySize   uint16 // Immutable. No need to lock to access key.
 
-	valueOffset uint32
-	valueSize   uint16 // Assume values not too big. There's value threshold.
+	// Multiple parts of the value are encoded as a single uint64 so that it
+	// can be atomically loaded and stored:
+	//   uint32: offset
+	//   uint16: size
+	value uint64
 
 	// []*node. Size is <=kMaxNumLevels. Usually a very small array. CAS.
 	// No need to lock.
@@ -120,13 +118,23 @@ func (s *Skiplist) valid() bool { return s.arena != nil }
 func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 	keyOffset := arena.putKey(key)
 	valOffset := arena.putVal(v)
+	value := encodeValue(valOffset, uint16(len(v.Value)))
 	return &node{
-		keyOffset:   keyOffset,
-		keySize:     uint16(len(key)),
-		valueOffset: valOffset,
-		valueSize:   uint16(len(v.Value)),
-		next:        make([]unsafe.Pointer, height),
+		keyOffset: keyOffset,
+		keySize:   uint16(len(key)),
+		value:     value,
+		next:      make([]unsafe.Pointer, height),
 	}
+}
+
+func encodeValue(valOffset uint32, valSize uint16) uint64 {
+	return uint64(valSize)<<32 | uint64(valOffset)
+}
+
+func decodeValue(value uint64) (valOffset uint32, valSize uint16) {
+	valOffset = uint32(value)
+	valSize = uint16(value >> 32)
+	return
 }
 
 // NewSkiplist makes a new empty skiplist, with a given arena size
@@ -142,9 +150,8 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 }
 
 func (s *node) getValueOffset() (uint32, uint16) {
-	s.Lock()
-	defer s.Unlock()
-	return s.valueOffset, s.valueSize
+	value := atomic.LoadUint64(&s.value)
+	return decodeValue(value)
 }
 
 func (s *node) key(arena *Arena) []byte {
@@ -153,10 +160,8 @@ func (s *node) key(arena *Arena) []byte {
 
 func (s *node) setValue(arena *Arena, v y.ValueStruct) {
 	valOffset := arena.putVal(v)
-	s.Lock()
-	defer s.Unlock()
-	s.valueOffset = valOffset
-	s.valueSize = uint16(len(v.Value))
+	value := encodeValue(valOffset, uint16(len(v.Value)))
+	atomic.StoreUint64(&s.value, value)
 }
 
 func (s *node) getNext(h int) *node {
