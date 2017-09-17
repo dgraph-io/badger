@@ -1071,7 +1071,8 @@ func (s *KV) StreamBackup(afterCas uint64, consumer func(protos.BackupItem) erro
 	return nil
 }
 
-// Builds a new badger instance from a backup.  opt.Dir and opt.ValueDir must not exist.
+// BuildKVFromBackup creates a new badger instance from a backup.  opt.Dir and opt.ValueDir must
+// not exist.
 func BuildKVFromBackup(opt *Options, itemCh <-chan []protos.BackupItem) (err error) {
 	// First create the directories we're restoring our backup into.
 	if err := os.Mkdir(opt.Dir, 0755); err != nil {
@@ -1093,8 +1094,9 @@ func BuildKVFromBackup(opt *Options, itemCh <-chan []protos.BackupItem) (err err
 		}
 	}()
 
+	size := int64(0)
+	batch := []*Entry{}
 	for items := range itemCh {
-		// TODO: Gosh, use BatchSet.
 		for _, item := range items {
 			if item.HasValue {
 				e := &Entry{
@@ -1102,10 +1104,22 @@ func BuildKVFromBackup(opt *Options, itemCh <-chan []protos.BackupItem) (err err
 					Value:    item.Value,
 					UserMeta: uint8(item.UserMeta),
 				}
-				if err := kv.BatchSet([]*Entry{e}); err != nil {
-					return err
+				size += int64(opt.estimateSize(e))
+				batch = append(batch, e)
+
+				if size >= opt.maxBatchSize {
+					if err := kv.BatchSet(batch); err != nil {
+						return err
+					}
+					size = 0
+					batch = []*Entry{}
 				}
 			}
+		}
+	}
+	if len(batch) > 0 {
+		if err := kv.BatchSet(batch); err != nil {
+			return err
 		}
 	}
 
