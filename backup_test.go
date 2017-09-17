@@ -26,6 +26,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func LoadBackupData(t *testing.T, kv *KV, limit int) {
+	entries := make([]*Entry, 0, limit)
+	for i := 0; i < limit; i++ {
+		entries = append(entries, &Entry{
+			Key:      []byte(fmt.Sprintf("key%09d", i)),
+			Value:    []byte(fmt.Sprintf("val%d", i)),
+			UserMeta: uint8(i),
+		})
+	}
+	err := kv.BatchSet(entries)
+	require.NoError(t, err)
+
+	for _, e := range entries {
+		require.NoError(t, e.Error, "entry with error: %+v", e)
+	}
+}
+
 func TestBasicBackup(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
@@ -34,29 +51,17 @@ func TestBasicBackup(t *testing.T) {
 	require.NoError(t, err)
 	defer kv.Close()
 
-	// Load data
-	var entries []*Entry
-	for i := 0; i < 100; i++ {
-		entries = append(entries, &Entry{
-			Key:      []byte(fmt.Sprintf("key%02d", i)),
-			Value:    []byte(fmt.Sprintf("val%d", i)),
-			UserMeta: uint8(i),
-		})
-	}
-	kv.BatchSet(entries)
-
-	for _, e := range entries {
-		require.NoError(t, e.Error, "entry with error: %+v", e)
-	}
+	LoadBackupData(t, kv, 100)
 
 	i := 0
 	// Now stream a backup
 	kv.StreamBackup(0, func(item protos.BackupItem) error {
-		require.Equal(t, fmt.Sprintf("key%02d", i), string(item.Key))
+		require.Equal(t, fmt.Sprintf("key%09d", i), string(item.Key))
 		require.True(t, item.HasValue)
 		require.Equal(t, fmt.Sprintf("val%d", i), string(item.Value))
 		require.Equal(t, uint32(uint8(i)), item.UserMeta)
 		i++
 		return nil
 	})
+	require.Equal(t, 100, i)
 }
