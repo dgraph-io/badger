@@ -57,13 +57,27 @@ func getItemValue(t *testing.T, item *KVItem) (val []byte) {
 	return val
 }
 
-func TestWrite(t *testing.T) {
+type tempKV struct {
+	*KV
+	dir string
+}
+
+func makeTempKV(t require.TestingT) tempKV {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
 	kv, err := NewKV(getTestOptions(dir))
 	require.NoError(t, err)
-	defer kv.Close()
+	return tempKV{KV: kv, dir: dir}
+}
+
+func (tkv *tempKV) cleanup(t require.TestingT) {
+	require.NoError(t, tkv.KV.Close())
+	require.NoError(t, os.RemoveAll(tkv.dir))
+}
+
+func TestWrite(t *testing.T) {
+	kv := makeTempKV(t)
+	defer kv.cleanup(t)
 
 	var entries []*Entry
 	for i := 0; i < 100; i++ {
@@ -79,11 +93,8 @@ func TestWrite(t *testing.T) {
 }
 
 func TestConcurrentWrite(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, _ := NewKV(getTestOptions(dir))
-	defer kv.Close()
+	kv := makeTempKV(t)
+	defer kv.cleanup(t)
 
 	// Not a benchmark. Just a simple test for concurrent writes.
 	n := 20
@@ -133,11 +144,8 @@ func TestConcurrentWrite(t *testing.T) {
 }
 
 func TestCAS(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, _ := NewKV(getTestOptions(dir))
-	defer kv.Close()
+	kv := makeTempKV(t)
+	defer kv.cleanup(t)
 
 	var entries []*Entry
 	for i := 0; i < 100; i++ {
@@ -225,14 +233,8 @@ func TestCAS(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
-	if err != nil {
-		t.Error(err)
-	}
-	defer kv.Close()
+	kv := makeTempKV(t)
+	defer kv.cleanup(t)
 
 	var item KVItem
 	kv.Set([]byte("key1"), []byte("val1"), 0x08)
@@ -277,17 +279,11 @@ func TestGet(t *testing.T) {
 }
 
 func TestExists(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
-	if err != nil {
-		t.Error(err)
-	}
-	defer kv.Close()
+	kv := makeTempKV(t)
+	defer kv.cleanup(t)
 
 	// populate with one entry
-	err = kv.Set([]byte("key1"), []byte("val1"), 0x00)
+	err := kv.Set([]byte("key1"), []byte("val1"), 0x00)
 	require.NoError(t, err)
 
 	tt := []struct {
@@ -320,15 +316,8 @@ func TestExists(t *testing.T) {
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestGetMore(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
-	if err != nil {
-		t.Error(err)
-		t.Fail()
-	}
-	defer kv.Close()
+	kv := makeTempKV(t)
+	defer kv.cleanup(t)
 
 	//	n := 500000
 	n := 10000
@@ -429,15 +418,8 @@ func TestGetMore(t *testing.T) {
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestExistsMore(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
-	if err != nil {
-		t.Error(err)
-		t.Fail()
-	}
-	defer kv.Close()
+	kv := makeTempKV(t)
+	defer kv.cleanup(t)
 
 	//	n := 500000
 	n := 10000
@@ -460,19 +442,18 @@ func TestExistsMore(t *testing.T) {
 	}
 	kv.validate()
 
-	var found bool
 	for i := 0; i < n; i++ {
 		if (i % 1000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		found, err = kv.Exists([]byte(k))
+		found, err := kv.Exists([]byte(k))
 		if err != nil {
 			t.Error(err)
 		}
 		require.EqualValues(t, true, found)
 	}
-	found, err = kv.Exists([]byte("non-exists"))
+	found, err := kv.Exists([]byte("non-exists"))
 	if err != nil {
 		t.Error(err)
 	}
@@ -512,11 +493,8 @@ func TestExistsMore(t *testing.T) {
 }
 
 func TestIterate2Basic(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, _ := NewKV(getTestOptions(dir))
-	defer kv.Close()
+	kv := makeTempKV(t)
+	defer kv.cleanup(t)
 
 	bkey := func(i int) []byte {
 		return []byte(fmt.Sprintf("%09d", i))
@@ -726,13 +704,11 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 }
 
 func TestSetIfAbsent(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	opt := getTestOptions(dir)
-	kv, err := NewKV(opt)
-	require.NoError(t, err)
+	kv := makeTempKV(t)
+	defer kv.cleanup(t)
 
 	key := []byte("k1")
-	err = kv.SetIfAbsent(key, []byte("val"), 0x00)
+	err := kv.SetIfAbsent(key, []byte("val"), 0x00)
 	require.NoError(t, err)
 
 	err = kv.SetIfAbsent(key, []byte("val2"), 0x00)
@@ -740,15 +716,8 @@ func TestSetIfAbsent(t *testing.T) {
 }
 
 func BenchmarkExists(b *testing.B) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(b, err)
-	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
-	if err != nil {
-		b.Error(err)
-		b.Fail()
-	}
-	defer kv.Close()
+	kv := makeTempKV(b)
+	defer kv.cleanup(b)
 
 	n := 50000
 	m := 100
@@ -813,25 +782,16 @@ func BenchmarkExists(b *testing.B) {
 }
 
 func TestPidFile(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	options := getTestOptions(dir)
-	kv1, err := NewKV(options)
-	require.NoError(t, err)
-	defer kv1.Close()
-	_, err = NewKV(options)
+	kv := makeTempKV(t)
+	defer kv.cleanup(t)
+	_, err := NewKV(getTestOptions(kv.dir))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Another process is using this Badger database")
 }
 
 func TestBigKeyValuePairs(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	kv, err := NewKV(getTestOptions(dir))
-	require.NoError(t, err)
+	kv := makeTempKV(t)
+	defer kv.cleanup(t)
 
 	bigK := make([]byte, maxKeySize+1)
 	bigV := make([]byte, maxValueSize+1)
@@ -842,7 +802,7 @@ func TestBigKeyValuePairs(t *testing.T) {
 
 	e1 := Entry{Key: small, Value: small}
 	e2 := Entry{Key: bigK, Value: bigV}
-	err = kv.BatchSet([]*Entry{&e1, &e2})
+	err := kv.BatchSet([]*Entry{&e1, &e2})
 	require.Nil(t, err)
 	require.Nil(t, e1.Error)
 	require.Equal(t, ErrExceedsMaxKeyValueSize, e2.Error)
@@ -852,16 +812,11 @@ func TestBigKeyValuePairs(t *testing.T) {
 	require.NoError(t, kv.Get(small, &item))
 	require.Equal(t, item.Key(), small)
 	require.Equal(t, getItemValue(t, &item), small)
-
-	require.NoError(t, kv.Close())
 }
 
 func TestIteratorPrefetchSize(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, _ := NewKV(getTestOptions(dir))
-	defer kv.Close()
+	kv := makeTempKV(t)
+	defer kv.cleanup(t)
 
 	bkey := func(i int) []byte {
 		return []byte(fmt.Sprintf("%09d", i))
