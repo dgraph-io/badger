@@ -110,19 +110,29 @@ func RestoreBackup(path string, thresholdCASCounter uint64, itemCh chan<- []prot
 	// precedence.
 	mergeIter := y.NewMergeIterator(fileIters, false)
 
+	// We send in batches because channel overhead could be significant.
+	size := int64(0) // Some approx metric to decide when to send a batch.
+	batch := []protos.BackupItem{}
+
 	for mergeIter.Rewind(); mergeIter.Valid(); mergeIter.Next() {
 		key := mergeIter.Key()
 		value := mergeIter.Value()
-		items := []protos.BackupItem{
-			protos.BackupItem{
-				Key:        key,
-				CASCounter: value.CASCounter,
-				HasValue:   value.Meta == 0, // or value.Meta != BitDelete
-				UserMeta:   uint32(value.UserMeta),
-				Value:      value.Value,
-			},
+		size += int64(len(key)) + int64(len(value.Value))
+		batch = append(batch, protos.BackupItem{
+			Key:        key,
+			CASCounter: value.CASCounter,
+			HasValue:   value.Meta == 0, // or value.Meta != BitDelete
+			UserMeta:   uint32(value.UserMeta),
+			Value:      value.Value,
+		})
+		if size > (1 << 20) {
+			itemCh <- batch
+			size = 0
+			batch = []protos.BackupItem{}
 		}
-		itemCh <- items
+	}
+	if len(batch) > 0 {
+		itemCh <- batch
 	}
 
 	return mergeIter.Close()
