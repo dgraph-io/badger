@@ -71,6 +71,7 @@ func backupFileName(id uint64) string {
 // changes with cas counter <= thresholdCasCounter.  Pass 0 for thresholdCASCounter to include all
 // changes (because 1 is the minimum possible cas counter value).
 func RestoreBackup(path string, thresholdCASCounter uint64, itemCh chan<- []protos.BackupItem) (err error) {
+	// TODO: If we remove thresholdCASCounter, we could filter away deletes.
 	status, err := ReadBackupStatus(path)
 	if err != nil {
 		return err
@@ -112,17 +113,15 @@ func RestoreBackup(path string, thresholdCASCounter uint64, itemCh chan<- []prot
 	for mergeIter.Rewind(); mergeIter.Valid(); mergeIter.Next() {
 		key := mergeIter.Key()
 		value := mergeIter.Value()
-
 		items := []protos.BackupItem{
 			protos.BackupItem{
 				Key:        key,
 				CASCounter: value.CASCounter,
-				HasValue:   value.Meta == 0,
+				HasValue:   value.Meta == 0, // or value.Meta != BitDelete
 				UserMeta:   uint32(value.UserMeta),
 				Value:      value.Value,
 			},
 		}
-
 		itemCh <- items
 	}
 

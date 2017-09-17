@@ -1071,6 +1071,47 @@ func (s *KV) StreamBackup(afterCas uint64, consumer func(protos.BackupItem) erro
 	return nil
 }
 
+// Builds a new badger instance from a backup.  opt.Dir and opt.ValueDir must not exist.
+func BuildKVFromBackup(opt *Options, itemCh <-chan []protos.BackupItem) (err error) {
+	// First create the directories we're restoring our backup into.
+	if err := os.Mkdir(opt.Dir, 0755); err != nil {
+		return err
+	}
+	if opt.Dir != opt.ValueDir {
+		if err := os.Mkdir(opt.ValueDir, 0755); err != nil {
+			return err
+		}
+	}
+
+	kv, err := NewKV(opt)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := kv.Close(); err == nil {
+			err = closeErr
+		}
+	}()
+
+	for items := range itemCh {
+		// TODO: Gosh, use BatchSet.
+		for _, item := range items {
+			if item.HasValue {
+				e := &Entry{
+					Key:      item.Key,
+					Value:    item.Value,
+					UserMeta: uint8(item.UserMeta),
+				}
+				if err := kv.BatchSet([]*Entry{e}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 var errNoRoom = errors.New("No room for write")
 
 // ensureRoomForWrite is always called serially.
