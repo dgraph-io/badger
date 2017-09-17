@@ -84,8 +84,8 @@ func RestoreBackup(path string, thresholdCASCounter uint64, itemCh chan<- []prot
 		ids = append(ids, backup.BackupID)
 	}
 
-	// Sort by increasing ID (because MergeIterator expects order by age)
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	// Sort by descending ID (because MergeIterator expects order by increasing age)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] > ids[j] })
 
 	const memUsage = 2 << 30
 	bufferSize := memUsage / len(ids)
@@ -105,7 +105,8 @@ func RestoreBackup(path string, thresholdCASCounter uint64, itemCh chan<- []prot
 		fileIters = append(fileIters, iter)
 	}
 
-	// TODO: Ensure fileIters is actually in the right order
+	// In MergeIterator, keys returned by the iterators closer to the beginning of the array take
+	// precedence.
 	mergeIter := y.NewMergeIterator(fileIters, false)
 
 	for mergeIter.Rewind(); mergeIter.Valid(); mergeIter.Next() {
@@ -125,7 +126,6 @@ func RestoreBackup(path string, thresholdCASCounter uint64, itemCh chan<- []prot
 		itemCh <- items
 	}
 
-	// TODO: Check that mergeIter.Close handles our errors nicely
 	return mergeIter.Close()
 }
 
