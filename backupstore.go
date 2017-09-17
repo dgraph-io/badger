@@ -237,19 +237,10 @@ var (
 	ErrBackupAborted = errors.New("backup aborted")
 )
 
-// BackupMessage holds a message passed to NewBackup.  'finished'
-type BackupMessage struct {
-	// if true, items is nil and we're done backing up.  If false, items must be non-nil (or the
-	// channel will be deemed closed and backup will fail).
-	finished bool
-	items    []protos.BackupItem
-}
-
-// NewBackup stores a new backup onto an existing backup store.  itemCh is deemed finished when it
-// produces an empty slice.  Keys must be distinct and arrive in increasing order.  (Each slice
-// must be in order, and the last key of the current slice must be less than the first key of the
-// next slice.)
-func NewBackup(path string, maxCASCounter uint64, itemCh <-chan BackupMessage) (err error) {
+// NewBackup stores a new backup onto an existing backup store.  producer is deemed finished when
+// it produces an empty slice (or error).  Keys must be distinct and arrive in increasing order
+// (across all slices).
+func NewBackup(path string, maxCASCounter uint64, producer func() ([]protos.BackupItem, error)) (err error) {
 	// TODO: Some sort of flocking to prevent multiple people from trying to add a backup
 	// simultaneously?
 	status, err := ReadBackupStatus(path)
@@ -284,18 +275,20 @@ func NewBackup(path string, maxCASCounter uint64, itemCh <-chan BackupMessage) (
 
 	prevKey := []byte{} // used to enforce key ordering
 	first := true
-	for msg := range itemCh {
-		if msg.finished {
-			break
-		}
-		if msg.items == nil {
+	for {
+		items, err := producer()
+		if err != nil {
 			fileName := f.Name()
 			_ = f.Close()
 			f = nil
 			_ = os.Remove(fileName)
-			return ErrBackupAborted
+			return err
 		}
-		for _, item := range msg.items {
+		if items == nil {
+			break
+		}
+
+		for _, item := range items {
 			if bytes.Compare(prevKey, item.Key) >= 0 && !first {
 				return ErrBackupKeysOutOfOrder
 			}
@@ -314,6 +307,7 @@ func NewBackup(path string, maxCASCounter uint64, itemCh <-chan BackupMessage) (
 			first = false
 		}
 	}
+
 	if err := writer.Flush(); err != nil {
 		return err
 	}
