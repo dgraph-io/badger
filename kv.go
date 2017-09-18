@@ -56,17 +56,18 @@ type KV struct {
 	// nil if Dir and ValueDir are the same
 	valueDirGuard *DirectoryLockGuard
 
-	closers        closers
-	elog           trace.EventLog
-	mt             *skl.Skiplist   // Our latest (actively written) in-memory table
-	imm            []*skl.Skiplist // Add here only AFTER pushing to flushChan.
-	opt            Options
-	manifest       *manifestFile
-	lc             *levelsController
-	vlog           valueLog
-	vptr           valuePointer // less than or equal to a pointer to the last vlog value put into mt
-	writeCh        chan *request
-	writePendingCh chan struct{}  // used as a mutex to halt the write loop
+	closers  closers
+	elog     trace.EventLog
+	mt       *skl.Skiplist   // Our latest (actively written) in-memory table
+	imm      []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+	opt      Options
+	manifest *manifestFile
+	lc       *levelsController
+	vlog     valueLog
+	vptr     valuePointer // less than or equal to a pointer to the last vlog value put into mt
+	writeCh  chan *request
+	// used as a mutex to halt the write loop -- must be acquired _before_  the sync.RWMutex.
+	writePendingCh chan struct{}
 	flushChan      chan flushTask // For flushing memtables.
 
 	// Incremented in the non-concurrently accessed write loop.  But also accessed outside. So
@@ -381,17 +382,20 @@ func syncDir(dir string) error {
 // immutablyGetMemtables gets the same memtables as getMemTables -- except the mutable memtable is
 // copied, so it cannot be changed during usage.
 func (s *KV) immutablyGetMemTables() ([]*skl.Skiplist, func()) {
+	// We make a copy of the mutable skiplist. We acquire mutex to copy s.mt while write loop isn't
+	// mutating it.  We have to do this before acquiring s.RLock() (because the lock ordering
+	// between the two locks disallows us from acquiring it while s.RLock() is held).
+	tables := make([]*skl.Skiplist, 1)
+	s.writePendingCh <- struct{}{}
+	tables[0] = s.mt.NewCopy()
+	<-s.writePendingCh
+
 	s.RLock()
 	defer s.RUnlock()
 
 	n := len(s.imm)
-	tables := make([]*skl.Skiplist, 0, n+1)
-	// We make a copy of the mutable skiplist.
 
-	s.writePendingCh <- struct{}{} // acquire mutex to copy s.mt while write loop isn't mutating it
-	tables = append(tables, s.mt.NewCopy())
-	<-s.writePendingCh
-	// tables[0] already has refcount 1, don't IncrRef.
+	// tables[0] already has refcount 1, don't IncrRef again.
 
 	for i := n; i > 0; {
 		i--
