@@ -632,11 +632,8 @@ func TestIterateDeleted(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	opt := DefaultOptions
-	opt.SyncWrites = true
-	opt.Dir = dir
-	opt.ValueDir = dir
-	ps, err := NewKV(&opt)
+	opt := getTestOptions(dir)
+	ps, err := NewKV(opt)
 	require.NoError(t, err)
 	defer ps.Close()
 	ps.Set([]byte("Key1"), []byte("Value1"), 0x00)
@@ -696,10 +693,7 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opt := new(Options)
-	*opt = DefaultOptions
-	opt.Dir = dir
-	opt.ValueDir = dir
+	opt := getTestOptions(dir)
 	kv, err := NewKV(opt)
 	if err != nil {
 		t.Error(err)
