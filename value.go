@@ -66,15 +66,15 @@ var (
 	// ErrThresholdZero is returned if threshold is set to zero, and value log GC is called.
 	// In such a case, GC can't be run.
 	ErrThresholdZero = errors.New(
-		"Value log GC can't run because threshold is set to zero.")
+		"Value log GC can't run because threshold is set to zero")
 
 	// ErrNoRewrite is returned if a call for value log GC doesn't result in a log file rewrite.
 	ErrNoRewrite = errors.New(
-		"Value log GC attempt didn't result in any cleanup.")
+		"Value log GC attempt didn't result in any cleanup")
 
 	// ErrRejected is returned if a value log GC is called either while another GC is running, or
 	// after KV::Close has been called.
-	ErrRejected = errors.New("Value log GC request rejected.")
+	ErrRejected = errors.New("Value log GC request rejected")
 
 	// ErrInvalidRequest is returned if the user request is invalid.
 	ErrInvalidRequest = errors.New("Invalid request")
