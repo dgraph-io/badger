@@ -68,7 +68,6 @@ func backupFileName(id uint64) string {
 
 // RestoreBackup streams all changes in increasing key order to itemCh.
 func RestoreBackup(path string, consumer func(protos.BackupItem) error) (err error) {
-	// TODO: If we remove thresholdCASCounter, we could filter away deletes.
 	status, err := ReadBackupStatus(path)
 	if err != nil {
 		return err
