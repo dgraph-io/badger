@@ -66,10 +66,8 @@ func backupFileName(id uint64) string {
 	return fmt.Sprintf("backup-%d", id)
 }
 
-// RestoreBackup streams all changes in increasing key order to itemCh.  Does so in batches.  Omits
-// changes with cas counter <= thresholdCasCounter.  Pass 0 for thresholdCASCounter to include all
-// changes (because 1 is the minimum possible cas counter value).
-func RestoreBackup(path string, thresholdCASCounter uint64, consumer func(protos.BackupItem) error) (err error) {
+// RestoreBackup streams all changes in increasing key order to itemCh.
+func RestoreBackup(path string, consumer func(protos.BackupItem) error) (err error) {
 	// TODO: If we remove thresholdCASCounter, we could filter away deletes.
 	status, err := ReadBackupStatus(path)
 	if err != nil {
@@ -78,9 +76,6 @@ func RestoreBackup(path string, thresholdCASCounter uint64, consumer func(protos
 
 	ids := []uint64{}
 	for _, backup := range status.Backups {
-		if backup.MaxCASCounter <= thresholdCASCounter {
-			continue
-		}
 		ids = append(ids, backup.BackupID)
 	}
 
@@ -118,15 +113,17 @@ func RestoreBackup(path string, thresholdCASCounter uint64, consumer func(protos
 	for mergeIter.Rewind(); mergeIter.Valid(); mergeIter.Next() {
 		key := mergeIter.Key()
 		value := mergeIter.Value()
-		err := consumer(protos.BackupItem{
-			Key:        key,
-			CASCounter: value.CASCounter,
-			HasValue:   value.Meta == 0, // or value.Meta != BitDelete
-			UserMeta:   uint32(value.UserMeta),
-			Value:      value.Value,
-		})
-		if err != nil {
-			return err
+		if value.Meta == 0 { // if value.Meta != BitDelete
+			err := consumer(protos.BackupItem{
+				Key:        key,
+				CASCounter: value.CASCounter,
+				HasValue:   true,
+				UserMeta:   uint32(value.UserMeta),
+				Value:      value.Value,
+			})
+			if err != nil {
+				return err
+			}
 		}
 	}
 
