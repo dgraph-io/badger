@@ -46,11 +46,10 @@ import (
 const (
 	maxHeight      = 20
 	heightIncrease = math.MaxUint32 / 3
-	nodeSize       = int(unsafe.Sizeof(node{}))
 )
 
 // MaxNodeSize is the memory footprint of a node of maximum height.
-const MaxNodeSize = nodeSize + (maxHeight-1)*offsetSize
+const MaxNodeSize = int(unsafe.Sizeof(node{}))
 
 type node struct {
 	// ONLY guards valueOffset, valueSize. To do without lock, we need to encode
@@ -68,13 +67,14 @@ type node struct {
 	valueOffset uint32
 	valueSize   uint16 // Assume values not too big. There's value threshold.
 
-	// When node is allocated, extra space is allocated after it in memory,
-	// and unsafe operations are used to access array elements, which are
-	// offsets to the previous and next nodes. This is usually a very small
-	// array, since the probability of each successive level decreases
-	// exponentially. The size is always <= maxHeight. All accesses to elements
-	// should use CAS operations, with no need to lock.
-	tower [1]uint32
+	// Most nodes do not need to use the full height of the tower, since the
+	// probability of each successive level decreases exponentially. Because
+	// these elements are never accessed, they do not need to be allocated.
+	// Therefore, when a node is allocated in the arena, its memory footprint
+	// is deliberately truncated to not include unneeded tower elements.
+	//
+	// All accesses to elements should use CAS operations, with no need to lock.
+	tower [maxHeight]uint32
 }
 
 // Skiplist maps keys to values (in memory)
@@ -148,15 +148,11 @@ func (s *node) setValue(arena *Arena, v y.ValueStruct) {
 }
 
 func (s *node) getNextOffset(h int) uint32 {
-	return atomic.LoadUint32(&s.unsafeTower()[h])
+	return atomic.LoadUint32(&s.tower[h])
 }
 
 func (s *node) casNextOffset(h int, old, val uint32) bool {
-	return atomic.CompareAndSwapUint32(&s.unsafeTower()[h], old, val)
-}
-
-func (s *node) unsafeTower() *[maxHeight]uint32 {
-	return (*[maxHeight]uint32)(unsafe.Pointer(&s.tower))
+	return atomic.CompareAndSwapUint32(&s.tower[h], old, val)
 }
 
 // Returns true if key is strictly > n.key.
@@ -328,7 +324,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 				y.AssertTrue(prev[i] != next[i])
 			}
 			nextOffset := s.arena.getNodeOffset(next[i])
-			x.unsafeTower()[i] = nextOffset
+			x.tower[i] = nextOffset
 			if prev[i].casNextOffset(i, nextOffset, s.arena.getNodeOffset(x)) {
 				// Managed to insert x between prev[i] and next[i]. Go to the next level.
 				break
