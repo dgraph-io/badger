@@ -81,9 +81,10 @@ func TestBackupStore(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, status.Backups)
 
+	const count = 100
 	i := 0
-	err = NewBackup(storeDir, 200, func() ([]protos.BackupItem, error) {
-		if i == 100 {
+	err = NewBackup(storeDir, 2*count, func() ([]protos.BackupItem, error) {
+		if i == count {
 			return nil, nil
 		}
 		ret := []protos.BackupItem{
@@ -98,7 +99,7 @@ func TestBackupStore(t *testing.T) {
 				Key:        []byte(fmt.Sprintf("key%09d-B", i)),
 				HasValue:   false,
 				Value:      nil,
-				UserMeta:   uint32(uint8(i)),
+				UserMeta:   0,
 				CASCounter: uint64(2*i + 2),
 			},
 		}
@@ -106,4 +107,27 @@ func TestBackupStore(t *testing.T) {
 		return ret, nil
 	})
 	require.NoError(t, err)
+
+	j := 0
+	err = RestoreBackup(storeDir, 0, func(item protos.BackupItem) error {
+		require.True(t, j < 2*count)
+		i := j / 2
+		if j%2 == 0 {
+			require.Equal(t, fmt.Sprintf("key%09d-A", i), string(item.Key))
+			require.True(t, item.HasValue)
+			require.Equal(t, uint64(2*i+1), item.CASCounter)
+			require.Equal(t, uint32(uint8(i)), item.UserMeta)
+			require.Equal(t, fmt.Sprintf("value%d", i), string(item.Value))
+		} else {
+			require.Equal(t, fmt.Sprintf("key%09d-B", i), string(item.Key))
+			require.False(t, item.HasValue)
+			require.Equal(t, 0, len(item.Value))
+			require.Equal(t, uint32(0), item.UserMeta)
+			require.Equal(t, uint64(2*i+2), item.CASCounter)
+		}
+		j++
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2*count, j)
 }
