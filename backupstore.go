@@ -242,8 +242,6 @@ var (
 // it produces an empty slice (or error).  Keys must be distinct and arrive in increasing order
 // (across all slices).
 func NewBackup(path string, maxCASCounter uint64, producer func() ([]protos.BackupItem, error)) (err error) {
-	// TODO: Some sort of flocking to prevent multiple people from trying to add a backup
-	// simultaneously?
 	status, err := ReadBackupStatus(path)
 	if err != nil {
 		return err
