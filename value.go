@@ -24,7 +24,6 @@ import (
 	"hash/crc32"
 	"io"
 	"io/ioutil"
-	"math"
 	"math/rand"
 	"os"
 	"sort"
@@ -638,8 +637,8 @@ func (vlog *valueLog) openOrCreateFiles() error {
 				vlog.opt.SyncWrites); err != nil {
 				return errors.Wrapf(err, "Unable to open value log file as RDWR")
 			}
-
-			if err := lf.mmap(math.MaxUint32); err != nil {
+			maxMmapSize := int64(500 * (1 << 20))
+			if err := lf.mmap(maxMmapSize); err != nil {
 				return errors.Wrapf(err, "Unable to mmap RDWR log file")
 			}
 		} else {
@@ -674,7 +673,8 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 		return nil, errors.Wrapf(err, "Unable to sync value log file dir")
 	}
 
-	if err = lf.mmap(math.MaxUint32); err != nil {
+	maxMmapSize := int64(500 * (1 << 20))
+	if err = lf.mmap(maxMmapSize); err != nil {
 		return nil, errors.Wrapf(err, "Unable to mmap value log file")
 	}
 
