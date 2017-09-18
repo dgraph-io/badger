@@ -241,6 +241,6 @@ func TestManifestRewrite(t *testing.T) {
 	mf, m, err = helpOpenOrCreateManifestFile(dir, deletionsThreshold)
 	require.NoError(t, err)
 	require.Equal(t, map[uint64]TableManifest{
-		uint64(deletionsThreshold * 3): {Level: 0, MaxCasCounter: casCounter},
+		uint64(deletionsThreshold * 3): {Level: 0, MaxCASCounter: casCounter},
 	}, m.Tables)
 }

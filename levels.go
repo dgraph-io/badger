@@ -116,7 +116,7 @@ func newLevelsController(kv *KV, mf *Manifest) (*levelsController, error) {
 			return nil, errors.Wrapf(err, "Opening file: %q", fname)
 		}
 
-		t, err := table.OpenTable(fd, tableManifest.MaxCasCounter, kv.opt.TableLoadingMode)
+		t, err := table.OpenTable(fd, tableManifest.MaxCASCounter, kv.opt.TableLoadingMode)
 		if err != nil {
 			closeAllTables(tables)
 			return nil, errors.Wrapf(err, "Opening table: %q", fname)
