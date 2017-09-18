@@ -42,4 +42,3 @@ message BackupStatusItem {
         uint64 BackupID = 1;
         uint64 MaxCASCounter = 2;
 }
-
