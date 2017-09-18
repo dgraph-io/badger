@@ -62,11 +62,12 @@ func TestValueBasic(t *testing.T) {
 
 	var buf1, buf2 []byte
 	var err1, err2 error
-	err1 = log.readValueBytes(b.Ptrs[0], func(val []byte) error {
+	s := new(y.Slice)
+	err1 = log.readValueBytes(b.Ptrs[0], s, func(val []byte) error {
 		buf1 = y.Safecopy(nil, val)
 		return nil
 	})
-	err2 = log.readValueBytes(b.Ptrs[1], func(val []byte) error {
+	err2 = log.readValueBytes(b.Ptrs[1], s, func(val []byte) error {
 		buf2 = y.Safecopy(nil, val)
 		return nil
 	})
@@ -499,7 +500,7 @@ func BenchmarkReadWrite(b *testing.B) {
 				y.Check(err)
 				defer vl.Close()
 				b.ResetTimer()
-
+				s := new(y.Slice)
 				for i := 0; i < b.N; i++ {
 					e := new(Entry)
 					e.Key = make([]byte, 16)
@@ -523,7 +524,7 @@ func BenchmarkReadWrite(b *testing.B) {
 							b.Fatalf("Zero length of ptrs")
 						}
 						idx := rand.Intn(ln)
-						err := vl.readValueBytes(ptrs[idx], func(buf []byte) error {
+						err := vl.readValueBytes(ptrs[idx], s, func(buf []byte) error {
 							e := valueBytesToEntry(buf)
 							if len(e.Key) != 16 {
 								return errors.New("Key is invalid")
