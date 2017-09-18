@@ -56,17 +56,18 @@ type KV struct {
 	// nil if Dir and ValueDir are the same
 	valueDirGuard *DirectoryLockGuard
 
-	closers   closers
-	elog      trace.EventLog
-	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
-	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
-	opt       Options
-	manifest  *manifestFile
-	lc        *levelsController
-	vlog      valueLog
-	vptr      valuePointer // less than or equal to a pointer to the last vlog value put into mt
-	writeCh   chan *request
-	flushChan chan flushTask // For flushing memtables.
+	closers        closers
+	elog           trace.EventLog
+	mt             *skl.Skiplist   // Our latest (actively written) in-memory table
+	imm            []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+	opt            Options
+	manifest       *manifestFile
+	lc             *levelsController
+	vlog           valueLog
+	vptr           valuePointer // less than or equal to a pointer to the last vlog value put into mt
+	writeCh        chan *request
+	writePendingCh chan struct{}  // used as a mutex to halt the write loop
+	flushChan      chan flushTask // For flushing memtables.
 
 	// Incremented in the non-concurrently accessed write loop.  But also accessed outside. So
 	// we use an atomic op.
@@ -148,14 +149,15 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	}()
 
 	out = &KV{
-		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
-		flushChan:     make(chan flushTask, opt.NumMemtables),
-		writeCh:       make(chan *request, kvWriteChCapacity),
-		opt:           opt,
-		manifest:      manifestFile,
-		elog:          trace.NewEventLog("Badger", "KV"),
-		dirLockGuard:  dirLockGuard,
-		valueDirGuard: valueDirLockGuard,
+		imm:            make([]*skl.Skiplist, 0, opt.NumMemtables),
+		flushChan:      make(chan flushTask, opt.NumMemtables),
+		writeCh:        make(chan *request, kvWriteChCapacity),
+		writePendingCh: make(chan struct{}, 1),
+		opt:            opt,
+		manifest:       manifestFile,
+		elog:           trace.NewEventLog("Badger", "KV"),
+		dirLockGuard:   dirLockGuard,
+		valueDirGuard:  valueDirLockGuard,
 	}
 
 	out.closers.updateSize = y.NewCloser(1)
@@ -386,9 +388,9 @@ func (s *KV) immutablyGetMemTables() ([]*skl.Skiplist, func()) {
 	tables := make([]*skl.Skiplist, 0, n+1)
 	// We make a copy of the mutable skiplist.
 
-	// TODO: Nothing stops the write loop from modifying s.mt while NewCopy runs.  This means it
-	// can be in an inconsistent state.
+	s.writePendingCh <- struct{}{} // acquire mutex to copy s.mt while write loop isn't mutating it
 	tables = append(tables, s.mt.NewCopy())
+	<-s.writePendingCh
 	// tables[0] already has refcount 1, don't IncrRef.
 
 	for i := n; i > 0; {
@@ -665,7 +667,7 @@ func (s *KV) writeRequests(reqs []*request) error {
 
 func (s *KV) doWrites(lc *y.Closer) {
 	defer lc.Done()
-	pendingCh := make(chan struct{}, 1)
+	pendingCh := s.writePendingCh
 
 	writeRequests := func(reqs []*request) {
 		if err := s.writeRequests(reqs); err != nil {
