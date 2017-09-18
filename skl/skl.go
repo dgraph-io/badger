@@ -55,8 +55,8 @@ type node struct {
 
 	// Multiple parts of the value are encoded as a single uint64 so that it
 	// can be atomically loaded and stored:
-	//   uint32: offset
-	//   uint16: size
+	//   value offset: uint32 (bits 0-31)
+	//   value size  : uint16 (bits 32-47)
 	value uint64
 
 	// []*node. Size is <=kMaxNumLevels. Usually a very small array. CAS.
