@@ -20,10 +20,10 @@ syntax = "proto3";
 package protos;
 
 // BackupItem holds the new information for a specific key: whether it has a value, and what that
-// value is.  Also the CasCounter value for that item.
+// value is.  Also the Version value for that item.
 message BackupItem {
         bytes Key = 1;
-        uint64 CASCounter = 2;
+        uint64 Version = 2;
         bool HasValue = 3;
         // UserMeta always holds a value 0 <= ... < 256.
         uint32 UserMeta = 4;
@@ -40,6 +40,6 @@ message BackupStatus {
 // incremental backup after that.)
 message BackupStatusItem {
         uint64 BackupID = 1;
-        uint64 MaxCASCounter = 2;
+        uint64 Version = 2;
 }
 

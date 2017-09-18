@@ -1041,7 +1041,7 @@ func (s *KV) StreamBackup(afterCas uint64, consumer func(protos.BackupItem) erro
 
 		var item protos.BackupItem
 		item.Key = key
-		item.CASCounter = vs.CASCounter
+		item.Version = vs.CASCounter
 		if (vs.Meta & BitDelete) != 0 {
 			// Tombstone
 			item.HasValue = false

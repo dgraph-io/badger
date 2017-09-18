@@ -32,10 +32,16 @@ import (
 	"github.com/pkg/errors"
 )
 
+/*
+What does a "backup store" look like?
+
+It consists of a directory with a BACKUPMANIFEST file (which we rewrite every time) and a bunch of
+files "backup-1", "backup-2", etc. Every new incremental backup adds a new one of these, and
+rewrites the BACKUPMANIFEST file with all the info about backup files.
+*/
+
 const (
-	backupMagicText        string = "BACKBADG"
-	backupMagicVersion     uint64 = 1
-	backupManifestFilename        = "BACKUPMANIFEST"
+	backupManifestFilename = "BACKUPMANIFEST"
 )
 
 // CreateBackupStore creates a directory and initializes a new backup store in that directory.
@@ -114,11 +120,11 @@ func RestoreBackup(path string, consumer func(protos.BackupItem) error) (err err
 		value := mergeIter.Value()
 		if value.Meta == 0 { // if value.Meta != BitDelete
 			err := consumer(protos.BackupItem{
-				Key:        key,
-				CASCounter: value.CASCounter,
-				HasValue:   true,
-				UserMeta:   uint32(value.UserMeta),
-				Value:      value.Value,
+				Key:      key,
+				Version:  value.CASCounter,
+				HasValue: true,
+				UserMeta: uint32(value.UserMeta),
+				Value:    value.Value,
 			})
 			if err != nil {
 				return err
@@ -208,7 +214,7 @@ func (bit *backupFileIterator) Next() {
 		Value:      item.Value,
 		Meta:       meta,
 		UserMeta:   uint8(item.UserMeta),
-		CASCounter: item.CASCounter,
+		CASCounter: item.Version,
 	}
 }
 
@@ -241,7 +247,7 @@ var (
 // NewBackup stores a new backup onto an existing backup store.  producer is deemed finished when
 // it produces an empty slice (or error).  Keys must be distinct and arrive in increasing order
 // (across all slices).
-func NewBackup(path string, maxCASCounter uint64, producer func() ([]protos.BackupItem, error)) (err error) {
+func NewBackup(path string, backupVersion uint64, producer func() ([]protos.BackupItem, error)) (err error) {
 	status, err := ReadBackupStatus(path)
 	if err != nil {
 		return err
@@ -249,9 +255,9 @@ func NewBackup(path string, maxCASCounter uint64, producer func() ([]protos.Back
 
 	maxBackupID := uint64(0)
 	for _, backup := range status.Backups {
-		if backup.MaxCASCounter > maxCASCounter {
-			return fmt.Errorf("backup %d exists with counter value %d (higher than %d)",
-				backup.BackupID, backup.MaxCASCounter, maxCASCounter)
+		if backup.Version > backupVersion {
+			return fmt.Errorf("backup %d exists with version value %d (higher than %d)",
+				backup.BackupID, backup.Version, backupVersion)
 		}
 		if maxBackupID < backup.BackupID {
 			// I suppose this conditional is always hit because the backups are in sorted order.
@@ -321,8 +327,8 @@ func NewBackup(path string, maxCASCounter uint64, producer func() ([]protos.Back
 	}
 
 	status.Backups = append(status.Backups, &protos.BackupStatusItem{
-		BackupID:      newBackupID,
-		MaxCASCounter: maxCASCounter,
+		BackupID: newBackupID,
+		Version:  backupVersion,
 	})
 
 	return writeBackupStatus(path, status)
