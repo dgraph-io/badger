@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -26,9 +27,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/options"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var mmap = flag.Bool("vlog_mmap", true, "Specify if value log must be memory-mapped")
 
 func getTestOptions(dir string) *Options {
 	opt := new(Options)
@@ -38,6 +43,9 @@ func getTestOptions(dir string) *Options {
 	opt.Dir = dir
 	opt.ValueDir = dir
 	opt.SyncWrites = true // Some tests seem to need this to pass.
+	if !*mmap {
+		opt.ValueLogLoadingMode = options.FileIO
+	}
 	return opt
 }
 

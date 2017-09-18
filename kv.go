@@ -25,6 +25,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dgraph-io/badger/options"
+
 	"golang.org/x/net/trace"
 
 	"github.com/dgraph-io/badger/skl"
@@ -79,6 +81,10 @@ var ErrInvalidDir = errors.New("Invalid Dir, directory does not exist")
 // ErrValueLogSize is returned when opt.ValueLogFileSize option is not within the valid
 // range.
 var ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be between 1MB and 1GB")
+
+// ErrInvalidLoadingMode is returned when opt.ValueLogLoadingMode option is not
+// within the valid range
+var ErrInvalidLoadingMode = errors.New("Invalid ValueLogLoadingMode, must be FileIO or MemoryMap")
 
 // ErrExceedsMaxKeyValueSize is returned as part of Entry when the size of the key or value
 // exceeds the specified limits.
@@ -136,6 +142,12 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
+
+	if (opt.ValueLogLoadingMode != options.MemoryMap) &&
+		(opt.ValueLogLoadingMode != options.FileIO) {
+		return nil, ErrInvalidLoadingMode
+	}
+
 	manifestFile, manifest, err := openOrCreateManifestFile(opt.Dir)
 	if err != nil {
 		return nil, err
@@ -416,7 +428,7 @@ func (s *KV) yieldItemValue(item *KVItem, consumer func([]byte) error) error {
 
 	var vp valuePointer
 	vp.Decode(item.vptr)
-	err := s.vlog.Read(vp, consumer)
+	err := s.vlog.Read(vp, item.slice, consumer)
 	if err != nil {
 		return err
 	}

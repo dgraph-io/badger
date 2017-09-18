@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"sync"
 
+	"github.com/dgraph-io/badger/options"
+
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -89,10 +91,14 @@ func (item *KVItem) prefetchValue() {
 			item.status = prefetched
 			return nil
 		}
-
-		buf := item.slice.Resize(len(val))
-		copy(buf, val)
-		item.val = buf
+		// copy values only if we are using memory mapping
+		if item.kv.opt.ValueLogLoadingMode == options.MemoryMap {
+			buf := item.slice.Resize(len(val))
+			copy(buf, val)
+			item.val = buf
+		} else {
+			item.val = val
+		}
 		item.status = prefetched
 		return nil
 	})
@@ -187,7 +193,7 @@ type Iterator struct {
 func (it *Iterator) newItem() *KVItem {
 	item := it.waste.pop()
 	if item == nil {
-		item = &KVItem{slice: new(y.Slice), kv: it.kv}
+		item = &KVItem{kv: it.kv}
 	}
 	return item
 }
