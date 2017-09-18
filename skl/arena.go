@@ -56,10 +56,12 @@ func (s *Arena) reset() {
 // putNode allocates a node in the arena. The node is aligned on a pointer-sized
 // boundary. The arena offset of the node is returned.
 func (s *Arena) putNode(height int) uint32 {
-	towerSize := offsetSize * (height - 1)
+	// Compute the amount of the tower that will never be used, since the height
+	// is less than maxHeight.
+	unusedSize := (maxHeight - height) * offsetSize
 
 	// Pad the allocation with enough bytes to ensure pointer alignment.
-	l := uint32(nodeSize + towerSize + ptrAlign)
+	l := uint32(MaxNodeSize - unusedSize + ptrAlign)
 	n := atomic.AddUint32(&s.n, l)
 	y.AssertTruef(int(n) <= len(s.buf),
 		"Arena too small, toWrite:%d newTotal:%d limit:%d",
