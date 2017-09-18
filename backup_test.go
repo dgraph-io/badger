@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/dgraph-io/badger/protos"
@@ -64,4 +65,45 @@ func TestBasicBackup(t *testing.T) {
 		return nil
 	})
 	require.Equal(t, 100, i)
+}
+
+func TestBackupStore(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	storeDir := filepath.Join(dir, "store")
+
+	err = CreateBackupStore(storeDir)
+	require.NoError(t, err)
+
+	status, err := ReadBackupStatus(storeDir)
+	require.NoError(t, err)
+	require.Empty(t, status.Backups)
+
+	i := 0
+	err = NewBackup(storeDir, 200, func() ([]protos.BackupItem, error) {
+		if i == 100 {
+			return nil, nil
+		}
+		ret := []protos.BackupItem{
+			{
+				Key:        []byte(fmt.Sprintf("key%09d-A", i)),
+				HasValue:   true,
+				Value:      []byte(fmt.Sprintf("value%d", i)),
+				UserMeta:   uint32(uint8(i)),
+				CASCounter: uint64(2*i + 1),
+			},
+			{
+				Key:        []byte(fmt.Sprintf("key%09d-B", i)),
+				HasValue:   false,
+				Value:      nil,
+				UserMeta:   uint32(uint8(i)),
+				CASCounter: uint64(2*i + 2),
+			},
+		}
+		i++
+		return ret, nil
+	})
+	require.NoError(t, err)
 }

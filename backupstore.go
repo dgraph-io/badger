@@ -41,24 +41,23 @@ const (
 // CreateBackupStore creates a directory and initializes a new backup store in that directory.
 func CreateBackupStore(path string) (err error) {
 	if err := os.Mkdir(path, 0755); err != nil {
-		return err
+		return errors.Wrap(err, "Mkdir in CreateBackupStore")
 	}
 	var initialStatus = protos.BackupStatus{
 		Backups: []*protos.BackupStatusItem{},
 	}
 	return writeBackupStatus(path, initialStatus)
-
 }
 
 // ReadBackupStatus reads the BackupStatus description from the backup directory.
 func ReadBackupStatus(path string) (protos.BackupStatus, error) {
 	data, err := ioutil.ReadFile(filepath.Join(path, backupManifestFilename))
 	if err != nil {
-		return protos.BackupStatus{}, err
+		return protos.BackupStatus{}, errors.Wrap(err, "cannot ReadFile in ReadBackupStatus")
 	}
 	var ret protos.BackupStatus
 	if err := ret.Unmarshal(data); err != nil {
-		return protos.BackupStatus{}, err
+		return protos.BackupStatus{}, errors.Wrap(err, "unmarshal in ReadBackupStatus")
 	}
 	return ret, nil
 }
@@ -268,11 +267,13 @@ func NewBackup(path string, maxCASCounter uint64, producer func() ([]protos.Back
 
 	f, err := ioutil.TempFile(path, "partial-backup-")
 	if err != nil {
-		return err
+		return errors.Wrap(err, "making partial-backup temp file")
 	}
 	defer func() {
-		if closeErr := f.Close(); err == nil {
-			err = closeErr
+		if f != nil {
+			if closeErr := f.Close(); err == nil {
+				err = errors.Wrap(closeErr, "closing file")
+			}
 		}
 	}()
 
@@ -300,22 +301,22 @@ func NewBackup(path string, maxCASCounter uint64, producer func() ([]protos.Back
 			}
 			data, err := item.Marshal()
 			if err != nil {
-				return err
+				return errors.Wrap(err, "NewBackup marshaling")
 			}
 			var lenBuf [binary.MaxVarintLen64]byte
 			lenLen := binary.PutUvarint(lenBuf[:], uint64(len(data)))
 			if _, err := writer.Write(lenBuf[:lenLen]); err != nil {
-				return err
+				return errors.Wrap(err, "NewBackup writing")
 			}
 			if _, err := writer.Write(data); err != nil {
-				return err
+				return errors.Wrap(err, "NewBackup writing")
 			}
 			first = false
 		}
 	}
 
 	if err := writer.Flush(); err != nil {
-		return err
+		return errors.Wrap(err, "NewBackup flushing")
 	}
 
 	newBackupID := maxBackupID + 1
@@ -338,11 +339,11 @@ func writeBackupStatus(path string, status protos.BackupStatus) (err error) {
 	// TODO: dir file syncing?  Locking?
 	data, err := status.Marshal()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "writeBackupStatus marshaling")
 	}
 	f, err := ioutil.TempFile(path, "partial-manifest-")
 	if err != nil {
-		return err
+		return errors.Wrap(err, "writeBackupStatus opening TempFile")
 	}
 	defer func() {
 		if f != nil {
@@ -352,10 +353,10 @@ func writeBackupStatus(path string, status protos.BackupStatus) (err error) {
 	}()
 	writer := bufio.NewWriter(f)
 	if _, err := writer.Write(data); err != nil {
-		return err
+		return errors.Wrap(err, "writeBackupStatus writing")
 	}
 	if err := writer.Flush(); err != nil {
-		return err
+		return errors.Wrap(err, "writeBackupStatus flushing")
 	}
 	err = syncCloseRename(f, f.Name(), filepath.Join(path, backupManifestFilename))
 	f = nil
@@ -366,12 +367,12 @@ func writeBackupStatus(path string, status protos.BackupStatus) (err error) {
 func syncCloseRename(f *os.File, oldPath string, newPath string) (err error) {
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
-		return err
+		return errors.Wrap(err, "cannot sync file")
 	}
 	err = f.Close()
 	f = nil
 	if err != nil {
-		return err
+		return errors.Wrap(err, "cannot close file")
 	}
-	return os.Rename(oldPath, newPath)
+	return errors.Wrap(os.Rename(oldPath, newPath), "renaming file")
 }
