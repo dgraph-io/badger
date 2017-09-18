@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"runtime"
 	"sort"
 	"sync"
 	"testing"
@@ -43,7 +44,7 @@ func getTestOptions(dir string) *Options {
 	opt.Dir = dir
 	opt.ValueDir = dir
 	opt.SyncWrites = true // Some tests seem to need this to pass.
-	if !*mmap {
+	if !*mmap || runtime.GOOS == "windows" {
 		opt.ValueLogLoadingMode = options.FileIO
 	}
 	return opt
