@@ -320,12 +320,11 @@ func NewBackup(path string, maxCASCounter uint64, producer func() ([]protos.Back
 	}
 
 	newBackupID := maxBackupID + 1
-	err = syncCloseRename(f, f.Name(), filepath.Join(path, backupFileName(newBackupID)))
+	err = syncCloseRename(f, f.Name(), path, backupFileName(newBackupID))
 	f = nil
 	if err != nil {
 		return err
 	}
-	// TODO: Sync dir?  Yadda yadda.
 
 	status.Backups = append(status.Backups, &protos.BackupStatusItem{
 		BackupID:      newBackupID,
@@ -336,7 +335,6 @@ func NewBackup(path string, maxCASCounter uint64, producer func() ([]protos.Back
 }
 
 func writeBackupStatus(path string, status protos.BackupStatus) (err error) {
-	// TODO: dir file syncing?  Locking?
 	data, err := status.Marshal()
 	if err != nil {
 		return errors.Wrap(err, "writeBackupStatus marshaling")
@@ -358,13 +356,13 @@ func writeBackupStatus(path string, status protos.BackupStatus) (err error) {
 	if err := writer.Flush(); err != nil {
 		return errors.Wrap(err, "writeBackupStatus flushing")
 	}
-	err = syncCloseRename(f, f.Name(), filepath.Join(path, backupManifestFilename))
+	err = syncCloseRename(f, f.Name(), path, backupManifestFilename)
 	f = nil
 	return err
 }
 
 // Always closes the file
-func syncCloseRename(f *os.File, oldPath string, newPath string) (err error) {
+func syncCloseRename(f *os.File, oldPath, newDir, newFilename string) (err error) {
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
 		return errors.Wrap(err, "cannot sync file")
@@ -374,5 +372,13 @@ func syncCloseRename(f *os.File, oldPath string, newPath string) (err error) {
 	if err != nil {
 		return errors.Wrap(err, "cannot close file")
 	}
-	return errors.Wrap(os.Rename(oldPath, newPath), "renaming file")
+	err = os.Rename(oldPath, filepath.Join(newDir, newFilename))
+	if err != nil {
+		return errors.Wrap(err, "renaming file")
+	}
+	err = syncDir(newDir)
+	if err != nil {
+		return errors.Wrap(err, "syncing dir")
+	}
+	return nil
 }
