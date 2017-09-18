@@ -19,7 +19,6 @@ package badger
 import (
 	"bufio"
 	"bytes"
-	cryptorand "crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
@@ -42,11 +41,8 @@ import (
 // and contains a sequence of ManifestChange's (file creations/deletions) which we use to
 // reconstruct the manifest at startup.
 type Manifest struct {
-	// Uniquely identifies a badger instance, so fewer people accidentally back up multiple Badger
-	// repos onto the same backup repo.
-	BadgerInstanceID [16]byte
-	Levels           []LevelManifest
-	Tables           map[uint64]TableManifest
+	Levels []LevelManifest
+	Tables map[uint64]TableManifest
 
 	// Contains total number of creation and deletion changes in the manifest -- used to compute
 	// whether it'd be useful to rewrite the manifest.
@@ -54,12 +50,11 @@ type Manifest struct {
 	Deletions int
 }
 
-func createManifest(badgerInstanceID [16]byte) Manifest {
+func createManifest() Manifest {
 	levels := make([]LevelManifest, 0)
 	return Manifest{
-		BadgerInstanceID: badgerInstanceID,
-		Levels:           levels,
-		Tables:           make(map[uint64]TableManifest),
+		Levels: levels,
+		Tables: make(map[uint64]TableManifest),
 	}
 }
 
@@ -111,7 +106,7 @@ func (m *Manifest) asChanges() []*protos.ManifestChange {
 
 func (m *Manifest) clone() Manifest {
 	changeSet := protos.ManifestChangeSet{Changes: m.asChanges()}
-	ret := createManifest(m.BadgerInstanceID)
+	ret := createManifest()
 	y.Check(applyChangeSet(&ret, &changeSet))
 	return ret
 }
@@ -129,13 +124,7 @@ func helpOpenOrCreateManifestFile(dir string, deletionsThreshold int) (ret *mani
 		if !os.IsNotExist(err) {
 			return nil, Manifest{}, err
 		}
-		// We're creating a brand new manifest (for a brand new badger instance) -- this is where
-		// we generate the unique instance ID.
-		var badgerInstanceID [16]byte
-		if _, err := cryptorand.Read(badgerInstanceID[:]); err != nil {
-			return nil, Manifest{}, err
-		}
-		m := createManifest(badgerInstanceID)
+		m := createManifest()
 		fp, netCreations, err := helpRewrite(dir, &m)
 		if err != nil {
 			return nil, Manifest{}, err
@@ -223,7 +212,7 @@ func (mf *manifestFile) addChanges(changesParam []*protos.ManifestChange) error 
 var magicText = [4]byte{'B', 'd', 'g', 'r'}
 
 // The magic version number.
-const magicVersion = 4
+const magicVersion = 3
 
 func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 	rewritePath := filepath.Join(dir, manifestRewriteFilename)
@@ -236,7 +225,6 @@ func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 	buf := make([]byte, 8)
 	copy(buf[0:4], magicText[:])
 	binary.BigEndian.PutUint32(buf[4:8], magicVersion)
-	buf = append(buf, m.BadgerInstanceID[:]...)
 
 	netCreations := len(m.Tables)
 	changes := m.asChanges()
@@ -345,14 +333,10 @@ func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error
 		return Manifest{}, 0,
 			fmt.Errorf("manifest has unsupported version: %d (we support %d)", version, magicVersion)
 	}
-	var badgerInstanceID [16]byte
-	if _, err := io.ReadFull(&r, badgerInstanceID[:]); err != nil {
-		return Manifest{}, 0, err
-	}
 
 	offset := r.count
 
-	build := createManifest(badgerInstanceID)
+	build := createManifest()
 	for {
 		offset = r.count
 		var lenCrcBuf [8]byte

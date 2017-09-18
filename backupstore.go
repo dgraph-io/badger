@@ -33,7 +33,9 @@ import (
 )
 
 const (
-	backupManifestFilename = "BACKUPMANIFEST"
+	backupMagicText        string = "BACKBADG"
+	backupMagicVersion     uint64 = 1
+	backupManifestFilename        = "BACKUPMANIFEST"
 )
 
 // CreateBackupStore creates a directory and initializes a new backup store in that directory.
