@@ -38,7 +38,7 @@ const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
 // value is.  Also the Version value for that item.
 type BackupItem struct {
 	Key      []byte `protobuf:"bytes,1,opt,name=Key,proto3" json:"Key,omitempty"`
-	Version  uint64 `protobuf:"varint,2,opt,name=Version,proto3" json:"Version,omitempty"`
+	Counter  uint64 `protobuf:"varint,2,opt,name=Counter,proto3" json:"Counter,omitempty"`
 	HasValue bool   `protobuf:"varint,3,opt,name=HasValue,proto3" json:"HasValue,omitempty"`
 	// UserMeta always holds a value 0 <= ... < 256.
 	UserMeta uint32 `protobuf:"varint,4,opt,name=UserMeta,proto3" json:"UserMeta,omitempty"`
@@ -57,9 +57,9 @@ func (m *BackupItem) GetKey() []byte {
 	return nil
 }
 
-func (m *BackupItem) GetVersion() uint64 {
+func (m *BackupItem) GetCounter() uint64 {
 	if m != nil {
-		return m.Version
+		return m.Counter
 	}
 	return 0
 }
@@ -104,10 +104,11 @@ func (m *BackupStatus) GetBackups() []*BackupStatusItem {
 }
 
 // BackupStatusItem describes a single backup.  (It might identify the original backup or an
-// incremental backup after that.)
+// incremental backup after that.)  Counter is the last generated value of the Badger store's
+// incrementing operation counter as of the backup.
 type BackupStatusItem struct {
 	BackupID uint64 `protobuf:"varint,1,opt,name=BackupID,proto3" json:"BackupID,omitempty"`
-	Version  uint64 `protobuf:"varint,2,opt,name=Version,proto3" json:"Version,omitempty"`
+	Counter  uint64 `protobuf:"varint,2,opt,name=Counter,proto3" json:"Counter,omitempty"`
 }
 
 func (m *BackupStatusItem) Reset()                    { *m = BackupStatusItem{} }
@@ -122,9 +123,9 @@ func (m *BackupStatusItem) GetBackupID() uint64 {
 	return 0
 }
 
-func (m *BackupStatusItem) GetVersion() uint64 {
+func (m *BackupStatusItem) GetCounter() uint64 {
 	if m != nil {
-		return m.Version
+		return m.Counter
 	}
 	return 0
 }
@@ -155,10 +156,10 @@ func (m *BackupItem) MarshalTo(dAtA []byte) (int, error) {
 		i = encodeVarintBackup(dAtA, i, uint64(len(m.Key)))
 		i += copy(dAtA[i:], m.Key)
 	}
-	if m.Version != 0 {
+	if m.Counter != 0 {
 		dAtA[i] = 0x10
 		i++
-		i = encodeVarintBackup(dAtA, i, uint64(m.Version))
+		i = encodeVarintBackup(dAtA, i, uint64(m.Counter))
 	}
 	if m.HasValue {
 		dAtA[i] = 0x18
@@ -234,10 +235,10 @@ func (m *BackupStatusItem) MarshalTo(dAtA []byte) (int, error) {
 		i++
 		i = encodeVarintBackup(dAtA, i, uint64(m.BackupID))
 	}
-	if m.Version != 0 {
+	if m.Counter != 0 {
 		dAtA[i] = 0x10
 		i++
-		i = encodeVarintBackup(dAtA, i, uint64(m.Version))
+		i = encodeVarintBackup(dAtA, i, uint64(m.Counter))
 	}
 	return i, nil
 }
@@ -276,8 +277,8 @@ func (m *BackupItem) Size() (n int) {
 	if l > 0 {
 		n += 1 + l + sovBackup(uint64(l))
 	}
-	if m.Version != 0 {
-		n += 1 + sovBackup(uint64(m.Version))
+	if m.Counter != 0 {
+		n += 1 + sovBackup(uint64(m.Counter))
 	}
 	if m.HasValue {
 		n += 2
@@ -310,8 +311,8 @@ func (m *BackupStatusItem) Size() (n int) {
 	if m.BackupID != 0 {
 		n += 1 + sovBackup(uint64(m.BackupID))
 	}
-	if m.Version != 0 {
-		n += 1 + sovBackup(uint64(m.Version))
+	if m.Counter != 0 {
+		n += 1 + sovBackup(uint64(m.Counter))
 	}
 	return n
 }
@@ -391,9 +392,9 @@ func (m *BackupItem) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Version", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Counter", wireType)
 			}
-			m.Version = 0
+			m.Counter = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowBackup
@@ -403,7 +404,7 @@ func (m *BackupItem) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.Version |= (uint64(b) & 0x7F) << shift
+				m.Counter |= (uint64(b) & 0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -630,9 +631,9 @@ func (m *BackupStatusItem) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Version", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Counter", wireType)
 			}
-			m.Version = 0
+			m.Counter = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowBackup
@@ -642,7 +643,7 @@ func (m *BackupStatusItem) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.Version |= (uint64(b) & 0x7F) << shift
+				m.Counter |= (uint64(b) & 0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -780,8 +781,8 @@ var fileDescriptorBackup = []byte{
 	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xe2, 0xe2, 0x49, 0x4a, 0x4c, 0xce,
 	0x2e, 0x2d, 0xd0, 0x2b, 0x28, 0xca, 0x2f, 0xc9, 0x17, 0x62, 0x03, 0x53, 0xc5, 0x4a, 0x6d, 0x8c,
 	0x5c, 0x5c, 0x4e, 0x60, 0x09, 0xcf, 0x92, 0xd4, 0x5c, 0x21, 0x01, 0x2e, 0x66, 0xef, 0xd4, 0x4a,
-	0x09, 0x46, 0x05, 0x46, 0x0d, 0x9e, 0x20, 0x10, 0x53, 0x48, 0x82, 0x8b, 0x3d, 0x2c, 0xb5, 0xa8,
-	0x38, 0x33, 0x3f, 0x4f, 0x82, 0x49, 0x81, 0x51, 0x83, 0x25, 0x08, 0xc6, 0x15, 0x92, 0xe2, 0xe2,
+	0x09, 0x46, 0x05, 0x46, 0x0d, 0x9e, 0x20, 0x10, 0x53, 0x48, 0x82, 0x8b, 0xdd, 0x39, 0xbf, 0x34,
+	0xaf, 0x24, 0xb5, 0x48, 0x82, 0x49, 0x81, 0x51, 0x83, 0x25, 0x08, 0xc6, 0x15, 0x92, 0xe2, 0xe2,
 	0xf0, 0x48, 0x2c, 0x0e, 0x4b, 0xcc, 0x29, 0x4d, 0x95, 0x60, 0x56, 0x60, 0xd4, 0xe0, 0x08, 0x82,
 	0xf3, 0x41, 0x72, 0xa1, 0xc5, 0xa9, 0x45, 0xbe, 0xa9, 0x25, 0x89, 0x12, 0x2c, 0x0a, 0x8c, 0x1a,
 	0xbc, 0x41, 0x70, 0xbe, 0x90, 0x08, 0x17, 0x2b, 0x44, 0x13, 0x2b, 0xd8, 0x16, 0x08, 0x47, 0xc9,
@@ -790,5 +791,5 @@ var fileDescriptorBackup = []byte{
 	0x20, 0x47, 0x07, 0xc1, 0x14, 0x2a, 0x79, 0x70, 0x09, 0xa0, 0x4b, 0x82, 0x5c, 0x02, 0xf5, 0x9f,
 	0x0b, 0xd8, 0x5b, 0x2c, 0x41, 0x70, 0x3e, 0x6e, 0xbf, 0x39, 0x09, 0x9c, 0x78, 0x24, 0xc7, 0x78,
 	0xe1, 0x91, 0x1c, 0xe3, 0x83, 0x47, 0x72, 0x8c, 0x33, 0x1e, 0xcb, 0x31, 0x24, 0x41, 0x02, 0xcc,
-	0x18, 0x10, 0x00, 0x00, 0xff, 0xff, 0xd7, 0x39, 0x2f, 0x12, 0x47, 0x01, 0x00, 0x00,
+	0x18, 0x10, 0x00, 0x00, 0xff, 0xff, 0x44, 0xaa, 0x84, 0x89, 0x47, 0x01, 0x00, 0x00,
 }

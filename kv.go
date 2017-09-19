@@ -1028,8 +1028,8 @@ func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint64, f func(error))
 	s.compareAsync(e, f)
 }
 
-// StreamBackup sends a stream of backup items by calling `f` over and over again, until it's done,
-// at which point it returns.
+// StreamBackup sends a stream of backup items by calling `consumer` over and over again, until
+// it's done, at which point it returns.
 func (s *KV) StreamBackup(afterCas uint64, consumer func(protos.BackupItem) error) error {
 	it, decrVlog := s.newBackupIterator(afterCas)
 	defer decrVlog()
@@ -1045,7 +1045,7 @@ func (s *KV) StreamBackup(afterCas uint64, consumer func(protos.BackupItem) erro
 
 		var item protos.BackupItem
 		item.Key = key
-		item.Version = vs.CASCounter
+		item.Counter = vs.CASCounter
 		if (vs.Meta & BitDelete) != 0 {
 			// Tombstone
 			item.HasValue = false

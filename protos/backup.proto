@@ -23,7 +23,7 @@ package protos;
 // value is.  Also the Version value for that item.
 message BackupItem {
         bytes Key = 1;
-        uint64 Version = 2;
+        uint64 Counter = 2;
         bool HasValue = 3;
         // UserMeta always holds a value 0 <= ... < 256.
         uint32 UserMeta = 4;
@@ -37,9 +37,10 @@ message BackupStatus {
 }
 
 // BackupStatusItem describes a single backup.  (It might identify the original backup or an
-// incremental backup after that.)
+// incremental backup after that.)  Counter is the last generated value of the Badger store's
+// incrementing operation counter as of the backup.
 message BackupStatusItem {
         uint64 BackupID = 1;
-        uint64 Version = 2;
+        uint64 Counter = 2;
 }
 

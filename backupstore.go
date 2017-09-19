@@ -44,6 +44,13 @@ const (
 	backupManifestFilename = "BACKUPMANIFEST"
 )
 
+var (
+	// ErrBackupKeysOutOfOrder means you tried storing a backup without supplying the keys in order.
+	ErrBackupKeysOutOfOrder = errors.New("backup keys out of order")
+	// ErrBackupAborted means the user aborted the backup.
+	ErrBackupAborted = errors.New("backup aborted")
+)
+
 // CreateBackupStore creates a directory and initializes a new backup store in that directory.
 func CreateBackupStore(path string) (err error) {
 	if err := os.Mkdir(path, 0755); err != nil {
@@ -69,11 +76,114 @@ func ReadBackupStatus(path string) (protos.BackupStatus, error) {
 }
 
 func backupFileName(id uint64) string {
-	return fmt.Sprintf("backup-%d", id)
+	return fmt.Sprintf("backup-%06d", id)
 }
 
-// RestoreBackup streams all changes in increasing key order to itemCh.
-func RestoreBackup(path string, consumer func(protos.BackupItem) error) (err error) {
+// Implements the y.Iterator interface.
+type backupFileIterator struct {
+	fp     *os.File
+	reader *bufio.Reader
+	key    []byte
+	value  y.ValueStruct
+	err    error
+}
+
+func makeBackupFileIterator(path string, id uint64, bufferSize int) (*backupFileIterator, error) {
+	fp, err := os.Open(filepath.Join(path, backupFileName(id)))
+	if err != nil {
+		return nil, err
+	}
+	return &backupFileIterator{fp: fp}, nil
+}
+
+func (bit *backupFileIterator) Rewind() {
+	if bit.err != nil {
+		bit.err = nil
+	}
+	_, err := bit.fp.Seek(0, os.SEEK_SET)
+	if err != nil {
+		bit.err = err
+		bit.key = nil
+		bit.value = y.ValueStruct{}
+		return
+	}
+	bit.reader = bufio.NewReader(bit.fp)
+	bit.Next()
+}
+
+func (bit *backupFileIterator) Key() []byte {
+	return bit.key
+}
+
+func (bit *backupFileIterator) Value() y.ValueStruct {
+	return bit.value
+}
+
+func (bit *backupFileIterator) Next() {
+	if bit.err != nil {
+		return
+	}
+	sz, err := binary.ReadUvarint(bit.reader)
+	if err != nil {
+		bit.err = err
+		bit.key = nil
+		bit.value = y.ValueStruct{}
+		return
+	}
+
+	data := make([]byte, sz)
+	if _, err := io.ReadFull(bit.reader, data); err != nil {
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
+		bit.err = err
+		bit.key = nil
+		bit.value = y.ValueStruct{}
+		return
+	}
+
+	var item protos.BackupItem
+	if err := item.Unmarshal(data); err != nil {
+		bit.err = err
+		bit.key = nil
+		bit.value = y.ValueStruct{}
+		return
+	}
+	bit.key = item.Key
+	var meta byte
+	if !item.HasValue {
+		meta = BitDelete
+	}
+	bit.value = y.ValueStruct{
+		// This is typically a vptr but in our case it's a value -- we're just using MergeIterator.
+		Value:      item.Value,
+		Meta:       meta,
+		UserMeta:   uint8(item.UserMeta),
+		CASCounter: item.Counter,
+	}
+}
+
+func (bit *backupFileIterator) Valid() bool {
+	return bit.key != nil
+}
+
+func (bit *backupFileIterator) Close() error {
+	err := bit.err
+	if err == io.EOF {
+		err = nil
+	}
+	if closeErr := bit.fp.Close(); err == nil {
+		err = closeErr
+	}
+	return err
+}
+
+func (bit *backupFileIterator) Seek([]byte) {
+	panic("Seek not implemented")
+}
+
+// RetrieveBackup streams all changes from the backup store in increasing key order to consumer.
+func RetrieveBackup(path string, consumer func(protos.BackupItem) error) (err error) {
 	status, err := ReadBackupStatus(path)
 	if err != nil {
 		return err
@@ -121,7 +231,7 @@ func RestoreBackup(path string, consumer func(protos.BackupItem) error) (err err
 		if value.Meta == 0 { // if value.Meta != BitDelete
 			err := consumer(protos.BackupItem{
 				Key:      key,
-				Version:  value.CASCounter,
+				Counter:  value.CASCounter,
 				HasValue: true,
 				UserMeta: uint32(value.UserMeta),
 				Value:    value.Value,
@@ -135,119 +245,11 @@ func RestoreBackup(path string, consumer func(protos.BackupItem) error) (err err
 	return nil
 }
 
-type backupFileIterator struct {
-	fp         *os.File
-	reader     *bufio.Reader
-	firstKey   []byte
-	firstValue y.ValueStruct
-	err        error
-}
-
-func makeBackupFileIterator(path string, id uint64, bufferSize int) (*backupFileIterator, error) {
-	fp, err := os.Open(filepath.Join(path, backupFileName(id)))
-	if err != nil {
-		return nil, err
-	}
-	return &backupFileIterator{fp: fp}, nil
-}
-
-func (bit *backupFileIterator) Rewind() {
-	if bit.err != nil {
-		bit.err = nil
-	}
-	_, err := bit.fp.Seek(0, os.SEEK_SET)
-	if err != nil {
-		bit.err = err
-		bit.firstKey = nil
-		bit.firstValue = y.ValueStruct{}
-		return
-	}
-	bit.reader = bufio.NewReader(bit.fp)
-	bit.Next()
-}
-
-func (bit *backupFileIterator) Key() []byte {
-	return bit.firstKey
-}
-
-func (bit *backupFileIterator) Value() y.ValueStruct {
-	return bit.firstValue
-}
-
-func (bit *backupFileIterator) Next() {
-	if bit.err != nil {
-		return
-	}
-	len, err := binary.ReadUvarint(bit.reader)
-	if err != nil {
-		bit.err = err
-		bit.firstKey = nil
-		bit.firstValue = y.ValueStruct{}
-		return
-	}
-
-	data := make([]byte, len)
-	if _, err := io.ReadFull(bit.reader, data); err != nil {
-		if err == io.EOF {
-			err = io.ErrUnexpectedEOF
-		}
-		bit.err = err
-		bit.firstKey = nil
-		bit.firstValue = y.ValueStruct{}
-		return
-	}
-
-	var item protos.BackupItem
-	if err := item.Unmarshal(data); err != nil {
-		bit.err = err
-		bit.firstKey = nil
-		bit.firstValue = y.ValueStruct{}
-		return
-	}
-	bit.firstKey = item.Key
-	var meta byte
-	if !item.HasValue {
-		meta = BitDelete
-	}
-	bit.firstValue = y.ValueStruct{
-		// This is typically a vptr but in our case it's a value -- we're just using MergeIterator.
-		Value:      item.Value,
-		Meta:       meta,
-		UserMeta:   uint8(item.UserMeta),
-		CASCounter: item.Version,
-	}
-}
-
-func (bit *backupFileIterator) Valid() bool {
-	return bit.firstKey != nil
-}
-
-func (bit *backupFileIterator) Close() error {
-	err := bit.err
-	if err == io.EOF {
-		err = nil
-	}
-	if closeErr := bit.fp.Close(); err == nil {
-		err = closeErr
-	}
-	return err
-}
-
-func (bit *backupFileIterator) Seek([]byte) {
-	panic("Seek not implemented")
-}
-
-var (
-	// ErrBackupKeysOutOfOrder means you tried storing a backup without supplying the keys in order.
-	ErrBackupKeysOutOfOrder = errors.New("backup keys out of order")
-	// ErrBackupAborted means the user aborted the backup.
-	ErrBackupAborted = errors.New("backup aborted")
-)
-
 // NewBackup stores a new backup onto an existing backup store.  producer is deemed finished when
 // it produces an empty slice (or error).  Keys must be distinct and arrive in increasing order
 // (across all slices).
-func NewBackup(path string, backupVersion uint64, producer func() ([]protos.BackupItem, error)) (err error) {
+func NewBackup(path string, counter uint64,
+	producer func() ([]protos.BackupItem, error)) (err error) {
 	status, err := ReadBackupStatus(path)
 	if err != nil {
 		return err
@@ -255,9 +257,9 @@ func NewBackup(path string, backupVersion uint64, producer func() ([]protos.Back
 
 	maxBackupID := uint64(0)
 	for _, backup := range status.Backups {
-		if backup.Version > backupVersion {
-			return fmt.Errorf("backup %d exists with version value %d (higher than %d)",
-				backup.BackupID, backup.Version, backupVersion)
+		if backup.Counter > counter {
+			return fmt.Errorf("backup %d exists with counter value %d (higher than %d)",
+				backup.BackupID, backup.Counter, counter)
 		}
 		if maxBackupID < backup.BackupID {
 			// I suppose this conditional is always hit because the backups are in sorted order.
@@ -295,6 +297,7 @@ func NewBackup(path string, backupVersion uint64, producer func() ([]protos.Back
 			break
 		}
 
+		var lenBuf [binary.MaxVarintLen64]byte
 		for _, item := range items {
 			if bytes.Compare(prevKey, item.Key) >= 0 && !first {
 				return ErrBackupKeysOutOfOrder
@@ -303,7 +306,6 @@ func NewBackup(path string, backupVersion uint64, producer func() ([]protos.Back
 			if err != nil {
 				return errors.Wrap(err, "NewBackup marshaling")
 			}
-			var lenBuf [binary.MaxVarintLen64]byte
 			lenLen := binary.PutUvarint(lenBuf[:], uint64(len(data)))
 			if _, err := writer.Write(lenBuf[:lenLen]); err != nil {
 				return errors.Wrap(err, "NewBackup writing")
@@ -328,7 +330,7 @@ func NewBackup(path string, backupVersion uint64, producer func() ([]protos.Back
 
 	status.Backups = append(status.Backups, &protos.BackupStatusItem{
 		BackupID: newBackupID,
-		Version:  backupVersion,
+		Counter:  counter,
 	})
 
 	return writeBackupStatus(path, status)

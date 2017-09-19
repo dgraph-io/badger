@@ -127,7 +127,7 @@ func TestBackupStore(t *testing.T) {
 	})
 
 	i = 0
-	err = RestoreBackup(storeDir, func(item protos.BackupItem) error {
+	err = RetrieveBackup(storeDir, func(item protos.BackupItem) error {
 		require.True(t, i < count)
 		require.Equal(t, fmt.Sprintf("key%09d-A", i), string(item.Key))
 		require.True(t, item.HasValue)
