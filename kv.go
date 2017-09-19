@@ -80,9 +80,13 @@ var ErrInvalidDir = errors.New("Invalid Dir, directory does not exist")
 // range.
 var ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be between 1MB and 1GB")
 
-// ErrExceedsMaxKeyValueSize is returned as part of Entry when the size of the key or value
-// exceeds the specified limits.
-var ErrExceedsMaxKeyValueSize = errors.New("Key (value) size exceeded 1MB (1GB) limit")
+// ErrExceedsMaxKeySize is returned as part of an entry when the size of the
+// key exceeds the size limit.
+var ErrExceedsMaxKeySize = errors.New("Key size exceeded 1MB limit")
+
+// ErrExceedsMaxValueSize is returned as part of an entry when the size of the
+// value exceeds the size limit.
+var ErrExceedsMaxValueSize = errors.New("Value size exceeded 1GB limit")
 
 const (
 	kvWriteChCapacity = 1000
@@ -701,8 +705,13 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 	var b *request
 	var bad []*Entry
 	for _, entry := range entries {
-		if len(entry.Key) > maxKeySize || len(entry.Value) > maxValueSize {
-			entry.Error = ErrExceedsMaxKeyValueSize
+		if len(entry.Key) > maxKeySize {
+			entry.Error = ErrExceedsMaxKeySize
+			bad = append(bad, entry)
+			continue
+		}
+		if len(entry.Value) > maxValueSize {
+			entry.Error = ErrExceedsMaxValueSize
 			bad = append(bad, entry)
 			continue
 		}
