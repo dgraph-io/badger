@@ -1142,14 +1142,10 @@ func BuildKVFromBackup(opt *Options, source func() ([]protos.BackupItem, error))
 
 var errNoRoom = errors.New("No room for write")
 
-// ensureRoomForWrite is always called serially.
-func (s *KV) ensureRoomForWrite() error {
-	s.Lock()
-	defer s.Unlock()
-	if s.mt.MemSize() < s.opt.MaxTableSize {
-		return nil
-	}
-
+// s.Lock() must be held.  If this returns errNoRoom, s.Lock() must be released and reacquired. You
+// should check that s.mt is big enough to be worth flushing first (because flushing an empty
+// memtable would be stupid).
+func (s *KV) tryFlushMemtable() error {
 	y.AssertTrue(s.mt != nil) // A nil mt indicates that KV is being closed.
 	select {
 	case s.flushChan <- flushTask{s.mt, s.vptr}:
@@ -1171,6 +1167,17 @@ func (s *KV) ensureRoomForWrite() error {
 		// We need to do this to unlock and allow the flusher to modify imm.
 		return errNoRoom
 	}
+}
+
+// ensureRoomForWrite is always called serially.
+func (s *KV) ensureRoomForWrite() error {
+	s.Lock()
+	defer s.Unlock()
+	if s.mt.MemSize() < s.opt.MaxTableSize {
+		return nil
+	}
+
+	return s.tryFlushMemtable()
 }
 
 func arenaSize(opt *Options) int64 {
