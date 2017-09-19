@@ -19,7 +19,6 @@ package badger
 import (
 	"encoding/hex"
 	"expvar"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -82,48 +81,14 @@ var ErrInvalidDir = errors.New("Invalid Dir, directory does not exist")
 // range.
 var ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be between 1MB and 2GB")
 
-// ExceedsMaxKeySizeError is returned as part of an entry when the size of the
-// key exceeds the size limit.
-type ExceedsMaxKeySizeError struct {
-	KeyPrefix []byte
-	KeySize   int
+func exceedsMaxKeySizeError(key []byte) error {
+	return errors.Errorf("Key with size %d exceeded %dMB limit. Key:\n%s",
+		len(key), maxKeySize<<20, hex.Dump(key[:1<<10]))
 }
 
-func (e *ExceedsMaxKeySizeError) Error() string {
-	return fmt.Sprintf("Key with size %d exceeded %dMB limit. Key:\n%s",
-		e.KeySize, maxKeySize<<20, hex.Dump(e.KeyPrefix))
-}
-
-func newExceedsMaxKeySizeError(key []byte) *ExceedsMaxKeySizeError {
-	err := &ExceedsMaxKeySizeError{
-		KeyPrefix: make([]byte, 1<<10),
-		KeySize:   len(key),
-	}
-	copy(err.KeyPrefix, key)
-	return err
-}
-
-type ExceedsMaxValueSizeError struct {
-	ValuePrefix  []byte
-	ValueSize    int
-	MaxValueSize int
-}
-
-// ExceedsMaxValueSizeError is returned as part of an entry when the size of
-// the value exceeds the size limit.
-func (e *ExceedsMaxValueSizeError) Error() string {
-	return fmt.Sprintf("Value with size %d exceeded ValueLogFileSize (%d). Key:\n%s",
-		e.ValueSize, e.MaxValueSize, hex.Dump(e.ValuePrefix))
-}
-
-func newExceedsMaxValueSizeError(value []byte, maxValueSize int) *ExceedsMaxValueSizeError {
-	err := &ExceedsMaxValueSizeError{
-		ValuePrefix:  make([]byte, 1<<10),
-		ValueSize:    len(value),
-		MaxValueSize: maxValueSize,
-	}
-	copy(err.ValuePrefix, value)
-	return err
+func exceedsMaxValueSizeError(value []byte, maxValueSize int64) error {
+	return errors.Errorf("Value with size %d exceeded ValueLogFileSize (%d). Key:\n%s",
+		len(value), maxValueSize, hex.Dump(value[:1<<10]))
 }
 
 const (
@@ -744,12 +709,12 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 	var bad []*Entry
 	for _, entry := range entries {
 		if len(entry.Key) > maxKeySize {
-			entry.Error = newExceedsMaxKeySizeError(entry.Key)
+			entry.Error = exceedsMaxKeySizeError(entry.Key)
 			bad = append(bad, entry)
 			continue
 		}
 		if len(entry.Value) > int(s.opt.ValueLogFileSize) {
-			entry.Error = newExceedsMaxValueSizeError(entry.Value, int(s.opt.ValueLogFileSize))
+			entry.Error = exceedsMaxValueSizeError(entry.Value, s.opt.ValueLogFileSize)
 			bad = append(bad, entry)
 			continue
 		}
