@@ -1157,21 +1157,17 @@ func (s *KV) tryFlushMemtable() (bool, error) {
 	}
 }
 
-// ensureRoomForWrite is always called serially.
-func (s *KV) ensureRoomForWrite(sizeThreshold int64) (bool, error) {
-	s.Lock()
-	defer s.Unlock()
-	if s.mt.MemSize() < sizeThreshold {
-		return true, nil
-	}
-
-	return s.tryFlushMemtable()
-}
-
-// Takes a msg to log if there's no room.
+// Takes a msg to log if we have to sleep.
 func (s *KV) pollRoomForWrite(sizeThreshold int64, msg string) error {
 	for {
-		room, err := s.ensureRoomForWrite(sizeThreshold)
+		s.Lock()
+		if s.mt.MemSize() < sizeThreshold {
+			s.Unlock()
+			return nil
+		}
+
+		room, err := s.tryFlushMemtable()
+		s.Unlock()
 		if err != nil {
 			return err
 		}
