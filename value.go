@@ -80,7 +80,7 @@ var (
 	ErrInvalidRequest = errors.New("Invalid request")
 )
 
-const maxKeySize = 16 << 20
+const maxKeySize = 1 << 20
 
 type logFile struct {
 	path string
