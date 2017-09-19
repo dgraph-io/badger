@@ -247,7 +247,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 			UserMeta:   e.UserMeta,
 			CASCounter: e.casCounter,
 		}
-		out.pollRoomForWrite("Replay: Making room for writes")
+		out.pollRoomForWrite(opt.MaxTableSize, "Replay: Making room for writes")
 		out.mt.Put(nk, v)
 		return nil
 	}
@@ -377,20 +377,19 @@ func syncDir(dir string) error {
 }
 
 // immutablyGetMemtables gets the same memtables as getMemTables -- except the mutable memtable is
-// copied, so it cannot be changed during usage.
-func (s *KV) immutablyGetMemTables() ([]*skl.Skiplist, func()) {
-	// We make a copy of the mutable skiplist. We acquire mutex to copy s.mt while write loop isn't
-	// mutating it.  We have to do this before acquiring s.RLock() (because the lock ordering
-	// between the two locks disallows us from acquiring it while s.RLock() is held).
-	tables := make([]*skl.Skiplist, 1)
-	s.writePendingCh <- struct{}{}
-	tables[0] = s.mt.NewCopy()
-	<-s.writePendingCh
+// bumped to storage,
+func (s *KV) bumpAndGetMemTables() ([]*skl.Skiplist, func(), error) {
+	// Bumps the memtable (unless it's empty).
+	err := s.pollRoomForWrite(1, "bumping memtable")
+	if err != nil {
+		return nil, nil, err
+	}
 
 	s.RLock()
 	defer s.RUnlock()
 
 	n := len(s.imm)
+	tables := make([]*skl.Skiplist, 0, n)
 
 	// tables[0] already has refcount 1, don't IncrRef again.
 
@@ -403,7 +402,7 @@ func (s *KV) immutablyGetMemTables() ([]*skl.Skiplist, func()) {
 		for _, tbl := range tables {
 			tbl.DecrRef()
 		}
-	}
+	}, nil
 }
 
 // getMemtables returns the current memtables and get references.
@@ -644,7 +643,7 @@ func (s *KV) writeRequests(reqs []*request) error {
 			continue
 		}
 		count += len(b.Entries)
-		err := s.pollRoomForWrite("Making room for writes")
+		err := s.pollRoomForWrite(s.opt.MaxTableSize, "Making room for writes")
 		if err != nil {
 			done(err)
 			return errors.Wrap(err, "writeRequests")
@@ -1159,10 +1158,10 @@ func (s *KV) tryFlushMemtable() (bool, error) {
 }
 
 // ensureRoomForWrite is always called serially.
-func (s *KV) ensureRoomForWrite() (bool, error) {
+func (s *KV) ensureRoomForWrite(sizeThreshold int64) (bool, error) {
 	s.Lock()
 	defer s.Unlock()
-	if s.mt.MemSize() < s.opt.MaxTableSize {
+	if s.mt.MemSize() < sizeThreshold {
 		return true, nil
 	}
 
@@ -1170,9 +1169,9 @@ func (s *KV) ensureRoomForWrite() (bool, error) {
 }
 
 // Takes a msg to log if there's no room.
-func (s *KV) pollRoomForWrite(msg string) error {
+func (s *KV) pollRoomForWrite(sizeThreshold int64, msg string) error {
 	for {
-		room, err := s.ensureRoomForWrite()
+		room, err := s.ensureRoomForWrite(sizeThreshold)
 		if err != nil {
 			return err
 		}

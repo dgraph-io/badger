@@ -364,7 +364,8 @@ func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 // value is <= afterCas.  (But it might not.)
 func (s *KV) newBackupIterator(afterCas uint64) (iter *y.MergeIterator, decrVlog func()) {
 	// For simplicity's sake we don't filter memtables by cas value.
-	tables, decr := s.immutablyGetMemTables()
+	tables, decr, err := s.bumpAndGetMemTables()
+	y.Check(err) // TODO: Handle this.
 	defer decr()
 	s.vlog.incrIteratorCount()
 	var iters []y.Iterator
