@@ -70,7 +70,7 @@ func main() {
 		opts.Dir = restoreDir
 		opts.ValueDir = restoreValueDir
 		opts.SyncWrites = false
-		errCh1 <- badger.BuildKVFromBackup(&opts, func() ([]protos.BackupItem, error) {
+		errCh1 <- BuildKVFromBackup(&opts, func() ([]protos.BackupItem, error) {
 			select {
 			case <-cancel:
 				return nil, errCanceled
@@ -118,4 +118,67 @@ func main() {
 
 	fmt.Println("Backup complete.")
 	return
+}
+
+// BuildKVFromBackup creates a new badger instance from a backup.  opt.Dir and opt.ValueDir must
+// not exist.  `source` supplies BackupItems (in increasing key order, hopefully) until it returns
+// a nil slice (or an error).
+func BuildKVFromBackup(opt *badger.Options, source func() ([]protos.BackupItem, error)) (err error) {
+	// First create the directories we're restoring our backup into.
+	if err := os.Mkdir(opt.Dir, 0755); err != nil {
+		return err
+	}
+	if opt.Dir != opt.ValueDir {
+		if err := os.Mkdir(opt.ValueDir, 0755); err != nil {
+			return err
+		}
+	}
+
+	kv, err := badger.NewKV(opt)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := kv.Close(); err == nil {
+			err = closeErr
+		}
+	}()
+
+	size := int64(0)
+	batch := []*badger.Entry{}
+	for {
+		items, err := source()
+		if err != nil {
+			return err
+		}
+		if items == nil {
+			break
+		}
+		for _, item := range items {
+			if item.HasValue {
+				e := &badger.Entry{
+					Key:      item.Key,
+					Value:    item.Value,
+					UserMeta: uint8(item.UserMeta),
+				}
+				size += int64(opt.EstimateSize(e))
+				batch = append(batch, e)
+
+				if size >= (1 << 20) {
+					if err := kv.BatchSet(batch); err != nil {
+						return err
+					}
+					size = 0
+					batch = []*badger.Entry{}
+				}
+			}
+		}
+	}
+	if len(batch) > 0 {
+		if err := kv.BatchSet(batch); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

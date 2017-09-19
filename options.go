@@ -99,7 +99,8 @@ var DefaultOptions = Options{
 	ValueThreshold:   20,
 }
 
-func (opt *Options) estimateSize(entry *Entry) int {
+// EstimateSize returns an approximate, representational size of the value's storage.
+func (opt *Options) EstimateSize(entry *Entry) int {
 	if len(entry.Value) < opt.ValueThreshold {
 		return len(entry.Key) + len(entry.Value) + y.MetaSize + y.UserMetaSize + y.CasSize
 	}

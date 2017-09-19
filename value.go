@@ -352,7 +352,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			// CAS counter check. Do not rewrite if key has a newer value.
 			ne.CASCounterCheck = vs.CASCounter
 			wb = append(wb, ne)
-			size += int64(vlog.opt.estimateSize(ne))
+			size += int64(vlog.opt.EstimateSize(ne))
 			if size >= 64*M {
 				elog.Printf("request has %d entries, size %d", len(wb), size)
 				if err := vlog.kv.BatchSet(wb); err != nil {
