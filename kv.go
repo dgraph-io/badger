@@ -247,17 +247,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 			UserMeta:   e.UserMeta,
 			CASCounter: e.casCounter,
 		}
-		for {
-			room, err := out.ensureRoomForWrite()
-			if err != nil {
-				return err
-			}
-			if room {
-				break
-			}
-			out.elog.Printf("Replay: Making room for writes")
-			time.Sleep(10 * time.Millisecond)
-		}
+		out.pollRoomForWrite("Replay: Making room for writes")
 		out.mt.Put(nk, v)
 		return nil
 	}
@@ -654,20 +644,7 @@ func (s *KV) writeRequests(reqs []*request) error {
 			continue
 		}
 		count += len(b.Entries)
-		for {
-			room, err := s.ensureRoomForWrite()
-			if err != nil {
-				return err
-			}
-			if room {
-				break
-			}
-			s.elog.Printf("Making room for writes")
-			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
-			// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
-			// you will get a deadlock.
-			time.Sleep(10 * time.Millisecond)
-		}
+		err := s.pollRoomForWrite("Making room for writes")
 		if err != nil {
 			done(err)
 			return errors.Wrap(err, "writeRequests")
@@ -1190,6 +1167,21 @@ func (s *KV) ensureRoomForWrite() (bool, error) {
 	}
 
 	return s.tryFlushMemtable()
+}
+
+// Takes a msg to log if there's no room.
+func (s *KV) pollRoomForWrite(msg string) error {
+	for {
+		room, err := s.ensureRoomForWrite()
+		if err != nil {
+			return err
+		}
+		if room {
+			return nil
+		}
+		s.elog.Printf("%s", msg)
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func arenaSize(opt *Options) int64 {
