@@ -26,6 +26,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/protos"
@@ -42,6 +43,11 @@ func main() {
 	backupDir := *backupDirFlag
 	restoreDir := *dirFlag
 	restoreValueDir := *valueDirFlag
+
+	if backupDir == "" || restoreDir == "" {
+		flag.Usage()
+		os.Exit(1)
+	}
 
 	if restoreValueDir == "" {
 		restoreValueDir = restoreDir
