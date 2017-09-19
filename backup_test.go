@@ -94,14 +94,14 @@ func TestBackupStore(t *testing.T) {
 				HasValue: true,
 				Value:    []byte(fmt.Sprintf("value%d", i)),
 				UserMeta: uint32(uint8(i)),
-				Version:  uint64(2*i + 1),
+				Counter:  uint64(2*i + 1),
 			},
 			{
 				Key:      []byte(fmt.Sprintf("key%09d-B", i)),
 				HasValue: true,
 				Value:    []byte(fmt.Sprintf("val%d", i)),
 				UserMeta: 0,
-				Version:  uint64(2*i + 2),
+				Counter:  uint64(2*i + 2),
 			},
 		}
 		i++
@@ -119,7 +119,7 @@ func TestBackupStore(t *testing.T) {
 				HasValue: false,
 				Value:    nil,
 				UserMeta: 0,
-				Version:  uint64(2*count + i + 1),
+				Counter:  uint64(2*count + i + 1),
 			},
 		}
 		i++
@@ -131,7 +131,7 @@ func TestBackupStore(t *testing.T) {
 		require.True(t, i < count)
 		require.Equal(t, fmt.Sprintf("key%09d-A", i), string(item.Key))
 		require.True(t, item.HasValue)
-		require.Equal(t, uint64(2*i+1), item.Version)
+		require.Equal(t, uint64(2*i+1), item.Counter)
 		require.Equal(t, uint32(uint8(i)), item.UserMeta)
 		require.Equal(t, fmt.Sprintf("value%d", i), string(item.Value))
 		i++
