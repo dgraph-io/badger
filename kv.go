@@ -90,8 +90,8 @@ type ExceedsMaxKeySizeError struct {
 }
 
 func (e ExceedsMaxKeySizeError) Error() string {
-	return fmt.Sprintf("Key with size %d exceeded 1MB limit. Key:\n%s",
-		e.KeySize, hex.Dump(e.KeyPrefix))
+	return fmt.Sprintf("Key with size %d exceeded %dMB limit. Key:\n%s",
+		e.KeySize, maxKeySize<<20, hex.Dump(e.KeyPrefix))
 }
 
 type ExceedsMaxValueSizeError struct {
