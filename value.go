@@ -80,10 +80,7 @@ var (
 	ErrInvalidRequest = errors.New("Invalid request")
 )
 
-const (
-	maxKeySize   = 1 << 20
-	maxValueSize = 1 << 30
-)
+const maxKeySize = 1 << 20
 
 type logFile struct {
 	path string
@@ -215,7 +212,7 @@ func (lf *logFile) iterate(offset uint32, fn logEntry) error {
 		var e Entry
 		e.offset = recordOffset
 		h.Decode(hbuf[:])
-		if h.klen > maxKeySize || h.vlen > maxValueSize {
+		if h.klen > maxKeySize {
 			truncate = true
 			break
 		}

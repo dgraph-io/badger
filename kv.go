@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"encoding/hex"
 	"expvar"
 	"log"
 	"os"
@@ -78,11 +79,17 @@ var ErrInvalidDir = errors.New("Invalid Dir, directory does not exist")
 
 // ErrValueLogSize is returned when opt.ValueLogFileSize option is not within the valid
 // range.
-var ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be between 1MB and 1GB")
+var ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be between 1MB and 2GB")
 
-// ErrExceedsMaxKeyValueSize is returned as part of Entry when the size of the key or value
-// exceeds the specified limits.
-var ErrExceedsMaxKeyValueSize = errors.New("Key (value) size exceeded 1MB (1GB) limit")
+func exceedsMaxKeySizeError(key []byte) error {
+	return errors.Errorf("Key with size %d exceeded %dMB limit. Key:\n%s",
+		len(key), maxKeySize<<20, hex.Dump(key[:1<<10]))
+}
+
+func exceedsMaxValueSizeError(value []byte, maxValueSize int64) error {
+	return errors.Errorf("Value with size %d exceeded ValueLogFileSize (%dMB). Key:\n%s",
+		len(value), maxValueSize<<20, hex.Dump(value[:1<<10]))
+}
 
 const (
 	kvWriteChCapacity = 1000
@@ -702,8 +709,13 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 	var b *request
 	var bad []*Entry
 	for _, entry := range entries {
-		if len(entry.Key) > maxKeySize || len(entry.Value) > maxValueSize {
-			entry.Error = ErrExceedsMaxKeyValueSize
+		if len(entry.Key) > maxKeySize {
+			entry.Error = exceedsMaxKeySizeError(entry.Key)
+			bad = append(bad, entry)
+			continue
+		}
+		if len(entry.Value) > int(s.opt.ValueLogFileSize) {
+			entry.Error = exceedsMaxValueSizeError(entry.Value, s.opt.ValueLogFileSize)
 			bad = append(bad, entry)
 			continue
 		}
