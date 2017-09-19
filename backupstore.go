@@ -302,6 +302,7 @@ func NewBackup(path string, counter uint64,
 			if bytes.Compare(prevKey, item.Key) >= 0 && !first {
 				return ErrBackupKeysOutOfOrder
 			}
+			prevKey = item.Key
 			data, err := item.Marshal()
 			if err != nil {
 				return errors.Wrap(err, "NewBackup marshaling")
