@@ -1144,7 +1144,6 @@ var errNoRoom = errors.New("No room for write")
 
 // ensureRoomForWrite is always called serially.
 func (s *KV) ensureRoomForWrite() error {
-	var err error
 	s.Lock()
 	defer s.Unlock()
 	if s.mt.MemSize() < s.opt.MaxTableSize {
@@ -1156,7 +1155,7 @@ func (s *KV) ensureRoomForWrite() error {
 	case s.flushChan <- flushTask{s.mt, s.vptr}:
 		s.elog.Printf("Flushing value log to disk if async mode.")
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
-		err = s.vlog.sync()
+		err := s.vlog.sync()
 		if err != nil {
 			return err
 		}
