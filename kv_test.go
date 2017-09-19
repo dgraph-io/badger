@@ -838,15 +838,15 @@ func TestBigKeyValuePairs(t *testing.T) {
 	bigV := make([]byte, opt.ValueLogFileSize+1)
 	small := make([]byte, 10)
 
-	require.IsType(t, ExceedsMaxKeySizeError{}, kv.Set(bigK, small, 0))
-	require.IsType(t, ExceedsMaxValueSizeError{}, kv.Set(small, bigV, 0))
+	require.IsType(t, &ExceedsMaxKeySizeError{}, kv.Set(bigK, small, 0))
+	require.IsType(t, &ExceedsMaxValueSizeError{}, kv.Set(small, bigV, 0))
 
 	e1 := Entry{Key: small, Value: small}
 	e2 := Entry{Key: bigK, Value: bigV}
 	err = kv.BatchSet([]*Entry{&e1, &e2})
 	require.Nil(t, err)
 	require.Nil(t, e1.Error)
-	require.IsType(t, ExceedsMaxKeySizeError{}, e2.Error)
+	require.IsType(t, &ExceedsMaxKeySizeError{}, e2.Error)
 
 	// make sure e1 was actually set:
 	var item KVItem

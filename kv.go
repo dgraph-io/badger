@@ -89,9 +89,18 @@ type ExceedsMaxKeySizeError struct {
 	KeySize   int
 }
 
-func (e ExceedsMaxKeySizeError) Error() string {
+func (e *ExceedsMaxKeySizeError) Error() string {
 	return fmt.Sprintf("Key with size %d exceeded %dMB limit. Key:\n%s",
 		e.KeySize, maxKeySize<<20, hex.Dump(e.KeyPrefix))
+}
+
+func newExceedsMaxKeySizeError(key []byte) *ExceedsMaxKeySizeError {
+	err := &ExceedsMaxKeySizeError{
+		KeyPrefix: make([]byte, 1<<10),
+		KeySize:   len(key),
+	}
+	copy(err.KeyPrefix, key)
+	return err
 }
 
 type ExceedsMaxValueSizeError struct {
@@ -102,9 +111,19 @@ type ExceedsMaxValueSizeError struct {
 
 // ExceedsMaxValueSizeError is returned as part of an entry when the size of
 // the value exceeds the size limit.
-func (e ExceedsMaxValueSizeError) Error() string {
+func (e *ExceedsMaxValueSizeError) Error() string {
 	return fmt.Sprintf("Value with size %d exceeded ValueLogFileSize (%d). Key:\n%s",
 		e.ValueSize, e.MaxValueSize, hex.Dump(e.ValuePrefix))
+}
+
+func newExceedsMaxValueSizeError(value []byte, maxValueSize int) *ExceedsMaxValueSizeError {
+	err := &ExceedsMaxValueSizeError{
+		ValuePrefix:  make([]byte, 1<<10),
+		ValueSize:    len(value),
+		MaxValueSize: maxValueSize,
+	}
+	copy(err.ValuePrefix, value)
+	return err
 }
 
 const (
@@ -725,19 +744,12 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 	var bad []*Entry
 	for _, entry := range entries {
 		if len(entry.Key) > maxKeySize {
-			entry.Error = ExceedsMaxKeySizeError{
-				KeyPrefix: entry.Key[:1<<10],
-				KeySize:   len(entry.Key),
-			}
+			entry.Error = newExceedsMaxKeySizeError(entry.Key)
 			bad = append(bad, entry)
 			continue
 		}
 		if len(entry.Value) > int(s.opt.ValueLogFileSize) {
-			entry.Error = ExceedsMaxValueSizeError{
-				ValuePrefix:  entry.Value[:1<<10],
-				ValueSize:    len(entry.Value),
-				MaxValueSize: int(s.opt.ValueLogFileSize),
-			}
+			entry.Error = newExceedsMaxValueSizeError(entry.Value, int(s.opt.ValueLogFileSize))
 			bad = append(bad, entry)
 			continue
 		}
