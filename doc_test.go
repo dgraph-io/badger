@@ -19,7 +19,10 @@ package badger_test
 import (
 	"fmt"
 	"io/ioutil"
+	"runtime"
 	"sync"
+
+	"github.com/dgraph-io/badger/options"
 
 	"github.com/dgraph-io/badger"
 )
@@ -28,6 +31,9 @@ var d string = "doc"
 
 func Example() {
 	opt := badger.DefaultOptions
+	if runtime.GOOS == "windows" {
+		opt.ValueLogLoadingMode = options.FileIO
+	}
 	dir, _ := ioutil.TempDir("", "badger")
 	opt.Dir = dir
 	opt.ValueDir = dir
@@ -113,6 +119,9 @@ func Example() {
 
 func ExampleKV_BatchSetAsync() {
 	opt := badger.DefaultOptions
+	if runtime.GOOS == "windows" {
+		opt.ValueLogLoadingMode = options.FileIO
+	}
 	dir, _ := ioutil.TempDir("", "badger")
 	opt.Dir = dir
 	opt.SyncWrites = true

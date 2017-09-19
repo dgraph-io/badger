@@ -34,6 +34,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dgraph-io/badger/options"
+
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
@@ -89,11 +91,12 @@ type logFile struct {
 	//
 	// Use shared ownership when reading/writing the file or memory map, use
 	// exclusive ownership to open/close the descriptor, unmap or remove the file.
-	lock sync.RWMutex
-	fd   *os.File
-	fid  uint32
-	fmap []byte
-	size uint32
+	lock        sync.RWMutex
+	fd          *os.File
+	fid         uint32
+	fmap        []byte
+	size        uint32
+	loadingMode options.FileLoadingMode
 }
 
 // openReadOnly assumes that we have a write lock on logFile.
@@ -119,6 +122,10 @@ func (lf *logFile) openReadOnly() error {
 }
 
 func (lf *logFile) mmap(size int64) (err error) {
+	if lf.loadingMode != options.MemoryMap {
+		return nil
+	}
+
 	lf.fmap, err = y.Mmap(lf.fd, false, size)
 	if err == nil {
 		err = y.Madvise(lf.fmap, false) // Disable readahead
@@ -126,19 +133,34 @@ func (lf *logFile) mmap(size int64) (err error) {
 	return err
 }
 
+func (lf *logFile) munmap() (err error) {
+	if lf.loadingMode != options.MemoryMap {
+		return nil
+	}
+
+	return y.Munmap(lf.fmap)
+}
+
 var errTooFewBytes = errors.New("Too few bytes read")
 
 // Acquire lock on mmap if you are calling this
-func (lf *logFile) read(p valuePointer) (buf []byte, err error) {
+func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 	var nbr int64
 	offset := p.Offset
 	size := uint32(len(lf.fmap))
 	valsz := p.Len
-	if offset >= size || offset+valsz > size {
-		err = y.ErrEOF
+	if lf.loadingMode == options.FileIO {
+		buf = s.Resize(int(p.Len))
+		var n int
+		n, err = lf.fd.ReadAt(buf, int64(offset))
+		nbr = int64(n)
 	} else {
-		buf = lf.fmap[offset : offset+valsz]
-		nbr = int64(valsz)
+		if offset >= size || offset+valsz > size {
+			err = y.ErrEOF
+		} else {
+			buf = lf.fmap[offset : offset+valsz]
+			nbr = int64(valsz)
+		}
 	}
 	y.NumReads.Add(1)
 	y.NumBytesRead.Add(nbr)
@@ -160,7 +182,7 @@ func (lf *logFile) doneWriting() error {
 	// permissions.
 	lf.lock.Lock()
 	defer lf.lock.Unlock()
-	if err := y.Munmap(lf.fmap); err != nil {
+	if err := lf.munmap(); err != nil {
 		return errors.Wrapf(err, "Unable to munmap value log: %q", lf.path)
 	}
 	if err := lf.fd.Close(); err != nil {
@@ -438,7 +460,7 @@ func (vlog *valueLog) decrIteratorCount() error {
 
 func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 	path := vlog.fpath(lf.fid)
-	if err := y.Munmap(lf.fmap); err != nil {
+	if err := lf.munmap(); err != nil {
 		_ = lf.fd.Close()
 		return err
 	}
@@ -619,7 +641,11 @@ func (vlog *valueLog) openOrCreateFiles() error {
 		}
 		found[fid] = struct{}{}
 
-		lf := &logFile{fid: uint32(fid), path: vlog.fpath(uint32(fid))}
+		lf := &logFile{
+			fid:         uint32(fid),
+			path:        vlog.fpath(uint32(fid)),
+			loadingMode: vlog.opt.ValueLogLoadingMode,
+		}
 		vlog.filesMap[uint32(fid)] = lf
 		if uint32(fid) > maxFid {
 			maxFid = uint32(fid)
@@ -659,7 +685,7 @@ func (vlog *valueLog) openOrCreateFiles() error {
 
 func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	path := vlog.fpath(fid)
-	lf := &logFile{fid: fid, path: path}
+	lf := &logFile{fid: fid, path: path, loadingMode: vlog.opt.ValueLogLoadingMode}
 	vlog.writableLogOffset = 0
 
 	var err error
@@ -704,7 +730,7 @@ func (vlog *valueLog) Close() error {
 	var err error
 	for _, f := range vlog.filesMap {
 		f.lock.Lock() // We won’t release the lock.
-		if munmapErr := y.Munmap(f.fmap); munmapErr != nil && err == nil {
+		if munmapErr := f.munmap(); munmapErr != nil && err == nil {
 			err = munmapErr
 		}
 
@@ -891,7 +917,7 @@ func (vlog *valueLog) getFileRLocked(fid uint32) (*logFile, error) {
 }
 
 // Read reads the value log at a given location.
-func (vlog *valueLog) Read(vp valuePointer, consumer func([]byte) error) error {
+func (vlog *valueLog) Read(vp valuePointer, s *y.Slice, consumer func([]byte) error) error {
 	// Check for valid offset if we are reading to writable log.
 	if vp.Fid == vlog.maxFid && vp.Offset >= vlog.writableLogOffset {
 		return errors.Errorf(
@@ -910,10 +936,11 @@ func (vlog *valueLog) Read(vp valuePointer, consumer func([]byte) error) error {
 		n += h.klen
 		return consumer(buf[n : n+h.vlen])
 	}
-	return vlog.readValueBytes(vp, fn)
+	return vlog.readValueBytes(vp, s, fn)
 }
 
-func (vlog *valueLog) readValueBytes(vp valuePointer, consumer func([]byte) error) error {
+func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice,
+	consumer func([]byte) error) error {
 	lf, err := vlog.getFileRLocked(vp.Fid)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to read from value log: %+v", vp)
@@ -921,7 +948,7 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, consumer func([]byte) erro
 	defer lf.lock.RUnlock()
 
 	var buf []byte
-	if buf, err = lf.read(vp); err != nil {
+	if buf, err = lf.read(vp, s); err != nil {
 		return errors.Wrapf(err, "Unable to read from value log: %+v", vp)
 	}
 	return consumer(buf)
@@ -980,6 +1007,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64) error {
 
 	start := time.Now()
 	y.AssertTrue(vlog.kv != nil)
+	s := new(y.Slice)
 	err := lf.iterate(0, func(e Entry, vp valuePointer) error {
 		esz := float64(vp.Len) / (1 << 20) // in MBs. +4 for the CAS stuff.
 		skipped += esz
@@ -1036,7 +1064,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64) error {
 		} else {
 			vlog.elog.Printf("Reason=%+v\n", r)
 
-			err := vlog.readValueBytes(vp, func(buf []byte) error {
+			err := vlog.readValueBytes(vp, s, func(buf []byte) error {
 				ne := valueBytesToEntry(buf)
 				ne.offset = vp.Offset
 				if ne.casCounter == e.casCounter {

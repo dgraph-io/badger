@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dgraph-io/badger/options"
+
 	"golang.org/x/net/trace"
 
 	"github.com/dgraph-io/badger/skl"
@@ -91,6 +93,10 @@ func exceedsMaxValueSizeError(value []byte, maxValueSize int64) error {
 		len(value), maxValueSize<<20, hex.Dump(value[:1<<10]))
 }
 
+// ErrInvalidLoadingMode is returned when opt.ValueLogLoadingMode option is not
+// within the valid range
+var ErrInvalidLoadingMode = errors.New("Invalid ValueLogLoadingMode, must be FileIO or MemoryMap")
+
 const (
 	kvWriteChCapacity = 1000
 )
@@ -144,6 +150,12 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
+
+	if (opt.ValueLogLoadingMode != options.MemoryMap) &&
+		(opt.ValueLogLoadingMode != options.FileIO) {
+		return nil, ErrInvalidLoadingMode
+	}
+
 	manifestFile, manifest, err := openOrCreateManifestFile(opt.Dir)
 	if err != nil {
 		return nil, err
@@ -424,7 +436,7 @@ func (s *KV) yieldItemValue(item *KVItem, consumer func([]byte) error) error {
 
 	var vp valuePointer
 	vp.Decode(item.vptr)
-	err := s.vlog.Read(vp, consumer)
+	err := s.vlog.Read(vp, item.slice, consumer)
 	if err != nil {
 		return err
 	}
