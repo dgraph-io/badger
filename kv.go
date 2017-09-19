@@ -247,7 +247,14 @@ func NewKV(optParam *Options) (out *KV, err error) {
 			UserMeta:   e.UserMeta,
 			CASCounter: e.casCounter,
 		}
-		for err := out.ensureRoomForWrite(); err != nil; err = out.ensureRoomForWrite() {
+		for {
+			room, err := out.ensureRoomForWrite()
+			if err != nil {
+				return err
+			}
+			if room {
+				break
+			}
 			out.elog.Printf("Replay: Making room for writes")
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -647,7 +654,14 @@ func (s *KV) writeRequests(reqs []*request) error {
 			continue
 		}
 		count += len(b.Entries)
-		for err := s.ensureRoomForWrite(); err != nil; err = s.ensureRoomForWrite() {
+		for {
+			room, err := s.ensureRoomForWrite()
+			if err != nil {
+				return err
+			}
+			if room {
+				break
+			}
 			s.elog.Printf("Making room for writes")
 			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
 			// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
@@ -1140,12 +1154,10 @@ func BuildKVFromBackup(opt *Options, source func() ([]protos.BackupItem, error))
 	return nil
 }
 
-var errNoRoom = errors.New("No room for write")
-
-// s.Lock() must be held.  If this returns errNoRoom, s.Lock() must be released and reacquired. You
-// should check that s.mt is big enough to be worth flushing first (because flushing an empty
-// memtable would be stupid).
-func (s *KV) tryFlushMemtable() error {
+// s.Lock() must be held.  If this returns false (with no error), s.Lock() must be released and
+// reacquired before you try again. You should check that s.mt is big enough to be worth flushing
+// first (because there's no point in flushing an empty or too-small memtable).
+func (s *KV) tryFlushMemtable() (bool, error) {
 	y.AssertTrue(s.mt != nil) // A nil mt indicates that KV is being closed.
 	select {
 	case s.flushChan <- flushTask{s.mt, s.vptr}:
@@ -1153,7 +1165,7 @@ func (s *KV) tryFlushMemtable() error {
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
 		err := s.vlog.sync()
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		s.elog.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
@@ -1162,19 +1174,19 @@ func (s *KV) tryFlushMemtable() error {
 		s.imm = append(s.imm, s.mt)
 		s.mt = skl.NewSkiplist(arenaSize(&s.opt))
 		// New memtable is empty. We certainly have room.
-		return nil
+		return true, nil
 	default:
 		// We need to do this to unlock and allow the flusher to modify imm.
-		return errNoRoom
+		return false, nil
 	}
 }
 
 // ensureRoomForWrite is always called serially.
-func (s *KV) ensureRoomForWrite() error {
+func (s *KV) ensureRoomForWrite() (bool, error) {
 	s.Lock()
 	defer s.Unlock()
 	if s.mt.MemSize() < s.opt.MaxTableSize {
-		return nil
+		return true, nil
 	}
 
 	return s.tryFlushMemtable()
