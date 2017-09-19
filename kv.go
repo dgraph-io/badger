@@ -27,6 +27,7 @@ import (
 
 	"golang.org/x/net/trace"
 
+	"github.com/dgraph-io/badger/protos"
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
@@ -55,17 +56,19 @@ type KV struct {
 	// nil if Dir and ValueDir are the same
 	valueDirGuard *DirectoryLockGuard
 
-	closers   closers
-	elog      trace.EventLog
-	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
-	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
-	opt       Options
-	manifest  *manifestFile
-	lc        *levelsController
-	vlog      valueLog
-	vptr      valuePointer // less than or equal to a pointer to the last vlog value put into mt
-	writeCh   chan *request
-	flushChan chan flushTask // For flushing memtables.
+	closers  closers
+	elog     trace.EventLog
+	mt       *skl.Skiplist   // Our latest (actively written) in-memory table
+	imm      []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+	opt      Options
+	manifest *manifestFile
+	lc       *levelsController
+	vlog     valueLog
+	vptr     valuePointer // less than or equal to a pointer to the last vlog value put into mt
+	writeCh  chan *request
+	// used as a mutex to halt the write loop -- must be acquired _before_  the sync.RWMutex.
+	writePendingCh chan struct{}
+	flushChan      chan flushTask // For flushing memtables.
 
 	// Incremented in the non-concurrently accessed write loop.  But also accessed outside. So
 	// we use an atomic op.
@@ -148,14 +151,15 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	}()
 
 	out = &KV{
-		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
-		flushChan:     make(chan flushTask, opt.NumMemtables),
-		writeCh:       make(chan *request, kvWriteChCapacity),
-		opt:           opt,
-		manifest:      manifestFile,
-		elog:          trace.NewEventLog("Badger", "KV"),
-		dirLockGuard:  dirLockGuard,
-		valueDirGuard: valueDirLockGuard,
+		imm:            make([]*skl.Skiplist, 0, opt.NumMemtables),
+		flushChan:      make(chan flushTask, opt.NumMemtables),
+		writeCh:        make(chan *request, kvWriteChCapacity),
+		writePendingCh: make(chan struct{}, 1),
+		opt:            opt,
+		manifest:       manifestFile,
+		elog:           trace.NewEventLog("Badger", "KV"),
+		dirLockGuard:   dirLockGuard,
+		valueDirGuard:  valueDirLockGuard,
 	}
 
 	out.closers.updateSize = y.NewCloser(1)
@@ -376,6 +380,36 @@ func syncDir(dir string) error {
 	return errors.Wrapf(closeErr, "While closing directory: %s.", dir)
 }
 
+// immutablyGetMemtables gets the same memtables as getMemTables -- except the mutable memtable is
+// copied, so it cannot be changed during usage.
+func (s *KV) immutablyGetMemTables() ([]*skl.Skiplist, func()) {
+	// We make a copy of the mutable skiplist. We acquire mutex to copy s.mt while write loop isn't
+	// mutating it.  We have to do this before acquiring s.RLock() (because the lock ordering
+	// between the two locks disallows us from acquiring it while s.RLock() is held).
+	tables := make([]*skl.Skiplist, 1)
+	s.writePendingCh <- struct{}{}
+	tables[0] = s.mt.NewCopy()
+	<-s.writePendingCh
+
+	s.RLock()
+	defer s.RUnlock()
+
+	n := len(s.imm)
+
+	// tables[0] already has refcount 1, don't IncrRef again.
+
+	for i := n; i > 0; {
+		i--
+		s.imm[i].IncrRef()
+		tables = append(tables, s.imm[i])
+	}
+	return tables, func() {
+		for _, tbl := range tables {
+			tbl.DecrRef()
+		}
+	}
+}
+
 // getMemtables returns the current memtables and get references.
 func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 	s.RLock()
@@ -567,7 +601,7 @@ func (s *KV) lastCASCounter() uint64 {
 }
 
 // newCASCounters generates a set of unique CAS counters -- the interval [x, x + howMany) where x
-// is the return value.
+// is the return value.  Never returns zero.
 func (s *KV) newCASCounters(howMany uint64) uint64 {
 	last := atomic.AddUint64(&s.lastUsedCasCounter, howMany)
 	return last - howMany + 1
@@ -638,7 +672,7 @@ func (s *KV) writeRequests(reqs []*request) error {
 
 func (s *KV) doWrites(lc *y.Closer) {
 	defer lc.Done()
-	pendingCh := make(chan struct{}, 1)
+	pendingCh := s.writePendingCh
 
 	writeRequests := func(reqs []*request) {
 		if err := s.writeRequests(reqs); err != nil {
@@ -997,6 +1031,118 @@ func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint64, f func(error))
 	s.compareAsync(e, f)
 }
 
+// StreamBackup sends a stream of backup items by calling `consumer` over and over again, until
+// it's done, at which point it returns.
+func (s *KV) StreamBackup(afterCas uint64, consumer func(protos.BackupItem) error) error {
+	it, decrVlog := s.newBackupIterator(afterCas)
+	defer decrVlog()
+	defer it.Close()
+
+	for it.Rewind(); it.Valid(); it.Next() {
+		key := append([]byte{}, it.Key()...)
+		vs := it.Value()
+
+		if vs.CASCounter <= afterCas {
+			continue
+		}
+
+		var item protos.BackupItem
+		item.Key = key
+		item.Counter = vs.CASCounter
+		if (vs.Meta & BitDelete) != 0 {
+			// Tombstone
+			item.HasValue = false
+		} else {
+			item.HasValue = true
+			item.UserMeta = uint32(vs.UserMeta)
+			if (vs.Meta & BitValuePointer) == 0 {
+				item.Value = append([]byte{}, vs.Value...)
+			} else {
+				var vp valuePointer
+				vp.Decode(vs.Value)
+
+				err := s.vlog.Read(vp, func(data []byte) error {
+					item.Value = append([]byte{}, data...)
+					return nil
+				})
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		if err := consumer(item); err != nil {
+			// f can tell us to stop.
+			return err
+		}
+	}
+
+	return nil
+}
+
+// BuildKVFromBackup creates a new badger instance from a backup.  opt.Dir and opt.ValueDir must
+// not exist.  `source` supplies BackupItems (in increasing key order, hopefully) until it returns
+// a nil slice (or an error).
+func BuildKVFromBackup(opt *Options, source func() ([]protos.BackupItem, error)) (err error) {
+	// First create the directories we're restoring our backup into.
+	if err := os.Mkdir(opt.Dir, 0755); err != nil {
+		return err
+	}
+	if opt.Dir != opt.ValueDir {
+		if err := os.Mkdir(opt.ValueDir, 0755); err != nil {
+			return err
+		}
+	}
+
+	kv, err := NewKV(opt)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := kv.Close(); err == nil {
+			err = closeErr
+		}
+	}()
+
+	size := int64(0)
+	batch := []*Entry{}
+	for {
+		items, err := source()
+		if err != nil {
+			return err
+		}
+		if items == nil {
+			break
+		}
+		for _, item := range items {
+			if item.HasValue {
+				e := &Entry{
+					Key:      item.Key,
+					Value:    item.Value,
+					UserMeta: uint8(item.UserMeta),
+				}
+				size += int64(opt.estimateSize(e))
+				batch = append(batch, e)
+
+				if size >= opt.maxBatchSize {
+					if err := kv.BatchSet(batch); err != nil {
+						return err
+					}
+					size = 0
+					batch = []*Entry{}
+				}
+			}
+		}
+	}
+	if len(batch) > 0 {
+		if err := kv.BatchSet(batch); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 var errNoRoom = errors.New("No room for write")
 
 // ensureRoomForWrite is always called serially.
@@ -1036,18 +1182,26 @@ func arenaSize(opt *Options) int64 {
 }
 
 // WriteLevel0Table flushes memtable. It drops deleteValues.
-func writeLevel0Table(s *skl.Skiplist, f *os.File) error {
+func writeLevel0Table(s *skl.Skiplist, f *os.File) (maxCasCounter uint64, err error) {
 	iter := s.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder()
 	defer b.Close()
+	maxCas := uint64(0)
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
-		if err := b.Add(iter.Key(), iter.Value()); err != nil {
-			return err
+		value := iter.Value()
+		if maxCas < value.CASCounter {
+			maxCas = value.CASCounter
+		}
+		if err := b.Add(iter.Key(), value); err != nil {
+			return 0, err
 		}
 	}
-	_, err := f.Write(b.Finish())
-	return err
+	_, err = f.Write(b.Finish())
+	if err != nil {
+		return 0, err
+	}
+	return maxCas, nil
 }
 
 type flushTask struct {
@@ -1087,7 +1241,7 @@ func (s *KV) flushMemtable(lc *y.Closer) error {
 		dirSyncCh := make(chan error)
 		go func() { dirSyncCh <- syncDir(s.opt.Dir) }()
 
-		err = writeLevel0Table(ft.mt, fd)
+		maxCasCounter, err := writeLevel0Table(ft.mt, fd)
 		dirSyncErr := <-dirSyncCh
 
 		if err != nil {
@@ -1099,7 +1253,7 @@ func (s *KV) flushMemtable(lc *y.Closer) error {
 			return err
 		}
 
-		tbl, err := table.OpenTable(fd, s.opt.TableLoadingMode)
+		tbl, err := table.OpenTable(fd, maxCasCounter, s.opt.TableLoadingMode)
 		if err != nil {
 			s.elog.Printf("ERROR while opening table: %v", err)
 			return err
