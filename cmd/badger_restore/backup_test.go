@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package badger
+package main
 
 import (
 	"fmt"
@@ -23,14 +23,26 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/protos"
 	"github.com/stretchr/testify/require"
 )
 
-func LoadBackupData(t *testing.T, kv *KV, limit int) {
-	entries := make([]*Entry, 0, limit)
+func getTestOptions(dir string) *badger.Options {
+	opt := new(badger.Options)
+	*opt = badger.DefaultOptions
+	opt.MaxTableSize = 1 << 15 // Force more compaction.
+	opt.LevelOneSize = 4 << 15 // Force more compaction.
+	opt.Dir = dir
+	opt.ValueDir = dir
+	opt.SyncWrites = true // Some tests seem to need this to pass.
+	return opt
+}
+
+func LoadBackupData(t *testing.T, kv *badger.KV, limit int) {
+	entries := make([]*badger.Entry, 0, limit)
 	for i := 0; i < limit; i++ {
-		entries = append(entries, &Entry{
+		entries = append(entries, &badger.Entry{
 			Key:      []byte(fmt.Sprintf("key%09d", i)),
 			Value:    []byte(fmt.Sprintf("val%d", i)),
 			UserMeta: uint8(i),
@@ -48,7 +60,7 @@ func TestBasicBackup(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := badger.NewKV(getTestOptions(dir))
 	require.NoError(t, err)
 	defer kv.Close()
 
@@ -74,17 +86,17 @@ func TestBackupStore(t *testing.T) {
 
 	storeDir := filepath.Join(dir, "store")
 
-	err = CreateBackupStore(storeDir)
+	err = badger.CreateBackupStore(storeDir)
 	require.NoError(t, err)
 
-	status, err := ReadBackupStatus(storeDir)
+	status, err := badger.ReadBackupStatus(storeDir)
 	require.NoError(t, err)
 	require.Empty(t, status.Backups)
 
 	// Perform two backups and test that restoration omits deletions.
 	const count = 100
 	i := 0
-	err = NewBackup(storeDir, 2*count, func() ([]protos.BackupItem, error) {
+	err = badger.NewBackup(storeDir, 2*count, func() ([]protos.BackupItem, error) {
 		if i == count {
 			return nil, nil
 		}
@@ -109,7 +121,7 @@ func TestBackupStore(t *testing.T) {
 	})
 	require.NoError(t, err)
 	i = 0
-	err = NewBackup(storeDir, 3*count, func() ([]protos.BackupItem, error) {
+	err = badger.NewBackup(storeDir, 3*count, func() ([]protos.BackupItem, error) {
 		if i == count {
 			return nil, nil
 		}
