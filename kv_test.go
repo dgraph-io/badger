@@ -38,7 +38,6 @@ func getTestOptions(dir string) *Options {
 	opt.LevelOneSize = 4 << 15 // Force more compaction.
 	opt.Dir = dir
 	opt.ValueDir = dir
-	opt.SyncWrites = true // Some tests seem to need this to pass.
 	return opt
 }
 
@@ -941,3 +940,76 @@ func TestSetIfAbsentAsync(t *testing.T) {
 	require.Equal(t, n, count)
 	require.NoError(t, kv.Close())
 }
+
+/*
+func TestIteratorRoad(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, _ := NewKV(getTestOptions(dir))
+	defer kv.Close()
+
+	entries := []*Entry{}
+	for i := 0; i < 100000; i++ {
+		entries = append(entries, &Entry{
+			Key: []byte(fmt.Sprintf("k%07d", i)),
+			Value: []byte(fmt.Sprintf("%d", 1)),
+		})
+	}
+	err := kv.BatchSet(entries)
+	require.NoError(err)
+
+	for i := 0
+
+
+
+	for i}
+
+	// Not a benchmark. Just a simple test for concurrent writes.
+	n := 20
+	m := 500
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < m; j++ {
+				kv.Set([]byte(fmt.Sprintf("k%05d_%08d", i, j)),
+					[]byte(fmt.Sprintf("v%05d_%08d", i, j)), byte(j%127))
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	t.Log("Starting iteration")
+
+	opt := IteratorOptions{}
+	opt.Reverse = false
+	opt.PrefetchSize = 10
+	opt.PrefetchValues = true
+
+	it := kv.NewIterator(opt)
+	defer it.Close()
+	var i, j int
+	for it.Rewind(); it.Valid(); it.Next() {
+		item := it.Item()
+		k := item.Key()
+		if k == nil {
+			break // end of iteration.
+		}
+
+		require.EqualValues(t, fmt.Sprintf("k%05d_%08d", i, j), string(k))
+		v := getItemValue(t, item)
+		require.EqualValues(t, fmt.Sprintf("v%05d_%08d", i, j), string(v))
+		require.Equal(t, item.UserMeta(), byte(j%127))
+		j++
+		if j == m {
+			i++
+			j = 0
+		}
+	}
+	require.EqualValues(t, n, i)
+	require.EqualValues(t, 0, j)
+}
+
+*/
