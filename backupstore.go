@@ -119,6 +119,7 @@ func NewBackup(path string, counter uint64,
 		items, err := producer()
 		if err != nil {
 			fileName := f.Name()
+			// TODO: Use y.Ignore for this (or add y.Ignore and use it for this and any others)
 			_ = f.Close()
 			f = nil
 			_ = os.Remove(fileName)
