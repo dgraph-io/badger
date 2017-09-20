@@ -73,7 +73,7 @@ func BuildKVFromBackup(opt *badger.Options, source func() ([]protos.BackupItem, 
 				size += int64(opt.EstimateSize(e))
 				batch = append(batch, e)
 
-				if size >= (1 << 20) {
+				if size >= (64 << 20) {
 					if err := kv.BatchSet(batch); err != nil {
 						return err
 					}
