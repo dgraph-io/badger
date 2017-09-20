@@ -38,16 +38,21 @@ func TestValueBasic(t *testing.T) {
 	defer kv.Close()
 	log := &kv.vlog
 
+	// Use value big enough that the value log writes them even if SyncWrites is false.
+	const val1 = "sampleval012345678901234567890123"
+	const val2 = "samplevalb012345678901234567890123"
+	require.True(t, len(val1) >= kv.opt.ValueThreshold)
+
 	entry := &Entry{
 		Key:             []byte("samplekey"),
-		Value:           []byte("sampleval"),
+		Value:           []byte(val1),
 		Meta:            BitValuePointer,
 		CASCounterCheck: 22222,
 		casCounter:      33333,
 	}
 	entry2 := &Entry{
 		Key:             []byte("samplekeyb"),
-		Value:           []byte("samplevalb"),
+		Value:           []byte(val2),
 		Meta:            BitValuePointer,
 		CASCounterCheck: 22225,
 		casCounter:      33335,
@@ -77,14 +82,14 @@ func TestValueBasic(t *testing.T) {
 	require.EqualValues(t, []Entry{
 		{
 			Key:             []byte("samplekey"),
-			Value:           []byte("sampleval"),
+			Value:           []byte(val1),
 			Meta:            BitValuePointer,
 			CASCounterCheck: 22222,
 			casCounter:      33333,
 		},
 		{
 			Key:             []byte("samplekeyb"),
-			Value:           []byte("samplevalb"),
+			Value:           []byte(val2),
 			Meta:            BitValuePointer,
 			CASCounterCheck: 22225,
 			casCounter:      33335,
@@ -307,15 +312,6 @@ func TestValueGC3(t *testing.T) {
 	require.Equal(t, value3, v3)
 }
 
-var (
-	k1 = []byte("k1")
-	k2 = []byte("k2")
-	k3 = []byte("k3")
-	v1 = []byte("value1")
-	v2 = []byte("value2")
-	v3 = []byte("value3")
-)
-
 func TestChecksums(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
@@ -324,6 +320,18 @@ func TestChecksums(t *testing.T) {
 	// Set up SST with K1=V1
 	kv, err := NewKV(getTestOptions(dir))
 	require.NoError(t, err)
+
+	var (
+		k1 = []byte("k1")
+		k2 = []byte("k2")
+		k3 = []byte("k3")
+		v1 = []byte("value1-012345678901234567890123")
+		v2 = []byte("value2-012345678901234567890123")
+		v3 = []byte("value3-012345678901234567890123")
+	)
+	// Make sure the value log would actually store the item
+	require.True(t, len(v3) >= kv.opt.ValueThreshold)
+
 	require.NoError(t, kv.Set(k1, v1, 0))
 	require.NoError(t, kv.Close())
 
@@ -376,6 +384,17 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	kv, err := NewKV(getTestOptions(dir))
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
+
+	var (
+		k1 = []byte("k1")
+		k2 = []byte("k2")
+		k3 = []byte("k3")
+		v1 = []byte("value1-012345678901234567890123")
+		v2 = []byte("value2-012345678901234567890123")
+		v3 = []byte("value3-012345678901234567890123")
+	)
+	// Values need to be long enough to actually get written to value log.
+	require.True(t, len(v3) >= kv.opt.ValueThreshold)
 
 	// Create truncated vlog to simulate a partial append.
 	buf := createVlog(t, []*Entry{
