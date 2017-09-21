@@ -376,6 +376,18 @@ func syncDir(dir string) error {
 	return errors.Wrapf(closeErr, "While closing directory: %s.", dir)
 }
 
+// s.tablesLock must be RLocked while you call this.  Calls IncrRef on the tables it appends.
+func (s *KV) appendAndIncrImmutableMemtables(appendOnto []*skl.Skiplist) []*skl.Skiplist {
+	n := len(s.imm)
+	for i := n; i > 0; {
+		i--
+		table := s.imm[i]
+		table.IncrRef()
+		appendOnto = append(appendOnto, table)
+	}
+	return appendOnto
+}
+
 // immutablyGetMemtables gets the same memtables as getMemTables -- except the mutable memtable is
 // bumped to storage,
 func (s *KV) bumpAndGetMemTables() ([]*skl.Skiplist, func(), error) {
@@ -390,14 +402,7 @@ func (s *KV) bumpAndGetMemTables() ([]*skl.Skiplist, func(), error) {
 
 	n := len(s.imm)
 	tables := make([]*skl.Skiplist, 0, n)
-
-	// tables[0] already has refcount 1, don't IncrRef again.
-
-	for i := n; i > 0; {
-		i--
-		s.imm[i].IncrRef()
-		tables = append(tables, s.imm[i])
-	}
+	tables = s.appendAndIncrImmutableMemtables(tables)
 	return tables, func() {
 		for _, tbl := range tables {
 			tbl.DecrRef()
@@ -408,18 +413,14 @@ func (s *KV) bumpAndGetMemTables() ([]*skl.Skiplist, func(), error) {
 // getMemtables returns the current memtables and get references.  s.tablesLock must be r-locked
 // while calling this.
 func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
-	tables := make([]*skl.Skiplist, len(s.imm)+1)
+	tables := make([]*skl.Skiplist, 1, len(s.imm)+1)
 
 	// Get mutable memtable.
 	tables[0] = s.mt
 	tables[0].IncrRef()
 
 	// Get immutable memtables.
-	last := len(s.imm) - 1
-	for i := range s.imm {
-		tables[i+1] = s.imm[last-i]
-		tables[i+1].IncrRef()
-	}
+	tables = s.appendAndIncrImmutableMemtables(tables)
 	return tables, func() {
 		for _, tbl := range tables {
 			tbl.DecrRef()
