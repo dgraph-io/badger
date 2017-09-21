@@ -345,14 +345,15 @@ func (it *Iterator) Rewind() {
 func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 	s.tablesLock.RLock()
 	tables, decr := s.getMemTables()
-	s.tablesLock.RUnlock()
 	defer decr()
 	s.vlog.incrIteratorCount()
 	var iters []y.Iterator
 	for i := 0; i < len(tables); i++ {
 		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
 	}
-	iters = s.lc.appendIterators(iters, opt.Reverse, 0) // This will increment references.
+	// This will increment references.
+	runlockMe, iters := s.lc.appendIterators(&s.tablesLock, iters, opt.Reverse, 0)
+	runlockMe.RUnlock()
 	res := &Iterator{
 		kv:   s,
 		iitr: y.NewMergeIterator(iters, opt.Reverse),
@@ -373,13 +374,14 @@ func (s *KV) newBackupIterator(afterCas uint64) (iter *y.MergeIterator, decrVlog
 	s.tablesLock.RLock()
 	// For simplicity's sake we don't filter memtables by cas value.
 	tables, decr := s.getImmutableMemTables()
-	s.tablesLock.RUnlock()
 	defer decr()
-	s.vlog.incrIteratorCount()
+	s.vlog.incrIteratorCount() // Prevents vlog from being deleted out from under our tables.
 	var iters []y.Iterator
 	for i := 0; i < len(tables); i++ {
 		iters = append(iters, tables[i].NewUniIterator(false))
 	}
-	iters = s.lc.appendIterators(iters, false, afterCas) // This will increment references.
+	// This will increment references.
+	runlockMe, iters := s.lc.appendIterators(&s.tablesLock, iters, false, afterCas)
+	runlockMe.RUnlock()
 	return y.NewMergeIterator(iters, false), func() { s.vlog.decrIteratorCount() }
 }
