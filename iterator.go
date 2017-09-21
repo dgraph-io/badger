@@ -352,7 +352,7 @@ func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
 	}
 	// This will increment references.
-	runlockMe, iters := s.lc.appendIterators(&s.tablesLock, iters, opt.Reverse, 0)
+	runlockMe, iters, _ := s.lc.appendIterators(&s.tablesLock, iters, opt.Reverse, 0)
 	runlockMe.RUnlock()
 	res := &Iterator{
 		kv:   s,
@@ -365,7 +365,7 @@ func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 // newBackupIterator returns an iterator that produces changes in the level controller (but not
 // memtables!).  Call decrVlog() after calling iter.Close().  This may omit tables whose max cas
 // value is <= afterCas.  (But it might not.)
-func (s *KV) newBackupIterator(afterCas uint64) (iter *y.MergeIterator, decrVlog func()) {
+func (s *KV) newBackupIterator(afterCas uint64) (iter *y.MergeIterator, counter uint64, decrVlog func()) {
 	// Bump prior writes because we want an immutable memtable to iterate, and we want our backup
 	// iteration to happen _after_ prior writes by the user.
 	err := s.pollRoomForWrite(1, "bumping memtable")
@@ -381,8 +381,23 @@ func (s *KV) newBackupIterator(afterCas uint64) (iter *y.MergeIterator, decrVlog
 		iters = append(iters, tables[i].NewUniIterator(false))
 	}
 	// This will increment references.
-	runlockMe, iters := s.lc.appendIterators(&s.tablesLock, iters, false, afterCas)
+	runlockMe, iters, levelsMaxCAS := s.lc.appendIterators(&s.tablesLock, iters, false, afterCas)
 	runlockMe.RUnlock()
+
+	if len(tables) > 0 {
+		iter := tables[0].NewUniIterator(false)
+		for iter.Rewind(); iter.Valid(); iter.Next() {
+			casCounter := iter.Value().CASCounter
+			if casCounter > counter {
+				counter = casCounter
+			}
+		}
+		err := iter.Close()
+		y.Check(err) // TODO: Handle this
+	} else {
+		counter = levelsMaxCAS
+	}
+
 	// TODO: Compute and return max cas counter value from most up-to-date table.
-	return y.NewMergeIterator(iters, false), func() { s.vlog.decrIteratorCount() }
+	return y.NewMergeIterator(iters, false), counter, func() { s.vlog.decrIteratorCount() }
 }

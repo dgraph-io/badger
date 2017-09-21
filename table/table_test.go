@@ -358,7 +358,7 @@ func TestConcatIteratorOneTable(t *testing.T) {
 	require.NoError(t, err)
 	defer tbl.DecrRef()
 
-	it := NewConcatIterator([]*Table{tbl}, false, 0)
+	it, _ := NewConcatIterator([]*Table{tbl}, false, 0)
 	defer it.Close()
 
 	it.Rewind()
@@ -385,7 +385,7 @@ func TestConcatIterator(t *testing.T) {
 	defer tbl3.DecrRef()
 
 	{
-		it := NewConcatIterator([]*Table{tbl1, tbl2, tbl3}, false, 0)
+		it, _ := NewConcatIterator([]*Table{tbl1, tbl2, tbl3}, false, 0)
 		defer it.Close()
 		it.Rewind()
 		require.True(t, it.Valid())
@@ -417,7 +417,7 @@ func TestConcatIterator(t *testing.T) {
 		require.False(t, it.Valid())
 	}
 	{
-		it := NewConcatIterator([]*Table{tbl1, tbl2, tbl3}, true, 0)
+		it, _ := NewConcatIterator([]*Table{tbl1, tbl2, tbl3}, true, 0)
 		defer it.Close()
 		it.Rewind()
 		require.True(t, it.Valid())
@@ -466,7 +466,7 @@ func TestMergingIterator(t *testing.T) {
 	require.NoError(t, err)
 	defer tbl2.DecrRef()
 	it1 := tbl1.NewIterator(false)
-	it2 := NewConcatIterator([]*Table{tbl2}, false, 0)
+	it2, _ := NewConcatIterator([]*Table{tbl2}, false, 0)
 	it := y.NewMergeIterator([]y.Iterator{it1, it2}, false)
 	defer it.Close()
 
@@ -506,7 +506,7 @@ func TestMergingIteratorReversed(t *testing.T) {
 	require.NoError(t, err)
 	defer tbl2.DecrRef()
 	it1 := tbl1.NewIterator(true)
-	it2 := NewConcatIterator([]*Table{tbl2}, true, 0)
+	it2, _ := NewConcatIterator([]*Table{tbl2}, true, 0)
 	it := y.NewMergeIterator([]y.Iterator{it1, it2}, true)
 	defer it.Close()
 
@@ -545,8 +545,8 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 	require.NoError(t, err)
 	defer t2.DecrRef()
 
-	it1 := NewConcatIterator([]*Table{t1}, false, 0)
-	it2 := NewConcatIterator([]*Table{t2}, false, 0)
+	it1, _ := NewConcatIterator([]*Table{t1}, false, 0)
+	it2, _ := NewConcatIterator([]*Table{t2}, false, 0)
 	it := y.NewMergeIterator([]y.Iterator{it1, it2}, false)
 	defer it.Close()
 
@@ -585,8 +585,8 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 	require.NoError(t, err)
 	defer t2.DecrRef()
 
-	it1 := NewConcatIterator([]*Table{t1}, false, 0)
-	it2 := NewConcatIterator([]*Table{t2}, false, 0)
+	it1, _ := NewConcatIterator([]*Table{t1}, false, 0)
+	it2, _ := NewConcatIterator([]*Table{t2}, false, 0)
 	it := y.NewMergeIterator([]y.Iterator{it1, it2}, false)
 	defer it.Close()
 

@@ -263,14 +263,15 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 // appendIterators appends iterators to an array of iterators, for merging.
 // Note: You must have acquired s.RLock() to use this function.
 // Note: This obtains references for the table handlers. Remember to close these iterators.
-func (s *levelHandler) appendIterators(iters []y.Iterator, reversed bool, afterCas uint64) []y.Iterator {
+func (s *levelHandler) appendIterators(iters []y.Iterator, reversed bool, afterCas uint64) ([]y.Iterator, uint64) {
 	if s.level == 0 {
 		y.AssertTrue(afterCas == 0)
 		// Remember to add in reverse order!
 		// The newer table at the end of s.tables should be added first as it takes precedence.
 		return appendIteratorsReversed(iters, s.tables, reversed)
 	}
-	return append(iters, table.NewConcatIterator(s.tables, reversed, afterCas))
+	iter, maxCas := table.NewConcatIterator(s.tables, reversed, afterCas)
+	return append(iters, iter), maxCas
 }
 
 type levelHandlerRLocked struct{}

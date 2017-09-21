@@ -267,14 +267,17 @@ func (s *levelsController) compactBuildTables(
 	// Create iterators across all the tables involved first.
 	var iters []y.Iterator
 	if l == 0 {
-		iters = appendIteratorsReversed(iters, topTables, false)
+		iters, _ = appendIteratorsReversed(iters, topTables, false)
 	} else {
 		y.AssertTrue(len(topTables) == 1)
 		iters = []y.Iterator{topTables[0].NewIterator(false)}
 	}
 
 	// Next level has level>=1 and we can use ConcatIterator as key ranges do not overlap.
-	iters = append(iters, table.NewConcatIterator(botTables, false, 0))
+	{
+		iter, _ := table.NewConcatIterator(botTables, false, 0)
+		iters = append(iters, iter)
+	}
 	it := y.NewMergeIterator(iters, false)
 	defer it.Close() // Important to close the iterator to do ref counting.
 
@@ -682,25 +685,36 @@ func (s *levelsController) get(key []byte) (y.ValueStruct, error) {
 	return y.ValueStruct{}, nil
 }
 
-func appendIteratorsReversed(out []y.Iterator, th []*table.Table, reversed bool) []y.Iterator {
+func appendIteratorsReversed(out []y.Iterator, th []*table.Table, reversed bool) ([]y.Iterator, uint64) {
+	var maxCas uint64
 	for i := len(th) - 1; i >= 0; i-- {
+		cas := th[i].MaxCasCounter()
+		if maxCas < cas {
+			maxCas = cas
+		}
 		// This will increment the reference of the table handler.
 		out = append(out, th[i].NewIterator(reversed))
 	}
-	return out
+	return out, maxCas
 }
 
-// appendIterators appends iterators to an array of iterators, for merging.
-// Note: This obtains references for the table handlers. Remember to close these iterators.
+// appendIterators appends iterators to an array of iterators, for merging.  Also returns the max
+// cas value of the levels, or afterCas if no tables were output. Note: This obtains references for
+// the table handlers. Remember to close these iterators.
 func (s *levelsController) appendIterators(
-	runlockMe *sync.RWMutex, iters []y.Iterator, reversed bool, afterCas uint64) (*sync.RWMutex, []y.Iterator) {
+	runlockMe *sync.RWMutex, iters []y.Iterator, reversed bool, afterCas uint64) (*sync.RWMutex, []y.Iterator, uint64) {
 	// Just like with get, it's important we iterate the levels from 0 on upward, to avoid missing
 	// data when there's a compaction.
+	maxCASCounter := afterCas
 	for _, level := range s.levels {
 		level.tablesLock.RLock()
 		runlockMe.RUnlock()
-		iters = level.appendIterators(iters, reversed, afterCas)
+		var cas uint64
+		iters, cas = level.appendIterators(iters, reversed, afterCas)
 		runlockMe = &level.tablesLock
+		if cas > maxCASCounter {
+			maxCASCounter = cas
+		}
 	}
-	return runlockMe, iters
+	return runlockMe, iters, maxCASCounter
 }

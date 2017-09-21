@@ -427,12 +427,18 @@ type ConcatIterator struct {
 	reversed bool
 }
 
-// NewConcatIterator creates a new concatenated iterator
-func NewConcatIterator(tbls []*Table, reversed bool, afterCas uint64) *ConcatIterator {
+// NewConcatIterator creates a new concatenated iterator, also returning the maximum cas counter of
+// any table included in the iterator, or afterCas if none were included.
+func NewConcatIterator(tbls []*Table, reversed bool, afterCas uint64) (*ConcatIterator, uint64) {
 	iters := make([]*Iterator, 0, len(tbls))
+	maxCounter := afterCas
 	for i := 0; i < len(tbls); i++ {
-		if tbls[i].MaxCasCounter() > afterCas {
+		counter := tbls[i].MaxCasCounter()
+		if counter > afterCas {
 			iters = append(iters, tbls[i].NewIterator(reversed))
+			if maxCounter < counter {
+				maxCounter = counter
+			}
 		}
 	}
 	return &ConcatIterator{
@@ -440,7 +446,7 @@ func NewConcatIterator(tbls []*Table, reversed bool, afterCas uint64) *ConcatIte
 		iters:    iters,
 		tables:   tbls,
 		idx:      -1, // Not really necessary because s.it.Valid()=false, but good to have.
-	}
+	}, maxCounter
 }
 
 func (s *ConcatIterator) setIdx(idx int) {

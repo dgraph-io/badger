@@ -1012,7 +1012,8 @@ func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint64, f func(error))
 // StreamBackup sends a stream of backup items by calling `consumer` over and over again, until
 // it's done, at which point it returns.
 func (s *KV) StreamBackup(afterCas uint64, consumer func(protos.BackupItem) error) error {
-	it, decrVlog := s.newBackupIterator(afterCas)
+	// TODO: Output counter.
+	it, _, decrVlog := s.newBackupIterator(afterCas)
 	defer decrVlog()
 	defer it.Close()
 
