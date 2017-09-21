@@ -162,6 +162,8 @@ func (lf *logFile) doneWriting(offset uint32) error {
 	if err := y.Munmap(lf.fmap); err != nil {
 		return errors.Wrapf(err, "Unable to munmap value log: %q", lf.path)
 	}
+	// TODO: Confirm if we need to run a file sync after truncation.
+	// Truncation must run after unmapping, otherwise Windows would crap itself.
 	if err := lf.fd.Truncate(int64(offset)); err != nil {
 		return errors.Wrapf(err, "Unable to truncate file: %q", lf.path)
 	}
@@ -279,36 +281,10 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		}
 	}
 
-	if truncate {
-		var wasMmaped bool
-		if len(lf.fmap) > 0 {
-			wasMmaped = true
-		}
-		if wasMmaped {
-			if err := y.Munmap(lf.fmap); err != nil {
-				return err
-			}
-		}
-
+	if truncate && len(lf.fmap) == 0 {
+		// Only truncate if the file isn't mmaped. Otherwise, Windows would puke.
 		if err := lf.fd.Truncate(int64(recordOffset)); err != nil {
 			return err
-		}
-
-		if wasMmaped {
-			var size int64
-			if lf.fid == vlog.maxFid {
-				// writable log
-				size = vlog.opt.ValueLogFileSize * 2
-			} else {
-				fi, err := lf.fd.Stat()
-				if err != nil {
-					return errors.Wrapf(err, "Unable to calculate size of readonly log file.")
-				}
-				size = fi.Size()
-			}
-			if err := lf.mmap(size); err != nil {
-				return err
-			}
 		}
 	}
 
