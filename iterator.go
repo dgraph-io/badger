@@ -343,7 +343,9 @@ func (it *Iterator) Rewind() {
 //   }
 //   itr.Close()
 func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
+	s.tablesLock.RLock()
 	tables, decr := s.getMemTables()
+	s.tablesLock.RUnlock()
 	defer decr()
 	s.vlog.incrIteratorCount()
 	var iters []y.Iterator

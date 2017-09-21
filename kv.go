@@ -405,11 +405,9 @@ func (s *KV) bumpAndGetMemTables() ([]*skl.Skiplist, func(), error) {
 	}, nil
 }
 
-// getMemtables returns the current memtables and get references.
+// getMemtables returns the current memtables and get references.  s.tablesLock must be r-locked
+// while calling this.
 func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
-	s.tablesLock.RLock()
-	defer s.tablesLock.RUnlock()
-
 	tables := make([]*skl.Skiplist, len(s.imm)+1)
 
 	// Get mutable memtable.
@@ -456,7 +454,9 @@ func (s *KV) yieldItemValue(item *KVItem, consumer func([]byte) error) error {
 // get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
 func (s *KV) get(key []byte) (y.ValueStruct, error) {
+	s.tablesLock.RLock()
 	tables, decr := s.getMemTables() // Lock should be released.
+	s.tablesLock.RUnlock()
 	defer decr()
 
 	y.NumGets.Add(1)
