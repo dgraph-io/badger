@@ -390,24 +390,14 @@ func (s *KV) appendAndIncrImmutableMemtables(appendOnto []*skl.Skiplist) []*skl.
 
 // immutablyGetMemtables gets the same memtables as getMemTables -- except the mutable memtable is
 // bumped to storage,
-func (s *KV) bumpAndGetMemTables() ([]*skl.Skiplist, func(), error) {
-	// Bumps the memtable (unless it's empty).
-	err := s.pollRoomForWrite(1, "bumping memtable")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	s.tablesLock.RLock()
-	defer s.tablesLock.RUnlock()
-
-	n := len(s.imm)
-	tables := make([]*skl.Skiplist, 0, n)
+func (s *KV) getImmutableMemTables() ([]*skl.Skiplist, func()) {
+	tables := make([]*skl.Skiplist, 0, len(s.imm))
 	tables = s.appendAndIncrImmutableMemtables(tables)
 	return tables, func() {
 		for _, tbl := range tables {
 			tbl.DecrRef()
 		}
-	}, nil
+	}
 }
 
 // getMemtables returns the current memtables and get references.  s.tablesLock must be r-locked

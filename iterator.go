@@ -365,9 +365,15 @@ func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 // memtables!).  Call decrVlog() after calling iter.Close().  This may omit tables whose max cas
 // value is <= afterCas.  (But it might not.)
 func (s *KV) newBackupIterator(afterCas uint64) (iter *y.MergeIterator, decrVlog func()) {
-	// For simplicity's sake we don't filter memtables by cas value.
-	tables, decr, err := s.bumpAndGetMemTables()
+	// Bump prior writes because we want an immutable memtable to iterate, and we want our backup
+	// iteration to happen _after_ prior writes by the user.
+	err := s.pollRoomForWrite(1, "bumping memtable")
 	y.Check(err) // TODO: Handle this.
+
+	s.tablesLock.RLock()
+	// For simplicity's sake we don't filter memtables by cas value.
+	tables, decr := s.getImmutableMemTables()
+	s.tablesLock.RUnlock()
 	defer decr()
 	s.vlog.incrIteratorCount()
 	var iters []y.Iterator
