@@ -318,7 +318,9 @@ func TestChecksums(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	// Set up SST with K1=V1
-	kv, err := NewKV(getTestOptions(dir))
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
+	kv, err := NewKV(opts)
 	require.NoError(t, err)
 
 	var (
@@ -344,7 +346,7 @@ func TestChecksums(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
 
 	// K1 should exist, but K2 shouldn't.
-	kv, err = NewKV(getTestOptions(dir))
+	kv, err = NewKV(opts)
 	require.NoError(t, err)
 	var item KVItem
 	require.NoError(t, kv.Get(k1, &item))
@@ -358,7 +360,7 @@ func TestChecksums(t *testing.T) {
 
 	// The vlog should contain K1 and K3 (K2 was lost when Badger started up
 	// last due to checksum failure).
-	kv, err = NewKV(getTestOptions(dir))
+	kv, err = NewKV(opts)
 	require.NoError(t, err)
 	iter := kv.NewIterator(DefaultIteratorOptions)
 	iter.Seek(k1)
@@ -381,7 +383,9 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	// Create skeleton files.
-	kv, err := NewKV(getTestOptions(dir))
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
+	kv, err := NewKV(opts)
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
 
@@ -405,7 +409,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
 
 	// Badger should now start up, but with only K1.
-	kv, err = NewKV(getTestOptions(dir))
+	kv, err = NewKV(opts)
 	require.NoError(t, err)
 	var item KVItem
 	require.NoError(t, kv.Get(k1, &item))
@@ -478,7 +482,9 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	kv, err := NewKV(getTestOptions(dir))
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
+	kv, err := NewKV(opts)
 	require.NoError(t, err)
 	require.NoError(t, kv.BatchSet(entries))
 	require.NoError(t, kv.Close())

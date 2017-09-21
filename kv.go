@@ -261,7 +261,14 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	if err = out.vlog.Replay(vptr, fn); err != nil {
 		return out, err
 	}
+
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
+
+	// Mmap writable log
+	lf := out.vlog.filesMap[out.vlog.maxFid]
+	if err = lf.mmap(2 * out.vlog.opt.ValueLogFileSize); err != nil {
+		return out, errors.Wrapf(err, "Unable to mmap RDWR log file")
+	}
 
 	out.writeCh = make(chan *request, kvWriteChCapacity)
 	out.closers.writes = y.NewCloser(1)

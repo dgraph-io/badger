@@ -24,7 +24,6 @@ import (
 	"hash/crc32"
 	"io"
 	"io/ioutil"
-	"math"
 	"math/rand"
 	"os"
 	"sort"
@@ -145,7 +144,7 @@ func (lf *logFile) read(p valuePointer) (buf []byte, err error) {
 	return buf, err
 }
 
-func (lf *logFile) doneWriting() error {
+func (lf *logFile) doneWriting(offset uint32) error {
 	// Sync before acquiring lock.  (We call this from write() and thus know we have shared access
 	// to the fd.)
 	if err := lf.fd.Sync(); err != nil {
@@ -162,6 +161,9 @@ func (lf *logFile) doneWriting() error {
 	defer lf.lock.Unlock()
 	if err := y.Munmap(lf.fmap); err != nil {
 		return errors.Wrapf(err, "Unable to munmap value log: %q", lf.path)
+	}
+	if err := lf.fd.Truncate(int64(offset)); err != nil {
+		return errors.Wrapf(err, "Unable to truncate file: %q", lf.path)
 	}
 	if err := lf.fd.Close(); err != nil {
 		return errors.Wrapf(err, "Unable to close value log: %q", lf.path)
@@ -181,7 +183,7 @@ type logEntry func(e Entry, vp valuePointer) error
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
-func (lf *logFile) iterate(offset uint32, fn logEntry) error {
+func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 	_, err := lf.fd.Seek(int64(offset), io.SeekStart)
 	if err != nil {
 		return y.Wrap(err)
@@ -278,8 +280,35 @@ func (lf *logFile) iterate(offset uint32, fn logEntry) error {
 	}
 
 	if truncate {
+		var wasMmaped bool
+		if len(lf.fmap) > 0 {
+			wasMmaped = true
+		}
+		if wasMmaped {
+			if err := y.Munmap(lf.fmap); err != nil {
+				return err
+			}
+		}
+
 		if err := lf.fd.Truncate(int64(recordOffset)); err != nil {
 			return err
+		}
+
+		if wasMmaped {
+			var size int64
+			if lf.fid == vlog.maxFid {
+				// writable log
+				size = vlog.opt.ValueLogFileSize * 2
+			} else {
+				fi, err := lf.fd.Stat()
+				if err != nil {
+					return errors.Wrapf(err, "Unable to calculate size of readonly log file.")
+				}
+				size = fi.Size()
+			}
+			if err := lf.mmap(size); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -365,7 +394,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		return nil
 	}
 
-	err := f.iterate(0, func(e Entry, vp valuePointer) error {
+	err := vlog.iterate(f, 0, func(e Entry, vp valuePointer) error {
 		return fe(e)
 	})
 	if err != nil {
@@ -635,10 +664,6 @@ func (vlog *valueLog) openOrCreateFiles() error {
 				vlog.opt.SyncWrites); err != nil {
 				return errors.Wrapf(err, "Unable to open value log file as RDWR")
 			}
-
-			if err := lf.mmap(math.MaxUint32); err != nil {
-				return errors.Wrapf(err, "Unable to mmap RDWR log file")
-			}
 		} else {
 			if err := lf.openReadOnly(); err != nil {
 				return err
@@ -671,10 +696,6 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 		return nil, errors.Wrapf(err, "Unable to sync value log file dir")
 	}
 
-	if err = lf.mmap(math.MaxUint32); err != nil {
-		return nil, errors.Wrapf(err, "Unable to mmap value log file")
-	}
-
 	vlog.filesLock.Lock()
 	vlog.filesMap[fid] = lf
 	vlog.filesLock.Unlock()
@@ -702,10 +723,19 @@ func (vlog *valueLog) Close() error {
 	defer vlog.elog.Finish()
 
 	var err error
-	for _, f := range vlog.filesMap {
+	for id, f := range vlog.filesMap {
+
 		f.lock.Lock() // We won’t release the lock.
 		if munmapErr := y.Munmap(f.fmap); munmapErr != nil && err == nil {
 			err = munmapErr
+		}
+
+		if id == vlog.maxFid {
+			// truncate writable log file to correct offset.
+			if truncErr := f.fd.Truncate(
+				int64(vlog.writableLogOffset)); truncErr != nil && err == nil {
+				err = truncErr
+			}
 		}
 
 		if closeErr := f.fd.Close(); closeErr != nil && err == nil {
@@ -752,7 +782,7 @@ func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 			of = 0
 		}
 		f := vlog.filesMap[id]
-		err := f.iterate(of, fn)
+		err := vlog.iterate(f, of, fn)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to replay value log: %q", f.path)
 		}
@@ -824,7 +854,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 		if vlog.writableLogOffset > uint32(vlog.opt.ValueLogFileSize) {
 			var err error
-			if err = curlf.doneWriting(); err != nil {
+			if err = curlf.doneWriting(vlog.writableLogOffset); err != nil {
 				return err
 			}
 
@@ -832,6 +862,10 @@ func (vlog *valueLog) write(reqs []*request) error {
 			y.AssertTruef(newid < 1<<16, "newid will overflow uint16: %v", newid)
 			newlf, err := vlog.createVlogFile(newid)
 			if err != nil {
+				return err
+			}
+
+			if err = newlf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
 				return err
 			}
 
@@ -980,7 +1014,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64) error {
 
 	start := time.Now()
 	y.AssertTrue(vlog.kv != nil)
-	err := lf.iterate(0, func(e Entry, vp valuePointer) error {
+	err := vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
 		esz := float64(vp.Len) / (1 << 20) // in MBs. +4 for the CAS stuff.
 		skipped += esz
 		if skipped < skipFirstM {
