@@ -365,11 +365,14 @@ func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 // newBackupIterator returns an iterator that produces changes in the level controller (but not
 // memtables!).  Call decrVlog() after calling iter.Close().  This may omit tables whose max cas
 // value is <= afterCas.  (But it might not.)
-func (s *KV) newBackupIterator(afterCas uint64) (iter *y.MergeIterator, counter uint64, decrVlog func()) {
+func (s *KV) newBackupIterator(
+	afterCas uint64) (iter *y.MergeIterator, counter uint64, decrVlog func(), err error) {
 	// Bump prior writes because we want an immutable memtable to iterate, and we want our backup
 	// iteration to happen _after_ prior writes by the user.
-	err := s.pollRoomForWrite(1, "bumping memtable")
-	y.Check(err) // TODO: Handle this.
+	err = s.pollRoomForWrite(1, "bumping memtable")
+	if err != nil {
+		return iter, counter, decrVlog, err
+	}
 
 	s.tablesLock.RLock()
 	// For simplicity's sake we don't filter memtables by cas value.
@@ -385,19 +388,20 @@ func (s *KV) newBackupIterator(afterCas uint64) (iter *y.MergeIterator, counter 
 	runlockMe.RUnlock()
 
 	if len(tables) > 0 {
-		iter := tables[0].NewUniIterator(false)
-		for iter.Rewind(); iter.Valid(); iter.Next() {
-			casCounter := iter.Value().CASCounter
+		it := tables[0].NewUniIterator(false)
+		for it.Rewind(); it.Valid(); it.Next() {
+			casCounter := it.Value().CASCounter
 			if casCounter > counter {
 				counter = casCounter
 			}
 		}
-		err := iter.Close()
-		y.Check(err) // TODO: Handle this
+		if err := it.Close(); err != nil {
+			_ = s.vlog.decrIteratorCount()
+			return iter, 0, decrVlog, err
+		}
 	} else {
 		counter = levelsMaxCAS
 	}
 
-	// TODO: Compute and return max cas counter value from most up-to-date table.
-	return y.NewMergeIterator(iters, false), counter, func() { s.vlog.decrIteratorCount() }
+	return y.NewMergeIterator(iters, false), counter, func() { s.vlog.decrIteratorCount() }, nil
 }
