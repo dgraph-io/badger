@@ -383,5 +383,6 @@ func (s *KV) newBackupIterator(afterCas uint64) (iter *y.MergeIterator, decrVlog
 	// This will increment references.
 	runlockMe, iters := s.lc.appendIterators(&s.tablesLock, iters, false, afterCas)
 	runlockMe.RUnlock()
+	// TODO: Compute and return max cas counter value from most up-to-date table.
 	return y.NewMergeIterator(iters, false), func() { s.vlog.decrIteratorCount() }
 }
