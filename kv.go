@@ -50,7 +50,7 @@ type closers struct {
 // KV provides the various functions required to interact with Badger.
 // KV is thread-safe.
 type KV struct {
-	sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
+	tablesLock sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
 
 	dirLockGuard *DirectoryLockGuard
 	// nil if Dir and ValueDir are the same
@@ -293,8 +293,8 @@ func (s *KV) Close() (err error) {
 		s.elog.Printf("Flushing memtable")
 		for {
 			pushedFlushTask := func() bool {
-				s.Lock()
-				defer s.Unlock()
+				s.tablesLock.Lock()
+				defer s.tablesLock.Unlock()
 				y.AssertTrue(s.mt != nil)
 				select {
 				case s.flushChan <- flushTask{s.mt, s.vptr}:
@@ -385,8 +385,8 @@ func (s *KV) bumpAndGetMemTables() ([]*skl.Skiplist, func(), error) {
 		return nil, nil, err
 	}
 
-	s.RLock()
-	defer s.RUnlock()
+	s.tablesLock.RLock()
+	defer s.tablesLock.RUnlock()
 
 	n := len(s.imm)
 	tables := make([]*skl.Skiplist, 0, n)
@@ -407,8 +407,8 @@ func (s *KV) bumpAndGetMemTables() ([]*skl.Skiplist, func(), error) {
 
 // getMemtables returns the current memtables and get references.
 func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
-	s.RLock()
-	defer s.RUnlock()
+	s.tablesLock.RLock()
+	defer s.tablesLock.RUnlock()
 
 	tables := make([]*skl.Skiplist, len(s.imm)+1)
 
@@ -522,8 +522,8 @@ func (s *KV) updateOffset(ptrs []valuePointer) {
 		return
 	}
 
-	s.Lock()
-	defer s.Unlock()
+	s.tablesLock.Lock()
+	defer s.tablesLock.Unlock()
 	y.AssertTrue(!ptr.Less(s.vptr))
 	s.vptr = ptr
 }
@@ -1097,14 +1097,14 @@ func (s *KV) tryFlushMemtable() (bool, error) {
 // Takes a msg to log if we have to sleep.
 func (s *KV) pollRoomForWrite(sizeThreshold int64, msg string) error {
 	for {
-		s.Lock()
+		s.tablesLock.Lock()
 		if s.mt.MemSize() < sizeThreshold {
-			s.Unlock()
+			s.tablesLock.Unlock()
 			return nil
 		}
 
 		room, err := s.tryFlushMemtable()
-		s.Unlock()
+		s.tablesLock.Unlock()
 		if err != nil {
 			return err
 		}
@@ -1205,11 +1205,11 @@ func (s *KV) flushMemtable(lc *y.Closer) error {
 		}
 
 		// Update s.imm. Need a lock.
-		s.Lock()
+		s.tablesLock.Lock()
 		y.AssertTrue(ft.mt == s.imm[0]) //For now, single threaded.
 		s.imm = s.imm[1:]
 		ft.mt.DecrRef() // Return memory.
-		s.Unlock()
+		s.tablesLock.Unlock()
 	}
 	return nil
 }
