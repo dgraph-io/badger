@@ -397,13 +397,13 @@ type compactDef struct {
 }
 
 func (cd *compactDef) lockLevels() {
-	cd.thisLevel.RLock()
-	cd.nextLevel.RLock()
+	cd.thisLevel.tablesLock.RLock()
+	cd.nextLevel.tablesLock.RLock()
 }
 
 func (cd *compactDef) unlockLevels() {
-	cd.nextLevel.RUnlock()
-	cd.thisLevel.RUnlock()
+	cd.nextLevel.tablesLock.RUnlock()
+	cd.thisLevel.tablesLock.RUnlock()
 }
 
 func (s *levelsController) fillTablesL0(cd *compactDef) bool {
@@ -697,9 +697,9 @@ func (s *levelsController) appendIterators(
 	// Just like with get, it's important we iterate the levels from 0 on upward, to avoid missing
 	// data when there's a compaction.
 	for _, level := range s.levels {
-		level.RLock()
+		level.tablesLock.RLock()
 		iters = level.appendIterators(iters, reversed, afterCas)
-		level.RUnlock()
+		level.tablesLock.RUnlock()
 	}
 	return iters
 }

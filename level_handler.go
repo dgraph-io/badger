@@ -29,7 +29,7 @@ import (
 
 type levelHandler struct {
 	// Guards tables, totalSize.
-	sync.RWMutex
+	tablesLock sync.RWMutex
 
 	// For level >= 1, tables are sorted by key ranges, which do not overlap.
 	// For level 0, tables are sorted by time.
@@ -45,15 +45,15 @@ type levelHandler struct {
 }
 
 func (s *levelHandler) getTotalSize() int64 {
-	s.RLock()
-	defer s.RUnlock()
+	s.tablesLock.RLock()
+	defer s.tablesLock.RUnlock()
 	return s.totalSize
 }
 
 // initTables replaces s.tables with given tables. This is done during loading.
 func (s *levelHandler) initTables(tables []*table.Table) {
-	s.Lock()
-	defer s.Unlock()
+	s.tablesLock.Lock()
+	defer s.tablesLock.Unlock()
 
 	s.tables = tables
 	s.totalSize = 0
@@ -77,7 +77,7 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 
 // deleteTables remove tables idx0, ..., idx1-1.
 func (s *levelHandler) deleteTables(toDel []*table.Table) error {
-	s.Lock() // s.Unlock() below
+	s.tablesLock.Lock() // s.Unlock() below
 
 	toDelMap := make(map[uint64]struct{})
 	for _, t := range toDel {
@@ -96,7 +96,7 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) error {
 	}
 	s.tables = newTables
 
-	s.Unlock() // Unlock s _before_ we DecrRef our tables, which can be slow.
+	s.tablesLock.Unlock() // Unlock s _before_ we DecrRef our tables, which can be slow.
 
 	return decrRefs(toDel)
 }
@@ -111,7 +111,7 @@ func (s *levelHandler) replaceTables(newTables []*table.Table) error {
 		return nil
 	}
 
-	s.Lock() // We s.Unlock() below.
+	s.tablesLock.Lock() // We s.Unlock() below.
 
 	// Increase totalSize first.
 	for _, tbl := range newTables {
@@ -143,7 +143,7 @@ func (s *levelHandler) replaceTables(newTables []*table.Table) error {
 	t = t[numAdded:]
 	y.AssertTrue(len(s.tables[right:]) == copy(t, s.tables[right:]))
 	s.tables = tables
-	s.Unlock() // s.Unlock before we DecrRef tables -- that can be slow.
+	s.tablesLock.Unlock() // s.Unlock before we DecrRef tables -- that can be slow.
 	return decrRefs(toDecr)
 }
 
@@ -168,8 +168,8 @@ func newLevelHandler(kv *KV, level int) *levelHandler {
 func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 	y.AssertTrue(s.level == 0)
 	// Need lock as we may be deleting the first table during a level 0 compaction.
-	s.Lock()
-	defer s.Unlock()
+	s.tablesLock.Lock()
+	defer s.tablesLock.Unlock()
 	if len(s.tables) >= s.kv.opt.NumLevelZeroTablesStall {
 		return false
 	}
@@ -182,14 +182,14 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 }
 
 func (s *levelHandler) numTables() int {
-	s.RLock()
-	defer s.RUnlock()
+	s.tablesLock.RLock()
+	defer s.tablesLock.RUnlock()
 	return len(s.tables)
 }
 
 func (s *levelHandler) close() error {
-	s.RLock()
-	defer s.RUnlock()
+	s.tablesLock.RLock()
+	defer s.tablesLock.RUnlock()
 	var err error
 	for _, t := range s.tables {
 		if closeErr := t.Close(); closeErr != nil && err == nil {
@@ -201,8 +201,8 @@ func (s *levelHandler) close() error {
 
 // getTableForKey acquires a read-lock to access s.tables. It returns a list of tableHandlers.
 func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func() error) {
-	s.RLock()
-	defer s.RUnlock()
+	s.tablesLock.RLock()
+	defer s.tablesLock.RUnlock()
 
 	if s.level == 0 {
 		// For level 0, we need to check every table. Remember to make a copy as s.tables may change

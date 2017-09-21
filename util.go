@@ -44,8 +44,8 @@ func (s *levelsController) getSummary() *summary {
 }
 
 func (s *levelHandler) getSummary(sum *summary) {
-	s.RLock()
-	defer s.RUnlock()
+	s.tablesLock.RLock()
+	defer s.tablesLock.RUnlock()
 	for _, t := range s.tables {
 		sum.fileIDs[t.ID()] = true
 	}
@@ -68,8 +68,8 @@ func (s *levelHandler) validate() error {
 		return nil
 	}
 
-	s.RLock()
-	defer s.RUnlock()
+	s.tablesLock.RLock()
+	defer s.tablesLock.RUnlock()
 	numTables := len(s.tables)
 	for j := 1; j < numTables; j++ {
 		if j >= len(s.tables) {
