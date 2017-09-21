@@ -1009,17 +1009,64 @@ func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint64, f func(error))
 	s.compareAsync(e, f)
 }
 
-// StreamBackup sends a stream of backup items by calling `consumer` over and over again, until
-// it's done, at which point it returns.
-func (s *KV) StreamBackup(afterCas uint64, consumer func(protos.BackupItem) error) error {
-	// TODO: Output counter.
-	it, _, decrVlog, err := s.newBackupIterator(afterCas)
-	if err != nil {
-		return err
-	}
-	defer decrVlog()
-	defer it.Close()
+// BackupStream holds information about a backup.
+type BackupStream struct {
+	vlog      *valueLog
+	decrVlog  func()
+	iter      *y.MergeIterator
+	afterCas  uint64
+	counter   uint64
+	startTime time.Time // Handy metadata with no functional purpose
+}
 
+// NewBackupStream creates a new BackupStream.  The backup includes information from all previously
+// completed writes.  The BackupStream can be iterated once, and it also has other useful
+// meta-information about the backup.
+func (s *KV) NewBackupStream(afterCas uint64) (*BackupStream, error) {
+	it, counter, decrVlog, err := s.newBackupIterator(afterCas)
+	startTime := time.Now()
+	if err != nil {
+		return nil, err
+	}
+	return &BackupStream{
+		vlog:      &s.vlog,
+		decrVlog:  decrVlog,
+		iter:      it,
+		afterCas:  afterCas,
+		counter:   counter,
+		startTime: startTime,
+	}, nil
+}
+
+// Close closes the backup stream, if for some reason you decided not to call StreamAndClose.
+func (bs *BackupStream) Close() {
+	bs.iter.Close()
+	bs.decrVlog()
+	bs.iter = nil
+	bs.decrVlog = nil
+	bs.afterCas = 0
+}
+
+// Counter returns the version counter of the Badger store (a counter that gets monotonically
+// incremented with every write) telling what point in history the backup describes.
+func (bs *BackupStream) Counter() uint64 {
+	return bs.counter
+}
+
+// StartTime returns the time when the backup started.  This value is informational and is not
+// precisely associated with "counter".  (If you started two backups simultaneously, these values
+// might not be in the same order.)
+func (bs *BackupStream) StartTime() time.Time {
+	return bs.startTime
+}
+
+// StreamAndClose streams backup items (which describe mutations and deletions) by calling consumer
+// repeatedly. It returns without error when it's done streaming.
+func (bs *BackupStream) StreamAndClose(consumer func(protos.BackupItem) error) error {
+	defer bs.Close()
+	it := bs.iter
+	afterCas := bs.afterCas
+	vlog := bs.vlog
 	for it.Rewind(); it.Valid(); it.Next() {
 		key := append([]byte{}, it.Key()...)
 		vs := it.Value()
@@ -1043,7 +1090,7 @@ func (s *KV) StreamBackup(afterCas uint64, consumer func(protos.BackupItem) erro
 				var vp valuePointer
 				vp.Decode(vs.Value)
 
-				err := s.vlog.Read(vp, func(data []byte) error {
+				err := vlog.Read(vp, func(data []byte) error {
 					item.Value = append([]byte{}, data...)
 					return nil
 				})
@@ -1058,7 +1105,6 @@ func (s *KV) StreamBackup(afterCas uint64, consumer func(protos.BackupItem) erro
 			return err
 		}
 	}
-
 	return nil
 }
 

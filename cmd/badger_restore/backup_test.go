@@ -68,7 +68,9 @@ func TestBasicBackup(t *testing.T) {
 
 	i := 0
 	// Now stream a backup
-	kv.StreamBackup(0, func(item protos.BackupItem) error {
+	stream, err := kv.NewBackupStream(0)
+	require.NoError(t, err)
+	err = stream.StreamAndClose(func(item protos.BackupItem) error {
 		require.Equal(t, fmt.Sprintf("key%09d", i), string(item.Key))
 		require.True(t, item.HasValue)
 		require.Equal(t, fmt.Sprintf("val%d", i), string(item.Value))
@@ -76,6 +78,7 @@ func TestBasicBackup(t *testing.T) {
 		i++
 		return nil
 	})
+	require.NoError(t, err)
 	require.Equal(t, 100, i)
 }
 
