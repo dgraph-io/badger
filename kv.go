@@ -1012,30 +1012,32 @@ func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint64, f func(error))
 // BackupStream holds information about a backup that you're making -- use NewBackupStream and
 // StreamAndClose to stream a new backup.
 type BackupStream struct {
-	vlog      *valueLog
-	decrVlog  func()
-	iter      *y.MergeIterator
-	afterCas  uint64
-	counter   uint64
-	startTime time.Time // Handy metadata with no functional purpose
+	vlog         *valueLog
+	decrVlog     func()
+	iter         *y.MergeIterator
+	afterCounter uint64
+	counter      uint64
+	startTime    time.Time // Handy metadata with no functional purpose
 }
 
 // NewBackupStream creates a new BackupStream.  The backup includes information from all previously
 // completed writes.  The BackupStream can be iterated once, and it also has other useful
-// meta-information about the backup.
-func (s *KV) NewBackupStream(afterCas uint64) (*BackupStream, error) {
-	it, counter, decrVlog, err := s.newBackupIterator(afterCas)
+// meta-information about the backup.  'afterCounter' tells us the stream should only include new
+// information that got written after that counter value.  This would normally be the previous
+// backup's Counter() value.  Or zero, if you want a "full" backup to be streamed.
+func (s *KV) NewBackupStream(afterCounter uint64) (*BackupStream, error) {
+	it, counter, decrVlog, err := s.newBackupIterator(afterCounter)
 	startTime := time.Now()
 	if err != nil {
 		return nil, err
 	}
 	return &BackupStream{
-		vlog:      &s.vlog,
-		decrVlog:  decrVlog,
-		iter:      it,
-		afterCas:  afterCas,
-		counter:   counter,
-		startTime: startTime,
+		vlog:         &s.vlog,
+		decrVlog:     decrVlog,
+		iter:         it,
+		afterCounter: afterCounter,
+		counter:      counter,
+		startTime:    startTime,
 	}, nil
 }
 
@@ -1045,7 +1047,6 @@ func (bs *BackupStream) Close() {
 	bs.decrVlog()
 	bs.iter = nil
 	bs.decrVlog = nil
-	bs.afterCas = 0
 }
 
 // Counter returns the version counter of the Badger store (a counter that gets monotonically
@@ -1066,7 +1067,7 @@ func (bs *BackupStream) StartTime() time.Time {
 func (bs *BackupStream) StreamAndClose(consumer func(protos.BackupItem) error) error {
 	defer bs.Close()
 	it := bs.iter
-	afterCas := bs.afterCas
+	afterCas := bs.afterCounter
 	vlog := bs.vlog
 	for it.Rewind(); it.Valid(); it.Next() {
 		key := append([]byte{}, it.Key()...)
