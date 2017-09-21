@@ -261,11 +261,9 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 }
 
 // appendIterators appends iterators to an array of iterators, for merging.
+// Note: You must have acquired s.RLock() to use this function.
 // Note: This obtains references for the table handlers. Remember to close these iterators.
 func (s *levelHandler) appendIterators(iters []y.Iterator, reversed bool, afterCas uint64) []y.Iterator {
-	s.RLock()
-	defer s.RUnlock()
-
 	if s.level == 0 {
 		y.AssertTrue(afterCas == 0)
 		// Remember to add in reverse order!

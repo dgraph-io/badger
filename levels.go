@@ -697,7 +697,9 @@ func (s *levelsController) appendIterators(
 	// Just like with get, it's important we iterate the levels from 0 on upward, to avoid missing
 	// data when there's a compaction.
 	for _, level := range s.levels {
+		level.RLock()
 		iters = level.appendIterators(iters, reversed, afterCas)
+		level.RUnlock()
 	}
 	return iters
 }
