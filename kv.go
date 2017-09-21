@@ -1009,7 +1009,8 @@ func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint64, f func(error))
 	s.compareAsync(e, f)
 }
 
-// BackupStream holds information about a backup.
+// BackupStream holds information about a backup that you're making -- use NewBackupStream and
+// StreamAndClose to stream a new backup.
 type BackupStream struct {
 	vlog      *valueLog
 	decrVlog  func()
@@ -1055,7 +1056,7 @@ func (bs *BackupStream) Counter() uint64 {
 
 // StartTime returns the time when the backup started.  This value is informational and is not
 // precisely associated with "counter".  (If you started two backups simultaneously, these values
-// might not be in the same order.)
+// might not even be in the same order.)
 func (bs *BackupStream) StartTime() time.Time {
 	return bs.startTime
 }
