@@ -236,6 +236,7 @@ func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func() error)
 }
 
 // get returns value for a given key. If not found, return nil.
+// TODO: Make this getOrNext.
 func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getTableForKey(key)
 
@@ -253,6 +254,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 		if !it.Valid() {
 			continue
 		}
+		// TODO: We still need to check for equality, but ignoring the last 8 bytes.
 		if bytes.Equal(key, it.Key()) {
 			return it.Value(), decr()
 		}

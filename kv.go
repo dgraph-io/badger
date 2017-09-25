@@ -38,6 +38,7 @@ import (
 var (
 	badgerPrefix = []byte("!badger!")     // Prefix for internal keys used by badger.
 	head         = []byte("!badger!head") // For storing value offset for replay.
+	txnKey       = []byte("!badger!txn")  // For indicating end of entries in txn.
 )
 
 type closers struct {
@@ -157,12 +158,12 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		}
 	}()
 
-	gs := globalTxnState{
-		nextCommitTs:   1,
+	gs := &globalTxnState{
+		nextCommit:     1,
 		pendingCommits: make(map[uint64]struct{}),
 		commits:        make(map[uint64]uint64),
 	}
-	heap.Init(&gs.curCommits)
+	heap.Init(&gs.commitMark)
 
 	out = &KV{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
@@ -173,6 +174,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		elog:          trace.NewEventLog("Badger", "KV"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
+		txnState:      gs,
 	}
 
 	out.closers.updateSize = y.NewCloser(1)

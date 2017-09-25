@@ -372,6 +372,7 @@ func (s *Skiplist) findLast() *node {
 }
 
 // Get gets the value associated with the key.
+// TODO: Make this GetOrNext.
 func (s *Skiplist) Get(key []byte) y.ValueStruct {
 	n, found := s.findNear(key, false, true) // findGreaterOrEqual.
 	if !found {

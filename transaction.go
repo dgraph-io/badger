@@ -19,7 +19,10 @@ package badger
 import (
 	"bytes"
 	"container/heap"
+	"encoding/binary"
 	"log"
+	"math"
+	"strconv"
 	"sync"
 
 	farm "github.com/dgryski/go-farm"
@@ -42,19 +45,22 @@ func (u *uint64Heap) Pop() interface{} {
 
 type globalTxnState struct {
 	sync.RWMutex
-	curReadTs    uint64
-	nextCommitTs uint64
+	curRead    uint64
+	nextCommit uint64
 
-	curCommits     uint64Heap
+	// These two structures are used to figure out when a commit is done. The minimum done commit is
+	// used to update curRead.
+	commitMark     uint64Heap
 	pendingCommits map[uint64]struct{}
 
-	commits map[uint64]uint64 // Avoid dealing with byte arrays.
+	// commits stores a key fingerprint and latest commit counter for it.
+	commits map[uint64]uint64
 }
 
 func (gs *globalTxnState) readTs() uint64 {
 	gs.RLock()
 	defer gs.RUnlock()
-	return gs.curReadTs
+	return gs.curRead
 }
 
 func (gs *globalTxnState) newCommitTs(txn *Txn) uint64 {
@@ -72,19 +78,19 @@ func (gs *globalTxnState) newCommitTs(txn *Txn) uint64 {
 	gs.Lock()
 	defer gs.Unlock()
 
-	ts := gs.nextCommitTs
+	ts := gs.nextCommit
 	for _, w := range txn.writes {
 		// Update the commitTs.
 		gs.commits[w] = ts
 	}
-	heap.Push(&gs.curCommits, ts)
+	heap.Push(&gs.commitMark, ts)
 	_, has := gs.pendingCommits[ts]
 	if has {
 		log.Fatal("We shouldn't already have the commit ts: %d", ts)
 	}
 	gs.pendingCommits[ts] = struct{}{}
 
-	gs.nextCommitTs++
+	gs.nextCommit++
 	return ts
 }
 
@@ -99,20 +105,20 @@ func (gs *globalTxnState) doneCommit(ts uint64) {
 	delete(gs.pendingCommits, ts)
 
 	var min uint64
-	for len(gs.curCommits) > 0 {
-		ts := gs.curCommits[0]
+	for len(gs.commitMark) > 0 {
+		ts := gs.commitMark[0]
 		if _, has := gs.pendingCommits[ts]; has {
 			// Still waiting for a txn to commit.
 			break
 		}
 		min = ts
-		heap.Pop(&gs.curCommits)
+		heap.Pop(&gs.commitMark)
 	}
 	if min == 0 {
 		return
 	}
-	gs.curReadTs = min
-	gs.nextCommitTs = min + 1
+	gs.curRead = min
+	gs.nextCommit = min + 1
 }
 
 type Txn struct {
@@ -152,6 +158,13 @@ func (txn *Txn) Delete(key []byte) {
 	txn.cache[fp] = e
 }
 
+func keyWithTs(key []byte, ts uint64) []byte {
+	out := make([]byte, len(key)+8)
+	copy(out, key)
+	binary.BigEndian.PutUint64(out[len(key):], math.MaxUint64-ts)
+	return out
+}
+
 func (txn *Txn) Get(key []byte, item *KVItem) error {
 	fp := farm.Fingerprint64(key)
 	if e, has := txn.cache[fp]; has && bytes.Compare(key, e.Key) == 0 {
@@ -165,7 +178,8 @@ func (txn *Txn) Get(key []byte, item *KVItem) error {
 
 	txn.reads = append(txn.reads, fp)
 
-	vs, err := txn.kv.get(key)
+	seek := keyWithTs(key, txn.readTs)
+	vs, err := txn.kv.get(seek)
 	if err != nil {
 		return errors.Wrapf(err, "KV::Get key: %q", key)
 	}
@@ -179,19 +193,39 @@ func (txn *Txn) Get(key []byte, item *KVItem) error {
 	return nil
 }
 
+var errConflict = errors.New("Transaction Conflict. Please retry.")
+
 func (txn *Txn) Commit() error {
 	cts := txn.gs.newCommitTs(txn)
+	if cts == 0 {
+		return errConflict
+	}
 
 	var entries []*Entry
 	for _, e := range txn.cache {
+		// Suffix the keys with commit ts, so the key versions are sorted in
+		// descending order of commit timestamp.
+		key := make([]byte, len(e.Key)+8)
+		copy(key, e.Key)
+		binary.BigEndian.PutUint64(key[len(e.Key):], math.MaxUint64-txn.commitTs)
+		e.Key = key
+
 		entries = append(entries, e)
 	}
+	// TODO: Add logic in replay to deal with this.
+	entry := &Entry{
+		Key:   txnKey,
+		Value: []byte(strconv.Itoa(txn.commitTs)),
+		Meta:  BitFinTxn,
+	}
+	entries = append(entries, entry)
+
 	err := txn.kv.BatchSet(entries)
 	txn.gs.doneCommit(cts)
 	return err
 }
 
-func (kv *KV) Begin() (*Txn, error) {
+func (kv *KV) NewTransaction() (*Txn, error) {
 	txn := &Txn{
 		gs:     kv.txnState,
 		kv:     kv,

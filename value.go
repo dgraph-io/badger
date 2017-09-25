@@ -44,7 +44,8 @@ const (
 	BitDelete       byte  = 1 // Set if the key has been deleted.
 	BitValuePointer byte  = 2 // Set if the value is NOT stored directly next to key.
 	BitUnused       byte  = 4
-	BitSetIfAbsent  byte  = 8 // Set if the key is set using SetIfAbsent.
+	BitSetIfAbsent  byte  = 8  // Set if the key is set using SetIfAbsent.
+	BitFinTxn       byte  = 16 // Set if the entry is to indicate end of txn in value log.
 	M               int64 = 1 << 20
 )
 
