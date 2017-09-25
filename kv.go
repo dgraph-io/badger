@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"container/heap"
 	"encoding/hex"
 	"expvar"
 	"log"
@@ -71,6 +72,8 @@ type KV struct {
 	// Incremented in the non-concurrently accessed write loop.  But also accessed outside. So
 	// we use an atomic op.
 	lastUsedCasCounter uint64
+
+	txnState *globalTxnState
 }
 
 // ErrInvalidDir is returned when Badger cannot find the directory
@@ -153,6 +156,13 @@ func NewKV(optParam *Options) (out *KV, err error) {
 			_ = manifestFile.close()
 		}
 	}()
+
+	gs := globalTxnState{
+		nextCommitTs:   1,
+		pendingCommits: make(map[uint64]struct{}),
+		commits:        make(map[uint64]uint64),
+	}
+	heap.Init(&gs.curCommits)
 
 	out = &KV{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
