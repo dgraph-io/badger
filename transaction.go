@@ -63,25 +63,31 @@ func (gs *globalTxnState) readTs() uint64 {
 	return gs.curRead
 }
 
-func (gs *globalTxnState) newCommitTs(txn *Txn) uint64 {
+func (gs *globalTxnState) hasConflict(txn *Txn) bool {
+	if len(txn.reads) == 0 {
+		return false
+	}
 	gs.RLock()
+	defer gs.RUnlock()
 	for _, ro := range txn.reads {
-		if ts, has := gs.commits[ro]; has {
-			if ts > txn.readTs {
-				gs.RUnlock()
-				return 0
-			}
+		if ts, has := gs.commits[ro]; has && ts > txn.readTs {
+			return true
 		}
 	}
-	gs.RUnlock()
+	return false
+}
+
+func (gs *globalTxnState) newCommitTs(txn *Txn) uint64 {
+	if gs.hasConflict(txn) {
+		return 0
+	}
 
 	gs.Lock()
 	defer gs.Unlock()
 
 	ts := gs.nextCommit
 	for _, w := range txn.writes {
-		// Update the commitTs.
-		gs.commits[w] = ts
+		gs.commits[w] = ts // Update the commitTs.
 	}
 	heap.Push(&gs.commitMark, ts)
 	_, has := gs.pendingCommits[ts]
@@ -196,20 +202,21 @@ func (txn *Txn) Get(key []byte, item *KVItem) error {
 var errConflict = errors.New("Transaction Conflict. Please retry.")
 
 func (txn *Txn) Commit() error {
+	if len(txn.writes) == 0 {
+		return nil // Read only transaction.
+	}
+
 	cts := txn.gs.newCommitTs(txn)
 	if cts == 0 {
 		return errConflict
 	}
+	defer txn.gs.doneCommit(cts)
 
 	var entries []*Entry
 	for _, e := range txn.cache {
 		// Suffix the keys with commit ts, so the key versions are sorted in
 		// descending order of commit timestamp.
-		key := make([]byte, len(e.Key)+8)
-		copy(key, e.Key)
-		binary.BigEndian.PutUint64(key[len(e.Key):], math.MaxUint64-txn.commitTs)
-		e.Key = key
-
+		e.Key = keyWithTs(e.Key, txn.commitTs)
 		entries = append(entries, e)
 	}
 	// TODO: Add logic in replay to deal with this.
@@ -219,10 +226,7 @@ func (txn *Txn) Commit() error {
 		Meta:  BitFinTxn,
 	}
 	entries = append(entries, entry)
-
-	err := txn.kv.BatchSet(entries)
-	txn.gs.doneCommit(cts)
-	return err
+	return txn.kv.BatchSet(entries)
 }
 
 func (kv *KV) NewTransaction() (*Txn, error) {

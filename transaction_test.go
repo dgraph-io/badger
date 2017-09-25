@@ -54,7 +54,7 @@ func TestSimpleTxn(t *testing.T) {
 	require.NoError(t, txn.Commit())
 }
 
-func TestConflict(t *testing.T) {
+func TestWriteSkew(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -62,10 +62,11 @@ func TestConflict(t *testing.T) {
 	require.NoError(t, err)
 	defer kv.Close()
 
+	// Accounts
 	ax := []byte("x")
 	ay := []byte("y")
 
-	// Add $100 to both accounts.
+	// Set balance to $100 in each account.
 	txn, err := kv.NewTransaction()
 	require.NoError(t, err)
 	val := []byte(strconv.Itoa(100))
