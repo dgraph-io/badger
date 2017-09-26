@@ -19,12 +19,11 @@ package badger
 import (
 	"bytes"
 	"container/heap"
-	"encoding/binary"
 	"log"
-	"math"
 	"strconv"
 	"sync"
 
+	"github.com/dgraph-io/badger/y"
 	farm "github.com/dgryski/go-farm"
 	"github.com/pkg/errors"
 )
@@ -128,8 +127,7 @@ func (gs *globalTxnState) doneCommit(ts uint64) {
 }
 
 type Txn struct {
-	readTs   uint64
-	commitTs uint64
+	readTs uint64
 
 	// The following contain fingerprints of the keys.
 	reads  []uint64
@@ -164,14 +162,7 @@ func (txn *Txn) Delete(key []byte) {
 	txn.cache[fp] = e
 }
 
-func keyWithTs(key []byte, ts uint64) []byte {
-	out := make([]byte, len(key)+8)
-	copy(out, key)
-	binary.BigEndian.PutUint64(out[len(key):], math.MaxUint64-ts)
-	return out
-}
-
-func (txn *Txn) Get(key []byte, item *KVItem) error {
+func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 	fp := farm.Fingerprint64(key)
 	if e, has := txn.cache[fp]; has && bytes.Compare(key, e.Key) == 0 {
 		// Fulfill from cache.
@@ -179,15 +170,15 @@ func (txn *Txn) Get(key []byte, item *KVItem) error {
 		item.userMeta = e.UserMeta
 		item.key = key
 		item.status = prefetched
-		return nil
+		return item, nil
 	}
 
 	txn.reads = append(txn.reads, fp)
 
-	seek := keyWithTs(key, txn.readTs)
+	seek := y.KeyWithTs(key, txn.readTs)
 	vs, err := txn.kv.get(seek)
 	if err != nil {
-		return errors.Wrapf(err, "KV::Get key: %q", key)
+		return item, errors.Wrapf(err, "KV::Get key: %q", key)
 	}
 
 	item.meta = vs.Meta
@@ -196,7 +187,7 @@ func (txn *Txn) Get(key []byte, item *KVItem) error {
 	item.key = key
 	item.kv = txn.kv
 	item.vptr = vs.Value
-	return nil
+	return item, nil
 }
 
 var errConflict = errors.New("Transaction Conflict. Please retry.")
@@ -206,23 +197,23 @@ func (txn *Txn) Commit() error {
 		return nil // Read only transaction.
 	}
 
-	cts := txn.gs.newCommitTs(txn)
-	if cts == 0 {
+	commitTs := txn.gs.newCommitTs(txn)
+	if commitTs == 0 {
 		return errConflict
 	}
-	defer txn.gs.doneCommit(cts)
+	defer txn.gs.doneCommit(commitTs)
 
 	var entries []*Entry
 	for _, e := range txn.cache {
 		// Suffix the keys with commit ts, so the key versions are sorted in
 		// descending order of commit timestamp.
-		e.Key = keyWithTs(e.Key, txn.commitTs)
+		e.Key = y.KeyWithTs(e.Key, commitTs)
 		entries = append(entries, e)
 	}
 	// TODO: Add logic in replay to deal with this.
 	entry := &Entry{
 		Key:   txnKey,
-		Value: []byte(strconv.Itoa(txn.commitTs)),
+		Value: []byte(strconv.FormatUint(commitTs, 10)),
 		Meta:  BitFinTxn,
 	}
 	entries = append(entries, entry)

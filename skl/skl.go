@@ -371,14 +371,18 @@ func (s *Skiplist) findLast() *node {
 	}
 }
 
-// Get gets the value associated with the key.
-// TODO: Make this GetOrNext.
+// Get gets the value associated with the key. It returns a valid value if it finds equal or earlier
+// version of the same key.
 func (s *Skiplist) Get(key []byte) y.ValueStruct {
-	n, found := s.findNear(key, false, true) // findGreaterOrEqual.
-	if !found {
+	n, _ := s.findNear(key, false, true) // findGreaterOrEqual.
+	if n == nil {
 		return y.ValueStruct{}
 	}
 	valOffset, valSize := n.getValueOffset()
+	if !y.SameKey(key, s.arena.getKey(n.keyOffset, n.keySize)) {
+		return y.ValueStruct{}
+	}
+	// TODO: Update the version timestamp in value struct.
 	return s.arena.getVal(valOffset, valSize)
 }
 

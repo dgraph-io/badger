@@ -17,7 +17,10 @@
 package y
 
 import (
+	"bytes"
+	"encoding/binary"
 	"hash/crc32"
+	"math"
 	"os"
 	"sync"
 
@@ -82,6 +85,25 @@ func OpenTruncFile(filename string, sync bool) (*os.File, error) {
 // Safecopy does append(a[:0], src...).
 func Safecopy(a []byte, src []byte) []byte {
 	return append(a[:0], src...)
+}
+
+// KeyWithTs generates a new key by appending ts to key.
+func KeyWithTs(key []byte, ts uint64) []byte {
+	out := make([]byte, len(key)+8)
+	copy(out, key)
+	binary.BigEndian.PutUint64(out[len(key):], math.MaxUint64-ts)
+	return out
+}
+
+// SameKey checks for key equality ignoring the version timestamp suffix.
+func SameKey(src, dst []byte) bool {
+	if len(src) != len(dst) {
+		return false
+	}
+	if len(src) < 8 {
+		return false
+	}
+	return bytes.Equal(src[len(src)-8:], dst[len(dst)-8:])
 }
 
 // Slice holds a reusable buf, will reallocate if you request a larger size than ever before.

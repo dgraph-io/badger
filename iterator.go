@@ -42,8 +42,8 @@ type KVItem struct {
 	meta       byte
 	userMeta   byte
 	val        []byte
-	casCounter uint64
-	slice      *y.Slice
+	casCounter uint64   // TODO: Rename to version ts.
+	slice      *y.Slice // Used only during prefetching.
 	next       *KVItem
 }
 
@@ -116,6 +116,7 @@ func (item *KVItem) EstimatedSize() int64 {
 }
 
 // Counter returns the CAS counter associated with the value.
+// TODO: Make this version.
 func (item *KVItem) Counter() uint64 {
 	return item.casCounter
 }

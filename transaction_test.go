@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSimpleTxn(t *testing.T) {
+func TestTxnSimple(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -43,9 +43,8 @@ func TestSimpleTxn(t *testing.T) {
 		txn.Set(k, v, 0)
 	}
 
-	var item KVItem
-	require.NoError(t, txn.Get([]byte("key=8"), &item))
-
+	item, err := txn.Get([]byte("key=8"))
+	require.NoError(t, err)
 	fn := func(val []byte) error {
 		require.Equal(t, []byte("val=8"), val)
 		return nil
@@ -54,7 +53,50 @@ func TestSimpleTxn(t *testing.T) {
 	require.NoError(t, txn.Commit())
 }
 
-func TestWriteSkew(t *testing.T) {
+func TestTxnVersions(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, err := NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+	defer kv.Close()
+
+	k := []byte("key")
+	for i := 1; i < 10; i++ {
+		txn, err := kv.NewTransaction()
+		require.NoError(t, err)
+
+		txn.Set(k, []byte(fmt.Sprintf("valversion=%d", i)), 0)
+		require.NoError(t, txn.Commit())
+		require.Equal(t, uint64(i), kv.txnState.readTs())
+	}
+
+	for i := 1; i < 10; i++ {
+		txn, err := kv.NewTransaction()
+		require.NoError(t, err)
+		txn.readTs = uint64(i) // Read version at i.
+
+		item, err := txn.Get(k)
+		require.NoError(t, err)
+
+		item.Value(func(val []byte) error {
+			require.Equal(t, []byte(fmt.Sprintf("valversion=%d", i)), val,
+				"Expected versions to match up at i=%d", i)
+			return nil
+		})
+	}
+	txn, err := kv.NewTransaction()
+	require.NoError(t, err)
+	item, err := txn.Get(k)
+	require.NoError(t, err)
+
+	item.Value(func(val []byte) error {
+		require.Equal(t, []byte("valversion=9"), val)
+		return nil
+	})
+}
+
+func TestTxnWriteSkew(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -76,9 +118,10 @@ func TestWriteSkew(t *testing.T) {
 	require.Equal(t, uint64(1), kv.txnState.readTs())
 
 	getBal := func(txn *Txn, key []byte) (bal int) {
-		var item KVItem
-		require.NoError(t, txn.Get(key, &item))
-		err := item.Value(func(val []byte) error {
+		item, err := txn.Get(key)
+		require.NoError(t, err)
+
+		err = item.Value(func(val []byte) error {
 			var err error
 			bal, err = strconv.Atoi(string(val))
 			return err

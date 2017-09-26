@@ -241,7 +241,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getTableForKey(key)
 
 	for _, th := range tables {
-		if th.DoesNotHave(key) {
+		if th.DoesNotHave(key) { // TODO: Only check the prefix, not suffix.
 			y.NumLSMBloomHits.Add(s.strLevel, 1)
 			continue
 		}
@@ -254,8 +254,8 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 		if !it.Valid() {
 			continue
 		}
-		// TODO: We still need to check for equality, but ignoring the last 8 bytes.
-		if bytes.Equal(key, it.Key()) {
+		if y.SameKey(key, it.Key()) {
+			// TODO: Update the CASCounter timestamp entry to embed key version.
 			return it.Value(), decr()
 		}
 	}

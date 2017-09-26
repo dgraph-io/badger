@@ -31,6 +31,7 @@ type ValueStruct struct {
 	Meta       byte
 	UserMeta   byte
 	CASCounter uint64
+	// Timestamp  uint64
 }
 
 // MakeValueStruct is the most convenient way for unit tests to make a ValueStruct.  (Also, the
