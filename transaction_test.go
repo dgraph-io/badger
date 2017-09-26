@@ -71,6 +71,23 @@ func TestTxnVersions(t *testing.T) {
 		require.Equal(t, uint64(i), kv.txnState.readTs())
 	}
 
+	checkIterator := func(itr *Iterator, i int) {
+		count := 0
+		for itr.Rewind(); itr.Valid(); itr.Next() {
+			item := itr.Item()
+			require.Equal(t, k, item.Key())
+
+			err := item.Value(func(val []byte) error {
+				exp := fmt.Sprintf("valversion=%d", i)
+				require.Equal(t, exp, string(val))
+				count++
+				return nil
+			})
+			require.NoError(t, err)
+		}
+		require.Equal(t, 1, count, "i=%d", i) // Should only loop once.
+	}
+
 	for i := 1; i < 10; i++ {
 		txn, err := kv.NewTransaction(true)
 		require.NoError(t, err)
@@ -90,20 +107,12 @@ func TestTxnVersions(t *testing.T) {
 		require.True(t, found)
 
 		itr := txn.NewIterator(DefaultIteratorOptions)
-		count := 0
-		for itr.Rewind(); itr.Valid(); itr.Next() {
-			item := itr.Item()
-			require.Equal(t, k, item.Key())
+		checkIterator(itr, i)
 
-			err := item.Value(func(val []byte) error {
-				exp := fmt.Sprintf("valversion=%d", i)
-				require.Equal(t, exp, string(val))
-				count++
-				return nil
-			})
-			require.NoError(t, err)
-		}
-		require.Equal(t, 1, count, "i=%d", i) // Should only loop once.
+		opt := DefaultIteratorOptions
+		opt.Reverse = true
+		itr = txn.NewIterator(opt)
+		checkIterator(itr, i)
 	}
 	txn, err := kv.NewTransaction(true)
 	require.NoError(t, err)

@@ -18,7 +18,7 @@ package badger
 
 import (
 	"bytes"
-	"math"
+	"fmt"
 	"sync"
 
 	"github.com/dgraph-io/badger/y"
@@ -236,19 +236,67 @@ func (it *Iterator) Next() {
 	it.item = it.data.pop()
 
 	// Advance internal iterator until entry is not deleted
-	for it.iitr.Next(); it.iitr.Valid(); it.iitr.Next() {
-		if it.validItem() {
+	for it.iitr.Valid() {
+		if it.parseItem() { // parseItem calls one extra next.
 			break
 		}
 	}
+}
 
-	if !it.iitr.Valid() {
-		return
+// This function should advance the iterator.
+func (it *Iterator) parseItem() bool {
+	fmt.Println("parseItem")
+	mi := it.iitr
+	key := mi.Key()
+	if bytes.HasPrefix(key, badgerPrefix) {
+		it.Next()
+		return false
 	}
-	it.lastKey = y.Safecopy(it.lastKey, it.iitr.Key()) // Update last key.
+	version := y.ParseTs(key)
+	if version > it.readTs {
+		mi.Next()
+		fmt.Printf("version %d is greater for key: %q\n", version, y.ParseKey(key))
+		return false
+	}
+	if !it.opt.Reverse {
+		if y.SameKey(it.lastKey, key) {
+			mi.Next()
+			fmt.Printf("same key: %q %q\n", y.ParseKey(it.lastKey), y.ParseKey(key))
+			return false
+		}
+		// Only track in forward direction.
+		// We should update lastKey as soon as we find a different key in our snapshot.
+		// Consider keys: a 5, b 7 (del), b 5. When iterating, lastKey = a.
+		// Then we see b 7, which is deleted. If we don't store lastKey = b, we'll then return b 5,
+		// which is wrong. Therefore, update lastKey here.
+		it.lastKey = y.Safecopy(it.lastKey, mi.Key())
+	}
+	if mi.Value().Meta&BitDelete > 0 { // Deleted.
+		fmt.Println("deleted value")
+		mi.Next()
+		return false
+	}
+
 	item := it.newItem()
+FILL:
 	it.fill(item)
-	it.data.push(item)
+	fmt.Printf("fill item: %+v\n", item)
+	if it.item == nil {
+		it.item = item
+	} else {
+		it.data.push(item)
+	}
+	mi.Next()
+	if !it.opt.Reverse || !mi.Valid() { // Forward direction, or invalid.
+		return true
+	}
+	// Reverse direction.
+	nextTs := y.ParseTs(mi.Key())
+	if nextTs <= it.readTs && y.SameKey(mi.Key(), item.key) {
+		mi.Next()
+		goto FILL
+	}
+	return true
 }
 
 // This logic only works in forward direction. It doesn't work in reverse direction.
@@ -259,11 +307,21 @@ func (it *Iterator) validItem() bool {
 	}
 	nextKey := mi.Key()
 	version := y.ParseTs(nextKey)
-	if it.readTs != math.MaxUint64 &&
-		(version > it.readTs || y.SameKey(it.lastKey, nextKey)) {
-		// Skip this key.
+	if version > it.readTs {
 		return false
 	}
+	if !it.opt.Reverse {
+		// In forward direction, pick the first key which fulfils the version, skipping any others.
+		if y.SameKey(it.lastKey, nextKey) {
+			return false
+		}
+	} else {
+	}
+	// We shouldn't miss the deletions.
+	// Consider keys: a 5, b 7 (del), b 5. When iterating, lastKey = a.
+	// Then we see b 7, which is deleted. If we don't store lastKey = b, we'll then return b 5,
+	// which is wrong. Therefore, update lastKey here.
+	it.lastKey = y.Safecopy(it.lastKey, mi.Key())
 	return mi.Value().Meta&BitDelete == 0 // Not deleted.
 }
 
@@ -294,20 +352,11 @@ func (it *Iterator) prefetch() {
 	i := it.iitr
 	var count int
 	it.item = nil
-	for ; i.Valid(); i.Next() {
-		if !it.validItem() {
+	for i.Valid() {
+		if !it.parseItem() {
 			continue
 		}
 		count++
-
-		it.lastKey = y.Safecopy(it.lastKey, i.Key())
-		item := it.newItem()
-		it.fill(item)
-		if it.item == nil {
-			it.item = item
-		} else {
-			it.data.push(item)
-		}
 		if count == prefetchSize {
 			break
 		}
