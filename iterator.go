@@ -18,9 +18,11 @@ package badger
 
 import (
 	"bytes"
+	"math"
 	"sync"
 
 	"github.com/dgraph-io/badger/y"
+	farm "github.com/dgryski/go-farm"
 )
 
 type prefetchStatus uint8
@@ -49,7 +51,7 @@ type KVItem struct {
 
 // Key returns the key. Remember to copy if you need to access it outside the iteration loop.
 func (item *KVItem) Key() []byte {
-	return item.key
+	return y.ParseKey(item.key)
 }
 
 // Value retrieves the value of the item from the value log. It calls the
@@ -176,26 +178,36 @@ var DefaultIteratorOptions = IteratorOptions{
 
 // Iterator helps iterating over the KV pairs in a lexicographically sorted order.
 type Iterator struct {
-	kv   *KV
-	iitr *y.MergeIterator
+	iitr   *y.MergeIterator
+	txn    *Txn
+	readTs uint64
 
 	opt   IteratorOptions
 	item  *KVItem
 	data  list
 	waste list
+
+	lastKey []byte // Used to skip over multiple versions of the same key.
 }
 
 func (it *Iterator) newItem() *KVItem {
 	item := it.waste.pop()
 	if item == nil {
-		item = &KVItem{slice: new(y.Slice), kv: it.kv}
+		item = &KVItem{slice: new(y.Slice), kv: it.txn.kv}
 	}
 	return item
 }
 
 // Item returns pointer to the current KVItem.
 // This item is only valid until it.Next() gets called.
-func (it *Iterator) Item() *KVItem { return it.item }
+func (it *Iterator) Item() *KVItem {
+	tx := it.txn
+	if tx.update {
+		// Track reads if this is an update txn.
+		tx.reads = append(tx.reads, farm.Fingerprint64(it.item.Key()))
+	}
+	return it.item
+}
 
 // Valid returns false when iteration is done.
 func (it *Iterator) Valid() bool { return it.item != nil }
@@ -210,7 +222,7 @@ func (it *Iterator) ValidForPrefix(prefix []byte) bool {
 func (it *Iterator) Close() {
 	it.iitr.Close()
 	// TODO: We could handle this error.
-	_ = it.kv.vlog.decrIteratorCount()
+	_ = it.txn.kv.vlog.decrIteratorCount()
 }
 
 // Next would advance the iterator by one. Always check it.Valid() after a Next()
@@ -225,10 +237,7 @@ func (it *Iterator) Next() {
 
 	// Advance internal iterator until entry is not deleted
 	for it.iitr.Next(); it.iitr.Valid(); it.iitr.Next() {
-		if bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
-			continue
-		}
-		if it.iitr.Value().Meta&BitDelete == 0 { // Not deleted.
+		if it.validItem() {
 			break
 		}
 	}
@@ -236,9 +245,26 @@ func (it *Iterator) Next() {
 	if !it.iitr.Valid() {
 		return
 	}
+	it.lastKey = y.Safecopy(it.lastKey, it.iitr.Key()) // Update last key.
 	item := it.newItem()
 	it.fill(item)
 	it.data.push(item)
+}
+
+// This logic only works in forward direction. It doesn't work in reverse direction.
+func (it *Iterator) validItem() bool {
+	mi := it.iitr
+	if bytes.HasPrefix(mi.Key(), badgerPrefix) {
+		return false
+	}
+	nextKey := mi.Key()
+	version := y.ParseTs(nextKey)
+	if it.readTs != math.MaxUint64 &&
+		(version > it.readTs || y.SameKey(it.lastKey, nextKey)) {
+		// Skip this key.
+		return false
+	}
+	return mi.Value().Meta&BitDelete == 0 // Not deleted.
 }
 
 func (it *Iterator) fill(item *KVItem) {
@@ -269,14 +295,12 @@ func (it *Iterator) prefetch() {
 	var count int
 	it.item = nil
 	for ; i.Valid(); i.Next() {
-		if bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
-			continue
-		}
-		if i.Value().Meta&BitDelete > 0 {
+		if !it.validItem() {
 			continue
 		}
 		count++
 
+		it.lastKey = y.Safecopy(it.lastKey, i.Key())
 		item := it.newItem()
 		it.fill(item)
 		if it.item == nil {
@@ -299,6 +323,7 @@ func (it *Iterator) Seek(key []byte) {
 		it.waste.push(i)
 	}
 	it.iitr.Seek(key)
+	// TODO: Looks like we don't need the following lines.
 	for it.iitr.Valid() && bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
 		it.iitr.Next()
 	}
@@ -317,6 +342,7 @@ func (it *Iterator) Rewind() {
 	}
 
 	it.iitr.Rewind()
+	// TODO: DO we need this?
 	for it.iitr.Valid() && bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
 		it.iitr.Next()
 	}
@@ -343,6 +369,7 @@ func (it *Iterator) Rewind() {
 //     // So, if you need access to them outside, copy them or parse them.
 //   }
 //   itr.Close()
+// TODO: Remove this.
 func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 	tables, decr := s.getMemTables()
 	defer decr()
@@ -353,7 +380,6 @@ func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 	}
 	iters = s.lc.appendIterators(iters, opt.Reverse) // This will increment references.
 	res := &Iterator{
-		kv:   s,
 		iitr: y.NewMergeIterator(iters, opt.Reverse),
 		opt:  opt,
 	}

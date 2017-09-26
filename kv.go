@@ -469,6 +469,7 @@ func (s *KV) get(key []byte) (y.ValueStruct, error) {
 
 // Get looks for key and returns a KVItem.
 // If key is not found, item.Value() is nil.
+// TODO: Remove.
 func (s *KV) Get(key []byte, item *KVItem) error {
 	vs, err := s.get(key)
 	if err != nil {

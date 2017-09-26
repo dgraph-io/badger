@@ -127,6 +127,7 @@ func (gs *globalTxnState) doneCommit(ts uint64) {
 }
 
 type Txn struct {
+	update bool
 	readTs uint64
 
 	// The following contain fingerprints of the keys.
@@ -163,17 +164,18 @@ func (txn *Txn) Delete(key []byte) {
 }
 
 func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
-	fp := farm.Fingerprint64(key)
-	if e, has := txn.cache[fp]; has && bytes.Compare(key, e.Key) == 0 {
-		// Fulfill from cache.
-		item.val = e.Value
-		item.userMeta = e.UserMeta
-		item.key = key
-		item.status = prefetched
-		return item, nil
+	if txn.update {
+		fp := farm.Fingerprint64(key)
+		if e, has := txn.cache[fp]; has && bytes.Compare(key, e.Key) == 0 {
+			// Fulfill from cache.
+			item.val = e.Value
+			item.userMeta = e.UserMeta
+			item.key = key
+			item.status = prefetched
+			return item, nil
+		}
+		txn.reads = append(txn.reads, fp)
 	}
-
-	txn.reads = append(txn.reads, fp)
 
 	seek := y.KeyWithTs(key, txn.readTs)
 	vs, err := txn.kv.get(seek)
@@ -220,8 +222,46 @@ func (txn *Txn) Commit() error {
 	return txn.kv.BatchSet(entries)
 }
 
-func (kv *KV) NewTransaction() (*Txn, error) {
+// NewIterator returns a new iterator. Depending upon the options, either only keys, or both
+// key-value pairs would be fetched. The keys are returned in lexicographically sorted order.
+// Usage:
+//   opt := badger.DefaultIteratorOptions
+//   itr := kv.NewIterator(opt)
+//   for itr.Rewind(); itr.Valid(); itr.Next() {
+//     item := itr.Item()
+//     key := item.Key()
+//     var val []byte
+//     err = item.Value(func(v []byte) {
+//         val = make([]byte, len(v))
+// 	       copy(val, v)
+//     }) 	// This could block while value is fetched from value log.
+//          // For key only iteration, set opt.PrefetchValues to false, and don't call
+//          // item.Value(func(v []byte)).
+//
+//     // Remember that both key, val would become invalid in the next iteration of the loop.
+//     // So, if you need access to them outside, copy them or parse them.
+//   }
+//   itr.Close()
+func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
+	tables, decr := txn.kv.getMemTables()
+	defer decr()
+	txn.kv.vlog.incrIteratorCount()
+	var iters []y.Iterator
+	for i := 0; i < len(tables); i++ {
+		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
+	}
+	iters = txn.kv.lc.appendIterators(iters, opt.Reverse) // This will increment references.
+	res := &Iterator{
+		txn:    txn,
+		iitr:   y.NewMergeIterator(iters, opt.Reverse),
+		opt:    opt,
+		readTs: txn.readTs,
+	}
+	return res
+}
+func (kv *KV) NewTransaction(update bool) (*Txn, error) {
 	txn := &Txn{
+		update: update,
 		gs:     kv.txnState,
 		kv:     kv,
 		readTs: kv.txnState.readTs(),

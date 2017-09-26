@@ -95,6 +95,20 @@ func KeyWithTs(key []byte, ts uint64) []byte {
 	return out
 }
 
+func ParseTs(key []byte) uint64 {
+	if len(key) < 8 {
+		return 0
+	}
+	return math.MaxUint64 - binary.BigEndian.Uint64(key[len(key)-8:])
+}
+
+func ParseKey(key []byte) []byte {
+	if len(key) < 8 {
+		return key
+	}
+	return key[:len(key)-8]
+}
+
 // SameKey checks for key equality ignoring the version timestamp suffix.
 func SameKey(src, dst []byte) bool {
 	if len(src) != len(dst) {
@@ -103,7 +117,8 @@ func SameKey(src, dst []byte) bool {
 	if len(src) < 8 {
 		return false
 	}
-	return bytes.Equal(src[len(src)-8:], dst[len(dst)-8:])
+	ok := bytes.Equal(src[:len(src)-8], dst[:len(dst)-8])
+	return ok
 }
 
 // Slice holds a reusable buf, will reallocate if you request a larger size than ever before.

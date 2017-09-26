@@ -34,7 +34,7 @@ func TestTxnSimple(t *testing.T) {
 	require.NoError(t, err)
 	defer kv.Close()
 
-	txn, err := kv.NewTransaction()
+	txn, err := kv.NewTransaction(true)
 	require.NoError(t, err)
 
 	for i := 0; i < 10; i++ {
@@ -63,7 +63,7 @@ func TestTxnVersions(t *testing.T) {
 
 	k := []byte("key")
 	for i := 1; i < 10; i++ {
-		txn, err := kv.NewTransaction()
+		txn, err := kv.NewTransaction(true)
 		require.NoError(t, err)
 
 		txn.Set(k, []byte(fmt.Sprintf("valversion=%d", i)), 0)
@@ -72,20 +72,40 @@ func TestTxnVersions(t *testing.T) {
 	}
 
 	for i := 1; i < 10; i++ {
-		txn, err := kv.NewTransaction()
+		txn, err := kv.NewTransaction(true)
 		require.NoError(t, err)
 		txn.readTs = uint64(i) // Read version at i.
 
 		item, err := txn.Get(k)
 		require.NoError(t, err)
 
-		item.Value(func(val []byte) error {
+		var found bool
+		err = item.Value(func(val []byte) error {
+			found = true
 			require.Equal(t, []byte(fmt.Sprintf("valversion=%d", i)), val,
 				"Expected versions to match up at i=%d", i)
 			return nil
 		})
+		require.NoError(t, err)
+		require.True(t, found)
+
+		itr := txn.NewIterator(DefaultIteratorOptions)
+		count := 0
+		for itr.Rewind(); itr.Valid(); itr.Next() {
+			item := itr.Item()
+			require.Equal(t, k, item.Key())
+
+			err := item.Value(func(val []byte) error {
+				exp := fmt.Sprintf("valversion=%d", i)
+				require.Equal(t, exp, string(val))
+				count++
+				return nil
+			})
+			require.NoError(t, err)
+		}
+		require.Equal(t, 1, count, "i=%d", i) // Should only loop once.
 	}
-	txn, err := kv.NewTransaction()
+	txn, err := kv.NewTransaction(true)
 	require.NoError(t, err)
 	item, err := txn.Get(k)
 	require.NoError(t, err)
@@ -109,7 +129,7 @@ func TestTxnWriteSkew(t *testing.T) {
 	ay := []byte("y")
 
 	// Set balance to $100 in each account.
-	txn, err := kv.NewTransaction()
+	txn, err := kv.NewTransaction(true)
 	require.NoError(t, err)
 	val := []byte(strconv.Itoa(100))
 	txn.Set(ax, val, 0)
@@ -131,7 +151,7 @@ func TestTxnWriteSkew(t *testing.T) {
 	}
 
 	// Start two transactions, each would read both accounts and deduct from one account.
-	txn1, err := kv.NewTransaction()
+	txn1, err := kv.NewTransaction(true)
 	require.NoError(t, err)
 
 	sum := getBal(txn1, ax)
@@ -146,7 +166,7 @@ func TestTxnWriteSkew(t *testing.T) {
 	require.Equal(t, 100, sum)
 	// Don't commit yet.
 
-	txn2, err := kv.NewTransaction()
+	txn2, err := kv.NewTransaction(true)
 	require.NoError(t, err)
 
 	sum = getBal(txn2, ax)
