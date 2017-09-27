@@ -382,7 +382,6 @@ func (s *Skiplist) Get(key []byte) y.ValueStruct {
 	if !y.SameKey(key, s.arena.getKey(n.keyOffset, n.keySize)) {
 		return y.ValueStruct{}
 	}
-	// TODO: Update the version timestamp in value struct.
 	return s.arena.getVal(valOffset, valSize)
 }
 

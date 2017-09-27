@@ -235,13 +235,14 @@ func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func() error)
 	return []*table.Table{tbl}, tbl.DecrRef
 }
 
-// get returns value for a given key. If not found, return nil.
-// TODO: Make this getOrNext.
+// get returns value for a given key or the key after that. If not found, return nil.
 func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getTableForKey(key)
 
 	for _, th := range tables {
-		if th.DoesNotHave(key) { // TODO: Only check the prefix, not suffix.
+		if th.DoesNotHave(key) {
+			// TODO: Only check the prefix, not suffix in blooms.
+			// TODO: This is important.
 			y.NumLSMBloomHits.Add(s.strLevel, 1)
 			continue
 		}

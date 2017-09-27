@@ -234,28 +234,40 @@ func (it *Iterator) Next() {
 	// Set next item to current
 	it.item = it.data.pop()
 
-	// Advance internal iterator until entry is not deleted
 	for it.iitr.Valid() {
-		if it.parseItem() { // parseItem calls one extra next.
+		if it.parseItem() {
+			// parseItem calls one extra next.
+			// This is used to deal with the complexity of reverse iteration.
 			break
 		}
 	}
 }
 
-// This function should advance the iterator.
+// parseItem is a complex function because it needs to handle both forward and reverse iteration
+// implementation. We store keys such that their versions are sorted in descending order. This makes
+// forward iteration efficient, but revese iteration complicated. This tradeoff is better because
+// forward iteration is more common than reverse.
+//
+// This function advances the iterator.
 func (it *Iterator) parseItem() bool {
 	mi := it.iitr
 	key := mi.Key()
+
+	// Skip badger keys.
 	if bytes.HasPrefix(key, badgerPrefix) {
 		mi.Next()
 		return false
 	}
 
+	// Skip any versions which are beyond the readTs.
 	version := y.ParseTs(key)
 	if version > it.readTs {
 		mi.Next()
 		return false
 	}
+
+	// If iterating in forward direction, then just checking the last key against current key would
+	// be sufficient.
 	if !it.opt.Reverse {
 		if y.SameKey(it.lastKey, key) {
 			mi.Next()
@@ -268,15 +280,20 @@ func (it *Iterator) parseItem() bool {
 		// which is wrong. Therefore, update lastKey here.
 		it.lastKey = y.Safecopy(it.lastKey, mi.Key())
 	}
+
 FILL:
-	if mi.Value().Meta&BitDelete > 0 { // Deleted.
+	// If deleted, advance and return.
+	if mi.Value().Meta&BitDelete > 0 {
 		mi.Next()
 		return false
 	}
 
 	item := it.newItem()
 	it.fill(item)
-	mi.Next()
+	// fill item based on current cursor position. All Next calls have returned, so reaching here
+	// means no Next was called.
+
+	mi.Next()                           // Advance but no fill item yet.
 	if !it.opt.Reverse || !mi.Valid() { // Forward direction, or invalid.
 		if it.item == nil {
 			it.item = item
@@ -285,43 +302,20 @@ FILL:
 		}
 		return true
 	}
+
 	// Reverse direction.
 	nextTs := y.ParseTs(mi.Key())
 	if nextTs <= it.readTs && y.SameKey(mi.Key(), item.key) {
+		// This is a valid potential candidate.
 		goto FILL
 	}
+	// Ignore the next candidate. Return the current one.
 	if it.item == nil {
 		it.item = item
 	} else {
 		it.data.push(item)
 	}
 	return true
-}
-
-// This logic only works in forward direction. It doesn't work in reverse direction.
-func (it *Iterator) validItem() bool {
-	mi := it.iitr
-	if bytes.HasPrefix(mi.Key(), badgerPrefix) {
-		return false
-	}
-	nextKey := mi.Key()
-	version := y.ParseTs(nextKey)
-	if version > it.readTs {
-		return false
-	}
-	if !it.opt.Reverse {
-		// In forward direction, pick the first key which fulfils the version, skipping any others.
-		if y.SameKey(it.lastKey, nextKey) {
-			return false
-		}
-	} else {
-	}
-	// We shouldn't miss the deletions.
-	// Consider keys: a 5, b 7 (del), b 5. When iterating, lastKey = a.
-	// Then we see b 7, which is deleted. If we don't store lastKey = b, we'll then return b 5,
-	// which is wrong. Therefore, update lastKey here.
-	it.lastKey = y.Safecopy(it.lastKey, mi.Key())
-	return mi.Value().Meta&BitDelete == 0 // Not deleted.
 }
 
 func (it *Iterator) fill(item *KVItem) {
@@ -371,10 +365,6 @@ func (it *Iterator) Seek(key []byte) {
 		it.waste.push(i)
 	}
 	it.iitr.Seek(key)
-	// TODO: Looks like we don't need the following lines.
-	for it.iitr.Valid() && bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
-		it.iitr.Next()
-	}
 	it.prefetch()
 }
 
@@ -390,10 +380,6 @@ func (it *Iterator) Rewind() {
 	}
 
 	it.iitr.Rewind()
-	// TODO: DO we need this?
-	for it.iitr.Valid() && bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
-		it.iitr.Next()
-	}
 	it.prefetch()
 }
 

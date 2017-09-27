@@ -19,7 +19,7 @@ package badger
 import (
 	"bytes"
 	"container/heap"
-	"log"
+	"fmt"
 	"strconv"
 	"sync"
 
@@ -89,9 +89,8 @@ func (gs *globalTxnState) newCommitTs(txn *Txn) uint64 {
 		gs.commits[w] = ts // Update the commitTs.
 	}
 	heap.Push(&gs.commitMark, ts)
-	_, has := gs.pendingCommits[ts]
-	if has {
-		log.Fatal("We shouldn't already have the commit ts: %d", ts)
+	if _, has := gs.pendingCommits[ts]; has {
+		panic(fmt.Sprintf("We shouldn't have the commit ts: %d", ts))
 	}
 	gs.pendingCommits[ts] = struct{}{}
 
@@ -103,9 +102,8 @@ func (gs *globalTxnState) doneCommit(ts uint64) {
 	gs.Lock()
 	defer gs.Unlock()
 
-	_, has := gs.pendingCommits[ts]
-	if !has {
-		log.Fatal("We should already have the commit ts: %d", ts)
+	if _, has := gs.pendingCommits[ts]; !has {
+		panic(fmt.Sprintf("We should already have the commit ts: %d", ts))
 	}
 	delete(gs.pendingCommits, ts)
 
@@ -127,14 +125,13 @@ func (gs *globalTxnState) doneCommit(ts uint64) {
 }
 
 type Txn struct {
-	update bool
 	readTs uint64
 
-	// The following contain fingerprints of the keys.
-	reads  []uint64
-	writes []uint64
+	update bool     // update is used to conditionally keep track of reads.
+	reads  []uint64 // contains fingerprints of keys read.
+	writes []uint64 // contains fingerprints of keys written.
 
-	cache map[uint64]*Entry
+	cache map[uint64]*Entry // cache stores any writes done by txn.
 
 	gs *globalTxnState
 	kv *KV
@@ -226,7 +223,7 @@ func (txn *Txn) Commit() error {
 // key-value pairs would be fetched. The keys are returned in lexicographically sorted order.
 // Usage:
 //   opt := badger.DefaultIteratorOptions
-//   itr := kv.NewIterator(opt)
+//   itr := txn.NewIterator(opt)
 //   for itr.Rewind(); itr.Valid(); itr.Next() {
 //     item := itr.Item()
 //     key := item.Key()
@@ -242,6 +239,7 @@ func (txn *Txn) Commit() error {
 //     // So, if you need access to them outside, copy them or parse them.
 //   }
 //   itr.Close()
+// TODO: Move this usage to README.
 func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	tables, decr := txn.kv.getMemTables()
 	defer decr()
