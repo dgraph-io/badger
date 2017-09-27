@@ -24,6 +24,7 @@ import (
 	"hash/crc32"
 	"io"
 	"io/ioutil"
+	"log"
 	"math/rand"
 	"os"
 	"sort"
@@ -41,46 +42,15 @@ import (
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete       byte  = 1 // Set if the key has been deleted.
-	BitValuePointer byte  = 2 // Set if the value is NOT stored directly next to key.
-	BitUnused       byte  = 4
-	BitSetIfAbsent  byte  = 8  // Set if the key is set using SetIfAbsent.
-	BitFinTxn       byte  = 16 // Set if the entry is to indicate end of txn in value log.
-	M               int64 = 1 << 20
+	BitDelete       byte = 1 << 0 // Set if the key has been deleted.
+	BitValuePointer byte = 1 << 1 // Set if the value is NOT stored directly next to key.
+
+	// The MSB 2 bits are for transactions.
+	BitTxn    byte = 1 << 6 // Set if the entry is part of a txn.
+	BitFinTxn byte = 1 << 7 // Set if the entry is to indicate end of txn in value log.
+
+	M int64 = 1 << 20
 )
-
-var (
-	// ErrRetry is returned when a log file containing the value is not found.
-	// This usually indicates that it may have been garbage collected, and the
-	// operation needs to be retried.
-	ErrRetry = errors.New("Unable to find log file. Please retry")
-
-	// ErrCasMismatch is returned when a CompareAndSet operation has failed due
-	// to a counter mismatch.
-	ErrCasMismatch = errors.New("CompareAndSet failed due to counter mismatch")
-
-	// ErrKeyExists is returned by SetIfAbsent metadata bit is set, but the
-	// key already exists in the store.
-	ErrKeyExists = errors.New("SetIfAbsent failed since key already exists")
-
-	// ErrThresholdZero is returned if threshold is set to zero, and value log GC is called.
-	// In such a case, GC can't be run.
-	ErrThresholdZero = errors.New(
-		"Value log GC can't run because threshold is set to zero")
-
-	// ErrNoRewrite is returned if a call for value log GC doesn't result in a log file rewrite.
-	ErrNoRewrite = errors.New(
-		"Value log GC attempt didn't result in any cleanup")
-
-	// ErrRejected is returned if a value log GC is called either while another GC is running, or
-	// after KV::Close has been called.
-	ErrRejected = errors.New("Value log GC request rejected")
-
-	// ErrInvalidRequest is returned if the user request is invalid.
-	ErrInvalidRequest = errors.New("Invalid request")
-)
-
-const maxKeySize = 1 << 20
 
 type logFile struct {
 	path string
@@ -204,6 +174,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		hash := crc32.New(y.CastagnoliCrcTable)
 		tee := io.TeeReader(reader, hash)
 
+		// TODO: Move this entry decode into structs.go
 		if _, err = io.ReadFull(tee, hbuf[:]); err != nil {
 			if err == io.EOF {
 				break
@@ -242,8 +213,6 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		}
 		e.Meta = h.meta
 		e.UserMeta = h.userMeta
-		e.casCounter = h.casCounter
-		e.CASCounterCheck = h.casCounterCheck
 		if _, err = io.ReadFull(tee, e.Value); err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				truncate = true
@@ -315,11 +284,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		if err != nil {
 			return err
 		}
-
-		if (vs.Meta & BitDelete) > 0 {
-			return nil
-		}
-		if (vs.Meta & BitValuePointer) == 0 {
+		if discardEntry(e, vs) {
 			return nil
 		}
 
@@ -339,34 +304,24 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		if vp.Fid == f.fid && vp.Offset == e.offset {
 			// This new entry only contains the key, and a pointer to the value.
 			ne := new(Entry)
-			if e.Meta == BitSetIfAbsent {
-				// If we rewrite this entry without removing BitSetIfAbsent, lsm would see that
-				// the key is already present, which would be this same entry and won't update
-				// the vptr to point to the new file.
-				e.Meta = 0
-			}
-			y.AssertTruef(e.Meta == 0, "Got meta: 0")
-			ne.Meta = e.Meta
+			ne.Meta = 0 // Remove all bits.
 			ne.UserMeta = e.UserMeta
 			ne.Key = make([]byte, len(e.Key))
 			copy(ne.Key, e.Key)
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
-			// CAS counter check. Do not rewrite if key has a newer value.
-			ne.CASCounterCheck = vs.CASCounter
 			wb = append(wb, ne)
 			size += int64(vlog.opt.estimateSize(ne))
 			if size >= 64*M {
 				elog.Printf("request has %d entries, size %d", len(wb), size)
-				if err := vlog.kv.BatchSet(wb); err != nil {
+				if err := vlog.kv.batchSet(wb); err != nil {
 					return err
 				}
 				size = 0
 				wb = wb[:0]
 			}
 		} else {
-			// This can now happen because we can move some entries forward, but then not write
-			// them to LSM tree due to CAS check failure.
+			log.Printf("WARNING: This entry should have been caught. %+v\n", e)
 		}
 		return nil
 	}
@@ -378,13 +333,30 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		return err
 	}
 
-	if len(wb) > 0 {
-		elog.Printf("request has %d entries, size %d", len(wb), size)
-		if err := vlog.kv.BatchSet(wb); err != nil {
+	elog.Printf("request has %d entries, size %d", len(wb), size)
+	batchSize := 1024
+	var loops int
+	for i := 0; i < len(wb); i += batchSize {
+		loops++
+		if batchSize == 0 {
+			log.Printf("WARNING: We shouldn't reach batch size of zero.")
+			return ErrNoRewrite
+		}
+		end := i + batchSize
+		if end > len(wb) {
+			end = len(wb)
+		}
+		if err := vlog.kv.batchSet(wb[i:end]); err != nil {
+			if err == ErrTxnTooBig {
+				// Decrease the batch size to half.
+				batchSize = batchSize / 2
+				elog.Printf("Dropped batch size to %d", batchSize)
+				continue
+			}
 			return err
 		}
 	}
-	elog.Printf("Processed %d entries in total", count)
+	elog.Printf("Processed %d entries in %d loops", len(wb), loops)
 
 	elog.Printf("Removing fid: %d", f.fid)
 	var deleteFileNow bool
@@ -452,127 +424,6 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 		return err
 	}
 	return os.Remove(path)
-}
-
-// Entry provides Key, Value and if required, CASCounterCheck to kv.BatchSet() API.
-// If CASCounterCheck is provided, it would be compared against the current casCounter
-// assigned to this key-value. Set be done on this key only if the counters match.
-type Entry struct {
-	Key             []byte
-	Meta            byte
-	UserMeta        byte
-	Value           []byte
-	CASCounterCheck uint64 // If nonzero, we will check if existing casCounter matches.
-	Error           error  // Error if any.
-
-	// Fields maintained internally.
-	offset     uint32
-	casCounter uint64
-}
-
-// Encodes e to buf. Returns number of bytes written.
-func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
-	var h header
-	h.klen = uint32(len(e.Key))
-	h.vlen = uint32(len(e.Value))
-	h.meta = e.Meta
-	h.userMeta = e.UserMeta
-	h.casCounter = e.casCounter
-	h.casCounterCheck = e.CASCounterCheck
-
-	var headerEnc [headerBufSize]byte
-	h.Encode(headerEnc[:])
-
-	hash := crc32.New(y.CastagnoliCrcTable)
-
-	buf.Write(headerEnc[:])
-	hash.Write(headerEnc[:])
-
-	buf.Write(e.Key)
-	hash.Write(e.Key)
-
-	buf.Write(e.Value)
-	hash.Write(e.Value)
-
-	var crcBuf [4]byte
-	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
-	buf.Write(crcBuf[:])
-
-	return len(headerEnc) + len(e.Key) + len(e.Value) + len(crcBuf), nil
-}
-
-func (e Entry) print(prefix string) {
-	fmt.Printf("%s Key: %s Meta: %d UserMeta: %d Offset: %d len(val)=%d cas=%d check=%d\n",
-		prefix, e.Key, e.Meta, e.UserMeta, e.offset, len(e.Value), e.casCounter, e.CASCounterCheck)
-}
-
-type header struct {
-	klen            uint32
-	vlen            uint32
-	meta            byte
-	userMeta        byte
-	casCounter      uint64
-	casCounterCheck uint64
-}
-
-const (
-	headerBufSize = 26
-)
-
-func (h header) Encode(out []byte) {
-	y.AssertTrue(len(out) >= headerBufSize)
-	binary.BigEndian.PutUint32(out[0:4], h.klen)
-	binary.BigEndian.PutUint32(out[4:8], h.vlen)
-	out[8] = h.meta
-	out[9] = h.userMeta
-	binary.BigEndian.PutUint64(out[10:18], h.casCounter)
-	binary.BigEndian.PutUint64(out[18:26], h.casCounterCheck)
-}
-
-// Decodes h from buf.
-func (h *header) Decode(buf []byte) {
-	h.klen = binary.BigEndian.Uint32(buf[0:4])
-	h.vlen = binary.BigEndian.Uint32(buf[4:8])
-	h.meta = buf[8]
-	h.userMeta = buf[9]
-	h.casCounter = binary.BigEndian.Uint64(buf[10:18])
-	h.casCounterCheck = binary.BigEndian.Uint64(buf[18:26])
-}
-
-type valuePointer struct {
-	Fid    uint32
-	Len    uint32
-	Offset uint32
-}
-
-func (p valuePointer) Less(o valuePointer) bool {
-	if p.Fid != o.Fid {
-		return p.Fid < o.Fid
-	}
-	if p.Offset != o.Offset {
-		return p.Offset < o.Offset
-	}
-	return p.Len < o.Len
-}
-
-func (p valuePointer) IsZero() bool {
-	return p.Fid == 0 && p.Offset == 0 && p.Len == 0
-}
-
-const valuePointerEncodedSize = 12
-
-// Encode encodes Pointer into byte buffer.
-func (p valuePointer) Encode(b []byte) []byte {
-	binary.BigEndian.PutUint32(b[:4], p.Fid)
-	binary.BigEndian.PutUint32(b[4:8], p.Len)
-	binary.BigEndian.PutUint32(b[8:valuePointerEncodedSize], p.Offset)
-	return b[:valuePointerEncodedSize]
-}
-
-func (p *valuePointer) Decode(b []byte) {
-	p.Fid = binary.BigEndian.Uint32(b[:4])
-	p.Len = binary.BigEndian.Uint32(b[4:8])
-	p.Offset = binary.BigEndian.Uint32(b[8:valuePointerEncodedSize])
 }
 
 type valueLog struct {
@@ -948,8 +799,6 @@ func valueBytesToEntry(buf []byte) (e Entry) {
 	n += h.klen
 	e.Meta = h.meta
 	e.UserMeta = h.userMeta
-	e.casCounter = h.casCounter
-	e.CASCounterCheck = h.casCounterCheck
 	e.Value = buf[n : n+h.vlen]
 	return
 }
@@ -967,6 +816,26 @@ func (vlog *valueLog) pickLog() *logFile {
 		idx = rand.Intn(idx) // Another level of rand to favor smaller fids.
 	}
 	return vlog.filesMap[fids[idx]]
+}
+
+func discardEntry(e Entry, vs y.ValueStruct) bool {
+	if vs.Version != y.ParseTs(e.Key) {
+		// Version not found. Discard.
+		return true
+	}
+	if (vs.Meta & BitDelete) > 0 {
+		// Key deleted. Discard.
+		return true
+	}
+	if (vs.Meta & BitValuePointer) == 0 {
+		// Key also stores the value in LSM. Discard.
+		return true
+	}
+	if (vs.Meta & BitFinTxn) > 0 {
+		// Just a txn finish entry. Discard.
+		return true
+	}
+	return false
 }
 
 func (vlog *valueLog) doRunGC(gcThreshold float64) error {
@@ -1014,20 +883,13 @@ func (vlog *valueLog) doRunGC(gcThreshold float64) error {
 		if err != nil {
 			return err
 		}
-		if (vs.Meta & BitDelete) > 0 {
-			// Key has been deleted. Discard.
-			r.discard += esz
-			return nil
-		}
-		if (vs.Meta & BitValuePointer) == 0 {
-			// Value is stored alongside key. Discard.
+		if discardEntry(e, vs) {
 			r.discard += esz
 			return nil
 		}
 
 		// Value is still present in value log.
 		y.AssertTrue(len(vs.Value) > 0)
-
 		vp.Decode(vs.Value)
 
 		if vp.Fid > lf.fid {
@@ -1050,13 +912,10 @@ func (vlog *valueLog) doRunGC(gcThreshold float64) error {
 			err := vlog.readValueBytes(vp, func(buf []byte) error {
 				ne := valueBytesToEntry(buf)
 				ne.offset = vp.Offset
-				if ne.casCounter == e.casCounter {
-					ne.print("Latest Entry Header in LSM")
-					e.print("Latest Entry in Log")
-					return errors.Errorf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.",
-						vp, vs.Meta)
-				}
-				return nil
+				ne.print("Latest Entry Header in LSM")
+				e.print("Latest Entry in Log")
+				return errors.Errorf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.",
+					vp, vs.Meta)
 			})
 			if err != nil {
 				return errStop

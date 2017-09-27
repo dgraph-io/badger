@@ -34,18 +34,17 @@ const (
 // KVItem is returned during iteration. Both the Key() and Value() output is only valid until
 // iterator.Next() is called.
 type KVItem struct {
-	status     prefetchStatus
-	err        error
-	wg         sync.WaitGroup
-	kv         *KV
-	key        []byte
-	vptr       []byte
-	meta       byte
-	userMeta   byte
-	val        []byte
-	casCounter uint64   // TODO: Rename to version ts.
-	slice      *y.Slice // Used only during prefetching.
-	next       *KVItem
+	status   prefetchStatus
+	err      error
+	wg       sync.WaitGroup
+	kv       *KV
+	key      []byte
+	vptr     []byte
+	meta     byte
+	userMeta byte
+	val      []byte
+	slice    *y.Slice // Used only during prefetching.
+	next     *KVItem
 }
 
 // Key returns the key. Remember to copy if you need to access it outside the iteration loop.
@@ -116,10 +115,9 @@ func (item *KVItem) EstimatedSize() int64 {
 	return int64(vp.Len) // includes key length.
 }
 
-// Counter returns the CAS counter associated with the value.
-// TODO: Make this version.
-func (item *KVItem) Counter() uint64 {
-	return item.casCounter
+// Version returns the commit timestamp of the item.
+func (item *KVItem) Version() uint64 {
+	return y.ParseTs(item.key)
 }
 
 // UserMeta returns the userMeta set by the user. Typically, this byte, optionally set by the user
@@ -322,7 +320,6 @@ func (it *Iterator) fill(item *KVItem) {
 	vs := it.iitr.Value()
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta
-	item.casCounter = vs.CASCounter
 	item.key = y.Safecopy(item.key, it.iitr.Key())
 	item.vptr = y.Safecopy(item.vptr, vs.Value)
 	item.val = nil
