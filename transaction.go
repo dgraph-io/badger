@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/dgraph-io/badger/y"
 	farm "github.com/dgryski/go-farm"
@@ -43,7 +44,7 @@ func (u *uint64Heap) Pop() interface{} {
 }
 
 type globalTxnState struct {
-	sync.RWMutex
+	sync.Mutex
 	curRead    uint64
 	nextCommit uint64
 
@@ -57,17 +58,14 @@ type globalTxnState struct {
 }
 
 func (gs *globalTxnState) readTs() uint64 {
-	gs.RLock()
-	defer gs.RUnlock()
-	return gs.curRead
+	return atomic.LoadUint64(&gs.curRead)
 }
 
+// hasConflict must be called while having a lock.
 func (gs *globalTxnState) hasConflict(txn *Txn) bool {
 	if len(txn.reads) == 0 {
 		return false
 	}
-	gs.RLock()
-	defer gs.RUnlock()
 	for _, ro := range txn.reads {
 		if ts, has := gs.commits[ro]; has && ts > txn.readTs {
 			return true
@@ -77,13 +75,12 @@ func (gs *globalTxnState) hasConflict(txn *Txn) bool {
 }
 
 func (gs *globalTxnState) newCommitTs(txn *Txn) uint64 {
-	if gs.hasConflict(txn) {
-		return 0
-	}
-
 	gs.Lock()
 	defer gs.Unlock()
 
+	if gs.hasConflict(txn) {
+		return 0
+	}
 	ts := gs.nextCommit
 	for _, w := range txn.writes {
 		gs.commits[w] = ts // Update the commitTs.
@@ -98,14 +95,14 @@ func (gs *globalTxnState) newCommitTs(txn *Txn) uint64 {
 	return ts
 }
 
-func (gs *globalTxnState) doneCommit(ts uint64) {
+func (gs *globalTxnState) doneCommit(cts uint64) {
 	gs.Lock()
 	defer gs.Unlock()
 
-	if _, has := gs.pendingCommits[ts]; !has {
-		panic(fmt.Sprintf("We should already have the commit ts: %d", ts))
+	if _, has := gs.pendingCommits[cts]; !has {
+		panic(fmt.Sprintf("We should already have the commit ts: %d", cts))
 	}
-	delete(gs.pendingCommits, ts)
+	delete(gs.pendingCommits, cts)
 
 	var min uint64
 	for len(gs.commitMark) > 0 {
@@ -120,7 +117,7 @@ func (gs *globalTxnState) doneCommit(ts uint64) {
 	if min == 0 {
 		return
 	}
-	gs.curRead = min
+	atomic.StoreUint64(&gs.curRead, min)
 	gs.nextCommit = min + 1
 }
 
@@ -131,7 +128,7 @@ type Txn struct {
 	reads  []uint64 // contains fingerprints of keys read.
 	writes []uint64 // contains fingerprints of keys written.
 
-	cache map[uint64]*Entry // cache stores any writes done by txn.
+	pendingWrites map[uint64]*Entry // cache stores any writes done by txn.
 
 	gs *globalTxnState
 	kv *KV
@@ -146,7 +143,7 @@ func (txn *Txn) Set(key, val []byte, userMeta byte) {
 		Value:    val,
 		UserMeta: userMeta,
 	}
-	txn.cache[fp] = e
+	txn.pendingWrites[fp] = e
 }
 
 func (txn *Txn) Delete(key []byte) {
@@ -157,13 +154,13 @@ func (txn *Txn) Delete(key []byte) {
 		Key:  key,
 		Meta: BitDelete,
 	}
-	txn.cache[fp] = e
+	txn.pendingWrites[fp] = e
 }
 
 func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 	if txn.update {
 		fp := farm.Fingerprint64(key)
-		if e, has := txn.cache[fp]; has && bytes.Compare(key, e.Key) == 0 {
+		if e, has := txn.pendingWrites[fp]; has && bytes.Compare(key, e.Key) == 0 {
 			// Fulfill from cache.
 			item.val = e.Value
 			item.userMeta = e.UserMeta
@@ -202,8 +199,8 @@ func (txn *Txn) Commit() error {
 	}
 	defer txn.gs.doneCommit(commitTs)
 
-	var entries []*Entry
-	for _, e := range txn.cache {
+	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
+	for _, e := range txn.pendingWrites {
 		// Suffix the keys with commit ts, so the key versions are sorted in
 		// descending order of commit timestamp.
 		e.Key = y.KeyWithTs(e.Key, commitTs)
@@ -259,11 +256,11 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 }
 func (kv *KV) NewTransaction(update bool) (*Txn, error) {
 	txn := &Txn{
-		update: update,
-		gs:     kv.txnState,
-		kv:     kv,
-		readTs: kv.txnState.readTs(),
-		cache:  make(map[uint64]*Entry),
+		update:        update,
+		gs:            kv.txnState,
+		kv:            kv,
+		readTs:        kv.txnState.readTs(),
+		pendingWrites: make(map[uint64]*Entry),
 	}
 
 	return txn, nil
