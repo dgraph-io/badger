@@ -18,7 +18,6 @@ package badger
 
 import (
 	"bytes"
-	"fmt"
 	"sync"
 
 	"github.com/dgraph-io/badger/y"
@@ -245,23 +244,21 @@ func (it *Iterator) Next() {
 
 // This function should advance the iterator.
 func (it *Iterator) parseItem() bool {
-	fmt.Println("parseItem")
 	mi := it.iitr
 	key := mi.Key()
 	if bytes.HasPrefix(key, badgerPrefix) {
-		it.Next()
+		mi.Next()
 		return false
 	}
+
 	version := y.ParseTs(key)
 	if version > it.readTs {
 		mi.Next()
-		fmt.Printf("version %d is greater for key: %q\n", version, y.ParseKey(key))
 		return false
 	}
 	if !it.opt.Reverse {
 		if y.SameKey(it.lastKey, key) {
 			mi.Next()
-			fmt.Printf("same key: %q %q\n", y.ParseKey(it.lastKey), y.ParseKey(key))
 			return false
 		}
 		// Only track in forward direction.
@@ -271,30 +268,32 @@ func (it *Iterator) parseItem() bool {
 		// which is wrong. Therefore, update lastKey here.
 		it.lastKey = y.Safecopy(it.lastKey, mi.Key())
 	}
+FILL:
 	if mi.Value().Meta&BitDelete > 0 { // Deleted.
-		fmt.Println("deleted value")
 		mi.Next()
 		return false
 	}
 
 	item := it.newItem()
-FILL:
 	it.fill(item)
-	fmt.Printf("fill item: %+v\n", item)
-	if it.item == nil {
-		it.item = item
-	} else {
-		it.data.push(item)
-	}
 	mi.Next()
 	if !it.opt.Reverse || !mi.Valid() { // Forward direction, or invalid.
+		if it.item == nil {
+			it.item = item
+		} else {
+			it.data.push(item)
+		}
 		return true
 	}
 	// Reverse direction.
 	nextTs := y.ParseTs(mi.Key())
 	if nextTs <= it.readTs && y.SameKey(mi.Key(), item.key) {
-		mi.Next()
 		goto FILL
+	}
+	if it.item == nil {
+		it.item = item
+	} else {
+		it.data.push(item)
 	}
 	return true
 }
