@@ -386,7 +386,7 @@ func (itr *Iterator) Key() []byte {
 
 // Value follows the y.Iterator interface
 func (itr *Iterator) Value() (ret y.ValueStruct) {
-	ret.DecodeEntireSlice(itr.bi.Value())
+	ret.Decode(itr.bi.Value())
 	return
 }
 

@@ -102,7 +102,7 @@ var DefaultOptions = Options{
 
 func (opt *Options) estimateSize(entry *Entry) int {
 	if len(entry.Value) < opt.ValueThreshold {
-		return len(entry.Key) + len(entry.Value) + y.MetaSize + y.UserMetaSize + y.CasSize
+		return len(entry.Key) + len(entry.Value) + y.MetaSize + y.UserMetaSize
 	}
-	return len(entry.Key) + 16 + y.MetaSize + y.UserMetaSize + y.CasSize
+	return len(entry.Key) + 16 + y.MetaSize + y.UserMetaSize
 }

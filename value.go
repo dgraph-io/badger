@@ -41,46 +41,11 @@ import (
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete       byte  = 1 // Set if the key has been deleted.
-	BitValuePointer byte  = 2 // Set if the value is NOT stored directly next to key.
-	BitUnused       byte  = 4
-	BitSetIfAbsent  byte  = 8  // Set if the key is set using SetIfAbsent.
+	BitDelete       byte  = 1  // Set if the key has been deleted.
+	BitValuePointer byte  = 2  // Set if the value is NOT stored directly next to key.
 	BitFinTxn       byte  = 16 // Set if the entry is to indicate end of txn in value log.
 	M               int64 = 1 << 20
 )
-
-var (
-	// ErrRetry is returned when a log file containing the value is not found.
-	// This usually indicates that it may have been garbage collected, and the
-	// operation needs to be retried.
-	ErrRetry = errors.New("Unable to find log file. Please retry")
-
-	// ErrCasMismatch is returned when a CompareAndSet operation has failed due
-	// to a counter mismatch.
-	ErrCasMismatch = errors.New("CompareAndSet failed due to counter mismatch")
-
-	// ErrKeyExists is returned by SetIfAbsent metadata bit is set, but the
-	// key already exists in the store.
-	ErrKeyExists = errors.New("SetIfAbsent failed since key already exists")
-
-	// ErrThresholdZero is returned if threshold is set to zero, and value log GC is called.
-	// In such a case, GC can't be run.
-	ErrThresholdZero = errors.New(
-		"Value log GC can't run because threshold is set to zero")
-
-	// ErrNoRewrite is returned if a call for value log GC doesn't result in a log file rewrite.
-	ErrNoRewrite = errors.New(
-		"Value log GC attempt didn't result in any cleanup")
-
-	// ErrRejected is returned if a value log GC is called either while another GC is running, or
-	// after KV::Close has been called.
-	ErrRejected = errors.New("Value log GC request rejected")
-
-	// ErrInvalidRequest is returned if the user request is invalid.
-	ErrInvalidRequest = errors.New("Invalid request")
-)
-
-const maxKeySize = 1 << 20
 
 type logFile struct {
 	path string
@@ -242,8 +207,6 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		}
 		e.Meta = h.meta
 		e.UserMeta = h.userMeta
-		e.casCounter = h.casCounter
-		e.CASCounterCheck = h.casCounterCheck
 		if _, err = io.ReadFull(tee, e.Value); err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				truncate = true
@@ -311,15 +274,20 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			elog.Printf("Processing entry %d", count)
 		}
 
-		vs, err := vlog.kv.get(e.Key)
+		next, vs, err := vlog.kv.get(e.Key)
 		if err != nil {
 			return err
 		}
-
+		if !bytes.Equal(next, e.Key) {
+			// Key not found in LSM. Don't rewrite it.
+			return nil
+		}
 		if (vs.Meta & BitDelete) > 0 {
+			// Key deleted. Don't rewrite it.
 			return nil
 		}
 		if (vs.Meta & BitValuePointer) == 0 {
+			// Key also stores the value in LSM. Don't rewrite it.
 			return nil
 		}
 
@@ -339,12 +307,6 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		if vp.Fid == f.fid && vp.Offset == e.offset {
 			// This new entry only contains the key, and a pointer to the value.
 			ne := new(Entry)
-			if e.Meta == BitSetIfAbsent {
-				// If we rewrite this entry without removing BitSetIfAbsent, lsm would see that
-				// the key is already present, which would be this same entry and won't update
-				// the vptr to point to the new file.
-				e.Meta = 0
-			}
 			y.AssertTruef(e.Meta == 0, "Got meta: 0")
 			ne.Meta = e.Meta
 			ne.UserMeta = e.UserMeta
@@ -458,16 +420,14 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 // If CASCounterCheck is provided, it would be compared against the current casCounter
 // assigned to this key-value. Set be done on this key only if the counters match.
 type Entry struct {
-	Key             []byte
-	Meta            byte
-	UserMeta        byte
-	Value           []byte
-	CASCounterCheck uint64 // If nonzero, we will check if existing casCounter matches.
-	Error           error  // Error if any.
+	Key      []byte
+	Meta     byte
+	UserMeta byte
+	Value    []byte
 
 	// Fields maintained internally.
-	offset     uint32
-	casCounter uint64
+	offset uint32
+	// casCounter uint64
 }
 
 // Encodes e to buf. Returns number of bytes written.
@@ -506,17 +466,16 @@ func (e Entry) print(prefix string) {
 		prefix, e.Key, e.Meta, e.UserMeta, e.offset, len(e.Value), e.casCounter, e.CASCounterCheck)
 }
 
+// header is used in value log as a header
 type header struct {
-	klen            uint32
-	vlen            uint32
-	meta            byte
-	userMeta        byte
-	casCounter      uint64
-	casCounterCheck uint64
+	klen     uint32
+	vlen     uint32
+	meta     byte
+	userMeta byte
 }
 
 const (
-	headerBufSize = 26
+	headerBufSize = 10
 )
 
 func (h header) Encode(out []byte) {
@@ -525,8 +484,6 @@ func (h header) Encode(out []byte) {
 	binary.BigEndian.PutUint32(out[4:8], h.vlen)
 	out[8] = h.meta
 	out[9] = h.userMeta
-	binary.BigEndian.PutUint64(out[10:18], h.casCounter)
-	binary.BigEndian.PutUint64(out[18:26], h.casCounterCheck)
 }
 
 // Decodes h from buf.
@@ -535,8 +492,6 @@ func (h *header) Decode(buf []byte) {
 	h.vlen = binary.BigEndian.Uint32(buf[4:8])
 	h.meta = buf[8]
 	h.userMeta = buf[9]
-	h.casCounter = binary.BigEndian.Uint64(buf[10:18])
-	h.casCounterCheck = binary.BigEndian.Uint64(buf[18:26])
 }
 
 type valuePointer struct {

@@ -118,7 +118,7 @@ func (gs *globalTxnState) doneCommit(cts uint64) {
 		return
 	}
 	atomic.StoreUint64(&gs.curRead, min)
-	gs.nextCommit = min + 1
+	// nextCommit must never be reset.
 }
 
 type Txn struct {
@@ -134,7 +134,25 @@ type Txn struct {
 	kv *KV
 }
 
-func (txn *Txn) Set(key, val []byte, userMeta byte) {
+// Set sets the provided value for a given key. If key is not present, it is created.  If it is
+// present, a new version is created at commit timestamp.
+// Along with key and value, Set can also take an optional userMeta byte. This byte is stored
+// alongside the key, and can be used as an aid to interpret the value or store other contextual
+// bits corresponding to the key-value pair.
+// If this is not an update transaction, Set would be a NOOP.
+// This would fail with ErrReadOnlyTxn if update flag was set to false when creating this
+// transaction.
+func (txn *Txn) Set(key, val []byte, userMeta byte) error {
+	if !txn.update {
+		return ErrReadOnlyTxn
+	} else if len(key) == 0 {
+		return ErrEmptyKey
+	} else if len(key) > maxKeySize {
+		return exceedsMaxKeySizeError(key)
+	} else if int64(len(val)) > txn.kv.opt.ValueLogFileSize {
+		return exceedsMaxValueSizeError(val, txn.kv.opt.ValueLogFileSize)
+	}
+
 	fp := farm.Fingerprint64(key) // Avoid dealing with byte arrays.
 	txn.writes = append(txn.writes, fp)
 
@@ -144,9 +162,21 @@ func (txn *Txn) Set(key, val []byte, userMeta byte) {
 		UserMeta: userMeta,
 	}
 	txn.pendingWrites[string(key)] = e
+	return nil
 }
 
-func (txn *Txn) Delete(key []byte) {
+// Delete deletes a key. This is done by adding a delete marker for the key at commit timestamp.
+// Any reads happening before this timestamp would be unaffected. Any reads after this commit would
+// see the deletion.
+func (txn *Txn) Delete(key []byte) error {
+	if !txn.update {
+		return ErrReadOnlyTxn
+	} else if len(key) == 0 {
+		return ErrEmptyKey
+	} else if len(key) > maxKeySize {
+		return exceedsMaxKeySizeError(key)
+	}
+
 	fp := farm.Fingerprint64(key) // Avoid dealing with byte arrays.
 	txn.writes = append(txn.writes, fp)
 
@@ -155,8 +185,11 @@ func (txn *Txn) Delete(key []byte) {
 		Meta: BitDelete,
 	}
 	txn.pendingWrites[string(key)] = e
+	return nil
 }
 
+// Get looks for key and returns a KVItem.
+// If key is not found, item.Value() is nil.
 func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 	if txn.update {
 		if e, has := txn.pendingWrites[string(key)]; has && bytes.Compare(key, e.Key) == 0 {
@@ -174,30 +207,44 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 	}
 
 	seek := y.KeyWithTs(key, txn.readTs)
-	vs, err := txn.kv.get(seek)
+	next, vs, err := txn.kv.get(seek)
 	if err != nil {
 		return item, errors.Wrapf(err, "KV::Get key: %q", key)
+	}
+	if vs.Value == nil && vs.Meta == 0 {
+		return item, ErrKeyNotFound
+	}
+	if (vs.Meta & BitDelete) != 0 {
+		return item, ErrKeyNotFound
 	}
 
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta
-	item.casCounter = vs.CASCounter
-	item.key = key
+	item.key = next
 	item.kv = txn.kv
 	item.vptr = vs.Value
 	return item, nil
 }
 
-var errConflict = errors.New("Transaction Conflict. Please retry.")
-
-func (txn *Txn) Commit() error {
+// Commit commits the transaction, following these steps:
+// 1. If there are no writes, return immediately.
+// 2. Check if read rows were updated since txn started. If so, return ErrConflict.
+// 3. If no conflict, generate a commit timestamp and update written rows' commit ts.
+// 4. Batch up all writes, write them to value log and LSM tree.
+// 5. If callback is provided, don't block on these writes, running this part asynchronously. The
+// callback would be run once writes are done, along with any errors.
+//
+// If error is nil, the transaction is successfully committed. Else, Badger would automatically
+// rollback the transaction, removing any writes from LSM tree. Note that the writes might be
+// present on value log, but those can be garbage collected later.
+func (txn *Txn) Commit(callback func(error)) error {
 	if len(txn.writes) == 0 {
 		return nil // Read only transaction.
 	}
 
 	commitTs := txn.gs.newCommitTs(txn)
 	if commitTs == 0 {
-		return errConflict
+		return ErrConflict
 	}
 	defer txn.gs.doneCommit(commitTs)
 
@@ -215,7 +262,22 @@ func (txn *Txn) Commit() error {
 		Meta:  BitFinTxn,
 	}
 	entries = append(entries, entry)
-	return txn.kv.BatchSet(entries)
+	if callback == nil {
+		err := txn.kv.batchSet(entries)
+		if err != nil {
+			// TODO: Run cleanup.
+		}
+		return err
+	}
+
+	cb := func(err error) {
+		if err != nil {
+			// TODO: Run cleanup.
+		}
+		callback(err)
+	}
+	txn.kv.batchSetAsync(entries, callback)
+	return nil
 }
 
 // NewIterator returns a new iterator. Depending upon the options, either only keys, or both
@@ -262,7 +324,7 @@ func (kv *KV) NewTransaction(update bool) (*Txn, error) {
 		gs:            kv.txnState,
 		kv:            kv,
 		readTs:        kv.txnState.readTs(),
-		pendingWrites: make(map[uint64]*Entry),
+		pendingWrites: make(map[string]*Entry),
 	}
 
 	return txn, nil

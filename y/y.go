@@ -31,7 +31,6 @@ import (
 const (
 	MetaSize     = 1
 	UserMetaSize = 1
-	CasSize      = 8
 )
 
 // ErrEOF indicates an end of file when trying to read from a memory mapped file

@@ -109,7 +109,7 @@ func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 	node.keyOffset = arena.putKey(key)
 	node.keySize = uint16(len(key))
 	node.height = uint16(height)
-	node.value = encodeValue(arena.putVal(v), uint16(len(v.Value)))
+	node.value = encodeValue(arena.putVal(v), uint16(v.EncodedSize()))
 	return node
 }
 
@@ -373,16 +373,17 @@ func (s *Skiplist) findLast() *node {
 
 // Get gets the value associated with the key. It returns a valid value if it finds equal or earlier
 // version of the same key.
-func (s *Skiplist) Get(key []byte) y.ValueStruct {
+func (s *Skiplist) Get(key []byte) (next []byte, res y.ValueStruct) {
 	n, _ := s.findNear(key, false, true) // findGreaterOrEqual.
 	if n == nil {
-		return y.ValueStruct{}
+		return nil, y.ValueStruct{}
 	}
 	valOffset, valSize := n.getValueOffset()
-	if !y.SameKey(key, s.arena.getKey(n.keyOffset, n.keySize)) {
-		return y.ValueStruct{}
+	nextKey := s.arena.getKey(n.keyOffset, n.keySize)
+	if !y.SameKey(key, nextKey) {
+		return nil, y.ValueStruct{}
 	}
-	return s.arena.getVal(valOffset, valSize)
+	return nextKey, s.arena.getVal(valOffset, valSize)
 }
 
 // NewIterator returns a skiplist iterator.  You have to Close() the iterator.
