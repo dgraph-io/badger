@@ -117,7 +117,7 @@ func TestValueGC(t *testing.T) {
 			Value: v,
 		})
 	}
-	kv.BatchSet(entries)
+	kv.batchSet(entries)
 	for _, e := range entries {
 		require.NoError(t, e.Error, "entry with error: %+v", e)
 	}

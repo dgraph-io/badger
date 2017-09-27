@@ -256,8 +256,9 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 			continue
 		}
 		if y.SameKey(key, it.Key()) {
-			// TODO: Update the CASCounter timestamp entry to embed key version.
-			return it.Value(), decr()
+			vs := it.Value()
+			vs.Version = y.ParseTs(it.Key())
+			return vs, decr()
 		}
 	}
 	return y.ValueStruct{}, decr()

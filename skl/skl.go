@@ -109,7 +109,7 @@ func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 	node.keyOffset = arena.putKey(key)
 	node.keySize = uint16(len(key))
 	node.height = uint16(height)
-	node.value = encodeValue(arena.putVal(v), uint16(len(v.Value)))
+	node.value = encodeValue(arena.putVal(v), uint16(v.EncodedSize()))
 	return node
 }
 
@@ -379,10 +379,13 @@ func (s *Skiplist) Get(key []byte) y.ValueStruct {
 		return y.ValueStruct{}
 	}
 	valOffset, valSize := n.getValueOffset()
-	if !y.SameKey(key, s.arena.getKey(n.keyOffset, n.keySize)) {
+	nextKey := s.arena.getKey(n.keyOffset, n.keySize)
+	if !y.SameKey(key, nextKey) {
 		return y.ValueStruct{}
 	}
-	return s.arena.getVal(valOffset, valSize)
+	vs := s.arena.getVal(valOffset, valSize)
+	vs.Version = y.ParseTs(nextKey)
+	return vs
 }
 
 // NewIterator returns a skiplist iterator.  You have to Close() the iterator.
