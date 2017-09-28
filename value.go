@@ -768,7 +768,7 @@ func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 	var err error
 	last := vlog.filesMap[vlog.maxFid]
 	lastOffset, err := last.fd.Seek(0, io.SeekEnd)
-	vlog.writableLogOffset = uint32(lastOffset)
+	atomic.AddUint32(&vlog.writableLogOffset, uint32(lastOffset))
 	return errors.Wrapf(err, "Unable to seek to end of value log: %q", last.path)
 }
 
@@ -807,6 +807,10 @@ func (vlog *valueLog) sync() error {
 	return err
 }
 
+func (vlog *valueLog) writableOffset() uint32 {
+	return atomic.LoadUint32(&vlog.writableLogOffset)
+}
+
 // write is thread-unsafe by design and should not be called concurrently.
 func (vlog *valueLog) write(reqs []*request) error {
 	vlog.filesLock.RLock()
@@ -825,10 +829,10 @@ func (vlog *valueLog) write(reqs []*request) error {
 		y.NumWrites.Add(1)
 		y.NumBytesWritten.Add(int64(n))
 		vlog.elog.Printf("Done")
-		vlog.writableLogOffset += uint32(n)
+		atomic.AddUint32(&vlog.writableLogOffset, uint32(n))
 		vlog.buf.Reset()
 
-		if vlog.writableLogOffset > uint32(vlog.opt.ValueLogFileSize) {
+		if vlog.writableOffset() > uint32(vlog.opt.ValueLogFileSize) {
 			var err error
 			if err = curlf.doneWriting(vlog.writableLogOffset); err != nil {
 				return err
@@ -865,7 +869,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 			p.Fid = curlf.fid
 			// Use the offset including buffer length so far.
-			p.Offset = vlog.writableLogOffset + uint32(vlog.buf.Len())
+			p.Offset = vlog.writableOffset() + uint32(vlog.buf.Len())
 			plen, err := encodeEntry(e, &vlog.buf) // Now encode the entry into buffer.
 			if err != nil {
 				return err
@@ -903,10 +907,10 @@ func (vlog *valueLog) getFileRLocked(fid uint32) (*logFile, error) {
 // Read reads the value log at a given location.
 func (vlog *valueLog) Read(vp valuePointer, consumer func([]byte) error) error {
 	// Check for valid offset if we are reading to writable log.
-	if vp.Fid == vlog.maxFid && vp.Offset >= vlog.writableLogOffset {
+	if vp.Fid == vlog.maxFid && vp.Offset >= vlog.writableOffset() {
 		return errors.Errorf(
 			"Invalid value pointer offset: %d greater than current offset: %d",
-			vp.Offset, vlog.writableLogOffset)
+			vp.Offset, vlog.writableOffset())
 	}
 
 	fn := func(buf []byte) error {

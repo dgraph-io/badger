@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"crypto/rand"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -939,4 +940,60 @@ func TestSetIfAbsentAsync(t *testing.T) {
 	}
 	require.Equal(t, n, count)
 	require.NoError(t, kv.Close())
+}
+
+func TestGetSetRace(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, _ := NewKV(getTestOptions(dir))
+
+	data := make([]byte, 4096)
+	_, err = rand.Read(data)
+	require.NoError(t, err)
+
+	var (
+		numOp = 100
+		wg    sync.WaitGroup
+		keyCh = make(chan string)
+	)
+
+	// writer
+	wg.Add(1)
+	go func() {
+		defer func() {
+			wg.Done()
+			close(keyCh)
+		}()
+
+		for i := 0; i < numOp; i++ {
+			key := fmt.Sprintf("%d", i)
+			err = kv.Set([]byte(key), data, 0x00)
+			require.NoError(t, err)
+			keyCh <- key
+		}
+	}()
+
+	// reader
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		for key := range keyCh {
+			var item KVItem
+
+			err := kv.Get([]byte(key), &item)
+			require.NoError(t, err)
+
+			var val []byte
+			err = item.Value(func(v []byte) error {
+				val = make([]byte, len(v))
+				copy(val, v)
+				return nil
+			})
+			require.NoError(t, err)
+		}
+	}()
+
+	wg.Wait()
 }
