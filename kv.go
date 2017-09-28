@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"container/heap"
 	"encoding/hex"
 	"expvar"
 	"log"
@@ -37,6 +38,7 @@ import (
 var (
 	badgerPrefix = []byte("!badger!")     // Prefix for internal keys used by badger.
 	head         = []byte("!badger!head") // For storing value offset for replay.
+	txnKey       = []byte("!badger!txn")  // For indicating end of entries in txn.
 )
 
 type closers struct {
@@ -71,6 +73,8 @@ type KV struct {
 	// Incremented in the non-concurrently accessed write loop.  But also accessed outside. So
 	// we use an atomic op.
 	lastUsedCasCounter uint64
+
+	txnState *globalTxnState
 }
 
 // ErrInvalidDir is returned when Badger cannot find the directory
@@ -154,6 +158,13 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		}
 	}()
 
+	gs := &globalTxnState{
+		nextCommit:     1,
+		pendingCommits: make(map[uint64]struct{}),
+		commits:        make(map[uint64]uint64),
+	}
+	heap.Init(&gs.commitMark)
+
 	out = &KV{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
@@ -163,6 +174,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		elog:          trace.NewEventLog("Badger", "KV"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
+		txnState:      gs,
 	}
 
 	out.closers.updateSize = y.NewCloser(1)
@@ -457,6 +469,7 @@ func (s *KV) get(key []byte) (y.ValueStruct, error) {
 
 // Get looks for key and returns a KVItem.
 // If key is not found, item.Value() is nil.
+// TODO: Remove.
 func (s *KV) Get(key []byte, item *KVItem) error {
 	vs, err := s.get(key)
 	if err != nil {
