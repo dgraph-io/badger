@@ -128,7 +128,7 @@ type Txn struct {
 	reads  []uint64 // contains fingerprints of keys read.
 	writes []uint64 // contains fingerprints of keys written.
 
-	pendingWrites map[uint64]*Entry // cache stores any writes done by txn.
+	pendingWrites map[string]*Entry // cache stores any writes done by txn.
 
 	gs *globalTxnState
 	kv *KV
@@ -143,7 +143,7 @@ func (txn *Txn) Set(key, val []byte, userMeta byte) {
 		Value:    val,
 		UserMeta: userMeta,
 	}
-	txn.pendingWrites[fp] = e
+	txn.pendingWrites[string(key)] = e
 }
 
 func (txn *Txn) Delete(key []byte) {
@@ -154,20 +154,22 @@ func (txn *Txn) Delete(key []byte) {
 		Key:  key,
 		Meta: BitDelete,
 	}
-	txn.pendingWrites[fp] = e
+	txn.pendingWrites[string(key)] = e
 }
 
 func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 	if txn.update {
-		fp := farm.Fingerprint64(key)
-		if e, has := txn.pendingWrites[fp]; has && bytes.Compare(key, e.Key) == 0 {
+		if e, has := txn.pendingWrites[string(key)]; has && bytes.Compare(key, e.Key) == 0 {
 			// Fulfill from cache.
+			item.meta = e.Meta
 			item.val = e.Value
 			item.userMeta = e.UserMeta
 			item.key = key
 			item.status = prefetched
+			// We probably don't need to set KV on item here.
 			return item, nil
 		}
+		fp := farm.Fingerprint64(key)
 		txn.reads = append(txn.reads, fp)
 	}
 
