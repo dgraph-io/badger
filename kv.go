@@ -255,6 +255,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 				toLSM(t.nk, t.v)
 			}
 			txn = txn[:0]
+			lastCommit = 0
 
 		} else if e.Meta&BitTxn == 0 {
 			// This entry is from a rewrite.

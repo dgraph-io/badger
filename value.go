@@ -336,7 +336,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	elog.Printf("request has %d entries, size %d", len(wb), size)
 	batchSize := 1024
 	var loops int
-	for i := 0; i < len(wb); i += batchSize {
+	for i := 0; i < len(wb); {
 		loops++
 		if batchSize == 0 {
 			log.Printf("WARNING: We shouldn't reach batch size of zero.")
@@ -355,6 +355,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			}
 			return err
 		}
+		i += batchSize
 	}
 	elog.Printf("Processed %d entries in %d loops", len(wb), loops)
 
