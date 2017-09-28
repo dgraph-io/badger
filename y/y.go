@@ -27,13 +27,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Constants used in serialization sizes, and in ValueStruct serialization
-const (
-	MetaSize     = 1
-	UserMetaSize = 1
-	CasSize      = 8
-)
-
 // ErrEOF indicates an end of file when trying to read from a memory mapped file
 // and encountering the end of slice.
 var ErrEOF = errors.New("End of mapped region")
