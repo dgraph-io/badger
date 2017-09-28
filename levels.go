@@ -663,7 +663,9 @@ func (s *levelsController) get(key []byte) (y.ValueStruct, error) {
 	// read level L's tables post-compaction and level L+1's tables pre-compaction.  (If we do
 	// parallelize this, we will need to call the h.RLock() function by increasing order of level
 	// number.)
-	for _, h := range s.levels {
+
+	var maxVs y.ValueStruct
+	for l, h := range s.levels {
 		vs, err := h.get(key) // Calls h.RLock() and h.RUnlock().
 		if err != nil {
 			return y.ValueStruct{}, errors.Wrapf(err, "get key: %q", key)
@@ -671,9 +673,14 @@ func (s *levelsController) get(key []byte) (y.ValueStruct, error) {
 		if vs.Value == nil && vs.Meta == 0 {
 			continue
 		}
-		return vs, nil
+		if l == 0 {
+			return vs, nil
+		}
+		if maxVs.Version < vs.Version {
+			maxVs = vs
+		}
 	}
-	return y.ValueStruct{}, nil
+	return maxVs, nil
 }
 
 func appendIteratorsReversed(out []y.Iterator, th []*table.Table, reversed bool) []y.Iterator {

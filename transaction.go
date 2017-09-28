@@ -204,6 +204,7 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 			item.userMeta = e.UserMeta
 			item.key = key
 			item.status = prefetched
+			item.version = txn.readTs
 			// We probably don't need to set KV on item here.
 			return item, nil
 		}
@@ -225,9 +226,10 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 		return item, ErrKeyNotFound
 	}
 
+	item.key = key
+	item.version = vs.Version
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta
-	item.key = key
 	item.kv = txn.kv
 	item.vptr = vs.Value
 	return item, nil

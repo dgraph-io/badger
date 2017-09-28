@@ -240,12 +240,12 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getTableForKey(key)
 
 	for _, th := range tables {
-		if th.DoesNotHave(key) {
-			// TODO: Only check the prefix, not suffix in blooms.
-			// TODO: This is important.
-			y.NumLSMBloomHits.Add(s.strLevel, 1)
-			continue
-		}
+		// if th.DoesNotHave(key) {
+		// 	// TODO: Only check the prefix, not suffix in blooms.
+		// 	// TODO: This is important.
+		// 	y.NumLSMBloomHits.Add(s.strLevel, 1)
+		// 	continue
+		// }
 
 		it := th.NewIterator(false)
 		defer it.Close()
