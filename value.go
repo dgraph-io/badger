@@ -274,12 +274,12 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			elog.Printf("Processing entry %d", count)
 		}
 
-		next, vs, err := vlog.kv.get(e.Key)
+		vs, err := vlog.kv.get(e.Key)
 		if err != nil {
 			return err
 		}
-		if !bytes.Equal(next, e.Key) {
-			// Key not found in LSM. Don't rewrite it.
+		if vs.Version != y.ParseTs(e.Key) {
+			// Same version not found in LSM. Don't rewrite it.
 			return nil
 		}
 		if (vs.Meta & BitDelete) > 0 {
@@ -314,13 +314,11 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			copy(ne.Key, e.Key)
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
-			// CAS counter check. Do not rewrite if key has a newer value.
-			ne.CASCounterCheck = vs.CASCounter
 			wb = append(wb, ne)
 			size += int64(vlog.opt.estimateSize(ne))
 			if size >= 64*M {
 				elog.Printf("request has %d entries, size %d", len(wb), size)
-				if err := vlog.kv.BatchSet(wb); err != nil {
+				if err := vlog.kv.batchSet(wb); err != nil {
 					return err
 				}
 				size = 0
@@ -342,7 +340,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 
 	if len(wb) > 0 {
 		elog.Printf("request has %d entries, size %d", len(wb), size)
-		if err := vlog.kv.BatchSet(wb); err != nil {
+		if err := vlog.kv.batchSet(wb); err != nil {
 			return err
 		}
 	}
@@ -437,8 +435,6 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	h.vlen = uint32(len(e.Value))
 	h.meta = e.Meta
 	h.userMeta = e.UserMeta
-	h.casCounter = e.casCounter
-	h.casCounterCheck = e.CASCounterCheck
 
 	var headerEnc [headerBufSize]byte
 	h.Encode(headerEnc[:])
@@ -462,8 +458,8 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 }
 
 func (e Entry) print(prefix string) {
-	fmt.Printf("%s Key: %s Meta: %d UserMeta: %d Offset: %d len(val)=%d cas=%d check=%d\n",
-		prefix, e.Key, e.Meta, e.UserMeta, e.offset, len(e.Value), e.casCounter, e.CASCounterCheck)
+	fmt.Printf("%s Key: %s Meta: %d UserMeta: %d Offset: %d len(val)=%d",
+		prefix, e.Key, e.Meta, e.UserMeta, e.offset, len(e.Value))
 }
 
 // header is used in value log as a header
@@ -903,8 +899,6 @@ func valueBytesToEntry(buf []byte) (e Entry) {
 	n += h.klen
 	e.Meta = h.meta
 	e.UserMeta = h.userMeta
-	e.casCounter = h.casCounter
-	e.CASCounterCheck = h.casCounterCheck
 	e.Value = buf[n : n+h.vlen]
 	return
 }
@@ -1005,13 +999,10 @@ func (vlog *valueLog) doRunGC(gcThreshold float64) error {
 			err := vlog.readValueBytes(vp, func(buf []byte) error {
 				ne := valueBytesToEntry(buf)
 				ne.offset = vp.Offset
-				if ne.casCounter == e.casCounter {
-					ne.print("Latest Entry Header in LSM")
-					e.print("Latest Entry in Log")
-					return errors.Errorf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.",
-						vp, vs.Meta)
-				}
-				return nil
+				ne.print("Latest Entry Header in LSM")
+				e.print("Latest Entry in Log")
+				return errors.Errorf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.",
+					vp, vs.Meta)
 			})
 			if err != nil {
 				return errStop

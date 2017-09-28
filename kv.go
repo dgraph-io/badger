@@ -177,16 +177,15 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		return nil, err
 	}
 
-	var item KVItem
-	next, vs, err := out.get(head)
+	vs, err := out.get(head)
 	if err != nil {
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
+	out.txnState.curRead = vs.Version
 	var vptr valuePointer
 	if len(vs.Value) > 0 {
 		vptr.Decode(vs.Value)
 	}
-	out.txnState.curRead = y.ParseTs(next)
 
 	// lastUsedCasCounter will either be the value stored in !badger!head, or some subsequently
 	// written value log entry that we replay.  (Subsequent value log entries might be _less_
@@ -420,16 +419,16 @@ func (s *KV) yieldItemValue(item *KVItem, consumer func([]byte) error) error {
 
 // get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
-func (s *KV) get(key []byte) ([]byte, y.ValueStruct, error) {
+func (s *KV) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getMemTables() // Lock should be released.
 	defer decr()
 
 	y.NumGets.Add(1)
 	for i := 0; i < len(tables); i++ {
-		next, vs := tables[i].Get(key)
+		vs := tables[i].Get(key)
 		y.NumMemtableGets.Add(1)
 		if vs.Meta != 0 || vs.Value != nil {
-			return next, vs, nil
+			return vs, nil
 		}
 	}
 	return s.lc.get(key)

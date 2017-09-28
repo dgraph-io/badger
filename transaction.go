@@ -207,7 +207,7 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 	}
 
 	seek := y.KeyWithTs(key, txn.readTs)
-	next, vs, err := txn.kv.get(seek)
+	vs, err := txn.kv.get(seek)
 	if err != nil {
 		return item, errors.Wrapf(err, "KV::Get key: %q", key)
 	}
@@ -220,7 +220,7 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta
-	item.key = next
+	item.key = key
 	item.kv = txn.kv
 	item.vptr = vs.Value
 	return item, nil
@@ -263,19 +263,13 @@ func (txn *Txn) Commit(callback func(error)) error {
 	}
 	entries = append(entries, entry)
 	if callback == nil {
-		err := txn.kv.batchSet(entries)
-		if err != nil {
-			// TODO: Run cleanup.
-		}
-		return err
+		// If batchSet failed, LSM would not have been updated. So, no need to rollback anything.
+
+		// TODO: What if some of the txns successfully make it to value log, but others fail.
+		// Nothing gets updated to LSM, until a restart happens.
+		return txn.kv.batchSet(entries)
 	}
 
-	cb := func(err error) {
-		if err != nil {
-			// TODO: Run cleanup.
-		}
-		callback(err)
-	}
 	txn.kv.batchSetAsync(entries, callback)
 	return nil
 }

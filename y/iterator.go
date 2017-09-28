@@ -29,6 +29,8 @@ type ValueStruct struct {
 	Meta     byte
 	UserMeta byte
 	Value    []byte
+
+	Version uint64 // This field is not serialized. Only for internal usage.
 }
 
 // EncodedSize is the size of the ValueStruct when encoded

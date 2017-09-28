@@ -236,7 +236,7 @@ func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func() error)
 }
 
 // get returns value for a given key or the key after that. If not found, return nil.
-func (s *levelHandler) get(key []byte) ([]byte, y.ValueStruct, error) {
+func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getTableForKey(key)
 
 	for _, th := range tables {
@@ -256,11 +256,12 @@ func (s *levelHandler) get(key []byte) ([]byte, y.ValueStruct, error) {
 			continue
 		}
 		if y.SameKey(key, it.Key()) {
-			next := y.Safecopy([]byte{}, it.Key())
-			return next, it.Value(), decr()
+			vs := it.Value()
+			vs.Version = y.ParseTs(it.Key())
+			return it.Value(), decr()
 		}
 	}
-	return nil, y.ValueStruct{}, decr()
+	return y.ValueStruct{}, decr()
 }
 
 // appendIterators appends iterators to an array of iterators, for merging.

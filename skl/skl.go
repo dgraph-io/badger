@@ -373,17 +373,19 @@ func (s *Skiplist) findLast() *node {
 
 // Get gets the value associated with the key. It returns a valid value if it finds equal or earlier
 // version of the same key.
-func (s *Skiplist) Get(key []byte) (next []byte, res y.ValueStruct) {
+func (s *Skiplist) Get(key []byte) y.ValueStruct {
 	n, _ := s.findNear(key, false, true) // findGreaterOrEqual.
 	if n == nil {
-		return nil, y.ValueStruct{}
+		return y.ValueStruct{}
 	}
 	valOffset, valSize := n.getValueOffset()
 	nextKey := s.arena.getKey(n.keyOffset, n.keySize)
 	if !y.SameKey(key, nextKey) {
-		return nil, y.ValueStruct{}
+		return y.ValueStruct{}
 	}
-	return nextKey, s.arena.getVal(valOffset, valSize)
+	vs := s.arena.getVal(valOffset, valSize)
+	vs.Version = y.ParseTs(nextKey)
+	return vs
 }
 
 // NewIterator returns a skiplist iterator.  You have to Close() the iterator.
