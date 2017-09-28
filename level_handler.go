@@ -258,7 +258,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 		if y.SameKey(key, it.Key()) {
 			vs := it.Value()
 			vs.Version = y.ParseTs(it.Key())
-			return it.Value(), decr()
+			return vs, decr()
 		}
 	}
 	return y.ValueStruct{}, decr()

@@ -419,13 +419,19 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 // assigned to this key-value. Set be done on this key only if the counters match.
 type Entry struct {
 	Key      []byte
+	Value    []byte
 	Meta     byte
 	UserMeta byte
-	Value    []byte
 
 	// Fields maintained internally.
 	offset uint32
-	// casCounter uint64
+}
+
+func (e *Entry) estimateSize(threshold int) int {
+	if len(e.Value) < threshold {
+		return len(e.Key) + len(e.Value) + 2 // Meta, UserMeta
+	}
+	return len(e.Key) + 12 + 2 // 12 for ValuePointer, 2 for metas.
 }
 
 // Encodes e to buf. Returns number of bytes written.
@@ -510,20 +516,20 @@ func (p valuePointer) IsZero() bool {
 	return p.Fid == 0 && p.Offset == 0 && p.Len == 0
 }
 
-const valuePointerEncodedSize = 12
+const vptrSize = 12
 
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode(b []byte) []byte {
 	binary.BigEndian.PutUint32(b[:4], p.Fid)
 	binary.BigEndian.PutUint32(b[4:8], p.Len)
-	binary.BigEndian.PutUint32(b[8:valuePointerEncodedSize], p.Offset)
-	return b[:valuePointerEncodedSize]
+	binary.BigEndian.PutUint32(b[8:12], p.Offset)
+	return b[:vptrSize]
 }
 
 func (p *valuePointer) Decode(b []byte) {
 	p.Fid = binary.BigEndian.Uint32(b[:4])
 	p.Len = binary.BigEndian.Uint32(b[4:8])
-	p.Offset = binary.BigEndian.Uint32(b[8:valuePointerEncodedSize])
+	p.Offset = binary.BigEndian.Uint32(b[8:12])
 }
 
 type valueLog struct {

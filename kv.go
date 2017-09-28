@@ -218,7 +218,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 			nv = make([]byte, len(e.Value))
 			copy(nv, e.Value)
 		} else {
-			nv = make([]byte, valuePointerEncodedSize)
+			nv = make([]byte, vptrSize)
 			vp.Encode(nv)
 			meta = meta | BitValuePointer
 		}
@@ -477,7 +477,7 @@ func (s *KV) writeToLSM(b *request) error {
 					UserMeta: entry.UserMeta,
 				})
 		} else {
-			var offsetBuf [valuePointerEncodedSize]byte
+			var offsetBuf [vptrSize]byte
 			s.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:    b.Ptrs[i].Encode(offsetBuf[:]),
@@ -759,10 +759,12 @@ func (s *KV) flushMemtable(lc *y.Closer) error {
 
 		if !ft.vptr.IsZero() {
 			s.elog.Printf("Storing offset: %+v\n", ft.vptr)
-			offset := make([]byte, valuePointerEncodedSize)
+			offset := make([]byte, vptrSize)
 			ft.vptr.Encode(offset)
 
-			headTs := y.KeyWithTs(head, s.txnState.readTs())
+			// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
+			// commits.
+			headTs := y.KeyWithTs(head, s.txnState.commitTs())
 			ft.mt.Put(headTs, y.ValueStruct{Value: offset})
 		}
 		fileID := s.lc.reserveFileID()

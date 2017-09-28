@@ -61,6 +61,12 @@ func (gs *globalTxnState) readTs() uint64 {
 	return atomic.LoadUint64(&gs.curRead)
 }
 
+func (gs *globalTxnState) commitTs() uint64 {
+	gs.Lock()
+	defer gs.Unlock()
+	return gs.nextCommit
+}
+
 // hasConflict must be called while having a lock.
 func (gs *globalTxnState) hasConflict(txn *Txn) bool {
 	if len(txn.reads) == 0 {
@@ -202,6 +208,8 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 			// We probably don't need to set KV on item here.
 			return item, nil
 		}
+		// Only track reads if this is update txn. No need to track read if txn serviced it
+		// internally.
 		fp := farm.Fingerprint64(key)
 		txn.reads = append(txn.reads, fp)
 	}

@@ -18,7 +18,6 @@ package badger
 
 import (
 	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/y"
 )
 
 // NOTE: Keep the comments in the following to 75 chars width, so they
@@ -101,8 +100,5 @@ var DefaultOptions = Options{
 }
 
 func (opt *Options) estimateSize(entry *Entry) int {
-	if len(entry.Value) < opt.ValueThreshold {
-		return len(entry.Key) + len(entry.Value) + y.MetaSize + y.UserMetaSize
-	}
-	return len(entry.Key) + 16 + y.MetaSize + y.UserMetaSize
+	return entry.estimateSize(opt.ValueThreshold)
 }
