@@ -179,6 +179,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	}
 
 	headKey := y.KeyWithTs(head, math.MaxUint64)
+	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
 	vs, err := out.get(headKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "Retrieving head")
@@ -512,6 +513,9 @@ func (s *KV) writeToLSM(b *request) error {
 	}
 
 	for i, entry := range b.Entries {
+		if entry.Meta&BitFinTxn != 0 {
+			continue
+		}
 		if s.shouldWriteValueToLSM(*entry) { // Will include deletion / tombstone case.
 			s.mt.Put(entry.Key,
 				y.ValueStruct{
@@ -767,15 +771,17 @@ func (s *KV) flushMemtable(lc *y.Closer) error {
 			return nil
 		}
 
-		// Store badger head even if vptr is zero, need it for readTs
-		s.elog.Printf("Storing offset: %+v\n", ft.vptr)
-		offset := make([]byte, vptrSize)
-		ft.vptr.Encode(offset)
+		if !ft.mt.Empty() {
+			// Store badger head even if vptr is zero, need it for readTs
+			s.elog.Printf("Storing offset: %+v\n", ft.vptr)
+			offset := make([]byte, vptrSize)
+			ft.vptr.Encode(offset)
 
-		// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
-		// commits.
-		headTs := y.KeyWithTs(head, s.txnState.commitTs())
-		ft.mt.Put(headTs, y.ValueStruct{Value: offset})
+			// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
+			// commits.
+			headTs := y.KeyWithTs(head, s.txnState.commitTs())
+			ft.mt.Put(headTs, y.ValueStruct{Value: offset})
+		}
 
 		fileID := s.lc.reserveFileID()
 		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
