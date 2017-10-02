@@ -274,3 +274,80 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 	itr = txn.NewIterator(rev)
 	checkIterator(itr, []string{"c1"})
 }
+
+func TestTxnManaged(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, err := NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+	defer kv.Close()
+
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("key-%02d", i))
+	}
+
+	val := func(i int) []byte {
+		return []byte(fmt.Sprintf("val-%d", i))
+	}
+
+	// Write data at t=3.
+	txn := kv.NewTransactionAt(3, true)
+	for i := 0; i <= 3; i++ {
+		require.NoError(t, txn.Set(key(i), val(i), 0))
+	}
+	require.NoError(t, txn.CommitAt(3, nil))
+
+	// Read data at t=2.
+	txn = kv.NewTransactionAt(2, false)
+	for i := 0; i <= 3; i++ {
+		_, err := txn.Get(key(i))
+		require.Equal(t, ErrKeyNotFound, err)
+	}
+
+	// Read data at t=3.
+	txn = kv.NewTransactionAt(3, false)
+	for i := 0; i <= 3; i++ {
+		item, err := txn.Get(key(i))
+		require.NoError(t, err)
+		require.Equal(t, uint64(3), item.Version())
+		require.NoError(t, item.Value(func(v []byte) error {
+			require.Equal(t, val(i), v)
+			return nil
+		}))
+	}
+
+	// Write data at t=7.
+	txn = kv.NewTransactionAt(6, true)
+	for i := 0; i <= 7; i++ {
+		_, err := txn.Get(key(i))
+		if err == nil {
+			continue // Don't overwrite existing keys.
+		}
+		require.NoError(t, txn.Set(key(i), val(i), 0))
+	}
+	require.NoError(t, txn.CommitAt(7, nil))
+
+	// Read data at t=9.
+	txn = kv.NewTransactionAt(9, false)
+	for i := 0; i <= 9; i++ {
+		item, err := txn.Get(key(i))
+		if i <= 7 {
+			require.NoError(t, err)
+		} else {
+			require.Equal(t, ErrKeyNotFound, err)
+		}
+
+		if i <= 3 {
+			require.Equal(t, uint64(3), item.Version())
+		} else if i <= 7 {
+			require.Equal(t, uint64(7), item.Version())
+		}
+		if i <= 7 {
+			require.NoError(t, item.Value(func(v []byte) error {
+				require.Equal(t, val(i), v)
+				return nil
+			}))
+		}
+	}
+}
