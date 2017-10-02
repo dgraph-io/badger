@@ -287,16 +287,14 @@ func TestValueGC4(t *testing.T) {
 	defer kv.Close()
 
 	sz := 128 << 10 // 5 entries per value log file.
-	txn, err := kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(true)
 	for i := 0; i < 24; i++ {
 		v := make([]byte, sz)
 		rand.Read(v[:rand.Intn(sz)])
 		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v, 0))
 		if i%3 == 0 {
 			require.NoError(t, txn.Commit(nil))
-			txn, err = kv.NewTransaction(true)
-			require.NoError(t, err)
+			txn = kv.NewTransaction(true)
 		}
 	}
 	require.NoError(t, txn.Commit(nil))
