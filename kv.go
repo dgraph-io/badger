@@ -217,7 +217,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	}
 
 	first := true
-	fn := func(e Entry, vp valuePointer) error { // Function for replaying.
+	fn := func(e entry, vp valuePointer) error { // Function for replaying.
 		if first {
 			out.elog.Printf("First key=%s\n", e.Key)
 		}
@@ -503,7 +503,7 @@ var requestPool = sync.Pool{
 	},
 }
 
-func (s *KV) shouldWriteValueToLSM(e Entry) bool {
+func (s *KV) shouldWriteValueToLSM(e entry) bool {
 	return len(e.Value) < s.opt.ValueThreshold
 }
 
@@ -646,7 +646,7 @@ func (s *KV) doWrites(lc *y.Closer) {
 	}
 }
 
-func (s *KV) sendToWriteCh(entries []*Entry) (*request, error) {
+func (s *KV) sendToWriteCh(entries []*entry) (*request, error) {
 	var count, size int64
 	for _, e := range entries {
 		size += int64(s.opt.estimateSize(e))
@@ -671,7 +671,7 @@ func (s *KV) sendToWriteCh(entries []*Entry) (*request, error) {
 // batchSet applies a list of badger.Entry. If a request level error occurs it
 // will be returned.
 //   Check(kv.BatchSet(entries))
-func (s *KV) batchSet(entries []*Entry) error {
+func (s *KV) batchSet(entries []*entry) error {
 	req, err := s.sendToWriteCh(entries)
 	if err != nil {
 		return err
@@ -690,7 +690,7 @@ func (s *KV) batchSet(entries []*Entry) error {
 //   err := kv.BatchSetAsync(entries, func(err error)) {
 //      Check(err)
 //   }
-func (s *KV) batchSetAsync(entries []*Entry, f func(error)) error {
+func (s *KV) batchSetAsync(entries []*entry, f func(error)) error {
 	req, err := s.sendToWriteCh(entries)
 	if err != nil {
 		return err

@@ -147,7 +147,7 @@ type Txn struct {
 	reads  []uint64 // contains fingerprints of keys read.
 	writes []uint64 // contains fingerprints of keys written.
 
-	pendingWrites map[string]*Entry // cache stores any writes done by txn.
+	pendingWrites map[string]*entry // cache stores any writes done by txn.
 
 	gs *globalTxnState
 	kv *KV
@@ -174,7 +174,7 @@ func (txn *Txn) Set(key, val []byte, userMeta byte) error {
 	fp := farm.Fingerprint64(key) // Avoid dealing with byte arrays.
 	txn.writes = append(txn.writes, fp)
 
-	e := &Entry{
+	e := &entry{
 		Key:      key,
 		Value:    val,
 		UserMeta: userMeta,
@@ -198,7 +198,7 @@ func (txn *Txn) Delete(key []byte) error {
 	fp := farm.Fingerprint64(key) // Avoid dealing with byte arrays.
 	txn.writes = append(txn.writes, fp)
 
-	e := &Entry{
+	e := &entry{
 		Key:  key,
 		Meta: BitDelete,
 	}
@@ -270,7 +270,7 @@ func (txn *Txn) Commit(callback func(error)) error {
 	}
 	defer txn.gs.doneCommit(commitTs)
 
-	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
+	entries := make([]*entry, 0, len(txn.pendingWrites)+1)
 	for _, e := range txn.pendingWrites {
 		// Suffix the keys with commit ts, so the key versions are sorted in
 		// descending order of commit timestamp.
@@ -278,12 +278,12 @@ func (txn *Txn) Commit(callback func(error)) error {
 		e.Meta |= BitTxn
 		entries = append(entries, e)
 	}
-	entry := &Entry{
+	e := &entry{
 		Key:   y.KeyWithTs(txnKey, commitTs),
 		Value: []byte(strconv.FormatUint(commitTs, 10)),
 		Meta:  BitFinTxn,
 	}
-	entries = append(entries, entry)
+	entries = append(entries, e)
 
 	if callback == nil {
 		// If batchSet failed, LSM would not have been updated. So, no need to rollback anything.
@@ -347,7 +347,7 @@ func (kv *KV) NewTransaction(update bool) *Txn {
 		readTs: kv.txnState.readTs(),
 	}
 	if update {
-		txn.pendingWrites = make(map[string]*Entry)
+		txn.pendingWrites = make(map[string]*entry)
 	}
 
 	return txn
