@@ -275,6 +275,90 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 	checkIterator(itr, []string{"c1"})
 }
 
+// a2, a3, b4 (del), b3, c2, c1
+// Read at ts=4 -> a3, c2
+// Read at ts=3 -> a3, b3, c2
+// Read at ts=2 -> a2, c2
+// Read at ts=1 -> c1
+func TestTxnIterationEdgeCase2(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, err := NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+	defer kv.Close()
+
+	ka := []byte("a")
+	kb := []byte("aa")
+	kc := []byte("aaa")
+
+	// c1
+	txn := kv.NewTransaction(true)
+	txn.Set(kc, []byte("c1"), 0)
+	require.NoError(t, txn.Commit(nil))
+	require.Equal(t, uint64(1), kv.txnState.readTs())
+
+	// a2, c2
+	txn = kv.NewTransaction(true)
+	txn.Set(ka, []byte("a2"), 0)
+	txn.Set(kc, []byte("c2"), 0)
+	require.NoError(t, txn.Commit(nil))
+	require.Equal(t, uint64(2), kv.txnState.readTs())
+
+	// b3
+	txn = kv.NewTransaction(true)
+	txn.Set(ka, []byte("a3"), 0)
+	txn.Set(kb, []byte("b3"), 0)
+	require.NoError(t, txn.Commit(nil))
+	require.Equal(t, uint64(3), kv.txnState.readTs())
+
+	// b4 (del)
+	txn = kv.NewTransaction(true)
+	txn.Delete(kb)
+	require.NoError(t, txn.Commit(nil))
+	require.Equal(t, uint64(4), kv.txnState.readTs())
+
+	checkIterator := func(itr *Iterator, expected []string) {
+		var i int
+		for itr.Rewind(); itr.Valid(); itr.Next() {
+			item := itr.Item()
+			err := item.Value(func(val []byte) error {
+				require.Equal(t, expected[i], string(val), "readts=%d", itr.readTs)
+				return nil
+			})
+			require.NoError(t, err)
+			i++
+		}
+		require.Equal(t, len(expected), i)
+	}
+	txn = kv.NewTransaction(true)
+	itr := txn.NewIterator(DefaultIteratorOptions)
+	checkIterator(itr, []string{"a3", "c2"})
+
+	rev := DefaultIteratorOptions
+	rev.Reverse = true
+	itr = txn.NewIterator(rev)
+	checkIterator(itr, []string{"c2", "a3"})
+
+	txn.readTs = 3
+	itr = txn.NewIterator(DefaultIteratorOptions)
+	checkIterator(itr, []string{"a3", "b3", "c2"})
+	itr = txn.NewIterator(rev)
+	checkIterator(itr, []string{"c2", "b3", "a3"})
+
+	txn.readTs = 2
+	itr = txn.NewIterator(DefaultIteratorOptions)
+	checkIterator(itr, []string{"a2", "c2"})
+	itr = txn.NewIterator(rev)
+	checkIterator(itr, []string{"c2", "a2"})
+
+	txn.readTs = 1
+	itr = txn.NewIterator(DefaultIteratorOptions)
+	checkIterator(itr, []string{"c1"})
+	itr = txn.NewIterator(rev)
+	checkIterator(itr, []string{"c1"})
+}
+
 func TestTxnManaged(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)

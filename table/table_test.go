@@ -62,7 +62,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	})
 	for _, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		err := b.Add([]byte(kv[0]), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0})
+		err := b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0})
 		if t != nil {
 			require.NoError(t, err)
 		} else {
@@ -140,14 +140,14 @@ func TestSeek(t *testing.T) {
 	}
 
 	for _, tt := range data {
-		it.seek([]byte(tt.in))
+		it.seek(y.KeyWithTs([]byte(tt.in), 0))
 		if !tt.valid {
 			require.False(t, it.Valid())
 			continue
 		}
 		require.True(t, it.Valid())
 		k := it.Key()
-		require.EqualValues(t, tt.out, string(k))
+		require.EqualValues(t, tt.out, string(y.ParseKey(k)))
 	}
 }
 
