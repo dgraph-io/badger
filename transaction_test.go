@@ -86,6 +86,35 @@ func TestTxnVersions(t *testing.T) {
 		require.Equal(t, 1, count, "i=%d", i) // Should only loop once.
 	}
 
+	checkAllVersions := func(itr *Iterator, i int) {
+		var version uint64
+		if itr.opt.Reverse {
+			version = 1
+		} else {
+			version = uint64(i)
+		}
+
+		count := 0
+		for itr.Rewind(); itr.Valid(); itr.Next() {
+			item := itr.Item()
+			require.Equal(t, k, item.Key())
+			require.Equal(t, version, item.Version())
+			err := item.Value(func(val []byte) error {
+				exp := fmt.Sprintf("valversion=%d", version)
+				require.Equal(t, exp, string(val), "v=%d", version)
+				count++
+				return nil
+			})
+			require.NoError(t, err)
+			if itr.opt.Reverse {
+				version++
+			} else {
+				version--
+			}
+		}
+		require.Equal(t, i, count, "i=%d", i) // Should loop as many times as i.
+	}
+
 	for i := 1; i < 10; i++ {
 		txn := kv.NewTransaction(true)
 		require.NoError(t, err)
@@ -104,6 +133,7 @@ func TestTxnVersions(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, found)
 
+		// Try retrieving the latest version forward and reverse.
 		itr := txn.NewIterator(DefaultIteratorOptions)
 		checkIterator(itr, i)
 
@@ -111,6 +141,18 @@ func TestTxnVersions(t *testing.T) {
 		opt.Reverse = true
 		itr = txn.NewIterator(opt)
 		checkIterator(itr, i)
+
+		// Now try retrieving all versions forward and reverse.
+		opt = DefaultIteratorOptions
+		opt.AllVersions = true
+		itr = txn.NewIterator(opt)
+		checkAllVersions(itr, i)
+
+		opt = DefaultIteratorOptions
+		opt.AllVersions = true
+		opt.Reverse = true
+		itr = txn.NewIterator(opt)
+		checkAllVersions(itr, i)
 	}
 	txn := kv.NewTransaction(true)
 	require.NoError(t, err)

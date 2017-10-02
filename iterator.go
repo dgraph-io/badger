@@ -171,6 +171,7 @@ type IteratorOptions struct {
 	// How many KV pairs to prefetch while iterating. Valid only if PrefetchValues is true.
 	PrefetchSize int
 	Reverse      bool // Direction of iteration. False is forward, true is backward.
+	AllVersions  bool // Fetch all valid versions of the same key.
 }
 
 // DefaultIteratorOptions contains default options when iterating over Badger key-value stores.
@@ -178,6 +179,7 @@ var DefaultIteratorOptions = IteratorOptions{
 	PrefetchValues: true,
 	PrefetchSize:   100,
 	Reverse:        false,
+	AllVersions:    false,
 }
 
 // Iterator helps iterating over the KV pairs in a lexicographically sorted order.
@@ -258,6 +260,14 @@ func (it *Iterator) parseItem() bool {
 	mi := it.iitr
 	key := mi.Key()
 
+	setItem := func(item *KVItem) {
+		if it.item == nil {
+			it.item = item
+		} else {
+			it.data.push(item)
+		}
+	}
+
 	// Skip badger keys.
 	if bytes.HasPrefix(key, badgerPrefix) {
 		mi.Next()
@@ -269,6 +279,14 @@ func (it *Iterator) parseItem() bool {
 	if version > it.readTs {
 		mi.Next()
 		return false
+	}
+
+	if it.opt.AllVersions {
+		item := it.newItem()
+		it.fill(item)
+		setItem(item)
+		mi.Next()
+		return true
 	}
 
 	// If iterating in forward direction, then just checking the last key against current key would
@@ -300,11 +318,7 @@ FILL:
 
 	mi.Next()                           // Advance but no fill item yet.
 	if !it.opt.Reverse || !mi.Valid() { // Forward direction, or invalid.
-		if it.item == nil {
-			it.item = item
-		} else {
-			it.data.push(item)
-		}
+		setItem(item)
 		return true
 	}
 
@@ -316,11 +330,7 @@ FILL:
 		goto FILL
 	}
 	// Ignore the next candidate. Return the current one.
-	if it.item == nil {
-		it.item = item
-	} else {
-		it.data.push(item)
-	}
+	setItem(item)
 	return true
 }
 
