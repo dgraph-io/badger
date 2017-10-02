@@ -175,14 +175,14 @@ func TestSeekForPrev(t *testing.T) {
 	}
 
 	for _, tt := range data {
-		it.seekForPrev([]byte(tt.in))
+		it.seekForPrev(y.KeyWithTs([]byte(tt.in), 0))
 		if !tt.valid {
 			require.False(t, it.Valid())
 			continue
 		}
 		require.True(t, it.Valid())
 		k := it.Key()
-		require.EqualValues(t, tt.out, string(k))
+		require.EqualValues(t, tt.out, string(y.ParseKey(k)))
 	}
 }
 
@@ -197,7 +197,7 @@ func TestIterateFromStart(t *testing.T) {
 			ti := table.NewIterator(false)
 			defer ti.Close()
 			ti.reset()
-			ti.seek([]byte(""))
+			ti.seek(y.KeyWithTs([]byte(""), 0))
 			require.True(t, ti.Valid())
 			// No need to do a Next.
 			// ti.Seek brings us to the first key >= "". Essentially a SeekToFirst.
@@ -224,7 +224,7 @@ func TestIterateFromEnd(t *testing.T) {
 			ti := table.NewIterator(false)
 			defer ti.Close()
 			ti.reset()
-			ti.seek([]byte("zzzzzz")) // Seek to end, an invalid element.
+			ti.seek(y.KeyWithTs([]byte("zzzzzz"), 0)) // Seek to end, an invalid element.
 			require.False(t, ti.Valid())
 			for i := n - 1; i >= 0; i-- {
 				ti.prev()
@@ -247,23 +247,23 @@ func TestTable(t *testing.T) {
 	ti := table.NewIterator(false)
 	defer ti.Close()
 	kid := 1010
-	seek := []byte(key("key", kid))
+	seek := y.KeyWithTs([]byte(key("key", kid)), 0)
 	for ti.seek(seek); ti.Valid(); ti.next() {
 		k := ti.Key()
-		require.EqualValues(t, k, key("key", kid))
+		require.EqualValues(t, string(y.ParseKey(k)), key("key", kid))
 		kid++
 	}
 	if kid != 10000 {
 		t.Errorf("Expected kid: 10000. Got: %v", kid)
 	}
 
-	ti.seek([]byte(key("key", 99999)))
+	ti.seek(y.KeyWithTs([]byte(key("key", 99999)), 0))
 	require.False(t, ti.Valid())
 
-	ti.seek([]byte(key("key", -1)))
+	ti.seek(y.KeyWithTs([]byte(key("key", -1)), 0))
 	require.True(t, ti.Valid())
 	k := ti.Key()
-	require.EqualValues(t, k, key("key", 0))
+	require.EqualValues(t, string(y.ParseKey(k)), key("key", 0))
 }
 
 func TestIterateBackAndForth(t *testing.T) {
@@ -272,7 +272,7 @@ func TestIterateBackAndForth(t *testing.T) {
 	require.NoError(t, err)
 	defer table.DecrRef()
 
-	seek := []byte(key("key", 1010))
+	seek := y.KeyWithTs([]byte(key("key", 1010)), 0)
 	it := table.NewIterator(false)
 	defer it.Close()
 	it.seek(seek)
@@ -284,27 +284,27 @@ func TestIterateBackAndForth(t *testing.T) {
 	it.prev()
 	require.True(t, it.Valid())
 	k = it.Key()
-	require.EqualValues(t, key("key", 1008), string(k))
+	require.EqualValues(t, key("key", 1008), string(y.ParseKey(k)))
 
 	it.next()
 	it.next()
 	require.True(t, it.Valid())
 	k = it.Key()
-	require.EqualValues(t, key("key", 1010), k)
+	require.EqualValues(t, key("key", 1010), y.ParseKey(k))
 
-	it.seek([]byte(key("key", 2000)))
+	it.seek(y.KeyWithTs([]byte(key("key", 2000)), 0))
 	require.True(t, it.Valid())
 	k = it.Key()
-	require.EqualValues(t, key("key", 2000), k)
+	require.EqualValues(t, key("key", 2000), y.ParseKey(k))
 
 	it.prev()
 	require.True(t, it.Valid())
 	k = it.Key()
-	require.EqualValues(t, key("key", 1999), k)
+	require.EqualValues(t, key("key", 1999), y.ParseKey(k))
 
 	it.seekToFirst()
 	k = it.Key()
-	require.EqualValues(t, key("key", 0), string(k))
+	require.EqualValues(t, key("key", 0), y.ParseKey(k))
 }
 
 func TestUniIterator(t *testing.T) {
@@ -355,7 +355,7 @@ func TestConcatIteratorOneTable(t *testing.T) {
 	it.Rewind()
 	require.True(t, it.Valid())
 	k := it.Key()
-	require.EqualValues(t, "k1", string(k))
+	require.EqualValues(t, "k1", string(y.ParseKey(k)))
 	vs := it.Value()
 	require.EqualValues(t, "a1", string(vs.Value))
 	require.EqualValues(t, 'A', vs.Meta)
@@ -389,22 +389,22 @@ func TestConcatIterator(t *testing.T) {
 		}
 		require.EqualValues(t, 30000, count)
 
-		it.Seek([]byte("a"))
-		require.EqualValues(t, "keya0000", string(it.Key()))
+		it.Seek(y.KeyWithTs([]byte("a"), 0))
+		require.EqualValues(t, "keya0000", string(y.ParseKey(it.Key())))
 		vs := it.Value()
 		require.EqualValues(t, "0", string(vs.Value))
 
-		it.Seek([]byte("keyb"))
-		require.EqualValues(t, "keyb0000", string(it.Key()))
+		it.Seek(y.KeyWithTs([]byte("keyb"), 0))
+		require.EqualValues(t, "keyb0000", string(y.ParseKey(it.Key())))
 		vs = it.Value()
 		require.EqualValues(t, "0", string(vs.Value))
 
-		it.Seek([]byte("keyb9999b"))
-		require.EqualValues(t, "keyc0000", string(it.Key()))
+		it.Seek(y.KeyWithTs([]byte("keyb9999b"), 0))
+		require.EqualValues(t, "keyc0000", string(y.ParseKey(it.Key())))
 		vs = it.Value()
 		require.EqualValues(t, "0", string(vs.Value))
 
-		it.Seek([]byte("keyd"))
+		it.Seek(y.KeyWithTs([]byte("keyd"), 0))
 		require.False(t, it.Valid())
 	}
 	{
@@ -421,21 +421,21 @@ func TestConcatIterator(t *testing.T) {
 		}
 		require.EqualValues(t, 30000, count)
 
-		it.Seek([]byte("a"))
+		it.Seek(y.KeyWithTs([]byte("a"), 0))
 		require.False(t, it.Valid())
 
-		it.Seek([]byte("keyb"))
-		require.EqualValues(t, "keya9999", string(it.Key()))
+		it.Seek(y.KeyWithTs([]byte("keyb"), 0))
+		require.EqualValues(t, "keya9999", string(y.ParseKey(it.Key())))
 		vs := it.Value()
 		require.EqualValues(t, "9999", string(vs.Value))
 
-		it.Seek([]byte("keyb9999b"))
-		require.EqualValues(t, "keyb9999", string(it.Key()))
+		it.Seek(y.KeyWithTs([]byte("keyb9999b"), 0))
+		require.EqualValues(t, "keyb9999", string(y.ParseKey(it.Key())))
 		vs = it.Value()
 		require.EqualValues(t, "9999", string(vs.Value))
 
-		it.Seek([]byte("keyd"))
-		require.EqualValues(t, "keyc9999", string(it.Key()))
+		it.Seek(y.KeyWithTs([]byte("keyd"), 0))
+		require.EqualValues(t, "keyc9999", string(y.ParseKey(it.Key())))
 		vs = it.Value()
 		require.EqualValues(t, "9999", string(vs.Value))
 	}
@@ -464,7 +464,7 @@ func TestMergingIterator(t *testing.T) {
 	it.Rewind()
 	require.True(t, it.Valid())
 	k := it.Key()
-	require.EqualValues(t, "k1", string(k))
+	require.EqualValues(t, "k1", string(y.ParseKey(k)))
 	vs := it.Value()
 	require.EqualValues(t, "a1", string(vs.Value))
 	require.EqualValues(t, 'A', vs.Meta)
@@ -472,7 +472,7 @@ func TestMergingIterator(t *testing.T) {
 
 	require.True(t, it.Valid())
 	k = it.Key()
-	require.EqualValues(t, "k2", string(k))
+	require.EqualValues(t, "k2", string(y.ParseKey(k)))
 	vs = it.Value()
 	require.EqualValues(t, "a2", string(vs.Value))
 	require.EqualValues(t, 'A', vs.Meta)
@@ -504,7 +504,7 @@ func TestMergingIteratorReversed(t *testing.T) {
 	it.Rewind()
 	require.True(t, it.Valid())
 	k := it.Key()
-	require.EqualValues(t, "k2", string(k))
+	require.EqualValues(t, "k2", string(y.ParseKey(k)))
 	vs := it.Value()
 	require.EqualValues(t, "a2", string(vs.Value))
 	require.EqualValues(t, 'A', vs.Meta)
@@ -512,7 +512,7 @@ func TestMergingIteratorReversed(t *testing.T) {
 
 	require.True(t, it.Valid())
 	k = it.Key()
-	require.EqualValues(t, "k1", string(k))
+	require.EqualValues(t, "k1", string(y.ParseKey(k)))
 	vs = it.Value()
 	require.EqualValues(t, "a1", string(vs.Value))
 	require.EqualValues(t, 'A', vs.Meta)
@@ -544,7 +544,7 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 	it.Rewind()
 	require.True(t, it.Valid())
 	k := it.Key()
-	require.EqualValues(t, "k1", string(k))
+	require.EqualValues(t, "k1", string(y.ParseKey(k)))
 	vs := it.Value()
 	require.EqualValues(t, "a1", string(vs.Value))
 	require.EqualValues(t, 'A', vs.Meta)
@@ -552,7 +552,7 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 
 	require.True(t, it.Valid())
 	k = it.Key()
-	require.EqualValues(t, "k2", string(k))
+	require.EqualValues(t, "k2", string(y.ParseKey(k)))
 	vs = it.Value()
 	require.EqualValues(t, "a2", string(vs.Value))
 	require.EqualValues(t, 'A', vs.Meta)
@@ -584,7 +584,7 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 	it.Rewind()
 	require.True(t, it.Valid())
 	k := it.Key()
-	require.EqualValues(t, "k1", string(k))
+	require.EqualValues(t, "k1", string(y.ParseKey(k)))
 	vs := it.Value()
 	require.EqualValues(t, "a1", string(vs.Value))
 	require.EqualValues(t, 'A', vs.Meta)
@@ -592,7 +592,7 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 
 	require.True(t, it.Valid())
 	k = it.Key()
-	require.EqualValues(t, "k2", string(k))
+	require.EqualValues(t, "k2", string(y.ParseKey(k)))
 	vs = it.Value()
 	require.EqualValues(t, "a2", string(vs.Value))
 	require.EqualValues(t, 'A', vs.Meta)

@@ -234,7 +234,7 @@ func TestGetMore(t *testing.T) {
 	defer kv.Close()
 
 	data := func(i int) []byte {
-		return []byte(fmt.Sprintf("%09d", i))
+		return []byte(fmt.Sprintf("%b", i))
 	}
 	//	n := 500000
 	n := 10000
@@ -262,7 +262,7 @@ func TestGetMore(t *testing.T) {
 		for j := i; j < i+m && j < n; j++ {
 			require.NoError(t, txn.Set(data(j),
 				// Use a long value that will certainly exceed value threshold.
-				[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", j)),
+				[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", j)),
 				0x00))
 		}
 		require.NoError(t, txn.Commit(nil))
@@ -270,9 +270,9 @@ func TestGetMore(t *testing.T) {
 	require.NoError(t, kv.validate())
 
 	for i := 0; i < n; i++ {
-		k := []byte(fmt.Sprintf("%09d", i))
-		expectedValue := fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", i)
-		item, err := txnGet(t, kv, []byte(k))
+		expectedValue := fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", i)
+		k := data(i)
+		item, err := txnGet(t, kv, k)
 		if err != nil {
 			t.Error(err)
 		}
@@ -306,7 +306,7 @@ func TestGetMore(t *testing.T) {
 		}
 		txn := kv.NewTransaction(true)
 		for j := i; j < i+m && j < n; j++ {
-			require.NoError(t, txn.Delete([]byte(fmt.Sprintf("%09d", j))))
+			require.NoError(t, txn.Delete(data(j)))
 		}
 		require.NoError(t, txn.Commit(nil))
 	}
@@ -443,7 +443,7 @@ func TestIterate2Basic(t *testing.T) {
 	{
 		t.Log("Starting second basic iteration")
 		idx := 5030
-		start := bkey(idx)
+		start := y.KeyWithTs(bkey(idx), txn.readTs)
 		for it.Seek(start); it.Valid(); it.Next() {
 			item := it.Item()
 			require.EqualValues(t, bkey(idx), string(item.Key()))
@@ -526,12 +526,9 @@ func TestIterateDeleted(t *testing.T) {
 
 	count := 0
 	txn2 := ps.NewTransaction(true)
-	prefix := []byte("Key")
-	for idxIt.Seek(prefix); idxIt.Valid(); idxIt.Next() {
+	prefix := y.KeyWithTs([]byte("Key"), txn.readTs)
+	for idxIt.Seek(prefix); idxIt.ValidForPrefix([]byte("Key")); idxIt.Next() {
 		key := idxIt.Item().Key()
-		if !bytes.HasPrefix(key, prefix) {
-			break
-		}
 		count++
 		newKey := make([]byte, len(key))
 		copy(newKey, key)
