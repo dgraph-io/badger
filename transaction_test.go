@@ -50,7 +50,7 @@ func TestTxnSimple(t *testing.T) {
 		return nil
 	}
 	require.NoError(t, item.Value(fn))
-	require.NoError(t, txn.Commit())
+	require.NoError(t, txn.Commit(nil))
 }
 
 func TestTxnVersions(t *testing.T) {
@@ -67,7 +67,7 @@ func TestTxnVersions(t *testing.T) {
 		require.NoError(t, err)
 
 		txn.Set(k, []byte(fmt.Sprintf("valversion=%d", i)), 0)
-		require.NoError(t, txn.Commit())
+		require.NoError(t, txn.Commit(nil))
 		require.Equal(t, uint64(i), kv.txnState.readTs())
 	}
 
@@ -143,7 +143,7 @@ func TestTxnWriteSkew(t *testing.T) {
 	val := []byte(strconv.Itoa(100))
 	txn.Set(ax, val, 0)
 	txn.Set(ay, val, 0)
-	require.NoError(t, txn.Commit())
+	require.NoError(t, txn.Commit(nil))
 	require.Equal(t, uint64(1), kv.txnState.readTs())
 
 	getBal := func(txn *Txn, key []byte) (bal int) {
@@ -190,8 +190,8 @@ func TestTxnWriteSkew(t *testing.T) {
 	require.Equal(t, 100, sum)
 
 	// Commit both now.
-	require.NoError(t, txn1.Commit())
-	require.Error(t, txn2.Commit()) // This should fail.
+	require.NoError(t, txn1.Commit(nil))
+	require.Error(t, txn2.Commit(nil)) // This should fail.
 
 	require.Equal(t, uint64(2), kv.txnState.readTs())
 }
@@ -217,7 +217,7 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 	txn, err := kv.NewTransaction(true)
 	require.NoError(t, err)
 	txn.Set(kc, []byte("c1"), 0)
-	require.NoError(t, txn.Commit())
+	require.NoError(t, txn.Commit(nil))
 	require.Equal(t, uint64(1), kv.txnState.readTs())
 
 	// a2, c2
@@ -225,7 +225,7 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 	require.NoError(t, err)
 	txn.Set(ka, []byte("a2"), 0)
 	txn.Set(kc, []byte("c2"), 0)
-	require.NoError(t, txn.Commit())
+	require.NoError(t, txn.Commit(nil))
 	require.Equal(t, uint64(2), kv.txnState.readTs())
 
 	// b3
@@ -233,14 +233,14 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 	require.NoError(t, err)
 	txn.Set(ka, []byte("a3"), 0)
 	txn.Set(kb, []byte("b3"), 0)
-	require.NoError(t, txn.Commit())
+	require.NoError(t, txn.Commit(nil))
 	require.Equal(t, uint64(3), kv.txnState.readTs())
 
 	// b4 (del)
 	txn, err = kv.NewTransaction(true)
 	require.NoError(t, err)
 	txn.Delete(kb)
-	require.NoError(t, txn.Commit())
+	require.NoError(t, txn.Commit(nil))
 	require.Equal(t, uint64(4), kv.txnState.readTs())
 
 	checkIterator := func(itr *Iterator, expected []string) {
