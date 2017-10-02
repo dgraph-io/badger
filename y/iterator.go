@@ -34,8 +34,8 @@ type ValueStruct struct {
 }
 
 // EncodedSize is the size of the ValueStruct when encoded
-func (v *ValueStruct) EncodedSize() int {
-	return len(v.Value) + 2
+func (v *ValueStruct) EncodedSize() uint16 {
+	return uint16(len(v.Value) + 2)
 }
 
 // Decode uses the length of the slice to infer the length of the Value field.

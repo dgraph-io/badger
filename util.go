@@ -51,7 +51,7 @@ func (s *levelHandler) getSummary(sum *summary) {
 	}
 }
 
-func (s *KV) validate() { s.lc.validate() }
+func (s *KV) validate() error { return s.lc.validate() }
 
 func (s *levelsController) validate() error {
 	for _, l := range s.levels {

@@ -20,6 +20,7 @@ import (
 	"container/heap"
 	"expvar"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -177,7 +178,9 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		return nil, err
 	}
 
-	vs, err := out.get(head)
+	headKey := y.KeyWithTs(head, math.MaxUint64)
+	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
+	vs, err := out.get(headKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
@@ -510,6 +513,9 @@ func (s *KV) writeToLSM(b *request) error {
 	}
 
 	for i, entry := range b.Entries {
+		if entry.Meta&BitFinTxn != 0 {
+			continue
+		}
 		if s.shouldWriteValueToLSM(*entry) { // Will include deletion / tombstone case.
 			s.mt.Put(entry.Key,
 				y.ValueStruct{
@@ -673,8 +679,9 @@ func (s *KV) batchSet(entries []*Entry) error {
 
 	req.Wg.Wait()
 	req.Entries = nil
+	err = req.Err
 	requestPool.Put(req)
-	return req.Err
+	return err
 }
 
 // batchSetAsync is the asynchronous version of batchSet. It accepts a callback
@@ -765,7 +772,8 @@ func (s *KV) flushMemtable(lc *y.Closer) error {
 			return nil
 		}
 
-		if !ft.vptr.IsZero() {
+		if !ft.mt.Empty() {
+			// Store badger head even if vptr is zero, need it for readTs
 			s.elog.Printf("Storing offset: %+v\n", ft.vptr)
 			offset := make([]byte, vptrSize)
 			ft.vptr.Encode(offset)
@@ -775,6 +783,7 @@ func (s *KV) flushMemtable(lc *y.Closer) error {
 			headTs := y.KeyWithTs(head, s.txnState.commitTs())
 			ft.mt.Put(headTs, y.ValueStruct{Value: offset})
 		}
+
 		fileID := s.lc.reserveFileID()
 		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
 		if err != nil {

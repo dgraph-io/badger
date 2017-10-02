@@ -18,17 +18,17 @@ package badger
 
 import (
 	"bytes"
-	"crypto/rand"
 	"fmt"
 	"io/ioutil"
+	"math"
+	"math/rand"
 	"os"
 	"regexp"
 	"sort"
 	"sync"
 	"testing"
-	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -58,6 +58,26 @@ func getItemValue(t *testing.T, item *KVItem) (val []byte) {
 	return val
 }
 
+func txnSet(t *testing.T, kv *KV, key []byte, val []byte, meta byte) {
+	txn, err := kv.NewTransaction(true)
+	require.NoError(t, err)
+	require.NoError(t, txn.Set(key, val, meta))
+	require.NoError(t, txn.Commit(nil))
+}
+
+func txnDelete(t *testing.T, kv *KV, key []byte) {
+	txn, err := kv.NewTransaction(true)
+	require.NoError(t, err)
+	require.NoError(t, txn.Delete(key))
+	require.NoError(t, txn.Commit(nil))
+}
+
+func txnGet(t *testing.T, kv *KV, key []byte) (KVItem, error) {
+	txn, err := kv.NewTransaction(false)
+	require.NoError(t, err)
+	return txn.Get(key)
+}
+
 func TestWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
@@ -66,16 +86,8 @@ func TestWrite(t *testing.T) {
 	require.NoError(t, err)
 	defer kv.Close()
 
-	var entries []*Entry
 	for i := 0; i < 100; i++ {
-		entries = append(entries, &Entry{
-			Key:   []byte(fmt.Sprintf("key%d", i)),
-			Value: []byte(fmt.Sprintf("val%d", i)),
-		})
-	}
-	kv.BatchSet(entries)
-	for _, e := range entries {
-		require.NoError(t, e.Error, "entry with error: %+v", e)
+		txnSet(t, kv, []byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)), 0x00)
 	}
 }
 
@@ -95,7 +107,7 @@ func TestConcurrentWrite(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			for j := 0; j < m; j++ {
-				kv.Set([]byte(fmt.Sprintf("k%05d_%08d", i, j)),
+				txnSet(t, kv, []byte(fmt.Sprintf("k%05d_%08d", i, j)),
 					[]byte(fmt.Sprintf("v%05d_%08d", i, j)), byte(j%127))
 			}
 		}(i)
@@ -109,7 +121,8 @@ func TestConcurrentWrite(t *testing.T) {
 	opt.PrefetchSize = 10
 	opt.PrefetchValues = true
 
-	it := kv.NewIterator(opt)
+	txn, err := kv.NewTransaction(true)
+	it := txn.NewIterator(opt)
 	defer it.Close()
 	var i, j int
 	for it.Rewind(); it.Valid(); it.Next() {
@@ -133,98 +146,6 @@ func TestConcurrentWrite(t *testing.T) {
 	require.EqualValues(t, 0, j)
 }
 
-func TestCAS(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, _ := NewKV(getTestOptions(dir))
-	defer kv.Close()
-
-	var entries []*Entry
-	for i := 0; i < 100; i++ {
-		entries = append(entries, &Entry{
-			Key:   []byte(fmt.Sprintf("key%d", i)),
-			Value: []byte(fmt.Sprintf("val%d", i)),
-		})
-	}
-	kv.BatchSet(entries)
-	for _, e := range entries {
-		require.NoError(t, e.Error, "entry with error: %+v", e)
-	}
-
-	time.Sleep(time.Second)
-
-	var item KVItem
-	for i := 0; i < 100; i++ {
-		k := []byte(fmt.Sprintf("key%d", i))
-		v := []byte(fmt.Sprintf("val%d", i))
-		if err := kv.Get(k, &item); err != nil {
-			t.Error(err)
-		}
-		require.EqualValues(t, v, getItemValue(t, &item))
-		require.EqualValues(t, entries[i].casCounter, item.Counter())
-	}
-
-	for i := 0; i < 100; i++ {
-		k := []byte(fmt.Sprintf("key%d", i))
-		v := []byte(fmt.Sprintf("zzz%d", i))
-		cc := entries[i].casCounter
-		if cc == 5 {
-			cc = 6
-		} else {
-			cc = 5
-		}
-		require.Error(t, kv.CompareAndSet(k, v, cc))
-	}
-	time.Sleep(time.Second)
-	for i := 0; i < 100; i++ {
-		k := []byte(fmt.Sprintf("key%d", i))
-		v := []byte(fmt.Sprintf("val%d", i))
-		if err := kv.Get(k, &item); err != nil {
-			t.Error(err)
-		}
-		require.EqualValues(t, v, getItemValue(t, &item))
-		require.EqualValues(t, entries[i].casCounter, item.Counter())
-	}
-
-	for i := 0; i < 100; i++ {
-		k := []byte(fmt.Sprintf("key%d", i))
-		cc := entries[i].casCounter
-		if cc == 5 {
-			cc = 6
-		} else {
-			cc = 5
-		}
-		require.Error(t, kv.CompareAndDelete(k, cc))
-	}
-	time.Sleep(time.Second)
-	for i := 0; i < 100; i++ {
-		k := []byte(fmt.Sprintf("key%d", i))
-		v := []byte(fmt.Sprintf("val%d", i))
-		if err := kv.Get(k, &item); err != nil {
-			t.Error(err)
-		}
-		require.EqualValues(t, v, getItemValue(t, &item))
-		require.EqualValues(t, entries[i].casCounter, item.Counter())
-	}
-
-	for i := 0; i < 100; i++ {
-		k := []byte(fmt.Sprintf("key%d", i))
-		v := []byte(fmt.Sprintf("zzz%d", i))
-		require.NoError(t, kv.CompareAndSet(k, v, entries[i].casCounter))
-	}
-	time.Sleep(time.Second)
-	for i := 0; i < 100; i++ {
-		k := []byte(fmt.Sprintf("key%d", i))
-		v := []byte(fmt.Sprintf("zzz%d", i)) // Value should be changed.
-		if err := kv.Get(k, &item); err != nil {
-			t.Error(err)
-		}
-		require.EqualValues(t, v, getItemValue(t, &item))
-		require.True(t, item.Counter() != 0)
-	}
-}
-
 func TestGet(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
@@ -234,47 +155,34 @@ func TestGet(t *testing.T) {
 		t.Error(err)
 	}
 	defer kv.Close()
+	txnSet(t, kv, []byte("key1"), []byte("val1"), 0x08)
 
-	var item KVItem
-	kv.Set([]byte("key1"), []byte("val1"), 0x08)
-
-	if err := kv.Get([]byte("key1"), &item); err != nil {
-		t.Error(err)
-	}
+	item, err := txnGet(t, kv, []byte("key1"))
+	require.NoError(t, err)
 	require.EqualValues(t, "val1", getItemValue(t, &item))
 	require.Equal(t, byte(0x08), item.UserMeta())
-	require.True(t, item.Counter() != 0)
 
-	kv.Set([]byte("key1"), []byte("val2"), 0x09)
-	if err := kv.Get([]byte("key1"), &item); err != nil {
-		t.Error(err)
-	}
+	txnSet(t, kv, []byte("key1"), []byte("val2"), 0x09)
+	item, err = txnGet(t, kv, []byte("key1"))
+	require.NoError(t, err)
 	require.EqualValues(t, "val2", getItemValue(t, &item))
 	require.Equal(t, byte(0x09), item.UserMeta())
-	require.True(t, item.Counter() != 0)
 
-	kv.Delete([]byte("key1"))
-	if err := kv.Get([]byte("key1"), &item); err != nil {
-		t.Error(err)
-	}
-	require.Nil(t, getItemValue(t, &item))
-	require.True(t, item.Counter() != 0)
+	txnDelete(t, kv, []byte("key1"))
+	item, err = txnGet(t, kv, []byte("key1"))
+	require.Equal(t, ErrKeyNotFound, err)
 
-	kv.Set([]byte("key1"), []byte("val3"), 0x01)
-	if err := kv.Get([]byte("key1"), &item); err != nil {
-		t.Error(err)
-	}
+	txnSet(t, kv, []byte("key1"), []byte("val3"), 0x01)
+	item, err = txnGet(t, kv, []byte("key1"))
+	require.NoError(t, err)
 	require.EqualValues(t, "val3", getItemValue(t, &item))
 	require.Equal(t, byte(0x01), item.UserMeta())
-	require.True(t, item.Counter() != 0)
 
 	longVal := make([]byte, 1000)
-	kv.Set([]byte("key1"), longVal, 0x00)
-	if err := kv.Get([]byte("key1"), &item); err != nil {
-		t.Error(err)
-	}
+	txnSet(t, kv, []byte("key1"), longVal, 0x00)
+	item, err = txnGet(t, kv, []byte("key1"))
+	require.NoError(t, err)
 	require.EqualValues(t, longVal, getItemValue(t, &item))
-	require.True(t, item.Counter() != 0)
 }
 
 func TestExists(t *testing.T) {
@@ -288,32 +196,29 @@ func TestExists(t *testing.T) {
 	defer kv.Close()
 
 	// populate with one entry
-	err = kv.Set([]byte("key1"), []byte("val1"), 0x00)
-	require.NoError(t, err)
+	txnSet(t, kv, []byte("key1"), []byte("val1"), 0x00)
 
 	tt := []struct {
 		key    []byte
 		exists bool
-		name   string
 	}{
 		{
 			key:    []byte("key1"),
 			exists: true,
-			name:   " valid key",
 		},
 		{
 			key:    []byte("non-exits"),
 			exists: false,
-			name:   "non exist key",
 		},
 	}
 
 	for _, test := range tt {
-		t.Run(test.name, func(t *testing.T) {
-			exists, err := kv.Exists(test.key)
-			assert.NoError(t, err)
-			assert.Equal(t, test.exists, exists)
-		})
+		_, err := txnGet(t, kv, test.key)
+		if test.exists {
+			require.NoError(t, err)
+			continue
+		}
+		require.Error(t, err)
 	}
 
 }
@@ -331,68 +236,77 @@ func TestGetMore(t *testing.T) {
 	}
 	defer kv.Close()
 
+	data := func(i int) []byte {
+		return []byte(fmt.Sprintf("%09d", i))
+	}
 	//	n := 500000
 	n := 10000
-	m := 100
+	m := 49 // Increasing would cause ErrTxnTooBig
+	fmt.Println("writing")
 	for i := 0; i < n; i += m {
-		if (i % 10000) == 0 {
-			fmt.Printf("Putting i=%d\n", i)
-		}
-		var entries []*Entry
+		txn, err := kv.NewTransaction(true)
+		require.NoError(t, err)
 		for j := i; j < i+m && j < n; j++ {
-			entries = append(entries, &Entry{
-				Key:   []byte(fmt.Sprintf("%09d", j)),
-				Value: []byte(fmt.Sprintf("%09d", j)),
-			})
+			require.NoError(t, txn.Set(data(j), data(j), 0))
 		}
-		kv.BatchSet(entries)
-		for _, e := range entries {
-			require.NoError(t, e.Error, "entry with error: %+v", e)
-		}
+		require.NoError(t, txn.Commit(nil))
 	}
-	kv.validate()
+	require.NoError(t, kv.validate())
 
-	var item KVItem
+	fmt.Println("retrieving")
 	for i := 0; i < n; i++ {
-		if (i % 10000) == 0 {
-			fmt.Printf("Testing i=%d\n", i)
-		}
-		k := fmt.Sprintf("%09d", i)
-		if err := kv.Get([]byte(k), &item); err != nil {
+		item, err := txnGet(t, kv, data(i))
+		if err != nil {
 			t.Error(err)
 		}
-		require.EqualValues(t, k, string(getItemValue(t, &item)))
+		require.EqualValues(t, string(data(i)), string(getItemValue(t, &item)))
 	}
 
 	// Overwrite
-	for i := n - 1; i >= 0; i -= m {
-		if (i % 10000) == 0 {
-			fmt.Printf("Overwriting i=%d\n", i)
-		}
-		var entries []*Entry
-		for j := i; j > i-m && j >= 0; j-- {
-			entries = append(entries, &Entry{
-				Key: []byte(fmt.Sprintf("%09d", j)),
+	fmt.Println("overwriting")
+	for i := 0; i < n; i += m {
+		txn, err := kv.NewTransaction(true)
+		require.NoError(t, err)
+		for j := i; j < i+m && j < n; j++ {
+			require.NoError(t, txn.Set(data(j),
 				// Use a long value that will certainly exceed value threshold.
-				Value: []byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", j)),
-			})
+				[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", j)),
+				0x00))
 		}
-		kv.BatchSet(entries)
-		for _, e := range entries {
-			require.NoError(t, e.Error, "entry with error: %+v", e)
-		}
+		require.NoError(t, txn.Commit(nil))
 	}
-	kv.validate()
+	require.NoError(t, kv.validate())
+
+	fmt.Println("testing")
 	for i := 0; i < n; i++ {
-		if (i % 10000) == 0 {
-			fmt.Printf("Testing i=%d\n", i)
-		}
 		k := []byte(fmt.Sprintf("%09d", i))
 		expectedValue := fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", i)
-		if err := kv.Get([]byte(k), &item); err != nil {
+		item, err := txnGet(t, kv, []byte(k))
+		if err != nil {
 			t.Error(err)
 		}
-		require.EqualValues(t, expectedValue, string(getItemValue(t, &item)))
+		got := string(getItemValue(t, &item))
+		if expectedValue != got {
+			k0 := y.KeyWithTs(k, math.MaxUint64)
+
+			vs, err := kv.get(k0)
+			require.NoError(t, err)
+			fmt.Printf("wanted=%q Item: %s\n", k, item.ToString())
+			fmt.Printf("on re-run, got version: %+v\n", vs)
+
+			txn, err := kv.NewTransaction(false)
+			require.NoError(t, err)
+			itr := txn.NewIterator(DefaultIteratorOptions)
+			for itr.Seek(k0); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				fmt.Printf("item=%s\n", item.ToString())
+				if !bytes.Equal(item.Key(), k) {
+					break
+				}
+			}
+			itr.Close()
+		}
+		require.EqualValues(t, expectedValue, string(getItemValue(t, &item)), "wanted=%q Item: %s\n", k, item.ToString())
 	}
 
 	// "Delete" key.
@@ -400,17 +314,12 @@ func TestGetMore(t *testing.T) {
 		if (i % 10000) == 0 {
 			fmt.Printf("Deleting i=%d\n", i)
 		}
-		var entries []*Entry
+		txn, err := kv.NewTransaction(true)
+		require.NoError(t, err)
 		for j := i; j < i+m && j < n; j++ {
-			entries = append(entries, &Entry{
-				Key:  []byte(fmt.Sprintf("%09d", j)),
-				Meta: BitDelete,
-			})
+			require.NoError(t, txn.Delete([]byte(fmt.Sprintf("%09d", j))))
 		}
-		kv.BatchSet(entries)
-		for _, e := range entries {
-			require.NoError(t, e.Error, "entry with error: %+v", e)
-		}
+		require.NoError(t, txn.Commit(nil))
 	}
 	kv.validate()
 	for i := 0; i < n; i++ {
@@ -418,11 +327,9 @@ func TestGetMore(t *testing.T) {
 			// Display some progress. Right now, it's not very fast with no caching.
 			fmt.Printf("Testing i=%d\n", i)
 		}
-		k := fmt.Sprintf("%09d", i)
-		if err := kv.Get([]byte(k), &item); err != nil {
-			t.Error(err)
-		}
-		require.Nil(t, getItemValue(t, &item))
+		k := data(i)
+		item, err := txnGet(t, kv, []byte(k))
+		require.Equal(t, ErrKeyNotFound, err, "wanted=%q item=%s\n", k, item.ToString())
 	}
 	fmt.Println("Done and closing")
 }
@@ -442,59 +349,44 @@ func TestExistsMore(t *testing.T) {
 
 	//	n := 500000
 	n := 10000
-	m := 100
+	m := 49
 	for i := 0; i < n; i += m {
 		if (i % 1000) == 0 {
 			fmt.Printf("Putting i=%d\n", i)
 		}
-		var entries []*Entry
+		txn, err := kv.NewTransaction(true)
+		require.NoError(t, err)
 		for j := i; j < i+m && j < n; j++ {
-			entries = append(entries, &Entry{
-				Key:   []byte(fmt.Sprintf("%09d", j)),
-				Value: []byte(fmt.Sprintf("%09d", j)),
-			})
+			require.NoError(t, txn.Set([]byte(fmt.Sprintf("%09d", j)),
+				[]byte(fmt.Sprintf("%09d", j)),
+				0x00))
 		}
-		kv.BatchSet(entries)
-		for _, e := range entries {
-			require.NoError(t, e.Error, "entry with error: %+v", e)
-		}
+		require.NoError(t, txn.Commit(nil))
 	}
 	kv.validate()
 
-	var found bool
 	for i := 0; i < n; i++ {
 		if (i % 1000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		found, err = kv.Exists([]byte(k))
-		if err != nil {
-			t.Error(err)
-		}
-		require.EqualValues(t, true, found)
+		_, err = txnGet(t, kv, []byte(k))
+		require.NoError(t, err)
 	}
-	found, err = kv.Exists([]byte("non-exists"))
-	if err != nil {
-		t.Error(err)
-	}
-	require.EqualValues(t, false, found)
+	_, err = txnGet(t, kv, []byte("non-exists"))
+	require.Error(t, err)
 
 	// "Delete" key.
 	for i := 0; i < n; i += m {
 		if (i % 1000) == 0 {
 			fmt.Printf("Deleting i=%d\n", i)
 		}
-		var entries []*Entry
+		txn, err := kv.NewTransaction(true)
+		require.NoError(t, err)
 		for j := i; j < i+m && j < n; j++ {
-			entries = append(entries, &Entry{
-				Key:  []byte(fmt.Sprintf("%09d", j)),
-				Meta: BitDelete,
-			})
+			require.NoError(t, txn.Delete([]byte(fmt.Sprintf("%09d", j))))
 		}
-		kv.BatchSet(entries)
-		for _, e := range entries {
-			require.NoError(t, e.Error, "entry with error: %+v", e)
-		}
+		require.NoError(t, txn.Commit(nil))
 	}
 	kv.validate()
 	for i := 0; i < n; i++ {
@@ -503,11 +395,8 @@ func TestExistsMore(t *testing.T) {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		found, err := kv.Exists([]byte(k))
-		if err != nil {
-			t.Error(err)
-		}
-		require.False(t, found, fmt.Sprintf("key=%s", k))
+		_, err = txnGet(t, kv, []byte(k))
+		require.Error(t, err)
 	}
 	fmt.Println("Done and closing")
 }
@@ -532,14 +421,16 @@ func TestIterate2Basic(t *testing.T) {
 		if (i % 1000) == 0 {
 			t.Logf("Put i=%d\n", i)
 		}
-		kv.Set(bkey(i), bval(i), byte(i%127))
+		txnSet(t, kv, bkey(i), bval(i), byte(i%127))
 	}
 
 	opt := IteratorOptions{}
 	opt.PrefetchValues = true
 	opt.PrefetchSize = 10
 
-	it := kv.NewIterator(opt)
+	txn, err := kv.NewTransaction(false)
+	require.NoError(t, err)
+	it := txn.NewIterator(opt)
 	{
 		var count int
 		rewind := true
@@ -591,22 +482,21 @@ func TestLoad(t *testing.T) {
 				fmt.Printf("Putting i=%d\n", i)
 			}
 			k := []byte(fmt.Sprintf("%09d", i))
-			kv.Set(k, k, 0x00)
+			txnSet(t, kv, k, k, 0x00)
 		}
 		kv.Close()
 	}
 
 	kv, err := NewKV(getTestOptions(dir))
 	require.NoError(t, err)
-	var item KVItem
+	require.Equal(t, uint64(10001), kv.txnState.readTs())
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		if err := kv.Get([]byte(k), &item); err != nil {
-			t.Error(err)
-		}
+		item, err := txnGet(t, kv, []byte(k))
+		require.NoError(t, err)
 		require.EqualValues(t, k, string(getItemValue(t, &item)))
 	}
 	kv.Close()
@@ -640,35 +530,40 @@ func TestIterateDeleted(t *testing.T) {
 	ps, err := NewKV(&opt)
 	require.NoError(t, err)
 	defer ps.Close()
-	ps.Set([]byte("Key1"), []byte("Value1"), 0x00)
-	ps.Set([]byte("Key2"), []byte("Value2"), 0x00)
+	txnSet(t, ps, []byte("Key1"), []byte("Value1"), 0x00)
+	txnSet(t, ps, []byte("Key2"), []byte("Value2"), 0x00)
 
 	iterOpt := DefaultIteratorOptions
 	iterOpt.PrefetchValues = false
-	idxIt := ps.NewIterator(iterOpt)
+	txn, err := ps.NewTransaction(false)
+	require.NoError(t, err)
+	idxIt := txn.NewIterator(iterOpt)
 	defer idxIt.Close()
 
-	wb := make([]*Entry, 0, 100)
+	count := 0
+	txn2, err := ps.NewTransaction(true)
+	require.NoError(t, err)
 	prefix := []byte("Key")
 	for idxIt.Seek(prefix); idxIt.Valid(); idxIt.Next() {
 		key := idxIt.Item().Key()
 		if !bytes.HasPrefix(key, prefix) {
 			break
 		}
-		wb = EntriesDelete(wb, key)
+		count++
+		newKey := make([]byte, len(key))
+		copy(newKey, key)
+		require.NoError(t, txn2.Delete(newKey))
 	}
-	require.Equal(t, 2, len(wb))
-	ps.BatchSet(wb)
-
-	for _, e := range wb {
-		require.NoError(t, e.Error)
-	}
+	require.Equal(t, 2, count)
+	require.NoError(t, txn2.Commit(nil))
 
 	for _, prefetch := range [...]bool{true, false} {
 		t.Run(fmt.Sprintf("Prefetch=%t", prefetch), func(t *testing.T) {
+			txn, err := ps.NewTransaction(false)
+			require.NoError(t, err)
 			iterOpt = DefaultIteratorOptions
 			iterOpt.PrefetchValues = prefetch
-			idxIt = ps.NewIterator(iterOpt)
+			idxIt = txn.NewIterator(iterOpt)
 
 			var estSize int64
 			var idxKeys []string
@@ -709,8 +604,8 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 
 	key := []byte("k1")
 	// Set a value with size > value threshold so that its written to value log.
-	require.NoError(t, kv.Set(key, []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789FOOBARZOGZOG"), 0x00))
-	require.NoError(t, kv.Delete(key))
+	txnSet(t, kv, key, []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789FOOBARZOGZOG"), 0x00)
+	txnDelete(t, kv, key)
 	kv.Close()
 
 	// Reopen KV
@@ -721,96 +616,8 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 	}
 	defer kv.Close()
 
-	item := KVItem{}
-	require.NoError(t, kv.Get(key, &item))
-	require.Equal(t, 0, len(getItemValue(t, &item)))
-}
-
-func TestSetIfAbsent(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	opt := getTestOptions(dir)
-	kv, err := NewKV(opt)
-	require.NoError(t, err)
-
-	key := []byte("k1")
-	err = kv.SetIfAbsent(key, []byte("val"), 0x00)
-	require.NoError(t, err)
-
-	err = kv.SetIfAbsent(key, []byte("val2"), 0x00)
-	require.EqualError(t, err, ErrKeyExists.Error())
-}
-
-func BenchmarkExists(b *testing.B) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(b, err)
-	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
-	if err != nil {
-		b.Error(err)
-		b.Fail()
-	}
-	defer kv.Close()
-
-	n := 50000
-	m := 100
-	for i := 0; i < n; i += m {
-		if (i % 10000) == 0 {
-			fmt.Printf("Putting i=%d\n", i)
-		}
-		var entries []*Entry
-		for j := i; j < i+m && j < n; j++ {
-			entries = append(entries, &Entry{
-				Key:   []byte(fmt.Sprintf("%09d", j)),
-				Value: []byte(fmt.Sprintf("%09d", j)),
-			})
-		}
-		kv.BatchSet(entries)
-		for _, e := range entries {
-			require.NoError(b, e.Error, "entry with error: %+v", e)
-		}
-	}
-	kv.validate()
-
-	// rand.Seed(int64(time.Now().Nanosecond()))
-
-	b.Run("WithGet", func(b *testing.B) {
-		b.ResetTimer()
-		item := &KVItem{}
-		for i := 0; i < b.N; i++ {
-			k := fmt.Sprintf("%09d", i%n)
-			err := kv.Get([]byte(k), item)
-			if err != nil {
-				b.Error(err)
-			}
-			var val []byte
-			err = item.Value(func(v []byte) error {
-				val = make([]byte, len(v))
-				copy(val, v)
-				return nil
-			})
-			if err != nil {
-				b.Error(err)
-			}
-			found := val == nil
-			_ = found
-		}
-	})
-
-	b.Run("WithExists", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			// k := fmt.Sprintf("%09d", rand.Intn(n))
-			k := fmt.Sprintf("%09d", i%n)
-			// k := fmt.Sprintf("%09d", 0)
-			found, err := kv.Exists([]byte(k))
-			if err != nil {
-				b.Error(err)
-			}
-			_ = found
-		}
-	})
-
-	fmt.Println("Done and closing")
+	_, err = txnGet(t, kv, key)
+	require.Error(t, ErrKeyNotFound, err)
 }
 
 func TestPidFile(t *testing.T) {
@@ -839,21 +646,18 @@ func TestBigKeyValuePairs(t *testing.T) {
 	bigV := make([]byte, opt.ValueLogFileSize+1)
 	small := make([]byte, 10)
 
-	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), kv.Set(bigK, small, 0).Error())
-	require.Regexp(t, regexp.MustCompile("Value.*exceeded"), kv.Set(small, bigV, 0).Error())
+	txn, err := kv.NewTransaction(true)
+	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, small, 0))
+	txn, err = kv.NewTransaction(true)
+	require.Regexp(t, regexp.MustCompile("Value.*exceeded"), txn.Set(small, bigV, 0))
 
-	e1 := Entry{Key: small, Value: small}
-	e2 := Entry{Key: bigK, Value: bigV}
-	err = kv.BatchSet([]*Entry{&e1, &e2})
-	require.Nil(t, err)
-	require.Nil(t, e1.Error)
-	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), e2.Error.Error())
+	txn, err = kv.NewTransaction(true)
+	require.NoError(t, err)
+	require.NoError(t, txn.Set(small, small, 0x00))
+	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, bigV, 0x00))
 
-	// make sure e1 was actually set:
-	var item KVItem
-	require.NoError(t, kv.Get(small, &item))
-	require.Equal(t, item.Key(), small)
-	require.Equal(t, getItemValue(t, &item), small)
+	_, err = txnGet(t, kv, small)
+	require.Equal(t, ErrKeyNotFound, err)
 
 	require.NoError(t, kv.Close())
 }
@@ -877,7 +681,7 @@ func TestIteratorPrefetchSize(t *testing.T) {
 		if (i % 10) == 0 {
 			t.Logf("Put i=%d\n", i)
 		}
-		kv.Set(bkey(i), bval(i), byte(i%127))
+		txnSet(t, kv, bkey(i), bval(i), byte(i%127))
 	}
 
 	getIteratorCount := func(prefetchSize int) int {
@@ -886,7 +690,9 @@ func TestIteratorPrefetchSize(t *testing.T) {
 		opt.PrefetchSize = prefetchSize
 
 		var count int
-		it := kv.NewIterator(opt)
+		txn, err := kv.NewTransaction(false)
+		require.NoError(t, err)
+		it := txn.NewIterator(opt)
 		{
 			t.Log("Starting first basic iteration")
 			for it.Rewind(); it.Valid(); it.Next() {
@@ -921,7 +727,12 @@ func TestSetIfAbsentAsync(t *testing.T) {
 		if (i % 10) == 0 {
 			t.Logf("Put i=%d\n", i)
 		}
-		kv.SetIfAbsentAsync(bkey(i), nil, byte(i%127), f)
+		txn, err := kv.NewTransaction(true)
+		require.NoError(t, err)
+		_, err = txn.Get(bkey(i))
+		require.Equal(t, ErrKeyNotFound, err)
+		require.NoError(t, txn.Set(bkey(i), nil, byte(i%127)))
+		require.NoError(t, txn.Commit(f))
 	}
 
 	require.NoError(t, kv.Close())
@@ -929,8 +740,10 @@ func TestSetIfAbsentAsync(t *testing.T) {
 	require.NoError(t, err)
 
 	opt := DefaultIteratorOptions
+	txn, err := kv.NewTransaction(false)
+	require.NoError(t, err)
 	var count int
-	it := kv.NewIterator(opt)
+	it := txn.NewIterator(opt)
 	{
 		t.Log("Starting first basic iteration")
 		for it.Rewind(); it.Valid(); it.Next() {
@@ -968,8 +781,7 @@ func TestGetSetRace(t *testing.T) {
 
 		for i := 0; i < numOp; i++ {
 			key := fmt.Sprintf("%d", i)
-			err = kv.Set([]byte(key), data, 0x00)
-			require.NoError(t, err)
+			txnSet(t, kv, []byte(key), data, 0x00)
 			keyCh <- key
 		}
 	}()
@@ -980,9 +792,7 @@ func TestGetSetRace(t *testing.T) {
 		defer wg.Done()
 
 		for key := range keyCh {
-			var item KVItem
-
-			err := kv.Get([]byte(key), &item)
+			item, err := txnGet(t, kv, []byte(key))
 			require.NoError(t, err)
 
 			var val []byte

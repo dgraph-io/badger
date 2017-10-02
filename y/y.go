@@ -96,9 +96,11 @@ func ParseTs(key []byte) uint64 {
 }
 
 func ParseKey(key []byte) []byte {
-	if len(key) < 8 {
-		return key
+	if key == nil {
+		return nil
 	}
+
+	AssertTruef(len(key) > 8, "key=%q", key)
 	return key[:len(key)-8]
 }
 

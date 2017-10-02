@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"fmt"
 	"sync"
 
 	"github.com/dgraph-io/badger/y"
@@ -45,11 +46,22 @@ type KVItem struct {
 	val      []byte
 	slice    *y.Slice // Used only during prefetching.
 	next     *KVItem
+	version  uint64
+}
+
+func (item *KVItem) ToString() string {
+	return fmt.Sprintf("key=%q, version=%d, meta=%x", item.Key(), item.Version(), item.meta)
+
 }
 
 // Key returns the key. Remember to copy if you need to access it outside the iteration loop.
 func (item *KVItem) Key() []byte {
-	return y.ParseKey(item.key)
+	return item.key
+}
+
+// Version returns the commit timestamp of the item.
+func (item *KVItem) Version() uint64 {
+	return item.version
 }
 
 // Value retrieves the value of the item from the value log. It calls the
@@ -113,11 +125,6 @@ func (item *KVItem) EstimatedSize() int64 {
 	var vp valuePointer
 	vp.Decode(item.vptr)
 	return int64(vp.Len) // includes key length.
-}
-
-// Version returns the commit timestamp of the item.
-func (item *KVItem) Version() uint64 {
-	return y.ParseTs(item.key)
 }
 
 // UserMeta returns the userMeta set by the user. Typically, this byte, optionally set by the user
@@ -303,7 +310,8 @@ FILL:
 
 	// Reverse direction.
 	nextTs := y.ParseTs(mi.Key())
-	if nextTs <= it.readTs && y.SameKey(mi.Key(), item.key) {
+	mik := y.ParseKey(mi.Key())
+	if nextTs <= it.readTs && bytes.Compare(mik, item.key) == 0 {
 		// This is a valid potential candidate.
 		goto FILL
 	}
@@ -320,7 +328,10 @@ func (it *Iterator) fill(item *KVItem) {
 	vs := it.iitr.Value()
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta
-	item.key = y.Safecopy(item.key, it.iitr.Key())
+
+	item.version = y.ParseTs(it.iitr.Key())
+	item.key = y.Safecopy(item.key, y.ParseKey(it.iitr.Key()))
+
 	item.vptr = y.Safecopy(item.vptr, vs.Value)
 	item.val = nil
 	if it.opt.PrefetchValues {
@@ -378,41 +389,4 @@ func (it *Iterator) Rewind() {
 
 	it.iitr.Rewind()
 	it.prefetch()
-}
-
-// NewIterator returns a new iterator. Depending upon the options, either only keys, or both
-// key-value pairs would be fetched. The keys are returned in lexicographically sorted order.
-// Usage:
-//   opt := badger.DefaultIteratorOptions
-//   itr := kv.NewIterator(opt)
-//   for itr.Rewind(); itr.Valid(); itr.Next() {
-//     item := itr.Item()
-//     key := item.Key()
-//     var val []byte
-//     err = item.Value(func(v []byte) {
-//         val = make([]byte, len(v))
-// 	       copy(val, v)
-//     }) 	// This could block while value is fetched from value log.
-//          // For key only iteration, set opt.PrefetchValues to false, and don't call
-//          // item.Value(func(v []byte)).
-//
-//     // Remember that both key, val would become invalid in the next iteration of the loop.
-//     // So, if you need access to them outside, copy them or parse them.
-//   }
-//   itr.Close()
-// TODO: Remove this.
-func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
-	tables, decr := s.getMemTables()
-	defer decr()
-	s.vlog.incrIteratorCount()
-	var iters []y.Iterator
-	for i := 0; i < len(tables); i++ {
-		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
-	}
-	iters = s.lc.appendIterators(iters, opt.Reverse) // This will increment references.
-	res := &Iterator{
-		iitr: y.NewMergeIterator(iters, opt.Reverse),
-		opt:  opt,
-	}
-	return res
 }

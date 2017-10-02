@@ -44,18 +44,14 @@ func TestValueBasic(t *testing.T) {
 	require.True(t, len(val1) >= kv.opt.ValueThreshold)
 
 	entry := &Entry{
-		Key:             []byte("samplekey"),
-		Value:           []byte(val1),
-		Meta:            BitValuePointer,
-		CASCounterCheck: 22222,
-		casCounter:      33333,
+		Key:   []byte("samplekey"),
+		Value: []byte(val1),
+		Meta:  BitValuePointer,
 	}
 	entry2 := &Entry{
-		Key:             []byte("samplekeyb"),
-		Value:           []byte(val2),
-		Meta:            BitValuePointer,
-		CASCounterCheck: 22225,
-		casCounter:      33335,
+		Key:   []byte("samplekeyb"),
+		Value: []byte(val2),
+		Meta:  BitValuePointer,
 	}
 
 	b := new(request)
@@ -81,18 +77,14 @@ func TestValueBasic(t *testing.T) {
 	readEntries := []Entry{valueBytesToEntry(buf1), valueBytesToEntry(buf2)}
 	require.EqualValues(t, []Entry{
 		{
-			Key:             []byte("samplekey"),
-			Value:           []byte(val1),
-			Meta:            BitValuePointer,
-			CASCounterCheck: 22222,
-			casCounter:      33333,
+			Key:   []byte("samplekey"),
+			Value: []byte(val1),
+			Meta:  BitValuePointer,
 		},
 		{
-			Key:             []byte("samplekeyb"),
-			Value:           []byte(val2),
-			Meta:            BitValuePointer,
-			CASCounterCheck: 22225,
-			casCounter:      33335,
+			Key:   []byte("samplekeyb"),
+			Value: []byte(val2),
+			Meta:  BitValuePointer,
 		},
 	}, readEntries)
 }
@@ -108,22 +100,22 @@ func TestValueGC(t *testing.T) {
 	defer kv.Close()
 
 	sz := 32 << 10
-	var entries []*Entry
+	txn, err := kv.NewTransaction(true)
+	require.NoError(t, err)
 	for i := 0; i < 100; i++ {
 		v := make([]byte, sz)
 		rand.Read(v[:rand.Intn(sz)])
-		entries = append(entries, &Entry{
-			Key:   []byte(fmt.Sprintf("key%d", i)),
-			Value: v,
-		})
+		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v, 0))
+		if i%20 == 0 {
+			require.NoError(t, txn.Commit(nil))
+			txn, err = kv.NewTransaction(true)
+			require.NoError(t, err)
+		}
 	}
-	kv.batchSet(entries)
-	for _, e := range entries {
-		require.NoError(t, e.Error, "entry with error: %+v", e)
-	}
+	require.NoError(t, txn.Commit(nil))
 
 	for i := 0; i < 45; i++ {
-		kv.Delete([]byte(fmt.Sprintf("key%d", i)))
+		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
 	}
 
 	kv.vlog.filesLock.RLock()
@@ -136,12 +128,10 @@ func TestValueGC(t *testing.T) {
 	//	})
 
 	kv.vlog.rewrite(lf)
-	var item KVItem
 	for i := 45; i < 100; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
-		if err := kv.Get(key, &item); err != nil {
-			t.Error(err)
-		}
+		item, err := txnGet(t, kv, key)
+		require.NoError(t, err)
 		val := getItemValue(t, &item)
 		require.NotNil(t, val)
 		require.True(t, len(val) == sz, "Size found: %d", len(val))
@@ -159,40 +149,27 @@ func TestValueGC2(t *testing.T) {
 	defer kv.Close()
 
 	sz := 32 << 10
-	var entries []*Entry
+	txn, err := kv.NewTransaction(true)
+	require.NoError(t, err)
 	for i := 0; i < 100; i++ {
 		v := make([]byte, sz)
 		rand.Read(v[:rand.Intn(sz)])
-		entry := &Entry{
-			Key:   []byte(fmt.Sprintf("key%d", i)),
-			Value: v,
-		}
-		entries = append(entries, entry)
-		// We don't overwrite these values later in the test
-		if i == 10 || i == 11 {
-			entry.Meta = BitSetIfAbsent
+		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v, 0))
+		if i%20 == 0 {
+			require.NoError(t, txn.Commit(nil))
+			txn, err = kv.NewTransaction(true)
+			require.NoError(t, err)
 		}
 	}
-	kv.BatchSet(entries)
-	for _, e := range entries {
-		require.NoError(t, e.Error, "entry with error: %+v", e)
-	}
+	require.NoError(t, txn.Commit(nil))
 
 	for i := 0; i < 5; i++ {
-		kv.Delete([]byte(fmt.Sprintf("key%d", i)))
+		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
 	}
 
-	entries = entries[:0]
 	for i := 5; i < 10; i++ {
 		v := []byte(fmt.Sprintf("value%d", i))
-		entries = append(entries, &Entry{
-			Key:   []byte(fmt.Sprintf("key%d", i)),
-			Value: v,
-		})
-	}
-	kv.BatchSet(entries)
-	for _, e := range entries {
-		require.NoError(t, e.Error, "entry with error: %+v", e)
+		txnSet(t, kv, []byte(fmt.Sprintf("key%d", i)), v, 0)
 	}
 
 	kv.vlog.filesLock.RLock()
@@ -205,29 +182,23 @@ func TestValueGC2(t *testing.T) {
 	//	})
 
 	kv.vlog.rewrite(lf)
-	var item KVItem
 	for i := 0; i < 5; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
-		if err := kv.Get(key, &item); err != nil {
-			t.Error(err)
-		}
-		val := getItemValue(t, &item)
-		require.True(t, len(val) == 0, "Size found: %d", len(val))
+		_, err := txnGet(t, kv, key)
+		require.Error(t, ErrKeyNotFound, err)
 	}
 	for i := 5; i < 10; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
-		if err := kv.Get(key, &item); err != nil {
-			t.Error(err)
-		}
+		item, err := txnGet(t, kv, key)
+		require.NoError(t, err)
 		val := getItemValue(t, &item)
 		require.NotNil(t, val)
 		require.Equal(t, string(val), fmt.Sprintf("value%d", i))
 	}
 	for i := 10; i < 100; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
-		if err := kv.Get(key, &item); err != nil {
-			t.Error(err)
-		}
+		item, err := txnGet(t, kv, key)
+		require.NoError(t, err)
 		val := getItemValue(t, &item)
 		require.NotNil(t, val)
 		require.True(t, len(val) == sz, "Size found: %d", len(val))
@@ -250,7 +221,8 @@ func TestValueGC3(t *testing.T) {
 	valueSize := 32 << 10
 
 	var value3 []byte
-	var entries []*Entry
+	txn, err := kv.NewTransaction(true)
+	require.NoError(t, err)
 	for i := 0; i < 100; i++ {
 		v := make([]byte, valueSize) // 32K * 100 will take >=3'276'800 B.
 		if i == 3 {
@@ -258,17 +230,14 @@ func TestValueGC3(t *testing.T) {
 		}
 		rand.Read(v[:])
 		// Keys key000, key001, key002, such that sorted order matches insertion order
-		entry := &Entry{
-			Key:   []byte(fmt.Sprintf("key%03d", i)),
-			Value: v,
+		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%03d", i)), v, 0))
+		if i%20 == 0 {
+			require.NoError(t, txn.Commit(nil))
+			txn, err = kv.NewTransaction(true)
+			require.NoError(t, err)
 		}
-		entries = append(entries, entry)
 	}
-	err = kv.BatchSet(entries)
-	require.NoError(t, err)
-	for _, e := range entries {
-		require.NoError(t, e.Error)
-	}
+	require.NoError(t, txn.Commit(nil))
 
 	// Start an iterator to keys in the first value log file
 	itOpt := IteratorOptions{
@@ -277,7 +246,9 @@ func TestValueGC3(t *testing.T) {
 		Reverse:        false,
 	}
 
-	it := kv.NewIterator(itOpt)
+	txn, err = kv.NewTransaction(true)
+	require.NoError(t, err)
+	it := txn.NewIterator(itOpt)
 	defer it.Close()
 	// Walk a few keys
 	it.Rewind()
@@ -322,23 +293,24 @@ func TestChecksums(t *testing.T) {
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
 	kv, err := NewKV(opts)
 	require.NoError(t, err)
+	require.NoError(t, kv.Close())
 
 	var (
+		k0 = []byte("k0")
 		k1 = []byte("k1")
 		k2 = []byte("k2")
 		k3 = []byte("k3")
+		v0 = []byte("value0-012345678901234567890123")
 		v1 = []byte("value1-012345678901234567890123")
 		v2 = []byte("value2-012345678901234567890123")
 		v3 = []byte("value3-012345678901234567890123")
 	)
 	// Make sure the value log would actually store the item
-	require.True(t, len(v3) >= kv.opt.ValueThreshold)
+	require.True(t, len(v0) >= kv.opt.ValueThreshold)
 
-	require.NoError(t, kv.Set(k1, v1, 0))
-	require.NoError(t, kv.Close())
-
-	// Use a vlog with K1=V1 and a (corrupted) K2=V2
+	// Use a vlog with K0=V0 and a (corrupted) second transaction(k1,k2)
 	buf := createVlog(t, []*Entry{
+		{Key: k0, Value: v0},
 		{Key: k1, Value: v1},
 		{Key: k2, Value: v2},
 	})
@@ -348,26 +320,29 @@ func TestChecksums(t *testing.T) {
 	// K1 should exist, but K2 shouldn't.
 	kv, err = NewKV(opts)
 	require.NoError(t, err)
-	var item KVItem
-	require.NoError(t, kv.Get(k1, &item))
-	require.Equal(t, getItemValue(t, &item), v1)
-	ok, err := kv.Exists(k2)
+	item, err := txnGet(t, kv, k0)
 	require.NoError(t, err)
-	require.False(t, ok)
+	require.Equal(t, getItemValue(t, &item), v0)
+	_, err = txnGet(t, kv, k1)
+	require.Error(t, ErrKeyNotFound, err)
+	_, err = txnGet(t, kv, k2)
+	require.Error(t, ErrKeyNotFound, err)
 	// Write K3 at the end of the vlog.
-	require.NoError(t, kv.Set(k3, v3, 0))
+	txnSet(t, kv, k3, v3, 0)
 	require.NoError(t, kv.Close())
 
-	// The vlog should contain K1 and K3 (K2 was lost when Badger started up
+	// The vlog should contain K0 and K3 (K1 and k2 was lost when Badger started up
 	// last due to checksum failure).
 	kv, err = NewKV(opts)
 	require.NoError(t, err)
-	iter := kv.NewIterator(DefaultIteratorOptions)
-	iter.Seek(k1)
+	txn, err := kv.NewTransaction(false)
+	require.NoError(t, err)
+	iter := txn.NewIterator(DefaultIteratorOptions)
+	iter.Seek(k0)
 	require.True(t, iter.Valid())
 	it := iter.Item()
-	require.Equal(t, it.Key(), k1)
-	require.Equal(t, getItemValue(t, it), v1)
+	require.Equal(t, it.Key(), k0)
+	require.Equal(t, getItemValue(t, it), v0)
 	iter.Next()
 	require.True(t, iter.Valid())
 	it = iter.Item()
@@ -390,9 +365,11 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	require.NoError(t, kv.Close())
 
 	var (
+		k0 = []byte("k0")
 		k1 = []byte("k1")
 		k2 = []byte("k2")
 		k3 = []byte("k3")
+		v0 = []byte("value0-012345678901234567890123")
 		v1 = []byte("value1-012345678901234567890123")
 		v2 = []byte("value2-012345678901234567890123")
 		v3 = []byte("value3-012345678901234567890123")
@@ -401,30 +378,32 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	require.True(t, len(v3) >= kv.opt.ValueThreshold)
 
 	// Create truncated vlog to simulate a partial append.
+	// k0 - single transaction, k1 and k2 in another transaction
 	buf := createVlog(t, []*Entry{
+		{Key: k0, Value: v0},
 		{Key: k1, Value: v1},
 		{Key: k2, Value: v2},
 	})
 	buf = buf[:len(buf)-6]
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
 
-	// Badger should now start up, but with only K1.
+	// Badger should now start up
 	kv, err = NewKV(opts)
 	require.NoError(t, err)
-	var item KVItem
-	require.NoError(t, kv.Get(k1, &item))
-	ok, err := kv.Exists(k2)
+	item, err := txnGet(t, kv, k0)
 	require.NoError(t, err)
-	require.False(t, ok)
-	require.Equal(t, item.Key(), k1)
-	require.Equal(t, getItemValue(t, &item), v1)
+	require.Equal(t, v0, getItemValue(t, &item))
+	_, err = txnGet(t, kv, k1)
+	require.Error(t, ErrKeyNotFound, err)
+	_, err = txnGet(t, kv, k2)
+	require.Error(t, ErrKeyNotFound, err)
 
 	// When K3 is set, it should be persisted after a restart.
-	require.NoError(t, kv.Set(k3, v3, 0))
+	txnSet(t, kv, k3, v3, 0)
 	require.NoError(t, kv.Close())
 	kv, err = NewKV(getTestOptions(dir))
 	require.NoError(t, err)
-	checkKeys(t, kv, [][]byte{k1, k3})
+	checkKeys(t, kv, [][]byte{k3})
 	require.NoError(t, kv.Close())
 }
 
@@ -440,22 +419,22 @@ func TestValueLogTrigger(t *testing.T) {
 
 	// Write a lot of data, so it creates some work for valug log GC.
 	sz := 32 << 10
-	var entries []*Entry
+	txn, err := kv.NewTransaction(true)
+	require.NoError(t, err)
 	for i := 0; i < 100; i++ {
 		v := make([]byte, sz)
 		rand.Read(v[:rand.Intn(sz)])
-		entries = append(entries, &Entry{
-			Key:   []byte(fmt.Sprintf("key%d", i)),
-			Value: v,
-		})
+		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v, 0))
+		if i%20 == 0 {
+			require.NoError(t, txn.Commit(nil))
+			txn, err = kv.NewTransaction(true)
+			require.NoError(t, err)
+		}
 	}
-	kv.BatchSet(entries)
-	for _, e := range entries {
-		require.NoError(t, e.Error, "entry with error: %+v", e)
-	}
+	require.NoError(t, txn.Commit(nil))
 
 	for i := 0; i < 45; i++ {
-		kv.Delete([]byte(fmt.Sprintf("key%d", i)))
+		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
 	}
 
 	// Now attempt to run 5 value log GCs simultaneously.
@@ -486,7 +465,13 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
 	kv, err := NewKV(opts)
 	require.NoError(t, err)
-	require.NoError(t, kv.BatchSet(entries))
+	txnSet(t, kv, entries[0].Key, entries[0].Value, entries[0].Meta)
+	entries = entries[1:]
+	txn, err := kv.NewTransaction(true)
+	for _, entry := range entries {
+		require.NoError(t, txn.Set(entry.Key, entry.Value, entry.Meta))
+	}
+	require.NoError(t, txn.Commit(nil))
 	require.NoError(t, kv.Close())
 
 	filename := vlogFilePath(dir, 0)
@@ -497,7 +482,9 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 
 func checkKeys(t *testing.T, kv *KV, keys [][]byte) {
 	i := 0
-	iter := kv.NewIterator(IteratorOptions{})
+	txn, err := kv.NewTransaction(false)
+	require.NoError(t, err)
+	iter := txn.NewIterator(IteratorOptions{})
 	for iter.Seek(keys[0]); iter.Valid(); iter.Next() {
 		require.Equal(t, iter.Item().Key(), keys[i])
 		i++

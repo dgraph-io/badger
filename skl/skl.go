@@ -109,7 +109,7 @@ func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 	node.keyOffset = arena.putKey(key)
 	node.keySize = uint16(len(key))
 	node.height = uint16(height)
-	node.value = encodeValue(arena.putVal(v), uint16(v.EncodedSize()))
+	node.value = encodeValue(arena.putVal(v), v.EncodedSize())
 	return node
 }
 
@@ -146,7 +146,7 @@ func (s *node) key(arena *Arena) []byte {
 
 func (s *node) setValue(arena *Arena, v y.ValueStruct) {
 	valOffset := arena.putVal(v)
-	value := encodeValue(valOffset, uint16(len(v.Value)))
+	value := encodeValue(valOffset, v.EncodedSize())
 	atomic.StoreUint64(&s.value, value)
 }
 
@@ -378,11 +378,13 @@ func (s *Skiplist) Get(key []byte) y.ValueStruct {
 	if n == nil {
 		return y.ValueStruct{}
 	}
-	valOffset, valSize := n.getValueOffset()
+
 	nextKey := s.arena.getKey(n.keyOffset, n.keySize)
 	if !y.SameKey(key, nextKey) {
 		return y.ValueStruct{}
 	}
+
+	valOffset, valSize := n.getValueOffset()
 	vs := s.arena.getVal(valOffset, valSize)
 	vs.Version = y.ParseTs(nextKey)
 	return vs

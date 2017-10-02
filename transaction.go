@@ -204,6 +204,7 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 			item.userMeta = e.UserMeta
 			item.key = key
 			item.status = prefetched
+			item.version = txn.readTs
 			// We probably don't need to set KV on item here.
 			return item, nil
 		}
@@ -225,9 +226,10 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 		return item, ErrKeyNotFound
 	}
 
+	item.key = key
+	item.version = vs.Version
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta
-	item.key = key
 	item.kv = txn.kv
 	item.vptr = vs.Value
 	return item, nil
@@ -263,9 +265,8 @@ func (txn *Txn) Commit(callback func(error)) error {
 		e.Meta |= BitTxn
 		entries = append(entries, e)
 	}
-	// TODO: Add logic in replay to deal with this.
 	entry := &Entry{
-		Key:   txnKey,
+		Key:   y.KeyWithTs(txnKey, commitTs),
 		Value: []byte(strconv.FormatUint(commitTs, 10)),
 		Meta:  BitFinTxn,
 	}
