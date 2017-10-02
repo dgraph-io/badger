@@ -87,7 +87,21 @@ func (gs *globalTxnState) newCommitTs(txn *Txn) uint64 {
 	if gs.hasConflict(txn) {
 		return 0
 	}
-	ts := gs.nextCommit
+
+	var ts uint64
+	if txn.commitTs == 0 {
+		// This is the general case, when user doesn't specify the read and commit ts.
+		ts = gs.nextCommit
+		gs.nextCommit++
+
+	} else {
+		// If commitTs is set, use it instead.
+		ts = txn.commitTs
+		if gs.nextCommit <= ts { // Update this to max+1 commit ts, so replay works.
+			gs.nextCommit = ts + 1
+		}
+	}
+
 	for _, w := range txn.writes {
 		gs.commits[w] = ts // Update the commitTs.
 	}
@@ -96,8 +110,6 @@ func (gs *globalTxnState) newCommitTs(txn *Txn) uint64 {
 		panic(fmt.Sprintf("We shouldn't have the commit ts: %d", ts))
 	}
 	gs.pendingCommits[ts] = struct{}{}
-
-	gs.nextCommit++
 	return ts
 }
 
@@ -128,7 +140,8 @@ func (gs *globalTxnState) doneCommit(cts uint64) {
 }
 
 type Txn struct {
-	readTs uint64
+	readTs   uint64
+	commitTs uint64
 
 	update bool     // update is used to conditionally keep track of reads.
 	reads  []uint64 // contains fingerprints of keys read.
@@ -282,6 +295,11 @@ func (txn *Txn) Commit(callback func(error)) error {
 	return txn.kv.batchSetAsync(entries, callback)
 }
 
+func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
+	txn.commitTs = commitTs
+	return txn.Commit(callback)
+}
+
 // NewIterator returns a new iterator. Depending upon the options, either only keys, or both
 // key-value pairs would be fetched. The keys are returned in lexicographically sorted order.
 // Usage:
@@ -320,14 +338,23 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	}
 	return res
 }
-func (kv *KV) NewTransaction(update bool) (*Txn, error) {
+
+func (kv *KV) NewTxn(update bool) *Txn {
 	txn := &Txn{
-		update:        update,
-		gs:            kv.txnState,
-		kv:            kv,
-		readTs:        kv.txnState.readTs(),
-		pendingWrites: make(map[string]*Entry),
+		update: update,
+		gs:     kv.txnState,
+		kv:     kv,
+		readTs: kv.txnState.readTs(),
+	}
+	if update {
+		txn.pendingWrites = make(map[string]*Entry)
 	}
 
-	return txn, nil
+	return txn
+}
+
+func (kv *KV) NewTxnAt(readTs uint64, update bool) *Txn {
+	txn := kv.NewTxn(update)
+	txn.readTs = readTs
+	return txn
 }
