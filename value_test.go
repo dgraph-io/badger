@@ -276,6 +276,71 @@ func TestValueGC3(t *testing.T) {
 	require.Equal(t, value3, v3)
 }
 
+func TestValueGC4(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opt := getTestOptions(dir)
+	opt.ValueLogFileSize = 1 << 20
+
+	kv, _ := NewKV(opt)
+	defer kv.Close()
+
+	sz := 128 << 10 // 5 entries per value log file.
+	txn, err := kv.NewTransaction(true)
+	require.NoError(t, err)
+	for i := 0; i < 24; i++ {
+		v := make([]byte, sz)
+		rand.Read(v[:rand.Intn(sz)])
+		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v, 0))
+		if i%3 == 0 {
+			require.NoError(t, txn.Commit(nil))
+			txn, err = kv.NewTransaction(true)
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, txn.Commit(nil))
+
+	for i := 0; i < 8; i++ {
+		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
+	}
+
+	for i := 8; i < 16; i++ {
+		v := []byte(fmt.Sprintf("value%d", i))
+		txnSet(t, kv, []byte(fmt.Sprintf("key%d", i)), v, 0)
+	}
+
+	kv.vlog.filesLock.RLock()
+	lf0 := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
+	lf1 := kv.vlog.filesMap[kv.vlog.sortedFids()[1]]
+	kv.vlog.filesLock.RUnlock()
+
+	//	lf.iterate(0, func(e Entry) bool {
+	//		e.print("lf")
+	//		return true
+	//	})
+
+	kv.vlog.rewrite(lf0)
+	kv.vlog.rewrite(lf1)
+
+	// Replay value log
+	kv.vlog.Replay(valuePointer{Fid: 2}, replayFunction(kv))
+
+	for i := 0; i < 8; i++ {
+		key := []byte(fmt.Sprintf("key%d", i))
+		_, err := txnGet(t, kv, key)
+		require.Error(t, ErrKeyNotFound, err)
+	}
+	for i := 8; i < 16; i++ {
+		key := []byte(fmt.Sprintf("key%d", i))
+		item, err := txnGet(t, kv, key)
+		require.NoError(t, err)
+		val := getItemValue(t, &item)
+		require.NotNil(t, val)
+		require.Equal(t, string(val), fmt.Sprintf("value%d", i))
+	}
+}
+
 func TestChecksums(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)

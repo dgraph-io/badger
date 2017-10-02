@@ -81,6 +81,88 @@ const (
 	kvWriteChCapacity = 1000
 )
 
+func replayFunction(out *KV) func(entry, valuePointer) error {
+	type txnEntry struct {
+		nk []byte
+		v  y.ValueStruct
+	}
+
+	var txn []txnEntry
+	var lastCommit uint64
+
+	toLSM := func(nk []byte, vs y.ValueStruct) {
+		for err := out.ensureRoomForWrite(); err != nil; err = out.ensureRoomForWrite() {
+			out.elog.Printf("Replay: Making room for writes")
+			time.Sleep(10 * time.Millisecond)
+		}
+		out.mt.Put(nk, vs)
+	}
+
+	first := true
+	return func(e entry, vp valuePointer) error { // Function for replaying.
+		if first {
+			out.elog.Printf("First key=%s\n", e.Key)
+		}
+		first = false
+
+		if out.txnState.curRead < y.ParseTs(e.Key) {
+			out.txnState.curRead = y.ParseTs(e.Key)
+		}
+
+		nk := make([]byte, len(e.Key))
+		copy(nk, e.Key)
+		var nv []byte
+		meta := e.Meta
+		if out.shouldWriteValueToLSM(e) {
+			nv = make([]byte, len(e.Value))
+			copy(nv, e.Value)
+		} else {
+			nv = make([]byte, vptrSize)
+			vp.Encode(nv)
+			meta = meta | BitValuePointer
+		}
+
+		v := y.ValueStruct{
+			Value:    nv,
+			Meta:     meta,
+			UserMeta: e.UserMeta,
+		}
+
+		if e.Meta&BitFinTxn > 0 {
+			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
+			if err != nil {
+				return errors.Wrapf(err, "Unable to parse txn fin: %q", e.Value)
+			}
+			y.AssertTrue(lastCommit == txnTs)
+			y.AssertTrue(len(txn) > 0)
+			// Got the end of txn. Now we can store them.
+			for _, t := range txn {
+				toLSM(t.nk, t.v)
+			}
+			txn = txn[:0]
+			lastCommit = 0
+
+		} else if e.Meta&BitTxn == 0 {
+			// This entry is from a rewrite.
+			toLSM(nk, v)
+
+			// We shouldn't get this entry in the middle of a transaction.
+			y.AssertTrue(lastCommit == 0)
+			y.AssertTrue(len(txn) == 0)
+
+		} else {
+			txnTs := y.ParseTs(nk)
+			if lastCommit == 0 {
+				lastCommit = txnTs
+			}
+			y.AssertTrue(lastCommit == txnTs)
+			te := txnEntry{nk: nk, v: v}
+			txn = append(txn, te)
+		}
+		return nil
+	}
+}
+
 // NewKV returns a new KV object.
 func NewKV(optParam *Options) (out *KV, err error) {
 	// Make a copy early and fill in maxBatchSize
@@ -200,86 +282,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	replayCloser := y.NewCloser(1)
 	go out.doWrites(replayCloser)
 
-	type txnEntry struct {
-		nk []byte
-		v  y.ValueStruct
-	}
-
-	var txn []txnEntry
-	var lastCommit uint64
-
-	toLSM := func(nk []byte, vs y.ValueStruct) {
-		for err := out.ensureRoomForWrite(); err != nil; err = out.ensureRoomForWrite() {
-			out.elog.Printf("Replay: Making room for writes")
-			time.Sleep(10 * time.Millisecond)
-		}
-		out.mt.Put(nk, vs)
-	}
-
-	first := true
-	fn := func(e entry, vp valuePointer) error { // Function for replaying.
-		if first {
-			out.elog.Printf("First key=%s\n", e.Key)
-		}
-		first = false
-
-		if out.txnState.curRead < y.ParseTs(e.Key) {
-			out.txnState.curRead = y.ParseTs(e.Key)
-		}
-
-		nk := make([]byte, len(e.Key))
-		copy(nk, e.Key)
-		var nv []byte
-		meta := e.Meta
-		if out.shouldWriteValueToLSM(e) {
-			nv = make([]byte, len(e.Value))
-			copy(nv, e.Value)
-		} else {
-			nv = make([]byte, vptrSize)
-			vp.Encode(nv)
-			meta = meta | BitValuePointer
-		}
-
-		v := y.ValueStruct{
-			Value:    nv,
-			Meta:     meta,
-			UserMeta: e.UserMeta,
-		}
-
-		if e.Meta&BitFinTxn > 0 {
-			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
-			if err != nil {
-				return errors.Wrapf(err, "Unable to parse txn fin: %q", e.Value)
-			}
-			y.AssertTrue(lastCommit == txnTs)
-			y.AssertTrue(len(txn) > 0)
-			// Got the end of txn. Now we can store them.
-			for _, t := range txn {
-				toLSM(t.nk, t.v)
-			}
-			txn = txn[:0]
-			lastCommit = 0
-
-		} else if e.Meta&BitTxn == 0 {
-			// This entry is from a rewrite.
-			toLSM(nk, v)
-
-			// We shouldn't get this entry in the middle of a transaction.
-			y.AssertTrue(lastCommit == 0)
-			y.AssertTrue(len(txn) == 0)
-
-		} else {
-			txnTs := y.ParseTs(nk)
-			if lastCommit == 0 {
-				lastCommit = txnTs
-			}
-			y.AssertTrue(lastCommit == txnTs)
-			te := txnEntry{nk: nk, v: v}
-			txn = append(txn, te)
-		}
-		return nil
-	}
-	if err = out.vlog.Replay(vptr, fn); err != nil {
+	if err = out.vlog.Replay(vptr, replayFunction(out)); err != nil {
 		return out, err
 	}
 
