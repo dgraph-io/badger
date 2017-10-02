@@ -60,9 +60,9 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	sort.Slice(keyValues, func(i, j int) bool {
 		return keyValues[i][0] < keyValues[j][0]
 	})
-	for i, kv := range keyValues {
+	for _, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		err := b.Add([]byte(kv[0]), y.MakeValueStruct([]byte(kv[1]), 'A', 0, uint64(i)))
+		err := b.Add([]byte(kv[0]), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0})
 		if t != nil {
 			require.NoError(t, err)
 		} else {
@@ -89,7 +89,6 @@ func TestSeekToFirst(t *testing.T) {
 			v := it.Value()
 			require.EqualValues(t, "0", string(v.Value))
 			require.EqualValues(t, 'A', v.Meta)
-			require.EqualValues(t, 0, v.CASCounter)
 		})
 	}
 }
@@ -108,13 +107,11 @@ func TestSeekToLast(t *testing.T) {
 			v := it.Value()
 			require.EqualValues(t, fmt.Sprintf("%d", n-1), string(v.Value))
 			require.EqualValues(t, 'A', v.Meta)
-			require.EqualValues(t, n-1, v.CASCounter)
 			it.prev()
 			require.True(t, it.Valid())
 			v = it.Value()
 			require.EqualValues(t, fmt.Sprintf("%d", n-2), string(v.Value))
 			require.EqualValues(t, 'A', v.Meta)
-			require.EqualValues(t, n-2, v.CASCounter)
 		})
 	}
 }
@@ -209,7 +206,6 @@ func TestIterateFromStart(t *testing.T) {
 				v := ti.Value()
 				require.EqualValues(t, fmt.Sprintf("%d", count), string(v.Value))
 				require.EqualValues(t, 'A', v.Meta)
-				require.EqualValues(t, count, v.CASCounter)
 				count++
 			}
 			require.EqualValues(t, n, count)
@@ -236,7 +232,6 @@ func TestIterateFromEnd(t *testing.T) {
 				v := ti.Value()
 				require.EqualValues(t, fmt.Sprintf("%d", i), string(v.Value))
 				require.EqualValues(t, 'A', v.Meta)
-				require.EqualValues(t, i, v.CASCounter)
 			}
 			ti.prev()
 			require.False(t, ti.Valid())
@@ -325,7 +320,6 @@ func TestUniIterator(t *testing.T) {
 			v := it.Value()
 			require.EqualValues(t, fmt.Sprintf("%d", count), string(v.Value))
 			require.EqualValues(t, 'A', v.Meta)
-			require.EqualValues(t, count, v.CASCounter)
 			count++
 		}
 		require.EqualValues(t, 10000, count)
@@ -338,7 +332,6 @@ func TestUniIterator(t *testing.T) {
 			v := it.Value()
 			require.EqualValues(t, fmt.Sprintf("%d", 10000-1-count), string(v.Value))
 			require.EqualValues(t, 'A', v.Meta)
-			require.EqualValues(t, 10000-1-count, v.CASCounter)
 			count++
 		}
 		require.EqualValues(t, 10000, count)
@@ -617,7 +610,7 @@ func BenchmarkRead(b *testing.B) {
 	for i := 0; i < n; i++ {
 		k := fmt.Sprintf("%016x", i)
 		v := fmt.Sprintf("%d", i)
-		y.Check(builder.Add([]byte(k), y.MakeValueStruct([]byte(v), 123, 0, 5555)))
+		y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}))
 	}
 
 	f.Write(builder.Finish())
@@ -647,7 +640,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 	for i := 0; i < n; i++ {
 		k := fmt.Sprintf("%016x", i)
 		v := fmt.Sprintf("%d", i)
-		y.Check(builder.Add([]byte(k), y.MakeValueStruct([]byte(v), 123, 0, 5555)))
+		y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}))
 	}
 
 	f.Write(builder.Finish())
@@ -687,7 +680,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			// id := i*tableSize+j (not interleaved)
 			k := fmt.Sprintf("%016x", id)
 			v := fmt.Sprintf("%d", id)
-			y.Check(builder.Add([]byte(k), y.MakeValueStruct([]byte(v), 123, 0, 5555)))
+			y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}))
 		}
 		f.Write(builder.Finish())
 		tbl, err := OpenTable(f, options.MemoryMap)

@@ -69,7 +69,11 @@ func (s *SimpleIterator) Seek(key []byte) {
 
 func (s *SimpleIterator) Key() []byte { return s.keys[s.idx] }
 func (s *SimpleIterator) Value() ValueStruct {
-	return ValueStruct{s.vals[s.idx], 55, 0, 12345}
+	return ValueStruct{
+		Value:    s.vals[s.idx],
+		UserMeta: 55,
+		Meta:     0,
+	}
 }
 func (s *SimpleIterator) Valid() bool {
 	return s.idx >= 0 && s.idx < len(s.keys)

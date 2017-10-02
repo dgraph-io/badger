@@ -86,6 +86,7 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	// Make a copy early and fill in maxBatchSize
 	opt := *optParam
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
+	// TODO: Fix me
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
 	for _, path := range []string{opt.Dir, opt.ValueDir} {
@@ -679,8 +680,9 @@ func (s *KV) batchSet(entries []*Entry) error {
 
 	req.Wg.Wait()
 	req.Entries = nil
+	err = req.Err
 	requestPool.Put(req)
-	return req.Err
+	return err
 }
 
 // batchSetAsync is the asynchronous version of batchSet. It accepts a callback
@@ -740,6 +742,7 @@ func (s *KV) ensureRoomForWrite() error {
 }
 
 func arenaSize(opt *Options) int64 {
+	// TODO: Fix me
 	return opt.MaxTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
 

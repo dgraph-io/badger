@@ -559,9 +559,11 @@ func TestIterateDeleted(t *testing.T) {
 
 	for _, prefetch := range [...]bool{true, false} {
 		t.Run(fmt.Sprintf("Prefetch=%t", prefetch), func(t *testing.T) {
+			txn, err := ps.NewTransaction(false)
+			require.NoError(t, err)
 			iterOpt = DefaultIteratorOptions
 			iterOpt.PrefetchValues = prefetch
-			idxIt = ps.NewIterator(iterOpt)
+			idxIt = txn.NewIterator(iterOpt)
 
 			var estSize int64
 			var idxKeys []string
