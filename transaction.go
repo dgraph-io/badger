@@ -267,7 +267,7 @@ func (txn *Txn) Commit(callback func(error)) error {
 	}
 	// TODO: Add logic in replay to deal with this.
 	entry := &Entry{
-		Key:   txnKey,
+		Key:   y.KeyWithTs(txnKey, commitTs),
 		Value: []byte(strconv.FormatUint(commitTs, 10)),
 		Meta:  BitFinTxn,
 	}
