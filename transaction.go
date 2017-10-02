@@ -64,7 +64,8 @@ func (gs *globalTxnState) readTs() uint64 {
 func (gs *globalTxnState) commitTs() uint64 {
 	gs.Lock()
 	defer gs.Unlock()
-	return gs.nextCommit
+	// starts from atleast 1 after kv is initialized.
+	return gs.nextCommit - 1
 }
 
 // hasConflict must be called while having a lock.

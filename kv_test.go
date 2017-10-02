@@ -172,7 +172,6 @@ func TestGet(t *testing.T) {
 	item, err = txnGet(t, kv, []byte("key1"))
 	require.Equal(t, ErrKeyNotFound, err)
 
-	fmt.Printf("here\n")
 	txnSet(t, kv, []byte("key1"), []byte("val3"), 0x01)
 	item, err = txnGet(t, kv, []byte("key1"))
 	require.NoError(t, err)

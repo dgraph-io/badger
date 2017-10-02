@@ -20,6 +20,7 @@ import (
 	"container/heap"
 	"expvar"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -177,7 +178,8 @@ func NewKV(optParam *Options) (out *KV, err error) {
 		return nil, err
 	}
 
-	vs, err := out.get(head)
+	headKey := y.KeyWithTs(head, math.MaxUint64)
+	vs, err := out.get(headKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
@@ -765,16 +767,16 @@ func (s *KV) flushMemtable(lc *y.Closer) error {
 			return nil
 		}
 
-		if !ft.vptr.IsZero() {
-			s.elog.Printf("Storing offset: %+v\n", ft.vptr)
-			offset := make([]byte, vptrSize)
-			ft.vptr.Encode(offset)
+		// Store badger head even if vptr is zero, need it for readTs
+		s.elog.Printf("Storing offset: %+v\n", ft.vptr)
+		offset := make([]byte, vptrSize)
+		ft.vptr.Encode(offset)
 
-			// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
-			// commits.
-			headTs := y.KeyWithTs(head, s.txnState.commitTs())
-			ft.mt.Put(headTs, y.ValueStruct{Value: offset})
-		}
+		// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
+		// commits.
+		headTs := y.KeyWithTs(head, s.txnState.commitTs())
+		ft.mt.Put(headTs, y.ValueStruct{Value: offset})
+
 		fileID := s.lc.reserveFileID()
 		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
 		if err != nil {

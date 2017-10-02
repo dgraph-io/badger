@@ -92,7 +92,7 @@ var DefaultOptions = Options{
 	NumLevelZeroTables:      5,
 	NumLevelZeroTablesStall: 10,
 	NumMemtables:            5,
-	SyncWrites:              true,
+	SyncWrites:              false,
 	// Nothing to read/write value log using standard File I/O
 	// MemoryMap to mmap() the value log files
 	ValueLogFileSize: 1 << 30,
