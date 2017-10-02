@@ -339,7 +339,7 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	return res
 }
 
-func (kv *KV) NewTxn(update bool) *Txn {
+func (kv *KV) NewTransaction(update bool) *Txn {
 	txn := &Txn{
 		update: update,
 		gs:     kv.txnState,
@@ -353,8 +353,8 @@ func (kv *KV) NewTxn(update bool) *Txn {
 	return txn
 }
 
-func (kv *KV) NewTxnAt(readTs uint64, update bool) *Txn {
-	txn := kv.NewTxn(update)
+func (kv *KV) NewTransactionAt(readTs uint64, update bool) *Txn {
+	txn := kv.NewTransaction(update)
 	txn.readTs = readTs
 	return txn
 }

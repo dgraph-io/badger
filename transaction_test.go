@@ -34,8 +34,7 @@ func TestTxnSimple(t *testing.T) {
 	require.NoError(t, err)
 	defer kv.Close()
 
-	txn, err := kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(true)
 
 	for i := 0; i < 10; i++ {
 		k := []byte(fmt.Sprintf("key=%d", i))
@@ -63,8 +62,7 @@ func TestTxnVersions(t *testing.T) {
 
 	k := []byte("key")
 	for i := 1; i < 10; i++ {
-		txn, err := kv.NewTransaction(true)
-		require.NoError(t, err)
+		txn := kv.NewTransaction(true)
 
 		txn.Set(k, []byte(fmt.Sprintf("valversion=%d", i)), 0)
 		require.NoError(t, txn.Commit(nil))
@@ -89,7 +87,7 @@ func TestTxnVersions(t *testing.T) {
 	}
 
 	for i := 1; i < 10; i++ {
-		txn, err := kv.NewTransaction(true)
+		txn := kv.NewTransaction(true)
 		require.NoError(t, err)
 		txn.readTs = uint64(i) // Read version at i.
 
@@ -114,7 +112,7 @@ func TestTxnVersions(t *testing.T) {
 		itr = txn.NewIterator(opt)
 		checkIterator(itr, i)
 	}
-	txn, err := kv.NewTransaction(true)
+	txn := kv.NewTransaction(true)
 	require.NoError(t, err)
 	item, err := txn.Get(k)
 	require.NoError(t, err)
@@ -138,8 +136,7 @@ func TestTxnWriteSkew(t *testing.T) {
 	ay := []byte("y")
 
 	// Set balance to $100 in each account.
-	txn, err := kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(true)
 	val := []byte(strconv.Itoa(100))
 	txn.Set(ax, val, 0)
 	txn.Set(ay, val, 0)
@@ -160,8 +157,7 @@ func TestTxnWriteSkew(t *testing.T) {
 	}
 
 	// Start two transactions, each would read both accounts and deduct from one account.
-	txn1, err := kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn1 := kv.NewTransaction(true)
 
 	sum := getBal(txn1, ax)
 	sum += getBal(txn1, ay)
@@ -175,8 +171,7 @@ func TestTxnWriteSkew(t *testing.T) {
 	require.Equal(t, 100, sum)
 	// Don't commit yet.
 
-	txn2, err := kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn2 := kv.NewTransaction(true)
 
 	sum = getBal(txn2, ax)
 	sum += getBal(txn2, ay)
@@ -214,31 +209,27 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 	kc := []byte("c")
 
 	// c1
-	txn, err := kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(true)
 	txn.Set(kc, []byte("c1"), 0)
 	require.NoError(t, txn.Commit(nil))
 	require.Equal(t, uint64(1), kv.txnState.readTs())
 
 	// a2, c2
-	txn, err = kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn = kv.NewTransaction(true)
 	txn.Set(ka, []byte("a2"), 0)
 	txn.Set(kc, []byte("c2"), 0)
 	require.NoError(t, txn.Commit(nil))
 	require.Equal(t, uint64(2), kv.txnState.readTs())
 
 	// b3
-	txn, err = kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn = kv.NewTransaction(true)
 	txn.Set(ka, []byte("a3"), 0)
 	txn.Set(kb, []byte("b3"), 0)
 	require.NoError(t, txn.Commit(nil))
 	require.Equal(t, uint64(3), kv.txnState.readTs())
 
 	// b4 (del)
-	txn, err = kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn = kv.NewTransaction(true)
 	txn.Delete(kb)
 	require.NoError(t, txn.Commit(nil))
 	require.Equal(t, uint64(4), kv.txnState.readTs())
@@ -256,8 +247,7 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 		}
 		require.Equal(t, len(expected), i)
 	}
-	txn, err = kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn = kv.NewTransaction(true)
 	itr := txn.NewIterator(DefaultIteratorOptions)
 	checkIterator(itr, []string{"a3", "c2"})
 
