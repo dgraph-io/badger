@@ -22,43 +22,31 @@ import (
 	"github.com/pkg/errors"
 )
 
-// ErrInvalidDir is returned when Badger cannot find the directory
-// from where it is supposed to load the key-value store.
-var ErrInvalidDir = errors.New("Invalid Dir, directory does not exist")
-
-// ErrValueLogSize is returned when opt.ValueLogFileSize option is not within the valid
-// range.
-var ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be between 1MB and 2GB")
-
-// ErrKeyNotFound is returned when key isn't found on a txn.Get.
-var ErrKeyNotFound = errors.New("Key not found")
-
-// ErrTxnTooBig is returned if too many writes are fit into a single transaction.
-var ErrTxnTooBig = errors.New("Txn is too big to fit into one request.")
-
-// ErrConflict is returned when a transaction conflicts with another transaction. This can happen if
-// the read rows had been updated concurrently by another transaction.
-var ErrConflict = errors.New("Transaction Conflict. Please retry.")
-
-// ErrReadOnlyTxn is returned if an update function is called on a read-only transaction.
-var ErrReadOnlyTxn = errors.New("No sets or deletes are allowed in a read-only transaction.")
-
-// ErrEmptyKey is returned if an empty key is passed on an update function.
-var ErrEmptyKey = errors.New("Key cannot be empty.")
-
-const maxKeySize = 1 << 20
-
-func exceedsMaxKeySizeError(key []byte) error {
-	return errors.Errorf("Key with size %d exceeded %dMB limit. Key:\n%s",
-		len(key), maxKeySize<<20, hex.Dump(key[:1<<10]))
-}
-
-func exceedsMaxValueSizeError(value []byte, maxValueSize int64) error {
-	return errors.Errorf("Value with size %d exceeded ValueLogFileSize (%dMB). Key:\n%s",
-		len(value), maxValueSize<<20, hex.Dump(value[:1<<10]))
-}
-
 var (
+	// ErrInvalidDir is returned when Badger cannot find the directory
+	// from where it is supposed to load the key-value store.
+	ErrInvalidDir = errors.New("Invalid Dir, directory does not exist")
+
+	// ErrValueLogSize is returned when opt.ValueLogFileSize option is not within the valid
+	// range.
+	ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be between 1MB and 2GB")
+
+	// ErrKeyNotFound is returned when key isn't found on a txn.Get.
+	ErrKeyNotFound = errors.New("Key not found")
+
+	// ErrTxnTooBig is returned if too many writes are fit into a single transaction.
+	ErrTxnTooBig = errors.New("Txn is too big to fit into one request.")
+
+	// ErrConflict is returned when a transaction conflicts with another transaction. This can happen if
+	// the read rows had been updated concurrently by another transaction.
+	ErrConflict = errors.New("Transaction Conflict. Please retry.")
+
+	// ErrReadOnlyTxn is returned if an update function is called on a read-only transaction.
+	ErrReadOnlyTxn = errors.New("No sets or deletes are allowed in a read-only transaction.")
+
+	// ErrEmptyKey is returned if an empty key is passed on an update function.
+	ErrEmptyKey = errors.New("Key cannot be empty.")
+
 	// ErrRetry is returned when a log file containing the value is not found.
 	// This usually indicates that it may have been garbage collected, and the
 	// operation needs to be retried.
@@ -80,3 +68,15 @@ var (
 	// ErrInvalidRequest is returned if the user request is invalid.
 	ErrInvalidRequest = errors.New("Invalid request")
 )
+
+const maxKeySize = 1 << 20
+
+func exceedsMaxKeySizeError(key []byte) error {
+	return errors.Errorf("Key with size %d exceeded %dMB limit. Key:\n%s",
+		len(key), maxKeySize<<20, hex.Dump(key[:1<<10]))
+}
+
+func exceedsMaxValueSizeError(value []byte, maxValueSize int64) error {
+	return errors.Errorf("Value with size %d exceeded ValueLogFileSize (%dMB). Key:\n%s",
+		len(value), maxValueSize<<20, hex.Dump(value[:1<<10]))
+}
