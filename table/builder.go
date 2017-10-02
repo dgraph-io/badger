@@ -110,11 +110,14 @@ func (b Builder) keyDiff(newKey []byte) []byte {
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	// Add key to bloom filter.
-	var klen [2]byte
-	binary.BigEndian.PutUint16(klen[:], uint16(len(key)))
-	b.keyBuf.Write(klen[:])
-	b.keyBuf.Write(key)
-	b.keyCount++
+	if len(key) > 0 {
+		var klen [2]byte
+		keyNoTs := y.ParseKey(key)
+		binary.BigEndian.PutUint16(klen[:], uint16(len(keyNoTs)))
+		b.keyBuf.Write(klen[:])
+		b.keyBuf.Write(keyNoTs)
+		b.keyCount++
+	}
 
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
