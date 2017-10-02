@@ -293,23 +293,24 @@ func TestChecksums(t *testing.T) {
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
 	kv, err := NewKV(opts)
 	require.NoError(t, err)
+	require.NoError(t, kv.Close())
 
 	var (
+		k0 = []byte("k0")
 		k1 = []byte("k1")
 		k2 = []byte("k2")
 		k3 = []byte("k3")
+		v0 = []byte("value0-012345678901234567890123")
 		v1 = []byte("value1-012345678901234567890123")
 		v2 = []byte("value2-012345678901234567890123")
 		v3 = []byte("value3-012345678901234567890123")
 	)
 	// Make sure the value log would actually store the item
-	require.True(t, len(v3) >= kv.opt.ValueThreshold)
+	require.True(t, len(v0) >= kv.opt.ValueThreshold)
 
-	txnSet(t, kv, k1, v1, 0)
-	require.NoError(t, kv.Close())
-
-	// Use a vlog with K1=V1 and a (corrupted) K2=V2
+	// Use a vlog with K0=V0 and a (corrupted) second transaction(k1,k2)
 	buf := createVlog(t, []*Entry{
+		{Key: k0, Value: v0},
 		{Key: k1, Value: v1},
 		{Key: k2, Value: v2},
 	})
@@ -319,27 +320,29 @@ func TestChecksums(t *testing.T) {
 	// K1 should exist, but K2 shouldn't.
 	kv, err = NewKV(opts)
 	require.NoError(t, err)
-	item, err := txnGet(t, kv, k1)
+	item, err := txnGet(t, kv, k0)
 	require.NoError(t, err)
-	require.Equal(t, getItemValue(t, &item), v1)
+	require.Equal(t, getItemValue(t, &item), v0)
+	_, err = txnGet(t, kv, k1)
+	require.Error(t, ErrKeyNotFound, err)
 	_, err = txnGet(t, kv, k2)
 	require.Error(t, ErrKeyNotFound, err)
 	// Write K3 at the end of the vlog.
 	txnSet(t, kv, k3, v3, 0)
 	require.NoError(t, kv.Close())
 
-	// The vlog should contain K1 and K3 (K2 was lost when Badger started up
+	// The vlog should contain K0 and K3 (K1 and k2 was lost when Badger started up
 	// last due to checksum failure).
 	kv, err = NewKV(opts)
 	require.NoError(t, err)
 	txn, err := kv.NewTransaction(false)
 	require.NoError(t, err)
 	iter := txn.NewIterator(DefaultIteratorOptions)
-	iter.Seek(k1)
+	iter.Seek(k0)
 	require.True(t, iter.Valid())
 	it := iter.Item()
-	require.Equal(t, it.Key(), k1)
-	require.Equal(t, getItemValue(t, it), v1)
+	require.Equal(t, it.Key(), k0)
+	require.Equal(t, getItemValue(t, it), v0)
 	iter.Next()
 	require.True(t, iter.Valid())
 	it = iter.Item()
@@ -362,9 +365,11 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	require.NoError(t, kv.Close())
 
 	var (
+		k0 = []byte("k0")
 		k1 = []byte("k1")
 		k2 = []byte("k2")
 		k3 = []byte("k3")
+		v0 = []byte("value0-012345678901234567890123")
 		v1 = []byte("value1-012345678901234567890123")
 		v2 = []byte("value2-012345678901234567890123")
 		v3 = []byte("value3-012345678901234567890123")
@@ -373,7 +378,9 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	require.True(t, len(v3) >= kv.opt.ValueThreshold)
 
 	// Create truncated vlog to simulate a partial append.
+	// k0 - single transaction, k1 and k2 in another transaction
 	buf := createVlog(t, []*Entry{
+		{Key: k0, Value: v0},
 		{Key: k1, Value: v1},
 		{Key: k2, Value: v2},
 	})
@@ -383,6 +390,9 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	// Badger should now start up
 	kv, err = NewKV(opts)
 	require.NoError(t, err)
+	item, err := txnGet(t, kv, k0)
+	require.NoError(t, err)
+	require.Equal(t, v0, getItemValue(t, &item))
 	_, err = txnGet(t, kv, k1)
 	require.Error(t, ErrKeyNotFound, err)
 	_, err = txnGet(t, kv, k2)
@@ -455,6 +465,8 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
 	kv, err := NewKV(opts)
 	require.NoError(t, err)
+	txnSet(t, kv, entries[0].Key, entries[0].Value, entries[0].Meta)
+	entries = entries[1:]
 	txn, err := kv.NewTransaction(true)
 	for _, entry := range entries {
 		require.NoError(t, txn.Set(entry.Key, entry.Value, entry.Meta))

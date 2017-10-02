@@ -64,8 +64,7 @@ func (gs *globalTxnState) readTs() uint64 {
 func (gs *globalTxnState) commitTs() uint64 {
 	gs.Lock()
 	defer gs.Unlock()
-	// starts from atleast 1 after kv is initialized.
-	return gs.nextCommit - 1
+	return gs.nextCommit
 }
 
 // hasConflict must be called while having a lock.
@@ -266,7 +265,6 @@ func (txn *Txn) Commit(callback func(error)) error {
 		e.Meta |= BitTxn
 		entries = append(entries, e)
 	}
-	// TODO: Add logic in replay to deal with this.
 	entry := &Entry{
 		Key:   y.KeyWithTs(txnKey, commitTs),
 		Value: []byte(strconv.FormatUint(commitTs, 10)),
