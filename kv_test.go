@@ -59,22 +59,19 @@ func getItemValue(t *testing.T, item *KVItem) (val []byte) {
 }
 
 func txnSet(t *testing.T, kv *KV, key []byte, val []byte, meta byte) {
-	txn, err := kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(true)
 	require.NoError(t, txn.Set(key, val, meta))
 	require.NoError(t, txn.Commit(nil))
 }
 
 func txnDelete(t *testing.T, kv *KV, key []byte) {
-	txn, err := kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(true)
 	require.NoError(t, txn.Delete(key))
 	require.NoError(t, txn.Commit(nil))
 }
 
 func txnGet(t *testing.T, kv *KV, key []byte) (KVItem, error) {
-	txn, err := kv.NewTransaction(false)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(false)
 	return txn.Get(key)
 }
 
@@ -121,7 +118,7 @@ func TestConcurrentWrite(t *testing.T) {
 	opt.PrefetchSize = 10
 	opt.PrefetchValues = true
 
-	txn, err := kv.NewTransaction(true)
+	txn := kv.NewTransaction(true)
 	it := txn.NewIterator(opt)
 	defer it.Close()
 	var i, j int
@@ -242,10 +239,8 @@ func TestGetMore(t *testing.T) {
 	//	n := 500000
 	n := 10000
 	m := 49 // Increasing would cause ErrTxnTooBig
-	fmt.Println("writing")
 	for i := 0; i < n; i += m {
-		txn, err := kv.NewTransaction(true)
-		require.NoError(t, err)
+		txn := kv.NewTransaction(true)
 		for j := i; j < i+m && j < n; j++ {
 			require.NoError(t, txn.Set(data(j), data(j), 0))
 		}
@@ -253,7 +248,6 @@ func TestGetMore(t *testing.T) {
 	}
 	require.NoError(t, kv.validate())
 
-	fmt.Println("retrieving")
 	for i := 0; i < n; i++ {
 		item, err := txnGet(t, kv, data(i))
 		if err != nil {
@@ -263,10 +257,8 @@ func TestGetMore(t *testing.T) {
 	}
 
 	// Overwrite
-	fmt.Println("overwriting")
 	for i := 0; i < n; i += m {
-		txn, err := kv.NewTransaction(true)
-		require.NoError(t, err)
+		txn := kv.NewTransaction(true)
 		for j := i; j < i+m && j < n; j++ {
 			require.NoError(t, txn.Set(data(j),
 				// Use a long value that will certainly exceed value threshold.
@@ -277,7 +269,6 @@ func TestGetMore(t *testing.T) {
 	}
 	require.NoError(t, kv.validate())
 
-	fmt.Println("testing")
 	for i := 0; i < n; i++ {
 		k := []byte(fmt.Sprintf("%09d", i))
 		expectedValue := fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%09d", i)
@@ -294,8 +285,7 @@ func TestGetMore(t *testing.T) {
 			fmt.Printf("wanted=%q Item: %s\n", k, item.ToString())
 			fmt.Printf("on re-run, got version: %+v\n", vs)
 
-			txn, err := kv.NewTransaction(false)
-			require.NoError(t, err)
+			txn := kv.NewTransaction(false)
 			itr := txn.NewIterator(DefaultIteratorOptions)
 			for itr.Seek(k0); itr.Valid(); itr.Next() {
 				item := itr.Item()
@@ -314,8 +304,7 @@ func TestGetMore(t *testing.T) {
 		if (i % 10000) == 0 {
 			fmt.Printf("Deleting i=%d\n", i)
 		}
-		txn, err := kv.NewTransaction(true)
-		require.NoError(t, err)
+		txn := kv.NewTransaction(true)
 		for j := i; j < i+m && j < n; j++ {
 			require.NoError(t, txn.Delete([]byte(fmt.Sprintf("%09d", j))))
 		}
@@ -331,7 +320,6 @@ func TestGetMore(t *testing.T) {
 		item, err := txnGet(t, kv, []byte(k))
 		require.Equal(t, ErrKeyNotFound, err, "wanted=%q item=%s\n", k, item.ToString())
 	}
-	fmt.Println("Done and closing")
 }
 
 // Put a lot of data to move some data to disk.
@@ -352,10 +340,9 @@ func TestExistsMore(t *testing.T) {
 	m := 49
 	for i := 0; i < n; i += m {
 		if (i % 1000) == 0 {
-			fmt.Printf("Putting i=%d\n", i)
+			t.Logf("Putting i=%d\n", i)
 		}
-		txn, err := kv.NewTransaction(true)
-		require.NoError(t, err)
+		txn := kv.NewTransaction(true)
 		for j := i; j < i+m && j < n; j++ {
 			require.NoError(t, txn.Set([]byte(fmt.Sprintf("%09d", j)),
 				[]byte(fmt.Sprintf("%09d", j)),
@@ -381,8 +368,7 @@ func TestExistsMore(t *testing.T) {
 		if (i % 1000) == 0 {
 			fmt.Printf("Deleting i=%d\n", i)
 		}
-		txn, err := kv.NewTransaction(true)
-		require.NoError(t, err)
+		txn := kv.NewTransaction(true)
 		for j := i; j < i+m && j < n; j++ {
 			require.NoError(t, txn.Delete([]byte(fmt.Sprintf("%09d", j))))
 		}
@@ -428,8 +414,7 @@ func TestIterate2Basic(t *testing.T) {
 	opt.PrefetchValues = true
 	opt.PrefetchSize = 10
 
-	txn, err := kv.NewTransaction(false)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(false)
 	it := txn.NewIterator(opt)
 	{
 		var count int
@@ -535,14 +520,12 @@ func TestIterateDeleted(t *testing.T) {
 
 	iterOpt := DefaultIteratorOptions
 	iterOpt.PrefetchValues = false
-	txn, err := ps.NewTransaction(false)
-	require.NoError(t, err)
+	txn := ps.NewTransaction(false)
 	idxIt := txn.NewIterator(iterOpt)
 	defer idxIt.Close()
 
 	count := 0
-	txn2, err := ps.NewTransaction(true)
-	require.NoError(t, err)
+	txn2 := ps.NewTransaction(true)
 	prefix := []byte("Key")
 	for idxIt.Seek(prefix); idxIt.Valid(); idxIt.Next() {
 		key := idxIt.Item().Key()
@@ -559,8 +542,7 @@ func TestIterateDeleted(t *testing.T) {
 
 	for _, prefetch := range [...]bool{true, false} {
 		t.Run(fmt.Sprintf("Prefetch=%t", prefetch), func(t *testing.T) {
-			txn, err := ps.NewTransaction(false)
-			require.NoError(t, err)
+			txn := ps.NewTransaction(false)
 			iterOpt = DefaultIteratorOptions
 			iterOpt.PrefetchValues = prefetch
 			idxIt = txn.NewIterator(iterOpt)
@@ -646,13 +628,12 @@ func TestBigKeyValuePairs(t *testing.T) {
 	bigV := make([]byte, opt.ValueLogFileSize+1)
 	small := make([]byte, 10)
 
-	txn, err := kv.NewTransaction(true)
+	txn := kv.NewTransaction(true)
 	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, small, 0))
-	txn, err = kv.NewTransaction(true)
+	txn = kv.NewTransaction(true)
 	require.Regexp(t, regexp.MustCompile("Value.*exceeded"), txn.Set(small, bigV, 0))
 
-	txn, err = kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn = kv.NewTransaction(true)
 	require.NoError(t, txn.Set(small, small, 0x00))
 	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, bigV, 0x00))
 
@@ -678,9 +659,9 @@ func TestIteratorPrefetchSize(t *testing.T) {
 
 	n := 100
 	for i := 0; i < n; i++ {
-		if (i % 10) == 0 {
-			t.Logf("Put i=%d\n", i)
-		}
+		// if (i % 10) == 0 {
+		// 	t.Logf("Put i=%d\n", i)
+		// }
 		txnSet(t, kv, bkey(i), bval(i), byte(i%127))
 	}
 
@@ -690,8 +671,7 @@ func TestIteratorPrefetchSize(t *testing.T) {
 		opt.PrefetchSize = prefetchSize
 
 		var count int
-		txn, err := kv.NewTransaction(false)
-		require.NoError(t, err)
+		txn := kv.NewTransaction(false)
 		it := txn.NewIterator(opt)
 		{
 			t.Log("Starting first basic iteration")
@@ -724,11 +704,10 @@ func TestSetIfAbsentAsync(t *testing.T) {
 
 	n := 1000
 	for i := 0; i < n; i++ {
-		if (i % 10) == 0 {
-			t.Logf("Put i=%d\n", i)
-		}
-		txn, err := kv.NewTransaction(true)
-		require.NoError(t, err)
+		// if (i % 10) == 0 {
+		// 	t.Logf("Put i=%d\n", i)
+		// }
+		txn := kv.NewTransaction(true)
 		_, err = txn.Get(bkey(i))
 		require.Equal(t, ErrKeyNotFound, err)
 		require.NoError(t, txn.Set(bkey(i), nil, byte(i%127)))
@@ -740,8 +719,7 @@ func TestSetIfAbsentAsync(t *testing.T) {
 	require.NoError(t, err)
 
 	opt := DefaultIteratorOptions
-	txn, err := kv.NewTransaction(false)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(false)
 	var count int
 	it := txn.NewIterator(opt)
 	{

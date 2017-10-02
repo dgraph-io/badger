@@ -152,7 +152,7 @@ func (lf *logFile) sync() error {
 
 var errStop = errors.New("Stop iteration")
 
-type logEntry func(e Entry, vp valuePointer) error
+type logEntry func(e entry, vp valuePointer) error
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
@@ -185,7 +185,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 			return err
 		}
 
-		var e Entry
+		var e entry
 		e.offset = recordOffset
 		h.Decode(hbuf[:])
 		if h.klen > maxKeySize {
@@ -269,12 +269,12 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	defer elog.Finish()
 	elog.Printf("Rewriting fid: %d", f.fid)
 
-	wb := make([]*Entry, 0, 1000)
+	wb := make([]*entry, 0, 1000)
 	var size int64
 
 	y.AssertTrue(vlog.kv != nil)
 	var count int
-	fe := func(e Entry) error {
+	fe := func(e entry) error {
 		count++
 		if count%10000 == 0 {
 			elog.Printf("Processing entry %d", count)
@@ -303,7 +303,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		}
 		if vp.Fid == f.fid && vp.Offset == e.offset {
 			// This new entry only contains the key, and a pointer to the value.
-			ne := new(Entry)
+			ne := new(entry)
 			ne.Meta = 0 // Remove all bits.
 			ne.UserMeta = e.UserMeta
 			ne.Key = make([]byte, len(e.Key))
@@ -326,7 +326,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		return nil
 	}
 
-	err := vlog.iterate(f, 0, func(e Entry, vp valuePointer) error {
+	err := vlog.iterate(f, 0, func(e entry, vp valuePointer) error {
 		return fe(e)
 	})
 	if err != nil {
@@ -627,7 +627,7 @@ func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 
 type request struct {
 	// Input values
-	Entries []*Entry
+	Entries []*entry
 	// Output values and wait group stuff below
 	Ptrs []valuePointer
 	Wg   sync.WaitGroup
@@ -795,7 +795,7 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, consumer func([]byte) erro
 }
 
 // Test helper
-func valueBytesToEntry(buf []byte) (e Entry) {
+func valueBytesToEntry(buf []byte) (e entry) {
 	var h header
 	h.Decode(buf)
 	n := uint32(headerBufSize)
@@ -823,7 +823,7 @@ func (vlog *valueLog) pickLog() *logFile {
 	return vlog.filesMap[fids[idx]]
 }
 
-func discardEntry(e Entry, vs y.ValueStruct) bool {
+func discardEntry(e entry, vs y.ValueStruct) bool {
 	if vs.Version != y.ParseTs(e.Key) {
 		// Version not found. Discard.
 		return true
@@ -865,7 +865,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64) error {
 
 	start := time.Now()
 	y.AssertTrue(vlog.kv != nil)
-	err := vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
+	err := vlog.iterate(lf, 0, func(e entry, vp valuePointer) error {
 		esz := float64(vp.Len) / (1 << 20) // in MBs. +4 for the CAS stuff.
 		skipped += esz
 		if skipped < skipFirstM {

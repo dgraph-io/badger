@@ -43,23 +43,23 @@ func TestValueBasic(t *testing.T) {
 	const val2 = "samplevalb012345678901234567890123"
 	require.True(t, len(val1) >= kv.opt.ValueThreshold)
 
-	entry := &Entry{
+	e := &entry{
 		Key:   []byte("samplekey"),
 		Value: []byte(val1),
 		Meta:  BitValuePointer,
 	}
-	entry2 := &Entry{
+	e2 := &entry{
 		Key:   []byte("samplekeyb"),
 		Value: []byte(val2),
 		Meta:  BitValuePointer,
 	}
 
 	b := new(request)
-	b.Entries = []*Entry{entry, entry2}
+	b.Entries = []*entry{e, e2}
 
 	log.write([]*request{b})
 	require.Len(t, b.Ptrs, 2)
-	fmt.Printf("Pointer written: %+v %+v\n", b.Ptrs[0], b.Ptrs[1])
+	t.Logf("Pointer written: %+v %+v\n", b.Ptrs[0], b.Ptrs[1])
 
 	var buf1, buf2 []byte
 	var err1, err2 error
@@ -74,8 +74,8 @@ func TestValueBasic(t *testing.T) {
 
 	require.NoError(t, err1)
 	require.NoError(t, err2)
-	readEntries := []Entry{valueBytesToEntry(buf1), valueBytesToEntry(buf2)}
-	require.EqualValues(t, []Entry{
+	readEntries := []entry{valueBytesToEntry(buf1), valueBytesToEntry(buf2)}
+	require.EqualValues(t, []entry{
 		{
 			Key:   []byte("samplekey"),
 			Value: []byte(val1),
@@ -100,16 +100,14 @@ func TestValueGC(t *testing.T) {
 	defer kv.Close()
 
 	sz := 32 << 10
-	txn, err := kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(true)
 	for i := 0; i < 100; i++ {
 		v := make([]byte, sz)
 		rand.Read(v[:rand.Intn(sz)])
 		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v, 0))
 		if i%20 == 0 {
 			require.NoError(t, txn.Commit(nil))
-			txn, err = kv.NewTransaction(true)
-			require.NoError(t, err)
+			txn = kv.NewTransaction(true)
 		}
 	}
 	require.NoError(t, txn.Commit(nil))
@@ -149,16 +147,14 @@ func TestValueGC2(t *testing.T) {
 	defer kv.Close()
 
 	sz := 32 << 10
-	txn, err := kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(true)
 	for i := 0; i < 100; i++ {
 		v := make([]byte, sz)
 		rand.Read(v[:rand.Intn(sz)])
 		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v, 0))
 		if i%20 == 0 {
 			require.NoError(t, txn.Commit(nil))
-			txn, err = kv.NewTransaction(true)
-			require.NoError(t, err)
+			txn = kv.NewTransaction(true)
 		}
 	}
 	require.NoError(t, txn.Commit(nil))
@@ -221,8 +217,7 @@ func TestValueGC3(t *testing.T) {
 	valueSize := 32 << 10
 
 	var value3 []byte
-	txn, err := kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(true)
 	for i := 0; i < 100; i++ {
 		v := make([]byte, valueSize) // 32K * 100 will take >=3'276'800 B.
 		if i == 3 {
@@ -233,8 +228,7 @@ func TestValueGC3(t *testing.T) {
 		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%03d", i)), v, 0))
 		if i%20 == 0 {
 			require.NoError(t, txn.Commit(nil))
-			txn, err = kv.NewTransaction(true)
-			require.NoError(t, err)
+			txn = kv.NewTransaction(true)
 		}
 	}
 	require.NoError(t, txn.Commit(nil))
@@ -246,8 +240,7 @@ func TestValueGC3(t *testing.T) {
 		Reverse:        false,
 	}
 
-	txn, err = kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn = kv.NewTransaction(true)
 	it := txn.NewIterator(itOpt)
 	defer it.Close()
 	// Walk a few keys
@@ -309,7 +302,7 @@ func TestChecksums(t *testing.T) {
 	require.True(t, len(v0) >= kv.opt.ValueThreshold)
 
 	// Use a vlog with K0=V0 and a (corrupted) second transaction(k1,k2)
-	buf := createVlog(t, []*Entry{
+	buf := createVlog(t, []*entry{
 		{Key: k0, Value: v0},
 		{Key: k1, Value: v1},
 		{Key: k2, Value: v2},
@@ -335,8 +328,7 @@ func TestChecksums(t *testing.T) {
 	// last due to checksum failure).
 	kv, err = NewKV(opts)
 	require.NoError(t, err)
-	txn, err := kv.NewTransaction(false)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(false)
 	iter := txn.NewIterator(DefaultIteratorOptions)
 	iter.Seek(k0)
 	require.True(t, iter.Valid())
@@ -379,7 +371,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 
 	// Create truncated vlog to simulate a partial append.
 	// k0 - single transaction, k1 and k2 in another transaction
-	buf := createVlog(t, []*Entry{
+	buf := createVlog(t, []*entry{
 		{Key: k0, Value: v0},
 		{Key: k1, Value: v1},
 		{Key: k2, Value: v2},
@@ -419,16 +411,14 @@ func TestValueLogTrigger(t *testing.T) {
 
 	// Write a lot of data, so it creates some work for valug log GC.
 	sz := 32 << 10
-	txn, err := kv.NewTransaction(true)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(true)
 	for i := 0; i < 100; i++ {
 		v := make([]byte, sz)
 		rand.Read(v[:rand.Intn(sz)])
 		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v, 0))
 		if i%20 == 0 {
 			require.NoError(t, txn.Commit(nil))
-			txn, err = kv.NewTransaction(true)
-			require.NoError(t, err)
+			txn = kv.NewTransaction(true)
 		}
 	}
 	require.NoError(t, txn.Commit(nil))
@@ -456,7 +446,7 @@ func TestValueLogTrigger(t *testing.T) {
 	require.Equal(t, ErrRejected, err, "Error should be returned after closing KV.")
 }
 
-func createVlog(t *testing.T, entries []*Entry) []byte {
+func createVlog(t *testing.T, entries []*entry) []byte {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -467,7 +457,7 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 	require.NoError(t, err)
 	txnSet(t, kv, entries[0].Key, entries[0].Value, entries[0].Meta)
 	entries = entries[1:]
-	txn, err := kv.NewTransaction(true)
+	txn := kv.NewTransaction(true)
 	for _, entry := range entries {
 		require.NoError(t, txn.Set(entry.Key, entry.Value, entry.Meta))
 	}
@@ -482,8 +472,7 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 
 func checkKeys(t *testing.T, kv *KV, keys [][]byte) {
 	i := 0
-	txn, err := kv.NewTransaction(false)
-	require.NoError(t, err)
+	txn := kv.NewTransaction(false)
 	iter := txn.NewIterator(IteratorOptions{})
 	for iter.Seek(keys[0]); iter.Valid(); iter.Next() {
 		require.Equal(t, iter.Item().Key(), keys[i])
@@ -513,11 +502,11 @@ func BenchmarkReadWrite(b *testing.B) {
 				b.ResetTimer()
 
 				for i := 0; i < b.N; i++ {
-					e := new(Entry)
+					e := new(entry)
 					e.Key = make([]byte, 16)
 					e.Value = make([]byte, vsz)
 					bl := new(request)
-					bl.Entries = []*Entry{e}
+					bl.Entries = []*entry{e}
 
 					var ptrs []valuePointer
 

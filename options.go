@@ -99,6 +99,6 @@ var DefaultOptions = Options{
 	ValueThreshold:   20,
 }
 
-func (opt *Options) estimateSize(entry *Entry) int {
-	return entry.estimateSize(opt.ValueThreshold)
+func (opt *Options) estimateSize(e *entry) int {
+	return e.estimateSize(opt.ValueThreshold)
 }
