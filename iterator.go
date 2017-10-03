@@ -373,6 +373,7 @@ func (it *Iterator) Seek(key []byte) {
 		i.wg.Wait()
 		it.waste.push(i)
 	}
+	it.lastKey = it.lastKey[:0]
 	it.iitr.Seek(key)
 	it.prefetch()
 }

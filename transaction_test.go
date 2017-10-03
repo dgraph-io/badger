@@ -332,13 +332,30 @@ func TestTxnIterationEdgeCase2(t *testing.T) {
 		require.Equal(t, len(expected), i)
 	}
 	txn = kv.NewTransaction(true)
-	itr := txn.NewIterator(DefaultIteratorOptions)
-	checkIterator(itr, []string{"a3", "c2"})
-
 	rev := DefaultIteratorOptions
 	rev.Reverse = true
+
+	itr := txn.NewIterator(DefaultIteratorOptions)
+	checkIterator(itr, []string{"a3", "c2"})
 	itr = txn.NewIterator(rev)
 	checkIterator(itr, []string{"c2", "a3"})
+
+	txn.readTs = 5
+	itr = txn.NewIterator(DefaultIteratorOptions)
+	itr.Seek(ka)
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), ka)
+	itr.Seek(kc)
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kc)
+
+	itr = txn.NewIterator(rev)
+	itr.Seek(ka)
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), ka)
+	itr.Seek(kc)
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kc)
 
 	txn.readTs = 3
 	itr = txn.NewIterator(DefaultIteratorOptions)
