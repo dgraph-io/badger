@@ -242,10 +242,6 @@ func (t *Table) readIndex() error {
 		t.blockIndex = append(t.blockIndex, ko)
 	}
 
-	if len(t.blockIndex) == 1 {
-		return nil
-	}
-
 	che := make(chan error, len(t.blockIndex))
 	blocks := make(chan int, len(t.blockIndex))
 

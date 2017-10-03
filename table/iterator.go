@@ -280,12 +280,10 @@ func (itr *Iterator) seekFrom(key []byte, whence int) {
 	}
 
 	var idx int
-	if len(itr.t.blockIndex) > 1 {
-		idx = sort.Search(len(itr.t.blockIndex), func(idx int) bool {
-			ko := itr.t.blockIndex[idx]
-			return y.CompareKeys(ko.key, key) > 0
-		})
-	}
+	idx = sort.Search(len(itr.t.blockIndex), func(idx int) bool {
+		ko := itr.t.blockIndex[idx]
+		return y.CompareKeys(ko.key, key) > 0
+	})
 	if idx == 0 {
 		// The smallest key in our table is already strictly > key. We can return that.
 		// This is like a SeekToFirst.
