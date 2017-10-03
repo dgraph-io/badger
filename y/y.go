@@ -84,18 +84,26 @@ func Safecopy(a []byte, src []byte) []byte {
 // TODO: Mention in docs, key shouldn't have 0x00 when keys are of
 // unequal length. (Probably escape 0x00 in key and ts)
 func KeyWithTs(key []byte, ts uint64) []byte {
-	out := make([]byte, len(key)+8+1)
+	out := make([]byte, len(key)+8)
 	copy(out, key)
-	out[len(key)] = 0x00
-	binary.BigEndian.PutUint64(out[len(key)+1:], math.MaxUint64-ts)
+	binary.BigEndian.PutUint64(out[len(key):], math.MaxUint64-ts)
 	return out
 }
 
 func ParseTs(key []byte) uint64 {
-	if len(key) < 9 {
+	if len(key) < 8 {
 		return 0
 	}
 	return math.MaxUint64 - binary.BigEndian.Uint64(key[len(key)-8:])
+}
+
+// a<timestamp> would be sorted higher than aa<timestamp> if we use bytes.compare
+func CompareKeys(key1 []byte, key2 []byte) int {
+	AssertTruef(len(key1) >= 8 && len(key2) >= 8, "%q %q", key1, key2)
+	if cmp := bytes.Compare(key1[:len(key1)-8], key2[:len(key2)-8]); cmp != 0 {
+		return cmp
+	}
+	return bytes.Compare(key1[len(key1)-8:], key2[len(key2)-8:])
 }
 
 func ParseKey(key []byte) []byte {
@@ -103,8 +111,8 @@ func ParseKey(key []byte) []byte {
 		return nil
 	}
 
-	AssertTruef(len(key) >= 9, "key=%q", key)
-	return key[:len(key)-9]
+	AssertTruef(len(key) >= 8, "key=%q", key)
+	return key[:len(key)-8]
 }
 
 // SameKey checks for key equality ignoring the version timestamp suffix.

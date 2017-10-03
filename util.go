@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"bytes"
 	"io/ioutil"
 	"math/rand"
 	"sync/atomic"
@@ -76,13 +75,13 @@ func (s *levelHandler) validate() error {
 			return errors.Errorf("Level %d, j=%d numTables=%d", s.level, j, numTables)
 		}
 
-		if bytes.Compare(s.tables[j-1].Biggest(), s.tables[j].Smallest()) >= 0 {
+		if y.CompareKeys(s.tables[j-1].Biggest(), s.tables[j].Smallest()) >= 0 {
 			return errors.Errorf(
 				"Inter: %q vs %q: level=%d j=%d numTables=%d",
 				string(s.tables[j-1].Biggest()), string(s.tables[j].Smallest()), s.level, j, numTables)
 		}
 
-		if bytes.Compare(s.tables[j].Smallest(), s.tables[j].Biggest()) > 0 {
+		if y.CompareKeys(s.tables[j].Smallest(), s.tables[j].Biggest()) > 0 {
 			return errors.Errorf(
 				"Intra: %q vs %q: level=%d j=%d numTables=%d",
 				s.tables[j].Smallest(), s.tables[j].Biggest(), s.level, j, numTables)

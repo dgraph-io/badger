@@ -86,7 +86,7 @@ func (eh *elemHeap) Pop() interface{} {
 	return x
 }
 func (eh elemHeap) Less(i, j int) bool {
-	cmp := bytes.Compare(eh[i].itr.Key(), eh[j].itr.Key())
+	cmp := CompareKeys(eh[i].itr.Key(), eh[j].itr.Key())
 	if cmp < 0 {
 		return !eh[i].reversed
 	}

@@ -33,7 +33,6 @@ Key differences:
 package skl
 
 import (
-	"bytes"
 	"math"
 	"math/rand"
 	"sync/atomic"
@@ -162,7 +161,7 @@ func (s *node) casNextOffset(h int, old, val uint32) bool {
 // If n is nil, this is an "end" marker and we return false.
 //func (s *Skiplist) keyIsAfterNode(key []byte, n *node) bool {
 //	y.AssertTrue(n != s.head)
-//	return n != nil && bytes.Compare(key, n.key) > 0
+//	return n != nil && y.CompareKeys(key, n.key) > 0
 //}
 
 func randomHeight() int {
@@ -208,7 +207,7 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 		}
 
 		nextKey := next.key(s.arena)
-		cmp := bytes.Compare(key, nextKey)
+		cmp := y.CompareKeys(key, nextKey)
 		if cmp > 0 {
 			// x.key < next.key < key. We can continue to move right.
 			x = next
@@ -263,7 +262,7 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 			return before, next
 		}
 		nextKey := next.key(s.arena)
-		cmp := bytes.Compare(key, nextKey)
+		cmp := y.CompareKeys(key, nextKey)
 		if cmp == 0 {
 			// Equality case.
 			return next, next
