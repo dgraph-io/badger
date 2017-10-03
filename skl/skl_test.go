@@ -357,7 +357,7 @@ func TestIteratorSeek(t *testing.T) {
 		l.Put(y.KeyWithTs([]byte(fmt.Sprintf("%05d", i*10+1000)), 0),
 			y.ValueStruct{Value: newValue(v), Meta: 0, UserMeta: 0})
 	}
-	it.Seek(y.KeyWithTs([]byte(""), 0))
+	it.SeekToFirst()
 	require.True(t, it.Valid())
 	v := it.Value()
 	require.EqualValues(t, "01000", v.Value)
@@ -381,7 +381,7 @@ func TestIteratorSeek(t *testing.T) {
 	require.False(t, it.Valid())
 
 	// Try SeekForPrev.
-	it.SeekForPrev(y.KeyWithTs([]byte(""), 0))
+	it.SeekForPrev(y.KeyWithTs([]byte("00"), 0))
 	require.False(t, it.Valid())
 
 	it.SeekForPrev(y.KeyWithTs([]byte("01000"), 0))

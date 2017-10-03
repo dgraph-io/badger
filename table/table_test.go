@@ -197,7 +197,7 @@ func TestIterateFromStart(t *testing.T) {
 			ti := table.NewIterator(false)
 			defer ti.Close()
 			ti.reset()
-			ti.seek(y.KeyWithTs([]byte(""), 0))
+			ti.seekToFirst()
 			require.True(t, ti.Valid())
 			// No need to do a Next.
 			// ti.Seek brings us to the first key >= "". Essentially a SeekToFirst.

@@ -89,7 +89,7 @@ func KeyWithTs(key []byte, ts uint64) []byte {
 }
 
 func ParseTs(key []byte) uint64 {
-	if len(key) < 8 {
+	if len(key) <= 8 {
 		return 0
 	}
 	return math.MaxUint64 - binary.BigEndian.Uint64(key[len(key)-8:])
@@ -100,7 +100,7 @@ func ParseTs(key []byte) uint64 {
 // a<timestamp> would be sorted higher than aa<timestamp> if we use bytes.compare
 // All keys should have timestamp.
 func CompareKeys(key1 []byte, key2 []byte) int {
-	AssertTruef(len(key1) >= 8 && len(key2) >= 8, "%q %q", key1, key2)
+	AssertTruef(len(key1) > 8 && len(key2) > 8, "%q %q", key1, key2)
 	if cmp := bytes.Compare(key1[:len(key1)-8], key2[:len(key2)-8]); cmp != 0 {
 		return cmp
 	}
@@ -112,7 +112,7 @@ func ParseKey(key []byte) []byte {
 		return nil
 	}
 
-	AssertTruef(len(key) >= 8, "key=%q", key)
+	AssertTruef(len(key) > 8, "key=%q", key)
 	return key[:len(key)-8]
 }
 
