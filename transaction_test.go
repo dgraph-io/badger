@@ -376,6 +376,50 @@ func TestTxnIterationEdgeCase2(t *testing.T) {
 	checkIterator(itr, []string{"c1"})
 }
 
+func TestTxnIterationEdgeCase3(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, err := NewKV(getTestOptions(dir))
+	require.NoError(t, err)
+	defer kv.Close()
+
+	kb := []byte("abc")
+	kc := []byte("acd")
+
+	// c1
+	txn := kv.NewTransaction(true)
+	txn.Set(kc, []byte("c1"), 0)
+	require.NoError(t, txn.Commit(nil))
+	require.Equal(t, uint64(1), kv.txnState.readTs())
+
+	// b2
+	txn = kv.NewTransaction(true)
+	txn.Set(kb, []byte("b2"), 0)
+	require.NoError(t, txn.Commit(nil))
+	require.Equal(t, uint64(2), kv.txnState.readTs())
+
+	txn = kv.NewTransaction(true)
+	rev := DefaultIteratorOptions
+	rev.Reverse = true
+
+	itr := txn.NewIterator(DefaultIteratorOptions)
+	itr.Seek([]byte("ab"))
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kb)
+	itr.Seek([]byte("ac"))
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kc)
+
+	itr = txn.NewIterator(rev)
+	itr.Seek([]byte("ac"))
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kb)
+	itr.Seek([]byte("ad"))
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kc)
+}
+
 func TestTxnManaged(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
