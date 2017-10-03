@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"sync"
@@ -69,7 +70,7 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 	} else {
 		// Sort tables by keys.
 		sort.Slice(s.tables, func(i, j int) bool {
-			return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
+			return bytes.Compare(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
 		})
 	}
 }
@@ -223,7 +224,7 @@ func (s *levelHandler) getTableForKey(key []byte) ([]*table.Table, func() error)
 	}
 	// For level >= 1, we can do a binary search as key range does not overlap.
 	idx := sort.Search(len(s.tables), func(i int) bool {
-		return y.CompareKeys(s.tables[i].Biggest(), key) >= 0
+		return bytes.Compare(s.tables[i].Biggest(), key) >= 0
 	})
 	if idx >= len(s.tables) {
 		// Given key is strictly > than every element we have.
@@ -283,10 +284,10 @@ type levelHandlerRLocked struct{}
 // pass an empty parameter declaring such.
 func (s *levelHandler) overlappingTables(_ levelHandlerRLocked, kr keyRange) (int, int) {
 	left := sort.Search(len(s.tables), func(i int) bool {
-		return y.CompareKeys(kr.left, s.tables[i].Biggest()) <= 0
+		return bytes.Compare(kr.left, s.tables[i].Biggest()) <= 0
 	})
 	right := sort.Search(len(s.tables), func(i int) bool {
-		return y.CompareKeys(kr.right, s.tables[i].Smallest()) < 0
+		return bytes.Compare(kr.right, s.tables[i].Smallest()) < 0
 	})
 	return left, right
 }

@@ -17,6 +17,7 @@
 package y
 
 import (
+	"bytes"
 	"sort"
 	"testing"
 
@@ -56,12 +57,12 @@ func (s *SimpleIterator) Seek(key []byte) {
 	key = KeyWithTs(key, 0)
 	if !s.reversed {
 		s.idx = sort.Search(len(s.keys), func(i int) bool {
-			return CompareKeys(s.keys[i], key) >= 0
+			return bytes.Compare(s.keys[i], key) >= 0
 		})
 	} else {
 		n := len(s.keys)
 		s.idx = n - 1 - sort.Search(n, func(i int) bool {
-			return CompareKeys(s.keys[n-1-i], key) <= 0
+			return bytes.Compare(s.keys[n-1-i], key) <= 0
 		})
 	}
 }
