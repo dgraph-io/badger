@@ -49,10 +49,6 @@ Badger has these design goals in mind:
 - ~~Keep it simple, stupid. No support for transactions, versioning or snapshots -- anything that can be done outside of the store should be done outside.~~ By user demand and realizing their utility, we're introducing multi-version concurrency control, snapshots and transactions to Badger.
 - Optimize for SSDs (more below).
 
-### Non-Goals
-
-- Try to be a database.
-
 ## Users
 
 Badger is currently being used by [Dgraph](https://github.com/dgraph-io/dgraph).
