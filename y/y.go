@@ -81,6 +81,8 @@ func Safecopy(a []byte, src []byte) []byte {
 }
 
 // KeyWithTs generates a new key by appending ts to key.
+// TODO: Mention in docs, key shouldn't have 0x00 when keys are of
+// unequal length. (Probably escape 0x00 in key and ts)
 func KeyWithTs(key []byte, ts uint64) []byte {
 	out := make([]byte, len(key)+8+1)
 	copy(out, key)
