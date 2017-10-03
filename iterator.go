@@ -382,6 +382,19 @@ func (it *Iterator) Seek(key []byte) {
 		i.wg.Wait()
 		it.waste.push(i)
 	}
+
+	it.lastKey = it.lastKey[:0]
+	if len(key) == 0 {
+		it.iitr.Rewind()
+		it.prefetch()
+		return
+	}
+
+	if !it.opt.Reverse {
+		key = y.KeyWithTs(key, it.txn.readTs)
+	} else {
+		key = y.KeyWithTs(key, 0)
+	}
 	it.iitr.Seek(key)
 	it.prefetch()
 }
@@ -397,6 +410,7 @@ func (it *Iterator) Rewind() {
 		i = it.data.pop()
 	}
 
+	it.lastKey = it.lastKey[:0]
 	it.iitr.Rewind()
 	it.prefetch()
 }

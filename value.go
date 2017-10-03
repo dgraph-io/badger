@@ -714,12 +714,6 @@ func (vlog *valueLog) write(reqs []*request) error {
 			e := b.Entries[j]
 			var p valuePointer
 
-			if !vlog.opt.SyncWrites && len(e.Value) < vlog.opt.ValueThreshold && e.Meta&BitFinTxn == 0 {
-				// No need to write to value log.
-				b.Ptrs = append(b.Ptrs, p)
-				continue
-			}
-
 			p.Fid = curlf.fid
 			// Use the offset including buffer length so far.
 			p.Offset = vlog.writableOffset() + uint32(vlog.buf.Len())

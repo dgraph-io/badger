@@ -209,6 +209,9 @@ func (txn *Txn) Delete(key []byte) error {
 // Get looks for key and returns a KVItem.
 // If key is not found, ErrKeyNotFound is returned.
 func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
+	if len(key) == 0 {
+		return item, ErrEmptyKey
+	}
 	if txn.update {
 		if e, has := txn.pendingWrites[string(key)]; has && bytes.Compare(key, e.Key) == 0 {
 			// Fulfill from cache.

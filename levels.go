@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"bytes"
 	"fmt"
 	"math/rand"
 	"os"
@@ -355,7 +354,7 @@ func (s *levelsController) compactBuildTables(
 	}
 
 	sort.Slice(newTables, func(i, j int) bool {
-		return bytes.Compare(newTables[i].Biggest(), newTables[j].Biggest()) < 0
+		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
 
 	return newTables, func() error { return decrRefs(newTables) }, nil
