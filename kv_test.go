@@ -278,16 +278,15 @@ func TestGetMore(t *testing.T) {
 		}
 		got := string(getItemValue(t, &item))
 		if expectedValue != got {
-			k0 := y.KeyWithTs(k, math.MaxUint64)
 
-			vs, err := kv.get(k0)
+			vs, err := kv.get(y.KeyWithTs(k, math.MaxUint64))
 			require.NoError(t, err)
 			fmt.Printf("wanted=%q Item: %s\n", k, item.ToString())
 			fmt.Printf("on re-run, got version: %+v\n", vs)
 
 			txn := kv.NewTransaction(false)
 			itr := txn.NewIterator(DefaultIteratorOptions)
-			for itr.Seek(k0); itr.Valid(); itr.Next() {
+			for itr.Seek(k); itr.Valid(); itr.Next() {
 				item := itr.Item()
 				fmt.Printf("item=%s\n", item.ToString())
 				if !bytes.Equal(item.Key(), k) {
@@ -443,8 +442,7 @@ func TestIterate2Basic(t *testing.T) {
 	{
 		t.Log("Starting second basic iteration")
 		idx := 5030
-		start := y.KeyWithTs(bkey(idx), txn.readTs)
-		for it.Seek(start); it.Valid(); it.Next() {
+		for it.Seek(bkey(idx)); it.Valid(); it.Next() {
 			item := it.Item()
 			require.EqualValues(t, bkey(idx), string(item.Key()))
 			require.EqualValues(t, bval(idx), string(getItemValue(t, item)))
@@ -526,8 +524,8 @@ func TestIterateDeleted(t *testing.T) {
 
 	count := 0
 	txn2 := ps.NewTransaction(true)
-	prefix := y.KeyWithTs([]byte("Key"), txn.readTs)
-	for idxIt.Seek(prefix); idxIt.ValidForPrefix([]byte("Key")); idxIt.Next() {
+	prefix := []byte("Key")
+	for idxIt.Seek(prefix); idxIt.ValidForPrefix(prefix); idxIt.Next() {
 		key := idxIt.Item().Key()
 		count++
 		newKey := make([]byte, len(key))

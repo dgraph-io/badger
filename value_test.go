@@ -393,7 +393,7 @@ func TestChecksums(t *testing.T) {
 	require.NoError(t, err)
 	txn := kv.NewTransaction(false)
 	iter := txn.NewIterator(DefaultIteratorOptions)
-	iter.Seek(y.KeyWithTs(k0, txn.readTs))
+	iter.Seek(k0)
 	require.True(t, iter.Valid())
 	it := iter.Item()
 	require.Equal(t, it.Key(), k0)
@@ -537,7 +537,7 @@ func checkKeys(t *testing.T, kv *KV, keys [][]byte) {
 	i := 0
 	txn := kv.NewTransaction(false)
 	iter := txn.NewIterator(IteratorOptions{})
-	for iter.Seek(y.KeyWithTs(keys[0], txn.readTs)); iter.Valid(); iter.Next() {
+	for iter.Seek(keys[0]); iter.Valid(); iter.Next() {
 		require.Equal(t, iter.Item().Key(), keys[i])
 		i++
 	}
