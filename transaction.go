@@ -170,6 +170,7 @@ type Txn struct {
 
 	kv        *KV
 	callbacks []func()
+	discarded bool
 }
 
 // Set sets the provided value for a given key. If key is not present, it is created.  If it is
@@ -182,6 +183,8 @@ type Txn struct {
 func (txn *Txn) Set(key, val []byte, userMeta byte) error {
 	if !txn.update {
 		return ErrReadOnlyTxn
+	} else if txn.discarded {
+		return ErrDiscardedTxn
 	} else if len(key) == 0 {
 		return ErrEmptyKey
 	} else if len(key) > maxKeySize {
@@ -208,6 +211,8 @@ func (txn *Txn) Set(key, val []byte, userMeta byte) error {
 func (txn *Txn) Delete(key []byte) error {
 	if !txn.update {
 		return ErrReadOnlyTxn
+	} else if txn.discarded {
+		return ErrDiscardedTxn
 	} else if len(key) == 0 {
 		return ErrEmptyKey
 	} else if len(key) > maxKeySize {
@@ -230,7 +235,10 @@ func (txn *Txn) Delete(key []byte) error {
 func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 	if len(key) == 0 {
 		return item, ErrEmptyKey
+	} else if txn.discarded {
+		return ErrDiscardedTxn
 	}
+
 	if txn.update {
 		if e, has := txn.pendingWrites[string(key)]; has && bytes.Compare(key, e.Key) == 0 {
 			// Fulfill from cache.
@@ -272,10 +280,15 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 }
 
 func (txn *Txn) Discard() {
+	if txn.discarded {
+		// Avoid a re-run.
+		return
+	}
+	txn.discarded = true
+
 	for _, cb := range txn.callbacks {
 		cb()
 	}
-	txn.callbacks = txn.callbacks[:0]
 	if txn.update {
 		txn.kv.txnState.decrRef()
 	}
@@ -293,6 +306,9 @@ func (txn *Txn) Discard() {
 // rollback the transaction, removing any writes from LSM tree. Note that the writes might be
 // present on value log, but those can be garbage collected later.
 func (txn *Txn) Commit(callback func(error)) error {
+	if txn.discarded {
+		return ErrDiscardedTxn
+	}
 	defer txn.Discard()
 	if len(txn.writes) == 0 {
 		return nil // Nothing to do.
