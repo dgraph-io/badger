@@ -31,10 +31,7 @@ From here, follow [docs](https://godoc.org/github.com/dgraph-io/badger) for usag
 ### Note
 Badger is undergoing a major API change by introducing transactions. To use the
 existing version of the APIs, please use [tag v0.8](/tree/v0.8). Tag can be
-specified via the Go dependency tool you're using, or by calling `go get` as
-follows.
-
-`go get -t -v gopkg.in/dgraph-io/badger.v0`
+specified via the Go dependency tool you're using.
 
 ## Documentation
 
