@@ -45,7 +45,7 @@ var (
 	ErrReadOnlyTxn = errors.New("No sets or deletes are allowed in a read-only transaction.")
 
 	// ErrDiscardedTxn is returned if a previously discarded transaction is re-used.
-	ErrDiscardedTxn = errors.New("This transaction has been discarded. Recreate a new one.")
+	ErrDiscardedTxn = errors.New("This transaction has been discarded. Create a new one.")
 
 	// ErrEmptyKey is returned if an empty key is passed on an update function.
 	ErrEmptyKey = errors.New("Key cannot be empty.")

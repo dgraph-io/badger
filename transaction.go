@@ -280,8 +280,7 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 }
 
 func (txn *Txn) Discard() {
-	if txn.discarded {
-		// Avoid a re-run.
+	if txn.discarded { // Avoid a re-run.
 		return
 	}
 	txn.discarded = true
