@@ -37,7 +37,7 @@ type levelsController struct {
 
 	// The following are initialized once and const.
 	levels []*levelHandler
-	kv     *KV
+	kv     *DB
 
 	nextFileID uint64 // Atomic
 
@@ -55,7 +55,7 @@ var (
 // revertToManifest checks that all necessary table files exist and removes all table files not
 // referenced by the manifest.  idMap is a set of table file id's that were read from the directory
 // listing.
-func revertToManifest(kv *KV, mf *Manifest, idMap map[uint64]struct{}) error {
+func revertToManifest(kv *DB, mf *Manifest, idMap map[uint64]struct{}) error {
 	// 1. Check all files in manifest exist.
 	for id := range mf.Tables {
 		if _, ok := idMap[id]; !ok {
@@ -77,7 +77,7 @@ func revertToManifest(kv *KV, mf *Manifest, idMap map[uint64]struct{}) error {
 	return nil
 }
 
-func newLevelsController(kv *KV, mf *Manifest) (*levelsController, error) {
+func newLevelsController(kv *DB, mf *Manifest) (*levelsController, error) {
 	y.AssertTrue(kv.opt.NumLevelZeroTablesStall > kv.opt.NumLevelZeroTables)
 	s := &levelsController{
 		kv:     kv,

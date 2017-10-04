@@ -41,7 +41,7 @@ func TestManifestBasic(t *testing.T) {
 
 	opt := getTestOptions(dir)
 	{
-		kv, err := NewKV(opt)
+		kv, err := Open(opt)
 		require.NoError(t, err)
 		n := 5000
 		for i := 0; i < n; i++ {
@@ -56,7 +56,7 @@ func TestManifestBasic(t *testing.T) {
 		require.NoError(t, kv.Close())
 	}
 
-	kv, err := NewKV(opt)
+	kv, err := Open(opt)
 	require.NoError(t, err)
 
 	require.NoError(t, kv.View(func(txn *Txn) error {
@@ -76,7 +76,7 @@ func helpTestManifestFileCorruption(t *testing.T, off int64, errorContent string
 
 	opt := getTestOptions(dir)
 	{
-		kv, err := NewKV(opt)
+		kv, err := Open(opt)
 		require.NoError(t, err)
 		require.NoError(t, kv.Close())
 	}
@@ -86,7 +86,7 @@ func helpTestManifestFileCorruption(t *testing.T, off int64, errorContent string
 	_, err = fp.WriteAt([]byte{'X'}, off)
 	require.NoError(t, err)
 	require.NoError(t, fp.Close())
-	kv, err := NewKV(opt)
+	kv, err := Open(opt)
 	defer func() {
 		if kv != nil {
 			kv.Close()
@@ -163,7 +163,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	opt := DefaultOptions
 	opt.Dir = dir
 	opt.ValueDir = dir
-	kv, err := NewKV(&opt)
+	kv, err := Open(&opt)
 	require.NoError(t, err)
 
 	lh0 := newLevelHandler(kv, 0)

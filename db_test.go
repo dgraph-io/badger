@@ -43,7 +43,7 @@ func getTestOptions(dir string) *Options {
 	return opt
 }
 
-func getItemValue(t *testing.T, item *KVItem) (val []byte) {
+func getItemValue(t *testing.T, item *Item) (val []byte) {
 	v, err := item.Value()
 	if err != nil {
 		t.Error(err)
@@ -54,13 +54,13 @@ func getItemValue(t *testing.T, item *KVItem) (val []byte) {
 	return v
 }
 
-func txnSet(t *testing.T, kv *KV, key []byte, val []byte, meta byte) {
+func txnSet(t *testing.T, kv *DB, key []byte, val []byte, meta byte) {
 	txn := kv.NewTransaction(true)
 	require.NoError(t, txn.Set(key, val, meta))
 	require.NoError(t, txn.Commit(nil))
 }
 
-func txnDelete(t *testing.T, kv *KV, key []byte) {
+func txnDelete(t *testing.T, kv *DB, key []byte) {
 	txn := kv.NewTransaction(true)
 	require.NoError(t, txn.Delete(key))
 	require.NoError(t, txn.Commit(nil))
@@ -70,7 +70,7 @@ func TestWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 	defer kv.Close()
 
@@ -83,7 +83,7 @@ func TestConcurrentWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, _ := NewKV(getTestOptions(dir))
+	kv, _ := Open(getTestOptions(dir))
 	defer kv.Close()
 
 	// Not a benchmark. Just a simple test for concurrent writes.
@@ -138,7 +138,7 @@ func TestGet(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := Open(getTestOptions(dir))
 	if err != nil {
 		t.Error(err)
 	}
@@ -190,7 +190,7 @@ func TestExists(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := Open(getTestOptions(dir))
 	if err != nil {
 		t.Error(err)
 	}
@@ -233,7 +233,7 @@ func TestGetMore(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := Open(getTestOptions(dir))
 	if err != nil {
 		t.Error(err)
 		t.Fail()
@@ -341,7 +341,7 @@ func TestExistsMore(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := Open(getTestOptions(dir))
 	if err != nil {
 		t.Error(err)
 		t.Fail()
@@ -414,7 +414,7 @@ func TestIterate2Basic(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, _ := NewKV(getTestOptions(dir))
+	kv, _ := Open(getTestOptions(dir))
 	defer kv.Close()
 
 	bkey := func(i int) []byte {
@@ -483,7 +483,7 @@ func TestLoad(t *testing.T) {
 	defer os.RemoveAll(dir)
 	n := 10000
 	{
-		kv, _ := NewKV(getTestOptions(dir))
+		kv, _ := Open(getTestOptions(dir))
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
 				fmt.Printf("Putting i=%d\n", i)
@@ -494,7 +494,7 @@ func TestLoad(t *testing.T) {
 		kv.Close()
 	}
 
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 	require.Equal(t, uint64(10001), kv.txnState.readTs())
 	for i := 0; i < n; i++ {
@@ -538,7 +538,7 @@ func TestIterateDeleted(t *testing.T) {
 	opt.SyncWrites = true
 	opt.Dir = dir
 	opt.ValueDir = dir
-	ps, err := NewKV(&opt)
+	ps, err := Open(&opt)
 	require.NoError(t, err)
 	defer ps.Close()
 	txnSet(t, ps, []byte("Key1"), []byte("Value1"), 0x00)
@@ -589,7 +589,7 @@ func TestIterateDeleted(t *testing.T) {
 }
 
 func TestDirNotExists(t *testing.T) {
-	_, err := NewKV(getTestOptions("not-exists"))
+	_, err := Open(getTestOptions("not-exists"))
 	require.Error(t, err)
 }
 
@@ -601,7 +601,7 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 	*opt = DefaultOptions
 	opt.Dir = dir
 	opt.ValueDir = dir
-	kv, err := NewKV(opt)
+	kv, err := Open(opt)
 	if err != nil {
 		t.Error(err)
 		t.Fail()
@@ -614,7 +614,7 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 	kv.Close()
 
 	// Reopen KV
-	kv, err = NewKV(opt)
+	kv, err = Open(opt)
 	if err != nil {
 		t.Error(err)
 		t.Fail()
@@ -633,10 +633,10 @@ func TestPidFile(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	options := getTestOptions(dir)
-	kv1, err := NewKV(options)
+	kv1, err := Open(options)
 	require.NoError(t, err)
 	defer kv1.Close()
-	_, err = NewKV(options)
+	_, err = Open(options)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Another process is using this Badger database")
 }
@@ -647,7 +647,7 @@ func TestBigKeyValuePairs(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	opt := getTestOptions(dir)
-	kv, err := NewKV(opt)
+	kv, err := Open(opt)
 	require.NoError(t, err)
 
 	bigK := make([]byte, maxKeySize+1)
@@ -673,7 +673,7 @@ func TestIteratorPrefetchSize(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, _ := NewKV(getTestOptions(dir))
+	kv, _ := Open(getTestOptions(dir))
 	defer kv.Close()
 
 	bkey := func(i int) []byte {
@@ -720,7 +720,7 @@ func TestSetIfAbsentAsync(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, _ := NewKV(getTestOptions(dir))
+	kv, _ := Open(getTestOptions(dir))
 
 	bkey := func(i int) []byte {
 		return []byte(fmt.Sprintf("%09d", i))
@@ -741,7 +741,7 @@ func TestSetIfAbsentAsync(t *testing.T) {
 	}
 
 	require.NoError(t, kv.Close())
-	kv, err = NewKV(getTestOptions(dir))
+	kv, err = Open(getTestOptions(dir))
 	require.NoError(t, err)
 
 	opt := DefaultIteratorOptions
@@ -763,7 +763,7 @@ func TestGetSetRace(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, _ := NewKV(getTestOptions(dir))
+	kv, _ := Open(getTestOptions(dir))
 
 	data := make([]byte, 4096)
 	_, err = rand.Read(data)

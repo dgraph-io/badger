@@ -32,7 +32,7 @@ func TestValueBasic(t *testing.T) {
 	y.Check(err)
 	defer os.RemoveAll(dir)
 
-	kv, _ := NewKV(getTestOptions(dir))
+	kv, _ := Open(getTestOptions(dir))
 	defer kv.Close()
 	log := &kv.vlog
 
@@ -89,7 +89,7 @@ func TestValueGC(t *testing.T) {
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 
-	kv, _ := NewKV(opt)
+	kv, _ := Open(opt)
 	defer kv.Close()
 
 	sz := 32 << 10
@@ -140,7 +140,7 @@ func TestValueGC2(t *testing.T) {
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 
-	kv, _ := NewKV(opt)
+	kv, _ := Open(opt)
 	defer kv.Close()
 
 	sz := 32 << 10
@@ -214,7 +214,7 @@ func TestValueGC3(t *testing.T) {
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 
-	kv, err := NewKV(opt)
+	kv, err := Open(opt)
 	require.NoError(t, err)
 	defer kv.Close()
 
@@ -287,7 +287,7 @@ func TestValueGC4(t *testing.T) {
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 
-	kv, _ := NewKV(opt)
+	kv, _ := Open(opt)
 	defer kv.Close()
 
 	sz := 128 << 10 // 5 entries per value log file.
@@ -357,7 +357,7 @@ func TestChecksums(t *testing.T) {
 	// Set up SST with K1=V1
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
-	kv, err := NewKV(opts)
+	kv, err := Open(opts)
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
 
@@ -384,7 +384,7 @@ func TestChecksums(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
 
 	// K1 should exist, but K2 shouldn't.
-	kv, err = NewKV(opts)
+	kv, err = Open(opts)
 	require.NoError(t, err)
 
 	require.NoError(t, kv.View(func(txn *Txn) error {
@@ -406,7 +406,7 @@ func TestChecksums(t *testing.T) {
 
 	// The vlog should contain K0 and K3 (K1 and k2 was lost when Badger started up
 	// last due to checksum failure).
-	kv, err = NewKV(opts)
+	kv, err = Open(opts)
 	require.NoError(t, err)
 
 	{
@@ -439,7 +439,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	// Create skeleton files.
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
-	kv, err := NewKV(opts)
+	kv, err := Open(opts)
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
 
@@ -467,7 +467,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
 
 	// Badger should now start up
-	kv, err = NewKV(opts)
+	kv, err = Open(opts)
 	require.NoError(t, err)
 
 	require.NoError(t, kv.View(func(txn *Txn) error {
@@ -485,7 +485,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	// When K3 is set, it should be persisted after a restart.
 	txnSet(t, kv, k3, v3, 0)
 	require.NoError(t, kv.Close())
-	kv, err = NewKV(getTestOptions(dir))
+	kv, err = Open(getTestOptions(dir))
 	require.NoError(t, err)
 	checkKeys(t, kv, [][]byte{k3})
 	require.NoError(t, kv.Close())
@@ -498,7 +498,7 @@ func TestValueLogTrigger(t *testing.T) {
 
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
-	kv, err := NewKV(opt)
+	kv, err := Open(opt)
 	require.NoError(t, err)
 
 	// Write a lot of data, so it creates some work for valug log GC.
@@ -535,7 +535,7 @@ func TestValueLogTrigger(t *testing.T) {
 	require.NoError(t, kv.Close())
 
 	err = kv.RunValueLogGC(0.5)
-	require.Equal(t, ErrRejected, err, "Error should be returned after closing KV.")
+	require.Equal(t, ErrRejected, err, "Error should be returned after closing DB.")
 }
 
 func createVlog(t *testing.T, entries []*entry) []byte {
@@ -545,7 +545,7 @@ func createVlog(t *testing.T, entries []*entry) []byte {
 
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
-	kv, err := NewKV(opts)
+	kv, err := Open(opts)
 	require.NoError(t, err)
 	txnSet(t, kv, entries[0].Key, entries[0].Value, entries[0].Meta)
 	entries = entries[1:]
@@ -562,7 +562,7 @@ func createVlog(t *testing.T, entries []*entry) []byte {
 	return buf
 }
 
-func checkKeys(t *testing.T, kv *KV, keys [][]byte) {
+func checkKeys(t *testing.T, kv *DB, keys [][]byte) {
 	i := 0
 	txn := kv.NewTransaction(false)
 	iter := txn.NewIterator(IteratorOptions{})

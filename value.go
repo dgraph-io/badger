@@ -439,7 +439,7 @@ type valueLog struct {
 	// A refcount of iterators -- when this hits zero, we can delete the filesToBeDeleted.
 	numActiveIterators int
 
-	kv                *KV
+	kv                *DB
 	maxFid            uint32
 	writableLogOffset uint32
 	opt               Options
@@ -532,7 +532,7 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	return lf, nil
 }
 
-func (vlog *valueLog) Open(kv *KV, opt *Options) error {
+func (vlog *valueLog) Open(kv *DB, opt *Options) error {
 	vlog.dirPath = opt.ValueDir
 	vlog.opt = *opt
 	vlog.kv = kv

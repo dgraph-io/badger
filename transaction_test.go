@@ -30,7 +30,7 @@ func TestTxnSimple(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 	defer kv.Close()
 
@@ -56,7 +56,7 @@ func TestTxnVersions(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 	defer kv.Close()
 
@@ -161,7 +161,7 @@ func TestTxnWriteSkew(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 	defer kv.Close()
 
@@ -232,7 +232,7 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 	defer kv.Close()
 
@@ -314,7 +314,7 @@ func TestTxnIterationEdgeCase2(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 	defer kv.Close()
 
@@ -408,7 +408,7 @@ func TestTxnIterationEdgeCase3(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 	defer kv.Close()
 
@@ -473,7 +473,7 @@ func TestTxnManaged(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := NewKV(getTestOptions(dir))
+	kv, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 	defer kv.Close()
 

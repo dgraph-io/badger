@@ -40,7 +40,7 @@ type levelHandler struct {
 	level        int
 	strLevel     string
 	maxTotalSize int64
-	kv           *KV
+	db           *DB
 }
 
 func (s *levelHandler) getTotalSize() int64 {
@@ -155,11 +155,11 @@ func decrRefs(tables []*table.Table) error {
 	return nil
 }
 
-func newLevelHandler(kv *KV, level int) *levelHandler {
+func newLevelHandler(db *DB, level int) *levelHandler {
 	return &levelHandler{
 		level:    level,
 		strLevel: fmt.Sprintf("l%d", level),
-		kv:       kv,
+		db:       db,
 	}
 }
 
@@ -169,7 +169,7 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 	// Need lock as we may be deleting the first table during a level 0 compaction.
 	s.Lock()
 	defer s.Unlock()
-	if len(s.tables) >= s.kv.opt.NumLevelZeroTablesStall {
+	if len(s.tables) >= s.db.opt.NumLevelZeroTablesStall {
 		return false
 	}
 

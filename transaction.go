@@ -168,7 +168,7 @@ type Txn struct {
 
 	pendingWrites map[string]*entry // cache stores any writes done by txn.
 
-	kv        *KV
+	db        *DB
 	callbacks []func()
 	discarded bool
 }
@@ -189,8 +189,8 @@ func (txn *Txn) Set(key, val []byte, userMeta byte) error {
 		return ErrEmptyKey
 	} else if len(key) > maxKeySize {
 		return exceedsMaxKeySizeError(key)
-	} else if int64(len(val)) > txn.kv.opt.ValueLogFileSize {
-		return exceedsMaxValueSizeError(val, txn.kv.opt.ValueLogFileSize)
+	} else if int64(len(val)) > txn.db.opt.ValueLogFileSize {
+		return exceedsMaxValueSizeError(val, txn.db.opt.ValueLogFileSize)
 	}
 
 	fp := farm.Fingerprint64(key) // Avoid dealing with byte arrays.
@@ -230,9 +230,9 @@ func (txn *Txn) Delete(key []byte) error {
 	return nil
 }
 
-// Get looks for key and returns a KVItem.
+// Get looks for key and returns a Item.
 // If key is not found, ErrKeyNotFound is returned.
-func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
+func (txn *Txn) Get(key []byte) (item Item, rerr error) {
 	if len(key) == 0 {
 		return item, ErrEmptyKey
 	} else if txn.discarded {
@@ -248,7 +248,7 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 			item.key = key
 			item.status = prefetched
 			item.version = txn.readTs
-			// We probably don't need to set KV on item here.
+			// We probably don't need to set db on item here.
 			return item, nil
 		}
 		// Only track reads if this is update txn. No need to track read if txn serviced it
@@ -258,9 +258,9 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 	}
 
 	seek := y.KeyWithTs(key, txn.readTs)
-	vs, err := txn.kv.get(seek)
+	vs, err := txn.db.get(seek)
 	if err != nil {
-		return item, errors.Wrapf(err, "KV::Get key: %q", key)
+		return item, errors.Wrapf(err, "DB::Get key: %q", key)
 	}
 	if vs.Value == nil && vs.Meta == 0 {
 		return item, ErrKeyNotFound
@@ -273,7 +273,7 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 	item.version = vs.Version
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta
-	item.kv = txn.kv
+	item.db = txn.db
 	item.vptr = vs.Value
 	item.txn = txn
 	return item, nil
@@ -289,7 +289,7 @@ func (txn *Txn) Discard() {
 		cb()
 	}
 	if txn.update {
-		txn.kv.txnState.decrRef()
+		txn.db.txnState.decrRef()
 	}
 }
 
@@ -313,7 +313,7 @@ func (txn *Txn) Commit(callback func(error)) error {
 		return nil // Nothing to do.
 	}
 
-	state := txn.kv.txnState
+	state := txn.db.txnState
 	commitTs := state.newCommitTs(txn)
 	if commitTs == 0 {
 		return ErrConflict
@@ -340,9 +340,9 @@ func (txn *Txn) Commit(callback func(error)) error {
 
 		// TODO: What if some of the txns successfully make it to value log, but others fail.
 		// Nothing gets updated to LSM, until a restart happens.
-		return txn.kv.batchSet(entries)
+		return txn.db.batchSet(entries)
 	}
-	return txn.kv.batchSetAsync(entries, callback)
+	return txn.db.batchSetAsync(entries, callback)
 }
 
 func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
@@ -372,14 +372,14 @@ func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
 //   itr.Close()
 // TODO: Move this usage to README.
 func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
-	tables, decr := txn.kv.getMemTables()
+	tables, decr := txn.db.getMemTables()
 	defer decr()
-	txn.kv.vlog.incrIteratorCount()
+	txn.db.vlog.incrIteratorCount()
 	var iters []y.Iterator
 	for i := 0; i < len(tables); i++ {
 		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
 	}
-	iters = txn.kv.lc.appendIterators(iters, opt.Reverse) // This will increment references.
+	iters = txn.db.lc.appendIterators(iters, opt.Reverse) // This will increment references.
 	res := &Iterator{
 		txn:    txn,
 		iitr:   y.NewMergeIterator(iters, opt.Reverse),
@@ -389,27 +389,27 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	return res
 }
 
-func (kv *KV) NewTransaction(update bool) *Txn {
+func (db *DB) NewTransaction(update bool) *Txn {
 	txn := &Txn{
 		update: update,
-		kv:     kv,
-		readTs: kv.txnState.readTs(),
+		db:     db,
+		readTs: db.txnState.readTs(),
 	}
 	if update {
 		txn.pendingWrites = make(map[string]*entry)
-		txn.kv.txnState.addRef()
+		txn.db.txnState.addRef()
 	}
 	return txn
 }
 
-func (kv *KV) NewTransactionAt(readTs uint64, update bool) *Txn {
-	txn := kv.NewTransaction(update)
+func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
+	txn := db.NewTransaction(update)
 	txn.readTs = readTs
 	return txn
 }
 
-func (kv *KV) View(callback func(txn *Txn) error) error {
-	txn := kv.NewTransaction(false)
+func (db *DB) View(callback func(txn *Txn) error) error {
+	txn := db.NewTransaction(false)
 	defer txn.Discard()
 
 	return callback(txn)

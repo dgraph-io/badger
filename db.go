@@ -49,9 +49,9 @@ type closers struct {
 	valueGC    *y.Closer
 }
 
-// KV provides the various functions required to interact with Badger.
-// KV is thread-safe.
-type KV struct {
+// DB provides the various functions required to interact with Badger.
+// DB is thread-safe.
+type DB struct {
 	sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
 
 	dirLockGuard *DirectoryLockGuard
@@ -81,7 +81,7 @@ const (
 	kvWriteChCapacity = 1000
 )
 
-func replayFunction(out *KV) func(entry, valuePointer) error {
+func replayFunction(out *DB) func(entry, valuePointer) error {
 	type txnEntry struct {
 		nk []byte
 		v  y.ValueStruct
@@ -163,8 +163,8 @@ func replayFunction(out *KV) func(entry, valuePointer) error {
 	}
 }
 
-// NewKV returns a new KV object.
-func NewKV(optParam *Options) (out *KV, err error) {
+// Open returns a new DB object.
+func Open(optParam *Options) (out *DB, err error) {
 	// Make a copy early and fill in maxBatchSize
 	opt := *optParam
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
@@ -229,13 +229,13 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	}
 	heap.Init(&gs.commitMark)
 
-	out = &KV{
+	out = &DB{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
 		opt:           opt,
 		manifest:      manifestFile,
-		elog:          trace.NewEventLog("Badger", "KV"),
+		elog:          trace.NewEventLog("Badger", "DB"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
 		txnState:      gs,
@@ -309,9 +309,9 @@ func NewKV(optParam *Options) (out *KV, err error) {
 	return out, nil
 }
 
-// Close closes a KV. It's crucial to call it to ensure all the pending updates
+// Close closes a DB. It's crucial to call it to ensure all the pending updates
 // make their way to disk.
-func (s *KV) Close() (err error) {
+func (s *DB) Close() (err error) {
 	s.elog.Printf("Closing database")
 	// Stop value GC first.
 	s.closers.valueGC.SignalAndWait()
@@ -321,7 +321,7 @@ func (s *KV) Close() (err error) {
 
 	// Now close the value log.
 	if vlogErr := s.vlog.Close(); err == nil {
-		err = errors.Wrap(vlogErr, "KV.Close")
+		err = errors.Wrap(vlogErr, "DB.Close")
 	}
 
 	// Make sure that block writer is done pushing stuff into memtable!
@@ -364,7 +364,7 @@ func (s *KV) Close() (err error) {
 	s.elog.Printf("Compaction finished")
 
 	if lcErr := s.lc.close(); err == nil {
-		err = errors.Wrap(lcErr, "KV.Close")
+		err = errors.Wrap(lcErr, "DB.Close")
 	}
 	s.elog.Printf("Waiting for closer")
 	s.closers.updateSize.SignalAndWait()
@@ -372,25 +372,25 @@ func (s *KV) Close() (err error) {
 	s.elog.Finish()
 
 	if guardErr := s.dirLockGuard.Release(); err == nil {
-		err = errors.Wrap(guardErr, "KV.Close")
+		err = errors.Wrap(guardErr, "DB.Close")
 	}
 	if s.valueDirGuard != nil {
 		if guardErr := s.valueDirGuard.Release(); err == nil {
-			err = errors.Wrap(guardErr, "KV.Close")
+			err = errors.Wrap(guardErr, "DB.Close")
 		}
 	}
 	if manifestErr := s.manifest.close(); err == nil {
-		err = errors.Wrap(manifestErr, "KV.Close")
+		err = errors.Wrap(manifestErr, "DB.Close")
 	}
 
 	// Fsync directories to ensure that lock file, and any other removed files whose directory
 	// we haven't specifically fsynced, are guaranteed to have their directory entry removal
 	// persisted to disk.
 	if syncErr := syncDir(s.opt.Dir); err == nil {
-		err = errors.Wrap(syncErr, "KV.Close")
+		err = errors.Wrap(syncErr, "DB.Close")
 	}
 	if syncErr := syncDir(s.opt.ValueDir); err == nil {
-		err = errors.Wrap(syncErr, "KV.Close")
+		err = errors.Wrap(syncErr, "DB.Close")
 	}
 
 	return err
@@ -417,7 +417,7 @@ func syncDir(dir string) error {
 }
 
 // getMemtables returns the current memtables and get references.
-func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
+func (s *DB) getMemTables() ([]*skl.Skiplist, func()) {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -442,7 +442,7 @@ func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 
 // get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
-func (s *KV) get(key []byte) (y.ValueStruct, error) {
+func (s *DB) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getMemTables() // Lock should be released.
 	defer decr()
 
@@ -457,7 +457,7 @@ func (s *KV) get(key []byte) (y.ValueStruct, error) {
 	return s.lc.get(key)
 }
 
-func (s *KV) updateOffset(ptrs []valuePointer) {
+func (s *DB) updateOffset(ptrs []valuePointer) {
 	var ptr valuePointer
 	for i := len(ptrs) - 1; i >= 0; i-- {
 		p := ptrs[i]
@@ -482,11 +482,11 @@ var requestPool = sync.Pool{
 	},
 }
 
-func (s *KV) shouldWriteValueToLSM(e entry) bool {
+func (s *DB) shouldWriteValueToLSM(e entry) bool {
 	return len(e.Value) < s.opt.ValueThreshold
 }
 
-func (s *KV) writeToLSM(b *request) error {
+func (s *DB) writeToLSM(b *request) error {
 	if len(b.Ptrs) != len(b.Entries) {
 		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
@@ -516,7 +516,7 @@ func (s *KV) writeToLSM(b *request) error {
 }
 
 // writeRequests is called serially by only one goroutine.
-func (s *KV) writeRequests(reqs []*request) error {
+func (s *DB) writeRequests(reqs []*request) error {
 	if len(reqs) == 0 {
 		return nil
 	}
@@ -565,7 +565,7 @@ func (s *KV) writeRequests(reqs []*request) error {
 	return nil
 }
 
-func (s *KV) doWrites(lc *y.Closer) {
+func (s *DB) doWrites(lc *y.Closer) {
 	defer lc.Done()
 	pendingCh := make(chan struct{}, 1)
 
@@ -625,7 +625,7 @@ func (s *KV) doWrites(lc *y.Closer) {
 	}
 }
 
-func (s *KV) sendToWriteCh(entries []*entry) (*request, error) {
+func (s *DB) sendToWriteCh(entries []*entry) (*request, error) {
 	var count, size int64
 	for _, e := range entries {
 		size += int64(s.opt.estimateSize(e))
@@ -650,7 +650,7 @@ func (s *KV) sendToWriteCh(entries []*entry) (*request, error) {
 // batchSet applies a list of badger.Entry. If a request level error occurs it
 // will be returned.
 //   Check(kv.BatchSet(entries))
-func (s *KV) batchSet(entries []*entry) error {
+func (s *DB) batchSet(entries []*entry) error {
 	req, err := s.sendToWriteCh(entries)
 	if err != nil {
 		return err
@@ -669,7 +669,7 @@ func (s *KV) batchSet(entries []*entry) error {
 //   err := kv.BatchSetAsync(entries, func(err error)) {
 //      Check(err)
 //   }
-func (s *KV) batchSetAsync(entries []*entry, f func(error)) error {
+func (s *DB) batchSetAsync(entries []*entry, f func(error)) error {
 	req, err := s.sendToWriteCh(entries)
 	if err != nil {
 		return err
@@ -688,7 +688,7 @@ func (s *KV) batchSetAsync(entries []*entry, f func(error)) error {
 var errNoRoom = errors.New("No room for write")
 
 // ensureRoomForWrite is always called serially.
-func (s *KV) ensureRoomForWrite() error {
+func (s *DB) ensureRoomForWrite() error {
 	var err error
 	s.Lock()
 	defer s.Unlock()
@@ -696,7 +696,7 @@ func (s *KV) ensureRoomForWrite() error {
 		return nil
 	}
 
-	y.AssertTrue(s.mt != nil) // A nil mt indicates that KV is being closed.
+	y.AssertTrue(s.mt != nil) // A nil mt indicates that DB is being closed.
 	select {
 	case s.flushChan <- flushTask{s.mt, s.vptr}:
 		s.elog.Printf("Flushing value log to disk if async mode.")
@@ -743,7 +743,7 @@ type flushTask struct {
 	vptr valuePointer
 }
 
-func (s *KV) flushMemtable(lc *y.Closer) error {
+func (s *DB) flushMemtable(lc *y.Closer) error {
 	defer lc.Done()
 
 	for ft := range s.flushChan {
@@ -818,7 +818,7 @@ func exists(path string) (bool, error) {
 	return true, err
 }
 
-func (s *KV) updateSize(lc *y.Closer) {
+func (s *DB) updateSize(lc *y.Closer) {
 	defer lc.Done()
 
 	metricsTicker := time.NewTicker(5 * time.Minute)
@@ -882,11 +882,11 @@ func (s *KV) updateSize(lc *y.Closer) {
 // the cost of increased activity on the LSM tree. discardRatio must be in the range (0.0, 1.0),
 // both endpoints excluded, otherwise an ErrInvalidRequest is returned.
 //
-// Only one GC is allowed at a time. If another value log GC is running, or KV has been closed, this
+// Only one GC is allowed at a time. If another value log GC is running, or DB has been closed, this
 // would return an ErrRejected.
 //
 // Note: Every time GC is run, it would produce a spike of activity on the LSM tree.
-func (s *KV) RunValueLogGC(discardRatio float64) error {
+func (s *DB) RunValueLogGC(discardRatio float64) error {
 	if discardRatio >= 1.0 || discardRatio <= 0.0 {
 		return ErrInvalidRequest
 	}

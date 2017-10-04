@@ -32,36 +32,36 @@ const (
 	prefetched
 )
 
-// KVItem is returned during iteration. Both the Key() and Value() output is only valid until
+// Item is returned during iteration. Both the Key() and Value() output is only valid until
 // iterator.Next() is called.
-type KVItem struct {
+type Item struct {
 	status   prefetchStatus
 	err      error
 	wg       sync.WaitGroup
-	kv       *KV
+	db       *DB
 	key      []byte
 	vptr     []byte
 	meta     byte
 	userMeta byte
 	val      []byte
 	slice    *y.Slice // Used only during prefetching.
-	next     *KVItem
+	next     *Item
 	version  uint64
 	txn      *Txn
 }
 
-func (item *KVItem) ToString() string {
+func (item *Item) ToString() string {
 	return fmt.Sprintf("key=%q, version=%d, meta=%x", item.Key(), item.Version(), item.meta)
 
 }
 
 // Key returns the key. Remember to copy if you need to access it outside the iteration loop.
-func (item *KVItem) Key() []byte {
+func (item *Item) Key() []byte {
 	return item.key
 }
 
 // Version returns the commit timestamp of the item.
-func (item *KVItem) Version() uint64 {
+func (item *Item) Version() uint64 {
 	return item.version
 }
 
@@ -73,7 +73,7 @@ func (item *KVItem) Version() uint64 {
 //
 // Remember to parse or copy it if you need to reuse it. DO NOT modify or
 // append to this slice; it would result in a panic.
-func (item *KVItem) Value() ([]byte, error) {
+func (item *Item) Value() ([]byte, error) {
 	item.wg.Wait()
 	if item.status == prefetched {
 		return item.val, item.err
@@ -85,7 +85,7 @@ func (item *KVItem) Value() ([]byte, error) {
 	return buf, err
 }
 
-func (item *KVItem) hasValue() bool {
+func (item *Item) hasValue() bool {
 	if item.meta == 0 && item.vptr == nil {
 		// key not found
 		return false
@@ -97,7 +97,7 @@ func (item *KVItem) hasValue() bool {
 	return true
 }
 
-func (item *KVItem) yieldItemValue() ([]byte, func(), error) {
+func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	if !item.hasValue() {
 		return nil, nil, nil
 	}
@@ -114,7 +114,7 @@ func (item *KVItem) yieldItemValue() ([]byte, func(), error) {
 
 	var vp valuePointer
 	vp.Decode(item.vptr)
-	return item.kv.vlog.Read(vp)
+	return item.db.vlog.Read(vp)
 }
 
 func runCallback(cb func()) {
@@ -123,7 +123,7 @@ func runCallback(cb func()) {
 	}
 }
 
-func (item *KVItem) prefetchValue() {
+func (item *Item) prefetchValue() {
 	val, cb, err := item.yieldItemValue()
 	defer runCallback(cb)
 
@@ -142,7 +142,7 @@ func (item *KVItem) prefetchValue() {
 // This can be called while iterating through a store to quickly estimate the
 // size of a range of key-value pairs (without fetching the corresponding
 // values).
-func (item *KVItem) EstimatedSize() int64 {
+func (item *Item) EstimatedSize() int64 {
 	if !item.hasValue() {
 		return 0
 	}
@@ -156,17 +156,17 @@ func (item *KVItem) EstimatedSize() int64 {
 
 // UserMeta returns the userMeta set by the user. Typically, this byte, optionally set by the user
 // is used to interpret the value.
-func (item *KVItem) UserMeta() byte {
+func (item *Item) UserMeta() byte {
 	return item.userMeta
 }
 
 // TODO: Switch this to use linked list container in Go.
 type list struct {
-	head *KVItem
-	tail *KVItem
+	head *Item
+	tail *Item
 }
 
-func (l *list) push(i *KVItem) {
+func (l *list) push(i *Item) {
 	i.next = nil
 	if l.tail == nil {
 		l.head = i
@@ -177,7 +177,7 @@ func (l *list) push(i *KVItem) {
 	l.tail = i
 }
 
-func (l *list) pop() *KVItem {
+func (l *list) pop() *Item {
 	if l.head == nil {
 		return nil
 	}
@@ -217,24 +217,24 @@ type Iterator struct {
 	readTs uint64
 
 	opt   IteratorOptions
-	item  *KVItem
+	item  *Item
 	data  list
 	waste list
 
 	lastKey []byte // Used to skip over multiple versions of the same key.
 }
 
-func (it *Iterator) newItem() *KVItem {
+func (it *Iterator) newItem() *Item {
 	item := it.waste.pop()
 	if item == nil {
-		item = &KVItem{slice: new(y.Slice), kv: it.txn.kv, txn: it.txn}
+		item = &Item{slice: new(y.Slice), db: it.txn.db, txn: it.txn}
 	}
 	return item
 }
 
 // Item returns pointer to the current KVItem.
 // This item is only valid until it.Next() gets called.
-func (it *Iterator) Item() *KVItem {
+func (it *Iterator) Item() *Item {
 	tx := it.txn
 	if tx.update {
 		// Track reads if this is an update txn.
@@ -256,7 +256,7 @@ func (it *Iterator) ValidForPrefix(prefix []byte) bool {
 func (it *Iterator) Close() {
 	it.iitr.Close()
 	// TODO: We could handle this error.
-	_ = it.txn.kv.vlog.decrIteratorCount()
+	_ = it.txn.db.vlog.decrIteratorCount()
 }
 
 // Next would advance the iterator by one. Always check it.Valid() after a Next()
@@ -288,7 +288,7 @@ func (it *Iterator) parseItem() bool {
 	mi := it.iitr
 	key := mi.Key()
 
-	setItem := func(item *KVItem) {
+	setItem := func(item *Item) {
 		if it.item == nil {
 			it.item = item
 		} else {
@@ -362,7 +362,7 @@ FILL:
 	return true
 }
 
-func (it *Iterator) fill(item *KVItem) {
+func (it *Iterator) fill(item *Item) {
 	vs := it.iitr.Value()
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta

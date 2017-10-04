@@ -65,7 +65,7 @@ var (
 		"Value log GC attempt didn't result in any cleanup")
 
 	// ErrRejected is returned if a value log GC is called either while another GC is running, or
-	// after KV::Close has been called.
+	// after DB::Close has been called.
 	ErrRejected = errors.New("Value log GC request rejected")
 
 	// ErrInvalidRequest is returned if the user request is invalid.
