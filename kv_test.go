@@ -44,19 +44,21 @@ func getTestOptions(dir string) *Options {
 }
 
 func getItemValue(t *testing.T, item *KVItem) (val []byte) {
-	err := item.Value(func(v []byte) error {
-		if v == nil {
-			return nil
-		}
-		val = make([]byte, len(v))
-		copy(val, v)
-		return nil
-	})
-
+	v, err := item.Value()
 	if err != nil {
 		t.Error(err)
 	}
+	if v == nil {
+		return nil
+	}
+	val = make([]byte, len(v))
+	copy(val, v)
 	return val
+}
+
+func txnGet(t *testing.T, kv *KV, key []byte) (KVItem, error) {
+	txn := kv.NewTransaction(false)
+	return txn.Get(key)
 }
 
 func txnSet(t *testing.T, kv *KV, key []byte, val []byte, meta byte) {
@@ -69,11 +71,6 @@ func txnDelete(t *testing.T, kv *KV, key []byte) {
 	txn := kv.NewTransaction(true)
 	require.NoError(t, txn.Delete(key))
 	require.NoError(t, txn.Commit(nil))
-}
-
-func txnGet(t *testing.T, kv *KV, key []byte) (KVItem, error) {
-	txn := kv.NewTransaction(false)
-	return txn.Get(key)
 }
 
 func TestWrite(t *testing.T) {
@@ -155,32 +152,45 @@ func TestGet(t *testing.T) {
 	defer kv.Close()
 	txnSet(t, kv, []byte("key1"), []byte("val1"), 0x08)
 
-	item, err := txnGet(t, kv, []byte("key1"))
+	txn := kv.NewTransaction(false)
+	item, err := txn.Get([]byte("key1"))
 	require.NoError(t, err)
 	require.EqualValues(t, "val1", getItemValue(t, &item))
 	require.Equal(t, byte(0x08), item.UserMeta())
+	txn.Discard()
 
 	txnSet(t, kv, []byte("key1"), []byte("val2"), 0x09)
-	item, err = txnGet(t, kv, []byte("key1"))
+
+	txn = kv.NewTransaction(false)
+	item, err = txn.Get([]byte("key1"))
 	require.NoError(t, err)
 	require.EqualValues(t, "val2", getItemValue(t, &item))
 	require.Equal(t, byte(0x09), item.UserMeta())
+	txn.Discard()
 
 	txnDelete(t, kv, []byte("key1"))
-	item, err = txnGet(t, kv, []byte("key1"))
+
+	txn = kv.NewTransaction(false)
+	item, err = txn.Get([]byte("key1"))
 	require.Equal(t, ErrKeyNotFound, err)
+	txn.Discard()
 
 	txnSet(t, kv, []byte("key1"), []byte("val3"), 0x01)
-	item, err = txnGet(t, kv, []byte("key1"))
+
+	txn = kv.NewTransaction(false)
+	item, err = txn.Get([]byte("key1"))
 	require.NoError(t, err)
 	require.EqualValues(t, "val3", getItemValue(t, &item))
 	require.Equal(t, byte(0x01), item.UserMeta())
 
 	longVal := make([]byte, 1000)
 	txnSet(t, kv, []byte("key1"), longVal, 0x00)
-	item, err = txnGet(t, kv, []byte("key1"))
+
+	txn = kv.NewTransaction(false)
+	item, err = txn.Get([]byte("key1"))
 	require.NoError(t, err)
 	require.EqualValues(t, longVal, getItemValue(t, &item))
+	txn.Discard()
 }
 
 func TestExists(t *testing.T) {
@@ -250,11 +260,13 @@ func TestGetMore(t *testing.T) {
 	require.NoError(t, kv.validate())
 
 	for i := 0; i < n; i++ {
-		item, err := txnGet(t, kv, data(i))
+		txn := kv.NewTransaction(false)
+		item, err := txn.Get(data(i))
 		if err != nil {
 			t.Error(err)
 		}
 		require.EqualValues(t, string(data(i)), string(getItemValue(t, &item)))
+		txn.Discard()
 	}
 
 	// Overwrite
@@ -273,7 +285,8 @@ func TestGetMore(t *testing.T) {
 	for i := 0; i < n; i++ {
 		expectedValue := fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", i)
 		k := data(i)
-		item, err := txnGet(t, kv, k)
+		txn := kv.NewTransaction(false)
+		item, err := txn.Get(k)
 		if err != nil {
 			t.Error(err)
 		}
@@ -295,8 +308,10 @@ func TestGetMore(t *testing.T) {
 				}
 			}
 			itr.Close()
+			txn.Discard()
 		}
 		require.EqualValues(t, expectedValue, string(getItemValue(t, &item)), "wanted=%q Item: %s\n", k, item.ToString())
+		txn.Discard()
 	}
 
 	// "Delete" key.
@@ -317,8 +332,10 @@ func TestGetMore(t *testing.T) {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := data(i)
-		item, err := txnGet(t, kv, []byte(k))
+		txn := kv.NewTransaction(false)
+		item, err := txn.Get([]byte(k))
 		require.Equal(t, ErrKeyNotFound, err, "wanted=%q item=%s\n", k, item.ToString())
+		txn.Discard()
 	}
 }
 
@@ -769,13 +786,10 @@ func TestGetSetRace(t *testing.T) {
 			item, err := txnGet(t, kv, []byte(key))
 			require.NoError(t, err)
 
-			var val []byte
-			err = item.Value(func(v []byte) error {
-				val = make([]byte, len(v))
-				copy(val, v)
-				return nil
-			})
+			v, err := item.Value()
 			require.NoError(t, err)
+			val := make([]byte, len(v))
+			copy(val, v)
 		}
 	}()
 

@@ -168,7 +168,8 @@ type Txn struct {
 
 	pendingWrites map[string]*entry // cache stores any writes done by txn.
 
-	kv *KV
+	kv        *KV
+	callbacks []func()
 }
 
 // Set sets the provided value for a given key. If key is not present, it is created.  If it is
@@ -266,7 +267,15 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 	item.userMeta = vs.UserMeta
 	item.kv = txn.kv
 	item.vptr = vs.Value
+	item.txn = txn
 	return item, nil
+}
+
+func (txn *Txn) Discard() {
+	for _, cb := range txn.callbacks {
+		cb()
+	}
+	txn.callbacks = txn.callbacks[:0]
 }
 
 // Commit commits the transaction, following these steps:
@@ -281,6 +290,8 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 // rollback the transaction, removing any writes from LSM tree. Note that the writes might be
 // present on value log, but those can be garbage collected later.
 func (txn *Txn) Commit(callback func(error)) error {
+	defer txn.Discard()
+
 	state := txn.kv.txnState
 	if txn.update {
 		defer state.decrRef()

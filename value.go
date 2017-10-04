@@ -752,40 +752,43 @@ func (vlog *valueLog) getFileRLocked(fid uint32) (*logFile, error) {
 }
 
 // Read reads the value log at a given location.
-func (vlog *valueLog) Read(vp valuePointer, consumer func([]byte) error) error {
+func (vlog *valueLog) Read(vp valuePointer, txn *Txn) ([]byte, error) {
 	// Check for valid offset if we are reading to writable log.
 	if vp.Fid == vlog.maxFid && vp.Offset >= vlog.writableOffset() {
-		return errors.Errorf(
+		return nil, errors.Errorf(
 			"Invalid value pointer offset: %d greater than current offset: %d",
 			vp.Offset, vlog.writableOffset())
 	}
 
-	fn := func(buf []byte) error {
-		var h header
-		h.Decode(buf)
-		if (h.meta & BitDelete) != 0 {
-			// Tombstone key
-			return consumer(nil)
-		}
-		n := uint32(headerBufSize)
-		n += h.klen
-		return consumer(buf[n : n+h.vlen])
+	y.AssertTrue(txn != nil)
+	buf, err := vlog.readValueBytes(vp, txn)
+	if err != nil {
+		return nil, err
 	}
-	return vlog.readValueBytes(vp, fn)
+	var h header
+	h.Decode(buf)
+	if (h.meta & BitDelete) != 0 {
+		// Tombstone key
+		return nil, nil
+	}
+	n := uint32(headerBufSize)
+	n += h.klen
+	return buf[n : n+h.vlen], nil
 }
 
-func (vlog *valueLog) readValueBytes(vp valuePointer, consumer func([]byte) error) error {
+func (vlog *valueLog) readValueBytes(vp valuePointer, txn *Txn) ([]byte, error) {
 	lf, err := vlog.getFileRLocked(vp.Fid)
 	if err != nil {
-		return errors.Wrapf(err, "Unable to read from value log: %+v", vp)
+		return nil, errors.Wrapf(err, "Unable to read from value log: %+v", vp)
 	}
-	defer lf.lock.RUnlock()
 
-	var buf []byte
-	if buf, err = lf.read(vp); err != nil {
-		return errors.Wrapf(err, "Unable to read from value log: %+v", vp)
+	if txn != nil {
+		txn.callbacks = append(txn.callbacks, lf.lock.RUnlock)
+	} else {
+		defer lf.lock.RUnlock()
 	}
-	return consumer(buf)
+
+	return lf.read(vp)
 }
 
 // Test helper
@@ -908,17 +911,16 @@ func (vlog *valueLog) doRunGC(gcThreshold float64) error {
 		} else {
 			vlog.elog.Printf("Reason=%+v\n", r)
 
-			err := vlog.readValueBytes(vp, func(buf []byte) error {
-				ne := valueBytesToEntry(buf)
-				ne.offset = vp.Offset
-				ne.print("Latest Entry Header in LSM")
-				e.print("Latest Entry in Log")
-				return errors.Errorf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.",
-					vp, vs.Meta)
-			})
+			buf, err := vlog.readValueBytes(vp, nil)
 			if err != nil {
 				return errStop
 			}
+			ne := valueBytesToEntry(buf)
+			ne.offset = vp.Offset
+			ne.print("Latest Entry Header in LSM")
+			e.print("Latest Entry in Log")
+			return errors.Errorf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.",
+				vp, vs.Meta)
 		}
 		return nil
 	})

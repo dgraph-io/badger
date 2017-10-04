@@ -440,30 +440,6 @@ func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 	}
 }
 
-func (s *KV) yieldItemValue(item *KVItem, consumer func([]byte) error) error {
-	if !item.hasValue() {
-		return consumer(nil)
-	}
-
-	if item.slice == nil {
-		item.slice = new(y.Slice)
-	}
-
-	if (item.meta & BitValuePointer) == 0 {
-		val := item.slice.Resize(len(item.vptr))
-		copy(val, item.vptr)
-		return consumer(val)
-	}
-
-	var vp valuePointer
-	vp.Decode(item.vptr)
-	err := s.vlog.Read(vp, consumer)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 // get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
 func (s *KV) get(key []byte) (y.ValueStruct, error) {
