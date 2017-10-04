@@ -44,19 +44,14 @@ func getTestOptions(dir string) *Options {
 }
 
 func getItemValue(t *testing.T, item *KVItem) (val []byte) {
-	err := item.Value(func(v []byte) error {
-		if v == nil {
-			return nil
-		}
-		val = make([]byte, len(v))
-		copy(val, v)
-		return nil
-	})
-
+	v, err := item.Value()
 	if err != nil {
 		t.Error(err)
 	}
-	return val
+	if v == nil {
+		return nil
+	}
+	return v
 }
 
 func txnSet(t *testing.T, kv *KV, key []byte, val []byte, meta byte) {
@@ -69,11 +64,6 @@ func txnDelete(t *testing.T, kv *KV, key []byte) {
 	txn := kv.NewTransaction(true)
 	require.NoError(t, txn.Delete(key))
 	require.NoError(t, txn.Commit(nil))
-}
-
-func txnGet(t *testing.T, kv *KV, key []byte) (KVItem, error) {
-	txn := kv.NewTransaction(false)
-	return txn.Get(key)
 }
 
 func TestWrite(t *testing.T) {
@@ -155,32 +145,45 @@ func TestGet(t *testing.T) {
 	defer kv.Close()
 	txnSet(t, kv, []byte("key1"), []byte("val1"), 0x08)
 
-	item, err := txnGet(t, kv, []byte("key1"))
+	txn := kv.NewTransaction(false)
+	item, err := txn.Get([]byte("key1"))
 	require.NoError(t, err)
 	require.EqualValues(t, "val1", getItemValue(t, &item))
 	require.Equal(t, byte(0x08), item.UserMeta())
+	txn.Discard()
 
 	txnSet(t, kv, []byte("key1"), []byte("val2"), 0x09)
-	item, err = txnGet(t, kv, []byte("key1"))
+
+	txn = kv.NewTransaction(false)
+	item, err = txn.Get([]byte("key1"))
 	require.NoError(t, err)
 	require.EqualValues(t, "val2", getItemValue(t, &item))
 	require.Equal(t, byte(0x09), item.UserMeta())
+	txn.Discard()
 
 	txnDelete(t, kv, []byte("key1"))
-	item, err = txnGet(t, kv, []byte("key1"))
+
+	txn = kv.NewTransaction(false)
+	item, err = txn.Get([]byte("key1"))
 	require.Equal(t, ErrKeyNotFound, err)
+	txn.Discard()
 
 	txnSet(t, kv, []byte("key1"), []byte("val3"), 0x01)
-	item, err = txnGet(t, kv, []byte("key1"))
+
+	txn = kv.NewTransaction(false)
+	item, err = txn.Get([]byte("key1"))
 	require.NoError(t, err)
 	require.EqualValues(t, "val3", getItemValue(t, &item))
 	require.Equal(t, byte(0x01), item.UserMeta())
 
 	longVal := make([]byte, 1000)
 	txnSet(t, kv, []byte("key1"), longVal, 0x00)
-	item, err = txnGet(t, kv, []byte("key1"))
+
+	txn = kv.NewTransaction(false)
+	item, err = txn.Get([]byte("key1"))
 	require.NoError(t, err)
 	require.EqualValues(t, longVal, getItemValue(t, &item))
+	txn.Discard()
 }
 
 func TestExists(t *testing.T) {
@@ -211,12 +214,15 @@ func TestExists(t *testing.T) {
 	}
 
 	for _, test := range tt {
-		_, err := txnGet(t, kv, test.key)
-		if test.exists {
-			require.NoError(t, err)
-			continue
-		}
-		require.Error(t, err)
+		require.NoError(t, kv.View(func(tx *Txn) error {
+			_, err := tx.Get(test.key)
+			if test.exists {
+				require.NoError(t, err)
+				return nil
+			}
+			require.Equal(t, ErrKeyNotFound, err)
+			return nil
+		}))
 	}
 
 }
@@ -250,11 +256,13 @@ func TestGetMore(t *testing.T) {
 	require.NoError(t, kv.validate())
 
 	for i := 0; i < n; i++ {
-		item, err := txnGet(t, kv, data(i))
+		txn := kv.NewTransaction(false)
+		item, err := txn.Get(data(i))
 		if err != nil {
 			t.Error(err)
 		}
 		require.EqualValues(t, string(data(i)), string(getItemValue(t, &item)))
+		txn.Discard()
 	}
 
 	// Overwrite
@@ -273,7 +281,8 @@ func TestGetMore(t *testing.T) {
 	for i := 0; i < n; i++ {
 		expectedValue := fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", i)
 		k := data(i)
-		item, err := txnGet(t, kv, k)
+		txn := kv.NewTransaction(false)
+		item, err := txn.Get(k)
 		if err != nil {
 			t.Error(err)
 		}
@@ -295,8 +304,10 @@ func TestGetMore(t *testing.T) {
 				}
 			}
 			itr.Close()
+			txn.Discard()
 		}
 		require.EqualValues(t, expectedValue, string(getItemValue(t, &item)), "wanted=%q Item: %s\n", k, item.ToString())
+		txn.Discard()
 	}
 
 	// "Delete" key.
@@ -317,8 +328,10 @@ func TestGetMore(t *testing.T) {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := data(i)
-		item, err := txnGet(t, kv, []byte(k))
+		txn := kv.NewTransaction(false)
+		item, err := txn.Get([]byte(k))
 		require.Equal(t, ErrKeyNotFound, err, "wanted=%q item=%s\n", k, item.ToString())
+		txn.Discard()
 	}
 }
 
@@ -357,11 +370,17 @@ func TestExistsMore(t *testing.T) {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		_, err = txnGet(t, kv, []byte(k))
-		require.NoError(t, err)
+		require.NoError(t, kv.View(func(txn *Txn) error {
+			_, err := txn.Get([]byte(k))
+			require.NoError(t, err)
+			return nil
+		}))
 	}
-	_, err = txnGet(t, kv, []byte("non-exists"))
-	require.Error(t, err)
+	require.NoError(t, kv.View(func(txn *Txn) error {
+		_, err := txn.Get([]byte("non-exists"))
+		require.Error(t, err)
+		return nil
+	}))
 
 	// "Delete" key.
 	for i := 0; i < n; i += m {
@@ -381,8 +400,12 @@ func TestExistsMore(t *testing.T) {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		_, err = txnGet(t, kv, []byte(k))
-		require.Error(t, err)
+
+		require.NoError(t, kv.View(func(txn *Txn) error {
+			_, err := txn.Get([]byte(k))
+			require.Error(t, err)
+			return nil
+		}))
 	}
 	fmt.Println("Done and closing")
 }
@@ -479,9 +502,13 @@ func TestLoad(t *testing.T) {
 			fmt.Printf("Testing i=%d\n", i)
 		}
 		k := fmt.Sprintf("%09d", i)
-		item, err := txnGet(t, kv, []byte(k))
-		require.NoError(t, err)
-		require.EqualValues(t, k, string(getItemValue(t, &item)))
+		require.NoError(t, kv.View(func(txn *Txn) error {
+			item, err := txn.Get([]byte(k))
+			require.NoError(t, err)
+			require.EqualValues(t, k, string(getItemValue(t, &item)))
+			return nil
+		}))
+
 	}
 	kv.Close()
 	summary := kv.lc.getSummary()
@@ -594,8 +621,11 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 	}
 	defer kv.Close()
 
-	_, err = txnGet(t, kv, key)
-	require.Error(t, ErrKeyNotFound, err)
+	require.NoError(t, kv.View(func(txn *Txn) error {
+		_, err := txn.Get(key)
+		require.Error(t, ErrKeyNotFound, err)
+		return nil
+	}))
 }
 
 func TestPidFile(t *testing.T) {
@@ -626,16 +656,16 @@ func TestBigKeyValuePairs(t *testing.T) {
 
 	txn := kv.NewTransaction(true)
 	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, small, 0))
-	txn = kv.NewTransaction(true)
 	require.Regexp(t, regexp.MustCompile("Value.*exceeded"), txn.Set(small, bigV, 0))
 
-	txn = kv.NewTransaction(true)
 	require.NoError(t, txn.Set(small, small, 0x00))
 	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, bigV, 0x00))
 
-	_, err = txnGet(t, kv, small)
-	require.Equal(t, ErrKeyNotFound, err)
-
+	require.NoError(t, kv.View(func(txn *Txn) error {
+		_, err := txn.Get(small)
+		require.Equal(t, ErrKeyNotFound, err)
+		return nil
+	}))
 	require.NoError(t, kv.Close())
 }
 
@@ -766,16 +796,13 @@ func TestGetSetRace(t *testing.T) {
 		defer wg.Done()
 
 		for key := range keyCh {
-			item, err := txnGet(t, kv, []byte(key))
-			require.NoError(t, err)
-
-			var val []byte
-			err = item.Value(func(v []byte) error {
-				val = make([]byte, len(v))
-				copy(val, v)
+			require.NoError(t, kv.View(func(txn *Txn) error {
+				item, err := txn.Get([]byte(key))
+				require.NoError(t, err)
+				_, err = item.Value()
+				require.NoError(t, err)
 				return nil
-			})
-			require.NoError(t, err)
+			}))
 		}
 	}()
 

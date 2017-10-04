@@ -44,11 +44,11 @@ func TestTxnSimple(t *testing.T) {
 
 	item, err := txn.Get([]byte("key=8"))
 	require.NoError(t, err)
-	fn := func(val []byte) error {
-		require.Equal(t, []byte("val=8"), val)
-		return nil
-	}
-	require.NoError(t, item.Value(fn))
+
+	val, err := item.Value()
+	require.NoError(t, err)
+	require.Equal(t, []byte("val=8"), val)
+
 	require.NoError(t, txn.Commit(nil))
 }
 
@@ -75,13 +75,11 @@ func TestTxnVersions(t *testing.T) {
 			item := itr.Item()
 			require.Equal(t, k, item.Key())
 
-			err := item.Value(func(val []byte) error {
-				exp := fmt.Sprintf("valversion=%d", i)
-				require.Equal(t, exp, string(val), "i=%d", i)
-				count++
-				return nil
-			})
+			val, err := item.Value()
 			require.NoError(t, err)
+			exp := fmt.Sprintf("valversion=%d", i)
+			require.Equal(t, exp, string(val), "i=%d", i)
+			count++
 		}
 		require.Equal(t, 1, count, "i=%d", i) // Should only loop once.
 	}
@@ -99,13 +97,13 @@ func TestTxnVersions(t *testing.T) {
 			item := itr.Item()
 			require.Equal(t, k, item.Key())
 			require.Equal(t, version, item.Version())
-			err := item.Value(func(val []byte) error {
-				exp := fmt.Sprintf("valversion=%d", version)
-				require.Equal(t, exp, string(val), "v=%d", version)
-				count++
-				return nil
-			})
+
+			val, err := item.Value()
 			require.NoError(t, err)
+			exp := fmt.Sprintf("valversion=%d", version)
+			require.Equal(t, exp, string(val), "v=%d", version)
+			count++
+
 			if itr.opt.Reverse {
 				version++
 			} else {
@@ -123,15 +121,10 @@ func TestTxnVersions(t *testing.T) {
 		item, err := txn.Get(k)
 		require.NoError(t, err)
 
-		var found bool
-		err = item.Value(func(val []byte) error {
-			found = true
-			require.Equal(t, []byte(fmt.Sprintf("valversion=%d", i)), val,
-				"Expected versions to match up at i=%d", i)
-			return nil
-		})
+		val, err := item.Value()
 		require.NoError(t, err)
-		require.True(t, found)
+		require.Equal(t, []byte(fmt.Sprintf("valversion=%d", i)), val,
+			"Expected versions to match up at i=%d", i)
 
 		// Try retrieving the latest version forward and reverse.
 		itr := txn.NewIterator(DefaultIteratorOptions)
@@ -159,10 +152,9 @@ func TestTxnVersions(t *testing.T) {
 	item, err := txn.Get(k)
 	require.NoError(t, err)
 
-	item.Value(func(val []byte) error {
-		require.Equal(t, []byte("valversion=9"), val)
-		return nil
-	})
+	val, err := item.Value()
+	require.NoError(t, err)
+	require.Equal(t, []byte("valversion=9"), val)
 }
 
 func TestTxnWriteSkew(t *testing.T) {
@@ -189,11 +181,9 @@ func TestTxnWriteSkew(t *testing.T) {
 		item, err := txn.Get(key)
 		require.NoError(t, err)
 
-		err = item.Value(func(val []byte) error {
-			var err error
-			bal, err = strconv.Atoi(string(val))
-			return err
-		})
+		val, err := item.Value()
+		require.NoError(t, err)
+		bal, err = strconv.Atoi(string(val))
 		require.NoError(t, err)
 		return bal
 	}
@@ -280,11 +270,9 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 		var i int
 		for itr.Rewind(); itr.Valid(); itr.Next() {
 			item := itr.Item()
-			err := item.Value(func(val []byte) error {
-				require.Equal(t, expected[i], string(val), "readts=%d", itr.readTs)
-				return nil
-			})
+			val, err := item.Value()
 			require.NoError(t, err)
+			require.Equal(t, expected[i], string(val), "readts=%d", itr.readTs)
 			i++
 		}
 		require.Equal(t, len(expected), i)
@@ -364,11 +352,9 @@ func TestTxnIterationEdgeCase2(t *testing.T) {
 		var i int
 		for itr.Rewind(); itr.Valid(); itr.Next() {
 			item := itr.Item()
-			err := item.Value(func(val []byte) error {
-				require.Equal(t, expected[i], string(val), "readts=%d", itr.readTs)
-				return nil
-			})
+			val, err := item.Value()
 			require.NoError(t, err)
+			require.Equal(t, expected[i], string(val), "readts=%d", itr.readTs)
 			i++
 		}
 		require.Equal(t, len(expected), i)
@@ -519,10 +505,9 @@ func TestTxnManaged(t *testing.T) {
 		item, err := txn.Get(key(i))
 		require.NoError(t, err)
 		require.Equal(t, uint64(3), item.Version())
-		require.NoError(t, item.Value(func(v []byte) error {
-			require.Equal(t, val(i), v)
-			return nil
-		}))
+		v, err := item.Value()
+		require.NoError(t, err)
+		require.Equal(t, val(i), v)
 	}
 
 	// Write data at t=7.
@@ -552,10 +537,9 @@ func TestTxnManaged(t *testing.T) {
 			require.Equal(t, uint64(7), item.Version())
 		}
 		if i <= 7 {
-			require.NoError(t, item.Value(func(v []byte) error {
-				require.Equal(t, val(i), v)
-				return nil
-			}))
+			v, err := item.Value()
+			require.NoError(t, err)
+			require.Equal(t, val(i), v)
 		}
 	}
 }

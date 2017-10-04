@@ -47,6 +47,7 @@ type KVItem struct {
 	slice    *y.Slice // Used only during prefetching.
 	next     *KVItem
 	version  uint64
+	txn      *Txn
 }
 
 func (item *KVItem) ToString() string {
@@ -72,15 +73,16 @@ func (item *KVItem) Version() uint64 {
 //
 // Remember to parse or copy it if you need to reuse it. DO NOT modify or
 // append to this slice; it would result in a panic.
-func (item *KVItem) Value(consumer func([]byte) error) error {
+func (item *KVItem) Value() ([]byte, error) {
 	item.wg.Wait()
 	if item.status == prefetched {
-		if item.err != nil {
-			return item.err
-		}
-		return consumer(item.val)
+		return item.val, item.err
 	}
-	return item.kv.yieldItemValue(item, consumer)
+	buf, cb, err := item.yieldItemValue()
+	if cb != nil {
+		item.txn.callbacks = append(item.txn.callbacks, cb)
+	}
+	return buf, err
 }
 
 func (item *KVItem) hasValue() bool {
@@ -95,19 +97,44 @@ func (item *KVItem) hasValue() bool {
 	return true
 }
 
-func (item *KVItem) prefetchValue() {
-	item.err = item.kv.yieldItemValue(item, func(val []byte) error {
-		if val == nil {
-			item.status = prefetched
-			return nil
-		}
+func (item *KVItem) yieldItemValue() ([]byte, func(), error) {
+	if !item.hasValue() {
+		return nil, nil, nil
+	}
 
-		buf := item.slice.Resize(len(val))
-		copy(buf, val)
-		item.val = buf
-		item.status = prefetched
-		return nil
-	})
+	if item.slice == nil {
+		item.slice = new(y.Slice)
+	}
+
+	if (item.meta & BitValuePointer) == 0 {
+		val := item.slice.Resize(len(item.vptr))
+		copy(val, item.vptr)
+		return val, nil, nil
+	}
+
+	var vp valuePointer
+	vp.Decode(item.vptr)
+	return item.kv.vlog.Read(vp)
+}
+
+func runCallback(cb func()) {
+	if cb != nil {
+		cb()
+	}
+}
+
+func (item *KVItem) prefetchValue() {
+	val, cb, err := item.yieldItemValue()
+	defer runCallback(cb)
+
+	item.err = err
+	item.status = prefetched
+	if val == nil {
+		return
+	}
+	buf := item.slice.Resize(len(val))
+	copy(buf, val)
+	item.val = buf
 }
 
 // EstimatedSize returns approximate size of the key-value pair.
@@ -133,6 +160,7 @@ func (item *KVItem) UserMeta() byte {
 	return item.userMeta
 }
 
+// TODO: Switch this to use linked list container in Go.
 type list struct {
 	head *KVItem
 	tail *KVItem
@@ -199,7 +227,7 @@ type Iterator struct {
 func (it *Iterator) newItem() *KVItem {
 	item := it.waste.pop()
 	if item == nil {
-		item = &KVItem{slice: new(y.Slice), kv: it.txn.kv}
+		item = &KVItem{slice: new(y.Slice), kv: it.txn.kv, txn: it.txn}
 	}
 	return item
 }

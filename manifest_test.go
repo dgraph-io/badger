@@ -59,10 +59,13 @@ func TestManifestBasic(t *testing.T) {
 	kv, err := NewKV(opt)
 	require.NoError(t, err)
 
-	item, err := txnGet(t, kv, []byte("testkey"))
-	require.NoError(t, err)
-	require.EqualValues(t, "testval", string(getItemValue(t, &item)))
-	require.EqualValues(t, byte(0x05), item.UserMeta())
+	require.NoError(t, kv.View(func(txn *Txn) error {
+		item, err := txn.Get([]byte("testkey"))
+		require.NoError(t, err)
+		require.EqualValues(t, "testval", string(getItemValue(t, &item)))
+		require.EqualValues(t, byte(0x05), item.UserMeta())
+		return nil
+	}))
 	require.NoError(t, kv.Close())
 }
 
