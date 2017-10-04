@@ -164,7 +164,7 @@ func replayFunction(out *DB) func(entry, valuePointer) error {
 }
 
 // Open returns a new DB object.
-func Open(optParam *Options) (out *DB, err error) {
+func Open(optParam *Options) (db *DB, err error) {
 	// Make a copy early and fill in maxBatchSize
 	opt := *optParam
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
@@ -229,7 +229,7 @@ func Open(optParam *Options) (out *DB, err error) {
 	}
 	heap.Init(&gs.commitMark)
 
-	out = &DB{
+	db = &DB{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
@@ -241,32 +241,32 @@ func Open(optParam *Options) (out *DB, err error) {
 		txnState:      gs,
 	}
 
-	out.closers.updateSize = y.NewCloser(1)
-	go out.updateSize(out.closers.updateSize)
-	out.mt = skl.NewSkiplist(arenaSize(&opt))
+	db.closers.updateSize = y.NewCloser(1)
+	go db.updateSize(db.closers.updateSize)
+	db.mt = skl.NewSkiplist(arenaSize(&opt))
 
 	// newLevelsController potentially loads files in directory.
-	if out.lc, err = newLevelsController(out, &manifest); err != nil {
+	if db.lc, err = newLevelsController(db, &manifest); err != nil {
 		return nil, err
 	}
 
-	out.closers.compactors = y.NewCloser(1)
-	out.lc.startCompact(out.closers.compactors)
+	db.closers.compactors = y.NewCloser(1)
+	db.lc.startCompact(db.closers.compactors)
 
-	out.closers.memtable = y.NewCloser(1)
-	go out.flushMemtable(out.closers.memtable) // Need levels controller to be up.
+	db.closers.memtable = y.NewCloser(1)
+	go db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
 
-	if err = out.vlog.Open(out, &opt); err != nil {
+	if err = db.vlog.Open(db, &opt); err != nil {
 		return nil, err
 	}
 
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
-	vs, err := out.get(headKey)
+	vs, err := db.get(headKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
-	out.txnState.curRead = vs.Version
+	db.txnState.curRead = vs.Version
 	var vptr valuePointer
 	if len(vs.Value) > 0 {
 		vptr.Decode(vs.Value)
@@ -280,33 +280,33 @@ func Open(optParam *Options) (out *DB, err error) {
 	// TODO: Figure this out. This would update the read timestamp, and set nextCommitTs.
 
 	replayCloser := y.NewCloser(1)
-	go out.doWrites(replayCloser)
+	go db.doWrites(replayCloser)
 
-	if err = out.vlog.Replay(vptr, replayFunction(out)); err != nil {
-		return out, err
+	if err = db.vlog.Replay(vptr, replayFunction(db)); err != nil {
+		return db, err
 	}
 
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 	// Now that we have the curRead, we can update the nextCommit.
-	out.txnState.nextCommit = out.txnState.curRead + 1
+	db.txnState.nextCommit = db.txnState.curRead + 1
 
 	// Mmap writable log
-	lf := out.vlog.filesMap[out.vlog.maxFid]
-	if err = lf.mmap(2 * out.vlog.opt.ValueLogFileSize); err != nil {
-		return out, errors.Wrapf(err, "Unable to mmap RDWR log file")
+	lf := db.vlog.filesMap[db.vlog.maxFid]
+	if err = lf.mmap(2 * db.vlog.opt.ValueLogFileSize); err != nil {
+		return db, errors.Wrapf(err, "Unable to mmap RDWR log file")
 	}
 
-	out.writeCh = make(chan *request, kvWriteChCapacity)
-	out.closers.writes = y.NewCloser(1)
-	go out.doWrites(out.closers.writes)
+	db.writeCh = make(chan *request, kvWriteChCapacity)
+	db.closers.writes = y.NewCloser(1)
+	go db.doWrites(db.closers.writes)
 
-	out.closers.valueGC = y.NewCloser(1)
-	go out.vlog.waitOnGC(out.closers.valueGC)
+	db.closers.valueGC = y.NewCloser(1)
+	go db.vlog.waitOnGC(db.closers.valueGC)
 
 	valueDirLockGuard = nil
 	dirLockGuard = nil
 	manifestFile = nil
-	return out, nil
+	return db, nil
 }
 
 // Close closes a DB. It's crucial to call it to ensure all the pending updates
