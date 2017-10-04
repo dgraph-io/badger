@@ -39,6 +39,7 @@ func getTestOptions(dir string) *Options {
 	opt.LevelOneSize = 4 << 15 // Force more compaction.
 	opt.Dir = dir
 	opt.ValueDir = dir
+	opt.SyncWrites = false
 	return opt
 }
 
