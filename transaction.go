@@ -236,7 +236,7 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 	if len(key) == 0 {
 		return item, ErrEmptyKey
 	} else if txn.discarded {
-		return ErrDiscardedTxn
+		return item, ErrDiscardedTxn
 	}
 
 	if txn.update {
