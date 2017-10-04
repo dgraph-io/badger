@@ -54,7 +54,26 @@ type globalTxnState struct {
 	pendingCommits map[uint64]struct{}
 
 	// commits stores a key fingerprint and latest commit counter for it.
-	commits map[uint64]uint64
+	// refCount is used to clear out commits map to avoid a memory blowup.
+	commits  map[uint64]uint64
+	refCount int64
+}
+
+func (gs *globalTxnState) addRef() {
+	atomic.AddInt64(&gs.refCount, 1)
+}
+
+func (gs *globalTxnState) decrRef() {
+	if count := atomic.AddInt64(&gs.refCount, -1); count == 0 {
+		// Clear out pendingCommits maps to release memory.
+		gs.Lock()
+		y.AssertTrue(len(gs.commitMark) == 0)
+		y.AssertTrue(len(gs.pendingCommits) == 0)
+		if len(gs.commits) >= 1000 { // If the map is still small, let it slide.
+			gs.commits = make(map[uint64]uint64)
+		}
+		gs.Unlock()
+	}
 }
 
 func (gs *globalTxnState) readTs() uint64 {
@@ -149,7 +168,6 @@ type Txn struct {
 
 	pendingWrites map[string]*entry // cache stores any writes done by txn.
 
-	gs *globalTxnState
 	kv *KV
 }
 
@@ -263,15 +281,19 @@ func (txn *Txn) Get(key []byte) (item KVItem, rerr error) {
 // rollback the transaction, removing any writes from LSM tree. Note that the writes might be
 // present on value log, but those can be garbage collected later.
 func (txn *Txn) Commit(callback func(error)) error {
+	state := txn.kv.txnState
+	if txn.update {
+		defer state.decrRef()
+	}
 	if len(txn.writes) == 0 {
 		return nil // Read only transaction.
 	}
 
-	commitTs := txn.gs.newCommitTs(txn)
+	commitTs := state.newCommitTs(txn)
 	if commitTs == 0 {
 		return ErrConflict
 	}
-	defer txn.gs.doneCommit(commitTs)
+	defer state.doneCommit(commitTs)
 
 	entries := make([]*entry, 0, len(txn.pendingWrites)+1)
 	for _, e := range txn.pendingWrites {
@@ -345,12 +367,12 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 func (kv *KV) NewTransaction(update bool) *Txn {
 	txn := &Txn{
 		update: update,
-		gs:     kv.txnState,
 		kv:     kv,
 		readTs: kv.txnState.readTs(),
 	}
 	if update {
 		txn.pendingWrites = make(map[string]*entry)
+		txn.kv.txnState.addRef()
 	}
 
 	return txn
