@@ -752,43 +752,38 @@ func (vlog *valueLog) getFileRLocked(fid uint32) (*logFile, error) {
 }
 
 // Read reads the value log at a given location.
-func (vlog *valueLog) Read(vp valuePointer, txn *Txn) ([]byte, error) {
+// TODO: Make this read private.
+func (vlog *valueLog) Read(vp valuePointer) ([]byte, func(), error) {
 	// Check for valid offset if we are reading to writable log.
 	if vp.Fid == vlog.maxFid && vp.Offset >= vlog.writableOffset() {
-		return nil, errors.Errorf(
+		return nil, nil, errors.Errorf(
 			"Invalid value pointer offset: %d greater than current offset: %d",
 			vp.Offset, vlog.writableOffset())
 	}
 
-	y.AssertTrue(txn != nil)
-	buf, err := vlog.readValueBytes(vp, txn)
+	buf, cb, err := vlog.readValueBytes(vp)
 	if err != nil {
-		return nil, err
+		return nil, cb, err
 	}
 	var h header
 	h.Decode(buf)
 	if (h.meta & BitDelete) != 0 {
 		// Tombstone key
-		return nil, nil
+		return nil, cb, nil
 	}
 	n := uint32(headerBufSize)
 	n += h.klen
-	return buf[n : n+h.vlen], nil
+	return buf[n : n+h.vlen], cb, nil
 }
 
-func (vlog *valueLog) readValueBytes(vp valuePointer, txn *Txn) ([]byte, error) {
+func (vlog *valueLog) readValueBytes(vp valuePointer) ([]byte, func(), error) {
 	lf, err := vlog.getFileRLocked(vp.Fid)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Unable to read from value log: %+v", vp)
+		return nil, nil, errors.Wrapf(err, "Unable to read from value log: %+v", vp)
 	}
 
-	if txn != nil {
-		txn.callbacks = append(txn.callbacks, lf.lock.RUnlock)
-	} else {
-		defer lf.lock.RUnlock()
-	}
-
-	return lf.read(vp)
+	buf, err := lf.read(vp)
+	return buf, lf.lock.RUnlock, err
 }
 
 // Test helper
@@ -911,7 +906,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64) error {
 		} else {
 			vlog.elog.Printf("Reason=%+v\n", r)
 
-			buf, err := vlog.readValueBytes(vp, nil)
+			buf, cb, err := vlog.readValueBytes(vp)
 			if err != nil {
 				return errStop
 			}
@@ -919,6 +914,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64) error {
 			ne.offset = vp.Offset
 			ne.print("Latest Entry Header in LSM")
 			e.print("Latest Entry in Log")
+			runCallback(cb)
 			return errors.Errorf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.",
 				vp, vs.Meta)
 		}

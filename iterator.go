@@ -78,7 +78,11 @@ func (item *KVItem) Value() ([]byte, error) {
 	if item.status == prefetched {
 		return item.val, item.err
 	}
-	return item.yieldItemValue()
+	buf, cb, err := item.yieldItemValue()
+	if cb != nil {
+		item.txn.callbacks = append(item.txn.callbacks, cb)
+	}
+	return buf, err
 }
 
 func (item *KVItem) hasValue() bool {
@@ -93,9 +97,9 @@ func (item *KVItem) hasValue() bool {
 	return true
 }
 
-func (item *KVItem) yieldItemValue() ([]byte, error) {
+func (item *KVItem) yieldItemValue() ([]byte, func(), error) {
 	if !item.hasValue() {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	if item.slice == nil {
@@ -105,16 +109,24 @@ func (item *KVItem) yieldItemValue() ([]byte, error) {
 	if (item.meta & BitValuePointer) == 0 {
 		val := item.slice.Resize(len(item.vptr))
 		copy(val, item.vptr)
-		return val, nil
+		return val, nil, nil
 	}
 
 	var vp valuePointer
 	vp.Decode(item.vptr)
-	return item.kv.vlog.Read(vp, item.txn)
+	return item.kv.vlog.Read(vp)
+}
+
+func runCallback(cb func()) {
+	if cb != nil {
+		cb()
+	}
 }
 
 func (item *KVItem) prefetchValue() {
-	val, err := item.yieldItemValue()
+	val, cb, err := item.yieldItemValue()
+	defer runCallback(cb)
+
 	item.err = err
 	item.status = prefetched
 	if val == nil {
@@ -123,7 +135,6 @@ func (item *KVItem) prefetchValue() {
 	buf := item.slice.Resize(len(val))
 	copy(buf, val)
 	item.val = buf
-	return
 }
 
 // EstimatedSize returns approximate size of the key-value pair.
