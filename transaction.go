@@ -276,6 +276,9 @@ func (txn *Txn) Discard() {
 		cb()
 	}
 	txn.callbacks = txn.callbacks[:0]
+	if txn.update {
+		txn.kv.txnState.decrRef()
+	}
 }
 
 // Commit commits the transaction, following these steps:
@@ -291,15 +294,11 @@ func (txn *Txn) Discard() {
 // present on value log, but those can be garbage collected later.
 func (txn *Txn) Commit(callback func(error)) error {
 	defer txn.Discard()
+	if len(txn.writes) == 0 {
+		return nil // Nothing to do.
+	}
 
 	state := txn.kv.txnState
-	if txn.update {
-		defer state.decrRef()
-	}
-	if len(txn.writes) == 0 {
-		return nil // Read only transaction.
-	}
-
 	commitTs := state.newCommitTs(txn)
 	if commitTs == 0 {
 		return ErrConflict
@@ -385,7 +384,6 @@ func (kv *KV) NewTransaction(update bool) *Txn {
 		txn.pendingWrites = make(map[string]*entry)
 		txn.kv.txnState.addRef()
 	}
-
 	return txn
 }
 
@@ -393,4 +391,11 @@ func (kv *KV) NewTransactionAt(readTs uint64, update bool) *Txn {
 	txn := kv.NewTransaction(update)
 	txn.readTs = readTs
 	return txn
+}
+
+func (kv *KV) View(callback func(txn *Txn) error) error {
+	txn := kv.NewTransaction(false)
+	defer txn.Discard()
+
+	return callback(txn)
 }

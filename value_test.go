@@ -59,10 +59,12 @@ func TestValueBasic(t *testing.T) {
 	require.Len(t, b.Ptrs, 2)
 	t.Logf("Pointer written: %+v %+v\n", b.Ptrs[0], b.Ptrs[1])
 
-	buf1, err1 := log.readValueBytes(b.Ptrs[0], nil)
-	buf2, err2 := log.readValueBytes(b.Ptrs[1], nil)
+	buf1, cb1, err1 := log.readValueBytes(b.Ptrs[0])
+	buf2, cb2, err2 := log.readValueBytes(b.Ptrs[1])
 	require.NoError(t, err1)
 	require.NoError(t, err2)
+	defer runCallback(cb1)
+	defer runCallback(cb2)
 
 	readEntries := []entry{valueBytesToEntry(buf1), valueBytesToEntry(buf2)}
 	require.EqualValues(t, []entry{
@@ -77,6 +79,7 @@ func TestValueBasic(t *testing.T) {
 			Meta:  BitValuePointer,
 		},
 	}, readEntries)
+
 }
 
 func TestValueGC(t *testing.T) {
@@ -118,11 +121,15 @@ func TestValueGC(t *testing.T) {
 	kv.vlog.rewrite(lf)
 	for i := 45; i < 100; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
-		item, err := txnGet(t, kv, key)
-		require.NoError(t, err)
-		val := getItemValue(t, &item)
-		require.NotNil(t, val)
-		require.True(t, len(val) == sz, "Size found: %d", len(val))
+
+		require.NoError(t, kv.View(func(txn *Txn) error {
+			item, err := txn.Get(key)
+			require.NoError(t, err)
+			val := getItemValue(t, &item)
+			require.NotNil(t, val)
+			require.True(t, len(val) == sz, "Size found: %d", len(val))
+			return nil
+		}))
 	}
 }
 
@@ -170,24 +177,33 @@ func TestValueGC2(t *testing.T) {
 	kv.vlog.rewrite(lf)
 	for i := 0; i < 5; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
-		_, err := txnGet(t, kv, key)
-		require.Error(t, ErrKeyNotFound, err)
+		require.NoError(t, kv.View(func(txn *Txn) error {
+			_, err := txn.Get(key)
+			require.Error(t, ErrKeyNotFound, err)
+			return nil
+		}))
 	}
 	for i := 5; i < 10; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
-		item, err := txnGet(t, kv, key)
-		require.NoError(t, err)
-		val := getItemValue(t, &item)
-		require.NotNil(t, val)
-		require.Equal(t, string(val), fmt.Sprintf("value%d", i))
+		require.NoError(t, kv.View(func(txn *Txn) error {
+			item, err := txn.Get(key)
+			require.NoError(t, err)
+			val := getItemValue(t, &item)
+			require.NotNil(t, val)
+			require.Equal(t, string(val), fmt.Sprintf("value%d", i))
+			return nil
+		}))
 	}
 	for i := 10; i < 100; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
-		item, err := txnGet(t, kv, key)
-		require.NoError(t, err)
-		val := getItemValue(t, &item)
-		require.NotNil(t, val)
-		require.True(t, len(val) == sz, "Size found: %d", len(val))
+		require.NoError(t, kv.View(func(txn *Txn) error {
+			item, err := txn.Get(key)
+			require.NoError(t, err)
+			val := getItemValue(t, &item)
+			require.NotNil(t, val)
+			require.True(t, len(val) == sz, "Size found: %d", len(val))
+			return nil
+		}))
 	}
 }
 
@@ -314,16 +330,22 @@ func TestValueGC4(t *testing.T) {
 
 	for i := 0; i < 8; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
-		_, err := txnGet(t, kv, key)
-		require.Error(t, ErrKeyNotFound, err)
+		require.NoError(t, kv.View(func(txn *Txn) error {
+			_, err := txn.Get(key)
+			require.Equal(t, ErrKeyNotFound, err)
+			return nil
+		}))
 	}
 	for i := 8; i < 16; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
-		item, err := txnGet(t, kv, key)
-		require.NoError(t, err)
-		val := getItemValue(t, &item)
-		require.NotNil(t, val)
-		require.Equal(t, string(val), fmt.Sprintf("value%d", i))
+		require.NoError(t, kv.View(func(txn *Txn) error {
+			item, err := txn.Get(key)
+			require.NoError(t, err)
+			val := getItemValue(t, &item)
+			require.NotNil(t, val)
+			require.Equal(t, string(val), fmt.Sprintf("value%d", i))
+			return nil
+		}))
 	}
 }
 
@@ -364,13 +386,20 @@ func TestChecksums(t *testing.T) {
 	// K1 should exist, but K2 shouldn't.
 	kv, err = NewKV(opts)
 	require.NoError(t, err)
-	item, err := txnGet(t, kv, k0)
-	require.NoError(t, err)
-	require.Equal(t, getItemValue(t, &item), v0)
-	_, err = txnGet(t, kv, k1)
-	require.Error(t, ErrKeyNotFound, err)
-	_, err = txnGet(t, kv, k2)
-	require.Error(t, ErrKeyNotFound, err)
+
+	require.NoError(t, kv.View(func(txn *Txn) error {
+		item, err := txn.Get(k0)
+		require.NoError(t, err)
+		require.Equal(t, getItemValue(t, &item), v0)
+
+		_, err = txn.Get(k1)
+		require.Error(t, ErrKeyNotFound, err)
+
+		_, err = txn.Get(k2)
+		require.Error(t, ErrKeyNotFound, err)
+		return nil
+	}))
+
 	// Write K3 at the end of the vlog.
 	txnSet(t, kv, k3, v3, 0)
 	require.NoError(t, kv.Close())
@@ -379,19 +408,26 @@ func TestChecksums(t *testing.T) {
 	// last due to checksum failure).
 	kv, err = NewKV(opts)
 	require.NoError(t, err)
-	txn := kv.NewTransaction(false)
-	iter := txn.NewIterator(DefaultIteratorOptions)
-	iter.Seek(k0)
-	require.True(t, iter.Valid())
-	it := iter.Item()
-	require.Equal(t, it.Key(), k0)
-	require.Equal(t, getItemValue(t, it), v0)
-	iter.Next()
-	require.True(t, iter.Valid())
-	it = iter.Item()
-	require.Equal(t, it.Key(), k3)
-	require.Equal(t, getItemValue(t, it), v3)
-	iter.Close()
+
+	{
+		txn := kv.NewTransaction(false)
+
+		iter := txn.NewIterator(DefaultIteratorOptions)
+		iter.Seek(k0)
+		require.True(t, iter.Valid())
+		it := iter.Item()
+		require.Equal(t, it.Key(), k0)
+		require.Equal(t, getItemValue(t, it), v0)
+		iter.Next()
+		require.True(t, iter.Valid())
+		it = iter.Item()
+		require.Equal(t, it.Key(), k3)
+		require.Equal(t, getItemValue(t, it), v3)
+
+		iter.Close()
+		txn.Discard()
+	}
+
 	require.NoError(t, kv.Close())
 }
 
@@ -433,13 +469,18 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	// Badger should now start up
 	kv, err = NewKV(opts)
 	require.NoError(t, err)
-	item, err := txnGet(t, kv, k0)
-	require.NoError(t, err)
-	require.Equal(t, v0, getItemValue(t, &item))
-	_, err = txnGet(t, kv, k1)
-	require.Error(t, ErrKeyNotFound, err)
-	_, err = txnGet(t, kv, k2)
-	require.Error(t, ErrKeyNotFound, err)
+
+	require.NoError(t, kv.View(func(txn *Txn) error {
+		item, err := txn.Get(k0)
+		require.NoError(t, err)
+		require.Equal(t, v0, getItemValue(t, &item))
+
+		_, err = txn.Get(k1)
+		require.Error(t, ErrKeyNotFound, err)
+		_, err = txn.Get(k2)
+		require.Error(t, ErrKeyNotFound, err)
+		return nil
+	}))
 
 	// When K3 is set, it should be persisted after a restart.
 	txnSet(t, kv, k3, v3, 0)
@@ -575,7 +616,7 @@ func BenchmarkReadWrite(b *testing.B) {
 							b.Fatalf("Zero length of ptrs")
 						}
 						idx := rand.Intn(ln)
-						buf, err := vl.readValueBytes(ptrs[idx], nil)
+						buf, cb, err := vl.readValueBytes(ptrs[idx])
 						if err != nil {
 							b.Fatalf("Benchmark Read: %v", err)
 						}
@@ -587,6 +628,7 @@ func BenchmarkReadWrite(b *testing.B) {
 						if len(e.Value) != vsz {
 							b.Fatalf("Value is invalid")
 						}
+						cb()
 					}
 				}
 			})
