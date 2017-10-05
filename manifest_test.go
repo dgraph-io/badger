@@ -41,7 +41,7 @@ func TestManifestBasic(t *testing.T) {
 
 	opt := getTestOptions(dir)
 	{
-		kv, err := NewKV(opt)
+		kv, err := Open(opt)
 		require.NoError(t, err)
 		n := 5000
 		for i := 0; i < n; i++ {
@@ -49,22 +49,23 @@ func TestManifestBasic(t *testing.T) {
 				fmt.Printf("Putting i=%d\n", i)
 			}
 			k := []byte(fmt.Sprintf("%16x", rand.Int63()))
-			kv.Set(k, k, 0x00)
+			txnSet(t, kv, k, k, 0x00)
 		}
-		kv.Set([]byte("testkey"), []byte("testval"), 0x05)
+		txnSet(t, kv, []byte("testkey"), []byte("testval"), 0x05)
 		kv.validate()
 		require.NoError(t, kv.Close())
 	}
 
-	kv, err := NewKV(opt)
+	kv, err := Open(opt)
 	require.NoError(t, err)
 
-	var item KVItem
-	if err := kv.Get([]byte("testkey"), &item); err != nil {
-		t.Error(err)
-	}
-	require.EqualValues(t, "testval", string(getItemValue(t, &item)))
-	require.EqualValues(t, byte(0x05), item.UserMeta())
+	require.NoError(t, kv.View(func(txn *Txn) error {
+		item, err := txn.Get([]byte("testkey"))
+		require.NoError(t, err)
+		require.EqualValues(t, "testval", string(getItemValue(t, &item)))
+		require.EqualValues(t, byte(0x05), item.UserMeta())
+		return nil
+	}))
 	require.NoError(t, kv.Close())
 }
 
@@ -75,7 +76,7 @@ func helpTestManifestFileCorruption(t *testing.T, off int64, errorContent string
 
 	opt := getTestOptions(dir)
 	{
-		kv, err := NewKV(opt)
+		kv, err := Open(opt)
 		require.NoError(t, err)
 		require.NoError(t, kv.Close())
 	}
@@ -85,7 +86,7 @@ func helpTestManifestFileCorruption(t *testing.T, off int64, errorContent string
 	_, err = fp.WriteAt([]byte{'X'}, off)
 	require.NoError(t, err)
 	require.NoError(t, fp.Close())
-	kv, err := NewKV(opt)
+	kv, err := Open(opt)
 	defer func() {
 		if kv != nil {
 			kv.Close()
@@ -136,13 +137,12 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	sort.Slice(keyValues, func(i, j int) bool {
 		return keyValues[i][0] < keyValues[j][0]
 	})
-	for i, kv := range keyValues {
+	for _, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		err := b.Add([]byte(kv[0]), y.ValueStruct{
-			Value:      []byte(kv[1]),
-			Meta:       'A',
-			UserMeta:   0,
-			CASCounter: uint64(i),
+		err := b.Add(y.KeyWithTs([]byte(kv[0]), 10), y.ValueStruct{
+			Value:    []byte(kv[1]),
+			Meta:     'A',
+			UserMeta: 0,
 		})
 		if t != nil {
 			require.NoError(t, err)
@@ -163,7 +163,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	opt := DefaultOptions
 	opt.Dir = dir
 	opt.ValueDir = dir
-	kv, err := NewKV(&opt)
+	kv, err := Open(&opt)
 	require.NoError(t, err)
 
 	lh0 := newLevelHandler(kv, 0)

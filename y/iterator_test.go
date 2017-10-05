@@ -17,8 +17,6 @@
 package y
 
 import (
-	//	"fmt"
-	"bytes"
 	"sort"
 	"testing"
 
@@ -55,21 +53,26 @@ func (s *SimpleIterator) Rewind() {
 }
 
 func (s *SimpleIterator) Seek(key []byte) {
+	key = KeyWithTs(key, 0)
 	if !s.reversed {
 		s.idx = sort.Search(len(s.keys), func(i int) bool {
-			return bytes.Compare(s.keys[i], key) >= 0
+			return CompareKeys(s.keys[i], key) >= 0
 		})
 	} else {
 		n := len(s.keys)
 		s.idx = n - 1 - sort.Search(n, func(i int) bool {
-			return bytes.Compare(s.keys[n-1-i], key) <= 0
+			return CompareKeys(s.keys[n-1-i], key) <= 0
 		})
 	}
 }
 
 func (s *SimpleIterator) Key() []byte { return s.keys[s.idx] }
 func (s *SimpleIterator) Value() ValueStruct {
-	return ValueStruct{s.vals[s.idx], 55, 0, 12345}
+	return ValueStruct{
+		Value:    s.vals[s.idx],
+		UserMeta: 55,
+		Meta:     0,
+	}
 }
 func (s *SimpleIterator) Valid() bool {
 	return s.idx >= 0 && s.idx < len(s.keys)
@@ -80,7 +83,7 @@ func newSimpleIterator(keys []string, vals []string, reversed bool) *SimpleItera
 	v := make([][]byte, len(vals))
 	AssertTrue(len(keys) == len(vals))
 	for i := 0; i < len(keys); i++ {
-		k[i] = []byte(keys[i])
+		k[i] = KeyWithTs([]byte(keys[i]), 0)
 		v[i] = []byte(vals[i])
 	}
 	return &SimpleIterator{
@@ -95,7 +98,7 @@ func getAll(it Iterator) ([]string, []string) {
 	var keys, vals []string
 	for ; it.Valid(); it.Next() {
 		k := it.Key()
-		keys = append(keys, string(k))
+		keys = append(keys, string(ParseKey(k)))
 		v := it.Value()
 		vals = append(vals, string(v.Value))
 	}
