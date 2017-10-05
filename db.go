@@ -74,7 +74,7 @@ type DB struct {
 	// we use an atomic op.
 	lastUsedCommitTs uint64
 
-	txnState *globalTxnState
+	orc *oracle
 }
 
 const (
@@ -105,8 +105,8 @@ func replayFunction(out *DB) func(entry, valuePointer) error {
 		}
 		first = false
 
-		if out.txnState.curRead < y.ParseTs(e.Key) {
-			out.txnState.curRead = y.ParseTs(e.Key)
+		if out.orc.curRead < y.ParseTs(e.Key) {
+			out.orc.curRead = y.ParseTs(e.Key)
 		}
 
 		nk := make([]byte, len(e.Key))
@@ -222,12 +222,12 @@ func Open(optParam *Options) (db *DB, err error) {
 		}
 	}()
 
-	gs := &globalTxnState{
+	orc := &oracle{
 		nextCommit:     1,
 		pendingCommits: make(map[uint64]struct{}),
 		commits:        make(map[uint64]uint64),
 	}
-	heap.Init(&gs.commitMark)
+	heap.Init(&orc.commitMark)
 
 	db = &DB{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
@@ -238,7 +238,7 @@ func Open(optParam *Options) (db *DB, err error) {
 		elog:          trace.NewEventLog("Badger", "DB"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
-		txnState:      gs,
+		orc:           orc,
 	}
 
 	db.closers.updateSize = y.NewCloser(1)
@@ -266,7 +266,7 @@ func Open(optParam *Options) (db *DB, err error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
-	db.txnState.curRead = vs.Version
+	db.orc.curRead = vs.Version
 	var vptr valuePointer
 	if len(vs.Value) > 0 {
 		vptr.Decode(vs.Value)
@@ -288,7 +288,7 @@ func Open(optParam *Options) (db *DB, err error) {
 
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 	// Now that we have the curRead, we can update the nextCommit.
-	db.txnState.nextCommit = db.txnState.curRead + 1
+	db.orc.nextCommit = db.orc.curRead + 1
 
 	// Mmap writable log
 	lf := db.vlog.filesMap[db.vlog.maxFid]
@@ -759,7 +759,7 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 
 			// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
 			// commits.
-			headTs := y.KeyWithTs(head, db.txnState.commitTs())
+			headTs := y.KeyWithTs(head, db.orc.commitTs())
 			ft.mt.Put(headTs, y.ValueStruct{Value: offset})
 		}
 

@@ -43,7 +43,7 @@ func (u *uint64Heap) Pop() interface{} {
 	return x
 }
 
-type globalTxnState struct {
+type oracle struct {
 	sync.Mutex
 	curRead    uint64
 	nextCommit uint64
@@ -59,102 +59,102 @@ type globalTxnState struct {
 	refCount int64
 }
 
-func (gs *globalTxnState) addRef() {
-	atomic.AddInt64(&gs.refCount, 1)
+func (o *oracle) addRef() {
+	atomic.AddInt64(&o.refCount, 1)
 }
 
-func (gs *globalTxnState) decrRef() {
-	if count := atomic.AddInt64(&gs.refCount, -1); count == 0 {
+func (o *oracle) decrRef() {
+	if count := atomic.AddInt64(&o.refCount, -1); count == 0 {
 		// Clear out pendingCommits maps to release memory.
-		gs.Lock()
-		y.AssertTrue(len(gs.commitMark) == 0)
-		y.AssertTrue(len(gs.pendingCommits) == 0)
-		if len(gs.commits) >= 1000 { // If the map is still small, let it slide.
-			gs.commits = make(map[uint64]uint64)
+		o.Lock()
+		y.AssertTrue(len(o.commitMark) == 0)
+		y.AssertTrue(len(o.pendingCommits) == 0)
+		if len(o.commits) >= 1000 { // If the map is still small, let it slide.
+			o.commits = make(map[uint64]uint64)
 		}
-		gs.Unlock()
+		o.Unlock()
 	}
 }
 
-func (gs *globalTxnState) readTs() uint64 {
-	return atomic.LoadUint64(&gs.curRead)
+func (o *oracle) readTs() uint64 {
+	return atomic.LoadUint64(&o.curRead)
 }
 
-func (gs *globalTxnState) commitTs() uint64 {
-	gs.Lock()
-	defer gs.Unlock()
-	return gs.nextCommit
+func (o *oracle) commitTs() uint64 {
+	o.Lock()
+	defer o.Unlock()
+	return o.nextCommit
 }
 
 // hasConflict must be called while having a lock.
-func (gs *globalTxnState) hasConflict(txn *Txn) bool {
+func (o *oracle) hasConflict(txn *Txn) bool {
 	if len(txn.reads) == 0 {
 		return false
 	}
 	for _, ro := range txn.reads {
-		if ts, has := gs.commits[ro]; has && ts > txn.readTs {
+		if ts, has := o.commits[ro]; has && ts > txn.readTs {
 			return true
 		}
 	}
 	return false
 }
 
-func (gs *globalTxnState) newCommitTs(txn *Txn) uint64 {
-	gs.Lock()
-	defer gs.Unlock()
+func (o *oracle) newCommitTs(txn *Txn) uint64 {
+	o.Lock()
+	defer o.Unlock()
 
-	if gs.hasConflict(txn) {
+	if o.hasConflict(txn) {
 		return 0
 	}
 
 	var ts uint64
 	if txn.commitTs == 0 {
 		// This is the general case, when user doesn't specify the read and commit ts.
-		ts = gs.nextCommit
-		gs.nextCommit++
+		ts = o.nextCommit
+		o.nextCommit++
 
 	} else {
 		// If commitTs is set, use it instead.
 		ts = txn.commitTs
-		if gs.nextCommit <= ts { // Update this to max+1 commit ts, so replay works.
-			gs.nextCommit = ts + 1
+		if o.nextCommit <= ts { // Update this to max+1 commit ts, so replay works.
+			o.nextCommit = ts + 1
 		}
 	}
 
 	for _, w := range txn.writes {
-		gs.commits[w] = ts // Update the commitTs.
+		o.commits[w] = ts // Update the commitTs.
 	}
-	heap.Push(&gs.commitMark, ts)
-	if _, has := gs.pendingCommits[ts]; has {
+	heap.Push(&o.commitMark, ts)
+	if _, has := o.pendingCommits[ts]; has {
 		panic(fmt.Sprintf("We shouldn't have the commit ts: %d", ts))
 	}
-	gs.pendingCommits[ts] = struct{}{}
+	o.pendingCommits[ts] = struct{}{}
 	return ts
 }
 
-func (gs *globalTxnState) doneCommit(cts uint64) {
-	gs.Lock()
-	defer gs.Unlock()
+func (o *oracle) doneCommit(cts uint64) {
+	o.Lock()
+	defer o.Unlock()
 
-	if _, has := gs.pendingCommits[cts]; !has {
+	if _, has := o.pendingCommits[cts]; !has {
 		panic(fmt.Sprintf("We should already have the commit ts: %d", cts))
 	}
-	delete(gs.pendingCommits, cts)
+	delete(o.pendingCommits, cts)
 
 	var min uint64
-	for len(gs.commitMark) > 0 {
-		ts := gs.commitMark[0]
-		if _, has := gs.pendingCommits[ts]; has {
+	for len(o.commitMark) > 0 {
+		ts := o.commitMark[0]
+		if _, has := o.pendingCommits[ts]; has {
 			// Still waiting for a txn to commit.
 			break
 		}
 		min = ts
-		heap.Pop(&gs.commitMark)
+		heap.Pop(&o.commitMark)
 	}
 	if min == 0 {
 		return
 	}
-	atomic.StoreUint64(&gs.curRead, min)
+	atomic.StoreUint64(&o.curRead, min)
 	// nextCommit must never be reset.
 }
 
@@ -297,7 +297,7 @@ func (txn *Txn) Discard() {
 		cb()
 	}
 	if txn.update {
-		txn.db.txnState.decrRef()
+		txn.db.orc.decrRef()
 	}
 }
 
@@ -325,7 +325,7 @@ func (txn *Txn) Commit(callback func(error)) error {
 		return nil // Nothing to do.
 	}
 
-	state := txn.db.txnState
+	state := txn.db.orc
 	commitTs := state.newCommitTs(txn)
 	if commitTs == 0 {
 		return ErrConflict
@@ -388,11 +388,11 @@ func (db *DB) NewTransaction(update bool) *Txn {
 	txn := &Txn{
 		update: update,
 		db:     db,
-		readTs: db.txnState.readTs(),
+		readTs: db.orc.readTs(),
 	}
 	if update {
 		txn.pendingWrites = make(map[string]*entry)
-		txn.db.txnState.addRef()
+		txn.db.orc.addRef()
 	}
 	return txn
 }

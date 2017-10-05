@@ -496,7 +496,7 @@ func TestLoad(t *testing.T) {
 
 	kv, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
-	require.Equal(t, uint64(10001), kv.txnState.readTs())
+	require.Equal(t, uint64(10001), kv.orc.readTs())
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
