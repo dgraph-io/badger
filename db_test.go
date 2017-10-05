@@ -329,8 +329,8 @@ func TestGetMore(t *testing.T) {
 		}
 		k := data(i)
 		txn := kv.NewTransaction(false)
-		item, err := txn.Get([]byte(k))
-		require.Equal(t, ErrKeyNotFound, err, "wanted=%q item=%s\n", k, item.ToString())
+		_, err := txn.Get([]byte(k))
+		require.Equal(t, ErrKeyNotFound, err, "should not have found k: %q", k)
 		txn.Discard()
 	}
 }
