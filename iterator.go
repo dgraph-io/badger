@@ -192,7 +192,12 @@ func (l *list) pop() *Item {
 	return i
 }
 
-// IteratorOptions is used to set options when iterating over Badger key-value stores.
+// IteratorOptions is used to set options when iterating over Badger key-value
+// stores.
+//
+// This package provides DefaultIteratorOptions which contains options that
+// should work for most applications. Consider using that as a starting point
+// before customizing it for your own needs.
 type IteratorOptions struct {
 	// Indicates whether we should prefetch values during iteration and store them.
 	PrefetchValues bool
