@@ -233,13 +233,14 @@ func (txn *Txn) Delete(key []byte) error {
 
 // Get looks for key and returns corresponding Item.
 // If key is not found, ErrKeyNotFound is returned.
-func (txn *Txn) Get(key []byte) (item Item, rerr error) {
+func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	if len(key) == 0 {
-		return item, ErrEmptyKey
+		return nil, ErrEmptyKey
 	} else if txn.discarded {
-		return item, ErrDiscardedTxn
+		return nil, ErrDiscardedTxn
 	}
 
+	item = new(Item)
 	if txn.update {
 		if e, has := txn.pendingWrites[string(key)]; has && bytes.Compare(key, e.Key) == 0 {
 			// Fulfill from cache.
@@ -261,13 +262,13 @@ func (txn *Txn) Get(key []byte) (item Item, rerr error) {
 	seek := y.KeyWithTs(key, txn.readTs)
 	vs, err := txn.db.get(seek)
 	if err != nil {
-		return item, errors.Wrapf(err, "DB::Get key: %q", key)
+		return nil, errors.Wrapf(err, "DB::Get key: %q", key)
 	}
 	if vs.Value == nil && vs.Meta == 0 {
-		return item, ErrKeyNotFound
+		return nil, ErrKeyNotFound
 	}
 	if (vs.Meta & bitDelete) != 0 {
-		return item, ErrKeyNotFound
+		return nil, ErrKeyNotFound
 	}
 
 	item.key = key

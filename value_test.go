@@ -125,7 +125,7 @@ func TestValueGC(t *testing.T) {
 		require.NoError(t, kv.View(func(txn *Txn) error {
 			item, err := txn.Get(key)
 			require.NoError(t, err)
-			val := getItemValue(t, &item)
+			val := getItemValue(t, item)
 			require.NotNil(t, val)
 			require.True(t, len(val) == sz, "Size found: %d", len(val))
 			return nil
@@ -188,7 +188,7 @@ func TestValueGC2(t *testing.T) {
 		require.NoError(t, kv.View(func(txn *Txn) error {
 			item, err := txn.Get(key)
 			require.NoError(t, err)
-			val := getItemValue(t, &item)
+			val := getItemValue(t, item)
 			require.NotNil(t, val)
 			require.Equal(t, string(val), fmt.Sprintf("value%d", i))
 			return nil
@@ -199,7 +199,7 @@ func TestValueGC2(t *testing.T) {
 		require.NoError(t, kv.View(func(txn *Txn) error {
 			item, err := txn.Get(key)
 			require.NoError(t, err)
-			val := getItemValue(t, &item)
+			val := getItemValue(t, item)
 			require.NotNil(t, val)
 			require.True(t, len(val) == sz, "Size found: %d", len(val))
 			return nil
@@ -341,7 +341,7 @@ func TestValueGC4(t *testing.T) {
 		require.NoError(t, kv.View(func(txn *Txn) error {
 			item, err := txn.Get(key)
 			require.NoError(t, err)
-			val := getItemValue(t, &item)
+			val := getItemValue(t, item)
 			require.NotNil(t, val)
 			require.Equal(t, string(val), fmt.Sprintf("value%d", i))
 			return nil
@@ -390,7 +390,7 @@ func TestChecksums(t *testing.T) {
 	require.NoError(t, kv.View(func(txn *Txn) error {
 		item, err := txn.Get(k0)
 		require.NoError(t, err)
-		require.Equal(t, getItemValue(t, &item), v0)
+		require.Equal(t, getItemValue(t, item), v0)
 
 		_, err = txn.Get(k1)
 		require.Error(t, ErrKeyNotFound, err)
@@ -473,7 +473,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	require.NoError(t, kv.View(func(txn *Txn) error {
 		item, err := txn.Get(k0)
 		require.NoError(t, err)
-		require.Equal(t, v0, getItemValue(t, &item))
+		require.Equal(t, v0, getItemValue(t, item))
 
 		_, err = txn.Get(k1)
 		require.Error(t, ErrKeyNotFound, err)

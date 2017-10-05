@@ -148,7 +148,7 @@ func TestGet(t *testing.T) {
 	txn := kv.NewTransaction(false)
 	item, err := txn.Get([]byte("key1"))
 	require.NoError(t, err)
-	require.EqualValues(t, "val1", getItemValue(t, &item))
+	require.EqualValues(t, "val1", getItemValue(t, item))
 	require.Equal(t, byte(0x08), item.UserMeta())
 	txn.Discard()
 
@@ -157,7 +157,7 @@ func TestGet(t *testing.T) {
 	txn = kv.NewTransaction(false)
 	item, err = txn.Get([]byte("key1"))
 	require.NoError(t, err)
-	require.EqualValues(t, "val2", getItemValue(t, &item))
+	require.EqualValues(t, "val2", getItemValue(t, item))
 	require.Equal(t, byte(0x09), item.UserMeta())
 	txn.Discard()
 
@@ -173,7 +173,7 @@ func TestGet(t *testing.T) {
 	txn = kv.NewTransaction(false)
 	item, err = txn.Get([]byte("key1"))
 	require.NoError(t, err)
-	require.EqualValues(t, "val3", getItemValue(t, &item))
+	require.EqualValues(t, "val3", getItemValue(t, item))
 	require.Equal(t, byte(0x01), item.UserMeta())
 
 	longVal := make([]byte, 1000)
@@ -182,7 +182,7 @@ func TestGet(t *testing.T) {
 	txn = kv.NewTransaction(false)
 	item, err = txn.Get([]byte("key1"))
 	require.NoError(t, err)
-	require.EqualValues(t, longVal, getItemValue(t, &item))
+	require.EqualValues(t, longVal, getItemValue(t, item))
 	txn.Discard()
 }
 
@@ -261,7 +261,7 @@ func TestGetMore(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		require.EqualValues(t, string(data(i)), string(getItemValue(t, &item)))
+		require.EqualValues(t, string(data(i)), string(getItemValue(t, item)))
 		txn.Discard()
 	}
 
@@ -286,7 +286,7 @@ func TestGetMore(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		got := string(getItemValue(t, &item))
+		got := string(getItemValue(t, item))
 		if expectedValue != got {
 
 			vs, err := kv.get(y.KeyWithTs(k, math.MaxUint64))
@@ -306,7 +306,7 @@ func TestGetMore(t *testing.T) {
 			itr.Close()
 			txn.Discard()
 		}
-		require.EqualValues(t, expectedValue, string(getItemValue(t, &item)), "wanted=%q Item: %s\n", k, item.ToString())
+		require.EqualValues(t, expectedValue, string(getItemValue(t, item)), "wanted=%q Item: %s\n", k, item.ToString())
 		txn.Discard()
 	}
 
@@ -505,7 +505,7 @@ func TestLoad(t *testing.T) {
 		require.NoError(t, kv.View(func(txn *Txn) error {
 			item, err := txn.Get([]byte(k))
 			require.NoError(t, err)
-			require.EqualValues(t, k, string(getItemValue(t, &item)))
+			require.EqualValues(t, k, string(getItemValue(t, item)))
 			return nil
 		}))
 
