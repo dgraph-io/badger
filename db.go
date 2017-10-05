@@ -417,20 +417,20 @@ func syncDir(dir string) error {
 }
 
 // getMemtables returns the current memtables and get references.
-func (s *DB) getMemTables() ([]*skl.Skiplist, func()) {
-	s.RLock()
-	defer s.RUnlock()
+func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
+	db.RLock()
+	defer db.RUnlock()
 
-	tables := make([]*skl.Skiplist, len(s.imm)+1)
+	tables := make([]*skl.Skiplist, len(db.imm)+1)
 
 	// Get mutable memtable.
-	tables[0] = s.mt
+	tables[0] = db.mt
 	tables[0].IncrRef()
 
 	// Get immutable memtables.
-	last := len(s.imm) - 1
-	for i := range s.imm {
-		tables[i+1] = s.imm[last-i]
+	last := len(db.imm) - 1
+	for i := range db.imm {
+		tables[i+1] = db.imm[last-i]
 		tables[i+1].IncrRef()
 	}
 	return tables, func() {
@@ -442,8 +442,8 @@ func (s *DB) getMemTables() ([]*skl.Skiplist, func()) {
 
 // get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
-func (s *DB) get(key []byte) (y.ValueStruct, error) {
-	tables, decr := s.getMemTables() // Lock should be released.
+func (db *DB) get(key []byte) (y.ValueStruct, error) {
+	tables, decr := db.getMemTables() // Lock should be released.
 	defer decr()
 
 	y.NumGets.Add(1)
@@ -454,10 +454,10 @@ func (s *DB) get(key []byte) (y.ValueStruct, error) {
 			return vs, nil
 		}
 	}
-	return s.lc.get(key)
+	return db.lc.get(key)
 }
 
-func (s *DB) updateOffset(ptrs []valuePointer) {
+func (db *DB) updateOffset(ptrs []valuePointer) {
 	var ptr valuePointer
 	for i := len(ptrs) - 1; i >= 0; i-- {
 		p := ptrs[i]
@@ -470,10 +470,10 @@ func (s *DB) updateOffset(ptrs []valuePointer) {
 		return
 	}
 
-	s.Lock()
-	defer s.Unlock()
-	y.AssertTrue(!ptr.Less(s.vptr))
-	s.vptr = ptr
+	db.Lock()
+	defer db.Unlock()
+	y.AssertTrue(!ptr.Less(db.vptr))
+	db.vptr = ptr
 }
 
 var requestPool = sync.Pool{
@@ -482,11 +482,11 @@ var requestPool = sync.Pool{
 	},
 }
 
-func (s *DB) shouldWriteValueToLSM(e entry) bool {
-	return len(e.Value) < s.opt.ValueThreshold
+func (db *DB) shouldWriteValueToLSM(e entry) bool {
+	return len(e.Value) < db.opt.ValueThreshold
 }
 
-func (s *DB) writeToLSM(b *request) error {
+func (db *DB) writeToLSM(b *request) error {
 	if len(b.Ptrs) != len(b.Entries) {
 		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
@@ -495,8 +495,8 @@ func (s *DB) writeToLSM(b *request) error {
 		if entry.Meta&bitFinTxn != 0 {
 			continue
 		}
-		if s.shouldWriteValueToLSM(*entry) { // Will include deletion / tombstone case.
-			s.mt.Put(entry.Key,
+		if db.shouldWriteValueToLSM(*entry) { // Will include deletion / tombstone case.
+			db.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:    entry.Value,
 					Meta:     entry.Meta,
@@ -504,7 +504,7 @@ func (s *DB) writeToLSM(b *request) error {
 				})
 		} else {
 			var offsetBuf [vptrSize]byte
-			s.mt.Put(entry.Key,
+			db.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:    b.Ptrs[i].Encode(offsetBuf[:]),
 					Meta:     entry.Meta | bitValuePointer,
@@ -516,7 +516,7 @@ func (s *DB) writeToLSM(b *request) error {
 }
 
 // writeRequests is called serially by only one goroutine.
-func (s *DB) writeRequests(reqs []*request) error {
+func (db *DB) writeRequests(reqs []*request) error {
 	if len(reqs) == 0 {
 		return nil
 	}
@@ -528,23 +528,23 @@ func (s *DB) writeRequests(reqs []*request) error {
 		}
 	}
 
-	s.elog.Printf("writeRequests called. Writing to value log")
+	db.elog.Printf("writeRequests called. Writing to value log")
 
-	err := s.vlog.write(reqs)
+	err := db.vlog.write(reqs)
 	if err != nil {
 		done(err)
 		return err
 	}
 
-	s.elog.Printf("Writing to memtable")
+	db.elog.Printf("Writing to memtable")
 	var count int
 	for _, b := range reqs {
 		if len(b.Entries) == 0 {
 			continue
 		}
 		count += len(b.Entries)
-		for err := s.ensureRoomForWrite(); err != nil; err = s.ensureRoomForWrite() {
-			s.elog.Printf("Making room for writes")
+		for err := db.ensureRoomForWrite(); err != nil; err = db.ensureRoomForWrite() {
+			db.elog.Printf("Making room for writes")
 			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
 			// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
 			// you will get a deadlock.
@@ -554,23 +554,23 @@ func (s *DB) writeRequests(reqs []*request) error {
 			done(err)
 			return errors.Wrap(err, "writeRequests")
 		}
-		if err := s.writeToLSM(b); err != nil {
+		if err := db.writeToLSM(b); err != nil {
 			done(err)
 			return errors.Wrap(err, "writeRequests")
 		}
-		s.updateOffset(b.Ptrs)
+		db.updateOffset(b.Ptrs)
 	}
 	done(nil)
-	s.elog.Printf("%d entries written", count)
+	db.elog.Printf("%d entries written", count)
 	return nil
 }
 
-func (s *DB) doWrites(lc *y.Closer) {
+func (db *DB) doWrites(lc *y.Closer) {
 	defer lc.Done()
 	pendingCh := make(chan struct{}, 1)
 
 	writeRequests := func(reqs []*request) {
-		if err := s.writeRequests(reqs); err != nil {
+		if err := db.writeRequests(reqs); err != nil {
 			log.Printf("ERROR in Badger::writeRequests: %v", err)
 		}
 		<-pendingCh
@@ -578,13 +578,13 @@ func (s *DB) doWrites(lc *y.Closer) {
 
 	// This variable tracks the number of pending writes.
 	reqLen := new(expvar.Int)
-	y.PendingWrites.Set(s.opt.Dir, reqLen)
+	y.PendingWrites.Set(db.opt.Dir, reqLen)
 
 	reqs := make([]*request, 0, 10)
 	for {
 		var r *request
 		select {
-		case r = <-s.writeCh:
+		case r = <-db.writeCh:
 		case <-lc.HasBeenClosed():
 			goto closedCase
 		}
@@ -600,7 +600,7 @@ func (s *DB) doWrites(lc *y.Closer) {
 
 			select {
 			// Either push to pending, or continue to pick from writeCh.
-			case r = <-s.writeCh:
+			case r = <-db.writeCh:
 			case pendingCh <- struct{}{}:
 				goto writeCase
 			case <-lc.HasBeenClosed():
@@ -609,8 +609,8 @@ func (s *DB) doWrites(lc *y.Closer) {
 		}
 
 	closedCase:
-		close(s.writeCh)
-		for r := range s.writeCh { // Flush the channel.
+		close(db.writeCh)
+		for r := range db.writeCh { // Flush the channel.
 			reqs = append(reqs, r)
 		}
 
@@ -625,13 +625,13 @@ func (s *DB) doWrites(lc *y.Closer) {
 	}
 }
 
-func (s *DB) sendToWriteCh(entries []*entry) (*request, error) {
+func (db *DB) sendToWriteCh(entries []*entry) (*request, error) {
 	var count, size int64
 	for _, e := range entries {
-		size += int64(s.opt.estimateSize(e))
+		size += int64(db.opt.estimateSize(e))
 		count++
 	}
-	if count >= s.opt.maxBatchCount || size >= s.opt.maxBatchSize {
+	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
 		return nil, ErrTxnTooBig
 	}
 
@@ -641,7 +641,7 @@ func (s *DB) sendToWriteCh(entries []*entry) (*request, error) {
 	req.Entries = entries
 	req.Wg = sync.WaitGroup{}
 	req.Wg.Add(1)
-	s.writeCh <- req
+	db.writeCh <- req
 	y.NumPuts.Add(int64(len(entries)))
 
 	return req, nil
@@ -650,8 +650,8 @@ func (s *DB) sendToWriteCh(entries []*entry) (*request, error) {
 // batchSet applies a list of badger.Entry. If a request level error occurs it
 // will be returned.
 //   Check(kv.BatchSet(entries))
-func (s *DB) batchSet(entries []*entry) error {
-	req, err := s.sendToWriteCh(entries)
+func (db *DB) batchSet(entries []*entry) error {
+	req, err := db.sendToWriteCh(entries)
 	if err != nil {
 		return err
 	}
@@ -669,8 +669,8 @@ func (s *DB) batchSet(entries []*entry) error {
 //   err := kv.BatchSetAsync(entries, func(err error)) {
 //      Check(err)
 //   }
-func (s *DB) batchSetAsync(entries []*entry, f func(error)) error {
-	req, err := s.sendToWriteCh(entries)
+func (db *DB) batchSetAsync(entries []*entry, f func(error)) error {
+	req, err := db.sendToWriteCh(entries)
 	if err != nil {
 		return err
 	}
@@ -688,29 +688,29 @@ func (s *DB) batchSetAsync(entries []*entry, f func(error)) error {
 var errNoRoom = errors.New("No room for write")
 
 // ensureRoomForWrite is always called serially.
-func (s *DB) ensureRoomForWrite() error {
+func (db *DB) ensureRoomForWrite() error {
 	var err error
-	s.Lock()
-	defer s.Unlock()
-	if s.mt.MemSize() < s.opt.MaxTableSize {
+	db.Lock()
+	defer db.Unlock()
+	if db.mt.MemSize() < db.opt.MaxTableSize {
 		return nil
 	}
 
-	y.AssertTrue(s.mt != nil) // A nil mt indicates that DB is being closed.
+	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	select {
-	case s.flushChan <- flushTask{s.mt, s.vptr}:
-		s.elog.Printf("Flushing value log to disk if async mode.")
+	case db.flushChan <- flushTask{db.mt, db.vptr}:
+		db.elog.Printf("Flushing value log to disk if async mode.")
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
-		err = s.vlog.sync()
+		err = db.vlog.sync()
 		if err != nil {
 			return err
 		}
 
-		s.elog.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
-			s.mt.MemSize(), len(s.flushChan))
+		db.elog.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
+			db.mt.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
-		s.imm = append(s.imm, s.mt)
-		s.mt = skl.NewSkiplist(arenaSize(&s.opt))
+		db.imm = append(db.imm, db.mt)
+		db.mt = skl.NewSkiplist(arenaSize(&db.opt))
 		// New memtable is empty. We certainly have room.
 		return nil
 	default:
@@ -743,66 +743,66 @@ type flushTask struct {
 	vptr valuePointer
 }
 
-func (s *DB) flushMemtable(lc *y.Closer) error {
+func (db *DB) flushMemtable(lc *y.Closer) error {
 	defer lc.Done()
 
-	for ft := range s.flushChan {
+	for ft := range db.flushChan {
 		if ft.mt == nil {
 			return nil
 		}
 
 		if !ft.mt.Empty() {
 			// Store badger head even if vptr is zero, need it for readTs
-			s.elog.Printf("Storing offset: %+v\n", ft.vptr)
+			db.elog.Printf("Storing offset: %+v\n", ft.vptr)
 			offset := make([]byte, vptrSize)
 			ft.vptr.Encode(offset)
 
 			// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
 			// commits.
-			headTs := y.KeyWithTs(head, s.txnState.commitTs())
+			headTs := y.KeyWithTs(head, db.txnState.commitTs())
 			ft.mt.Put(headTs, y.ValueStruct{Value: offset})
 		}
 
-		fileID := s.lc.reserveFileID()
-		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
+		fileID := db.lc.reserveFileID()
+		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
 		if err != nil {
 			return y.Wrap(err)
 		}
 
 		// Don't block just to sync the directory entry.
 		dirSyncCh := make(chan error)
-		go func() { dirSyncCh <- syncDir(s.opt.Dir) }()
+		go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
 
 		err = writeLevel0Table(ft.mt, fd)
 		dirSyncErr := <-dirSyncCh
 
 		if err != nil {
-			s.elog.Errorf("ERROR while writing to level 0: %v", err)
+			db.elog.Errorf("ERROR while writing to level 0: %v", err)
 			return err
 		}
 		if dirSyncErr != nil {
-			s.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
+			db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 			return err
 		}
 
-		tbl, err := table.OpenTable(fd, s.opt.TableLoadingMode)
+		tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode)
 		if err != nil {
-			s.elog.Printf("ERROR while opening table: %v", err)
+			db.elog.Printf("ERROR while opening table: %v", err)
 			return err
 		}
 		// We own a ref on tbl.
-		err = s.lc.addLevel0Table(tbl) // This will incrRef (if we don't error, sure)
-		tbl.DecrRef()                  // Releases our ref.
+		err = db.lc.addLevel0Table(tbl) // This will incrRef (if we don't error, sure)
+		tbl.DecrRef()                   // Releases our ref.
 		if err != nil {
 			return err
 		}
 
 		// Update s.imm. Need a lock.
-		s.Lock()
-		y.AssertTrue(ft.mt == s.imm[0]) //For now, single threaded.
-		s.imm = s.imm[1:]
+		db.Lock()
+		y.AssertTrue(ft.mt == db.imm[0]) //For now, single threaded.
+		db.imm = db.imm[1:]
 		ft.mt.DecrRef() // Return memory.
-		s.Unlock()
+		db.Unlock()
 	}
 	return nil
 }
@@ -818,7 +818,7 @@ func exists(path string) (bool, error) {
 	return true, err
 }
 
-func (s *DB) updateSize(lc *y.Closer) {
+func (db *DB) updateSize(lc *y.Closer) {
 	defer lc.Done()
 
 	metricsTicker := time.NewTicker(5 * time.Minute)
@@ -845,7 +845,7 @@ func (s *DB) updateSize(lc *y.Closer) {
 			return nil
 		})
 		if err != nil {
-			s.elog.Printf("Got error while calculating total size of directory: %s", dir)
+			db.elog.Printf("Got error while calculating total size of directory: %s", dir)
 		}
 		return lsmSize, vlogSize
 	}
@@ -853,13 +853,13 @@ func (s *DB) updateSize(lc *y.Closer) {
 	for {
 		select {
 		case <-metricsTicker.C:
-			lsmSize, vlogSize := totalSize(s.opt.Dir)
-			y.LSMSize.Set(s.opt.Dir, newInt(lsmSize))
+			lsmSize, vlogSize := totalSize(db.opt.Dir)
+			y.LSMSize.Set(db.opt.Dir, newInt(lsmSize))
 			// If valueDir is different from dir, we'd have to do another walk.
-			if s.opt.ValueDir != s.opt.Dir {
-				_, vlogSize = totalSize(s.opt.ValueDir)
+			if db.opt.ValueDir != db.opt.Dir {
+				_, vlogSize = totalSize(db.opt.ValueDir)
 			}
-			y.VlogSize.Set(s.opt.Dir, newInt(vlogSize))
+			y.VlogSize.Set(db.opt.Dir, newInt(vlogSize))
 		case <-lc.HasBeenClosed():
 			return
 		}

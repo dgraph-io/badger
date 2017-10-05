@@ -158,6 +158,7 @@ func (gs *globalTxnState) doneCommit(cts uint64) {
 	// nextCommit must never be reset.
 }
 
+// Txn represents a Badger transaction.
 type Txn struct {
 	readTs   uint64
 	commitTs uint64
