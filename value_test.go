@@ -44,12 +44,12 @@ func TestValueBasic(t *testing.T) {
 	e := &entry{
 		Key:   []byte("samplekey"),
 		Value: []byte(val1),
-		Meta:  BitValuePointer,
+		Meta:  bitValuePointer,
 	}
 	e2 := &entry{
 		Key:   []byte("samplekeyb"),
 		Value: []byte(val2),
-		Meta:  BitValuePointer,
+		Meta:  bitValuePointer,
 	}
 
 	b := new(request)
@@ -71,12 +71,12 @@ func TestValueBasic(t *testing.T) {
 		{
 			Key:   []byte("samplekey"),
 			Value: []byte(val1),
-			Meta:  BitValuePointer,
+			Meta:  bitValuePointer,
 		},
 		{
 			Key:   []byte("samplekeyb"),
 			Value: []byte(val2),
-			Meta:  BitValuePointer,
+			Meta:  bitValuePointer,
 		},
 	}, readEntries)
 

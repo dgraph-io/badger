@@ -42,14 +42,14 @@ import (
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
-	BitDelete       byte = 1 << 0 // Set if the key has been deleted.
-	BitValuePointer byte = 1 << 1 // Set if the value is NOT stored directly next to key.
+	bitDelete       byte = 1 << 0 // Set if the key has been deleted.
+	bitValuePointer byte = 1 << 1 // Set if the value is NOT stored directly next to key.
 
 	// The MSB 2 bits are for transactions.
-	BitTxn    byte = 1 << 6 // Set if the entry is part of a txn.
-	BitFinTxn byte = 1 << 7 // Set if the entry is to indicate end of txn in value log.
+	bitTxn    byte = 1 << 6 // Set if the entry is part of a txn.
+	bitFinTxn byte = 1 << 7 // Set if the entry is to indicate end of txn in value log.
 
-	M int64 = 1 << 20
+	mi int64 = 1 << 20
 )
 
 type logFile struct {
@@ -312,7 +312,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			copy(ne.Value, e.Value)
 			wb = append(wb, ne)
 			size += int64(vlog.opt.estimateSize(ne))
-			if size >= 64*M {
+			if size >= 64*mi {
 				elog.Printf("request has %d entries, size %d", len(wb), size)
 				if err := vlog.kv.batchSet(wb); err != nil {
 					return err
@@ -767,7 +767,7 @@ func (vlog *valueLog) Read(vp valuePointer) ([]byte, func(), error) {
 	}
 	var h header
 	h.Decode(buf)
-	if (h.meta & BitDelete) != 0 {
+	if (h.meta & bitDelete) != 0 {
 		// Tombstone key
 		return nil, cb, nil
 	}
@@ -820,15 +820,15 @@ func discardEntry(e entry, vs y.ValueStruct) bool {
 		// Version not found. Discard.
 		return true
 	}
-	if (vs.Meta & BitDelete) > 0 {
+	if (vs.Meta & bitDelete) > 0 {
 		// Key deleted. Discard.
 		return true
 	}
-	if (vs.Meta & BitValuePointer) == 0 {
+	if (vs.Meta & bitValuePointer) == 0 {
 		// Key also stores the value in LSM. Discard.
 		return true
 	}
-	if (vs.Meta & BitFinTxn) > 0 {
+	if (vs.Meta & bitFinTxn) > 0 {
 		// Just a txn finish entry. Discard.
 		return true
 	}
@@ -852,7 +852,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64) error {
 	count := 0
 
 	// Pick a random start point for the log.
-	skipFirstM := float64(rand.Intn(int(vlog.opt.ValueLogFileSize/M))) - window
+	skipFirstM := float64(rand.Intn(int(vlog.opt.ValueLogFileSize/mi))) - window
 	var skipped float64
 
 	start := time.Now()

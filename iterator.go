@@ -55,7 +55,10 @@ func (item *Item) ToString() string {
 
 }
 
-// Key returns the key. Remember to copy if you need to access it outside the iteration loop.
+// Key returns the key.
+//
+// Key is only valid as long as item is valid, or transaction is valid.  If you need to use it
+// outside its validity, please copy it.
 func (item *Item) Key() []byte {
 	return item.key
 }
@@ -65,14 +68,10 @@ func (item *Item) Version() uint64 {
 	return item.version
 }
 
-// Value retrieves the value of the item from the value log. It calls the
-// consumer function with a slice argument representing the value. In case
-// of error, the consumer function is not called.
+// Value retrieves the value of the item from the value log.
 //
-// Note that the call to the consumer func happens synchronously.
-//
-// Remember to parse or copy it if you need to reuse it. DO NOT modify or
-// append to this slice; it would result in a panic.
+// The returned value is only valid as long as item is valid, or transaction is valid. So, if you
+// need to use it outside, please parse or copy it.
 func (item *Item) Value() ([]byte, error) {
 	item.wg.Wait()
 	if item.status == prefetched {
@@ -90,7 +89,7 @@ func (item *Item) hasValue() bool {
 		// key not found
 		return false
 	}
-	if (item.meta & BitDelete) != 0 {
+	if (item.meta & bitDelete) != 0 {
 		// Tombstone encountered.
 		return false
 	}
@@ -106,7 +105,7 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 		item.slice = new(y.Slice)
 	}
 
-	if (item.meta & BitValuePointer) == 0 {
+	if (item.meta & bitValuePointer) == 0 {
 		val := item.slice.Resize(len(item.vptr))
 		copy(val, item.vptr)
 		return val, nil, nil
@@ -146,7 +145,7 @@ func (item *Item) EstimatedSize() int64 {
 	if !item.hasValue() {
 		return 0
 	}
-	if (item.meta & BitValuePointer) == 0 {
+	if (item.meta & bitValuePointer) == 0 {
 		return int64(len(item.key) + len(item.vptr))
 	}
 	var vp valuePointer
@@ -224,6 +223,28 @@ type Iterator struct {
 	lastKey []byte // Used to skip over multiple versions of the same key.
 }
 
+// NewIterator returns a new iterator. Depending upon the options, either only keys, or both
+// key-value pairs would be fetched. The keys are returned in lexicographically sorted order.
+// Using prefetch is highly recommended if you're doing a long running iteration.
+// Avoid long running iterations in update transactions.
+func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
+	tables, decr := txn.db.getMemTables()
+	defer decr()
+	txn.db.vlog.incrIteratorCount()
+	var iters []y.Iterator
+	for i := 0; i < len(tables); i++ {
+		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
+	}
+	iters = txn.db.lc.appendIterators(iters, opt.Reverse) // This will increment references.
+	res := &Iterator{
+		txn:    txn,
+		iitr:   y.NewMergeIterator(iters, opt.Reverse),
+		opt:    opt,
+		readTs: txn.readTs,
+	}
+	return res
+}
+
 func (it *Iterator) newItem() *Item {
 	item := it.waste.pop()
 	if item == nil {
@@ -232,7 +253,7 @@ func (it *Iterator) newItem() *Item {
 	return item
 }
 
-// Item returns pointer to the current KVItem.
+// Item returns pointer to the current key-value pair.
 // This item is only valid until it.Next() gets called.
 func (it *Iterator) Item() *Item {
 	tx := it.txn
@@ -334,7 +355,7 @@ func (it *Iterator) parseItem() bool {
 
 FILL:
 	// If deleted, advance and return.
-	if mi.Value().Meta&BitDelete > 0 {
+	if mi.Value().Meta&bitDelete > 0 {
 		mi.Next()
 		return false
 	}

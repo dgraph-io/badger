@@ -119,7 +119,7 @@ func replayFunction(out *DB) func(entry, valuePointer) error {
 		} else {
 			nv = make([]byte, vptrSize)
 			vp.Encode(nv)
-			meta = meta | BitValuePointer
+			meta = meta | bitValuePointer
 		}
 
 		v := y.ValueStruct{
@@ -128,7 +128,7 @@ func replayFunction(out *DB) func(entry, valuePointer) error {
 			UserMeta: e.UserMeta,
 		}
 
-		if e.Meta&BitFinTxn > 0 {
+		if e.Meta&bitFinTxn > 0 {
 			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
 			if err != nil {
 				return errors.Wrapf(err, "Unable to parse txn fin: %q", e.Value)
@@ -142,7 +142,7 @@ func replayFunction(out *DB) func(entry, valuePointer) error {
 			txn = txn[:0]
 			lastCommit = 0
 
-		} else if e.Meta&BitTxn == 0 {
+		} else if e.Meta&bitTxn == 0 {
 			// This entry is from a rewrite.
 			toLSM(nk, v)
 
@@ -311,16 +311,16 @@ func Open(optParam *Options) (db *DB, err error) {
 
 // Close closes a DB. It's crucial to call it to ensure all the pending updates
 // make their way to disk.
-func (s *DB) Close() (err error) {
-	s.elog.Printf("Closing database")
+func (db *DB) Close() (err error) {
+	db.elog.Printf("Closing database")
 	// Stop value GC first.
-	s.closers.valueGC.SignalAndWait()
+	db.closers.valueGC.SignalAndWait()
 
 	// Stop writes next.
-	s.closers.writes.SignalAndWait()
+	db.closers.writes.SignalAndWait()
 
 	// Now close the value log.
-	if vlogErr := s.vlog.Close(); err == nil {
+	if vlogErr := db.vlog.Close(); err == nil {
 		err = errors.Wrap(vlogErr, "DB.Close")
 	}
 
@@ -329,18 +329,18 @@ func (s *DB) Close() (err error) {
 	// and remove them completely, while the block / memtable writer is still
 	// trying to push stuff into the memtable. This will also resolve the value
 	// offset problem: as we push into memtable, we update value offsets there.
-	if !s.mt.Empty() {
-		s.elog.Printf("Flushing memtable")
+	if !db.mt.Empty() {
+		db.elog.Printf("Flushing memtable")
 		for {
 			pushedFlushTask := func() bool {
-				s.Lock()
-				defer s.Unlock()
-				y.AssertTrue(s.mt != nil)
+				db.Lock()
+				defer db.Unlock()
+				y.AssertTrue(db.mt != nil)
 				select {
-				case s.flushChan <- flushTask{s.mt, s.vptr}:
-					s.imm = append(s.imm, s.mt) // Flusher will attempt to remove this from s.imm.
-					s.mt = nil                  // Will segfault if we try writing!
-					s.elog.Printf("pushed to flush chan\n")
+				case db.flushChan <- flushTask{db.mt, db.vptr}:
+					db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
+					db.mt = nil                    // Will segfault if we try writing!
+					db.elog.Printf("pushed to flush chan\n")
 					return true
 				default:
 					// If we fail to push, we need to unlock and wait for a short while.
@@ -355,41 +355,41 @@ func (s *DB) Close() (err error) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	s.flushChan <- flushTask{nil, valuePointer{}} // Tell flusher to quit.
+	db.flushChan <- flushTask{nil, valuePointer{}} // Tell flusher to quit.
 
-	s.closers.memtable.Wait()
-	s.elog.Printf("Memtable flushed")
+	db.closers.memtable.Wait()
+	db.elog.Printf("Memtable flushed")
 
-	s.closers.compactors.SignalAndWait()
-	s.elog.Printf("Compaction finished")
+	db.closers.compactors.SignalAndWait()
+	db.elog.Printf("Compaction finished")
 
-	if lcErr := s.lc.close(); err == nil {
+	if lcErr := db.lc.close(); err == nil {
 		err = errors.Wrap(lcErr, "DB.Close")
 	}
-	s.elog.Printf("Waiting for closer")
-	s.closers.updateSize.SignalAndWait()
+	db.elog.Printf("Waiting for closer")
+	db.closers.updateSize.SignalAndWait()
 
-	s.elog.Finish()
+	db.elog.Finish()
 
-	if guardErr := s.dirLockGuard.Release(); err == nil {
+	if guardErr := db.dirLockGuard.Release(); err == nil {
 		err = errors.Wrap(guardErr, "DB.Close")
 	}
-	if s.valueDirGuard != nil {
-		if guardErr := s.valueDirGuard.Release(); err == nil {
+	if db.valueDirGuard != nil {
+		if guardErr := db.valueDirGuard.Release(); err == nil {
 			err = errors.Wrap(guardErr, "DB.Close")
 		}
 	}
-	if manifestErr := s.manifest.close(); err == nil {
+	if manifestErr := db.manifest.close(); err == nil {
 		err = errors.Wrap(manifestErr, "DB.Close")
 	}
 
 	// Fsync directories to ensure that lock file, and any other removed files whose directory
 	// we haven't specifically fsynced, are guaranteed to have their directory entry removal
 	// persisted to disk.
-	if syncErr := syncDir(s.opt.Dir); err == nil {
+	if syncErr := syncDir(db.opt.Dir); err == nil {
 		err = errors.Wrap(syncErr, "DB.Close")
 	}
-	if syncErr := syncDir(s.opt.ValueDir); err == nil {
+	if syncErr := syncDir(db.opt.ValueDir); err == nil {
 		err = errors.Wrap(syncErr, "DB.Close")
 	}
 
@@ -492,7 +492,7 @@ func (s *DB) writeToLSM(b *request) error {
 	}
 
 	for i, entry := range b.Entries {
-		if entry.Meta&BitFinTxn != 0 {
+		if entry.Meta&bitFinTxn != 0 {
 			continue
 		}
 		if s.shouldWriteValueToLSM(*entry) { // Will include deletion / tombstone case.
@@ -507,7 +507,7 @@ func (s *DB) writeToLSM(b *request) error {
 			s.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:    b.Ptrs[i].Encode(offsetBuf[:]),
-					Meta:     entry.Meta | BitValuePointer,
+					Meta:     entry.Meta | bitValuePointer,
 					UserMeta: entry.UserMeta,
 				})
 		}
@@ -886,9 +886,9 @@ func (s *DB) updateSize(lc *y.Closer) {
 // would return an ErrRejected.
 //
 // Note: Every time GC is run, it would produce a spike of activity on the LSM tree.
-func (s *DB) RunValueLogGC(discardRatio float64) error {
+func (db *DB) RunValueLogGC(discardRatio float64) error {
 	if discardRatio >= 1.0 || discardRatio <= 0.0 {
 		return ErrInvalidRequest
 	}
-	return s.vlog.runGC(discardRatio)
+	return db.vlog.runGC(discardRatio)
 }

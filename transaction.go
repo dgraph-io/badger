@@ -173,12 +173,13 @@ type Txn struct {
 	discarded bool
 }
 
-// Set sets the provided value for a given key. If key is not present, it is created.  If it is
-// present, a new version is created at commit timestamp.
+// Set sets the provided value for a given key. If key is not present, it is created.
+//
 // Along with key and value, Set can also take an optional userMeta byte. This byte is stored
 // alongside the key, and can be used as an aid to interpret the value or store other contextual
 // bits corresponding to the key-value pair.
-// This would fail with ErrReadOnlyTxn if update flag was set to false when creating this
+//
+// This would fail with ErrReadOnlyTxn if update flag was set to false when creating the
 // transaction.
 func (txn *Txn) Set(key, val []byte, userMeta byte) error {
 	if !txn.update {
@@ -224,13 +225,13 @@ func (txn *Txn) Delete(key []byte) error {
 
 	e := &entry{
 		Key:  key,
-		Meta: BitDelete,
+		Meta: bitDelete,
 	}
 	txn.pendingWrites[string(key)] = e
 	return nil
 }
 
-// Get looks for key and returns a Item.
+// Get looks for key and returns corresponding Item.
 // If key is not found, ErrKeyNotFound is returned.
 func (txn *Txn) Get(key []byte) (item Item, rerr error) {
 	if len(key) == 0 {
@@ -265,7 +266,7 @@ func (txn *Txn) Get(key []byte) (item Item, rerr error) {
 	if vs.Value == nil && vs.Meta == 0 {
 		return item, ErrKeyNotFound
 	}
-	if (vs.Meta & BitDelete) != 0 {
+	if (vs.Meta & bitDelete) != 0 {
 		return item, ErrKeyNotFound
 	}
 
@@ -279,6 +280,11 @@ func (txn *Txn) Get(key []byte) (item Item, rerr error) {
 	return item, nil
 }
 
+// Discard discards a created transaction. This method is very important and must be called. Commit
+// method calls this internally, however, calling this multiple times doesn't cause any issues. So,
+// this can safely be called via a defer right when transaction is created.
+//
+// NOTE: If any operations are run on a discarded transaction, ErrDiscardedTxn is returned.
 func (txn *Txn) Discard() {
 	if txn.discarded { // Avoid a re-run.
 		return
@@ -294,16 +300,20 @@ func (txn *Txn) Discard() {
 }
 
 // Commit commits the transaction, following these steps:
+//
 // 1. If there are no writes, return immediately.
+//
 // 2. Check if read rows were updated since txn started. If so, return ErrConflict.
+//
 // 3. If no conflict, generate a commit timestamp and update written rows' commit ts.
+//
 // 4. Batch up all writes, write them to value log and LSM tree.
+//
 // 5. If callback is provided, don't block on these writes, running this part asynchronously. The
 // callback would be run once writes are done, along with any errors.
 //
-// If error is nil, the transaction is successfully committed. Else, Badger would automatically
-// rollback the transaction, removing any writes from LSM tree. Note that the writes might be
-// present on value log, but those can be garbage collected later.
+// If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
+// tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit(callback func(error)) error {
 	if txn.discarded {
 		return ErrDiscardedTxn
@@ -325,13 +335,13 @@ func (txn *Txn) Commit(callback func(error)) error {
 		// Suffix the keys with commit ts, so the key versions are sorted in
 		// descending order of commit timestamp.
 		e.Key = y.KeyWithTs(e.Key, commitTs)
-		e.Meta |= BitTxn
+		e.Meta |= bitTxn
 		entries = append(entries, e)
 	}
 	e := &entry{
 		Key:   y.KeyWithTs(txnKey, commitTs),
 		Value: []byte(strconv.FormatUint(commitTs, 10)),
-		Meta:  BitFinTxn,
+		Meta:  bitFinTxn,
 	}
 	entries = append(entries, e)
 
@@ -345,50 +355,33 @@ func (txn *Txn) Commit(callback func(error)) error {
 	return txn.db.batchSetAsync(entries, callback)
 }
 
+// CommitAt commits the transaction, following the same logic as Commit(), but at the given
+// commit timestamp. This API is only useful for databases built on top of Badger (like Dgraph), and
+// can be ignored by most users.
 func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
 	txn.commitTs = commitTs
 	return txn.Commit(callback)
 }
 
-// NewIterator returns a new iterator. Depending upon the options, either only keys, or both
-// key-value pairs would be fetched. The keys are returned in lexicographically sorted order.
-// Usage:
-//   opt := badger.DefaultIteratorOptions
-//   itr := txn.NewIterator(opt)
-//   for itr.Rewind(); itr.Valid(); itr.Next() {
-//     item := itr.Item()
-//     key := item.Key()
-//     var val []byte
-//     err = item.Value(func(v []byte) {
-//         val = make([]byte, len(v))
-// 	       copy(val, v)
-//     }) 	// This could block while value is fetched from value log.
-//          // For key only iteration, set opt.PrefetchValues to false, and don't call
-//          // item.Value(func(v []byte)).
+// NewTransaction creates a new transaction. Badger supports concurrent execution of transactions,
+// providing serializable snapshot isolation, avoiding write skews. Badger achieves this by tracking
+// the keys read and at Commit time, ensuring that these read keys weren't concurrently modified by
+// another transaction.
 //
-//     // Remember that both key, val would become invalid in the next iteration of the loop.
-//     // So, if you need access to them outside, copy them or parse them.
-//   }
-//   itr.Close()
-// TODO: Move this usage to README.
-func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
-	tables, decr := txn.db.getMemTables()
-	defer decr()
-	txn.db.vlog.incrIteratorCount()
-	var iters []y.Iterator
-	for i := 0; i < len(tables); i++ {
-		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
-	}
-	iters = txn.db.lc.appendIterators(iters, opt.Reverse) // This will increment references.
-	res := &Iterator{
-		txn:    txn,
-		iitr:   y.NewMergeIterator(iters, opt.Reverse),
-		opt:    opt,
-		readTs: txn.readTs,
-	}
-	return res
-}
-
+// For read-only transactions, set update to false. In this mode, we don't track the rows read for
+// any changes. Thus, any long running iterations done in this mode wouldn't pay this overhead.
+//
+// Running transactions concurrently is OK. However, a transaction itself isn't thread safe, and
+// should only be run serially. It doesn't matter if a transaction is created by one goroutine and
+// passed down to other, as long as the Txn APIs are called serially.
+//
+// When you create a new transaction, it is absolutely essential to call Discard(). This should be
+// done irrespective of update param. Commit API internally runs Discard, but running it twice
+// wouldn't cause any issues.
+//
+//  txn := db.NewTransaction(false)
+//  defer txn.Discard()
+//  // Call various APIs.
 func (db *DB) NewTransaction(update bool) *Txn {
 	txn := &Txn{
 		update: update,
@@ -402,15 +395,20 @@ func (db *DB) NewTransaction(update bool) *Txn {
 	return txn
 }
 
+// NewTransactionAt follows the same logic as NewTransaction, but uses the provided read timestamp.
+// This API is only useful for databases built on top of Badger (like Dgraph), and can be ignored by
+// most users.
 func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
 	txn := db.NewTransaction(update)
 	txn.readTs = readTs
 	return txn
 }
 
-func (db *DB) View(callback func(txn *Txn) error) error {
+// View executes a function creating and managing a read-only transaction for the user. Error
+// returned by the function is relayed by the View method.
+func (db *DB) View(fn func(txn *Txn) error) error {
 	txn := db.NewTransaction(false)
 	defer txn.Discard()
 
-	return callback(txn)
+	return fn(txn)
 }
