@@ -311,8 +311,9 @@ func (txn *Txn) Discard() {
 //
 // 4. Batch up all writes, write them to value log and LSM tree.
 //
-// 5. If callback is provided, don't block on these writes, running this part asynchronously. The
-// callback would be run once writes are done, along with any errors.
+// 5. If callback is provided, method will return as soon as Badger has checked
+// for conflicts. Writes to database will happen in the background, and the
+// callback will be called upon successful completion or error.
 //
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
@@ -377,9 +378,10 @@ func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
 // should only be run serially. It doesn't matter if a transaction is created by one goroutine and
 // passed down to other, as long as the Txn APIs are called serially.
 //
-// When you create a new transaction, it is absolutely essential to call Discard(). This should be
-// done irrespective of update param. Commit API internally runs Discard, but running it twice
-// wouldn't cause any issues.
+// When you create a new transaction, it is absolutely essential to call
+// Discard(). This should be done irrespective of what the update param is set
+// to. Commit API internally runs Discard, but running it twice wouldn't cause
+// any issues.
 //
 //  txn := db.NewTransaction(false)
 //  defer txn.Discard()
