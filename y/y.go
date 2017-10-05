@@ -88,6 +88,7 @@ func KeyWithTs(key []byte, ts uint64) []byte {
 	return out
 }
 
+// ParseTs parses the timestamp from the key bytes.
 func ParseTs(key []byte) uint64 {
 	if len(key) <= 8 {
 		return 0
@@ -107,6 +108,7 @@ func CompareKeys(key1 []byte, key2 []byte) int {
 	return bytes.Compare(key1[len(key1)-8:], key2[len(key2)-8:])
 }
 
+// ParseKey parses the actual key from the key bytes.
 func ParseKey(key []byte) []byte {
 	if key == nil {
 		return nil
