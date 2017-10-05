@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -847,4 +848,119 @@ func TestGetSetRace(t *testing.T) {
 	}()
 
 	wg.Wait()
+}
+
+func ExampleOpen() {
+	dir, err := ioutil.TempDir("", "badger")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	opts := DefaultOptions
+	opts.Dir = dir
+	opts.ValueDir = dir
+	db, err := Open(&opts)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	err = db.View(func(txn *Txn) error {
+		_, err := txn.Get([]byte("key"))
+		// We expect ErrKeyNotFound
+		fmt.Println(err)
+		return nil
+	})
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	txn := db.NewTransaction(true) // Read-write txn
+	err = txn.Set([]byte("key"), []byte("value"), 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = txn.Commit(nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = db.View(func(txn *Txn) error {
+		item, err := txn.Get([]byte("key"))
+		if err != nil {
+			return err
+		}
+		val, err := item.Value()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s\n", string(val))
+		return nil
+	})
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Output:
+	// Key not found
+	// value
+}
+
+func ExampleTxn_NewIterator() {
+	dir, err := ioutil.TempDir("", "badger")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	opts := DefaultOptions
+	opts.Dir = dir
+	opts.ValueDir = dir
+
+	db, err := Open(&opts)
+	defer db.Close()
+
+	bkey := func(i int) []byte {
+		return []byte(fmt.Sprintf("%09d", i))
+	}
+	bval := func(i int) []byte {
+		return []byte(fmt.Sprintf("%025d", i))
+	}
+
+	txn := db.NewTransaction(true)
+
+	// Fill in 1000 items
+	n := 1000
+	for i := 0; i < n; i++ {
+		err := txn.Set(bkey(i), bval(i), 0)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	err = txn.Commit(nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	opt := DefaultIteratorOptions
+	opt.PrefetchSize = 10
+
+	// Iterate over 1000 items
+	var count int
+	err = db.View(func(txn *Txn) error {
+		it := txn.NewIterator(opt)
+		for it.Rewind(); it.Valid(); it.Next() {
+			count++
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Counted %d elements", count)
+	// Output:
+	// Counted 1000 elements
 }

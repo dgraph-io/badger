@@ -24,6 +24,10 @@ import (
 // format nicely in godoc.
 
 // Options are params for creating DB object.
+//
+// This package provides DefaultOptions which contains options that should
+// work for most applications. Consider using that as a starting point before
+// customizing it for your own needs.
 type Options struct {
 	// 1. Mandatory flags
 	// -------------------
