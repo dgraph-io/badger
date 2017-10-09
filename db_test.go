@@ -79,6 +79,46 @@ func TestWrite(t *testing.T) {
 	}
 }
 
+func TestUpdateAndView(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	db, err := Open(getTestOptions(dir))
+	require.NoError(t, err)
+	defer db.Close()
+
+	err = db.Update(func(txn *Txn) error {
+		for i := 0; i < 10; i++ {
+			err := txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)), 0x00)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	err = db.View(func(txn *Txn) error {
+		for i := 0; i < 10; i++ {
+			item, err := txn.Get([]byte(fmt.Sprintf("key%d", i)))
+			if err != nil {
+				return err
+			}
+
+			val, err := item.Value()
+			if err != nil {
+				return err
+			}
+			expected := []byte(fmt.Sprintf("val%d", i))
+			require.Equal(t, expected, val,
+				"Invalid value for key %q. expected: %q, actual: %q",
+				item.Key(), expected, val)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+}
+
 func TestConcurrentWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)

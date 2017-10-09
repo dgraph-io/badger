@@ -414,3 +414,16 @@ func (db *DB) View(fn func(txn *Txn) error) error {
 
 	return fn(txn)
 }
+
+// Update executes a function, creating and managing a read-write transaction
+// for the user. Error returned by the function is relayed by the Update method.
+func (db *DB) Update(fn func(txn *Txn) error) error {
+	txn := db.NewTransaction(true)
+	defer txn.Discard()
+
+	if err := fn(txn); err != nil {
+		return err
+	}
+
+	return txn.Commit(nil)
+}
