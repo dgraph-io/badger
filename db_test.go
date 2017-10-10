@@ -33,9 +33,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func getTestOptions(dir string) *Options {
-	opt := new(Options)
-	*opt = DefaultOptions
+func getTestOptions(dir string) Options {
+	opt := DefaultOptions
 	opt.MaxTableSize = 1 << 15 // Force more compaction.
 	opt.LevelOneSize = 4 << 15 // Force more compaction.
 	opt.Dir = dir
@@ -579,7 +578,7 @@ func TestIterateDeleted(t *testing.T) {
 	opt.SyncWrites = true
 	opt.Dir = dir
 	opt.ValueDir = dir
-	ps, err := Open(&opt)
+	ps, err := Open(opt)
 	require.NoError(t, err)
 	defer ps.Close()
 	txnSet(t, ps, []byte("Key1"), []byte("Value1"), 0x00)
@@ -638,8 +637,7 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opt := new(Options)
-	*opt = DefaultOptions
+	opt := DefaultOptions
 	opt.Dir = dir
 	opt.ValueDir = dir
 	kv, err := Open(opt)
@@ -859,7 +857,7 @@ func ExampleOpen() {
 	opts := DefaultOptions
 	opts.Dir = dir
 	opts.ValueDir = dir
-	db, err := Open(&opts)
+	db, err := Open(opts)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -919,7 +917,7 @@ func ExampleTxn_NewIterator() {
 	opts.Dir = dir
 	opts.ValueDir = dir
 
-	db, err := Open(&opts)
+	db, err := Open(opts)
 	defer db.Close()
 
 	bkey := func(i int) []byte {

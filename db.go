@@ -254,7 +254,7 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.memtable = y.NewCloser(1)
 	go db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
 
-	if err = db.vlog.Open(db, &opt); err != nil {
+	if err = db.vlog.Open(db, opt); err != nil {
 		return nil, err
 	}
 

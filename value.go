@@ -532,9 +532,9 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	return lf, nil
 }
 
-func (vlog *valueLog) Open(kv *DB, opt *Options) error {
+func (vlog *valueLog) Open(kv *DB, opt Options) error {
 	vlog.dirPath = opt.ValueDir
-	vlog.opt = *opt
+	vlog.opt = opt
 	vlog.kv = kv
 	vlog.filesMap = make(map[uint32]*logFile)
 	if err := vlog.openOrCreateFiles(); err != nil {
