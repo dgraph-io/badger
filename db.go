@@ -164,9 +164,7 @@ func replayFunction(out *DB) func(entry, valuePointer) error {
 }
 
 // Open returns a new DB object.
-func Open(optParam *Options) (db *DB, err error) {
-	// Make a copy early and fill in maxBatchSize
-	opt := *optParam
+func Open(opt Options) (db *DB, err error) {
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
