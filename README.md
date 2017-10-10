@@ -334,7 +334,7 @@ As such RocksDB's design isn't aimed at SSDs.
 ### Benchmarks
 We have run comprehensive benchmarks against RocksDB, Bolt and LMDB. The
 benchmarking code, and the detailed logs for the benchmarks can be found in the
-[badger-bench] repo. More explanation can be found the blog posts (linked
+[badger-bench] repo. More explanation, including graphs can be found the blog posts (linked
 above).
 
 [badger-bench]: https://github.com/dgraph-io/badger-bench
