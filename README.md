@@ -3,12 +3,12 @@
 ![Badger mascot](images/diggy-shadow.png)
 
 Badger is an embeddable, persistent, simple and fast key-value (KV) store
-written in pure Go. It's meant to be a performant alternative to non Go based
+written in pure Go. It's meant to be a performant alternative to non-Go-based
 key-value stores like [RocksDB](https://github.com/facebook/rocksdb).
 
 ## Project Status
 We are currently gearing up for a [v1.0 release][v1-milestone]. We recently introduced
-transaction which involved a major API change.To use the previous version of
+transactions which involved a major API change.To use the previous version of
 the APIs, please use [tag v0.8][v0.8]. This tag can be specified via the
 Go dependency tool you're using.
 
