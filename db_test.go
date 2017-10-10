@@ -848,6 +848,58 @@ func TestGetSetRace(t *testing.T) {
 	wg.Wait()
 }
 
+func TestDeleteOlderVersions(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	db, err := Open(getTestOptions(dir))
+	require.NoError(t, err)
+
+	err = db.Update(func(txn *Txn) error {
+		return txn.Set([]byte("answer"), []byte("42"), 0)
+	})
+	require.NoError(t, err)
+
+	err = db.Update(func(txn *Txn) error {
+		return txn.Set([]byte("answer"), []byte("43"), 0)
+	})
+	require.NoError(t, err)
+
+	opts := DefaultIteratorOptions
+	opts.AllVersions = true
+	opts.PrefetchValues = false
+
+	err = db.View(func(txn *Txn) error {
+		it := txn.NewIterator(opts)
+		var count int
+		for it.Rewind(); it.Valid(); it.Next() {
+			count++
+			item := it.Item()
+			require.Equal(t, []byte("answer"), item.Key())
+		}
+		require.Equal(t, 2, count)
+		return nil
+	})
+	require.NoError(t, err)
+
+	db.DeleteOlderVersions()
+
+	err = db.View(func(txn *Txn) error {
+		it := txn.NewIterator(opts)
+		var count int
+		for it.Rewind(); it.Valid(); it.Next() {
+			count++
+			item := it.Item()
+			require.Equal(t, []byte("answer"), item.Key())
+			val, err := item.Value()
+			require.NoError(t, err)
+			require.Equal(t, []byte("43"), val)
+		}
+		require.Equal(t, 1, count)
+		return nil
+	})
+}
+
 func ExampleOpen() {
 	dir, err := ioutil.TempDir("", "badger")
 	if err != nil {
