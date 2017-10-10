@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"container/heap"
 	"expvar"
 	"log"
@@ -862,6 +863,43 @@ func (db *DB) updateSize(lc *y.Closer) {
 			return
 		}
 	}
+}
+
+// DeleteOlderVersions deletes older versions of all keys.
+//
+// This function could be called prior to doing garbage collection to clean up
+// older versions for the database that are no longer needed.
+//
+// * TODO Should we cap the number of deletions to a max value?
+//
+// * TODO What is the best way to handle a read transaction that might be
+// running when this function is called, and has a readTs < this txn. How do we
+// ‘abort’ that txn? Maybe we add a threshold to the oracle and check that threshold in Txn.Get()
+func (db *DB) DeleteOlderVersions() error {
+	var entries []*entry
+	return db.View(func(txn *Txn) error {
+		opts := DefaultIteratorOptions
+		opts.AllVersions = true
+		opts.PrefetchValues = false
+		it := txn.NewIterator(opts)
+
+		var lastKey []byte
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			if !bytes.Equal(lastKey, item.Key()) {
+				lastKey = item.Key()
+				continue
+			}
+
+			// Found an older version. Mark for deletion
+			entries = append(entries,
+				&entry{
+					Key:  y.KeyWithTs(lastKey, item.version),
+					Meta: bitDelete,
+				})
+		}
+		return txn.db.batchSet(entries)
+	})
 }
 
 // RunValueLogGC would trigger a value log garbage collection with no guarantees that a call would
