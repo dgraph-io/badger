@@ -241,7 +241,7 @@ func Open(opt Options) (db *DB, err error) {
 
 	db.closers.updateSize = y.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
-	db.mt = skl.NewSkiplist(arenaSize(&opt))
+	db.mt = skl.NewSkiplist(arenaSize(opt))
 
 	// newLevelsController potentially loads files in directory.
 	if db.lc, err = newLevelsController(db, &manifest); err != nil {
@@ -254,7 +254,7 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.memtable = y.NewCloser(1)
 	go db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
 
-	if err = db.vlog.Open(db, &opt); err != nil {
+	if err = db.vlog.Open(db, opt); err != nil {
 		return nil, err
 	}
 
@@ -708,7 +708,7 @@ func (db *DB) ensureRoomForWrite() error {
 			db.mt.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
 		db.imm = append(db.imm, db.mt)
-		db.mt = skl.NewSkiplist(arenaSize(&db.opt))
+		db.mt = skl.NewSkiplist(arenaSize(db.opt))
 		// New memtable is empty. We certainly have room.
 		return nil
 	default:
@@ -717,7 +717,7 @@ func (db *DB) ensureRoomForWrite() error {
 	}
 }
 
-func arenaSize(opt *Options) int64 {
+func arenaSize(opt Options) int64 {
 	return opt.MaxTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
 
