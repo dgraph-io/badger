@@ -74,7 +74,7 @@ func main() {
   opts := badger.DefaultOptions
   opts.Dir := "/tmp/badger"
   opts.ValueDir := "/tmp/badger"
-  db, err := badger.Open(&opts)
+  db, err := badger.Open(opts)
   if err != nil {
 	  log.Fatal(err)
   }
@@ -207,7 +207,7 @@ To iterate over keys, we can use an `Iterator`, which can be obtained using the
 err := db.View(func(txn *.Tx) error {
   opts := DefaultIteratorOptions
   opts.PrefetchSize = 10
-  it := txn.NewIterator(&opts)
+  it := txn.NewIterator(opts)
   for it.Rewind(); it.Valid(); it.Next() {
     item := it.Item()
     k := item.Key()
@@ -262,7 +262,7 @@ during an iteration, by calling `item.Value()` only when required.
 err := db.View(func(txn *.Tx) error {
   opts := DefaultIteratorOptions
   opts.PrefetchValues = false
-  it := txn.NewIterator(&opts)
+  it := txn.NewIterator(opts)
   for it.Rewind(); it.Valid(); it.Next() {
     item := it.Item()
     k := item.Key()
