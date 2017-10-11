@@ -337,6 +337,11 @@ func (it *Iterator) parseItem() bool {
 	}
 
 	if it.opt.AllVersions {
+		// First check if value has been deleted
+		if mi.Value().Meta&bitDelete > 0 {
+			mi.Next()
+			return false
+		}
 		item := it.newItem()
 		it.fill(item)
 		setItem(item)

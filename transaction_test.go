@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/dgraph-io/badger/y"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -467,6 +469,55 @@ func TestTxnIterationEdgeCase3(t *testing.T) {
 	itr.Seek([]byte("ad"))
 	require.True(t, itr.Valid())
 	require.Equal(t, itr.item.Key(), kc)
+}
+
+func TestIteratorAllVersionsButDeleted(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	db, err := Open(getTestOptions(dir))
+	require.NoError(t, err)
+
+	// Write two keys
+	err = db.Update(func(txn *Txn) error {
+		txn.Set([]byte("answer1"), []byte("42"), 0)
+		txn.Set([]byte("answer2"), []byte("43"), 0)
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Delete the specific key version from underlying db directly
+	err = db.View(func(txn *Txn) error {
+		item, err := txn.Get([]byte("answer1"))
+		require.NoError(t, err)
+		err = txn.db.batchSet([]*entry{
+			{
+				Key:  y.KeyWithTs(item.key, item.version),
+				Meta: bitDelete,
+			},
+		})
+		require.NoError(t, err)
+		return err
+	})
+	require.NoError(t, err)
+
+	opts := DefaultIteratorOptions
+	opts.AllVersions = true
+	opts.PrefetchValues = false
+
+	// Verify that deleted key does not show up when AllVersions is set.
+	err = db.View(func(txn *Txn) error {
+		it := txn.NewIterator(opts)
+		var count int
+		for it.Rewind(); it.Valid(); it.Next() {
+			count++
+			item := it.Item()
+			require.Equal(t, []byte("answer2"), item.Key())
+		}
+		require.Equal(t, 1, count)
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 func TestTxnManaged(t *testing.T) {
