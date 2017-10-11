@@ -321,7 +321,7 @@ Values in SSD-conscious Storage][wisckey]_.
 | Embeddable          | Yes                                          | Yes                           | Yes       |
 | Sorted KV access    | Yes                                          | Yes                           | Yes       |
 | Pure Go (no Cgo)    | Yes                                          | No                            | Yes       |
-| Transactions        | Yes, ACID, concurrent with SSI | Yes (but non-ACID)            | Yes, ACID |
+| Transactions        | Yes, ACID, concurrent with SSI<sup>3</sup> | Yes (but non-ACID)            | Yes, ACID |
 | Snapshots           | Yes                                           | Yes                           | Yes       |
 
 <sup>1</sup> The [WISCKEY paper][wisckey] (on which Badger is based) saw big
@@ -330,6 +330,8 @@ amplification compared to a typical LSM tree.
 
 <sup>2</sup> RocksDB is an SSD optimized version of LevelDB, which was designed specifically for rotating disks.
 As such RocksDB's design isn't aimed at SSDs.
+
+<sup>3</sup> SSI: Serializable Snapshot Isolation. For more details, see the blog post [Concurrent ACID Transactions in Badger](https://blog.dgraph.io/post/badger-txn/)
 
 ### Benchmarks
 We have run comprehensive benchmarks against RocksDB, Bolt and LMDB. The
