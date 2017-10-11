@@ -167,8 +167,8 @@ To save a key/value pair to a bucket, use the `Txn.Set()` method:
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-	err := txn.Set([]byte("answer"), []byte("42"), 0)
-	return err
+  err := txn.Set([]byte("answer"), []byte("42"), 0)
+  return err
 })
 ```
 
@@ -185,8 +185,8 @@ err := db.View(func(txn *badger.Txn) error {
   if err != nil {
     return err
   }
-	fmt.Printf("The answer is: %s\n", val)
-	return nil
+  fmt.Printf("The answer is: %s\n", val)
+  return nil
 })
 ```
 
@@ -236,7 +236,7 @@ To iterate over a key prefix, you can combine `Seek()` and `ValidForPrefix()`:
 ```go
 db.View(func(txn *badger.Txn) error {
   it := txn.NewIterator(&DefaultIteratorOptions)
-	prefix := []byte("1234")
+  prefix := []byte("1234")
   for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
     item := it.Item()
     k := item.Key()
@@ -244,9 +244,9 @@ db.View(func(txn *badger.Txn) error {
     if err != nil {
       return err
     }
-		fmt.Printf("key=%s, value=%s\n", k, v)
-	}
-	return nil
+    fmt.Printf("key=%s, value=%s\n", k, v)
+  }
+  return nil
 })
 ```
 
