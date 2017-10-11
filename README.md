@@ -350,6 +350,13 @@ Below is a list of public, open source projects that use Badger:
 If you are using Badger in a project please send a pull request to add it to the list.
 
 ## Frequently Asked Questions
+- **My writes are really slow. Why?**
+Are you creating a new transaction for every single key update? This will lead
+to very low throughput. To get best write performance, batch up multiple writes
+inside a transaction using single `DB.Update()` call. You could also have
+multiple such `DB.Update()` calls being made concurrently from multiple
+goroutines.
+
 - **I don't see any disk write. Why?**
 
 If you're using Badger with `SyncWrites=false`, then your writes might not be written to value log
