@@ -321,8 +321,8 @@ Values in SSD-conscious Storage][wisckey]_.
 | Embeddable          | Yes                                          | Yes                           | Yes       |
 | Sorted KV access    | Yes                                          | Yes                           | Yes       |
 | Pure Go (no Cgo)    | Yes                                          | No                            | Yes       |
-| Transactions        | Yes, ACID | Yes (but non-ACID)            | Yes, ACID |
-| Snapshots           | No                                           | Yes                           | Yes       |
+| Transactions        | Yes, ACID, concurrent with SSI | Yes (but non-ACID)            | Yes, ACID |
+| Snapshots           | Yes                                           | Yes                           | Yes       |
 
 <sup>1</sup> The [WISCKEY paper][wisckey] (on which Badger is based) saw big
 wins with separating values from keys, significantly reducing the write
