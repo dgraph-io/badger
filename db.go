@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"container/heap"
 	"expvar"
 	"log"
@@ -862,6 +863,93 @@ func (db *DB) updateSize(lc *y.Closer) {
 			return
 		}
 	}
+}
+
+// DeleteOlderVersions deletes older versions of all keys.
+//
+// This function could be called prior to doing garbage collection to clean up
+// older versions that are no longer needed. The caller must make sure that
+// there are no long-running read transactions running before this function is
+// called, otherwise they will not work as expected.
+func (db *DB) DeleteOlderVersions() error {
+	return db.View(func(txn *Txn) error {
+		opts := DefaultIteratorOptions
+		opts.AllVersions = true
+		opts.PrefetchValues = false
+		it := txn.NewIterator(opts)
+
+		var entries []*entry
+		var lastKey []byte
+		var count int
+		var wg sync.WaitGroup
+		errChan := make(chan error, 1)
+		finished := make(chan bool, 1)
+
+		// func to check for pending error before sending off a batch for writing
+		batchSetAsyncIfNoErr := func(entries []*entry) error {
+			select {
+			case err := <-errChan:
+				return err
+			default:
+				wg.Add(1)
+				err := txn.db.batchSetAsync(entries, func(err error) {
+					defer wg.Done()
+					if err != nil {
+						errChan <- err
+					}
+				})
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			if !bytes.Equal(lastKey, item.Key()) {
+				lastKey = y.Safecopy(lastKey, item.Key())
+				continue
+			}
+			// Found an older version. Mark for deletion
+			entries = append(entries,
+				&entry{
+					Key:  y.KeyWithTs(lastKey, item.version),
+					Meta: bitDelete,
+				})
+			count++
+
+			// Batch up 1000 entries at a time and write
+			if count == 1000 {
+				err := batchSetAsyncIfNoErr(entries)
+				if err != nil {
+					return err
+				}
+				count = 0
+				entries = []*entry{}
+			}
+		}
+
+		// Write last batch pending deletes
+		if count > 0 {
+			err := batchSetAsyncIfNoErr(entries)
+			if err != nil {
+				return err
+			}
+		}
+
+		go func() {
+			wg.Wait()
+			close(finished)
+		}()
+
+		select {
+		case err := <-errChan:
+			return err
+		case <-finished:
+			return nil
+		}
+	})
 }
 
 // RunValueLogGC would trigger a value log garbage collection with no guarantees that a call would
