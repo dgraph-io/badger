@@ -848,6 +848,63 @@ func TestGetSetRace(t *testing.T) {
 	wg.Wait()
 }
 
+func TestPurgeKeyVersionsBelow(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	db, err := Open(getTestOptions(dir))
+	require.NoError(t, err)
+
+	// Write 4 versions of the same key
+	for i := 0; i < 4; i++ {
+		err = db.Update(func(txn *Txn) error {
+			return txn.Set([]byte("answer"), []byte(fmt.Sprintf("%d", i)), 0)
+		})
+		require.NoError(t, err)
+	}
+
+	opts := DefaultIteratorOptions
+	opts.AllVersions = true
+	opts.PrefetchValues = false
+
+	// Verify that there are 4 versions, and record 3rd version (2nd from top in iteration)
+	var ts uint64
+	db.View(func(txn *Txn) error {
+		it := txn.NewIterator(opts)
+		var count int
+		for it.Rewind(); it.Valid(); it.Next() {
+			count++
+			item := it.Item()
+			if count == 2 {
+				ts = item.Version()
+			}
+			require.Equal(t, []byte("answer"), item.Key())
+		}
+		require.Equal(t, 4, count)
+		return nil
+	})
+
+	// Delete all versions below the 3rd version
+	err = db.PurgeKeyVersionsBelow([]byte("answer"), ts)
+	require.NoError(t, err)
+
+	// Verify that there are only 2 versions left
+	db.View(func(txn *Txn) error {
+		it := txn.NewIterator(opts)
+		var count int
+		for it.Rewind(); it.Valid(); it.Next() {
+			count++
+			item := it.Item()
+			require.True(t, item.Version() >= ts,
+				"item version: %d older than ts: %d",
+				item.Version(), ts)
+			require.Equal(t, []byte("answer"), item.Key())
+		}
+		require.Equal(t, 2, count)
+		return nil
+	})
+}
+
 func TestPurgeOlderVersions(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
