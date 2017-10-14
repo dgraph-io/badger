@@ -76,10 +76,10 @@ const maxKeySize = 1 << 20
 
 func exceedsMaxKeySizeError(key []byte) error {
 	return errors.Errorf("Key with size %d exceeded %dMB limit. Key:\n%s",
-		len(key), maxKeySize<<20, hex.Dump(key[:1<<10]))
+		len(key), maxKeySize>>20, hex.Dump(key[:1<<10]))
 }
 
 func exceedsMaxValueSizeError(value []byte, maxValueSize int64) error {
 	return errors.Errorf("Value with size %d exceeded ValueLogFileSize (%dMB). Key:\n%s",
-		len(value), maxValueSize<<20, hex.Dump(value[:1<<10]))
+		len(value), maxValueSize>>20, hex.Dump(value[:1<<10]))
 }
