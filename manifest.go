@@ -324,7 +324,7 @@ func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error
 	if _, err := io.ReadFull(&r, magicBuf[:]); err != nil {
 		return Manifest{}, 0, errBadMagic
 	}
-	if bytes.Compare(magicBuf[0:4], magicText[:]) != 0 {
+	if !bytes.Equal(magicBuf[0:4], magicText[:]) {
 		return Manifest{}, 0, errBadMagic
 	}
 	version := binary.BigEndian.Uint32(magicBuf[4:8])
