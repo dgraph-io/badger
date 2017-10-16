@@ -403,7 +403,7 @@ const (
 // in order to guarantee the file is visible (if the system crashes).  (See the man page for fsync,
 // or see https://github.com/coreos/etcd/issues/6368 for an example.)
 func syncDir(dir string) error {
-	f, err := OpenDir(dir)
+	f, err := openDir(dir)
 	if err != nil {
 		return errors.Wrapf(err, "While opening directory: %s.", dir)
 	}
