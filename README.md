@@ -128,12 +128,16 @@ execute a function, and then safely discard your transaction if an error is
 returned. This is the recommended way to use Badger transactions.
 
 However, sometimes you may want to manually create and commit your
-transactions. You can use the `DB.NewTransaction()` function directly. It is 
-necessary to call `Txn.Commit()` at the end to commit your transaction. `Txn.Commit()`
-internally calls another method `Txn.Discard()` to cleanup the transaction. However, if
-your code doesn’t call `Txn.Commit()` for some reason (for e.g it returns prematurely
-with an error), then please make sure you call `Txn.Discard()` in a `defer` block. Refer
-to the code below.
+transactions. You can use the `DB.NewTransaction()` function directly, which
+takes in a boolean argument to specify whether a read-write transaction is
+required. For read-write transactions, it is necessary to call `Txn,Commit()`
+to ensure the transaction is committed. For read-only transactions, calling
+`Txn.Discard()` is sufficient. `Txn.Commit()` also calls `Txn.Discard()`
+internally to cleanup the transaction, so just calling `Txn.Commit()` is
+sufficient for read-write transaction. However, if your code doesn’t call
+`Txn.Commit()` for some reason (for e.g it returns prematurely with an error),
+then please make sure you call `Txn.Discard()` in a `defer` block. Refer to the
+code below.
 
 ```go
 // Start a writable transaction.
