@@ -291,15 +291,17 @@ time these older versions are needed.
 Badger relies on the client to perform garbage collection at a time of their choosing. It provides
 the following methods, which can be invoked at an appropriate time:
 
-* `DB.RunValueLogGC()`: This method triggers a value log garbage collection for a single log file. There
-are no guarantees that a call would result in space reclamation. Every run would rewrite at most one log
-file. So, repeated calls may be necessary.
 * `DB.PurgeOlderVersions()`: This method iterates over the database, and cleans up all but the latest 
 versions of the key-value pairs. It marks the older versions as deleted, which makes them eligible for
 garbage collection.
 * `DB.PurgeVersionsBelow(key, ts)`: This method is useful to do a more targeted clean up of older versions
 of key-value pairs. You can specify a key, and a timestamp. All versions of the key older than the timestamp
 are marked as deleted, making them eligible for garbage collection.
+* `DB.RunValueLogGC()`: This method triggers a value log garbage collection for a single log file. There
+are no guarantees that a call would result in space reclamation. Every run would rewrite at most one log
+file. So, repeated calls may be necessary. Please ensure that you call the `DB.Purge…()` methods first
+before invoking this method.
+
 
 ### Database backup
 Database backup is an [open issue][bak-issue] for v1.0 and will be coming soon.
