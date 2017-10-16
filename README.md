@@ -127,8 +127,12 @@ execute a function, and then safely discard your transaction if an error is
 returned. This is the recommended way to use Badger transactions.
 
 However, sometimes you may want to manually create and commit your
-transactions. You can use the `DB.NewTransaction()` function directly but
-please be sure to commit or discard the transaction.
+transactions. You can use the `DB.NewTransaction()` function directly. It is 
+necessary to call `Txn.Commit()` at the end to commit your transaction. `Txn.Commit()`
+internally calls another method `Txn.Discard()` to cleanup the transaction. However, if
+your code doesn’t call `Txn.Commit()` for some reason (for e.g it returns prematurely
+with an error), then please make sure you call `Txn.Discard()` in a `defer` block. Refer
+to the code below.
 
 ```go
 // Start a writable transaction.
