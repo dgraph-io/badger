@@ -259,7 +259,7 @@ field to `false`. This can also be used to do sparse reads for selected keys
 during an iteration, by calling `item.Value()` only when required.
 
 ```go
-err := db.View(func(txn *.Tx) error {
+err := db.View(func(txn *badger.Txn) error {
   opts := DefaultIteratorOptions
   opts.PrefetchValues = false
   it := txn.NewIterator(opts)
