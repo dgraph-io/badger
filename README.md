@@ -79,7 +79,7 @@ func main() {
 	  log.Fatal(err)
   }
   defer db.Close()
-	…
+  // Your code here…
 }
 ```
 
@@ -93,8 +93,8 @@ To start a read-only transaction, you can use the `DB.View()` method:
 
 ```go
 err := db.View(func(tx *badger.Txn) error {
-	...
-	return nil
+  // Your code here…
+  return nil
 })
 ```
 
@@ -108,8 +108,8 @@ To start a read-write transaction, you can use the `DB.Update()` method:
 
 ```go
 err := db.Update(func(tx *badger.Txn) error {
-	...
-	return nil
+  // Your code here…
+  return nil
 })
 ```
 
@@ -136,7 +136,7 @@ txn, err := db.NewTransaction(true)
 if err != nil {
     return err
 }
-defer tx.Discard()
+defer txn.Discard()
 
 // Use the transaction...
 err := txn.Set([]byte("answer"), []byte("42"), 0)
