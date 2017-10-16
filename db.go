@@ -55,9 +55,9 @@ type closers struct {
 type DB struct {
 	sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
 
-	dirLockGuard *DirectoryLockGuard
+	dirLockGuard *directoryLockGuard
 	// nil if Dir and ValueDir are the same
-	valueDirGuard *DirectoryLockGuard
+	valueDirGuard *directoryLockGuard
 
 	closers   closers
 	elog      trace.EventLog
@@ -187,25 +187,25 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, err
 	}
 
-	dirLockGuard, err := AcquireDirectoryLock(opt.Dir, lockFile)
+	dirLockGuard, err := acquireDirectoryLock(opt.Dir, lockFile)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
 		if dirLockGuard != nil {
-			_ = dirLockGuard.Release()
+			_ = dirLockGuard.release()
 		}
 	}()
-	var valueDirLockGuard *DirectoryLockGuard
+	var valueDirLockGuard *directoryLockGuard
 	if absValueDir != absDir {
-		valueDirLockGuard, err = AcquireDirectoryLock(opt.ValueDir, lockFile)
+		valueDirLockGuard, err = acquireDirectoryLock(opt.ValueDir, lockFile)
 		if err != nil {
 			return nil, err
 		}
 	}
 	defer func() {
 		if valueDirLockGuard != nil {
-			_ = valueDirLockGuard.Release()
+			_ = valueDirLockGuard.release()
 		}
 	}()
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
@@ -370,11 +370,11 @@ func (db *DB) Close() (err error) {
 
 	db.elog.Finish()
 
-	if guardErr := db.dirLockGuard.Release(); err == nil {
+	if guardErr := db.dirLockGuard.release(); err == nil {
 		err = errors.Wrap(guardErr, "DB.Close")
 	}
 	if db.valueDirGuard != nil {
-		if guardErr := db.valueDirGuard.Release(); err == nil {
+		if guardErr := db.valueDirGuard.release(); err == nil {
 			err = errors.Wrap(guardErr, "DB.Close")
 		}
 	}
