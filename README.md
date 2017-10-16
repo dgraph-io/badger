@@ -281,11 +281,11 @@ err := db.View(func(txn *badger.Txn) error {
 Badger values need to be garbage collected, because of two reasons:
 
 * Badger keeps values separately from the LSM tree. This means that the compaction operations 
-that clean up the LSM tree do not touch the values at all. Values need to be garbage collected
+that clean up the LSM tree do not touch the values at all. Values need to be cleaned up
 separately. 
 
-* Concurrent read/writes could also leave behind multiple values for a single key, because they 
-are stored with different versions. This could accumulate, and take up unneeded space beyond the
+* Concurrent read/write transactions could leave behind multiple values for a single key, because they 
+are stored with different versions. These could accumulate, and take up unneeded space beyond the
 time these older versions are needed.
 
 Badger relies on the client to perform garbage collection at a time of their choosing. It provides
