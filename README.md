@@ -2,7 +2,7 @@
 
 ![Badger mascot](images/diggy-shadow.png)
 
-Badger is an embeddable, persistent, simple and fast key-value (KV) store
+Badger is an embeddable, persistent, simple and fast key-value (KV) database
 written in pure Go. It's meant to be a performant alternative to non-Go-based
 key-value stores like [RocksDB](https://github.com/facebook/rocksdb).
 
@@ -54,7 +54,7 @@ utility into your `$GOBIN` path.
 
 ### Opening a database
 The top-level object in Badger is a `DB`. It represents multiple files on disk
-in specific directories, which contain the data for a single store.
+in specific directories, which contain the data for a single database.
 
 To open your database, use the `badger.Open()` function, with the appropriate
 options. The `Dir` and `ValueDir` options are mandatory and must be
@@ -70,7 +70,7 @@ import (
 )
 
 func main() {
-  // Open the Badger store located in the /tmp/badger directory.
+  // Open the Badger database located in the /tmp/badger directory.
   // It will be created if it doesn't exist.
   opts := badger.DefaultOptions
   opts.Dir = "/tmp/badger"
@@ -284,18 +284,18 @@ err := db.View(func(txn *badger.Txn) error {
 ### Garbage Collection
 Badger values need to be garbage collected, because of two reasons:
 
-* Badger keeps values separately from the LSM tree. This means that the compaction operations 
+* Badger keeps values separately from the LSM tree. This means that the compaction operations
 that clean up the LSM tree do not touch the values at all. Values need to be cleaned up
-separately. 
+separately.
 
-* Concurrent read/write transactions could leave behind multiple values for a single key, because they 
+* Concurrent read/write transactions could leave behind multiple values for a single key, because they
 are stored with different versions. These could accumulate, and take up unneeded space beyond the
 time these older versions are needed.
 
 Badger relies on the client to perform garbage collection at a time of their choosing. It provides
 the following methods, which can be invoked at an appropriate time:
 
-* `DB.PurgeOlderVersions()`: This method iterates over the database, and cleans up all but the latest 
+* `DB.PurgeOlderVersions()`: This method iterates over the database, and cleans up all but the latest
 versions of the key-value pairs. It marks the older versions as deleted, which makes them eligible for
 garbage collection.
 * `DB.PurgeVersionsBelow(key, ts)`: This method is useful to do a more targeted clean up of older versions
@@ -338,8 +338,8 @@ Go](https://open.dgraph.io/post/badger/)
 ## Design
 Badger was written with these design goals in mind:
 
-- Write a key-value store in pure Go.
-- Use latest research to build the fastest KV store for data sets spanning terabytes.
+- Write a key-value database in pure Go.
+- Use latest research to build the fastest KV database for data sets spanning terabytes.
 - Optimize for SSDs.
 
 Badger’s design is based on a paper titled _[WiscKey: Separating Keys from
@@ -400,7 +400,7 @@ If you're using Badger with `SyncWrites=false`, then your writes might not be wr
 and won't get synced to disk immediately. Writes to LSM tree are done inmemory first, before they
 get compacted to disk. The compaction would only happen once `MaxTableSize` has been reached. So, if
 you're doing a few writes and then checking, you might not see anything on disk. Once you `Close`
-the store, you'll see these writes on disk.
+the database, you'll see these writes on disk.
 
 - **Which instances should I use for Badger?**
 
