@@ -83,5 +83,5 @@ func (guard *directoryLockGuard) release() error {
 	return err
 }
 
-// OpenDir opens a directory for syncing.
-func OpenDir(path string) (*os.File, error) { return os.Open(path) }
+// openDir opens a directory for syncing.
+func openDir(path string) (*os.File, error) { return os.Open(path) }

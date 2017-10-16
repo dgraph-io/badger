@@ -28,15 +28,15 @@ import (
 	"github.com/pkg/errors"
 )
 
-func OpenDir(path string) (*os.File, error) {
-	fd, err := openDir(path)
+func openDir(path string) (*os.File, error) {
+	fd, err := openDirWin(path)
 	if err != nil {
 		return nil, err
 	}
 	return os.NewFile(uintptr(fd), path), nil
 }
 
-func openDir(path string) (fd syscall.Handle, err error) {
+func openDirWin(path string) (fd syscall.Handle, err error) {
 	if len(path) == 0 {
 		return syscall.InvalidHandle, syscall.ERROR_FILE_NOT_FOUND
 	}
