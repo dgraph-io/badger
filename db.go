@@ -996,5 +996,17 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 	if discardRatio >= 1.0 || discardRatio <= 0.0 {
 		return ErrInvalidRequest
 	}
-	return db.vlog.runGC(discardRatio)
+
+	headKey := y.KeyWithTs(head, math.MaxUint64)
+	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
+	headValStruct, err := db.lc.get(headKey)
+	if err != nil {
+		return errors.Wrap(err, "Retrieving head from on-disk LSM")
+	}
+
+	var headValPointer valuePointer
+	if len(headValStruct.Value) > 0 {
+		headValPointer.Decode(headValStruct.Value)
+	}
+	return db.vlog.runGC(discardRatio, headValPointer)
 }
