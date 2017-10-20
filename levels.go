@@ -288,7 +288,7 @@ func (s *levelsController) compactBuildTables(
 	var i int
 	for ; it.Valid(); i++ {
 		timeStart := time.Now()
-		builder := table.NewTableBuilder()
+		builder := table.NewTableBuilder(s.kv.opt.MaxTableSize)
 		for ; it.Valid(); it.Next() {
 			if builder.ReachedCapacity(s.kv.opt.MaxTableSize) {
 				break

@@ -83,10 +83,10 @@ type Builder struct {
 }
 
 // NewTableBuilder makes a new TableBuilder.
-func NewTableBuilder() *Builder {
+func NewTableBuilder(tableSize int64) *Builder {
 	return &Builder{
-		keyBuf:     newBuffer(32 << 20),
-		buf:        newBuffer(64 << 20),
+		keyBuf:     newBuffer(int(tableSize) / 2),
+		buf:        newBuffer(int(tableSize)),
 		prevOffset: math.MaxUint32, // Used for the first element!
 	}
 }
