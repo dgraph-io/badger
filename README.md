@@ -351,7 +351,8 @@ Values in SSD-conscious Storage][wisckey]_.
 | Feature             | Badger                                       | RocksDB                       | BoltDB    |
 | -------             | ------                                       | -------                       | ------    |
 | Design              | LSM tree with value log                      | LSM tree only                 | B+ tree   |
-| High RW Performance | Yes                                          | Yes                           | No        |
+| High Read throughput | Yes                                          | No                           | Yes        |
+| High Write throughput | Yes                                          | Yes                           | No        |
 | Designed for SSDs   | Yes (with latest research <sup>1</sup>)      | Not specifically <sup>2</sup> | No        |
 | Embeddable          | Yes                                          | Yes                           | Yes       |
 | Sorted KV access    | Yes                                          | Yes                           | Yes       |
