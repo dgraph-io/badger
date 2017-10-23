@@ -222,7 +222,7 @@ func Open(opt Options) (db *DB, err error) {
 	}()
 
 	orc := &oracle{
-		isManaged:      opt.ManagedTxns,
+		isManaged:      opt.managedTxns,
 		nextCommit:     1,
 		pendingCommits: make(map[uint64]struct{}),
 		commits:        make(map[uint64]uint64),
