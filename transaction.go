@@ -331,7 +331,7 @@ func (txn *Txn) Discard() {
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit(callback func(error)) error {
-	if txn.db.opt.ManagedTxns {
+	if txn.commitTs == 0 && txn.db.opt.ManagedTxns {
 		return ErrManagedTxn
 	}
 	if txn.discarded {
