@@ -375,7 +375,9 @@ func (txn *Txn) Commit(callback func(error)) error {
 }
 
 // CommitAt commits the transaction, following the same logic as Commit(), but at the given
-// commit timestamp. This API is only useful for databases built on top of Badger (like Dgraph), and
+// commit timestamp. It returns an error if ManagedTxns option is not set.
+//
+// This API is only useful for databases built on top of Badger (like Dgraph), and
 // can be ignored by most users.
 func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
 	if !txn.db.opt.ManagedTxns {
