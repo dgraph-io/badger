@@ -51,7 +51,7 @@ func TestTxnSimple(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("val=8"), val)
 
-	require.Equal(t, ErrManagedTxn, txn.CommitAt(100, nil))
+	require.Panics(t, func() { txn.CommitAt(100, nil) })
 	require.NoError(t, txn.Commit(nil))
 }
 
@@ -528,14 +528,13 @@ func TestIteratorAllVersionsButDeleted(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestTxnManaged(t *testing.T) {
+func TestManagedDB(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
 	opt := getTestOptions(dir)
-	opt.ManagedTxns = true
-	kv, err := Open(opt)
+	kv, err := OpenManaged(opt)
 	require.NoError(t, err)
 	defer kv.Close()
 
@@ -547,7 +546,9 @@ func TestTxnManaged(t *testing.T) {
 		return []byte(fmt.Sprintf("val-%d", i))
 	}
 
-	// Don't allow these APIs in managed.
+	// Don't allow these APIs in ManagedDB
+	require.Panics(t, func() { kv.NewTransaction(false) })
+
 	err = kv.Update(func(tx *Txn) error { return nil })
 	require.Equal(t, ErrManagedTxn, err)
 
@@ -559,7 +560,7 @@ func TestTxnManaged(t *testing.T) {
 	for i := 0; i <= 3; i++ {
 		require.NoError(t, txn.Set(key(i), val(i), 0))
 	}
-	require.Equal(t, ErrManagedTxn, txn.Commit(nil))
+	require.Panics(t, func() { txn.Commit(nil) })
 	require.NoError(t, txn.CommitAt(3, nil))
 
 	// Read data at t=2.
