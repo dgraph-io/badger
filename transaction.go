@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"container/heap"
 	"fmt"
+	"math"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,8 @@ func (u *uint64Heap) Pop() interface{} {
 }
 
 type oracle struct {
+	isManaged bool // Does not change value, so no locking required.
+
 	sync.Mutex
 	curRead    uint64
 	nextCommit uint64
@@ -77,6 +80,9 @@ func (o *oracle) decrRef() {
 }
 
 func (o *oracle) readTs() uint64 {
+	if o.isManaged {
+		return math.MaxUint64
+	}
 	return atomic.LoadUint64(&o.curRead)
 }
 
@@ -108,7 +114,7 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 	}
 
 	var ts uint64
-	if txn.commitTs == 0 {
+	if !o.isManaged {
 		// This is the general case, when user doesn't specify the read and commit ts.
 		ts = o.nextCommit
 		o.nextCommit++
@@ -116,13 +122,14 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 	} else {
 		// If commitTs is set, use it instead.
 		ts = txn.commitTs
-		if o.nextCommit <= ts { // Update this to max+1 commit ts, so replay works.
-			o.nextCommit = ts + 1
-		}
 	}
 
 	for _, w := range txn.writes {
 		o.commits[w] = ts // Update the commitTs.
+	}
+	if o.isManaged {
+		// No need to update the heap.
+		return ts
 	}
 	heap.Push(&o.commitMark, ts)
 	if _, has := o.pendingCommits[ts]; has {
@@ -133,6 +140,10 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 }
 
 func (o *oracle) doneCommit(cts uint64) {
+	if o.isManaged {
+		// No need to update anything.
+		return
+	}
 	o.Lock()
 	defer o.Unlock()
 
@@ -320,6 +331,9 @@ func (txn *Txn) Discard() {
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit(callback func(error)) error {
+	if txn.commitTs == 0 && txn.db.opt.ManagedTxns {
+		return ErrManagedTxn
+	}
 	if txn.discarded {
 		return ErrDiscardedTxn
 	}
@@ -364,6 +378,9 @@ func (txn *Txn) Commit(callback func(error)) error {
 // commit timestamp. This API is only useful for databases built on top of Badger (like Dgraph), and
 // can be ignored by most users.
 func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
+	if !txn.db.opt.ManagedTxns {
+		return ErrManagedTxn
+	}
 	txn.commitTs = commitTs
 	return txn.Commit(callback)
 }
@@ -413,6 +430,9 @@ func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
 // View executes a function creating and managing a read-only transaction for the user. Error
 // returned by the function is relayed by the View method.
 func (db *DB) View(fn func(txn *Txn) error) error {
+	if db.opt.ManagedTxns {
+		return ErrManagedTxn
+	}
 	txn := db.NewTransaction(false)
 	defer txn.Discard()
 
@@ -422,6 +442,9 @@ func (db *DB) View(fn func(txn *Txn) error) error {
 // Update executes a function, creating and managing a read-write transaction
 // for the user. Error returned by the function is relayed by the Update method.
 func (db *DB) Update(fn func(txn *Txn) error) error {
+	if db.opt.ManagedTxns {
+		return ErrManagedTxn
+	}
 	txn := db.NewTransaction(true)
 	defer txn.Discard()
 

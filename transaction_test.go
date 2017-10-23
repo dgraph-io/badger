@@ -51,6 +51,7 @@ func TestTxnSimple(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("val=8"), val)
 
+	require.Equal(t, ErrManagedTxn, txn.CommitAt(100, nil))
 	require.NoError(t, txn.Commit(nil))
 }
 
@@ -531,7 +532,10 @@ func TestTxnManaged(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := Open(getTestOptions(dir))
+
+	opt := getTestOptions(dir)
+	opt.ManagedTxns = true
+	kv, err := Open(opt)
 	require.NoError(t, err)
 	defer kv.Close()
 
@@ -543,11 +547,19 @@ func TestTxnManaged(t *testing.T) {
 		return []byte(fmt.Sprintf("val-%d", i))
 	}
 
+	// Don't allow these APIs in managed.
+	err = kv.Update(func(tx *Txn) error { return nil })
+	require.Equal(t, ErrManagedTxn, err)
+
+	err = kv.View(func(tx *Txn) error { return nil })
+	require.Equal(t, ErrManagedTxn, err)
+
 	// Write data at t=3.
 	txn := kv.NewTransactionAt(3, true)
 	for i := 0; i <= 3; i++ {
 		require.NoError(t, txn.Set(key(i), val(i), 0))
 	}
+	require.Equal(t, ErrManagedTxn, txn.Commit(nil))
 	require.NoError(t, txn.CommitAt(3, nil))
 
 	// Read data at t=2.

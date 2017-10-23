@@ -73,6 +73,9 @@ type Options struct {
 	// Number of compaction workers to run concurrently.
 	NumCompactors int
 
+	// Transaction start and commit timestamps are managed by end-user.
+	ManagedTxns bool
+
 	// 4. Flags for testing purposes
 	// ------------------------------
 	DoNotCompact bool // Stops LSM tree from compactions.
