@@ -866,6 +866,18 @@ func (db *DB) updateSize(lc *y.Closer) {
 	}
 }
 
+// TODO make this threadsafe
+var gcStats = make(map[uint32]int)
+
+// Increment the counter for
+func updateGCStats(ptr []byte) {
+	var vptr valuePointer
+	if len(ptr) > 0 {
+		vptr.Decode(ptr)
+		gcStats[vptr.Fid]++
+	}
+}
+
 // PurgeVersionsBelow will delete all versions of a key below the specified version
 func (db *DB) PurgeVersionsBelow(key []byte, ts uint64) error {
 	return db.View(func(txn *Txn) error {
@@ -888,6 +900,7 @@ func (db *DB) PurgeVersionsBelow(key []byte, ts uint64) error {
 					Key:  y.KeyWithTs(key, item.version),
 					Meta: bitDelete,
 				})
+			updateGCStats(item.vptr)
 		}
 		return db.batchSet(entries)
 	})
@@ -943,6 +956,7 @@ func (db *DB) PurgeOlderVersions() error {
 					Key:  y.KeyWithTs(lastKey, item.version),
 					Meta: bitDelete,
 				})
+			updateGCStats(item.vptr)
 			count++
 
 			// Batch up 1000 entries at a time and write
@@ -998,6 +1012,7 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 		return ErrInvalidRequest
 	}
 
+	// Find head on disk
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
 	val, err := db.lc.get(headKey)
@@ -1009,5 +1024,18 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 	if len(val.Value) > 0 {
 		head.Decode(val.Value)
 	}
-	return db.vlog.runGC(discardRatio, head)
+
+	// Pick a log file for GC
+	lf := db.vlog.pickLog(head, gcStats)
+	if lf == nil {
+		return ErrNoRewrite
+	}
+
+	// Run GC on selected log file
+	err = db.vlog.runGC(discardRatio, lf)
+	if err != nil {
+		// TODO Update gc stats (in a threadsafe manner)
+		gcStats[lf.fid] = 0
+	}
+	return err
 }

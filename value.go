@@ -25,6 +25,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"sort"
@@ -800,7 +801,7 @@ func valueBytesToEntry(buf []byte) (e entry) {
 	return
 }
 
-func (vlog *valueLog) pickLog(head valuePointer) *logFile {
+func (vlog *valueLog) pickLog(head valuePointer, stats map[uint32]int) *logFile {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
 	fids := vlog.sortedFids()
@@ -815,6 +816,24 @@ func (vlog *valueLog) pickLog(head valuePointer) *logFile {
 		return nil
 	}
 
+	// Pick a candidate that contains the largest no. of discardable values
+	candidate := struct {
+		fid   uint32
+		count int
+	}{math.MaxUint32, 0}
+	for j := 0; j < i; j++ {
+		// TODO acquire mutex before accessing map
+		if stats[fids[j]] > candidate.count {
+			candidate.fid = fids[j]
+			candidate.count = stats[fids[j]]
+		}
+	}
+
+	if candidate.count != math.MaxUint32 { // Found a candidate
+		return vlog.filesMap[candidate.fid]
+	}
+
+	// Fallback to randomly picking a log file
 	idx := rand.Intn(i) // Don’t include head.Fid. We pick a random file before it.
 	if idx > 0 {
 		idx = rand.Intn(idx + 1) // Another level of rand to favor smaller fids.
@@ -842,12 +861,7 @@ func discardEntry(e entry, vs y.ValueStruct) bool {
 	return false
 }
 
-func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) error {
-	lf := vlog.pickLog(head)
-	if lf == nil {
-		return ErrNoRewrite
-	}
-
+func (vlog *valueLog) doRunGC(gcThreshold float64, lf *logFile) error {
 	type reason struct {
 		total   float64
 		keep    float64
@@ -957,10 +971,10 @@ func (vlog *valueLog) waitOnGC(lc *y.Closer) {
 	vlog.garbageCh <- struct{}{}
 }
 
-func (vlog *valueLog) runGC(gcThreshold float64, head valuePointer) error {
+func (vlog *valueLog) runGC(gcThreshold float64, lf *logFile) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
-		err := vlog.doRunGC(gcThreshold, head)
+		err := vlog.doRunGC(gcThreshold, lf)
 		<-vlog.garbageCh
 		return err
 	default:
