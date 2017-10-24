@@ -51,7 +51,7 @@ func TestTxnSimple(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("val=8"), val)
 
-	require.Panics(t, func() { txn.CommitAt(100, nil) })
+	require.Error(t, ErrManagedTxn, txn.CommitAt(100, nil))
 	require.NoError(t, txn.Commit(nil))
 }
 
@@ -560,7 +560,7 @@ func TestManagedDB(t *testing.T) {
 	for i := 0; i <= 3; i++ {
 		require.NoError(t, txn.Set(key(i), val(i), 0))
 	}
-	require.Panics(t, func() { txn.Commit(nil) })
+	require.Error(t, ErrManagedTxn, txn.Commit(nil))
 	require.NoError(t, txn.CommitAt(3, nil))
 
 	// Read data at t=2.
