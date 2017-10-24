@@ -50,6 +50,11 @@ type closers struct {
 	valueGC    *y.Closer
 }
 
+type gcStats struct {
+	sync.Mutex
+	m map[uint32]int64
+}
+
 // DB provides the various functions required to interact with Badger.
 // DB is thread-safe.
 type DB struct {
@@ -76,6 +81,8 @@ type DB struct {
 	lastUsedCommitTs uint64
 
 	orc *oracle
+
+	gcStats *gcStats
 }
 
 const (
@@ -239,6 +246,7 @@ func Open(opt Options) (db *DB, err error) {
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
 		orc:           orc,
+		gcStats:       &gcStats{m: make(map[uint32]int64)},
 	}
 
 	db.closers.updateSize = y.NewCloser(1)
@@ -866,6 +874,16 @@ func (db *DB) updateSize(lc *y.Closer) {
 	}
 }
 
+func (db *DB) updateGCStats(item *Item) {
+	if item.meta&bitValuePointer > 0 {
+		var vp valuePointer
+		vp.Decode(item.vptr)
+		db.gcStats.Lock()
+		db.gcStats.m[vp.Fid] += item.EstimatedSize()
+		db.gcStats.Unlock()
+	}
+}
+
 // PurgeVersionsBelow will delete all versions of a key below the specified version
 func (db *DB) PurgeVersionsBelow(key []byte, ts uint64) error {
 	return db.View(func(txn *Txn) error {
@@ -888,6 +906,7 @@ func (db *DB) PurgeVersionsBelow(key []byte, ts uint64) error {
 					Key:  y.KeyWithTs(key, item.version),
 					Meta: bitDelete,
 				})
+			db.updateGCStats(item)
 		}
 		return db.batchSet(entries)
 	})
@@ -943,6 +962,7 @@ func (db *DB) PurgeOlderVersions() error {
 					Key:  y.KeyWithTs(lastKey, item.version),
 					Meta: bitDelete,
 				})
+			db.updateGCStats(item)
 			count++
 
 			// Batch up 1000 entries at a time and write
@@ -998,6 +1018,7 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 		return ErrInvalidRequest
 	}
 
+	// Find head on disk
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
 	val, err := db.lc.get(headKey)
@@ -1009,5 +1030,19 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 	if len(val.Value) > 0 {
 		head.Decode(val.Value)
 	}
-	return db.vlog.runGC(discardRatio, head)
+
+	// Pick a log file for GC
+	lf := db.vlog.pickLog(head, db.gcStats)
+	if lf == nil {
+		return ErrNoRewrite
+	}
+
+	// Run GC on selected log file
+	err = db.vlog.runGC(discardRatio, lf)
+	if err != nil {
+		db.gcStats.Lock()
+		db.gcStats.m[lf.fid] = 0
+		db.gcStats.Unlock()
+	}
+	return err
 }
