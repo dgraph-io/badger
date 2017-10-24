@@ -858,7 +858,7 @@ func TestPurgeVersionsBelow(t *testing.T) {
 	// Write 4 versions of the same key
 	for i := 0; i < 4; i++ {
 		err = db.Update(func(txn *Txn) error {
-			return txn.Set([]byte("answer"), []byte(fmt.Sprintf("%d", i)), 0)
+			return txn.Set([]byte("answer"), []byte(fmt.Sprintf("%25d", i)), 0)
 		})
 		require.NoError(t, err)
 	}
@@ -887,6 +887,7 @@ func TestPurgeVersionsBelow(t *testing.T) {
 	// Delete all versions below the 3rd version
 	err = db.PurgeVersionsBelow([]byte("answer"), ts)
 	require.NoError(t, err)
+	require.NotEmpty(t, db.vlog.lfDiscardStats.m)
 
 	// Verify that there are only 2 versions left
 	db.View(func(txn *Txn) error {
