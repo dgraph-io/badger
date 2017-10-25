@@ -80,6 +80,13 @@ func Safecopy(a []byte, src []byte) []byte {
 	return append(a[:0], src...)
 }
 
+// Copy copies a byte slice and returns the copied slice.
+func Copy(a []byte) []byte {
+	b := make([]byte, len(a))
+	copy(b, a)
+	return b
+}
+
 // KeyWithTs generates a new key by appending ts to key.
 func KeyWithTs(key []byte, ts uint64) []byte {
 	out := make([]byte, len(key)+8)
