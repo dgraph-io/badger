@@ -16,6 +16,12 @@
 
 package badger
 
+import (
+	"bytes"
+
+	"github.com/dgraph-io/badger/y"
+)
+
 // ManagedDB allows end users to manage the transactions themselves. Transaction
 // start and commit timestamps are set by end-user.
 //
@@ -70,4 +76,31 @@ func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
 	}
 	txn.commitTs = commitTs
 	return txn.Commit(callback)
+}
+
+// PurgeVersionsBelow will delete all versions of a key below the specified version
+func (db *ManagedDB) PurgeVersionsBelow(key []byte, ts uint64) error {
+	txn := db.NewTransactionAt(ts, false)
+	defer txn.Discard()
+	opts := DefaultIteratorOptions
+	opts.AllVersions = true
+	opts.PrefetchValues = false
+	it := txn.NewIterator(opts)
+
+	var entries []*entry
+
+	for it.Seek(key); it.ValidForPrefix(key); it.Next() {
+		item := it.Item()
+		if !bytes.Equal(key, item.Key()) || item.Version() >= ts {
+			continue
+		}
+
+		// Found an older version. Mark for deletion
+		entries = append(entries,
+			&entry{
+				Key:  y.KeyWithTs(key, item.version),
+				Meta: bitDelete,
+			})
+	}
+	return db.batchSet(entries)
 }
