@@ -71,3 +71,10 @@ func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
 	txn.commitTs = commitTs
 	return txn.Commit(callback)
 }
+
+// PurgeVersionsBelow will delete all versions of a key below the specified version
+func (db *ManagedDB) PurgeVersionsBelow(key []byte, ts uint64) error {
+	txn := db.NewTransactionAt(ts, false)
+	defer txn.Discard()
+	return db.purgeVersionsBelow(txn, key, ts)
+}
