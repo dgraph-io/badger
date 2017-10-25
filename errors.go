@@ -75,6 +75,9 @@ var (
 	// allowed due to external management of transactions, when using ManagedDB.
 	ErrManagedTxn = errors.New(
 		"Invalid API request. Not allowed to perform this action using ManagedDB")
+
+	ErrInvalidBackupData = errors.New(
+		"Backup data cannot be read")
 )
 
 const maxKeySize = 1 << 20
