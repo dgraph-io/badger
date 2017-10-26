@@ -387,19 +387,16 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 }
 
 func (vlog *valueLog) incrIteratorCount() {
-	vlog.filesLock.Lock()
-	vlog.numActiveIterators++
-	vlog.filesLock.Unlock()
+	atomic.AddInt32(&vlog.numActiveIterators, 1)
 }
 
 func (vlog *valueLog) decrIteratorCount() error {
-	vlog.filesLock.Lock()
-
-	vlog.numActiveIterators--
-	if vlog.numActiveIterators != 0 {
-		vlog.filesLock.Unlock()
+	num := atomic.AddInt32(&vlog.numActiveIterators, -1)
+	if num != 0 {
 		return nil
 	}
+
+	vlog.filesLock.Lock()
 	lfs := make([]*logFile, 0, len(vlog.filesToBeDeleted))
 	for _, id := range vlog.filesToBeDeleted {
 		lfs = append(lfs, vlog.filesMap[id])
@@ -445,7 +442,7 @@ type valueLog struct {
 	filesMap         map[uint32]*logFile
 	filesToBeDeleted []uint32
 	// A refcount of iterators -- when this hits zero, we can delete the filesToBeDeleted.
-	numActiveIterators int
+	numActiveIterators int32
 
 	kv                *DB
 	maxFid            uint32
