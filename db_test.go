@@ -962,6 +962,7 @@ func TestPurgeOlderVersions(t *testing.T) {
 		require.Equal(t, 1, count)
 		return nil
 	})
+	require.NoError(t, err)
 }
 
 func ExampleOpen() {
