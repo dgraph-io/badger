@@ -97,8 +97,6 @@ func (lf *logFile) mmap(size int64) (err error) {
 	return err
 }
 
-var errTooFewBytes = errors.New("Too few bytes read")
-
 // Acquire lock on mmap if you are calling this
 func (lf *logFile) read(p valuePointer) (buf []byte, err error) {
 	var nbr int64

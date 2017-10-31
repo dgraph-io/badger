@@ -62,8 +62,10 @@ func TestDumpLoad(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	db, err = Open(getTestOptions(dir))
+	require.NoError(t, err)
 	defer db.Close()
 	bak, err = os.Open(bak.Name())
+	require.NoError(t, err)
 	defer bak.Close()
 
 	require.NoError(t, db.Load(bak))

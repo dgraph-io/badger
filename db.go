@@ -71,10 +71,6 @@ type DB struct {
 	writeCh   chan *request
 	flushChan chan flushTask // For flushing memtables.
 
-	// Incremented in the non-concurrently accessed write loop.  But also accessed outside. So
-	// we use an atomic op.
-	lastUsedCommitTs uint64
-
 	orc *oracle
 }
 
