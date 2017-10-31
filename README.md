@@ -7,13 +7,15 @@ written in pure Go. It's meant to be a performant alternative to non-Go-based
 key-value stores like [RocksDB](https://github.com/facebook/rocksdb).
 
 ## Project Status
-We are currently gearing up for a [v1.0 release][v1-milestone]. We recently introduced
-transactions which involved a major API change.To use the previous version of
-the APIs, please use [tag v0.8][v0.8]. This tag can be specified via the
-Go dependency tool you're using.
+We introduced transactions in [v0.9.0] which involved a major API change.To use
+the previous version of the APIs, please use [tag v0.8.1][v0.8.1]. This tag can
+be specified via the Go dependency tool you're using.
 
 [v1-milestone]: https://github.com/dgraph-io/badger/issues?q=is%3Aopen+is%3Aissue+milestone%3Av1.0
-[v0.8]: /tree/v0.8
+[v0.8.1]: /tree/v0.8.1
+[v0.9.0]: /tree/v0.9.0
+
+We are currently gearing up for a [v1.0 release][v1-milestone].
 
 ## Table of Contents
  * [Getting Started](#getting-started)
@@ -308,9 +310,34 @@ before invoking this method.
 
 
 ### Database backup
-Database backup is an [open issue][bak-issue] for v1.0 and will be coming soon.
+There are two public API methods `DB.Backup()` and `DB.Load()` which can be
+used to do online backups and restores. Badger v0.9 provides a CLI tool
+`badger`, which can do offline backup/restore. Make sure you have `$GOPATH/bin`
+in your PATH to use this tool.
 
-[bak-issue]: https://github.com/dgraph-io/badger/issues/135
+The command below will create a version-agnostic backup of the database, to a
+file `badger.bak` in the current working directory
+
+```
+badger backup --dir <path/to/badgerdb>
+```
+
+To restore `badger.bak` in the current working directory to a new database:
+
+```
+badger restore --dir <path/to/badgerdb>
+```
+
+See `badger --help` for more details.
+
+If you have a Badger database that was created using v0.8 (or below), you can
+use the `badger_backup` tool provided in v0.8.1, and then restore it using the
+command above to upgrade your database to work with the latest version.
+
+```
+badger_backup --dir <path/to/badgerdb> --backup-file badger.bak
+```
+
 
 ### Statistics
 Badger records metrics using the [expvar] package, which is included in the Go
