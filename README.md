@@ -30,7 +30,7 @@ We are currently gearing up for a [v1.0 release][v1-milestone].
       - [Prefix scans](#prefix-scans)
       - [Key-only iteration](#key-only-iteration)
     + [Garbage Collection](#garbage-collection)
-    + [Database backups](#database-backups)
+    + [Database backup](#database-backup)
     + [Statistics](#statistics)
   * [Resources](#resources)
     + [Blog Posts](#blog-posts)
