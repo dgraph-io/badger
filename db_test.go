@@ -204,7 +204,7 @@ func TestGet(t *testing.T) {
 	txnDelete(t, kv, []byte("key1"))
 
 	txn = kv.NewTransaction(false)
-	item, err = txn.Get([]byte("key1"))
+	_, err = txn.Get([]byte("key1"))
 	require.Equal(t, ErrKeyNotFound, err)
 	txn.Discard()
 
@@ -1035,6 +1035,9 @@ func ExampleTxn_NewIterator() {
 	opts.ValueDir = dir
 
 	db, err := Open(opts)
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer db.Close()
 
 	bkey := func(i int) []byte {

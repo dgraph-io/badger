@@ -675,6 +675,7 @@ func BenchmarkReadMerged(b *testing.B) {
 		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 		builder := NewTableBuilder()
 		f, err := y.OpenSyncedFile(filename, true)
+		y.Check(err)
 		for j := 0; j < tableSize; j++ {
 			id := j*m + i // Arrays are interleaved.
 			// id := i*tableSize+j (not interleaved)

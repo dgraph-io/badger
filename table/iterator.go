@@ -169,7 +169,7 @@ func (itr *blockIterator) Prev() {
 	itr.pos = itr.last.prev
 
 	var h header
-	y.AssertTruef(itr.pos >= 0 && itr.pos < uint32(len(itr.data)), "%d %d", itr.pos, len(itr.data))
+	y.AssertTruef(itr.pos < uint32(len(itr.data)), "%d %d", itr.pos, len(itr.data))
 	itr.pos += uint32(h.Decode(itr.data[itr.pos:]))
 	itr.parseKV(h)
 	itr.last = h
@@ -279,8 +279,7 @@ func (itr *Iterator) seekFrom(key []byte, whence int) {
 	case current:
 	}
 
-	var idx int
-	idx = sort.Search(len(itr.t.blockIndex), func(idx int) bool {
+	idx := sort.Search(len(itr.t.blockIndex), func(idx int) bool {
 		ko := itr.t.blockIndex[idx]
 		return y.CompareKeys(ko.key, key) > 0
 	})

@@ -599,7 +599,6 @@ func BenchmarkReadWrite(b *testing.B) {
 					f := rand.Float32()
 					if f < rw {
 						vl.write([]*request{bl})
-						ptrs = append(ptrs, bl.Ptrs...)
 
 					} else {
 						ln := len(ptrs)

@@ -28,8 +28,7 @@ import (
 type prefetchStatus uint8
 
 const (
-	empty prefetchStatus = iota
-	prefetched
+	prefetched prefetchStatus = iota + 1
 )
 
 // Item is returned during iteration. Both the Key() and Value() output is only valid until
