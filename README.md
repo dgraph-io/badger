@@ -215,8 +215,8 @@ To iterate over keys, we can use an `Iterator`, which can be obtained using the
 
 
 ```go
-err := db.View(func(txn *.Tx) error {
-  opts := DefaultIteratorOptions
+err := db.View(func(txn *badger.Txn) error {
+  opts := badger.DefaultIteratorOptions
   opts.PrefetchSize = 10
   it := txn.NewIterator(opts)
   for it.Rewind(); it.Valid(); it.Next() {
@@ -271,7 +271,7 @@ during an iteration, by calling `item.Value()` only when required.
 
 ```go
 err := db.View(func(txn *badger.Txn) error {
-  opts := DefaultIteratorOptions
+  opts := badger.DefaultIteratorOptions
   opts.PrefetchValues = false
   it := txn.NewIterator(opts)
   for it.Rewind(); it.Valid(); it.Next() {
