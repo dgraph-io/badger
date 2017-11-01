@@ -44,7 +44,7 @@ func TestDumpLoad(t *testing.T) {
 
 	err = db.Update(func(txn *Txn) error {
 		for _, e := range entries {
-			err := txn.Set(e.key, e.val, e.userMeta)
+			err := txn.SetWithMeta(e.key, e.val, e.userMeta)
 			if err != nil {
 				return err
 			}

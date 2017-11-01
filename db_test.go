@@ -56,7 +56,7 @@ func getItemValue(t *testing.T, item *Item) (val []byte) {
 
 func txnSet(t *testing.T, kv *DB, key []byte, val []byte, meta byte) {
 	txn := kv.NewTransaction(true)
-	require.NoError(t, txn.Set(key, val, meta))
+	require.NoError(t, txn.SetWithMeta(key, val, meta))
 	require.NoError(t, txn.Commit(nil))
 }
 
@@ -89,7 +89,7 @@ func TestUpdateAndView(t *testing.T) {
 
 	err = db.Update(func(txn *Txn) error {
 		for i := 0; i < 10; i++ {
-			err := txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)), 0x00)
+			err := txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)))
 			if err != nil {
 				return err
 			}
@@ -289,7 +289,7 @@ func TestGetMore(t *testing.T) {
 	for i := 0; i < n; i += m {
 		txn := kv.NewTransaction(true)
 		for j := i; j < i+m && j < n; j++ {
-			require.NoError(t, txn.Set(data(j), data(j), 0))
+			require.NoError(t, txn.Set(data(j), data(j)))
 		}
 		require.NoError(t, txn.Commit(nil))
 	}
@@ -311,8 +311,7 @@ func TestGetMore(t *testing.T) {
 		for j := i; j < i+m && j < n; j++ {
 			require.NoError(t, txn.Set(data(j),
 				// Use a long value that will certainly exceed value threshold.
-				[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", j)),
-				0x00))
+				[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", j))))
 		}
 		require.NoError(t, txn.Commit(nil))
 	}
@@ -398,8 +397,7 @@ func TestExistsMore(t *testing.T) {
 		txn := kv.NewTransaction(true)
 		for j := i; j < i+m && j < n; j++ {
 			require.NoError(t, txn.Set([]byte(fmt.Sprintf("%09d", j)),
-				[]byte(fmt.Sprintf("%09d", j)),
-				0x00))
+				[]byte(fmt.Sprintf("%09d", j))))
 		}
 		require.NoError(t, txn.Commit(nil))
 	}
@@ -694,11 +692,11 @@ func TestBigKeyValuePairs(t *testing.T) {
 	small := make([]byte, 10)
 
 	txn := kv.NewTransaction(true)
-	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, small, 0))
-	require.Regexp(t, regexp.MustCompile("Value.*exceeded"), txn.Set(small, bigV, 0))
+	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, small))
+	require.Regexp(t, regexp.MustCompile("Value.*exceeded"), txn.Set(small, bigV))
 
-	require.NoError(t, txn.Set(small, small, 0x00))
-	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, bigV, 0x00))
+	require.NoError(t, txn.Set(small, small))
+	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, bigV))
 
 	require.NoError(t, kv.View(func(txn *Txn) error {
 		_, err := txn.Get(small)
@@ -775,7 +773,7 @@ func TestSetIfAbsentAsync(t *testing.T) {
 		txn := kv.NewTransaction(true)
 		_, err = txn.Get(bkey(i))
 		require.Equal(t, ErrKeyNotFound, err)
-		require.NoError(t, txn.Set(bkey(i), nil, byte(i%127)))
+		require.NoError(t, txn.SetWithMeta(bkey(i), nil, byte(i%127)))
 		require.NoError(t, txn.Commit(f))
 	}
 
@@ -858,7 +856,7 @@ func TestPurgeVersionsBelow(t *testing.T) {
 	// Write 4 versions of the same key
 	for i := 0; i < 4; i++ {
 		err = db.Update(func(txn *Txn) error {
-			return txn.Set([]byte("answer"), []byte(fmt.Sprintf("%25d", i)), 0)
+			return txn.Set([]byte("answer"), []byte(fmt.Sprintf("%25d", i)))
 		})
 		require.NoError(t, err)
 	}
@@ -915,12 +913,12 @@ func TestPurgeOlderVersions(t *testing.T) {
 
 	// Write two versions of a key
 	err = db.Update(func(txn *Txn) error {
-		return txn.Set([]byte("answer"), []byte("42"), 0)
+		return txn.Set([]byte("answer"), []byte("42"))
 	})
 	require.NoError(t, err)
 
 	err = db.Update(func(txn *Txn) error {
-		return txn.Set([]byte("answer"), []byte("43"), 0)
+		return txn.Set([]byte("answer"), []byte("43"))
 	})
 	require.NoError(t, err)
 
@@ -992,7 +990,7 @@ func ExampleOpen() {
 	}
 
 	txn := db.NewTransaction(true) // Read-write txn
-	err = txn.Set([]byte("key"), []byte("value"), 0)
+	err = txn.Set([]byte("key"), []byte("value"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1052,7 +1050,7 @@ func ExampleTxn_NewIterator() {
 	// Fill in 1000 items
 	n := 1000
 	for i := 0; i < n; i++ {
-		err := txn.Set(bkey(i), bval(i), 0)
+		err := txn.Set(bkey(i), bval(i))
 		if err != nil {
 			log.Fatal(err)
 		}

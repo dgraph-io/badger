@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
+	"time"
 
 	"github.com/dgraph-io/badger/y"
 )
@@ -73,20 +74,19 @@ func (h *header) Decode(buf []byte) {
 	h.userMeta = buf[9]
 }
 
-// entry provides Key, Value and if required, CASCounterCheck to kv.BatchSet() API.
-// If CASCounterCheck is provided, it would be compared against the current casCounter
-// assigned to this key-value. Set be done on this key only if the counters match.
-type entry struct {
+// Entry provides Key, Value, UserMeta and TTL. This struct can be used by the user to set data.
+type Entry struct {
 	Key      []byte
 	Value    []byte
-	Meta     byte
 	UserMeta byte
+	TTL      time.Duration
+	meta     byte
 
 	// Fields maintained internally.
 	offset uint32
 }
 
-func (e *entry) estimateSize(threshold int) int {
+func (e *Entry) estimateSize(threshold int) int {
 	if len(e.Value) < threshold {
 		return len(e.Key) + len(e.Value) + 2 // Meta, UserMeta
 	}
@@ -94,11 +94,11 @@ func (e *entry) estimateSize(threshold int) int {
 }
 
 // Encodes e to buf. Returns number of bytes written.
-func encodeEntry(e *entry, buf *bytes.Buffer) (int, error) {
+func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	var h header
 	h.klen = uint32(len(e.Key))
 	h.vlen = uint32(len(e.Value))
-	h.meta = e.Meta
+	h.meta = e.meta
 	h.userMeta = e.UserMeta
 
 	var headerEnc [headerBufSize]byte
@@ -122,7 +122,7 @@ func encodeEntry(e *entry, buf *bytes.Buffer) (int, error) {
 	return len(headerEnc) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
-func (e entry) print(prefix string) {
+func (e Entry) print(prefix string) {
 	fmt.Printf("%s Key: %s Meta: %d UserMeta: %d Offset: %d len(val)=%d",
-		prefix, e.Key, e.Meta, e.UserMeta, e.offset, len(e.Value))
+		prefix, e.Key, e.meta, e.UserMeta, e.offset, len(e.Value))
 }

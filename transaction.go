@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/dgraph-io/badger/y"
 	farm "github.com/dgryski/go-farm"
@@ -178,43 +179,63 @@ type Txn struct {
 	reads  []uint64 // contains fingerprints of keys read.
 	writes []uint64 // contains fingerprints of keys written.
 
-	pendingWrites map[string]*entry // cache stores any writes done by txn.
+	pendingWrites map[string]*Entry // cache stores any writes done by txn.
 
 	db        *DB
 	callbacks []func()
 	discarded bool
 }
 
-// Set sets the provided value for a given key. If key is not present, it is created.
+// Set is a wrapper around SetEntry.
+func (txn *Txn) Set(key, val []byte) error {
+	e := &Entry{
+		Key:   key,
+		Value: val,
+	}
+	return txn.SetEntry(e)
+}
+
+// SetWithMeta is a wrapper around SetEntry.
+func (txn *Txn) SetWithMeta(key, val []byte, meta byte) error {
+	e := &Entry{Key: key, Value: val, UserMeta: meta}
+	return txn.SetEntry(e)
+}
+
+// SetWithTTL is a wrapper around SetEntry.
+func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
+	e := &Entry{Key: key, Value: val, TTL: dur}
+	return txn.SetEntry(e)
+}
+
+// SetEntry sets the provided entry, containing the key, value, meta and TTL (time to live)
+// duration. If key is not present, it is created.
 //
-// Along with key and value, Set can also take an optional userMeta byte. This byte is stored
+// Along with key and value, Entry can also take an optional UserMeta byte. This byte is stored
 // alongside the key, and can be used as an aid to interpret the value or store other contextual
 // bits corresponding to the key-value pair.
 //
+// Entry can also take an optional TTL (time to live) duration. A key stored with TTL would
+// automatically expire after this duration, and be eligible for garbage collection.
+//
 // This would fail with ErrReadOnlyTxn if update flag was set to false when creating the
 // transaction.
-func (txn *Txn) Set(key, val []byte, userMeta byte) error {
-	if !txn.update {
+func (txn *Txn) SetEntry(entry *Entry) error {
+	switch {
+	case !txn.update:
 		return ErrReadOnlyTxn
-	} else if txn.discarded {
+	case txn.discarded:
 		return ErrDiscardedTxn
-	} else if len(key) == 0 {
+	case len(entry.Key) == 0:
 		return ErrEmptyKey
-	} else if len(key) > maxKeySize {
-		return exceedsMaxKeySizeError(key)
-	} else if int64(len(val)) > txn.db.opt.ValueLogFileSize {
-		return exceedsMaxValueSizeError(val, txn.db.opt.ValueLogFileSize)
+	case len(entry.Key) > maxKeySize:
+		return exceedsMaxKeySizeError(entry.Key)
+	case int64(len(entry.Value)) > txn.db.opt.ValueLogFileSize:
+		return exceedsMaxValueSizeError(entry.Value, txn.db.opt.ValueLogFileSize)
 	}
 
-	fp := farm.Fingerprint64(key) // Avoid dealing with byte arrays.
+	fp := farm.Fingerprint64(entry.Key) // Avoid dealing with byte arrays.
 	txn.writes = append(txn.writes, fp)
-
-	e := &entry{
-		Key:      key,
-		Value:    val,
-		UserMeta: userMeta,
-	}
-	txn.pendingWrites[string(key)] = e
+	txn.pendingWrites[string(entry.Key)] = entry
 	return nil
 }
 
@@ -235,9 +256,9 @@ func (txn *Txn) Delete(key []byte) error {
 	fp := farm.Fingerprint64(key) // Avoid dealing with byte arrays.
 	txn.writes = append(txn.writes, fp)
 
-	e := &entry{
+	e := &Entry{
 		Key:  key,
-		Meta: bitDelete,
+		meta: bitDelete,
 	}
 	txn.pendingWrites[string(key)] = e
 	return nil
@@ -256,7 +277,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	if txn.update {
 		if e, has := txn.pendingWrites[string(key)]; has && bytes.Equal(key, e.Key) {
 			// Fulfill from cache.
-			item.meta = e.Meta
+			item.meta = e.meta
 			item.val = e.Value
 			item.userMeta = e.UserMeta
 			item.key = key
@@ -349,18 +370,18 @@ func (txn *Txn) Commit(callback func(error)) error {
 	}
 	defer state.doneCommit(commitTs)
 
-	entries := make([]*entry, 0, len(txn.pendingWrites)+1)
+	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
 	for _, e := range txn.pendingWrites {
 		// Suffix the keys with commit ts, so the key versions are sorted in
 		// descending order of commit timestamp.
 		e.Key = y.KeyWithTs(e.Key, commitTs)
-		e.Meta |= bitTxn
+		e.meta |= bitTxn
 		entries = append(entries, e)
 	}
-	e := &entry{
+	e := &Entry{
 		Key:   y.KeyWithTs(txnKey, commitTs),
 		Value: []byte(strconv.FormatUint(commitTs, 10)),
-		Meta:  bitFinTxn,
+		meta:  bitFinTxn,
 	}
 	entries = append(entries, e)
 
@@ -401,7 +422,7 @@ func (db *DB) NewTransaction(update bool) *Txn {
 		readTs: db.orc.readTs(),
 	}
 	if update {
-		txn.pendingWrites = make(map[string]*entry)
+		txn.pendingWrites = make(map[string]*Entry)
 		txn.db.orc.addRef()
 	}
 	return txn
