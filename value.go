@@ -233,7 +233,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		}
 		e.meta = h.meta
 		e.UserMeta = h.userMeta
-		e.ExpiresAt = h.expiry
+		e.ExpiresAt = h.expiresAt
 
 		var vp valuePointer
 		vp.Len = headerBufSize + h.klen + h.vlen + uint32(len(crcBuf))

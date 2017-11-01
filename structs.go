@@ -47,11 +47,11 @@ func (p *valuePointer) Decode(b []byte) {
 
 // header is used in value log as a header before Entry.
 type header struct {
-	klen     uint32
-	vlen     uint32
-	expiry   uint64
-	meta     byte
-	userMeta byte
+	klen      uint32
+	vlen      uint32
+	expiresAt uint64
+	meta      byte
+	userMeta  byte
 }
 
 const (
@@ -62,7 +62,7 @@ func (h header) Encode(out []byte) {
 	y.AssertTrue(len(out) >= headerBufSize)
 	binary.BigEndian.PutUint32(out[0:4], h.klen)
 	binary.BigEndian.PutUint32(out[4:8], h.vlen)
-	binary.BigEndian.PutUint64(out[8:16], h.expiry)
+	binary.BigEndian.PutUint64(out[8:16], h.expiresAt)
 	out[16] = h.meta
 	out[17] = h.userMeta
 }
@@ -71,7 +71,7 @@ func (h header) Encode(out []byte) {
 func (h *header) Decode(buf []byte) {
 	h.klen = binary.BigEndian.Uint32(buf[0:4])
 	h.vlen = binary.BigEndian.Uint32(buf[4:8])
-	h.expiry = binary.BigEndian.Uint64(buf[8:16])
+	h.expiresAt = binary.BigEndian.Uint64(buf[8:16])
 	h.meta = buf[16]
 	h.userMeta = buf[17]
 }
@@ -98,11 +98,11 @@ func (e *Entry) estimateSize(threshold int) int {
 // Encodes e to buf. Returns number of bytes written.
 func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	h := header{
-		klen:     uint32(len(e.Key)),
-		vlen:     uint32(len(e.Value)),
-		expiry:   e.ExpiresAt,
-		meta:     e.meta,
-		userMeta: e.UserMeta,
+		klen:      uint32(len(e.Key)),
+		vlen:      uint32(len(e.Value)),
+		expiresAt: e.ExpiresAt,
+		meta:      e.meta,
+		userMeta:  e.UserMeta,
 	}
 
 	var headerEnc [headerBufSize]byte
