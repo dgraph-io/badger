@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"container/heap"
 	"encoding/binary"
-	"math/bits"
 
 	"github.com/pkg/errors"
 )
@@ -36,13 +35,25 @@ type ValueStruct struct {
 	Version uint64 // This field is not serialized. Only for internal usage.
 }
 
+func sizeVarint(x uint64) (n int) {
+	for {
+		n++
+		x >>= 7
+		if x == 0 {
+			break
+		}
+	}
+	return n
+}
+
 // EncodedSize is the size of the ValueStruct when encoded
 func (v *ValueStruct) EncodedSize() uint16 {
 	sz := len(v.Value) + 2 // meta, usermeta.
 	if v.Expiry == 0 {
 		return uint16(sz + 1)
 	}
-	enc := bits.Len64(v.Expiry)/7 + 1
+
+	enc := sizeVarint(v.Expiry)/7 + 1
 	return uint16(sz + enc)
 }
 
@@ -63,8 +74,9 @@ func (v *ValueStruct) Encode(b []byte) {
 	copy(b[2+sz:], v.Value)
 }
 
-// This should be kept in sync with the Encode function above.  The reason this function exists is
-// to avoid creating byte arrays per key-value pair in talbe/builder.go.
+// EncodeTo should be kept in sync with the Encode function above. The reason
+// this function exists is to avoid creating byte arrays per key-value pair in
+// table/builder.go.
 func (v *ValueStruct) EncodeTo(buf *bytes.Buffer) {
 	buf.WriteByte(v.Meta)
 	buf.WriteByte(v.UserMeta)

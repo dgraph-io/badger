@@ -846,7 +846,7 @@ func discardEntry(e Entry, vs y.ValueStruct) bool {
 		// Version not found. Discard.
 		return true
 	}
-	if isExpired(vs) {
+	if isDeletedOrExpired(vs) {
 		return true
 	}
 	if (vs.Meta & bitValuePointer) == 0 {

@@ -301,7 +301,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	if vs.Value == nil && vs.Meta == 0 {
 		return nil, ErrKeyNotFound
 	}
-	if isExpired(vs) {
+	if isDeletedOrExpired(vs) {
 		return nil, ErrKeyNotFound
 	}
 

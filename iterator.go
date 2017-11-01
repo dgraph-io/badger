@@ -301,7 +301,7 @@ func (it *Iterator) Next() {
 	}
 }
 
-func isExpired(vs y.ValueStruct) bool {
+func isDeletedOrExpired(vs y.ValueStruct) bool {
 	if vs.Meta&bitDelete > 0 {
 		return true
 	}
@@ -344,7 +344,7 @@ func (it *Iterator) parseItem() bool {
 
 	if it.opt.AllVersions {
 		// First check if value has been expired.
-		if isExpired(mi.Value()) {
+		if isDeletedOrExpired(mi.Value()) {
 			mi.Next()
 			return false
 		}
@@ -372,7 +372,7 @@ func (it *Iterator) parseItem() bool {
 
 FILL:
 	// If deleted, advance and return.
-	if isExpired(mi.Value()) {
+	if isDeletedOrExpired(mi.Value()) {
 		mi.Next()
 		return false
 	}
