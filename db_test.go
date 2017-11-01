@@ -984,17 +984,26 @@ func TestExpiry(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 
+	// Verify that only unexpired key is found during iteration
+	err = db.View(func(txn *Txn) error {
+		_, err := txn.Get([]byte("answer1"))
+		require.NoError(t, err)
+
+		_, err = txn.Get([]byte("answer2"))
+		require.Error(t, ErrKeyNotFound, err)
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Verify that only one key is found during iteration
 	opts := DefaultIteratorOptions
 	opts.PrefetchValues = false
-
-	// Verify that two versions are found during iteration
 	err = db.View(func(txn *Txn) error {
 		it := txn.NewIterator(opts)
 		var count int
 		for it.Rewind(); it.Valid(); it.Next() {
 			count++
 			item := it.Item()
-			t.Logf("Found %s\n", item.Key())
 			require.Equal(t, []byte("answer1"), item.Key())
 		}
 		require.Equal(t, 1, count)
