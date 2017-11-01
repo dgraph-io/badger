@@ -28,6 +28,7 @@ import (
 	"sort"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
@@ -956,6 +957,45 @@ func TestPurgeOlderVersions(t *testing.T) {
 			require.NoError(t, err)
 			t.Logf("Item value is %q", val)
 			//require.Equal(t, []byte("43"), val)
+		}
+		require.Equal(t, 1, count)
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+func TestExpiry(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	db, err := Open(getTestOptions(dir))
+	require.NoError(t, err)
+
+	// Write two keys, one with a TTL
+	err = db.Update(func(txn *Txn) error {
+		return txn.Set([]byte("answer1"), []byte("42"))
+	})
+	require.NoError(t, err)
+
+	err = db.Update(func(txn *Txn) error {
+		return txn.SetWithTTL([]byte("answer2"), []byte("43"), 1*time.Second)
+	})
+	require.NoError(t, err)
+
+	time.Sleep(2 * time.Second)
+
+	opts := DefaultIteratorOptions
+	opts.PrefetchValues = false
+
+	// Verify that two versions are found during iteration
+	err = db.View(func(txn *Txn) error {
+		it := txn.NewIterator(opts)
+		var count int
+		for it.Rewind(); it.Valid(); it.Next() {
+			count++
+			item := it.Item()
+			t.Logf("Found %s\n", item.Key())
+			require.Equal(t, []byte("answer1"), item.Key())
 		}
 		require.Equal(t, 1, count)
 		return nil
