@@ -74,12 +74,12 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 func (db *DB) Load(r io.Reader) error {
 	br := bufio.NewReaderSize(r, 16<<10)
 	unmarshalBuf := make([]byte, 1<<10)
-	var entries []*Entry
+	var entries []*entry
 	var wg sync.WaitGroup
 	errChan := make(chan error, 1)
 
 	// func to check for pending error before sending off a batch for writing
-	batchSetAsyncIfNoErr := func(entries []*Entry) error {
+	batchSetAsyncIfNoErr := func(entries []*entry) error {
 		select {
 		case err := <-errChan:
 			return err
@@ -117,7 +117,7 @@ func (db *DB) Load(r io.Reader) error {
 		if err = e.Unmarshal(unmarshalBuf[:sz]); err != nil {
 			return err
 		}
-		entries = append(entries, &Entry{
+		entries = append(entries, &entry{
 			Key:      y.KeyWithTs(e.Key, e.Version),
 			Value:    e.Value,
 			UserMeta: e.UserMeta[0],

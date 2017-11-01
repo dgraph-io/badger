@@ -78,7 +78,7 @@ const (
 	kvWriteChCapacity = 1000
 )
 
-func replayFunction(out *DB) func(Entry, valuePointer) error {
+func replayFunction(out *DB) func(entry, valuePointer) error {
 	type txnEntry struct {
 		nk []byte
 		v  y.ValueStruct
@@ -96,7 +96,7 @@ func replayFunction(out *DB) func(Entry, valuePointer) error {
 	}
 
 	first := true
-	return func(e Entry, vp valuePointer) error { // Function for replaying.
+	return func(e entry, vp valuePointer) error { // Function for replaying.
 		if first {
 			out.elog.Printf("First key=%s\n", e.Key)
 		}
@@ -478,7 +478,7 @@ var requestPool = sync.Pool{
 	},
 }
 
-func (db *DB) shouldWriteValueToLSM(e Entry) bool {
+func (db *DB) shouldWriteValueToLSM(e entry) bool {
 	return len(e.Value) < db.opt.ValueThreshold
 }
 
@@ -563,7 +563,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 	return nil
 }
 
-func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
+func (db *DB) sendToWriteCh(entries []*entry) (*request, error) {
 	var count, size int64
 	for _, e := range entries {
 		size += int64(db.opt.estimateSize(e))
@@ -648,7 +648,7 @@ func (db *DB) doWrites(lc *y.Closer) {
 // batchSet applies a list of badger.Entry. If a request level error occurs it
 // will be returned.
 //   Check(kv.BatchSet(entries))
-func (db *DB) batchSet(entries []*Entry) error {
+func (db *DB) batchSet(entries []*entry) error {
 	req, err := db.sendToWriteCh(entries)
 	if err != nil {
 		return err
@@ -667,7 +667,7 @@ func (db *DB) batchSet(entries []*Entry) error {
 //   err := kv.BatchSetAsync(entries, func(err error)) {
 //      Check(err)
 //   }
-func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
+func (db *DB) batchSetAsync(entries []*entry, f func(error)) error {
 	req, err := db.sendToWriteCh(entries)
 	if err != nil {
 		return err
@@ -877,7 +877,7 @@ func (db *DB) purgeVersionsBelow(txn *Txn, key []byte, ts uint64) error {
 	opts.PrefetchValues = false
 	it := txn.NewIterator(opts)
 
-	var entries []*Entry
+	var entries []*entry
 
 	for it.Seek(key); it.ValidForPrefix(key); it.Next() {
 		item := it.Item()
@@ -887,7 +887,7 @@ func (db *DB) purgeVersionsBelow(txn *Txn, key []byte, ts uint64) error {
 
 		// Found an older version. Mark for deletion
 		entries = append(entries,
-			&Entry{
+			&entry{
 				Key:  y.KeyWithTs(key, item.version),
 				meta: bitDelete,
 			})
@@ -909,14 +909,14 @@ func (db *DB) PurgeOlderVersions() error {
 		opts.PrefetchValues = false
 		it := txn.NewIterator(opts)
 
-		var entries []*Entry
+		var entries []*entry
 		var lastKey []byte
 		var count int
 		var wg sync.WaitGroup
 		errChan := make(chan error, 1)
 
 		// func to check for pending error before sending off a batch for writing
-		batchSetAsyncIfNoErr := func(entries []*Entry) error {
+		batchSetAsyncIfNoErr := func(entries []*entry) error {
 			select {
 			case err := <-errChan:
 				return err
@@ -942,7 +942,7 @@ func (db *DB) PurgeOlderVersions() error {
 			}
 			// Found an older version. Mark for deletion
 			entries = append(entries,
-				&Entry{
+				&entry{
 					Key:  y.KeyWithTs(lastKey, item.version),
 					meta: bitDelete,
 				})
@@ -955,7 +955,7 @@ func (db *DB) PurgeOlderVersions() error {
 					return err
 				}
 				count = 0
-				entries = []*Entry{}
+				entries = []*entry{}
 			}
 		}
 
