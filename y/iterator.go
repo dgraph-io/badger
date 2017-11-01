@@ -53,7 +53,7 @@ func (v *ValueStruct) EncodedSize() uint16 {
 		return uint16(sz + 1)
 	}
 
-	enc := sizeVarint(v.Expiry)/7 + 1
+	enc := sizeVarint(v.Expiry)
 	return uint16(sz + enc)
 }
 
