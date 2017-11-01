@@ -48,10 +48,11 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 			}
 
 			entry := &protos.KVPair{
-				Key:      y.Copy(item.Key()),
-				Value:    y.Copy(val),
-				UserMeta: []byte{item.UserMeta()},
-				Version:  item.Version(),
+				Key:       y.Copy(item.Key()),
+				Value:     y.Copy(val),
+				UserMeta:  []byte{item.UserMeta()},
+				Version:   item.Version(),
+				ExpiresAt: item.ExpiresAt(),
 			}
 
 			// Write entries to disk
@@ -118,9 +119,10 @@ func (db *DB) Load(r io.Reader) error {
 			return err
 		}
 		entries = append(entries, &entry{
-			Key:      y.KeyWithTs(e.Key, e.Version),
-			Value:    e.Value,
-			UserMeta: e.UserMeta[0],
+			Key:       y.KeyWithTs(e.Key, e.Version),
+			Value:     e.Value,
+			UserMeta:  e.UserMeta[0],
+			ExpiresAt: e.ExpiresAt,
 		})
 
 		if len(entries) == 1000 {
