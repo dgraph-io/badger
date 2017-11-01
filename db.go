@@ -497,6 +497,7 @@ func (db *DB) writeToLSM(b *request) error {
 					Value:    entry.Value,
 					Meta:     entry.meta,
 					UserMeta: entry.UserMeta,
+					Expiry:   entry.ExpiresAt,
 				})
 		} else {
 			var offsetBuf [vptrSize]byte
@@ -505,6 +506,7 @@ func (db *DB) writeToLSM(b *request) error {
 					Value:    b.Ptrs[i].Encode(offsetBuf[:]),
 					Meta:     entry.meta | bitValuePointer,
 					UserMeta: entry.UserMeta,
+					Expiry:   entry.ExpiresAt,
 				})
 		}
 	}

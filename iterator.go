@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/dgraph-io/badger/y"
 	farm "github.com/dgryski/go-farm"
@@ -40,7 +41,7 @@ type Item struct {
 	db       *DB
 	key      []byte
 	vptr     []byte
-	meta     byte
+	meta     byte // We need to store meta to know about bitValuePointer.
 	userMeta byte
 	val      []byte
 	slice    *y.Slice // Used only during prefetching.
@@ -87,10 +88,6 @@ func (item *Item) Value() ([]byte, error) {
 func (item *Item) hasValue() bool {
 	if item.meta == 0 && item.vptr == nil {
 		// key not found
-		return false
-	}
-	if (item.meta & bitDelete) != 0 {
-		// Tombstone encountered.
 		return false
 	}
 	return true
@@ -304,6 +301,16 @@ func (it *Iterator) Next() {
 	}
 }
 
+func isExpired(vs y.ValueStruct) bool {
+	if vs.Meta&bitDelete > 0 {
+		return true
+	}
+	if vs.Expiry == 0 {
+		return false
+	}
+	return vs.Expiry <= uint64(time.Now().Unix())
+}
+
 // parseItem is a complex function because it needs to handle both forward and reverse iteration
 // implementation. We store keys such that their versions are sorted in descending order. This makes
 // forward iteration efficient, but revese iteration complicated. This tradeoff is better because
@@ -336,8 +343,8 @@ func (it *Iterator) parseItem() bool {
 	}
 
 	if it.opt.AllVersions {
-		// First check if value has been deleted
-		if mi.Value().Meta&bitDelete > 0 {
+		// First check if value has been expired.
+		if isExpired(mi.Value()) {
 			mi.Next()
 			return false
 		}
@@ -365,7 +372,7 @@ func (it *Iterator) parseItem() bool {
 
 FILL:
 	// If deleted, advance and return.
-	if mi.Value().Meta&bitDelete > 0 {
+	if isExpired(mi.Value()) {
 		mi.Next()
 		return false
 	}

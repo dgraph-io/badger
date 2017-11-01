@@ -203,7 +203,8 @@ func (txn *Txn) SetWithMeta(key, val []byte, meta byte) error {
 
 // SetWithTTL is a wrapper around SetEntry.
 func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
-	e := &Entry{Key: key, Value: val, TTL: dur}
+	expire := time.Now().Add(dur).Unix()
+	e := &Entry{Key: key, Value: val, ExpiresAt: uint64(expire)}
 	return txn.SetEntry(e)
 }
 
@@ -214,8 +215,8 @@ func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
 // alongside the key, and can be used as an aid to interpret the value or store other contextual
 // bits corresponding to the key-value pair.
 //
-// Entry can also take an optional TTL (time to live) duration. A key stored with TTL would
-// automatically expire after this duration, and be eligible for garbage collection.
+// Entry can also take an optional ExpiresAt, which is time in Unix epoch seconds. A key stored with
+// ExpiresAt would automatically expire after this time, and be eligible for garbage collection.
 //
 // This would fail with ErrReadOnlyTxn if update flag was set to false when creating the
 // transaction.
@@ -300,7 +301,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	if vs.Value == nil && vs.Meta == 0 {
 		return nil, ErrKeyNotFound
 	}
-	if (vs.Meta & bitDelete) != 0 {
+	if isExpired(vs) {
 		return nil, ErrKeyNotFound
 	}
 

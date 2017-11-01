@@ -210,8 +210,6 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 			}
 			return err
 		}
-		e.meta = h.meta
-		e.UserMeta = h.userMeta
 		if _, err = io.ReadFull(tee, e.Value); err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				truncate = true
@@ -233,9 +231,11 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 			truncate = true
 			break
 		}
+		e.meta = h.meta
+		e.UserMeta = h.userMeta
+		e.ExpiresAt = h.expiry
 
 		var vp valuePointer
-
 		vp.Len = headerBufSize + h.klen + h.vlen + uint32(len(crcBuf))
 		recordOffset += vp.Len
 
@@ -771,12 +771,7 @@ func (vlog *valueLog) Read(vp valuePointer) ([]byte, func(), error) {
 	}
 	var h header
 	h.Decode(buf)
-	if (h.meta & bitDelete) != 0 {
-		// Tombstone key
-		return nil, cb, nil
-	}
-	n := uint32(headerBufSize)
-	n += h.klen
+	n := uint32(headerBufSize) + h.klen
 	return buf[n : n+h.vlen], cb, nil
 }
 
@@ -851,8 +846,7 @@ func discardEntry(e Entry, vs y.ValueStruct) bool {
 		// Version not found. Discard.
 		return true
 	}
-	if (vs.Meta & bitDelete) > 0 {
-		// Key deleted. Discard.
+	if isExpired(vs) {
 		return true
 	}
 	if (vs.Meta & bitValuePointer) == 0 {
