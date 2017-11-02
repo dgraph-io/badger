@@ -267,6 +267,46 @@ func TestExists(t *testing.T) {
 
 }
 
+func TestTxnTooBig(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, err := Open(getTestOptions(dir))
+	if err != nil {
+		t.Error(err)
+		t.Fail()
+	}
+	defer kv.Close()
+	data := func(i int) []byte {
+		return []byte(fmt.Sprintf("%b", i))
+	}
+	//	n := 500000
+	n := 1000
+	txn := kv.NewTransaction(true)
+	for i := 0; i < n; {
+		if err := txn.Set(data(i), data(i), 0); err != nil {
+			// t.Logf("Error: %v. Commiting this set transaction", err)
+			require.NoError(t, txn.Commit(nil))
+			txn = kv.NewTransaction(true)
+		} else {
+			i++
+		}
+	}
+	require.NoError(t, txn.Commit(nil))
+
+	txn = kv.NewTransaction(true)
+	for i := 0; i < n; {
+		if err := txn.Delete(data(i)); err != nil {
+			// t.Logf("Error: %v. Commiting this delete transaction", err)
+			require.NoError(t, txn.Commit(nil))
+			txn = kv.NewTransaction(true)
+		} else {
+			i++
+		}
+	}
+	require.NoError(t, txn.Commit(nil))
+}
+
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestGetMore(t *testing.T) {

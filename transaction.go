@@ -183,6 +183,19 @@ type Txn struct {
 	db        *DB
 	callbacks []func()
 	discarded bool
+
+	size  int64
+	count int64
+}
+
+func (txn *Txn) checkSize(e *entry) error {
+	count := txn.count + 1
+	size := txn.size + int64(txn.db.opt.estimateSize(e)) + 10 // Extra bytes for version in key.
+	if count >= txn.db.opt.maxBatchCount || size >= txn.db.opt.maxBatchSize {
+		return ErrTxnTooBig
+	}
+	txn.count, txn.size = count, size
+	return nil
 }
 
 // Set sets the provided value for a given key. If key is not present, it is created.
@@ -206,14 +219,18 @@ func (txn *Txn) Set(key, val []byte, userMeta byte) error {
 		return exceedsMaxValueSizeError(val, txn.db.opt.ValueLogFileSize)
 	}
 
-	fp := farm.Fingerprint64(key) // Avoid dealing with byte arrays.
-	txn.writes = append(txn.writes, fp)
-
 	e := &entry{
 		Key:      key,
 		Value:    val,
 		UserMeta: userMeta,
 	}
+	if err := txn.checkSize(e); err != nil {
+		return err
+	}
+
+	fp := farm.Fingerprint64(key) // Avoid dealing with byte arrays.
+	txn.writes = append(txn.writes, fp)
+
 	txn.pendingWrites[string(key)] = e
 	return nil
 }
@@ -232,13 +249,17 @@ func (txn *Txn) Delete(key []byte) error {
 		return exceedsMaxKeySizeError(key)
 	}
 
-	fp := farm.Fingerprint64(key) // Avoid dealing with byte arrays.
-	txn.writes = append(txn.writes, fp)
-
 	e := &entry{
 		Key:  key,
 		Meta: bitDelete,
 	}
+	if err := txn.checkSize(e); err != nil {
+		return err
+	}
+
+	fp := farm.Fingerprint64(key) // Avoid dealing with byte arrays.
+	txn.writes = append(txn.writes, fp)
+
 	txn.pendingWrites[string(key)] = e
 	return nil
 }
@@ -399,6 +420,8 @@ func (db *DB) NewTransaction(update bool) *Txn {
 		update: update,
 		db:     db,
 		readTs: db.orc.readTs(),
+		count:  1,                       // One extra entry for BitFin.
+		size:   int64(len(txnKey) + 10), // Some buffer for the extra entry.
 	}
 	if update {
 		txn.pendingWrites = make(map[string]*entry)
