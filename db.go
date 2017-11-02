@@ -566,7 +566,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 func (db *DB) sendToWriteCh(entries []*entry) (*request, error) {
 	var count, size int64
 	for _, e := range entries {
-		size += int64(db.opt.estimateSize(e))
+		size += int64(e.estimateSize(db.opt.ValueThreshold))
 		count++
 	}
 	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {

@@ -191,7 +191,8 @@ type Txn struct {
 
 func (txn *Txn) checkSize(e *entry) error {
 	count := txn.count + 1
-	size := txn.size + int64(txn.db.opt.estimateSize(e)) + 10 // Extra bytes for version in key.
+	// Extra bytes for version in key.
+	size := txn.size + int64(e.estimateSize(txn.db.opt.ValueThreshold)) + 10 
 	if count >= txn.db.opt.maxBatchCount || size >= txn.db.opt.maxBatchSize {
 		return ErrTxnTooBig
 	}

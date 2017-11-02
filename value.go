@@ -310,7 +310,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
 			wb = append(wb, ne)
-			size += int64(vlog.opt.estimateSize(ne))
+			size += int64(e.estimateSize(vlog.opt.ValueThreshold))
 			if size >= 64*mi {
 				elog.Printf("request has %d entries, size %d", len(wb), size)
 				if err := vlog.kv.batchSet(wb); err != nil {
