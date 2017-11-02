@@ -285,8 +285,7 @@ func TestTxnTooBig(t *testing.T) {
 	n := 1000
 	txn := kv.NewTransaction(true)
 	for i := 0; i < n; {
-		if err := txn.Set(data(i), data(i), 0); err != nil {
-			// t.Logf("Error: %v. Commiting this set transaction", err)
+		if err := txn.Set(data(i), data(i)); err != nil {
 			require.NoError(t, txn.Commit(nil))
 			txn = kv.NewTransaction(true)
 		} else {
@@ -298,7 +297,6 @@ func TestTxnTooBig(t *testing.T) {
 	txn = kv.NewTransaction(true)
 	for i := 0; i < n; {
 		if err := txn.Delete(data(i)); err != nil {
-			// t.Logf("Error: %v. Commiting this delete transaction", err)
 			require.NoError(t, txn.Commit(nil))
 			txn = kv.NewTransaction(true)
 		} else {
