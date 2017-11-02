@@ -28,6 +28,7 @@ import (
 	"sort"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
@@ -56,7 +57,7 @@ func getItemValue(t *testing.T, item *Item) (val []byte) {
 
 func txnSet(t *testing.T, kv *DB, key []byte, val []byte, meta byte) {
 	txn := kv.NewTransaction(true)
-	require.NoError(t, txn.Set(key, val, meta))
+	require.NoError(t, txn.SetWithMeta(key, val, meta))
 	require.NoError(t, txn.Commit(nil))
 }
 
@@ -89,7 +90,7 @@ func TestUpdateAndView(t *testing.T) {
 
 	err = db.Update(func(txn *Txn) error {
 		for i := 0; i < 10; i++ {
-			err := txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)), 0x00)
+			err := txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)))
 			if err != nil {
 				return err
 			}
@@ -289,7 +290,7 @@ func TestGetMore(t *testing.T) {
 	for i := 0; i < n; i += m {
 		txn := kv.NewTransaction(true)
 		for j := i; j < i+m && j < n; j++ {
-			require.NoError(t, txn.Set(data(j), data(j), 0))
+			require.NoError(t, txn.Set(data(j), data(j)))
 		}
 		require.NoError(t, txn.Commit(nil))
 	}
@@ -311,8 +312,7 @@ func TestGetMore(t *testing.T) {
 		for j := i; j < i+m && j < n; j++ {
 			require.NoError(t, txn.Set(data(j),
 				// Use a long value that will certainly exceed value threshold.
-				[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", j)),
-				0x00))
+				[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", j))))
 		}
 		require.NoError(t, txn.Commit(nil))
 	}
@@ -398,8 +398,7 @@ func TestExistsMore(t *testing.T) {
 		txn := kv.NewTransaction(true)
 		for j := i; j < i+m && j < n; j++ {
 			require.NoError(t, txn.Set([]byte(fmt.Sprintf("%09d", j)),
-				[]byte(fmt.Sprintf("%09d", j)),
-				0x00))
+				[]byte(fmt.Sprintf("%09d", j))))
 		}
 		require.NoError(t, txn.Commit(nil))
 	}
@@ -694,11 +693,11 @@ func TestBigKeyValuePairs(t *testing.T) {
 	small := make([]byte, 10)
 
 	txn := kv.NewTransaction(true)
-	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, small, 0))
-	require.Regexp(t, regexp.MustCompile("Value.*exceeded"), txn.Set(small, bigV, 0))
+	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, small))
+	require.Regexp(t, regexp.MustCompile("Value.*exceeded"), txn.Set(small, bigV))
 
-	require.NoError(t, txn.Set(small, small, 0x00))
-	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, bigV, 0x00))
+	require.NoError(t, txn.Set(small, small))
+	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, bigV))
 
 	require.NoError(t, kv.View(func(txn *Txn) error {
 		_, err := txn.Get(small)
@@ -775,7 +774,7 @@ func TestSetIfAbsentAsync(t *testing.T) {
 		txn := kv.NewTransaction(true)
 		_, err = txn.Get(bkey(i))
 		require.Equal(t, ErrKeyNotFound, err)
-		require.NoError(t, txn.Set(bkey(i), nil, byte(i%127)))
+		require.NoError(t, txn.SetWithMeta(bkey(i), nil, byte(i%127)))
 		require.NoError(t, txn.Commit(f))
 	}
 
@@ -858,7 +857,7 @@ func TestPurgeVersionsBelow(t *testing.T) {
 	// Write 4 versions of the same key
 	for i := 0; i < 4; i++ {
 		err = db.Update(func(txn *Txn) error {
-			return txn.Set([]byte("answer"), []byte(fmt.Sprintf("%25d", i)), 0)
+			return txn.Set([]byte("answer"), []byte(fmt.Sprintf("%25d", i)))
 		})
 		require.NoError(t, err)
 	}
@@ -915,12 +914,12 @@ func TestPurgeOlderVersions(t *testing.T) {
 
 	// Write two versions of a key
 	err = db.Update(func(txn *Txn) error {
-		return txn.Set([]byte("answer"), []byte("42"), 0)
+		return txn.Set([]byte("answer"), []byte("42"))
 	})
 	require.NoError(t, err)
 
 	err = db.Update(func(txn *Txn) error {
-		return txn.Set([]byte("answer"), []byte("43"), 0)
+		return txn.Set([]byte("answer"), []byte("43"))
 	})
 	require.NoError(t, err)
 
@@ -965,6 +964,54 @@ func TestPurgeOlderVersions(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestExpiry(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	db, err := Open(getTestOptions(dir))
+	require.NoError(t, err)
+
+	// Write two keys, one with a TTL
+	err = db.Update(func(txn *Txn) error {
+		return txn.Set([]byte("answer1"), []byte("42"))
+	})
+	require.NoError(t, err)
+
+	err = db.Update(func(txn *Txn) error {
+		return txn.SetWithTTL([]byte("answer2"), []byte("43"), 1*time.Second)
+	})
+	require.NoError(t, err)
+
+	time.Sleep(2 * time.Second)
+
+	// Verify that only unexpired key is found during iteration
+	err = db.View(func(txn *Txn) error {
+		_, err := txn.Get([]byte("answer1"))
+		require.NoError(t, err)
+
+		_, err = txn.Get([]byte("answer2"))
+		require.Error(t, ErrKeyNotFound, err)
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Verify that only one key is found during iteration
+	opts := DefaultIteratorOptions
+	opts.PrefetchValues = false
+	err = db.View(func(txn *Txn) error {
+		it := txn.NewIterator(opts)
+		var count int
+		for it.Rewind(); it.Valid(); it.Next() {
+			count++
+			item := it.Item()
+			require.Equal(t, []byte("answer1"), item.Key())
+		}
+		require.Equal(t, 1, count)
+		return nil
+	})
+	require.NoError(t, err)
+}
+
 func ExampleOpen() {
 	dir, err := ioutil.TempDir("", "badger")
 	if err != nil {
@@ -992,7 +1039,7 @@ func ExampleOpen() {
 	}
 
 	txn := db.NewTransaction(true) // Read-write txn
-	err = txn.Set([]byte("key"), []byte("value"), 0)
+	err = txn.Set([]byte("key"), []byte("value"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1052,7 +1099,7 @@ func ExampleTxn_NewIterator() {
 	// Fill in 1000 items
 	n := 1000
 	for i := 0; i < n; i++ {
-		err := txn.Set(bkey(i), bval(i), 0)
+		err := txn.Set(bkey(i), bval(i))
 		if err != nil {
 			log.Fatal(err)
 		}

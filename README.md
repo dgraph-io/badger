@@ -26,6 +26,7 @@ We are currently gearing up for a [v1.0 release][v1-milestone].
       - [Read-write transactions](#read-write-transactions)
       - [Managing transactions manually](#managing-transactions-manually)
     + [Using key/value pairs](#using-keyvalue-pairs)
+    + [Setting Time To Live(TTL) and User Metadata on Keys](#setting-time-to-livettl-and-user-metadata-on-keys)
     + [Iterating over keys](#iterating-over-keys)
       - [Prefix scans](#prefix-scans)
       - [Key-only iteration](#key-only-iteration)
@@ -150,7 +151,7 @@ if err != nil {
 defer txn.Discard()
 
 // Use the transaction...
-err := txn.Set([]byte("answer"), []byte("42"), 0)
+err := txn.Set([]byte("answer"), []byte("42"))
 if err != nil {
     return err
 }
@@ -178,7 +179,7 @@ To save a key/value pair, use the `Txn.Set()` method:
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  err := txn.Set([]byte("answer"), []byte("42"), 0)
+  err := txn.Set([]byte("answer"), []byte("42"))
   return err
 })
 ```
@@ -208,6 +209,17 @@ transaction is open. If you need to use a value outside of the transaction
 then you must use `copy()` to copy it to another byte slice.
 
 Use the `Txn.Delete()` method to delete a key.
+
+### Setting Time To Live(TTL) and User Metadata on Keys
+Badger allows setting an optional Time to Live (TTL) value on keys. Once the TTL has
+elapsed, the key will no longer be retrievable and will be eligible for garbage
+collection. A TTL can be set as a `time.Duration` value using the `Txn.SetWithTTL()`
+API method.
+
+An optional user metadata value can be set on each key. A user metadata value
+is represented by a single byte. It can be used to set certain bits along
+with the key to aid in interpreting or decoding the key-value pair. User
+metadata can be set using the `Txn.SetWithMeta()` API method.
 
 ### Iterating over keys
 To iterate over keys, we can use an `Iterator`, which can be obtained using the
@@ -386,6 +398,7 @@ Values in SSD-conscious Storage][wisckey]_.
 | Pure Go (no Cgo)    | Yes                                          | No                            | Yes       |
 | Transactions        | Yes, ACID, concurrent with SSI<sup>3</sup> | Yes (but non-ACID)            | Yes, ACID |
 | Snapshots           | Yes                                           | Yes                           | Yes       |
+| TTL support         | Yes                                           | Yes                           | No       |
 
 <sup>1</sup> The [WISCKEY paper][wisckey] (on which Badger is based) saw big
 wins with separating values from keys, significantly reducing the write
