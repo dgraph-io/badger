@@ -48,7 +48,7 @@ func init() {
 		"Directory where the LSM tree files are located. (required)")
 
 	RootCmd.PersistentFlags().StringVar(&vlogDir, "vlog-dir", "",
-		"Directory where the value log files are located, if different from --sst-dir")
+		"Directory where the value log files are located, if different from --dir")
 }
 
 func validateRootCmdArgs(cmd *cobra.Command, args []string) error {
