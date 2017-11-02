@@ -7,15 +7,14 @@ written in pure Go. It's meant to be a performant alternative to non-Go-based
 key-value stores like [RocksDB](https://github.com/facebook/rocksdb).
 
 ## Project Status
-We introduced transactions in [v0.9.0] which involved a major API change.To use
-the previous version of the APIs, please use [tag v0.8.1][v0.8.1]. This tag can
-be specified via the Go dependency tool you're using.
+Badger v1.0 was released in Nov 2017. The latest release is [v1.0.0]
 
-[v1-milestone]: https://github.com/dgraph-io/badger/issues?q=is%3Aopen+is%3Aissue+milestone%3Av1.0
+We introduced transactions in [v0.9.0] which involved a major API change. If you have a Badger 
+datastore prior to that, please use [v0.8.1], but we strongly urge you to upgrade.
+
+[v.1.0.0]: /tree/v1.0.0
 [v0.8.1]: /tree/v0.8.1
 [v0.9.0]: /tree/v0.9.0
-
-We are currently gearing up for a [v1.0 release][v1-milestone].
 
 ## Table of Contents
  * [Getting Started](#getting-started)
