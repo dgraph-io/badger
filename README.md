@@ -12,7 +12,7 @@ Badger v1.0 was released in Nov 2017. The latest release is [v1.0.0]
 We introduced transactions in [v0.9.0] which involved a major API change. If you have a Badger 
 datastore prior to that, please use [v0.8.1], but we strongly urge you to upgrade.
 
-[v.1.0.0]: /tree/v1.0.0
+[v1.0.0]: /tree/v1.0.0
 [v0.8.1]: /tree/v0.8.1
 [v0.9.0]: /tree/v0.9.0
 
