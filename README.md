@@ -216,8 +216,9 @@ elapsed, the key will no longer be retrievable and will be eligible for garbage
 collection. A TTL can be set as a `time.Duration` value using the `Txn.SetWithTTL()`
 API method.
 
-An optional user metadata value can be set on each key. A user metadata value is represented by
-a single byte. It could be used to set client application specific flags for instance. User
+An optional user metadata value can be set on each key. A user metadata value
+is represented by a single byte. It can be used to set certain bits along
+with the key to aid in interpreting or decoding the key-value pair. User
 metadata can be set using the `Txn.SetWithMeta()` API method.
 
 ### Iterating over keys

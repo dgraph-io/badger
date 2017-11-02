@@ -186,7 +186,10 @@ type Txn struct {
 	discarded bool
 }
 
-// Set is a wrapper around SetEntry.
+// Set adds a key-value pair to the database.
+//
+// It will return ErrReadOnlyTxn if update flag was set to false when creating the
+// transaction.
 func (txn *Txn) Set(key, val []byte) error {
 	e := &entry{
 		Key:   key,
@@ -195,31 +198,24 @@ func (txn *Txn) Set(key, val []byte) error {
 	return txn.setEntry(e)
 }
 
-// SetWithMeta is a wrapper around SetEntry.
+// SetWithMeta adds a key-value pair to the database, along with a metadata
+// byte. This byte is stored alongside the key, and can be used as an aid to
+// interpret the value or store other contextual bits corresponding to the
+// key-value pair.
 func (txn *Txn) SetWithMeta(key, val []byte, meta byte) error {
 	e := &entry{Key: key, Value: val, UserMeta: meta}
 	return txn.setEntry(e)
 }
 
-// SetWithTTL is a wrapper around SetEntry.
+// SetWithTTL adds a key-value pair to the database, along with a time-to-live
+// (TTL) setting. A key stored with with a TTL would automatically expire after
+// the time has elapsed , and be eligible for garbage collection.
 func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
 	expire := time.Now().Add(dur).Unix()
 	e := &entry{Key: key, Value: val, ExpiresAt: uint64(expire)}
 	return txn.setEntry(e)
 }
 
-// setEntry sets the provided entry, containing the key, value, meta and TTL (time to live)
-// duration. If key is not present, it is created.
-//
-// Along with key and value, Entry can also take an optional UserMeta byte. This byte is stored
-// alongside the key, and can be used as an aid to interpret the value or store other contextual
-// bits corresponding to the key-value pair.
-//
-// Entry can also take an optional ExpiresAt, which is time in Unix epoch seconds. A key stored with
-// ExpiresAt would automatically expire after this time, and be eligible for garbage collection.
-//
-// This would fail with ErrReadOnlyTxn if update flag was set to false when creating the
-// transaction.
 func (txn *Txn) setEntry(e *entry) error {
 	switch {
 	case !txn.update:
