@@ -10,7 +10,9 @@ key-value stores like [RocksDB](https://github.com/facebook/rocksdb).
 Badger v1.0 was released in Nov 2017. The latest release is [v1.0.0]
 
 We introduced transactions in [v0.9.0] which involved a major API change. If you have a Badger 
-datastore prior to that, please use [v0.8.1], but we strongly urge you to upgrade.
+datastore prior to that, please use [v0.8.1], but we strongly urge you to upgrade. Upgrading from
+both v0.8 and v0.9 will require you to [take backups](#database-backup) and restore using the new
+version.
 
 [v1.0.0]: /tree/v1.0.0
 [v0.8.1]: /tree/v0.8.1
