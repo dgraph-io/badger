@@ -397,6 +397,7 @@ Values in SSD-conscious Storage][wisckey]_.
 | Pure Go (no Cgo)    | Yes                                          | No                            | Yes       |
 | Transactions        | Yes, ACID, concurrent with SSI<sup>3</sup> | Yes (but non-ACID)            | Yes, ACID |
 | Snapshots           | Yes                                           | Yes                           | Yes       |
+| TTL support         | Yes                                           | Yes                           | No       |
 
 <sup>1</sup> The [WISCKEY paper][wisckey] (on which Badger is based) saw big
 wins with separating values from keys, significantly reducing the write
