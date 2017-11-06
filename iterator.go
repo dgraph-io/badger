@@ -111,6 +111,9 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 
 	var vp valuePointer
 	vp.Decode(item.vptr)
+	if vp.Len == 0 {
+		return nil, nil, nil
+	}
 	return item.db.vlog.Read(vp)
 }
 
