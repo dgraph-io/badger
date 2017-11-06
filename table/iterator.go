@@ -110,7 +110,7 @@ func (itr *blockIterator) SeekToLast() {
 // parseKV would allocate a new byte slice for key and for value.
 func (itr *blockIterator) parseKV(h header) {
 	if cap(itr.key) < int(h.plen+h.klen) {
-		sz := int(h.plen) + int(h.klen) // Convert them to int before adding to avoid int overflow.
+		sz := int(h.plen) + int(h.klen) // Convert to int before adding to avoid uint16 overflow.
 		itr.key = make([]byte, 2*sz)
 	}
 	itr.key = itr.key[:h.plen+h.klen]
