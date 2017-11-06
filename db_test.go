@@ -1167,3 +1167,57 @@ func ExampleTxn_NewIterator() {
 	// Output:
 	// Counted 1000 elements
 }
+
+func randBytes(n int) []byte {
+	recv := make([]byte, n)
+	in, err := rand.Read(recv)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return recv[:in]
+}
+
+var benchmarkData = []struct {
+	key, value []byte
+}{
+	{randBytes(100), nil},
+	{randBytes(1000), []byte("foo")},
+	{[]byte("foo"), randBytes(1000)},
+	{[]byte(""), randBytes(1000)},
+	{nil, randBytes(1000000)},
+	{randBytes(100000), nil},
+	{randBytes(1000000), nil},
+}
+
+func TestLargeKeys(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opts := new(Options)
+	*opts = DefaultOptions
+	opts.ValueLogFileSize = 1024 * 1024 * 1024
+	opts.Dir = dir
+	opts.ValueDir = dir
+
+	db, err := Open(*opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 1000; i++ {
+		tx := db.NewTransaction(true)
+		for _, kv := range benchmarkData {
+			k := make([]byte, len(kv.key))
+			copy(k, kv.key)
+
+			v := make([]byte, len(kv.value))
+			copy(v, kv.value)
+			if err := tx.Set(k, v); err != nil {
+				// Skip over this record.
+			}
+		}
+		if err := tx.Commit(nil); err != nil {
+			t.Fatalf("#%d: batchSet err: %v", i, err)
+		}
+	}
+}
