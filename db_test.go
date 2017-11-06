@@ -1180,13 +1180,13 @@ func randBytes(n int) []byte {
 var benchmarkData = []struct {
 	key, value []byte
 }{
-	{randBytes(100), randBytes(1)},
+	{randBytes(100), nil},
 	{randBytes(1000), []byte("foo")},
 	{[]byte("foo"), randBytes(1000)},
 	{[]byte(""), randBytes(1000)},
 	{nil, randBytes(1000000)},
-	{randBytes(100000), randBytes(1)},
-	{randBytes(1000000), randBytes(1)},
+	{randBytes(100000), nil},
+	{randBytes(1000000), nil},
 }
 
 func TestLargeKeys(t *testing.T) {
