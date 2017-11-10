@@ -428,6 +428,25 @@ Below is a list of public, open source projects that use Badger:
 If you are using Badger in a project please send a pull request to add it to the list.
 
 ## Frequently Asked Questions
+- **My writes are getting stuck. Why?**
+
+This can happen if a long running iteration with `Prefetch` is set to false, but
+a `Item::Value` call is made internally in the loop. That causes Badger to
+acquire read locks over the value log files to avoid value log GC removing the
+file from underneath. As a side effect, this also blocks a new value log GC
+file from being created, when the value log file boundary is hit.
+
+Please see Github issues [#293](https://github.com/dgraph-io/badger/issues/293)
+and [#315](https://github.com/dgraph-io/badger/issues/315).
+
+There are multiple workarounds during iteration:
+
+1. Set `Prefetch` to true. Badger would then copy over the value and release the
+   file lock immediately.
+2. When `Prefetch` is false, don't call `Item::Value` and do a pure key-only
+   iteration. This might be useful if you just want to delete a lot of keys.
+3. Do the writes in a separate transaction after the reads.
+
 - **My writes are really slow. Why?**
 
 Are you creating a new transaction for every single key update? This will lead
