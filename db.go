@@ -171,7 +171,11 @@ func Open(opt Options) (db *DB, err error) {
 			return nil, y.Wrapf(err, "Invalid Dir: %q", path)
 		}
 		if !dirExists {
-			return nil, ErrInvalidDir
+			// Try to create the directory
+			err = os.Mkdir(path, 0700)
+			if err != nil {
+				return nil, y.Wrapf(err, "Error Creating Dir: %q", path)
+			}
 		}
 	}
 	absDir, err := filepath.Abs(opt.Dir)
