@@ -328,7 +328,7 @@ func TestGetMore(t *testing.T) {
 	}
 	//	n := 500000
 	n := 10000
-	m := 49 // Increasing would cause ErrTxnTooBig
+	m := 45 // Increasing would cause ErrTxnTooBig
 	for i := 0; i < n; i += m {
 		txn := kv.NewTransaction(true)
 		for j := i; j < i+m && j < n; j++ {
@@ -432,7 +432,7 @@ func TestExistsMore(t *testing.T) {
 
 	//	n := 500000
 	n := 10000
-	m := 49
+	m := 45
 	for i := 0; i < n; i += m {
 		if (i % 1000) == 0 {
 			t.Logf("Putting i=%d\n", i)

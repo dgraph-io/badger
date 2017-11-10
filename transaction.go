@@ -46,10 +46,11 @@ func (u *uint64Heap) Pop() interface{} {
 }
 
 type oracle struct {
+	curRead   uint64 // Managed by the mutex.
+	refCount  int64
 	isManaged bool // Does not change value, so no locking required.
 
 	sync.Mutex
-	curRead    uint64
 	nextCommit uint64
 
 	// These two structures are used to figure out when a commit is done. The minimum done commit is
@@ -59,8 +60,7 @@ type oracle struct {
 
 	// commits stores a key fingerprint and latest commit counter for it.
 	// refCount is used to clear out commits map to avoid a memory blowup.
-	commits  map[uint64]uint64
-	refCount int64
+	commits map[uint64]uint64
 }
 
 func (o *oracle) addRef() {
@@ -192,7 +192,7 @@ type Txn struct {
 func (txn *Txn) checkSize(e *entry) error {
 	count := txn.count + 1
 	// Extra bytes for version in key.
-	size := txn.size + int64(e.estimateSize(txn.db.opt.ValueThreshold)) + 10 
+	size := txn.size + int64(e.estimateSize(txn.db.opt.ValueThreshold)) + 10
 	if count >= txn.db.opt.maxBatchCount || size >= txn.db.opt.maxBatchSize {
 		return ErrTxnTooBig
 	}
