@@ -24,6 +24,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"sync"
@@ -1220,4 +1221,20 @@ func TestLargeKeys(t *testing.T) {
 			t.Fatalf("#%d: batchSet err: %v", i, err)
 		}
 	}
+}
+
+func TestCreateDirs(t *testing.T) {
+	dir, err := ioutil.TempDir("", "parent")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opts := DefaultOptions
+	dir = filepath.Join(dir, "badger")
+	opts.Dir = dir
+	opts.ValueDir = dir
+	db, err := Open(opts)
+	require.NoError(t, err)
+	db.Close()
+	_, err = os.Stat(dir)
+	require.NoError(t, err)
 }
