@@ -666,11 +666,6 @@ func TestIterateDeleted(t *testing.T) {
 	}
 }
 
-func TestDirNotExists(t *testing.T) {
-	_, err := Open(getTestOptions("not-exists"))
-	require.Error(t, err)
-}
-
 func TestDeleteWithoutSyncWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
