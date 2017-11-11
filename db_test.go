@@ -53,7 +53,7 @@ func getItemValue(t *testing.T, item *Item) (val []byte) {
 	if v == nil {
 		return nil
 	}
-	another, err := item.ValueCopy()
+	another, err := item.ValueCopy(nil)
 	require.NoError(t, err)
 	require.Equal(t, v, another)
 	return v
@@ -1279,7 +1279,9 @@ func TestWriteDeadlock(t *testing.T) {
 
 			// Using Value() would cause deadlock.
 			// item.Value()
-			item.ValueCopy()
+			out, err := item.ValueCopy(nil)
+			require.NoError(t, err)
+			require.Equal(t, len(val), len(out))
 
 			key := y.Copy(item.Key())
 			rand.Read(val)

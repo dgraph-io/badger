@@ -91,14 +91,14 @@ func (item *Item) Value() ([]byte, error) {
 // The returned value is valid for usage anywhere. This function is useful in
 // long running iterate/update transactions to avoid a write deadlock.
 // See Github issue: https://github.com/dgraph-io/badger/issues/315
-func (item *Item) ValueCopy() ([]byte, error) {
+func (item *Item) ValueCopy(dst []byte) ([]byte, error) {
 	item.wg.Wait()
 	if item.status == prefetched {
-		return y.Copy(item.val), item.err
+		return y.SafeCopy(dst, item.val), item.err
 	}
 	buf, cb, err := item.yieldItemValue()
 	defer runCallback(cb)
-	return y.Copy(buf), err
+	return y.SafeCopy(dst, buf), err
 }
 
 func (item *Item) hasValue() bool {
@@ -389,7 +389,7 @@ func (it *Iterator) parseItem() bool {
 		// Consider keys: a 5, b 7 (del), b 5. When iterating, lastKey = a.
 		// Then we see b 7, which is deleted. If we don't store lastKey = b, we'll then return b 5,
 		// which is wrong. Therefore, update lastKey here.
-		it.lastKey = y.Safecopy(it.lastKey, mi.Key())
+		it.lastKey = y.SafeCopy(it.lastKey, mi.Key())
 	}
 
 FILL:
@@ -429,9 +429,9 @@ func (it *Iterator) fill(item *Item) {
 	item.expiresAt = vs.ExpiresAt
 
 	item.version = y.ParseTs(it.iitr.Key())
-	item.key = y.Safecopy(item.key, y.ParseKey(it.iitr.Key()))
+	item.key = y.SafeCopy(item.key, y.ParseKey(it.iitr.Key()))
 
-	item.vptr = y.Safecopy(item.vptr, vs.Value)
+	item.vptr = y.SafeCopy(item.vptr, vs.Value)
 	item.val = nil
 	if it.opt.PrefetchValues {
 		item.wg.Add(1)

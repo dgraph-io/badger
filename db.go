@@ -941,7 +941,7 @@ func (db *DB) PurgeOlderVersions() error {
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
 			if !bytes.Equal(lastKey, item.Key()) {
-				lastKey = y.Safecopy(lastKey, item.Key())
+				lastKey = y.SafeCopy(lastKey, item.Key())
 				continue
 			}
 			// Found an older version. Mark for deletion
