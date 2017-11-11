@@ -86,6 +86,21 @@ func (item *Item) Value() ([]byte, error) {
 	return buf, err
 }
 
+// ValueCopy returns a copy of the value of the item from the value log.
+//
+// The returned value is valid for usage anywhere. This function is useful in
+// long running iterate/update transactions to avoid a write deadlock.
+// See Github issue: https://github.com/dgraph-io/badger/issues/315
+func (item *Item) ValueCopy() ([]byte, error) {
+	item.wg.Wait()
+	if item.status == prefetched {
+		return y.Copy(item.val), item.err
+	}
+	buf, cb, err := item.yieldItemValue()
+	defer runCallback(cb)
+	return y.Copy(buf), err
+}
+
 func (item *Item) hasValue() bool {
 	if item.meta == 0 && item.vptr == nil {
 		// key not found
