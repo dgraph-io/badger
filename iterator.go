@@ -86,10 +86,11 @@ func (item *Item) Value() ([]byte, error) {
 	return buf, err
 }
 
-// ValueCopy returns a copy of the value of the item from the value log.
+// ValueCopy returns a copy of the value of the item from the value log, writing it to dst slice.
+// If nil is passed, or capacity of dst isn't sufficient, a new slice would be allocated and
+// returned. Tip: It might make sense to reuse the returned slice as dst argument for the next call.
 //
-// The returned value is valid for usage anywhere. This function is useful in
-// long running iterate/update transactions to avoid a write deadlock.
+// This function is useful in long running iterate/update transactions to avoid a write deadlock.
 // See Github issue: https://github.com/dgraph-io/badger/issues/315
 func (item *Item) ValueCopy(dst []byte) ([]byte, error) {
 	item.wg.Wait()
