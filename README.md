@@ -226,7 +226,8 @@ metadata can be set using the `Txn.SetWithMeta()` API method.
 
 ### Iterating over keys
 To iterate over keys, we can use an `Iterator`, which can be obtained using the
-`Txn.NewIterator()` method.
+`Txn.NewIterator()` method. Iteration happens in byte-wise lexicographical sorting
+order.
 
 
 ```go
