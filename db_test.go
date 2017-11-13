@@ -1241,7 +1241,8 @@ func TestWriteDeadlock(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	fmt.Println(dir)
 	require.NoError(t, err)
-	// defer os.RemoveAll(dir)
+	defer os.RemoveAll(dir)
+
 	opt := DefaultOptions
 	opt.Dir = dir
 	opt.ValueDir = dir
