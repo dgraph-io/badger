@@ -7,7 +7,9 @@ written in pure Go. It's meant to be a performant alternative to non-Go-based
 key-value stores like [RocksDB](https://github.com/facebook/rocksdb).
 
 ## Project Status
-Badger v1.0 was released in Nov 2017. The latest release is [v1.0.1]
+Badger v1.0 was released in Nov 2017. Check the [Changelog] for the full details.
+
+[Changelog]:https://github.com/dgraph-io/badger/blob/master/CHANGELOG.md
 
 We introduced transactions in [v0.9.0] which involved a major API change. If you have a Badger 
 datastore prior to that, please use [v0.8.1], but we strongly urge you to upgrade. Upgrading from
