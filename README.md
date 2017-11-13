@@ -441,11 +441,12 @@ and [#315](https://github.com/dgraph-io/badger/issues/315).
 
 There are multiple workarounds during iteration:
 
+1. Use `Item::ValueCopy` instead of `Item::Value` when retrieving value.
 1. Set `Prefetch` to true. Badger would then copy over the value and release the
    file lock immediately.
-2. When `Prefetch` is false, don't call `Item::Value` and do a pure key-only
+1. When `Prefetch` is false, don't call `Item::Value` and do a pure key-only
    iteration. This might be useful if you just want to delete a lot of keys.
-3. Do the writes in a separate transaction after the reads.
+1. Do the writes in a separate transaction after the reads.
 
 - **My writes are really slow. Why?**
 
