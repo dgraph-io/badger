@@ -294,6 +294,12 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	item = new(Item)
 	if txn.update {
 		if e, has := txn.pendingWrites[string(key)]; has && bytes.Equal(key, e.Key) {
+			if e.meta&bitDelete > 0 {
+				return nil, ErrKeyNotFound
+			}
+			if e.ExpiresAt > 0 && e.ExpiresAt <= uint64(time.Now().Unix()) {
+				return nil, ErrKeyNotFound
+			}
 			// Fulfill from cache.
 			item.meta = e.meta
 			item.val = e.Value

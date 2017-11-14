@@ -231,6 +231,29 @@ func TestGet(t *testing.T) {
 	txn.Discard()
 }
 
+func TestGetAfterDelete(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, err := Open(getTestOptions(dir))
+	if err != nil {
+		t.Error(err)
+	}
+	defer kv.Close()
+
+	// populate with one entry
+	key := []byte("key")
+	txnSet(t, kv, key, []byte("val1"), 0x00)
+	require.NoError(t, kv.Update(func(txn *Txn) error {
+		err := txn.Delete(key)
+		require.NoError(t, err)
+
+		_, err = txn.Get(key)
+		require.Equal(t, ErrKeyNotFound, err)
+		return nil
+	}))
+}
+
 func TestExists(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
