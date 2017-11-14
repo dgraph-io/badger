@@ -5,6 +5,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+* Fix bug where txn.Get was returing key deleted in same transaction.
 
 ## [1.1.0] - 2017-11-13
 * Create Badger directory if it does not exist when `badger.Open` is called.
