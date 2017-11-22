@@ -136,7 +136,7 @@ returned. This is the recommended way to use Badger transactions.
 However, sometimes you may want to manually create and commit your
 transactions. You can use the `DB.NewTransaction()` function directly, which
 takes in a boolean argument to specify whether a read-write transaction is
-required. For read-write transactions, it is necessary to call `Txn,Commit()`
+required. For read-write transactions, it is necessary to call `Txn.Commit()`
 to ensure the transaction is committed. For read-only transactions, calling
 `Txn.Discard()` is sufficient. `Txn.Commit()` also calls `Txn.Discard()`
 internally to cleanup the transaction, so just calling `Txn.Commit()` is
