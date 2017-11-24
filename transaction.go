@@ -71,6 +71,12 @@ func (o *oracle) decrRef() {
 	if count := atomic.AddInt64(&o.refCount, -1); count == 0 {
 		// Clear out pendingCommits maps to release memory.
 		o.Lock()
+		// There could be race here, so check again.
+		// Checking commitMark is safe since it is protected by mutex.
+		if len(o.commitMark) > 0 {
+			o.Unlock()
+			return
+		}
 		y.AssertTrue(len(o.commitMark) == 0)
 		y.AssertTrue(len(o.pendingCommits) == 0)
 		if len(o.commits) >= 1000 { // If the map is still small, let it slide.
