@@ -392,7 +392,6 @@ func (txn *Txn) Commit(callback func(error)) error {
 	if commitTs == 0 {
 		return ErrConflict
 	}
-	defer state.doneCommit(commitTs)
 
 	entries := make([]*entry, 0, len(txn.pendingWrites)+1)
 	for _, e := range txn.pendingWrites {
@@ -414,9 +413,13 @@ func (txn *Txn) Commit(callback func(error)) error {
 
 		// TODO: What if some of the txns successfully make it to value log, but others fail.
 		// Nothing gets updated to LSM, until a restart happens.
+		defer state.doneCommit(commitTs)
 		return txn.db.batchSet(entries)
 	}
-	return txn.db.batchSetAsync(entries, callback)
+	return txn.db.batchSetAsync(entries, func(err error) {
+		state.doneCommit(commitTs)
+		callback(err)
+	})
 }
 
 // NewTransaction creates a new transaction. Badger supports concurrent execution of transactions,
