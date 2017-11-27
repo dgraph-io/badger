@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 * Fix bug where txn.Get was returing key deleted in same transaction.
+* Fix race condition while decrementing reference in oracle.
+* Update doneCommit in the callback for CommitAsync.
 
 ## [1.1.0] - 2017-11-13
 * Create Badger directory if it does not exist when `badger.Open` is called.

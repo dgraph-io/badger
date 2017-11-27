@@ -19,9 +19,13 @@ package badger
 import (
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
@@ -54,6 +58,70 @@ func TestTxnSimple(t *testing.T) {
 
 	require.Error(t, ErrManagedTxn, txn.CommitAt(100, nil))
 	require.NoError(t, txn.Commit(nil))
+}
+
+func TestTxnCommitAsync(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	kv, err := Open(getTestOptions(dir))
+	require.NoError(t, err)
+	defer kv.Close()
+
+	txn := kv.NewTransaction(true)
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("key=%d", i))
+	}
+	for i := 0; i < 40; i++ {
+		err := txn.Set(key(i), []byte(strconv.Itoa(100)))
+		require.NoError(t, err)
+	}
+	require.NoError(t, txn.Commit(nil))
+	txn.Discard()
+
+	var done uint64
+	go func() {
+		// Keep checking balance variant
+		for atomic.LoadUint64(&done) == 0 {
+			txn := kv.NewTransaction(false)
+			totalBalance := 0
+			for i := 0; i < 40; i++ {
+				item, err := txn.Get(key(i))
+				require.NoError(t, err)
+				val, err := item.Value()
+				require.NoError(t, err)
+				bal, err := strconv.Atoi(string(val))
+				require.NoError(t, err)
+				totalBalance += bal
+			}
+			require.Equal(t, totalBalance, 4000)
+			txn.Discard()
+		}
+	}()
+
+	var wg sync.WaitGroup
+	wg.Add(100)
+	for i := 0; i < 100; i++ {
+		go func() {
+			txn := kv.NewTransaction(true)
+			delta := rand.Intn(100)
+			for i := 0; i < 20; i++ {
+				err := txn.Set(key(i), []byte(strconv.Itoa(100-delta)))
+				require.NoError(t, err)
+			}
+			for i := 20; i < 40; i++ {
+				err := txn.Set(key(i), []byte(strconv.Itoa(100+delta)))
+				require.NoError(t, err)
+			}
+			// We are only doing writes, so there won't be any conflicts.
+			require.NoError(t, txn.Commit(func(err error) {}))
+			txn.Discard()
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	atomic.StoreUint64(&done, 1)
+	time.Sleep(time.Millisecond * 10) // allow goroutine to complete.
 }
 
 func TestTxnVersions(t *testing.T) {

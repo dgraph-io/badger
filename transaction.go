@@ -71,7 +71,12 @@ func (o *oracle) decrRef() {
 	if count := atomic.AddInt64(&o.refCount, -1); count == 0 {
 		// Clear out pendingCommits maps to release memory.
 		o.Lock()
-		y.AssertTrue(len(o.commitMark) == 0)
+		// There could be race here, so check again.
+		// Checking commitMark is safe since it is protected by mutex.
+		if len(o.commitMark) > 0 {
+			o.Unlock()
+			return
+		}
 		y.AssertTrue(len(o.pendingCommits) == 0)
 		if len(o.commits) >= 1000 { // If the map is still small, let it slide.
 			o.commits = make(map[uint64]uint64)
@@ -392,7 +397,6 @@ func (txn *Txn) Commit(callback func(error)) error {
 	if commitTs == 0 {
 		return ErrConflict
 	}
-	defer state.doneCommit(commitTs)
 
 	entries := make([]*entry, 0, len(txn.pendingWrites)+1)
 	for _, e := range txn.pendingWrites {
@@ -414,9 +418,13 @@ func (txn *Txn) Commit(callback func(error)) error {
 
 		// TODO: What if some of the txns successfully make it to value log, but others fail.
 		// Nothing gets updated to LSM, until a restart happens.
+		defer state.doneCommit(commitTs)
 		return txn.db.batchSet(entries)
 	}
-	return txn.db.batchSetAsync(entries, callback)
+	return txn.db.batchSetAsync(entries, func(err error) {
+		state.doneCommit(commitTs)
+		callback(err)
+	})
 }
 
 // NewTransaction creates a new transaction. Badger supports concurrent execution of transactions,
