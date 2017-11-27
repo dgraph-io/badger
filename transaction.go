@@ -77,7 +77,6 @@ func (o *oracle) decrRef() {
 			o.Unlock()
 			return
 		}
-		y.AssertTrue(len(o.commitMark) == 0)
 		y.AssertTrue(len(o.pendingCommits) == 0)
 		if len(o.commits) >= 1000 { // If the map is still small, let it slide.
 			o.commits = make(map[uint64]uint64)

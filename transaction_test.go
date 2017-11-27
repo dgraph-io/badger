@@ -113,8 +113,8 @@ func TestTxnCommitAsync(t *testing.T) {
 				err := txn.Set(key(i), []byte(strconv.Itoa(100+delta)))
 				require.NoError(t, err)
 			}
-			require.NoError(t, txn.Commit(func(err error) {
-			}))
+			// We are only doing writes, so there won't be any conflicts.
+			require.NoError(t, txn.Commit(func(err error) {}))
 			txn.Discard()
 			wg.Done()
 		}()
