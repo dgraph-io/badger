@@ -196,9 +196,10 @@ type Txn struct {
 }
 
 type pendingWritesIterator struct {
-	entries []*entry
-	nextIdx int
-	readTs  uint64
+	entries  []*entry
+	nextIdx  int
+	readTs   uint64
+	reversed bool
 }
 
 func (pi *pendingWritesIterator) Next() {
@@ -212,7 +213,11 @@ func (pi *pendingWritesIterator) Rewind() {
 func (pi *pendingWritesIterator) Seek(key []byte) {
 	key = y.ParseKey(key)
 	pi.nextIdx = sort.Search(len(pi.entries), func(idx int) bool {
-		return bytes.Compare(pi.entries[idx].Key, key) >= 0
+		cmp := bytes.Compare(pi.entries[idx].Key, key)
+		if !pi.reversed {
+			return cmp >= 0
+		}
+		return cmp <= 0
 	})
 }
 
@@ -252,11 +257,16 @@ func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
 	}
 	// Number of pending writes per transaction shouldn't be too big in general.
 	sort.Slice(entries, func(i, j int) bool {
-		return bytes.Compare(entries[i].Key, entries[j].Key) < 0
+		cmp := bytes.Compare(entries[i].Key, entries[j].Key)
+		if !reversed {
+			return cmp < 0
+		}
+		return cmp > 0
 	})
 	return &pendingWritesIterator{
-		readTs:  txn.readTs,
-		entries: entries,
+		readTs:   txn.readTs,
+		entries:  entries,
+		reversed: reversed,
 	}
 }
 

@@ -299,8 +299,9 @@ func TestTxnWriteSkew(t *testing.T) {
 	require.Equal(t, uint64(2), kv.orc.readTs())
 }
 
-// a2, a3, b4 (del), b3, c2, c1
+// a3, a2, b4 (del), b3, c2, c1
 // Read at ts=4 -> a3, c2
+// Read at ts=4(Uncomitted) -> a3, b4
 // Read at ts=3 -> a3, b3, c2
 // Read at ts=2 -> a2, c2
 // Read at ts=1 -> c1
@@ -336,6 +337,12 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 	require.NoError(t, txn.Commit(nil))
 	require.Equal(t, uint64(3), kv.orc.readTs())
 
+	// b4, c4(del) (Uncomitted)
+	txn4 := kv.NewTransaction(true)
+	require.NoError(t, txn4.Set(kb, []byte("b4")))
+	require.NoError(t, txn4.Delete(kc))
+	require.Equal(t, uint64(3), kv.orc.readTs())
+
 	// b4 (del)
 	txn = kv.NewTransaction(true)
 	txn.Delete(kb)
@@ -353,15 +360,20 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 		}
 		require.Equal(t, len(expected), i)
 	}
+
 	txn = kv.NewTransaction(true)
 	defer txn.Discard()
 	itr := txn.NewIterator(DefaultIteratorOptions)
+	itr5 := txn4.NewIterator(DefaultIteratorOptions)
 	checkIterator(itr, []string{"a3", "c2"})
+	checkIterator(itr5, []string{"a3", "b4"})
 
 	rev := DefaultIteratorOptions
 	rev.Reverse = true
 	itr = txn.NewIterator(rev)
+	itr5 = txn4.NewIterator(rev)
 	checkIterator(itr, []string{"c2", "a3"})
+	checkIterator(itr5, []string{"b4", "a3"})
 
 	txn.readTs = 3
 	itr = txn.NewIterator(DefaultIteratorOptions)
@@ -492,6 +504,7 @@ func TestTxnIterationEdgeCase3(t *testing.T) {
 
 	kb := []byte("abc")
 	kc := []byte("acd")
+	kd := []byte("ade")
 
 	// c1
 	txn := kv.NewTransaction(true)
@@ -504,6 +517,10 @@ func TestTxnIterationEdgeCase3(t *testing.T) {
 	txn.Set(kb, []byte("b2"))
 	require.NoError(t, txn.Commit(nil))
 	require.Equal(t, uint64(2), kv.orc.readTs())
+
+	txn2 := kv.NewTransaction(true)
+	require.NoError(t, txn2.Set(kd, []byte("d2")))
+	require.NoError(t, txn2.Delete(kc))
 
 	txn = kv.NewTransaction(true)
 	defer txn.Discard()
@@ -529,6 +546,27 @@ func TestTxnIterationEdgeCase3(t *testing.T) {
 	require.True(t, itr.Valid())
 	require.Equal(t, itr.item.Key(), kc)
 
+	//  Keys: "abc", "ade"
+	// Read pending writes.
+	itr = txn2.NewIterator(DefaultIteratorOptions)
+	itr.Seek([]byte("ab"))
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kb)
+	itr.Seek([]byte("ac"))
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kd)
+	itr.Seek(nil)
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kb)
+	itr.Seek([]byte("ac"))
+	itr.Rewind()
+	itr.Seek(nil)
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kb)
+	itr.Seek([]byte("ad"))
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kd)
+
 	itr = txn.NewIterator(rev)
 	itr.Seek([]byte("ac"))
 	require.True(t, itr.Valid())
@@ -546,6 +584,25 @@ func TestTxnIterationEdgeCase3(t *testing.T) {
 	itr.Seek([]byte("ad"))
 	require.True(t, itr.Valid())
 	require.Equal(t, itr.item.Key(), kc)
+
+	//  Keys: "abc", "ade"
+	itr = txn2.NewIterator(rev)
+	itr.Seek([]byte("ad"))
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kb)
+	itr.Seek([]byte("ae"))
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kd)
+	itr.Seek(nil)
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kd)
+	itr.Seek([]byte("ab"))
+	itr.Rewind()
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kd)
+	itr.Seek([]byte("ac"))
+	require.True(t, itr.Valid())
+	require.Equal(t, itr.item.Key(), kb)
 }
 
 func TestIteratorAllVersionsButDeleted(t *testing.T) {
