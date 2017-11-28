@@ -28,7 +28,6 @@ version.
       - [Read-only transactions](#read-only-transactions)
       - [Read-write transactions](#read-write-transactions)
       - [Managing transactions manually](#managing-transactions-manually)
-      - [Handling Errors](#handling-errors)
     + [Using key/value pairs](#using-keyvalue-pairs)
     + [Setting Time To Live(TTL) and User Metadata on Keys](#setting-time-to-livettl-and-user-metadata-on-keys)
     + [Iterating over keys](#iterating-over-keys)
