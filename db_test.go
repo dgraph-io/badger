@@ -71,513 +71,435 @@ func txnDelete(t *testing.T, kv *DB, key []byte) {
 	require.NoError(t, txn.Commit(nil))
 }
 
-func TestWrite(t *testing.T) {
+// Opens a badger db and runs a a test on it.
+func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB)) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := Open(getTestOptions(dir))
-	require.NoError(t, err)
-	defer kv.Close()
-
-	for i := 0; i < 100; i++ {
-		txnSet(t, kv, []byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)), 0x00)
+	if opts == nil {
+		opts = new(Options)
+		*opts = getTestOptions(dir)
 	}
+	db, err := Open(*opts)
+	require.NoError(t, err)
+	defer db.Close()
+	test(t, db)
+}
+
+func TestWrite(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		for i := 0; i < 100; i++ {
+			txnSet(t, db, []byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)), 0x00)
+		}
+	})
 }
 
 func TestUpdateAndView(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	db, err := Open(getTestOptions(dir))
-	require.NoError(t, err)
-	defer db.Close()
-
-	err = db.Update(func(txn *Txn) error {
-		for i := 0; i < 10; i++ {
-			err := txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)))
-			if err != nil {
-				return err
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		err := db.Update(func(txn *Txn) error {
+			for i := 0; i < 10; i++ {
+				err := txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)))
+				if err != nil {
+					return err
+				}
 			}
-		}
-		return nil
+			return nil
+		})
+		require.NoError(t, err)
+
+		err = db.View(func(txn *Txn) error {
+			for i := 0; i < 10; i++ {
+				item, err := txn.Get([]byte(fmt.Sprintf("key%d", i)))
+				if err != nil {
+					return err
+				}
+
+				val, err := item.Value()
+				if err != nil {
+					return err
+				}
+				expected := []byte(fmt.Sprintf("val%d", i))
+				require.Equal(t, expected, val,
+					"Invalid value for key %q. expected: %q, actual: %q",
+					item.Key(), expected, val)
+			}
+			return nil
+		})
+		require.NoError(t, err)
 	})
-	require.NoError(t, err)
-
-	err = db.View(func(txn *Txn) error {
-		for i := 0; i < 10; i++ {
-			item, err := txn.Get([]byte(fmt.Sprintf("key%d", i)))
-			if err != nil {
-				return err
-			}
-
-			val, err := item.Value()
-			if err != nil {
-				return err
-			}
-			expected := []byte(fmt.Sprintf("val%d", i))
-			require.Equal(t, expected, val,
-				"Invalid value for key %q. expected: %q, actual: %q",
-				item.Key(), expected, val)
-		}
-		return nil
-	})
-	require.NoError(t, err)
 }
 
 func TestConcurrentWrite(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, _ := Open(getTestOptions(dir))
-	defer kv.Close()
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// Not a benchmark. Just a simple test for concurrent writes.
+		n := 20
+		m := 500
+		var wg sync.WaitGroup
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				for j := 0; j < m; j++ {
+					txnSet(t, db, []byte(fmt.Sprintf("k%05d_%08d", i, j)),
+						[]byte(fmt.Sprintf("v%05d_%08d", i, j)), byte(j%127))
+				}
+			}(i)
+		}
+		wg.Wait()
 
-	// Not a benchmark. Just a simple test for concurrent writes.
-	n := 20
-	m := 500
-	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			for j := 0; j < m; j++ {
-				txnSet(t, kv, []byte(fmt.Sprintf("k%05d_%08d", i, j)),
-					[]byte(fmt.Sprintf("v%05d_%08d", i, j)), byte(j%127))
+		t.Log("Starting iteration")
+
+		opt := IteratorOptions{}
+		opt.Reverse = false
+		opt.PrefetchSize = 10
+		opt.PrefetchValues = true
+
+		txn := db.NewTransaction(true)
+		it := txn.NewIterator(opt)
+		defer it.Close()
+		var i, j int
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			k := item.Key()
+			if k == nil {
+				break // end of iteration.
 			}
-		}(i)
-	}
-	wg.Wait()
 
-	t.Log("Starting iteration")
-
-	opt := IteratorOptions{}
-	opt.Reverse = false
-	opt.PrefetchSize = 10
-	opt.PrefetchValues = true
-
-	txn := kv.NewTransaction(true)
-	it := txn.NewIterator(opt)
-	defer it.Close()
-	var i, j int
-	for it.Rewind(); it.Valid(); it.Next() {
-		item := it.Item()
-		k := item.Key()
-		if k == nil {
-			break // end of iteration.
+			require.EqualValues(t, fmt.Sprintf("k%05d_%08d", i, j), string(k))
+			v := getItemValue(t, item)
+			require.EqualValues(t, fmt.Sprintf("v%05d_%08d", i, j), string(v))
+			require.Equal(t, item.UserMeta(), byte(j%127))
+			j++
+			if j == m {
+				i++
+				j = 0
+			}
 		}
-
-		require.EqualValues(t, fmt.Sprintf("k%05d_%08d", i, j), string(k))
-		v := getItemValue(t, item)
-		require.EqualValues(t, fmt.Sprintf("v%05d_%08d", i, j), string(v))
-		require.Equal(t, item.UserMeta(), byte(j%127))
-		j++
-		if j == m {
-			i++
-			j = 0
-		}
-	}
-	require.EqualValues(t, n, i)
-	require.EqualValues(t, 0, j)
+		require.EqualValues(t, n, i)
+		require.EqualValues(t, 0, j)
+	})
 }
 
 func TestGet(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, err := Open(getTestOptions(dir))
-	if err != nil {
-		t.Error(err)
-	}
-	defer kv.Close()
-	txnSet(t, kv, []byte("key1"), []byte("val1"), 0x08)
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		txnSet(t, db, []byte("key1"), []byte("val1"), 0x08)
 
-	txn := kv.NewTransaction(false)
-	item, err := txn.Get([]byte("key1"))
-	require.NoError(t, err)
-	require.EqualValues(t, "val1", getItemValue(t, item))
-	require.Equal(t, byte(0x08), item.UserMeta())
-	txn.Discard()
+		txn := db.NewTransaction(false)
+		item, err := txn.Get([]byte("key1"))
+		require.NoError(t, err)
+		require.EqualValues(t, "val1", getItemValue(t, item))
+		require.Equal(t, byte(0x08), item.UserMeta())
+		txn.Discard()
 
-	txnSet(t, kv, []byte("key1"), []byte("val2"), 0x09)
+		txnSet(t, db, []byte("key1"), []byte("val2"), 0x09)
 
-	txn = kv.NewTransaction(false)
-	item, err = txn.Get([]byte("key1"))
-	require.NoError(t, err)
-	require.EqualValues(t, "val2", getItemValue(t, item))
-	require.Equal(t, byte(0x09), item.UserMeta())
-	txn.Discard()
+		txn = db.NewTransaction(false)
+		item, err = txn.Get([]byte("key1"))
+		require.NoError(t, err)
+		require.EqualValues(t, "val2", getItemValue(t, item))
+		require.Equal(t, byte(0x09), item.UserMeta())
+		txn.Discard()
 
-	txnDelete(t, kv, []byte("key1"))
+		txnDelete(t, db, []byte("key1"))
 
-	txn = kv.NewTransaction(false)
-	_, err = txn.Get([]byte("key1"))
-	require.Equal(t, ErrKeyNotFound, err)
-	txn.Discard()
+		txn = db.NewTransaction(false)
+		_, err = txn.Get([]byte("key1"))
+		require.Equal(t, ErrKeyNotFound, err)
+		txn.Discard()
 
-	txnSet(t, kv, []byte("key1"), []byte("val3"), 0x01)
+		txnSet(t, db, []byte("key1"), []byte("val3"), 0x01)
 
-	txn = kv.NewTransaction(false)
-	item, err = txn.Get([]byte("key1"))
-	require.NoError(t, err)
-	require.EqualValues(t, "val3", getItemValue(t, item))
-	require.Equal(t, byte(0x01), item.UserMeta())
+		txn = db.NewTransaction(false)
+		item, err = txn.Get([]byte("key1"))
+		require.NoError(t, err)
+		require.EqualValues(t, "val3", getItemValue(t, item))
+		require.Equal(t, byte(0x01), item.UserMeta())
 
-	longVal := make([]byte, 1000)
-	txnSet(t, kv, []byte("key1"), longVal, 0x00)
+		longVal := make([]byte, 1000)
+		txnSet(t, db, []byte("key1"), longVal, 0x00)
 
-	txn = kv.NewTransaction(false)
-	item, err = txn.Get([]byte("key1"))
-	require.NoError(t, err)
-	require.EqualValues(t, longVal, getItemValue(t, item))
-	txn.Discard()
+		txn = db.NewTransaction(false)
+		item, err = txn.Get([]byte("key1"))
+		require.NoError(t, err)
+		require.EqualValues(t, longVal, getItemValue(t, item))
+		txn.Discard()
+	})
 }
 
 func TestGetAfterDelete(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, err := Open(getTestOptions(dir))
-	if err != nil {
-		t.Error(err)
-	}
-	defer kv.Close()
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// populate with one entry
+		key := []byte("key")
+		txnSet(t, db, key, []byte("val1"), 0x00)
+		require.NoError(t, db.Update(func(txn *Txn) error {
+			err := txn.Delete(key)
+			require.NoError(t, err)
 
-	// populate with one entry
-	key := []byte("key")
-	txnSet(t, kv, key, []byte("val1"), 0x00)
-	require.NoError(t, kv.Update(func(txn *Txn) error {
-		err := txn.Delete(key)
-		require.NoError(t, err)
-
-		_, err = txn.Get(key)
-		require.Equal(t, ErrKeyNotFound, err)
-		return nil
-	}))
-}
-
-func TestExists(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, err := Open(getTestOptions(dir))
-	if err != nil {
-		t.Error(err)
-	}
-	defer kv.Close()
-
-	// populate with one entry
-	txnSet(t, kv, []byte("key1"), []byte("val1"), 0x00)
-
-	tt := []struct {
-		key    []byte
-		exists bool
-	}{
-		{
-			key:    []byte("key1"),
-			exists: true,
-		},
-		{
-			key:    []byte("non-exits"),
-			exists: false,
-		},
-	}
-
-	for _, test := range tt {
-		require.NoError(t, kv.View(func(tx *Txn) error {
-			_, err := tx.Get(test.key)
-			if test.exists {
-				require.NoError(t, err)
-				return nil
-			}
+			_, err = txn.Get(key)
 			require.Equal(t, ErrKeyNotFound, err)
 			return nil
 		}))
-	}
-
+	})
 }
 
 func TestTxnTooBig(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, err := Open(getTestOptions(dir))
-	if err != nil {
-		t.Error(err)
-		t.Fail()
-	}
-	defer kv.Close()
-	data := func(i int) []byte {
-		return []byte(fmt.Sprintf("%b", i))
-	}
-	//	n := 500000
-	n := 1000
-	txn := kv.NewTransaction(true)
-	for i := 0; i < n; {
-		if err := txn.Set(data(i), data(i)); err != nil {
-			require.NoError(t, txn.Commit(nil))
-			txn = kv.NewTransaction(true)
-		} else {
-			i++
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		data := func(i int) []byte {
+			return []byte(fmt.Sprintf("%b", i))
 		}
-	}
-	require.NoError(t, txn.Commit(nil))
+		//	n := 500000
+		n := 1000
+		txn := db.NewTransaction(true)
+		for i := 0; i < n; {
+			if err := txn.Set(data(i), data(i)); err != nil {
+				require.NoError(t, txn.Commit(nil))
+				txn = db.NewTransaction(true)
+			} else {
+				i++
+			}
+		}
+		require.NoError(t, txn.Commit(nil))
 
-	txn = kv.NewTransaction(true)
-	for i := 0; i < n; {
-		if err := txn.Delete(data(i)); err != nil {
-			require.NoError(t, txn.Commit(nil))
-			txn = kv.NewTransaction(true)
-		} else {
-			i++
+		txn = db.NewTransaction(true)
+		for i := 0; i < n; {
+			if err := txn.Delete(data(i)); err != nil {
+				require.NoError(t, txn.Commit(nil))
+				txn = db.NewTransaction(true)
+			} else {
+				i++
+			}
 		}
-	}
-	require.NoError(t, txn.Commit(nil))
+		require.NoError(t, txn.Commit(nil))
+	})
 }
 
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestGetMore(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, err := Open(getTestOptions(dir))
-	if err != nil {
-		t.Error(err)
-		t.Fail()
-	}
-	defer kv.Close()
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 
-	data := func(i int) []byte {
-		return []byte(fmt.Sprintf("%b", i))
-	}
-	//	n := 500000
-	n := 10000
-	m := 45 // Increasing would cause ErrTxnTooBig
-	for i := 0; i < n; i += m {
-		txn := kv.NewTransaction(true)
-		for j := i; j < i+m && j < n; j++ {
-			require.NoError(t, txn.Set(data(j), data(j)))
+		data := func(i int) []byte {
+			return []byte(fmt.Sprintf("%b", i))
 		}
-		require.NoError(t, txn.Commit(nil))
-	}
-	require.NoError(t, kv.validate())
-
-	for i := 0; i < n; i++ {
-		txn := kv.NewTransaction(false)
-		item, err := txn.Get(data(i))
-		if err != nil {
-			t.Error(err)
-		}
-		require.EqualValues(t, string(data(i)), string(getItemValue(t, item)))
-		txn.Discard()
-	}
-
-	// Overwrite
-	for i := 0; i < n; i += m {
-		txn := kv.NewTransaction(true)
-		for j := i; j < i+m && j < n; j++ {
-			require.NoError(t, txn.Set(data(j),
-				// Use a long value that will certainly exceed value threshold.
-				[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", j))))
-		}
-		require.NoError(t, txn.Commit(nil))
-	}
-	require.NoError(t, kv.validate())
-
-	for i := 0; i < n; i++ {
-		expectedValue := fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", i)
-		k := data(i)
-		txn := kv.NewTransaction(false)
-		item, err := txn.Get(k)
-		if err != nil {
-			t.Error(err)
-		}
-		got := string(getItemValue(t, item))
-		if expectedValue != got {
-
-			vs, err := kv.get(y.KeyWithTs(k, math.MaxUint64))
-			require.NoError(t, err)
-			fmt.Printf("wanted=%q Item: %s\n", k, item.ToString())
-			fmt.Printf("on re-run, got version: %+v\n", vs)
-
-			txn := kv.NewTransaction(false)
-			itr := txn.NewIterator(DefaultIteratorOptions)
-			for itr.Seek(k); itr.Valid(); itr.Next() {
-				item := itr.Item()
-				fmt.Printf("item=%s\n", item.ToString())
-				if !bytes.Equal(item.Key(), k) {
-					break
-				}
+		//	n := 500000
+		n := 10000
+		m := 45 // Increasing would cause ErrTxnTooBig
+		for i := 0; i < n; i += m {
+			txn := db.NewTransaction(true)
+			for j := i; j < i+m && j < n; j++ {
+				require.NoError(t, txn.Set(data(j), data(j)))
 			}
-			itr.Close()
+			require.NoError(t, txn.Commit(nil))
+		}
+		require.NoError(t, db.validate())
+
+		for i := 0; i < n; i++ {
+			txn := db.NewTransaction(false)
+			item, err := txn.Get(data(i))
+			if err != nil {
+				t.Error(err)
+			}
+			require.EqualValues(t, string(data(i)), string(getItemValue(t, item)))
 			txn.Discard()
 		}
-		require.EqualValues(t, expectedValue, string(getItemValue(t, item)), "wanted=%q Item: %s\n", k, item.ToString())
-		txn.Discard()
-	}
 
-	// "Delete" key.
-	for i := 0; i < n; i += m {
-		if (i % 10000) == 0 {
-			fmt.Printf("Deleting i=%d\n", i)
+		// Overwrite
+		for i := 0; i < n; i += m {
+			txn := db.NewTransaction(true)
+			for j := i; j < i+m && j < n; j++ {
+				require.NoError(t, txn.Set(data(j),
+					// Use a long value that will certainly exceed value threshold.
+					[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", j))))
+			}
+			require.NoError(t, txn.Commit(nil))
 		}
-		txn := kv.NewTransaction(true)
-		for j := i; j < i+m && j < n; j++ {
-			require.NoError(t, txn.Delete(data(j)))
+		require.NoError(t, db.validate())
+
+		for i := 0; i < n; i++ {
+			expectedValue := fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", i)
+			k := data(i)
+			txn := db.NewTransaction(false)
+			item, err := txn.Get(k)
+			if err != nil {
+				t.Error(err)
+			}
+			got := string(getItemValue(t, item))
+			if expectedValue != got {
+
+				vs, err := db.get(y.KeyWithTs(k, math.MaxUint64))
+				require.NoError(t, err)
+				fmt.Printf("wanted=%q Item: %s\n", k, item.ToString())
+				fmt.Printf("on re-run, got version: %+v\n", vs)
+
+				txn := db.NewTransaction(false)
+				itr := txn.NewIterator(DefaultIteratorOptions)
+				for itr.Seek(k); itr.Valid(); itr.Next() {
+					item := itr.Item()
+					fmt.Printf("item=%s\n", item.ToString())
+					if !bytes.Equal(item.Key(), k) {
+						break
+					}
+				}
+				itr.Close()
+				txn.Discard()
+			}
+			require.EqualValues(t, expectedValue, string(getItemValue(t, item)), "wanted=%q Item: %s\n", k, item.ToString())
+			txn.Discard()
 		}
-		require.NoError(t, txn.Commit(nil))
-	}
-	kv.validate()
-	for i := 0; i < n; i++ {
-		if (i % 10000) == 0 {
-			// Display some progress. Right now, it's not very fast with no caching.
-			fmt.Printf("Testing i=%d\n", i)
+
+		// "Delete" key.
+		for i := 0; i < n; i += m {
+			if (i % 10000) == 0 {
+				fmt.Printf("Deleting i=%d\n", i)
+			}
+			txn := db.NewTransaction(true)
+			for j := i; j < i+m && j < n; j++ {
+				require.NoError(t, txn.Delete(data(j)))
+			}
+			require.NoError(t, txn.Commit(nil))
 		}
-		k := data(i)
-		txn := kv.NewTransaction(false)
-		_, err := txn.Get([]byte(k))
-		require.Equal(t, ErrKeyNotFound, err, "should not have found k: %q", k)
-		txn.Discard()
-	}
+		db.validate()
+		for i := 0; i < n; i++ {
+			if (i % 10000) == 0 {
+				// Display some progress. Right now, it's not very fast with no caching.
+				fmt.Printf("Testing i=%d\n", i)
+			}
+			k := data(i)
+			txn := db.NewTransaction(false)
+			_, err := txn.Get([]byte(k))
+			require.Equal(t, ErrKeyNotFound, err, "should not have found k: %q", k)
+			txn.Discard()
+		}
+	})
 }
 
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestExistsMore(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, err := Open(getTestOptions(dir))
-	if err != nil {
-		t.Error(err)
-		t.Fail()
-	}
-	defer kv.Close()
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		//	n := 500000
+		n := 10000
+		m := 45
+		for i := 0; i < n; i += m {
+			if (i % 1000) == 0 {
+				t.Logf("Putting i=%d\n", i)
+			}
+			txn := db.NewTransaction(true)
+			for j := i; j < i+m && j < n; j++ {
+				require.NoError(t, txn.Set([]byte(fmt.Sprintf("%09d", j)),
+					[]byte(fmt.Sprintf("%09d", j))))
+			}
+			require.NoError(t, txn.Commit(nil))
+		}
+		db.validate()
 
-	//	n := 500000
-	n := 10000
-	m := 45
-	for i := 0; i < n; i += m {
-		if (i % 1000) == 0 {
-			t.Logf("Putting i=%d\n", i)
+		for i := 0; i < n; i++ {
+			if (i % 1000) == 0 {
+				fmt.Printf("Testing i=%d\n", i)
+			}
+			k := fmt.Sprintf("%09d", i)
+			require.NoError(t, db.View(func(txn *Txn) error {
+				_, err := txn.Get([]byte(k))
+				require.NoError(t, err)
+				return nil
+			}))
 		}
-		txn := kv.NewTransaction(true)
-		for j := i; j < i+m && j < n; j++ {
-			require.NoError(t, txn.Set([]byte(fmt.Sprintf("%09d", j)),
-				[]byte(fmt.Sprintf("%09d", j))))
-		}
-		require.NoError(t, txn.Commit(nil))
-	}
-	kv.validate()
-
-	for i := 0; i < n; i++ {
-		if (i % 1000) == 0 {
-			fmt.Printf("Testing i=%d\n", i)
-		}
-		k := fmt.Sprintf("%09d", i)
-		require.NoError(t, kv.View(func(txn *Txn) error {
-			_, err := txn.Get([]byte(k))
-			require.NoError(t, err)
-			return nil
-		}))
-	}
-	require.NoError(t, kv.View(func(txn *Txn) error {
-		_, err := txn.Get([]byte("non-exists"))
-		require.Error(t, err)
-		return nil
-	}))
-
-	// "Delete" key.
-	for i := 0; i < n; i += m {
-		if (i % 1000) == 0 {
-			fmt.Printf("Deleting i=%d\n", i)
-		}
-		txn := kv.NewTransaction(true)
-		for j := i; j < i+m && j < n; j++ {
-			require.NoError(t, txn.Delete([]byte(fmt.Sprintf("%09d", j))))
-		}
-		require.NoError(t, txn.Commit(nil))
-	}
-	kv.validate()
-	for i := 0; i < n; i++ {
-		if (i % 10000) == 0 {
-			// Display some progress. Right now, it's not very fast with no caching.
-			fmt.Printf("Testing i=%d\n", i)
-		}
-		k := fmt.Sprintf("%09d", i)
-
-		require.NoError(t, kv.View(func(txn *Txn) error {
-			_, err := txn.Get([]byte(k))
+		require.NoError(t, db.View(func(txn *Txn) error {
+			_, err := txn.Get([]byte("non-exists"))
 			require.Error(t, err)
 			return nil
 		}))
-	}
-	fmt.Println("Done and closing")
+
+		// "Delete" key.
+		for i := 0; i < n; i += m {
+			if (i % 1000) == 0 {
+				fmt.Printf("Deleting i=%d\n", i)
+			}
+			txn := db.NewTransaction(true)
+			for j := i; j < i+m && j < n; j++ {
+				require.NoError(t, txn.Delete([]byte(fmt.Sprintf("%09d", j))))
+			}
+			require.NoError(t, txn.Commit(nil))
+		}
+		db.validate()
+		for i := 0; i < n; i++ {
+			if (i % 10000) == 0 {
+				// Display some progress. Right now, it's not very fast with no caching.
+				fmt.Printf("Testing i=%d\n", i)
+			}
+			k := fmt.Sprintf("%09d", i)
+
+			require.NoError(t, db.View(func(txn *Txn) error {
+				_, err := txn.Get([]byte(k))
+				require.Error(t, err)
+				return nil
+			}))
+		}
+		fmt.Println("Done and closing")
+	})
 }
 
 func TestIterate2Basic(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, _ := Open(getTestOptions(dir))
-	defer kv.Close()
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 
-	bkey := func(i int) []byte {
-		return []byte(fmt.Sprintf("%09d", i))
-	}
-	bval := func(i int) []byte {
-		return []byte(fmt.Sprintf("%025d", i))
-	}
-
-	// n := 500000
-	n := 10000
-	for i := 0; i < n; i++ {
-		if (i % 1000) == 0 {
-			t.Logf("Put i=%d\n", i)
+		bkey := func(i int) []byte {
+			return []byte(fmt.Sprintf("%09d", i))
 		}
-		txnSet(t, kv, bkey(i), bval(i), byte(i%127))
-	}
+		bval := func(i int) []byte {
+			return []byte(fmt.Sprintf("%025d", i))
+		}
 
-	opt := IteratorOptions{}
-	opt.PrefetchValues = true
-	opt.PrefetchSize = 10
-
-	txn := kv.NewTransaction(false)
-	it := txn.NewIterator(opt)
-	{
-		var count int
-		rewind := true
-		t.Log("Starting first basic iteration")
-		for it.Rewind(); it.Valid(); it.Next() {
-			item := it.Item()
-			key := item.Key()
-			if rewind && count == 5000 {
-				// Rewind would skip /head/ key, and it.Next() would skip 0.
-				count = 1
-				it.Rewind()
-				t.Log("Rewinding from 5000 to zero.")
-				rewind = false
-				continue
+		// n := 500000
+		n := 10000
+		for i := 0; i < n; i++ {
+			if (i % 1000) == 0 {
+				t.Logf("Put i=%d\n", i)
 			}
-			require.EqualValues(t, bkey(count), string(key))
-			val := getItemValue(t, item)
-			require.EqualValues(t, bval(count), string(val))
-			require.Equal(t, byte(count%127), item.UserMeta())
-			count++
+			txnSet(t, db, bkey(i), bval(i), byte(i%127))
 		}
-		require.EqualValues(t, n, count)
-	}
 
-	{
-		t.Log("Starting second basic iteration")
-		idx := 5030
-		for it.Seek(bkey(idx)); it.Valid(); it.Next() {
-			item := it.Item()
-			require.EqualValues(t, bkey(idx), string(item.Key()))
-			require.EqualValues(t, bval(idx), string(getItemValue(t, item)))
-			idx++
+		opt := IteratorOptions{}
+		opt.PrefetchValues = true
+		opt.PrefetchSize = 10
+
+		txn := db.NewTransaction(false)
+		it := txn.NewIterator(opt)
+		{
+			var count int
+			rewind := true
+			t.Log("Starting first basic iteration")
+			for it.Rewind(); it.Valid(); it.Next() {
+				item := it.Item()
+				key := item.Key()
+				if rewind && count == 5000 {
+					// Rewind would skip /head/ key, and it.Next() would skip 0.
+					count = 1
+					it.Rewind()
+					t.Log("Rewinding from 5000 to zero.")
+					rewind = false
+					continue
+				}
+				require.EqualValues(t, bkey(count), string(key))
+				val := getItemValue(t, item)
+				require.EqualValues(t, bval(count), string(val))
+				require.Equal(t, byte(count%127), item.UserMeta())
+				count++
+			}
+			require.EqualValues(t, n, count)
 		}
-	}
-	it.Close()
+
+		{
+			t.Log("Starting second basic iteration")
+			idx := 5030
+			for it.Seek(bkey(idx)); it.Valid(); it.Next() {
+				item := it.Item()
+				require.EqualValues(t, bkey(idx), string(item.Key()))
+				require.EqualValues(t, bval(idx), string(getItemValue(t, item)))
+				idx++
+			}
+		}
+		it.Close()
+	})
 }
 
 func TestLoad(t *testing.T) {
@@ -634,62 +556,53 @@ func TestLoad(t *testing.T) {
 }
 
 func TestIterateDeleted(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		txnSet(t, db, []byte("Key1"), []byte("Value1"), 0x00)
+		txnSet(t, db, []byte("Key2"), []byte("Value2"), 0x00)
 
-	opt := DefaultOptions
-	opt.SyncWrites = true
-	opt.Dir = dir
-	opt.ValueDir = dir
-	ps, err := Open(opt)
-	require.NoError(t, err)
-	defer ps.Close()
-	txnSet(t, ps, []byte("Key1"), []byte("Value1"), 0x00)
-	txnSet(t, ps, []byte("Key2"), []byte("Value2"), 0x00)
+		iterOpt := DefaultIteratorOptions
+		iterOpt.PrefetchValues = false
+		txn := db.NewTransaction(false)
+		idxIt := txn.NewIterator(iterOpt)
+		defer idxIt.Close()
 
-	iterOpt := DefaultIteratorOptions
-	iterOpt.PrefetchValues = false
-	txn := ps.NewTransaction(false)
-	idxIt := txn.NewIterator(iterOpt)
-	defer idxIt.Close()
+		count := 0
+		txn2 := db.NewTransaction(true)
+		prefix := []byte("Key")
+		for idxIt.Seek(prefix); idxIt.ValidForPrefix(prefix); idxIt.Next() {
+			key := idxIt.Item().Key()
+			count++
+			newKey := make([]byte, len(key))
+			copy(newKey, key)
+			require.NoError(t, txn2.Delete(newKey))
+		}
+		require.Equal(t, 2, count)
+		require.NoError(t, txn2.Commit(nil))
 
-	count := 0
-	txn2 := ps.NewTransaction(true)
-	prefix := []byte("Key")
-	for idxIt.Seek(prefix); idxIt.ValidForPrefix(prefix); idxIt.Next() {
-		key := idxIt.Item().Key()
-		count++
-		newKey := make([]byte, len(key))
-		copy(newKey, key)
-		require.NoError(t, txn2.Delete(newKey))
-	}
-	require.Equal(t, 2, count)
-	require.NoError(t, txn2.Commit(nil))
+		for _, prefetch := range [...]bool{true, false} {
+			t.Run(fmt.Sprintf("Prefetch=%t", prefetch), func(t *testing.T) {
+				txn := db.NewTransaction(false)
+				iterOpt = DefaultIteratorOptions
+				iterOpt.PrefetchValues = prefetch
+				idxIt = txn.NewIterator(iterOpt)
 
-	for _, prefetch := range [...]bool{true, false} {
-		t.Run(fmt.Sprintf("Prefetch=%t", prefetch), func(t *testing.T) {
-			txn := ps.NewTransaction(false)
-			iterOpt = DefaultIteratorOptions
-			iterOpt.PrefetchValues = prefetch
-			idxIt = txn.NewIterator(iterOpt)
-
-			var estSize int64
-			var idxKeys []string
-			for idxIt.Seek(prefix); idxIt.Valid(); idxIt.Next() {
-				item := idxIt.Item()
-				key := item.Key()
-				estSize += item.EstimatedSize()
-				if !bytes.HasPrefix(key, prefix) {
-					break
+				var estSize int64
+				var idxKeys []string
+				for idxIt.Seek(prefix); idxIt.Valid(); idxIt.Next() {
+					item := idxIt.Item()
+					key := item.Key()
+					estSize += item.EstimatedSize()
+					if !bytes.HasPrefix(key, prefix) {
+						break
+					}
+					idxKeys = append(idxKeys, string(key))
+					t.Logf("%+v\n", idxIt.Item())
 				}
-				idxKeys = append(idxKeys, string(key))
-				t.Logf("%+v\n", idxIt.Item())
-			}
-			require.Equal(t, 0, len(idxKeys))
-			require.Equal(t, int64(0), estSize)
-		})
-	}
+				require.Equal(t, 0, len(idxKeys))
+				require.Equal(t, int64(0), estSize)
+			})
+		}
+	})
 }
 
 func TestDeleteWithoutSyncWrite(t *testing.T) {
@@ -727,91 +640,77 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 }
 
 func TestPidFile(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	options := getTestOptions(dir)
-	kv1, err := Open(options)
-	require.NoError(t, err)
-	defer kv1.Close()
-	_, err = Open(options)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "Another process is using this Badger database")
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// Reopen database
+		_, err := Open(getTestOptions(db.opt.Dir))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "Another process is using this Badger database")
+	})
 }
 
 func TestBigKeyValuePairs(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		bigK := make([]byte, maxKeySize+1)
+		bigV := make([]byte, db.opt.ValueLogFileSize+1)
+		small := make([]byte, 10)
 
-	opt := getTestOptions(dir)
-	kv, err := Open(opt)
-	require.NoError(t, err)
+		txn := db.NewTransaction(true)
+		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, small))
+		require.Regexp(t, regexp.MustCompile("Value.*exceeded"), txn.Set(small, bigV))
 
-	bigK := make([]byte, maxKeySize+1)
-	bigV := make([]byte, opt.ValueLogFileSize+1)
-	small := make([]byte, 10)
+		require.NoError(t, txn.Set(small, small))
+		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, bigV))
 
-	txn := kv.NewTransaction(true)
-	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, small))
-	require.Regexp(t, regexp.MustCompile("Value.*exceeded"), txn.Set(small, bigV))
-
-	require.NoError(t, txn.Set(small, small))
-	require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, bigV))
-
-	require.NoError(t, kv.View(func(txn *Txn) error {
-		_, err := txn.Get(small)
-		require.Equal(t, ErrKeyNotFound, err)
-		return nil
-	}))
-	require.NoError(t, kv.Close())
+		require.NoError(t, db.View(func(txn *Txn) error {
+			_, err := txn.Get(small)
+			require.Equal(t, ErrKeyNotFound, err)
+			return nil
+		}))
+	})
 }
 
 func TestIteratorPrefetchSize(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, _ := Open(getTestOptions(dir))
-	defer kv.Close()
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 
-	bkey := func(i int) []byte {
-		return []byte(fmt.Sprintf("%09d", i))
-	}
-	bval := func(i int) []byte {
-		return []byte(fmt.Sprintf("%025d", i))
-	}
-
-	n := 100
-	for i := 0; i < n; i++ {
-		// if (i % 10) == 0 {
-		// 	t.Logf("Put i=%d\n", i)
-		// }
-		txnSet(t, kv, bkey(i), bval(i), byte(i%127))
-	}
-
-	getIteratorCount := func(prefetchSize int) int {
-		opt := IteratorOptions{}
-		opt.PrefetchValues = true
-		opt.PrefetchSize = prefetchSize
-
-		var count int
-		txn := kv.NewTransaction(false)
-		it := txn.NewIterator(opt)
-		{
-			t.Log("Starting first basic iteration")
-			for it.Rewind(); it.Valid(); it.Next() {
-				count++
-			}
-			require.EqualValues(t, n, count)
+		bkey := func(i int) []byte {
+			return []byte(fmt.Sprintf("%09d", i))
 		}
-		return count
-	}
+		bval := func(i int) []byte {
+			return []byte(fmt.Sprintf("%025d", i))
+		}
 
-	var sizes = []int{-10, 0, 1, 10}
-	for _, size := range sizes {
-		c := getIteratorCount(size)
-		require.Equal(t, 100, c)
-	}
+		n := 100
+		for i := 0; i < n; i++ {
+			// if (i % 10) == 0 {
+			// 	t.Logf("Put i=%d\n", i)
+			// }
+			txnSet(t, db, bkey(i), bval(i), byte(i%127))
+		}
+
+		getIteratorCount := func(prefetchSize int) int {
+			opt := IteratorOptions{}
+			opt.PrefetchValues = true
+			opt.PrefetchSize = prefetchSize
+
+			var count int
+			txn := db.NewTransaction(false)
+			it := txn.NewIterator(opt)
+			{
+				t.Log("Starting first basic iteration")
+				for it.Rewind(); it.Valid(); it.Next() {
+					count++
+				}
+				require.EqualValues(t, n, count)
+			}
+			return count
+		}
+
+		var sizes = []int{-10, 0, 1, 10}
+		for _, size := range sizes {
+			c := getIteratorCount(size)
+			require.Equal(t, 100, c)
+		}
+	})
 }
 
 func TestSetIfAbsentAsync(t *testing.T) {
@@ -858,215 +757,327 @@ func TestSetIfAbsentAsync(t *testing.T) {
 }
 
 func TestGetSetRace(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	kv, _ := Open(getTestOptions(dir))
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 
-	data := make([]byte, 4096)
-	_, err = rand.Read(data)
-	require.NoError(t, err)
+		data := make([]byte, 4096)
+		_, err := rand.Read(data)
+		require.NoError(t, err)
 
-	var (
-		numOp = 100
-		wg    sync.WaitGroup
-		keyCh = make(chan string)
-	)
+		var (
+			numOp = 100
+			wg    sync.WaitGroup
+			keyCh = make(chan string)
+		)
 
-	// writer
-	wg.Add(1)
-	go func() {
-		defer func() {
-			wg.Done()
-			close(keyCh)
+		// writer
+		wg.Add(1)
+		go func() {
+			defer func() {
+				wg.Done()
+				close(keyCh)
+			}()
+
+			for i := 0; i < numOp; i++ {
+				key := fmt.Sprintf("%d", i)
+				txnSet(t, db, []byte(key), data, 0x00)
+				keyCh <- key
+			}
 		}()
 
-		for i := 0; i < numOp; i++ {
-			key := fmt.Sprintf("%d", i)
-			txnSet(t, kv, []byte(key), data, 0x00)
-			keyCh <- key
-		}
-	}()
+		// reader
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 
-	// reader
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+			for key := range keyCh {
+				require.NoError(t, db.View(func(txn *Txn) error {
+					item, err := txn.Get([]byte(key))
+					require.NoError(t, err)
+					_, err = item.Value()
+					require.NoError(t, err)
+					return nil
+				}))
+			}
+		}()
 
-		for key := range keyCh {
-			require.NoError(t, kv.View(func(txn *Txn) error {
-				item, err := txn.Get([]byte(key))
-				require.NoError(t, err)
-				_, err = item.Value()
-				require.NoError(t, err)
-				return nil
-			}))
-		}
-	}()
-
-	wg.Wait()
+		wg.Wait()
+	})
 }
 
 func TestPurgeVersionsBelow(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	db, err := Open(getTestOptions(dir))
-	require.NoError(t, err)
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// Write 4 versions of the same key
+		for i := 0; i < 4; i++ {
+			err := db.Update(func(txn *Txn) error {
+				return txn.Set([]byte("answer"), []byte(fmt.Sprintf("%25d", i)))
+			})
+			require.NoError(t, err)
+		}
 
-	// Write 4 versions of the same key
-	for i := 0; i < 4; i++ {
-		err = db.Update(func(txn *Txn) error {
-			return txn.Set([]byte("answer"), []byte(fmt.Sprintf("%25d", i)))
-		})
-		require.NoError(t, err)
-	}
+		opts := DefaultIteratorOptions
+		opts.AllVersions = true
+		opts.PrefetchValues = false
 
-	opts := DefaultIteratorOptions
-	opts.AllVersions = true
-	opts.PrefetchValues = false
-
-	// Verify that there are 4 versions, and record 3rd version (2nd from top in iteration)
-	var ts uint64
-	db.View(func(txn *Txn) error {
-		it := txn.NewIterator(opts)
-		var count int
-		for it.Rewind(); it.Valid(); it.Next() {
-			count++
-			item := it.Item()
-			if count == 2 {
-				ts = item.Version()
+		// Verify that there are 4 versions, and record 3rd version (2nd from top in iteration)
+		var ts uint64
+		db.View(func(txn *Txn) error {
+			it := txn.NewIterator(opts)
+			var count int
+			for it.Rewind(); it.Valid(); it.Next() {
+				count++
+				item := it.Item()
+				if count == 2 {
+					ts = item.Version()
+				}
+				require.Equal(t, []byte("answer"), item.Key())
 			}
-			require.Equal(t, []byte("answer"), item.Key())
-		}
-		require.Equal(t, 4, count)
-		return nil
-	})
+			require.Equal(t, 4, count)
+			return nil
+		})
 
-	// Delete all versions below the 3rd version
-	err = db.PurgeVersionsBelow([]byte("answer"), ts)
-	require.NoError(t, err)
-	require.NotEmpty(t, db.vlog.lfDiscardStats.m)
+		// Delete all versions below the 3rd version
+		err := db.PurgeVersionsBelow([]byte("answer"), ts)
+		require.NoError(t, err)
+		require.NotEmpty(t, db.vlog.lfDiscardStats.m)
 
-	// Verify that there are only 2 versions left
-	db.View(func(txn *Txn) error {
-		it := txn.NewIterator(opts)
-		var count int
-		for it.Rewind(); it.Valid(); it.Next() {
-			count++
-			item := it.Item()
-			require.True(t, item.Version() >= ts,
-				"item version: %d older than ts: %d",
-				item.Version(), ts)
-			require.Equal(t, []byte("answer"), item.Key())
-		}
-		require.Equal(t, 2, count)
-		return nil
+		// Verify that there are only 2 versions left
+		db.View(func(txn *Txn) error {
+			it := txn.NewIterator(opts)
+			var count int
+			for it.Rewind(); it.Valid(); it.Next() {
+				count++
+				item := it.Item()
+				require.True(t, item.Version() >= ts,
+					"item version: %d older than ts: %d",
+					item.Version(), ts)
+				require.Equal(t, []byte("answer"), item.Key())
+			}
+			require.Equal(t, 2, count)
+			return nil
+		})
 	})
 }
 
 func TestPurgeOlderVersions(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	db, err := Open(getTestOptions(dir))
-	require.NoError(t, err)
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// Write two versions of a key
+		err := db.Update(func(txn *Txn) error {
+			return txn.Set([]byte("answer"), []byte("42"))
+		})
+		require.NoError(t, err)
 
-	// Write two versions of a key
-	err = db.Update(func(txn *Txn) error {
-		return txn.Set([]byte("answer"), []byte("42"))
+		err = db.Update(func(txn *Txn) error {
+			return txn.Set([]byte("answer"), []byte("43"))
+		})
+		require.NoError(t, err)
+
+		opts := DefaultIteratorOptions
+		opts.AllVersions = true
+		opts.PrefetchValues = false
+
+		// Verify that two versions are found during iteration
+		err = db.View(func(txn *Txn) error {
+			it := txn.NewIterator(opts)
+			var count int
+			for it.Rewind(); it.Valid(); it.Next() {
+				count++
+				item := it.Item()
+				require.Equal(t, []byte("answer"), item.Key())
+			}
+			require.Equal(t, 2, count)
+			return nil
+		})
+		require.NoError(t, err)
+
+		// Invoke DeleteOlderVersions() to delete older version
+		err = db.PurgeOlderVersions()
+		require.NoError(t, err)
+
+		// Verify that only one version is found
+		err = db.View(func(txn *Txn) error {
+			it := txn.NewIterator(opts)
+			var count int
+			for it.Rewind(); it.Valid(); it.Next() {
+				count++
+				item := it.Item()
+				require.Equal(t, []byte("answer"), item.Key())
+				val, err := item.Value()
+				require.NoError(t, err)
+				t.Logf("Item value is %q", val)
+				//require.Equal(t, []byte("43"), val)
+			}
+			require.Equal(t, 1, count)
+			return nil
+		})
+		require.NoError(t, err)
 	})
-	require.NoError(t, err)
-
-	err = db.Update(func(txn *Txn) error {
-		return txn.Set([]byte("answer"), []byte("43"))
-	})
-	require.NoError(t, err)
-
-	opts := DefaultIteratorOptions
-	opts.AllVersions = true
-	opts.PrefetchValues = false
-
-	// Verify that two versions are found during iteration
-	err = db.View(func(txn *Txn) error {
-		it := txn.NewIterator(opts)
-		var count int
-		for it.Rewind(); it.Valid(); it.Next() {
-			count++
-			item := it.Item()
-			require.Equal(t, []byte("answer"), item.Key())
-		}
-		require.Equal(t, 2, count)
-		return nil
-	})
-	require.NoError(t, err)
-
-	// Invoke DeleteOlderVersions() to delete older version
-	err = db.PurgeOlderVersions()
-	require.NoError(t, err)
-
-	// Verify that only one version is found
-	err = db.View(func(txn *Txn) error {
-		it := txn.NewIterator(opts)
-		var count int
-		for it.Rewind(); it.Valid(); it.Next() {
-			count++
-			item := it.Item()
-			require.Equal(t, []byte("answer"), item.Key())
-			val, err := item.Value()
-			require.NoError(t, err)
-			t.Logf("Item value is %q", val)
-			//require.Equal(t, []byte("43"), val)
-		}
-		require.Equal(t, 1, count)
-		return nil
-	})
-	require.NoError(t, err)
 }
 
 func TestExpiry(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// Write two keys, one with a TTL
+		err := db.Update(func(txn *Txn) error {
+			return txn.Set([]byte("answer1"), []byte("42"))
+		})
+		require.NoError(t, err)
+
+		err = db.Update(func(txn *Txn) error {
+			return txn.SetWithTTL([]byte("answer2"), []byte("43"), 1*time.Second)
+		})
+		require.NoError(t, err)
+
+		time.Sleep(2 * time.Second)
+
+		// Verify that only unexpired key is found during iteration
+		err = db.View(func(txn *Txn) error {
+			_, err := txn.Get([]byte("answer1"))
+			require.NoError(t, err)
+
+			_, err = txn.Get([]byte("answer2"))
+			require.Error(t, ErrKeyNotFound, err)
+			return nil
+		})
+		require.NoError(t, err)
+
+		// Verify that only one key is found during iteration
+		opts := DefaultIteratorOptions
+		opts.PrefetchValues = false
+		err = db.View(func(txn *Txn) error {
+			it := txn.NewIterator(opts)
+			var count int
+			for it.Rewind(); it.Valid(); it.Next() {
+				count++
+				item := it.Item()
+				require.Equal(t, []byte("answer1"), item.Key())
+			}
+			require.Equal(t, 1, count)
+			return nil
+		})
+		require.NoError(t, err)
+	})
+}
+
+func randBytes(n int) []byte {
+	recv := make([]byte, n)
+	in, err := rand.Read(recv)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return recv[:in]
+}
+
+var benchmarkData = []struct {
+	key, value []byte
+}{
+	{randBytes(100), nil},
+	{randBytes(1000), []byte("foo")},
+	{[]byte("foo"), randBytes(1000)},
+	{[]byte(""), randBytes(1000)},
+	{nil, randBytes(1000000)},
+	{randBytes(100000), nil},
+	{randBytes(1000000), nil},
+}
+
+func TestLargeKeys(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	db, err := Open(getTestOptions(dir))
-	require.NoError(t, err)
 
-	// Write two keys, one with a TTL
-	err = db.Update(func(txn *Txn) error {
-		return txn.Set([]byte("answer1"), []byte("42"))
-	})
-	require.NoError(t, err)
+	opts := new(Options)
+	*opts = DefaultOptions
+	opts.ValueLogFileSize = 1024 * 1024 * 1024
+	opts.Dir = dir
+	opts.ValueDir = dir
 
-	err = db.Update(func(txn *Txn) error {
-		return txn.SetWithTTL([]byte("answer2"), []byte("43"), 1*time.Second)
-	})
-	require.NoError(t, err)
+	db, err := Open(*opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 1000; i++ {
+		tx := db.NewTransaction(true)
+		for _, kv := range benchmarkData {
+			k := make([]byte, len(kv.key))
+			copy(k, kv.key)
 
-	time.Sleep(2 * time.Second)
-
-	// Verify that only unexpired key is found during iteration
-	err = db.View(func(txn *Txn) error {
-		_, err := txn.Get([]byte("answer1"))
-		require.NoError(t, err)
-
-		_, err = txn.Get([]byte("answer2"))
-		require.Error(t, ErrKeyNotFound, err)
-		return nil
-	})
-	require.NoError(t, err)
-
-	// Verify that only one key is found during iteration
-	opts := DefaultIteratorOptions
-	opts.PrefetchValues = false
-	err = db.View(func(txn *Txn) error {
-		it := txn.NewIterator(opts)
-		var count int
-		for it.Rewind(); it.Valid(); it.Next() {
-			count++
-			item := it.Item()
-			require.Equal(t, []byte("answer1"), item.Key())
+			v := make([]byte, len(kv.value))
+			copy(v, kv.value)
+			if err := tx.Set(k, v); err != nil {
+				// Skip over this record.
+			}
 		}
-		require.Equal(t, 1, count)
+		if err := tx.Commit(nil); err != nil {
+			t.Fatalf("#%d: batchSet err: %v", i, err)
+		}
+	}
+}
+
+func TestCreateDirs(t *testing.T) {
+	dir, err := ioutil.TempDir("", "parent")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opts := DefaultOptions
+	dir = filepath.Join(dir, "badger")
+	opts.Dir = dir
+	opts.ValueDir = dir
+	db, err := Open(opts)
+	require.NoError(t, err)
+	db.Close()
+	_, err = os.Stat(dir)
+	require.NoError(t, err)
+}
+func TestWriteDeadlock(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	fmt.Println(dir)
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opt := DefaultOptions
+	opt.Dir = dir
+	opt.ValueDir = dir
+	opt.ValueLogFileSize = 10 << 20
+	db, err := Open(opt)
+	require.NoError(t, err)
+
+	print := func(count *int) {
+		*count++
+		if *count%100 == 0 {
+			fmt.Printf("%05d\r", *count)
+		}
+	}
+
+	var count int
+	val := make([]byte, 10000)
+	require.NoError(t, db.Update(func(txn *Txn) error {
+		for i := 0; i < 1500; i++ {
+			key := fmt.Sprintf("%d", i)
+			rand.Read(val)
+			require.NoError(t, txn.Set([]byte(key), val))
+			print(&count)
+		}
+		return nil
+	}))
+
+	count = 0
+	fmt.Println("\nWrites done. Iteration and updates starting...")
+	err = db.Update(func(txn *Txn) error {
+		opt := DefaultIteratorOptions
+		opt.PrefetchValues = false
+		it := txn.NewIterator(opt)
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+
+			// Using Value() would cause deadlock.
+			// item.Value()
+			out, err := item.ValueCopy(nil)
+			require.NoError(t, err)
+			require.Equal(t, len(val), len(out))
+
+			key := y.Copy(item.Key())
+			rand.Read(val)
+			require.NoError(t, txn.Set(key, val))
+			print(&count)
+		}
 		return nil
 	})
 	require.NoError(t, err)
@@ -1188,131 +1199,4 @@ func ExampleTxn_NewIterator() {
 	fmt.Printf("Counted %d elements", count)
 	// Output:
 	// Counted 1000 elements
-}
-
-func randBytes(n int) []byte {
-	recv := make([]byte, n)
-	in, err := rand.Read(recv)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return recv[:in]
-}
-
-var benchmarkData = []struct {
-	key, value []byte
-}{
-	{randBytes(100), nil},
-	{randBytes(1000), []byte("foo")},
-	{[]byte("foo"), randBytes(1000)},
-	{[]byte(""), randBytes(1000)},
-	{nil, randBytes(1000000)},
-	{randBytes(100000), nil},
-	{randBytes(1000000), nil},
-}
-
-func TestLargeKeys(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	opts := new(Options)
-	*opts = DefaultOptions
-	opts.ValueLogFileSize = 1024 * 1024 * 1024
-	opts.Dir = dir
-	opts.ValueDir = dir
-
-	db, err := Open(*opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 1000; i++ {
-		tx := db.NewTransaction(true)
-		for _, kv := range benchmarkData {
-			k := make([]byte, len(kv.key))
-			copy(k, kv.key)
-
-			v := make([]byte, len(kv.value))
-			copy(v, kv.value)
-			if err := tx.Set(k, v); err != nil {
-				// Skip over this record.
-			}
-		}
-		if err := tx.Commit(nil); err != nil {
-			t.Fatalf("#%d: batchSet err: %v", i, err)
-		}
-	}
-}
-
-func TestCreateDirs(t *testing.T) {
-	dir, err := ioutil.TempDir("", "parent")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	opts := DefaultOptions
-	dir = filepath.Join(dir, "badger")
-	opts.Dir = dir
-	opts.ValueDir = dir
-	db, err := Open(opts)
-	require.NoError(t, err)
-	db.Close()
-	_, err = os.Stat(dir)
-	require.NoError(t, err)
-}
-
-func TestWriteDeadlock(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	fmt.Println(dir)
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	opt := DefaultOptions
-	opt.Dir = dir
-	opt.ValueDir = dir
-	opt.ValueLogFileSize = 10 << 20
-	db, err := Open(opt)
-	require.NoError(t, err)
-
-	print := func(count *int) {
-		*count++
-		if *count%100 == 0 {
-			fmt.Printf("%05d\r", *count)
-		}
-	}
-
-	var count int
-	val := make([]byte, 10000)
-	require.NoError(t, db.Update(func(txn *Txn) error {
-		for i := 0; i < 1500; i++ {
-			key := fmt.Sprintf("%d", i)
-			rand.Read(val)
-			require.NoError(t, txn.Set([]byte(key), val))
-			print(&count)
-		}
-		return nil
-	}))
-
-	count = 0
-	fmt.Println("\nWrites done. Iteration and updates starting...")
-	err = db.Update(func(txn *Txn) error {
-		opt := DefaultIteratorOptions
-		opt.PrefetchValues = false
-		it := txn.NewIterator(opt)
-		for it.Rewind(); it.Valid(); it.Next() {
-			item := it.Item()
-
-			// Using Value() would cause deadlock.
-			// item.Value()
-			out, err := item.ValueCopy(nil)
-			require.NoError(t, err)
-			require.Equal(t, len(val), len(out))
-
-			key := y.Copy(item.Key())
-			rand.Read(val)
-			require.NoError(t, txn.Set(key, val))
-			print(&count)
-		}
-		return nil
-	})
-	require.NoError(t, err)
 }
