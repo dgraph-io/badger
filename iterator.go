@@ -257,6 +257,9 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	defer decr()
 	txn.db.vlog.incrIteratorCount()
 	var iters []y.Iterator
+	if itr := txn.newPendingWritesIterator(opt.Reverse); itr != nil {
+		iters = append(iters, itr)
+	}
 	for i := 0; i < len(tables); i++ {
 		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
 	}

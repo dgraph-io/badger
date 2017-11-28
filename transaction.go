@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -192,6 +193,71 @@ type Txn struct {
 
 	size  int64
 	count int64
+}
+
+type pendingWritesIterator struct {
+	entries []*entry
+	nextIdx int
+	readTs  uint64
+}
+
+func (pi *pendingWritesIterator) Next() {
+	pi.nextIdx++
+}
+
+func (pi *pendingWritesIterator) Rewind() {
+	pi.nextIdx = 0
+}
+
+func (pi *pendingWritesIterator) Seek(key []byte) {
+	key = y.ParseKey(key)
+	pi.nextIdx = sort.Search(len(pi.entries), func(idx int) bool {
+		return bytes.Compare(pi.entries[idx].Key, key) >= 0
+	})
+}
+
+func (pi *pendingWritesIterator) Key() []byte {
+	y.AssertTrue(pi.Valid())
+	entry := pi.entries[pi.nextIdx]
+	return y.KeyWithTs(entry.Key, pi.readTs)
+}
+
+func (pi *pendingWritesIterator) Value() y.ValueStruct {
+	y.AssertTrue(pi.Valid())
+	entry := pi.entries[pi.nextIdx]
+	return y.ValueStruct{
+		Value:     entry.Value,
+		Meta:      entry.meta,
+		UserMeta:  entry.UserMeta,
+		ExpiresAt: entry.ExpiresAt,
+		Version:   pi.readTs,
+	}
+}
+
+func (pi *pendingWritesIterator) Valid() bool {
+	return pi.nextIdx < len(pi.entries)
+}
+
+func (pi *pendingWritesIterator) Close() error {
+	return nil
+}
+
+func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
+	if !txn.update || len(txn.pendingWrites) == 0 {
+		return nil
+	}
+	entries := make([]*entry, 0, len(txn.pendingWrites))
+	for _, e := range txn.pendingWrites {
+		entries = append(entries, e)
+	}
+	// Number of pending writes per transaction shouldn't be too big in general.
+	sort.Slice(entries, func(i, j int) bool {
+		return bytes.Compare(entries[i].Key, entries[j].Key) < 0
+	})
+	return &pendingWritesIterator{
+		readTs:  txn.readTs,
+		entries: entries,
+	}
 }
 
 func (txn *Txn) checkSize(e *entry) error {
