@@ -28,6 +28,7 @@ version.
       - [Read-only transactions](#read-only-transactions)
       - [Read-write transactions](#read-write-transactions)
       - [Managing transactions manually](#managing-transactions-manually)
+      - [Handling Errors](#handling-errors)
     + [Using key/value pairs](#using-keyvalue-pairs)
     + [Setting Time To Live(TTL) and User Metadata on Keys](#setting-time-to-livettl-and-user-metadata-on-keys)
     + [Iterating over keys](#iterating-over-keys)
@@ -122,9 +123,30 @@ err := db.Update(func(tx *badger.Txn) error {
 
 All database operations are allowed inside a read-write transaction.
 
-Always check the return error as it will report an `ErrConflict` in case of
-conflict or other errors, for e.g. due to disk failures. If you return an error
+Always check the returned error value. If you return an error
 within your closure it will be passed through.
+
+An `ErrConflict` error will be reported in case of a conflict. Depending on the state 
+of your application, you have the option to retry the operation if you receive 
+this error.
+
+An `ErrTxnTooBig` will be reported in case the number of pending writes/deletes in
+the transaction exceed a certain limit. In that case, it is best to commit the
+transaction and start a new transaction immediately. Here is an example (we are
+not checking for errors in some places for simplicity):
+
+```go
+updates := make(map[string]string)
+txn := db.NewTransaction(true)
+for k,v := range updates {
+  if err := txn.Set(byte[](k),byte[](v)); err == ErrTxnTooBig {
+    _ = txn.Commit()
+    txn = db.NewTransaction(..)
+    _ = txn.Set(k,v) 
+  }
+}
+_ = txn.Commit()
+```
 
 #### Managing transactions manually
 The `DB.View()` and `DB.Update()` methods are wrappers around the
