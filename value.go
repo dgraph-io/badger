@@ -924,21 +924,7 @@ func discardEntry(e Entry, vs y.ValueStruct) bool {
 	return false
 }
 
-func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error) {
-	// Pick a log file for GC
-	lf := vlog.pickLog(head)
-	if lf == nil {
-		return ErrNoRewrite
-	}
-
-	// Update stats before exiting
-	defer func() {
-		if err == nil {
-			vlog.lfDiscardStats.Lock()
-			delete(vlog.lfDiscardStats.m, lf.fid)
-			vlog.lfDiscardStats.Unlock()
-		}
-	}()
+func (vlog *valueLog) scan(lf *logFile, gcThreshold float64) (err error) {
 
 	type reason struct {
 		total   float64
@@ -1046,6 +1032,47 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 	return nil
 }
 
+func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error) {
+	// Pick a log file for GC
+	lf := vlog.pickLog(head)
+	if lf == nil {
+		return ErrNoRewrite
+	}
+
+	// Update stats before exiting
+	defer func() {
+		if err == nil {
+			vlog.lfDiscardStats.Lock()
+			delete(vlog.lfDiscardStats.m, lf.fid)
+			vlog.lfDiscardStats.Unlock()
+		}
+	}()
+
+	return vlog.scan(lf, gcThreshold)
+}
+
+// Run GC over all files w/ discard ratio of 0.0
+func (vlog *valueLog) doRunGCOffline(headPtr valuePointer) error {
+	vlog.filesLock.RLock()
+	defer vlog.filesLock.RUnlock()
+	fids := vlog.sortedFids()
+	if len(fids) <= 1 || headPtr.Fid == 0 {
+		return nil
+	}
+
+	for _, fid := range fids {
+		if fid >= headPtr.Fid {
+			continue
+		}
+		lf := vlog.filesMap[fid]
+		err := vlog.scan(lf, 0.0)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (vlog *valueLog) waitOnGC(lc *y.Closer) {
 	defer lc.Done()
 
@@ -1056,7 +1083,7 @@ func (vlog *valueLog) waitOnGC(lc *y.Closer) {
 	vlog.garbageCh <- struct{}{}
 }
 
-func (vlog *valueLog) runGC(gcThreshold float64, head valuePointer) error {
+func (vlog *valueLog) runGC(gcThreshold float64, headPtr valuePointer) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
 		// Run GC
@@ -1066,7 +1093,7 @@ func (vlog *valueLog) runGC(gcThreshold float64, head valuePointer) error {
 		)
 		numFiles := len(vlog.sortedFids())
 		for count < numFiles {
-			err = vlog.doRunGC(gcThreshold, head)
+			err = vlog.doRunGC(gcThreshold, headPtr)
 			if err != nil {
 				break
 			}

@@ -191,7 +191,7 @@ func (s *levelsController) runWorker(lc *y.Closer) {
 			prios := s.pickCompactLevels()
 			for _, p := range prios {
 				// TODO: Handle error.
-				didCompact, _ := s.doCompact(p)
+				didCompact, _ := s.doCompact(p.level)
 				if didCompact {
 					break
 				}
@@ -200,6 +200,17 @@ func (s *levelsController) runWorker(lc *y.Closer) {
 			return
 		}
 	}
+}
+
+// FIXME do we need a level closer here. Probably not
+func (s *levelsController) doCompactOffline() error {
+	for i := range s.levels {
+		_, err := s.doCompact(i)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Returns true if level zero may be compacted, without accounting for compactions that already
@@ -559,8 +570,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 }
 
 // doCompact picks some table on level l and compacts it away to the next level.
-func (s *levelsController) doCompact(p compactionPriority) (bool, error) {
-	l := p.level
+func (s *levelsController) doCompact(l int) (bool, error) {
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
 
 	cd := compactDef{
@@ -570,8 +580,6 @@ func (s *levelsController) doCompact(p compactionPriority) (bool, error) {
 	}
 	cd.elog.SetMaxEvents(100)
 	defer cd.elog.Finish()
-
-	cd.elog.LazyPrintf("Got compaction priority: %+v", p)
 
 	// While picking tables to be compacted, both levels' tables are expected to
 	// remain unchanged.

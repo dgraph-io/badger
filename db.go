@@ -1068,6 +1068,22 @@ func (db *DB) PurgeOlderVersions() error {
 	})
 }
 
+func (db *DB) getHeadPointer() (headPtr valuePointer, err error) {
+	// Find head on disk
+	headKey := y.KeyWithTs(head, math.MaxUint64)
+	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
+	val, err := db.lc.get(headKey)
+	if err != nil {
+		err = errors.Wrap(err, "Retrieving head from on-disk LSM")
+		return
+	}
+
+	if len(val.Value) > 0 {
+		headPtr.Decode(val.Value)
+	}
+	return
+}
+
 // RunValueLogGC triggers a value log garbage collection.
 //
 // It picks value log files to perform GC based on statistics that are collected
@@ -1101,21 +1117,42 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 		return ErrInvalidRequest
 	}
 
-	// Find head on disk
-	headKey := y.KeyWithTs(head, math.MaxUint64)
-	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
-	val, err := db.lc.get(headKey)
+	headPtr, err := db.getHeadPointer()
 	if err != nil {
-		return errors.Wrap(err, "Retrieving head from on-disk LSM")
+		return err
 	}
-
-	var head valuePointer
-	if len(val.Value) > 0 {
-		head.Decode(val.Value)
-	}
-
 	// Pick a log file and run GC
-	return db.vlog.runGC(discardRatio, head)
+	return db.vlog.runGC(discardRatio, headPtr)
+}
+
+// RunValueLogGCOffline is similar to the RunValueLogGC method. It triggers
+// value log garbage collection. However, it differs from RunValueLogGC in two
+// key aspects.
+//
+// * Garbage collection is run on every single file. There is no policy employed
+//   to be selective in picking the files to be GC-ed.
+//
+// * The discard ratio is 0.0. This means GC would run even if a single entry
+//   could be discarded is found.
+//
+// Because of the conditions above, this is a very disk-intensive activity and
+// must be run when Badger is offline and not taking any other requests.
+func (db *DB) RunValueLogGCOffline() error {
+	headPtr, err := db.getHeadPointer()
+	if err != nil {
+		return err
+	}
+
+	return db.vlog.doRunGCOffline(headPtr)
+}
+
+// CompactLSMTreeOffline runs a full compaction on every level of the LSM tree.
+// Please ensure that no other concurrent compactions are running when this is
+// called.
+//
+// This must be run when Badger is offline and not taking any other requests.
+func (db *DB) CompactLSMTreeOffline() error {
+	return db.lc.doCompactOffline()
 }
 
 // Size returns the size of lsm and value log files in bytes. It can be used to decide how often to
