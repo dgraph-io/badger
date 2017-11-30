@@ -185,7 +185,7 @@ type Txn struct {
 	reads  []uint64 // contains fingerprints of keys read.
 	writes []uint64 // contains fingerprints of keys written.
 
-	pendingWrites map[string]*entry // cache stores any writes done by txn.
+	pendingWrites map[string]*Entry // cache stores any writes done by txn.
 
 	db        *DB
 	callbacks []func()
@@ -196,7 +196,7 @@ type Txn struct {
 }
 
 type pendingWritesIterator struct {
-	entries  []*entry
+	entries  []*Entry
 	nextIdx  int
 	readTs   uint64
 	reversed bool
@@ -251,7 +251,7 @@ func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
 	if !txn.update || len(txn.pendingWrites) == 0 {
 		return nil
 	}
-	entries := make([]*entry, 0, len(txn.pendingWrites))
+	entries := make([]*Entry, 0, len(txn.pendingWrites))
 	for _, e := range txn.pendingWrites {
 		entries = append(entries, e)
 	}
@@ -270,7 +270,7 @@ func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
 	}
 }
 
-func (txn *Txn) checkSize(e *entry) error {
+func (txn *Txn) checkSize(e *Entry) error {
 	count := txn.count + 1
 	// Extra bytes for version in key.
 	size := txn.size + int64(e.estimateSize(txn.db.opt.ValueThreshold)) + 10
@@ -286,11 +286,11 @@ func (txn *Txn) checkSize(e *entry) error {
 // It will return ErrReadOnlyTxn if update flag was set to false when creating the
 // transaction.
 func (txn *Txn) Set(key, val []byte) error {
-	e := &entry{
+	e := &Entry{
 		Key:   key,
 		Value: val,
 	}
-	return txn.setEntry(e)
+	return txn.SetEntry(e)
 }
 
 // SetWithMeta adds a key-value pair to the database, along with a metadata
@@ -298,8 +298,8 @@ func (txn *Txn) Set(key, val []byte) error {
 // interpret the value or store other contextual bits corresponding to the
 // key-value pair.
 func (txn *Txn) SetWithMeta(key, val []byte, meta byte) error {
-	e := &entry{Key: key, Value: val, UserMeta: meta}
-	return txn.setEntry(e)
+	e := &Entry{Key: key, Value: val, UserMeta: meta}
+	return txn.SetEntry(e)
 }
 
 // SetWithTTL adds a key-value pair to the database, along with a time-to-live
@@ -307,11 +307,13 @@ func (txn *Txn) SetWithMeta(key, val []byte, meta byte) error {
 // the time has elapsed , and be eligible for garbage collection.
 func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
 	expire := time.Now().Add(dur).Unix()
-	e := &entry{Key: key, Value: val, ExpiresAt: uint64(expire)}
-	return txn.setEntry(e)
+	e := &Entry{Key: key, Value: val, ExpiresAt: uint64(expire)}
+	return txn.SetEntry(e)
 }
 
-func (txn *Txn) setEntry(e *entry) error {
+// SetEntry takes an Entry struct and adds the key-value pair in the struct, along
+// with other metadata to the database.
+func (txn *Txn) SetEntry(e *Entry) error {
 	switch {
 	case !txn.update:
 		return ErrReadOnlyTxn
@@ -348,7 +350,7 @@ func (txn *Txn) Delete(key []byte) error {
 		return exceedsMaxKeySizeError(key)
 	}
 
-	e := &entry{
+	e := &Entry{
 		Key:  key,
 		meta: bitDelete,
 	}
@@ -474,7 +476,7 @@ func (txn *Txn) Commit(callback func(error)) error {
 		return ErrConflict
 	}
 
-	entries := make([]*entry, 0, len(txn.pendingWrites)+1)
+	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
 	for _, e := range txn.pendingWrites {
 		// Suffix the keys with commit ts, so the key versions are sorted in
 		// descending order of commit timestamp.
@@ -482,7 +484,7 @@ func (txn *Txn) Commit(callback func(error)) error {
 		e.meta |= bitTxn
 		entries = append(entries, e)
 	}
-	e := &entry{
+	e := &Entry{
 		Key:   y.KeyWithTs(txnKey, commitTs),
 		Value: []byte(strconv.FormatUint(commitTs, 10)),
 		meta:  bitFinTxn,
@@ -532,7 +534,7 @@ func (db *DB) NewTransaction(update bool) *Txn {
 		size:   int64(len(txnKey) + 10), // Some buffer for the extra entry.
 	}
 	if update {
-		txn.pendingWrites = make(map[string]*entry)
+		txn.pendingWrites = make(map[string]*Entry)
 		txn.db.orc.addRef()
 	}
 	return txn

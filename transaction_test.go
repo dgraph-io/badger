@@ -584,7 +584,7 @@ func TestIteratorAllVersionsButDeleted(t *testing.T) {
 		err = db.View(func(txn *Txn) error {
 			item, err := txn.Get([]byte("answer1"))
 			require.NoError(t, err)
-			err = txn.db.batchSet([]*entry{
+			err = txn.db.batchSet([]*Entry{
 				{
 					Key:  y.KeyWithTs(item.key, item.version),
 					meta: bitDelete,
