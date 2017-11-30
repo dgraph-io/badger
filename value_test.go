@@ -41,19 +41,19 @@ func TestValueBasic(t *testing.T) {
 	const val2 = "samplevalb012345678901234567890123"
 	require.True(t, len(val1) >= kv.opt.ValueThreshold)
 
-	e := &entry{
+	e := &Entry{
 		Key:   []byte("samplekey"),
 		Value: []byte(val1),
 		meta:  bitValuePointer,
 	}
-	e2 := &entry{
+	e2 := &Entry{
 		Key:   []byte("samplekeyb"),
 		Value: []byte(val2),
 		meta:  bitValuePointer,
 	}
 
 	b := new(request)
-	b.Entries = []*entry{e, e2}
+	b.Entries = []*Entry{e, e2}
 
 	log.write([]*request{b})
 	require.Len(t, b.Ptrs, 2)
@@ -66,8 +66,8 @@ func TestValueBasic(t *testing.T) {
 	defer runCallback(cb1)
 	defer runCallback(cb2)
 
-	readEntries := []entry{valueBytesToEntry(buf1), valueBytesToEntry(buf2)}
-	require.EqualValues(t, []entry{
+	readEntries := []Entry{valueBytesToEntry(buf1), valueBytesToEntry(buf2)}
+	require.EqualValues(t, []Entry{
 		{
 			Key:   []byte("samplekey"),
 			Value: []byte(val1),
@@ -375,7 +375,7 @@ func TestChecksums(t *testing.T) {
 	require.True(t, len(v0) >= kv.opt.ValueThreshold)
 
 	// Use a vlog with K0=V0 and a (corrupted) second transaction(k1,k2)
-	buf := createVlog(t, []*entry{
+	buf := createVlog(t, []*Entry{
 		{Key: k0, Value: v0},
 		{Key: k1, Value: v1},
 		{Key: k2, Value: v2},
@@ -458,7 +458,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 
 	// Create truncated vlog to simulate a partial append.
 	// k0 - single transaction, k1 and k2 in another transaction
-	buf := createVlog(t, []*entry{
+	buf := createVlog(t, []*Entry{
 		{Key: k0, Value: v0},
 		{Key: k1, Value: v1},
 		{Key: k2, Value: v2},
@@ -529,7 +529,7 @@ func TestValueLogTrigger(t *testing.T) {
 	require.Equal(t, ErrRejected, err, "Error should be returned after closing DB.")
 }
 
-func createVlog(t *testing.T, entries []*entry) []byte {
+func createVlog(t *testing.T, entries []*Entry) []byte {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -585,11 +585,11 @@ func BenchmarkReadWrite(b *testing.B) {
 				b.ResetTimer()
 
 				for i := 0; i < b.N; i++ {
-					e := new(entry)
+					e := new(Entry)
 					e.Key = make([]byte, 16)
 					e.Value = make([]byte, vsz)
 					bl := new(request)
-					bl.Entries = []*entry{e}
+					bl.Entries = []*Entry{e}
 
 					var ptrs []valuePointer
 
