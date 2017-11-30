@@ -67,6 +67,7 @@ func Mmap(fd *os.File, write bool, size int64) ([]byte, error) {
 	}
 
 	// Slice memory layout
+	// Copied this snippet from golang/sys package
 	var sl = struct {
 		addr uintptr
 		len  int
