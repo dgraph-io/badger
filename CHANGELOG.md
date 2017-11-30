@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.2.0] - 2017-11-30
+* Expose a `Txn.SetEntry()` method to allow setting the key-value pair
+  and all the metadata at the same time.
+
 ## [1.1.1] - 2017-11-28
 * Fix bug where txn.Get was returing key deleted in same transaction.
 * Fix race condition while decrementing reference in oracle.
@@ -20,7 +24,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [1.0.1] - 2017-11-06
 * Fix an uint16 overflow when resizing key slice
 
-[Unreleased]: https://github.com/dgraph-io/badger/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/dgraph-io/badger/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/dgraph-io/badger/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/dgraph-io/badger/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/dgraph-io/badger/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/dgraph-io/badger/compare/v1.0.0...v1.0.1
