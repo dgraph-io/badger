@@ -35,6 +35,7 @@ version.
       - [Key-only iteration](#key-only-iteration)
     + [Garbage Collection](#garbage-collection)
     + [Database backup](#database-backup)
+    + [Memory usage](#memory-usage)
     + [Statistics](#statistics)
   * [Resources](#resources)
     + [Blog Posts](#blog-posts)
@@ -375,6 +376,21 @@ command above to upgrade your database to work with the latest version.
 badger_backup --dir <path/to/badgerdb> --backup-file badger.bak
 ```
 
+### Memory usage
+
+Badger's memory usage is a function of:
+
+- Number of memtables `(Options::NumMemtables)`
+  - If you modify `NumMemtables`, also adjust `NumLevelZeroTables` and
+    `NumLevelZeroTablesStall` accordingly.
+- Number of concurrent compactions `(Options::NumCompactors)`
+- Mode in which LSM tree is loaded `(Options::TableLoadingMode)`
+- Size of table `(Options::MaxTableSize)`
+- Size of value log file `(Options::ValueLogFileSize)`
+
+If you want to decrease the memory usage of Badger instance, tweak these
+options ideally doing them one at a time until you achieve the desired
+memory usage.
 
 ### Statistics
 Badger records metrics using the [expvar] package, which is included in the Go
