@@ -306,7 +306,7 @@ func (txn *Txn) SetWithMeta(key, val []byte, meta byte) error {
 // (TTL) setting. A key stored with with a TTL would automatically expire after
 // the time has elapsed , and be eligible for garbage collection.
 func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
-	expire := time.Now().Add(dur).UnixNano()
+	expire := time.Now().Add(dur).Unix()
 	e := &Entry{Key: key, Value: val, ExpiresAt: uint64(expire)}
 	return txn.SetEntry(e)
 }
@@ -380,7 +380,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 			if e.meta&bitDelete > 0 {
 				return nil, ErrKeyNotFound
 			}
-			if e.ExpiresAt > 0 && e.ExpiresAt <= uint64(time.Now().UnixNano()) {
+			if e.ExpiresAt > 0 && e.ExpiresAt <= uint64(time.Now().Unix()) {
 				return nil, ErrKeyNotFound
 			}
 			// Fulfill from cache.
