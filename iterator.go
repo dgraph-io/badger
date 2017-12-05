@@ -334,7 +334,7 @@ func isDeletedOrExpired(vs y.ValueStruct) bool {
 	if vs.ExpiresAt == 0 {
 		return false
 	}
-	return vs.ExpiresAt <= uint64(time.Now().Unix())
+	return vs.ExpiresAt <= uint64(time.Now().UnixNano())
 }
 
 // parseItem is a complex function because it needs to handle both forward and reverse iteration
