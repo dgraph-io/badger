@@ -81,7 +81,7 @@ type Entry struct {
 	Key       []byte
 	Value     []byte
 	UserMeta  byte
-	ExpiresAt uint64 // time.UnixNano
+	ExpiresAt uint64 // time.Unix
 	meta      byte
 
 	// Fields maintained internally.
