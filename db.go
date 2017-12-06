@@ -28,6 +28,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dgraph-io/badger/options"
+
 	"golang.org/x/net/trace"
 
 	"github.com/dgraph-io/badger/skl"
@@ -210,6 +212,10 @@ func Open(opt Options) (db *DB, err error) {
 	}()
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
+	}
+	if !(opt.ValueLogLoadingMode == options.FileIO ||
+		opt.ValueLogLoadingMode == options.MemoryMap) {
+		return nil, ErrInvalidLoadingMode
 	}
 	manifestFile, manifest, err := openOrCreateManifestFile(opt.Dir)
 	if err != nil {

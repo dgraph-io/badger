@@ -74,6 +74,10 @@ var (
 
 	// ErrInvalidDump if a data dump made previously cannot be loaded into the database.
 	ErrInvalidDump = errors.New("Data dump cannot be read")
+
+	// ErrInvalidLoadingMode is returned when opt.ValueLogLoadingMode option is not
+	// within the valid range
+	ErrInvalidLoadingMode = errors.New("Invalid ValueLogLoadingMode, must be FileIO or MemoryMap")
 )
 
 const maxKeySize = 1 << 16 // Key length can't be more than uint16, as determined by table::header.
