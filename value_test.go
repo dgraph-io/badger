@@ -59,8 +59,9 @@ func TestValueBasic(t *testing.T) {
 	require.Len(t, b.Ptrs, 2)
 	t.Logf("Pointer written: %+v %+v\n", b.Ptrs[0], b.Ptrs[1])
 
-	buf1, cb1, err1 := log.readValueBytes(b.Ptrs[0])
-	buf2, cb2, err2 := log.readValueBytes(b.Ptrs[1])
+	s := new(y.Slice)
+	buf1, cb1, err1 := log.readValueBytes(b.Ptrs[0], s)
+	buf2, cb2, err2 := log.readValueBytes(b.Ptrs[1], s)
 	require.NoError(t, err1)
 	require.NoError(t, err2)
 	defer runCallback(cb1)
@@ -606,7 +607,8 @@ func BenchmarkReadWrite(b *testing.B) {
 							b.Fatalf("Zero length of ptrs")
 						}
 						idx := rand.Intn(ln)
-						buf, cb, err := vl.readValueBytes(ptrs[idx])
+						s := new(y.Slice)
+						buf, cb, err := vl.readValueBytes(ptrs[idx], s)
 						if err != nil {
 							b.Fatalf("Benchmark Read: %v", err)
 						}
