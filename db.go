@@ -241,6 +241,8 @@ func Open(opt Options) (db *DB, err error) {
 		orc:           orc,
 	}
 
+	// Calculate initial size.
+	db.calculateSize()
 	db.closers.updateSize = y.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
 	db.mt = skl.NewSkiplist(arenaSize(opt))
@@ -820,12 +822,9 @@ func exists(path string) (bool, error) {
 	return true, err
 }
 
-func (db *DB) updateSize(lc *y.Closer) {
-	defer lc.Done()
-
-	metricsTicker := time.NewTicker(5 * time.Minute)
-	defer metricsTicker.Stop()
-
+// This function does a filewalk, calculates the size of vlog and sst files and stores it in
+// y.LSMSize and y.VlogSize.
+func (db *DB) calculateSize() {
 	newInt := func(val int64) *expvar.Int {
 		v := new(expvar.Int)
 		v.Add(val)
@@ -852,16 +851,26 @@ func (db *DB) updateSize(lc *y.Closer) {
 		return lsmSize, vlogSize
 	}
 
+	lsmSize, vlogSize := totalSize(db.opt.Dir)
+	y.LSMSize.Set(db.opt.Dir, newInt(lsmSize))
+	// If valueDir is different from dir, we'd have to do another walk.
+	if db.opt.ValueDir != db.opt.Dir {
+		_, vlogSize = totalSize(db.opt.ValueDir)
+	}
+	y.VlogSize.Set(db.opt.Dir, newInt(vlogSize))
+
+}
+
+func (db *DB) updateSize(lc *y.Closer) {
+	defer lc.Done()
+
+	metricsTicker := time.NewTicker(time.Minute)
+	defer metricsTicker.Stop()
+
 	for {
 		select {
 		case <-metricsTicker.C:
-			lsmSize, vlogSize := totalSize(db.opt.Dir)
-			y.LSMSize.Set(db.opt.Dir, newInt(lsmSize))
-			// If valueDir is different from dir, we'd have to do another walk.
-			if db.opt.ValueDir != db.opt.Dir {
-				_, vlogSize = totalSize(db.opt.ValueDir)
-			}
-			y.VlogSize.Set(db.opt.Dir, newInt(vlogSize))
+			db.calculateSize()
 		case <-lc.HasBeenClosed():
 			return
 		}
@@ -1021,4 +1030,16 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 
 	// Pick a log file and run GC
 	return db.vlog.runGC(discardRatio, head)
+}
+
+// Size returns the size of lsm and value log files in bytes. It can be used to decide how often to
+// call RunValueLogGC.
+func (db *DB) Size() (lsm int64, vlog int64) {
+	if y.LSMSize.Get(db.opt.Dir) == nil {
+		lsm, vlog = 0, 0
+		return
+	}
+	lsm = y.LSMSize.Get(db.opt.Dir).(*expvar.Int).Value()
+	vlog = y.VlogSize.Get(db.opt.Dir).(*expvar.Int).Value()
+	return
 }
