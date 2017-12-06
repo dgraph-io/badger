@@ -822,7 +822,7 @@ func exists(path string) (bool, error) {
 	return true, err
 }
 
-// This function does a filewalk, calculates the size of vlog and sst files and stores them in
+// This function does a filewalk, calculates the size of vlog and sst files and stores it in
 // y.LSMSize and y.VlogSize.
 func (db *DB) calculateSize() {
 	newInt := func(val int64) *expvar.Int {
