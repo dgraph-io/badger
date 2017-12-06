@@ -823,7 +823,7 @@ func exists(path string) (bool, error) {
 func (db *DB) updateSize(lc *y.Closer) {
 	defer lc.Done()
 
-	metricsTicker := time.NewTicker(5 * time.Minute)
+	metricsTicker := time.NewTicker(10 * time.Second)
 	defer metricsTicker.Stop()
 
 	newInt := func(val int64) *expvar.Int {
@@ -1021,4 +1021,16 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 
 	// Pick a log file and run GC
 	return db.vlog.runGC(discardRatio, head)
+}
+
+// Size returns the size of lsm and value log files in bytes. It can be used to decide how often to
+// call RunValueLogGC.
+func (db *DB) Size() (lsm int64, vlog int64) {
+	if y.LSMSize.Get(db.opt.Dir) == nil {
+		lsm, vlog = 0, 0
+		return
+	}
+	lsm = y.LSMSize.Get(db.opt.Dir).(*expvar.Int).Value()
+	vlog = y.VlogSize.Get(db.opt.Dir).(*expvar.Int).Value()
+	return
 }
