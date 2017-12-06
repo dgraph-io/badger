@@ -823,7 +823,7 @@ func exists(path string) (bool, error) {
 func (db *DB) updateSize(lc *y.Closer) {
 	defer lc.Done()
 
-	metricsTicker := time.NewTicker(10 * time.Second)
+	metricsTicker := time.NewTicker(time.Minute)
 	defer metricsTicker.Stop()
 
 	newInt := func(val int64) *expvar.Int {
