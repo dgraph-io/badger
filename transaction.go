@@ -306,8 +306,14 @@ func (txn *Txn) SetWithMeta(key, val []byte, meta byte) error {
 // (TTL) setting. A key stored with with a TTL would automatically expire after
 // the time has elapsed , and be eligible for garbage collection.
 func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
-	expire := time.Now().Add(dur).Unix()
-	e := &Entry{Key: key, Value: val, ExpiresAt: uint64(expire)}
+	expire := time.Now().Add(dur)
+	var expiresAt int64
+	if txn.db.opt.UseSubsecondTTL {
+		expiresAt = expire.UnixNano()
+	} else {
+		expiresAt = expire.Unix()
+	}
+	e := &Entry{Key: key, Value: val, ExpiresAt: uint64(expiresAt)}
 	return txn.SetEntry(e)
 }
 
@@ -380,7 +386,13 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 			if e.meta&bitDelete > 0 {
 				return nil, ErrKeyNotFound
 			}
-			if e.ExpiresAt > 0 && e.ExpiresAt <= uint64(time.Now().Unix()) {
+			var now int64
+			if txn.db.opt.UseSubsecondTTL {
+				now = time.Now().UnixNano()
+			} else {
+				now = time.Now().Unix()
+			}
+			if e.ExpiresAt > 0 && e.ExpiresAt <= uint64(now) {
 				return nil, ErrKeyNotFound
 			}
 			// Fulfill from cache.
@@ -407,7 +419,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	if vs.Value == nil && vs.Meta == 0 {
 		return nil, ErrKeyNotFound
 	}
-	if isDeletedOrExpired(vs) {
+	if isDeletedOrExpired(vs, txn.db.opt.UseSubsecondTTL) {
 		return nil, ErrKeyNotFound
 	}
 

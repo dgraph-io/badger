@@ -327,14 +327,20 @@ func (it *Iterator) Next() {
 	}
 }
 
-func isDeletedOrExpired(vs y.ValueStruct) bool {
+func isDeletedOrExpired(vs y.ValueStruct, useSubsecondTTL bool) bool {
 	if vs.Meta&bitDelete > 0 {
 		return true
 	}
 	if vs.ExpiresAt == 0 {
 		return false
 	}
-	return vs.ExpiresAt <= uint64(time.Now().Unix())
+	var now int64
+	if useSubsecondTTL {
+		now = time.Now().UnixNano()
+	} else {
+		now = time.Now().Unix()
+	}
+	return vs.ExpiresAt <= uint64(now)
 }
 
 // parseItem is a complex function because it needs to handle both forward and reverse iteration
@@ -370,7 +376,7 @@ func (it *Iterator) parseItem() bool {
 
 	if it.opt.AllVersions {
 		// First check if value has been expired.
-		if isDeletedOrExpired(mi.Value()) {
+		if isDeletedOrExpired(mi.Value(), it.txn.db.opt.UseSubsecondTTL) {
 			mi.Next()
 			return false
 		}
@@ -398,7 +404,7 @@ func (it *Iterator) parseItem() bool {
 
 FILL:
 	// If deleted, advance and return.
-	if isDeletedOrExpired(mi.Value()) {
+	if isDeletedOrExpired(mi.Value(), it.txn.db.opt.UseSubsecondTTL) {
 		mi.Next()
 		return false
 	}
