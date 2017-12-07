@@ -283,7 +283,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		if err != nil {
 			return err
 		}
-		if discardEntry(e, vs) {
+		if discardEntry(e, vs, vlog.opt.UseSubsecondTTL) {
 			return nil
 		}
 
@@ -841,12 +841,12 @@ func (vlog *valueLog) pickLog(head valuePointer) *logFile {
 	return vlog.filesMap[fids[idx]]
 }
 
-func discardEntry(e Entry, vs y.ValueStruct) bool {
+func discardEntry(e Entry, vs y.ValueStruct, useSubsecondTTL bool) bool {
 	if vs.Version != y.ParseTs(e.Key) {
 		// Version not found. Discard.
 		return true
 	}
-	if isDeletedOrExpired(vs) {
+	if isDeletedOrExpired(vs, useSubsecondTTL) {
 		return true
 	}
 	if (vs.Meta & bitValuePointer) == 0 {
@@ -915,7 +915,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 		if err != nil {
 			return err
 		}
-		if discardEntry(e, vs) {
+		if discardEntry(e, vs, vlog.opt.UseSubsecondTTL) {
 			r.discard += esz
 			return nil
 		}
