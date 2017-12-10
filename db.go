@@ -1092,16 +1092,15 @@ func (seq *Sequence) updateLease() error {
 		if err = txn.Set(seq.key, buf[:]); err != nil {
 			return err
 		}
-
 		seq.leased = lease
 		return nil
 	})
 }
 
-// GetSequence would initiate a new sequence object, generating it from the stored lease in the
-// database. Sequence can be used to get a list of monotonically increasing integers. Multiple
-// sequences can be created by providing different keys. Bandwidth determines the size of the lease,
-// determining how many Next() requests can be served from memory.
+// GetSequence would initiate a new sequence object, generating it from the stored lease, if
+// available, in the database. Sequence can be used to get a list of monotonically increasing
+// integers. Multiple sequences can be created by providing different keys. Bandwidth sets the
+// size of the lease, determining how many Next() requests can be served from memory.
 func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
 	seq := &Sequence{
 		db:        db,
