@@ -529,6 +529,36 @@ func TestValueLogTrigger(t *testing.T) {
 	require.Equal(t, ErrRejected, err, "Error should be returned after closing DB.")
 }
 
+func TestPurgeOlderVersions2(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opt := getTestOptions(dir)
+	opt.ValueLogFileSize = 1 << 20
+	kv, err := Open(opt)
+	require.NoError(t, err)
+
+	sz := 1 << 10
+	for j := 0; j < 40; j++ {
+		err := kv.Update(func(txn *Txn) error {
+			for i := 0; i < 45; i++ {
+				v := make([]byte, sz)
+				rand.Read(v[:rand.Intn(sz)])
+				require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v))
+			}
+			return nil
+		})
+		require.NoError(t, err)
+	}
+	require.NoError(t, kv.PurgeOlderVersions())
+	require.NoError(t, kv.RunValueLogGC(0.3))
+	_, err = os.Stat(dir + string(os.PathSeparator) + "000000.vlog")
+	require.Error(t, err)
+	_, err = os.Stat(dir + string(os.PathSeparator) + "000001.vlog")
+	require.NoError(t, err)
+}
+
 func createVlog(t *testing.T, entries []*Entry) []byte {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)

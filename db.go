@@ -889,6 +889,7 @@ func (db *DB) purgeVersionsBelow(txn *Txn, key []byte, ts uint64) error {
 	opts.AllVersions = true
 	opts.PrefetchValues = false
 	it := txn.NewIterator(opts)
+	defer it.Close()
 
 	var entries []*Entry
 
@@ -921,6 +922,7 @@ func (db *DB) PurgeOlderVersions() error {
 		opts.AllVersions = true
 		opts.PrefetchValues = false
 		it := txn.NewIterator(opts)
+		defer it.Close()
 
 		var entries []*Entry
 		var lastKey []byte
@@ -963,7 +965,7 @@ func (db *DB) PurgeOlderVersions() error {
 			count++
 
 			// Batch up 1000 entries at a time and write
-			if count == 1000 {
+			if count == 1000 || count == int(db.opt.maxBatchCount-1) {
 				if err := batchSetAsyncIfNoErr(entries); err != nil {
 					return err
 				}

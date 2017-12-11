@@ -962,7 +962,11 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 	}
 	vlog.elog.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
 
-	if r.total < 10.0 || r.discard < gcThreshold*r.total {
+	minTotal := vlog.opt.ValueLogFileSize / (100 << 20)
+	if minTotal < 1 {
+		minTotal = 1
+	}
+	if r.total < float64(minTotal) || r.discard < gcThreshold*r.total {
 		vlog.elog.Printf("Skipping GC on fid: %d\n\n", lf.fid)
 		return ErrNoRewrite
 	}
