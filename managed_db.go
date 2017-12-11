@@ -78,3 +78,8 @@ func (db *ManagedDB) PurgeVersionsBelow(key []byte, ts uint64) error {
 	defer txn.Discard()
 	return db.purgeVersionsBelow(txn, key, ts)
 }
+
+func (db *ManagedDB) GetSequence(_ []byte, _ uint64) (*Sequence, error) {
+	panic("Cannot use GetSequence for ManagedDB.")
+	return nil, ErrInvalidRequest
+}

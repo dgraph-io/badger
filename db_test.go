@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -1081,6 +1082,53 @@ func TestWriteDeadlock(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+func TestSequence(t *testing.T) {
+	key0 := []byte("seq0")
+	key1 := []byte("seq1")
+
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		seq0, err := db.GetSequence(key0, 10)
+		require.NoError(t, err)
+		seq1, err := db.GetSequence(key1, 100)
+		require.NoError(t, err)
+
+		for i := uint64(0); i < uint64(105); i++ {
+			num, err := seq0.Next()
+			require.NoError(t, err)
+			require.Equal(t, i, num)
+
+			num, err = seq1.Next()
+			require.NoError(t, err)
+			require.Equal(t, i, num)
+		}
+		err = db.View(func(txn *Txn) error {
+			item, err := txn.Get(key0)
+			if err != nil {
+				return err
+			}
+			val, err := item.Value()
+			if err != nil {
+				return err
+			}
+			num0 := binary.BigEndian.Uint64(val)
+			require.Equal(t, uint64(110), num0)
+
+			item, err = txn.Get(key1)
+			if err != nil {
+				return err
+			}
+			val, err = item.Value()
+			if err != nil {
+				return err
+			}
+			num1 := binary.BigEndian.Uint64(val)
+			require.Equal(t, uint64(200), num1)
+			return nil
+		})
+		require.NoError(t, err)
+	})
 }
 
 func ExampleOpen() {

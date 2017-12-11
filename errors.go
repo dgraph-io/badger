@@ -74,6 +74,9 @@ var (
 
 	// ErrInvalidDump if a data dump made previously cannot be loaded into the database.
 	ErrInvalidDump = errors.New("Data dump cannot be read")
+
+	// ErrZeroBandwidth is returned if the user passes in zero bandwidth for sequence.
+	ErrZeroBandwidth = errors.New("Bandwidth must be greater than zero")
 )
 
 const maxKeySize = 1 << 16 // Key length can't be more than uint16, as determined by table::header.

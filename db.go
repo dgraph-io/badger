@@ -19,6 +19,7 @@ package badger
 import (
 	"bytes"
 	"container/heap"
+	"encoding/binary"
 	"expvar"
 	"log"
 	"math"
@@ -1042,4 +1043,79 @@ func (db *DB) Size() (lsm int64, vlog int64) {
 	lsm = y.LSMSize.Get(db.opt.Dir).(*expvar.Int).Value()
 	vlog = y.VlogSize.Get(db.opt.Dir).(*expvar.Int).Value()
 	return
+}
+
+// Sequence represents a Badger sequence.
+type Sequence struct {
+	sync.Mutex
+	db        *DB
+	key       []byte
+	next      uint64
+	leased    uint64
+	bandwidth uint64
+}
+
+// Next would return the next integer in the sequence, updating the lease by running a transaction
+// if needed.
+func (seq *Sequence) Next() (uint64, error) {
+	seq.Lock()
+	defer seq.Unlock()
+	if seq.next >= seq.leased {
+		if err := seq.updateLease(); err != nil {
+			return 0, err
+		}
+	}
+	val := seq.next
+	seq.next++
+	return val, nil
+}
+
+func (seq *Sequence) updateLease() error {
+	return seq.db.Update(func(txn *Txn) error {
+		item, err := txn.Get(seq.key)
+		if err == ErrKeyNotFound {
+			seq.next = 0
+		} else if err != nil {
+			return err
+		} else {
+			val, err := item.Value()
+			if err != nil {
+				return err
+			}
+			num := binary.BigEndian.Uint64(val)
+			seq.next = num
+		}
+
+		lease := seq.next + seq.bandwidth
+		var buf [8]byte
+		binary.BigEndian.PutUint64(buf[:], lease)
+		if err = txn.Set(seq.key, buf[:]); err != nil {
+			return err
+		}
+		seq.leased = lease
+		return nil
+	})
+}
+
+// GetSequence would initiate a new sequence object, generating it from the stored lease, if
+// available, in the database. Sequence can be used to get a list of monotonically increasing
+// integers. Multiple sequences can be created by providing different keys. Bandwidth sets the
+// size of the lease, determining how many Next() requests can be served from memory.
+// This doesn't work with ManagedDB.
+func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
+	switch {
+	case len(key) == 0:
+		return nil, ErrEmptyKey
+	case bandwidth == 0:
+		return nil, ErrZeroBandwidth
+	}
+	seq := &Sequence{
+		db:        db,
+		key:       key,
+		next:      0,
+		leased:    0,
+		bandwidth: bandwidth,
+	}
+	err := seq.updateLease()
+	return seq, err
 }
