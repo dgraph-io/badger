@@ -1102,6 +1102,12 @@ func (seq *Sequence) updateLease() error {
 // integers. Multiple sequences can be created by providing different keys. Bandwidth sets the
 // size of the lease, determining how many Next() requests can be served from memory.
 func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
+	switch {
+	case len(key) == 0:
+		return nil, ErrEmptyKey
+	case bandwidth == 0:
+		return nil, ErrZeroBandwidth
+	}
 	seq := &Sequence{
 		db:        db,
 		key:       key,
