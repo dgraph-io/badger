@@ -529,7 +529,7 @@ func TestValueLogTrigger(t *testing.T) {
 	require.Equal(t, ErrRejected, err, "Error should be returned after closing DB.")
 }
 
-func TestPurgeOlderVersions2(t *testing.T) {
+func TestValueLogGC(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -552,7 +552,10 @@ func TestPurgeOlderVersions2(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.NoError(t, kv.PurgeOlderVersions())
+	_, err = os.Stat(dir + string(os.PathSeparator) + "000000.vlog")
+	require.NoError(t, err)
 	require.NoError(t, kv.RunValueLogGC(0.3))
+	// Check that 000000.vlog is deleted.
 	_, err = os.Stat(dir + string(os.PathSeparator) + "000000.vlog")
 	require.Error(t, err)
 	_, err = os.Stat(dir + string(os.PathSeparator) + "000001.vlog")
