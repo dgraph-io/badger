@@ -79,7 +79,8 @@ func (db *ManagedDB) PurgeVersionsBelow(key []byte, ts uint64) error {
 	return db.purgeVersionsBelow(txn, key, ts)
 }
 
+// GetSequence is not supported on ManagedDB. Calling this would result
+// in a panic.
 func (db *ManagedDB) GetSequence(_ []byte, _ uint64) (*Sequence, error) {
 	panic("Cannot use GetSequence for ManagedDB.")
-	return nil, ErrInvalidRequest
 }
