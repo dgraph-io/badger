@@ -1101,7 +1101,6 @@ func (seq *Sequence) updateLease() error {
 // available, in the database. Sequence can be used to get a list of monotonically increasing
 // integers. Multiple sequences can be created by providing different keys. Bandwidth sets the
 // size of the lease, determining how many Next() requests can be served from memory.
-// This doesn't work with ManagedDB.
 func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
 	switch {
 	case len(key) == 0:
