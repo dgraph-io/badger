@@ -890,6 +890,7 @@ func (db *DB) purgeVersionsBelow(txn *Txn, key []byte, ts uint64) error {
 	opts.AllVersions = true
 	opts.PrefetchValues = false
 	it := txn.NewIterator(opts)
+	defer it.Close()
 
 	var entries []*Entry
 
@@ -922,10 +923,11 @@ func (db *DB) PurgeOlderVersions() error {
 		opts.AllVersions = true
 		opts.PrefetchValues = false
 		it := txn.NewIterator(opts)
+		defer it.Close()
 
 		var entries []*Entry
 		var lastKey []byte
-		var count int
+		var count, size int
 		var wg sync.WaitGroup
 		errChan := make(chan error, 1)
 
@@ -955,22 +957,27 @@ func (db *DB) PurgeOlderVersions() error {
 				continue
 			}
 			// Found an older version. Mark for deletion
-			entries = append(entries,
-				&Entry{
-					Key:  y.KeyWithTs(lastKey, item.version),
-					meta: bitDelete,
-				})
+			e := &Entry{
+				Key:  y.KeyWithTs(lastKey, item.version),
+				meta: bitDelete,
+			}
 			db.vlog.updateGCStats(item)
-			count++
+			curSize := e.estimateSize(db.opt.ValueThreshold)
 
-			// Batch up 1000 entries at a time and write
-			if count == 1000 {
+			// Batch up min(1000, maxBatchCount) entries at a time and write
+			// Ensure that total batch size doesn't exceed maxBatchSize
+			if count == 1000 || count+1 >= int(db.opt.maxBatchCount) ||
+				size+curSize >= int(db.opt.maxBatchSize) {
 				if err := batchSetAsyncIfNoErr(entries); err != nil {
 					return err
 				}
 				count = 0
+				size = 0
 				entries = []*Entry{}
 			}
+			size += curSize
+			count++
+			entries = append(entries, e)
 		}
 
 		// Write last batch pending deletes

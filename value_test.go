@@ -529,6 +529,42 @@ func TestValueLogTrigger(t *testing.T) {
 	require.Equal(t, ErrRejected, err, "Error should be returned after closing DB.")
 }
 
+func TestValueLogGC(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opt := getTestOptions(dir)
+	opt.ValueLogFileSize = 15 << 20
+	runBadgerTest(t, &opt, func(t *testing.T, kv *DB) {
+		sz := 32 << 10
+		for j := 0; j < 40; j++ {
+			err := kv.Update(func(txn *Txn) error {
+				for i := 0; i < 45; i++ {
+					v := make([]byte, sz)
+					rand.Read(v[:rand.Intn(sz)])
+					require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v))
+				}
+				return nil
+			})
+			require.NoError(t, err)
+		}
+		fids := kv.vlog.sortedFids()
+		require.NoError(t, kv.PurgeOlderVersions())
+		require.NoError(t, kv.RunValueLogGC(0.3))
+		newFids := kv.vlog.sortedFids()
+		require.Equal(t, len(newFids)+1, len(fids))
+		for i, fid := range fids {
+			if i < len(newFids) && newFids[i] == fid {
+				continue
+			}
+			// Check that vlog is deleted.
+			_, err = os.Stat(fmt.Sprintf("dir%c%06d.vlog", os.PathSeparator, fid))
+			require.Error(t, err)
+		}
+	})
+}
+
 func createVlog(t *testing.T, entries []*Entry) []byte {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
