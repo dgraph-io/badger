@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/dgraph-io/badger/y"
 
@@ -52,7 +53,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 				Value:     y.Copy(val),
 				UserMeta:  []byte{item.UserMeta()},
 				Version:   item.Version(),
-				ExpiresAt: item.ExpiresAt(),
+				ExpiresAt: uint64(time.Unix(int64(item.ExpiresAt()), 0).UnixNano()),
 			}
 
 			// Write entries to disk
