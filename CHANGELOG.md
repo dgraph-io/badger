@@ -5,6 +5,12 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+* Add `DB.NextSequence()` method to generate monotonically increasing integer
+  sequences.
+* Add `DB.Size()` method to return the size of LSM and value log files.
+* Tweaked mmap code to make Windows 32-bit builds work.
+* Tweaked build tags on some files to make iOS builds work.
+* Fix `DB.PurgeOlderVersions()` to not violate some constraints.
 
 ## [1.2.0] - 2017-11-30
 * Expose a `Txn.SetEntry()` method to allow setting the key-value pair
