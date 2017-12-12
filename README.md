@@ -397,19 +397,20 @@ badger_backup --dir <path/to/badgerdb> --backup-file badger.bak
 ```
 
 ### Memory usage
+Badger's memory usage can be managed by tweaking several options available in
+the `Options` struct that is passed in when opening the database using
+`DB.Open`.
 
-Badger's memory usage is a function of:
-
-- Number of memtables `(Options::NumMemtables)`
-  - If you modify `NumMemtables`, also adjust `NumLevelZeroTables` and
-    `NumLevelZeroTablesStall` accordingly.
-- Number of concurrent compactions `(Options::NumCompactors)`
-- Mode in which LSM tree is loaded `(Options::TableLoadingMode)`
-- Size of table `(Options::MaxTableSize)`
-- Size of value log file `(Options::ValueLogFileSize)`
+- Number of memtables (`Options.NumMemtables`)
+  - If you modify `Options.NumMemtables`, also adjust `Options.NumLevelZeroTables` and
+    `Options.NumLevelZeroTablesStall` accordingly.
+- Number of concurrent compactions (`Options.NumCompactors`)
+- Mode in which LSM tree is loaded (`Options.TableLoadingMode`)
+- Size of table (`Options.MaxTableSize`)
+- Size of value log file (`Options.ValueLogFileSize`)
 
 If you want to decrease the memory usage of Badger instance, tweak these
-options ideally doing them one at a time until you achieve the desired
+options (ideally one at a time) until you achieve the desired
 memory usage.
 
 ### Statistics
