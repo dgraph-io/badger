@@ -1243,6 +1243,102 @@ func TestSequence_Release(t *testing.T) {
 	})
 }
 
+func uint64ToBytes(i uint64) []byte {
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], i)
+	return buf[:]
+}
+
+func bytesToUint64(b []byte) uint64 {
+	return binary.BigEndian.Uint64(b)
+}
+
+// Merge function to add two uint64 numbers
+func add(existing, new []byte) []byte {
+	return uint64ToBytes(
+		bytesToUint64(existing) +
+			bytesToUint64(new))
+}
+
+func TestMergeOperatorGetBeforeAdd(t *testing.T) {
+	key := []byte("merge")
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		m := db.GetMergeOperator(key, add, 200*time.Millisecond)
+		defer m.Stop()
+
+		_, err := m.Get()
+		require.Error(t, ErrKeyNotFound, err)
+	})
+}
+
+func TestMergeOperatorBeforeAdd(t *testing.T) {
+	key := []byte("merge")
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		m := db.GetMergeOperator(key, add, 200*time.Millisecond)
+		defer m.Stop()
+		time.Sleep(time.Second)
+	})
+}
+
+func TestMergeOperatorAddAndGet(t *testing.T) {
+	key := []byte("merge")
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		m := db.GetMergeOperator(key, add, 200*time.Millisecond)
+		defer m.Stop()
+
+		err := m.Add(uint64ToBytes(1))
+		require.NoError(t, err)
+		m.Add(uint64ToBytes(2))
+		require.NoError(t, err)
+		m.Add(uint64ToBytes(3))
+		require.NoError(t, err)
+
+		res, err := m.Get()
+		require.NoError(t, err)
+		require.Equal(t, uint64(6), bytesToUint64(res))
+	})
+}
+
+func TestMergeOperatorCompactBeforeGet(t *testing.T) {
+	key := []byte("merge")
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		m := db.GetMergeOperator(key, add, 200*time.Millisecond)
+		defer m.Stop()
+
+		err := m.Add(uint64ToBytes(1))
+		require.NoError(t, err)
+		m.Add(uint64ToBytes(2))
+		require.NoError(t, err)
+		m.Add(uint64ToBytes(3))
+		require.NoError(t, err)
+
+		time.Sleep(250 * time.Millisecond) // wait for merge to happen
+
+		res, err := m.Get()
+		require.NoError(t, err)
+		require.Equal(t, uint64(6), bytesToUint64(res))
+	})
+}
+
+func TestMergeOperatorGetAfterStop(t *testing.T) {
+	key := []byte("merge")
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		m := db.GetMergeOperator(key, add, 1*time.Second)
+
+		err := m.Add(uint64ToBytes(1))
+		require.NoError(t, err)
+		m.Add(uint64ToBytes(2))
+		require.NoError(t, err)
+		m.Add(uint64ToBytes(3))
+		require.NoError(t, err)
+
+		m.Stop()
+		res, err := m.Get()
+		require.NoError(t, err)
+		require.Equal(t, uint64(6), bytesToUint64(res))
+	})
+}
+
 func ExampleOpen() {
 	dir, err := ioutil.TempDir("", "badger")
 	if err != nil {

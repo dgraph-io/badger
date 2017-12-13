@@ -30,6 +30,7 @@ version.
       - [Managing transactions manually](#managing-transactions-manually)
     + [Using key/value pairs](#using-keyvalue-pairs)
     + [Monotonically increasing integers](#monotonically-increasing-integers)
+    * [Merge Operations](#merge-operations)
     + [Setting Time To Live(TTL) and User Metadata on Keys](#setting-time-to-livettl-and-user-metadata-on-keys)
     + [Iterating over keys](#iterating-over-keys)
       - [Prefix scans](#prefix-scans)
@@ -255,6 +256,51 @@ defer seq.Release()
 for {
   num, err := seq.Next()
 }
+```
+
+### Merge Operations
+Badger provides support for unordered merge operations. You can define a func
+of type `MergeFunc` which takes in an existing value, and a value to be
+_merged_ with it. It returns a new value which is the result of the _merge_
+operation. All values are specified in byte arrays. For e.g., here is a merge
+function (`add`) which adds a `uint64` value to an existing `uint64` value.
+
+```Go
+uint64ToBytes(i uint64) []byte {
+  var buf [8]byte
+  binary.BigEndian.PutUint64(buf[:], i)
+  return buf[:]
+}
+
+func bytesToUint64(b []byte) uint64 {
+  return binary.BigEndian.Uint64(b)
+}
+
+// Merge function to add two uint64 numbers
+func add(existing, new []byte) []byte {
+  return uint64ToBytes(bytesToUint64(existing) + bytesToUint64(new))
+}
+```
+
+This function can then be passed to the `DB.GetMergeOperator()` method, along
+with a key, and a duration value. The duration specifies how often the merge
+function is run on values that have been added using the `MergeOperator.Add()`
+method.
+
+`MergeOperator.Get()` method can be used to retrieve the cumulative value of the key
+associated with the merge operation.
+
+```Go
+key := []byte("merge")
+m := db.GetMergeOperator(key, add, 200*time.Millisecond)
+defer m.Stop()
+
+m.Add(uint64ToBytes(1))
+m.Add(uint64ToBytes(2))
+m.Add(uint64ToBytes(3))
+
+res, err := m.Get() // res should have value 6 encoded
+fmt.Println(bytesToUint64(res))
 ```
 
 ### Setting Time To Live(TTL) and User Metadata on Keys
