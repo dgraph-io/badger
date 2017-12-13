@@ -1024,10 +1024,22 @@ func (vlog *valueLog) waitOnGC(lc *y.Closer) {
 func (vlog *valueLog) runGC(gcThreshold float64, head valuePointer) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
-
 		// Run GC
-		err := vlog.doRunGC(gcThreshold, head)
+		var (
+			err   error
+			count int
+		)
+		for {
+			err = vlog.doRunGC(gcThreshold, head)
+			if err != nil {
+				break
+			}
+			count++
+		}
 		<-vlog.garbageCh
+		if err == ErrNoRewrite && count > 0 {
+			return nil
+		}
 		return err
 	default:
 		return ErrRejected

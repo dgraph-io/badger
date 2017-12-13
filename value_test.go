@@ -554,7 +554,9 @@ func TestValueLogGC(t *testing.T) {
 		require.NoError(t, kv.PurgeOlderVersions())
 		require.NoError(t, kv.RunValueLogGC(0.3))
 		newFids := kv.vlog.sortedFids()
-		require.Equal(t, len(newFids)+1, len(fids))
+		// No. of value log files after GC should be less than before.
+		// We should have GC-ed more than one value log file.
+		require.True(t, (len(fids)-len(newFids)) > 2)
 		for i, fid := range fids {
 			if i < len(newFids) && newFids[i] == fid {
 				continue
