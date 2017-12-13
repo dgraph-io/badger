@@ -81,6 +81,10 @@ var (
 	// ErrInvalidLoadingMode is returned when opt.ValueLogLoadingMode option is not
 	// within the valid range
 	ErrInvalidLoadingMode = errors.New("Invalid ValueLogLoadingMode, must be FileIO or MemoryMap")
+
+	// ErrStoppedMerge is returned when an MergeOperator.Add is attempted after the
+	// merge operation has been stopped by calling MergeOperator.Stop
+	ErrStoppedMerge = errors.New("Cannot add. Merge operation has already been stopped")
 )
 
 const maxKeySize = 1 << 16 // Key length can't be more than uint16, as determined by table::header.

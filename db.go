@@ -1154,3 +1154,155 @@ func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
 	err := seq.updateLease()
 	return seq, err
 }
+
+// MergeOperator represents a Badger merge operator.
+type MergeOperator struct {
+	sync.RWMutex
+	f       MergeFunc
+	db      *DB
+	key     []byte
+	version uint64
+	ticker  *time.Ticker
+	err     error
+	stopped bool
+	done    chan error
+}
+
+// MergeFunc accepts two byte slices, one representing an existing value, and
+// another representing a new value that needs to be ‘merged’ into it. MergeFunc
+// contains the logic to perform the ‘merge’ and return an updated value.
+// MergeFunc could perform operations like, integer addition, string concatenation
+// or list appends.
+type MergeFunc func(existing, new []byte) []byte
+
+// GetMergeOperator creates a new MergeOperator for a given key and returns
+// a pointer to it. It also fires off a goroutine that performs a merge operation
+// using the merge function that runs periodically, specified by the dur argument.
+func (db *DB) GetMergeOperator(key []byte,
+	f MergeFunc, dur time.Duration) *MergeOperator {
+	op := &MergeOperator{
+		f:      f,
+		db:     db,
+		key:    key,
+		ticker: time.NewTicker(dur),
+		done:   make(chan error),
+	}
+
+	go op.runMerge()
+	return op
+}
+
+func (op *MergeOperator) merge() error {
+	op.db.Lock()
+	defer op.db.Unlock()
+	return op.db.Update(func(txn *Txn) error {
+		opt := DefaultIteratorOptions
+		opt.AllVersions = true
+		it := txn.NewIterator(opt)
+		var existing []byte
+		var updated bool
+		for it.Rewind(); it.ValidForPrefix(op.key); it.Next() {
+			item := it.Item()
+			y.AssertTrue(item.Version() >= op.version)
+			if item.Version() == op.version {
+				var err error
+				existing, err = item.ValueCopy(existing)
+				if err != nil {
+					return err
+				}
+			} else {
+				// Set a flag if value was updated
+				updated = true
+				new, err := item.Value()
+				if err != nil {
+					return err
+				}
+				existing = op.f(existing, new)
+			}
+		}
+
+		// Write value back to db, and update version
+		if updated {
+			err := txn.Set(op.key, existing)
+			if err != nil {
+				return err
+			}
+			op.version = txn.commitTs
+		}
+
+		// Purge all previous entries
+		return op.db.PurgeVersionsBelow(op.key, op.version)
+	})
+}
+
+func (op *MergeOperator) runMerge() {
+	for _ = range op.ticker.C {
+		if op.err = op.merge(); op.err != nil {
+			break
+		}
+	}
+	// Perform merge one last time before exiting
+	if op.err != nil {
+		op.err = op.merge()
+	}
+	op.done <- op.err
+}
+
+// Add records a value in Badger which will eventually be merged by a background
+// routine into the values that were recorded by previous invocations to Add().
+func (op *MergeOperator) Add(val []byte) error {
+	if op.stopped {
+		return ErrStoppedMerge
+	}
+	return op.db.Update(func(txn *Txn) error {
+		return txn.Set(op.key, val)
+	})
+}
+
+// Get returns the latest value for the merge operator, which is derived by
+// applying the merge function to all the values added so far.
+//
+// FIXME What happens if MergeOperator.Get() is called before any calls to
+// MergeOperator.Add().
+func (op *MergeOperator) Get() ([]byte, error) {
+	op.db.RLock()
+	defer op.db.RUnlock()
+	var val []byte
+	if op.err != nil {
+		return val, op.err
+	}
+	err := op.db.View(func(txn *Txn) error {
+		opt := DefaultIteratorOptions
+		opt.AllVersions = true
+		it := txn.NewIterator(opt)
+		for it.Rewind(); it.ValidForPrefix(op.key); it.Next() {
+			item := it.Item()
+			y.AssertTrue(item.Version() >= op.version)
+			if item.Version() == op.version {
+				var err error
+				val, err = item.ValueCopy(val)
+				if err != nil {
+					return err
+				}
+			} else {
+				new, err := item.Value()
+				if err != nil {
+					return err
+				}
+				val = op.f(val, new)
+			}
+		}
+		return nil
+	})
+	return val, err
+}
+
+// Stop waits for any pending merge to complete and then stops the background
+// goroutine. After Stop() is called, any subsequent calls to Add will result in
+// an error
+func (op *MergeOperator) Stop() error {
+	op.ticker.Stop()
+	err := <-op.done
+	op.stopped = true
+	return err
+}
