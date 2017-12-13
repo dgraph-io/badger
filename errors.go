@@ -81,6 +81,9 @@ var (
 	// ErrInvalidLoadingMode is returned when opt.ValueLogLoadingMode option is not
 	// within the valid range
 	ErrInvalidLoadingMode = errors.New("Invalid ValueLogLoadingMode, must be FileIO or MemoryMap")
+
+	// ErrInvalidValue is returned when an MergeOperator.Add is attempted with a nil or empty slice
+	ErrInvalidValue = errors.New("Cannot set empty slice as value")
 )
 
 const maxKeySize = 1 << 16 // Key length can't be more than uint16, as determined by table::header.
