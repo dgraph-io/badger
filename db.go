@@ -1172,3 +1172,169 @@ func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
 	err := seq.updateLease()
 	return seq, err
 }
+
+// MergeOperator represents a Badger merge operator.
+type MergeOperator struct {
+	sync.RWMutex
+	f           MergeFunc
+	db          *DB
+	key         []byte
+	skipVersion uint64
+	ticker      *time.Ticker
+	err         error
+	closer      *y.Closer
+}
+
+// MergeFunc accepts two byte slices, one representing an existing value, and
+// another representing a new value that needs to be ‘merged’ into it. MergeFunc
+// contains the logic to perform the ‘merge’ and return an updated value.
+// MergeFunc could perform operations like integer addition, list appends etc.
+// Note that the ordering of the operands is unspecified, so the merge func
+// should either be agnostic to ordering or do additional handling if ordering
+// is required.
+type MergeFunc func(existing, val []byte) []byte
+
+// GetMergeOperator creates a new MergeOperator for a given key and returns a
+// pointer to it. It also fires off a goroutine that performs a compaction using
+// the merge function that runs periodically, as specified by dur.
+func (db *DB) GetMergeOperator(key []byte,
+	f MergeFunc, dur time.Duration) *MergeOperator {
+	op := &MergeOperator{
+		f:      f,
+		db:     db,
+		key:    key,
+		ticker: time.NewTicker(dur),
+		closer: y.NewCloser(1),
+	}
+
+	go op.runCompactions()
+	return op
+}
+
+func (op *MergeOperator) compact() error {
+	op.Lock()
+	defer op.Unlock()
+	err := op.db.Update(func(txn *Txn) error {
+		opt := DefaultIteratorOptions
+		opt.AllVersions = true
+		it := txn.NewIterator(opt)
+		var existing []byte
+		var updated, first bool
+		var maxVersion uint64
+		for it.Rewind(); it.ValidForPrefix(op.key); it.Next() {
+			item := it.Item()
+			y.AssertTrue(item.Version() > op.skipVersion)
+			if item.Version() > maxVersion {
+				maxVersion = item.Version()
+			}
+			if !first {
+				first = true
+				var err error
+				existing, err = item.ValueCopy(existing)
+				if err != nil {
+					return err
+				}
+			} else {
+				// Set a flag if value was updated
+				updated = true
+				val, err := item.Value()
+				if err != nil {
+					return err
+				}
+				existing = op.f(existing, val)
+			}
+		}
+
+		// Write value back to db, and update version
+		if updated {
+			if err := txn.Set(op.key, existing); err != nil {
+				return err
+			}
+			op.skipVersion = maxVersion
+		}
+		return nil
+	})
+	if err != nil {
+		return nil
+	}
+	// Purge all previous entries
+	return op.db.PurgeVersionsBelow(op.key, op.skipVersion+1)
+}
+
+func (op *MergeOperator) runCompactions() {
+	var stop bool
+	for {
+		select {
+		case <-op.closer.HasBeenClosed():
+			stop = true
+		case <-op.ticker.C: // wait for tick
+		}
+
+		if op.err = op.compact(); op.err != nil {
+			break
+		}
+		if stop { // timer has stopped
+			break
+		}
+	}
+	op.closer.Done()
+}
+
+// Add records a value in Badger which will eventually be merged by a background
+// routine into the values that were recorded by previous invocations to Add().
+func (op *MergeOperator) Add(val []byte) error {
+	return op.db.Update(func(txn *Txn) error {
+		return txn.Set(op.key, val)
+	})
+}
+
+// Get returns the latest value for the merge operator, which is derived by
+// applying the merge function to all the values added so far.
+//
+// If Add has not been called even once, Get will return ErrKeyNotFound
+func (op *MergeOperator) Get() ([]byte, error) {
+	op.RLock()
+	defer op.RUnlock()
+	var existing []byte
+	if op.err != nil {
+		return existing, op.err
+	}
+	err := op.db.View(func(txn *Txn) error {
+		opt := DefaultIteratorOptions
+		opt.AllVersions = true
+		it := txn.NewIterator(opt)
+		var first bool
+		for it.Rewind(); it.ValidForPrefix(op.key); it.Next() {
+			item := it.Item()
+			y.AssertTrue(item.Version() > op.skipVersion)
+			if !first {
+				first = true
+				var err error
+				existing, err = item.ValueCopy(existing)
+				if err != nil {
+					return err
+				}
+			} else {
+				val, err := item.Value()
+				if err != nil {
+					return err
+				}
+				existing = op.f(existing, val)
+			}
+		}
+		if !first {
+			return ErrKeyNotFound
+		}
+		return nil
+	})
+	return existing, err
+}
+
+// Stop waits for any pending merge to complete and then stops the background
+// goroutine. After Stop() is called, any subsequent calls to Add will result in
+// an error
+func (op *MergeOperator) Stop() error {
+	op.ticker.Stop()
+	op.closer.SignalAndWait()
+	return op.err
+}
