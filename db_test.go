@@ -282,6 +282,34 @@ func TestTxnTooBig(t *testing.T) {
 	})
 }
 
+func TestGetAfterPurge(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+
+		data := func(i int) []byte {
+			return []byte(fmt.Sprintf("%b", i))
+		}
+		//	n := 500000
+		n := 1000
+		m := 45 // Increasing would cause ErrTxnTooBig
+		for i := 0; i < n; i += m {
+			txn := db.NewTransaction(true)
+			for j := 0; j < m; j++ {
+				require.NoError(t, txn.Set(data(j), data(j)))
+			}
+			require.NoError(t, txn.Commit(nil))
+		}
+		require.NoError(t, db.PurgeOlderVersions())
+		for i := 0; i < m; i++ {
+			txn := db.NewTransaction(false)
+			item, err := txn.Get(data(i))
+			require.NoError(t, err)
+			require.EqualValues(t, string(data(i)), string(getItemValue(t, item)))
+			txn.Discard()
+		}
+
+	})
+}
+
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestGetMore(t *testing.T) {
