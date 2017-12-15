@@ -283,32 +283,61 @@ func TestTxnTooBig(t *testing.T) {
 }
 
 func TestGetAfterPurge(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
 
-		data := func(i int) []byte {
-			return []byte(fmt.Sprintf("%b", i))
-		}
-		n := 1000
-		m := 45 // Increasing would cause ErrTxnTooBig
-		// Workload is such that different versions of same key should
-		// be in different tables atleast for some keys.
-		for i := 0; i < n; i += m {
-			txn := db.NewTransaction(true)
-			for j := 0; j < m; j++ {
-				require.NoError(t, txn.Set(data(j), data(j)))
-			}
-			require.NoError(t, txn.Commit(nil))
-		}
-		require.NoError(t, db.PurgeOlderVersions())
-		for i := 0; i < m; i++ {
-			txn := db.NewTransaction(false)
-			item, err := txn.Get(data(i))
-			require.NoError(t, err)
-			require.EqualValues(t, string(data(i)), string(getItemValue(t, item)))
-			txn.Discard()
-		}
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 15 << 20
+	db, err := OpenManaged(opts)
+	require.NoError(t, err)
+	defer db.Close()
 
-	})
+	data := func(i int) []byte {
+		return []byte(fmt.Sprintf("%b", i))
+	}
+	n := 80
+	m := 45 // Increasing would cause ErrTxnTooBig
+	sz := 32 << 10
+	v := make([]byte, sz)
+	for i := 0; i < n; i += 2 {
+		version := uint64(i)
+		txn := db.NewTransactionAt(version, true)
+		for j := 0; j < m; j++ {
+			require.NoError(t, txn.Set(data(j), v))
+		}
+		require.NoError(t, txn.CommitAt(version+1, nil))
+	}
+
+	for j := 10; j < m; j++ {
+		err := db.PurgeVersionsBelow(data(j), uint64(80))
+		require.NoError(t, err)
+	}
+	for i := 0; i < 10; i++ {
+		txn := db.NewTransactionAt(80, false)
+		item, err := txn.Get(data(i))
+		require.NoError(t, err)
+		require.Equal(t, item.Version(), uint64(79))
+		txn.Discard()
+	}
+	err = db.RunValueLogGC(0.2)
+	require.NoError(t, err)
+
+	for i := 10; i < m; i++ {
+		txn := db.NewTransactionAt(80, false)
+		_, err := txn.Get(data(i))
+		require.Equal(t, err, ErrKeyNotFound)
+		txn.Discard()
+	}
+
+	for i := 0; i < 10; i++ {
+		txn := db.NewTransactionAt(80, false)
+		item, err := txn.Get(data(i))
+		require.NoError(t, err)
+		require.Equal(t, item.Version(), uint64(79))
+		txn.Discard()
+	}
+
 }
 
 // Put a lot of data to move some data to disk.
