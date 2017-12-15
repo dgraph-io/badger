@@ -288,9 +288,10 @@ func TestGetAfterPurge(t *testing.T) {
 		data := func(i int) []byte {
 			return []byte(fmt.Sprintf("%b", i))
 		}
-		//	n := 500000
 		n := 1000
 		m := 45 // Increasing would cause ErrTxnTooBig
+		// Workload is such that different versions of same key should
+		// be in different tables atleast for some keys.
 		for i := 0; i < n; i += m {
 			txn := db.NewTransaction(true)
 			for j := 0; j < m; j++ {
