@@ -458,6 +458,12 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	y.NumGets.Add(1)
 	version := y.ParseTs(key)
 	var maxVs y.ValueStruct
+	// Need to search for values in all tables, with managed db
+	// latest value needn't be present in the latest table.
+	// Even without managed db, purging can cause this constraint
+	// to be violated.
+	// Search until required version is found or iterate over all
+	// tables and return max version.
 	for i := 0; i < len(tables); i++ {
 		vs := tables[i].Get(key)
 		y.NumMemtableGets.Add(1)
