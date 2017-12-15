@@ -456,14 +456,28 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	defer decr()
 
 	y.NumGets.Add(1)
+	version := y.ParseTs(key)
+	var maxVs y.ValueStruct
+	// Need to search for values in all tables, with managed db
+	// latest value needn't be present in the latest table.
+	// Even without managed db, purging can cause this constraint
+	// to be violated.
+	// Search until required version is found or iterate over all
+	// tables and return max version.
 	for i := 0; i < len(tables); i++ {
 		vs := tables[i].Get(key)
 		y.NumMemtableGets.Add(1)
-		if vs.Meta != 0 || vs.Value != nil {
+		if vs.Meta == 0 && vs.Value == nil {
+			continue
+		}
+		if vs.Version == version {
 			return vs, nil
 		}
+		if maxVs.Version < vs.Version {
+			maxVs = vs
+		}
 	}
-	return db.lc.get(key)
+	return db.lc.get(key, maxVs)
 }
 
 func (db *DB) updateOffset(ptrs []valuePointer) {
@@ -1040,7 +1054,8 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 	// Find head on disk
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
-	val, err := db.lc.get(headKey)
+	var maxVs y.ValueStruct
+	val, err := db.lc.get(headKey, maxVs)
 	if err != nil {
 		return errors.Wrap(err, "Retrieving head from on-disk LSM")
 	}
