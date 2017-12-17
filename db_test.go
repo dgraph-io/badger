@@ -1197,6 +1197,52 @@ func TestSequence(t *testing.T) {
 	})
 }
 
+func TestSequence_Release(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// get sequence, use once and release
+		key := []byte("key")
+		seq, err := db.GetSequence(key, 1000)
+		require.NoError(t, err)
+		num, err := seq.Next()
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), num)
+		require.NoError(t, seq.Release())
+
+		// we used up 0 and 1 should be stored now
+		err = db.View(func(txn *Txn) error {
+			item, err := txn.Get(key)
+			if err != nil {
+				return err
+			}
+			val, err := item.Value()
+			if err != nil {
+				return err
+			}
+			require.Equal(t, num+1, binary.BigEndian.Uint64(val))
+			return nil
+		})
+		require.NoError(t, err)
+
+		// using it again will lease 1+1000
+		num, err = seq.Next()
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), num)
+		err = db.View(func(txn *Txn) error {
+			item, err := txn.Get(key)
+			if err != nil {
+				return err
+			}
+			val, err := item.Value()
+			if err != nil {
+				return err
+			}
+			require.Equal(t, uint64(1001), binary.BigEndian.Uint64(val))
+			return nil
+		})
+		require.NoError(t, err)
+	})
+}
+
 func ExampleOpen() {
 	dir, err := ioutil.TempDir("", "badger")
 	if err != nil {

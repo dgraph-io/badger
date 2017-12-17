@@ -247,9 +247,11 @@ bandwidth provided to `DB.GetSequence`. The frequency at which disk writes are
 done is determined by this lease bandwidth and the frequency of `Next`
 invocations. Setting a bandwith too low would do more disk writes, setting it
 too high would result in wasted integers if Badger is closed or crashes.
+To avoid wasted integers, call `Release` before closing Badger.
 
 ```go
 seq, err := db.GetSequence(key, 1000)
+defer seq.Release()
 for {
   num, err := seq.Next()
 }
