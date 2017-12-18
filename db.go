@@ -1106,6 +1106,24 @@ func (seq *Sequence) Next() (uint64, error) {
 	return val, nil
 }
 
+// Release the leased sequence to avoid wasted integers. This should be done right
+// before closing the associated DB. However it is valid to use the sequence after
+// it was released, causing a new lease with full bandwidth.
+func (seq *Sequence) Release() error {
+	seq.Lock()
+	defer seq.Unlock()
+	err := seq.db.Update(func(txn *Txn) error {
+		var buf [8]byte
+		binary.BigEndian.PutUint64(buf[:], seq.next)
+		return txn.Set(seq.key, buf[:])
+	})
+	if err != nil {
+		return err
+	}
+	seq.leased = seq.next
+	return nil
+}
+
 func (seq *Sequence) updateLease() error {
 	return seq.db.Update(func(txn *Txn) error {
 		item, err := txn.Get(seq.key)
