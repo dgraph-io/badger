@@ -1,6 +1,7 @@
 # BadgerDB [![GoDoc](https://godoc.org/github.com/dgraph-io/badger?status.svg)](https://godoc.org/github.com/dgraph-io/badger) [![Go Report Card](https://goreportcard.com/badge/github.com/dgraph-io/badger)](https://goreportcard.com/report/github.com/dgraph-io/badger) [![Build Status](https://travis-ci.org/dgraph-io/badger.svg?branch=master)](https://travis-ci.org/dgraph-io/badger) ![Appveyor](https://ci.appveyor.com/api/projects/status/github/dgraph-io/badger?branch=master&svg=true) [![Coverage Status](https://coveralls.io/repos/github/dgraph-io/badger/badge.svg?branch=master)](https://coveralls.io/github/dgraph-io/badger?branch=master)
 
 ![Badger mascot](images/diggy-shadow.png)
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fdgraph-io%2Fbadger.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fdgraph-io%2Fbadger?ref=badge_shield)
 
 BadgerDB is an embeddable, persistent, simple and fast key-value (KV) database
 written in pure Go. It's meant to be a performant alternative to non-Go-based
@@ -555,3 +556,7 @@ thread](https://groups.google.com/d/topic/golang-nuts/jPb_h3TvlKE/discussion).
 - Join [![Slack Status](http://slack.dgraph.io/badge.svg)](http://slack.dgraph.io).
 - Follow us on Twitter [@dgraphlabs](https://twitter.com/dgraphlabs).
 
+
+
+## License
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fdgraph-io%2Fbadger.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2Fdgraph-io%2Fbadger?ref=badge_large)
