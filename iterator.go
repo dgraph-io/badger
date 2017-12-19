@@ -74,8 +74,13 @@ func (item *Item) Version() uint64 {
 
 // Value retrieves the value of the item from the value log.
 //
-// The returned value is only valid as long as item is valid, or transaction is valid. So, if you
-// need to use it outside, please parse or copy it.
+// This method must be called within a transaction. Calling it outside a
+// transaction is considered undefined behavior. If an iterator is being used,
+// then Item.Value() is defined in the current iteration only, because items are
+// reused.
+//
+// If you need to use a value outside a transaction, please use Item.ValueCopy
+// instead, or copy it yourself.
 func (item *Item) Value() ([]byte, error) {
 	item.wg.Wait()
 	if item.status == prefetched {
