@@ -843,9 +843,9 @@ func (vlog *valueLog) pickLog(head valuePointer) *logFile {
 	}
 
 	i := sort.Search(len(fids), func(i int) bool {
-		return fids[i] == head.Fid
+		return fids[i] >= head.Fid
 	})
-	if i == len(fids) {
+	if i == len(fids) || fids[i] != head.Fid {
 		return nil
 	}
 
