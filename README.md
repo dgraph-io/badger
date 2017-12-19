@@ -314,6 +314,9 @@ is represented by a single byte. It can be used to set certain bits along
 with the key to aid in interpreting or decoding the key-value pair. User
 metadata can be set using the `Txn.SetWithMeta()` API method.
 
+`Txn.SetEntry()` can be used to set the key, value, user metatadata and TTL,
+all at once.
+
 ### Iterating over keys
 To iterate over keys, we can use an `Iterator`, which can be obtained using the
 `Txn.NewIterator()` method. Iteration happens in byte-wise lexicographical sorting
