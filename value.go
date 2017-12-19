@@ -847,6 +847,8 @@ func (vlog *valueLog) pickLog(head valuePointer) *logFile {
 	})
 	if i == len(fids) || fids[i] != head.Fid {
 		return nil
+	} else if i == 0 { // head is the first value log file
+		return nil
 	}
 
 	// Pick a candidate that contains the largest amount of discardable data
@@ -881,7 +883,7 @@ func discardEntry(e Entry, vs y.ValueStruct) bool {
 		// Version not found. Discard.
 		return true
 	}
-	if isDeletedOrExpired(vs) {
+	if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
 		return true
 	}
 	if (vs.Meta & bitValuePointer) == 0 {

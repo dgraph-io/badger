@@ -570,7 +570,7 @@ func TestTxnIterationEdgeCase3(t *testing.T) {
 	})
 }
 
-func TestIteratorAllVersionsButDeleted(t *testing.T) {
+func TestIteratorAllVersionsWithDeleted(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// Write two keys
 		err := db.Update(func(txn *Txn) error {
@@ -599,16 +599,63 @@ func TestIteratorAllVersionsButDeleted(t *testing.T) {
 		opts.AllVersions = true
 		opts.PrefetchValues = false
 
-		// Verify that deleted key does not show up when AllVersions is set.
+		// Verify that deleted shows up when AllVersions is set.
 		err = db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
 			var count int
 			for it.Rewind(); it.Valid(); it.Next() {
 				count++
 				item := it.Item()
-				require.Equal(t, []byte("answer2"), item.Key())
+				if count == 1 {
+					require.Equal(t, []byte("answer1"), item.Key())
+					require.True(t, item.meta&bitDelete > 0)
+				} else {
+					require.Equal(t, []byte("answer2"), item.Key())
+				}
 			}
-			require.Equal(t, 1, count)
+			require.Equal(t, 2, count)
+			return nil
+		})
+		require.NoError(t, err)
+	})
+}
+
+func TestIteratorAllVersionsWithDeleted2(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// Set and delete alternatively
+		for i := 0; i < 4; i++ {
+			err := db.Update(func(txn *Txn) error {
+				if i%2 == 0 {
+					txn.Set([]byte("key"), []byte("value"))
+					return nil
+				}
+				txn.Delete([]byte("key"))
+				return nil
+			})
+			require.NoError(t, err)
+		}
+
+		opts := DefaultIteratorOptions
+		opts.AllVersions = true
+		opts.PrefetchValues = false
+
+		// Verify that deleted shows up when AllVersions is set.
+		err := db.View(func(txn *Txn) error {
+			it := txn.NewIterator(opts)
+			var count int
+			for it.Rewind(); it.Valid(); it.Next() {
+				item := it.Item()
+				require.Equal(t, []byte("key"), item.Key())
+				if count%2 != 0 {
+					val, err := item.Value()
+					require.NoError(t, err)
+					require.Equal(t, val, []byte("value"))
+				} else {
+					require.True(t, item.meta&bitDelete > 0)
+				}
+				count++
+			}
+			require.Equal(t, 4, count)
 			return nil
 		})
 		require.NoError(t, err)

@@ -907,17 +907,77 @@ func TestPurgeVersionsBelow(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, db.vlog.lfDiscardStats.m)
 
-		// Verify that there are only 2 versions left
+		// Verify that there are only 2 versions left, and versions
+		// below ts have been deleted.
+		db.View(func(txn *Txn) error {
+			it := txn.NewIterator(opts)
+			var count int
+			for it.Rewind(); it.Valid(); it.Next() {
+				item := it.Item()
+				if item.Version() < ts {
+					require.True(t, item.meta&bitDelete > 0)
+				} else {
+					count++
+				}
+				require.Equal(t, []byte("answer"), item.Key())
+			}
+			require.Equal(t, 2, count)
+			return nil
+		})
+	})
+}
+
+func TestPurgeVersionsBelow2(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// Do a set and delete of same key
+		err := db.Update(func(txn *Txn) error {
+			return txn.Set([]byte("key"), []byte("value"))
+		})
+		require.NoError(t, err)
+
+		err = db.Update(func(txn *Txn) error {
+			return txn.Delete([]byte("key"))
+		})
+		require.NoError(t, err)
+
+		opts := DefaultIteratorOptions
+		opts.AllVersions = true
+		opts.PrefetchValues = false
+		// Verify that there are 2 versions and record highest version
+		var ts uint64
 		db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
 			var count int
 			for it.Rewind(); it.Valid(); it.Next() {
 				count++
 				item := it.Item()
-				require.True(t, item.Version() >= ts,
-					"item version: %d older than ts: %d",
-					item.Version(), ts)
-				require.Equal(t, []byte("answer"), item.Key())
+				require.Equal(t, []byte("key"), item.Key())
+				if count == 1 {
+					ts = item.Version()
+					require.True(t, item.meta&bitDelete > 0)
+					continue
+				}
+				val, err := item.Value()
+				require.NoError(t, err)
+				require.Equal(t, val, []byte("value"))
+			}
+			require.Equal(t, 2, count)
+			return nil
+		})
+
+		// Delete all versions
+		err = db.PurgeVersionsBelow([]byte("key"), ts)
+		require.NoError(t, err)
+
+		// Verify everything has been deleted
+		db.View(func(txn *Txn) error {
+			it := txn.NewIterator(opts)
+			var count int
+			for it.Rewind(); it.Valid(); it.Next() {
+				item := it.Item()
+				require.Equal(t, []byte("key"), item.Key())
+				require.True(t, item.meta&bitDelete > 0)
+				count++
 			}
 			require.Equal(t, 2, count)
 			return nil
@@ -960,7 +1020,7 @@ func TestPurgeOlderVersions(t *testing.T) {
 		err = db.PurgeOlderVersions()
 		require.NoError(t, err)
 
-		// Verify that only one version is found
+		// Verify that only one non-deleted version is found
 		err = db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
 			var count int
@@ -968,15 +1028,74 @@ func TestPurgeOlderVersions(t *testing.T) {
 				count++
 				item := it.Item()
 				require.Equal(t, []byte("answer"), item.Key())
-				val, err := item.Value()
-				require.NoError(t, err)
-				t.Logf("Item value is %q", val)
-				//require.Equal(t, []byte("43"), val)
+				if count == 1 {
+					val, err := item.Value()
+					require.NoError(t, err)
+					require.Equal(t, []byte("43"), val)
+				} else {
+					require.True(t, item.meta&bitDelete > 0)
+				}
 			}
-			require.Equal(t, 1, count)
+			require.Equal(t, 2, count)
 			return nil
 		})
 		require.NoError(t, err)
+	})
+}
+
+func TestPurgeOlderVersions2(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// Do a set and delete of same key
+		err := db.Update(func(txn *Txn) error {
+			return txn.Set([]byte("key"), []byte("value"))
+		})
+		require.NoError(t, err)
+
+		err = db.Update(func(txn *Txn) error {
+			return txn.Delete([]byte("key"))
+		})
+		require.NoError(t, err)
+
+		opts := DefaultIteratorOptions
+		opts.AllVersions = true
+		opts.PrefetchValues = false
+		// Verify that there are 2 versions
+		db.View(func(txn *Txn) error {
+			it := txn.NewIterator(opts)
+			var count int
+			for it.Rewind(); it.Valid(); it.Next() {
+				count++
+				item := it.Item()
+				require.Equal(t, []byte("key"), item.Key())
+				if count == 1 {
+					require.True(t, item.meta&bitDelete > 0)
+					continue
+				}
+				val, err := item.Value()
+				require.NoError(t, err)
+				require.Equal(t, val, []byte("value"))
+			}
+			require.Equal(t, 2, count)
+			return nil
+		})
+
+		// Delete all versions
+		err = db.PurgeOlderVersions()
+		require.NoError(t, err)
+
+		// Verify everything has been deleted
+		db.View(func(txn *Txn) error {
+			it := txn.NewIterator(opts)
+			var count int
+			for it.Rewind(); it.Valid(); it.Next() {
+				item := it.Item()
+				require.Equal(t, []byte("key"), item.Key())
+				require.True(t, item.meta&bitDelete > 0)
+				count++
+			}
+			require.Equal(t, 2, count)
+			return nil
+		})
 	})
 }
 
