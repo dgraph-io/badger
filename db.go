@@ -919,6 +919,9 @@ func (db *DB) purgeVersionsBelow(txn *Txn, key []byte, ts uint64) error {
 		if !bytes.Equal(key, item.Key()) || item.Version() >= ts {
 			continue
 		}
+		if isDeletedOrExpired(item.meta, item.ExpiresAt()) {
+			continue
+		}
 
 		// Found an older version. Mark for deletion
 		entries = append(entries,
@@ -974,6 +977,9 @@ func (db *DB) PurgeOlderVersions() error {
 			item := it.Item()
 			if !bytes.Equal(lastKey, item.Key()) {
 				lastKey = y.SafeCopy(lastKey, item.Key())
+				continue
+			}
+			if isDeletedOrExpired(item.meta, item.ExpiresAt()) {
 				continue
 			}
 			// Found an older version. Mark for deletion
