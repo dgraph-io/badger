@@ -56,6 +56,34 @@ func TestTxnSimple(t *testing.T) {
 	})
 }
 
+func TestTxnReadAfterWrite(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		var wg sync.WaitGroup
+		N := 100
+		wg.Add(N)
+		for i := 0; i < N; i++ {
+			go func(i int) {
+				defer wg.Done()
+				key := []byte(fmt.Sprintf("key%d", i))
+				err := db.Update(func(tx *Txn) error {
+					return tx.Set(key, key)
+				})
+				require.NoError(t, err)
+				err = db.View(func(tx *Txn) error {
+					item, err := tx.Get(key)
+					require.NoError(t, err)
+					val, err := item.Value()
+					require.NoError(t, err)
+					require.Equal(t, val, key)
+					return nil
+				})
+				require.NoError(t, err)
+			}(i)
+		}
+		wg.Wait()
+	})
+}
+
 func TestTxnCommitAsync(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 
