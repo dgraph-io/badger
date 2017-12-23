@@ -102,7 +102,7 @@ cannot open the same database at the same time.
 To start a read-only transaction, you can use the `DB.View()` method:
 
 ```go
-err := db.View(func(tx *badger.Txn) error {
+err := db.View(func(txn *badger.Txn) error {
   // Your code here…
   return nil
 })
@@ -117,7 +117,7 @@ seen by calls made within the closure.
 To start a read-write transaction, you can use the `DB.Update()` method:
 
 ```go
-err := db.Update(func(tx *badger.Txn) error {
+err := db.Update(func(txn *badger.Txn) error {
   // Your code here…
   return nil
 })
@@ -355,7 +355,7 @@ To iterate over a key prefix, you can combine `Seek()` and `ValidForPrefix()`:
 
 ```go
 db.View(func(txn *badger.Txn) error {
-  it := txn.NewIterator(&DefaultIteratorOptions)
+  it := txn.NewIterator(badger.DefaultIteratorOptions)
   prefix := []byte("1234")
   for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
     item := it.Item()
