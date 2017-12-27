@@ -725,7 +725,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			}
 
 			newid := atomic.AddUint32(&vlog.maxFid, 1)
-			y.AssertTruef(newid < 1<<16, "newid will overflow uint16: %v", newid)
+			y.AssertTruef(newid <= math.MaxUint32, "newid will overflow uint32: %v", newid)
 			newlf, err := vlog.createVlogFile(newid)
 			if err != nil {
 				return err
