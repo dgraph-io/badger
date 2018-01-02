@@ -18,7 +18,6 @@ package badger
 
 import (
 	"bytes"
-	"container/heap"
 	"encoding/binary"
 	"expvar"
 	"log"
@@ -229,12 +228,10 @@ func Open(opt Options) (db *DB, err error) {
 	}()
 
 	orc := &oracle{
-		isManaged:      opt.managedTxns,
-		nextCommit:     1,
-		pendingCommits: make(map[uint64]struct{}),
-		commits:        make(map[uint64]uint64),
+		isManaged:  opt.managedTxns,
+		nextCommit: 1,
+		commits:    make(map[uint64]uint64),
 	}
-	heap.Init(&orc.commitMark)
 
 	db = &DB{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
@@ -681,11 +678,7 @@ func (db *DB) batchSet(entries []*Entry) error {
 		return err
 	}
 
-	req.Wg.Wait()
-	req.Entries = nil
-	err = req.Err
-	requestPool.Put(req)
-	return err
+	return req.Wait()
 }
 
 // batchSetAsync is the asynchronous version of batchSet. It accepts a callback
@@ -700,10 +693,7 @@ func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
 		return err
 	}
 	go func() {
-		req.Wg.Wait()
-		err := req.Err
-		req.Entries = nil
-		requestPool.Put(req)
+		err := req.Wait()
 		// Write is complete. Let's call the callback function now.
 		f(err)
 	}()

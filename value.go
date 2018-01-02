@@ -667,6 +667,14 @@ type request struct {
 	Err  error
 }
 
+func (req *request) Wait() error {
+	req.Wg.Wait()
+	req.Entries = nil
+	err := req.Err
+	requestPool.Put(req)
+	return err
+}
+
 // sync is thread-unsafe and should not be called concurrently with write.
 func (vlog *valueLog) sync() error {
 	if vlog.opt.SyncWrites {
