@@ -41,3 +41,15 @@ message KVPair {
         uint64 version = 4;
         uint64 expires_at = 5;
 }
+
+message ValueLogIndex {
+    // Only one of the following would be set depending on index sparsness
+    repeated uint32 offsets = 1;
+		repeated IdOffset id_offsets = 2;
+}
+
+message IdOffset {
+  uint32 id = 1;
+	uint32 offset = 2;
+}
+
