@@ -1077,6 +1077,16 @@ func (db *DB) Size() (lsm int64, vlog int64) {
 	return
 }
 
+// MagicVersion returns the version number of the on-disk data format used by
+// the current instance Badger. This is incremented occasionally, if there is a
+// change in the way data is recorded in data files by Badger.
+//
+// Badger data files with a magic number that is different from the one reported
+// by this function, will not work with the current instance of Badger.
+func (db *DB) MagicVersion() int {
+	return magicVersion
+}
+
 // Sequence represents a Badger sequence.
 type Sequence struct {
 	sync.Mutex
