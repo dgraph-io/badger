@@ -75,8 +75,30 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	return f
 }
 
+func TestTableIterator(t *testing.T) {
+	for _, n := range []int{99, 100, 101} {
+		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
+			f := buildTestTable(t, "key", n)
+			table, err := OpenTable(f, options.MemoryMap)
+			require.NoError(t, err)
+			defer table.DecrRef()
+			it := table.NewIterator(false)
+			defer it.Close()
+			count := 0
+			for it.Rewind(); it.Valid(); it.Next() {
+				v := it.Value()
+				k := y.KeyWithTs([]byte(key("key", count)), 0)
+				require.EqualValues(t, k, it.Key())
+				require.EqualValues(t, fmt.Sprintf("%d", count), string(v.Value))
+				count++
+			}
+			require.Equal(t, count, n)
+		})
+	}
+}
+
 func TestSeekToFirst(t *testing.T) {
-	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
+	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
 			table, err := OpenTable(f, options.MemoryMap)
@@ -94,7 +116,7 @@ func TestSeekToFirst(t *testing.T) {
 }
 
 func TestSeekToLast(t *testing.T) {
-	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
+	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
 			table, err := OpenTable(f, options.MemoryMap)
@@ -188,7 +210,7 @@ func TestSeekForPrev(t *testing.T) {
 
 func TestIterateFromStart(t *testing.T) {
 	// Vary the number of elements added.
-	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
+	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
 			table, err := OpenTable(f, options.MemoryMap)
@@ -215,7 +237,7 @@ func TestIterateFromStart(t *testing.T) {
 
 func TestIterateFromEnd(t *testing.T) {
 	// Vary the number of elements added.
-	for _, n := range []int{101, 199, 200, 250, 9999, 10000} {
+	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
 			table, err := OpenTable(f, options.FileIO)
