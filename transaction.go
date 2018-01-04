@@ -290,7 +290,7 @@ func (txn *Txn) SetEntry(e *Entry) error {
 		return ErrDiscardedTxn
 	case len(e.Key) == 0:
 		return ErrEmptyKey
-	case len(e.Key) > maxKeySize:
+	case len(e.Key) > maxKeySize-8:
 		return exceedsMaxKeySizeError(e.Key)
 	case int64(len(e.Value)) > txn.db.opt.ValueLogFileSize:
 		return exceedsMaxValueSizeError(e.Value, txn.db.opt.ValueLogFileSize)
@@ -315,7 +315,7 @@ func (txn *Txn) Delete(key []byte) error {
 		return ErrDiscardedTxn
 	} else if len(key) == 0 {
 		return ErrEmptyKey
-	} else if len(key) > maxKeySize {
+	} else if len(key) > maxKeySize-8 {
 		return exceedsMaxKeySizeError(key)
 	}
 

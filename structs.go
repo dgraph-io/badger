@@ -10,23 +10,23 @@ import (
 )
 
 type valuePointer struct {
-	Fid    uint32
-	Len    uint32
-	Offset uint32
+	Fid uint32
+	Len uint32
+	Id  uint32
 }
 
 func (p valuePointer) Less(o valuePointer) bool {
 	if p.Fid != o.Fid {
 		return p.Fid < o.Fid
 	}
-	if p.Offset != o.Offset {
-		return p.Offset < o.Offset
+	if p.Id != o.Id {
+		return p.Id < o.Id
 	}
 	return p.Len < o.Len
 }
 
 func (p valuePointer) IsZero() bool {
-	return p.Fid == 0 && p.Offset == 0 && p.Len == 0
+	return p.Fid == 0 && p.Id == 0 && p.Len == 0
 }
 
 const vptrSize = 12
@@ -35,14 +35,14 @@ const vptrSize = 12
 func (p valuePointer) Encode(b []byte) []byte {
 	binary.BigEndian.PutUint32(b[:4], p.Fid)
 	binary.BigEndian.PutUint32(b[4:8], p.Len)
-	binary.BigEndian.PutUint32(b[8:12], p.Offset)
+	binary.BigEndian.PutUint32(b[8:12], p.Id)
 	return b[:vptrSize]
 }
 
 func (p *valuePointer) Decode(b []byte) {
 	p.Fid = binary.BigEndian.Uint32(b[:4])
 	p.Len = binary.BigEndian.Uint32(b[4:8])
-	p.Offset = binary.BigEndian.Uint32(b[8:12])
+	p.Id = binary.BigEndian.Uint32(b[8:12])
 }
 
 // header is used in value log as a header before Entry.
@@ -50,12 +50,13 @@ type header struct {
 	klen      uint32
 	vlen      uint32
 	expiresAt uint64
+	id        uint32
 	meta      byte
 	userMeta  byte
 }
 
 const (
-	headerBufSize = 18
+	headerBufSize = 22
 )
 
 func (h header) Encode(out []byte) {
@@ -65,6 +66,7 @@ func (h header) Encode(out []byte) {
 	binary.BigEndian.PutUint64(out[8:16], h.expiresAt)
 	out[16] = h.meta
 	out[17] = h.userMeta
+	binary.BigEndian.PutUint32(out[18:22], h.id)
 }
 
 // Decodes h from buf.
@@ -74,6 +76,7 @@ func (h *header) Decode(buf []byte) {
 	h.expiresAt = binary.BigEndian.Uint64(buf[8:16])
 	h.meta = buf[16]
 	h.userMeta = buf[17]
+	h.id = binary.BigEndian.Uint32(buf[18:22])
 }
 
 // Entry provides Key, Value, UserMeta and ExpiresAt. This struct can be used by the user to set data.
@@ -83,8 +86,9 @@ type Entry struct {
 	UserMeta  byte
 	ExpiresAt uint64 // time.Unix
 	meta      byte
+	id        uint32
 
-	// Fields maintained internally.
+	// field used internally
 	offset uint32
 }
 
@@ -103,6 +107,7 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 		expiresAt: e.ExpiresAt,
 		meta:      e.meta,
 		userMeta:  e.UserMeta,
+		id:        e.id,
 	}
 
 	var headerEnc [headerBufSize]byte
@@ -127,6 +132,6 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 }
 
 func (e Entry) print(prefix string) {
-	fmt.Printf("%s Key: %s Meta: %d UserMeta: %d Offset: %d len(val)=%d",
-		prefix, e.Key, e.meta, e.UserMeta, e.offset, len(e.Value))
+	fmt.Printf("%s Key: %s Meta: %d UserMeta: %d Id: %d len(val)=%d",
+		prefix, e.Key, e.meta, e.UserMeta, e.id, len(e.Value))
 }
