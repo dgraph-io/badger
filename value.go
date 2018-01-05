@@ -495,7 +495,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 
 	if deleteFileNow {
 		f.lock.Lock()
-		if err := os.Remove(f.path); err != nil {
+		if err := vlog.deleteLogFile(f); err != nil {
 			f.lock.Unlock()
 			return err
 		}
