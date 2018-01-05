@@ -426,12 +426,6 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		return err
 	}
 
-	elog.Printf("buf length is %d\n", buf.Len())
-	_, err = fp.Write(buf.Bytes())
-	if err != nil {
-		return err
-	}
-	buf.Reset()
 	if offset > 0 {
 		// Write emtpy entry and index
 		val, err := index.Marshal()

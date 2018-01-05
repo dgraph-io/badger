@@ -88,7 +88,7 @@ type Entry struct {
 	meta      byte
 	id        uint32
 
-	// field used internally
+	// Fields Maintained internally
 	offset uint32
 }
 
