@@ -55,6 +55,10 @@ const (
 	mi int64 = 1 << 20
 )
 
+var (
+	minHoleLen int64 = 4 << 20
+)
+
 type logFile struct {
 	path string
 	// This is a lock on the log file. It guards the fd’s value, the file’s
@@ -70,10 +74,10 @@ type logFile struct {
 	loadingMode options.FileLoadingMode
 }
 
-// openReadOnly assumes that we have a write lock on logFile.
-func (lf *logFile) openReadOnly() error {
+// open assumes that we have a write lock on logFile.
+func (lf *logFile) open() error {
 	var err error
-	lf.fd, err = os.OpenFile(lf.path, os.O_RDONLY, 0666)
+	lf.fd, err = os.OpenFile(lf.path, os.O_RDWR, 0666)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to open %q as RDONLY.", lf.path)
 	}
@@ -166,7 +170,7 @@ func (lf *logFile) doneWriting(offset uint32) error {
 		return errors.Wrapf(err, "Unable to close value log: %q", lf.path)
 	}
 
-	return lf.openReadOnly()
+	return lf.open()
 }
 
 // You must hold lf.lock to sync()
@@ -188,6 +192,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 
 	reader := bufio.NewReader(lf.fd)
 	var hbuf [headerBufSize]byte
+	var zeroBytes [headerBufSize]byte
 	var h header
 	k := make([]byte, 1<<10)
 	v := make([]byte, 1<<20)
@@ -207,6 +212,27 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 				break
 			}
 			return err
+		}
+
+		// After punching holes even though the entries don't occoupy space on disk,
+		// read would return zeros. So, Skip all zeros
+		if bytes.Equal(hbuf[:], zeroBytes[:]) {
+			nextByte := byte(0x00)
+			count := 0
+			for nextByte == 0x00 {
+				nextByte, err = reader.ReadByte()
+				if err == io.EOF {
+					break
+				} else if err != nil {
+					return err
+				}
+				count++
+			}
+			if err = reader.UnreadByte(); err != nil {
+				return err
+			}
+			recordOffset += uint32(headerBufSize + count - 1)
+			continue
 		}
 
 		var e Entry
@@ -293,11 +319,10 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	defer elog.Finish()
 	elog.Printf("Rewriting fid: %d", f.fid)
 
-	wb := make([]*Entry, 0, 1000)
-	var size int64
-
 	y.AssertTrue(vlog.kv != nil)
 	var count int
+	var holeStartOffset uint32
+	var totalHoleLen int64
 	fe := func(e Entry) error {
 		count++
 		if count%10000 == 0 {
@@ -326,24 +351,13 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			return nil
 		}
 		if vp.Fid == f.fid && vp.Offset == e.offset {
-			// This new entry only contains the key, and a pointer to the value.
-			ne := new(Entry)
-			ne.meta = 0 // Remove all bits.
-			ne.UserMeta = e.UserMeta
-			ne.Key = make([]byte, len(e.Key))
-			copy(ne.Key, e.Key)
-			ne.Value = make([]byte, len(e.Value))
-			copy(ne.Value, e.Value)
-			wb = append(wb, ne)
-			size += int64(e.estimateSize(vlog.opt.ValueThreshold))
-			if size >= 64*mi {
-				elog.Printf("request has %d entries, size %d", len(wb), size)
-				if err := vlog.kv.batchSet(wb); err != nil {
-					return err
-				}
-				size = 0
-				wb = wb[:0]
+			if holeLen := int64(e.offset - holeStartOffset); holeLen > minHoleLen {
+				f.lock.Lock()
+				y.Ignore(y.PunchHole(int(f.fd.Fd()), int64(holeStartOffset), holeLen))
+				f.lock.Unlock()
+				totalHoleLen += holeLen
 			}
+			holeStartOffset = e.offset + vp.Len
 		} else {
 			log.Printf("WARNING: This entry should have been caught. %+v\n", e)
 		}
@@ -357,32 +371,19 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		return err
 	}
 
-	elog.Printf("request has %d entries, size %d", len(wb), size)
-	batchSize := 1024
-	var loops int
-	for i := 0; i < len(wb); {
-		loops++
-		if batchSize == 0 {
-			log.Printf("WARNING: We shouldn't reach batch size of zero.")
+	if holeStartOffset > 0 {
+		vlog.lfDiscardStats.Lock()
+		// If the holes are fragmented then we would not punch any holes,
+		// and this file might stop other files from being chosen if the
+		// discard ratio is high. So setting it to zero instead of doing
+		// `-= totalHoleLen`
+		vlog.lfDiscardStats.m[f.fid] = 0
+		vlog.lfDiscardStats.Unlock()
+		if totalHoleLen == 0 {
 			return ErrNoRewrite
 		}
-		end := i + batchSize
-		if end > len(wb) {
-			end = len(wb)
-		}
-		if err := vlog.kv.batchSet(wb[i:end]); err != nil {
-			if err == ErrTxnTooBig {
-				// Decrease the batch size to half.
-				batchSize = batchSize / 2
-				elog.Printf("Dropped batch size to %d", batchSize)
-				continue
-			}
-			return err
-		}
-		i += batchSize
+		return nil
 	}
-	elog.Printf("Processed %d entries in %d loops", len(wb), loops)
-
 	elog.Printf("Removing fid: %d", f.fid)
 	var deleteFileNow bool
 	// Entries written to LSM. Remove the older file now.
@@ -527,7 +528,7 @@ func (vlog *valueLog) openOrCreateFiles() error {
 				return errors.Wrapf(err, "Unable to open value log file as RDWR")
 			}
 		} else {
-			if err := lf.openReadOnly(); err != nil {
+			if err := lf.open(); err != nil {
 				return err
 			}
 		}
@@ -1011,7 +1012,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 	}
 	vlog.elog.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
 
-	if r.total < 10.0 || r.discard < gcThreshold*r.total {
+	if r.discard < gcThreshold*r.total {
 		vlog.elog.Printf("Skipping GC on fid: %d\n\n", lf.fid)
 		return ErrNoRewrite
 	}
@@ -1042,7 +1043,8 @@ func (vlog *valueLog) runGC(gcThreshold float64, head valuePointer) error {
 			err   error
 			count int
 		)
-		for {
+		numFiles := len(vlog.sortedFids())
+		for count < numFiles {
 			err = vlog.doRunGC(gcThreshold, head)
 			if err != nil {
 				break
