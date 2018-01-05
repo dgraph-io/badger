@@ -118,7 +118,7 @@ func TestUpdateAndView(t *testing.T) {
 
 		err = db.View(func(txn *Txn) error {
 			for i := 0; i < 10; i++ {
-				item, err := txn.Get([]byte(fmt.Sprintf("key%d", i)))
+				item, err := txn.Get([]byte(fmt.Sprintf("keys%d", i)))
 				if err != nil {
 					return err
 				}
