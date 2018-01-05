@@ -84,7 +84,7 @@ var (
 )
 
 // Key length can't be more than uint16, as determined by table::header.
-const maxKeySize = 1<<16 - 8 // 8 bytes are for storing timestamp
+const maxKeySize = 1 << 16 // 8 bytes are for storing timestamp
 
 func exceedsMaxKeySizeError(key []byte) error {
 	return errors.Errorf("Key with size %d exceeded %d limit. Key:\n%s",

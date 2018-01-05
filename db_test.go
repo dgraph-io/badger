@@ -72,12 +72,14 @@ func txnSet(t *testing.T, kv *DB, key []byte, val []byte, meta byte) {
 	txn := kv.NewTransaction(true)
 	require.NoError(t, txn.SetWithMeta(key, val, meta))
 	require.NoError(t, txn.Commit(nil))
+	txn.Discard()
 }
 
 func txnDelete(t *testing.T, kv *DB, key []byte) {
 	txn := kv.NewTransaction(true)
 	require.NoError(t, txn.Delete(key))
 	require.NoError(t, txn.Commit(nil))
+	txn.Discard()
 }
 
 // Opens a badger db and runs a a test on it.
