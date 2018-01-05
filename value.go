@@ -28,6 +28,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -53,7 +54,9 @@ const (
 	bitTxn    byte = 1 << 6 // Set if the entry is part of a txn.
 	bitFinTxn byte = 1 << 7 // Set if the entry is to indicate end of txn in value log.
 
-	mi int64 = 1 << 20
+	mi = 1 << 20
+
+	valueLogRewriteFileName = "valuelog-rewrite"
 )
 
 type logFile struct {
@@ -343,8 +346,16 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	defer elog.Finish()
 	elog.Printf("Rewriting fid: %d", f.fid)
 
-	wb := make([]*Entry, 0, 1000)
-	var size int64
+	var buf bytes.Buffer
+	var offset uint32
+	var index protos.ValueLogIndex
+
+	rewritePath := filepath.Join(vlog.opt.ValueDir, valueLogRewriteFileName)
+	// We explicity sync
+	fp, err := y.OpenTruncFile(rewritePath, false)
+	if err != nil {
+		return err
+	}
 
 	y.AssertTrue(vlog.kv != nil)
 	var count int
@@ -384,15 +395,23 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			copy(ne.Key, e.Key)
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
-			wb = append(wb, ne)
-			size += int64(e.estimateSize(vlog.opt.ValueThreshold))
-			if size >= 64*mi {
-				elog.Printf("request has %d entries, size %d", len(wb), size)
-				if err := vlog.kv.batchSet(wb); err != nil {
+			ne.id = e.id
+			plen, err := encodeEntry(ne, &buf)
+			if err != nil {
+				return err
+			}
+			index.IdOffsets = append(index.IdOffsets, &protos.IdOffset{
+				Id:     ne.id,
+				Offset: offset,
+			})
+			offset += uint32(plen)
+			if buf.Len() >= 64*mi {
+				elog.Printf("buf length is %d\n", buf.Len())
+				_, err := fp.Write(buf.Bytes())
+				if err != nil {
 					return err
 				}
-				size = 0
-				wb = wb[:0]
+				buf.Reset()
 			}
 		} else {
 			log.Printf("WARNING: This entry should have been caught. %+v\n", e)
@@ -400,42 +419,53 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		return nil
 	}
 
-	err := vlog.iterate(f, 0, func(e Entry, vp valuePointer) error {
+	err = vlog.iterate(f, 0, func(e Entry, vp valuePointer) error {
 		return fe(e)
 	})
 	if err != nil {
 		return err
 	}
 
-	elog.Printf("request has %d entries, size %d", len(wb), size)
-	batchSize := 1024
-	var loops int
-	for i := 0; i < len(wb); {
-		loops++
-		if batchSize == 0 {
-			log.Printf("WARNING: We shouldn't reach batch size of zero.")
-			return ErrNoRewrite
-		}
-		end := i + batchSize
-		if end > len(wb) {
-			end = len(wb)
-		}
-		if err := vlog.kv.batchSet(wb[i:end]); err != nil {
-			if err == ErrTxnTooBig {
-				// Decrease the batch size to half.
-				batchSize = batchSize / 2
-				elog.Printf("Dropped batch size to %d", batchSize)
-				continue
-			}
+	elog.Printf("buf length is %d\n", buf.Len())
+	_, err = fp.Write(buf.Bytes())
+	if err != nil {
+		return err
+	}
+	buf.Reset()
+	if offset > 0 {
+		// Write emtpy entry and index
+		val, err := index.Marshal()
+		y.Check(err)
+		e := &Entry{}
+		n, err := encodeEntry(e, &buf)
+		if err != nil {
 			return err
 		}
-		i += batchSize
+		offset += uint32(n)
+		buf.Write(val)
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], offset)
+		buf.Write(b[:])
+		offset += uint32(len(val) + 4)
+		_, err = fp.Write(buf.Bytes())
+		if err != nil {
+			return err
+		}
 	}
-	elog.Printf("Processed %d entries in %d loops", len(wb), loops)
 
-	elog.Printf("Removing fid: %d", f.fid)
+	if err := fp.Sync(); err != nil {
+		fp.Close()
+		return err
+	}
+	if err = fp.Truncate(int64(offset)); err != nil {
+		return err
+	}
+	if err = fp.Close(); err != nil {
+		return err
+	}
+
+	elog.Printf("Rewriting fid: %d", f.fid)
 	var deleteFileNow bool
-	// Entries written to LSM. Remove the older file now.
 	{
 		vlog.filesLock.Lock()
 		// Just a sanity-check.
@@ -443,19 +473,52 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			vlog.filesLock.Unlock()
 			return errors.Errorf("Unable to find fid: %d", f.fid)
 		}
-		if vlog.numActiveIterators == 0 {
+		if offset == 0 {
 			delete(vlog.filesMap, f.fid)
 			deleteFileNow = true
+			vlog.filesLock.Unlock()
 		} else {
-			vlog.filesToBeDeleted = append(vlog.filesToBeDeleted, f.fid)
+			vlog.filesLock.Unlock()
+			f.lock.Lock()
+			if err := vlog.replace(f, rewritePath); err != nil {
+				f.lock.Unlock()
+				return err
+			}
+			f.index.Reset()
+			if err := f.openReadOnly(); err != nil {
+				f.lock.Unlock()
+				return err
+			}
+			f.lock.Unlock()
 		}
-		vlog.filesLock.Unlock()
 	}
 
 	if deleteFileNow {
-		vlog.deleteLogFile(f)
+		f.lock.Lock()
+		if err := os.Remove(f.path); err != nil {
+			f.lock.Unlock()
+			return err
+		}
+		f.lock.Unlock()
+		if err := os.Remove(rewritePath); err != nil {
+			return err
+		}
 	}
+	return nil
+}
 
+func (vlog *valueLog) replace(f *logFile, rewritePath string) error {
+	// Need to close the other file on windows before renaming
+	if err := f.munmap(); err != nil {
+		_ = f.fd.Close()
+		return err
+	}
+	if err := f.fd.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(rewritePath, f.path); err != nil {
+		return err
+	}
 	return nil
 }
 
