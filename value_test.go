@@ -248,6 +248,7 @@ func TestValueGC3(t *testing.T) {
 	}
 
 	txn = kv.NewTransaction(true)
+	defer txn.Discard()
 	it := txn.NewIterator(itOpt)
 	defer it.Close()
 	// Walk a few keys
@@ -551,18 +552,14 @@ func TestValueLogGC(t *testing.T) {
 			require.NoError(t, err)
 		}
 		fids := kv.vlog.sortedFids()
+		require.Equal(t, len(fids), 4)
 		require.NoError(t, kv.PurgeOlderVersions())
 		require.NoError(t, kv.RunValueLogGC(0.3))
 		newFids := kv.vlog.sortedFids()
-		// No. of value log files after GC should be less than before.
-		// We should have GC-ed more than one value log file.
-		require.True(t, (len(fids)-len(newFids)) > 2)
-		for i, fid := range fids {
-			if i < len(newFids) && newFids[i] == fid {
-				continue
-			}
+		require.Equal(t, len(newFids), 1)
+		for i := 0; i < 3; i++ {
 			// Check that vlog is deleted.
-			_, err = os.Stat(fmt.Sprintf("dir%c%06d.vlog", os.PathSeparator, fid))
+			_, err = os.Stat(fmt.Sprintf("%s%c%06d.vlog", dir, os.PathSeparator, i))
 			require.Error(t, err)
 		}
 	})

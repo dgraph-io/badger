@@ -286,9 +286,13 @@ func TestGetAfterPurge(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
+	defer func() {
+		minHoleLen = 4 << 20
+	}()
 
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 15 << 20
+	minHoleLen = 100 << 10
 	db, err := OpenManaged(opts)
 	require.NoError(t, err)
 	defer db.Close()

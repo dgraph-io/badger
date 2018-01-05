@@ -55,11 +55,14 @@ type header struct {
 }
 
 const (
-	headerBufSize = 18
+	headerBufSize = 19
+	magicByte     = 0x01
 )
 
 func (h header) Encode(out []byte) {
 	y.AssertTrue(len(out) >= headerBufSize)
+	out[0] = magicByte
+	out = out[1:]
 	binary.BigEndian.PutUint32(out[0:4], h.klen)
 	binary.BigEndian.PutUint32(out[4:8], h.vlen)
 	binary.BigEndian.PutUint64(out[8:16], h.expiresAt)
@@ -69,6 +72,7 @@ func (h header) Encode(out []byte) {
 
 // Decodes h from buf.
 func (h *header) Decode(buf []byte) {
+	buf = buf[1:]
 	h.klen = binary.BigEndian.Uint32(buf[0:4])
 	h.vlen = binary.BigEndian.Uint32(buf[4:8])
 	h.expiresAt = binary.BigEndian.Uint64(buf[8:16])
