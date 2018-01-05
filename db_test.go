@@ -1623,3 +1623,9 @@ func ExampleTxn_NewIterator() {
 	// Output:
 	// Counted 1000 elements
 }
+
+func TestMain(m *testing.M) {
+	minHoleLen = 1 << 10
+	r := m.Run()
+	os.Exit(r)
+}
