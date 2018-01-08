@@ -72,6 +72,7 @@ func (h header) Encode(out []byte) {
 
 // Decodes h from buf.
 func (h *header) Decode(buf []byte) {
+	y.AssertTrue(buf[0] == magicByte)
 	buf = buf[1:]
 	h.klen = binary.BigEndian.Uint32(buf[0:4])
 	h.vlen = binary.BigEndian.Uint32(buf[4:8])

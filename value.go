@@ -192,6 +192,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 
 	reader := bufio.NewReader(lf.fd)
 	var hbuf [headerBufSize]byte
+	var zeroBytes [headerBufSize]byte
 	var h header
 	k := make([]byte, 1<<10)
 	v := make([]byte, 1<<20)
@@ -213,10 +214,8 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 			return err
 		}
 
-		var e Entry
-		e.offset = recordOffset
-		h.Decode(hbuf[:])
-		if h.klen == 0 && h.vlen == 0 {
+		// Skip all zeros
+		if bytes.Equal(hbuf[:], zeroBytes[:]) {
 			nextByte := byte(0x00)
 			for nextByte == 0x00 {
 				nextByte, err = reader.ReadByte()
@@ -229,7 +228,12 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 			if err = reader.UnreadByte(); err != nil {
 				return err
 			}
+			continue
 		}
+
+		var e Entry
+		e.offset = recordOffset
+		h.Decode(hbuf[:])
 		if h.klen > maxKeySize {
 			truncate = true
 			break
@@ -928,7 +932,6 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 	}
 
 	var r reason
-	// TODO: Remove
 	var window = 100.0
 	count := 0
 
@@ -1040,8 +1043,7 @@ func (vlog *valueLog) runGC(gcThreshold float64, head valuePointer) error {
 			err   error
 			count int
 		)
-		numFiles := len(vlog.sortedFids())
-		for i := 0; i < numFiles; i++ {
+		for {
 			err = vlog.doRunGC(gcThreshold, head)
 			if err != nil {
 				break
