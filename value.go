@@ -57,6 +57,7 @@ const (
 
 var (
 	minHoleLen int64 = 4 << 20
+	zeroHeader [headerBufSize]byte
 )
 
 type logFile struct {
@@ -192,7 +193,6 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 
 	reader := bufio.NewReader(lf.fd)
 	var hbuf [headerBufSize]byte
-	var zeroBytes [headerBufSize]byte
 	var h header
 	k := make([]byte, 1<<10)
 	v := make([]byte, 1<<20)
@@ -216,7 +216,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 
 		// After punching holes even though the entries don't occoupy space on disk,
 		// read would return zeros. So, Skip all zeros
-		if bytes.Equal(hbuf[:], zeroBytes[:]) {
+		if bytes.Equal(hbuf[:], zeroHeader[:]) {
 			nextByte := byte(0x00)
 			count := 0
 			for nextByte == 0x00 {
@@ -313,13 +313,17 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 
 func (vlog *valueLog) purgeEntry(key []byte, version uint64) (bool, error) {
 	vs, err := vlog.kv.get(purgeKey(key))
+	var purgeTs uint64
 	if err != nil {
 		return false, err
+	} else if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
+	} else if len(vs.Value) > 0 {
+		purgeTs = binary.BigEndian.Uint64(vs.Value)
 	}
-	if version < vs.Version {
+	if purgeTs > 0 && version < purgeTs {
 		return true, nil
 	}
-	return true, nil
+	return false, nil
 }
 
 func (vlog *valueLog) rewrite(f *logFile) error {
@@ -347,7 +351,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		if discardEntry(e, vs) {
 			return nil
 		}
-		if purge, err := vlog.purgeEntry(e.Key, vs.Version); err != nil {
+		if purge, err := vlog.purgeEntry(y.ParseKey(e.Key), y.ParseTs(e.Key)); err != nil {
 			return err
 		} else if purge {
 			return nil
@@ -822,6 +826,8 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	buf, cb, err := vlog.readValueBytes(vp, s)
 	if err != nil {
 		return nil, cb, err
+	} else if bytes.Equal(buf[:headerBufSize], zeroHeader[:]) {
+		return nil, cb, nil
 	}
 	var h header
 	h.Decode(buf)
@@ -985,7 +991,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 			r.discard += esz
 			return nil
 		}
-		if purge, err := vlog.purgeEntry(e.Key, vs.Version); err != nil {
+		if purge, err := vlog.purgeEntry(y.ParseKey(e.Key), y.ParseTs(e.Key)); err != nil {
 			return err
 		} else if purge {
 			r.discard += esz

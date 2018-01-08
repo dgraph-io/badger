@@ -300,6 +300,7 @@ func TestGetAfterPurge(t *testing.T) {
 	m := 45 // Increasing would cause ErrTxnTooBig
 	sz := 32 << 10
 	v := make([]byte, sz)
+	rand.Read(v)
 	for i := 0; i < n; i += 2 {
 		version := uint64(i)
 		txn := db.NewTransactionAt(version, true)
@@ -315,27 +316,35 @@ func TestGetAfterPurge(t *testing.T) {
 	}
 	for i := 0; i < 10; i++ {
 		txn := db.NewTransactionAt(80, false)
+		defer txn.Discard()
 		item, err := txn.Get(data(i))
 		require.NoError(t, err)
 		require.Equal(t, item.Version(), uint64(79))
-		txn.Discard()
 	}
 	err = db.RunValueLogGC(0.2)
 	require.NoError(t, err)
 
 	for i := 10; i < m; i++ {
-		txn := db.NewTransactionAt(80, false)
-		_, err := txn.Get(data(i))
-		require.Equal(t, err, ErrKeyNotFound)
-		txn.Discard()
+		// Read at earlier timestamp since latest value lies in file after badgerHead
+		// and holes won't be punched in that file.
+		txn := db.NewTransactionAt(3, false)
+		// db.Close will get stuck if txn discard is not defered which will cause
+		// the test to be hung without stacktrace
+		defer txn.Discard()
+		item, err := txn.Get(data(i))
+		// After purge key still remains in lsm and is not marked deleted.
+		require.NoError(t, err)
+		val, err := item.Value()
+		require.NoError(t, err)
+		require.Equal(t, len(val), 0)
 	}
 
 	for i := 0; i < 10; i++ {
 		txn := db.NewTransactionAt(80, false)
+		defer txn.Discard()
 		item, err := txn.Get(data(i))
 		require.NoError(t, err)
 		require.Equal(t, item.Version(), uint64(79))
-		txn.Discard()
 	}
 
 }
