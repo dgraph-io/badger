@@ -217,6 +217,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		// Skip all zeros
 		if bytes.Equal(hbuf[:], zeroBytes[:]) {
 			nextByte := byte(0x00)
+			count := 0
 			for nextByte == 0x00 {
 				nextByte, err = reader.ReadByte()
 				if err == io.EOF {
@@ -224,10 +225,12 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 				} else if err != nil {
 					return err
 				}
+				count++
 			}
 			if err = reader.UnreadByte(); err != nil {
 				return err
 			}
+			recordOffset += uint32(headerBufSize + count - 1)
 			continue
 		}
 
@@ -317,7 +320,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 
 	y.AssertTrue(vlog.kv != nil)
 	var count int
-	var lastRecordOffset uint32
+	var holeStartOffset uint32
 	var totalHoleLen int64
 	fe := func(e Entry) error {
 		count++
@@ -355,13 +358,13 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			copy(ne.Key, e.Key)
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
-			if holeLen := int64(e.offset - lastRecordOffset); holeLen > minHoleLen {
+			if holeLen := int64(e.offset - holeStartOffset); holeLen > minHoleLen {
 				f.lock.Lock()
-				y.PunchHole(int(f.fd.Fd()), int64(lastRecordOffset), holeLen)
+				y.PunchHole(int(f.fd.Fd()), int64(holeStartOffset), holeLen)
 				f.lock.Unlock()
 				totalHoleLen += holeLen
 			}
-			lastRecordOffset = e.offset + vp.Len
+			holeStartOffset = e.offset + vp.Len
 		} else {
 			log.Printf("WARNING: This entry should have been caught. %+v\n", e)
 		}
@@ -375,7 +378,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		return err
 	}
 
-	if lastRecordOffset > 0 {
+	if holeStartOffset > 0 {
 		vlog.lfDiscardStats.Lock()
 		// If the holes are fragmented then we would not punch any holes,
 		// and this file might stop other files from being chosen if the
@@ -1047,7 +1050,8 @@ func (vlog *valueLog) runGC(gcThreshold float64, head valuePointer) error {
 			err   error
 			count int
 		)
-		for {
+		numFiles := len(vlog.sortedFids())
+		for count < numFiles {
 			err = vlog.doRunGC(gcThreshold, head)
 			if err != nil {
 				break
