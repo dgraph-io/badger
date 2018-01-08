@@ -51,10 +51,6 @@ var (
 	// operation needs to be retried.
 	ErrRetry = errors.New("Unable to find log file. Please retry")
 
-	// ErrPurged is returned when a transaction tries to access an entry which
-	// has been purged.
-	ErrPurged = errors.New("This version of key has been purged")
-
 	// ErrThresholdZero is returned if threshold is set to zero, and value log GC is called.
 	// In such a case, GC can't be run.
 	ErrThresholdZero = errors.New(

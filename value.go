@@ -827,7 +827,7 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	if err != nil {
 		return nil, cb, err
 	} else if bytes.Equal(buf[:headerBufSize], zeroHeader[:]) {
-		return nil, cb, ErrPurged
+		return nil, cb, y.ErrPurged
 	}
 	var h header
 	h.Decode(buf)

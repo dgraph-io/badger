@@ -335,7 +335,7 @@ func TestGetAfterPurge(t *testing.T) {
 		// After purge key still remains in lsm and is not marked deleted.
 		require.NoError(t, err)
 		_, err = item.Value()
-		require.Equal(t, err, ErrPurged)
+		require.Equal(t, err, y.ErrPurged)
 	}
 
 	for i := 0; i < 10; i++ {
@@ -932,7 +932,7 @@ func TestPurgeVersionsBelow(t *testing.T) {
 				item := it.Item()
 				if item.Version() < ts {
 					_, err := item.Value()
-					require.Equal(t, err, ErrPurged)
+					require.Equal(t, err, y.ErrPurged)
 				} else {
 					count++
 				}
@@ -1082,7 +1082,7 @@ func TestPurgeOlderVersions1(t *testing.T) {
 					require.Equal(t, v2, val)
 				} else {
 					_, err := item.Value()
-					require.Equal(t, err, ErrPurged)
+					require.Equal(t, err, y.ErrPurged)
 				}
 			}
 			require.Equal(t, 2, count)
