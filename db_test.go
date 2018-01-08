@@ -915,6 +915,7 @@ func TestPurgeVersionsBelow(t *testing.T) {
 		err := db.PurgeVersionsBelow([]byte("answer"), ts)
 		require.NoError(t, err)
 		require.NotEmpty(t, db.vlog.lfDiscardStats.m)
+		require.NoError(t, db.RunValueLogGC(0.2))
 
 		// Verify that there are only 2 versions left, and versions
 		// below ts have been deleted.
