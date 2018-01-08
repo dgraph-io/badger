@@ -377,7 +377,11 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 
 	if lastRecordOffset > 0 {
 		vlog.lfDiscardStats.Lock()
-		vlog.lfDiscardStats.m[f.fid] -= totalHoleLen
+		// If the holes are fragmented then we would not punch any holes,
+		// and this file might stop other files from being chosen if the
+		// discard ratio is high. So setting it to zero instead of doing
+		// `-= totalHoleLen`
+		vlog.lfDiscardStats.m[f.fid] = 0
 		vlog.lfDiscardStats.Unlock()
 		if totalHoleLen == 0 {
 			return ErrNoRewrite
