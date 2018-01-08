@@ -56,7 +56,7 @@ type header struct {
 
 const (
 	headerBufSize = 19
-	magicByte     = 0x01
+	magicByte     = 0xaa
 )
 
 func (h header) Encode(out []byte) {

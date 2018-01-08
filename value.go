@@ -214,7 +214,8 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 			return err
 		}
 
-		// Skip all zeros
+		// After punching holes even though the entries don't occoupy space on disk,
+		// read would return zeros. So, Skip all zeros
 		if bytes.Equal(hbuf[:], zeroBytes[:]) {
 			nextByte := byte(0x00)
 			count := 0
@@ -350,17 +351,9 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			return nil
 		}
 		if vp.Fid == f.fid && vp.Offset == e.offset {
-			// This new entry only contains the key, and a pointer to the value.
-			ne := new(Entry)
-			ne.meta = 0 // Remove all bits.
-			ne.UserMeta = e.UserMeta
-			ne.Key = make([]byte, len(e.Key))
-			copy(ne.Key, e.Key)
-			ne.Value = make([]byte, len(e.Value))
-			copy(ne.Value, e.Value)
 			if holeLen := int64(e.offset - holeStartOffset); holeLen > minHoleLen {
 				f.lock.Lock()
-				y.PunchHole(int(f.fd.Fd()), int64(holeStartOffset), holeLen)
+				y.Ignore(y.PunchHole(int(f.fd.Fd()), int64(holeStartOffset), holeLen))
 				f.lock.Unlock()
 				totalHoleLen += holeLen
 			}

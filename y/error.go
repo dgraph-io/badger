@@ -37,6 +37,10 @@ import (
 
 var debugMode = true
 
+// Ignore ignores the error
+func Ignore(err error) {
+}
+
 // Check logs fatal if err != nil.
 func Check(err error) {
 	if err != nil {

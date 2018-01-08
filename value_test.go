@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -584,6 +585,25 @@ func TestValueLogGC(t *testing.T) {
 			// Check that vlog is deleted.
 			_, err = os.Stat(fmt.Sprintf("%s%c%06d.vlog", dir, os.PathSeparator, i))
 			require.Error(t, err)
+		}
+
+		// Check for All versions of "keya0" after vlog is deleted.
+		txn := kv.NewTransaction(false)
+		defer txn.Discard()
+		iterOpts := DefaultIteratorOptions
+		iterOpts.AllVersions = true
+		it := txn.NewIterator(iterOpts)
+		defer it.Close()
+		key := []byte("keya0")
+		it.Seek(key)
+		for ; it.Valid(); it.Next() {
+			item := it.Item()
+			if !bytes.Equal(key, item.Key()) {
+				break
+			}
+			val, err := item.Value()
+			require.NoError(t, err)
+			require.Equal(t, len(val), 0)
 		}
 	})
 }
