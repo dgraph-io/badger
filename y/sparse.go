@@ -18,8 +18,6 @@
 
 package y
 
-import "golang.org/x/sys/unix"
-
 func PunchHole(fd int, offset, len int64) error {
 	// Not supported on non linux platforms
 	return nil
