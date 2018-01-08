@@ -556,7 +556,7 @@ func TestValueLogGC(t *testing.T) {
 		require.Equal(t, len(fids), 4)
 		require.NoError(t, kv.PurgeOlderVersions())
 		require.NoError(t, kv.RunValueLogGC(0.3))
-		for i := 0; i < 1; i++ {
+		for i := 0; i < 4; i++ {
 			// Check that  no vlog is deleted.
 			_, err := os.Stat(fmt.Sprintf("%s%c%06d.vlog", dir, os.PathSeparator, i))
 			require.NoError(t, err)
