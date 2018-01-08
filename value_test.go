@@ -596,15 +596,21 @@ func TestValueLogGC(t *testing.T) {
 		defer it.Close()
 		key := []byte("keya0")
 		it.Seek(key)
+		count := 0
 		for ; it.Valid(); it.Next() {
 			item := it.Item()
 			if !bytes.Equal(key, item.Key()) {
 				break
 			}
-			val, err := item.Value()
-			require.NoError(t, err)
-			require.Equal(t, len(val), 0)
+			_, err := item.Value()
+			if count == 0 {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err, ErrRetry)
+			}
+			count++
 		}
+		require.Equal(t, count, 2)
 	})
 }
 
