@@ -39,9 +39,10 @@ import (
 )
 
 var (
-	badgerPrefix = []byte("!badger!")     // Prefix for internal keys used by badger.
-	head         = []byte("!badger!head") // For storing value offset for replay.
-	txnKey       = []byte("!badger!txn")  // For indicating end of entries in txn.
+	badgerPrefix = []byte("!badger!")      // Prefix for internal keys used by badger.
+	head         = []byte("!badger!head")  // For storing value offset for replay.
+	txnKey       = []byte("!badger!txn")   // For indicating end of entries in txn.
+	purgePrefix  = []byte("!badger!purge") // Stores the version below which we need to purge.
 )
 
 type closers struct {
@@ -895,6 +896,10 @@ func (db *DB) PurgeVersionsBelow(key []byte, ts uint64) error {
 	return db.purgeVersionsBelow(txn, key, ts)
 }
 
+func purgeKey(key []byte) []byte {
+	return y.KeyWithTs(append(purgePrefix, key...), 1)
+}
+
 func (db *DB) purgeVersionsBelow(txn *Txn, key []byte, ts uint64) error {
 	opts := DefaultIteratorOptions
 	opts.AllVersions = true
@@ -902,26 +907,42 @@ func (db *DB) purgeVersionsBelow(txn *Txn, key []byte, ts uint64) error {
 	it := txn.NewIterator(opts)
 	defer it.Close()
 
-	var entries []*Entry
+	var lastPurgeTs uint64
+	item, err := txn.Get(purgeKey(key))
+	if err == ErrKeyNotFound {
+	} else if err != nil {
+		return nil
+	} else {
+		val, err := item.Value()
+		if err != nil {
+			return err
+		}
+		lastPurgeTs = binary.BigEndian.Uint64(val)
+	}
 
+	// Iterate only till lastPurgeTs and updateGC stats to ensure that
+	// we don't call updateGCStats for same item twice.
 	for it.Seek(key); it.ValidForPrefix(key); it.Next() {
 		item := it.Item()
-		if !bytes.Equal(key, item.Key()) || item.Version() >= ts {
+		if !bytes.Equal(key, item.Key()) {
+			break
+		} else if item.Version() >= ts {
+			continue
+		} else if item.Version() < lastPurgeTs {
+			break
+		} else if isDeletedOrExpired(item.meta, item.ExpiresAt()) {
 			continue
 		}
-		if isDeletedOrExpired(item.meta, item.ExpiresAt()) {
-			continue
-		}
-
-		// Found an older version. Mark for deletion
-		entries = append(entries,
-			&Entry{
-				Key:  y.KeyWithTs(key, item.version),
-				meta: bitDelete,
-			})
 		db.vlog.updateGCStats(item)
 	}
-	return db.batchSet(entries)
+
+	buf := make([]byte, 10)
+	binary.BigEndian.PutUint64(buf, ts)
+	e := &Entry{
+		Key:   purgeKey(key),
+		Value: buf,
+	}
+	return db.batchSet([]*Entry{e})
 }
 
 // PurgeOlderVersions deletes older versions of all keys.
@@ -963,37 +984,42 @@ func (db *DB) PurgeOlderVersions() error {
 			}
 		}
 
+		// Since the older versions of value are not deleted in lsm, we need to reset gcstats
+		// or else same entry would be counted as discarded everytime we call PurgeOlderVersions.
+		db.vlog.resetGCStats()
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
 			if !bytes.Equal(lastKey, item.Key()) {
 				lastKey = y.SafeCopy(lastKey, item.Key())
+				buf := make([]byte, 10)
+				binary.BigEndian.PutUint64(buf, item.Version())
+				e := &Entry{
+					Key:   purgeKey(lastKey),
+					Value: buf,
+				}
+
+				curSize := e.estimateSize(db.opt.ValueThreshold)
+				// Batch up min(1000, maxBatchCount) entries at a time and write
+				// Ensure that total batch size doesn't exceed maxBatchSize
+				if count == 1000 || count+1 >= int(db.opt.maxBatchCount) ||
+					size+curSize >= int(db.opt.maxBatchSize) {
+					if err := batchSetAsyncIfNoErr(entries); err != nil {
+						return err
+					}
+					count = 0
+					size = 0
+					entries = []*Entry{}
+				}
+				size += curSize
+				count++
+				entries = append(entries, e)
 				continue
 			}
+
 			if isDeletedOrExpired(item.meta, item.ExpiresAt()) {
 				continue
 			}
-			// Found an older version. Mark for deletion
-			e := &Entry{
-				Key:  y.KeyWithTs(lastKey, item.version),
-				meta: bitDelete,
-			}
 			db.vlog.updateGCStats(item)
-			curSize := e.estimateSize(db.opt.ValueThreshold)
-
-			// Batch up min(1000, maxBatchCount) entries at a time and write
-			// Ensure that total batch size doesn't exceed maxBatchSize
-			if count == 1000 || count+1 >= int(db.opt.maxBatchCount) ||
-				size+curSize >= int(db.opt.maxBatchSize) {
-				if err := batchSetAsyncIfNoErr(entries); err != nil {
-					return err
-				}
-				count = 0
-				size = 0
-				entries = []*Entry{}
-			}
-			size += curSize
-			count++
-			entries = append(entries, e)
 		}
 
 		// Write last batch pending deletes

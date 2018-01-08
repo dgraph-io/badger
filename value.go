@@ -311,6 +311,17 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 	return nil
 }
 
+func (vlog *valueLog) purgeEntry(key []byte, version uint64) (bool, error) {
+	vs, err := vlog.kv.get(purgeKey(key))
+	if err != nil {
+		return false, err
+	}
+	if version < vs.Version {
+		return true, nil
+	}
+	return true, nil
+}
+
 func (vlog *valueLog) rewrite(f *logFile) error {
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	y.AssertTruef(uint32(f.fid) < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
@@ -334,6 +345,11 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			return err
 		}
 		if discardEntry(e, vs) {
+			return nil
+		}
+		if purge, err := vlog.purgeEntry(e.Key, vs.Version); err != nil {
+			return err
+		} else if purge {
 			return nil
 		}
 
@@ -969,6 +985,12 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 			r.discard += esz
 			return nil
 		}
+		if purge, err := vlog.purgeEntry(e.Key, vs.Version); err != nil {
+			return err
+		} else if purge {
+			r.discard += esz
+			return nil
+		}
 
 		// Value is still present in value log.
 		y.AssertTrue(len(vs.Value) > 0)
@@ -1069,4 +1091,10 @@ func (vlog *valueLog) updateGCStats(item *Item) {
 		vlog.lfDiscardStats.m[vp.Fid] += int64(vp.Len)
 		vlog.lfDiscardStats.Unlock()
 	}
+}
+
+func (vlog *valueLog) resetGCStats() {
+	vlog.lfDiscardStats.Lock()
+	vlog.lfDiscardStats.m = make(map[uint32]int64)
+	vlog.lfDiscardStats.Unlock()
 }
