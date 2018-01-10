@@ -48,7 +48,7 @@ func (db *ManagedDB) periodicUpdateGCStats(lc *y.Closer) {
 	defer lc.Done()
 	for {
 		select {
-		case t := <-db.gcStatsCh:
+		case t := <-db.purgeUpdateCh:
 			txn := db.NewTransactionAt(t.end, false)
 			db.updateGCStats(txn, t)
 			txn.Discard()

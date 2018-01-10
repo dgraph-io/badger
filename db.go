@@ -63,18 +63,18 @@ type DB struct {
 	// nil if Dir and ValueDir are the same
 	valueDirGuard *directoryLockGuard
 
-	closers   closers
-	elog      trace.EventLog
-	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
-	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
-	opt       Options
-	manifest  *manifestFile
-	lc        *levelsController
-	vlog      valueLog
-	vptr      valuePointer // less than or equal to a pointer to the last vlog value put into mt
-	writeCh   chan *request
-	flushChan chan flushTask        // For flushing memtables.
-	gcStatsCh chan updateGcStatTask // For updating GcStats
+	closers       closers
+	elog          trace.EventLog
+	mt            *skl.Skiplist   // Our latest (actively written) in-memory table
+	imm           []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+	opt           Options
+	manifest      *manifestFile
+	lc            *levelsController
+	vlog          valueLog
+	vptr          valuePointer // less than or equal to a pointer to the last vlog value put into mt
+	writeCh       chan *request
+	flushChan     chan flushTask   // For flushing memtables.
+	purgeUpdateCh chan purgeUpdate // For updating GcStats
 
 	orc *oracle
 }
@@ -240,7 +240,7 @@ func Open(opt Options) (db *DB, err error) {
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
-		gcStatsCh:     make(chan updateGcStatTask, 10000),
+		purgeUpdateCh: make(chan purgeUpdate, 1000),
 		opt:           opt,
 		manifest:      manifestFile,
 		elog:          trace.NewEventLog("Badger", "DB"),
@@ -314,7 +314,7 @@ func Open(opt Options) (db *DB, err error) {
 	go db.vlog.waitOnGC(db.closers.valueGC)
 
 	db.closers.gcStats = y.NewCloser(1)
-	go db.periodicUpdateGCStats(db.closers.gcStats)
+	go db.runUpdateGCStats(db.closers.gcStats)
 
 	valueDirLockGuard = nil
 	dirLockGuard = nil
@@ -458,7 +458,7 @@ func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 
 // get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
-// IMP: We should never write an entry with a older timestamp for same key,
+// IMPORTANT: We should never write an entry with a older timestamp for same key,
 // We need to maintain this invariant to search for latest value of a key,
 // or else we need to search in all tables and find the max version among them.
 // To maintain this invariant, we also need to ensure that all versions of a key
@@ -890,11 +890,11 @@ func (db *DB) updateSize(lc *y.Closer) {
 	}
 }
 
-func (db *DB) periodicUpdateGCStats(lc *y.Closer) {
+func (db *DB) runUpdateGCStats(lc *y.Closer) {
 	defer lc.Done()
 	for {
 		select {
-		case t := <-db.gcStatsCh:
+		case t := <-db.purgeUpdateCh:
 			txn := db.NewTransaction(false)
 			db.updateGCStats(txn, t)
 			txn.Discard()
@@ -922,13 +922,13 @@ func (db *DB) purgeTs(key []byte) uint64 {
 	return 0
 }
 
-type updateGcStatTask struct {
+type purgeUpdate struct {
 	key  []byte
 	from uint64
 	end  uint64
 }
 
-func (db *DB) updateGCStats(txn *Txn, t updateGcStatTask) {
+func (db *DB) updateGCStats(txn *Txn, t purgeUpdate) {
 	opts := DefaultIteratorOptions
 	opts.AllVersions = true
 	opts.PrefetchValues = false
@@ -952,13 +952,14 @@ func (db *DB) updateGCStats(txn *Txn, t updateGcStatTask) {
 
 // PurgeVersionsBelow will delete all versions of a key below the specified version
 func (db *DB) PurgeVersionsBelow(key []byte, ts uint64) error {
-	updateGcTask := updateGcStatTask{
+	updateGcTask := purgeUpdate{
 		key:  key,
 		from: db.purgeTs(key),
 		end:  ts - 1,
 	}
 	select {
-	case db.gcStatsCh <- updateGcTask:
+	case db.purgeUpdateCh <- updateGcTask:
+	default:
 	}
 
 	buf := make([]byte, 10)

@@ -311,9 +311,9 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 	return nil
 }
 
-func (vlog *valueLog) purgeEntry(key []byte, version uint64) (bool, error) {
-	purgeTs := vlog.kv.purgeTs(key)
-	if purgeTs > 0 && version < purgeTs {
+func (vlog *valueLog) purgeEntry(keyWithTs []byte) (bool, error) {
+	purgeTs := vlog.kv.purgeTs(y.ParseKey(keyWithTs))
+	if purgeTs > 0 && y.ParseTs(keyWithTs) < purgeTs {
 		return true, nil
 	}
 	return false, nil
@@ -344,7 +344,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		if discardEntry(e, vs) {
 			return nil
 		}
-		if purge, err := vlog.purgeEntry(y.ParseKey(e.Key), y.ParseTs(e.Key)); err != nil {
+		if purge, err := vlog.purgeEntry(e.Key); err != nil {
 			return err
 		} else if purge {
 			return nil
@@ -984,7 +984,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 			r.discard += esz
 			return nil
 		}
-		if purge, err := vlog.purgeEntry(y.ParseKey(e.Key), y.ParseTs(e.Key)); err != nil {
+		if purge, err := vlog.purgeEntry(e.Key); err != nil {
 			return err
 		} else if purge {
 			r.discard += esz
