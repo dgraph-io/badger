@@ -329,6 +329,9 @@ func (db *DB) Close() (err error) {
 	// Stop value GC first.
 	db.closers.valueGC.SignalAndWait()
 
+	// Stop GC stats update.
+	db.closers.gcStats.SignalAndWait()
+
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
 
@@ -381,7 +384,6 @@ func (db *DB) Close() (err error) {
 	}
 	db.elog.Printf("Waiting for closer")
 	db.closers.updateSize.SignalAndWait()
-	db.closers.gcStats.SignalAndWait()
 
 	db.elog.Finish()
 
