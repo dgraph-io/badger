@@ -18,6 +18,8 @@
 
 package y
 
+var ErrPurged error
+
 func PunchHole(fd int, offset, len int64) error {
 	// Not supported on non linux platforms
 	return nil
