@@ -57,6 +57,7 @@ const (
 
 var (
 	minHoleLen int64 = 4 << 20
+	zeroHeader [headerBufSize]byte
 )
 
 type logFile struct {
@@ -192,7 +193,6 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 
 	reader := bufio.NewReader(lf.fd)
 	var hbuf [headerBufSize]byte
-	var zeroBytes [headerBufSize]byte
 	var h header
 	k := make([]byte, 1<<10)
 	v := make([]byte, 1<<20)
@@ -218,7 +218,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 
 		// After punching holes even though the entries don't occoupy space on disk,
 		// read would return zeros. So, Skip all zeros
-		if bytes.Equal(hbuf[:], zeroBytes[:]) {
+		if bytes.Equal(hbuf[:], zeroHeader[:]) {
 			nextByte := byte(0x00)
 			count := 0
 			for nextByte == 0x00 {
@@ -343,6 +343,14 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 	return nil
 }
 
+func (vlog *valueLog) purgeEntry(keyWithTs []byte) (bool, error) {
+	purgeTs := vlog.kv.purgeTs(y.ParseKey(keyWithTs))
+	if purgeTs > 0 && y.ParseTs(keyWithTs) < purgeTs {
+		return true, nil
+	}
+	return false, nil
+}
+
 func (vlog *valueLog) rewrite(f *logFile) error {
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	y.AssertTruef(uint32(f.fid) < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
@@ -366,6 +374,11 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			return err
 		}
 		if discardEntry(e, vs) {
+			return nil
+		}
+		if purge, err := vlog.purgeEntry(e.Key); err != nil {
+			return err
+		} else if purge {
 			return nil
 		}
 
@@ -839,6 +852,8 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	buf, cb, err := vlog.readValueBytes(vp, s)
 	if err != nil {
 		return nil, cb, err
+	} else if bytes.Equal(buf[:headerBufSize], zeroHeader[:]) {
+		return nil, cb, y.ErrPurged
 	}
 	var h header
 	h.Decode(buf)
@@ -1002,6 +1017,12 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 			r.discard += esz
 			return nil
 		}
+		if purge, err := vlog.purgeEntry(e.Key); err != nil {
+			return err
+		} else if purge {
+			r.discard += esz
+			return nil
+		}
 
 		// Value is still present in value log.
 		y.AssertTrue(len(vs.Value) > 0)
@@ -1102,4 +1123,10 @@ func (vlog *valueLog) updateGCStats(item *Item) {
 		vlog.lfDiscardStats.m[vp.Fid] += int64(vp.Len)
 		vlog.lfDiscardStats.Unlock()
 	}
+}
+
+func (vlog *valueLog) resetGCStats() {
+	vlog.lfDiscardStats.Lock()
+	vlog.lfDiscardStats.m = make(map[uint32]int64)
+	vlog.lfDiscardStats.Unlock()
 }

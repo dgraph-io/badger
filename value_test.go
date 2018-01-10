@@ -572,8 +572,20 @@ func TestValueLogGC(t *testing.T) {
 				return nil
 			})
 		}
+		err = kv.View(func(txn *Txn) error {
+			it := txn.NewIterator(DefaultIteratorOptions)
+			defer it.Close()
+			count := 0
+			for it.Rewind(); it.Valid(); it.Next() {
+				count++
+			}
+			require.Equal(t, count, 85)
+			return nil
+		})
+		require.NoError(t, err)
 
-		for j := 0; j < 40; j++ {
+		// Delete some entries and punch hole second time.
+		for j := 0; j < 40; j += 2 {
 			err := kv.Update(func(txn *Txn) error {
 				require.NoError(t, txn.Delete([]byte(fmt.Sprintf("keya%d", j))))
 				return nil
@@ -583,12 +595,58 @@ func TestValueLogGC(t *testing.T) {
 		require.NoError(t, kv.PurgeOlderVersions())
 		require.NoError(t, kv.RunValueLogGC(0.3))
 		newFids := kv.vlog.sortedFids()
+		require.Equal(t, len(newFids), 4)
+		for i := 0; i < 4; i++ {
+			_, err = os.Stat(fmt.Sprintf("%s%c%06d.vlog", dir, os.PathSeparator, i))
+			require.NoError(t, err)
+			kv.vlog.filesLock.RLock()
+			lf := kv.vlog.filesMap[uint32(i)]
+			kv.vlog.filesLock.RUnlock()
+			// Ensure iteration doesn't return in any error.
+			kv.vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
+				return nil
+			})
+		}
+		err = kv.View(func(txn *Txn) error {
+			it := txn.NewIterator(DefaultIteratorOptions)
+			defer it.Close()
+			count := 0
+			for it.Rewind(); it.Valid(); it.Next() {
+				count++
+			}
+			require.Equal(t, count, 65)
+			return nil
+		})
+		require.NoError(t, err)
+
+		// Delete some entries so that only one vlog remains
+		for j := 1; j < 40; j += 2 {
+			err := kv.Update(func(txn *Txn) error {
+				require.NoError(t, txn.Delete([]byte(fmt.Sprintf("keya%d", j))))
+				return nil
+			})
+			require.NoError(t, err)
+		}
+		require.NoError(t, kv.PurgeOlderVersions())
+		require.NoError(t, kv.RunValueLogGC(0.3))
+		newFids = kv.vlog.sortedFids()
 		require.Equal(t, len(newFids), 1)
 		for i := 0; i < 3; i++ {
 			// Check that vlog is deleted.
 			_, err = os.Stat(fmt.Sprintf("%s%c%06d.vlog", dir, os.PathSeparator, i))
 			require.Error(t, err)
 		}
+		err = kv.View(func(txn *Txn) error {
+			it := txn.NewIterator(DefaultIteratorOptions)
+			defer it.Close()
+			count := 0
+			for it.Rewind(); it.Valid(); it.Next() {
+				count++
+			}
+			require.Equal(t, count, 45)
+			return nil
+		})
+		require.NoError(t, err)
 
 		// Check for All versions of "keya0" after vlog is deleted.
 		txn := kv.NewTransaction(false)
@@ -599,15 +657,21 @@ func TestValueLogGC(t *testing.T) {
 		defer it.Close()
 		key := []byte("keya0")
 		it.Seek(key)
+		count := 0
 		for ; it.Valid(); it.Next() {
 			item := it.Item()
 			if !bytes.Equal(key, item.Key()) {
 				break
 			}
-			val, err := item.Value()
-			require.NoError(t, err)
-			require.Equal(t, len(val), 0)
+			_, err := item.Value()
+			if count == 0 {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err, ErrRetry)
+			}
+			count++
 		}
+		require.Equal(t, count, 2)
 	})
 }
 
