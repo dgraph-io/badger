@@ -312,14 +312,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 }
 
 func (vlog *valueLog) purgeEntry(key []byte, version uint64) (bool, error) {
-	vs, err := vlog.kv.get(purgeKey(key))
-	var purgeTs uint64
-	if err != nil {
-		return false, err
-	} else if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
-	} else if len(vs.Value) > 0 {
-		purgeTs = binary.BigEndian.Uint64(vs.Value)
-	}
+	purgeTs := vlog.kv.purgeTs(key)
 	if purgeTs > 0 && version < purgeTs {
 		return true, nil
 	}

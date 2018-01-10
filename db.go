@@ -51,6 +51,7 @@ type closers struct {
 	memtable   *y.Closer
 	writes     *y.Closer
 	valueGC    *y.Closer
+	gcStats    *y.Closer
 }
 
 // DB provides the various functions required to interact with Badger.
@@ -72,7 +73,8 @@ type DB struct {
 	vlog      valueLog
 	vptr      valuePointer // less than or equal to a pointer to the last vlog value put into mt
 	writeCh   chan *request
-	flushChan chan flushTask // For flushing memtables.
+	flushChan chan flushTask        // For flushing memtables.
+	gcStatsCh chan updateGcStatTask // For updating GcStats
 
 	orc *oracle
 }
@@ -238,6 +240,7 @@ func Open(opt Options) (db *DB, err error) {
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
+		gcStatsCh:     make(chan updateGcStatTask, 10000),
 		opt:           opt,
 		manifest:      manifestFile,
 		elog:          trace.NewEventLog("Badger", "DB"),
@@ -310,6 +313,9 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.valueGC = y.NewCloser(1)
 	go db.vlog.waitOnGC(db.closers.valueGC)
 
+	db.closers.gcStats = y.NewCloser(1)
+	go db.periodicUpdateGCStats(db.closers.gcStats)
+
 	valueDirLockGuard = nil
 	dirLockGuard = nil
 	manifestFile = nil
@@ -375,6 +381,7 @@ func (db *DB) Close() (err error) {
 	}
 	db.elog.Printf("Waiting for closer")
 	db.closers.updateSize.SignalAndWait()
+	db.closers.gcStats.SignalAndWait()
 
 	db.elog.Finish()
 
@@ -449,6 +456,12 @@ func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 
 // get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
+// IMP: We should never write an entry with a older timestamp for same key,
+// We need to maintain this invariant to search for latest value of a key,
+// or else we need to search in all tables and find the max version among them.
+// To maintain this invariant, we also need to ensure that all versions of a key
+// are always present in same table from level 1, because compaction can push
+// any table down.
 func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := db.getMemTables() // Lock should be released.
 	defer decr()
@@ -875,51 +888,75 @@ func (db *DB) updateSize(lc *y.Closer) {
 	}
 }
 
-// PurgeVersionsBelow will delete all versions of a key below the specified version
-func (db *DB) PurgeVersionsBelow(key []byte, ts uint64) error {
-	txn := db.NewTransaction(false)
-	defer txn.Discard()
-	return db.purgeVersionsBelow(txn, key, ts)
+func (db *DB) periodicUpdateGCStats(lc *y.Closer) {
+	defer lc.Done()
+	for {
+		select {
+		case t := <-db.gcStatsCh:
+			txn := db.NewTransaction(false)
+			db.updateGCStats(txn, t)
+			txn.Discard()
+		case <-lc.HasBeenClosed():
+			return
+		}
+	}
 }
 
 func purgeKey(key []byte) []byte {
 	return y.KeyWithTs(append(purgePrefix, key...), 1)
 }
 
-func (db *DB) purgeVersionsBelow(txn *Txn, key []byte, ts uint64) error {
+func (db *DB) purgeTs(key []byte) uint64 {
+	vs, err := db.get(purgeKey(key))
+	if err != nil {
+		return 0
+	} else if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
+		// If purgekey is deleted, then purgeTs would be zero
+		// But we never delete purgeKey.
+		return 0
+	} else if len(vs.Value) > 0 {
+		return binary.BigEndian.Uint64(vs.Value)
+	}
+	return 0
+}
+
+type updateGcStatTask struct {
+	key  []byte
+	from uint64
+	end  uint64
+}
+
+func (db *DB) updateGCStats(txn *Txn, t updateGcStatTask) {
 	opts := DefaultIteratorOptions
 	opts.AllVersions = true
 	opts.PrefetchValues = false
 	it := txn.NewIterator(opts)
 	defer it.Close()
 
-	var lastPurgeTs uint64
-	item, err := txn.Get(purgeKey(key))
-	if err == ErrKeyNotFound {
-	} else if err != nil {
-		return nil
-	} else {
-		val, err := item.Value()
-		if err != nil {
-			return err
-		}
-		lastPurgeTs = binary.BigEndian.Uint64(val)
-	}
-
-	// Iterate only till lastPurgeTs and updateGC stats to ensure that
-	// we don't call updateGCStats for same item twice.
-	for it.Seek(key); it.ValidForPrefix(key); it.Next() {
+	for it.Seek(t.key); it.ValidForPrefix(t.key); it.Next() {
 		item := it.Item()
-		if !bytes.Equal(key, item.Key()) {
+		if !bytes.Equal(t.key, item.Key()) {
 			break
-		} else if item.Version() >= ts {
+		} else if item.Version() > t.end {
 			continue
-		} else if item.Version() < lastPurgeTs {
+		} else if item.Version() < t.from {
 			break
 		} else if isDeletedOrExpired(item.meta, item.ExpiresAt()) {
 			continue
 		}
 		db.vlog.updateGCStats(item)
+	}
+}
+
+// PurgeVersionsBelow will delete all versions of a key below the specified version
+func (db *DB) PurgeVersionsBelow(key []byte, ts uint64) error {
+	updateGcTask := updateGcStatTask{
+		key:  key,
+		from: db.purgeTs(key),
+		end:  ts - 1,
+	}
+	select {
+	case db.gcStatsCh <- updateGcTask:
 	}
 
 	buf := make([]byte, 10)
@@ -940,6 +977,7 @@ func (db *DB) purgeVersionsBelow(txn *Txn, key []byte, ts uint64) error {
 func (db *DB) PurgeOlderVersions() error {
 	return db.View(func(txn *Txn) error {
 		opts := DefaultIteratorOptions
+		// We need to use AllVersions otherwise we won't get deleted keys in merge iterator.
 		opts.AllVersions = true
 		opts.PrefetchValues = false
 		it := txn.NewIterator(opts)
@@ -975,6 +1013,7 @@ func (db *DB) PurgeOlderVersions() error {
 		db.vlog.resetGCStats()
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
+			// This is latest version for this key.
 			if !bytes.Equal(lastKey, item.Key()) {
 				lastKey = y.SafeCopy(lastKey, item.Key())
 				buf := make([]byte, 10)

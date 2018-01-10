@@ -913,6 +913,8 @@ func TestPurgeVersionsBelow(t *testing.T) {
 		// Delete all versions below the 3rd version
 		err := db.PurgeVersionsBelow([]byte("answer"), ts)
 		require.NoError(t, err)
+		// Since GC stats is updated in background, add a sleep
+		time.Sleep(10 * time.Millisecond)
 		require.NotEmpty(t, db.vlog.lfDiscardStats.m)
 		defer func() {
 			minHoleLen = 1 << 20

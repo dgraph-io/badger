@@ -25,7 +25,7 @@ import (
 
 // ErrPurged is returned when a transaction tries to access an entry which
 // has been purged.
-var ErrPurged = errors.New("This version of key has been purged")
+var ErrPurged = errors.New("This version of key has been purged.")
 
 func PunchHole(fd int, offset, len int64) error {
 	return unix.Fallocate(fd, unix.FALLOC_FL_KEEP_SIZE|unix.FALLOC_FL_PUNCH_HOLE, offset, len)
