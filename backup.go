@@ -98,6 +98,7 @@ func (db *DB) Load(r io.Reader) error {
 		}
 	}
 
+	maxVersion := uint64(0)
 	for {
 		var sz uint64
 		err := binary.Read(br, binary.LittleEndian, &sz)
@@ -125,6 +126,10 @@ func (db *DB) Load(r io.Reader) error {
 			ExpiresAt: e.ExpiresAt,
 		})
 
+		if e.Version > maxVersion {
+			maxVersion = e.Version
+		}
+
 		if len(entries) == 1000 {
 			if err := batchSetAsyncIfNoErr(entries); err != nil {
 				return err
@@ -145,6 +150,7 @@ func (db *DB) Load(r io.Reader) error {
 	case err := <-errChan:
 		return err
 	default:
+		db.orc.doneCommit(maxVersion)
 		return nil
 	}
 }
