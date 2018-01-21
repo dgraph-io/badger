@@ -39,20 +39,33 @@ func TestDumpLoad(t *testing.T) {
 		version  uint64
 	}{
 		{key: []byte("answer1"), val: []byte("42"), version: 1},
-		{key: []byte("answer2"), val: []byte("43"), userMeta: 1, version: 1},
+		{key: []byte("answer2"), val: []byte("43"), userMeta: 1, version: 2},
 	}
 
 	err = db.Update(func(txn *Txn) error {
-		for _, e := range entries {
-			err := txn.SetWithMeta(e.key, e.val, e.userMeta)
-			if err != nil {
-				return err
-			}
+		e := entries[0]
+		err := txn.SetWithMeta(e.key, e.val, e.userMeta)
+		if err != nil {
+			return err
 		}
 		return nil
 	})
 	require.NoError(t, err)
 
+	err = db.Update(func(txn *Txn) error {
+		e := entries[1]
+		err := txn.SetWithMeta(e.key, e.val, e.userMeta)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Use different directory.
+	dir, err = ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
 	bak, err := ioutil.TempFile(dir, "badgerbak")
 	require.NoError(t, err)
 	ts, err := db.Backup(bak, 0)
@@ -87,6 +100,7 @@ func TestDumpLoad(t *testing.T) {
 			require.Equal(t, entries[count].userMeta, item.UserMeta())
 			count++
 		}
+		require.Equal(t, count, 2)
 		return nil
 	})
 	require.NoError(t, err)
