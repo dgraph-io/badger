@@ -477,9 +477,9 @@ func TestPartialAppendToValueLog(t *testing.T) {
 		require.Equal(t, v0, getItemValue(t, item))
 
 		_, err = txn.Get(k1)
-		require.Error(t, ErrKeyNotFound, err)
+		require.Equal(t, ErrKeyNotFound, err)
 		_, err = txn.Get(k2)
-		require.Error(t, ErrKeyNotFound, err)
+		require.Equal(t, ErrKeyNotFound, err)
 		return nil
 	}))
 
@@ -489,6 +489,9 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	kv, err = Open(getTestOptions(dir))
 	require.NoError(t, err)
 	checkKeys(t, kv, [][]byte{k3})
+
+	// Replay value log from beginning, badger head is past k2.
+	kv.vlog.Replay(valuePointer{Fid: 0}, replayFunction(kv))
 	require.NoError(t, kv.Close())
 }
 
