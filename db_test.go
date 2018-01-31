@@ -1225,6 +1225,7 @@ func TestGetSetDeadlock(t *testing.T) {
 	opt.ValueLogFileSize = 1 << 20
 	db, err := Open(opt)
 	require.NoError(t, err)
+	defer db.Close()
 
 	val := make([]byte, 1<<19)
 	key := []byte("key1")
@@ -1234,17 +1235,29 @@ func TestGetSetDeadlock(t *testing.T) {
 		return nil
 	}))
 
-	require.NoError(t, db.Update(func(txn *Txn) error {
-		item, err := txn.Get(key)
-		require.NoError(t, err)
-		_, err = item.Value() // This take a RLock on file
-		require.NoError(t, err)
+	timeout, done := time.After(10*time.Second), make(chan bool)
 
-		rand.Read(val)
-		require.NoError(t, txn.Set(key, val))
-		require.NoError(t, txn.Set([]byte("key2"), val))
-		return nil
-	}))
+	go func() {
+		db.Update(func(txn *Txn) error {
+			item, err := txn.Get(key)
+			require.NoError(t, err)
+			_, err = item.Value() // This take a RLock on file
+			require.NoError(t, err)
+
+			rand.Read(val)
+			require.NoError(t, txn.Set(key, val))
+			require.NoError(t, txn.Set([]byte("key2"), val))
+			return nil
+		})
+		done <- true
+	}()
+
+	select {
+	case <-timeout:
+		t.Fatal("db.Update did not finish within 10s, assuming deadlock.")
+	case <-done:
+		t.Log("db.Update finished.")
+	}
 }
 
 func TestWriteDeadlock(t *testing.T) {
