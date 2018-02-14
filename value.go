@@ -764,11 +764,12 @@ func (vlog *valueLog) write(reqs []*request) error {
 			}
 			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
-
-			if p.Offset > uint32(vlog.opt.ValueLogFileSize) {
-				if err := toDisk(); err != nil {
-					return err
-				}
+		}
+		// We write to disk here so that all entries that are part of the same transaction are
+		// written to the same vlog file.
+		if vlog.writableOffset()+uint32(vlog.buf.Len()) > uint32(vlog.opt.ValueLogFileSize) {
+			if err := toDisk(); err != nil {
+				return err
 			}
 		}
 	}
