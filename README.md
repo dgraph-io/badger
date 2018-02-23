@@ -541,6 +541,7 @@ above).
 ## Other Projects Using Badger
 Below is a list of public, open source projects that use Badger:
 
+* [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
 * [Dgraph](https://github.com/dgraph-io/dgraph) - Distributed graph database.
 * [go-ipfs](https://github.com/ipfs/go-ipfs) - Go client for the InterPlanetary File System (IPFS), a new hypermedia distribution protocol.
 * [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
