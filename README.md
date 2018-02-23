@@ -539,7 +539,7 @@ above).
 [badger-bench]: https://github.com/dgraph-io/badger-bench
 
 ## Other Projects Using Badger
-Below is a list of public, open source projects that use Badger:
+Below is a list of known projects that use Badger:
 
 * [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
 * [Dgraph](https://github.com/dgraph-io/dgraph) - Distributed graph database.
