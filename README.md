@@ -337,6 +337,7 @@ err := db.View(func(txn *badger.Txn) error {
     }
     fmt.Printf("key=%s, value=%s\n", k, v)
   }
+  it.Close()
   return nil
 })
 ```
@@ -366,6 +367,7 @@ db.View(func(txn *badger.Txn) error {
     }
     fmt.Printf("key=%s, value=%s\n", k, v)
   }
+  it.Close()
   return nil
 })
 ```
@@ -388,6 +390,7 @@ err := db.View(func(txn *badger.Txn) error {
     k := item.Key()
     fmt.Printf("key=%s\n", k)
   }
+  it.Close()
   return nil
 })
 ```
