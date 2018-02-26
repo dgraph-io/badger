@@ -80,7 +80,8 @@ func (item *Item) Version() uint64 {
 // reused.
 //
 // If you need to use a value outside a transaction, please use Item.ValueCopy
-// instead, or copy it yourself.
+// instead, or copy it yourself. Value might change once discard or commit is called.
+// Use ValueCopy if you want to do a Set after Get.
 func (item *Item) Value() ([]byte, error) {
 	item.wg.Wait()
 	if item.status == prefetched {
