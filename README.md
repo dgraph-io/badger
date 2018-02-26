@@ -141,10 +141,10 @@ not checking for errors in some places for simplicity):
 updates := make(map[string]string)
 txn := db.NewTransaction(true)
 for k,v := range updates {
-  if err := txn.Set(byte[](k),byte[](v)); err == ErrTxnTooBig {
+  if err := txn.Set([]byte(k),[]byte(v)); err == ErrTxnTooBig {
     _ = txn.Commit()
     txn = db.NewTransaction(..)
-    _ = txn.Set(k,v) 
+    _ = txn.Set([]byte(k),[]byte(v)) 
   }
 }
 _ = txn.Commit()
