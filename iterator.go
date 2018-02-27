@@ -316,6 +316,19 @@ func (it *Iterator) ValidForPrefix(prefix []byte) bool {
 // Close would close the iterator. It is important to call this when you're done with iteration.
 func (it *Iterator) Close() {
 	it.iitr.Close()
+
+	// It is important to wait for the fill goroutines to finish. Otherwise, we might leave zombie
+	// goroutines behind, which are waiting to acquire file read locks after DB has been closed.
+	waitFor := func(l list) {
+		item := l.pop()
+		for item != nil {
+			item.wg.Wait()
+			item = l.pop()
+		}
+	}
+	waitFor(it.waste)
+	waitFor(it.data)
+
 	// TODO: We could handle this error.
 	_ = it.txn.db.vlog.decrIteratorCount()
 }
