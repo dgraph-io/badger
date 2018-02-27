@@ -603,7 +603,8 @@ func (vlog *valueLog) Close() error {
 		if closeErr := f.fd.Close(); closeErr != nil && err == nil {
 			err = closeErr
 		}
-
+		f.fd = nil      // indicate the logFile has been closed
+		f.lock.Unlock() // unlock to release prefetch goroutines
 	}
 	return err
 }
@@ -790,6 +791,10 @@ func (vlog *valueLog) getFileRLocked(fid uint32) (*logFile, error) {
 		return nil, ErrRetry
 	}
 	ret.lock.RLock()
+	if ret.fd == nil {
+		ret.lock.RUnlock()
+		return nil, ErrClosed
+	}
 	return ret, nil
 }
 

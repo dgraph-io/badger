@@ -51,6 +51,9 @@ var (
 	// operation needs to be retried.
 	ErrRetry = errors.New("Unable to find log file. Please retry")
 
+	// ErrClosed is returned when a log file has already been closed
+	ErrClosed = errors.New("Log file closed")
+
 	// ErrThresholdZero is returned if threshold is set to zero, and value log GC is called.
 	// In such a case, GC can't be run.
 	ErrThresholdZero = errors.New(
