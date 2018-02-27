@@ -328,6 +328,7 @@ err := db.View(func(txn *badger.Txn) error {
   opts := badger.DefaultIteratorOptions
   opts.PrefetchSize = 10
   it := txn.NewIterator(opts)
+  defer it.Close()
   for it.Rewind(); it.Valid(); it.Next() {
     item := it.Item()
     k := item.Key()
@@ -356,6 +357,7 @@ To iterate over a key prefix, you can combine `Seek()` and `ValidForPrefix()`:
 ```go
 db.View(func(txn *badger.Txn) error {
   it := txn.NewIterator(badger.DefaultIteratorOptions)
+  defer it.Close()
   prefix := []byte("1234")
   for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
     item := it.Item()
@@ -383,6 +385,7 @@ err := db.View(func(txn *badger.Txn) error {
   opts := badger.DefaultIteratorOptions
   opts.PrefetchValues = false
   it := txn.NewIterator(opts)
+  defer it.Close()
   for it.Rewind(); it.Valid(); it.Next() {
     item := it.Item()
     k := item.Key()
