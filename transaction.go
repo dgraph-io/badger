@@ -470,6 +470,7 @@ func (txn *Txn) Commit(callback func(error)) error {
 		return err
 	}
 
+	// Need to release all locks or writes can get deadlocked.
 	txn.runCallbacks()
 
 	if callback == nil {

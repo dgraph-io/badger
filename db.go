@@ -565,8 +565,12 @@ func (db *DB) writeRequests(reqs []*request) error {
 			continue
 		}
 		count += len(b.Entries)
+		var i uint64
 		for err := db.ensureRoomForWrite(); err != nil; err = db.ensureRoomForWrite() {
-			db.elog.Printf("Making room for writes")
+			i++
+			if i%100 == 0 {
+				db.elog.Printf("Making room for writes")
+			}
 			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
 			// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
 			// you will get a deadlock.
@@ -758,6 +762,8 @@ type flushTask struct {
 	vptr valuePointer
 }
 
+// TODO: Ensure that this function doesn't return, or is handled by another wrapper function.
+// Otherwise, we would have no goroutine which can flush memtables.
 func (db *DB) flushMemtable(lc *y.Closer) error {
 	defer lc.Done()
 
