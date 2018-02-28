@@ -583,14 +583,15 @@ func (s *levelsController) doCompact(p compactionPriority) (bool, error) {
 
 	cd.elog.LazyPrintf("Running for level: %d\n", cd.thisLevel.level)
 	s.cstatus.toLog(cd.elog)
-	if err := s.runCompactDef(l, cd); err != nil {
+	err := s.runCompactDef(l, cd)
+	// Done with compaction. So, remove the ranges from compaction status.
+	s.cstatus.delete(cd)
+	if err != nil {
 		// This compaction couldn't be done successfully.
 		cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v", err, cd)
 		return false, err
 	}
 
-	// Done with compaction. So, remove the ranges from compaction status.
-	s.cstatus.delete(cd)
 	s.cstatus.toLog(cd.elog)
 	cd.elog.LazyPrintf("Compaction for level: %d DONE", cd.thisLevel.level)
 	return true, nil

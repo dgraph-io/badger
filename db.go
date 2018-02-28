@@ -781,6 +781,7 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 		fileID := db.lc.reserveFileID()
 		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
 		if err != nil {
+			// TODO: Assert or retry
 			return y.Wrap(err)
 		}
 
