@@ -134,7 +134,7 @@ func (db *DB) Load(r io.Reader) error {
 			if err := batchSetAsyncIfNoErr(entries); err != nil {
 				return err
 			}
-			entries = entries[:0]
+			entries = make([]*Entry, 0, 1000)
 		}
 	}
 

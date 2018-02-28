@@ -17,8 +17,12 @@
 package badger
 
 import (
+	"bytes"
+	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -104,4 +108,150 @@ func TestDumpLoad(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+func Test_BackupRestore(t *testing.T) {
+	tmpdir, err := ioutil.TempDir("", "badger-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		os.RemoveAll(tmpdir)
+	}()
+
+	s1Path := filepath.Join(tmpdir, "test1")
+	s2Path := filepath.Join(tmpdir, "test2")
+	s3Path := filepath.Join(tmpdir, "test3")
+
+	opts := DefaultOptions
+	opts.Dir = s1Path
+	opts.ValueDir = s1Path
+	db1, err := Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key1 := []byte("key1")
+	key2 := []byte("key2")
+	rawValue := []byte("NotLongValue")
+	N := byte(251)
+	err = db1.Update(func(tx *Txn) error {
+		if err := tx.Set(key1, rawValue); err != nil {
+			return err
+		}
+		return tx.Set(key2, rawValue)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := byte(0); i < N; i++ {
+		err = db1.Update(func(tx *Txn) error {
+			if err := tx.Set(append(key1, i), rawValue); err != nil {
+				return err
+			}
+			return tx.Set(append(key2, i), rawValue)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var backup bytes.Buffer
+	_, err = db1.Backup(&backup, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("backup1 length:", backup.Len())
+
+	opts = DefaultOptions
+	opts.Dir = s2Path
+	opts.ValueDir = s2Path
+	db2, err := Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db2.Load(&backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	/*
+		for i := byte(0); i < N; i++ {
+			err = db2.View(func(tx *Txn) error {
+				k := append(key1, i)
+				item, err := tx.Get(k)
+				if err != nil {
+					if err == ErrKeyNotFound {
+						return fmt.Errorf("Key %q has been not found, but was set\n", k)
+					}
+					return err
+				}
+				v, err := item.Value()
+				if err != nil {
+					return err
+				}
+				if !reflect.DeepEqual(v, rawValue) {
+					return fmt.Errorf("Values not match, got %v, expected %v", v, rawValue)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	*/
+
+	for i := byte(0); i < N; i++ {
+		err = db2.Update(func(tx *Txn) error {
+			if err := tx.Set(append(key1, i), rawValue); err != nil {
+				return err
+			}
+			return tx.Set(append(key2, i), rawValue)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	backup.Reset()
+	_, err = db2.Backup(&backup, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("backup2 length:", backup.Len())
+	opts = DefaultOptions
+	opts.Dir = s3Path
+	opts.ValueDir = s3Path
+	db3, err := Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = db3.Load(&backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := byte(0); i < N; i++ {
+		err = db3.View(func(tx *Txn) error {
+			k := append(key1, i)
+			item, err := tx.Get(k)
+			if err != nil {
+				if err == ErrKeyNotFound {
+					return fmt.Errorf("Key %q has been not found, but was set\n", k)
+				}
+				return err
+			}
+			v, err := item.Value()
+			if err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(v, rawValue) {
+				return fmt.Errorf("Values not match, got %v, expected %v", v, rawValue)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
 }
