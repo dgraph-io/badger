@@ -173,31 +173,29 @@ func Test_BackupRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	/*
-		for i := byte(0); i < N; i++ {
-			err = db2.View(func(tx *Txn) error {
-				k := append(key1, i)
-				item, err := tx.Get(k)
-				if err != nil {
-					if err == ErrKeyNotFound {
-						return fmt.Errorf("Key %q has been not found, but was set\n", k)
-					}
-					return err
-				}
-				v, err := item.Value()
-				if err != nil {
-					return err
-				}
-				if !reflect.DeepEqual(v, rawValue) {
-					return fmt.Errorf("Values not match, got %v, expected %v", v, rawValue)
-				}
-				return nil
-			})
+	for i := byte(0); i < N; i++ {
+		err = db2.View(func(tx *Txn) error {
+			k := append(key1, i)
+			item, err := tx.Get(k)
 			if err != nil {
-				t.Fatal(err)
+				if err == ErrKeyNotFound {
+					return fmt.Errorf("Key %q has been not found, but was set\n", k)
+				}
+				return err
 			}
+			v, err := item.Value()
+			if err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(v, rawValue) {
+				return fmt.Errorf("Values not match, got %v, expected %v", v, rawValue)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-	*/
+	}
 
 	for i := byte(0); i < N; i++ {
 		err = db2.Update(func(tx *Txn) error {
