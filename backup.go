@@ -68,7 +68,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 
 // Load reads a protobuf-encoded list of all entries from a reader and writes
 // them to the database. This can be used to restore the database from a backup
-// made by calling DB.Dump().
+// made by calling DB.Backup().
 //
 // DB.Load() should be called on a database that is not running any other
 // concurrent transactions while it is running.
