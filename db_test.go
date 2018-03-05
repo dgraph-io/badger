@@ -915,7 +915,9 @@ func TestPurgeVersionsBelow(t *testing.T) {
 		require.NoError(t, err)
 		// Since GC stats is updated in background, add a sleep
 		time.Sleep(10 * time.Millisecond)
+		db.vlog.lfDiscardStats.Lock()
 		require.NotEmpty(t, db.vlog.lfDiscardStats.m)
+		db.vlog.lfDiscardStats.Unlock()
 		defer func() {
 			minHoleLen = 1 << 20
 		}()
