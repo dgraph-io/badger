@@ -199,6 +199,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 
 	truncate := false
 	recordOffset := offset
+	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	var lastCommit uint64
 	var validEndOffset uint32
 	for {
@@ -295,7 +296,11 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		vp.Offset = e.offset
 		vp.Fid = lf.fid
 
-		if e.meta&bitFinTxn > 0 {
+		if maxFid > lf.fid {
+			// Truncate only for last file, after punching holes we can have
+			// only some entries of a transaction then new transaction entries
+			// without bitFinTxn in files which has been garbage collected.
+		} else if e.meta&bitFinTxn > 0 {
 			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
 			if err != nil || lastCommit != txnTs {
 				truncate = true
@@ -312,9 +317,6 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 			}
 			validEndOffset = recordOffset
 		} else {
-			// TODO: Remove this once we merge v2.0-candidate branch. This shouldn't
-			// happen in 2.0 because we are no longer moving entries within the value
-			// logs, everything should be either txn or txnfin.
 			txnTs := y.ParseTs(e.Key)
 			if lastCommit == 0 {
 				lastCommit = txnTs
