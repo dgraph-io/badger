@@ -32,7 +32,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Manifest represnts the contents of the MANIFEST file in a Badger store.
+// Manifest represents the contents of the MANIFEST file in a Badger store.
 //
 // The MANIFEST file describes the startup state of the db -- all LSM files and what level they're
 // at.
