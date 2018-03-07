@@ -557,8 +557,14 @@ func (vlog *valueLog) openOrCreateFiles(readOnly bool) error {
 	// as read write (unless the DB is read only).
 	for fid, lf := range vlog.filesMap {
 		if fid == maxFid {
-			if lf.fd, err = y.OpenExistingSyncedFile(vlog.fpath(fid),
-				vlog.opt.SyncWrites, readOnly); err != nil {
+			var flags uint32
+			if vlog.opt.SyncWrites {
+				flags |= y.Sync
+			}
+			if readOnly {
+				flags |= y.ReadOnly
+			}
+			if lf.fd, err = y.OpenExistingSyncedFile(vlog.fpath(fid), flags); err != nil {
 				return errors.Wrapf(err, "Unable to open value log file")
 			}
 		} else {

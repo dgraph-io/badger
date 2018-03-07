@@ -118,7 +118,11 @@ func openOrCreateManifestFile(dir string, readOnly bool) (ret *manifestFile, res
 
 func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold int) (ret *manifestFile, result Manifest, err error) {
 	path := filepath.Join(dir, ManifestFilename)
-	fp, err := y.OpenExistingSyncedFile(path, false, readOnly) // We explicitly sync in addChanges, outside the lock.
+	var flags uint32
+	if readOnly {
+		flags |= y.ReadOnly
+	}
+	fp, err := y.OpenExistingSyncedFile(path, flags) // We explicitly sync in addChanges, outside the lock.
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return nil, Manifest{}, err
@@ -260,7 +264,7 @@ func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 	if err := os.Rename(rewritePath, manifestPath); err != nil {
 		return nil, 0, err
 	}
-	fp, err = y.OpenExistingSyncedFile(manifestPath, false, false)
+	fp, err = y.OpenExistingSyncedFile(manifestPath, 0)
 	if err != nil {
 		return nil, 0, err
 	}

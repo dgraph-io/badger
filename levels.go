@@ -104,7 +104,11 @@ func newLevelsController(kv *DB, mf *Manifest) (*levelsController, error) {
 	var maxFileID uint64
 	for fileID, tableManifest := range mf.Tables {
 		fname := table.NewFilename(fileID, kv.opt.Dir)
-		fd, err := y.OpenExistingSyncedFile(fname, true, kv.opt.ReadOnly)
+		var flags uint32 = y.Sync
+		if kv.opt.ReadOnly {
+			flags |= y.ReadOnly
+		}
+		fd, err := y.OpenExistingSyncedFile(fname, flags)
 		if err != nil {
 			closeAllTables(tables)
 			return nil, errors.Wrapf(err, "Opening file: %q", fname)
