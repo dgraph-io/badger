@@ -612,7 +612,7 @@ func (vlog *valueLog) Open(kv *DB, opt Options) error {
 	return nil
 }
 
-func (vlog *valueLog) Close() error {
+func (vlog *valueLog) Close(readOnly bool) error {
 	vlog.elog.Printf("Stopping garbage collection of values.")
 	defer vlog.elog.Finish()
 
@@ -624,7 +624,7 @@ func (vlog *valueLog) Close() error {
 			err = munmapErr
 		}
 
-		if id == vlog.maxFid {
+		if !readOnly && id == vlog.maxFid {
 			// truncate writable log file to correct offset.
 			if truncErr := f.fd.Truncate(
 				int64(vlog.writableLogOffset)); truncErr != nil && err == nil {
