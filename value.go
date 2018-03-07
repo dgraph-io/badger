@@ -516,7 +516,7 @@ func (vlog *valueLog) fpath(fid uint32) string {
 	return vlogFilePath(vlog.dirPath, fid)
 }
 
-func (vlog *valueLog) openOrCreateFiles() error {
+func (vlog *valueLog) openOrCreateFiles(readOnly bool) error {
 	files, err := ioutil.ReadDir(vlog.dirPath)
 	if err != nil {
 		return errors.Wrapf(err, "Error while opening value log")
@@ -551,12 +551,12 @@ func (vlog *valueLog) openOrCreateFiles() error {
 	vlog.maxFid = uint32(maxFid)
 
 	// Open all previous log files as read only. Open the last log file
-	// as read write.
+	// as read write (unless the DB is read only).
 	for fid, lf := range vlog.filesMap {
 		if fid == maxFid {
 			if lf.fd, err = y.OpenExistingSyncedFile(vlog.fpath(fid),
-				vlog.opt.SyncWrites); err != nil {
-				return errors.Wrapf(err, "Unable to open value log file as RDWR")
+				vlog.opt.SyncWrites, readOnly); err != nil {
+				return errors.Wrapf(err, "Unable to open value log file")
 			}
 		} else {
 			if err := lf.openReadOnly(); err != nil {
@@ -602,7 +602,7 @@ func (vlog *valueLog) Open(kv *DB, opt Options) error {
 	vlog.opt = opt
 	vlog.kv = kv
 	vlog.filesMap = make(map[uint32]*logFile)
-	if err := vlog.openOrCreateFiles(); err != nil {
+	if err := vlog.openOrCreateFiles(kv.opt.ReadOnly); err != nil {
 		return errors.Wrapf(err, "Unable to open value log")
 	}
 

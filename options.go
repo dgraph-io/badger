@@ -86,6 +86,10 @@ type Options struct {
 
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
+
+	// Whether the DB allows writes. With ReadOnly set, multiple Opens
+	// can happen.
+	ReadOnly bool
 }
 
 // DefaultOptions sets a list of recommended options for good performance.

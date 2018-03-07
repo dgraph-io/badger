@@ -210,7 +210,7 @@ func TestManifestRewrite(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	deletionsThreshold := 10
-	mf, m, err := helpOpenOrCreateManifestFile(dir, deletionsThreshold)
+	mf, m, err := helpOpenOrCreateManifestFile(dir, false, deletionsThreshold)
 	defer func() {
 		if mf != nil {
 			mf.close()
@@ -236,7 +236,7 @@ func TestManifestRewrite(t *testing.T) {
 	err = mf.close()
 	require.NoError(t, err)
 	mf = nil
-	mf, m, err = helpOpenOrCreateManifestFile(dir, deletionsThreshold)
+	mf, m, err = helpOpenOrCreateManifestFile(dir, false, deletionsThreshold)
 	require.NoError(t, err)
 	require.Equal(t, map[uint64]tableManifest{
 		uint64(deletionsThreshold * 3): {Level: 0},

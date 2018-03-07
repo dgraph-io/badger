@@ -40,8 +40,12 @@ var (
 )
 
 // OpenExistingSyncedFile opens an existing file, errors if it doesn't exist.
-func OpenExistingSyncedFile(filename string, sync bool) (*os.File, error) {
+func OpenExistingSyncedFile(filename string, sync bool, readonly bool) (*os.File, error) {
 	flags := os.O_RDWR
+	if readonly {
+		flags = os.O_RDONLY
+	}
+
 	if sync {
 		flags |= datasyncFileFlag
 	}
