@@ -87,10 +87,10 @@ type Options struct {
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
 
-	// Whether the DB allows writes. With ReadOnly set, multiple Opens
-	// can happen. Note: if the DB being opened had crashed before and
-	// has vlog data to be replayed, ReadOnly will cause Open to fail
-	// (with an appropriate message).
+	// Open the DB as read-only. With this set, multiple processes can
+	// open the same Badger DB. Note: if the DB being opened had crashed
+	// before and has vlog data to be replayed, ReadOnly will cause Open
+	// to fail (with an appropriate message).
 	ReadOnly bool
 }
 
