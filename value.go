@@ -180,7 +180,7 @@ type logEntry func(e Entry, vp valuePointer) error
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
-func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
+func (vlog *valueLog) iterate(lf *logFile, offset uint32, readOnly bool, fn logEntry) error {
 	_, err := lf.fd.Seek(int64(offset), io.SeekStart)
 	if err != nil {
 		return y.Wrap(err)
@@ -299,6 +299,9 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 			}
 		}
 
+		if readOnly {
+			return errors.Errorf("database was not properly closed, cannot open read-only")
+		}
 		if err := fn(e, vp); err != nil {
 			if err == errStop {
 				break
@@ -307,7 +310,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		}
 	}
 
-	if truncate && len(lf.fmap) == 0 {
+	if !readOnly && truncate && len(lf.fmap) == 0 {
 		// Only truncate if the file isn't mmaped. Otherwise, Windows would puke.
 		if err := lf.fd.Truncate(int64(validEndOffset)); err != nil {
 			return err
@@ -382,7 +385,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		return nil
 	}
 
-	err := vlog.iterate(f, 0, func(e Entry, vp valuePointer) error {
+	err := vlog.iterate(f, 0, false, func(e Entry, vp valuePointer) error {
 		return fe(e)
 	})
 	if err != nil {
@@ -660,7 +663,7 @@ func (vlog *valueLog) sortedFids() []uint32 {
 }
 
 // Replay replays the value log. The kv provided is only valid for the lifetime of function call.
-func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
+func (vlog *valueLog) Replay(ptr valuePointer, readOnly bool, fn logEntry) error {
 	fid := ptr.Fid
 	offset := ptr.Offset + ptr.Len
 	vlog.elog.Printf("Seeking at value pointer: %+v\n", ptr)
@@ -676,7 +679,7 @@ func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 			of = 0
 		}
 		f := vlog.filesMap[id]
-		err := vlog.iterate(f, of, fn)
+		err := vlog.iterate(f, of, readOnly, fn)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to replay value log: %q", f.path)
 		}
@@ -974,7 +977,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 	start := time.Now()
 	y.AssertTrue(vlog.kv != nil)
 	s := new(y.Slice)
-	err = vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
+	err = vlog.iterate(lf, 0, false, func(e Entry, vp valuePointer) error {
 		esz := float64(vp.Len) / (1 << 20) // in MBs. +4 for the CAS stuff.
 		skipped += esz
 		if skipped < skipFirstM {

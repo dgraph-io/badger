@@ -88,7 +88,9 @@ type Options struct {
 	maxBatchSize  int64 // max batch size in bytes
 
 	// Whether the DB allows writes. With ReadOnly set, multiple Opens
-	// can happen.
+	// can happen. Note: if the DB being opened had crashed before and
+	// has vlog data to be replayed, ReadOnly will cause Open to fail
+	// (with an appropriate message).
 	ReadOnly bool
 }
 

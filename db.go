@@ -292,7 +292,7 @@ func Open(opt Options) (db *DB, err error) {
 	replayCloser := y.NewCloser(1)
 	go db.doWrites(replayCloser)
 
-	if err = db.vlog.Replay(vptr, replayFunction(db)); err != nil {
+	if err = db.vlog.Replay(vptr, opt.ReadOnly, replayFunction(db)); err != nil {
 		return db, err
 	}
 

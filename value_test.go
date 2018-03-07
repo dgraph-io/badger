@@ -327,7 +327,7 @@ func TestValueGC4(t *testing.T) {
 	kv.vlog.rewrite(lf1)
 
 	// Replay value log
-	kv.vlog.Replay(valuePointer{Fid: 2}, replayFunction(kv))
+	kv.vlog.Replay(valuePointer{Fid: 2}, false, replayFunction(kv))
 
 	for i := 0; i < 8; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
@@ -491,8 +491,46 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	checkKeys(t, kv, [][]byte{k3})
 
 	// Replay value log from beginning, badger head is past k2.
-	kv.vlog.Replay(valuePointer{Fid: 0}, replayFunction(kv))
+	kv.vlog.Replay(valuePointer{Fid: 0}, false, replayFunction(kv))
 	require.NoError(t, kv.Close())
+}
+
+func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	// Create skeleton files.
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
+	kv, err := Open(opts)
+	require.NoError(t, err)
+	require.NoError(t, kv.Close())
+
+	var (
+		k0 = []byte("k0")
+		k1 = []byte("k1")
+		k2 = []byte("k2")
+		v0 = []byte("value0-012345678901234567890123")
+		v1 = []byte("value1-012345678901234567890123")
+		v2 = []byte("value2-012345678901234567890123")
+	)
+
+	// Create truncated vlog to simulate a partial append.
+	// k0 - single transaction, k1 and k2 in another transaction
+	buf := createVlog(t, []*Entry{
+		{Key: k0, Value: v0},
+		{Key: k1, Value: v1},
+		{Key: k2, Value: v2},
+	})
+	buf = buf[:len(buf)-6]
+	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
+
+	opts.ReadOnly = true
+	// Badger should fail a read-only open with values to replay
+	kv, err = Open(opts)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "database was not properly closed, cannot open read-only")
 }
 
 func TestValueLogTrigger(t *testing.T) {
