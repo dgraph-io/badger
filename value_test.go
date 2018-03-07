@@ -661,7 +661,7 @@ func BenchmarkReadWrite(b *testing.B) {
 				defer os.RemoveAll(dir)
 				err = vl.Open(nil, getTestOptions(dir))
 				y.Check(err)
-				defer vl.Close(false)
+				defer vl.Close()
 				b.ResetTimer()
 
 				for i := 0; i < b.N; i++ {
