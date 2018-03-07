@@ -48,8 +48,8 @@ var (
 	CastagnoliCrcTable = crc32.MakeTable(crc32.Castagnoli)
 )
 
-// OpenExistingSyncedFile opens an existing file, errors if it doesn't exist.
-func OpenExistingSyncedFile(filename string, flags uint32) (*os.File, error) {
+// OpenExistingFile opens an existing file, errors if it doesn't exist.
+func OpenExistingFile(filename string, flags uint32) (*os.File, error) {
 	openFlags := os.O_RDWR
 	if flags&ReadOnly != 0 {
 		openFlags = os.O_RDONLY

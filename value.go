@@ -564,7 +564,7 @@ func (vlog *valueLog) openOrCreateFiles(readOnly bool) error {
 			if readOnly {
 				flags |= y.ReadOnly
 			}
-			if lf.fd, err = y.OpenExistingSyncedFile(vlog.fpath(fid), flags); err != nil {
+			if lf.fd, err = y.OpenExistingFile(vlog.fpath(fid), flags); err != nil {
 				return errors.Wrapf(err, "Unable to open value log file")
 			}
 		} else {

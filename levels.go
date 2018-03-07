@@ -108,7 +108,7 @@ func newLevelsController(kv *DB, mf *Manifest) (*levelsController, error) {
 		if kv.opt.ReadOnly {
 			flags |= y.ReadOnly
 		}
-		fd, err := y.OpenExistingSyncedFile(fname, flags)
+		fd, err := y.OpenExistingFile(fname, flags)
 		if err != nil {
 			closeAllTables(tables)
 			return nil, errors.Wrapf(err, "Opening file: %q", fname)
