@@ -1523,8 +1523,10 @@ func TestReadOnly(t *testing.T) {
 	opts.ReadOnly = true
 	_, err = Open(opts)
 	require.Error(t, err)
+	if err.Error() == "read-only mode is not supported on Windows" {
+		return
+	}
 	require.Contains(t, err.Error(), "Another process is using this Badger database")
-
 	db.Close()
 
 	// Open one read-only
