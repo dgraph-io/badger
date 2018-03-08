@@ -300,7 +300,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, readOnly bool, fn logE
 		}
 
 		if readOnly {
-			return ErrCorruptDatabase
+			return ErrReplayNeeded
 		}
 		if err := fn(e, vp); err != nil {
 			if err == errStop {

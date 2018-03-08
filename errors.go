@@ -82,9 +82,9 @@ var (
 	// within the valid range
 	ErrInvalidLoadingMode = errors.New("Invalid ValueLogLoadingMode, must be FileIO or MemoryMap")
 
-	// ErrCorruptDatabase is returned when opt.ReadOnly is set but the
+	// ErrReplayNeeded is returned when opt.ReadOnly is set but the
 	// database requires a value log replay.
-	ErrCorruptDatabase = errors.New("database was not properly closed, cannot open read-only")
+	ErrReplayNeeded = errors.New("Database was not properly closed, cannot open read-only")
 
 	// ErrWindowsNotSupported is returned when opt.ReadOnly is used on Windows
 	ErrWindowsNotSupported = errors.New("Read-only mode is not supported on Windows")
