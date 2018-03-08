@@ -530,7 +530,7 @@ func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 	// Badger should fail a read-only open with values to replay
 	kv, err = Open(opts)
 	require.Error(t, err)
-	require.Regexp(t, "database was not properly closed, cannot open read-only|read-only mode is not supported on Windows", err.Error())
+	require.Regexp(t, "Database was not properly closed, cannot open read-only|Read-only mode is not supported on Windows", err.Error())
 }
 
 func TestValueLogTrigger(t *testing.T) {
