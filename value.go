@@ -300,7 +300,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, readOnly bool, fn logE
 		}
 
 		if readOnly {
-			return errors.Errorf("database was not properly closed, cannot open read-only")
+			return ErrCorruptDatabase
 		}
 		if err := fn(e, vp); err != nil {
 			if err == errStop {
@@ -669,7 +669,7 @@ func (vlog *valueLog) sortedFids() []uint32 {
 }
 
 // Replay replays the value log. The kv provided is only valid for the lifetime of function call.
-func (vlog *valueLog) Replay(ptr valuePointer, readOnly bool, fn logEntry) error {
+func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 	fid := ptr.Fid
 	offset := ptr.Offset + ptr.Len
 	vlog.elog.Printf("Seeking at value pointer: %+v\n", ptr)
@@ -685,7 +685,7 @@ func (vlog *valueLog) Replay(ptr valuePointer, readOnly bool, fn logEntry) error
 			of = 0
 		}
 		f := vlog.filesMap[id]
-		err := vlog.iterate(f, of, readOnly, fn)
+		err := vlog.iterate(f, of, vlog.opt.ReadOnly, fn)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to replay value log: %q", f.path)
 		}

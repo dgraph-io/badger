@@ -59,7 +59,7 @@ type directoryLockGuard struct {
 // AcquireDirectoryLock acquires exclusive access to a directory.
 func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*directoryLockGuard, error) {
 	if readOnly {
-		return nil, fmt.Errorf("read-only mode is not supported on Windows")
+		return nil, ErrWindowsNotSupported
 	}
 
 	// Convert to absolute path so that Release still works even if we do an unbalanced

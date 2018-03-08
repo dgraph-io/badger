@@ -327,7 +327,7 @@ func TestValueGC4(t *testing.T) {
 	kv.vlog.rewrite(lf1)
 
 	// Replay value log
-	kv.vlog.Replay(valuePointer{Fid: 2}, false, replayFunction(kv))
+	kv.vlog.Replay(valuePointer{Fid: 2}, replayFunction(kv))
 
 	for i := 0; i < 8; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
@@ -491,7 +491,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	checkKeys(t, kv, [][]byte{k3})
 
 	// Replay value log from beginning, badger head is past k2.
-	kv.vlog.Replay(valuePointer{Fid: 0}, false, replayFunction(kv))
+	kv.vlog.Replay(valuePointer{Fid: 0}, replayFunction(kv))
 	require.NoError(t, kv.Close())
 }
 

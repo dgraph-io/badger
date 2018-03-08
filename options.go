@@ -90,7 +90,7 @@ type Options struct {
 	// Open the DB as read-only. With this set, multiple processes can
 	// open the same Badger DB. Note: if the DB being opened had crashed
 	// before and has vlog data to be replayed, ReadOnly will cause Open
-	// to fail (with an appropriate message).
+	// to fail with an appropriate message.
 	ReadOnly bool
 }
 
