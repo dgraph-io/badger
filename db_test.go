@@ -395,14 +395,14 @@ func TestGetMore(t *testing.T) {
 
 				vs, err := db.get(y.KeyWithTs(k, math.MaxUint64))
 				require.NoError(t, err)
-				fmt.Printf("wanted=%q Item: %s\n", k, item.ToString())
+				fmt.Printf("wanted=%q Item: %s\n", k, item)
 				fmt.Printf("on re-run, got version: %+v\n", vs)
 
 				txn := db.NewTransaction(false)
 				itr := txn.NewIterator(DefaultIteratorOptions)
 				for itr.Seek(k); itr.Valid(); itr.Next() {
 					item := itr.Item()
-					fmt.Printf("item=%s\n", item.ToString())
+					fmt.Printf("item=%s\n", item)
 					if !bytes.Equal(item.Key(), k) {
 						break
 					}
@@ -410,7 +410,7 @@ func TestGetMore(t *testing.T) {
 				itr.Close()
 				txn.Discard()
 			}
-			require.EqualValues(t, expectedValue, string(getItemValue(t, item)), "wanted=%q Item: %s\n", k, item.ToString())
+			require.EqualValues(t, expectedValue, string(getItemValue(t, item)), "wanted=%q Item: %s\n", k, item)
 			txn.Discard()
 		}
 
