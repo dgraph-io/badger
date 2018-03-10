@@ -74,6 +74,8 @@ type DB struct {
 	flushChan chan flushTask // For flushing memtables.
 
 	orc *oracle
+
+	closed chan struct{}
 }
 
 const (
@@ -245,6 +247,7 @@ func Open(opt Options) (db *DB, err error) {
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
 		orc:           orc,
+		closed:        make(chan struct{}, 1),
 	}
 
 	// Calculate initial size.
@@ -322,12 +325,18 @@ func Open(opt Options) (db *DB, err error) {
 // Close closes a DB. It's crucial to call it to ensure all the pending updates
 // make their way to disk.
 func (db *DB) Close() (err error) {
+	if db.isClosed() {
+		return ErrBadgerClosed
+	}
+
 	db.elog.Printf("Closing database")
 	// Stop value GC first.
 	db.closers.valueGC.SignalAndWait()
 
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
+
+	db.closed <- struct{}{}
 
 	// Now close the value log.
 	if vlogErr := db.vlog.Close(); err == nil {
@@ -905,6 +914,10 @@ func (db *DB) updateSize(lc *y.Closer) {
 
 // PurgeVersionsBelow will delete all versions of a key below the specified version
 func (db *DB) PurgeVersionsBelow(key []byte, ts uint64) error {
+	if db.isClosed() {
+		return ErrBadgerClosed
+	}
+
 	txn := db.NewTransaction(false)
 	defer txn.Discard()
 	return db.purgeVersionsBelow(txn, key, ts)

@@ -533,6 +533,10 @@ func (db *DB) NewTransaction(update bool) *Txn {
 // View executes a function creating and managing a read-only transaction for the user. Error
 // returned by the function is relayed by the View method.
 func (db *DB) View(fn func(txn *Txn) error) error {
+	if db.isClosed() {
+		return ErrBadgerClosed
+	}
+
 	if db.opt.managedTxns {
 		return ErrManagedTxn
 	}
@@ -545,9 +549,14 @@ func (db *DB) View(fn func(txn *Txn) error) error {
 // Update executes a function, creating and managing a read-write transaction
 // for the user. Error returned by the function is relayed by the Update method.
 func (db *DB) Update(fn func(txn *Txn) error) error {
+	if db.isClosed() {
+		return ErrBadgerClosed
+	}
+
 	if db.opt.managedTxns {
 		return ErrManagedTxn
 	}
+
 	txn := db.NewTransaction(true)
 	defer txn.Discard()
 
@@ -556,4 +565,8 @@ func (db *DB) Update(fn func(txn *Txn) error) error {
 	}
 
 	return txn.Commit(nil)
+}
+
+func (db *DB) isClosed() bool {
+	return len(db.closed) == 1
 }

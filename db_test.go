@@ -103,6 +103,48 @@ func TestWrite(t *testing.T) {
 	})
 }
 
+func TestDB_Close_MultipleTimes(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		db.Close()
+
+		err := db.Close()
+		require.Equal(t, ErrBadgerClosed, err)
+	})
+}
+
+func TestDB_Close(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+
+	db, err := Open(getTestOptions(dir))
+	require.NoError(t, err)
+
+	writeFn := func(txn *Txn) error {
+		return txn.Set([]byte("name"), []byte("Badger"))
+	}
+
+	err = db.Update(writeFn)
+	require.NoError(t, err)
+
+	err = db.View(func(txn *Txn) error {
+		_, err := txn.Get([]byte("name"))
+		return err
+	})
+	require.NoError(t, err)
+
+	db.Close()
+
+	err = db.View(func(txn *Txn) error {
+		_, err := txn.Get([]byte("name"))
+		return err
+	})
+	require.Error(t, err)
+
+	err = db.Update(writeFn)
+	require.Error(t, err)
+	require.Equal(t, ErrBadgerClosed, err)
+}
+
 func TestUpdateAndView(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		err := db.Update(func(txn *Txn) error {
