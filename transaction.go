@@ -30,6 +30,11 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	deleteItem = iota
+	setItem    = iota
+)
+
 type uint64Heap []uint64
 
 func (u uint64Heap) Len() int               { return len(u) }
@@ -280,19 +285,16 @@ func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
 	return txn.SetEntry(e)
 }
 
-// SetEntry takes an Entry struct and adds the key-value pair in the struct, along
-// with other metadata to the database.
-func (txn *Txn) SetEntry(e *Entry) error {
-	switch {
-	case !txn.update:
+func (txn *Txn) modify(e *Entry, operation int) error {
+	if !txn.update {
 		return ErrReadOnlyTxn
-	case txn.discarded:
+	} else if txn.discarded {
 		return ErrDiscardedTxn
-	case len(e.Key) == 0:
+	} else if len(e.Key) == 0 {
 		return ErrEmptyKey
-	case len(e.Key) > maxKeySize:
+	} else if len(e.Key) > maxKeySize {
 		return exceedsMaxKeySizeError(e.Key)
-	case int64(len(e.Value)) > txn.db.opt.ValueLogFileSize:
+	} else if operation == setItem && int64(len(e.Value)) > txn.db.opt.ValueLogFileSize {
 		return exceedsMaxValueSizeError(e.Value, txn.db.opt.ValueLogFileSize)
 	}
 	if err := txn.checkSize(e); err != nil {
@@ -305,33 +307,21 @@ func (txn *Txn) SetEntry(e *Entry) error {
 	return nil
 }
 
+// SetEntry takes an Entry struct and adds the key-value pair in the struct, along
+// with other metadata to the database.
+func (txn *Txn) SetEntry(e *Entry) error {
+	return txn.modify(e, setItem)
+}
+
 // Delete deletes a key. This is done by adding a delete marker for the key at commit timestamp.
 // Any reads happening before this timestamp would be unaffected. Any reads after this commit would
 // see the deletion.
 func (txn *Txn) Delete(key []byte) error {
-	if !txn.update {
-		return ErrReadOnlyTxn
-	} else if txn.discarded {
-		return ErrDiscardedTxn
-	} else if len(key) == 0 {
-		return ErrEmptyKey
-	} else if len(key) > maxKeySize {
-		return exceedsMaxKeySizeError(key)
-	}
-
 	e := &Entry{
 		Key:  key,
 		meta: bitDelete,
 	}
-	if err := txn.checkSize(e); err != nil {
-		return err
-	}
-
-	fp := farm.Fingerprint64(key) // Avoid dealing with byte arrays.
-	txn.writes = append(txn.writes, fp)
-
-	txn.pendingWrites[string(key)] = e
-	return nil
+	return txn.modify(e, deleteItem)
 }
 
 // Get looks for key and returns corresponding Item.
