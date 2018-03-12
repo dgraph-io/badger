@@ -320,7 +320,8 @@ func Open(opt Options) (db *DB, err error) {
 }
 
 // Close closes a DB. It's crucial to call it to ensure all the pending updates
-// make their way to disk.
+// make their way to disk. Calling DB.Close() multiple times is not safe and would
+// cause panic.
 func (db *DB) Close() (err error) {
 	db.elog.Printf("Closing database")
 	// Stop value GC first.
