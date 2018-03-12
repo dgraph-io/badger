@@ -377,6 +377,23 @@ func (db *DB) Close() (err error) {
 		db.elog.Printf("Compaction finished")
 	}
 
+	// Force Compact L0
+	// We don't need to care about cstatus since no parallel compaction is running.
+	cd := compactDef{
+		elog:      trace.New("Badger", "Compact"),
+		thisLevel: db.lc.levels[0],
+		nextLevel: db.lc.levels[1],
+	}
+	cd.elog.SetMaxEvents(100)
+	defer cd.elog.Finish()
+	if db.lc.fillTablesL0(&cd) {
+		if err := db.lc.runCompactDef(0, cd); err != nil {
+			cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v", err, cd)
+		}
+	} else {
+		cd.elog.LazyPrintf("fillTables failed for level: 0\n")
+	}
+
 	if lcErr := db.lc.close(); err == nil {
 		err = errors.Wrap(lcErr, "DB.Close")
 	}
