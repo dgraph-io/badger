@@ -31,7 +31,7 @@ func writeTo(entry *protos.KVPair, w io.Writer) error {
 // added/modified since the last invocation of DB.Backup()
 //
 // This can be used to backup the data in a database at a given point in time.
-func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
+func (db *DB) Backup(w io.Writer, since uint64, dumpNano bool) (uint64, error) {
 	var tsNew uint64
 	err := db.View(func(txn *Txn) error {
 		opts := DefaultIteratorOptions
@@ -49,11 +49,15 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 			}
 
 			entry := &protos.KVPair{
-				Key:       y.Copy(item.Key()),
-				Value:     y.Copy(val),
-				UserMeta:  []byte{item.UserMeta()},
-				Version:   item.Version(),
-				ExpiresAt: uint64(time.Unix(int64(item.ExpiresAt()), 0).UnixNano()),
+				Key:      y.Copy(item.Key()),
+				Value:    y.Copy(val),
+				UserMeta: []byte{item.UserMeta()},
+				Version:  item.Version(),
+			}
+			if dumpNano {
+				entry.ExpiresAt = uint64(time.Unix(int64(item.ExpiresAt()), 0).UnixNano())
+			} else {
+				entry.ExpiresAt = item.ExpiresAt()
 			}
 
 			// Write entries to disk

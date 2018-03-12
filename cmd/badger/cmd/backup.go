@@ -24,6 +24,7 @@ import (
 )
 
 var backupFile string
+var backupForV2 bool
 
 // backupCmd represents the backup command
 var backupCmd = &cobra.Command{
@@ -42,6 +43,7 @@ func init() {
 	RootCmd.AddCommand(backupCmd)
 	backupCmd.Flags().StringVarP(&backupFile, "backup-file", "f",
 		"badger.bak", "File to backup to")
+	backupCmd.Flags().BoolVar(&backupForV2, "for_v2", false, "Write in v2.x format")
 }
 
 func doBackup(cmd *cobra.Command, args []string) error {
@@ -63,6 +65,6 @@ func doBackup(cmd *cobra.Command, args []string) error {
 	defer f.Close()
 
 	// Run Backup
-	_, err = db.Backup(f, 0)
+	_, err = db.Backup(f, 0, backupForV2)
 	return err
 }
