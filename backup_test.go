@@ -55,7 +55,7 @@ func TestDumpLoad(t *testing.T) {
 
 	bak, err := ioutil.TempFile(dir, "badgerbak")
 	require.NoError(t, err)
-	ts, err := db.Backup(bak, 0)
+	ts, err := db.Backup(bak, 0, false)
 	t.Logf("New ts: %d\n", ts)
 	require.NoError(t, err)
 	require.NoError(t, bak.Close())
