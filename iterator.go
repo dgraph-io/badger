@@ -130,6 +130,11 @@ func (item *Item) hasValue() bool {
 	return true
 }
 
+// IsDeletedOrExpired returns true if item contains deleted or expired value.
+func (item *Item) IsDeletedOrExpired() bool {
+	return isDeletedOrExpired(item.meta, item.expiresAt)
+}
+
 func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	if !item.hasValue() {
 		return nil, nil, nil
