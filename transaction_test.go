@@ -825,3 +825,49 @@ func TestArmV7Issue311Fix(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTxn_WithDBClosed(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opt := getTestOptions(dir)
+	kv, err := OpenManaged(opt)
+	require.NoError(t, err)
+
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("key-%02d", i))
+	}
+
+	val := func(i int) []byte {
+		return []byte(fmt.Sprintf("val-%d", i))
+	}
+
+	err = kv.Update(func(tx *Txn) error { return nil })
+	require.Equal(t, ErrManagedTxn, err)
+
+	err = kv.View(func(tx *Txn) error { return nil })
+	require.Equal(t, ErrManagedTxn, err)
+
+	// Write data at t=3.
+	txn := kv.NewTransactionAt(3, true)
+	for i := 0; i <= 3; i++ {
+		require.NoError(t, txn.Set(key(i), val(i)))
+	}
+	require.Error(t, ErrManagedTxn, txn.Commit(nil))
+	require.NoError(t, txn.CommitAt(3, nil))
+
+	kv.Close()
+
+	_, err = txn.Get(key(1))
+	require.Error(t, err)
+	require.Equal(t, ErrBadgerClosed, err)
+
+	err = txn.Set(key(1), val(1))
+	require.Error(t, err)
+	require.Equal(t, ErrBadgerClosed, err)
+
+	err = txn.Delete(key(1))
+	require.Error(t, err)
+	require.Equal(t, ErrBadgerClosed, err)
+}

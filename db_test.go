@@ -145,6 +145,10 @@ func TestDB_Close(t *testing.T) {
 	require.Equal(t, ErrBadgerClosed, err)
 }
 
+func TestTxn_ClosedDB(t *testing.T) {
+
+}
+
 func TestUpdateAndView(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		err := db.Update(func(txn *Txn) error {
