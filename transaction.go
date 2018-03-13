@@ -286,6 +286,10 @@ func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
 }
 
 func (txn *Txn) modify(e *Entry, operation int) error {
+	if txn.db.isClosed() {
+		return ErrBadgerClosed
+	}
+
 	if !txn.update {
 		return ErrReadOnlyTxn
 	} else if txn.discarded {
