@@ -24,7 +24,7 @@ import (
 
 var (
 
-	// ErrBadgerClosed is returned when trying to write to a closed database
+	// ErrBadgerClosed is returned when trying to perform an operation to a closed database.
 	ErrBadgerClosed = errors.New("Database is already closed")
 
 	// ErrValueLogSize is returned when opt.ValueLogFileSize option is not within the valid

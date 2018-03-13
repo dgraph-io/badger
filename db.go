@@ -26,18 +26,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dgraph-io/badger/options"
-
-	"golang.org/x/net/trace"
-
-	"sync/atomic"
-
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
+	"golang.org/x/net/trace"
 )
 
 var (
@@ -331,14 +328,14 @@ func (db *DB) Close() (err error) {
 		return ErrBadgerClosed
 	}
 
+	atomic.StoreUint32(&db.closed, 1)
+
 	db.elog.Printf("Closing database")
 	// Stop value GC first.
 	db.closers.valueGC.SignalAndWait()
 
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
-
-	atomic.AddUint32(&db.closed, 1)
 
 	// Now close the value log.
 	if vlogErr := db.vlog.Close(); err == nil {
