@@ -32,6 +32,8 @@ import (
 
 	"golang.org/x/net/trace"
 
+	"sync/atomic"
+
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
@@ -75,7 +77,7 @@ type DB struct {
 
 	orc *oracle
 
-	closed chan struct{}
+	closed uint32
 }
 
 const (
@@ -247,7 +249,7 @@ func Open(opt Options) (db *DB, err error) {
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
 		orc:           orc,
-		closed:        make(chan struct{}, 1),
+		closed:        0,
 	}
 
 	// Calculate initial size.
@@ -336,7 +338,7 @@ func (db *DB) Close() (err error) {
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
 
-	db.closed <- struct{}{}
+	atomic.AddUint32(&db.closed, 1)
 
 	// Now close the value log.
 	if vlogErr := db.vlog.Close(); err == nil {

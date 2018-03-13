@@ -568,5 +568,5 @@ func (db *DB) Update(fn func(txn *Txn) error) error {
 }
 
 func (db *DB) isClosed() bool {
-	return len(db.closed) == 1
+	return atomic.LoadUint32(&db.closed) > 0
 }
