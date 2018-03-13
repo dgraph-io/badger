@@ -286,6 +286,10 @@ func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
 }
 
 func (txn *Txn) modify(e *Entry, operation int) error {
+	if txn.db.isClosed() {
+		return ErrBadgerClosed
+	}
+
 	if !txn.update {
 		return ErrReadOnlyTxn
 	} else if txn.discarded {
@@ -327,6 +331,10 @@ func (txn *Txn) Delete(key []byte) error {
 // Get looks for key and returns corresponding Item.
 // If key is not found, ErrKeyNotFound is returned.
 func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
+	if txn.db.isClosed() {
+		return nil, ErrBadgerClosed
+	}
+
 	if len(key) == 0 {
 		return nil, ErrEmptyKey
 	} else if txn.discarded {
@@ -420,6 +428,10 @@ func (txn *Txn) Discard() {
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit(callback func(error)) error {
+	if txn.db.isClosed() {
+		return ErrBadgerClosed
+	}
+
 	if txn.commitTs == 0 && txn.db.opt.managedTxns {
 		return ErrManagedTxn
 	}
@@ -523,6 +535,10 @@ func (db *DB) NewTransaction(update bool) *Txn {
 // View executes a function creating and managing a read-only transaction for the user. Error
 // returned by the function is relayed by the View method.
 func (db *DB) View(fn func(txn *Txn) error) error {
+	if db.isClosed() {
+		return ErrBadgerClosed
+	}
+
 	if db.opt.managedTxns {
 		return ErrManagedTxn
 	}
@@ -535,9 +551,14 @@ func (db *DB) View(fn func(txn *Txn) error) error {
 // Update executes a function, creating and managing a read-write transaction
 // for the user. Error returned by the function is relayed by the Update method.
 func (db *DB) Update(fn func(txn *Txn) error) error {
+	if db.isClosed() {
+		return ErrBadgerClosed
+	}
+
 	if db.opt.managedTxns {
 		return ErrManagedTxn
 	}
+
 	txn := db.NewTransaction(true)
 	defer txn.Discard()
 
@@ -546,4 +567,8 @@ func (db *DB) Update(fn func(txn *Txn) error) error {
 	}
 
 	return txn.Commit(nil)
+}
+
+func (db *DB) isClosed() bool {
+	return atomic.LoadUint32(&db.closed) > 0
 }

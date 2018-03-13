@@ -26,16 +26,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dgraph-io/badger/options"
-
-	"golang.org/x/net/trace"
-
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
+	"golang.org/x/net/trace"
 )
 
 var (
@@ -74,6 +73,8 @@ type DB struct {
 	flushChan chan flushTask // For flushing memtables.
 
 	orc *oracle
+
+	closed uint32
 }
 
 const (
@@ -245,6 +246,7 @@ func Open(opt Options) (db *DB, err error) {
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
 		orc:           orc,
+		closed:        0,
 	}
 
 	// Calculate initial size.
@@ -323,6 +325,12 @@ func Open(opt Options) (db *DB, err error) {
 // make their way to disk. Calling DB.Close() multiple times is not safe and would
 // cause panic.
 func (db *DB) Close() (err error) {
+	if db.isClosed() {
+		return ErrBadgerClosed
+	}
+
+	atomic.StoreUint32(&db.closed, 1)
+
 	db.elog.Printf("Closing database")
 	// Stop value GC first.
 	db.closers.valueGC.SignalAndWait()
@@ -923,6 +931,10 @@ func (db *DB) updateSize(lc *y.Closer) {
 
 // PurgeVersionsBelow will delete all versions of a key below the specified version
 func (db *DB) PurgeVersionsBelow(key []byte, ts uint64) error {
+	if db.isClosed() {
+		return ErrBadgerClosed
+	}
+
 	txn := db.NewTransaction(false)
 	defer txn.Discard()
 	return db.purgeVersionsBelow(txn, key, ts)
