@@ -391,7 +391,7 @@ func (db *DB) Close() (err error) {
 			cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v", err, cd)
 		}
 	} else {
-		cd.elog.LazyPrintf("fillTables failed for level: 0\n")
+		cd.elog.LazyPrintf("fillTables failed for level zero. No compaction required")
 	}
 
 	if lcErr := db.lc.close(); err == nil {
