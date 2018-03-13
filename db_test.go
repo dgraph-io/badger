@@ -282,6 +282,38 @@ func TestTxnTooBig(t *testing.T) {
 	})
 }
 
+func TestForceCompactL0(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 15 << 20
+	db, err := OpenManaged(opts)
+	require.NoError(t, err)
+
+	data := func(i int) []byte {
+		return []byte(fmt.Sprintf("%b", i))
+	}
+	n := 80
+	m := 45 // Increasing would cause ErrTxnTooBig
+	sz := 32 << 10
+	v := make([]byte, sz)
+	for i := 0; i < n; i += 2 {
+		version := uint64(i)
+		txn := db.NewTransactionAt(version, true)
+		for j := 0; j < m; j++ {
+			require.NoError(t, txn.Set(data(j), v))
+		}
+		require.NoError(t, txn.CommitAt(version+1, nil))
+	}
+	db.Close()
+
+	db, err = OpenManaged(opts)
+	defer db.Close()
+	require.Equal(t, len(db.lc.levels[0].tables), 0)
+}
+
 func TestGetAfterPurge(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
