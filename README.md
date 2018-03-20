@@ -589,6 +589,10 @@ get compacted to disk. The compaction would only happen once `MaxTableSize` has 
 you're doing a few writes and then checking, you might not see anything on disk. Once you `Close`
 the database, you'll see these writes on disk.
 
+- **Reverse iteration doesn't give me the right results.**
+
+Just like forward iteration goes to the first key which is equal or greater than the SEEK key, reverse iteration goes to the first key which is equal or lesser than the SEEK key. Therefore, SEEK key would not be part of the results. You can typically add a tilde (~) as a suffix to the SEEK key to include it in the results. See the following issues: https://github.com/dgraph-io/badger/issues/436 and https://github.com/dgraph-io/badger/issues/347.
+
 - **Which instances should I use for Badger?**
 
 We recommend using instances which provide local SSD storage, without any limit
