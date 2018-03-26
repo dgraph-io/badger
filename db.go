@@ -593,7 +593,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 		count += len(b.Entries)
 		var i uint64
-		for err := db.ensureRoomForWrite(); err != nil; err = db.ensureRoomForWrite() {
+		for err := db.ensureRoomForWrite(); err == errNoRoom; err = db.ensureRoomForWrite() {
 			i++
 			if i%100 == 0 {
 				db.elog.Printf("Making room for writes")
