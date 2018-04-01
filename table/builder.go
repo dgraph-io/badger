@@ -27,7 +27,10 @@ import (
 )
 
 var (
-	restartInterval = 100 // Might want to change this to be based on total size instead of numKeys.
+	defaultBlockSize = 100
+	// TODO: This value is duplicated from DefaultOptions.
+	// It should only be there but some benchmark tests
+	// that call NewTableBuilder don't seem to have access to it.
 )
 
 func newBuffer(sz int) *bytes.Buffer {
@@ -80,6 +83,8 @@ type Builder struct {
 
 	keyBuf   *bytes.Buffer
 	keyCount int
+
+	blockSize int // Number of entries per block.
 }
 
 // NewTableBuilder makes a new TableBuilder.
@@ -88,6 +93,7 @@ func NewTableBuilder() *Builder {
 		keyBuf:     newBuffer(1 << 20),
 		buf:        newBuffer(1 << 20),
 		prevOffset: math.MaxUint32, // Used for the first element!
+		blockSize: defaultBlockSize,
 	}
 }
 
@@ -154,10 +160,16 @@ func (b *Builder) finishBlock() {
 	b.addHelper([]byte{}, y.ValueStruct{})
 }
 
+// SetBlockSize configures the block size used for the builder, should
+// be set only once.
+func (b *Builder) SetBlockSize(value int) {
+	b.blockSize = value
+}
+
 // Add adds a key-value pair to the block.
 // If doNotRestart is true, we will not restart even if b.counter >= restartInterval.
 func (b *Builder) Add(key []byte, value y.ValueStruct) error {
-	if b.counter >= restartInterval {
+	if b.counter >= b.blockSize {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
 		b.restarts = append(b.restarts, uint32(b.buf.Len()))
