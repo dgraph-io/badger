@@ -235,6 +235,68 @@ func TestGet(t *testing.T) {
 	})
 }
 
+// TODO: Not a real test.
+// This is a PoC benchmark written in the form of a test
+// to make the AppVeyor run it. It runs a serious of
+// get operations (with small values to avoid reading
+// from the log value file) with different block
+// sizes and different database sizes, as discussed in #446.
+func TestBenchmarkGetWithBlockSize(t *testing.T) {
+	for _, entriesNum  := range []float64{.1 , .5, 2} { // In M
+		for _, blockSize := range []int{1 , 10, 100, 1000} {
+			fmt.Printf("Entries: %.1fM. Block size: %d.\n", entriesNum, blockSize)
+			testBenchmarkGetWithBlockSize(t, blockSize, int(entriesNum * 1e6))
+		}
+	}
+}
+func testBenchmarkGetWithBlockSize(t *testing.T, blockSize int, entriesNum int) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opts := DefaultOptions
+	opts.Dir = dir
+	opts.ValueDir = dir
+
+	opts.BlockSize = blockSize
+
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	started := time.Now()
+	txn := db.NewTransaction(true)
+	for i := 0; i < entriesNum; i++ {
+		err = txn.Set([]byte(fmt.Sprintf("%d", i)), []byte{0})
+		require.NoError(t, err)
+
+		// Commit transaction to avoid "Txn is too big" error.
+		if i > 0 && i % 1000 == 0 {
+			err = txn.Commit(nil)
+			require.NoError(t, err)
+			txn = db.NewTransaction(true)
+		}
+	}
+	err = txn.Commit(nil)
+	require.NoError(t, err)
+
+	db.Close() // Flush SST to disk
+	fmt.Printf("Put time: %s\n", time.Since(started))
+
+	// Reopen to load SSTables with blocks.
+	db, err = Open(opts)
+	require.NoError(t, err)
+
+	started = time.Now()
+	txn = db.NewTransaction(false)
+	for i := 0; i < entriesNum; i++ {
+		_, err = txn.Get([]byte(fmt.Sprintf("%d", i)))
+		require.NoError(t, err)
+	}
+	txn.Discard()
+	fmt.Printf("Get time: %s\n", time.Since(started))
+
+	db.Close()
+}
+
 func TestGetAfterDelete(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// populate with one entry
