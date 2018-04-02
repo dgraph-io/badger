@@ -18,6 +18,7 @@ package table
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
 	"math"
 	"sort"
@@ -37,6 +38,23 @@ type blockIterator struct {
 	init bool
 
 	last header // The last header we saw.
+
+	// Raw bytes with the entry offsets. The offsets are parsed
+	// on demand instead of parsing the entire array during initialization
+	// (in a similar way to the table's `readIndex`), this is becuase
+	// the blocks (unlike the tables) are discarded on every seek
+	// operation.
+	// The `data` buffer now contains the entry index (besides the
+	// key-vaue entries), it's length is still used as an indication
+	// of the number of entries, so to avoid modifying that code the
+	// entry index is moved away to another slice.
+	// TODO: Modify the use of `len(data)`, use the entry index to
+	// know the number of entries.
+	entryIndex []byte
+
+	// Number of entries in the block (which is just the size
+	// of entryIndex divided by 4).
+	entriesNum uint32
 }
 
 func (itr *blockIterator) Reset() {
@@ -70,6 +88,27 @@ var (
 	current = 1
 )
 
+// loadEntryIndex loads the entry index into `entryIndex` to separate
+// it from the rest of `data` adjusting its length (see `entryIndex`).
+// The index is loaded and only its length is parsed, the rest will
+// be process by a lazy-initialization in `readEntryIndex`.
+func (itr *blockIterator) loadEntryIndex()  {
+	// Get the number of entries from the end of `data` (and remove it).
+	itr.entriesNum = binary.BigEndian.Uint32(itr.data[(len(itr.data) - 4) : len(itr.data)])
+	itr.data = itr.data[:(len(itr.data) - 4)]
+
+	// Move the index from `data` to `entryIndex`.
+	itr.entryIndex = itr.data[(len(itr.data) - int(itr.entriesNum) * 4) : len(itr.data)]
+	itr.data = itr.data[:(len(itr.data) - int(itr.entriesNum) * 4)]
+}
+
+// getEntryOffset retrieves the offset of the entry of the given `idx`.
+// The value is computed in the moment and is not cached because the block
+// (and it's iterator) will be discarded in the next table's `seekFrom`.
+func (itr *blockIterator) getEntryOffset(idx int) uint32 {
+	return binary.BigEndian.Uint32(itr.entryIndex[4 * idx : 4 * (idx + 1)])
+}
+
 // Seek brings us to the first block element that is >= input key.
 func (itr *blockIterator) Seek(key []byte, whence int) {
 	itr.err = nil
@@ -80,17 +119,52 @@ func (itr *blockIterator) Seek(key []byte, whence int) {
 	case current:
 	}
 
-	var done bool
-	for itr.Init(); itr.Valid(); itr.Next() {
+	itr.Init()
+
+	foundEntryIdx := sort.Search(int(itr.entriesNum), func(idx int) bool {
+		entryOffset := itr.getEntryOffset(idx)
+		
+		// Mimic the code executed by `Next` to modify the the rest
+		// of the iterator behavior as less as possible (at this point)
+		// TODO: `Next` and related should use the entry index and
+		// this duplication of code won't be necessary.
+		itr.pos = entryOffset
+		itr.err = nil
+		var h header
+		itr.pos += uint32(h.Decode(itr.data[itr.pos:]))
+		itr.last = h // Store the last header.
+
+		// Populate baseKey if it isn't set yet. This would only happen for the first Next.
+		if len(itr.baseKey) == 0 {
+			panic("len(itr.baseKey) == 0")
+		}
+
+		itr.parseKV(h)
+
 		k := itr.Key()
 		if y.CompareKeys(k, key) >= 0 {
-			// We are done as k is >= key.
-			done = true
-			break
+			return true
 		}
-	}
-	if !done {
-		itr.err = io.EOF
+		return false
+	})
+
+	if foundEntryIdx < int(itr.entriesNum) {
+		// Found the entry, set the position there and parse it.
+		itr.pos = itr.getEntryOffset(foundEntryIdx)
+		itr.Next()
+	} else {
+		// It didn't find it, simulate the linear search behavior by going
+		// to the last (dummy) entry. That entry is not stored in
+		// `entryOffsets` (which has the entries up until the last valid
+		// one), so go to the end of the array and advance with `Next`
+		// two times, read the last valid entry and attempt to read
+		// the dummy one that will set the corresponding EOF error
+		// (to signal the key was not found).
+		// TODO: Remove this once `Next` is adjusted to use the
+		// entry index.
+		itr.pos = itr.getEntryOffset(int(itr.entriesNum) - 1)
+		itr.Next()
+		itr.Next()
 	}
 }
 
