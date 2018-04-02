@@ -75,6 +75,10 @@ type Builder struct {
 
 	restarts []uint32 // Base offsets of every block.
 
+	// Offsets of every entry within the current block being built.
+	// The offsets are relative to the start of the block.
+	entryOffsets []uint32
+
 	// Tracks offset for the previous key-value pair. Offset is relative to block base offset.
 	prevOffset uint32
 
@@ -138,6 +142,8 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	}
 	b.prevOffset = uint32(b.buf.Len()) - b.baseOffset // Remember current offset for the next Add call.
 
+	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len()) - b.baseOffset)
+
 	// Layout: header, diffKey, value.
 	var hbuf [10]byte
 	h.Encode(hbuf[:])
@@ -152,6 +158,11 @@ func (b *Builder) finishBlock() {
 	// When we are at the end of the block and Valid=false, and the user wants to do a Prev,
 	// we need a dummy header to tell us the offset of the previous key-value pair.
 	b.addHelper([]byte{}, y.ValueStruct{})
+
+	b.buf.Write(b.entryIndex())
+	// Reset the entry offsets of the block for the next build.
+	b.entryOffsets = nil
+
 }
 
 // Add adds a key-value pair to the block.
@@ -197,6 +208,32 @@ func (b *Builder) blockIndex() []byte {
 	}
 	binary.BigEndian.PutUint32(buf[:4], uint32(len(b.restarts)))
 	return out
+}
+
+// entryIndex generates the entry index for the block
+// (in a analogous way to `blockIndex`).
+// It is mainly a list of all the entry offsets.
+func (b *Builder) entryIndex() []byte {
+	// Remove the last (dummy) header added in `finishBlock`, it
+	// is used for the reverse iteration system and is not necessary
+	// in the entry offsets vector that will be used by the block iterator's
+	// `seek`.
+	// TODO: Remove this once the `Prev` and related fuctions are modified
+	// to leverage this entry index (and the dummy header is not added anymore).
+	b.entryOffsets = b.entryOffsets[:len(b.entryOffsets) - 1]
+
+	// Add 4 because we want to write out the length of the index at the end.
+	index := make([]byte, 4 * len(b.entryOffsets) + 4)
+	buf := index
+	for _, offset := range b.entryOffsets {
+		binary.BigEndian.PutUint32(buf[:4], offset)
+		buf = buf[4:]
+	}
+	// Write the number of entry offsets (not the number of bytes),
+	// to be read in `loadEntryIndex`.
+	binary.BigEndian.PutUint32(buf[:4], uint32(len(b.entryOffsets)))
+
+	return index
 }
 
 // Finish finishes the table by appending the index.

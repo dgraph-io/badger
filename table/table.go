@@ -98,7 +98,9 @@ type block struct {
 }
 
 func (b block) NewIterator() *blockIterator {
-	return &blockIterator{data: b.data}
+	bi := &blockIterator{data: b.data}
+	bi.loadEntryIndex()
+	return bi
 }
 
 // OpenTable assumes file has only one table and opens it.  Takes ownership of fd upon function
