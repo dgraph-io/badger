@@ -31,7 +31,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var dirFlag, valueDirFlag string
 var infoCmd = &cobra.Command{
 	Use:   "info",
 	Short: "Health info about Badger database.",
