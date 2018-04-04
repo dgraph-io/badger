@@ -80,6 +80,10 @@ type Options struct {
 	// is a private option used by ManagedDB.
 	managedTxns bool
 
+	// Number of key-value entries per block when flushing an
+	// in-memory Skiplist to the in-file Table (SST).
+	BlockSize int
+
 	// 4. Flags for testing purposes
 	// ------------------------------
 	DoNotCompact bool // Stops LSM tree from compactions.
@@ -115,4 +119,5 @@ var DefaultOptions = Options{
 	// MemoryMap to mmap() the value log files
 	ValueLogFileSize: 1 << 30,
 	ValueThreshold:   20,
+	BlockSize: 100,
 }

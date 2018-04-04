@@ -27,7 +27,10 @@ import (
 )
 
 var (
-	restartInterval = 100 // Might want to change this to be based on total size instead of numKeys.
+	defaultBlockSize = 100
+	// TODO: This value is duplicated from DefaultOptions.
+	// It should only be there but some benchmark tests
+	// that call NewTableBuilder don't seem to have access to it.
 )
 
 func newBuffer(sz int) *bytes.Buffer {
@@ -75,11 +78,17 @@ type Builder struct {
 
 	restarts []uint32 // Base offsets of every block.
 
+	// Offsets of every entry within the current block being built.
+	// The offsets are relative to the start of the block.
+	entryOffsets []uint32
+
 	// Tracks offset for the previous key-value pair. Offset is relative to block base offset.
 	prevOffset uint32
 
 	keyBuf   *bytes.Buffer
 	keyCount int
+
+	blockSize int // Number of entries per block.
 }
 
 // NewTableBuilder makes a new TableBuilder.
@@ -88,6 +97,7 @@ func NewTableBuilder() *Builder {
 		keyBuf:     newBuffer(1 << 20),
 		buf:        newBuffer(1 << 20),
 		prevOffset: math.MaxUint32, // Used for the first element!
+		blockSize: defaultBlockSize,
 	}
 }
 
@@ -138,6 +148,8 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	}
 	b.prevOffset = uint32(b.buf.Len()) - b.baseOffset // Remember current offset for the next Add call.
 
+	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len()) - b.baseOffset)
+
 	// Layout: header, diffKey, value.
 	var hbuf [10]byte
 	h.Encode(hbuf[:])
@@ -152,12 +164,23 @@ func (b *Builder) finishBlock() {
 	// When we are at the end of the block and Valid=false, and the user wants to do a Prev,
 	// we need a dummy header to tell us the offset of the previous key-value pair.
 	b.addHelper([]byte{}, y.ValueStruct{})
+
+	b.buf.Write(b.entryIndex())
+	// Reset the entry offsets of the block for the next build.
+	b.entryOffsets = nil
+
+}
+
+// SetBlockSize configures the block size used for the builder, should
+// be set only once.
+func (b *Builder) SetBlockSize(value int) {
+	b.blockSize = value
 }
 
 // Add adds a key-value pair to the block.
 // If doNotRestart is true, we will not restart even if b.counter >= restartInterval.
 func (b *Builder) Add(key []byte, value y.ValueStruct) error {
-	if b.counter >= restartInterval {
+	if b.counter >= b.blockSize {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
 		b.restarts = append(b.restarts, uint32(b.buf.Len()))
@@ -197,6 +220,32 @@ func (b *Builder) blockIndex() []byte {
 	}
 	binary.BigEndian.PutUint32(buf[:4], uint32(len(b.restarts)))
 	return out
+}
+
+// entryIndex generates the entry index for the block
+// (in a analogous way to `blockIndex`).
+// It is mainly a list of all the entry offsets.
+func (b *Builder) entryIndex() []byte {
+	// Remove the last (dummy) header added in `finishBlock`, it
+	// is used for the reverse iteration system and is not necessary
+	// in the entry offsets vector that will be used by the block iterator's
+	// `seek`.
+	// TODO: Remove this once the `Prev` and related fuctions are modified
+	// to leverage this entry index (and the dummy header is not added anymore).
+	b.entryOffsets = b.entryOffsets[:len(b.entryOffsets) - 1]
+
+	// Add 4 because we want to write out the length of the index at the end.
+	index := make([]byte, 4 * len(b.entryOffsets) + 4)
+	buf := index
+	for _, offset := range b.entryOffsets {
+		binary.BigEndian.PutUint32(buf[:4], offset)
+		buf = buf[4:]
+	}
+	// Write the number of entry offsets (not the number of bytes),
+	// to be read in `loadEntryIndex`.
+	binary.BigEndian.PutUint32(buf[:4], uint32(len(b.entryOffsets)))
+
+	return index
 }
 
 // Finish finishes the table by appending the index.
