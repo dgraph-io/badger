@@ -64,6 +64,10 @@ func bytes(sz int64) string {
 	return humanize.Bytes(uint64(sz))
 }
 
+func dur(src, dst time.Time) string {
+	return humanize.RelTime(dst, src, "earlier", "later")
+}
+
 func printInfo(dir, valueDir string) error {
 	if dir == "" {
 		return fmt.Errorf("--dir not supplied")
@@ -99,6 +103,7 @@ func printInfo(dir, valueDir string) error {
 	}
 
 	fmt.Println()
+	var baseTime time.Time
 	// fmt.Print("\n[Manifest]\n")
 	manifestTruncated := false
 	manifestInfo, ok := fileinfoByName[badger.ManifestFilename]
@@ -110,7 +115,8 @@ func printInfo(dir, valueDir string) error {
 			manifestTruncated = true
 		}
 
-		fmt.Printf("[%s] %-12s %6s MA%s\n", manifestInfo.ModTime().Format(time.RFC3339),
+		baseTime = manifestInfo.ModTime()
+		fmt.Printf("[%25s] %-12s %6s MA%s\n", manifestInfo.ModTime().Format(time.RFC3339),
 			manifestInfo.Name(), bytes(manifestInfo.Size()), truncatedString)
 	} else {
 		fmt.Printf("%s [MISSING]\n", manifestInfo.Name())
@@ -143,7 +149,7 @@ func printInfo(dir, valueDir string) error {
 				}
 				levelSizes[level] += fileSize
 				// (Put level on every line to make easier to process with sed/perl.)
-				fmt.Printf("[%s] %-12s %6s L%d%s\n", file.ModTime().Format(time.RFC3339),
+				fmt.Printf("[%25s] %-12s %6s L%d%s\n", dur(baseTime, file.ModTime()),
 					tableFile, bytes(fileSize), level, emptyString)
 			} else {
 				fmt.Printf("%s [MISSING]\n", tableFile)
@@ -180,7 +186,7 @@ func printInfo(dir, valueDir string) error {
 			numEmpty++
 		}
 		valueLogSize += fileSize
-		fmt.Printf("[%s] %-12s %6s VL%s\n", file.ModTime().Format(time.RFC3339), file.Name(),
+		fmt.Printf("[%25s] %-12s %6s VL%s\n", dur(baseTime, file.ModTime()), file.Name(),
 			bytes(fileSize), emptyString)
 
 		fileinfoMarked[file.Name()] = true
