@@ -30,7 +30,7 @@ var sstDir, vlogDir string
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:               "badger",
-	Short:             "Tool to manage Badger databases.",
+	Short:             "Tools to manage Badger database.",
 	PersistentPreRunE: validateRootCmdArgs,
 }
 
