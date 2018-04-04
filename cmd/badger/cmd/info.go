@@ -194,7 +194,8 @@ func printInfo(dir, valueDir string) error {
 		if numExtra == 0 {
 			fmt.Print("\n[EXTRA]\n")
 		}
-		fmt.Printf("[%s] %-12s %6s\n", file.ModTime().Format(time.RFC3339), file.Name(), bytes(file.Size()))
+		fmt.Printf("[%s] %-12s %6s\n", file.ModTime().Format(time.RFC3339),
+			file.Name(), bytes(file.Size()))
 		numExtra++
 	}
 
@@ -203,7 +204,8 @@ func printInfo(dir, valueDir string) error {
 		if numValueDirExtra == 0 {
 			fmt.Print("\n[ValueDir EXTRA]\n")
 		}
-		fmt.Printf("[%s] %-12s %6s\n", file.ModTime().Format(time.RFC3339), file.Name(), bytes(file.Size()))
+		fmt.Printf("[%s] %-12s %6s\n", file.ModTime().Format(time.RFC3339),
+			file.Name(), bytes(file.Size()))
 		numValueDirExtra++
 	}
 
@@ -226,7 +228,8 @@ func printInfo(dir, valueDir string) error {
 	fmt.Printf("%d extra %s.\n", totalExtra, pluralFiles(totalExtra))
 	fmt.Printf("%d missing %s.\n", numMissing, pluralFiles(numMissing))
 	fmt.Printf("%d empty %s.\n", numEmpty, pluralFiles(numEmpty))
-	fmt.Printf("%d truncated %s.\n", boolToNum(manifestTruncated), pluralManifest(manifestTruncated))
+	fmt.Printf("%d truncated %s.\n", boolToNum(manifestTruncated),
+		pluralManifest(manifestTruncated))
 
 	return nil
 }
