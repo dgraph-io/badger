@@ -599,6 +599,15 @@ We recommend using instances which provide local SSD storage, without any limit
 on the maximum IOPS. In AWS, these are storage optimized instances like i3. They
 provide local SSDs which clock 100K IOPS over 4KB blocks easily.
 
+- **I'm getting a closed channel error. Why?**
+
+```
+panic: close of closed channel
+panic: send on closed channel
+```
+
+If you're seeing panics like above, this would be because you're operating on a closed DB. This can happen, if you call `Close()` before sending a write, or multiple times. You should ensure that you only call `Close()` once, and all your read/write operations finish before closing.
+
 - **Are there any Go specific settings that I should use?**
 
 We *highly* recommend setting a high number for GOMAXPROCS, which allows Go to
