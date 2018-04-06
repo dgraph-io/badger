@@ -413,35 +413,39 @@ func (gs *garbageState) punchHoles(e Entry) error {
 	return nil
 }
 
-func (vlog *valueLog) rewrite(gs *garbageState, elog trace.EventLog) error {
-	if gs.holeStartOffset > 0 {
-	}
-	f := gs.f
-	elog.Printf("Removing fid: %d", gs.f.fid)
-	var deleteFileNow bool
-	// Entries written to LSM. Remove the older file now.
-	{
-		vlog.filesLock.Lock()
-		// Just a sanity-check.
-		if _, ok := vlog.filesMap[f.fid]; !ok {
-			vlog.filesLock.Unlock()
-			return errors.Errorf("Unable to find fid: %d", f.fid)
-		}
-		if vlog.numActiveIterators == 0 {
-			delete(vlog.filesMap, f.fid)
-			deleteFileNow = true
-		} else {
-			vlog.filesToBeDeleted = append(vlog.filesToBeDeleted, f.fid)
-		}
-		vlog.filesLock.Unlock()
-	}
-
-	if deleteFileNow {
-		vlog.deleteLogFile(f)
-	}
-
+func (vlog *valueLog) rewrite(lf *logFile) error {
 	return nil
 }
+
+// func (vlog *valueLog) rewrite(gs *garbageState, elog trace.EventLog) error {
+// if gs.holeStartOffset > 0 {
+// }
+// f := gs.f
+// elog.Printf("Removing fid: %d", gs.f.fid)
+// var deleteFileNow bool
+// // Entries written to LSM. Remove the older file now.
+// {
+// 	vlog.filesLock.Lock()
+// 	// Just a sanity-check.
+// 	if _, ok := vlog.filesMap[f.fid]; !ok {
+// 		vlog.filesLock.Unlock()
+// 		return errors.Errorf("Unable to find fid: %d", f.fid)
+// 	}
+// 	if vlog.numActiveIterators == 0 {
+// 		delete(vlog.filesMap, f.fid)
+// 		deleteFileNow = true
+// 	} else {
+// 		vlog.filesToBeDeleted = append(vlog.filesToBeDeleted, f.fid)
+// 	}
+// 	vlog.filesLock.Unlock()
+// }
+
+// if deleteFileNow {
+// 	vlog.deleteLogFile(f)
+// }
+
+// return nil
+// }
 
 func (vlog *valueLog) incrIteratorCount() {
 	atomic.AddInt32(&vlog.numActiveIterators, 1)
@@ -1001,9 +1005,9 @@ func (vlog *valueLog) doRunGC(discardRatio float64, head valuePointer) (err erro
 	}
 
 	vlog.elog.Printf("REWRITING VLOG %d\n", lf.fid)
-	if err = vlog.rewrite(gs, elog); err != nil {
-		return err
-	}
+	// if err = vlog.rewrite(gs, elog); err != nil {
+	// 	return err
+	// }
 	vlog.elog.Printf("Done rewriting.")
 	return nil
 }
