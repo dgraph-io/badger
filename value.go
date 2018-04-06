@@ -33,7 +33,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/dgraph-io/badger/options"
 
@@ -180,8 +179,84 @@ func (lf *logFile) sync() error {
 }
 
 var errStop = errors.New("Stop iteration")
+var errTruncate = errors.New("Do truncate")
 
 type logEntry func(e Entry, vp valuePointer) error
+
+type readFrom struct {
+	k []byte
+	v []byte
+
+	recordOffset uint32
+}
+
+func (r *readFrom) Entry(reader *bufio.Reader) (*Entry, error) {
+	hash := crc32.New(y.CastagnoliCrcTable)
+	tee := io.TeeReader(reader, hash)
+
+	var hbuf [headerBufSize]byte
+	var err error
+	if _, err = io.ReadFull(tee, hbuf[:]); err != nil {
+		return nil, err
+	}
+	// After punching holes even though the entries don't occoupy space on disk,
+	// read would return zeros. So, Skip all zeros
+	if bytes.Equal(hbuf[:], zeroHeader[:]) {
+		nextByte := byte(0x00)
+		count := 0
+		for nextByte == 0x00 {
+			nextByte, err = reader.ReadByte()
+			if err != nil {
+				return nil, err
+			}
+			count++
+		}
+		if err = reader.UnreadByte(); err != nil {
+			return nil, err
+		}
+		r.recordOffset += uint32(headerBufSize + count - 1)
+		return nil, nil
+	}
+
+	var h header
+	h.Decode(hbuf[:])
+	if h.klen > maxKeySize {
+		return nil, errTruncate
+	}
+	vl := int(h.vlen)
+	if cap(r.v) < vl {
+		r.v = make([]byte, 2*vl)
+	}
+
+	kl := int(h.klen)
+	if cap(r.k) < kl {
+		r.k = make([]byte, 2*kl)
+	}
+
+	e := &Entry{}
+	e.offset = r.recordOffset
+	e.Key = r.k[:kl]
+	e.Value = r.v[:vl]
+
+	if _, err = io.ReadFull(tee, e.Key); err != nil {
+		return nil, err
+	}
+	if _, err = io.ReadFull(tee, e.Value); err != nil {
+		return nil, err
+	}
+	var crcBuf [4]byte
+	if _, err = io.ReadFull(reader, crcBuf[:]); err != nil {
+		return nil, err
+	}
+	crc := binary.BigEndian.Uint32(crcBuf[:])
+	if crc != hash.Sum32() {
+		return nil, errTruncate
+	}
+	e.meta = h.meta
+	e.UserMeta = h.userMeta
+	e.ExpiresAt = h.expiresAt
+	return e, nil
+}
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
@@ -192,10 +267,9 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 	}
 
 	reader := bufio.NewReader(lf.fd)
-	var hbuf [headerBufSize]byte
-	var h header
-	k := make([]byte, 1<<10)
-	v := make([]byte, 1<<20)
+	// reader.Discard()
+
+	read := &readFrom{k: make([]byte, 10), v: make([]byte, 10)}
 
 	truncate := false
 	recordOffset := offset
@@ -203,95 +277,19 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 	var lastCommit uint64
 	var validEndOffset uint32
 	for {
-		hash := crc32.New(y.CastagnoliCrcTable)
-		tee := io.TeeReader(reader, hash)
-
-		// TODO: Move this entry decode into structs.go
-		if _, err = io.ReadFull(tee, hbuf[:]); err != nil {
-			if err == io.EOF {
-				break
-			} else if err == io.ErrUnexpectedEOF {
-				truncate = true
-				break
-			}
+		e, err := read.Entry(reader)
+		if err == io.EOF || err == io.ErrUnexpectedEOF || err == errTruncate {
+			truncate = true
+			break
+		} else if err != nil {
 			return err
-		}
-
-		// After punching holes even though the entries don't occoupy space on disk,
-		// read would return zeros. So, Skip all zeros
-		if bytes.Equal(hbuf[:], zeroHeader[:]) {
-			nextByte := byte(0x00)
-			count := 0
-			for nextByte == 0x00 {
-				nextByte, err = reader.ReadByte()
-				if err == io.EOF {
-					break
-				} else if err != nil {
-					return err
-				}
-				count++
-			}
-			if err = reader.UnreadByte(); err != nil {
-				return err
-			}
-			recordOffset += uint32(headerBufSize + count - 1)
+		} else if e == nil {
 			continue
 		}
 
-		var e Entry
-		e.offset = recordOffset
-		h.Decode(hbuf[:])
-		if h.klen > maxKeySize {
-			truncate = true
-			break
-		}
-		vl := int(h.vlen)
-		if cap(v) < vl {
-			v = make([]byte, 2*vl)
-		}
-
-		kl := int(h.klen)
-		if cap(k) < kl {
-			k = make([]byte, 2*kl)
-		}
-		e.Key = k[:kl]
-		e.Value = v[:vl]
-
-		if _, err = io.ReadFull(tee, e.Key); err != nil {
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				truncate = true
-				break
-			}
-			return err
-		}
-		if _, err = io.ReadFull(tee, e.Value); err != nil {
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				truncate = true
-				break
-			}
-			return err
-		}
-
-		var crcBuf [4]byte
-		if _, err = io.ReadFull(reader, crcBuf[:]); err != nil {
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				truncate = true
-				break
-			}
-			return err
-		}
-		crc := binary.BigEndian.Uint32(crcBuf[:])
-		if crc != hash.Sum32() {
-			truncate = true
-			break
-		}
-		e.meta = h.meta
-		e.UserMeta = h.userMeta
-		e.ExpiresAt = h.expiresAt
-
 		var vp valuePointer
-		vp.Len = headerBufSize + h.klen + h.vlen + uint32(len(crcBuf))
-		recordOffset += vp.Len
+		vp.Len = uint32(headerBufSize + len(e.Key) + len(e.Value) + 4) // len(crcBuf)
+		read.recordOffset += vp.Len
 
 		vp.Offset = e.offset
 		vp.Fid = lf.fid
@@ -330,7 +328,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		if vlog.opt.ReadOnly {
 			return ErrReplayNeeded
 		}
-		if err := fn(e, vp); err != nil {
+		if err := fn(*e, vp); err != nil {
 			if err == errStop {
 				break
 			}
@@ -358,85 +356,68 @@ func (vlog *valueLog) purgeEntry(keyWithTs []byte) (bool, error) {
 	return false, nil
 }
 
-func (vlog *valueLog) rewrite(f *logFile) error {
-	maxFid := atomic.LoadUint32(&vlog.maxFid)
-	y.AssertTruef(uint32(f.fid) < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
+type garbageState struct {
+	f               *logFile
+	vlog            *valueLog
+	holeStartOffset uint32
+	totalHoleLen    int64
 
-	elog := trace.NewEventLog("badger", "vlog-rewrite")
-	defer elog.Finish()
-	elog.Printf("Rewriting fid: %d", f.fid)
+	fileKeep  float64
+	fileTotal float64
+}
 
-	y.AssertTrue(vlog.kv != nil)
-	var count int
-	var holeStartOffset uint32
-	var totalHoleLen int64
-	fe := func(e Entry) error {
-		count++
-		if count%10000 == 0 {
-			elog.Printf("Processing entry %d", count)
-		}
-
-		vs, err := vlog.kv.get(e.Key)
-		if err != nil {
-			return err
-		}
-		if discardEntry(e, vs) {
-			return nil
-		}
-		if purge, err := vlog.purgeEntry(e.Key); err != nil {
-			return err
-		} else if purge {
-			return nil
-		}
-
-		// Value is still present in value log.
-		if len(vs.Value) == 0 {
-			return errors.Errorf("Empty value: %+v", vs)
-		}
-		var vp valuePointer
-		vp.Decode(vs.Value)
-
-		if vp.Fid > f.fid {
-			return nil
-		}
-		if vp.Offset > e.offset {
-			return nil
-		}
-		if vp.Fid == f.fid && vp.Offset == e.offset {
-			if holeLen := int64(e.offset - holeStartOffset); holeLen > minHoleLen {
-				f.lock.Lock()
-				y.Ignore(y.PunchHole(int(f.fd.Fd()), int64(holeStartOffset), holeLen))
-				f.lock.Unlock()
-				totalHoleLen += holeLen
-			}
-			holeStartOffset = e.offset + vp.Len
-		} else {
-			log.Printf("WARNING: This entry should have been caught. %+v\n", e)
-		}
-		return nil
-	}
-
-	err := vlog.iterate(f, 0, func(e Entry, vp valuePointer) error {
-		return fe(e)
-	})
+func (gs *garbageState) punchHoles(e Entry) error {
+	// TODO: Check if e is a rewritten entry, using meta.
+	// If so, use the rewrite key.
+	vs, err := gs.vlog.kv.get(e.Key)
 	if err != nil {
 		return err
 	}
-
-	if holeStartOffset > 0 {
-		vlog.lfDiscardStats.Lock()
-		// If the holes are fragmented then we would not punch any holes,
-		// and this file might stop other files from being chosen if the
-		// discard ratio is high. So setting it to zero instead of doing
-		// `-= totalHoleLen`
-		vlog.lfDiscardStats.m[f.fid] = 0
-		vlog.lfDiscardStats.Unlock()
-		if totalHoleLen == 0 {
-			return ErrNoRewrite
-		}
+	if discardEntry(e, vs) {
 		return nil
 	}
-	elog.Printf("Removing fid: %d", f.fid)
+	if purge, err := gs.vlog.purgeEntry(e.Key); err != nil {
+		return err
+	} else if purge {
+		return nil
+	}
+
+	// Value is still present in value log.
+	if len(vs.Value) == 0 {
+		return errors.Errorf("Empty value: %+v", vs)
+	}
+	var vp valuePointer
+	vp.Decode(vs.Value)
+
+	if vp.Fid > gs.f.fid {
+		return nil
+	}
+	if vp.Offset > e.offset {
+		return nil
+	}
+	if vp.Fid == gs.f.fid && vp.Offset == e.offset {
+		gs.fileKeep += float64(vp.Len)
+		if holeLen := int64(e.offset - gs.holeStartOffset); holeLen > minHoleLen {
+			// Can punch a hole till the beginning of this valid entry.
+			gs.f.lock.Lock()
+			err := y.PunchHole(int(gs.f.fd.Fd()), int64(gs.holeStartOffset), holeLen)
+			gs.f.lock.Unlock()
+			if err == nil {
+				gs.totalHoleLen += holeLen
+			}
+		}
+		gs.holeStartOffset = e.offset + vp.Len // End of this entry.
+	} else {
+		log.Printf("WARNING: This entry should have been caught. %+v\n", e)
+	}
+	return nil
+}
+
+func (vlog *valueLog) rewrite(gs *garbageState, elog trace.EventLog) error {
+	if gs.holeStartOffset > 0 {
+	}
+	f := gs.f
+	elog.Printf("Removing fid: %d", gs.f.fid)
 	var deleteFileNow bool
 	// Entries written to LSM. Remove the older file now.
 	{
@@ -970,122 +951,57 @@ func discardEntry(e Entry, vs y.ValueStruct) bool {
 	return false
 }
 
-func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error) {
+func (vlog *valueLog) doRunGC(discardRatio float64, head valuePointer) (err error) {
 	// Pick a log file for GC
 	lf := vlog.pickLog(head)
 	if lf == nil {
-		return ErrNoRewrite
+		return ErrNoCleanup
 	}
 
 	// Update stats before exiting
 	defer func() {
+		// TODO: This needs to be fixed up to consider the various exit events.
 		if err == nil {
+			// If the holes are fragmented then we would not punch any holes,
+			// and this file might stop other files from being chosen if the
+			// discard ratio is high. So setting it to zero instead of doing
+			// `-= totalHoleLen`
 			vlog.lfDiscardStats.Lock()
 			delete(vlog.lfDiscardStats.m, lf.fid)
 			vlog.lfDiscardStats.Unlock()
 		}
 	}()
 
-	type reason struct {
-		total   float64
-		keep    float64
-		discard float64
-	}
-
-	var r reason
-	var window = 100.0
-	count := 0
-
-	// Pick a random start point for the log.
-	skipFirstM := float64(rand.Intn(int(vlog.opt.ValueLogFileSize/mi))) - window
-	var skipped float64
-
-	start := time.Now()
 	y.AssertTrue(vlog.kv != nil)
-	s := new(y.Slice)
+	elog := trace.NewEventLog("badger", "vlog-gc")
+	gs := &garbageState{f: lf, vlog: vlog}
+
+	var count int
 	err = vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
-		esz := float64(vp.Len) / (1 << 20) // in MBs. +4 for the CAS stuff.
-		skipped += esz
-		if skipped < skipFirstM {
-			return nil
-		}
-
 		count++
-		if count%100 == 0 {
-			time.Sleep(time.Millisecond)
+		if count%10000 == 0 {
+			elog.Printf("Processing entry %d", count)
 		}
-		r.total += esz
-		if r.total > window {
-			return errStop
-		}
-		if time.Since(start) > 10*time.Second {
-			return errStop
-		}
-
-		vs, err := vlog.kv.get(e.Key)
-		if err != nil {
-			return err
-		}
-		if discardEntry(e, vs) {
-			r.discard += esz
-			return nil
-		}
-		if purge, err := vlog.purgeEntry(e.Key); err != nil {
-			return err
-		} else if purge {
-			r.discard += esz
-			return nil
-		}
-
-		// Value is still present in value log.
-		y.AssertTrue(len(vs.Value) > 0)
-		vp.Decode(vs.Value)
-
-		if vp.Fid > lf.fid {
-			// Value is present in a later log. Discard.
-			r.discard += esz
-			return nil
-		}
-		if vp.Offset > e.offset {
-			// Value is present in a later offset, but in the same log.
-			r.discard += esz
-			return nil
-		}
-		if vp.Fid == lf.fid && vp.Offset == e.offset {
-			// This is still the active entry. This would need to be rewritten.
-			r.keep += esz
-
-		} else {
-			vlog.elog.Printf("Reason=%+v\n", r)
-
-			buf, cb, err := vlog.readValueBytes(vp, s)
-			if err != nil {
-				return errStop
-			}
-			ne := valueBytesToEntry(buf)
-			ne.offset = vp.Offset
-			ne.print("Latest Entry Header in LSM")
-			e.print("Latest Entry in Log")
-			runCallback(cb)
-			return errors.Errorf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.",
-				vp, vs.Meta)
-		}
-		return nil
+		gs.fileTotal += float64(vp.Len)
+		return gs.punchHoles(e)
 	})
-
 	if err != nil {
 		vlog.elog.Errorf("Error while iterating for RunGC: %v", err)
 		return err
 	}
-	vlog.elog.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
+	vlog.elog.Printf("Fid: %d Data status=%+v\n", lf.fid, gs)
 
-	if r.discard < gcThreshold*r.total {
+	if gs.fileKeep > (1.0-discardRatio)*gs.fileTotal {
 		vlog.elog.Printf("Skipping GC on fid: %d\n\n", lf.fid)
-		return ErrNoRewrite
+		if gs.totalHoleLen > 0 {
+			// Cleaned up via punching holes.
+			return nil
+		}
+		return ErrNoCleanup
 	}
 
 	vlog.elog.Printf("REWRITING VLOG %d\n", lf.fid)
-	if err = vlog.rewrite(lf); err != nil {
+	if err = vlog.rewrite(gs, elog); err != nil {
 		return err
 	}
 	vlog.elog.Printf("Done rewriting.")
@@ -1102,7 +1018,7 @@ func (vlog *valueLog) waitOnGC(lc *y.Closer) {
 	vlog.garbageCh <- struct{}{}
 }
 
-func (vlog *valueLog) runGC(gcThreshold float64, head valuePointer) error {
+func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
 		// Run GC
@@ -1112,14 +1028,14 @@ func (vlog *valueLog) runGC(gcThreshold float64, head valuePointer) error {
 		)
 		numFiles := len(vlog.sortedFids())
 		for count < numFiles {
-			err = vlog.doRunGC(gcThreshold, head)
+			err = vlog.doRunGC(discardRatio, head)
 			if err != nil {
 				break
 			}
 			count++
 		}
 		<-vlog.garbageCh
-		if err == ErrNoRewrite && count > 0 {
+		if err == ErrNoCleanup && count > 0 {
 			return nil
 		}
 		return err

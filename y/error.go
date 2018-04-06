@@ -37,6 +37,8 @@ import (
 
 var debugMode = true
 
+var ErrNotSupported = errors.New("Operation not supported")
+
 // Ignore ignores the error
 func Ignore(err error) {
 }
