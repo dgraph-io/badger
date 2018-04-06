@@ -183,14 +183,14 @@ var errTruncate = errors.New("Do truncate")
 
 type logEntry func(e Entry, vp valuePointer) error
 
-type readFrom struct {
+type safeRead struct {
 	k []byte
 	v []byte
 
 	recordOffset uint32
 }
 
-func (r *readFrom) Entry(reader *bufio.Reader) (*Entry, error) {
+func (r *safeRead) Entry(reader *bufio.Reader) (*Entry, error) {
 	hash := crc32.New(y.CastagnoliCrcTable)
 	tee := io.TeeReader(reader, hash)
 
@@ -239,13 +239,22 @@ func (r *readFrom) Entry(reader *bufio.Reader) (*Entry, error) {
 	e.Value = r.v[:vl]
 
 	if _, err = io.ReadFull(tee, e.Key); err != nil {
+		if err == io.EOF {
+			err = errTruncate
+		}
 		return nil, err
 	}
 	if _, err = io.ReadFull(tee, e.Value); err != nil {
+		if err == io.EOF {
+			err = errTruncate
+		}
 		return nil, err
 	}
 	var crcBuf [4]byte
 	if _, err = io.ReadFull(reader, crcBuf[:]); err != nil {
+		if err == io.EOF {
+			err = errTruncate
+		}
 		return nil, err
 	}
 	crc := binary.BigEndian.Uint32(crcBuf[:])
@@ -267,18 +276,21 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 	}
 
 	reader := bufio.NewReader(lf.fd)
-	// reader.Discard()
-
-	read := &readFrom{k: make([]byte, 10), v: make([]byte, 10)}
+	read := &safeRead{
+		k:            make([]byte, 10),
+		v:            make([]byte, 10),
+		recordOffset: offset,
+	}
 
 	truncate := false
-	recordOffset := offset
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	var lastCommit uint64
 	var validEndOffset uint32
 	for {
 		e, err := read.Entry(reader)
-		if err == io.EOF || err == io.ErrUnexpectedEOF || err == errTruncate {
+		if err == io.EOF {
+			break
+		} else if err == io.ErrUnexpectedEOF || err == errTruncate {
 			truncate = true
 			break
 		} else if err != nil {
@@ -306,14 +318,14 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 			}
 			// Got the end of txn. Now we can store them.
 			lastCommit = 0
-			validEndOffset = recordOffset
+			validEndOffset = read.recordOffset
 		} else if e.meta&bitTxn == 0 {
 			// We shouldn't get this entry in the middle of a transaction.
 			if lastCommit != 0 {
 				truncate = true
 				break
 			}
-			validEndOffset = recordOffset
+			validEndOffset = read.recordOffset
 		} else {
 			txnTs := y.ParseTs(e.Key)
 			if lastCommit == 0 {
@@ -361,6 +373,7 @@ type garbageState struct {
 	vlog            *valueLog
 	holeStartOffset uint32
 	totalHoleLen    int64
+	validPtrs       []valuePointer
 
 	fileKeep  float64
 	fileTotal float64
@@ -397,6 +410,9 @@ func (gs *garbageState) punchHoles(e Entry) error {
 	}
 	if vp.Fid == gs.f.fid && vp.Offset == e.offset {
 		gs.fileKeep += float64(vp.Len)
+		gs.validPtrs = append(gs.validPtrs, vp) // Valid entry. Store for potential rewrite.
+
+		fmt.Printf("hole len: %d\n", e.offset-gs.holeStartOffset)
 		if holeLen := int64(e.offset - gs.holeStartOffset); holeLen > minHoleLen {
 			// Can punch a hole till the beginning of this valid entry.
 			gs.f.lock.Lock()
@@ -405,6 +421,7 @@ func (gs *garbageState) punchHoles(e Entry) error {
 			if err == nil {
 				gs.totalHoleLen += holeLen
 			}
+			fmt.Printf("Error while punching hole: %v\n", err)
 		}
 		gs.holeStartOffset = e.offset + vp.Len // End of this entry.
 	} else {
@@ -413,8 +430,11 @@ func (gs *garbageState) punchHoles(e Entry) error {
 	return nil
 }
 
-func (vlog *valueLog) rewrite(lf *logFile) error {
-	return nil
+func (vlog *valueLog) rewrite(gs *garbageState, elog trace.EventLog) error {
+	elog.Printf("Valid entries found: %d", len(gs.validPtrs))
+	if len(gs.validPtrs) == 0 {
+		// Just delete the file.
+	}
 }
 
 // func (vlog *valueLog) rewrite(gs *garbageState, elog trace.EventLog) error {
@@ -955,13 +975,7 @@ func discardEntry(e Entry, vs y.ValueStruct) bool {
 	return false
 }
 
-func (vlog *valueLog) doRunGC(discardRatio float64, head valuePointer) (err error) {
-	// Pick a log file for GC
-	lf := vlog.pickLog(head)
-	if lf == nil {
-		return ErrNoCleanup
-	}
-
+func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64) (err error) {
 	// Update stats before exiting
 	defer func() {
 		// TODO: This needs to be fixed up to consider the various exit events.
@@ -1032,7 +1046,12 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 		)
 		numFiles := len(vlog.sortedFids())
 		for count < numFiles {
-			err = vlog.doRunGC(discardRatio, head)
+			// Pick a log file for GC
+			if lf := vlog.pickLog(head); lf != nil {
+				err = vlog.doRunGC(lf, discardRatio)
+			} else {
+				err = ErrNoCleanup
+			}
 			if err != nil {
 				break
 			}

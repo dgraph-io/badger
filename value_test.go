@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"math/rand"
 	"os"
 	"testing"
@@ -28,7 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// var maxHead = valuePointer{Fid: math.MaxUint32}
+var maxHead = valuePointer{Fid: math.MaxUint32}
 
 func TestValueBasic(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
@@ -114,29 +115,35 @@ func TestValueGC(t *testing.T) {
 	}
 
 	kv.vlog.filesLock.RLock()
-	// lf := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
+	lf := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
-	// err = kv.vlog.doRunGC(0.0, maxHead)
+	fi, err := lf.fd.Stat()
+	y.Check(err)
+	fmt.Println(fi.Size())
+	err = kv.vlog.doRunGC(lf, 0.0)
 	fmt.Println("Error doRunGC: ", err)
+	fi, err = lf.fd.Stat()
+	y.Check(err)
+	fmt.Println(fi.Size())
 	//	lf.iterate(0, func(e Entry) bool {
 	//		e.print("lf")
 	//		return true
 	//	})
 
 	// kv.vlog.rewrite(lf)
-	// for i := 45; i < 100; i++ {
-	// 	key := []byte(fmt.Sprintf("key%d", i))
+	for i := 45; i < 100; i++ {
+		key := []byte(fmt.Sprintf("key%d", i))
 
-	// 	require.NoError(t, kv.View(func(txn *Txn) error {
-	// 		item, err := txn.Get(key)
-	// 		require.NoError(t, err)
-	// 		val := getItemValue(t, item)
-	// 		require.NotNil(t, val)
-	// 		require.True(t, len(val) == sz, "Size found: %d", len(val))
-	// 		return nil
-	// 	}))
-	// }
+		require.NoError(t, kv.View(func(txn *Txn) error {
+			item, err := txn.Get(key)
+			require.NoError(t, err)
+			val := getItemValue(t, item)
+			require.NotNil(t, val)
+			require.True(t, len(val) == sz, "Size found: %d", len(val))
+			return nil
+		}))
+	}
 }
 
 func TestValueGC2(t *testing.T) {
