@@ -24,6 +24,7 @@ import (
 )
 
 var backupFile string
+var truncate bool
 
 // backupCmd represents the backup command
 var backupCmd = &cobra.Command{
@@ -42,6 +43,8 @@ func init() {
 	RootCmd.AddCommand(backupCmd)
 	backupCmd.Flags().StringVarP(&backupFile, "backup-file", "f",
 		"badger.bak", "File to backup to")
+	backupCmd.Flags().BoolVarP(&truncate, "truncate", "t",
+		false, "Allow value log truncation if required.")
 }
 
 func doBackup(cmd *cobra.Command, args []string) error {
@@ -49,6 +52,7 @@ func doBackup(cmd *cobra.Command, args []string) error {
 	opts := badger.DefaultOptions
 	opts.Dir = sstDir
 	opts.ValueDir = vlogDir
+	opts.Truncate = truncate
 	db, err := badger.Open(opts)
 	if err != nil {
 		return err

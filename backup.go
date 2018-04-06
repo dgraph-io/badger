@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/binary"
 	"io"
+	"log"
 	"sync"
 
 	"github.com/dgraph-io/badger/y"
@@ -44,7 +45,8 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 			}
 			val, err := item.Value()
 			if err != nil {
-				return err
+				log.Printf("Key [%x]. Error while fetching value [%v]\n", item.Key(), err)
+				continue
 			}
 
 			entry := &protos.KVPair{
