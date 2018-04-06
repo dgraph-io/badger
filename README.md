@@ -589,11 +589,24 @@ get compacted to disk. The compaction would only happen once `MaxTableSize` has 
 you're doing a few writes and then checking, you might not see anything on disk. Once you `Close`
 the database, you'll see these writes on disk.
 
+- **Reverse iteration doesn't give me the right results.**
+
+Just like forward iteration goes to the first key which is equal or greater than the SEEK key, reverse iteration goes to the first key which is equal or lesser than the SEEK key. Therefore, SEEK key would not be part of the results. You can typically add a tilde (~) as a suffix to the SEEK key to include it in the results. See the following issues: [#436](https://github.com/dgraph-io/badger/issues/436) and [#347](https://github.com/dgraph-io/badger/issues/347).
+
 - **Which instances should I use for Badger?**
 
 We recommend using instances which provide local SSD storage, without any limit
 on the maximum IOPS. In AWS, these are storage optimized instances like i3. They
 provide local SSDs which clock 100K IOPS over 4KB blocks easily.
+
+- **I'm getting a closed channel error. Why?**
+
+```
+panic: close of closed channel
+panic: send on closed channel
+```
+
+If you're seeing panics like above, this would be because you're operating on a closed DB. This can happen, if you call `Close()` before sending a write, or multiple times. You should ensure that you only call `Close()` once, and all your read/write operations finish before closing.
 
 - **Are there any Go specific settings that I should use?**
 

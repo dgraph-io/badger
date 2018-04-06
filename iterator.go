@@ -53,18 +53,30 @@ type Item struct {
 	txn       *Txn
 }
 
+// String returns a string representation of Item
+func (item *Item) String() string {
+	return fmt.Sprintf("key=%q, version=%d, meta=%x", item.Key(), item.Version(), item.meta)
+}
+
+// Deprecated
 // ToString returns a string representation of Item
 func (item *Item) ToString() string {
-	return fmt.Sprintf("key=%q, version=%d, meta=%x", item.Key(), item.Version(), item.meta)
-
+	return item.String()
 }
 
 // Key returns the key.
 //
 // Key is only valid as long as item is valid, or transaction is valid.  If you need to use it
-// outside its validity, please copy it.
+// outside its validity, please use KeyCopy
 func (item *Item) Key() []byte {
 	return item.key
+}
+
+// KeyCopy returns a copy of the key of the item, writing it to dst slice.
+// If nil is passed, or capacity of dst isn't sufficient, a new slice would be allocated and
+// returned.
+func (item *Item) KeyCopy(dst []byte) []byte {
+	return y.SafeCopy(dst, item.key)
 }
 
 // Version returns the commit timestamp of the item.
@@ -116,6 +128,11 @@ func (item *Item) hasValue() bool {
 		return false
 	}
 	return true
+}
+
+// IsDeletedOrExpired returns true if item contains deleted or expired value.
+func (item *Item) IsDeletedOrExpired() bool {
+	return isDeletedOrExpired(item.meta, item.expiresAt)
 }
 
 func (item *Item) yieldItemValue() ([]byte, func(), error) {

@@ -14,20 +14,9 @@
  * limitations under the License.
  */
 
-/*
-badger_info
-
-Usage: badger_info --dir x [--value-dir y]
-
-This command prints information about the badger key-value store.  It reads MANIFEST and prints its
-info. It also prints info about missing/extra files, and general information about the value log
-files (which are not referenced by the manifest).  Use this tool to report any issues about Badger
-to the Dgraph team.
-*/
-package main
+package cmd
 
 import (
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -38,19 +27,38 @@ import (
 
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/table"
+	humanize "github.com/dustin/go-humanize"
+	"github.com/spf13/cobra"
 )
 
-func main() {
-	dirFlag := flag.String("dir", "", "The Badger database's index directory")
-	valueDirFlag := flag.String("value-dir", "",
-		"The Badger database's value log directory, if different from the index directory")
+var infoCmd = &cobra.Command{
+	Use:   "info",
+	Short: "Health info about Badger database.",
+	Long: `
+This command prints information about the badger key-value store.  It reads MANIFEST and prints its
+info. It also prints info about missing/extra files, and general information about the value log
+files (which are not referenced by the manifest).  Use this tool to report any issues about Badger
+to the Dgraph team.
+`,
+	Run: func(cmd *cobra.Command, args []string) {
+		err := printInfo(sstDir, vlogDir)
+		if err != nil {
+			fmt.Println("Error:", err.Error())
+			os.Exit(1)
+		}
+	},
+}
 
-	flag.Parse()
-	err := printInfo(*dirFlag, *valueDirFlag)
-	if err != nil {
-		fmt.Println("Error:", err.Error())
-		os.Exit(1)
-	}
+func init() {
+	RootCmd.AddCommand(infoCmd)
+}
+
+func bytes(sz int64) string {
+	return humanize.Bytes(uint64(sz))
+}
+
+func dur(src, dst time.Time) string {
+	return humanize.RelTime(dst, src, "earlier", "later")
 }
 
 func printInfo(dir, valueDir string) error {
@@ -87,7 +95,9 @@ func printInfo(dir, valueDir string) error {
 		fileinfoMarked[info.Name()] = false
 	}
 
-	fmt.Print("[Manifest]\n")
+	fmt.Println()
+	var baseTime time.Time
+	// fmt.Print("\n[Manifest]\n")
 	manifestTruncated := false
 	manifestInfo, ok := fileinfoByName[badger.ManifestFilename]
 	if ok {
@@ -98,8 +108,9 @@ func printInfo(dir, valueDir string) error {
 			manifestTruncated = true
 		}
 
-		fmt.Printf("%-12s %10d  %s%s\n", manifestInfo.Name(), manifestInfo.Size(),
-			manifestInfo.ModTime().Format(time.RFC3339), truncatedString)
+		baseTime = manifestInfo.ModTime()
+		fmt.Printf("[%25s] %-12s %6s MA%s\n", manifestInfo.ModTime().Format(time.RFC3339),
+			manifestInfo.Name(), bytes(manifestInfo.Size()), truncatedString)
 	} else {
 		fmt.Printf("%s [MISSING]\n", manifestInfo.Name())
 	}
@@ -109,7 +120,7 @@ func printInfo(dir, valueDir string) error {
 
 	levelSizes := make([]int64, len(manifest.Levels))
 	for level, lm := range manifest.Levels {
-		fmt.Printf("[Level %d]\n", level)
+		// fmt.Printf("\n[Level %d]\n", level)
 		// We create a sorted list of table ID's so that output is in consistent order.
 		tableIDs := make([]uint64, 0, len(lm.Tables))
 		for id := range lm.Tables {
@@ -131,8 +142,8 @@ func printInfo(dir, valueDir string) error {
 				}
 				levelSizes[level] += fileSize
 				// (Put level on every line to make easier to process with sed/perl.)
-				fmt.Printf("%-12s %10d  %s %d%s\n", tableFile, fileSize,
-					file.ModTime().Format(time.RFC3339), level, emptyString)
+				fmt.Printf("[%25s] %-12s %6s L%d%s\n", dur(baseTime, file.ModTime()),
+					tableFile, bytes(fileSize), level, emptyString)
 			} else {
 				fmt.Printf("%s [MISSING]\n", tableFile)
 				numMissing++
@@ -152,7 +163,7 @@ func printInfo(dir, valueDir string) error {
 	valueDirExtras := []os.FileInfo{}
 
 	valueLogSize := int64(0)
-	fmt.Print("[Value Log]\n")
+	// fmt.Print("\n[Value Log]\n")
 	for _, file := range valueDirFileinfos {
 		if !strings.HasSuffix(file.Name(), ".vlog") {
 			if valueDir != dir {
@@ -168,8 +179,8 @@ func printInfo(dir, valueDir string) error {
 			numEmpty++
 		}
 		valueLogSize += fileSize
-		fmt.Printf("%-12s %10d  %s%s\n", file.Name(), fileSize,
-			file.ModTime().Format(time.RFC3339), emptyString)
+		fmt.Printf("[%25s] %-12s %6s VL%s\n", dur(baseTime, file.ModTime()), file.Name(),
+			bytes(fileSize), emptyString)
 
 		fileinfoMarked[file.Name()] = true
 	}
@@ -180,29 +191,33 @@ func printInfo(dir, valueDir string) error {
 			continue
 		}
 		if numExtra == 0 {
-			fmt.Print("[EXTRA]\n")
+			fmt.Print("\n[EXTRA]\n")
 		}
-		fmt.Printf("%-12s %10d  %s\n", file.Name(), file.Size(), file.ModTime().Format(time.RFC3339))
+		fmt.Printf("[%s] %-12s %6s\n", file.ModTime().Format(time.RFC3339),
+			file.Name(), bytes(file.Size()))
 		numExtra++
 	}
 
 	numValueDirExtra := 0
 	for _, file := range valueDirExtras {
 		if numValueDirExtra == 0 {
-			fmt.Print("[ValueDir EXTRA]\n")
+			fmt.Print("\n[ValueDir EXTRA]\n")
 		}
-		fmt.Printf("%-12s %10d  %s\n", file.Name(), file.Size(), file.ModTime().Format(time.RFC3339))
+		fmt.Printf("[%s] %-12s %6s\n", file.ModTime().Format(time.RFC3339),
+			file.Name(), bytes(file.Size()))
 		numValueDirExtra++
 	}
 
-	fmt.Print("[Summary]\n")
+	fmt.Print("\n[Summary]\n")
 	totalIndexSize := int64(0)
 	for i, sz := range levelSizes {
-		fmt.Printf("Level %d size: %d\n", i, sz)
+		fmt.Printf("Level %d size: %12s\n", i, bytes(sz))
 		totalIndexSize += sz
 	}
-	fmt.Printf("Total index size: %d\n", totalIndexSize)
-	fmt.Printf("Value log size: %d\n", valueLogSize)
+
+	fmt.Printf("Total index size: %8s\n", bytes(totalIndexSize))
+	fmt.Printf("Value log size: %10s\n", bytes(valueLogSize))
+	fmt.Println()
 	totalExtra := numExtra + numValueDirExtra
 	if totalExtra == 0 && numMissing == 0 && numEmpty == 0 && !manifestTruncated {
 		fmt.Println("Abnormalities: None.")
@@ -212,7 +227,8 @@ func printInfo(dir, valueDir string) error {
 	fmt.Printf("%d extra %s.\n", totalExtra, pluralFiles(totalExtra))
 	fmt.Printf("%d missing %s.\n", numMissing, pluralFiles(numMissing))
 	fmt.Printf("%d empty %s.\n", numEmpty, pluralFiles(numEmpty))
-	fmt.Printf("%d truncated %s.\n", boolToNum(manifestTruncated), pluralManifest(manifestTruncated))
+	fmt.Printf("%d truncated %s.\n", boolToNum(manifestTruncated),
+		pluralManifest(manifestTruncated))
 
 	return nil
 }
