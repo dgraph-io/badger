@@ -170,6 +170,11 @@ func Open(opt Options) (db *DB, err error) {
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
+	if opt.ReadOnly {
+		// Can't truncate if the DB is read only.
+		opt.Truncate = false
+	}
+
 	for _, path := range []string{opt.Dir, opt.ValueDir} {
 		dirExists, err := exists(path)
 		if err != nil {
