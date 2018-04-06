@@ -357,6 +357,7 @@ func TestChecksums(t *testing.T) {
 
 	// Set up SST with K1=V1
 	opts := getTestOptions(dir)
+	opts.Truncate = true
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
 	kv, err := Open(opts)
 	require.NoError(t, err)
@@ -439,6 +440,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 
 	// Create skeleton files.
 	opts := getTestOptions(dir)
+	opts.Truncate = true
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
 	kv, err := Open(opts)
 	require.NoError(t, err)
