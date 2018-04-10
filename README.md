@@ -67,7 +67,7 @@ in specific directories, which contain the data for a single database.
 
 To open your database, use the `badger.Open()` function, with the appropriate
 options. The `Dir` and `ValueDir` options are mandatory and must be
-specified by the client. They can be set to the same value to simplify things.
+specified by the client and exist. They can be set to the same value to simplify things.
 
 ```go
 package main
@@ -84,7 +84,7 @@ func main() {
   opts := badger.DefaultOptions
   opts.Dir = "/tmp/badger"
   opts.ValueDir = "/tmp/badger"
-  db, err := badger.Open(opts)
+  db, err := badger.Open(&opts)
   if err != nil {
 	  log.Fatal(err)
   }
