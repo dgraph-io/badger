@@ -72,6 +72,8 @@ type Options struct {
 
 	// Size of single value log file.
 	ValueLogFileSize int64
+	// Maximum size used for value log memory buffer.
+	MaxValueLogBufSize int
 
 	// Number of compaction workers to run concurrently.
 	NumCompactors int
@@ -116,7 +118,8 @@ var DefaultOptions = Options{
 	SyncWrites:              true,
 	// Nothing to read/write value log using standard File I/O
 	// MemoryMap to mmap() the value log files
-	ValueLogFileSize: 1 << 30,
-	ValueThreshold:   20,
-	Truncate:         false,
+	ValueLogFileSize:   1 << 30,
+	MaxValueLogBufSize: 64 << 20,
+	ValueThreshold:     20,
+	Truncate:           false,
 }

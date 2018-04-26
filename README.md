@@ -470,6 +470,7 @@ the `Options` struct that is passed in when opening the database using
 - Mode in which LSM tree is loaded (`Options.TableLoadingMode`)
 - Size of table (`Options.MaxTableSize`)
 - Size of value log file (`Options.ValueLogFileSize`)
+- Max amount of memory to use to buffer the value log (`Options.MaxValueLogBufSize`)
 
 If you want to decrease the memory usage of Badger instance, tweak these
 options (ideally one at a time) until you achieve the desired
