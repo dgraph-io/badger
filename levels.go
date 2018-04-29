@@ -262,6 +262,23 @@ func (s *levelsController) compactBuildTables(
 	topTables := cd.top
 	botTables := cd.bot
 
+	var hasOverlap bool
+	{
+		kr := getKeyRange(cd.top)
+		for i, lh := range s.levels {
+			if i <= l { // Skip upper levels.
+				continue
+			}
+			lh.RLock()
+			left, right := lh.overlappingTables(levelHandlerRLocked{}, kr)
+			lh.RUnlock()
+			if right-left > 0 {
+				hasOverlap = true
+				break
+			}
+		}
+	}
+
 	// Create iterators across all the tables involved first.
 	var iters []y.Iterator
 	if l == 0 {
@@ -288,14 +305,29 @@ func (s *levelsController) compactBuildTables(
 	for ; it.Valid(); i++ {
 		timeStart := time.Now()
 		builder := table.NewTableBuilder()
+		var numKeys uint64
 		for ; it.Valid(); it.Next() {
 			if builder.ReachedCapacity(s.kv.opt.MaxTableSize) {
 				break
 			}
+			// TODO: If bottom tables are empty, and the keys are expired, then just skip them.
+			if !hasOverlap { // No range overlap with the keys.
+				vs := it.Value()
+				if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
+					version := y.ParseTs(it.Key())
+					var dst []byte
+					dst = append(dst, it.Key()...)
+					cd.elog.LazyPrintf("Skipping key: %x. Version: %d", dst, version)
+					continue // Skip adding this key.
+				}
+			}
+			numKeys++
 			y.Check(builder.Add(it.Key(), it.Value()))
 		}
 		// It was true that it.Valid() at least once in the loop above, which means we
 		// called Add() at least once, and builder is not Empty().
+		// TODO: Deal with builder being empty.
+		cd.elog.LazyPrintf("Added %d keys", numKeys)
 		y.AssertTrue(!builder.Empty())
 
 		cd.elog.LazyPrintf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
@@ -486,40 +518,41 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	thisLevel := cd.thisLevel
 	nextLevel := cd.nextLevel
 
-	if thisLevel.level >= 1 && len(cd.bot) == 0 {
-		y.AssertTrue(len(cd.top) == 1)
-		tbl := cd.top[0]
+	// TODO: Probably skip this one. Table should never be moved directly, always be rewritten.
+	// if thisLevel.level >= 1 && len(cd.bot) == 0 {
+	// 	y.AssertTrue(len(cd.top) == 1)
+	// 	tbl := cd.top[0]
 
-		// We write to the manifest _before_ we delete files (and after we created files).
-		changes := []*protos.ManifestChange{
-			// The order matters here -- you can't temporarily have two copies of the same
-			// table id when reloading the manifest.
-			makeTableDeleteChange(tbl.ID()),
-			makeTableCreateChange(tbl.ID(), nextLevel.level),
-		}
-		if err := s.kv.manifest.addChanges(changes); err != nil {
-			return err
-		}
+	// 	// We write to the manifest _before_ we delete files (and after we created files).
+	// 	changes := []*protos.ManifestChange{
+	// 		// The order matters here -- you can't temporarily have two copies of the same
+	// 		// table id when reloading the manifest.
+	// 		makeTableDeleteChange(tbl.ID()),
+	// 		makeTableCreateChange(tbl.ID(), nextLevel.level),
+	// 	}
+	// 	if err := s.kv.manifest.addChanges(changes); err != nil {
+	// 		return err
+	// 	}
 
-		// We have to add to nextLevel before we remove from thisLevel, not after.  This way, we
-		// don't have a bug where reads would see keys missing from both levels.
+	// 	// We have to add to nextLevel before we remove from thisLevel, not after.  This way, we
+	// 	// don't have a bug where reads would see keys missing from both levels.
 
-		// Note: It's critical that we add tables (replace them) in nextLevel before deleting them
-		// in thisLevel.  (We could finagle it atomically somehow.)  Also, when reading we must
-		// read, or at least acquire s.RLock(), in increasing order by level, so that we don't skip
-		// a compaction.
+	// 	// Note: It's critical that we add tables (replace them) in nextLevel before deleting them
+	// 	// in thisLevel.  (We could finagle it atomically somehow.)  Also, when reading we must
+	// 	// read, or at least acquire s.RLock(), in increasing order by level, so that we don't skip
+	// 	// a compaction.
 
-		if err := nextLevel.replaceTables(cd.top); err != nil {
-			return err
-		}
-		if err := thisLevel.deleteTables(cd.top); err != nil {
-			return err
-		}
+	// 	if err := nextLevel.replaceTables(cd.top); err != nil {
+	// 		return err
+	// 	}
+	// 	if err := thisLevel.deleteTables(cd.top); err != nil {
+	// 		return err
+	// 	}
 
-		cd.elog.LazyPrintf("\tLOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
-			l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
-		return nil
-	}
+	// 	cd.elog.LazyPrintf("\tLOG Compact-Move %d->%d smallest:%s biggest:%s took %v\n",
+	// 		l, l+1, string(tbl.Smallest()), string(tbl.Biggest()), time.Since(timeStart))
+	// 	return nil
+	// }
 
 	newTables, decr, err := s.compactBuildTables(l, cd)
 	if err != nil {
