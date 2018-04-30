@@ -297,6 +297,7 @@ func (s *levelsController) compactBuildTables(
 
 	it.Rewind()
 
+	readTs := s.kv.orc.readTs()
 	// Start generating new tables.
 	type newTableResult struct {
 		table *table.Table
@@ -329,13 +330,13 @@ func (s *levelsController) compactBuildTables(
 			}
 
 			vs := it.Value()
-			if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
+			version := y.ParseTs(it.Key())
+			if version < readTs && isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
 				// If this version of the key is deleted or expired, skip all the rest of the
-				// versions.
+				// versions. Ensure that we're only removing versions below readTs.
 				skipKey = y.SafeCopy(skipKey, it.Key())
 
 				// TODO: Remove this block.
-				version := y.ParseTs(it.Key())
 				var dst []byte
 				dst = append(dst, it.Key()...)
 
