@@ -18,6 +18,7 @@ package badger
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"sort"
@@ -277,6 +278,7 @@ func (s *levelsController) compactBuildTables(
 				break
 			}
 		}
+		cd.elog.LazyPrintf("Key range overlaps with lower levels: %v", hasOverlap)
 	}
 
 	// Create iterators across all the tables involved first.
@@ -301,24 +303,52 @@ func (s *levelsController) compactBuildTables(
 		err   error
 	}
 	resultCh := make(chan newTableResult)
-	var i int
-	for ; it.Valid(); i++ {
+	var numBuilds int
+	var lastKey, skipKey []byte
+	for it.Valid() {
 		timeStart := time.Now()
 		builder := table.NewTableBuilder()
-		var numKeys uint64
+		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
-			if builder.ReachedCapacity(s.kv.opt.MaxTableSize) {
-				break
+			if !y.SameKey(it.Key(), lastKey) {
+				if builder.ReachedCapacity(s.kv.opt.MaxTableSize) {
+					// Only break if we are on a different key, and have reached capacity. We want to
+					// ensure that all versions of the key are stored in the same sstable, and not
+					// divided across multiple tables at the same level.
+					break
+				}
+				lastKey = y.SafeCopy(lastKey, it.Key())
 			}
-			// TODO: If bottom tables are empty, and the keys are expired, then just skip them.
-			if !hasOverlap { // No range overlap with the keys.
-				vs := it.Value()
-				if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
-					version := y.ParseTs(it.Key())
-					var dst []byte
-					dst = append(dst, it.Key()...)
-					cd.elog.LazyPrintf("Skipping key: %x. Version: %d", dst, version)
+			if len(skipKey) > 0 {
+				if y.SameKey(it.Key(), skipKey) {
+					numSkips++
+					continue
+				} else {
+					skipKey = skipKey[:0]
+				}
+			}
+
+			vs := it.Value()
+			if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
+				// If this version of the key is deleted or expired, skip all the rest of the
+				// versions.
+				skipKey = y.SafeCopy(skipKey, it.Key())
+
+				// TODO: Remove this block.
+				version := y.ParseTs(it.Key())
+				var dst []byte
+				dst = append(dst, it.Key()...)
+
+				if !hasOverlap {
+					// If no overlap, we can skip all the versions, by continuing here.
+					numSkips++
+					cd.elog.LazyPrintf("Skipping key and all lower versions: %x. Version: %d.", dst, version)
 					continue // Skip adding this key.
+				} else {
+					// If this key range has overlap with lower levels, then keep the deletion
+					// marker with the latest version, discarding the rest. This logic here
+					// would not continue, but has set the skipKey for the future iterations.
+					cd.elog.LazyPrintf("Skipping all lower versions: %x. Version: %d.", dst, version)
 				}
 			}
 			numKeys++
@@ -327,37 +357,36 @@ func (s *levelsController) compactBuildTables(
 		// It was true that it.Valid() at least once in the loop above, which means we
 		// called Add() at least once, and builder is not Empty().
 		// TODO: Deal with builder being empty.
-		cd.elog.LazyPrintf("Added %d keys", numKeys)
-		y.AssertTrue(!builder.Empty())
+		cd.elog.LazyPrintf("Added %d keys. Skipped %d keys.", numKeys, numSkips)
+		cd.elog.LazyPrintf("LOG Compact. Iteration took: %v\n", time.Since(timeStart))
+		if !builder.Empty() {
+			numBuilds++
+			fileID := s.reserveFileID()
+			go func(builder *table.Builder) {
+				defer builder.Close()
 
-		cd.elog.LazyPrintf("LOG Compact. Iteration to generate one table took: %v\n", time.Since(timeStart))
+				fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
+				if err != nil {
+					resultCh <- newTableResult{nil, errors.Wrapf(err, "While opening new table: %d", fileID)}
+					return
+				}
 
-		fileID := s.reserveFileID()
-		go func(builder *table.Builder) {
-			defer builder.Close()
+				if _, err := fd.Write(builder.Finish()); err != nil {
+					resultCh <- newTableResult{nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)}
+					return
+				}
 
-			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
-			if err != nil {
-				resultCh <- newTableResult{nil, errors.Wrapf(err, "While opening new table: %d", fileID)}
-				return
-			}
-
-			if _, err := fd.Write(builder.Finish()); err != nil {
-				resultCh <- newTableResult{nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)}
-				return
-			}
-
-			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode)
-			// decrRef is added below.
-			resultCh <- newTableResult{tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())}
-		}(builder)
+				tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode)
+				// decrRef is added below.
+				resultCh <- newTableResult{tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())}
+			}(builder)
+		}
 	}
 
 	newTables := make([]*table.Table, 0, 20)
-
 	// Wait for all table builders to finish.
 	var firstErr error
-	for x := 0; x < i; x++ {
+	for x := 0; x < numBuilds; x++ {
 		res := <-resultCh
 		newTables = append(newTables, res.table)
 		if firstErr == nil {
@@ -375,7 +404,7 @@ func (s *levelsController) compactBuildTables(
 	if firstErr != nil {
 		// An error happened.  Delete all the newly created table files (by calling DecrRef
 		// -- we're the only holders of a ref).
-		for j := 0; j < i; j++ {
+		for j := 0; j < numBuilds; j++ {
 			if newTables[j] != nil {
 				newTables[j].DecrRef()
 			}
@@ -478,8 +507,10 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	for _, t := range tbls {
 		cd.thisSize = t.Size()
 		cd.thisRange = keyRange{
-			left:  t.Smallest(),
-			right: t.Biggest(),
+			// We pick all the versions of the smallest and the biggest key.
+			left: y.KeyWithTs(y.ParseKey(t.Smallest()), math.MaxUint64),
+			// Note that version zero would be the rightmost key.
+			right: y.KeyWithTs(y.ParseKey(t.Biggest()), 0),
 		}
 		if s.cstatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
 			continue
@@ -594,7 +625,7 @@ func (s *levelsController) doCompact(p compactionPriority) (bool, error) {
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
 
 	cd := compactDef{
-		elog:      trace.New("Badger", "Compact"),
+		elog:      trace.New(fmt.Sprintf("Badger.L%d", l), "Compact"),
 		thisLevel: s.levels[l],
 		nextLevel: s.levels[l+1],
 	}
@@ -736,4 +767,32 @@ func (s *levelsController) appendIterators(
 		iters = level.appendIterators(iters, reversed)
 	}
 	return iters
+}
+
+type TableInfo struct {
+	ID    uint64
+	Level int
+	Left  []byte
+	Right []byte
+}
+
+func (s *levelsController) getTableInfo() (result []TableInfo) {
+	for _, l := range s.levels {
+		for _, t := range l.tables {
+			info := TableInfo{
+				ID:    t.ID(),
+				Level: l.level,
+				Left:  t.Smallest(),
+				Right: t.Biggest(),
+			}
+			result = append(result, info)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Level != result[j].Level {
+			return result[i].Level < result[j].Level
+		}
+		return result[i].ID < result[j].ID
+	})
+	return
 }

@@ -27,6 +27,7 @@ import (
 
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/table"
+	"github.com/dgraph-io/badger/y"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
@@ -46,6 +47,11 @@ to the Dgraph team.
 			fmt.Println("Error:", err.Error())
 			os.Exit(1)
 		}
+		err = tableInfo(sstDir, vlogDir)
+		if err != nil {
+			fmt.Println("Error:", err.Error())
+			os.Exit(1)
+		}
 	},
 }
 
@@ -59,6 +65,29 @@ func bytes(sz int64) string {
 
 func dur(src, dst time.Time) string {
 	return humanize.RelTime(dst, src, "earlier", "later")
+}
+
+func tableInfo(dir, valueDir string) error {
+	// Open DB
+	opts := badger.DefaultOptions
+	opts.Dir = sstDir
+	opts.ValueDir = vlogDir
+	// opts.ReadOnly = true // TODO: Make this readonly.
+
+	db, err := badger.Open(opts)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tables := db.Tables()
+	for _, t := range tables {
+		lk, lv := y.ParseKey(t.Left), y.ParseTs(t.Left)
+		rk, rv := y.ParseKey(t.Right), y.ParseTs(t.Right)
+		fmt.Printf("SSTable [L%d, %03d] [%20X, v%-10d -> %20X, v%-10d]\n",
+			t.Level, t.ID, lk, lv, rk, rv)
+	}
+	return nil
 }
 
 func printInfo(dir, valueDir string) error {
