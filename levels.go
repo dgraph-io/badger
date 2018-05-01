@@ -336,21 +336,14 @@ func (s *levelsController) compactBuildTables(
 				// versions. Ensure that we're only removing versions below readTs.
 				skipKey = y.SafeCopy(skipKey, it.Key())
 
-				var dst []byte
-				dst = append(dst, it.Key()...)
-
 				if !hasOverlap {
 					// If no overlap, we can skip all the versions, by continuing here.
 					numSkips++
-					cd.elog.LazyPrintf("Skipping key and all lower versions: %x. Version: %d.",
-						dst, version)
 					continue // Skip adding this key.
 				} else {
 					// If this key range has overlap with lower levels, then keep the deletion
 					// marker with the latest version, discarding the rest. This logic here
 					// would not continue, but has set the skipKey for the future iterations.
-					cd.elog.LazyPrintf("Skipping all lower versions for %x. Version: %d.",
-						dst, version)
 				}
 			}
 			numKeys++
