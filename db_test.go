@@ -1607,6 +1607,36 @@ func TestReadOnly(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestLSMOnly(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opts := LSMOnlyOptions
+	opts.Dir = dir
+	opts.ValueDir = dir
+
+	dopts := DefaultOptions
+	require.NotEqual(t, dopts.ValueThreshold, opts.ValueThreshold)
+	require.NotEqual(t, dopts.ValueLogLoadingMode, opts.ValueLogLoadingMode)
+	require.NotEqual(t, dopts.ValueLogFileSize, opts.ValueLogFileSize)
+
+	db, err := Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for i := 0; i < 5000; i++ {
+		value := make([]byte, 64000)
+		_, err = rand.Read(value)
+		require.NoError(t, err)
+
+		txnSet(t, db, []byte(fmt.Sprintf("key%d", i)), value, 0x00)
+	}
+	require.NoError(t, db.RunValueLogGC(0.2))
+}
+
 func ExampleOpen() {
 	dir, err := ioutil.TempDir("", "badger")
 	if err != nil {

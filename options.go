@@ -120,3 +120,18 @@ var DefaultOptions = Options{
 	ValueThreshold:   20,
 	Truncate:         false,
 }
+
+// LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold so values would
+// be colocated with the LSM tree, with value log largely acting as a write-ahead log only. These
+// options would reduce the disk usage of value log, and make Badger act like a typical LSM tree.
+var LSMOnlyOptions = Options{}
+
+func init() {
+	LSMOnlyOptions = DefaultOptions
+
+	// TODO: Once we switch Skiplist code to store uint32 value sizes, we can increase this.
+	// But for now, ensure that the value length fits in uint16.
+	LSMOnlyOptions.ValueThreshold = 65001
+	LSMOnlyOptions.ValueLogFileSize = 64 << 20 // Allow easy space reclamation.
+	LSMOnlyOptions.ValueLogLoadingMode = options.FileIO
+}
