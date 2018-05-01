@@ -313,9 +313,9 @@ func (s *levelsController) compactBuildTables(
 		for ; it.Valid(); it.Next() {
 			if !y.SameKey(it.Key(), lastKey) {
 				if builder.ReachedCapacity(s.kv.opt.MaxTableSize) {
-					// Only break if we are on a different key, and have reached capacity. We want to
-					// ensure that all versions of the key are stored in the same sstable, and not
-					// divided across multiple tables at the same level.
+					// Only break if we are on a different key, and have reached capacity. We want
+					// to ensure that all versions of the key are stored in the same sstable, and
+					// not divided across multiple tables at the same level.
 					break
 				}
 				lastKey = y.SafeCopy(lastKey, it.Key())
@@ -342,13 +342,15 @@ func (s *levelsController) compactBuildTables(
 				if !hasOverlap {
 					// If no overlap, we can skip all the versions, by continuing here.
 					numSkips++
-					cd.elog.LazyPrintf("Skipping key and all lower versions: %x. Version: %d.", dst, version)
+					cd.elog.LazyPrintf("Skipping key and all lower versions: %x. Version: %d.",
+						dst, version)
 					continue // Skip adding this key.
 				} else {
 					// If this key range has overlap with lower levels, then keep the deletion
 					// marker with the latest version, discarding the rest. This logic here
 					// would not continue, but has set the skipKey for the future iterations.
-					cd.elog.LazyPrintf("Skipping all lower versions: %x. Version: %d.", dst, version)
+					cd.elog.LazyPrintf("Skipping all lower versions for %x. Version: %d.",
+						dst, version)
 				}
 			}
 			numKeys++
