@@ -72,7 +72,7 @@ func tableInfo(dir, valueDir string) error {
 	opts := badger.DefaultOptions
 	opts.Dir = sstDir
 	opts.ValueDir = vlogDir
-	// opts.ReadOnly = true // TODO: Make this readonly.
+	opts.ReadOnly = true
 
 	db, err := badger.Open(opts)
 	if err != nil {
