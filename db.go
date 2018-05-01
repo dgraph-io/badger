@@ -1207,6 +1207,10 @@ func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
 	return seq, err
 }
 
+func (db *DB) Tables() []TableInfo {
+	return db.lc.getTableInfo()
+}
+
 // MergeOperator represents a Badger merge operator.
 type MergeOperator struct {
 	sync.RWMutex
