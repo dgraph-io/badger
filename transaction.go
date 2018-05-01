@@ -346,6 +346,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 			item.key = key
 			item.status = prefetched
 			item.version = txn.readTs
+			item.expiresAt = e.ExpiresAt
 			// We probably don't need to set db on item here.
 			return item, nil
 		}
@@ -374,6 +375,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	item.db = txn.db
 	item.vptr = vs.Value
 	item.txn = txn
+	item.expiresAt = vs.ExpiresAt
 	return item, nil
 }
 
