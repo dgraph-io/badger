@@ -435,6 +435,7 @@ func (vlog *valueLog) rewrite(gs *garbageState, elog trace.EventLog) error {
 	if len(gs.validPtrs) == 0 {
 		// Just delete the file.
 	}
+	return nil
 }
 
 // func (vlog *valueLog) rewrite(gs *garbageState, elog trace.EventLog) error {

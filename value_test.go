@@ -192,7 +192,7 @@ func TestValueGC2(t *testing.T) {
 		key := []byte(fmt.Sprintf("key%d", i))
 		require.NoError(t, kv.View(func(txn *Txn) error {
 			_, err := txn.Get(key)
-			require.Error(t, ErrKeyNotFound, err)
+			require.Equal(t, ErrKeyNotFound, err)
 			return nil
 		}))
 	}
@@ -408,10 +408,10 @@ func TestChecksums(t *testing.T) {
 		require.Equal(t, getItemValue(t, item), v0)
 
 		_, err = txn.Get(k1)
-		require.Error(t, ErrKeyNotFound, err)
+		require.Equal(t, ErrKeyNotFound, err)
 
 		_, err = txn.Get(k2)
-		require.Error(t, ErrKeyNotFound, err)
+		require.Equal(t, ErrKeyNotFound, err)
 		return nil
 	}))
 
