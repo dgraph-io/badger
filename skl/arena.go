@@ -25,7 +25,12 @@ import (
 
 const (
 	offsetSize = int(unsafe.Sizeof(uint32(0)))
-	ptrAlign   = int(unsafe.Sizeof(uintptr(0))) - 1
+
+	// Always align nodes on 64-bit boundaries, even on 32-bit architectures,
+	// so that the node.value field is 64-bit aligned. This is necessary because
+	// node.getValueOffset uses atomic.LoadUint64, which expects its input
+	// pointer to be 64-bit aligned.
+	nodeAlign  = int(unsafe.Sizeof(uint64(0))) - 1
 )
 
 // Arena should be lock-free.
@@ -61,14 +66,14 @@ func (s *Arena) putNode(height int) uint32 {
 	unusedSize := (maxHeight - height) * offsetSize
 
 	// Pad the allocation with enough bytes to ensure pointer alignment.
-	l := uint32(MaxNodeSize - unusedSize + ptrAlign)
+	l := uint32(MaxNodeSize - unusedSize + nodeAlign)
 	n := atomic.AddUint32(&s.n, l)
 	y.AssertTruef(int(n) <= len(s.buf),
 		"Arena too small, toWrite:%d newTotal:%d limit:%d",
 		l, n, len(s.buf))
 
 	// Return the aligned offset.
-	m := (n - l + uint32(ptrAlign)) & ^uint32(ptrAlign)
+	m := (n - l + uint32(nodeAlign)) & ^uint32(nodeAlign)
 	return m
 }
 
@@ -115,8 +120,8 @@ func (s *Arena) getKey(offset uint32, size uint16) []byte {
 
 // getVal returns byte slice at offset. The given size should be just the value
 // size and should NOT include the meta bytes.
-func (s *Arena) getVal(offset uint32, size uint16) (ret y.ValueStruct) {
-	ret.Decode(s.buf[offset : offset+uint32(size)])
+func (s *Arena) getVal(offset uint32, size uint32) (ret y.ValueStruct) {
+	ret.Decode(s.buf[offset : offset+size])
 	return
 }
 
