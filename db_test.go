@@ -1621,7 +1621,12 @@ func TestLSMOnly(t *testing.T) {
 	require.NotEqual(t, dopts.ValueLogLoadingMode, opts.ValueLogLoadingMode)
 	require.NotEqual(t, dopts.ValueLogFileSize, opts.ValueLogFileSize)
 
+	dopts.ValueThreshold = 1 << 16
+	_, err = Open(dopts)
+	require.Equal(t, ErrValueThreshold, err)
+
 	db, err := Open(opts)
+	require.NoError(t, err)
 	if err != nil {
 		t.Fatal(err)
 	}

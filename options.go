@@ -129,9 +129,7 @@ var LSMOnlyOptions = Options{}
 func init() {
 	LSMOnlyOptions = DefaultOptions
 
-	// TODO: Once we switch Skiplist code to store uint32 value sizes, we can increase this.
-	// But for now, ensure that the value length fits in uint16.
-	LSMOnlyOptions.ValueThreshold = 65001
+	LSMOnlyOptions.ValueThreshold = 65500      // Max value length which fits in uint16.
 	LSMOnlyOptions.ValueLogFileSize = 64 << 20 // Allow easy space reclamation.
 	LSMOnlyOptions.ValueLogLoadingMode = options.FileIO
 }

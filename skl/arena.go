@@ -30,7 +30,7 @@ const (
 	// so that the node.value field is 64-bit aligned. This is necessary because
 	// node.getValueOffset uses atomic.LoadUint64, which expects its input
 	// pointer to be 64-bit aligned.
-	nodeAlign  = int(unsafe.Sizeof(uint64(0))) - 1
+	nodeAlign = int(unsafe.Sizeof(uint64(0))) - 1
 )
 
 // Arena should be lock-free.
@@ -120,8 +120,8 @@ func (s *Arena) getKey(offset uint32, size uint16) []byte {
 
 // getVal returns byte slice at offset. The given size should be just the value
 // size and should NOT include the meta bytes.
-func (s *Arena) getVal(offset uint32, size uint32) (ret y.ValueStruct) {
-	ret.Decode(s.buf[offset : offset+size])
+func (s *Arena) getVal(offset uint32, size uint16) (ret y.ValueStruct) {
+	ret.Decode(s.buf[offset : offset+uint32(size)])
 	return
 }
 
