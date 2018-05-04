@@ -300,7 +300,7 @@ func (s *levelsController) compactBuildTables(
 	// Pick up the currently pending transactions' min readTs, so we can discard versions below this
 	// readTs. We should never discard any versions starting from above this timestamp, because that
 	// would affect the snapshot view guarantee provided by transactions.
-	readTs := s.kv.orc.readMark.MinReadTs()
+	minReadTs := s.kv.orc.readMark.MinReadTs()
 
 	// Start generating new tables.
 	type newTableResult struct {
@@ -338,7 +338,7 @@ func (s *levelsController) compactBuildTables(
 
 			vs := it.Value()
 			version := y.ParseTs(it.Key())
-			if version < readTs {
+			if version < minReadTs {
 				// Keep track of the number of versions encountered for this key. Only consider the
 				// versions which are below the minReadTs, otherwise, we might end up discarding the
 				// only valid version for a running transaction.
