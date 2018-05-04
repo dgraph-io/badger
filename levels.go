@@ -338,7 +338,7 @@ func (s *levelsController) compactBuildTables(
 
 			vs := it.Value()
 			version := y.ParseTs(it.Key())
-			if version < minReadTs {
+			if version <= minReadTs {
 				// Keep track of the number of versions encountered for this key. Only consider the
 				// versions which are below the minReadTs, otherwise, we might end up discarding the
 				// only valid version for a running transaction.
