@@ -332,6 +332,7 @@ func TestGetAfterPurge(t *testing.T) {
 	m := 45 // Increasing would cause ErrTxnTooBig
 	sz := 32 << 10
 	v := make([]byte, sz)
+	rand.Read(v)
 	for i := 0; i < n; i += 2 {
 		version := uint64(i)
 		txn := db.NewTransactionAt(version, true)
@@ -347,27 +348,34 @@ func TestGetAfterPurge(t *testing.T) {
 	}
 	for i := 0; i < 10; i++ {
 		txn := db.NewTransactionAt(80, false)
+		defer txn.Discard()
 		item, err := txn.Get(data(i))
 		require.NoError(t, err)
 		require.Equal(t, item.Version(), uint64(79))
-		txn.Discard()
 	}
 	err = db.RunValueLogGC(0.2)
 	require.NoError(t, err)
 
 	for i := 10; i < m; i++ {
-		txn := db.NewTransactionAt(80, false)
-		_, err := txn.Get(data(i))
-		require.Equal(t, err, ErrKeyNotFound)
-		txn.Discard()
+		// Read at earlier timestamp since latest value lies in file after badgerHead
+		// and holes won't be punched in that file.
+		txn := db.NewTransactionAt(3, false)
+		// db.Close will get stuck if txn discard is not defered which will cause
+		// the test to be hung without stacktrace
+		defer txn.Discard()
+		item, err := txn.Get(data(i))
+		// After purge key still remains in lsm and is not marked deleted.
+		require.NoError(t, err)
+		_, err = item.Value()
+		require.Equal(t, err, y.ErrPurged)
 	}
 
 	for i := 0; i < 10; i++ {
 		txn := db.NewTransactionAt(80, false)
+		defer txn.Discard()
 		item, err := txn.Get(data(i))
 		require.NoError(t, err)
 		require.Equal(t, item.Version(), uint64(79))
-		txn.Discard()
 	}
 
 }
@@ -937,17 +945,30 @@ func TestPurgeVersionsBelow(t *testing.T) {
 		// Delete all versions below the 3rd version
 		err := db.PurgeVersionsBelow([]byte("answer"), ts)
 		require.NoError(t, err)
+		// Since GC stats is updated in background, add a sleep
+		time.Sleep(10 * time.Millisecond)
+		db.vlog.lfDiscardStats.Lock()
 		require.NotEmpty(t, db.vlog.lfDiscardStats.m)
+		db.vlog.lfDiscardStats.Unlock()
+		defer func() {
+			minHoleLen = 1 << 20
+		}()
+		lf := db.vlog.filesMap[0]
+		// Hack way to punch  holes in last file.
+		db.vlog.maxFid = 1
+		minHoleLen = 1
+		require.NoError(t, db.vlog.rewrite(lf))
 
-		// Verify that there are only 2 versions left, and versions
-		// below ts have been deleted.
+		// Verify that there are 4 versions, and versions
+		// below ts have been purged.
 		db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
 			var count int
 			for it.Rewind(); it.Valid(); it.Next() {
 				item := it.Item()
 				if item.Version() < ts {
-					require.True(t, item.meta&bitDelete > 0)
+					_, err := item.Value()
+					require.Equal(t, err, y.ErrPurged)
 				} else {
 					count++
 				}
@@ -962,8 +983,10 @@ func TestPurgeVersionsBelow(t *testing.T) {
 func TestPurgeVersionsBelow2(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// Do a set and delete of same key
+		v := make([]byte, 1000) // should go to value log
+		rand.Read(v)
 		err := db.Update(func(txn *Txn) error {
-			return txn.Set([]byte("key"), []byte("value"))
+			return txn.Set([]byte("key"), v)
 		})
 		require.NoError(t, err)
 
@@ -979,6 +1002,7 @@ func TestPurgeVersionsBelow2(t *testing.T) {
 		var ts uint64
 		db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
+			defer it.Close()
 			var count int
 			for it.Rewind(); it.Valid(); it.Next() {
 				count++
@@ -991,7 +1015,7 @@ func TestPurgeVersionsBelow2(t *testing.T) {
 				}
 				val, err := item.Value()
 				require.NoError(t, err)
-				require.Equal(t, val, []byte("value"))
+				require.Equal(t, val, v)
 			}
 			require.Equal(t, 2, count)
 			return nil
@@ -1001,14 +1025,28 @@ func TestPurgeVersionsBelow2(t *testing.T) {
 		err = db.PurgeVersionsBelow([]byte("key"), ts)
 		require.NoError(t, err)
 
-		// Verify everything has been deleted
+		lf := db.vlog.filesMap[0]
+		// Hack way to gc last file.
+		db.vlog.maxFid = 1
+		require.NoError(t, db.vlog.rewrite(lf))
+
+		// Verify everything returns empty value
 		db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
+			defer it.Close()
 			var count int
 			for it.Rewind(); it.Valid(); it.Next() {
 				item := it.Item()
 				require.Equal(t, []byte("key"), item.Key())
-				require.True(t, item.meta&bitDelete > 0)
+				val, err := item.Value()
+				if count == 0 {
+					require.NoError(t, err)
+					require.Equal(t, len(val), 0)
+					require.True(t, item.meta&bitDelete > 0)
+				} else {
+					// Since file is deleted would throw error(unable to find log file).
+					require.Contains(t, err.Error(), "Unable to find log file")
+				}
 				count++
 			}
 			require.Equal(t, 2, count)
@@ -1017,16 +1055,20 @@ func TestPurgeVersionsBelow2(t *testing.T) {
 	})
 }
 
-func TestPurgeOlderVersions(t *testing.T) {
+func TestPurgeOlderVersions1(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// Write two versions of a key
+		v1 := make([]byte, 1000) // should go to value log
+		rand.Read(v1)
+		v2 := make([]byte, 1000) // should go to value log
+		rand.Read(v2)
 		err := db.Update(func(txn *Txn) error {
-			return txn.Set([]byte("answer"), []byte("42"))
+			return txn.Set([]byte("answer"), v1)
 		})
 		require.NoError(t, err)
 
 		err = db.Update(func(txn *Txn) error {
-			return txn.Set([]byte("answer"), []byte("43"))
+			return txn.Set([]byte("answer"), v2)
 		})
 		require.NoError(t, err)
 
@@ -1052,6 +1094,16 @@ func TestPurgeOlderVersions(t *testing.T) {
 		err = db.PurgeOlderVersions()
 		require.NoError(t, err)
 
+		lf := db.vlog.filesMap[0]
+		defer func() {
+			minHoleLen = 1 << 10
+			db.vlog.maxFid = 0
+		}()
+		// Hack way to gc last file.
+		db.vlog.maxFid = 1
+		minHoleLen = 1
+		require.NoError(t, db.vlog.rewrite(lf))
+
 		// Verify that only one non-deleted version is found
 		err = db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
@@ -1063,9 +1115,10 @@ func TestPurgeOlderVersions(t *testing.T) {
 				if count == 1 {
 					val, err := item.Value()
 					require.NoError(t, err)
-					require.Equal(t, []byte("43"), val)
+					require.Equal(t, v2, val)
 				} else {
-					require.True(t, item.meta&bitDelete > 0)
+					_, err := item.Value()
+					require.Equal(t, err, y.ErrPurged)
 				}
 			}
 			require.Equal(t, 2, count)
@@ -1078,8 +1131,10 @@ func TestPurgeOlderVersions(t *testing.T) {
 func TestPurgeOlderVersions2(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// Do a set and delete of same key
+		v := make([]byte, 1000) // should go to value log
+		rand.Read(v)
 		err := db.Update(func(txn *Txn) error {
-			return txn.Set([]byte("key"), []byte("value"))
+			return txn.Set([]byte("key"), v)
 		})
 		require.NoError(t, err)
 
@@ -1094,6 +1149,7 @@ func TestPurgeOlderVersions2(t *testing.T) {
 		// Verify that there are 2 versions
 		db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
+			defer it.Close()
 			var count int
 			for it.Rewind(); it.Valid(); it.Next() {
 				count++
@@ -1105,7 +1161,7 @@ func TestPurgeOlderVersions2(t *testing.T) {
 				}
 				val, err := item.Value()
 				require.NoError(t, err)
-				require.Equal(t, val, []byte("value"))
+				require.Equal(t, val, v)
 			}
 			require.Equal(t, 2, count)
 			return nil
@@ -1115,15 +1171,27 @@ func TestPurgeOlderVersions2(t *testing.T) {
 		err = db.PurgeOlderVersions()
 		require.NoError(t, err)
 
+		lf := db.vlog.filesMap[0]
+		// Hack way to gc last file.
+		db.vlog.maxFid = 1
+		require.NoError(t, db.vlog.rewrite(lf))
+
 		// Verify everything has been deleted
 		db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
+			defer it.Close()
 			var count int
 			for it.Rewind(); it.Valid(); it.Next() {
+				count++
 				item := it.Item()
 				require.Equal(t, []byte("key"), item.Key())
-				require.True(t, item.meta&bitDelete > 0)
-				count++
+				if count == 1 {
+					require.True(t, item.meta&bitDelete > 0)
+				} else {
+					_, err := item.Value()
+					// Since file is deleted would throw error(unable to find log file).
+					require.Contains(t, err.Error(), "Unable to find log file")
+				}
 			}
 			require.Equal(t, 2, count)
 			return nil
@@ -1793,4 +1861,10 @@ func ExampleTxn_NewIterator() {
 	fmt.Printf("Counted %d elements", count)
 	// Output:
 	// Counted 1000 elements
+}
+
+func TestMain(m *testing.M) {
+	minHoleLen = 1 << 10
+	r := m.Run()
+	os.Exit(r)
 }

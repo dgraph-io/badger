@@ -376,7 +376,7 @@ func isDeletedOrExpired(meta byte, expiresAt uint64) bool {
 	if expiresAt == 0 {
 		return false
 	}
-	return expiresAt <= uint64(time.Now().Unix())
+	return expiresAt <= uint64(time.Now().UnixNano())
 }
 
 // parseItem is a complex function because it needs to handle both forward and reverse iteration

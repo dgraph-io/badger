@@ -61,7 +61,7 @@ var (
 		"Value log GC can't run because threshold is set to zero")
 
 	// ErrNoRewrite is returned if a call for value log GC doesn't result in a log file rewrite.
-	ErrNoRewrite = errors.New(
+	ErrNoCleanup = errors.New(
 		"Value log GC attempt didn't result in any cleanup")
 
 	// ErrRejected is returned if a value log GC is called either while another GC is running, or
