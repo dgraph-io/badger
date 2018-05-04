@@ -100,8 +100,9 @@ func (w *WaterMark) process() {
 		// Update mark by going through all reads in order; and checking if they have
 		// been done. Stop at the first readTs, which isn't done.
 		minReadTs := w.MinReadTs()
-		AssertTrue(minReadTs <= readTs)
-
+		// Don't assert that minReadTs < readTs, to avoid any inconsistencies caused by managed
+		// transactions, or testing where we explicitly set the readTs for transactions like in
+		// TestTxnVersions.
 		until := minReadTs
 		loops := 0
 
