@@ -335,25 +335,29 @@ func (s *levelsController) compactBuildTables(
 				lastKey = y.SafeCopy(lastKey, it.Key())
 				numVersions = 0
 			}
-			numVersions++ // Keep track of the number of versions encountered for this key.
 
 			vs := it.Value()
 			version := y.ParseTs(it.Key())
-			discard := isDeletedOrExpired(vs.Meta, vs.ExpiresAt) ||
-				numVersions > s.kv.opt.NumVersionsToKeep
-			if version < readTs && discard {
-				// If this version of the key is deleted or expired, skip all the rest of the
-				// versions. Ensure that we're only removing versions below readTs.
-				skipKey = y.SafeCopy(skipKey, it.Key())
+			if version < readTs {
+				// Keep track of the number of versions encountered for this key. Only consider the
+				// versions which are below the minReadTs, otherwise, we might end up discarding the
+				// only valid version for a running transaction.
+				numVersions++
+				if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) ||
+					numVersions > s.kv.opt.NumVersionsToKeep {
+					// If this version of the key is deleted or expired, skip all the rest of the
+					// versions. Ensure that we're only removing versions below readTs.
+					skipKey = y.SafeCopy(skipKey, it.Key())
 
-				if !hasOverlap {
-					// If no overlap, we can skip all the versions, by continuing here.
-					numSkips++
-					continue // Skip adding this key.
-				} else {
-					// If this key range has overlap with lower levels, then keep the deletion
-					// marker with the latest version, discarding the rest. This logic here
-					// would not continue, but has set the skipKey for the future iterations.
+					if !hasOverlap {
+						// If no overlap, we can skip all the versions, by continuing here.
+						numSkips++
+						continue // Skip adding this key.
+					} else {
+						// If this key range has overlap with lower levels, then keep the deletion
+						// marker with the latest version, discarding the rest. This logic here
+						// would not continue, but has set the skipKey for the future iterations.
+					}
 				}
 			}
 			numKeys++
