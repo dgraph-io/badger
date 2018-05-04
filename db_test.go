@@ -1710,6 +1710,41 @@ func TestLSMOnly(t *testing.T) {
 	require.NoError(t, db.RunValueLogGC(0.2))
 }
 
+func TestMinReadTs(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		for i := 0; i < 10; i++ {
+			require.NoError(t, db.Update(func(txn *Txn) error {
+				return txn.Set([]byte("x"), []byte("y"))
+			}))
+		}
+		time.Sleep(time.Millisecond)
+		require.Equal(t, uint64(10), db.orc.readTs())
+		min := db.orc.readMark.MinReadTs()
+		require.Equal(t, uint64(9), min)
+
+		readTxn := db.NewTransaction(false)
+		for i := 0; i < 10; i++ {
+			require.NoError(t, db.Update(func(txn *Txn) error {
+				return txn.Set([]byte("x"), []byte("y"))
+			}))
+		}
+		require.Equal(t, uint64(20), db.orc.readTs())
+		time.Sleep(time.Millisecond)
+		require.Equal(t, min, db.orc.readMark.MinReadTs())
+		readTxn.Discard()
+		time.Sleep(time.Millisecond)
+		require.Equal(t, uint64(19), db.orc.readMark.MinReadTs())
+
+		for i := 0; i < 10; i++ {
+			db.View(func(txn *Txn) error {
+				return nil
+			})
+		}
+		time.Sleep(time.Millisecond)
+		require.Equal(t, uint64(20), db.orc.readMark.MinReadTs())
+	})
+}
+
 func ExampleOpen() {
 	dir, err := ioutil.TempDir("", "badger")
 	if err != nil {
