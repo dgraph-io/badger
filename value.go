@@ -326,7 +326,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	y.AssertTruef(uint32(f.fid) < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
 
-	elog := trace.NewEventLog("badger", "vlog-rewrite")
+	elog := trace.NewEventLog("Badger", "vlog-rewrite")
 	defer elog.Finish()
 	elog.Printf("Rewriting fid: %d", f.fid)
 

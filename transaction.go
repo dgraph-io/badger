@@ -35,20 +35,6 @@ const (
 	setItem
 )
 
-type uint64Heap []uint64
-
-func (u uint64Heap) Len() int               { return len(u) }
-func (u uint64Heap) Less(i int, j int) bool { return u[i] < u[j] }
-func (u uint64Heap) Swap(i int, j int)      { u[i], u[j] = u[j], u[i] }
-func (u *uint64Heap) Push(x interface{})    { *u = append(*u, x.(uint64)) }
-func (u *uint64Heap) Pop() interface{} {
-	old := *u
-	n := len(old)
-	x := old[n-1]
-	*u = old[0 : n-1]
-	return x
-}
-
 type oracle struct {
 	curRead   uint64 // Managed by the mutex.
 	refCount  int64
@@ -57,6 +43,8 @@ type oracle struct {
 	sync.Mutex
 	writeLock  sync.Mutex
 	nextCommit uint64
+
+	readMark y.WaterMark
 
 	// commits stores a key fingerprint and latest commit counter for it.
 	// refCount is used to clear out commits map to avoid a memory blowup.
@@ -396,6 +384,7 @@ func (txn *Txn) Discard() {
 		return
 	}
 	txn.discarded = true
+	txn.db.orc.readMark.Done(txn.readTs)
 	txn.runCallbacks()
 
 	if txn.update {
@@ -515,6 +504,7 @@ func (db *DB) NewTransaction(update bool) *Txn {
 		count:  1,                       // One extra entry for BitFin.
 		size:   int64(len(txnKey) + 10), // Some buffer for the extra entry.
 	}
+	db.orc.readMark.Begin(txn.readTs)
 	if update {
 		txn.pendingWrites = make(map[string]*Entry)
 		txn.db.orc.addRef()

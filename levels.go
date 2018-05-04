@@ -297,29 +297,25 @@ func (s *levelsController) compactBuildTables(
 
 	it.Rewind()
 
-	readTs := s.kv.orc.readTs()
+	// Pick up the currently pending transactions' min readTs, so we can discard versions below this
+	// readTs. We should never discard any versions starting from above this timestamp, because that
+	// would affect the snapshot view guarantee provided by transactions.
+	minReadTs := s.kv.orc.readMark.MinReadTs()
+
 	// Start generating new tables.
 	type newTableResult struct {
 		table *table.Table
 		err   error
 	}
 	resultCh := make(chan newTableResult)
-	var numBuilds int
+	var numBuilds, numVersions int
 	var lastKey, skipKey []byte
 	for it.Valid() {
 		timeStart := time.Now()
 		builder := table.NewTableBuilder()
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
-			if !y.SameKey(it.Key(), lastKey) {
-				if builder.ReachedCapacity(s.kv.opt.MaxTableSize) {
-					// Only break if we are on a different key, and have reached capacity. We want
-					// to ensure that all versions of the key are stored in the same sstable, and
-					// not divided across multiple tables at the same level.
-					break
-				}
-				lastKey = y.SafeCopy(lastKey, it.Key())
-			}
+			// See if we need to skip this key.
 			if len(skipKey) > 0 {
 				if y.SameKey(it.Key(), skipKey) {
 					numSkips++
@@ -329,21 +325,39 @@ func (s *levelsController) compactBuildTables(
 				}
 			}
 
+			if !y.SameKey(it.Key(), lastKey) {
+				if builder.ReachedCapacity(s.kv.opt.MaxTableSize) {
+					// Only break if we are on a different key, and have reached capacity. We want
+					// to ensure that all versions of the key are stored in the same sstable, and
+					// not divided across multiple tables at the same level.
+					break
+				}
+				lastKey = y.SafeCopy(lastKey, it.Key())
+				numVersions = 0
+			}
+
 			vs := it.Value()
 			version := y.ParseTs(it.Key())
-			if version < readTs && isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
-				// If this version of the key is deleted or expired, skip all the rest of the
-				// versions. Ensure that we're only removing versions below readTs.
-				skipKey = y.SafeCopy(skipKey, it.Key())
+			if version <= minReadTs {
+				// Keep track of the number of versions encountered for this key. Only consider the
+				// versions which are below the minReadTs, otherwise, we might end up discarding the
+				// only valid version for a running transaction.
+				numVersions++
+				if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) ||
+					numVersions > s.kv.opt.NumVersionsToKeep {
+					// If this version of the key is deleted or expired, skip all the rest of the
+					// versions. Ensure that we're only removing versions below readTs.
+					skipKey = y.SafeCopy(skipKey, it.Key())
 
-				if !hasOverlap {
-					// If no overlap, we can skip all the versions, by continuing here.
-					numSkips++
-					continue // Skip adding this key.
-				} else {
-					// If this key range has overlap with lower levels, then keep the deletion
-					// marker with the latest version, discarding the rest. This logic here
-					// would not continue, but has set the skipKey for the future iterations.
+					if !hasOverlap {
+						// If no overlap, we can skip all the versions, by continuing here.
+						numSkips++
+						continue // Skip adding this key.
+					} else {
+						// If this key range has overlap with lower levels, then keep the deletion
+						// marker with the latest version, discarding the rest. This logic here
+						// would not continue, but has set the skipKey for the future iterations.
+					}
 				}
 			}
 			numKeys++

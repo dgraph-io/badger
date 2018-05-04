@@ -46,8 +46,11 @@ type Options struct {
 	// How should LSM tree be accessed.
 	TableLoadingMode options.FileLoadingMode
 
-	// How should value log be accessed
+	// How should value log be accessed.
 	ValueLogLoadingMode options.FileLoadingMode
+
+	// How many versions to keep per key.
+	NumVersionsToKeep int
 
 	// 3. Flags that user might want to review
 	// ----------------------------------------
@@ -114,6 +117,7 @@ var DefaultOptions = Options{
 	NumLevelZeroTablesStall: 10,
 	NumMemtables:            5,
 	SyncWrites:              true,
+	NumVersionsToKeep:       1,
 	// Nothing to read/write value log using standard File I/O
 	// MemoryMap to mmap() the value log files
 	ValueLogFileSize: 1 << 30,
