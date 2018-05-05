@@ -1011,7 +1011,6 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 		}
 		if discardEntry(e, vs) {
 			r.discard += esz
-			fmt.Println("discard")
 			return nil
 		}
 
