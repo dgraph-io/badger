@@ -135,6 +135,10 @@ func (item *Item) IsDeletedOrExpired() bool {
 	return isDeletedOrExpired(item.meta, item.expiresAt)
 }
 
+func (item *Item) DiscardEarlierVersions() bool {
+	return item.meta&bitDiscardEarlierVersions > 0
+}
+
 func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	if !item.hasValue() {
 		return nil, nil, nil

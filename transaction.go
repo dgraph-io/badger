@@ -30,11 +30,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-const (
-	deleteItem = iota
-	setItem
-)
-
 type oracle struct {
 	curRead   uint64 // Managed by the mutex.
 	refCount  int64
@@ -264,8 +259,19 @@ func (txn *Txn) SetWithMeta(key, val []byte, meta byte) error {
 	return txn.SetEntry(e)
 }
 
+// SetWithDiscard acts like SetWithMeta, but adds a marker to discard earlier versions of the key.
+func (txn *Txn) SetWithDiscard(key, val []byte, meta byte) error {
+	e := &Entry{
+		Key:      key,
+		Value:    val,
+		UserMeta: meta,
+		meta:     bitDiscardEarlierVersions,
+	}
+	return txn.SetEntry(e)
+}
+
 // SetWithTTL adds a key-value pair to the database, along with a time-to-live
-// (TTL) setting. A key stored with with a TTL would automatically expire after
+// (TTL) setting. A key stored with a TTL would automatically expire after
 // the time has elapsed , and be eligible for garbage collection.
 func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
 	expire := time.Now().Add(dur).Unix()
@@ -273,7 +279,7 @@ func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
 	return txn.SetEntry(e)
 }
 
-func (txn *Txn) modify(e *Entry, operation int) error {
+func (txn *Txn) modify(e *Entry) error {
 	if !txn.update {
 		return ErrReadOnlyTxn
 	} else if txn.discarded {
@@ -298,7 +304,7 @@ func (txn *Txn) modify(e *Entry, operation int) error {
 // SetEntry takes an Entry struct and adds the key-value pair in the struct, along
 // with other metadata to the database.
 func (txn *Txn) SetEntry(e *Entry) error {
-	return txn.modify(e, setItem)
+	return txn.modify(e)
 }
 
 // Delete deletes a key. This is done by adding a delete marker for the key at commit timestamp.
@@ -309,7 +315,7 @@ func (txn *Txn) Delete(key []byte) error {
 		Key:  key,
 		meta: bitDelete,
 	}
-	return txn.modify(e, deleteItem)
+	return txn.modify(e)
 }
 
 // Get looks for key and returns corresponding Item.

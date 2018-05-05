@@ -343,20 +343,25 @@ func (s *levelsController) compactBuildTables(
 				// versions which are below the minReadTs, otherwise, we might end up discarding the
 				// only valid version for a running transaction.
 				numVersions++
+				lastValidVersion := vs.Meta&bitDiscardEarlierVersions > 0
 				if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) ||
-					numVersions > s.kv.opt.NumVersionsToKeep {
+					numVersions > s.kv.opt.NumVersionsToKeep ||
+					lastValidVersion {
 					// If this version of the key is deleted or expired, skip all the rest of the
 					// versions. Ensure that we're only removing versions below readTs.
 					skipKey = y.SafeCopy(skipKey, it.Key())
 
-					if !hasOverlap {
+					if lastValidVersion {
+						// Add this key. We have set skipKey, so the following key versions
+						// would be skipped.
+					} else if hasOverlap {
+						// If this key range has overlap with lower levels, then keep the deletion
+						// marker with the latest version, discarding the rest. We have set skipKey,
+						// so the following key versions would be skipped.
+					} else {
 						// If no overlap, we can skip all the versions, by continuing here.
 						numSkips++
 						continue // Skip adding this key.
-					} else {
-						// If this key range has overlap with lower levels, then keep the deletion
-						// marker with the latest version, discarding the rest. This logic here
-						// would not continue, but has set the skipKey for the future iterations.
 					}
 				}
 			}
