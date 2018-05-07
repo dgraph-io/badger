@@ -176,8 +176,75 @@ func (lf *logFile) sync() error {
 }
 
 var errStop = errors.New("Stop iteration")
+var errTruncate = errors.New("Do truncate")
 
 type logEntry func(e Entry, vp valuePointer) error
+
+type safeRead struct {
+	k []byte
+	v []byte
+
+	recordOffset uint32
+}
+
+func (r *safeRead) Entry(reader *bufio.Reader) (*Entry, error) {
+	var hbuf [headerBufSize]byte
+	var err error
+
+	hash := crc32.New(y.CastagnoliCrcTable)
+	tee := io.TeeReader(reader, hash)
+	if _, err = io.ReadFull(tee, hbuf[:]); err != nil {
+		return nil, err
+	}
+
+	var h header
+	h.Decode(hbuf[:])
+	if h.klen > maxKeySize {
+		return nil, errTruncate
+	}
+	vl := int(h.vlen)
+	if cap(r.v) < vl {
+		r.v = make([]byte, 2*vl)
+	}
+
+	kl := int(h.klen)
+	if cap(r.k) < kl {
+		r.k = make([]byte, 2*kl)
+	}
+
+	e := &Entry{}
+	e.offset = r.recordOffset
+	e.Key = r.k[:kl]
+	e.Value = r.v[:vl]
+
+	if _, err = io.ReadFull(tee, e.Key); err != nil {
+		if err == io.EOF {
+			err = errTruncate
+		}
+		return nil, err
+	}
+	if _, err = io.ReadFull(tee, e.Value); err != nil {
+		if err == io.EOF {
+			err = errTruncate
+		}
+		return nil, err
+	}
+	var crcBuf [4]byte
+	if _, err = io.ReadFull(reader, crcBuf[:]); err != nil {
+		if err == io.EOF {
+			err = errTruncate
+		}
+		return nil, err
+	}
+	crc := binary.BigEndian.Uint32(crcBuf[:])
+	if crc != hash.Sum32() {
+		return nil, errTruncate
+	}
+	e.meta = h.meta
+	e.UserMeta = h.userMeta
+	e.ExpiresAt = h.expiresAt
+	return e, nil
+}
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
@@ -188,108 +255,36 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 	}
 
 	reader := bufio.NewReader(lf.fd)
-	var hbuf [headerBufSize]byte
-	var h header
-	k := make([]byte, 1<<10)
-	v := make([]byte, 1<<20)
+	read := &safeRead{
+		k:            make([]byte, 10),
+		v:            make([]byte, 10),
+		recordOffset: offset,
+	}
 
 	truncate := false
-	recordOffset := offset
 	var lastCommit uint64
 	var validEndOffset uint32
 	for {
-		hash := crc32.New(y.CastagnoliCrcTable)
-		tee := io.TeeReader(reader, hash)
-
-		// TODO: Move this entry decode into structs.go
-		if _, err = io.ReadFull(tee, hbuf[:]); err != nil {
-			if err == io.EOF {
-				break
-			} else if err == io.ErrUnexpectedEOF {
-				truncate = true
-				break
-			}
-			return err
-		}
-
-		var e Entry
-		e.offset = recordOffset
-		h.Decode(hbuf[:])
-		if h.klen > maxKeySize {
+		e, err := read.Entry(reader)
+		if err == io.EOF {
+			break
+		} else if err == io.ErrUnexpectedEOF || err == errTruncate {
 			truncate = true
 			break
-		}
-		vl := int(h.vlen)
-		if cap(v) < vl {
-			v = make([]byte, 2*vl)
-		}
-
-		kl := int(h.klen)
-		if cap(k) < kl {
-			k = make([]byte, 2*kl)
-		}
-		e.Key = k[:kl]
-		e.Value = v[:vl]
-
-		if _, err = io.ReadFull(tee, e.Key); err != nil {
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				truncate = true
-				break
-			}
+		} else if err != nil {
 			return err
+		} else if e == nil {
+			continue
 		}
-		if _, err = io.ReadFull(tee, e.Value); err != nil {
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				truncate = true
-				break
-			}
-			return err
-		}
-
-		var crcBuf [4]byte
-		if _, err = io.ReadFull(reader, crcBuf[:]); err != nil {
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				truncate = true
-				break
-			}
-			return err
-		}
-		crc := binary.BigEndian.Uint32(crcBuf[:])
-		if crc != hash.Sum32() {
-			truncate = true
-			break
-		}
-		e.meta = h.meta
-		e.UserMeta = h.userMeta
-		e.ExpiresAt = h.expiresAt
 
 		var vp valuePointer
-		vp.Len = headerBufSize + h.klen + h.vlen + uint32(len(crcBuf))
-		recordOffset += vp.Len
+		vp.Len = uint32(headerBufSize + len(e.Key) + len(e.Value) + 4) // len(crcBuf)
+		read.recordOffset += vp.Len
 
 		vp.Offset = e.offset
 		vp.Fid = lf.fid
 
-		if e.meta&bitFinTxn > 0 {
-			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
-			if err != nil || lastCommit != txnTs {
-				truncate = true
-				break
-			}
-			// Got the end of txn. Now we can store them.
-			lastCommit = 0
-			validEndOffset = recordOffset
-		} else if e.meta&bitTxn == 0 {
-			// We shouldn't get this entry in the middle of a transaction.
-			if lastCommit != 0 {
-				truncate = true
-				break
-			}
-			validEndOffset = recordOffset
-		} else {
-			// TODO: Remove this once we merge v2.0-candidate branch. This shouldn't
-			// happen in 2.0 because we are no longer moving entries within the value
-			// logs, everything should be either txn or txnfin.
+		if e.meta&bitTxn > 0 {
 			txnTs := y.ParseTs(e.Key)
 			if lastCommit == 0 {
 				lastCommit = txnTs
@@ -298,12 +293,31 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 				truncate = true
 				break
 			}
+
+		} else if e.meta&bitFinTxn > 0 {
+			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
+			if err != nil || lastCommit != txnTs {
+				truncate = true
+				break
+			}
+			// Got the end of txn. Now we can store them.
+			lastCommit = 0
+			validEndOffset = read.recordOffset
+
+		} else {
+			if lastCommit != 0 {
+				// This is most likely an entry which was moved as part of GC.
+				// We shouldn't get this entry in the middle of a transaction.
+				truncate = true
+				break
+			}
+			validEndOffset = read.recordOffset
 		}
 
 		if vlog.opt.ReadOnly {
 			return ErrReplayNeeded
 		}
-		if err := fn(e, vp); err != nil {
+		if err := fn(*e, vp); err != nil {
 			if err == errStop {
 				break
 			}
@@ -953,13 +967,7 @@ func discardEntry(e Entry, vs y.ValueStruct) bool {
 	return false
 }
 
-func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error) {
-	// Pick a log file for GC
-	lf := vlog.pickLog(head)
-	if lf == nil {
-		return ErrNoRewrite
-	}
-
+func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64) (err error) {
 	// Update stats before exiting
 	defer func() {
 		if err == nil {
@@ -998,6 +1006,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 			time.Sleep(time.Millisecond)
 		}
 		r.total += esz
+		// Sample until we reach window size, or exceed 10 seconds.
 		if r.total > window {
 			return errStop
 		}
@@ -1056,7 +1065,8 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 	}
 	vlog.elog.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
 
-	if r.total < 10.0 || r.discard < gcThreshold*r.total {
+	// If we sampled at least 10MB, we can make a call about rewrite.
+	if r.total < 10.0 || r.discard < discardRatio*r.total {
 		vlog.elog.Printf("Skipping GC on fid: %d\n\n", lf.fid)
 		return ErrNoRewrite
 	}
@@ -1079,7 +1089,7 @@ func (vlog *valueLog) waitOnGC(lc *y.Closer) {
 	vlog.garbageCh <- struct{}{}
 }
 
-func (vlog *valueLog) runGC(gcThreshold float64, head valuePointer) error {
+func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
 		// Run GC
@@ -1088,7 +1098,12 @@ func (vlog *valueLog) runGC(gcThreshold float64, head valuePointer) error {
 			count int
 		)
 		for {
-			err = vlog.doRunGC(gcThreshold, head)
+			// Pick a log file for GC.
+			if lf := vlog.pickLog(head); lf != nil {
+				err = vlog.doRunGC(lf, discardRatio)
+			} else {
+				err = ErrNoRewrite
+			}
 			if err != nil {
 				break
 			}
