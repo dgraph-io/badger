@@ -967,13 +967,7 @@ func discardEntry(e Entry, vs y.ValueStruct) bool {
 	return false
 }
 
-func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error) {
-	// Pick a log file for GC
-	lf := vlog.pickLog(head)
-	if lf == nil {
-		return ErrNoRewrite
-	}
-
+func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64) (err error) {
 	// Update stats before exiting
 	defer func() {
 		if err == nil {
@@ -1012,6 +1006,7 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 			time.Sleep(time.Millisecond)
 		}
 		r.total += esz
+		// Sample until we reach window size, or exceed 10 seconds.
 		if r.total > window {
 			return errStop
 		}
@@ -1070,7 +1065,8 @@ func (vlog *valueLog) doRunGC(gcThreshold float64, head valuePointer) (err error
 	}
 	vlog.elog.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
 
-	if r.total < 10.0 || r.discard < gcThreshold*r.total {
+	// If we sampled at least 10MB, we can make a call about rewrite.
+	if r.total < 10.0 || r.discard < discardRatio*r.total {
 		vlog.elog.Printf("Skipping GC on fid: %d\n\n", lf.fid)
 		return ErrNoRewrite
 	}
@@ -1093,7 +1089,7 @@ func (vlog *valueLog) waitOnGC(lc *y.Closer) {
 	vlog.garbageCh <- struct{}{}
 }
 
-func (vlog *valueLog) runGC(gcThreshold float64, head valuePointer) error {
+func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
 		// Run GC
@@ -1102,7 +1098,12 @@ func (vlog *valueLog) runGC(gcThreshold float64, head valuePointer) error {
 			count int
 		)
 		for {
-			err = vlog.doRunGC(gcThreshold, head)
+			// Pick a log file for GC.
+			if lf := vlog.pickLog(head); lf != nil {
+				err = vlog.doRunGC(lf, discardRatio)
+			} else {
+				err = ErrNoRewrite
+			}
 			if err != nil {
 				break
 			}
