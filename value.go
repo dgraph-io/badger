@@ -284,7 +284,17 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		vp.Offset = e.offset
 		vp.Fid = lf.fid
 
-		if e.meta&bitFinTxn > 0 {
+		if e.meta&bitTxn > 0 {
+			txnTs := y.ParseTs(e.Key)
+			if lastCommit == 0 {
+				lastCommit = txnTs
+			}
+			if lastCommit != txnTs {
+				truncate = true
+				break
+			}
+
+		} else if e.meta&bitFinTxn > 0 {
 			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
 			if err != nil || lastCommit != txnTs {
 				truncate = true
@@ -294,23 +304,14 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 			lastCommit = 0
 			validEndOffset = read.recordOffset
 
-		} else if e.meta&bitTxn == 0 {
-			// We shouldn't get this entry in the middle of a transaction.
+		} else {
 			if lastCommit != 0 {
+				// This is most likely an entry which was moved as part of GC.
+				// We shouldn't get this entry in the middle of a transaction.
 				truncate = true
 				break
 			}
 			validEndOffset = read.recordOffset
-
-		} else {
-			txnTs := y.ParseTs(e.Key)
-			if lastCommit == 0 {
-				lastCommit = txnTs
-			}
-			if lastCommit != txnTs {
-				truncate = true
-				break
-			}
 		}
 
 		if vlog.opt.ReadOnly {
