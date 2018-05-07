@@ -486,33 +486,26 @@ func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 
 // get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
+//
+// IMPORTANT: We should never write an entry with a older timestamp for same key,
+// We need to maintain this invariant to search for latest value of a key,
+// or else we need to search in all tables and find the max version among them.
+// To maintain this invariant, we also need to ensure that all versions of a key
+// are always present in same table from level 1, because compaction can push
+// any table down.
 func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := db.getMemTables() // Lock should be released.
 	defer decr()
 
 	y.NumGets.Add(1)
-	version := y.ParseTs(key)
-	var maxVs y.ValueStruct
-	// Need to search for values in all tables, with managed db
-	// latest value needn't be present in the latest table.
-	// Even without managed db, purging can cause this constraint
-	// to be violated.
-	// Search until required version is found or iterate over all
-	// tables and return max version.
 	for i := 0; i < len(tables); i++ {
 		vs := tables[i].Get(key)
 		y.NumMemtableGets.Add(1)
-		if vs.Meta == 0 && vs.Value == nil {
-			continue
-		}
-		if vs.Version == version {
+		if vs.Meta != 0 || vs.Value != nil {
 			return vs, nil
 		}
-		if maxVs.Version < vs.Version {
-			maxVs = vs
-		}
 	}
-	return db.lc.get(key, maxVs)
+	return db.lc.get(key)
 }
 
 func (db *DB) updateOffset(ptrs []valuePointer) {
@@ -968,8 +961,7 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 	// Find head on disk
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
-	var maxVs y.ValueStruct
-	val, err := db.lc.get(headKey, maxVs)
+	val, err := db.lc.get(headKey)
 	if err != nil {
 		return errors.Wrap(err, "Retrieving head from on-disk LSM")
 	}

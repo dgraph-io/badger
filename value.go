@@ -379,17 +379,14 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		if vp.Fid == f.fid && vp.Offset == e.offset {
 			// This new entry only contains the key, and a pointer to the value.
 			ne := new(Entry)
-			ne.meta = 0 // Remove all bits.
-			if vs.Meta&bitDiscardEarlierVersions > 0 {
-				ne.meta |= bitDiscardEarlierVersions
-			}
+			ne.meta = 0 // Remove all bits. Different keyspace doesn't need these bits.
 			ne.UserMeta = e.UserMeta
 
 			// Create a new key in a separate keyspace, prefixed by moveKey. We are not
 			// allowed to rewrite an older version of key in the LSM tree, because then this older
 			// version would be at the top of the LSM tree. To work correctly, reads expect the
 			// latest versions to be at the top, and the older versions at the bottom.
-			ne.Key = append(badgerMove, e.Key)
+			ne.Key = append(badgerMove, e.Key...)
 
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
@@ -881,7 +878,7 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
 	lf, err := vlog.getFileRLocked(vp.Fid)
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "Unable to read from value log: %+v", vp)
+		return nil, nil, err
 	}
 
 	buf, err := lf.read(vp, s)
