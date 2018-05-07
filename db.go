@@ -41,6 +41,7 @@ var (
 	badgerPrefix = []byte("!badger!")     // Prefix for internal keys used by badger.
 	head         = []byte("!badger!head") // For storing value offset for replay.
 	txnKey       = []byte("!badger!txn")  // For indicating end of entries in txn.
+	badgerMove   = []byte("!badger!move") // For key-value pairs which got moved during GC.
 )
 
 type closers struct {
