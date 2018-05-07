@@ -202,14 +202,13 @@ func (r *safeRead) Entry(reader *bufio.Reader) (*Entry, error) {
 	if h.klen > maxKeySize {
 		return nil, errTruncate
 	}
-	vl := int(h.vlen)
-	if cap(r.v) < vl {
-		r.v = make([]byte, 2*vl)
-	}
-
 	kl := int(h.klen)
 	if cap(r.k) < kl {
 		r.k = make([]byte, 2*kl)
+	}
+	vl := int(h.vlen)
+	if cap(r.v) < vl {
+		r.v = make([]byte, 2*vl)
 	}
 
 	e := &Entry{}
