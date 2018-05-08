@@ -888,8 +888,9 @@ func (vlog *valueLog) write(reqs []*request) error {
 		vlog.numEntriesWritten += uint32(len(b.Entries))
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
-		writeNow := vlog.writableOffset()+uint32(vlog.buf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
-			vlog.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries)
+		writeNow :=
+			vlog.writableOffset()+uint32(vlog.buf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
+				vlog.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries)
 		if writeNow {
 			if err := toDisk(); err != nil {
 				return err
