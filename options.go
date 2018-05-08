@@ -124,7 +124,7 @@ var DefaultOptions = Options{
 	NumVersionsToKeep:       1,
 	// Nothing to read/write value log using standard File I/O
 	// MemoryMap to mmap() the value log files
-	ValueLogFileSize:   256 << 20,
+	ValueLogFileSize:   1 << 30,
 	ValueLogMaxEntries: 1000000,
 	ValueThreshold:     64,
 	Truncate:           false,

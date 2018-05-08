@@ -487,12 +487,11 @@ func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 // get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
 //
-// IMPORTANT: We should never write an entry with a older timestamp for same key,
-// We need to maintain this invariant to search for latest value of a key,
-// or else we need to search in all tables and find the max version among them.
-// To maintain this invariant, we also need to ensure that all versions of a key
-// are always present in same table from level 1, because compaction can push
-// any table down.
+// IMPORTANT: We should never write an entry with an older timestamp for the same key, We need to
+// maintain this invariant to search for the latest value of a key, or else we need to search in all
+// tables and find the max version among them.  To maintain this invariant, we also need to ensure
+// that all versions of a key are always present in the same table from level 1, because compaction
+// can push any table down.
 func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := db.getMemTables() // Lock should be released.
 	defer decr()
