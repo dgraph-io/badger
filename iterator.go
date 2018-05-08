@@ -276,6 +276,8 @@ type IteratorOptions struct {
 	PrefetchSize int
 	Reverse      bool // Direction of iteration. False is forward, true is backward.
 	AllVersions  bool // Fetch all valid versions of the same key.
+
+	internalAccess bool // Used to allow internal access to badger keys.
 }
 
 // DefaultIteratorOptions contains default options when iterating over Badger key-value stores.
@@ -421,7 +423,7 @@ func (it *Iterator) parseItem() bool {
 	}
 
 	// Skip badger keys.
-	if bytes.HasPrefix(key, badgerPrefix) {
+	if !it.opt.internalAccess && bytes.HasPrefix(key, badgerPrefix) {
 		mi.Next()
 		return false
 	}

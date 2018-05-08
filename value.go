@@ -463,6 +463,63 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 	return nil
 }
 
+func (vlog *valueLog) deleteMoveKeysFor(fid uint32, tr trace.Trace) {
+	db := vlog.kv
+	var result []*Entry
+	var count, pointers uint64
+	tr.LazyPrintf("Iterating over move keys to find invalids for fid: %d", fid)
+	err := db.View(func(txn *Txn) error {
+		opt := DefaultIteratorOptions
+		opt.internalAccess = true
+		opt.PrefetchValues = false
+		itr := txn.NewIterator(opt)
+		defer itr.Close()
+
+		for itr.Seek(badgerMove); itr.ValidForPrefix(badgerMove); itr.Next() {
+			count++
+			item := itr.Item()
+			if item.meta&bitValuePointer == 0 {
+				continue
+			}
+			pointers++
+			var vp valuePointer
+			vp.Decode(item.vptr)
+			if vp.Fid == fid {
+				e := &Entry{Key: item.KeyCopy(nil), meta: bitDelete}
+				result = append(result, e)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		tr.LazyPrintf("Got error while iterating move keys: %v", err)
+		tr.SetError()
+		return
+	}
+	tr.LazyPrintf("Num total move keys: %d. Num pointers: %d", count, pointers)
+	tr.LazyPrintf("Number of invalid move keys found: %d", len(result))
+	batchSize := 10240
+	for i := 0; i < len(result); {
+		end := i + batchSize
+		if end > len(result) {
+			end = len(result)
+		}
+		if err := db.batchSet(result[i:end]); err != nil {
+			if err == ErrTxnTooBig {
+				batchSize /= 2
+				tr.LazyPrintf("Dropped batch size to %d", batchSize)
+				continue
+			}
+			tr.LazyPrintf("Error while doing batchSet: %v", err)
+			tr.SetError()
+			return
+		}
+		i += batchSize
+	}
+	tr.LazyPrintf("Move keys deletion done.")
+	return
+}
+
 func (vlog *valueLog) incrIteratorCount() {
 	atomic.AddInt32(&vlog.numActiveIterators, 1)
 }
@@ -1139,6 +1196,7 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 			tried[lf.fid] = true
 			err = vlog.doRunGC(lf, discardRatio, tr)
 			if err == nil {
+				vlog.deleteMoveKeysFor(lf.fid, tr)
 				return nil
 			}
 		}

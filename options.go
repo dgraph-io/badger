@@ -126,7 +126,7 @@ var DefaultOptions = Options{
 	// MemoryMap to mmap() the value log files
 	ValueLogFileSize:   1 << 30,
 	ValueLogMaxEntries: 1000000,
-	ValueThreshold:     64,
+	ValueThreshold:     32,
 	Truncate:           false,
 }
 

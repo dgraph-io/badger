@@ -17,7 +17,7 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-var Max int64 = 1000000
+var Max int64 = 10000000
 var suffix = make([]byte, 128)
 
 type S struct {
