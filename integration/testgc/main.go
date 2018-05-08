@@ -81,7 +81,7 @@ func (s *S) read(db *badger.DB) error {
 		s.Lock()
 		expected := s.vals[keyi]
 		if vali < expected {
-			log.Fatal("Expected: %d. Found: %d. Key: %d\n", expected, vali, keyi)
+			log.Fatalf("Expected: %d. Found: %d. Key: %d\n", expected, vali, keyi)
 		} else if vali == expected {
 			// pass
 		} else {
@@ -175,7 +175,7 @@ func main() {
 			}
 		}()
 	}
-	time.Sleep(3 * time.Minute)
+	time.Sleep(5 * time.Minute)
 	log.Println("Signaling...")
 	closer.SignalAndWait()
 	log.Println("Wait done. Now iterating over everything.")

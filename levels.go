@@ -281,6 +281,17 @@ func (s *levelsController) compactBuildTables(
 		cd.elog.LazyPrintf("Key range overlaps with lower levels: %v", hasOverlap)
 	}
 
+	// Try to collect stats so that we can inform value log about GC. That would help us find which
+	// value log file should be GCed.
+	discardStats := make(map[uint32]int64)
+	updateStats := func(vs y.ValueStruct) {
+		if vs.Meta&bitValuePointer > 0 {
+			var vp valuePointer
+			vp.Decode(vs.Value)
+			discardStats[vp.Fid] += int64(vp.Len)
+		}
+	}
+
 	// Create iterators across all the tables involved first.
 	var iters []y.Iterator
 	if l == 0 {
@@ -319,6 +330,7 @@ func (s *levelsController) compactBuildTables(
 			if len(skipKey) > 0 {
 				if y.SameKey(it.Key(), skipKey) {
 					numSkips++
+					updateStats(it.Value())
 					continue
 				} else {
 					skipKey = skipKey[:0]
@@ -361,6 +373,7 @@ func (s *levelsController) compactBuildTables(
 					} else {
 						// If no overlap, we can skip all the versions, by continuing here.
 						numSkips++
+						updateStats(vs)
 						continue // Skip adding this key.
 					}
 				}
@@ -429,7 +442,8 @@ func (s *levelsController) compactBuildTables(
 	sort.Slice(newTables, func(i, j int) bool {
 		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
-
+	s.kv.vlog.updateGCStats(discardStats)
+	cd.elog.LazyPrintf("Discard stats: %v", discardStats)
 	return newTables, func() error { return decrRefs(newTables) }, nil
 }
 
