@@ -281,6 +281,17 @@ func (s *levelsController) compactBuildTables(
 		cd.elog.LazyPrintf("Key range overlaps with lower levels: %v", hasOverlap)
 	}
 
+	// Try to collect stats so that we can inform value log about GC. That would help us find which
+	// value log file should be GCed.
+	discardStats := make(map[uint32]int64)
+	updateStats := func(vs y.ValueStruct) {
+		if vs.Meta&bitValuePointer > 0 {
+			var vp valuePointer
+			vp.Decode(vs.Value)
+			discardStats[vp.Fid] += int64(vp.Len)
+		}
+	}
+
 	// Create iterators across all the tables involved first.
 	var iters []y.Iterator
 	if l == 0 {
@@ -319,6 +330,7 @@ func (s *levelsController) compactBuildTables(
 			if len(skipKey) > 0 {
 				if y.SameKey(it.Key(), skipKey) {
 					numSkips++
+					updateStats(it.Value())
 					continue
 				} else {
 					skipKey = skipKey[:0]
@@ -361,6 +373,7 @@ func (s *levelsController) compactBuildTables(
 					} else {
 						// If no overlap, we can skip all the versions, by continuing here.
 						numSkips++
+						updateStats(vs)
 						continue // Skip adding this key.
 					}
 				}
@@ -429,7 +442,8 @@ func (s *levelsController) compactBuildTables(
 	sort.Slice(newTables, func(i, j int) bool {
 		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
-
+	s.kv.vlog.updateGCStats(discardStats)
+	cd.elog.LazyPrintf("Discard stats: %v", discardStats)
 	return newTables, func() error { return decrRefs(newTables) }, nil
 }
 
@@ -703,14 +717,12 @@ func (s *levelsController) close() error {
 }
 
 // get returns the found value if any. If not found, we return nil.
-func (s *levelsController) get(key []byte, maxVs y.ValueStruct) (y.ValueStruct, error) {
+func (s *levelsController) get(key []byte) (y.ValueStruct, error) {
 	// It's important that we iterate the levels from 0 on upward.  The reason is, if we iterated
 	// in opposite order, or in parallel (naively calling all the h.RLock() in some order) we could
 	// read level L's tables post-compaction and level L+1's tables pre-compaction.  (If we do
 	// parallelize this, we will need to call the h.RLock() function by increasing order of level
 	// number.)
-
-	version := y.ParseTs(key)
 	for _, h := range s.levels {
 		vs, err := h.get(key) // Calls h.RLock() and h.RUnlock().
 		if err != nil {
@@ -719,14 +731,9 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct) (y.ValueStruct, 
 		if vs.Value == nil && vs.Meta == 0 {
 			continue
 		}
-		if vs.Version == version {
-			return vs, nil
-		}
-		if maxVs.Version < vs.Version {
-			maxVs = vs
-		}
+		return vs, nil
 	}
-	return maxVs, nil
+	return y.ValueStruct{}, nil
 }
 
 func appendIteratorsReversed(out []y.Iterator, th []*table.Table, reversed bool) []y.Iterator {

@@ -76,6 +76,10 @@ type Options struct {
 	// Size of single value log file.
 	ValueLogFileSize int64
 
+	// Max number of entries a value log file can hold (approximately). A value log file would be
+	// determined by the smaller of its file size and max entries.
+	ValueLogMaxEntries uint32
+
 	// Number of compaction workers to run concurrently.
 	NumCompactors int
 
@@ -120,9 +124,10 @@ var DefaultOptions = Options{
 	NumVersionsToKeep:       1,
 	// Nothing to read/write value log using standard File I/O
 	// MemoryMap to mmap() the value log files
-	ValueLogFileSize: 1 << 30,
-	ValueThreshold:   20,
-	Truncate:         false,
+	ValueLogFileSize:   1 << 30,
+	ValueLogMaxEntries: 1000000,
+	ValueThreshold:     32,
+	Truncate:           false,
 }
 
 // LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold so values would

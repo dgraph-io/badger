@@ -25,6 +25,7 @@ import (
 
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/net/trace"
 )
 
 func TestValueBasic(t *testing.T) {
@@ -119,7 +120,9 @@ func TestValueGC(t *testing.T) {
 	//		return true
 	//	})
 
-	kv.vlog.rewrite(lf)
+	tr := trace.New("Test", "Test")
+	defer tr.Finish()
+	kv.vlog.rewrite(lf, tr)
 	for i := 45; i < 100; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
 
@@ -175,7 +178,9 @@ func TestValueGC2(t *testing.T) {
 	//		return true
 	//	})
 
-	kv.vlog.rewrite(lf)
+	tr := trace.New("Test", "Test")
+	defer tr.Finish()
+	kv.vlog.rewrite(lf, tr)
 	for i := 0; i < 5; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
 		require.NoError(t, kv.View(func(txn *Txn) error {
@@ -270,7 +275,9 @@ func TestValueGC3(t *testing.T) {
 	logFile := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
-	kv.vlog.rewrite(logFile)
+	tr := trace.New("Test", "Test")
+	defer tr.Finish()
+	kv.vlog.rewrite(logFile, tr)
 	it.Next()
 	require.True(t, it.Valid())
 	item = it.Item()
@@ -323,8 +330,10 @@ func TestValueGC4(t *testing.T) {
 	//		return true
 	//	})
 
-	kv.vlog.rewrite(lf0)
-	kv.vlog.rewrite(lf1)
+	tr := trace.New("Test", "Test")
+	defer tr.Finish()
+	kv.vlog.rewrite(lf0, tr)
+	kv.vlog.rewrite(lf1, tr)
 
 	// Replay value log
 	kv.vlog.Replay(valuePointer{Fid: 2}, replayFunction(kv))
@@ -368,10 +377,10 @@ func TestChecksums(t *testing.T) {
 		k1 = []byte("k1")
 		k2 = []byte("k2")
 		k3 = []byte("k3")
-		v0 = []byte("value0-012345678901234567890123")
-		v1 = []byte("value1-012345678901234567890123")
-		v2 = []byte("value2-012345678901234567890123")
-		v3 = []byte("value3-012345678901234567890123")
+		v0 = []byte("value0-012345678901234567890123012345678901234567890123")
+		v1 = []byte("value1-012345678901234567890123012345678901234567890123")
+		v2 = []byte("value2-012345678901234567890123012345678901234567890123")
+		v3 = []byte("value3-012345678901234567890123012345678901234567890123")
 	)
 	// Make sure the value log would actually store the item
 	require.True(t, len(v0) >= kv.opt.ValueThreshold)
@@ -451,10 +460,10 @@ func TestPartialAppendToValueLog(t *testing.T) {
 		k1 = []byte("k1")
 		k2 = []byte("k2")
 		k3 = []byte("k3")
-		v0 = []byte("value0-012345678901234567890123")
-		v1 = []byte("value1-012345678901234567890123")
-		v2 = []byte("value2-012345678901234567890123")
-		v3 = []byte("value3-012345678901234567890123")
+		v0 = []byte("value0-01234567890123456789012012345678901234567890123")
+		v1 = []byte("value1-01234567890123456789012012345678901234567890123")
+		v2 = []byte("value2-01234567890123456789012012345678901234567890123")
+		v3 = []byte("value3-01234567890123456789012012345678901234567890123")
 	)
 	// Values need to be long enough to actually get written to value log.
 	require.True(t, len(v3) >= kv.opt.ValueThreshold)

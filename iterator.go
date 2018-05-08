@@ -156,7 +156,26 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 
 	var vp valuePointer
 	vp.Decode(item.vptr)
-	return item.db.vlog.Read(vp, item.slice)
+	result, cb, err := item.db.vlog.Read(vp, item.slice)
+	if err != ErrRetry {
+		return result, cb, err
+	}
+
+	// The value pointer is pointing to a deleted value log. Look for the move key and read that
+	// instead.
+	runCallback(cb)
+	key := y.KeyWithTs(item.Key(), item.Version())
+	moveKey := append(badgerMove, key...)
+	vs, err := item.db.get(moveKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	if vs.Version != item.Version() {
+		return nil, nil, nil
+	}
+	item.vptr = vs.Value
+	item.meta |= vs.Meta // This meta would only be about value pointer.
+	return item.yieldItemValue()
 }
 
 func runCallback(cb func()) {
@@ -257,6 +276,8 @@ type IteratorOptions struct {
 	PrefetchSize int
 	Reverse      bool // Direction of iteration. False is forward, true is backward.
 	AllVersions  bool // Fetch all valid versions of the same key.
+
+	internalAccess bool // Used to allow internal access to badger keys.
 }
 
 // DefaultIteratorOptions contains default options when iterating over Badger key-value stores.
@@ -402,7 +423,7 @@ func (it *Iterator) parseItem() bool {
 	}
 
 	// Skip badger keys.
-	if bytes.HasPrefix(key, badgerPrefix) {
+	if !it.opt.internalAccess && bytes.HasPrefix(key, badgerPrefix) {
 		mi.Next()
 		return false
 	}

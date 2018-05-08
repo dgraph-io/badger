@@ -616,6 +616,10 @@ observe the full IOPS throughput provided by modern SSDs. In Dgraph, we have set
 it to 128. For more details, [see this
 thread](https://groups.google.com/d/topic/golang-nuts/jPb_h3TvlKE/discussion).
 
+- Are there any linux specific settings that I should use?
+
+We recommend setting max file descriptors to a high number depending upon the expected size of you data.
+
 ## Contact
 - Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, feature requests and discussions.
 - Please use [Github issue tracker](https://github.com/dgraph-io/badger/issues) for filing bugs or feature requests.
