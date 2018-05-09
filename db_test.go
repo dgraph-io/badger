@@ -675,7 +675,7 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 
 	require.NoError(t, kv.View(func(txn *Txn) error {
 		_, err := txn.Get(key)
-		require.Error(t, ErrKeyNotFound, err)
+		require.Equal(t, ErrKeyNotFound, err)
 		return nil
 	}))
 }
@@ -921,7 +921,7 @@ func TestExpiry(t *testing.T) {
 			require.NoError(t, err)
 
 			_, err = txn.Get([]byte("answer2"))
-			require.Error(t, ErrKeyNotFound, err)
+			require.Equal(t, ErrKeyNotFound, err)
 			return nil
 		})
 		require.NoError(t, err)
@@ -1235,7 +1235,7 @@ func TestMergeOperatorGetBeforeAdd(t *testing.T) {
 		defer m.Stop()
 
 		_, err := m.Get()
-		require.Error(t, ErrKeyNotFound, err)
+		require.Equal(t, ErrKeyNotFound, err)
 	})
 }
 
