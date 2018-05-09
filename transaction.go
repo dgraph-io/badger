@@ -31,6 +31,7 @@ import (
 )
 
 type oracle struct {
+	// curRead must be at the top for memory alignment. See issue #311.
 	curRead   uint64 // Managed by the mutex.
 	refCount  int64
 	isManaged bool // Does not change value, so no locking required.
