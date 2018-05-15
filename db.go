@@ -74,6 +74,8 @@ type DB struct {
 	flushChan chan flushTask // For flushing memtables.
 
 	orc *oracle
+
+	beforeCommit func(txn *Txn, key, val []byte) error
 }
 
 const (
@@ -166,6 +168,13 @@ func replayFunction(out *DB) func(Entry, valuePointer) error {
 func Open(opt Options) (db *DB, err error) {
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
+
+	defer func() {
+		if db == nil || err != nil {
+			return
+		}
+		db.beforeCommit = opt.BeforeCommit
+	}()
 
 	if opt.ValueThreshold > math.MaxUint16-16 {
 		return nil, ErrValueThreshold
