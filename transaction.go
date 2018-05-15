@@ -320,7 +320,7 @@ func (txn *Txn) modify(e *Entry) error {
 // with other metadata to the database.
 //
 // The current transaction keeps a reference to the entry passed in argument.
-// Users must not modify the entry the end of the transaction.
+// Users must not modify the entry until the end of the transaction.
 func (txn *Txn) SetEntry(e *Entry) error {
 	return txn.modify(e)
 }
