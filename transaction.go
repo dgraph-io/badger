@@ -544,5 +544,36 @@ func (db *DB) Update(fn func(txn *Txn) error) error {
 		return err
 	}
 
+	if err := db.callBeforeCommit(txn); err != nil {
+		return err
+	}
+
 	return txn.Commit(nil)
+}
+
+func (db *DB) callBeforeCommit(txn *Txn) error {
+	if db.beforeCommit == nil {
+		return nil
+	}
+	if len(txn.pendingWrites) == 0 {
+		return nil
+	}
+	it := txn.newPendingWritesIterator(false)
+	if it == nil {
+		return nil
+	}
+	defer it.Close()
+	for it.Rewind(); it.Valid(); it.Next() {
+		k := it.Key()
+		k = k[0 : len(k)-8]
+		var v []byte
+		_v := it.Value()
+		if _v.Value != nil && _v.Meta != bitDelete {
+			v = _v.Value
+		}
+		if err := db.beforeCommit(txn, k, v); err != nil {
+			return err
+		}
+	}
+	return nil
 }

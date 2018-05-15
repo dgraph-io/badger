@@ -102,6 +102,9 @@ type Options struct {
 
 	// Truncate value log to delete corrupt data, if any. Would not truncate if ReadOnly is set.
 	Truncate bool
+
+	// If provided, will be called inside (*DB) Update(...) right before txn.Commit(nil).
+	BeforeCommit func(txn *Txn, key, val []byte) error
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
