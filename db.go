@@ -927,12 +927,11 @@ func (db *DB) updateSize(lc *y.Closer) {
 // RunValueLogGC triggers a value log garbage collection.
 //
 // It picks value log files to perform GC based on statistics that are collected
-// duing the session, when DB.PurgeOlderVersions() and DB.PurgeVersions() is
-// called. If no such statistics are available, then log files are picked in
-// random order. The process stops as soon as the first log file is encountered
-// which does not result in garbage collection.
+// duing compactions.  If no such statistics are available, then log files are
+// picked in random order. The process stops as soon as the first log file is
+// encountered which does not result in garbage collection.
 //
-// When a log file is picked, it is first sampled If the sample shows that we
+// When a log file is picked, it is first sampled. If the sample shows that we
 // can discard at least discardRatio space of that file, it would be rewritten.
 //
 // If a call to RunValueLogGC results in no rewrites, then an ErrNoRewrite is
