@@ -772,7 +772,7 @@ func arenaSize(opt Options) int64 {
 	return opt.MaxTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
 
-// WriteLevel0Table flushes memtable. It drops deleteValues.
+// WriteLevel0Table flushes memtable.
 func writeLevel0Table(s *skl.Skiplist, f *os.File) error {
 	iter := s.NewIterator()
 	defer iter.Close()
