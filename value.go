@@ -1155,8 +1155,9 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	tr.LazyPrintf("Fid: %d. Skipped: %5.2fMB Num iterations: %d. Data status=%+v\n",
 		lf.fid, skipped, numIterations, r)
 
-	// If we sampled at least 10MB, we can make a call about rewrite.
-	if (r.count < 10000 && r.total < 10.0) || r.discard < discardRatio*r.total {
+	// If we couldn't sample at least a 1000 KV pairs or at least 75% of the window size,
+	// and what we can discard is below the threshold, we should skip the rewrite.
+	if (r.count < 1000 && r.total < window*0.75) || r.discard < discardRatio*r.total {
 		tr.LazyPrintf("Skipping GC on fid: %d", lf.fid)
 		return ErrNoRewrite
 	}
