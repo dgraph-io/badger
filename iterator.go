@@ -175,6 +175,7 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	}
 	item.vptr = vs.Value
 	item.meta |= vs.Meta // This meta would only be about value pointer.
+	item.key = moveKey
 	return item.yieldItemValue()
 }
 
