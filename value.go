@@ -384,10 +384,13 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			// allowed to rewrite an older version of key in the LSM tree, because then this older
 			// version would be at the top of the LSM tree. To work correctly, reads expect the
 			// latest versions to be at the top, and the older versions at the bottom.
-			ne.Key = append(badgerMove, e.Key...)
+			if bytes.HasPrefix(e.Key, badgerMove) {
+				ne.Key = append([]byte{}, e.Key...)
+			} else {
+				ne.Key = append(badgerMove, e.Key...)
+			}
 
-			ne.Value = make([]byte, len(e.Value))
-			copy(ne.Value, e.Value)
+			ne.Value = append([]byte{}, e.Value...)
 			wb = append(wb, ne)
 			size += int64(e.estimateSize(vlog.opt.ValueThreshold))
 			if size >= 64*mi {
