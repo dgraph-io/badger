@@ -1072,6 +1072,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	// Set up the sampling window sizes.
 	sizeWindow := float64(fi.Size()) * 0.1                          // 10% of the file as window.
 	countWindow := int(float64(vlog.opt.ValueLogMaxEntries) * 0.01) // 1% of num entries.
+	tr.LazyPrintf("Size window: %5.2f. Count window: %d.", sizeWindow, countWindow)
 
 	// Pick a random start point for the log.
 	skipFirstM := float64(rand.Int63n(fi.Size())) // Pick a random starting location.
@@ -1189,6 +1190,7 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 	case vlog.garbageCh <- struct{}{}:
 		// Pick a log file for GC.
 		tr := trace.New("Badger.ValueLog", "GC")
+		tr.SetMaxEvents(100)
 		defer func() {
 			tr.Finish()
 			<-vlog.garbageCh
@@ -1196,6 +1198,10 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 
 		var err error
 		files := vlog.pickLog(head, tr)
+		if len(files) == 0 {
+			tr.LazyPrintf("PickLog returned zero results.")
+			return ErrNoRewrite
+		}
 		tried := make(map[uint32]bool)
 		for _, lf := range files {
 			if _, done := tried[lf.fid]; done {

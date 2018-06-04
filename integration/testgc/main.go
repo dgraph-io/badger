@@ -128,9 +128,10 @@ func main() {
 		// Run value log GC.
 		defer closer.Done()
 		var count int
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
+		again:
 			select {
 			case <-closer.HasBeenClosed():
 				log.Printf("Num times value log GC was successful: %d\n", count)
@@ -142,6 +143,7 @@ func main() {
 			log.Printf("Result of value log GC: %v\n", err)
 			if err == nil {
 				count++
+				goto again
 			}
 		}
 	}()
@@ -218,4 +220,5 @@ func main() {
 		log.Fatalf("Error while iterating: %v", err)
 	}
 	log.Println("Iteration done. Test successful.")
+	time.Sleep(time.Minute) // Time to do some poking around.
 }
