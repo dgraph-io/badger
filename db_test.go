@@ -1394,17 +1394,17 @@ func TestLSMOnly(t *testing.T) {
 	_, err = Open(dopts)
 	require.Equal(t, ErrValueThreshold, err)
 
+	opts.ValueLogMaxEntries = 100
 	db, err := Open(opts)
 	require.NoError(t, err)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < 5000; i++ {
-		value := make([]byte, 64000)
-		_, err = rand.Read(value)
+	value := make([]byte, 128)
+	_, err = rand.Read(value)
+	for i := 0; i < 500; i++ {
 		require.NoError(t, err)
-
 		txnSet(t, db, []byte(fmt.Sprintf("key%d", i)), value, 0x00)
 	}
 	require.NoError(t, db.Close()) // Close to force compactions, so Value log GC would run.
