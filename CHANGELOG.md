@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.5.1] - 2018-06-04
+Bug Fixes:
+* Fix for infinite yieldItemValue recursion. #503
+* Fix recursive addition of `badgerMove` prefix. https://github.com/dgraph-io/badger/commit/2e3a32f0ccac3066fb4206b28deb39c210c5266f
+* Use file size based window size for sampling, instead of fixing it to 10MB. #501
+
+Cleanup:
+* Clarify comments and documentation.
+* Move badger tool one directory level up.
+
 ## [1.5.0] - 2018-05-08
 * Introduce `NumVersionsToKeep` option. This option is used to discard many
   versions of the same key, which saves space.
