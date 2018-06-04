@@ -541,6 +541,7 @@ Below is a list of known projects that use Badger:
 * [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
 * [go-ipfs](https://github.com/ipfs/go-ipfs) - Go client for the InterPlanetary File System (IPFS), a new hypermedia distribution protocol.
 * [gorush](https://github.com/appleboy/gorush) - A push notification server written in Go.
+* [emitter](https://github.com/emitter-io/emitter) - Scalable, low latency, distributed pub/sub broker with message storage, uses MQTT, gossip and badger.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
