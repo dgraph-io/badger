@@ -38,7 +38,7 @@ Cleanup:
 * Introduce new `LSMOnlyOptions`, to make Badger act like a typical LSM based DB.
 
 Bug fix:
-* [Temporary] Check max version across all tables in Get (removed in next
+* (Temporary) Check max version across all tables in Get (removed in next
   release).
 * Update commit and read ts while loading from backup.
 * Ensure all transaction entries are part of the same value log file.
@@ -71,7 +71,10 @@ Bug fix:
 ## [1.0.1] - 2017-11-06
 * Fix an uint16 overflow when resizing key slice
 
-[Unreleased]: https://github.com/dgraph-io/badger/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/dgraph-io/badger/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/dgraph-io/badger/compare/v1.5.0...v1.5.1
+[1.5.0]: https://github.com/dgraph-io/badger/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/dgraph-io/badger/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/dgraph-io/badger/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/dgraph-io/badger/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/dgraph-io/badger/compare/v1.1.0...v1.1.1
