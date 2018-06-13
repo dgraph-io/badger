@@ -1205,6 +1205,11 @@ func (op *MergeOperator) Add(val []byte) error {
 	})
 }
 
+// AddUsing provides the same functionality as Add, but does it using the given txn object.
+func (op *MergeOperator) AddUsing(txn *Txn, val []byte) error {
+	return txn.Set(op.key, val)
+}
+
 // Get returns the latest value for the merge operator, which is derived by
 // applying the merge function to all the values added so far.
 //
