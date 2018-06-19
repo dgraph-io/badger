@@ -91,6 +91,7 @@ func TestDumpLoad(t *testing.T) {
 		opts := DefaultIteratorOptions
 		opts.AllVersions = true
 		it := txn.NewIterator(opts)
+		defer it.Close()
 		var count int
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()

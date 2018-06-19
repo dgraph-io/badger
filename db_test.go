@@ -862,6 +862,7 @@ func TestDiscardVersionsBelow(t *testing.T) {
 		// Verify that there are 4 versions, and record 3rd version (2nd from top in iteration)
 		db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
+			defer it.Close()
 			var count int
 			for it.Rewind(); it.Valid(); it.Next() {
 				count++
@@ -885,6 +886,7 @@ func TestDiscardVersionsBelow(t *testing.T) {
 		// below ts have been deleted.
 		db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
+			defer it.Close()
 			var count int
 			for it.Rewind(); it.Valid(); it.Next() {
 				count++
@@ -931,6 +933,7 @@ func TestExpiry(t *testing.T) {
 		opts.PrefetchValues = false
 		err = db.View(func(txn *Txn) error {
 			it := txn.NewIterator(opts)
+			defer it.Close()
 			var count int
 			for it.Rewind(); it.Valid(); it.Next() {
 				count++
@@ -1099,6 +1102,7 @@ func TestWriteDeadlock(t *testing.T) {
 		opt := DefaultIteratorOptions
 		opt.PrefetchValues = false
 		it := txn.NewIterator(opt)
+		defer it.Close()
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
 
@@ -1558,6 +1562,7 @@ func ExampleTxn_NewIterator() {
 	var count int
 	err = db.View(func(txn *Txn) error {
 		it := txn.NewIterator(opt)
+		defer it.Close()
 		for it.Rewind(); it.Valid(); it.Next() {
 			count++
 		}
