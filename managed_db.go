@@ -18,6 +18,7 @@ package badger
 
 import (
 	"math"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -103,11 +104,8 @@ var errDone = errors.New("Done deleting keys")
 // tables and apply it to manifest. DO not pick up the latest table from level
 // 0, to preserve the (persistent) badgerHead key.
 // - Iterate over the KVs in Level 0, and run deletes on them via transactions.
-//
-// NOTE: The timestamp used for writes must be greater than the max timestamp of
-// writes before DropAll, to ensure that new writes are not lower than the
-// delete markers in terms of versioning. If lower, it would result in new
-// writes being seen as absent.
+// - The deletions are done at the same timestamp as the latest version of the
+// key. Thus, we could write the keys back at the same timestamp as before.
 func (db *ManagedDB) DropAll() error {
 	// Stop accepting new writes.
 	atomic.StoreInt32(&db.blockWrites, 1)
@@ -140,47 +138,56 @@ func (db *ManagedDB) DropAll() error {
 		return err
 	}
 
-	deleteKeys := func() error {
-		txn := db.NewTransactionAt(math.MaxUint64, true)
+	type KV struct {
+		key     []byte
+		version uint64
+	}
+
+	var kvs []KV
+	getKeys := func() error {
+		txn := db.NewTransactionAt(math.MaxUint64, false)
 		defer txn.Discard()
 
 		opts := DefaultIteratorOptions
 		opts.PrefetchValues = false
 		itr := txn.NewIterator(opts)
+		defer itr.Close()
 
-		var maxTs uint64
-		var count int
 		for itr.Rewind(); itr.Valid(); itr.Next() {
-			count++
 			item := itr.Item()
-			if item.Version() > maxTs {
-				maxTs = item.Version()
-			}
-			err := txn.Delete(item.KeyCopy(nil))
-			if err == ErrTxnTooBig {
-				break
-			} else if err != nil {
-				itr.Close()
-				return err
-			}
+			kvs = append(kvs, KV{item.KeyCopy(nil), item.Version()})
 		}
-		itr.Close()
-		if count == 0 {
-			return errDone
-		}
-		return txn.CommitAt(maxTs, nil)
+		return nil
+	}
+	if err := getKeys(); err != nil {
+		return err
 	}
 
-	// Continue deleting until all data has been marked as deleted.
-	for {
-		err := deleteKeys()
-		if err == errDone {
-			return nil
-		}
-		if err != nil {
+	var wg sync.WaitGroup
+	errCh := make(chan error, 1)
+	for _, kv := range kvs {
+		wg.Add(1)
+		txn := db.NewTransactionAt(math.MaxUint64, true)
+		if err := txn.Delete(kv.key); err != nil {
 			return err
 		}
-		// Otherwise, continue.
+		if err := txn.CommitAt(kv.version, func(rerr error) {
+			if rerr != nil {
+				select {
+				case errCh <- rerr:
+				default:
+				}
+			}
+			wg.Done()
+		}); err != nil {
+			return err
+		}
 	}
-	return nil
+	wg.Wait()
+	select {
+	case err := <-errCh:
+		return err
+	default:
+		return nil
+	}
 }

@@ -67,8 +67,8 @@ func TestDropAll(t *testing.T) {
 	require.NoError(t, mdb.DropAll())
 	require.Equal(t, 0, numKeys(mdb, math.MaxUint64))
 
-	// Check that we can still write to mdb.
-	populate(mdb, N+1)
+	// Check that we can still write to mdb, and using the same timestamps as before.
+	populate(mdb, 1)
 	require.Equal(t, int(N), numKeys(mdb, math.MaxUint64))
 	mdb.Close()
 
