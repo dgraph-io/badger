@@ -17,11 +17,13 @@
 package badger
 
 import (
+	"fmt"
 	"math"
 	"sync/atomic"
 	"time"
 
 	"github.com/dgraph-io/badger/y"
+	"github.com/pkg/errors"
 )
 
 // ManagedDB allows end users to manage the transactions themselves. Transaction
@@ -93,6 +95,8 @@ func (db *ManagedDB) SetDiscardTs(ts uint64) {
 	db.orc.setDiscardTs(ts)
 }
 
+var errDone = errors.New("Done deleting keys")
+
 // DropAll would drop all the data stored in Badger. It does this in the following way.
 // - Stop accepting new writes.
 // - Pause the compactions.
@@ -117,30 +121,32 @@ func (db *ManagedDB) DropAll() error {
 	if db.closers.compactors != nil {
 		db.closers.compactors.SignalAndWait()
 	}
-	defer func() {
-		db.closers.compactors = y.NewCloser(1)
-		db.lc.startCompact(db.closers.compactors)
-	}()
 
-	err := db.lc.deleteLSMTree()
+	_, err := db.lc.deleteLSMTree()
 	// Allow writes so that we can run transactions. Ideally, the user must ensure that they're not
 	// doing more writes concurrently while this operation is happening.
 	atomic.StoreInt32(&db.blockWrites, 0)
+	// Need compactions to happen so deletes below can be flushed out.
+	if db.closers.compactors != nil {
+		fmt.Println("Starting compactions.")
+		db.closers.compactors = y.NewCloser(1)
+		db.lc.startCompact(db.closers.compactors)
+		fmt.Println("Done")
+	}
 	if err != nil {
 		return err
 	}
 
-	// Continue deleting until all data has been marked as deleted.
-	for count := 1; count > 0; count = 0 {
+	deleteKeys := func() error {
 		txn := db.NewTransactionAt(math.MaxUint64, true)
 		defer txn.Discard()
 
 		opts := DefaultIteratorOptions
 		opts.PrefetchValues = false
 		itr := txn.NewIterator(opts)
-		defer itr.Close()
 
 		var maxTs uint64
+		var count int
 		for itr.Rewind(); itr.Valid(); itr.Next() {
 			count++
 			item := itr.Item()
@@ -148,21 +154,30 @@ func (db *ManagedDB) DropAll() error {
 				maxTs = item.Version()
 			}
 			err := txn.Delete(item.KeyCopy(nil))
-			if err == nil {
-				continue
-			} else if err == ErrTxnTooBig {
+			if err == ErrTxnTooBig {
 				break
-			} else {
+			} else if err != nil {
+				itr.Close()
 				return err
 			}
 		}
+		itr.Close()
 		if count == 0 {
-			break
+			return errDone
 		}
-		if err := txn.CommitAt(maxTs, nil); err != nil {
-			return err
-		}
+		return txn.CommitAt(maxTs, nil)
 	}
 
+	// Continue deleting until all data has been marked as deleted.
+	for {
+		err := deleteKeys()
+		if err == errDone {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		// Otherwise, continue.
+	}
 	return nil
 }

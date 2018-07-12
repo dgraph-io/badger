@@ -25,6 +25,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1574,4 +1575,14 @@ func ExampleTxn_NewIterator() {
 	fmt.Printf("Counted %d elements", count)
 	// Output:
 	// Counted 1000 elements
+}
+
+func TestMain(m *testing.M) {
+	// call flag.Parse() here if TestMain uses flags
+	go func() {
+		if err := http.ListenAndServe("localhost:8080", nil); err != nil {
+			log.Fatalf("Unable to open http port at 8080")
+		}
+	}()
+	os.Exit(m.Run())
 }
