@@ -208,8 +208,10 @@ func (s *levelsController) deleteLSMTree() (int, error) {
 
 	for _, l := range s.levels {
 		l.Lock()
+		l.totalSize = 0
 		if l.level == 0 && len(l.tables) > 1 {
 			l.tables = []*table.Table{keepOne}
+			l.totalSize += keepOne.Size()
 		} else {
 			l.tables = l.tables[:0]
 		}

@@ -1,7 +1,6 @@
 package badger
 
 import (
-	"fmt"
 	"io/ioutil"
 	"math"
 	"math/rand"
@@ -36,7 +35,6 @@ func numKeys(mdb *ManagedDB, readTs uint64) int {
 	for itr.Rewind(); itr.Valid(); itr.Next() {
 		count++
 	}
-	fmt.Println("itr done for numkeys")
 	return count
 }
 
@@ -48,7 +46,7 @@ func TestDropAll(t *testing.T) {
 	mdb, err := OpenManaged(opts)
 	require.NoError(t, err)
 
-	N := uint64(20000)
+	N := uint64(10000)
 	populate := func(db *ManagedDB, start uint64) {
 		var wg sync.WaitGroup
 		for i := start; i < start+N; i++ {
@@ -67,7 +65,6 @@ func TestDropAll(t *testing.T) {
 	require.Equal(t, int(N), numKeys(mdb, math.MaxUint64))
 
 	require.NoError(t, mdb.DropAll())
-	fmt.Println("Now checking num keys")
 	require.Equal(t, 0, numKeys(mdb, math.MaxUint64))
 
 	// Check that we can still write to mdb.

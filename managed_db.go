@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"fmt"
 	"math"
 	"sync/atomic"
 	"time"
@@ -128,10 +127,8 @@ func (db *ManagedDB) DropAll() error {
 	atomic.StoreInt32(&db.blockWrites, 0)
 	// Need compactions to happen so deletes below can be flushed out.
 	if db.closers.compactors != nil {
-		fmt.Println("Starting compactions.")
 		db.closers.compactors = y.NewCloser(1)
 		db.lc.startCompact(db.closers.compactors)
-		fmt.Println("Done")
 	}
 	if err != nil {
 		return err
