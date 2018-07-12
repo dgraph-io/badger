@@ -856,7 +856,12 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 
 		// Update s.imm. Need a lock.
 		db.Lock()
-		y.AssertTrue(ft.mt == db.imm[0]) //For now, single threaded.
+		// This is a single-threaded operation. ft.mt corresponds to the head of
+		// db.imm list. Once we flush it, we advance db.imm. The next ft.mt
+		// which would arrive here would match db.imm[0], because we acquire a
+		// lock over DB when pushing to flushChan.
+		// TODO: This logic is dirty AF. Any change and this could easily break.
+		y.AssertTrue(ft.mt == db.imm[0])
 		db.imm = db.imm[1:]
 		ft.mt.DecrRef() // Return memory.
 		db.Unlock()
