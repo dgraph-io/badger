@@ -98,13 +98,9 @@ var errDone = errors.New("Done deleting keys")
 
 // DropAll would drop all the data stored in Badger. It does this in the following way.
 // - Stop accepting new writes.
-// - Flush out all memtables.
-// - Push one update, and flush memtables again.
 // - Pause the compactions.
 // - Pick all tables from all levels, create a changeset to delete all these tables and apply it to
 // manifest. DO not pick up the latest table from level 0, to preserve the (persistent) badgerHead key.
-// - Iterate over DB, we should have zero KVs.
-// - TODO: Update logic to use flushChan.
 // - Iterate over the KVs in Level 0, and run deletes on them via transactions.
 //
 // NOTE: The timestamp used for writes must be greater than the max timestamp of
