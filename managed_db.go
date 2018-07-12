@@ -16,6 +16,14 @@
 
 package badger
 
+import (
+	"math"
+	"sync/atomic"
+	"time"
+
+	"github.com/dgraph-io/badger/y"
+)
+
 // ManagedDB allows end users to manage the transactions themselves. Transaction
 // start and commit timestamps are set by end-user.
 //
@@ -83,4 +91,78 @@ func (db *ManagedDB) GetSequence(_ []byte, _ uint64) (*Sequence, error) {
 // reclaim disk space.
 func (db *ManagedDB) SetDiscardTs(ts uint64) {
 	db.orc.setDiscardTs(ts)
+}
+
+// DropAll would drop all the data stored in Badger. It does this in the following way.
+// - Stop accepting new writes.
+// - Pause the compactions.
+// - Pick all tables from all levels, create a changeset to delete all these tables and apply it to
+// manifest. DO not pick up the latest table from level 0, to preserve the (persistent) badgerHead key.
+// - Iterate over the KVs in Level 0, and run deletes on them via transactions.
+func (db *ManagedDB) DropAll() error {
+	// Stop accepting new writes.
+	atomic.StoreInt32(&db.blockWrites, 1)
+
+	// Wait for writeCh to reach size of zero. This is not ideal, but a very
+	// simple way to allow writeCh to flush out, before we proceed.
+	tick := time.NewTicker(100 * time.Millisecond)
+	for range tick.C {
+		if len(db.writeCh) == 0 {
+			break
+		}
+	}
+	tick.Stop()
+
+	// Stop the compactions.
+	if db.closers.compactors != nil {
+		db.closers.compactors.SignalAndWait()
+	}
+	defer func() {
+		db.closers.compactors = y.NewCloser(1)
+		db.lc.startCompact(db.closers.compactors)
+	}()
+
+	err := db.lc.deleteLSMTree()
+	// Allow writes so that we can run transactions. Ideally, the user must ensure that they're not
+	// doing more writes concurrently while this operation is happening.
+	atomic.StoreInt32(&db.blockWrites, 0)
+	if err != nil {
+		return err
+	}
+
+	// Continue deleting until all data has been marked as deleted.
+	for count := 1; count > 0; count = 0 {
+		txn := db.NewTransactionAt(math.MaxUint64, true)
+		defer txn.Discard()
+
+		opts := DefaultIteratorOptions
+		opts.PrefetchValues = false
+		itr := txn.NewIterator(opts)
+		defer itr.Close()
+
+		var maxTs uint64
+		for itr.Rewind(); itr.Valid(); itr.Next() {
+			count++
+			item := itr.Item()
+			if item.Version() > maxTs {
+				maxTs = item.Version()
+			}
+			err := txn.Delete(item.KeyCopy(nil))
+			if err == nil {
+				continue
+			} else if err == ErrTxnTooBig {
+				break
+			} else {
+				return err
+			}
+		}
+		if count == 0 {
+			break
+		}
+		if err := txn.CommitAt(maxTs, nil); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

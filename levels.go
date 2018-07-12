@@ -170,6 +170,41 @@ func (s *levelsController) cleanupLevels() error {
 	return firstErr
 }
 
+// This function picks all tables from all levels, creates a manifest changeset,
+// applies it, and then decrements the refs of these tables, which would result
+// in their deletion. It spares one table from L0, to keep the badgerHead key
+// persisted, so we don't lose where we are w.r.t. value log.
+// NOTE: This function in itself isn't sufficient to completely delete all the
+// data. After this, one would still need to iterate over the KV pairs and mark
+// them as deleted.
+func (s *levelsController) deleteLSMTree() error {
+	var all []*table.Table
+	for _, l := range s.levels {
+		l.RLock()
+		if l.level == 0 && len(l.tables) > 1 {
+			// Skip the last table. We do this to keep the badgerMove key persisted.
+			all = append(all, l.tables[:len(l.tables)-1]...)
+		} else {
+			all = append(all, l.tables...)
+		}
+		l.RUnlock()
+	}
+	changes := []*protos.ManifestChange{}
+	for _, table := range all {
+		changes = append(changes, makeTableDeleteChange(table.ID()))
+	}
+	changeSet := protos.ManifestChangeSet{Changes: changes}
+	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
+		return err
+	}
+	for _, table := range all {
+		if err := table.DecrRef(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *levelsController) startCompact(lc *y.Closer) {
 	n := s.kv.opt.NumCompactors
 	lc.AddRunning(n - 1)

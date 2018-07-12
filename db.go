@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dgraph-io/badger/options"
@@ -72,6 +73,8 @@ type DB struct {
 	vptr      valuePointer // less than or equal to a pointer to the last vlog value put into mt
 	writeCh   chan *request
 	flushChan chan flushTask // For flushing memtables.
+
+	blockWrites int32
 
 	orc *oracle
 }
@@ -622,6 +625,9 @@ func (db *DB) writeRequests(reqs []*request) error {
 }
 
 func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
+	if atomic.LoadInt32(&db.blockWrites) == 1 {
+		return nil, ErrBlockedWrites
+	}
 	var count, size int64
 	for _, e := range entries {
 		size += int64(e.estimateSize(db.opt.ValueThreshold))
