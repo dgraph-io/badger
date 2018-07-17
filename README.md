@@ -583,11 +583,11 @@ There are multiple workarounds during iteration:
 
 - **My writes are really slow. Why?**
 
-Are you creating a new transaction for every single key update? This will lead
-to very low throughput. To get best write performance, batch up multiple writes
-inside a transaction using single `DB.Update()` call. You could also have
-multiple such `DB.Update()` calls being made concurrently from multiple
-goroutines.
+Are you creating a new transaction for every single key update, and waiting for
+it to `Commit` fully before creating a new one? This will lead to very low
+throughput. To get best write performance, batch up multiple writes inside a
+transaction using single `DB.Update()` call. You could also have multiple such
+`DB.Update()` calls being made concurrently from multiple goroutines.
 
 The way to achieve the highest write throughput via Badger, is to do serial
 writes and use callbacks in `txn.Commit`, like so:
