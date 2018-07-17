@@ -604,7 +604,7 @@ storeErr := func(err error) {
   }
 }
 
-getErr := func() {
+getErr := func() error {
   select {
     case err := <-che:
       return err
