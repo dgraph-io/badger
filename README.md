@@ -589,6 +589,48 @@ inside a transaction using single `DB.Update()` call. You could also have
 multiple such `DB.Update()` calls being made concurrently from multiple
 goroutines.
 
+The way to achieve the highest write throughput via Badger, is to do serial
+writes and use callbacks in `txn.Commit`, like so:
+
+```go
+che := make(chan error, 1)
+storeErr := func(err error) {
+  if err == nil {
+    return
+  }
+  select {
+    case che <- err:
+    default:
+  }
+}
+
+getErr := func() {
+  select {
+    case err := <-che:
+      return err
+    default:
+      return nil
+  }
+}
+
+var wg sync.WaitGroup
+for _, kv := range kvs {
+  wg.Add(1)
+  txn := db.NewTransaction(true)
+  handle(txn.Set(kv.Key, kv.Value))
+  handle(txn.Commit(func(err error) {
+    storeErr(err)
+    wg.Done()
+  }))
+}
+wg.Wait()
+return getErr()
+```
+
+In this code, we passed a callback function to `txn.Commit`, which can pick up
+and return the first error encountered, if any. Callbacks can be made to do more
+things, like retrying commits etc.
+
 - **I don't see any disk write. Why?**
 
 If you're using Badger with `SyncWrites=false`, then your writes might not be written to value log

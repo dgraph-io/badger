@@ -916,7 +916,6 @@ func (db *DB) calculateSize() {
 		_, vlogSize = totalSize(db.opt.ValueDir)
 	}
 	y.VlogSize.Set(db.opt.Dir, newInt(vlogSize))
-
 }
 
 func (db *DB) updateSize(lc *y.Closer) {
