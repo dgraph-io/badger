@@ -1091,6 +1091,16 @@ func (db *DB) Tables() []TableInfo {
 	return db.lc.getTableInfo()
 }
 
+// GetMaxBatchCount returns max possible entries in batch
+func (db *DB) GetMaxBatchCount() int64 {
+	return db.opt.maxBatchCount
+}
+
+// GetMaxBatchCount returns max possible batch size
+func (db *DB) GetMaxBatchSize() int64 {
+	return db.opt.maxBatchSize
+}
+
 // MergeOperator represents a Badger merge operator.
 type MergeOperator struct {
 	sync.RWMutex
