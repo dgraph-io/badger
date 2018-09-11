@@ -1091,13 +1091,13 @@ func (db *DB) Tables() []TableInfo {
 	return db.lc.getTableInfo()
 }
 
-// GetMaxBatchCount returns max possible entries in batch
-func (db *DB) GetMaxBatchCount() int64 {
+// MaxBatchCount returns max possible entries in batch
+func (db *DB) MaxBatchCount() int64 {
 	return db.opt.maxBatchCount
 }
 
-// GetMaxBatchCount returns max possible batch size
-func (db *DB) GetMaxBatchSize() int64 {
+// MaxBatchCount returns max possible batch size
+func (db *DB) MaxBatchSize() int64 {
 	return db.opt.maxBatchSize
 }
 
