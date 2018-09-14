@@ -171,10 +171,7 @@ code below.
 
 ```go
 // Start a writable transaction.
-txn, err := db.NewTransaction(true)
-if err != nil {
-    return err
-}
+txn := db.NewTransaction(true)
 defer txn.Discard()
 
 // Use the transaction...
