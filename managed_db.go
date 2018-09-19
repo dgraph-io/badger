@@ -26,6 +26,16 @@ import (
 	"github.com/pkg/errors"
 )
 
+// OpenManaged returns a new DB, which allows more control over setting
+// transaction timestamps, by setting ManagedTxns=true.
+//
+// This is only useful for databases built on top of Badger (like Dgraph), and
+// can be ignored by most users.
+func OpenManaged(opts Options) (*DB, error) {
+	opts.ManagedTxns = true
+	return Open(opts)
+}
+
 // NewTransactionAt follows the same logic as DB.NewTransaction(), but uses the
 // provided read timestamp.
 //
