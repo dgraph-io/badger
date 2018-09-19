@@ -20,12 +20,12 @@ package badger
 
 // OpenDir opens a directory in windows with write access for syncing.
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
 
 	"github.com/pkg/errors"
+	"golang.org/x/sys/windows"
 )
 
 func openDir(path string) (*os.File, error) {
@@ -53,6 +53,7 @@ func openDirWin(path string) (fd syscall.Handle, err error) {
 
 // DirectoryLockGuard holds a lock on the directory.
 type directoryLockGuard struct {
+	h    windows.Handle
 	path string
 }
 
@@ -69,26 +70,18 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*d
 		return nil, errors.Wrap(err, "Cannot get absolute path for pid lock file")
 	}
 
-	f, err := os.OpenFile(absLockFilePath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
+	h, err := windows.CreateFile(windows.StringToUTF16Ptr(absLockFilePath), 0, 0, nil, windows.OPEN_ALWAYS, windows.FILE_ATTRIBUTE_TEMPORARY|windows.FILE_FLAG_DELETE_ON_CLOSE, 0)
 	if err != nil {
 		return nil, errors.Wrapf(err,
-			"Cannot create pid lock file %q.  Another process is using this Badger database",
+			"Cannot create lock file %q.  Another process is using this Badger database",
 			absLockFilePath)
 	}
-	_, err = fmt.Fprintf(f, "%d\n", os.Getpid())
-	closeErr := f.Close()
-	if err != nil {
-		return nil, errors.Wrap(err, "Cannot write to pid lock file")
-	}
-	if closeErr != nil {
-		return nil, errors.Wrap(closeErr, "Cannot close pid lock file")
-	}
-	return &directoryLockGuard{path: absLockFilePath}, nil
+
+	return &directoryLockGuard{h: h, path: absLockFilePath}, nil
 }
 
 // Release removes the directory lock.
 func (g *directoryLockGuard) release() error {
-	path := g.path
 	g.path = ""
-	return os.Remove(path)
+	return windows.CloseHandle(g.h)
 }
