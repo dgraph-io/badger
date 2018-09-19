@@ -51,7 +51,7 @@ func TestTxnSimple(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []byte("val=8"), val)
 
-		require.Equal(t, ErrManagedTxn, txn.CommitAt(100, nil))
+		require.Panics(t, func() { txn.CommitAt(100, nil) })
 		require.NoError(t, txn.Commit(nil))
 	})
 }
@@ -709,9 +709,10 @@ func TestManagedDB(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	opt := getTestOptions(dir)
-	kv, err := OpenManaged(opt)
+	opt.ManagedTxns = true
+	db, err := Open(opt)
 	require.NoError(t, err)
-	defer kv.Close()
+	defer db.Close()
 
 	key := func(i int) []byte {
 		return []byte(fmt.Sprintf("key-%02d", i))
@@ -721,25 +722,23 @@ func TestManagedDB(t *testing.T) {
 		return []byte(fmt.Sprintf("val-%d", i))
 	}
 
-	// Don't allow these APIs in ManagedDB
-	require.Panics(t, func() { kv.NewTransaction(false) })
+	require.Panics(t, func() {
+		db.Update(func(tx *Txn) error { return nil })
+	})
 
-	err = kv.Update(func(tx *Txn) error { return nil })
-	require.Equal(t, ErrManagedTxn, err)
-
-	err = kv.View(func(tx *Txn) error { return nil })
-	require.Equal(t, ErrManagedTxn, err)
+	err = db.View(func(tx *Txn) error { return nil })
+	require.NoError(t, err)
 
 	// Write data at t=3.
-	txn := kv.NewTransactionAt(3, true)
+	txn := db.NewTransactionAt(3, true)
 	for i := 0; i <= 3; i++ {
 		require.NoError(t, txn.Set(key(i), val(i)))
 	}
-	require.Equal(t, ErrManagedTxn, txn.Commit(nil))
+	require.Panics(t, func() { txn.Commit(nil) })
 	require.NoError(t, txn.CommitAt(3, nil))
 
 	// Read data at t=2.
-	txn = kv.NewTransactionAt(2, false)
+	txn = db.NewTransactionAt(2, false)
 	for i := 0; i <= 3; i++ {
 		_, err := txn.Get(key(i))
 		require.Equal(t, ErrKeyNotFound, err)
@@ -747,7 +746,7 @@ func TestManagedDB(t *testing.T) {
 	txn.Discard()
 
 	// Read data at t=3.
-	txn = kv.NewTransactionAt(3, false)
+	txn = db.NewTransactionAt(3, false)
 	for i := 0; i <= 3; i++ {
 		item, err := txn.Get(key(i))
 		require.NoError(t, err)
@@ -759,7 +758,7 @@ func TestManagedDB(t *testing.T) {
 	txn.Discard()
 
 	// Write data at t=7.
-	txn = kv.NewTransactionAt(6, true)
+	txn = db.NewTransactionAt(6, true)
 	for i := 0; i <= 7; i++ {
 		_, err := txn.Get(key(i))
 		if err == nil {
@@ -770,7 +769,7 @@ func TestManagedDB(t *testing.T) {
 	require.NoError(t, txn.CommitAt(7, nil))
 
 	// Read data at t=9.
-	txn = kv.NewTransactionAt(9, false)
+	txn = db.NewTransactionAt(9, false)
 	for i := 0; i <= 9; i++ {
 		item, err := txn.Get(key(i))
 		if i <= 7 {
