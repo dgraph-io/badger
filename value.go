@@ -263,12 +263,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 	truncate := false
 	var lastCommit uint64
 	var validEndOffset uint32
-	var count int
 	for {
-		count++
-		if count%2000 == 0 {
-			log.Printf("Replaying log file: %d. Running count: %d\n", lf.fid, count)
-		}
 		e, err := read.Entry(reader)
 		if err == io.EOF {
 			break
