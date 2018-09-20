@@ -1394,8 +1394,6 @@ func TestLSMOnly(t *testing.T) {
 
 	dopts := DefaultOptions
 	require.NotEqual(t, dopts.ValueThreshold, opts.ValueThreshold)
-	require.NotEqual(t, dopts.ValueLogLoadingMode, opts.ValueLogLoadingMode)
-	require.NotEqual(t, dopts.ValueLogFileSize, opts.ValueLogFileSize)
 
 	dopts.ValueThreshold = 1 << 16
 	_, err = Open(dopts)
