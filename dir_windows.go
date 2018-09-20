@@ -25,7 +25,13 @@ import (
 	"syscall"
 
 	"github.com/pkg/errors"
-	"golang.org/x/sys/windows"
+)
+
+// FILE_FLAG_DELETE_ON_CLOSE - The file is to be deleted immediately after all of its handles are
+// closed, which includes the specified handle and any other open or duplicated handles.
+// See: https://docs.microsoft.com/en-us/windows/desktop/FileIO/file-attribute-constants
+const (
+	FILE_FLAG_DELETE_ON_CLOSE = 0x04000000
 )
 
 func openDir(path string) (*os.File, error) {
@@ -53,7 +59,7 @@ func openDirWin(path string) (fd syscall.Handle, err error) {
 
 // DirectoryLockGuard holds a lock on the directory.
 type directoryLockGuard struct {
-	h    windows.Handle
+	h    syscall.Handle
 	path string
 }
 
@@ -70,7 +76,17 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*d
 		return nil, errors.Wrap(err, "Cannot get absolute path for pid lock file")
 	}
 
-	h, err := windows.CreateFile(windows.StringToUTF16Ptr(absLockFilePath), 0, 0, nil, windows.OPEN_ALWAYS, windows.FILE_ATTRIBUTE_TEMPORARY|windows.FILE_FLAG_DELETE_ON_CLOSE, 0)
+	// This call creates a file handler in memory that only one process can use at a time. When
+	// that process ends, the file is deleted by the system.
+	// FILE_ATTRIBUTE_TEMPORARY is used to tell Windows to try to create the handle in memory.
+	// FILE_FLAG_DELETE_ON_CLOSE is not specified in syscall_windows.go but tells Windows to delete
+	// the file when all processes holding the handler are closed.
+	// XXX: this works but it's a bit klunky. i'd prefer to use LockFileEx but it needs unsafe pkg.
+	h, err := syscall.CreateFile(
+		syscall.StringToUTF16Ptr(absLockFilePath), 0, 0, nil,
+		uint32(syscall.OPEN_ALWAYS), // createmode
+		uint32(syscall.FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE), // flags and attr
+		0)
 	if err != nil {
 		return nil, errors.Wrapf(err,
 			"Cannot create lock file %q.  Another process is using this Badger database",
@@ -83,5 +99,5 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*d
 // Release removes the directory lock.
 func (g *directoryLockGuard) release() error {
 	g.path = ""
-	return windows.CloseHandle(g.h)
+	return syscall.CloseHandle(g.h)
 }
