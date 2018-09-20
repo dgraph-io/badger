@@ -26,6 +26,7 @@ import (
 	"syscall"
 
 	"github.com/pkg/errors"
+	"github.com/theckman/go-flock"
 )
 
 func openDir(path string) (*os.File, error) {
@@ -53,42 +54,34 @@ func openDirWin(path string) (fd syscall.Handle, err error) {
 
 // DirectoryLockGuard holds a lock on the directory.
 type directoryLockGuard struct {
-	path string
+	lock *flock.Flock
 }
 
 // AcquireDirectoryLock acquires exclusive access to a directory.
-func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*directoryLockGuard, error) {
+func acquireDirectoryLock(dirPath string, lockFileName string, readOnly bool) (*directoryLockGuard, error) {
 	if readOnly {
 		return nil, ErrWindowsNotSupported
 	}
 
 	// Convert to absolute path so that Release still works even if we do an unbalanced
 	// chdir in the meantime.
-	absLockFilePath, err := filepath.Abs(filepath.Join(dirPath, pidFileName))
+	absLockFilePath, err := filepath.Abs(filepath.Join(dirPath, lockFileName))
 	if err != nil {
 		return nil, errors.Wrap(err, "Cannot get absolute path for pid lock file")
 	}
 
-	f, err := os.OpenFile(absLockFilePath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
+	lock := flock.NewFlock(absLockFilePath)
+	unlocked, err := lock.TryLock()
 	if err != nil {
-		return nil, errors.Wrapf(err,
-			"Cannot create pid lock file %q.  Another process is using this Badger database",
-			absLockFilePath)
+		return nil, errors.Wrapf(err,"Cannot create pid lock file %q", absLockFilePath)
 	}
-	_, err = fmt.Fprintf(f, "%d\n", os.Getpid())
-	closeErr := f.Close()
-	if err != nil {
-		return nil, errors.Wrap(err, "Cannot write to pid lock file")
+	if !unlocked {
+		return nil, fmt.Errorf("Cannot get lock. Another process is using this Badger database")
 	}
-	if closeErr != nil {
-		return nil, errors.Wrap(closeErr, "Cannot close pid lock file")
-	}
-	return &directoryLockGuard{path: absLockFilePath}, nil
+	return &directoryLockGuard{lock}, nil
 }
 
 // Release removes the directory lock.
 func (g *directoryLockGuard) release() error {
-	path := g.path
-	g.path = ""
-	return os.Remove(path)
+	return g.lock.Unlock()
 }
