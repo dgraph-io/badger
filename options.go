@@ -39,8 +39,8 @@ type Options struct {
 
 	// 2. Frequently modified flags
 	// -----------------------------
-	// Sync all writes to disk. Setting this to true would slow down data
-	// loading significantly.
+	// Sync all writes to disk. Setting this to false would achieve better
+	// performance, but may cause data to be lost.
 	SyncWrites bool
 
 	// How should LSM tree be accessed.
