@@ -25,6 +25,7 @@ import (
 	"syscall"
 
 	"github.com/pkg/errors"
+	"golang.org/x/sys/windows"
 )
 
 // FILE_FLAG_DELETE_ON_CLOSE - The file is to be deleted immediately after all of its handles are
@@ -84,8 +85,8 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*d
 	// XXX: this works but it's a bit klunky. i'd prefer to use LockFileEx but it needs unsafe pkg.
 	h, err := syscall.CreateFile(
 		syscall.StringToUTF16Ptr(absLockFilePath), 0, 0, nil,
-		uint32(syscall.OPEN_ALWAYS), // createmode
-		uint32(syscall.FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE), // flags and attr
+		uint32(windows.OPEN_ALWAYS), // createmode
+		uint32(windows.FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE), // flags and attr
 		0)
 	if err != nil {
 		return nil, errors.Wrapf(err,
