@@ -25,13 +25,15 @@ import (
 	"syscall"
 
 	"github.com/pkg/errors"
-	"golang.org/x/sys/windows"
 )
 
+// FILE_ATTRIBUTE_TEMPORARY - A file that is being used for temporary storage.
 // FILE_FLAG_DELETE_ON_CLOSE - The file is to be deleted immediately after all of its handles are
 // closed, which includes the specified handle and any other open or duplicated handles.
 // See: https://docs.microsoft.com/en-us/windows/desktop/FileIO/file-attribute-constants
+// NOTE: Added here to avoid importing golang.org/x/sys/windows
 const (
+	FILE_ATTRIBUTE_TEMPORARY  = 0x00000100
 	FILE_FLAG_DELETE_ON_CLOSE = 0x04000000
 )
 
@@ -85,8 +87,8 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*d
 	// XXX: this works but it's a bit klunky. i'd prefer to use LockFileEx but it needs unsafe pkg.
 	h, err := syscall.CreateFile(
 		syscall.StringToUTF16Ptr(absLockFilePath), 0, 0, nil,
-		uint32(windows.OPEN_ALWAYS), // createmode
-		uint32(windows.FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE), // flags and attr
+		syscall.OPEN_ALWAYS,
+		uint32(FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE),
 		0)
 	if err != nil {
 		return nil, errors.Wrapf(err,
