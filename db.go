@@ -1046,11 +1046,16 @@ func (seq *Sequence) updateLease() error {
 		} else if err != nil {
 			return err
 		} else {
-			val, err := item.Value()
-			if err != nil {
+			// val, err := item.Value()
+			// if err != nil {
+			// 	return err
+			// }
+			var num uint64
+			if err := item.Value(func(v []byte) {
+				num = binary.BigEndian.Uint64(v)
+			}); err != nil {
 				return err
 			}
-			num := binary.BigEndian.Uint64(val)
 			seq.next = num
 		}
 
@@ -1159,11 +1164,15 @@ func (op *MergeOperator) iterateAndMerge(txn *Txn) (val []byte, err error) {
 				return nil, err
 			}
 		} else {
-			newVal, err := item.Value()
-			if err != nil {
+			// newVal, err := item.Value()
+			// if err != nil {
+			// 	return nil, err
+			// }
+			if err := item.Value(func(newVal []byte) {
+				val = op.f(val, newVal)
+			}); err != nil {
 				return nil, err
 			}
-			val = op.f(val, newVal)
 		}
 		if item.DiscardEarlierVersions() {
 			break

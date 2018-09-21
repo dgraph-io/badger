@@ -61,7 +61,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 				// Ignore versions less than given timestamp
 				continue
 			}
-			val, err := item.Value()
+			valCopy, err := item.ValueCopy(nil)
 			if err != nil {
 				log.Printf("Key [%x]. Error while fetching value [%v]\n", item.Key(), err)
 				continue
@@ -69,7 +69,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 
 			entry := &protos.KVPair{
 				Key:       y.Copy(item.Key()),
-				Value:     y.Copy(val),
+				Value:     valCopy,
 				UserMeta:  []byte{item.UserMeta()},
 				Version:   item.Version(),
 				ExpiresAt: item.ExpiresAt(),
