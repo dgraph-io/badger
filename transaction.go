@@ -55,20 +55,21 @@ func (o *oracle) addRef() {
 }
 
 func (o *oracle) decrRef() {
-	if count := atomic.AddInt64(&o.refCount, -1); count == 0 {
-		// Clear out commits maps to release memory.
-		o.Lock()
-		// Avoids the race where something new is added to commitsMap
-		// after we check refCount and before we take Lock.
-		if atomic.LoadInt64(&o.refCount) != 0 {
-			o.Unlock()
-			return
-		}
-		if len(o.commits) >= 1000 { // If the map is still small, let it slide.
-			o.commits = make(map[uint64]uint64)
-		}
-		o.Unlock()
+	if atomic.AddInt64(&o.refCount, -1) != 0 {
+		return
 	}
+	// Clear out commits maps to release memory.
+	o.Lock()
+	// Avoids the race where something new is added to commitsMap
+	// after we check refCount and before we take Lock.
+	if atomic.LoadInt64(&o.refCount) != 0 {
+		o.Unlock()
+		return
+	}
+	if len(o.commits) >= 1000 { // If the map is still small, let it slide.
+		o.commits = make(map[uint64]uint64)
+	}
+	o.Unlock()
 }
 
 func (o *oracle) readTs() uint64 {
