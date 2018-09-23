@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -675,6 +676,77 @@ func checkKeys(t *testing.T, kv *DB, keys [][]byte) {
 		i++
 	}
 	require.Equal(t, i, len(keys))
+}
+
+// Test Bug #578, which showed that if a value is moved during value log GC, an
+// older version can end up at a higher level in the LSM tree than a newer
+// version, causing the data to not be returned.
+func TestBug578(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	y.Check(err)
+	defer os.RemoveAll(dir)
+
+	opts := DefaultOptions
+	opts.Dir = dir
+	opts.ValueDir = dir
+	opts.ValueLogMaxEntries = 64
+	opts.MaxTableSize = 1 << 13
+
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%d%100d", i, i))
+	}
+
+	value := make([]byte, 100)
+	y.Check2(rand.Read(value))
+
+	writeRange := func(from, to int) {
+		for i := from; i < to; i++ {
+			err := db.Update(func(txn *Txn) error {
+				return txn.Set(key(i), value)
+			})
+			require.NoError(t, err)
+		}
+	}
+
+	readRange := func(from, to int) {
+		for i := from; i < to; i++ {
+			err := db.View(func(txn *Txn) error {
+				item, err := txn.Get(key(i))
+				if err != nil {
+					return err
+				}
+				val, err := item.Value()
+				if err != nil {
+					return err
+				}
+
+				if !bytes.Equal(val, value) {
+					t.Fatalf("Invalid value for key: %q", key(i))
+				}
+				return nil
+			})
+			require.NoError(t, err)
+		}
+	}
+
+	// Let's run this whole thing a few times.
+	for j := 0; j < 10; j++ {
+		t.Logf("Cycle: %d\n", j)
+		writeRange(0, 32)
+		writeRange(0, 10)
+		writeRange(50, 72)
+		writeRange(40, 72)
+		writeRange(40, 72)
+
+		// Run value log GC a few times.
+		for i := 0; i < 5; i++ {
+			db.RunValueLogGC(0.5)
+		}
+		readRange(0, 10)
+	}
 }
 
 func BenchmarkReadWrite(b *testing.B) {
