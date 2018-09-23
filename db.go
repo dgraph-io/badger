@@ -499,11 +499,11 @@ func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 //
 // Update (Sep 22, 2018): To maintain the above invariant, and to allow keys to be moved from one
 // value log to another (while reclaiming space during value log GC), we have logically moved this
-// need to write older versions in levels above newer versions to the badgerMove keyspace. Thus, for
-// normal gets, we can stop going down the LSM tree once we find any version of the key (note
-// however that we will ALWAYS skip versions with ts greater than the key version). However, if that
-// key has been moved, then for the corresponding "movekey", we'll look through all the levels of
-// the tree to ensure that we pick the highest version of the movekey present.
+// need to write "old versions after new versions" to the badgerMove keyspace. Thus, for normal
+// gets, we can stop going down the LSM tree once we find any version of the key (note however that
+// we will ALWAYS skip versions with ts greater than the key version).  However, if that key has
+// been moved, then for the corresponding movekey, we'll look through all the levels of the tree
+// to ensure that we pick the highest version of the movekey present.
 func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := db.getMemTables() // Lock should be released.
 	defer decr()
