@@ -47,9 +47,9 @@ func TestTxnSimple(t *testing.T) {
 		item, err := txn.Get([]byte("key=8"))
 		require.NoError(t, err)
 
-		val, err := item.Value()
-		require.NoError(t, err)
-		require.Equal(t, []byte("val=8"), val)
+		require.NoError(t, item.Value(func(val []byte) {
+			require.Equal(t, []byte("val=8"), val)
+		}))
 
 		require.Panics(t, func() { txn.CommitAt(100, nil) })
 		require.NoError(t, txn.Commit(nil))
@@ -72,7 +72,7 @@ func TestTxnReadAfterWrite(t *testing.T) {
 				err = db.View(func(tx *Txn) error {
 					item, err := tx.Get(key)
 					require.NoError(t, err)
-					val, err := item.Value()
+					val, err := item.ValueCopy(nil)
 					require.NoError(t, err)
 					require.Equal(t, val, key)
 					return nil
@@ -107,7 +107,7 @@ func TestTxnCommitAsync(t *testing.T) {
 				for i := 0; i < 40; i++ {
 					item, err := txn.Get(key(i))
 					require.NoError(t, err)
-					val, err := item.Value()
+					val, err := item.ValueCopy(nil)
 					require.NoError(t, err)
 					bal, err := strconv.Atoi(string(val))
 					require.NoError(t, err)
@@ -162,7 +162,7 @@ func TestTxnVersions(t *testing.T) {
 				item := itr.Item()
 				require.Equal(t, k, item.Key())
 
-				val, err := item.Value()
+				val, err := item.ValueCopy(nil)
 				require.NoError(t, err)
 				exp := fmt.Sprintf("valversion=%d", i)
 				require.Equal(t, exp, string(val), "i=%d", i)
@@ -185,7 +185,7 @@ func TestTxnVersions(t *testing.T) {
 				require.Equal(t, k, item.Key())
 				require.Equal(t, version, item.Version())
 
-				val, err := item.Value()
+				val, err := item.ValueCopy(nil)
 				require.NoError(t, err)
 				exp := fmt.Sprintf("valversion=%d", version)
 				require.Equal(t, exp, string(val), "v=%d", version)
@@ -207,7 +207,7 @@ func TestTxnVersions(t *testing.T) {
 			item, err := txn.Get(k)
 			require.NoError(t, err)
 
-			val, err := item.Value()
+			val, err := item.ValueCopy(nil)
 			require.NoError(t, err)
 			require.Equal(t, []byte(fmt.Sprintf("valversion=%d", i)), val,
 				"Expected versions to match up at i=%d", i)
@@ -242,7 +242,7 @@ func TestTxnVersions(t *testing.T) {
 		item, err := txn.Get(k)
 		require.NoError(t, err)
 
-		val, err := item.Value()
+		val, err := item.ValueCopy(nil)
 		require.NoError(t, err)
 		require.Equal(t, []byte("valversion=9"), val)
 	})
@@ -267,7 +267,7 @@ func TestTxnWriteSkew(t *testing.T) {
 			item, err := txn.Get(key)
 			require.NoError(t, err)
 
-			val, err := item.Value()
+			val, err := item.ValueCopy(nil)
 			require.NoError(t, err)
 			bal, err = strconv.Atoi(string(val))
 			require.NoError(t, err)
@@ -359,7 +359,7 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 			var i int
 			for itr.Rewind(); itr.Valid(); itr.Next() {
 				item := itr.Item()
-				val, err := item.Value()
+				val, err := item.ValueCopy(nil)
 				require.NoError(t, err)
 				require.Equal(t, expected[i], string(val), "readts=%d", itr.readTs)
 				i++
@@ -443,7 +443,7 @@ func TestTxnIterationEdgeCase2(t *testing.T) {
 			var i int
 			for itr.Rewind(); itr.Valid(); itr.Next() {
 				item := itr.Item()
-				val, err := item.Value()
+				val, err := item.ValueCopy(nil)
 				require.NoError(t, err)
 				require.Equal(t, expected[i], string(val), "readts=%d", itr.readTs)
 				i++
@@ -688,7 +688,7 @@ func TestIteratorAllVersionsWithDeleted2(t *testing.T) {
 				item := it.Item()
 				require.Equal(t, []byte("key"), item.Key())
 				if count%2 != 0 {
-					val, err := item.Value()
+					val, err := item.ValueCopy(nil)
 					require.NoError(t, err)
 					require.Equal(t, val, []byte("value"))
 				} else {
@@ -751,7 +751,7 @@ func TestManagedDB(t *testing.T) {
 		item, err := txn.Get(key(i))
 		require.NoError(t, err)
 		require.Equal(t, uint64(3), item.Version())
-		v, err := item.Value()
+		v, err := item.ValueCopy(nil)
 		require.NoError(t, err)
 		require.Equal(t, val(i), v)
 	}
@@ -784,7 +784,7 @@ func TestManagedDB(t *testing.T) {
 			require.Equal(t, uint64(7), item.Version())
 		}
 		if i <= 7 {
-			v, err := item.Value()
+			v, err := item.ValueCopy(nil)
 			require.NoError(t, err)
 			require.Equal(t, val(i), v)
 		}

@@ -344,7 +344,7 @@ func TestValueGC3(t *testing.T) {
 	item = it.Item()
 	require.Equal(t, []byte("key003"), item.Key())
 
-	v3, err := item.Value()
+	v3, err := item.ValueCopy(nil)
 	require.NoError(t, err)
 	require.Equal(t, value3, v3)
 }

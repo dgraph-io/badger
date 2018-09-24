@@ -32,8 +32,7 @@ import (
 )
 
 type oracle struct {
-	// curRead must be at the top for memory alignment. See issue #311.
-	curRead   uint64 // Managed by the mutex.
+	// A 64-bit integer must be at the top for memory alignment. See issue #311.
 	refCount  int64
 	isManaged bool // Does not change value, so no locking required.
 
@@ -42,11 +41,9 @@ type oracle struct {
 	// their commit timestamps.
 	writeChLock sync.Mutex
 	nextTxnTs   uint64
-	readOnlyTs  uint64
-	tsWatermark y.WaterMark
 
-	// TODO: Remove this.
-	nextCommit uint64
+	// Used to block NewTransaction, so all previous commits are visible to a new read.
+	txnMark y.WaterMark
 
 	// Either of these is used to determine which versions can be permanently
 	// discarded during compaction.
@@ -56,6 +53,19 @@ type oracle struct {
 	// commits stores a key fingerprint and latest commit counter for it.
 	// refCount is used to clear out commits map to avoid a memory blowup.
 	commits map[uint64]uint64
+}
+
+func newOracle(opt Options) *oracle {
+	orc := &oracle{
+		isManaged: opt.ManagedTxns,
+		commits:   make(map[uint64]uint64),
+		// We're not initializing nextTxnTs and readOnlyTs. It would be done after replay in Open.
+		readMark: y.WaterMark{Name: "badger.PendingReads"},
+		txnMark:  y.WaterMark{Name: "badger.TxnTimestamp"},
+	}
+	orc.readMark.Init()
+	orc.txnMark.Init()
+	return orc
 }
 
 func (o *oracle) addRef() {
@@ -87,26 +97,18 @@ func (o *oracle) readTs() uint64 {
 
 	var readTs uint64
 	o.Lock()
-	if o.readOnlyTs == o.nextTxnTs-1 {
-		// Is the last timestamp handed out.
-		readTs := o.readOnlyTs
-		o.Unlock()
-		return readTs
-	}
-	// Not the last ts passed.
-	o.readOnlyTs = o.nextTxnTs
-	o.nextTxnTs++
-	readTs = o.readOnlyTs
+	readTs = o.nextTxnTs - 1
+	o.readMark.Begin(readTs)
 	o.Unlock()
 
-	o.tsWatermark.WaitForMark(context.Background(), readTs)
+	o.txnMark.WaitForMark(context.Background(), readTs)
 	return readTs
 }
 
-func (o *oracle) commitTs() uint64 {
+func (o *oracle) nextTs() uint64 {
 	o.Lock()
 	defer o.Unlock()
-	return o.nextCommit
+	return o.nextTxnTs
 }
 
 // Any deleted or invalid versions at or below ts would be discarded during
@@ -152,7 +154,7 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 		// This is the general case, when user doesn't specify the read and commit ts.
 		ts = o.nextTxnTs
 		o.nextTxnTs++
-		o.tsWatermark.Begin(ts)
+		o.txnMark.Begin(ts)
 
 	} else {
 		// If commitTs is set, use it instead.
@@ -170,15 +172,7 @@ func (o *oracle) doneCommit(cts uint64) {
 		// No need to update anything.
 		return
 	}
-	o.tsWatermark.Done(cts)
-
-	// 	for {
-	// 		curRead := atomic.LoadUint64(&o.curRead)
-	// 		if cts <= curRead {
-	// 			return
-	// 		}
-	// 		atomic.CompareAndSwapUint64(&o.curRead, curRead, cts)
-	// 	}
+	o.txnMark.Done(cts)
 }
 
 // Txn represents a Badger transaction.
@@ -475,7 +469,9 @@ func (txn *Txn) Discard() {
 		panic("Unclosed iterator at time of Txn.Discard.")
 	}
 	txn.discarded = true
-	txn.db.orc.readMark.Done(txn.readTs)
+	if !txn.db.orc.isManaged {
+		txn.db.orc.readMark.Done(txn.readTs)
+	}
 	txn.runCallbacks()
 	if txn.update {
 		txn.db.orc.decrRef()
@@ -605,6 +601,7 @@ func (db *DB) NewTransaction(update bool) *Txn {
 		update = false
 	}
 
+	// fmt.Println("new txn")
 	txn := &Txn{
 		update: update,
 		db:     db,
@@ -612,7 +609,7 @@ func (db *DB) NewTransaction(update bool) *Txn {
 		count:  1,                       // One extra entry for BitFin.
 		size:   int64(len(txnKey) + 10), // Some buffer for the extra entry.
 	}
-	db.orc.readMark.Begin(txn.readTs)
+	// fmt.Printf("Got new txn with readts: %d\n", txn.readTs)
 	if update {
 		txn.pendingWrites = make(map[string]*Entry)
 		txn.db.orc.addRef()

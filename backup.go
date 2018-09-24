@@ -144,10 +144,10 @@ func (db *DB) Load(r io.Reader) error {
 			UserMeta:  e.UserMeta[0],
 			ExpiresAt: e.ExpiresAt,
 		})
-		// Update nextCommit, memtable stores this timestamp in badger head
+		// Update nextTxnTs, memtable stores this timestamp in badger head
 		// when flushed.
-		if e.Version >= db.orc.commitTs() {
-			db.orc.nextCommit = e.Version + 1
+		if e.Version >= db.orc.nextTxnTs {
+			db.orc.nextTxnTs = e.Version + 1
 		}
 
 		if len(entries) == 1000 {
@@ -170,7 +170,6 @@ func (db *DB) Load(r io.Reader) error {
 	case err := <-errChan:
 		return err
 	default:
-		db.orc.curRead = db.orc.commitTs() - 1
 		return nil
 	}
 }

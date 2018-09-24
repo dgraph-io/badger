@@ -98,14 +98,14 @@ func (item *Item) Version() uint64 {
 func (item *Item) Value(fn func(val []byte)) error {
 	item.wg.Wait()
 	if item.status == prefetched {
-		if item.err == nil {
+		if item.err == nil && fn != nil {
 			fn(item.val)
 		}
 		return item.err
 	}
 	buf, cb, err := item.yieldItemValue()
 	defer runCallback(cb)
-	if err == nil {
+	if err == nil && fn != nil {
 		fn(buf)
 	}
 	// if cb != nil {

@@ -119,14 +119,12 @@ func moveMoney(db *badger.DB, from, to int) error {
 		}
 
 		floor := min(balf, balt)
-		if floor == 0 {
+		if floor < 5 {
 			return errAbandoned
 		}
-
 		// Move the money.
-		move := uint64(rand.Int63n(int64(floor)) + 1)
-		balf -= move
-		balt += move
+		balf -= 5
+		balt += 5
 
 		if err = putBalance(txn, from, balf); err != nil {
 			return err
@@ -242,15 +240,20 @@ func runTest(cmd *cobra.Command, args []string) error {
 	keyPrefix = fmt.Sprintf("a%s:", time.Now().Format(time.RFC3339Nano))
 
 	var wg sync.WaitGroup
+	var txns []*badger.Txn
 	for i := 0; i < numAccounts; i++ {
 		wg.Add(1)
 		txn := db.NewTransaction(true)
 		y.Check(putBalance(txn, i, initialBal))
+		txns = append(txns, txn)
+	}
+	for _, txn := range txns {
 		y.Check(txn.Commit(func(err error) {
 			y.Check(err)
 			wg.Done()
 		}))
 	}
+	log.Println("Waiting for writes to be done")
 	wg.Wait()
 	log.Println("Bank initialization OK. Commencing test.")
 	log.Printf("Running with %d accounts, and %d goroutines.\n", numAccounts, numGoroutines)
