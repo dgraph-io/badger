@@ -263,7 +263,7 @@ operation. All values are specified in byte arrays. For e.g., here is a merge
 function (`add`) which adds a `uint64` value to an existing `uint64` value.
 
 ```Go
-uint64ToBytes(i uint64) []byte {
+func uint64ToBytes(i uint64) []byte {
   var buf [8]byte
   binary.BigEndian.PutUint64(buf[:], i)
   return buf[:]
