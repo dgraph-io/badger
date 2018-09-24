@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"encoding/binary"
 	"expvar"
 	"log"
@@ -493,19 +494,45 @@ func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 // tables and find the max version among them.  To maintain this invariant, we also need to ensure
 // that all versions of a key are always present in the same table from level 1, because compaction
 // can push any table down.
+//
+// Update (Sep 22, 2018): To maintain the above invariant, and to allow keys to be moved from one
+// value log to another (while reclaiming space during value log GC), we have logically moved this
+// need to write "old versions after new versions" to the badgerMove keyspace. Thus, for normal
+// gets, we can stop going down the LSM tree once we find any version of the key (note however that
+// we will ALWAYS skip versions with ts greater than the key version).  However, if that key has
+// been moved, then for the corresponding movekey, we'll look through all the levels of the tree
+// to ensure that we pick the highest version of the movekey present.
 func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := db.getMemTables() // Lock should be released.
 	defer decr()
+
+	var maxVs *y.ValueStruct
+	var version uint64
+	if bytes.HasPrefix(key, badgerMove) {
+		// If we are checking badgerMove key, we should look into all the
+		// levels, so we can pick up the newer versions, which might have been
+		// compacted down the tree.
+		maxVs = &y.ValueStruct{}
+		version = y.ParseTs(key)
+	}
 
 	y.NumGets.Add(1)
 	for i := 0; i < len(tables); i++ {
 		vs := tables[i].Get(key)
 		y.NumMemtableGets.Add(1)
-		if vs.Meta != 0 || vs.Value != nil {
+		if vs.Meta == 0 && vs.Value == nil {
+			continue
+		}
+		// Found a version of the key. For user keyspace, return immediately. For move keyspace,
+		// continue iterating, unless we found a version == given key version.
+		if maxVs == nil || vs.Version == version {
 			return vs, nil
 		}
+		if maxVs.Version < vs.Version {
+			*maxVs = vs
+		}
 	}
-	return db.lc.get(key)
+	return db.lc.get(key, maxVs)
 }
 
 func (db *DB) updateOffset(ptrs []valuePointer) {
@@ -967,7 +994,7 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 	// Find head on disk
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
-	val, err := db.lc.get(headKey)
+	val, err := db.lc.get(headKey, nil)
 	if err != nil {
 		return errors.Wrap(err, "Retrieving head from on-disk LSM")
 	}
