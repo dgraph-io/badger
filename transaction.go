@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"context"
 	"math"
 	"sort"
 	"strconv"
@@ -37,7 +38,14 @@ type oracle struct {
 	isManaged bool // Does not change value, so no locking required.
 
 	sync.Mutex
-	writeLock  sync.Mutex
+	// writeChLock lock is for ensuring that transactions go to the write channel in the same order as
+	// their commit timestamps.
+	writeChLock sync.Mutex
+	nextTxnTs   uint64
+	readOnlyTs  uint64
+	tsWatermark y.WaterMark
+
+	// TODO: Remove this.
 	nextCommit uint64
 
 	// Either of these is used to determine which versions can be permanently
@@ -76,7 +84,23 @@ func (o *oracle) readTs() uint64 {
 	if o.isManaged {
 		return math.MaxUint64
 	}
-	return atomic.LoadUint64(&o.curRead)
+
+	var readTs uint64
+	o.Lock()
+	if o.readOnlyTs == o.nextTxnTs-1 {
+		// Is the last timestamp handed out.
+		readTs := o.readOnlyTs
+		o.Unlock()
+		return readTs
+	}
+	// Not the last ts passed.
+	o.readOnlyTs = o.nextTxnTs
+	o.nextTxnTs++
+	readTs = o.readOnlyTs
+	o.Unlock()
+
+	o.tsWatermark.WaitForMark(context.Background(), readTs)
+	return readTs
 }
 
 func (o *oracle) commitTs() uint64 {
@@ -99,7 +123,7 @@ func (o *oracle) discardAtOrBelow() uint64 {
 		defer o.Unlock()
 		return o.discardTs
 	}
-	return o.readMark.MinReadTs()
+	return o.readMark.DoneUntil()
 }
 
 // hasConflict must be called while having a lock.
@@ -126,8 +150,9 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 	var ts uint64
 	if !o.isManaged {
 		// This is the general case, when user doesn't specify the read and commit ts.
-		ts = o.nextCommit
-		o.nextCommit++
+		ts = o.nextTxnTs
+		o.nextTxnTs++
+		o.tsWatermark.Begin(ts)
 
 	} else {
 		// If commitTs is set, use it instead.
@@ -145,14 +170,15 @@ func (o *oracle) doneCommit(cts uint64) {
 		// No need to update anything.
 		return
 	}
+	o.tsWatermark.Done(cts)
 
-	for {
-		curRead := atomic.LoadUint64(&o.curRead)
-		if cts <= curRead {
-			return
-		}
-		atomic.CompareAndSwapUint64(&o.curRead, curRead, cts)
-	}
+	// 	for {
+	// 		curRead := atomic.LoadUint64(&o.curRead)
+	// 		if cts <= curRead {
+	// 			return
+	// 		}
+	// 		atomic.CompareAndSwapUint64(&o.curRead, curRead, cts)
+	// 	}
 }
 
 // Txn represents a Badger transaction.
@@ -456,6 +482,46 @@ func (txn *Txn) Discard() {
 	}
 }
 
+func (txn *Txn) commitAndSend() (func() error, error) {
+	orc := txn.db.orc
+	// Ensure that the order in which we get the commit timestamp is the same as the order in which we push these updates to the write channel. So, we acquire a writeChLock before getting a commit timestamp, and only release it after pushing the entries to it.
+	orc.writeChLock.Lock()
+	defer orc.writeChLock.Unlock()
+
+	commitTs := orc.newCommitTs(txn)
+	if commitTs == 0 {
+		return nil, ErrConflict
+	}
+
+	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
+	for _, e := range txn.pendingWrites {
+		// Suffix the keys with commit ts, so the key versions are sorted in
+		// descending order of commit timestamp.
+		e.Key = y.KeyWithTs(e.Key, commitTs)
+		e.meta |= bitTxn
+		entries = append(entries, e)
+	}
+	e := &Entry{
+		Key:   y.KeyWithTs(txnKey, commitTs),
+		Value: []byte(strconv.FormatUint(commitTs, 10)),
+		meta:  bitFinTxn,
+	}
+	entries = append(entries, e)
+
+	req, err := txn.db.sendToWriteCh(entries)
+	if err != nil {
+		orc.doneCommit(commitTs)
+		return nil, err
+	}
+	ret := func() error {
+		err := req.Wait()
+		// Wait before marking commitTs as done.
+		orc.doneCommit(commitTs)
+		return err
+	}
+	return ret, nil
+}
+
 // Commit commits the transaction, following these steps:
 //
 // 1. If there are no writes, return immediately.
@@ -486,31 +552,7 @@ func (txn *Txn) Commit(callback func(error)) error {
 		return nil // Nothing to do.
 	}
 
-	state := txn.db.orc
-	state.writeLock.Lock()
-	commitTs := state.newCommitTs(txn)
-	if commitTs == 0 {
-		state.writeLock.Unlock()
-		return ErrConflict
-	}
-
-	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
-	for _, e := range txn.pendingWrites {
-		// Suffix the keys with commit ts, so the key versions are sorted in
-		// descending order of commit timestamp.
-		e.Key = y.KeyWithTs(e.Key, commitTs)
-		e.meta |= bitTxn
-		entries = append(entries, e)
-	}
-	e := &Entry{
-		Key:   y.KeyWithTs(txnKey, commitTs),
-		Value: []byte(strconv.FormatUint(commitTs, 10)),
-		meta:  bitFinTxn,
-	}
-	entries = append(entries, e)
-
-	req, err := txn.db.sendToWriteCh(entries)
-	state.writeLock.Unlock()
+	txnCb, err := txn.commitAndSend()
 	if err != nil {
 		return err
 	}
@@ -523,13 +565,15 @@ func (txn *Txn) Commit(callback func(error)) error {
 
 		// TODO: What if some of the txns successfully make it to value log, but others fail.
 		// Nothing gets updated to LSM, until a restart happens.
-		defer state.doneCommit(commitTs)
-		return req.Wait()
+		return txnCb()
 	}
+
+	// TODO: Avoid creating a goroutine per txn. We should instead send these
+	// over to a channel, which can run them via a single goroutine. This would
+	// also ensure that the callbacks are run serially, which makes it easier
+	// for the users to write thread-unsafe callbacks.
 	go func() {
-		err := req.Wait()
-		// Write is complete. Let's call the callback function now.
-		state.doneCommit(commitTs)
+		err := txnCb()
 		callback(err)
 	}()
 	return nil
