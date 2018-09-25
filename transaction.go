@@ -611,6 +611,11 @@ func (db *DB) NewTransaction(update bool) *Txn {
 	return txn
 }
 
+// GetReadTimestamp returns the current read time stramp.
+func (txn *Txn) GetReadTimestamp() uint64 {
+	return txn.readTs
+}
+
 // View executes a function creating and managing a read-only transaction for the user. Error
 // returned by the function is relayed by the View method.
 // If View is used with managed transactions, it would assume a read timestamp of MaxUint64.
