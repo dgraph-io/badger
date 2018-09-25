@@ -275,6 +275,11 @@ func (txn *Txn) Set(key, val []byte) error {
 	return txn.SetEntry(e)
 }
 
+// GetReadTimestamp returns the current read time stramp.
+func (txn *Txn) GetReadTimestamp() uint64 {
+	return txn.readTs
+}
+
 // SetWithMeta adds a key-value pair to the database, along with a metadata
 // byte.
 //
@@ -572,6 +577,17 @@ func (db *DB) NewTransaction(update bool) *Txn {
 		txn.pendingWrites = make(map[string]*Entry)
 		txn.db.orc.addRef()
 	}
+	return txn
+}
+
+// NewTransactionAt follows the same logic as DB.NewTransaction(), but uses the
+// provided read timestamp.
+//
+// This is only useful for databases built on top of Badger (like Dgraph), and
+// can be ignored by most users.
+func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
+	txn := db.NewTransaction(update)
+	txn.readTs = readTs
 	return txn
 }
 
