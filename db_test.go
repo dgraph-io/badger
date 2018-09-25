@@ -56,7 +56,14 @@ func getTestOptions(dir string) Options {
 }
 
 func getItemValue(t *testing.T, item *Item) (val []byte) {
-	v, err := item.Value()
+	var v []byte
+	err := item.Value(func(val []byte) {
+		if val == nil {
+			v = nil
+		} else {
+			v = append([]byte{}, val...)
+		}
+	})
 	if err != nil {
 		t.Error(err)
 	}
@@ -124,14 +131,14 @@ func TestUpdateAndView(t *testing.T) {
 					return err
 				}
 
-				val, err := item.Value()
-				if err != nil {
+				expected := []byte(fmt.Sprintf("val%d", i))
+				if err := item.Value(func(val []byte) {
+					require.Equal(t, expected, val,
+						"Invalid value for key %q. expected: %q, actual: %q",
+						item.Key(), expected, val)
+				}); err != nil {
 					return err
 				}
-				expected := []byte(fmt.Sprintf("val%d", i))
-				require.Equal(t, expected, val,
-					"Invalid value for key %q. expected: %q, actual: %q",
-					item.Key(), expected, val)
 			}
 			return nil
 		})
@@ -290,7 +297,8 @@ func TestForceCompactL0(t *testing.T) {
 
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 15 << 20
-	db, err := OpenManaged(opts)
+	opts.ManagedTxns = true
+	db, err := Open(opts)
 	require.NoError(t, err)
 
 	data := func(i int) []byte {
@@ -310,7 +318,8 @@ func TestForceCompactL0(t *testing.T) {
 	}
 	db.Close()
 
-	db, err = OpenManaged(opts)
+	opts.ManagedTxns = true
+	db, err = Open(opts)
 	defer db.Close()
 	require.Equal(t, len(db.lc.levels[0].tables), 0)
 }
@@ -546,12 +555,12 @@ func TestIterate2Basic(t *testing.T) {
 
 func TestLoad(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
-	fmt.Printf("Writing to dir %s\n", dir)
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	n := 10000
 	{
-		kv, _ := Open(getTestOptions(dir))
+		kv, err := Open(getTestOptions(dir))
+		require.NoError(t, err)
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
 				fmt.Printf("Putting i=%d\n", i)
@@ -565,6 +574,7 @@ func TestLoad(t *testing.T) {
 	kv, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 	require.Equal(t, uint64(10001), kv.orc.readTs())
+
 	for i := 0; i < n; i++ {
 		if (i % 10000) == 0 {
 			fmt.Printf("Testing i=%d\n", i)
@@ -576,7 +586,6 @@ func TestLoad(t *testing.T) {
 			require.EqualValues(t, k, string(getItemValue(t, item)))
 			return nil
 		}))
-
 	}
 	kv.Close()
 	summary := kv.lc.getSummary()
@@ -835,7 +844,7 @@ func TestGetSetRace(t *testing.T) {
 				require.NoError(t, db.View(func(txn *Txn) error {
 					item, err := txn.Get([]byte(key))
 					require.NoError(t, err)
-					_, err = item.Value()
+					err = item.Value(nil)
 					require.NoError(t, err)
 					return nil
 				}))
@@ -1046,7 +1055,7 @@ func TestGetSetDeadlock(t *testing.T) {
 		db.Update(func(txn *Txn) error {
 			item, err := txn.Get(key)
 			require.NoError(t, err)
-			_, err = item.Value() // This take a RLock on file
+			err = item.Value(nil) // This take a RLock on file
 			require.NoError(t, err)
 
 			rand.Read(val)
@@ -1147,22 +1156,24 @@ func TestSequence(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			val, err := item.Value()
-			if err != nil {
+			var num0 uint64
+			if err := item.Value(func(val []byte) {
+				num0 = binary.BigEndian.Uint64(val)
+			}); err != nil {
 				return err
 			}
-			num0 := binary.BigEndian.Uint64(val)
 			require.Equal(t, uint64(110), num0)
 
 			item, err = txn.Get(key1)
 			if err != nil {
 				return err
 			}
-			val, err = item.Value()
-			if err != nil {
+			var num1 uint64
+			if err := item.Value(func(val []byte) {
+				num1 = binary.BigEndian.Uint64(val)
+			}); err != nil {
 				return err
 			}
-			num1 := binary.BigEndian.Uint64(val)
 			require.Equal(t, uint64(200), num1)
 			return nil
 		})
@@ -1187,7 +1198,7 @@ func TestSequence_Release(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			val, err := item.Value()
+			val, err := item.ValueCopy(nil)
 			if err != nil {
 				return err
 			}
@@ -1205,7 +1216,7 @@ func TestSequence_Release(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			val, err := item.Value()
+			val, err := item.ValueCopy(nil)
 			if err != nil {
 				return err
 			}
@@ -1356,7 +1367,7 @@ func TestReadOnly(t *testing.T) {
 	txn1 := kv1.NewTransaction(true)
 	v1, err := txn1.Get([]byte("key1"))
 	require.NoError(t, err)
-	b1, err := v1.Value()
+	b1, err := v1.ValueCopy(nil)
 	require.NoError(t, err)
 	require.Equal(t, b1, []byte("value1"))
 	err = txn1.Commit(nil)
@@ -1366,7 +1377,7 @@ func TestReadOnly(t *testing.T) {
 	txn2 := kv2.NewTransaction(true)
 	v2, err := txn2.Get([]byte("key2000"))
 	require.NoError(t, err)
-	b2, err := v2.Value()
+	b2, err := v2.ValueCopy(nil)
 	require.NoError(t, err)
 	require.Equal(t, b2, []byte("value2000"))
 	err = txn2.Commit(nil)
@@ -1392,8 +1403,6 @@ func TestLSMOnly(t *testing.T) {
 
 	dopts := DefaultOptions
 	require.NotEqual(t, dopts.ValueThreshold, opts.ValueThreshold)
-	require.NotEqual(t, dopts.ValueLogLoadingMode, opts.ValueLogLoadingMode)
-	require.NotEqual(t, dopts.ValueLogFileSize, opts.ValueLogFileSize)
 
 	dopts.ValueThreshold = 1 << 16
 	_, err = Open(dopts)
@@ -1423,6 +1432,7 @@ func TestLSMOnly(t *testing.T) {
 	require.NoError(t, db.RunValueLogGC(0.2))
 }
 
+// This test function is doing some intricate sorcery.
 func TestMinReadTs(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		for i := 0; i < 10; i++ {
@@ -1431,8 +1441,11 @@ func TestMinReadTs(t *testing.T) {
 			}))
 		}
 		time.Sleep(time.Millisecond)
-		require.Equal(t, uint64(10), db.orc.readTs())
-		min := db.orc.readMark.MinReadTs()
+
+		readTxn0 := db.NewTransaction(false)
+		require.Equal(t, uint64(10), readTxn0.readTs)
+
+		min := db.orc.readMark.DoneUntil()
 		require.Equal(t, uint64(9), min)
 
 		readTxn := db.NewTransaction(false)
@@ -1442,11 +1455,15 @@ func TestMinReadTs(t *testing.T) {
 			}))
 		}
 		require.Equal(t, uint64(20), db.orc.readTs())
+
 		time.Sleep(time.Millisecond)
-		require.Equal(t, min, db.orc.readMark.MinReadTs())
+		require.Equal(t, min, db.orc.readMark.DoneUntil())
+
+		readTxn0.Discard()
 		readTxn.Discard()
 		time.Sleep(time.Millisecond)
-		require.Equal(t, uint64(19), db.orc.readMark.MinReadTs())
+		require.Equal(t, uint64(19), db.orc.readMark.DoneUntil())
+		db.orc.readMark.Done(uint64(20)) // Because we called readTs.
 
 		for i := 0; i < 10; i++ {
 			db.View(func(txn *Txn) error {
@@ -1454,7 +1471,7 @@ func TestMinReadTs(t *testing.T) {
 			})
 		}
 		time.Sleep(time.Millisecond)
-		require.Equal(t, uint64(20), db.orc.readMark.MinReadTs())
+		require.Equal(t, uint64(20), db.orc.readMark.DoneUntil())
 	})
 }
 
@@ -1499,7 +1516,7 @@ func ExampleOpen() {
 		if err != nil {
 			return err
 		}
-		val, err := item.Value()
+		val, err := item.ValueCopy(nil)
 		if err != nil {
 			return err
 		}

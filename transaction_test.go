@@ -23,7 +23,6 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,11 +46,11 @@ func TestTxnSimple(t *testing.T) {
 		item, err := txn.Get([]byte("key=8"))
 		require.NoError(t, err)
 
-		val, err := item.Value()
-		require.NoError(t, err)
-		require.Equal(t, []byte("val=8"), val)
+		require.NoError(t, item.Value(func(val []byte) {
+			require.Equal(t, []byte("val=8"), val)
+		}))
 
-		require.Equal(t, ErrManagedTxn, txn.CommitAt(100, nil))
+		require.Panics(t, func() { txn.CommitAt(100, nil) })
 		require.NoError(t, txn.Commit(nil))
 	})
 }
@@ -72,7 +71,7 @@ func TestTxnReadAfterWrite(t *testing.T) {
 				err = db.View(func(tx *Txn) error {
 					item, err := tx.Get(key)
 					require.NoError(t, err)
-					val, err := item.Value()
+					val, err := item.ValueCopy(nil)
 					require.NoError(t, err)
 					require.Equal(t, val, key)
 					return nil
@@ -85,12 +84,12 @@ func TestTxnReadAfterWrite(t *testing.T) {
 }
 
 func TestTxnCommitAsync(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("key=%d", i))
+	}
 
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		txn := db.NewTransaction(true)
-		key := func(i int) []byte {
-			return []byte(fmt.Sprintf("key=%d", i))
-		}
 		for i := 0; i < 40; i++ {
 			err := txn.Set(key(i), []byte(strconv.Itoa(100)))
 			require.NoError(t, err)
@@ -98,16 +97,22 @@ func TestTxnCommitAsync(t *testing.T) {
 		require.NoError(t, txn.Commit(nil))
 		txn.Discard()
 
-		var done uint64
+		closer := y.NewCloser(1)
 		go func() {
-			// Keep checking balance variant
-			for atomic.LoadUint64(&done) == 0 {
+			defer closer.Done()
+			for {
+				select {
+				case <-closer.HasBeenClosed():
+					return
+				default:
+				}
+				// Keep checking balance variant
 				txn := db.NewTransaction(false)
 				totalBalance := 0
 				for i := 0; i < 40; i++ {
 					item, err := txn.Get(key(i))
 					require.NoError(t, err)
-					val, err := item.Value()
+					val, err := item.ValueCopy(nil)
 					require.NoError(t, err)
 					bal, err := strconv.Atoi(string(val))
 					require.NoError(t, err)
@@ -139,7 +144,7 @@ func TestTxnCommitAsync(t *testing.T) {
 			}()
 		}
 		wg.Wait()
-		atomic.StoreUint64(&done, 1)
+		closer.SignalAndWait()
 		time.Sleep(time.Millisecond * 10) // allow goroutine to complete.
 	})
 }
@@ -162,7 +167,7 @@ func TestTxnVersions(t *testing.T) {
 				item := itr.Item()
 				require.Equal(t, k, item.Key())
 
-				val, err := item.Value()
+				val, err := item.ValueCopy(nil)
 				require.NoError(t, err)
 				exp := fmt.Sprintf("valversion=%d", i)
 				require.Equal(t, exp, string(val), "i=%d", i)
@@ -185,7 +190,7 @@ func TestTxnVersions(t *testing.T) {
 				require.Equal(t, k, item.Key())
 				require.Equal(t, version, item.Version())
 
-				val, err := item.Value()
+				val, err := item.ValueCopy(nil)
 				require.NoError(t, err)
 				exp := fmt.Sprintf("valversion=%d", version)
 				require.Equal(t, exp, string(val), "v=%d", version)
@@ -207,7 +212,7 @@ func TestTxnVersions(t *testing.T) {
 			item, err := txn.Get(k)
 			require.NoError(t, err)
 
-			val, err := item.Value()
+			val, err := item.ValueCopy(nil)
 			require.NoError(t, err)
 			require.Equal(t, []byte(fmt.Sprintf("valversion=%d", i)), val,
 				"Expected versions to match up at i=%d", i)
@@ -242,7 +247,7 @@ func TestTxnVersions(t *testing.T) {
 		item, err := txn.Get(k)
 		require.NoError(t, err)
 
-		val, err := item.Value()
+		val, err := item.ValueCopy(nil)
 		require.NoError(t, err)
 		require.Equal(t, []byte("valversion=9"), val)
 	})
@@ -267,7 +272,7 @@ func TestTxnWriteSkew(t *testing.T) {
 			item, err := txn.Get(key)
 			require.NoError(t, err)
 
-			val, err := item.Value()
+			val, err := item.ValueCopy(nil)
 			require.NoError(t, err)
 			bal, err = strconv.Atoi(string(val))
 			require.NoError(t, err)
@@ -359,7 +364,7 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 			var i int
 			for itr.Rewind(); itr.Valid(); itr.Next() {
 				item := itr.Item()
-				val, err := item.Value()
+				val, err := item.ValueCopy(nil)
 				require.NoError(t, err)
 				require.Equal(t, expected[i], string(val), "readts=%d", itr.readTs)
 				i++
@@ -443,7 +448,7 @@ func TestTxnIterationEdgeCase2(t *testing.T) {
 			var i int
 			for itr.Rewind(); itr.Valid(); itr.Next() {
 				item := itr.Item()
-				val, err := item.Value()
+				val, err := item.ValueCopy(nil)
 				require.NoError(t, err)
 				require.Equal(t, expected[i], string(val), "readts=%d", itr.readTs)
 				i++
@@ -688,7 +693,7 @@ func TestIteratorAllVersionsWithDeleted2(t *testing.T) {
 				item := it.Item()
 				require.Equal(t, []byte("key"), item.Key())
 				if count%2 != 0 {
-					val, err := item.Value()
+					val, err := item.ValueCopy(nil)
 					require.NoError(t, err)
 					require.Equal(t, val, []byte("value"))
 				} else {
@@ -709,9 +714,10 @@ func TestManagedDB(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	opt := getTestOptions(dir)
-	kv, err := OpenManaged(opt)
+	opt.ManagedTxns = true
+	db, err := Open(opt)
 	require.NoError(t, err)
-	defer kv.Close()
+	defer db.Close()
 
 	key := func(i int) []byte {
 		return []byte(fmt.Sprintf("key-%02d", i))
@@ -721,25 +727,23 @@ func TestManagedDB(t *testing.T) {
 		return []byte(fmt.Sprintf("val-%d", i))
 	}
 
-	// Don't allow these APIs in ManagedDB
-	require.Panics(t, func() { kv.NewTransaction(false) })
+	require.Panics(t, func() {
+		db.Update(func(tx *Txn) error { return nil })
+	})
 
-	err = kv.Update(func(tx *Txn) error { return nil })
-	require.Equal(t, ErrManagedTxn, err)
-
-	err = kv.View(func(tx *Txn) error { return nil })
-	require.Equal(t, ErrManagedTxn, err)
+	err = db.View(func(tx *Txn) error { return nil })
+	require.NoError(t, err)
 
 	// Write data at t=3.
-	txn := kv.NewTransactionAt(3, true)
+	txn := db.NewTransactionAt(3, true)
 	for i := 0; i <= 3; i++ {
 		require.NoError(t, txn.Set(key(i), val(i)))
 	}
-	require.Equal(t, ErrManagedTxn, txn.Commit(nil))
+	require.Panics(t, func() { txn.Commit(nil) })
 	require.NoError(t, txn.CommitAt(3, nil))
 
 	// Read data at t=2.
-	txn = kv.NewTransactionAt(2, false)
+	txn = db.NewTransactionAt(2, false)
 	for i := 0; i <= 3; i++ {
 		_, err := txn.Get(key(i))
 		require.Equal(t, ErrKeyNotFound, err)
@@ -747,19 +751,19 @@ func TestManagedDB(t *testing.T) {
 	txn.Discard()
 
 	// Read data at t=3.
-	txn = kv.NewTransactionAt(3, false)
+	txn = db.NewTransactionAt(3, false)
 	for i := 0; i <= 3; i++ {
 		item, err := txn.Get(key(i))
 		require.NoError(t, err)
 		require.Equal(t, uint64(3), item.Version())
-		v, err := item.Value()
+		v, err := item.ValueCopy(nil)
 		require.NoError(t, err)
 		require.Equal(t, val(i), v)
 	}
 	txn.Discard()
 
 	// Write data at t=7.
-	txn = kv.NewTransactionAt(6, true)
+	txn = db.NewTransactionAt(6, true)
 	for i := 0; i <= 7; i++ {
 		_, err := txn.Get(key(i))
 		if err == nil {
@@ -770,7 +774,7 @@ func TestManagedDB(t *testing.T) {
 	require.NoError(t, txn.CommitAt(7, nil))
 
 	// Read data at t=9.
-	txn = kv.NewTransactionAt(9, false)
+	txn = db.NewTransactionAt(9, false)
 	for i := 0; i <= 9; i++ {
 		item, err := txn.Get(key(i))
 		if i <= 7 {
@@ -785,7 +789,7 @@ func TestManagedDB(t *testing.T) {
 			require.Equal(t, uint64(7), item.Version())
 		}
 		if i <= 7 {
-			v, err := item.Value()
+			v, err := item.ValueCopy(nil)
 			require.NoError(t, err)
 			require.Equal(t, val(i), v)
 		}

@@ -17,13 +17,16 @@
 package badger
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/dgraph-io/badger/y"
+	humanize "github.com/dustin/go-humanize"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/trace"
 )
@@ -82,6 +85,65 @@ func TestValueBasic(t *testing.T) {
 		},
 	}, readEntries)
 
+}
+
+func TestValueGCManaged(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	N := 10000
+	opt := getTestOptions(dir)
+	opt.ValueLogMaxEntries = uint32(N / 10)
+	opt.ManagedTxns = true
+	db, err := Open(opt)
+	require.NoError(t, err)
+	defer db.Close()
+
+	var ts uint64
+	newTs := func() uint64 {
+		ts += 1
+		return ts
+	}
+
+	sz := 64 << 10
+	var wg sync.WaitGroup
+	for i := 0; i < N; i++ {
+		v := make([]byte, sz)
+		rand.Read(v[:rand.Intn(sz)])
+
+		wg.Add(1)
+		txn := db.NewTransactionAt(newTs(), true)
+		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v))
+		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
+			wg.Done()
+			require.NoError(t, err)
+		}))
+	}
+
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		txn := db.NewTransactionAt(newTs(), true)
+		require.NoError(t, txn.Delete([]byte(fmt.Sprintf("key%d", i))))
+		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
+			wg.Done()
+			require.NoError(t, err)
+		}))
+	}
+	wg.Wait()
+	files, err := ioutil.ReadDir(dir)
+	require.NoError(t, err)
+	for _, fi := range files {
+		t.Logf("File: %s. Size: %s\n", fi.Name(), humanize.Bytes(uint64(fi.Size())))
+	}
+
+	for i := 0; i < 100; i++ {
+		// Try at max 100 times to GC even a single value log file.
+		if err := db.RunValueLogGC(0.0001); err == nil {
+			return // Done
+		}
+	}
+	require.Fail(t, "Unable to GC even a single value log file.")
 }
 
 func TestValueGC(t *testing.T) {
@@ -283,7 +345,7 @@ func TestValueGC3(t *testing.T) {
 	item = it.Item()
 	require.Equal(t, []byte("key003"), item.Key())
 
-	v3, err := item.Value()
+	v3, err := item.ValueCopy(nil)
 	require.NoError(t, err)
 	require.Equal(t, value3, v3)
 }
@@ -614,6 +676,76 @@ func checkKeys(t *testing.T, kv *DB, keys [][]byte) {
 		i++
 	}
 	require.Equal(t, i, len(keys))
+}
+
+// Test Bug #578, which showed that if a value is moved during value log GC, an
+// older version can end up at a higher level in the LSM tree than a newer
+// version, causing the data to not be returned.
+func TestBug578(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	y.Check(err)
+	defer os.RemoveAll(dir)
+
+	opts := DefaultOptions
+	opts.Dir = dir
+	opts.ValueDir = dir
+	opts.ValueLogMaxEntries = 64
+	opts.MaxTableSize = 1 << 13
+
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%d%100d", i, i))
+	}
+
+	value := make([]byte, 100)
+	y.Check2(rand.Read(value))
+
+	writeRange := func(from, to int) {
+		for i := from; i < to; i++ {
+			err := db.Update(func(txn *Txn) error {
+				return txn.Set(key(i), value)
+			})
+			require.NoError(t, err)
+		}
+	}
+
+	readRange := func(from, to int) {
+		for i := from; i < to; i++ {
+			err := db.View(func(txn *Txn) error {
+				item, err := txn.Get(key(i))
+				if err != nil {
+					return err
+				}
+				if err := item.Value(func(val []byte) {
+					if !bytes.Equal(val, value) {
+						t.Fatalf("Invalid value for key: %q", key(i))
+					}
+				}); err != nil {
+					return err
+				}
+				return nil
+			})
+			require.NoError(t, err)
+		}
+	}
+
+	// Let's run this whole thing a few times.
+	for j := 0; j < 10; j++ {
+		t.Logf("Cycle: %d\n", j)
+		writeRange(0, 32)
+		writeRange(0, 10)
+		writeRange(50, 72)
+		writeRange(40, 72)
+		writeRange(40, 72)
+
+		// Run value log GC a few times.
+		for i := 0; i < 5; i++ {
+			db.RunValueLogGC(0.5)
+		}
+		readRange(0, 10)
+	}
 }
 
 func BenchmarkReadWrite(b *testing.B) {

@@ -24,8 +24,8 @@ func val(large bool) []byte {
 	return buf
 }
 
-func numKeys(mdb *ManagedDB, readTs uint64) int {
-	txn := mdb.NewTransactionAt(readTs, false)
+func numKeys(db *DB, readTs uint64) int {
+	txn := db.NewTransactionAt(readTs, false)
 	defer txn.Discard()
 
 	itr := txn.NewIterator(DefaultIteratorOptions)
@@ -43,11 +43,12 @@ func TestDropAll(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
-	mdb, err := OpenManaged(opts)
+	opts.ManagedTxns = true
+	db, err := Open(opts)
 	require.NoError(t, err)
 
 	N := uint64(10000)
-	populate := func(db *ManagedDB, start uint64) {
+	populate := func(db *DB, start uint64) {
 		var wg sync.WaitGroup
 		for i := start; i < start+N; i++ {
 			wg.Add(1)
@@ -61,22 +62,23 @@ func TestDropAll(t *testing.T) {
 		wg.Wait()
 	}
 
-	populate(mdb, 1)
-	require.Equal(t, int(N), numKeys(mdb, math.MaxUint64))
+	populate(db, 1)
+	require.Equal(t, int(N), numKeys(db, math.MaxUint64))
 
-	require.NoError(t, mdb.DropAll())
-	require.Equal(t, 0, numKeys(mdb, math.MaxUint64))
+	require.NoError(t, db.DropAll())
+	require.Equal(t, 0, numKeys(db, math.MaxUint64))
 
 	// Check that we can still write to mdb, and using the same timestamps as before.
-	populate(mdb, 1)
-	require.Equal(t, int(N), numKeys(mdb, math.MaxUint64))
-	mdb.Close()
+	populate(db, 1)
+	require.Equal(t, int(N), numKeys(db, math.MaxUint64))
+	db.Close()
 
 	// Ensure that value log is correctly replayed, that we are preserving badgerHead.
-	mdb2, err := OpenManaged(opts)
+	opts.ManagedTxns = true
+	db2, err := Open(opts)
 	require.NoError(t, err)
-	require.Equal(t, int(N), numKeys(mdb2, math.MaxUint64))
-	mdb2.Close()
+	require.Equal(t, int(N), numKeys(db2, math.MaxUint64))
+	db2.Close()
 }
 
 func TestDropAllRace(t *testing.T) {
@@ -84,7 +86,8 @@ func TestDropAllRace(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
-	mdb, err := OpenManaged(opts)
+	opts.ManagedTxns = true
+	db, err := Open(opts)
 	require.NoError(t, err)
 
 	N := 10000
@@ -100,7 +103,7 @@ func TestDropAllRace(t *testing.T) {
 			select {
 			case <-ticker.C:
 				i++
-				txn := mdb.NewTransactionAt(math.MaxUint64, true)
+				txn := db.NewTransactionAt(math.MaxUint64, true)
 				require.NoError(t, txn.Set([]byte(key("key", i)), val(false)))
 				_ = txn.CommitAt(uint64(i), nil)
 			case <-closer.HasBeenClosed():
@@ -112,7 +115,7 @@ func TestDropAllRace(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 1; i <= N; i++ {
 		wg.Add(1)
-		txn := mdb.NewTransactionAt(math.MaxUint64, true)
+		txn := db.NewTransactionAt(math.MaxUint64, true)
 		require.NoError(t, txn.Set([]byte(key("key", i)), val(false)))
 		require.NoError(t, txn.CommitAt(uint64(i), func(err error) {
 			require.NoError(t, err)
@@ -121,14 +124,14 @@ func TestDropAllRace(t *testing.T) {
 	}
 	wg.Wait()
 
-	before := numKeys(mdb, math.MaxUint64)
+	before := numKeys(db, math.MaxUint64)
 	require.True(t, before > N)
 
-	require.NoError(t, mdb.DropAll())
+	require.NoError(t, db.DropAll())
 	closer.SignalAndWait()
 
-	after := numKeys(mdb, math.MaxUint64)
+	after := numKeys(db, math.MaxUint64)
 	t.Logf("Before: %d. After dropall: %d\n", before, after)
 	require.True(t, after < before)
-	mdb.Close()
+	db.Close()
 }

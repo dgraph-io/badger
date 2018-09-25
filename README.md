@@ -263,7 +263,7 @@ operation. All values are specified in byte arrays. For e.g., here is a merge
 function (`add`) which adds a `uint64` value to an existing `uint64` value.
 
 ```Go
-uint64ToBytes(i uint64) []byte {
+func uint64ToBytes(i uint64) []byte {
   var buf [8]byte
   binary.BigEndian.PutUint64(buf[:], i)
   return buf[:]
@@ -549,6 +549,7 @@ Below is a list of known projects that use Badger:
 
 * [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
 * [Dgraph](https://github.com/dgraph-io/dgraph) - Distributed graph database.
+* [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed application data analytics.
 * [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
 * [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
 * [go-ipfs](https://github.com/ipfs/go-ipfs) - Go client for the InterPlanetary File System (IPFS), a new hypermedia distribution protocol.

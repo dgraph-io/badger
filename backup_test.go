@@ -95,7 +95,7 @@ func TestDumpLoad(t *testing.T) {
 		var count int
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
-			val, err := item.Value()
+			val, err := item.ValueCopy(nil)
 			if err != nil {
 				return err
 			}
@@ -184,7 +184,7 @@ func Test_BackupRestore(t *testing.T) {
 				}
 				return err
 			}
-			v, err := item.Value()
+			v, err := item.ValueCopy(nil)
 			if err != nil {
 				return err
 			}
@@ -239,7 +239,7 @@ func Test_BackupRestore(t *testing.T) {
 				}
 				return err
 			}
-			v, err := item.Value()
+			v, err := item.ValueCopy(nil)
 			if err != nil {
 				return err
 			}

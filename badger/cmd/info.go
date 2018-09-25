@@ -59,7 +59,7 @@ func init() {
 	RootCmd.AddCommand(infoCmd)
 }
 
-func bytes(sz int64) string {
+func hbytes(sz int64) string {
 	return humanize.Bytes(uint64(sz))
 }
 
@@ -139,7 +139,7 @@ func printInfo(dir, valueDir string) error {
 
 		baseTime = manifestInfo.ModTime()
 		fmt.Printf("[%25s] %-12s %6s MA%s\n", manifestInfo.ModTime().Format(time.RFC3339),
-			manifestInfo.Name(), bytes(manifestInfo.Size()), truncatedString)
+			manifestInfo.Name(), hbytes(manifestInfo.Size()), truncatedString)
 	} else {
 		fmt.Printf("%s [MISSING]\n", manifestInfo.Name())
 	}
@@ -172,7 +172,7 @@ func printInfo(dir, valueDir string) error {
 				levelSizes[level] += fileSize
 				// (Put level on every line to make easier to process with sed/perl.)
 				fmt.Printf("[%25s] %-12s %6s L%d%s\n", dur(baseTime, file.ModTime()),
-					tableFile, bytes(fileSize), level, emptyString)
+					tableFile, hbytes(fileSize), level, emptyString)
 			} else {
 				fmt.Printf("%s [MISSING]\n", tableFile)
 				numMissing++
@@ -209,7 +209,7 @@ func printInfo(dir, valueDir string) error {
 		}
 		valueLogSize += fileSize
 		fmt.Printf("[%25s] %-12s %6s VL%s\n", dur(baseTime, file.ModTime()), file.Name(),
-			bytes(fileSize), emptyString)
+			hbytes(fileSize), emptyString)
 
 		fileinfoMarked[file.Name()] = true
 	}
@@ -223,7 +223,7 @@ func printInfo(dir, valueDir string) error {
 			fmt.Print("\n[EXTRA]\n")
 		}
 		fmt.Printf("[%s] %-12s %6s\n", file.ModTime().Format(time.RFC3339),
-			file.Name(), bytes(file.Size()))
+			file.Name(), hbytes(file.Size()))
 		numExtra++
 	}
 
@@ -233,19 +233,19 @@ func printInfo(dir, valueDir string) error {
 			fmt.Print("\n[ValueDir EXTRA]\n")
 		}
 		fmt.Printf("[%s] %-12s %6s\n", file.ModTime().Format(time.RFC3339),
-			file.Name(), bytes(file.Size()))
+			file.Name(), hbytes(file.Size()))
 		numValueDirExtra++
 	}
 
 	fmt.Print("\n[Summary]\n")
 	totalIndexSize := int64(0)
 	for i, sz := range levelSizes {
-		fmt.Printf("Level %d size: %12s\n", i, bytes(sz))
+		fmt.Printf("Level %d size: %12s\n", i, hbytes(sz))
 		totalIndexSize += sz
 	}
 
-	fmt.Printf("Total index size: %8s\n", bytes(totalIndexSize))
-	fmt.Printf("Value log size: %10s\n", bytes(valueLogSize))
+	fmt.Printf("Total index size: %8s\n", hbytes(totalIndexSize))
+	fmt.Printf("Value log size: %10s\n", hbytes(valueLogSize))
 	fmt.Println()
 	totalExtra := numExtra + numValueDirExtra
 	if totalExtra == 0 && numMissing == 0 && numEmpty == 0 && !manifestTruncated {
