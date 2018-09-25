@@ -45,7 +45,7 @@ of all the accounts, to ensure that the total never changes.
 
 var numGoroutines, numAccounts int
 var duration, keyPrefix string
-var blockAll int32
+var stopAll int32
 
 const initialBal uint64 = 100
 
@@ -87,11 +87,6 @@ func getBalance(txn *badger.Txn, account int) (uint64, error) {
 		bal = toUint64(v)
 	})
 	return bal, err
-	// val, err := item.Value()
-	// if err != nil {
-	// 	return 0, err
-	// }
-	// return toUint64(val), nil
 }
 
 func putBalance(txn *badger.Txn, account int, bal uint64) error {
@@ -182,7 +177,7 @@ func iterateTotal(db *badger.DB) ([]account, error) {
 		if total != expected {
 			log.Printf("Balance did NOT match up. Expected: %d. Received: %d",
 				expected, total)
-			atomic.AddInt32(&blockAll, 1)
+			atomic.AddInt32(&stopAll, 1)
 			return errFailure
 		}
 		// log.Printf("totalMoney took: %s\n", time.Since(start).String())
@@ -216,7 +211,7 @@ func seekTotal(db *badger.DB) ([]account, error) {
 		if total != expected {
 			log.Printf("Balance did NOT match up. Expected: %d. Received: %d",
 				expected, total)
-			atomic.AddInt32(&blockAll, 1)
+			atomic.AddInt32(&stopAll, 1)
 			return errFailure
 		}
 		return nil
@@ -272,9 +267,9 @@ func runTest(cmd *cobra.Command, args []string) error {
 		defer ticker.Stop()
 
 		for range ticker.C {
-			if atomic.LoadInt32(&blockAll) > 0 {
+			if atomic.LoadInt32(&stopAll) > 0 {
 				// Do not proceed.
-				continue
+				return
 			}
 			log.Printf("Total: %d. Success: %d. Errors: %d Reads: %d.\n",
 				atomic.LoadUint64(&total),
@@ -297,9 +292,9 @@ func runTest(cmd *cobra.Command, args []string) error {
 			defer ticker.Stop()
 
 			for range ticker.C {
-				if atomic.LoadInt32(&blockAll) > 0 {
+				if atomic.LoadInt32(&stopAll) > 0 {
 					// Do not proceed.
-					continue
+					return
 				}
 				if time.Now().After(endTs) {
 					return
@@ -325,9 +320,9 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 		var lastOk []account
 		for range ticker.C {
-			if atomic.LoadInt32(&blockAll) > 0 {
+			if atomic.LoadInt32(&stopAll) > 0 {
 				// Do not proceed.
-				continue
+				return
 			}
 			if time.Now().After(endTs) {
 				return

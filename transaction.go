@@ -36,9 +36,9 @@ type oracle struct {
 	refCount  int64
 	isManaged bool // Does not change value, so no locking required.
 
-	sync.Mutex
-	// writeChLock lock is for ensuring that transactions go to the write channel in the same order as
-	// their commit timestamps.
+	sync.Mutex // For nextTxnTs and commits.
+	// writeChLock lock is for ensuring that transactions go to the write
+	// channel in the same order as their commit timestamps.
 	writeChLock sync.Mutex
 	nextTxnTs   uint64
 
@@ -78,16 +78,15 @@ func (o *oracle) decrRef() {
 	}
 	// Clear out commits maps to release memory.
 	o.Lock()
+	defer o.Unlock()
 	// Avoids the race where something new is added to commitsMap
 	// after we check refCount and before we take Lock.
 	if atomic.LoadInt64(&o.refCount) != 0 {
-		o.Unlock()
 		return
 	}
 	if len(o.commits) >= 1000 { // If the map is still small, let it slide.
 		o.commits = make(map[uint64]uint64)
 	}
-	o.Unlock()
 }
 
 func (o *oracle) readTs() uint64 {
@@ -101,6 +100,10 @@ func (o *oracle) readTs() uint64 {
 	o.readMark.Begin(readTs)
 	o.Unlock()
 
+	// Wait for all txns which have no conflicts, have been assigned a commit
+	// timestamp and are going through the write to value log and LSM tree
+	// process. Not waiting here could mean that some txns which have been
+	// committed would not be read.
 	o.txnMark.WaitForMark(context.Background(), readTs)
 	return readTs
 }
@@ -187,7 +190,6 @@ type Txn struct {
 	pendingWrites map[string]*Entry // cache stores any writes done by txn.
 
 	db        *DB
-	callbacks []func()
 	discarded bool
 
 	size         int64
@@ -449,13 +451,6 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	return item, nil
 }
 
-func (txn *Txn) runCallbacks() {
-	for _, cb := range txn.callbacks {
-		cb()
-	}
-	txn.callbacks = txn.callbacks[:0]
-}
-
 // Discard discards a created transaction. This method is very important and must be called. Commit
 // method calls this internally, however, calling this multiple times doesn't cause any issues. So,
 // this can safely be called via a defer right when transaction is created.
@@ -472,7 +467,6 @@ func (txn *Txn) Discard() {
 	if !txn.db.orc.isManaged {
 		txn.db.orc.readMark.Done(txn.readTs)
 	}
-	txn.runCallbacks()
 	if txn.update {
 		txn.db.orc.decrRef()
 	}
@@ -480,7 +474,10 @@ func (txn *Txn) Discard() {
 
 func (txn *Txn) commitAndSend() (func() error, error) {
 	orc := txn.db.orc
-	// Ensure that the order in which we get the commit timestamp is the same as the order in which we push these updates to the write channel. So, we acquire a writeChLock before getting a commit timestamp, and only release it after pushing the entries to it.
+	// Ensure that the order in which we get the commit timestamp is the same as
+	// the order in which we push these updates to the write channel. So, we
+	// acquire a writeChLock before getting a commit timestamp, and only release
+	// it after pushing the entries to it.
 	orc.writeChLock.Lock()
 	defer orc.writeChLock.Unlock()
 
@@ -512,6 +509,8 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	ret := func() error {
 		err := req.Wait()
 		// Wait before marking commitTs as done.
+		// We can't defer doneCommit above, because it is being called from a
+		// callback here.
 		orc.doneCommit(commitTs)
 		return err
 	}
@@ -552,9 +551,6 @@ func (txn *Txn) Commit(callback func(error)) error {
 	if err != nil {
 		return err
 	}
-
-	// Need to release all locks or writes can get deadlocked.
-	txn.runCallbacks()
 
 	if callback == nil {
 		// If batchSet failed, LSM would not have been updated. So, no need to rollback anything.
@@ -601,7 +597,6 @@ func (db *DB) NewTransaction(update bool) *Txn {
 		update = false
 	}
 
-	// fmt.Println("new txn")
 	txn := &Txn{
 		update: update,
 		db:     db,
@@ -609,7 +604,6 @@ func (db *DB) NewTransaction(update bool) *Txn {
 		count:  1,                       // One extra entry for BitFin.
 		size:   int64(len(txnKey) + 10), // Some buffer for the extra entry.
 	}
-	// fmt.Printf("Got new txn with readts: %d\n", txn.readTs)
 	if update {
 		txn.pendingWrites = make(map[string]*Entry)
 		txn.db.orc.addRef()

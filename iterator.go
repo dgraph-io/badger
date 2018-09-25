@@ -108,9 +108,6 @@ func (item *Item) Value(fn func(val []byte)) error {
 	if err == nil && fn != nil {
 		fn(buf)
 	}
-	// if cb != nil {
-	// 	item.txn.callbacks = append(item.txn.callbacks, cb)
-	// }
 	return err
 }
 

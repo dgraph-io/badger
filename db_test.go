@@ -566,8 +566,6 @@ func TestLoad(t *testing.T) {
 				fmt.Printf("Putting i=%d\n", i)
 			}
 			k := []byte(fmt.Sprintf("%09d", i))
-			// One RW transaction would increase the txn ts by 2. One for read,
-			// and one for write.
 			txnSet(t, kv, k, k, 0x00)
 		}
 		kv.Close()
@@ -588,7 +586,6 @@ func TestLoad(t *testing.T) {
 			require.EqualValues(t, k, string(getItemValue(t, item)))
 			return nil
 		}))
-
 	}
 	kv.Close()
 	summary := kv.lc.getSummary()

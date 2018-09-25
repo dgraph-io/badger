@@ -289,13 +289,6 @@ func Open(opt Options) (db *DB, err error) {
 		vptr.Decode(vs.Value)
 	}
 
-	// lastUsedCasCounter will either be the value stored in !badger!head, or some subsequently
-	// written value log entry that we replay.  (Subsequent value log entries might be _less_
-	// than lastUsedCasCounter, if there was value log gc so we have to max() values while
-	// replaying.)
-	// out.lastUsedCasCounter = item.casCounter
-	// TODO: Figure this out. This would update the read timestamp, and set nextCommitTs.
-
 	replayCloser := y.NewCloser(1)
 	go db.doWrites(replayCloser)
 
@@ -304,12 +297,9 @@ func Open(opt Options) (db *DB, err error) {
 	}
 
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
-	// Now that we have the curRead, we can update the nextCommit.
-	// db.orc.nextCommit = db.orc.curRead + 1
 
 	// Let's advance nextTxnTs to one more than whatever we observed via
 	// replaying the logs.
-	// db.orc.readOnlyTs = db.orc.nextTxnTs
 	db.orc.txnMark.Done(db.orc.nextTxnTs)
 	db.orc.nextTxnTs++
 
@@ -1071,10 +1061,6 @@ func (seq *Sequence) updateLease() error {
 		} else if err != nil {
 			return err
 		} else {
-			// val, err := item.Value()
-			// if err != nil {
-			// 	return err
-			// }
 			var num uint64
 			if err := item.Value(func(v []byte) {
 				num = binary.BigEndian.Uint64(v)
@@ -1189,10 +1175,6 @@ func (op *MergeOperator) iterateAndMerge(txn *Txn) (val []byte, err error) {
 				return nil, err
 			}
 		} else {
-			// newVal, err := item.Value()
-			// if err != nil {
-			// 	return nil, err
-			// }
 			if err := item.Value(func(newVal []byte) {
 				val = op.f(val, newVal)
 			}); err != nil {

@@ -403,12 +403,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 				wb = wb[:0]
 			}
 		} else {
-			pk := y.ParseKey(e.Key)
-			msg := fmt.Sprintf("WARNING: This entry should have been caught. %+v. Ts: %d."+
-				" Entry offset: %d. VP offset: %d\n", pk, y.ParseTs(e.Key), e.offset, vp.Offset)
-			panic(msg)
-			// log.Printf("Entry offset: %d. VP offset: %d\n", e.offset, vp.Offset)
-			// log.Printf("WARNING: This entry should have been caught. %+v\n", e)
+			log.Printf("WARNING: This entry should have been caught. %+v\n", e)
 		}
 		return nil
 	}
