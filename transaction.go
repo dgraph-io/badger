@@ -350,21 +350,24 @@ func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
 }
 
 func (txn *Txn) modify(e *Entry) error {
-	if !txn.update {
+	switch {
+	case !txn.update:
 		return ErrReadOnlyTxn
-	} else if txn.discarded {
+	case txn.discarded:
 		return ErrDiscardedTxn
-	} else if len(e.Key) == 0 {
+	case len(e.Key) == 0:
 		return ErrEmptyKey
-	} else if len(e.Key) > maxKeySize {
+	case bytes.HasPrefix(e.Key, badgerPrefix):
+		return ErrInvalidKey
+	case len(e.Key) > maxKeySize:
 		return exceedsMaxKeySizeError(e.Key)
-	} else if int64(len(e.Value)) > txn.db.opt.ValueLogFileSize {
+	case int64(len(e.Value)) > txn.db.opt.ValueLogFileSize:
 		return exceedsMaxValueSizeError(e.Value, txn.db.opt.ValueLogFileSize)
 	}
+
 	if err := txn.checkSize(e); err != nil {
 		return err
 	}
-
 	fp := farm.Fingerprint64(e.Key) // Avoid dealing with byte arrays.
 	txn.writes = append(txn.writes, fp)
 	txn.pendingWrites[string(e.Key)] = e
@@ -424,8 +427,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 		}
 		// Only track reads if this is update txn. No need to track read if txn serviced it
 		// internally.
-		fp := farm.Fingerprint64(key)
-		txn.reads = append(txn.reads, fp)
+		txn.addReadKey(key)
 	}
 
 	seek := y.KeyWithTs(key, txn.readTs)
@@ -449,6 +451,13 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	item.txn = txn
 	item.expiresAt = vs.ExpiresAt
 	return item, nil
+}
+
+func (txn *Txn) addReadKey(key []byte) {
+	if txn.update {
+		fp := farm.Fingerprint64(key)
+		txn.reads = append(txn.reads, fp)
+	}
 }
 
 // Discard discards a created transaction. This method is very important and must be called. Commit

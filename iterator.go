@@ -26,7 +26,6 @@ import (
 	"github.com/dgraph-io/badger/options"
 
 	"github.com/dgraph-io/badger/y"
-	farm "github.com/dgryski/go-farm"
 )
 
 type prefetchStatus uint8
@@ -323,15 +322,25 @@ type Iterator struct {
 	waste list
 
 	lastKey []byte // Used to skip over multiple versions of the same key.
+
+	closed bool
 }
 
 // NewIterator returns a new iterator. Depending upon the options, either only keys, or both
 // key-value pairs would be fetched. The keys are returned in lexicographically sorted order.
-// Using prefetch is highly recommended if you're doing a long running iteration.
-// Avoid long running iterations in update transactions.
+// Using prefetch is recommended if you're doing a long running iteration, for performance.
+//
+// Multiple Iterators:
+// For a read-only txn, multiple iterators can be running simultaneously.  However, for a read-write
+// txn, only one can be running at one time to avoid race conditions, because Txn is thread-unsafe.
 func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
-	if atomic.AddInt32(&txn.numIterators, 1) > 1 {
-		panic("Only one iterator can be active at one time.")
+	if txn.discarded {
+		panic("Transaction has already been discarded")
+	}
+	// Do not change the order of the next if. We must track the number of running iterators.
+	if atomic.AddInt32(&txn.numIterators, 1) > 1 && txn.update {
+		atomic.AddInt32(&txn.numIterators, -1)
+		panic("Only one iterator can be active at one time, for a RW txn.")
 	}
 
 	tables, decr := txn.db.getMemTables()
@@ -366,10 +375,7 @@ func (it *Iterator) newItem() *Item {
 // This item is only valid until it.Next() gets called.
 func (it *Iterator) Item() *Item {
 	tx := it.txn
-	if tx.update {
-		// Track reads if this is an update txn.
-		tx.reads = append(tx.reads, farm.Fingerprint64(it.item.Key()))
-	}
+	tx.addReadKey(it.item.Key())
 	return it.item
 }
 
@@ -384,8 +390,12 @@ func (it *Iterator) ValidForPrefix(prefix []byte) bool {
 
 // Close would close the iterator. It is important to call this when you're done with iteration.
 func (it *Iterator) Close() {
-	it.iitr.Close()
+	if it.closed {
+		return
+	}
+	it.closed = true
 
+	it.iitr.Close()
 	// It is important to wait for the fill goroutines to finish. Otherwise, we might leave zombie
 	// goroutines behind, which are waiting to acquire file read locks after DB has been closed.
 	waitFor := func(l list) {
