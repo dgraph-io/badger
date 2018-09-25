@@ -51,8 +51,10 @@ const initialBal uint64 = 100
 
 func init() {
 	RootCmd.AddCommand(testCmd)
-	testCmd.Flags().IntVarP(&numGoroutines, "conc", "c", 10, "Number of concurrent transactions to run.")
-	testCmd.Flags().IntVarP(&numAccounts, "accounts", "a", 1000000, "Number of accounts in the bank.")
+	testCmd.Flags().IntVarP(
+		&numGoroutines, "conc", "c", 10, "Number of concurrent transactions to run.")
+	testCmd.Flags().IntVarP(
+		&numAccounts, "accounts", "a", 1000000, "Number of accounts in the bank.")
 	testCmd.Flags().StringVarP(&duration, "duration", "d", "3m", "How long to run the test.")
 }
 
