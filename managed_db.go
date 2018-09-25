@@ -58,17 +58,6 @@ func (db *ManagedDB) NewTransaction(update bool) {
 	panic("Cannot use NewTransaction() for ManagedDB. Use NewTransactionAt() instead.")
 }
 
-// NewTransactionAt follows the same logic as DB.NewTransaction(), but uses the
-// provided read timestamp.
-//
-// This is only useful for databases built on top of Badger (like Dgraph), and
-// can be ignored by most users.
-func (db *ManagedDB) NewTransactionAt(readTs uint64, update bool) *Txn {
-	txn := db.DB.NewTransaction(update)
-	txn.readTs = readTs
-	return txn
-}
-
 // CommitAt commits the transaction, following the same logic as Commit(), but
 // at the given commit timestamp. This will panic if not used with ManagedDB.
 //
