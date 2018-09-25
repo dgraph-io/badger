@@ -96,6 +96,9 @@ func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB))
 	if opts == nil {
 		opts = new(Options)
 		*opts = getTestOptions(dir)
+	} else {
+		opts.Dir = dir
+		opts.ValueDir = dir
 	}
 	db, err := Open(*opts)
 	require.NoError(t, err)
@@ -656,6 +659,73 @@ func TestIterateDeleted(t *testing.T) {
 	})
 }
 
+func TestIterateParallel(t *testing.T) {
+	key := func(account int) []byte {
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], uint32(account))
+		return append([]byte("account-"), b[:]...)
+	}
+
+	N := 100000
+	iterate := func(txn *Txn, wg *sync.WaitGroup) {
+		defer wg.Done()
+		itr := txn.NewIterator(DefaultIteratorOptions)
+		defer itr.Close()
+
+		var count int
+		for itr.Rewind(); itr.Valid(); itr.Next() {
+			count++
+			item := itr.Item()
+			require.Equal(t, "account-", string(item.Key()[0:8]))
+			err := item.Value(func(val []byte) {
+				require.Equal(t, "1000", string(val))
+			})
+			require.NoError(t, err)
+		}
+		require.Equal(t, N, count)
+		itr.Close() // Double close.
+	}
+
+	opt := DefaultOptions
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		var wg sync.WaitGroup
+		var txns []*Txn
+		for i := 0; i < N; i++ {
+			wg.Add(1)
+			txn := db.NewTransaction(true)
+			require.NoError(t, txn.Set(key(i), []byte("1000")))
+			txns = append(txns, txn)
+		}
+		for _, txn := range txns {
+			y.Check(txn.Commit(func(err error) {
+				y.Check(err)
+				wg.Done()
+			}))
+		}
+
+		wg.Wait()
+
+		// Check that a RW txn can't run multiple iterators.
+		txn := db.NewTransaction(true)
+		itr := txn.NewIterator(DefaultIteratorOptions)
+		require.Panics(t, func() {
+			txn.NewIterator(DefaultIteratorOptions)
+		})
+		require.Panics(t, txn.Discard)
+		itr.Close()
+		txn.Discard()
+
+		// Run multiple iterators for a RO txn.
+		txn = db.NewTransaction(false)
+		defer txn.Discard()
+		wg.Add(3)
+		go iterate(txn, &wg)
+		go iterate(txn, &wg)
+		go iterate(txn, &wg)
+		wg.Wait()
+	})
+}
+
 func TestDeleteWithoutSyncWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
@@ -696,6 +766,34 @@ func TestPidFile(t *testing.T) {
 		_, err := Open(getTestOptions(db.opt.Dir))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "Another process is using this Badger database")
+	})
+}
+
+func TestInvalidKey(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		err := db.Update(func(txn *Txn) error {
+			err := txn.Set([]byte("!badger!head"), nil)
+			require.Equal(t, ErrInvalidKey, err)
+
+			err = txn.Set([]byte("!badger!"), nil)
+			require.Equal(t, ErrInvalidKey, err)
+
+			err = txn.Set([]byte("!badger"), []byte("BadgerDB"))
+			require.NoError(t, err)
+			return err
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, db.View(func(txn *Txn) error {
+			item, err := txn.Get([]byte("!badger"))
+			if err != nil {
+				return err
+			}
+			require.NoError(t, item.Value(func(val []byte) {
+				require.Equal(t, []byte("BadgerDB"), val)
+			}))
+			return nil
+		}))
 	})
 }
 
