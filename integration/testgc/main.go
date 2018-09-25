@@ -72,7 +72,7 @@ func (s *S) read(db *badger.DB) error {
 		if err != nil {
 			return err
 		}
-		val, err := item.Value()
+		val, err := item.ValueCopy(nil)
 		if err != nil {
 			return err
 		}
@@ -194,7 +194,7 @@ func main() {
 			keyi := binary.BigEndian.Uint64(key)
 			total++
 
-			val, err := item.Value()
+			val, err := item.ValueCopy(nil)
 			if err != nil {
 				return err
 			}
