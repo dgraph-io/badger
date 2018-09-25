@@ -108,8 +108,8 @@ func replayFunction(out *DB) func(Entry, valuePointer) error {
 		}
 		first = false
 
-		if out.orc.curRead < y.ParseTs(e.Key) {
-			out.orc.curRead = y.ParseTs(e.Key)
+		if out.orc.nextTxnTs < y.ParseTs(e.Key) {
+			out.orc.nextTxnTs = y.ParseTs(e.Key)
 		}
 
 		nk := make([]byte, len(e.Key))
@@ -242,14 +242,6 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}()
 
-	orc := &oracle{
-		isManaged:  opt.ManagedTxns,
-		nextCommit: 1,
-		commits:    make(map[uint64]uint64),
-		readMark:   y.WaterMark{},
-	}
-	orc.readMark.Init()
-
 	db = &DB{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
@@ -259,7 +251,7 @@ func Open(opt Options) (db *DB, err error) {
 		elog:          trace.NewEventLog("Badger", "DB"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
-		orc:           orc,
+		orc:           newOracle(opt),
 	}
 
 	// Calculate initial size.
@@ -291,18 +283,11 @@ func Open(opt Options) (db *DB, err error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
-	db.orc.curRead = vs.Version
+	db.orc.nextTxnTs = vs.Version
 	var vptr valuePointer
 	if len(vs.Value) > 0 {
 		vptr.Decode(vs.Value)
 	}
-
-	// lastUsedCasCounter will either be the value stored in !badger!head, or some subsequently
-	// written value log entry that we replay.  (Subsequent value log entries might be _less_
-	// than lastUsedCasCounter, if there was value log gc so we have to max() values while
-	// replaying.)
-	// out.lastUsedCasCounter = item.casCounter
-	// TODO: Figure this out. This would update the read timestamp, and set nextCommitTs.
 
 	replayCloser := y.NewCloser(1)
 	go db.doWrites(replayCloser)
@@ -312,8 +297,11 @@ func Open(opt Options) (db *DB, err error) {
 	}
 
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
-	// Now that we have the curRead, we can update the nextCommit.
-	db.orc.nextCommit = db.orc.curRead + 1
+
+	// Let's advance nextTxnTs to one more than whatever we observed via
+	// replaying the logs.
+	db.orc.txnMark.Done(db.orc.nextTxnTs)
+	db.orc.nextTxnTs++
 
 	// Mmap writable log
 	lf := db.vlog.filesMap[db.vlog.maxFid]
@@ -843,7 +831,7 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 
 			// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
 			// commits.
-			headTs := y.KeyWithTs(head, db.orc.commitTs())
+			headTs := y.KeyWithTs(head, db.orc.nextTs())
 			ft.mt.Put(headTs, y.ValueStruct{Value: offset})
 		}
 
@@ -1073,11 +1061,12 @@ func (seq *Sequence) updateLease() error {
 		} else if err != nil {
 			return err
 		} else {
-			val, err := item.Value()
-			if err != nil {
+			var num uint64
+			if err := item.Value(func(v []byte) {
+				num = binary.BigEndian.Uint64(v)
+			}); err != nil {
 				return err
 			}
-			num := binary.BigEndian.Uint64(val)
 			seq.next = num
 		}
 
@@ -1186,11 +1175,11 @@ func (op *MergeOperator) iterateAndMerge(txn *Txn) (val []byte, err error) {
 				return nil, err
 			}
 		} else {
-			newVal, err := item.Value()
-			if err != nil {
+			if err := item.Value(func(newVal []byte) {
+				val = op.f(val, newVal)
+			}); err != nil {
 				return nil, err
 			}
-			val = op.f(val, newVal)
 		}
 		if item.DiscardEarlierVersions() {
 			break

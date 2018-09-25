@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"context"
 	"math"
 	"sort"
 	"strconv"
@@ -31,14 +32,18 @@ import (
 )
 
 type oracle struct {
-	// curRead must be at the top for memory alignment. See issue #311.
-	curRead   uint64 // Managed by the mutex.
+	// A 64-bit integer must be at the top for memory alignment. See issue #311.
 	refCount  int64
 	isManaged bool // Does not change value, so no locking required.
 
-	sync.Mutex
-	writeLock  sync.Mutex
-	nextCommit uint64
+	sync.Mutex // For nextTxnTs and commits.
+	// writeChLock lock is for ensuring that transactions go to the write
+	// channel in the same order as their commit timestamps.
+	writeChLock sync.Mutex
+	nextTxnTs   uint64
+
+	// Used to block NewTransaction, so all previous commits are visible to a new read.
+	txnMark y.WaterMark
 
 	// Either of these is used to determine which versions can be permanently
 	// discarded during compaction.
@@ -50,24 +55,37 @@ type oracle struct {
 	commits map[uint64]uint64
 }
 
+func newOracle(opt Options) *oracle {
+	orc := &oracle{
+		isManaged: opt.ManagedTxns,
+		commits:   make(map[uint64]uint64),
+		// We're not initializing nextTxnTs and readOnlyTs. It would be done after replay in Open.
+		readMark: y.WaterMark{Name: "badger.PendingReads"},
+		txnMark:  y.WaterMark{Name: "badger.TxnTimestamp"},
+	}
+	orc.readMark.Init()
+	orc.txnMark.Init()
+	return orc
+}
+
 func (o *oracle) addRef() {
 	atomic.AddInt64(&o.refCount, 1)
 }
 
 func (o *oracle) decrRef() {
-	if count := atomic.AddInt64(&o.refCount, -1); count == 0 {
-		// Clear out commits maps to release memory.
-		o.Lock()
-		// Avoids the race where something new is added to commitsMap
-		// after we check refCount and before we take Lock.
-		if atomic.LoadInt64(&o.refCount) != 0 {
-			o.Unlock()
-			return
-		}
-		if len(o.commits) >= 1000 { // If the map is still small, let it slide.
-			o.commits = make(map[uint64]uint64)
-		}
-		o.Unlock()
+	if atomic.AddInt64(&o.refCount, -1) != 0 {
+		return
+	}
+	// Clear out commits maps to release memory.
+	o.Lock()
+	defer o.Unlock()
+	// Avoids the race where something new is added to commitsMap
+	// after we check refCount and before we take Lock.
+	if atomic.LoadInt64(&o.refCount) != 0 {
+		return
+	}
+	if len(o.commits) >= 1000 { // If the map is still small, let it slide.
+		o.commits = make(map[uint64]uint64)
 	}
 }
 
@@ -75,13 +93,25 @@ func (o *oracle) readTs() uint64 {
 	if o.isManaged {
 		return math.MaxUint64
 	}
-	return atomic.LoadUint64(&o.curRead)
+
+	var readTs uint64
+	o.Lock()
+	readTs = o.nextTxnTs - 1
+	o.readMark.Begin(readTs)
+	o.Unlock()
+
+	// Wait for all txns which have no conflicts, have been assigned a commit
+	// timestamp and are going through the write to value log and LSM tree
+	// process. Not waiting here could mean that some txns which have been
+	// committed would not be read.
+	y.Check(o.txnMark.WaitForMark(context.Background(), readTs))
+	return readTs
 }
 
-func (o *oracle) commitTs() uint64 {
+func (o *oracle) nextTs() uint64 {
 	o.Lock()
 	defer o.Unlock()
-	return o.nextCommit
+	return o.nextTxnTs
 }
 
 // Any deleted or invalid versions at or below ts would be discarded during
@@ -98,7 +128,7 @@ func (o *oracle) discardAtOrBelow() uint64 {
 		defer o.Unlock()
 		return o.discardTs
 	}
-	return o.readMark.MinReadTs()
+	return o.readMark.DoneUntil()
 }
 
 // hasConflict must be called while having a lock.
@@ -125,8 +155,9 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 	var ts uint64
 	if !o.isManaged {
 		// This is the general case, when user doesn't specify the read and commit ts.
-		ts = o.nextCommit
-		o.nextCommit++
+		ts = o.nextTxnTs
+		o.nextTxnTs++
+		o.txnMark.Begin(ts)
 
 	} else {
 		// If commitTs is set, use it instead.
@@ -144,14 +175,7 @@ func (o *oracle) doneCommit(cts uint64) {
 		// No need to update anything.
 		return
 	}
-
-	for {
-		curRead := atomic.LoadUint64(&o.curRead)
-		if cts <= curRead {
-			return
-		}
-		atomic.CompareAndSwapUint64(&o.curRead, curRead, cts)
-	}
+	o.txnMark.Done(cts)
 }
 
 // Txn represents a Badger transaction.
@@ -166,7 +190,6 @@ type Txn struct {
 	pendingWrites map[string]*Entry // cache stores any writes done by txn.
 
 	db        *DB
-	callbacks []func()
 	discarded bool
 
 	size         int64
@@ -422,17 +445,10 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta
 	item.db = txn.db
-	item.vptr = vs.Value
+	item.vptr = vs.Value // TODO: Do we need to copy this over?
 	item.txn = txn
 	item.expiresAt = vs.ExpiresAt
 	return item, nil
-}
-
-func (txn *Txn) runCallbacks() {
-	for _, cb := range txn.callbacks {
-		cb()
-	}
-	txn.callbacks = txn.callbacks[:0]
 }
 
 // Discard discards a created transaction. This method is very important and must be called. Commit
@@ -448,11 +464,57 @@ func (txn *Txn) Discard() {
 		panic("Unclosed iterator at time of Txn.Discard.")
 	}
 	txn.discarded = true
-	txn.db.orc.readMark.Done(txn.readTs)
-	txn.runCallbacks()
+	if !txn.db.orc.isManaged {
+		txn.db.orc.readMark.Done(txn.readTs)
+	}
 	if txn.update {
 		txn.db.orc.decrRef()
 	}
+}
+
+func (txn *Txn) commitAndSend() (func() error, error) {
+	orc := txn.db.orc
+	// Ensure that the order in which we get the commit timestamp is the same as
+	// the order in which we push these updates to the write channel. So, we
+	// acquire a writeChLock before getting a commit timestamp, and only release
+	// it after pushing the entries to it.
+	orc.writeChLock.Lock()
+	defer orc.writeChLock.Unlock()
+
+	commitTs := orc.newCommitTs(txn)
+	if commitTs == 0 {
+		return nil, ErrConflict
+	}
+
+	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
+	for _, e := range txn.pendingWrites {
+		// Suffix the keys with commit ts, so the key versions are sorted in
+		// descending order of commit timestamp.
+		e.Key = y.KeyWithTs(e.Key, commitTs)
+		e.meta |= bitTxn
+		entries = append(entries, e)
+	}
+	e := &Entry{
+		Key:   y.KeyWithTs(txnKey, commitTs),
+		Value: []byte(strconv.FormatUint(commitTs, 10)),
+		meta:  bitFinTxn,
+	}
+	entries = append(entries, e)
+
+	req, err := txn.db.sendToWriteCh(entries)
+	if err != nil {
+		orc.doneCommit(commitTs)
+		return nil, err
+	}
+	ret := func() error {
+		err := req.Wait()
+		// Wait before marking commitTs as done.
+		// We can't defer doneCommit above, because it is being called from a
+		// callback here.
+		orc.doneCommit(commitTs)
+		return err
+	}
+	return ret, nil
 }
 
 // Commit commits the transaction, following these steps:
@@ -485,50 +547,25 @@ func (txn *Txn) Commit(callback func(error)) error {
 		return nil // Nothing to do.
 	}
 
-	state := txn.db.orc
-	state.writeLock.Lock()
-	commitTs := state.newCommitTs(txn)
-	if commitTs == 0 {
-		state.writeLock.Unlock()
-		return ErrConflict
-	}
-
-	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
-	for _, e := range txn.pendingWrites {
-		// Suffix the keys with commit ts, so the key versions are sorted in
-		// descending order of commit timestamp.
-		e.Key = y.KeyWithTs(e.Key, commitTs)
-		e.meta |= bitTxn
-		entries = append(entries, e)
-	}
-	e := &Entry{
-		Key:   y.KeyWithTs(txnKey, commitTs),
-		Value: []byte(strconv.FormatUint(commitTs, 10)),
-		meta:  bitFinTxn,
-	}
-	entries = append(entries, e)
-
-	req, err := txn.db.sendToWriteCh(entries)
-	state.writeLock.Unlock()
+	txnCb, err := txn.commitAndSend()
 	if err != nil {
 		return err
 	}
-
-	// Need to release all locks or writes can get deadlocked.
-	txn.runCallbacks()
 
 	if callback == nil {
 		// If batchSet failed, LSM would not have been updated. So, no need to rollback anything.
 
 		// TODO: What if some of the txns successfully make it to value log, but others fail.
 		// Nothing gets updated to LSM, until a restart happens.
-		defer state.doneCommit(commitTs)
-		return req.Wait()
+		return txnCb()
 	}
+
+	// TODO: Avoid creating a goroutine per txn. We should instead send these
+	// over to a channel, which can run them via a single goroutine. This would
+	// also ensure that the callbacks are run serially, which makes it easier
+	// for the users to write thread-unsafe callbacks.
 	go func() {
-		err := req.Wait()
-		// Write is complete. Let's call the callback function now.
-		state.doneCommit(commitTs)
+		err := txnCb()
 		callback(err)
 	}()
 	return nil
@@ -567,7 +604,6 @@ func (db *DB) NewTransaction(update bool) *Txn {
 		count:  1,                       // One extra entry for BitFin.
 		size:   int64(len(txnKey) + 10), // Some buffer for the extra entry.
 	}
-	db.orc.readMark.Begin(txn.readTs)
 	if update {
 		txn.pendingWrites = make(map[string]*Entry)
 		txn.db.orc.addRef()
