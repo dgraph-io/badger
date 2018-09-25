@@ -165,6 +165,8 @@ func (db *DB) Load(r io.Reader) error {
 	}
 
 	wg.Wait()
+	// Mark all versions done up until nextTxnTs.
+	db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
 
 	select {
 	case err := <-errChan:

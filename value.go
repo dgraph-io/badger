@@ -756,7 +756,6 @@ func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 	fid := ptr.Fid
 	offset := ptr.Offset + ptr.Len
 	vlog.elog.Printf("Seeking at value pointer: %+v\n", ptr)
-	log.Printf("Replaying from value pointer: %+v\n", ptr)
 
 	fids := vlog.sortedFids()
 
@@ -769,10 +768,10 @@ func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 			of = 0
 		}
 		f := vlog.filesMap[id]
-		log.Printf("Iterating file id: %d", id)
+		vlog.elog.Printf("Iterating file id: %d", id)
 		now := time.Now()
 		err := vlog.iterate(f, of, fn)
-		log.Printf("Iteration took: %s\n", time.Since(now))
+		vlog.elog.Printf("Iteration took: %s\n", time.Since(now))
 		if err != nil {
 			return errors.Wrapf(err, "Unable to replay value log: %q", f.path)
 		}

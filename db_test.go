@@ -1432,6 +1432,7 @@ func TestLSMOnly(t *testing.T) {
 	require.NoError(t, db.RunValueLogGC(0.2))
 }
 
+// This test function is doing some intricate sorcery.
 func TestMinReadTs(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		for i := 0; i < 10; i++ {
@@ -1440,7 +1441,10 @@ func TestMinReadTs(t *testing.T) {
 			}))
 		}
 		time.Sleep(time.Millisecond)
-		require.Equal(t, uint64(10), db.orc.readTs())
+
+		readTxn0 := db.NewTransaction(false)
+		require.Equal(t, uint64(10), readTxn0.readTs)
+
 		min := db.orc.readMark.DoneUntil()
 		require.Equal(t, uint64(9), min)
 
@@ -1451,11 +1455,15 @@ func TestMinReadTs(t *testing.T) {
 			}))
 		}
 		require.Equal(t, uint64(20), db.orc.readTs())
+
 		time.Sleep(time.Millisecond)
 		require.Equal(t, min, db.orc.readMark.DoneUntil())
+
+		readTxn0.Discard()
 		readTxn.Discard()
 		time.Sleep(time.Millisecond)
 		require.Equal(t, uint64(19), db.orc.readMark.DoneUntil())
+		db.orc.readMark.Done(uint64(20)) // Because we called readTs.
 
 		for i := 0; i < 10; i++ {
 			db.View(func(txn *Txn) error {

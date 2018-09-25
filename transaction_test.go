@@ -87,10 +87,11 @@ func TestTxnReadAfterWrite(t *testing.T) {
 func TestTxnCommitAsync(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 
-		txn := db.NewTransaction(true)
 		key := func(i int) []byte {
 			return []byte(fmt.Sprintf("key=%d", i))
 		}
+
+		txn := db.NewTransaction(true)
 		for i := 0; i < 40; i++ {
 			err := txn.Set(key(i), []byte(strconv.Itoa(100)))
 			require.NoError(t, err)
