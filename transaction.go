@@ -104,7 +104,7 @@ func (o *oracle) readTs() uint64 {
 	// timestamp and are going through the write to value log and LSM tree
 	// process. Not waiting here could mean that some txns which have been
 	// committed would not be read.
-	o.txnMark.WaitForMark(context.Background(), readTs)
+	y.Check(o.txnMark.WaitForMark(context.Background(), readTs))
 	return readTs
 }
 

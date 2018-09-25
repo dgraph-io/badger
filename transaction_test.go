@@ -23,7 +23,6 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -85,12 +84,11 @@ func TestTxnReadAfterWrite(t *testing.T) {
 }
 
 func TestTxnCommitAsync(t *testing.T) {
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("key=%d", i))
+	}
+
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-
-		key := func(i int) []byte {
-			return []byte(fmt.Sprintf("key=%d", i))
-		}
-
 		txn := db.NewTransaction(true)
 		for i := 0; i < 40; i++ {
 			err := txn.Set(key(i), []byte(strconv.Itoa(100)))
@@ -99,10 +97,16 @@ func TestTxnCommitAsync(t *testing.T) {
 		require.NoError(t, txn.Commit(nil))
 		txn.Discard()
 
-		var done uint64
+		closer := y.NewCloser(1)
 		go func() {
-			// Keep checking balance variant
-			for atomic.LoadUint64(&done) == 0 {
+			defer closer.Done()
+			for {
+				select {
+				case <-closer.HasBeenClosed():
+					return
+				default:
+				}
+				// Keep checking balance variant
 				txn := db.NewTransaction(false)
 				totalBalance := 0
 				for i := 0; i < 40; i++ {
@@ -140,7 +144,7 @@ func TestTxnCommitAsync(t *testing.T) {
 			}()
 		}
 		wg.Wait()
-		atomic.StoreUint64(&done, 1)
+		closer.SignalAndWait()
 		time.Sleep(time.Millisecond * 10) // allow goroutine to complete.
 	})
 }
