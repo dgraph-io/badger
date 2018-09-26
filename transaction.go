@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/y"
-	farm "github.com/dgryski/go-farm"
 	"github.com/pkg/errors"
 )
 
@@ -52,13 +51,13 @@ type oracle struct {
 
 	// commits stores a key fingerprint and latest commit counter for it.
 	// refCount is used to clear out commits map to avoid a memory blowup.
-	commits map[uint64]uint64
+	commits map[string]uint64
 }
 
 func newOracle(opt Options) *oracle {
 	orc := &oracle{
 		isManaged: opt.ManagedTxns,
-		commits:   make(map[uint64]uint64),
+		commits:   make(map[string]uint64),
 		// We're not initializing nextTxnTs and readOnlyTs. It would be done after replay in Open.
 		readMark: y.WaterMark{Name: "badger.PendingReads"},
 		txnMark:  y.WaterMark{Name: "badger.TxnTimestamp"},
@@ -85,7 +84,7 @@ func (o *oracle) decrRef() {
 		return
 	}
 	if len(o.commits) >= 1000 { // If the map is still small, let it slide.
-		o.commits = make(map[uint64]uint64)
+		o.commits = make(map[string]uint64)
 	}
 }
 
@@ -184,8 +183,8 @@ type Txn struct {
 	commitTs uint64
 
 	update bool     // update is used to conditionally keep track of reads.
-	reads  []uint64 // contains fingerprints of keys read.
-	writes []uint64 // contains fingerprints of keys written.
+	reads  []string // contains fingerprints of keys read.
+	writes []string // contains fingerprints of keys written.
 
 	pendingWrites map[string]*Entry // cache stores any writes done by txn.
 
@@ -368,8 +367,8 @@ func (txn *Txn) modify(e *Entry) error {
 	if err := txn.checkSize(e); err != nil {
 		return err
 	}
-	fp := farm.Fingerprint64(e.Key) // Avoid dealing with byte arrays.
-	txn.writes = append(txn.writes, fp)
+	// fp := farm.Fingerprint64(e.Key) // Avoid dealing with byte arrays.
+	txn.writes = append(txn.writes, string(e.Key))
 	txn.pendingWrites[string(e.Key)] = e
 	return nil
 }
@@ -455,8 +454,8 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 
 func (txn *Txn) addReadKey(key []byte) {
 	if txn.update {
-		fp := farm.Fingerprint64(key)
-		txn.reads = append(txn.reads, fp)
+		// fp := farm.Fingerprint64(key)
+		txn.reads = append(txn.reads, string(key))
 	}
 }
 
