@@ -350,6 +350,8 @@ func runDisect(cmd *cobra.Command, args []string) error {
 }
 
 func runTest(cmd *cobra.Command, args []string) error {
+	rand.Seed(time.Now().UnixNano())
+
 	// Open DB
 	opts := badger.DefaultOptions
 	opts.Dir = sstDir
