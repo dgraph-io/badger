@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -33,29 +34,49 @@ import (
 )
 
 var testCmd = &cobra.Command{
-	Use:   "test",
+	Use:   "bank",
 	Short: "Run bank test on Badger.",
 	Long: `
 This command runs bank test on Badger, inspired by Jepsen. It creates many
 accounts and moves money among them transactionally. It also reads the sum total
 of all the accounts, to ensure that the total never changes.
 `,
-	RunE: runTest,
+}
+
+var bankTest = &cobra.Command{
+	Use:   "test",
+	Short: "Execute bank test on Badger.",
+	RunE:  runTest,
+}
+
+var bankDisect = &cobra.Command{
+	Use:   "disect",
+	Short: "Disect the bank output.",
+	Long: `
+Disect the bank output BadgerDB to find the first transaction which causes
+failure of the total invariant.
+`,
+	RunE: runDisect,
 }
 
 var numGoroutines, numAccounts int
-var duration, keyPrefix string
+var duration string
 var stopAll int32
+
+var keyPrefix = "account:"
 
 const initialBal uint64 = 100
 
 func init() {
 	RootCmd.AddCommand(testCmd)
+	testCmd.AddCommand(bankTest)
+	testCmd.AddCommand(bankDisect)
+
 	testCmd.Flags().IntVarP(
-		&numGoroutines, "conc", "c", 10, "Number of concurrent transactions to run.")
-	testCmd.Flags().IntVarP(
-		&numAccounts, "accounts", "a", 1000000, "Number of accounts in the bank.")
-	testCmd.Flags().StringVarP(&duration, "duration", "d", "3m", "How long to run the test.")
+		&numAccounts, "accounts", "a", 100000, "Number of accounts in the bank.")
+	bankTest.Flags().IntVarP(
+		&numGoroutines, "conc", "c", 16, "Number of concurrent transactions to run.")
+	bankTest.Flags().StringVarP(&duration, "duration", "d", "3m", "How long to run the test.")
 }
 
 func key(account int) []byte {
@@ -153,72 +174,177 @@ func diff(a, b []account) string {
 
 var errFailure = errors.New("Found an balance mismatch. Test failed.")
 
-// iterateTotal retrives the total of all accounts by iterating over the DB.
-func iterateTotal(db *badger.DB) ([]account, error) {
-	expected := uint64(numAccounts) * uint64(initialBal)
-	var accounts []account
-	err := db.View(func(txn *badger.Txn) error {
-		// start := time.Now()
-		itr := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer itr.Close()
+// // iterateTotal retrives the total of all accounts by iterating over the DB.
+// func iterateTotal(db *badger.DB) ([]account, error) {
+// 	expected := uint64(numAccounts) * uint64(initialBal)
+// 	var accounts []account
+// 	err := db.View(func(txn *badger.Txn) error {
+// 		// start := time.Now()
+// 		itr := txn.NewIterator(badger.DefaultIteratorOptions)
+// 		defer itr.Close()
 
-		var total uint64
-		for itr.Seek([]byte(keyPrefix)); itr.ValidForPrefix([]byte(keyPrefix)); itr.Next() {
-			item := itr.Item()
-			val, err := item.ValueCopy(nil)
-			if err != nil {
-				return err
-			}
-			acc := account{
-				Id:  toAccount(item.Key()),
-				Bal: toUint64(val),
-			}
-			accounts = append(accounts, acc)
-			total += acc.Bal
-		}
-		if total != expected {
-			log.Printf("Balance did NOT match up. Expected: %d. Received: %d",
-				expected, total)
-			atomic.AddInt32(&stopAll, 1)
-			return errFailure
-		}
-		// log.Printf("totalMoney took: %s\n", time.Since(start).String())
-		return nil
-	})
-	return accounts, err
-}
+// 		var total uint64
+// 		for itr.Seek([]byte(keyPrefix)); itr.ValidForPrefix([]byte(keyPrefix)); itr.Next() {
+// 			item := itr.Item()
+// 			val, err := item.ValueCopy(nil)
+// 			if err != nil {
+// 				return err
+// 			}
+// 			acc := account{
+// 				Id:  toAccount(item.Key()),
+// 				Bal: toUint64(val),
+// 			}
+// 			accounts = append(accounts, acc)
+// 			total += acc.Bal
+// 		}
+// 		if total != expected {
+// 			log.Printf("Balance did NOT match up. Expected: %d. Received: %d",
+// 				expected, total)
+// 			atomic.AddInt32(&stopAll, 1)
+// 			return errFailure
+// 		}
+// 		// log.Printf("totalMoney took: %s\n", time.Since(start).String())
+// 		return nil
+// 	})
+// 	return accounts, err
+// }
 
 // seekTotal retrives the total of all accounts by seeking for each account key.
-func seekTotal(db *badger.DB) ([]account, error) {
+func seekTotal(txn *badger.Txn) ([]account, error) {
 	expected := uint64(numAccounts) * uint64(initialBal)
 	var accounts []account
-	err := db.View(func(txn *badger.Txn) error {
-		var total uint64
-		for i := 0; i < numAccounts; i++ {
-			item, err := txn.Get(key(i))
-			if err != nil {
-				return err
-			}
-			val, err := item.ValueCopy(nil)
-			if err != nil {
-				return err
-			}
-			acc := account{
-				Id:  i,
-				Bal: toUint64(val),
-			}
-			accounts = append(accounts, acc)
-			total += acc.Bal
+
+	var total uint64
+	for i := 0; i < numAccounts; i++ {
+		item, err := txn.Get(key(i))
+		if err != nil {
+			log.Printf("Error for account: %d. err=%v. key=%q\n", i, err, key(i))
+			return accounts, err
 		}
-		if total != expected {
-			log.Printf("Balance did NOT match up. Expected: %d. Received: %d",
-				expected, total)
-			atomic.AddInt32(&stopAll, 1)
-			return errFailure
+		val, err := item.ValueCopy(nil)
+		if err != nil {
+			return accounts, err
 		}
+		acc := account{
+			Id:  i,
+			Bal: toUint64(val),
+		}
+		accounts = append(accounts, acc)
+		total += acc.Bal
+	}
+	if total != expected {
+		log.Printf("Balance did NOT match up. Expected: %d. Received: %d",
+			expected, total)
+		atomic.AddInt32(&stopAll, 1)
+		return accounts, errFailure
+	}
+	return accounts, nil
+}
+
+// Range is [lowTs, highTs).
+func findFirstInvalidTxn(db *badger.DB, lowTs, highTs uint64) uint64 {
+	checkAt := func(ts uint64) error {
+		txn := db.NewTransactionAt(ts, false)
+		_, err := seekTotal(txn)
+		txn.Discard()
+		return err
+	}
+
+	if highTs-lowTs < 1 {
+		log.Printf("Checking at lowTs: %d\n", lowTs)
+		err := checkAt(lowTs)
+		if err == errFailure {
+			fmt.Printf("Violation at ts: %d\n", lowTs)
+			return lowTs
+		} else if err != nil {
+			log.Printf("Error at lowTs: %d. Err=%v\n", lowTs, err)
+			return 0
+		}
+		fmt.Printf("No violation found at ts: %d\n", lowTs)
+		return 0
+	}
+
+	midTs := (lowTs + highTs) / 2
+	log.Println()
+	log.Printf("Checking. low=%d. high=%d. mid=%d\n", lowTs, highTs, midTs)
+	err := checkAt(midTs)
+	if err == badger.ErrKeyNotFound || err == nil {
+		// If no failure, move to higher ts.
+		return findFirstInvalidTxn(db, midTs+1, highTs)
+	} else {
+		// Found an error.
+		return findFirstInvalidTxn(db, lowTs, midTs)
+	}
+}
+
+func compareTwo(db *badger.DB, before, after uint64) {
+	fmt.Printf("Comparing @ts=%d with @ts=%d\n", before, after)
+	txn := db.NewTransactionAt(before, false)
+	prev, err := seekTotal(txn)
+	if err == errFailure {
+		// pass
+	} else {
+		y.Check(err)
+	}
+	txn.Discard()
+
+	txn = db.NewTransactionAt(after, false)
+	now, err := seekTotal(txn)
+	if err == errFailure {
+		// pass
+	} else {
+		y.Check(err)
+	}
+	txn.Discard()
+
+	fmt.Println(diff(prev, now))
+}
+
+func runDisect(cmd *cobra.Command, args []string) error {
+	opts := badger.DefaultOptions
+	opts.Dir = sstDir
+	opts.ValueDir = vlogDir
+	opts.ReadOnly = true
+
+	// The total did not match up. So, let's disect the DB to find the
+	// transction which caused the total mismatch.
+	db, err := badger.OpenManaged(opts)
+	if err != nil {
+		return err
+	}
+	fmt.Println("opened db")
+
+	var min, max uint64 = math.MaxUint64, 0
+	{
+		txn := db.NewTransactionAt(uint64(math.MaxUint32), false)
+		iopt := badger.DefaultIteratorOptions
+		iopt.AllVersions = true
+		itr := txn.NewIterator(iopt)
+		for itr.Rewind(); itr.Valid(); itr.Next() {
+			item := itr.Item()
+			if min > item.Version() {
+				min = item.Version()
+			}
+			if max < item.Version() {
+				max = item.Version()
+			}
+		}
+		itr.Close()
+		txn.Discard()
+	}
+
+	log.Printf("min=%d. max=%d\n", min, max)
+	ts := findFirstInvalidTxn(db, min, max)
+	fmt.Println()
+	if ts == 0 {
+		fmt.Println("Nothing found. Exiting.")
 		return nil
-	})
-	return accounts, err
+	}
+
+	compareTwo(db, ts-1, ts)
+	compareTwo(db, ts-2, ts-1)
+	compareTwo(db, ts-3, ts-2)
+	return nil
 }
 
 func runTest(cmd *cobra.Command, args []string) error {
@@ -226,15 +352,15 @@ func runTest(cmd *cobra.Command, args []string) error {
 	opts := badger.DefaultOptions
 	opts.Dir = sstDir
 	opts.ValueDir = vlogDir
-	opts.ValueThreshold = 1 // Make all values go to value log.
+	// Do not GC any versions, because we need them for the disect.
+	opts.NumVersionsToKeep = int(math.MaxInt32)
+	// opts.ValueThreshold = 1 // Make all values go to value log.
 
 	db, err := badger.Open(opts)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-
-	keyPrefix = fmt.Sprintf("a%s:", time.Now().Format(time.RFC3339Nano))
 
 	var wg sync.WaitGroup
 	var txns []*badger.Txn
@@ -252,6 +378,11 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}
 	log.Println("Waiting for writes to be done")
 	wg.Wait()
+
+	y.Check(db.View(func(txn *badger.Txn) error {
+		log.Printf("LowTs: %d\n", txn.ReadTs())
+		return nil
+	}))
 	log.Println("Bank initialization OK. Commencing test.")
 	log.Printf("Running with %d accounts, and %d goroutines.\n", numAccounts, numGoroutines)
 	log.Printf("Using keyPrefix: %s\n", keyPrefix)
@@ -259,8 +390,9 @@ func runTest(cmd *cobra.Command, args []string) error {
 	dur, err := time.ParseDuration(duration)
 	y.Check(err)
 
+	// startTs := time.Now()
 	endTs := time.Now().Add(dur)
-	var total, success, errors, reads uint64
+	var total, errors, reads uint64
 
 	wg.Add(1)
 	go func() {
@@ -273,11 +405,11 @@ func runTest(cmd *cobra.Command, args []string) error {
 				// Do not proceed.
 				return
 			}
-			log.Printf("Total: %d. Success: %d. Errors: %d Reads: %d.\n",
-				atomic.LoadUint64(&total),
-				atomic.LoadUint64(&success),
-				atomic.LoadUint64(&errors),
-				atomic.LoadUint64(&reads))
+			// log.Printf("[%6s] Total: %d. Errors: %d Reads: %d.\n",
+			// 	time.Since(startTs).Round(time.Second).String(),
+			// 	atomic.LoadUint64(&total),
+			// 	atomic.LoadUint64(&errors),
+			// 	atomic.LoadUint64(&reads))
 			if time.Now().After(endTs) {
 				return
 			}
@@ -301,12 +433,17 @@ func runTest(cmd *cobra.Command, args []string) error {
 				if time.Now().After(endTs) {
 					return
 				}
-				err := moveMoney(db, rand.Intn(numAccounts), rand.Intn(numAccounts))
+				from := rand.Intn(numAccounts)
+				to := rand.Intn(numAccounts)
+				if from == to {
+					continue
+				}
+				err := moveMoney(db, from, to)
 				atomic.AddUint64(&total, 1)
-				if err != nil {
-					atomic.AddUint64(&errors, 1)
+				if err == nil {
+					log.Printf("Moved $5. %d -> %d\n", from, to)
 				} else {
-					atomic.AddUint64(&success, 1)
+					atomic.AddUint64(&errors, 1)
 				}
 			}
 		}()
@@ -320,7 +457,6 @@ func runTest(cmd *cobra.Command, args []string) error {
 		ticker := time.NewTicker(10 * time.Microsecond)
 		defer ticker.Stop()
 
-		var lastOk []account
 		for range ticker.C {
 			if atomic.LoadInt32(&stopAll) > 0 {
 				// Do not proceed.
@@ -329,22 +465,24 @@ func runTest(cmd *cobra.Command, args []string) error {
 			if time.Now().After(endTs) {
 				return
 			}
-			current, err := seekTotal(db)
-			if err == errFailure {
-				log.Printf("FAILURE. Diff: %s", diff(lastOk, current))
 
-			} else if err != nil {
-				log.Printf("Error while calculating total: %v", err)
-			} else {
-				lastOk = current
-				atomic.AddUint64(&reads, 1)
-			}
+			y.Check(db.View(func(txn *badger.Txn) error {
+				_, err := seekTotal(txn)
+				if err != nil {
+					log.Printf("Error while calculating total: %v", err)
+				} else {
+					atomic.AddUint64(&reads, 1)
+				}
+				return nil
+			}))
 		}
 	}()
 	wg.Wait()
 
-	_, err = seekTotal(db)
-	y.Check(err) // One last time.
-	log.Println("Test OK")
+	if atomic.LoadInt32(&stopAll) == 0 {
+		log.Println("Test OK")
+	} else {
+		log.Println("Test FAILED")
+	}
 	return nil
 }
