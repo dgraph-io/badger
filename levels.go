@@ -781,7 +781,7 @@ func (s *levelsController) get(key []byte, maxVs *y.ValueStruct) (y.ValueStruct,
 	// number.)
 	version := y.ParseTs(key)
 	for _, h := range s.levels {
-		vs, err := h.get(key) // Calls h.RLock() and h.RUnlock().
+		vs, err := h.get(key) // Calls h.RLock() and h.RUnlock(). // This returns a copy of valuestruct.
 		if err != nil {
 			return y.ValueStruct{}, errors.Wrapf(err, "get key: %q", key)
 		}
@@ -796,7 +796,7 @@ func (s *levelsController) get(key []byte, maxVs *y.ValueStruct) (y.ValueStruct,
 		}
 	}
 	if maxVs != nil {
-		return *maxVs, nil
+		return maxVs.Copy(), nil
 	}
 	return y.ValueStruct{}, nil
 }
