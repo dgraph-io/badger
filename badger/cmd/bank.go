@@ -77,7 +77,7 @@ func init() {
 	bankTest.Flags().IntVarP(
 		&numGoroutines, "conc", "c", 16, "Number of concurrent transactions to run.")
 	bankTest.Flags().StringVarP(&duration, "duration", "d", "3m", "How long to run the test.")
-	bankDisect.Flags().IntVarP(&numPrevious, "previous", "p", 5,
+	bankDisect.Flags().IntVarP(&numPrevious, "previous", "p", 100,
 		"Starting from the violation txn, how many previous versions to retrieve.")
 }
 
