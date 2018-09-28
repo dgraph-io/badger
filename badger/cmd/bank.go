@@ -73,7 +73,7 @@ func init() {
 	testCmd.AddCommand(bankDisect)
 
 	testCmd.Flags().IntVarP(
-		&numAccounts, "accounts", "a", 1000, "Number of accounts in the bank.")
+		&numAccounts, "accounts", "a", 10000, "Number of accounts in the bank.")
 	bankTest.Flags().IntVarP(
 		&numGoroutines, "conc", "c", 16, "Number of concurrent transactions to run.")
 	bankTest.Flags().StringVarP(&duration, "duration", "d", "3m", "How long to run the test.")
