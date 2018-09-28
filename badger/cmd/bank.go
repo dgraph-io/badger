@@ -59,7 +59,7 @@ failure of the total invariant.
 	RunE: runDisect,
 }
 
-var numGoroutines, numAccounts int
+var numGoroutines, numAccounts, numPrevious int
 var duration string
 var stopAll int32
 
@@ -73,10 +73,12 @@ func init() {
 	testCmd.AddCommand(bankDisect)
 
 	testCmd.Flags().IntVarP(
-		&numAccounts, "accounts", "a", 100000, "Number of accounts in the bank.")
+		&numAccounts, "accounts", "a", 1000, "Number of accounts in the bank.")
 	bankTest.Flags().IntVarP(
 		&numGoroutines, "conc", "c", 16, "Number of concurrent transactions to run.")
 	bankTest.Flags().StringVarP(&duration, "duration", "d", "3m", "How long to run the test.")
+	bankDisect.Flags().IntVarP(&numPrevious, "previous", "p", 5,
+		"Starting from the violation txn, how many previous versions to retrieve.")
 }
 
 func key(account int) []byte {
@@ -341,13 +343,15 @@ func runDisect(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	compareTwo(db, ts-1, ts)
-	compareTwo(db, ts-2, ts-1)
-	compareTwo(db, ts-3, ts-2)
+	for i := 0; i < numPrevious; i++ {
+		compareTwo(db, ts-1-uint64(i), ts-uint64(i))
+	}
 	return nil
 }
 
 func runTest(cmd *cobra.Command, args []string) error {
+	rand.Seed(time.Now().UnixNano())
+
 	// Open DB
 	opts := badger.DefaultOptions
 	opts.Dir = sstDir
