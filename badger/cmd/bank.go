@@ -63,7 +63,7 @@ var numGoroutines, numAccounts, numPrevious int
 var duration string
 var stopAll int32
 
-var keyPrefix = "account:"
+const keyPrefix = "account:"
 
 const initialBal uint64 = 100
 
@@ -356,7 +356,9 @@ func runTest(cmd *cobra.Command, args []string) error {
 	opts := badger.DefaultOptions
 	opts.Dir = sstDir
 	opts.ValueDir = vlogDir
-	opts.MaxTableSize = 8 << 20 // Force more compactions.
+	opts.MaxTableSize = 4 << 20 // Force more compactions.
+	opts.NumLevelZeroTables = 2
+	opts.NumMemtables = 2
 	// Do not GC any versions, because we need them for the disect.
 	opts.NumVersionsToKeep = int(math.MaxInt32)
 	// opts.ValueThreshold = 1 // Make all values go to value log.
