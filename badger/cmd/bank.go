@@ -488,8 +488,9 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 	if atomic.LoadInt32(&stopAll) == 0 {
 		log.Println("Test OK")
+		return nil
 	} else {
 		log.Println("Test FAILED")
+		return fmt.Errorf("Test FAILED")
 	}
-	return nil
 }
