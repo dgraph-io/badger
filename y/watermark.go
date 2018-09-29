@@ -178,6 +178,7 @@ func (w *WaterMark) process() {
 			for _, ch := range toNotify {
 				close(ch)
 			}
+			delete(waiters, i) // Release the memory back.
 		}
 		if until != doneUntil {
 			AssertTrue(atomic.CompareAndSwapUint64(&w.doneUntil, doneUntil, until))
