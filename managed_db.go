@@ -42,7 +42,11 @@ func OpenManaged(opts Options) (*DB, error) {
 // This is only useful for databases built on top of Badger (like Dgraph), and
 // can be ignored by most users.
 func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
-	if !db.opt.ManagedTxns {
+	// Can't use this function if:
+	//     - the database is not managed AND update is true
+	// OR
+	//     - the database is not managed AND the readTs is zero.
+	if !db.opt.ManagedTxns && update || !db.opt.ManagedTxns && readTs == 0 {
 		panic("Cannot use NewTransactionAt with ManagedTxns=false. Use NewTransaction instead.")
 	}
 	txn := db.NewTransaction(update)

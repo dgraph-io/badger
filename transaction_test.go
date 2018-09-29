@@ -842,3 +842,106 @@ func TestArmV7Issue311Fix(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTxnConcurrentIterators(t *testing.T) {
+	dir, err := ioutil.TempDir("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	config := DefaultOptions
+	config.Dir = dir
+	config.ValueDir = dir
+
+	db, err := Open(config)
+	if err != nil {
+		t.Fatalf("cannot open db at location %s: %v", dir, err)
+	}
+
+	dataSlice1 := [][2][]byte{
+		[2][]byte{[]byte{1}, []byte("val-1")},
+		[2][]byte{[]byte{2}, []byte("val-2")},
+		[2][]byte{[]byte{3}, []byte("val-3")},
+		[2][]byte{[]byte{4}, []byte("val-4")},
+		[2][]byte{[]byte{5}, []byte("val-5")},
+	}
+	dataSlice2 := [][2][]byte{
+		[2][]byte{[]byte{6}, []byte("val-6")},
+		[2][]byte{[]byte{7}, []byte("val-7")},
+		[2][]byte{[]byte{8}, []byte("val-8")},
+		[2][]byte{[]byte{9}, []byte("val-9")},
+		[2][]byte{[]byte{10}, []byte("val-10")},
+	}
+	addFunc := func(txn *Txn, sliceValue [][2][]byte) {
+		for _, v := range sliceValue {
+			txn.Set(v[0], v[1])
+		}
+	}
+
+	db.Update(func(txn *Txn) error {
+		addFunc(txn, dataSlice1)
+		return nil
+	})
+
+	txn1 := db.NewTransaction(true)
+	defer txn1.Discard()
+	// Add new values
+	addFunc(txn1, dataSlice2)
+	// Save the changes
+	txn1.Commit(nil)
+
+	txn2 := db.NewTransactionAt(txn1.GetReadTimestamp(), false)
+	defer txn2.Discard()
+	iter1 := txn2.NewIterator(DefaultIteratorOptions)
+	defer iter1.Close()
+
+	testExpectedData := func(iter *Iterator, data [2][]byte) error {
+		var key, val []byte
+		item := iter.Item()
+		key = item.Key()
+		val, _ = item.ValueCopy(val)
+
+		if fmt.Sprintf("%X", data[0]) != fmt.Sprintf("%X", key) {
+			return fmt.Errorf("expected key %X but had %X", data[0], key)
+		}
+		if fmt.Sprintf("%X", data[1]) != fmt.Sprintf("%X", val) {
+			return fmt.Errorf("expected key %X but had %X", data[1], val)
+		}
+		return nil
+	}
+
+	// Test data
+	nbReaded := 0
+	for iter1.Rewind(); iter1.Valid(); iter1.Next() {
+		if err := testExpectedData(iter1, dataSlice1[nbReaded]); err != nil {
+			t.Error(err)
+		}
+
+		nbReaded++
+	}
+	// Must read only 5
+	if nbReaded != 5 {
+		t.Errorf("iterator must read 5 elements but had %d", nbReaded)
+	}
+
+	txn3 := db.NewTransaction(false)
+	defer txn3.Discard()
+	iter2 := txn3.NewIterator(DefaultIteratorOptions)
+	defer iter2.Close()
+
+	nbReaded = 0
+	for iter2.Rewind(); iter2.Valid(); iter2.Next() {
+		if nbReaded < len(dataSlice1) {
+			testExpectedData(iter2, dataSlice1[nbReaded])
+		} else {
+			testExpectedData(iter2, dataSlice2[nbReaded-len(dataSlice1)])
+		}
+
+		nbReaded++
+	}
+	// Must read the all database (10)
+	if nbReaded != 10 {
+		t.Errorf("iterator must read 10 elements but had %d", nbReaded)
+	}
+}
