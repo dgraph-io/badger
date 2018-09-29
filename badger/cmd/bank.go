@@ -361,7 +361,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	opts.NumMemtables = 2
 	// Do not GC any versions, because we need them for the disect.
 	opts.NumVersionsToKeep = int(math.MaxInt32)
-	// opts.ValueThreshold = 1 // Make all values go to value log.
+	opts.ValueThreshold = 1 // Make all values go to value log.
 
 	db, err := badger.Open(opts)
 	if err != nil {
