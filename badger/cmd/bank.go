@@ -18,12 +18,12 @@ package cmd
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
 	"math"
 	"math/rand"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -77,28 +77,28 @@ func init() {
 	bankTest.Flags().IntVarP(
 		&numGoroutines, "conc", "c", 16, "Number of concurrent transactions to run.")
 	bankTest.Flags().StringVarP(&duration, "duration", "d", "3m", "How long to run the test.")
-	bankDisect.Flags().IntVarP(&numPrevious, "previous", "p", 100,
+	bankDisect.Flags().IntVarP(&numPrevious, "previous", "p", 12,
 		"Starting from the violation txn, how many previous versions to retrieve.")
 }
 
 func key(account int) []byte {
-	var b [4]byte
-	binary.BigEndian.PutUint32(b[:], uint32(account))
-	return append([]byte(keyPrefix), b[:]...)
+	return []byte(fmt.Sprintf("%s%s", keyPrefix, strconv.Itoa(account)))
 }
 
 func toAccount(key []byte) int {
-	return int(binary.BigEndian.Uint32(key[len(keyPrefix):]))
+	i, err := strconv.Atoi(string(key[len(keyPrefix):]))
+	y.Check(err)
+	return i
 }
 
 func toUint64(val []byte) uint64 {
-	return binary.BigEndian.Uint64(val)
+	u, err := strconv.ParseUint(string(val), 10, 64)
+	y.Check(err)
+	return uint64(u)
 }
 
 func toSlice(bal uint64) []byte {
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, bal)
-	return b
+	return []byte(strconv.FormatUint(bal, 10))
 }
 
 func getBalance(txn *badger.Txn, account int) (uint64, error) {
@@ -356,6 +356,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	opts := badger.DefaultOptions
 	opts.Dir = sstDir
 	opts.ValueDir = vlogDir
+	opts.MaxTableSize = 8 << 20 // Force more compactions.
 	// Do not GC any versions, because we need them for the disect.
 	opts.NumVersionsToKeep = int(math.MaxInt32)
 	// opts.ValueThreshold = 1 // Make all values go to value log.

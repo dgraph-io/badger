@@ -76,6 +76,7 @@ func (o *oracle) decrRef() {
 	if atomic.AddInt64(&o.refCount, -1) != 0 {
 		return
 	}
+
 	// Clear out commits maps to release memory.
 	o.Lock()
 	defer o.Unlock()
@@ -137,6 +138,8 @@ func (o *oracle) hasConflict(txn *Txn) bool {
 		return false
 	}
 	for _, ro := range txn.reads {
+		// A commit at the read timestamp is expected.
+		// But, any commit after the read timestamp should cause a conflict.
 		if ts, has := o.commits[ro]; has && ts > txn.readTs {
 			return true
 		}
@@ -495,14 +498,23 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 		return nil, ErrConflict
 	}
 
+	// The following debug information is what led to determining the cause of
+	// bank txn violation bug, and it took a whole bunch of effort to narrow it
+	// down to here. So, keep this around for at least a couple of months.
+	// var b strings.Builder
+	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
+	// 	txn.readTs, commitTs, txn.reads, txn.writes)
 	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
 	for _, e := range txn.pendingWrites {
+		// fmt.Fprintf(&b, "[%q : %q], ", e.Key, e.Value)
+
 		// Suffix the keys with commit ts, so the key versions are sorted in
 		// descending order of commit timestamp.
 		e.Key = y.KeyWithTs(e.Key, commitTs)
 		e.meta |= bitTxn
 		entries = append(entries, e)
 	}
+	// log.Printf("%s\n", b.String())
 	e := &Entry{
 		Key:   y.KeyWithTs(txnKey, commitTs),
 		Value: []byte(strconv.FormatUint(commitTs, 10)),
@@ -614,7 +626,6 @@ func (db *DB) NewTransaction(update bool) *Txn {
 	txn := &Txn{
 		update: update,
 		db:     db,
-		readTs: db.orc.readTs(),
 		count:  1,                       // One extra entry for BitFin.
 		size:   int64(len(txnKey) + 10), // Some buffer for the extra entry.
 	}
@@ -622,6 +633,19 @@ func (db *DB) NewTransaction(update bool) *Txn {
 		txn.pendingWrites = make(map[string]*Entry)
 		txn.db.orc.addRef()
 	}
+	// It is important that the oracle addRef happens BEFORE we retrieve a read
+	// timestamp. Otherwise, it is possible that the oracle commit map would
+	// become nil after we get the read timestamp.
+	// The sequence of events can be:
+	// 1. This txn gets a read timestamp.
+	// 2. Another txn working on the same keyset commits them, and decrements
+	//    the reference to oracle.
+	// 3. Oracle ref reaches zero, resetting commit map.
+	// 4. This txn increments the oracle reference.
+	// 5. Now this txn would go on to commit the keyset, and no conflicts
+	//    would be detected.
+	// See issue: https://github.com/dgraph-io/badger/issues/574
+	txn.readTs = db.orc.readTs()
 	return txn
 }
 
