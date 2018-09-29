@@ -35,19 +35,6 @@ type ValueStruct struct {
 	Version uint64 // This field is not serialized. Only for internal usage.
 }
 
-func (vs *ValueStruct) Copy() ValueStruct {
-	out := ValueStruct{
-		Meta:      vs.Meta,
-		UserMeta:  vs.UserMeta,
-		ExpiresAt: vs.ExpiresAt,
-		Version:   vs.Version,
-	}
-	if vs.Value != nil {
-		out.Value = append([]byte{}, vs.Value...)
-	}
-	return out
-}
-
 func sizeVarint(x uint64) (n int) {
 	for {
 		n++

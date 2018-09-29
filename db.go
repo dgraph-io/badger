@@ -516,7 +516,7 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 		// Found a version of the key. For user keyspace, return immediately. For move keyspace,
 		// continue iterating, unless we found a version == given key version.
 		if maxVs == nil || vs.Version == version {
-			return vs.Copy(), nil
+			return vs, nil
 		}
 		if maxVs.Version < vs.Version {
 			*maxVs = vs

@@ -63,7 +63,7 @@ var numGoroutines, numAccounts, numPrevious int
 var duration string
 var stopAll int32
 
-const keyPrefix = "account:"
+var keyPrefix = "account:"
 
 const initialBal uint64 = 100
 

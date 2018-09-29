@@ -261,7 +261,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 			}
 		}
 	}
-	return maxVs.Copy(), decr()
+	return maxVs, decr()
 }
 
 // appendIterators appends iterators to an array of iterators, for merging.
