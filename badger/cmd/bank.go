@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/spf13/cobra"
 )
@@ -62,6 +63,7 @@ failure of the total invariant.
 var numGoroutines, numAccounts, numPrevious int
 var duration string
 var stopAll int32
+var mmap bool
 
 const keyPrefix = "account:"
 
@@ -77,6 +79,7 @@ func init() {
 	bankTest.Flags().IntVarP(
 		&numGoroutines, "conc", "c", 16, "Number of concurrent transactions to run.")
 	bankTest.Flags().StringVarP(&duration, "duration", "d", "3m", "How long to run the test.")
+	bankTest.Flags().BoolVarP(&mmap, "mmap", "m", false, "If true, mmap LSM tree. Default is RAM.")
 	bankDisect.Flags().IntVarP(&numPrevious, "previous", "p", 12,
 		"Starting from the violation txn, how many previous versions to retrieve.")
 }
@@ -362,6 +365,10 @@ func runTest(cmd *cobra.Command, args []string) error {
 	// Do not GC any versions, because we need them for the disect.
 	opts.NumVersionsToKeep = int(math.MaxInt32)
 	opts.ValueThreshold = 1 // Make all values go to value log.
+	if mmap {
+		opts.TableLoadingMode = options.MemoryMap
+	}
+	log.Printf("Opening DB with options: %+v\n", opts)
 
 	db, err := badger.Open(opts)
 	if err != nil {
