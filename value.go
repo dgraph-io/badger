@@ -489,7 +489,7 @@ func (vlog *valueLog) deleteMoveKeysFor(fid uint32, tr trace.Trace) error {
 			var vp valuePointer
 			vp.Decode(item.vptr)
 			if vp.Fid == fid {
-				e := &Entry{Key: item.KeyCopy(nil), meta: bitDelete}
+				e := &Entry{Key: y.KeyWithTs(item.Key(), item.Version()), meta: bitDelete}
 				result = append(result, e)
 			}
 		}
