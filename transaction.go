@@ -57,7 +57,7 @@ type oracle struct {
 
 func newOracle(opt Options) *oracle {
 	orc := &oracle{
-		isManaged: opt.ManagedTxns,
+		isManaged: opt.managedTxns,
 		commits:   make(map[uint64]uint64),
 		// We're not initializing nextTxnTs and readOnlyTs. It would be done after replay in Open.
 		readMark: y.WaterMark{Name: "badger.PendingReads"},
@@ -557,8 +557,8 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit(callback func(error)) error {
-	if txn.commitTs == 0 && txn.db.opt.ManagedTxns {
-		panic("Commit cannot be called with ManagedTxns=true. Use CommitAt.")
+	if txn.commitTs == 0 && txn.db.opt.managedTxns {
+		panic("Commit cannot be called with managedDB=true. Use CommitAt.")
 	}
 	if txn.discarded {
 		return ErrDiscardedTxn
@@ -654,7 +654,7 @@ func (db *DB) NewTransaction(update bool) *Txn {
 // If View is used with managed transactions, it would assume a read timestamp of MaxUint64.
 func (db *DB) View(fn func(txn *Txn) error) error {
 	var txn *Txn
-	if db.opt.ManagedTxns {
+	if db.opt.managedTxns {
 		txn = db.NewTransactionAt(math.MaxUint64, false)
 	} else {
 		txn = db.NewTransaction(false)
@@ -668,8 +668,8 @@ func (db *DB) View(fn func(txn *Txn) error) error {
 // for the user. Error returned by the function is relayed by the Update method.
 // Update cannot be used with managed transactions.
 func (db *DB) Update(fn func(txn *Txn) error) error {
-	if db.opt.ManagedTxns {
-		panic("Update can only be used with ManagedTxns=false.")
+	if db.opt.managedTxns {
+		panic("Update can only be used with managedDB=false.")
 	}
 	txn := db.NewTransaction(true)
 	defer txn.Discard()

@@ -1088,8 +1088,8 @@ func (seq *Sequence) updateLease() error {
 //
 // GetSequence is not supported on ManagedDB. Calling this would result in a panic.
 func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
-	if db.opt.ManagedTxns {
-		panic("Cannot use GetSequence with ManagedTxns=true.")
+	if db.opt.managedTxns {
+		panic("Cannot use GetSequence with managedDB=true.")
 	}
 
 	switch {

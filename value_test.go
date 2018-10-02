@@ -95,7 +95,7 @@ func TestValueGCManaged(t *testing.T) {
 	N := 10000
 	opt := getTestOptions(dir)
 	opt.ValueLogMaxEntries = uint32(N / 10)
-	opt.ManagedTxns = true
+	opt.managedTxns = true
 	db, err := Open(opt)
 	require.NoError(t, err)
 	defer db.Close()

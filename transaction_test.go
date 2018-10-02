@@ -714,7 +714,7 @@ func TestManagedDB(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	opt := getTestOptions(dir)
-	opt.ManagedTxns = true
+	opt.managedTxns = true
 	db, err := Open(opt)
 	require.NoError(t, err)
 	defer db.Close()

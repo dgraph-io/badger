@@ -300,7 +300,7 @@ func TestForceCompactL0(t *testing.T) {
 
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 15 << 20
-	opts.ManagedTxns = true
+	opts.managedTxns = true
 	db, err := Open(opts)
 	require.NoError(t, err)
 
@@ -321,7 +321,7 @@ func TestForceCompactL0(t *testing.T) {
 	}
 	db.Close()
 
-	opts.ManagedTxns = true
+	opts.managedTxns = true
 	db, err = Open(opts)
 	defer db.Close()
 	require.Equal(t, len(db.lc.levels[0].tables), 0)
