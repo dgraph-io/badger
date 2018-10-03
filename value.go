@@ -126,11 +126,12 @@ func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 		n, err = lf.fd.ReadAt(buf, int64(offset))
 		nbr = int64(n)
 	} else {
-		ln := len(lf.fmap)
-		size := uint32(ln)
+		// Do not convert size to uint32, because the lf.fmap can be of size
+		// 4GB, which overflows the uint32 during conversion to make the size 0,
+		// causing the read to fail with ErrEOF. See issue #585.
+		size := int64(len(lf.fmap))
 		valsz := p.Len
-		if offset >= size || offset+valsz > size {
-			fmt.Printf("offset=%d. size=%d. valsz=%d len(fp.fmap)=%d\n", offset, size, valsz, len(lf.fmap))
+		if int64(offset) >= size || int64(offset+valsz) > size {
 			err = y.ErrEOF
 		} else {
 			buf = lf.fmap[offset : offset+valsz]
