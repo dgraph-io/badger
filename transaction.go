@@ -19,6 +19,7 @@ package badger
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"math"
 	"sort"
 	"strconv"
@@ -352,7 +353,14 @@ func (txn *Txn) SetWithTTL(key, val []byte, dur time.Duration) error {
 	return txn.SetEntry(e)
 }
 
+func exceedsSize(prefix string, max int64, key []byte) error {
+	return errors.Errorf("%s with size %d exceeded %d limit. %s:\n%s",
+		prefix, len(key), max, prefix, hex.Dump(key[:1<<10]))
+}
+
 func (txn *Txn) modify(e *Entry) error {
+	const maxKeySize = 65000
+
 	switch {
 	case !txn.update:
 		return ErrReadOnlyTxn
@@ -363,9 +371,12 @@ func (txn *Txn) modify(e *Entry) error {
 	case bytes.HasPrefix(e.Key, badgerPrefix):
 		return ErrInvalidKey
 	case len(e.Key) > maxKeySize:
-		return exceedsMaxKeySizeError(e.Key)
+		// Key length can't be more than uint16, as determined by table::header.  To
+		// keep things safe and allow badger move prefix and a timestamp suffix, let's
+		// cut it down to 65000, instead of using 65536.
+		return exceedsSize("Key", maxKeySize, e.Key)
 	case int64(len(e.Value)) > txn.db.opt.ValueLogFileSize:
-		return exceedsMaxValueSizeError(e.Value, txn.db.opt.ValueLogFileSize)
+		return exceedsSize("Value", txn.db.opt.ValueLogFileSize, e.Value)
 	}
 
 	if err := txn.checkSize(e); err != nil {
