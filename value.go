@@ -126,9 +126,11 @@ func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 		n, err = lf.fd.ReadAt(buf, int64(offset))
 		nbr = int64(n)
 	} else {
-		size := uint32(len(lf.fmap))
+		ln := len(lf.fmap)
+		size := uint32(ln)
 		valsz := p.Len
 		if offset >= size || offset+valsz > size {
+			fmt.Printf("offset=%d. size=%d. valsz=%d len(fp.fmap)=%d\n", offset, size, valsz, len(lf.fmap))
 			err = y.ErrEOF
 		} else {
 			buf = lf.fmap[offset : offset+valsz]
