@@ -878,6 +878,47 @@ func TestBigKeyValuePairs(t *testing.T) {
 	})
 }
 
+// The following test checks for issue #585.
+func TestPushValueLogLimit(t *testing.T) {
+	opt := DefaultOptions
+	opt.ValueLogMaxEntries = 64
+	opt.ValueLogFileSize = 2 << 30
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		data := []byte(fmt.Sprintf("%30d", 1))
+		key := func(i int) string {
+			return fmt.Sprintf("%100d", i)
+		}
+
+		for i := 0; i < 32; i++ {
+			if i == 4 {
+				v := make([]byte, 2<<30)
+				err := db.Update(func(txn *Txn) error {
+					return txn.Set([]byte(key(i)), v)
+				})
+				require.NoError(t, err)
+			} else {
+				err := db.Update(func(txn *Txn) error {
+					return txn.Set([]byte(key(i)), data)
+				})
+				require.NoError(t, err)
+			}
+		}
+
+		for i := 0; i < 32; i++ {
+			err := db.View(func(txn *Txn) error {
+				item, err := txn.Get([]byte(key(i)))
+				require.NoError(t, err, "Getting key: %s", key(i))
+				err = item.Value(func(v []byte) {
+					_ = v
+				})
+				require.NoError(t, err, "Getting value: %s", key(i))
+				return nil
+			})
+			require.NoError(t, err)
+		}
+	})
+}
+
 func TestIteratorPrefetchSize(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 
