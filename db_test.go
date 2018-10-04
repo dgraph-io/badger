@@ -55,7 +55,9 @@ func getTestOptions(dir string) Options {
 }
 
 func getItemValue(t *testing.T, item *Item) (val []byte) {
+	t.Helper()
 	var v []byte
+	size := item.ValueSize()
 	err := item.Value(func(val []byte) error {
 		if val == nil {
 			v = nil
@@ -66,6 +68,9 @@ func getItemValue(t *testing.T, item *Item) (val []byte) {
 	})
 	if err != nil {
 		t.Error(err)
+	}
+	if int64(len(v)) != size {
+		t.Errorf("incorrect size: expected %d, got %d", len(v), size)
 	}
 	if v == nil {
 		return nil

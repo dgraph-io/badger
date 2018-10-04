@@ -19,6 +19,7 @@ package badger
 import (
 	"bytes"
 	"fmt"
+	"hash/crc32"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -242,6 +243,22 @@ func (item *Item) EstimatedSize() int64 {
 	var vp valuePointer
 	vp.Decode(item.vptr)
 	return int64(vp.Len) // includes key length.
+}
+
+// ValueSize returns the exact size of the value.
+//
+// This can be called to quickly estimate the size of a value without fetching
+// it.
+func (item *Item) ValueSize() int64 {
+	if !item.hasValue() {
+		return 0
+	}
+	if (item.meta & bitValuePointer) == 0 {
+		return int64(len(item.vptr))
+	}
+	var vp valuePointer
+	vp.Decode(item.vptr)
+	return int64(vp.Len) - int64(len(item.key)) - headerBufSize - crc32.Size - 8 // len(uint64) (timestamp)
 }
 
 // UserMeta returns the userMeta set by the user. Typically, this byte, optionally set by the user
