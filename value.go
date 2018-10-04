@@ -24,7 +24,6 @@ import (
 	"hash/crc32"
 	"io"
 	"io/ioutil"
-	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -35,6 +34,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dgraph-io/badger/debug"
 	"github.com/dgraph-io/badger/options"
 
 	"github.com/dgraph-io/badger/y"
@@ -403,7 +403,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 				wb = wb[:0]
 			}
 		} else {
-			log.Printf("WARNING: This entry should have been caught. %+v\n", e)
+			debug.Printf("WARNING: This entry should have been caught. %+v\n", e)
 		}
 		return nil
 	}
@@ -421,7 +421,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 	for i := 0; i < len(wb); {
 		loops++
 		if batchSize == 0 {
-			log.Printf("WARNING: We shouldn't reach batch size of zero.")
+			debug.Printf("WARNING: We shouldn't reach batch size of zero.")
 			return ErrNoRewrite
 		}
 		end := i + batchSize
@@ -700,7 +700,7 @@ func (vlog *valueLog) Open(kv *DB, opt Options) error {
 		return errors.Wrapf(err, "Unable to open value log")
 	}
 
-	vlog.elog = trace.NewEventLog("Badger", "Valuelog")
+	vlog.elog = debug.NewEventLog("Badger", "Valuelog")
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 	vlog.lfDiscardStats = &lfDiscardStats{m: make(map[uint32]int64)}
 	return nil

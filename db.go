@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"expvar"
-	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -29,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dgraph-io/badger/debug"
 	"github.com/dgraph-io/badger/options"
 
 	"golang.org/x/net/trace"
@@ -248,7 +248,7 @@ func Open(opt Options) (db *DB, err error) {
 		writeCh:       make(chan *request, kvWriteChCapacity),
 		opt:           opt,
 		manifest:      manifestFile,
-		elog:          trace.NewEventLog("Badger", "DB"),
+		elog:          debug.NewEventLog("Badger", "DB"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
 		orc:           newOracle(opt),
@@ -670,7 +670,7 @@ func (db *DB) doWrites(lc *y.Closer) {
 
 	writeRequests := func(reqs []*request) {
 		if err := db.writeRequests(reqs); err != nil {
-			log.Printf("ERROR in Badger::writeRequests: %v", err)
+			debug.Printf("ERROR in Badger::writeRequests: %v", err)
 		}
 		<-pendingCh
 	}
@@ -890,7 +890,7 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 				break
 			}
 			// Encounterd error. Retry indefinitely.
-			log.Printf("Error while flushing memtable to disk: %v. Retrying...\n", err)
+			debug.Printf("Error while flushing memtable to disk: %v. Retrying...\n", err)
 			time.Sleep(time.Second)
 		}
 	}
@@ -1247,7 +1247,7 @@ func (op *MergeOperator) runCompactions(dur time.Duration) {
 		case <-ticker.C: // wait for tick
 		}
 		if err := op.compact(); err != nil {
-			log.Printf("Error while running merge operation: %s", err)
+			debug.Printf("Error while running merge operation: %s", err)
 		}
 		if stop {
 			ticker.Stop()

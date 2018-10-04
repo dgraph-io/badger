@@ -21,6 +21,7 @@ import (
 	"context"
 	"sync/atomic"
 
+	"github.com/dgraph-io/badger/debug"
 	"golang.org/x/net/trace"
 )
 
@@ -66,7 +67,7 @@ type WaterMark struct {
 // Init initializes a WaterMark struct. MUST be called before using it.
 func (w *WaterMark) Init() {
 	w.markCh = make(chan mark, 100)
-	w.elog = trace.NewEventLog("Watermark", w.Name)
+	w.elog = debug.NewEventLog("Watermark", w.Name)
 	go w.process()
 }
 
