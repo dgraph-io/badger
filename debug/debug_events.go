@@ -22,13 +22,13 @@ import (
 	"golang.org/x/net/trace"
 )
 
-type EventLog struct {
-	elog trace.EventLog
-}
-
 func Printf(format string, v ...interface{}) {}
 
 func Println(v ...interface{}) {}
+
+type EventLog struct {
+	elog trace.EventLog
+}
 
 func (e *EventLog) Printf(fmt string, a ...interface{}) {
 	e.elog.Printf(fmt, a...)

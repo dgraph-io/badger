@@ -20,20 +20,21 @@ package debug
 
 import (
 	"log"
+	"os"
 
 	"golang.org/x/net/trace"
 )
 
-type EventLog struct {
-	elog trace.EventLog
-}
-
 func Printf(format string, v ...interface{}) {
-	log.Printf(format, v...)
+	StdLog.Printf(format, v...)
 }
 
 func Println(v ...interface{}) {
-	log.Println(v...)
+	StdLog.Println(v...)
+}
+
+type EventLog struct {
+	elog trace.EventLog
 }
 
 func (e *EventLog) Printf(fmt string, a ...interface{}) {
@@ -50,4 +51,9 @@ func (e *EventLog) Finish() {
 
 func NewEventLog(family, title string) *EventLog {
 	return &EventLog{elog: trace.NewEventLog(family, title)}
+}
+
+func init() {
+	// this is set for compatibility.
+	StdLog = log.New(os.Stderr, "", log.LstdFlags)
 }
