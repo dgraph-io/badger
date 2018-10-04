@@ -258,7 +258,9 @@ func (item *Item) ValueSize() int64 {
 	}
 	var vp valuePointer
 	vp.Decode(item.vptr)
-	return int64(vp.Len) - int64(len(item.key)) - headerBufSize - crc32.Size - 8 // len(uint64) (timestamp)
+
+	klen := int64(len(item.key) + 8) // 8 bytes for timestamp.
+	return int64(vp.Len) - klen - headerBufSize - crc32.Size
 }
 
 // UserMeta returns the userMeta set by the user. Typically, this byte, optionally set by the user
