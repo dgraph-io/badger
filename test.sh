@@ -1,9 +1,11 @@
+set -e
+
 # Run the memory intensive tests first.
 go test -v --manual=true -run='TestBigKeyValuePairs$'
 go test -v --manual=true -run='TestPushValueLogLimit'
 
 # Run the special Truncate test.
-rm -R p
+rm -R p || true
 go test -v --manual=true -run='TestTruncateVlogNoClose$' .
 truncate --size=4096 p/000000.vlog
 go test -v --manual=true -run='TestTruncateVlogNoClose2$' .
