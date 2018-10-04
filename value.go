@@ -251,25 +251,24 @@ func (r *safeRead) Entry(reader *bufio.Reader) (*Entry, error) {
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
-func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
+func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, error) {
 	fi, err := lf.fd.Stat()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if int64(offset) == fi.Size() {
 		// We're at the end of the file already. No need to do anything.
-		return nil
+		return offset, nil
 	}
-
 	if vlog.opt.ReadOnly {
 		// We're not at the end of the file. We'd need to replay the entries, or
 		// possibly truncate the file.
-		return ErrReplayNeeded
+		return 0, ErrReplayNeeded
 	}
 
 	// We're not at the end of the file. Let's Seek to the offset and start reading.
 	if _, err := lf.fd.Seek(int64(offset), io.SeekStart); err != nil {
-		return y.Wrap(err)
+		return 0, y.Wrap(err)
 	}
 
 	reader := bufio.NewReader(lf.fd)
@@ -288,7 +287,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		} else if err == io.ErrUnexpectedEOF || err == errTruncate {
 			break
 		} else if err != nil {
-			return err
+			return 0, err
 		} else if e == nil {
 			continue
 		}
@@ -331,24 +330,10 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 			if err == errStop {
 				break
 			}
-			return y.Wrap(err)
+			return 0, y.Wrap(err)
 		}
 	}
-
-	if int64(validEndOffset) == fi.Size() {
-		return nil
-	}
-	y.AssertTrue(int64(validEndOffset) <= fi.Size())
-	fmt.Printf("Time to truncate. validendoffset: %d. size: %d\n", validEndOffset, fi.Size())
-	switch {
-	case !vlog.opt.Truncate:
-		return ErrTruncateNeeded
-	case len(lf.fmap) > 0:
-		// Only truncate if the file isn't mmaped. Otherwise, Windows would puke.
-		return ErrTruncateNeeded
-	default:
-		return lf.fd.Truncate(int64(validEndOffset))
-	}
+	return validEndOffset, nil
 }
 
 func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
@@ -423,7 +408,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 		return nil
 	}
 
-	err := vlog.iterate(f, 0, func(e Entry, vp valuePointer) error {
+	_, err := vlog.iterate(f, 0, func(e Entry, vp valuePointer) error {
 		return fe(e)
 	})
 	if err != nil {
@@ -783,13 +768,34 @@ func (vlog *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 		if id > fid {
 			of = 0
 		}
-		f := vlog.filesMap[id]
+		lf := vlog.filesMap[id]
 		vlog.elog.Printf("Iterating file id: %d", id)
 		now := time.Now()
-		err := vlog.iterate(f, of, fn)
+		fi, err := lf.fd.Stat()
+		if err != nil {
+			return err
+		}
+		validEndOffset, err := vlog.iterate(lf, of, fn)
+		if err != nil {
+			return errors.Wrapf(err, "Unable to replay value log: %q", lf.path)
+		}
+		if int64(validEndOffset) != fi.Size() {
+			y.AssertTrue(int64(validEndOffset) <= fi.Size())
+			switch {
+			case !vlog.opt.Truncate:
+				return ErrTruncateNeeded
+			case len(lf.fmap) > 0:
+				// Only truncate if the file isn't mmaped. Otherwise, Windows would puke.
+				return ErrTruncateNeeded
+			default:
+				if err := lf.fd.Truncate(int64(validEndOffset)); err != nil {
+					return errors.Wrapf(err, "Unable to truncate file: %q", lf.path)
+				}
+			}
+		}
 		vlog.elog.Printf("Iteration took: %s\n", time.Since(now))
 		if err != nil {
-			return errors.Wrapf(err, "Unable to replay value log: %q", f.path)
+			return errors.Wrapf(err, "Unable to replay value log: %q", lf.path)
 		}
 	}
 
@@ -1110,7 +1116,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	y.AssertTrue(vlog.kv != nil)
 	s := new(y.Slice)
 	var numIterations int
-	err = vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
+	_, err = vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
 		numIterations++
 		esz := float64(vp.Len) / (1 << 20) // in MBs.
 		if skipped < skipFirstM {
