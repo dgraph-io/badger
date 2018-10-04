@@ -111,8 +111,9 @@ func getBalance(txn *badger.Txn, account int) (uint64, error) {
 	}
 
 	var bal uint64
-	err = item.Value(func(v []byte) {
+	err = item.Value(func(v []byte) error {
 		bal = toUint64(v)
+		return nil
 	})
 	return bal, err
 }
