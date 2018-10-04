@@ -83,6 +83,7 @@ func (lf *logFile) openReadOnly() error {
 	if err != nil {
 		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
 	}
+	y.AssertTrue(fi.Size() <= math.MaxUint32)
 	lf.size = uint32(fi.Size())
 
 	if err = lf.mmap(fi.Size()); err != nil {
@@ -251,8 +252,23 @@ func (r *safeRead) Entry(reader *bufio.Reader) (*Entry, error) {
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
 func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
-	_, err := lf.fd.Seek(int64(offset), io.SeekStart)
+	fi, err := lf.fd.Stat()
 	if err != nil {
+		return err
+	}
+	if int64(offset) == fi.Size() {
+		// We're at the end of the file already. No need to do anything.
+		return nil
+	}
+
+	if vlog.opt.ReadOnly {
+		// We're not at the end of the file. We'd need to replay the entries, or
+		// possibly truncate the file.
+		return ErrReplayNeeded
+	}
+
+	// We're not at the end of the file. Let's Seek to the offset and start reading.
+	if _, err := lf.fd.Seek(int64(offset), io.SeekStart); err != nil {
 		return y.Wrap(err)
 	}
 
@@ -263,7 +279,6 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		recordOffset: offset,
 	}
 
-	truncate := false
 	var lastCommit uint64
 	var validEndOffset uint32
 	for {
@@ -271,7 +286,6 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		if err == io.EOF {
 			break
 		} else if err == io.ErrUnexpectedEOF || err == errTruncate {
-			truncate = true
 			break
 		} else if err != nil {
 			return err
@@ -292,14 +306,12 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 				lastCommit = txnTs
 			}
 			if lastCommit != txnTs {
-				truncate = true
 				break
 			}
 
 		} else if e.meta&bitFinTxn > 0 {
 			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
 			if err != nil || lastCommit != txnTs {
-				truncate = true
 				break
 			}
 			// Got the end of txn. Now we can store them.
@@ -310,15 +322,11 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 			if lastCommit != 0 {
 				// This is most likely an entry which was moved as part of GC.
 				// We shouldn't get this entry in the middle of a transaction.
-				truncate = true
 				break
 			}
 			validEndOffset = read.recordOffset
 		}
 
-		if vlog.opt.ReadOnly {
-			return ErrReplayNeeded
-		}
 		if err := fn(*e, vp); err != nil {
 			if err == errStop {
 				break
@@ -327,16 +335,20 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) error {
 		}
 	}
 
-	if vlog.opt.Truncate && truncate && len(lf.fmap) == 0 {
-		// Only truncate if the file isn't mmaped. Otherwise, Windows would puke.
-		if err := lf.fd.Truncate(int64(validEndOffset)); err != nil {
-			return err
-		}
-	} else if truncate {
-		return ErrTruncateNeeded
+	if int64(validEndOffset) == fi.Size() {
+		return nil
 	}
-
-	return nil
+	y.AssertTrue(int64(validEndOffset) <= fi.Size())
+	fmt.Printf("Time to truncate. validendoffset: %d. size: %d\n", validEndOffset, fi.Size())
+	switch {
+	case !vlog.opt.Truncate:
+		return ErrTruncateNeeded
+	case len(lf.fmap) > 0:
+		// Only truncate if the file isn't mmaped. Otherwise, Windows would puke.
+		return ErrTruncateNeeded
+	default:
+		return lf.fd.Truncate(int64(validEndOffset))
+	}
 }
 
 func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
@@ -715,7 +727,6 @@ func (vlog *valueLog) Close() error {
 
 	var err error
 	for id, f := range vlog.filesMap {
-
 		f.lock.Lock() // We won’t release the lock.
 		if munmapErr := f.munmap(); munmapErr != nil && err == nil {
 			err = munmapErr
@@ -733,7 +744,6 @@ func (vlog *valueLog) Close() error {
 		if closeErr := f.fd.Close(); closeErr != nil && err == nil {
 			err = closeErr
 		}
-
 	}
 	return err
 }
