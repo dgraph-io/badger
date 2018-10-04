@@ -46,8 +46,9 @@ func TestTxnSimple(t *testing.T) {
 		item, err := txn.Get([]byte("key=8"))
 		require.NoError(t, err)
 
-		require.NoError(t, item.Value(func(val []byte) {
+		require.NoError(t, item.Value(func(val []byte) error {
 			require.Equal(t, []byte("val=8"), val)
+			return nil
 		}))
 
 		require.Panics(t, func() { txn.CommitAt(100, nil) })

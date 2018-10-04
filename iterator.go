@@ -94,7 +94,7 @@ func (item *Item) Version() uint64 {
 // If you need to use a value outside a transaction, please use Item.ValueCopy
 // instead, or copy it yourself. Value might change once discard or commit is called.
 // Use ValueCopy if you want to do a Set after Get.
-func (item *Item) Value(fn func(val []byte)) error {
+func (item *Item) Value(fn func(val []byte) error) error {
 	item.wg.Wait()
 	if item.status == prefetched {
 		if item.err == nil && fn != nil {
@@ -104,10 +104,13 @@ func (item *Item) Value(fn func(val []byte)) error {
 	}
 	buf, cb, err := item.yieldItemValue()
 	defer runCallback(cb)
-	if err == nil && fn != nil {
-		fn(buf)
+	if err != nil {
+		return err
 	}
-	return err
+	if fn != nil {
+		return fn(buf)
+	}
+	return nil
 }
 
 // ValueCopy returns a copy of the value of the item from the value log, writing it to dst slice.

@@ -1075,8 +1075,9 @@ func (seq *Sequence) updateLease() error {
 			return err
 		} else {
 			var num uint64
-			if err := item.Value(func(v []byte) {
+			if err := item.Value(func(v []byte) error {
 				num = binary.BigEndian.Uint64(v)
+				return nil
 			}); err != nil {
 				return err
 			}
@@ -1188,8 +1189,9 @@ func (op *MergeOperator) iterateAndMerge(txn *Txn) (val []byte, err error) {
 				return nil, err
 			}
 		} else {
-			if err := item.Value(func(newVal []byte) {
+			if err := item.Value(func(newVal []byte) error {
 				val = op.f(val, newVal)
+				return nil
 			}); err != nil {
 				return nil, err
 			}

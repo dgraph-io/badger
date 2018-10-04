@@ -217,7 +217,7 @@ err := db.View(func(txn *badger.Txn) error {
   handle(err)
 
   var valNot, valCopy []byte
-  err := item.Value(func(val []byte) {
+  err := item.Value(func(val []byte) error {
     // This func with val would only be called if item.Value encounters no error.
 
     // Accessing val here is valid.
@@ -228,6 +228,7 @@ err := db.View(func(txn *badger.Txn) error {
 
     // Assigning val slice to another variable is NOT OK.
     valNot = val // Do not do this.
+    return nil
   })
   handle(err)
 
@@ -349,8 +350,9 @@ err := db.View(func(txn *badger.Txn) error {
   for it.Rewind(); it.Valid(); it.Next() {
     item := it.Item()
     k := item.Key()
-    err := item.Value(func(v []byte) {
+    err := item.Value(func(v []byte) error {
       fmt.Printf("key=%s, value=%s\n", k, v)
+      return nil
     })
     if err != nil {
       return err
@@ -380,8 +382,9 @@ db.View(func(txn *badger.Txn) error {
   for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
     item := it.Item()
     k := item.Key()
-    err := item.Value(func(v []byte) {
+    err := item.Value(func(v []byte) error {
       fmt.Printf("key=%s, value=%s\n", k, v)
+      return nil
     })
     if err != nil {
       return err

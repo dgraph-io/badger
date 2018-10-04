@@ -718,10 +718,11 @@ func TestBug578(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if err := item.Value(func(val []byte) {
+				if err := item.Value(func(val []byte) error {
 					if !bytes.Equal(val, value) {
 						t.Fatalf("Invalid value for key: %q", key(i))
 					}
+					return nil
 				}); err != nil {
 					return err
 				}

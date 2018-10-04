@@ -235,10 +235,11 @@ func TestBigKeyValuePairs(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				return item.Value(func(val []byte) {
+				return item.Value(func(val []byte) error {
 					if len(val) == 0 {
 						log.Fatalf("key not found %q", len(key))
 					}
+					return nil
 				})
 			})
 		}
@@ -311,8 +312,9 @@ func TestPushValueLogLimit(t *testing.T) {
 			err := db.View(func(txn *Txn) error {
 				item, err := txn.Get([]byte(key(i)))
 				require.NoError(t, err, "Getting key: %s", key(i))
-				err = item.Value(func(v []byte) {
+				err = item.Value(func(v []byte) error {
 					_ = v
+					return nil
 				})
 				require.NoError(t, err, "Getting value: %s", key(i))
 				return nil

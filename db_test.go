@@ -56,12 +56,13 @@ func getTestOptions(dir string) Options {
 
 func getItemValue(t *testing.T, item *Item) (val []byte) {
 	var v []byte
-	err := item.Value(func(val []byte) {
+	err := item.Value(func(val []byte) error {
 		if val == nil {
 			v = nil
 		} else {
 			v = append([]byte{}, val...)
 		}
+		return nil
 	})
 	if err != nil {
 		t.Error(err)
@@ -134,10 +135,11 @@ func TestUpdateAndView(t *testing.T) {
 				}
 
 				expected := []byte(fmt.Sprintf("val%d", i))
-				if err := item.Value(func(val []byte) {
+				if err := item.Value(func(val []byte) error {
 					require.Equal(t, expected, val,
 						"Invalid value for key %q. expected: %q, actual: %q",
 						item.Key(), expected, val)
+					return nil
 				}); err != nil {
 					return err
 				}
@@ -676,8 +678,9 @@ func TestIterateParallel(t *testing.T) {
 			count++
 			item := itr.Item()
 			require.Equal(t, "account-", string(item.Key()[0:8]))
-			err := item.Value(func(val []byte) {
+			err := item.Value(func(val []byte) error {
 				require.Equal(t, "1000", string(val))
+				return nil
 			})
 			require.NoError(t, err)
 		}
@@ -788,8 +791,9 @@ func TestInvalidKey(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			require.NoError(t, item.Value(func(val []byte) {
+			require.NoError(t, item.Value(func(val []byte) error {
 				require.Equal(t, []byte("BadgerDB"), val)
+				return nil
 			}))
 			return nil
 		}))
@@ -1233,8 +1237,9 @@ func TestSequence(t *testing.T) {
 				return err
 			}
 			var num0 uint64
-			if err := item.Value(func(val []byte) {
+			if err := item.Value(func(val []byte) error {
 				num0 = binary.BigEndian.Uint64(val)
+				return nil
 			}); err != nil {
 				return err
 			}
@@ -1245,8 +1250,9 @@ func TestSequence(t *testing.T) {
 				return err
 			}
 			var num1 uint64
-			if err := item.Value(func(val []byte) {
+			if err := item.Value(func(val []byte) error {
 				num1 = binary.BigEndian.Uint64(val)
+				return nil
 			}); err != nil {
 				return err
 			}
