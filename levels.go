@@ -729,8 +729,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time
 		{
-			s.elog.Printf("STALLED STALLED STALLED STALLED STALLED STALLED STALLED STALLED: %v\n",
-				time.Since(lastUnstalled))
+			s.elog.Printf("STALLED STALLED STALLED: %v\n", time.Since(lastUnstalled))
 			s.cstatus.RLock()
 			for i := 0; i < s.kv.opt.MaxLevels; i++ {
 				s.elog.Printf("level=%d. Status=%s Size=%d\n",
@@ -758,8 +757,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 			}
 		}
 		{
-			s.elog.Printf("UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED UNSTALLED: %v\n",
-				time.Since(timeStart))
+			s.elog.Printf("UNSTALLED UNSTALLED UNSTALLED: %v\n", time.Since(timeStart))
 			lastUnstalled = time.Now()
 		}
 	}

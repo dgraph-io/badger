@@ -845,8 +845,8 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return err
 	}
 	if dirSyncErr != nil {
+		// Do dir sync as best effort. No need to return due to an error there.
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
-		return err
 	}
 
 	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode)
