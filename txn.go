@@ -549,6 +549,15 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	return ret, nil
 }
 
+func (txn *Txn) commitPrecheck() {
+	if txn.commitTs == 0 && txn.db.opt.managedTxns {
+		panic("Commit cannot be called with managedDB=true. Use CommitAt.")
+	}
+	if txn.discarded {
+		panic("Trying to commit a discarded txn")
+	}
+}
+
 // Commit commits the transaction, following these steps:
 //
 // 1. If there are no writes, return immediately.
@@ -567,14 +576,10 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 //
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
-func (txn *Txn) Commit(callback func(error)) error {
-	if txn.commitTs == 0 && txn.db.opt.managedTxns {
-		panic("Commit cannot be called with managedDB=true. Use CommitAt.")
-	}
-	if txn.discarded {
-		return ErrDiscardedTxn
-	}
+func (txn *Txn) Commit() error {
 	defer txn.Discard()
+	txn.commitPrecheck()
+
 	if len(txn.writes) == 0 {
 		return nil // Nothing to do.
 	}
@@ -583,24 +588,42 @@ func (txn *Txn) Commit(callback func(error)) error {
 	if err != nil {
 		return err
 	}
+	// If batchSet failed, LSM would not have been updated. So, no need to rollback anything.
 
-	if callback == nil {
-		// If batchSet failed, LSM would not have been updated. So, no need to rollback anything.
+	// TODO: What if some of the txns successfully make it to value log, but others fail.
+	// Nothing gets updated to LSM, until a restart happens.
+	return txnCb()
+}
 
-		// TODO: What if some of the txns successfully make it to value log, but others fail.
-		// Nothing gets updated to LSM, until a restart happens.
-		return txnCb()
+// CommitWith acts like Commit, but takes a callback, which gets run via a
+// goroutine to avoid blocking this function. The callback is guaranteed to run,
+// so it is safe to increment sync.WaitGroup before calling CommitWith, and
+// decrementing it in the callback; to block until all callbacks are run.
+func (txn *Txn) CommitWith(cb func(error)) {
+	defer txn.Discard()
+	txn.commitPrecheck()
+	if cb == nil {
+		panic("Nil callback provided to CommitWith")
 	}
 
+	if len(txn.writes) == 0 {
+		cb(nil)
+		return
+	}
+
+	txnCb, err := txn.commitAndSend()
+	if err != nil {
+		cb(err)
+		return
+	}
 	// TODO: Avoid creating a goroutine per txn. We should instead send these
 	// over to a channel, which can run them via a single goroutine. This would
 	// also ensure that the callbacks are run serially, which makes it easier
 	// for the users to write thread-unsafe callbacks.
 	go func() {
 		err := txnCb()
-		callback(err)
+		cb(err)
 	}()
-	return nil
 }
 
 // ReadTs returns the read timestamp of the transaction.
@@ -689,5 +712,5 @@ func (db *DB) Update(fn func(txn *Txn) error) error {
 		return err
 	}
 
-	return txn.Commit(nil)
+	return txn.Commit()
 }
