@@ -35,7 +35,7 @@ type WriteBatch struct {
 // creating and committing transactions. Due to the nature of SSI guaratees provided by Badger,
 // blind writes can never encounter transaction conflicts (ErrConflict).
 func (db *DB) NewWriteBatch() *WriteBatch {
-	return &WriteBatch{db: db, txn: db.NewTransaction(true)}
+	return &WriteBatch{db: db, txn: db.newTransaction(true, true)}
 }
 
 func (wb *WriteBatch) callback(err error) {
@@ -86,11 +86,10 @@ func (wb *WriteBatch) commit() error {
 	}
 	// Get a new txn before we commit this one. So, the new txn doesn't need
 	// to wait for this one to commit.
-	newTxn := wb.db.NewTransaction(true)
-	fmt.Println("newtxn")
 	wb.wg.Add(1)
 	wb.txn.CommitWith(wb.callback)
-	wb.txn = newTxn
+	wb.txn = wb.db.newTransaction(true, true)
+	wb.txn.readTs = 0 // We're not reading anything.
 	return wb.err
 }
 

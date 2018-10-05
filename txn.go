@@ -93,7 +93,7 @@ func (o *oracle) decrRef() {
 
 func (o *oracle) readTs() uint64 {
 	if o.isManaged {
-		return math.MaxUint64
+		panic("ReadTs should not be retrieved for managed DB")
 	}
 
 	var readTs uint64
@@ -595,6 +595,22 @@ func (txn *Txn) Commit() error {
 	return txnCb()
 }
 
+type txnCb struct {
+	f   func(error)
+	err error
+}
+
+func (db *DB) runTxnCallbacks(closer *y.Closer) {
+	defer closer.Done()
+
+	for {
+		select {
+		case <-closer.HasBeenClosed():
+			return
+		}
+	}
+}
+
 // CommitWith acts like Commit, but takes a callback, which gets run via a
 // goroutine to avoid blocking this function. The callback is guaranteed to run,
 // so it is safe to increment sync.WaitGroup before calling CommitWith, and
@@ -611,7 +627,7 @@ func (txn *Txn) CommitWith(cb func(error)) {
 		return
 	}
 
-	txnCb, err := txn.commitAndSend()
+	commitCb, err := txn.commitAndSend()
 	if err != nil {
 		cb(err)
 		return
@@ -621,7 +637,7 @@ func (txn *Txn) CommitWith(cb func(error)) {
 	// also ensure that the callbacks are run serially, which makes it easier
 	// for the users to write thread-unsafe callbacks.
 	go func() {
-		err := txnCb()
+		err := commitCb()
 		cb(err)
 	}()
 }
@@ -652,6 +668,10 @@ func (txn *Txn) ReadTs() uint64 {
 //  defer txn.Discard()
 //  // Call various APIs.
 func (db *DB) NewTransaction(update bool) *Txn {
+	return db.newTransaction(update, false)
+}
+
+func (db *DB) newTransaction(update, isManaged bool) *Txn {
 	if db.opt.ReadOnly && update {
 		// DB is read-only, force read-only transaction.
 		update = false
@@ -679,7 +699,9 @@ func (db *DB) NewTransaction(update bool) *Txn {
 	// 5. Now this txn would go on to commit the keyset, and no conflicts
 	//    would be detected.
 	// See issue: https://github.com/dgraph-io/badger/issues/574
-	txn.readTs = db.orc.readTs()
+	if !isManaged {
+		txn.readTs = db.orc.readTs()
+	}
 	return txn
 }
 
