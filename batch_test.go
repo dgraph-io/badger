@@ -26,7 +26,10 @@ import (
 
 func TestWriteBatch(t *testing.T) {
 	key := func(i int) []byte {
-		return []byte(fmt.Sprintf("%30d", i))
+		// b := make([]byte, 8)
+		// binary.BigEndian.PutUint64(b, uint64(i))
+		// return b
+		return []byte(fmt.Sprintf("%10d", i))
 	}
 	val := func(i int) []byte {
 		return []byte(fmt.Sprintf("%128d", i))
@@ -44,7 +47,7 @@ func TestWriteBatch(t *testing.T) {
 			require.NoError(t, wb.Delete(key(i)))
 		}
 		require.NoError(t, wb.Flush())
-		t.Logf("Time it took to do 51K writes: %s\n", time.Since(start))
+		t.Logf("Time taken for %d writes (w/ test options): %s\n", N+M, time.Since(start))
 
 		err := db.View(func(txn *Txn) error {
 			itr := txn.NewIterator(DefaultIteratorOptions)
@@ -53,7 +56,7 @@ func TestWriteBatch(t *testing.T) {
 			i := M
 			for itr.Rewind(); itr.Valid(); itr.Next() {
 				item := itr.Item()
-				require.Equal(t, key(i), item.Key())
+				require.Equal(t, string(key(i)), string(item.Key()))
 				valcopy, err := item.ValueCopy(nil)
 				require.NoError(t, err)
 				require.Equal(t, val(i), valcopy)

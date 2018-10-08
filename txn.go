@@ -606,6 +606,8 @@ func (db *DB) runTxnCallbacks(closer *y.Closer) {
 
 	run := func(cb *txnCb) {
 		switch {
+		case cb == nil:
+			panic("txn callback is nil")
 		case cb.err != nil:
 			cb.user(cb.err)
 		case cb.commit != nil:
@@ -618,16 +620,12 @@ func (db *DB) runTxnCallbacks(closer *y.Closer) {
 		}
 	}
 
-	for {
-		select {
-		case cb := <-db.txnCallbackCh:
-			run(cb)
-		case <-closer.HasBeenClosed():
-			for cb := range db.txnCallbackCh {
-				run(cb)
-			}
-			return
-		}
+	// We don't check closer.HasBeenClosed because we must empty out the txnCallbackCh completely
+	// before exiting here. During db.Close, txnCallbackCh is closed, so this loop below would
+	// automatically exit. We do still need the closer, so we can block until all these callbacks
+	// are finished running.
+	for cb := range db.txnCallbackCh {
+		run(cb)
 	}
 }
 

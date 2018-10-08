@@ -48,6 +48,7 @@ func (wb *WriteBatch) callback(err error) {
 	wb.Lock()
 	defer wb.Unlock()
 	if wb.err != nil {
+		panic(fmt.Sprintf("Got error: %v\n", err))
 		return
 	}
 	wb.err = err
@@ -58,11 +59,20 @@ func (wb *WriteBatch) Set(k, v []byte, meta byte) error {
 	wb.Lock()
 	defer wb.Unlock()
 
-	err := wb.txn.SetWithMeta(k, v, meta)
-	if err == ErrTxnTooBig {
-		return wb.commit()
+	if err := wb.txn.SetWithMeta(k, v, meta); err != ErrTxnTooBig {
+		return err
 	}
-	return err
+	// Txn has reached it's zenith. Commit now.
+	if cerr := wb.commit(); cerr != nil {
+		return cerr
+	}
+	// This time the error must not be ErrTxnTooBig, otherwise, we make the
+	// error permanent.
+	if err := wb.txn.SetWithMeta(k, v, meta); err != nil {
+		wb.err = err
+		return err
+	}
+	return nil
 }
 
 // Delete is equivalent of Txn.Delete.
@@ -70,16 +80,21 @@ func (wb *WriteBatch) Delete(k []byte) error {
 	wb.Lock()
 	defer wb.Unlock()
 
-	err := wb.txn.Delete(k)
-	if err == ErrTxnTooBig {
-		return wb.commit()
+	if err := wb.txn.Delete(k); err != ErrTxnTooBig {
+		return err
 	}
-	return err
+	if err := wb.commit(); err != nil {
+		return err
+	}
+	if err := wb.txn.Delete(k); err != nil {
+		wb.err = err
+		return err
+	}
+	return nil
 }
 
 // This must hold a lock.
 func (wb *WriteBatch) commit() error {
-	fmt.Println("Doing a commit")
 	if wb.err != nil {
 		fmt.Printf("Got error: %v\n", wb.err)
 		return wb.err
@@ -101,7 +116,6 @@ func (wb *WriteBatch) Flush() error {
 	wb.txn.Discard()
 	wb.Unlock()
 
-	fmt.Println("waiting for wait")
 	wb.wg.Wait()
 	// Safe to access error without any synchronization here.
 	return wb.err
