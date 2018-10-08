@@ -51,8 +51,8 @@ type closers struct {
 	compactors  *y.Closer
 	memtable    *y.Closer
 	writes      *y.Closer
-	valueGC     *y.Closer
 	txnCallback *y.Closer
+	valueGC     *y.Closer
 }
 
 // DB provides the various functions required to interact with Badger.
@@ -312,6 +312,12 @@ func Open(opt Options) (db *DB, err error) {
 		return db, errors.Wrapf(err, "Unable to mmap RDWR log file")
 	}
 
+	// These goroutines run the user specified callbacks passed during txn.CommitWith.
+	db.closers.txnCallback = y.NewCloser(3)
+	for i := 0; i < 3; i++ {
+		go db.runTxnCallbacks(db.closers.txnCallback)
+	}
+
 	db.writeCh = make(chan *request, kvWriteChCapacity)
 	db.closers.writes = y.NewCloser(1)
 	go db.doWrites(db.closers.writes)
@@ -335,6 +341,10 @@ func (db *DB) Close() (err error) {
 
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
+
+	// Wait for callbacks to be run.
+	close(db.txnCallbackCh)
+	db.closers.txnCallback.SignalAndWait()
 
 	// Now close the value log.
 	if vlogErr := db.vlog.Close(); err == nil {

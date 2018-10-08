@@ -596,16 +596,36 @@ func (txn *Txn) Commit() error {
 }
 
 type txnCb struct {
-	f   func(error)
-	err error
+	commit func() error
+	user   func(error)
+	err    error
 }
 
 func (db *DB) runTxnCallbacks(closer *y.Closer) {
 	defer closer.Done()
 
+	run := func(cb *txnCb) {
+		switch {
+		case cb.err != nil:
+			cb.user(cb.err)
+		case cb.commit != nil:
+			err := cb.commit()
+			cb.user(err)
+		case cb.user == nil:
+			panic("Must have caught a nil callback for txn.CommitWith")
+		default:
+			cb.user(nil)
+		}
+	}
+
 	for {
 		select {
+		case cb := <-db.txnCallbackCh:
+			run(cb)
 		case <-closer.HasBeenClosed():
+			for cb := range db.txnCallbackCh {
+				run(cb)
+			}
 			return
 		}
 	}
@@ -623,23 +643,19 @@ func (txn *Txn) CommitWith(cb func(error)) {
 	}
 
 	if len(txn.writes) == 0 {
-		cb(nil)
+		// Do not run these callbacks from here, because the CommitWith and the
+		// callback might be acquiring the same locks. Instead run the callback
+		// from another goroutine.
+		txn.db.txnCallbackCh <- &txnCb{user: cb, err: nil}
 		return
 	}
 
 	commitCb, err := txn.commitAndSend()
 	if err != nil {
-		cb(err)
+		txn.db.txnCallbackCh <- &txnCb{user: cb, err: err}
 		return
 	}
-	// TODO: Avoid creating a goroutine per txn. We should instead send these
-	// over to a channel, which can run them via a single goroutine. This would
-	// also ensure that the callbacks are run serially, which makes it easier
-	// for the users to write thread-unsafe callbacks.
-	go func() {
-		err := commitCb()
-		cb(err)
-	}()
+	txn.db.txnCallbackCh <- &txnCb{user: cb, commit: commitCb}
 }
 
 // ReadTs returns the read timestamp of the transaction.
