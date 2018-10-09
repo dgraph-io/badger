@@ -26,9 +26,6 @@ import (
 
 func TestWriteBatch(t *testing.T) {
 	key := func(i int) []byte {
-		// b := make([]byte, 8)
-		// binary.BigEndian.PutUint64(b, uint64(i))
-		// return b
 		return []byte(fmt.Sprintf("%10d", i))
 	}
 	val := func(i int) []byte {
@@ -37,6 +34,8 @@ func TestWriteBatch(t *testing.T) {
 
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		wb := db.NewWriteBatch()
+		defer wb.Cancel()
+
 		N, M := 50000, 1000
 		start := time.Now()
 

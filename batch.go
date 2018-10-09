@@ -37,6 +37,18 @@ func (db *DB) NewWriteBatch() *WriteBatch {
 	return &WriteBatch{db: db, txn: db.newTransaction(true, true)}
 }
 
+// Cancel function must be called if there's a chance that Flush might not get
+// called. If neither Flush or Cancel is called, the transaction oracle would
+// never get a chance to clear out the row commit timestamp map, thus causing an
+// unbounded memory consumption. Typically, you can call Cancel as a defer
+// statement right after NewWriteBatch is called.
+//
+// Note that any committed writes would still go through despite calling Cancel.
+func (wb *WriteBatch) Cancel() {
+	wb.wg.Wait()
+	wb.txn.Discard()
+}
+
 func (wb *WriteBatch) callback(err error) {
 	// sync.WaitGroup is thread-safe, so it doesn't need to be run inside wb.Lock.
 	defer wb.wg.Done()

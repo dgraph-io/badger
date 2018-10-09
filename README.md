@@ -626,6 +626,8 @@ workloads, you should be using the `Transaction` API.
 
 ```go
 wb := db.NewWriteBatch()
+defer wb.Cancel()
+
 for i := 0; i < N; i++ {
   err := wb.Set(key(i), value(i), 0) // Will create txns as needed.
   handle(err)
