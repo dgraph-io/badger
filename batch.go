@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -48,7 +47,6 @@ func (wb *WriteBatch) callback(err error) {
 	wb.Lock()
 	defer wb.Unlock()
 	if wb.err != nil {
-		panic(fmt.Sprintf("Got error: %v\n", err))
 		return
 	}
 	wb.err = err
