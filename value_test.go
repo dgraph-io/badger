@@ -163,11 +163,11 @@ func TestValueGC(t *testing.T) {
 		rand.Read(v[:rand.Intn(sz)])
 		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v))
 		if i%20 == 0 {
-			require.NoError(t, txn.Commit(nil))
+			require.NoError(t, txn.Commit())
 			txn = kv.NewTransaction(true)
 		}
 	}
-	require.NoError(t, txn.Commit(nil))
+	require.NoError(t, txn.Commit())
 
 	for i := 0; i < 45; i++ {
 		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
@@ -216,11 +216,11 @@ func TestValueGC2(t *testing.T) {
 		rand.Read(v[:rand.Intn(sz)])
 		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v))
 		if i%20 == 0 {
-			require.NoError(t, txn.Commit(nil))
+			require.NoError(t, txn.Commit())
 			txn = kv.NewTransaction(true)
 		}
 	}
-	require.NoError(t, txn.Commit(nil))
+	require.NoError(t, txn.Commit())
 
 	for i := 0; i < 5; i++ {
 		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
@@ -301,11 +301,11 @@ func TestValueGC3(t *testing.T) {
 		// Keys key000, key001, key002, such that sorted order matches insertion order
 		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%03d", i)), v))
 		if i%20 == 0 {
-			require.NoError(t, txn.Commit(nil))
+			require.NoError(t, txn.Commit())
 			txn = kv.NewTransaction(true)
 		}
 	}
-	require.NoError(t, txn.Commit(nil))
+	require.NoError(t, txn.Commit())
 
 	// Start an iterator to keys in the first value log file
 	itOpt := IteratorOptions{
@@ -367,11 +367,11 @@ func TestValueGC4(t *testing.T) {
 		rand.Read(v[:rand.Intn(sz)])
 		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v))
 		if i%3 == 0 {
-			require.NoError(t, txn.Commit(nil))
+			require.NoError(t, txn.Commit())
 			txn = kv.NewTransaction(true)
 		}
 	}
-	require.NoError(t, txn.Commit(nil))
+	require.NoError(t, txn.Commit())
 
 	for i := 0; i < 8; i++ {
 		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
@@ -625,11 +625,11 @@ func TestValueLogTrigger(t *testing.T) {
 		rand.Read(v[:rand.Intn(sz)])
 		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v))
 		if i%20 == 0 {
-			require.NoError(t, txn.Commit(nil))
+			require.NoError(t, txn.Commit())
 			txn = kv.NewTransaction(true)
 		}
 	}
-	require.NoError(t, txn.Commit(nil))
+	require.NoError(t, txn.Commit())
 
 	for i := 0; i < 45; i++ {
 		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
@@ -658,7 +658,7 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 	for _, entry := range entries {
 		require.NoError(t, txn.SetWithMeta(entry.Key, entry.Value, entry.meta))
 	}
-	require.NoError(t, txn.Commit(nil))
+	require.NoError(t, txn.Commit())
 	require.NoError(t, kv.Close())
 
 	filename := vlogFilePath(dir, 0)

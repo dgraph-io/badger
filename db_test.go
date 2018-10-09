@@ -84,13 +84,13 @@ func getItemValue(t *testing.T, item *Item) (val []byte) {
 func txnSet(t *testing.T, kv *DB, key []byte, val []byte, meta byte) {
 	txn := kv.NewTransaction(true)
 	require.NoError(t, txn.SetWithMeta(key, val, meta))
-	require.NoError(t, txn.Commit(nil))
+	require.NoError(t, txn.Commit())
 }
 
 func txnDelete(t *testing.T, kv *DB, key []byte) {
 	txn := kv.NewTransaction(true)
 	require.NoError(t, txn.Delete(key))
-	require.NoError(t, txn.Commit(nil))
+	require.NoError(t, txn.Commit())
 }
 
 // Opens a badger db and runs a a test on it.
@@ -278,24 +278,24 @@ func TestTxnTooBig(t *testing.T) {
 		txn := db.NewTransaction(true)
 		for i := 0; i < n; {
 			if err := txn.Set(data(i), data(i)); err != nil {
-				require.NoError(t, txn.Commit(nil))
+				require.NoError(t, txn.Commit())
 				txn = db.NewTransaction(true)
 			} else {
 				i++
 			}
 		}
-		require.NoError(t, txn.Commit(nil))
+		require.NoError(t, txn.Commit())
 
 		txn = db.NewTransaction(true)
 		for i := 0; i < n; {
 			if err := txn.Delete(data(i)); err != nil {
-				require.NoError(t, txn.Commit(nil))
+				require.NoError(t, txn.Commit())
 				txn = db.NewTransaction(true)
 			} else {
 				i++
 			}
 		}
-		require.NoError(t, txn.Commit(nil))
+		require.NoError(t, txn.Commit())
 	})
 }
 
@@ -349,7 +349,7 @@ func TestGetMore(t *testing.T) {
 			for j := i; j < i+m && j < n; j++ {
 				require.NoError(t, txn.Set(data(j), data(j)))
 			}
-			require.NoError(t, txn.Commit(nil))
+			require.NoError(t, txn.Commit())
 		}
 		require.NoError(t, db.validate())
 
@@ -371,7 +371,7 @@ func TestGetMore(t *testing.T) {
 					// Use a long value that will certainly exceed value threshold.
 					[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", j))))
 			}
-			require.NoError(t, txn.Commit(nil))
+			require.NoError(t, txn.Commit())
 		}
 		require.NoError(t, db.validate())
 
@@ -416,7 +416,7 @@ func TestGetMore(t *testing.T) {
 			for j := i; j < i+m && j < n; j++ {
 				require.NoError(t, txn.Delete(data(j)))
 			}
-			require.NoError(t, txn.Commit(nil))
+			require.NoError(t, txn.Commit())
 		}
 		db.validate()
 		for i := 0; i < n; i++ {
@@ -449,7 +449,7 @@ func TestExistsMore(t *testing.T) {
 				require.NoError(t, txn.Set([]byte(fmt.Sprintf("%09d", j)),
 					[]byte(fmt.Sprintf("%09d", j))))
 			}
-			require.NoError(t, txn.Commit(nil))
+			require.NoError(t, txn.Commit())
 		}
 		db.validate()
 
@@ -479,7 +479,7 @@ func TestExistsMore(t *testing.T) {
 			for j := i; j < i+m && j < n; j++ {
 				require.NoError(t, txn.Delete([]byte(fmt.Sprintf("%09d", j))))
 			}
-			require.NoError(t, txn.Commit(nil))
+			require.NoError(t, txn.Commit())
 		}
 		db.validate()
 		for i := 0; i < n; i++ {
@@ -637,7 +637,7 @@ func TestIterateDeleted(t *testing.T) {
 			require.NoError(t, txn2.Delete(newKey))
 		}
 		require.Equal(t, 2, count)
-		require.NoError(t, txn2.Commit(nil))
+		require.NoError(t, txn2.Commit())
 
 		for _, prefetch := range [...]bool{true, false} {
 			t.Run(fmt.Sprintf("Prefetch=%t", prefetch), func(t *testing.T) {
@@ -704,10 +704,10 @@ func TestIterateParallel(t *testing.T) {
 			txns = append(txns, txn)
 		}
 		for _, txn := range txns {
-			y.Check(txn.Commit(func(err error) {
+			txn.CommitWith(func(err error) {
 				y.Check(err)
 				wg.Done()
-			}))
+			})
 		}
 
 		wg.Wait()
@@ -870,7 +870,7 @@ func TestSetIfAbsentAsync(t *testing.T) {
 		_, err = txn.Get(bkey(i))
 		require.Equal(t, ErrKeyNotFound, err)
 		require.NoError(t, txn.SetWithMeta(bkey(i), nil, byte(i%127)))
-		require.NoError(t, txn.Commit(f))
+		txn.CommitWith(f)
 	}
 
 	require.NoError(t, kv.Close())
@@ -1090,7 +1090,7 @@ func TestLargeKeys(t *testing.T) {
 				// Skip over this record.
 			}
 		}
-		if err := tx.Commit(nil); err != nil {
+		if err := tx.Commit(); err != nil {
 			t.Fatalf("#%d: batchSet err: %v", i, err)
 		}
 	}
@@ -1457,7 +1457,7 @@ func TestReadOnly(t *testing.T) {
 	b1, err := v1.ValueCopy(nil)
 	require.NoError(t, err)
 	require.Equal(t, b1, []byte("value1"))
-	err = txn1.Commit(nil)
+	err = txn1.Commit()
 	require.NoError(t, err)
 
 	// Get a thing from the DB via the other connection
@@ -1467,7 +1467,7 @@ func TestReadOnly(t *testing.T) {
 	b2, err := v2.ValueCopy(nil)
 	require.NoError(t, err)
 	require.Equal(t, b2, []byte("value2000"))
-	err = txn2.Commit(nil)
+	err = txn2.Commit()
 	require.NoError(t, err)
 
 	// Attempt to set a value on a read-only connection
@@ -1475,7 +1475,7 @@ func TestReadOnly(t *testing.T) {
 	err = txn.SetWithMeta([]byte("key"), []byte("value"), 0x00)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "No sets or deletes are allowed in a read-only transaction")
-	err = txn.Commit(nil)
+	err = txn.Commit()
 	require.NoError(t, err)
 }
 
@@ -1593,7 +1593,7 @@ func ExampleOpen() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = txn.Commit(nil)
+	err = txn.Commit()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1655,7 +1655,7 @@ func ExampleTxn_NewIterator() {
 		}
 	}
 
-	err = txn.Commit(nil)
+	err = txn.Commit()
 	if err != nil {
 		log.Fatal(err)
 	}

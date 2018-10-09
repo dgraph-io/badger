@@ -377,27 +377,13 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	var wg sync.WaitGroup
-	var txns []*badger.Txn
+	wb := db.NewWriteBatch()
 	for i := 0; i < numAccounts; i++ {
-		wg.Add(1)
-		txn := db.NewTransaction(true)
-		y.Check(putBalance(txn, i, initialBal))
-		txns = append(txns, txn)
+		y.Check(wb.Set(key(i), toSlice(initialBal), 0))
 	}
-	for _, txn := range txns {
-		y.Check(txn.Commit(func(err error) {
-			y.Check(err)
-			wg.Done()
-		}))
-	}
-	log.Println("Waiting for writes to be done")
-	wg.Wait()
+	log.Println("Waiting for writes to be done...")
+	y.Check(wb.Flush())
 
-	y.Check(db.View(func(txn *badger.Txn) error {
-		log.Printf("LowTs: %d\n", txn.ReadTs())
-		return nil
-	}))
 	log.Println("Bank initialization OK. Commencing test.")
 	log.Printf("Running with %d accounts, and %d goroutines.\n", numAccounts, numGoroutines)
 	log.Printf("Using keyPrefix: %s\n", keyPrefix)
@@ -409,6 +395,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	endTs := time.Now().Add(dur)
 	var total, errors, reads uint64
 
+	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
