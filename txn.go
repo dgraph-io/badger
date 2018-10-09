@@ -577,7 +577,7 @@ func (txn *Txn) commitPrecheck() {
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit() error {
-	txn.commitPrecheck()
+	txn.commitPrecheck() // Precheck before discarding txn.
 	defer txn.Discard()
 
 	if len(txn.writes) == 0 {
@@ -634,8 +634,9 @@ func (db *DB) runTxnCallbacks(closer *y.Closer) {
 // so it is safe to increment sync.WaitGroup before calling CommitWith, and
 // decrementing it in the callback; to block until all callbacks are run.
 func (txn *Txn) CommitWith(cb func(error)) {
+	txn.commitPrecheck() // Precheck before discarding txn.
 	defer txn.Discard()
-	txn.commitPrecheck()
+
 	if cb == nil {
 		panic("Nil callback provided to CommitWith")
 	}
