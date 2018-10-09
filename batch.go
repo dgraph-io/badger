@@ -93,10 +93,9 @@ func (wb *WriteBatch) Delete(k []byte) error {
 	return nil
 }
 
-// This must hold a lock.
+// Caller to commit must hold a write lock.
 func (wb *WriteBatch) commit() error {
 	if wb.err != nil {
-		fmt.Printf("Got error: %v\n", wb.err)
 		return wb.err
 	}
 	// Get a new txn before we commit this one. So, the new txn doesn't need

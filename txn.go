@@ -577,8 +577,8 @@ func (txn *Txn) commitPrecheck() {
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit() error {
-	defer txn.Discard()
 	txn.commitPrecheck()
+	defer txn.Discard()
 
 	if len(txn.writes) == 0 {
 		return nil // Nothing to do.
