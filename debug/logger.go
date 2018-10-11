@@ -22,7 +22,5 @@ type Logger interface {
 	Println(...interface{})
 }
 
-// StdLog is the logger used for standard (info) logs. When building using
-// the `debugcompat` flag, it will be assigned to stderr in the Go "log" package.
-// But it can be changed to any object that implement `Logger`.
-var StdLog Logger
+// stdLogger is the logger used for standard (info) logs.
+var stdLogger Logger

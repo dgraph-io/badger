@@ -1,5 +1,3 @@
-// +build !debugcompat,!debugevents
-
 /*
  * Copyright 2018 Dgraph Labs, Inc. and Contributors
  *
@@ -18,29 +16,28 @@
 
 package debug
 
+import "github.com/dgraph-io/dgraph/x"
+
 // Printf prints to the standard logger using fmt.Sprintf formatting.
-func Printf(format string, v ...interface{}) {}
+func Printf(format string, v ...interface{}) {
+	stdLogger.Printf(format, v...)
+}
 
 // Println prints to the standard logger.
-func Println(v ...interface{}) {}
+func Println(v ...interface{}) {
+	stdLogger.Println(v...)
+}
 
-// EventLog implements the trace.EventLog interface.
-// See: https://godoc.org/golang.org/x/net/trace#EventLog
-type EventLog struct{}
-
-// Printf formats its arguments with fmt.Sprintf and adds the
-// result to the event log.
-func (e *EventLog) Printf(fmt string, a ...interface{}) {}
-
-// Errorf is like Printf, but it marks this event as an error.
-func (e *EventLog) Errorf(fmt string, a ...interface{}) {}
-
-// Finish declares that this event log is complete.
-// The event log should not be used after calling this method.
-func (e *EventLog) Finish() {}
-
-// NewEventLog returns a new EventLog with the specified family name
-// and title.
-func NewEventLog(family, title string) *EventLog {
-	return &EventLog{}
+// Use changes configuration of items.
+func Use(items ...interface{}) {
+	for _, i := range items {
+		switch l := i.(type) {
+		case Logger:
+			stdLogger = l
+		case EventLogger:
+			eventLogger = l
+		default:
+			x.Fatalf("can't use item type %T", l)
+		}
+	}
 }

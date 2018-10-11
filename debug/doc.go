@@ -15,24 +15,29 @@
  */
 
 /*
-	Package debug encapsulates info and events logging for easy toggling.
+	Package debug abstracts info and events logging for easy toggling.
 
 	The purpose of this package is to allow flexibility to performance configurations,
-	while keeping the main source undisturbed. When using this package for logging,
-	the Go build tool will produce a binary with logging disabled by default. To toggle
-	logging you must use build tags. See: go help build
+	while keeping the main source undisturbed.
 
-	Build tags:
-		- debugcompat: enables info logging (log) and event logging (x/net/trace.EventLog). This is
-			the compatible behavior following traditional builds.
-		- debugevents: enables only event logging.
+	To attach a new standard logger, it must implement the StdLogger interface. This will be
+	used with typical info outputs.
 
-	Examples:
+	Example using LogRUs:
 
-		go build -tags debugcompat
+		log := logrus.New()
+		debug.Use(log)
 
-		go build -tags debugevents
+	To attach a new events logger, it must implement the EventLogger interface. This is used for
+	long-running operations that potentially generate lots of output.
 
-	Note: Use one or none tags when building.
+	Example using x/net/trace:
+
+		elog := trace.NewEventLog("Dgraph", "Parse")
+		debug.Use(elog)
+
+	For convenience, the func `UseCompatStdLogger()` and `UseCompatEventLogger()` will setup the
+	Go standard logging and trace event logging.
+
 */
 package debug

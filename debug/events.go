@@ -1,5 +1,3 @@
-// +build debugevents,!debugcompat
-
 /*
  * Copyright 2018 Dgraph Labs, Inc. and Contributors
  *
@@ -22,26 +20,17 @@ import (
 	"golang.org/x/net/trace"
 )
 
-func Printf(format string, v ...interface{}) {}
-
-func Println(v ...interface{}) {}
-
-type EventLog struct {
-	elog trace.EventLog
+// EventLogger is composed from trace.EventLog interface.
+// See: https://godoc.org/golang.org/x/net/trace#EventLog
+type EventLogger interface {
+	trace.EventLog
+	New(string, string) EventLogger
 }
 
-func (e *EventLog) Printf(fmt string, a ...interface{}) {
-	e.elog.Printf(fmt, a...)
-}
+var eventLogger EventLogger
 
-func (e *EventLog) Errorf(fmt string, a ...interface{}) {
-	e.elog.Errorf(fmt, a...)
-}
-
-func (e *EventLog) Finish() {
-	e.elog.Finish()
-}
-
-func NewEventLog(family, title string) *EventLog {
-	return &EventLog{elog: trace.NewEventLog(family, title)}
+// NewEventLog returns a new EventLog with the specified family name
+// and title.
+func NewEventLog(family, title string) EventLogger {
+	return eventLogger.New(family, title)
 }
