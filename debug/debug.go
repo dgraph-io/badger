@@ -18,16 +18,6 @@ package debug
 
 import "github.com/dgraph-io/dgraph/x"
 
-// Printf prints to the standard logger using fmt.Sprintf formatting.
-func Printf(format string, v ...interface{}) {
-	stdLogger.Printf(format, v...)
-}
-
-// Println prints to the standard logger.
-func Println(v ...interface{}) {
-	stdLogger.Println(v...)
-}
-
 // Use changes configuration of items.
 func Use(items ...interface{}) {
 	for _, i := range items {

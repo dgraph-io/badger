@@ -24,3 +24,13 @@ type Logger interface {
 
 // stdLogger is the logger used for standard (info) logs.
 var stdLogger Logger
+
+// Printf prints to the standard logger using fmt.Sprintf formatting.
+func Printf(format string, v ...interface{}) {
+	stdLogger.Printf(format, v...)
+}
+
+// Println prints to the standard logger.
+func Println(v ...interface{}) {
+	stdLogger.Println(v...)
+}

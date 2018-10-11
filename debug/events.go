@@ -16,14 +16,21 @@
 
 package debug
 
-import (
-	"golang.org/x/net/trace"
-)
-
 // EventLogger is composed from trace.EventLog interface.
-// See: https://godoc.org/golang.org/x/net/trace#EventLog
 type EventLogger interface {
-	trace.EventLog
+	// Printf formats its arguments with fmt.Sprintf and adds the
+	// result to the event log.
+	Printf(string, ...interface{})
+
+	// Errorf is like Printf, but it marks this event as an error.
+	Errorf(string, ...interface{})
+
+	// Finish declares that this event log is complete.
+	// The event log should not be used after calling this method.
+	Finish()
+
+	// New would be the function that initalizes an existing EventLog object.
+	// ie., create trace object and attach it.
 	New(string, string) EventLogger
 }
 

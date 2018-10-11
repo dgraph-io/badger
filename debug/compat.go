@@ -27,26 +27,19 @@ type compatEventLogger struct {
 	el trace.EventLog
 }
 
-// New would be the function that initalizes an existing EventLog object.
-// ie., create trace object and attach it.
 func (l *compatEventLogger) New(family, title string) EventLogger {
 	l.el = trace.NewEventLog(family, title)
 	return l
 }
 
-// Printf formats its arguments with fmt.Sprintf and adds the
-// result to the event log.
 func (l *compatEventLogger) Printf(fmt string, a ...interface{}) {
 	l.el.Printf(fmt, a...)
 }
 
-// Errorf is like Printf, but it marks this event as an error.
 func (l *compatEventLogger) Errorf(fmt string, a ...interface{}) {
 	l.el.Errorf(fmt, a...)
 }
 
-// Finish declares that this event log is complete.
-// The event log should not be used after calling this method.
 func (l *compatEventLogger) Finish() {
 	l.el.Finish()
 }
