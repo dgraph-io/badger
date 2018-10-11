@@ -16,18 +16,16 @@
 
 package debug
 
-import "github.com/dgraph-io/dgraph/x"
-
 // Use changes configuration of items.
 func Use(items ...interface{}) {
 	for _, i := range items {
-		switch l := i.(type) {
+		switch v := i.(type) {
 		case Logger:
-			stdLogger = l
+			stdLogger = v
 		case EventLogger:
-			eventLogger = l
+			eventLogger = v
 		default:
-			x.Fatalf("can't use item type %T", l)
+			panic("invalid item type used")
 		}
 	}
 }

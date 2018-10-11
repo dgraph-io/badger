@@ -16,28 +16,33 @@
 
 package debug
 
-// EventLogger is composed from trace.EventLog interface.
+// EventLogger are objects that implement the trace.EventLog interface.
 type EventLogger interface {
-	// Printf formats its arguments with fmt.Sprintf and adds the
-	// result to the event log.
 	Printf(string, ...interface{})
-
-	// Errorf is like Printf, but it marks this event as an error.
 	Errorf(string, ...interface{})
-
-	// Finish declares that this event log is complete.
-	// The event log should not be used after calling this method.
 	Finish()
-
-	// New would be the function that initalizes an existing EventLog object.
-	// ie., create trace object and attach it.
-	New(string, string) EventLogger
 }
 
 var eventLogger EventLogger
 
+type compatEventLogger struct{}
+
+// Printf formats its arguments with fmt.Sprintf and adds the
+// result to the event log.
+func (l *compatEventLogger) Printf(fmt string, a ...interface{}) {}
+
+// Errorf is like Printf, but it marks this event as an error.
+func (l *compatEventLogger) Errorf(fmt string, a ...interface{}) {}
+
+// Finish declares that this event log is complete.
+// The event log should not be used after calling this method.
+func (l *compatEventLogger) Finish() {}
+
 // NewEventLog returns a new EventLog with the specified family name
 // and title.
 func NewEventLog(family, title string) EventLogger {
-	return eventLogger.New(family, title)
+	if eventLogger != nil {
+		return eventLogger
+	}
+	return &compatEventLogger{}
 }
