@@ -44,12 +44,12 @@ type oracle struct {
 	nextTxnTs   uint64
 
 	// Used to block NewTransaction, so all previous commits are visible to a new read.
-	txnMark y.WaterMark
+	txnMark *y.WaterMark
 
 	// Either of these is used to determine which versions can be permanently
 	// discarded during compaction.
-	discardTs uint64      // Used by ManagedDB.
-	readMark  y.WaterMark // Used by DB.
+	discardTs uint64       // Used by ManagedDB.
+	readMark  *y.WaterMark // Used by DB.
 
 	// commits stores a key fingerprint and latest commit counter for it.
 	// refCount is used to clear out commits map to avoid a memory blowup.
@@ -61,8 +61,11 @@ func newOracle(opt Options) *oracle {
 		isManaged: opt.managedTxns,
 		commits:   make(map[uint64]uint64),
 		// We're not initializing nextTxnTs and readOnlyTs. It would be done after replay in Open.
-		readMark: y.WaterMark{Name: "badger.PendingReads"},
-		txnMark:  y.WaterMark{Name: "badger.TxnTimestamp"},
+		//
+		// WaterMarks must be 64-bit aligned for atomic package, hence we must use pointers here.
+		// See https://golang.org/pkg/sync/atomic/#pkg-note-BUG.
+		readMark: &y.WaterMark{Name: "badger.PendingReads"},
+		txnMark:  &y.WaterMark{Name: "badger.TxnTimestamp"},
 	}
 	orc.readMark.Init()
 	orc.txnMark.Init()
