@@ -14,18 +14,31 @@
  * limitations under the License.
  */
 
-package debug
+package log
 
-// Use changes configuration of items.
-func Use(items ...interface{}) {
-	for _, i := range items {
-		switch v := i.(type) {
-		case Logger:
-			stdLogger = v
-		case EventLogger:
-			eventLogger = v
-		default:
-			panic("invalid item type used")
-		}
-	}
+import (
+	golog "log"
+	"os"
+)
+
+type defaultLog struct {
+	*golog.Logger
+}
+
+func UseDefault() {
+	Use(&defaultLog{
+		Logger: golog.New(os.Stderr, "badger", golog.LstdFlags),
+	})
+}
+
+func (l *defaultLog) Errorf(f string, v ...interface{}) {
+	l.Printf("ERROR: "+f, v...)
+}
+
+func (l *defaultLog) Infof(f string, v ...interface{}) {
+	l.Printf("INFO: "+f, v...)
+}
+
+func (l *defaultLog) Warningf(f string, v ...interface{}) {
+	l.Printf("WARNING: "+f, v...)
 }

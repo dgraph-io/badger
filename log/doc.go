@@ -14,23 +14,14 @@
  * limitations under the License.
  */
 
-package debug
+/*
+	Package log abstracts info logging for easy toggling.
 
-// Logger is implemented by any logging system that is used for standard logs.
-type Logger interface {
-	Printf(string, ...interface{})
-	Println(...interface{})
-}
+	The purpose of this package is to allow flexibility to performance configurations,
+	while keeping the main source undisturbed.
 
-// stdLogger is the logger used for standard (info) logs.
-var stdLogger Logger
+	To attach a new logger, it must implement the `Logger` interface. This will be
+	used with typical outputs of errors, info and warnings.
 
-// Printf prints to the standard logger using fmt.Sprintf formatting.
-func Printf(format string, v ...interface{}) {
-	stdLogger.Printf(format, v...)
-}
-
-// Println prints to the standard logger.
-func Println(v ...interface{}) {
-	stdLogger.Println(v...)
-}
+*/
+package log
