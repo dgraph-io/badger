@@ -28,7 +28,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger/log"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
@@ -681,7 +680,7 @@ func (db *DB) doWrites(lc *y.Closer) {
 
 	writeRequests := func(reqs []*request) {
 		if err := db.writeRequests(reqs); err != nil {
-			log.Errorf("writeRequests: %v", err)
+			Errorf("writeRequests: %v", err)
 		}
 		<-pendingCh
 	}
@@ -901,7 +900,7 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 				break
 			}
 			// Encounterd error. Retry indefinitely.
-			log.Errorf("failure while flushing memtable to disk: %v. Retrying...\n", err)
+			Errorf("failure while flushing memtable to disk: %v. Retrying...\n", err)
 			time.Sleep(time.Second)
 		}
 	}
@@ -1258,7 +1257,7 @@ func (op *MergeOperator) runCompactions(dur time.Duration) {
 		case <-ticker.C: // wait for tick
 		}
 		if err := op.compact(); err != nil {
-			log.Errorf("failure while running merge operation: %s", err)
+			Errorf("failure while running merge operation: %s", err)
 		}
 		if stop {
 			ticker.Stop()

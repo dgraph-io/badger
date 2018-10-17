@@ -34,7 +34,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger/log"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
@@ -402,7 +401,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 				wb = wb[:0]
 			}
 		} else {
-			log.Warningf("This entry should have been caught. %+v\n", e)
+			Warningf("This entry should have been caught. %+v\n", e)
 		}
 		return nil
 	}
@@ -420,7 +419,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 	for i := 0; i < len(wb); {
 		loops++
 		if batchSize == 0 {
-			log.Warningf("We shouldn't reach batch size of zero.")
+			Warningf("We shouldn't reach batch size of zero.")
 			return ErrNoRewrite
 		}
 		end := i + batchSize

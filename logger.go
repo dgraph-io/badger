@@ -14,22 +14,43 @@
  * limitations under the License.
  */
 
-package log
+package badger
 
 import (
-	golog "log"
+	"log"
 	"os"
 )
 
-type defaultLog struct {
-	*golog.Logger
+// Logger is implemented by any logging system that is used for standard logs.
+type Logger interface {
+	Errorf(string, ...interface{})
+	Infof(string, ...interface{})
+	Warningf(string, ...interface{})
 }
 
-func UseDefault() {
-	Use(&defaultLog{
-		Logger: golog.New(os.Stderr, "badger", golog.LstdFlags),
-	})
+var badgerLogger Logger
+
+func SetLogger(l Logger) { badgerLogger = l }
+
+func Errorf(format string, v ...interface{}) {
+	badgerLogger.Errorf(format, v...)
 }
+
+func Infof(format string, v ...interface{}) {
+	badgerLogger.Infof(format, v...)
+}
+
+func Warningf(format string, v ...interface{}) {
+	badgerLogger.Warningf(format, v...)
+}
+
+type defaultLog struct {
+	*log.Logger
+}
+
+var defaultLogger = &defaultLog{Logger: log.New(os.Stderr, "badger", log.LstdFlags)}
+
+func UseDefaultLogger() { SetLogger(defaultLogger) }
 
 func (l *defaultLog) Errorf(f string, v ...interface{}) {
 	l.Printf("ERROR: "+f, v...)
@@ -41,4 +62,8 @@ func (l *defaultLog) Infof(f string, v ...interface{}) {
 
 func (l *defaultLog) Warningf(f string, v ...interface{}) {
 	l.Printf("WARNING: "+f, v...)
+}
+
+func init() {
+	UseDefaultLogger()
 }
