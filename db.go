@@ -900,7 +900,7 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 				break
 			}
 			// Encounterd error. Retry indefinitely.
-			Errorf("failure while flushing memtable to disk: %v. Retrying...\n", err)
+			Errorf("Failure while flushing memtable to disk: %v. Retrying...\n", err)
 			time.Sleep(time.Second)
 		}
 	}
