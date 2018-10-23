@@ -25,6 +25,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/stretchr/testify/require"
@@ -667,6 +668,49 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 	return buf
 }
 
+func TestPenultimateLogCorruption(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opt := getTestOptions(dir)
+	opt.ValueLogLoadingMode = options.FileIO
+	opt.ValueLogMaxEntries = 3
+
+	db0, err := Open(opt)
+	require.NoError(t, err)
+
+	h := testHelper{db: db0, t: t}
+	h.writeRange(0, 7)
+	h.readRange(0, 7)
+
+	for i := 2; i >= 0; i-- {
+		fpath := vlogFilePath(dir, uint32(i))
+		fi, err := os.Stat(fpath)
+		require.NoError(t, err)
+		require.True(t, fi.Size() > 0, "Empty file at log=%d", i)
+		if i == 0 {
+			err := os.Truncate(fpath, fi.Size()-1)
+			require.NoError(t, err)
+		}
+	}
+	// require.NoError(t, db0.Close())
+	// Simulate a crash by not closing db0, but releasing the locks.
+	if db0.dirLockGuard != nil {
+		require.NoError(t, db0.dirLockGuard.release())
+	}
+	if db0.valueDirGuard != nil {
+		require.NoError(t, db0.valueDirGuard.release())
+	}
+
+	opt.Truncate = true
+	db1, err := Open(opt)
+	require.NoError(t, err)
+	h = testHelper{db: db1, t: t}
+	h.readRange(0, 1) // Only 2 should be gone.
+	h.readRange(3, 7)
+	require.NoError(t, db1.Close())
+}
+
 func checkKeys(t *testing.T, kv *DB, keys [][]byte) {
 	i := 0
 	txn := kv.NewTransaction(false)
@@ -676,6 +720,53 @@ func checkKeys(t *testing.T, kv *DB, keys [][]byte) {
 		i++
 	}
 	require.Equal(t, i, len(keys))
+}
+
+type testHelper struct {
+	db  *DB
+	t   *testing.T
+	val []byte
+}
+
+func (th *testHelper) key(i int) []byte {
+	return []byte(fmt.Sprintf("%d%100d", i, i))
+}
+func (th *testHelper) value() []byte {
+	if len(th.val) > 0 {
+		return th.val
+	}
+	th.val = make([]byte, 100)
+	y.Check2(rand.Read(th.val))
+	return th.val
+}
+func (th *testHelper) writeRange(from, to int) {
+	for i := from; i < to; i++ {
+		err := th.db.Update(func(txn *Txn) error {
+			return txn.Set(th.key(i), th.value())
+		})
+		require.NoError(th.t, err)
+	}
+}
+
+func (th *testHelper) readRange(from, to int) {
+	for i := from; i < to; i++ {
+		err := th.db.View(func(txn *Txn) error {
+			item, err := txn.Get(th.key(i))
+			if err != nil {
+				return err
+			}
+			if err := item.Value(func(val []byte) error {
+				if !bytes.Equal(val, th.value()) {
+					th.t.Fatalf("Invalid value for key: %q", th.key(i))
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			return nil
+		})
+		require.NoError(th.t, err)
+	}
 }
 
 // Test Bug #578, which showed that if a value is moved during value log GC, an
@@ -695,57 +786,22 @@ func TestBug578(t *testing.T) {
 	db, err := Open(opts)
 	require.NoError(t, err)
 
-	key := func(i int) []byte {
-		return []byte(fmt.Sprintf("%d%100d", i, i))
-	}
-
-	value := make([]byte, 100)
-	y.Check2(rand.Read(value))
-
-	writeRange := func(from, to int) {
-		for i := from; i < to; i++ {
-			err := db.Update(func(txn *Txn) error {
-				return txn.Set(key(i), value)
-			})
-			require.NoError(t, err)
-		}
-	}
-
-	readRange := func(from, to int) {
-		for i := from; i < to; i++ {
-			err := db.View(func(txn *Txn) error {
-				item, err := txn.Get(key(i))
-				if err != nil {
-					return err
-				}
-				if err := item.Value(func(val []byte) error {
-					if !bytes.Equal(val, value) {
-						t.Fatalf("Invalid value for key: %q", key(i))
-					}
-					return nil
-				}); err != nil {
-					return err
-				}
-				return nil
-			})
-			require.NoError(t, err)
-		}
-	}
+	h := testHelper{db: db, t: t}
 
 	// Let's run this whole thing a few times.
 	for j := 0; j < 10; j++ {
 		t.Logf("Cycle: %d\n", j)
-		writeRange(0, 32)
-		writeRange(0, 10)
-		writeRange(50, 72)
-		writeRange(40, 72)
-		writeRange(40, 72)
+		h.writeRange(0, 32)
+		h.writeRange(0, 10)
+		h.writeRange(50, 72)
+		h.writeRange(40, 72)
+		h.writeRange(40, 72)
 
 		// Run value log GC a few times.
 		for i := 0; i < 5; i++ {
 			db.RunValueLogGC(0.5)
 		}
-		readRange(0, 10)
+		h.readRange(0, 10)
 	}
 }
 
