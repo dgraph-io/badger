@@ -598,6 +598,38 @@ func (vlog *valueLog) fpath(fid uint32) string {
 	return vlogFilePath(vlog.dirPath, fid)
 }
 
+func (vlog *valueLog) populateFileMap() error {
+	files, err := ioutil.ReadDir(vlog.dirPath)
+	if err != nil {
+		return errors.Wrapf(err, "Error while opening value log")
+	}
+
+	found := make(map[uint64]struct{})
+	var maxFid uint32 // Beware len(files) == 0 case, this starts at 0.
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".vlog") {
+			continue
+		}
+		fsz := len(file.Name())
+		fid, err := strconv.ParseUint(file.Name()[:fsz-5], 10, 32)
+		if err != nil {
+			return errors.Wrapf(err, "Error while parsing value log id for file: %q", file.Name())
+		}
+		if _, ok := found[fid]; ok {
+			return errors.Errorf("Found the same value log file twice: %d", fid)
+		}
+		found[fid] = struct{}{}
+
+		lf := &logFile{
+			fid:         uint32(fid),
+			path:        vlog.fpath(uint32(fid)),
+			loadingMode: vlog.opt.ValueLogLoadingMode,
+		}
+		vlog.filesMap[uint32(fid)] = lf
+	}
+	return nil
+}
+
 func (vlog *valueLog) openOrCreateFiles(readOnly bool) error {
 	files, err := ioutil.ReadDir(vlog.dirPath)
 	if err != nil {
@@ -687,6 +719,32 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	vlog.filesLock.Unlock()
 
 	return lf, nil
+}
+
+func (db *DB) openValueLog(ptr valuePointer, fn logEntry) error {
+	vlog, opt := db.vlog, db.opt
+	vlog.dirPath = opt.ValueDir
+	vlog.opt = opt
+	vlog.kv = db
+
+	if err := vlog.populateFileMap(); err != nil {
+		return err
+	}
+	fids := vlog.sortedFids()
+
+	offset := ptr.Offset + ptr.Len
+	for _, fid := range fids {
+		if fid < ptr.Fid {
+			continue
+		}
+		var offset int64
+		if fid == ptr.Fid {
+			offset = int64(ptr.Offset + ptr.Len)
+		}
+		lf := vlog.filesMap[id]
+		vlog.elog.Printf("Iterating file id: %d", fid)
+		now := time.Now()
+	}
 }
 
 func (vlog *valueLog) Open(kv *DB, opt Options) error {
