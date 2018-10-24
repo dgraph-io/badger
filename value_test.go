@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"bytes"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -679,7 +678,6 @@ func TestPenultimateLogCorruption(t *testing.T) {
 
 	db0, err := Open(opt)
 	require.NoError(t, err)
-	fmt.Println("DB0 openened")
 
 	h := testHelper{db: db0, t: t}
 	h.writeRange(0, 7)
@@ -707,9 +705,15 @@ func TestPenultimateLogCorruption(t *testing.T) {
 	opt.Truncate = true
 	db1, err := Open(opt)
 	require.NoError(t, err)
-	h = testHelper{db: db1, t: t}
-	h.readRange(0, 2) // Only 3 should be gone.
-	h.readRange(4, 7)
+	h.db = db1
+	h.readRange(0, 1) // Only 2 should be gone, because it is at the end of logfile 0.
+	h.readRange(3, 7)
+	err = db1.View(func(txn *Txn) error {
+		_, err := txn.Get(h.key(2)) // Verify that 2 is gone.
+		require.Equal(t, ErrKeyNotFound, err)
+		return nil
+	})
+	require.NoError(t, err)
 	require.NoError(t, db1.Close())
 }
 
@@ -731,7 +735,7 @@ type testHelper struct {
 }
 
 func (th *testHelper) key(i int) []byte {
-	return []byte(fmt.Sprintf("%d%100d", i, i))
+	return []byte(fmt.Sprintf("%010d", i))
 }
 func (th *testHelper) value() []byte {
 	if len(th.val) > 0 {
@@ -741,8 +745,10 @@ func (th *testHelper) value() []byte {
 	y.Check2(rand.Read(th.val))
 	return th.val
 }
+
+// writeRange [from, to].
 func (th *testHelper) writeRange(from, to int) {
-	for i := from; i < to; i++ {
+	for i := from; i <= to; i++ {
 		err := th.db.Update(func(txn *Txn) error {
 			return txn.Set(th.key(i), th.value())
 		})
@@ -751,23 +757,22 @@ func (th *testHelper) writeRange(from, to int) {
 }
 
 func (th *testHelper) readRange(from, to int) {
-	for i := from; i < to; i++ {
+	for i := from; i <= to; i++ {
 		err := th.db.View(func(txn *Txn) error {
 			item, err := txn.Get(th.key(i))
 			if err != nil {
 				return err
 			}
 			if err := item.Value(func(val []byte) error {
-				if !bytes.Equal(val, th.value()) {
-					th.t.Fatalf("Invalid value for key: %q", th.key(i))
-				}
+				require.Equal(th.t, val, th.value(), "key=%q", th.key(i))
 				return nil
+
 			}); err != nil {
 				return err
 			}
 			return nil
 		})
-		require.NoError(th.t, err)
+		require.NoErrorf(th.t, err, "key=%q", th.key(i))
 	}
 }
 

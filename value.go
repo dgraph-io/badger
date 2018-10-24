@@ -785,8 +785,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	// If no files are found, then create a new file.
 	if len(vlog.filesMap) == 0 {
 		// TODO: Warn if the valuePointer is > 0.
-		lf, err := vlog.createVlogFile(0)
-		fmt.Printf("creating zero log file: %v. err=%v\n", lf, err)
+		_, err := vlog.createVlogFile(0)
 		return err
 	}
 
@@ -957,7 +956,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	curlf := vlog.filesMap[maxFid]
 	vlog.filesLock.RUnlock()
-	fmt.Printf("maxfid=%d. curlf=%v\n", maxFid, curlf)
+	// fmt.Printf("maxfid=%d. curlf=%v\n", maxFid, curlf)
 
 	toDisk := func() error {
 		if vlog.buf.Len() == 0 {

@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -536,7 +535,6 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 		meta:  bitFinTxn,
 	}
 	entries = append(entries, e)
-	fmt.Printf("Sending %d entries at ts=%d\n", len(entries), commitTs)
 
 	req, err := txn.db.sendToWriteCh(entries)
 	if err != nil {

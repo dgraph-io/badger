@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"expvar"
-	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -136,7 +135,6 @@ func (out *DB) replayFunction() func(Entry, valuePointer) error {
 			if err != nil {
 				return errors.Wrapf(err, "Unable to parse txn fin: %q", e.Value)
 			}
-			fmt.Printf("bitFinTxn. Ts=%d\n", txnTs)
 			y.AssertTrue(lastCommit == txnTs)
 			y.AssertTrue(len(txn) > 0)
 			// Got the end of txn. Now we can store them.
@@ -148,13 +146,11 @@ func (out *DB) replayFunction() func(Entry, valuePointer) error {
 
 		} else if e.meta&bitTxn > 0 {
 			txnTs := y.ParseTs(nk)
-			fmt.Printf("bitTxn. Ts=%d\n", txnTs)
 			if lastCommit == 0 {
 				lastCommit = txnTs
 			}
 			if lastCommit != txnTs {
 				// We have found an incomplete txn. Let's discard it.
-				fmt.Printf("Discarding txn: %+v\n", txn)
 				txn = txn[:0]
 				lastCommit = txnTs
 			}
