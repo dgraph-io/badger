@@ -24,7 +24,6 @@ import (
 	"hash/crc32"
 	"io"
 	"io/ioutil"
-	"log"
 	"math"
 	"math/rand"
 	"os"
@@ -632,72 +631,6 @@ func (vlog *valueLog) populateFilesMap() error {
 	return nil
 }
 
-// func (vlog *valueLog) openOrCreateFiles(readOnly bool) error {
-// 	files, err := ioutil.ReadDir(vlog.dirPath)
-// 	if err != nil {
-// 		return errors.Wrapf(err, "Error while opening value log")
-// 	}
-
-// 	found := make(map[uint64]struct{})
-// 	var maxFid uint32 // Beware len(files) == 0 case, this starts at 0.
-// 	for _, file := range files {
-// 		if !strings.HasSuffix(file.Name(), ".vlog") {
-// 			continue
-// 		}
-// 		fsz := len(file.Name())
-// 		fid, err := strconv.ParseUint(file.Name()[:fsz-5], 10, 32)
-// 		if err != nil {
-// 			return errors.Wrapf(err, "Error while parsing value log id for file: %q", file.Name())
-// 		}
-// 		if _, ok := found[fid]; ok {
-// 			return errors.Errorf("Found the same value log file twice: %d", fid)
-// 		}
-// 		found[fid] = struct{}{}
-
-// 		lf := &logFile{
-// 			fid:         uint32(fid),
-// 			path:        vlog.fpath(uint32(fid)),
-// 			loadingMode: vlog.opt.ValueLogLoadingMode,
-// 		}
-// 		vlog.filesMap[uint32(fid)] = lf
-// 		if uint32(fid) > maxFid {
-// 			maxFid = uint32(fid)
-// 		}
-// 	}
-// 	vlog.maxFid = uint32(maxFid)
-
-// 	// Open all previous log files as read only. Open the last log file
-// 	// as read write (unless the DB is read only).
-// 	for fid, lf := range vlog.filesMap {
-// 		if fid == maxFid {
-// 			var flags uint32
-// 			if vlog.opt.SyncWrites {
-// 				flags |= y.Sync
-// 			}
-// 			if readOnly {
-// 				flags |= y.ReadOnly
-// 			}
-// 			if lf.fd, err = y.OpenExistingFile(vlog.fpath(fid), flags); err != nil {
-// 				return errors.Wrapf(err, "Unable to open value log file")
-// 			}
-// 		} else {
-// 			if err := lf.openReadOnly(); err != nil {
-// 				return err
-// 			}
-// 		}
-// 	}
-
-// 	// If no files are found, then create a new file.
-// 	if len(vlog.filesMap) == 0 {
-// 		// We already set vlog.maxFid above
-// 		_, err := vlog.createVlogFile(0)
-// 		if err != nil {
-// 			return err
-// 		}
-// 	}
-// 	return nil
-// }
-
 func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	path := vlog.fpath(fid)
 	lf := &logFile{
@@ -781,10 +714,8 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	if err := vlog.populateFilesMap(); err != nil {
 		return err
 	}
-
 	// If no files are found, then create a new file.
 	if len(vlog.filesMap) == 0 {
-		// TODO: Warn if the valuePointer is > 0.
 		_, err := vlog.createVlogFile(0)
 		return err
 	}
@@ -850,10 +781,6 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		return errFile(err, last.path, "Map log file")
 	}
 	return nil
-}
-
-func (vlog *valueLog) Replay(vptr valuePointer, fn interface{}) {
-	log.Fatalf("replay")
 }
 
 func (vlog *valueLog) Close() error {

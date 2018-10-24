@@ -357,7 +357,8 @@ func TestValueGC4(t *testing.T) {
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 
-	kv, _ := Open(opt)
+	kv, err := Open(opt)
+	require.NoError(t, err)
 	defer kv.Close()
 
 	sz := 128 << 10 // 5 entries per value log file.
@@ -397,8 +398,11 @@ func TestValueGC4(t *testing.T) {
 	kv.vlog.rewrite(lf0, tr)
 	kv.vlog.rewrite(lf1, tr)
 
+	// This function is no longer available.
 	// Replay value log
-	kv.vlog.Replay(valuePointer{Fid: 2}, kv.replayFunction())
+	// kv.vlog.Replay(valuePointer{Fid: 2}, kv.replayFunction())
+	err = kv.vlog.open(kv, valuePointer{Fid: 2}, kv.replayFunction())
+	require.NoError(t, err)
 
 	for i := 0; i < 8; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
@@ -564,7 +568,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	checkKeys(t, kv, [][]byte{k3})
 
 	// Replay value log from beginning, badger head is past k2.
-	kv.vlog.Replay(valuePointer{Fid: 0}, kv.replayFunction())
+	kv.vlog.open(kv, valuePointer{Fid: 0}, kv.replayFunction())
 	require.NoError(t, kv.Close())
 }
 
