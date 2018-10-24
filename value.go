@@ -598,14 +598,13 @@ func (vlog *valueLog) fpath(fid uint32) string {
 	return vlogFilePath(vlog.dirPath, fid)
 }
 
-func (vlog *valueLog) populateFileMap() error {
+func (vlog *valueLog) populateFilesMap() error {
 	files, err := ioutil.ReadDir(vlog.dirPath)
 	if err != nil {
 		return errors.Wrapf(err, "Error while opening value log")
 	}
 
 	found := make(map[uint64]struct{})
-	var maxFid uint32 // Beware len(files) == 0 case, this starts at 0.
 	for _, file := range files {
 		if !strings.HasSuffix(file.Name(), ".vlog") {
 			continue
@@ -721,30 +720,119 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	return lf, nil
 }
 
-func (db *DB) openValueLog(ptr valuePointer, fn logEntry) error {
+func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) error {
+	// We should open the file in RW mode, so it can be truncated.
+	var err error
+	lf.fd, err = os.OpenFile(lf.path, os.O_RDWR, 0)
+	if err != nil {
+		return errors.Wrapf(err, "Unable to open file in RW mode: %q", lf.path)
+	}
+	defer lf.fd.Close()
+
+	fi, err := lf.fd.Stat()
+	if err != nil {
+		return errors.Wrapf(err, "Unable to run file.Stat: %q", lf.path)
+	}
+
+	// Alright, let's iterate now.
+	endOffset, err := vlog.iterate(lf, offset, replayFn)
+	if err != nil {
+		return errors.Wrapf(err, "Unable to replay logfile: %q", lf.path)
+	}
+	if int64(endOffset) == fi.Size() {
+		return nil
+	}
+
+	// End offset is different from file size. So, we should truncate the file
+	// to that size.
+	y.AssertTrue(int64(endOffset) <= fi.Size())
+	if !vlog.opt.Truncate {
+		return ErrTruncateNeeded
+	}
+	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
+		return errors.Wrapf(err, "Unable to truncate file: %q at offset: %d."+
+			" This can also be done manually to allow Badger to run.", lf.path, endOffset)
+	}
+	return nil
+}
+
+func (db *DB) openValueLog(ptr valuePointer, replayFn logEntry) error {
 	vlog, opt := db.vlog, db.opt
 	vlog.dirPath = opt.ValueDir
 	vlog.opt = opt
 	vlog.kv = db
 
-	if err := vlog.populateFileMap(); err != nil {
+	if err := vlog.populateFilesMap(); err != nil {
 		return err
 	}
-	fids := vlog.sortedFids()
 
-	offset := ptr.Offset + ptr.Len
+	// If no files are found, then create a new file.
+	if len(vlog.filesMap) == 0 {
+		_, err := vlog.createVlogFile(0)
+		return err
+	}
+
+	fids := vlog.sortedFids()
+	vlog.maxFid = fids[len(fids)-1]
+
 	for _, fid := range fids {
+		lf, ok := vlog.filesMap[fid]
+		y.AssertTrue(ok)
+
+		// This file is before the value head pointer. So, we don't need to
+		// replay it, and can just open it in readonly mode.
 		if fid < ptr.Fid {
+			if err := lf.openReadOnly(); err != nil {
+				return err
+			}
 			continue
 		}
-		var offset int64
+
+		var offset uint32
 		if fid == ptr.Fid {
-			offset = int64(ptr.Offset + ptr.Len)
+			offset = ptr.Offset + ptr.Len
 		}
-		lf := vlog.filesMap[id]
 		vlog.elog.Printf("Iterating file id: %d", fid)
 		now := time.Now()
+
+		if err := vlog.replayLog(lf, offset, replayFn); err != nil {
+			return err
+		}
+
+		// Replay and possible truncation done. Now we can open the file as per
+		// user specified options.
+		if fid < vlog.maxFid {
+			if err := lf.openReadOnly(); err != nil {
+				return err
+			}
+		} else {
+			var flags uint32
+			if vlog.opt.SyncWrites {
+				flags |= y.Sync
+			}
+			if vlog.opt.ReadOnly {
+				flags |= y.ReadOnly
+			}
+			var err error
+			if lf.fd, err = y.OpenExistingFile(vlog.fpath(fid), flags); err != nil {
+				return errors.Wrapf(err, "Unable to open value log file")
+			}
+		}
+		vlog.elog.Printf("Iteration took: %s\n", time.Since(now))
 	}
+
+	// Seek to the end to start writing.
+	last := vlog.filesMap[vlog.maxFid]
+	lastOffset, err := last.fd.Seek(0, io.SeekEnd)
+	if err != nil {
+		return errors.Wrapf(err, "Unable to seek to end of value log: %q", last.path)
+	}
+	vlog.writableLogOffset = uint32(lastOffset)
+
+	vlog.elog = trace.NewEventLog("Badger", "Valuelog")
+	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
+	vlog.lfDiscardStats = &lfDiscardStats{m: make(map[uint32]int64)}
+	return nil
 }
 
 func (vlog *valueLog) Open(kv *DB, opt Options) error {
