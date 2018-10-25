@@ -603,7 +603,7 @@ func (vlog *valueLog) populateFilesMap() error {
 
 	files, err := ioutil.ReadDir(vlog.dirPath)
 	if err != nil {
-		return errors.Wrapf(err, "Error while opening value log")
+		return errFile(err, vlog.dirPath, "Unable to open log dir.")
 	}
 
 	found := make(map[uint64]struct{})
@@ -617,7 +617,7 @@ func (vlog *valueLog) populateFilesMap() error {
 			return errFile(err, file.Name(), "Unable to parse log id.")
 		}
 		if _, ok := found[fid]; ok {
-			return fmt.Errorf("Found the same value log file twice: %d", fid)
+			return errFile(err, file.Name(), "Duplicate file found. Please delete one.")
 		}
 		found[fid] = struct{}{}
 
@@ -627,6 +627,9 @@ func (vlog *valueLog) populateFilesMap() error {
 			loadingMode: vlog.opt.ValueLogLoadingMode,
 		}
 		vlog.filesMap[uint32(fid)] = lf
+		if vlog.maxFid < uint32(fid) {
+			vlog.maxFid = uint32(fid)
+		}
 	}
 	return nil
 }
@@ -721,8 +724,6 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	}
 
 	fids := vlog.sortedFids()
-	vlog.maxFid = fids[len(fids)-1]
-
 	for _, fid := range fids {
 		lf, ok := vlog.filesMap[fid]
 		y.AssertTrue(ok)
@@ -740,15 +741,15 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		if fid == ptr.Fid {
 			offset = ptr.Offset + ptr.Len
 		}
-		vlog.elog.Printf("Iterating file id: %d", fid)
+		Infof("Replaying file id: %d at offset: %d\n", fid, offset)
 		now := time.Now()
-
+		// Replay and possible truncation done. Now we can open the file as per
+		// user specified options.
 		if err := vlog.replayLog(lf, offset, replayFn); err != nil {
 			return err
 		}
+		Infof("Replay took: %s\n", time.Since(now))
 
-		// Replay and possible truncation done. Now we can open the file as per
-		// user specified options.
 		if fid < vlog.maxFid {
 			if err := lf.openReadOnly(); err != nil {
 				return err
@@ -764,10 +765,9 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			}
 			var err error
 			if lf.fd, err = y.OpenExistingFile(vlog.fpath(fid), flags); err != nil {
-				return errors.Wrapf(err, "Unable to open value log file")
+				return errFile(err, lf.path, "Open existing file")
 			}
 		}
-		vlog.elog.Printf("Iteration took: %s\n", time.Since(now))
 	}
 
 	// Seek to the end to start writing.
@@ -778,6 +778,8 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		return errFile(err, last.path, "file.Seek to end")
 	}
 	vlog.writableLogOffset = uint32(lastOffset)
+	// Map the file if needed. When we create a file, it is automatically
+	// mapped.
 	if err = last.mmap(2 * opt.ValueLogFileSize); err != nil {
 		return errFile(err, last.path, "Map log file")
 	}
