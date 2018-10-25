@@ -151,6 +151,7 @@ func (out *DB) replayFunction() func(Entry, valuePointer) error {
 			}
 			if lastCommit != txnTs {
 				// We have found an incomplete txn. Let's discard it.
+				Warningf("Found an incomplete txn at timestamp %d. Discarding it.\n", lastCommit)
 				txn = txn[:0]
 				lastCommit = txnTs
 			}

@@ -398,9 +398,6 @@ func TestValueGC4(t *testing.T) {
 	kv.vlog.rewrite(lf0, tr)
 	kv.vlog.rewrite(lf1, tr)
 
-	// This function is no longer available.
-	// Replay value log
-	// kv.vlog.Replay(valuePointer{Fid: 2}, kv.replayFunction())
 	err = kv.vlog.open(kv, valuePointer{Fid: 2}, kv.replayFunction())
 	require.NoError(t, err)
 
@@ -697,7 +694,6 @@ func TestPenultimateLogCorruption(t *testing.T) {
 			require.NoError(t, err)
 		}
 	}
-	// require.NoError(t, db0.Close())
 	// Simulate a crash by not closing db0, but releasing the locks.
 	if db0.dirLockGuard != nil {
 		require.NoError(t, db0.dirLockGuard.release())
@@ -827,14 +823,14 @@ func BenchmarkReadWrite(b *testing.B) {
 	for _, vsz := range valueSize {
 		for _, rw := range rwRatio {
 			b.Run(fmt.Sprintf("%3.1f,%04d", rw, vsz), func(b *testing.B) {
-				var vl valueLog
-				dir, err := ioutil.TempDir("", "vlog")
+				dir, err := ioutil.TempDir("", "vlog-benchmark")
 				y.Check(err)
 				defer os.RemoveAll(dir)
-				// TODO: Fix this up.
-				// err = vl.Open(nil, getTestOptions(dir))
+
+				db, err := Open(getTestOptions(dir))
 				y.Check(err)
-				defer vl.Close()
+
+				vl := db.vlog
 				b.ResetTimer()
 
 				for i := 0; i < b.N; i++ {

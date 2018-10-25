@@ -614,7 +614,7 @@ func (vlog *valueLog) populateFilesMap() error {
 		fsz := len(file.Name())
 		fid, err := strconv.ParseUint(file.Name()[:fsz-5], 10, 32)
 		if err != nil {
-			return fmt.Errorf("Unable to parse value log id for file %q. Err=%v", file.Name(), err)
+			return errFile(err, file.Name(), "Unable to parse log id.")
 		}
 		if _, ok := found[fid]; ok {
 			return fmt.Errorf("Found the same value log file twice: %d", fid)
@@ -755,11 +755,12 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			}
 		} else {
 			var flags uint32
-			if vlog.opt.SyncWrites {
-				flags |= y.Sync
-			}
-			if vlog.opt.ReadOnly {
+			switch {
+			case vlog.opt.ReadOnly:
+				// If we have read only, we don't need SyncWrites.
 				flags |= y.ReadOnly
+			case vlog.opt.SyncWrites:
+				flags |= y.Sync
 			}
 			var err error
 			if lf.fd, err = y.OpenExistingFile(vlog.fpath(fid), flags); err != nil {
@@ -883,7 +884,6 @@ func (vlog *valueLog) write(reqs []*request) error {
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	curlf := vlog.filesMap[maxFid]
 	vlog.filesLock.RUnlock()
-	// fmt.Printf("maxfid=%d. curlf=%v\n", maxFid, curlf)
 
 	toDisk := func() error {
 		if vlog.buf.Len() == 0 {
