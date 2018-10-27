@@ -772,7 +772,7 @@ func (th *testHelper) readRange(from, to int) {
 			}
 			return nil
 		})
-		require.NoErrorf(th.t, err, "key=%q", th.key(i))
+		require.NoError(th.t, err, "key=%q", th.key(i))
 	}
 }
 
