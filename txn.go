@@ -28,8 +28,9 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/y"
-	farm "github.com/dgryski/go-farm"
+	"github.com/dgryski/go-farm"
 	"github.com/pkg/errors"
+	"runtime"
 )
 
 type oracle struct {
@@ -604,6 +605,102 @@ type txnCb struct {
 	err    error
 }
 
+type txnCbChan struct {
+	c      chan *txnCb
+	m      sync.Mutex
+	buffer []*txnCb
+	closed bool
+}
+
+func newTxnCbChan() *txnCbChan {
+	c := &txnCbChan{
+		c: make(chan *txnCb, 1),
+	}
+	return c
+}
+
+func (c *txnCbChan) put(v *txnCb) {
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	if c.closed {
+		return
+	}
+
+	select {
+	case c.c <- v:
+		return
+	default:
+		c.buffer = append(c.buffer, v)
+	}
+}
+
+func (c *txnCbChan) get() (*txnCb, bool) {
+	// if c is closed it will return immediately with
+	// (v, true) or (nil, false)
+	// if c is not closed, it will block util a sender arrive
+	// or close c
+	v, ok := <-c.c
+	c.m.Lock()
+	defer c.m.Unlock()
+	// if c is closed and ok is true means that v is just cached in c
+	// ok is false means that c has no cached elements, so
+	// try to read from Buffer
+	if c.closed {
+		if ok {
+			return v, true
+		}
+		if len(c.buffer) > 0 {
+			v = c.buffer[0]
+			c.buffer[0] = nil // gc
+			c.buffer = c.buffer[1:]
+			return v, true
+		}
+		return nil, false
+	}
+	// c is opening, so refill c to notify consumer
+	if len(c.buffer) > 0 {
+		select {
+		case c.c <- c.buffer[0]:
+			c.buffer[0] = nil // gc
+			c.buffer = c.buffer[1:]
+		default:
+		}
+	}
+	return v, true
+}
+
+func (c *txnCbChan) close() {
+	c.m.Lock()
+	c.closed = true
+	close(c.c)
+	c.m.Unlock()
+}
+
+func (c *txnCbChan) startConsumer(closer *y.Closer) {
+	resource := make(chan struct{}, runtime.NumCPU()*2-1)
+	var wg sync.WaitGroup
+	for {
+		cb, ok := c.get()
+		// ok is false only if c is closed and
+		// there are no cache elements
+		if !ok {
+			break
+		}
+		// if the resource limit is reached,
+		// g will be blocked until an available resource
+		resource <- struct{}{}
+		wg.Add(1)
+		go func() {
+			runTxnCallback(cb)
+			<-resource
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	closer.Done()
+}
+
 func runTxnCallback(cb *txnCb) {
 	switch {
 	case cb == nil:
@@ -618,6 +715,10 @@ func runTxnCallback(cb *txnCb) {
 	default:
 		cb.user(nil)
 	}
+}
+
+func (txn *Txn) runTxnCallbackAsync(cb *txnCb) {
+	txn.db.txnCallbackChan.put(cb)
 }
 
 // CommitWith acts like Commit, but takes a callback, which gets run via a
@@ -636,17 +737,17 @@ func (txn *Txn) CommitWith(cb func(error)) {
 		// Do not run these callbacks from here, because the CommitWith and the
 		// callback might be acquiring the same locks. Instead run the callback
 		// from another goroutine.
-		go runTxnCallback(&txnCb{user: cb, err: nil})
+		txn.runTxnCallbackAsync(&txnCb{user: cb, err: nil})
 		return
 	}
 
 	commitCb, err := txn.commitAndSend()
 	if err != nil {
-		go runTxnCallback(&txnCb{user: cb, err: err})
+		txn.runTxnCallbackAsync(&txnCb{user: cb, err: err})
 		return
 	}
 
-	go runTxnCallback(&txnCb{user: cb, commit: commitCb})
+	txn.runTxnCallbackAsync(&txnCb{user: cb, commit: commitCb})
 }
 
 // ReadTs returns the read timestamp of the transaction.
