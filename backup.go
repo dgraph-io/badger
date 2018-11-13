@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/dgraph-io/badger/protos"
 	"github.com/dgraph-io/badger/y"
@@ -55,8 +56,9 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
-			if item.Version() < since {
-				// Ignore versions less than given timestamp
+			if item.Version() < since || item.IsDeletedOrExpired() {
+				// Ignore versions less than given timestamp.
+				// Also ignore expired or deleted items.
 				continue
 			}
 			valCopy, err := item.ValueCopy(nil)
@@ -116,6 +118,7 @@ func (db *DB) Load(r io.Reader) error {
 		}
 	}
 
+	nowTs := uint64(time.Now().Unix())
 	for {
 		var sz uint64
 		err := binary.Read(br, binary.LittleEndian, &sz)
@@ -135,6 +138,10 @@ func (db *DB) Load(r io.Reader) error {
 		}
 		if err = e.Unmarshal(unmarshalBuf[:sz]); err != nil {
 			return err
+		}
+		// don't load expired entries.
+		if e.ExpiresAt > 0 && e.ExpiresAt <= nowTs {
+			continue
 		}
 		entries = append(entries, &Entry{
 			Key:       y.KeyWithTs(e.Key, e.Version),
