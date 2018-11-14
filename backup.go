@@ -18,13 +18,17 @@ package badger
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"io"
 	"sync"
-	"time"
 
 	"github.com/dgraph-io/badger/protos"
 	"github.com/dgraph-io/badger/y"
+)
+
+var (
+	backupDeleteMark = []byte("!delete!")
 )
 
 func writeTo(entry *protos.KVPair, w io.Writer) error {
@@ -54,11 +58,19 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
+		keyMarkFn := func(item *Item, delete bool) []byte {
+			if delete {
+				mark := append([]byte{}, backupDeleteMark...)
+				mark = append(mark, item.KeyCopy(mark)...)
+				return mark
+			}
+			return y.Copy(item.Key())
+		}
+
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
-			if item.Version() < since || item.IsDeletedOrExpired() {
+			if item.Version() < since {
 				// Ignore versions less than given timestamp.
-				// Also ignore expired or deleted items.
 				continue
 			}
 			valCopy, err := item.ValueCopy(nil)
@@ -68,7 +80,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 			}
 
 			entry := &protos.KVPair{
-				Key:       y.Copy(item.Key()),
+				Key:       keyMarkFn(item, item.IsDeletedOrExpired()),
 				Value:     valCopy,
 				UserMeta:  []byte{item.UserMeta()},
 				Version:   item.Version(),
@@ -78,6 +90,17 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 			// Write entries to disk
 			if err := writeTo(entry, w); err != nil {
 				return err
+			}
+
+			// if we need to discard earlier versions of this item, add a copy 1sec earlier
+			// to delete previous versions. the new version is the one that matters.
+			if !item.IsDeletedOrExpired() && item.DiscardEarlierVersions() {
+				entry := entry
+				entry.Version -= 1
+				entry.Key = keyMarkFn(item, true)
+				if err := writeTo(entry, w); err != nil {
+					return err
+				}
 			}
 		}
 		tsNew = txn.readTs
@@ -118,7 +141,6 @@ func (db *DB) Load(r io.Reader) error {
 		}
 	}
 
-	nowTs := uint64(time.Now().Unix())
 	for {
 		var sz uint64
 		err := binary.Read(br, binary.LittleEndian, &sz)
@@ -139,15 +161,18 @@ func (db *DB) Load(r io.Reader) error {
 		if err = e.Unmarshal(unmarshalBuf[:sz]); err != nil {
 			return err
 		}
-		// don't load expired entries.
-		if e.ExpiresAt > 0 && e.ExpiresAt <= nowTs {
-			continue
+		var meta byte
+		// entry marked for deletion.
+		if bytes.HasPrefix(e.Key, backupDeleteMark) {
+			e.Key = e.Key[8:]
+			meta = bitDelete
 		}
 		entries = append(entries, &Entry{
 			Key:       y.KeyWithTs(e.Key, e.Version),
 			Value:     e.Value,
 			UserMeta:  e.UserMeta[0],
 			ExpiresAt: e.ExpiresAt,
+			meta:      meta,
 		})
 		// Update nextTxnTs, memtable stores this timestamp in badger head
 		// when flushed.
