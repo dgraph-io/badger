@@ -77,7 +77,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 			}
 
 			// clear txn bits
-			item.meta &= ^(bitTxn | bitFinTxn)
+			meta := item.meta &^ (bitTxn | bitFinTxn)
 
 			entry := &protos.KVPair{
 				Key:       y.Copy(item.Key()),
@@ -85,7 +85,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 				UserMeta:  []byte{item.UserMeta()},
 				Version:   item.Version(),
 				ExpiresAt: item.ExpiresAt(),
-				Meta:      []byte{item.meta},
+				Meta:      []byte{meta},
 			}
 			if err := writeTo(entry, w); err != nil {
 				return err
@@ -181,7 +181,7 @@ func (db *DB) Load(r io.Reader) error {
 			if err := batchSetAsyncIfNoErr(entries); err != nil {
 				return err
 			}
-			entries = entries[:0]
+			entries = make([]*Entry, 0, 1000)
 		}
 	}
 
