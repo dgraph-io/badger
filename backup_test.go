@@ -18,15 +18,13 @@ package badger
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
+	"strconv"
 	"testing"
 	"time"
 
@@ -36,22 +34,12 @@ import (
 
 var randSrc = rand.NewSource(time.Now().UnixNano())
 
-func randomValue() []byte {
-	const chars = "abcdefghijklmnopqrstuvwxyz1234567890"
-	r := rand.New(randSrc)
-	var b []byte
-	for _, i := range r.Perm(len(chars))[:10] {
-		b = append(b, chars[i])
-	}
-	return b
-}
-
 func createEntries(n int) []*protos.KVPair {
 	entries := make([]*protos.KVPair, n)
 	for i := 0; i < n; i++ {
 		entries[i] = &protos.KVPair{
-			Key:      []byte(fmt.Sprintf("key%05d", i+1)),
-			Value:    randomValue(),
+			Key:      []byte(fmt.Sprint("key", i)),
+			Value:    []byte{1},
 			UserMeta: []byte{0},
 			Meta:     []byte{0},
 		}
@@ -72,58 +60,6 @@ func populateEntries(db *DB, entries []*protos.KVPair) error {
 	})
 }
 
-func verifyEntries(br io.Reader, entries []*protos.KVPair) error {
-	var list []*protos.KVPair
-	unmarshalBuf := make([]byte, 1<<10)
-	for {
-		var sz uint64
-		err := binary.Read(br, binary.LittleEndian, &sz)
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return err
-		}
-
-		if cap(unmarshalBuf) < int(sz) {
-			unmarshalBuf = make([]byte, sz)
-		}
-
-		e := &protos.KVPair{}
-		if _, err = io.ReadFull(br, unmarshalBuf[:sz]); err != nil {
-			return err
-		}
-		if err = e.Unmarshal(unmarshalBuf[:sz]); err != nil {
-			return err
-		}
-		list = append(list, e)
-	}
-
-	if len(entries) != len(list) {
-		return fmt.Errorf("entries length mismatch %d expected != %d actual",
-			len(entries), len(list))
-	}
-
-	// sort by key
-	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
-
-	for i := 0; i < len(entries); i++ {
-		if !bytes.Equal(entries[i].Key, list[i].Key) {
-			return fmt.Errorf("key name mismatch %q expected != %q actual",
-				entries[i].Key, list[i].Key)
-		}
-		if len(entries[i].Value) != len(entries[i].Value) {
-			return fmt.Errorf("value mismatch %q expected != %q actual",
-				entries[i].Value, list[i].Value)
-		}
-		if !bytes.Equal(entries[i].Meta, list[i].Meta) {
-			return fmt.Errorf("meta mismatch %+v expected != %+v actual",
-				entries[i].Meta, list[i].Meta)
-		}
-	}
-
-	return nil
-}
-
 func TestBackup(t *testing.T) {
 	var bb bytes.Buffer
 
@@ -134,74 +70,45 @@ func TestBackup(t *testing.T) {
 	defer os.RemoveAll(tmpdir)
 
 	opts := DefaultOptions
-	opts.Dir = tmpdir
-	opts.ValueDir = tmpdir
+	opts.Dir = filepath.Join(tmpdir, "backup0")
+	opts.ValueDir = opts.Dir
 	db1, err := Open(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	entries := createEntries(1000)
+	N := 1000
+	entries := createEntries(N)
 	require.NoError(t, populateEntries(db1, entries))
 
 	_, err = db1.Backup(&bb, 0)
 	require.NoError(t, err)
-	require.NoError(t, verifyEntries(&bb, entries))
-}
 
-func verifyItems(db *DB, entries []*protos.KVPair, updates map[int]byte) error {
-	err := db.View(func(txn *Txn) error {
+	err = db1.View(func(txn *Txn) error {
+		opts := DefaultIteratorOptions
+		it := txn.NewIterator(opts)
+		defer it.Close()
 		var count int
-		for i := range entries {
-			item, err := txn.Get(entries[i].Key)
-			if err != nil {
-				// if key not found, check that we are expecting it to be gone.
-				if err == ErrKeyNotFound {
-					v, ok := updates[i]
-					if ok && v&bitDelete == 1 {
-						count++
-						continue
-					}
-				}
-				return fmt.Errorf("%s: %s", string(entries[i].Key), err)
-			}
-			val, err := item.ValueCopy(nil)
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			idx, err := strconv.Atoi(string(item.Key())[3:])
 			if err != nil {
 				return err
 			}
-			if !bytes.Equal(entries[count].Key, item.Key()) {
-				return fmt.Errorf("key name mismatch %q expected != %q actual",
-					entries[count].Key, item.Key())
-			}
-			key := string(entries[count].Key)
-			if !bytes.Equal(entries[count].Value, val) {
-				return fmt.Errorf("%s: value mismatch %q expected != %q actual",
-					key, entries[count].Value, val)
-			}
-			if entries[count].UserMeta[0] != item.UserMeta() {
-				return fmt.Errorf("%s: userMeta mismatch %+v expected != %+v actual",
-					key, entries[count].UserMeta, item.UserMeta())
-			}
-			if entries[count].Meta[0] != item.meta {
-				return fmt.Errorf("%s: meta mismatch %+v expected != %+v actual",
-					key, entries[count].Meta, item.meta)
-			}
-			if entries[count].Version != item.Version() {
-				return fmt.Errorf("%s: version mismatch %d expected != %d actual",
-					key, entries[count].Version, item.Version())
+			if idx > N || !bytes.Equal(entries[idx].Key, item.Key()) {
+				return fmt.Errorf("%s: %s", string(item.Key()), ErrKeyNotFound)
 			}
 			count++
 		}
-		if len(entries) != count {
-			return fmt.Errorf("entries length mismatch %d expected != %d actual",
-				len(entries), count)
+		if N != count {
+			return fmt.Errorf("wrong number of items: %d expected, %d actual", N, count)
 		}
 		return nil
 	})
-	return err
+	require.NoError(t, err)
 }
 
-func TestRestore(t *testing.T) {
+func TestBackupLoad(t *testing.T) {
 	var bb bytes.Buffer
 
 	tmpdir, err := ioutil.TempDir("", "badger-test")
@@ -211,7 +118,7 @@ func TestRestore(t *testing.T) {
 	defer os.RemoveAll(tmpdir)
 
 	opts := DefaultOptions
-	N := 100
+	N := 1000
 	entries := createEntries(N)
 
 	// backup
@@ -242,10 +149,31 @@ func TestRestore(t *testing.T) {
 	require.NoError(t, db2.Load(&bb))
 
 	// verify
-	require.NoError(t, verifyItems(db2, entries, nil))
+	err = db2.View(func(txn *Txn) error {
+		opts := DefaultIteratorOptions
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		var count int
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			idx, err := strconv.Atoi(string(item.Key())[3:])
+			if err != nil {
+				return err
+			}
+			if idx > N || !bytes.Equal(entries[idx].Key, item.Key()) {
+				return fmt.Errorf("%s: %s", string(item.Key()), ErrKeyNotFound)
+			}
+			count++
+		}
+		if N != count {
+			return fmt.Errorf("wrong number of items: %d expected, %d actual", N, count)
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
-func TestRestoreWithDeletes(t *testing.T) {
+func TestBackupLoadIncremental(t *testing.T) {
 	var bb bytes.Buffer
 
 	tmpdir, err := ioutil.TempDir("", "badger-test")
@@ -261,6 +189,8 @@ func TestRestoreWithDeletes(t *testing.T) {
 
 	// backup
 	{
+		var since uint64
+
 		opts.Dir = filepath.Join(tmpdir, "backup2")
 		opts.ValueDir = opts.Dir
 		db1, err := Open(opts)
@@ -269,12 +199,15 @@ func TestRestoreWithDeletes(t *testing.T) {
 		}
 
 		require.NoError(t, populateEntries(db1, entries))
+		since, err = db1.Backup(&bb, 0)
+		require.NoError(t, err)
+
+		ints := rand.New(randSrc).Perm(N)
 
 		// pick 10 items to mark as deleted.
-		r := rand.New(randSrc)
 		err = db1.Update(func(txn *Txn) error {
 			var err error
-			for _, i := range r.Perm(N)[:10] {
+			for _, i := range ints[:10] {
 				err = txn.Delete(entries[i].Key)
 				if err != nil {
 					return err
@@ -284,9 +217,41 @@ func TestRestoreWithDeletes(t *testing.T) {
 			return nil
 		})
 		require.NoError(t, err)
-
-		_, err = db1.Backup(&bb, 0)
+		since, err = db1.Backup(&bb, since)
 		require.NoError(t, err)
+
+		// pick 5 items to mark as expired.
+		err = db1.Update(func(txn *Txn) error {
+			var err error
+			for _, i := range (ints)[10:15] {
+				err = txn.SetWithTTL(entries[i].Key, entries[i].Value, -time.Hour)
+				if err != nil {
+					return err
+				}
+				updates[i] = bitDelete // expired
+			}
+			return nil
+		})
+		require.NoError(t, err)
+		since, err = db1.Backup(&bb, since)
+		require.NoError(t, err)
+
+		// pick 5 items to mark as discard.
+		err = db1.Update(func(txn *Txn) error {
+			var err error
+			for _, i := range ints[15:20] {
+				err = txn.SetWithDiscard(entries[i].Key, entries[i].Value, 0)
+				if err != nil {
+					return err
+				}
+				updates[i] = bitDiscardEarlierVersions
+			}
+			return nil
+		})
+		require.NoError(t, err)
+		since, err = db1.Backup(&bb, since)
+		require.NoError(t, err)
+
 		db1.Close()
 	}
 	require.True(t, len(entries) == N)
@@ -302,7 +267,37 @@ func TestRestoreWithDeletes(t *testing.T) {
 	require.NoError(t, db2.Load(&bb))
 
 	// verify
-	require.NoError(t, verifyItems(db2, entries, updates))
+	actual := make(map[int]byte)
+	err = db2.View(func(txn *Txn) error {
+		opts := DefaultIteratorOptions
+		opts.AllVersions = true
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		var count int
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			idx, err := strconv.Atoi(string(item.Key())[3:])
+			if err != nil {
+				return err
+			}
+			if item.IsDeletedOrExpired() {
+				_, ok := updates[idx]
+				if !ok {
+					return fmt.Errorf("%s: not expected to be updated but it is",
+						string(item.Key()))
+				}
+				actual[idx] = item.meta
+				count++
+				continue
+			}
+		}
+		if len(updates) != count {
+			return fmt.Errorf("mismatched updated items: %d expected, %d actual",
+				len(updates), count)
+		}
+		return nil
+	})
+	require.NoError(t, err, "%v %v", updates, actual)
 }
 
 func TestDumpLoad(t *testing.T) {
@@ -421,7 +416,7 @@ func Test_BackupRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := byte(0); i < N; i++ {
+	for i := byte(1); i < N; i++ {
 		err = db1.Update(func(tx *Txn) error {
 			if err := tx.Set(append(key1, i), rawValue); err != nil {
 				return err
@@ -451,7 +446,7 @@ func Test_BackupRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := byte(0); i < N; i++ {
+	for i := byte(1); i < N; i++ {
 		err = db2.View(func(tx *Txn) error {
 			k := append(key1, i)
 			item, err := tx.Get(k)
@@ -475,7 +470,7 @@ func Test_BackupRestore(t *testing.T) {
 		}
 	}
 
-	for i := byte(0); i < N; i++ {
+	for i := byte(1); i < N; i++ {
 		err = db2.Update(func(tx *Txn) error {
 			if err := tx.Set(append(key1, i), rawValue); err != nil {
 				return err
@@ -506,7 +501,7 @@ func Test_BackupRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := byte(0); i < N; i++ {
+	for i := byte(1); i < N; i++ {
 		err = db3.View(func(tx *Txn) error {
 			k := append(key1, i)
 			item, err := tx.Get(k)
