@@ -18,15 +18,292 @@ package badger
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"testing"
+	"time"
 
+	"github.com/dgraph-io/badger/protos"
 	"github.com/stretchr/testify/require"
 )
+
+var randSrc = rand.NewSource(time.Now().UnixNano())
+
+func randomValue() []byte {
+	const chars = "abcdefghijklmnopqrstuvwxyz1234567890"
+	r := rand.New(randSrc)
+	var b []byte
+	for _, i := range r.Perm(len(chars))[:10] {
+		b = append(b, chars[i])
+	}
+	return b
+}
+
+func createEntries(n int) []*protos.KVPair {
+	entries := make([]*protos.KVPair, n)
+	for i := 0; i < n; i++ {
+		entries[i] = &protos.KVPair{
+			Key:      []byte(fmt.Sprintf("key%05d", i+1)),
+			Value:    randomValue(),
+			UserMeta: []byte{0},
+			Meta:     []byte{0},
+		}
+	}
+	return entries
+}
+
+func populateEntries(db *DB, entries []*protos.KVPair) error {
+	return db.Update(func(txn *Txn) error {
+		var err error
+		for i, e := range entries {
+			if err = txn.Set(e.Key, e.Value); err != nil {
+				return err
+			}
+			entries[i].Version = 1
+		}
+		return nil
+	})
+}
+
+func verifyEntries(br io.Reader, entries []*protos.KVPair) error {
+	var list []*protos.KVPair
+	unmarshalBuf := make([]byte, 1<<10)
+	for {
+		var sz uint64
+		err := binary.Read(br, binary.LittleEndian, &sz)
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return err
+		}
+
+		if cap(unmarshalBuf) < int(sz) {
+			unmarshalBuf = make([]byte, sz)
+		}
+
+		e := &protos.KVPair{}
+		if _, err = io.ReadFull(br, unmarshalBuf[:sz]); err != nil {
+			return err
+		}
+		if err = e.Unmarshal(unmarshalBuf[:sz]); err != nil {
+			return err
+		}
+		list = append(list, e)
+	}
+
+	if len(entries) != len(list) {
+		return fmt.Errorf("entries length mismatch %d expected != %d actual",
+			len(entries), len(list))
+	}
+
+	// sort by key
+	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
+
+	for i := 0; i < len(entries); i++ {
+		if !bytes.Equal(entries[i].Key, list[i].Key) {
+			return fmt.Errorf("key name mismatch %q expected != %q actual",
+				entries[i].Key, list[i].Key)
+		}
+		if len(entries[i].Value) != len(entries[i].Value) {
+			return fmt.Errorf("value mismatch %q expected != %q actual",
+				entries[i].Value, list[i].Value)
+		}
+		if !bytes.Equal(entries[i].Meta, list[i].Meta) {
+			return fmt.Errorf("meta mismatch %+v expected != %+v actual",
+				entries[i].Meta, list[i].Meta)
+		}
+	}
+
+	return nil
+}
+
+func TestBackup(t *testing.T) {
+	var bb bytes.Buffer
+
+	tmpdir, err := ioutil.TempDir("", "badger-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpdir)
+
+	opts := DefaultOptions
+	opts.Dir = tmpdir
+	opts.ValueDir = tmpdir
+	db1, err := Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries := createEntries(1000)
+	require.NoError(t, populateEntries(db1, entries))
+
+	_, err = db1.Backup(&bb, 0)
+	require.NoError(t, err)
+	require.NoError(t, verifyEntries(&bb, entries))
+}
+
+func verifyItems(db *DB, entries []*protos.KVPair, updates map[int]byte) error {
+	err := db.View(func(txn *Txn) error {
+		var count int
+		for i := range entries {
+			item, err := txn.Get(entries[i].Key)
+			if err != nil {
+				// if key not found, check that we are expecting it to be gone.
+				if err == ErrKeyNotFound {
+					v, ok := updates[i]
+					if ok && v&bitDelete == 1 {
+						count++
+						continue
+					}
+				}
+				return fmt.Errorf("%s: %s", string(entries[i].Key), err)
+			}
+			val, err := item.ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(entries[count].Key, item.Key()) {
+				return fmt.Errorf("key name mismatch %q expected != %q actual",
+					entries[count].Key, item.Key())
+			}
+			key := string(entries[count].Key)
+			if !bytes.Equal(entries[count].Value, val) {
+				return fmt.Errorf("%s: value mismatch %q expected != %q actual",
+					key, entries[count].Value, val)
+			}
+			if entries[count].UserMeta[0] != item.UserMeta() {
+				return fmt.Errorf("%s: userMeta mismatch %+v expected != %+v actual",
+					key, entries[count].UserMeta, item.UserMeta())
+			}
+			if entries[count].Meta[0] != item.meta {
+				return fmt.Errorf("%s: meta mismatch %+v expected != %+v actual",
+					key, entries[count].Meta, item.meta)
+			}
+			if entries[count].Version != item.Version() {
+				return fmt.Errorf("%s: version mismatch %d expected != %d actual",
+					key, entries[count].Version, item.Version())
+			}
+			count++
+		}
+		if len(entries) != count {
+			return fmt.Errorf("entries length mismatch %d expected != %d actual",
+				len(entries), count)
+		}
+		return nil
+	})
+	return err
+}
+
+func TestRestore(t *testing.T) {
+	var bb bytes.Buffer
+
+	tmpdir, err := ioutil.TempDir("", "badger-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpdir)
+
+	opts := DefaultOptions
+	N := 100
+	entries := createEntries(N)
+
+	// backup
+	{
+		opts.Dir = filepath.Join(tmpdir, "backup1")
+		opts.ValueDir = opts.Dir
+		db1, err := Open(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		require.NoError(t, populateEntries(db1, entries))
+
+		_, err = db1.Backup(&bb, 0)
+		require.NoError(t, err)
+		db1.Close()
+	}
+	require.True(t, len(entries) == N)
+	require.True(t, bb.Len() > 0)
+
+	// restore
+	opts.Dir = filepath.Join(tmpdir, "restore1")
+	opts.ValueDir = opts.Dir
+	db2, err := Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	require.NoError(t, db2.Load(&bb))
+
+	// verify
+	require.NoError(t, verifyItems(db2, entries, nil))
+}
+
+func TestRestoreWithDeletes(t *testing.T) {
+	var bb bytes.Buffer
+
+	tmpdir, err := ioutil.TempDir("", "badger-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpdir)
+
+	opts := DefaultOptions
+	N := 100
+	entries := createEntries(N)
+	updates := make(map[int]byte)
+
+	// backup
+	{
+		opts.Dir = filepath.Join(tmpdir, "backup2")
+		opts.ValueDir = opts.Dir
+		db1, err := Open(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		require.NoError(t, populateEntries(db1, entries))
+
+		// pick 10 items to mark as deleted.
+		r := rand.New(randSrc)
+		err = db1.Update(func(txn *Txn) error {
+			var err error
+			for _, i := range r.Perm(N)[:10] {
+				err = txn.Delete(entries[i].Key)
+				if err != nil {
+					return err
+				}
+				updates[i] = bitDelete
+			}
+			return nil
+		})
+		require.NoError(t, err)
+
+		_, err = db1.Backup(&bb, 0)
+		require.NoError(t, err)
+		db1.Close()
+	}
+	require.True(t, len(entries) == N)
+	require.True(t, bb.Len() > 0)
+
+	// restore
+	opts.Dir = filepath.Join(tmpdir, "restore2")
+	opts.ValueDir = opts.Dir
+	db2, err := Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	require.NoError(t, db2.Load(&bb))
+
+	// verify
+	require.NoError(t, verifyItems(db2, entries, updates))
+}
 
 func TestDumpLoad(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")

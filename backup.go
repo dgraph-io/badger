@@ -18,17 +18,12 @@ package badger
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"io"
 	"sync"
 
 	"github.com/dgraph-io/badger/protos"
 	"github.com/dgraph-io/badger/y"
-)
-
-var (
-	backupDeleteMark = []byte("!delete!")
 )
 
 func writeTo(entry *protos.KVPair, w io.Writer) error {
@@ -58,15 +53,6 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
-		keyMarkFn := func(item *Item, delete bool) []byte {
-			if delete {
-				mark := append([]byte{}, backupDeleteMark...)
-				mark = append(mark, item.KeyCopy(mark)...)
-				return mark
-			}
-			return y.Copy(item.Key())
-		}
-
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
 			if item.Version() < since {
@@ -79,12 +65,16 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 				continue
 			}
 
+			// clear txn bits
+			item.meta &= ^(bitTxn | bitFinTxn)
+
 			entry := &protos.KVPair{
-				Key:       keyMarkFn(item, item.IsDeletedOrExpired()),
+				Key:       y.Copy(item.Key()),
 				Value:     valCopy,
 				UserMeta:  []byte{item.UserMeta()},
 				Version:   item.Version(),
 				ExpiresAt: item.ExpiresAt(),
+				Meta:      []byte{item.meta},
 			}
 
 			// Write entries to disk
@@ -97,7 +87,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 			if !item.IsDeletedOrExpired() && item.DiscardEarlierVersions() {
 				entry := entry
 				entry.Version -= 1
-				entry.Key = keyMarkFn(item, true)
+				entry.Meta = []byte{bitDelete}
 				if err := writeTo(entry, w); err != nil {
 					return err
 				}
@@ -161,18 +151,12 @@ func (db *DB) Load(r io.Reader) error {
 		if err = e.Unmarshal(unmarshalBuf[:sz]); err != nil {
 			return err
 		}
-		var meta byte
-		// entry marked for deletion.
-		if bytes.HasPrefix(e.Key, backupDeleteMark) {
-			e.Key = e.Key[8:]
-			meta = bitDelete
-		}
 		entries = append(entries, &Entry{
 			Key:       y.KeyWithTs(e.Key, e.Version),
 			Value:     e.Value,
 			UserMeta:  e.UserMeta[0],
 			ExpiresAt: e.ExpiresAt,
-			meta:      meta,
+			meta:      e.Meta[0],
 		})
 		// Update nextTxnTs, memtable stores this timestamp in badger head
 		// when flushed.
@@ -184,7 +168,7 @@ func (db *DB) Load(r io.Reader) error {
 			if err := batchSetAsyncIfNoErr(entries); err != nil {
 				return err
 			}
-			entries = make([]*Entry, 0, 1000)
+			entries = entries[:0]
 		}
 	}
 
