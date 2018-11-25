@@ -173,8 +173,6 @@ func TestBackupLoad(t *testing.T) {
 }
 
 func TestBackupLoadIncremental(t *testing.T) {
-	var bb bytes.Buffer
-
 	tmpdir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
 		t.Fatal(err)
@@ -185,11 +183,10 @@ func TestBackupLoadIncremental(t *testing.T) {
 	N := 100
 	entries := createEntries(N)
 	updates := make(map[int]byte)
+	var bb bytes.Buffer
 
 	// backup
 	{
-		var since uint64
-
 		opts.Dir = filepath.Join(tmpdir, "backup2")
 		opts.ValueDir = opts.Dir
 		db1, err := Open(opts)
@@ -198,17 +195,15 @@ func TestBackupLoadIncremental(t *testing.T) {
 		}
 
 		require.NoError(t, populateEntries(db1, entries))
-		since, err = db1.Backup(&bb, 0)
+		since, err := db1.Backup(&bb, 0)
 		require.NoError(t, err)
 
 		ints := rand.New(randSrc).Perm(N)
 
 		// pick 10 items to mark as deleted.
 		err = db1.Update(func(txn *Txn) error {
-			var err error
 			for _, i := range ints[:10] {
-				err = txn.Delete(entries[i].Key)
-				if err != nil {
+				if err := txn.Delete(entries[i].Key); err != nil {
 					return err
 				}
 				updates[i] = bitDelete
@@ -221,10 +216,9 @@ func TestBackupLoadIncremental(t *testing.T) {
 
 		// pick 5 items to mark as expired.
 		err = db1.Update(func(txn *Txn) error {
-			var err error
 			for _, i := range (ints)[10:15] {
-				err = txn.SetWithTTL(entries[i].Key, entries[i].Value, -time.Hour)
-				if err != nil {
+				if err := txn.SetWithTTL(
+					entries[i].Key, entries[i].Value, -time.Hour); err != nil {
 					return err
 				}
 				updates[i] = bitDelete // expired
@@ -237,10 +231,8 @@ func TestBackupLoadIncremental(t *testing.T) {
 
 		// pick 5 items to mark as discard.
 		err = db1.Update(func(txn *Txn) error {
-			var err error
 			for _, i := range ints[15:20] {
-				err = txn.SetWithDiscard(entries[i].Key, entries[i].Value, 0)
-				if err != nil {
+				if err := txn.SetWithDiscard(entries[i].Key, entries[i].Value, 0); err != nil {
 					return err
 				}
 				updates[i] = bitDiscardEarlierVersions
