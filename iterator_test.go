@@ -149,7 +149,7 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 	y.Check(err)
 	defer db.Close()
 
-	N := 100000
+	N := 100000 // Should generate around 80 SSTables.
 	val := []byte("OK")
 	bkey := func(i int) []byte {
 		return []byte(fmt.Sprintf("%06d", i))
