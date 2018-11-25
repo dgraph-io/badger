@@ -20,9 +20,13 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
@@ -103,49 +107,100 @@ func TestIteratePrefix(t *testing.T) {
 	})
 }
 
+// go test -v -run=XXX -bench=BenchmarkIterate -benchtime=3s
+// Benchmark with opt.Prefix set ===
+// goos: linux
+// goarch: amd64
+// pkg: github.com/dgraph-io/badger
+// BenchmarkIteratePrefixSingleKey/Key_lookups-4         	   10000	    365539 ns/op
+// --- BENCH: BenchmarkIteratePrefixSingleKey/Key_lookups-4
+// 	iterator_test.go:147: Inner b.N: 1
+// 	iterator_test.go:147: Inner b.N: 100
+// 	iterator_test.go:147: Inner b.N: 10000
+// --- BENCH: BenchmarkIteratePrefixSingleKey
+// 	iterator_test.go:143: LSM files: 79
+// 	iterator_test.go:145: Outer b.N: 1
+// PASS
+// ok  	github.com/dgraph-io/badger	41.586s
+//
+// Benchmark with NO opt.Prefix set ===
+// goos: linux
+// goarch: amd64
+// pkg: github.com/dgraph-io/badger
+// BenchmarkIteratePrefixSingleKey/Key_lookups-4         	   10000	    460924 ns/op
+// --- BENCH: BenchmarkIteratePrefixSingleKey/Key_lookups-4
+// 	iterator_test.go:147: Inner b.N: 1
+// 	iterator_test.go:147: Inner b.N: 100
+// 	iterator_test.go:147: Inner b.N: 10000
+// --- BENCH: BenchmarkIteratePrefixSingleKey
+// 	iterator_test.go:143: LSM files: 83
+// 	iterator_test.go:145: Outer b.N: 1
+// PASS
+// ok  	github.com/dgraph-io/badger	41.836s
+//
+// Only my laptop there's a 20% improvement in latency with ~80 files.
 func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 	dir, err := ioutil.TempDir(".", "badger-test")
 	y.Check(err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
+	opts.TableLoadingMode = options.LoadToRAM
 	db, err := Open(opts)
 	y.Check(err)
 	defer db.Close()
 
-	bkey := func(i int) []byte {
-		return []byte(fmt.Sprintf("%04d", i))
-	}
+	N := 100000
 	val := []byte("OK")
-	n := 10000
+	bkey := func(i int) []byte {
+		return []byte(fmt.Sprintf("%06d", i))
+	}
 
 	batch := db.NewWriteBatch()
-	for i := 0; i < n; i++ {
+	for i := 0; i < N; i++ {
 		y.Check(batch.Set(bkey(i), val, 0))
 	}
 	y.Check(batch.Flush())
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		key := bkey(i % n)
-		err := db.View(func(txn *Txn) error {
-			opt := DefaultIteratorOptions
-			opt.Prefix = key
-			opt.AllVersions = true
-
-			itr := txn.NewIterator(opt)
-			defer itr.Close()
-
-			var count int
-			for itr.Rewind(); itr.Valid(); itr.Next() {
-				count++
-			}
-			if count != 1 {
-				b.Fatalf("Count must be one for key: %s", key)
-			}
-			return nil
-		})
-		if err != nil {
-			b.Fatalf("Error while View: %v", err)
+	var lsmFiles int
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if strings.HasSuffix(path, ".sst") {
+			lsmFiles++
 		}
-	}
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	y.Check(err)
+	b.Logf("LSM files: %d", lsmFiles)
+
+	b.Logf("Outer b.N: %d", b.N)
+	b.Run("Key lookups", func(b *testing.B) {
+		b.Logf("Inner b.N: %d", b.N)
+		for i := 0; i < b.N; i++ {
+			key := bkey(rand.Intn(N))
+			err := db.View(func(txn *Txn) error {
+				opt := DefaultIteratorOptions
+				// NOTE: Comment opt.Prefix out here to compare the performance
+				// difference between providing Prefix as an option, v/s not. I
+				// see a 20% improvement when there are ~80 SSTables.
+				opt.Prefix = key
+				opt.AllVersions = true
+
+				itr := txn.NewIterator(opt)
+				defer itr.Close()
+
+				var count int
+				for itr.Seek(key); itr.ValidForPrefix(key); itr.Next() {
+					count++
+				}
+				if count != 1 {
+					b.Fatalf("Count must be one key: %s. Found: %d", key, count)
+				}
+				return nil
+			})
+			if err != nil {
+				b.Fatalf("Error while View: %v", err)
+			}
+		}
+	})
 }
