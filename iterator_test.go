@@ -172,6 +172,8 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 	})
 	y.Check(err)
 	b.Logf("LSM files: %d", lsmFiles)
+	b.Logf("Key splits: %v", db.KeySplits(nil))
+	b.Logf("Key splits with prefix: %v", db.KeySplits([]byte("09")))
 
 	b.Logf("Outer b.N: %d", b.N)
 	b.Run("Key lookups", func(b *testing.B) {
