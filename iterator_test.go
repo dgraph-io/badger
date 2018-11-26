@@ -31,16 +31,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type tableMock struct {
+	left, right []byte
+}
+
+func (tm *tableMock) Smallest() []byte            { return tm.left }
+func (tm *tableMock) Biggest() []byte             { return tm.right }
+func (tm *tableMock) DoesNotHave(key []byte) bool { return false }
+
 func TestPickTables(t *testing.T) {
 	opt := DefaultIteratorOptions
 
 	within := func(prefix, left, right string) {
 		opt.Prefix = []byte(prefix)
-		require.True(t, opt.PickTable([]byte(left), []byte(right)))
+		tm := &tableMock{left: []byte(left), right: []byte(right)}
+		require.True(t, opt.PickTable(tm))
 	}
 	outside := func(prefix, left, right string) {
 		opt.Prefix = []byte(prefix)
-		require.False(t, opt.PickTable([]byte(left), []byte(right)))
+		tm := &tableMock{left: []byte(left), right: []byte(right)}
+		require.False(t, opt.PickTable(tm))
 	}
 	within("abc", "ab", "ad")
 	within("abc", "abc", "ad")
@@ -97,12 +107,38 @@ func TestIteratePrefix(t *testing.T) {
 			return count
 		}
 
+		countOneKey := func(key []byte) int {
+			var count int
+			err := db.View(func(txn *Txn) error {
+				itr := txn.NewKeyIterator(key, DefaultIteratorOptions)
+				defer itr.Close()
+				for itr.Rewind(); itr.Valid(); itr.Next() {
+					item := itr.Item()
+					err := item.Value(func(v []byte) error {
+						require.Equal(t, val, v)
+						return nil
+					})
+					require.NoError(t, err)
+					require.Equal(t, key, item.Key())
+					count++
+				}
+				return nil
+			})
+			require.NoError(t, err)
+			return count
+		}
+
 		for i := 0; i <= 9; i++ {
 			require.Equal(t, 1, countKeys(fmt.Sprintf("%d%d%d%d", i, i, i, i)))
 			require.Equal(t, 10, countKeys(fmt.Sprintf("%d%d%d", i, i, i)))
 			require.Equal(t, 100, countKeys(fmt.Sprintf("%d%d", i, i)))
 			require.Equal(t, 1000, countKeys(fmt.Sprintf("%d", i)))
-			require.Equal(t, 10000, countKeys(""))
+		}
+		require.Equal(t, 10000, countKeys(""))
+
+		t.Logf("Testing each key with key iterator")
+		for i := 0; i < n; i++ {
+			require.Equal(t, 1, countOneKey(bkey(i)))
 		}
 	})
 }
