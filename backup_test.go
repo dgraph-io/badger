@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -253,4 +254,68 @@ func Test_BackupRestore(t *testing.T) {
 		}
 	}
 
+}
+
+func TestBatchWithManagedDB(t *testing.T) {
+	// Open the Badger database located in the /tmp/badger directory.
+	// It will be created if it doesn't exist.
+	opts := DefaultOptions
+	opts.Dir = "/tmp/badger"
+	opts.ValueDir = "/tmp/badger"
+	db, err := OpenManaged(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	N := 3
+	wb := db.NewWriteBatch()
+	defer wb.Cancel()
+
+	for i := 0; i < N; i++ {
+		err := wb.Set(toBytes(i), toBytes(i), 0) // Will create txns as needed.
+		require.NoError(t, err)
+	}
+	// managed db transactions should be called with FlushAt
+	err = wb.FlushAt(1)
+	require.NoError(t, err)
+
+	// calling Flush should fail
+	err = wb.Flush()
+	require.Error(t, err)
+}
+
+func TestBatchWithUnmanagedDB(t *testing.T) {
+	// Open the Badger database located in the /tmp/badger directory.
+	// It will be created if it doesn't exist.
+	opts := DefaultOptions
+	opts.Dir = "/tmp/badger"
+	opts.ValueDir = "/tmp/badger"
+	db, err := Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	N := 3
+	wb := db.NewWriteBatch()
+	defer wb.Cancel()
+
+	for i := 0; i < N; i++ {
+		err := wb.Set(toBytes(i), toBytes(i), 0) // Will create txns as needed.
+		require.NoError(t, err)
+	}
+	// unmanaged db transactions should be called with Flush
+	err = wb.Flush()
+	require.NoError(t, err)
+
+	// calling FlushAt should fail
+	err = wb.FlushAt(1)
+	require.Error(t, err)
+}
+
+func toBytes(i int) []byte {
+	bs := make([]byte, 4)
+	binary.LittleEndian.PutUint32(bs, 31415926)
+	return bs
 }

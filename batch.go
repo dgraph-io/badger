@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -34,7 +35,7 @@ type WriteBatch struct {
 // creating and committing transactions. Due to the nature of SSI guaratees provided by Badger,
 // blind writes can never encounter transaction conflicts (ErrConflict).
 func (db *DB) NewWriteBatch() *WriteBatch {
-	return &WriteBatch{db: db, txn: db.newTransaction(true, true)}
+	return &WriteBatch{db: db, txn: db.newTransaction(true, db.opt.managedTxns)}
 }
 
 // Cancel function must be called if there's a chance that Flush might not get
@@ -112,7 +113,7 @@ func (wb *WriteBatch) commit() error {
 	// to wait for this one to commit.
 	wb.wg.Add(1)
 	wb.txn.CommitWith(wb.callback)
-	wb.txn = wb.db.newTransaction(true, true)
+	wb.txn = wb.db.newTransaction(true, wb.db.opt.managedTxns)
 	wb.txn.readTs = 0 // We're not reading anything.
 	return wb.err
 }
@@ -120,8 +121,43 @@ func (wb *WriteBatch) commit() error {
 // Flush must be called at the end to ensure that any pending writes get committed to Badger. Flush
 // returns any error stored by WriteBatch.
 func (wb *WriteBatch) Flush() error {
+	if wb.db.opt.managedTxns {
+		return fmt.Errorf("Flush cannot be called with managedDB=true. Use FlushAt instead")
+	}
 	wb.Lock()
 	_ = wb.commit()
+	wb.txn.Discard()
+	wb.Unlock()
+
+	wb.wg.Wait()
+	// Safe to access error without any synchronization here.
+	return wb.err
+}
+
+// commit at the specified timestamp
+// Caller to commit must hold a write lock.
+func (wb *WriteBatch) commitAt(commitTs uint64) error {
+	if wb.err != nil {
+		return wb.err
+	}
+	// Get a new txn before we commit this one. So, the new txn doesn't need
+	// to wait for this one to commit.
+	wb.wg.Add(1)
+	wb.txn.CommitAt(commitTs, wb.callback)
+	wb.txn = wb.db.newTransaction(true, wb.db.opt.managedTxns)
+	wb.txn.readTs = 0 // We're not reading anything.
+	return wb.err
+}
+
+// Flush must be called at the end to ensure that any pending writes get committed to Badger. Flush
+// returns any error stored by WriteBatch.
+func (wb *WriteBatch) FlushAt(commitTs uint64) error {
+	if !wb.db.opt.managedTxns {
+		return fmt.Errorf("FlushAt cannot be called with managedDB=false. Use Flush instead")
+	}
+
+	wb.Lock()
+	_ = wb.commitAt(commitTs)
 	wb.txn.Discard()
 	wb.Unlock()
 
