@@ -36,14 +36,15 @@ import (
 	"math"
 	"math/rand"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/dgraph-io/badger/y"
 )
 
 const (
-	maxHeight      = 20
-	heightIncrease = math.MaxUint32 / 3
+	maxHeight                  = 20
+	defaultProbability float64 = 1 / math.E
 )
 
 // MaxNodeSize is the memory footprint of a node of maximum height.
@@ -75,10 +76,13 @@ type node struct {
 
 // Skiplist maps keys to values (in memory)
 type Skiplist struct {
-	height int32 // Current height. 1 <= height <= kMaxHeight. CAS.
-	head   *node
-	ref    int32
-	arena  *Arena
+	height      int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	head        *node
+	ref         int32
+	arena       *Arena
+	probability float64
+	probTable   []float64
+	randSource  rand.Source
 }
 
 // IncrRef increases the refcount
@@ -122,15 +126,29 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint16) {
 	return
 }
 
+// probabilityTable calculates in advance the probability of a new node having a given level.
+// probability is in [0, 1], maxLevel is (0, 64]
+// Returns a table of floating point probabilities that each level should be included during an insert.
+func probabilityTable(probability float64, maxLevel int) (table []float64) {
+	for i := 1; i <= maxLevel; i++ {
+		prob := math.Pow(probability, float64(i-1))
+		table = append(table, prob)
+	}
+	return table
+}
+
 // NewSkiplist makes a new empty skiplist, with a given arena size
 func NewSkiplist(arenaSize int64) *Skiplist {
 	arena := newArena(arenaSize)
 	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
 	return &Skiplist{
-		height: 1,
-		head:   head,
-		arena:  arena,
-		ref:    1,
+		height:      1,
+		head:        head,
+		arena:       arena,
+		probability: defaultProbability,
+		probTable:   probabilityTable(defaultProbability, maxHeight),
+		randSource:  rand.New(rand.NewSource(time.Now().UnixNano())),
+		ref:         1,
 	}
 }
 
@@ -157,19 +175,16 @@ func (s *node) casNextOffset(h int, old, val uint32) bool {
 	return atomic.CompareAndSwapUint32(&s.tower[h], old, val)
 }
 
-// Returns true if key is strictly > n.key.
-// If n is nil, this is an "end" marker and we return false.
-//func (s *Skiplist) keyIsAfterNode(key []byte, n *node) bool {
-//	y.AssertTrue(n != s.head)
-//	return n != nil && y.CompareKeys(key, n.key) > 0
-//}
+func (s *Skiplist) randomHeight() (level int) {
+	// Our random number source only has Int63(), so we have to produce a float64 from it
+	// Reference: https://golang.org/src/math/rand/rand.go#L150
+	r := float64(s.randSource.Int63()) / (1 << 63)
 
-func randomHeight() int {
-	h := 1
-	for h < maxHeight && rand.Uint32() <= heightIncrease {
-		h++
+	level = 1
+	for level < maxHeight && r < s.probTable[level] {
+		level++
 	}
-	return h
+	return
 }
 
 func (s *Skiplist) getNext(nd *node, height int) *node {
@@ -299,7 +314,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	}
 
 	// We do need to create a new node.
-	height := randomHeight()
+	height := s.randomHeight()
 	x := newNode(s.arena, key, v, height)
 
 	// Try to increase s.height via CAS.
