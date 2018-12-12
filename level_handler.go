@@ -132,16 +132,37 @@ func (s *levelHandler) replaceTables(newTables []*table.Table) error {
 		toDecr[i-left] = tbl
 	}
 
-	// To be safe, just make a copy. TODO: Be more careful and avoid copying.
 	numDeleted := right - left
 	numAdded := len(newTables)
-	tables := make([]*table.Table, len(s.tables)-numDeleted+numAdded)
-	y.AssertTrue(left == copy(tables, s.tables[:left]))
-	t := tables[left:]
-	y.AssertTrue(numAdded == copy(t, newTables))
-	t = t[numAdded:]
-	y.AssertTrue(len(s.tables[right:]) == copy(t, s.tables[right:]))
-	s.tables = tables
+	oldLen := len(s.tables)
+	newLen := oldLen - numDeleted + numAdded
+	if newLen > cap(s.tables) {
+		// copy can't be avoided
+		tables := make([]*table.Table, newLen)
+		y.AssertTrue(left == copy(tables, s.tables[:left]))
+		t := tables[left:]
+		y.AssertTrue(numAdded == copy(t, newTables))
+		t = t[numAdded:]
+		y.AssertTrue(len(s.tables[right:]) == copy(t, s.tables[right:]))
+		s.tables = tables
+	} else {
+		// avoid copy
+		if newLen > oldLen {
+			// extend tables with nil pointers
+			s.tables = s.tables[0:newLen]
+		}
+
+		// copy tables[right:oldLen] to its new position
+		y.AssertTrue(oldLen-right == copy(s.tables[left+numAdded:], s.tables[right:oldLen]))
+		// copy newTables to where it should be
+		y.AssertTrue(numAdded == copy(s.tables[left:], newTables))
+		// shrink if necessary
+		if newLen < oldLen {
+			s.tables = s.tables[0:newLen]
+		}
+
+	}
+
 	s.Unlock() // s.Unlock before we DecrRef tables -- that can be slow.
 	return decrRefs(toDecr)
 }
