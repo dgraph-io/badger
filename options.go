@@ -80,7 +80,8 @@ type Options struct {
 	// determined by the smaller of its file size and max entries.
 	ValueLogMaxEntries uint32
 
-	// Number of compaction workers to run concurrently.
+	// Number of compaction workers to run concurrently. Setting this to zero would stop LSM tree
+	// from compactions.
 	NumCompactors int
 
 	// Transaction start and commit timestamps are managed by end-user.
@@ -90,8 +91,6 @@ type Options struct {
 
 	// 4. Flags for testing purposes
 	// ------------------------------
-	DoNotCompact bool // Stops LSM tree from compactions.
-
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
 
@@ -108,7 +107,6 @@ type Options struct {
 // DefaultOptions sets a list of recommended options for good performance.
 // Feel free to modify these to suit your needs.
 var DefaultOptions = Options{
-	DoNotCompact:        false,
 	LevelOneSize:        256 << 20,
 	LevelSizeMultiplier: 10,
 	TableLoadingMode:    options.LoadToRAM,

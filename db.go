@@ -33,6 +33,7 @@ import (
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
+	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
 )
@@ -1141,6 +1142,56 @@ func (db *DB) MaxBatchCount() int64 {
 // MaxBatchCount returns max possible batch size
 func (db *DB) MaxBatchSize() int64 {
 	return db.opt.maxBatchSize
+}
+
+func (db *DB) Flatten() error {
+	if db.opt.NumCompactors > 0 {
+		return errors.New("Flatten can only be run when no compact workers are running.")
+	}
+
+	compactAway := func(cp compactionPriority) error {
+		Infof("Attempting to compact with %+v\n", cp)
+		if err := db.lc.doCompact(cp); err != nil {
+			Errorf("While running doCompact with %+v. Error: %v\n", cp, err)
+			return err
+		}
+		Infof("One or more tables from level %d compacted.\n", cp.level)
+		return nil
+	}
+
+	hbytes := func(sz int64) string {
+		return humanize.Bytes(uint64(sz))
+	}
+
+	for {
+		Infof("\n")
+		var levels []int
+		for i, l := range db.lc.levels {
+			sz := l.getTotalSize()
+			Infof("Level: %d. Size: %8s Max: %8s\n",
+				i, hbytes(l.getTotalSize()), hbytes(l.maxTotalSize))
+			if sz > 0 {
+				levels = append(levels, i)
+			}
+		}
+		if len(levels) == 1 {
+			prios := db.lc.pickCompactLevels()
+			if len(prios) == 0 || prios[0].score <= 1.0 {
+				Infof("All tables consolidated into one level. Flattening done.\n")
+				return nil
+			}
+			if err := compactAway(prios[0]); err != nil {
+				return err
+			}
+			continue
+		}
+		// Create an artificial compaction priority, to ensure that we compact the level.
+		cp := compactionPriority{level: levels[0], score: 1.71}
+		if err := compactAway(cp); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // MergeOperator represents a Badger merge operator.
