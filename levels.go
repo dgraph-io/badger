@@ -240,7 +240,14 @@ func (s *levelsController) runWorker(lc *y.Closer) {
 		return
 	}
 
-	time.Sleep(time.Duration(rand.Int31n(1000)) * time.Millisecond)
+	randomDelay := time.NewTimer(time.Duration(rand.Int31n(1000)) * time.Millisecond)
+	select {
+	case <-randomDelay.C:
+	case <-lc.HasBeenClosed():
+		randomDelay.Stop()
+		return
+	}
+
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
