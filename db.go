@@ -33,6 +33,7 @@ import (
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
+	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
 )
@@ -360,7 +361,7 @@ func (db *DB) Close() (err error) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	db.flushChan <- flushTask{nil, valuePointer{}} // Tell flusher to quit.
+	close(db.flushChan) // Tell flusher to quit.
 
 	if db.closers.memtable != nil {
 		db.closers.memtable.Wait()
@@ -373,19 +374,12 @@ func (db *DB) Close() (err error) {
 
 	// Force Compact L0
 	// We don't need to care about cstatus since no parallel compaction is running.
-	cd := compactDef{
-		elog:      trace.New("Badger", "Compact"),
-		thisLevel: db.lc.levels[0],
-		nextLevel: db.lc.levels[1],
-	}
-	cd.elog.SetMaxEvents(100)
-	defer cd.elog.Finish()
-	if db.lc.fillTablesL0(&cd) {
-		if err := db.lc.runCompactDef(0, cd); err != nil {
-			cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v", err, cd)
+	if db.opt.CompactL0OnClose {
+		if err := db.lc.doCompact(compactionPriority{level: 0, score: 1.73}); err != nil {
+			Warningf("Error while forcing compaction on level 0: %v", err)
+		} else {
+			Infof("Force compaction on level 0 done")
 		}
-	} else {
-		cd.elog.LazyPrintf("fillTables failed for level zero. No compaction required")
 	}
 
 	if lcErr := db.lc.close(); err == nil {
@@ -1141,6 +1135,74 @@ func (db *DB) MaxBatchCount() int64 {
 // MaxBatchCount returns max possible batch size
 func (db *DB) MaxBatchSize() int64 {
 	return db.opt.maxBatchSize
+}
+
+func (db *DB) Flatten(workers int) error {
+	if db.opt.NumCompactors > 0 {
+		return errors.New("Flatten can only be run when no compact workers are running.")
+	}
+
+	compactAway := func(cp compactionPriority) error {
+		Infof("Attempting to compact with %+v\n", cp)
+		errCh := make(chan error, 1)
+		for i := 0; i < workers; i++ {
+			go func() {
+				errCh <- db.lc.doCompact(cp)
+			}()
+		}
+		var success int
+		var rerr error
+		for i := 0; i < workers; i++ {
+			err := <-errCh
+			if err != nil {
+				rerr = err
+				Warningf("While running doCompact with %+v. Error: %v\n", cp, err)
+			} else {
+				success++
+			}
+		}
+		if success == 0 {
+			return rerr
+		}
+		// We could do at least one successful compaction. So, we'll consider this a success.
+		Infof("%d compactor(s) succeeded. One or more tables from level %d compacted.\n",
+			success, cp.level)
+		return nil
+	}
+
+	hbytes := func(sz int64) string {
+		return humanize.Bytes(uint64(sz))
+	}
+
+	for {
+		Infof("\n")
+		var levels []int
+		for i, l := range db.lc.levels {
+			sz := l.getTotalSize()
+			Infof("Level: %d. %8s Size. %8s Max.\n",
+				i, hbytes(l.getTotalSize()), hbytes(l.maxTotalSize))
+			if sz > 0 {
+				levels = append(levels, i)
+			}
+		}
+		if len(levels) == 1 {
+			prios := db.lc.pickCompactLevels()
+			if len(prios) == 0 || prios[0].score <= 1.0 {
+				Infof("All tables consolidated into one level. Flattening done.\n")
+				return nil
+			}
+			if err := compactAway(prios[0]); err != nil {
+				return err
+			}
+			continue
+		}
+		// Create an artificial compaction priority, to ensure that we compact the level.
+		cp := compactionPriority{level: levels[0], score: 1.71}
+		if err := compactAway(cp); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // MergeOperator represents a Badger merge operator.
