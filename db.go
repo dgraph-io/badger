@@ -361,7 +361,7 @@ func (db *DB) Close() (err error) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	db.flushChan <- flushTask{nil, valuePointer{}} // Tell flusher to quit.
+	close(db.flushChan) // Tell flusher to quit.
 
 	if db.closers.memtable != nil {
 		db.closers.memtable.Wait()
@@ -374,19 +374,12 @@ func (db *DB) Close() (err error) {
 
 	// Force Compact L0
 	// We don't need to care about cstatus since no parallel compaction is running.
-	cd := compactDef{
-		elog:      trace.New("Badger", "Compact"),
-		thisLevel: db.lc.levels[0],
-		nextLevel: db.lc.levels[1],
-	}
-	cd.elog.SetMaxEvents(100)
-	defer cd.elog.Finish()
-	if db.lc.fillTablesL0(&cd) {
-		if err := db.lc.runCompactDef(0, cd); err != nil {
-			cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v", err, cd)
+	if db.opt.CompactL0OnClose {
+		if err := db.lc.doCompact(compactionPriority{level: 0, score: 1.73}); err != nil {
+			Warningf("Error while forcing compaction on level 0: %v", err)
+		} else {
+			Infof("Force compaction on level 0 done")
 		}
-	} else {
-		cd.elog.LazyPrintf("fillTables failed for level zero. No compaction required")
 	}
 
 	if lcErr := db.lc.close(); err == nil {

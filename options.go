@@ -84,6 +84,10 @@ type Options struct {
 	// from compactions.
 	NumCompactors int
 
+	// When closing the DB, force compact Level 0. This ensures that both reads and writes are
+	// efficient when the DB is opened later.
+	CompactL0OnClose bool
+
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.
@@ -121,6 +125,7 @@ var DefaultOptions = Options{
 	NumMemtables:            5,
 	SyncWrites:              true,
 	NumVersionsToKeep:       1,
+	CompactL0OnClose:        true,
 	// Nothing to read/write value log using standard File I/O
 	// MemoryMap to mmap() the value log files
 	// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.

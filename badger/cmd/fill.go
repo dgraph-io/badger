@@ -20,6 +20,7 @@ This command would fill Badger with random data. Useful for testing and performa
 
 var keySz, valSz int
 var numKeys float64
+var force bool
 
 const mil float64 = 1e6
 
@@ -29,6 +30,7 @@ func init() {
 	fillCmd.Flags().IntVarP(&valSz, "val-size", "v", 128, "Size of value")
 	fillCmd.Flags().Float64VarP(&numKeys, "keys-mil", "m", 10.0,
 		"Number of keys to add in millions")
+	fillCmd.Flags().BoolVarP(&force, "force-compact", "f", true, "Force compact level 0 on close.")
 }
 
 func fill(cmd *cobra.Command, args []string) error {
@@ -37,12 +39,17 @@ func fill(cmd *cobra.Command, args []string) error {
 	opts.ValueDir = vlogDir
 	opts.Truncate = truncate
 	opts.SyncWrites = false
+	opts.CompactL0OnClose = force
 
 	db, err := badger.Open(opts)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() {
+		start := time.Now()
+		err := db.Close()
+		badger.Infof("DB.Close. Error: %v. Time taken: %s", err, time.Since(start))
+	}()
 
 	start := time.Now()
 	batch := db.NewWriteBatch()
