@@ -80,8 +80,8 @@ type Options struct {
 	// determined by the smaller of its file size and max entries.
 	ValueLogMaxEntries uint32
 
-	// Number of compaction workers to run concurrently. Setting this to zero would stop LSM tree
-	// from compactions.
+	// Number of compaction workers to run concurrently. Setting this to zero would stop compactions
+	// to happen within LSM tree. If set to zero, writes could block forever.
 	NumCompactors int
 
 	// When closing the DB, force compact Level 0. This ensures that both reads and writes are

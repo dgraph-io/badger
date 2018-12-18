@@ -605,7 +605,6 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 			cd.bot = []*table.Table{}
 			cd.nextRange = cd.thisRange
 			if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
-				Infof("CompareAndAdd failed here.")
 				continue
 			}
 			return true
