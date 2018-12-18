@@ -14,8 +14,13 @@ This command would compact all the LSM tables into one level.
 	RunE: flatten,
 }
 
+var numWorkers int
+
 func init() {
 	RootCmd.AddCommand(flattenCmd)
+	flattenCmd.Flags().IntVarP(&numWorkers, "num-workers", "w", 1,
+		"Number of concurrent compactors to run. More compactors would use more"+
+			" server resources to potentially achieve faster compactions.")
 }
 
 func flatten(cmd *cobra.Command, args []string) error {
@@ -31,5 +36,5 @@ func flatten(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	return db.Flatten()
+	return db.Flatten(numWorkers)
 }

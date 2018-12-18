@@ -1137,18 +1137,36 @@ func (db *DB) MaxBatchSize() int64 {
 	return db.opt.maxBatchSize
 }
 
-func (db *DB) Flatten() error {
+func (db *DB) Flatten(workers int) error {
 	if db.opt.NumCompactors > 0 {
 		return errors.New("Flatten can only be run when no compact workers are running.")
 	}
 
 	compactAway := func(cp compactionPriority) error {
 		Infof("Attempting to compact with %+v\n", cp)
-		if err := db.lc.doCompact(cp); err != nil {
-			Errorf("While running doCompact with %+v. Error: %v\n", cp, err)
-			return err
+		errCh := make(chan error, 1)
+		for i := 0; i < workers; i++ {
+			go func() {
+				errCh <- db.lc.doCompact(cp)
+			}()
 		}
-		Infof("One or more tables from level %d compacted.\n", cp.level)
+		var success int
+		var rerr error
+		for i := 0; i < workers; i++ {
+			err := <-errCh
+			if err != nil {
+				rerr = err
+				Warningf("While running doCompact with %+v. Error: %v\n", cp, err)
+			} else {
+				success++
+			}
+		}
+		if success == 0 {
+			return rerr
+		}
+		// We could do at least one successful compaction. So, we'll consider this a success.
+		Infof("%d compactor(s) succeeded. One or more tables from level %d compacted.\n",
+			success, cp.level)
 		return nil
 	}
 
@@ -1161,7 +1179,7 @@ func (db *DB) Flatten() error {
 		var levels []int
 		for i, l := range db.lc.levels {
 			sz := l.getTotalSize()
-			Infof("Level: %d. Size: %8s Max: %8s\n",
+			Infof("Level: %d. %8s Size. %8s Max.\n",
 				i, hbytes(l.getTotalSize()), hbytes(l.maxTotalSize))
 			if sz > 0 {
 				levels = append(levels, i)

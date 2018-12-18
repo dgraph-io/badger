@@ -119,7 +119,7 @@ var DefaultOptions = Options{
 	// table.Nothing to not preload the tables.
 	MaxLevels:               7,
 	MaxTableSize:            64 << 20,
-	NumCompactors:           3,
+	NumCompactors:           2, // Compactions can be expensive. Only run 2.
 	NumLevelZeroTables:      5,
 	NumLevelZeroTablesStall: 10,
 	NumMemtables:            5,
