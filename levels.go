@@ -236,11 +236,15 @@ func (s *levelsController) startCompact(lc *y.Closer) {
 
 func (s *levelsController) runWorker(lc *y.Closer) {
 	defer lc.Done()
-	if s.kv.opt.DoNotCompact {
+
+	randomDelay := time.NewTimer(time.Duration(rand.Int31n(1000)) * time.Millisecond)
+	select {
+	case <-randomDelay.C:
+	case <-lc.HasBeenClosed():
+		randomDelay.Stop()
 		return
 	}
 
-	time.Sleep(time.Duration(rand.Int31n(1000)) * time.Millisecond)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -250,10 +254,10 @@ func (s *levelsController) runWorker(lc *y.Closer) {
 		case <-ticker.C:
 			prios := s.pickCompactLevels()
 			for _, p := range prios {
-				// TODO: Handle error.
-				didCompact, _ := s.doCompact(p)
-				if didCompact {
+				if err := s.doCompact(p); err == nil {
 					break
+				} else {
+					Errorf("Error while running doCompact: %v\n", err)
 				}
 			}
 		case <-lc.HasBeenClosed():
@@ -617,7 +621,6 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 		if s.cstatus.overlapsWith(cd.nextLevel.level, cd.nextRange) {
 			continue
 		}
-
 		if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
 			continue
 		}
@@ -670,7 +673,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 }
 
 // doCompact picks some table on level l and compacts it away to the next level.
-func (s *levelsController) doCompact(p compactionPriority) (bool, error) {
+func (s *levelsController) doCompact(p compactionPriority) error {
 	l := p.level
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
 
@@ -689,13 +692,13 @@ func (s *levelsController) doCompact(p compactionPriority) (bool, error) {
 	if l == 0 {
 		if !s.fillTablesL0(&cd) {
 			cd.elog.LazyPrintf("fillTables failed for level: %d\n", l)
-			return false, nil
+			return fmt.Errorf("Unable to fill tables for level: %d\n", l)
 		}
 
 	} else {
 		if !s.fillTables(&cd) {
 			cd.elog.LazyPrintf("fillTables failed for level: %d\n", l)
-			return false, nil
+			return fmt.Errorf("Unable to fill tables for level: %d\n", l)
 		}
 	}
 	defer s.cstatus.delete(cd) // Remove the ranges from compaction status.
@@ -705,12 +708,12 @@ func (s *levelsController) doCompact(p compactionPriority) (bool, error) {
 	if err := s.runCompactDef(l, cd); err != nil {
 		// This compaction couldn't be done successfully.
 		cd.elog.LazyPrintf("\tLOG Compact FAILED with error: %+v: %+v", err, cd)
-		return false, err
+		return err
 	}
 
 	s.cstatus.toLog(cd.elog)
 	cd.elog.LazyPrintf("Compaction for level: %d DONE", cd.thisLevel.level)
-	return true, nil
+	return nil
 }
 
 func (s *levelsController) addLevel0Table(t *table.Table) error {
@@ -810,11 +813,11 @@ func appendIteratorsReversed(out []y.Iterator, th []*table.Table, reversed bool)
 // appendIterators appends iterators to an array of iterators, for merging.
 // Note: This obtains references for the table handlers. Remember to close these iterators.
 func (s *levelsController) appendIterators(
-	iters []y.Iterator, reversed bool) []y.Iterator {
+	iters []y.Iterator, opt *IteratorOptions) []y.Iterator {
 	// Just like with get, it's important we iterate the levels from 0 on upward, to avoid missing
 	// data when there's a compaction.
 	for _, level := range s.levels {
-		iters = level.appendIterators(iters, reversed)
+		iters = level.appendIterators(iters, opt)
 	}
 	return iters
 }

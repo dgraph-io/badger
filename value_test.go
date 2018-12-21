@@ -356,6 +356,7 @@ func TestValueGC4(t *testing.T) {
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
+	opt.Truncate = true
 
 	kv, err := Open(opt)
 	require.NoError(t, err)

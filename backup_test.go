@@ -144,7 +144,7 @@ func Test_BackupRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := byte(0); i < N; i++ {
+	for i := byte(1); i < N; i++ {
 		err = db1.Update(func(tx *Txn) error {
 			if err := tx.Set(append(key1, i), rawValue); err != nil {
 				return err
@@ -174,7 +174,7 @@ func Test_BackupRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := byte(0); i < N; i++ {
+	for i := byte(1); i < N; i++ {
 		err = db2.View(func(tx *Txn) error {
 			k := append(key1, i)
 			item, err := tx.Get(k)
@@ -198,7 +198,7 @@ func Test_BackupRestore(t *testing.T) {
 		}
 	}
 
-	for i := byte(0); i < N; i++ {
+	for i := byte(1); i < N; i++ {
 		err = db2.Update(func(tx *Txn) error {
 			if err := tx.Set(append(key1, i), rawValue); err != nil {
 				return err
@@ -229,7 +229,7 @@ func Test_BackupRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := byte(0); i < N; i++ {
+	for i := byte(1); i < N; i++ {
 		err = db3.View(func(tx *Txn) error {
 			k := append(key1, i)
 			item, err := tx.Get(k)

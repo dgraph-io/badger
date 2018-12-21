@@ -47,6 +47,9 @@ to the Dgraph team.
 			fmt.Println("Error:", err.Error())
 			os.Exit(1)
 		}
+		if !showTables {
+			return
+		}
 		err = tableInfo(sstDir, vlogDir)
 		if err != nil {
 			fmt.Println("Error:", err.Error())
@@ -55,8 +58,12 @@ to the Dgraph team.
 	},
 }
 
+var showTables bool
+
 func init() {
 	RootCmd.AddCommand(infoCmd)
+	infoCmd.Flags().BoolVarP(&showTables, "show-tables", "s", false,
+		"If set to true, show tables as well.")
 }
 
 func hbytes(sz int64) string {
