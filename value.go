@@ -569,7 +569,6 @@ type lfDiscardStats struct {
 }
 
 type valueLog struct {
-	buf     bytes.Buffer
 	dirPath string
 	elog    trace.EventLog
 
@@ -886,25 +885,26 @@ func (vlog *valueLog) write(reqs []*request) error {
 	curlf := vlog.filesMap[maxFid]
 	vlog.filesLock.RUnlock()
 
+	var buf bytes.Buffer
 	toDisk := func() error {
-		if vlog.buf.Len() == 0 {
+		if buf.Len() == 0 {
 			return nil
 		}
-		vlog.elog.Printf("Flushing %d blocks of total size: %d", len(reqs), vlog.buf.Len())
-		n, err := curlf.fd.Write(vlog.buf.Bytes())
+		vlog.elog.Printf("Flushing %d blocks of total size: %d", len(reqs), buf.Len())
+		n, err := curlf.fd.Write(buf.Bytes())
 		if err != nil {
 			return errors.Wrapf(err, "Unable to write to value log file: %q", curlf.path)
 		}
+		buf.Reset()
 		y.NumWrites.Add(1)
 		y.NumBytesWritten.Add(int64(n))
 		vlog.elog.Printf("Done")
 		atomic.AddUint32(&vlog.writableLogOffset, uint32(n))
-		vlog.buf.Reset()
 
 		if vlog.woffset() > uint32(vlog.opt.ValueLogFileSize) ||
 			vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
 			var err error
-			if err = curlf.doneWriting(vlog.writableLogOffset); err != nil {
+			if err = curlf.doneWriting(vlog.woffset()); err != nil {
 				return err
 			}
 
@@ -928,8 +928,8 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 			p.Fid = curlf.fid
 			// Use the offset including buffer length so far.
-			p.Offset = vlog.woffset() + uint32(vlog.buf.Len())
-			plen, err := encodeEntry(e, &vlog.buf) // Now encode the entry into buffer.
+			p.Offset = vlog.woffset() + uint32(buf.Len())
+			plen, err := encodeEntry(e, &buf) // Now encode the entry into buffer.
 			if err != nil {
 				return err
 			}
@@ -940,7 +940,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
 		writeNow :=
-			vlog.woffset()+uint32(vlog.buf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
+			vlog.woffset()+uint32(buf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
 				vlog.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries)
 		if writeNow {
 			if err := toDisk(); err != nil {
@@ -949,9 +949,6 @@ func (vlog *valueLog) write(reqs []*request) error {
 		}
 	}
 	return toDisk()
-
-	// Acquire mutex locks around this manipulation, so that the reads don't try to use
-	// an invalid file descriptor.
 }
 
 // Gets the logFile and acquires and RLock() for the mmap. You must call RUnlock on the file
