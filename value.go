@@ -904,7 +904,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		if vlog.woffset() > uint32(vlog.opt.ValueLogFileSize) ||
 			vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
 			var err error
-			if err = curlf.doneWriting(vlog.writableLogOffset); err != nil {
+			if err = curlf.doneWriting(vlog.woffset()); err != nil {
 				return err
 			}
 
