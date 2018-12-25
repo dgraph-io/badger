@@ -183,7 +183,7 @@ func (s *levelsController) deleteLSMTree() (int, error) {
 	for _, l := range s.levels {
 		l.RLock()
 		if l.level == 0 && len(l.tables) > 1 {
-			// Skip the last table. We do this to keep the badgerMove key persisted.
+			// Skip the last table. We do this to keep the badgerHead key persisted.
 			lastIdx := len(l.tables) - 1
 			keepOne = l.tables[lastIdx]
 			all = append(all, l.tables[:lastIdx]...)

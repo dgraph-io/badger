@@ -70,7 +70,7 @@ type DB struct {
 	manifest  *manifestFile
 	lc        *levelsController
 	vlog      valueLog
-	vptr      valuePointer // less than or equal to a pointer to the last vlog value put into mt
+	vhead     valuePointer // less than or equal to a pointer to the last vlog value put into mt
 	writeCh   chan *request
 	flushChan chan flushTask // For flushing memtables.
 
@@ -83,7 +83,7 @@ const (
 	kvWriteChCapacity = 1000
 )
 
-func (out *DB) replayFunction() func(Entry, valuePointer) error {
+func (db *DB) replayFunction() func(Entry, valuePointer) error {
 	type txnEntry struct {
 		nk []byte
 		v  y.ValueStruct
@@ -93,29 +93,29 @@ func (out *DB) replayFunction() func(Entry, valuePointer) error {
 	var lastCommit uint64
 
 	toLSM := func(nk []byte, vs y.ValueStruct) {
-		for err := out.ensureRoomForWrite(); err != nil; err = out.ensureRoomForWrite() {
-			out.elog.Printf("Replay: Making room for writes")
+		for err := db.ensureRoomForWrite(); err != nil; err = db.ensureRoomForWrite() {
+			db.elog.Printf("Replay: Making room for writes")
 			time.Sleep(10 * time.Millisecond)
 		}
-		out.mt.Put(nk, vs)
+		db.mt.Put(nk, vs)
 	}
 
 	first := true
 	return func(e Entry, vp valuePointer) error { // Function for replaying.
 		if first {
-			out.elog.Printf("First key=%q\n", e.Key)
+			db.elog.Printf("First key=%q\n", e.Key)
 		}
 		first = false
 
-		if out.orc.nextTxnTs < y.ParseTs(e.Key) {
-			out.orc.nextTxnTs = y.ParseTs(e.Key)
+		if db.orc.nextTxnTs < y.ParseTs(e.Key) {
+			db.orc.nextTxnTs = y.ParseTs(e.Key)
 		}
 
 		nk := make([]byte, len(e.Key))
 		copy(nk, e.Key)
 		var nv []byte
 		meta := e.meta
-		if out.shouldWriteValueToLSM(e) {
+		if db.shouldWriteValueToLSM(e) {
 			nv = make([]byte, len(e.Value))
 			copy(nv, e.Value)
 		} else {
@@ -343,7 +343,7 @@ func (db *DB) Close() (err error) {
 				defer db.Unlock()
 				y.AssertTrue(db.mt != nil)
 				select {
-				case db.flushChan <- flushTask{db.mt, db.vptr}:
+				case db.flushChan <- flushTask{db.mt, db.vhead}:
 					db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
 					db.mt = nil                    // Will segfault if we try writing!
 					db.elog.Printf("pushed to flush chan\n")
@@ -510,7 +510,7 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	return db.lc.get(key, maxVs)
 }
 
-func (db *DB) updateOffset(ptrs []valuePointer) {
+func (db *DB) updateHead(ptrs []valuePointer) {
 	var ptr valuePointer
 	for i := len(ptrs) - 1; i >= 0; i-- {
 		p := ptrs[i]
@@ -525,8 +525,8 @@ func (db *DB) updateOffset(ptrs []valuePointer) {
 
 	db.Lock()
 	defer db.Unlock()
-	y.AssertTrue(!ptr.Less(db.vptr))
-	db.vptr = ptr
+	y.AssertTrue(!ptr.Less(db.vhead))
+	db.vhead = ptr
 }
 
 var requestPool = sync.Pool{
@@ -617,7 +617,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 			done(err)
 			return errors.Wrap(err, "writeRequests")
 		}
-		db.updateOffset(b.Ptrs)
+		db.updateHead(b.Ptrs)
 	}
 	done(nil)
 	db.elog.Printf("%d entries written", count)
@@ -753,7 +753,7 @@ func (db *DB) ensureRoomForWrite() error {
 
 	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	select {
-	case db.flushChan <- flushTask{db.mt, db.vptr}:
+	case db.flushChan <- flushTask{db.mt, db.vhead}:
 		db.elog.Printf("Flushing value log to disk if async mode.")
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
 		err = db.vlog.sync()
@@ -802,6 +802,7 @@ type flushTask struct {
 func (db *DB) handleFlushTask(ft flushTask) error {
 	if !ft.mt.Empty() {
 		// Store badger head even if vptr is zero, need it for readTs
+		Infof("Storing value log head: %+v\n", ft.vptr)
 		db.elog.Printf("Storing offset: %+v\n", ft.vptr)
 		offset := make([]byte, vptrSize)
 		ft.vptr.Encode(offset)

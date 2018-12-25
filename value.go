@@ -777,6 +777,12 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		return errFile(err, last.path, "file.Seek to end")
 	}
 	vlog.writableLogOffset = uint32(lastOffset)
+
+	// Update the head to point to the updated tail. Otherwise, even after doing a successful
+	// replay and closing the DB, the value log head does not get updated, which causes the replay
+	// to happen repeatedly.
+	vlog.db.vhead = valuePointer{Fid: vlog.maxFid, Offset: uint32(lastOffset)}
+
 	// Map the file if needed. When we create a file, it is automatically mapped.
 	if err = last.mmap(2 * opt.ValueLogFileSize); err != nil {
 		return errFile(err, last.path, "Map log file")
