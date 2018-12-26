@@ -56,7 +56,7 @@ func validateRootCmdArgs(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	if sstDir == "" {
-		return errors.New("--sst-dir not specified")
+		return errors.New("--dir not specified")
 	}
 	if vlogDir == "" {
 		vlogDir = sstDir
