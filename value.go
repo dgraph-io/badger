@@ -385,8 +385,9 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			if bytes.HasPrefix(e.Key, badgerMove) {
 				ne.Key = append([]byte{}, e.Key...)
 			} else {
-				ne.Key = append([]byte{}, badgerMove...)
-				ne.Key = append(ne.Key, e.Key...)
+				ne.Key = make([]byte, len(badgerMove)+len(e.Key))
+				n := copy(ne.Key, badgerMove)
+				copy(ne.Key[n:], e.Key)
 			}
 
 			ne.Value = append([]byte{}, e.Value...)
