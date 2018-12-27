@@ -868,7 +868,8 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 
 	for ft := range db.flushChan {
 		if ft.mt == nil {
-			return nil // Stop this goroutine.
+			// We close db.flushChan now, instead of sending a nil ft.mt.
+			continue
 		}
 		for {
 			err := db.handleFlushTask(ft)
@@ -1203,6 +1204,77 @@ func (db *DB) Flatten(workers int) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// DropAll would drop all the data stored in Badger. It does this in the following way.
+// - Stop accepting new writes.
+// - Pause the compactions.
+// - Pick all tables from all levels, create a changeset to delete all these
+// tables and apply it to manifest.
+// - Pick all log files from value log, and delete all of them. Restart value log files from zero.
+func (db *DB) DropAll() error {
+	Infof("DropAll called. Blocking writes...")
+	// Stop accepting new writes.
+	atomic.StoreInt32(&db.blockWrites, 1)
+
+	// Wait for writeCh to reach size of zero. This is not ideal, but a very
+	// simple way to allow writeCh to flush out, before we proceed.
+	tick := time.NewTicker(100 * time.Millisecond)
+	for range tick.C {
+		if len(db.writeCh) == 0 {
+			break
+		}
+	}
+	tick.Stop()
+	Infof("All previous writes done. Stopping compactions...")
+
+	// Stop the compactions.
+	if db.closers.compactors != nil {
+		db.closers.compactors.SignalAndWait()
+	}
+	if db.closers.memtable != nil {
+		close(db.flushChan)
+		db.closers.memtable.SignalAndWait()
+	}
+	Infof("Compactions stopped. Dropping all SSTables...")
+
+	// Remove inmemory tables. Calling DecrRef for safety. Not sure if they're absolutely needed.
+	db.mt.DecrRef()
+	db.mt = skl.NewSkiplist(arenaSize(db.opt)) // Set it up for future writes.
+	for _, mt := range db.imm {
+		mt.DecrRef()
+	}
+	db.imm = db.imm[:0]
+
+	num, err := db.lc.deleteLSMTree()
+	if err != nil {
+		return err
+	}
+	Infof("Deleted %d SSTables. Now deleting value logs...\n", num)
+
+	num, err = db.vlog.dropAll()
+	if err != nil {
+		return err
+	}
+	db.vhead = valuePointer{} // Zero it out.
+	Infof("Deleted %d value log files. Resuming operations...\n", num)
+
+	// Resume compactions.
+	if db.closers.compactors != nil {
+		db.closers.compactors = y.NewCloser(1)
+		db.lc.startCompact(db.closers.compactors)
+	}
+	if db.closers.memtable != nil {
+		db.flushChan = make(chan flushTask, db.opt.NumMemtables)
+		db.closers.memtable = y.NewCloser(1)
+		go db.flushMemtable(db.closers.memtable)
+	}
+
+	// Resume writes.
+	atomic.StoreInt32(&db.blockWrites, 0)
+
+	Infof("DropAll done")
 	return nil
 }
 

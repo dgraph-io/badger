@@ -24,7 +24,22 @@ func val(large bool) []byte {
 	return buf
 }
 
-func numKeys(db *DB, readTs uint64) int {
+func numKeys(db *DB) int {
+	var count int
+	err := db.View(func(txn *Txn) error {
+		itr := txn.NewIterator(DefaultIteratorOptions)
+		defer itr.Close()
+
+		for itr.Rewind(); itr.Valid(); itr.Next() {
+			count++
+		}
+		return nil
+	})
+	y.Check(err)
+	return count
+}
+
+func numKeysManaged(db *DB, readTs uint64) int {
 	txn := db.NewTransactionAt(readTs, false)
 	defer txn.Discard()
 
@@ -38,7 +53,7 @@ func numKeys(db *DB, readTs uint64) int {
 	return count
 }
 
-func TestDropAll(t *testing.T) {
+func TestDropAllManaged(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -64,21 +79,57 @@ func TestDropAll(t *testing.T) {
 	}
 
 	populate(db, N)
-	require.Equal(t, int(N), numKeys(db, math.MaxUint64))
+	require.Equal(t, int(N), numKeysManaged(db, math.MaxUint64))
 
 	require.NoError(t, db.DropAll())
-	require.Equal(t, 0, numKeys(db, math.MaxUint64))
+	require.Equal(t, 0, numKeysManaged(db, math.MaxUint64))
 
 	// Check that we can still write to mdb, and using lower timestamps.
 	populate(db, 1)
-	require.Equal(t, int(N), numKeys(db, math.MaxUint64))
+	require.Equal(t, int(N), numKeysManaged(db, math.MaxUint64))
 	db.Close()
 
 	// Ensure that value log is correctly replayed, that we are preserving badgerHead.
 	opts.managedTxns = true
 	db2, err := Open(opts)
 	require.NoError(t, err)
-	require.Equal(t, int(N), numKeys(db2, math.MaxUint64))
+	require.Equal(t, int(N), numKeysManaged(db2, math.MaxUint64))
+	db2.Close()
+}
+
+func TestDropAll(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 5 << 20
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	N := uint64(10000)
+	populate := func(db *DB) {
+		writer := db.NewWriteBatch()
+		for i := uint64(0); i < N; i++ {
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+		}
+		require.NoError(t, writer.Flush())
+	}
+
+	populate(db)
+	require.Equal(t, int(N), numKeys(db))
+
+	require.NoError(t, db.DropAll())
+	require.Equal(t, 0, numKeys(db))
+
+	// Check that we can still write to mdb, and using lower timestamps.
+	populate(db)
+	require.Equal(t, int(N), numKeys(db))
+	db.Close()
+
+	// Ensure that value log is correctly replayed.
+	db2, err := Open(opts)
+	require.NoError(t, err)
+	require.Equal(t, int(N), numKeys(db2))
 	db2.Close()
 }
 
@@ -125,13 +176,13 @@ func TestDropAllRace(t *testing.T) {
 	}
 	wg.Wait()
 
-	before := numKeys(db, math.MaxUint64)
+	before := numKeysManaged(db, math.MaxUint64)
 	require.True(t, before > N)
 
 	require.NoError(t, db.DropAll())
 	closer.SignalAndWait()
 
-	after := numKeys(db, math.MaxUint64)
+	after := numKeysManaged(db, math.MaxUint64)
 	t.Logf("Before: %d. After dropall: %d\n", before, after)
 	require.True(t, after < before)
 	db.Close()
