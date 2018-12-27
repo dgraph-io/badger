@@ -575,7 +575,8 @@ func (vlog *valueLog) dropAll() (int, error) {
 		loops++
 		if vlog.iteratorCount() == 0 {
 			if loops%10 == 0 {
-				Infof("Waiting for iterators to go down to zero. Currently active: %d", vlog.iteratorCount())
+				Infof("Waiting for iterators to get done. Currently active: %d",
+					vlog.iteratorCount())
 			}
 			break
 		}
