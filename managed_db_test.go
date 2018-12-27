@@ -16,7 +16,7 @@ import (
 func val(large bool) []byte {
 	var buf []byte
 	if large {
-		buf = make([]byte, 64)
+		buf = make([]byte, 8192)
 	} else {
 		buf = make([]byte, 16)
 	}
@@ -44,6 +44,7 @@ func TestDropAll(t *testing.T) {
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
 	opts.managedTxns = true
+	opts.ValueLogFileSize = 5 << 20
 	db, err := Open(opts)
 	require.NoError(t, err)
 
@@ -53,7 +54,7 @@ func TestDropAll(t *testing.T) {
 		for i := start; i < start+N; i++ {
 			wg.Add(1)
 			txn := db.NewTransactionAt(math.MaxUint64, true)
-			require.NoError(t, txn.Set([]byte(key("key", int(i))), val(false)))
+			require.NoError(t, txn.Set([]byte(key("key", int(i))), val(true)))
 			require.NoError(t, txn.CommitAt(uint64(i), func(err error) {
 				require.NoError(t, err)
 				wg.Done()
@@ -62,13 +63,13 @@ func TestDropAll(t *testing.T) {
 		wg.Wait()
 	}
 
-	populate(db, 1)
+	populate(db, N)
 	require.Equal(t, int(N), numKeys(db, math.MaxUint64))
 
 	require.NoError(t, db.DropAll())
 	require.Equal(t, 0, numKeys(db, math.MaxUint64))
 
-	// Check that we can still write to mdb, and using the same timestamps as before.
+	// Check that we can still write to mdb, and using lower timestamps.
 	populate(db, 1)
 	require.Equal(t, int(N), numKeys(db, math.MaxUint64))
 	db.Close()

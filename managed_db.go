@@ -17,11 +17,10 @@
 package badger
 
 import (
-	"math"
-	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
 )
@@ -83,17 +82,10 @@ var errDone = errors.New("Done deleting keys")
 // - Stop accepting new writes.
 // - Pause the compactions.
 // - Pick all tables from all levels, create a changeset to delete all these
-// tables and apply it to manifest. DO not pick up the latest table from level
-// 0, to preserve the (persistent) badgerHead key.
-// - Iterate over the KVs in Level 0, and run deletes on them via transactions.
-// - The deletions are done at the same timestamp as the latest version of the
-// key. Thus, we could write the keys back at the same timestamp as before.
-//
-// DropAll is only available with managed transactions.
+// tables and apply it to manifest.
+// - Pick all log files from value log, and delete all of them. Restart value log files from zero.
 func (db *DB) DropAll() error {
-	if !db.opt.managedTxns {
-		panic("DropAll is only available with managedDB=true.")
-	}
+	Infof("DropAll called. Blocking writes...")
 	// Stop accepting new writes.
 	atomic.StoreInt32(&db.blockWrites, 1)
 
@@ -106,75 +98,43 @@ func (db *DB) DropAll() error {
 		}
 	}
 	tick.Stop()
+	Infof("All previous writes done. Stopping compactions...")
 
 	// Stop the compactions.
 	if db.closers.compactors != nil {
 		db.closers.compactors.SignalAndWait()
 	}
+	Infof("Compactions stopped. Dropping all SSTables...")
 
-	_, err := db.lc.deleteLSMTree()
-	// Allow writes so that we can run transactions. Ideally, the user must ensure that they're not
-	// doing more writes concurrently while this operation is happening.
-	atomic.StoreInt32(&db.blockWrites, 0)
-	// Need compactions to happen so deletes below can be flushed out.
+	// Remove inmemory tables. Calling DecrRef for safety. Not sure if they're absolutely needed.
+	db.mt.DecrRef()
+	db.mt = skl.NewSkiplist(arenaSize(db.opt)) // Set it up for future writes.
+	for _, mt := range db.imm {
+		mt.DecrRef()
+	}
+	db.imm = db.imm[:0]
+
+	num, err := db.lc.deleteLSMTree()
+	if err != nil {
+		return err
+	}
+	Infof("Deleted %d SSTables. Now deleting value logs...\n", num)
+
+	num, err = db.vlog.dropAll()
+	if err != nil {
+		return err
+	}
+	db.vhead = valuePointer{} // Zero it out.
+	Infof("Deleted %d value log files. Resuming operations...\n", num)
+
+	// Resume compactions.
 	if db.closers.compactors != nil {
 		db.closers.compactors = y.NewCloser(1)
 		db.lc.startCompact(db.closers.compactors)
 	}
-	if err != nil {
-		return err
-	}
+	// Resume writes.
+	atomic.StoreInt32(&db.blockWrites, 0)
 
-	type KV struct {
-		key     []byte
-		version uint64
-	}
-
-	var kvs []KV
-	getKeys := func() error {
-		txn := db.NewTransactionAt(math.MaxUint64, false)
-		defer txn.Discard()
-
-		opts := DefaultIteratorOptions
-		opts.PrefetchValues = false
-		itr := txn.NewIterator(opts)
-		defer itr.Close()
-
-		for itr.Rewind(); itr.Valid(); itr.Next() {
-			item := itr.Item()
-			kvs = append(kvs, KV{item.KeyCopy(nil), item.Version()})
-		}
-		return nil
-	}
-	if err := getKeys(); err != nil {
-		return err
-	}
-
-	var wg sync.WaitGroup
-	errCh := make(chan error, 1)
-	for _, kv := range kvs {
-		wg.Add(1)
-		txn := db.NewTransactionAt(math.MaxUint64, true)
-		if err := txn.Delete(kv.key); err != nil {
-			return err
-		}
-		if err := txn.CommitAt(kv.version, func(rerr error) {
-			if rerr != nil {
-				select {
-				case errCh <- rerr:
-				default:
-				}
-			}
-			wg.Done()
-		}); err != nil {
-			return err
-		}
-	}
-	wg.Wait()
-	select {
-	case err := <-errCh:
-		return err
-	default:
-		return nil
-	}
+	Infof("DropAll done")
+	return nil
 }
