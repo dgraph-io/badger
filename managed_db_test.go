@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -151,14 +152,22 @@ func TestDropAllRace(t *testing.T) {
 		defer ticker.Stop()
 
 		i := N + 1 // Writes would happen above N.
+		var errors int32
 		for {
 			select {
 			case <-ticker.C:
 				i++
 				txn := db.NewTransactionAt(math.MaxUint64, true)
 				require.NoError(t, txn.Set([]byte(key("key", i)), val(false)))
-				_ = txn.CommitAt(uint64(i), nil)
+				if err := txn.CommitAt(uint64(i), func(err error) {
+					if err != nil {
+						atomic.AddInt32(&errors, 1)
+					}
+				}); err != nil {
+					atomic.AddInt32(&errors, 1)
+				}
 			case <-closer.HasBeenClosed():
+				t.Logf("i: %d. Number of (expected) write errors: %d.\n", i, errors)
 				return
 			}
 		}
