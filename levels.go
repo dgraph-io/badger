@@ -174,6 +174,7 @@ func (s *levelsController) cleanupLevels() error {
 // applies it, and then decrements the refs of these tables, which would result
 // in their deletion.
 func (s *levelsController) deleteLSMTree() (int, error) {
+	// First pick all tables, so we can create a manifest changelog.
 	var all []*table.Table
 	for _, l := range s.levels {
 		l.RLock()
@@ -194,13 +195,13 @@ func (s *levelsController) deleteLSMTree() (int, error) {
 		return 0, err
 	}
 
+	// Now that manifest has been successfully written, we can delete the tables.
 	for _, l := range s.levels {
 		l.Lock()
 		l.totalSize = 0
 		l.tables = l.tables[:0]
 		l.Unlock()
 	}
-	// Now allow deletion of tables.
 	for _, table := range all {
 		if err := table.DecrRef(); err != nil {
 			return 0, err

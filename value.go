@@ -450,7 +450,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			vlog.filesLock.Unlock()
 			return errors.Errorf("Unable to find fid: %d", f.fid)
 		}
-		if atomic.LoadInt32(&vlog.numActiveIterators) == 0 {
+		if vlog.iteratorCount() == 0 {
 			delete(vlog.filesMap, f.fid)
 			deleteFileNow = true
 		} else {

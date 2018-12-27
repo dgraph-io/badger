@@ -1218,6 +1218,10 @@ func (db *DB) Flatten(workers int) error {
 // tables and apply it to manifest.
 // - Pick all log files from value log, and delete all of them. Restart value log files from zero.
 // - Resume memtable flushes and compactions.
+//
+// NOTE: DropAll is resilient to concurrent writes, but not to reads. It is up to the user to not do
+// any reads while DropAll is going on, otherwise they may result in panics. Ideally, both reads and
+// writes are paused before running DropAll, and resumed after it is finished.
 func (db *DB) DropAll() error {
 	Infof("DropAll called. Blocking writes...")
 	// Stop accepting new writes.
@@ -1244,8 +1248,6 @@ func (db *DB) DropAll() error {
 		db.closers.compactors.SignalAndWait()
 	}
 	Infof("Compactions stopped. Dropping all SSTables...")
-	// HACK
-	time.Sleep(10 * time.Second)
 
 	// Remove inmemory tables. Calling DecrRef for safety. Not sure if they're absolutely needed.
 	db.mt.DecrRef()
