@@ -172,24 +172,13 @@ func (s *levelsController) cleanupLevels() error {
 
 // This function picks all tables from all levels, creates a manifest changeset,
 // applies it, and then decrements the refs of these tables, which would result
-// in their deletion. It spares one table from L0, to keep the badgerHead key
-// persisted, so we don't lose where we are w.r.t. value log.
-// NOTE: This function in itself isn't sufficient to completely delete all the
-// data. After this, one would still need to iterate over the KV pairs and mark
-// them as deleted.
+// in their deletion.
 func (s *levelsController) deleteLSMTree() (int, error) {
+	// First pick all tables, so we can create a manifest changelog.
 	var all []*table.Table
-	var keepOne *table.Table
 	for _, l := range s.levels {
 		l.RLock()
-		if l.level == 0 && len(l.tables) > 1 {
-			// Skip the last table. We do this to keep the badgerHead key persisted.
-			lastIdx := len(l.tables) - 1
-			keepOne = l.tables[lastIdx]
-			all = append(all, l.tables[:lastIdx]...)
-		} else {
-			all = append(all, l.tables...)
-		}
+		all = append(all, l.tables...)
 		l.RUnlock()
 	}
 	if len(all) == 0 {
@@ -206,18 +195,13 @@ func (s *levelsController) deleteLSMTree() (int, error) {
 		return 0, err
 	}
 
+	// Now that manifest has been successfully written, we can delete the tables.
 	for _, l := range s.levels {
 		l.Lock()
 		l.totalSize = 0
-		if l.level == 0 && len(l.tables) > 1 {
-			l.tables = []*table.Table{keepOne}
-			l.totalSize += keepOne.Size()
-		} else {
-			l.tables = l.tables[:0]
-		}
+		l.tables = l.tables[:0]
 		l.Unlock()
 	}
-	// Now allow deletion of tables.
 	for _, table := range all {
 		if err := table.DecrRef(); err != nil {
 			return 0, err
