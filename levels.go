@@ -26,7 +26,7 @@ import (
 
 	"golang.org/x/net/trace"
 
-	"github.com/dgraph-io/badger/protos"
+	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
@@ -186,11 +186,11 @@ func (s *levelsController) deleteLSMTree() (int, error) {
 	}
 
 	// Generate the manifest changes.
-	changes := []*protos.ManifestChange{}
+	changes := []*pb.ManifestChange{}
 	for _, table := range all {
 		changes = append(changes, makeTableDeleteChange(table.ID()))
 	}
-	changeSet := protos.ManifestChangeSet{Changes: changes}
+	changeSet := pb.ManifestChangeSet{Changes: changes}
 	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
 		return 0, err
 	}
@@ -491,8 +491,8 @@ func (s *levelsController) compactBuildTables(
 	return newTables, func() error { return decrRefs(newTables) }, nil
 }
 
-func buildChangeSet(cd *compactDef, newTables []*table.Table) protos.ManifestChangeSet {
-	changes := []*protos.ManifestChange{}
+func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeSet {
+	changes := []*pb.ManifestChange{}
 	for _, table := range newTables {
 		changes = append(changes, makeTableCreateChange(table.ID(), cd.nextLevel.level))
 	}
@@ -502,7 +502,7 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) protos.ManifestCha
 	for _, table := range cd.bot {
 		changes = append(changes, makeTableDeleteChange(table.ID()))
 	}
-	return protos.ManifestChangeSet{Changes: changes}
+	return pb.ManifestChangeSet{Changes: changes}
 }
 
 type compactDef struct {
@@ -705,7 +705,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	// point it could get used in some compaction.  This ensures the manifest file gets updated in
 	// the proper order. (That means this update happens before that of some compaction which
 	// deletes the table.)
-	err := s.kv.manifest.addChanges([]*protos.ManifestChange{
+	err := s.kv.manifest.addChanges([]*pb.ManifestChange{
 		makeTableCreateChange(t.ID(), 0),
 	})
 	if err != nil {

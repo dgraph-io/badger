@@ -24,7 +24,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/dgraph-io/badger/protos"
+	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -37,8 +37,8 @@ import (
 // This can be used to backup the data in a database at a given point in time.
 func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 	stream := db.NewStream()
-	stream.KeyToKVList = func(key []byte, itr *Iterator) (*protos.KVList, error) {
-		list := &protos.KVList{}
+	stream.KeyToKVList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
+		list := &pb.KVList{}
 		for ; itr.Valid(); itr.Next() {
 			item := itr.Item()
 			if !bytes.Equal(item.Key(), key) {
@@ -64,7 +64,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 
 			// clear txn bits
 			meta := item.meta &^ (bitTxn | bitFinTxn)
-			kv := &protos.KVPair{
+			kv := &pb.KVPair{
 				Key:       item.KeyCopy(nil),
 				Value:     valCopy,
 				UserMeta:  []byte{item.UserMeta()},
@@ -78,7 +78,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 			case item.DiscardEarlierVersions():
 				// If we need to discard earlier versions of this item, add a delete
 				// marker just below the current version.
-				list.Kv = append(list.Kv, &protos.KVPair{
+				list.Kv = append(list.Kv, &pb.KVPair{
 					Key:     item.KeyCopy(nil),
 					Version: item.Version() - 1,
 					Meta:    []byte{bitDelete},
@@ -93,7 +93,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 	}
 
 	var maxVersion uint64
-	stream.Send = func(list *protos.KVList) error {
+	stream.Send = func(list *pb.KVList) error {
 		for _, kv := range list.Kv {
 			if maxVersion < kv.Version {
 				maxVersion = kv.Version
@@ -111,7 +111,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 	return maxVersion, nil
 }
 
-func writeTo(entry *protos.KVPair, w io.Writer) error {
+func writeTo(entry *pb.KVPair, w io.Writer) error {
 	if err := binary.Write(w, binary.LittleEndian, uint64(entry.Size())); err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func (db *DB) Load(r io.Reader) error {
 			unmarshalBuf = make([]byte, sz)
 		}
 
-		e := &protos.KVPair{}
+		e := &pb.KVPair{}
 		if _, err = io.ReadFull(br, unmarshalBuf[:sz]); err != nil {
 			return err
 		}

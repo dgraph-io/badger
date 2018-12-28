@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dgraph-io/badger/protos"
+	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 	humanize "github.com/dustin/go-humanize"
 )
@@ -55,20 +55,20 @@ type Stream struct {
 	// function by default.
 	//
 	// Note: Calls to KeyToKVList are concurrent.
-	KeyToKVList func(key []byte, itr *Iterator) (*protos.KVList, error)
+	KeyToKVList func(key []byte, itr *Iterator) (*pb.KVList, error)
 
 	// This is the method where Stream sends the final output. All calls to Send are done by a
 	// single goroutine, i.e. logic within Send method can expect single threaded execution.
-	Send func(*protos.KVList) error
+	Send func(*pb.KVList) error
 
 	rangeCh chan keyRange
-	kvChan  chan *protos.KVList
+	kvChan  chan *pb.KVList
 }
 
 // ToList is a default implementation of KeyToKVList. It picks up all valid versions of the key,
 // skipping over deleted or expired keys.
-func ToList(key []byte, itr *Iterator) (*protos.KVList, error) {
-	list := &protos.KVList{}
+func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
+	list := &pb.KVList{}
 	for ; itr.Valid(); itr.Next() {
 		item := itr.Item()
 		if item.IsDeletedOrExpired() {
@@ -83,7 +83,7 @@ func ToList(key []byte, itr *Iterator) (*protos.KVList, error) {
 		if err != nil {
 			return nil, err
 		}
-		kv := &protos.KVPair{
+		kv := &pb.KVPair{
 			Key:       item.KeyCopy(nil),
 			Value:     valCopy,
 			UserMeta:  []byte{item.UserMeta()},
@@ -91,6 +91,9 @@ func ToList(key []byte, itr *Iterator) (*protos.KVList, error) {
 			ExpiresAt: item.ExpiresAt(),
 		}
 		list.Kv = append(list.Kv, kv)
+		if st.db.opt.NumVersionsToKeep == 1 {
+			break
+		}
 
 		if item.DiscardEarlierVersions() {
 			break
@@ -133,7 +136,7 @@ func (st *Stream) produceKVs(ctx context.Context) error {
 		itr := txn.NewIterator(iterOpts)
 		defer itr.Close()
 
-		outList := new(protos.KVList)
+		outList := new(pb.KVList)
 		var prevKey []byte
 		for itr.Seek(kr.left); itr.Valid(); {
 			// it.Valid would only return true for keys with the provided Prefix in iterOpts.
@@ -165,7 +168,7 @@ func (st *Stream) produceKVs(ctx context.Context) error {
 			size += list.Size()
 			if size >= pageSize {
 				st.kvChan <- outList
-				outList = new(protos.KVList)
+				outList = new(pb.KVList)
 				size = 0
 			}
 		}
@@ -198,7 +201,7 @@ func (st *Stream) streamKVs(ctx context.Context, logPrefix string) error {
 	defer t.Stop()
 	now := time.Now()
 
-	slurp := func(batch *protos.KVList) error {
+	slurp := func(batch *pb.KVList) error {
 	loop:
 		for {
 			select {
@@ -226,7 +229,7 @@ func (st *Stream) streamKVs(ctx context.Context, logPrefix string) error {
 
 outer:
 	for {
-		var batch *protos.KVList
+		var batch *pb.KVList
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -269,10 +272,10 @@ func (st *Stream) Orchestrate(ctx context.Context, numGo int, logPrefix string) 
 
 	// kvChan should only have a small capacity to ensure that we don't buffer up too much data if
 	// sending is slow. So, setting this to 3.
-	st.kvChan = make(chan *protos.KVList, 3)
+	st.kvChan = make(chan *pb.KVList, 3)
 
 	if st.KeyToKVList == nil {
-		st.KeyToKVList = ToList
+		st.KeyToKVList = st.ToList
 	}
 
 	// Picks up ranges from Badger, and sends them to rangeCh.
