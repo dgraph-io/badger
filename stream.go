@@ -47,15 +47,15 @@ type Stream struct {
 	// Note: Calls to ChooseKey are concurrent.
 	ChooseKey func(item *Item) bool
 
-	// KeyToKVList, similar to ChooseKey, is only invoked on the highest version of the value. It
+	// KeyToList, similar to ChooseKey, is only invoked on the highest version of the value. It
 	// is upto the caller to iterate over the versions and generate zero, one or more KVPairs. It
 	// is expected that the user would advance the iterator to go through the versions of the
 	// values. However, the user MUST immediately return from this function on the first encounter
 	// with a mismatching key. See example usage in ToList function. Can be left nil to use ToList
 	// function by default.
 	//
-	// Note: Calls to KeyToKVList are concurrent.
-	KeyToKVList func(key []byte, itr *Iterator) (*pb.KVList, error)
+	// Note: Calls to KeyToList are concurrent.
+	KeyToList func(key []byte, itr *Iterator) (*pb.KVList, error)
 
 	// This is the method where Stream sends the final output. All calls to Send are done by a
 	// single goroutine, i.e. logic within Send method can expect single threaded execution.
@@ -65,7 +65,7 @@ type Stream struct {
 	kvChan  chan *pb.KVList
 }
 
-// ToList is a default implementation of KeyToKVList. It picks up all valid versions of the key,
+// ToList is a default implementation of KeyToList. It picks up all valid versions of the key,
 // skipping over deleted or expired keys.
 func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 	list := &pb.KVList{}
@@ -157,7 +157,7 @@ func (st *Stream) produceKVs(ctx context.Context) error {
 			}
 
 			// Now convert to key value.
-			list, err := st.KeyToKVList(item.KeyCopy(nil), itr)
+			list, err := st.KeyToList(item.KeyCopy(nil), itr)
 			if err != nil {
 				return err
 			}
@@ -274,8 +274,8 @@ func (st *Stream) Orchestrate(ctx context.Context, numGo int, logPrefix string) 
 	// sending is slow. So, setting this to 3.
 	st.kvChan = make(chan *pb.KVList, 3)
 
-	if st.KeyToKVList == nil {
-		st.KeyToKVList = st.ToList
+	if st.KeyToList == nil {
+		st.KeyToList = st.ToList
 	}
 
 	// Picks up ranges from Badger, and sends them to rangeCh.

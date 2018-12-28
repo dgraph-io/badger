@@ -37,7 +37,7 @@ import (
 // This can be used to backup the data in a database at a given point in time.
 func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 	stream := db.NewStream()
-	stream.KeyToKVList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
+	stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
 		list := &pb.KVList{}
 		for ; itr.Valid(); itr.Next() {
 			item := itr.Item()
