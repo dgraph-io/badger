@@ -167,7 +167,8 @@ func TestDropAllRace(t *testing.T) {
 					atomic.AddInt32(&errors, 1)
 				}
 			case <-closer.HasBeenClosed():
-				t.Logf("i: %d. Number of (expected) write errors: %d.\n", i, errors)
+				// The following causes a data race.
+				// t.Logf("i: %d. Number of (expected) write errors: %d.\n", i, errors)
 				return
 			}
 		}
