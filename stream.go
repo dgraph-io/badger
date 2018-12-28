@@ -1,3 +1,19 @@
+/*
+ * Copyright 2018 Dgraph Labs, Inc. and Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package badger
 
 import (
@@ -31,17 +47,18 @@ type Stream struct {
 	// Note: Calls to ChooseKey are concurrent.
 	ChooseKey func(item *Item) bool
 
-	// KeyToKVList, similar to ChooseKey, is only invoked on the highest version of the value. It is
-	// upto the caller to iterate over the versions and generate zero, one or more KVPairs.  It is
-	// expected that the user would advance the iterator to go through the versions of the values.
-	// However, the user MUST immediately return from this function on the first encounter with a
-	// mismatching key. See example usage in ToList function.
+	// KeyToKVList, similar to ChooseKey, is only invoked on the highest version of the value. It
+	// is upto the caller to iterate over the versions and generate zero, one or more KVPairs. It
+	// is expected that the user would advance the iterator to go through the versions of the
+	// values. However, the user MUST immediately return from this function on the first encounter
+	// with a mismatching key. See example usage in ToList function. Can be left nil to use ToList
+	// function by default.
 	//
 	// Note: Calls to KeyToKVList are concurrent.
 	KeyToKVList func(key []byte, itr *Iterator) (*protos.KVList, error)
 
-	// This is the method which accepts the KV lists. All calls to Send are done by a single
-	// goroutine, i.e. logic within Send method can expect single threaded execution.
+	// This is the method where Stream sends the final output. All calls to Send are done by a
+	// single goroutine, i.e. logic within Send method can expect single threaded execution.
 	Send func(*protos.KVList) error
 
 	rangeCh chan keyRange
@@ -243,14 +260,14 @@ outer:
 // Orchestrate runs Stream. It picks up ranges from the SSTables, then runs numGo number of
 // goroutines to iterate over these ranges and batch up KVs in lists. It then runs a single
 // goroutine to pick these lists, batch them up further and send to Output.Send. Orchestrate also
-// spits logs out to Infof, using the logPrefix string provided.
-// Note that all calls
-// to Output.Send are serial. In case any of these steps encounter an error, Orchestrate would stop
-// execution and return that error.
+// spits logs out to Infof, using the logPrefix string provided.  Note that all calls to
+// Output.Send are serial. In case any of these steps encounter an error, Orchestrate would stop
+// execution and return that error. Orchestrate should only be called once on the same Stream
+// object.
 func (st *Stream) Orchestrate(ctx context.Context, numGo int, logPrefix string) error {
 	st.rangeCh = make(chan keyRange, 3) // Contains keys for posting lists.
 
-	// kvChan should only have a small capacity to ensure that we don't buffer up too much data, if
+	// kvChan should only have a small capacity to ensure that we don't buffer up too much data if
 	// sending is slow. So, setting this to 3.
 	st.kvChan = make(chan *protos.KVList, 3)
 
@@ -301,13 +318,16 @@ func (st *Stream) Orchestrate(ctx context.Context, numGo int, logPrefix string) 
 
 // NewStream creates a new Stream.
 func (db *DB) NewStream() *Stream {
+	if db.opt.managedTxns {
+		panic("This API can not be called in managed mode.")
+	}
 	return &Stream{db: db}
 }
 
 // NewStreamAt creates a new Stream at a particular timestamp. Should only be used with managed DB.
 func (db *DB) NewStreamAt(readTs uint64) *Stream {
 	if !db.opt.managedTxns {
-		panic("This API can only be called in managed transactions mode.")
+		panic("This API can only be called in managed mode.")
 	}
 	return &Stream{db: db, readTs: readTs}
 }
