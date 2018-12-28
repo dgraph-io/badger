@@ -13,9 +13,9 @@ import (
 
 const pageSize = 4 << 20 // 4MB
 
-// Stream provides a way to concurrently iterate over Badger, pick up key-values, batch them up and
-// call Send. Because, Stream does concurrent iteration over many smaller key ranges, it does NOT
-// send keys in a strictly lexicographical order.
+// Stream provides a framework to concurrently iterate over a snapshot of Badger, pick up
+// key-values, batch them up and call Send. Because, Stream does concurrent iteration over many
+// smaller key ranges, it does NOT send keys in a strictly lexicographical order.
 type Stream struct {
 	// Prefix to only iterate over certain range of keys. If set to nil (default), Stream would
 	// iterate over the entire DB.
@@ -299,10 +299,15 @@ func (st *Stream) Orchestrate(ctx context.Context, numGo int, logPrefix string) 
 	return nil
 }
 
+// NewStream creates a new Stream.
 func (db *DB) NewStream() *Stream {
 	return &Stream{db: db}
 }
 
+// NewStreamAt creates a new Stream at a particular timestamp. Should only be used with managed DB.
 func (db *DB) NewStreamAt(readTs uint64) *Stream {
+	if !db.opt.managedTxns {
+		panic("This API can only be called in managed transactions mode.")
+	}
 	return &Stream{db: db, readTs: readTs}
 }

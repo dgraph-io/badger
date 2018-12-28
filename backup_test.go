@@ -335,7 +335,7 @@ func TestBackup(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestBackupLoad3(t *testing.T) {
+func TestBackupRestore3(t *testing.T) {
 	var bb bytes.Buffer
 
 	tmpdir, err := ioutil.TempDir("", "badger-test")
