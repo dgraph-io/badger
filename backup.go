@@ -19,6 +19,7 @@ package badger
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"io"
 	"sync"
@@ -26,6 +27,89 @@ import (
 	"github.com/dgraph-io/badger/protos"
 	"github.com/dgraph-io/badger/y"
 )
+
+// Backup dumps a protobuf-encoded list of all entries in the database into the
+// given writer, that are newer than the specified version. It returns a
+// timestamp indicating when the entries were dumped which can be passed into a
+// later invocation to generate an incremental dump, of entries that have been
+// added/modified since the last invocation of DB.Backup()
+//
+// This can be used to backup the data in a database at a given point in time.
+func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
+	stream := db.NewStream()
+	stream.KeyToKVList = func(key []byte, itr *Iterator) (*protos.KVList, error) {
+		list := &protos.KVList{}
+		for ; itr.Valid(); itr.Next() {
+			item := itr.Item()
+			if !bytes.Equal(item.Key(), key) {
+				return list, nil
+			}
+			if item.Version() < since {
+				// Ignore versions less than given timestamp, or skip older
+				// versions of the given key.
+				return list, nil
+			}
+
+			var valCopy []byte
+			if !item.IsDeletedOrExpired() {
+				// No need to copy value, if item is deleted or expired.
+				var err error
+				valCopy, err = item.ValueCopy(nil)
+				if err != nil {
+					Errorf("Key [%x, %d]. Error while fetching value [%v]\n",
+						item.Key(), item.Version(), err)
+					return nil, err
+				}
+			}
+
+			// clear txn bits
+			meta := item.meta &^ (bitTxn | bitFinTxn)
+			kv := &protos.KVPair{
+				Key:       item.KeyCopy(nil),
+				Value:     valCopy,
+				UserMeta:  []byte{item.UserMeta()},
+				Version:   item.Version(),
+				ExpiresAt: item.ExpiresAt(),
+				Meta:      []byte{meta},
+			}
+			list.Kv = append(list.Kv, kv)
+
+			switch {
+			case item.DiscardEarlierVersions():
+				// If we need to discard earlier versions of this item, add a delete
+				// marker just below the current version.
+				list.Kv = append(list.Kv, &protos.KVPair{
+					Key:     item.KeyCopy(nil),
+					Version: item.Version() - 1,
+					Meta:    []byte{bitDelete},
+				})
+				return list, nil
+
+			case item.IsDeletedOrExpired():
+				return list, nil
+			}
+		}
+		return list, nil
+	}
+
+	var maxVersion uint64
+	stream.Send = func(list *protos.KVList) error {
+		for _, kv := range list.Kv {
+			if maxVersion < kv.Version {
+				maxVersion = kv.Version
+			}
+			if err := writeTo(kv, w); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := stream.Orchestrate(context.Background(), 8, "DB.Backup"); err != nil {
+		return 0, err
+	}
+	return maxVersion, nil
+}
 
 func writeTo(entry *protos.KVPair, w io.Writer) error {
 	if err := binary.Write(w, binary.LittleEndian, uint64(entry.Size())); err != nil {
@@ -37,79 +121,6 @@ func writeTo(entry *protos.KVPair, w io.Writer) error {
 	}
 	_, err = w.Write(buf)
 	return err
-}
-
-// Backup dumps a protobuf-encoded list of all entries in the database into the
-// given writer, that are newer than the specified version. It returns a
-// timestamp indicating when the entries were dumped which can be passed into a
-// later invocation to generate an incremental dump, of entries that have been
-// added/modified since the last invocation of DB.Backup()
-//
-// This can be used to backup the data in a database at a given point in time.
-func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
-	var tsNew uint64
-	var skipKey []byte
-	err := db.View(func(txn *Txn) error {
-		opts := DefaultIteratorOptions
-		opts.AllVersions = true
-		it := txn.NewIterator(opts)
-		defer it.Close()
-
-		for it.Rewind(); it.Valid(); it.Next() {
-			item := it.Item()
-			if item.Version() < since || bytes.Equal(skipKey, item.Key()) {
-				// Ignore versions less than given timestamp, or skip older
-				// versions of the given skipKey.
-				continue
-			}
-			skipKey = skipKey[:0]
-
-			var valCopy []byte
-			if !item.IsDeletedOrExpired() {
-				// No need to copy value, if item is deleted or expired.
-				var err error
-				valCopy, err = item.ValueCopy(nil)
-				if err != nil {
-					Errorf("Key [%x, %d]. Error while fetching value [%v]\n",
-						item.Key(), item.Version(), err)
-					continue
-				}
-			}
-
-			// clear txn bits
-			meta := item.meta &^ (bitTxn | bitFinTxn)
-
-			entry := &protos.KVPair{
-				Key:       y.Copy(item.Key()),
-				Value:     valCopy,
-				UserMeta:  []byte{item.UserMeta()},
-				Version:   item.Version(),
-				ExpiresAt: item.ExpiresAt(),
-				Meta:      []byte{meta},
-			}
-			if err := writeTo(entry, w); err != nil {
-				return err
-			}
-
-			switch {
-			case item.DiscardEarlierVersions():
-				// If we need to discard earlier versions of this item, add a delete
-				// marker just below the current version.
-				entry.Version -= 1
-				entry.Meta = []byte{bitDelete}
-				if err := writeTo(entry, w); err != nil {
-					return err
-				}
-				skipKey = item.KeyCopy(skipKey)
-
-			case item.IsDeletedOrExpired():
-				skipKey = item.KeyCopy(skipKey)
-			}
-		}
-		tsNew = txn.readTs
-		return nil
-	})
-	return tsNew, err
 }
 
 // Load reads a protobuf-encoded list of all entries from a reader and writes
@@ -164,10 +175,14 @@ func (db *DB) Load(r io.Reader) error {
 		if err = e.Unmarshal(unmarshalBuf[:sz]); err != nil {
 			return err
 		}
+		var userMeta byte
+		if len(e.UserMeta) > 0 {
+			userMeta = e.UserMeta[0]
+		}
 		entries = append(entries, &Entry{
 			Key:       y.KeyWithTs(e.Key, e.Version),
 			Value:     e.Value,
-			UserMeta:  e.UserMeta[0],
+			UserMeta:  userMeta,
 			ExpiresAt: e.ExpiresAt,
 			meta:      e.Meta[0],
 		})

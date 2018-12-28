@@ -8,20 +8,14 @@ import (
 
 	"github.com/dgraph-io/badger/protos"
 	"github.com/dgraph-io/badger/y"
-	"github.com/dgraph-io/dgraph/x"
 	humanize "github.com/dustin/go-humanize"
 )
 
 const pageSize = 4 << 20 // 4MB
 
-// KVStream is an interface which wraps the Send method. All calls to Send are done by a single
-// goroutine, i.e. logic within Send method can be single-threaded.
-type KVStream interface {
-	Send(*protos.KVList) error
-}
-
 // Stream provides a way to concurrently iterate over Badger, pick up key-values, batch them up and
-// output to KVStream.
+// call Send. Because, Stream does concurrent iteration over many smaller key ranges, it does NOT
+// send keys in a strictly lexicographical order.
 type Stream struct {
 	// Prefix to only iterate over certain range of keys. If set to nil (default), Stream would
 	// iterate over the entire DB.
@@ -32,7 +26,7 @@ type Stream struct {
 
 	// ChooseKey is invoked each time a new key is encountered. Note that this is not called
 	// on every version of the value, only the first encountered version (i.e. the highest version
-	// of the value a key has).
+	// of the value a key has). ChooseKey can be left nil to select all keys.
 	//
 	// Note: Calls to ChooseKey are concurrent.
 	ChooseKey func(item *Item) bool
@@ -46,8 +40,9 @@ type Stream struct {
 	// Note: Calls to KeyToKVList are concurrent.
 	KeyToKVList func(key []byte, itr *Iterator) (*protos.KVList, error)
 
-	// Output can be set to an object, which implements KVStream interface.
-	Output KVStream
+	// This is the method which accepts the KV lists. All calls to Send are done by a single
+	// goroutine, i.e. logic within Send method can expect single threaded execution.
+	Send func(*protos.KVList) error
 
 	rangeCh chan keyRange
 	kvChan  chan *protos.KVList
@@ -194,7 +189,7 @@ func (st *Stream) streamKVs(ctx context.Context, logPrefix string) error {
 				if !ok {
 					break loop
 				}
-				x.AssertTrue(kvs != nil)
+				y.AssertTrue(kvs != nil)
 				batch.Kv = append(batch.Kv, kvs.Kv...)
 			default:
 				break loop
@@ -204,7 +199,7 @@ func (st *Stream) streamKVs(ctx context.Context, logPrefix string) error {
 		bytesSent += sz
 		count += len(batch.Kv)
 		t := time.Now()
-		if err := st.Output.Send(batch); err != nil {
+		if err := st.Send(batch); err != nil {
 			return err
 		}
 		Infof("%s Created batch of size: %s in %s.\n",
@@ -233,7 +228,7 @@ outer:
 			if !ok {
 				break outer
 			}
-			x.AssertTrue(kvs != nil)
+			y.AssertTrue(kvs != nil)
 			batch = kvs
 			if err := slurp(batch); err != nil {
 				return err
@@ -258,6 +253,10 @@ func (st *Stream) Orchestrate(ctx context.Context, numGo int, logPrefix string) 
 	// kvChan should only have a small capacity to ensure that we don't buffer up too much data, if
 	// sending is slow. So, setting this to 3.
 	st.kvChan = make(chan *protos.KVList, 3)
+
+	if st.KeyToKVList == nil {
+		st.KeyToKVList = ToList
+	}
 
 	// Picks up ranges from Badger, and sends them to rangeCh.
 	go st.produceRanges(ctx)
@@ -298,4 +297,12 @@ func (st *Stream) Orchestrate(ctx context.Context, numGo int, logPrefix string) 
 		return err
 	}
 	return nil
+}
+
+func (db *DB) NewStream() *Stream {
+	return &Stream{db: db}
+}
+
+func (db *DB) NewStreamAt(readTs uint64) *Stream {
+	return &Stream{db: db, readTs: readTs}
 }
