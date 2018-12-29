@@ -361,16 +361,7 @@ func (db *DB) Close() (err error) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	close(db.flushChan) // Tell flusher to quit.
-
-	if db.closers.memtable != nil {
-		db.closers.memtable.Wait()
-		db.elog.Printf("Memtable flushed")
-	}
-	if db.closers.compactors != nil {
-		db.closers.compactors.SignalAndWait()
-		db.elog.Printf("Compaction finished")
-	}
+	db.stopCompactions()
 
 	// Force Compact L0
 	// We don't need to care about cstatus since no parallel compaction is running.
@@ -1143,10 +1134,39 @@ func (db *DB) MaxBatchSize() int64 {
 	return db.opt.maxBatchSize
 }
 
-func (db *DB) Flatten(workers int) error {
-	if db.opt.NumCompactors > 0 {
-		return errors.New("Flatten can only be run when no compact workers are running.")
+func (db *DB) stopCompactions() {
+	// Stop memtable flushes.
+	if db.closers.memtable != nil {
+		close(db.flushChan)
+		db.closers.memtable.SignalAndWait()
 	}
+	// Stop compactions.
+	if db.closers.compactors != nil {
+		db.closers.compactors.SignalAndWait()
+	}
+}
+
+func (db *DB) startCompactions() {
+	// Resume compactions.
+	if db.closers.compactors != nil {
+		db.closers.compactors = y.NewCloser(1)
+		db.lc.startCompact(db.closers.compactors)
+	}
+	if db.closers.memtable != nil {
+		db.flushChan = make(chan flushTask, db.opt.NumMemtables)
+		db.closers.memtable = y.NewCloser(1)
+		go db.flushMemtable(db.closers.memtable)
+	}
+}
+
+// Flatten can be used to force compactions on the LSM tree so all the tables fall on the same
+// level. This ensures that all the versions of keys are colocated and not split across multiple
+// levels, which is necessary after a restore from backup. During Flatten, live compactions are
+// stopped. Ideally, no writes are going on during Flatten. Otherwise, it would create competition
+// between flattening the tree and new tables being created at level zero.
+func (db *DB) Flatten(workers int) error {
+	db.stopCompactions()
+	defer db.startCompactions()
 
 	compactAway := func(cp compactionPriority) error {
 		Infof("Attempting to compact with %+v\n", cp)
@@ -1238,15 +1258,8 @@ func (db *DB) DropAll() error {
 	tick.Stop()
 	Infof("All previous writes done. Stopping compactions...")
 
-	// Stop memtable flushes.
-	if db.closers.memtable != nil {
-		close(db.flushChan)
-		db.closers.memtable.SignalAndWait()
-	}
-	// Stop compactions.
-	if db.closers.compactors != nil {
-		db.closers.compactors.SignalAndWait()
-	}
+	db.stopCompactions()
+	defer db.startCompactions()
 	Infof("Compactions stopped. Dropping all SSTables...")
 
 	// Remove inmemory tables. Calling DecrRef for safety. Not sure if they're absolutely needed.
@@ -1269,17 +1282,6 @@ func (db *DB) DropAll() error {
 	}
 	db.vhead = valuePointer{} // Zero it out.
 	Infof("Deleted %d value log files. Resuming operations...\n", num)
-
-	// Resume compactions.
-	if db.closers.compactors != nil {
-		db.closers.compactors = y.NewCloser(1)
-		db.lc.startCompact(db.closers.compactors)
-	}
-	if db.closers.memtable != nil {
-		db.flushChan = make(chan flushTask, db.opt.NumMemtables)
-		db.closers.memtable = y.NewCloser(1)
-		go db.flushMemtable(db.closers.memtable)
-	}
 
 	// Resume writes.
 	atomic.StoreInt32(&db.blockWrites, 0)

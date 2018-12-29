@@ -28,7 +28,7 @@ import (
 	"golang.org/x/net/trace"
 
 	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/protos"
+	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
@@ -220,13 +220,13 @@ func TestManifestRewrite(t *testing.T) {
 	require.Equal(t, 0, m.Creations)
 	require.Equal(t, 0, m.Deletions)
 
-	err = mf.addChanges([]*protos.ManifestChange{
+	err = mf.addChanges([]*pb.ManifestChange{
 		makeTableCreateChange(0, 0),
 	})
 	require.NoError(t, err)
 
 	for i := uint64(0); i < uint64(deletionsThreshold*3); i++ {
-		ch := []*protos.ManifestChange{
+		ch := []*pb.ManifestChange{
 			makeTableCreateChange(i+1, 0),
 			makeTableDeleteChange(i),
 		}
