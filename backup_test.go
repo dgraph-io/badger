@@ -261,10 +261,10 @@ func TestBackupRestore2(t *testing.T) {
 
 var randSrc = rand.NewSource(time.Now().UnixNano())
 
-func createEntries(n int) []*pb.KVPair {
-	entries := make([]*pb.KVPair, n)
+func createEntries(n int) []*pb.KV {
+	entries := make([]*pb.KV, n)
 	for i := 0; i < n; i++ {
-		entries[i] = &pb.KVPair{
+		entries[i] = &pb.KV{
 			Key:      []byte(fmt.Sprint("key", i)),
 			Value:    []byte{1},
 			UserMeta: []byte{0},
@@ -274,7 +274,7 @@ func createEntries(n int) []*pb.KVPair {
 	return entries
 }
 
-func populateEntries(db *DB, entries []*pb.KVPair) error {
+func populateEntries(db *DB, entries []*pb.KV) error {
 	return db.Update(func(txn *Txn) error {
 		var err error
 		for i, e := range entries {

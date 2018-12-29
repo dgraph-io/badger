@@ -48,7 +48,7 @@ type Stream struct {
 	ChooseKey func(item *Item) bool
 
 	// KeyToList, similar to ChooseKey, is only invoked on the highest version of the value. It
-	// is upto the caller to iterate over the versions and generate zero, one or more KVPairs. It
+	// is upto the caller to iterate over the versions and generate zero, one or more KVs. It
 	// is expected that the user would advance the iterator to go through the versions of the
 	// values. However, the user MUST immediately return from this function on the first encounter
 	// with a mismatching key. See example usage in ToList function. Can be left nil to use ToList
