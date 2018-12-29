@@ -19,7 +19,7 @@ syntax = "proto3";
 
 package pb;
 
-message KVPair {
+message KV {
   bytes key = 1;
   bytes value = 2;
   bytes user_meta = 3;
@@ -29,7 +29,7 @@ message KVPair {
 }
 
 message KVList {
-  repeated KVPair kv = 1;
+  repeated KV kv = 1;
 }
 
 message ManifestChangeSet {

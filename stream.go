@@ -83,7 +83,7 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 		if err != nil {
 			return nil, err
 		}
-		kv := &pb.KVPair{
+		kv := &pb.KV{
 			Key:       item.KeyCopy(nil),
 			Value:     valCopy,
 			UserMeta:  []byte{item.UserMeta()},

@@ -64,7 +64,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 
 			// clear txn bits
 			meta := item.meta &^ (bitTxn | bitFinTxn)
-			kv := &pb.KVPair{
+			kv := &pb.KV{
 				Key:       item.KeyCopy(nil),
 				Value:     valCopy,
 				UserMeta:  []byte{item.UserMeta()},
@@ -78,7 +78,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 			case item.DiscardEarlierVersions():
 				// If we need to discard earlier versions of this item, add a delete
 				// marker just below the current version.
-				list.Kv = append(list.Kv, &pb.KVPair{
+				list.Kv = append(list.Kv, &pb.KV{
 					Key:     item.KeyCopy(nil),
 					Version: item.Version() - 1,
 					Meta:    []byte{bitDelete},
@@ -111,7 +111,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 	return maxVersion, nil
 }
 
-func writeTo(entry *pb.KVPair, w io.Writer) error {
+func writeTo(entry *pb.KV, w io.Writer) error {
 	if err := binary.Write(w, binary.LittleEndian, uint64(entry.Size())); err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func (db *DB) Load(r io.Reader) error {
 			unmarshalBuf = make([]byte, sz)
 		}
 
-		e := &pb.KVPair{}
+		e := &pb.KV{}
 		if _, err = io.ReadFull(br, unmarshalBuf[:sz]); err != nil {
 			return err
 		}
