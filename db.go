@@ -1257,7 +1257,9 @@ func (db *DB) DropAll() error {
 	}
 	tick.Stop()
 	Infof("All previous writes done. Stopping compactions...")
+
 	db.stopCompactions()
+	defer db.startCompactions()
 	Infof("Compactions stopped. Dropping all SSTables...")
 
 	// Remove inmemory tables. Calling DecrRef for safety. Not sure if they're absolutely needed.
@@ -1281,7 +1283,6 @@ func (db *DB) DropAll() error {
 	db.vhead = valuePointer{} // Zero it out.
 	Infof("Deleted %d value log files. Resuming operations...\n", num)
 
-	db.startCompactions()
 	// Resume writes.
 	atomic.StoreInt32(&db.blockWrites, 0)
 
