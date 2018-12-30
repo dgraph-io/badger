@@ -30,8 +30,9 @@ import (
 const pageSize = 4 << 20 // 4MB
 
 // Stream provides a framework to concurrently iterate over a snapshot of Badger, pick up
-// key-values, batch them up and call Send. Because, Stream does concurrent iteration over many
-// smaller key ranges, it does NOT send keys in a strictly lexicographical order.
+// key-values, batch them up and call Send. Stream does concurrent iteration over many smaller key
+// ranges. It does NOT send keys in lexicographical sorted order. To get keys in sorted
+// order, use Iterator.
 type Stream struct {
 	// Prefix to only iterate over certain range of keys. If set to nil (default), Stream would
 	// iterate over the entire DB.
@@ -267,12 +268,11 @@ outer:
 }
 
 // Orchestrate runs Stream. It picks up ranges from the SSTables, then runs NumGo number of
-// goroutines to iterate over these ranges and batch up KVs in lists. It then runs a single
+// goroutines to iterate over these ranges and batch up KVs in lists. It concurrently runs a single
 // goroutine to pick these lists, batch them up further and send to Output.Send. Orchestrate also
-// spits logs out to Infof, using the logPrefix string provided.  Note that all calls to
-// Output.Send are serial. In case any of these steps encounter an error, Orchestrate would stop
-// execution and return that error. Orchestrate should only be called once on the same Stream
-// object.
+// spits logs out to Infof, using provided LogPrefix. Note that all calls to Output.Send
+// are serial. In case any of these steps encounter an error, Orchestrate would stop execution and
+// return that error. Orchestrate can be called multiple times, but in serial order.
 func (st *Stream) Orchestrate(ctx context.Context) error {
 	st.rangeCh = make(chan keyRange, 3) // Contains keys for posting lists.
 

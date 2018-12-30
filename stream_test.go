@@ -7,11 +7,11 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 
+	bpb "github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
-	"github.com/dgraph-io/dgraph/protos/pb"
-	"github.com/dgraph-io/dgraph/x"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,14 +23,15 @@ func openManaged(dir string) (*DB, error) {
 	return OpenManaged(opt)
 }
 
-func key(k int) []byte {
-	return []byte(strconv.Itoa(k))
+func keyWithPrefix(prefix string, k int) []byte {
+	return []byte(fmt.Sprintf("%s-%d", prefix, k))
 }
 
-func keyToInt(k []byte) int {
-	key, err := strconv.Atoi(string(k))
+func keyToInt(k []byte) (string, int) {
+	splits := strings.Split(string(k), "-")
+	key, err := strconv.Atoi(splits[1])
 	y.Check(err)
-	return key
+	return splits[0], key
 }
 
 func value(k int) []byte {
@@ -41,12 +42,14 @@ type collector struct {
 	kv []*bpb.KV
 }
 
-func (c *collector) Send(list *pb.KVList) error {
+func (c *collector) Send(list *bpb.KVList) error {
 	c.kv = append(c.kv, list.Kv...)
 	return nil
 }
 
-func TestOrchestrate(t *testing.T) {
+var ctxb = context.Background()
+
+func TestStream(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -55,10 +58,10 @@ func TestOrchestrate(t *testing.T) {
 	require.NoError(t, err)
 
 	var count int
-	for _, pred := range []string{"p0", "p1", "p2"} {
+	for _, prefix := range []string{"p0", "p1", "p2"} {
 		txn := db.NewTransactionAt(math.MaxUint64, true)
 		for i := 1; i <= 100; i++ {
-			require.NoError(t, txn.Set(key(i), value(i)))
+			require.NoError(t, txn.Set(keyWithPrefix(prefix, i), value(i)))
 			count++
 		}
 		require.NoError(t, txn.CommitAt(5, nil))
@@ -66,30 +69,22 @@ func TestOrchestrate(t *testing.T) {
 
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = "Testing"
-	// stream.KeyToList = func(key []byte, itr *Iterator) (*bpb.KVList, error) {
-	// 	item := itr.Item()
-	// 	val, err := item.ValueCopy(nil)
-	// 	require.NoError(t, err)
-	// 	kv := &bpb.KV{Key: item.KeyCopy(nil), Value: val, Version: item.Version()}
-	// 	itr.Next() // Just for fun.
-	// 	return kv, nil
-	// }
-
-	stream.Send = func(list *pb.KVList) error {
+	c := &collector{}
+	stream.Send = func(list *bpb.KVList) error {
 		return c.Send(list)
 	}
 
 	// Test case 1. Retrieve everything.
-	err = sl.Orchestrate(context.Background())
+	err = stream.Orchestrate(ctxb)
 	require.NoError(t, err)
 	require.Equal(t, 300, len(c.kv), "Expected 300. Got: %d", len(c.kv))
 
 	m := make(map[string]int)
 	for _, kv := range c.kv {
-		ki := keyToInt(kv.Key)
+		prefix, ki := keyToInt(kv.Key)
 		expected := value(ki)
 		require.Equal(t, expected, kv.Value)
-		m[pk.Attr]++
+		m[prefix]++
 	}
 	require.Equal(t, 3, len(m))
 	for pred, count := range m {
@@ -97,18 +92,18 @@ func TestOrchestrate(t *testing.T) {
 	}
 
 	// Test case 2. Retrieve only 1 predicate.
-	sl.Predicate = "p1"
+	stream.Prefix = []byte("p1")
 	c.kv = c.kv[:0]
-	err = sl.Orchestrate(context.Background(), "Testing", math.MaxUint64)
+	err = stream.Orchestrate(ctxb)
 	require.NoError(t, err)
 	require.Equal(t, 100, len(c.kv), "Expected 100. Got: %d", len(c.kv))
 
 	m = make(map[string]int)
 	for _, kv := range c.kv {
-		pk := x.Parse(kv.Key)
-		expected := value(int(pk.Uid))
+		prefix, ki := keyToInt(kv.Key)
+		expected := value(ki)
 		require.Equal(t, expected, kv.Value)
-		m[pk.Attr]++
+		m[prefix]++
 	}
 	require.Equal(t, 1, len(m))
 	for pred, count := range m {
@@ -117,20 +112,20 @@ func TestOrchestrate(t *testing.T) {
 
 	// Test case 3. Retrieve select keys within the predicate.
 	c.kv = c.kv[:0]
-	sl.ChooseKeyFunc = func(item *Item) bool {
-		pk := x.Parse(item.Key())
-		return pk.Uid%2 == 0
+	stream.ChooseKey = func(item *Item) bool {
+		_, k := keyToInt(item.Key())
+		return k%2 == 0
 	}
-	err = sl.Orchestrate(context.Background(), "Testing", math.MaxUint64)
+	err = stream.Orchestrate(ctxb)
 	require.NoError(t, err)
 	require.Equal(t, 50, len(c.kv), "Expected 50. Got: %d", len(c.kv))
 
 	m = make(map[string]int)
 	for _, kv := range c.kv {
-		pk := x.Parse(kv.Key)
-		expected := value(int(pk.Uid))
+		prefix, ki := keyToInt(kv.Key)
+		expected := value(ki)
 		require.Equal(t, expected, kv.Value)
-		m[pk.Attr]++
+		m[prefix]++
 	}
 	require.Equal(t, 1, len(m))
 	for pred, count := range m {
@@ -139,17 +134,17 @@ func TestOrchestrate(t *testing.T) {
 
 	// Test case 4. Retrieve select keys from all predicates.
 	c.kv = c.kv[:0]
-	sl.Predicate = ""
-	err = sl.Orchestrate(context.Background(), "Testing", math.MaxUint64)
+	stream.Prefix = []byte{}
+	err = stream.Orchestrate(ctxb)
 	require.NoError(t, err)
 	require.Equal(t, 150, len(c.kv), "Expected 150. Got: %d", len(c.kv))
 
 	m = make(map[string]int)
 	for _, kv := range c.kv {
-		pk := x.Parse(kv.Key)
-		expected := value(int(pk.Uid))
+		prefix, ki := keyToInt(kv.Key)
+		expected := value(ki)
 		require.Equal(t, expected, kv.Value)
-		m[pk.Attr]++
+		m[prefix]++
 	}
 	require.Equal(t, 3, len(m))
 	for pred, count := range m {
