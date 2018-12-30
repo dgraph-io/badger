@@ -248,8 +248,8 @@ outer:
 				continue
 			}
 			speed := bytesSent / durSec
-			Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec\n",
-				st.LogPrefix, y.FixedDuration(dur), humanize.Bytes(bytesSent), humanize.Bytes(speed))
+			Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec\n", st.LogPrefix,
+				y.FixedDuration(dur), humanize.Bytes(bytesSent), humanize.Bytes(speed))
 
 		case kvs, ok := <-st.kvChan:
 			if !ok {
