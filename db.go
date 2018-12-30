@@ -319,6 +319,8 @@ func Open(opt Options) (db *DB, err error) {
 // cause panic.
 func (db *DB) Close() (err error) {
 	db.elog.Printf("Closing database")
+	atomic.StoreInt32(&db.blockWrites, 1)
+
 	// Stop value GC first.
 	db.closers.valueGC.SignalAndWait()
 

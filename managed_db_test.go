@@ -161,6 +161,32 @@ func TestDropReadOnly(t *testing.T) {
 	require.Panics(t, func() { db2.DropAll() })
 }
 
+func TestWriteAfterClose(t *testing.T) {
+	dir, err := ioutil.TempDir(".", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 5 << 20
+	db, err := Open(opts)
+	require.NoError(t, err)
+	N := uint64(1000)
+	populate := func(db *DB) {
+		writer := db.NewWriteBatch()
+		for i := uint64(0); i < N; i++ {
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+		}
+		require.NoError(t, writer.Flush())
+	}
+
+	populate(db)
+	require.Equal(t, int(N), numKeys(db))
+	require.NoError(t, db.Close())
+	err = db.Update(func(txn *Txn) error {
+		return txn.Set([]byte("a"), []byte("b"))
+	})
+	require.Equal(t, ErrBlockedWrites, err)
+}
+
 func TestDropAllRace(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
