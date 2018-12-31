@@ -229,7 +229,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 		if err := st.Send(batch); err != nil {
 			return err
 		}
-		Infof("%s Created batch of size: %s in %s.\n",
+		SafeInfof(st.db, "%s Created batch of size: %s in %s.\n",
 			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
 		return nil
 	}
@@ -248,7 +248,7 @@ outer:
 				continue
 			}
 			speed := bytesSent / durSec
-			Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec\n", st.LogPrefix,
+			SafeInfof(st.db, "%s Time elapsed: %s, bytes sent: %s, speed: %s/sec\n", st.LogPrefix,
 				y.FixedDuration(dur), humanize.Bytes(bytesSent), humanize.Bytes(speed))
 
 		case kvs, ok := <-st.kvChan:
@@ -263,7 +263,7 @@ outer:
 		}
 	}
 
-	Infof("%s Sent %d keys\n", st.LogPrefix, count)
+	SafeInfof(st.db, "%s Sent %d keys\n", st.LogPrefix, count)
 	return nil
 }
 

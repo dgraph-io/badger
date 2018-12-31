@@ -402,7 +402,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 				wb = wb[:0]
 			}
 		} else {
-			Warningf("This entry should have been caught. %+v\n", e)
+			SafeWarningf(vlog.db, "This entry should have been caught. %+v\n", e)
 		}
 		return nil
 	}
@@ -420,7 +420,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 	for i := 0; i < len(wb); {
 		loops++
 		if batchSize == 0 {
-			Warningf("We shouldn't reach batch size of zero.")
+			SafeWarningf(vlog.db, "We shouldn't reach batch size of zero.")
 			return ErrNoRewrite
 		}
 		end := i + batchSize
@@ -575,13 +575,13 @@ func (vlog *valueLog) dropAll() (int, error) {
 		loops++
 		if vlog.iteratorCount() == 0 {
 			if loops%10 == 0 {
-				Infof("Waiting for iterators to get done. Currently active: %d",
+				SafeInfof(vlog.db, "Waiting for iterators to get done. Currently active: %d",
 					vlog.iteratorCount())
 			}
 			break
 		}
 	}
-	Infof("No active value log iterators. Deleting value logs...")
+	SafeInfof(vlog.db, "No active value log iterators. Deleting value logs...")
 
 	var count int
 	deleteAll := func() error {
@@ -599,7 +599,7 @@ func (vlog *valueLog) dropAll() (int, error) {
 		return count, err
 	}
 
-	Infof("Value logs deleted. Creating value log file: 0")
+	SafeInfof(vlog.db, "Value logs deleted. Creating value log file: 0")
 	if _, err := vlog.createVlogFile(0); err != nil {
 		return count, err
 	}
@@ -786,14 +786,14 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		if fid == ptr.Fid {
 			offset = ptr.Offset + ptr.Len
 		}
-		Infof("Replaying file id: %d at offset: %d\n", fid, offset)
+		SafeInfof(vlog.db, "Replaying file id: %d at offset: %d\n", fid, offset)
 		now := time.Now()
 		// Replay and possible truncation done. Now we can open the file as per
 		// user specified options.
 		if err := vlog.replayLog(lf, offset, replayFn); err != nil {
 			return err
 		}
-		Infof("Replay took: %s\n", time.Since(now))
+		SafeInfof(vlog.db, "Replay took: %s\n", time.Since(now))
 
 		if fid < vlog.maxFid {
 			if err := lf.openReadOnly(); err != nil {
