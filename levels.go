@@ -241,7 +241,7 @@ func (s *levelsController) runWorker(lc *y.Closer) {
 				if err := s.doCompact(p); err == nil {
 					break
 				} else {
-					SafeErrorf(s.kv, "Error while running doCompact: %v\n", err)
+					s.kv.opt.Errorf("Error while running doCompact: %v\n", err)
 				}
 			}
 		case <-lc.HasBeenClosed():

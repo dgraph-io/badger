@@ -41,35 +41,27 @@ func (l *mockLogger) Warningf(f string, v ...interface{}) {
 
 // Test that the DB-specific log is used instead of the global log.
 func TestDbLog(t *testing.T) {
-	db := DB{}
 	l := &mockLogger{}
-	db.SetLogger(l)
+	opt := Options{Logger: l}
 
-	SafeErrorf(&db, "test")
+	opt.Errorf("test")
 	require.Equal(t, "ERROR: test", l.output)
-	SafeInfof(&db, "test")
+	opt.Infof("test")
 	require.Equal(t, "INFO: test", l.output)
-	SafeWarningf(&db, "test")
+	opt.Warningf("test")
 	require.Equal(t, "WARNING: test", l.output)
 }
 
-// Test there are no errors when the db is nil or does not have a logger.
+// Test that the global logger is used when no logger is specified in Options.
 func TestNoDbLog(t *testing.T) {
 	l := &mockLogger{}
 	SetLogger(l)
+	opt := Options{}
 
-	SafeErrorf(nil, "test")
+	opt.Errorf("test")
 	require.Equal(t, "ERROR: test", l.output)
-	SafeInfof(nil, "test")
+	opt.Infof("test")
 	require.Equal(t, "INFO: test", l.output)
-	SafeWarningf(nil, "test")
-	require.Equal(t, "WARNING: test", l.output)
-
-	db := DB{}
-	SafeErrorf(&db, "test")
-	require.Equal(t, "ERROR: test", l.output)
-	SafeInfof(&db, "test")
-	require.Equal(t, "INFO: test", l.output)
-	SafeWarningf(&db, "test")
+	opt.Warningf("test")
 	require.Equal(t, "WARNING: test", l.output)
 }

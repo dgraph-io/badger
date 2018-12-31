@@ -134,7 +134,7 @@ func (op *MergeOperator) runCompactions(dur time.Duration) {
 		case <-ticker.C: // wait for tick
 		}
 		if err := op.compact(); err != nil {
-			SafeErrorf(op.db, "failure while running merge operation: %s", err)
+			op.db.opt.Errorf("failure while running merge operation: %s", err)
 		}
 		if stop {
 			ticker.Stop()

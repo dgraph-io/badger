@@ -77,8 +77,6 @@ type DB struct {
 	blockWrites int32
 
 	orc *oracle
-
-	logger Logger // DB-specific logger which will override the global logger.
 }
 
 const (
@@ -152,7 +150,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 				lastCommit = txnTs
 			}
 			if lastCommit != txnTs {
-				SafeWarningf(db, "Found an incomplete txn at timestamp %d. Discarding it.\n",
+				db.opt.Warningf("Found an incomplete txn at timestamp %d. Discarding it.\n",
 					lastCommit)
 				txn = txn[:0]
 				lastCommit = txnTs
@@ -372,9 +370,9 @@ func (db *DB) Close() (err error) {
 	// We don't need to care about cstatus since no parallel compaction is running.
 	if db.opt.CompactL0OnClose {
 		if err := db.lc.doCompact(compactionPriority{level: 0, score: 1.73}); err != nil {
-			SafeWarningf(db, "Error while forcing compaction on level 0: %v", err)
+			db.opt.Warningf("Error while forcing compaction on level 0: %v", err)
 		} else {
-			SafeInfof(db, "Force compaction on level 0 done")
+			db.opt.Infof("Force compaction on level 0 done")
 		}
 	}
 
@@ -650,7 +648,7 @@ func (db *DB) doWrites(lc *y.Closer) {
 
 	writeRequests := func(reqs []*request) {
 		if err := db.writeRequests(reqs); err != nil {
-			SafeErrorf(db, "writeRequests: %v", err)
+			db.opt.Errorf("writeRequests: %v", err)
 		}
 		<-pendingCh
 	}
@@ -797,7 +795,7 @@ type flushTask struct {
 func (db *DB) handleFlushTask(ft flushTask) error {
 	if !ft.mt.Empty() {
 		// Store badger head even if vptr is zero, need it for readTs
-		SafeInfof(db, "Storing value log head: %+v\n", ft.vptr)
+		db.opt.Infof("Storing value log head: %+v\n", ft.vptr)
 		db.elog.Printf("Storing offset: %+v\n", ft.vptr)
 		offset := make([]byte, vptrSize)
 		ft.vptr.Encode(offset)
@@ -872,7 +870,7 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 				break
 			}
 			// Encounterd error. Retry indefinitely.
-			SafeErrorf(db, "Failure while flushing memtable to disk: %v. Retrying...\n", err)
+			db.opt.Errorf("Failure while flushing memtable to disk: %v. Retrying...\n", err)
 			time.Sleep(time.Second)
 		}
 	}
@@ -1169,7 +1167,7 @@ func (db *DB) Flatten(workers int) error {
 	defer db.startCompactions()
 
 	compactAway := func(cp compactionPriority) error {
-		SafeInfof(db, "Attempting to compact with %+v\n", cp)
+		db.opt.Infof("Attempting to compact with %+v\n", cp)
 		errCh := make(chan error, 1)
 		for i := 0; i < workers; i++ {
 			go func() {
@@ -1182,7 +1180,7 @@ func (db *DB) Flatten(workers int) error {
 			err := <-errCh
 			if err != nil {
 				rerr = err
-				SafeWarningf(db, "While running doCompact with %+v. Error: %v\n", cp, err)
+				db.opt.Warningf("While running doCompact with %+v. Error: %v\n", cp, err)
 			} else {
 				success++
 			}
@@ -1191,7 +1189,7 @@ func (db *DB) Flatten(workers int) error {
 			return rerr
 		}
 		// We could do at least one successful compaction. So, we'll consider this a success.
-		SafeInfof(db, "%d compactor(s) succeeded. One or more tables from level %d compacted.\n",
+		db.opt.Infof("%d compactor(s) succeeded. One or more tables from level %d compacted.\n",
 			success, cp.level)
 		return nil
 	}
@@ -1201,11 +1199,11 @@ func (db *DB) Flatten(workers int) error {
 	}
 
 	for {
-		SafeInfof(db, "\n")
+		db.opt.Infof("\n")
 		var levels []int
 		for i, l := range db.lc.levels {
 			sz := l.getTotalSize()
-			SafeInfof(db, "Level: %d. %8s Size. %8s Max.\n",
+			db.opt.Infof("Level: %d. %8s Size. %8s Max.\n",
 				i, hbytes(l.getTotalSize()), hbytes(l.maxTotalSize))
 			if sz > 0 {
 				levels = append(levels, i)
@@ -1214,7 +1212,7 @@ func (db *DB) Flatten(workers int) error {
 		if len(levels) == 1 {
 			prios := db.lc.pickCompactLevels()
 			if len(prios) == 0 || prios[0].score <= 1.0 {
-				SafeInfof(db, "All tables consolidated into one level. Flattening done.\n")
+				db.opt.Infof("All tables consolidated into one level. Flattening done.\n")
 				return nil
 			}
 			if err := compactAway(prios[0]); err != nil {
@@ -1246,18 +1244,18 @@ func (db *DB) DropAll() error {
 	if db.opt.ReadOnly {
 		panic("Attempting to drop data in read-only mode.")
 	}
-	SafeInfof(db, "DropAll called. Blocking writes...")
+	db.opt.Infof("DropAll called. Blocking writes...")
 	// Stop accepting new writes.
 	atomic.StoreInt32(&db.blockWrites, 1)
 
 	// Make all pending writes finish. The following will also close writeCh.
 	db.closers.writes.SignalAndWait()
-	SafeInfof(db, "Writes flushed. Stopping compactions now...")
+	db.opt.Infof("Writes flushed. Stopping compactions now...")
 
 	// Stop all compactions.
 	db.stopCompactions()
 	defer func() {
-		SafeInfof(db, "Resuming writes")
+		db.opt.Infof("Resuming writes")
 		db.startCompactions()
 
 		db.writeCh = make(chan *request, kvWriteChCapacity)
@@ -1267,7 +1265,7 @@ func (db *DB) DropAll() error {
 		// Resume writes.
 		atomic.StoreInt32(&db.blockWrites, 0)
 	}()
-	SafeInfof(db, "Compactions stopped. Dropping all SSTables...")
+	db.opt.Infof("Compactions stopped. Dropping all SSTables...")
 
 	// Remove inmemory tables. Calling DecrRef for safety. Not sure if they're absolutely needed.
 	db.mt.DecrRef()
@@ -1281,13 +1279,13 @@ func (db *DB) DropAll() error {
 	if err != nil {
 		return err
 	}
-	SafeInfof(db, "Deleted %d SSTables. Now deleting value logs...\n", num)
+	db.opt.Infof("Deleted %d SSTables. Now deleting value logs...\n", num)
 
 	num, err = db.vlog.dropAll()
 	if err != nil {
 		return err
 	}
 	db.vhead = valuePointer{} // Zero it out.
-	SafeInfof(db, "Deleted %d value log files. DropAll done.\n", num)
+	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
 	return nil
 }

@@ -33,23 +33,16 @@ var badgerLogger Logger
 // SetLogger sets the global logger.
 func SetLogger(l Logger) { badgerLogger = l }
 
-// SetLogger sets the DB-specific logger. If the DB-specific logger is valid,
-// it will be used instead of the global logger. Otherwise the global logger
-// will be used.
-func (db *DB) SetLogger(l Logger) {
-	db.logger = l
-}
-
 // Errorf logs an ERROR message to the global logger.
 func Errorf(format string, v ...interface{}) {
 	badgerLogger.Errorf(format, v...)
 }
 
-// SafeErrorf calls Errorf on the DB-specific logger if it is valid. Otherwise
-// it fallbacks on using Errorf (i.e using the global logger).
-func SafeErrorf(db *DB, format string, v ...interface{}) {
-	if db != nil && db.logger != nil {
-		db.logger.Errorf(format, v...)
+// Errorf logs an ERROR log message to the logger specified in opts or to the
+// global logger if no logger is specified in opts.
+func (opt *Options) Errorf(format string, v ...interface{}) {
+	if opt.Logger != nil {
+		opt.Logger.Errorf(format, v...)
 		return
 	}
 	Errorf(format, v...)
@@ -60,10 +53,10 @@ func Infof(format string, v ...interface{}) {
 	badgerLogger.Infof(format, v...)
 }
 
-// SafeInfof is like SafeErrorf but for INFO messages.
-func SafeInfof(db *DB, format string, v ...interface{}) {
-	if db != nil && db.logger != nil {
-		db.logger.Infof(format, v...)
+// Infof is like Errorf but for INFO messages.
+func (opt *Options) Infof(format string, v ...interface{}) {
+	if opt.Logger != nil {
+		opt.Logger.Infof(format, v...)
 		return
 	}
 	Infof(format, v...)
@@ -74,10 +67,10 @@ func Warningf(format string, v ...interface{}) {
 	badgerLogger.Warningf(format, v...)
 }
 
-// SafeWarningf is like SafeErrorf but for WARNING messages.
-func SafeWarningf(db *DB, format string, v ...interface{}) {
-	if db != nil && db.logger != nil {
-		db.logger.Warningf(format, v...)
+// Warningf is like Errorf but for WARNING messages.
+func (opt *Options) Warningf(format string, v ...interface{}) {
+	if opt.Logger != nil {
+		opt.Logger.Warningf(format, v...)
 		return
 	}
 	Warningf(format, v...)
