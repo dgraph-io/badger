@@ -426,14 +426,15 @@ Badger. This is a lot faster way to iterate over Badger than using a single
 Iterator. Stream supports Badger in both managed and normal mode.
 
 Stream uses the natural boundaries created by SSTables within the LSM tree, to
-quickly generate key ranges. Each goroutine then creates an iterator from the
-same transaction, thus working over a snapshot of the DB. Iterators iterate over
-all versions of the values. Every time a new key is encountered, it calls
-`ChoooseKey(item)`, followed by `KeyToList(key, itr)`. This allows a user to
-select or reject that key, and if selected, convert it into custom key-values.
-The goroutine then batches up 4MB worth of key-values, before sending it over to
-a channel.  Another goroutine further batches up this data using "smart
-batching" algorithm and calls `Send` serially.
+quickly generate key ranges. Each goroutine then picks a range and runs an
+iterator to iterate over it. Each iterator iterates over all versions of values
+and is created from the same transaction, thus working over a snapshot of the
+DB. Every time a new key is encountered, it calls `ChoooseKey(item)`, followed
+by `KeyToList(key, itr)`. This allows a user to select or reject that key, and
+if selected, convert the value versions into custom key-values. The goroutine
+batches up 4MB worth of key-values, before sending it over to a channel.
+Another goroutine further batches up data from this channel using *smart
+batching* algorithm and calls `Send` serially.
 
 This framework is designed for high throughput key-value iteration, spreading
 the work of iteration across many goroutines. `DB.Backup` uses this framework to
@@ -443,7 +444,7 @@ getting ported over to Badger.
 
 ```go
 stream := db.NewStream()
-// db.NewStreamAt(readTs) // For managed mode.
+// db.NewStreamAt(readTs) for managed mode.
 
 // -- Optional settings
 stream.NumGo = 16                     // Set number of goroutines to use for iteration.
@@ -455,14 +456,14 @@ stream.ChooseKey = func(item *badger.Item) bool {
   return bytes.HasSuffix(item.Key(), []byte("er"))
 }
 
-// KeyToList is called concurrently for every key. This can be used to convert
+// KeyToList is called concurrently for chosen keys. This can be used to convert
 // Badger data into custom key-values. If nil, uses stream.ToList, a default
 // implementation, which picks all valid key-values.
 stream.KeyToList = nil
 
 // -- End of optional settings.
 
-// Send would be called serially until Stream ends.
+// Send is called serially, while Stream.Orchestrate is running.
 stream.Send = func(list *pb.KVList) error {
   return proto.MarshalText(w, list) // Write to w.
 }
@@ -471,6 +472,7 @@ stream.Send = func(list *pb.KVList) error {
 if err := stream.Orchestrate(context.Background()); err != nil {
   return err
 }
+// Done.
 ```
 
 ### Garbage Collection
