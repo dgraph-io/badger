@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -157,7 +158,12 @@ func TestDropReadOnly(t *testing.T) {
 
 	opts.ReadOnly = true
 	db2, err := Open(opts)
-	require.NoError(t, err)
+	// acquireDirectoryLock will return ErrWindowsNotSupported on Windows platform, we can ignore it safely.
+	if runtime.GOOS == "windows" {
+		require.Equal(t, err, ErrWindowsNotSupported)
+	} else {
+		require.NoError(t, err)
+	}
 	require.Panics(t, func() { db2.DropAll() })
 }
 
