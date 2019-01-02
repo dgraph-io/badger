@@ -429,7 +429,7 @@ Stream uses the natural boundaries created by SSTables within the LSM tree, to
 quickly generate key ranges. Each goroutine then picks a range and runs an
 iterator to iterate over it. Each iterator iterates over all versions of values
 and is created from the same transaction, thus working over a snapshot of the
-DB. Every time a new key is encountered, it calls `ChoooseKey(item)`, followed
+DB. Every time a new key is encountered, it calls `ChooseKey(item)`, followed
 by `KeyToList(key, itr)`. This allows a user to select or reject that key, and
 if selected, convert the value versions into custom key-values. The goroutine
 batches up 4MB worth of key-values, before sending it over to a channel.
