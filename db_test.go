@@ -329,8 +329,9 @@ func TestForceCompactL0(t *testing.T) {
 
 	opts.managedTxns = true
 	db, err = Open(opts)
-	defer db.Close()
+	require.NoError(t, err)
 	require.Equal(t, len(db.lc.levels[0].tables), 0)
+	require.NoError(t, db.Close())
 }
 
 // Put a lot of data to move some data to disk.
