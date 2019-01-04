@@ -745,9 +745,11 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	}
 
 	// If the file is mapped to memory, unmap it first.
+	lf.lock.Lock()
+	defer lf.lock.Unlock()
 	if len(lf.fmap) > 0 {
 		if err := lf.munmap(); err != nil {
-			return errFile(err, lf.path, "Unable to unmap logfile")
+			return err
 		}
 	}
 
