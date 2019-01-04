@@ -744,7 +744,8 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 		return ErrTruncateNeeded
 	}
 
-	// If the file is mapped to memory, unmap it first.
+	// If the file is mapped to memory, unmap it first or Windows will throw out
+	// an error.
 	lf.lock.Lock()
 	defer lf.lock.Unlock()
 	if len(lf.fmap) > 0 {
