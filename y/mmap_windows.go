@@ -81,6 +81,9 @@ func Mmap(fd *os.File, write bool, size int64) ([]byte, error) {
 }
 
 func Munmap(b []byte) error {
+	if len(b) == 0 {
+		return nil
+	}
 	return syscall.UnmapViewOfFile(uintptr(unsafe.Pointer(&b[0])))
 }
 
