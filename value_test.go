@@ -569,6 +569,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	checkKeys(t, kv, [][]byte{k3})
 
 	// Replay value log from beginning, badger head is past k2.
+	require.NoError(t, kv.vlog.Close())
 	require.NoError(t,
 		kv.vlog.open(kv, valuePointer{Fid: 0}, kv.replayFunction()))
 	require.NoError(t, kv.Close())
