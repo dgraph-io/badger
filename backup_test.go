@@ -468,7 +468,7 @@ func TestBackupLoadIncremental(t *testing.T) {
 			return nil
 		})
 		require.NoError(t, err)
-		since, err = db1.Backup(&bb, since)
+		_, err = db1.Backup(&bb, since)
 		require.NoError(t, err)
 		require.NoError(t, db1.Close())
 	}
