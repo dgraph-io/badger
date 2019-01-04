@@ -153,10 +153,7 @@ func moveMoney(db *badger.DB, from, to int) error {
 		if err = putBalance(txn, from, balf); err != nil {
 			return err
 		}
-		if err = putBalance(txn, to, balt); err != nil {
-			return err
-		}
-		return nil
+		return putBalance(txn, to, balt)
 	})
 }
 
@@ -277,10 +274,9 @@ func findFirstInvalidTxn(db *badger.DB, lowTs, highTs uint64) uint64 {
 	if err == badger.ErrKeyNotFound || err == nil {
 		// If no failure, move to higher ts.
 		return findFirstInvalidTxn(db, midTs+1, highTs)
-	} else {
-		// Found an error.
-		return findFirstInvalidTxn(db, lowTs, midTs)
 	}
+	// Found an error.
+	return findFirstInvalidTxn(db, lowTs, midTs)
 }
 
 func compareTwo(db *badger.DB, before, after uint64) {
@@ -484,8 +480,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	if atomic.LoadInt32(&stopAll) == 0 {
 		log.Println("Test OK")
 		return nil
-	} else {
-		log.Println("Test FAILED")
-		return fmt.Errorf("Test FAILED")
 	}
+	log.Println("Test FAILED")
+	return fmt.Errorf("Test FAILED")
 }

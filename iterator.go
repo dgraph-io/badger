@@ -60,12 +60,6 @@ func (item *Item) String() string {
 	return fmt.Sprintf("key=%q, version=%d, meta=%x", item.Key(), item.Version(), item.meta)
 }
 
-// Deprecated
-// ToString returns a string representation of Item
-func (item *Item) ToString() string {
-	return item.String()
-}
-
 // Key returns the key.
 //
 // Key is only valid as long as item is valid, or transaction is valid.  If you need to use it

@@ -767,14 +767,11 @@ func (th *testHelper) readRange(from, to int) {
 			if err != nil {
 				return err
 			}
-			if err := item.Value(func(val []byte) error {
+			return item.Value(func(val []byte) error {
 				require.Equal(th.t, val, th.value(), "key=%q", th.key(i))
 				return nil
 
-			}); err != nil {
-				return err
-			}
-			return nil
+			})
 		})
 		require.NoError(th.t, err, "key=%q", th.key(i))
 	}

@@ -320,10 +320,8 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	}
 
 	// Wait for key streaming to be over.
-	if err := <-kvErr; err != nil {
-		return err
-	}
-	return nil
+	err := <-kvErr
+	return err
 }
 
 func (db *DB) newStream() *Stream {
