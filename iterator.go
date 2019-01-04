@@ -94,7 +94,9 @@ func (item *Item) Value(fn func(val []byte) error) error {
 	item.wg.Wait()
 	if item.status == prefetched {
 		if item.err == nil && fn != nil {
-			return fn(item.val)
+			if err := fn(item.val); err != nil {
+				return err
+			}
 		}
 		return item.err
 	}
