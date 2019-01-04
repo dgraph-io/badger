@@ -564,14 +564,14 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	// When K3 is set, it should be persisted after a restart.
 	txnSet(t, kv, k3, v3, 0)
 	require.NoError(t, kv.Close())
-	kv2, err := Open(getTestOptions(dir))
+	kv, err = Open(getTestOptions(dir))
 	require.NoError(t, err)
-	checkKeys(t, kv2, [][]byte{k3})
+	checkKeys(t, kv, [][]byte{k3})
 
 	// Replay value log from beginning, badger head is past k2.
 	require.NoError(t,
-		kv2.vlog.open(kv2, valuePointer{Fid: 0}, kv2.replayFunction()))
-	require.NoError(t, kv2.Close())
+		kv.vlog.open(kv, valuePointer{Fid: 0}, kv.replayFunction()))
+	require.NoError(t, kv.Close())
 }
 
 func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
