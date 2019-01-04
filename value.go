@@ -721,6 +721,7 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	if err != nil {
 		return errFile(err, lf.path, "Open file in RW mode")
 	}
+	defer lf.fd.Close()
 
 	fi, err := lf.fd.Stat()
 	if err != nil {
@@ -742,7 +743,8 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	if !vlog.opt.Truncate {
 		return ErrTruncateNeeded
 	}
-	lf.fd.Close()
+
+	lf.munmap()
 	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
 		return errFile(err, lf.path, fmt.Sprintf(
 			"Truncation needed at offset %d. Can be done manually as well.", endOffset))
