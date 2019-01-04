@@ -1127,7 +1127,7 @@ func (db *DB) MaxBatchCount() int64 {
 	return db.opt.maxBatchCount
 }
 
-// MaxBatchCount returns max possible batch size
+// MaxBatchSize returns max possible batch size
 func (db *DB) MaxBatchSize() int64 {
 	return db.opt.maxBatchSize
 }

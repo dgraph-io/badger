@@ -60,8 +60,7 @@ func (item *Item) String() string {
 	return fmt.Sprintf("key=%q, version=%d, meta=%x", item.Key(), item.Version(), item.meta)
 }
 
-// Deprecated
-// ToString returns a string representation of Item
+// ToString returns a string representation of Item. This method is deprecated.
 func (item *Item) ToString() string {
 	return item.String()
 }
