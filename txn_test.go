@@ -318,7 +318,7 @@ func TestTxnWriteSkew(t *testing.T) {
 
 // a3, a2, b4 (del), b3, c2, c1
 // Read at ts=4 -> a3, c2
-// Read at ts=4(Uncomitted) -> a3, b4
+// Read at ts=4(Uncommitted) -> a3, b4
 // Read at ts=3 -> a3, b3, c2
 // Read at ts=2 -> a2, c2
 // Read at ts=1 -> c1
@@ -348,7 +348,7 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 		require.NoError(t, txn.Commit())
 		require.Equal(t, uint64(3), db.orc.readTs())
 
-		// b4, c4(del) (Uncomitted)
+		// b4, c4(del) (Uncommitted)
 		txn4 := db.NewTransaction(true)
 		require.NoError(t, txn4.Set(kb, []byte("b4")))
 		require.NoError(t, txn4.Delete(kc))
