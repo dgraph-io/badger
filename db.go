@@ -1226,7 +1226,6 @@ func (db *DB) Flatten(workers int) error {
 			return err
 		}
 	}
-	return nil
 }
 
 // DropAll would drop all the data stored in Badger. It does this in the following way.
