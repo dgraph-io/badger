@@ -48,7 +48,6 @@ func getTestOptions(dir string) Options {
 	opt.Dir = dir
 	opt.ValueDir = dir
 	opt.SyncWrites = false
-	opt.Truncate = true
 	if !*mmap {
 		opt.ValueLogLoadingMode = options.FileIO
 	}

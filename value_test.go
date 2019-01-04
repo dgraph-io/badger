@@ -564,7 +564,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	// When K3 is set, it should be persisted after a restart.
 	txnSet(t, kv, k3, v3, 0)
 	require.NoError(t, kv.Close())
-	kv, err = Open(getTestOptions(dir))
+	kv, err = Open(opts)
 	require.NoError(t, err)
 	checkKeys(t, kv, [][]byte{k3})
 
