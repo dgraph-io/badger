@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -158,7 +159,6 @@ func TestOneKey(t *testing.T) {
 
 	var wg sync.WaitGroup
 	var sawValue int32
-	var mutex sync.Mutex
 	wg.Add(2 * n)
 
 	for i := 0; i < 2*n; i++ {
@@ -176,10 +176,8 @@ func TestOneKey(t *testing.T) {
 			if p.Value == nil {
 				return
 			}
-
-			mutex.Lock()
-			defer mutex.Unlock()
-			sawValue++
+			atomic.AddInt32(&sawValue, 1)
+			panic(p.Value)
 			v, err := strconv.Atoi(string(p.Value))
 			require.NoError(t, err)
 			require.True(t, 0 <= v && v < n)
