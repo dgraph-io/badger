@@ -158,18 +158,17 @@ func TestOneKey(t *testing.T) {
 	defer l.DecrRef()
 
 	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			l.Put(key, y.ValueStruct{Value: newValue(i), Meta: 0, UserMeta: 0})
+		}(i)
+	}
+	// We expect that at least some write made it such that some read returns a value.
 	var sawValue int32
-	wg.Add(2 * n)
-
-	for i := 0; i < 2*n; i++ {
-		if i%2 == 0 {
-			go func(i int) {
-				defer wg.Done()
-				l.Put(key, y.ValueStruct{Value: newValue(i), Meta: 0, UserMeta: 0})
-			}(i)
-			continue
-		}
-
+	for i := 0; i < n; i++ {
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			p := l.Get(key)
@@ -182,8 +181,6 @@ func TestOneKey(t *testing.T) {
 			require.True(t, 0 <= v && v < n, fmt.Sprintf("invalid value %d", v))
 		}()
 	}
-
-	// We expect that at least some write made it such that some read returns a value.
 	wg.Wait()
 	require.True(t, sawValue > 0)
 	require.EqualValues(t, 1, length(l))
