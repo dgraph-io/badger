@@ -167,8 +167,8 @@ func TestOneKey(t *testing.T) {
 	}
 	// We expect that at least some write made it such that some read returns a value.
 	var sawValue int32
+	wg.Add(n)
 	for i := 0; i < n; i++ {
-		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			p := l.Get(key)
