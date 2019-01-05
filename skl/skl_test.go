@@ -176,8 +176,7 @@ func TestOneKey(t *testing.T) {
 			if p.Value == nil {
 				return
 			}
-			panic("sawValue")
-			atomic.StoreInt32(&sawValue, 1)
+			atomic.AddInt32(&sawValue, 1)
 			v, err := strconv.Atoi(string(p.Value))
 			require.NoError(t, err)
 			require.True(t, 0 <= v && v < n)
