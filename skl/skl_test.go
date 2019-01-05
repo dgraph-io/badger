@@ -175,10 +175,10 @@ func TestOneKey(t *testing.T) {
 			if p.Value == nil {
 				return
 			}
-			atomic.StoreInt32(&sawValue, 1)
+			atomic.AddInt32(&sawValue, 1)
 			v, err := strconv.Atoi(string(p.Value))
 			require.NoError(t, err)
-			require.True(t, 0 <= v && v < n)
+			require.True(t, 0 <= v && v < n, fmt.Sprintf("invalid value %d", v))
 		}()
 	}
 	wg.Wait()
