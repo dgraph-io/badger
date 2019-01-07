@@ -17,10 +17,10 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-var Max int64 = 10000000
+var maxValue int64 = 10000000
 var suffix = make([]byte, 128)
 
-type S struct {
+type testSuite struct {
 	sync.Mutex
 	vals map[uint64]uint64
 
@@ -33,11 +33,11 @@ func encoded(i uint64) []byte {
 	return out
 }
 
-func (s *S) write(db *badger.DB) error {
+func (s *testSuite) write(db *badger.DB) error {
 	return db.Update(func(txn *badger.Txn) error {
 		for i := 0; i < 10; i++ {
 			// These keys would be overwritten.
-			keyi := uint64(rand.Int63n(Max))
+			keyi := uint64(rand.Int63n(maxValue))
 			key := encoded(keyi)
 			vali := atomic.AddUint64(&s.count, 1)
 			val := encoded(vali)
@@ -62,7 +62,7 @@ func (s *S) write(db *badger.DB) error {
 	})
 }
 
-func (s *S) read(db *badger.DB) error {
+func (s *testSuite) read(db *badger.DB) error {
 	max := int64(atomic.LoadUint64(&s.count))
 	keyi := uint64(rand.Int63n(max))
 	key := encoded(keyi)
@@ -99,20 +99,14 @@ func (s *S) read(db *badger.DB) error {
 func main() {
 	fmt.Println("Badger Integration test for value log GC.")
 
-	// dir, err := ioutil.TempDir("./", "badger")
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
 	dir := "/mnt/drive/badgertest"
 	os.RemoveAll(dir)
-	// defer os.RemoveAll(dir)
 
 	opts := badger.DefaultOptions
 	opts.Dir = dir
 	opts.ValueDir = dir
 	opts.TableLoadingMode = options.MemoryMap
 	opts.ValueLogLoadingMode = options.FileIO
-	// opts.ValueLogFileSize = 64 << 20 // 64 MB.
 	opts.SyncWrites = false
 
 	db, err := badger.Open(opts)
@@ -148,8 +142,8 @@ func main() {
 		}
 	}()
 
-	s := S{
-		count: uint64(Max),
+	s := testSuite{
+		count: uint64(maxValue),
 		vals:  make(map[uint64]uint64),
 	}
 	var numLoops uint64
