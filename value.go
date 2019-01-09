@@ -744,16 +744,6 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 		return ErrTruncateNeeded
 	}
 
-	// If the file is mapped to memory, unmap it first or Windows will throw out
-	// an error.
-	lf.lock.Lock()
-	defer lf.lock.Unlock()
-	if len(lf.fmap) > 0 {
-		if err := lf.munmap(); err != nil {
-			return err
-		}
-	}
-
 	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
 		return errFile(err, lf.path, fmt.Sprintf(
 			"Truncation needed at offset %d. Can be done manually as well.", endOffset))
