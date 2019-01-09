@@ -140,6 +140,8 @@ func (item *Item) IsDeletedOrExpired() bool {
 	return isDeletedOrExpired(item.meta, item.expiresAt)
 }
 
+// DiscardEarlierVersions returns whether the iterator was created with the
+// option to discard earlier versions of a key when multiple are available.
 func (item *Item) DiscardEarlierVersions() bool {
 	return item.meta&bitDiscardEarlierVersions > 0
 }
@@ -329,7 +331,7 @@ type IteratorOptions struct {
 	internalAccess bool // Used to allow internal access to badger keys.
 }
 
-func (opt *IteratorOptions) PickTable(t table.TableInterface) bool {
+func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	if len(opt.Prefix) == 0 {
 		return true
 	}

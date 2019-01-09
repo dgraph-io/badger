@@ -21,6 +21,7 @@ import (
 	"time"
 )
 
+// WriteBatch holds the necessary info to perform batched writes.
 type WriteBatch struct {
 	sync.Mutex
 	txn *Txn
