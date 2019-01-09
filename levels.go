@@ -806,6 +806,7 @@ func (s *levelsController) appendIterators(
 	return iters
 }
 
+// TableInfo represents the information about a table.
 type TableInfo struct {
 	ID    uint64
 	Level int

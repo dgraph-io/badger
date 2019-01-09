@@ -1103,6 +1103,7 @@ func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
 	return seq, err
 }
 
+// Tables gets the TableInfo objects from the level controller.
 func (db *DB) Tables() []TableInfo {
 	return db.lc.getTableInfo()
 }

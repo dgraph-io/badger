@@ -45,12 +45,12 @@ func TestPickTables(t *testing.T) {
 	within := func(prefix, left, right string) {
 		opt.Prefix = []byte(prefix)
 		tm := &tableMock{left: []byte(left), right: []byte(right)}
-		require.True(t, opt.PickTable(tm))
+		require.True(t, opt.pickTable(tm))
 	}
 	outside := func(prefix, left, right string) {
 		opt.Prefix = []byte(prefix)
 		tm := &tableMock{left: []byte(left), right: []byte(right)}
-		require.False(t, opt.PickTable(tm))
+		require.False(t, opt.pickTable(tm))
 	}
 	within("abc", "ab", "ad")
 	within("abc", "abc", "ad")
