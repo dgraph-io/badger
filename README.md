@@ -511,7 +511,8 @@ again:
   }
 }
 ```
-One caveat is that the RunValueLogGC method will return an error and won’t clean up if there’s only one value log file. In general, GC isn’t that aggressive, because disk is cheap.
+
+**Note: The RunValueLogGC method would not garbage collect the latest value log.**
 
 ### Database backup
 There are two public API methods `DB.Backup()` and `DB.Load()` which can be
