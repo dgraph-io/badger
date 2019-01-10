@@ -1210,7 +1210,7 @@ func (db *DB) Flatten(workers int) error {
 				levels = append(levels, i)
 			}
 		}
-		if len(levels) == 1 {
+		if len(levels) <= 1 {
 			prios := db.lc.pickCompactLevels()
 			if len(prios) == 0 || prios[0].score <= 1.0 {
 				db.opt.Infof("All tables consolidated into one level. Flattening done.\n")
