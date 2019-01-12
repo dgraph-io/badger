@@ -298,8 +298,10 @@ func (s *levelsController) runWorker(lc *y.Closer) {
 			for _, p := range prios {
 				if err := s.doCompact(p); err == nil {
 					break
+				} else if err == errFillTables {
+					// pass
 				} else {
-					s.kv.opt.Errorf("Error while running doCompact: %v\n", err)
+					s.kv.opt.Warningf("While running doCompact: %v\n", err)
 				}
 			}
 		case <-lc.HasBeenClosed():
@@ -714,6 +716,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	return nil
 }
 
+var errFillTables = errors.New("Unable to fill tables")
+
 // doCompact picks some table on level l and compacts it away to the next level.
 func (s *levelsController) doCompact(p compactionPriority) error {
 	l := p.level
@@ -734,13 +738,13 @@ func (s *levelsController) doCompact(p compactionPriority) error {
 	if l == 0 {
 		if !s.fillTablesL0(&cd) {
 			cd.elog.LazyPrintf("fillTables failed for level: %d\n", l)
-			return fmt.Errorf("Unable to fill tables for level: %d\n", l)
+			return errFillTables
 		}
 
 	} else {
 		if !s.fillTables(&cd) {
 			cd.elog.LazyPrintf("fillTables failed for level: %d\n", l)
-			return fmt.Errorf("Unable to fill tables for level: %d\n", l)
+			return errFillTables
 		}
 	}
 	defer s.cstatus.delete(cd) // Remove the ranges from compaction status.
