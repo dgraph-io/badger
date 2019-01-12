@@ -115,10 +115,10 @@ func newLevelsController(kv *DB, mf *Manifest) (*levelsController, error) {
 	// Make errCh non-blocking for iteration over mf.Tables.
 	errCh := make(chan error, len(mf.Tables))
 
-	// We found that even using 2 goroutines allows disk throughput to be utilized to its max.
+	// We found that using 3 goroutines allows disk throughput to be utilized to its max.
 	// Disk utilization is the main thing we should focus on, while trying to read the data. That's
 	// the one factor that remains constant between HDD and SSD.
-	throttleCh := make(chan struct{}, 2)
+	throttleCh := make(chan struct{}, 3)
 	flushThrottle := func() error {
 		close(throttleCh)
 		for range throttleCh {
@@ -139,15 +139,14 @@ func newLevelsController(kv *DB, mf *Manifest) (*levelsController, error) {
 
 	for fileID, tableManifest := range mf.Tables {
 		fname := table.NewFilename(fileID, kv.opt.Dir)
-		Infof("Opening file: %s\n", fname)
 	THROTTLE:
 		for {
 			select {
 			case throttleCh <- struct{}{}:
 				break THROTTLE
 			case <-tick.C:
-				Infof("%d tables opened in %s\n", atomic.LoadInt32(&numOpened),
-					time.Since(start).Round(time.Millisecond))
+				Infof("%d tables out of %d opened in %s\n", atomic.LoadInt32(&numOpened),
+					len(mf.Tables), time.Since(start).Round(time.Millisecond))
 			case err := <-errCh:
 				if err != nil {
 					flushThrottle()
