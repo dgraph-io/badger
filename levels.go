@@ -112,25 +112,10 @@ func newLevelsController(kv *DB, mf *Manifest) (*levelsController, error) {
 	tables := make([][]*table.Table, kv.opt.MaxLevels)
 	var maxFileID uint64
 
-	// Make errCh non-blocking for iteration over mf.Tables.
-	errCh := make(chan error, len(mf.Tables))
-
 	// We found that using 3 goroutines allows disk throughput to be utilized to its max.
 	// Disk utilization is the main thing we should focus on, while trying to read the data. That's
 	// the one factor that remains constant between HDD and SSD.
-	throttleCh := make(chan struct{}, 3)
-	flushThrottle := func() error {
-		close(throttleCh)
-		for range throttleCh {
-		}
-		close(errCh)
-		for err := range errCh {
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}
+	throttle := y.NewThrottle(3)
 
 	start := time.Now()
 	var numOpened int32
@@ -139,39 +124,34 @@ func newLevelsController(kv *DB, mf *Manifest) (*levelsController, error) {
 
 	for fileID, tableManifest := range mf.Tables {
 		fname := table.NewFilename(fileID, kv.opt.Dir)
-	THROTTLE:
-		for {
-			select {
-			case throttleCh <- struct{}{}:
-				break THROTTLE
-			case <-tick.C:
-				Infof("%d tables out of %d opened in %s\n", atomic.LoadInt32(&numOpened),
-					len(mf.Tables), time.Since(start).Round(time.Millisecond))
-			case err := <-errCh:
-				if err != nil {
-					flushThrottle()
-					closeAllTables(tables)
-					return nil, err
-				}
-			}
+		select {
+		case <-tick.C:
+			Infof("%d tables out of %d opened in %s\n", atomic.LoadInt32(&numOpened),
+				len(mf.Tables), time.Since(start).Round(time.Millisecond))
+		default:
+		}
+		if err := throttle.Do(); err != nil {
+			closeAllTables(tables)
+			return nil, err
 		}
 		if fileID > maxFileID {
 			maxFileID = fileID
 		}
 		go func(fname string, level int) {
+			var rerr error
 			defer func() {
-				<-throttleCh
+				throttle.Done(rerr)
 				atomic.AddInt32(&numOpened, 1)
 			}()
 			fd, err := y.OpenExistingFile(fname, flags)
 			if err != nil {
-				errCh <- errors.Wrapf(err, "Opening file: %q", fname)
+				rerr = errors.Wrapf(err, "Opening file: %q", fname)
 				return
 			}
 
 			t, err := table.OpenTable(fd, kv.opt.TableLoadingMode)
 			if err != nil {
-				errCh <- errors.Wrapf(err, "Opening table: %q", fname)
+				rerr = errors.Wrapf(err, "Opening table: %q", fname)
 				return
 			}
 
@@ -180,7 +160,7 @@ func newLevelsController(kv *DB, mf *Manifest) (*levelsController, error) {
 			mu.Unlock()
 		}(fname, int(tableManifest.Level))
 	}
-	if err := flushThrottle(); err != nil {
+	if err := throttle.Finish(); err != nil {
 		closeAllTables(tables)
 		return nil, err
 	}
