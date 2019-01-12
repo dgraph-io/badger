@@ -22,6 +22,8 @@ import (
 	"math/rand"
 	"os"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/trace"
@@ -101,33 +103,89 @@ func newLevelsController(kv *DB, mf *Manifest) (*levelsController, error) {
 	}
 
 	// Some files may be deleted. Let's reload.
+	var flags uint32 = y.Sync
+	if kv.opt.ReadOnly {
+		flags |= y.ReadOnly
+	}
+
+	var mu sync.Mutex
 	tables := make([][]*table.Table, kv.opt.MaxLevels)
 	var maxFileID uint64
+
+	// Make errCh non-blocking for iteration over mf.Tables.
+	errCh := make(chan error, len(mf.Tables))
+
+	// We found that using 3 goroutines allows disk throughput to be utilized to its max.
+	// Disk utilization is the main thing we should focus on, while trying to read the data. That's
+	// the one factor that remains constant between HDD and SSD.
+	throttleCh := make(chan struct{}, 3)
+	flushThrottle := func() error {
+		close(throttleCh)
+		for range throttleCh {
+		}
+		close(errCh)
+		for err := range errCh {
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	start := time.Now()
+	var numOpened int32
+	tick := time.NewTicker(3 * time.Second)
+	defer tick.Stop()
+
 	for fileID, tableManifest := range mf.Tables {
 		fname := table.NewFilename(fileID, kv.opt.Dir)
-		var flags uint32 = y.Sync
-		if kv.opt.ReadOnly {
-			flags |= y.ReadOnly
+	THROTTLE:
+		for {
+			select {
+			case throttleCh <- struct{}{}:
+				break THROTTLE
+			case <-tick.C:
+				Infof("%d tables out of %d opened in %s\n", atomic.LoadInt32(&numOpened),
+					len(mf.Tables), time.Since(start).Round(time.Millisecond))
+			case err := <-errCh:
+				if err != nil {
+					flushThrottle()
+					closeAllTables(tables)
+					return nil, err
+				}
+			}
 		}
-		fd, err := y.OpenExistingFile(fname, flags)
-		if err != nil {
-			closeAllTables(tables)
-			return nil, errors.Wrapf(err, "Opening file: %q", fname)
-		}
-
-		t, err := table.OpenTable(fd, kv.opt.TableLoadingMode)
-		if err != nil {
-			closeAllTables(tables)
-			return nil, errors.Wrapf(err, "Opening table: %q", fname)
-		}
-
-		level := tableManifest.Level
-		tables[level] = append(tables[level], t)
-
 		if fileID > maxFileID {
 			maxFileID = fileID
 		}
+		go func(fname string, level int) {
+			defer func() {
+				<-throttleCh
+				atomic.AddInt32(&numOpened, 1)
+			}()
+			fd, err := y.OpenExistingFile(fname, flags)
+			if err != nil {
+				errCh <- errors.Wrapf(err, "Opening file: %q", fname)
+				return
+			}
+
+			t, err := table.OpenTable(fd, kv.opt.TableLoadingMode)
+			if err != nil {
+				errCh <- errors.Wrapf(err, "Opening table: %q", fname)
+				return
+			}
+
+			mu.Lock()
+			tables[level] = append(tables[level], t)
+			mu.Unlock()
+		}(fname, int(tableManifest.Level))
 	}
+	if err := flushThrottle(); err != nil {
+		closeAllTables(tables)
+		return nil, err
+	}
+	Infof("All %d tables opened in %s\n", atomic.LoadInt32(&numOpened),
+		time.Since(start).Round(time.Millisecond))
 	s.nextFileID = maxFileID + 1
 	for i, tbls := range tables {
 		s.levels[i].initTables(tbls)

@@ -37,5 +37,6 @@ func main() {
 		}
 	}()
 	runtime.SetBlockProfileRate(100)
+	runtime.GOMAXPROCS(128)
 	cmd.Execute()
 }

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 	humanize "github.com/dustin/go-humanize"
@@ -77,6 +78,7 @@ func dur(src, dst time.Time) string {
 func tableInfo(dir, valueDir string) error {
 	// Open DB
 	opts := badger.DefaultOptions
+	opts.TableLoadingMode = options.MemoryMap
 	opts.Dir = sstDir
 	opts.ValueDir = vlogDir
 	opts.ReadOnly = true
