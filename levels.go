@@ -115,8 +115,10 @@ func newLevelsController(kv *DB, mf *Manifest) (*levelsController, error) {
 	// Make errCh non-blocking for iteration over mf.Tables.
 	errCh := make(chan error, len(mf.Tables))
 
-	// 8 goroutines makes loading significantly slower, based on my testing with external HDD.
-	throttleCh := make(chan struct{}, 8)
+	// We found that even using 2 goroutines allows disk throughput to be utilized to its max.
+	// Disk utilization is the main thing we should focus on, while trying to read the data. That's
+	// the one factor that remains constant between HDD and SSD.
+	throttleCh := make(chan struct{}, 2)
 	flushThrottle := func() error {
 		close(throttleCh)
 		for range throttleCh {

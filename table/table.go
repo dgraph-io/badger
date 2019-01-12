@@ -18,6 +18,7 @@ package table
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -152,7 +153,8 @@ func OpenTable(fd *os.File, loadingMode options.FileLoadingMode) (*Table, error)
 		}
 	}
 
-	if err := t.readIndex(); err != nil {
+	if err := t.readIndex(loadingMode); err != nil {
+		fmt.Printf("Issue during readindex: %v\n", err)
 		return nil, y.Wrap(err)
 	}
 
@@ -202,7 +204,7 @@ func (t *Table) readNoFail(off int, sz int) []byte {
 	return res
 }
 
-func (t *Table) readIndex() error {
+func (t *Table) readIndex(loadingMode options.FileLoadingMode) error {
 	readPos := t.tableSize
 
 	// Read bloom filter.
@@ -246,7 +248,15 @@ func (t *Table) readIndex() error {
 	// serially compared to executing random reads.
 	var h header
 	var offset int
-	r := bufio.NewReader(t.fd)
+	var r *bufio.Reader
+	if loadingMode == options.LoadToRAM {
+		r = bufio.NewReader(bytes.NewReader(t.mmap))
+	} else {
+		if _, err := t.fd.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		r = bufio.NewReader(t.fd)
+	}
 	hbuf := make([]byte, h.Size())
 	for idx := range t.blockIndex {
 		ko := &t.blockIndex[idx]
@@ -267,56 +277,6 @@ func (t *Table) readIndex() error {
 		ko.key = key
 		offset += len(key)
 	}
-
-	// che := make(chan error, len(t.blockIndex))
-	// blocks := make(chan int, len(t.blockIndex))
-
-	// for i := 0; i < len(t.blockIndex); i++ {
-	// 	blocks <- i
-	// }
-
-	// for i := 0; i < 64; i++ { // Run 64 goroutines.
-	// 	go func() {
-	// 		var h header
-
-	// 		for index := range blocks {
-	// 			ko := &t.blockIndex[index]
-
-	// 			offset := ko.offset
-	// 			buf, err := t.read(offset, h.Size())
-	// 			if err != nil {
-	// 				che <- errors.Wrap(err, "While reading first header in block")
-	// 				continue
-	// 			}
-
-	// 			h.Decode(buf)
-	// 			y.AssertTruef(h.plen == 0, "Key offset: %+v, h.plen = %d", *ko, h.plen)
-
-	// 			offset += h.Size()
-	// 			buf = make([]byte, h.klen)
-	// 			var out []byte
-	// 			if out, err = t.read(offset, int(h.klen)); err != nil {
-	// 				che <- errors.Wrap(err, "While reading first key in block")
-	// 				continue
-	// 			}
-	// 			y.AssertTrue(len(buf) == copy(buf, out))
-
-	// 			ko.key = buf
-	// 			che <- nil
-	// 		}
-	// 	}()
-	// }
-	// close(blocks) // to stop reading goroutines
-
-	// var readError error
-	// for i := 0; i < len(t.blockIndex); i++ {
-	// 	if err := <-che; err != nil && readError == nil {
-	// 		readError = err
-	// 	}
-	// }
-	// if readError != nil {
-	// 	return readError
-	// }
 
 	return nil
 }
