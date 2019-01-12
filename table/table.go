@@ -154,7 +154,6 @@ func OpenTable(fd *os.File, loadingMode options.FileLoadingMode) (*Table, error)
 	}
 
 	if err := t.readIndex(loadingMode); err != nil {
-		fmt.Printf("Issue during readindex: %v\n", err)
 		return nil, y.Wrap(err)
 	}
 
@@ -270,12 +269,11 @@ func (t *Table) readIndex(loadingMode options.FileLoadingMode) error {
 		offset += len(hbuf)
 		h.Decode(hbuf)
 		y.AssertTrue(h.plen == 0)
-		key := make([]byte, h.klen)
-		if _, err := io.ReadFull(r, key); err != nil {
+		ko.key = make([]byte, h.klen)
+		if _, err := io.ReadFull(r, ko.key); err != nil {
 			return err
 		}
-		ko.key = key
-		offset += len(key)
+		offset += len(ko.key)
 	}
 
 	return nil

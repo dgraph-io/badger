@@ -166,11 +166,13 @@ func newLevelsController(kv *DB, mf *Manifest) (*levelsController, error) {
 			fd, err := y.OpenExistingFile(fname, flags)
 			if err != nil {
 				errCh <- errors.Wrapf(err, "Opening file: %q", fname)
+				return
 			}
 
 			t, err := table.OpenTable(fd, kv.opt.TableLoadingMode)
 			if err != nil {
 				errCh <- errors.Wrapf(err, "Opening table: %q", fname)
+				return
 			}
 
 			mu.Lock()
