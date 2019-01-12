@@ -108,8 +108,8 @@ func newLevelsController(kv *DB, mf *Manifest) (*levelsController, error) {
 		flags |= y.ReadOnly
 	}
 
-	tables := make([][]*table.Table, kv.opt.MaxLevels)
 	var mu sync.Mutex
+	tables := make([][]*table.Table, kv.opt.MaxLevels)
 	var maxFileID uint64
 
 	// Make errCh non-blocking for iteration over mf.Tables.

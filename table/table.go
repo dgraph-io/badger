@@ -249,6 +249,8 @@ func (t *Table) readIndex(loadingMode options.FileLoadingMode) error {
 	var offset int
 	var r *bufio.Reader
 	if loadingMode == options.LoadToRAM {
+		// We already read the table to put it into t.mmap. So, no point reading it again from disk.
+		// Instead use the read buffer.
 		r = bufio.NewReader(bytes.NewReader(t.mmap))
 	} else {
 		if _, err := t.fd.Seek(0, io.SeekStart); err != nil {
