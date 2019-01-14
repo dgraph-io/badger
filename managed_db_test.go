@@ -84,6 +84,7 @@ func TestDropAllManaged(t *testing.T) {
 	require.Equal(t, int(N), numKeysManaged(db, math.MaxUint64))
 
 	require.NoError(t, db.DropAll())
+	require.NoError(t, db.DropAll()) // Just call it twice, for fun.
 	require.Equal(t, 0, numKeysManaged(db, math.MaxUint64))
 
 	// Check that we can still write to mdb, and using lower timestamps.
@@ -133,6 +134,34 @@ func TestDropAll(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int(N), numKeys(db2))
 	db2.Close()
+}
+
+func TestDropAllTwice(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 5 << 20
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	N := uint64(10000)
+	populate := func(db *DB) {
+		writer := db.NewWriteBatch()
+		for i := uint64(0); i < N; i++ {
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+		}
+		require.NoError(t, writer.Flush())
+	}
+
+	populate(db)
+	require.Equal(t, int(N), numKeys(db))
+
+	require.NoError(t, db.DropAll())
+	require.Equal(t, 0, numKeys(db))
+
+	// Call DropAll again.
+	require.NoError(t, db.DropAll())
 }
 
 func TestDropReadOnly(t *testing.T) {

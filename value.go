@@ -598,6 +598,7 @@ func (vlog *valueLog) dropAll() (int, error) {
 	if err := deleteAll(); err != nil {
 		return count, err
 	}
+	vlog.filesMap = make(map[uint32]*logFile)
 
 	vlog.db.opt.Infof("Value logs deleted. Creating value log file: 0")
 	if _, err := vlog.createVlogFile(0); err != nil {
