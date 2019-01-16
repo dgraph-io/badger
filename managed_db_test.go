@@ -164,6 +164,59 @@ func TestDropAllTwice(t *testing.T) {
 	require.NoError(t, db.DropAll())
 }
 
+func TestDropAllWithPendingTxn(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 5 << 20
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	N := uint64(10000)
+	populate := func(db *DB) {
+		writer := db.NewWriteBatch()
+		for i := uint64(0); i < N; i++ {
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+		}
+		require.NoError(t, writer.Flush())
+	}
+
+	populate(db)
+	require.Equal(t, int(N), numKeys(db))
+
+	txn := db.NewTransaction(true)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		itr := txn.NewIterator(DefaultIteratorOptions)
+		defer itr.Close()
+		for {
+			var count int
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				count++
+				item := itr.Item()
+				_, err := item.ValueCopy(nil)
+				if err != nil {
+					t.Logf("Got error during value copy: %v", err)
+					return
+				}
+			}
+			t.Logf("Got number of keys: %d\n", count)
+			time.Sleep(time.Second)
+		}
+	}()
+	// Do not cancel txn.
+
+	go func() {
+		time.Sleep(2 * time.Second)
+		require.NoError(t, db.DropAll())
+	}()
+	wg.Wait()
+}
+
 func TestDropReadOnly(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
