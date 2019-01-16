@@ -38,14 +38,15 @@ func (u *uint64Heap) Pop() interface{} {
 	return x
 }
 
-// mark contains raft proposal id and a done boolean. It is used to
-// update the WaterMark struct about the status of a proposal.
+// mark contains one of more indices, along with a done boolean to indicate the
+// status of the index: begin or done. It also contains waiters, who could be
+// waiting for the watermark to reach >= a certain index.
 type mark struct {
 	// Either this is an (index, waiter) pair or (index, done) or (indices, done).
 	index   uint64
 	waiter  chan struct{}
 	indices []uint64
-	done    bool // Set to true if the pending mutation is done.
+	done    bool // Set to true if the index is done.
 }
 
 // WaterMark is used to keep track of the minimum un-finished index.  Typically, an index k becomes
