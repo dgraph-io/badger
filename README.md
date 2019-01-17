@@ -543,9 +543,11 @@ command above to upgrade your database to work with the latest version.
 badger_backup --dir <path/to/badgerdb> --backup-file badger.bak
 ```
 
-A Badger database is rsync-friendly, so rsync can be used as a rudimentary way
-to perform a file-level backup. For a complete backup via rsync, repeat the
-rsync if non-log files are changed.
+We recommend all users to use the Backup and Restore APIs and tools. However,
+Badger is also rsync-friendly because all files are immutable, barring the
+latest value log which is append-only. So, rsync can be used as rudimentary way
+to perform a backup. In the following script, we repeat rsync to ensure that the
+LSM tree remains consistent with the MANIFEST file while doing a full backup.
 
 ```
 #!/bin/bash
