@@ -193,11 +193,14 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 		defer wg.Done()
 		itr := txn.NewIterator(DefaultIteratorOptions)
 		defer itr.Close()
+
+		var keys []string
 		for {
 			var count int
 			for itr.Rewind(); itr.Valid(); itr.Next() {
 				count++
 				item := itr.Item()
+				keys = append(keys, string(item.KeyCopy(nil)))
 				_, err := item.ValueCopy(nil)
 				if err != nil {
 					t.Logf("Got error during value copy: %v", err)
@@ -205,7 +208,17 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 				}
 			}
 			t.Logf("Got number of keys: %d\n", count)
-			time.Sleep(time.Second)
+			for _, key := range keys {
+				item, err := txn.Get([]byte(key))
+				if err != nil {
+					t.Logf("Got error during key lookup: %v", err)
+					return
+				}
+				if _, err := item.ValueCopy(nil); err != nil {
+					t.Logf("Got error during second value copy: %v", err)
+					return
+				}
+			}
 		}
 	}()
 	// Do not cancel txn.
