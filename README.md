@@ -559,7 +559,6 @@ rsync -avz --delete db/ dst
 while !! | grep -q "(MANIFEST\|\.sst)$"; do :; done
 ```
 
-
 ### Memory usage
 Badger's memory usage can be managed by tweaking several options available in
 the `Options` struct that is passed in when opening the database using
