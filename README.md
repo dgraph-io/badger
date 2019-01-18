@@ -543,6 +543,22 @@ command above to upgrade your database to work with the latest version.
 badger_backup --dir <path/to/badgerdb> --backup-file badger.bak
 ```
 
+We recommend all users to use the `Backup` and `Restore` APIs and tools. However,
+Badger is also rsync-friendly because all files are immutable, barring the
+latest value log which is append-only. So, rsync can be used as rudimentary way
+to perform a backup. In the following script, we repeat rsync to ensure that the
+LSM tree remains consistent with the MANIFEST file while doing a full backup.
+
+```
+#!/bin/bash
+set -o history
+set -o histexpand
+# Makes a complete copy of a Badger database directory.
+# Repeat rsync if the MANIFEST and SSTables are updated.
+rsync -avz --delete db/ dst
+while !! | grep -q "(MANIFEST\|\.sst)$"; do :; done
+```
+
 ### Memory usage
 Badger's memory usage can be managed by tweaking several options available in
 the `Options` struct that is passed in when opening the database using
