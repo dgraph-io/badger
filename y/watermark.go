@@ -65,7 +65,6 @@ type WaterMark struct {
 	Name      string
 	markCh    chan mark
 	elog      trace.EventLog
-	closer    *Closer
 }
 
 // Init initializes a WaterMark struct. MUST be called before using it.
