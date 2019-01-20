@@ -381,6 +381,7 @@ func (db *DB) Close() (err error) {
 	}
 	db.elog.Printf("Waiting for closer")
 	db.closers.updateSize.SignalAndWait()
+	db.orc.Stop()
 
 	db.elog.Finish()
 

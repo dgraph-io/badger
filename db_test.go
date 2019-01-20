@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"sync"
 	"testing"
@@ -1561,6 +1562,20 @@ func TestMinReadTs(t *testing.T) {
 		time.Sleep(time.Millisecond)
 		require.Equal(t, uint64(20), db.orc.readMark.DoneUntil())
 	})
+}
+
+func TestGoroutineLeak(t *testing.T) {
+	before := runtime.NumGoroutine()
+	t.Logf("Num go: %d", before)
+	for i := 0; i < 12; i++ {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			err := db.Update(func(txn *Txn) error {
+				return txn.Set([]byte("key"), []byte("value"))
+			})
+			require.NoError(t, err)
+		})
+	}
+	require.Equal(t, before, runtime.NumGoroutine())
 }
 
 func ExampleOpen() {

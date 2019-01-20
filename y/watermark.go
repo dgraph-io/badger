@@ -68,10 +68,10 @@ type WaterMark struct {
 }
 
 // Init initializes a WaterMark struct. MUST be called before using it.
-func (w *WaterMark) Init() {
+func (w *WaterMark) Init(closer *Closer) {
 	w.markCh = make(chan mark, 100)
 	w.elog = trace.NewEventLog("Watermark", w.Name)
-	go w.process()
+	go w.process(closer)
 }
 
 // Begin sets the last index to the given value.
@@ -137,7 +137,9 @@ func (w *WaterMark) WaitForMark(ctx context.Context, index uint64) error {
 // if no watermark is emitted at index 101 then waiter would get stuck indefinitely as it
 // can't decide whether the task at 101 has decided not to emit watermark or it didn't get
 // scheduled yet.
-func (w *WaterMark) process() {
+func (w *WaterMark) process(closer *Closer) {
+	defer closer.Done()
+
 	var indices uint64Heap
 	// pending maps raft proposal index to the number of pending mutations for this proposal.
 	pending := make(map[uint64]int)
@@ -201,25 +203,30 @@ func (w *WaterMark) process() {
 		}
 	}
 
-	for mark := range w.markCh {
-		if mark.waiter != nil {
-			doneUntil := atomic.LoadUint64(&w.doneUntil)
-			if doneUntil >= mark.index {
-				close(mark.waiter)
-			} else {
-				ws, ok := waiters[mark.index]
-				if !ok {
-					waiters[mark.index] = []chan struct{}{mark.waiter}
+	for {
+		select {
+		case <-closer.HasBeenClosed():
+			return
+		case mark := <-w.markCh:
+			if mark.waiter != nil {
+				doneUntil := atomic.LoadUint64(&w.doneUntil)
+				if doneUntil >= mark.index {
+					close(mark.waiter)
 				} else {
-					waiters[mark.index] = append(ws, mark.waiter)
+					ws, ok := waiters[mark.index]
+					if !ok {
+						waiters[mark.index] = []chan struct{}{mark.waiter}
+					} else {
+						waiters[mark.index] = append(ws, mark.waiter)
+					}
 				}
-			}
-		} else {
-			if mark.index > 0 {
-				processOne(mark.index, mark.done)
-			}
-			for _, index := range mark.indices {
-				processOne(index, mark.done)
+			} else {
+				if mark.index > 0 {
+					processOne(mark.index, mark.done)
+				}
+				for _, index := range mark.indices {
+					processOne(index, mark.done)
+				}
 			}
 		}
 	}
