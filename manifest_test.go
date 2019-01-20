@@ -169,7 +169,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lh0 := newLevelHandler(kv, 0)
 	lh1 := newLevelHandler(kv, 1)
 	f := buildTestTable(t, "k", 2)
-	t1, err := table.OpenTable(f, options.MemoryMap)
+	t1, err := table.OpenTable(f, options.MemoryMap, nil)
 	require.NoError(t, err)
 	defer t1.DecrRef()
 
@@ -190,7 +190,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lc.runCompactDef(0, cd)
 
 	f = buildTestTable(t, "l", 2)
-	t2, err := table.OpenTable(f, options.MemoryMap)
+	t2, err := table.OpenTable(f, options.MemoryMap, nil)
 	require.NoError(t, err)
 	defer t2.DecrRef()
 	done = lh0.tryAddLevel0Table(t2)
@@ -221,14 +221,14 @@ func TestManifestRewrite(t *testing.T) {
 	require.Equal(t, 0, m.Deletions)
 
 	err = mf.addChanges([]*pb.ManifestChange{
-		makeTableCreateChange(0, 0),
+		newCreateChange(0, 0, nil),
 	})
 	require.NoError(t, err)
 
 	for i := uint64(0); i < uint64(deletionsThreshold*3); i++ {
 		ch := []*pb.ManifestChange{
-			makeTableCreateChange(i+1, 0),
-			makeTableDeleteChange(i),
+			newCreateChange(i+1, 0, nil),
+			newDeleteChange(i),
 		}
 		err := mf.addChanges(ch)
 		require.NoError(t, err)
@@ -238,7 +238,7 @@ func TestManifestRewrite(t *testing.T) {
 	mf = nil
 	mf, m, err = helpOpenOrCreateManifestFile(dir, false, deletionsThreshold)
 	require.NoError(t, err)
-	require.Equal(t, map[uint64]tableManifest{
-		uint64(deletionsThreshold * 3): {Level: 0},
+	require.Equal(t, map[uint64]TableManifest{
+		uint64(deletionsThreshold * 3): {Level: 0, Checksum: []byte{}},
 	}, m.Tables)
 }
