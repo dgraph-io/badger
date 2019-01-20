@@ -33,7 +33,6 @@ import (
 	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
-	"github.com/dgraph-io/dgraph/x"
 	"github.com/pkg/errors"
 )
 
@@ -149,7 +148,7 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 	// Enforce checksum before we read index. Otherwise, if the file was
 	// truncated, we'd end up with panics in readIndex.
 	if len(cksum) > 0 && !bytes.Equal(t.Checksum, cksum) {
-		return nil, x.Errorf(
+		return nil, fmt.Errorf(
 			"CHECKSUM_MISMATCH: Table checksum does not match checksum in MANIFEST."+
 				" NOT including table %s. This would lead to missing data."+
 				"\n  sha256 %x Expected\n  sha256 %x Found\n", filename, cksum, t.Checksum)
