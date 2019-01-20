@@ -169,8 +169,9 @@ func printInfo(dir, valueDir string) error {
 		})
 		for _, tableID := range tableIDs {
 			tableFile := table.IDToFilename(tableID)
-			file, ok := fileinfoByName[tableFile]
-			if ok {
+			tm, ok1 := manifest.Tables[tableID]
+			file, ok2 := fileinfoByName[tableFile]
+			if ok1 && ok2 {
 				fileinfoMarked[tableFile] = true
 				emptyString := ""
 				fileSize := file.Size()
@@ -180,8 +181,8 @@ func printInfo(dir, valueDir string) error {
 				}
 				levelSizes[level] += fileSize
 				// (Put level on every line to make easier to process with sed/perl.)
-				fmt.Printf("[%25s] %-12s %6s L%d%s\n", dur(baseTime, file.ModTime()),
-					tableFile, hbytes(fileSize), level, emptyString)
+				fmt.Printf("[%25s] %-12s %6s L%d %x%s\n", dur(baseTime, file.ModTime()),
+					tableFile, hbytes(fileSize), level, tm.Checksum, emptyString)
 			} else {
 				fmt.Printf("%s [MISSING]\n", tableFile)
 				numMissing++

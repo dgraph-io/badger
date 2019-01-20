@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -122,7 +123,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 	tick := time.NewTicker(3 * time.Second)
 	defer tick.Stop()
 
-	for fileID, tableManifest := range mf.Tables {
+	for fileID, tf := range mf.Tables {
 		fname := table.NewFilename(fileID, db.opt.Dir)
 		select {
 		case <-tick.C:
@@ -137,7 +138,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		if fileID > maxFileID {
 			maxFileID = fileID
 		}
-		go func(fname string, level int) {
+		go func(fname string, tf TableManifest) {
 			var rerr error
 			defer func() {
 				throttle.Done(rerr)
@@ -149,16 +150,22 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				return
 			}
 
-			t, err := table.OpenTable(fd, db.opt.TableLoadingMode)
+			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, tf.Checksum)
 			if err != nil {
-				rerr = errors.Wrapf(err, "Opening table: %q", fname)
+				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
+					db.opt.Errorf(err.Error())
+					db.opt.Errorf("Ignoring table %s", fd.Name())
+					// Do not set rerr. We will continue without this table.
+				} else {
+					rerr = errors.Wrapf(err, "Opening table: %q", fname)
+				}
 				return
 			}
 
 			mu.Lock()
-			tables[level] = append(tables[level], t)
+			tables[tf.Level] = append(tables[tf.Level], t)
 			mu.Unlock()
-		}(fname, int(tableManifest.Level))
+		}(fname, tf)
 	}
 	if err := throttle.Finish(); err != nil {
 		closeAllTables(tables)
@@ -226,7 +233,7 @@ func (s *levelsController) deleteLSMTree() (int, error) {
 	// Generate the manifest changes.
 	changes := []*pb.ManifestChange{}
 	for _, table := range all {
-		changes = append(changes, makeTableDeleteChange(table.ID()))
+		changes = append(changes, newDeleteChange(table.ID()))
 	}
 	changeSet := pb.ManifestChangeSet{Changes: changes}
 	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
@@ -486,7 +493,7 @@ func (s *levelsController) compactBuildTables(
 					return
 				}
 
-				tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode)
+				tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, nil)
 				// decrRef is added below.
 				resultCh <- newTableResult{tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())}
 			}(builder)
@@ -534,13 +541,14 @@ func (s *levelsController) compactBuildTables(
 func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeSet {
 	changes := []*pb.ManifestChange{}
 	for _, table := range newTables {
-		changes = append(changes, makeTableCreateChange(table.ID(), cd.nextLevel.level))
+		changes = append(changes,
+			newCreateChange(table.ID(), cd.nextLevel.level, table.Checksum))
 	}
 	for _, table := range cd.top {
-		changes = append(changes, makeTableDeleteChange(table.ID()))
+		changes = append(changes, newDeleteChange(table.ID()))
 	}
 	for _, table := range cd.bot {
-		changes = append(changes, makeTableDeleteChange(table.ID()))
+		changes = append(changes, newDeleteChange(table.ID()))
 	}
 	return pb.ManifestChangeSet{Changes: changes}
 }
@@ -748,7 +756,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	// the proper order. (That means this update happens before that of some compaction which
 	// deletes the table.)
 	err := s.kv.manifest.addChanges([]*pb.ManifestChange{
-		makeTableCreateChange(t.ID(), 0),
+		newCreateChange(t.ID(), 0, t.Checksum),
 	})
 	if err != nil {
 		return err
