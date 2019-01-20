@@ -170,16 +170,19 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 		t.biggest = it2.Key()
 	}
 
-	if mode == options.LoadToRAM {
+	switch mode {
+	case options.LoadToRAM:
 		// No need to do anything. t.mmap is already filled.
-	} else if mode == options.MemoryMap {
+	case options.MemoryMap:
 		t.mmap, err = y.Mmap(fd, false, fileInfo.Size())
 		if err != nil {
 			_ = fd.Close()
 			return nil, y.Wrapf(err, "Unable to map file")
 		}
-	} else if mode == options.FileIO {
+	case options.FileIO:
 		t.mmap = nil
+	default:
+		panic(fmt.Sprintf("Invalid loading mode: %v", mode))
 	}
 	return t, nil
 }
