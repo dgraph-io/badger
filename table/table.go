@@ -146,6 +146,8 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 	if err := t.loadToRAM(); err != nil {
 		return nil, err
 	}
+	// Enforce checksum before we read index. Otherwise, if the file was
+	// truncated, we'd end up with panics in readIndex.
 	if len(cksum) > 0 && !bytes.Equal(t.Checksum, cksum) {
 		return nil, x.Errorf(
 			"CHECKSUM_MISMATCH: Table checksum does not match checksum in MANIFEST."+
