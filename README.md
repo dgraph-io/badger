@@ -661,6 +661,16 @@ Below is a list of known projects that use Badger:
 * [emitter](https://github.com/emitter-io/emitter) - Scalable, low latency, distributed pub/sub broker with message storage, uses MQTT, gossip and badger.
 * [GarageMQ](https://github.com/valinurovam/garagemq) - AMQP server written in Go.
 * [RedixDB](https://alash3al.github.io/redix/) - A real-time persistent key-value store with the same redis protocol.
+* [BBVA](https://github.com/BBVA/raft-badger) - Raft backend implementation using BadgerDB for Hashicorp raft.
+* [Riot](https://github.com/go-ego/riot) - An open-source, distributed search engine.
+* [Fantom](https://github.com/Fantom-foundation/go-lachesis) - aBFT Consensus platform for distributed applications.
+* [decred](https://github.com/decred/dcrdata) - An open, progressive, and self-funding cryptocurrency with a system of community-based governance integrated into its blockchain.
+* [OpenNetSys](https://github.com/opennetsys/c3-go) - Create useful dApps in any software language.
+* [HoneyTrap](https://github.com/honeytrap/honeytrap) - An extensible and opensource system for running, monitoring and managing honeypots.
+* [Insolar](https://github.com/insolar/insolar) - Enterprise-ready blockchain platform.
+* [IoTeX](https://github.com/iotexproject/iotex-core) - The next generation of the decentralized network for IoT powered by scalability- and privacy-centric blockchains.
+* [go-sessions](https://github.com/kataras/go-sessions) - The sessions manager for Go net/http and fasthttp.
+* [Babble](https://github.com/mosaicnetworks/babble) - BFT Consensus platform for distributed applications.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
