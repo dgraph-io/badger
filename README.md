@@ -671,6 +671,7 @@ Below is a list of known projects that use Badger:
 * [IoTeX](https://github.com/iotexproject/iotex-core) - The next generation of the decentralized network for IoT powered by scalability- and privacy-centric blockchains.
 * [go-sessions](https://github.com/kataras/go-sessions) - The sessions manager for Go net/http and fasthttp.
 * [Babble](https://github.com/mosaicnetworks/babble) - BFT Consensus platform for distributed applications.
+* [Tormenta](https://github.com/jpincas/tormenta) - Embedded object-persistence layer / simple JSON database for Go projects.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
