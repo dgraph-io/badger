@@ -182,7 +182,7 @@ if err != nil {
 }
 
 // Commit the transaction and check for error.
-if err := txn.Commit(nil); err != nil {
+if err := txn.Commit(); err != nil {
     return err
 }
 ```
