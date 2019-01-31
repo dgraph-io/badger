@@ -636,6 +636,7 @@ amplification compared to a typical LSM tree.
 As such RocksDB's design isn't aimed at SSDs.
 
 <sup>3</sup> SSI: Serializable Snapshot Isolation. For more details, see the blog post [Concurrent ACID Transactions in Badger](https://blog.dgraph.io/post/badger-txn/)
+
 <sup>4</sup> Badger provides direct access to value versions via its Iterator API.
 Users can also specify how many versions to keep per key via Options.
 
