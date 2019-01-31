@@ -616,6 +616,8 @@ func runTxnCallback(cb *txnCb) {
 	switch {
 	case cb == nil:
 		panic("txn callback is nil")
+	case cb.user == nil:
+		panic("Must have caught a nil callback for txn.CommitWith")
 	case cb.err != nil:
 		cb.user(cb.err)
 	case cb.commit != nil:
