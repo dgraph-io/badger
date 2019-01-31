@@ -31,10 +31,11 @@ import (
 type Options struct {
 	// 1. Mandatory flags
 	// -------------------
-	// Directory to store the data in. Should exist and be writable.
+	// Directory to store the data in. If it doesn't exist, it will
+	// try to be created for you.
 	Dir string
-	// Directory to store the value log in. Can be the same as Dir. Should
-	// exist and be writable.
+	// Directory to store the value log in. Can be the same as Dir. If it
+	// doesn't exist, it will try to be created for you.
 	ValueDir string
 
 	// 2. Frequently modified flags

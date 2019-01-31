@@ -621,8 +621,6 @@ func runTxnCallback(cb *txnCb) {
 	case cb.commit != nil:
 		err := cb.commit()
 		cb.user(err)
-	case cb.user == nil:
-		panic("Must have caught a nil callback for txn.CommitWith")
 	default:
 		cb.user(nil)
 	}

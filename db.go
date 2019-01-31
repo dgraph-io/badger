@@ -223,12 +223,12 @@ func Open(opt Options) (db *DB, err error) {
 		if err != nil {
 			return nil, err
 		}
+		defer func() {
+			if valueDirLockGuard != nil {
+				_ = valueDirLockGuard.release()
+			}
+		}()
 	}
-	defer func() {
-		if valueDirLockGuard != nil {
-			_ = valueDirLockGuard.release()
-		}
-	}()
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
