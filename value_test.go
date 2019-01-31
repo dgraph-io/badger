@@ -102,7 +102,7 @@ func TestValueGCManaged(t *testing.T) {
 
 	var ts uint64
 	newTs := func() uint64 {
-		ts += 1
+		ts++
 		return ts
 	}
 
