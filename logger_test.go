@@ -55,8 +55,8 @@ func TestDbLog(t *testing.T) {
 // Test that the global logger is used when no logger is specified in Options.
 func TestNoDbLog(t *testing.T) {
 	l := &mockLogger{}
-	SetLogger(l)
 	opt := Options{}
+	opt.Logger = l
 
 	opt.Errorf("test")
 	require.Equal(t, "ERROR: test", l.output)

@@ -67,7 +67,7 @@ func fill(cmd *cobra.Command, args []string) error {
 	defer func() {
 		start := time.Now()
 		err := db.Close()
-		badger.Infof("DB.Close. Error: %v. Time taken: %s", err, time.Since(start))
+		opts.Infof("DB.Close. Error: %v. Time taken: %s", err, time.Since(start))
 	}()
 
 	start := time.Now()
@@ -82,12 +82,12 @@ func fill(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if i%1e5 == 0 {
-			badger.Infof("Written keys: %d\n", i)
+			opts.Infof("Written keys: %d\n", i)
 		}
 	}
 	if err := batch.Flush(); err != nil {
 		return err
 	}
-	badger.Infof("%d keys written. Time taken: %s\n", num, time.Since(start))
+	opts.Infof("%d keys written. Time taken: %s\n", num, time.Since(start))
 	return nil
 }
