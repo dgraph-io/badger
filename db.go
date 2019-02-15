@@ -346,7 +346,7 @@ func (db *DB) Close() (err error) {
 				defer db.Unlock()
 				y.AssertTrue(db.mt != nil)
 				select {
-				case db.flushChan <- flushTask{db.mt, db.vhead}:
+				case db.flushChan <- flushTask{mt: db.mt, vptr: db.vhead}:
 					db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
 					db.mt = nil                    // Will segfault if we try writing!
 					db.elog.Printf("pushed to flush chan\n")
@@ -747,7 +747,7 @@ func (db *DB) ensureRoomForWrite() error {
 
 	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	select {
-	case db.flushChan <- flushTask{db.mt, db.vhead}:
+	case db.flushChan <- flushTask{mt: db.mt, vptr: db.vhead}:
 		db.elog.Printf("Flushing value log to disk if async mode.")
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
 		err = db.vlog.sync()
@@ -773,12 +773,16 @@ func arenaSize(opt Options) int64 {
 }
 
 // WriteLevel0Table flushes memtable.
-func writeLevel0Table(s *skl.Skiplist, f *os.File) error {
+func writeLevel0Table(ft flushTask, f *os.File) error {
+	s := ft.mt
 	iter := s.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder()
 	defer b.Close()
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
+		if len(ft.dropPrefix) > 0 && bytes.HasPrefix(iter.Key(), ft.dropPrefix) {
+			continue
+		}
 		if err := b.Add(iter.Key(), iter.Value()); err != nil {
 			return err
 		}
@@ -788,8 +792,9 @@ func writeLevel0Table(s *skl.Skiplist, f *os.File) error {
 }
 
 type flushTask struct {
-	mt   *skl.Skiplist
-	vptr valuePointer
+	mt         *skl.Skiplist
+	vptr       valuePointer
+	dropPrefix []byte
 }
 
 // handleFlushTask must be run serially.
@@ -817,7 +822,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	dirSyncCh := make(chan error)
 	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
 
-	err = writeLevel0Table(ft.mt, fd)
+	err = writeLevel0Table(ft, fd)
 	dirSyncErr := <-dirSyncCh
 
 	if err != nil {
@@ -837,22 +842,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// We own a ref on tbl.
 	err = db.lc.addLevel0Table(tbl) // This will incrRef (if we don't error, sure)
 	tbl.DecrRef()                   // Releases our ref.
-	if err != nil {
-		return err
-	}
-
-	// Update s.imm. Need a lock.
-	db.Lock()
-	defer db.Unlock()
-	// This is a single-threaded operation. ft.mt corresponds to the head of
-	// db.imm list. Once we flush it, we advance db.imm. The next ft.mt
-	// which would arrive here would match db.imm[0], because we acquire a
-	// lock over DB when pushing to flushChan.
-	// TODO: This logic is dirty AF. Any change and this could easily break.
-	y.AssertTrue(ft.mt == db.imm[0])
-	db.imm = db.imm[1:]
-	ft.mt.DecrRef() // Return memory.
-	return nil
+	return err
 }
 
 // flushMemtable must keep running until we send it an empty flushTask. If there
@@ -868,6 +858,18 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 		for {
 			err := db.handleFlushTask(ft)
 			if err == nil {
+				// Update s.imm. Need a lock.
+				db.Lock()
+				// This is a single-threaded operation. ft.mt corresponds to the head of
+				// db.imm list. Once we flush it, we advance db.imm. The next ft.mt
+				// which would arrive here would match db.imm[0], because we acquire a
+				// lock over DB when pushing to flushChan.
+				// TODO: This logic is dirty AF. Any change and this could easily break.
+				y.AssertTrue(ft.mt == db.imm[0])
+				db.imm = db.imm[1:]
+				ft.mt.DecrRef() // Return memory.
+				db.Unlock()
+
 				break
 			}
 			// Encountered error. Retry indefinitely.
@@ -1230,6 +1232,33 @@ func (db *DB) Flatten(workers int) error {
 	}
 }
 
+func (db *DB) prepareToDrop() func() {
+	if db.opt.ReadOnly {
+		panic("Attempting to drop data in read-only mode.")
+	}
+	// Stop accepting new writes.
+	atomic.StoreInt32(&db.blockWrites, 1)
+
+	// Make all pending writes finish. The following will also close writeCh.
+	db.closers.writes.SignalAndWait()
+	db.opt.Infof("Writes flushed. Stopping compactions now...")
+
+	// Stop all compactions.
+	db.stopCompactions()
+	db.opt.Infof("Compactions stopped. Dropping all SSTables...")
+	return func() {
+		db.opt.Infof("Resuming writes")
+		db.startCompactions()
+
+		db.writeCh = make(chan *request, kvWriteChCapacity)
+		db.closers.writes = y.NewCloser(1)
+		go db.doWrites(db.closers.writes)
+
+		// Resume writes.
+		atomic.StoreInt32(&db.blockWrites, 0)
+	}
+}
+
 // DropAll would drop all the data stored in Badger. It does this in the following way.
 // - Stop accepting new writes.
 // - Pause memtable flushes and compactions.
@@ -1242,31 +1271,9 @@ func (db *DB) Flatten(workers int) error {
 // any reads while DropAll is going on, otherwise they may result in panics. Ideally, both reads and
 // writes are paused before running DropAll, and resumed after it is finished.
 func (db *DB) DropAll() error {
-	if db.opt.ReadOnly {
-		panic("Attempting to drop data in read-only mode.")
-	}
 	db.opt.Infof("DropAll called. Blocking writes...")
-	// Stop accepting new writes.
-	atomic.StoreInt32(&db.blockWrites, 1)
-
-	// Make all pending writes finish. The following will also close writeCh.
-	db.closers.writes.SignalAndWait()
-	db.opt.Infof("Writes flushed. Stopping compactions now...")
-
-	// Stop all compactions.
-	db.stopCompactions()
-	defer func() {
-		db.opt.Infof("Resuming writes")
-		db.startCompactions()
-
-		db.writeCh = make(chan *request, kvWriteChCapacity)
-		db.closers.writes = y.NewCloser(1)
-		go db.doWrites(db.closers.writes)
-
-		// Resume writes.
-		atomic.StoreInt32(&db.blockWrites, 0)
-	}()
-	db.opt.Infof("Compactions stopped. Dropping all SSTables...")
+	f := db.prepareToDrop()
+	defer f()
 
 	// Block all foreign interactions with memory tables.
 	db.Lock()
@@ -1292,5 +1299,45 @@ func (db *DB) DropAll() error {
 	}
 	db.vhead = valuePointer{} // Zero it out.
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
+	return nil
+}
+
+func (db *DB) DropPrefix(prefix []byte) error {
+	db.opt.Infof("DropPrefix called. Blocking writes...")
+	f := db.prepareToDrop()
+	defer f()
+
+	// Block all foreign interactions with memory tables.
+	db.Lock()
+	defer db.Unlock()
+
+	// TODO: Deal with inmemory tables.
+	db.imm = append(db.imm, db.mt)
+	for _, memtable := range db.imm {
+		if memtable.Empty() {
+			memtable.DecrRef()
+			continue
+		}
+		task := flushTask{
+			mt:         memtable,
+			vptr:       db.vhead,
+			dropPrefix: prefix,
+		}
+		db.opt.Infof("Flushing memtable")
+		if err := db.handleFlushTask(task); err != nil {
+			db.opt.Errorf("While trying to flush memtable: %v", err)
+			return err
+		}
+		memtable.DecrRef()
+	}
+	db.imm = db.imm[:0]
+	db.mt = skl.NewSkiplist(arenaSize(db.opt))
+
+	// Ensure that the head of value log gets persisted to disk.
+
+	// Drop prefixes from the levels.
+	if err := db.lc.dropPrefix(prefix); err != nil {
+		return err
+	}
 	return nil
 }

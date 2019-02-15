@@ -1,6 +1,7 @@
 package badger
 
 import (
+	"fmt"
 	"io/ioutil"
 	"math"
 	"math/rand"
@@ -350,4 +351,55 @@ func TestDropAllRace(t *testing.T) {
 	t.Logf("Before: %d. After dropall: %d\n", before, after)
 	require.True(t, after < before)
 	db.Close()
+}
+
+func TestDropPrefix(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 5 << 20
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	N := uint64(10000)
+	populate := func(db *DB) {
+		writer := db.NewWriteBatch()
+		for i := uint64(0); i < N; i++ {
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+		}
+		require.NoError(t, writer.Flush())
+	}
+
+	populate(db)
+	// require.NoError(t, db.Flatten(1))
+	require.Equal(t, int(N), numKeys(db))
+
+	require.NoError(t, db.DropPrefix([]byte("key000")))
+	t.Logf("numkeys: %d", numKeys(db))
+
+	require.NoError(t, db.DropPrefix([]byte("key00")))
+	t.Logf("numkeys: %d", numKeys(db))
+
+	for i := 0; i < 10; i++ {
+		require.NoError(t, db.DropPrefix([]byte(fmt.Sprintf("key%d", i))))
+		t.Logf("numkeys: %d", numKeys(db))
+	}
+	require.NoError(t, db.DropPrefix([]byte("key1")))
+	t.Logf("numkeys: %d", numKeys(db))
+	require.NoError(t, db.DropPrefix([]byte("key")))
+	t.Logf("numkeys: %d", numKeys(db))
+
+	db.Close()
+
+	// Check that we can still write to mdb, and using lower timestamps.
+	// populate(db)
+	// require.Equal(t, int(N), numKeys(db))
+	// db.Close()
+
+	// // Ensure that value log is correctly replayed.
+	// db2, err := Open(opts)
+	// require.NoError(t, err)
+	// require.Equal(t, int(N), numKeys(db2))
+	// db2.Close()
 }
