@@ -24,8 +24,9 @@ import (
 // Logger is implemented by any logging system that is used for standard logs.
 type Logger interface {
 	Errorf(string, ...interface{})
-	Infof(string, ...interface{})
 	Warningf(string, ...interface{})
+	Infof(string, ...interface{})
+	Debugf(string, ...interface{})
 }
 
 // Errorf logs an ERROR log message to the logger specified in opts or to the
@@ -53,6 +54,14 @@ func (opt *Options) Warningf(format string, v ...interface{}) {
 	opt.Logger.Warningf(format, v...)
 }
 
+// Warningf logs a WARNING message to the logger specified in opts.
+func (opt *Options) Debugf(format string, v ...interface{}) {
+	if opt.Logger == nil {
+		return
+	}
+	opt.Logger.Debugf(format, v...)
+}
+
 type defaultLog struct {
 	*log.Logger
 }
@@ -63,10 +72,14 @@ func (l *defaultLog) Errorf(f string, v ...interface{}) {
 	l.Printf("ERROR: "+f, v...)
 }
 
+func (l *defaultLog) Warningf(f string, v ...interface{}) {
+	l.Printf("WARNING: "+f, v...)
+}
+
 func (l *defaultLog) Infof(f string, v ...interface{}) {
 	l.Printf("INFO: "+f, v...)
 }
 
-func (l *defaultLog) Warningf(f string, v ...interface{}) {
-	l.Printf("WARNING: "+f, v...)
+func (l *defaultLog) Debugf(f string, v ...interface{}) {
+	l.Printf("DEBUG: "+f, v...)
 }

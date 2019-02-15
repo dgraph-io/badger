@@ -19,6 +19,7 @@ package badger
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"expvar"
 	"math"
 	"os"
@@ -369,10 +370,13 @@ func (db *DB) Close() (err error) {
 	// Force Compact L0
 	// We don't need to care about cstatus since no parallel compaction is running.
 	if db.opt.CompactL0OnClose {
-		if err := db.lc.doCompact(compactionPriority{level: 0, score: 1.73}); err != nil {
-			db.opt.Warningf("While forcing compaction on level 0: %v", err)
-		} else {
+		err := db.lc.doCompact(compactionPriority{level: 0, score: 1.73})
+		switch err {
+		case errFillTables:
+		case nil:
 			db.opt.Infof("Force compaction on level 0 done")
+		default:
+			db.opt.Warningf("While forcing compaction on level 0: %v", err)
 		}
 	}
 
@@ -801,7 +805,7 @@ type flushTask struct {
 func (db *DB) handleFlushTask(ft flushTask) error {
 	if !ft.mt.Empty() {
 		// Store badger head even if vptr is zero, need it for readTs
-		db.opt.Infof("Storing value log head: %+v\n", ft.vptr)
+		db.opt.Debugf("Storing value log head: %+v\n", ft.vptr)
 		db.elog.Printf("Storing offset: %+v\n", ft.vptr)
 		offset := make([]byte, vptrSize)
 		ft.vptr.Encode(offset)
@@ -1281,13 +1285,13 @@ func (db *DB) DropAll() error {
 
 	// Remove inmemory tables. Calling DecrRef for safety. Not sure if they're absolutely needed.
 	db.mt.DecrRef()
-	db.mt = skl.NewSkiplist(arenaSize(db.opt)) // Set it up for future writes.
 	for _, mt := range db.imm {
 		mt.DecrRef()
 	}
 	db.imm = db.imm[:0]
+	db.mt = skl.NewSkiplist(arenaSize(db.opt)) // Set it up for future writes.
 
-	num, err := db.lc.deleteLSMTree()
+	num, err := db.lc.dropTree()
 	if err != nil {
 		return err
 	}
@@ -1303,7 +1307,7 @@ func (db *DB) DropAll() error {
 }
 
 func (db *DB) DropPrefix(prefix []byte) error {
-	db.opt.Infof("DropPrefix called. Blocking writes...")
+	db.opt.Infof("DropPrefix called on %s. Blocking writes...", hex.Dump(prefix))
 	f := db.prepareToDrop()
 	defer f()
 
@@ -1311,7 +1315,6 @@ func (db *DB) DropPrefix(prefix []byte) error {
 	db.Lock()
 	defer db.Unlock()
 
-	// TODO: Deal with inmemory tables.
 	db.imm = append(db.imm, db.mt)
 	for _, memtable := range db.imm {
 		if memtable.Empty() {
@@ -1319,11 +1322,12 @@ func (db *DB) DropPrefix(prefix []byte) error {
 			continue
 		}
 		task := flushTask{
-			mt:         memtable,
+			mt: memtable,
+			// Ensure that the head of value log gets persisted to disk.
 			vptr:       db.vhead,
 			dropPrefix: prefix,
 		}
-		db.opt.Infof("Flushing memtable")
+		db.opt.Debugf("Flushing memtable")
 		if err := db.handleFlushTask(task); err != nil {
 			db.opt.Errorf("While trying to flush memtable: %v", err)
 			return err
@@ -1333,11 +1337,10 @@ func (db *DB) DropPrefix(prefix []byte) error {
 	db.imm = db.imm[:0]
 	db.mt = skl.NewSkiplist(arenaSize(db.opt))
 
-	// Ensure that the head of value log gets persisted to disk.
-
 	// Drop prefixes from the levels.
 	if err := db.lc.dropPrefix(prefix); err != nil {
 		return err
 	}
+	db.opt.Infof("DropPrefix done")
 	return nil
 }

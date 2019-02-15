@@ -216,10 +216,10 @@ func (s *levelsController) cleanupLevels() error {
 	return firstErr
 }
 
-// This function picks all tables from all levels, creates a manifest changeset,
+// dropTree picks all tables from all levels, creates a manifest changeset,
 // applies it, and then decrements the refs of these tables, which would result
 // in their deletion.
-func (s *levelsController) deleteLSMTree() (int, error) {
+func (s *levelsController) dropTree() (int, error) {
 	// First pick all tables, so we can create a manifest changelog.
 	var all []*table.Table
 	for _, l := range s.levels {
@@ -293,6 +293,11 @@ func (s *levelsController) dropPrefix(prefix []byte) error {
 				tables = append(tables, table)
 			}
 		}
+		l.RUnlock()
+		if len(tables) == 0 {
+			continue
+		}
+
 		cd := compactDef{
 			elog:       trace.New(fmt.Sprintf("Badger.L%d", l.level), "Compact"),
 			thisLevel:  l,
@@ -301,15 +306,11 @@ func (s *levelsController) dropPrefix(prefix []byte) error {
 			bot:        tables,
 			dropPrefix: prefix,
 		}
-		l.RUnlock()
-
-		opt.Infof("Running compact def for: %+v", cd)
 		if err := s.runCompactDef(l.level, cd); err != nil {
 			opt.Warningf("While running compact def: %+v. Error: %v", cd, err)
 			return err
 		}
 	}
-	opt.Infof("Done dropping prefix")
 	return nil
 }
 
@@ -428,7 +429,6 @@ func (s *levelsController) compactBuildTables(
 				break
 			}
 		}
-		cd.elog.LazyPrintf("Key range overlaps with lower levels: %v", hasOverlap)
 	}
 
 	// Try to collect stats so that we can inform value log about GC. That would help us find which
@@ -550,8 +550,8 @@ func (s *levelsController) compactBuildTables(
 		}
 		// It was true that it.Valid() at least once in the loop above, which means we
 		// called Add() at least once, and builder is not Empty().
-		s.kv.opt.Infof("Added %d keys. Skipped %d keys.", numKeys, numSkips)
-		s.kv.opt.Infof("LOG Compact. Iteration took: %v\n", time.Since(timeStart))
+		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
+			numKeys, numSkips, time.Since(timeStart))
 		if !builder.Empty() {
 			numBuilds++
 			fileID := s.reserveFileID()
@@ -610,7 +610,7 @@ func (s *levelsController) compactBuildTables(
 		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
 	s.kv.vlog.updateGCStats(discardStats)
-	s.kv.opt.Infof("Discard stats: %v", discardStats)
+	s.kv.opt.Debugf("Discard stats: %v", discardStats)
 	return newTables, func() error { return decrRefs(newTables) }, nil
 }
 
@@ -778,7 +778,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
 
 	s.kv.opt.Infof("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
-		l, l+1, len(cd.top)+len(cd.bot), len(newTables), time.Since(timeStart))
+		thisLevel.level, nextLevel.level, len(cd.top)+len(cd.bot),
+		len(newTables), time.Since(timeStart))
 	return nil
 }
 
@@ -804,13 +805,11 @@ func (s *levelsController) doCompact(p compactionPriority) error {
 	// remain unchanged.
 	if l == 0 {
 		if !s.fillTablesL0(&cd) {
-			s.kv.opt.Infof("fillTables failed for level: %d\n", l)
 			return errFillTables
 		}
 
 	} else {
 		if !s.fillTables(&cd) {
-			s.kv.opt.Infof("fillTables failed for level: %d\n", l)
 			return errFillTables
 		}
 	}
@@ -820,7 +819,7 @@ func (s *levelsController) doCompact(p compactionPriority) error {
 	s.cstatus.toLog(cd.elog)
 	if err := s.runCompactDef(l, cd); err != nil {
 		// This compaction couldn't be done successfully.
-		s.kv.opt.Warningf("\tLOG Compact FAILED with error: %+v: %+v", err, cd)
+		s.kv.opt.Warningf("LOG Compact FAILED with error: %+v: %+v", err, cd)
 		return err
 	}
 

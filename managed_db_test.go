@@ -372,34 +372,34 @@ func TestDropPrefix(t *testing.T) {
 	}
 
 	populate(db)
-	// require.NoError(t, db.Flatten(1))
 	require.Equal(t, int(N), numKeys(db))
 
 	require.NoError(t, db.DropPrefix([]byte("key000")))
-	t.Logf("numkeys: %d", numKeys(db))
+	require.Equal(t, int(N)-10, numKeys(db))
 
 	require.NoError(t, db.DropPrefix([]byte("key00")))
-	t.Logf("numkeys: %d", numKeys(db))
+	require.Equal(t, int(N)-100, numKeys(db))
 
+	expected := int(N)
 	for i := 0; i < 10; i++ {
 		require.NoError(t, db.DropPrefix([]byte(fmt.Sprintf("key%d", i))))
-		t.Logf("numkeys: %d", numKeys(db))
+		expected -= 1000
+		require.Equal(t, expected, numKeys(db))
 	}
 	require.NoError(t, db.DropPrefix([]byte("key1")))
-	t.Logf("numkeys: %d", numKeys(db))
+	require.Equal(t, 0, numKeys(db))
 	require.NoError(t, db.DropPrefix([]byte("key")))
-	t.Logf("numkeys: %d", numKeys(db))
-
-	db.Close()
+	require.Equal(t, 0, numKeys(db))
 
 	// Check that we can still write to mdb, and using lower timestamps.
-	// populate(db)
-	// require.Equal(t, int(N), numKeys(db))
-	// db.Close()
+	populate(db)
+	require.Equal(t, int(N), numKeys(db))
+	require.NoError(t, db.DropPrefix([]byte("key")))
+	db.Close()
 
-	// // Ensure that value log is correctly replayed.
-	// db2, err := Open(opts)
-	// require.NoError(t, err)
-	// require.Equal(t, int(N), numKeys(db2))
-	// db2.Close()
+	// Ensure that value log is correctly replayed.
+	db2, err := Open(opts)
+	require.NoError(t, err)
+	require.Equal(t, 0, numKeys(db2))
+	db2.Close()
 }
