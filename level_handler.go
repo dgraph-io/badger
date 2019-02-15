@@ -108,9 +108,6 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 	// the indices get shifted around.)
 	s.Lock() // We s.Unlock() below.
 
-	// TODO: This needs to be rewritten so we delete cd.bot tables and add newTables. We can just do
-	// a sort afterwards. Not sure why this logic is so complex.
-
 	toDelMap := make(map[uint64]struct{})
 	for _, t := range toDel {
 		toDelMap[t.ID()] = struct{}{}
@@ -122,7 +119,6 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 			newTables = append(newTables, t)
 			continue
 		}
-		t.DecrRef()
 		s.totalSize -= t.Size()
 	}
 
@@ -140,31 +136,6 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 	})
 	s.Unlock() // s.Unlock before we DecrRef tables -- that can be slow.
 	return decrRefs(toDel)
-
-	// kr := keyRange{
-	// 	left:  newTables[0].Smallest(),
-	// 	right: newTables[len(newTables)-1].Biggest(),
-	// }
-	// left, right := s.overlappingTables(levelHandlerRLocked{}, kr)
-
-	// toDecr := make([]*table.Table, right-left)
-	// // Update totalSize and reference counts.
-	// for i := left; i < right; i++ {
-	// 	tbl := s.tables[i]
-	// 	s.totalSize -= tbl.Size()
-	// 	toDecr[i-left] = tbl
-	// }
-
-	// // To be safe, just make a copy. TODO: Be more careful and avoid copying.
-	// numDeleted := right - left
-	// numAdded := len(newTables)
-	// tables := make([]*table.Table, len(s.tables)-numDeleted+numAdded)
-	// y.AssertTrue(left == copy(tables, s.tables[:left]))
-	// t := tables[left:]
-	// y.AssertTrue(numAdded == copy(t, newTables))
-	// t = t[numAdded:]
-	// y.AssertTrue(len(s.tables[right:]) == copy(t, s.tables[right:]))
-	// s.tables = tables
 }
 
 func decrRefs(tables []*table.Table) error {

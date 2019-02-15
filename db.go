@@ -1249,7 +1249,6 @@ func (db *DB) prepareToDrop() func() {
 
 	// Stop all compactions.
 	db.stopCompactions()
-	db.opt.Infof("Compactions stopped. Dropping all SSTables...")
 	return func() {
 		db.opt.Infof("Resuming writes")
 		db.startCompactions()
@@ -1306,6 +1305,15 @@ func (db *DB) DropAll() error {
 	return nil
 }
 
+// DropPrefix would drop all the keys with the provided prefix. It does this in the following way:
+// - Stop accepting new writes.
+// - Stop memtable flushes and compactions.
+// - Flush out all memtables, skipping over keys with the given prefix, Kp.
+// - Write out the value log header to memtables when flushing, so we don't accidentally bring Kp
+//   back after a restart.
+// - Compact L0->L1, skipping over Kp.
+// - Compact rest of the levels, Li->Li, picking tables which have Kp.
+// - Resume memtable flushes, compactions and writes.
 func (db *DB) DropPrefix(prefix []byte) error {
 	db.opt.Infof("DropPrefix called on %s. Blocking writes...", hex.Dump(prefix))
 	f := db.prepareToDrop()

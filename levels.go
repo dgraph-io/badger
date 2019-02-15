@@ -256,6 +256,12 @@ func (s *levelsController) dropTree() (int, error) {
 	return len(all), nil
 }
 
+// dropPrefix runs a L0->L1 compaction, and then runs same level compaction on the rest of the
+// levels. For L0->L1 compaction, it runs compactions normally, but skips over all the keys with the
+// provided prefix. For Li->Li compactions, it picks up the tables which would have the prefix. The
+// tables who only have keys with this prefix are quickly dropped. The ones which have other keys
+// are run through MergeIterator and compacted to create new tables. All the mechanisms of
+// compactions apply, i.e. level sizes and MANIFEST are updated as in the normal flow.
 func (s *levelsController) dropPrefix(prefix []byte) error {
 	opt := s.kv.opt
 	for _, l := range s.levels {
