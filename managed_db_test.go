@@ -561,7 +561,7 @@ func TestDropPrefixRace(t *testing.T) {
 
 	require.NoError(t, db.DropPrefix([]byte("key00")))
 	require.NoError(t, db.DropPrefix([]byte("key1")))
-	require.NoError(t, db.DropAll())
+	require.NoError(t, db.DropPrefix([]byte("key")))
 	closer.SignalAndWait()
 
 	after := numKeysManaged(db, math.MaxUint64)
