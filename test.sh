@@ -17,7 +17,7 @@ go test -v --manual=true -run='TestTruncateVlogNoClose$' .
 truncate --size=4096 p/000000.vlog
 go test -v --manual=true -run='TestTruncateVlogNoClose2$' .
 go test -v --manual=true -run='TestTruncateVlogNoClose3$' .
-rm -R p
+rm -R p || true
 
 # Then the normal tests.
 go test -v --vlog_mmap=true -race ./...
