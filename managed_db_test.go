@@ -403,3 +403,169 @@ func TestDropPrefix(t *testing.T) {
 	require.Equal(t, 0, numKeys(db2))
 	db2.Close()
 }
+
+func TestDropPrefixWithPendingTxn(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 5 << 20
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	N := uint64(10000)
+	populate := func(db *DB) {
+		writer := db.NewWriteBatch()
+		for i := uint64(0); i < N; i++ {
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+		}
+		require.NoError(t, writer.Flush())
+	}
+
+	populate(db)
+	require.Equal(t, int(N), numKeys(db))
+
+	txn := db.NewTransaction(true)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		itr := txn.NewIterator(DefaultIteratorOptions)
+		defer itr.Close()
+
+		var keys []string
+		for {
+			var count int
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				count++
+				item := itr.Item()
+				keys = append(keys, string(item.KeyCopy(nil)))
+				_, err := item.ValueCopy(nil)
+				if err != nil {
+					t.Logf("Got error during value copy: %v", err)
+					return
+				}
+			}
+			t.Logf("Got number of keys: %d\n", count)
+			for _, key := range keys {
+				item, err := txn.Get([]byte(key))
+				if err != nil {
+					t.Logf("Got error during key lookup: %v", err)
+					return
+				}
+				if _, err := item.ValueCopy(nil); err != nil {
+					t.Logf("Got error during second value copy: %v", err)
+					return
+				}
+			}
+		}
+	}()
+	// Do not cancel txn.
+
+	go func() {
+		time.Sleep(2 * time.Second)
+		require.NoError(t, db.DropPrefix([]byte("key0")))
+		require.NoError(t, db.DropPrefix([]byte("key00")))
+		require.NoError(t, db.DropPrefix([]byte("key")))
+	}()
+	wg.Wait()
+}
+
+func TestDropPrefixReadOnly(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 5 << 20
+	db, err := Open(opts)
+	require.NoError(t, err)
+	N := uint64(1000)
+	populate := func(db *DB) {
+		writer := db.NewWriteBatch()
+		for i := uint64(0); i < N; i++ {
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+		}
+		require.NoError(t, writer.Flush())
+	}
+
+	populate(db)
+	require.Equal(t, int(N), numKeys(db))
+	require.NoError(t, db.Close())
+
+	opts.ReadOnly = true
+	db2, err := Open(opts)
+	// acquireDirectoryLock returns ErrWindowsNotSupported on Windows. It can be ignored safely.
+	if runtime.GOOS == "windows" {
+		require.Equal(t, err, ErrWindowsNotSupported)
+	} else {
+		require.NoError(t, err)
+	}
+	require.Panics(t, func() { db2.DropPrefix([]byte("key0")) })
+}
+
+func TestDropPrefixRace(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opts := getTestOptions(dir)
+	opts.managedTxns = true
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	N := 10000
+	// Start a goroutine to keep trying to write to DB while DropPrefix happens.
+	closer := y.NewCloser(1)
+	go func() {
+		defer closer.Done()
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+
+		i := N + 1 // Writes would happen above N.
+		var errors int32
+		for {
+			select {
+			case <-ticker.C:
+				i++
+				txn := db.NewTransactionAt(math.MaxUint64, true)
+				require.NoError(t, txn.Set([]byte(key("key", i)), val(false)))
+				if err := txn.CommitAt(uint64(i), func(err error) {
+					if err != nil {
+						atomic.AddInt32(&errors, 1)
+					}
+				}); err != nil {
+					atomic.AddInt32(&errors, 1)
+				}
+			case <-closer.HasBeenClosed():
+				// The following causes a data race.
+				// t.Logf("i: %d. Number of (expected) write errors: %d.\n", i, errors)
+				return
+			}
+		}
+	}()
+
+	var wg sync.WaitGroup
+	for i := 1; i <= N; i++ {
+		wg.Add(1)
+		txn := db.NewTransactionAt(math.MaxUint64, true)
+		require.NoError(t, txn.Set([]byte(key("key", i)), val(false)))
+		require.NoError(t, txn.CommitAt(uint64(i), func(err error) {
+			require.NoError(t, err)
+			wg.Done()
+		}))
+	}
+	wg.Wait()
+
+	before := numKeysManaged(db, math.MaxUint64)
+	require.True(t, before > N)
+
+	require.NoError(t, db.DropPrefix([]byte("key00")))
+	require.NoError(t, db.DropPrefix([]byte("key1")))
+	require.NoError(t, db.DropAll())
+	closer.SignalAndWait()
+
+	after := numKeysManaged(db, math.MaxUint64)
+	t.Logf("Before: %d. After dropprefix: %d\n", before, after)
+	require.True(t, after < before)
+	db.Close()
+}
