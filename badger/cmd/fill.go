@@ -70,15 +70,16 @@ func fill(cmd *cobra.Command, args []string) error {
 		opts.Infof("DB.Close. Error: %v. Time taken: %s", err, time.Since(start))
 	}()
 
+	value := make([]byte, valSz)
+	y.Check2(rand.Read(value))
+
 	start := time.Now()
 	batch := db.NewWriteBatch()
 	num := int64(numKeys * mil)
 	for i := int64(1); i <= num; i++ {
 		k := make([]byte, keySz)
-		v := make([]byte, valSz)
 		y.Check2(rand.Read(k))
-		y.Check2(rand.Read(v))
-		if err := batch.Set(k, v, 0); err != nil {
+		if err := batch.Set(k, value, 0); err != nil {
 			return err
 		}
 		if i%1e5 == 0 {
