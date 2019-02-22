@@ -267,13 +267,15 @@ func (s *levelsController) dropPrefix(prefix []byte) error {
 	for _, l := range s.levels {
 		l.RLock()
 		if l.level == 0 {
-			sz := len(l.tables)
+			size := len(l.tables)
 			l.RUnlock()
 
-			if sz > 0 {
+			if size > 0 {
 				cp := compactionPriority{
-					level:      0,
-					score:      1.74,
+					level: 0,
+					score: 1.74,
+					// A unique number greater than 1.0 does two things. Helps identify this
+					// function in logs, and forces a compaction.
 					dropPrefix: prefix,
 				}
 				if err := s.doCompact(cp); err != nil {
@@ -463,7 +465,8 @@ func (s *levelsController) compactBuildTables(
 		if len(cd.dropPrefix) > 0 &&
 			bytes.HasPrefix(table.Smallest(), cd.dropPrefix) &&
 			bytes.HasPrefix(table.Biggest(), cd.dropPrefix) {
-			// This table does not need to be in the iterator.
+			// All the keys in this table have the dropPrefix. So, this table does not need to be
+			// in the iterator and can be dropped immediately.
 			continue
 		}
 		valid = append(valid, table)
