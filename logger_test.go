@@ -39,6 +39,10 @@ func (l *mockLogger) Warningf(f string, v ...interface{}) {
 	l.output = fmt.Sprintf("WARNING: "+f, v...)
 }
 
+func (l *mockLogger) Debugf(f string, v ...interface{}) {
+	l.output = fmt.Sprintf("DEBUG: "+f, v...)
+}
+
 // Test that the DB-specific log is used instead of the global log.
 func TestDbLog(t *testing.T) {
 	l := &mockLogger{}
