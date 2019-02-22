@@ -300,6 +300,9 @@ func Open(opt Options) (db *DB, err error) {
 	// Let's advance nextTxnTs to one more than whatever we observed via
 	// replaying the logs.
 	db.orc.txnMark.Done(db.orc.nextTxnTs)
+	// In normal mode, we must update readMark so older versions of keys can be removed during
+	// compaction when run in offline mode via the flatten tool.
+	db.orc.readMark.Done(db.orc.nextTxnTs)
 	db.orc.nextTxnTs++
 
 	db.writeCh = make(chan *request, kvWriteChCapacity)
