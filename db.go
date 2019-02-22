@@ -373,6 +373,8 @@ func (db *DB) Close() (err error) {
 		err := db.lc.doCompact(compactionPriority{level: 0, score: 1.73})
 		switch err {
 		case errFillTables:
+			// This error only means that there might be enough tables to do a compaction. So, we
+			// should not report it to the end user to avoid confusing them.
 		case nil:
 			db.opt.Infof("Force compaction on level 0 done")
 		default:
@@ -778,8 +780,7 @@ func arenaSize(opt Options) int64 {
 
 // WriteLevel0Table flushes memtable.
 func writeLevel0Table(ft flushTask, f *os.File) error {
-	s := ft.mt
-	iter := s.NewIterator()
+	iter := ft.mt.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder()
 	defer b.Close()
