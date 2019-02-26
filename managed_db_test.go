@@ -428,7 +428,7 @@ func TestDropPrefixWithPendingTxn(t *testing.T) {
 	txn := db.NewTransaction(true)
 
 	var wg sync.WaitGroup
-	wg.Add(1)
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		itr := txn.NewIterator(DefaultIteratorOptions)
@@ -464,6 +464,7 @@ func TestDropPrefixWithPendingTxn(t *testing.T) {
 	// Do not cancel txn.
 
 	go func() {
+		defer wg.Done()
 		time.Sleep(2 * time.Second)
 		require.NoError(t, db.DropPrefix([]byte("key0")))
 		require.NoError(t, db.DropPrefix([]byte("key00")))
