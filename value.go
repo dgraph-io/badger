@@ -1143,8 +1143,8 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	}()
 
 	type reason struct {
-		total   float64
-		discard float64
+		total   int64
+		discard int64
 		count   int
 	}
 
@@ -1156,16 +1156,15 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	}
 
 	// Set up the sampling window sizes.
-	sizeWindow := float64(fi.Size()) * 0.1                          // 10% of the file as window.
+	sizeWindow := int64(float64(fi.Size()) * 0.1)                   // 10% of the file as window.
 	countWindow := int(float64(vlog.opt.ValueLogMaxEntries) * 0.01) // 1% of num entries.
 	tr.LazyPrintf("Size window: %5.2f. Count window: %d.", sizeWindow, countWindow)
 
 	// Pick a random start point for the log.
-	skipFirstM := float64(rand.Int63n(fi.Size())) // Pick a random starting location.
-	skipFirstM -= sizeWindow                      // Avoid hitting EOF by moving back by window.
-	skipFirstM /= float64(mi)                     // Convert to MBs.
-	tr.LazyPrintf("Skip first %5.2f MB of file of size: %d MB", skipFirstM, fi.Size()/mi)
-	var skipped float64
+	skipFirst := rand.Int63n(fi.Size()) // Pick a random starting location.
+	skipFirst -= sizeWindow                      // Avoid hitting EOF by moving back by window.
+	tr.LazyPrintf("Skip first %d of file of size: %d", skipFirst, fi.Size())
+	var skipped int64
 
 	var r reason
 	start := time.Now()
@@ -1174,8 +1173,8 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	var numIterations int
 	_, err = vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
 		numIterations++
-		esz := float64(vp.Len) / (1 << 20) // in MBs.
-		if skipped < skipFirstM {
+		esz := int64(vp.Len)
+		if skipped < skipFirst {
 			skipped += esz
 			return nil
 		}
@@ -1245,12 +1244,12 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 		tr.SetError()
 		return err
 	}
-	tr.LazyPrintf("Fid: %d. Skipped: %5.2fMB Num iterations: %d. Data status=%+v\n",
+	tr.LazyPrintf("Fid: %d. Skipped: %d Num iterations: %d. Data status=%+v\n",
 		lf.fid, skipped, numIterations, r)
 
 	// If we couldn't sample at least a 1000 KV pairs or at least 75% of the window size,
 	// and what we can discard is below the threshold, we should skip the rewrite.
-	if (r.count < countWindow && r.total < sizeWindow*0.75) || r.discard < discardRatio*r.total {
+	if (r.count < countWindow && r.total < int64(float64(sizeWindow)*0.75)) || r.discard < int64(discardRatio*float64(r.total)) {
 		tr.LazyPrintf("Skipping GC on fid: %d", lf.fid)
 		return ErrNoRewrite
 	}
