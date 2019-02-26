@@ -138,6 +138,12 @@ func (w *WaterMark) WaitForMark(ctx context.Context, index uint64) error {
 // can't decide whether the task at 101 has decided not to emit watermark or it didn't get
 // scheduled yet.
 func (w *WaterMark) process(closer *Closer) {
+	// If closer is nil, create a new dummy closer with an initial count of zero.
+	// This is needed so that the select statement inside the for loop below still
+	// works as expected.
+	if closer == nil {
+		closer = NewCloser(0)
+	}
 	defer closer.Done()
 
 	var indices uint64Heap
