@@ -75,6 +75,7 @@ type DB struct {
 	flushChan chan flushTask // For flushing memtables.
 
 	blockWrites int32
+	version     int64 // vlog timestamp
 
 	orc *oracle
 }
@@ -889,6 +890,10 @@ func exists(path string) (bool, error) {
 	return true, err
 }
 
+type dirInfo struct {
+	lsmSize, vlogSize, vlogVersion int64
+}
+
 // This function does a filewalk, calculates the size of vlog and sst files and stores it in
 // y.LSMSize and y.VlogSize.
 func (db *DB) calculateSize() {
@@ -898,33 +903,37 @@ func (db *DB) calculateSize() {
 		return v
 	}
 
-	totalSize := func(dir string) (int64, int64) {
-		var lsmSize, vlogSize int64
+	totalSize := func(dir string) dirInfo {
+		var di dirInfo
 		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
 			ext := filepath.Ext(path)
 			if ext == ".sst" {
-				lsmSize += info.Size()
+				di.lsmSize += info.Size()
 			} else if ext == ".vlog" {
-				vlogSize += info.Size()
+				di.vlogSize += info.Size()
+				if ts := info.ModTime().Unix(); ts > di.vlogVersion {
+					di.vlogVersion = ts
+				}
 			}
 			return nil
 		})
 		if err != nil {
 			db.elog.Printf("Got error while calculating total size of directory: %s", dir)
 		}
-		return lsmSize, vlogSize
+		return di
 	}
 
-	lsmSize, vlogSize := totalSize(db.opt.Dir)
-	y.LSMSize.Set(db.opt.Dir, newInt(lsmSize))
+	di := totalSize(db.opt.Dir)
+	y.LSMSize.Set(db.opt.Dir, newInt(di.lsmSize))
 	// If valueDir is different from dir, we'd have to do another walk.
 	if db.opt.ValueDir != db.opt.Dir {
-		_, vlogSize = totalSize(db.opt.ValueDir)
+		di = totalSize(db.opt.ValueDir)
 	}
-	y.VlogSize.Set(db.opt.Dir, newInt(vlogSize))
+	y.VlogSize.Set(db.opt.Dir, newInt(di.vlogSize))
+	atomic.StoreInt64(&db.version, di.vlogVersion)
 }
 
 func (db *DB) updateSize(lc *y.Closer) {
@@ -1002,6 +1011,11 @@ func (db *DB) Size() (lsm int64, vlog int64) {
 	lsm = y.LSMSize.Get(db.opt.Dir).(*expvar.Int).Value()
 	vlog = y.VlogSize.Get(db.opt.Dir).(*expvar.Int).Value()
 	return
+}
+
+// Version returns max value log timestamp.
+func (db *DB) Version() int64 {
+	return atomic.LoadInt64(&db.version)
 }
 
 // Sequence represents a Badger sequence.
