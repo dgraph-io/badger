@@ -5,7 +5,7 @@ package pb
 
 import (
 	fmt "fmt"
-	proto "github.com/golang/protobuf/proto"
+	proto "github.com/gogo/protobuf/proto"
 	io "io"
 	math "math"
 )
@@ -19,7 +19,7 @@ var _ = math.Inf
 // is compatible with the proto package it is being compiled against.
 // A compilation error at this line likely means your copy of the
 // proto package needs to be updated.
-const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
+const _ = proto.GoGoProtoPackageIsVersion2 // please upgrade the proto package
 
 type ManifestChange_Operation int32
 
@@ -47,15 +47,12 @@ func (ManifestChange_Operation) EnumDescriptor() ([]byte, []int) {
 }
 
 type KV struct {
-	Key                  []byte   `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	Value                []byte   `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	UserMeta             []byte   `protobuf:"bytes,3,opt,name=user_meta,json=userMeta,proto3" json:"user_meta,omitempty"`
-	Version              uint64   `protobuf:"varint,4,opt,name=version,proto3" json:"version,omitempty"`
-	ExpiresAt            uint64   `protobuf:"varint,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	Meta                 []byte   `protobuf:"bytes,6,opt,name=meta,proto3" json:"meta,omitempty"`
-	XXX_NoUnkeyedLiteral struct{} `json:"-"`
-	XXX_unrecognized     []byte   `json:"-"`
-	XXX_sizecache        int32    `json:"-"`
+	Key       []byte `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Value     []byte `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	UserMeta  []byte `protobuf:"bytes,3,opt,name=user_meta,json=userMeta,proto3" json:"user_meta,omitempty"`
+	Version   uint64 `protobuf:"varint,4,opt,name=version,proto3" json:"version,omitempty"`
+	ExpiresAt uint64 `protobuf:"varint,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	Meta      []byte `protobuf:"bytes,6,opt,name=meta,proto3" json:"meta,omitempty"`
 }
 
 func (m *KV) Reset()         { *m = KV{} }
@@ -134,10 +131,7 @@ func (m *KV) GetMeta() []byte {
 }
 
 type KVList struct {
-	Kv                   []*KV    `protobuf:"bytes,1,rep,name=kv,proto3" json:"kv,omitempty"`
-	XXX_NoUnkeyedLiteral struct{} `json:"-"`
-	XXX_unrecognized     []byte   `json:"-"`
-	XXX_sizecache        int32    `json:"-"`
+	Kv []*KV `protobuf:"bytes,1,rep,name=kv,proto3" json:"kv,omitempty"`
 }
 
 func (m *KVList) Reset()         { *m = KVList{} }
@@ -182,10 +176,7 @@ func (m *KVList) GetKv() []*KV {
 
 type ManifestChangeSet struct {
 	// A set of changes that are applied atomically.
-	Changes              []*ManifestChange `protobuf:"bytes,1,rep,name=changes,proto3" json:"changes,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	Changes []*ManifestChange `protobuf:"bytes,1,rep,name=changes,proto3" json:"changes,omitempty"`
 }
 
 func (m *ManifestChangeSet) Reset()         { *m = ManifestChangeSet{} }
@@ -229,13 +220,10 @@ func (m *ManifestChangeSet) GetChanges() []*ManifestChange {
 }
 
 type ManifestChange struct {
-	Id                   uint64                   `protobuf:"varint,1,opt,name=Id,proto3" json:"Id,omitempty"`
-	Op                   ManifestChange_Operation `protobuf:"varint,2,opt,name=Op,proto3,enum=pb.ManifestChange_Operation" json:"Op,omitempty"`
-	Level                uint32                   `protobuf:"varint,3,opt,name=Level,proto3" json:"Level,omitempty"`
-	Checksum             []byte                   `protobuf:"bytes,4,opt,name=Checksum,proto3" json:"Checksum,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
-	XXX_unrecognized     []byte                   `json:"-"`
-	XXX_sizecache        int32                    `json:"-"`
+	Id       uint64                   `protobuf:"varint,1,opt,name=Id,proto3" json:"Id,omitempty"`
+	Op       ManifestChange_Operation `protobuf:"varint,2,opt,name=Op,proto3,enum=pb.ManifestChange_Operation" json:"Op,omitempty"`
+	Level    uint32                   `protobuf:"varint,3,opt,name=Level,proto3" json:"Level,omitempty"`
+	Checksum []byte                   `protobuf:"bytes,4,opt,name=Checksum,proto3" json:"Checksum,omitempty"`
 }
 
 func (m *ManifestChange) Reset()         { *m = ManifestChange{} }
@@ -310,29 +298,29 @@ func init() {
 func init() { proto.RegisterFile("pb.proto", fileDescriptor_f80abaa17e25ccc8) }
 
 var fileDescriptor_f80abaa17e25ccc8 = []byte{
-	// 342 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x64, 0x91, 0x4d, 0x6a, 0xf2, 0x40,
-	0x18, 0xc7, 0x9d, 0x31, 0x46, 0x7d, 0x5e, 0x5f, 0x49, 0x87, 0x52, 0x42, 0x3f, 0x42, 0x48, 0x37,
-	0x2e, 0x24, 0x0b, 0x7b, 0x02, 0x6b, 0xb3, 0x10, 0x15, 0x61, 0x2a, 0x6e, 0x25, 0xd1, 0xa7, 0x35,
-	0x44, 0x93, 0x21, 0x19, 0x43, 0x7b, 0x91, 0xd2, 0x0b, 0xf4, 0x2e, 0x5d, 0xf6, 0x08, 0xc5, 0x5e,
-	0xa4, 0x64, 0xfc, 0x00, 0xe9, 0xee, 0xff, 0x31, 0xcf, 0x7f, 0xf1, 0x1b, 0xa8, 0x89, 0xc0, 0x15,
-	0x69, 0x22, 0x13, 0x46, 0x45, 0xe0, 0xbc, 0x11, 0xa0, 0x83, 0x29, 0x33, 0xa0, 0x1c, 0xe1, 0xab,
-	0x49, 0x6c, 0xd2, 0x6a, 0xf0, 0x42, 0xb2, 0x73, 0xa8, 0xe4, 0xfe, 0x6a, 0x83, 0x26, 0x55, 0xd9,
-	0xce, 0xb0, 0x2b, 0xa8, 0x6f, 0x32, 0x4c, 0x67, 0x6b, 0x94, 0xbe, 0x59, 0x56, 0x4d, 0xad, 0x08,
-	0x46, 0x28, 0x7d, 0x66, 0x42, 0x35, 0xc7, 0x34, 0x0b, 0x93, 0xd8, 0xd4, 0x6c, 0xd2, 0xd2, 0xf8,
-	0xc1, 0xb2, 0x1b, 0x00, 0x7c, 0x11, 0x61, 0x8a, 0xd9, 0xcc, 0x97, 0x66, 0x45, 0x95, 0xf5, 0x7d,
-	0xd2, 0x95, 0x8c, 0x81, 0xa6, 0x06, 0x75, 0x35, 0xa8, 0xb4, 0x63, 0x83, 0x3e, 0x98, 0x0e, 0xc3,
-	0x4c, 0xb2, 0x0b, 0xa0, 0x51, 0x6e, 0x12, 0xbb, 0xdc, 0xfa, 0xd7, 0xd1, 0x5d, 0x11, 0xb8, 0x83,
-	0x29, 0xa7, 0x51, 0xee, 0x74, 0xe1, 0x6c, 0xe4, 0xc7, 0xe1, 0x13, 0x66, 0xb2, 0xb7, 0xf4, 0xe3,
-	0x67, 0x7c, 0x44, 0xc9, 0xda, 0x50, 0x9d, 0x2b, 0x93, 0xed, 0x2f, 0x58, 0x71, 0x71, 0xfa, 0x8e,
-	0x1f, 0x9e, 0x38, 0x1f, 0x04, 0x9a, 0xa7, 0x1d, 0x6b, 0x02, 0xed, 0x2f, 0x14, 0x08, 0x8d, 0xd3,
-	0xfe, 0x82, 0xb5, 0x81, 0x8e, 0x85, 0x82, 0xd0, 0xec, 0x5c, 0xff, 0xdd, 0x72, 0xc7, 0x02, 0x53,
-	0x5f, 0x86, 0x49, 0xcc, 0xe9, 0x58, 0x14, 0xd4, 0x86, 0x98, 0xe3, 0x4a, 0xb1, 0xf9, 0xcf, 0x77,
-	0x86, 0x5d, 0x42, 0xad, 0xb7, 0xc4, 0x79, 0x94, 0x6d, 0xd6, 0x8a, 0x4c, 0x83, 0x1f, 0xbd, 0x73,
-	0x0b, 0xf5, 0xe3, 0x04, 0x03, 0xd0, 0x7b, 0xdc, 0xeb, 0x4e, 0x3c, 0xa3, 0x54, 0xe8, 0x07, 0x6f,
-	0xe8, 0x4d, 0x3c, 0x83, 0xdc, 0x1b, 0x9f, 0x5b, 0x8b, 0x7c, 0x6d, 0x2d, 0xf2, 0xbd, 0xb5, 0xc8,
-	0xfb, 0x8f, 0x55, 0x0a, 0x74, 0xf5, 0x85, 0x77, 0xbf, 0x01, 0x00, 0x00, 0xff, 0xff, 0x50, 0xdf,
-	0x4a, 0x84, 0xce, 0x01, 0x00, 0x00,
+	// 349 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x64, 0x91, 0x4b, 0x4e, 0xc2, 0x40,
+	0x18, 0xc7, 0x3b, 0x43, 0x29, 0xf0, 0x89, 0x04, 0x27, 0xc6, 0x4c, 0x7c, 0x34, 0x4d, 0xdd, 0xb0,
+	0x20, 0x5d, 0xe0, 0x09, 0x10, 0xbb, 0x20, 0x40, 0x48, 0x46, 0xc2, 0x96, 0xb4, 0x30, 0x4a, 0x53,
+	0x68, 0x27, 0xed, 0xd0, 0xe8, 0x2d, 0x5c, 0x79, 0x03, 0xef, 0xe2, 0x92, 0xa5, 0x4b, 0x03, 0x17,
+	0x31, 0x1d, 0x1e, 0x09, 0x71, 0xf7, 0x7f, 0xcc, 0xf7, 0x5f, 0xfc, 0x06, 0xca, 0xc2, 0x77, 0x44,
+	0x12, 0xcb, 0x98, 0x60, 0xe1, 0xdb, 0x9f, 0x08, 0x70, 0x6f, 0x4c, 0xea, 0x50, 0x08, 0xf9, 0x3b,
+	0x45, 0x16, 0x6a, 0x54, 0x59, 0x2e, 0xc9, 0x25, 0x14, 0x33, 0x6f, 0xb1, 0xe2, 0x14, 0xab, 0x6c,
+	0x67, 0xc8, 0x0d, 0x54, 0x56, 0x29, 0x4f, 0x26, 0x4b, 0x2e, 0x3d, 0x5a, 0x50, 0x4d, 0x39, 0x0f,
+	0x06, 0x5c, 0x7a, 0x84, 0x42, 0x29, 0xe3, 0x49, 0x1a, 0xc4, 0x11, 0xd5, 0x2d, 0xd4, 0xd0, 0xd9,
+	0xc1, 0x92, 0x3b, 0x00, 0xfe, 0x26, 0x82, 0x84, 0xa7, 0x13, 0x4f, 0xd2, 0xa2, 0x2a, 0x2b, 0xfb,
+	0xa4, 0x2d, 0x09, 0x01, 0x5d, 0x0d, 0x1a, 0x6a, 0x50, 0x69, 0xdb, 0x02, 0xa3, 0x37, 0xee, 0x07,
+	0xa9, 0x24, 0x57, 0x80, 0xc3, 0x8c, 0x22, 0xab, 0xd0, 0x38, 0x6b, 0x19, 0x8e, 0xf0, 0x9d, 0xde,
+	0x98, 0xe1, 0x30, 0xb3, 0xdb, 0x70, 0x31, 0xf0, 0xa2, 0xe0, 0x85, 0xa7, 0xb2, 0x33, 0xf7, 0xa2,
+	0x57, 0xfe, 0xcc, 0x25, 0x69, 0x42, 0x69, 0xaa, 0x4c, 0xba, 0xbf, 0x20, 0xf9, 0xc5, 0xe9, 0x3b,
+	0x76, 0x78, 0x62, 0x7f, 0x21, 0xa8, 0x9d, 0x76, 0xa4, 0x06, 0xb8, 0x3b, 0x53, 0x20, 0x74, 0x86,
+	0xbb, 0x33, 0xd2, 0x04, 0x3c, 0x14, 0x0a, 0x42, 0xad, 0x75, 0xfb, 0x7f, 0xcb, 0x19, 0x0a, 0x9e,
+	0x78, 0x32, 0x88, 0x23, 0x86, 0x87, 0x22, 0xa7, 0xd6, 0xe7, 0x19, 0x5f, 0x28, 0x36, 0xe7, 0x6c,
+	0x67, 0xc8, 0x35, 0x94, 0x3b, 0x73, 0x3e, 0x0d, 0xd3, 0xd5, 0x52, 0x91, 0xa9, 0xb2, 0xa3, 0xb7,
+	0xef, 0xa1, 0x72, 0x9c, 0x20, 0x00, 0x46, 0x87, 0xb9, 0xed, 0x91, 0x5b, 0xd7, 0x72, 0xfd, 0xe4,
+	0xf6, 0xdd, 0x91, 0x5b, 0x47, 0x8f, 0xf4, 0x7b, 0x63, 0xa2, 0xf5, 0xc6, 0x44, 0xbf, 0x1b, 0x13,
+	0x7d, 0x6c, 0x4d, 0x6d, 0xbd, 0x35, 0xb5, 0x9f, 0xad, 0xa9, 0xf9, 0x86, 0xfa, 0xca, 0x87, 0xbf,
+	0x00, 0x00, 0x00, 0xff, 0xff, 0xc9, 0xf9, 0xca, 0x14, 0xd6, 0x01, 0x00, 0x00,
 }
 
 func (m *KV) Marshal() (dAtA []byte, err error) {
@@ -384,9 +372,6 @@ func (m *KV) MarshalTo(dAtA []byte) (int, error) {
 		i = encodeVarintPb(dAtA, i, uint64(len(m.Meta)))
 		i += copy(dAtA[i:], m.Meta)
 	}
-	if m.XXX_unrecognized != nil {
-		i += copy(dAtA[i:], m.XXX_unrecognized)
-	}
 	return i, nil
 }
 
@@ -417,9 +402,6 @@ func (m *KVList) MarshalTo(dAtA []byte) (int, error) {
 			i += n
 		}
 	}
-	if m.XXX_unrecognized != nil {
-		i += copy(dAtA[i:], m.XXX_unrecognized)
-	}
 	return i, nil
 }
 
@@ -449,9 +431,6 @@ func (m *ManifestChangeSet) MarshalTo(dAtA []byte) (int, error) {
 			}
 			i += n
 		}
-	}
-	if m.XXX_unrecognized != nil {
-		i += copy(dAtA[i:], m.XXX_unrecognized)
 	}
 	return i, nil
 }
@@ -491,9 +470,6 @@ func (m *ManifestChange) MarshalTo(dAtA []byte) (int, error) {
 		i++
 		i = encodeVarintPb(dAtA, i, uint64(len(m.Checksum)))
 		i += copy(dAtA[i:], m.Checksum)
-	}
-	if m.XXX_unrecognized != nil {
-		i += copy(dAtA[i:], m.XXX_unrecognized)
 	}
 	return i, nil
 }
@@ -535,9 +511,6 @@ func (m *KV) Size() (n int) {
 	if l > 0 {
 		n += 1 + l + sovPb(uint64(l))
 	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
-	}
 	return n
 }
 
@@ -553,9 +526,6 @@ func (m *KVList) Size() (n int) {
 			n += 1 + l + sovPb(uint64(l))
 		}
 	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
-	}
 	return n
 }
 
@@ -570,9 +540,6 @@ func (m *ManifestChangeSet) Size() (n int) {
 			l = e.Size()
 			n += 1 + l + sovPb(uint64(l))
 		}
-	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
 	}
 	return n
 }
@@ -595,9 +562,6 @@ func (m *ManifestChange) Size() (n int) {
 	l = len(m.Checksum)
 	if l > 0 {
 		n += 1 + l + sovPb(uint64(l))
-	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
 	}
 	return n
 }
@@ -630,7 +594,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 			}
 			b := dAtA[iNdEx]
 			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
+			wire |= uint64(b&0x7F) << shift
 			if b < 0x80 {
 				break
 			}
@@ -658,7 +622,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
+				byteLen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -667,6 +631,9 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
@@ -689,7 +656,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
+				byteLen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -698,6 +665,9 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
@@ -720,7 +690,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
+				byteLen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -729,6 +699,9 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
@@ -751,7 +724,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.Version |= (uint64(b) & 0x7F) << shift
+				m.Version |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -770,7 +743,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.ExpiresAt |= (uint64(b) & 0x7F) << shift
+				m.ExpiresAt |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -789,7 +762,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
+				byteLen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -798,6 +771,9 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
@@ -815,10 +791,12 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 			if skippy < 0 {
 				return ErrInvalidLengthPb
 			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthPb
+			}
 			if (iNdEx + skippy) > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
 			iNdEx += skippy
 		}
 	}
@@ -843,7 +821,7 @@ func (m *KVList) Unmarshal(dAtA []byte) error {
 			}
 			b := dAtA[iNdEx]
 			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
+			wire |= uint64(b&0x7F) << shift
 			if b < 0x80 {
 				break
 			}
@@ -871,7 +849,7 @@ func (m *KVList) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				msglen |= (int(b) & 0x7F) << shift
+				msglen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -880,6 +858,9 @@ func (m *KVList) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
@@ -897,10 +878,12 @@ func (m *KVList) Unmarshal(dAtA []byte) error {
 			if skippy < 0 {
 				return ErrInvalidLengthPb
 			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthPb
+			}
 			if (iNdEx + skippy) > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
 			iNdEx += skippy
 		}
 	}
@@ -925,7 +908,7 @@ func (m *ManifestChangeSet) Unmarshal(dAtA []byte) error {
 			}
 			b := dAtA[iNdEx]
 			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
+			wire |= uint64(b&0x7F) << shift
 			if b < 0x80 {
 				break
 			}
@@ -953,7 +936,7 @@ func (m *ManifestChangeSet) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				msglen |= (int(b) & 0x7F) << shift
+				msglen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -962,6 +945,9 @@ func (m *ManifestChangeSet) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
@@ -979,10 +965,12 @@ func (m *ManifestChangeSet) Unmarshal(dAtA []byte) error {
 			if skippy < 0 {
 				return ErrInvalidLengthPb
 			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthPb
+			}
 			if (iNdEx + skippy) > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
 			iNdEx += skippy
 		}
 	}
@@ -1007,7 +995,7 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 			}
 			b := dAtA[iNdEx]
 			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
+			wire |= uint64(b&0x7F) << shift
 			if b < 0x80 {
 				break
 			}
@@ -1035,7 +1023,7 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.Id |= (uint64(b) & 0x7F) << shift
+				m.Id |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -1054,7 +1042,7 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.Op |= (ManifestChange_Operation(b) & 0x7F) << shift
+				m.Op |= ManifestChange_Operation(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -1073,7 +1061,7 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.Level |= (uint32(b) & 0x7F) << shift
+				m.Level |= uint32(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -1092,7 +1080,7 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
+				byteLen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -1101,6 +1089,9 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
@@ -1118,10 +1109,12 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 			if skippy < 0 {
 				return ErrInvalidLengthPb
 			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthPb
+			}
 			if (iNdEx + skippy) > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
 			iNdEx += skippy
 		}
 	}
@@ -1185,8 +1178,11 @@ func skipPb(dAtA []byte) (n int, err error) {
 					break
 				}
 			}
-			iNdEx += length
 			if length < 0 {
+				return 0, ErrInvalidLengthPb
+			}
+			iNdEx += length
+			if iNdEx < 0 {
 				return 0, ErrInvalidLengthPb
 			}
 			return iNdEx, nil
@@ -1217,6 +1213,9 @@ func skipPb(dAtA []byte) (n int, err error) {
 					return 0, err
 				}
 				iNdEx = start + next
+				if iNdEx < 0 {
+					return 0, ErrInvalidLengthPb
+				}
 			}
 			return iNdEx, nil
 		case 4:
