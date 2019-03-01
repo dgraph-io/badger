@@ -33,6 +33,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type flagOptions struct {
+	showTables    bool
+	sizeHistogram bool
+}
+
+var (
+	opt flagOptions
+)
+
+func init() {
+	RootCmd.AddCommand(infoCmd)
+	infoCmd.Flags().BoolVarP(&opt.showTables, "show-tables", "s", false,
+		"If set to true, show tables as well.")
+	infoCmd.Flags().BoolVar(&opt.sizeHistogram, "histogram", false,
+		"Show a histogram of the key and value sizes.")
+}
+
 var infoCmd = &cobra.Command{
 	Use:   "info",
 	Short: "Health info about Badger database.",
@@ -48,23 +65,33 @@ to the Dgraph team.
 			fmt.Println("Error:", err.Error())
 			os.Exit(1)
 		}
-		if !showTables {
+		if !opt.showTables {
 			return
 		}
-		err = tableInfo(sstDir, vlogDir)
+		// Open DB
+		opts := badger.DefaultOptions
+		opts.TableLoadingMode = options.MemoryMap
+		opts.Dir = sstDir
+		opts.ValueDir = vlogDir
+		opts.ReadOnly = true
+
+		db, err := badger.Open(opts)
 		if err != nil {
 			fmt.Println("Error:", err.Error())
 			os.Exit(1)
 		}
+		defer db.Close()
+
+		err = tableInfo(sstDir, vlogDir, db)
+		if err != nil {
+			fmt.Println("Error:", err.Error())
+			os.Exit(1)
+		}
+		if opt.sizeHistogram {
+			// use prefix as nil since we want to list all keys
+			db.ShowKeyValueSizeHistogram(nil)
+		}
 	},
-}
-
-var showTables bool
-
-func init() {
-	RootCmd.AddCommand(infoCmd)
-	infoCmd.Flags().BoolVarP(&showTables, "show-tables", "s", false,
-		"If set to true, show tables as well.")
 }
 
 func hbytes(sz int64) string {
@@ -75,20 +102,7 @@ func dur(src, dst time.Time) string {
 	return humanize.RelTime(dst, src, "earlier", "later")
 }
 
-func tableInfo(dir, valueDir string) error {
-	// Open DB
-	opts := badger.DefaultOptions
-	opts.TableLoadingMode = options.MemoryMap
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.ReadOnly = true
-
-	db, err := badger.Open(opts)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
+func tableInfo(dir, valueDir string, db *badger.DB) error {
 	tables := db.Tables()
 	for _, t := range tables {
 		lk, lv := y.ParseKey(t.Left), y.ParseTs(t.Left)

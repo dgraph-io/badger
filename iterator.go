@@ -246,6 +246,11 @@ func (item *Item) EstimatedSize() int64 {
 	return int64(vp.Len) // includes key length.
 }
 
+// KeySize returns the exact size of the key.
+func (item *Item) KeySize() int64 {
+	return int64(len(item.key) + 8) // 8 bytes for timestamp.
+}
+
 // ValueSize returns the exact size of the value.
 //
 // This can be called to quickly estimate the size of a value without fetching
