@@ -58,7 +58,7 @@ To start using Badger, install Go 1.8 or above and run `go get`:
 $ go get github.com/dgraph-io/badger/...
 ```
 
-This will retrieve the library and install the `badger_info` command line
+This will retrieve the library and install the `badger` command line
 utility into your `$GOBIN` path.
 
 
