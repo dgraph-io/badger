@@ -1391,6 +1391,7 @@ type keyValueSizeHistogram struct {
 // newKeyValueSizeHistogram returns a new instance of keyValueSizeHistogram with
 // properly initialized fields.
 func newKeyValueSizeHistogram() *keyValueSizeHistogram {
+	// TODO(ibrahim): find appropriate bin size.
 	keyBins := createHistogramBins(1, 16)
 	valueBins := createHistogramBins(1, 30)
 	return &keyValueSizeHistogram{
@@ -1459,7 +1460,6 @@ func (db *DB) buildKeyValueSizeHistogram(keyPrefix []byte) *keyValueSizeHistogra
 	itr := txn.NewIterator(DefaultIteratorOptions)
 	defer itr.Close()
 
-	// TODO(ibrahim): find appropriate bin size.
 	badgerHistogram := newKeyValueSizeHistogram()
 
 	// Collect key and value sizes.
