@@ -104,12 +104,18 @@ func dur(src, dst time.Time) string {
 
 func tableInfo(dir, valueDir string, db *badger.DB) error {
 	tables := db.Tables()
+	fmt.Printf("\n%s SSTables %[1]s\n", strings.Repeat("=", 45))
+	fmt.Printf("%-5s\t%-10s\t%-30s\t%-30s\t%-7s\n", "ID", "Level",
+		"Left-Key(in hex) (Time)", "Right-Key(in hex) (Time)", "Total Keys")
+	fmt.Printf("%s\n", strings.Repeat("=", 100))
 	for _, t := range tables {
-		lk, lv := y.ParseKey(t.Left), y.ParseTs(t.Left)
-		rk, rv := y.ParseKey(t.Right), y.ParseTs(t.Right)
-		fmt.Printf("SSTable [L%d, %03d] [%20X, v%-10d -> %20X, v%-10d]\n",
-			t.Level, t.ID, lk, lv, rk, rv)
+		lk, lt := y.ParseKey(t.Left), y.ParseTs(t.Left)
+		rk, rt := y.ParseKey(t.Right), y.ParseTs(t.Right)
+
+		fmt.Printf("%-5d\tL%-9d\t%-30s\t%-30s\t%-7d\n", t.ID, t.Level,
+			fmt.Sprintf("%X (v%d)", lk, lt), fmt.Sprintf("%X (v%d)", rk, rt), t.KeyCount)
 	}
+	fmt.Println()
 	return nil
 }
 
@@ -149,7 +155,6 @@ func printInfo(dir, valueDir string) error {
 
 	fmt.Println()
 	var baseTime time.Time
-	// fmt.Print("\n[Manifest]\n")
 	manifestTruncated := false
 	manifestInfo, ok := fileinfoByName[badger.ManifestFilename]
 	if ok {
