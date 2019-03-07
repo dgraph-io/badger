@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
+ * Copyright 2019 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package badger
 
 import (
@@ -20,18 +21,18 @@ import (
 	"math"
 )
 
-// ShowKeyValueSizeHistogram builds and displays the key-value size histogram.
+// PrintKeyValueHistogram builds and displays the key-value size histogram.
 // When keyPrefix is set, only the keys that have prefix "keyPrefix" are
 // considered for creating the histogram
-func (db *DB) ShowKeyValueSizeHistogram(keyPrefix []byte) {
+func (db *DB) PrintKeyValueHistogram(keyPrefix []byte) {
 	if db == nil {
 		fmt.Println("\nCannot build histogram: DB is nil.")
 		return
 	}
 	histogram := db.buildKeyValueSizeHistogram(keyPrefix)
-	fmt.Printf("\nHistogram of key sizes (in bytes)\n")
+	fmt.Printf("Histogram of key sizes (in bytes)\n")
 	histogram.keySizeHistogram.printHistogram()
-	fmt.Printf("\nHistogram of value sizes (in bytes)\n")
+	fmt.Printf("Histogram of value sizes (in bytes)\n")
 	histogram.valueSizeHistogram.printHistogram()
 }
 
@@ -164,4 +165,5 @@ func (histogram histogramData) printHistogram() {
 
 		fmt.Printf("[%10d, %10d) %9d\n", lowerBound, upperBound, count)
 	}
+	fmt.Println()
 }
