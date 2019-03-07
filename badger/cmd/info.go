@@ -33,6 +33,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type flagOptions struct {
+	showTables    bool
+	sizeHistogram bool
+}
+
+var (
+	opt flagOptions
+)
+
+func init() {
+	RootCmd.AddCommand(infoCmd)
+	infoCmd.Flags().BoolVarP(&opt.showTables, "show-tables", "s", false,
+		"If set to true, show tables as well.")
+	infoCmd.Flags().BoolVar(&opt.sizeHistogram, "histogram", false,
+		"Show a histogram of the key and value sizes.")
+}
+
 var infoCmd = &cobra.Command{
 	Use:   "info",
 	Short: "Health info about Badger database.",
@@ -48,23 +65,33 @@ to the Dgraph team.
 			fmt.Println("Error:", err.Error())
 			os.Exit(1)
 		}
-		if !showTables {
+		if !opt.showTables {
 			return
 		}
-		err = tableInfo(sstDir, vlogDir)
+		// Open DB
+		opts := badger.DefaultOptions
+		opts.TableLoadingMode = options.MemoryMap
+		opts.Dir = sstDir
+		opts.ValueDir = vlogDir
+		opts.ReadOnly = true
+
+		db, err := badger.Open(opts)
 		if err != nil {
 			fmt.Println("Error:", err.Error())
 			os.Exit(1)
 		}
+		defer db.Close()
+
+		err = tableInfo(sstDir, vlogDir, db)
+		if err != nil {
+			fmt.Println("Error:", err.Error())
+			os.Exit(1)
+		}
+		if opt.sizeHistogram {
+			// use prefix as nil since we want to list all keys
+			db.ShowKeyValueSizeHistogram(nil)
+		}
 	},
-}
-
-var showTables bool
-
-func init() {
-	RootCmd.AddCommand(infoCmd)
-	infoCmd.Flags().BoolVarP(&showTables, "show-tables", "s", false,
-		"If set to true, show tables as well.")
 }
 
 func hbytes(sz int64) string {
@@ -75,27 +102,20 @@ func dur(src, dst time.Time) string {
 	return humanize.RelTime(dst, src, "earlier", "later")
 }
 
-func tableInfo(dir, valueDir string) error {
-	// Open DB
-	opts := badger.DefaultOptions
-	opts.TableLoadingMode = options.MemoryMap
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.ReadOnly = true
-
-	db, err := badger.Open(opts)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
+func tableInfo(dir, valueDir string, db *badger.DB) error {
 	tables := db.Tables()
+	fmt.Printf("\n%s SSTables %[1]s\n", strings.Repeat("=", 45))
+	fmt.Printf("%-5s\t%-10s\t%-30s\t%-30s\t%-7s\n", "ID", "Level",
+		"Left-Key(in hex) (Time)", "Right-Key(in hex) (Time)", "Total Keys")
+	fmt.Printf("%s\n", strings.Repeat("=", 100))
 	for _, t := range tables {
-		lk, lv := y.ParseKey(t.Left), y.ParseTs(t.Left)
-		rk, rv := y.ParseKey(t.Right), y.ParseTs(t.Right)
-		fmt.Printf("SSTable [L%d, %03d] [%20X, v%-10d -> %20X, v%-10d]\n",
-			t.Level, t.ID, lk, lv, rk, rv)
+		lk, lt := y.ParseKey(t.Left), y.ParseTs(t.Left)
+		rk, rt := y.ParseKey(t.Right), y.ParseTs(t.Right)
+
+		fmt.Printf("%-5d\tL%-9d\t%-30s\t%-30s\t%-7d\n", t.ID, t.Level,
+			fmt.Sprintf("%X (v%d)", lk, lt), fmt.Sprintf("%X (v%d)", rk, rt), t.KeyCount)
 	}
+	fmt.Println()
 	return nil
 }
 
@@ -135,7 +155,6 @@ func printInfo(dir, valueDir string) error {
 
 	fmt.Println()
 	var baseTime time.Time
-	// fmt.Print("\n[Manifest]\n")
 	manifestTruncated := false
 	manifestInfo, ok := fileinfoByName[badger.ManifestFilename]
 	if ok {

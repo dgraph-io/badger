@@ -59,7 +59,7 @@ type Table struct {
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
 
 	blockIndex []keyOffset
-	ref        int32 // For file garbage collection.  Atomic.
+	ref        int32 // For file garbage collection. Atomic.
 
 	loadingMode options.FileLoadingMode
 	mmap        []byte // Memory mapped.
