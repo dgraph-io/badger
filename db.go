@@ -333,7 +333,7 @@ func (db *DB) Close() (err error) {
 	db.closers.writes.SignalAndWait()
 
 	// Now close the value log.
-	if vlogErr := db.vlog.Close(); vlogErr == nil {
+	if vlogErr := db.vlog.Close(); vlogErr != nil {
 		err = errors.Wrap(vlogErr, "DB.Close")
 	}
 
