@@ -67,7 +67,7 @@ func (op *MergeOperator) iterateAndMerge(txn *Txn) (val []byte, err error) {
 	defer it.Close()
 
 	var numVersions int
-	for it.Rewind(); it.ValidForPrefix(op.key); it.Next() {
+	for it.Seek(op.key); it.ValidForPrefix(op.key); it.Next() {
 		item := it.Item()
 		numVersions++
 		if numVersions == 1 {
