@@ -63,11 +63,11 @@ var errNoMerge = errors.New("No need for merge")
 func (op *MergeOperator) iterateAndMerge(txn *Txn) (val []byte, err error) {
 	opt := DefaultIteratorOptions
 	opt.AllVersions = true
-	it := txn.NewIterator(opt)
+	it := txn.NewKeyIterator(op.key, opt)
 	defer it.Close()
 
 	var numVersions int
-	for it.Rewind(); it.ValidForPrefix(op.key); it.Next() {
+	for it.Rewind(); it.Valid(); it.Next() {
 		item := it.Item()
 		numVersions++
 		if numVersions == 1 {
