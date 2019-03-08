@@ -89,7 +89,7 @@ to the Dgraph team.
 		}
 		if opt.sizeHistogram {
 			// use prefix as nil since we want to list all keys
-			db.ShowKeyValueSizeHistogram(nil)
+			db.PrintKeyValueHistogram(nil)
 		}
 	},
 }
