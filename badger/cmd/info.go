@@ -89,7 +89,7 @@ to the Dgraph team.
 		}
 		if opt.sizeHistogram {
 			// use prefix as nil since we want to list all keys
-			db.ShowKeyValueSizeHistogram(nil)
+			db.PrintHistogram(nil)
 		}
 	},
 }
@@ -104,16 +104,14 @@ func dur(src, dst time.Time) string {
 
 func tableInfo(dir, valueDir string, db *badger.DB) error {
 	tables := db.Tables()
-	fmt.Printf("\n%s SSTables %[1]s\n", strings.Repeat("=", 45))
-	fmt.Printf("%-5s\t%-10s\t%-30s\t%-30s\t%-7s\n", "ID", "Level",
-		"Left-Key(in hex) (Time)", "Right-Key(in hex) (Time)", "Total Keys")
-	fmt.Printf("%s\n", strings.Repeat("=", 100))
+	fmt.Println()
+	fmt.Println("SSTable [Li, Id, Total Keys including internal keys] [Left Key, Version -> Right Key, Version]")
 	for _, t := range tables {
 		lk, lt := y.ParseKey(t.Left), y.ParseTs(t.Left)
 		rk, rt := y.ParseKey(t.Right), y.ParseTs(t.Right)
 
-		fmt.Printf("%-5d\tL%-9d\t%-30s\t%-30s\t%-7d\n", t.ID, t.Level,
-			fmt.Sprintf("%X (v%d)", lk, lt), fmt.Sprintf("%X (v%d)", rk, rt), t.KeyCount)
+		fmt.Printf("SSTable [L%d, %03d, %07d] [%20X, v%d -> %20X, v%d]\n",
+			t.Level, t.ID, t.KeyCount, lk, lt, rk, rt)
 	}
 	fmt.Println()
 	return nil

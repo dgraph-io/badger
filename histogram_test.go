@@ -37,7 +37,7 @@ func TestBuildKeyValueSizeHistogram(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			histogram := db.buildKeyValueSizeHistogram(nil)
+			histogram := db.buildHistogram(nil)
 			keyHistogram := histogram.keySizeHistogram
 			valueHistogram := histogram.valueSizeHistogram
 
@@ -79,7 +79,7 @@ func TestBuildKeyValueSizeHistogram(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			histogram := db.buildKeyValueSizeHistogram(nil)
+			histogram := db.buildHistogram(nil)
 			keyHistogram := histogram.keySizeHistogram
 			valueHistogram := histogram.valueSizeHistogram
 

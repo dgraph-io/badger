@@ -21,15 +21,15 @@ import (
 	"math"
 )
 
-// PrintKeyValueHistogram builds and displays the key-value size histogram.
+// PrintHistogram builds and displays the key-value size histogram.
 // When keyPrefix is set, only the keys that have prefix "keyPrefix" are
 // considered for creating the histogram
-func (db *DB) PrintKeyValueHistogram(keyPrefix []byte) {
+func (db *DB) PrintHistogram(keyPrefix []byte) {
 	if db == nil {
 		fmt.Println("\nCannot build histogram: DB is nil.")
 		return
 	}
-	histogram := db.buildKeyValueSizeHistogram(keyPrefix)
+	histogram := db.buildHistogram(keyPrefix)
 	fmt.Printf("Histogram of key sizes (in bytes)\n")
 	histogram.keySizeHistogram.printHistogram()
 	fmt.Printf("Histogram of value sizes (in bytes)\n")
@@ -46,18 +46,18 @@ type histogramData struct {
 	sum         int64
 }
 
-// keyValueSizeHistogram contains keySize histogram and valueSize histogram
-type keyValueSizeHistogram struct {
+// sizeHistogram contains keySize histogram and valueSize histogram
+type sizeHistogram struct {
 	keySizeHistogram, valueSizeHistogram histogramData
 }
 
-// newKeyValueSizeHistogram returns a new instance of keyValueSizeHistogram with
+// newSizeHistogram returns a new instance of keyValueSizeHistogram with
 // properly initialized fields.
-func newKeyValueSizeHistogram() *keyValueSizeHistogram {
+func newSizeHistogram() *sizeHistogram {
 	// TODO(ibrahim): find appropriate bin size.
 	keyBins := createHistogramBins(1, 16)
 	valueBins := createHistogramBins(1, 30)
-	return &keyValueSizeHistogram{
+	return &sizeHistogram{
 		keySizeHistogram: histogramData{
 			bins:        keyBins,
 			countPerBin: make([]int64, len(keyBins)+1),
@@ -113,17 +113,17 @@ func (histogram *histogramData) Update(value int64) {
 	}
 }
 
-// buildKeyValueSizeHistogram builds the key-value size histogram.
+// buildHistogram builds the key-value size histogram.
 // When keyPrefix is set, only the keys that have prefix "keyPrefix" are
 // considered for creating the histogram
-func (db *DB) buildKeyValueSizeHistogram(keyPrefix []byte) *keyValueSizeHistogram {
+func (db *DB) buildHistogram(keyPrefix []byte) *sizeHistogram {
 	txn := db.NewTransaction(false)
 	defer txn.Discard()
 
 	itr := txn.NewIterator(DefaultIteratorOptions)
 	defer itr.Close()
 
-	badgerHistogram := newKeyValueSizeHistogram()
+	badgerHistogram := newSizeHistogram()
 
 	// Collect key and value sizes.
 	for itr.Seek(keyPrefix); itr.ValidForPrefix(keyPrefix); itr.Next() {
