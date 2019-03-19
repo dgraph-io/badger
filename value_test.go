@@ -21,6 +21,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -424,6 +425,50 @@ func TestValueGC4(t *testing.T) {
 			return nil
 		}))
 	}
+}
+
+func TestPersistLFDiscardStats(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opt := getTestOptions(dir)
+	opt.ValueLogFileSize = 1 << 20
+	opt.Truncate = true
+
+	db, err := Open(opt)
+	require.NoError(t, err)
+
+	sz := 128 << 10 // 5 entries per value log file.
+	v := make([]byte, sz)
+	rand.Read(v[:rand.Intn(sz)])
+	txn := db.NewTransaction(true)
+	for i := 0; i < 500; i++ {
+		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v))
+		if i%3 == 0 {
+			require.NoError(t, txn.Commit())
+			txn = db.NewTransaction(true)
+		}
+	}
+	require.NoError(t, txn.Commit())
+
+	for i := 0; i < 500; i++ {
+		txnDelete(t, db, []byte(fmt.Sprintf("key%d", i)))
+	}
+
+	err = db.lc.doCompact(compactionPriority{level: 0, score: 1.73})
+	require.NoError(t, err)
+
+	persistedMap := make(map[uint32]int64)
+	for k, v := range db.vlog.lfDiscardStats.m {
+		persistedMap[k] = v
+	}
+	err = db.Close()
+	require.NoError(t, err)
+
+	db, err = Open(opt)
+	require.NoError(t, err)
+	defer db.Close()
+	require.True(t, reflect.DeepEqual(persistedMap, db.vlog.lfDiscardStats.m))
 }
 
 func TestChecksums(t *testing.T) {
