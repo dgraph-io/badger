@@ -40,10 +40,11 @@ import (
 )
 
 var (
-	badgerPrefix = []byte("!badger!")     // Prefix for internal keys used by badger.
-	head         = []byte("!badger!head") // For storing value offset for replay.
-	txnKey       = []byte("!badger!txn")  // For indicating end of entries in txn.
-	badgerMove   = []byte("!badger!move") // For key-value pairs which got moved during GC.
+	badgerPrefix      = []byte("!badger!")        // Prefix for internal keys used by badger.
+	head              = []byte("!badger!head")    // For storing value offset for replay.
+	txnKey            = []byte("!badger!txn")     // For indicating end of entries in txn.
+	badgerMove        = []byte("!badger!move")    // For key-value pairs which got moved during GC.
+	lfDiscardStatsKey = []byte("!badger!discard") // For storing lfDiscardStats
 )
 
 type closers struct {
@@ -818,6 +819,10 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		// commits.
 		headTs := y.KeyWithTs(head, db.orc.nextTs())
 		ft.mt.Put(headTs, y.ValueStruct{Value: offset})
+
+		// Also store lfDiscardStats before flushing memtables
+		discardStatsKey := y.KeyWithTs(lfDiscardStatsKey, 1)
+		ft.mt.Put(discardStatsKey, y.ValueStruct{Value: db.vlog.encodedDiscardStats()})
 	}
 
 	fileID := db.lc.reserveFileID()
