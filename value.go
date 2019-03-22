@@ -55,6 +55,10 @@ const (
 	mi int64 = 1 << 20
 )
 
+// errLogFileRotated is returned if a new value log file has been created while
+// writing request batch to value logs
+var errLogFileRotated = errors.New("value log file rotated")
+
 type logFile struct {
 	path string
 	// This is a lock on the log file. It guards the fd’s value, the file’s
@@ -929,6 +933,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 	curlf := vlog.filesMap[maxFid]
 	vlog.filesLock.RUnlock()
 
+	var fileRotationError error
 	var buf bytes.Buffer
 	toDisk := func() error {
 		if buf.Len() == 0 {
@@ -959,6 +964,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 				return err
 			}
 			curlf = newlf
+			fileRotationError = errLogFileRotated
 		}
 		return nil
 	}
@@ -992,7 +998,12 @@ func (vlog *valueLog) write(reqs []*request) error {
 			}
 		}
 	}
-	return toDisk()
+
+	if err := toDisk(); err != nil {
+		return err
+	}
+
+	return fileRotationError
 }
 
 // Gets the logFile and acquires and RLock() for the mmap. You must call RUnlock on the file

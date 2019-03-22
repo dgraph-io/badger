@@ -19,11 +19,13 @@ package badger
 import (
 	"fmt"
 	"io/ioutil"
+	"math"
 	"math/rand"
 	"os"
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
@@ -361,7 +363,7 @@ func TestValueGC4(t *testing.T) {
 
 	kv, err := Open(opt)
 	require.NoError(t, err)
-	defer kv.Close()
+	//defer kv.Close()
 
 	sz := 128 << 10 // 5 entries per value log file.
 	txn := kv.NewTransaction(true)
@@ -390,21 +392,17 @@ func TestValueGC4(t *testing.T) {
 	lf1 := kv.vlog.filesMap[kv.vlog.sortedFids()[1]]
 	kv.vlog.filesLock.RUnlock()
 
-	//	lf.iterate(0, func(e Entry) bool {
-	//		e.print("lf")
-	//		return true
-	//	})
-
 	tr := trace.New("Test", "Test")
 	defer tr.Finish()
 	kv.vlog.rewrite(lf0, tr)
 	kv.vlog.rewrite(lf1, tr)
 
-	err = kv.vlog.Close()
+	err = kv.Close()
 	require.NoError(t, err)
 
-	err = kv.vlog.open(kv, valuePointer{Fid: 2}, kv.replayFunction())
+	kv, err = Open(opt)
 	require.NoError(t, err)
+	defer kv.Close()
 
 	for i := 0; i < 8; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
@@ -740,7 +738,7 @@ func TestPenultimateLogCorruption(t *testing.T) {
 		fi, err := os.Stat(fpath)
 		require.NoError(t, err)
 		require.True(t, fi.Size() > 0, "Empty file at log=%d", i)
-		if i == 0 {
+		if i == 2 {
 			err := os.Truncate(fpath, fi.Size()-1)
 			require.NoError(t, err)
 		}
@@ -757,15 +755,63 @@ func TestPenultimateLogCorruption(t *testing.T) {
 	db1, err := Open(opt)
 	require.NoError(t, err)
 	h.db = db1
-	h.readRange(0, 1) // Only 2 should be gone, because it is at the end of logfile 0.
-	h.readRange(3, 7)
+	h.readRange(0, 6) // Only 7 should be gone, because it is at the end of logfile 2.
 	err = db1.View(func(txn *Txn) error {
-		_, err := txn.Get(h.key(2)) // Verify that 2 is gone.
+		_, err := txn.Get(h.key(7)) // Verify that 7 is gone.
 		require.Equal(t, ErrKeyNotFound, err)
 		return nil
 	})
 	require.NoError(t, err)
 	require.NoError(t, db1.Close())
+}
+func TestForceFlushMemtable(t *testing.T) {
+	// This test checks, if latest value of value log head is getting persisted
+	// after value log file rotation. Latestt value is persisted by flushing current
+	// memtable to disk.
+
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opt := getTestOptions(dir)
+	opt.ValueLogLoadingMode = options.FileIO
+	opt.ValueLogMaxEntries = 1
+
+	db0, err := Open(opt)
+	require.NoError(t, err)
+
+	// write two entries to db. Since there can be max 1 entry in
+	// each value log file, there will be two log file rotation. latest value
+	// persisted for head will have file id as 1.
+	for i := 0; i < 2; i++ {
+		err := db0.Update(func(txn *Txn) error {
+			return txn.Set([]byte(fmt.Sprintf("%d", i)), []byte(fmt.Sprintf("%d", i)))
+		})
+		require.NoError(t, err)
+	}
+
+	// We want to check persisted value of value log head, hence open another instance of
+	// db from same opt. Release directory lock of first instance
+	if db0.dirLockGuard != nil {
+		require.NoError(t, db0.dirLockGuard.release())
+	}
+	if db0.valueDirGuard != nil {
+		require.NoError(t, db0.valueDirGuard.release())
+	}
+
+	// wait for memtable to flush to disk
+	time.Sleep(100 * time.Millisecond)
+
+	opt.Truncate = true
+	db1, err := Open(opt)
+	require.NoError(t, err)
+	// get latest value of value log head
+	headKey := y.KeyWithTs(head, math.MaxUint64)
+	vs, err := db1.get(headKey)
+	require.NoError(t, db1.Close())
+	var vptr valuePointer
+	vptr.Decode(vs.Value)
+	// check if latest value of head has 1 as file id
+	require.True(t, vptr.Fid == 1)
 }
 
 func checkKeys(t *testing.T, kv *DB, keys [][]byte) {
