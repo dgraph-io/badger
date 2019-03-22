@@ -360,7 +360,7 @@ func TestValueGC4(t *testing.T) {
 
 	kv, err := Open(opt)
 	require.NoError(t, err)
-	defer kv.Close()
+	//defer kv.Close()
 
 	sz := 128 << 10 // 5 entries per value log file.
 	txn := kv.NewTransaction(true)
@@ -389,21 +389,17 @@ func TestValueGC4(t *testing.T) {
 	lf1 := kv.vlog.filesMap[kv.vlog.sortedFids()[1]]
 	kv.vlog.filesLock.RUnlock()
 
-	//	lf.iterate(0, func(e Entry) bool {
-	//		e.print("lf")
-	//		return true
-	//	})
-
 	tr := trace.New("Test", "Test")
 	defer tr.Finish()
 	kv.vlog.rewrite(lf0, tr)
 	kv.vlog.rewrite(lf1, tr)
 
-	err = kv.vlog.Close()
+	err = kv.Close()
 	require.NoError(t, err)
 
-	err = kv.vlog.open(kv, valuePointer{Fid: 2}, kv.replayFunction())
+	kv, err = Open(opt)
 	require.NoError(t, err)
+	defer kv.Close()
 
 	for i := 0; i < 8; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
@@ -695,7 +691,7 @@ func TestPenultimateLogCorruption(t *testing.T) {
 		fi, err := os.Stat(fpath)
 		require.NoError(t, err)
 		require.True(t, fi.Size() > 0, "Empty file at log=%d", i)
-		if i == 0 {
+		if i == 2 {
 			err := os.Truncate(fpath, fi.Size()-1)
 			require.NoError(t, err)
 		}
@@ -712,10 +708,9 @@ func TestPenultimateLogCorruption(t *testing.T) {
 	db1, err := Open(opt)
 	require.NoError(t, err)
 	h.db = db1
-	h.readRange(0, 1) // Only 2 should be gone, because it is at the end of logfile 0.
-	h.readRange(3, 7)
+	h.readRange(0, 6) // Only 7 should be gone, because it is at the end of logfile 2.
 	err = db1.View(func(txn *Txn) error {
-		_, err := txn.Get(h.key(2)) // Verify that 2 is gone.
+		_, err := txn.Get(h.key(7)) // Verify that 7 is gone.
 		require.Equal(t, ErrKeyNotFound, err)
 		return nil
 	})
