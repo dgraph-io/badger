@@ -588,10 +588,13 @@ func (db *DB) writeRequests(reqs []*request) error {
 	}
 	db.elog.Printf("writeRequests called. Writing to value log")
 
+	var valueLogFileRotated bool
 	err := db.vlog.write(reqs)
-	if err != nil {
+	if err != nil && err != errLogFileRotated {
 		done(err)
 		return err
+	} else if err == errLogFileRotated {
+		valueLogFileRotated = true
 	}
 
 	db.elog.Printf("Writing to memtable")
@@ -624,6 +627,14 @@ func (db *DB) writeRequests(reqs []*request) error {
 	}
 	done(nil)
 	db.elog.Printf("%d entries written", count)
+
+	// Persist latest value of value log head
+	if valueLogFileRotated {
+		if err := db.sendMemtableFlushTaskToChan(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -747,12 +758,21 @@ var errNoRoom = errors.New("No room for write")
 
 // ensureRoomForWrite is always called serially.
 func (db *DB) ensureRoomForWrite() error {
+	db.Lock()
+	mtSize := db.mt.MemSize()
+	db.Unlock()
+	if mtSize < db.opt.MaxTableSize {
+		return nil
+	}
+
+	return db.sendMemtableFlushTaskToChan()
+}
+
+// sendMemtableFlushTaskToChan sends memtable flush task to flushChan
+func (db *DB) sendMemtableFlushTaskToChan() error {
 	var err error
 	db.Lock()
 	defer db.Unlock()
-	if db.mt.MemSize() < db.opt.MaxTableSize {
-		return nil
-	}
 
 	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	select {
