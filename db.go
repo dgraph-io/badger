@@ -45,6 +45,8 @@ var (
 	txnKey            = []byte("!badger!txn")     // For indicating end of entries in txn.
 	badgerMove        = []byte("!badger!move")    // For key-value pairs which got moved during GC.
 	lfDiscardStatsKey = []byte("!badger!discard") // For storing lfDiscardStats
+
+	errNilMemtable = errors.New("memtable is nil")
 )
 
 type closers struct {
@@ -596,10 +598,13 @@ func (db *DB) writeRequests(reqs []*request) error {
 	}
 	db.elog.Printf("writeRequests called. Writing to value log")
 
+	var valueLogFileRotated bool
 	err := db.vlog.write(reqs)
-	if err != nil {
+	if err != nil && err != errLogFileRotated {
 		done(err)
 		return err
+	} else if err == errLogFileRotated {
+		valueLogFileRotated = true
 	}
 
 	db.elog.Printf("Writing to memtable")
@@ -632,6 +637,16 @@ func (db *DB) writeRequests(reqs []*request) error {
 	}
 	done(nil)
 	db.elog.Printf("%d entries written", count)
+
+	// Persist latest value of value log head
+	if valueLogFileRotated {
+		db.Lock()
+		defer db.Unlock()
+		if err := db.sendMemtableFlushTaskToChan(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -755,20 +770,27 @@ var errNoRoom = errors.New("No room for write")
 
 // ensureRoomForWrite is always called serially.
 func (db *DB) ensureRoomForWrite() error {
-	var err error
 	db.Lock()
 	defer db.Unlock()
 	if db.mt.MemSize() < db.opt.MaxTableSize {
 		return nil
 	}
 
-	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
+	return db.sendMemtableFlushTaskToChan()
+}
+
+// sendMemtableFlushTaskToChan sends memtable flush task to flushChan
+// This function assumes lock on db is already acquired
+func (db *DB) sendMemtableFlushTaskToChan() error {
+	if db.mt == nil {
+		return errNilMemtable
+	}
+
 	select {
 	case db.flushChan <- flushTask{mt: db.mt, vptr: db.vhead}:
 		db.elog.Printf("Flushing value log to disk if async mode.")
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
-		err = db.vlog.sync()
-		if err != nil {
+		if err := db.vlog.sync(); err != nil {
 			return err
 		}
 
