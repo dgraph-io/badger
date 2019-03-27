@@ -18,6 +18,9 @@
 syntax = "proto3";
 
 package pb;
+import "github.com/gogo/protobuf/gogoproto/gogo.proto";
+option (gogoproto.gogoproto_import) = false;
+
 
 message KV {
   bytes key = 1;

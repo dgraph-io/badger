@@ -4,4 +4,4 @@
 
 protos=${GOPATH-$HOME/go}/src/github.com/dgraph-io/badger/pb
 pushd $protos > /dev/null
-protoc --gogofaster_out=. -I=. pb.proto
+protoc --gogofaster_out=. -I=".:$(go env GOPATH)/src" pb.proto
