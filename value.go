@@ -887,7 +887,9 @@ func (req *request) Wait() error {
 	return err
 }
 
-// sync is thread-unsafe and should not be called concurrently with write.
+// sync function syncs content of current value log file to disk.
+// syncing of value log directory is not required here as it happens
+// every time a new value log file is created(check createVlogFile function).
 func (vlog *valueLog) sync() error {
 	if vlog.opt.SyncWrites {
 		return nil
@@ -903,14 +905,8 @@ func (vlog *valueLog) sync() error {
 	curlf.lock.RLock()
 	vlog.filesLock.RUnlock()
 
-	dirSyncCh := make(chan error)
-	go func() { dirSyncCh <- syncDir(vlog.opt.ValueDir) }()
 	err := curlf.sync()
 	curlf.lock.RUnlock()
-	dirSyncErr := <-dirSyncCh
-	if err != nil {
-		err = dirSyncErr
-	}
 	return err
 }
 
@@ -1157,7 +1153,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 
 	// Set up the sampling window sizes.
 	sizeWindow := float64(fi.Size()) * 0.1                          // 10% of the file as window.
-	sizeWindowM := sizeWindow / (1 << 20) // in MBs.
+	sizeWindowM := sizeWindow / (1 << 20)                           // in MBs.
 	countWindow := int(float64(vlog.opt.ValueLogMaxEntries) * 0.01) // 1% of num entries.
 	tr.LazyPrintf("Size window: %5.2f. Count window: %d.", sizeWindow, countWindow)
 
