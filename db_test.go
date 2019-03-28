@@ -1697,6 +1697,99 @@ func ExampleTxn_NewIterator() {
 	// Counted 1000 elements
 }
 
+func TestSyncForRace(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opts := DefaultOptions
+	opts.Dir = dir
+	opts.ValueDir = dir
+	opts.SyncWrites = false
+
+	db, err := Open(opts)
+	require.NoError(t, err)
+	defer db.Close()
+
+	closeChan := make(chan struct{})
+	doneChan := make(chan struct{})
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		for {
+			select {
+			case <-ticker.C:
+				if err := db.Sync(); err != nil {
+					require.NoError(t, err)
+				}
+				db.opt.Debugf("Sync Iteration completed")
+			case <-closeChan:
+				close(doneChan)
+				return
+			}
+		}
+	}()
+
+	sz := 128 << 10 // 5 entries per value log file.
+	txn := db.NewTransaction(true)
+	for i := 0; i < 10000; i++ {
+		v := make([]byte, sz)
+		rand.Read(v[:rand.Intn(sz)])
+		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v))
+		if i%3 == 0 {
+			require.NoError(t, txn.Commit())
+			txn = db.NewTransaction(true)
+		}
+		if i%100 == 0 {
+			db.opt.Debugf("next 100 entries added to DB")
+		}
+	}
+	require.NoError(t, txn.Commit())
+
+	close(closeChan)
+	<-doneChan
+}
+
+func TestSyncForRace2(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opts := DefaultOptions
+	opts.Dir = dir
+	opts.ValueDir = dir
+	opts.SyncWrites = false
+
+	db, err := Open(opts)
+	require.NoError(t, err)
+	defer db.Close()
+
+	var wg sync.WaitGroup
+
+	sz := 128 << 10
+	for i:=0; i<50; i++ {
+		wg.Add(1)
+		go func() {
+			txn := db.NewTransaction(true)
+			for i:=0; i<100; i++ {
+				v := make([]byte, sz)
+				rand.Read(v[:rand.Intn(sz)])
+				require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v))
+				if i%3 == 0 {
+					require.NoError(t, txn.Commit())
+					require.NoError(t, db.Sync())
+					txn = db.NewTransaction(true)
+				}
+			}
+			require.NoError(t, txn.Commit())
+			wg.Done()
+		} ()
+	}
+
+	wg.Wait()
+	require.NoError(t, db.Sync())
+}
+
 func TestMain(m *testing.M) {
 	// call flag.Parse() here if TestMain uses flags
 	go func() {
