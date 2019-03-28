@@ -891,7 +891,9 @@ func (req *request) Wait() error {
 	return err
 }
 
-// sync is thread-unsafe and should not be called concurrently with write.
+// sync function syncs content of current value log file to disk.
+// syncing of value log directory is not required here as it happens
+// every time a new value log file is created(check createVlogFile function).
 func (vlog *valueLog) sync() error {
 	if vlog.opt.SyncWrites {
 		return nil
@@ -904,17 +906,18 @@ func (vlog *valueLog) sync() error {
 	}
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	curlf := vlog.filesMap[maxFid]
+	// Sometimes it is possible that vlog.maxFid has been increased but file creation
+	// with same id is still in progress and this function is called. In those cases
+	// entry for the file might not be present in vlog.filesMap.
+	if curlf == nil {
+		vlog.filesLock.RUnlock()
+		return nil
+	}
 	curlf.lock.RLock()
 	vlog.filesLock.RUnlock()
 
-	dirSyncCh := make(chan error)
-	go func() { dirSyncCh <- syncDir(vlog.opt.ValueDir) }()
 	err := curlf.sync()
 	curlf.lock.RUnlock()
-	dirSyncErr := <-dirSyncCh
-	if err != nil {
-		err = dirSyncErr
-	}
 	return err
 }
 
