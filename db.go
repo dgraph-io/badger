@@ -426,6 +426,12 @@ const (
 	lockFile = "LOCK"
 )
 
+// Sync syncs database content to disk. This function provides
+// more control to user to sync data whenever required.
+func (db *DB) Sync() error {
+	return db.vlog.sync()
+}
+
 // When you create or delete a file, you have to ensure the directory entry for the file is synced
 // in order to guarantee the file is visible (if the system crashes).  (See the man page for fsync,
 // or see https://github.com/coreos/etcd/issues/6368 for an example.)
