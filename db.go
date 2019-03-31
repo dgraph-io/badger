@@ -782,7 +782,7 @@ func arenaSize(opt Options) int64 {
 }
 
 // WriteLevel0Table flushes memtable.
-func writeLevel0Table(ft flushTask, f *os.File) error {
+func writeLevel0Table(ft flushTask, f io.Writer) error {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder()
