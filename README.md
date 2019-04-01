@@ -675,6 +675,7 @@ Below is a list of known projects that use Badger:
 * [BadgerHold](https://github.com/timshannon/badgerhold) - An embeddable NoSQL store for querying Go types built on Badger
 * [Goblero](https://github.com/didil/goblero) - Pure Go embedded persistent job queue backed by BadgerDB
 * [Surfline](https://www.surfline.com) - Serving global wave and weather forecast data with Badger.
+* [Cete](https://github.com/mosuka/cete) - Simple and highly available distributed key-value store built on Badger. Makes it easy bringing up a cluster of Badger with Raft consensus algorithm by hashicorp/raft. 
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
