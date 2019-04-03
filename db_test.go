@@ -1044,6 +1044,45 @@ func TestExpiry(t *testing.T) {
 	})
 }
 
+func TestExpiryImproperDBClose(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opt := getTestOptions(dir)
+	opt.ValueLogLoadingMode = options.FileIO
+
+	db0, err := Open(opt)
+	require.NoError(t, err)
+
+	dur := 1 * time.Hour
+	expiryTime := uint64(time.Now().Add(dur).Unix())
+	err = db0.Update(func(txn *Txn) error {
+		err = txn.SetWithTTL([]byte("test_key"), []byte("test_value"), dur)
+		require.NoError(t, err)
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Simulate a crash by not closing db0, but releasing the locks.
+	if db0.dirLockGuard != nil {
+		require.NoError(t, db0.dirLockGuard.release())
+	}
+	if db0.valueDirGuard != nil {
+		require.NoError(t, db0.valueDirGuard.release())
+	}
+
+	db1, err := Open(opt)
+	require.NoError(t, err)
+	err = db1.View(func(txn *Txn) error {
+		itm, err := txn.Get([]byte("test_key"))
+		require.NoError(t, err)
+		require.True(t, expiryTime <= itm.ExpiresAt() && itm.ExpiresAt() <= uint64(time.Now().Add(dur).Unix()))
+		return nil
+	})
+	require.NoError(t, err)
+	require.NoError(t, db1.Close())
+}
+
 func randBytes(n int) []byte {
 	recv := make([]byte, n)
 	in, err := rand.Read(recv)
