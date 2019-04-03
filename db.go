@@ -127,9 +127,10 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 		}
 
 		v := y.ValueStruct{
-			Value:    nv,
-			Meta:     meta,
-			UserMeta: e.UserMeta,
+			Value:     nv,
+			Meta:      meta,
+			UserMeta:  e.UserMeta,
+			ExpiresAt: e.ExpiresAt,
 		}
 
 		if e.meta&bitFinTxn > 0 {
