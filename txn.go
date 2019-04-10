@@ -33,7 +33,8 @@ import (
 )
 
 type oracle struct {
-	// A 64-bit integer must be at the top for memory alignment. See issue #311.
+	// A 64-bit integer must be at the top for memory alignment. See issue
+	// https://github.com/dgraph-io/badger/issues/311.
 	refCount  int64
 	isManaged bool // Does not change value, so no locking required.
 
@@ -43,7 +44,8 @@ type oracle struct {
 	writeChLock sync.Mutex
 	nextTxnTs   uint64
 
-	// Used to block NewTransaction, so all previous commits are visible to a new read.
+	// Used to block NewTransaction, so all previous commits are visible to a
+	// new read.
 	txnMark *y.WaterMark
 
 	// Either of these is used to determine which versions can be permanently
@@ -63,10 +65,12 @@ func newOracle(opt Options) *oracle {
 	orc := &oracle{
 		isManaged: opt.managedTxns,
 		commits:   make(map[uint64]uint64),
-		// We're not initializing nextTxnTs and readOnlyTs. It would be done after replay in Open.
+		// We're not initializing nextTxnTs and readOnlyTs. It would be done
+		// after replay in Open.
 		//
-		// WaterMarks must be 64-bit aligned for atomic package, hence we must use pointers here.
-		// See https://golang.org/pkg/sync/atomic/#pkg-note-BUG.
+		// WaterMarks must be 64-bit aligned for atomic package, hence we must
+		// use pointers here. See
+		// https://golang.org/pkg/sync/atomic/#pkg-note-BUG.
 		readMark: &y.WaterMark{Name: "badger.PendingReads"},
 		txnMark:  &y.WaterMark{Name: "badger.TxnTimestamp"},
 		closer:   y.NewCloser(2),
@@ -168,15 +172,15 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 	}
 
 	var ts uint64
-	if !o.isManaged {
-		// This is the general case, when user doesn't specify the read and commit ts.
+	if o.isManaged {
+		// Use the commitTs provided by the user
+		ts = txn.commitTs
+	} else {
+		// This is the general case, when user doesn't need to specify
+		// the read and commit ts.
 		ts = o.nextTxnTs
 		o.nextTxnTs++
 		o.txnMark.Begin(ts)
-
-	} else {
-		// If commitTs is set, use it instead.
-		ts = txn.commitTs
 	}
 
 	for _, w := range txn.writes {
@@ -300,11 +304,12 @@ func (txn *Txn) checkSize(e *Entry) error {
 
 // Set adds a key-value pair to the database.
 //
-// It will return ErrReadOnlyTxn if update flag was set to false when creating the
-// transaction.
+// It will return ErrReadOnlyTxn if update flag was set to false when creating
+// the transaction.
 //
 // The current transaction keeps a reference to the key and val byte slice
-// arguments. Users must not modify key and val until the end of the transaction.
+// arguments. Users must not modify key and val until the end of the
+// transaction.
 func (txn *Txn) Set(key, val []byte) error {
 	e := &Entry{
 		Key:   key,
@@ -316,12 +321,12 @@ func (txn *Txn) Set(key, val []byte) error {
 // SetWithMeta adds a key-value pair to the database, along with a metadata
 // byte.
 //
-// This byte is stored alongside the key, and can be used as an aid to
-// interpret the value or store other contextual bits corresponding to the
-// key-value pair.
+// This byte is stored alongside the key, and can be used as an aid to interpret
+// the value or store other contextual bits corresponding to the key-value pair.
 //
 // The current transaction keeps a reference to the key and val byte slice
-// arguments. Users must not modify key and val until the end of the transaction.
+// arguments. Users must not modify key and val until the end of the
+// transaction.
 func (txn *Txn) SetWithMeta(key, val []byte, meta byte) error {
 	e := &Entry{Key: key, Value: val, UserMeta: meta}
 	return txn.SetEntry(e)
@@ -450,8 +455,8 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 			// We probably don't need to set db on item here.
 			return item, nil
 		}
-		// Only track reads if this is update txn. No need to track read if txn serviced it
-		// internally.
+		// Only track reads if this is update txn. No need to track read if txn
+		// serviced it internally.
 		txn.addReadKey(key)
 	}
 
@@ -485,11 +490,13 @@ func (txn *Txn) addReadKey(key []byte) {
 	}
 }
 
-// Discard discards a created transaction. This method is very important and must be called. Commit
-// method calls this internally, however, calling this multiple times doesn't cause any issues. So,
-// this can safely be called via a defer right when transaction is created.
+// Discard discards a created transaction. This method is very important and
+// must be called. Commit method calls this internally, however, calling this
+// multiple times doesn't cause any issues. So, this can safely be called via a
+// defer right when transaction is created.
 //
-// NOTE: If any operations are run on a discarded transaction, ErrDiscardedTxn is returned.
+// NOTE: If any operations are run on a discarded transaction, ErrDiscardedTxn
+// is returned.
 func (txn *Txn) Discard() {
 	if txn.discarded { // Avoid a re-run.
 		return
@@ -573,20 +580,23 @@ func (txn *Txn) commitPrecheck() {
 //
 // 1. If there are no writes, return immediately.
 //
-// 2. Check if read rows were updated since txn started. If so, return ErrConflict.
+// 2. Check if read rows were updated since txn started. If so, return
+// ErrConflict.
 //
-// 3. If no conflict, generate a commit timestamp and update written rows' commit ts.
+// 3. If no conflict, generate a commit timestamp and update written rows'
+// commit ts.
 //
 // 4. Batch up all writes, write them to value log and LSM tree.
 //
-// 5. If callback is provided, Badger will return immediately after checking
-// for conflicts. Writes to the database will happen in the background.  If
-// there is a conflict, an error will be returned and the callback will not
-// run. If there are no conflicts, the callback will be called in the
-// background upon successful completion of writes or any error during write.
+// 5. If callback is provided, Badger will return immediately after checking for
+// conflicts. Writes to the database will happen in the background.  If there is
+// a conflict, an error will be returned and the callback will not run. If there
+// are no conflicts, the callback will be called in the background upon
+// successful completion of writes or any error during write.
 //
-// If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
-// tree won't be updated, so there's no need for any rollback.
+// If error is nil, the transaction is successfully committed. In case of a
+// non-nil error, the LSM tree won't be updated, so there's no need for any
+// rollback.
 func (txn *Txn) Commit() error {
 	txn.commitPrecheck() // Precheck before discarding txn.
 	defer txn.Discard()
@@ -599,10 +609,11 @@ func (txn *Txn) Commit() error {
 	if err != nil {
 		return err
 	}
-	// If batchSet failed, LSM would not have been updated. So, no need to rollback anything.
+	// If batchSet failed, LSM would not have been updated. So, no need to
+	// rollback anything.
 
-	// TODO: What if some of the txns successfully make it to value log, but others fail.
-	// Nothing gets updated to LSM, until a restart happens.
+	// TODO: What if some of the txns successfully make it to value log, but
+	// others fail. Nothing gets updated to LSM, until a restart happens.
 	return txnCb()
 }
 
@@ -662,17 +673,20 @@ func (txn *Txn) ReadTs() uint64 {
 	return txn.readTs
 }
 
-// NewTransaction creates a new transaction. Badger supports concurrent execution of transactions,
-// providing serializable snapshot isolation, avoiding write skews. Badger achieves this by tracking
-// the keys read and at Commit time, ensuring that these read keys weren't concurrently modified by
+// NewTransaction creates a new transaction. Badger supports concurrent
+// execution of transactions, providing serializable snapshot isolation,
+// avoiding write skews. Badger achieves this by tracking the keys read and at
+// Commit time, ensuring that these read keys weren't concurrently modified by
 // another transaction.
 //
-// For read-only transactions, set update to false. In this mode, we don't track the rows read for
-// any changes. Thus, any long running iterations done in this mode wouldn't pay this overhead.
+// For read-only transactions, set update to false. In this mode, we don't track
+// the rows read for any changes. Thus, any long running iterations done in this
+// mode wouldn't pay this overhead.
 //
-// Running transactions concurrently is OK. However, a transaction itself isn't thread safe, and
-// should only be run serially. It doesn't matter if a transaction is created by one goroutine and
-// passed down to other, as long as the Txn APIs are called serially.
+// Running transactions concurrently is OK. However, a transaction itself isn't
+// thread safe, and should only be run serially. It doesn't matter if a
+// transaction is created by one goroutine and passed down to other, as long as
+// the Txn APIs are called serially.
 //
 // When you create a new transaction, it is absolutely essential to call
 // Discard(). This should be done irrespective of what the update param is set
