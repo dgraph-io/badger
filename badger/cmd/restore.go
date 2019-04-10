@@ -26,6 +26,7 @@ import (
 )
 
 var restoreFile string
+var maxPendingWrites int
 
 // restoreCmd represents the restore command
 var restoreCmd = &cobra.Command{
@@ -46,6 +47,10 @@ func init() {
 	RootCmd.AddCommand(restoreCmd)
 	restoreCmd.Flags().StringVarP(&restoreFile, "backup-file", "f",
 		"badger.bak", "File to restore from")
+	// Default value for maxPendingWrites is 256, to minimise memory usage
+	// and overall finish time.
+	restoreCmd.Flags().IntVarP(&maxPendingWrites, "max-pending-writes", "w",
+		256, "Max number of pending writes at any time while restore")
 }
 
 func doRestore(cmd *cobra.Command, args []string) error {
@@ -77,5 +82,5 @@ func doRestore(cmd *cobra.Command, args []string) error {
 	defer f.Close()
 
 	// Run restore
-	return db.Load(f)
+	return db.Load(f, maxPendingWrites)
 }
