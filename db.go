@@ -185,6 +185,8 @@ func Open(opt Options) (db *DB, err error) {
 	if opt.ReadOnly {
 		// Can't truncate if the DB is read only.
 		opt.Truncate = false
+		// Do not perform compaction in read only mode.
+		opt.CompactL0OnClose = false
 	}
 
 	for _, path := range []string{opt.Dir, opt.ValueDir} {
