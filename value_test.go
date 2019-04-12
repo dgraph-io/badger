@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
@@ -434,6 +435,8 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 	opt.Truncate = true
+	// avoid compaction on close, so that discard map remains same
+	opt.CompactL0OnClose = false
 
 	db, err := Open(opt)
 	require.NoError(t, err)
@@ -449,26 +452,34 @@ func TestPersistLFDiscardStats(t *testing.T) {
 			txn = db.NewTransaction(true)
 		}
 	}
-	require.NoError(t, txn.Commit())
+	require.NoError(t, txn.Commit(), "error while commiting txn")
 
 	for i := 0; i < 500; i++ {
-		txnDelete(t, db, []byte(fmt.Sprintf("key%d", i)))
+		// use SetWithDiscard to delete entries, because this causes data to be flushed on disk,
+		// creating SSTs. Simple Delete was having data in Memtables only.
+		err = db.Update(func(txn *Txn) error {
+			return txn.SetWithDiscard([]byte(fmt.Sprintf("key%d", i)), v, byte(0))
+		})
+		require.NoError(t, err)
 	}
 
-	err = db.lc.doCompact(compactionPriority{level: 0, score: 1.73})
-	require.NoError(t, err)
+	// wait for compaction to complete
+	time.Sleep(1 * time.Second)
 
 	persistedMap := make(map[uint32]int64)
+	db.vlog.lfDiscardStats.Lock()
 	for k, v := range db.vlog.lfDiscardStats.m {
 		persistedMap[k] = v
 	}
+	db.vlog.lfDiscardStats.Unlock()
 	err = db.Close()
 	require.NoError(t, err)
 
 	db, err = Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
-	require.True(t, reflect.DeepEqual(persistedMap, db.vlog.lfDiscardStats.m))
+	require.True(t, reflect.DeepEqual(persistedMap, db.vlog.lfDiscardStats.m), "Discard maps are "+
+		"not equal")
 }
 
 func TestChecksums(t *testing.T) {
@@ -727,6 +738,7 @@ func TestPenultimateLogCorruption(t *testing.T) {
 	opt.ValueLogLoadingMode = options.FileIO
 	// Each txn generates at least two entries. 3 txns will fit each file.
 	opt.ValueLogMaxEntries = 5
+	opt.LogRotatesToFlush = 1000
 
 	db0, err := Open(opt)
 	require.NoError(t, err)
