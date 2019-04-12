@@ -449,14 +449,14 @@ func TestPersistLFDiscardStats(t *testing.T) {
 			txn = db.NewTransaction(true)
 		}
 	}
-	require.NoError(t, txn.Commit())
+	require.NoError(t, txn.Commit(), "error while commiting txn")
 
 	for i := 0; i < 500; i++ {
 		txnDelete(t, db, []byte(fmt.Sprintf("key%d", i)))
 	}
 
 	err = db.lc.doCompact(compactionPriority{level: 0, score: 1.73})
-	require.NoError(t, err)
+	require.NoError(t, err, "Error while compaction")
 
 	persistedMap := make(map[uint32]int64)
 	for k, v := range db.vlog.lfDiscardStats.m {
@@ -468,7 +468,8 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	db, err = Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
-	require.True(t, reflect.DeepEqual(persistedMap, db.vlog.lfDiscardStats.m))
+	require.True(t, reflect.DeepEqual(persistedMap, db.vlog.lfDiscardStats.m), "Discard maps are "+
+		"not equal")
 }
 
 func TestChecksums(t *testing.T) {
@@ -727,6 +728,7 @@ func TestPenultimateLogCorruption(t *testing.T) {
 	opt.ValueLogLoadingMode = options.FileIO
 	// Each txn generates at least two entries. 3 txns will fit each file.
 	opt.ValueLogMaxEntries = 5
+	opt.LogRotatesToFlush = 1000
 
 	db0, err := Open(opt)
 	require.NoError(t, err)
