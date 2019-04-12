@@ -727,6 +727,7 @@ func TestPenultimateLogCorruption(t *testing.T) {
 	opt.ValueLogLoadingMode = options.FileIO
 	// Each txn generates at least two entries. 3 txns will fit each file.
 	opt.ValueLogMaxEntries = 5
+	opt.LogRotatesToFlush = 1000
 
 	db0, err := Open(opt)
 	require.NoError(t, err)
