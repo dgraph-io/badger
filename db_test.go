@@ -1751,24 +1751,16 @@ func TestSyncForRace(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	closeChan := make(chan struct{})
-	doneChan := make(chan struct{})
+	ticker := time.NewTicker(100 * time.Microsecond)
 
-	go func() {
-		ticker := time.NewTicker(100 * time.Microsecond)
-		for {
-			select {
-			case <-ticker.C:
-				if err := db.Sync(); err != nil {
-					require.NoError(t, err)
-				}
-				db.opt.Debugf("Sync Iteration completed")
-			case <-closeChan:
-				close(doneChan)
-				return
+	go func(*time.Ticker) {
+		for range ticker.C {
+			if err := db.Sync(); err != nil {
+				require.NoError(t, err)
 			}
+			db.opt.Debugf("Sync Iteration completed")
 		}
-	}()
+	}(ticker)
 
 	sz := 128 << 10 // 5 entries per value log file.
 	v := make([]byte, sz)
@@ -1785,9 +1777,7 @@ func TestSyncForRace(t *testing.T) {
 		}
 	}
 	require.NoError(t, txn.Commit())
-
-	close(closeChan)
-	<-doneChan
+	ticker.Stop()
 }
 
 func TestMain(m *testing.M) {
