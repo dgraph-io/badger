@@ -36,6 +36,8 @@ import (
 type flagOptions struct {
 	showTables    bool
 	sizeHistogram bool
+	dumpData      bool
+	withPrefix    string
 }
 
 var (
@@ -48,6 +50,8 @@ func init() {
 		"If set to true, show tables as well.")
 	infoCmd.Flags().BoolVar(&opt.sizeHistogram, "histogram", false,
 		"Show a histogram of the key and value sizes.")
+	infoCmd.Flags().BoolVarP(&opt.dumpData, "dump", "d", false, "Dump keys and values in Badger")
+	infoCmd.Flags().StringVar(&opt.withPrefix, "with-prefix", "", "Consider only the keys with specified prefix")
 }
 
 var infoCmd = &cobra.Command{
@@ -59,39 +63,77 @@ info. It also prints info about missing/extra files, and general information abo
 files (which are not referenced by the manifest).  Use this tool to report any issues about Badger
 to the Dgraph team.
 `,
-	Run: func(cmd *cobra.Command, args []string) {
-		err := printInfo(sstDir, vlogDir)
-		if err != nil {
-			fmt.Println("Error:", err.Error())
-			os.Exit(1)
-		}
-		if !opt.showTables {
-			return
-		}
-		// Open DB
-		opts := badger.DefaultOptions
-		opts.TableLoadingMode = options.MemoryMap
-		opts.Dir = sstDir
-		opts.ValueDir = vlogDir
-		opts.ReadOnly = true
+	Run: handleInfo,
+}
 
-		db, err := badger.Open(opts)
-		if err != nil {
-			fmt.Println("Error:", err.Error())
-			os.Exit(1)
-		}
-		defer db.Close()
+func handleInfo(cmd *cobra.Command, args []string) {
+	if err := printInfo(sstDir, vlogDir); err != nil {
+		fmt.Println("Error:", err.Error())
+		os.Exit(1)
+	}
 
-		err = tableInfo(sstDir, vlogDir, db)
-		if err != nil {
+	// Open DB
+	opts := badger.DefaultOptions
+	opts.TableLoadingMode = options.MemoryMap
+	opts.Dir = sstDir
+	opts.ValueDir = vlogDir
+	opts.ReadOnly = true
+
+	db, err := badger.Open(opts)
+	if err != nil {
+		fmt.Println("Error:", err.Error())
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	if opt.showTables {
+		if err = tableInfo(sstDir, vlogDir, db); err != nil {
 			fmt.Println("Error:", err.Error())
 			os.Exit(1)
 		}
-		if opt.sizeHistogram {
-			// use prefix as nil since we want to list all keys
-			db.PrintHistogram(nil)
+	}
+
+	if opt.sizeHistogram {
+		db.PrintHistogram([]byte(opt.withPrefix))
+	}
+
+	if opt.dumpData {
+		if err := dumpData(db, opt.withPrefix); err != nil {
+			fmt.Println("Error:", err.Error())
+			os.Exit(1)
 		}
-	},
+	}
+}
+
+func dumpData(db *badger.DB, prefix string) error {
+	if len(prefix) > 0 {
+		fmt.Printf("Only choosing keys with prefix: %s\n", prefix)
+	}
+	fmt.Printf("\nInformation about keys and values in the store\n")
+	err := db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		totalKeys := 0
+		prefixByte := []byte(prefix)
+		for it.Seek(prefixByte); it.ValidForPrefix(prefixByte); it.Next() {
+			item := it.Item()
+			if item.IsDeletedOrExpired() {
+				continue
+			}
+			v, err := item.ValueCopy(nil)
+			if err != nil {
+				continue
+			}
+			keyNoPrefix := item.Key()[len(prefix):]
+			// TODO: Find a way to determine if the keys/values should be printed in Hex/String format
+			fmt.Printf("Key=%X\tValue=%X\tVersion=%d\tMetadata=%b\n", keyNoPrefix, v, item.Version(), item.UserMeta())
+			totalKeys++
+		}
+		fmt.Print("\n[Summary]\n")
+		fmt.Println("Total Number of keys:", totalKeys)
+		return nil
+	})
+	return err
 }
 
 func hbytes(sz int64) string {
