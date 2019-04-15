@@ -17,8 +17,11 @@
 package cmd
 
 import (
+	"bytes"
+	"encoding/hex"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -35,7 +38,12 @@ import (
 
 type flagOptions struct {
 	showTables    bool
-	sizeHistogram bool
+	showHistogram bool
+	showKeys      bool
+	withPrefix    string
+	keyLookup     string
+	itemMeta      bool
+	keyHistory    bool
 }
 
 var (
@@ -46,8 +54,13 @@ func init() {
 	RootCmd.AddCommand(infoCmd)
 	infoCmd.Flags().BoolVarP(&opt.showTables, "show-tables", "s", false,
 		"If set to true, show tables as well.")
-	infoCmd.Flags().BoolVar(&opt.sizeHistogram, "histogram", false,
+	infoCmd.Flags().BoolVar(&opt.showHistogram, "histogram", false,
 		"Show a histogram of the key and value sizes.")
+	infoCmd.Flags().BoolVar(&opt.showKeys, "show-keys", false, "Show keys stored in Badger")
+	infoCmd.Flags().StringVar(&opt.withPrefix, "with-prefix", "", "Consider only the keys with specified prefix")
+	infoCmd.Flags().StringVarP(&opt.keyLookup, "lookup", "l", "", "Hex of the key to lookup")
+	infoCmd.Flags().BoolVar(&opt.itemMeta, "show-meta", true, "Output item meta data as well")
+	infoCmd.Flags().BoolVar(&opt.keyHistory, "history", false, "Show all versions of a key")
 }
 
 var infoCmd = &cobra.Command{
@@ -59,39 +72,129 @@ info. It also prints info about missing/extra files, and general information abo
 files (which are not referenced by the manifest).  Use this tool to report any issues about Badger
 to the Dgraph team.
 `,
-	Run: func(cmd *cobra.Command, args []string) {
-		err := printInfo(sstDir, vlogDir)
-		if err != nil {
-			fmt.Println("Error:", err.Error())
-			os.Exit(1)
-		}
-		if !opt.showTables {
-			return
-		}
-		// Open DB
-		opts := badger.DefaultOptions
-		opts.TableLoadingMode = options.MemoryMap
-		opts.Dir = sstDir
-		opts.ValueDir = vlogDir
-		opts.ReadOnly = true
+	Run: handleInfo,
+}
 
-		db, err := badger.Open(opts)
-		if err != nil {
-			fmt.Println("Error:", err.Error())
-			os.Exit(1)
-		}
-		defer db.Close()
+func handleInfo(cmd *cobra.Command, args []string) {
+	if err := printInfo(sstDir, vlogDir); err != nil {
+		fmt.Println("Error:", err.Error())
+		os.Exit(1)
+	}
 
-		err = tableInfo(sstDir, vlogDir, db)
+	// Open DB
+	opts := badger.DefaultOptions
+	opts.TableLoadingMode = options.MemoryMap
+	opts.Dir = sstDir
+	opts.ValueDir = vlogDir
+	opts.ReadOnly = true
+
+	db, err := badger.Open(opts)
+	if err != nil {
+		fmt.Println("Error:", err.Error())
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	if opt.showTables {
+		tableInfo(sstDir, vlogDir, db)
+	}
+
+	if opt.showHistogram {
+		db.PrintHistogram([]byte(opt.withPrefix))
+	}
+
+	if opt.showKeys {
+		showKeys(db, opt.withPrefix)
+	}
+
+	if len(opt.keyLookup) > 0 {
+		lookup(db)
+	}
+}
+
+func showKeys(db *badger.DB, prefix string) {
+	if len(prefix) > 0 {
+		fmt.Printf("Only choosing keys with prefix: \n%s", hex.Dump([]byte(prefix)))
+	}
+	txn := db.NewTransaction(false)
+	defer txn.Discard()
+
+	iopt := badger.DefaultIteratorOptions
+	iopt.PrefetchValues = false
+	if opt.keyHistory {
+		iopt.AllVersions = true
+	}
+	it := txn.NewIterator(iopt)
+	defer it.Close()
+
+	totalKeys := 0
+	for it.Rewind(); it.Valid(); it.Next() {
+		printKey(it.Item(), false)
+		totalKeys++
+	}
+	fmt.Print("\n[Summary]\n")
+	fmt.Println("Total Number of keys:", totalKeys)
+
+}
+
+func lookup(db *badger.DB) {
+	txn := db.NewTransaction(false)
+	defer txn.Discard()
+
+	iopts := badger.DefaultIteratorOptions
+	iopts.PrefetchValues = false
+	if opt.keyHistory {
+		iopts.AllVersions = true
+		iopts.PrefetchValues = true
+	}
+	itr := txn.NewIterator(iopts)
+	defer itr.Close()
+
+	key, err := hex.DecodeString(opt.keyLookup)
+	if err != nil {
+		log.Fatal(err)
+	}
+	itr.Seek(key)
+	if !itr.Valid() {
+		log.Fatalf("Unable to seek to key:\n %s", hex.Dump(key))
+	}
+	fmt.Println()
+	item := itr.Item()
+	printKey(item, true)
+	if opt.keyHistory {
+		itr.Next() // Move to the next key
+		for ; itr.Valid(); itr.Next() {
+			item := itr.Item()
+			if !bytes.Equal(key, item.Key()) {
+				break
+			}
+			printKey(item, true)
+		}
+	}
+
+}
+
+func printKey(item *badger.Item, showValue bool) {
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "Key: %x\tversion: %d", item.Key(), item.Version())
+	if opt.itemMeta {
+		fmt.Fprintf(&buf, "\tsize: %d\tmeta: b%04b", item.EstimatedSize(), item.UserMeta())
+	}
+	if showValue {
+		val, err := item.ValueCopy(nil)
 		if err != nil {
-			fmt.Println("Error:", err.Error())
-			os.Exit(1)
+			log.Fatal(err)
 		}
-		if opt.sizeHistogram {
-			// use prefix as nil since we want to list all keys
-			db.PrintHistogram(nil)
-		}
-	},
+		fmt.Fprintf(&buf, "\tvalue: %v", val)
+	}
+	if item.IsDeletedOrExpired() {
+		buf.WriteString("\t{deleted}")
+	}
+	if item.DiscardEarlierVersions() {
+		buf.WriteString("\t{discard}")
+	}
+	fmt.Println(buf.String())
+
 }
 
 func hbytes(sz int64) string {
@@ -102,7 +205,7 @@ func dur(src, dst time.Time) string {
 	return humanize.RelTime(dst, src, "earlier", "later")
 }
 
-func tableInfo(dir, valueDir string, db *badger.DB) error {
+func tableInfo(dir, valueDir string, db *badger.DB) {
 	tables := db.Tables()
 	fmt.Println()
 	fmt.Println("SSTable [Li, Id, Total Keys including internal keys] [Left Key, Version -> Right Key, Version]")
@@ -114,7 +217,6 @@ func tableInfo(dir, valueDir string, db *badger.DB) error {
 			t.Level, t.ID, t.KeyCount, lk, lt, rk, rt)
 	}
 	fmt.Println()
-	return nil
 }
 
 func printInfo(dir, valueDir string) error {
