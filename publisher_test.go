@@ -17,8 +17,10 @@ package badger
 
 import (
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -64,5 +66,30 @@ func TestPublisherOrdering(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			require.Equal(t, fmt.Sprintf("value%d", i), order[i])
 		}
+	})
+}
+
+func TestBlockingPublish(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		var once sync.Once
+		var numUpdates int32
+		numUpdates = 0
+		unsub := db.Subscribe("ke", func(kv *pb.KV) {
+			once.Do(func() {
+				time.Sleep(time.Second * 10)
+			})
+			atomic.AddInt32(&numUpdates, 1)
+		})
+
+		for i := 0; i < 100; i++ {
+			start := time.Now()
+			db.Update(func(txn *Txn) error {
+				return txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
+			})
+			finish := time.Now()
+			require.Less(t, finish.Sub(start).Seconds(), float64(1))
+		}
+		unsub()
+		require.Equal(t, int32(100), numUpdates)
 	})
 }
