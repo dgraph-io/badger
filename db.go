@@ -1381,7 +1381,7 @@ func (db *DB) Subscribe(prefix string, cb callback) func() {
 	if cb == nil {
 		panic("callback can't be nil") // should we panic or return error?
 	}
-	c := db.pub.addSubscriber(prefix, cb)
+	c := db.pub.runSubscriber(prefix, cb)
 	return func() {
 		c.SignalAndWait() // have to wait or to return closer itself?
 	}

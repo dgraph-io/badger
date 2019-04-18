@@ -36,11 +36,11 @@ func newPublisher() *publisher {
 	}
 }
 
-// addSubscriber spins two go rotuine, one for processing callback and another for batching the incomming
+// runSubscriber spins two go rotuine, one for processing callback and another for batching the incomming
 // updates. closer will first stop further incoming updates and wait for all the updates to get consumed
 // by the subscriber's callback
 // do we have to close the subscribers while closing db? or upto user to deal?
-func (p *publisher) addSubscriber(prefix string, cb callback) *y.Closer {
+func (p *publisher) runSubscriber(prefix string, cb callback) *y.Closer {
 	p.Lock()
 	defer p.Unlock()
 
