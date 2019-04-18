@@ -36,11 +36,15 @@ func newPublisher() *publisher {
 	}
 }
 
+// addSubscriber spins two go rotuine, one for processing callback and another for batching the incomming
+// updates. closer will first stop further incoming updates and wait for all the updates to get consumed
+// by the subscriber's callback
+// do we have to close the subscribers while closing db? or upto user to deal?
 func (p *publisher) addSubscriber(prefix string, cb callback) *y.Closer {
 	p.Lock()
 	defer p.Unlock()
 
-	c := y.NewCloser(1)
+	c := y.NewCloser(2)
 	listen := func(updateRecv chan *pb.KV) {
 		defer c.Done()
 		cbCh := make(chan []*pb.KV)
@@ -50,6 +54,7 @@ func (p *publisher) addSubscriber(prefix string, cb callback) *y.Closer {
 					cb(kv)
 				}
 			}
+			c.Done()
 		}
 		go cbRunner()
 
@@ -88,15 +93,20 @@ func (p *publisher) addSubscriber(prefix string, cb callback) *y.Closer {
 						break smartbatch
 					}
 				}
+			default:
+				if len(kvs) > 0 {
+					trySending()
+				}
 			}
 		}
 	}
 	updateCh := make(chan *pb.KV)
 	p.subscribers[prefix] = updateCh
 	go listen(updateCh)
-	return c // do we have to close the subscribers while closing db?
+	return c
 }
 
+// publishUpdates send update to the listening subscriber
 func (p *publisher) publishUpdates(reqs []*request) {
 	p.Lock()
 	defer p.Unlock()
@@ -108,14 +118,15 @@ func (p *publisher) publishUpdates(reqs []*request) {
 
 				// send update to the subscriber if prefix matches
 				if strings.HasPrefix(string(e.Key), prefix) {
-					kv := pb.KV{}
 					k := y.SafeCopy(nil, e.Key)
-					kv.Key = y.ParseKey(k)
-					kv.Value = y.SafeCopy(nil, e.Value)
-					kv.Meta = []byte{e.UserMeta}
-					kv.ExpiresAt = e.ExpiresAt
-					kv.Version = y.ParseTs(k)
-					sCh <- &kv
+					kv := &pb.KV{
+						Key:       y.ParseKey(k),
+						Value:     y.SafeCopy(nil, e.Value),
+						Meta:      []byte{e.UserMeta},
+						ExpiresAt: e.ExpiresAt,
+						Version:   y.ParseTs(k),
+					}
+					sCh <- kv
 				}
 			}
 		}

@@ -30,7 +30,6 @@ func TestSubscribe(t *testing.T) {
 		var numUpdates int32
 		numUpdates = 0
 		unsubscribe := db.Subscribe("ke", func(kv *pb.KV) {
-			fmt.Printf("%s %s \n", string(kv.Key), string(kv.Value))
 			atomic.AddInt32(&numUpdates, 1)
 		})
 		db.Update(func(txn *Txn) error {
@@ -47,5 +46,23 @@ func TestSubscribe(t *testing.T) {
 			return txn.Set([]byte("key4"), []byte("value4"))
 		})
 		require.Equal(t, int32(3), numUpdates)
+	})
+}
+
+func TestPublisherOrdering(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		order := []string{}
+		unsub := db.Subscribe("ke", func(kv *pb.KV) {
+			order = append(order, string(kv.Value))
+		})
+		for i := 0; i < 5; i++ {
+			db.Update(func(txn *Txn) error {
+				return txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
+			})
+		}
+		unsub()
+		for i := 0; i < 5; i++ {
+			require.Equal(t, fmt.Sprintf("value%d", i), order[i])
+		}
 	})
 }
