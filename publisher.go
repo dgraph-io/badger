@@ -63,6 +63,7 @@ func (p *publisher) addSubscriber(prefix string, cb callback) *y.Closer {
 			select {
 			case cbCh <- kvs:
 				kvs = []*pb.KV{}
+			default:
 			}
 		}
 
