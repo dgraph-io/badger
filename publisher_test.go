@@ -17,6 +17,8 @@ package badger
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -91,5 +93,34 @@ func TestBlockingPublish(t *testing.T) {
 		}
 		unsub()
 		require.Equal(t, int32(100), numUpdates)
+	})
+}
+
+func TestMaxBatch(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opts := getTestOptions(dir)
+	opts.MaxPendingSubscriberUpdates = 100
+	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+		var once sync.Once
+		var numUpdates int32
+		numUpdates = 0
+		unsub := db.Subscribe("ke", func(kv *pb.KV) {
+			once.Do(func() {
+				time.Sleep(time.Second * 10)
+			})
+			atomic.AddInt32(&numUpdates, 1)
+		})
+
+		for i := 0; i < 200; i++ {
+			db.Update(func(txn *Txn) error {
+				return txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
+			})
+		}
+		unsub()
+		// we're block after 1'st msg. toatal update count is 101
+		require.Equal(t, int32(101), numUpdates)
 	})
 }
