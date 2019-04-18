@@ -25,14 +25,18 @@ import (
 
 type publisher struct {
 	subscribers map[string]chan<- *pb.KV
+	batchSize   int
+	opts        Options
 	sync.RWMutex
 }
 
 type callback func(kv *pb.KV)
 
-func newPublisher() *publisher {
+func newPublisher(opts Options) *publisher {
 	return &publisher{
 		subscribers: make(map[string]chan<- *pb.KV),
+		batchSize:   opts.MaxPendingSubscriberUpdates,
+		opts:        opts,
 	}
 }
 
@@ -71,9 +75,14 @@ func (p *publisher) runSubscriber(prefix string, cb callback) *y.Closer {
 		for {
 			select {
 			case kv := <-updateRecv:
-				kvs = append(kvs, kv)
-				trySending()
+				if p.batchSize > len(kvs) {
+					kvs = append(kvs, kv)
+					trySending()
+					continue smartbatch
+				}
+				p.opts.Infof("publisher: maximux batch size %d reached.", p.batchSize)
 			case <-c.HasBeenClosed():
+			drainer:
 				for {
 					// we need to drain the channel before deleting subscriber
 					// because after closing signal, publishUpdates may be invoked
@@ -81,7 +90,11 @@ func (p *publisher) runSubscriber(prefix string, cb callback) *y.Closer {
 					// That'll lead to deadlock when we try to aquire lock for deleting subscriber
 					select {
 					case kv := <-updateRecv:
-						kvs = append(kvs, kv)
+						if p.batchSize > len(kvs) {
+							kvs = append(kvs, kv)
+							continue drainer
+						}
+						p.opts.Infof("publisher: maximux batch size %d reached.", p.batchSize)
 					default:
 						// delete the subscribers to avoid further updates
 						p.deleteSubscriber(prefix)

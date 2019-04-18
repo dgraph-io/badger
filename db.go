@@ -263,7 +263,7 @@ func Open(opt Options) (db *DB, err error) {
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
 		orc:           newOracle(opt),
-		pub:           newPublisher(),
+		pub:           newPublisher(opt),
 	}
 
 	// Calculate initial size.

@@ -110,6 +110,9 @@ type Options struct {
 
 	// DB-specific logger which will override the global logger.
 	Logger Logger
+
+	// Maximum pending updates for the subscribers
+	MaxPendingSubscriberUpdates int
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -136,10 +139,11 @@ var DefaultOptions = Options{
 	// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
 	ValueLogFileSize: 1<<30 - 1,
 
-	ValueLogMaxEntries: 1000000,
-	ValueThreshold:     32,
-	Truncate:           false,
-	Logger:             defaultLogger,
+	ValueLogMaxEntries:          1000000,
+	ValueThreshold:              32,
+	Truncate:                    false,
+	Logger:                      defaultLogger,
+	MaxPendingSubscriberUpdates: 1 << 9,
 }
 
 // LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold
