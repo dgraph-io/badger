@@ -408,6 +408,16 @@ func (txn *Txn) SetEntry(e *Entry) error {
 	return txn.modify(e)
 }
 
+// SetEntryWithDiscard acts like SetEntry, but adds a marker to discard earlier
+// versions of the key.
+//
+// The current transaction keeps a reference to the entry passed in argument.
+// Users must not modify the entry until the end of the transaction.
+func (txn *Txn) SetEntryWithDiscard(e *Entry) error {
+	e.meta = bitDiscardEarlierVersions
+	return txn.modify(e)
+}
+
 // Delete deletes a key.
 //
 // This is done by adding a delete marker for the key at commit timestamp.  Any
