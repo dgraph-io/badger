@@ -85,8 +85,8 @@ func (p *publisher) runSubscriber(prefix string, cb callback) *y.Closer {
 			drainer:
 				for {
 					// we need to drain the channel before deleting subscriber
-					// because after closing signal, publishUpdates may be invoked
-					// and it'll try to push the update but no one is listening here so lock is never released.
+					// because after closing signal, publishUpdates may be already invoked
+					// and trying to push the update but no one is listening here so lock is never released.
 					// That'll lead to deadlock when we try to aquire lock for deleting subscriber
 					select {
 					case kv := <-updateRecv:
