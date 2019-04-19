@@ -72,10 +72,7 @@ func TestBuildKeyValueSizeHistogram(t *testing.T) {
 					return err
 				}
 
-				if err := txn.Set([]byte("AAA"), []byte("BBB")); err != nil {
-					return err
-				}
-				return nil
+				return txn.Set([]byte("AAA"), []byte("BBB"))
 			})
 			require.NoError(t, err)
 
@@ -91,7 +88,7 @@ func TestBuildKeyValueSizeHistogram(t *testing.T) {
 			require.Equal(t, int64(6), valueHistogram.sum)
 			require.Equal(t, int64(6), keyHistogram.sum)
 
-			// Lenght 1 key is in first bucket, length 2 and 3 are in the second
+			// Length 1 key is in first bucket, length 2 and 3 are in the second
 			// bucket
 			require.Equal(t, int64(1), valueHistogram.countPerBin[0])
 			require.Equal(t, int64(2), valueHistogram.countPerBin[1])
