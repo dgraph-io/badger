@@ -24,10 +24,10 @@ import (
 )
 
 type publisher struct {
+	sync.RWMutex
 	subscribers map[string]chan<- *pb.KV
 	batchSize   int
 	opts        Options
-	sync.RWMutex
 }
 
 type callback func(kv *pb.KV)
@@ -35,7 +35,7 @@ type callback func(kv *pb.KV)
 func newPublisher(opts Options) *publisher {
 	return &publisher{
 		subscribers: make(map[string]chan<- *pb.KV),
-		batchSize:   opts.MaxPendingSubscriberUpdates,
+		batchSize:   opts.MaxPendingUpdates,
 		opts:        opts,
 	}
 }
@@ -51,70 +51,21 @@ func (p *publisher) runSubscriber(prefix string, cb callback) *y.Closer {
 	c := y.NewCloser(2)
 	listen := func(updateRecv chan *pb.KV) {
 		defer c.Done()
-		cbCh := make(chan []*pb.KV)
 		cbRunner := func() {
-			for kvs := range cbCh {
-				for _, kv := range kvs {
-					cb(kv)
-				}
+			// listen for incomming updates
+			for kv := range updateRecv {
+				cb(kv)
 			}
 			c.Done()
 		}
 		go cbRunner()
-
-		var kvs []*pb.KV
-		trySending := func() {
-			select {
-			case cbCh <- kvs:
-				kvs = []*pb.KV{}
-			default:
-			}
-		}
-
-	smartbatch:
-		for {
-			select {
-			case kv := <-updateRecv:
-				if p.batchSize > len(kvs) {
-					kvs = append(kvs, kv)
-					trySending()
-					continue smartbatch
-				}
-				p.opts.Infof("publisher: maximux batch size %d reached.", p.batchSize)
-			case <-c.HasBeenClosed():
-			drainer:
-				for {
-					// we need to drain the channel before deleting subscriber
-					// because after closing signal, publishUpdates may be already invoked
-					// and trying to push the update but no one is listening here so lock is never released.
-					// That'll lead to deadlock when we try to aquire lock for deleting subscriber
-					select {
-					case kv := <-updateRecv:
-						if p.batchSize > len(kvs) {
-							kvs = append(kvs, kv)
-							continue drainer
-						}
-						p.opts.Infof("publisher: maximux batch size %d reached.", p.batchSize)
-					default:
-						// delete the subscribers to avoid further updates
-						p.deleteSubscriber(prefix)
-						if len(kvs) > 0 {
-							// send pending updates
-							cbCh <- kvs
-						}
-						// stop the callback runner
-						close(cbCh)
-						break smartbatch
-					}
-				}
-			default:
-				if len(kvs) > 0 {
-					trySending()
-				}
-			}
-		}
+		<-c.HasBeenClosed()
+		// delete the subscriber and close the channel
+		p.deleteSubscriber(prefix)
+		close(updateRecv)
 	}
-	updateCh := make(chan *pb.KV)
+
+	updateCh := make(chan *pb.KV, p.batchSize)
 	p.subscribers[prefix] = updateCh
 	go listen(updateCh)
 	return c
@@ -140,7 +91,11 @@ func (p *publisher) publishUpdates(reqs []*request) {
 						ExpiresAt: e.ExpiresAt,
 						Version:   y.ParseTs(k),
 					}
-					sCh <- kv
+					select {
+					case sCh <- kv:
+					default:
+						//buffer overflowed
+					}
 				}
 			}
 		}

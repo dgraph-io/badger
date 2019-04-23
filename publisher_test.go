@@ -33,9 +33,12 @@ func TestSubscribe(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		var numUpdates int32
 		numUpdates = 0
-		unsubscribe := db.Subscribe("ke", func(kv *pb.KV) {
+		unsubscribe, err := db.Subscribe("ke", func(kv *pb.KV) {
 			atomic.AddInt32(&numUpdates, 1)
 		})
+		if err != nil {
+			require.NoError(t, err)
+		}
 		db.Update(func(txn *Txn) error {
 			return txn.Set([]byte("key1"), []byte("value1"))
 		})
@@ -56,9 +59,12 @@ func TestSubscribe(t *testing.T) {
 func TestPublisherOrdering(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		order := []string{}
-		unsub := db.Subscribe("ke", func(kv *pb.KV) {
+		unsub, err := db.Subscribe("ke", func(kv *pb.KV) {
 			order = append(order, string(kv.Value))
 		})
+		if err != nil {
+			require.NoError(t, err)
+		}
 		for i := 0; i < 5; i++ {
 			db.Update(func(txn *Txn) error {
 				return txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
@@ -76,12 +82,15 @@ func TestBlockingPublish(t *testing.T) {
 		var once sync.Once
 		var numUpdates int32
 		numUpdates = 0
-		unsub := db.Subscribe("ke", func(kv *pb.KV) {
+		unsub, err := db.Subscribe("ke", func(kv *pb.KV) {
 			once.Do(func() {
 				time.Sleep(time.Second * 10)
 			})
 			atomic.AddInt32(&numUpdates, 1)
 		})
+		if err != nil {
+			require.NoError(t, err)
+		}
 
 		for i := 0; i < 100; i++ {
 			start := time.Now()
@@ -102,17 +111,20 @@ func TestMaxBatch(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	opts := getTestOptions(dir)
-	opts.MaxPendingSubscriberUpdates = 100
+	opts.MaxPendingUpdates = 100
 	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
 		var once sync.Once
 		var numUpdates int32
 		numUpdates = 0
-		unsub := db.Subscribe("ke", func(kv *pb.KV) {
+		unsub, err := db.Subscribe("ke", func(kv *pb.KV) {
 			once.Do(func() {
 				time.Sleep(time.Second * 10)
 			})
 			atomic.AddInt32(&numUpdates, 1)
 		})
+		if err != nil {
+			require.NoError(t, err)
+		}
 
 		for i := 0; i < 200; i++ {
 			db.Update(func(txn *Txn) error {
