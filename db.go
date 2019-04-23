@@ -1377,12 +1377,12 @@ func (db *DB) DropPrefix(prefix []byte) error {
 }
 
 // Subscribe can be used watch key changes for the given key prefix
-func (db *DB) Subscribe(prefix string, cb callback) func() {
+func (db *DB) Subscribe(prefix string, cb callback) (func(), error) {
 	if cb == nil {
-		panic("callback can't be nil") // should we panic or return error?
+		return nil, errors.New("callback can't be nil")
 	}
 	c := db.pub.runSubscriber(prefix, cb)
 	return func() {
 		c.SignalAndWait() // have to wait or to return closer itself?
-	}
+	}, nil
 }
