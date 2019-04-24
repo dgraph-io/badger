@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"expvar"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -792,7 +793,7 @@ func arenaSize(opt Options) int64 {
 }
 
 // WriteLevel0Table flushes memtable.
-func writeLevel0Table(ft flushTask, f *os.File) error {
+func writeLevel0Table(ft flushTask, f io.Writer) error {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder()
@@ -1018,7 +1019,7 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 
 // Size returns the size of lsm and value log files in bytes. It can be used to decide how often to
 // call RunValueLogGC.
-func (db *DB) Size() (lsm int64, vlog int64) {
+func (db *DB) Size() (lsm, vlog int64) {
 	if y.LSMSize.Get(db.opt.Dir) == nil {
 		lsm, vlog = 0, 0
 		return
