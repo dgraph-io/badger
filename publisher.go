@@ -101,7 +101,7 @@ func (p *publisher) publishUpdates(reqs []*request) {
 	}
 }
 
-func (p *publisher) newSubsriber(prefix []byte) (<-chan *pb.KVList, int) {
+func (p *publisher) newSubscriber(prefix []byte) (<-chan *pb.KVList, int) {
 	p.Lock()
 	defer p.Unlock()
 	ch := make(chan *pb.KVList, 1000)
@@ -129,7 +129,7 @@ func (p *publisher) cleanSubscribers() {
 	}
 }
 
-func (p *publisher) deleteSubcriber(id int) {
+func (p *publisher) deleteSubscriber(id int) {
 	p.Lock()
 	defer p.Unlock()
 	subscriber, ok := p.subscribers[id]

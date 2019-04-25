@@ -1610,8 +1610,10 @@ func TestGoroutineLeak(t *testing.T) {
 	t.Logf("Num go: %d", before)
 	for i := 0; i < 12; i++ {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			updated := false
 			unsubscribe, err := db.Subscribe([]byte("key"), func(kv *pb.KV) {
 				require.Equal(t, []byte("value"), kv.GetValue())
+				updated = true
 			})
 			if err != nil {
 				require.NoError(t, err)
@@ -1621,6 +1623,7 @@ func TestGoroutineLeak(t *testing.T) {
 			})
 			unsubscribe()
 			require.NoError(t, err)
+			require.Equal(t, true, updated)
 		})
 	}
 	require.Equal(t, before, runtime.NumGoroutine())
