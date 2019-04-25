@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
@@ -53,7 +54,10 @@ type closers struct {
 	memtable   *y.Closer
 	writes     *y.Closer
 	valueGC    *y.Closer
+	publisher  *y.Closer
 }
+
+type callback func(kv *pb.KV)
 
 // DB provides the various functions required to interact with Badger.
 // DB is thread-safe.
@@ -263,7 +267,7 @@ func Open(opt Options) (db *DB, err error) {
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
 		orc:           newOracle(opt),
-		pub:           newPublisher(opt),
+		pub:           newPublisher(),
 	}
 
 	// Calculate initial size.
@@ -320,6 +324,9 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.valueGC = y.NewCloser(1)
 	go db.vlog.waitOnGC(db.closers.valueGC)
 
+	db.closers.publisher = y.NewCloser(1)
+	go db.pub.listenForUpdates(db.closers.publisher)
+
 	valueDirLockGuard = nil
 	dirLockGuard = nil
 	manifestFile = nil
@@ -338,6 +345,8 @@ func (db *DB) Close() (err error) {
 
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
+
+	db.closers.publisher.SignalAndWait()
 
 	// Now close the value log.
 	if vlogErr := db.vlog.Close(); vlogErr != nil {
@@ -1377,12 +1386,51 @@ func (db *DB) DropPrefix(prefix []byte) error {
 }
 
 // Subscribe can be used watch key changes for the given key prefix
-func (db *DB) Subscribe(prefix string, cb callback) (func(), error) {
+func (db *DB) Subscribe(prefix []byte, cb callback) (func(), error) {
 	if cb == nil {
 		return nil, errors.New("callback can't be nil")
 	}
-	c := db.pub.runSubscriber(prefix, cb)
+	c := y.NewCloser(1)
+	recvCh, id := db.pub.newSubsriber(prefix)
+	cbRunner := func(recvCh <-chan *pb.KVList, id int) {
+		defer c.Done()
+	runner:
+		for {
+			select {
+			case <-c.HasBeenClosed():
+				// close the subscriber to avoid further update
+				db.pub.deleteSubcriber(id)
+				// drain all the pending updates
+				goto drainer
+			case kvs := <-recvCh:
+				if recvCh != nil {
+					for _, kv := range kvs.GetKv() {
+						cb(kv)
+					}
+					continue runner
+				}
+				// reciver is closed here and no updates so wait for the closer signal
+				<-c.HasBeenClosed()
+				break runner
+			}
+		drainer:
+			for {
+				select {
+				case kvs := <-recvCh:
+					if kvs != nil {
+						for _, kv := range kvs.GetKv() {
+							cb(kv)
+						}
+						continue drainer
+					}
+					break drainer
+				}
+			}
+			break runner
+		}
+	}
+	go cbRunner(recvCh, id)
 	return func() {
-		c.SignalAndWait() // have to wait or to return closer itself?
+		c.SignalAndWait()
 	}, nil
 }

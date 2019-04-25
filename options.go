@@ -110,9 +110,6 @@ type Options struct {
 
 	// DB-specific logger which will override the global logger.
 	Logger Logger
-
-	// Maximum pending updates for the subscribers
-	MaxPendingUpdates int
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -143,7 +140,6 @@ var DefaultOptions = Options{
 	ValueThreshold:     32,
 	Truncate:           false,
 	Logger:             defaultLogger,
-	MaxPendingUpdates:  1 << 9,
 }
 
 // LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold

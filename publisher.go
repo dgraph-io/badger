@@ -16,73 +16,68 @@
 package badger
 
 import (
-	"strings"
+	"bytes"
+	"math/rand"
 	"sync"
 
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 )
 
+type subscriber struct {
+	prefix []byte
+	sendCh chan<- *pb.KVList
+}
+
 type publisher struct {
-	sync.RWMutex
-	subscribers map[string]chan<- *pb.KV
-	batchSize   int
-	opts        Options
+	sync.Mutex
+	pubCh       chan []*request
+	subscribers map[int]subscriber
 }
 
-type callback func(kv *pb.KV)
-
-func newPublisher(opts Options) *publisher {
+func newPublisher() *publisher {
 	return &publisher{
-		subscribers: make(map[string]chan<- *pb.KV),
-		batchSize:   opts.MaxPendingUpdates,
-		opts:        opts,
+		pubCh:       make(chan []*request, 10000),
+		subscribers: make(map[int]subscriber),
 	}
 }
 
-// runSubscriber spins two go rotuine, one for processing callback and another for batching the incomming
-// updates. closer will first stop further incoming updates and wait for all the updates to get consumed
-// by the subscriber's callback
-// do we have to close the subscribers while closing db? or upto user to deal?
-func (p *publisher) runSubscriber(prefix string, cb callback) *y.Closer {
-	p.Lock()
-	defer p.Unlock()
+func (p *publisher) listenForUpdates(c *y.Closer) {
+	defer func() {
+		c.Done()
+		p.cleanSubscribers()
+	}()
 
-	c := y.NewCloser(2)
-	listen := func(updateRecv chan *pb.KV) {
-		defer c.Done()
-		cbRunner := func() {
-			// listen for incomming updates
-			for kv := range updateRecv {
-				cb(kv)
-			}
-			c.Done()
+listen:
+	for {
+		reqs := []*request{}
+		select {
+		case <-c.HasBeenClosed():
+			break listen
+		case r := <-p.pubCh:
+			reqs = append(reqs, r...)
 		}
-		go cbRunner()
-		<-c.HasBeenClosed()
-		// delete the subscriber and close the channel
-		p.deleteSubscriber(prefix)
-		close(updateRecv)
+	drainer:
+		for {
+			select {
+			case r := <-p.pubCh:
+				reqs = append(reqs, r...)
+			default:
+				break drainer
+			}
+		}
+		p.publishUpdates(reqs)
 	}
-
-	updateCh := make(chan *pb.KV, p.batchSize)
-	p.subscribers[prefix] = updateCh
-	go listen(updateCh)
-	return c
 }
 
-// publishUpdates send update to the listening subscriber
 func (p *publisher) publishUpdates(reqs []*request) {
 	p.Lock()
 	defer p.Unlock()
-	for _, req := range reqs {
-
-		for _, e := range req.Entries {
-
-			for prefix, sCh := range p.subscribers {
-
-				// send update to the subscriber if prefix matches
-				if strings.HasPrefix(string(e.Key), prefix) {
+	for id, s := range p.subscribers {
+		kvs := &pb.KVList{}
+		for _, req := range reqs {
+			for _, e := range req.Entries {
+				if bytes.HasPrefix(e.Key, s.prefix) {
 					k := y.SafeCopy(nil, e.Key)
 					kv := &pb.KV{
 						Key:       y.ParseKey(k),
@@ -91,19 +86,56 @@ func (p *publisher) publishUpdates(reqs []*request) {
 						ExpiresAt: e.ExpiresAt,
 						Version:   y.ParseTs(k),
 					}
-					select {
-					case sCh <- kv:
-					default:
-						//buffer overflowed
-					}
+					kvs.Kv = append(kvs.Kv, kv)
 				}
+			}
+		}
+		if len(kvs.GetKv()) > 0 {
+			select {
+			case s.sendCh <- kvs:
+			default:
+				close(s.sendCh)
+				delete(p.subscribers, id)
 			}
 		}
 	}
 }
 
-func (p *publisher) deleteSubscriber(prefix string) {
+func (p *publisher) newSubsriber(prefix []byte) (<-chan *pb.KVList, int) {
 	p.Lock()
 	defer p.Unlock()
-	delete(p.subscribers, prefix)
+	ch := make(chan *pb.KVList, 1000)
+	var id int
+	for {
+		id = rand.Int()
+		if _, has := p.subscribers[id]; !has {
+			break
+		}
+	}
+	p.subscribers[id] = subscriber{
+		prefix: prefix,
+		sendCh: ch,
+	}
+	return ch, id
+}
+
+// cleanSubscribers stops all the subscribers. Ideally, It should be called while closing DB
+func (p *publisher) cleanSubscribers() {
+	p.Lock()
+	defer p.Unlock()
+	for id, s := range p.subscribers {
+		close(s.sendCh)
+		delete(p.subscribers, id)
+	}
+}
+
+func (p *publisher) deleteSubcriber(id int) {
+	p.Lock()
+	defer p.Unlock()
+	subscriber, ok := p.subscribers[id]
+	if !ok {
+		return
+	}
+	close(subscriber.sendCh)
+	delete(p.subscribers, id)
 }

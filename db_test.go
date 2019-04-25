@@ -1610,7 +1610,9 @@ func TestGoroutineLeak(t *testing.T) {
 	t.Logf("Num go: %d", before)
 	for i := 0; i < 12; i++ {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-			unsubscribe, err := db.Subscribe("key", func(_ *pb.KV) {})
+			unsubscribe, err := db.Subscribe([]byte("key"), func(kv *pb.KV) {
+				require.Equal(t, []byte("value"), kv.GetValue())
+			})
 			if err != nil {
 				require.NoError(t, err)
 			}
