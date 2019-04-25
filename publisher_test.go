@@ -17,8 +17,6 @@ package badger
 
 import (
 	"fmt"
-	"io/ioutil"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -33,7 +31,7 @@ func TestSubscribe(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		var numUpdates int32
 		numUpdates = 0
-		unsubscribe, err := db.Subscribe("ke", func(kv *pb.KV) {
+		unsubscribe, err := db.Subscribe([]byte("ke"), func(kv *pb.KV) {
 			atomic.AddInt32(&numUpdates, 1)
 		})
 		if err != nil {
@@ -59,7 +57,7 @@ func TestSubscribe(t *testing.T) {
 func TestPublisherOrdering(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		order := []string{}
-		unsub, err := db.Subscribe("ke", func(kv *pb.KV) {
+		unsub, err := db.Subscribe([]byte("ke"), func(kv *pb.KV) {
 			order = append(order, string(kv.Value))
 		})
 		if err != nil {
@@ -82,7 +80,7 @@ func TestBlockingPublish(t *testing.T) {
 		var once sync.Once
 		var numUpdates int32
 		numUpdates = 0
-		unsub, err := db.Subscribe("ke", func(kv *pb.KV) {
+		unsub, err := db.Subscribe([]byte("ke"), func(kv *pb.KV) {
 			once.Do(func() {
 				time.Sleep(time.Second * 10)
 			})
@@ -102,37 +100,5 @@ func TestBlockingPublish(t *testing.T) {
 		}
 		unsub()
 		require.Equal(t, int32(100), numUpdates)
-	})
-}
-
-func TestMaxBatch(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	opts := getTestOptions(dir)
-	opts.MaxPendingUpdates = 100
-	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
-		var once sync.Once
-		var numUpdates int32
-		numUpdates = 0
-		unsub, err := db.Subscribe("ke", func(kv *pb.KV) {
-			once.Do(func() {
-				time.Sleep(time.Second * 10)
-			})
-			atomic.AddInt32(&numUpdates, 1)
-		})
-		if err != nil {
-			require.NoError(t, err)
-		}
-
-		for i := 0; i < 200; i++ {
-			db.Update(func(txn *Txn) error {
-				return txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
-			})
-		}
-		unsub()
-		// we're block after 1'st msg. toatal update count is 101
-		require.Equal(t, int32(101), numUpdates)
 	})
 }
