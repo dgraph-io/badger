@@ -1400,8 +1400,8 @@ func (db *DB) Subscribe(prefix []byte, cb callback) (func(), error) {
 			case <-c.HasBeenClosed():
 				// close the subscriber to avoid further update
 				db.pub.deleteSubscriber(id)
-				// drain all the pending updates
-				goto drainer
+				//stop listening and drain all the updates
+				break runner
 			case kvs := <-recvCh:
 				if recvCh != nil {
 					for _, kv := range kvs.GetKv() {
@@ -1411,22 +1411,14 @@ func (db *DB) Subscribe(prefix []byte, cb callback) (func(), error) {
 				}
 				// reciver is closed here and no updates so wait for the closer signal
 				<-c.HasBeenClosed()
-				break runner
+				return
 			}
-		drainer:
-			for {
-				select {
-				case kvs := <-recvCh:
-					if kvs != nil {
-						for _, kv := range kvs.GetKv() {
-							cb(kv)
-						}
-						continue drainer
-					}
-					break drainer
-				}
+		}
+		// drain all the pending updates
+		for kvs := range recvCh {
+			for _, kv := range kvs.GetKv() {
+				cb(kv)
 			}
-			break runner
 		}
 	}
 	go cbRunner(recvCh, id)
