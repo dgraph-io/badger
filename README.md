@@ -144,7 +144,7 @@ txn := db.NewTransaction(true)
 for k,v := range updates {
   if err := txn.Set([]byte(k),[]byte(v)); err == ErrTxnTooBig {
     _ = txn.Commit()
-    txn = db.NewTransaction(..)
+    txn = db.NewTransaction(true)
     _ = txn.Set([]byte(k),[]byte(v))
   }
 }
