@@ -1391,7 +1391,7 @@ func (db *DB) Subscribe(prefix []byte, cb callback) (func(), error) {
 		return nil, errors.New("callback can't be nil")
 	}
 	c := y.NewCloser(1)
-	recvCh, id := db.pub.newSubsriber(prefix)
+	recvCh, id := db.pub.newSubscriber(prefix)
 	cbRunner := func(recvCh <-chan *pb.KVList, id int) {
 		defer c.Done()
 	runner:
@@ -1399,7 +1399,7 @@ func (db *DB) Subscribe(prefix []byte, cb callback) (func(), error) {
 			select {
 			case <-c.HasBeenClosed():
 				// close the subscriber to avoid further update
-				db.pub.deleteSubcriber(id)
+				db.pub.deleteSubscriber(id)
 				// drain all the pending updates
 				goto drainer
 			case kvs := <-recvCh:
