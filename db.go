@@ -566,6 +566,7 @@ func (db *DB) shouldWriteValueToLSM(e Entry) bool {
 }
 
 func (db *DB) writeToLSM(b *request) error {
+	defer b.DecrRef()
 	if len(b.Ptrs) != len(b.Entries) {
 		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
@@ -617,7 +618,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 	}
 
 	db.elog.Printf("Sending updates to subscribers")
-	db.pub.publishUpdates(reqs)
+	db.pub.sendUpdates(reqs)
 	db.elog.Printf("Writing to memtable")
 	var count int
 	for _, b := range reqs {
@@ -670,6 +671,8 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	req.Entries = entries
 	req.Wg = sync.WaitGroup{}
 	req.Wg.Add(1)
+	req.IncrRef()     // for db write
+	req.IncrRef()     // for publisher updates
 	db.writeCh <- req // Handled in doWrites.
 	y.NumPuts.Add(int64(len(entries)))
 
