@@ -1790,6 +1790,36 @@ func TestSyncForRace(t *testing.T) {
 	<-doneChan
 }
 
+// Earlier, if head is not pointing to latest Vlog file, then at replay badger used to crash with index
+// out of range panic. After fix in this commit it should not.
+func TestNoCrash(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err, "cannot create badger dir")
+
+	ops := getTestOptions(dir)
+	ops.ValueLogMaxEntries = 1
+	db, err := Open(ops)
+	require.NoError(t, err, "unable to open db")
+
+	// entering 100 entries will generate 100 vlog files
+	for i := 0; i < 100; i++ {
+		err := db.Update(func(txn *Txn) error {
+			return txn.Set([]byte(fmt.Sprintf("key-%d", i)), []byte(fmt.Sprintf("val-%d", i)))
+		})
+		require.NoError(t, err, "update to db failed")
+	}
+
+	db.Lock()
+	// make head to point to first file
+	db.vhead = valuePointer{0, 0, 0}
+	db.Unlock()
+	db.Close()
+
+	// reduce size of SSTable to flush early
+	ops.MaxTableSize = 1 << 10
+	db, err = Open(ops)
+}
+
 func TestMain(m *testing.M) {
 	// call flag.Parse() here if TestMain uses flags
 	go func() {
