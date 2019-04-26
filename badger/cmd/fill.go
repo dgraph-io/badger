@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger"
-	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/spf13/cobra"
 )
@@ -57,8 +56,6 @@ func fill(cmd *cobra.Command, args []string) error {
 	opts.Truncate = truncate
 	opts.SyncWrites = false
 	opts.CompactL0OnClose = force
-	opts.TableLoadingMode = options.FileIO
-	opts.ValueLogLoadingMode = options.FileIO
 
 	db, err := badger.Open(opts)
 	if err != nil {
