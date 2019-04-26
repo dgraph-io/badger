@@ -89,6 +89,7 @@ func (p *publisher) publishUpdates(reqs []*request) {
 					kvs.Kv = append(kvs.Kv, kv)
 				}
 			}
+			req.DecrRef() // release the request
 		}
 		if len(kvs.GetKv()) > 0 {
 			select {
@@ -138,4 +139,8 @@ func (p *publisher) deleteSubscriber(id int) {
 	}
 	close(subscriber.sendCh)
 	delete(p.subscribers, id)
+}
+
+func (p *publisher) sendUpdates(reqs []*request) {
+	p.pubCh <- reqs
 }
