@@ -31,8 +31,8 @@ func TestSubscribe(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		var numUpdates int32
 		numUpdates = 0
-		unsubscribe, err := db.Subscribe([]byte("ke"), func(kv *pb.KVList) {
-			atomic.AddInt32(&numUpdates, 1)
+		unsubscribe, err := db.Subscribe([]byte("ke"), func(kvs *pb.KVList) {
+			atomic.AddInt32(&numUpdates, int32(len(kvs.GetKv())))
 		})
 		if err != nil {
 			require.NoError(t, err)
@@ -46,6 +46,7 @@ func TestSubscribe(t *testing.T) {
 		db.Update(func(txn *Txn) error {
 			return txn.Set([]byte("key3"), []byte("value3"))
 		})
+		time.Sleep(1 * time.Millisecond)
 		unsubscribe()
 		db.Update(func(txn *Txn) error {
 			return txn.Set([]byte("key4"), []byte("value4"))
@@ -70,6 +71,7 @@ func TestPublisherOrdering(t *testing.T) {
 				return txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
 			})
 		}
+		time.Sleep(1 * time.Millisecond)
 		unsub()
 		for i := 0; i < 5; i++ {
 			require.Equal(t, fmt.Sprintf("value%d", i), order[i])
@@ -77,16 +79,20 @@ func TestPublisherOrdering(t *testing.T) {
 	})
 }
 
-func TestBlockingPublish(t *testing.T) {
+func TestPublisherBatching(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		var once sync.Once
-		var numUpdates int32
-		numUpdates = 0
+		first := false
 		unsub, err := db.Subscribe([]byte("ke"), func(kvs *pb.KVList) {
 			once.Do(func() {
 				time.Sleep(time.Second * 10)
+				first = true
 			})
-			atomic.AddInt32(&numUpdates, 1)
+			if first {
+				first = false
+				return
+			}
+			require.Equal(t, 99, len(kvs.GetKv()))
 		})
 		if err != nil {
 			require.NoError(t, err)
@@ -101,6 +107,5 @@ func TestBlockingPublish(t *testing.T) {
 			require.Less(t, finish.Sub(start).Seconds(), float64(1))
 		}
 		unsub()
-		require.Equal(t, int32(100), numUpdates)
 	})
 }

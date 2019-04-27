@@ -1395,7 +1395,7 @@ func (db *DB) Subscribe(prefix []byte, cb callback) (func(), error) {
 	}
 	c := y.NewCloser(1)
 	recvCh, id := db.pub.newSubscriber(prefix)
-	cbRunner := func(recvCh <-chan *pb.KVList, id int) {
+	cbRunner := func(recvCh <-chan *pb.KVList, id uint64) {
 		defer c.Done()
 		slurp := func(batch *pb.KVList) {
 		loop:
