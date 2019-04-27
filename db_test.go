@@ -1611,8 +1611,8 @@ func TestGoroutineLeak(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			updated := false
-			unsubscribe, err := db.Subscribe([]byte("key"), func(kv *pb.KV) {
-				require.Equal(t, []byte("value"), kv.GetValue())
+			unsubscribe, err := db.Subscribe([]byte("key"), func(kvs *pb.KVList) {
+				require.Equal(t, []byte("value"), kvs.Kv[0].GetValue())
 				updated = true
 			})
 			if err != nil {
@@ -1621,6 +1621,9 @@ func TestGoroutineLeak(t *testing.T) {
 			err = db.Update(func(txn *Txn) error {
 				return txn.Set([]byte("key"), []byte("value"))
 			})
+			// calling unsubscribe will straight away stop the cb runner.
+			// need some to reach the subscriber
+			time.Sleep(1 * time.Millisecond)
 			unsubscribe()
 			require.NoError(t, err)
 			require.Equal(t, true, updated)

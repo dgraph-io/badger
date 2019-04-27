@@ -31,7 +31,7 @@ func TestSubscribe(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		var numUpdates int32
 		numUpdates = 0
-		unsubscribe, err := db.Subscribe([]byte("ke"), func(kv *pb.KV) {
+		unsubscribe, err := db.Subscribe([]byte("ke"), func(kv *pb.KVList) {
 			atomic.AddInt32(&numUpdates, 1)
 		})
 		if err != nil {
@@ -57,8 +57,10 @@ func TestSubscribe(t *testing.T) {
 func TestPublisherOrdering(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		order := []string{}
-		unsub, err := db.Subscribe([]byte("ke"), func(kv *pb.KV) {
-			order = append(order, string(kv.Value))
+		unsub, err := db.Subscribe([]byte("ke"), func(kvs *pb.KVList) {
+			for _, kv := range kvs.GetKv() {
+				order = append(order, string(kv.Value))
+			}
 		})
 		if err != nil {
 			require.NoError(t, err)
@@ -80,7 +82,7 @@ func TestBlockingPublish(t *testing.T) {
 		var once sync.Once
 		var numUpdates int32
 		numUpdates = 0
-		unsub, err := db.Subscribe([]byte("ke"), func(kv *pb.KV) {
+		unsub, err := db.Subscribe([]byte("ke"), func(kvs *pb.KVList) {
 			once.Do(func() {
 				time.Sleep(time.Second * 10)
 			})
