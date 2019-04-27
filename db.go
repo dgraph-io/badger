@@ -57,7 +57,7 @@ type closers struct {
 	publisher  *y.Closer
 }
 
-type callback func(kv *pb.KV)
+type callback func(kv *pb.KVList)
 
 // DB provides the various functions required to interact with Badger.
 // DB is thread-safe.
@@ -566,7 +566,7 @@ func (db *DB) shouldWriteValueToLSM(e Entry) bool {
 }
 
 func (db *DB) writeToLSM(b *request) error {
-	defer b.DecrRef()
+	defer b.DecrRef() // release after writing to LSM
 	if len(b.Ptrs) != len(b.Entries) {
 		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
@@ -1397,6 +1397,22 @@ func (db *DB) Subscribe(prefix []byte, cb callback) (func(), error) {
 	recvCh, id := db.pub.newSubscriber(prefix)
 	cbRunner := func(recvCh <-chan *pb.KVList, id int) {
 		defer c.Done()
+		slurp := func(batch *pb.KVList) {
+		loop:
+			for {
+				select {
+				case kvs, ok := <-recvCh:
+					if !ok {
+						// channel closed due to buffer overflow.
+						break loop
+					}
+					batch.Kv = append(batch.Kv, kvs.Kv...)
+				default:
+					break loop
+				}
+			}
+			cb(batch)
+		}
 	runner:
 		for {
 			select {
@@ -1405,23 +1421,25 @@ func (db *DB) Subscribe(prefix []byte, cb callback) (func(), error) {
 				db.pub.deleteSubscriber(id)
 				//stop listening and drain all the updates
 				break runner
-			case kvs := <-recvCh:
-				if recvCh != nil {
-					for _, kv := range kvs.GetKv() {
-						cb(kv)
-					}
-					continue runner
+			case batch, ok := <-recvCh:
+				if !ok {
+					// callback reciver is closed to buffer overflow, so wait for the user to
+					// close the callback runner
+					<-c.HasBeenClosed()
+					return
 				}
-				// reciver is closed here and no updates so wait for the closer signal
-				<-c.HasBeenClosed()
-				return
+				slurp(batch)
 			}
 		}
 		// drain all the pending updates
-		for kvs := range recvCh {
-			for _, kv := range kvs.GetKv() {
-				cb(kv)
+	drainer:
+		select {
+		case batch, ok := <-recvCh:
+			if !ok {
+				break drainer
 			}
+			slurp(batch)
+		default:
 		}
 	}
 	go cbRunner(recvCh, id)
