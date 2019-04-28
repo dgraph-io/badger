@@ -32,14 +32,14 @@ type publisher struct {
 	sync.Mutex
 	pubCh       chan []*request
 	subscribers map[uint64]subscriber
-	lastID      uint64
+	nextID      uint64
 }
 
 func newPublisher() *publisher {
 	return &publisher{
 		pubCh:       make(chan []*request, 10000),
 		subscribers: make(map[uint64]subscriber),
-		lastID:      0,
+		nextID:      0,
 	}
 }
 
@@ -107,13 +107,14 @@ func (p *publisher) newSubscriber(prefix []byte) (<-chan *pb.KVList, uint64) {
 	p.Lock()
 	defer p.Unlock()
 	ch := make(chan *pb.KVList, 1000)
-	// increment last ID
-	p.lastID++
-	p.subscribers[p.lastID] = subscriber{
+	id := p.nextID
+	// increment next ID
+	p.nextID++
+	p.subscribers[id] = subscriber{
 		prefix: prefix,
 		sendCh: ch,
 	}
-	return ch, p.lastID
+	return ch, id
 }
 
 // cleanSubscribers stops all the subscribers. Ideally, It should be called while closing DB

@@ -55,7 +55,7 @@ type closers struct {
 	memtable   *y.Closer
 	writes     *y.Closer
 	valueGC    *y.Closer
-	publisher  *y.Closer
+	pub        *y.Closer
 }
 
 type callback func(kv *pb.KVList)
@@ -325,8 +325,8 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.valueGC = y.NewCloser(1)
 	go db.vlog.waitOnGC(db.closers.valueGC)
 
-	db.closers.publisher = y.NewCloser(1)
-	go db.pub.listenForUpdates(db.closers.publisher)
+	db.closers.pub = y.NewCloser(1)
+	go db.pub.listenForUpdates(db.closers.pub)
 
 	valueDirLockGuard = nil
 	dirLockGuard = nil
@@ -347,7 +347,7 @@ func (db *DB) Close() (err error) {
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
 
-	db.closers.publisher.SignalAndWait()
+	db.closers.pub.SignalAndWait()
 
 	// Now close the value log.
 	if vlogErr := db.vlog.Close(); vlogErr != nil {
@@ -1392,7 +1392,7 @@ func (db *DB) DropPrefix(prefix []byte) error {
 // Subscribe can be used watch key changes for the given key prefix
 func (db *DB) Subscribe(prefix []byte, cb callback) (func(), error) {
 	if cb == nil {
-		return nil, errors.New("callback can't be nil")
+		return nil, ErrNilCallback
 	}
 	c := y.NewCloser(1)
 	recvCh, id := db.pub.newSubscriber(prefix)
