@@ -1421,6 +1421,11 @@ func (db *DB) Subscribe(prefix []byte, cb callback) (func(), error) {
 				// close the subscriber to avoid further update
 				db.pub.deleteSubscriber(id)
 				//stop listening and drain all the updates
+				batch, ok := <-recvCh
+				if !ok {
+					break runner
+				}
+				slurp(batch)
 				break runner
 			case batch, ok := <-recvCh:
 				if !ok {
@@ -1431,16 +1436,6 @@ func (db *DB) Subscribe(prefix []byte, cb callback) (func(), error) {
 				}
 				slurp(batch)
 			}
-		}
-		// drain all the pending updates
-	drainer:
-		select {
-		case batch, ok := <-recvCh:
-			if !ok {
-				break drainer
-			}
-			slurp(batch)
-		default:
 		}
 	}
 	go cbRunner(recvCh, id)
