@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"encoding/binary"
 	"testing"
 	"time"
 
@@ -24,24 +25,42 @@ import (
 )
 
 func TestGetMergeOperator(t *testing.T) {
-	// Merge function to merge two byte slices
-	add := func(originalValue, newValue []byte) []byte {
-		// We append original value to new value because the values
-		// are retrieved in reverse order (Last insertion will be the first value)
-		return append(newValue, originalValue...)
-	}
-	t.Run("get should return error", func(t *testing.T) {
+	t.Run("Get before Add", func(t *testing.T) {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-			m := db.GetMergeOperator([]byte("foo"), add, 200*time.Millisecond)
+			m := db.GetMergeOperator([]byte("merge"), add, 200*time.Millisecond)
 			defer m.Stop()
 
-			value, err := m.Get()
-			// MergeOperator should return key not found error
-			require.Error(t, err)
-			require.Nil(t, value)
+			val, err := m.Get()
+			require.Equal(t, ErrKeyNotFound, err)
+			require.Nil(t, val)
 		})
 	})
-	t.Run("add and get", func(t *testing.T) {
+	t.Run("Add and Get", func(t *testing.T) {
+		key := []byte("merge")
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			m := db.GetMergeOperator(key, add, 200*time.Millisecond)
+			defer m.Stop()
+
+			err := m.Add(uint64ToBytes(1))
+			require.NoError(t, err)
+			m.Add(uint64ToBytes(2))
+			require.NoError(t, err)
+			m.Add(uint64ToBytes(3))
+			require.NoError(t, err)
+
+			res, err := m.Get()
+			require.NoError(t, err)
+			require.Equal(t, uint64(6), bytesToUint64(res))
+		})
+
+	})
+	t.Run("Add and Get slices", func(t *testing.T) {
+		// Merge function to merge two byte slices
+		add := func(originalValue, newValue []byte) []byte {
+			// We append original value to new value because the values
+			// are retrieved in reverse order (Last insertion will be the first value)
+			return append(newValue, originalValue...)
+		}
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator([]byte("fooprefix"), add, 2*time.Millisecond)
 			defer m.Stop()
@@ -55,4 +74,56 @@ func TestGetMergeOperator(t *testing.T) {
 			require.Equal(t, "123", string(value))
 		})
 	})
+	t.Run("Get Before Compact", func(t *testing.T) {
+		key := []byte("merge")
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			m := db.GetMergeOperator(key, add, 500*time.Millisecond)
+			defer m.Stop()
+
+			err := m.Add(uint64ToBytes(1))
+			require.NoError(t, err)
+			m.Add(uint64ToBytes(2))
+			require.NoError(t, err)
+			m.Add(uint64ToBytes(3))
+			require.NoError(t, err)
+
+			res, err := m.Get()
+			require.NoError(t, err)
+			require.Equal(t, uint64(6), bytesToUint64(res))
+		})
+	})
+
+	t.Run("Get after Stop", func(t *testing.T) {
+		key := []byte("merge")
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			m := db.GetMergeOperator(key, add, 1*time.Second)
+
+			err := m.Add(uint64ToBytes(1))
+			require.NoError(t, err)
+			m.Add(uint64ToBytes(2))
+			require.NoError(t, err)
+			m.Add(uint64ToBytes(3))
+			require.NoError(t, err)
+
+			m.Stop()
+			res, err := m.Get()
+			require.NoError(t, err)
+			require.Equal(t, uint64(6), bytesToUint64(res))
+		})
+	})
+}
+
+func uint64ToBytes(i uint64) []byte {
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], i)
+	return buf[:]
+}
+
+func bytesToUint64(b []byte) uint64 {
+	return binary.BigEndian.Uint64(b)
+}
+
+// Merge function to add two uint64 numbers
+func add(existing, new []byte) []byte {
+	return uint64ToBytes(bytesToUint64(existing) + bytesToUint64(new))
 }
