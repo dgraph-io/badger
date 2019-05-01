@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"expvar"
@@ -567,7 +568,6 @@ func (db *DB) shouldWriteValueToLSM(e Entry) bool {
 }
 
 func (db *DB) writeToLSM(b *request) error {
-	defer b.DecrRef() // release after writing to LSM
 	if len(b.Ptrs) != len(b.Entries) {
 		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
@@ -1390,56 +1390,48 @@ func (db *DB) DropPrefix(prefix []byte) error {
 }
 
 // Subscribe can be used watch key changes for the given key prefix
-func (db *DB) Subscribe(prefix []byte, cb callback) (func(), error) {
+func (db *DB) Subscribe(ctx context.Context, cb callback, prefix []byte, prefixes ...[]byte) error {
 	if cb == nil {
-		return nil, ErrNilCallback
+		return ErrNilCallback
 	}
+	prefixes = append(prefixes, prefix)
 	c := y.NewCloser(1)
-	recvCh, id := db.pub.newSubscriber(prefix)
-	cbRunner := func(recvCh <-chan *pb.KVList, id uint64) {
-		defer c.Done()
-		slurp := func(batch *pb.KVList) {
-		loop:
-			for {
-				select {
-				case kvs, ok := <-recvCh:
-					if !ok {
-						// channel closed due to buffer overflow.
-						break loop
-					}
-					batch.Kv = append(batch.Kv, kvs.Kv...)
-				default:
-					break loop
-				}
+	recvCh, id := db.pub.newSubscriber(c, prefixes...)
+	slurp := func(batch *pb.KVList) {
+		defer func() {
+			if len(batch.GetKv()) > 0 {
+				cb(batch)
 			}
-			cb(batch)
+		}()
+		for {
+			select {
+			case kvs := <-recvCh:
+				batch.Kv = append(batch.Kv, kvs.Kv...)
+			default:
+				return
+			}
 		}
-	runner:
+	}
+	cbRunner := func(recvCh <-chan *pb.KVList, id uint64) {
 		for {
 			select {
 			case <-c.HasBeenClosed():
-				// close the subscriber to avoid further update
+				slurp(new(pb.KVList))
+				//drain if any pending updates
+				c.Done()
+				// no need to delete here. closer will be called only while
+				// closing DB. subscriber will be delete by cleanSubscribers
+				return
+			case <-ctx.Done():
+				c.Done()
 				db.pub.deleteSubscriber(id)
-				//stop listening and drain all the updates
-				batch, ok := <-recvCh
-				if !ok {
-					break runner
-				}
-				slurp(batch)
-				break runner
-			case batch, ok := <-recvCh:
-				if !ok {
-					// callback reciver is closed to buffer overflow, so wait for the user to
-					// close the callback runner
-					<-c.HasBeenClosed()
-					return
-				}
+				// delete the subscriber to avoid further updates
+				return
+			case batch := <-recvCh:
 				slurp(batch)
 			}
 		}
 	}
-	go cbRunner(recvCh, id)
-	return func() {
-		c.SignalAndWait()
-	}, nil
+	cbRunner(recvCh, id)
+	return nil
 }

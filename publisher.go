@@ -24,20 +24,21 @@ import (
 )
 
 type subscriber struct {
-	prefix []byte
-	sendCh chan<- *pb.KVList
+	prefixes  [][]byte
+	sendCh    chan<- *pb.KVList
+	subCloser *y.Closer
 }
 
 type publisher struct {
 	sync.Mutex
-	pubCh       chan []*request
+	pubCh       chan requests
 	subscribers map[uint64]subscriber
 	nextID      uint64
 }
 
 func newPublisher() *publisher {
 	return &publisher{
-		pubCh:       make(chan []*request, 10000),
+		pubCh:       make(chan requests, 10000),
 		subscribers: make(map[uint64]subscriber),
 		nextID:      0,
 	}
@@ -45,65 +46,56 @@ func newPublisher() *publisher {
 
 func (p *publisher) listenForUpdates(c *y.Closer) {
 	defer func() {
-		c.Done()
 		p.cleanSubscribers()
+		c.Done()
 	}()
-
-listen:
 	for {
-		reqs := []*request{}
 		select {
 		case <-c.HasBeenClosed():
-			break listen
-		case r := <-p.pubCh:
-			reqs = append(reqs, r...)
+			return
+		case reqs := <-p.pubCh:
+			p.publishUpdates(reqs)
 		}
-	drainer:
-		for {
-			select {
-			case r := <-p.pubCh:
-				reqs = append(reqs, r...)
-			default:
-				break drainer
-			}
-		}
-		p.publishUpdates(reqs)
 	}
 }
 
-func (p *publisher) publishUpdates(reqs []*request) {
+func (p *publisher) publishUpdates(reqs requests) {
 	p.Lock()
-	defer p.Unlock()
-	for id, s := range p.subscribers {
+	defer func() {
+		p.Unlock()
+
+		// release all the request
+		reqs.DecrRef()
+	}()
+	for _, s := range p.subscribers {
 		kvs := &pb.KVList{}
-		for _, req := range reqs {
-			for _, e := range req.Entries {
-				if bytes.HasPrefix(e.Key, s.prefix) {
-					k := y.SafeCopy(nil, e.Key)
-					kv := &pb.KV{
-						Key:       y.ParseKey(k),
-						Value:     y.SafeCopy(nil, e.Value),
-						Meta:      []byte{e.UserMeta},
-						ExpiresAt: e.ExpiresAt,
-						Version:   y.ParseTs(k),
+		for _, prefix := range s.prefixes {
+			for _, req := range reqs {
+				for _, e := range req.Entries {
+					if bytes.HasPrefix(e.Key, prefix) {
+						k := y.SafeCopy(nil, e.Key)
+						kv := &pb.KV{
+							Key:       y.ParseKey(k),
+							Value:     y.SafeCopy(nil, e.Value),
+							Meta:      []byte{e.UserMeta},
+							ExpiresAt: e.ExpiresAt,
+							Version:   y.ParseTs(k),
+						}
+						kvs.Kv = append(kvs.Kv, kv)
 					}
-					kvs.Kv = append(kvs.Kv, kv)
 				}
 			}
-			req.DecrRef() // release the request
 		}
 		if len(kvs.GetKv()) > 0 {
 			select {
 			case s.sendCh <- kvs:
 			default:
-				close(s.sendCh)
-				delete(p.subscribers, id)
 			}
 		}
 	}
 }
 
-func (p *publisher) newSubscriber(prefix []byte) (<-chan *pb.KVList, uint64) {
+func (p *publisher) newSubscriber(c *y.Closer, prefixes ...[]byte) (<-chan *pb.KVList, uint64) {
 	p.Lock()
 	defer p.Unlock()
 	ch := make(chan *pb.KVList, 1000)
@@ -111,8 +103,9 @@ func (p *publisher) newSubscriber(prefix []byte) (<-chan *pb.KVList, uint64) {
 	// increment next ID
 	p.nextID++
 	p.subscribers[id] = subscriber{
-		prefix: prefix,
-		sendCh: ch,
+		prefixes:  prefixes,
+		sendCh:    ch,
+		subCloser: c,
 	}
 	return ch, id
 }
@@ -122,22 +115,24 @@ func (p *publisher) cleanSubscribers() {
 	p.Lock()
 	defer p.Unlock()
 	for id, s := range p.subscribers {
-		close(s.sendCh)
 		delete(p.subscribers, id)
+		s.subCloser.SignalAndWait()
 	}
 }
 
 func (p *publisher) deleteSubscriber(id uint64) {
 	p.Lock()
 	defer p.Unlock()
-	subscriber, ok := p.subscribers[id]
+	_, ok := p.subscribers[id]
 	if !ok {
 		return
 	}
-	close(subscriber.sendCh)
 	delete(p.subscribers, id)
 }
 
 func (p *publisher) sendUpdates(reqs []*request) {
-	p.pubCh <- reqs
+	select {
+	case p.pubCh <- reqs:
+	default:
+	}
 }

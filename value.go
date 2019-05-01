@@ -903,7 +903,16 @@ func (req *request) DecrRef() {
 func (req *request) Wait() error {
 	req.Wg.Wait()
 	err := req.Err
+	req.DecrRef() // deref after writing to db
 	return err
+}
+
+type requests []*request
+
+func (reqs requests) DecrRef() {
+	for _, req := range reqs {
+		req.DecrRef()
+	}
 }
 
 // sync function syncs content of current value log file to disk.
