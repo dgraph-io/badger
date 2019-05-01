@@ -144,7 +144,7 @@ func (op *MergeOperator) runCompactions(dur time.Duration) {
 // routine into the values that were recorded by previous invocations to Add().
 func (op *MergeOperator) Add(val []byte) error {
 	return op.db.Update(func(txn *Txn) error {
-		return txn.Set(op.key, val)
+		return txn.setMergeEntry(op.key, val)
 	})
 }
 

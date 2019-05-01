@@ -18,6 +18,8 @@ package badger
 
 import (
 	"encoding/binary"
+	"io/ioutil"
+	"os"
 	"testing"
 	"time"
 
@@ -111,6 +113,50 @@ func TestGetMergeOperator(t *testing.T) {
 			require.Equal(t, uint64(6), bytesToUint64(res))
 		})
 	})
+	t.Run("Old keys should be removed after compaction", func(t *testing.T) {
+		dir, err := ioutil.TempDir(".", "badger-test")
+		require.NoError(t, err)
+		defer os.RemoveAll(dir)
+
+		opts := getTestOptions(dir)
+		db, err := Open(opts)
+		require.NoError(t, err)
+		mergeKey := []byte("foo")
+		m := db.GetMergeOperator(mergeKey, add, 2*time.Second)
+
+		count := 5000 // This will cause compaction from L0->L1
+		for i := 0; i < count; i++ {
+			require.NoError(t, m.Add(uint64ToBytes(1)))
+		}
+		// Wait for merge compaction to happen.
+		// Merge compaction will set the latest entry with discardEarlierVersions flag
+		time.Sleep(2 * time.Second)
+
+		value, err := m.Get()
+		require.Nil(t, err)
+		require.Equal(t, uint64(count), bytesToUint64(value))
+		m.Stop()
+
+		// Force compaction by closing DB. The compaction should discard all the old merged values
+		require.Nil(t, db.Close())
+		db, err = Open(opts)
+		require.NoError(t, err)
+		defer db.Close()
+
+		keyCount := 0
+		txn := db.NewTransaction(false)
+		defer txn.Discard()
+		iopt := DefaultIteratorOptions
+		iopt.AllVersions = true
+		it := txn.NewKeyIterator(mergeKey, iopt)
+		defer it.Close()
+		for it.Rewind(); it.Valid(); it.Next() {
+			keyCount++
+		}
+		// We should have only one key in badger. All the other keys should've been removed by compaction
+		require.Equal(t, 1, keyCount)
+	})
+
 }
 
 func uint64ToBytes(i uint64) []byte {
