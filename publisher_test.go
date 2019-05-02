@@ -45,7 +45,7 @@ func TestSubscribe(t *testing.T) {
 				atomic.AddInt32(&numUpdates, int32(len(kvs.GetKv())))
 			}, []byte("ke"))
 			if err != nil {
-				require.NoError(t, err)
+				require.Equal(t, err.Error(), context.Canceled.Error())
 			}
 		}()
 		db.Update(func(txn *Txn) error {
@@ -77,7 +77,7 @@ func TestPublisherOrdering(t *testing.T) {
 				}
 			}, []byte("ke"))
 			if err != nil {
-				require.NoError(t, err)
+				require.Equal(t, err.Error(), context.Canceled.Error())
 			}
 		}()
 		for i := 0; i < 5; i++ {
@@ -111,7 +111,7 @@ func TestPublisherBatching(t *testing.T) {
 				require.Equal(t, 99, len(kvs.GetKv()))
 			}, []byte("ke"))
 			if err != nil {
-				require.NoError(t, err)
+				require.Equal(t, err.Error(), context.Canceled.Error())
 			}
 		}()
 
@@ -123,6 +123,35 @@ func TestPublisherBatching(t *testing.T) {
 			finish := time.Now()
 			require.Less(t, finish.Sub(start).Seconds(), float64(1))
 		}
+		time.Sleep(time.Second * 10)
 		cancel()
+	})
+}
+
+func TestMutiplePrefix(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		go func() {
+			err := db.Subscribe(context.Background(), func(kvs *pb.KVList) {
+				for _, kv := range kvs.GetKv() {
+					if string(kv.Key) == "key" {
+						require.Equal(t, string(kv.Value), "value")
+					} else {
+						require.Equal(t, string(kv.Value), "badger")
+					}
+				}
+			}, []byte("ke"), []byte("hel"))
+			if err != nil {
+				require.Equal(t, err.Error(), context.Canceled.Error())
+			}
+		}()
+
+		db.Update(func(txn *Txn) error {
+			return txn.Set([]byte("key"), []byte("value"))
+		})
+		db.Update(func(txn *Txn) error {
+			return txn.Set([]byte("hello"), []byte("badger"))
+		})
+
+		time.Sleep(time.Millisecond * 1)
 	})
 }

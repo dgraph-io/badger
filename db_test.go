@@ -1619,7 +1619,7 @@ func TestGoroutineLeak(t *testing.T) {
 					updated = true
 				}, []byte("key"))
 				if err != nil {
-					require.NoError(t, err)
+					require.Equal(t, err.Error(), context.Canceled.Error())
 				}
 			}()
 			err := db.Update(func(txn *Txn) error {

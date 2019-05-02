@@ -1412,7 +1412,7 @@ func (db *DB) Subscribe(ctx context.Context, cb callback, prefix []byte, prefixe
 			}
 		}
 	}
-	cbRunner := func(recvCh <-chan *pb.KVList, id uint64) {
+	cbRunner := func(recvCh <-chan *pb.KVList, id uint64) error {
 		for {
 			select {
 			case <-c.HasBeenClosed():
@@ -1421,17 +1421,16 @@ func (db *DB) Subscribe(ctx context.Context, cb callback, prefix []byte, prefixe
 				c.Done()
 				// no need to delete here. closer will be called only while
 				// closing DB. subscriber will be delete by cleanSubscribers
-				return
+				return nil
 			case <-ctx.Done():
 				c.Done()
 				db.pub.deleteSubscriber(id)
 				// delete the subscriber to avoid further updates
-				return
+				return ctx.Err()
 			case batch := <-recvCh:
 				slurp(batch)
 			}
 		}
 	}
-	cbRunner(recvCh, id)
-	return nil
+	return cbRunner(recvCh, id)
 }
