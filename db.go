@@ -446,7 +446,7 @@ const (
 // Sync syncs database content to disk. This function provides
 // more control to user to sync data whenever required.
 func (db *DB) Sync() error {
-	return db.vlog.sync()
+	return db.vlog.sync(math.MaxUint32)
 }
 
 // When you create or delete a file, you have to ensure the directory entry for the file is synced
@@ -787,7 +787,7 @@ func (db *DB) ensureRoomForWrite() error {
 	case db.flushChan <- flushTask{mt: db.mt, vptr: db.vhead}:
 		db.elog.Printf("Flushing value log to disk if async mode.")
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
-		err = db.vlog.sync()
+		err = db.vlog.sync(db.vhead.Fid)
 		if err != nil {
 			return err
 		}

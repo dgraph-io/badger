@@ -18,6 +18,8 @@ package badger
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
 	"testing"
 	"time"
 
@@ -66,4 +68,60 @@ func TestWriteBatch(t *testing.T) {
 		})
 		require.NoError(t, err)
 	})
+}
+
+func TestWriteBatchCompaction(t *testing.T) {
+	dir, err := ioutil.TempDir(".", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opts := DefaultOptions
+	opts.ValueDir = dir
+	opts.Dir = dir
+
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	wb := db.NewWriteBatch()
+	entries := 10000
+	for i := 0; i < entries; i++ {
+		require.Nil(t, wb.Set([]byte(fmt.Sprintf("foo%d", i)), []byte("bar"), 0))
+	}
+	require.Nil(t, wb.Flush())
+
+	wb = db.NewWriteBatch()
+	// Delete 50% of the entries
+	for i := 0; i < entries/2; i++ {
+		require.Nil(t, wb.Delete([]byte(fmt.Sprintf("foo%d", i))))
+	}
+	require.Nil(t, wb.Flush())
+
+	// It is necessary that we call db.Update(..) before compaction so that the db.orc.readMark
+	// value is incremented. The transactions in WriteBatch call do not increment the
+	// db.orc.readMark value and hence compaction wouldn't discard any entries added by write batch
+	// if we do not increment the db.orc.readMark value
+	require.Nil(t, db.Update(func(txn *Txn) error {
+		txn.Set([]byte("key1"), []byte("val1"))
+		return nil
+	}))
+
+	// Close DB to force compaction
+	require.Nil(t, db.Close())
+
+	db, err = Open(opts)
+	require.NoError(t, err)
+	defer db.Close()
+
+	iopt := DefaultIteratorOptions
+	iopt.AllVersions = true
+	txn := db.NewTransaction(false)
+	defer txn.Discard()
+	it := txn.NewIterator(iopt)
+	defer it.Close()
+	countAfterCompaction := 0
+	for it.Rewind(); it.Valid(); it.Next() {
+		countAfterCompaction++
+	}
+	// We have deleted 50% of the keys
+	require.Less(t, countAfterCompaction, entries+entries/2)
 }
