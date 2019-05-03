@@ -1129,16 +1129,18 @@ func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
 	return seq, err
 }
 
-// Tables gets the TableInfo objects from the level controller.
-func (db *DB) Tables() []TableInfo {
-	return db.lc.getTableInfo()
+// Tables gets the TableInfo objects from the level controller. If withKeysCount
+// is true, TableInfo objects also contain counts of keys for the tables.
+func (db *DB) Tables(withKeysCount bool) []TableInfo {
+	return db.lc.getTableInfo(withKeysCount)
 }
 
 // KeySplits can be used to get rough key ranges to divide up iteration over
 // the DB.
 func (db *DB) KeySplits(prefix []byte) []string {
 	var splits []string
-	for _, ti := range db.Tables() {
+	// We just want table ranges here and not keys count.
+	for _, ti := range db.Tables(false) {
 		// We don't use ti.Left, because that has a tendency to store !badger
 		// keys.
 		if bytes.HasPrefix(ti.Right, prefix) {

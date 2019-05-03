@@ -223,7 +223,8 @@ func dur(src, dst time.Time) string {
 }
 
 func tableInfo(dir, valueDir string, db *badger.DB) {
-	tables := db.Tables()
+	// we want all tables with keys count here.
+	tables := db.Tables(true)
 	fmt.Println()
 	fmt.Println("SSTable [Li, Id, Total Keys including internal keys] [Left Key, Version -> Right Key, Version]")
 	for _, t := range tables {

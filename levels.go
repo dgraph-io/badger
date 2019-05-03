@@ -952,14 +952,17 @@ type TableInfo struct {
 	KeyCount uint64 // Number of keys in the table
 }
 
-func (s *levelsController) getTableInfo() (result []TableInfo) {
+func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo) {
 	for _, l := range s.levels {
 		for _, t := range l.tables {
-			it := t.NewIterator(false)
 			var count uint64
-			for it.Rewind(); it.Valid(); it.Next() {
-				count++
+			if withKeysCount {
+				it := t.NewIterator(false)
+				for it.Rewind(); it.Valid(); it.Next() {
+					count++
+				}
 			}
+
 			info := TableInfo{
 				ID:       t.ID(),
 				Level:    l.level,
