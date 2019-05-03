@@ -18,8 +18,10 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
@@ -30,6 +32,7 @@ import (
 
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 	"github.com/spf13/cobra"
 )
@@ -64,6 +67,7 @@ var numGoroutines, numAccounts, numPrevious int
 var duration string
 var stopAll int32
 var mmap bool
+var checkStream bool
 
 const keyPrefix = "account:"
 
@@ -80,6 +84,10 @@ func init() {
 		&numGoroutines, "conc", "c", 16, "Number of concurrent transactions to run.")
 	bankTest.Flags().StringVarP(&duration, "duration", "d", "3m", "How long to run the test.")
 	bankTest.Flags().BoolVarP(&mmap, "mmap", "m", false, "If true, mmap LSM tree. Default is RAM.")
+	bankTest.Flags().BoolVarP(&checkStream, "check_stream", "s", false,
+		"If true, the test will send transactions to another badger instance via the stream "+
+			"interface in order to verify that all data is streamed correctly.")
+
 	bankDisect.Flags().IntVarP(&numPrevious, "previous", "p", 12,
 		"Starting from the violation txn, how many previous versions to retrieve.")
 }
@@ -338,6 +346,24 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
+	var streamDb *badger.DB
+	if checkStream {
+		dir, err := ioutil.TempDir("", "bank_stream")
+		y.Check(err)
+
+		streamOpts := badger.DefaultOptions
+		streamOpts.Dir = dir
+		streamOpts.ValueDir = dir
+		streamOpts.SyncWrites = false
+		log.Printf("Opening stream DB with options: %+v\n", streamOpts)
+
+		streamDb, err = badger.Open(streamOpts)
+		if err != nil {
+			return err
+		}
+		defer streamDb.Close()
+	}
+
 	wb := db.NewWriteBatch()
 	for i := 0; i < numAccounts; i++ {
 		y.Check(wb.Set(key(i), toSlice(initialBal), 0))
@@ -408,6 +434,51 @@ func runTest(cmd *cobra.Command, args []string) error {
 				} else {
 					atomic.AddUint64(&errors, 1)
 				}
+			}
+		}()
+	}
+
+	if checkStream {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+
+			for range ticker.C {
+				log.Printf("Received stream\n")
+
+				// Do not proceed.
+				if atomic.LoadInt32(&stopAll) > 0 || time.Now().After(endTs) {
+					return
+				}
+
+				// Clean up the database receiving the stream.
+				err = streamDb.DropAll()
+				y.Check(err)
+
+				batch := streamDb.NewWriteBatch()
+
+				stream := db.NewStream()
+				stream.Send = func(list *pb.KVList) error {
+					for _, kv := range list.Kv {
+						if err := batch.Set(kv.Key, kv.Value, 0); err != nil {
+							return err
+						}
+					}
+					return nil
+				}
+				y.Check(stream.Orchestrate(context.Background()))
+				y.Check(batch.Flush())
+
+				y.Check(streamDb.View(func(txn *badger.Txn) error {
+					_, err := seekTotal(txn)
+					if err != nil {
+						log.Printf("Error while calculating total: %v", err)
+					}
+					return nil
+				}))
 			}
 		}()
 	}
