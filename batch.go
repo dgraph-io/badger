@@ -138,10 +138,10 @@ func (wb *WriteBatch) commit() error {
 	if wb.err != nil {
 		return wb.err
 	}
-	wb.txn.CommitWith(wb.callback)
 	if err := wb.throttle.Do(); err != nil {
 		return err
 	}
+	wb.txn.CommitWith(wb.callback)
 	wb.txn = wb.db.newTransaction(true, true)
 	wb.txn.readTs = 0 // We're not reading anything.
 	return wb.err
