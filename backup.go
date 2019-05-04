@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
-	"sync"
 
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
@@ -137,31 +136,11 @@ func writeTo(entry *pb.KV, w io.Writer) error {
 //
 // DB.Load() should be called on a database that is not running any other
 // concurrent transactions while it is running.
-func (db *DB) Load(r io.Reader) error {
+func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 	br := bufio.NewReaderSize(r, 16<<10)
 	unmarshalBuf := make([]byte, 1<<10)
+	throttle := y.NewThrottle(maxPendingWrites)
 	var entries []*Entry
-	var wg sync.WaitGroup
-	errChan := make(chan error, 1)
-
-	// func to check for pending error before sending off a batch for writing
-	batchSetAsyncIfNoErr := func(entries []*Entry) error {
-		select {
-		case err := <-errChan:
-			return err
-		default:
-			wg.Add(1)
-			return db.batchSetAsync(entries, func(err error) {
-				defer wg.Done()
-				if err != nil {
-					select {
-					case errChan <- err:
-					default:
-					}
-				}
-			})
-		}
-	}
 
 	for {
 		var sz uint64
@@ -201,26 +180,30 @@ func (db *DB) Load(r io.Reader) error {
 		}
 
 		if len(entries) == 1000 {
-			if err := batchSetAsyncIfNoErr(entries); err != nil {
+			if err := throttle.Do(); err != nil {
 				return err
 			}
+			db.batchSetAsync(entries, func(err error) {
+				throttle.Done(err)
+			})
+
 			entries = make([]*Entry, 0, 1000)
 		}
 	}
 
 	if len(entries) > 0 {
-		if err := batchSetAsyncIfNoErr(entries); err != nil {
+		if err := throttle.Do(); err != nil {
 			return err
 		}
+		db.batchSetAsync(entries, func(err error) {
+			throttle.Done(err)
+		})
 	}
-	wg.Wait()
 
-	select {
-	case err := <-errChan:
+	if err := throttle.Finish(); err != nil {
 		return err
-	default:
-		// Mark all versions done up until nextTxnTs.
-		db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
-		return nil
 	}
+
+	db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
+	return nil
 }
