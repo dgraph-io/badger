@@ -38,16 +38,9 @@ type WriteBatch struct {
 // creating and committing transactions. Due to the nature of SSI guaratees provided by Badger,
 // blind writes can never encounter transaction conflicts (ErrConflict).
 func (db *DB) NewWriteBatch() *WriteBatch {
-	txn := db.newTransaction(true, true)
-	// If we let it stay at zero, compactions would not allow older key versions to be deleted,
-	// because the read timestamps of pending txns, would be zero. Therefore, we set it to the
-	// maximum read timestamp that's done. This allows compactions to discard key versions below
-	// this read timestamp, while also not blocking on pending txns to finish before starting this
-	// one.
-	txn.readTs = db.orc.readMark.DoneUntil()
 	return &WriteBatch{
 		db:       db,
-		txn:      txn,
+		txn:      db.newTransaction(true, true),
 		throttle: y.NewThrottle(16),
 	}
 }
@@ -150,8 +143,7 @@ func (wb *WriteBatch) commit() error {
 		return err
 	}
 	wb.txn = wb.db.newTransaction(true, true)
-	// See comment about readTs in NewWriteBatch.
-	wb.txn.readTs = wb.db.orc.readMark.DoneUntil()
+	wb.txn.readTs = 0 // We're not reading anything.
 	return wb.err
 }
 
