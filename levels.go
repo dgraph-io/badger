@@ -954,6 +954,7 @@ type TableInfo struct {
 
 func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo) {
 	for _, l := range s.levels {
+		l.RLock()
 		for _, t := range l.tables {
 			var count uint64
 			if withKeysCount {
@@ -972,6 +973,7 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 			}
 			result = append(result, info)
 		}
+		l.RUnlock()
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Level != result[j].Level {
