@@ -89,6 +89,7 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 }
 
 func (sw *StreamWriter) Done() error {
+	// TODO: Set the value log head to math.MaxUint32 stream here.
 	for _, writer := range sw.writers {
 		if err := writer.Done(); err != nil {
 			return err

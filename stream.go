@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dgraph-io/badger/pb"
@@ -66,10 +67,11 @@ type Stream struct {
 	// single goroutine, i.e. logic within Send method can expect single threaded execution.
 	Send func(*pb.KVList) error
 
-	readTs  uint64
-	db      *DB
-	rangeCh chan keyRange
-	kvChan  chan *pb.KVList
+	readTs       uint64
+	db           *DB
+	rangeCh      chan keyRange
+	kvChan       chan *pb.KVList
+	nextStreamId uint32
 }
 
 // ToList is a default implementation of KeyToList. It picks up all valid versions of the key,
@@ -143,6 +145,9 @@ func (st *Stream) produceKVs(ctx context.Context) error {
 		itr := txn.NewIterator(iterOpts)
 		defer itr.Close()
 
+		// This unique stream id is used to identify all the keys from this iteration.
+		streamId := atomic.AddUint32(&st.nextStreamId, 1)
+
 		outList := new(pb.KVList)
 		var prevKey []byte
 		for itr.Seek(kr.left); itr.Valid(); {
@@ -174,6 +179,9 @@ func (st *Stream) produceKVs(ctx context.Context) error {
 			outList.Kv = append(outList.Kv, list.Kv...)
 			size += list.Size()
 			if size >= pageSize {
+				for _, kv := range outList.Kv {
+					kv.StreamId = streamId
+				}
 				select {
 				case st.kvChan <- outList:
 				case <-ctx.Done():
@@ -184,6 +192,10 @@ func (st *Stream) produceKVs(ctx context.Context) error {
 			}
 		}
 		if len(outList.Kv) > 0 {
+			for _, kv := range outList.Kv {
+				kv.StreamId = streamId
+			}
+			// TODO: Think of a way to indicate that a stream is over.
 			select {
 			case st.kvChan <- outList:
 			case <-ctx.Done():
