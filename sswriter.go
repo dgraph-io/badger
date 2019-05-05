@@ -13,12 +13,91 @@ import (
 type StreamWriter struct {
 	db       *DB
 	throttle *y.Throttle
+	writers  map[uint32]*sortedWriter
 }
 
-func (sw *StreamWriter) Write(kvs *pb.KVList) {
+func (db *DB) NewStreamWriter(maxPending int) *StreamWriter {
+	return &StreamWriter{
+		db:       db,
+		throttle: y.NewThrottle(maxPending),
+		writers:  make(map[uint32]*sortedWriter),
+	}
 }
 
-type SortedWriter struct {
+func (sw *StreamWriter) Write(kvs *pb.KVList) error {
+	var entries []*Entry
+	for _, kv := range kvs.Kv {
+		var meta, userMeta byte
+		if len(kv.Meta) > 0 {
+			meta = kv.Meta[0]
+		}
+		if len(kv.UserMeta) > 0 {
+			userMeta = kv.UserMeta[0]
+		}
+		e := &Entry{
+			Key:       kv.Key,
+			Value:     kv.Value,
+			UserMeta:  userMeta,
+			ExpiresAt: kv.ExpiresAt,
+			meta:      meta,
+		}
+		// If the value can be colocated with the key in LSM tree, we can skip
+		// writing the value to value log.
+		e.skipVlog = sw.db.shouldWriteValueToLSM(*e)
+		entries = append(entries, e)
+	}
+	req := &request{
+		Entries: entries,
+	}
+	y.AssertTrue(len(kvs.Kv) == len(req.Entries))
+	if err := sw.db.vlog.write([]*request{req}); err != nil {
+		return err
+	}
+
+	for i, kv := range kvs.Kv {
+		e := req.Entries[i]
+		vptr := req.Ptrs[i]
+
+		writer, ok := sw.writers[kv.StreamId]
+		if !ok {
+			writer = sw.newWriter()
+			sw.writers[kv.StreamId] = writer
+		}
+
+		var vs y.ValueStruct
+		if e.skipVlog {
+			vs = y.ValueStruct{
+				Value:     e.Value,
+				Meta:      e.meta,
+				UserMeta:  e.UserMeta,
+				ExpiresAt: e.ExpiresAt,
+			}
+		} else {
+			vbuf := make([]byte, vptrSize)
+			vs = y.ValueStruct{
+				Value:     vptr.Encode(vbuf),
+				Meta:      e.meta | bitValuePointer,
+				UserMeta:  e.UserMeta,
+				ExpiresAt: e.ExpiresAt,
+			}
+		}
+		if err := writer.Add(e.Key, vs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (sw *StreamWriter) Done() error {
+	for _, writer := range sw.writers {
+		if err := writer.Done(); err != nil {
+			return err
+		}
+	}
+	return sw.throttle.Finish()
+}
+
+type sortedWriter struct {
 	db       *DB
 	throttle *y.Throttle
 
@@ -26,8 +105,8 @@ type SortedWriter struct {
 	lastKey []byte
 }
 
-func (sw *StreamWriter) NewSSWriter() *SortedWriter {
-	return &SortedWriter{
+func (sw *StreamWriter) newWriter() *sortedWriter {
+	return &sortedWriter{
 		db:       sw.db,
 		throttle: sw.throttle,
 		builder:  table.NewTableBuilder(),
@@ -36,20 +115,14 @@ func (sw *StreamWriter) NewSSWriter() *SortedWriter {
 
 var ErrUnsortedKey = errors.New("Keys not in sorted order")
 
-func (w *SortedWriter) Add(e *Entry) error {
-	if bytes.Compare(e.Key, w.lastKey) < 0 {
+func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
+	if bytes.Compare(key, w.lastKey) < 0 {
 		return ErrUnsortedKey
 	}
-	sameKey := y.SameKey(e.Key, w.lastKey)
-	w.lastKey = y.SafeCopy(w.lastKey, e.Key)
+	sameKey := y.SameKey(key, w.lastKey)
+	w.lastKey = y.SafeCopy(w.lastKey, key)
 
-	v := y.ValueStruct{
-		Value:     e.Value,
-		Meta:      e.meta,
-		UserMeta:  e.UserMeta,
-		ExpiresAt: e.ExpiresAt,
-	}
-	if err := w.builder.Add(e.Key, v); err != nil {
+	if err := w.builder.Add(key, vs); err != nil {
 		return err
 	}
 	// Same keys should go into the same SSTable.
@@ -59,7 +132,7 @@ func (w *SortedWriter) Add(e *Entry) error {
 	return nil
 }
 
-func (w *SortedWriter) send() error {
+func (w *sortedWriter) send() error {
 	data := w.builder.Finish()
 	if err := w.throttle.Do(); err != nil {
 		return err
@@ -72,14 +145,14 @@ func (w *SortedWriter) send() error {
 	return nil
 }
 
-func (w *SortedWriter) Done() error {
+func (w *sortedWriter) Done() error {
 	if w.builder.Empty() {
 		return nil
 	}
 	return w.send()
 }
 
-func (w *SortedWriter) createTable(data []byte) error {
+func (w *sortedWriter) createTable(data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
