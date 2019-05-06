@@ -130,6 +130,62 @@ func writeTo(entry *pb.KV, w io.Writer) error {
 	return err
 }
 
+type Loader struct {
+	db       *DB
+	throttle *y.Throttle
+	entries  []*Entry
+}
+
+func (db *DB) NewLoader(maxPendingWrites int) *Loader {
+	return &Loader{
+		db:       db,
+		throttle: y.NewThrottle(maxPendingWrites),
+	}
+}
+
+func (l *Loader) Set(kv *pb.KV) error {
+	var userMeta, meta byte
+	if len(kv.UserMeta) > 0 {
+		userMeta = kv.UserMeta[0]
+	}
+	if len(kv.Meta) > 0 {
+		meta = kv.Meta[0]
+	}
+
+	l.entries = append(l.entries, &Entry{
+		Key:       y.KeyWithTs(kv.Key, kv.Version),
+		Value:     kv.Value,
+		UserMeta:  userMeta,
+		ExpiresAt: kv.ExpiresAt,
+		meta:      meta,
+	})
+	if len(l.entries) >= 1000 {
+		return l.send()
+	}
+	return nil
+}
+
+func (l *Loader) send() error {
+	if err := l.throttle.Do(); err != nil {
+		return err
+	}
+	l.db.batchSetAsync(l.entries, func(err error) {
+		l.throttle.Done(err)
+	})
+
+	l.entries = make([]*Entry, 0, 1000)
+	return nil
+}
+
+func (l *Loader) Finish() error {
+	if len(l.entries) > 0 {
+		if err := l.send(); err != nil {
+			return err
+		}
+	}
+	return l.throttle.Finish()
+}
+
 // Load reads a protobuf-encoded list of all entries from a reader and writes
 // them to the database. This can be used to restore the database from a backup
 // made by calling DB.Backup().
@@ -139,9 +195,8 @@ func writeTo(entry *pb.KV, w io.Writer) error {
 func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 	br := bufio.NewReaderSize(r, 16<<10)
 	unmarshalBuf := make([]byte, 1<<10)
-	throttle := y.NewThrottle(maxPendingWrites)
-	var entries []*Entry
 
+	loader := db.NewLoader(maxPendingWrites)
 	for {
 		var sz uint64
 		err := binary.Read(br, binary.LittleEndian, &sz)
@@ -155,55 +210,26 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 			unmarshalBuf = make([]byte, sz)
 		}
 
-		e := &pb.KV{}
 		if _, err = io.ReadFull(br, unmarshalBuf[:sz]); err != nil {
 			return err
 		}
-		if err = e.Unmarshal(unmarshalBuf[:sz]); err != nil {
+		kv := &pb.KV{}
+		if err = kv.Unmarshal(unmarshalBuf[:sz]); err != nil {
 			return err
 		}
-		var userMeta byte
-		if len(e.UserMeta) > 0 {
-			userMeta = e.UserMeta[0]
+		if err := loader.Set(kv); err != nil {
+			return err
 		}
-		entries = append(entries, &Entry{
-			Key:       y.KeyWithTs(e.Key, e.Version),
-			Value:     e.Value,
-			UserMeta:  userMeta,
-			ExpiresAt: e.ExpiresAt,
-			meta:      e.Meta[0],
-		})
 		// Update nextTxnTs, memtable stores this timestamp in badger head
 		// when flushed.
-		if e.Version >= db.orc.nextTxnTs {
-			db.orc.nextTxnTs = e.Version + 1
-		}
-
-		if len(entries) == 1000 {
-			if err := throttle.Do(); err != nil {
-				return err
-			}
-			db.batchSetAsync(entries, func(err error) {
-				throttle.Done(err)
-			})
-
-			entries = make([]*Entry, 0, 1000)
+		if kv.Version >= db.orc.nextTxnTs {
+			db.orc.nextTxnTs = kv.Version + 1
 		}
 	}
 
-	if len(entries) > 0 {
-		if err := throttle.Do(); err != nil {
-			return err
-		}
-		db.batchSetAsync(entries, func(err error) {
-			throttle.Done(err)
-		})
-	}
-
-	if err := throttle.Finish(); err != nil {
+	if err := loader.Finish(); err != nil {
 		return err
 	}
-
 	db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
 	return nil
 }
