@@ -1412,25 +1412,22 @@ func (db *DB) Subscribe(ctx context.Context, cb callback, prefix []byte, prefixe
 			}
 		}
 	}
-	cbRunner := func(recvCh <-chan *pb.KVList, id uint64) error {
-		for {
-			select {
-			case <-c.HasBeenClosed():
-				slurp(new(pb.KVList))
-				//drain if any pending updates
-				c.Done()
-				// no need to delete here. closer will be called only while
-				// closing DB. subscriber will be delete by cleanSubscribers
-				return nil
-			case <-ctx.Done():
-				c.Done()
-				db.pub.deleteSubscriber(id)
-				// delete the subscriber to avoid further updates
-				return ctx.Err()
-			case batch := <-recvCh:
-				slurp(batch)
-			}
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			slurp(new(pb.KVList))
+			//drain if any pending updates
+			c.Done()
+			// no need to delete here. closer will be called only while
+			// closing DB. subscriber will be deleted by cleanSubscribers
+			return nil
+		case <-ctx.Done():
+			c.Done()
+			db.pub.deleteSubscriber(id)
+			// delete the subscriber to avoid further updates
+			return ctx.Err()
+		case batch := <-recvCh:
+			slurp(batch)
 		}
 	}
-	return cbRunner(recvCh, id)
 }

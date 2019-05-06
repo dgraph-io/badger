@@ -63,7 +63,6 @@ func (p *publisher) publishUpdates(reqs requests) {
 	p.Lock()
 	defer func() {
 		p.Unlock()
-
 		// release all the request
 		reqs.DecrRef()
 	}()
@@ -72,6 +71,7 @@ func (p *publisher) publishUpdates(reqs requests) {
 		for _, prefix := range s.prefixes {
 			for _, req := range reqs {
 				for _, e := range req.Entries {
+					//TODO: use trie to find subscribers
 					if bytes.HasPrefix(e.Key, prefix) {
 						k := y.SafeCopy(nil, e.Key)
 						kv := &pb.KV{
