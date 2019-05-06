@@ -346,7 +346,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	var streamDb *badger.DB
+	var tmpDb *badger.DB
 	if checkStream {
 		dir, err := ioutil.TempDir("", "bank_stream")
 		y.Check(err)
@@ -357,11 +357,11 @@ func runTest(cmd *cobra.Command, args []string) error {
 		streamOpts.SyncWrites = false
 		log.Printf("Opening stream DB with options: %+v\n", streamOpts)
 
-		streamDb, err = badger.Open(streamOpts)
+		tmpDb, err = badger.Open(streamOpts)
 		if err != nil {
 			return err
 		}
-		defer streamDb.Close()
+		defer tmpDb.Close()
 	}
 
 	wb := db.NewWriteBatch()
@@ -455,10 +455,10 @@ func runTest(cmd *cobra.Command, args []string) error {
 				}
 
 				// Clean up the database receiving the stream.
-				err = streamDb.DropAll()
+				err = tmpDb.DropAll()
 				y.Check(err)
 
-				batch := streamDb.NewWriteBatch()
+				batch := tmpDb.NewWriteBatch()
 
 				stream := db.NewStream()
 				stream.Send = func(list *pb.KVList) error {
@@ -472,10 +472,10 @@ func runTest(cmd *cobra.Command, args []string) error {
 				y.Check(stream.Orchestrate(context.Background()))
 				y.Check(batch.Flush())
 
-				y.Check(streamDb.View(func(txn *badger.Txn) error {
+				y.Check(tmpDb.View(func(txn *badger.Txn) error {
 					_, err := seekTotal(txn)
 					if err != nil {
-						log.Printf("Error while calculating total: %v", err)
+						log.Printf("Error while calculating total in stream: %v", err)
 					}
 					return nil
 				}))
