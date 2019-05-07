@@ -125,6 +125,14 @@ func (sw *StreamWriter) Done() error {
 	if err := headWriter.Done(); err != nil {
 		return err
 	}
+
+	if !sw.db.opt.managedTxns {
+		sw.db.orc.nextTxnTs = sw.maxVersion
+		sw.db.orc.txnMark.Done(sw.db.orc.nextTxnTs)
+		sw.db.orc.readMark.Done(sw.db.orc.nextTxnTs)
+		sw.db.orc.nextTxnTs++
+	}
+
 	return sw.throttle.Finish()
 }
 
