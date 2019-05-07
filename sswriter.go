@@ -11,9 +11,12 @@ import (
 )
 
 type StreamWriter struct {
-	db       *DB
-	throttle *y.Throttle
-	writers  map[uint32]*sortedWriter
+	db         *DB
+	done       func()
+	throttle   *y.Throttle
+	head       valuePointer
+	maxVersion uint64
+	writers    map[uint32]*sortedWriter
 }
 
 func (db *DB) NewStreamWriter(maxPending int) *StreamWriter {
@@ -22,6 +25,12 @@ func (db *DB) NewStreamWriter(maxPending int) *StreamWriter {
 		throttle: y.NewThrottle(maxPending),
 		writers:  make(map[uint32]*sortedWriter),
 	}
+}
+
+func (sw *StreamWriter) Prepare() error {
+	var err error
+	sw.done, err = sw.db.dropAll()
+	return err
 }
 
 func (sw *StreamWriter) Write(kvs *pb.KVList) error {
@@ -34,8 +43,11 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 		if len(kv.UserMeta) > 0 {
 			userMeta = kv.UserMeta[0]
 		}
+		if sw.maxVersion < kv.Version {
+			sw.maxVersion = kv.Version
+		}
 		e := &Entry{
-			Key:       kv.Key,
+			Key:       y.KeyWithTs(kv.Key, kv.Version),
 			Value:     kv.Value,
 			UserMeta:  userMeta,
 			ExpiresAt: kv.ExpiresAt,
@@ -57,6 +69,10 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 	for i, kv := range kvs.Kv {
 		e := req.Entries[i]
 		vptr := req.Ptrs[i]
+		if !vptr.IsZero() {
+			y.AssertTrue(sw.head.Less(vptr))
+			sw.head = vptr
+		}
 
 		writer, ok := sw.writers[kv.StreamId]
 		if !ok {
@@ -90,10 +106,24 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 
 func (sw *StreamWriter) Done() error {
 	// TODO: Set the value log head to math.MaxUint32 stream here.
+	defer sw.done()
 	for _, writer := range sw.writers {
 		if err := writer.Done(); err != nil {
 			return err
 		}
+	}
+
+	// Encode and write the value log head into a new table.
+	data := make([]byte, vptrSize)
+	sw.head.Encode(data)
+	headWriter := sw.newWriter()
+	if err := headWriter.Add(
+		y.KeyWithTs(head, sw.maxVersion),
+		y.ValueStruct{Value: data}); err != nil {
+		return err
+	}
+	if err := headWriter.Done(); err != nil {
+		return err
 	}
 	return sw.throttle.Finish()
 }

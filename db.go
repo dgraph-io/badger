@@ -1295,9 +1295,17 @@ func (db *DB) prepareToDrop() func() {
 // any reads while DropAll is going on, otherwise they may result in panics. Ideally, both reads and
 // writes are paused before running DropAll, and resumed after it is finished.
 func (db *DB) DropAll() error {
+	f, err := db.dropAll()
+	if err != nil {
+		return err
+	}
+	f()
+	return nil
+}
+
+func (db *DB) dropAll() (func(), error) {
 	db.opt.Infof("DropAll called. Blocking writes...")
 	f := db.prepareToDrop()
-	defer f()
 
 	// Block all foreign interactions with memory tables.
 	db.Lock()
@@ -1313,17 +1321,17 @@ func (db *DB) DropAll() error {
 
 	num, err := db.lc.dropTree()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	db.opt.Infof("Deleted %d SSTables. Now deleting value logs...\n", num)
 
 	num, err = db.vlog.dropAll()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	db.vhead = valuePointer{} // Zero it out.
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
-	return nil
+	return f, nil
 }
 
 // DropPrefix would drop all the keys with the provided prefix. It does this in the following way:
