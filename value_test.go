@@ -478,8 +478,8 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	db, err = Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
-	require.True(t, reflect.DeepEqual(persistedMap, db.vlog.lfDiscardStats.m), "Discard maps are "+
-		"not equal")
+	require.True(t, reflect.DeepEqual(persistedMap, db.vlog.lfDiscardStats.m),
+		"Discard maps are not equal")
 }
 
 func TestChecksums(t *testing.T) {

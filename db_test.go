@@ -1748,9 +1748,9 @@ func TestForceFlushMemtable(t *testing.T) {
 	}
 	time.Sleep(1 * time.Second)
 
-	// We want to make sure that memtable is flushed on disk. While flushing memtable to disk, latest
-	// head is also stored in it. Hence we will try to read head from disk. To make sure this. we will
-	// truncate all memtables.
+	// We want to make sure that memtable is flushed on disk. While flushing memtable to disk,
+	// latest head is also stored in it. Hence we will try to read head from disk. To make sure
+	// this. we will truncate all memtables.
 	db.Lock()
 	db.mt.DecrRef()
 	for _, mt := range db.imm {
@@ -1765,8 +1765,8 @@ func TestForceFlushMemtable(t *testing.T) {
 	vs, err := db.get(headKey)
 	var vptr valuePointer
 	vptr.Decode(vs.Value)
-	// Since we are inserting 3 entries and ValueLogMaxEntries is 1, there will be 3 rotation. For 1st
-	// and 2nd time head flushed with memtable will have fid as 0 and last time it will be 1.
+	// Since we are inserting 3 entries and ValueLogMaxEntries is 1, there will be 3 rotation. For
+	// 1st and 2nd time head flushed with memtable will have fid as 0 and last time it will be 1.
 	require.True(t, vptr.Fid == 1, fmt.Sprintf("expected fid: %d, actual fid: %d", 1, vptr.Fid))
 }
 

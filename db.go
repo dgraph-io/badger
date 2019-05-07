@@ -65,18 +65,22 @@ type DB struct {
 	// nil if Dir and ValueDir are the same
 	valueDirGuard *directoryLockGuard
 
-	closers    closers
-	elog       trace.EventLog
-	mt         *skl.Skiplist   // Our latest (actively written) in-memory table
-	imm        []*skl.Skiplist // Add here only AFTER pushing to flushChan.
-	opt        Options
-	manifest   *manifestFile
-	lc         *levelsController
-	vlog       valueLog
-	vhead      valuePointer // less than or equal to a pointer to the last vlog value put into mt
-	writeCh    chan *request
-	flushChan  chan flushTask // For flushing memtables.
-	logRotates int32          // Number of log rotates since the last memtable flush
+	closers   closers
+	elog      trace.EventLog
+	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
+	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+	opt       Options
+	manifest  *manifestFile
+	lc        *levelsController
+	vlog      valueLog
+	vhead     valuePointer // less than or equal to a pointer to the last vlog value put into mt
+	writeCh   chan *request
+	flushChan chan flushTask // For flushing memtables.
+
+	// Number of log rotates since the last memtable flush. We will access this field via atomic
+	// functions. Since we are not going to use any 64bit atomic functions, there is no need for
+	// 64 bit alignment of this struct(see #311).
+	logRotates int32
 
 	blockWrites int32
 
@@ -768,6 +772,11 @@ func (db *DB) ensureRoomForWrite() error {
 	// pushed to L0. Otherwise, it would not go to L0, until the memtable has been fully filled,
 	// which can take a lot longer if the write load has fewer keys and larger values. This force
 	// flush, thus avoids the need to read through a lot of log files on a crash and restart.
+	// Above approach is quite simple with small drawback. We are calling ensureRoomForWrite before
+	// inserting every entry in Memtable. We will get latest db.head after all entries for a request
+	// are inserted in Memtable. If we have done >= db.logRotates rotations, then while inserting
+	// first entry in Memtable, below condition will be true and we will endup flushing old value of
+	// db.head. Hence we are limiting no of value log files to be read to db.logRotates only.
 	forceFlush := atomic.LoadInt32(&db.logRotates) >= db.opt.LogRotatesToFlush
 
 	if !forceFlush && db.mt.MemSize() < db.opt.MaxTableSize {
