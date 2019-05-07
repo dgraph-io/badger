@@ -151,7 +151,8 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				return
 			}
 
-			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, tf.Checksum)
+			t, err := table.OpenTable(
+				fd, db.opt.TableLoadingMode, tf.Checksum, tf.Smallest, tf.Biggest)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -578,7 +579,7 @@ func (s *levelsController) compactBuildTables(
 					return
 				}
 
-				tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, nil)
+				tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, nil, nil, nil)
 				// decrRef is added below.
 				resultCh <- newTableResult{tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())}
 			}(builder)
@@ -627,7 +628,8 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeS
 	changes := []*pb.ManifestChange{}
 	for _, table := range newTables {
 		changes = append(changes,
-			newCreateChange(table.ID(), cd.nextLevel.level, table.Checksum))
+			newCreateChange(
+				table.ID(), cd.nextLevel.level, table.Checksum, table.Smallest(), table.Biggest()))
 	}
 	for _, table := range cd.top {
 		changes = append(changes, newDeleteChange(table.ID()))
@@ -843,7 +845,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	// the proper order. (That means this update happens before that of some compaction which
 	// deletes the table.)
 	err := s.kv.manifest.addChanges([]*pb.ManifestChange{
-		newCreateChange(t.ID(), 0, t.Checksum),
+		newCreateChange(t.ID(), 0, t.Checksum, t.Smallest(), t.Biggest()),
 	})
 	if err != nil {
 		return err

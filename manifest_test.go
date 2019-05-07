@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -24,6 +25,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 
 	"golang.org/x/net/trace"
 
@@ -169,7 +171,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lh0 := newLevelHandler(kv, 0)
 	lh1 := newLevelHandler(kv, 1)
 	f := buildTestTable(t, "k", 2)
-	t1, err := table.OpenTable(f, options.MemoryMap, nil)
+	t1, err := table.OpenTable(f, options.MemoryMap, nil, nil, nil)
 	require.NoError(t, err)
 	defer t1.DecrRef()
 
@@ -190,7 +192,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lc.runCompactDef(0, cd)
 
 	f = buildTestTable(t, "l", 2)
-	t2, err := table.OpenTable(f, options.MemoryMap, nil)
+	t2, err := table.OpenTable(f, options.MemoryMap, nil, nil, nil)
 	require.NoError(t, err)
 	defer t2.DecrRef()
 	done = lh0.tryAddLevel0Table(t2)
@@ -221,13 +223,13 @@ func TestManifestRewrite(t *testing.T) {
 	require.Equal(t, 0, m.Deletions)
 
 	err = mf.addChanges([]*pb.ManifestChange{
-		newCreateChange(0, 0, nil),
+		newCreateChange(0, 0, nil, nil, nil),
 	})
 	require.NoError(t, err)
 
 	for i := uint64(0); i < uint64(deletionsThreshold*3); i++ {
 		ch := []*pb.ManifestChange{
-			newCreateChange(i+1, 0, nil),
+			newCreateChange(i+1, 0, nil, nil, nil),
 			newDeleteChange(i),
 		}
 		err := mf.addChanges(ch)
@@ -241,4 +243,53 @@ func TestManifestRewrite(t *testing.T) {
 	require.Equal(t, map[uint64]TableManifest{
 		uint64(deletionsThreshold * 3): {Level: 0, Checksum: []byte{}},
 	}, m.Tables)
+}
+
+func TestManifestEnsureSmallestBiggestAreSet(t *testing.T) {
+	dir, err := ioutil.TempDir(".", "badger")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	opt := DefaultOptions
+	opt.Dir = dir
+	opt.ValueDir = dir
+	opt.MaxTableSize = 1 << 20 // Reduce table size so that we have multiple tables
+	db, err := Open(opt)
+	require.NoError(t, err)
+
+	n := 50000
+	wb := db.NewWriteBatch()
+	for i := 0; i < n; i++ {
+		k := []byte(fmt.Sprintf("%09d", i))
+		wb.Set(k, k, 0x00)
+	}
+	require.NoError(t, wb.Flush())
+	// Wait for things to settle down
+	time.Sleep(100 * time.Millisecond)
+
+	tableInfo := db.Tables(true)
+	expectedCount := len(tableInfo)
+	manifest := db.manifest.manifest
+	tableCount := len(manifest.Tables)
+	require.Equal(t, tableCount, expectedCount)
+
+	deletedEntry := false
+	for _, item := range tableInfo {
+		for index, anotherItem := range manifest.Tables {
+			// Remove entry from manifest.Tables if it exists in tableInfo also
+			if bytes.Equal(item.Left, anotherItem.Smallest) &&
+				bytes.Equal(item.Right, anotherItem.Biggest) {
+				delete(manifest.Tables, index)
+				deletedEntry = true
+				break
+			}
+		}
+		// Similar entry in manifest.Tables was not found
+		if !deletedEntry {
+			break
+		}
+	}
+	// manifest.Tables should be empty since we've removed all the entries present in tableInfo.
+	if len(manifest.Tables) > 0 || !deletedEntry {
+		t.Error("Mismatch between actual tables and tables in manifest file")
+	}
 }

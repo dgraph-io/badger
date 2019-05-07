@@ -117,7 +117,8 @@ func (b block) NewIterator() *blockIterator {
 // entry.  Returns a table with one reference count on it (decrementing which may delete the file!
 // -- consider t.Close() instead).  The fd has to writeable because we call Truncate on it before
 // deleting.
-func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table, error) {
+func OpenTable(
+	fd *os.File, mode options.FileLoadingMode, cksum, smallest, biggest []byte) (*Table, error) {
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -137,6 +138,8 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 		ref:         1, // Caller is given one reference.
 		id:          id,
 		loadingMode: mode,
+		smallest:    smallest,
+		biggest:     biggest,
 	}
 
 	t.tableSize = int(fileInfo.Size())
@@ -157,18 +160,24 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 		return nil, y.Wrap(err)
 	}
 
-	it := t.NewIterator(false)
-	defer it.Close()
-	it.Rewind()
-	if it.Valid() {
-		t.smallest = it.Key()
+	if t.smallest == nil {
+		it := t.NewIterator(false)
+		defer it.Close()
+		it.Rewind()
+		if it.Valid() {
+			t.smallest = it.Key()
+		}
+
 	}
 
-	it2 := t.NewIterator(true)
-	defer it2.Close()
-	it2.Rewind()
-	if it2.Valid() {
-		t.biggest = it2.Key()
+	if t.biggest == nil {
+		it2 := t.NewIterator(true)
+		defer it2.Close()
+		it2.Rewind()
+		if it2.Valid() {
+			t.biggest = it2.Key()
+		}
+
 	}
 
 	switch mode {

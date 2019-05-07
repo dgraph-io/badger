@@ -69,6 +69,8 @@ type levelManifest struct {
 type TableManifest struct {
 	Level    uint8
 	Checksum []byte
+	Smallest []byte
+	Biggest  []byte
 }
 
 // manifestFile holds the file pointer (and other info) about the manifest file, which is a log
@@ -99,7 +101,8 @@ const (
 func (m *Manifest) asChanges() []*pb.ManifestChange {
 	changes := make([]*pb.ManifestChange, 0, len(m.Tables))
 	for id, tm := range m.Tables {
-		changes = append(changes, newCreateChange(id, int(tm.Level), tm.Checksum))
+		changes = append(changes, newCreateChange(
+			id, int(tm.Level), tm.Checksum, tm.Smallest, tm.Biggest))
 	}
 	return changes
 }
@@ -388,6 +391,8 @@ func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {
 		build.Tables[tc.Id] = TableManifest{
 			Level:    uint8(tc.Level),
 			Checksum: append([]byte{}, tc.Checksum...),
+			Smallest: tc.Smallest,
+			Biggest:  tc.Biggest,
 		}
 		for len(build.Levels) <= int(tc.Level) {
 			build.Levels = append(build.Levels, levelManifest{make(map[uint64]struct{})})
@@ -419,12 +424,14 @@ func applyChangeSet(build *Manifest, changeSet *pb.ManifestChangeSet) error {
 	return nil
 }
 
-func newCreateChange(id uint64, level int, checksum []byte) *pb.ManifestChange {
+func newCreateChange(id uint64, level int, checksum, smallest, biggest []byte) *pb.ManifestChange {
 	return &pb.ManifestChange{
 		Id:       id,
 		Op:       pb.ManifestChange_CREATE,
 		Level:    uint32(level),
 		Checksum: checksum,
+		Smallest: smallest,
+		Biggest:  biggest,
 	}
 }
 

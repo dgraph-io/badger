@@ -233,6 +233,8 @@ type ManifestChange struct {
 	Op                   ManifestChange_Operation `protobuf:"varint,2,opt,name=Op,proto3,enum=pb.ManifestChange_Operation" json:"Op,omitempty"`
 	Level                uint32                   `protobuf:"varint,3,opt,name=Level,proto3" json:"Level,omitempty"`
 	Checksum             []byte                   `protobuf:"bytes,4,opt,name=Checksum,proto3" json:"Checksum,omitempty"`
+	Smallest             []byte                   `protobuf:"bytes,5,opt,name=Smallest,proto3" json:"Smallest,omitempty"`
+	Biggest              []byte                   `protobuf:"bytes,6,opt,name=Biggest,proto3" json:"Biggest,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
 	XXX_unrecognized     []byte                   `json:"-"`
 	XXX_sizecache        int32                    `json:"-"`
@@ -299,6 +301,20 @@ func (m *ManifestChange) GetChecksum() []byte {
 	return nil
 }
 
+func (m *ManifestChange) GetSmallest() []byte {
+	if m != nil {
+		return m.Smallest
+	}
+	return nil
+}
+
+func (m *ManifestChange) GetBiggest() []byte {
+	if m != nil {
+		return m.Biggest
+	}
+	return nil
+}
+
 func init() {
 	proto.RegisterEnum("pb.ManifestChange_Operation", ManifestChange_Operation_name, ManifestChange_Operation_value)
 	proto.RegisterType((*KV)(nil), "pb.KV")
@@ -310,29 +326,30 @@ func init() {
 func init() { proto.RegisterFile("pb.proto", fileDescriptor_f80abaa17e25ccc8) }
 
 var fileDescriptor_f80abaa17e25ccc8 = []byte{
-	// 342 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x64, 0x91, 0x4d, 0x6a, 0xf2, 0x40,
-	0x18, 0xc7, 0x9d, 0x31, 0x46, 0x7d, 0x5e, 0x5f, 0x49, 0x87, 0x52, 0x42, 0x3f, 0x42, 0x48, 0x37,
-	0x2e, 0x24, 0x0b, 0x7b, 0x02, 0x6b, 0xb3, 0x10, 0x15, 0x61, 0x2a, 0x6e, 0x25, 0xd1, 0xa7, 0x35,
-	0x44, 0x93, 0x21, 0x19, 0x43, 0x7b, 0x91, 0xd2, 0x0b, 0xf4, 0x2e, 0x5d, 0xf6, 0x08, 0xc5, 0x5e,
-	0xa4, 0x64, 0xfc, 0x00, 0xe9, 0xee, 0xff, 0x31, 0xcf, 0x7f, 0xf1, 0x1b, 0xa8, 0x89, 0xc0, 0x15,
-	0x69, 0x22, 0x13, 0x46, 0x45, 0xe0, 0xbc, 0x11, 0xa0, 0x83, 0x29, 0x33, 0xa0, 0x1c, 0xe1, 0xab,
-	0x49, 0x6c, 0xd2, 0x6a, 0xf0, 0x42, 0xb2, 0x73, 0xa8, 0xe4, 0xfe, 0x6a, 0x83, 0x26, 0x55, 0xd9,
-	0xce, 0xb0, 0x2b, 0xa8, 0x6f, 0x32, 0x4c, 0x67, 0x6b, 0x94, 0xbe, 0x59, 0x56, 0x4d, 0xad, 0x08,
-	0x46, 0x28, 0x7d, 0x66, 0x42, 0x35, 0xc7, 0x34, 0x0b, 0x93, 0xd8, 0xd4, 0x6c, 0xd2, 0xd2, 0xf8,
-	0xc1, 0xb2, 0x1b, 0x00, 0x7c, 0x11, 0x61, 0x8a, 0xd9, 0xcc, 0x97, 0x66, 0x45, 0x95, 0xf5, 0x7d,
-	0xd2, 0x95, 0x8c, 0x81, 0xa6, 0x06, 0x75, 0x35, 0xa8, 0xb4, 0x63, 0x83, 0x3e, 0x98, 0x0e, 0xc3,
-	0x4c, 0xb2, 0x0b, 0xa0, 0x51, 0x6e, 0x12, 0xbb, 0xdc, 0xfa, 0xd7, 0xd1, 0x5d, 0x11, 0xb8, 0x83,
-	0x29, 0xa7, 0x51, 0xee, 0x74, 0xe1, 0x6c, 0xe4, 0xc7, 0xe1, 0x13, 0x66, 0xb2, 0xb7, 0xf4, 0xe3,
-	0x67, 0x7c, 0x44, 0xc9, 0xda, 0x50, 0x9d, 0x2b, 0x93, 0xed, 0x2f, 0x58, 0x71, 0x71, 0xfa, 0x8e,
-	0x1f, 0x9e, 0x38, 0x1f, 0x04, 0x9a, 0xa7, 0x1d, 0x6b, 0x02, 0xed, 0x2f, 0x14, 0x08, 0x8d, 0xd3,
-	0xfe, 0x82, 0xb5, 0x81, 0x8e, 0x85, 0x82, 0xd0, 0xec, 0x5c, 0xff, 0xdd, 0x72, 0xc7, 0x02, 0x53,
-	0x5f, 0x86, 0x49, 0xcc, 0xe9, 0x58, 0x14, 0xd4, 0x86, 0x98, 0xe3, 0x4a, 0xb1, 0xf9, 0xcf, 0x77,
-	0x86, 0x5d, 0x42, 0xad, 0xb7, 0xc4, 0x79, 0x94, 0x6d, 0xd6, 0x8a, 0x4c, 0x83, 0x1f, 0xbd, 0x73,
-	0x0b, 0xf5, 0xe3, 0x04, 0x03, 0xd0, 0x7b, 0xdc, 0xeb, 0x4e, 0x3c, 0xa3, 0x54, 0xe8, 0x07, 0x6f,
-	0xe8, 0x4d, 0x3c, 0x83, 0xdc, 0x1b, 0x9f, 0x5b, 0x8b, 0x7c, 0x6d, 0x2d, 0xf2, 0xbd, 0xb5, 0xc8,
-	0xfb, 0x8f, 0x55, 0x0a, 0x74, 0xf5, 0x85, 0x77, 0xbf, 0x01, 0x00, 0x00, 0xff, 0xff, 0x50, 0xdf,
-	0x4a, 0x84, 0xce, 0x01, 0x00, 0x00,
+	// 367 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x64, 0x91, 0xcf, 0x8e, 0xda, 0x30,
+	0x10, 0x87, 0xd7, 0x26, 0x9b, 0x85, 0x29, 0x45, 0xa9, 0x55, 0x55, 0x51, 0xff, 0x44, 0x51, 0x7a,
+	0xe1, 0xb0, 0xca, 0x61, 0xfb, 0x04, 0x2c, 0xcd, 0x61, 0x05, 0x2b, 0x24, 0x83, 0xb8, 0x22, 0x07,
+	0xa6, 0x10, 0x25, 0x24, 0x56, 0x6c, 0xa2, 0xf6, 0x45, 0xaa, 0x3e, 0x52, 0x8f, 0xbd, 0xf7, 0x52,
+	0xd1, 0x17, 0xa9, 0xec, 0x00, 0x12, 0xea, 0x6d, 0xbe, 0xf9, 0xcd, 0x8c, 0xa5, 0xcf, 0xd0, 0x95,
+	0x69, 0x2c, 0xeb, 0x4a, 0x57, 0x8c, 0xca, 0x34, 0xfa, 0x4e, 0x80, 0x4e, 0x96, 0xcc, 0x83, 0x4e,
+	0x8e, 0xdf, 0x7c, 0x12, 0x92, 0x61, 0x9f, 0x9b, 0x92, 0xbd, 0x86, 0xdb, 0x46, 0x14, 0x07, 0xf4,
+	0xa9, 0xed, 0xb5, 0xc0, 0xde, 0x41, 0xef, 0xa0, 0xb0, 0x5e, 0xed, 0x51, 0x0b, 0xbf, 0x63, 0x93,
+	0xae, 0x69, 0x3c, 0xa3, 0x16, 0xcc, 0x87, 0xbb, 0x06, 0x6b, 0x95, 0x55, 0xa5, 0xef, 0x84, 0x64,
+	0xe8, 0xf0, 0x33, 0xb2, 0x0f, 0x00, 0xf8, 0x55, 0x66, 0x35, 0xaa, 0x95, 0xd0, 0xfe, 0xad, 0x0d,
+	0x7b, 0xa7, 0xce, 0x48, 0x33, 0x06, 0x8e, 0x3d, 0xe8, 0xda, 0x83, 0xb6, 0x8e, 0x42, 0x70, 0x27,
+	0xcb, 0x69, 0xa6, 0x34, 0x7b, 0x03, 0x34, 0x6f, 0x7c, 0x12, 0x76, 0x86, 0x2f, 0x1e, 0xdc, 0x58,
+	0xa6, 0xf1, 0x64, 0xc9, 0x69, 0xde, 0x44, 0x23, 0x78, 0xf5, 0x2c, 0xca, 0xec, 0x0b, 0x2a, 0x3d,
+	0xde, 0x89, 0x72, 0x8b, 0x73, 0xd4, 0xec, 0x1e, 0xee, 0xd6, 0x16, 0xd4, 0x69, 0x83, 0x99, 0x8d,
+	0xeb, 0x39, 0x7e, 0x1e, 0x89, 0x7e, 0x13, 0x18, 0x5c, 0x67, 0x6c, 0x00, 0xf4, 0x69, 0x63, 0x45,
+	0x38, 0x9c, 0x3e, 0x6d, 0xd8, 0x3d, 0xd0, 0x99, 0xb4, 0x12, 0x06, 0x0f, 0xef, 0xff, 0xbf, 0x15,
+	0xcf, 0x24, 0xd6, 0x42, 0x67, 0x55, 0xc9, 0xe9, 0x4c, 0x1a, 0x6b, 0x53, 0x6c, 0xb0, 0xb0, 0x6e,
+	0x5e, 0xf2, 0x16, 0xd8, 0x5b, 0xe8, 0x8e, 0x77, 0xb8, 0xce, 0xd5, 0x61, 0x6f, 0xcd, 0xf4, 0xf9,
+	0x85, 0x4d, 0x36, 0xdf, 0x8b, 0xa2, 0x40, 0xd5, 0x8a, 0xe9, 0xf3, 0x0b, 0x1b, 0xa1, 0x8f, 0xd9,
+	0x76, 0x6b, 0xa2, 0x56, 0xcd, 0x19, 0xa3, 0x8f, 0xd0, 0xbb, 0x3c, 0xcc, 0x00, 0xdc, 0x31, 0x4f,
+	0x46, 0x8b, 0xc4, 0xbb, 0x31, 0xf5, 0xe7, 0x64, 0x9a, 0x2c, 0x12, 0x8f, 0x3c, 0x7a, 0x3f, 0x8f,
+	0x01, 0xf9, 0x75, 0x0c, 0xc8, 0x9f, 0x63, 0x40, 0x7e, 0xfc, 0x0d, 0x6e, 0x52, 0xd7, 0x7e, 0xfc,
+	0xa7, 0x7f, 0x01, 0x00, 0x00, 0xff, 0xff, 0xb4, 0x12, 0x2c, 0xe4, 0x04, 0x02, 0x00, 0x00,
 }
 
 func (m *KV) Marshal() (dAtA []byte, err error) {
@@ -492,6 +509,18 @@ func (m *ManifestChange) MarshalTo(dAtA []byte) (int, error) {
 		i = encodeVarintPb(dAtA, i, uint64(len(m.Checksum)))
 		i += copy(dAtA[i:], m.Checksum)
 	}
+	if len(m.Smallest) > 0 {
+		dAtA[i] = 0x2a
+		i++
+		i = encodeVarintPb(dAtA, i, uint64(len(m.Smallest)))
+		i += copy(dAtA[i:], m.Smallest)
+	}
+	if len(m.Biggest) > 0 {
+		dAtA[i] = 0x32
+		i++
+		i = encodeVarintPb(dAtA, i, uint64(len(m.Biggest)))
+		i += copy(dAtA[i:], m.Biggest)
+	}
 	if m.XXX_unrecognized != nil {
 		i += copy(dAtA[i:], m.XXX_unrecognized)
 	}
@@ -596,6 +625,14 @@ func (m *ManifestChange) Size() (n int) {
 	if l > 0 {
 		n += 1 + l + sovPb(uint64(l))
 	}
+	l = len(m.Smallest)
+	if l > 0 {
+		n += 1 + l + sovPb(uint64(l))
+	}
+	l = len(m.Biggest)
+	if l > 0 {
+		n += 1 + l + sovPb(uint64(l))
+	}
 	if m.XXX_unrecognized != nil {
 		n += len(m.XXX_unrecognized)
 	}
@@ -630,7 +667,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 			}
 			b := dAtA[iNdEx]
 			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
+			wire |= uint64(b&0x7F) << shift
 			if b < 0x80 {
 				break
 			}
@@ -658,7 +695,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
+				byteLen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -667,6 +704,9 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
@@ -689,7 +729,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
+				byteLen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -698,6 +738,9 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
@@ -720,7 +763,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
+				byteLen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -729,6 +772,9 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
@@ -751,7 +797,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.Version |= (uint64(b) & 0x7F) << shift
+				m.Version |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -770,7 +816,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.ExpiresAt |= (uint64(b) & 0x7F) << shift
+				m.ExpiresAt |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -789,7 +835,7 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
+				byteLen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -798,6 +844,9 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
@@ -813,6 +862,9 @@ func (m *KV) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			if skippy < 0 {
+				return ErrInvalidLengthPb
+			}
+			if (iNdEx + skippy) < 0 {
 				return ErrInvalidLengthPb
 			}
 			if (iNdEx + skippy) > l {
@@ -843,7 +895,7 @@ func (m *KVList) Unmarshal(dAtA []byte) error {
 			}
 			b := dAtA[iNdEx]
 			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
+			wire |= uint64(b&0x7F) << shift
 			if b < 0x80 {
 				break
 			}
@@ -871,7 +923,7 @@ func (m *KVList) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				msglen |= (int(b) & 0x7F) << shift
+				msglen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -880,6 +932,9 @@ func (m *KVList) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
@@ -895,6 +950,9 @@ func (m *KVList) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			if skippy < 0 {
+				return ErrInvalidLengthPb
+			}
+			if (iNdEx + skippy) < 0 {
 				return ErrInvalidLengthPb
 			}
 			if (iNdEx + skippy) > l {
@@ -925,7 +983,7 @@ func (m *ManifestChangeSet) Unmarshal(dAtA []byte) error {
 			}
 			b := dAtA[iNdEx]
 			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
+			wire |= uint64(b&0x7F) << shift
 			if b < 0x80 {
 				break
 			}
@@ -953,7 +1011,7 @@ func (m *ManifestChangeSet) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				msglen |= (int(b) & 0x7F) << shift
+				msglen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -962,6 +1020,9 @@ func (m *ManifestChangeSet) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
@@ -977,6 +1038,9 @@ func (m *ManifestChangeSet) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			if skippy < 0 {
+				return ErrInvalidLengthPb
+			}
+			if (iNdEx + skippy) < 0 {
 				return ErrInvalidLengthPb
 			}
 			if (iNdEx + skippy) > l {
@@ -1007,7 +1071,7 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 			}
 			b := dAtA[iNdEx]
 			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
+			wire |= uint64(b&0x7F) << shift
 			if b < 0x80 {
 				break
 			}
@@ -1035,7 +1099,7 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.Id |= (uint64(b) & 0x7F) << shift
+				m.Id |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -1054,7 +1118,7 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.Op |= (ManifestChange_Operation(b) & 0x7F) << shift
+				m.Op |= ManifestChange_Operation(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -1073,7 +1137,7 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.Level |= (uint32(b) & 0x7F) << shift
+				m.Level |= uint32(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -1092,7 +1156,7 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				byteLen |= (int(b) & 0x7F) << shift
+				byteLen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -1101,12 +1165,83 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 				return ErrInvalidLengthPb
 			}
 			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
 			m.Checksum = append(m.Checksum[:0], dAtA[iNdEx:postIndex]...)
 			if m.Checksum == nil {
 				m.Checksum = []byte{}
+			}
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Smallest", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPb
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthPb
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Smallest = append(m.Smallest[:0], dAtA[iNdEx:postIndex]...)
+			if m.Smallest == nil {
+				m.Smallest = []byte{}
+			}
+			iNdEx = postIndex
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Biggest", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPb
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthPb
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthPb
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Biggest = append(m.Biggest[:0], dAtA[iNdEx:postIndex]...)
+			if m.Biggest == nil {
+				m.Biggest = []byte{}
 			}
 			iNdEx = postIndex
 		default:
@@ -1116,6 +1251,9 @@ func (m *ManifestChange) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			if skippy < 0 {
+				return ErrInvalidLengthPb
+			}
+			if (iNdEx + skippy) < 0 {
 				return ErrInvalidLengthPb
 			}
 			if (iNdEx + skippy) > l {
@@ -1185,8 +1323,11 @@ func skipPb(dAtA []byte) (n int, err error) {
 					break
 				}
 			}
-			iNdEx += length
 			if length < 0 {
+				return 0, ErrInvalidLengthPb
+			}
+			iNdEx += length
+			if iNdEx < 0 {
 				return 0, ErrInvalidLengthPb
 			}
 			return iNdEx, nil
@@ -1217,6 +1358,9 @@ func skipPb(dAtA []byte) (n int, err error) {
 					return 0, err
 				}
 				iNdEx = start + next
+				if iNdEx < 0 {
+					return 0, ErrInvalidLengthPb
+				}
 			}
 			return iNdEx, nil
 		case 4:
