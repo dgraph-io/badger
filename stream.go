@@ -19,6 +19,8 @@ package badger
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -115,6 +117,26 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 // end byte slices are owned by keyRange struct.
 func (st *Stream) produceRanges(ctx context.Context) {
 	splits := st.db.KeySplits(st.Prefix)
+
+	// We don't need to create more key ranges than NumGo goroutines. This way, we will have limited
+	// number of "streams" coming out, which then helps limit the memory used by SSWriter.
+	{
+		pickEvery := int(math.Floor(float64(len(splits)) / float64(st.NumGo)))
+		if pickEvery < 1 {
+			pickEvery = 1
+		}
+		filtered := splits[:0]
+		for i, split := range splits {
+			if (i+1)%pickEvery == 0 {
+				filtered = append(filtered, split)
+			}
+		}
+		fmt.Printf("NumGo: %d\n", st.NumGo)
+		fmt.Printf("Before: %v\n", len(splits))
+		fmt.Printf("After: %v\n", len(filtered))
+		splits = filtered
+	}
+
 	start := y.SafeCopy(nil, st.Prefix)
 	for _, key := range splits {
 		st.rangeCh <- keyRange{left: start, right: y.SafeCopy(nil, []byte(key))}
@@ -298,8 +320,8 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 
 	// kvChan should only have a small capacity to ensure that we don't buffer up too much data if
 	// sending is slow. Page size is set to 4MB, which is used to lazily cap the size of each
-	// KVList. To get around 64MB buffer, we can set the channel size to 16.
-	st.kvChan = make(chan *pb.KVList, 16)
+	// KVList. To get around 128MB buffer, we can set the channel size to 32.
+	st.kvChan = make(chan *pb.KVList, 32)
 
 	if st.KeyToList == nil {
 		st.KeyToList = st.ToList
