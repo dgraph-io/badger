@@ -105,11 +105,8 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 			if maxVersion < kv.Version {
 				maxVersion = kv.Version
 			}
-			if err := writeTo(kv, w); err != nil {
-				return err
-			}
 		}
-		return nil
+		return writeTo(list, w)
 	}
 
 	if err := stream.Orchestrate(context.Background()); err != nil {
@@ -118,11 +115,11 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 	return maxVersion, nil
 }
 
-func writeTo(entry *pb.KV, w io.Writer) error {
-	if err := binary.Write(w, binary.LittleEndian, uint64(entry.Size())); err != nil {
+func writeTo(list *pb.KVList, w io.Writer) error {
+	if err := binary.Write(w, binary.LittleEndian, uint64(list.Size())); err != nil {
 		return err
 	}
-	buf, err := entry.Marshal()
+	buf, err := list.Marshal()
 	if err != nil {
 		return err
 	}
@@ -213,17 +210,22 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 		if _, err = io.ReadFull(br, unmarshalBuf[:sz]); err != nil {
 			return err
 		}
-		kv := &pb.KV{}
-		if err = kv.Unmarshal(unmarshalBuf[:sz]); err != nil {
+
+		list := &pb.KVList{}
+		if err := list.Unmarshal(unmarshalBuf[:sz]); err != nil {
 			return err
 		}
-		if err := loader.Set(kv); err != nil {
-			return err
-		}
-		// Update nextTxnTs, memtable stores this timestamp in badger head
-		// when flushed.
-		if kv.Version >= db.orc.nextTxnTs {
-			db.orc.nextTxnTs = kv.Version + 1
+
+		for _, kv := range list.Kv {
+			if err := loader.Set(kv); err != nil {
+				return err
+			}
+
+			// Update nextTxnTs, memtable stores this timestamp in badger head
+			// when flushed.
+			if kv.Version >= db.orc.nextTxnTs {
+				db.orc.nextTxnTs = kv.Version + 1
+			}
 		}
 	}
 
