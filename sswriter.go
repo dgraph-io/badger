@@ -106,7 +106,6 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 }
 
 func (sw *StreamWriter) Done() error {
-	// TODO: Set the value log head to math.MaxUint32 stream here.
 	defer sw.done()
 	for _, writer := range sw.writers {
 		if err := writer.Done(); err != nil {
@@ -134,7 +133,19 @@ func (sw *StreamWriter) Done() error {
 		sw.db.orc.nextTxnTs++
 	}
 
-	return sw.throttle.Finish()
+	// Wait for all files to be written.
+	if err := sw.throttle.Finish(); err != nil {
+		return err
+	}
+
+	// Now sync the directories, so all the files are registered.
+	if err := syncDir(sw.db.opt.Dir); err != nil {
+		return err
+	}
+	if sw.db.opt.ValueDir != sw.db.opt.Dir {
+		return syncDir(sw.db.opt.ValueDir)
+	}
+	return nil
 }
 
 type sortedWriter struct {
