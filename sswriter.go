@@ -2,6 +2,7 @@ package badger
 
 import (
 	"bytes"
+	"math"
 
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/table"
@@ -76,7 +77,7 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 
 		writer, ok := sw.writers[kv.StreamId]
 		if !ok {
-			writer = sw.newWriter()
+			writer = sw.newWriter(kv.StreamId)
 			sw.writers[kv.StreamId] = writer
 		}
 
@@ -116,7 +117,7 @@ func (sw *StreamWriter) Done() error {
 	// Encode and write the value log head into a new table.
 	data := make([]byte, vptrSize)
 	sw.head.Encode(data)
-	headWriter := sw.newWriter()
+	headWriter := sw.newWriter(math.MaxUint32)
 	if err := headWriter.Add(
 		y.KeyWithTs(head, sw.maxVersion),
 		y.ValueStruct{Value: data}); err != nil {
@@ -140,13 +141,15 @@ type sortedWriter struct {
 	db       *DB
 	throttle *y.Throttle
 
-	builder *table.Builder
-	lastKey []byte
+	builder  *table.Builder
+	lastKey  []byte
+	streamId uint32
 }
 
-func (sw *StreamWriter) newWriter() *sortedWriter {
+func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
 	return &sortedWriter{
 		db:       sw.db,
+		streamId: streamId,
 		throttle: sw.throttle,
 		builder:  table.NewTableBuilder(),
 	}
@@ -233,7 +236,7 @@ func (w *sortedWriter) createTable(data []byte) error {
 	if err := lhandler.replaceTables([]*table.Table{}, []*table.Table{tbl}); err != nil {
 		return err
 	}
-	w.db.opt.Infof("Table created: %d at level: %d. Size: %s\n",
-		fileId, lhandler.level, humanize.Bytes(uint64(tbl.Size())))
+	w.db.opt.Infof("Table created: %d at level: %d for stream: %d. Size: %s\n",
+		fileId, lhandler.level, w.streamId, humanize.Bytes(uint64(tbl.Size())))
 	return nil
 }
