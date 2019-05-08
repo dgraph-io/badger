@@ -127,6 +127,12 @@ func (o *oracle) nextTs() uint64 {
 	return o.nextTxnTs
 }
 
+func (o *oracle) incrementNextTxnTs() {
+	o.Lock()
+	defer o.Unlock()
+	o.nextTxnTs++
+}
+
 // Any deleted or invalid versions at or below ts would be discarded during
 // compaction to reclaim disk space in LSM tree and thence value log.
 func (o *oracle) setDiscardTs(ts uint64) {
