@@ -202,14 +202,14 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 }
 
 func (w *sortedWriter) send() error {
-	data := w.builder.Finish()
 	if err := w.throttle.Do(); err != nil {
 		return err
 	}
-	go func() {
+	go func(builder *table.Builder) {
+		data := builder.Finish()
 		err := w.createTable(data)
 		w.throttle.Done(err)
-	}()
+	}(w.builder)
 	w.builder = table.NewTableBuilder()
 	return nil
 }
