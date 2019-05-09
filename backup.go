@@ -221,8 +221,8 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 				return err
 			}
 
-			// Update nextTxnTs, memtable stores this timestamp in badger head
-			// when flushed.
+			// Update nextTxnTs, memtable stores this
+			// timestamp in badger head when flushed.
 			if kv.Version >= db.orc.nextTxnTs {
 				db.orc.nextTxnTs = kv.Version + 1
 			}

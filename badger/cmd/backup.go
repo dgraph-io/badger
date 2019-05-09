@@ -17,6 +17,7 @@
 package cmd
 
 import (
+	"bufio"
 	"os"
 
 	"github.com/dgraph-io/badger"
@@ -64,9 +65,19 @@ func doBackup(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
-	// Run Backup
-	_, err = db.Backup(f, 0)
-	return err
+	bw := bufio.NewWriterSize(f, 64<<20)
+	if _, err = db.Backup(bw, 0); err != nil {
+		return err
+	}
+
+	if err = bw.Flush(); err != nil {
+		return err
+	}
+
+	if err = f.Sync(); err != nil {
+		return err
+	}
+
+	return f.Close()
 }
