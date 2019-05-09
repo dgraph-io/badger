@@ -127,7 +127,7 @@ func (o *oracle) nextTs() uint64 {
 	return o.nextTxnTs
 }
 
-func (o *oracle) incrementNextTxnTs() {
+func (o *oracle) incrementNextTs() {
 	o.Lock()
 	defer o.Unlock()
 	o.nextTxnTs++
