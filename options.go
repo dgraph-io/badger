@@ -118,6 +118,8 @@ type Options struct {
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
 
+	// Validate checksum for each SST on startup
+	VerifyChecksumOnStartup bool
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -144,11 +146,12 @@ var DefaultOptions = Options{
 	// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
 	ValueLogFileSize: 1<<30 - 1,
 
-	ValueLogMaxEntries: 1000000,
-	ValueThreshold:     32,
-	Truncate:           false,
-	Logger:             defaultLogger,
-	LogRotatesToFlush:  2,
+	ValueLogMaxEntries:      1000000,
+	ValueThreshold:          32,
+	Truncate:                false,
+	Logger:                  defaultLogger,
+	LogRotatesToFlush:       2,
+	VerifyChecksumOnStartup: false,
 }
 
 // LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold

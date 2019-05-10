@@ -17,6 +17,7 @@
 package table
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"math/rand"
 	"os"
@@ -726,4 +727,42 @@ func BenchmarkReadMerged(b *testing.B) {
 			}
 		}()
 	}
+}
+
+func TestVerifyChecksum(t *testing.T) {
+	t.Run("Empty Table", func(t *testing.T) {
+		table1, err := OpenTable(buildTable(t, nil), options.MemoryMap, nil)
+		require.NoError(t, err)
+		defer table1.DecrRef()
+		require.NoError(t, table1.VerifyChecksum(nil))
+
+	})
+	t.Run("Table with some data", func(t *testing.T) {
+		data := [][]string{{"k1", "a1"}}
+		tableFile := buildTable(t, data)
+		table1, err := OpenTable(tableFile, options.LoadToRAM, nil)
+		require.NoError(t, err)
+		defer table1.DecrRef()
+
+		tableData, err := table1.read(0, table1.tableSize)
+		require.NoError(t, err)
+
+		tableChecksum := sha256.Sum256(tableData)
+		require.NoError(t, table1.VerifyChecksum(tableChecksum[:]))
+	})
+
+	t.Run("Table with corrupt data", func(t *testing.T) {
+		data := [][]string{{"k1", "a1"}}
+		tableFile := buildTable(t, data)
+		table1, err := OpenTable(tableFile, options.LoadToRAM, nil)
+		require.NoError(t, err)
+		defer table1.DecrRef()
+
+		tableData, err := table1.read(0, table1.tableSize)
+		require.NoError(t, err)
+
+		corruptData := append(tableData, byte('1'))
+		tableChecksum := sha256.Sum256(corruptData)
+		require.Error(t, table1.VerifyChecksum(tableChecksum[:]))
+	})
 }

@@ -21,10 +21,12 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"expvar"
+	"fmt"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"sync"
@@ -279,7 +281,11 @@ func Open(opt Options) (db *DB, err error) {
 	if db.lc, err = newLevelsController(db, &manifest); err != nil {
 		return nil, err
 	}
-
+	if opt.VerifyChecksumOnStartup {
+		if err := db.VerifyChecksum(); err != nil {
+			return nil, y.Wrapf(err, "failed to verify checksum")
+		}
+	}
 	if !opt.ReadOnly {
 		db.closers.compactors = y.NewCloser(1)
 		db.lc.startCompact(db.closers.compactors)
@@ -1396,4 +1402,34 @@ func (db *DB) DropPrefix(prefix []byte) error {
 	}
 	db.opt.Infof("DropPrefix done")
 	return nil
+}
+
+// VerifyChecksum validates the checksum for all the SS-tables.
+func (db *DB) VerifyChecksum() error {
+	manifest := db.manifest.manifest
+	throttle := y.NewThrottle(2 * runtime.NumCPU())
+	for _, l := range db.lc.levels {
+		var rerr error
+		for _, t := range l.tables {
+			if err := throttle.Do(); err != nil {
+				return err
+			}
+			go func(t *table.Table) {
+				defer func() {
+					throttle.Done(rerr)
+				}()
+				t.IncrRef()
+				defer t.DecrRef()
+				table, ok := manifest.Tables[t.ID()]
+				if !ok {
+					fmt.Println(errors.Errorf("Table with ID %d not found in manifest file. Skipping", t.ID()))
+					return
+				}
+				if err := t.VerifyChecksum(table.Checksum); err != nil {
+					rerr = y.Wrapf(err, "failed to verify checksum for file %s", t.Filename())
+				}
+			}(t)
+		}
+	}
+	return throttle.Finish()
 }

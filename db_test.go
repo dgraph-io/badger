@@ -1779,3 +1779,26 @@ func TestMain(m *testing.M) {
 	}()
 	os.Exit(m.Run())
 }
+
+func TestVerifyChecksum(t *testing.T) {
+	dir, err := ioutil.TempDir(".", "badger")
+	require.NoError(t, err, "cannot create badger dir")
+	defer os.RemoveAll(dir)
+
+	opt := getTestOptions(dir)
+	db, err := Open(opt)
+	require.NoError(t, err)
+
+	wb := db.NewWriteBatch()
+	for i := 0; i < 10000; i++ {
+		wb.Set([]byte(fmt.Sprintf("%5d", i)), []byte(fmt.Sprintf("%5d", i)), 0x00)
+	}
+	wb.Flush()
+
+	// Ensure manifest has some tables
+	require.NotZero(t, len(db.manifest.manifest.Tables))
+
+	// Validate checksum against information in manifest file
+	require.NoError(t, db.VerifyChecksum())
+	require.NoError(t, db.Close())
+}

@@ -140,19 +140,6 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 	}
 
 	t.tableSize = int(fileInfo.Size())
-
-	// We first load to RAM, so we can read the index and do checksum.
-	if err := t.loadToRAM(); err != nil {
-		return nil, err
-	}
-	// Enforce checksum before we read index. Otherwise, if the file was
-	// truncated, we'd end up with panics in readIndex.
-	if len(cksum) > 0 && !bytes.Equal(t.Checksum, cksum) {
-		return nil, fmt.Errorf(
-			"CHECKSUM_MISMATCH: Table checksum does not match checksum in MANIFEST."+
-				" NOT including table %s. This would lead to missing data."+
-				"\n  sha256 %x Expected\n  sha256 %x Found\n", filename, cksum, t.Checksum)
-	}
 	if err := t.readIndex(); err != nil {
 		return nil, y.Wrap(err)
 	}
@@ -173,7 +160,16 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 
 	switch mode {
 	case options.LoadToRAM:
-		// No need to do anything. t.mmap is already filled.
+		if _, err := fd.Seek(0, io.SeekStart); err != nil {
+			return nil, err
+		}
+		t.mmap = make([]byte, t.tableSize)
+		bytesRead, err := fd.Read(t.mmap)
+		if err != nil || bytesRead != t.tableSize {
+			return nil, y.Wrapf(err, "Unable to load file in memory. Table file: %s", t.Filename())
+		}
+		y.NumReads.Add(1)
+		y.NumBytesRead.Add(int64(bytesRead))
 	case options.MemoryMap:
 		t.mmap, err = y.Mmap(fd, false, fileInfo.Size())
 		if err != nil {
@@ -219,9 +215,6 @@ func (t *Table) readNoFail(off, sz int) []byte {
 }
 
 func (t *Table) readIndex() error {
-	if len(t.mmap) != t.tableSize {
-		panic("Table size does not match the read bytes")
-	}
 	readPos := t.tableSize
 
 	// Read bloom filter.
@@ -338,19 +331,26 @@ func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, IDToFilename(id))
 }
 
-func (t *Table) loadToRAM() error {
+// VerifyChecksum generates the sha256 for the contents of the table and validated it against
+// the given checksum
+func (t *Table) VerifyChecksum(checksum []byte) error {
 	if _, err := t.fd.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	t.mmap = make([]byte, t.tableSize)
 	sum := sha256.New()
-	tee := io.TeeReader(t.fd, sum)
-	read, err := tee.Read(t.mmap)
-	if err != nil || read != t.tableSize {
-		return y.Wrapf(err, "Unable to load file in memory. Table file: %s", t.Filename())
+	bytesRead, err := io.Copy(sum, t.fd)
+	if err != nil || bytesRead != int64(t.tableSize) {
+		return y.Wrapf(err,
+			"Unable to read entire file for checksum calculation.Table file: %s", t.Filename())
 	}
 	t.Checksum = sum.Sum(nil)
-	y.NumReads.Add(1)
-	y.NumBytesRead.Add(int64(read))
+	if len(checksum) > 0 && !bytes.Equal(t.Checksum, checksum) {
+		fmt.Println("checksum validation failed")
+		return fmt.Errorf(
+			"CHECKSUM_MISMATCH: Table checksum does not match checksum in MANIFEST."+
+				" NOT including table %s. This would lead to missing data."+
+				"\n  sha256 %x Expected\n  sha256 %x Found\n", t.Filename(), checksum, t.Checksum)
+	}
+	// fmt.Printf("Checksum equal for %s\n", t.Filename())
 	return nil
 }
