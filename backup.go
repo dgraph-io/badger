@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
-	"sync"
 
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
@@ -131,38 +130,73 @@ func writeTo(entry *pb.KV, w io.Writer) error {
 	return err
 }
 
+type loader struct {
+	db       *DB
+	throttle *y.Throttle
+	entries  []*Entry
+}
+
+func (db *DB) newLoader(maxPendingWrites int) *loader {
+	return &loader{
+		db:       db,
+		throttle: y.NewThrottle(maxPendingWrites),
+	}
+}
+
+func (l *loader) set(kv *pb.KV) error {
+	var userMeta, meta byte
+	if len(kv.UserMeta) > 0 {
+		userMeta = kv.UserMeta[0]
+	}
+	if len(kv.Meta) > 0 {
+		meta = kv.Meta[0]
+	}
+
+	l.entries = append(l.entries, &Entry{
+		Key:       y.KeyWithTs(kv.Key, kv.Version),
+		Value:     kv.Value,
+		UserMeta:  userMeta,
+		ExpiresAt: kv.ExpiresAt,
+		meta:      meta,
+	})
+	if len(l.entries) >= 1000 {
+		return l.send()
+	}
+	return nil
+}
+
+func (l *loader) send() error {
+	if err := l.throttle.Do(); err != nil {
+		return err
+	}
+	l.db.batchSetAsync(l.entries, func(err error) {
+		l.throttle.Done(err)
+	})
+
+	l.entries = make([]*Entry, 0, 1000)
+	return nil
+}
+
+func (l *loader) finish() error {
+	if len(l.entries) > 0 {
+		if err := l.send(); err != nil {
+			return err
+		}
+	}
+	return l.throttle.Finish()
+}
+
 // Load reads a protobuf-encoded list of all entries from a reader and writes
 // them to the database. This can be used to restore the database from a backup
 // made by calling DB.Backup().
 //
 // DB.Load() should be called on a database that is not running any other
 // concurrent transactions while it is running.
-func (db *DB) Load(r io.Reader) error {
+func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 	br := bufio.NewReaderSize(r, 16<<10)
 	unmarshalBuf := make([]byte, 1<<10)
-	var entries []*Entry
-	var wg sync.WaitGroup
-	errChan := make(chan error, 1)
 
-	// func to check for pending error before sending off a batch for writing
-	batchSetAsyncIfNoErr := func(entries []*Entry) error {
-		select {
-		case err := <-errChan:
-			return err
-		default:
-			wg.Add(1)
-			return db.batchSetAsync(entries, func(err error) {
-				defer wg.Done()
-				if err != nil {
-					select {
-					case errChan <- err:
-					default:
-					}
-				}
-			})
-		}
-	}
-
+	ldr := db.newLoader(maxPendingWrites)
 	for {
 		var sz uint64
 		err := binary.Read(br, binary.LittleEndian, &sz)
@@ -176,51 +210,26 @@ func (db *DB) Load(r io.Reader) error {
 			unmarshalBuf = make([]byte, sz)
 		}
 
-		e := &pb.KV{}
 		if _, err = io.ReadFull(br, unmarshalBuf[:sz]); err != nil {
 			return err
 		}
-		if err = e.Unmarshal(unmarshalBuf[:sz]); err != nil {
+		kv := &pb.KV{}
+		if err = kv.Unmarshal(unmarshalBuf[:sz]); err != nil {
 			return err
 		}
-		var userMeta byte
-		if len(e.UserMeta) > 0 {
-			userMeta = e.UserMeta[0]
+		if err := ldr.set(kv); err != nil {
+			return err
 		}
-		entries = append(entries, &Entry{
-			Key:       y.KeyWithTs(e.Key, e.Version),
-			Value:     e.Value,
-			UserMeta:  userMeta,
-			ExpiresAt: e.ExpiresAt,
-			meta:      e.Meta[0],
-		})
 		// Update nextTxnTs, memtable stores this timestamp in badger head
 		// when flushed.
-		if e.Version >= db.orc.nextTxnTs {
-			db.orc.nextTxnTs = e.Version + 1
-		}
-
-		if len(entries) == 1000 {
-			if err := batchSetAsyncIfNoErr(entries); err != nil {
-				return err
-			}
-			entries = make([]*Entry, 0, 1000)
+		if kv.Version >= db.orc.nextTxnTs {
+			db.orc.nextTxnTs = kv.Version + 1
 		}
 	}
 
-	if len(entries) > 0 {
-		if err := batchSetAsyncIfNoErr(entries); err != nil {
-			return err
-		}
-	}
-	wg.Wait()
-
-	select {
-	case err := <-errChan:
+	if err := ldr.finish(); err != nil {
 		return err
-	default:
-		// Mark all versions done up until nextTxnTs.
-		db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
-		return nil
 	}
+	db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
+	return nil
 }

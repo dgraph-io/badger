@@ -89,7 +89,7 @@ func TestBackupRestore1(t *testing.T) {
 	require.NoError(t, err)
 	defer bak.Close()
 
-	require.NoError(t, db.Load(bak))
+	require.NoError(t, db.Load(bak, 16))
 
 	err = db.View(func(txn *Txn) error {
 		opts := DefaultIteratorOptions
@@ -173,7 +173,7 @@ func TestBackupRestore2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = db2.Load(&backup)
+	err = db2.Load(&backup, 16)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestBackupRestore2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = db3.Load(&backup)
+	err = db3.Load(&backup, 16)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestBackupRestore3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	require.NoError(t, db2.Load(&bb))
+	require.NoError(t, db2.Load(&bb, 16))
 
 	// verify
 	err = db2.View(func(txn *Txn) error {
@@ -482,7 +482,7 @@ func TestBackupLoadIncremental(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	require.NoError(t, db2.Load(&bb))
+	require.NoError(t, db2.Load(&bb, 16))
 
 	// verify
 	actual := make(map[int]byte)

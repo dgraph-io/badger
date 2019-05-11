@@ -526,7 +526,8 @@ func (s *levelsController) compactBuildTables(
 
 			vs := it.Value()
 			version := y.ParseTs(it.Key())
-			if version <= discardTs {
+			// Do not discard entries inserted by merge operator. These entries will be discarded once they're merged
+			if version <= discardTs && vs.Meta&bitMergeEntry == 0 {
 				// Keep track of the number of versions encountered for this key. Only consider the
 				// versions which are below the minReadTs, otherwise, we might end up discarding the
 				// only valid version for a running transaction.
@@ -952,14 +953,18 @@ type TableInfo struct {
 	KeyCount uint64 // Number of keys in the table
 }
 
-func (s *levelsController) getTableInfo() (result []TableInfo) {
+func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo) {
 	for _, l := range s.levels {
+		l.RLock()
 		for _, t := range l.tables {
-			it := t.NewIterator(false)
 			var count uint64
-			for it.Rewind(); it.Valid(); it.Next() {
-				count++
+			if withKeysCount {
+				it := t.NewIterator(false)
+				for it.Rewind(); it.Valid(); it.Next() {
+					count++
+				}
 			}
+
 			info := TableInfo{
 				ID:       t.ID(),
 				Level:    l.level,
@@ -969,6 +974,7 @@ func (s *levelsController) getTableInfo() (result []TableInfo) {
 			}
 			result = append(result, info)
 		}
+		l.RUnlock()
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Level != result[j].Level {
