@@ -347,6 +347,21 @@ func runTest(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 
 	var tmpDb *badger.DB
+	var subscribeDB *badger.DB
+	dir, err := ioutil.TempDir("", "bank_subscribe")
+	y.Check(err)
+
+	subscribeOpts := badger.DefaultOptions
+	subscribeOpts.Dir = dir
+	subscribeOpts.ValueDir = dir
+	subscribeOpts.SyncWrites = false
+	log.Printf("Opening subscribe DB with options: %+v\n", subscribeOpts)
+
+	subscribeDB, err = badger.Open(subscribeOpts)
+	if err != nil {
+		return err
+	}
+	defer subscribeDB.Close()
 	if checkStream {
 		dir, err := ioutil.TempDir("", "bank_stream")
 		y.Check(err)
@@ -511,8 +526,37 @@ func runTest(cmd *cobra.Command, args []string) error {
 			}))
 		}
 	}()
-	wg.Wait()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	var subWg sync.WaitGroup
+	subWg.Add(1)
+	go func() {
+		defer subWg.Done()
+		accountIDS := [][]byte{}
+		for i := 0; i < numAccounts; i++ {
+			accountIDS = append(accountIDS, key(i))
+		}
+		updater := func(kvs *pb.KVList) {
+			batch := subscribeDB.NewWriteBatch()
+			for _, kv := range kvs.GetKv() {
+				y.Check(batch.Set(kv.Key, kv.Value, 0))
+			}
+			y.Check(batch.Flush())
+		}
+		db.Subscribe(ctx, updater, accountIDS[0], accountIDS[1:]...)
+	}()
+	wg.Wait()
+	cancel()
+	subWg.Wait()
+	y.Check(subscribeDB.View(func(txn *badger.Txn) error {
+		_, err := seekTotal(txn)
+		if err != nil {
+			log.Printf("Error while calculating subscriber DB total: %v", err)
+		} else {
+			atomic.AddUint64(&reads, 1)
+		}
+		return nil
+	}))
 	if atomic.LoadInt32(&stopAll) == 0 {
 		log.Println("Test OK")
 		return nil

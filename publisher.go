@@ -38,7 +38,7 @@ type publisher struct {
 
 func newPublisher() *publisher {
 	return &publisher{
-		pubCh:       make(chan requests, 10000),
+		pubCh:       make(chan requests, 1000000),
 		subscribers: make(map[uint64]subscriber),
 		nextID:      0,
 	}
