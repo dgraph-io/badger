@@ -60,7 +60,9 @@ func (db *DB) GetMergeOperator(key []byte,
 
 var errNoMerge = errors.New("No need for merge")
 
-func (op *MergeOperator) iterateAndMerge(txn *Txn) (val []byte, err error) {
+func (op *MergeOperator) iterateAndMerge() (val []byte, lastVersion uint64, err error) {
+	txn := op.db.NewTransaction(false)
+	defer txn.Discard()
 	opt := DefaultIteratorOptions
 	opt.AllVersions = true
 	it := txn.NewKeyIterator(op.key, opt)
@@ -73,14 +75,15 @@ func (op *MergeOperator) iterateAndMerge(txn *Txn) (val []byte, err error) {
 		if numVersions == 1 {
 			val, err = item.ValueCopy(val)
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
+			lastVersion = item.Version()
 		} else {
 			if err := item.Value(func(newVal []byte) error {
 				val = op.f(val, newVal)
 				return nil
 			}); err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 		}
 		if item.DiscardEarlierVersions() {
@@ -88,36 +91,30 @@ func (op *MergeOperator) iterateAndMerge(txn *Txn) (val []byte, err error) {
 		}
 	}
 	if numVersions == 0 {
-		return nil, ErrKeyNotFound
+		return nil, lastVersion, ErrKeyNotFound
 	} else if numVersions == 1 {
-		return val, errNoMerge
+		return val, lastVersion, errNoMerge
 	}
-	return val, nil
+	return val, lastVersion, nil
 }
 
 func (op *MergeOperator) compact() error {
 	op.Lock()
 	defer op.Unlock()
-	err := op.db.Update(func(txn *Txn) error {
-		var (
-			val []byte
-			err error
-		)
-		val, err = op.iterateAndMerge(txn)
-		if err != nil {
-			return err
-		}
-		// Write value back to the DB. It is important that we do not set the bitMergeEntry bit
-		// here. When compaction happens, all the older merged entries will be removed.
-		return txn.SetWithDiscard(op.key, val, 0)
-	})
-
+	val, version, err := op.iterateAndMerge()
 	if err == ErrKeyNotFound || err == errNoMerge {
-		// pass.
+		return nil
 	} else if err != nil {
 		return err
 	}
-	return nil
+	entries := []*Entry{
+		&Entry{
+			Key:   y.KeyWithTs(op.key, version),
+			Value: val,
+			meta:  bitDiscardEarlierVersions,
+		},
+	}
+	return op.db.batchSetAsync(entries, func(err error) {})
 }
 
 func (op *MergeOperator) runCompactions(dur time.Duration) {
@@ -157,7 +154,7 @@ func (op *MergeOperator) Get() ([]byte, error) {
 	defer op.RUnlock()
 	var existing []byte
 	err := op.db.View(func(txn *Txn) (err error) {
-		existing, err = op.iterateAndMerge(txn)
+		existing, _, err = op.iterateAndMerge()
 		return err
 	})
 	if err == errNoMerge {
