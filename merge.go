@@ -130,7 +130,11 @@ func (op *MergeOperator) runCompactions(dur time.Duration) {
 			stop = true
 		case <-ticker.C: // wait for tick
 		}
-		if err := op.compact(); err != nil {
+		// Skip error logging if the error is transaction conflict.
+		// There might be multiple transaction conflict errors if merge
+		// compaction is running very often. This isn't really a problem for merge
+		// operator because the entries will be compacted (merged) in the next transaction.
+		if err := op.compact(); err != nil && err != ErrConflict {
 			op.db.opt.Errorf("failure while running merge operation: %s", err)
 		}
 		if stop {
