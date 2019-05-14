@@ -17,7 +17,6 @@
 package table
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -141,18 +140,23 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 
 	t.tableSize = int(fileInfo.Size())
 
-	// We first load to RAM, so we can read the index and do checksum.
-	if err := t.loadToRAM(); err != nil {
-		return nil, err
-	}
-	// Enforce checksum before we read index. Otherwise, if the file was
-	// truncated, we'd end up with panics in readIndex.
-	if len(cksum) > 0 && !bytes.Equal(t.Checksum, cksum) {
-		return nil, fmt.Errorf(
-			"CHECKSUM_MISMATCH: Table checksum does not match checksum in MANIFEST."+
-				" NOT including table %s. This would lead to missing data."+
-				"\n  sha256 %x Expected\n  sha256 %x Found\n", filename, cksum, t.Checksum)
-	}
+	// The following code block is intentionally commented out. Removing the loadToRAM()
+	// call lead to significant performance improvement (see
+	// https://github.com/dgraph-io/badger/pull/808). We will be adding block level checksum
+	// (currently we have a table level checksum) along with a block level cache in near future.
+	//
+	// // We first load to RAM, so we can read the index and do checksum.
+	// if err := t.loadToRAM(); err != nil {
+	// 	return nil, err
+	// }
+	// // Enforce checksum before we read index. Otherwise, if the file was
+	// // truncated, we'd end up with panics in readIndex.
+	// if len(cksum) > 0 && !bytes.Equal(t.Checksum, cksum) {
+	// 	return nil, fmt.Errorf(
+	// 		"CHECKSUM_MISMATCH: Table checksum does not match checksum in MANIFEST."+
+	// 			" NOT including table %s. This would lead to missing data."+
+	// 			"\n  sha256 %x Expected\n  sha256 %x Found\n", filename, cksum, t.Checksum)
+	// }
 	if err := t.readIndex(); err != nil {
 		return nil, y.Wrap(err)
 	}
@@ -219,9 +223,6 @@ func (t *Table) readNoFail(off, sz int) []byte {
 }
 
 func (t *Table) readIndex() error {
-	if len(t.mmap) != t.tableSize {
-		panic("Table size does not match the read bytes")
-	}
 	readPos := t.tableSize
 
 	// Read bloom filter.
