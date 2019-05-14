@@ -331,26 +331,34 @@ func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, IDToFilename(id))
 }
 
-// VerifyChecksum generates the sha256 for the contents of the table and validated it against
+// VerifyChecksum generates the sha256 for the contents of the table and validates it against
 // the given checksum
 func (t *Table) VerifyChecksum(checksum []byte) error {
-	if _, err := t.fd.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
 	sum := sha256.New()
-	bytesRead, err := io.Copy(sum, t.fd)
-	if err != nil || bytesRead != int64(t.tableSize) {
-		return y.Wrapf(err,
-			"Unable to read entire file for checksum calculation.Table file: %s", t.Filename())
+	if t.loadingMode == options.LoadToRAM {
+		bytesWritten, err := sum.Write(t.mmap)
+		if err != nil || bytesWritten != t.tableSize {
+			return y.Wrapf(err,
+				"Unable to read entire mmap for checksum calculation. Table file: %s", t.Filename())
+		}
+	} else {
+		if _, err := t.fd.Seek(0, io.SeekStart); err != nil {
+			return y.Wrapf(err,
+				"Unable to seek to start for checksum calculation. Table file %s", t.Filename())
+		}
+		bytesRead, err := io.Copy(sum, t.fd)
+		if err != nil || bytesRead != int64(t.tableSize) {
+			return y.Wrapf(err,
+				"Unable to read entire file for checksum calculation. Table file: %s", t.Filename())
+		}
 	}
 	t.Checksum = sum.Sum(nil)
 	if len(checksum) > 0 && !bytes.Equal(t.Checksum, checksum) {
 		fmt.Println("checksum validation failed")
 		return fmt.Errorf(
-			"CHECKSUM_MISMATCH: Table checksum does not match checksum in MANIFEST."+
+			"CHECKSUM_MISMATCH: Table checksum does not match the checksum in MANIFEST."+
 				" NOT including table %s. This would lead to missing data."+
 				"\n  sha256 %x Expected\n  sha256 %x Found\n", t.Filename(), checksum, t.Checksum)
 	}
-	// fmt.Printf("Checksum equal for %s\n", t.Filename())
 	return nil
 }
