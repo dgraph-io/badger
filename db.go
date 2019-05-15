@@ -1299,6 +1299,9 @@ func (db *DB) DropAll() error {
 	if err != nil {
 		return err
 	}
+	if f == nil {
+		panic("both error and returned function cannot be nil in DropAll")
+	}
 	f()
 	return nil
 }

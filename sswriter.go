@@ -27,6 +27,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+// StreamWriter is used to write data coming from multiple streams. It expects keys to be in sorted
+// order from each stream. Internally it contains one sorted writer for each stream.
 type StreamWriter struct {
 	db         *DB
 	done       func()
@@ -36,6 +38,8 @@ type StreamWriter struct {
 	writers    map[uint32]*sortedWriter
 }
 
+// NewStreamWriter creates a StreamWriter. It is called with maxPending.
+// maxPending is the throttle count for concurrent SST creations.
 func (db *DB) NewStreamWriter(maxPending int) *StreamWriter {
 	return &StreamWriter{
 		db:       db,
@@ -44,12 +48,15 @@ func (db *DB) NewStreamWriter(maxPending int) *StreamWriter {
 	}
 }
 
+// Prepare should be called before writing any entry to StreamWriter.
+// It cleans up all the data currently present in DB.
 func (sw *StreamWriter) Prepare() error {
 	var err error
 	sw.done, err = sw.db.dropAll()
 	return err
 }
 
+// Write writes KVList to DB.
 func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 	var entries []*Entry
 	for _, kv := range kvs.Kv {
@@ -121,6 +128,8 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 	return nil
 }
 
+// Done is called once, we are done writing all the entries. It syncs DB directories.
+// It also updates Oracle with maxVersion found in all entries(if DB is not managed).
 func (sw *StreamWriter) Done() error {
 	defer sw.done()
 	for _, writer := range sw.writers {
@@ -170,22 +179,24 @@ type sortedWriter struct {
 
 	builder  *table.Builder
 	lastKey  []byte
-	streamId uint32
+	streamID uint32
 }
 
-func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
+func (sw *StreamWriter) newWriter(streamID uint32) *sortedWriter {
 	return &sortedWriter{
 		db:       sw.db,
-		streamId: streamId,
+		streamID: streamID,
 		throttle: sw.throttle,
 		builder:  table.NewTableBuilder(),
 	}
 }
 
+// ErrUnsortedKey is returned when any out of order key arrives at sortedWriter during call to Add.
 var ErrUnsortedKey = errors.New("Keys not in sorted order")
 
+// Add adds key and vs to sortedWriter.
 func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
-	if bytes.Compare(key, w.lastKey) < 0 {
+	if bytes.Compare(key, w.lastKey) <= 0 {
 		return ErrUnsortedKey
 	}
 	sameKey := y.SameKey(key, w.lastKey)
@@ -214,6 +225,8 @@ func (w *sortedWriter) send() error {
 	return nil
 }
 
+// Done is called once we are done writing all keys and valueStructs
+// to sortedWriter. It completes writing current SST to disk.
 func (w *sortedWriter) Done() error {
 	if w.builder.Empty() {
 		return nil
@@ -225,8 +238,8 @@ func (w *sortedWriter) createTable(data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
-	fileId := w.db.lc.reserveFileID()
-	fd, err := y.CreateSyncedFile(table.NewFilename(fileId, w.db.opt.Dir), true)
+	fileID := w.db.lc.reserveFileID()
+	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, w.db.opt.Dir), true)
 	if err != nil {
 		return err
 	}
@@ -264,6 +277,6 @@ func (w *sortedWriter) createTable(data []byte) error {
 		return err
 	}
 	w.db.opt.Infof("Table created: %d at level: %d for stream: %d. Size: %s\n",
-		fileId, lhandler.level, w.streamId, humanize.Bytes(uint64(tbl.Size())))
+		fileID, lhandler.level, w.streamID, humanize.Bytes(uint64(tbl.Size())))
 	return nil
 }

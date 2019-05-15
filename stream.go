@@ -131,7 +131,6 @@ func (st *Stream) produceRanges(ctx context.Context) {
 				filtered = append(filtered, split)
 			}
 		}
-		fmt.Printf("NumGo: %d\n", st.NumGo)
 		fmt.Printf("Before: %v\n", len(splits))
 		fmt.Printf("After: %v\n", len(filtered))
 		splits = filtered
