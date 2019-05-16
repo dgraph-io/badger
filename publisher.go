@@ -38,7 +38,7 @@ type publisher struct {
 
 func newPublisher() *publisher {
 	return &publisher{
-		pubCh:       make(chan requests, 1000000),
+		pubCh:       make(chan requests, 1000),
 		subscribers: make(map[uint64]subscriber),
 		nextID:      0,
 	}
@@ -49,17 +49,29 @@ func (p *publisher) listenForUpdates(c *y.Closer) {
 		p.cleanSubscribers()
 		c.Done()
 	}()
+	slurp := func(batch []*request) {
+		for {
+			select {
+			case reqs := <-p.pubCh:
+				batch = append(batch, reqs...)
+			default:
+				p.publishUpdates(batch)
+				return
+			}
+		}
+	}
 	for {
 		select {
 		case <-c.HasBeenClosed():
 			return
 		case reqs := <-p.pubCh:
-			p.publishUpdates(reqs)
+			slurp(reqs)
 		}
 	}
 }
 
 func (p *publisher) publishUpdates(reqs requests) {
+	kvs := &pb.KVList{}
 	p.Lock()
 	defer func() {
 		p.Unlock()
@@ -67,7 +79,6 @@ func (p *publisher) publishUpdates(reqs requests) {
 		reqs.DecrRef()
 	}()
 	for _, s := range p.subscribers {
-		kvs := &pb.KVList{}
 		for _, prefix := range s.prefixes {
 			for _, req := range reqs {
 				for _, e := range req.Entries {
@@ -87,10 +98,7 @@ func (p *publisher) publishUpdates(reqs requests) {
 			}
 		}
 		if len(kvs.GetKv()) > 0 {
-			select {
-			case s.sendCh <- kvs:
-			default:
-			}
+			s.sendCh <- kvs
 		}
 	}
 }
@@ -123,16 +131,21 @@ func (p *publisher) cleanSubscribers() {
 func (p *publisher) deleteSubscriber(id uint64) {
 	p.Lock()
 	defer p.Unlock()
-	_, ok := p.subscribers[id]
-	if !ok {
+	if _, ok := p.subscribers[id]; !ok {
 		return
 	}
 	delete(p.subscribers, id)
 }
 
 func (p *publisher) sendUpdates(reqs []*request) {
-	select {
-	case p.pubCh <- reqs:
-	default:
+	//TODO: prefix check before pushing into pubCh
+	if p.noOfSubscribers() != 0 {
+		p.pubCh <- reqs
 	}
+}
+
+func (p *publisher) noOfSubscribers() int {
+	p.Lock()
+	defer p.Unlock()
+	return len(p.subscribers)
 }

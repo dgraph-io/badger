@@ -1517,23 +1517,28 @@ func TestGoroutineLeak(t *testing.T) {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			updated := false
 			ctx, cancel := context.WithCancel(context.Background())
+			var wg sync.WaitGroup
+			wg.Add(1)
+			var subWg sync.WaitGroup
+			subWg.Add(1)
 			go func() {
+				subWg.Done()
 				err := db.Subscribe(ctx, func(kvs *pb.KVList) {
 					require.Equal(t, []byte("value"), kvs.Kv[0].GetValue())
 					updated = true
+					wg.Done()
 				}, []byte("key"))
 				if err != nil {
 					require.Equal(t, err.Error(), context.Canceled.Error())
 				}
 			}()
+			subWg.Wait()
 			err := db.Update(func(txn *Txn) error {
 				return txn.Set([]byte("key"), []byte("value"))
 			})
-			// calling unsubscribe will straight away stop the cb runner.
-			// need some to reach the subscriber
-			time.Sleep(1 * time.Millisecond)
-			cancel()
 			require.NoError(t, err)
+			wg.Wait()
+			cancel()
 			require.Equal(t, true, updated)
 		})
 	}

@@ -31,7 +31,10 @@ func TestPublisherOrdering(t *testing.T) {
 		order := []string{}
 		var wg sync.WaitGroup
 		wg.Add(1)
+		var subWg sync.WaitGroup
+		subWg.Add(1)
 		go func() {
+			subWg.Done()
 			updates := 0
 			err := db.Subscribe(context.Background(), func(kvs *pb.KVList) {
 				updates += len(kvs.GetKv())
@@ -46,6 +49,7 @@ func TestPublisherOrdering(t *testing.T) {
 				require.Equal(t, err.Error(), context.Canceled.Error())
 			}
 		}()
+		subWg.Wait()
 		for i := 0; i < 5; i++ {
 			db.Update(func(txn *Txn) error {
 				return txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
@@ -62,7 +66,10 @@ func TestMutiplePrefix(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		var wg sync.WaitGroup
 		wg.Add(1)
+		var subWg sync.WaitGroup
+		subWg.Add(1)
 		go func() {
+			subWg.Done()
 			updates := 0
 			err := db.Subscribe(context.Background(), func(kvs *pb.KVList) {
 				updates += len(kvs.GetKv())
@@ -81,7 +88,7 @@ func TestMutiplePrefix(t *testing.T) {
 				require.Equal(t, err.Error(), context.Canceled.Error())
 			}
 		}()
-
+		subWg.Wait()
 		db.Update(func(txn *Txn) error {
 			return txn.Set([]byte("key"), []byte("value"))
 		})
