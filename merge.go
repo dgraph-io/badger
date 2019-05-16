@@ -107,8 +107,8 @@ func (op *MergeOperator) compact() error {
 		if err != nil {
 			return err
 		}
-
-		// Write value back to db
+		// Write value back to the DB. It is important that we do not set the bitMergeEntry bit
+		// here. When compaction happens, all the older merged entries will be removed.
 		return txn.SetWithDiscard(op.key, val, 0)
 	})
 
@@ -144,7 +144,7 @@ func (op *MergeOperator) runCompactions(dur time.Duration) {
 // routine into the values that were recorded by previous invocations to Add().
 func (op *MergeOperator) Add(val []byte) error {
 	return op.db.Update(func(txn *Txn) error {
-		return txn.Set(op.key, val)
+		return txn.setMergeEntry(op.key, val)
 	})
 }
 

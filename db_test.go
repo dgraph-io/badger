@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/skl"
 
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
@@ -1725,6 +1726,48 @@ func TestNoCrash(t *testing.T) {
 	db, err = Open(ops)
 	require.Nil(t, err, "error while opening db")
 	require.NoError(t, db.Close())
+}
+
+func TestForceFlushMemtable(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger")
+	require.NoError(t, err, "temp dir for badger count not be created")
+
+	ops := getTestOptions(dir)
+	ops.ValueLogMaxEntries = 1
+	ops.LogRotatesToFlush = 1
+
+	db, err := Open(ops)
+	require.NoError(t, err, "error while openning db")
+	defer db.Close()
+
+	for i := 0; i < 3; i++ {
+		err = db.Update(func(txn *Txn) error {
+			return txn.Set([]byte(fmt.Sprintf("key-%d", i)), []byte(fmt.Sprintf("value-%d", i)))
+		})
+		require.NoError(t, err, "unable to set key and value")
+	}
+	time.Sleep(1 * time.Second)
+
+	// We want to make sure that memtable is flushed on disk. While flushing memtable to disk,
+	// latest head is also stored in it. Hence we will try to read head from disk. To make sure
+	// this. we will truncate all memtables.
+	db.Lock()
+	db.mt.DecrRef()
+	for _, mt := range db.imm {
+		mt.DecrRef()
+	}
+	db.imm = db.imm[:0]
+	db.mt = skl.NewSkiplist(arenaSize(db.opt)) // Set it up for future writes.
+	db.Unlock()
+
+	// get latest value of value log head
+	headKey := y.KeyWithTs(head, math.MaxUint64)
+	vs, err := db.get(headKey)
+	var vptr valuePointer
+	vptr.Decode(vs.Value)
+	// Since we are inserting 3 entries and ValueLogMaxEntries is 1, there will be 3 rotation. For
+	// 1st and 2nd time head flushed with memtable will have fid as 0 and last time it will be 1.
+	require.True(t, vptr.Fid == 1, fmt.Sprintf("expected fid: %d, actual fid: %d", 1, vptr.Fid))
 }
 
 func TestMain(m *testing.M) {

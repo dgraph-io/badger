@@ -105,11 +105,8 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 			if maxVersion < kv.Version {
 				maxVersion = kv.Version
 			}
-			if err := writeTo(kv, w); err != nil {
-				return err
-			}
 		}
-		return nil
+		return writeTo(list, w)
 	}
 
 	if err := stream.Orchestrate(context.Background()); err != nil {
@@ -118,11 +115,11 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 	return maxVersion, nil
 }
 
-func writeTo(entry *pb.KV, w io.Writer) error {
-	if err := binary.Write(w, binary.LittleEndian, uint64(entry.Size())); err != nil {
+func writeTo(list *pb.KVList, w io.Writer) error {
+	if err := binary.Write(w, binary.LittleEndian, uint64(list.Size())); err != nil {
 		return err
 	}
-	buf, err := entry.Marshal()
+	buf, err := list.Marshal()
 	if err != nil {
 		return err
 	}
@@ -130,20 +127,20 @@ func writeTo(entry *pb.KV, w io.Writer) error {
 	return err
 }
 
-type Loader struct {
+type loader struct {
 	db       *DB
 	throttle *y.Throttle
 	entries  []*Entry
 }
 
-func (db *DB) NewLoader(maxPendingWrites int) *Loader {
-	return &Loader{
+func (db *DB) newLoader(maxPendingWrites int) *loader {
+	return &loader{
 		db:       db,
 		throttle: y.NewThrottle(maxPendingWrites),
 	}
 }
 
-func (l *Loader) Set(kv *pb.KV) error {
+func (l *loader) set(kv *pb.KV) error {
 	var userMeta, meta byte
 	if len(kv.UserMeta) > 0 {
 		userMeta = kv.UserMeta[0]
@@ -165,7 +162,7 @@ func (l *Loader) Set(kv *pb.KV) error {
 	return nil
 }
 
-func (l *Loader) send() error {
+func (l *loader) send() error {
 	if err := l.throttle.Do(); err != nil {
 		return err
 	}
@@ -177,7 +174,7 @@ func (l *Loader) send() error {
 	return nil
 }
 
-func (l *Loader) Finish() error {
+func (l *loader) finish() error {
 	if len(l.entries) > 0 {
 		if err := l.send(); err != nil {
 			return err
@@ -196,7 +193,7 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 	br := bufio.NewReaderSize(r, 16<<10)
 	unmarshalBuf := make([]byte, 1<<10)
 
-	loader := db.NewLoader(maxPendingWrites)
+	ldr := db.newLoader(maxPendingWrites)
 	for {
 		var sz uint64
 		err := binary.Read(br, binary.LittleEndian, &sz)
@@ -213,21 +210,26 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 		if _, err = io.ReadFull(br, unmarshalBuf[:sz]); err != nil {
 			return err
 		}
-		kv := &pb.KV{}
-		if err = kv.Unmarshal(unmarshalBuf[:sz]); err != nil {
+
+		list := &pb.KVList{}
+		if err := list.Unmarshal(unmarshalBuf[:sz]); err != nil {
 			return err
 		}
-		if err := loader.Set(kv); err != nil {
-			return err
-		}
-		// Update nextTxnTs, memtable stores this timestamp in badger head
-		// when flushed.
-		if kv.Version >= db.orc.nextTxnTs {
-			db.orc.nextTxnTs = kv.Version + 1
+
+		for _, kv := range list.Kv {
+			if err := ldr.set(kv); err != nil {
+				return err
+			}
+
+			// Update nextTxnTs, memtable stores this
+			// timestamp in badger head when flushed.
+			if kv.Version >= db.orc.nextTxnTs {
+				db.orc.nextTxnTs = kv.Version + 1
+			}
 		}
 	}
 
-	if err := loader.Finish(); err != nil {
+	if err := ldr.finish(); err != nil {
 		return err
 	}
 	db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
