@@ -57,7 +57,7 @@ func TestStreamWriter1(t *testing.T) {
 			noOfKeys := 1000
 			valueSize := 128
 			list := getSortedKVList(valueSize, noOfKeys)
-			sw := db.NewStreamWriter(2)
+			sw := db.NewStreamWriter()
 			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 			require.NoError(t, sw.Write(list), "sw.Write() failed")
 			require.NoError(t, sw.Done(), "sw.Done() failed")
@@ -98,7 +98,7 @@ func TestStreamWriter2(t *testing.T) {
 			noOfKeys := 1000
 			valueSize := 128
 			list := getSortedKVList(valueSize, noOfKeys)
-			sw := db.NewStreamWriter(2)
+			sw := db.NewStreamWriter()
 			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 			require.NoError(t, sw.Write(list), "sw.Write() failed")
 			// get max version of sw, will be used in transactions for managed mode
@@ -166,7 +166,7 @@ func TestStreamWriter3(t *testing.T) {
 				counter = counter + 2
 			}
 
-			sw := db.NewStreamWriter(8)
+			sw := db.NewStreamWriter()
 			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 			require.NoError(t, sw.Write(list), "sw.Write() failed")
 			// get max version of sw, will be used in transactions for managed mode
