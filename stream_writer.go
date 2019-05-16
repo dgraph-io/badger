@@ -27,8 +27,17 @@ import (
 	"github.com/pkg/errors"
 )
 
-// StreamWriter is used to write data coming from multiple streams. It expects keys to be in sorted
-// order from each stream. Internally it contains one sorted writer for each stream.
+// StreamWriter is used to write data coming from multiple streams. The streams must not have any
+// overlapping key ranges. Within each stream, the keys must be sorted. Badger Stream framework is
+// capable of generating such an output. So, this StreamWriter can be used at the other end to build
+// BadgerDB at a much faster pace by writing SSTables (and value logs) directly to LSM tree levels
+// without causing any compactions at all. This is way faster than using batched writer or using
+// transactions, but only applicable in situations where the keys are pre-sorted and the DB is being
+// bootstrapped. Existing data would get deleted when using this writer. So, this is only useful
+// when restoring from backup or replicating DB across servers.
+//
+// StreamWriter should not be called on in-use DB instances. It is designed only to bootstrap new
+// DBs.
 type StreamWriter struct {
 	db         *DB
 	done       func()
@@ -38,25 +47,32 @@ type StreamWriter struct {
 	writers    map[uint32]*sortedWriter
 }
 
-// NewStreamWriter creates a StreamWriter. It is called with maxPending.
-// maxPending is the throttle count for concurrent SST creations.
-func (db *DB) NewStreamWriter(maxPending int) *StreamWriter {
+// NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
+// called. The memory usage of a StreamWriter is directly proportional to the number of streams
+// possible. So, efforts must be made to keep the number of streams low. Stream framework would
+// typically use 16 goroutines and hence create 16 streams.
+func (db *DB) NewStreamWriter() *StreamWriter {
 	return &StreamWriter{
-		db:       db,
-		throttle: y.NewThrottle(maxPending),
+		db: db,
+		// throttle shouldn't make much difference. Memory consumption is based on the number of
+		// concurrent streams being processed.
+		throttle: y.NewThrottle(16),
 		writers:  make(map[uint32]*sortedWriter),
 	}
 }
 
-// Prepare should be called before writing any entry to StreamWriter.
-// It cleans up all the data currently present in DB.
+// Prepare should be called before writing any entry to StreamWriter. It deletes all data present in
+// existing DB, stops compactions and any writes being done by other means. Be very careful when
+// calling Prepare, because it could result in permanent data loss. Not calling Prepare would result
+// in a corrupt Badger instance.
 func (sw *StreamWriter) Prepare() error {
 	var err error
 	sw.done, err = sw.db.dropAll()
 	return err
 }
 
-// Write writes KVList to DB.
+// Write writes KVList to DB. Each KV within the list contains the stream id which StreamWriter
+// would use to demux the writes.
 func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 	var entries []*Entry
 	for _, kv := range kvs.Kv {
@@ -128,8 +144,8 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 	return nil
 }
 
-// Done is called once, we are done writing all the entries. It syncs DB directories.
-// It also updates Oracle with maxVersion found in all entries(if DB is not managed).
+// Done is called once we are done writing all the entries. It syncs DB directories. It also
+// updates Oracle with maxVersion found in all entries (if DB is not managed).
 func (sw *StreamWriter) Done() error {
 	defer sw.done()
 	for _, writer := range sw.writers {
@@ -164,13 +180,12 @@ func (sw *StreamWriter) Done() error {
 	}
 
 	// Now sync the directories, so all the files are registered.
-	if err := syncDir(sw.db.opt.Dir); err != nil {
-		return err
-	}
 	if sw.db.opt.ValueDir != sw.db.opt.Dir {
-		return syncDir(sw.db.opt.ValueDir)
+		if err := syncDir(sw.db.opt.ValueDir); err != nil {
+			return err
+		}
 	}
-	return nil
+	return syncDir(sw.db.opt.Dir)
 }
 
 type sortedWriter struct {
