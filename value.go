@@ -991,6 +991,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 				return err
 			}
 			curlf = newlf
+			atomic.AddInt32(&vlog.db.logRotates, 1)
 		}
 		return nil
 	}
