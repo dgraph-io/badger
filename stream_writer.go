@@ -168,10 +168,11 @@ func (sw *StreamWriter) Done() error {
 	}
 
 	if !sw.db.opt.managedTxns {
+		sw.db.orc = newOracle(sw.db.opt)
 		sw.db.orc.nextTxnTs = sw.maxVersion
-		sw.db.orc.txnMark.Done(sw.db.orc.nextTxnTs)
-		sw.db.orc.readMark.Done(sw.db.orc.nextTxnTs)
-		sw.db.orc.nextTxnTs++
+		sw.db.orc.txnMark.Done(sw.maxVersion)
+		sw.db.orc.readMark.Done(sw.maxVersion)
+		sw.db.orc.incrementNextTs()
 	}
 
 	// Wait for all files to be written.

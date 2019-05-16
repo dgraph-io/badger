@@ -1357,6 +1357,7 @@ func (db *DB) dropAll() (func(), error) {
 		return nil, err
 	}
 	db.vhead = valuePointer{} // Zero it out.
+	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
 	return f, nil
 }

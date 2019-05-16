@@ -75,7 +75,7 @@ func fillSorted(db *badger.DB, num uint64) error {
 	value := make([]byte, valSz)
 	y.Check2(rand.Read(value))
 
-	writer := db.NewStreamWriter(8)
+	writer := db.NewStreamWriter()
 	if err := writer.Prepare(); err != nil {
 		return err
 	}

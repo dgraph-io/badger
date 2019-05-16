@@ -19,7 +19,6 @@ package badger
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -131,8 +130,6 @@ func (st *Stream) produceRanges(ctx context.Context) {
 				filtered = append(filtered, split)
 			}
 		}
-		fmt.Printf("Before: %v\n", len(splits))
-		fmt.Printf("After: %v\n", len(filtered))
 		splits = filtered
 	}
 
@@ -319,7 +316,7 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 
 	// kvChan should only have a small capacity to ensure that we don't buffer up too much data if
 	// sending is slow. Page size is set to 4MB, which is used to lazily cap the size of each
-	// KVList. To get around 128MB buffer, we can set the channel size to 32.
+	// KVList. To get 128MB buffer, we can set the channel size to 32.
 	st.kvChan = make(chan *pb.KVList, 32)
 
 	if st.KeyToList == nil {
