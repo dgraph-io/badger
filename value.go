@@ -978,8 +978,13 @@ func (vlog *valueLog) write(reqs []*request) error {
 	for i := range reqs {
 		b := reqs[i]
 		b.Ptrs = b.Ptrs[:0]
+		var written int
 		for j := range b.Entries {
 			e := b.Entries[j]
+			if e.skipVlog {
+				b.Ptrs = append(b.Ptrs, valuePointer{})
+				continue
+			}
 			var p valuePointer
 
 			p.Fid = curlf.fid
@@ -991,8 +996,9 @@ func (vlog *valueLog) write(reqs []*request) error {
 			}
 			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
+			written++
 		}
-		vlog.numEntriesWritten += uint32(len(b.Entries))
+		vlog.numEntriesWritten += uint32(written)
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
 		writeNow :=
