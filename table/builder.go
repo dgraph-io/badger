@@ -66,9 +66,10 @@ type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf *bytes.Buffer
 
-	blockSize  uint32
-	baseKey    []byte // Base key for the current block.
-	baseOffset uint32 // Offset for the current block.
+	blockSize         uint32
+	baseKey           []byte   // Base key for the current block.
+	baseOffset        uint32   // Offset for the current block.
+	blockEntryOffsets []uint32 // offsets of entries present in current block
 
 	restarts []uint32 // Base offsets of every block.
 
@@ -87,7 +88,8 @@ func NewTableBuilder() *Builder {
 		prevOffset: math.MaxUint32, // Used for the first element!
 
 		// TODO: make this configurable
-		blockSize: 4 * 1024,
+		blockSize:         4 * 1024,
+		blockEntryOffsets: make([]uint32, 0),
 	}
 }
 
@@ -136,7 +138,8 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 		vlen: uint16(v.EncodedSize()),
 		prev: b.prevOffset, // prevOffset is the location of the last key-value added.
 	}
-	b.prevOffset = uint32(b.buf.Len()) - b.baseOffset // Remember current offset for the next Add call.
+	b.prevOffset = uint32(b.buf.Len()) - b.baseOffset               // Remember current offset for the next Add call.
+	b.blockEntryOffsets = append(b.blockEntryOffsets, b.prevOffset) // store current entries offset
 
 	// Layout: header, diffKey, value.
 	var hbuf [10]byte
@@ -153,6 +156,18 @@ func (b *Builder) finishBlock() {
 	// we need a dummy header to tell us the offset of the previous key-value pair.
 	b.addHelper([]byte{}, y.ValueStruct{})
 
+	// add entryOffsets at the end
+	offsetBuf := make([]byte, len(b.blockEntryOffsets)*4+4)
+	buf := offsetBuf
+
+	// put this in reverse order, while reading it will be picked in normal order
+	for i := len(b.blockEntryOffsets) - 1; i >= 0; i-- {
+		binary.BigEndian.PutUint32(buf[:4], b.blockEntryOffsets[i])
+		buf = buf[4:]
+	}
+	binary.BigEndian.PutUint32(buf[:4], uint32(len(b.blockEntryOffsets)))
+	b.buf.Write(offsetBuf)
+
 	// TODO: implement padding
 }
 
@@ -164,9 +179,10 @@ func (b *Builder) shouldFinish(key []byte, value y.ValueStruct) bool {
 		diffKeyLen = len(b.keyDiff(key))
 	}
 
+	entriesOffsetsSize := uint32(len(b.blockEntryOffsets)*4 + 4)
 	// 13 is for dummy entry to be put at end, 10 is for header size
 	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(13+10+diffKeyLen) +
-		uint32(value.EncodedSize())
+		uint32(value.EncodedSize()) + entriesOffsetsSize
 	if estimatedSize > b.blockSize {
 		return true
 	}
@@ -184,6 +200,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 		b.baseKey = []byte{}
 		b.baseOffset = uint32(b.buf.Len())
 		b.prevOffset = math.MaxUint32 // First key-value pair of block has header.prev=MaxInt.
+		b.blockEntryOffsets = make([]uint32, 0)
 	}
 	b.addHelper(key, value)
 	return nil // Currently, there is no meaningful error.

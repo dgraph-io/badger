@@ -18,6 +18,7 @@ package table
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
 	"math"
 	"sort"
@@ -27,10 +28,11 @@ import (
 )
 
 type blockIterator struct {
-	data    []byte
-	pos     uint32
-	err     error
-	baseKey []byte
+	data         []byte
+	pos          uint32
+	err          error
+	baseKey      []byte
+	entryOffsets []uint32
 
 	key  []byte
 	val  []byte
@@ -47,6 +49,7 @@ func (itr *blockIterator) Reset() {
 	itr.val = []byte{}
 	itr.init = false
 	itr.last = header{}
+	itr.entryOffsets = nil
 }
 
 func (itr *blockIterator) Init() {
@@ -150,6 +153,18 @@ func (itr *blockIterator) Next() {
 		// This should be the first Next() for this block. Hence, prefix length should be zero.
 		y.AssertTrue(h.plen == 0)
 		itr.baseKey = itr.data[itr.pos : itr.pos+uint32(h.klen)]
+
+		// also populate entry offsets
+		itr.entryOffsets = make([]uint32, 0)
+		readPos := len(itr.data) - 4
+		size := binary.BigEndian.Uint32(itr.data[readPos : readPos+4])
+		for i := uint32(0); i < size; i++ {
+			readPos -= 4
+			offset := binary.BigEndian.Uint32(itr.data[readPos : readPos+4])
+			itr.entryOffsets = append(itr.entryOffsets, offset)
+		}
+		// update data slice
+		itr.data = itr.data[:readPos]
 	}
 	itr.parseKV(h)
 }
