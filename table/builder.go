@@ -155,10 +155,6 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 }
 
 func (b *Builder) finishBlock() {
-	// When we are at the end of the block and Valid=false, and the user wants to do a Prev,
-	// we need a dummy header to tell us the offset of the previous key-value pair.
-	b.addHelper([]byte{}, y.ValueStruct{})
-
 	// add entryOffsets at the end
 	offsetBuf := make([]byte, len(b.blockEntryOffsets)*4+4)
 	buf := offsetBuf
@@ -191,8 +187,8 @@ func (b *Builder) shouldFinish(key []byte, value y.ValueStruct) bool {
 	}
 
 	entriesOffsetsSize := uint32(len(b.blockEntryOffsets)*4 + 4)
-	// 13 is for dummy entry to be put at end, 10 is for header size
-	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(13+10+diffKeyLen) +
+	// 10 is for header size
+	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(10+diffKeyLen) +
 		uint32(value.EncodedSize()) + entriesOffsetsSize
 	if estimatedSize > b.blockSize {
 		return true
