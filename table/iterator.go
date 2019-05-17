@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"math"
 	"sort"
 
 	"github.com/dgraph-io/badger/y"
@@ -33,12 +32,11 @@ type blockIterator struct {
 	err          error
 	baseKey      []byte
 	entryOffsets []uint32
+	currentIdx   int
 
 	key  []byte
 	val  []byte
 	init bool
-
-	last header // The last header we saw.
 }
 
 func (itr *blockIterator) Reset() {
@@ -48,12 +46,25 @@ func (itr *blockIterator) Reset() {
 	itr.key = []byte{}
 	itr.val = []byte{}
 	itr.init = false
-	itr.last = header{}
 	itr.entryOffsets = nil
+	itr.currentIdx = -1
 }
 
 func (itr *blockIterator) Init() {
 	if !itr.init {
+		// also populate entry offsets
+		itr.entryOffsets = make([]uint32, 0)
+		readPos := len(itr.data) - 4
+		size := binary.BigEndian.Uint32(itr.data[readPos : readPos+4])
+		for i := uint32(0); i < size; i++ {
+			readPos -= 4
+			offset := binary.BigEndian.Uint32(itr.data[readPos : readPos+4])
+			itr.entryOffsets = append(itr.entryOffsets, offset)
+		}
+		// update data slice
+		itr.data = itr.data[:readPos]
+		itr.currentIdx = -1
+
 		itr.Next()
 	}
 }
@@ -83,18 +94,35 @@ func (itr *blockIterator) Seek(key []byte, whence int) {
 	case current:
 	}
 
-	var done bool
-	for itr.Init(); itr.Valid(); itr.Next() {
-		k := itr.Key()
-		if y.CompareKeys(k, key) >= 0 {
-			// We are done as k is >= key.
-			done = true
-			break
+	itr.Init()
+	idx := sort.Search(len(itr.entryOffsets), func(idx int) bool {
+		idxPos := itr.entryOffsets[idx]
+		var h header
+		idxPos += uint32(h.Decode(itr.data[idxPos:]))
+
+		var idxKey []byte
+		if cap(idxKey) < int(h.plen+h.klen) {
+			sz := int(h.plen) + int(h.klen) // Convert to int before adding to avoid uint16 overflow.
+			idxKey = make([]byte, 2*sz)
 		}
-	}
-	if !done {
+		idxKey = idxKey[:h.plen+h.klen]
+		copy(idxKey, itr.baseKey[:h.plen])
+		copy(idxKey[h.plen:], itr.data[idxPos:idxPos+uint32(h.klen)])
+
+		return y.CompareKeys(idxKey, key) >= 0
+	})
+
+	if idx >= len(itr.entryOffsets) {
 		itr.err = io.EOF
+		itr.currentIdx = len(itr.entryOffsets)
+		return
 	}
+
+	itr.currentIdx = idx
+	itr.pos = itr.entryOffsets[itr.currentIdx]
+	var h header
+	itr.pos += uint32(h.Decode(itr.data[itr.pos:]))
+	itr.parseKV(h)
 }
 
 func (itr *blockIterator) SeekToFirst() {
@@ -105,8 +133,9 @@ func (itr *blockIterator) SeekToFirst() {
 // SeekToLast brings us to the last element. Valid should return true.
 func (itr *blockIterator) SeekToLast() {
 	itr.err = nil
-	for itr.Init(); itr.Valid(); itr.Next() {
-	}
+
+	itr.Init()
+	itr.currentIdx = len(itr.entryOffsets)
 	itr.Prev()
 }
 
@@ -133,38 +162,23 @@ func (itr *blockIterator) parseKV(h header) {
 func (itr *blockIterator) Next() {
 	itr.init = true
 	itr.err = nil
-	if itr.pos >= uint32(len(itr.data)) {
+
+	itr.currentIdx++
+	if itr.currentIdx >= len(itr.entryOffsets) || len(itr.entryOffsets) <= 0 {
 		itr.err = io.EOF
 		return
 	}
+
+	itr.pos = itr.entryOffsets[itr.currentIdx]
 
 	var h header
 	itr.pos += uint32(h.Decode(itr.data[itr.pos:]))
-	itr.last = h // Store the last header.
-
-	if h.klen == 0 && h.plen == 0 {
-		// Last entry in the table.
-		itr.err = io.EOF
-		return
-	}
 
 	// Populate baseKey if it isn't set yet. This would only happen for the first Next.
 	if len(itr.baseKey) == 0 {
 		// This should be the first Next() for this block. Hence, prefix length should be zero.
 		y.AssertTrue(h.plen == 0)
 		itr.baseKey = itr.data[itr.pos : itr.pos+uint32(h.klen)]
-
-		// also populate entry offsets
-		itr.entryOffsets = make([]uint32, 0)
-		readPos := len(itr.data) - 4
-		size := binary.BigEndian.Uint32(itr.data[readPos : readPos+4])
-		for i := uint32(0); i < size; i++ {
-			readPos -= 4
-			offset := binary.BigEndian.Uint32(itr.data[readPos : readPos+4])
-			itr.entryOffsets = append(itr.entryOffsets, offset)
-		}
-		// update data slice
-		itr.data = itr.data[:readPos]
 	}
 	itr.parseKV(h)
 }
@@ -174,21 +188,19 @@ func (itr *blockIterator) Prev() {
 		return
 	}
 	itr.err = nil
-	if itr.last.prev == math.MaxUint32 {
-		// This is the first element of the block!
+
+	itr.currentIdx--
+	if itr.currentIdx < 0 {
 		itr.err = io.EOF
-		itr.pos = 0
 		return
 	}
 
-	// Move back using current header's prev.
-	itr.pos = itr.last.prev
+	itr.pos = itr.entryOffsets[itr.currentIdx]
 
 	var h header
 	y.AssertTruef(itr.pos < uint32(len(itr.data)), "%d %d", itr.pos, len(itr.data))
 	itr.pos += uint32(h.Decode(itr.data[itr.pos:]))
 	itr.parseKV(h)
-	itr.last = h
 }
 
 func (itr *blockIterator) Key() []byte {
