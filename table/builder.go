@@ -28,10 +28,6 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-var (
-	restartInterval = 100 // Might want to change this to be based on total size instead of numKeys.
-)
-
 func newBuffer(sz int) *bytes.Buffer {
 	b := new(bytes.Buffer)
 	b.Grow(sz)
@@ -72,6 +68,7 @@ type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf *bytes.Buffer
 
+	blockSize  uint32
 	baseKey    []byte // Base key for the current block.
 	baseOffset uint32 // Offset for the current block.
 
@@ -91,6 +88,9 @@ func NewTableBuilder() *Builder {
 		buf:        newBuffer(1 << 20),
 		prevOffset: math.MaxUint32, // Used for the first element!
 		tableIndex: &pb.TableIndex{},
+
+		// TODO: make this configurable
+		blockSize: 4 * 1024,
 	}
 }
 
@@ -155,6 +155,7 @@ func (b *Builder) finishBlock() {
 	// When we are at the end of the block and Valid=false, and the user wants to do a Prev,
 	// we need a dummy header to tell us the offset of the previous key-value pair.
 	b.addHelper([]byte{}, y.ValueStruct{})
+
 	// Add key to the block index
 	bo := &pb.BlockOffset{
 		Key:    y.Copy(b.baseKey),
@@ -164,9 +165,27 @@ func (b *Builder) finishBlock() {
 	b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
 }
 
+func (b *Builder) shouldFinish(key []byte, value y.ValueStruct) bool {
+	var diffKeyLen int
+	if len(b.baseKey) == 0 {
+		diffKeyLen = len(key)
+	} else {
+		diffKeyLen = len(b.keyDiff(key))
+	}
+
+	// 13 is for dummy entry to be put at end, 10 is for header size
+	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(13+10+diffKeyLen) +
+		uint32(value.EncodedSize())
+	if estimatedSize > b.blockSize {
+		return true
+	}
+
+	return false
+}
+
 // Add adds a key-value pair to the block.
 func (b *Builder) Add(key []byte, value y.ValueStruct) error {
-	if b.counter >= restartInterval {
+	if b.shouldFinish(key, value) {
 		b.finishBlock()
 		b.counter = 0
 		b.baseKey = []byte{}
