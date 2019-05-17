@@ -60,7 +60,7 @@ func TestStreamWriter1(t *testing.T) {
 			sw := db.NewStreamWriter()
 			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 			require.NoError(t, sw.Write(list), "sw.Write() failed")
-			require.NoError(t, sw.Done(), "sw.Done() failed")
+			require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
 			err := db.View(func(txn *Txn) error {
 				// read any random key from inserted keys
@@ -103,7 +103,7 @@ func TestStreamWriter2(t *testing.T) {
 			require.NoError(t, sw.Write(list), "sw.Write() failed")
 			// get max version of sw, will be used in transactions for managed mode
 			maxVs := sw.maxVersion
-			require.NoError(t, sw.Done(), "sw.Done() failed")
+			require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
 			// delete all the inserted keys
 			val := make([]byte, valueSize)
@@ -171,7 +171,7 @@ func TestStreamWriter3(t *testing.T) {
 			require.NoError(t, sw.Write(list), "sw.Write() failed")
 			// get max version of sw, will be used in transactions for managed mode
 			maxVs := sw.maxVersion
-			require.NoError(t, sw.Done(), "sw.Done() failed")
+			require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
 			// insert keys which are odd
 			val := make([]byte, valueSize)

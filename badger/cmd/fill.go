@@ -100,7 +100,7 @@ func fillSorted(db *badger.DB, num uint64) error {
 			return err
 		}
 	}
-	return writer.Done()
+	return writer.Flush()
 }
 
 func fill(cmd *cobra.Command, args []string) error {
