@@ -50,3 +50,14 @@ message ManifestChange {
         uint32 Level   = 3; // Only used for CREATE
         bytes Checksum = 4; // Only used for CREATE
 }
+
+message KeyOffset {
+  bytes key = 1;
+  uint32 offset = 2;
+  uint32 len = 3;
+}
+
+message TableIndex {
+  repeated KeyOffset KeyOffSetList = 1;
+  bytes BloomFilter = 2;
+}

@@ -22,6 +22,8 @@ import (
 	"io"
 	"math"
 
+	"github.com/dgraph-io/badger/pb"
+
 	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/y"
 )
@@ -73,7 +75,7 @@ type Builder struct {
 	baseKey    []byte // Base key for the current block.
 	baseOffset uint32 // Offset for the current block.
 
-	restarts []uint32 // Base offsets of every block.
+	tableIndex pb.TableIndex
 
 	// Tracks offset for the previous key-value pair. Offset is relative to block base offset.
 	prevOffset uint32
@@ -109,6 +111,18 @@ func (b Builder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
+	// Block start
+	if b.counter == 0 {
+		ko := &pb.KeyOffset{
+			Offset: uint32(b.buf.Len()),
+			Len:    0, // Len will be populated when we finish the block
+		}
+		ko.Key = make([]byte, len(key))
+		copy(ko.Key, key)
+
+		b.tableIndex.KeyOffSetList = append(b.tableIndex.KeyOffSetList, ko)
+	}
+
 	// Add key to bloom filter.
 	if len(key) > 0 {
 		var klen [2]byte
@@ -152,15 +166,16 @@ func (b *Builder) finishBlock() {
 	// When we are at the end of the block and Valid=false, and the user wants to do a Prev,
 	// we need a dummy header to tell us the offset of the previous key-value pair.
 	b.addHelper([]byte{}, y.ValueStruct{})
+	// Add the length of the previous block to the index
+	kList := b.tableIndex.KeyOffSetList
+	lastBlock := kList[len(kList)-1]
+	lastBlock.Len = uint32(b.buf.Len()) - lastBlock.Offset
 }
 
 // Add adds a key-value pair to the block.
-// If doNotRestart is true, we will not restart even if b.counter >= restartInterval.
 func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 	if b.counter >= restartInterval {
 		b.finishBlock()
-		// Start a new block. Initialize the block.
-		b.restarts = append(b.restarts, uint32(b.buf.Len()))
 		b.counter = 0
 		b.baseKey = []byte{}
 		b.baseOffset = uint32(b.buf.Len())
@@ -177,25 +192,15 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	estimateSz := b.buf.Len() + 8 /* empty header */ + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
+	estimateSz := b.buf.Len() + 8 /* empty header */ + 4 /* Index length */ +
+		5*(len(b.tableIndex.KeyOffSetList)) /* index size */
 	return int64(estimateSz) > cap
 }
 
 // blockIndex generates the block index for the table.
-// It is mainly a list of all the block base offsets.
 func (b *Builder) blockIndex() []byte {
-	// Store the end offset, so we know the length of the final block.
-	b.restarts = append(b.restarts, uint32(b.buf.Len()))
-
-	// Add 4 because we want to write out number of restarts at the end.
-	sz := 4*len(b.restarts) + 4
-	out := make([]byte, sz)
-	buf := out
-	for _, r := range b.restarts {
-		binary.BigEndian.PutUint32(buf[:4], r)
-		buf = buf[4:]
-	}
-	binary.BigEndian.PutUint32(buf[:4], uint32(len(b.restarts)))
+	out, err := b.tableIndex.Marshal()
+	y.Check(err)
 	return out
 }
 
@@ -219,14 +224,15 @@ func (b *Builder) Finish() []byte {
 		bf.Add(key)
 	}
 
-	b.finishBlock() // This will never start a new block.
-	index := b.blockIndex()
-	b.buf.Write(index)
-
 	// Write bloom filter.
-	bdata := bf.JSONMarshal()
-	n, err := b.buf.Write(bdata)
+	b.tableIndex.BloomFilter = bf.JSONMarshal()
+	b.finishBlock() // This will never start a new block.
+
+	index := b.blockIndex()
+	n, err := b.buf.Write(index)
 	y.Check(err)
+
+	// Write index size to the end of the file
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	b.buf.Write(buf[:])
