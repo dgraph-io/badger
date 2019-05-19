@@ -51,6 +51,11 @@ var (
 
 	// Dummy channel for nil closers.
 	dummyCloserChan = make(chan struct{})
+
+	// CompareKeys returns an integer comparing two keys.
+	// The result will be 0 if key1==keys2, -1 if key1 < key2, and +1 if key1 > key2.
+	// Defaults to CompareKeysWithTimestamp.
+	CompareKeys = CompareKeysWithTimestamp
 )
 
 // OpenExistingFile opens an existing file, errors if it doesn't exist.
@@ -121,11 +126,11 @@ func ParseTs(key []byte) uint64 {
 	return math.MaxUint64 - binary.BigEndian.Uint64(key[len(key)-8:])
 }
 
-// CompareKeys checks the key without timestamp and checks the timestamp if keyNoTs
+// CompareKeysWithTimestamp checks the key without timestamp and checks the timestamp if keyNoTs
 // is same.
 // a<timestamp> would be sorted higher than aa<timestamp> if we use bytes.compare
 // All keys should have timestamp.
-func CompareKeys(key1, key2 []byte) int {
+func CompareKeysWithTimestamp(key1, key2 []byte) int {
 	AssertTrue(len(key1) > 8 && len(key2) > 8)
 	if cmp := bytes.Compare(key1[:len(key1)-8], key2[:len(key2)-8]); cmp != 0 {
 		return cmp
