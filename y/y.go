@@ -53,7 +53,7 @@ var (
 	dummyCloserChan = make(chan struct{})
 
 	// CompareKeys returns an integer comparing two keys.
-	// The result will be 0 if key1==keys2, negative if key1 < key2, and positive if key1 > key2.
+	// The result will be 0 if key1==key2, negative if key1 < key2, and positive if key1 > key2.
 	// Defaults to CompareKeysWithTimestamp.
 	CompareKeys = CompareKeysWithTimestamp
 )
