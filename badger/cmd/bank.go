@@ -88,7 +88,7 @@ func init() {
 	bankTest.Flags().BoolVarP(&checkStream, "check_stream", "s", false,
 		"If true, the test will send transactions to another badger instance via the stream "+
 			"interface in order to verify that all data is streamed correctly.")
-	bankTest.Flags().BoolVarP(&checkSubscriber, "check_subscriber", "p", false,
+	bankTest.Flags().BoolVarP(&checkSubscriber, "check_subscriber", "w", false,
 		"If true, the test will send transactions to another badger instance via the subscriber "+
 			"interface in order to verify that all the data is published correctly.")
 

@@ -1415,7 +1415,7 @@ func (db *DB) DropPrefix(prefix []byte) error {
 	return nil
 }
 
-// Subscribe can be used watch key changes for the given key prefix
+// Subscribe can be used watch key changes for the given key prefix.
 func (db *DB) Subscribe(ctx context.Context, cb callback, prefix []byte, prefixes ...[]byte) error {
 	if cb == nil {
 		return ErrNilCallback
@@ -1442,15 +1442,15 @@ func (db *DB) Subscribe(ctx context.Context, cb callback, prefix []byte, prefixe
 		select {
 		case <-c.HasBeenClosed():
 			slurp(new(pb.KVList))
-			//drain if any pending updates
+			// Drain if any pending updates.
 			c.Done()
-			// no need to delete here. closer will be called only while
-			// closing DB. subscriber will be deleted by cleanSubscribers
+			// No need to delete here. Closer will be called only while
+			// closing DB. Subscriber will be deleted by cleanSubscribers.
 			return nil
 		case <-ctx.Done():
 			c.Done()
 			db.pub.deleteSubscriber(id)
-			// delete the subscriber to avoid further updates
+			// Delete the subscriber to avoid further updates.
 			return ctx.Err()
 		case batch := <-recvCh:
 			slurp(batch)

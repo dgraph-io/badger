@@ -75,14 +75,14 @@ func (p *publisher) publishUpdates(reqs requests) {
 	p.Lock()
 	defer func() {
 		p.Unlock()
-		// release all the request
+		// Release all the request.
 		reqs.DecrRef()
 	}()
 	for _, s := range p.subscribers {
 		for _, prefix := range s.prefixes {
 			for _, req := range reqs {
 				for _, e := range req.Entries {
-					//TODO: use trie to find subscribers
+					// TODO: Use trie to find subscribers.
 					if bytes.HasPrefix(e.Key, prefix) {
 						k := y.SafeCopy(nil, e.Key)
 						kv := &pb.KV{
@@ -108,7 +108,7 @@ func (p *publisher) newSubscriber(c *y.Closer, prefixes ...[]byte) (<-chan *pb.K
 	defer p.Unlock()
 	ch := make(chan *pb.KVList, 1000)
 	id := p.nextID
-	// increment next ID
+	// Increment next ID.
 	p.nextID++
 	p.subscribers[id] = subscriber{
 		prefixes:  prefixes,
@@ -118,7 +118,7 @@ func (p *publisher) newSubscriber(c *y.Closer, prefixes ...[]byte) (<-chan *pb.K
 	return ch, id
 }
 
-// cleanSubscribers stops all the subscribers. Ideally, It should be called while closing DB
+// cleanSubscribers stops all the subscribers. Ideally, It should be called while closing DB.
 func (p *publisher) cleanSubscribers() {
 	p.Lock()
 	defer p.Unlock()
@@ -138,7 +138,7 @@ func (p *publisher) deleteSubscriber(id uint64) {
 }
 
 func (p *publisher) sendUpdates(reqs []*request) {
-	//TODO: prefix check before pushing into pubCh
+	// TODO: Prefix check before pushing into pubCh.
 	if p.noOfSubscribers() != 0 {
 		p.pubCh <- reqs
 	}

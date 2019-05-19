@@ -904,7 +904,7 @@ func (req *request) DecrRef() {
 func (req *request) Wait() error {
 	req.Wg.Wait()
 	err := req.Err
-	req.DecrRef() // deref after writing to db
+	req.DecrRef() // DecrRef after writing to DB.
 	return err
 }
 
