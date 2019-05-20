@@ -110,7 +110,20 @@ type block struct {
 }
 
 func (b block) NewIterator() *blockIterator {
-	return &blockIterator{data: b.data}
+	bi := &blockIterator{data: b.data}
+
+	// Start by populating entry offsets for block.
+	bi.entryOffsets = make([]uint32, 0)
+	readPos := len(bi.data) - 4 // first read number of entry offsets
+	size := binary.BigEndian.Uint32(bi.data[readPos : readPos+4])
+	for i := uint32(0); i < size; i++ {
+		readPos -= 4
+		offset := binary.BigEndian.Uint32(bi.data[readPos : readPos+4]) // read offset one by one
+		bi.entryOffsets = append(bi.entryOffsets, offset)
+	}
+
+	bi.data = bi.data[:readPos] // update data slice
+	return bi
 }
 
 // OpenTable assumes file has only one table and opens it.  Takes ownership of fd upon function

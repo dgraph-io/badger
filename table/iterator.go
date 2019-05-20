@@ -18,7 +18,6 @@ package table
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io"
 	"sort"
 
@@ -28,7 +27,7 @@ import (
 
 type blockIterator struct {
 	data         []byte
-	pos          uint32
+	pos          uint32 // TODO: can this be removed??
 	err          error
 	baseKey      []byte
 	entryOffsets []uint32
@@ -46,23 +45,12 @@ func (itr *blockIterator) Reset() {
 	itr.key = []byte{}
 	itr.val = []byte{}
 	itr.init = false
-	itr.entryOffsets = nil
 	itr.currentIdx = -1
+	// we are not resetting entryOffsets here.
 }
 
 func (itr *blockIterator) Init() {
 	if !itr.init {
-		// also populate entry offsets
-		itr.entryOffsets = make([]uint32, 0)
-		readPos := len(itr.data) - 4
-		size := binary.BigEndian.Uint32(itr.data[readPos : readPos+4])
-		for i := uint32(0); i < size; i++ {
-			readPos -= 4
-			offset := binary.BigEndian.Uint32(itr.data[readPos : readPos+4])
-			itr.entryOffsets = append(itr.entryOffsets, offset)
-		}
-		// update data slice
-		itr.data = itr.data[:readPos]
 		itr.currentIdx = -1
 
 		itr.Next()
@@ -84,40 +72,60 @@ var (
 	current = 1
 )
 
+func (itr *blockIterator) getKeyAtIndex(idx int) []byte {
+	y.AssertTrue(idx >= 0 && idx < len(itr.entryOffsets))
+
+	idxPos := itr.entryOffsets[idx]
+	var h header
+	idxPos += uint32(h.Decode(itr.data[idxPos:]))
+
+	var idxKey []byte
+	if cap(idxKey) < int(h.plen+h.klen) {
+		sz := int(h.plen) + int(h.klen) // Convert to int before adding to avoid uint16 overflow.
+		idxKey = make([]byte, 2*sz)
+	}
+	idxKey = idxKey[:h.plen+h.klen]
+	copy(idxKey, itr.baseKey[:h.plen])
+	copy(idxKey[h.plen:], itr.data[idxPos:idxPos+uint32(h.klen)])
+
+	return idxKey
+}
+
 // Seek brings us to the first block element that is >= input key.
 func (itr *blockIterator) Seek(key []byte, whence int) {
 	itr.err = nil
+	startIndex := 0 // This tells from which index, we should start binary search
 
 	switch whence {
 	case origin:
 		itr.Reset()
 	case current:
+		startIndex = itr.currentIdx
 	}
 
-	itr.Init()
-	idx := sort.Search(len(itr.entryOffsets), func(idx int) bool {
-		idxPos := itr.entryOffsets[idx]
-		var h header
-		idxPos += uint32(h.Decode(itr.data[idxPos:]))
+	itr.Init() // If iterator is not initialized or has been reset
 
-		var idxKey []byte
-		if cap(idxKey) < int(h.plen+h.klen) {
-			sz := int(h.plen) + int(h.klen) // Convert to int before adding to avoid uint16 overflow.
-			idxKey = make([]byte, 2*sz)
+	idx := sort.Search(len(itr.entryOffsets), func(idx int) bool {
+		// if idx is less than start index then just return false
+		if idx < startIndex {
+			return false
 		}
-		idxKey = idxKey[:h.plen+h.klen]
-		copy(idxKey, itr.baseKey[:h.plen])
-		copy(idxKey[h.plen:], itr.data[idxPos:idxPos+uint32(h.klen)])
+
+		idxKey := itr.getKeyAtIndex(idx)
 
 		return y.CompareKeys(idxKey, key) >= 0
 	})
 
+	// all keys in the block are less than the key to be sought
 	if idx >= len(itr.entryOffsets) {
 		itr.err = io.EOF
+		// update currentIdx to len of entryOffsets, so that if Prev() is
+		// called just after Seek, it will return correct result.
 		itr.currentIdx = len(itr.entryOffsets)
 		return
 	}
 
+	// found first idx for which key is >= key to be sought
 	itr.currentIdx = idx
 	itr.pos = itr.entryOffsets[itr.currentIdx]
 	var h header
@@ -164,7 +172,7 @@ func (itr *blockIterator) Next() {
 	itr.err = nil
 
 	itr.currentIdx++
-	if itr.currentIdx >= len(itr.entryOffsets) || len(itr.entryOffsets) <= 0 {
+	if itr.currentIdx >= len(itr.entryOffsets) {
 		itr.err = io.EOF
 		return
 	}
@@ -190,6 +198,7 @@ func (itr *blockIterator) Prev() {
 	itr.err = nil
 
 	itr.currentIdx--
+	y.AssertTrue(itr.currentIdx < len(itr.entryOffsets))
 	if itr.currentIdx < 0 {
 		itr.err = io.EOF
 		return
