@@ -174,7 +174,7 @@ func (b *Builder) shouldFinish(key []byte, value y.ValueStruct) bool {
 		diffKeyLen = len(b.keyDiff(key))
 	}
 
-	// have to include current entry also in size
+	// have to include current entry also in size, thats why +1 len of blockEntryOffsets
 	entriesOffsetsSize := uint32((len(b.blockEntryOffsets)+1)*4 + 4)
 	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(6 /*header size*/ +diffKeyLen) +
 		uint32(value.EncodedSize()) + entriesOffsetsSize
@@ -205,7 +205,8 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	estimateSz := b.buf.Len() + 8 /* empty header */ + 4 /* Index length */ +
+	blocksSize := b.buf.Len() + len(b.blockEntryOffsets)*4 + 4
+	estimateSz := blocksSize + 4 /* Index length */ +
 		5*(len(b.tableIndex.Offsets)) /* approximate index size */
 	return int64(estimateSz) > cap
 }
