@@ -197,7 +197,7 @@ func BuildChecksum(data []byte) ([]byte, error) {
 }
 
 // VerifyChecksum builds sha256 checksum for the given data and validates it against the given
-// chksum. Returns nil on success, error on failure
+// checksum 'chksum'. Returns nil on success, error on failure
 func VerifyChecksum(data []byte, chksum []byte) error {
 	checksum, err := BuildChecksum(data)
 	Check(err)
