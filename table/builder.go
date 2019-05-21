@@ -230,7 +230,7 @@ func (b *Builder) Finish() []byte {
 	n, err := b.buf.Write(index)
 	y.Check(err)
 
-	// Write index size to the end of the file
+	// Write index size
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	b.buf.Write(buf[:])
@@ -242,7 +242,7 @@ func (b *Builder) Finish() []byte {
 	// Write checksum to the file
 	n, err = b.buf.Write(checksum)
 
-	// Write len of checksum to the file
+	// Write len of the checksum to the file
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	b.buf.Write(buf[:])
 	return b.buf.Bytes()
