@@ -843,7 +843,11 @@ func writeLevel0Table(ft flushTask, f io.Writer) error {
 			return err
 		}
 	}
-	_, err := f.Write(b.Finish())
+	tbl, err := b.Finish()
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(tbl)
 	return err
 }
 

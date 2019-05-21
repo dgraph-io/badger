@@ -178,7 +178,7 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 		n, err := t.fd.Read(t.mmap)
 		if err != nil {
 			// It's OK to ignore fd.Close() error because we have only read from the file.
-			_ = fd.Close()
+			_ = t.fd.Close()
 			return nil, y.Wrapf(err, "Failed to load file into RAM")
 		}
 		if n != t.tableSize {

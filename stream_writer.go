@@ -233,8 +233,12 @@ func (w *sortedWriter) send() error {
 		return err
 	}
 	go func(builder *table.Builder) {
-		data := builder.Finish()
-		err := w.createTable(data)
+		data, err := builder.Finish()
+		if err != nil {
+			w.throttle.Done(err)
+			return
+		}
+		err = w.createTable(data)
 		w.throttle.Done(err)
 	}(w.builder)
 	w.builder = table.NewTableBuilder()

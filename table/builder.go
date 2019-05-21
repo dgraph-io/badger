@@ -196,14 +196,16 @@ func (b *Builder) ReachedCapacity(cap int64) bool {
 }
 
 // blockIndex generates the block index for the table.
-func (b *Builder) blockIndex() []byte {
+func (b *Builder) blockIndex() ([]byte, error) {
 	out, err := b.tableIndex.Marshal()
-	y.Check(err)
-	return out
+	if err != nil {
+		return nil, y.Wrapf(err, "failed to marshal table index")
+	}
+	return out, nil
 }
 
 // Finish finishes the table by appending the index.
-func (b *Builder) Finish() []byte {
+func (b *Builder) Finish() ([]byte, error) {
 	bf := bbloom.New(float64(b.keyCount), 0.01)
 	var klen [2]byte
 	key := make([]byte, 1024)
@@ -226,24 +228,38 @@ func (b *Builder) Finish() []byte {
 	b.tableIndex.BloomFilter = bf.JSONMarshal()
 	b.finishBlock() // This will never start a new block.
 
-	index := b.blockIndex()
+	index, err := b.blockIndex()
+	if err != nil {
+		return nil, y.Wrapf(err, "failed to build block index")
+	}
 	n, err := b.buf.Write(index)
-	y.Check(err)
+	if err != nil {
+		return nil, y.Wrapf(err, "failed to write index to the buffer")
+	}
 
 	// Write index size
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
-	b.buf.Write(buf[:])
-
+	_, err = b.buf.Write(buf[:])
+	if err != nil {
+		return nil, err
+	}
 	// Build checksum for index
 	checksum, err := y.BuildChecksum(index)
-	y.Check(err)
-
+	if err != nil {
+		return nil, y.Wrapf(err, "failed to build checksum")
+	}
 	// Write checksum to the file
 	n, err = b.buf.Write(checksum)
+	if err != nil {
+		return nil, err
+	}
 
 	// Write len of the checksum to the file
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
-	b.buf.Write(buf[:])
-	return b.buf.Bytes()
+	_, err = b.buf.Write(buf[:])
+	if err != nil {
+		return nil, err
+	}
+	return b.buf.Bytes(), nil
 }

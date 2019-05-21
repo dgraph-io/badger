@@ -187,12 +187,13 @@ func FixedDuration(d time.Duration) string {
 func BuildChecksum(data []byte) ([]byte, error) {
 	sum := sha256.New()
 	bytesWritten, err := sum.Write(data)
-	if bytesWritten != len(data) {
-		return nil, errors.New("Size mismatch between bytes written and length of data")
-	}
 	if err != nil {
 		return nil, err
 	}
+	if bytesWritten != len(data) {
+		return nil, errors.New("Size mismatch between bytes written and length of data")
+	}
+
 	return sum.Sum(nil), nil
 }
 
@@ -200,7 +201,9 @@ func BuildChecksum(data []byte) ([]byte, error) {
 // checksum 'chksum'. Returns nil on success, error on failure
 func VerifyChecksum(data []byte, chksum []byte) error {
 	checksum, err := BuildChecksum(data)
-	Check(err)
+	if err != nil {
+		return err
+	}
 	if len(checksum) != len(chksum) || !bytes.Equal(checksum, chksum) {
 		return Wrapf(ErrChecksumMismatch, "expected %s actual %s", chksum, checksum)
 	}

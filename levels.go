@@ -574,7 +574,11 @@ func (s *levelsController) compactBuildTables(
 					return
 				}
 
-				if _, err := fd.Write(builder.Finish()); err != nil {
+				data, err := builder.Finish()
+				if err != nil {
+					resultCh <- newTableResult{nil, y.Wrapf(err, "failed to build table")}
+				}
+				if _, err := fd.Write(data); err != nil {
 					resultCh <- newTableResult{nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)}
 					return
 				}
