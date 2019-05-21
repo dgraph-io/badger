@@ -69,7 +69,9 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 			y.Check(err)
 		}
 	}
-	f.Write(b.Finish())
+	data, err := b.Finish()
+	y.Check(err)
+	f.Write(data)
 	f.Close()
 	f, _ = y.OpenSyncedFile(filename, true)
 	return f
@@ -634,8 +636,9 @@ func BenchmarkRead(b *testing.B) {
 		v := fmt.Sprintf("%d", i)
 		y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}))
 	}
-
-	f.Write(builder.Finish())
+	data, err := builder.Finish()
+	y.Check(err)
+	f.Write(data)
 	tbl, err := OpenTable(f, options.MemoryMap, nil)
 	y.Check(err)
 	defer tbl.DecrRef()
@@ -664,8 +667,9 @@ func BenchmarkReadAndBuild(b *testing.B) {
 		v := fmt.Sprintf("%d", i)
 		y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}))
 	}
-
-	f.Write(builder.Finish())
+	data, err := builder.Finish()
+	y.Check(err)
+	f.Write(data)
 	tbl, err := OpenTable(f, options.MemoryMap, nil)
 	y.Check(err)
 	defer tbl.DecrRef()
@@ -705,7 +709,9 @@ func BenchmarkReadMerged(b *testing.B) {
 			v := fmt.Sprintf("%d", id)
 			y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}))
 		}
-		f.Write(builder.Finish())
+		data, err := builder.Finish()
+		y.Check(err)
+		f.Write(data)
 		tbl, err := OpenTable(f, options.MemoryMap, nil)
 		y.Check(err)
 		tables = append(tables, tbl)
