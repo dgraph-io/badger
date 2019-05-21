@@ -707,11 +707,20 @@ func errFile(err error, path string, msg string) error {
 }
 
 func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) error {
-	// We should open the file in RW mode, so it can be truncated.
 	var err error
-	lf.fd, err = os.OpenFile(lf.path, os.O_RDWR, 0)
-	if err != nil {
-		return errFile(err, lf.path, "Open file in RW mode")
+	if vlog.opt.Truncate {
+		// We should open the file in RW mode, so it can be truncated.
+		lf.fd, err = os.OpenFile(lf.path, os.O_RDWR, 0)
+		if err != nil {
+			return errFile(err, lf.path, "Open file in RW mode")
+		}
+	} else {
+		// With the Truncate option set to false, opening the file as RO should be sufficient.
+		// This allows the database to be placed on a read-only file system.
+		lf.fd, err = os.OpenFile(lf.path, os.O_RDONLY, 0)
+		if err != nil {
+			return errFile(err, lf.path, "Open file in RO mode")
+		}
 	}
 	defer lf.fd.Close()
 
