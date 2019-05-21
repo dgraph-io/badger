@@ -27,7 +27,7 @@ import (
 
 type blockIterator struct {
 	data         []byte
-	pos          uint32 // TODO: can this be removed??
+	pos          uint32 // TODO: This can be removed.
 	err          error
 	baseKey      []byte
 	entryOffsets []uint32

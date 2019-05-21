@@ -74,11 +74,9 @@ type Builder struct {
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder() *Builder {
 	return &Builder{
-		keyBuf: newBuffer(1 << 20),
-		buf:    newBuffer(1 << 20),
-
-		// TODO: make this configurable
-		blockSize:         4 * 1024,
+		keyBuf:            newBuffer(1 << 20),
+		buf:               newBuffer(1 << 20),
+		blockSize:         4 * 1024, // TODO: make this configurable
 		blockEntryOffsets: make([]uint32, 0),
 	}
 }
@@ -164,7 +162,7 @@ func (b *Builder) shouldFinish(key []byte, value y.ValueStruct) bool {
 		diffKeyLen = len(b.keyDiff(key))
 	}
 
-	// have to include current entry also in size
+	// have to include current entry also in size, thats why +1 len of blockEntryOffsets
 	entriesOffsetsSize := uint32((len(b.blockEntryOffsets)+1)*4 + 4)
 	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(6 /*header size*/ +diffKeyLen) +
 		uint32(value.EncodedSize()) + entriesOffsetsSize
@@ -196,8 +194,8 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	currentBlockSize := b.buf.Len() + len(b.blockEntryOffsets)*4 + 4
-	estimateSz := currentBlockSize + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
+	blocksSize := b.buf.Len() + len(b.blockEntryOffsets)*4 + 4
+	estimateSz := blocksSize + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
 	return int64(estimateSz) > cap
 }
 
