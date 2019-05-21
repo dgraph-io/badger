@@ -114,12 +114,10 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	// Block start
 	if b.counter == 0 {
 		ko := &pb.KeyOffset{
+			Key:    y.Copy(key),
 			Offset: uint32(b.buf.Len()),
-			Len:    0, // Len will be populated when we finish the block
+			Len:    0, // Len will be populated when we finish the block. See finish function.
 		}
-		ko.Key = make([]byte, len(key))
-		copy(ko.Key, key)
-
 		b.tableIndex.KeyOffSetList = append(b.tableIndex.KeyOffSetList, ko)
 	}
 
@@ -193,7 +191,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
 	estimateSz := b.buf.Len() + 8 /* empty header */ + 4 /* Index length */ +
-		5*(len(b.tableIndex.KeyOffSetList)) /* index size */
+		5*(len(b.tableIndex.KeyOffSetList)) /* approximate index size */
 	return int64(estimateSz) > cap
 }
 
@@ -237,5 +235,15 @@ func (b *Builder) Finish() []byte {
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	b.buf.Write(buf[:])
 
+	// Build checksum for index
+	checksum, err := y.BuildChecksum(index)
+	y.Check(err)
+
+	// Write checksum to the file
+	n, err = b.buf.Write(checksum)
+
+	// Write len of checksum to the file
+	binary.BigEndian.PutUint32(buf[:], uint32(n))
+	b.buf.Write(buf[:])
 	return b.buf.Bytes()
 }

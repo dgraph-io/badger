@@ -18,6 +18,7 @@ package y
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
@@ -32,6 +33,9 @@ import (
 // ErrEOF indicates an end of file when trying to read from a memory mapped file
 // and encountering the end of slice.
 var ErrEOF = errors.New("End of mapped region")
+
+// ErrChecksumMismatch indicates checksum validation failed
+var ErrChecksumMismatch = errors.New("Checksum mismatch")
 
 const (
 	// Sync indicates that O_DSYNC should be set on the underlying file,
@@ -177,6 +181,30 @@ func FixedDuration(d time.Duration) string {
 		str = fmt.Sprintf("%02dh", int(d.Hours())) + str
 	}
 	return str
+}
+
+// BuildChecksum builds sha256 checksum for the given data.
+func BuildChecksum(data []byte) ([]byte, error) {
+	sum := sha256.New()
+	bytesWritten, err := sum.Write(data)
+	if bytesWritten != len(data) {
+		return nil, errors.New("Size mismatch between bytes written and length of data")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return sum.Sum(nil), nil
+}
+
+// VerifyChecksum builds sha256 checksum for the given data and validates it against the given
+// chksum. Returns nil on success, error on failure
+func VerifyChecksum(data []byte, chksum []byte) error {
+	checksum, err := BuildChecksum(data)
+	Check(err)
+	if len(checksum) != len(chksum) || !bytes.Equal(checksum, chksum) {
+		return Wrapf(ErrChecksumMismatch, "expected %s actual %s", chksum, checksum)
+	}
+	return nil
 }
 
 // Closer holds the two things we need to close a goroutine and wait for it to finish: a chan

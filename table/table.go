@@ -231,14 +231,25 @@ func (t *Table) readNoFail(off, sz int) []byte {
 
 func (t *Table) readIndex() error {
 	readPos := t.tableSize
-	// Read index size from the footer
+
+	// Read length of checksum from the last 4 bytes
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
+	checksumLen := int(binary.BigEndian.Uint32(buf))
+
+	readPos -= checksumLen
+	checksum := t.readNoFail(readPos, checksumLen)
+	t.Checksum = checksum
+
+	// Read index size from the footer
+	readPos -= 4
+	buf = t.readNoFail(readPos, 4)
 	indexLen := int(binary.BigEndian.Uint32(buf))
 	// Read index
 	readPos -= indexLen
 	data := t.readNoFail(readPos, indexLen)
 
+	y.VerifyChecksum(data, t.Checksum)
 	index := pb.TableIndex{}
 	err := index.Unmarshal(data)
 	y.Check(err)
