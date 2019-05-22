@@ -167,6 +167,11 @@ func (b *Builder) finishBlock() {
 }
 
 func (b *Builder) shouldFinish(key []byte, value y.ValueStruct) bool {
+	// if there is no entry till now, we will return false
+	if len(b.blockEntryOffsets) <= 0 {
+		return false
+	}
+
 	var diffKeyLen int
 	if len(b.baseKey) == 0 {
 		diffKeyLen = len(key)
