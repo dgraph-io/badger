@@ -935,3 +935,39 @@ func BenchmarkReadWrite(b *testing.B) {
 		}
 	}
 }
+
+// Regression test for https://github.com/dgraph-io/badger/issues/817
+func TestValueLogTruncate(t *testing.T) {
+	dir, err := ioutil.TempDir(".", "badger-test")
+	y.Check(err)
+	defer os.RemoveAll(dir)
+
+	opts := DefaultOptions
+	opts.Dir = dir
+	opts.ValueDir = dir
+
+	db, err := Open(opts)
+	require.NoError(t, err)
+	// Insert 1 entry so that we have valid data in first vlog file
+	require.NoError(t, db.Update(func(txn *Txn) error {
+		txn.Set([]byte("foo"), nil)
+		return nil
+	}))
+
+	// +1 because we create a new vlog file on db close
+	fileCountBeforeCorruption := len(db.vlog.filesMap) + 1
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	// Create two vlog files corrupted data. These will be truncated when DB starts next time
+	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), []byte("foo"), 0664))
+	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 2), []byte("foo"), 0664))
+
+	db, err = Open(opts)
+	require.NoError(t, err)
+	fileCountAfterCorruption := len(db.vlog.filesMap)
+	require.Equal(t, fileCountBeforeCorruption, fileCountAfterCorruption)
+	// Max file ID would point to the last vlog file, which is fid=2 in this case
+	require.Equal(t, 2, int(db.vlog.maxFid))
+	require.NoError(t, db.Close())
+}

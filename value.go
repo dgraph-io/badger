@@ -181,6 +181,7 @@ func (lf *logFile) sync() error {
 
 var errStop = errors.New("Stop iteration")
 var errTruncate = errors.New("Do truncate")
+var errDeleteVlogFile = errors.New("Delete vlog file")
 
 type logEntry func(e Entry, vp valuePointer) error
 
@@ -725,6 +726,10 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	if err != nil {
 		return errFile(err, lf.path, "Unable to replay logfile")
 	}
+	// The entire file should be truncated (i.e. it should be deleted)
+	if endOffset == 0 {
+		return errDeleteVlogFile
+	}
 	if int64(endOffset) == fi.Size() {
 		return nil
 	}
@@ -787,7 +792,18 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		// Replay and possible truncation done. Now we can open the file as per
 		// user specified options.
 		if err := vlog.replayLog(lf, offset, replayFn); err != nil {
-			return err
+			if err != errDeleteVlogFile {
+				return err
+			}
+			// Log file is corrupted. Delete it
+			if vlog.maxFid != fid {
+				delete(vlog.filesMap, fid)
+				path := vlog.fpath(lf.fid)
+				if err := os.Remove(path); err != nil {
+					return y.Wrapf(err, "failed to delete empty value log file: %q", path)
+				}
+				continue
+			}
 		}
 		vlog.db.opt.Infof("Replay took: %s\n", time.Since(now))
 
