@@ -200,10 +200,10 @@ type sortedWriter struct {
 	streamId uint32
 }
 
-func (sw *StreamWriter) newWriter(streamID uint32) *sortedWriter {
+func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
 	return &sortedWriter{
 		db:       sw.db,
-		streamId: streamID,
+		streamId: streamId,
 		throttle: sw.throttle,
 		builder:  table.NewTableBuilder(),
 	}
