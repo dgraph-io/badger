@@ -88,7 +88,7 @@ func (lf *logFile) openReadOnly() error {
 
 	if err = lf.mmap(fi.Size()); err != nil {
 		_ = lf.fd.Close()
-		return y.Wrapf(err, "Unable to map file")
+		return y.Wrapf(err, "Unable to map file: %q", fi.Name())
 	}
 
 	return nil
