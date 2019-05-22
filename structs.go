@@ -170,3 +170,10 @@ func (e *Entry) WithTTL(dur time.Duration) *Entry {
 	e.ExpiresAt = uint64(time.Now().Add(dur).Unix())
 	return e
 }
+
+// withMergeBit sets merge bit in entry's metadata. This
+// function is called by MergeOperator's Add method.
+func (e *Entry) withMergeBit() *Entry {
+	e.meta = bitMergeEntry
+	return e
+}

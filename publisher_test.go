@@ -52,7 +52,8 @@ func TestPublisherOrdering(t *testing.T) {
 		subWg.Wait()
 		for i := 0; i < 5; i++ {
 			db.Update(func(txn *Txn) error {
-				return txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
+				return txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)),
+					[]byte(fmt.Sprintf("value%d", i))))
 			})
 		}
 		wg.Wait()
@@ -62,7 +63,7 @@ func TestPublisherOrdering(t *testing.T) {
 	})
 }
 
-func TestMutiplePrefix(t *testing.T) {
+func TestMultiplePrefix(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -90,10 +91,10 @@ func TestMutiplePrefix(t *testing.T) {
 		}()
 		subWg.Wait()
 		db.Update(func(txn *Txn) error {
-			return txn.Set([]byte("key"), []byte("value"))
+			return txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
 		})
 		db.Update(func(txn *Txn) error {
-			return txn.Set([]byte("hello"), []byte("badger"))
+			return txn.SetEntry(NewEntry([]byte("hello"), []byte("badger")))
 		})
 		wg.Wait()
 	})
