@@ -707,11 +707,15 @@ func errFile(err error, path string, msg string) error {
 }
 
 func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) error {
-	// We should open the file in RW mode, so it can be truncated.
 	var err error
-	lf.fd, err = os.OpenFile(lf.path, os.O_RDWR, 0)
+	mode := os.O_RDONLY
+	if vlog.opt.Truncate {
+		// We should open the file in RW mode, so it can be truncated.
+		mode = os.O_RDWR
+	}
+	lf.fd, err = os.OpenFile(lf.path, mode, 0)
 	if err != nil {
-		return errFile(err, lf.path, "Open file in RW mode")
+		return errFile(err, lf.path, "Open file")
 	}
 	defer lf.fd.Close()
 
