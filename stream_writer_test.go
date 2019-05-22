@@ -273,15 +273,6 @@ func TestStreamWriter5(t *testing.T) {
 			Version: 1,
 		})
 
-		// dir, err := ioutil.TempDir(".", "badger-test")
-		// require.NoError(t, err)
-
-		// opt := db.opt
-		// opt.Dir = dir
-		// opt.ValueDir = dir
-		// db2, err := Open(opt)
-		// require.NoError(t, err)
-
 		sw := db.NewStreamWriter()
 		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 		require.NoError(t, sw.Write(list), "sw.Write() failed")
@@ -289,7 +280,7 @@ func TestStreamWriter5(t *testing.T) {
 		require.NoError(t, db.Close())
 
 		var err error
-		db, err = Open(db.opt)
+		_, err = Open(db.opt)
 		require.NoError(t, err)
 	})
 }

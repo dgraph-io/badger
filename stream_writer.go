@@ -27,7 +27,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-var headStreamId uint32 = math.MaxUint32
+const headStreamId uint32 = math.MaxUint32
 
 // StreamWriter is used to write data coming from multiple streams. The streams must not have any
 // overlapping key ranges. Within each stream, the keys must be sorted. Badger Stream framework is
@@ -271,11 +271,11 @@ func (w *sortedWriter) createTable(data []byte) error {
 	lc := w.db.lc
 
 	var lhandler *levelHandler
-	// We should start the levels from 2, because we need level 1 to set the !badger!head key. We
+	// We should start the levels from 1, because we need level 0 to set the !badger!head key. We
 	// cannot mix up this key with other keys from the DB, otherwise we would introduce a range
 	// overlap violation.
-	y.AssertTrue(len(lc.levels) > 2)
-	for _, l := range lc.levels[2:] {
+	y.AssertTrue(len(lc.levels) > 1)
+	for _, l := range lc.levels[1:] {
 		ratio := float64(l.getTotalSize()) / float64(l.maxTotalSize)
 		if ratio < 1.0 {
 			lhandler = l
@@ -288,9 +288,9 @@ func (w *sortedWriter) createTable(data []byte) error {
 		lhandler = lc.levels[len(lc.levels)-1]
 	}
 	if w.streamId == headStreamId {
-		// This is a special !badger!head key. We should store it at level 1, separate from all the
+		// This is a special !badger!head key. We should store it at level 0, separate from all the
 		// other keys to avoid an overlap.
-		lhandler = lc.levels[1]
+		lhandler = lc.levels[0]
 	}
 	// Now that table can be opened successfully, let's add this to the MANIFEST.
 	change := &pb.ManifestChange{
