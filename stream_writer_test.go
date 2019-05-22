@@ -249,3 +249,47 @@ func TestStreamWriter4(t *testing.T) {
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
 	})
 }
+
+func TestStreamWriter5(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		list := &pb.KVList{}
+
+		left := make([]byte, 6)
+		left[0] = 0x00
+		copy(left[1:], []byte("break"))
+
+		right := make([]byte, 6)
+		right[0] = 0xff
+		copy(right[1:], []byte("break"))
+
+		list.Kv = append(list.Kv, &pb.KV{
+			Key:     left,
+			Value:   []byte("val"),
+			Version: 1,
+		})
+		list.Kv = append(list.Kv, &pb.KV{
+			Key:     right,
+			Value:   []byte("val"),
+			Version: 1,
+		})
+
+		// dir, err := ioutil.TempDir(".", "badger-test")
+		// require.NoError(t, err)
+
+		// opt := db.opt
+		// opt.Dir = dir
+		// opt.ValueDir = dir
+		// db2, err := Open(opt)
+		// require.NoError(t, err)
+
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+		require.NoError(t, sw.Write(list), "sw.Write() failed")
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+		require.NoError(t, db.Close())
+
+		var err error
+		db, err = Open(db.opt)
+		require.NoError(t, err)
+	})
+}
