@@ -71,7 +71,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	}
 	data, err := b.Finish()
 	y.Check(err)
-	f.Write(data)
+	y.Check2(f.Write(data))
 	f.Close()
 	f, _ = y.OpenSyncedFile(filename, true)
 	return f
@@ -638,7 +638,7 @@ func BenchmarkRead(b *testing.B) {
 	}
 	data, err := builder.Finish()
 	y.Check(err)
-	f.Write(data)
+	y.Check2(f.Write(data))
 	tbl, err := OpenTable(f, options.MemoryMap, nil)
 	y.Check(err)
 	defer tbl.DecrRef()
@@ -669,7 +669,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 	}
 	data, err := builder.Finish()
 	y.Check(err)
-	f.Write(data)
+	y.Check2(f.Write(data))
 	tbl, err := OpenTable(f, options.MemoryMap, nil)
 	y.Check(err)
 	defer tbl.DecrRef()
@@ -711,7 +711,7 @@ func BenchmarkReadMerged(b *testing.B) {
 		}
 		data, err := builder.Finish()
 		y.Check(err)
-		f.Write(data)
+		y.Check2(f.Write(data))
 		tbl, err := OpenTable(f, options.MemoryMap, nil)
 		y.Check(err)
 		tables = append(tables, tbl)

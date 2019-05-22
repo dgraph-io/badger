@@ -182,7 +182,7 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 			return nil, y.Wrapf(err, "Failed to load file into RAM")
 		}
 		if n != t.tableSize {
-			return nil, errors.Errorf("Failed to read all bytes from the file."+
+			return nil, y.Wrap("Failed to read all bytes from the file."+
 				"Bytes in file: %d Bytes actually Read: %d", t.tableSize, n)
 		}
 	case options.MemoryMap:

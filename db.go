@@ -845,10 +845,10 @@ func writeLevel0Table(ft flushTask, f io.Writer) error {
 	}
 	tbl, err := b.Finish()
 	if err != nil {
-		return err
+		return y.Wrapf(err, "failed to complete building table")
 	}
 	_, err = f.Write(tbl)
-	return err
+	return y.Wrapf(err, "failed to write table to file")
 }
 
 type flushTask struct {
