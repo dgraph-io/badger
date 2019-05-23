@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 	"path"
@@ -232,14 +233,10 @@ func (t *Table) readNoFail(off, sz int) []byte {
 func (t *Table) readIndex() error {
 	readPos := t.tableSize
 
-	// Read length of checksum from the last 4 bytes
+	// Read checksum from the last 4 bytes
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
-	checksumLen := int(binary.BigEndian.Uint32(buf))
-
-	readPos -= checksumLen
-	checksum := t.readNoFail(readPos, checksumLen)
-	t.Checksum = checksum
+	readchecksum := binary.BigEndian.Uint32(buf)
 
 	// Read index size from the footer
 	readPos -= 4
@@ -249,8 +246,9 @@ func (t *Table) readIndex() error {
 	readPos -= indexLen
 	data := t.readNoFail(readPos, indexLen)
 
-	if err := y.VerifyChecksum(data, t.Checksum); err != nil {
-		return y.Wrapf(err, "checksum validation failed for table: %s", t.fd.Name())
+	calculatedChecksum := crc32.ChecksumIEEE(data)
+	if calculatedChecksum != readchecksum {
+		return y.Wrapf(y.ErrChecksumMismatch, "checksum validation failed for table footer: %s", t.fd.Name())
 	}
 	index := pb.TableIndex{}
 	err := index.Unmarshal(data)

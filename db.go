@@ -843,11 +843,11 @@ func writeLevel0Table(ft flushTask, f io.Writer) error {
 			return err
 		}
 	}
-	tbl, err := b.Finish()
+	data, err := b.Finish()
 	if err != nil {
 		return y.Wrapf(err, "failed to complete building table")
 	}
-	_, err = f.Write(tbl)
+	_, err = f.Write(data)
 	return y.Wrapf(err, "failed to write table to file")
 }
 

@@ -19,6 +19,7 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
+	"hash/crc32"
 	"io"
 	"math"
 
@@ -237,17 +238,12 @@ func (b *Builder) Finish() ([]byte, error) {
 	y.Check(err)
 
 	// Build checksum for index
-	checksum, err := y.BuildChecksum(index)
-	if err != nil {
-		return nil, y.Wrapf(err, "failed to build checksum")
-	}
-	// Write checksum to the file
-	n, err = b.buf.Write(checksum)
-	y.Check(err)
+	checksum := crc32.ChecksumIEEE(index)
 
-	// Write len of the checksum to the file
-	binary.BigEndian.PutUint32(buf[:], uint32(n))
+	// Write checksum to the file
+	binary.BigEndian.PutUint32(buf[:], checksum)
 	_, err = b.buf.Write(buf[:])
 	y.Check(err)
+
 	return b.buf.Bytes(), nil
 }
