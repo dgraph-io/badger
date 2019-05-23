@@ -338,6 +338,17 @@ func (txn *Txn) modify(e *Entry) error {
 	return nil
 }
 
+// Set adds a key-value pair to the database.
+//
+// It will return ErrReadOnlyTxn if update flag was set to false when creating the
+// transaction.
+//
+// The current transaction keeps a reference to the key and val byte slice
+// arguments. Users must not modify key and val until the end of the transaction.
+func (txn *Txn) Set(key, val []byte) error {
+	return txn.SetEntry(NewEntry(key, val))
+}
+
 // SetEntry takes an Entry struct and adds the key-value pair in the struct,
 // along with other metadata to the database.
 //
