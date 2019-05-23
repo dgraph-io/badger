@@ -945,6 +945,7 @@ func TestValueLogTruncate(t *testing.T) {
 	opts := DefaultOptions
 	opts.Dir = dir
 	opts.ValueDir = dir
+	opts.Truncate = true
 
 	db, err := Open(opts)
 	require.NoError(t, err)
