@@ -239,6 +239,7 @@ func (b *Builder) Finish() ([]byte, error) {
 	y.Check(err)
 
 	// Build CRC32 checksum for index
+	// (see https://gist.github.com/jarifibrahim/cc91fd84c7866e0341ca1a2a83c67a96 for benchmark)
 	checksum := crc32.ChecksumIEEE(index)
 
 	// Write checksum to the file
