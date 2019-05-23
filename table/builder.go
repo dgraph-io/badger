@@ -231,13 +231,14 @@ func (b *Builder) Finish() ([]byte, error) {
 	n, err := b.buf.Write(index)
 	y.Check(err)
 
+	y.AssertTrue(n < math.MaxUint32)
 	// Write index size
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	_, err = b.buf.Write(buf[:])
 	y.Check(err)
 
-	// Build checksum for index
+	// Build CRC32 checksum for index
 	checksum := crc32.ChecksumIEEE(index)
 
 	// Write checksum to the file
