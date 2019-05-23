@@ -1099,14 +1099,15 @@ func randBytes(n int) []byte {
 
 var benchmarkData = []struct {
 	key, value []byte
+	success    bool // represent if KV should be inserted successfully or not
 }{
-	{randBytes(100), nil},
-	{randBytes(1000), []byte("foo")},
-	{[]byte("foo"), randBytes(1000)},
-	{[]byte(""), randBytes(1000)},
-	{nil, randBytes(1000000)},
-	{randBytes(100000), nil},
-	{randBytes(1000000), nil},
+	{randBytes(100), nil, true},
+	{randBytes(1000), []byte("foo"), true},
+	{[]byte("foo"), randBytes(1000), true},
+	{[]byte(""), randBytes(1000), false},
+	{nil, randBytes(1000000), false},
+	{randBytes(100000), nil, false},
+	{randBytes(1000000), nil, false},
 }
 
 func TestLargeKeys(t *testing.T) {
@@ -1133,7 +1134,12 @@ func TestLargeKeys(t *testing.T) {
 			v := make([]byte, len(kv.value))
 			copy(v, kv.value)
 			if err := tx.SetEntry(NewEntry(k, v)); err != nil {
-				// Skip over this record.
+				// check is success should be true
+				if kv.success {
+					t.Fatalf("failed with: %s", err)
+				}
+			} else if !kv.success {
+				t.Fatal("insertion should have failed")
 			}
 		}
 		if err := tx.Commit(); err != nil {
