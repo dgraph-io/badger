@@ -951,7 +951,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, err)
 	// Insert 1 entry so that we have valid data in first vlog file
 	require.NoError(t, db.Update(func(txn *Txn) error {
-		txn.Set([]byte("foo"), nil)
+		require.NoError(t, txn.Set([]byte("foo"), nil))
 		return nil
 	}))
 
