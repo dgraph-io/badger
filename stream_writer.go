@@ -67,7 +67,7 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 		// concurrent streams being processed.
 		throttle: y.NewThrottle(16),
 		writers:  make(map[uint32]*sortedWriter),
-		tableCh:  make(chan *toTable, 10),
+		tableCh:  make(chan *toTable, 3),
 		closer:   y.NewCloser(1),
 	}
 	go sw.handleRequests()
