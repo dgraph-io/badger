@@ -726,12 +726,6 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	if err != nil {
 		return errFile(err, lf.path, "Unable to replay logfile")
 	}
-	// The entire file should be truncated (i.e. it should be deleted).
-	// If fid == maxFid then it's okay to truncate the entire file since will be
-	// used for future additions
-	if endOffset == 0 && lf.fid != vlog.maxFid {
-		return errDeleteVlogFile
-	}
 	if int64(endOffset) == fi.Size() {
 		return nil
 	}
@@ -742,7 +736,12 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	if !vlog.opt.Truncate {
 		return ErrTruncateNeeded
 	}
-
+	// The entire file should be truncated (i.e. it should be deleted).
+	// If fid == maxFid then it's okay to truncate the entire file since will be
+	// used for future additions
+	if endOffset == 0 && lf.fid != vlog.maxFid {
+		return errDeleteVlogFile
+	}
 	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
 		return errFile(err, lf.path, fmt.Sprintf(
 			"Truncation needed at offset %d. Can be done manually as well.", endOffset))
