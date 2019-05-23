@@ -47,6 +47,13 @@ type StreamWriter struct {
 	head       valuePointer
 	maxVersion uint64
 	writers    map[uint32]*sortedWriter
+	tableCh    chan *toTable
+	closer     *y.Closer
+}
+
+type toTable struct {
+	kvs *pb.KVList
+	req *request
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -54,13 +61,17 @@ type StreamWriter struct {
 // possible. So, efforts must be made to keep the number of streams low. Stream framework would
 // typically use 16 goroutines and hence create 16 streams.
 func (db *DB) NewStreamWriter() *StreamWriter {
-	return &StreamWriter{
+	sw := &StreamWriter{
 		db: db,
 		// throttle shouldn't make much difference. Memory consumption is based on the number of
 		// concurrent streams being processed.
 		throttle: y.NewThrottle(16),
 		writers:  make(map[uint32]*sortedWriter),
+		tableCh:  make(chan *toTable, 10),
+		closer:   y.NewCloser(1),
 	}
+	go sw.handleRequests()
+	return sw
 }
 
 // Prepare should be called before writing any entry to StreamWriter. It deletes all data present in
@@ -108,48 +119,71 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 		return err
 	}
 
-	for i, kv := range kvs.Kv {
-		e := req.Entries[i]
-		vptr := req.Ptrs[i]
-		if !vptr.IsZero() {
-			y.AssertTrue(sw.head.Less(vptr))
-			sw.head = vptr
-		}
+	sw.tableCh <- &toTable{kvs: kvs, req: req}
+	return nil
+}
 
-		writer, ok := sw.writers[kv.StreamId]
-		if !ok {
-			writer = sw.newWriter(kv.StreamId)
-			sw.writers[kv.StreamId] = writer
-		}
+func (sw *StreamWriter) handleRequests() {
+	defer sw.closer.Done()
 
-		var vs y.ValueStruct
-		if e.skipVlog {
-			vs = y.ValueStruct{
-				Value:     e.Value,
-				Meta:      e.meta,
-				UserMeta:  e.UserMeta,
-				ExpiresAt: e.ExpiresAt,
+	process := func(kvs *pb.KVList, req *request) {
+		for i, kv := range kvs.Kv {
+			e := req.Entries[i]
+			vptr := req.Ptrs[i]
+			if !vptr.IsZero() {
+				y.AssertTrue(sw.head.Less(vptr))
+				sw.head = vptr
 			}
-		} else {
-			vbuf := make([]byte, vptrSize)
-			vs = y.ValueStruct{
-				Value:     vptr.Encode(vbuf),
-				Meta:      e.meta | bitValuePointer,
-				UserMeta:  e.UserMeta,
-				ExpiresAt: e.ExpiresAt,
+
+			writer, ok := sw.writers[kv.StreamId]
+			if !ok {
+				writer = sw.newWriter(kv.StreamId)
+				sw.writers[kv.StreamId] = writer
 			}
-		}
-		if err := writer.Add(e.Key, vs); err != nil {
-			return err
+
+			var vs y.ValueStruct
+			if e.skipVlog {
+				vs = y.ValueStruct{
+					Value:     e.Value,
+					Meta:      e.meta,
+					UserMeta:  e.UserMeta,
+					ExpiresAt: e.ExpiresAt,
+				}
+			} else {
+				vbuf := make([]byte, vptrSize)
+				vs = y.ValueStruct{
+					Value:     vptr.Encode(vbuf),
+					Meta:      e.meta | bitValuePointer,
+					UserMeta:  e.UserMeta,
+					ExpiresAt: e.ExpiresAt,
+				}
+			}
+			if err := writer.Add(e.Key, vs); err != nil {
+				panic(err)
+			}
 		}
 	}
-	return nil
+
+	for {
+		select {
+		case t := <-sw.tableCh:
+			process(t.kvs, t.req)
+		case <-sw.closer.HasBeenClosed():
+			close(sw.tableCh)
+			for t := range sw.tableCh {
+				process(t.kvs, t.req)
+			}
+			return
+		}
+	}
 }
 
 // Flush is called once we are done writing all the entries. It syncs DB directories. It also
 // updates Oracle with maxVersion found in all entries (if DB is not managed).
 func (sw *StreamWriter) Flush() error {
 	defer sw.done()
+
+	sw.closer.SignalAndWait()
 	for _, writer := range sw.writers {
 		if err := writer.Done(); err != nil {
 			return err
