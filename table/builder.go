@@ -19,12 +19,9 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"hash/crc32"
 	"io"
 	"math"
-
-	"github.com/dgraph-io/badger/pb"
 
 	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/pb"
@@ -147,6 +144,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 }
 
 func (b *Builder) finishBlock() error {
+	// store offsets for all entries as block meta
 	meta := &pb.BlockMeta{
 		EntryOffsets: b.entryOffsets,
 	}
@@ -157,9 +155,10 @@ func (b *Builder) finishBlock() error {
 	}
 
 	n, err := b.buf.Write(mo)
-	if err != nil || n != len(mo) {
-		return fmt.Errorf("block meta not written properly")
+	if err != nil {
+		return y.Wrapf(err, "unable to marshal block meta")
 	}
+	y.AssertTrue(n == len(mo))
 	// also write size of block meta
 	sb := make([]byte, 4)
 	binary.BigEndian.PutUint32(sb, uint32(n))
@@ -197,8 +196,9 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	}
 
 	// have to include current entry also in size, thats why +1 len of blockEntryOffsets
-	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 + 4)
-	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(6 /*header size*/ +diffKeyLen) +
+	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 + 4 /*size of list*/ +
+		4 /*crc32 checksum*/)
+	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(8 /*header size*/ +diffKeyLen) +
 		uint32(value.EncodedSize()) + entriesOffsetsSize
 	if estimatedSize > b.blockSize {
 		return true
@@ -229,7 +229,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	blocksSize := b.buf.Len() + len(b.blockEntryOffsets)*4 + 4
+	blocksSize := b.buf.Len() + len(b.entryOffsets)*4 + 4 + 4 /*checksum*/
 	estimateSz := blocksSize + 4 /* Index length */ +
 		5*(len(b.tableIndex.Offsets)) /* approximate index size */
 	return int64(estimateSz) > cap
