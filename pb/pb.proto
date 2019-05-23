@@ -69,3 +69,7 @@ message Checksum {
   Algorithm algo = 1; // For storing type of Checksum algorithm used
   uint64 sum64 = 2;
 }
+
+message BlockMeta {
+  repeated uint32 EntryOffsets = 1;
+}

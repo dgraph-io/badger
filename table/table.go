@@ -32,6 +32,7 @@ import (
 
 	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
 )
@@ -99,24 +100,34 @@ func (t *Table) DecrRef() error {
 }
 
 type block struct {
-	offset int
-	data   []byte
+	offset   int
+	data     []byte
+	checkSum uint32
 }
 
 func (b block) NewIterator() *blockIterator {
 	bi := &blockIterator{data: b.data}
 
-	// Start by populating entry offsets for block.
-	bi.entryOffsets = make([]uint32, 0)
-	readPos := len(bi.data) - 4 // first read number of entry offsets
-	size := binary.BigEndian.Uint32(bi.data[readPos : readPos+4])
-	for i := uint32(0); i < size; i++ {
-		readPos -= 4
-		offset := binary.BigEndian.Uint32(bi.data[readPos : readPos+4]) // read offset one by one
-		bi.entryOffsets = append(bi.entryOffsets, offset)
+	// start by reading checksum
+	readPos := len(bi.data) - 4
+	cs := binary.BigEndian.Uint32(bi.data[readPos : readPos+4])
+	b.checkSum = cs // TODO: should be part of block??
+
+	// read size of block meta
+	readPos -= 4
+	metaSize := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
+
+	// read while meta
+	readPos -= metaSize
+	bm := &pb.BlockMeta{}
+	err := bm.Unmarshal(bi.data[readPos : readPos+metaSize])
+	if err != nil {
+		panic(err) // TODO: what to do here
 	}
 
-	bi.data = bi.data[:readPos] // update data slice
+	bi.entryOffsets = bm.EntryOffsets
+	bi.data = bi.data[:readPos]
+
 	return bi
 }
 
