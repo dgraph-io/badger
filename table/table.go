@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 	"path"
@@ -106,21 +107,28 @@ func (t *Table) DecrRef() error {
 }
 
 type block struct {
-	offset   int
-	data     []byte
-	checkSum uint32
+	offset int
+	data   []byte
+}
+
+func (b block) VerifyCheckSum() bool {
+	y.AssertTrue(len(b.data) > 4)
+	csStored := binary.BigEndian.Uint32(b.data[len(b.data)-4:])
+
+	csNow := crc32.Checksum(b.data[:len(b.data)-4], y.CastagnoliCrcTable)
+	if csNow != csStored {
+		return false
+	}
+
+	return true
 }
 
 func (b block) NewIterator() *blockIterator {
 	bi := &blockIterator{data: b.data}
 
-	// start by reading checksum
-	readPos := len(bi.data) - 4
-	cs := binary.BigEndian.Uint32(bi.data[readPos : readPos+4])
-	b.checkSum = cs // TODO: should be part of block??
-
-	// read size of block meta
-	readPos -= 4
+	// since last 4 bytes at the end will be for checksum, we can skip
+	// reading last 4 bytes. Directly read size of block meta.
+	readPos := len(b.data) - 8
 	metaSize := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
 
 	// read while meta
@@ -132,7 +140,6 @@ func (b block) NewIterator() *blockIterator {
 	}
 
 	bi.entryOffsets = bm.EntryOffsets
-	bi.data = bi.data[:readPos]
 
 	return bi
 }
