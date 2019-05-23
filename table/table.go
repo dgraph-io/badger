@@ -248,7 +248,8 @@ func (t *Table) readIndex() error {
 
 	calculatedChecksum := crc32.ChecksumIEEE(data)
 	if calculatedChecksum != readchecksum {
-		return y.Wrapf(y.ErrChecksumMismatch, "checksum validation failed for table footer: %s", t.fd.Name())
+		return y.Wrapf(y.ErrChecksumMismatch,
+			"checksum validation failed for table footer: %s", t.fd.Name())
 	}
 	index := pb.TableIndex{}
 	err := index.Unmarshal(data)
