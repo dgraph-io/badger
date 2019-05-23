@@ -951,22 +951,33 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, err)
 	// Insert 1 entry so that we have valid data in first vlog file
 	require.NoError(t, db.Update(func(txn *Txn) error {
-		txn.Set([]byte("foo"), nil)
+		require.NoError(t, txn.Set([]byte("foo"), nil))
 		return nil
 	}))
 
-	// +1 because we create a new vlog file on db close
-	fileCountBeforeCorruption := len(db.vlog.filesMap) + 1
+	fileCountBeforeCorruption := len(db.vlog.filesMap)
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
-
 	// Create two vlog files corrupted data. These will be truncated when DB starts next time
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), []byte("foo"), 0664))
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 2), []byte("foo"), 0664))
 
 	db, err = Open(opts)
 	require.NoError(t, err)
-	fileCountAfterCorruption := len(db.vlog.filesMap)
+
+	// Ensure vlog file with id=1 is not present
+	require.Nil(t, db.vlog.filesMap[1])
+
+	// Ensure filesize of fid=2 is zero
+	zeroFile, ok := db.vlog.filesMap[2]
+	require.True(t, ok)
+	fileStat, err := zeroFile.fd.Stat()
+	require.NoError(t, err)
+	require.Zero(t, fileStat.Size())
+
+	// -1 because the file with id=2 will be completely truncated. It won't be deleted.
+	// There would be two files. fid=0 with valid data, fid=2 with zero data (truncated).
+	fileCountAfterCorruption := len(db.vlog.filesMap) - 1
 	require.Equal(t, fileCountBeforeCorruption, fileCountAfterCorruption)
 	// Max file ID would point to the last vlog file, which is fid=2 in this case
 	require.Equal(t, 2, int(db.vlog.maxFid))

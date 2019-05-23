@@ -736,9 +736,11 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	if !vlog.opt.Truncate {
 		return ErrTruncateNeeded
 	}
+
 	// The entire file should be truncated (i.e. it should be deleted).
-	// If fid == maxFid then it's okay to truncate the entire file since will be
-	// used for future additions
+	// If fid == maxFid then it's okay to truncate the entire file since it will be
+	// used for future additions. Also, it's okay if the last file has size zero.
+	// We mmap 2*opt.ValueLogSize for the last file. See vlog.Open() function
 	if endOffset == 0 && lf.fid != vlog.maxFid {
 		return errDeleteVlogFile
 	}
@@ -793,7 +795,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		// Replay and possible truncation done. Now we can open the file as per
 		// user specified options.
 		if err := vlog.replayLog(lf, offset, replayFn); err != nil {
-			// Log file is corrupted. Delete it
+			// Log file is corrupted. Delete it.
 			if err == errDeleteVlogFile {
 				delete(vlog.filesMap, fid)
 				path := vlog.fpath(lf.fid)
