@@ -18,6 +18,7 @@ package badger
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"math/rand"
 	"testing"
@@ -215,4 +216,71 @@ func TestStreamWriter3(t *testing.T) {
 			require.Nil(t, err, "error should be nil while iterating")
 		})
 	}
+}
+
+// After inserting all data from streams, StreamWriter reinitializes Oracle and updates its nextTs
+// to maxVersion found in all entries inserted(if db is running in non managed mode). It also
+// updates Oracle's txnMark and readMark. If Oracle is not reinitialized, it might cause issue
+// while updating readMark and txnMark when its nextTs is ahead of maxVersion. This tests verifies
+// Oracle reinitialization is happening. Try commenting line 171 in stream_writer.go with code
+// (sw.db.orc = newOracle(sw.db.opt), this test should fail.
+func TestStreamWriter4(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// first insert some entries in db
+		for i := 0; i < 10; i++ {
+			err := db.Update(func(txn *Txn) error {
+				key := []byte(fmt.Sprintf("key-%d", i))
+				value := []byte(fmt.Sprintf("val-%d", i))
+				return txn.Set(key, value)
+			})
+			require.NoError(t, err, "error while updating db")
+		}
+
+		list := &pb.KVList{}
+		list.Kv = append(list.Kv, &pb.KV{
+			Key:     []byte("key-1"),
+			Value:   []byte("value-1"),
+			Version: 1,
+		})
+
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+		require.NoError(t, sw.Write(list), "sw.Write() failed")
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+	})
+}
+
+func TestStreamWriter5(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		list := &pb.KVList{}
+
+		left := make([]byte, 6)
+		left[0] = 0x00
+		copy(left[1:], []byte("break"))
+
+		right := make([]byte, 6)
+		right[0] = 0xff
+		copy(right[1:], []byte("break"))
+
+		list.Kv = append(list.Kv, &pb.KV{
+			Key:     left,
+			Value:   []byte("val"),
+			Version: 1,
+		})
+		list.Kv = append(list.Kv, &pb.KV{
+			Key:     right,
+			Value:   []byte("val"),
+			Version: 1,
+		})
+
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+		require.NoError(t, sw.Write(list), "sw.Write() failed")
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+		require.NoError(t, db.Close())
+
+		var err error
+		_, err = Open(db.opt)
+		require.NoError(t, err)
+	})
 }
