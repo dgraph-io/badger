@@ -40,7 +40,7 @@ func TestTxnSimple(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			k := []byte(fmt.Sprintf("key=%d", i))
 			v := []byte(fmt.Sprintf("val=%d", i))
-			txn.SetEntry(NewEntry(k, v))
+			require.NoError(t, txn.SetEntry(NewEntry(k, v)))
 		}
 
 		item, err := txn.Get([]byte("key=8"))
@@ -156,7 +156,7 @@ func TestTxnVersions(t *testing.T) {
 		for i := 1; i < 10; i++ {
 			txn := db.NewTransaction(true)
 
-			txn.SetEntry(NewEntry(k, []byte(fmt.Sprintf("valversion=%d", i))))
+			require.NoError(t, txn.SetEntry(NewEntry(k, []byte(fmt.Sprintf("valversion=%d", i)))))
 			require.NoError(t, txn.Commit())
 			require.Equal(t, uint64(i), db.orc.readTs())
 		}
@@ -264,8 +264,8 @@ func TestTxnWriteSkew(t *testing.T) {
 		txn := db.NewTransaction(true)
 		defer txn.Discard()
 		val := []byte(strconv.Itoa(100))
-		txn.SetEntry(NewEntry(ax, val))
-		txn.SetEntry(NewEntry(ay, val))
+		require.NoError(t, txn.SetEntry(NewEntry(ax, val)))
+		require.NoError(t, txn.SetEntry(NewEntry(ay, val)))
 		require.NoError(t, txn.Commit())
 		require.Equal(t, uint64(1), db.orc.readTs())
 
@@ -286,7 +286,7 @@ func TestTxnWriteSkew(t *testing.T) {
 		sum := getBal(txn1, ax)
 		sum += getBal(txn1, ay)
 		require.Equal(t, 200, sum)
-		txn1.SetEntry(NewEntry(ax, []byte("0"))) // Deduct 100 from ax.
+		require.NoError(t, txn1.SetEntry(NewEntry(ax, []byte("0")))) // Deduct 100 from ax.
 
 		// Let's read this back.
 		sum = getBal(txn1, ax)
@@ -300,7 +300,7 @@ func TestTxnWriteSkew(t *testing.T) {
 		sum = getBal(txn2, ax)
 		sum += getBal(txn2, ay)
 		require.Equal(t, 200, sum)
-		txn2.SetEntry(NewEntry(ay, []byte("0"))) // Deduct 100 from ay.
+		require.NoError(t, txn2.SetEntry(NewEntry(ay, []byte("0")))) // Deduct 100 from ay.
 
 		// Let's read this back.
 		sum = getBal(txn2, ax)
