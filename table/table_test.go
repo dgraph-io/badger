@@ -22,6 +22,7 @@ import (
 	"os"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
@@ -47,6 +48,7 @@ func buildTestTable(t *testing.T, prefix string, n int) *os.File {
 func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	b := NewTableBuilder()
 	defer b.Close()
+	rand.Seed(time.Now().UnixNano())
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
