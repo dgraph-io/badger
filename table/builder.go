@@ -112,16 +112,6 @@ func (b Builder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
-	// Block start
-	if b.counter == 0 {
-		ko := &pb.KeyOffset{
-			Key:    y.Copy(key),
-			Offset: uint32(b.buf.Len()),
-			Len:    0, // Len will be populated when we finish the block. See finish function.
-		}
-		b.tableIndex.KeyOffSetList = append(b.tableIndex.KeyOffSetList, ko)
-	}
-
 	// Add key to bloom filter.
 	if len(key) > 0 {
 		var klen [2]byte
@@ -165,10 +155,13 @@ func (b *Builder) finishBlock() {
 	// When we are at the end of the block and Valid=false, and the user wants to do a Prev,
 	// we need a dummy header to tell us the offset of the previous key-value pair.
 	b.addHelper([]byte{}, y.ValueStruct{})
-	// Add the length of the previous block to the index
-	kList := b.tableIndex.KeyOffSetList
-	lastBlock := kList[len(kList)-1]
-	lastBlock.Len = uint32(b.buf.Len()) - lastBlock.Offset
+	// Add key to the block index
+	ko := &pb.KeyOffset{
+		Key:    y.Copy(b.baseKey),
+		Offset: b.baseOffset,
+		Len:    uint32(b.buf.Len()) - b.baseOffset, // Len will be populated when we finish the block. See finish function.
+	}
+	b.tableIndex.KeyOffSetList = append(b.tableIndex.KeyOffSetList, ko)
 }
 
 // Add adds a key-value pair to the block.
@@ -204,7 +197,7 @@ func (b *Builder) blockIndex() []byte {
 }
 
 // Finish finishes the table by appending the index.
-func (b *Builder) Finish() ([]byte, error) {
+func (b *Builder) Finish() []byte {
 	bf := bbloom.New(float64(b.keyCount), 0.01)
 	var klen [2]byte
 	key := make([]byte, 1024)
@@ -247,5 +240,5 @@ func (b *Builder) Finish() ([]byte, error) {
 	_, err = b.buf.Write(buf[:])
 	y.Check(err)
 
-	return b.buf.Bytes(), nil
+	return b.buf.Bytes()
 }

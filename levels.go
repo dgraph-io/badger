@@ -568,11 +568,7 @@ func (s *levelsController) compactBuildTables(
 				return newTableResult{nil, errors.Wrapf(err, "While opening new table: %d", fileID)}
 			}
 
-			data, err := builder.Finish()
-			if err != nil {
-				return newTableResult{nil, errors.Wrapf(err, "failed to build table")}
-			}
-			if _, err := fd.Write(data); err != nil {
+			if _, err := fd.Write(builder.Finish()); err != nil {
 				return newTableResult{nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)}
 			}
 
