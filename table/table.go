@@ -249,7 +249,9 @@ func (t *Table) readIndex() error {
 	readPos -= indexLen
 	data := t.readNoFail(readPos, indexLen)
 
-	y.VerifyChecksum(data, t.Checksum)
+	if err := y.VerifyChecksum(data, t.Checksum); err != nil {
+		return y.Wrapf(err, "checksum validation failed for table: %s", t.fd.Name())
+	}
 	index := pb.TableIndex{}
 	err := index.Unmarshal(data)
 	y.Check(err)
