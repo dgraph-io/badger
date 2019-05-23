@@ -562,31 +562,30 @@ func (s *levelsController) compactBuildTables(
 		// called Add() at least once, and builder is not Empty().
 		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			numKeys, numSkips, time.Since(timeStart))
+		build := func(fileID uint64) newTableResult {
+			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
+			if err != nil {
+				return newTableResult{nil, errors.Wrapf(err, "While opening new table: %d", fileID)}
+			}
+
+			data, err := builder.Finish()
+			if err != nil {
+				return newTableResult{nil, errors.Wrapf(err, "failed to build table")}
+			}
+			if _, err := fd.Write(data); err != nil {
+				return newTableResult{nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)}
+			}
+
+			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, nil)
+			// decrRef is added below.
+			return newTableResult{tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())}
+		}
 		if !builder.Empty() {
 			numBuilds++
 			fileID := s.reserveFileID()
 			go func(builder *table.Builder) {
 				defer builder.Close()
-
-				fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
-				if err != nil {
-					resultCh <- newTableResult{nil, errors.Wrapf(err, "While opening new table: %d", fileID)}
-					return
-				}
-
-				data, err := builder.Finish()
-				if err != nil {
-					resultCh <- newTableResult{nil, errors.Wrapf(err, "failed to build table")}
-					return
-				}
-				if _, err := fd.Write(data); err != nil {
-					resultCh <- newTableResult{nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)}
-					return
-				}
-
-				tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, nil)
-				// decrRef is added below.
-				resultCh <- newTableResult{tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())}
+				resultCh <- build(fileID)
 			}(builder)
 		}
 	}

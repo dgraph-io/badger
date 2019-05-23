@@ -733,23 +733,3 @@ func BenchmarkReadMerged(b *testing.B) {
 		}()
 	}
 }
-
-/*
-	fmt.Printf("data size: %s ", humanize.Bytes(uint64(len(index))))
-	start := time.Now()
-	// Build checksum for index
-	checksum, err := y.BuildChecksum(index, y.ChecksumXXHASH64)
-	fmt.Printf("XXHASH64: %s\t", time.Since(start))
-	if err != nil {
-		return nil, y.Wrapf(err, "failed to build checksum")
-	}
-
-	start = time.Now()
-	// Build checksum for index
-	checksum, err = y.BuildChecksum(index, y.ChecksumCRC)
-	fmt.Printf("CRC: %s\n", time.Since(start))
-	if err != nil {
-		return nil, y.Wrapf(err, "failed to build checksum")
-	}
-
-*/
