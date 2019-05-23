@@ -196,12 +196,10 @@ func (b *Builder) ReachedCapacity(cap int64) bool {
 }
 
 // blockIndex generates the block index for the table.
-func (b *Builder) blockIndex() ([]byte, error) {
+func (b *Builder) blockIndex() []byte {
 	out, err := b.tableIndex.Marshal()
-	if err != nil {
-		return nil, y.Wrapf(err, "failed to marshal table index")
-	}
-	return out, nil
+	y.Check(err)
+	return out
 }
 
 // Finish finishes the table by appending the index.
@@ -228,14 +226,9 @@ func (b *Builder) Finish() ([]byte, error) {
 	b.tableIndex.BloomFilter = bf.JSONMarshal()
 	b.finishBlock() // This will never start a new block.
 
-	index, err := b.blockIndex()
-	if err != nil {
-		return nil, y.Wrapf(err, "failed to build block index")
-	}
+	index := b.blockIndex()
 	n, err := b.buf.Write(index)
-	if err != nil {
-		return nil, y.Wrapf(err, "failed to write index to the buffer")
-	}
+	y.Check(err)
 
 	// Write index size
 	var buf [4]byte
