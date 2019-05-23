@@ -50,3 +50,7 @@ message ManifestChange {
         uint32 Level   = 3; // Only used for CREATE
         bytes Checksum = 4; // Only used for CREATE
 }
+
+message BlockMeta {
+  repeated uint32 EntryOffsets = 1;
+}
