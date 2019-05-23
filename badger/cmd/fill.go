@@ -18,7 +18,6 @@ package cmd
 
 import (
 	"encoding/binary"
-	"fmt"
 	"log"
 	"math/rand"
 	"time"
@@ -116,8 +115,6 @@ func fill(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println()
-	fmt.Println("============== key size: ", keySz)
 	defer func() {
 		start := time.Now()
 		err := db.Close()
