@@ -51,6 +51,16 @@ message ManifestChange {
         bytes Checksum = 4; // Only used for CREATE
 }
 
-message BlockMeta {
+message BlockIndex {
   repeated uint32 EntryOffsets = 1;
+}
+
+enum ChecksumType {
+  CRC32C = 0;
+  XXHash = 1;
+}
+
+message Checksum {
+  ChecksumType Type = 1;  // For storing type of Checksum algorithm used
+  bytes Content = 2; // For storing actual checksum
 }
