@@ -47,13 +47,7 @@ type StreamWriter struct {
 	head       valuePointer
 	maxVersion uint64
 	writers    map[uint32]*sortedWriter
-	tableCh    chan *toTable
 	closer     *y.Closer
-}
-
-type toTable struct {
-	kvs *pb.KVList
-	req *request
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -67,7 +61,6 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 		// concurrent streams being processed.
 		throttle: y.NewThrottle(16),
 		writers:  make(map[uint32]*sortedWriter),
-		tableCh:  make(chan *toTable, 3),
 		closer:   y.NewCloser(0),
 	}
 }
