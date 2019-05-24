@@ -61,17 +61,15 @@ type toTable struct {
 // possible. So, efforts must be made to keep the number of streams low. Stream framework would
 // typically use 16 goroutines and hence create 16 streams.
 func (db *DB) NewStreamWriter() *StreamWriter {
-	sw := &StreamWriter{
+	return &StreamWriter{
 		db: db,
 		// throttle shouldn't make much difference. Memory consumption is based on the number of
 		// concurrent streams being processed.
 		throttle: y.NewThrottle(16),
 		writers:  make(map[uint32]*sortedWriter),
 		tableCh:  make(chan *toTable, 3),
-		closer:   y.NewCloser(1),
+		closer:   y.NewCloser(0),
 	}
-	go sw.handleRequests()
-	return sw
 }
 
 // Prepare should be called before writing any entry to StreamWriter. It deletes all data present in
@@ -87,7 +85,7 @@ func (sw *StreamWriter) Prepare() error {
 // Write writes KVList to DB. Each KV within the list contains the stream id which StreamWriter
 // would use to demux the writes.
 func (sw *StreamWriter) Write(kvs *pb.KVList) error {
-	var entries []*Entry
+	streamReqs := make(map[uint32]*request)
 	for _, kv := range kvs.Kv {
 		var meta, userMeta byte
 		if len(kv.Meta) > 0 {
@@ -109,73 +107,30 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 		// If the value can be colocated with the key in LSM tree, we can skip
 		// writing the value to value log.
 		e.skipVlog = sw.db.shouldWriteValueToLSM(*e)
-		entries = append(entries, e)
+		req := streamReqs[kv.StreamId]
+		if req == nil {
+			req = &request{}
+			streamReqs[kv.StreamId] = req
+		}
+		req.Entries = append(req.Entries, e)
 	}
-	req := &request{
-		Entries: entries,
+	var all []*request
+	for _, req := range streamReqs {
+		all = append(all, req)
 	}
-	y.AssertTrue(len(kvs.Kv) == len(req.Entries))
-	if err := sw.db.vlog.write([]*request{req}); err != nil {
+	if err := sw.db.vlog.write(all); err != nil {
 		return err
 	}
 
-	sw.tableCh <- &toTable{kvs: kvs, req: req}
+	for streamId, req := range streamReqs {
+		writer, ok := sw.writers[streamId]
+		if !ok {
+			writer = sw.newWriter(streamId)
+			sw.writers[streamId] = writer
+		}
+		writer.reqCh <- req
+	}
 	return nil
-}
-
-func (sw *StreamWriter) handleRequests() {
-	defer sw.closer.Done()
-
-	process := func(kvs *pb.KVList, req *request) {
-		for i, kv := range kvs.Kv {
-			e := req.Entries[i]
-			vptr := req.Ptrs[i]
-			if !vptr.IsZero() {
-				y.AssertTrue(sw.head.Less(vptr))
-				sw.head = vptr
-			}
-
-			writer, ok := sw.writers[kv.StreamId]
-			if !ok {
-				writer = sw.newWriter(kv.StreamId)
-				sw.writers[kv.StreamId] = writer
-			}
-
-			var vs y.ValueStruct
-			if e.skipVlog {
-				vs = y.ValueStruct{
-					Value:     e.Value,
-					Meta:      e.meta,
-					UserMeta:  e.UserMeta,
-					ExpiresAt: e.ExpiresAt,
-				}
-			} else {
-				vbuf := make([]byte, vptrSize)
-				vs = y.ValueStruct{
-					Value:     vptr.Encode(vbuf),
-					Meta:      e.meta | bitValuePointer,
-					UserMeta:  e.UserMeta,
-					ExpiresAt: e.ExpiresAt,
-				}
-			}
-			if err := writer.Add(e.Key, vs); err != nil {
-				panic(err)
-			}
-		}
-	}
-
-	for {
-		select {
-		case t := <-sw.tableCh:
-			process(t.kvs, t.req)
-		case <-sw.closer.HasBeenClosed():
-			close(sw.tableCh)
-			for t := range sw.tableCh {
-				process(t.kvs, t.req)
-			}
-			return
-		}
-	}
 }
 
 // Flush is called once we are done writing all the entries. It syncs DB directories. It also
@@ -232,19 +187,73 @@ type sortedWriter struct {
 	builder  *table.Builder
 	lastKey  []byte
 	streamId uint32
+	reqCh    chan *request
+	head     valuePointer
 }
 
 func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
-	return &sortedWriter{
+	w := &sortedWriter{
 		db:       sw.db,
 		streamId: streamId,
 		throttle: sw.throttle,
 		builder:  table.NewTableBuilder(),
+		reqCh:    make(chan *request, 3),
 	}
+	sw.closer.AddRunning(1)
+	go w.handleRequests(sw.closer)
+	return w
 }
 
 // ErrUnsortedKey is returned when any out of order key arrives at sortedWriter during call to Add.
 var ErrUnsortedKey = errors.New("Keys not in sorted order")
+
+func (w *sortedWriter) handleRequests(closer *y.Closer) {
+	defer closer.Done()
+
+	process := func(req *request) {
+		for i, e := range req.Entries {
+			vptr := req.Ptrs[i]
+			if !vptr.IsZero() {
+				y.AssertTrue(w.head.Less(vptr))
+				w.head = vptr
+			}
+
+			var vs y.ValueStruct
+			if e.skipVlog {
+				vs = y.ValueStruct{
+					Value:     e.Value,
+					Meta:      e.meta,
+					UserMeta:  e.UserMeta,
+					ExpiresAt: e.ExpiresAt,
+				}
+			} else {
+				vbuf := make([]byte, vptrSize)
+				vs = y.ValueStruct{
+					Value:     vptr.Encode(vbuf),
+					Meta:      e.meta | bitValuePointer,
+					UserMeta:  e.UserMeta,
+					ExpiresAt: e.ExpiresAt,
+				}
+			}
+			if err := w.Add(e.Key, vs); err != nil {
+				panic(err)
+			}
+		}
+	}
+
+	for {
+		select {
+		case req := <-w.reqCh:
+			process(req)
+		case <-closer.HasBeenClosed():
+			close(w.reqCh)
+			for req := range w.reqCh {
+				process(req)
+			}
+			return
+		}
+	}
+}
 
 // Add adds key and vs to sortedWriter.
 func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
