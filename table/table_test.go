@@ -727,3 +727,16 @@ func BenchmarkReadMerged(b *testing.B) {
 		}()
 	}
 }
+
+func TestBlockChecksum(t *testing.T) {
+	f := buildTestTable(t, "k", 10000)
+	table, err := OpenTable(f, options.MemoryMap, nil)
+	require.NoError(t, err)
+
+	for i := range table.blockIndex {
+		b, err := table.block(i)
+		require.NoError(t, err, "error while getting block")
+
+		require.NoError(t, b.VerifyCheckSum(), "error in checksum verification")
+	}
+}

@@ -19,13 +19,15 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	"hash/crc32"
 	"io"
 
 	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 )
+
+// TODO: add this as an option
+const checksumType = pb.ChecksumType_CRC32C
 
 func newBuffer(sz int) *bytes.Buffer {
 	b := new(bytes.Buffer)
@@ -140,34 +142,40 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 }
 
 func (b *Builder) finishBlock() error {
-	// store offsets for all entries as block meta
-	meta := &pb.BlockMeta{
-		EntryOffsets: b.entryOffsets,
+	idx := &pb.BlockIndex{
+		EntryOffsets: b.entryOffsets, // store offsets for all entries as block index
 	}
-
-	mo, err := meta.Marshal()
+	mo, err := idx.Marshal()
 	if err != nil {
-		return err
+		return y.Wrapf(err, "unable to marshal block index")
 	}
-
 	n, err := b.buf.Write(mo)
 	if err != nil {
-		return y.Wrapf(err, "unable to marshal block meta")
+		return y.Wrapf(err, "unable to write block index to buf")
 	}
 	y.AssertTrue(n == len(mo))
-	// also write size of block meta
-	sb := make([]byte, 4)
-	binary.BigEndian.PutUint32(sb, uint32(n))
+	sb := y.BytesForUint32(uint32(n)) // also write size of block meta
 	b.buf.Write(sb)
 
-	// we need to calculate checksum for current block
+	// store checksum for current block
 	blockBuf := b.buf.Bytes()[b.baseOffset:]
-	cs := crc32.Checksum(blockBuf, y.CastagnoliCrcTable)
-	csBuf := make([]byte, 4)
-	binary.BigEndian.PutUint32(csBuf, cs)
-	b.buf.Write(csBuf)
+	cs := &pb.Checksum{
+		Type:    checksumType,
+		Content: y.CalculateChecksum(blockBuf, checksumType),
+	}
+	csm, err := cs.Marshal()
+	if err != nil {
+		return y.Wrapf(err, "unable to marshal block checksum")
+	}
+	n, err = b.buf.Write(csm)
+	if err != nil {
+		return y.Wrapf(err, "unable to write block checksum to buf")
+	}
+	sb = y.BytesForUint32(uint32(n)) // also write size of block checksum
+	b.buf.Write(sb)
 
-	// TODO: implement padding ??
+	// TODO: If want to make block as multiple of pages, we can implement padding
+
 	return nil
 }
 
@@ -185,6 +193,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	}
 
 	// have to include current entry also in size, thats why +1 len of blockEntryOffsets
+	// TODO: estimate correct size for checksum
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 + 4 /*size of list*/ +
 		4 /*crc32 checksum*/)
 	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(8 /*header size*/ +diffKeyLen) +
@@ -219,7 +228,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	// 4 for list size and 4 for checksum.
+	// 4 for list size and 4 for checksum. TODO: estimate correct size for checksum
 	blocksSize := b.buf.Len() + len(b.entryOffsets)*4 + 4 + 4
 	estimateSz := blocksSize + 4*len(b.restarts) + 8 // 8 = end of buf offset + len(restarts).
 	return int64(estimateSz) > cap

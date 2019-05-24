@@ -73,3 +73,10 @@ func verifyXXHash(data, expected []byte) error {
 
 	return nil
 }
+
+// BytesForUint32 returns bytes representation of uint32.
+func BytesForUint32(n uint32) []byte {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, n)
+	return b
+}
