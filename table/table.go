@@ -19,7 +19,6 @@ package table
 import (
 	"encoding/binary"
 	"fmt"
-	"hash/crc32"
 	"io"
 	"os"
 	"path"
@@ -103,29 +102,38 @@ type block struct {
 	data   []byte
 }
 
-func (b block) VerifyCheckSum() bool {
+func (b block) VerifyCheckSum() error {
 	y.AssertTrue(len(b.data) > 4)
-	csStored := binary.BigEndian.Uint32(b.data[len(b.data)-4:])
+	csSize := int(binary.BigEndian.Uint32(b.data[len(b.data)-4:]))
 
-	csNow := crc32.Checksum(b.data[:len(b.data)-4], y.CastagnoliCrcTable)
-	if csNow != csStored {
-		return false
+	readPos := len(b.data) - 4 - csSize
+	y.AssertTrue(readPos >= 0)
+
+	cs := pb.Checksum{}
+	if err := cs.Unmarshal(b.data[readPos : readPos+csSize]); err != nil {
+		return y.Wrapf(err, "unable to unmarshal checksum")
 	}
 
-	return true
+	if err := y.VerifyChecksum(b.data[:readPos], cs.Content, cs.Type); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (b block) NewIterator() *blockIterator {
 	bi := &blockIterator{data: b.data}
 
-	// since last 4 bytes at the end will be for checksum, we can skip
-	// reading last 4 bytes. Directly read size of block meta.
-	readPos := len(b.data) - 8
+	// first read checksum size
+	readPos := len(b.data) - 4
+	csSize := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
+
+	readPos -= (csSize + 4) // skip reading checksum, and move position to block index length
 	metaSize := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
 
 	// read while meta
 	readPos -= metaSize
-	bm := &pb.BlockMeta{}
+	bm := &pb.BlockIndex{}
 	err := bm.Unmarshal(bi.data[readPos : readPos+metaSize])
 	if err != nil {
 		panic(err) // TODO: what to do here
