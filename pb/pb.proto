@@ -70,6 +70,6 @@ message Checksum {
   uint64 sum64 = 2;
 }
 
-message BlockMeta {
+message BlockIndex {
   repeated uint32 EntryOffsets = 1;
 }
