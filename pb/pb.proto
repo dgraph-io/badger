@@ -61,3 +61,13 @@ message TableIndex {
   repeated KeyOffset KeyOffSetList = 1;
   bytes BloomFilter = 2;
 }
+
+enum ChecksumType {
+  CRC32C = 0;
+  XXHash = 1;
+}
+
+message Checksum {
+  ChecksumType Type = 1;  // For storing type of Checksum algorithm used
+  bytes Content = 2;      // For storing actual checksum
+}

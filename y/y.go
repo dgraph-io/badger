@@ -33,9 +33,6 @@ import (
 // and encountering the end of slice.
 var ErrEOF = errors.New("End of mapped region")
 
-// ErrChecksumMismatch indicates checksum validation failed
-var ErrChecksumMismatch = errors.New("Checksum mismatch")
-
 const (
 	// Sync indicates that O_DSYNC should be set on the underlying file,
 	// ensuring that data writes do not return until the data is flushed

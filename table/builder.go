@@ -19,7 +19,6 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	"hash/crc32"
 	"io"
 	"math"
 
@@ -231,14 +230,27 @@ func (b *Builder) Finish() []byte {
 	_, err = b.buf.Write(buf[:])
 	y.Check(err)
 
-	// Build CRC32 checksum for index
-	// (see https://gist.github.com/jarifibrahim/cc91fd84c7866e0341ca1a2a83c67a96 for benchmark)
-	checksum := crc32.ChecksumIEEE(index)
+	b.writeChecksum(index)
+	return b.buf.Bytes()
+}
+
+func (b *Builder) writeChecksum(data []byte) {
+	// Build checksum for the index
+	checksum := pb.Checksum{
+		Content: y.CalculateChecksum(data, pb.ChecksumType_CRC32C),
+		Type:    pb.ChecksumType_CRC32C,
+	}
 
 	// Write checksum to the file
-	binary.BigEndian.PutUint32(buf[:], checksum)
-	_, err = b.buf.Write(buf[:])
+	chksum, err := checksum.Marshal()
+	y.Check(err)
+	n, err := b.buf.Write(chksum)
 	y.Check(err)
 
-	return b.buf.Bytes()
+	y.AssertTrue(n < math.MaxUint32)
+	// Write checksum size
+	var buf [4]byte
+	binary.BigEndian.PutUint32(buf[:], uint32(n))
+	_, err = b.buf.Write(buf[:])
+	y.Check(err)
 }

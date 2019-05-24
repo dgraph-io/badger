@@ -20,7 +20,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"hash/crc32"
 	"io"
 	"os"
 	"path"
@@ -233,10 +232,16 @@ func (t *Table) readNoFail(off, sz int) []byte {
 func (t *Table) readIndex() error {
 	readPos := t.tableSize
 
-	// Read checksum from the last 4 bytes
+	// Read checksum len from the last 4 bytes
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
-	readchecksum := binary.BigEndian.Uint32(buf)
+	checksumLen := binary.BigEndian.Uint32(buf)
+
+	// Read checksum
+	checksum := pb.Checksum{}
+	readPos -= int(checksumLen)
+	buf = t.readNoFail(readPos, int(checksumLen))
+	err := checksum.Unmarshal(buf)
 
 	// Read index size from the footer
 	readPos -= 4
@@ -246,13 +251,11 @@ func (t *Table) readIndex() error {
 	readPos -= indexLen
 	data := t.readNoFail(readPos, indexLen)
 
-	calculatedChecksum := crc32.ChecksumIEEE(data)
-	if calculatedChecksum != readchecksum {
-		return y.Wrapf(y.ErrChecksumMismatch,
-			"checksum validation failed for table footer: %s", t.fd.Name())
-	}
+	err = y.VerifyChecksum(data, checksum.Content, checksum.Type)
+	// Todo log the error
+	y.Check(err)
 	index := pb.TableIndex{}
-	err := index.Unmarshal(data)
+	err = index.Unmarshal(data)
 	y.Check(err)
 
 	t.bf = bbloom.JSONUnmarshal(index.BloomFilter)

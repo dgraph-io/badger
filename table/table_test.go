@@ -17,13 +17,17 @@
 package table
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"fmt"
+	"hash/crc32"
 	"math/rand"
 	"os"
 	"sort"
 	"testing"
 	"time"
 
+	"github.com/cespare/xxhash"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
@@ -641,7 +645,7 @@ func BenchmarkRead(b *testing.B) {
 	y.Check(err)
 	defer tbl.DecrRef()
 
-	//	y.Printf("Size of table: %d\n", tbl.Size())
+	fmt.Printf("Size of table: %d\n", tbl.Size())
 	b.ResetTimer()
 	// Iterate b.N times over the entire table.
 	for i := 0; i < b.N; i++ {
@@ -725,5 +729,50 @@ func BenchmarkReadMerged(b *testing.B) {
 			for it.Rewind(); it.Valid(); it.Next() {
 			}
 		}()
+	}
+}
+
+func BenchmarkChecksumCRC(b *testing.B) {
+	kb := 1024
+	mb := kb * 1024
+	keySz := []int{2 * kb, 4 * kb, 8 * kb, 16 * kb, 32 * kb, 64 * kb, 128 * kb, 256 * kb, mb}
+	var x uint32
+	for _, kz := range keySz {
+		key := bytes.Repeat([]byte("a"), kz)
+		b.Run(fmt.Sprintf("CRC %d", kz), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				x = crc32.ChecksumIEEE(key)
+			}
+		})
+	}
+	fmt.Print(x)
+}
+
+func BenchmarkChecksumSha256(b *testing.B) {
+	kb := 1024
+	mb := kb * 1024
+	keySz := []int{2 * kb, 4 * kb, 8 * kb, 16 * kb, 32 * kb, 64 * kb, 128 * kb, 256 * kb, mb}
+	for _, kz := range keySz {
+		key := make([]byte, kz)
+		b.Run(fmt.Sprintf("SHA256 %d", kz), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				sha256.Sum256(key)
+			}
+		})
+	}
+
+}
+
+func BenchmarkChecksumxxHash(b *testing.B) {
+	kb := 1024
+	mb := kb * 1024
+	keySz := []int{2 * kb, 4 * kb, 8 * kb, 16 * kb, 32 * kb, 64 * kb, 128 * kb, 256 * kb, mb}
+	for _, kz := range keySz {
+		key := make([]byte, kz)
+		b.Run(fmt.Sprintf("xxHash64 %d", kz), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				xxhash.Sum64(key)
+			}
+		})
 	}
 }
