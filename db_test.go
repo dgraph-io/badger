@@ -1786,6 +1786,7 @@ func TestForceFlushMemtable(t *testing.T) {
 	// get latest value of value log head
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	vs, err := db.get(headKey)
+	require.NoError(t, err)
 	var vptr valuePointer
 	vptr.Decode(vs.Value)
 	// Since we are inserting 3 entries and ValueLogMaxEntries is 1, there will be 3 rotation. For
