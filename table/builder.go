@@ -26,9 +26,6 @@ import (
 	"github.com/dgraph-io/badger/y"
 )
 
-// TODO: add this as an option
-const checksumType = pb.ChecksumType_CRC32C
-
 func newBuffer(sz int) *bytes.Buffer {
 	b := new(bytes.Buffer)
 	b.Grow(sz)
@@ -73,14 +70,17 @@ type Builder struct {
 
 	keyBuf   *bytes.Buffer
 	keyCount int
+
+	checksumType pb.ChecksumType
 }
 
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder() *Builder {
 	return &Builder{
-		keyBuf:    newBuffer(1 << 20),
-		buf:       newBuffer(1 << 20),
-		blockSize: 4 * 1024, // TODO:Ashish: make this configurable
+		keyBuf:       newBuffer(1 << 20),
+		buf:          newBuffer(1 << 20),
+		blockSize:    4 * 1024,               // TODO:Ashish: make this configurable
+		checksumType: pb.ChecksumType_CRC32C, // TODO: make this configurable
 	}
 }
 
@@ -160,8 +160,8 @@ func (b *Builder) finishBlock() error {
 	// store checksum for current block
 	blockBuf := b.buf.Bytes()[b.baseOffset:]
 	cs := &pb.Checksum{
-		Type:    checksumType,
-		Content: y.CalculateChecksum(blockBuf, checksumType),
+		Type:    b.checksumType,
+		Content: y.CalculateChecksum(blockBuf, b.checksumType),
 	}
 	csm, err := cs.Marshal()
 	if err != nil {
@@ -174,7 +174,8 @@ func (b *Builder) finishBlock() error {
 	sb = y.BytesForUint32(uint32(n)) // also write size of block checksum
 	b.buf.Write(sb)
 
-	// TODO: If want to make block as multiple of pages, we can implement padding
+	// TODO: If want to make block as multiple of pages, we can implement padding.
+	// This is be useful while using direct io.
 
 	return nil
 }
