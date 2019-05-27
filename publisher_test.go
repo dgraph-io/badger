@@ -52,8 +52,8 @@ func TestPublisherOrdering(t *testing.T) {
 		subWg.Wait()
 		for i := 0; i < 5; i++ {
 			db.Update(func(txn *Txn) error {
-				return txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)),
-					[]byte(fmt.Sprintf("value%d", i))))
+				e := NewEntry([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("value%d", i)))
+				return txn.SetEntry(e)
 			})
 		}
 		wg.Wait()

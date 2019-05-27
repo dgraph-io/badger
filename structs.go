@@ -136,8 +136,8 @@ func (e Entry) print(prefix string) {
 // NewEntry creates a new entry with key and value passed in args. This newly created entry can be
 // set in a transaction by calling txn.SetEntry(). All other properties of Entry can be set by
 // calling WithMeta, WithDiscard, WithTTL methods on it.
-// This function uses key and value reference, hence users must not modify key and value until the
-// end of transaction.
+// This function uses key and value reference, hence users must
+// not modify key and value until the end of transaction.
 func NewEntry(key, value []byte) *Entry {
 	return &Entry{
 		Key:   key,
@@ -145,9 +145,9 @@ func NewEntry(key, value []byte) *Entry {
 	}
 }
 
-// WithMeta adds meta data to Entry e. This byte is stored alongside the key and can be used as an
-// aid to interpret the value or store other contextual bits corresponding to the key-value pair of
-// entry.
+// WithMeta adds meta data to Entry e. This byte is stored alongside the key
+// and can be used as an aid to interpret the value or store other contextual
+// bits corresponding to the key-value pair of entry.
 func (e *Entry) WithMeta(meta byte) *Entry {
 	e.UserMeta = meta
 	return e
@@ -165,7 +165,7 @@ func (e *Entry) WithDiscard() *Entry {
 }
 
 // WithTTL adds time to live duration to Entry e. Entry stored with a TTL would automatically expire
-// after the time has elapsed, and be eligible for garbage collection.
+// after the time has elapsed, and will be eligible for garbage collection.
 func (e *Entry) WithTTL(dur time.Duration) *Entry {
 	e.ExpiresAt = uint64(time.Now().Add(dur).Unix())
 	return e

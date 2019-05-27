@@ -206,8 +206,8 @@ func TestBigKeyValuePairs(t *testing.T) {
 
 		txn := db.NewTransaction(true)
 		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.SetEntry(NewEntry(bigK, small)))
-		require.Regexp(t, regexp.MustCompile("Value.*exceeded"), txn.SetEntry(
-			NewEntry(small, bigV)))
+		require.Regexp(t, regexp.MustCompile("Value.*exceeded"),
+			txn.SetEntry(NewEntry(small, bigV)))
 
 		require.NoError(t, txn.SetEntry(NewEntry(small, small)))
 		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.SetEntry(NewEntry(bigK, bigV)))

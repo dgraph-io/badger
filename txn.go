@@ -339,9 +339,7 @@ func (txn *Txn) modify(e *Entry) error {
 }
 
 // Set adds a key-value pair to the database.
-//
-// It will return ErrReadOnlyTxn if update flag was set to false when creating the
-// transaction.
+// It will return ErrReadOnlyTxn if update flag was set to false when creating the transaction.
 //
 // The current transaction keeps a reference to the key and val byte slice
 // arguments. Users must not modify key and val until the end of the transaction.

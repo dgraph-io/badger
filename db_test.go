@@ -127,9 +127,8 @@ func TestUpdateAndView(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		err := db.Update(func(txn *Txn) error {
 			for i := 0; i < 10; i++ {
-				err := txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)),
-					[]byte(fmt.Sprintf("val%d", i))))
-				if err != nil {
+				entry := NewEntry([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)))
+				if err := txn.SetEntry(entry); err != nil {
 					return err
 				}
 			}
@@ -1139,7 +1138,7 @@ func TestLargeKeys(t *testing.T) {
 					t.Fatalf("failed with: %s", err)
 				}
 			} else if !kv.success {
-				t.Fatal("insertion should have failed")
+				t.Fatal("insertion should fail")
 			}
 		}
 		if err := tx.Commit(); err != nil {
@@ -1740,8 +1739,8 @@ func TestNoCrash(t *testing.T) {
 	// entering 100 entries will generate 100 vlog files
 	for i := 0; i < 100; i++ {
 		err := db.Update(func(txn *Txn) error {
-			return txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key-%d", i)),
-				[]byte(fmt.Sprintf("val-%d", i))))
+			entry := NewEntry([]byte(fmt.Sprintf("key-%d", i)), []byte(fmt.Sprintf("val-%d", i)))
+			return txn.SetEntry(entry)
 		})
 		require.NoError(t, err, "update to db failed")
 	}

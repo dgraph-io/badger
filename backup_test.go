@@ -445,8 +445,8 @@ func TestBackupLoadIncremental(t *testing.T) {
 		// pick 5 items to mark as expired.
 		err = db1.Update(func(txn *Txn) error {
 			for _, i := range (ints)[10:15] {
-				if err := txn.SetEntry(
-					NewEntry(entries[i].Key, entries[i].Value).WithTTL(-time.Hour)); err != nil {
+				entry := NewEntry(entries[i].Key, entries[i].Value).WithTTL(-time.Hour)
+				if err := txn.SetEntry(entry); err != nil {
 					return err
 				}
 				updates[i] = bitDelete // expired
@@ -460,8 +460,8 @@ func TestBackupLoadIncremental(t *testing.T) {
 		// pick 5 items to mark as discard.
 		err = db1.Update(func(txn *Txn) error {
 			for _, i := range ints[15:20] {
-				if err := txn.SetEntry(NewEntry(entries[i].Key, entries[i].Value).
-					WithDiscard()); err != nil {
+				entry := NewEntry(entries[i].Key, entries[i].Value).WithDiscard()
+				if err := txn.SetEntry(entry); err != nil {
 					return err
 				}
 				updates[i] = bitDiscardEarlierVersions
