@@ -203,11 +203,8 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		4 /*crc32 checksum*/)
 	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(8 /*header size*/) +
 		uint32(value.EncodedSize()) + entriesOffsetsSize
-	if estimatedSize > b.blockSize {
-		return true
-	}
 
-	return false
+	return estimatedSize > b.blockSize
 }
 
 // Add adds a key-value pair to the block.
