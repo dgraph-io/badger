@@ -122,11 +122,7 @@ func (b block) VerifyCheckSum() error {
 		return y.Wrapf(err, "unable to unmarshal checksum")
 	}
 
-	if err := y.VerifyChecksum(b.data[:readPos], cs.Content, cs.Type); err != nil {
-		return err
-	}
-
-	return nil
+	return y.VerifyChecksum(b.data[:readPos], cs.Content, cs.Type)
 }
 
 func (b block) NewIterator() *blockIterator {
