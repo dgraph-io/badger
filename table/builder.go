@@ -186,18 +186,11 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		return false
 	}
 
-	var diffKeyLen int
-	if len(b.baseKey) == 0 {
-		diffKeyLen = len(key)
-	} else {
-		diffKeyLen = len(b.keyDiff(key))
-	}
-
 	// have to include current entry also in size, thats why +1 len of blockEntryOffsets
 	// TODO: estimate correct size for checksum
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 + 4 /*size of list*/ +
 		4 /*crc32 checksum*/)
-	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(8 /*header size*/ +diffKeyLen) +
+	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(8 /*header size*/) +
 		uint32(value.EncodedSize()) + entriesOffsetsSize
 	if estimatedSize > b.blockSize {
 		return true
