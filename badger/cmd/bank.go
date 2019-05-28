@@ -131,7 +131,7 @@ func getBalance(txn *badger.Txn, account int) (uint64, error) {
 }
 
 func putBalance(txn *badger.Txn, account int, bal uint64) error {
-	return txn.Set(key(account), toSlice(bal))
+	return txn.SetEntry(badger.NewEntry(key(account), toSlice(bal)))
 }
 
 func min(a, b uint64) uint64 {
