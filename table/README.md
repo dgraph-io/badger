@@ -49,3 +49,33 @@ takes ~1.3s as we saw above. So in total, we expect around 0.84+1.3 ~ 2.1s.
 This roughly matches what we observe when running populate. There might be
 some additional overhead due to the concurrent writes going on, in flushing the
 table to disk. Also, the tables tend to be slightly bigger than 64M/s.
+
+# DB Open benchmark
+1. Create badger DB with some data
+```
+badger fill -m 300 --dir="/tmp/data" --sorted
+```
+2. Clear buffers and swap memory
+```
+free -mh && sync && echo 3 | sudo tee /proc/sys/vm/drop_caches && sudo swapoff -a && sudo swapon -a && free -mh
+```
+Also flush disk buffers
+```
+blockdev --flushbufs /dev/nvme0n1p4
+```
+3. Run the benchmark
+```
+go test -run=^$ github.com/dgraph-io/badger -bench ^BenchmarkDBOpen$ -benchdir="/tmp/data" -v
+
+badger 2019/05/28 21:31:20 INFO: 92 tables out of 155 opened in 3.005s
+badger 2019/05/28 21:31:22 INFO: All 155 tables opened in 5.132s
+badger 2019/05/28 21:31:22 INFO: Replaying file id: 299 at offset: 116366000
+badger 2019/05/28 21:31:22 INFO: Replay took: 355.887µs
+goos: linux
+goarch: amd64
+pkg: github.com/dgraph-io/badger
+BenchmarkDBOpen-8   	       1	5228268412 ns/op
+PASS
+ok  	github.com/dgraph-io/badger	5.291s
+```
+It takes about 5.132s to open a DB with 300 million sorted key-value entries.
