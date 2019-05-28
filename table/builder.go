@@ -19,6 +19,7 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
+	"hash/crc32"
 	"io"
 	"math"
 
@@ -75,7 +76,7 @@ type Builder struct {
 	baseKey    []byte // Base key for the current block.
 	baseOffset uint32 // Offset for the current block.
 
-	tableIndex pb.TableIndex
+	tableIndex *pb.TableIndex
 
 	// Tracks offset for the previous key-value pair. Offset is relative to block base offset.
 	prevOffset uint32
@@ -90,6 +91,7 @@ func NewTableBuilder() *Builder {
 		keyBuf:     newBuffer(1 << 20),
 		buf:        newBuffer(1 << 20),
 		prevOffset: math.MaxUint32, // Used for the first element!
+		tableIndex: &pb.TableIndex{},
 	}
 }
 
@@ -155,12 +157,12 @@ func (b *Builder) finishBlock() {
 	// we need a dummy header to tell us the offset of the previous key-value pair.
 	b.addHelper([]byte{}, y.ValueStruct{})
 	// Add key to the block index
-	ko := &pb.KeyOffset{
+	bo := &pb.BlockOffset{
 		Key:    y.Copy(b.baseKey),
 		Offset: b.baseOffset,
-		Len:    uint32(b.buf.Len()) - b.baseOffset, // Len will be populated when we finish the block. See finish function.
+		Len:    uint32(b.buf.Len()) - b.baseOffset,
 	}
-	b.tableIndex.KeyOffSetList = append(b.tableIndex.KeyOffSetList, ko)
+	b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
 }
 
 // Add adds a key-value pair to the block.
@@ -184,7 +186,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
 	estimateSz := b.buf.Len() + 8 /* empty header */ + 4 /* Index length */ +
-		5*(len(b.tableIndex.KeyOffSetList)) /* approximate index size */
+		5*(len(b.tableIndex.Offsets)) /* approximate index size */
 	return int64(estimateSz) > cap
 }
 
@@ -237,8 +239,14 @@ func (b *Builder) Finish() []byte {
 func (b *Builder) writeChecksum(data []byte) {
 	// Build checksum for the index
 	checksum := pb.Checksum{
-		Content: y.CalculateChecksum(data, pb.ChecksumType_CRC32C),
-		Type:    pb.ChecksumType_CRC32C,
+		// TODO: The checksum type should be configuration from options.
+		// We chose to use CRC32 as the default option because it performed better
+		// compared to xxHash64. See the BenchmarkChecksum in table_test.go file
+		// Size     =>   1024 B        2048 B
+		// CRC32    => 63.7 ns/op     112 ns/op
+		// xxHash64 => 87.5 ns/op     158 ns/op
+		Sum32: crc32.Checksum(data, y.CastagnoliCrcTable),
+		Algo:  pb.Checksum_CRC32C,
 	}
 
 	// Write checksum to the file

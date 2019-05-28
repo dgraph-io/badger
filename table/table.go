@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 	"path"
@@ -28,6 +29,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/cespare/xxhash"
 
 	"github.com/dgraph-io/badger/pb"
 
@@ -38,6 +41,9 @@ import (
 )
 
 const fileSuffix = ".sst"
+
+// ErrChecksumMismatch is returned when the checksum does not match the actual checksum.
+var ErrChecksumMismatch = errors.New("Checksum mismatch")
 
 // TableInterface is useful for testing.
 type TableInterface interface {
@@ -53,7 +59,7 @@ type Table struct {
 	fd        *os.File // Own fd.
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
 
-	blockIndex []*pb.KeyOffset
+	blockIndex []*pb.BlockOffset
 	ref        int32 // For file garbage collection. Atomic.
 
 	loadingMode options.FileLoadingMode
@@ -238,10 +244,12 @@ func (t *Table) readIndex() error {
 	checksumLen := binary.BigEndian.Uint32(buf)
 
 	// Read checksum
-	checksum := pb.Checksum{}
+	checksumExpected := pb.Checksum{}
 	readPos -= int(checksumLen)
 	buf = t.readNoFail(readPos, int(checksumLen))
-	err := checksum.Unmarshal(buf)
+	if err := checksumExpected.Unmarshal(buf); err != nil {
+		return err
+	}
 
 	// Read index size from the footer
 	readPos -= 4
@@ -251,15 +259,26 @@ func (t *Table) readIndex() error {
 	readPos -= indexLen
 	data := t.readNoFail(readPos, indexLen)
 
-	err = y.VerifyChecksum(data, checksum.Content, checksum.Type)
-	// Todo log the error
-	y.Check(err)
+	if checksumExpected.Algo == pb.Checksum_CRC32C {
+		checksum := crc32.Checksum(data, y.CastagnoliCrcTable)
+		if checksum != checksumExpected.Sum32 {
+			return y.Wrapf(ErrChecksumMismatch, "actual: %d, expected: %d", checksum, checksumExpected)
+		}
+	} else if checksumExpected.Algo == pb.Checksum_XXHash {
+		checksum := xxhash.Sum64(data)
+		if checksum != checksumExpected.Sum64 {
+			return y.Wrapf(ErrChecksumMismatch, "actual: %d, expected: %d", checksum, checksumExpected)
+		}
+	} else {
+		return errors.New("Unknown checksum type")
+	}
+
 	index := pb.TableIndex{}
-	err = index.Unmarshal(data)
+	err := index.Unmarshal(data)
 	y.Check(err)
 
 	t.bf = bbloom.JSONUnmarshal(index.BloomFilter)
-	t.blockIndex = index.KeyOffSetList
+	t.blockIndex = index.Offsets
 	return nil
 }
 

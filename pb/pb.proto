@@ -51,23 +51,24 @@ message ManifestChange {
         bytes Checksum = 4; // Only used for CREATE
 }
 
-message KeyOffset {
+message BlockOffset {
   bytes key = 1;
   uint32 offset = 2;
   uint32 len = 3;
 }
 
 message TableIndex {
-  repeated KeyOffset KeyOffSetList = 1;
-  bytes BloomFilter = 2;
-}
-
-enum ChecksumType {
-  CRC32C = 0;
-  XXHash = 1;
+  repeated BlockOffset offsets = 1;
+  bytes bloom_filter = 2;
 }
 
 message Checksum {
-  ChecksumType Type = 1;  // For storing type of Checksum algorithm used
-  bytes Content = 2;      // For storing actual checksum
+  enum Algorithm {
+    CRC32C = 0;
+    XXHash = 1;
+  }
+  Algorithm algo = 1; // For storing type of Checksum algorithm used
+  uint32 sum32 = 2;
+  uint64 sum64 = 3;
+  bytes content = 4;
 }

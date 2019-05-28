@@ -17,7 +17,6 @@
 package table
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"hash/crc32"
@@ -31,6 +30,11 @@ import (
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	KB = 1024
+	MB = KB * 1024
 )
 
 func key(prefix string, i int) string {
@@ -645,7 +649,7 @@ func BenchmarkRead(b *testing.B) {
 	y.Check(err)
 	defer tbl.DecrRef()
 
-	fmt.Printf("Size of table: %d\n", tbl.Size())
+	b.Logf("Size of table: %d\n", tbl.Size())
 	b.ResetTimer()
 	// Iterate b.N times over the entire table.
 	for i := 0; i < b.N; i++ {
@@ -732,46 +736,23 @@ func BenchmarkReadMerged(b *testing.B) {
 	}
 }
 
-func BenchmarkChecksumCRC(b *testing.B) {
-	kb := 1024
-	mb := kb * 1024
-	keySz := []int{2 * kb, 4 * kb, 8 * kb, 16 * kb, 32 * kb, 64 * kb, 128 * kb, 256 * kb, mb}
-	var x uint32
+func BenchmarkChecksum(b *testing.B) {
+	keySz := []int{KB, 2 * KB, 4 * KB, 8 * KB, 16 * KB, 32 * KB, 64 * KB, 128 * KB, 256 * KB, MB}
 	for _, kz := range keySz {
-		key := bytes.Repeat([]byte("a"), kz)
+		key := make([]byte, kz)
 		b.Run(fmt.Sprintf("CRC %d", kz), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				x = crc32.ChecksumIEEE(key)
+				crc32.ChecksumIEEE(key)
 			}
 		})
-	}
-	fmt.Print(x)
-}
-
-func BenchmarkChecksumSha256(b *testing.B) {
-	kb := 1024
-	mb := kb * 1024
-	keySz := []int{2 * kb, 4 * kb, 8 * kb, 16 * kb, 32 * kb, 64 * kb, 128 * kb, 256 * kb, mb}
-	for _, kz := range keySz {
-		key := make([]byte, kz)
-		b.Run(fmt.Sprintf("SHA256 %d", kz), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				sha256.Sum256(key)
-			}
-		})
-	}
-
-}
-
-func BenchmarkChecksumxxHash(b *testing.B) {
-	kb := 1024
-	mb := kb * 1024
-	keySz := []int{2 * kb, 4 * kb, 8 * kb, 16 * kb, 32 * kb, 64 * kb, 128 * kb, 256 * kb, mb}
-	for _, kz := range keySz {
-		key := make([]byte, kz)
 		b.Run(fmt.Sprintf("xxHash64 %d", kz), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				xxhash.Sum64(key)
+			}
+		})
+		b.Run(fmt.Sprintf("SHA256 %d", kz), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				sha256.Sum256(key)
 			}
 		})
 	}
