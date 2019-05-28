@@ -48,7 +48,6 @@ message ManifestChange {
         }
         Operation Op   = 2;
         uint32 Level   = 3; // Only used for CREATE
-        bytes Checksum = 4; // Only used for CREATE
 }
 
 message BlockOffset {

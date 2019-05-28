@@ -17,7 +17,6 @@
 package table
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
@@ -142,21 +141,6 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 
 	t.tableSize = int(fileInfo.Size())
 
-	// The following code block has been intentionally commented out to improve
-	// badger startup time.
-	//
-	// // We first load to RAM, so we can read the index and do checksum.
-	// if err := t.loadToRAM(); err != nil {
-	// 	return nil, err
-	// }
-	// // Enforce checksum before we read index. Otherwise, if the file was
-	// // truncated, we'd end up with panics in readIndex.
-	// if len(cksum) > 0 && !bytes.Equal(t.Checksum, cksum) {
-	// 	return nil, fmt.Errorf(
-	// 		"CHECKSUM_MISMATCH: Table checksum does not match checksum in MANIFEST."+
-	// 			" NOT including table %s. This would lead to missing data."+
-	// 			"\n  sha256 %x Expected\n  sha256 %x Found\n", filename, cksum, t.Checksum)
-	// }
 	if err := t.readIndex(); err != nil {
 		return nil, y.Wrap(err)
 	}
@@ -341,21 +325,4 @@ func IDToFilename(id uint64) string {
 // filepath.
 func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, IDToFilename(id))
-}
-
-func (t *Table) loadToRAM() error {
-	if _, err := t.fd.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	t.mmap = make([]byte, t.tableSize)
-	sum := sha256.New()
-	tee := io.TeeReader(t.fd, sum)
-	read, err := tee.Read(t.mmap)
-	if err != nil || read != t.tableSize {
-		return y.Wrapf(err, "Unable to load file in memory. Table file: %s", t.Filename())
-	}
-	t.Checksum = sum.Sum(nil)
-	y.NumReads.Add(1)
-	y.NumBytesRead.Add(int64(read))
-	return nil
 }
