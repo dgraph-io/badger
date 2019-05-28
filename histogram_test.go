@@ -28,7 +28,7 @@ func TestBuildKeyValueSizeHistogram(t *testing.T) {
 			entries := int64(40)
 			err := db.Update(func(txn *Txn) error {
 				for i := int64(0); i < entries; i++ {
-					err := txn.Set([]byte(string(i)), []byte("B"))
+					err := txn.SetEntry(NewEntry([]byte(string(i)), []byte("B")))
 					if err != nil {
 						return err
 					}
@@ -64,15 +64,15 @@ func TestBuildKeyValueSizeHistogram(t *testing.T) {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			entries := int64(3)
 			err := db.Update(func(txn *Txn) error {
-				if err := txn.Set([]byte("A"), []byte("B")); err != nil {
+				if err := txn.SetEntry(NewEntry([]byte("A"), []byte("B"))); err != nil {
 					return err
 				}
 
-				if err := txn.Set([]byte("AA"), []byte("BB")); err != nil {
+				if err := txn.SetEntry(NewEntry([]byte("AA"), []byte("BB"))); err != nil {
 					return err
 				}
 
-				return txn.Set([]byte("AAA"), []byte("BBB"))
+				return txn.SetEntry(NewEntry([]byte("AAA"), []byte("BBB")))
 			})
 			require.NoError(t, err)
 

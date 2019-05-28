@@ -77,7 +77,7 @@ func TestStream(t *testing.T) {
 	for _, prefix := range []string{"p0", "p1", "p2"} {
 		txn := db.NewTransactionAt(math.MaxUint64, true)
 		for i := 1; i <= 100; i++ {
-			require.NoError(t, txn.Set(keyWithPrefix(prefix, i), value(i)))
+			require.NoError(t, txn.SetEntry(NewEntry(keyWithPrefix(prefix, i), value(i))))
 			count++
 		}
 		require.NoError(t, txn.CommitAt(5, nil))
