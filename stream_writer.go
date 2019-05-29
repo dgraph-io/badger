@@ -44,7 +44,6 @@ type StreamWriter struct {
 	db         *DB
 	done       func()
 	throttle   *y.Throttle
-	head       valuePointer
 	maxVersion uint64
 	writers    map[uint32]*sortedWriter
 	closer     *y.Closer
@@ -78,7 +77,7 @@ func (sw *StreamWriter) Prepare() error {
 // Write writes KVList to DB. Each KV within the list contains the stream id which StreamWriter
 // would use to demux the writes. Write is not thread safe and it should NOT be called concurrently.
 func (sw *StreamWriter) Write(kvs *pb.KVList) error {
-	if len(kvs.Kv) == 0 {
+	if len(kvs.GetKv()) == 0 {
 		return nil
 	}
 	streamReqs := make(map[uint32]*request)
@@ -135,15 +134,19 @@ func (sw *StreamWriter) Flush() error {
 	defer sw.done()
 
 	sw.closer.SignalAndWait()
+	var maxHead valuePointer
 	for _, writer := range sw.writers {
 		if err := writer.Done(); err != nil {
 			return err
+		}
+		if maxHead.Less(writer.head) {
+			maxHead = writer.head
 		}
 	}
 
 	// Encode and write the value log head into a new table.
 	data := make([]byte, vptrSize)
-	sw.head.Encode(data)
+	maxHead.Encode(data)
 	headWriter := sw.newWriter(headStreamId)
 	if err := headWriter.Add(
 		y.KeyWithTs(head, sw.maxVersion),
