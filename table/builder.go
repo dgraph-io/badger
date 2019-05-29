@@ -19,6 +19,7 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
+	"hash/crc32"
 	"io"
 
 	"github.com/AndreasBriese/bbloom"
@@ -77,10 +78,9 @@ type Builder struct {
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder() *Builder {
 	return &Builder{
-		keyBuf:       newBuffer(1 << 20),
-		buf:          newBuffer(1 << 20),
-		blockSize:    4 * 1024,               // TODO:Ashish: make this configurable
-		checksumType: pb.ChecksumType_CRC32C, // TODO: make this configurable
+		keyBuf:    newBuffer(1 << 20),
+		buf:       newBuffer(1 << 20),
+		blockSize: 4 * 1024, // TODO:(Ashish): make this configurable
 	}
 }
 
@@ -157,11 +157,11 @@ func (b *Builder) finishBlock() error {
 	sb := y.BytesForUint32(uint32(n)) // also write size of block meta
 	b.buf.Write(sb)
 
-	// store checksum for current block
-	blockBuf := b.buf.Bytes()[b.baseOffset:]
+	blockBuf := b.buf.Bytes()[b.baseOffset:] // store checksum for current block
+	// TODO: Add checksum algo in builder options.
 	cs := &pb.Checksum{
-		Type:    b.checksumType,
-		Content: y.CalculateChecksum(blockBuf, b.checksumType),
+		Algo:  pb.Checksum_CRC32C,
+		Sum32: crc32.Checksum(blockBuf, y.CastagnoliCrcTable),
 	}
 	csm, err := cs.Marshal()
 	if err != nil {
@@ -174,8 +174,8 @@ func (b *Builder) finishBlock() error {
 	sb = y.BytesForUint32(uint32(n)) // also write size of block checksum
 	b.buf.Write(sb)
 
-	// TODO: If want to make block as multiple of pages, we can implement padding.
-	// This is be useful while using direct io.
+	// TODO: If we want to make block as multiple of pages, we can implement padding.
+	// This might be useful while using direct io.
 
 	return nil
 }

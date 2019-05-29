@@ -61,6 +61,12 @@ enum ChecksumType {
 }
 
 message Checksum {
-  ChecksumType Type = 1;  // For storing type of Checksum algorithm used
-  bytes Content = 2; // For storing actual checksum
+  enum Algorithm {
+    CRC32C = 0;
+    XXHash = 1;
+  }
+  Algorithm algo = 1; // For storing type of Checksum algorithm used
+  uint32 sum32 = 2;
+  uint64 sum64 = 3;
+  bytes content = 4;
 }
