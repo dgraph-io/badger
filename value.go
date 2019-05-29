@@ -1388,7 +1388,11 @@ func (vlog *valueLog) populateDiscardStats() error {
 
 	var statsMap map[uint32]int64
 	if err := json.Unmarshal(vs.Value, &statsMap); err != nil {
-		return err
+		// It's safe to ignore the error since the discard stat might have been corrupted and
+		// it would be rebuilt during compactions.
+		vlog.opt.Debugf("Failed to unmarshal: %s. Dropping Value Log Discard stats.", err)
+		vlog.lfDiscardStats = &lfDiscardStats{m: make(map[uint32]int64)}
+		return nil
 	}
 	vlog.opt.Debugf("Value Log Discard stats: %v", statsMap)
 	vlog.lfDiscardStats = &lfDiscardStats{m: statsMap}
