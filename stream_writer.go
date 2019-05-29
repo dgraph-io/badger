@@ -59,7 +59,7 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 		db: db,
 		// throttle shouldn't make much difference. Memory consumption is based on the number of
 		// concurrent streams being processed.
-		throttle: y.NewThrottle(16),
+		throttle: y.NewThrottle(64),
 		writers:  make(map[uint32]*sortedWriter),
 		closer:   y.NewCloser(0),
 	}
@@ -76,8 +76,11 @@ func (sw *StreamWriter) Prepare() error {
 }
 
 // Write writes KVList to DB. Each KV within the list contains the stream id which StreamWriter
-// would use to demux the writes.
+// would use to demux the writes. Write is not thread safe and it should NOT be called concurrently.
 func (sw *StreamWriter) Write(kvs *pb.KVList) error {
+	if len(kvs.Kv) == 0 {
+		return nil
+	}
 	streamReqs := make(map[uint32]*request)
 	for _, kv := range kvs.Kv {
 		var meta, userMeta byte

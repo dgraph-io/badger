@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"log"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/dgraph-io/badger"
@@ -79,27 +80,53 @@ func fillSorted(db *badger.DB, num uint64) error {
 	if err := writer.Prepare(); err != nil {
 		return err
 	}
-	kvs := &pb.KVList{}
-	for i := uint64(1); i <= num; i++ {
-		key := make([]byte, 8)
-		binary.BigEndian.PutUint64(key, i)
-		kvs.Kv = append(kvs.Kv, &pb.KV{
-			Key:     key,
-			Value:   value,
-			Version: 1,
-		})
-		if len(kvs.Kv) > 1000 {
-			if err := writer.Write(kvs); err != nil {
-				return err
+
+	wg := &sync.WaitGroup{}
+	writeCh := make(chan *pb.KVList, 3)
+	writeRange := func(start, end uint64, streamId uint32) {
+		// end is not included.
+		defer wg.Done()
+		kvs := &pb.KVList{}
+		for i := start; i < end; i++ {
+			key := make([]byte, 8)
+			binary.BigEndian.PutUint64(key, i)
+			kvs.Kv = append(kvs.Kv, &pb.KV{
+				Key:      key,
+				Value:    value,
+				Version:  1,
+				StreamId: streamId,
+			})
+			if len(kvs.Kv) > 1000 {
+				writeCh <- kvs
+				kvs = &pb.KVList{}
 			}
-			kvs = &pb.KVList{}
 		}
+		writeCh <- kvs
 	}
-	if len(kvs.Kv) > 0 {
+
+	// Let's create 16 streams.
+	width := num / 16
+	streamId := uint32(0)
+	for start := uint64(0); start < num; start += width {
+		end := start + width
+		if end > num {
+			end = num
+		}
+		streamId++
+		wg.Add(1)
+		go writeRange(start, end, streamId)
+	}
+	go func() {
+		wg.Wait()
+		close(writeCh)
+	}()
+	log.Printf("Max StreamId used: %d. Width: %d\n", streamId, width)
+	for kvs := range writeCh {
 		if err := writer.Write(kvs); err != nil {
-			return err
+			panic(err)
 		}
 	}
+	log.Println("DONE streaming. Flushing...")
 	return writer.Flush()
 }
 
