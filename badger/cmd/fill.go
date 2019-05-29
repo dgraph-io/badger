@@ -87,6 +87,7 @@ func fillSorted(db *badger.DB, num uint64) error {
 		// end is not included.
 		defer wg.Done()
 		kvs := &pb.KVList{}
+		var sz int
 		for i := start; i < end; i++ {
 			key := make([]byte, 8)
 			binary.BigEndian.PutUint64(key, i)
@@ -96,9 +97,11 @@ func fillSorted(db *badger.DB, num uint64) error {
 				Version:  1,
 				StreamId: streamId,
 			})
-			if len(kvs.Kv) > 1000 {
+			sz += len(key) + len(value)
+			if sz >= 4<<20 { // 4 MB
 				writeCh <- kvs
 				kvs = &pb.KVList{}
+				sz = 0
 			}
 		}
 		writeCh <- kvs
