@@ -13,12 +13,8 @@ $ go version
 ### Does this issue reproduce with the latest release?
 
 
-### What operating system and processor architecture are you using (`go env`)?
+### What are the hardware spec of the machine (RAM, OS, Disk)?
 
-<details><summary><code>go env</code> Output</summary><br><pre>
-$ go env
-
-</pre></details>
 
 ### What did you do?
 
