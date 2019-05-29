@@ -37,6 +37,15 @@ import (
 
 const fileSuffix = ".sst"
 
+// ErrInvalidChecksumAlgo is returned if any algo is not supported.
+var ErrInvalidChecksumAlgo = errors.New("Checksum Algo not supported")
+
+type keyOffset struct {
+	key    []byte
+	offset int
+	len    int
+}
+
 // TableInterface is useful for testing.
 type TableInterface interface {
 	Smallest() []byte
@@ -114,7 +123,7 @@ func (b block) VerifyCheckSum() error {
 		return y.Wrapf(err, "unable to unmarshal checksum")
 	}
 
-	return y.VerifyChecksum(b.data[:readPos], cs.Content, cs.Type)
+	return y.VerifyChecksum(b.data[:readPos], cs)
 }
 
 func (b block) NewIterator() *blockIterator {

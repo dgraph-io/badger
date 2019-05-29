@@ -71,8 +71,6 @@ type Builder struct {
 
 	keyBuf   *bytes.Buffer
 	keyCount int
-
-	checksumType pb.ChecksumType
 }
 
 // NewTableBuilder makes a new TableBuilder.
@@ -157,14 +155,15 @@ func (b *Builder) finishBlock() error {
 		return y.Wrapf(err, "unable to write block index to buf")
 	}
 	y.AssertTrue(n == len(mo))
-	sb := y.BytesForUint32(uint32(n)) // also write size of block meta
-	b.buf.Write(sb)
+	sb := make([]byte, 4)
+	binary.BigEndian.PutUint32(sb, uint32(n))
+	b.buf.Write(sb) // also write size of block index
 
-	// store checksum for current block
-	blockBuf := b.buf.Bytes()[b.baseOffset:]
+	blockBuf := b.buf.Bytes()[b.baseOffset:] // store checksum for current block
+	// TODO: Add checksum algo in builder options.
 	cs := &pb.Checksum{
-		Type:    b.checksumType,
-		Content: y.CalculateChecksum(blockBuf, b.checksumType),
+		Algo:  pb.Checksum_CRC32C,
+		Sum64: y.CalculateChecksum(blockBuf, pb.Checksum_CRC32C),
 	}
 	csm, err := cs.Marshal()
 	if err != nil {
@@ -174,11 +173,12 @@ func (b *Builder) finishBlock() error {
 	if err != nil {
 		return y.Wrapf(err, "unable to write block checksum to buf")
 	}
-	sb = y.BytesForUint32(uint32(n)) // also write size of block checksum
+	sb = make([]byte, 4)
+	binary.BigEndian.PutUint32(sb, uint32(n)) // also write size of block checksum
 	b.buf.Write(sb)
 
-	// TODO: If want to make block as multiple of pages, we can implement padding.
-	// This is be useful while using direct io.
+	// TODO: If we want to make block as multiple of pages, we can implement padding.
+	// This might be useful while using direct io.
 
 	// Add key to the block index
 	bo := &pb.BlockOffset{
