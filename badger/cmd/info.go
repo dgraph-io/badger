@@ -99,12 +99,16 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		tableInfo(sstDir, vlogDir, db)
 	}
 
+	prefix, err := hex.DecodeString(opt.withPrefix)
+	if err != nil {
+		return errors.Wrapf(err, "failed to decode hex prefix: %s", opt.withPrefix)
+	}
 	if opt.showHistogram {
-		db.PrintHistogram([]byte(opt.withPrefix))
+		db.PrintHistogram(prefix)
 	}
 
 	if opt.showKeys {
-		if err := showKeys(db, opt.withPrefix); err != nil {
+		if err := showKeys(db, prefix); err != nil {
 			return err
 		}
 	}
@@ -117,9 +121,9 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func showKeys(db *badger.DB, prefix string) error {
+func showKeys(db *badger.DB, prefix []byte) error {
 	if len(prefix) > 0 {
-		fmt.Printf("Only choosing keys with prefix: \n%s", hex.Dump([]byte(prefix)))
+		fmt.Printf("Only choosing keys with prefix: \n%s", hex.Dump(prefix))
 	}
 	txn := db.NewTransaction(false)
 	defer txn.Discard()
