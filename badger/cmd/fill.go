@@ -107,7 +107,7 @@ func fillSorted(db *badger.DB, num uint64) error {
 		writeCh <- kvs
 	}
 
-	// Let's create 16 streams.
+	// Let's create some streams.
 	width := num / 16
 	streamId := uint32(0)
 	for start := uint64(0); start < num; start += width {

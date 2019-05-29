@@ -58,7 +58,7 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 		db: db,
 		// throttle shouldn't make much difference. Memory consumption is based on the number of
 		// concurrent streams being processed.
-		throttle: y.NewThrottle(64),
+		throttle: y.NewThrottle(16),
 		writers:  make(map[uint32]*sortedWriter),
 		closer:   y.NewCloser(0),
 	}
