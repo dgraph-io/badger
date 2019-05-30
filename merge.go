@@ -37,10 +37,8 @@ type MergeOperator struct {
 // another representing a new value that needs to be ‘merged’ into it. MergeFunc
 // contains the logic to perform the ‘merge’ and return an updated value.
 // MergeFunc could perform operations like integer addition, list appends etc.
-// Note that the ordering of the operands is unspecified, so the merge func
-// should either be agnostic to ordering or do additional handling if ordering
-// is required.
-type MergeFunc func(existing, val []byte) []byte
+// Note that the ordering of the operands is maintained.
+type MergeFunc func(existingVal, newVal []byte) []byte
 
 // GetMergeOperator creates a new MergeOperator for a given key and returns a
 // pointer to it. It also fires off a goroutine that performs a compaction using
@@ -60,7 +58,7 @@ func (db *DB) GetMergeOperator(key []byte,
 
 var errNoMerge = errors.New("No need for merge")
 
-func (op *MergeOperator) iterateAndMerge(txn *Txn) (val []byte, err error) {
+func (op *MergeOperator) iterateAndMerge(txn *Txn) (newVal []byte, err error) {
 	opt := DefaultIteratorOptions
 	opt.AllVersions = true
 	it := txn.NewKeyIterator(op.key, opt)
@@ -71,13 +69,16 @@ func (op *MergeOperator) iterateAndMerge(txn *Txn) (val []byte, err error) {
 		item := it.Item()
 		numVersions++
 		if numVersions == 1 {
-			val, err = item.ValueCopy(val)
+			// This should be the newVal, considering this it the latest version.
+			newVal, err = item.ValueCopy(newVal)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			if err := item.Value(func(newVal []byte) error {
-				val = op.f(val, newVal)
+			if err := item.Value(func(oldVal []byte) error {
+				// The merge should always be the newVal, considering it has the merge result of the
+				// latest version.  The value read should be the oldVal.
+				newVal = op.f(oldVal, newVal)
 				return nil
 			}); err != nil {
 				return nil, err
@@ -90,9 +91,9 @@ func (op *MergeOperator) iterateAndMerge(txn *Txn) (val []byte, err error) {
 	if numVersions == 0 {
 		return nil, ErrKeyNotFound
 	} else if numVersions == 1 {
-		return val, errNoMerge
+		return newVal, errNoMerge
 	}
-	return val, nil
+	return newVal, nil
 }
 
 func (op *MergeOperator) compact() error {
