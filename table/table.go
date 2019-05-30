@@ -21,7 +21,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"hash/crc32"
 	"io"
 	"os"
 	"path"
@@ -39,9 +38,6 @@ import (
 )
 
 const fileSuffix = ".sst"
-
-// ErrChecksumMismatch is returned when the checksum does not match the actual checksum.
-var ErrChecksumMismatch = errors.New("Checksum mismatch")
 
 // ErrInvalidChecksumAlgo is returned if any algo is not supported.
 var ErrInvalidChecksumAlgo = errors.New("Checksum Algo not supported")
@@ -129,16 +125,7 @@ func (b block) VerifyCheckSum() error {
 		return y.Wrapf(err, "unable to unmarshal checksum")
 	}
 
-	if cs.Algo == pb.Checksum_CRC32C {
-		if cs.Sum32 != crc32.Checksum(b.data[:readPos], y.CastagnoliCrcTable) {
-			return ErrChecksumMismatch
-		}
-
-		return nil
-	}
-
-	// TODO: Modify this after merging this with ibrahim/footer-protobuf
-	return ErrInvalidChecksumAlgo
+	return y.VerifyChecksum(b.data[:readPos], cs)
 }
 
 func (b block) NewIterator() *blockIterator {

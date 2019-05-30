@@ -19,7 +19,6 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	"hash/crc32"
 	"io"
 
 	"github.com/AndreasBriese/bbloom"
@@ -71,8 +70,6 @@ type Builder struct {
 
 	keyBuf   *bytes.Buffer
 	keyCount int
-
-	checksumType pb.ChecksumType
 }
 
 // NewTableBuilder makes a new TableBuilder.
@@ -162,7 +159,7 @@ func (b *Builder) finishBlock() error {
 	// TODO: Add checksum algo in builder options.
 	cs := &pb.Checksum{
 		Algo:  pb.Checksum_CRC32C,
-		Sum32: crc32.Checksum(blockBuf, y.CastagnoliCrcTable),
+		Sum64: y.CalculateChecksum(blockBuf, pb.Checksum_CRC32C),
 	}
 	csm, err := cs.Marshal()
 	if err != nil {

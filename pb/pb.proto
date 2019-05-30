@@ -55,18 +55,12 @@ message BlockIndex {
   repeated uint32 EntryOffsets = 1;
 }
 
-enum ChecksumType {
-  CRC32C = 0;
-  XXHash = 1;
-}
-
 message Checksum {
   enum Algorithm {
     CRC32C = 0;
-    XXHash = 1;
+    XXHash64 = 1;
   }
   Algorithm algo = 1; // For storing type of Checksum algorithm used
-  uint32 sum32 = 2;
-  uint64 sum64 = 3;
-  bytes content = 4;
+  uint64 sum64 = 2;
 }
+
