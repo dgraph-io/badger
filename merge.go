@@ -114,6 +114,8 @@ func (op *MergeOperator) compact() error {
 			meta:  bitDiscardEarlierVersions,
 		},
 	}
+	// Write value back to the DB. It is important that we do not set the bitMergeEntry bit
+	// here. When compaction happens, all the older merged entries will be removed.
 	return op.db.batchSetAsync(entries, func(err error) {})
 }
 
@@ -141,7 +143,7 @@ func (op *MergeOperator) runCompactions(dur time.Duration) {
 // routine into the values that were recorded by previous invocations to Add().
 func (op *MergeOperator) Add(val []byte) error {
 	return op.db.Update(func(txn *Txn) error {
-		return txn.setMergeEntry(op.key, val)
+		return txn.SetEntry(NewEntry(op.key, val).withMergeBit())
 	})
 }
 
