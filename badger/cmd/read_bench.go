@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
+	"sync/atomic"
 	"time"
 
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
@@ -22,6 +25,11 @@ testing and performance analysis.
 	RunE: readBench,
 }
 
+const maxKeys = 1000
+
+var sizeRead, entriesRead uint64
+var startTime time.Time
+
 func init() {
 	RootCmd.AddCommand(readBenchCmd)
 	readBenchCmd.Flags().IntVarP(
@@ -34,8 +42,6 @@ func readBench(cmd *cobra.Command, args []string) error {
 	dur, err := time.ParseDuration(duration)
 	y.Check(err)
 	y.AssertTrue(numGoroutines > 0)
-
-	rand.Seed(time.Now().UnixNano())
 
 	opts := badger.DefaultOptions
 	opts.ReadOnly = true
@@ -62,63 +68,70 @@ func readBench(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	closer := y.NewCloser(0)
+	c := y.NewCloser(0)
+	startTime = time.Now()
 	for i := 0; i < numGoroutines; i++ {
-		closer.AddRunning(1)
-		go spawnRoutine(i, db, closer, keys)
+		c.AddRunning(1)
+		go spawnRoutine(db, c, keys)
 	}
 
+	// spawn printStats
+	c.AddRunning(1)
+	go printStats(c)
+
 	<-time.After(dur)
-	closer.SignalAndWait()
+	c.SignalAndWait()
 
 	return nil
 }
 
-func spawnRoutine(id int, db *badger.DB, c *y.Closer, keys [][]byte) {
+func printStats(c *y.Closer) {
 	defer c.Done()
 
-	start := time.Now()
-	now := time.Now()
-	sz := uint64(0)
-	count := uint64(0)
-
-	printStats := func() {
-		dur := time.Since(now)
-		durSec := dur.Seconds()
-		if int(durSec) > 0 {
-			bytesRate := sz / uint64(durSec)
-			countRate := count / uint64(durSec)
-			fmt.Printf("Routine: %d, Time elapsed: %s, bytes read: %s, speed: %s/sec, "+
-				"entries read: %d, speed: %d/sec\n", id, y.FixedDuration(time.Since(start)),
-				humanize.Bytes(sz), humanize.Bytes(bytesRate), count, countRate)
-		}
-	}
-
-	t := time.NewTicker(5 * time.Second) // TODO:(Ashish): decide on the tick duration
+	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	for {
 		select {
 		case <-c.HasBeenClosed():
 			return
 		case <-t.C:
-			printStats()
-		default:
-			sz += runIteration(db, keys)
-			count++
+			dur := time.Since(startTime)
+			durSec := dur.Seconds()
+			if int(durSec) > 0 {
+				sz := atomic.LoadUint64(&sizeRead)
+				entries := atomic.LoadUint64(&entriesRead)
+				bytesRate := sz / uint64(durSec)
+				entriesRate := entries / uint64(durSec)
+				fmt.Printf("Time elapsed: %s, bytes read: %s, speed: %s/sec, "+
+					"entries read: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
+					humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
+			}
 		}
 	}
 }
 
-func runIteration(db *badger.DB, keys [][]byte) uint64 {
-	r := rand.Intn(len(keys))
-	var sz uint64
-	key := keys[r]
+func spawnRoutine(db *badger.DB, c *y.Closer, keys [][]byte) {
+	defer c.Done()
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			return
+		default:
+			key := keys[r.Int31n(int32(len(keys)))]
+			atomic.AddUint64(&sizeRead, lookupForKey(db, key))
+			atomic.AddUint64(&entriesRead, 1)
+		}
+	}
+}
+
+func lookupForKey(db *badger.DB, key []byte) (sz uint64) {
 	err := db.View(func(txn *badger.Txn) error {
 		itm, err := txn.Get(key)
 		if err != nil {
 			panic(err)
 		}
-		if _, err = itm.ValueCopy(nil); err != nil {
+		if _, err := itm.ValueCopy(nil); err != nil {
 			panic(err)
 		}
 		sz = uint64(itm.EstimatedSize())
@@ -127,27 +140,32 @@ func runIteration(db *badger.DB, keys [][]byte) uint64 {
 	if err != nil {
 		panic(err)
 	}
-	return sz
+	return
 }
 
-// getKeys returns all keys present in database.
-// TODO:(Ashish): Need sampling for very large DB.
 func getKeys(db *badger.DB) ([][]byte, error) {
 	var keys [][]byte
-	err := db.View(func(txn *badger.Txn) error {
-		itrOps := badger.DefaultIteratorOptions
-		itrOps.PrefetchValues = false
-		itr := txn.NewIterator(itrOps)
-		defer itr.Close()
-		for itr.Rewind(); itr.Valid(); itr.Next() {
-			itm := itr.Item()
-			key := itm.KeyCopy(nil)
-			keys = append(keys, key)
+	count := 0
+	stream := db.NewStream()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream.Send = func(list *pb.KVList) error {
+		for _, kv := range list.Kv {
+			keys = append(keys, kv.Key)
+		}
+		count += len(list.Kv)
+		if count >= maxKeys {
+			// we only want maxKeys
+			cancel()
 		}
 		return nil
-	})
-	if err != nil {
-		return nil, err
+	}
+
+	if err := stream.Orchestrate(ctx); err != nil {
+		if err != context.Canceled {
+			return nil, err
+		}
 	}
 
 	return keys, nil
