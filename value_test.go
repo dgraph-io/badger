@@ -452,7 +452,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 			txn = db.NewTransaction(true)
 		}
 	}
-	require.NoError(t, txn.Commit(), "error while commiting txn")
+	require.NoError(t, txn.Commit(), "error while committing txn")
 
 	for i := 0; i < 500; i++ {
 		// use SetWithDiscard to delete entries, because this causes data to be flushed on disk,
