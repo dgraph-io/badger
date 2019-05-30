@@ -108,7 +108,7 @@ func (op *MergeOperator) compact() error {
 		return err
 	}
 	entries := []*Entry{
-		&Entry{
+		{
 			Key:   y.KeyWithTs(op.key, version),
 			Value: val,
 			meta:  bitDiscardEarlierVersions,
