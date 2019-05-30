@@ -547,6 +547,8 @@ func runTest(cmd *cobra.Command, args []string) error {
 			updater := func(kvs *pb.KVList) {
 				batch := subscribeDB.NewWriteBatch()
 				for _, kv := range kvs.GetKv() {
+					// BUG: This loses version information.
+					// TODO: Use the loader API, once it is made public.
 					y.Check(batch.Set(kv.Key, kv.Value, 0))
 				}
 				y.Check(batch.Flush())

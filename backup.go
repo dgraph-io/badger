@@ -127,6 +127,7 @@ func writeTo(list *pb.KVList, w io.Writer) error {
 	return err
 }
 
+// TODO: Expose this loader as a public API.
 type loader struct {
 	db       *DB
 	throttle *y.Throttle
@@ -193,7 +194,7 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 	br := bufio.NewReaderSize(r, 16<<10)
 	unmarshalBuf := make([]byte, 1<<10)
 
-	ldr := db.newLoader(maxPendingWrites)
+	loader := db.newLoader(maxPendingWrites)
 	for {
 		var sz uint64
 		err := binary.Read(br, binary.LittleEndian, &sz)
@@ -217,7 +218,7 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 		}
 
 		for _, kv := range list.Kv {
-			if err := ldr.set(kv); err != nil {
+			if err := loader.set(kv); err != nil {
 				return err
 			}
 
@@ -229,7 +230,7 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 		}
 	}
 
-	if err := ldr.finish(); err != nil {
+	if err := loader.finish(); err != nil {
 		return err
 	}
 	db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
