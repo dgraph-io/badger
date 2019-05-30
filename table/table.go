@@ -238,7 +238,7 @@ func (t *Table) readIndex() error {
 	data := t.readNoFail(readPos, indexLen)
 
 	if err := y.VerifyChecksum(data, expectedChk); err != nil {
-		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename)
+		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename())
 	}
 
 	index := pb.TableIndex{}
