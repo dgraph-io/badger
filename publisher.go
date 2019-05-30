@@ -17,6 +17,7 @@ package badger
 
 import (
 	"bytes"
+	"github.com/dgraph-io/badger/trie"
 	"sync"
 
 	"github.com/dgraph-io/badger/pb"
@@ -71,13 +72,36 @@ func (p *publisher) listenForUpdates(c *y.Closer) {
 }
 
 func (p *publisher) publishUpdates(reqs requests) {
-	kvs := &pb.KVList{}
+
 	p.Lock()
 	defer func() {
 		p.Unlock()
 		// Release all the request.
 		reqs.DecrRef()
 	}()
+
+	// the trie maps a prefix to a list of subscribers
+	t := trie.New()
+	for _, s := range p.subscribers {
+		for _, prefix := range s.prefixes {
+			if node, ok := t.Find(prefix); ok {
+				// add the current subscriber to the list
+				subscribers := node.Meta().([]subscriber)
+				node.SetMeta(append(subscribers, s))
+			} else {
+				// the prefix has not been inserted into the trie before
+				// insert a new list with the current subscriber
+				t.Add(prefix, []subscriber{s})
+			}
+		}
+	}
+
+	kvs := &pb.KVList{}
+	for _, req := range reqs {
+		for _, e := range req.Entries {
+		}
+	}
+
 
 	// TODO: Optimize this, so we can figure out key -> subscriber quickly, without iterating over
 	// all the prefixes.
