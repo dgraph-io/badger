@@ -19,7 +19,6 @@ package table
 import (
 	"encoding/binary"
 	"fmt"
-	"hash/crc32"
 	"io"
 	"os"
 	"path"
@@ -28,8 +27,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-
-	"github.com/cespare/xxhash"
 
 	"github.com/dgraph-io/badger/pb"
 
@@ -40,9 +37,6 @@ import (
 )
 
 const fileSuffix = ".sst"
-
-// ErrChecksumMismatch is returned when the checksum does not match the actual checksum.
-var ErrChecksumMismatch = errors.New("Checksum mismatch")
 
 // TableInterface is useful for testing.
 type TableInterface interface {
@@ -228,10 +222,10 @@ func (t *Table) readIndex() error {
 	checksumLen := binary.BigEndian.Uint32(buf)
 
 	// Read checksum
-	checksumExpected := pb.Checksum{}
+	expectedChk := pb.Checksum{}
 	readPos -= int(checksumLen)
 	buf = t.readNoFail(readPos, int(checksumLen))
-	if err := checksumExpected.Unmarshal(buf); err != nil {
+	if err := expectedChk.Unmarshal(buf); err != nil {
 		return err
 	}
 
@@ -243,18 +237,8 @@ func (t *Table) readIndex() error {
 	readPos -= indexLen
 	data := t.readNoFail(readPos, indexLen)
 
-	if checksumExpected.Algo == pb.Checksum_CRC32C {
-		checksum := crc32.Checksum(data, y.CastagnoliCrcTable)
-		if checksum != checksumExpected.Sum32 {
-			return y.Wrapf(ErrChecksumMismatch, "actual: %d, expected: %d", checksum, checksumExpected)
-		}
-	} else if checksumExpected.Algo == pb.Checksum_XXHash {
-		checksum := xxhash.Sum64(data)
-		if checksum != checksumExpected.Sum64 {
-			return y.Wrapf(ErrChecksumMismatch, "actual: %d, expected: %d", checksum, checksumExpected)
-		}
-	} else {
-		return errors.New("Unknown checksum type")
+	if err := y.VerifyChecksum(data, expectedChk); err != nil {
+		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename)
 	}
 
 	index := pb.TableIndex{}

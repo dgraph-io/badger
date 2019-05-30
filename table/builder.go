@@ -19,7 +19,6 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	"hash/crc32"
 	"io"
 	"math"
 
@@ -245,7 +244,7 @@ func (b *Builder) writeChecksum(data []byte) {
 		// Size     =>   1024 B        2048 B
 		// CRC32    => 63.7 ns/op     112 ns/op
 		// xxHash64 => 87.5 ns/op     158 ns/op
-		Sum32: crc32.Checksum(data, y.CastagnoliCrcTable),
+		Sum64: y.CalculateChecksum(data, pb.Checksum_CRC32C),
 		Algo:  pb.Checksum_CRC32C,
 	}
 
