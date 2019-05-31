@@ -37,15 +37,6 @@ import (
 
 const fileSuffix = ".sst"
 
-// ErrInvalidChecksumAlgo is returned if any algo is not supported.
-var ErrInvalidChecksumAlgo = errors.New("Checksum Algo not supported")
-
-type keyOffset struct {
-	key    []byte
-	offset int
-	len    int
-}
-
 // TableInterface is useful for testing.
 type TableInterface interface {
 	Smallest() []byte
@@ -138,11 +129,9 @@ func (b block) NewIterator() *blockIterator {
 
 	// read while meta
 	readPos -= metaSize
-	bm := &pb.BlockIndex{}
+	bm := &pb.BlockMeta{}
 	err := bm.Unmarshal(bi.data[readPos : readPos+metaSize])
-	if err != nil {
-		panic(err) // TODO: what to do here
-	}
+	y.Check(err) // TODO(Ashish): avoid this.
 
 	bi.entryOffsets = bm.EntryOffsets
 

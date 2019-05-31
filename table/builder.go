@@ -142,22 +142,16 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	v.EncodeTo(b.buf)
 }
 
-func (b *Builder) finishBlock() error {
-	idx := &pb.BlockIndex{
+func (b *Builder) finishBlock() {
+	meta := &pb.BlockMeta{
 		EntryOffsets: b.entryOffsets, // store offsets for all entries as block index
 	}
-	mo, err := idx.Marshal()
-	if err != nil {
-		return y.Wrapf(err, "unable to marshal block index")
-	}
+	mo, err := meta.Marshal()
+	y.Check(err) // avoid signature change of function for now.
 	n, err := b.buf.Write(mo)
-	if err != nil {
-		return y.Wrapf(err, "unable to write block index to buf")
-	}
+	y.Check(err)
 	y.AssertTrue(n == len(mo))
-	sb := make([]byte, 4)
-	binary.BigEndian.PutUint32(sb, uint32(n))
-	b.buf.Write(sb) // also write size of block index
+	b.buf.Write(y.BytesForUint32(uint32(n))) // also write size of block index
 
 	blockBuf := b.buf.Bytes()[b.baseOffset:] // store checksum for current block
 	// TODO: Add checksum algo in builder options.
@@ -166,16 +160,10 @@ func (b *Builder) finishBlock() error {
 		Sum64: y.CalculateChecksum(blockBuf, pb.Checksum_CRC32C),
 	}
 	csm, err := cs.Marshal()
-	if err != nil {
-		return y.Wrapf(err, "unable to marshal block checksum")
-	}
+	y.Check(err)
 	n, err = b.buf.Write(csm)
-	if err != nil {
-		return y.Wrapf(err, "unable to write block checksum to buf")
-	}
-	sb = make([]byte, 4)
-	binary.BigEndian.PutUint32(sb, uint32(n)) // also write size of block checksum
-	b.buf.Write(sb)
+	y.Check(err)
+	b.buf.Write(y.BytesForUint32(uint32(n))) // also write size of block checksum
 
 	// TODO: If we want to make block as multiple of pages, we can implement padding.
 	// This might be useful while using direct io.
@@ -187,8 +175,6 @@ func (b *Builder) finishBlock() error {
 		Len:    uint32(b.buf.Len()) - b.baseOffset,
 	}
 	b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
-
-	return nil
 }
 
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
@@ -210,9 +196,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 // Add adds a key-value pair to the block.
 func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 	if b.shouldFinishBlock(key, value) {
-		if err := b.finishBlock(); err != nil {
-			return err
-		}
+		b.finishBlock()
 		// Start a new block. Initialize the block.
 		b.baseKey = []byte{}
 		b.baseOffset = uint32(b.buf.Len())
