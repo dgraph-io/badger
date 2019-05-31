@@ -455,8 +455,8 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	require.NoError(t, txn.Commit(), "error while committing txn")
 
 	for i := 0; i < 500; i++ {
-		// use SetWithDiscard to delete entries, because this causes data to be flushed on disk,
-		// creating SSTs. Simple Delete was having data in Memtables only.
+		// use Entry.WithDiscard() to delete entries, because this causes data to be flushed on
+		// disk, creating SSTs. Simple Delete was having data in Memtables only.
 		err = db.Update(func(txn *Txn) error {
 			return txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v).WithDiscard())
 		})
