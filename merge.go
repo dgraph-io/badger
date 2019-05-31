@@ -58,7 +58,9 @@ func (db *DB) GetMergeOperator(key []byte,
 
 var errNoMerge = errors.New("No need for merge")
 
-func (op *MergeOperator) iterateAndMerge(txn *Txn) (newVal []byte, err error) {
+func (op *MergeOperator) iterateAndMerge() (newVal []byte, latest uint64, err error) {
+	txn := op.db.NewTransaction(false)
+	defer txn.Discard()
 	opt := DefaultIteratorOptions
 	opt.AllVersions = true
 	it := txn.NewKeyIterator(op.key, opt)
@@ -72,8 +74,9 @@ func (op *MergeOperator) iterateAndMerge(txn *Txn) (newVal []byte, err error) {
 			// This should be the newVal, considering this it the latest version.
 			newVal, err = item.ValueCopy(newVal)
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
+			latest = item.Version()
 		} else {
 			if err := item.Value(func(oldVal []byte) error {
 				// The merge should always be the newVal, considering it has the merge result of the
@@ -81,7 +84,7 @@ func (op *MergeOperator) iterateAndMerge(txn *Txn) (newVal []byte, err error) {
 				newVal = op.f(oldVal, newVal)
 				return nil
 			}); err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 		}
 		if item.DiscardEarlierVersions() {
@@ -89,36 +92,36 @@ func (op *MergeOperator) iterateAndMerge(txn *Txn) (newVal []byte, err error) {
 		}
 	}
 	if numVersions == 0 {
-		return nil, ErrKeyNotFound
+		return nil, latest, ErrKeyNotFound
 	} else if numVersions == 1 {
-		return newVal, errNoMerge
+		return newVal, latest, errNoMerge
 	}
-	return newVal, nil
+	return newVal, latest, nil
 }
 
 func (op *MergeOperator) compact() error {
 	op.Lock()
 	defer op.Unlock()
-	err := op.db.Update(func(txn *Txn) error {
-		var (
-			val []byte
-			err error
-		)
-		val, err = op.iterateAndMerge(txn)
-		if err != nil {
-			return err
-		}
-		// Write value back to the DB. It is important that we do not set the bitMergeEntry bit
-		// here. When compaction happens, all the older merged entries will be removed.
-		return txn.SetEntry(NewEntry(op.key, val).WithDiscard())
-	})
-
+	val, version, err := op.iterateAndMerge()
 	if err == ErrKeyNotFound || err == errNoMerge {
-		// pass.
+		return nil
 	} else if err != nil {
 		return err
 	}
-	return nil
+	entries := []*Entry{
+		{
+			Key:   y.KeyWithTs(op.key, version),
+			Value: val,
+			meta:  bitDiscardEarlierVersions,
+		},
+	}
+	// Write value back to the DB. It is important that we do not set the bitMergeEntry bit
+	// here. When compaction happens, all the older merged entries will be removed.
+	return op.db.batchSetAsync(entries, func(err error) {
+		if err != nil {
+			op.db.opt.Errorf("failed to insert the result of merge compaction: %s", err)
+		}
+	})
 }
 
 func (op *MergeOperator) runCompactions(dur time.Duration) {
@@ -158,7 +161,7 @@ func (op *MergeOperator) Get() ([]byte, error) {
 	defer op.RUnlock()
 	var existing []byte
 	err := op.db.View(func(txn *Txn) (err error) {
-		existing, err = op.iterateAndMerge(txn)
+		existing, _, err = op.iterateAndMerge()
 		return err
 	})
 	if err == errNoMerge {
