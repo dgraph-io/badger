@@ -555,7 +555,9 @@ func runTest(cmd *cobra.Command, args []string) error {
 			db.Subscribe(ctx, updater, accountIDS[0], accountIDS[1:]...)
 		}()
 	}
+
 	wg.Wait()
+
 	if checkSubscriber {
 		cancel()
 		subWg.Wait()
@@ -569,6 +571,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 			return nil
 		}))
 	}
+
 	if atomic.LoadInt32(&stopAll) == 0 {
 		log.Println("Test OK")
 		return nil
