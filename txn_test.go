@@ -40,7 +40,7 @@ func TestTxnSimple(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			k := []byte(fmt.Sprintf("key=%d", i))
 			v := []byte(fmt.Sprintf("val=%d", i))
-			txn.Set(k, v)
+			require.NoError(t, txn.SetEntry(NewEntry(k, v)))
 		}
 
 		item, err := txn.Get([]byte("key=8"))
@@ -66,7 +66,7 @@ func TestTxnReadAfterWrite(t *testing.T) {
 				defer wg.Done()
 				key := []byte(fmt.Sprintf("key%d", i))
 				err := db.Update(func(tx *Txn) error {
-					return tx.Set(key, key)
+					return tx.SetEntry(NewEntry(key, key))
 				})
 				require.NoError(t, err)
 				err = db.View(func(tx *Txn) error {
@@ -92,7 +92,7 @@ func TestTxnCommitAsync(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		txn := db.NewTransaction(true)
 		for i := 0; i < 40; i++ {
-			err := txn.Set(key(i), []byte(strconv.Itoa(100)))
+			err := txn.SetEntry(NewEntry(key(i), []byte(strconv.Itoa(100))))
 			require.NoError(t, err)
 		}
 		require.NoError(t, txn.Commit())
@@ -131,11 +131,11 @@ func TestTxnCommitAsync(t *testing.T) {
 				txn := db.NewTransaction(true)
 				delta := rand.Intn(100)
 				for i := 0; i < 20; i++ {
-					err := txn.Set(key(i), []byte(strconv.Itoa(100-delta)))
+					err := txn.SetEntry(NewEntry(key(i), []byte(strconv.Itoa(100-delta))))
 					require.NoError(t, err)
 				}
 				for i := 20; i < 40; i++ {
-					err := txn.Set(key(i), []byte(strconv.Itoa(100+delta)))
+					err := txn.SetEntry(NewEntry(key(i), []byte(strconv.Itoa(100+delta))))
 					require.NoError(t, err)
 				}
 				// We are only doing writes, so there won't be any conflicts.
@@ -156,7 +156,7 @@ func TestTxnVersions(t *testing.T) {
 		for i := 1; i < 10; i++ {
 			txn := db.NewTransaction(true)
 
-			txn.Set(k, []byte(fmt.Sprintf("valversion=%d", i)))
+			require.NoError(t, txn.SetEntry(NewEntry(k, []byte(fmt.Sprintf("valversion=%d", i)))))
 			require.NoError(t, txn.Commit())
 			require.Equal(t, uint64(i), db.orc.readTs())
 		}
@@ -264,8 +264,8 @@ func TestTxnWriteSkew(t *testing.T) {
 		txn := db.NewTransaction(true)
 		defer txn.Discard()
 		val := []byte(strconv.Itoa(100))
-		txn.Set(ax, val)
-		txn.Set(ay, val)
+		require.NoError(t, txn.SetEntry(NewEntry(ax, val)))
+		require.NoError(t, txn.SetEntry(NewEntry(ay, val)))
 		require.NoError(t, txn.Commit())
 		require.Equal(t, uint64(1), db.orc.readTs())
 
@@ -286,7 +286,7 @@ func TestTxnWriteSkew(t *testing.T) {
 		sum := getBal(txn1, ax)
 		sum += getBal(txn1, ay)
 		require.Equal(t, 200, sum)
-		txn1.Set(ax, []byte("0")) // Deduct 100 from ax.
+		require.NoError(t, txn1.SetEntry(NewEntry(ax, []byte("0")))) // Deduct 100 from ax.
 
 		// Let's read this back.
 		sum = getBal(txn1, ax)
@@ -300,7 +300,7 @@ func TestTxnWriteSkew(t *testing.T) {
 		sum = getBal(txn2, ax)
 		sum += getBal(txn2, ay)
 		require.Equal(t, 200, sum)
-		txn2.Set(ay, []byte("0")) // Deduct 100 from ay.
+		require.NoError(t, txn2.SetEntry(NewEntry(ay, []byte("0")))) // Deduct 100 from ay.
 
 		// Let's read this back.
 		sum = getBal(txn2, ax)
@@ -330,27 +330,27 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 
 		// c1
 		txn := db.NewTransaction(true)
-		txn.Set(kc, []byte("c1"))
+		require.NoError(t, txn.SetEntry(NewEntry(kc, []byte("c1"))))
 		require.NoError(t, txn.Commit())
 		require.Equal(t, uint64(1), db.orc.readTs())
 
 		// a2, c2
 		txn = db.NewTransaction(true)
-		txn.Set(ka, []byte("a2"))
-		txn.Set(kc, []byte("c2"))
+		require.NoError(t, txn.SetEntry(NewEntry(ka, []byte("a2"))))
+		require.NoError(t, txn.SetEntry(NewEntry(kc, []byte("c2"))))
 		require.NoError(t, txn.Commit())
 		require.Equal(t, uint64(2), db.orc.readTs())
 
 		// b3
 		txn = db.NewTransaction(true)
-		txn.Set(ka, []byte("a3"))
-		txn.Set(kb, []byte("b3"))
+		require.NoError(t, txn.SetEntry(NewEntry(ka, []byte("a3"))))
+		require.NoError(t, txn.SetEntry(NewEntry(kb, []byte("b3"))))
 		require.NoError(t, txn.Commit())
 		require.Equal(t, uint64(3), db.orc.readTs())
 
 		// b4, c4(del) (Uncommitted)
 		txn4 := db.NewTransaction(true)
-		require.NoError(t, txn4.Set(kb, []byte("b4")))
+		require.NoError(t, txn4.SetEntry(NewEntry(kb, []byte("b4"))))
 		require.NoError(t, txn4.Delete(kc))
 		require.Equal(t, uint64(3), db.orc.readTs())
 
@@ -420,21 +420,21 @@ func TestTxnIterationEdgeCase2(t *testing.T) {
 
 		// c1
 		txn := db.NewTransaction(true)
-		txn.Set(kc, []byte("c1"))
+		require.NoError(t, txn.SetEntry(NewEntry(kc, []byte("c1"))))
 		require.NoError(t, txn.Commit())
 		require.Equal(t, uint64(1), db.orc.readTs())
 
 		// a2, c2
 		txn = db.NewTransaction(true)
-		txn.Set(ka, []byte("a2"))
-		txn.Set(kc, []byte("c2"))
+		require.NoError(t, txn.SetEntry(NewEntry(ka, []byte("a2"))))
+		require.NoError(t, txn.SetEntry(NewEntry(kc, []byte("c2"))))
 		require.NoError(t, txn.Commit())
 		require.Equal(t, uint64(2), db.orc.readTs())
 
 		// b3
 		txn = db.NewTransaction(true)
-		txn.Set(ka, []byte("a3"))
-		txn.Set(kb, []byte("b3"))
+		require.NoError(t, txn.SetEntry(NewEntry(ka, []byte("a3"))))
+		require.NoError(t, txn.SetEntry(NewEntry(kb, []byte("b3"))))
 		require.NoError(t, txn.Commit())
 		require.Equal(t, uint64(3), db.orc.readTs())
 
@@ -513,18 +513,18 @@ func TestTxnIterationEdgeCase3(t *testing.T) {
 
 		// c1
 		txn := db.NewTransaction(true)
-		txn.Set(kc, []byte("c1"))
+		require.NoError(t, txn.SetEntry(NewEntry(kc, []byte("c1"))))
 		require.NoError(t, txn.Commit())
 		require.Equal(t, uint64(1), db.orc.readTs())
 
 		// b2
 		txn = db.NewTransaction(true)
-		txn.Set(kb, []byte("b2"))
+		require.NoError(t, txn.SetEntry(NewEntry(kb, []byte("b2"))))
 		require.NoError(t, txn.Commit())
 		require.Equal(t, uint64(2), db.orc.readTs())
 
 		txn2 := db.NewTransaction(true)
-		require.NoError(t, txn2.Set(kd, []byte("d2")))
+		require.NoError(t, txn2.SetEntry(NewEntry(kd, []byte("d2"))))
 		require.NoError(t, txn2.Delete(kc))
 
 		txn = db.NewTransaction(true)
@@ -619,9 +619,8 @@ func TestIteratorAllVersionsWithDeleted(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// Write two keys
 		err := db.Update(func(txn *Txn) error {
-			txn.Set([]byte("answer1"), []byte("42"))
-			txn.Set([]byte("answer2"), []byte("43"))
-			return nil
+			require.NoError(t, txn.SetEntry(NewEntry([]byte("answer1"), []byte("42"))))
+			return txn.SetEntry(NewEntry([]byte("answer2"), []byte("43")))
 		})
 		require.NoError(t, err)
 
@@ -672,11 +671,10 @@ func TestIteratorAllVersionsWithDeleted2(t *testing.T) {
 		for i := 0; i < 4; i++ {
 			err := db.Update(func(txn *Txn) error {
 				if i%2 == 0 {
-					txn.Set([]byte("key"), []byte("value"))
+					require.NoError(t, txn.SetEntry(NewEntry([]byte("key"), []byte("value"))))
 					return nil
 				}
-				txn.Delete([]byte("key"))
-				return nil
+				return txn.Delete([]byte("key"))
 			})
 			require.NoError(t, err)
 		}
@@ -738,7 +736,7 @@ func TestManagedDB(t *testing.T) {
 	// Write data at t=3.
 	txn := db.NewTransactionAt(3, true)
 	for i := 0; i <= 3; i++ {
-		require.NoError(t, txn.Set(key(i), val(i)))
+		require.NoError(t, txn.SetEntry(NewEntry(key(i), val(i))))
 	}
 	require.Panics(t, func() { txn.Commit() })
 	require.NoError(t, txn.CommitAt(3, nil))
@@ -770,7 +768,7 @@ func TestManagedDB(t *testing.T) {
 		if err == nil {
 			continue // Don't overwrite existing keys.
 		}
-		require.NoError(t, txn.Set(key(i), val(i)))
+		require.NoError(t, txn.SetEntry(NewEntry(key(i), val(i))))
 	}
 	require.NoError(t, txn.CommitAt(7, nil))
 
@@ -825,14 +823,14 @@ func TestArmV7Issue311Fix(t *testing.T) {
 	}
 
 	err = db.Update(func(txn *Txn) error {
-		return txn.Set([]byte{0x11}, []byte{0x22})
+		return txn.SetEntry(NewEntry([]byte{0x11}, []byte{0x22}))
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	err = db.Update(func(txn *Txn) error {
-		return txn.Set([]byte{0x11}, []byte{0x22})
+		return txn.SetEntry(NewEntry([]byte{0x11}, []byte{0x22}))
 	})
 
 	if err != nil {

@@ -187,7 +187,8 @@ func TestStreamWriter3(t *testing.T) {
 				keybyte := make([]byte, 8)
 				keyNo := uint64(counter)
 				binary.BigEndian.PutUint64(keybyte, keyNo)
-				require.NoError(t, txn.Set(keybyte, val), "error while inserting entries")
+				require.NoError(t, txn.SetEntry(NewEntry(keybyte, val)),
+					"error while inserting entries")
 				require.NoError(t, txn.Commit(), "error while commit")
 				counter = counter + 2
 			}
