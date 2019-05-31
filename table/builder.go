@@ -184,10 +184,9 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	}
 
 	// have to include current entry also in size, thats why +1 len of blockEntryOffsets
-	// TODO: estimate correct size for checksum
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 + 4 /*size of list*/ +
-		4 /*crc32 checksum*/)
-	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(8 /*header size*/) +
+		8 /*Sum64 in checksum proto*/)
+	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(8 /*header size for entry*/) +
 		uint32(value.EncodedSize()) + entriesOffsetsSize
 
 	return estimatedSize > b.blockSize
@@ -213,7 +212,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	blocksSize := b.buf.Len() + len(b.entryOffsets)*4 + 4 + 4 /*checksum*/
+	blocksSize := b.buf.Len() + len(b.entryOffsets)*4 + 4 /*length of block meta*/ + 8 /*checksum*/
 	estimateSz := blocksSize + 4 /* Index length */ +
 		5*(len(b.tableIndex.Offsets)) /* approximate index size */
 
