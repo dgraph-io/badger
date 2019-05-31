@@ -305,12 +305,11 @@ key := []byte("merge")
 m := db.GetMergeOperator(key, add, 200*time.Millisecond)
 defer m.Stop()
 
-require.Nil(t, m.Add([]byte("A")))
-require.Nil(t, m.Add([]byte("B")))
-require.Nil(t, m.Add([]byte("C")))
+m.Add([]byte("A"))
+m.Add([]byte("B"))
+m.Add([]byte("C"))
 
 res, _ := m.Get() // res should have value ABC encoded
-fmt.Println(bytesToUint64(res))
 ```
 
 ### Setting Time To Live(TTL) and User Metadata on Keys
