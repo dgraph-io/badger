@@ -160,7 +160,7 @@ var LSMOnlyOptions = Options{}
 func init() {
 	LSMOnlyOptions = DefaultOptions
 
-	LSMOnlyOptions.ValueThreshold = 65500 // Max value length which fits in uint16.
+	LSMOnlyOptions.ValueThreshold = 4294967195 // Max value length which fits in uint32.
 	// Let's not set any other options, because they can cause issues with the
 	// size of key-value a user can pass to Badger. For e.g., if we set
 	// ValueLogFileSize to 64MB, a user can't pass a value more than that.
