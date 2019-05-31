@@ -62,7 +62,7 @@ func fillRandom(db *badger.DB, num uint64) error {
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, keySz)
 		y.Check2(rand.Read(key))
-		if err := batch.Set(key, value, 0); err != nil {
+		if err := batch.Set(key, value); err != nil {
 			return err
 		}
 		if i%1e5 == 0 {

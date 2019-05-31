@@ -40,7 +40,7 @@ func TestWriteBatch(t *testing.T) {
 		start := time.Now()
 
 		for i := 0; i < N; i++ {
-			require.NoError(t, wb.Set(key(i), val(i), 0))
+			require.NoError(t, wb.Set(key(i), val(i)))
 		}
 		for i := 0; i < M; i++ {
 			require.NoError(t, wb.Delete(key(i)))

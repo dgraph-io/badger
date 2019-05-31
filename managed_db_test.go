@@ -114,7 +114,7 @@ func TestDropAll(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -150,7 +150,7 @@ func TestDropAllTwice(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -178,7 +178,7 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -243,7 +243,7 @@ func TestDropReadOnly(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -275,7 +275,7 @@ func TestWriteAfterClose(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -366,7 +366,7 @@ func TestDropPrefix(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -417,7 +417,7 @@ func TestDropPrefixWithPendingTxn(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -485,7 +485,7 @@ func TestDropPrefixReadOnly(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}

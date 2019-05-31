@@ -101,9 +101,9 @@ func (wb *WriteBatch) SetEntry(e *Entry) error {
 	return nil
 }
 
-// Set is equivalent of Txn.SetWithMeta.
-func (wb *WriteBatch) Set(k, v []byte, meta byte) error {
-	e := &Entry{Key: k, Value: v, UserMeta: meta}
+// Set is equivalent of Txn.Set().
+func (wb *WriteBatch) Set(k, v []byte) error {
+	e := &Entry{Key: k, Value: v}
 	return wb.SetEntry(e)
 }
 
