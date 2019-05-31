@@ -939,7 +939,7 @@ func BenchmarkReadWrite(b *testing.B) {
 // Regression test for https://github.com/dgraph-io/badger/issues/817
 func TestValueLogTruncate(t *testing.T) {
 	dir, err := ioutil.TempDir(".", "badger-test")
-	y.Check(err)
+	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
 	opts := DefaultOptions
@@ -951,13 +951,13 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, err)
 	// Insert 1 entry so that we have valid data in first vlog file
 	require.NoError(t, db.Update(func(txn *Txn) error {
-		require.NoError(t, txn.Set([]byte("foo"), nil))
-		return nil
+		return txn.Set([]byte("foo"), nil)
 	}))
 
 	fileCountBeforeCorruption := len(db.vlog.filesMap)
-	require.NoError(t, err)
+
 	require.NoError(t, db.Close())
+
 	// Create two vlog files corrupted data. These will be truncated when DB starts next time
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), []byte("foo"), 0664))
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 2), []byte("foo"), 0664))
@@ -975,10 +975,10 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, fileStat.Size())
 
-	// -1 because the file with id=2 will be completely truncated. It won't be deleted.
+	fileCountAfterCorruption := len(db.vlog.filesMap)
+	// +1 because the file with id=2 will be completely truncated. It won't be deleted.
 	// There would be two files. fid=0 with valid data, fid=2 with zero data (truncated).
-	fileCountAfterCorruption := len(db.vlog.filesMap) - 1
-	require.Equal(t, fileCountBeforeCorruption, fileCountAfterCorruption)
+	require.Equal(t, fileCountBeforeCorruption+1, fileCountAfterCorruption)
 	// Max file ID would point to the last vlog file, which is fid=2 in this case
 	require.Equal(t, 2, int(db.vlog.maxFid))
 	require.NoError(t, db.Close())
