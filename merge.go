@@ -79,8 +79,9 @@ func (op *MergeOperator) iterateAndMerge() (newVal []byte, latest uint64, err er
 			latest = item.Version()
 		} else {
 			if err := item.Value(func(oldVal []byte) error {
-				// The merge should always be the newVal, considering it has the merge result of the
-				// latest version. The value read should be the oldVal.
+				// The merge should always be on the newVal considering it has
+				// the merge result of the latest version. The value read should
+				// be the oldVal.
 				newVal = op.f(oldVal, newVal)
 				return nil
 			}); err != nil {
