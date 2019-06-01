@@ -135,12 +135,12 @@ func (st *Stream) produceRanges(ctx context.Context) {
 
 	start := y.SafeCopy(nil, st.Prefix)
 	for _, key := range splits {
-		st.rangeCh <- keyRange{left: start, right: y.SafeCopy(nil, []byte(key))}
+		st.rangeCh <- keyRange{left: start, right: y.SafeCopy(nil, []byte(key)), keyComparator: st.db.opt.KeyComparator}
 		start = y.SafeCopy(nil, []byte(key))
 	}
 	// Edge case: prefix is empty and no splits exist. In that case, we should have at least one
 	// keyRange output.
-	st.rangeCh <- keyRange{left: start}
+	st.rangeCh <- keyRange{left: start, keyComparator: st.db.opt.KeyComparator}
 	close(st.rangeCh)
 }
 
