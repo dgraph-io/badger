@@ -105,29 +105,32 @@ type elem struct {
 	reversed bool
 }
 
-type elemHeap []*elem
+type elemHeap struct {
+	heap          []*elem
+	keyComparator KeyComparator
+}
 
-func (eh elemHeap) Len() int            { return len(eh) }
-func (eh elemHeap) Swap(i, j int)       { eh[i], eh[j] = eh[j], eh[i] }
-func (eh *elemHeap) Push(x interface{}) { *eh = append(*eh, x.(*elem)) }
+func (eh elemHeap) Len() int            { return len(eh.heap) }
+func (eh elemHeap) Swap(i, j int)       { eh.heap[i], eh.heap[j] = eh.heap[j], eh.heap[i] }
+func (eh *elemHeap) Push(x interface{}) { eh.heap = append(eh.heap, x.(*elem)) }
 func (eh *elemHeap) Pop() interface{} {
 	// Remove the last element, because Go has already swapped 0th elem <-> last.
-	old := *eh
+	old := eh.heap
 	n := len(old)
 	x := old[n-1]
-	*eh = old[0 : n-1]
+	eh.heap = old[0 : n-1]
 	return x
 }
 func (eh elemHeap) Less(i, j int) bool {
-	cmp := CompareKeys(eh[i].itr.Key(), eh[j].itr.Key())
+	cmp := eh.keyComparator.CompareKeys(eh.heap[i].itr.Key(), eh.heap[j].itr.Key())
 	if cmp < 0 {
-		return !eh[i].reversed
+		return !eh.heap[i].reversed
 	}
 	if cmp > 0 {
-		return eh[i].reversed
+		return eh.heap[i].reversed
 	}
 	// The keys are equal. In this case, lower nice take precedence. This is important.
-	return eh[i].nice < eh[j].nice
+	return eh.heap[i].nice < eh.heap[j].nice
 }
 
 // MergeIterator merges multiple iterators.
