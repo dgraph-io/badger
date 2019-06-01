@@ -70,6 +70,8 @@ type Table struct {
 
 	bf bbloom.Bloom
 
+	keyComparator y.KeyComparator
+
 	Checksum []byte
 }
 
@@ -105,19 +107,20 @@ func (t *Table) DecrRef() error {
 }
 
 type block struct {
-	offset int
-	data   []byte
+	offset        int
+	data          []byte
+	keyComparator y.KeyComparator
 }
 
 func (b block) NewIterator() *blockIterator {
-	return &blockIterator{data: b.data}
+	return &blockIterator{data: b.data, keyComparator: b.keyComparator}
 }
 
 // OpenTable assumes file has only one table and opens it.  Takes ownership of fd upon function
 // entry.  Returns a table with one reference count on it (decrementing which may delete the file!
 // -- consider t.Close() instead).  The fd has to writeable because we call Truncate on it before
 // deleting.
-func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table, error) {
+func OpenTable(fd *os.File, mode options.FileLoadingMode, comp y.KeyComparator, cksum []byte) (*Table, error) {
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -133,10 +136,11 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 		return nil, errors.Errorf("Invalid filename: %s", filename)
 	}
 	t := &Table{
-		fd:          fd,
-		ref:         1, // Caller is given one reference.
-		id:          id,
-		loadingMode: mode,
+		fd:            fd,
+		ref:           1, // Caller is given one reference.
+		id:            id,
+		loadingMode:   mode,
+		keyComparator: comp,
 	}
 
 	t.tableSize = int(fileInfo.Size())
@@ -285,7 +289,8 @@ func (t *Table) block(idx int) (block, error) {
 
 	ko := t.blockIndex[idx]
 	blk := block{
-		offset: ko.offset,
+		offset:        ko.offset,
+		keyComparator: t.keyComparator,
 	}
 	var err error
 	blk.data, err = t.read(blk.offset, ko.len)

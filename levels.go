@@ -151,7 +151,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				return
 			}
 
-			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, tf.Checksum)
+			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.KeyComparator, tf.Checksum)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -579,7 +579,7 @@ func (s *levelsController) compactBuildTables(
 					return
 				}
 
-				tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, nil)
+				tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, s.kv.opt.KeyComparator, nil)
 				// decrRef is added below.
 				resultCh <- newTableResult{tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())}
 			}(builder)
@@ -617,7 +617,7 @@ func (s *levelsController) compactBuildTables(
 	}
 
 	sort.Slice(newTables, func(i, j int) bool {
-		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
+		return s.kv.opt.KeyComparator.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
 	s.kv.vlog.updateDiscardStats(discardStats)
 	s.kv.opt.Debugf("Discard stats: %v", discardStats)

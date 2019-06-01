@@ -169,7 +169,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lh0 := newLevelHandler(kv, 0)
 	lh1 := newLevelHandler(kv, 1)
 	f := buildTestTable(t, "k", 2)
-	t1, err := table.OpenTable(f, options.MemoryMap, nil)
+	t1, err := table.OpenTable(f, options.MemoryMap, new(y.DefaultKeyComparator), nil)
 	require.NoError(t, err)
 	defer t1.DecrRef()
 
@@ -190,7 +190,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lc.runCompactDef(0, cd)
 
 	f = buildTestTable(t, "l", 2)
-	t2, err := table.OpenTable(f, options.MemoryMap, nil)
+	t2, err := table.OpenTable(f, options.MemoryMap, new(y.DefaultKeyComparator), nil)
 	require.NoError(t, err)
 	defer t2.DecrRef()
 	done = lh0.tryAddLevel0Table(t2)

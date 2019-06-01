@@ -74,10 +74,10 @@ func getKeyRange(tables []*table.Table, comp y.KeyComparator) keyRange {
 	smallest := tables[0].Smallest()
 	biggest := tables[0].Biggest()
 	for i := 1; i < len(tables); i++ {
-		if y.CompareKeys(tables[i].Smallest(), smallest) < 0 {
+		if comp.CompareKeys(tables[i].Smallest(), smallest) < 0 {
 			smallest = tables[i].Smallest()
 		}
-		if y.CompareKeys(tables[i].Biggest(), biggest) > 0 {
+		if comp.CompareKeys(tables[i].Biggest(), biggest) > 0 {
 			biggest = tables[i].Biggest()
 		}
 	}

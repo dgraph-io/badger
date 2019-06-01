@@ -37,6 +37,8 @@ type blockIterator struct {
 	init bool
 
 	last header // The last header we saw.
+
+	keyComparator y.KeyComparator
 }
 
 func (itr *blockIterator) Reset() {
@@ -83,7 +85,7 @@ func (itr *blockIterator) Seek(key []byte, whence int) {
 	var done bool
 	for itr.Init(); itr.Valid(); itr.Next() {
 		k := itr.Key()
-		if y.CompareKeys(k, key) >= 0 {
+		if itr.keyComparator.CompareKeys(k, key) >= 0 {
 			// We are done as k is >= key.
 			done = true
 			break
@@ -200,12 +202,14 @@ type Iterator struct {
 	// Internally, Iterator is bidirectional. However, we only expose the
 	// unidirectional functionality for now.
 	reversed bool
+
+	keyComparator y.KeyComparator
 }
 
 // NewIterator returns a new iterator of the Table
 func (t *Table) NewIterator(reversed bool) *Iterator {
 	t.IncrRef() // Important.
-	ti := &Iterator{t: t, reversed: reversed}
+	ti := &Iterator{t: t, reversed: reversed, keyComparator: t.keyComparator}
 	ti.next()
 	return ti
 }
@@ -282,7 +286,7 @@ func (itr *Iterator) seekFrom(key []byte, whence int) {
 
 	idx := sort.Search(len(itr.t.blockIndex), func(idx int) bool {
 		ko := itr.t.blockIndex[idx]
-		return y.CompareKeys(ko.key, key) > 0
+		return itr.keyComparator.CompareKeys(ko.key, key) > 0
 	})
 	if idx == 0 {
 		// The smallest key in our table is already strictly > key. We can return that.
@@ -486,12 +490,12 @@ func (s *ConcatIterator) Seek(key []byte) {
 	var idx int
 	if !s.reversed {
 		idx = sort.Search(len(s.tables), func(i int) bool {
-			return y.CompareKeys(s.tables[i].Biggest(), key) >= 0
+			return s.tables[i].keyComparator.CompareKeys(s.tables[i].Biggest(), key) >= 0
 		})
 	} else {
 		n := len(s.tables)
 		idx = n - 1 - sort.Search(n, func(i int) bool {
-			return y.CompareKeys(s.tables[n-1-i].Smallest(), key) <= 0
+			return s.tables[i].keyComparator.CompareKeys(s.tables[n-1-i].Smallest(), key) <= 0
 		})
 	}
 	if idx >= len(s.tables) || idx < 0 {
