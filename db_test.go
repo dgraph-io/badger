@@ -53,6 +53,7 @@ func getTestOptions(dir string) Options {
 	if !*mmap {
 		opt.ValueLogLoadingMode = options.FileIO
 	}
+	opt.KeyComparator = new(y.DefaultKeyComparator)
 	return opt
 }
 
