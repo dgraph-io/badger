@@ -195,6 +195,10 @@ func Open(opt Options) (db *DB, err error) {
 		opt.CompactL0OnClose = false
 	}
 
+	if opt.KeyComparator == nil {
+		opt.KeyComparator = new(y.DefaultKeyComparator)
+	}
+
 	for _, path := range []string{opt.Dir, opt.ValueDir} {
 		dirExists, err := exists(path)
 		if err != nil {
