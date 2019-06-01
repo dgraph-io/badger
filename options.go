@@ -109,8 +109,8 @@ type Options struct {
 	// which can slow things on start.
 	LogRotatesToFlush int32
 
-	// The KeyComparator is used to sort keys.
-	// Defaults to y.CompareKeysDefault.
+	// The KeyComparator is used by all Badger's components to compare keys in order to sort them.
+	// Defaults to y.DefaultKeyComparator.
 	KeyComparator y.KeyComparator
 
 	// Transaction start and commit timestamps are managed by end-user.
