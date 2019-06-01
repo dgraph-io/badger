@@ -58,6 +58,12 @@ var (
 	CompareKeys = CompareKeysWithTimestamp
 )
 
+// KeyComparator returns an integer comparing two keys.
+// The result will be 0 if key1==key2, negative if key1 < key2, and positive if key1 > key2.
+type KeyComparator interface {
+	CompareKeys(key1 []byte, key2 []byte) int
+}
+
 // OpenExistingFile opens an existing file, errors if it doesn't exist.
 func OpenExistingFile(filename string, flags uint32) (*os.File, error) {
 	openFlags := os.O_RDWR
