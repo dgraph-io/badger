@@ -18,6 +18,7 @@ package badger
 
 import (
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/y"
 )
 
 // NOTE: Keep the comments in the following to 75 chars width, so they
@@ -108,6 +109,10 @@ type Options struct {
 	// which can slow things on start.
 	LogRotatesToFlush int32
 
+	// The KeyComparator is used to sort keys.
+	// Defaults to y.CompareKeysDefault.
+	KeyComparator y.KeyComparator
+
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.
@@ -149,6 +154,7 @@ var DefaultOptions = Options{
 	Truncate:           false,
 	Logger:             defaultLogger,
 	LogRotatesToFlush:  2,
+	KeyComparator:      new(y.DefaultKeyComparator),
 }
 
 // LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold
