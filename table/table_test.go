@@ -480,7 +480,7 @@ func TestMergingIterator(t *testing.T) {
 	defer tbl2.DecrRef()
 	it1 := tbl1.NewIterator(false)
 	it2 := NewConcatIterator([]*Table{tbl2}, false)
-	it := y.NewMergeIterator([]y.Iterator{it1, it2}, false)
+	it := y.NewMergeIterator([]y.Iterator{it1, it2}, new(y.DefaultKeyComparator), false)
 	defer it.Close()
 
 	it.Rewind()
@@ -520,7 +520,7 @@ func TestMergingIteratorReversed(t *testing.T) {
 	defer tbl2.DecrRef()
 	it1 := tbl1.NewIterator(true)
 	it2 := NewConcatIterator([]*Table{tbl2}, true)
-	it := y.NewMergeIterator([]y.Iterator{it1, it2}, true)
+	it := y.NewMergeIterator([]y.Iterator{it1, it2}, new(y.DefaultKeyComparator), true)
 	defer it.Close()
 
 	it.Rewind()
@@ -560,7 +560,7 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 
 	it1 := NewConcatIterator([]*Table{t1}, false)
 	it2 := NewConcatIterator([]*Table{t2}, false)
-	it := y.NewMergeIterator([]y.Iterator{it1, it2}, false)
+	it := y.NewMergeIterator([]y.Iterator{it1, it2}, new(y.DefaultKeyComparator), false)
 	defer it.Close()
 
 	it.Rewind()
@@ -600,7 +600,7 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 
 	it1 := NewConcatIterator([]*Table{t1}, false)
 	it2 := NewConcatIterator([]*Table{t2}, false)
-	it := y.NewMergeIterator([]y.Iterator{it1, it2}, false)
+	it := y.NewMergeIterator([]y.Iterator{it1, it2}, new(y.DefaultKeyComparator), false)
 	defer it.Close()
 
 	it.Rewind()
@@ -720,7 +720,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			for _, tbl := range tables {
 				iters = append(iters, tbl.NewIterator(false))
 			}
-			it := y.NewMergeIterator(iters, false)
+			it := y.NewMergeIterator(iters, new(y.DefaultKeyComparator), false)
 			defer it.Close()
 			for it.Rewind(); it.Valid(); it.Next() {
 			}

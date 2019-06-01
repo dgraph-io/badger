@@ -327,6 +327,9 @@ type IteratorOptions struct {
 	PrefetchSize int
 	Reverse      bool // Direction of iteration. False is forward, true is backward.
 	AllVersions  bool // Fetch all valid versions of the same key.
+	// The KeyComparator is used to sort keys.
+	// Defaults to y.CompareKeysDefault.
+	KeyComparator y.KeyComparator
 
 	// The following option is used to narrow down the SSTables that iterator picks up. If
 	// Prefix is specified, only tables which could have this prefix are picked based on their range
@@ -417,7 +420,7 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	iters = txn.db.lc.appendIterators(iters, &opt) // This will increment references.
 	res := &Iterator{
 		txn:    txn,
-		iitr:   y.NewMergeIterator(iters, opt.Reverse),
+		iitr:   y.NewMergeIterator(iters, opt.KeyComparator, opt.Reverse),
 		opt:    opt,
 		readTs: txn.readTs,
 	}

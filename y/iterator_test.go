@@ -56,12 +56,12 @@ func (s *SimpleIterator) Seek(key []byte) {
 	key = KeyWithTs(key, 0)
 	if !s.reversed {
 		s.idx = sort.Search(len(s.keys), func(i int) bool {
-			return CompareKeys(s.keys[i], key) >= 0
+			return new(DefaultKeyComparator).CompareKeys(s.keys[i], key) >= 0
 		})
 	} else {
 		n := len(s.keys)
 		s.idx = n - 1 - sort.Search(n, func(i int) bool {
-			return CompareKeys(s.keys[n-1-i], key) <= 0
+			return new(DefaultKeyComparator).CompareKeys(s.keys[n-1-i], key) <= 0
 		})
 	}
 }
@@ -135,7 +135,7 @@ func TestMergeSingle(t *testing.T) {
 	keys := []string{"1", "2", "3"}
 	vals := []string{"v1", "v2", "v3"}
 	it := newSimpleIterator(keys, vals, false)
-	mergeIt := NewMergeIterator([]Iterator{it}, false)
+	mergeIt := NewMergeIterator([]Iterator{it}, new(DefaultKeyComparator), false)
 	mergeIt.Rewind()
 	k, v := getAll(mergeIt)
 	require.EqualValues(t, keys, k)
@@ -143,11 +143,12 @@ func TestMergeSingle(t *testing.T) {
 	closeAndCheck(t, mergeIt, 1)
 }
 
+
 func TestMergeSingleReversed(t *testing.T) {
 	keys := []string{"1", "2", "3"}
 	vals := []string{"v1", "v2", "v3"}
 	it := newSimpleIterator(keys, vals, true)
-	mergeIt := NewMergeIterator([]Iterator{it}, true)
+	mergeIt := NewMergeIterator([]Iterator{it},  new(DefaultKeyComparator), true)
 	mergeIt.Rewind()
 	k, v := getAll(mergeIt)
 	require.EqualValues(t, reversed(keys), k)
@@ -161,7 +162,7 @@ func TestMergeMore(t *testing.T) {
 	it3 := newSimpleIterator([]string{"1"}, []string{"c1"}, false)
 	it4 := newSimpleIterator([]string{"1", "7", "9"}, []string{"d1", "d7", "d9"}, false)
 
-	mergeIt := NewMergeIterator([]Iterator{it, it2, it3, it4}, false)
+	mergeIt := NewMergeIterator([]Iterator{it, it2, it3, it4},  new(DefaultKeyComparator), false)
 	expectedKeys := []string{"1", "2", "3", "5", "7", "9"}
 	expectedVals := []string{"a1", "b2", "a3", "b5", "a7", "d9"}
 	mergeIt.Rewind()
@@ -176,8 +177,8 @@ func TestMergeIteratorNested(t *testing.T) {
 	keys := []string{"1", "2", "3"}
 	vals := []string{"v1", "v2", "v3"}
 	it := newSimpleIterator(keys, vals, false)
-	mergeIt := NewMergeIterator([]Iterator{it}, false)
-	mergeIt2 := NewMergeIterator([]Iterator{mergeIt}, false)
+	mergeIt := NewMergeIterator([]Iterator{it},  new(DefaultKeyComparator), false)
+	mergeIt2 := NewMergeIterator([]Iterator{mergeIt},  new(DefaultKeyComparator), false)
 	mergeIt2.Rewind()
 	k, v := getAll(mergeIt2)
 	require.EqualValues(t, keys, k)
@@ -190,7 +191,7 @@ func TestMergeIteratorSeek(t *testing.T) {
 	it2 := newSimpleIterator([]string{"2", "3", "5"}, []string{"b2", "b3", "b5"}, false)
 	it3 := newSimpleIterator([]string{"1"}, []string{"c1"}, false)
 	it4 := newSimpleIterator([]string{"1", "7", "9"}, []string{"d1", "d7", "d9"}, false)
-	mergeIt := NewMergeIterator([]Iterator{it, it2, it3, it4}, false)
+	mergeIt := NewMergeIterator([]Iterator{it, it2, it3, it4},  new(DefaultKeyComparator), false)
 	mergeIt.Seek([]byte("4"))
 	k, v := getAll(mergeIt)
 	require.EqualValues(t, []string{"5", "7", "9"}, k)
@@ -203,7 +204,7 @@ func TestMergeIteratorSeekReversed(t *testing.T) {
 	it2 := newSimpleIterator([]string{"2", "3", "5"}, []string{"b2", "b3", "b5"}, true)
 	it3 := newSimpleIterator([]string{"1"}, []string{"c1"}, true)
 	it4 := newSimpleIterator([]string{"1", "7", "9"}, []string{"d1", "d7", "d9"}, true)
-	mergeIt := NewMergeIterator([]Iterator{it, it2, it3, it4}, true)
+	mergeIt := NewMergeIterator([]Iterator{it, it2, it3, it4},  new(DefaultKeyComparator), true)
 	mergeIt.Seek([]byte("5"))
 	k, v := getAll(mergeIt)
 	require.EqualValues(t, []string{"5", "3", "2", "1"}, k)
@@ -216,7 +217,7 @@ func TestMergeIteratorSeekInvalid(t *testing.T) {
 	it2 := newSimpleIterator([]string{"2", "3", "5"}, []string{"b2", "b3", "b5"}, false)
 	it3 := newSimpleIterator([]string{"1"}, []string{"c1"}, false)
 	it4 := newSimpleIterator([]string{"1", "7", "9"}, []string{"d1", "d7", "d9"}, false)
-	mergeIt := NewMergeIterator([]Iterator{it, it2, it3, it4}, false)
+	mergeIt := NewMergeIterator([]Iterator{it, it2, it3, it4},  new(DefaultKeyComparator), false)
 	mergeIt.Seek([]byte("f"))
 	require.False(t, mergeIt.Valid())
 	closeAndCheck(t, mergeIt, 4)
@@ -227,7 +228,7 @@ func TestMergeIteratorSeekInvalidReversed(t *testing.T) {
 	it2 := newSimpleIterator([]string{"2", "3", "5"}, []string{"b2", "b3", "b5"}, true)
 	it3 := newSimpleIterator([]string{"1"}, []string{"c1"}, true)
 	it4 := newSimpleIterator([]string{"1", "7", "9"}, []string{"d1", "d7", "d9"}, true)
-	mergeIt := NewMergeIterator([]Iterator{it, it2, it3, it4}, true)
+	mergeIt := NewMergeIterator([]Iterator{it, it2, it3, it4},  new(DefaultKeyComparator), true)
 	mergeIt.Seek([]byte("0"))
 	require.False(t, mergeIt.Valid())
 	closeAndCheck(t, mergeIt, 4)
