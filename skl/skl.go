@@ -75,10 +75,11 @@ type node struct {
 
 // Skiplist maps keys to values (in memory)
 type Skiplist struct {
-	height int32 // Current height. 1 <= height <= kMaxHeight. CAS.
-	head   *node
-	ref    int32
-	arena  *Arena
+	height        int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	head          *node
+	ref           int32
+	arena         *Arena
+	keyComparator y.KeyComparator
 }
 
 // IncrRef increases the refcount
@@ -123,14 +124,15 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint16) {
 }
 
 // NewSkiplist makes a new empty skiplist, with a given arena size
-func NewSkiplist(arenaSize int64) *Skiplist {
+func NewSkiplist(arenaSize int64, comp y.KeyComparator) *Skiplist {
 	arena := newArena(arenaSize)
 	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
 	return &Skiplist{
-		height: 1,
-		head:   head,
-		arena:  arena,
-		ref:    1,
+		height:        1,
+		head:          head,
+		arena:         arena,
+		ref:           1,
+		keyComparator: comp,
 	}
 }
 
@@ -207,7 +209,7 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 		}
 
 		nextKey := next.key(s.arena)
-		cmp := y.CompareKeys(key, nextKey)
+		cmp := s.keyComparator.CompareKeys(key, nextKey)
 		if cmp > 0 {
 			// x.key < next.key < key. We can continue to move right.
 			x = next
@@ -262,7 +264,7 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 			return before, next
 		}
 		nextKey := next.key(s.arena)
-		cmp := y.CompareKeys(key, nextKey)
+		cmp := s.keyComparator.CompareKeys(key, nextKey)
 		if cmp == 0 {
 			// Equality case.
 			return next, next

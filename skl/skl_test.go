@@ -50,7 +50,7 @@ func length(s *Skiplist) int {
 
 func TestEmpty(t *testing.T) {
 	key := []byte("aaa")
-	l := NewSkiplist(arenaSize)
+	l := NewSkiplist(arenaSize, new(y.DefaultKeyComparator))
 
 	v := l.Get(key)
 	require.True(t, v.Value == nil) // Cannot use require.Nil for unsafe.Pointer nil.
@@ -84,7 +84,7 @@ func TestEmpty(t *testing.T) {
 
 // TestBasic tests single-threaded inserts and updates and gets.
 func TestBasic(t *testing.T) {
-	l := NewSkiplist(arenaSize)
+	l := NewSkiplist(arenaSize, new(y.DefaultKeyComparator))
 	val1 := newValue(42)
 	val2 := newValue(52)
 	val3 := newValue(62)
@@ -122,7 +122,7 @@ func TestBasic(t *testing.T) {
 // TestConcurrentBasic tests concurrent writes followed by concurrent reads.
 func TestConcurrentBasic(t *testing.T) {
 	const n = 1000
-	l := NewSkiplist(arenaSize)
+	l := NewSkiplist(arenaSize, new(y.DefaultKeyComparator))
 	var wg sync.WaitGroup
 	key := func(i int) []byte {
 		return y.KeyWithTs([]byte(fmt.Sprintf("%05d", i)), 0)
@@ -154,7 +154,7 @@ func TestConcurrentBasic(t *testing.T) {
 func TestOneKey(t *testing.T) {
 	const n = 100
 	key := y.KeyWithTs([]byte("thekey"), 0)
-	l := NewSkiplist(arenaSize)
+	l := NewSkiplist(arenaSize, new(y.DefaultKeyComparator))
 	defer l.DecrRef()
 
 	var wg sync.WaitGroup
@@ -187,7 +187,7 @@ func TestOneKey(t *testing.T) {
 }
 
 func TestFindNear(t *testing.T) {
-	l := NewSkiplist(arenaSize)
+	l := NewSkiplist(arenaSize, new(y.DefaultKeyComparator))
 	defer l.DecrRef()
 	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("%05d", i*10+5)
@@ -294,7 +294,7 @@ func TestFindNear(t *testing.T) {
 // TestIteratorNext tests a basic iteration over all nodes from the beginning.
 func TestIteratorNext(t *testing.T) {
 	const n = 100
-	l := NewSkiplist(arenaSize)
+	l := NewSkiplist(arenaSize, new(y.DefaultKeyComparator))
 	defer l.DecrRef()
 	it := l.NewIterator()
 	defer it.Close()
@@ -318,7 +318,7 @@ func TestIteratorNext(t *testing.T) {
 // TestIteratorPrev tests a basic iteration over all nodes from the end.
 func TestIteratorPrev(t *testing.T) {
 	const n = 100
-	l := NewSkiplist(arenaSize)
+	l := NewSkiplist(arenaSize, new(y.DefaultKeyComparator))
 	defer l.DecrRef()
 	it := l.NewIterator()
 	defer it.Close()
@@ -342,7 +342,7 @@ func TestIteratorPrev(t *testing.T) {
 // TestIteratorSeek tests Seek and SeekForPrev.
 func TestIteratorSeek(t *testing.T) {
 	const n = 100
-	l := NewSkiplist(arenaSize)
+	l := NewSkiplist(arenaSize, new(y.DefaultKeyComparator))
 	defer l.DecrRef()
 
 	it := l.NewIterator()
@@ -421,7 +421,7 @@ func BenchmarkReadWrite(b *testing.B) {
 	for i := 0; i <= 10; i++ {
 		readFrac := float32(i) / 10.0
 		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
-			l := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
+			l := NewSkiplist(int64((b.N + 1) * MaxNodeSize), new(y.DefaultKeyComparator))
 			defer l.DecrRef()
 			b.ResetTimer()
 			var count int
