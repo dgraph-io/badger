@@ -15,13 +15,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var benchCmd = &cobra.Command{
+	Use:   "benchmark",
+	Short: "Benchmark Badger database.",
+	Long: `This command will benchmark Badger for different usecases. Currently only read benchmark
+	is supported. Useful for testing and performance analysis.`,
+}
+
 var readBenchCmd = &cobra.Command{
-	Use:   "read_bench",
-	Short: "ReadBench reads data from Badger randomly to benchmark read speed.",
+	Use:   "read",
+	Short: "Read data from Badger randomly to benchmark read speed.",
 	Long: `
-This command reads data from existing Badger randomly using multiple go routines. Useful for
-testing and performance analysis.
-`,
+This command reads data from existing Badger database randomly using multiple go routines.`,
 	RunE: readBench,
 }
 
@@ -32,7 +37,8 @@ var sampleSize int
 var keysOnly bool
 
 func init() {
-	RootCmd.AddCommand(readBenchCmd)
+	RootCmd.AddCommand(benchCmd)
+	benchCmd.AddCommand(readBenchCmd)
 	readBenchCmd.Flags().IntVarP(
 		&numGoroutines, "goroutines", "g", 4, "Number of goroutines to run for reading.")
 	readBenchCmd.Flags().StringVarP(
@@ -80,7 +86,7 @@ func readBench(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("*********************************************************")
-	fmt.Println("Starting benchmarking Reads")
+	fmt.Println("Starting to benchmark Reads")
 	fmt.Println("*********************************************************")
 	c := y.NewCloser(0)
 	startTime = time.Now()
@@ -179,6 +185,9 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream.Send = func(list *pb.KVList) error {
+		if count >= sampleSize {
+			return nil
+		}
 		for _, kv := range list.Kv {
 			keys = append(keys, kv.Key)
 			count++
