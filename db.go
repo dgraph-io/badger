@@ -192,8 +192,7 @@ func Open(opt Options) (db *DB, err error) {
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
-	// TODO:(Ashish): what should be max size for opt.ValueThreshold
-	if opt.ValueThreshold > math.MaxUint32-100 {
+	if opt.ValueThreshold > math.MaxUint16-16 {
 		return nil, ErrValueThreshold
 	}
 

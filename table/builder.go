@@ -36,26 +36,26 @@ func newBuffer(sz int) *bytes.Buffer {
 type header struct {
 	plen uint16 // Overlap with base key.
 	klen uint16 // Length of the diff.
-	vlen uint32 // Length of value.
+	vlen uint16 // Length of value.
 }
 
 // Encode encodes the header.
 func (h header) Encode(b []byte) {
 	binary.BigEndian.PutUint16(b[0:2], h.plen)
 	binary.BigEndian.PutUint16(b[2:4], h.klen)
-	binary.BigEndian.PutUint32(b[4:8], h.vlen)
+	binary.BigEndian.PutUint16(b[4:6], h.vlen)
 }
 
 // Decode decodes the header.
 func (h *header) Decode(buf []byte) int {
 	h.plen = binary.BigEndian.Uint16(buf[0:2])
 	h.klen = binary.BigEndian.Uint16(buf[2:4])
-	h.vlen = binary.BigEndian.Uint32(buf[4:8])
+	h.vlen = binary.BigEndian.Uint16(buf[4:6])
 	return h.Size()
 }
 
 // Size returns size of the header. Currently it's just a constant.
-func (h header) Size() int { return 8 }
+func (h header) Size() int { return 6 }
 
 // Builder is used in building a table.
 type Builder struct {
@@ -127,14 +127,14 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	h := header{
 		plen: uint16(len(key) - len(diffKey)),
 		klen: uint16(len(diffKey)),
-		vlen: uint32(v.EncodedSize()),
+		vlen: uint16(v.EncodedSize()),
 	}
 
 	// store current entry's offset
 	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len())-b.baseOffset)
 
 	// Layout: header, diffKey, value.
-	var hbuf [8]byte
+	var hbuf [6]byte
 	h.Encode(hbuf[:])
 	b.buf.Write(hbuf[:])
 	b.buf.Write(diffKey) // We only need to store the key difference.
@@ -188,7 +188,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	// we should include current entry also in size, thats why +1 to len(b.entryOffsets)
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 + 4 /*size of list*/ +
 		8 /*Sum64 in checksum proto*/ + 4 /*checksum length*/)
-	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(8 /*header size for entry*/) +
+	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 
 	return estimatedSize > b.blockSize

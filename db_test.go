@@ -1446,7 +1446,7 @@ func TestLSMOnly(t *testing.T) {
 	dopts := DefaultOptions
 	require.NotEqual(t, dopts.ValueThreshold, opts.ValueThreshold)
 
-	dopts.ValueThreshold = 1 << 32
+	dopts.ValueThreshold = 1 << 16
 	_, err = Open(dopts)
 	require.Equal(t, ErrValueThreshold, err)
 
