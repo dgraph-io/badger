@@ -80,7 +80,7 @@ func NewTableBuilder() *Builder {
 		buf:        newBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
 
-		// TODO: make this configurable
+		// TODO(Ashish): make this configurable
 		blockSize: 4 * 1024,
 	}
 }
@@ -142,6 +142,17 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	v.EncodeTo(b.buf)
 }
 
+/*
+Structure of Block.
++-------------------+-------------------+--------------------+--------------+------------------+
+| Entry1            | Entry2            | Entry3             | Entry4       | Entry5           |
++-------------------+-------------------+--------------------+--------------+------------------+
+| Entry6            | ...               | ...                | ...          | EntryN           |
++-------------------+-------------------+--------------------+--------------+------------------+
+| Block Meta(contains list of offsets used| Block Meta Size  | Block        | Checksum Size    |
+| to perform binary search in the block)  | (4 Bytes)        | Checksum     | (4 Bytes)        |
++-----------------------------------------+------------------+--------------+------------------+
+*/
 func (b *Builder) finishBlock() {
 	meta := &pb.BlockMeta{
 		EntryOffsets: b.entryOffsets, // store offsets for all entries as block index
@@ -151,22 +162,13 @@ func (b *Builder) finishBlock() {
 	n, err := b.buf.Write(mo)
 	y.Check(err)
 	y.AssertTrue(n == len(mo))
-	b.buf.Write(y.BytesForUint32(uint32(n))) // also write size of block index
+	b.buf.Write(y.BytesForUint32(uint32(n))) // also write size of block meta
 
 	blockBuf := b.buf.Bytes()[b.baseOffset:] // store checksum for current block
-	// TODO: Add checksum algo in builder options.
-	cs := &pb.Checksum{
-		Algo:  pb.Checksum_CRC32C,
-		Sum64: y.CalculateChecksum(blockBuf, pb.Checksum_CRC32C),
-	}
-	csm, err := cs.Marshal()
-	y.Check(err)
-	n, err = b.buf.Write(csm)
-	y.Check(err)
-	b.buf.Write(y.BytesForUint32(uint32(n))) // also write size of block checksum
+	b.writeChecksum(blockBuf)
 
-	// TODO: If we want to make block as multiple of pages, we can implement padding.
-	// This might be useful while using direct io.
+	// TODO(Ashish): If we want to make block as multiple of pages, we can implement padding.
+	// This might be useful while using direct I/O.
 
 	// Add key to the block index
 	bo := &pb.BlockOffset{
@@ -183,11 +185,11 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		return false
 	}
 
-	// have to include current entry also in size, thats why +1 len of blockEntryOffsets
+	// we should include current entry also in size, thats why +1 to len(b.entryOffsets)
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 + 4 /*size of list*/ +
-		8 /*Sum64 in checksum proto*/)
+		8 /*Sum64 in checksum proto*/ + 4 /*checksum length*/)
 	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(8 /*header size for entry*/) +
-		uint32(value.EncodedSize()) + entriesOffsetsSize
+		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 
 	return estimatedSize > b.blockSize
 }
@@ -212,7 +214,8 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	blocksSize := b.buf.Len() + len(b.entryOffsets)*4 + 4 /*length of block meta*/ + 8 /*checksum*/
+	blocksSize := b.buf.Len() + len(b.entryOffsets)*4 + 4 /*length of block meta*/ +
+		8 /*checksum*/ + 4 /*checksum length*/
 	estimateSz := blocksSize + 4 /* Index length */ +
 		5*(len(b.tableIndex.Offsets)) /* approximate index size */
 
@@ -286,8 +289,6 @@ func (b *Builder) writeChecksum(data []byte) {
 
 	y.AssertTrue(n < math.MaxUint32)
 	// Write checksum size
-	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], uint32(n))
-	_, err = b.buf.Write(buf[:])
+	_, err = b.buf.Write(y.BytesForUint32(uint32(n)))
 	y.Check(err)
 }

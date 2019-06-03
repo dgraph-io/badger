@@ -111,7 +111,7 @@ func (b block) VerifyCheckSum() error {
 
 	cs := pb.Checksum{}
 	if err := cs.Unmarshal(b.data[readPos : readPos+csSize]); err != nil {
-		return y.Wrapf(err, "unable to unmarshal checksum")
+		return y.Wrapf(err, "unable to unmarshal checksum for block")
 	}
 
 	return y.VerifyChecksum(b.data[:readPos], cs)
@@ -124,10 +124,10 @@ func (b block) NewIterator() *blockIterator {
 	readPos := len(b.data) - 4
 	csSize := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
 
-	readPos -= (csSize + 4) // skip reading checksum, and move position to block index length
+	readPos -= (csSize + 4) // skip reading checksum, and move position to block meta length
 	metaSize := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
 
-	// read while meta
+	// read block meta
 	readPos -= metaSize
 	bm := &pb.BlockMeta{}
 	err := bm.Unmarshal(bi.data[readPos : readPos+metaSize])

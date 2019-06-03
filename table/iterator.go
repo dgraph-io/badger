@@ -79,12 +79,8 @@ func (itr *blockIterator) getKeyAtIndex(idx int) []byte {
 	var h header
 	idxPos += uint32(h.Decode(itr.data[idxPos:]))
 
-	var idxKey []byte
-	if cap(idxKey) < int(h.plen+h.klen) {
-		sz := int(h.plen) + int(h.klen) // Convert to int before adding to avoid uint16 overflow.
-		idxKey = make([]byte, 2*sz)
-	}
-	idxKey = idxKey[:h.plen+h.klen]
+	// Convert to int before adding to avoid uint16 overflow.
+	idxKey := make([]byte, int(h.plen)+int(h.klen))
 	copy(idxKey, itr.baseKey[:h.plen])
 	copy(idxKey[h.plen:], itr.data[idxPos:idxPos+uint32(h.klen)])
 
