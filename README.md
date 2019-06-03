@@ -377,7 +377,7 @@ metadata can be set using `Entry.WithMeta()` and `Txn.SetEntry()` API methods.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(0))
+  e := NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1))
   err := txn.SetEntry(e)
   return err
 })
@@ -385,6 +385,14 @@ err := db.Update(func(txn *badger.Txn) error {
 
 `Entry` APIs can be used to add the user metadata and TTL for same key. This `Entry`
 then can be set using `Txn.SetEntry()`.
+
+```go
+err := db.Update(func(txn *badger.Txn) error {
+  e := NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1)).WithTTL(time.Hour)
+  err := txn.SetEntry(e)
+  return err
+})
+```
 
 ### Iterating over keys
 To iterate over keys, we can use an `Iterator`, which can be obtained using the
