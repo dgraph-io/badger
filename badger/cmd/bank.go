@@ -535,6 +535,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var subWg sync.WaitGroup
 	if checkSubscriber {
 		subWg.Add(1)
@@ -555,18 +556,23 @@ func runTest(cmd *cobra.Command, args []string) error {
 			db.Subscribe(ctx, updater, accountIDS[0], accountIDS[1:]...)
 		}()
 	}
+
 	wg.Wait()
-	cancel()
-	subWg.Wait()
-	y.Check(subscribeDB.View(func(txn *badger.Txn) error {
-		_, err := seekTotal(txn)
-		if err != nil {
-			log.Printf("Error while calculating subscriber DB total: %v", err)
-		} else {
-			atomic.AddUint64(&reads, 1)
-		}
-		return nil
-	}))
+
+	if checkSubscriber {
+		cancel()
+		subWg.Wait()
+		y.Check(subscribeDB.View(func(txn *badger.Txn) error {
+			_, err := seekTotal(txn)
+			if err != nil {
+				log.Printf("Error while calculating subscriber DB total: %v", err)
+			} else {
+				atomic.AddUint64(&reads, 1)
+			}
+			return nil
+		}))
+	}
+
 	if atomic.LoadInt32(&stopAll) == 0 {
 		log.Println("Test OK")
 		return nil
