@@ -452,7 +452,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 			txn = db.NewTransaction(true)
 		}
 	}
-	require.NoError(t, txn.Commit(), "error while commiting txn")
+	require.NoError(t, txn.Commit(), "error while committing txn")
 
 	for i := 0; i < 500; i++ {
 		// use SetWithDiscard to delete entries, because this causes data to be flushed on disk,
@@ -934,4 +934,52 @@ func BenchmarkReadWrite(b *testing.B) {
 			})
 		}
 	}
+}
+
+// Regression test for https://github.com/dgraph-io/badger/issues/817
+func TestValueLogTruncate(t *testing.T) {
+	dir, err := ioutil.TempDir(".", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	opts := DefaultOptions
+	opts.Dir = dir
+	opts.ValueDir = dir
+	opts.Truncate = true
+
+	db, err := Open(opts)
+	require.NoError(t, err)
+	// Insert 1 entry so that we have valid data in first vlog file
+	require.NoError(t, db.Update(func(txn *Txn) error {
+		return txn.Set([]byte("foo"), nil)
+	}))
+
+	fileCountBeforeCorruption := len(db.vlog.filesMap)
+
+	require.NoError(t, db.Close())
+
+	// Create two vlog files corrupted data. These will be truncated when DB starts next time
+	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), []byte("foo"), 0664))
+	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 2), []byte("foo"), 0664))
+
+	db, err = Open(opts)
+	require.NoError(t, err)
+
+	// Ensure vlog file with id=1 is not present
+	require.Nil(t, db.vlog.filesMap[1])
+
+	// Ensure filesize of fid=2 is zero
+	zeroFile, ok := db.vlog.filesMap[2]
+	require.True(t, ok)
+	fileStat, err := zeroFile.fd.Stat()
+	require.NoError(t, err)
+	require.Zero(t, fileStat.Size())
+
+	fileCountAfterCorruption := len(db.vlog.filesMap)
+	// +1 because the file with id=2 will be completely truncated. It won't be deleted.
+	// There would be two files. fid=0 with valid data, fid=2 with zero data (truncated).
+	require.Equal(t, fileCountBeforeCorruption+1, fileCountAfterCorruption)
+	// Max file ID would point to the last vlog file, which is fid=2 in this case
+	require.Equal(t, 2, int(db.vlog.maxFid))
+	require.NoError(t, db.Close())
 }

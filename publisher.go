@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package badger
 
 import (
@@ -80,6 +81,9 @@ func (p *publisher) publishUpdates(reqs requests) {
 		reqs.DecrRef()
 	}()
 
+
+	kvs := &pb.KVList{}
+	/*
 	// the trie maps a prefix to a list of subscribers
 	t := trie.New()
 	for _, s := range p.subscribers {
@@ -96,12 +100,11 @@ func (p *publisher) publishUpdates(reqs requests) {
 		}
 	}
 
-	kvs := &pb.KVList{}
 	for _, req := range reqs {
 		for _, e := range req.Entries {
 		}
 	}
-
+	 */
 
 	// TODO: Optimize this, so we can figure out key -> subscriber quickly, without iterating over
 	// all the prefixes.
