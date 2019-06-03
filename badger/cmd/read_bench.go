@@ -19,7 +19,7 @@ var readBenchCmd = &cobra.Command{
 	Use:   "read_bench",
 	Short: "ReadBench reads data from Badger randomly to benchmark read speed.",
 	Long: `
-This command would read data from existing Badger randomly using multiple go routines. Useful for 
+This command reads data from existing Badger randomly using multiple go routines. Useful for
 testing and performance analysis.
 `,
 	RunE: readBench,
@@ -111,15 +111,13 @@ func spawnReporter(c *y.Closer) {
 		case <-t.C:
 			dur := time.Since(startTime)
 			durSec := dur.Seconds()
-			if int(durSec) > 0 {
-				sz := atomic.LoadUint64(&sizeRead)
-				entries := atomic.LoadUint64(&entriesRead)
-				bytesRate := sz / uint64(durSec)
-				entriesRate := entries / uint64(durSec)
-				fmt.Printf("Time elapsed: %s, bytes read: %s, speed: %s/sec, "+
-					"entries read: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
-					humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
-			}
+			sz := atomic.LoadUint64(&sizeRead)
+			entries := atomic.LoadUint64(&entriesRead)
+			bytesRate := sz / uint64(durSec)
+			entriesRate := entries / uint64(durSec)
+			fmt.Printf("Time elapsed: %s, bytes read: %s, speed: %s/sec, "+
+				"entries read: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
+				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
 		}
 	}
 }
@@ -145,10 +143,10 @@ func lookupForKey(db *badger.DB, key []byte) (sz uint64) {
 		y.Check(err)
 
 		if keysOnly {
+			sz = uint64(itm.KeySize())
+		} else {
 			y.Check2(itm.ValueCopy(nil))
 			sz = uint64(itm.EstimatedSize())
-		} else {
-			sz = uint64(itm.KeySize())
 		}
 
 		return nil
@@ -162,6 +160,21 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 	var keys [][]byte
 	count := 0
 	stream := db.NewStream()
+
+	// overide stream.KeyToList as we only want keys. Also
+	// we can take only first version for the key.
+	stream.KeyToList = func(key []byte, itr *badger.Iterator) (*pb.KVList, error) {
+		list := &pb.KVList{}
+		if !itr.Valid() {
+			return list, nil
+		}
+		item := itr.Item()
+		kv := &pb.KV{
+			Key: item.KeyCopy(nil),
+		}
+		list.Kv = append(list.Kv, kv)
+		return list, nil
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -177,10 +190,8 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 		return nil
 	}
 
-	if err := stream.Orchestrate(ctx); err != nil {
-		if err != context.Canceled {
-			return nil, err
-		}
+	if err := stream.Orchestrate(ctx); err != nil && err != context.Canceled {
+		return nil, err
 	}
 
 	return keys, nil
