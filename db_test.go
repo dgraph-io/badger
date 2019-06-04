@@ -87,7 +87,7 @@ func getItemValue(t *testing.T, item *Item) (val []byte) {
 
 func txnSet(t *testing.T, kv *DB, key []byte, val []byte, meta byte) {
 	txn := kv.NewTransaction(true)
-	require.NoError(t, txn.SetWithMeta(key, val, meta))
+	require.NoError(t, txn.SetEntry(NewEntry(key, val).WithMeta(meta)))
 	require.NoError(t, txn.Commit())
 }
 
@@ -127,8 +127,8 @@ func TestUpdateAndView(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		err := db.Update(func(txn *Txn) error {
 			for i := 0; i < 10; i++ {
-				err := txn.Set([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)))
-				if err != nil {
+				entry := NewEntry([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)))
+				if err := txn.SetEntry(entry); err != nil {
 					return err
 				}
 			}
@@ -281,7 +281,7 @@ func TestTxnTooBig(t *testing.T) {
 		n := 1000
 		txn := db.NewTransaction(true)
 		for i := 0; i < n; {
-			if err := txn.Set(data(i), data(i)); err != nil {
+			if err := txn.SetEntry(NewEntry(data(i), data(i))); err != nil {
 				require.NoError(t, txn.Commit())
 				txn = db.NewTransaction(true)
 			} else {
@@ -325,7 +325,7 @@ func TestForceCompactL0(t *testing.T) {
 		version := uint64(i)
 		txn := db.NewTransactionAt(version, true)
 		for j := 0; j < m; j++ {
-			require.NoError(t, txn.Set(data(j), v))
+			require.NoError(t, txn.SetEntry(NewEntry(data(j), v)))
 		}
 		require.NoError(t, txn.CommitAt(version+1, nil))
 	}
@@ -352,7 +352,7 @@ func TestGetMore(t *testing.T) {
 		for i := 0; i < n; i += m {
 			txn := db.NewTransaction(true)
 			for j := i; j < i+m && j < n; j++ {
-				require.NoError(t, txn.Set(data(j), data(j)))
+				require.NoError(t, txn.SetEntry(NewEntry(data(j), data(j))))
 			}
 			require.NoError(t, txn.Commit())
 		}
@@ -372,9 +372,9 @@ func TestGetMore(t *testing.T) {
 		for i := 0; i < n; i += m {
 			txn := db.NewTransaction(true)
 			for j := i; j < i+m && j < n; j++ {
-				require.NoError(t, txn.Set(data(j),
+				require.NoError(t, txn.SetEntry(NewEntry(data(j),
 					// Use a long value that will certainly exceed value threshold.
-					[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", j))))
+					[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", j)))))
 			}
 			require.NoError(t, txn.Commit())
 		}
@@ -451,8 +451,8 @@ func TestExistsMore(t *testing.T) {
 			}
 			txn := db.NewTransaction(true)
 			for j := i; j < i+m && j < n; j++ {
-				require.NoError(t, txn.Set([]byte(fmt.Sprintf("%09d", j)),
-					[]byte(fmt.Sprintf("%09d", j))))
+				require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("%09d", j)),
+					[]byte(fmt.Sprintf("%09d", j)))))
 			}
 			require.NoError(t, txn.Commit())
 		}
@@ -705,7 +705,7 @@ func TestIterateParallel(t *testing.T) {
 		for i := 0; i < N; i++ {
 			wg.Add(1)
 			txn := db.NewTransaction(true)
-			require.NoError(t, txn.Set(key(i), []byte("1000")))
+			require.NoError(t, txn.SetEntry(NewEntry(key(i), []byte("1000"))))
 			txns = append(txns, txn)
 		}
 		for _, txn := range txns {
@@ -784,13 +784,13 @@ func TestPidFile(t *testing.T) {
 func TestInvalidKey(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		err := db.Update(func(txn *Txn) error {
-			err := txn.Set([]byte("!badger!head"), nil)
+			err := txn.SetEntry(NewEntry([]byte("!badger!head"), nil))
 			require.Equal(t, ErrInvalidKey, err)
 
-			err = txn.Set([]byte("!badger!"), nil)
+			err = txn.SetEntry(NewEntry([]byte("!badger!"), nil))
 			require.Equal(t, ErrInvalidKey, err)
 
-			err = txn.Set([]byte("!badger"), []byte("BadgerDB"))
+			err = txn.SetEntry(NewEntry([]byte("!badger"), []byte("BadgerDB")))
 			require.NoError(t, err)
 			return err
 		})
@@ -874,7 +874,7 @@ func TestSetIfAbsentAsync(t *testing.T) {
 		txn := kv.NewTransaction(true)
 		_, err = txn.Get(bkey(i))
 		require.Equal(t, ErrKeyNotFound, err)
-		require.NoError(t, txn.SetWithMeta(bkey(i), nil, byte(i%127)))
+		require.NoError(t, txn.SetEntry(NewEntry(bkey(i), nil).WithMeta(byte(i%127))))
 		txn.CommitWith(f)
 	}
 
@@ -950,7 +950,7 @@ func TestDiscardVersionsBelow(t *testing.T) {
 		// Write 4 versions of the same key
 		for i := 0; i < 4; i++ {
 			err := db.Update(func(txn *Txn) error {
-				return txn.Set([]byte("answer"), []byte(fmt.Sprintf("%d", i)))
+				return txn.SetEntry(NewEntry([]byte("answer"), []byte(fmt.Sprintf("%d", i))))
 			})
 			require.NoError(t, err)
 		}
@@ -978,7 +978,7 @@ func TestDiscardVersionsBelow(t *testing.T) {
 
 		// Set new version and discard older ones.
 		err := db.Update(func(txn *Txn) error {
-			return txn.SetWithDiscard([]byte("answer"), []byte("5"), 0)
+			return txn.SetEntry(NewEntry([]byte("answer"), []byte("5")).WithDiscard())
 		})
 		require.NoError(t, err)
 
@@ -1006,12 +1006,12 @@ func TestExpiry(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// Write two keys, one with a TTL
 		err := db.Update(func(txn *Txn) error {
-			return txn.Set([]byte("answer1"), []byte("42"))
+			return txn.SetEntry(NewEntry([]byte("answer1"), []byte("42")))
 		})
 		require.NoError(t, err)
 
 		err = db.Update(func(txn *Txn) error {
-			return txn.SetWithTTL([]byte("answer2"), []byte("43"), 1*time.Second)
+			return txn.SetEntry(NewEntry([]byte("answer2"), []byte("43")).WithTTL(1 * time.Second))
 		})
 		require.NoError(t, err)
 
@@ -1060,7 +1060,7 @@ func TestExpiryImproperDBClose(t *testing.T) {
 	dur := 1 * time.Hour
 	expiryTime := uint64(time.Now().Add(dur).Unix())
 	err = db0.Update(func(txn *Txn) error {
-		err = txn.SetWithTTL([]byte("test_key"), []byte("test_value"), dur)
+		err = txn.SetEntry(NewEntry([]byte("test_key"), []byte("test_value")).WithTTL(dur))
 		require.NoError(t, err)
 		return nil
 	})
@@ -1098,14 +1098,15 @@ func randBytes(n int) []byte {
 
 var benchmarkData = []struct {
 	key, value []byte
+	success    bool // represent if KV should be inserted successfully or not
 }{
-	{randBytes(100), nil},
-	{randBytes(1000), []byte("foo")},
-	{[]byte("foo"), randBytes(1000)},
-	{[]byte(""), randBytes(1000)},
-	{nil, randBytes(1000000)},
-	{randBytes(100000), nil},
-	{randBytes(1000000), nil},
+	{randBytes(100), nil, true},
+	{randBytes(1000), []byte("foo"), true},
+	{[]byte("foo"), randBytes(1000), true},
+	{[]byte(""), randBytes(1000), false},
+	{nil, randBytes(1000000), false},
+	{randBytes(100000), nil, false},
+	{randBytes(1000000), nil, false},
 }
 
 func TestLargeKeys(t *testing.T) {
@@ -1131,8 +1132,13 @@ func TestLargeKeys(t *testing.T) {
 
 			v := make([]byte, len(kv.value))
 			copy(v, kv.value)
-			if err := tx.Set(k, v); err != nil {
-				// Skip over this record.
+			if err := tx.SetEntry(NewEntry(k, v)); err != nil {
+				// check is success should be true
+				if kv.success {
+					t.Fatalf("failed with: %s", err)
+				}
+			} else if !kv.success {
+				t.Fatal("insertion should fail")
 			}
 		}
 		if err := tx.Commit(); err != nil {
@@ -1175,7 +1181,7 @@ func TestGetSetDeadlock(t *testing.T) {
 	key := []byte("key1")
 	require.NoError(t, db.Update(func(txn *Txn) error {
 		rand.Read(val)
-		require.NoError(t, txn.Set(key, val))
+		require.NoError(t, txn.SetEntry(NewEntry(key, val)))
 		return nil
 	}))
 
@@ -1189,8 +1195,8 @@ func TestGetSetDeadlock(t *testing.T) {
 			require.NoError(t, err)
 
 			rand.Read(val)
-			require.NoError(t, txn.Set(key, val))
-			require.NoError(t, txn.Set([]byte("key2"), val))
+			require.NoError(t, txn.SetEntry(NewEntry(key, val)))
+			require.NoError(t, txn.SetEntry(NewEntry([]byte("key2"), val)))
 			return nil
 		})
 		done <- true
@@ -1230,7 +1236,7 @@ func TestWriteDeadlock(t *testing.T) {
 		for i := 0; i < 1500; i++ {
 			key := fmt.Sprintf("%d", i)
 			rand.Read(val)
-			require.NoError(t, txn.Set([]byte(key), val))
+			require.NoError(t, txn.SetEntry(NewEntry([]byte(key), val)))
 			print(&count)
 		}
 		return nil
@@ -1254,7 +1260,7 @@ func TestWriteDeadlock(t *testing.T) {
 
 			key := y.Copy(item.Key())
 			rand.Read(val)
-			require.NoError(t, txn.Set(key, val))
+			require.NoError(t, txn.SetEntry(NewEntry(key, val)))
 			print(&count)
 		}
 		return nil
@@ -1421,7 +1427,7 @@ func TestReadOnly(t *testing.T) {
 
 	// Attempt to set a value on a read-only connection
 	txn := kv1.NewTransaction(true)
-	err = txn.SetWithMeta([]byte("key"), []byte("value"), 0x00)
+	err = txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "No sets or deletes are allowed in a read-only transaction")
 	err = txn.Commit()
@@ -1473,7 +1479,7 @@ func TestMinReadTs(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		for i := 0; i < 10; i++ {
 			require.NoError(t, db.Update(func(txn *Txn) error {
-				return txn.Set([]byte("x"), []byte("y"))
+				return txn.SetEntry(NewEntry([]byte("x"), []byte("y")))
 			}))
 		}
 		time.Sleep(time.Millisecond)
@@ -1487,7 +1493,7 @@ func TestMinReadTs(t *testing.T) {
 		readTxn := db.NewTransaction(false)
 		for i := 0; i < 10; i++ {
 			require.NoError(t, db.Update(func(txn *Txn) error {
-				return txn.Set([]byte("x"), []byte("y"))
+				return txn.SetEntry(NewEntry([]byte("x"), []byte("y")))
 			}))
 		}
 		require.Equal(t, uint64(20), db.orc.readTs())
@@ -1535,7 +1541,7 @@ func TestGoroutineLeak(t *testing.T) {
 			}()
 			subWg.Wait()
 			err := db.Update(func(txn *Txn) error {
-				return txn.Set([]byte("key"), []byte("value"))
+				return txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
 			})
 			require.NoError(t, err)
 			wg.Wait()
@@ -1573,7 +1579,7 @@ func ExampleOpen() {
 	}
 
 	txn := db.NewTransaction(true) // Read-write txn
-	err = txn.Set([]byte("key"), []byte("value"))
+	err = txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1633,7 +1639,7 @@ func ExampleTxn_NewIterator() {
 	// Fill in 1000 items
 	n := 1000
 	for i := 0; i < n; i++ {
-		err := txn.Set(bkey(i), bval(i))
+		err := txn.SetEntry(NewEntry(bkey(i), bval(i)))
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -1703,7 +1709,7 @@ func TestSyncForRace(t *testing.T) {
 	rand.Read(v[:rand.Intn(sz)])
 	txn := db.NewTransaction(true)
 	for i := 0; i < 10000; i++ {
-		require.NoError(t, txn.Set([]byte(fmt.Sprintf("key%d", i)), v))
+		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
 		if i%3 == 0 {
 			require.NoError(t, txn.Commit())
 			txn = db.NewTransaction(true)
@@ -1733,7 +1739,8 @@ func TestNoCrash(t *testing.T) {
 	// entering 100 entries will generate 100 vlog files
 	for i := 0; i < 100; i++ {
 		err := db.Update(func(txn *Txn) error {
-			return txn.Set([]byte(fmt.Sprintf("key-%d", i)), []byte(fmt.Sprintf("val-%d", i)))
+			entry := NewEntry([]byte(fmt.Sprintf("key-%d", i)), []byte(fmt.Sprintf("val-%d", i)))
+			return txn.SetEntry(entry)
 		})
 		require.NoError(t, err, "update to db failed")
 	}
@@ -1765,7 +1772,8 @@ func TestForceFlushMemtable(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		err = db.Update(func(txn *Txn) error {
-			return txn.Set([]byte(fmt.Sprintf("key-%d", i)), []byte(fmt.Sprintf("value-%d", i)))
+			return txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key-%d", i)),
+				[]byte(fmt.Sprintf("value-%d", i))))
 		})
 		require.NoError(t, err, "unable to set key and value")
 	}
@@ -1786,6 +1794,7 @@ func TestForceFlushMemtable(t *testing.T) {
 	// get latest value of value log head
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	vs, err := db.get(headKey)
+	require.NoError(t, err)
 	var vptr valuePointer
 	vptr.Decode(vs.Value)
 	// Since we are inserting 3 entries and ValueLogMaxEntries is 1, there will be 3 rotation. For

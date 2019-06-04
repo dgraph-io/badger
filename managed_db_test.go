@@ -72,7 +72,7 @@ func TestDropAllManaged(t *testing.T) {
 		for i := start; i < start+N; i++ {
 			wg.Add(1)
 			txn := db.NewTransactionAt(math.MaxUint64, true)
-			require.NoError(t, txn.Set([]byte(key("key", int(i))), val(true)))
+			require.NoError(t, txn.SetEntry(NewEntry([]byte(key("key", int(i))), val(true))))
 			require.NoError(t, txn.CommitAt(uint64(i), func(err error) {
 				require.NoError(t, err)
 				wg.Done()
@@ -284,7 +284,7 @@ func TestWriteAfterClose(t *testing.T) {
 	require.Equal(t, int(N), numKeys(db))
 	require.NoError(t, db.Close())
 	err = db.Update(func(txn *Txn) error {
-		return txn.Set([]byte("a"), []byte("b"))
+		return txn.SetEntry(NewEntry([]byte("a"), []byte("b")))
 	})
 	require.Equal(t, ErrBlockedWrites, err)
 }
@@ -313,7 +313,7 @@ func TestDropAllRace(t *testing.T) {
 			case <-ticker.C:
 				i++
 				txn := db.NewTransactionAt(math.MaxUint64, true)
-				require.NoError(t, txn.Set([]byte(key("key", i)), val(false)))
+				require.NoError(t, txn.SetEntry(NewEntry([]byte(key("key", i)), val(false))))
 				if err := txn.CommitAt(uint64(i), func(err error) {
 					if err != nil {
 						atomic.AddInt32(&errors, 1)
@@ -333,7 +333,7 @@ func TestDropAllRace(t *testing.T) {
 	for i := 1; i <= N; i++ {
 		wg.Add(1)
 		txn := db.NewTransactionAt(math.MaxUint64, true)
-		require.NoError(t, txn.Set([]byte(key("key", i)), val(false)))
+		require.NoError(t, txn.SetEntry(NewEntry([]byte(key("key", i)), val(false))))
 		require.NoError(t, txn.CommitAt(uint64(i), func(err error) {
 			require.NoError(t, err)
 			wg.Done()
@@ -529,7 +529,7 @@ func TestDropPrefixRace(t *testing.T) {
 			case <-ticker.C:
 				i++
 				txn := db.NewTransactionAt(math.MaxUint64, true)
-				require.NoError(t, txn.Set([]byte(key("key", i)), val(false)))
+				require.NoError(t, txn.SetEntry(NewEntry([]byte(key("key", i)), val(false))))
 				if err := txn.CommitAt(uint64(i), func(err error) {
 					if err != nil {
 						atomic.AddInt32(&errors, 1)
@@ -549,7 +549,7 @@ func TestDropPrefixRace(t *testing.T) {
 	for i := 1; i <= N; i++ {
 		wg.Add(1)
 		txn := db.NewTransactionAt(math.MaxUint64, true)
-		require.NoError(t, txn.Set([]byte(key("key", i)), val(false)))
+		require.NoError(t, txn.SetEntry(NewEntry([]byte(key("key", i)), val(false))))
 		require.NoError(t, txn.CommitAt(uint64(i), func(err error) {
 			require.NoError(t, err)
 			wg.Done()

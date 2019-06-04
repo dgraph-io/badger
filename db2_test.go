@@ -54,7 +54,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 	require.NoError(t, err)
 
 	err = db.Update(func(txn *Txn) error {
-		return txn.Set(key(0), data(4055))
+		return txn.SetEntry(NewEntry(key(0), data(4055)))
 	})
 	require.NoError(t, err)
 
@@ -67,7 +67,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 	require.NoError(t, err)
 	for i := 0; i < 32; i++ {
 		err := db.Update(func(txn *Txn) error {
-			return txn.Set(key(i), data(10))
+			return txn.SetEntry(NewEntry(key(i), data(10)))
 		})
 		require.NoError(t, err)
 	}
@@ -128,7 +128,7 @@ func TestTruncateVlogNoClose(t *testing.T) {
 	}
 	data := fmt.Sprintf("%4055d", 1)
 	err = kv.Update(func(txn *Txn) error {
-		return txn.Set([]byte(key(0)), []byte(data))
+		return txn.SetEntry(NewEntry([]byte(key(0)), []byte(data)))
 	})
 	require.NoError(t, err)
 }
@@ -150,7 +150,7 @@ func TestTruncateVlogNoClose2(t *testing.T) {
 	data := fmt.Sprintf("%10d", 1)
 	for i := 32; i < 64; i++ {
 		err := kv.Update(func(txn *Txn) error {
-			return txn.Set([]byte(key(i)), []byte(data))
+			return txn.SetEntry(NewEntry([]byte(key(i)), []byte(data)))
 		})
 		require.NoError(t, err)
 	}
@@ -208,11 +208,12 @@ func TestBigKeyValuePairs(t *testing.T) {
 		small := make([]byte, 65000)
 
 		txn := db.NewTransaction(true)
-		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, small))
-		require.Regexp(t, regexp.MustCompile("Value.*exceeded"), txn.Set(small, bigV))
+		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.SetEntry(NewEntry(bigK, small)))
+		require.Regexp(t, regexp.MustCompile("Value.*exceeded"),
+			txn.SetEntry(NewEntry(small, bigV)))
 
-		require.NoError(t, txn.Set(small, small))
-		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.Set(bigK, bigV))
+		require.NoError(t, txn.SetEntry(NewEntry(small, small)))
+		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.SetEntry(NewEntry(bigK, bigV)))
 
 		require.NoError(t, db.View(func(txn *Txn) error {
 			_, err := txn.Get(small)
@@ -228,7 +229,7 @@ func TestBigKeyValuePairs(t *testing.T) {
 
 		saveByKey := func(key string, value []byte) error {
 			return db.Update(func(txn *Txn) error {
-				return txn.Set([]byte(key), value)
+				return txn.SetEntry(NewEntry([]byte(key), value))
 			})
 		}
 
@@ -300,12 +301,12 @@ func TestPushValueLogLimit(t *testing.T) {
 			if i == 4 {
 				v := make([]byte, 2<<30)
 				err := db.Update(func(txn *Txn) error {
-					return txn.Set([]byte(key(i)), v)
+					return txn.SetEntry(NewEntry([]byte(key(i)), v))
 				})
 				require.NoError(t, err)
 			} else {
 				err := db.Update(func(txn *Txn) error {
-					return txn.Set([]byte(key(i)), data)
+					return txn.SetEntry(NewEntry([]byte(key(i)), data))
 				})
 				require.NoError(t, err)
 			}

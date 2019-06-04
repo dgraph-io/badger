@@ -52,7 +52,7 @@ func TestBackupRestore1(t *testing.T) {
 
 	err = db.Update(func(txn *Txn) error {
 		e := entries[0]
-		err := txn.SetWithMeta(e.key, e.val, e.userMeta)
+		err := txn.SetEntry(NewEntry(e.key, e.val).WithMeta(e.userMeta))
 		if err != nil {
 			return err
 		}
@@ -62,7 +62,7 @@ func TestBackupRestore1(t *testing.T) {
 
 	err = db.Update(func(txn *Txn) error {
 		e := entries[1]
-		err := txn.SetWithMeta(e.key, e.val, e.userMeta)
+		err := txn.SetEntry(NewEntry(e.key, e.val).WithMeta(e.userMeta))
 		if err != nil {
 			return err
 		}
@@ -140,20 +140,20 @@ func TestBackupRestore2(t *testing.T) {
 	rawValue := []byte("NotLongValue")
 	N := byte(251)
 	err = db1.Update(func(tx *Txn) error {
-		if err := tx.Set(key1, rawValue); err != nil {
+		if err := tx.SetEntry(NewEntry(key1, rawValue)); err != nil {
 			return err
 		}
-		return tx.Set(key2, rawValue)
+		return tx.SetEntry(NewEntry(key2, rawValue))
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := byte(1); i < N; i++ {
 		err = db1.Update(func(tx *Txn) error {
-			if err := tx.Set(append(key1, i), rawValue); err != nil {
+			if err := tx.SetEntry(NewEntry(append(key1, i), rawValue)); err != nil {
 				return err
 			}
-			return tx.Set(append(key2, i), rawValue)
+			return tx.SetEntry(NewEntry(append(key2, i), rawValue))
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -204,10 +204,10 @@ func TestBackupRestore2(t *testing.T) {
 
 	for i := byte(1); i < N; i++ {
 		err = db2.Update(func(tx *Txn) error {
-			if err := tx.Set(append(key1, i), rawValue); err != nil {
+			if err := tx.SetEntry(NewEntry(append(key1, i), rawValue)); err != nil {
 				return err
 			}
-			return tx.Set(append(key2, i), rawValue)
+			return tx.SetEntry(NewEntry(append(key2, i), rawValue))
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -278,7 +278,7 @@ func populateEntries(db *DB, entries []*pb.KV) error {
 	return db.Update(func(txn *Txn) error {
 		var err error
 		for i, e := range entries {
-			if err = txn.Set(e.Key, e.Value); err != nil {
+			if err = txn.SetEntry(NewEntry(e.Key, e.Value)); err != nil {
 				return err
 			}
 			entries[i].Version = 1
@@ -445,8 +445,8 @@ func TestBackupLoadIncremental(t *testing.T) {
 		// pick 5 items to mark as expired.
 		err = db1.Update(func(txn *Txn) error {
 			for _, i := range (ints)[10:15] {
-				if err := txn.SetWithTTL(
-					entries[i].Key, entries[i].Value, -time.Hour); err != nil {
+				entry := NewEntry(entries[i].Key, entries[i].Value).WithTTL(-time.Hour)
+				if err := txn.SetEntry(entry); err != nil {
 					return err
 				}
 				updates[i] = bitDelete // expired
@@ -460,7 +460,8 @@ func TestBackupLoadIncremental(t *testing.T) {
 		// pick 5 items to mark as discard.
 		err = db1.Update(func(txn *Txn) error {
 			for _, i := range ints[15:20] {
-				if err := txn.SetWithDiscard(entries[i].Key, entries[i].Value, 0); err != nil {
+				entry := NewEntry(entries[i].Key, entries[i].Value).WithDiscard()
+				if err := txn.SetEntry(entry); err != nil {
 					return err
 				}
 				updates[i] = bitDiscardEarlierVersions
