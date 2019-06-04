@@ -1,26 +1,43 @@
-package trie_test
+package trie
 
 import (
-	"github.com/dgraph-io/badger/trie"
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-func TestTrie(t *testing.T) {
-	oneTrie := trie.New()
-	oneTrie.Add([]byte("f"), 1)
-	oneTrie.Add([]byte("foo"), 2)
-	oneTrie.Add([]byte("foob"), 3)
+func TestGet(t *testing.T) {
+	trie := NewTrie()
+	trie.Add([]byte("hello"), 1)
+	trie.Add([]byte("hello"), 3)
+	trie.Add([]byte("hello"), 4)
+	trie.Add([]byte("hel"), 20)
+	trie.Add([]byte("badger"), 30)
+	ids := trie.Get([]byte("hel"))
+	if len(ids) != 1 {
+		t.Errorf("expected number of ids 1 but got %d", len(ids))
+		return
+	}
+	require.Equal(t, ids[0], uint64(20))
+	ids = trie.Get([]byte("badger"))
+	if len(ids) != 1 {
+		t.Errorf("expected number of ids 1 but got %d", len(ids))
+		return
+	}
+	require.Equal(t, ids[0], uint64(30))
+	ids = trie.Get([]byte("hello"))
+	if len(ids) != 4 {
+		t.Errorf("expected number of ids 1 but got %d", len(ids))
+		return
+	}
+	require.ElementsMatch(t, ids, []uint64{1, 3, 4, 20})
+}
 
-	nodes := oneTrie.FindMatchingNodes([]byte("foobar"))
-	require.Equal(t, 3, len(nodes), "the should be 3 nodes in the result")
-	require.Equal(t, 1, nodes[0].Meta(), "the first node should have meta value 1")
-	require.Equal(t, 2, nodes[1].Meta(), "the second node should have meta value 2")
-	require.Equal(t, 3, nodes[2].Meta(), "the third node should have meta value 3")
-	node1, ok1 := oneTrie.Find([]byte("f"))
-	require.True(t, ok1, "the first node should be returned when finding with the key f")
-	require.Equal(t, 1,  node1.Meta(), "the first node should have meta value 1")
-
-	_, ok2 := oneTrie.Find([]byte("fo"))
-	require.False(t, ok2, "no node should be found when search with the key fo")
+func TestTrieDelete(t *testing.T) {
+	trie := NewTrie()
+	trie.Add([]byte("hello"), 1)
+	trie.Add([]byte("hello"), 3)
+	trie.Add([]byte("hello"), 4)
+	trie.Delete([]byte("hello"), 4)
+	require.ElementsMatch(t, trie.Get([]byte("hello")), []uint64{1, 3})
 }

@@ -1,96 +1,75 @@
 package trie
 
-type Node struct {
-	val byte
-	meta interface{}
-	term bool // whether the node represents a terminated prefix
-	depth int // depth starts at 0
-	children map[byte]*Node
+type node struct {
+	childrens map[byte]*node
+	items     []uint64
 }
 
-func (n *Node) NewChild(val byte, meta interface{}, term bool) *Node {
-	node := &Node {
-		val : val,
-		meta : meta,
-		term: term,
-		children: make(map[byte]*Node),
-		depth: n.depth + 1,
+func newNode() *node {
+	return &node{
+		childrens: make(map[byte]*node),
+		items:     []uint64{},
 	}
-	n.children[val] = node
-	return node
 }
 
-func (n *Node) SetMeta(meta interface{}) {
-	n.meta = meta
-}
-
-func (n *Node) Meta() interface{} {
-	return n.meta
-}
-
+// Trie datastructure
 type Trie struct {
-	root *Node
+	root *node
 }
 
-func New() *Trie {
+// NewTrie returns trie
+func NewTrie() *Trie {
 	return &Trie{
-		root: &Node{children: make(map[byte]*Node)},
+		root: newNode(),
 	}
 }
 
-const nul = 0x0
-
-func (t *Trie) Add(key []byte, meta interface{}) *Node {
-	node := t.root
-	for _, k := range key {
-		if n, ok := node.children[k]; ok {
-			node = n
-		} else {
-			node = node.NewChild(k, nil, false)
+// Add adds the item in the trie for the given prefix path
+func (t *Trie) Add(prefix []byte, item uint64) {
+	curr := t.root
+	for _, val := range prefix {
+		n, ok := curr.childrens[val]
+		if !ok {
+			n = newNode()
+			curr.childrens[val] = n
 		}
+		curr = n
 	}
-	// we've arrived at a terminal node, store the meta here
-	node.term = true
-	node.meta = meta
-	return node
+	curr.items = append(curr.items, item)
 }
 
-type collectorFunc func(node *Node)
-
-func (t *Trie) findNode(key []byte, collector collectorFunc) {
-	node := t.root
-	missing := false
-	for _, k := range key {
-		collector(node)
-		if n, ok := node.children[k]; ok {
-			node = n
-		} else {
-			missing = true
-			break
+// Get returns prefix matched items for the given key
+func (t *Trie) Get(key []byte) []uint64 {
+	o := []uint64{}
+	curr := t.root
+	for _, val := range key {
+		n, ok := curr.childrens[val]
+		if !ok {
+			return o
 		}
+		o = append(o, n.items...)
+		curr = n
 	}
-
-	if !missing {
-		collector(node)
-	}
+	return o
 }
 
-func (t *Trie) Find(key []byte) (*Node, bool) {
-	var matchedNode *Node
-	t.findNode(key, func(node *Node) {
-		if node.term && node.depth == len(key) {
-			matchedNode = node
+// Delete will delete the item if the item exist in the given index path
+func (t *Trie) Delete(index []byte, item uint64) {
+	curr := t.root
+	for _, val := range index {
+		n, ok := curr.childrens[val]
+		if !ok {
+			return
 		}
-	})
-	return matchedNode, matchedNode != nil
-}
-
-func (t *Trie) FindMatchingNodes(key []byte) []*Node {
-	var nodes []*Node
-	t.findNode(key, func(node *Node) {
-		if node.term {
-			nodes = append(nodes, node)
+		curr = n
+	}
+	//NOTE: we're just removing the item not the hanging path
+	old := curr.items
+	new := []uint64{}
+	for _, val := range old {
+		if val != item {
+			new = append(new, val)
 		}
-	})
-	return nodes
+	}
+	curr.items = new
 }

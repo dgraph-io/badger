@@ -17,9 +17,9 @@
 package badger
 
 import (
-	"bytes"
-	"github.com/dgraph-io/badger/trie"
 	"sync"
+
+	"github.com/dgraph-io/badger/trie"
 
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
@@ -36,6 +36,7 @@ type publisher struct {
 	pubCh       chan requests
 	subscribers map[uint64]subscriber
 	nextID      uint64
+	indexer     *trie.Trie
 }
 
 func newPublisher() *publisher {
@@ -43,6 +44,7 @@ func newPublisher() *publisher {
 		pubCh:       make(chan requests, 1000),
 		subscribers: make(map[uint64]subscriber),
 		nextID:      0,
+		indexer:     trie.NewTrie(),
 	}
 }
 
@@ -73,67 +75,48 @@ func (p *publisher) listenForUpdates(c *y.Closer) {
 }
 
 func (p *publisher) publishUpdates(reqs requests) {
-
 	p.Lock()
 	defer func() {
 		p.Unlock()
 		// Release all the request.
 		reqs.DecrRef()
 	}()
-
-
-	kvs := &pb.KVList{}
-	/*
-	// the trie maps a prefix to a list of subscribers
-	t := trie.New()
-	for _, s := range p.subscribers {
-		for _, prefix := range s.prefixes {
-			if node, ok := t.Find(prefix); ok {
-				// add the current subscriber to the list
-				subscribers := node.Meta().([]subscriber)
-				node.SetMeta(append(subscribers, s))
-			} else {
-				// the prefix has not been inserted into the trie before
-				// insert a new list with the current subscriber
-				t.Add(prefix, []subscriber{s})
-			}
-		}
-	}
-
+	batchedUpdates := make(map[uint64]*pb.KVList)
 	for _, req := range reqs {
 		for _, e := range req.Entries {
-		}
-	}
-	 */
-
-	// TODO: Optimize this, so we can figure out key -> subscriber quickly, without iterating over
-	// all the prefixes.
-	// TODO: Use trie to find subscribers.
-	for _, s := range p.subscribers {
-		// BUG: This would send out the same entry multiple times on multiple matches for the same
-		// subscriber.
-		for _, prefix := range s.prefixes {
-			for _, req := range reqs {
-				for _, e := range req.Entries {
-					if bytes.HasPrefix(e.Key, prefix) {
-						// TODO: Maybe we can optimize this by creating the KV once and sending it
-						// over to multiple subscribers.
-						k := y.SafeCopy(nil, e.Key)
-						kv := &pb.KV{
-							Key:       y.ParseKey(k),
-							Value:     y.SafeCopy(nil, e.Value),
-							Meta:      []byte{e.UserMeta},
-							ExpiresAt: e.ExpiresAt,
-							Version:   y.ParseTs(k),
-						}
-						kvs.Kv = append(kvs.Kv, kv)
-					}
+			ids := p.indexer.Get(e.Key)
+			// trie can give dulplicate ids
+			// eg: hel - 1, hell -1
+			// if we searching the trie with hello, we'll be getting [1,1]
+			// but we have to send only one update for that we're removing
+			// duplicate id
+			updatedIDs := make(map[uint64]struct{})
+			for _, id := range ids {
+				// ignoring if the entry is already updated for the id
+				if _, ok := updatedIDs[id]; ok {
+					continue
 				}
+				kvs, ok := batchedUpdates[id]
+				if !ok {
+					kvs = &pb.KVList{}
+					batchedUpdates[id] = kvs
+				}
+				k := y.SafeCopy(nil, e.Key)
+				kv := &pb.KV{
+					Key:       y.ParseKey(k),
+					Value:     y.SafeCopy(nil, e.Value),
+					Meta:      []byte{e.UserMeta},
+					ExpiresAt: e.ExpiresAt,
+					Version:   y.ParseTs(k),
+				}
+				batchedUpdates[id].Kv = append(batchedUpdates[id].Kv, kv)
+				updatedIDs[id] = struct{}{}
 			}
 		}
-		if len(kvs.GetKv()) > 0 {
-			s.sendCh <- kvs
-		}
+	}
+
+	for id, kvs := range batchedUpdates {
+		p.subscribers[id].sendCh <- kvs
 	}
 }
 
@@ -148,6 +131,9 @@ func (p *publisher) newSubscriber(c *y.Closer, prefixes ...[]byte) (<-chan *pb.K
 		prefixes:  prefixes,
 		sendCh:    ch,
 		subCloser: c,
+	}
+	for _, prefix := range prefixes {
+		p.indexer.Add(prefix, id)
 	}
 	return ch, id
 }
@@ -172,7 +158,6 @@ func (p *publisher) deleteSubscriber(id uint64) {
 }
 
 func (p *publisher) sendUpdates(reqs []*request) {
-	// TODO: Prefix check before pushing into pubCh.
 	if p.noOfSubscribers() != 0 {
 		p.pubCh <- reqs
 	}
