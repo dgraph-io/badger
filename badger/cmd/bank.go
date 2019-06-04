@@ -535,6 +535,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var subWg sync.WaitGroup
 	if checkSubscriber {
 		subWg.Add(1)
@@ -545,27 +546,33 @@ func runTest(cmd *cobra.Command, args []string) error {
 				accountIDS = append(accountIDS, key(i))
 			}
 			updater := func(kvs *pb.KVList) {
-				batch := subscribeDB.NewWriteBatch()
+				loader := subscribeDB.NewLoader(16)
 				for _, kv := range kvs.GetKv() {
-					y.Check(batch.Set(kv.Key, kv.Value, 0))
+					y.Check(loader.Set(kv))
 				}
-				y.Check(batch.Flush())
+
+				y.Check(loader.Finish())
 			}
 			db.Subscribe(ctx, updater, accountIDS[0], accountIDS[1:]...)
 		}()
 	}
+
 	wg.Wait()
-	cancel()
-	subWg.Wait()
-	y.Check(subscribeDB.View(func(txn *badger.Txn) error {
-		_, err := seekTotal(txn)
-		if err != nil {
-			log.Printf("Error while calculating subscriber DB total: %v", err)
-		} else {
-			atomic.AddUint64(&reads, 1)
-		}
-		return nil
-	}))
+
+	if checkSubscriber {
+		cancel()
+		subWg.Wait()
+		y.Check(subscribeDB.View(func(txn *badger.Txn) error {
+			_, err := seekTotal(txn)
+			if err != nil {
+				log.Printf("Error while calculating subscriber DB total: %v", err)
+			} else {
+				atomic.AddUint64(&reads, 1)
+			}
+			return nil
+		}))
+	}
+
 	if atomic.LoadInt32(&stopAll) == 0 {
 		log.Println("Test OK")
 		return nil

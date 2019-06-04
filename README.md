@@ -278,11 +278,41 @@ for {
 ```
 
 ### Merge Operations
-Badger provides support for unordered merge operations. You can define a func
+Badger provides support for ordered merge operations. You can define a func
 of type `MergeFunc` which takes in an existing value, and a value to be
 _merged_ with it. It returns a new value which is the result of the _merge_
 operation. All values are specified in byte arrays. For e.g., here is a merge
-function (`add`) which adds a `uint64` value to an existing `uint64` value.
+function (`add`) which appends a  `[]byte` value to an existing `[]byte` value.
+
+```Go
+// Merge function to append one byte slice to another
+func add(originalValue, newValue []byte) []byte {
+  return append(originalValue, newValue...)
+}
+```
+
+This function can then be passed to the `DB.GetMergeOperator()` method, along
+with a key, and a duration value. The duration specifies how often the merge
+function is run on values that have been added using the `MergeOperator.Add()`
+method.
+
+`MergeOperator.Get()` method can be used to retrieve the cumulative value of the key
+associated with the merge operation.
+
+```Go
+key := []byte("merge")
+
+m := db.GetMergeOperator(key, add, 200*time.Millisecond)
+defer m.Stop()
+
+m.Add([]byte("A"))
+m.Add([]byte("B"))
+m.Add([]byte("C"))
+
+res, _ := m.Get() // res should have value ABC encoded
+```
+
+Example: Merge operator which increments a counter
 
 ```Go
 func uint64ToBytes(i uint64) []byte {
@@ -300,17 +330,10 @@ func add(existing, new []byte) []byte {
   return uint64ToBytes(bytesToUint64(existing) + bytesToUint64(new))
 }
 ```
-
-This function can then be passed to the `DB.GetMergeOperator()` method, along
-with a key, and a duration value. The duration specifies how often the merge
-function is run on values that have been added using the `MergeOperator.Add()`
-method.
-
-`MergeOperator.Get()` method can be used to retrieve the cumulative value of the key
-associated with the merge operation.
-
+It can be used as
 ```Go
 key := []byte("merge")
+
 m := db.GetMergeOperator(key, add, 200*time.Millisecond)
 defer m.Stop()
 
@@ -318,8 +341,7 @@ m.Add(uint64ToBytes(1))
 m.Add(uint64ToBytes(2))
 m.Add(uint64ToBytes(3))
 
-res, err := m.Get() // res should have value 6 encoded
-fmt.Println(bytesToUint64(res))
+res, _ := m.Get() // res should have value 6 encoded
 ```
 
 ### Setting Time To Live(TTL) and User Metadata on Keys
