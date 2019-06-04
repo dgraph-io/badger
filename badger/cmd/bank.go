@@ -388,7 +388,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 	wb := db.NewWriteBatch()
 	for i := 0; i < numAccounts; i++ {
-		y.Check(wb.Set(key(i), toSlice(initialBal), 0))
+		y.Check(wb.Set(key(i), toSlice(initialBal)))
 	}
 	log.Println("Waiting for writes to be done...")
 	y.Check(wb.Flush())
@@ -485,7 +485,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 				stream := db.NewStream()
 				stream.Send = func(list *pb.KVList) error {
 					for _, kv := range list.Kv {
-						if err := batch.Set(kv.Key, kv.Value, 0); err != nil {
+						if err := batch.Set(kv.Key, kv.Value); err != nil {
 							return err
 						}
 					}
