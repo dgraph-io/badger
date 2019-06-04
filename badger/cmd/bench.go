@@ -21,8 +21,8 @@ import "github.com/spf13/cobra"
 var benchCmd = &cobra.Command{
 	Use:   "benchmark",
 	Short: "Benchmark Badger database.",
-	Long: `This command will benchmark Badger for different usecases. Currently only read benchmark
-	is supported. Useful for testing and performance analysis.`,
+	Long: `This command will benchmark Badger for different usecases. Currently only a read
+	benchmark is supported. Useful for testing and performance analysis.`,
 }
 
 func init() {

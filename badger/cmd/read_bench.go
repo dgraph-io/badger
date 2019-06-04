@@ -187,9 +187,7 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 		list := &pb.KVList{}
 		// Since stream framework copies the item's key while calling
 		// KeyToList, we can directly append key to list.
-		list.Kv = append(list.Kv, &pb.KV{
-			Key: key,
-		})
+		list.Kv = append(list.Kv, &pb.KV{Key: key})
 		return list, nil
 	}
 
@@ -214,8 +212,7 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 		return nil, err
 	}
 
-	// Shuffle keys before returning to minimise locality
-	// of keys coming from stream framework.
+	// Shuffle keys before returning to minimise locality of keys coming from stream framework.
 	rand.Shuffle(len(keys), func(i, j int) {
 		keys[i], keys[j] = keys[j], keys[i]
 	})
