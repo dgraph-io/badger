@@ -96,10 +96,8 @@ func (p *publisher) publishUpdates(reqs requests) {
 				if _, ok := updatedIDs[id]; ok {
 					continue
 				}
-				kvs, ok := batchedUpdates[id]
-				if !ok {
-					kvs = &pb.KVList{}
-					batchedUpdates[id] = kvs
+				if _, ok := batchedUpdates[id]; !ok {
+					batchedUpdates[id] = &pb.KVList{}
 				}
 				k := y.SafeCopy(nil, e.Key)
 				kv := &pb.KV{
