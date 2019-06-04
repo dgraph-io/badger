@@ -143,6 +143,9 @@ func (p *publisher) cleanSubscribers() {
 	p.Lock()
 	defer p.Unlock()
 	for id, s := range p.subscribers {
+		for _, prefix := range s.prefixes {
+			p.indexer.Delete(prefix, id)
+		}
 		delete(p.subscribers, id)
 		s.subCloser.SignalAndWait()
 	}
@@ -151,8 +154,10 @@ func (p *publisher) cleanSubscribers() {
 func (p *publisher) deleteSubscriber(id uint64) {
 	p.Lock()
 	defer p.Unlock()
-	if _, ok := p.subscribers[id]; !ok {
-		return
+	if s, ok := p.subscribers[id]; ok {
+		for _, prefix := range s.prefixes {
+			p.indexer.Delete(prefix, id)
+		}
 	}
 	delete(p.subscribers, id)
 }
