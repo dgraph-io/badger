@@ -1,9 +1,26 @@
+/*
+ * Copyright 2017 Dgraph Labs, Inc. and Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package cmd
 
 import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -14,13 +31,6 @@ import (
 	humanize "github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
-
-var benchCmd = &cobra.Command{
-	Use:   "benchmark",
-	Short: "Benchmark Badger database.",
-	Long: `This command will benchmark Badger for different usecases. Currently only read benchmark
-	is supported. Useful for testing and performance analysis.`,
-}
 
 var readBenchCmd = &cobra.Command{
 	Use:   "read",
@@ -34,37 +44,42 @@ var sizeRead, entriesRead uint64
 var startTime time.Time
 
 var sampleSize int
-var keysOnly bool
+var loadingMode string
+var keysOnly, readOnly bool
 
 func init() {
-	RootCmd.AddCommand(benchCmd)
 	benchCmd.AddCommand(readBenchCmd)
 	readBenchCmd.Flags().IntVarP(
-		&numGoroutines, "goroutines", "g", 4, "Number of goroutines to run for reading.")
+		&numGoroutines, "goroutines", "g", 16, "Number of goroutines to run for reading.")
 	readBenchCmd.Flags().StringVarP(
 		&duration, "duration", "d", "1m", "How long to run the benchmark.")
 	readBenchCmd.Flags().IntVar(
 		&sampleSize, "sample-size", 1000000, "Keys sample size to be used for random lookup.")
 	readBenchCmd.Flags().BoolVar(
 		&keysOnly, "keys-only", false, "If false, values will also be read.")
+	readBenchCmd.Flags().BoolVar(
+		&readOnly, "read-only", true, "If true, DB will be opened in read only mode.")
+	readBenchCmd.Flags().StringVar(
+		&loadingMode, "loading-mode", "mmap", "Mode for accessing SSTables and value log files. "+
+			"Valid loading modes are fileio and mmap.")
 }
 
 func readBench(cmd *cobra.Command, args []string) error {
+	rand.Seed(time.Now().Unix())
+
 	dur, err := time.ParseDuration(duration)
 	if err != nil {
 		return y.Wrapf(err, "unable to parse duration")
 	}
 	y.AssertTrue(numGoroutines > 0)
+	mode := getLoadingMode(loadingMode)
 
 	opts := badger.DefaultOptions
-	opts.ReadOnly = true
+	opts.ReadOnly = readOnly
 	opts.Dir = sstDir
 	opts.ValueDir = vlogDir
-	// Table and value loading mode is fileIO here, as we want to test
-	// disk speed also. We can make this configurable in future.
-	opts.TableLoadingMode = options.FileIO
-	opts.ValueLogLoadingMode = options.FileIO
-
+	opts.TableLoadingMode = mode
+	opts.ValueLogLoadingMode = mode
 	db, err := badger.Open(opts)
 	if err != nil {
 		return y.Wrapf(err, "unable to open DB")
@@ -92,12 +107,12 @@ func readBench(cmd *cobra.Command, args []string) error {
 	startTime = time.Now()
 	for i := 0; i < numGoroutines; i++ {
 		c.AddRunning(1)
-		go spawnReader(db, c, keys)
+		go readKeys(db, c, keys)
 	}
 
-	// spawn stats reporter routine
+	// also start printing stats
 	c.AddRunning(1)
-	go spawnReporter(c)
+	go printStats(c)
 
 	<-time.After(dur)
 	c.SignalAndWait()
@@ -105,7 +120,7 @@ func readBench(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func spawnReporter(c *y.Closer) {
+func printStats(c *y.Closer) {
 	defer c.Done()
 
 	t := time.NewTicker(time.Second)
@@ -116,11 +131,10 @@ func spawnReporter(c *y.Closer) {
 			return
 		case <-t.C:
 			dur := time.Since(startTime)
-			durSec := dur.Seconds()
 			sz := atomic.LoadUint64(&sizeRead)
 			entries := atomic.LoadUint64(&entriesRead)
-			bytesRate := sz / uint64(durSec)
-			entriesRate := entries / uint64(durSec)
+			bytesRate := sz / uint64(dur.Seconds())
+			entriesRate := entries / uint64(dur.Seconds())
 			fmt.Printf("Time elapsed: %s, bytes read: %s, speed: %s/sec, "+
 				"entries read: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
@@ -128,7 +142,7 @@ func spawnReporter(c *y.Closer) {
 	}
 }
 
-func spawnReader(db *badger.DB, c *y.Closer, keys [][]byte) {
+func readKeys(db *badger.DB, c *y.Closer, keys [][]byte) {
 	defer c.Done()
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	for {
@@ -171,14 +185,11 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 	// we can take only first version for the key.
 	stream.KeyToList = func(key []byte, itr *badger.Iterator) (*pb.KVList, error) {
 		list := &pb.KVList{}
-		if !itr.Valid() {
-			return list, nil
-		}
-		item := itr.Item()
-		kv := &pb.KV{
-			Key: item.KeyCopy(nil),
-		}
-		list.Kv = append(list.Kv, kv)
+		// Since stream framework copies the item's key while calling
+		// KeyToList, we can directly append key to list.
+		list.Kv = append(list.Kv, &pb.KV{
+			Key: key,
+		})
 		return list, nil
 	}
 
@@ -203,5 +214,26 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 		return nil, err
 	}
 
+	// Shuffle keys before returning to minimise locality
+	// of keys coming from stream framework.
+	rand.Shuffle(len(keys), func(i, j int) {
+		keys[i], keys[j] = keys[j], keys[i]
+	})
+
 	return keys, nil
+}
+
+func getLoadingMode(m string) options.FileLoadingMode {
+	m = strings.ToLower(m)
+	var mode options.FileLoadingMode
+	switch m {
+	case "fileio":
+		mode = options.FileIO
+	case "mmap":
+		mode = options.MemoryMap
+	default:
+		panic("loading mode not supported")
+	}
+
+	return mode
 }
