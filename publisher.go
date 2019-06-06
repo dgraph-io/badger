@@ -19,9 +19,8 @@ package badger
 import (
 	"sync"
 
-	"github.com/dgraph-io/badger/trie"
-
 	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/trie"
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -85,17 +84,7 @@ func (p *publisher) publishUpdates(reqs requests) {
 	for _, req := range reqs {
 		for _, e := range req.Entries {
 			ids := p.indexer.Get(e.Key)
-			// trie can give dulplicate ids
-			// eg: hel - 1, hell -1
-			// if we searching the trie with hello, we'll be getting [1,1]
-			// but we have to send only one update for that we're removing
-			// duplicate id
-			updatedIDs := make(map[uint64]struct{})
 			for _, id := range ids {
-				// ignoring if the entry is already updated for the id
-				if _, ok := updatedIDs[id]; ok {
-					continue
-				}
 				if _, ok := batchedUpdates[id]; !ok {
 					batchedUpdates[id] = &pb.KVList{}
 				}
@@ -108,7 +97,6 @@ func (p *publisher) publishUpdates(reqs requests) {
 					Version:   y.ParseTs(k),
 				}
 				batchedUpdates[id].Kv = append(batchedUpdates[id].Kv, kv)
-				updatedIDs[id] = struct{}{}
 			}
 		}
 	}

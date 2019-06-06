@@ -1,75 +1,103 @@
+/*
+ * Copyright 2019 Dgraph Labs, Inc. and Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package trie
 
+import "sort"
+
 type node struct {
-	childrens map[byte]*node
-	items     []uint64
+	children map[byte]*node
+	ids      []uint64
 }
 
 func newNode() *node {
 	return &node{
-		childrens: make(map[byte]*node),
-		items:     []uint64{},
+		children: make(map[byte]*node),
+		ids:      []uint64{},
 	}
 }
 
-// Trie datastructure
+// Trie datastructure.
 type Trie struct {
 	root *node
 }
 
-// NewTrie returns trie
+// NewTrie returns Trie.
 func NewTrie() *Trie {
 	return &Trie{
 		root: newNode(),
 	}
 }
 
-// Add adds the item in the trie for the given prefix path
-func (t *Trie) Add(prefix []byte, item uint64) {
+// Add adds the id in the trie for the given prefix path.
+func (t *Trie) Add(prefix []byte, id uint64) {
 	curr := t.root
 	for _, val := range prefix {
-		n, ok := curr.childrens[val]
+		n, ok := curr.children[val]
 		if !ok {
 			n = newNode()
-			curr.childrens[val] = n
+			curr.children[val] = n
 		}
 		curr = n
 	}
-	curr.items = append(curr.items, item)
+	curr.ids = append(curr.ids, id)
 }
 
-// Get returns prefix matched items for the given key
+// Get returns prefix matched ids for the given key.
 func (t *Trie) Get(key []byte) []uint64 {
-	o := []uint64{}
+	out := []uint64{}
 	curr := t.root
 	for _, val := range key {
-		n, ok := curr.childrens[val]
+		n, ok := curr.children[val]
 		if !ok {
-			return o
+			break
 		}
-		o = append(o, n.items...)
+		out = append(out, n.ids...)
 		curr = n
 	}
-	return o
+	sort.Slice(out, func(i, j int) bool {
+		return out[i] < out[j]
+	})
+	res := []uint64{}
+	for i := 0; i < len(out); i++ {
+		if len(res) != 0 && res[len(res)-1] == out[i] {
+			continue
+		}
+		res = append(res, out[i])
+	}
+	return res
 }
 
-// Delete will delete the item if the item exist in the given index path
-func (t *Trie) Delete(index []byte, item uint64) {
+// Delete will delete the id if the id exist in the given index path.
+func (t *Trie) Delete(index []byte, id uint64) {
 	curr := t.root
 	for _, val := range index {
-		n, ok := curr.childrens[val]
+		n, ok := curr.children[val]
 		if !ok {
 			return
 		}
 		curr = n
 	}
-	//NOTE: we're just removing the item not the hanging path
-	old := curr.items
-	new := []uint64{}
+	//NOTE: We're just removing the id not the hanging path.
+	old := curr.ids
+	out := []uint64{}
 	for _, val := range old {
-		if val != item {
-			new = append(new, val)
+		if val != id {
+			out = append(out, val)
 		}
 	}
-	curr.items = new
+	curr.ids = out
 }
