@@ -263,7 +263,9 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	sameKey := y.SameKey(key, w.lastKey)
 	// Same keys should go into the same SSTable.
 	if !sameKey && w.builder.ReachedCapacity(w.db.opt.MaxTableSize) {
-		return w.send()
+		if err := w.send(); err != nil {
+			return err
+		}
 	}
 
 	w.lastKey = y.SafeCopy(w.lastKey, key)
