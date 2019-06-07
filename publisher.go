@@ -89,14 +89,13 @@ func (p *publisher) publishUpdates(reqs requests) {
 					batchedUpdates[id] = &pb.KVList{}
 				}
 				k := y.SafeCopy(nil, e.Key)
-				kv := &pb.KV{
+				batchedUpdates[id].Kv = append(batchedUpdates[id].Kv, &pb.KV{
 					Key:       y.ParseKey(k),
 					Value:     y.SafeCopy(nil, e.Value),
 					Meta:      []byte{e.UserMeta},
 					ExpiresAt: e.ExpiresAt,
 					Version:   y.ParseTs(k),
-				}
-				batchedUpdates[id].Kv = append(batchedUpdates[id].Kv, kv)
+				})
 			}
 		}
 	}

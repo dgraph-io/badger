@@ -44,16 +44,16 @@ func NewTrie() *Trie {
 
 // Add adds the id in the trie for the given prefix path.
 func (t *Trie) Add(prefix []byte, id uint64) {
-	curr := t.root
+	node := t.root
 	for _, val := range prefix {
-		n, ok := curr.children[val]
+		child, ok := node.children[val]
 		if !ok {
-			n = newNode()
-			curr.children[val] = n
+			child = newNode()
+			node.children[val] = child
 		}
-		curr = n
+		node = child
 	}
-	curr.ids = append(curr.ids, id)
+	node.ids = append(node.ids, id)
 }
 
 // Get returns prefix matched ids for the given key.
@@ -71,33 +71,35 @@ func (t *Trie) Get(key []byte) []uint64 {
 	sort.Slice(out, func(i, j int) bool {
 		return out[i] < out[j]
 	})
-	res := []uint64{}
-	for i := 0; i < len(out); i++ {
-		if len(res) != 0 && res[len(res)-1] == out[i] {
+	res := out[:0]
+	for _, val := range out {
+		if len(res) != 0 && res[len(res)-1] == val {
 			continue
 		}
-		res = append(res, out[i])
+		res = append(res, val)
 	}
 	return res
 }
 
 // Delete will delete the id if the id exist in the given index path.
 func (t *Trie) Delete(index []byte, id uint64) {
-	curr := t.root
+	node := t.root
 	for _, val := range index {
-		n, ok := curr.children[val]
+		child, ok := node.children[val]
 		if !ok {
 			return
 		}
-		curr = n
+		node = child
 	}
-	//NOTE: We're just removing the id not the hanging path.
-	old := curr.ids
-	out := []uint64{}
-	for _, val := range old {
-		if val != id {
-			out = append(out, val)
+	// We're just removing the id not the hanging path.
+	out := node.ids[:0]
+	for i := 0; i < len(node.ids); i++ {
+		if node.ids[i] != id {
+			out = append(out, node.ids[i])
 		}
 	}
-	curr.ids = out
+	for i := len(out); i < len(node.ids); i++ {
+		node.ids[i] = 0 // garbage collecting
+	}
+	node.ids = out
 }
