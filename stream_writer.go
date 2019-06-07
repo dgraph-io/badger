@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"bytes"
 	"math"
 
 	"github.com/dgraph-io/badger/pb"
@@ -176,7 +175,10 @@ func (sw *StreamWriter) Flush() error {
 			return err
 		}
 	}
-	return syncDir(sw.db.opt.Dir)
+	if err := syncDir(sw.db.opt.Dir); err != nil {
+		return err
+	}
+	return sw.db.lc.validate()
 }
 
 type sortedWriter struct {
@@ -256,7 +258,7 @@ func (w *sortedWriter) handleRequests(closer *y.Closer) {
 
 // Add adds key and vs to sortedWriter.
 func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
-	if bytes.Compare(key, w.lastKey) <= 0 {
+	if len(w.lastKey) > 0 && y.CompareKeys(key, w.lastKey) <= 0 {
 		return ErrUnsortedKey
 	}
 
