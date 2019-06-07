@@ -259,17 +259,15 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	if bytes.Compare(key, w.lastKey) <= 0 {
 		return ErrUnsortedKey
 	}
-	sameKey := y.SameKey(key, w.lastKey)
-	w.lastKey = y.SafeCopy(w.lastKey, key)
 
-	if err := w.builder.Add(key, vs); err != nil {
-		return err
-	}
+	sameKey := y.SameKey(key, w.lastKey)
 	// Same keys should go into the same SSTable.
 	if !sameKey && w.builder.ReachedCapacity(w.db.opt.MaxTableSize) {
 		return w.send()
 	}
-	return nil
+
+	w.lastKey = y.SafeCopy(w.lastKey, key)
+	return w.builder.Add(key, vs)
 }
 
 func (w *sortedWriter) send() error {
