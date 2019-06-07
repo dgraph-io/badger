@@ -154,21 +154,19 @@ Structure of Block.
 +-----------------------------------------+------------------+--------------+------------------+
 */
 func (b *Builder) finishBlock() {
-	meta := &pb.BlockMeta{
-		EntryOffsets: b.entryOffsets, // store offsets for all entries as block index
+	ebuf := make([]byte, len(b.entryOffsets)*4+4)
+	for i, idx := len(b.entryOffsets)-1, 0; i >= 0; i-- {
+		binary.BigEndian.PutUint32(ebuf[idx:idx+4], b.entryOffsets[i])
+		idx += 4
 	}
-	mo, err := meta.Marshal()
-	y.Check(err) // avoid signature change of function for now.
-	n, err := b.buf.Write(mo)
-	y.Check(err)
-	y.AssertTrue(n == len(mo))
-	b.buf.Write(y.BytesForUint32(uint32(n))) // also write size of block meta
+	binary.BigEndian.PutUint32(ebuf[len(ebuf)-4:], uint32(len(b.entryOffsets)))
+	b.buf.Write(ebuf)
 
 	blockBuf := b.buf.Bytes()[b.baseOffset:] // store checksum for current block
 	b.writeChecksum(blockBuf)
 
-	// TODO(Ashish): If we want to make block as multiple of pages, we can implement padding.
-	// This might be useful while using direct I/O.
+	// TODO(Ashish): If we want to make block as multiple of OS pages, we can
+	// implement padding. This might be useful while using direct I/O.
 
 	// Add key to the block index
 	bo := &pb.BlockOffset{

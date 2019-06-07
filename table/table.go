@@ -127,13 +127,12 @@ func (b block) NewIterator() *blockIterator {
 	readPos -= (csSize + 4) // skip reading checksum, and move position to block meta length
 	metaSize := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
 
-	// read block meta
-	readPos -= metaSize
-	bm := &pb.BlockMeta{}
-	err := bm.Unmarshal(bi.data[readPos : readPos+metaSize])
-	y.Check(err) // TODO(Ashish): avoid this.
-
-	bi.entryOffsets = bm.EntryOffsets
+	readPos -= 4
+	bi.entryOffsets = make([]uint32, int(metaSize))
+	for i := 0; i < int(metaSize); i++ {
+		bi.entryOffsets[i] = binary.BigEndian.Uint32(bi.data[readPos : readPos+4])
+		readPos -= 4
+	}
 
 	return bi
 }
