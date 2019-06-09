@@ -59,14 +59,14 @@ func (t *Trie) Add(prefix []byte, id uint64) {
 // Get returns prefix matched ids for the given key.
 func (t *Trie) Get(key []byte) []uint64 {
 	out := []uint64{}
-	curr := t.root
+	node := t.root
 	for _, val := range key {
-		n, ok := curr.children[val]
+		child, ok := node.children[val]
 		if !ok {
 			break
 		}
-		out = append(out, n.ids...)
-		curr = n
+		out = append(out, child.ids...)
+		node = child
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i] < out[j]
