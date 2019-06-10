@@ -354,7 +354,9 @@ func (db *DB) Close() error {
 func (db *DB) close() (err error) {
 	db.elog.Printf("Closing database")
 
-	db.vlog.FlushDiscardStats()
+	if err := db.vlog.FlushDiscardStats(); err != nil {
+		return errors.Wrap(err, "failed to flush discard stats")
+	}
 
 	atomic.StoreInt32(&db.blockWrites, 1)
 
