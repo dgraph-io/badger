@@ -1434,7 +1434,7 @@ func (vlog *valueLog) populateDiscardStats() error {
 	if vs.Meta&bitValuePointer > 0 {
 		var vp valuePointer
 		vp.Decode(vs.Value)
-		result, cb, err := vlog.Read(vp, nil)
+		result, cb, err := vlog.Read(vp, new(y.Slice))
 		defer runCallback(cb)
 		if err != nil {
 			return errors.Wrapf(err, "failed to read value pointer from vlog file: %+v", vp)
