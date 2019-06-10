@@ -353,6 +353,9 @@ func (db *DB) Close() error {
 
 func (db *DB) close() (err error) {
 	db.elog.Printf("Closing database")
+
+	db.vlog.FlushDiscardStats()
+
 	atomic.StoreInt32(&db.blockWrites, 1)
 
 	// Stop value GC first.
@@ -879,10 +882,6 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// commits.
 	headTs := y.KeyWithTs(head, db.orc.nextTs())
 	ft.mt.Put(headTs, y.ValueStruct{Value: offset})
-
-	// Also store lfDiscardStats before flushing memtables
-	discardStatsKey := y.KeyWithTs(lfDiscardStatsKey, 1)
-	ft.mt.Put(discardStatsKey, y.ValueStruct{Value: db.vlog.encodedDiscardStats()})
 
 	fileID := db.lc.reserveFileID()
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)

@@ -54,6 +54,9 @@ const (
 	bitFinTxn byte = 1 << 7 // Set if the entry is to indicate end of txn in value log.
 
 	mi int64 = 1 << 20
+
+	// The number of updates after which discard map should be flushed into badger
+	discardStatsFlushThreshold = 100
 )
 
 type logFile struct {
@@ -604,7 +607,8 @@ func (vlog *valueLog) dropAll() (int, error) {
 // a given logfile.
 type lfDiscardStats struct {
 	sync.Mutex
-	m map[uint32]int64
+	m                 map[uint32]int64
+	updatesSinceFlush uint16
 }
 
 type valueLog struct {
@@ -762,11 +766,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	vlog.db = db
 	vlog.elog = trace.NewEventLog("Badger", "Valuelog")
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
-
-	if err := vlog.populateDiscardStats(); err != nil {
-		return err
-	}
-
+	vlog.lfDiscardStats = &lfDiscardStats{m: make(map[uint32]int64)}
 	if err := vlog.populateFilesMap(); err != nil {
 		return err
 	}
@@ -849,6 +849,9 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	// Map the file if needed. When we create a file, it is automatically mapped.
 	if err = last.mmap(2 * opt.ValueLogFileSize); err != nil {
 		return errFile(err, last.path, "Map log file")
+	}
+	if err := vlog.populateDiscardStats(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1370,12 +1373,36 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 	}
 }
 
-func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
+func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) error {
 	vlog.lfDiscardStats.Lock()
 	for fid, sz := range stats {
 		vlog.lfDiscardStats.m[fid] += sz
+		vlog.lfDiscardStats.updatesSinceFlush++
 	}
 	vlog.lfDiscardStats.Unlock()
+	if vlog.lfDiscardStats.updatesSinceFlush > discardStatsFlushThreshold {
+		if err := vlog.FlushDiscardStats(); err != nil {
+			return err
+		}
+		vlog.lfDiscardStats.updatesSinceFlush = 0
+	}
+	return nil
+}
+
+// FlushDiscardStats inserts discard stats into badger. Returns error on failure.
+func (vlog *valueLog) FlushDiscardStats() error {
+	if len(vlog.lfDiscardStats.m) < 1 {
+		return nil
+	}
+	entries := []*Entry{{
+		Key:   y.KeyWithTs(lfDiscardStatsKey, 1),
+		Value: vlog.encodedDiscardStats(),
+	}}
+	req, err := vlog.db.sendToWriteCh(entries)
+	if err != nil {
+		return errors.Wrapf(err, "failed to push discard stats to write channel")
+	}
+	return req.Wait()
 }
 
 // encodedDiscardStats returns []byte representation of lfDiscardStats
@@ -1399,13 +1426,26 @@ func (vlog *valueLog) populateDiscardStats() error {
 
 	// check if value is Empty
 	if vs.Value == nil || len(vs.Value) == 0 {
-		vlog.lfDiscardStats = &lfDiscardStats{m: make(map[uint32]int64)}
 		return nil
 	}
 
 	var statsMap map[uint32]int64
-	if err := json.Unmarshal(vs.Value, &statsMap); err != nil {
-		return err
+	// If discard map is stored in vlog file
+	if vs.Meta&bitValuePointer > 0 {
+		var vp valuePointer
+		vp.Decode(vs.Value)
+		result, cb, err := vlog.Read(vp, nil)
+		defer runCallback(cb)
+		if err != nil {
+			return errors.Wrapf(err, "failed to read value pointer from vlog file: %+v", vp)
+		}
+		if err := json.Unmarshal(result, &statsMap); err != nil {
+			return errors.Wrapf(err, "failed to unmarshal discard stats")
+		}
+	} else {
+		if err := json.Unmarshal(vs.Value, &statsMap); err != nil {
+			return errors.Wrapf(err, "failed to unmarshal discard stats")
+		}
 	}
 	vlog.opt.Debugf("Value Log Discard stats: %v", statsMap)
 	vlog.lfDiscardStats = &lfDiscardStats{m: statsMap}
