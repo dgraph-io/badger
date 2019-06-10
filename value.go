@@ -463,7 +463,9 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 	}
 
 	if deleteFileNow {
-		vlog.deleteLogFile(f)
+		if err := vlog.deleteLogFile(f); err != nil {
+			return err
+		}
 	}
 
 	return nil
