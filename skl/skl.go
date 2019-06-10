@@ -99,8 +99,6 @@ func (s *Skiplist) DecrRef() {
 	s.arena = nil
 }
 
-func (s *Skiplist) valid() bool { return s.arena != nil }
-
 func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 	// The base level is already allocated in the node struct.
 	offset := arena.putNode(height)

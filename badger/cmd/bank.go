@@ -100,12 +100,6 @@ func key(account int) []byte {
 	return []byte(fmt.Sprintf("%s%s", keyPrefix, strconv.Itoa(account)))
 }
 
-func toAccount(key []byte) int {
-	i, err := strconv.Atoi(string(key[len(keyPrefix):]))
-	y.Check(err)
-	return i
-}
-
 func toUint64(val []byte) uint64 {
 	u, err := strconv.ParseUint(string(val), 10, 64)
 	y.Check(err)
