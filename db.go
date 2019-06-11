@@ -707,6 +707,10 @@ func (db *DB) doWrites(lc *y.Closer) {
 	writeRequests := func(reqs []*request) {
 		if err := db.writeRequests(reqs); err != nil {
 			db.opt.Errorf("writeRequests: %v", err)
+			//write error
+			if db.opt.SyncErrCallback != nil {
+				db.opt.SyncErrCallback(err)
+			}
 		}
 		<-pendingCh
 	}
@@ -934,6 +938,7 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 			// We close db.flushChan now, instead of sending a nil ft.mt.
 			continue
 		}
+
 		for {
 			err := db.handleFlushTask(ft)
 			if err == nil {
@@ -951,8 +956,15 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 
 				break
 			}
-			// Encountered error. Retry indefinitely.
+
+			// Encountered error. Retry until the SyncErrCallback function returns false.
 			db.opt.Errorf("Failure while flushing memtable to disk: %v. Retrying...\n", err)
+			if db.opt.SyncErrCallback != nil {
+				if !db.opt.SyncErrCallback(err) {
+					break
+				}
+			}
+
 			time.Sleep(time.Second)
 		}
 	}

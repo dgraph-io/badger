@@ -67,6 +67,10 @@ type Options struct {
 	// ChecksumVerificationMode decides when db should verify checksum for SStable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
 
+	// SyncErrCallback is called whenever a sync operation fails.
+	// If the function returns false, it indicates the sync operation shouldn't be retried.
+	SyncErrCallback func(error) bool
+
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.
@@ -111,6 +115,8 @@ func DefaultOptions(path string) Options {
 		Truncate:           false,
 		Logger:             defaultLogger,
 		LogRotatesToFlush:  2,
+
+		SyncErrCallback: nil,
 	}
 }
 
@@ -376,5 +382,16 @@ func (opt Options) WithCompactL0OnClose(val bool) Options {
 // The default value of LogRotatesToFlush is 2.
 func (opt Options) WithLogRotatesToFlush(val int32) Options {
 	opt.LogRotatesToFlush = val
+	return opt
+}
+
+// WithSyncErrCallback returns a new Options value with SyncErrCallback set to the given function.
+//
+// SyncErrCallback is called whenever a sync operation fails.
+// If the function returns false, it indicates the sync operation shouldn't be retried.
+//
+// The default value of SyncErrCallback is nil.
+func (opt Options) WithSyncErrCallback(sec func(error) bool) Options {
+	opt.SyncErrCallback = sec
 	return opt
 }
