@@ -1711,10 +1711,13 @@ func TestSyncForRace(t *testing.T) {
 	defer db.Close()
 
 	closeChan := make(chan struct{})
-	doneChan := make(chan struct{})
 
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		ticker := time.NewTicker(100 * time.Microsecond)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
@@ -1723,7 +1726,6 @@ func TestSyncForRace(t *testing.T) {
 				}
 				db.opt.Debugf("Sync Iteration completed")
 			case <-closeChan:
-				close(doneChan)
 				return
 			}
 		}
@@ -1746,7 +1748,7 @@ func TestSyncForRace(t *testing.T) {
 	require.NoError(t, txn.Commit())
 
 	close(closeChan)
-	<-doneChan
+	wg.Wait()
 }
 
 // Earlier, if head is not pointing to latest Vlog file, then at replay badger used to crash with

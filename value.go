@@ -1003,11 +1003,14 @@ func (vlog *valueLog) write(reqs []*request) error {
 		if vlog.woffset() > uint32(vlog.opt.ValueLogFileSize) ||
 			vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
 			var err error
+			vlog.filesLock.Lock()
 			if err = curlf.doneWriting(vlog.woffset()); err != nil {
+				vlog.filesLock.Unlock()
 				return err
 			}
 
 			newid := atomic.AddUint32(&vlog.maxFid, 1)
+			vlog.filesLock.Unlock()
 			y.AssertTruef(newid > 0, "newid has overflown uint32: %v", newid)
 			newlf, err := vlog.createVlogFile(newid)
 			if err != nil {
