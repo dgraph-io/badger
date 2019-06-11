@@ -64,6 +64,10 @@ type Options struct {
 	CompactL0OnClose  bool
 	LogRotatesToFlush int32
 
+	// SyncErrCallback is called whenever a sync operation fails.
+	// If the function returns false, it indicates the sync operation shouldn't be retried.
+	SyncErrCallback func(error) bool
+
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.
@@ -108,6 +112,8 @@ func DefaultOptions(path string) Options {
 		Truncate:           false,
 		Logger:             defaultLogger,
 		LogRotatesToFlush:  2,
+
+		SyncErrCallback: func(error) bool { return true },
 	}
 }
 
