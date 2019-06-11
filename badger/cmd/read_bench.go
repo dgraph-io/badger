@@ -24,12 +24,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	humanize "github.com/dustin/go-humanize"
+	"github.com/spf13/cobra"
+
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
-	humanize "github.com/dustin/go-humanize"
-	"github.com/spf13/cobra"
 )
 
 var readBenchCmd = &cobra.Command{
@@ -40,12 +41,16 @@ This command reads data from existing Badger database randomly using multiple go
 	RunE: readBench,
 }
 
-var sizeRead, entriesRead uint64
-var startTime time.Time
+var (
+	sizeRead    uint64    // will store size read till now
+	entriesRead uint64    // will store entries read till now
+	startTime   time.Time // start time of read benchmarking
 
-var sampleSize int
-var loadingMode string
-var keysOnly, readOnly bool
+	sampleSize  int
+	loadingMode string
+	keysOnly    bool
+	readOnly    bool
+)
 
 func init() {
 	benchCmd.AddCommand(readBenchCmd)
@@ -184,27 +189,25 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 	// overide stream.KeyToList as we only want keys. Also
 	// we can take only first version for the key.
 	stream.KeyToList = func(key []byte, itr *badger.Iterator) (*pb.KVList, error) {
-		list := &pb.KVList{}
+		l := &pb.KVList{}
 		// Since stream framework copies the item's key while calling
 		// KeyToList, we can directly append key to list.
-		list.Kv = append(list.Kv, &pb.KV{
-			Key: key,
-		})
-		return list, nil
+		l.Kv = append(l.Kv, &pb.KV{Key: key})
+		return l, nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream.Send = func(list *pb.KVList) error {
+	stream.Send = func(l *pb.KVList) error {
 		if count >= sampleSize {
 			return nil
 		}
-		for _, kv := range list.Kv {
+		for _, kv := range l.Kv {
 			keys = append(keys, kv.Key)
 			count++
 			if count >= sampleSize {
 				cancel()
-				break
+				return nil
 			}
 		}
 		return nil
