@@ -45,7 +45,7 @@ type flagOptions struct {
 	keyLookup     string
 	itemMeta      bool
 	keyHistory    bool
-	allowInternal bool
+	showInternal  bool
 }
 
 var (
@@ -65,7 +65,7 @@ func init() {
 	infoCmd.Flags().BoolVar(&opt.itemMeta, "show-meta", true, "Output item meta data as well")
 	infoCmd.Flags().BoolVar(&opt.keyHistory, "history", false, "Show all versions of a key")
 	infoCmd.Flags().BoolVar(
-		&opt.allowInternal, "show-internal", false, "Show internal keys along with other keys."+
+		&opt.showInternal, "show-internal", false, "Show internal keys along with other keys."+
 			" This option should be used along with --show-key option")
 }
 
@@ -136,7 +136,7 @@ func showKeys(db *badger.DB, prefix []byte) error {
 	iopt.Prefix = []byte(prefix)
 	iopt.PrefetchValues = false
 	iopt.AllVersions = opt.keyHistory
-	iopt.InternalAccess = opt.allowInternal
+	iopt.InternalAccess = opt.showInternal
 	it := txn.NewIterator(iopt)
 	defer it.Close()
 
