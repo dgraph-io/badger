@@ -334,7 +334,7 @@ func TestDiscardMapTooBig(t *testing.T) {
 		}
 		return stat
 	}
-	dir, err := ioutil.TempDir(".", "badgertest")
+	dir, err := ioutil.TempDir("", "badgertest")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -354,7 +354,7 @@ func TestDiscardMapTooBig(t *testing.T) {
 		m: createDiscardStats(),
 	}
 
-	db.Close()
+	require.NoError(t, db.Close())
 	// reopen the same DB
 	db, err = Open(ops)
 	require.NoError(t, err, "error while openning db")

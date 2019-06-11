@@ -55,7 +55,7 @@ const (
 
 	mi int64 = 1 << 20
 
-	// The number of updates after which discard map should be flushed into badger
+	// The number of updates after which discard map should be flushed into badger.
 	discardStatsFlushThreshold = 100
 )
 
@@ -608,7 +608,7 @@ func (vlog *valueLog) dropAll() (int, error) {
 type lfDiscardStats struct {
 	sync.Mutex
 	m                 map[uint32]int64
-	updatesSinceFlush uint16
+	updatesSinceFlush int
 }
 
 type valueLog struct {
@@ -1381,7 +1381,7 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) error {
 	}
 	vlog.lfDiscardStats.Unlock()
 	if vlog.lfDiscardStats.updatesSinceFlush > discardStatsFlushThreshold {
-		if err := vlog.FlushDiscardStats(); err != nil {
+		if err := vlog.flushDiscardStats(); err != nil {
 			return err
 		}
 		vlog.lfDiscardStats.updatesSinceFlush = 0
@@ -1389,9 +1389,9 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) error {
 	return nil
 }
 
-// FlushDiscardStats inserts discard stats into badger. Returns error on failure.
-func (vlog *valueLog) FlushDiscardStats() error {
-	if len(vlog.lfDiscardStats.m) < 1 {
+// flushDiscardStats inserts discard stats into badger. Returns error on failure.
+func (vlog *valueLog) flushDiscardStats() error {
+	if len(vlog.lfDiscardStats.m) == 0 {
 		return nil
 	}
 	entries := []*Entry{{
@@ -1430,15 +1430,15 @@ func (vlog *valueLog) populateDiscardStats() error {
 	}
 
 	var statsMap map[uint32]int64
-	// If discard map is stored in vlog file
+	// discard map is stored in the vlog file.
 	if vs.Meta&bitValuePointer > 0 {
 		var vp valuePointer
 		vp.Decode(vs.Value)
 		result, cb, err := vlog.Read(vp, new(y.Slice))
-		defer runCallback(cb)
 		if err != nil {
 			return errors.Wrapf(err, "failed to read value pointer from vlog file: %+v", vp)
 		}
+		defer runCallback(cb)
 		if err := json.Unmarshal(result, &statsMap); err != nil {
 			return errors.Wrapf(err, "failed to unmarshal discard stats")
 		}
