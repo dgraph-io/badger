@@ -65,7 +65,7 @@ func init() {
 	infoCmd.Flags().BoolVar(&opt.itemMeta, "show-meta", true, "Output item meta data as well")
 	infoCmd.Flags().BoolVar(&opt.keyHistory, "history", false, "Show all versions of a key")
 	infoCmd.Flags().BoolVar(
-		&opt.allowInternal, "allow-internal", false, "Show internal keys along with other keys."+
+		&opt.allowInternal, "show-internal", false, "Show internal keys along with other keys."+
 			" This option should be used along with --show-key option")
 }
 
