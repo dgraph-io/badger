@@ -731,6 +731,7 @@ func BenchmarkRandomRead(b *testing.B) {
 }
 
 func getTableForBenchmarks(b *testing.B, count int) *Table {
+	rand.Seed(time.Now().Unix())
 	builder := NewTableBuilder()
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
@@ -742,7 +743,7 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 	}
 
 	f.Write(builder.Finish())
-	tbl, err := OpenTable(f, options.LoadToRAM, nil)
+	tbl, err := OpenTable(f, options.MemoryMap, nil)
 	require.NoError(b, err, "unable to open table")
 	return tbl
 }
