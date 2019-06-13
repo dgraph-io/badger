@@ -711,6 +711,7 @@ func BenchmarkRandomRead(b *testing.B) {
 
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	itr := tbl.NewIterator(false)
+	defer itr.Close()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
