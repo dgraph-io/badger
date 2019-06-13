@@ -714,12 +714,9 @@ func BenchmarkRandomRead(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		b.StopTimer()
-		itr.seekToFirst()
 		no := r.Intn(n)
 		k := []byte(fmt.Sprintf("%016x", no))
 		v := []byte(fmt.Sprintf("%d", no))
-		b.StartTimer()
 		itr.Seek(k)
 		if !itr.Valid() {
 			b.Fatal("itr should be valid")
@@ -734,9 +731,8 @@ func BenchmarkRandomRead(b *testing.B) {
 }
 
 func getTableForBenchmarks(b *testing.B, count int) *Table {
-	r := rand.New(rand.NewSource(time.Now().Unix()))
 	builder := NewTableBuilder()
-	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), r.Int63())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
 	require.NoError(b, err)
 	for i := 0; i < count; i++ {
