@@ -14,5 +14,5 @@ markComment: >
 # Comment to post when closing a stale issue. Set to `false` to disable
 closeComment: >
   This issue was marked as stale and no activity has occurred since then,
-  therefore it will now be closed. Please, reopen it if the issue is still
+  therefore it will now be closed. Please, reopen if the issue is still
   relevant.
