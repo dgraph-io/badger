@@ -155,7 +155,7 @@ Structure of Block.
 */
 func (b *Builder) finishBlock() {
 	ebuf := make([]byte, len(b.entryOffsets)*4+4)
-	for i, idx := len(b.entryOffsets)-1, 0; i >= 0; i-- {
+	for i, idx := 0, 0; i < len(b.entryOffsets); i++ {
 		binary.BigEndian.PutUint32(ebuf[idx:idx+4], b.entryOffsets[i])
 		idx += 4
 	}
