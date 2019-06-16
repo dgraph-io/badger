@@ -16,8 +16,6 @@
 
 package trie
 
-import "sort"
-
 type node struct {
 	children map[byte]*node
 	ids      []uint64
@@ -57,28 +55,21 @@ func (t *Trie) Add(prefix []byte, id uint64) {
 }
 
 // Get returns prefix matched ids for the given key.
-func (t *Trie) Get(key []byte) []uint64 {
-	out := []uint64{}
+func (t *Trie) Get(key []byte) map[uint64]struct{} {
+	out := make(map[uint64]struct{}, 0)
 	node := t.root
 	for _, val := range key {
 		child, ok := node.children[val]
 		if !ok {
 			break
 		}
-		out = append(out, child.ids...)
+		// We need ids of the all the node in the matching key path.
+		for _, id := range child.ids {
+			out[id] = struct{}{}
+		}
 		node = child
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i] < out[j]
-	})
-	res := out[:0]
-	for _, val := range out {
-		if len(res) != 0 && res[len(res)-1] == val {
-			continue
-		}
-		res = append(res, val)
-	}
-	return res
+	return out
 }
 
 // Delete will delete the id if the id exist in the given index path.
@@ -93,9 +84,9 @@ func (t *Trie) Delete(index []byte, id uint64) {
 	}
 	// We're just removing the id not the hanging path.
 	out := node.ids[:0]
-	for i := 0; i < len(node.ids); i++ {
-		if node.ids[i] != id {
-			out = append(out, node.ids[i])
+	for _, val := range node.ids {
+		if val != id {
+			out = append(out, val)
 		}
 	}
 	for i := len(out); i < len(node.ids); i++ {
