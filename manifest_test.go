@@ -104,6 +104,10 @@ func TestManifestVersion(t *testing.T) {
 	helpTestManifestFileCorruption(t, 4, "unsupported version")
 }
 
+func TestManifestChecksum(t *testing.T) {
+	helpTestManifestFileCorruption(t, 15, "checksum mismatch")
+}
+
 func key(prefix string, i int) string {
 	return prefix + fmt.Sprintf("%04d", i)
 }
