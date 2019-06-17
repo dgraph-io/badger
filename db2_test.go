@@ -334,7 +334,7 @@ func TestDiscardMapTooBig(t *testing.T) {
 		}
 		return stat
 	}
-	dir, err := ioutil.TempDir("", "badgertest")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
