@@ -472,7 +472,7 @@ func syncDir(dir string) error {
 	if err != nil {
 		return errors.Wrapf(err, "While opening directory: %s.", dir)
 	}
-	err = f.Sync()
+	err = y.FileSync(f)
 	closeErr := f.Close()
 	if err != nil {
 		return errors.Wrapf(err, "While syncing directory: %s.", dir)
