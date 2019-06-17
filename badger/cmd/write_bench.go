@@ -160,6 +160,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	opts.Truncate = truncate
 	opts.SyncWrites = false
 	opts.CompactL0OnClose = force
+	opts.Logger = nil
 
 	db, err := badger.Open(opts)
 	if err != nil {
@@ -170,6 +171,10 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		err := db.Close()
 		log.Printf("DB.Close. Error: %v. Time taken to close: %s", err, time.Since(start))
 	}()
+
+	fmt.Println("*********************************************************")
+	fmt.Println("Starting to benchmark Writes")
+	fmt.Println("*********************************************************")
 
 	startTime = time.Now()
 	num := uint64(numKeys * mil)
