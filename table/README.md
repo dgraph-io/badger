@@ -1,51 +1,69 @@
-# BenchmarkRead
+Size of table is 127,618,890 bytes for all benchmarks.
 
+# BenchmarkRead
 ```
 $ go test -bench Read$ -count 3
-
-Size of table: 105843444
-BenchmarkRead-8   	3	 343846914 ns/op
-BenchmarkRead-8   	3	 351790907 ns/op
-BenchmarkRead-8   	3	 351762823 ns/op
+goos: linux
+goarch: amd64
+pkg: github.com/dgraph-io/badger/table
+BenchmarkRead-16    	      10	 163993633 ns/op
+BenchmarkRead-16    	      10	 162365329 ns/op
+BenchmarkRead-16    	      10	 162801148 ns/op
+PASS
+ok  	github.com/dgraph-io/badger/table	30.095s
 ```
 
-Size of table is 105,843,444 bytes, which is ~101M.
+Size of table is 127,618,890 bytes, which is ~122MB.
 
-The rate is ~287M/s which matches our read speed. This is using mmap.
+The rate is ~742MB/s using LoadToRAM(when table is in RAM).
 
-To read a 64M table, this would take ~0.22s, which is negligible.
+To read a 64M table, this would take ~0.0863s, which is negligible.
 
-```
+# BenchmarkReadAndBuild
+```go
 $ go test -bench BenchmarkReadAndBuild -count 3
-
-BenchmarkReadAndBuild-8   	       1	2341034225 ns/op
-BenchmarkReadAndBuild-8   	       1	2346349671 ns/op
-BenchmarkReadAndBuild-8   	       1	2364064576 ns/op
+goos: linux
+goarch: amd64
+pkg: github.com/dgraph-io/badger/table
+BenchmarkReadAndBuild-16   	       1	1004708276 ns/op
+BenchmarkReadAndBuild-16  	       1	1009918585 ns/op
+BenchmarkReadAndBuild-16  	       1	1030127321 ns/op
+PASS
+ok  	github.com/dgraph-io/badger/table	18.732s
 ```
 
-The rate is ~43M/s. To build a ~64M table, this would take ~1.5s. Note that this
+The rate is ~118MB/s. To build a ~64M table, this would take ~0.54s. Note that this
 does NOT include the flushing of the table to disk. All we are doing above is
-to read one table (mmaped) and write one table in memory.
+reading one table (which is in RAM) and write one table in memory.
 
-The table building takes 1.5-0.22 ~ 1.3s.
+The table building takes 0.54-0.0.0863s ~ 0.4537s.
 
-If we are writing out up to 10 tables, this would take 1.5*10 ~ 15s, and ~13s
-is spent building the tables.
+# BenchmarkReadMerged
+Below, we merge 5 tables. The total size remains unchanged at ~122M.
 
-When running populate, building one table in memory tends to take ~1.5s to ~2.5s
-on my system. Where does this overhead come from? Let's investigate the merging.
-
-Below, we merge 5 tables. The total size remains unchanged at ~101M.
-
-```
+```go
 $ go test -bench ReadMerged -count 3
-BenchmarkReadMerged-8   	       1	1321190264 ns/op
-BenchmarkReadMerged-8   	       1	1296958737 ns/op
-BenchmarkReadMerged-8   	       1	1314381178 ns/op
+BenchmarkReadMerged-16   	       2	954475788 ns/op
+BenchmarkReadMerged-16   	       2	955252462 ns/op
+BenchmarkReadMerged-16  	       2	956857353 ns/op
+PASS
+ok  	github.com/dgraph-io/badger/table	33.327s
 ```
 
-The rate is ~76M/s. To build a 64M table, this would take ~0.84s. The writing
-takes ~1.3s as we saw above. So in total, we expect around 0.84+1.3 ~ 2.1s.
-This roughly matches what we observe when running populate. There might be
-some additional overhead due to the concurrent writes going on, in flushing the
-table to disk. Also, the tables tend to be slightly bigger than 64M/s.
+The rate is ~127M/s. To read a 64M table using merge iterator, this would take ~0.5s.
+
+# BenchmarkRandomRead
+
+```go
+go test -bench BenchmarkRandomRead$ -count 3
+goos: linux
+goarch: amd64
+pkg: github.com/dgraph-io/badger/table
+BenchmarkRandomRead-16    	  300000	      3596 ns/op
+BenchmarkRandomRead-16    	  300000	      3621 ns/op
+BenchmarkRandomRead-16    	  300000	      3596 ns/op
+PASS
+ok  	github.com/dgraph-io/badger/table	44.727s
+```
+
+For random read benchmarking, we are randomly reading a key and verifying its value.
