@@ -200,6 +200,16 @@ func (b *Builder) blockIndex() []byte {
 }
 
 // Finish finishes the table by appending the index.
+/*
+The table structure looks like
++---------+------------+-----------+---------------+
+| Block 1 | Block 2    | Block 3   | Block 4       |
++---------+------------+-----------+---------------+
+| Block 5 | Block 6    | Block ... | Block N       |
++---------+------------+-----------+---------------+
+| Index   | Index Size | Checksum  | Checksum Size |
++---------+------------+-----------+---------------+
+*/
 func (b *Builder) Finish() []byte {
 	bf := bbloom.New(float64(b.keyCount), 0.01)
 	var klen [2]byte
