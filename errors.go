@@ -17,6 +17,8 @@
 package badger
 
 import (
+	"math"
+
 	"github.com/pkg/errors"
 )
 
@@ -27,7 +29,8 @@ var (
 
 	// ErrValueThreshold is returned when ValueThreshold is set to a value close to or greater than
 	// uint16.
-	ErrValueThreshold = errors.New("Invalid ValueThreshold, must be lower than uint16")
+	ErrValueThreshold = errors.Errorf(
+		"Invalid ValueThreshold, must be lower than %d", math.MaxUint16-16)
 
 	// ErrKeyNotFound is returned when key isn't found on a txn.Get.
 	ErrKeyNotFound = errors.New("Key not found")
