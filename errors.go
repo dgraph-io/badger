@@ -30,7 +30,7 @@ var (
 	// ErrValueThreshold is returned when ValueThreshold is set to a value close to or greater than
 	// uint16.
 	ErrValueThreshold = errors.Errorf(
-		"Invalid ValueThreshold, must be lower than %d", math.MaxUint16-16)
+		"Invalid ValueThreshold, must be less than %d", math.MaxUint16-16+1)
 
 	// ErrKeyNotFound is returned when key isn't found on a txn.Get.
 	ErrKeyNotFound = errors.New("Key not found")
