@@ -24,3 +24,4 @@ issues:
     - linters:
         - gosec
       text: "G404: "
+      

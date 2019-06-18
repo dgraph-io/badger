@@ -25,11 +25,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	humanize "github.com/dustin/go-humanize"
+	"github.com/spf13/cobra"
+
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
-	humanize "github.com/dustin/go-humanize"
-	"github.com/spf13/cobra"
 )
 
 var writeBenchCmd = &cobra.Command{
