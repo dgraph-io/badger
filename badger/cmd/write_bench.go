@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Dgraph Labs, Inc. and Contributors
+ * Copyright 2019 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ var writeBenchCmd = &cobra.Command{
 	Use:   "write",
 	Short: "Writes random data to Badger to benchmark write speed.",
 	Long: `
-This command writes random data to Badger to benchmark write speed. Useful for testing and 
+This command writes random data to Badger to benchmark write speed. Useful for testing and
 performance analysis.
 `,
 	RunE: writeBench,

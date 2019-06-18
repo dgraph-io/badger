@@ -33,6 +33,8 @@ import (
 
 const arenaSize = 1 << 20
 
+func (s *Skiplist) valid() bool { return s.arena != nil }
+
 func newValue(v int) []byte {
 	return []byte(fmt.Sprintf("%05d", v))
 }
