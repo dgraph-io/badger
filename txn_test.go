@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/enums"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 
@@ -33,7 +34,7 @@ import (
 )
 
 func TestTxnSimple(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 
 		txn := db.NewTransaction(true)
 
@@ -57,7 +58,7 @@ func TestTxnSimple(t *testing.T) {
 }
 
 func TestTxnReadAfterWrite(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		var wg sync.WaitGroup
 		N := 100
 		wg.Add(N)
@@ -89,7 +90,7 @@ func TestTxnCommitAsync(t *testing.T) {
 		return []byte(fmt.Sprintf("key=%d", i))
 	}
 
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		txn := db.NewTransaction(true)
 		for i := 0; i < 40; i++ {
 			err := txn.SetEntry(NewEntry(key(i), []byte(strconv.Itoa(100))))
@@ -151,7 +152,7 @@ func TestTxnCommitAsync(t *testing.T) {
 }
 
 func TestTxnVersions(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		k := []byte("key")
 		for i := 1; i < 10; i++ {
 			txn := db.NewTransaction(true)
@@ -255,7 +256,7 @@ func TestTxnVersions(t *testing.T) {
 }
 
 func TestTxnWriteSkew(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		// Accounts
 		ax := []byte("x")
 		ay := []byte("y")
@@ -323,7 +324,7 @@ func TestTxnWriteSkew(t *testing.T) {
 // Read at ts=2 -> a2, c2
 // Read at ts=1 -> c1
 func TestTxnIterationEdgeCase(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		ka := []byte("a")
 		kb := []byte("b")
 		kc := []byte("c")
@@ -413,7 +414,7 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 // Read at ts=2 -> a2, c2
 // Read at ts=1 -> c1
 func TestTxnIterationEdgeCase2(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		ka := []byte("a")
 		kb := []byte("aa")
 		kc := []byte("aaa")
@@ -506,7 +507,7 @@ func TestTxnIterationEdgeCase2(t *testing.T) {
 }
 
 func TestTxnIterationEdgeCase3(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		kb := []byte("abc")
 		kc := []byte("acd")
 		kd := []byte("ade")
@@ -616,7 +617,7 @@ func TestTxnIterationEdgeCase3(t *testing.T) {
 }
 
 func TestIteratorAllVersionsWithDeleted(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		// Write two keys
 		err := db.Update(func(txn *Txn) error {
 			require.NoError(t, txn.SetEntry(NewEntry([]byte("answer1"), []byte("42"))))
@@ -666,7 +667,7 @@ func TestIteratorAllVersionsWithDeleted(t *testing.T) {
 }
 
 func TestIteratorAllVersionsWithDeleted2(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		// Set and delete alternatively
 		for i := 0; i < 4; i++ {
 			err := db.Update(func(txn *Txn) error {
@@ -712,9 +713,7 @@ func TestManagedDB(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	opt := getTestOptions(dir)
-	opt.managedTxns = true
-	db, err := Open(opt)
+	db, err := OpenManaged(dir, getTestOptions()...)
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -803,16 +802,13 @@ func TestArmV7Issue311Fix(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	config := DefaultOptions
-	config.TableLoadingMode = options.MemoryMap
-	config.ValueLogFileSize = 16 << 20
-	config.LevelOneSize = 8 << 20
-	config.MaxTableSize = 2 << 20
-	config.Dir = dir
-	config.ValueDir = dir
-	config.SyncWrites = false
-
-	db, err := Open(config)
+	db, err := Open(dir,
+		options.WithTableLoadingMode(enums.MemoryMap),
+		options.WithValueLogFileSize(16<<20),
+		options.WithLevelOneSize(8<<20),
+		options.WithMaxTableSize(2<<20),
+		options.WithSyncWrites(false),
+	)
 	if err != nil {
 		t.Fatalf("cannot open db at location %s: %v", dir, err)
 	}

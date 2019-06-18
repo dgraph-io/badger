@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/dgraph-io/badger/options"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,12 +46,13 @@ func TestTruncateVlogWithClose(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	opt := getTestOptions(dir)
-	opt.SyncWrites = true
-	opt.Truncate = true
-	opt.ValueThreshold = 1 // Force all reads from value log.
+	opt := append(getTestOptions(),
+		options.WithSyncWrites(true),
+		options.WithTruncate(true),
+		options.WithValueThreshold(1), // Force all reads from value log.
+	)
 
-	db, err := Open(opt)
+	db, err := Open(dir, opt...)
 	require.NoError(t, err)
 
 	err = db.Update(func(txn *Txn) error {
@@ -63,7 +65,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 	require.NoError(t, os.Truncate(path.Join(dir, "000000.vlog"), 4096))
 
 	// Reopen and write some new data.
-	db, err = Open(opt)
+	db, err = Open(dir, opt...)
 	require.NoError(t, err)
 	for i := 0; i < 32; i++ {
 		err := db.Update(func(txn *Txn) error {
@@ -85,7 +87,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	// Reopen and read the data again.
-	db, err = Open(opt)
+	db, err = Open(dir, opt...)
 	require.NoError(t, err)
 	for i := 0; i < 32; i++ {
 		err := db.View(func(txn *Txn) error {
@@ -114,11 +116,12 @@ func TestTruncateVlogNoClose(t *testing.T) {
 	}
 	fmt.Println("running")
 	dir := "p"
-	opts := getTestOptions(dir)
-	opts.SyncWrites = true
-	opts.Truncate = true
+	opts := append(getTestOptions(),
+		options.WithSyncWrites(true),
+		options.WithTruncate(true),
+	)
 
-	kv, err := Open(opts)
+	kv, err := Open(dir, opts...)
 	require.NoError(t, err)
 	key := func(i int) string {
 		return fmt.Sprintf("%d%10d", i, i)
@@ -135,11 +138,12 @@ func TestTruncateVlogNoClose2(t *testing.T) {
 		return
 	}
 	dir := "p"
-	opts := getTestOptions(dir)
-	opts.SyncWrites = true
-	opts.Truncate = true
+	opts := append(getTestOptions(),
+		options.WithSyncWrites(true),
+		options.WithTruncate(true),
+	)
 
-	kv, err := Open(opts)
+	kv, err := Open(dir, opts...)
 	require.NoError(t, err)
 	key := func(i int) string {
 		return fmt.Sprintf("%d%10d", i, i)
@@ -169,11 +173,12 @@ func TestTruncateVlogNoClose3(t *testing.T) {
 	}
 	fmt.Print("Running")
 	dir := "p"
-	opts := getTestOptions(dir)
-	opts.SyncWrites = true
-	opts.Truncate = true
+	opts := append(getTestOptions(),
+		options.WithSyncWrites(true),
+		options.WithTruncate(true),
+	)
 
-	kv, err := Open(opts)
+	kv, err := Open(dir, opts...)
 	require.NoError(t, err)
 	key := func(i int) string {
 		return fmt.Sprintf("%d%10d", i, i)
@@ -196,10 +201,11 @@ func TestBigKeyValuePairs(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	opts := DefaultOptions
-	opts.MaxTableSize = 1 << 20
-	opts.ValueLogMaxEntries = 64
-	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+	opts := []options.Option{
+		options.WithMaxTableSize(1 << 20),
+		options.WithValueLogMaxEntries(64),
+	}
+	runBadgerTest(t, opts, false, func(t *testing.T, db *DB) {
 		bigK := make([]byte, 65001)
 		bigV := make([]byte, db.opt.ValueLogFileSize+1)
 		small := make([]byte, 65000)
@@ -285,10 +291,11 @@ func TestPushValueLogLimit(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	opt := DefaultOptions
-	opt.ValueLogMaxEntries = 64
-	opt.ValueLogFileSize = 2 << 30
-	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+	opts := []options.Option{
+		options.WithValueLogMaxEntries(64),
+		options.WithValueLogFileSize(2 << 30),
+	}
+	runBadgerTest(t, opts, false, func(t *testing.T, db *DB) {
 		data := []byte(fmt.Sprintf("%30d", 1))
 		key := func(i int) string {
 			return fmt.Sprintf("%100d", i)

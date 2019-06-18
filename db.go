@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dgraph-io/badger/enums"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/skl"
@@ -70,11 +71,15 @@ type DB struct {
 	// nil if Dir and ValueDir are the same
 	valueDirGuard *directoryLockGuard
 
-	closers   closers
-	elog      trace.EventLog
-	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
-	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
-	opt       Options
+	closers closers
+	elog    trace.EventLog
+	mt      *skl.Skiplist   // Our latest (actively written) in-memory table
+	imm     []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+	opt     options.Options
+
+	maxBatchCount int64 // max entries in batch
+	maxBatchSize  int64 // max batch size in bytes
+
 	manifest  *manifestFile
 	lc        *levelsController
 	vlog      valueLog
@@ -188,9 +193,13 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 }
 
 // Open returns a new DB object.
-func Open(opt Options) (db *DB, err error) {
-	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
-	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
+func Open(path string, opts ...options.Option) (db *DB, err error) {
+	opt := defaultOptions
+	opt.ValueDir = path
+	opt.Dir = path
+	for _, o := range opts {
+		opt = o(opt)
+	}
 
 	if opt.ValueThreshold > math.MaxUint16-16 {
 		return nil, ErrValueThreshold
@@ -251,8 +260,8 @@ func Open(opt Options) (db *DB, err error) {
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
-	if !(opt.ValueLogLoadingMode == options.FileIO ||
-		opt.ValueLogLoadingMode == options.MemoryMap) {
+	if !(opt.ValueLogLoadingMode == enums.FileIO ||
+		opt.ValueLogLoadingMode == enums.MemoryMap) {
 		return nil, ErrInvalidLoadingMode
 	}
 	manifestFile, manifest, err := openOrCreateManifestFile(opt.Dir, opt.ReadOnly)
@@ -265,6 +274,7 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}()
 
+	maxBatchSize := (15 * opt.MaxTableSize) / 100
 	db = &DB{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
@@ -274,15 +284,17 @@ func Open(opt Options) (db *DB, err error) {
 		elog:          trace.NewEventLog("Badger", "DB"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
-		orc:           newOracle(opt),
+		orc:           newOracle(opt.ManagedTxns),
 		pub:           newPublisher(),
+		maxBatchSize:  maxBatchSize,
+		maxBatchCount: maxBatchSize / int64(skl.MaxNodeSize),
 	}
 
 	// Calculate initial size.
 	db.calculateSize()
 	db.closers.updateSize = y.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
-	db.mt = skl.NewSkiplist(arenaSize(opt))
+	db.mt = skl.NewSkiplist(arenaSize(db))
 
 	// newLevelsController potentially loads files in directory.
 	if db.lc, err = newLevelsController(db, &manifest); err != nil {
@@ -677,7 +689,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 		size += int64(e.estimateSize(db.opt.ValueThreshold))
 		count++
 	}
-	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
+	if count >= db.maxBatchCount || size >= db.maxBatchSize {
 		return nil, ErrTxnTooBig
 	}
 
@@ -826,7 +838,7 @@ func (db *DB) ensureRoomForWrite() error {
 			db.mt.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
 		db.imm = append(db.imm, db.mt)
-		db.mt = skl.NewSkiplist(arenaSize(db.opt))
+		db.mt = skl.NewSkiplist(arenaSize(db))
 		// New memtable is empty. We certainly have room.
 		return nil
 	default:
@@ -835,8 +847,8 @@ func (db *DB) ensureRoomForWrite() error {
 	}
 }
 
-func arenaSize(opt Options) int64 {
-	return opt.MaxTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
+func arenaSize(db *DB) int64 {
+	return db.opt.MaxTableSize + db.maxBatchSize + db.maxBatchCount*int64(skl.MaxNodeSize)
 }
 
 // WriteLevel0Table flushes memtable.
@@ -1159,7 +1171,7 @@ func (seq *Sequence) updateLease() error {
 //
 // GetSequence is not supported on ManagedDB. Calling this would result in a panic.
 func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
-	if db.opt.managedTxns {
+	if db.opt.ManagedTxns {
 		panic("Cannot use GetSequence with managedDB=true.")
 	}
 
@@ -1204,12 +1216,12 @@ func (db *DB) KeySplits(prefix []byte) []string {
 
 // MaxBatchCount returns max possible entries in batch
 func (db *DB) MaxBatchCount() int64 {
-	return db.opt.maxBatchCount
+	return db.maxBatchCount
 }
 
 // MaxBatchSize returns max possible batch size
 func (db *DB) MaxBatchSize() int64 {
-	return db.opt.maxBatchSize
+	return db.maxBatchSize
 }
 
 func (db *DB) stopCompactions() {
@@ -1373,7 +1385,7 @@ func (db *DB) dropAll() (func(), error) {
 		mt.DecrRef()
 	}
 	db.imm = db.imm[:0]
-	db.mt = skl.NewSkiplist(arenaSize(db.opt)) // Set it up for future writes.
+	db.mt = skl.NewSkiplist(arenaSize(db)) // Set it up for future writes.
 
 	num, err := db.lc.dropTree()
 	if err != nil {
@@ -1429,7 +1441,7 @@ func (db *DB) DropPrefix(prefix []byte) error {
 		memtable.DecrRef()
 	}
 	db.imm = db.imm[:0]
-	db.mt = skl.NewSkiplist(arenaSize(db.opt))
+	db.mt = skl.NewSkiplist(arenaSize(db))
 
 	// Drop prefixes from the levels.
 	if err := db.lc.dropPrefix(prefix); err != nil {

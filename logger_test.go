@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/dgraph-io/badger/options"
 	"github.com/stretchr/testify/require"
 )
 
@@ -46,7 +47,7 @@ func (l *mockLogger) Debugf(f string, v ...interface{}) {
 // Test that the DB-specific log is used instead of the global log.
 func TestDbLog(t *testing.T) {
 	l := &mockLogger{}
-	opt := Options{Logger: l}
+	opt := options.Options{Logger: l}
 
 	opt.Errorf("test")
 	require.Equal(t, "ERROR: test", l.output)
@@ -59,8 +60,7 @@ func TestDbLog(t *testing.T) {
 // Test that the global logger is used when no logger is specified in Options.
 func TestNoDbLog(t *testing.T) {
 	l := &mockLogger{}
-	opt := Options{}
-	opt.Logger = l
+	opt := options.Options{Logger: l}
 
 	opt.Errorf("test")
 	require.Equal(t, "ERROR: test", l.output)

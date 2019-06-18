@@ -49,12 +49,8 @@ func getSortedKVList(valueSize, listSize int) *pb.KVList {
 
 // check if we can read values after writing using stream writer
 func TestStreamWriter1(t *testing.T) {
-	normalModeOpts := DefaultOptions
-	managedModeOpts := DefaultOptions
-	managedModeOpts.managedTxns = true
-
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
-		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
+	for _, managedTxns := range []bool{false, true} {
+		runBadgerTest(t, nil, managedTxns, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
 			valueSize := 128
@@ -90,12 +86,8 @@ func TestStreamWriter1(t *testing.T) {
 
 // write more keys to db after writing keys using stream writer
 func TestStreamWriter2(t *testing.T) {
-	normalModeOpts := DefaultOptions
-	managedModeOpts := DefaultOptions
-	managedModeOpts.managedTxns = true
-
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
-		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
+	for _, managedTxns := range []bool{false, true} {
+		runBadgerTest(t, nil, managedTxns, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
 			valueSize := 128
@@ -111,8 +103,8 @@ func TestStreamWriter2(t *testing.T) {
 			val := make([]byte, valueSize)
 			y.Check2(rand.Read(val))
 			for i := 0; i < noOfKeys; i++ {
-				txn := db.newTransaction(true, opts.managedTxns)
-				if opts.managedTxns {
+				txn := db.newTransaction(true, managedTxns)
+				if managedTxns {
 					txn.readTs = math.MaxUint64
 					txn.commitTs = maxVs
 				}
@@ -142,12 +134,8 @@ func TestStreamWriter2(t *testing.T) {
 }
 
 func TestStreamWriter3(t *testing.T) {
-	normalModeOpts := DefaultOptions
-	managedModeOpts := DefaultOptions
-	managedModeOpts.managedTxns = true
-
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
-		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
+	for _, managedTxns := range []bool{false, true} {
+		runBadgerTest(t, nil, managedTxns, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
 			valueSize := 128
@@ -180,8 +168,8 @@ func TestStreamWriter3(t *testing.T) {
 			y.Check2(rand.Read(val))
 			counter = 1
 			for i := 0; i < noOfKeys; i++ {
-				txn := db.newTransaction(true, opts.managedTxns)
-				if opts.managedTxns {
+				txn := db.newTransaction(true, managedTxns)
+				if managedTxns {
 					txn.readTs = math.MaxUint64
 					txn.commitTs = maxVs
 				}
@@ -227,7 +215,7 @@ func TestStreamWriter3(t *testing.T) {
 // Oracle reinitialization is happening. Try commenting line 171 in stream_writer.go with code
 // (sw.db.orc = newOracle(sw.db.opt), this test should fail.
 func TestStreamWriter4(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		// first insert some entries in db
 		for i := 0; i < 10; i++ {
 			err := db.Update(func(txn *Txn) error {
@@ -253,7 +241,7 @@ func TestStreamWriter4(t *testing.T) {
 }
 
 func TestStreamWriter5(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		list := &pb.KVList{}
 
 		left := make([]byte, 6)
@@ -282,7 +270,7 @@ func TestStreamWriter5(t *testing.T) {
 		require.NoError(t, db.Close())
 
 		var err error
-		_, err = Open(db.opt)
+		_, err = Open(db.opt.Dir)
 		require.NoError(t, err)
 	})
 }
@@ -290,7 +278,7 @@ func TestStreamWriter5(t *testing.T) {
 // This test tries to insert multiple equal keys(without version) and verifies
 // if those are going to same table.
 func TestStreamWriter6(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		fmt.Println(db.opt.Dir)
 		list := &pb.KVList{}
 		str := []string{"a", "a", "b", "b", "c", "c"}
@@ -324,7 +312,7 @@ func TestStreamWriter6(t *testing.T) {
 		}
 		require.NoError(t, db.Close())
 
-		_, err := Open(db.opt)
+		_, err := Open(db.opt.Dir)
 		require.NoError(t, err)
 	})
 }

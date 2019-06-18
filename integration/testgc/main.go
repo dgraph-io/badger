@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/enums"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 )
@@ -102,14 +103,11 @@ func main() {
 	dir := "/mnt/drive/badgertest"
 	os.RemoveAll(dir)
 
-	opts := badger.DefaultOptions
-	opts.Dir = dir
-	opts.ValueDir = dir
-	opts.TableLoadingMode = options.MemoryMap
-	opts.ValueLogLoadingMode = options.FileIO
-	opts.SyncWrites = false
-
-	db, err := badger.Open(opts)
+	db, err := badger.Open(dir,
+		options.WithTableLoadingMode(enums.MemoryMap),
+		options.WithValueLogLoadingMode(enums.FileIO),
+		options.WithSyncWrites(false),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}

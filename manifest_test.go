@@ -27,7 +27,7 @@ import (
 
 	"golang.org/x/net/trace"
 
-	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/enums"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
@@ -39,9 +39,8 @@ func TestManifestBasic(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	opt := getTestOptions(dir)
 	{
-		kv, err := Open(opt)
+		kv, err := Open(dir, getTestOptions()...)
 		require.NoError(t, err)
 		n := 5000
 		for i := 0; i < n; i++ {
@@ -56,7 +55,7 @@ func TestManifestBasic(t *testing.T) {
 		require.NoError(t, kv.Close())
 	}
 
-	kv, err := Open(opt)
+	kv, err := Open(dir, getTestOptions()...)
 	require.NoError(t, err)
 
 	require.NoError(t, kv.View(func(txn *Txn) error {
@@ -74,9 +73,8 @@ func helpTestManifestFileCorruption(t *testing.T, off int64, errorContent string
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	opt := getTestOptions(dir)
 	{
-		kv, err := Open(opt)
+		kv, err := Open(dir, getTestOptions()...)
 		require.NoError(t, err)
 		require.NoError(t, kv.Close())
 	}
@@ -86,7 +84,7 @@ func helpTestManifestFileCorruption(t *testing.T, off int64, errorContent string
 	_, err = fp.WriteAt([]byte{'X'}, off)
 	require.NoError(t, err)
 	require.NoError(t, fp.Close())
-	kv, err := Open(opt)
+	kv, err := Open(dir, getTestOptions()...)
 	defer func() {
 		if kv != nil {
 			kv.Close()
@@ -164,16 +162,13 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opt := DefaultOptions
-	opt.Dir = dir
-	opt.ValueDir = dir
-	kv, err := Open(opt)
+	kv, err := Open(dir)
 	require.NoError(t, err)
 
 	lh0 := newLevelHandler(kv, 0)
 	lh1 := newLevelHandler(kv, 1)
 	f := buildTestTable(t, "k", 2)
-	t1, err := table.OpenTable(f, options.MemoryMap, nil)
+	t1, err := table.OpenTable(f, enums.MemoryMap, nil)
 	require.NoError(t, err)
 	defer t1.DecrRef()
 
@@ -194,7 +189,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lc.runCompactDef(0, cd)
 
 	f = buildTestTable(t, "l", 2)
-	t2, err := table.OpenTable(f, options.MemoryMap, nil)
+	t2, err := table.OpenTable(f, enums.MemoryMap, nil)
 	require.NoError(t, err)
 	defer t2.DecrRef()
 	done = lh0.tryAddLevel0Table(t2)

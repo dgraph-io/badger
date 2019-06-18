@@ -24,7 +24,7 @@ import (
 
 func TestBuildKeyValueSizeHistogram(t *testing.T) {
 	t.Run("All same size key-values", func(t *testing.T) {
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 			entries := int64(40)
 			err := db.Update(func(txn *Txn) error {
 				for i := int64(0); i < entries; i++ {
@@ -61,7 +61,7 @@ func TestBuildKeyValueSizeHistogram(t *testing.T) {
 	})
 
 	t.Run("different size key-values", func(t *testing.T) {
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 			entries := int64(3)
 			err := db.Update(func(txn *Txn) error {
 				if err := txn.SetEntry(NewEntry([]byte("A"), []byte("B"))); err != nil {

@@ -35,6 +35,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dgraph-io/badger/enums"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
@@ -68,7 +69,7 @@ type logFile struct {
 	fid         uint32
 	fmap        []byte
 	size        uint32
-	loadingMode options.FileLoadingMode
+	loadingMode enums.FileLoadingMode
 }
 
 // openReadOnly assumes that we have a write lock on logFile.
@@ -95,7 +96,7 @@ func (lf *logFile) openReadOnly() error {
 }
 
 func (lf *logFile) mmap(size int64) (err error) {
-	if lf.loadingMode != options.MemoryMap {
+	if lf.loadingMode != enums.MemoryMap {
 		// Nothing to do
 		return nil
 	}
@@ -107,7 +108,7 @@ func (lf *logFile) mmap(size int64) (err error) {
 }
 
 func (lf *logFile) munmap() (err error) {
-	if lf.loadingMode != options.MemoryMap {
+	if lf.loadingMode != enums.MemoryMap {
 		// Nothing to do
 		return nil
 	}
@@ -121,7 +122,7 @@ func (lf *logFile) munmap() (err error) {
 func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 	var nbr int64
 	offset := p.Offset
-	if lf.loadingMode == options.FileIO {
+	if lf.loadingMode == enums.FileIO {
 		buf = s.Resize(int(p.Len))
 		var n int
 		n, err = lf.fd.ReadAt(buf, int64(offset))
@@ -624,7 +625,7 @@ type valueLog struct {
 	maxFid            uint32 // accessed via atomics.
 	writableLogOffset uint32 // read by read, written by write. Must access via atomics.
 	numEntriesWritten uint32
-	opt               Options
+	opt               options.Options
 
 	garbageCh      chan struct{}
 	lfDiscardStats *lfDiscardStats
@@ -1099,7 +1100,7 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, func(
 	}
 
 	buf, err := lf.read(vp, s)
-	if vlog.opt.ValueLogLoadingMode == options.MemoryMap {
+	if vlog.opt.ValueLogLoadingMode == enums.MemoryMap {
 		return buf, lf.lock.RUnlock, err
 	}
 	// If we are using File I/O we unlock the file immediately

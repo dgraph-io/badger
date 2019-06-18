@@ -28,7 +28,7 @@ import (
 
 func TestGetMergeOperator(t *testing.T) {
 	t.Run("Get before Add", func(t *testing.T) {
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator([]byte("merge"), add, 200*time.Millisecond)
 			defer m.Stop()
 
@@ -39,7 +39,7 @@ func TestGetMergeOperator(t *testing.T) {
 	})
 	t.Run("Add and Get", func(t *testing.T) {
 		key := []byte("merge")
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator(key, add, 200*time.Millisecond)
 			defer m.Stop()
 
@@ -61,7 +61,7 @@ func TestGetMergeOperator(t *testing.T) {
 		add := func(originalValue, newValue []byte) []byte {
 			return append(originalValue, newValue...)
 		}
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator([]byte("fooprefix"), add, 2*time.Millisecond)
 			defer m.Stop()
 
@@ -76,7 +76,7 @@ func TestGetMergeOperator(t *testing.T) {
 	})
 	t.Run("Get Before Compact", func(t *testing.T) {
 		key := []byte("merge")
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator(key, add, 500*time.Millisecond)
 			defer m.Stop()
 
@@ -95,7 +95,7 @@ func TestGetMergeOperator(t *testing.T) {
 
 	t.Run("Get after Stop", func(t *testing.T) {
 		key := []byte("merge")
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator(key, add, 1*time.Second)
 
 			err := m.Add(uint64ToBytes(1))
@@ -116,8 +116,7 @@ func TestGetMergeOperator(t *testing.T) {
 		require.NoError(t, err)
 		defer os.RemoveAll(dir)
 
-		opts := getTestOptions(dir)
-		db, err := Open(opts)
+		db, err := Open(dir, getTestOptions()...)
 		require.NoError(t, err)
 		mergeKey := []byte("foo")
 		m := db.GetMergeOperator(mergeKey, add, 2*time.Millisecond)
@@ -133,7 +132,7 @@ func TestGetMergeOperator(t *testing.T) {
 
 		// Force compaction by closing DB. The compaction should discard all the old merged values
 		require.Nil(t, db.Close())
-		db, err = Open(opts)
+		db, err = Open(dir, getTestOptions()...)
 		require.NoError(t, err)
 		defer db.Close()
 

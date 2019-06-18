@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
@@ -60,10 +61,9 @@ func TestDropAllManaged(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opts := getTestOptions(dir)
-	opts.managedTxns = true
-	opts.ValueLogFileSize = 5 << 20
-	db, err := Open(opts)
+	opts := append(getTestOptions(),
+		options.WithValueLogFileSize(5<<20))
+	db, err := OpenManaged(dir, opts...)
 	require.NoError(t, err)
 
 	N := uint64(10000)
@@ -94,8 +94,7 @@ func TestDropAllManaged(t *testing.T) {
 	db.Close()
 
 	// Ensure that value log is correctly replayed, that we are preserving badgerHead.
-	opts.managedTxns = true
-	db2, err := Open(opts)
+	db2, err := OpenManaged(dir, opts...)
 	require.NoError(t, err)
 	require.Equal(t, int(N), numKeysManaged(db2, math.MaxUint64))
 	db2.Close()
@@ -105,9 +104,8 @@ func TestDropAll(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 5 << 20
-	db, err := Open(opts)
+	opts := append(getTestOptions(), options.WithValueLogFileSize(5<<20))
+	db, err := Open(dir, opts...)
 	require.NoError(t, err)
 
 	N := uint64(10000)
@@ -131,7 +129,7 @@ func TestDropAll(t *testing.T) {
 	db.Close()
 
 	// Ensure that value log is correctly replayed.
-	db2, err := Open(opts)
+	db2, err := Open(dir, opts...)
 	require.NoError(t, err)
 	require.Equal(t, int(N), numKeys(db2))
 	db2.Close()
@@ -141,9 +139,8 @@ func TestDropAllTwice(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 5 << 20
-	db, err := Open(opts)
+	opts := append(getTestOptions(), options.WithValueLogFileSize(5<<20))
+	db, err := Open(dir, opts...)
 	require.NoError(t, err)
 
 	N := uint64(10000)
@@ -169,9 +166,8 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 5 << 20
-	db, err := Open(opts)
+	opts := append(getTestOptions(), options.WithValueLogFileSize(5<<20))
+	db, err := Open(dir, opts...)
 	require.NoError(t, err)
 
 	N := uint64(10000)
@@ -235,9 +231,8 @@ func TestDropReadOnly(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 5 << 20
-	db, err := Open(opts)
+	opts := append(getTestOptions(), options.WithValueLogFileSize(5<<20))
+	db, err := Open(dir, opts...)
 	require.NoError(t, err)
 	N := uint64(1000)
 	populate := func(db *DB) {
@@ -252,8 +247,7 @@ func TestDropReadOnly(t *testing.T) {
 	require.Equal(t, int(N), numKeys(db))
 	require.NoError(t, db.Close())
 
-	opts.ReadOnly = true
-	db2, err := Open(opts)
+	db2, err := Open(dir, append(opts, options.WithReadOnly(true))...)
 	// acquireDirectoryLock returns ErrWindowsNotSupported on Windows. It can be ignored safely.
 	if runtime.GOOS == "windows" {
 		require.Equal(t, err, ErrWindowsNotSupported)
@@ -267,9 +261,8 @@ func TestWriteAfterClose(t *testing.T) {
 	dir, err := ioutil.TempDir(".", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 5 << 20
-	db, err := Open(opts)
+	opts := append(getTestOptions(), options.WithValueLogFileSize(5<<20))
+	db, err := Open(dir, opts...)
 	require.NoError(t, err)
 	N := uint64(1000)
 	populate := func(db *DB) {
@@ -293,9 +286,7 @@ func TestDropAllRace(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opts := getTestOptions(dir)
-	opts.managedTxns = true
-	db, err := Open(opts)
+	db, err := OpenManaged(dir, getTestOptions()...)
 	require.NoError(t, err)
 
 	N := 10000
@@ -357,9 +348,8 @@ func TestDropPrefix(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 5 << 20
-	db, err := Open(opts)
+	opts := append(getTestOptions(), options.WithValueLogFileSize(5<<20))
+	db, err := Open(dir, opts...)
 	require.NoError(t, err)
 
 	N := uint64(10000)
@@ -398,7 +388,7 @@ func TestDropPrefix(t *testing.T) {
 	db.Close()
 
 	// Ensure that value log is correctly replayed.
-	db2, err := Open(opts)
+	db2, err := Open(dir, opts...)
 	require.NoError(t, err)
 	require.Equal(t, 0, numKeys(db2))
 	db2.Close()
@@ -408,9 +398,8 @@ func TestDropPrefixWithPendingTxn(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 5 << 20
-	db, err := Open(opts)
+	opts := append(getTestOptions(), options.WithValueLogFileSize(5<<20))
+	db, err := Open(dir, opts...)
 	require.NoError(t, err)
 
 	N := uint64(10000)
@@ -477,9 +466,8 @@ func TestDropPrefixReadOnly(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 5 << 20
-	db, err := Open(opts)
+	opts := append(getTestOptions(), options.WithValueLogFileSize(5<<20))
+	db, err := Open(dir, opts...)
 	require.NoError(t, err)
 	N := uint64(1000)
 	populate := func(db *DB) {
@@ -494,8 +482,7 @@ func TestDropPrefixReadOnly(t *testing.T) {
 	require.Equal(t, int(N), numKeys(db))
 	require.NoError(t, db.Close())
 
-	opts.ReadOnly = true
-	db2, err := Open(opts)
+	db2, err := Open(dir, append(opts, options.WithReadOnly(true))...)
 	// acquireDirectoryLock returns ErrWindowsNotSupported on Windows. It can be ignored safely.
 	if runtime.GOOS == "windows" {
 		require.Equal(t, err, ErrWindowsNotSupported)
@@ -509,9 +496,7 @@ func TestDropPrefixRace(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opts := getTestOptions(dir)
-	opts.managedTxns = true
-	db, err := Open(opts)
+	db, err := OpenManaged(dir, getTestOptions()...)
 	require.NoError(t, err)
 
 	N := 10000

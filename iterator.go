@@ -24,7 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/enums"
 	"github.com/dgraph-io/badger/table"
 
 	"github.com/dgraph-io/badger/y"
@@ -220,7 +220,7 @@ func (item *Item) prefetchValue() {
 	if val == nil {
 		return
 	}
-	if item.db.opt.ValueLogLoadingMode == options.MemoryMap {
+	if item.db.opt.ValueLogLoadingMode == enums.MemoryMap {
 		buf := item.slice.Resize(len(val))
 		copy(buf, val)
 		item.val = buf

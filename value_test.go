@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/enums"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	humanize "github.com/dustin/go-humanize"
@@ -38,7 +39,7 @@ func TestValueBasic(t *testing.T) {
 	y.Check(err)
 	defer os.RemoveAll(dir)
 
-	kv, _ := Open(getTestOptions(dir))
+	kv, _ := Open(dir, getTestOptions()...)
 	defer kv.Close()
 	log := &kv.vlog
 
@@ -95,10 +96,7 @@ func TestValueGCManaged(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	N := 10000
-	opt := getTestOptions(dir)
-	opt.ValueLogMaxEntries = uint32(N / 10)
-	opt.managedTxns = true
-	db, err := Open(opt)
+	db, err := OpenManaged(dir, append(getTestOptions(), options.WithValueLogMaxEntries(uint32(N/10)))...)
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -152,10 +150,8 @@ func TestValueGC(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opt := getTestOptions(dir)
-	opt.ValueLogFileSize = 1 << 20
 
-	kv, _ := Open(opt)
+	kv, _ := Open(dir, append(getTestOptions(), options.WithValueLogFileSize(1<<20))...)
 	defer kv.Close()
 
 	sz := 32 << 10
@@ -205,10 +201,8 @@ func TestValueGC2(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opt := getTestOptions(dir)
-	opt.ValueLogFileSize = 1 << 20
 
-	kv, _ := Open(opt)
+	kv, _ := Open(dir, append(getTestOptions(), options.WithValueLogFileSize(1<<20))...)
 	defer kv.Close()
 
 	sz := 32 << 10
@@ -281,10 +275,8 @@ func TestValueGC3(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opt := getTestOptions(dir)
-	opt.ValueLogFileSize = 1 << 20
 
-	kv, err := Open(opt)
+	kv, err := Open(dir, append(getTestOptions(), options.WithValueLogFileSize(1<<20))...)
 	require.NoError(t, err)
 	defer kv.Close()
 
@@ -356,11 +348,11 @@ func TestValueGC4(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opt := getTestOptions(dir)
-	opt.ValueLogFileSize = 1 << 20
-	opt.Truncate = true
 
-	kv, err := Open(opt)
+	kv, _ := Open(dir, append(getTestOptions(),
+		options.WithValueLogFileSize(1<<20),
+		options.WithTruncate(true),
+	)...)
 	require.NoError(t, err)
 	defer kv.Close()
 
@@ -432,13 +424,14 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opt := getTestOptions(dir)
-	opt.ValueLogFileSize = 1 << 20
-	opt.Truncate = true
-	// avoid compaction on close, so that discard map remains same
-	opt.CompactL0OnClose = false
 
-	db, err := Open(opt)
+	opts := append(getTestOptions(),
+		options.WithValueLogFileSize(1<<20),
+		options.WithTruncate(true),
+		// avoid compaction on close, so that discard map remains same
+		options.WithCompactLevelZeroOnClose(false),
+	)
+	db, err := Open(dir, opts...)
 	require.NoError(t, err)
 
 	sz := 128 << 10 // 5 entries per value log file.
@@ -475,7 +468,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	err = db.Close()
 	require.NoError(t, err)
 
-	db, err = Open(opt)
+	db, err = Open(dir, opts...)
 	require.NoError(t, err)
 	defer db.Close()
 	require.True(t, reflect.DeepEqual(persistedMap, db.vlog.lfDiscardStats.m),
@@ -488,10 +481,11 @@ func TestChecksums(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	// Set up SST with K1=V1
-	opts := getTestOptions(dir)
-	opts.Truncate = true
-	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
-	kv, err := Open(opts)
+	opts := append(getTestOptions(),
+		options.WithTruncate(true),
+		options.WithValueLogFileSize(100*1024*1024), // 100Mb
+	)
+	kv, err := Open(dir, opts...)
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
 
@@ -518,7 +512,7 @@ func TestChecksums(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
 
 	// K1 should exist, but K2 shouldn't.
-	kv, err = Open(opts)
+	kv, err = Open(dir, opts...)
 	require.NoError(t, err)
 
 	require.NoError(t, kv.View(func(txn *Txn) error {
@@ -540,7 +534,7 @@ func TestChecksums(t *testing.T) {
 
 	// The vlog should contain K0 and K3 (K1 and k2 was lost when Badger started up
 	// last due to checksum failure).
-	kv, err = Open(opts)
+	kv, err = Open(dir, opts...)
 	require.NoError(t, err)
 
 	{
@@ -571,10 +565,12 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	// Create skeleton files.
-	opts := getTestOptions(dir)
-	opts.Truncate = true
-	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
-	kv, err := Open(opts)
+	opts := append(getTestOptions(),
+		options.WithTruncate(true),
+		options.WithValueLogFileSize(100*1024*1024), // 100Mb
+	)
+
+	kv, err := Open(dir, opts...)
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
 
@@ -602,7 +598,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
 
 	// Badger should now start up
-	kv, err = Open(opts)
+	kv, err = Open(dir, opts...)
 	require.NoError(t, err)
 
 	require.NoError(t, kv.View(func(txn *Txn) error {
@@ -620,7 +616,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	// When K3 is set, it should be persisted after a restart.
 	txnSet(t, kv, k3, v3, 0)
 	require.NoError(t, kv.Close())
-	kv, err = Open(opts)
+	kv, err = Open(dir, opts...)
 	require.NoError(t, err)
 	checkKeys(t, kv, [][]byte{k3})
 
@@ -637,9 +633,9 @@ func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	// Create skeleton files.
-	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
-	kv, err := Open(opts)
+	opts := append(getTestOptions(),
+		options.WithValueLogFileSize(100*1024*1024)) // 100Mb
+	kv, err := Open(dir, opts...)
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
 
@@ -662,9 +658,8 @@ func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 	buf = buf[:len(buf)-6]
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
 
-	opts.ReadOnly = true
 	// Badger should fail a read-only open with values to replay
-	kv, err = Open(opts)
+	kv, err = Open(dir, append(opts, options.WithReadOnly(true))...)
 	require.Error(t, err)
 	require.Regexp(t, "Database was not properly closed, cannot open read-only|Read-only mode is not supported on Windows", err.Error())
 }
@@ -675,9 +670,8 @@ func TestValueLogTrigger(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	opt := getTestOptions(dir)
-	opt.ValueLogFileSize = 1 << 20
-	kv, err := Open(opt)
+	opts := append(getTestOptions(), options.WithValueLogFileSize(1<<20))
+	kv, err := Open(dir, opts...)
 	require.NoError(t, err)
 
 	// Write a lot of data, so it creates some work for valug log GC.
@@ -711,9 +705,8 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
-	kv, err := Open(opts)
+	opts := append(getTestOptions(), options.WithValueLogFileSize(100*1024*1024)) // 100Mb
+	kv, err := Open(dir, opts...)
 	require.NoError(t, err)
 	txnSet(t, kv, entries[0].Key, entries[0].Value, entries[0].meta)
 	entries = entries[1:]
@@ -734,13 +727,13 @@ func TestPenultimateLogCorruption(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opt := getTestOptions(dir)
-	opt.ValueLogLoadingMode = options.FileIO
-	// Each txn generates at least two entries. 3 txns will fit each file.
-	opt.ValueLogMaxEntries = 5
-	opt.LogRotatesToFlush = 1000
+	opts := append(getTestOptions(),
+		options.WithValueLogLoadingMode(enums.FileIO),
+		// Each txn generates at least two entries. 3 txns will fit each file.
+		options.WithValueLogMaxEntries(5),
+		options.WithLogRotatesToFlush(1000))
 
-	db0, err := Open(opt)
+	db0, err := Open(dir, opts...)
 	require.NoError(t, err)
 
 	h := testHelper{db: db0, t: t}
@@ -765,8 +758,7 @@ func TestPenultimateLogCorruption(t *testing.T) {
 		require.NoError(t, db0.valueDirGuard.release())
 	}
 
-	opt.Truncate = true
-	db1, err := Open(opt)
+	db1, err := Open(dir, append(opts, options.WithTruncate(true))...)
 	require.NoError(t, err)
 	h.db = db1
 	h.readRange(0, 1) // Only 2 should be gone, because it is at the end of logfile 0.
@@ -844,13 +836,7 @@ func TestBug578(t *testing.T) {
 	y.Check(err)
 	defer os.RemoveAll(dir)
 
-	opts := DefaultOptions
-	opts.Dir = dir
-	opts.ValueDir = dir
-	opts.ValueLogMaxEntries = 64
-	opts.MaxTableSize = 1 << 13
-
-	db, err := Open(opts)
+	db, err := Open(dir, options.WithValueLogMaxEntries(64), options.WithMaxTableSize(1<<13))
 	require.NoError(t, err)
 
 	h := testHelper{db: db, t: t}
@@ -887,7 +873,7 @@ func BenchmarkReadWrite(b *testing.B) {
 				y.Check(err)
 				defer os.RemoveAll(dir)
 
-				db, err := Open(getTestOptions(dir))
+				db, err := Open(dir, getTestOptions()...)
 				y.Check(err)
 
 				vl := &db.vlog
@@ -942,12 +928,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	opts := DefaultOptions
-	opts.Dir = dir
-	opts.ValueDir = dir
-	opts.Truncate = true
-
-	db, err := Open(opts)
+	db, err := Open(dir, options.WithTruncate(true))
 	require.NoError(t, err)
 	// Insert 1 entry so that we have valid data in first vlog file
 	require.NoError(t, db.Update(func(txn *Txn) error {
@@ -962,7 +943,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), []byte("foo"), 0664))
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 2), []byte("foo"), 0664))
 
-	db, err = Open(opts)
+	db, err = Open(dir, options.WithTruncate(true))
 	require.NoError(t, err)
 
 	// Ensure vlog file with id=1 is not present

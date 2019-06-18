@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/enums"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
@@ -274,14 +275,9 @@ func compareTwo(db *badger.DB, before, after uint64) {
 }
 
 func runDisect(cmd *cobra.Command, args []string) error {
-	opts := badger.DefaultOptions
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.ReadOnly = true
-
 	// The total did not match up. So, let's disect the DB to find the
 	// transction which caused the total mismatch.
-	db, err := badger.OpenManaged(opts)
+	db, err := badger.OpenManaged(sstDir, options.WithValueDir(vlogDir), options.WithReadOnly(true))
 	if err != nil {
 		return err
 	}
@@ -324,21 +320,18 @@ func runTest(cmd *cobra.Command, args []string) error {
 	rand.Seed(time.Now().UnixNano())
 
 	// Open DB
-	opts := badger.DefaultOptions
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.MaxTableSize = 4 << 20 // Force more compactions.
-	opts.NumLevelZeroTables = 2
-	opts.NumMemtables = 2
-	// Do not GC any versions, because we need them for the disect.
-	opts.NumVersionsToKeep = int(math.MaxInt32)
-	opts.ValueThreshold = 1 // Make all values go to value log.
-	if mmap {
-		opts.TableLoadingMode = options.MemoryMap
+	opts := []options.Option{
+		options.WithValueDir(vlogDir),
+		options.WithMaxTableSize(4 << 20), // Force more compactions.
+		options.WithMaxLevelZeroTables(2),
+		options.WithMaxMemtables(2),
+		options.WithMaxVersionsToKeep(-1), // Do not GC any versions, because we need them for the disect.
+		options.WithValueThreshold(1),     // Make all values go to value log.
 	}
-	log.Printf("Opening DB with options: %+v\n", opts)
-
-	db, err := badger.Open(opts)
+	if mmap {
+		opts = append(opts, options.WithTableLoadingMode(enums.MemoryMap))
+	}
+	db, err := badger.Open(sstDir, opts...)
 	if err != nil {
 		return err
 	}
@@ -350,13 +343,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		dir, err := ioutil.TempDir("", "bank_subscribe")
 		y.Check(err)
 
-		subscribeOpts := badger.DefaultOptions
-		subscribeOpts.Dir = dir
-		subscribeOpts.ValueDir = dir
-		subscribeOpts.SyncWrites = false
-		log.Printf("Opening subscribe DB with options: %+v\n", subscribeOpts)
-
-		subscribeDB, err = badger.Open(subscribeOpts)
+		subscribeDB, err = badger.Open(dir, options.WithSyncWrites(false))
 		if err != nil {
 			return err
 		}
@@ -367,13 +354,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		dir, err := ioutil.TempDir("", "bank_stream")
 		y.Check(err)
 
-		streamOpts := badger.DefaultOptions
-		streamOpts.Dir = dir
-		streamOpts.ValueDir = dir
-		streamOpts.SyncWrites = false
-		log.Printf("Opening stream DB with options: %+v\n", streamOpts)
-
-		tmpDb, err = badger.Open(streamOpts)
+		tmpDb, err = badger.Open(dir, options.WithSyncWrites(false))
 		if err != nil {
 			return err
 		}

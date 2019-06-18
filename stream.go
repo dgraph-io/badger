@@ -368,7 +368,7 @@ func (db *DB) newStream() *Stream {
 
 // NewStream creates a new Stream.
 func (db *DB) NewStream() *Stream {
-	if db.opt.managedTxns {
+	if db.opt.ManagedTxns {
 		panic("This API can not be called in managed mode.")
 	}
 	return db.newStream()
@@ -376,7 +376,7 @@ func (db *DB) NewStream() *Stream {
 
 // NewStreamAt creates a new Stream at a particular timestamp. Should only be used with managed DB.
 func (db *DB) NewStreamAt(readTs uint64) *Stream {
-	if !db.opt.managedTxns {
+	if !db.opt.ManagedTxns {
 		panic("This API can only be called in managed mode.")
 	}
 	stream := db.newStream()

@@ -31,7 +31,7 @@ import (
 	"sync/atomic"
 
 	"github.com/AndreasBriese/bbloom"
-	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/enums"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
 )
@@ -61,7 +61,7 @@ type Table struct {
 	blockIndex []keyOffset
 	ref        int32 // For file garbage collection. Atomic.
 
-	loadingMode options.FileLoadingMode
+	loadingMode enums.FileLoadingMode
 	mmap        []byte // Memory mapped.
 
 	// The following are initialized once and const.
@@ -86,7 +86,7 @@ func (t *Table) DecrRef() error {
 		// at least one reference pointing to them.
 
 		// It's necessary to delete windows files
-		if t.loadingMode == options.MemoryMap {
+		if t.loadingMode == enums.MemoryMap {
 			if err := y.Munmap(t.mmap); err != nil {
 				return err
 			}
@@ -119,7 +119,7 @@ func (b block) NewIterator() *blockIterator {
 // entry.  Returns a table with one reference count on it (decrementing which may delete the file!
 // -- consider t.Close() instead).  The fd has to writeable because we call Truncate on it before
 // deleting.
-func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table, error) {
+func OpenTable(fd *os.File, mode enums.FileLoadingMode, cksum []byte) (*Table, error) {
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -174,15 +174,15 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 	}
 
 	switch mode {
-	case options.LoadToRAM:
+	case enums.LoadToRAM:
 		// No need to do anything. t.mmap is already filled.
-	case options.MemoryMap:
+	case enums.MemoryMap:
 		t.mmap, err = y.Mmap(fd, false, fileInfo.Size())
 		if err != nil {
 			_ = fd.Close()
 			return nil, y.Wrapf(err, "Unable to map file: %q", fileInfo.Name())
 		}
-	case options.FileIO:
+	case enums.FileIO:
 		t.mmap = nil
 	default:
 		panic(fmt.Sprintf("Invalid loading mode: %v", mode))
@@ -192,7 +192,7 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 
 // Close closes the open table.  (Releases resources back to the OS.)
 func (t *Table) Close() error {
-	if t.loadingMode == options.MemoryMap {
+	if t.loadingMode == enums.MemoryMap {
 		if err := y.Munmap(t.mmap); err != nil {
 			return err
 		}

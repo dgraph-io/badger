@@ -156,8 +156,8 @@ func (sw *StreamWriter) Flush() error {
 		return err
 	}
 
-	if !sw.db.opt.managedTxns {
-		sw.db.orc = newOracle(sw.db.opt)
+	if !sw.db.opt.ManagedTxns {
+		sw.db.orc = newOracle(sw.db.opt.ManagedTxns)
 		sw.db.orc.nextTxnTs = sw.maxVersion
 		sw.db.orc.txnMark.Done(sw.maxVersion)
 		sw.db.orc.readMark.Done(sw.maxVersion)

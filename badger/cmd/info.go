@@ -30,6 +30,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/enums"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
@@ -86,14 +87,9 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to print information in MANIFEST file")
 	}
 
-	// Open DB
-	opts := badger.DefaultOptions
-	opts.TableLoadingMode = options.MemoryMap
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.ReadOnly = true
-
-	db, err := badger.Open(opts)
+	db, err := badger.Open(sstDir, options.WithValueDir(vlogDir),
+		options.WithTableLoadingMode(enums.MemoryMap),
+		options.WithReadOnly(true))
 	if err != nil {
 		return errors.Wrap(err, "failed to open database")
 	}

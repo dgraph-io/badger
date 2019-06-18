@@ -58,9 +58,9 @@ type oracle struct {
 	closer *y.Closer
 }
 
-func newOracle(opt Options) *oracle {
+func newOracle(managedTxns bool) *oracle {
 	orc := &oracle{
-		isManaged: opt.managedTxns,
+		isManaged: managedTxns,
 		commits:   make(map[uint64]uint64),
 		// We're not initializing nextTxnTs and readOnlyTs. It would be done after replay in Open.
 		//
@@ -296,7 +296,7 @@ func (txn *Txn) checkSize(e *Entry) error {
 	count := txn.count + 1
 	// Extra bytes for version in key.
 	size := txn.size + int64(e.estimateSize(txn.db.opt.ValueThreshold)) + 10
-	if count >= txn.db.opt.maxBatchCount || size >= txn.db.opt.maxBatchSize {
+	if count >= txn.db.maxBatchCount || size >= txn.db.maxBatchSize {
 		return ErrTxnTooBig
 	}
 	txn.count, txn.size = count, size
@@ -509,7 +509,7 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 }
 
 func (txn *Txn) commitPrecheck() {
-	if txn.commitTs == 0 && txn.db.opt.managedTxns {
+	if txn.commitTs == 0 && txn.db.opt.ManagedTxns {
 		panic("Commit cannot be called with managedDB=true. Use CommitAt.")
 	}
 	if txn.discarded {
@@ -673,7 +673,7 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 // If View is used with managed transactions, it would assume a read timestamp of MaxUint64.
 func (db *DB) View(fn func(txn *Txn) error) error {
 	var txn *Txn
-	if db.opt.managedTxns {
+	if db.opt.ManagedTxns {
 		txn = db.NewTransactionAt(math.MaxUint64, false)
 	} else {
 		txn = db.NewTransaction(false)
@@ -687,7 +687,7 @@ func (db *DB) View(fn func(txn *Txn) error) error {
 // for the user. Error returned by the function is relayed by the Update method.
 // Update cannot be used with managed transactions.
 func (db *DB) Update(fn func(txn *Txn) error) error {
-	if db.opt.managedTxns {
+	if db.opt.ManagedTxns {
 		panic("Update can only be used with managedDB=false.")
 	}
 	txn := db.NewTransaction(true)

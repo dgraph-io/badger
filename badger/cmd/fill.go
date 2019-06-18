@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 	"github.com/spf13/cobra"
@@ -134,14 +135,10 @@ func fillSorted(db *badger.DB, num uint64) error {
 }
 
 func fill(cmd *cobra.Command, args []string) error {
-	opts := badger.DefaultOptions
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.Truncate = truncate
-	opts.SyncWrites = false
-	opts.CompactL0OnClose = force
-
-	db, err := badger.Open(opts)
+	db, err := badger.Open(sstDir, options.WithValueDir(vlogDir),
+		options.WithTruncate(true),
+		options.WithSyncWrites(false),
+		options.WithCompactLevelZeroOnClose(force))
 	if err != nil {
 		return err
 	}

@@ -32,7 +32,7 @@ func TestWriteBatch(t *testing.T) {
 		return []byte(fmt.Sprintf("%128d", i))
 	}
 
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		wb := db.NewWriteBatch()
 		defer wb.Cancel()
 

@@ -26,6 +26,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dgraph-io/badger/enums"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
@@ -67,7 +68,7 @@ func TestPickTables(t *testing.T) {
 }
 
 func TestIteratePrefix(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, false, func(t *testing.T, db *DB) {
 		bkey := func(i int) []byte {
 			return []byte(fmt.Sprintf("%04d", i))
 		}
@@ -179,9 +180,7 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 	dir, err := ioutil.TempDir(".", "badger-test")
 	y.Check(err)
 	defer os.RemoveAll(dir)
-	opts := getTestOptions(dir)
-	opts.TableLoadingMode = options.LoadToRAM
-	db, err := Open(opts)
+	db, err := Open(dir, append(getTestOptions(), options.WithTableLoadingMode(enums.LoadToRAM))...)
 	y.Check(err)
 	defer db.Close()
 

@@ -28,6 +28,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/enums"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
@@ -79,13 +80,10 @@ func readBench(cmd *cobra.Command, args []string) error {
 	y.AssertTrue(numGoroutines > 0)
 	mode := getLoadingMode(loadingMode)
 
-	opts := badger.DefaultOptions
-	opts.ReadOnly = readOnly
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.TableLoadingMode = mode
-	opts.ValueLogLoadingMode = mode
-	db, err := badger.Open(opts)
+	db, err := badger.Open(sstDir, options.WithValueDir(vlogDir),
+		options.WithReadOnly(readOnly),
+		options.WithTableLoadingMode(mode),
+		options.WithValueLogLoadingMode(mode))
 	if err != nil {
 		return y.Wrapf(err, "unable to open DB")
 	}
@@ -226,14 +224,14 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 	return keys, nil
 }
 
-func getLoadingMode(m string) options.FileLoadingMode {
+func getLoadingMode(m string) enums.FileLoadingMode {
 	m = strings.ToLower(m)
-	var mode options.FileLoadingMode
+	var mode enums.FileLoadingMode
 	switch m {
 	case "fileio":
-		mode = options.FileIO
+		mode = enums.FileIO
 	case "mmap":
-		mode = options.MemoryMap
+		mode = enums.MemoryMap
 	default:
 		panic("loading mode not supported")
 	}
