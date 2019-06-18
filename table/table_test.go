@@ -625,7 +625,7 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 }
 
 func BenchmarkRead(b *testing.B) {
-	n := 5 << 20
+	n := int(5 * 1e6)
 	tbl := getTableForBenchmarks(b, n)
 	defer tbl.DecrRef()
 
@@ -642,7 +642,7 @@ func BenchmarkRead(b *testing.B) {
 }
 
 func BenchmarkReadAndBuild(b *testing.B) {
-	n := 5 << 20
+	n := int(5 * 1e6)
 	tbl := getTableForBenchmarks(b, n)
 	defer tbl.DecrRef()
 
@@ -743,7 +743,7 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 	}
 
 	f.Write(builder.Finish())
-	tbl, err := OpenTable(f, options.MemoryMap, nil)
+	tbl, err := OpenTable(f, options.LoadToRAM, nil)
 	require.NoError(b, err, "unable to open table")
 	return tbl
 }
