@@ -57,7 +57,7 @@ func numKeysManaged(db *DB, readTs uint64) int {
 }
 
 func TestDropAllManaged(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -102,7 +102,7 @@ func TestDropAllManaged(t *testing.T) {
 }
 
 func TestDropAll(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -138,7 +138,7 @@ func TestDropAll(t *testing.T) {
 }
 
 func TestDropAllTwice(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -166,7 +166,7 @@ func TestDropAllTwice(t *testing.T) {
 }
 
 func TestDropAllWithPendingTxn(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -232,7 +232,7 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 }
 
 func TestDropReadOnly(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -264,7 +264,7 @@ func TestDropReadOnly(t *testing.T) {
 }
 
 func TestWriteAfterClose(t *testing.T) {
-	dir, err := ioutil.TempDir(".", "badger-test")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -290,7 +290,7 @@ func TestWriteAfterClose(t *testing.T) {
 }
 
 func TestDropAllRace(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -354,7 +354,7 @@ func TestDropAllRace(t *testing.T) {
 }
 
 func TestDropPrefix(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -405,7 +405,7 @@ func TestDropPrefix(t *testing.T) {
 }
 
 func TestDropPrefixWithPendingTxn(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -474,7 +474,7 @@ func TestDropPrefixWithPendingTxn(t *testing.T) {
 }
 
 func TestDropPrefixReadOnly(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -506,7 +506,7 @@ func TestDropPrefixReadOnly(t *testing.T) {
 }
 
 func TestDropPrefixRace(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)

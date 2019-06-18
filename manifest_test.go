@@ -35,7 +35,7 @@ import (
 )
 
 func TestManifestBasic(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -70,7 +70,7 @@ func TestManifestBasic(t *testing.T) {
 }
 
 func helpTestManifestFileCorruption(t *testing.T, off int64, errorContent string) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -161,7 +161,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 }
 
 func TestOverlappingKeyRangeError(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := DefaultOptions
@@ -210,7 +210,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 }
 
 func TestManifestRewrite(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	deletionsThreshold := 10

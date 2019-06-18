@@ -34,7 +34,7 @@ import (
 )
 
 func TestValueBasic(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	y.Check(err)
 	defer os.RemoveAll(dir)
 
@@ -90,7 +90,7 @@ func TestValueBasic(t *testing.T) {
 }
 
 func TestValueGCManaged(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -149,7 +149,7 @@ func TestValueGCManaged(t *testing.T) {
 }
 
 func TestValueGC(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
@@ -202,7 +202,7 @@ func TestValueGC(t *testing.T) {
 }
 
 func TestValueGC2(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
@@ -278,7 +278,7 @@ func TestValueGC2(t *testing.T) {
 }
 
 func TestValueGC3(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
@@ -353,7 +353,7 @@ func TestValueGC3(t *testing.T) {
 }
 
 func TestValueGC4(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
@@ -429,7 +429,7 @@ func TestValueGC4(t *testing.T) {
 }
 
 func TestPersistLFDiscardStats(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
@@ -483,7 +483,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 }
 
 func TestChecksums(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -566,7 +566,7 @@ func TestChecksums(t *testing.T) {
 }
 
 func TestPartialAppendToValueLog(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -632,7 +632,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 }
 
 func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -671,7 +671,7 @@ func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 
 func TestValueLogTrigger(t *testing.T) {
 	t.Skip("Difficult to trigger compaction, so skipping. Re-enable after fixing #226")
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -707,7 +707,7 @@ func TestValueLogTrigger(t *testing.T) {
 }
 
 func createVlog(t *testing.T, entries []*Entry) []byte {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -731,7 +731,7 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 }
 
 func TestPenultimateLogCorruption(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
@@ -840,7 +840,7 @@ func (th *testHelper) readRange(from, to int) {
 // older version can end up at a higher level in the LSM tree than a newer
 // version, causing the data to not be returned.
 func TestBug578(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	y.Check(err)
 	defer os.RemoveAll(dir)
 
@@ -938,7 +938,7 @@ func BenchmarkReadWrite(b *testing.B) {
 
 // Regression test for https://github.com/dgraph-io/badger/issues/817
 func TestValueLogTruncate(t *testing.T) {
-	dir, err := ioutil.TempDir(".", "badger-test")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 

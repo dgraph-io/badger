@@ -41,7 +41,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 		return m
 	}
 
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
