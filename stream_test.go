@@ -66,7 +66,7 @@ func (c *collector) Send(list *bpb.KVList) error {
 var ctxb = context.Background()
 
 func TestStream(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
