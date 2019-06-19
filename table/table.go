@@ -102,7 +102,7 @@ type block struct {
 	data   []byte
 }
 
-func (b block) VerifyCheckSum() error {
+func (b block) verifyCheckSum() error {
 	y.AssertTrue(len(b.data) > 4)
 	csSize := int(binary.BigEndian.Uint32(b.data[len(b.data)-4:]))
 
@@ -309,6 +309,29 @@ func (t *Table) ID() uint64 { return t.id }
 // DoesNotHave returns true if (but not "only if") the table does not have the key.  It does a
 // bloom filter lookup.
 func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(key) }
+
+// VerifyChecksum verifies checksum for index and blocks of table.
+func (t *Table) VerifyChecksum() error {
+	if t.blockIndex == nil {
+		// readIndex() also verifies checksum.
+		if err := t.readIndex(); err != nil {
+			return fmt.Errorf("checksum validation failed for table: %s", t.Filename())
+		}
+	} // index is non nil, we have already verified checksum for index.
+
+	errMsg := "checksum validattion failed for table: %s, block offset:%d"
+	for i, os := range t.blockIndex {
+		b, err := t.block(i)
+		if err != nil {
+			return y.Wrapf(err, errMsg, t.Filename(), os.Offset)
+		}
+		if b.verifyCheckSum() != nil {
+			return fmt.Errorf(errMsg, t.Filename(), os.Offset)
+		}
+	}
+
+	return nil
+}
 
 // ParseFileID reads the file id out of a filename.
 func ParseFileID(name string) (uint64, bool) {

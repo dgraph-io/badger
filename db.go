@@ -289,6 +289,8 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, err
 	}
 
+	// TODO: add changes to verify checksum of tables.
+
 	if !opt.ReadOnly {
 		db.closers.compactors = y.NewCloser(1)
 		db.lc.startCompact(db.closers.compactors)
@@ -450,6 +452,12 @@ func (db *DB) close() (err error) {
 	}
 
 	return err
+}
+
+// VerifyChecksum verifies checksum for all tables on all levels.
+// If returned error is nil, checksum is successfully verified for all tables.
+func (db *DB) VerifyChecksum() error {
+	return db.lc.verifyChecksum()
 }
 
 const (

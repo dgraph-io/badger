@@ -986,3 +986,19 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 	})
 	return
 }
+
+// verifyChecksum verifies checksum for all tables on all levels.
+func (s *levelsController) verifyChecksum() error {
+	for _, l := range s.levels {
+		l.RLock()
+		for _, t := range l.tables {
+			if err := t.VerifyChecksum(); err != nil {
+				l.RUnlock()
+				return err
+			}
+		}
+		l.RUnlock()
+	}
+
+	return nil
+}

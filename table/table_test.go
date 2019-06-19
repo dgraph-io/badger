@@ -758,15 +758,11 @@ func BenchmarkChecksum(b *testing.B) {
 	}
 }
 
-func TestBlockChecksum(t *testing.T) {
+func TestTableChecksum(t *testing.T) {
 	f := buildTestTable(t, "k", 10000)
-	table, err := OpenTable(f, options.MemoryMap, nil)
+	tab, err := OpenTable(f, options.LoadToRAM, nil)
 	require.NoError(t, err)
+	defer tab.DecrRef()
 
-	for i := range table.blockIndex {
-		b, err := table.block(i)
-		require.NoError(t, err, "error while getting block")
-
-		require.NoError(t, b.VerifyCheckSum(), "error in checksum verification")
-	}
+	require.NoError(t, tab.verifyChecksum(), "error in table checksum verification")
 }
