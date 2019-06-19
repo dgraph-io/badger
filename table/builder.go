@@ -131,6 +131,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	}
 
 	// store current entry's offset
+	y.AssertTrue(b.buf.Len() < math.MaxUint32)
 	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len())-b.baseOffset)
 
 	// Layout: header, diffKey, value.
@@ -198,6 +199,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
 		b.baseKey = []byte{}
+		y.AssertTrue(b.buf.Len() < math.MaxUint32)
 		b.baseOffset = uint32(b.buf.Len())
 		b.entryOffsets = nil
 	}
@@ -228,6 +230,16 @@ func (b *Builder) blockIndex() []byte {
 }
 
 // Finish finishes the table by appending the index.
+/*
+The table structure looks like
++---------+------------+-----------+---------------+
+| Block 1 | Block 2    | Block 3   | Block 4       |
++---------+------------+-----------+---------------+
+| Block 5 | Block 6    | Block ... | Block N       |
++---------+------------+-----------+---------------+
+| Index   | Index Size | Checksum  | Checksum Size |
++---------+------------+-----------+---------------+
+*/
 func (b *Builder) Finish() []byte {
 	bf := bbloom.New(float64(b.keyCount), 0.01)
 	var klen [2]byte
@@ -269,14 +281,16 @@ func (b *Builder) Finish() []byte {
 func (b *Builder) writeChecksum(data []byte) {
 	// Build checksum for the index
 	checksum := pb.Checksum{
-		// TODO: The checksum type should be configuration from options.
-		// We chose to use CRC32 as the default option because it performed better
-		// compared to xxHash64. See the BenchmarkChecksum in table_test.go file
+		// TODO: The checksum type should be configurable from the
+		// options.
+		// We chose to use CRC32 as the default option because
+		// it performed better compared to xxHash64.
+		// See the BenchmarkChecksum in table_test.go file
 		// Size     =>   1024 B        2048 B
 		// CRC32    => 63.7 ns/op     112 ns/op
 		// xxHash64 => 87.5 ns/op     158 ns/op
-		Sum64: y.CalculateChecksum(data, pb.Checksum_CRC32C),
-		Algo:  pb.Checksum_CRC32C,
+		Sum:  y.CalculateChecksum(data, pb.Checksum_CRC32C),
+		Algo: pb.Checksum_CRC32C,
 	}
 
 	// Write checksum to the file

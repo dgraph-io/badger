@@ -67,5 +67,5 @@ message Checksum {
     XXHash64 = 1;
   }
   Algorithm algo = 1; // For storing type of Checksum algorithm used
-  uint64 sum64 = 2;
+  uint64 sum = 2;
 }
