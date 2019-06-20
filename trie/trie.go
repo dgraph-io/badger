@@ -51,6 +51,7 @@ func (t *Trie) Add(prefix []byte, id uint64) {
 		}
 		node = child
 	}
+	// We only need to add the id to the last node of the given prefix.
 	node.ids = append(node.ids, id)
 }
 

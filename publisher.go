@@ -84,7 +84,7 @@ func (p *publisher) publishUpdates(reqs requests) {
 	for _, req := range reqs {
 		for _, e := range req.Entries {
 			ids := p.indexer.Get(e.Key)
-			if len(ids) != 0 {
+			if len(ids) > 0 {
 				k := y.SafeCopy(nil, e.Key)
 				kv := &pb.KV{
 					Key:       y.ParseKey(k),
