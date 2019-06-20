@@ -45,6 +45,31 @@ import (
 
 var mmap = flag.Bool("vlog_mmap", true, "Specify if value log must be memory-mapped")
 
+// summary is produced when DB is closed. Currently it is used only for testing.
+type summary struct {
+	fileIDs map[uint64]bool
+}
+
+func (s *levelsController) getSummary() *summary {
+	out := &summary{
+		fileIDs: make(map[uint64]bool),
+	}
+	for _, l := range s.levels {
+		l.getSummary(out)
+	}
+	return out
+}
+
+func (s *levelHandler) getSummary(sum *summary) {
+	s.RLock()
+	defer s.RUnlock()
+	for _, t := range s.tables {
+		sum.fileIDs[t.ID()] = true
+	}
+}
+
+func (s *DB) validate() error { return s.lc.validate() }
+
 func getTestOptions(dir string) Options {
 	opt := DefaultOptions
 	opt.MaxTableSize = 1 << 15 // Force more compaction.
@@ -99,7 +124,7 @@ func txnDelete(t *testing.T, kv *DB, key []byte) {
 
 // Opens a badger db and runs a a test on it.
 func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB)) {
-	dir, err := ioutil.TempDir(".", "badger-test")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	if opts == nil {
@@ -304,7 +329,7 @@ func TestTxnTooBig(t *testing.T) {
 }
 
 func TestForceCompactL0(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -568,7 +593,7 @@ func TestIterate2Basic(t *testing.T) {
 }
 
 func TestLoad(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	n := 10000
@@ -739,7 +764,7 @@ func TestIterateParallel(t *testing.T) {
 }
 
 func TestDeleteWithoutSyncWrite(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := DefaultOptions
@@ -855,7 +880,7 @@ func TestIteratorPrefetchSize(t *testing.T) {
 }
 
 func TestSetIfAbsentAsync(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	kv, _ := Open(getTestOptions(dir))
@@ -1048,7 +1073,7 @@ func TestExpiry(t *testing.T) {
 }
 
 func TestExpiryImproperDBClose(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
@@ -1110,7 +1135,7 @@ var benchmarkData = []struct {
 }
 
 func TestLargeKeys(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -1164,7 +1189,7 @@ func TestCreateDirs(t *testing.T) {
 }
 
 func TestGetSetDeadlock(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	fmt.Println(dir)
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -1211,7 +1236,7 @@ func TestGetSetDeadlock(t *testing.T) {
 }
 
 func TestWriteDeadlock(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	fmt.Println(dir)
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -1366,7 +1391,7 @@ func TestSequence_Release(t *testing.T) {
 }
 
 func TestReadOnly(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -1435,7 +1460,7 @@ func TestReadOnly(t *testing.T) {
 }
 
 func TestLSMOnly(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -1553,7 +1578,7 @@ func TestGoroutineLeak(t *testing.T) {
 }
 
 func ExampleOpen() {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1611,7 +1636,7 @@ func ExampleOpen() {
 }
 
 func ExampleTxn_NewIterator() {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1672,7 +1697,7 @@ func ExampleTxn_NewIterator() {
 }
 
 func TestSyncForRace(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -1727,7 +1752,7 @@ func TestSyncForRace(t *testing.T) {
 // Earlier, if head is not pointing to latest Vlog file, then at replay badger used to crash with
 // index out of range panic. After fix in this commit it should not.
 func TestNoCrash(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err, "cannot create badger dir")
 	defer os.RemoveAll(dir)
 
@@ -1759,7 +1784,7 @@ func TestNoCrash(t *testing.T) {
 }
 
 func TestForceFlushMemtable(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err, "temp dir for badger count not be created")
 
 	ops := getTestOptions(dir)

@@ -45,6 +45,7 @@ type flagOptions struct {
 	keyLookup     string
 	itemMeta      bool
 	keyHistory    bool
+	showInternal  bool
 }
 
 var (
@@ -63,6 +64,9 @@ func init() {
 	infoCmd.Flags().StringVarP(&opt.keyLookup, "lookup", "l", "", "Hex of the key to lookup")
 	infoCmd.Flags().BoolVar(&opt.itemMeta, "show-meta", true, "Output item meta data as well")
 	infoCmd.Flags().BoolVar(&opt.keyHistory, "history", false, "Show all versions of a key")
+	infoCmd.Flags().BoolVar(
+		&opt.showInternal, "show-internal", false, "Show internal keys along with other keys."+
+			" This option should be used along with --show-key option")
 }
 
 var infoCmd = &cobra.Command{
@@ -132,6 +136,7 @@ func showKeys(db *badger.DB, prefix []byte) error {
 	iopt.Prefix = []byte(prefix)
 	iopt.PrefetchValues = false
 	iopt.AllVersions = opt.keyHistory
+	iopt.InternalAccess = opt.showInternal
 	it := txn.NewIterator(iopt)
 	defer it.Close()
 
@@ -230,7 +235,8 @@ func tableInfo(dir, valueDir string, db *badger.DB) {
 	// we want all tables with keys count here.
 	tables := db.Tables(true)
 	fmt.Println()
-	fmt.Println("SSTable [Li, Id, Total Keys including internal keys] [Left Key, Version -> Right Key, Version]")
+	fmt.Println("SSTable [Li, Id, Total Keys including internal keys] " +
+		"[Left Key, Version -> Right Key, Version]")
 	for _, t := range tables {
 		lk, lt := y.ParseKey(t.Left), y.ParseTs(t.Left)
 		rk, rt := y.ParseKey(t.Right), y.ParseTs(t.Right)

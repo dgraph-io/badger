@@ -209,6 +209,18 @@ err := db.Update(func(txn *badger.Txn) error {
 })
 ```
 
+Key/Value pair can also be saved by first creating `Entry`, then setting this
+`Entry` using `Txn.SetEntry()`. `Entry` also exposes methods to set properties
+on it.
+
+```go
+err := db.Update(func(txn *badger.Txn) error {
+  e := NewEntry([]byte("answer"), []byte("42"))
+  err := txn.SetEntry(e)
+  return err
+})
+```
+
 This will set the value of the `"answer"` key to `"42"`. To retrieve this
 value, we can use the `Txn.Get()` method:
 
@@ -347,16 +359,40 @@ res, _ := m.Get() // res should have value 6 encoded
 ### Setting Time To Live(TTL) and User Metadata on Keys
 Badger allows setting an optional Time to Live (TTL) value on keys. Once the TTL has
 elapsed, the key will no longer be retrievable and will be eligible for garbage
-collection. A TTL can be set as a `time.Duration` value using the `Txn.SetWithTTL()`
-API method.
+collection. A TTL can be set as a `time.Duration` value using the `Entry.WithTTL()`
+and `Txn.SetEntry()` API methods.
+
+```go
+err := db.Update(func(txn *badger.Txn) error {
+  e := NewEntry([]byte("answer"), []byte("42")).WithTTL(time.Hour)
+  err := txn.SetEntry(e)
+  return err
+})
+```
 
 An optional user metadata value can be set on each key. A user metadata value
 is represented by a single byte. It can be used to set certain bits along
 with the key to aid in interpreting or decoding the key-value pair. User
-metadata can be set using the `Txn.SetWithMeta()` API method.
+metadata can be set using `Entry.WithMeta()` and `Txn.SetEntry()` API methods.
 
-`Txn.SetEntry()` can be used to set the key, value, user metatadata and TTL,
-all at once.
+```go
+err := db.Update(func(txn *badger.Txn) error {
+  e := NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1))
+  err := txn.SetEntry(e)
+  return err
+})
+```
+
+`Entry` APIs can be used to add the user metadata and TTL for same key. This `Entry`
+then can be set using `Txn.SetEntry()`.
+
+```go
+err := db.Update(func(txn *badger.Txn) error {
+  e := NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1)).WithTTL(time.Hour)
+  err := txn.SetEntry(e)
+  return err
+})
+```
 
 ### Iterating over keys
 To iterate over keys, we can use an `Iterator`, which can be obtained using the
@@ -698,6 +734,7 @@ Below is a list of known projects that use Badger:
 * [Goblero](https://github.com/didil/goblero) - Pure Go embedded persistent job queue backed by BadgerDB
 * [Surfline](https://www.surfline.com) - Serving global wave and weather forecast data with Badger.
 * [Cete](https://github.com/mosuka/cete) - Simple and highly available distributed key-value store built on Badger. Makes it easy bringing up a cluster of Badger with Raft consensus algorithm by hashicorp/raft. 
+* [Volument](https://volument.com/) - A new take on website analytics backed by Badger.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 

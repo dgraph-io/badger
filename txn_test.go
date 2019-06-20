@@ -708,7 +708,7 @@ func TestIteratorAllVersionsWithDeleted2(t *testing.T) {
 }
 
 func TestManagedDB(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 

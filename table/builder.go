@@ -181,7 +181,8 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 }
 
 // TODO: vvv this was the comment on ReachedCapacity.
-// FinalSize returns the *rough* final size of the array, counting the header which is not yet written.
+// FinalSize returns the *rough* final size of the array, counting the header which is
+// not yet written.
 // TODO: Look into why there is a discrepancy. I suspect it is because of Write(empty, empty)
 // at the end. The diff can vary.
 

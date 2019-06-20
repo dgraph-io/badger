@@ -79,7 +79,7 @@ func TestIteratePrefix(t *testing.T) {
 			if (i % 1000) == 0 {
 				t.Logf("Put i=%d\n", i)
 			}
-			require.NoError(t, batch.Set(bkey(i), val, 0))
+			require.NoError(t, batch.Set(bkey(i), val))
 		}
 		require.NoError(t, batch.Flush())
 
@@ -193,7 +193,7 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 
 	batch := db.NewWriteBatch()
 	for i := 0; i < N; i++ {
-		y.Check(batch.Set(bkey(i), val, 0))
+		y.Check(batch.Set(bkey(i), val))
 	}
 	y.Check(batch.Flush())
 	var lsmFiles int
