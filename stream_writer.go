@@ -306,8 +306,7 @@ func (w *sortedWriter) createTable(data []byte) error {
 	if _, err := fd.Write(data); err != nil {
 		return err
 	}
-	// TODO:(Ashish): should we verify checksum just after creating table.
-	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode, true)
+	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode, false)
 	if err != nil {
 		return err
 	}

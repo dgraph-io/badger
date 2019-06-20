@@ -145,20 +145,19 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 
 /*
 Structure of Block.
-+-------------------+-------------------+--------------------+--------------+------------------+
-| Entry1            | Entry2            | Entry3             | Entry4       | Entry5           |
-+-------------------+-------------------+--------------------+--------------+------------------+
-| Entry6            | ...               | ...                | ...          | EntryN           |
-+-------------------+-------------------+--------------------+--------------+------------------+
-| Block Meta(contains list of offsets used| Block Meta Size  | Block        | Checksum Size    |
-| to perform binary search in the block)  | (4 Bytes)        | Checksum     | (4 Bytes)        |
-+-----------------------------------------+------------------+--------------+------------------+
++-------------------+---------------------+--------------------+--------------+------------------+
+| Entry1            | Entry2              | Entry3             | Entry4       | Entry5           |
++-------------------+---------------------+--------------------+--------------+------------------+
+| Entry6            | ...                 | ...                | ...          | EntryN           |
++-------------------+---------------------+--------------------+--------------+------------------+
+| Block Meta(contains list of offsets used| Block Meta Size    | Block        | Checksum Size    |
+| to perform binary search in the block)  | (4 Bytes)          | Checksum     | (4 Bytes)        |
++-----------------------------------------+--------------------+--------------+------------------+
 */
 func (b *Builder) finishBlock() {
 	ebuf := make([]byte, len(b.entryOffsets)*4+4)
-	for i, idx := 0, 0; i < len(b.entryOffsets); i++ {
-		binary.BigEndian.PutUint32(ebuf[idx:idx+4], b.entryOffsets[i])
-		idx += 4
+	for i, offset := range b.entryOffsets {
+		binary.BigEndian.PutUint32(ebuf[4*i:4*i+4], uint32(offset))
 	}
 	binary.BigEndian.PutUint32(ebuf[len(ebuf)-4:], uint32(len(b.entryOffsets)))
 	b.buf.Write(ebuf)
@@ -202,7 +201,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 		b.baseKey = []byte{}
 		y.AssertTrue(b.buf.Len() < math.MaxUint32)
 		b.baseOffset = uint32(b.buf.Len())
-		b.entryOffsets = nil
+		b.entryOffsets = b.entryOffsets[:0]
 	}
 	b.addHelper(key, value)
 	return nil // Currently, there is no meaningful error.
@@ -215,10 +214,14 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	blocksSize := b.buf.Len() + len(b.entryOffsets)*4 + 4 /*length of block meta*/ +
-		8 /*checksum*/ + 4 /*checksum length*/
-	estimateSz := blocksSize + 4 /* Index length */ +
-		5*(len(b.tableIndex.Offsets)) /* approximate index size */
+	blocksSize := b.buf.Len() + // length of current buffer
+		len(b.entryOffsets)*4 + // all entry offsets size
+		4 + // count of all entry offsets
+		8 + // checksum bytes
+		4 // checksum length
+	estimateSz := blocksSize +
+		4 + // Index length
+		5*(len(b.tableIndex.Offsets)) // approximate index size
 
 	return int64(estimateSz) > cap
 }
@@ -302,6 +305,8 @@ func (b *Builder) writeChecksum(data []byte) {
 
 	y.AssertTrue(n < math.MaxUint32)
 	// Write checksum size
-	_, err = b.buf.Write(y.BytesForUint32(uint32(n)))
+	var chkBuf [4]byte
+	binary.BigEndian.PutUint32(chkBuf[:], uint32(n))
+	_, err = b.buf.Write(chkBuf[:])
 	y.Check(err)
 }

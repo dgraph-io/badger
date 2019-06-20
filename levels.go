@@ -572,8 +572,7 @@ func (s *levelsController) compactBuildTables(
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
 
-			// TODO:(Ashish): should we verify checksum just after building table.
-			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, true)
+			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, false)
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}
@@ -990,15 +989,23 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 
 // verifyChecksum verifies checksum for all tables on all levels.
 func (s *levelsController) verifyChecksum() error {
+	var tables []*table.Table
 	for _, l := range s.levels {
 		l.RLock()
+		tables = tables[:0]
 		for _, t := range l.tables {
-			if err := t.VerifyChecksum(); err != nil {
-				l.RUnlock()
+			tables = append(tables, t)
+			t.IncrRef()
+		}
+		l.RUnlock()
+
+		for _, t := range tables {
+			err := t.VerifyChecksum()
+			t.DecrRef()
+			if err != nil {
 				return err
 			}
 		}
-		l.RUnlock()
 	}
 
 	return nil

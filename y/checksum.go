@@ -17,7 +17,6 @@
 package y
 
 import (
-	"encoding/binary"
 	"hash/crc32"
 
 	"github.com/dgraph-io/badger/pb"
@@ -42,17 +41,10 @@ func CalculateChecksum(data []byte, ct pb.Checksum_Algorithm) uint64 {
 }
 
 // VerifyChecksum validates the checksum for the data against the given expected checksum.
-func VerifyChecksum(data []byte, expected pb.Checksum) error {
+func VerifyChecksum(data []byte, expected *pb.Checksum) error {
 	actual := CalculateChecksum(data, expected.Algo)
 	if actual != expected.Sum {
 		return Wrapf(ErrChecksumMismatch, "actual: %d, expected: %d", actual, expected)
 	}
 	return nil
-}
-
-// BytesForUint32 converts uint32 to bytes.
-func BytesForUint32(n uint32) []byte {
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint32(b, n)
-	return b
 }

@@ -37,6 +37,12 @@ import (
 
 const fileSuffix = ".sst"
 
+var (
+	// errInvalidBlock is returned when block does not have
+	// things common to every block like checksum.
+	errInvalidBlock = errors.New("invalid block")
+)
+
 // TableInterface is useful for testing.
 type TableInterface interface {
 	Smallest() []byte
@@ -98,19 +104,21 @@ func (t *Table) DecrRef() error {
 }
 
 type block struct {
-	offset int
-	data   []byte
+	offset            int
+	data              []byte
+	numEntries        int // number of entries present in the block
+	entriesIndexStart int // start index of data for entryOffsets list
+	chkLen            int // checksum length
 }
 
 func (b block) verifyCheckSum() error {
-	y.AssertTrue(len(b.data) > 4)
-	csSize := int(binary.BigEndian.Uint32(b.data[len(b.data)-4:]))
+	readPos := len(b.data) - 4 - b.chkLen
+	if readPos < 0 {
+		return errInvalidBlock
+	}
 
-	readPos := len(b.data) - 4 - csSize
-	y.AssertTrue(readPos >= 0)
-
-	cs := pb.Checksum{}
-	if err := cs.Unmarshal(b.data[readPos : readPos+csSize]); err != nil {
+	cs := &pb.Checksum{}
+	if err := cs.Unmarshal(b.data[readPos : readPos+b.chkLen]); err != nil {
 		return y.Wrapf(err, "unable to unmarshal checksum for block")
 	}
 
@@ -118,17 +126,20 @@ func (b block) verifyCheckSum() error {
 }
 
 func (b block) NewIterator() *blockIterator {
-	bi := &blockIterator{data: b.data}
+	bi := &blockIterator{
+		data:              b.data,
+		numEntries:        b.numEntries,
+		entriesIndexStart: b.entriesIndexStart,
+	}
+	// // first read checksum size
+	// readPos := len(b.data) - 4
+	// csSize := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
 
-	// first read checksum size
-	readPos := len(b.data) - 4
-	csSize := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
+	// readPos -= (csSize + 4) // skip reading checksum, and move position to block meta length
+	// numEntries := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
 
-	readPos -= (csSize + 4) // skip reading checksum, and move position to block meta length
-	entriesCount := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
-
-	bi.entriesCount = entriesCount
-	bi.entriesIndexStart = readPos - (entriesCount * 4)
+	// bi.numEntries = numEntries
+	// bi.entriesIndexStart = readPos - (numEntries * 4)
 
 	return bi
 }
@@ -256,7 +267,7 @@ func (t *Table) readIndex() error {
 	checksumLen := binary.BigEndian.Uint32(buf)
 
 	// Read checksum
-	expectedChk := pb.Checksum{}
+	expectedChk := &pb.Checksum{}
 	readPos -= int(checksumLen)
 	buf = t.readNoFail(readPos, int(checksumLen))
 	if err := expectedChk.Unmarshal(buf); err != nil {
@@ -296,6 +307,16 @@ func (t *Table) block(idx int) (block, error) {
 	}
 	var err error
 	blk.data, err = t.read(blk.offset, int(ko.Len))
+
+	// read meta data related to block
+	readPos := len(blk.data) - 4 // first read checksum length
+	blk.chkLen = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
+
+	readPos -= (blk.chkLen + 4) // skip reading checksum, and move position to read numEntries in block
+	blk.numEntries = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
+
+	blk.entriesIndexStart = readPos - (blk.numEntries * 4)
+
 	return blk, err
 }
 
@@ -321,14 +342,15 @@ func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(key) }
 // VerifyChecksum verifies checksum for all blocks of table.
 func (t *Table) VerifyChecksum() error {
 	// since we verify index checksum at table open, we are verifying only block checksums here.
-	errMsg := "checksum validation failed for table: %s, block: %d, offset:%d"
 	for i, os := range t.blockIndex {
 		b, err := t.block(i)
 		if err != nil {
-			return y.Wrapf(err, errMsg, t.Filename(), i, os.Offset)
+			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
+				t.Filename(), i, os.Offset)
 		}
 		if err = b.verifyCheckSum(); err != nil {
-			return y.Wrapf(err, errMsg, t.Filename(), i, os.Offset)
+			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
+				t.Filename(), i, os.Offset)
 		}
 	}
 

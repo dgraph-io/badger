@@ -152,7 +152,7 @@ var DefaultOptions = Options{
 	Truncate:              false,
 	Logger:                defaultLogger,
 	LogRotatesToFlush:     2,
-	VerifyChecksumOnStart: true,
+	VerifyChecksumOnStart: false,
 }
 
 // LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold

@@ -31,7 +31,7 @@ type blockIterator struct {
 	pos               uint32
 	err               error
 	baseKey           []byte
-	entriesCount      int
+	numEntries        int
 	entriesIndexStart int
 	currentIdx        int
 
@@ -73,15 +73,15 @@ var (
 	current = 1
 )
 
-func (itr *blockIterator) getOffsetForIdx(idx int) uint32 {
-	y.AssertTrue(idx >= 0 && idx < itr.entriesCount)
+func (itr *blockIterator) getOffset(idx int) uint32 {
+	y.AssertTrue(idx >= 0 && idx < itr.numEntries)
 	return binary.BigEndian.Uint32(itr.data[itr.entriesIndexStart+4*idx:])
 }
 
-func (itr *blockIterator) getKeyAtIndex(idx int) []byte {
-	y.AssertTrue(idx >= 0 && idx < itr.entriesCount)
+func (itr *blockIterator) getKey(idx int) []byte {
+	y.AssertTrue(idx >= 0 && idx < itr.numEntries)
 
-	idxPos := itr.getOffsetForIdx(idx)
+	idxPos := itr.getOffset(idx)
 	var h header
 	idxPos += uint32(h.Decode(itr.data[idxPos:]))
 
@@ -96,7 +96,7 @@ func (itr *blockIterator) getKeyAtIndex(idx int) []byte {
 // Seek brings us to the first block element that is >= input key.
 func (itr *blockIterator) Seek(key []byte, whence int) {
 	itr.err = nil
-	startIndex := 0 // This tells from which index, we should start binary search
+	startIndex := 0 // This tells from which index we should start binary search.
 
 	switch whence {
 	case origin:
@@ -107,29 +107,28 @@ func (itr *blockIterator) Seek(key []byte, whence int) {
 
 	itr.Init() // If iterator is not initialized or has been reset
 
-	idx := sort.Search(itr.entriesCount, func(idx int) bool {
+	idx := sort.Search(itr.numEntries, func(idx int) bool {
 		// if idx is less than start index then just return false
 		if idx < startIndex {
 			return false
 		}
 
-		idxKey := itr.getKeyAtIndex(idx)
-
+		idxKey := itr.getKey(idx)
 		return y.CompareKeys(idxKey, key) >= 0
 	})
 
 	// all keys in the block are less than the key to be sought
-	if idx >= itr.entriesCount {
+	if idx >= itr.numEntries {
 		itr.err = io.EOF
 		// update currentIdx to len of entryOffsets, so that if Prev() is
 		// called just after Seek, it will return correct result.
-		itr.currentIdx = itr.entriesCount
+		itr.currentIdx = itr.numEntries
 		return
 	}
 
 	// found first idx for which key is >= key to be sought
 	itr.currentIdx = idx
-	itr.pos = itr.getOffsetForIdx(itr.currentIdx)
+	itr.pos = itr.getOffset(itr.currentIdx)
 	var h header
 	itr.pos += uint32(h.Decode(itr.data[itr.pos:]))
 	itr.parseKV(h)
@@ -145,7 +144,7 @@ func (itr *blockIterator) SeekToLast() {
 	itr.err = nil
 
 	itr.Init()
-	itr.currentIdx = itr.entriesCount
+	itr.currentIdx = itr.numEntries
 	itr.Prev()
 }
 
@@ -174,7 +173,7 @@ func (itr *blockIterator) Next() {
 	itr.err = nil
 
 	itr.currentIdx++
-	if itr.currentIdx >= itr.entriesCount {
+	if itr.currentIdx >= itr.numEntries {
 		itr.err = io.EOF
 		return
 	}
@@ -198,13 +197,13 @@ func (itr *blockIterator) Prev() {
 	itr.err = nil
 
 	itr.currentIdx--
-	y.AssertTrue(itr.currentIdx < itr.entriesCount)
+	y.AssertTrue(itr.currentIdx < itr.numEntries)
 	if itr.currentIdx < 0 {
 		itr.err = io.EOF
 		return
 	}
 
-	itr.pos = itr.getOffsetForIdx(itr.currentIdx)
+	itr.pos = itr.getOffset(itr.currentIdx)
 
 	var h header
 	y.AssertTruef(itr.pos < uint32(len(itr.data)), "%d %d", itr.pos, len(itr.data))
