@@ -59,21 +59,19 @@ func TestGetMergeOperator(t *testing.T) {
 	t.Run("Add and Get slices", func(t *testing.T) {
 		// Merge function to merge two byte slices
 		add := func(originalValue, newValue []byte) []byte {
-			// We append original value to new value because the values
-			// are retrieved in reverse order (Last insertion will be the first value)
-			return append(newValue, originalValue...)
+			return append(originalValue, newValue...)
 		}
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator([]byte("fooprefix"), add, 2*time.Millisecond)
 			defer m.Stop()
 
-			require.Nil(t, m.Add([]byte("1")))
-			require.Nil(t, m.Add([]byte("2")))
-			require.Nil(t, m.Add([]byte("3")))
+			require.Nil(t, m.Add([]byte("A")))
+			require.Nil(t, m.Add([]byte("B")))
+			require.Nil(t, m.Add([]byte("C")))
 
 			value, err := m.Get()
 			require.Nil(t, err)
-			require.Equal(t, "123", string(value))
+			require.Equal(t, "ABC", string(value))
 		})
 	})
 	t.Run("Get Before Compact", func(t *testing.T) {
@@ -114,7 +112,7 @@ func TestGetMergeOperator(t *testing.T) {
 		})
 	})
 	t.Run("Old keys should be removed after compaction", func(t *testing.T) {
-		dir, err := ioutil.TempDir(".", "badger-test")
+		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
 		defer os.RemoveAll(dir)
 

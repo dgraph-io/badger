@@ -18,3 +18,10 @@ linters:
     - lll
     - varcheck
     - unused
+
+issues:
+  exclude-rules:
+    - linters:
+        - gosec
+      text: "G404: "
+      

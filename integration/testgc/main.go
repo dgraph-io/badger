@@ -115,7 +115,9 @@ func main() {
 	}
 	defer db.Close()
 
-	go http.ListenAndServe("localhost:8080", nil)
+	go func() {
+		_ = http.ListenAndServe("localhost:8080", nil)
+	}()
 
 	closer := y.NewCloser(11)
 	go func() {

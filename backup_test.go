@@ -33,7 +33,7 @@ import (
 )
 
 func TestBackupRestore1(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	db, err := Open(getTestOptions(dir))
@@ -71,7 +71,7 @@ func TestBackupRestore1(t *testing.T) {
 	require.NoError(t, err)
 
 	// Use different directory.
-	dir, err = ioutil.TempDir("", "badger")
+	dir, err = ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	bak, err := ioutil.TempFile(dir, "badgerbak")
