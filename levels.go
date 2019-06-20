@@ -151,7 +151,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				return
 			}
 
-			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, tf.Checksum)
+			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.VerifyChecksumOnStart)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -572,7 +572,8 @@ func (s *levelsController) compactBuildTables(
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
 
-			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, nil)
+			// TODO:(Ashish): should we verify checksum just after building table.
+			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, true)
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}

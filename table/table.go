@@ -133,11 +133,11 @@ func (b block) NewIterator() *blockIterator {
 	return bi
 }
 
-// OpenTable assumes file has only one table and opens it.  Takes ownership of fd upon function
-// entry.  Returns a table with one reference count on it (decrementing which may delete the file!
-// -- consider t.Close() instead).  The fd has to writeable because we call Truncate on it before
-// deleting.
-func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table, error) {
+// OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function
+// entry. Returns a table with one reference count on it (decrementing which may delete the file!
+// -- consider t.Close() instead). The fd has to writeable because we call Truncate on it before
+// deleting. Checksum for all blocks of table is verified based on verifyChecksum value.
+func OpenTable(fd *os.File, mode options.FileLoadingMode, verifyChecksum bool) (*Table, error) {
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -206,6 +206,14 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 	default:
 		panic(fmt.Sprintf("Invalid loading mode: %v", mode))
 	}
+
+	if verifyChecksum {
+		if err := t.VerifyChecksum(); err != nil {
+			_ = fd.Close()
+			return nil, err
+		}
+	}
+
 	return t, nil
 }
 
@@ -310,23 +318,17 @@ func (t *Table) ID() uint64 { return t.id }
 // bloom filter lookup.
 func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(key) }
 
-// VerifyChecksum verifies checksum for index and blocks of table.
+// VerifyChecksum verifies checksum for all blocks of table.
 func (t *Table) VerifyChecksum() error {
-	if t.blockIndex == nil {
-		// readIndex() also verifies checksum.
-		if err := t.readIndex(); err != nil {
-			return fmt.Errorf("checksum validation failed for table: %s", t.Filename())
-		}
-	} // index is non nil, we have already verified checksum for index.
-
-	errMsg := "checksum validattion failed for table: %s, block offset:%d"
+	// since we verify index checksum at table open, we are verifying only block checksums here.
+	errMsg := "checksum validattion failed for table: %s, block: %d, offset:%d"
 	for i, os := range t.blockIndex {
 		b, err := t.block(i)
 		if err != nil {
-			return y.Wrapf(err, errMsg, t.Filename(), os.Offset)
+			return y.Wrapf(err, errMsg, t.Filename(), i, os.Offset)
 		}
 		if b.verifyCheckSum() != nil {
-			return fmt.Errorf(errMsg, t.Filename(), os.Offset)
+			return fmt.Errorf(errMsg, t.Filename(), i, os.Offset)
 		}
 	}
 

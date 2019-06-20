@@ -108,8 +108,8 @@ type Options struct {
 	// which can slow things on start.
 	LogRotatesToFlush int32
 
-	// VerifyChecksumAtStart decides if db should verify checksum for all tables at start.
-	VerifyChecksumAtStart bool
+	// VerifyChecksumOnStart decides if db should verify checksum for all tables at start.
+	VerifyChecksumOnStart bool
 
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
@@ -152,7 +152,7 @@ var DefaultOptions = Options{
 	Truncate:              false,
 	Logger:                defaultLogger,
 	LogRotatesToFlush:     2,
-	VerifyChecksumAtStart: true,
+	VerifyChecksumOnStart: true,
 }
 
 // LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold
