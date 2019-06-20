@@ -125,10 +125,10 @@ func (b block) NewIterator() *blockIterator {
 	csSize := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
 
 	readPos -= (csSize + 4) // skip reading checksum, and move position to block meta length
-	metaSize := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
+	entriesCount := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
 
-	bi.entriesCount = metaSize
-	bi.entriesIndexStart = readPos - (metaSize * 4)
+	bi.entriesCount = entriesCount
+	bi.entriesIndexStart = readPos - (entriesCount * 4)
 
 	return bi
 }
@@ -321,14 +321,14 @@ func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(key) }
 // VerifyChecksum verifies checksum for all blocks of table.
 func (t *Table) VerifyChecksum() error {
 	// since we verify index checksum at table open, we are verifying only block checksums here.
-	errMsg := "checksum validattion failed for table: %s, block: %d, offset:%d"
+	errMsg := "checksum validation failed for table: %s, block: %d, offset:%d"
 	for i, os := range t.blockIndex {
 		b, err := t.block(i)
 		if err != nil {
 			return y.Wrapf(err, errMsg, t.Filename(), i, os.Offset)
 		}
-		if b.verifyCheckSum() != nil {
-			return fmt.Errorf(errMsg, t.Filename(), i, os.Offset)
+		if err = b.verifyCheckSum(); err != nil {
+			return y.Wrapf(err, errMsg, t.Filename(), i, os.Offset)
 		}
 	}
 

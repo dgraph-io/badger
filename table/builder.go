@@ -166,7 +166,7 @@ func (b *Builder) finishBlock() {
 	blockBuf := b.buf.Bytes()[b.baseOffset:] // store checksum for current block
 	b.writeChecksum(blockBuf)
 
-	// TODO(Ashish): If we want to make block as multiple of OS pages, we can
+	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
 	// implement padding. This might be useful while using direct I/O.
 
 	// Add key to the block index
@@ -184,6 +184,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		return false
 	}
 
+	y.AssertTrue((len(b.entryOffsets)+1)*4+4+8+4 < math.MaxUint32) // check for below statements
 	// we should include current entry also in size, thats why +1 to len(b.entryOffsets)
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 + 4 /*size of list*/ +
 		8 /*Sum64 in checksum proto*/ + 4 /*checksum length*/)
