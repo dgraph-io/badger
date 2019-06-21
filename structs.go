@@ -7,7 +7,7 @@ import (
 	"hash/crc32"
 	"time"
 
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 type valuePointer struct {
