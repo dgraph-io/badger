@@ -41,8 +41,6 @@ _Note_: The hashes in parenthesis correspond to the commits that impacted the gi
 
 - badger.Logger (fbb2778)
 
-- badger.Loader (0115933)
-
 - badger.Options
   - CompactL0OnClose (7e41bba)
   - Logger (3f66663)
