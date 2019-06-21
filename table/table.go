@@ -220,24 +220,24 @@ func (t *Table) readNoFail(off, sz int) []byte {
 func (t *Table) readIndex() error {
 	readPos := t.tableSize
 
-	// Read checksum len from the last 4 bytes
+	// Read checksum len from the last 4 bytes.
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
-	checksumLen := binary.BigEndian.Uint32(buf)
+	checksumLen := int(binary.BigEndian.Uint32(buf))
 
-	// Read checksum
+	// Read checksum.
 	expectedChk := pb.Checksum{}
-	readPos -= int(checksumLen)
-	buf = t.readNoFail(readPos, int(checksumLen))
+	readPos -= checksumLen
+	buf = t.readNoFail(readPos, checksumLen)
 	if err := expectedChk.Unmarshal(buf); err != nil {
 		return err
 	}
 
-	// Read index size from the footer
+	// Read index size from the footer.
 	readPos -= 4
 	buf = t.readNoFail(readPos, 4)
 	indexLen := int(binary.BigEndian.Uint32(buf))
-	// Read index
+	// Read index.
 	readPos -= indexLen
 	data := t.readNoFail(readPos, indexLen)
 
