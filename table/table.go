@@ -70,6 +70,7 @@ type Table struct {
 	bf bbloom.Bloom
 
 	Checksum []byte
+	chkMode  options.ChecksumVerificationMode // indicates when to verify checksum for blocks.
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
@@ -131,24 +132,27 @@ func (b block) NewIterator() *blockIterator {
 		numEntries:        b.numEntries,
 		entriesIndexStart: b.entriesIndexStart,
 	}
-	// // first read checksum size
-	// readPos := len(b.data) - 4
-	// csSize := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
-
-	// readPos -= (csSize + 4) // skip reading checksum, and move position to block meta length
-	// numEntries := int(binary.BigEndian.Uint32(bi.data[readPos : readPos+4]))
-
-	// bi.numEntries = numEntries
-	// bi.entriesIndexStart = readPos - (numEntries * 4)
 
 	return bi
+}
+
+// ChecksumOptions are used while calling OpenTable().
+type ChecksumOptions struct {
+	// Mode is ChecksumVerification mode.
+	Mode options.ChecksumVerificationMode
+	// VerifyNow tells if checksum should be verified in current OpenTable call or not.
+	// This is required because in some cases we do not want to verify checksum for table.
+	// One of such case is when we just built table and we we are opening it now.
+	VerifyNow bool
 }
 
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function
 // entry. Returns a table with one reference count on it (decrementing which may delete the file!
 // -- consider t.Close() instead). The fd has to writeable because we call Truncate on it before
-// deleting. Checksum for all blocks of table is verified based on verifyChecksum value.
-func OpenTable(fd *os.File, mode options.FileLoadingMode, verifyChecksum bool) (*Table, error) {
+// deleting. Checksum for all blocks of table is verified based on value of chkOpts.
+func OpenTable(
+	fd *os.File, mode options.FileLoadingMode, chkOpts *ChecksumOptions) (*Table, error) {
+
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -168,6 +172,7 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, verifyChecksum bool) (
 		ref:         1, // Caller is given one reference.
 		id:          id,
 		loadingMode: mode,
+		chkMode:     chkOpts.Mode,
 	}
 
 	t.tableSize = int(fileInfo.Size())
@@ -218,7 +223,8 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, verifyChecksum bool) (
 		panic(fmt.Sprintf("Invalid loading mode: %v", mode))
 	}
 
-	if verifyChecksum {
+	if (chkOpts.Mode == options.OnStartAndRead || chkOpts.Mode == options.OnStart) &&
+		chkOpts.VerifyNow {
 		if err := t.VerifyChecksum(); err != nil {
 			_ = fd.Close()
 			return nil, err
@@ -317,6 +323,13 @@ func (t *Table) block(idx int) (block, error) {
 
 	blk.entriesIndexStart = readPos - (blk.numEntries * 4)
 
+	// verify checksum on if checksum verification mode is OnRead on OnStartAndRead
+	if t.chkMode == options.OnRead || t.chkMode == options.OnStartAndRead {
+		if err = blk.verifyCheckSum(); err != nil {
+			return block{}, err
+		}
+	}
+
 	return blk, err
 }
 
@@ -348,9 +361,14 @@ func (t *Table) VerifyChecksum() error {
 			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
 				t.Filename(), i, os.Offset)
 		}
-		if err = b.verifyCheckSum(); err != nil {
-			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
-				t.Filename(), i, os.Offset)
+
+		// If t.ChkMode is OnRead or OnStartAndRead, we don't need to call verify checksum
+		// on block, verification would have been done while creating block itself.
+		if !(t.chkMode == options.OnRead || t.chkMode == options.OnStartAndRead) {
+			if err = b.verifyCheckSum(); err != nil {
+				return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
+					t.Filename(), i, os.Offset)
+			}
 		}
 	}
 

@@ -108,8 +108,8 @@ type Options struct {
 	// which can slow things on start.
 	LogRotatesToFlush int32
 
-	// VerifyChecksumOnStart decides if db should verify checksum for all tables at start.
-	VerifyChecksumOnStart bool
+	// ChecksumVerificationMode decides when db should verify checksum for SStable blocks.
+	ChecksumVerificationMode options.ChecksumVerificationMode
 
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
@@ -147,12 +147,12 @@ var DefaultOptions = Options{
 	// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
 	ValueLogFileSize: 1<<30 - 1,
 
-	ValueLogMaxEntries:    1000000,
-	ValueThreshold:        32,
-	Truncate:              false,
-	Logger:                defaultLogger,
-	LogRotatesToFlush:     2,
-	VerifyChecksumOnStart: false,
+	ValueLogMaxEntries:       1000000,
+	ValueThreshold:           32,
+	Truncate:                 false,
+	Logger:                   defaultLogger,
+	LogRotatesToFlush:        2,
+	ChecksumVerificationMode: options.NoVerification,
 }
 
 // LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold

@@ -151,7 +151,11 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				return
 			}
 
-			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.VerifyChecksumOnStart)
+			chkOpts := &table.ChecksumOptions{
+				Mode:      db.opt.ChecksumVerificationMode,
+				VerifyNow: true,
+			}
+			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, chkOpts)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -572,7 +576,11 @@ func (s *levelsController) compactBuildTables(
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
 
-			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, false)
+			chkOpts := &table.ChecksumOptions{
+				Mode:      s.kv.opt.ChecksumVerificationMode,
+				VerifyNow: false,
+			}
+			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, chkOpts)
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}
@@ -1000,10 +1008,14 @@ func (s *levelsController) verifyChecksum() error {
 		l.RUnlock()
 
 		for _, t := range tables {
-			err := t.VerifyChecksum()
-			t.DecrRef()
-			if err != nil {
-				return err
+			errChkVerify := t.VerifyChecksum()
+			if err := t.DecrRef(); err != nil {
+				s.kv.opt.Errorf("unable to decrease reference of table: %s, "+
+					"while verifying checksum", t.Filename())
+			}
+
+			if errChkVerify != nil {
+				return errChkVerify
 			}
 		}
 	}

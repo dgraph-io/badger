@@ -34,9 +34,10 @@ func TestTableIndex(t *testing.T) {
 	keyPrefix := "key"
 	t.Run("single key", func(t *testing.T) {
 		f := buildTestTable(t, keyPrefix, 1)
-		table, err := OpenTable(f, options.MemoryMap, true)
+		tbl, err := OpenTable(f, options.MemoryMap,
+			&ChecksumOptions{Mode: options.OnStartAndRead, VerifyNow: true})
 		require.NoError(t, err)
-		require.Len(t, table.blockIndex, 1)
+		require.Len(t, tbl.blockIndex, 1)
 	})
 
 	t.Run("multiple keys", func(t *testing.T) {
@@ -63,7 +64,8 @@ func TestTableIndex(t *testing.T) {
 		}
 		f.Write(builder.Finish())
 
-		tbl, err := OpenTable(f, options.LoadToRAM, true)
+		tbl, err := OpenTable(f, options.LoadToRAM,
+			&ChecksumOptions{Mode: options.OnStartAndRead, VerifyNow: true})
 		require.NoError(t, err, "unable to open table")
 
 		// Ensure index is built correctly
