@@ -698,6 +698,31 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	return true
 }
 
+func (s *levelsController) pickTables(tbls []*table.Table, cd *compactDef) []*table.Table {
+	if len(tbls) == 0 {
+		return tbls
+	}
+
+	tableOverlap := make([]int, len(tbls))
+	for i := range tbls {
+		tableRange := keyRange{
+			// We pick all the versions of the smallest and the biggest key.
+			left: y.KeyWithTs(y.ParseKey(tbls[i].Smallest()), math.MaxUint64),
+			// Note that version zero would be the rightmost key.
+			right: y.KeyWithTs(y.ParseKey(tbls[i].Biggest()), 0),
+		}
+
+		// get overlap with next level
+		left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, tableRange)
+		tableOverlap[i] = right - left
+	}
+
+	sort.Slice(tbls, func(i, j int) bool {
+		return tableOverlap[i] < tableOverlap[j]
+	})
+	return nil
+}
+
 func (s *levelsController) fillTables(cd *compactDef) bool {
 	cd.lockLevels()
 	defer cd.unlockLevels()
@@ -708,11 +733,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 		return false
 	}
 
-	// Find the biggest table, and compact that first.
-	// TODO: Try other table picking strategies.
-	sort.Slice(tbls, func(i, j int) bool {
-		return tbls[i].Size() > tbls[j].Size()
-	})
+	s.pickTables(tbls, cd)
 
 	for _, t := range tbls {
 		cd.thisSize = t.Size()
