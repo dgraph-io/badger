@@ -306,8 +306,7 @@ func (w *sortedWriter) createTable(data []byte) error {
 	if _, err := fd.Write(data); err != nil {
 		return err
 	}
-	chkOpts := &table.ChecksumOptions{Mode: w.db.opt.ChecksumVerificationMode, VerifyNow: true}
-	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode, chkOpts)
+	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode, w.db.opt.ChecksumVerificationMode)
 	if err != nil {
 		return err
 	}

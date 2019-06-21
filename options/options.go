@@ -33,12 +33,13 @@ const (
 type ChecksumVerificationMode int
 
 const (
-	// NoVerification indicates DB should not verify checksum for table blocks.
+	// NoVerification indicates DB should not verify checksum for SSTable blocks.
 	NoVerification ChecksumVerificationMode = iota
-	// OnStart indicates checksum should be verified on DB start.
-	OnStart
-	// OnRead indicates checksum should be verified on every block read.
-	OnRead
-	// OnStartAndRead indicates checksum should be verified on DB start and on every block read.
-	OnStartAndRead
+	// OnTableRead indicates checksum should be verified while opening SSTtable.
+	OnTableRead
+	// OnBlockRead indicates checksum should be verified on every SSTable block read.
+	OnBlockRead
+	// OnTableAndBlockRead indicates checksum should be verified
+	// on SSTable opening and on every block read.
+	OnTableAndBlockRead
 )

@@ -912,9 +912,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
 
-	// we have just built this table, we can avoid verifying checksum for it in this call.
-	chkOpts := &table.ChecksumOptions{Mode: db.opt.ChecksumVerificationMode, VerifyNow: false}
-	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode, chkOpts)
+	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err
