@@ -28,7 +28,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/v2/pb"
 
 	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/v2/options"
