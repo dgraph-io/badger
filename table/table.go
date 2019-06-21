@@ -37,12 +37,6 @@ import (
 
 const fileSuffix = ".sst"
 
-var (
-	// errInvalidBlock is returned when block does not have
-	// things common to every block like checksum.
-	errInvalidBlock = errors.New("invalid block")
-)
-
 // TableInterface is useful for testing.
 type TableInterface interface {
 	Smallest() []byte
@@ -108,14 +102,15 @@ type block struct {
 	offset            int
 	data              []byte
 	numEntries        int // number of entries present in the block
-	entriesIndexStart int // start index of data for entryOffsets list
+	entriesIndexStart int // start index of entryOffsets list
 	chkLen            int // checksum length
 }
 
 func (b block) verifyCheckSum() error {
 	readPos := len(b.data) - 4 - b.chkLen
 	if readPos < 0 {
-		return errInvalidBlock
+		// This should be rare, hence can create a error instead of having global error.
+		return fmt.Errorf("block does not contain checksum")
 	}
 
 	cs := &pb.Checksum{}
@@ -139,7 +134,7 @@ func (b block) NewIterator() *blockIterator {
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function
 // entry. Returns a table with one reference count on it (decrementing which may delete the file!
 // -- consider t.Close() instead). The fd has to writeable because we call Truncate on it before
-// deleting. Checksum for all blocks of table is verified based on value of chkOpts.
+// deleting. Checksum for all blocks of table is verified based on value of chkMode.
 func OpenTable(fd *os.File, mode options.FileLoadingMode,
 	chkMode options.ChecksumVerificationMode) (*Table, error) {
 

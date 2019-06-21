@@ -759,12 +759,12 @@ func BenchmarkChecksum(b *testing.B) {
 	}
 }
 
+// This test is for verifying checksum failure during table open.
 func TestTableChecksum(t *testing.T) {
 	rand.Seed(time.Now().Unix())
-	// we are going to write random byte at random location in table file
+	// we are going to write random byte at random location in table file.
 	rb := make([]byte, 1)
 	rand.Read(rb)
-
 	f := buildTestTable(t, "k", 10000)
 	fi, err := f.Stat()
 	require.NoError(t, err, "unable to get file information")

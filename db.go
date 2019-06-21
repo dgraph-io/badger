@@ -453,7 +453,7 @@ func (db *DB) close() (err error) {
 }
 
 // VerifyChecksum verifies checksum for all tables on all levels.
-// If returned error is nil, checksum is successfully verified for all tables.
+// This method can be used to verify checksum, if ChecksumVerificationMode is NoVerification.
 func (db *DB) VerifyChecksum() error {
 	return db.lc.verifyChecksum()
 }
