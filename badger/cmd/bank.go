@@ -540,12 +540,12 @@ func runTest(cmd *cobra.Command, args []string) error {
 				accountIDS = append(accountIDS, key(i))
 			}
 			updater := func(kvs *pb.KVList) {
-				loader := subscribeDB.NewLoader(16)
+				batch := subscribeDB.NewWriteBatch()
 				for _, kv := range kvs.GetKv() {
-					y.Check(loader.Set(kv))
+					y.Check(batch.Set(kv.Key, kv.Value))
 				}
 
-				y.Check(loader.Finish())
+				y.Check(batch.Flush())
 			}
 			_ = db.Subscribe(ctx, updater, accountIDS[0], accountIDS[1:]...)
 		}()
