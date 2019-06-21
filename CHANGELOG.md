@@ -54,7 +54,6 @@ _Note_: The hashes in parenthesis correspond to the commits that impacted the gi
 - badger.TableManifest (2017987)
 - badger.Tx.NewKeyIterator (49a49e3)
 - badger.WriteBatch (6daccf9, 7e78e80)
-- badger/ristretto.Cache (deee8c7)
 
 ### Modified APIs
 
