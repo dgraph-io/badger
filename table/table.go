@@ -303,15 +303,15 @@ func (t *Table) block(idx int) (block, error) {
 	var err error
 	blk.data, err = t.read(blk.offset, int(ko.Len))
 
-	// read meta data related to block
-	readPos := len(blk.data) - 4 // first read checksum length
+	// Read meta data related to block.
+	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
 
-	readPos -= (blk.chkLen + 4) // skip reading checksum, and move position to read numEntries in block
+	readPos -= (blk.chkLen + 4) // Skip reading checksum, and move position to read numEntries in block.
 	blk.numEntries = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
 	blk.entriesIndexStart = readPos - (blk.numEntries * 4)
 
-	// verify checksum on if checksum verification mode is OnRead on OnStartAndRead
+	// Verify checksum on if checksum verification mode is OnRead on OnStartAndRead.
 	if t.chkMode == options.OnBlockRead || t.chkMode == options.OnTableAndBlockRead {
 		if err = blk.verifyCheckSum(); err != nil {
 			return block{}, err

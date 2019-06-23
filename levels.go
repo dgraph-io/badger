@@ -1006,8 +1006,8 @@ func (s *levelsController) verifyChecksum() error {
 		for _, t := range tables {
 			errChkVerify := t.VerifyChecksum()
 			if err := t.DecrRef(); err != nil {
-				s.kv.opt.Errorf("unable to decrease reference of table: %s, "+
-					"while verifying checksum with error: %s", t.Filename(), err)
+				s.kv.opt.Errorf("unable to decrease reference of table: %s while "+
+					"verifying checksum with error: %s", t.Filename(), err)
 			}
 
 			if errChkVerify != nil {

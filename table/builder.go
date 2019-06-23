@@ -63,10 +63,10 @@ type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf *bytes.Buffer
 
-	blockSize    uint32   // max size of block
+	blockSize    uint32   // Max size of block.
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
-	entryOffsets []uint32 // offsets of entries present in current block
+	entryOffsets []uint32 // Offsets of entries present in current block.
 
 	tableIndex *pb.TableIndex
 
@@ -163,7 +163,7 @@ func (b *Builder) finishBlock() {
 	binary.BigEndian.PutUint32(ebuf[len(ebuf)-4:], uint32(len(b.entryOffsets)))
 	b.buf.Write(ebuf)
 
-	blockBuf := b.buf.Bytes()[b.baseOffset:] // store checksum for current block
+	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
 	b.writeChecksum(blockBuf)
 
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
@@ -179,13 +179,13 @@ func (b *Builder) finishBlock() {
 }
 
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
-	// if there is no entry till now, we will return false
+	// If there is no entry till now, we will return false.
 	if len(b.entryOffsets) <= 0 {
 		return false
 	}
 
 	y.AssertTrue((len(b.entryOffsets)+1)*4+4+8+4 < math.MaxUint32) // check for below statements
-	// we should include current entry also in size, thats why +1 to len(b.entryOffsets)
+	// We should include current entry also in size, thats why +1 to len(b.entryOffsets).
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 +
 		4 + // size of list
 		8 + // Sum64 in checksum proto

@@ -52,7 +52,7 @@ func TestTableIndex(t *testing.T) {
 			k := []byte(fmt.Sprintf("%016x", i))
 			v := fmt.Sprintf("%d", i)
 			vs := y.ValueStruct{Value: []byte(v)}
-			if i == 0 { // this is first key for first block
+			if i == 0 { // This is first key for first block.
 				blockFirstKeys = append(blockFirstKeys, k)
 				blockCount = 1
 			} else if builder.shouldFinishBlock(k, vs) {

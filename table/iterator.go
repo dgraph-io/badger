@@ -105,10 +105,10 @@ func (itr *blockIterator) Seek(key []byte, whence int) {
 		startIndex = itr.currentIdx
 	}
 
-	itr.Init() // If iterator is not initialized or has been reset
+	itr.Init() // If iterator is not initialized or has been reset.
 
 	idx := sort.Search(itr.numEntries, func(idx int) bool {
-		// if idx is less than start index then just return false
+		// If idx is less than start index then just return false.
 		if idx < startIndex {
 			return false
 		}
@@ -117,16 +117,16 @@ func (itr *blockIterator) Seek(key []byte, whence int) {
 		return y.CompareKeys(idxKey, key) >= 0
 	})
 
-	// all keys in the block are less than the key to be sought
+	// All keys in the block are less than the key to be sought.
 	if idx >= itr.numEntries {
 		itr.err = io.EOF
-		// update currentIdx to len of entryOffsets, so that if Prev() is
+		// Update currentIdx to len of entryOffsets, so that if Prev() is
 		// called just after Seek, it will return correct result.
 		itr.currentIdx = itr.numEntries
 		return
 	}
 
-	// found first idx for which key is >= key to be sought
+	// Found first idx for which key is >= key to be sought.
 	itr.currentIdx = idx
 	itr.pos = itr.getOffset(itr.currentIdx)
 	var h header
