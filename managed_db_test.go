@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,7 +57,7 @@ func numKeysManaged(db *DB, readTs uint64) int {
 }
 
 func TestDropAllManaged(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -102,7 +102,7 @@ func TestDropAllManaged(t *testing.T) {
 }
 
 func TestDropAll(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -114,7 +114,7 @@ func TestDropAll(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -138,7 +138,7 @@ func TestDropAll(t *testing.T) {
 }
 
 func TestDropAllTwice(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -150,7 +150,7 @@ func TestDropAllTwice(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -166,7 +166,7 @@ func TestDropAllTwice(t *testing.T) {
 }
 
 func TestDropAllWithPendingTxn(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -178,7 +178,7 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -232,7 +232,7 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 }
 
 func TestDropReadOnly(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -243,7 +243,7 @@ func TestDropReadOnly(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -264,7 +264,7 @@ func TestDropReadOnly(t *testing.T) {
 }
 
 func TestWriteAfterClose(t *testing.T) {
-	dir, err := ioutil.TempDir(".", "badger-test")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -275,7 +275,7 @@ func TestWriteAfterClose(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -290,7 +290,7 @@ func TestWriteAfterClose(t *testing.T) {
 }
 
 func TestDropAllRace(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -354,7 +354,7 @@ func TestDropAllRace(t *testing.T) {
 }
 
 func TestDropPrefix(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -366,7 +366,7 @@ func TestDropPrefix(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -405,7 +405,7 @@ func TestDropPrefix(t *testing.T) {
 }
 
 func TestDropPrefixWithPendingTxn(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -417,7 +417,7 @@ func TestDropPrefixWithPendingTxn(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -474,7 +474,7 @@ func TestDropPrefixWithPendingTxn(t *testing.T) {
 }
 
 func TestDropPrefixReadOnly(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
@@ -485,7 +485,7 @@ func TestDropPrefixReadOnly(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true), 0))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -506,7 +506,7 @@ func TestDropPrefixReadOnly(t *testing.T) {
 }
 
 func TestDropPrefixRace(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)

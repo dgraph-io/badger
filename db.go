@@ -32,11 +32,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/skl"
-	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/skl"
+	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
@@ -294,7 +294,9 @@ func Open(opt Options) (db *DB, err error) {
 		db.lc.startCompact(db.closers.compactors)
 
 		db.closers.memtable = y.NewCloser(1)
-		go db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
+		go func() {
+			_ = db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
+		}()
 	}
 
 	headKey := y.KeyWithTs(head, math.MaxUint64)
@@ -353,6 +355,11 @@ func (db *DB) Close() error {
 
 func (db *DB) close() (err error) {
 	db.elog.Printf("Closing database")
+
+	if err := db.vlog.flushDiscardStats(); err != nil {
+		return errors.Wrap(err, "failed to flush discard stats")
+	}
+
 	atomic.StoreInt32(&db.blockWrites, 1)
 
 	// Stop value GC first.
@@ -476,7 +483,7 @@ func syncDir(dir string) error {
 	if err != nil {
 		return errors.Wrapf(err, "While opening directory: %s.", dir)
 	}
-	err = f.Sync()
+	err = y.FileSync(f)
 	closeErr := f.Close()
 	if err != nil {
 		return errors.Wrapf(err, "While syncing directory: %s.", dir)
@@ -886,10 +893,6 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	headTs := y.KeyWithTs(head, db.orc.nextTs())
 	ft.mt.Put(headTs, y.ValueStruct{Value: offset})
 
-	// Also store lfDiscardStats before flushing memtables
-	discardStatsKey := y.KeyWithTs(lfDiscardStatsKey, 1)
-	ft.mt.Put(discardStatsKey, y.ValueStruct{Value: db.vlog.encodedDiscardStats()})
-
 	fileID := db.lc.reserveFileID()
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
 	if err != nil {
@@ -919,7 +922,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	}
 	// We own a ref on tbl.
 	err = db.lc.addLevel0Table(tbl) // This will incrRef (if we don't error, sure)
-	tbl.DecrRef()                   // Releases our ref.
+	_ = tbl.DecrRef()               // Releases our ref.
 	return err
 }
 
@@ -1237,7 +1240,9 @@ func (db *DB) startCompactions() {
 	if db.closers.memtable != nil {
 		db.flushChan = make(chan flushTask, db.opt.NumMemtables)
 		db.closers.memtable = y.NewCloser(1)
-		go db.flushMemtable(db.closers.memtable)
+		go func() {
+			_ = db.flushMemtable(db.closers.memtable)
+		}()
 	}
 }
 

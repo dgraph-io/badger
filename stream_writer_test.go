@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -25,8 +26,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 func getSortedKVList(valueSize, listSize int) *pb.KVList {
@@ -282,6 +283,48 @@ func TestStreamWriter5(t *testing.T) {
 
 		var err error
 		_, err = Open(db.opt)
+		require.NoError(t, err)
+	})
+}
+
+// This test tries to insert multiple equal keys(without version) and verifies
+// if those are going to same table.
+func TestStreamWriter6(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		fmt.Println(db.opt.Dir)
+		list := &pb.KVList{}
+		str := []string{"a", "a", "b", "b", "c", "c"}
+		ver := 1
+		for i := range str {
+			kv := &pb.KV{
+				Key:     bytes.Repeat([]byte(str[i]), int(db.opt.MaxTableSize)),
+				Value:   []byte("val"),
+				Version: uint64(ver),
+			}
+			list.Kv = append(list.Kv, kv)
+			ver = (ver + 1) % 2
+		}
+
+		// list has 3 pairs for equal keys. Since each Key has size equal to MaxTableSize
+		// we would have 6 tables, if keys are not equal. Here we should have 3 tables.
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+		require.NoError(t, sw.Write(list), "sw.Write() failed")
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+
+		tables := db.Tables(true)
+		require.Equal(t, 4, len(tables), "Count of tables not matching")
+		for _, tab := range tables {
+			if tab.Level > 0 {
+				require.Equal(t, 2, int(tab.KeyCount),
+					fmt.Sprintf("failed for level: %d", tab.Level))
+			} else {
+				require.Equal(t, 1, int(tab.KeyCount)) // level 0 table will have head key
+			}
+		}
+		require.NoError(t, db.Close())
+
+		_, err := Open(db.opt)
 		require.NoError(t, err)
 	})
 }

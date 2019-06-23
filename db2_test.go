@@ -41,7 +41,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 		return m
 	}
 
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -102,7 +102,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 
 var manual = flag.Bool("manual", false, "Set when manually running some tests.")
 
-// Badger dir to be used for performing db.Open benchmark
+// Badger dir to be used for performing db.Open benchmark.
 var benchDir = flag.String("benchdir", "", "Set when running db.Open benchmark")
 
 // The following 3 TruncateVlogNoClose tests should be run one after another.
@@ -344,4 +344,40 @@ func BenchmarkDBOpen(b *testing.B) {
 		require.NoError(b, err)
 		require.NoError(b, db.Close())
 	}
+}
+
+// Regression test for https://github.com/dgraph-io/badger/issues/830
+func TestDiscardMapTooBig(t *testing.T) {
+	createDiscardStats := func() map[uint32]int64 {
+		stat := map[uint32]int64{}
+		for i := uint32(0); i < 8000; i++ {
+			stat[i] = 0
+		}
+		return stat
+	}
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	ops := DefaultOptions
+	ops.Dir = dir
+	ops.ValueDir = dir
+	db, err := Open(ops)
+	require.NoError(t, err, "error while openning db")
+
+	// Add some data so that memtable flush happens on close
+	require.NoError(t, db.Update(func(txn *Txn) error {
+		return txn.Set([]byte("foo"), []byte("bar"))
+	}))
+
+	// overwrite discardstat with large value
+	db.vlog.lfDiscardStats = &lfDiscardStats{
+		m: createDiscardStats(),
+	}
+
+	require.NoError(t, db.Close())
+	// reopen the same DB
+	db, err = Open(ops)
+	require.NoError(t, err, "error while openning db")
+	require.NoError(t, db.Close())
 }

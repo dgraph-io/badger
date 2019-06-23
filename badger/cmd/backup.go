@@ -20,7 +20,8 @@ import (
 	"bufio"
 	"os"
 
-	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/spf13/cobra"
 )
 
@@ -75,7 +76,7 @@ func doBackup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err = f.Sync(); err != nil {
+	if err = y.FileSync(f); err != nil {
 		return err
 	}
 

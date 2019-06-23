@@ -26,8 +26,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -79,7 +79,7 @@ func TestIteratePrefix(t *testing.T) {
 			if (i % 1000) == 0 {
 				t.Logf("Put i=%d\n", i)
 			}
-			require.NoError(t, batch.Set(bkey(i), val, 0))
+			require.NoError(t, batch.Set(bkey(i), val))
 		}
 		require.NoError(t, batch.Flush())
 
@@ -162,7 +162,7 @@ func TestIteratePrefix(t *testing.T) {
 // Benchmark with NO opt.Prefix set ===
 // goos: linux
 // goarch: amd64
-// pkg: github.com/dgraph-io/badger
+// pkg: github.com/dgraph-io/badger/v2
 // BenchmarkIteratePrefixSingleKey/Key_lookups-4         	   10000	    460924 ns/op
 // --- BENCH: BenchmarkIteratePrefixSingleKey/Key_lookups-4
 // 	iterator_test.go:147: Inner b.N: 1
@@ -193,7 +193,7 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 
 	batch := db.NewWriteBatch()
 	for i := 0; i < N; i++ {
-		y.Check(batch.Set(bkey(i), val, 0))
+		y.Check(batch.Set(bkey(i), val))
 	}
 	y.Check(batch.Flush())
 	var lsmFiles int

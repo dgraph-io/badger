@@ -23,8 +23,9 @@ import (
 	"math"
 
 	"github.com/AndreasBriese/bbloom"
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 func newBuffer(sz int) *bytes.Buffer {
@@ -210,7 +211,8 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 }
 
 // TODO: vvv this was the comment on ReachedCapacity.
-// FinalSize returns the *rough* final size of the array, counting the header which is not yet written.
+// FinalSize returns the *rough* final size of the array, counting the header which is
+// not yet written.
 // TODO: Look into why there is a discrepancy. I suspect it is because of Write(empty, empty)
 // at the end. The diff can vary.
 
@@ -226,13 +228,6 @@ func (b *Builder) ReachedCapacity(cap int64) bool {
 		5*(len(b.tableIndex.Offsets)) // approximate index size
 
 	return int64(estimateSz) > cap
-}
-
-// blockIndex generates the block index for the table.
-func (b *Builder) blockIndex() []byte {
-	out, err := b.tableIndex.Marshal()
-	y.Check(err)
-	return out
 }
 
 // Finish finishes the table by appending the index.
@@ -265,16 +260,18 @@ func (b *Builder) Finish() []byte {
 		bf.Add(key)
 	}
 
-	// Write bloom filter.
+	// Add bloom filter to the index.
 	b.tableIndex.BloomFilter = bf.JSONMarshal()
 	b.finishBlock() // This will never start a new block.
 
-	index := b.blockIndex()
+	index, err := b.tableIndex.Marshal()
+	y.Check(err)
+	// Write index the file.
 	n, err := b.buf.Write(index)
 	y.Check(err)
 
 	y.AssertTrue(n < math.MaxUint32)
-	// Write index size
+	// Write index size.
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	_, err = b.buf.Write(buf[:])
@@ -285,7 +282,7 @@ func (b *Builder) Finish() []byte {
 }
 
 func (b *Builder) writeChecksum(data []byte) {
-	// Build checksum for the index
+	// Build checksum for the index.
 	checksum := pb.Checksum{
 		// TODO: The checksum type should be configurable from the
 		// options.
@@ -299,16 +296,16 @@ func (b *Builder) writeChecksum(data []byte) {
 		Algo: pb.Checksum_CRC32C,
 	}
 
-	// Write checksum to the file
+	// Write checksum to the file.
 	chksum, err := checksum.Marshal()
 	y.Check(err)
 	n, err := b.buf.Write(chksum)
 	y.Check(err)
 
 	y.AssertTrue(n < math.MaxUint32)
-	// Write checksum size
-	var chkBuf [4]byte
-	binary.BigEndian.PutUint32(chkBuf[:], uint32(n))
-	_, err = b.buf.Write(chkBuf[:])
+	// Write checksum size.
+	var buf [4]byte
+	binary.BigEndian.PutUint32(buf[:], uint32(n))
+	_, err = b.buf.Write(buf[:])
 	y.Check(err)
 }

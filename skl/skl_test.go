@@ -28,10 +28,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 const arenaSize = 1 << 20
+
+func (s *Skiplist) valid() bool { return s.arena != nil }
 
 func newValue(v int) []byte {
 	return []byte(fmt.Sprintf("%05d", v))

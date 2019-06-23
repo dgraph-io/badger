@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger"
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 var maxValue int64 = 10000000
@@ -115,7 +115,9 @@ func main() {
 	}
 	defer db.Close()
 
-	go http.ListenAndServe("localhost:8080", nil)
+	go func() {
+		_ = http.ListenAndServe("localhost:8080", nil)
+	}()
 
 	closer := y.NewCloser(11)
 	go func() {

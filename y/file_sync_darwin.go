@@ -1,5 +1,7 @@
+// +build darwin,!go1.12
+
 /*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
+ * Copyright 2019 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,29 +16,22 @@
  * limitations under the License.
  */
 
-package main
+package y
 
 import (
-	"fmt"
-	"net/http"
-	_ "net/http/pprof"
-	"runtime"
-
-	"github.com/dgraph-io/badger/v2/badger/cmd"
+	"os"
+	"syscall"
 )
 
-func main() {
-	go func() {
-		for i := 8080; i < 9080; i++ {
-			fmt.Printf("Listening for /debug HTTP requests at port: %d\n", i)
-			if err := http.ListenAndServe(fmt.Sprintf("localhost:%d", i), nil); err != nil {
-				fmt.Println("Port busy. Trying another one...")
-				continue
-
-			}
-		}
-	}()
-	runtime.SetBlockProfileRate(100)
-	runtime.GOMAXPROCS(128)
-	cmd.Execute()
+// FileSync calls os.File.Sync with the right parameters.
+// This function can be removed once we stop supporting Go 1.11
+// on MacOS.
+//
+// More info: https://golang.org/issue/26650.
+func FileSync(f *os.File) error {
+	_, _, err := syscall.Syscall(syscall.SYS_FCNTL, f.Fd(), syscall.F_FULLFSYNC, 0)
+	if err == 0 {
+		return nil
+	}
+	return err
 }

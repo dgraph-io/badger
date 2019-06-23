@@ -30,10 +30,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger"
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/spf13/cobra"
 )
 
@@ -98,12 +98,6 @@ func init() {
 
 func key(account int) []byte {
 	return []byte(fmt.Sprintf("%s%s", keyPrefix, strconv.Itoa(account)))
-}
-
-func toAccount(key []byte) int {
-	i, err := strconv.Atoi(string(key[len(keyPrefix):]))
-	y.Check(err)
-	return i
 }
 
 func toUint64(val []byte) uint64 {
@@ -388,7 +382,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 	wb := db.NewWriteBatch()
 	for i := 0; i < numAccounts; i++ {
-		y.Check(wb.Set(key(i), toSlice(initialBal), 0))
+		y.Check(wb.Set(key(i), toSlice(initialBal)))
 	}
 	log.Println("Waiting for writes to be done...")
 	y.Check(wb.Flush())
@@ -485,7 +479,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 				stream := db.NewStream()
 				stream.Send = func(list *pb.KVList) error {
 					for _, kv := range list.Kv {
-						if err := batch.Set(kv.Key, kv.Value, 0); err != nil {
+						if err := batch.Set(kv.Key, kv.Value); err != nil {
 							return err
 						}
 					}
@@ -553,7 +547,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 				y.Check(loader.Finish())
 			}
-			db.Subscribe(ctx, updater, accountIDS[0], accountIDS[1:]...)
+			_ = db.Subscribe(ctx, updater, accountIDS[0], accountIDS[1:]...)
 		}()
 	}
 
