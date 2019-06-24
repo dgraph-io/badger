@@ -102,7 +102,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 
 var manual = flag.Bool("manual", false, "Set when manually running some tests.")
 
-// Badger dir to be used for performing db.Open benchmark
+// Badger dir to be used for performing db.Open benchmark.
 var benchDir = flag.String("benchdir", "", "Set when running db.Open benchmark")
 
 // The following 3 TruncateVlogNoClose tests should be run one after another.

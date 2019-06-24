@@ -23,8 +23,8 @@ import (
 	"encoding/binary"
 	"io"
 
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 // Backup is a wrapper function over Stream.Backup to generate full and incremental backups of the

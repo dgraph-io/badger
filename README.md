@@ -52,10 +52,10 @@ few months. The [Changelog] is kept fairly up-to-date.
 ## Getting Started
 
 ### Installing
-To start using Badger, install Go 1.8 or above and run `go get`:
+To start using Badger, install Go 1.11 or above and run `go get`:
 
 ```sh
-$ go get github.com/dgraph-io/badger/...
+$ go get github.com/dgraph-io/badger/v2/...
 ```
 
 This will retrieve the library and install the `badger` command line
@@ -76,7 +76,7 @@ package main
 import (
 	"log"
 
-	"github.com/dgraph-io/badger"
+	badger "github.com/dgraph-io/badger/v2"
 )
 
 func main() {
