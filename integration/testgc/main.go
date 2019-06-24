@@ -102,14 +102,10 @@ func main() {
 	dir := "/mnt/drive/badgertest"
 	os.RemoveAll(dir)
 
-	opts := badger.DefaultOptions
-	opts.Dir = dir
-	opts.ValueDir = dir
-	opts.TableLoadingMode = options.MemoryMap
-	opts.ValueLogLoadingMode = options.FileIO
-	opts.SyncWrites = false
-
-	db, err := badger.Open(opts)
+	db, err := badger.Open(badger.DefaultOptions(dir).
+		WithTableLoadingMode(options.MemoryMap).
+		WithValueLogLoadingMode(options.FileIO).
+		WithSyncWrites(false))
 	if err != nil {
 		log.Fatal(err)
 	}

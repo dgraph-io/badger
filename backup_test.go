@@ -128,10 +128,7 @@ func TestBackupRestore2(t *testing.T) {
 	s2Path := filepath.Join(tmpdir, "test2")
 	s3Path := filepath.Join(tmpdir, "test3")
 
-	opts := DefaultOptions
-	opts.Dir = s1Path
-	opts.ValueDir = s1Path
-	db1, err := Open(opts)
+	db1, err := Open(DefaultOptions(s1Path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,10 +163,7 @@ func TestBackupRestore2(t *testing.T) {
 	}
 	fmt.Println("backup1 length:", backup.Len())
 
-	opts = DefaultOptions
-	opts.Dir = s2Path
-	opts.ValueDir = s2Path
-	db2, err := Open(opts)
+	db2, err := Open(DefaultOptions(s2Path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,10 +214,7 @@ func TestBackupRestore2(t *testing.T) {
 		t.Fatal(err)
 	}
 	fmt.Println("backup2 length:", backup.Len())
-	opts = DefaultOptions
-	opts.Dir = s3Path
-	opts.ValueDir = s3Path
-	db3, err := Open(opts)
+	db3, err := Open(DefaultOptions(s3Path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,10 +287,7 @@ func TestBackup(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpdir)
 
-	opts := DefaultOptions
-	opts.Dir = filepath.Join(tmpdir, "backup0")
-	opts.ValueDir = opts.Dir
-	db1, err := Open(opts)
+	db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup0")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,15 +332,12 @@ func TestBackupRestore3(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpdir)
 
-	opts := DefaultOptions
 	N := 1000
 	entries := createEntries(N)
 
 	// backup
 	{
-		opts.Dir = filepath.Join(tmpdir, "backup1")
-		opts.ValueDir = opts.Dir
-		db1, err := Open(opts)
+		db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup1")))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -367,9 +352,7 @@ func TestBackupRestore3(t *testing.T) {
 	require.True(t, bb.Len() > 0)
 
 	// restore
-	opts.Dir = filepath.Join(tmpdir, "restore1")
-	opts.ValueDir = opts.Dir
-	db2, err := Open(opts)
+	db2, err := Open(DefaultOptions(filepath.Join(tmpdir, "restore1")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +390,6 @@ func TestBackupLoadIncremental(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpdir)
 
-	opts := DefaultOptions
 	N := 100
 	entries := createEntries(N)
 	updates := make(map[int]byte)
@@ -415,9 +397,7 @@ func TestBackupLoadIncremental(t *testing.T) {
 
 	// backup
 	{
-		opts.Dir = filepath.Join(tmpdir, "backup2")
-		opts.ValueDir = opts.Dir
-		db1, err := Open(opts)
+		db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup2")))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -477,9 +457,7 @@ func TestBackupLoadIncremental(t *testing.T) {
 	require.True(t, bb.Len() > 0)
 
 	// restore
-	opts.Dir = filepath.Join(tmpdir, "restore2")
-	opts.ValueDir = opts.Dir
-	db2, err := Open(opts)
+	db2, err := Open(DefaultOptions(filepath.Join(tmpdir, "restore2")))
 	if err != nil {
 		t.Fatal(err)
 	}
