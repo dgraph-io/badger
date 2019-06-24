@@ -469,22 +469,6 @@ func (db *DB) Sync() error {
 	return db.vlog.sync(math.MaxUint32)
 }
 
-// When you create or delete a file, you have to ensure the directory entry for the file is synced
-// in order to guarantee the file is visible (if the system crashes).  (See the man page for fsync,
-// or see https://github.com/coreos/etcd/issues/6368 for an example.)
-func syncDir(dir string) error {
-	f, err := openDir(dir)
-	if err != nil {
-		return errors.Wrapf(err, "While opening directory: %s.", dir)
-	}
-	err = y.FileSync(f)
-	closeErr := f.Close()
-	if err != nil {
-		return errors.Wrapf(err, "While syncing directory: %s.", dir)
-	}
-	return errors.Wrapf(closeErr, "While closing directory: %s.", dir)
-}
-
 // getMemtables returns the current memtables and get references.
 func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 	db.RLock()
