@@ -290,14 +290,14 @@ func (t *Table) readIndex() error {
 	return nil
 }
 
-func (t *Table) block(idx int) (block, error) {
+func (t *Table) block(idx int) (*block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= len(t.blockIndex) {
-		return block{}, errors.New("block out of index")
+		return nil, errors.New("block out of index")
 	}
 
 	ko := t.blockIndex[idx]
-	blk := block{
+	blk := &block{
 		offset: int(ko.Offset),
 	}
 	var err error
@@ -315,7 +315,7 @@ func (t *Table) block(idx int) (block, error) {
 	// Verify checksum on if checksum verification mode is OnRead on OnStartAndRead.
 	if t.chkMode == options.OnBlockRead || t.chkMode == options.OnTableAndBlockRead {
 		if err = blk.verifyCheckSum(); err != nil {
-			return block{}, err
+			return nil, err
 		}
 	}
 
@@ -344,6 +344,12 @@ func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(key) }
 // VerifyChecksum verifies checksum for all blocks of table.
 func (t *Table) VerifyChecksum() error {
 	// since we verify index checksum at table open, we are verifying only block checksums here.
+	if t.chkMode == options.OnBlockRead || t.chkMode == options.OnTableAndBlockRead {
+		// OnBlockRead or OnTableAndBlockRead, we don't need to call verify checksum
+		// on block, verification would be done while reading block itself.
+		return nil
+	}
+
 	for i, os := range t.blockIndex {
 		b, err := t.block(i)
 		if err != nil {
@@ -351,14 +357,10 @@ func (t *Table) VerifyChecksum() error {
 				t.Filename(), i, os.Offset)
 		}
 
-		// If t.ChkMode is OnBlockRead or OnTableAndBlockRead, we don't need to call verify checksum
-		// on block, verification would have been done while creating block itself.
-		if !(t.chkMode == options.OnBlockRead || t.chkMode == options.OnTableAndBlockRead) {
-			if err = b.verifyCheckSum(); err != nil {
-				return y.Wrapf(err,
-					"checksum validation failed for table: %s, block: %d, offset:%d",
-					t.Filename(), i, os.Offset)
-			}
+		if err = b.verifyCheckSum(); err != nil {
+			return y.Wrapf(err,
+				"checksum validation failed for table: %s, block: %d, offset:%d",
+				t.Filename(), i, os.Offset)
 		}
 	}
 
