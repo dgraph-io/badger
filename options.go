@@ -20,6 +20,8 @@ import (
 	"github.com/dgraph-io/badger/v2/options"
 )
 
+// Note: If you add a new option X make sure you also add a WithX method on Options.
+
 // Options are params for creating DB object.
 //
 // This package provides DefaultOptions which contains options that should
@@ -127,7 +129,6 @@ func LSMOnlyOptions(path string) Options {
 }
 
 // WithDir returns a new Options value with Dir set to the given value.
-// The original Options value is never modified.
 //
 // Dir is the path of the directory where key data will be stored in.
 // If it doesn't exist, Badger will try to create it for you.
@@ -138,7 +139,6 @@ func (opt Options) WithDir(val string) Options {
 }
 
 // WithValueDir returns a new Options value with ValueDir set to the given value.
-// The original Options value is never modified.
 //
 // ValueDir is the path of the directory where value data will be stored in.
 // If it doesn't exist, Badger will try to create it for you.
@@ -149,7 +149,6 @@ func (opt Options) WithValueDir(val string) Options {
 }
 
 // WithSyncWrites returns a new Options value with SyncWrites set to the given value.
-// The original Options value is never modified.
 //
 // When SyncWrites is true all writes are synced to disk. Setting this to false would achieve better
 // performance, but may cause data loss in case of crash.
@@ -161,7 +160,6 @@ func (opt Options) WithSyncWrites(val bool) Options {
 }
 
 // WithTableLoadingMode returns a new Options value with TableLoadingMode set to the given value.
-// The original Options value is never modified.
 //
 // TableLoadingMode indicates which file loading mode should be used for the LSM tree data files.
 //
@@ -173,7 +171,6 @@ func (opt Options) WithTableLoadingMode(val options.FileLoadingMode) Options {
 
 // WithValueLogLoadingMode returns a new Options value with ValueLogLoadingMode set to the given
 // value.
-// The original Options value is never modified.
 //
 // ValueLogLoadingMode indicates which file loading mode should be used for the value log data
 // files.
@@ -185,7 +182,6 @@ func (opt Options) WithValueLogLoadingMode(val options.FileLoadingMode) Options 
 }
 
 // WithNumVersionsToKeep returns a new Options value with NumVersionsToKeep set to the given value.
-// The original Options value is never modified.
 //
 // NumVersionsToKeep sets how many versions to keep per key at most.
 //
@@ -196,7 +192,6 @@ func (opt Options) WithNumVersionsToKeep(val int) Options {
 }
 
 // WithReadOnly returns a new Options value with ReadOnly set to the given value.
-// The original Options value is never modified.
 //
 // When ReadOnly is true the DB will be opened on read-only mode.
 // Multiple processes can open the same Badger DB.
@@ -210,7 +205,6 @@ func (opt Options) WithReadOnly(val bool) Options {
 }
 
 // WithTruncate returns a new Options value with Truncate set to the given value.
-// The original Options value is never modified.
 //
 // Truncate indicates whether value log files should be truncated to delete corrupt data, if any.
 // This option is ignored when ReadOnly is true.
@@ -222,7 +216,6 @@ func (opt Options) WithTruncate(val bool) Options {
 }
 
 // WithLogger returns a new Options value with Logger set to the given value.
-// The original Options value is never modified.
 //
 // Logger provides a way to configure what logger each value of badger.DB uses.
 //
@@ -233,7 +226,6 @@ func (opt Options) WithLogger(val Logger) Options {
 }
 
 // WithMaxTableSize returns a new Options value with MaxTableSize set to the given value.
-// The original Options value is never modified.
 //
 // MaxTableSize sets the maximum size in bytes for each LSM table or file.
 //
@@ -245,7 +237,6 @@ func (opt Options) WithMaxTableSize(val int64) Options {
 
 // WithLevelSizeMultiplier returns a new Options value with LevelSizeMultiplier set to the given
 // value.
-// The original Options value is never modified.
 //
 // LevelSizeMultiplier sets the ratio between the maximum sizes of contiguous levels in the LSM.
 // Once a level grows to be larger than this ratio allowed, the compaction process will be
@@ -258,7 +249,6 @@ func (opt Options) WithLevelSizeMultiplier(val int) Options {
 }
 
 // WithMaxLevels returns a new Options value with MaxLevels set to the given value.
-// The original Options value is never modified.
 //
 // Maximum number of levels of compaction allowed in the LSM.
 //
@@ -269,7 +259,6 @@ func (opt Options) WithMaxLevels(val int) Options {
 }
 
 // WithValueThreshold returns a new Options value with ValueThreshold set to the given value.
-// The original Options value is never modified.
 //
 // ValueThreshold sets the threshold used to decide whether a value is stored directly in the LSM
 // tree or separatedly in the log value files.
@@ -281,7 +270,6 @@ func (opt Options) WithValueThreshold(val int) Options {
 }
 
 // WithNumMemtables returns a new Options value with NumMemtables set to the given value.
-// The original Options value is never modified.
 //
 // NumMemtables sets the maximum number of tables to keep in memory before stalling.
 //
@@ -293,7 +281,6 @@ func (opt Options) WithNumMemtables(val int) Options {
 
 // WithNumLevelZeroTables returns a new Options value with NumLevelZeroTables set to the given
 // value.
-// The original Options value is never modified.
 //
 // NumLevelZeroTables sets the maximum number of Level 0 tables before compaction starts.
 //
@@ -305,7 +292,6 @@ func (opt Options) WithNumLevelZeroTables(val int) Options {
 
 // WithNumLevelZeroTablesStall returns a new Options value with NumLevelZeroTablesStall set to the
 // given value.
-// The original Options value is never modified.
 //
 // NumLevelZeroTablesStall sets the number of Level 0 tables that once reached causes the DB to
 // stall until compaction succeeds.
@@ -317,7 +303,6 @@ func (opt Options) WithNumLevelZeroTablesStall(val int) Options {
 }
 
 // WithLevelOneSize returns a new Options value with LevelOneSize set to the given value.
-// The original Options value is never modified.
 //
 // LevelOneSize sets the maximum total size for Level 1.
 //
@@ -328,7 +313,6 @@ func (opt Options) WithLevelOneSize(val int64) Options {
 }
 
 // WithValueLogFileSize returns a new Options value with ValueLogFileSize set to the given value.
-// The original Options value is never modified.
 //
 // ValueLogFileSize sets the maximum size of a single value log file.
 //
@@ -340,7 +324,6 @@ func (opt Options) WithValueLogFileSize(val int64) Options {
 
 // WithValueLogMaxEntries returns a new Options value with ValueLogMaxEntries set to the given
 // value.
-// The original Options value is never modified.
 //
 // ValueLogMaxEntries sets the maximum number of entries a value log file can hold approximately.
 // A actual size limit of a value log file is the minimum of ValueLogFileSize and
@@ -353,7 +336,6 @@ func (opt Options) WithValueLogMaxEntries(val uint32) Options {
 }
 
 // WithNumCompactors returns a new Options value with NumCompactors set to the given value.
-// The original Options value is never modified.
 //
 // NumCompactors sets the number of compaction workers to run concurrently.
 // Setting this to zero stops compactions, which could eventually cause writes to block forever.
@@ -365,7 +347,6 @@ func (opt Options) WithNumCompactors(val int) Options {
 }
 
 // WithCompactL0OnClose returns a new Options value with CompactL0OnClose set to the given value.
-// The original Options value is never modified.
 //
 // CompactL0OnClose determines whether Level 0 should be compacted before closing the DB.
 // This ensures that both reads and writes are efficient when the DB is opened later.
@@ -377,7 +358,6 @@ func (opt Options) WithCompactL0OnClose(val bool) Options {
 }
 
 // WithLogRotatesToFlush returns a new Options value with LogRotatesToFlush set to the given value.
-// The original Options value is never modified.
 //
 // LogRotatesToFlush sets the number of value log file rotates after which the Memtables are
 // flushed to disk. This is useful in write loads with fewer keys and larger values. This work load
