@@ -192,7 +192,7 @@ func Open(opt Options) (db *DB, err error) {
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
-	if opt.ValueThreshold > math.MaxUint16-16 {
+	if opt.ValueThreshold > math.MaxUint32-100 { // TODO: correct this.
 		return nil, ErrValueThreshold
 	}
 
@@ -248,9 +248,10 @@ func Open(opt Options) (db *DB, err error) {
 			}
 		}()
 	}
-	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
-		return nil, ErrValueLogSize
-	}
+	// TODO: fix this.
+	// if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
+	// 	return nil, ErrValueLogSize
+	// }
 	if !(opt.ValueLogLoadingMode == options.FileIO ||
 		opt.ValueLogLoadingMode == options.MemoryMap) {
 		return nil, ErrInvalidLoadingMode
