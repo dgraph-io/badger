@@ -113,6 +113,24 @@ type Options struct {
 	// Not recommended for most users.
 	managedTxns bool
 
+	// BackupKeyFn is used during backup when the user wishes to store the keys in some other
+	// format.
+	BackupKeyFn func([]byte) ([]byte, error)
+
+	// BackupValueFn is used during backup when the user wishes to store the keys in some other
+	// format.
+	BackupValueFn func([]byte) ([]byte, error)
+
+	// RestoreKeyFn is used while loading a backup when the user wishes to restore keys that were
+	// backed up in a different format. It essentially should revert the changes made by
+	// BackupKeyFn.
+	RestoreKeyFn func([]byte) ([]byte, error)
+
+	// RestoreValueFn is used while loading a backup when the user wishes to restore values that were
+	// backed up in a different format. It essentially should revert the changes made by
+	// BackupValueFn.
+	RestoreValueFn func([]byte) ([]byte, error)
+
 	// 4. Flags for testing purposes
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
