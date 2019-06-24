@@ -83,9 +83,6 @@ type DB struct {
 	flushChan chan flushTask // For flushing memtables.
 	closeOnce sync.Once      // For closing DB only once.
 
-	// errCh is a channel that receives the db write/flush errors.
-	errCh chan error
-
 	// Number of log rotates since the last memtable flush. We will access this field via atomic
 	// functions. Since we are not going to use any 64bit atomic functions, there is no need for
 	// 64 bit alignment of this struct(see #311).
@@ -281,10 +278,6 @@ func Open(opt Options) (db *DB, err error) {
 		pub:           newPublisher(),
 	}
 
-	if db.opt.NotifyErr {
-		db.errCh = make(chan error, opt.NotifyErrBufferSize)
-	}
-
 	// Calculate initial size.
 	db.calculateSize()
 	db.closers.updateSize = y.NewCloser(1)
@@ -348,29 +341,6 @@ func Open(opt Options) (db *DB, err error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
-}
-
-func (db *DB) NotifyErr() <-chan error {
-	return db.errCh
-}
-
-func (db *DB) closeNotifyErr() {
-	if db.errCh == nil {
-		return
-	}
-
-	close(db.errCh)
-}
-
-func (db *DB) asyncNotifyErr(err error) {
-	if db.errCh == nil {
-		return
-	}
-
-	select {
-	case db.errCh <- err:
-	default:
-	}
 }
 
 // Close closes a DB. It's crucial to call it to ensure all the pending updates make their way to
@@ -456,7 +426,6 @@ func (db *DB) close() (err error) {
 	db.orc.Stop()
 
 	db.elog.Finish()
-	db.closeNotifyErr()
 
 	if db.dirLockGuard != nil {
 		if guardErr := db.dirLockGuard.release(); err == nil {
@@ -733,8 +702,8 @@ func (db *DB) doWrites(lc *y.Closer) {
 	writeRequests := func(reqs []*request) {
 		if err := db.writeRequests(reqs); err != nil {
 			db.opt.Errorf("writeRequests: %v", err)
-			// notify write error
-			db.asyncNotifyErr(err)
+			//write error
+			db.opt.SyncErrCallback(err)
 		}
 		<-pendingCh
 	}
@@ -962,8 +931,8 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 			// We close db.flushChan now, instead of sending a nil ft.mt.
 			continue
 		}
-		var i int64
-		for i = 0; i < db.opt.MaxRetryFlush; i++ {
+
+		for {
 			err := db.handleFlushTask(ft)
 			if err == nil {
 				// Update s.imm. Need a lock.
@@ -981,10 +950,12 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 				break
 			}
 
-			// notify flush error
-			db.asyncNotifyErr(err)
-			// Encountered error. Retry MaxRetryFlush times.
+			// Encountered error. Retry until the SyncErrCallback function returns false.
 			db.opt.Errorf("Failure while flushing memtable to disk: %v. Retrying...\n", err)
+			if !db.opt.SyncErrCallback(err) {
+				break
+			}
+
 			time.Sleep(time.Second)
 		}
 	}

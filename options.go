@@ -17,8 +17,6 @@
 package badger
 
 import (
-	"math"
-
 	"github.com/dgraph-io/badger/options"
 )
 
@@ -110,9 +108,9 @@ type Options struct {
 	// which can slow things on start.
 	LogRotatesToFlush int32
 
-	MaxRetryFlush       int64 // Max retry flush, default MaxInt64
-	NotifyErr           bool  // Notify write/flush errors, default false
-	NotifyErrBufferSize int   // Notify write/flush errors channel buffer size
+	// SyncErrCallback is called whenever a sync operation fails.
+	// If the function returns false, it indicates the sync operation shouldn't be retried.
+	SyncErrCallback func(error) bool
 
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
@@ -156,9 +154,7 @@ var DefaultOptions = Options{
 	Logger:             defaultLogger,
 	LogRotatesToFlush:  2,
 
-	MaxRetryFlush:       math.MaxInt64,
-	NotifyErr:           false,
-	NotifyErrBufferSize: 2,
+	SyncErrCallback: func(error) bool {return true},
 }
 
 // LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold
