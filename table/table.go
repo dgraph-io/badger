@@ -307,7 +307,8 @@ func (t *Table) block(idx int) (block, error) {
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
 
-	readPos -= (blk.chkLen + 4) // Skip reading checksum, and move position to read numEntries in block.
+	// Skip reading checksum, and move position to read numEntries in block.
+	readPos -= (blk.chkLen + 4)
 	blk.numEntries = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
 	blk.entriesIndexStart = readPos - (blk.numEntries * 4)
 

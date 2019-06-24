@@ -634,11 +634,28 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 	require.False(t, it.Valid())
 }
 
+// This test is for verifying checksum failure during table open.
+func TestTableChecksum(t *testing.T) {
+	rand.Seed(time.Now().Unix())
+	// we are going to write random byte at random location in table file.
+	rb := make([]byte, 1)
+	rand.Read(rb)
+	f := buildTestTable(t, "k", 10000)
+	fi, err := f.Stat()
+	require.NoError(t, err, "unable to get file information")
+	f.WriteAt(rb, rand.Int63n(fi.Size()))
+
+	_, err = OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
+	if err == nil || !strings.Contains(err.Error(), "checksum") {
+		t.Fatal("Test should have been failed with checksum mismatch error")
+	}
+}
+
 func BenchmarkRead(b *testing.B) {
 	n := int(5 * 1e6)
 	tbl := getTableForBenchmarks(b, n)
-	defer tbl.DecrRef()
-
+	// defer tbl.DecrRef()
+	fmt.Println("********** ", tbl.Size())
 	b.ResetTimer()
 	// Iterate b.N times over the entire table.
 	for i := 0; i < b.N; i++ {
@@ -732,23 +749,6 @@ func BenchmarkChecksum(b *testing.B) {
 				sha256.Sum256(key)
 			}
 		})
-	}
-}
-
-// This test is for verifying checksum failure during table open.
-func TestTableChecksum(t *testing.T) {
-	rand.Seed(time.Now().Unix())
-	// we are going to write random byte at random location in table file.
-	rb := make([]byte, 1)
-	rand.Read(rb)
-	f := buildTestTable(t, "k", 10000)
-	fi, err := f.Stat()
-	require.NoError(t, err, "unable to get file information")
-	f.WriteAt(rb, rand.Int63n(fi.Size()))
-
-	_, err = OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
-	if err == nil || !strings.Contains(err.Error(), "checksum") {
-		t.Fatal("Test should have been failed with checksum mismatch error")
 	}
 }
 
