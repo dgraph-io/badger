@@ -51,11 +51,9 @@ func init() {
 
 func doBackup(cmd *cobra.Command, args []string) error {
 	// Open DB
-	opts := badger.DefaultOptions
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.Truncate = truncate
-	db, err := badger.Open(opts)
+	db, err := badger.Open(badger.DefaultOptions(sstDir).
+		WithValueDir(vlogDir).
+		WithTruncate(truncate))
 	if err != nil {
 		return err
 	}

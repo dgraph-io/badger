@@ -844,13 +844,9 @@ func TestBug578(t *testing.T) {
 	y.Check(err)
 	defer os.RemoveAll(dir)
 
-	opts := DefaultOptions
-	opts.Dir = dir
-	opts.ValueDir = dir
-	opts.ValueLogMaxEntries = 64
-	opts.MaxTableSize = 1 << 13
-
-	db, err := Open(opts)
+	db, err := Open(DefaultOptions(dir).
+		WithValueLogMaxEntries(64).
+		WithMaxTableSize(1 << 13))
 	require.NoError(t, err)
 
 	h := testHelper{db: db, t: t}
@@ -942,12 +938,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	opts := DefaultOptions
-	opts.Dir = dir
-	opts.ValueDir = dir
-	opts.Truncate = true
-
-	db, err := Open(opts)
+	db, err := Open(DefaultOptions(dir).WithTruncate(true))
 	require.NoError(t, err)
 	// Insert 1 entry so that we have valid data in first vlog file
 	require.NoError(t, db.Update(func(txn *Txn) error {
@@ -962,7 +953,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), []byte("foo"), 0664))
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 2), []byte("foo"), 0664))
 
-	db, err = Open(opts)
+	db, err = Open(DefaultOptions(dir).WithTruncate(true))
 	require.NoError(t, err)
 
 	// Ensure vlog file with id=1 is not present

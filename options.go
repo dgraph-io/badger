@@ -80,6 +80,8 @@ type Options struct {
 // Feel free to modify these to suit your needs with the WithX methods.
 func DefaultOptions(path string) Options {
 	return Options{
+		Dir:                 path,
+		ValueDir:            path,
 		LevelOneSize:        256 << 20,
 		LevelSizeMultiplier: 10,
 		TableLoadingMode:    options.MemoryMap,

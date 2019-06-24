@@ -79,13 +79,11 @@ func readBench(cmd *cobra.Command, args []string) error {
 	y.AssertTrue(numGoroutines > 0)
 	mode := getLoadingMode(loadingMode)
 
-	opts := badger.DefaultOptions
-	opts.ReadOnly = readOnly
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.TableLoadingMode = mode
-	opts.ValueLogLoadingMode = mode
-	db, err := badger.Open(opts)
+	db, err := badger.Open(badger.DefaultOptions(sstDir).
+		WithValueDir(vlogDir).
+		WithReadOnly(readOnly).
+		WithTableLoadingMode(mode).
+		WithValueLogLoadingMode(mode))
 	if err != nil {
 		return y.Wrapf(err, "unable to open DB")
 	}
