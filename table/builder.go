@@ -189,9 +189,9 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
 	estimateSz := b.buf.Len() +
-		8 /* empty header */ +
-		4 /* Index length */ +
-		5*(len(b.tableIndex.Offsets)) /* approximate index size */
+		8 + // empty header
+		4 + // Index length
+		5*(len(b.tableIndex.Offsets)) // approximate index size
 	return int64(estimateSz) > cap
 }
 
