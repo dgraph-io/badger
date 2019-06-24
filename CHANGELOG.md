@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 This is a release including almost 200 commits, so expect many changes - some of them
 not backwards compatible.
 
-_Note_: The hashes in parenthesis correspond to the commits that impacted the given feature.
+_Note_: The hashes in parentheses correspond to the commits that impacted the given feature.
 
 ### New APIs
 
@@ -24,6 +24,9 @@ _Note_: The hashes in parenthesis correspond to the commits that impacted the gi
   - PrintKeyValueHistogram (fd59907)
   - Subscribe (26128a7)
   - Sync (851e462)
+
+- badger.DefaultOptions() and badger.LSMOnlyOptions() (91ce687)
+  - badger.Options.WithX methods
 
 - badger.Entry (e9447c9)
   - NewEntry
@@ -57,6 +60,7 @@ _Note_: The hashes in parenthesis correspond to the commits that impacted the gi
 
 #### Breaking changes:
 
+- badger.DefaultOptions and badger.LSMOnlyOptions are now functions rather than variables (91ce687)
 - badger.Item.Value now receives a function that returns an error (439fd46)
 - badger.Txn.Commit doesn't receive any params now (6daccf9)
 - badger.DB.Tables now receives a boolean (76b5341)
