@@ -654,8 +654,8 @@ func TestTableChecksum(t *testing.T) {
 func BenchmarkRead(b *testing.B) {
 	n := int(5 * 1e6)
 	tbl := getTableForBenchmarks(b, n)
-	// defer tbl.DecrRef()
-	fmt.Println("********** ", tbl.Size())
+	defer tbl.DecrRef()
+
 	b.ResetTimer()
 	// Iterate b.N times over the entire table.
 	for i := 0; i < b.N; i++ {
