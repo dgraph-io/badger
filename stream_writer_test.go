@@ -282,8 +282,9 @@ func TestStreamWriter5(t *testing.T) {
 		require.NoError(t, db.Close())
 
 		var err error
-		_, err = Open(db.opt)
+		db, err = Open(db.opt)
 		require.NoError(t, err)
+		require.NoError(t, db.Close())
 	})
 }
 
@@ -324,7 +325,8 @@ func TestStreamWriter6(t *testing.T) {
 		}
 		require.NoError(t, db.Close())
 
-		_, err := Open(db.opt)
+		db, err := Open(db.opt)
 		require.NoError(t, err)
+		require.NoError(t, db.Close())
 	})
 }
