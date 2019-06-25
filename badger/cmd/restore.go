@@ -65,10 +65,7 @@ func doRestore(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open DB
-	opts := badger.DefaultOptions
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	db, err := badger.Open(opts)
+	db, err := badger.Open(badger.DefaultOptions(sstDir).WithValueDir(vlogDir))
 	if err != nil {
 		return err
 	}
