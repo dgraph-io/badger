@@ -383,24 +383,19 @@ func TestDiscardMapTooBig(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
-// Tests for value size uint32
+// Test for values of size uint32.
 func TestBigValues(t *testing.T) {
-	// This test takes too much memory. So, run separately.
 	if !*manual {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
 	opts := DefaultOptions
-	opts.ValueThreshold = 1 << 30
-	opts.MaxTableSize = 5 << 30
-	opts.ValueLogFileSize = 5 << 30
-	opts.ValueLogMaxEntries = 2
-	opts.NumLevelZeroTables = 2
-	opts.NumLevelZeroTablesStall = 3
+	opts.ValueThreshold = 1 << 20
+	opts.ValueLogMaxEntries = 100
 	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
-		keyCount := 10
+		keyCount := 1000
 
-		data := fmt.Sprintf("%2000000000d", 1)
+		data := bytes.Repeat([]byte("a"), (1 << 20)) // Valuesize 1 MB.
 		key := func(i int) string {
 			return fmt.Sprintf("%65000d", i)
 		}
@@ -430,7 +425,7 @@ func TestBigValues(t *testing.T) {
 			require.NoError(t, saveByKey(key(i), []byte(data)))
 		}
 
-		for i := 0; i < 1; i++ {
+		for i := 0; i < keyCount; i++ {
 			require.NoError(t, getByKey(key(i)))
 		}
 	})

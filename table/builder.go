@@ -132,7 +132,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	}
 
 	// store current entry's offset
-	y.AssertTrue(b.buf.Len() < math.MaxUint32) // TODO: now value size is uint32, should we change this?
+	y.AssertTrue(b.buf.Len() < math.MaxUint32)
 	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len())-b.baseOffset)
 
 	// Layout: header, diffKey, value.

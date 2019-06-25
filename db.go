@@ -192,8 +192,16 @@ func Open(opt Options) (db *DB, err error) {
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
-	if opt.ValueThreshold > math.MaxUint32-100 { // TODO: correct this.
+	// ValueThreshold cannot be greater than ValueThresholdLimit.
+	if opt.ValueThreshold > ValueThresholdLimit {
 		return nil, ErrValueThreshold
+	}
+
+	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
+	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
+	if int64(opt.ValueThreshold) > opt.maxBatchSize {
+		return nil, errors.Errorf("Valuethreshold size too big. Either reduce opt.ValueThreshold " +
+			"or increase opt.MaxTableSize.")
 	}
 
 	if opt.ReadOnly {
@@ -248,10 +256,9 @@ func Open(opt Options) (db *DB, err error) {
 			}
 		}()
 	}
-	// TODO: fix this.
-	// if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
-	// 	return nil, ErrValueLogSize
-	// }
+	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
+		return nil, ErrValueLogSize
+	}
 	if !(opt.ValueLogLoadingMode == options.FileIO ||
 		opt.ValueLogLoadingMode == options.MemoryMap) {
 		return nil, ErrInvalidLoadingMode

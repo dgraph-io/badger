@@ -155,8 +155,13 @@ var DefaultOptions = Options{
 	ChecksumVerificationMode: options.NoVerification,
 }
 
+const (
+	// ValueThresholdLimit is the maximum permissible value of opt.ValueThreshold.
+	ValueThresholdLimit = (1 << 20) // 1 MB.
+)
+
 // LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold
-// so values would be colocated with the LSM tree, with value log largely acting
+// so values would be collocated with the LSM tree, with value log largely acting
 // as a write-ahead log only. These options would reduce the disk usage of value
 // log, and make Badger act more like a typical LSM tree.
 var LSMOnlyOptions = Options{}
@@ -164,8 +169,7 @@ var LSMOnlyOptions = Options{}
 func init() {
 	LSMOnlyOptions = DefaultOptions
 
-	// TODO: exact value of ValueThreshold ??
-	LSMOnlyOptions.ValueThreshold = 4294967195 // Max value length which fits in uint32.
+	LSMOnlyOptions.ValueThreshold = ValueThresholdLimit // 1 MB for now, can be changed in future.
 	// Let's not set any other options, because they can cause issues with the
 	// size of key-value a user can pass to Badger. For e.g., if we set
 	// ValueLogFileSize to 64MB, a user can't pass a value more than that.
@@ -175,5 +179,5 @@ func init() {
 	// achieve a heavier usage of LSM tree.
 	// NOTE: If a user does not want to set 64KB as the ValueThreshold because
 	// of performance reasons, 1KB would be a good option too, allowing
-	// values smaller than 1KB to be colocated with the keys in the LSM tree.
+	// values smaller than 1KB to be collocated with the keys in the LSM tree.
 }
