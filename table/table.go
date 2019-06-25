@@ -342,8 +342,8 @@ func (t *Table) ID() uint64 { return t.id }
 // bloom filter lookup.
 func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(key) }
 
-// VerifyChecksum verifies checksum for all blocks of table. This function is called by OpenTable() function.
-// This function is also called inside levelsController.VerifyChecksum().
+// VerifyChecksum verifies checksum for all blocks of table. This function is called by
+// OpenTable() function. This function is also called inside levelsController.VerifyChecksum().
 func (t *Table) VerifyChecksum() error {
 	for i, os := range t.blockIndex {
 		b, err := t.block(i)
