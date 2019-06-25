@@ -41,7 +41,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 		return m
 	}
 
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -196,9 +196,11 @@ func TestBigKeyValuePairs(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	opts := DefaultOptions
-	opts.MaxTableSize = 1 << 20
-	opts.ValueLogMaxEntries = 64
+
+	// Passing an empty directory since it will be filled by runBadgerTest.
+	opts := DefaultOptions("").
+		WithMaxTableSize(1 << 20).
+		WithValueLogMaxEntries(64)
 	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
 		bigK := make([]byte, 65001)
 		bigV := make([]byte, db.opt.ValueLogFileSize+1)
@@ -285,9 +287,11 @@ func TestPushValueLogLimit(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	opt := DefaultOptions
-	opt.ValueLogMaxEntries = 64
-	opt.ValueLogFileSize = 2 << 30
+
+	// Passing an empty directory since it will be filled by runBadgerTest.
+	opt := DefaultOptions("").
+		WithValueLogMaxEntries(64).
+		WithValueLogFileSize(2 << 30)
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		data := []byte(fmt.Sprintf("%30d", 1))
 		key := func(i int) string {
@@ -323,4 +327,37 @@ func TestPushValueLogLimit(t *testing.T) {
 			require.NoError(t, err)
 		}
 	})
+}
+
+// Regression test for https://github.com/dgraph-io/badger/issues/830
+func TestDiscardMapTooBig(t *testing.T) {
+	createDiscardStats := func() map[uint32]int64 {
+		stat := map[uint32]int64{}
+		for i := uint32(0); i < 8000; i++ {
+			stat[i] = 0
+		}
+		return stat
+	}
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	db, err := Open(DefaultOptions(dir))
+	require.NoError(t, err, "error while openning db")
+
+	// Add some data so that memtable flush happens on close
+	require.NoError(t, db.Update(func(txn *Txn) error {
+		return txn.Set([]byte("foo"), []byte("bar"))
+	}))
+
+	// overwrite discardstat with large value
+	db.vlog.lfDiscardStats = &lfDiscardStats{
+		m: createDiscardStats(),
+	}
+
+	require.NoError(t, db.Close())
+	// reopen the same DB
+	db, err = Open(DefaultOptions(dir))
+	require.NoError(t, err, "error while openning db")
+	require.NoError(t, db.Close())
 }

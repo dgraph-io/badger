@@ -17,7 +17,7 @@
 package cmd
 
 import (
-	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -40,13 +40,10 @@ func init() {
 }
 
 func flatten(cmd *cobra.Command, args []string) error {
-	opts := badger.DefaultOptions
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.Truncate = truncate
-	opts.NumCompactors = 0
-
-	db, err := badger.Open(opts)
+	db, err := badger.Open(badger.DefaultOptions(sstDir).
+		WithValueDir(vlogDir).
+		WithTruncate(truncate).
+		WithNumCompactors(0))
 	if err != nil {
 		return err
 	}

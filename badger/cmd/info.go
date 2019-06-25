@@ -29,10 +29,10 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/dgraph-io/badger"
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
@@ -45,6 +45,7 @@ type flagOptions struct {
 	keyLookup     string
 	itemMeta      bool
 	keyHistory    bool
+	showInternal  bool
 }
 
 var (
@@ -63,6 +64,9 @@ func init() {
 	infoCmd.Flags().StringVarP(&opt.keyLookup, "lookup", "l", "", "Hex of the key to lookup")
 	infoCmd.Flags().BoolVar(&opt.itemMeta, "show-meta", true, "Output item meta data as well")
 	infoCmd.Flags().BoolVar(&opt.keyHistory, "history", false, "Show all versions of a key")
+	infoCmd.Flags().BoolVar(
+		&opt.showInternal, "show-internal", false, "Show internal keys along with other keys."+
+			" This option should be used along with --show-key option")
 }
 
 var infoCmd = &cobra.Command{
@@ -83,13 +87,10 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open DB
-	opts := badger.DefaultOptions
-	opts.TableLoadingMode = options.MemoryMap
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.ReadOnly = true
-
-	db, err := badger.Open(opts)
+	db, err := badger.Open(badger.DefaultOptions(sstDir).
+		WithValueDir(vlogDir).
+		WithReadOnly(true).
+		WithTableLoadingMode(options.MemoryMap))
 	if err != nil {
 		return errors.Wrap(err, "failed to open database")
 	}
@@ -132,6 +133,7 @@ func showKeys(db *badger.DB, prefix []byte) error {
 	iopt.Prefix = []byte(prefix)
 	iopt.PrefetchValues = false
 	iopt.AllVersions = opt.keyHistory
+	iopt.InternalAccess = opt.showInternal
 	it := txn.NewIterator(iopt)
 	defer it.Close()
 

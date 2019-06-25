@@ -20,7 +20,8 @@ import (
 	"bufio"
 	"os"
 
-	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/spf13/cobra"
 )
 
@@ -50,11 +51,9 @@ func init() {
 
 func doBackup(cmd *cobra.Command, args []string) error {
 	// Open DB
-	opts := badger.DefaultOptions
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.Truncate = truncate
-	db, err := badger.Open(opts)
+	db, err := badger.Open(badger.DefaultOptions(sstDir).
+		WithValueDir(vlogDir).
+		WithTruncate(truncate))
 	if err != nil {
 		return err
 	}
@@ -75,7 +74,7 @@ func doBackup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err = f.Sync(); err != nil {
+	if err = y.FileSync(f); err != nil {
 		return err
 	}
 

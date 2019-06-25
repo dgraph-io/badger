@@ -17,14 +17,16 @@
 package table
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
 	"os"
 	"sort"
 	"testing"
+	"time"
 
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -619,28 +621,14 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 	require.EqualValues(t, "a2", string(vs.Value))
 	require.EqualValues(t, 'A', vs.Meta)
 	it.Next()
-
 	require.False(t, it.Valid())
 }
 
 func BenchmarkRead(b *testing.B) {
-	n := 5 << 20
-	builder := NewTableBuilder()
-	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-	f, err := y.OpenSyncedFile(filename, true)
-	y.Check(err)
-	for i := 0; i < n; i++ {
-		k := fmt.Sprintf("%016x", i)
-		v := fmt.Sprintf("%d", i)
-		y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}))
-	}
-
-	f.Write(builder.Finish())
-	tbl, err := OpenTable(f, options.MemoryMap, nil)
-	y.Check(err)
+	n := int(5 * 1e6)
+	tbl := getTableForBenchmarks(b, n)
 	defer tbl.DecrRef()
 
-	//	y.Printf("Size of table: %d\n", tbl.Size())
 	b.ResetTimer()
 	// Iterate b.N times over the entire table.
 	for i := 0; i < b.N; i++ {
@@ -654,23 +642,10 @@ func BenchmarkRead(b *testing.B) {
 }
 
 func BenchmarkReadAndBuild(b *testing.B) {
-	n := 5 << 20
-	builder := NewTableBuilder()
-	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-	f, err := y.OpenSyncedFile(filename, true)
-	y.Check(err)
-	for i := 0; i < n; i++ {
-		k := fmt.Sprintf("%016x", i)
-		v := fmt.Sprintf("%d", i)
-		y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}))
-	}
-
-	f.Write(builder.Finish())
-	tbl, err := OpenTable(f, options.MemoryMap, nil)
-	y.Check(err)
+	n := int(5 * 1e6)
+	tbl := getTableForBenchmarks(b, n)
 	defer tbl.DecrRef()
 
-	//	y.Printf("Size of table: %d\n", tbl.Size())
 	b.ResetTimer()
 	// Iterate b.N times over the entire table.
 	for i := 0; i < b.N; i++ {
@@ -688,7 +663,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 }
 
 func BenchmarkReadMerged(b *testing.B) {
-	n := 5 << 20
+	n := int(5 * 1e6)
 	m := 5 // Number of tables.
 	y.AssertTrue((n % m) == 0)
 	tableSize := n / m
@@ -706,7 +681,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}))
 		}
 		f.Write(builder.Finish())
-		tbl, err := OpenTable(f, options.MemoryMap, nil)
+		tbl, err := OpenTable(f, options.LoadToRAM, nil)
 		y.Check(err)
 		tables = append(tables, tbl)
 		defer tbl.DecrRef()
@@ -726,4 +701,49 @@ func BenchmarkReadMerged(b *testing.B) {
 			}
 		}()
 	}
+}
+
+func BenchmarkRandomRead(b *testing.B) {
+	n := int(5 * 1e6)
+	tbl := getTableForBenchmarks(b, n)
+	defer tbl.DecrRef()
+
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		itr := tbl.NewIterator(false)
+		no := r.Intn(n)
+		k := []byte(fmt.Sprintf("%016x", no))
+		v := []byte(fmt.Sprintf("%d", no))
+		itr.Seek(k)
+		if !itr.Valid() {
+			b.Fatal("itr should be valid")
+		}
+		v1 := itr.Value().Value
+
+		if !bytes.Equal(v, v1) {
+			fmt.Println("value does not match")
+			b.Fatal()
+		}
+		itr.Close()
+	}
+}
+
+func getTableForBenchmarks(b *testing.B, count int) *Table {
+	rand.Seed(time.Now().Unix())
+	builder := NewTableBuilder()
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
+	f, err := y.OpenSyncedFile(filename, true)
+	require.NoError(b, err)
+	for i := 0; i < count; i++ {
+		k := fmt.Sprintf("%016x", i)
+		v := fmt.Sprintf("%d", i)
+		y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)}))
+	}
+
+	f.Write(builder.Finish())
+	tbl, err := OpenTable(f, options.LoadToRAM, nil)
+	require.NoError(b, err, "unable to open table")
+	return tbl
 }

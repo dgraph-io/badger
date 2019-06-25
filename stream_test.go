@@ -26,18 +26,10 @@ import (
 	"strings"
 	"testing"
 
-	bpb "github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+	bpb "github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/stretchr/testify/require"
 )
-
-func openManaged(dir string) (*DB, error) {
-	opt := DefaultOptions
-	opt.Dir = dir
-	opt.ValueDir = dir
-
-	return OpenManaged(opt)
-}
 
 func keyWithPrefix(prefix string, k int) []byte {
 	return []byte(fmt.Sprintf("%s-%d", prefix, k))
@@ -66,11 +58,11 @@ func (c *collector) Send(list *bpb.KVList) error {
 var ctxb = context.Background()
 
 func TestStream(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	db, err := openManaged(dir)
+	db, err := OpenManaged(DefaultOptions(dir))
 	require.NoError(t, err)
 
 	var count int

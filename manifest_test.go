@@ -27,15 +27,15 @@ import (
 
 	"golang.org/x/net/trace"
 
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/stretchr/testify/require"
 )
 
 func TestManifestBasic(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -70,7 +70,7 @@ func TestManifestBasic(t *testing.T) {
 }
 
 func helpTestManifestFileCorruption(t *testing.T, off int64, errorContent string) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -102,6 +102,10 @@ func TestManifestMagic(t *testing.T) {
 
 func TestManifestVersion(t *testing.T) {
 	helpTestManifestFileCorruption(t, 4, "unsupported version")
+}
+
+func TestManifestChecksum(t *testing.T) {
+	helpTestManifestFileCorruption(t, 15, "checksum mismatch")
 }
 
 func key(prefix string, i int) string {
@@ -157,13 +161,10 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 }
 
 func TestOverlappingKeyRangeError(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opt := DefaultOptions
-	opt.Dir = dir
-	opt.ValueDir = dir
-	kv, err := Open(opt)
+	kv, err := Open(DefaultOptions(dir))
 	require.NoError(t, err)
 
 	lh0 := newLevelHandler(kv, 0)
@@ -206,7 +207,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 }
 
 func TestManifestRewrite(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	deletionsThreshold := 10

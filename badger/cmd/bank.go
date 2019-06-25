@@ -30,10 +30,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger"
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/spf13/cobra"
 )
 
@@ -274,14 +274,11 @@ func compareTwo(db *badger.DB, before, after uint64) {
 }
 
 func runDisect(cmd *cobra.Command, args []string) error {
-	opts := badger.DefaultOptions
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.ReadOnly = true
-
 	// The total did not match up. So, let's disect the DB to find the
 	// transction which caused the total mismatch.
-	db, err := badger.OpenManaged(opts)
+	db, err := badger.OpenManaged(badger.DefaultOptions(sstDir).
+		WithValueDir(vlogDir).
+		WithReadOnly(true))
 	if err != nil {
 		return err
 	}
@@ -324,17 +321,16 @@ func runTest(cmd *cobra.Command, args []string) error {
 	rand.Seed(time.Now().UnixNano())
 
 	// Open DB
-	opts := badger.DefaultOptions
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.MaxTableSize = 4 << 20 // Force more compactions.
-	opts.NumLevelZeroTables = 2
-	opts.NumMemtables = 2
-	// Do not GC any versions, because we need them for the disect.
-	opts.NumVersionsToKeep = int(math.MaxInt32)
-	opts.ValueThreshold = 1 // Make all values go to value log.
+	opts := badger.DefaultOptions(sstDir).
+		WithValueDir(vlogDir).
+		WithMaxTableSize(4 << 20). // Force more compactions.
+		WithNumLevelZeroTables(2).
+		WithNumMemtables(2).
+		// Do not GC any versions, because we need them for the disect..
+		WithNumVersionsToKeep(int(math.MaxInt32)).
+		WithValueThreshold(1) // Make all values go to value log
 	if mmap {
-		opts.TableLoadingMode = options.MemoryMap
+		opts = opts.WithTableLoadingMode(options.MemoryMap)
 	}
 	log.Printf("Opening DB with options: %+v\n", opts)
 
@@ -350,13 +346,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		dir, err := ioutil.TempDir("", "bank_subscribe")
 		y.Check(err)
 
-		subscribeOpts := badger.DefaultOptions
-		subscribeOpts.Dir = dir
-		subscribeOpts.ValueDir = dir
-		subscribeOpts.SyncWrites = false
-		log.Printf("Opening subscribe DB with options: %+v\n", subscribeOpts)
-
-		subscribeDB, err = badger.Open(subscribeOpts)
+		subscribeDB, err = badger.Open(badger.DefaultOptions(dir).WithSyncWrites(false))
 		if err != nil {
 			return err
 		}
@@ -367,13 +357,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		dir, err := ioutil.TempDir("", "bank_stream")
 		y.Check(err)
 
-		streamOpts := badger.DefaultOptions
-		streamOpts.Dir = dir
-		streamOpts.ValueDir = dir
-		streamOpts.SyncWrites = false
-		log.Printf("Opening stream DB with options: %+v\n", streamOpts)
-
-		tmpDb, err = badger.Open(streamOpts)
+		tmpDb, err = badger.Open(badger.DefaultOptions(dir).WithSyncWrites(false))
 		if err != nil {
 			return err
 		}
@@ -540,12 +524,12 @@ func runTest(cmd *cobra.Command, args []string) error {
 				accountIDS = append(accountIDS, key(i))
 			}
 			updater := func(kvs *pb.KVList) {
-				loader := subscribeDB.NewLoader(16)
+				batch := subscribeDB.NewWriteBatch()
 				for _, kv := range kvs.GetKv() {
-					y.Check(loader.Set(kv))
+					y.Check(batch.Set(kv.Key, kv.Value))
 				}
 
-				y.Check(loader.Finish())
+				y.Check(batch.Flush())
 			}
 			_ = db.Subscribe(ctx, updater, accountIDS[0], accountIDS[1:]...)
 		}()

@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
+ * Copyright 2019 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,29 +14,19 @@
  * limitations under the License.
  */
 
-package main
+package cmd
 
 import (
-	"fmt"
-	"net/http"
-	_ "net/http/pprof"
-	"runtime"
-
-	"github.com/dgraph-io/badger/v2/badger/cmd"
+	"github.com/spf13/cobra"
 )
 
-func main() {
-	go func() {
-		for i := 8080; i < 9080; i++ {
-			fmt.Printf("Listening for /debug HTTP requests at port: %d\n", i)
-			if err := http.ListenAndServe(fmt.Sprintf("localhost:%d", i), nil); err != nil {
-				fmt.Println("Port busy. Trying another one...")
-				continue
+var benchCmd = &cobra.Command{
+	Use:   "benchmark",
+	Short: "Benchmark Badger database.",
+	Long: `This command will benchmark Badger for different usecases. Currently only read benchmark
+	is supported. Useful for testing and performance analysis.`,
+}
 
-			}
-		}
-	}()
-	runtime.SetBlockProfileRate(100)
-	runtime.GOMAXPROCS(128)
-	cmd.Execute()
+func init() {
+	RootCmd.AddCommand(benchCmd)
 }

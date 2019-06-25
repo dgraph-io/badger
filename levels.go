@@ -30,9 +30,9 @@ import (
 
 	"golang.org/x/net/trace"
 
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 )
 
@@ -620,7 +620,9 @@ func (s *levelsController) compactBuildTables(
 	sort.Slice(newTables, func(i, j int) bool {
 		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
-	s.kv.vlog.updateDiscardStats(discardStats)
+	if err := s.kv.vlog.updateDiscardStats(discardStats); err != nil {
+		return nil, nil, errors.Wrap(err, "failed to update discard stats")
+	}
 	s.kv.opt.Debugf("Discard stats: %v", discardStats)
 	return newTables, func() error { return decrRefs(newTables) }, nil
 }

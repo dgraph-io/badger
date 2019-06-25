@@ -27,15 +27,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/y"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/trace"
 )
 
 func TestValueBasic(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	y.Check(err)
 	defer os.RemoveAll(dir)
 
@@ -91,7 +91,7 @@ func TestValueBasic(t *testing.T) {
 }
 
 func TestValueGCManaged(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -150,7 +150,7 @@ func TestValueGCManaged(t *testing.T) {
 }
 
 func TestValueGC(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
@@ -203,7 +203,7 @@ func TestValueGC(t *testing.T) {
 }
 
 func TestValueGC2(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
@@ -279,7 +279,7 @@ func TestValueGC2(t *testing.T) {
 }
 
 func TestValueGC3(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
@@ -354,7 +354,7 @@ func TestValueGC3(t *testing.T) {
 }
 
 func TestValueGC4(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
@@ -430,7 +430,7 @@ func TestValueGC4(t *testing.T) {
 }
 
 func TestPersistLFDiscardStats(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
@@ -484,7 +484,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 }
 
 func TestChecksums(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -567,7 +567,7 @@ func TestChecksums(t *testing.T) {
 }
 
 func TestPartialAppendToValueLog(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -633,7 +633,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 }
 
 func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -672,7 +672,7 @@ func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 
 func TestValueLogTrigger(t *testing.T) {
 	t.Skip("Difficult to trigger compaction, so skipping. Re-enable after fixing #226")
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -708,7 +708,7 @@ func TestValueLogTrigger(t *testing.T) {
 }
 
 func createVlog(t *testing.T, entries []*Entry) []byte {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -732,7 +732,7 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 }
 
 func TestPenultimateLogCorruption(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opt := getTestOptions(dir)
@@ -841,17 +841,13 @@ func (th *testHelper) readRange(from, to int) {
 // older version can end up at a higher level in the LSM tree than a newer
 // version, causing the data to not be returned.
 func TestBug578(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger")
+	dir, err := ioutil.TempDir("", "badger-test")
 	y.Check(err)
 	defer os.RemoveAll(dir)
 
-	opts := DefaultOptions
-	opts.Dir = dir
-	opts.ValueDir = dir
-	opts.ValueLogMaxEntries = 64
-	opts.MaxTableSize = 1 << 13
-
-	db, err := Open(opts)
+	db, err := Open(DefaultOptions(dir).
+		WithValueLogMaxEntries(64).
+		WithMaxTableSize(1 << 13))
 	require.NoError(t, err)
 
 	h := testHelper{db: db, t: t}
@@ -939,16 +935,11 @@ func BenchmarkReadWrite(b *testing.B) {
 
 // Regression test for https://github.com/dgraph-io/badger/issues/817
 func TestValueLogTruncate(t *testing.T) {
-	dir, err := ioutil.TempDir(".", "badger-test")
+	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	opts := DefaultOptions
-	opts.Dir = dir
-	opts.ValueDir = dir
-	opts.Truncate = true
-
-	db, err := Open(opts)
+	db, err := Open(DefaultOptions(dir).WithTruncate(true))
 	require.NoError(t, err)
 	// Insert 1 entry so that we have valid data in first vlog file
 	require.NoError(t, db.Update(func(txn *Txn) error {
@@ -963,7 +954,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), []byte("foo"), 0664))
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 2), []byte("foo"), 0664))
 
-	db, err = Open(opts)
+	db, err = Open(DefaultOptions(dir).WithTruncate(true))
 	require.NoError(t, err)
 
 	// Ensure vlog file with id=1 is not present
