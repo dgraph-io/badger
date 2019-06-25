@@ -155,15 +155,12 @@ func writeSorted(db *badger.DB, num uint64) error {
 }
 
 func writeBench(cmd *cobra.Command, args []string) error {
-	opts := badger.DefaultOptions
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.Truncate = truncate
-	opts.SyncWrites = false
-	opts.CompactL0OnClose = force
-	opts.Logger = nil
-
-	db, err := badger.Open(opts)
+	db, err := badger.Open(badger.DefaultOptions(sstDir).
+		WithValueDir(vlogDir).
+		WithTruncate(truncate).
+		WithSyncWrites(false).
+		WithCompactL0OnClose(force).
+		WithLogger(nil))
 	if err != nil {
 		return err
 	}

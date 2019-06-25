@@ -1,4 +1,4 @@
-Size of table is 127,618,890 bytes for all benchmarks.
+Size of table is 122,173,606 bytes for all benchmarks.
 
 # BenchmarkRead
 ```
@@ -13,11 +13,11 @@ PASS
 ok  	github.com/dgraph-io/badger/table	23.549s
 ```
 
-Size of table is 127,618,890 bytes, which is ~122MB.
+Size of table is 122,173,606 bytes, which is ~117MB.
 
-The rate is ~783MB/s using LoadToRAM (when table is in RAM).
+The rate is ~750MB/s using LoadToRAM (when table is in RAM).
 
-To read a 64MB table, this would take ~0.0817s, which is negligible.
+To read a 64MB table, this would take ~0.0853s, which is negligible.
 
 # BenchmarkReadAndBuild
 ```go
@@ -32,11 +32,11 @@ PASS
 ok  	github.com/dgraph-io/badger/table	26.856s
 ```
 
-The rate is ~127MB/s. To build a 64MB table, this would take ~0.5s. Note that this
+The rate is ~122MB/s. To build a 64MB table, this would take ~0.52s. Note that this
 does NOT include the flushing of the table to disk. All we are doing above is
 reading one table (which is in RAM) and write one table in memory.
 
-The table building takes 0.5-0.0817s ~ 0.4183s.
+The table building takes 0.52-0.0853s ~ 0.4347s.
 
 # BenchmarkReadMerged
 Below, we merge 5 tables. The total size remains unchanged at ~122M.
@@ -50,7 +50,7 @@ PASS
 ok  	github.com/dgraph-io/badger/table	33.327s
 ```
 
-The rate is ~127MB/s. To read a 64MB table using merge iterator, this would take ~0.5s.
+The rate is ~122MB/s. To read a 64MB table using merge iterator, this would take ~0.52s.
 
 # BenchmarkRandomRead
 
