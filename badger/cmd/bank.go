@@ -181,7 +181,7 @@ func diff(a, b []account) string {
 	return buf.String()
 }
 
-var errFailure = errors.New("Found an balance mismatch. Test failed.")
+var errFailure = errors.New("test failed due to balance mismatch")
 
 // seekTotal retrives the total of all accounts by seeking for each account key.
 func seekTotal(txn *badger.Txn) ([]account, error) {
