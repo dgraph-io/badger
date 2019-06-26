@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -127,20 +126,23 @@ func writeTo(list *pb.KVList, w io.Writer) error {
 	return err
 }
 
-type loader struct {
+// KVLoader is used to write KVList objects in to badger. It can be used to restore a backup.
+type KVLoader struct {
 	db       *DB
 	throttle *y.Throttle
 	entries  []*Entry
 }
 
-func (db *DB) newLoader(maxPendingWrites int) *loader {
-	return &loader{
+// NewKVLoader returns a new instance of KVLoader.
+func (db *DB) NewKVLoader(maxPendingWrites int) *KVLoader {
+	return &KVLoader{
 		db:       db,
 		throttle: y.NewThrottle(maxPendingWrites),
 	}
 }
 
-func (l *loader) set(kv *pb.KV) error {
+// Set writes the key-value pair to the database.
+func (l *KVLoader) Set(kv *pb.KV) error {
 	var userMeta, meta byte
 	if len(kv.UserMeta) > 0 {
 		userMeta = kv.UserMeta[0]
@@ -162,7 +164,7 @@ func (l *loader) set(kv *pb.KV) error {
 	return nil
 }
 
-func (l *loader) send() error {
+func (l *KVLoader) send() error {
 	if err := l.throttle.Do(); err != nil {
 		return err
 	}
@@ -176,64 +178,12 @@ func (l *loader) send() error {
 	return nil
 }
 
-func (l *loader) finish() error {
+// Finish is meant to be called after all the key-value pairs have been loaded.
+func (l *KVLoader) Finish() error {
 	if len(l.entries) > 0 {
 		if err := l.send(); err != nil {
 			return err
 		}
 	}
 	return l.throttle.Finish()
-}
-
-// Load reads a protobuf-encoded list of all entries from a reader and writes
-// them to the database. This can be used to restore the database from a backup
-// made by calling DB.Backup().
-//
-// DB.Load() should be called on a database that is not running any other
-// concurrent transactions while it is running.
-func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
-	br := bufio.NewReaderSize(r, 16<<10)
-	unmarshalBuf := make([]byte, 1<<10)
-
-	ldr := db.newLoader(maxPendingWrites)
-	for {
-		var sz uint64
-		err := binary.Read(br, binary.LittleEndian, &sz)
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return err
-		}
-
-		if cap(unmarshalBuf) < int(sz) {
-			unmarshalBuf = make([]byte, sz)
-		}
-
-		if _, err = io.ReadFull(br, unmarshalBuf[:sz]); err != nil {
-			return err
-		}
-
-		list := &pb.KVList{}
-		if err := list.Unmarshal(unmarshalBuf[:sz]); err != nil {
-			return err
-		}
-
-		for _, kv := range list.Kv {
-			if err := ldr.set(kv); err != nil {
-				return err
-			}
-
-			// Update nextTxnTs, memtable stores this
-			// timestamp in badger head when flushed.
-			if kv.Version >= db.orc.nextTxnTs {
-				db.orc.nextTxnTs = kv.Version + 1
-			}
-		}
-	}
-
-	if err := ldr.finish(); err != nil {
-		return err
-	}
-	db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
-	return nil
 }
