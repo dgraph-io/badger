@@ -64,7 +64,7 @@ func (r keyRange) overlapsWith(dst keyRange) bool {
 	return true
 }
 
-func getKeyRange(tables []*table.Table) keyRange {
+func getKeyRange(tables ...*table.Table) keyRange {
 	if len(tables) == 0 {
 		return keyRange{}
 	}
@@ -79,7 +79,9 @@ func getKeyRange(tables []*table.Table) keyRange {
 		}
 	}
 	return keyRange{
-		left:  y.KeyWithTs(y.ParseKey(smallest), math.MaxUint64),
+		// We pick all the versions of the smallest and the biggest key.
+		left: y.KeyWithTs(y.ParseKey(smallest), math.MaxUint64),
+		// Note that version zero would be the rightmost key.
 		right: y.KeyWithTs(y.ParseKey(biggest), 0),
 	}
 }

@@ -19,7 +19,6 @@ package badger
 import (
 	"bytes"
 	"fmt"
-	"math"
 	"math/rand"
 	"os"
 	"sort"
@@ -424,7 +423,7 @@ func (s *levelsController) compactBuildTables(
 
 	var hasOverlap bool
 	{
-		kr := getKeyRange(cd.top)
+		kr := getKeyRange(cd.top...)
 		for i, lh := range s.levels {
 			if i <= lev { // Skip upper levels.
 				continue
@@ -680,7 +679,7 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	}
 	cd.thisRange = infRange
 
-	kr := getKeyRange(cd.top)
+	kr := getKeyRange(cd.top...)
 	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, kr)
 	cd.bot = make([]*table.Table, right-left)
 	copy(cd.bot, cd.nextLevel.tables[left:right])
@@ -688,7 +687,7 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	if len(cd.bot) == 0 {
 		cd.nextRange = kr
 	} else {
-		cd.nextRange = getKeyRange(cd.bot)
+		cd.nextRange = getKeyRange(cd.bot...)
 	}
 
 	if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
@@ -698,29 +697,24 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	return true
 }
 
-func (s *levelsController) pickTables(tbls []*table.Table, cd *compactDef) []*table.Table {
-	if len(tbls) == 0 {
-		return tbls
+// sortByOverlap sorts tables in increasing order of overlap with next level.
+func (s *levelsController) sortByOverlap(tables []*table.Table, cd *compactDef) {
+	if len(tables) == 0 {
+		return
 	}
 
-	tableOverlap := make([]int, len(tbls))
-	for i := range tbls {
-		tableRange := keyRange{
-			// We pick all the versions of the smallest and the biggest key.
-			left: y.KeyWithTs(y.ParseKey(tbls[i].Smallest()), math.MaxUint64),
-			// Note that version zero would be the rightmost key.
-			right: y.KeyWithTs(y.ParseKey(tbls[i].Biggest()), 0),
-		}
-
+	tableOverlap := make([]int, len(tables))
+	for i := range tables {
+		// get key range for table
+		tableRange := getKeyRange(tables[i])
 		// get overlap with next level
 		left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, tableRange)
 		tableOverlap[i] = right - left
 	}
 
-	sort.Slice(tbls, func(i, j int) bool {
+	sort.Slice(tables, func(i, j int) bool {
 		return tableOverlap[i] < tableOverlap[j]
 	})
-	return nil
 }
 
 func (s *levelsController) fillTables(cd *compactDef) bool {
@@ -733,16 +727,11 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 		return false
 	}
 
-	s.pickTables(tbls, cd)
+	s.sortByOverlap(tbls, cd)
 
 	for _, t := range tbls {
 		cd.thisSize = t.Size()
-		cd.thisRange = keyRange{
-			// We pick all the versions of the smallest and the biggest key.
-			left: y.KeyWithTs(y.ParseKey(t.Smallest()), math.MaxUint64),
-			// Note that version zero would be the rightmost key.
-			right: y.KeyWithTs(y.ParseKey(t.Biggest()), 0),
-		}
+		cd.thisRange = getKeyRange(t)
 		if s.cstatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
 			continue
 		}
@@ -760,7 +749,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 			}
 			return true
 		}
-		cd.nextRange = getKeyRange(cd.bot)
+		cd.nextRange = getKeyRange(cd.bot...)
 
 		if s.cstatus.overlapsWith(cd.nextLevel.level, cd.nextRange) {
 			continue
