@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -186,4 +187,58 @@ func (l *KVLoader) Finish() error {
 		}
 	}
 	return l.throttle.Finish()
+}
+
+// DefaultLoad reads a protobuf-encoded list of all entries from a reader and writes
+// them to the database. This can be used to restore the database from a backup
+// made by calling DB.Backup(). If more complex logic is needed to restore a badger
+// backup, the KVLoader interface should be used instead.
+//
+// DB.DefaultLoad() should be called on a database that is not running any other
+// concurrent transactions while it is running.
+func (db *DB) DefaultLoad(r io.Reader, maxPendingWrites int) error {
+	br := bufio.NewReaderSize(r, 16<<10)
+	unmarshalBuf := make([]byte, 1<<10)
+
+	ldr := db.NewKVLoader(maxPendingWrites)
+	for {
+		var sz uint64
+		err := binary.Read(br, binary.LittleEndian, &sz)
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return err
+		}
+
+		if cap(unmarshalBuf) < int(sz) {
+			unmarshalBuf = make([]byte, sz)
+		}
+
+		if _, err = io.ReadFull(br, unmarshalBuf[:sz]); err != nil {
+			return err
+		}
+
+		list := &pb.KVList{}
+		if err := list.Unmarshal(unmarshalBuf[:sz]); err != nil {
+			return err
+		}
+
+		for _, kv := range list.Kv {
+			if err := ldr.Set(kv); err != nil {
+				return err
+			}
+
+			// Update nextTxnTs, memtable stores this
+			// timestamp in badger head when flushed.
+			if kv.Version >= db.orc.nextTxnTs {
+				db.orc.nextTxnTs = kv.Version + 1
+			}
+		}
+	}
+
+	if err := ldr.Finish(); err != nil {
+		return err
+	}
+	db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
+	return nil
 }
