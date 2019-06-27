@@ -25,11 +25,6 @@ var (
 	// range.
 	ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be between 1MB and 2GB")
 
-	// ErrValueThreshold is returned when ValueThreshold is set
-	// to a value greater than ValueThresholdLimit.
-	ErrValueThreshold = errors.Errorf(
-		"Invalid ValueThreshold, must be less than or equal to %d", ValueThresholdLimit)
-
 	// ErrKeyNotFound is returned when key isn't found on a txn.Get.
 	ErrKeyNotFound = errors.New("Key not found")
 

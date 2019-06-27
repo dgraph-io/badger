@@ -192,9 +192,10 @@ func Open(opt Options) (db *DB, err error) {
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
-	// ValueThreshold cannot be greater than ValueThresholdLimit.
-	if opt.ValueThreshold > ValueThresholdLimit {
-		return nil, ErrValueThreshold
+	// We are limiting opt.ValueThreshold to LSMOnlyOptions.ValueThreshold for now.
+	if opt.ValueThreshold > LSMOnlyOptions.ValueThreshold {
+		return nil, errors.Errorf("Invalid ValueThreshold, must be less or equal to %d",
+			LSMOnlyOptions.ValueThreshold)
 	}
 
 	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
