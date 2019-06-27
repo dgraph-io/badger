@@ -339,10 +339,9 @@ func BenchmarkDBOpen(b *testing.B) {
 		b.Skip("Please set -benchdir to badger directory")
 	}
 	dir := *benchDir
-	opt := DefaultOptions
-	opt.Dir = dir
-	opt.ValueDir = dir
-	opt.ReadOnly = true
+	// Passing an empty directory since it will be filled by runBadgerTest.
+	opt := DefaultOptions(dir).
+		WithReadOnly(true)
 	for i := 0; i < b.N; i++ {
 		db, err := Open(opt)
 		require.NoError(b, err)
