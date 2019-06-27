@@ -22,7 +22,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/pb"
 
 	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/y"
