@@ -25,7 +25,7 @@ import (
 	"github.com/dgraph-io/badger/v2/pb"
 
 	"github.com/AndreasBriese/bbloom"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/y"
 )
 
 var (

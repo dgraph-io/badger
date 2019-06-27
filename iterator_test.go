@@ -26,8 +26,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -162,7 +162,7 @@ func TestIteratePrefix(t *testing.T) {
 // Benchmark with NO opt.Prefix set ===
 // goos: linux
 // goarch: amd64
-// pkg: github.com/dgraph-io/badger/v2
+// pkg: github.com/dgraph-io/badger
 // BenchmarkIteratePrefixSingleKey/Key_lookups-4         	   10000	    460924 ns/op
 // --- BENCH: BenchmarkIteratePrefixSingleKey/Key_lookups-4
 // 	iterator_test.go:147: Inner b.N: 1
