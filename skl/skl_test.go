@@ -123,7 +123,7 @@ func TestBasic(t *testing.T) {
 
 	l.Put(y.KeyWithTs([]byte("key4"), 1), y.ValueStruct{Value: val5, Meta: 60, UserMeta: 0})
 	v = l.Get(y.KeyWithTs([]byte("key4"), 1))
-	require.True(t, v.Value != nil)
+	require.NotNil(t, v.Value)
 	require.EqualValues(t, val5, v.Value)
 	require.EqualValues(t, 60, v.Meta)
 }
@@ -185,7 +185,7 @@ func TestConcurrentBasicBigValues(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			v := l.Get(key(i))
-			require.True(t, v.Value != nil)
+			require.NotNil(t, v.Value)
 			require.EqualValues(t, BigValue(i), v.Value)
 		}(i)
 	}
