@@ -79,5 +79,5 @@ func doRestore(cmd *cobra.Command, args []string) error {
 	defer f.Close()
 
 	// Run restore
-	return db.Load(f, maxPendingWrites)
+	return db.DefaultLoad(f, maxPendingWrites)
 }
