@@ -1473,7 +1473,7 @@ func TestLSMOnly(t *testing.T) {
 
 	dopts.ValueThreshold = 1 << 21
 	_, err = Open(dopts)
-	require.Equal(t, "Invalid ValueThreshold", err.Error())
+	require.Contains(t, err.Error(), "Invalid ValueThreshold")
 
 	// Also test for error, when ValueThresholdSize is greater than maxBatchSize.
 	dopts.ValueThreshold = LSMOnlyOptions.ValueThreshold
