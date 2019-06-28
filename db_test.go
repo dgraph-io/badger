@@ -1828,7 +1828,7 @@ func TestForceFlushMemtable(t *testing.T) {
 }
 
 func TestVerifyChecksum(t *testing.T) {
-	// user stream write for writing.
+	// use stream write for writing.
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		value := make([]byte, 32)
 		y.Check2(rand.Read(value))
