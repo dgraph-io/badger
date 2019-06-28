@@ -168,7 +168,7 @@ func TestConcurrentBasicBigValues(t *testing.T) {
 		return y.KeyWithTs([]byte(fmt.Sprintf("%05d", i)), 0)
 	}
 	BigValue := func(i int) []byte {
-		return []byte(fmt.Sprintf("%1048576dd", i)) // Have 1 MB value which is > math.MaxUint16.
+		return []byte(fmt.Sprintf("%01048576d", i)) // Have 1 MB value which is > math.MaxUint16.
 	}
 	for i := 0; i < n; i++ {
 		wg.Add(1)

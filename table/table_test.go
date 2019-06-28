@@ -636,7 +636,7 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 
 func TestTableBigValues(t *testing.T) {
 	value := func(i int) []byte {
-		return []byte(fmt.Sprintf("%1048576d", i)) // Return 1MB value which is > math.MaxUint16.
+		return []byte(fmt.Sprintf("%01048576d", i)) // Return 1MB value which is > math.MaxUint16.
 	}
 
 	rand.Seed(time.Now().UnixNano())
@@ -654,7 +654,7 @@ func TestTableBigValues(t *testing.T) {
 
 	f.Write(builder.Finish())
 	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
-	require.NoError(t, err, "uanble to open table")
+	require.NoError(t, err, "unable to open table")
 	defer tbl.DecrRef()
 
 	itr := tbl.NewIterator(false)
@@ -668,6 +668,23 @@ func TestTableBigValues(t *testing.T) {
 	}
 	require.False(t, itr.Valid(), "table iterator should be invalid now")
 	require.Equal(t, n, count)
+}
+
+// This test is for verifying checksum failure during table open.
+func TestTableChecksum(t *testing.T) {
+	rand.Seed(time.Now().Unix())
+	// we are going to write random byte at random location in table file.
+	rb := make([]byte, 1)
+	rand.Read(rb)
+	f := buildTestTable(t, "k", 10000)
+	fi, err := f.Stat()
+	require.NoError(t, err, "unable to get file information")
+	f.WriteAt(rb, rand.Int63n(fi.Size()))
+
+	_, err = OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
+	if err == nil || !strings.Contains(err.Error(), "checksum") {
+		t.Fatal("Test should have been failed with checksum mismatch error")
+	}
 }
 
 func BenchmarkRead(b *testing.B) {
@@ -768,23 +785,6 @@ func BenchmarkChecksum(b *testing.B) {
 				sha256.Sum256(key)
 			}
 		})
-	}
-}
-
-// This test is for verifying checksum failure during table open.
-func TestTableChecksum(t *testing.T) {
-	rand.Seed(time.Now().Unix())
-	// we are going to write random byte at random location in table file.
-	rb := make([]byte, 1)
-	rand.Read(rb)
-	f := buildTestTable(t, "k", 10000)
-	fi, err := f.Stat()
-	require.NoError(t, err, "unable to get file information")
-	f.WriteAt(rb, rand.Int63n(fi.Size()))
-
-	_, err = OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
-	if err == nil || !strings.Contains(err.Error(), "checksum") {
-		t.Fatal("Test should have been failed with checksum mismatch error")
 	}
 }
 

@@ -185,7 +185,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	}
 
 	y.AssertTrue((len(b.entryOffsets)+1)*4+4+8+4 < math.MaxUint32) // check for below statements
-	// We should include current entry also in size, thats why +1 to len(b.entryOffsets).
+	// We should include current entry also in size, that's why +1 to len(b.entryOffsets).
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 +
 		4 + // size of list
 		8 + // Sum64 in checksum proto

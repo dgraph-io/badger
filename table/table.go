@@ -138,6 +138,7 @@ func (b block) NewIterator() *blockIterator {
 // entry. Returns a table with one reference count on it (decrementing which may delete the file!
 // -- consider t.Close() instead). The fd has to writeable because we call Truncate on it before
 // deleting. Checksum for all blocks of table is verified based on value of chkMode.
+// TODO:(Ashish): convert individual args to option struct.
 func OpenTable(fd *os.File, mode options.FileLoadingMode,
 	chkMode options.ChecksumVerificationMode) (*Table, error) {
 
@@ -290,14 +291,14 @@ func (t *Table) readIndex() error {
 	return nil
 }
 
-func (t *Table) block(idx int) (block, error) {
+func (t *Table) block(idx int) (*block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= len(t.blockIndex) {
-		return block{}, errors.New("block out of index")
+		return nil, errors.New("block out of index")
 	}
 
 	ko := t.blockIndex[idx]
-	blk := block{
+	blk := &block{
 		offset: int(ko.Offset),
 	}
 	var err error
@@ -307,14 +308,15 @@ func (t *Table) block(idx int) (block, error) {
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
 
-	readPos -= (blk.chkLen + 4) // Skip reading checksum, and move position to read numEntries in block.
+	// Skip reading checksum, and move position to read numEntries in block.
+	readPos -= (blk.chkLen + 4)
 	blk.numEntries = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
 	blk.entriesIndexStart = readPos - (blk.numEntries * 4)
 
 	// Verify checksum on if checksum verification mode is OnRead on OnStartAndRead.
 	if t.chkMode == options.OnBlockRead || t.chkMode == options.OnTableAndBlockRead {
 		if err = blk.verifyCheckSum(); err != nil {
-			return block{}, err
+			return nil, err
 		}
 	}
 
@@ -340,9 +342,9 @@ func (t *Table) ID() uint64 { return t.id }
 // bloom filter lookup.
 func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(key) }
 
-// VerifyChecksum verifies checksum for all blocks of table.
+// VerifyChecksum verifies checksum for all blocks of table. This function is called by
+// OpenTable() function. This function is also called inside levelsController.VerifyChecksum().
 func (t *Table) VerifyChecksum() error {
-	// since we verify index checksum at table open, we are verifying only block checksums here.
 	for i, os := range t.blockIndex {
 		b, err := t.block(i)
 		if err != nil {
@@ -350,8 +352,8 @@ func (t *Table) VerifyChecksum() error {
 				t.Filename(), i, os.Offset)
 		}
 
-		// If t.ChkMode is OnBlockRead or OnTableAndBlockRead, we don't need to call verify checksum
-		// on block, verification would have been done while creating block itself.
+		// OnBlockRead or OnTableAndBlockRead, we don't need to call verify checksum
+		// on block, verification would be done while reading block itself.
 		if !(t.chkMode == options.OnBlockRead || t.chkMode == options.OnTableAndBlockRead) {
 			if err = b.verifyCheckSum(); err != nil {
 				return y.Wrapf(err,
