@@ -23,9 +23,8 @@ import (
 	"math"
 
 	"github.com/AndreasBriese/bbloom"
-
-	"github.com/dgraph-io/badger/v2/pb"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/y"
 )
 
 func newBuffer(sz int) *bytes.Buffer {

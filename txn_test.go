@@ -26,8 +26,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/y"
 
 	"github.com/stretchr/testify/require"
 )
@@ -803,16 +803,12 @@ func TestArmV7Issue311Fix(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	config := DefaultOptions
-	config.TableLoadingMode = options.MemoryMap
-	config.ValueLogFileSize = 16 << 20
-	config.LevelOneSize = 8 << 20
-	config.MaxTableSize = 2 << 20
-	config.Dir = dir
-	config.ValueDir = dir
-	config.SyncWrites = false
-
-	db, err := Open(config)
+	db, err := Open(DefaultOptions(dir).
+		WithTableLoadingMode(options.MemoryMap).
+		WithValueLogFileSize(16 << 20).
+		WithLevelOneSize(8 << 20).
+		WithMaxTableSize(2 << 20).
+		WithSyncWrites(false))
 	if err != nil {
 		t.Fatalf("cannot open db at location %s: %v", dir, err)
 	}

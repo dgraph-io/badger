@@ -32,11 +32,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/pb"
-	"github.com/dgraph-io/badger/v2/skl"
-	"github.com/dgraph-io/badger/v2/table"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/skl"
+	"github.com/dgraph-io/badger/table"
+	"github.com/dgraph-io/badger/y"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
@@ -482,22 +482,6 @@ const (
 // more control to user to sync data whenever required.
 func (db *DB) Sync() error {
 	return db.vlog.sync(math.MaxUint32)
-}
-
-// When you create or delete a file, you have to ensure the directory entry for the file is synced
-// in order to guarantee the file is visible (if the system crashes).  (See the man page for fsync,
-// or see https://github.com/coreos/etcd/issues/6368 for an example.)
-func syncDir(dir string) error {
-	f, err := openDir(dir)
-	if err != nil {
-		return errors.Wrapf(err, "While opening directory: %s.", dir)
-	}
-	err = y.FileSync(f)
-	closeErr := f.Close()
-	if err != nil {
-		return errors.Wrapf(err, "While syncing directory: %s.", dir)
-	}
-	return errors.Wrapf(closeErr, "While closing directory: %s.", dir)
 }
 
 // getMemtables returns the current memtables and get references.

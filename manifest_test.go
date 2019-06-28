@@ -27,10 +27,10 @@ import (
 
 	"golang.org/x/net/trace"
 
-	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/pb"
-	"github.com/dgraph-io/badger/v2/table"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/table"
+	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -164,10 +164,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	opt := DefaultOptions
-	opt.Dir = dir
-	opt.ValueDir = dir
-	kv, err := Open(opt)
+	kv, err := Open(DefaultOptions(dir))
 	require.NoError(t, err)
 
 	lh0 := newLevelHandler(kv, 0)

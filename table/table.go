@@ -28,11 +28,11 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/pb"
 
 	"github.com/AndreasBriese/bbloom"
-	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
 )
 

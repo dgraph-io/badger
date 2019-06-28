@@ -17,7 +17,14 @@
 package badger
 
 import (
+	"math"
+
 	"github.com/pkg/errors"
+)
+
+const (
+	// ValueThresholdLimit is the maximum permissible value of opt.ValueThreshold.
+	ValueThresholdLimit = math.MaxUint16 - 16 + 1
 )
 
 var (

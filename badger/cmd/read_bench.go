@@ -27,10 +27,10 @@ import (
 	humanize "github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 
-	"github.com/dgraph-io/badger/v2"
-	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/pb"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/y"
 )
 
 var readBenchCmd = &cobra.Command{
@@ -79,13 +79,11 @@ func readBench(cmd *cobra.Command, args []string) error {
 	y.AssertTrue(numGoroutines > 0)
 	mode := getLoadingMode(loadingMode)
 
-	opts := badger.DefaultOptions
-	opts.ReadOnly = readOnly
-	opts.Dir = sstDir
-	opts.ValueDir = vlogDir
-	opts.TableLoadingMode = mode
-	opts.ValueLogLoadingMode = mode
-	db, err := badger.Open(opts)
+	db, err := badger.Open(badger.DefaultOptions(sstDir).
+		WithValueDir(vlogDir).
+		WithReadOnly(readOnly).
+		WithTableLoadingMode(mode).
+		WithValueLogLoadingMode(mode))
 	if err != nil {
 		return y.Wrapf(err, "unable to open DB")
 	}

@@ -200,9 +200,11 @@ func TestBigKeyValuePairs(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	opts := DefaultOptions
-	opts.MaxTableSize = 1 << 20
-	opts.ValueLogMaxEntries = 64
+
+	// Passing an empty directory since it will be filled by runBadgerTest.
+	opts := DefaultOptions("").
+		WithMaxTableSize(1 << 20).
+		WithValueLogMaxEntries(64)
 	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
 		bigK := make([]byte, 65001)
 		bigV := make([]byte, db.opt.ValueLogFileSize+1)
@@ -289,9 +291,11 @@ func TestPushValueLogLimit(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	opt := DefaultOptions
-	opt.ValueLogMaxEntries = 64
-	opt.ValueLogFileSize = 2 << 30
+
+	// Passing an empty directory since it will be filled by runBadgerTest.
+	opt := DefaultOptions("").
+		WithValueLogMaxEntries(64).
+		WithValueLogFileSize(2 << 30)
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		data := []byte(fmt.Sprintf("%30d", 1))
 		key := func(i int) string {
@@ -336,10 +340,9 @@ func BenchmarkDBOpen(b *testing.B) {
 		b.Skip("Please set -benchdir to badger directory")
 	}
 	dir := *benchDir
-	opt := DefaultOptions
-	opt.Dir = dir
-	opt.ValueDir = dir
-	opt.ReadOnly = true
+	// Passing an empty directory since it will be filled by runBadgerTest.
+	opt := DefaultOptions(dir).
+		WithReadOnly(true)
 	for i := 0; i < b.N; i++ {
 		db, err := Open(opt)
 		require.NoError(b, err)
@@ -360,10 +363,7 @@ func TestDiscardMapTooBig(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	ops := DefaultOptions
-	ops.Dir = dir
-	ops.ValueDir = dir
-	db, err := Open(ops)
+	db, err := Open(DefaultOptions(dir))
 	require.NoError(t, err, "error while openning db")
 
 	// Add some data so that memtable flush happens on close
@@ -378,7 +378,7 @@ func TestDiscardMapTooBig(t *testing.T) {
 
 	require.NoError(t, db.Close())
 	// reopen the same DB
-	db, err = Open(ops)
+	db, err = Open(DefaultOptions(dir))
 	require.NoError(t, err, "error while openning db")
 	require.NoError(t, db.Close())
 }
