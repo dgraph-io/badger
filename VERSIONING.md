@@ -12,9 +12,9 @@ Semantic Versioning, commonly known as SemVer, is a great idea that has been ver
 
 Unfortunately, API changes are not the most important changes for libraries that serialize data for later consumption.
 For these libraries, such as BadgerDB, changes to the API are much easier to handle than change to the data format used
-to stored data on disk.
+to store data on disk.
 
-## Serialization Version pecification
+## Serialization Version specification
 
 Serialization Versioning, like Semantic Versioning, uses 3 numbers and also calls them MAJOR.MINOR.PATCH,
 but the semantics of the numbers are slightly modified:
@@ -27,7 +27,7 @@ Given a version number MAJOR.MINOR.PATCH, increment the:
 
 Additional labels for pre-release and build metadata are available as extensions to the MAJOR.MINOR.PATCH format.
 
-Following this naming strategy, migration from v1.x to v2.x require a migration strategy for your existing dataset,
+Following this naming strategy, migration from v1.x to v2.x requires a migration strategy for your existing dataset,
 and as such has to be carefully planned. Migrations in between different minor versions (e.g. v1.5.x and v1.6.x)
 might break your build, as the API *might* have changed, but once your code compiles there's no need for any data
 migration. Lastly, changes in between two different patch versions should never break your build or dataset.

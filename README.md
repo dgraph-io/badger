@@ -75,7 +75,7 @@ is not on its API but rather on how data is stored on disk.
 This is why we follow a version naming schema that differs from Semantic Versioning.
 
 - New major versions are released when the data format on disk changes in an incompatible way.
-- New minor versions are released whenever the API changes but data compatibility is conserved. Note that the changes on the API could be backward-incompatible - unlike Semantic Versioning.
+- New minor versions are released whenever the API changes but data compatibility is maintained. Note that the changes on the API could be backward-incompatible - unlike Semantic Versioning.
 - New patch versions are released when there's no changes to the data format nor the API.
 
 Following these rules:
