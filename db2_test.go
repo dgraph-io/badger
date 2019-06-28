@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -380,4 +381,52 @@ func TestDiscardMapTooBig(t *testing.T) {
 	db, err = Open(ops)
 	require.NoError(t, err, "error while openning db")
 	require.NoError(t, db.Close())
+}
+
+// Test for values of size uint32.
+func TestBigValues(t *testing.T) {
+	if !*manual {
+		t.Skip("Skipping test meant to be run manually.")
+		return
+	}
+	opts := DefaultOptions
+	opts.ValueThreshold = 1 << 20
+	opts.ValueLogMaxEntries = 100
+	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+		keyCount := 1000
+
+		data := bytes.Repeat([]byte("a"), (1 << 20)) // Valuesize 1 MB.
+		key := func(i int) string {
+			return fmt.Sprintf("%65000d", i)
+		}
+
+		saveByKey := func(key string, value []byte) error {
+			return db.Update(func(txn *Txn) error {
+				return txn.SetEntry(NewEntry([]byte(key), value))
+			})
+		}
+
+		getByKey := func(key string) error {
+			return db.View(func(txn *Txn) error {
+				item, err := txn.Get([]byte(key))
+				if err != nil {
+					return err
+				}
+				return item.Value(func(val []byte) error {
+					if len(val) == 0 || len(val) != len(data) || !bytes.Equal(val, []byte(data)) {
+						log.Fatalf("key not found %q", len(key))
+					}
+					return nil
+				})
+			})
+		}
+
+		for i := 0; i < keyCount; i++ {
+			require.NoError(t, saveByKey(key(i), []byte(data)))
+		}
+
+		for i := 0; i < keyCount; i++ {
+			require.NoError(t, getByKey(key(i)))
+		}
+	})
 }

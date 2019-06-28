@@ -634,6 +634,42 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 	require.False(t, it.Valid())
 }
 
+func TestTableBigValues(t *testing.T) {
+	value := func(i int) []byte {
+		return []byte(fmt.Sprintf("%01048576d", i)) // Return 1MB value which is > math.MaxUint16.
+	}
+
+	rand.Seed(time.Now().UnixNano())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
+	f, err := y.OpenSyncedFile(filename, true)
+	require.NoError(t, err, "unable to create file")
+
+	n := 100 // Insert 100 keys.
+	builder := NewTableBuilder()
+	for i := 0; i < n; i++ {
+		key := y.KeyWithTs([]byte(key("", i)), 0)
+		vs := y.ValueStruct{Value: value(i)}
+		require.NoError(t, builder.Add(key, vs))
+	}
+
+	f.Write(builder.Finish())
+	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
+	require.NoError(t, err, "unable to open table")
+	defer tbl.DecrRef()
+
+	itr := tbl.NewIterator(false)
+	require.True(t, itr.Valid())
+
+	count := 0
+	for itr.Rewind(); itr.Valid(); itr.Next() {
+		require.Equal(t, []byte(key("", count)), y.ParseKey(itr.Key()), "keys are not equal")
+		require.Equal(t, value(count), itr.Value().Value, "values are not equal")
+		count++
+	}
+	require.False(t, itr.Valid(), "table iterator should be invalid now")
+	require.Equal(t, n, count)
+}
+
 // This test is for verifying checksum failure during table open.
 func TestTableChecksum(t *testing.T) {
 	rand.Seed(time.Now().Unix())

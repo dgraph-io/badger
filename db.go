@@ -192,8 +192,17 @@ func Open(opt Options) (db *DB, err error) {
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
-	if opt.ValueThreshold > math.MaxUint16-16 {
-		return nil, ErrValueThreshold
+	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
+	if opt.ValueThreshold > maxValueThreshold {
+		return nil, errors.Errorf("Invalid ValueThreshold, must be less or equal to %d",
+			maxValueThreshold)
+	}
+
+	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
+	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
+	if int64(opt.ValueThreshold) > opt.maxBatchSize {
+		return nil, errors.Errorf("Valuethreshold greater than max batch size of %d. Either "+
+			"reduce opt.ValueThreshold or increase opt.MaxTableSize.", opt.maxBatchSize)
 	}
 
 	if opt.ReadOnly {
