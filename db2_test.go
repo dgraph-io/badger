@@ -389,9 +389,9 @@ func TestBigValues(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	opts := DefaultOptions
-	opts.ValueThreshold = 1 << 20
-	opts.ValueLogMaxEntries = 100
+	opts := DefaultOptions("").
+		WithValueThreshold(1 << 20).
+		WithValueLogMaxEntries(100)
 	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
 		keyCount := 1000
 
