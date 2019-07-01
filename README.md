@@ -69,21 +69,25 @@ utility into your `$GOBIN` path.
 
 #### Choosing a version
 
-BadgerDB is a pretty special package from the point of view that the most important change we can make to it
-is not on its API but rather on how data is stored on disk.
+BadgerDB is a pretty special package from the point of view that the most important change we can
+make to it is not on its API but rather on how data is stored on disk.
 
 This is why we follow a version naming schema that differs from Semantic Versioning.
 
 - New major versions are released when the data format on disk changes in an incompatible way.
-- New minor versions are released whenever the API changes but data compatibility is maintained. Note that the changes on the API could be backward-incompatible - unlike Semantic Versioning.
+- New minor versions are released whenever the API changes but data compatibility is maintained.
+ Note that the changes on the API could be backward-incompatible - unlike Semantic Versioning.
 - New patch versions are released when there's no changes to the data format nor the API.
 
 Following these rules:
 
-- v1.5.0 and v1.6.0 can be used on top of the same files without any concerns, as their major version is the same, therefore the data format on disk is compatible.
-- v1.6.0 and v2.0.0 are data incompatible as their major version implies, so files created with v1.6.0 will need to be converted into the new format before they can be used by v2.0.0.
+- v1.5.0 and v1.6.0 can be used on top of the same files without any concerns, as their major
+ version is the same, therefore the data format on disk is compatible.
+- v1.6.0 and v2.0.0 are data incompatible as their major version implies, so files created with
+ v1.6.0 will need to be converted into the new format before they can be used by v2.0.0.
 
-For a longer explanation on the reasons behind using a new versioning naming schema, you can read [VERSIONING.md](VERSIONING.md).
+For a longer explanation on the reasons behind using a new versioning naming schema, you can read
+[VERSIONING.md](VERSIONING.md).
 
 ### Opening a database
 The top-level object in Badger is a `DB`. It represents multiple files on disk
