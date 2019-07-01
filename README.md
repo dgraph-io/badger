@@ -15,8 +15,8 @@ snapshot isolation (SSI) guarantees. A Jepsen-style bank test runs nightly for
 Badger has also been tested to work with filesystem level anomalies, to ensure
 persistence and consistency.
 
-Badger v1.0 was released in Nov 2017, and the most recent branch that is data compatible
-with v1.0 was just published as v1.6.0.
+Badger v1.0 was released in Nov 2017, and the latest version that is data-compatible
+with v1.0 is v1.6.0.
 
 Badger v2.0, a new release coming up very soon will use a new storage format which won't
 be compatible with all of the v1.x. The [Changelog] is kept fairly up-to-date.
@@ -105,10 +105,7 @@ import (
 func main() {
   // Open the Badger database located in the /tmp/badger directory.
   // It will be created if it doesn't exist.
-  opts := badger.DefaultOptions
-  opts.Dir = "/tmp/badger"
-  opts.ValueDir = "/tmp/badger"
-  db, err := badger.Open(opts)
+  db, err := badger.Open(badger.DefaultOptions("tmp/badger"))
   if err != nil {
 	  log.Fatal(err)
   }
