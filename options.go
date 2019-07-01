@@ -66,7 +66,7 @@ type Options struct {
 
 	// SyncErrCallback is called whenever a sync operation fails.
 	// If the function returns false, it indicates the sync operation shouldn't be retried.
-	SyncErrCallback func(error) bool
+	SyncErrCallback ErrHandlerFunc
 
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
@@ -78,6 +78,12 @@ type Options struct {
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
 
+}
+
+type ErrHandlerFunc func(error) bool
+
+func defalutErrCallback(error) bool {
+	return true
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -113,7 +119,7 @@ func DefaultOptions(path string) Options {
 		Logger:             defaultLogger,
 		LogRotatesToFlush:  2,
 
-		SyncErrCallback: func(error) bool { return true },
+		SyncErrCallback: defalutErrCallback,
 	}
 }
 
@@ -376,5 +382,16 @@ func (opt Options) WithCompactL0OnClose(val bool) Options {
 // The default value of LogRotatesToFlush is 2.
 func (opt Options) WithLogRotatesToFlush(val int32) Options {
 	opt.LogRotatesToFlush = val
+	return opt
+}
+
+// WithSyncErrCallback returns a new Options value with SyncErrCallback set to the given function.
+//
+// SyncErrCallback is called whenever a sync operation fails.
+// If the function returns false, it indicates the sync operation shouldn't be retried.
+//
+// The default function of SyncErrCallback always returns true.
+func (opt Options) WithSyncErrCallback(sec ErrHandlerFunc) Options {
+	opt.SyncErrCallback = sec
 	return opt
 }
