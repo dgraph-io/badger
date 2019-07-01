@@ -189,14 +189,14 @@ func (l *KVLoader) Finish() error {
 	return l.throttle.Finish()
 }
 
-// DefaultLoad reads a protobuf-encoded list of all entries from a reader and writes
+// Load reads a protobuf-encoded list of all entries from a reader and writes
 // them to the database. This can be used to restore the database from a backup
 // made by calling DB.Backup(). If more complex logic is needed to restore a badger
 // backup, the KVLoader interface should be used instead.
 //
-// DB.DefaultLoad() should be called on a database that is not running any other
+// DB.Load() should be called on a database that is not running any other
 // concurrent transactions while it is running.
-func (db *DB) DefaultLoad(r io.Reader, maxPendingWrites int) error {
+func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 	br := bufio.NewReaderSize(r, 16<<10)
 	unmarshalBuf := make([]byte, 1<<10)
 
