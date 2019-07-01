@@ -19,7 +19,7 @@ package badger
 import (
 	"sync"
 
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/y"
 )
 
 // WriteBatch holds the necessary info to perform batched writes.
