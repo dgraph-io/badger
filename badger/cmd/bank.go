@@ -531,7 +531,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 				y.Check(batch.Flush())
 			}
-			_ = db.Subscribe(ctx, updater, accountIDS[0], accountIDS[1:]...)
+			_ = db.Subscribe(ctx, updater, accountIDS...)
 		}()
 	}
 
