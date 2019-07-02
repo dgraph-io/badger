@@ -58,8 +58,6 @@ type closers struct {
 	pub        *y.Closer
 }
 
-type callback func(kv *pb.KVList)
-
 // DB provides the various functions required to interact with Badger.
 // DB is thread-safe.
 type DB struct {
@@ -1462,12 +1460,22 @@ func (db *DB) DropPrefix(prefix []byte) error {
 	return nil
 }
 
-// Subscribe can be used watch key changes for the given key prefix.
-func (db *DB) Subscribe(ctx context.Context, cb callback, prefix []byte, prefixes ...[]byte) error {
+// KVList contains a list of key-value pairs.
+type KVList = pb.KVList
+
+// Subscribe can be used watch key changes for the given key prefixes.
+// At least one prefix should be passed, or an error will be returned.
+// You can use an empty prefix to monitor all changes to the DB.
+// This function blocks until the given context is done or an error occurs.
+// The given function will be called with a new KVList containing the modified keys and the
+// corresponding values.
+func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList), prefixes ...[]byte) error {
 	if cb == nil {
 		return ErrNilCallback
 	}
-	prefixes = append(prefixes, prefix)
+	if len(prefixes) == 0 {
+		return ErrNoPrefixes
+	}
 	c := y.NewCloser(1)
 	recvCh, id := db.pub.newSubscriber(c, prefixes...)
 	slurp := func(batch *pb.KVList) {
