@@ -70,16 +70,19 @@ type DB struct {
 	// nil if Dir and ValueDir are the same
 	valueDirGuard *directoryLockGuard
 
-	closers   closers
-	elog      trace.EventLog
-	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
-	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
-	opt       Options
-	manifest  *manifestFile
-	lc        *levelsController
-	vlog      valueLog
-	vhead     valuePointer // less than or equal to a pointer to the last vlog value put into mt
+	closers  closers
+	elog     trace.EventLog
+	mt       *skl.Skiplist   // Our latest (actively written) in-memory table
+	imm      []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+	opt      Options
+	manifest *manifestFile
+	lc       *levelsController
+	vlog     valueLog
+	vhead    valuePointer // less than or equal to a pointer to the last vlog value put into mt
+
 	writeCh   chan *request
+	writeChMu sync.Mutex
+
 	flushChan chan flushTask // For flushing memtables.
 	closeOnce sync.Once      // For closing DB only once.
 
@@ -676,9 +679,11 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	req.Entries = entries
 	req.Wg = sync.WaitGroup{}
 	req.Wg.Add(1)
-	req.IncrRef()     // for db write
-	req.IncrRef()     // for publisher updates
+	req.IncrRef() // for db write
+	req.IncrRef() // for publisher updates
+	db.writeChMu.Lock()
 	db.writeCh <- req // Handled in doWrites.
+	db.writeChMu.Unlock()
 	y.NumPuts.Add(int64(len(entries)))
 
 	return req, nil
@@ -728,7 +733,9 @@ func (db *DB) doWrites(lc *y.Closer) {
 		}
 
 	closedCase:
+		db.writeChMu.Lock()
 		close(db.writeCh)
+		db.writeChMu.Unlock()
 		for r := range db.writeCh { // Flush the channel.
 			reqs = append(reqs, r)
 		}
