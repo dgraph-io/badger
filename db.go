@@ -1425,7 +1425,7 @@ func (db *DB) DropPrefix(prefix []byte) error {
 // KVList contains a list of key-value pairs.
 type KVList = pb.KVList
 
-// Subscribe can be used watch key changes for the given key prefixes.
+// Subscribe can be used to watch key changes for the given key prefixes.
 // At least one prefix should be passed, or an error will be returned.
 // You can use an empty prefix to monitor all changes to the DB.
 // This function blocks until the given context is done or an error occurs.
