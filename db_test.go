@@ -1810,7 +1810,7 @@ func ExampleDB_Subscribe() {
 	bKey := []byte("b-key")
 	bValue := []byte("b-value")
 
-	// We open the DB.
+	// Open the DB.
 	dir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
 		log.Fatal(err)
@@ -1819,11 +1819,11 @@ func ExampleDB_Subscribe() {
 	db, err := Open(DefaultOptions(dir))
 	defer db.Close()
 
-	// We create the context here so we can cancel it after sending the writes.
+	// Create the context here so we can cancel it after sending the writes.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// We use the WaitGroup to make sure we wait for the subscription to stop before continuing.
+	// Use the WaitGroup to make sure we wait for the subscription to stop before continuing.
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -1839,7 +1839,7 @@ func ExampleDB_Subscribe() {
 		log.Printf("subscription closed")
 	}()
 
-	// We write both keys, but only one should be printed in the Output.
+	// Write both keys, but only one should be printed in the Output.
 	err = db.Update(func(txn *Txn) error { return txn.Set(aKey, aValue) })
 	if err != nil {
 		log.Fatal(err)
