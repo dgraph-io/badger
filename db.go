@@ -1304,7 +1304,7 @@ func (db *DB) prepareToDrop() func() {
 	// Stop accepting new writes.
 	atomic.StoreInt32(&db.blockWrites, 1)
 	db.sendLock.Lock()
-	defer db.sendLock.Unlock()
+
 	// Make all pending writes finish. The following will also close writeCh.
 	db.closers.writes.SignalAndWait()
 	db.opt.Infof("Writes flushed. Stopping compactions now...")
@@ -1321,6 +1321,7 @@ func (db *DB) prepareToDrop() func() {
 
 		// Resume writes.
 		atomic.StoreInt32(&db.blockWrites, 0)
+		db.sendLock.Unlock()
 	}
 }
 
