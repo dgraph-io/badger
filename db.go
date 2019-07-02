@@ -89,8 +89,8 @@ type DB struct {
 	logRotates int32
 
 	blockWrites int32
-
-	orc *oracle
+	sendLock    sync.Mutex
+	orc         *oracle
 
 	pub *publisher
 }
@@ -658,6 +658,8 @@ func (db *DB) writeRequests(reqs []*request) error {
 }
 
 func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
+	db.sendLock.Lock()
+	defer db.sendLock.Unlock()
 	if atomic.LoadInt32(&db.blockWrites) == 1 {
 		return nil, ErrBlockedWrites
 	}
@@ -1301,7 +1303,8 @@ func (db *DB) prepareToDrop() func() {
 	}
 	// Stop accepting new writes.
 	atomic.StoreInt32(&db.blockWrites, 1)
-
+	db.sendLock.Lock()
+	defer db.sendLock.Unlock()
 	// Make all pending writes finish. The following will also close writeCh.
 	db.closers.writes.SignalAndWait()
 	db.opt.Infof("Writes flushed. Stopping compactions now...")
