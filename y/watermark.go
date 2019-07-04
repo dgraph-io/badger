@@ -191,6 +191,11 @@ func (w *WaterMark) process(closer *Closer) {
 			loops++
 		}
 
+		if until != doneUntil {
+			AssertTrue(atomic.CompareAndSwapUint64(&w.doneUntil, doneUntil, until))
+			w.elog.Printf("%s: Done until %d. Loops: %d\n", w.Name, until, loops)
+		}
+
 		notifyAndRemove := func(idx uint64, toNotify []chan struct{}) {
 			for _, ch := range toNotify {
 				close(ch)
@@ -207,19 +212,13 @@ func (w *WaterMark) process(closer *Closer) {
 					notifyAndRemove(idx, toNotify)
 				}
 			}
-
 		} else {
 			for idx, toNotify := range waiters {
 				if idx <= until {
 					notifyAndRemove(idx, toNotify)
 				}
 			}
-		}
-
-		if until != doneUntil {
-			AssertTrue(atomic.CompareAndSwapUint64(&w.doneUntil, doneUntil, until))
-			w.elog.Printf("%s: Done until %d. Loops: %d\n", w.Name, until, loops)
-		}
+		} // end of notifying waiters.
 	}
 
 	for {
