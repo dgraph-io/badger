@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"expvar"
 	"io"
 	"math"
@@ -407,6 +406,7 @@ func (db *DB) close() (err error) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
+	db.stopMemoryFlush()
 	db.stopCompactions()
 
 	// Force Compact L0
@@ -1201,12 +1201,15 @@ func (db *DB) MaxBatchSize() int64 {
 	return db.opt.maxBatchSize
 }
 
-func (db *DB) stopCompactions() {
+func (db *DB) stopMemoryFlush() {
 	// Stop memtable flushes.
 	if db.closers.memtable != nil {
 		close(db.flushChan)
 		db.closers.memtable.SignalAndWait()
 	}
+}
+
+func (db *DB) stopCompactions() {
 	// Stop compactions.
 	if db.closers.compactors != nil {
 		db.closers.compactors.SignalAndWait()
@@ -1219,6 +1222,10 @@ func (db *DB) startCompactions() {
 		db.closers.compactors = y.NewCloser(1)
 		db.lc.startCompact(db.closers.compactors)
 	}
+}
+
+func (db *DB) startMemoryFlush() {
+	// Start memory fluhser.
 	if db.closers.memtable != nil {
 		db.flushChan = make(chan flushTask, db.opt.NumMemtables)
 		db.closers.memtable = y.NewCloser(1)
@@ -1299,29 +1306,33 @@ func (db *DB) Flatten(workers int) error {
 	}
 }
 
-func (db *DB) prepareToDrop() func() {
-	if db.opt.ReadOnly {
-		panic("Attempting to drop data in read-only mode.")
-	}
+func (db *DB) blockWrite() {
 	// Stop accepting new writes.
 	atomic.StoreInt32(&db.blockWrites, 1)
 
 	// Make all pending writes finish. The following will also close writeCh.
 	db.closers.writes.SignalAndWait()
 	db.opt.Infof("Writes flushed. Stopping compactions now...")
+}
 
-	// Stop all compactions.
-	db.stopCompactions()
+func (db *DB) unblockWrite() {
+	db.closers.writes = y.NewCloser(1)
+	go db.doWrites(db.closers.writes)
+
+	// Resume writes.
+	atomic.StoreInt32(&db.blockWrites, 0)
+}
+
+func (db *DB) prepareToDrop() func() {
+	if db.opt.ReadOnly {
+		panic("Attempting to drop data in read-only mode.")
+	}
+	db.blockWrite()
+	db.stopMemoryFlush()
 	return func() {
 		db.opt.Infof("Resuming writes")
-		db.startCompactions()
-
-		db.writeCh = make(chan *request, kvWriteChCapacity)
-		db.closers.writes = y.NewCloser(1)
-		go db.doWrites(db.closers.writes)
-
-		// Resume writes.
-		atomic.StoreInt32(&db.blockWrites, 0)
+		db.startMemoryFlush()
+		db.unblockWrite()
 	}
 }
 
@@ -1351,7 +1362,7 @@ func (db *DB) DropAll() error {
 func (db *DB) dropAll() (func(), error) {
 	db.opt.Infof("DropAll called. Blocking writes...")
 	f := db.prepareToDrop()
-
+	db.stopCompactions()
 	// Block all foreign interactions with memory tables.
 	db.Lock()
 	defer db.Unlock()
@@ -1377,6 +1388,7 @@ func (db *DB) dropAll() (func(), error) {
 	db.vhead = valuePointer{} // Zero it out.
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
+	db.startCompactions()
 	return f, nil
 }
 
@@ -1390,10 +1402,8 @@ func (db *DB) dropAll() (func(), error) {
 // - Compact rest of the levels, Li->Li, picking tables which have Kp.
 // - Resume memtable flushes, compactions and writes.
 func (db *DB) DropPrefix(prefix []byte) error {
-	db.opt.Infof("DropPrefix called on %s. Blocking writes...", hex.Dump(prefix))
 	f := db.prepareToDrop()
 	defer f()
-
 	// Block all foreign interactions with memory tables.
 	db.Lock()
 	defer db.Unlock()
@@ -1417,6 +1427,8 @@ func (db *DB) DropPrefix(prefix []byte) error {
 		}
 		memtable.DecrRef()
 	}
+	db.stopCompactions()
+	defer db.startCompactions()
 	db.imm = db.imm[:0]
 	db.mt = skl.NewSkiplist(arenaSize(db.opt))
 
