@@ -203,8 +203,9 @@ func (w *WaterMark) process(closer *Closer) {
 			// can hog up CPU just iterating over integers creating a busy-wait loop. So, only do
 			// this path if until - doneUntil is less than the number of waiters.
 			for idx := doneUntil + 1; idx <= until; idx++ {
-				toNotify := waiters[idx]
-				notifyAndRemove(idx, toNotify)
+				if toNotify, ok := waiters[idx]; ok {
+					notifyAndRemove(idx, toNotify)
+				}
 			}
 
 		} else {
