@@ -210,10 +210,9 @@ func (w *WaterMark) process(closer *Closer) {
 
 		} else {
 			for idx, toNotify := range waiters {
-				if idx > until {
-					continue
+				if idx <= until {
+					notifyAndRemove(idx, toNotify)
 				}
-				notifyAndRemove(idx, toNotify)
 			}
 		}
 
