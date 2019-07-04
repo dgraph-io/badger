@@ -352,7 +352,7 @@ func TestForceCompactL0(t *testing.T) {
 		}
 		require.NoError(t, txn.CommitAt(version+1, nil))
 	}
-	db.Close()
+	require.NoError(t, db.Close())
 
 	opts.managedTxns = true
 	db, err = Open(opts)

@@ -70,12 +70,20 @@ func newOracle(opt Options) *oracle {
 		txnMark:  &y.WaterMark{Name: "badger.TxnTimestamp"},
 		closer:   y.NewCloser(2),
 	}
-	orc.readMark.Init(orc.closer)
-	orc.txnMark.Init(orc.closer)
+
+	// readMark and txnMark are not used in managed mode.
+	if !orc.isManaged {
+		orc.readMark.Init(orc.closer)
+		orc.txnMark.Init(orc.closer)
+	}
 	return orc
 }
 
 func (o *oracle) Stop() {
+	if o.isManaged {
+		// Oracle is already stopped. We don't need to stop it again. See newOracle function.
+		return
+	}
 	o.closer.SignalAndWait()
 }
 

@@ -317,12 +317,17 @@ func Open(opt Options) (db *DB, err error) {
 	}
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 
-	// Let's advance nextTxnTs to one more than whatever we observed via
-	// replaying the logs.
-	db.orc.txnMark.Done(db.orc.nextTxnTs)
-	// In normal mode, we must update readMark so older versions of keys can be removed during
-	// compaction when run in offline mode via the flatten tool.
-	db.orc.readMark.Done(db.orc.nextTxnTs)
+	// txnMark and readMark are not used when running DB in managed mode. We can skip incrementing
+	// the markers.
+	if !db.opt.managedTxns {
+		// Let's advance nextTxnTs to one more than whatever we observed via
+		// replaying the logs.
+		db.orc.txnMark.Done(db.orc.nextTxnTs)
+		// In normal mode, we must update readMark so older versions of keys can be removed during
+		// compaction when run in offline mode via the flatten tool.
+		db.orc.readMark.Done(db.orc.nextTxnTs)
+	}
+
 	db.orc.incrementNextTs()
 
 	db.writeCh = make(chan *request, kvWriteChCapacity)
