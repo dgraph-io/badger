@@ -397,9 +397,10 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			}
 
 			ne.Value = append([]byte{}, e.Value...)
-			wb = append(wb, ne)
-			size += int64(e.estimateSize(vlog.opt.ValueThreshold))
-			if size >= 64*mi {
+			es := int64(ne.estimateSize(vlog.opt.ValueThreshold))
+			// Ensure length and size of wb is within transaction limits.
+			if int64(len(wb)+1) > vlog.opt.maxBatchCount ||
+				size+es > vlog.opt.maxBatchSize {
 				tr.LazyPrintf("request has %d entries, size %d", len(wb), size)
 				if err := vlog.db.batchSet(wb); err != nil {
 					return err
@@ -407,6 +408,8 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 				size = 0
 				wb = wb[:0]
 			}
+			wb = append(wb, ne)
+			size += es
 		} else {
 			vlog.db.opt.Warningf("This entry should have been caught. %+v\n", e)
 		}
