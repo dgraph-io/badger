@@ -729,7 +729,8 @@ func (db *DB) doWrites(lc *y.Closer) {
 		}
 
 	closedCase:
-		// Drain all the pending request
+		// All the pending request are drained.
+		// Don't close the writeCh, because it has be used in several places.
 		for {
 			select {
 			case r = <-db.writeCh:
@@ -1327,12 +1328,26 @@ func (db *DB) prepareToDrop() func() {
 	if db.opt.ReadOnly {
 		panic("Attempting to drop data in read-only mode.")
 	}
+	// In order prepare for drop, we need to block the incoming writes and
+	// write it to db. Then, flush all the pending flushtask. So that, we
+	// don't miss any entries.
 	db.blockWrite()
-	db.stopMemoryFlush()
-	return func() {
-		db.opt.Infof("Resuming writes")
-		db.startMemoryFlush()
-		db.unblockWrite()
+	reqs := make([]*request, 0, 10)
+	for {
+		select {
+		case r := <-db.writeCh:
+			reqs = append(reqs, r)
+		default:
+			if err := db.writeRequests(reqs); err != nil {
+				db.opt.Errorf("writeRequests: %v", err)
+			}
+			db.stopMemoryFlush()
+			return func() {
+				db.opt.Infof("Resuming writes")
+				db.startMemoryFlush()
+				db.unblockWrite()
+			}
+		}
 	}
 }
 
@@ -1349,20 +1364,24 @@ func (db *DB) prepareToDrop() func() {
 // writes are paused before running DropAll, and resumed after it is finished.
 func (db *DB) DropAll() error {
 	f, err := db.dropAll()
+	defer f()
 	if err != nil {
 		return err
 	}
-	if f == nil {
-		panic("both error and returned function cannot be nil in DropAll")
-	}
-	f()
 	return nil
 }
 
 func (db *DB) dropAll() (func(), error) {
 	db.opt.Infof("DropAll called. Blocking writes...")
 	f := db.prepareToDrop()
+	// prepareToDrop will stop all the incomming write and flushes any pending flush tasks.
+	// Before we drop, we'll stop the compaction because anyways all the datas are going to
+	// be deleted.
 	db.stopCompactions()
+	resume := func() {
+		db.startCompactions()
+		f()
+	}
 	// Block all foreign interactions with memory tables.
 	db.Lock()
 	defer db.Unlock()
@@ -1377,19 +1396,18 @@ func (db *DB) dropAll() (func(), error) {
 
 	num, err := db.lc.dropTree()
 	if err != nil {
-		return nil, err
+		return resume, err
 	}
 	db.opt.Infof("Deleted %d SSTables. Now deleting value logs...\n", num)
 
 	num, err = db.vlog.dropAll()
 	if err != nil {
-		return nil, err
+		return resume, err
 	}
 	db.vhead = valuePointer{} // Zero it out.
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
-	db.startCompactions()
-	return f, nil
+	return resume, nil
 }
 
 // DropPrefix would drop all the keys with the provided prefix. It does this in the following way:
