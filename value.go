@@ -1396,9 +1396,12 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) error {
 
 // flushDiscardStats inserts discard stats into badger. Returns error on failure.
 func (vlog *valueLog) flushDiscardStats() error {
+	vlog.lfDiscardStats.Lock()
 	if len(vlog.lfDiscardStats.m) == 0 {
 		return nil
 	}
+	vlog.lfDiscardStats.Unlock()
+
 	entries := []*Entry{{
 		Key:   y.KeyWithTs(lfDiscardStatsKey, 1),
 		Value: vlog.encodedDiscardStats(),
