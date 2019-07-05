@@ -1398,6 +1398,7 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) error {
 func (vlog *valueLog) flushDiscardStats() error {
 	vlog.lfDiscardStats.Lock()
 	if len(vlog.lfDiscardStats.m) == 0 {
+		vlog.lfDiscardStats.Unlock()
 		return nil
 	}
 	vlog.lfDiscardStats.Unlock()
