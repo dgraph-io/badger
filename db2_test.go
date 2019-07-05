@@ -102,6 +102,9 @@ func TestTruncateVlogWithClose(t *testing.T) {
 
 var manual = flag.Bool("manual", false, "Set when manually running some tests.")
 
+// Badger dir to be used for performing db.Open benchmark.
+var benchDir = flag.String("benchdir", "", "Set when running db.Open benchmark")
+
 // The following 3 TruncateVlogNoClose tests should be run one after another.
 // None of these close the DB, simulating a crash. They should be run with a
 // script, which truncates the value log to 4096, lining up with the end of the
@@ -327,6 +330,23 @@ func TestPushValueLogLimit(t *testing.T) {
 			require.NoError(t, err)
 		}
 	})
+}
+
+// The following benchmark test is supposed to be run against a badger directory with some data.
+// Use badger fill to create data if it doesn't exist.
+func BenchmarkDBOpen(b *testing.B) {
+	if *benchDir == "" {
+		b.Skip("Please set -benchdir to badger directory")
+	}
+	dir := *benchDir
+	// Passing an empty directory since it will be filled by runBadgerTest.
+	opt := DefaultOptions(dir).
+		WithReadOnly(true)
+	for i := 0; i < b.N; i++ {
+		db, err := Open(opt)
+		require.NoError(b, err)
+		require.NoError(b, db.Close())
+	}
 }
 
 // Regression test for https://github.com/dgraph-io/badger/issues/830

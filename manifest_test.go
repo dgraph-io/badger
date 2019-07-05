@@ -222,13 +222,13 @@ func TestManifestRewrite(t *testing.T) {
 	require.Equal(t, 0, m.Deletions)
 
 	err = mf.addChanges([]*pb.ManifestChange{
-		newCreateChange(0, 0, nil),
+		newCreateChange(0, 0),
 	})
 	require.NoError(t, err)
 
 	for i := uint64(0); i < uint64(deletionsThreshold*3); i++ {
 		ch := []*pb.ManifestChange{
-			newCreateChange(i+1, 0, nil),
+			newCreateChange(i+1, 0),
 			newDeleteChange(i),
 		}
 		err := mf.addChanges(ch)
@@ -240,6 +240,6 @@ func TestManifestRewrite(t *testing.T) {
 	mf, m, err = helpOpenOrCreateManifestFile(dir, false, deletionsThreshold)
 	require.NoError(t, err)
 	require.Equal(t, map[uint64]TableManifest{
-		uint64(deletionsThreshold * 3): {Level: 0, Checksum: []byte{}},
+		uint64(deletionsThreshold * 3): {Level: 0},
 	}, m.Tables)
 }

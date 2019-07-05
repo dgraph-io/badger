@@ -22,6 +22,8 @@ import (
 	"io"
 	"math"
 
+	"github.com/dgraph-io/badger/pb"
+
 	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/y"
 )
@@ -73,7 +75,7 @@ type Builder struct {
 	baseKey    []byte // Base key for the current block.
 	baseOffset uint32 // Offset for the current block.
 
-	restarts []uint32 // Base offsets of every block.
+	tableIndex *pb.TableIndex
 
 	// Tracks offset for the previous key-value pair. Offset is relative to block base offset.
 	prevOffset uint32
@@ -88,6 +90,7 @@ func NewTableBuilder() *Builder {
 		keyBuf:     newBuffer(1 << 20),
 		buf:        newBuffer(1 << 20),
 		prevOffset: math.MaxUint32, // Used for the first element!
+		tableIndex: &pb.TableIndex{},
 	}
 }
 
@@ -136,6 +139,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 		vlen: uint16(v.EncodedSize()),
 		prev: b.prevOffset, // prevOffset is the location of the last key-value added.
 	}
+	y.AssertTrue(b.buf.Len() < math.MaxUint32)
 	b.prevOffset = uint32(b.buf.Len()) - b.baseOffset // Remember current offset for the next Add call.
 
 	// Layout: header, diffKey, value.
@@ -152,17 +156,23 @@ func (b *Builder) finishBlock() {
 	// When we are at the end of the block and Valid=false, and the user wants to do a Prev,
 	// we need a dummy header to tell us the offset of the previous key-value pair.
 	b.addHelper([]byte{}, y.ValueStruct{})
+	y.AssertTrue(b.buf.Len() < math.MaxUint32)
+	// Add key to the block index
+	bo := &pb.BlockOffset{
+		Key:    y.Copy(b.baseKey),
+		Offset: b.baseOffset,
+		Len:    uint32(b.buf.Len()) - b.baseOffset,
+	}
+	b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
 }
 
 // Add adds a key-value pair to the block.
-// If doNotRestart is true, we will not restart even if b.counter >= restartInterval.
 func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 	if b.counter >= restartInterval {
 		b.finishBlock()
-		// Start a new block. Initialize the block.
-		b.restarts = append(b.restarts, uint32(b.buf.Len()))
 		b.counter = 0
 		b.baseKey = []byte{}
+		y.AssertTrue(b.buf.Len() < math.MaxUint32)
 		b.baseOffset = uint32(b.buf.Len())
 		b.prevOffset = math.MaxUint32 // First key-value pair of block has header.prev=MaxInt.
 	}
@@ -178,30 +188,24 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	estimateSz := b.buf.Len() + 8 /* empty header */ + 4*len(b.restarts) +
-		8 /* 8 = end of buf offset + len(restarts) */
+	estimateSz := b.buf.Len() +
+		8 + // empty header
+		4 + // Index length
+		5*(len(b.tableIndex.Offsets)) // approximate index size
 	return int64(estimateSz) > cap
 }
 
-// blockIndex generates the block index for the table.
-// It is mainly a list of all the block base offsets.
-func (b *Builder) blockIndex() []byte {
-	// Store the end offset, so we know the length of the final block.
-	b.restarts = append(b.restarts, uint32(b.buf.Len()))
-
-	// Add 4 because we want to write out number of restarts at the end.
-	sz := 4*len(b.restarts) + 4
-	out := make([]byte, sz)
-	buf := out
-	for _, r := range b.restarts {
-		binary.BigEndian.PutUint32(buf[:4], r)
-		buf = buf[4:]
-	}
-	binary.BigEndian.PutUint32(buf[:4], uint32(len(b.restarts)))
-	return out
-}
-
 // Finish finishes the table by appending the index.
+/*
+The table structure looks like
++---------+------------+-----------+---------------+
+| Block 1 | Block 2    | Block 3   | Block 4       |
++---------+------------+-----------+---------------+
+| Block 5 | Block 6    | Block ... | Block N       |
++---------+------------+-----------+---------------+
+| Index   | Index Size | Checksum  | Checksum Size |
++---------+------------+-----------+---------------+
+*/
 func (b *Builder) Finish() []byte {
 	bf := bbloom.New(float64(b.keyCount), 0.01)
 	var klen [2]byte
@@ -221,17 +225,52 @@ func (b *Builder) Finish() []byte {
 		bf.Add(key)
 	}
 
+	// Add bloom filter to the index.
+	b.tableIndex.BloomFilter = bf.JSONMarshal()
 	b.finishBlock() // This will never start a new block.
-	index := b.blockIndex()
-	b.buf.Write(index)
 
-	// Write bloom filter.
-	bdata := bf.JSONMarshal()
-	n, err := b.buf.Write(bdata)
+	index, err := b.tableIndex.Marshal()
 	y.Check(err)
+	// Write index the file.
+	n, err := b.buf.Write(index)
+	y.Check(err)
+
+	y.AssertTrue(n < math.MaxUint32)
+	// Write index size.
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
-	b.buf.Write(buf[:])
+	_, err = b.buf.Write(buf[:])
+	y.Check(err)
 
+	b.writeChecksum(index)
 	return b.buf.Bytes()
+}
+
+func (b *Builder) writeChecksum(data []byte) {
+	// Build checksum for the index.
+	checksum := pb.Checksum{
+		// TODO: The checksum type should be configurable from the
+		// options.
+		// We chose to use CRC32 as the default option because
+		// it performed better compared to xxHash64.
+		// See the BenchmarkChecksum in table_test.go file
+		// Size     =>   1024 B        2048 B
+		// CRC32    => 63.7 ns/op     112 ns/op
+		// xxHash64 => 87.5 ns/op     158 ns/op
+		Sum:  y.CalculateChecksum(data, pb.Checksum_CRC32C),
+		Algo: pb.Checksum_CRC32C,
+	}
+
+	// Write checksum to the file.
+	chksum, err := checksum.Marshal()
+	y.Check(err)
+	n, err := b.buf.Write(chksum)
+	y.Check(err)
+
+	y.AssertTrue(n < math.MaxUint32)
+	// Write checksum size.
+	var buf [4]byte
+	binary.BigEndian.PutUint32(buf[:], uint32(n))
+	_, err = b.buf.Write(buf[:])
+	y.Check(err)
 }

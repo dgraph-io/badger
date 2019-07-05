@@ -65,5 +65,41 @@ BenchmarkRandomRead-16    	  300000	      3596 ns/op
 PASS
 ok  	github.com/dgraph-io/badger/table	44.727s
 ```
-
 For random read benchmarking, we are randomly reading a key and verifying its value.
+
+# DB Open benchmark
+1. Create badger DB with 2 billion key-value pairs (about 380GB of data)
+```
+badger fill -m 2000 --dir="/tmp/data" --sorted
+```
+2. Clear buffers and swap memory
+```
+free -mh && sync && echo 3 | sudo tee /proc/sys/vm/drop_caches && sudo swapoff -a && sudo swapon -a && free -mh
+```
+Also flush disk buffers
+```
+blockdev --flushbufs /dev/nvme0n1p4
+```
+3. Run the benchmark
+```
+go test -run=^$ github.com/dgraph-io/badger -bench ^BenchmarkDBOpen$ -benchdir="/tmp/data" -v
+
+badger 2019/06/04 17:15:56 INFO: 126 tables out of 1028 opened in 3.017s
+badger 2019/06/04 17:15:59 INFO: 257 tables out of 1028 opened in 6.014s
+badger 2019/06/04 17:16:02 INFO: 387 tables out of 1028 opened in 9.017s
+badger 2019/06/04 17:16:05 INFO: 516 tables out of 1028 opened in 12.025s
+badger 2019/06/04 17:16:08 INFO: 645 tables out of 1028 opened in 15.013s
+badger 2019/06/04 17:16:11 INFO: 775 tables out of 1028 opened in 18.008s
+badger 2019/06/04 17:16:14 INFO: 906 tables out of 1028 opened in 21.003s
+badger 2019/06/04 17:16:17 INFO: All 1028 tables opened in 23.851s
+badger 2019/06/04 17:16:17 INFO: Replaying file id: 1998 at offset: 332000
+badger 2019/06/04 17:16:17 INFO: Replay took: 9.81µs
+goos: linux
+goarch: amd64
+pkg: github.com/dgraph-io/badger
+BenchmarkDBOpen-16    	       1	23930082140 ns/op
+PASS
+ok  	github.com/dgraph-io/badger	24.076s
+
+```
+It takes about 23.851s to open a DB with 2 billion sorted key-value entries.

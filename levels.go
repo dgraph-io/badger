@@ -563,28 +563,30 @@ func (s *levelsController) compactBuildTables(
 		// called Add() at least once, and builder is not Empty().
 		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			numKeys, numSkips, time.Since(timeStart))
-		if !builder.Empty() {
-			numBuilds++
-			fileID := s.reserveFileID()
-			go func(builder *table.Builder) {
-				defer builder.Close()
+		build := func(fileID uint64) (*table.Table, error) {
+			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
+			if err != nil {
+				return nil, errors.Wrapf(err, "While opening new table: %d", fileID)
+			}
 
-				fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
-				if err != nil {
-					resultCh <- newTableResult{nil, errors.Wrapf(err, "While opening new table: %d", fileID)}
-					return
-				}
+			if _, err := fd.Write(builder.Finish()); err != nil {
+				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
+			}
 
-				if _, err := fd.Write(builder.Finish()); err != nil {
-					resultCh <- newTableResult{nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)}
-					return
-				}
-
-				tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, nil)
-				// decrRef is added below.
-				resultCh <- newTableResult{tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())}
-			}(builder)
+			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, nil)
+			// decrRef is added below.
+			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}
+		if builder.Empty() {
+			continue
+		}
+		numBuilds++
+		fileID := s.reserveFileID()
+		go func(builder *table.Builder) {
+			defer builder.Close()
+			tbl, err := build(fileID)
+			resultCh <- newTableResult{tbl, err}
+		}(builder)
 	}
 
 	newTables := make([]*table.Table, 0, 20)
@@ -631,7 +633,7 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeS
 	changes := []*pb.ManifestChange{}
 	for _, table := range newTables {
 		changes = append(changes,
-			newCreateChange(table.ID(), cd.nextLevel.level, table.Checksum))
+			newCreateChange(table.ID(), cd.nextLevel.level))
 	}
 	for _, table := range cd.top {
 		changes = append(changes, newDeleteChange(table.ID()))
@@ -847,7 +849,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	// the proper order. (That means this update happens before that of some compaction which
 	// deletes the table.)
 	err := s.kv.manifest.addChanges([]*pb.ManifestChange{
-		newCreateChange(t.ID(), 0, t.Checksum),
+		newCreateChange(t.ID(), 0),
 	})
 	if err != nil {
 		return err

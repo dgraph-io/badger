@@ -18,16 +18,24 @@ package table
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
+	"hash/crc32"
 	"math/rand"
 	"os"
 	"sort"
 	"testing"
 	"time"
 
+	"github.com/cespare/xxhash"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	KB = 1024
+	MB = KB * 1024
 )
 
 func key(prefix string, i int) string {
@@ -49,6 +57,7 @@ func buildTestTable(t *testing.T, prefix string, n int) *os.File {
 func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	b := NewTableBuilder()
 	defer b.Close()
+	rand.Seed(time.Now().UnixNano())
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
@@ -700,6 +709,28 @@ func BenchmarkReadMerged(b *testing.B) {
 			for it.Rewind(); it.Valid(); it.Next() {
 			}
 		}()
+	}
+}
+
+func BenchmarkChecksum(b *testing.B) {
+	keySz := []int{KB, 2 * KB, 4 * KB, 8 * KB, 16 * KB, 32 * KB, 64 * KB, 128 * KB, 256 * KB, MB}
+	for _, kz := range keySz {
+		key := make([]byte, kz)
+		b.Run(fmt.Sprintf("CRC %d", kz), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				crc32.ChecksumIEEE(key)
+			}
+		})
+		b.Run(fmt.Sprintf("xxHash64 %d", kz), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				xxhash.Sum64(key)
+			}
+		})
+		b.Run(fmt.Sprintf("SHA256 %d", kz), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				sha256.Sum256(key)
+			}
+		})
 	}
 }
 
