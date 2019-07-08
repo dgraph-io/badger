@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
+	"math"
 	"time"
 
 	"github.com/dgraph-io/badger/y"
@@ -56,25 +57,41 @@ type header struct {
 }
 
 const (
-	headerBufSize = 18
+	// Maximum possible size of the header. The maximum size of header struct will be 18 but the
+	// maximum size of varint encoded header will be 21.
+	maxHeaderSize = 21
 )
 
-func (h header) Encode(out []byte) {
-	y.AssertTrue(len(out) >= headerBufSize)
-	binary.BigEndian.PutUint32(out[0:4], h.klen)
-	binary.BigEndian.PutUint32(out[4:8], h.vlen)
-	binary.BigEndian.PutUint64(out[8:16], h.expiresAt)
-	out[16] = h.meta
-	out[17] = h.userMeta
+// Encode encodes the header into []byte.
+/* The encoded header looks like
++------------+--------------+-----------+------+----------+
+| Key Length | Value Length | ExpiresAt | Meta | UserMeta |
++------------+--------------+-----------+------+----------+
+*/
+func (h header) Encode(out []byte) int {
+	index := 0
+	index += binary.PutUvarint(out[index:], uint64(h.klen))
+	index += binary.PutUvarint(out[index:], uint64(h.vlen))
+	index += binary.PutUvarint(out[index:], h.expiresAt)
+	out[index] = h.meta
+	index++
+	out[index] = h.userMeta
+	return index + 1
 }
 
 // Decodes h from buf.
 func (h *header) Decode(buf []byte) {
-	h.klen = binary.BigEndian.Uint32(buf[0:4])
-	h.vlen = binary.BigEndian.Uint32(buf[4:8])
-	h.expiresAt = binary.BigEndian.Uint64(buf[8:16])
-	h.meta = buf[16]
-	h.userMeta = buf[17]
+	klen, count := binary.Uvarint(buf[:])
+	h.klen = uint32(klen)
+	buf = buf[count:]
+	vlen, count := binary.Uvarint(buf[:])
+	h.vlen = uint32(vlen)
+	buf = buf[count:]
+	expiresAt, count := binary.Uvarint(buf[:])
+	h.expiresAt = uint64(expiresAt)
+	buf = buf[count:]
+	h.meta = buf[0]
+	h.userMeta = buf[1]
 }
 
 // Entry provides Key, Value, UserMeta and ExpiresAt. This struct can be used by
@@ -99,6 +116,11 @@ func (e *Entry) estimateSize(threshold int) int {
 }
 
 // Encodes e to buf. Returns number of bytes written.
+/* The encoded entry looks like
++---------------+--------+-----+-------+----------+
+| Header Length | Header | Key | Value | Checksum |
++---------------+--------+-----+-------+----------+
+*/
 func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	h := header{
 		klen:      uint32(len(e.Key)),
@@ -108,12 +130,17 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 		userMeta:  e.UserMeta,
 	}
 
-	var headerEnc [headerBufSize]byte
-	h.Encode(headerEnc[:])
+	headerEnc := make([]byte, maxHeaderSize)
+	headerLen := h.Encode(headerEnc[:])
+	// Ensure we don't overflow uint8.
+	y.AssertTrue(headerLen < math.MaxUint8)
+	// Write header length.
+	buf.Write([]byte{uint8(headerLen)})
 
-	hash := crc32.New(y.CastagnoliCrcTable)
-
+	// Trim headerEnc to contain only valid bytes.
+	headerEnc = headerEnc[:headerLen]
 	buf.Write(headerEnc[:])
+	hash := crc32.New(y.CastagnoliCrcTable)
 	if _, err := hash.Write(headerEnc[:]); err != nil {
 		return 0, err
 	}
@@ -131,8 +158,8 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	var crcBuf [crc32.Size]byte
 	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
 	buf.Write(crcBuf[:])
-
-	return len(headerEnc) + len(e.Key) + len(e.Value) + len(crcBuf), nil
+	// 1 byte is used to store the size of the header.
+	return 1 + len(headerEnc) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
 func (e Entry) print(prefix string) {
