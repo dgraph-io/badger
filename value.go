@@ -818,7 +818,7 @@ func (vlog *valueLog) openLogFile(lf *logFile) error {
 	}
 	sz := fstat.Size()
 	if sz == 0 {
-		// File is empty. We don't need to mmap is. Return.
+		// File is empty. We don't need to mmap it. Return.
 		return nil
 	}
 	y.AssertTrue(sz <= math.MaxUint32)
