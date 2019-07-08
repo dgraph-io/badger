@@ -195,12 +195,22 @@ type safeRead struct {
 	recordOffset uint32
 }
 
-func (r *safeRead) Entry(reader *bufio.Reader) (*Entry, error) {
-	var hbuf [headerBufSize]byte
+// nextHeaderLength returns the length of the next header in the reader.
+func (r *safeRead) nextHeaderLength(reader io.Reader) (int, error) {
+	headerLen := make([]byte, 1)
+	if _, err := io.ReadFull(reader, headerLen); err != nil {
+		return 0, err
+	}
+	return int(uint8(headerLen[0])), nil
+}
+
+func (r *safeRead) Entry(reader io.Reader, headerLen int) (*Entry, error) {
 	var err error
 
 	hash := crc32.New(y.CastagnoliCrcTable)
 	tee := io.TeeReader(reader, hash)
+
+	hbuf := make([]byte, headerLen)
 	if _, err = io.ReadFull(tee, hbuf[:]); err != nil {
 		return nil, err
 	}
@@ -285,7 +295,13 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 	var lastCommit uint64
 	var validEndOffset uint32
 	for {
-		e, err := read.Entry(reader)
+		hlen, err := read.nextHeaderLength(reader)
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return 0, err
+		}
+		e, err := read.Entry(reader, hlen)
 		if err == io.EOF {
 			break
 		} else if err == io.ErrUnexpectedEOF || err == errTruncate {
@@ -297,7 +313,8 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		}
 
 		var vp valuePointer
-		vp.Len = uint32(headerBufSize + len(e.Key) + len(e.Value) + crc32.Size)
+		// +1 because we store length of header in the first byte.
+		vp.Len = uint32(1 + hlen + len(e.Key) + len(e.Value) + crc32.Size)
 		read.recordOffset += vp.Len
 
 		vp.Offset = e.offset
@@ -1092,9 +1109,11 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	if err != nil {
 		return nil, cb, err
 	}
+	headerLen := uint8(buf[0])
+	buf = buf[1:]
 	var h header
 	h.Decode(buf)
-	n := uint32(headerBufSize) + h.klen
+	n := uint32(headerLen) + h.klen
 	return buf[n : n+h.vlen], cb, nil
 }
 
@@ -1116,15 +1135,18 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, func(
 
 // Test helper
 func valueBytesToEntry(buf []byte) (e Entry) {
+	// First byte stores the length of the header.
+	headerLen := uint32(buf[0])
+	buf = buf[1:]
+
 	var h header
 	h.Decode(buf)
-	n := uint32(headerBufSize)
-
-	e.Key = buf[n : n+h.klen]
-	n += h.klen
+	// Move ahead of the header.
+	buf = buf[headerLen:]
+	e.Key = buf[:h.klen]
 	e.meta = h.meta
 	e.UserMeta = h.userMeta
-	e.Value = buf[n : n+h.vlen]
+	e.Value = buf[h.klen : h.klen+h.vlen]
 	return
 }
 

@@ -128,8 +128,13 @@ func (db *DB) buildHistogram(keyPrefix []byte) *sizeHistogram {
 	// Collect key and value sizes.
 	for itr.Seek(keyPrefix); itr.ValidForPrefix(keyPrefix); itr.Next() {
 		item := itr.Item()
+		valueSlice, err := item.ValueCopy(nil)
+		if err != nil {
+			db.opt.Logger.Infof("Unable to fetch value. Skipping this entry due to error.", err)
+			continue
+		}
 		badgerHistogram.keySizeHistogram.Update(item.KeySize())
-		badgerHistogram.valueSizeHistogram.Update(item.ValueSize())
+		badgerHistogram.valueSizeHistogram.Update(int64(len(valueSlice)))
 	}
 	return badgerHistogram
 }
