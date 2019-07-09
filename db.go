@@ -193,8 +193,17 @@ func Open(opt Options) (db *DB, err error) {
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
-	if opt.ValueThreshold > ValueThresholdLimit {
-		return nil, ErrValueThreshold
+	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
+	if opt.ValueThreshold > maxValueThreshold {
+		return nil, errors.Errorf("Invalid ValueThreshold, must be less or equal to %d",
+			maxValueThreshold)
+	}
+
+	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
+	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
+	if int64(opt.ValueThreshold) > opt.maxBatchSize {
+		return nil, errors.Errorf("Valuethreshold greater than max batch size of %d. Either "+
+			"reduce opt.ValueThreshold or increase opt.MaxTableSize.", opt.maxBatchSize)
 	}
 
 	if opt.ReadOnly {
@@ -466,6 +475,12 @@ func (db *DB) close() (err error) {
 	}
 
 	return err
+}
+
+// VerifyChecksum verifies checksum for all tables on all levels.
+// This method can be used to verify checksum, if opt.ChecksumVerificationMode is NoVerification.
+func (db *DB) VerifyChecksum() error {
+	return db.lc.verifyChecksum()
 }
 
 const (
@@ -902,7 +917,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
 
-	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode, nil, db.cache)
+	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode, db.cache)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err

@@ -69,6 +69,7 @@ type Table struct {
 	Checksum []byte
 
 	blockCache *ristretto.Cache
+	chkMode    options.ChecksumVerificationMode // indicates when to verify checksum for blocks.
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
@@ -105,19 +106,46 @@ func (t *Table) DecrRef() error {
 }
 
 type block struct {
-	offset int
-	data   []byte
+	offset            int
+	data              []byte
+	numEntries        int // number of entries present in the block
+	entriesIndexStart int // start index of entryOffsets list
+	chkLen            int // checksum length
+}
+
+func (b block) verifyCheckSum() error {
+	readPos := len(b.data) - 4 - b.chkLen
+	if readPos < 0 {
+		// This should be rare, hence can create a error instead of having global error.
+		return fmt.Errorf("block does not contain checksum")
+	}
+
+	cs := &pb.Checksum{}
+	if err := cs.Unmarshal(b.data[readPos : readPos+b.chkLen]); err != nil {
+		return y.Wrapf(err, "unable to unmarshal checksum for block")
+	}
+
+	return y.VerifyChecksum(b.data[:readPos], cs)
 }
 
 func (b block) NewIterator() *blockIterator {
-	return &blockIterator{data: b.data}
+	bi := &blockIterator{
+		data:              b.data,
+		numEntries:        b.numEntries,
+		entriesIndexStart: b.entriesIndexStart,
+	}
+
+	return bi
 }
 
-// OpenTable assumes file has only one table and opens it.  Takes ownership of fd upon function
-// entry.  Returns a table with one reference count on it (decrementing which may delete the file!
-// -- consider t.Close() instead).  The fd has to writeable because we call Truncate on it before
-// deleting.
-func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte, cache *ristretto.Cache) (*Table, error) {
+// OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function
+// entry. Returns a table with one reference count on it (decrementing which may delete the file!
+// -- consider t.Close() instead). The fd has to writeable because we call Truncate on it before
+// deleting. Checksum for all blocks of table is verified based on value of chkMode.
+// TODO:(Ashish): convert individual args to option struct.
+func OpenTable(fd *os.File, mode options.FileLoadingMode,
+	chkMode options.ChecksumVerificationMode, cache *ristretto.Cache) (*Table, error) {
+
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -138,6 +166,7 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte, cache *r
 		id:          id,
 		loadingMode: mode,
 		blockCache:  cache,
+		chkMode:     chkMode,
 	}
 
 	t.tableSize = int(fileInfo.Size())
@@ -187,6 +216,14 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte, cache *r
 	default:
 		panic(fmt.Sprintf("Invalid loading mode: %v", mode))
 	}
+
+	if t.chkMode == options.OnTableRead || t.chkMode == options.OnTableAndBlockRead {
+		if err := t.VerifyChecksum(); err != nil {
+			_ = fd.Close()
+			return nil, err
+		}
+	}
+
 	return t, nil
 }
 
@@ -231,7 +268,7 @@ func (t *Table) readIndex() error {
 	checksumLen := int(binary.BigEndian.Uint32(buf))
 
 	// Read checksum.
-	expectedChk := pb.Checksum{}
+	expectedChk := &pb.Checksum{}
 	readPos -= checksumLen
 	buf = t.readNoFail(readPos, checksumLen)
 	if err := expectedChk.Unmarshal(buf); err != nil {
@@ -259,25 +296,41 @@ func (t *Table) readIndex() error {
 	return nil
 }
 
-func (t *Table) block(idx int) (block, error) {
+func (t *Table) block(idx int) (*block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= len(t.blockIndex) {
-		return block{}, errors.New("block out of index")
+		return nil, errors.New("block out of index")
 	}
 
 	blkKey := t.blockCacheKey(idx)
 	cachedBlk := t.blockCache.Get(blkKey)
 	if cachedBlk != nil {
-		return cachedBlk.(block), nil
+		return cachedBlk.(*block), nil
 	}
 	ko := t.blockIndex[idx]
-	blk := block{
+	blk := &block{
 		offset: int(ko.Offset),
 	}
 	var err error
 	blk.data, err = t.read(blk.offset, int(ko.Len))
+
+	// Read meta data related to block.
+	readPos := len(blk.data) - 4 // First read checksum length.
+	blk.chkLen = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
+
+	// Skip reading checksum, and move position to read numEntries in block.
+	readPos -= (blk.chkLen + 4)
+	blk.numEntries = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
+	blk.entriesIndexStart = readPos - (blk.numEntries * 4)
+
+	// Verify checksum on if checksum verification mode is OnRead on OnStartAndRead.
+	if t.chkMode == options.OnBlockRead || t.chkMode == options.OnTableAndBlockRead {
+		if err = blk.verifyCheckSum(); err != nil {
+			return nil, err
+		}
+	}
 	if err != nil {
-		return blk, err
+		return nil, err
 	}
 	t.blockCache.Set(blkKey, blk)
 	return blk, err
@@ -305,6 +358,30 @@ func (t *Table) blockCacheKey(idx int) string {
 // DoesNotHave returns true if (but not "only if") the table does not have the key.  It does a
 // bloom filter lookup.
 func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(key) }
+
+// VerifyChecksum verifies checksum for all blocks of table. This function is called by
+// OpenTable() function. This function is also called inside levelsController.VerifyChecksum().
+func (t *Table) VerifyChecksum() error {
+	for i, os := range t.blockIndex {
+		b, err := t.block(i)
+		if err != nil {
+			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
+				t.Filename(), i, os.Offset)
+		}
+
+		// OnBlockRead or OnTableAndBlockRead, we don't need to call verify checksum
+		// on block, verification would be done while reading block itself.
+		if !(t.chkMode == options.OnBlockRead || t.chkMode == options.OnTableAndBlockRead) {
+			if err = b.verifyCheckSum(); err != nil {
+				return y.Wrapf(err,
+					"checksum validation failed for table: %s, block: %d, offset:%d",
+					t.Filename(), i, os.Offset)
+			}
+		}
+	}
+
+	return nil
+}
 
 // ParseFileID reads the file id out of a filename.
 func ParseFileID(name string) (uint64, bool) {

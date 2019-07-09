@@ -35,12 +35,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/skl"
-
 	"github.com/dgraph-io/badger/y"
-	"github.com/stretchr/testify/require"
 )
 
 var mmap = flag.Bool("vlog_mmap", true, "Specify if value log must be memory-mapped")
@@ -1445,9 +1445,17 @@ func TestLSMOnly(t *testing.T) {
 	dopts := DefaultOptions(dir)
 	require.NotEqual(t, dopts.ValueThreshold, opts.ValueThreshold)
 
-	dopts.ValueThreshold = 1 << 16
+	dopts.ValueThreshold = 1 << 21
 	_, err = Open(dopts)
-	require.Equal(t, ErrValueThreshold, err)
+	require.Contains(t, err.Error(), "Invalid ValueThreshold")
+
+	// Also test for error, when ValueThresholdSize is greater than maxBatchSize.
+	dopts.ValueThreshold = LSMOnlyOptions(dir).ValueThreshold
+	// maxBatchSize is calculated from MaxTableSize.
+	dopts.MaxTableSize = int64(LSMOnlyOptions(dir).ValueThreshold)
+	_, err = Open(dopts)
+	require.Error(t, err, "db creation should have been failed")
+	require.Contains(t, err.Error(), "Valuethreshold greater than max batch size")
 
 	opts.ValueLogMaxEntries = 100
 	db, err := Open(opts)
@@ -1787,6 +1795,36 @@ func TestForceFlushMemtable(t *testing.T) {
 	// Since we are inserting 3 entries and ValueLogMaxEntries is 1, there will be 3 rotation. For
 	// 1st and 2nd time head flushed with memtable will have fid as 0 and last time it will be 1.
 	require.True(t, vptr.Fid == 1, fmt.Sprintf("expected fid: %d, actual fid: %d", 1, vptr.Fid))
+}
+
+func TestVerifyChecksum(t *testing.T) {
+	// use stream write for writing.
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		value := make([]byte, 32)
+		y.Check2(rand.Read(value))
+		l := &pb.KVList{}
+		st := 0
+		for i := 0; i < 1000; i++ {
+			key := make([]byte, 8)
+			binary.BigEndian.PutUint64(key, uint64(i))
+			l.Kv = append(l.Kv, &pb.KV{
+				Key:      key,
+				Value:    value,
+				StreamId: uint32(st),
+				Version:  1,
+			})
+			if i%100 == 0 {
+				st++
+			}
+		}
+
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+		require.NoError(t, sw.Write(l), "sw.Write() failed")
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+
+		require.NoError(t, db.VerifyChecksum(), "checksum verification failed for DB")
+	})
 }
 
 func TestMain(m *testing.M) {
