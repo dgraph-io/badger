@@ -151,7 +151,12 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				return
 			}
 
-			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode)
+			tableOpts := table.Options{
+				Fd:      fd,
+				Mode:    db.opt.TableLoadingMode,
+				ChkMode: db.opt.ChecksumVerificationMode,
+			}
+			t, err := table.OpenTable(tableOpts)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -573,8 +578,12 @@ func (s *levelsController) compactBuildTables(
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
 
-			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode,
-				s.kv.opt.ChecksumVerificationMode)
+			tableOpts := table.Options{
+				Fd:      fd,
+				Mode:    s.kv.opt.TableLoadingMode,
+				ChkMode: s.kv.opt.ChecksumVerificationMode,
+			}
+			tbl, err := table.OpenTable(tableOpts)
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}
