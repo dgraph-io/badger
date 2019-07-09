@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -27,7 +28,12 @@ import (
 	"path"
 	"regexp"
 	"testing"
+	"time"
 
+	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/table"
+	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -429,4 +435,91 @@ func TestBigValues(t *testing.T) {
 			require.NoError(t, getByKey(key(i)))
 		}
 	})
+}
+
+// This test is for compaction. We are creating db with two levels. We have 10 tables on level 3 and
+// 3 tables on level 2. Tables on level 2 have overlap with 2, 4, 3 tables on level 3. This test
+// will take more memory and time, hence adding it for manual run.
+func TestCompaction(t *testing.T) {
+	if !*manual {
+		t.Skip("Skipping test meant to be run manually.")
+		return
+	}
+
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	db, err := Open(DefaultOptions(dir).WithTableLoadingMode(options.LoadToRAM))
+	require.NoError(t, err, "error while opening db")
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
+
+	l3 := db.lc.levels[3]
+	start := 0
+	incr := 300000 // Every table has 300,000 entries.
+	for i := 0; i < 10; i++ {
+		tab := createTableWithRange(t, db, start, start+incr, 1)
+		addToMenifest(t, db, tab, 3)
+		start += incr
+		require.NoError(t, l3.replaceTables([]*table.Table{}, []*table.Table{tab}))
+	}
+
+	l2 := db.lc.levels[2]
+	// first table keys from 0 - 600,000
+	tab := createTableWithRange(t, db, 0, 600000, 2)
+	addToMenifest(t, db, tab, 2)
+	require.NoError(t, l2.replaceTables([]*table.Table{}, []*table.Table{tab}))
+
+	// second table have keys from 600,001 to 1,800,000
+	tab = createTableWithRange(t, db, 600001, 1800000, 4)
+	addToMenifest(t, db, tab, 2)
+	require.NoError(t, l2.replaceTables([]*table.Table{}, []*table.Table{tab}))
+
+	// third table have keys from 1,800,001 to 2,700,000
+	tab = createTableWithRange(t, db, 1800001, 2700000, 4)
+	addToMenifest(t, db, tab, 2)
+	require.NoError(t, l2.replaceTables([]*table.Table{}, []*table.Table{tab}))
+
+	for len(db.lc.levels[2].tables) > 0 {
+		now := time.Now()
+		require.NoError(t, db.lc.doCompact(compactionPriority{level: 2}))
+		fmt.Println("compaction completed in time: ", time.Since(now))
+	}
+}
+
+// addToMenifest function is used in TestCompaction. It adds table to db menifest.
+func addToMenifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
+	change := &pb.ManifestChange{
+		Id:    tab.ID(),
+		Op:    pb.ManifestChange_CREATE,
+		Level: level,
+	}
+	require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{change}),
+		"unable to add to menfest")
+}
+
+// createTableWithRange function is used in TestCompaction. It creates a table with key starting
+// from with start and ending with end with diff between each key as incr.
+func createTableWithRange(t *testing.T, db *DB, start, end, incr int) *table.Table {
+	b := table.NewTableBuilder()
+	for i := start; i < end; i += incr {
+		key := make([]byte, 8)
+		binary.BigEndian.PutUint64(key[:], uint64(i))
+		key = y.KeyWithTs(key, uint64(0))
+		val := y.ValueStruct{Value: []byte(fmt.Sprintf("%d", i))}
+		require.NoError(t, b.Add(key, val))
+	}
+
+	fileID := db.lc.reserveFileID()
+	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
+	require.NoError(t, err)
+
+	_, err = fd.Write(b.Finish())
+	require.NoError(t, err, "unable to write to file")
+
+	tab, err := table.OpenTable(fd, options.LoadToRAM, options.NoVerification)
+	require.NoError(t, err)
+	return tab
 }
