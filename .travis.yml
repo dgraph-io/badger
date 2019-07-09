@@ -2,11 +2,12 @@ language: go
 
 go:
     - "1.11"
-    - "1.12"
-
-matrix:
-  include:
-    - os: osx
+    # - "1.12"
+os:
+    - osx
+# matrix:
+#   include:
+#     - os: osx
 notifications:
   email: false
   slack:
