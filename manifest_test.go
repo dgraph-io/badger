@@ -31,6 +31,7 @@ import (
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto"
 	"github.com/stretchr/testify/require"
 )
 
@@ -160,6 +161,16 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	return f
 }
 
+func CreateTestCache() *ristretto.Cache {
+	return ristretto.NewCache(
+		&ristretto.Config{
+			CacheSize:  1 << 10,
+			BufferSize: 1 << 10 / 4,
+			Policy:     ristretto.NewLFU,
+			Log:        false,
+		},
+	)
+}
 func TestOverlappingKeyRangeError(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
@@ -170,7 +181,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lh0 := newLevelHandler(kv, 0)
 	lh1 := newLevelHandler(kv, 1)
 	f := buildTestTable(t, "k", 2)
-	t1, err := table.OpenTable(f, options.MemoryMap, nil)
+	t1, err := table.OpenTable(f, options.MemoryMap, nil, CreateTestCache())
 	require.NoError(t, err)
 	defer t1.DecrRef()
 
@@ -191,7 +202,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lc.runCompactDef(0, cd)
 
 	f = buildTestTable(t, "l", 2)
-	t2, err := table.OpenTable(f, options.MemoryMap, nil)
+	t2, err := table.OpenTable(f, options.MemoryMap, nil, CreateTestCache())
 	require.NoError(t, err)
 	defer t2.DecrRef()
 	done = lh0.tryAddLevel0Table(t2)

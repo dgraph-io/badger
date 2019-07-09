@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 
 	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/ristretto"
 
 	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/options"
@@ -37,6 +38,7 @@ import (
 )
 
 const fileSuffix = ".sst"
+const blockCachePrefix = "blockcache"
 
 // TableInterface is useful for testing.
 type TableInterface interface {
@@ -65,6 +67,8 @@ type Table struct {
 	bf bbloom.Bloom
 
 	Checksum []byte
+
+	blockCache *ristretto.Cache
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
@@ -113,7 +117,7 @@ func (b block) NewIterator() *blockIterator {
 // entry.  Returns a table with one reference count on it (decrementing which may delete the file!
 // -- consider t.Close() instead).  The fd has to writeable because we call Truncate on it before
 // deleting.
-func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table, error) {
+func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte, cache *ristretto.Cache) (*Table, error) {
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -133,6 +137,7 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode, cksum []byte) (*Table,
 		ref:         1, // Caller is given one reference.
 		id:          id,
 		loadingMode: mode,
+		blockCache:  cache,
 	}
 
 	t.tableSize = int(fileInfo.Size())
@@ -260,12 +265,21 @@ func (t *Table) block(idx int) (block, error) {
 		return block{}, errors.New("block out of index")
 	}
 
+	blkKey := t.blockCacheKey(idx)
+	cachedBlk := t.blockCache.Get(blkKey)
+	if cachedBlk != nil {
+		return cachedBlk.(block), nil
+	}
 	ko := t.blockIndex[idx]
 	blk := block{
 		offset: int(ko.Offset),
 	}
 	var err error
 	blk.data, err = t.read(blk.offset, int(ko.Len))
+	if err != nil {
+		return blk, err
+	}
+	t.blockCache.Set(blkKey, blk)
 	return blk, err
 }
 
@@ -283,6 +297,10 @@ func (t *Table) Filename() string { return t.fd.Name() }
 
 // ID is the table's ID number (used to make the file name).
 func (t *Table) ID() uint64 { return t.id }
+
+func (t *Table) blockCacheKey(idx int) string {
+	return fmt.Sprintf("%s_%d_%d", blockCachePrefix, t.ID(), idx)
+}
 
 // DoesNotHave returns true if (but not "only if") the table does not have the key.  It does a
 // bloom filter lookup.

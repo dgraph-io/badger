@@ -63,6 +63,7 @@ type Options struct {
 	NumCompactors     int
 	CompactL0OnClose  bool
 	LogRotatesToFlush int32
+	CacheSize         uint64
 
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
@@ -108,6 +109,7 @@ func DefaultOptions(path string) Options {
 		Truncate:           false,
 		Logger:             defaultLogger,
 		LogRotatesToFlush:  2,
+		CacheSize:          1 << 10,
 	}
 }
 

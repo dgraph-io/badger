@@ -37,6 +37,7 @@ import (
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
@@ -91,6 +92,8 @@ type DB struct {
 	orc *oracle
 
 	pub *publisher
+
+	cache *ristretto.Cache
 }
 
 const (
@@ -263,6 +266,13 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}()
 
+	cache := ristretto.NewCache(&ristretto.Config{
+		CacheSize:  opt.CacheSize,
+		Log:        true,
+		Policy:     ristretto.NewLFU,
+		BufferSize: opt.CacheSize / 5, // Should I make this more smaller?.
+	})
+
 	db = &DB{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
@@ -274,6 +284,7 @@ func Open(opt Options) (db *DB, err error) {
 		valueDirGuard: valueDirLockGuard,
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
+		cache:         cache,
 	}
 
 	// Calculate initial size.
@@ -891,7 +902,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
 
-	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode, nil)
+	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode, nil, db.cache)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err
@@ -1369,7 +1380,7 @@ func (db *DB) dropAll() (func(), error) {
 		return nil, err
 	}
 	db.vhead = valuePointer{} // Zero it out.
-	db.lc.nextFileID = 1
+	//db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
 	return f, nil
 }

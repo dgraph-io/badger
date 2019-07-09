@@ -29,14 +29,14 @@ func TestTableIndex(t *testing.T) {
 	keyPrefix := "key"
 	t.Run("single key", func(t *testing.T) {
 		f := buildTestTable(t, keyPrefix, 1)
-		table, err := OpenTable(f, options.MemoryMap, nil)
+		table, err := OpenTable(f, options.MemoryMap, nil, CreateTestCache())
 		require.NoError(t, err)
 		require.Len(t, table.blockIndex, 1)
 	})
 	t.Run("multiple keys", func(t *testing.T) {
 		keyCount := 10000
 		f := buildTestTable(t, keyPrefix, keyCount)
-		table, err := OpenTable(f, options.MemoryMap, nil)
+		table, err := OpenTable(f, options.MemoryMap, nil, CreateTestCache())
 		require.NoError(t, err)
 		require.Len(t, table.blockIndex, keyCount/restartInterval)
 		// Ensure index is built correctly
