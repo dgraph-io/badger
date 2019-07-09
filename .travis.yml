@@ -2,9 +2,9 @@ language: go
 
 go:
     - "1.11"
-    # - "1.12"
 os:
     - osx
+
 # matrix:
 #   include:
 #     - os: osx
