@@ -34,26 +34,16 @@ func TestTableIndex(t *testing.T) {
 	keyPrefix := "key"
 	t.Run("single key", func(t *testing.T) {
 		f := buildTestTable(t, keyPrefix, 1)
-<<<<<<< HEAD
-		table, err := OpenTable(f, options.MemoryMap, nil, CreateTestCache())
-=======
-		tbl, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead)
->>>>>>> 1496af939d8533779f7b6b3f3a6cd251abf5c598
+		tbl, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, CreateTestCache())
 		require.NoError(t, err)
 		require.Len(t, tbl.blockIndex, 1)
 	})
 
 	t.Run("multiple keys", func(t *testing.T) {
-<<<<<<< HEAD
-		keyCount := 10000
-		f := buildTestTable(t, keyPrefix, keyCount)
-		table, err := OpenTable(f, options.MemoryMap, nil, CreateTestCache())
-=======
 		keysCount := 10000
 		builder := NewTableBuilder()
 		filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
 		f, err := y.OpenSyncedFile(filename, true)
->>>>>>> 1496af939d8533779f7b6b3f3a6cd251abf5c598
 		require.NoError(t, err)
 
 		blockFirstKeys := make([][]byte, 0)
@@ -73,7 +63,7 @@ func TestTableIndex(t *testing.T) {
 		}
 		f.Write(builder.Finish())
 
-		tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
+		tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, CreateTestCache())
 		require.NoError(t, err, "unable to open table")
 
 		// Ensure index is built correctly

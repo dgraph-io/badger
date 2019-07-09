@@ -665,7 +665,7 @@ func TestTableBigValues(t *testing.T) {
 	}
 
 	f.Write(builder.Finish())
-	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
+	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, CreateTestCache())
 	require.NoError(t, err, "unable to open table")
 	defer tbl.DecrRef()
 
@@ -693,7 +693,7 @@ func TestTableChecksum(t *testing.T) {
 	require.NoError(t, err, "unable to get file information")
 	f.WriteAt(rb, rand.Int63n(fi.Size()))
 
-	_, err = OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
+	_, err = OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, CreateTestCache())
 	if err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatal("Test should have been failed with checksum mismatch error")
 	}
