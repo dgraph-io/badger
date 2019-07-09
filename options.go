@@ -112,7 +112,7 @@ func DefaultOptions(path string) Options {
 		Truncate:           false,
 		Logger:             defaultLogger,
 		LogRotatesToFlush:  2,
-		CacheSize:          1 << 10,
+		CacheSize:          512 << 10 / 4,
 	}
 }
 
