@@ -35,12 +35,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/pb"
-	"github.com/dgraph-io/badger/v2/skl"
-
-	"github.com/dgraph-io/badger/v2/y"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/skl"
+	"github.com/dgraph-io/badger/y"
 )
 
 var mmap = flag.Bool("vlog_mmap", true, "Specify if value log must be memory-mapped")
@@ -1445,9 +1445,17 @@ func TestLSMOnly(t *testing.T) {
 	dopts := DefaultOptions(dir)
 	require.NotEqual(t, dopts.ValueThreshold, opts.ValueThreshold)
 
-	dopts.ValueThreshold = 1 << 16
+	dopts.ValueThreshold = 1 << 21
 	_, err = Open(dopts)
-	require.Equal(t, ErrValueThreshold, err)
+	require.Contains(t, err.Error(), "Invalid ValueThreshold")
+
+	// Also test for error, when ValueThresholdSize is greater than maxBatchSize.
+	dopts.ValueThreshold = LSMOnlyOptions(dir).ValueThreshold
+	// maxBatchSize is calculated from MaxTableSize.
+	dopts.MaxTableSize = int64(LSMOnlyOptions(dir).ValueThreshold)
+	_, err = Open(dopts)
+	require.Error(t, err, "db creation should have been failed")
+	require.Contains(t, err.Error(), "Valuethreshold greater than max batch size")
 
 	opts.ValueLogMaxEntries = 100
 	db, err := Open(opts)
@@ -1789,6 +1797,36 @@ func TestForceFlushMemtable(t *testing.T) {
 	require.True(t, vptr.Fid == 1, fmt.Sprintf("expected fid: %d, actual fid: %d", 1, vptr.Fid))
 }
 
+func TestVerifyChecksum(t *testing.T) {
+	// use stream write for writing.
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		value := make([]byte, 32)
+		y.Check2(rand.Read(value))
+		l := &pb.KVList{}
+		st := 0
+		for i := 0; i < 1000; i++ {
+			key := make([]byte, 8)
+			binary.BigEndian.PutUint64(key, uint64(i))
+			l.Kv = append(l.Kv, &pb.KV{
+				Key:      key,
+				Value:    value,
+				StreamId: uint32(st),
+				Version:  1,
+			})
+			if i%100 == 0 {
+				st++
+			}
+		}
+
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+		require.NoError(t, sw.Write(l), "sw.Write() failed")
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+
+		require.NoError(t, db.VerifyChecksum(), "checksum verification failed for DB")
+	})
+}
+
 func TestMain(m *testing.M) {
 	// call flag.Parse() here if TestMain uses flags
 	go func() {
@@ -1797,4 +1835,62 @@ func TestMain(m *testing.M) {
 		}
 	}()
 	os.Exit(m.Run())
+}
+
+func ExampleDB_Subscribe() {
+	prefix := []byte{'a'}
+
+	// This key should be printed, since it matches the prefix.
+	aKey := []byte("a-key")
+	aValue := []byte("a-value")
+
+	// This key should not be printed.
+	bKey := []byte("b-key")
+	bValue := []byte("b-value")
+
+	// Open the DB.
+	dir, err := ioutil.TempDir("", "badger-test")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	db, err := Open(DefaultOptions(dir))
+	defer db.Close()
+
+	// Create the context here so we can cancel it after sending the writes.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Use the WaitGroup to make sure we wait for the subscription to stop before continuing.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cb := func(kvs *KVList) {
+			for _, kv := range kvs.Kv {
+				fmt.Printf("%s is now set to %s\n", kv.Key, kv.Value)
+			}
+		}
+		if err := db.Subscribe(ctx, cb, prefix); err != nil && err != context.Canceled {
+			log.Fatal(err)
+		}
+		log.Printf("subscription closed")
+	}()
+
+	// Write both keys, but only one should be printed in the Output.
+	err = db.Update(func(txn *Txn) error { return txn.Set(aKey, aValue) })
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = db.Update(func(txn *Txn) error { return txn.Set(bKey, bValue) })
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("stopping subscription")
+	cancel()
+	log.Printf("waiting for subscription to close")
+	wg.Wait()
+	// Output:
+	// a-key is now set to a-value
 }

@@ -19,9 +19,9 @@ package badger
 import (
 	"math"
 
-	"github.com/dgraph-io/badger/v2/pb"
-	"github.com/dgraph-io/badger/v2/table"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/table"
+	"github.com/dgraph-io/badger/y"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 )
@@ -311,7 +311,7 @@ func (w *sortedWriter) createTable(data []byte) error {
 	if _, err := fd.Write(data); err != nil {
 		return err
 	}
-	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode, nil)
+	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode, w.db.opt.ChecksumVerificationMode)
 	if err != nil {
 		return err
 	}
@@ -341,10 +341,9 @@ func (w *sortedWriter) createTable(data []byte) error {
 	}
 	// Now that table can be opened successfully, let's add this to the MANIFEST.
 	change := &pb.ManifestChange{
-		Id:       tbl.ID(),
-		Op:       pb.ManifestChange_CREATE,
-		Level:    uint32(lhandler.level),
-		Checksum: tbl.Checksum,
+		Id:    tbl.ID(),
+		Op:    pb.ManifestChange_CREATE,
+		Level: uint32(lhandler.level),
 	}
 	if err := w.db.manifest.addChanges([]*pb.ManifestChange{change}); err != nil {
 		return err

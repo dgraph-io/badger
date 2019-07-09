@@ -28,7 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/y"
 )
 
 const arenaSize = 1 << 20
@@ -91,6 +91,7 @@ func TestBasic(t *testing.T) {
 	val2 := newValue(52)
 	val3 := newValue(62)
 	val4 := newValue(72)
+	val5 := []byte(fmt.Sprintf("%0102400d", 1)) // Have size 100 KB which is > math.MaxUint16.
 
 	// Try inserting values.
 	// Somehow require.Nil doesn't work when checking for unsafe.Pointer(nil).
@@ -119,6 +120,12 @@ func TestBasic(t *testing.T) {
 	require.True(t, v.Value != nil)
 	require.EqualValues(t, "00072", string(v.Value))
 	require.EqualValues(t, 12, v.Meta)
+
+	l.Put(y.KeyWithTs([]byte("key4"), 1), y.ValueStruct{Value: val5, Meta: 60, UserMeta: 0})
+	v = l.Get(y.KeyWithTs([]byte("key4"), 1))
+	require.NotNil(t, v.Value)
+	require.EqualValues(t, val5, v.Value)
+	require.EqualValues(t, 60, v.Meta)
 }
 
 // TestConcurrentBasic tests concurrent writes followed by concurrent reads.
@@ -146,6 +153,40 @@ func TestConcurrentBasic(t *testing.T) {
 			v := l.Get(key(i))
 			require.True(t, v.Value != nil)
 			require.EqualValues(t, newValue(i), v.Value)
+		}(i)
+	}
+	wg.Wait()
+	require.EqualValues(t, n, length(l))
+}
+
+func TestConcurrentBasicBigValues(t *testing.T) {
+	const n = 100
+	arenaSize := int64(120 << 20) // 120 MB
+	l := NewSkiplist(arenaSize)
+	var wg sync.WaitGroup
+	key := func(i int) []byte {
+		return y.KeyWithTs([]byte(fmt.Sprintf("%05d", i)), 0)
+	}
+	BigValue := func(i int) []byte {
+		return []byte(fmt.Sprintf("%01048576d", i)) // Have 1 MB value which is > math.MaxUint16.
+	}
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			l.Put(key(i),
+				y.ValueStruct{Value: BigValue(i), Meta: 0, UserMeta: 0})
+		}(i)
+	}
+	wg.Wait()
+	// Check values. Concurrent reads.
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			v := l.Get(key(i))
+			require.NotNil(t, v.Value)
+			require.EqualValues(t, BigValue(i), v.Value)
 		}(i)
 	}
 	wg.Wait()
