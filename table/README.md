@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 Size of table is 123,217,667 bytes for all benchmarks.
-=======
-Size of table is 122,173,606 bytes for all benchmarks.
->>>>>>> origin/ibrahim/footer-protobuf
 
 # BenchmarkRead
 ```
@@ -17,19 +13,11 @@ PASS
 ok  	github.com/dgraph-io/badger/table	22.467s
 ```
 
-<<<<<<< HEAD
 Size of table is 123,217,667 bytes, which is ~118MB.
 
 The rate is ~762MB/s using LoadToRAM (when table is in RAM).
 
 To read a 64MB table, this would take ~0.084s, which is negligible.
-=======
-Size of table is 122,173,606 bytes, which is ~117MB.
-
-The rate is ~750MB/s using LoadToRAM (when table is in RAM).
-
-To read a 64MB table, this would take ~0.0853s, which is negligible.
->>>>>>> origin/ibrahim/footer-protobuf
 
 # BenchmarkReadAndBuild
 ```go
@@ -44,19 +32,11 @@ PASS
 ok  	github.com/dgraph-io/badger/table	12.081s
 ```
 
-<<<<<<< HEAD
 The rate is ~123MB/s. To build a 64MB table, this would take ~0.56s. Note that this
 does NOT include the flushing of the table to disk. All we are doing above is
 reading one table (which is in RAM) and write one table in memory.
 
 The table building takes 0.56-0.084s ~ 0.4823s.
-=======
-The rate is ~122MB/s. To build a 64MB table, this would take ~0.52s. Note that this
-does NOT include the flushing of the table to disk. All we are doing above is
-reading one table (which is in RAM) and write one table in memory.
-
-The table building takes 0.52-0.0853s ~ 0.4347s.
->>>>>>> origin/ibrahim/footer-protobuf
 
 # BenchmarkReadMerged
 Below, we merge 5 tables. The total size remains unchanged at ~122M.
@@ -73,11 +53,7 @@ PASS
 ok  	github.com/dgraph-io/badger/table	27.433s
 ```
 
-<<<<<<< HEAD
 The rate is ~120MB/s. To read a 64MB table using merge iterator, this would take ~0.53s.
-=======
-The rate is ~122MB/s. To read a 64MB table using merge iterator, this would take ~0.52s.
->>>>>>> origin/ibrahim/footer-protobuf
 
 # BenchmarkRandomRead
 
