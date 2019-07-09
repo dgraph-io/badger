@@ -109,4 +109,7 @@ var (
 
 	// ErrNilCallback is returned when subscriber's callback is nil.
 	ErrNilCallback = errors.New("Callback cannot be nil")
+
+	// ErrNoPrefixes is returned when subscriber doesn't provide any prefix.
+	ErrNoPrefixes = errors.New("At least one key prefix is required")
 )

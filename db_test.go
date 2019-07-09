@@ -1836,3 +1836,61 @@ func TestMain(m *testing.M) {
 	}()
 	os.Exit(m.Run())
 }
+
+func ExampleDB_Subscribe() {
+	prefix := []byte{'a'}
+
+	// This key should be printed, since it matches the prefix.
+	aKey := []byte("a-key")
+	aValue := []byte("a-value")
+
+	// This key should not be printed.
+	bKey := []byte("b-key")
+	bValue := []byte("b-value")
+
+	// Open the DB.
+	dir, err := ioutil.TempDir("", "badger-test")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	db, err := Open(DefaultOptions(dir))
+	defer db.Close()
+
+	// Create the context here so we can cancel it after sending the writes.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Use the WaitGroup to make sure we wait for the subscription to stop before continuing.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cb := func(kvs *KVList) {
+			for _, kv := range kvs.Kv {
+				fmt.Printf("%s is now set to %s\n", kv.Key, kv.Value)
+			}
+		}
+		if err := db.Subscribe(ctx, cb, prefix); err != nil && err != context.Canceled {
+			log.Fatal(err)
+		}
+		log.Printf("subscription closed")
+	}()
+
+	// Write both keys, but only one should be printed in the Output.
+	err = db.Update(func(txn *Txn) error { return txn.Set(aKey, aValue) })
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = db.Update(func(txn *Txn) error { return txn.Set(bKey, bValue) })
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("stopping subscription")
+	cancel()
+	log.Printf("waiting for subscription to close")
+	wg.Wait()
+	// Output:
+	// a-key is now set to a-value
+}
