@@ -159,7 +159,8 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	var crcBuf [crc32.Size]byte
 	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
 	buf.Write(crcBuf[:])
-	return headerLen + len(headerEnc) + len(e.Key) + len(e.Value) + len(crcBuf), nil
+	// 1 byte is used to store the size of the header.
+	return 1 + len(headerEnc) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
 func (e Entry) print(prefix string) {

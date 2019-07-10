@@ -976,8 +976,9 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
-func TestReadEntry(t *testing.T) {
+func TestSafeEntry(t *testing.T) {
 	var s safeRead
+
 	k := []byte("foo")
 	v := []byte("bar")
 	e := NewEntry(k, v)
