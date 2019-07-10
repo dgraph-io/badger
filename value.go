@@ -792,6 +792,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	}
 	return nil
 }
+
 func (vlog *valueLog) openLogFile(lf *logFile) error {
 	var flags uint32
 	switch {
