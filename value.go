@@ -130,11 +130,6 @@ func (lf *logFile) doneWriting(offset uint32) error {
 	if err := y.FileSync(lf.fd); err != nil {
 		return errors.Wrapf(err, "Unable to sync value log: %q", lf.path)
 	}
-	// Acquire lock because fd will become invalid for a bit.
-	// Acquiring the lock is bad because, while we don't hold the lock for a long time, it forces
-	// one batch of readers wait for the preceding batch of readers to finish.
-	lf.lock.Lock()
-	defer lf.lock.Unlock()
 
 	// TODO: Confirm if we need to run a file sync after truncation.
 	// Truncation must run after unmapping, otherwise Windows would crap itself.
