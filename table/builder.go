@@ -22,14 +22,9 @@ import (
 	"io"
 	"math"
 
-	"github.com/dgraph-io/badger/pb"
-
 	"github.com/AndreasBriese/bbloom"
+	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
-)
-
-var (
-	restartInterval = 100 // Might want to change this to be based on total size instead of numKeys.
 )
 
 func newBuffer(sz int) *bytes.Buffer {
@@ -41,44 +36,38 @@ func newBuffer(sz int) *bytes.Buffer {
 type header struct {
 	plen uint16 // Overlap with base key.
 	klen uint16 // Length of the diff.
-	vlen uint16 // Length of value.
-	prev uint32 // Offset for the previous key-value pair. The offset is relative to block base offset.
+	vlen uint32 // Length of value.
 }
 
 // Encode encodes the header.
 func (h header) Encode(b []byte) {
 	binary.BigEndian.PutUint16(b[0:2], h.plen)
 	binary.BigEndian.PutUint16(b[2:4], h.klen)
-	binary.BigEndian.PutUint16(b[4:6], h.vlen)
-	binary.BigEndian.PutUint32(b[6:10], h.prev)
+	binary.BigEndian.PutUint32(b[4:8], h.vlen)
 }
 
 // Decode decodes the header.
 func (h *header) Decode(buf []byte) int {
 	h.plen = binary.BigEndian.Uint16(buf[0:2])
 	h.klen = binary.BigEndian.Uint16(buf[2:4])
-	h.vlen = binary.BigEndian.Uint16(buf[4:6])
-	h.prev = binary.BigEndian.Uint32(buf[6:10])
+	h.vlen = binary.BigEndian.Uint32(buf[4:8])
 	return h.Size()
 }
 
 // Size returns size of the header. Currently it's just a constant.
-func (h header) Size() int { return 10 }
+func (h header) Size() int { return 8 }
 
 // Builder is used in building a table.
 type Builder struct {
-	counter int // Number of keys written for the current block.
-
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf *bytes.Buffer
 
-	baseKey    []byte // Base key for the current block.
-	baseOffset uint32 // Offset for the current block.
+	blockSize    uint32   // Max size of block.
+	baseKey      []byte   // Base key for the current block.
+	baseOffset   uint32   // Offset for the current block.
+	entryOffsets []uint32 // Offsets of entries present in current block.
 
 	tableIndex *pb.TableIndex
-
-	// Tracks offset for the previous key-value pair. Offset is relative to block base offset.
-	prevOffset uint32
 
 	keyBuf   *bytes.Buffer
 	keyCount int
@@ -89,8 +78,10 @@ func NewTableBuilder() *Builder {
 	return &Builder{
 		keyBuf:     newBuffer(1 << 20),
 		buf:        newBuffer(1 << 20),
-		prevOffset: math.MaxUint32, // Used for the first element!
 		tableIndex: &pb.TableIndex{},
+
+		// TODO(Ashish): make this configurable
+		blockSize: 4 * 1024,
 	}
 }
 
@@ -136,27 +127,47 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	h := header{
 		plen: uint16(len(key) - len(diffKey)),
 		klen: uint16(len(diffKey)),
-		vlen: uint16(v.EncodedSize()),
-		prev: b.prevOffset, // prevOffset is the location of the last key-value added.
+		vlen: uint32(v.EncodedSize()),
 	}
+
+	// store current entry's offset
 	y.AssertTrue(b.buf.Len() < math.MaxUint32)
-	b.prevOffset = uint32(b.buf.Len()) - b.baseOffset // Remember current offset for the next Add call.
+	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len())-b.baseOffset)
 
 	// Layout: header, diffKey, value.
-	var hbuf [10]byte
+	var hbuf [8]byte
 	h.Encode(hbuf[:])
 	b.buf.Write(hbuf[:])
 	b.buf.Write(diffKey) // We only need to store the key difference.
 
 	v.EncodeTo(b.buf)
-	b.counter++ // Increment number of keys added for this current block.
 }
 
+/*
+Structure of Block.
++-------------------+---------------------+--------------------+--------------+------------------+
+| Entry1            | Entry2              | Entry3             | Entry4       | Entry5           |
++-------------------+---------------------+--------------------+--------------+------------------+
+| Entry6            | ...                 | ...                | ...          | EntryN           |
++-------------------+---------------------+--------------------+--------------+------------------+
+| Block Meta(contains list of offsets used| Block Meta Size    | Block        | Checksum Size    |
+| to perform binary search in the block)  | (4 Bytes)          | Checksum     | (4 Bytes)        |
++-----------------------------------------+--------------------+--------------+------------------+
+*/
 func (b *Builder) finishBlock() {
-	// When we are at the end of the block and Valid=false, and the user wants to do a Prev,
-	// we need a dummy header to tell us the offset of the previous key-value pair.
-	b.addHelper([]byte{}, y.ValueStruct{})
-	y.AssertTrue(b.buf.Len() < math.MaxUint32)
+	ebuf := make([]byte, len(b.entryOffsets)*4+4)
+	for i, offset := range b.entryOffsets {
+		binary.BigEndian.PutUint32(ebuf[4*i:4*i+4], uint32(offset))
+	}
+	binary.BigEndian.PutUint32(ebuf[len(ebuf)-4:], uint32(len(b.entryOffsets)))
+	b.buf.Write(ebuf)
+
+	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
+	b.writeChecksum(blockBuf)
+
+	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
+	// implement padding. This might be useful while using direct I/O.
+
 	// Add key to the block index
 	bo := &pb.BlockOffset{
 		Key:    y.Copy(b.baseKey),
@@ -166,15 +177,33 @@ func (b *Builder) finishBlock() {
 	b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
 }
 
+func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
+	// If there is no entry till now, we will return false.
+	if len(b.entryOffsets) <= 0 {
+		return false
+	}
+
+	y.AssertTrue((len(b.entryOffsets)+1)*4+4+8+4 < math.MaxUint32) // check for below statements
+	// We should include current entry also in size, that's why +1 to len(b.entryOffsets).
+	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 +
+		4 + // size of list
+		8 + // Sum64 in checksum proto
+		4) // checksum length
+	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(6 /*header size for entry*/) +
+		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
+
+	return estimatedSize > b.blockSize
+}
+
 // Add adds a key-value pair to the block.
 func (b *Builder) Add(key []byte, value y.ValueStruct) error {
-	if b.counter >= restartInterval {
+	if b.shouldFinishBlock(key, value) {
 		b.finishBlock()
-		b.counter = 0
+		// Start a new block. Initialize the block.
 		b.baseKey = []byte{}
 		y.AssertTrue(b.buf.Len() < math.MaxUint32)
 		b.baseOffset = uint32(b.buf.Len())
-		b.prevOffset = math.MaxUint32 // First key-value pair of block has header.prev=MaxInt.
+		b.entryOffsets = b.entryOffsets[:0]
 	}
 	b.addHelper(key, value)
 	return nil // Currently, there is no meaningful error.
@@ -188,10 +217,15 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	estimateSz := b.buf.Len() +
-		8 + // empty header
+	blocksSize := b.buf.Len() + // length of current buffer
+		len(b.entryOffsets)*4 + // all entry offsets size
+		4 + // count of all entry offsets
+		8 + // checksum bytes
+		4 // checksum length
+	estimateSz := blocksSize +
 		4 + // Index length
 		5*(len(b.tableIndex.Offsets)) // approximate index size
+
 	return int64(estimateSz) > cap
 }
 
