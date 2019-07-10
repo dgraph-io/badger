@@ -976,9 +976,11 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
-func TestSafeEntry(t *testing.T) {
+func TestReadEntry(t *testing.T) {
 	var s safeRead
-	e := NewEntry([]byte("foo"), []byte("bar"))
+	k := []byte("foo")
+	v := []byte("bar")
+	e := NewEntry(k, v)
 	buf := bytes.NewBuffer(nil)
 	_, err := encodeEntry(e, buf)
 	require.NoError(t, err)
@@ -986,8 +988,10 @@ func TestSafeEntry(t *testing.T) {
 	hlen, err := s.nextHeaderLength(buf)
 	require.NoError(t, err)
 
-	ne, err := s.Entry(buf, hlen)
+	ne, err := s.readEntry(buf, hlen)
 	require.NoError(t, err)
+	require.Equal(t, e.Key, ne.Key, "key mismatch")
+	require.Equal(t, e.Value, ne.Value, "value mismatch")
 	require.Equal(t, e.meta, ne.meta, "meta mismatch")
 	require.Equal(t, e.UserMeta, ne.UserMeta, "usermeta mismatch")
 	require.Equal(t, e.ExpiresAt, ne.ExpiresAt, "expiresAt mismatch")
