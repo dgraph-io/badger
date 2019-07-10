@@ -41,6 +41,7 @@ func (p valuePointer) Encode(b []byte) []byte {
 	return b[:vptrSize]
 }
 
+// Decode decodes the value pointer into the provided byte buffer.
 func (p *valuePointer) Decode(b []byte) {
 	p.Fid = binary.BigEndian.Uint32(b[:4])
 	p.Len = binary.BigEndian.Uint32(b[4:8])
@@ -79,7 +80,7 @@ func (h header) Encode(out []byte) int {
 	return index + 1
 }
 
-// Decodes h from buf.
+// Decode decodes the given header from the provided byte slice.
 func (h *header) Decode(buf []byte) {
 	klen, count := binary.Uvarint(buf[:])
 	h.klen = uint32(klen)

@@ -204,7 +204,9 @@ func (r *safeRead) nextHeaderLength(reader io.Reader) (int, error) {
 	return int(uint8(headerLen[0])), nil
 }
 
-func (r *safeRead) Entry(reader io.Reader, headerLen int) (*Entry, error) {
+// readEntry reads an entry from the provided reader. It also validates the checksum for every entry
+// read. Returns error on failure.
+func (r *safeRead) readEntry(reader io.Reader, headerLen int) (*Entry, error) {
 	var err error
 
 	hash := crc32.New(y.CastagnoliCrcTable)
@@ -301,7 +303,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		} else if err != nil {
 			return 0, err
 		}
-		e, err := read.Entry(reader, hlen)
+		e, err := read.readEntry(reader, hlen)
 		if err == io.EOF {
 			break
 		} else if err == io.ErrUnexpectedEOF || err == errTruncate {
