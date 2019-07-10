@@ -52,6 +52,7 @@ type Options struct {
 	MaxLevels           int
 	ValueThreshold      int
 	NumMemtables        int
+	MaxBlockSize        int
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -97,6 +98,7 @@ func DefaultOptions(path string) Options {
 		NumLevelZeroTables:      5,
 		NumLevelZeroTablesStall: 10,
 		NumMemtables:            5,
+		MaxBlockSize:            4 << 10,
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
@@ -284,6 +286,16 @@ func (opt Options) WithValueThreshold(val int) Options {
 // The default value of NumMemtables is 5.
 func (opt Options) WithNumMemtables(val int) Options {
 	opt.NumMemtables = val
+	return opt
+}
+
+// WithMaxBlockSize returns a new Options value with MaxBlockSize set to the given value.
+//
+// MaxBlockSize sets maximum size of block for any SSTable of LSM Tree.
+//
+// The default value of MaxBlockSize is 4 KB.
+func (opt Options) WithMaxBlockSize(val int) Options {
+	opt.MaxBlockSize = val
 	return opt
 }
 

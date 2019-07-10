@@ -73,15 +73,13 @@ type Builder struct {
 	keyCount int
 }
 
-// NewTableBuilder makes a new TableBuilder.
-func NewTableBuilder() *Builder {
+// NewTableBuilder makes a new TableBuilder where each SSTable block is of max size blockSize.
+func NewTableBuilder(blockSize int) *Builder {
 	return &Builder{
 		keyBuf:     newBuffer(1 << 20),
 		buf:        newBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
-
-		// TODO(Ashish): make this configurable
-		blockSize: 4 * 1024,
+		blockSize:  uint32(blockSize),
 	}
 }
 

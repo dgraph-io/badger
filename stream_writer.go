@@ -200,7 +200,7 @@ func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
 		db:       sw.db,
 		streamId: streamId,
 		throttle: sw.throttle,
-		builder:  table.NewTableBuilder(),
+		builder:  table.NewTableBuilder(sw.db.opt.MaxBlockSize),
 		reqCh:    make(chan *request, 3),
 	}
 	sw.closer.AddRunning(1)
@@ -286,7 +286,7 @@ func (w *sortedWriter) send() error {
 		err := w.createTable(data)
 		w.throttle.Done(err)
 	}(w.builder)
-	w.builder = table.NewTableBuilder()
+	w.builder = table.NewTableBuilder(w.db.opt.MaxBlockSize)
 	return nil
 }
 

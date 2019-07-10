@@ -56,7 +56,7 @@ func buildTestTable(t *testing.T, prefix string, n int) *os.File {
 
 // keyValues is n by 2 where n is number of pairs.
 func buildTable(t *testing.T, keyValues [][]string) *os.File {
-	b := NewTableBuilder()
+	b := NewTableBuilder(4 << 10)
 	defer b.Close()
 	rand.Seed(time.Now().UnixNano())
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
@@ -734,7 +734,7 @@ func TestTableBigValues(t *testing.T) {
 	require.NoError(t, err, "unable to create file")
 
 	n := 100 // Insert 100 keys.
-	builder := NewTableBuilder()
+	builder := NewTableBuilder(4 << 10)
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), 0)
 		vs := y.ValueStruct{Value: value(i)}
@@ -812,7 +812,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 	// Iterate b.N times over the entire table.
 	for i := 0; i < b.N; i++ {
 		func() {
-			newBuilder := NewTableBuilder()
+			newBuilder := NewTableBuilder(4 << 10)
 			it := tbl.NewIterator(false)
 			defer it.Close()
 			for it.seekToFirst(); it.Valid(); it.next() {
@@ -832,7 +832,7 @@ func BenchmarkReadMerged(b *testing.B) {
 	var tables []*Table
 	for i := 0; i < m; i++ {
 		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-		builder := NewTableBuilder()
+		builder := NewTableBuilder(4 << 10)
 		f, err := y.OpenSyncedFile(filename, true)
 		y.Check(err)
 		for j := 0; j < tableSize; j++ {
@@ -921,7 +921,7 @@ func BenchmarkRandomRead(b *testing.B) {
 
 func getTableForBenchmarks(b *testing.B, count int) *Table {
 	rand.Seed(time.Now().Unix())
-	builder := NewTableBuilder()
+	builder := NewTableBuilder(4 << 10)
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
 	require.NoError(b, err)
