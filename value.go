@@ -136,6 +136,9 @@ func (lf *logFile) doneWriting(offset uint32) error {
 	if err := lf.fd.Truncate(int64(offset)); err != nil {
 		return errors.Wrapf(err, "Unable to truncate file: %q", lf.path)
 	}
+
+	// Previously we used to close the file after it was written and reopen it in read-only mode.
+	// We no longer open files in read-only mode. We keep all vlog files open in read-write mode.
 	return nil
 }
 
@@ -735,9 +738,18 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	for _, fid := range fids {
 		lf, ok := vlog.filesMap[fid]
 		y.AssertTrue(ok)
+		var flags uint32
+		switch {
+		case vlog.opt.ReadOnly:
+			// If we have read only, we don't need SyncWrites.
+			flags |= y.ReadOnly
+			// Set sync flag only for the last vlog file.
+		case vlog.opt.SyncWrites && lf.fid == vlog.maxFid:
+			flags |= y.Sync
+		}
 
-		// Open log file "lf" in read-write mode
-		if err := vlog.openLogFile(lf); err != nil {
+		// Open log file "lf" in read-write mode.
+		if err := lf.open(vlog.fpath(lf.fid), flags); err != nil {
 			return err
 		}
 		// This file is before the value head pointer. So, we don't need to
@@ -793,19 +805,9 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	return nil
 }
 
-func (vlog *valueLog) openLogFile(lf *logFile) error {
-	var flags uint32
-	switch {
-	case vlog.opt.ReadOnly:
-		// If we have read only, we don't need SyncWrites.
-		flags |= y.ReadOnly
-		// Set sync flag only for the last vlog file.
-	case vlog.opt.SyncWrites && lf.fid == vlog.maxFid:
-		flags |= y.Sync
-	}
-
+func (lf *logFile) open(filename string, flags uint32) error {
 	var err error
-	if lf.fd, err = y.OpenExistingFile(vlog.fpath(lf.fid), flags); err != nil {
+	if lf.fd, err = y.OpenExistingFile(filename, flags); err != nil {
 		return errors.Wrapf(err, "Open existing file: %q", lf.path)
 	}
 	fstat, err := lf.fd.Stat()
