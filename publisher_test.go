@@ -72,7 +72,9 @@ func TestMultiplePrefix(t *testing.T) {
 		go func() {
 			subWg.Done()
 			updates := 0
+			fmt.Println("Starting to subscribe")
 			err := db.Subscribe(context.Background(), func(kvs *pb.KVList) {
+				fmt.Println("got call to subscriber function")
 				updates += len(kvs.GetKv())
 				for _, kv := range kvs.GetKv() {
 					if string(kv.Key) == "key" {
@@ -83,6 +85,7 @@ func TestMultiplePrefix(t *testing.T) {
 				}
 				if updates == 2 {
 					wg.Done()
+					fmt.Println("Got both updates, returning from here")
 				}
 			}, []byte("ke"), []byte("hel"))
 			if err != nil {
@@ -90,12 +93,16 @@ func TestMultiplePrefix(t *testing.T) {
 			}
 		}()
 		subWg.Wait()
+		fmt.Println("Starting updates on DB")
 		db.Update(func(txn *Txn) error {
 			return txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
 		})
+		fmt.Println("Finished first update, starting second")
 		db.Update(func(txn *Txn) error {
 			return txn.SetEntry(NewEntry([]byte("hello"), []byte("badger")))
 		})
+		fmt.Println("Finished second updates")
 		wg.Wait()
+		fmt.Println("Done waiting")
 	})
 }
