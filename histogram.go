@@ -130,7 +130,7 @@ func (db *DB) buildHistogram(keyPrefix []byte) *sizeHistogram {
 		item := itr.Item()
 		valueSlice, err := item.ValueCopy(nil)
 		if err != nil {
-			db.opt.Logger.Infof("Unable to fetch value. Skipping this entry due to error.", err)
+			db.opt.Logger.Infof("Unable to fetch value. Skipping this entry due to error %v.", err)
 			continue
 		}
 		badgerHistogram.keySizeHistogram.Update(item.KeySize())

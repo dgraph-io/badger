@@ -201,19 +201,17 @@ func (r *safeRead) nextHeaderLength(reader io.Reader) (int, error) {
 	if _, err := io.ReadFull(reader, headerLen); err != nil {
 		return 0, err
 	}
-	return int(uint8(headerLen[0])), nil
+	return int(headerLen[0]), nil
 }
 
 // readEntry reads an entry from the provided reader. It also validates the checksum for every entry
 // read. Returns error on failure.
 func (r *safeRead) readEntry(reader io.Reader, headerLen int) (*Entry, error) {
-	var err error
-
 	hash := crc32.New(y.CastagnoliCrcTable)
 	tee := io.TeeReader(reader, hash)
 
 	hbuf := make([]byte, headerLen)
-	if _, err = io.ReadFull(tee, hbuf[:]); err != nil {
+	if _, err := io.ReadFull(tee, hbuf[:]); err != nil {
 		return nil, err
 	}
 
@@ -236,20 +234,20 @@ func (r *safeRead) readEntry(reader io.Reader, headerLen int) (*Entry, error) {
 	e.Key = r.k[:kl]
 	e.Value = r.v[:vl]
 
-	if _, err = io.ReadFull(tee, e.Key); err != nil {
+	if _, err := io.ReadFull(tee, e.Key); err != nil {
 		if err == io.EOF {
 			err = errTruncate
 		}
 		return nil, err
 	}
-	if _, err = io.ReadFull(tee, e.Value); err != nil {
+	if _, err := io.ReadFull(tee, e.Value); err != nil {
 		if err == io.EOF {
 			err = errTruncate
 		}
 		return nil, err
 	}
 	var crcBuf [4]byte
-	if _, err = io.ReadFull(reader, crcBuf[:]); err != nil {
+	if _, err := io.ReadFull(reader, crcBuf[:]); err != nil {
 		if err == io.EOF {
 			err = errTruncate
 		}

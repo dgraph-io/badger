@@ -85,11 +85,7 @@ func getItemValue(t *testing.T, item *Item) (val []byte) {
 	t.Helper()
 	var v []byte
 	err := item.Value(func(val []byte) error {
-		if val == nil {
-			v = nil
-		} else {
-			v = append([]byte{}, val...)
-		}
+		v = append(v, val...)
 		return nil
 	})
 	if err != nil {

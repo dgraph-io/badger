@@ -63,12 +63,12 @@ const (
 	maxHeaderSize = 21
 )
 
-// Encode encodes the header into []byte.
-/* The encoded header looks like
-+------------+--------------+-----------+------+----------+
-| Key Length | Value Length | ExpiresAt | Meta | UserMeta |
-+------------+--------------+-----------+------+----------+
-*/
+// Encode encodes the header into []byte. The provided []byte should be atleast 5 bytes. The
+// function will panic if out []byte isn't large enough to hold all the values.
+// The encoded header looks like
+// +------------+--------------+-----------+------+----------+
+// | Key Length | Value Length | ExpiresAt | Meta | UserMeta |
+// +------------+--------------+-----------+------+----------+
 func (h header) Encode(out []byte) int {
 	index := 0
 	index += binary.PutUvarint(out[index:], uint64(h.klen))
@@ -82,13 +82,13 @@ func (h header) Encode(out []byte) int {
 
 // Decode decodes the given header from the provided byte slice.
 func (h *header) Decode(buf []byte) {
-	klen, count := binary.Uvarint(buf[:])
+	klen, count := binary.Uvarint(buf)
 	h.klen = uint32(klen)
 	buf = buf[count:]
-	vlen, count := binary.Uvarint(buf[:])
+	vlen, count := binary.Uvarint(buf)
 	h.vlen = uint32(vlen)
 	buf = buf[count:]
-	expiresAt, count := binary.Uvarint(buf[:])
+	expiresAt, count := binary.Uvarint(buf)
 	h.expiresAt = uint64(expiresAt)
 	buf = buf[count:]
 	h.meta = buf[0]
@@ -117,11 +117,10 @@ func (e *Entry) estimateSize(threshold int) int {
 }
 
 // Encodes e to buf. Returns number of bytes written.
-/* The encoded entry looks like
-+---------------+--------+-----+-------+----------+
-| Header Length | Header | Key | Value | Checksum |
-+---------------+--------+-----+-------+----------+
-*/
+// The encoded entry looks like
+// +---------------+--------+-----+-------+----------+
+// | Header Length | Header | Key | Value | Checksum |
+// +---------------+--------+-----+-------+----------+
 func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	h := header{
 		klen:      uint32(len(e.Key)),
@@ -132,17 +131,17 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	}
 
 	headerEnc := make([]byte, maxHeaderSize)
-	headerLen := h.Encode(headerEnc[:])
+	headerLen := h.Encode(headerEnc)
 	// Ensure we don't overflow uint8.
 	y.AssertTrue(headerLen < math.MaxUint8)
 	// Write header length.
-	buf.Write([]byte{uint8(headerLen)})
+	buf.Write([]byte{byte(headerLen)})
 
 	// Trim headerEnc to contain only valid bytes.
 	headerEnc = headerEnc[:headerLen]
-	buf.Write(headerEnc[:])
+	buf.Write(headerEnc)
 	hash := crc32.New(y.CastagnoliCrcTable)
-	if _, err := hash.Write(headerEnc[:]); err != nil {
+	if _, err := hash.Write(headerEnc); err != nil {
 		return 0, err
 	}
 
