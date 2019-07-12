@@ -71,28 +71,28 @@ const (
 // +------------+--------------+-----------+------+----------+
 func (h header) Encode(out []byte) int {
 	index := 0
-	index += binary.PutUvarint(out[index:], uint64(h.klen))
-	index += binary.PutUvarint(out[index:], uint64(h.vlen))
-	index += binary.PutUvarint(out[index:], h.expiresAt)
 	out[index] = h.meta
 	index++
 	out[index] = h.userMeta
-	return index + 1
+	index++
+	index += binary.PutUvarint(out[index:], uint64(h.klen))
+	index += binary.PutUvarint(out[index:], uint64(h.vlen))
+	index += binary.PutUvarint(out[index:], h.expiresAt)
+	return index
 }
 
 // Decode decodes the given header from the provided byte slice.
 func (h *header) Decode(buf []byte) {
+	h.meta = buf[0]
+	h.userMeta = buf[1]
+	buf = buf[2:]
 	klen, count := binary.Uvarint(buf)
 	h.klen = uint32(klen)
 	buf = buf[count:]
 	vlen, count := binary.Uvarint(buf)
 	h.vlen = uint32(vlen)
 	buf = buf[count:]
-	expiresAt, count := binary.Uvarint(buf)
-	h.expiresAt = uint64(expiresAt)
-	buf = buf[count:]
-	h.meta = buf[0]
-	h.userMeta = buf[1]
+	h.expiresAt, _ = binary.Uvarint(buf)
 }
 
 // Entry provides Key, Value, UserMeta and ExpiresAt. This struct can be used by
