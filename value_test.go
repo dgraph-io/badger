@@ -986,10 +986,7 @@ func TestSafeEntry(t *testing.T) {
 	_, err := encodeEntry(e, buf)
 	require.NoError(t, err)
 
-	hlen, err := s.nextHeaderLength(buf)
-	require.NoError(t, err)
-
-	ne, err := s.readEntry(buf, hlen)
+	ne, err := s.readEntry(buf)
 	require.NoError(t, err)
 	require.Equal(t, e.Key, ne.Key, "key mismatch")
 	require.Equal(t, e.Value, ne.Value, "value mismatch")

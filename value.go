@@ -195,22 +195,17 @@ type safeRead struct {
 	recordOffset uint32
 }
 
-// nextHeaderLength returns the length of the next header in the reader.
-func (r *safeRead) nextHeaderLength(reader io.Reader) (int, error) {
-	headerLen := make([]byte, 1)
-	if _, err := io.ReadFull(reader, headerLen); err != nil {
-		return 0, err
-	}
-	return int(headerLen[0]), nil
-}
-
 // readEntry reads an entry from the provided reader. It also validates the checksum for every entry
 // read. Returns error on failure.
-func (r *safeRead) readEntry(reader io.Reader, headerLen int) (*Entry, error) {
+func (r *safeRead) readEntry(reader io.Reader) (*Entry, error) {
 	hash := crc32.New(y.CastagnoliCrcTable)
 	tee := io.TeeReader(reader, hash)
 
-	hbuf := make([]byte, headerLen)
+	headerLen := make([]byte, 1)
+	if _, err := io.ReadFull(reader, headerLen); err != nil {
+		return nil, err
+	}
+	hbuf := make([]byte, uint8(headerLen[0]))
 	if _, err := io.ReadFull(tee, hbuf[:]); err != nil {
 		return nil, err
 	}
@@ -233,6 +228,7 @@ func (r *safeRead) readEntry(reader io.Reader, headerLen int) (*Entry, error) {
 	e.offset = r.recordOffset
 	e.Key = r.k[:kl]
 	e.Value = r.v[:vl]
+	e.hlen = uint8(headerLen[0])
 
 	if _, err := io.ReadFull(tee, e.Key); err != nil {
 		if err == io.EOF {
@@ -295,13 +291,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 	var lastCommit uint64
 	var validEndOffset uint32
 	for {
-		hlen, err := read.nextHeaderLength(reader)
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return 0, err
-		}
-		e, err := read.readEntry(reader, hlen)
+		e, err := read.readEntry(reader)
 		if err == io.EOF {
 			break
 		} else if err == io.ErrUnexpectedEOF || err == errTruncate {
@@ -314,7 +304,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 
 		var vp valuePointer
 		// +1 because we store length of header in the first byte.
-		vp.Len = uint32(1 + hlen + len(e.Key) + len(e.Value) + crc32.Size)
+		vp.Len = uint32(1 + int(e.hlen) + len(e.Key) + len(e.Value) + crc32.Size)
 		read.recordOffset += vp.Len
 
 		vp.Offset = e.offset
@@ -1109,10 +1099,10 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	if err != nil {
 		return nil, cb, err
 	}
-	headerLen := uint8(buf[0])
+	// First byte contains the length of header. Skip it.
 	buf = buf[1:]
 	var h header
-	h.Decode(buf)
+	headerLen := h.Decode(buf)
 	n := uint32(headerLen) + h.klen
 	return buf[n : n+h.vlen], cb, nil
 }
@@ -1135,14 +1125,13 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, func(
 
 // Test helper
 func valueBytesToEntry(buf []byte) (e Entry) {
-	// First byte stores the length of the header.
-	headerLen := uint32(buf[0])
+	// First byte stores the length of the header. Skip it.
 	buf = buf[1:]
 
 	var h header
-	h.Decode(buf)
+	hlen := h.Decode(buf)
 	// Move ahead of the header.
-	buf = buf[headerLen:]
+	buf = buf[hlen:]
 	e.Key = buf[:h.klen]
 	e.meta = h.meta
 	e.UserMeta = h.userMeta

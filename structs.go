@@ -66,15 +66,12 @@ const (
 // Encode encodes the header into []byte. The provided []byte should be atleast 5 bytes. The
 // function will panic if out []byte isn't large enough to hold all the values.
 // The encoded header looks like
-// +------------+--------------+-----------+------+----------+
-// | Key Length | Value Length | ExpiresAt | Meta | UserMeta |
-// +------------+--------------+-----------+------+----------+
+// +------+----------+------------+--------------+-----------+
+// | Meta | UserMeta | Key Length | Value Length | ExpiresAt |
+// +------+----------+------------+--------------+-----------+
 func (h header) Encode(out []byte) int {
-	index := 0
-	out[index] = h.meta
-	index++
-	out[index] = h.userMeta
-	index++
+	out[0], out[1] = h.meta, h.userMeta
+	index := 2
 	index += binary.PutUvarint(out[index:], uint64(h.klen))
 	index += binary.PutUvarint(out[index:], uint64(h.vlen))
 	index += binary.PutUvarint(out[index:], h.expiresAt)
@@ -82,17 +79,18 @@ func (h header) Encode(out []byte) int {
 }
 
 // Decode decodes the given header from the provided byte slice.
-func (h *header) Decode(buf []byte) {
-	h.meta = buf[0]
-	h.userMeta = buf[1]
-	buf = buf[2:]
-	klen, count := binary.Uvarint(buf)
+// Returns the number of bytes written.
+func (h *header) Decode(buf []byte) int {
+	h.meta, h.userMeta = buf[0], buf[1]
+	index := 2
+	klen, count := binary.Uvarint(buf[index:])
 	h.klen = uint32(klen)
-	buf = buf[count:]
-	vlen, count := binary.Uvarint(buf)
+	index += count
+	vlen, count := binary.Uvarint(buf[index:])
 	h.vlen = uint32(vlen)
-	buf = buf[count:]
-	h.expiresAt, _ = binary.Uvarint(buf)
+	index += count
+	h.expiresAt, count = binary.Uvarint(buf[index:])
+	return index + count
 }
 
 // Entry provides Key, Value, UserMeta and ExpiresAt. This struct can be used by
@@ -107,6 +105,7 @@ type Entry struct {
 	// Fields maintained internally.
 	offset   uint32
 	skipVlog bool
+	hlen     uint8 // Length of the header.
 }
 
 func (e *Entry) estimateSize(threshold int) int {
