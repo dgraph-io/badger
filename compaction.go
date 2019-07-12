@@ -78,10 +78,11 @@ func getKeyRange(tables ...*table.Table) keyRange {
 			biggest = tables[i].Biggest()
 		}
 	}
+
+	// We pick all the versions of the smallest and the biggest key. Note that version zero would
+	// be the rightmost key, considering versions are default sorted in descending order.
 	return keyRange{
-		// We pick all the versions of the smallest and the biggest key.
-		left: y.KeyWithTs(y.ParseKey(smallest), math.MaxUint64),
-		// Note that version zero would be the rightmost key.
+		left:  y.KeyWithTs(y.ParseKey(smallest), math.MaxUint64),
 		right: y.KeyWithTs(y.ParseKey(biggest), 0),
 	}
 }

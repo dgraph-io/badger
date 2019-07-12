@@ -28,7 +28,6 @@ import (
 	"path"
 	"regexp"
 	"testing"
-	"time"
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
@@ -437,15 +436,10 @@ func TestBigValues(t *testing.T) {
 	})
 }
 
-// This test is for compaction. We are creating db with two levels. We have 10 tables on level 3 and
-// 3 tables on level 2. Tables on level 2 have overlap with 2, 4, 3 tables on level 3. This test
-// will take more memory and time, hence adding it for manual run.
-func TestCompaction(t *testing.T) {
-	if !*manual {
-		t.Skip("Skipping test meant to be run manually.")
-		return
-	}
-
+// This test is for compaction file picking testing. We are creating db with two levels. We have 10
+// tables on level 3 and 3 tables on level 2. Tables on level 2 have overlap with 2, 4, 3 tables on
+// level 3.
+func TestCompactionFilePicking(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -457,40 +451,61 @@ func TestCompaction(t *testing.T) {
 	}()
 
 	l3 := db.lc.levels[3]
-	start := 0
-	incr := 300000 // Every table has 300,000 entries.
+	start := 1
+	incr := 2 // Every table has entries diff between smallest and biggest as 1.
 	for i := 0; i < 10; i++ {
-		tab := createTableWithRange(t, db, start, start+incr, 1)
-		addToMenifest(t, db, tab, 3)
+		tab := createTableWithRange(t, db, start, start+incr-1)
+		addToManifest(t, db, tab, 3)
 		start += incr
 		require.NoError(t, l3.replaceTables([]*table.Table{}, []*table.Table{tab}))
 	}
 
 	l2 := db.lc.levels[2]
-	// first table keys from 0 - 600,000
-	tab := createTableWithRange(t, db, 0, 600000, 2)
-	addToMenifest(t, db, tab, 2)
+	// First table keys 1 and 4
+	tab := createTableWithRange(t, db, 1, 4)
+	addToManifest(t, db, tab, 2)
 	require.NoError(t, l2.replaceTables([]*table.Table{}, []*table.Table{tab}))
 
-	// second table have keys from 600,001 to 1,800,000
-	tab = createTableWithRange(t, db, 600001, 1800000, 4)
-	addToMenifest(t, db, tab, 2)
+	// Second table have keys 5 and 12
+	tab = createTableWithRange(t, db, 5, 12)
+	addToManifest(t, db, tab, 2)
 	require.NoError(t, l2.replaceTables([]*table.Table{}, []*table.Table{tab}))
 
-	// third table have keys from 1,800,001 to 2,700,000
-	tab = createTableWithRange(t, db, 1800001, 2700000, 4)
-	addToMenifest(t, db, tab, 2)
+	// Third table have keys 13 and 18
+	tab = createTableWithRange(t, db, 13, 18)
+	addToManifest(t, db, tab, 2)
 	require.NoError(t, l2.replaceTables([]*table.Table{}, []*table.Table{tab}))
 
-	for len(db.lc.levels[2].tables) > 0 {
-		now := time.Now()
-		require.NoError(t, db.lc.doCompact(compactionPriority{level: 2}))
-		fmt.Println("compaction completed in time: ", time.Since(now))
+	cdef := &compactDef{
+		thisLevel: db.lc.levels[2],
+		nextLevel: db.lc.levels[3],
 	}
+
+	tables := db.lc.levels[2].tables
+	db.lc.sortByOverlap(tables, cdef)
+
+	var expKey [8]byte
+	// First table should be with smallest and biggest keys as 1 and 4.
+	binary.BigEndian.PutUint64(expKey[:], uint64(1))
+	require.Equal(t, expKey[:], y.ParseKey(tables[0].Smallest()))
+	binary.BigEndian.PutUint64(expKey[:], uint64(4))
+	require.Equal(t, expKey[:], y.ParseKey(tables[0].Biggest()))
+
+	// Second table should be with smallest and biggest keys as 13 and 18.
+	binary.BigEndian.PutUint64(expKey[:], uint64(13))
+	require.Equal(t, expKey[:], y.ParseKey(tables[1].Smallest()))
+	binary.BigEndian.PutUint64(expKey[:], uint64(18))
+	require.Equal(t, expKey[:], y.ParseKey(tables[1].Biggest()))
+
+	// Third table should be with smallest and biggest keys as 5 and 12.
+	binary.BigEndian.PutUint64(expKey[:], uint64(5))
+	require.Equal(t, expKey[:], y.ParseKey(tables[2].Smallest()))
+	binary.BigEndian.PutUint64(expKey[:], uint64(12))
+	require.Equal(t, expKey[:], y.ParseKey(tables[2].Biggest()))
 }
 
-// addToMenifest function is used in TestCompaction. It adds table to db menifest.
-func addToMenifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
+// addToManifest function is used in TestCompaction. It adds table to db manifest.
+func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 	change := &pb.ManifestChange{
 		Id:    tab.ID(),
 		Op:    pb.ManifestChange_CREATE,
@@ -500,11 +515,12 @@ func addToMenifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 		"unable to add to menfest")
 }
 
-// createTableWithRange function is used in TestCompaction. It creates a table with key starting
-// from with start and ending with end with diff between each key as incr.
-func createTableWithRange(t *testing.T, db *DB, start, end, incr int) *table.Table {
+// createTableWithRange function is used in TestCompaction. It creates
+// a table with key starting from with start and ending with end.
+func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	b := table.NewTableBuilder()
-	for i := start; i < end; i += incr {
+	nums := []int{start, end}
+	for _, i := range nums {
 		key := make([]byte, 8)
 		binary.BigEndian.PutUint64(key[:], uint64(i))
 		key = y.KeyWithTs(key, uint64(0))
