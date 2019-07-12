@@ -504,7 +504,7 @@ func TestCompactionFilePicking(t *testing.T) {
 	require.Equal(t, expKey[:], y.ParseKey(tables[2].Biggest()))
 }
 
-// addToManifest function is used in TestCompaction. It adds table to db manifest.
+// addToManifest function is used in TestCompactionFilePicking. It adds table to db manifest.
 func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 	change := &pb.ManifestChange{
 		Id:    tab.ID(),
@@ -515,7 +515,7 @@ func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 		"unable to add to menfest")
 }
 
-// createTableWithRange function is used in TestCompaction. It creates
+// createTableWithRange function is used in TestCompactionFilePicking. It creates
 // a table with key starting from with start and ending with end.
 func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	b := table.NewTableBuilder()
