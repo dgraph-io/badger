@@ -1452,14 +1452,17 @@ func (vlog *valueLog) populateDiscardStats() error {
 		}
 		// Read entry from value log.
 		result, cb, err := vlog.Read(vp, new(y.Slice))
+		defer runCallback(cb)
 		val = make([]byte, len(result))
 		copy(val, result)
-		defer runCallback(cb)
+		if err == nil {
+			break
+		}
 		if err != ErrRetry {
 			return err
 		}
 		if bytes.HasPrefix(newKey, badgerMove) {
-			return nil
+			break
 		}
 		// If we're at this point it means the discard stats key was moved by the GC and the actual
 		// entry is the one prefixed by badger move key.
@@ -1467,6 +1470,10 @@ func (vlog *valueLog) populateDiscardStats() error {
 		// Prepend existing key with badger move and search for the key.
 		n := copy(newKey, badgerMove)
 		copy(newKey[n:], key)
+	}
+
+	if len(val) == 0 {
+		return nil
 	}
 	if err := json.Unmarshal(val, &statsMap); err != nil {
 		return errors.Wrapf(err, "failed to unmarshal discard stats")
