@@ -1438,10 +1438,10 @@ func (vlog *valueLog) populateDiscardStats() error {
 		if err != nil {
 			return err
 		}
-		// Vlaue doesn't exist.
+		// Value doesn't exist.
 		if vs.Meta == 0 && len(vs.Value) == 0 {
-			vs.Value = []byte{}
-			break
+			vlog.opt.Debugf("Value log discard stats empty")
+			return nil
 		}
 		vp.Decode(vs.Value)
 		// Entry stored in LSM tree.
