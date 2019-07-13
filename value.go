@@ -1456,11 +1456,10 @@ func (vlog *valueLog) populateDiscardStats() error {
 		copy(val, result)
 		defer runCallback(cb)
 		if err != ErrRetry {
-			break
+			return err
 		}
 		if bytes.HasPrefix(newKey, badgerMove) {
-			vs.Value = []byte{}
-			break
+			return nil
 		}
 		// If we're at this point it means the discard stats key was moved by the GC and the actual
 		// entry is the one prefixed by badger move key.
