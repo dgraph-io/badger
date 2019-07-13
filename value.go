@@ -1455,12 +1455,16 @@ func (vlog *valueLog) populateDiscardStats() error {
 		defer runCallback(cb)
 		val = make([]byte, len(result))
 		copy(val, result)
+		// The result is stored in val. We can break the loop from here.
 		if err == nil {
 			break
 		}
 		if err != ErrRetry {
 			return err
 		}
+		// If we're at this point it means we haven't found the value yet and if the current key has
+		// badger move prefix, we should break from here since we've already tried the original key
+		// and the key with move prefix. "val" would be empty since we haven't found the value yet.
 		if bytes.HasPrefix(newKey, badgerMove) {
 			break
 		}
