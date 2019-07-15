@@ -97,7 +97,7 @@ func DefaultOptions(path string) Options {
 		NumLevelZeroTables:      5,
 		NumLevelZeroTablesStall: 10,
 		NumMemtables:            5,
-		SyncWrites:              true,
+		SyncWrites:              false,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
 		// Nothing to read/write value log using standard File I/O
