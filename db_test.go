@@ -1855,6 +1855,9 @@ func ExampleDB_Subscribe() {
 	}
 	defer os.RemoveAll(dir)
 	db, err := Open(DefaultOptions(dir))
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer db.Close()
 
 	// Create the context here so we can cancel it after sending the writes.
