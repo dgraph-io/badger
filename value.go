@@ -743,8 +743,8 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		case vlog.opt.ReadOnly:
 			// If we have read only, we don't need SyncWrites.
 			flags |= y.ReadOnly
-			// Set sync flag only for the last vlog file.
-		case vlog.opt.SyncWrites && lf.fid == vlog.maxFid:
+			// Set sync flag.
+		case vlog.opt.SyncWrites:
 			flags |= y.Sync
 		}
 
