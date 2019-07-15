@@ -311,7 +311,8 @@ func (w *sortedWriter) createTable(data []byte) error {
 	if _, err := fd.Write(data); err != nil {
 		return err
 	}
-	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode, w.db.opt.ChecksumVerificationMode)
+	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode,
+		w.db.opt.ChecksumVerificationMode, w.db.opt.BloomEnabled)
 	if err != nil {
 		return err
 	}

@@ -1827,6 +1827,33 @@ func TestVerifyChecksum(t *testing.T) {
 	})
 }
 
+func TestBloomDisabled(t *testing.T) {
+	opts := DefaultOptions("").WithBloomEnabled(false).
+		WithMaxTableSize(1 << 15)
+	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+		for i := 0; i < 10; i++ {
+			key := []byte(fmt.Sprintf("key-%d", i))
+			val := []byte(fmt.Sprintf("val-%d", i))
+			err := db.Update(func(txn *Txn) error {
+				return txn.Set(key, val)
+			})
+			require.NoError(t, err, "unable to insert key-value into DB")
+		}
+
+		for i := 0; i < 10; i++ {
+			_ = db.View(func(txn *Txn) error {
+				key := []byte(fmt.Sprintf("key-%d", i))
+				itm, err := txn.Get(key)
+				require.NoError(t, err, "unable to get ke from DB")
+				val, err := itm.ValueCopy(nil)
+				require.NoError(t, err, "unable to copy value")
+				require.Equal(t, val, []byte(fmt.Sprintf("val-%d", i)))
+				return nil
+			})
+		}
+	})
+}
+
 func TestMain(m *testing.M) {
 	// call flag.Parse() here if TestMain uses flags
 	go func() {

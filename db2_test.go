@@ -533,7 +533,7 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	_, err = fd.Write(b.Finish())
 	require.NoError(t, err, "unable to write to file")
 
-	tab, err := table.OpenTable(fd, options.LoadToRAM, options.NoVerification)
+	tab, err := table.OpenTable(fd, options.LoadToRAM, options.NoVerification, db.opt.BloomEnabled)
 	require.NoError(t, err)
 	return tab
 }

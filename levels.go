@@ -150,7 +150,8 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				return
 			}
 
-			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode)
+			t, err := table.OpenTable(fd, db.opt.TableLoadingMode,
+				db.opt.ChecksumVerificationMode, db.opt.BloomEnabled)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -573,7 +574,7 @@ func (s *levelsController) compactBuildTables(
 			}
 
 			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode,
-				s.kv.opt.ChecksumVerificationMode)
+				s.kv.opt.ChecksumVerificationMode, s.kv.opt.BloomEnabled)
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}

@@ -43,6 +43,7 @@ type TableInterface interface {
 	Smallest() []byte
 	Biggest() []byte
 	DoesNotHave(key []byte) bool
+	BloomEnabled() bool
 }
 
 // Table represents a loaded table file with the info we have about it
@@ -62,7 +63,8 @@ type Table struct {
 	smallest, biggest []byte // Smallest and largest keys.
 	id                uint64 // file id, part of filename
 
-	bf bbloom.Bloom
+	bf           bbloom.Bloom
+	bloomEnabled bool
 
 	Checksum []byte
 	chkMode  options.ChecksumVerificationMode // indicates when to verify checksum for blocks.
@@ -140,7 +142,7 @@ func (b block) NewIterator() *blockIterator {
 // deleting. Checksum for all blocks of table is verified based on value of chkMode.
 // TODO:(Ashish): convert individual args to option struct.
 func OpenTable(fd *os.File, mode options.FileLoadingMode,
-	chkMode options.ChecksumVerificationMode) (*Table, error) {
+	chkMode options.ChecksumVerificationMode, bloomEnabled bool) (*Table, error) {
 
 	fileInfo, err := fd.Stat()
 	if err != nil {
@@ -157,11 +159,12 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode,
 		return nil, errors.Errorf("Invalid filename: %s", filename)
 	}
 	t := &Table{
-		fd:          fd,
-		ref:         1, // Caller is given one reference.
-		id:          id,
-		loadingMode: mode,
-		chkMode:     chkMode,
+		fd:           fd,
+		ref:          1, // Caller is given one reference.
+		id:           id,
+		loadingMode:  mode,
+		chkMode:      chkMode,
+		bloomEnabled: bloomEnabled,
 	}
 
 	t.tableSize = int(fileInfo.Size())
@@ -286,7 +289,9 @@ func (t *Table) readIndex() error {
 	err := index.Unmarshal(data)
 	y.Check(err)
 
-	t.bf = bbloom.JSONUnmarshal(index.BloomFilter)
+	if t.bloomEnabled {
+		t.bf = bbloom.JSONUnmarshal(index.BloomFilter)
+	}
 	t.blockIndex = index.Offsets
 	return nil
 }
@@ -341,6 +346,8 @@ func (t *Table) ID() uint64 { return t.id }
 // DoesNotHave returns true if (but not "only if") the table does not have the key.  It does a
 // bloom filter lookup.
 func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(key) }
+
+func (t *Table) BloomEnabled() bool { return t.bloomEnabled }
 
 // VerifyChecksum verifies checksum for all blocks of table. This function is called by
 // OpenTable() function. This function is also called inside levelsController.VerifyChecksum().

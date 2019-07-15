@@ -233,7 +233,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 
 	var maxVs y.ValueStruct
 	for _, th := range tables {
-		if th.DoesNotHave(keyNoTs) {
+		if th.BloomEnabled() && th.DoesNotHave(keyNoTs) {
 			y.NumLSMBloomHits.Add(s.strLevel, 1)
 			continue
 		}
