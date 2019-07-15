@@ -451,27 +451,25 @@ func TestCompactionFilePicking(t *testing.T) {
 	}()
 
 	l3 := db.lc.levels[3]
-	start := 1
-	incr := 2 // Every table has entries diff between smallest and biggest as 1.
-	for i := 0; i < 10; i++ {
-		tab := createTableWithRange(t, db, start, start+incr-1)
+	for i := 1; i <= 10; i++ {
+		// Each table has difference of 1 between smallest and largest key.
+		tab := createTableWithRange(t, db, 2*i-1, 2*i)
 		addToManifest(t, db, tab, 3)
-		start += incr
 		require.NoError(t, l3.replaceTables([]*table.Table{}, []*table.Table{tab}))
 	}
 
 	l2 := db.lc.levels[2]
-	// First table keys 1 and 4
+	// First table has keys 1 and 4.
 	tab := createTableWithRange(t, db, 1, 4)
 	addToManifest(t, db, tab, 2)
 	require.NoError(t, l2.replaceTables([]*table.Table{}, []*table.Table{tab}))
 
-	// Second table have keys 5 and 12
+	// Second table has keys 5 and 12.
 	tab = createTableWithRange(t, db, 5, 12)
 	addToManifest(t, db, tab, 2)
 	require.NoError(t, l2.replaceTables([]*table.Table{}, []*table.Table{tab}))
 
-	// Third table have keys 13 and 18
+	// Third table has keys 13 and 18.
 	tab = createTableWithRange(t, db, 13, 18)
 	addToManifest(t, db, tab, 2)
 	require.NoError(t, l2.replaceTables([]*table.Table{}, []*table.Table{tab}))
