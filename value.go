@@ -201,17 +201,19 @@ func (r *safeRead) readEntry(reader io.Reader) (*Entry, error) {
 	hash := crc32.New(y.CastagnoliCrcTable)
 	tee := io.TeeReader(reader, hash)
 
+	// Read the length of header from the first byte.
 	headerLen := make([]byte, 1)
 	if _, err := io.ReadFull(reader, headerLen); err != nil {
 		return nil, err
 	}
+	// Read bytes equal to header length.
 	hbuf := make([]byte, uint8(headerLen[0]))
-	if _, err := io.ReadFull(tee, hbuf[:]); err != nil {
+	if _, err := io.ReadFull(tee, hbuf); err != nil {
 		return nil, err
 	}
 
 	var h header
-	h.Decode(hbuf[:])
+	h.Decode(hbuf)
 	if h.klen > uint32(1<<16) { // Key length must be below uint16.
 		return nil, errTruncate
 	}
@@ -242,14 +244,14 @@ func (r *safeRead) readEntry(reader io.Reader) (*Entry, error) {
 		}
 		return nil, err
 	}
-	var crcBuf [4]byte
-	if _, err := io.ReadFull(reader, crcBuf[:]); err != nil {
+	crcBuf := make([]byte, 4)
+	if _, err := io.ReadFull(reader, crcBuf); err != nil {
 		if err == io.EOF {
 			err = errTruncate
 		}
 		return nil, err
 	}
-	crc := binary.BigEndian.Uint32(crcBuf[:])
+	crc := binary.BigEndian.Uint32(crcBuf)
 	if crc != hash.Sum32() {
 		return nil, errTruncate
 	}
