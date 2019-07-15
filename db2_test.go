@@ -510,11 +510,11 @@ func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 		Level: level,
 	}
 	require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{change}),
-		"unable to add to menfest")
+		"unable to add to manifest")
 }
 
 // createTableWithRange function is used in TestCompactionFilePicking. It creates
-// a table with key starting from with start and ending with end.
+// a table with key starting from start and ending with end.
 func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	b := table.NewTableBuilder()
 	nums := []int{start, end}
