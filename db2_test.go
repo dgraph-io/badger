@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -28,6 +29,10 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/table"
+	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -429,4 +434,106 @@ func TestBigValues(t *testing.T) {
 			require.NoError(t, getByKey(key(i)))
 		}
 	})
+}
+
+// This test is for compaction file picking testing. We are creating db with two levels. We have 10
+// tables on level 3 and 3 tables on level 2. Tables on level 2 have overlap with 2, 4, 3 tables on
+// level 3.
+func TestCompactionFilePicking(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	db, err := Open(DefaultOptions(dir).WithTableLoadingMode(options.LoadToRAM))
+	require.NoError(t, err, "error while opening db")
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
+
+	l3 := db.lc.levels[3]
+	for i := 1; i <= 10; i++ {
+		// Each table has difference of 1 between smallest and largest key.
+		tab := createTableWithRange(t, db, 2*i-1, 2*i)
+		addToManifest(t, db, tab, 3)
+		require.NoError(t, l3.replaceTables([]*table.Table{}, []*table.Table{tab}))
+	}
+
+	l2 := db.lc.levels[2]
+	// First table has keys 1 and 4.
+	tab := createTableWithRange(t, db, 1, 4)
+	addToManifest(t, db, tab, 2)
+	require.NoError(t, l2.replaceTables([]*table.Table{}, []*table.Table{tab}))
+
+	// Second table has keys 5 and 12.
+	tab = createTableWithRange(t, db, 5, 12)
+	addToManifest(t, db, tab, 2)
+	require.NoError(t, l2.replaceTables([]*table.Table{}, []*table.Table{tab}))
+
+	// Third table has keys 13 and 18.
+	tab = createTableWithRange(t, db, 13, 18)
+	addToManifest(t, db, tab, 2)
+	require.NoError(t, l2.replaceTables([]*table.Table{}, []*table.Table{tab}))
+
+	cdef := &compactDef{
+		thisLevel: db.lc.levels[2],
+		nextLevel: db.lc.levels[3],
+	}
+
+	tables := db.lc.levels[2].tables
+	db.lc.sortByOverlap(tables, cdef)
+
+	var expKey [8]byte
+	// First table should be with smallest and biggest keys as 1 and 4.
+	binary.BigEndian.PutUint64(expKey[:], uint64(1))
+	require.Equal(t, expKey[:], y.ParseKey(tables[0].Smallest()))
+	binary.BigEndian.PutUint64(expKey[:], uint64(4))
+	require.Equal(t, expKey[:], y.ParseKey(tables[0].Biggest()))
+
+	// Second table should be with smallest and biggest keys as 13 and 18.
+	binary.BigEndian.PutUint64(expKey[:], uint64(13))
+	require.Equal(t, expKey[:], y.ParseKey(tables[1].Smallest()))
+	binary.BigEndian.PutUint64(expKey[:], uint64(18))
+	require.Equal(t, expKey[:], y.ParseKey(tables[1].Biggest()))
+
+	// Third table should be with smallest and biggest keys as 5 and 12.
+	binary.BigEndian.PutUint64(expKey[:], uint64(5))
+	require.Equal(t, expKey[:], y.ParseKey(tables[2].Smallest()))
+	binary.BigEndian.PutUint64(expKey[:], uint64(12))
+	require.Equal(t, expKey[:], y.ParseKey(tables[2].Biggest()))
+}
+
+// addToManifest function is used in TestCompactionFilePicking. It adds table to db manifest.
+func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
+	change := &pb.ManifestChange{
+		Id:    tab.ID(),
+		Op:    pb.ManifestChange_CREATE,
+		Level: level,
+	}
+	require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{change}),
+		"unable to add to manifest")
+}
+
+// createTableWithRange function is used in TestCompactionFilePicking. It creates
+// a table with key starting from start and ending with end.
+func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
+	b := table.NewTableBuilder()
+	nums := []int{start, end}
+	for _, i := range nums {
+		key := make([]byte, 8)
+		binary.BigEndian.PutUint64(key[:], uint64(i))
+		key = y.KeyWithTs(key, uint64(0))
+		val := y.ValueStruct{Value: []byte(fmt.Sprintf("%d", i))}
+		require.NoError(t, b.Add(key, val))
+	}
+
+	fileID := db.lc.reserveFileID()
+	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
+	require.NoError(t, err)
+
+	_, err = fd.Write(b.Finish())
+	require.NoError(t, err, "unable to write to file")
+
+	tab, err := table.OpenTable(fd, options.LoadToRAM, options.NoVerification)
+	require.NoError(t, err)
+	return tab
 }
