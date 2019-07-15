@@ -18,6 +18,8 @@ package table
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/rand"
 	"encoding/binary"
 	"io"
 	"math"
@@ -70,12 +72,27 @@ type Builder struct {
 
 	tableIndex *pb.TableIndex
 
-	keyBuf   *bytes.Buffer
-	keyCount int
+	keyBuf    *bytes.Buffer
+	keyCount  int
+	doEncrypt bool
+	iv        []byte // Initialization Vector.
+}
+
+// BuilderOptions holds options for table builder.
+type BuilderOptions struct {
+	MasterKey []byte
 }
 
 // NewTableBuilder makes a new TableBuilder.
-func NewTableBuilder() *Builder {
+func NewTableBuilder(opts *BuilderOptions) *Builder {
+	var doEncrypt bool
+	var iv []byte
+	if len(opts.MasterKey) > 0 {
+		doEncrypt = true
+		iv = make([]byte, aes.BlockSize)
+		_, err := io.ReadFull(rand.Reader, iv)
+		y.Check(err)
+	}
 	return &Builder{
 		keyBuf:     newBuffer(1 << 20),
 		buf:        newBuffer(1 << 20),
@@ -84,6 +101,8 @@ func NewTableBuilder() *Builder {
 
 		// TODO(Ashish): make this configurable
 		blockSize: 4 * 1024,
+		doEncrypt: doEncrypt,
+		iv:        iv,
 	}
 }
 
