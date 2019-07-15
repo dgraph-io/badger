@@ -71,5 +71,39 @@ func TestTableIndex(t *testing.T) {
 		for i, ko := range tbl.blockIndex {
 			require.Equal(t, ko.Key, blockFirstKeys[i])
 		}
+		itr := tbl.NewIterator(false)
+		for i := 0; i < keysCount; i++ {
+			require.Equal(t, fmt.Sprintf("%d", i), string(itr.Value().Value))
+			itr.Next()
+		}
 	})
+}
+
+func TestBlockIndex(t *testing.T) {
+	keysCount := 10
+	builder := NewTableBuilder()
+	filename := fmt.Sprintf("%s%c%d.sst", "/home/schoolboy", os.PathSeparator, rand.Int63())
+	f, err := y.OpenSyncedFile(filename, true)
+	require.NoError(t, err)
+
+	blockFirstKeys := make([][]byte, 0)
+	blockCount := 0
+	for i := 0; i < keysCount; i++ {
+		k := []byte(fmt.Sprintf("sfehelllo%d", i))
+		v := fmt.Sprintf("%d", i)
+		vs := y.ValueStruct{Value: []byte(v)}
+		if i == 0 { // This is first key for first block.
+			blockFirstKeys = append(blockFirstKeys, k)
+			blockCount = 1
+		} else if builder.shouldFinishBlock(k, vs) {
+			blockCount++
+			blockFirstKeys = append(blockFirstKeys, k)
+		}
+		y.Check(builder.Add(k, vs))
+	}
+	f.Write(builder.Finish())
+	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
+	require.NoError(t, err, "unable to open table")
+	require.Equal(t, blockCount, len(tbl.blockIndex))
+	//itr := tbl.NewIterator(false)
 }

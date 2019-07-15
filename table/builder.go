@@ -62,6 +62,7 @@ type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf *bytes.Buffer
 
+	blockBuf     *bytes.Buffer
 	blockSize    uint32   // Max size of block.
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -79,6 +80,7 @@ func NewTableBuilder() *Builder {
 		keyBuf:     newBuffer(1 << 20),
 		buf:        newBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
+		blockBuf:   newBuffer(4 << 10),
 
 		// TODO(Ashish): make this configurable
 		blockSize: 4 * 1024,
@@ -131,16 +133,16 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	}
 
 	// store current entry's offset
-	y.AssertTrue(b.buf.Len() < math.MaxUint32)
-	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len())-b.baseOffset)
+	y.AssertTrue(b.buf.Len()+b.blockBuf.Len() < math.MaxUint32)
+	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len()+b.blockBuf.Len())-b.baseOffset)
 
 	// Layout: header, diffKey, value.
 	var hbuf [8]byte
 	h.Encode(hbuf[:])
-	b.buf.Write(hbuf[:])
-	b.buf.Write(diffKey) // We only need to store the key difference.
+	b.blockBuf.Write(hbuf[:])
+	b.blockBuf.Write(diffKey) // We only need to store the key difference.
 
-	v.EncodeTo(b.buf)
+	v.EncodeTo(b.blockBuf)
 }
 
 /*
@@ -160,11 +162,11 @@ func (b *Builder) finishBlock() {
 		binary.BigEndian.PutUint32(ebuf[4*i:4*i+4], uint32(offset))
 	}
 	binary.BigEndian.PutUint32(ebuf[len(ebuf)-4:], uint32(len(b.entryOffsets)))
-	b.buf.Write(ebuf)
+	b.blockBuf.Write(ebuf)
 
-	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
-	b.writeChecksum(blockBuf)
-
+	//blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
+	writeChecksum(b.blockBuf.Bytes(), b.blockBuf)
+	b.buf.Write(b.blockBuf.Bytes())
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
 	// implement padding. This might be useful while using direct I/O.
 
@@ -189,7 +191,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		4 + // size of list
 		8 + // Sum64 in checksum proto
 		4) // checksum length
-	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(6 /*header size for entry*/) +
+	estimatedSize := uint32(b.buf.Len()+b.blockBuf.Len()) - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 
 	return estimatedSize > b.blockSize
@@ -204,6 +206,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 		y.AssertTrue(b.buf.Len() < math.MaxUint32)
 		b.baseOffset = uint32(b.buf.Len())
 		b.entryOffsets = b.entryOffsets[:0]
+		b.blockBuf = newBuffer(4 << 10)
 	}
 	b.addHelper(key, value)
 	return nil // Currently, there is no meaningful error.
@@ -217,7 +220,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	blocksSize := b.buf.Len() + // length of current buffer
+	blocksSize := b.buf.Len() + b.blockBuf.Len() + // length of current buffer
 		len(b.entryOffsets)*4 + // all entry offsets size
 		4 + // count of all entry offsets
 		8 + // checksum bytes
@@ -306,5 +309,34 @@ func (b *Builder) writeChecksum(data []byte) {
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	_, err = b.buf.Write(buf[:])
+	y.Check(err)
+}
+
+func writeChecksum(data []byte, dst io.Writer) {
+	// Build checksum for the index.
+	checksum := pb.Checksum{
+		// TODO: The checksum type should be configurable from the
+		// options.
+		// We chose to use CRC32 as the default option because
+		// it performed better compared to xxHash64.
+		// See the BenchmarkChecksum in table_test.go file
+		// Size     =>   1024 B        2048 B
+		// CRC32    => 63.7 ns/op     112 ns/op
+		// xxHash64 => 87.5 ns/op     158 ns/op
+		Sum:  y.CalculateChecksum(data, pb.Checksum_CRC32C),
+		Algo: pb.Checksum_CRC32C,
+	}
+
+	// Write checksum to the file.
+	chksum, err := checksum.Marshal()
+	y.Check(err)
+	n, err := dst.Write(chksum)
+	y.Check(err)
+
+	y.AssertTrue(n < math.MaxUint32)
+	// Write checksum size.
+	var buf [4]byte
+	binary.BigEndian.PutUint32(buf[:], uint32(n))
+	_, err = dst.Write(buf[:])
 	y.Check(err)
 }
