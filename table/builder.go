@@ -91,7 +91,7 @@ func NewTableBuilder() *Builder {
 func (b *Builder) Close() {}
 
 // Empty returns whether it's empty.
-func (b *Builder) Empty() bool { return b.buf.Len() == 0 }
+func (b *Builder) Empty() bool { return b.buf.Len()+b.blockBuf.Len() == 0 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
 func (b Builder) keyDiff(newKey []byte) []byte {
@@ -279,37 +279,8 @@ func (b *Builder) Finish() []byte {
 	_, err = b.buf.Write(buf[:])
 	y.Check(err)
 
-	b.writeChecksum(index)
+	writeChecksum(index, b.buf)
 	return b.buf.Bytes()
-}
-
-func (b *Builder) writeChecksum(data []byte) {
-	// Build checksum for the index.
-	checksum := pb.Checksum{
-		// TODO: The checksum type should be configurable from the
-		// options.
-		// We chose to use CRC32 as the default option because
-		// it performed better compared to xxHash64.
-		// See the BenchmarkChecksum in table_test.go file
-		// Size     =>   1024 B        2048 B
-		// CRC32    => 63.7 ns/op     112 ns/op
-		// xxHash64 => 87.5 ns/op     158 ns/op
-		Sum:  y.CalculateChecksum(data, pb.Checksum_CRC32C),
-		Algo: pb.Checksum_CRC32C,
-	}
-
-	// Write checksum to the file.
-	chksum, err := checksum.Marshal()
-	y.Check(err)
-	n, err := b.buf.Write(chksum)
-	y.Check(err)
-
-	y.AssertTrue(n < math.MaxUint32)
-	// Write checksum size.
-	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], uint32(n))
-	_, err = b.buf.Write(buf[:])
-	y.Check(err)
 }
 
 func writeChecksum(data []byte, dst io.Writer) {
