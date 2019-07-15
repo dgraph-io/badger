@@ -19,6 +19,7 @@ package table
 import (
 	"bytes"
 	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"encoding/binary"
 	"io"
@@ -76,23 +77,35 @@ type Builder struct {
 	keyCount  int
 	doEncrypt bool
 	iv        []byte // Initialization Vector.
+	aesBlock  cipher.Block
+	dataKey   []byte
+	opts      *BuilderOptions
 }
 
 // BuilderOptions holds options for table builder.
 type BuilderOptions struct {
-	MasterKey []byte
+	StorageKey []byte
 }
 
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts *BuilderOptions) *Builder {
 	var doEncrypt bool
 	var iv []byte
-	if len(opts.MasterKey) > 0 {
+	var aesBlock cipher.Block
+	var dataKey []byte
+
+	if len(opts.StorageKey) > 0 {
 		doEncrypt = true
 		iv = make([]byte, aes.BlockSize)
 		_, err := io.ReadFull(rand.Reader, iv)
 		y.Check(err)
+		dataKey = make([]byte, len(opts.StorageKey))
+		_, err = io.ReadFull(rand.Reader, dataKey)
+		y.Check(err)
+		aesBlock, err = aes.NewCipher(dataKey)
+		y.Check(err) // Master key check has to be validated in the caller side.
 	}
+
 	return &Builder{
 		keyBuf:     newBuffer(1 << 20),
 		buf:        newBuffer(1 << 20),
@@ -103,6 +116,9 @@ func NewTableBuilder(opts *BuilderOptions) *Builder {
 		blockSize: 4 * 1024,
 		doEncrypt: doEncrypt,
 		iv:        iv,
+		aesBlock:  aesBlock,
+		opts:      opts,
+		dataKey:   dataKey,
 	}
 }
 
@@ -185,7 +201,14 @@ func (b *Builder) finishBlock() {
 
 	//blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
 	writeChecksum(b.blockBuf.Bytes(), b.blockBuf)
-	b.buf.Write(b.blockBuf.Bytes())
+	blockBuf := b.blockBuf.Bytes()
+	if b.doEncrypt {
+		dst := make([]byte, len(blockBuf))
+		stream := cipher.NewCTR(b.aesBlock, b.iv)
+		stream.XORKeyStream(dst, blockBuf)
+		blockBuf = dst
+	}
+	b.buf.Write(blockBuf)
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
 	// implement padding. This might be useful while using direct I/O.
 
@@ -287,18 +310,27 @@ func (b *Builder) Finish() []byte {
 
 	index, err := b.tableIndex.Marshal()
 	y.Check(err)
-	// Write index the file.
-	n, err := b.buf.Write(index)
-	y.Check(err)
-
+	n := len(index)
 	y.AssertTrue(n < math.MaxUint32)
 	// Write index size.
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
-	_, err = b.buf.Write(buf[:])
+	index = append(index, buf[0], buf[1], buf[2], buf[3])
+	chkSum := &bytes.Buffer{}
+	writeChecksum(index[:n], chkSum)
+	index = append(index, chkSum.Bytes()...)
+	b.buf.Write(index)
+	meta := &pb.TableMeta{
+		DataKey:   b.dataKey,
+		IV:        b.iv,
+		Encrypted: true,
+	}
+	metaBuf, err := meta.Marshal()
 	y.Check(err)
-
-	writeChecksum(index, b.buf)
+	var metaLen [4]byte
+	binary.BigEndian.PutUint32(metaLen[:], uint32(len(metaBuf)))
+	metaBuf = append(metaBuf, metaLen[0], metaLen[1], metaLen[2], metaLen[3])
+	b.buf.Write(metaBuf)
 	return b.buf.Bytes()
 }
 

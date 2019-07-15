@@ -69,3 +69,9 @@ message Checksum {
   Algorithm algo = 1; // For storing type of Checksum algorithm used
   uint64 sum = 2;
 }
+
+message TableMeta {
+  bytes DataKey = 1;
+  bytes IV = 2;
+  bool Encrypted = 3;
+}

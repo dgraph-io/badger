@@ -41,7 +41,7 @@ func TestTableIndex(t *testing.T) {
 
 	t.Run("multiple keys", func(t *testing.T) {
 		keysCount := 10000
-		builder := NewTableBuilder()
+		builder := NewTableBuilder(&BuilderOptions{})
 		filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
 		f, err := y.OpenSyncedFile(filename, true)
 		require.NoError(t, err)
@@ -81,7 +81,7 @@ func TestTableIndex(t *testing.T) {
 
 func TestBlockIndex(t *testing.T) {
 	keysCount := 10
-	builder := NewTableBuilder()
+	builder := NewTableBuilder(&BuilderOptions{})
 	filename := fmt.Sprintf("%s%c%d.sst", "/home/schoolboy", os.PathSeparator, rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
 	require.NoError(t, err)
