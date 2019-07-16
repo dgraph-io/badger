@@ -195,23 +195,48 @@ type safeRead struct {
 	recordOffset uint32
 }
 
+// teeByteReader implements io.Reader, io.ByteReader interfaces. It also keeps track of the number
+// bytes read. The teeByteReader writes to w what it reads from r.
+type teeByteReader struct {
+	r     io.Reader
+	w     io.Writer
+	count int // Number of bytes read.
+}
+
+// Read reads len(p) bytes from the reader. Returns the number of bytes read, error on failure.
+func (t *teeByteReader) Read(p []byte) (int, error) {
+	n, err := t.r.Read(p)
+	if err != nil {
+		return n, err
+	}
+	t.count += n
+	n, err = t.w.Write(p[:n])
+	return n, err
+}
+
+// ReadByte reads exactly one byte from the reader. Returns error on failure.
+func (t *teeByteReader) ReadByte() (byte, error) {
+	b := make([]byte, 1)
+	_, err := t.r.Read(b)
+	if err != nil {
+		return 0, err
+	}
+	t.count++
+	_, err = t.w.Write(b)
+	return b[0], err
+}
+
 // readEntry reads an entry from the provided reader. It also validates the checksum for every entry
 // read. Returns error on failure.
 func (r *safeRead) readEntry(reader io.Reader) (*Entry, error) {
 	hash := crc32.New(y.CastagnoliCrcTable)
-	tee := io.TeeReader(reader, hash)
-
-	headerLen := make([]byte, 1)
-	if _, err := io.ReadFull(reader, headerLen); err != nil {
-		return nil, err
-	}
-	hbuf := make([]byte, uint8(headerLen[0]))
-	if _, err := io.ReadFull(tee, hbuf[:]); err != nil {
-		return nil, err
-	}
+	tee := teeByteReader{reader, hash, 0}
 
 	var h header
-	h.Decode(hbuf[:])
+	hlen, err := h.DecodeFrom(&tee)
+	if err != nil {
+		return nil, err
+	}
 	if h.klen > uint32(1<<16) { // Key length must be below uint16.
 		return nil, errTruncate
 	}
@@ -228,28 +253,27 @@ func (r *safeRead) readEntry(reader io.Reader) (*Entry, error) {
 	e.offset = r.recordOffset
 	e.Key = r.k[:kl]
 	e.Value = r.v[:vl]
-	e.hlen = uint8(headerLen[0])
-
-	if _, err := io.ReadFull(tee, e.Key); err != nil {
+	e.hlen = hlen
+	if _, err := io.ReadFull(&tee, e.Key); err != nil {
 		if err == io.EOF {
 			err = errTruncate
 		}
 		return nil, err
 	}
-	if _, err := io.ReadFull(tee, e.Value); err != nil {
+	if _, err := io.ReadFull(&tee, e.Value); err != nil {
 		if err == io.EOF {
 			err = errTruncate
 		}
 		return nil, err
 	}
-	var crcBuf [4]byte
-	if _, err := io.ReadFull(reader, crcBuf[:]); err != nil {
+	crcBuf := make([]byte, 4)
+	if _, err := io.ReadFull(reader, crcBuf); err != nil {
 		if err == io.EOF {
 			err = errTruncate
 		}
 		return nil, err
 	}
-	crc := binary.BigEndian.Uint32(crcBuf[:])
+	crc := binary.BigEndian.Uint32(crcBuf)
 	if crc != hash.Sum32() {
 		return nil, errTruncate
 	}
@@ -303,8 +327,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		}
 
 		var vp valuePointer
-		// +1 because we store length of header in the first byte.
-		vp.Len = uint32(1 + int(e.hlen) + len(e.Key) + len(e.Value) + crc32.Size)
+		vp.Len = uint32(int(e.hlen) + len(e.Key) + len(e.Value) + crc32.Size)
 		read.recordOffset += vp.Len
 
 		vp.Offset = e.offset
@@ -1099,8 +1122,7 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	if err != nil {
 		return nil, cb, err
 	}
-	// First byte contains the length of header. Skip it.
-	buf = buf[1:]
+
 	var h header
 	headerLen := h.Decode(buf)
 	n := uint32(headerLen) + h.klen
@@ -1125,9 +1147,6 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, func(
 
 // Test helper
 func valueBytesToEntry(buf []byte) (e Entry) {
-	// First byte stores the length of the header. Skip it.
-	buf = buf[1:]
-
 	var h header
 	hlen := h.Decode(buf)
 	// Move ahead of the header.

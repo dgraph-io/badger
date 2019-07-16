@@ -260,7 +260,7 @@ func TestValueGC2(t *testing.T) {
 			item, err := txn.Get(key)
 			require.NoError(t, err)
 			val := getItemValue(t, item)
-			require.NotNil(t, val)
+			require.NotNil(t, val, "key %s", key)
 			require.Equal(t, string(val), fmt.Sprintf("value%d", i))
 			return nil
 		}))
@@ -271,7 +271,7 @@ func TestValueGC2(t *testing.T) {
 			item, err := txn.Get(key)
 			require.NoError(t, err)
 			val := getItemValue(t, item)
-			require.NotNil(t, val)
+			require.NotNil(t, val, "key %s", key)
 			require.True(t, len(val) == sz, "Size found: %d", len(val))
 			return nil
 		}))

@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
-	"math"
 	"time"
 
 	"github.com/dgraph-io/badger/y"
@@ -79,7 +78,7 @@ func (h header) Encode(out []byte) int {
 }
 
 // Decode decodes the given header from the provided byte slice.
-// Returns the number of bytes written.
+// Returns the number of bytes read.
 func (h *header) Decode(buf []byte) int {
 	h.meta, h.userMeta = buf[0], buf[1]
 	index := 2
@@ -91,6 +90,35 @@ func (h *header) Decode(buf []byte) int {
 	index += count
 	h.expiresAt, count = binary.Uvarint(buf[index:])
 	return index + count
+}
+
+// DecodeFrom reads the header from the teeByteReader.
+// Returns the number of bytes read.
+func (h *header) DecodeFrom(reader *teeByteReader) (int, error) {
+	var err error
+	h.meta, err = reader.ReadByte()
+	if err != nil {
+		return 0, err
+	}
+	h.userMeta, err = reader.ReadByte()
+	if err != nil {
+		return 0, err
+	}
+	klen, err := binary.ReadUvarint(reader)
+	if err != nil {
+		return 0, err
+	}
+	h.klen = uint32(klen)
+	vlen, err := binary.ReadUvarint(reader)
+	if err != nil {
+		return 0, err
+	}
+	h.vlen = uint32(vlen)
+	h.expiresAt, err = binary.ReadUvarint(reader)
+	if err != nil {
+		return 0, err
+	}
+	return reader.count, nil
 }
 
 // Entry provides Key, Value, UserMeta and ExpiresAt. This struct can be used by
@@ -105,7 +133,7 @@ type Entry struct {
 	// Fields maintained internally.
 	offset   uint32
 	skipVlog bool
-	hlen     uint8 // Length of the header.
+	hlen     int // Length of the header.
 }
 
 func (e *Entry) estimateSize(threshold int) int {
@@ -131,10 +159,6 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 
 	headerEnc := make([]byte, maxHeaderSize)
 	headerLen := h.Encode(headerEnc)
-	// Ensure we don't overflow uint8.
-	y.AssertTrue(headerLen < math.MaxUint8)
-	// Write header length.
-	buf.Write([]byte{byte(headerLen)})
 
 	// Trim headerEnc to contain only valid bytes.
 	headerEnc = headerEnc[:headerLen]
@@ -157,8 +181,7 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	var crcBuf [crc32.Size]byte
 	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
 	buf.Write(crcBuf[:])
-	// 1 byte is used to store the size of the header.
-	return 1 + len(headerEnc) + len(e.Key) + len(e.Value) + len(crcBuf), nil
+	return len(headerEnc) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
 func (e Entry) print(prefix string) {
