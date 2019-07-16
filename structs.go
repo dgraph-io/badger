@@ -178,9 +178,9 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 		return 0, err
 	}
 
-	var crcBuf [crc32.Size]byte
-	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
-	buf.Write(crcBuf[:])
+	crcBuf := make([]byte, crc32.Size)
+	binary.BigEndian.PutUint32(crcBuf, hash.Sum32())
+	buf.Write(crcBuf)
 	return len(headerEnc) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
