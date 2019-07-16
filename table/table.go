@@ -17,6 +17,8 @@
 package table
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -64,8 +66,10 @@ type Table struct {
 
 	bf bbloom.Bloom
 
-	Checksum []byte
-	chkMode  options.ChecksumVerificationMode // indicates when to verify checksum for blocks.
+	Checksum  []byte
+	chkMode   options.ChecksumVerificationMode // indicates when to verify checksum for blocks.
+	aesBlock  cipher.Block
+	doDecrypt bool
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
@@ -140,7 +144,7 @@ func (b block) NewIterator() *blockIterator {
 // deleting. Checksum for all blocks of table is verified based on value of chkMode.
 // TODO:(Ashish): convert individual args to option struct.
 func OpenTable(fd *os.File, mode options.FileLoadingMode,
-	chkMode options.ChecksumVerificationMode) (*Table, error) {
+	chkMode options.ChecksumVerificationMode, dataKey []byte) (*Table, error) {
 
 	fileInfo, err := fd.Stat()
 	if err != nil {
@@ -162,6 +166,13 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode,
 		id:          id,
 		loadingMode: mode,
 		chkMode:     chkMode,
+	}
+
+	if len(dataKey) > 0 {
+		t.doDecrypt = true
+		aesBlock, err := aes.NewCipher(dataKey)
+		y.Check(err)
+		t.aesBlock = aesBlock
 	}
 
 	t.tableSize = int(fileInfo.Size())
@@ -303,7 +314,16 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 	var err error
 	blk.data, err = t.read(blk.offset, int(ko.Len))
-
+	if err != nil {
+		return nil, err
+	}
+	if t.doDecrypt {
+		iv := blk.data[:aes.BlockSize]
+		unecrypted := make([]byte, len(blk.data[aes.BlockSize:]))
+		stream := cipher.NewCTR(t.aesBlock, iv)
+		stream.XORKeyStream(unecrypted, blk.data[aes.BlockSize:])
+		blk.data = unecrypted
+	}
 	// Read meta data related to block.
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))

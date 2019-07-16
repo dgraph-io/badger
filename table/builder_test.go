@@ -34,13 +34,13 @@ func TestTableIndex(t *testing.T) {
 	keyPrefix := "key"
 	t.Run("single key", func(t *testing.T) {
 		f := buildTestTable(t, keyPrefix, 1)
-		tbl, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead)
+		tbl, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, []byte{})
 		require.NoError(t, err)
 		require.Len(t, tbl.blockIndex, 1)
 	})
 
 	t.Run("multiple keys", func(t *testing.T) {
-		keysCount := 10000
+		keysCount := 10
 		builder := NewTableBuilder(&BuilderOptions{})
 		filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
 		f, err := y.OpenSyncedFile(filename, true)
@@ -63,7 +63,7 @@ func TestTableIndex(t *testing.T) {
 		}
 		f.Write(builder.Finish())
 
-		tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
+		tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, []byte{})
 		require.NoError(t, err, "unable to open table")
 
 		// Ensure index is built correctly
@@ -79,17 +79,23 @@ func TestTableIndex(t *testing.T) {
 	})
 }
 
-func TestBlockIndex(t *testing.T) {
-	keysCount := 10
-	builder := NewTableBuilder(&BuilderOptions{})
-	filename := fmt.Sprintf("%s%c%d.sst", "/home/schoolboy", os.PathSeparator, rand.Int63())
+func TestBlockEncryption(t *testing.T) {
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	y.Check(err)
+
+	keysCount := 10000
+	builder := NewTableBuilder(&BuilderOptions{
+		DataKey: key,
+	})
+	filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
 	require.NoError(t, err)
 
 	blockFirstKeys := make([][]byte, 0)
 	blockCount := 0
 	for i := 0; i < keysCount; i++ {
-		k := []byte(fmt.Sprintf("sfehelllo%d", i))
+		k := []byte(fmt.Sprintf("%016x", i))
 		v := fmt.Sprintf("%d", i)
 		vs := y.ValueStruct{Value: []byte(v)}
 		if i == 0 { // This is first key for first block.
@@ -102,8 +108,17 @@ func TestBlockIndex(t *testing.T) {
 		y.Check(builder.Add(k, vs))
 	}
 	f.Write(builder.Finish())
-	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
+	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, key)
 	require.NoError(t, err, "unable to open table")
+
+	// Ensure index is built correctly
 	require.Equal(t, blockCount, len(tbl.blockIndex))
-	//itr := tbl.NewIterator(false)
+	for i, ko := range tbl.blockIndex {
+		require.Equal(t, ko.Key, blockFirstKeys[i])
+	}
+	itr := tbl.NewIterator(false)
+	for i := 0; i < keysCount; i++ {
+		require.Equal(t, fmt.Sprintf("%d", i), string(itr.Value().Value))
+		itr.Next()
+	}
 }
