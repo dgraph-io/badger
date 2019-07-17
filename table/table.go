@@ -267,8 +267,13 @@ func (t *Table) readNoFail(off, sz int) []byte {
 
 func (t *Table) readIndex() error {
 	readPos := t.tableSize
-
+	var iv []byte
+	var stream cipher.Stream
 	// Read checksum len from the last 4 bytes.
+	if t.doDecrypt {
+		readPos -= aes.BlockSize
+		iv = t.readNoFail(readPos, aes.BlockSize)
+	}
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
 	checksumLen := int(binary.BigEndian.Uint32(buf))
@@ -277,6 +282,13 @@ func (t *Table) readIndex() error {
 	expectedChk := &pb.Checksum{}
 	readPos -= checksumLen
 	buf = t.readNoFail(readPos, checksumLen)
+	if t.doDecrypt {
+		// Decrypt checksum.
+		stream = cipher.NewCTR(t.aesBlock, iv)
+		tbuf := make([]byte, len(buf))
+		stream.XORKeyStream(tbuf, buf)
+		buf = tbuf
+	}
 	if err := expectedChk.Unmarshal(buf); err != nil {
 		return err
 	}
@@ -288,7 +300,12 @@ func (t *Table) readIndex() error {
 	// Read index.
 	readPos -= indexLen
 	data := t.readNoFail(readPos, indexLen)
-
+	if t.doDecrypt {
+		// Decrypt checksum.
+		tdata := make([]byte, len(data))
+		stream.XORKeyStream(tdata, data)
+		data = tdata
+	}
 	if err := y.VerifyChecksum(data, expectedChk); err != nil {
 		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename())
 	}

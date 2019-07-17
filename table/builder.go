@@ -130,12 +130,9 @@ func (b Builder) keyDiff(newKey []byte) []byte {
 	return newKey[i:]
 }
 
-// intializeIV appends IV to the blockbuf
+// intializeIV appends IV to the blockbuf.
 func (b *Builder) intializeIV() {
-	iv := make([]byte, aes.BlockSize)
-	_, err := io.ReadFull(rand.Reader, iv)
-	y.Check(err)
-	_, err = b.blockBuf.Write(iv)
+	_, err := b.blockBuf.Write(genereateIV())
 	y.Check(err)
 }
 
@@ -300,6 +297,8 @@ The table structure looks like
 func (b *Builder) Finish() []byte {
 	bf := bbloom.New(float64(b.keyCount), 0.01)
 	var klen [2]byte
+	var iv []byte
+	var stream cipher.Stream
 	key := make([]byte, 1024)
 	for {
 		if _, err := b.keyBuf.Read(klen[:]); err == io.EOF {
@@ -315,7 +314,6 @@ func (b *Builder) Finish() []byte {
 		y.Check2(b.keyBuf.Read(key))
 		bf.Add(key)
 	}
-
 	// Add bloom filter to the index.
 	b.tableIndex.BloomFilter = bf.JSONMarshal()
 	b.finishBlock() // This will never start a new block.
@@ -327,13 +325,34 @@ func (b *Builder) Finish() []byte {
 	chkSum := &bytes.Buffer{}
 	// Calculate CheckSum for the index.
 	writeChecksum(index, chkSum)
+	indexChkSum := chkSum.Bytes()
+	if b.doEncrypt {
+		iv = genereateIV()
+		stream = cipher.NewCTR(b.aesBlock, iv)
+		eChkSum := make([]byte, len(indexChkSum[:len(indexChkSum)-4]))
+		// Encrypt CheckSum.
+		// We need to encrypt checksum before index.
+		// beacuse Table reads checksum first and then it reads index.
+		// In order to encrypt and decrypt, we need to pass the block in
+		// same order. Otherwise, the counter will be mismatched. We don't
+		// get the real data back.
+		cl := indexChkSum[len(indexChkSum)-4:]
+		stream.XORKeyStream(eChkSum, indexChkSum[:len(indexChkSum)-4])
+		indexChkSum = eChkSum
+		indexChkSum = append(indexChkSum, cl...)
+		ei := make([]byte, len(index))
+		//Encrypt Index.
+		stream.XORKeyStream(ei, index)
+		index = ei
+	}
 	b.buf = append(b.buf, index...)
 	// Write index size.
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	b.buf = append(b.buf, buf[0], buf[1], buf[2], buf[3])
 	// Write CheckSum.
-	b.buf = append(b.buf, chkSum.Bytes()...)
+	b.buf = append(b.buf, indexChkSum...)
+	b.buf = append(b.buf, iv...)
 	return b.buf
 }
 
@@ -365,4 +384,11 @@ func writeChecksum(data []byte, dst io.Writer) {
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	_, err = dst.Write(buf[:])
 	y.Check(err)
+}
+
+func genereateIV() []byte {
+	iv := make([]byte, aes.BlockSize)
+	_, err := io.ReadFull(rand.Reader, iv)
+	y.Check(err)
+	return iv
 }
