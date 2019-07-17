@@ -1428,13 +1428,11 @@ func (vlog *valueLog) encodedDiscardStats() []byte {
 // This function will be called while initializing valueLog
 func (vlog *valueLog) populateDiscardStats() error {
 	key := y.KeyWithTs(lfDiscardStatsKey, math.MaxUint64)
-	newKey := make([]byte, len(key))
-	copy(newKey, key)
 	var statsMap map[uint32]int64
 	var val []byte
 	var vp valuePointer
 	for {
-		vs, err := vlog.db.get(newKey)
+		vs, err := vlog.db.get(key)
 		if err != nil {
 			return err
 		}
@@ -1446,15 +1444,13 @@ func (vlog *valueLog) populateDiscardStats() error {
 		vp.Decode(vs.Value)
 		// Entry stored in LSM tree.
 		if vs.Meta&bitValuePointer == 0 {
-			val = make([]byte, len(vs.Value))
-			copy(val, vs.Value)
+			val = y.SafeCopy(val, vs.Value)
 			break
 		}
 		// Read entry from value log.
 		result, cb, err := vlog.Read(vp, new(y.Slice))
-		defer runCallback(cb)
-		val = make([]byte, len(result))
-		copy(val, result)
+		runCallback(cb)
+		val = y.SafeCopy(val, result)
 		// The result is stored in val. We can break the loop from here.
 		if err == nil {
 			break
@@ -1465,15 +1461,13 @@ func (vlog *valueLog) populateDiscardStats() error {
 		// If we're at this point it means we haven't found the value yet and if the current key has
 		// badger move prefix, we should break from here since we've already tried the original key
 		// and the key with move prefix. "val" would be empty since we haven't found the value yet.
-		if bytes.HasPrefix(newKey, badgerMove) {
+		if bytes.HasPrefix(key, badgerMove) {
 			break
 		}
 		// If we're at this point it means the discard stats key was moved by the GC and the actual
 		// entry is the one prefixed by badger move key.
-		newKey = make([]byte, len(badgerMove)+len(key))
 		// Prepend existing key with badger move and search for the key.
-		n := copy(newKey, badgerMove)
-		copy(newKey[n:], key)
+		key = append(badgerMove, key...)
 	}
 
 	if len(val) == 0 {
