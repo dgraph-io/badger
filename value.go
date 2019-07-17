@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"hash"
 	"hash/crc32"
 	"io"
 	"io/ioutil"
@@ -195,45 +196,50 @@ type safeRead struct {
 	recordOffset uint32
 }
 
-// teeByteReader implements io.Reader, io.ByteReader interfaces. It also keeps track of the number
-// bytes read. The teeByteReader writes to w what it reads from r.
-type teeByteReader struct {
-	r     io.Reader
-	w     io.Writer
-	count int // Number of bytes read.
+// hashReader implements io.Reader, io.ByteReader interfaces. It also keeps track of the number
+// bytes read. The hashReader writes to h (hash) what it reads from r.
+type hashReader struct {
+	r         io.Reader
+	h         hash.Hash32
+	bytesRead int // Number of bytes read.
+}
+
+func newHashReader(r io.Reader) *hashReader {
+	hash := crc32.New(y.CastagnoliCrcTable)
+	return &hashReader{
+		r: r,
+		h: hash,
+	}
 }
 
 // Read reads len(p) bytes from the reader. Returns the number of bytes read, error on failure.
-func (t *teeByteReader) Read(p []byte) (int, error) {
+func (t *hashReader) Read(p []byte) (int, error) {
 	n, err := t.r.Read(p)
 	if err != nil {
 		return n, err
 	}
-	t.count += n
-	n, err = t.w.Write(p[:n])
-	return n, err
+	t.bytesRead += n
+	return t.h.Write(p[:n])
 }
 
 // ReadByte reads exactly one byte from the reader. Returns error on failure.
-func (t *teeByteReader) ReadByte() (byte, error) {
+func (t *hashReader) ReadByte() (byte, error) {
 	b := make([]byte, 1)
-	_, err := t.r.Read(b)
-	if err != nil {
-		return 0, err
-	}
-	t.count++
-	_, err = t.w.Write(b)
+	_, err := t.Read(b)
 	return b[0], err
 }
 
-// readEntry reads an entry from the provided reader. It also validates the checksum for every entry
-// read. Returns error on failure.
-func (r *safeRead) readEntry(reader io.Reader) (*Entry, error) {
-	hash := crc32.New(y.CastagnoliCrcTable)
-	tee := teeByteReader{reader, hash, 0}
+// Sum32 returns the sum32 of the underlying hash.
+func (t *hashReader) Sum32() uint32 {
+	return t.h.Sum32()
+}
 
+// Entry reads an entry from the provided reader. It also validates the checksum for every entry
+// read. Returns error on failure.
+func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
+	tee := newHashReader(reader)
 	var h header
-	hlen, err := h.DecodeFrom(&tee)
+	hlen, err := h.DecodeFrom(tee)
 	if err != nil {
 		return nil, err
 	}
@@ -254,27 +260,27 @@ func (r *safeRead) readEntry(reader io.Reader) (*Entry, error) {
 	e.Key = r.k[:kl]
 	e.Value = r.v[:vl]
 	e.hlen = hlen
-	if _, err := io.ReadFull(&tee, e.Key); err != nil {
+	if _, err := io.ReadFull(tee, e.Key); err != nil {
 		if err == io.EOF {
 			err = errTruncate
 		}
 		return nil, err
 	}
-	if _, err := io.ReadFull(&tee, e.Value); err != nil {
+	if _, err := io.ReadFull(tee, e.Value); err != nil {
 		if err == io.EOF {
 			err = errTruncate
 		}
 		return nil, err
 	}
-	crcBuf := make([]byte, 4)
-	if _, err := io.ReadFull(reader, crcBuf); err != nil {
+	var crcBuf [crc32.Size]byte
+	if _, err := io.ReadFull(reader, crcBuf[:]); err != nil {
 		if err == io.EOF {
 			err = errTruncate
 		}
 		return nil, err
 	}
-	crc := binary.BigEndian.Uint32(crcBuf)
-	if crc != hash.Sum32() {
+	crc := binary.BigEndian.Uint32(crcBuf[:])
+	if crc != tee.h.Sum32() {
 		return nil, errTruncate
 	}
 	e.meta = h.meta
@@ -315,7 +321,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 	var lastCommit uint64
 	var validEndOffset uint32
 	for {
-		e, err := read.readEntry(reader)
+		e, err := read.Entry(reader)
 		if err == io.EOF {
 			break
 		} else if err == io.ErrUnexpectedEOF || err == errTruncate {
@@ -1145,7 +1151,6 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, func(
 	return buf, nil, err
 }
 
-// Test helper
 func valueBytesToEntry(buf []byte) (e Entry) {
 	var h header
 	hlen := h.Decode(buf)

@@ -92,9 +92,9 @@ func (h *header) Decode(buf []byte) int {
 	return index + count
 }
 
-// DecodeFrom reads the header from the teeByteReader.
+// DecodeFrom reads the header from the hashReader.
 // Returns the number of bytes read.
-func (h *header) DecodeFrom(reader *teeByteReader) (int, error) {
+func (h *header) DecodeFrom(reader *hashReader) (int, error) {
 	var err error
 	h.meta, err = reader.ReadByte()
 	if err != nil {
@@ -118,7 +118,7 @@ func (h *header) DecodeFrom(reader *teeByteReader) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return reader.count, nil
+	return reader.bytesRead, nil
 }
 
 // Entry provides Key, Value, UserMeta and ExpiresAt. This struct can be used by
@@ -145,9 +145,9 @@ func (e *Entry) estimateSize(threshold int) int {
 
 // Encodes e to buf. Returns number of bytes written.
 // The encoded entry looks like
-// +---------------+--------+-----+-------+----------+
-// | Header Length | Header | Key | Value | Checksum |
-// +---------------+--------+-----+-------+----------+
+// +--------+-----+-------+----------+
+// | Header | Key | Value | Checksum |
+// +--------+-----+-------+----------+
 func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 	h := header{
 		klen:      uint32(len(e.Key)),
@@ -157,14 +157,11 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 		userMeta:  e.UserMeta,
 	}
 
-	headerEnc := make([]byte, maxHeaderSize)
-	headerLen := h.Encode(headerEnc)
-
-	// Trim headerEnc to contain only valid bytes.
-	headerEnc = headerEnc[:headerLen]
-	buf.Write(headerEnc)
+	var headerEnc [maxHeaderSize]byte
+	sz := h.Encode(headerEnc[:])
+	buf.Write(headerEnc[:sz])
 	hash := crc32.New(y.CastagnoliCrcTable)
-	if _, err := hash.Write(headerEnc); err != nil {
+	if _, err := hash.Write(headerEnc[:sz]); err != nil {
 		return 0, err
 	}
 
@@ -178,10 +175,10 @@ func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
 		return 0, err
 	}
 
-	crcBuf := make([]byte, crc32.Size)
-	binary.BigEndian.PutUint32(crcBuf, hash.Sum32())
-	buf.Write(crcBuf)
-	return len(headerEnc) + len(e.Key) + len(e.Value) + len(crcBuf), nil
+	var crcBuf [crc32.Size]byte
+	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
+	buf.Write(crcBuf[:])
+	return len(headerEnc[:sz]) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
 func (e Entry) print(prefix string) {
