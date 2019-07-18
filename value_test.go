@@ -1026,7 +1026,7 @@ func TestDiscardStatsMove(t *testing.T) {
 		stat[i] = 0
 	}
 
-	// Set discard stat.
+	// Set discard stats.
 	db.vlog.lfDiscardStats = &lfDiscardStats{
 		m: stat,
 	}
@@ -1035,7 +1035,7 @@ func TestDiscardStatsMove(t *testing.T) {
 		// The discard stat value is more than value threshold.
 		Value: db.vlog.encodedDiscardStats(),
 	}}
-	// Push discard stats entry to write channel
+	// Push discard stats entry to the write channel.
 	req, err := db.sendToWriteCh(entries)
 	require.NoError(t, err)
 	req.Wait()
