@@ -84,7 +84,7 @@ func TestBlockEncryption(t *testing.T) {
 	_, err := rand.Read(key)
 	y.Check(err)
 
-	keysCount := 10000
+	keysCount := 10
 	builder := NewTableBuilder(&BuilderOptions{
 		DataKey: key,
 	})

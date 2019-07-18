@@ -39,6 +39,7 @@ import (
 )
 
 const fileSuffix = ".sst"
+const keySuffix = ".key"
 
 // TableInterface is useful for testing.
 type TableInterface interface {
@@ -70,6 +71,7 @@ type Table struct {
 	chkMode   options.ChecksumVerificationMode // indicates when to verify checksum for blocks.
 	aesBlock  cipher.Block
 	doDecrypt bool
+	dataKey   []byte
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
@@ -166,15 +168,8 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode,
 		id:          id,
 		loadingMode: mode,
 		chkMode:     chkMode,
+		dataKey:     dataKey,
 	}
-
-	if len(dataKey) > 0 {
-		t.doDecrypt = true
-		aesBlock, err := aes.NewCipher(dataKey)
-		y.Check(err)
-		t.aesBlock = aesBlock
-	}
-
 	t.tableSize = int(fileInfo.Size())
 
 	if err := t.readIndex(); err != nil {
@@ -268,9 +263,8 @@ func (t *Table) readNoFail(off, sz int) []byte {
 func (t *Table) readIndex() error {
 	readPos := t.tableSize
 	var iv []byte
-	var stream cipher.Stream
 	// Read checksum len from the last 4 bytes.
-	if t.doDecrypt {
+	if len(t.dataKey) > 0 {
 		readPos -= aes.BlockSize
 		iv = t.readNoFail(readPos, aes.BlockSize)
 	}
@@ -282,13 +276,6 @@ func (t *Table) readIndex() error {
 	expectedChk := &pb.Checksum{}
 	readPos -= checksumLen
 	buf = t.readNoFail(readPos, checksumLen)
-	if t.doDecrypt {
-		// Decrypt checksum.
-		stream = cipher.NewCTR(t.aesBlock, iv)
-		tbuf := make([]byte, len(buf))
-		stream.XORKeyStream(tbuf, buf)
-		buf = tbuf
-	}
 	if err := expectedChk.Unmarshal(buf); err != nil {
 		return err
 	}
@@ -300,16 +287,16 @@ func (t *Table) readIndex() error {
 	// Read index.
 	readPos -= indexLen
 	data := t.readNoFail(readPos, indexLen)
-	if t.doDecrypt {
-		// Decrypt checksum.
-		tdata := make([]byte, len(data))
-		stream.XORKeyStream(tdata, data)
-		data = tdata
-	}
 	if err := y.VerifyChecksum(data, expectedChk); err != nil {
 		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename())
 	}
-
+	if len(t.dataKey) > 0 {
+		var err error
+		data, err = y.XORBlock(t.dataKey, iv, data, 0)
+		if err != nil {
+			return err
+		}
+	}
 	index := pb.TableIndex{}
 	err := index.Unmarshal(data)
 	y.Check(err)
@@ -324,31 +311,25 @@ func (t *Table) block(idx int) (*block, error) {
 	if idx >= len(t.blockIndex) {
 		return nil, errors.New("block out of index")
 	}
-
+	var iv []byte
 	ko := t.blockIndex[idx]
 	blk := &block{
 		offset: int(ko.Offset),
 	}
 	var err error
-	blk.data, err = t.read(blk.offset, int(ko.Len))
+	data, err := t.read(blk.offset, int(ko.Len))
 	if err != nil {
 		return nil, err
 	}
-	if t.doDecrypt {
-		iv := blk.data[:aes.BlockSize]
-		unecrypted := make([]byte, len(blk.data[aes.BlockSize:]))
-		stream := cipher.NewCTR(t.aesBlock, iv)
-		stream.XORKeyStream(unecrypted, blk.data[aes.BlockSize:])
-		blk.data = unecrypted
+
+	if len(t.dataKey) > 0 {
+		iv = data[len(data)-aes.BlockSize:]
+		data = data[:len(data)-aes.BlockSize]
 	}
+	blk.data = data
 	// Read meta data related to block.
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
-
-	// Skip reading checksum, and move position to read numEntries in block.
-	readPos -= (blk.chkLen + 4)
-	blk.numEntries = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
-	blk.entriesIndexStart = readPos - (blk.numEntries * 4)
 
 	// Verify checksum on if checksum verification mode is OnRead on OnStartAndRead.
 	if t.chkMode == options.OnBlockRead || t.chkMode == options.OnTableAndBlockRead {
@@ -356,7 +337,22 @@ func (t *Table) block(idx int) (*block, error) {
 			return nil, err
 		}
 	}
-
+	// Skip reading checksum.
+	readPos -= blk.chkLen
+	if len(t.dataKey) > 0 {
+		// We encrypt and store the checksum.
+		// So, decrypting after checksum verfication.
+		deBlk, err := y.XORBlock(t.dataKey, iv, blk.data[:readPos], 0)
+		if err != nil {
+			return nil, err
+		}
+		deBlk = append(deBlk, blk.data[readPos:]...)
+		blk.data = deBlk
+	}
+	//Move position to read numEntries in block.
+	readPos -= 4
+	blk.numEntries = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
+	blk.entriesIndexStart = readPos - (blk.numEntries * 4)
 	return blk, err
 }
 

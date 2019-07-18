@@ -19,8 +19,6 @@ package table
 import (
 	"bytes"
 	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
 	"encoding/binary"
 	"io"
 	"math"
@@ -73,11 +71,9 @@ type Builder struct {
 
 	tableIndex *pb.TableIndex
 
-	keyBuf    *bytes.Buffer
-	keyCount  int
-	doEncrypt bool
-	aesBlock  cipher.Block
-	opts      *BuilderOptions
+	keyBuf   *bytes.Buffer
+	keyCount int
+	opts     *BuilderOptions
 }
 
 // BuilderOptions holds options for table builder.
@@ -87,15 +83,7 @@ type BuilderOptions struct {
 
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts *BuilderOptions) *Builder {
-	var doEncrypt bool
-	var aesBlock cipher.Block
-	var err error
-	if len(opts.DataKey) > 0 {
-		doEncrypt = true
-		aesBlock, err = aes.NewCipher(opts.DataKey)
-		y.Check(err) // Master key check has to be validated in the caller side.
-	}
-	builder := &Builder{
+	return &Builder{
 		keyBuf:     newBuffer(1 << 20),
 		buf:        []byte{},
 		tableIndex: &pb.TableIndex{},
@@ -103,14 +91,8 @@ func NewTableBuilder(opts *BuilderOptions) *Builder {
 
 		// TODO(Ashish): make this configurable
 		blockSize: 4 * 1024,
-		doEncrypt: doEncrypt,
-		aesBlock:  aesBlock,
 		opts:      opts,
 	}
-	if doEncrypt {
-		builder.intializeIV()
-	}
-	return builder
 }
 
 // Close closes the TableBuilder.
@@ -128,12 +110,6 @@ func (b Builder) keyDiff(newKey []byte) []byte {
 		}
 	}
 	return newKey[i:]
-}
-
-// intializeIV appends IV to the blockbuf.
-func (b *Builder) intializeIV() {
-	_, err := b.blockBuf.Write(genereateIV())
-	y.Check(err)
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
@@ -167,10 +143,6 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	// store current entry's offset
 	y.AssertTrue(len(b.buf)+b.blockBuf.Len() < math.MaxUint32)
 	offset := b.blockBuf.Len()
-	if b.doEncrypt {
-		// Because block don't contain IV.
-		offset = offset - aes.BlockSize
-	}
 	b.entryOffsets = append(b.entryOffsets, uint32(offset))
 	// Layout: header, diffKey, value.
 	var hbuf [8]byte
@@ -199,22 +171,21 @@ func (b *Builder) finishBlock() {
 	}
 	binary.BigEndian.PutUint32(ebuf[len(ebuf)-4:], uint32(len(b.entryOffsets)))
 	b.blockBuf.Write(ebuf)
-
-	if b.doEncrypt {
-		// Writing checksum only for block.
-		writeChecksum(b.blockBuf.Bytes()[aes.BlockSize:], b.blockBuf)
-	} else {
-		writeChecksum(b.blockBuf.Bytes(), b.blockBuf)
-	}
 	blockBuf := b.blockBuf.Bytes()
-	if b.doEncrypt {
-		dst := make([]byte, len(blockBuf[aes.BlockSize:]))
-		stream := cipher.NewCTR(b.aesBlock, blockBuf[:aes.BlockSize])
-		stream.XORKeyStream(dst, blockBuf[aes.BlockSize:])
-		blockBuf = blockBuf[:aes.BlockSize]
-		blockBuf = append(blockBuf, dst...)
+	var iv []byte
+	if len(b.opts.DataKey) > 0 {
+		var err error
+		iv, err = y.GenereateIV()
+		y.Check(err)
+		blockBuf, err = y.XORBlock(b.opts.DataKey, iv, blockBuf, 0)
+		y.Check(err)
 	}
+	// Obtain checksum.
+	chksum, err := getChecksum(blockBuf)
+	y.Check(err)
 	b.buf = append(b.buf, blockBuf...)
+	b.buf = append(b.buf, chksum...)
+	b.buf = append(b.buf, iv...)
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
 	// implement padding. This might be useful while using direct I/O.
 
@@ -241,6 +212,10 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		4) // checksum length
 	estimatedSize := uint32(len(b.buf)+b.blockBuf.Len()) - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
+	if len(b.opts.DataKey) > 0 {
+		// If datakey present, add IV length as well.
+		estimatedSize += aes.BlockSize
+	}
 
 	return estimatedSize > b.blockSize
 }
@@ -255,9 +230,6 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 		b.baseOffset = uint32(len(b.buf))
 		b.entryOffsets = b.entryOffsets[:0]
 		b.blockBuf = newBuffer(4 << 10)
-		if b.doEncrypt {
-			b.intializeIV()
-		}
 	}
 	b.addHelper(key, value)
 	return nil // Currently, there is no meaningful error.
@@ -298,7 +270,6 @@ func (b *Builder) Finish() []byte {
 	bf := bbloom.New(float64(b.keyCount), 0.01)
 	var klen [2]byte
 	var iv []byte
-	var stream cipher.Stream
 	key := make([]byte, 1024)
 	for {
 		if _, err := b.keyBuf.Read(klen[:]); err == io.EOF {
@@ -320,44 +291,27 @@ func (b *Builder) Finish() []byte {
 
 	index, err := b.tableIndex.Marshal()
 	y.Check(err)
-	n := len(index)
-	y.AssertTrue(n < math.MaxUint32)
-	chkSum := &bytes.Buffer{}
 	// Calculate CheckSum for the index.
-	writeChecksum(index, chkSum)
-	indexChkSum := chkSum.Bytes()
-	if b.doEncrypt {
-		iv = genereateIV()
-		stream = cipher.NewCTR(b.aesBlock, iv)
-		eChkSum := make([]byte, len(indexChkSum[:len(indexChkSum)-4]))
-		// Encrypt CheckSum.
-		// We need to encrypt checksum before index.
-		// beacuse Table reads checksum first and then it reads index.
-		// In order to encrypt and decrypt, we need to pass the block in
-		// same order. Otherwise, the counter will be mismatched. We don't
-		// get the real data back.
-		cl := indexChkSum[len(indexChkSum)-4:]
-		stream.XORKeyStream(eChkSum, indexChkSum[:len(indexChkSum)-4])
-		indexChkSum = eChkSum
-		indexChkSum = append(indexChkSum, cl...)
-		ei := make([]byte, len(index))
-		//Encrypt Index.
-		stream.XORKeyStream(ei, index)
-		index = ei
+	if len(b.opts.DataKey) > 0 {
+		iv, err = y.GenereateIV()
+		y.Check(err)
+		index, err = y.XORBlock(b.opts.DataKey, iv, index, 0)
+		y.Check(err)
 	}
+	chksum, err := getChecksum(index)
 	b.buf = append(b.buf, index...)
 	// Write index size.
 	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], uint32(n))
+	binary.BigEndian.PutUint32(buf[:], uint32(len(index)))
 	b.buf = append(b.buf, buf[0], buf[1], buf[2], buf[3])
 	// Write CheckSum.
-	b.buf = append(b.buf, indexChkSum...)
+	b.buf = append(b.buf, chksum...)
 	b.buf = append(b.buf, iv...)
 	return b.buf
 }
 
-// writeChecksum writes checksum to the writer and also writes the length of checksum.
-func writeChecksum(data []byte, dst io.Writer) {
+// getChecksum returns checksum and also writes the length of checksum.
+func getChecksum(data []byte) ([]byte, error) {
 	// Build checksum for the index.
 	checksum := pb.Checksum{
 		// TODO: The checksum type should be configurable from the
@@ -374,21 +328,12 @@ func writeChecksum(data []byte, dst io.Writer) {
 
 	// Write checksum to the file.
 	chksum, err := checksum.Marshal()
-	y.Check(err)
-	n, err := dst.Write(chksum)
-	y.Check(err)
-
-	y.AssertTrue(n < math.MaxUint32)
+	if err != nil {
+		return nil, err
+	}
 	// Write checksum size.
 	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], uint32(n))
-	_, err = dst.Write(buf[:])
-	y.Check(err)
-}
-
-func genereateIV() []byte {
-	iv := make([]byte, aes.BlockSize)
-	_, err := io.ReadFull(rand.Reader, iv)
-	y.Check(err)
-	return iv
+	binary.BigEndian.PutUint32(buf[:], uint32(len(chksum)))
+	chksum = append(chksum, buf[0], buf[1], buf[2], buf[3])
+	return chksum, nil
 }
