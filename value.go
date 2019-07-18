@@ -1420,34 +1420,54 @@ func (vlog *valueLog) encodedDiscardStats() []byte {
 // populateDiscardStats populates vlog.lfDiscardStats
 // This function will be called while initializing valueLog
 func (vlog *valueLog) populateDiscardStats() error {
-	discardStatsKey := y.KeyWithTs(lfDiscardStatsKey, math.MaxUint64)
-	vs, err := vlog.db.get(discardStatsKey)
-	if err != nil {
-		return err
+	key := y.KeyWithTs(lfDiscardStatsKey, math.MaxUint64)
+	var statsMap map[uint32]int64
+	var val []byte
+	var vp valuePointer
+	for {
+		vs, err := vlog.db.get(key)
+		if err != nil {
+			return err
+		}
+		// Value doesn't exist.
+		if vs.Meta == 0 && len(vs.Value) == 0 {
+			vlog.opt.Debugf("Value log discard stats empty")
+			return nil
+		}
+		vp.Decode(vs.Value)
+		// Entry stored in LSM tree.
+		if vs.Meta&bitValuePointer == 0 {
+			val = y.SafeCopy(val, vs.Value)
+			break
+		}
+		// Read entry from value log.
+		result, cb, err := vlog.Read(vp, new(y.Slice))
+		runCallback(cb)
+		val = y.SafeCopy(val, result)
+		// The result is stored in val. We can break the loop from here.
+		if err == nil {
+			break
+		}
+		if err != ErrRetry {
+			return err
+		}
+		// If we're at this point it means we haven't found the value yet and if the current key has
+		// badger move prefix, we should break from here since we've already tried the original key
+		// and the key with move prefix. "val" would be empty since we haven't found the value yet.
+		if bytes.HasPrefix(key, badgerMove) {
+			break
+		}
+		// If we're at this point it means the discard stats key was moved by the GC and the actual
+		// entry is the one prefixed by badger move key.
+		// Prepend existing key with badger move and search for the key.
+		key = append(badgerMove, key...)
 	}
 
-	// check if value is Empty
-	if vs.Value == nil || len(vs.Value) == 0 {
+	if len(val) == 0 {
 		return nil
 	}
-
-	var statsMap map[uint32]int64
-	// discard map is stored in the vlog file.
-	if vs.Meta&bitValuePointer > 0 {
-		var vp valuePointer
-		vp.Decode(vs.Value)
-		result, cb, err := vlog.Read(vp, new(y.Slice))
-		if err != nil {
-			return errors.Wrapf(err, "failed to read value pointer from vlog file: %+v", vp)
-		}
-		defer runCallback(cb)
-		if err := json.Unmarshal(result, &statsMap); err != nil {
-			return errors.Wrapf(err, "failed to unmarshal discard stats")
-		}
-	} else {
-		if err := json.Unmarshal(vs.Value, &statsMap); err != nil {
-			return errors.Wrapf(err, "failed to unmarshal discard stats")
-		}
+	if err := json.Unmarshal(val, &statsMap); err != nil {
+		return errors.Wrapf(err, "failed to unmarshal discard stats")
 	}
 	vlog.opt.Debugf("Value Log Discard stats: %v", statsMap)
 	vlog.lfDiscardStats = &lfDiscardStats{m: statsMap}
