@@ -139,7 +139,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		if fileID > maxFileID {
 			maxFileID = fileID
 		}
-		go func(fname string, tf TableManifest) {
+		go func(fname string, tf TableManifest, fileID uint64) {
 			var rerr error
 			defer func() {
 				throttle.Done(rerr)
@@ -150,8 +150,18 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				rerr = errors.Wrapf(err, "Opening file: %q", fname)
 				return
 			}
-
-			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode)
+			var dataKey []byte
+			_, err = os.Stat(y.NewKeyName(fileID, db.opt.Dir))
+			if err == nil {
+				fd, err := os.Open(y.NewKeyName(fileID, db.opt.Dir))
+				defer fd.Close()
+				dataKey, err = y.GetDataKey(fd, s.kv.storageKey)
+				if err != nil {
+					rerr = err
+					return
+				}
+			}
+			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode, dataKey)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -166,7 +176,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			mu.Lock()
 			tables[tf.Level] = append(tables[tf.Level], t)
 			mu.Unlock()
-		}(fname, tf)
+		}(fname, tf, fileID)
 	}
 	if err := throttle.Finish(); err != nil {
 		closeAllTables(tables)
@@ -490,9 +500,16 @@ func (s *levelsController) compactBuildTables(
 	resultCh := make(chan newTableResult)
 	var numBuilds, numVersions int
 	var lastKey, skipKey []byte
+	var dataKey []byte
+	if len(s.kv.storageKey) > 0 {
+		dataKey = make([]byte, len(s.kv.storageKey))
+		rand.Read(dataKey)
+	}
 	for it.Valid() {
 		timeStart := time.Now()
-		builder := table.NewTableBuilder()
+		builder := table.NewTableBuilder(&table.BuilderOptions{
+			DataKey: dataKey,
+		})
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
 			// See if we need to skip the prefix.
@@ -564,17 +581,25 @@ func (s *levelsController) compactBuildTables(
 		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			numKeys, numSkips, time.Since(timeStart))
 		build := func(fileID uint64) (*table.Table, error) {
+			// Persist the key to the disk.
+			if len(dataKey) > 0 {
+				// This branch will be executed only if data key exist
+				y.AssertTrue(len(s.kv.storageKey) > 0)
+				err := y.StoreDataKey(y.NewKeyName(fileID, s.kv.opt.Dir), s.kv.storageKey, dataKey)
+				if err != nil {
+					return nil, err
+				}
+			}
 			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
 			if err != nil {
 				return nil, errors.Wrapf(err, "While opening new table: %d", fileID)
 			}
-
 			if _, err := fd.Write(builder.Finish()); err != nil {
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
 
 			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode,
-				s.kv.opt.ChecksumVerificationMode)
+				s.kv.opt.ChecksumVerificationMode, dataKey)
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}

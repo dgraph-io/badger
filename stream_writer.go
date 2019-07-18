@@ -17,6 +17,8 @@
 package badger
 
 import (
+	"crypto/aes"
+	"crypto/rand"
 	"math"
 
 	"github.com/dgraph-io/badger/pb"
@@ -193,15 +195,24 @@ type sortedWriter struct {
 	streamId uint32
 	reqCh    chan *request
 	head     valuePointer
+	dataKey  []byte
 }
 
 func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
+	var dataKey []byte
+	if len(sw.db.storageKey) > 0 {
+		dataKey = make([]byte, aes.BlockSize)
+		rand.Read(dataKey)
+	}
 	w := &sortedWriter{
 		db:       sw.db,
 		streamId: streamId,
 		throttle: sw.throttle,
-		builder:  table.NewTableBuilder(),
-		reqCh:    make(chan *request, 3),
+		builder: table.NewTableBuilder(&table.BuilderOptions{
+			DataKey: dataKey,
+		}),
+		reqCh:   make(chan *request, 3),
+		dataKey: dataKey,
 	}
 	sw.closer.AddRunning(1)
 	go w.handleRequests(sw.closer)
@@ -281,12 +292,20 @@ func (w *sortedWriter) send() error {
 	if err := w.throttle.Do(); err != nil {
 		return err
 	}
-	go func(builder *table.Builder) {
+	go func(builder *table.Builder, dataKey []byte) {
 		data := builder.Finish()
-		err := w.createTable(data)
+		err := w.createTable(data, dataKey)
 		w.throttle.Done(err)
-	}(w.builder)
-	w.builder = table.NewTableBuilder()
+	}(w.builder, w.dataKey)
+	var dataKey []byte
+	if len(w.db.storageKey) > 0 {
+		dataKey = make([]byte, aes.BlockSize)
+		rand.Read(dataKey)
+	}
+	w.builder = table.NewTableBuilder(&table.BuilderOptions{
+		DataKey: dataKey,
+	})
+	w.dataKey = dataKey
 	return nil
 }
 
@@ -299,11 +318,20 @@ func (w *sortedWriter) Done() error {
 	return w.send()
 }
 
-func (w *sortedWriter) createTable(data []byte) error {
+func (w *sortedWriter) createTable(data []byte, dataKey []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
 	fileID := w.db.lc.reserveFileID()
+	if len(w.db.storageKey) > 0 {
+		dataKey = make([]byte, len(w.db.storageKey))
+		rand.Read(dataKey)
+		// Persist the key to the disk.
+		err := y.StoreDataKey(y.NewKeyName(fileID, w.db.opt.Dir), w.db.storageKey, dataKey)
+		if err != nil {
+			return y.Wrap(err)
+		}
+	}
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, w.db.opt.Dir), true)
 	if err != nil {
 		return err
@@ -311,7 +339,7 @@ func (w *sortedWriter) createTable(data []byte) error {
 	if _, err := fd.Write(data); err != nil {
 		return err
 	}
-	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode, w.db.opt.ChecksumVerificationMode)
+	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode, w.db.opt.ChecksumVerificationMode, dataKey)
 	if err != nil {
 		return err
 	}

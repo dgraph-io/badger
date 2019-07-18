@@ -22,7 +22,9 @@ import (
 	"encoding/binary"
 	"expvar"
 	"io"
+	"io/ioutil"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -89,7 +91,8 @@ type DB struct {
 
 	orc *oracle
 
-	pub *publisher
+	pub        *publisher
+	storageKey []byte //TODO: don't claim memory from Go. can be swapped to the disk.
 }
 
 const (
@@ -282,6 +285,13 @@ func Open(opt Options) (db *DB, err error) {
 		valueDirGuard: valueDirLockGuard,
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
+	}
+
+	if opt.StorageKeyPath != "" {
+		db.storageKey, err = ioutil.ReadFile(opt.StorageKeyPath)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Calculate initial size.
@@ -849,10 +859,12 @@ func arenaSize(opt Options) int64 {
 }
 
 // WriteLevel0Table flushes memtable.
-func writeLevel0Table(ft flushTask, f io.Writer) error {
+func (db *DB) writeLevel0Table(ft flushTask, f io.Writer, dataKey []byte) error {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
-	b := table.NewTableBuilder()
+	b := table.NewTableBuilder(&table.BuilderOptions{
+		DataKey: dataKey,
+	})
 	defer b.Close()
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 		if len(ft.dropPrefix) > 0 && bytes.HasPrefix(iter.Key(), ft.dropPrefix) {
@@ -900,10 +912,18 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// Don't block just to sync the directory entry.
 	dirSyncCh := make(chan error)
 	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
-
-	err = writeLevel0Table(ft, fd)
+	var dataKey []byte
+	if len(db.storageKey) > 0 {
+		dataKey = make([]byte, len(db.storageKey))
+		rand.Read(dataKey)
+		// Persist the key to the disk.
+		err := y.StoreDataKey(y.NewKeyName(fileID, db.opt.Dir), db.storageKey, dataKey)
+		if err != nil {
+			return err
+		}
+	}
+	err = db.writeLevel0Table(ft, fd, dataKey)
 	dirSyncErr := <-dirSyncCh
-
 	if err != nil {
 		db.elog.Errorf("ERROR while writing to level 0: %v", err)
 		return err
@@ -913,7 +933,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
 
-	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode)
+	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode, dataKey)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err

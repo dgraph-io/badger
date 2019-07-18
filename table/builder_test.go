@@ -40,7 +40,7 @@ func TestTableIndex(t *testing.T) {
 	})
 
 	t.Run("multiple keys", func(t *testing.T) {
-		keysCount := 10
+		keysCount := 10000
 		builder := NewTableBuilder(&BuilderOptions{})
 		filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
 		f, err := y.OpenSyncedFile(filename, true)
@@ -84,7 +84,7 @@ func TestBlockEncryption(t *testing.T) {
 	_, err := rand.Read(key)
 	y.Check(err)
 
-	keysCount := 10
+	keysCount := 10000
 	builder := NewTableBuilder(&BuilderOptions{
 		DataKey: key,
 	})
