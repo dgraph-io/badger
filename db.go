@@ -1412,7 +1412,7 @@ func (db *DB) dropAll() (func(), error) {
 
 // DropPrefix would drop all the keys with the provided prefix. It does this in the following way:
 // - Stop accepting new writes.
-// - Stop memtable flushes before aquiring lock. Because we're acquring lock here
+// - Stop memtable flushes before acquiring lock. Because we're acquring lock here
 //   and memtable flush stalls for lock, which leads to deadlock
 // - Flush out all memtables, skipping over keys with the given prefix, Kp.
 // - Write out the value log header to memtables when flushing, so we don't accidentally bring Kp
