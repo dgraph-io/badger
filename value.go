@@ -802,7 +802,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	if err := vlog.populateDiscardStats(); err != nil {
 		// Print the error and continue. We don't want to prevent value log open if there's an error
 		// with the fetching discards stats.
-		db.opt.Infof("Failed to populate discard stats: %s", err)
+		db.opt.Errorf("Failed to populate discard stats: %s", err)
 	}
 	return nil
 }
