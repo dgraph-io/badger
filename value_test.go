@@ -1028,3 +1028,59 @@ func TestSafeEntry(t *testing.T) {
 	require.Equal(t, e.UserMeta, ne.UserMeta, "usermeta mismatch")
 	require.Equal(t, e.ExpiresAt, ne.ExpiresAt, "expiresAt mismatch")
 }
+
+// Regression test for https://github.com/dgraph-io/badger/issues/926
+func TestDiscardStatsMove(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	ops := getTestOptions(dir)
+	ops.ValueLogMaxEntries = 1
+	db, err := Open(ops)
+	require.NoError(t, err)
+
+	stat := make(map[uint32]int64, ops.ValueThreshold+10)
+	for i := uint32(0); i < uint32(ops.ValueThreshold+10); i++ {
+		stat[i] = 0
+	}
+
+	// Set discard stats.
+	db.vlog.lfDiscardStats = &lfDiscardStats{
+		m: stat,
+	}
+	entries := []*Entry{{
+		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
+		// The discard stat value is more than value threshold.
+		Value: db.vlog.encodedDiscardStats(),
+	}}
+	// Push discard stats entry to the write channel.
+	req, err := db.sendToWriteCh(entries)
+	require.NoError(t, err)
+	req.Wait()
+
+	// Unset discard stats. We've already pushed the stats. If we don't unset it then it will be
+	// pushed again on DB close. Also, the first insertion was in vlog file 1, this insertion would
+	// be in value log file 3.
+	db.vlog.lfDiscardStats.m = nil
+
+	// Push more entries so that we get more than 1 value log files.
+	require.NoError(t, db.Update(func(txn *Txn) error {
+		e := NewEntry([]byte("f"), []byte("1"))
+		return txn.SetEntry(e)
+	}))
+	require.NoError(t, db.Update(func(txn *Txn) error {
+		e := NewEntry([]byte("ff"), []byte("1"))
+		return txn.SetEntry(e)
+
+	}))
+
+	tr := trace.New("Badger.ValueLog", "GC")
+	// Use first value log file for GC. This value log file contains the discard stats.
+	lf := db.vlog.filesMap[0]
+	require.NoError(t, db.vlog.rewrite(lf, tr))
+	require.NoError(t, db.Close())
+
+	db, err = Open(ops)
+	require.NoError(t, err)
+	require.Equal(t, stat, db.vlog.lfDiscardStats.m)
+	require.NoError(t, db.Close())
+}
