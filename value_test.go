@@ -974,3 +974,40 @@ func TestValueLogTruncate(t *testing.T) {
 	require.Equal(t, 2, int(db.vlog.maxFid))
 	require.NoError(t, db.Close())
 }
+
+// Regression test for https://github.com/dgraph-io/dgraph/issues/3669
+func TestTruncatedDiscardStat(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	ops := getTestOptions(dir)
+	db, err := Open(ops)
+	require.NoError(t, err)
+
+	stat := make(map[uint32]int64, 20)
+	for i := uint32(0); i < uint32(20); i++ {
+		stat[i] = 0
+	}
+	// Set discard stats.
+	db.vlog.lfDiscardStats = &lfDiscardStats{
+		m: stat,
+	}
+	entries := []*Entry{{
+		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
+		// Insert truncated discard stats. This is important.
+		Value: db.vlog.encodedDiscardStats()[:10],
+	}}
+	// Push discard stats entry to the write channel.
+	req, err := db.sendToWriteCh(entries)
+	require.NoError(t, err)
+	req.Wait()
+
+	// Unset discard stats. We've already pushed the stats. If we don't unset it then it will be
+	// pushed again on DB close.
+	db.vlog.lfDiscardStats.m = nil
+
+	require.NoError(t, db.Close())
+
+	db, err = Open(ops)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+}
