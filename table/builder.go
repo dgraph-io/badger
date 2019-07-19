@@ -61,9 +61,7 @@ func (h header) Size() int { return 8 }
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	buf []byte
-
-	blockBuf     *bytes.Buffer
+	buf          []byte
 	blockSize    uint32   // Max size of block.
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -87,7 +85,6 @@ func NewTableBuilder(opts *BuilderOptions) *Builder {
 		keyBuf:     newBuffer(1 << 20),
 		buf:        []byte{},
 		tableIndex: &pb.TableIndex{},
-		blockBuf:   newBuffer(4 << 10),
 
 		// TODO(Ashish): make this configurable
 		blockSize: 4 * 1024,
@@ -99,7 +96,7 @@ func NewTableBuilder(opts *BuilderOptions) *Builder {
 func (b *Builder) Close() {}
 
 // Empty returns whether it's empty.
-func (b *Builder) Empty() bool { return len(b.buf)+b.blockBuf.Len() == 0 }
+func (b *Builder) Empty() bool { return len(b.buf) == 0 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
 func (b Builder) keyDiff(newKey []byte) []byte {
@@ -141,16 +138,17 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	}
 
 	// store current entry's offset
-	y.AssertTrue(len(b.buf)+b.blockBuf.Len() < math.MaxUint32)
-	offset := b.blockBuf.Len()
+	y.AssertTrue(len(b.buf) < math.MaxUint32)
+	offset := uint32(len(b.buf)) - b.baseOffset
 	b.entryOffsets = append(b.entryOffsets, uint32(offset))
 	// Layout: header, diffKey, value.
 	var hbuf [8]byte
 	h.Encode(hbuf[:])
-	b.blockBuf.Write(hbuf[:])
-	b.blockBuf.Write(diffKey) // We only need to store the key difference.
-
-	v.EncodeTo(b.blockBuf)
+	b.buf = append(b.buf, hbuf[:]...)
+	b.buf = append(b.buf, diffKey...)
+	vbuf := &bytes.Buffer{}
+	v.EncodeTo(vbuf)
+	b.buf = append(b.buf, vbuf.Bytes()...)
 }
 
 /*
@@ -170,20 +168,19 @@ func (b *Builder) finishBlock() {
 		binary.BigEndian.PutUint32(ebuf[4*i:4*i+4], uint32(offset))
 	}
 	binary.BigEndian.PutUint32(ebuf[len(ebuf)-4:], uint32(len(b.entryOffsets)))
-	b.blockBuf.Write(ebuf)
-	blockBuf := b.blockBuf.Bytes()
+	b.buf = append(b.buf, ebuf...)
 	var iv []byte
 	if len(b.opts.DataKey) > 0 {
 		var err error
 		iv, err = y.GenereateIV()
 		y.Check(err)
-		blockBuf, err = y.XORBlock(b.opts.DataKey, iv, blockBuf, 0)
+		eb, err := y.XORBlock(b.opts.DataKey, iv, b.buf[b.baseOffset:], 0)
 		y.Check(err)
+		copy(b.buf[b.baseOffset:], eb)
 	}
 	// Obtain checksum.
-	chksum, err := getChecksum(blockBuf)
+	chksum, err := getChecksum(b.buf[b.baseOffset:])
 	y.Check(err)
-	b.buf = append(b.buf, blockBuf...)
 	b.buf = append(b.buf, chksum...)
 	b.buf = append(b.buf, iv...)
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
@@ -210,7 +207,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		4 + // size of list
 		8 + // Sum64 in checksum proto
 		4) // checksum length
-	estimatedSize := uint32(len(b.buf)+b.blockBuf.Len()) - b.baseOffset + uint32(6 /*header size for entry*/) +
+	estimatedSize := uint32(len(b.buf)) - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 	if len(b.opts.DataKey) > 0 {
 		// If datakey present, add IV length as well.
@@ -229,7 +226,6 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 		y.AssertTrue(len(b.buf) < math.MaxUint32)
 		b.baseOffset = uint32(len(b.buf))
 		b.entryOffsets = b.entryOffsets[:0]
-		b.blockBuf = newBuffer(4 << 10)
 	}
 	b.addHelper(key, value)
 	return nil // Currently, there is no meaningful error.
@@ -243,7 +239,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	blocksSize := len(b.buf) + b.blockBuf.Len() + // length of current buffer
+	blocksSize := len(b.buf) + // length of current buffer
 		len(b.entryOffsets)*4 + // all entry offsets size
 		4 + // count of all entry offsets
 		8 + // checksum bytes
@@ -303,7 +299,7 @@ func (b *Builder) Finish() []byte {
 	// Write index size.
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(len(index)))
-	b.buf = append(b.buf, buf[0], buf[1], buf[2], buf[3])
+	b.buf = append(b.buf, buf[:]...)
 	// Write CheckSum.
 	b.buf = append(b.buf, chksum...)
 	b.buf = append(b.buf, iv...)
@@ -334,6 +330,6 @@ func getChecksum(data []byte) ([]byte, error) {
 	// Write checksum size.
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(len(chksum)))
-	chksum = append(chksum, buf[0], buf[1], buf[2], buf[3])
+	chksum = append(chksum, buf[:]...)
 	return chksum, nil
 }

@@ -18,7 +18,6 @@ package table
 
 import (
 	"crypto/aes"
-	"crypto/cipher"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -67,11 +66,9 @@ type Table struct {
 
 	bf bbloom.Bloom
 
-	Checksum  []byte
-	chkMode   options.ChecksumVerificationMode // indicates when to verify checksum for blocks.
-	aesBlock  cipher.Block
-	doDecrypt bool
-	dataKey   []byte
+	Checksum []byte
+	chkMode  options.ChecksumVerificationMode // indicates when to verify checksum for blocks.
+	dataKey  []byte
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
