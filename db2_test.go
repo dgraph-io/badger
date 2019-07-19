@@ -66,7 +66,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 
 	// Close the DB.
 	require.NoError(t, db.Close())
-	require.NoError(t, os.Truncate(path.Join(dir, "000000.vlog"), 4096))
+	require.NoError(t, os.Truncate(path.Join(dir, "000000.vlog"), 4090))
 
 	// Reopen and write some new data.
 	db, err = Open(opt)
@@ -113,9 +113,9 @@ var benchDir = flag.String("benchdir", "", "Set when running db.Open benchmark")
 
 // The following 3 TruncateVlogNoClose tests should be run one after another.
 // None of these close the DB, simulating a crash. They should be run with a
-// script, which truncates the value log to 4096, lining up with the end of the
-// first entry in the txn. At <4096, it would cause the entry to be truncated
-// immediately, at >4096, same thing.
+// script, which truncates the value log to 4090, lining up with the end of the
+// first entry in the txn. At <4090, it would cause the entry to be truncated
+// immediately, at >4090, same thing.
 func TestTruncateVlogNoClose(t *testing.T) {
 	if !*manual {
 		t.Skip("Skipping test meant to be run manually.")

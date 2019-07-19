@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -47,7 +48,7 @@ func TestValueBasic(t *testing.T) {
 	const val2 = "samplevalb012345678901234567890123"
 	require.True(t, len(val1) >= kv.opt.ValueThreshold)
 
-	e := &Entry{
+	e1 := &Entry{
 		Key:   []byte("samplekey"),
 		Value: []byte(val1),
 		meta:  bitValuePointer,
@@ -59,7 +60,7 @@ func TestValueBasic(t *testing.T) {
 	}
 
 	b := new(request)
-	b.Entries = []*Entry{e, e2}
+	b.Entries = []*Entry{e1, e2}
 
 	log.write([]*request{b})
 	require.Len(t, b.Ptrs, 2)
@@ -1010,6 +1011,22 @@ func TestTruncatedDiscardStat(t *testing.T) {
 	db, err = Open(ops)
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
+}
+
+func TestSafeEntry(t *testing.T) {
+	var s safeRead
+	e := NewEntry([]byte("foo"), []byte("bar"))
+	buf := bytes.NewBuffer(nil)
+	_, err := encodeEntry(e, buf)
+	require.NoError(t, err)
+
+	ne, err := s.Entry(buf)
+	require.NoError(t, err)
+	require.Equal(t, e.Key, ne.Key, "key mismatch")
+	require.Equal(t, e.Value, ne.Value, "value mismatch")
+	require.Equal(t, e.meta, ne.meta, "meta mismatch")
+	require.Equal(t, e.UserMeta, ne.UserMeta, "usermeta mismatch")
+	require.Equal(t, e.ExpiresAt, ne.ExpiresAt, "expiresAt mismatch")
 }
 
 // Regression test for https://github.com/dgraph-io/badger/issues/926
