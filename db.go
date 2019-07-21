@@ -294,6 +294,11 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}
 
+	if opt.OldStorageKeyPath != "" {
+		// We need to decrypt the data keys with old key and encrypt back with
+		// new key.
+	}
+
 	// Calculate initial size.
 	db.calculateSize()
 	db.closers.updateSize = y.NewCloser(1)

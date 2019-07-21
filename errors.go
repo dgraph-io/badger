@@ -112,4 +112,7 @@ var (
 
 	// ErrNoPrefixes is returned when subscriber doesn't provide any prefix.
 	ErrNoPrefixes = errors.New("At least one key prefix is required")
+
+	// ErrStorageKeyMismatch is returned when the storage key is not matched with the key previously given
+	ErrStorageKeyMismatch = errors.New("Storage key mismatch")
 )

@@ -70,8 +70,9 @@ message Checksum {
   uint64 sum = 2;
 }
 
-message TableMeta {
-  bytes DataKey = 1;
-  bytes IV = 2;
-  bool Encrypted = 3;
+message DataKey {
+  uint64 KeyID = 1;
+  bytes  Data  = 2;
+  bytes  IV  = 3;
+  int64  created_at = 4;
 }

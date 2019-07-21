@@ -69,6 +69,7 @@ type levelManifest struct {
 type TableManifest struct {
 	Level    uint8
 	Checksum []byte
+	KeyID    uint64
 }
 
 // manifestFile holds the file pointer (and other info) about the manifest file, which is a log

@@ -77,7 +77,8 @@ type Options struct {
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
 
-	StorageKeyPath string
+	StorageKeyPath    string
+	OldStorageKeyPath string
 }
 
 // DefaultOptions sets a list of recommended options for good performance.

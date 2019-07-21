@@ -243,11 +243,9 @@ func (t *Table) read(off, sz int) ([]byte, error) {
 		}
 		return t.mmap[off : off+sz], nil
 	}
-
-	res := make([]byte, sz)
-	nbr, err := t.fd.ReadAt(res, int64(off))
+	res, err := y.Read(t.fd, int64(off), sz)
 	y.NumReads.Add(1)
-	y.NumBytesRead.Add(int64(nbr))
+	y.NumBytesRead.Add(int64(len(res)))
 	return res, err
 }
 
