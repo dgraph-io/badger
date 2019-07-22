@@ -23,7 +23,6 @@ import (
 	"expvar"
 	"io"
 	"math"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -90,9 +89,8 @@ type DB struct {
 
 	orc *oracle
 
-	pub        *publisher
-	storageKey []byte //TODO: don't claim memory from Go. can be swapped to the disk.
-	registry   *KeyRegistry
+	pub      *publisher
+	registry *KeyRegistry
 }
 
 const (
@@ -286,17 +284,29 @@ func Open(opt Options) (db *DB, err error) {
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
 	}
-	db.storageKey = opt.StorageKey
-	if len(opt.OldStorageKey) > 0 {
-		registry, err := openKeyRegistry(opt.Dir, opt.ReadOnly, opt.OldStorageKey)
+	// First we'll try to open with old key. Because, It may be plain text.
+	// If it fails, then we'll open with storage key. If old key suceed and a new
+	// key present, then we'll rewrite with new key and open it back.
+	kr, err := openKeyRegistry(opt.Dir, opt.ReadOnly, opt.OldStorageKey)
+	if err == ErrStorageKeyMismatch {
+		var err error
+		kr, err = openKeyRegistry(opt.Dir, opt.ReadOnly, opt.StorageKey)
 		if err != nil {
 			return nil, err
 		}
-		err = rewriteRegistry(opt.Dir, registry, db.storageKey)
-		if err != nil {
-			return nil, err
+	} else {
+		if len(opt.StorageKey) > 0 {
+			err := rewriteRegistry(opt.Dir, kr, opt.StorageKey)
+			if err != nil {
+				return nil, err
+			}
+			kr, err = openKeyRegistry(opt.Dir, opt.ReadOnly, opt.StorageKey)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
+	db.registry = kr
 	// Calculate initial size.
 	db.calculateSize()
 	db.closers.updateSize = y.NewCloser(1)
@@ -862,7 +872,7 @@ func arenaSize(opt Options) int64 {
 }
 
 // WriteLevel0Table flushes memtable.
-func (db *DB) writeLevel0Table(ft flushTask, f io.Writer, dataKey []byte) error {
+func (db *DB) writeLevel0Table(ft flushTask, f io.Writer, dataKey *pb.DataKey) error {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder(&table.BuilderOptions{
@@ -915,17 +925,11 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// Don't block just to sync the directory entry.
 	dirSyncCh := make(chan error)
 	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
-	var dataKey []byte
-	if len(db.storageKey) > 0 {
-		dataKey = make([]byte, len(db.storageKey))
-		rand.Read(dataKey)
-		// Persist the key to the disk.
-		err := y.StoreDataKey(y.NewKeyName(fileID, db.opt.Dir), db.storageKey, dataKey)
-		if err != nil {
-			return err
-		}
+	dk, err := db.registry.getDataKey()
+	if err != nil {
+		return y.Wrap(err)
 	}
-	err = db.writeLevel0Table(ft, fd, dataKey)
+	err = db.writeLevel0Table(ft, fd, dk)
 	dirSyncErr := <-dirSyncCh
 	if err != nil {
 		db.elog.Errorf("ERROR while writing to level 0: %v", err)
@@ -936,7 +940,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
 
-	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode, dataKey)
+	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode, dk)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err

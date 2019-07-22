@@ -185,7 +185,21 @@ func rewriteRegistry(dir string, reg *KeyRegistry, storageKey []byte) error {
 	return nil
 }
 
+func (kr *KeyRegistry) dataKey(id uint64) (*pb.DataKey, error) {
+	if id == 0 {
+		return &pb.DataKey{}, nil
+	}
+	dk, ok := kr.dataKeys[id]
+	if !ok {
+		return nil, ErrInvalidDataKeyID
+	}
+	return dk, nil
+}
+
 func (kr *KeyRegistry) getDataKey() (*pb.DataKey, error) {
+	if len(kr.storageKey) == 0 {
+		return &pb.DataKey{}, nil
+	}
 	diff := time.Now().Sub(time.Unix(kr.lastCreated, 0))
 	if diff.Hours()/24 > 10 {
 		kr.nextKeyID++

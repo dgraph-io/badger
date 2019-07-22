@@ -643,6 +643,64 @@ func TestLoad(t *testing.T) {
 	fmt.Printf("FileIDs: %v\n", fileIDs)
 }
 
+func TestLoadEncryption(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	n := 10000
+	key := make([]byte, 32)
+	rand.Read(key)
+	{
+		opt := getTestOptions(dir)
+		opt.StorageKey = key
+		kv, err := Open(opt)
+		require.NoError(t, err)
+		for i := 0; i < n; i++ {
+			if (i % 10000) == 0 {
+				fmt.Printf("Putting i=%d\n", i)
+			}
+			k := []byte(fmt.Sprintf("%09d", i))
+			txnSet(t, kv, k, k, 0x00)
+		}
+		kv.Close()
+	}
+	opt := getTestOptions(dir)
+	opt.StorageKey = key
+	kv, err := Open(opt)
+	require.NoError(t, err)
+	require.Equal(t, uint64(10001), kv.orc.readTs())
+
+	for i := 0; i < n; i++ {
+		if (i % 10000) == 0 {
+			fmt.Printf("Testing i=%d\n", i)
+		}
+		k := fmt.Sprintf("%09d", i)
+		require.NoError(t, kv.View(func(txn *Txn) error {
+			item, err := txn.Get([]byte(k))
+			require.NoError(t, err)
+			require.EqualValues(t, k, string(getItemValue(t, item)))
+			return nil
+		}))
+	}
+	kv.Close()
+	summary := kv.lc.getSummary()
+
+	// Check that files are garbage collected.
+	idMap := getIDMap(dir)
+	for fileID := range idMap {
+		// Check that name is in summary.filenames.
+		require.True(t, summary.fileIDs[fileID], "%d", fileID)
+	}
+	require.EqualValues(t, len(idMap), len(summary.fileIDs))
+
+	var fileIDs []uint64
+	for k := range summary.fileIDs { // Map to array.
+		fileIDs = append(fileIDs, k)
+	}
+	sort.Slice(fileIDs, func(i, j int) bool { return fileIDs[i] < fileIDs[j] })
+	fmt.Printf("FileIDs: %v\n", fileIDs)
+}
+
 func TestIterateDeleted(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		txnSet(t, db, []byte("Key1"), []byte("Value1"), 0x00)

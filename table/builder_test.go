@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/pb"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/options"
@@ -34,7 +36,7 @@ func TestTableIndex(t *testing.T) {
 	keyPrefix := "key"
 	t.Run("single key", func(t *testing.T) {
 		f := buildTestTable(t, keyPrefix, 1)
-		tbl, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, []byte{})
+		tbl, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, &pb.DataKey{})
 		require.NoError(t, err)
 		require.Len(t, tbl.blockIndex, 1)
 	})
@@ -63,7 +65,7 @@ func TestTableIndex(t *testing.T) {
 		}
 		f.Write(builder.Finish())
 
-		tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, []byte{})
+		tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
 		require.NoError(t, err, "unable to open table")
 
 		// Ensure index is built correctly
@@ -86,7 +88,9 @@ func TestBlockEncryption(t *testing.T) {
 
 	keysCount := 10000
 	builder := NewTableBuilder(&BuilderOptions{
-		DataKey: key,
+		DataKey: &pb.DataKey{
+			Data: key,
+		},
 	})
 	filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
@@ -97,6 +101,7 @@ func TestBlockEncryption(t *testing.T) {
 	for i := 0; i < keysCount; i++ {
 		k := []byte(fmt.Sprintf("%016x", i))
 		v := fmt.Sprintf("%d", i)
+
 		vs := y.ValueStruct{Value: []byte(v)}
 		if i == 0 { // This is first key for first block.
 			blockFirstKeys = append(blockFirstKeys, k)
@@ -108,7 +113,9 @@ func TestBlockEncryption(t *testing.T) {
 		y.Check(builder.Add(k, vs))
 	}
 	f.Write(builder.Finish())
-	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, key)
+	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{
+		Data: key,
+	})
 	require.NoError(t, err, "unable to open table")
 
 	// Ensure index is built correctly

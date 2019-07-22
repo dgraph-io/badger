@@ -68,7 +68,7 @@ type Table struct {
 
 	Checksum []byte
 	chkMode  options.ChecksumVerificationMode // indicates when to verify checksum for blocks.
-	dataKey  []byte
+	dataKey  *pb.DataKey
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
@@ -143,7 +143,7 @@ func (b block) NewIterator() *blockIterator {
 // deleting. Checksum for all blocks of table is verified based on value of chkMode.
 // TODO:(Ashish): convert individual args to option struct.
 func OpenTable(fd *os.File, mode options.FileLoadingMode,
-	chkMode options.ChecksumVerificationMode, dataKey []byte) (*Table, error) {
+	chkMode options.ChecksumVerificationMode, dataKey *pb.DataKey) (*Table, error) {
 
 	fileInfo, err := fd.Stat()
 	if err != nil {
@@ -259,7 +259,7 @@ func (t *Table) readIndex() error {
 	readPos := t.tableSize
 	var iv []byte
 	// Read checksum len from the last 4 bytes.
-	if len(t.dataKey) > 0 {
+	if len(t.dataKey.Data) > 0 {
 		readPos -= aes.BlockSize
 		iv = t.readNoFail(readPos, aes.BlockSize)
 	}
@@ -285,9 +285,9 @@ func (t *Table) readIndex() error {
 	if err := y.VerifyChecksum(data, expectedChk); err != nil {
 		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename())
 	}
-	if len(t.dataKey) > 0 {
+	if len(t.dataKey.Data) > 0 {
 		var err error
-		data, err = y.XORBlock(t.dataKey, iv, data, 0)
+		data, err = y.XORBlock(t.dataKey.Data, iv, data, 0)
 		if err != nil {
 			return err
 		}
@@ -317,7 +317,7 @@ func (t *Table) block(idx int) (*block, error) {
 		return nil, err
 	}
 
-	if len(t.dataKey) > 0 {
+	if len(t.dataKey.Data) > 0 {
 		iv = data[len(data)-aes.BlockSize:]
 		data = data[:len(data)-aes.BlockSize]
 	}
@@ -334,10 +334,10 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 	// Skip reading checksum.
 	readPos -= blk.chkLen
-	if len(t.dataKey) > 0 {
+	if len(t.dataKey.Data) > 0 {
 		// We encrypt and store the checksum.
 		// So, decrypting after checksum verfication.
-		deBlk, err := y.XORBlock(t.dataKey, iv, blk.data[:readPos], 0)
+		deBlk, err := y.XORBlock(t.dataKey.Data, iv, blk.data[:readPos], 0)
 		if err != nil {
 			return nil, err
 		}
@@ -392,6 +392,11 @@ func (t *Table) VerifyChecksum() error {
 	}
 
 	return nil
+}
+
+// KeyID returns datakey's ID.
+func (t *Table) KeyID() uint64 {
+	return t.dataKey.KeyID
 }
 
 // ParseFileID reads the file id out of a filename.

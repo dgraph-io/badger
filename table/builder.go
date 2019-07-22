@@ -76,7 +76,7 @@ type Builder struct {
 
 // BuilderOptions holds options for table builder.
 type BuilderOptions struct {
-	DataKey []byte
+	DataKey *pb.DataKey
 }
 
 // NewTableBuilder makes a new TableBuilder.
@@ -170,11 +170,11 @@ func (b *Builder) finishBlock() {
 	binary.BigEndian.PutUint32(ebuf[len(ebuf)-4:], uint32(len(b.entryOffsets)))
 	b.buf = append(b.buf, ebuf...)
 	var iv []byte
-	if len(b.opts.DataKey) > 0 {
+	if len(b.opts.DataKey.Data) > 0 {
 		var err error
 		iv, err = y.GenereateIV()
 		y.Check(err)
-		eb, err := y.XORBlock(b.opts.DataKey, iv, b.buf[b.baseOffset:], 0)
+		eb, err := y.XORBlock(b.opts.DataKey.Data, iv, b.buf[b.baseOffset:], 0)
 		y.Check(err)
 		copy(b.buf[b.baseOffset:], eb)
 	}
@@ -209,7 +209,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		4) // checksum length
 	estimatedSize := uint32(len(b.buf)) - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
-	if len(b.opts.DataKey) > 0 {
+	if len(b.opts.DataKey.Data) > 0 {
 		// If datakey present, add IV length as well.
 		estimatedSize += aes.BlockSize
 	}
@@ -288,10 +288,10 @@ func (b *Builder) Finish() []byte {
 	index, err := b.tableIndex.Marshal()
 	y.Check(err)
 	// Calculate CheckSum for the index.
-	if len(b.opts.DataKey) > 0 {
+	if len(b.opts.DataKey.Data) > 0 {
 		iv, err = y.GenereateIV()
 		y.Check(err)
-		index, err = y.XORBlock(b.opts.DataKey, iv, index, 0)
+		index, err = y.XORBlock(b.opts.DataKey.Data, iv, index, 0)
 		y.Check(err)
 	}
 	chksum, err := getChecksum(index)
@@ -304,6 +304,11 @@ func (b *Builder) Finish() []byte {
 	b.buf = append(b.buf, chksum...)
 	b.buf = append(b.buf, iv...)
 	return b.buf
+}
+
+// DataKey returns datakey of the builder.
+func (b *Builder) DataKey() *pb.DataKey {
+	return b.opts.DataKey
 }
 
 // getChecksum returns checksum and also writes the length of checksum.

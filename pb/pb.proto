@@ -48,6 +48,7 @@ message ManifestChange {
         }
         Operation Op   = 2;
         uint32 Level   = 3; // Only used for CREATE
+        uint64 KeyID   = 4;
 }
 
 message BlockOffset {
@@ -71,8 +72,8 @@ message Checksum {
 }
 
 message DataKey {
-  uint64 KeyID = 1;
-  bytes  Data  = 2;
-  bytes  IV  = 3;
+  uint64 KeyID      = 1;
+  bytes  Data       = 2;
+  bytes  IV         = 3;
   int64  created_at = 4;
 }

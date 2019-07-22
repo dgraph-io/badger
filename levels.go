@@ -139,7 +139,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		if fileID > maxFileID {
 			maxFileID = fileID
 		}
-		go func(fname string, tf TableManifest, fileID uint64) {
+		go func(fname string, tf TableManifest) {
 			var rerr error
 			defer func() {
 				throttle.Done(rerr)
@@ -150,18 +150,12 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				rerr = errors.Wrapf(err, "Opening file: %q", fname)
 				return
 			}
-			var dataKey []byte
-			_, err = os.Stat(y.NewKeyName(fileID, db.opt.Dir))
-			if err == nil {
-				fd, err := os.Open(y.NewKeyName(fileID, db.opt.Dir))
-				defer fd.Close()
-				dataKey, err = y.GetDataKey(fd, s.kv.storageKey)
-				if err != nil {
-					rerr = err
-					return
-				}
+			dk, err := db.registry.dataKey(tf.KeyID)
+			if err != nil {
+				rerr = err
+				return
 			}
-			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode, dataKey)
+			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode, dk)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -176,7 +170,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			mu.Lock()
 			tables[tf.Level] = append(tables[tf.Level], t)
 			mu.Unlock()
-		}(fname, tf, fileID)
+		}(fname, tf)
 	}
 	if err := throttle.Finish(); err != nil {
 		closeAllTables(tables)
@@ -500,15 +494,14 @@ func (s *levelsController) compactBuildTables(
 	resultCh := make(chan newTableResult)
 	var numBuilds, numVersions int
 	var lastKey, skipKey []byte
-	var dataKey []byte
-	if len(s.kv.storageKey) > 0 {
-		dataKey = make([]byte, len(s.kv.storageKey))
-		rand.Read(dataKey)
-	}
 	for it.Valid() {
 		timeStart := time.Now()
+		dk, err := s.kv.registry.getDataKey()
+		if err != nil {
+			return nil, nil, err
+		}
 		builder := table.NewTableBuilder(&table.BuilderOptions{
-			DataKey: dataKey,
+			DataKey: dk,
 		})
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
@@ -581,15 +574,6 @@ func (s *levelsController) compactBuildTables(
 		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			numKeys, numSkips, time.Since(timeStart))
 		build := func(fileID uint64) (*table.Table, error) {
-			// Persist the key to the disk.
-			if len(dataKey) > 0 {
-				// This branch will be executed only if data key exist
-				y.AssertTrue(len(s.kv.storageKey) > 0)
-				err := y.StoreDataKey(y.NewKeyName(fileID, s.kv.opt.Dir), s.kv.storageKey, dataKey)
-				if err != nil {
-					return nil, err
-				}
-			}
 			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
 			if err != nil {
 				return nil, errors.Wrapf(err, "While opening new table: %d", fileID)
@@ -599,7 +583,7 @@ func (s *levelsController) compactBuildTables(
 			}
 
 			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode,
-				s.kv.opt.ChecksumVerificationMode, dataKey)
+				s.kv.opt.ChecksumVerificationMode, builder.DataKey())
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}
@@ -659,7 +643,7 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeS
 	changes := []*pb.ManifestChange{}
 	for _, table := range newTables {
 		changes = append(changes,
-			newCreateChange(table.ID(), cd.nextLevel.level))
+			newCreateChange(table.ID(), cd.nextLevel.level, table.KeyID()))
 	}
 	for _, table := range cd.top {
 		changes = append(changes, newDeleteChange(table.ID()))
@@ -875,7 +859,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	// the proper order. (That means this update happens before that of some compaction which
 	// deletes the table.)
 	err := s.kv.manifest.addChanges([]*pb.ManifestChange{
-		newCreateChange(t.ID(), 0),
+		newCreateChange(t.ID(), 0, t.KeyID()),
 	})
 	if err != nil {
 		return err
