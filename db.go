@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"expvar"
 	"io"
-	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
@@ -93,6 +92,7 @@ type DB struct {
 
 	pub        *publisher
 	storageKey []byte //TODO: don't claim memory from Go. can be swapped to the disk.
+	registry   *KeyRegistry
 }
 
 const (
@@ -286,19 +286,17 @@ func Open(opt Options) (db *DB, err error) {
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
 	}
-
-	if opt.StorageKeyPath != "" {
-		db.storageKey, err = ioutil.ReadFile(opt.StorageKeyPath)
+	db.storageKey = opt.StorageKey
+	if len(opt.OldStorageKey) > 0 {
+		registry, err := openKeyRegistry(opt.Dir, opt.ReadOnly, opt.OldStorageKey)
+		if err != nil {
+			return nil, err
+		}
+		err = rewriteRegistry(opt.Dir, registry, db.storageKey)
 		if err != nil {
 			return nil, err
 		}
 	}
-
-	if opt.OldStorageKeyPath != "" {
-		// We need to decrypt the data keys with old key and encrypt back with
-		// new key.
-	}
-
 	// Calculate initial size.
 	db.calculateSize()
 	db.closers.updateSize = y.NewCloser(1)

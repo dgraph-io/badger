@@ -77,8 +77,8 @@ type Options struct {
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
 
-	StorageKeyPath    string
-	OldStorageKeyPath string
+	StorageKey    []byte
+	OldStorageKey []byte
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -113,7 +113,6 @@ func DefaultOptions(path string) Options {
 		Truncate:           false,
 		Logger:             defaultLogger,
 		LogRotatesToFlush:  2,
-		StorageKeyPath:     "",
 	}
 }
 
