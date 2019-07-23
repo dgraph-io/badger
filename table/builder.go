@@ -98,7 +98,7 @@ func (b *Builder) Close() {}
 func (b *Builder) Empty() bool { return b.buf.Len() == 0 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
-func (b Builder) keyDiff(newKey []byte) []byte {
+func (b *Builder) keyDiff(newKey []byte) []byte {
 	var i int
 	for i = 0; i < len(newKey) && i < len(b.baseKey); i++ {
 		if newKey[i] != b.baseKey[i] {
@@ -109,16 +109,7 @@ func (b Builder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
-	// Add key to bloom filter.
-	// if len(key) > 0 {
-	// 	var klen [2]byte
-	// 	keyNoTs := y.ParseKey(key)
-	// 	binary.BigEndian.PutUint16(klen[:], uint16(len(keyNoTs)))
-	// 	b.keyBuf.Write(klen[:])
-	// 	b.keyBuf.Write(keyNoTs)
-	// 	b.keyCount++
-	// }
-	b.bf.Add(key)
+	b.bf.Add(y.ParseKey(key))
 
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
@@ -248,28 +239,8 @@ The table structure looks like
 +---------+------------+-----------+---------------+
 */
 func (b *Builder) Finish() []byte {
-	// if b.bloomEnabled {
-	// 	bf := bbloom.New(float64(b.keyCount), 0.01)
-	// 	var klen [2]byte
-	// 	key := make([]byte, 1024)
-	// 	for {
-	// 		if _, err := b.keyBuf.Read(klen[:]); err == io.EOF {
-	// 			break
-	// 		} else if err != nil {
-	// 			y.Check(err)
-	// 		}
-	// 		kl := int(binary.BigEndian.Uint16(klen[:]))
-	// 		if cap(key) < kl {
-	// 			key = make([]byte, 2*int(kl)) // 2 * uint16 will overflow
-	// 		}
-	// 		key = key[:kl]
-	// 		y.Check2(b.keyBuf.Read(key))
-	// 		bf.Add(key)
-	// 	}
-
 	// Add bloom filter to the index.
 	b.tableIndex.BloomFilter = b.bf.JSONMarshal()
-	// }
 
 	b.finishBlock() // This will never start a new block.
 
