@@ -18,9 +18,11 @@ package y
 
 import (
 	"bytes"
+	"container/list"
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"math"
 	"os"
 	"sync"
@@ -299,4 +301,57 @@ func (t *Throttle) Finish() error {
 	})
 
 	return t.finishErr
+}
+
+// type page struct {
+// 	buf bytes.Buffer
+// }
+
+// NoAllocBuffer ...
+type NoAllocBuffer struct {
+	li       *list.List
+	currBuf  []byte
+	pageSize int
+	idx      int
+}
+
+// NewNoAllocBuffer ...
+func NewNoAllocBuffer(pageSize int) *NoAllocBuffer {
+	n := &NoAllocBuffer{li: list.New(), currBuf: make([]byte, pageSize), pageSize: pageSize}
+	return n
+}
+
+func (n *NoAllocBuffer) Len() int {
+	return n.idx + n.li.Len()*n.pageSize
+}
+func (n *NoAllocBuffer) Write(b []byte) (int, error) {
+	if n.idx+len(b) > n.pageSize {
+		n.li.PushBack(n.currBuf[:n.idx])
+		n.currBuf = make([]byte, n.pageSize)
+		n.idx = 0
+	}
+	AssertTruef(n.idx < len(n.currBuf), "%d should be less than %d", n.idx, len(n.currBuf))
+	copy(n.currBuf[n.idx:], b)
+	n.idx += len(b)
+	return len(b), nil
+}
+
+func (n *NoAllocBuffer) WriteByte(b byte) (int, error) {
+	return n.Write([]byte{b})
+}
+
+func (n *NoAllocBuffer) Bytes() []byte {
+	buf := make([]byte, (n.li.Len()*n.pageSize)+n.idx)
+	cur := buf
+	for itr := n.li.Front(); itr != nil; itr = itr.Next() {
+		b := itr.Value.([]byte)
+		copy(cur[:n.pageSize], b)
+		cur = cur[n.pageSize:]
+	}
+	copy(cur[:n.idx], n.currBuf[:n.idx])
+	return buf
+}
+
+func (n *NoAllocBuffer) readTo(w io.Writer) {
+
 }

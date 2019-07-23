@@ -60,7 +60,7 @@ func (h header) Size() int { return 8 }
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	buf *bytes.Buffer
+	buf *y.NoAllocBuffer
 
 	blockSize    uint32   // Max size of block.
 	baseKey      []byte   // Base key for the current block.
@@ -77,7 +77,7 @@ type Builder struct {
 func NewTableBuilder() *Builder {
 	return &Builder{
 		keyBuf:     newBuffer(1 << 20),
-		buf:        newBuffer(1 << 20),
+		buf:        y.NewNoAllocBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
 
 		// TODO(Ashish): make this configurable
