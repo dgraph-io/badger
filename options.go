@@ -291,11 +291,11 @@ func (opt Options) WithNumMemtables(val int) Options {
 	return opt
 }
 
-// WithBloomSize returns a new Options value with BloomSize set to given value.
+// WithBloomSize returns a new Options value with BloomSize set to the given value.
 //
-// BloomSize sets apporximate size of bloom filter any SSTable should have. Before reading
-// a key from table, bloom filter is checked for key existence. BloomSize might impact read
-// performance of DB. Small BloomSize can result in more false positive rate.
+// BloomSize sets the approximate size of the bloom filter any SSTable should have. Before reading
+// a key from table, the bloom filter is checked for key existence. BloomSize might impact read
+// performance of DB. A small BloomSize can result in more false positive rate.
 //
 // The default value of BloomSize is 1572864.
 func (opt Options) WithBloomSize(val int) Options {
@@ -303,9 +303,9 @@ func (opt Options) WithBloomSize(val int) Options {
 	return opt
 }
 
-// WithBlockSize returns a new Options value with BlockSize set to given value.
+// WithBlockSize returns a new Options value with BlockSize set to the given value.
 //
-// BlockSize sets size of any block in SSTable. SSTable is divided into multiple blocks
+// BlockSize sets the size of any block in SSTable. SSTable is divided into multiple blocks
 // internally. Each block is compressed using prefix diff encoding.
 //
 // The default value of BlockSize is 4KB.

@@ -197,8 +197,8 @@ type sortedWriter struct {
 
 func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
 	bopts := table.BuilderOptions{
-		BlockSize: uint32(sw.db.opt.BlockSize),
-		BloomSize: uint32(sw.db.opt.BloomSize),
+		BlockSize: sw.db.opt.BlockSize,
+		BloomSize: sw.db.opt.BloomSize,
 	}
 	w := &sortedWriter{
 		db:       sw.db,
@@ -292,8 +292,8 @@ func (w *sortedWriter) send() error {
 	}(w.builder)
 
 	bopts := table.BuilderOptions{
-		BlockSize: uint32(w.db.opt.BlockSize),
-		BloomSize: uint32(w.db.opt.BloomSize),
+		BlockSize: w.db.opt.BlockSize,
+		BloomSize: w.db.opt.BloomSize,
 	}
 	w.builder = table.NewTableBuilder(bopts)
 	return nil

@@ -71,12 +71,12 @@ type Builder struct {
 	bf         bbloom.Bloom
 }
 
-// BuilderOptions contains fields that can be configured for table builder.
+// BuilderOptions contains configurable options for table builder.
 type BuilderOptions struct {
 	// BloomSize is the size of bloom filter in bytes.
-	BloomSize uint32
+	BloomSize int
 	// BlockSize is the size of each block inside SSTable in bytes.
-	BlockSize uint32
+	BlockSize int
 }
 
 // NewTableBuilder makes a new TableBuilder.
@@ -84,11 +84,9 @@ func NewTableBuilder(opts BuilderOptions) *Builder {
 	b := &Builder{
 		buf:        newBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
-		blockSize:  opts.BlockSize,
+		blockSize:  uint32(opts.BlockSize),
 	}
-
-	// TODO: change this, add more comments.
-	b.bf = bbloom.New(float64(opts.BloomSize), float64(4))
+	b.bf = bbloom.New(float64(opts.BloomSize*8 /*No of bits*/), float64(4) /*No of locs*/)
 
 	return b
 }
