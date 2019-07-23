@@ -28,10 +28,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dustin/go-humanize"
-
-	"github.com/AndreasBriese/bbloom"
-
 	"github.com/cespare/xxhash"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
@@ -60,7 +56,8 @@ func buildTestTable(t *testing.T, prefix string, n int) *os.File {
 
 // keyValues is n by 2 where n is number of pairs.
 func buildTable(t *testing.T, keyValues [][]string) *os.File {
-	b := NewTableBuilder(1572864)
+	opts := BuilderOptions{BlockSize: 4 * 1024, BloomSize: 1572864}
+	b := NewTableBuilder(opts)
 	defer b.Close()
 	rand.Seed(time.Now().UnixNano())
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
@@ -649,7 +646,8 @@ func TestTableBigValues(t *testing.T) {
 	require.NoError(t, err, "unable to create file")
 
 	n := 100 // Insert 100 keys.
-	builder := NewTableBuilder(1572864)
+	opts := BuilderOptions{BlockSize: 4 * 1024, BloomSize: 1572864}
+	builder := NewTableBuilder(opts)
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), 0)
 		vs := y.ValueStruct{Value: value(i)}
@@ -717,7 +715,8 @@ func BenchmarkReadAndBuild(b *testing.B) {
 	// Iterate b.N times over the entire table.
 	for i := 0; i < b.N; i++ {
 		func() {
-			newBuilder := NewTableBuilder(1572864)
+			opts := BuilderOptions{BlockSize: 4 * 0124, BloomSize: 1572864}
+			newBuilder := NewTableBuilder(opts)
 			it := tbl.NewIterator(false)
 			defer it.Close()
 			for it.seekToFirst(); it.Valid(); it.next() {
@@ -737,7 +736,8 @@ func BenchmarkReadMerged(b *testing.B) {
 	var tables []*Table
 	for i := 0; i < m; i++ {
 		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-		builder := NewTableBuilder(1572864)
+		opts := BuilderOptions{BlockSize: 4 * 1024, BloomSize: 1572864}
+		builder := NewTableBuilder(opts)
 		f, err := y.OpenSyncedFile(filename, true)
 		y.Check(err)
 		for j := 0; j < tableSize; j++ {
@@ -821,7 +821,8 @@ func BenchmarkRandomRead(b *testing.B) {
 
 func getTableForBenchmarks(b *testing.B, count int) *Table {
 	rand.Seed(time.Now().Unix())
-	builder := NewTableBuilder(1572864)
+	opts := BuilderOptions{BlockSize: 4 * 1024, BloomSize: 1572864}
+	builder := NewTableBuilder(opts)
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
 	require.NoError(b, err)
@@ -836,28 +837,3 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 	require.NoError(b, err, "unable to open table")
 	return tbl
 }
-
-func TestBloom(t *testing.T) {
-	lens := []int{10000, 1000000, 2000000, 5000000, 10000000}
-	for i := 0; i < len(lens); i++ {
-		bf := bbloom.New(float64(lens[i]), 0.1)
-		// for j := 0; j < lens[i]; j++ {
-		// 	key := make([]byte, 32)
-		// 	y.Check2(rand.Read(key))
-		// 	bf.Add(key)
-		// }
-		fmt.Printf("keys: %d, bf: %+v, bf json size: %d humnize-bytes: %s\n", lens[i], bf, len(bf.JSONMarshal()), humanize.Bytes(uint64(len(bf.JSONMarshal()))))
-	}
-}
-
-func TestBloom2(t *testing.T) {
-	s := []int{10240, 1048576}
-	for i := 0; i < len(s); i++ {
-		bf := bbloom.New(float64(s[i]), float64(4))
-		fmt.Printf("size: %d, bf json size: %d\n", s[i], len(bf.JSONMarshal()))
-	}
-}
-
-// func TestBloom2(t *testing.T) {
-// 	bf := bbloom.New(1024)
-// }

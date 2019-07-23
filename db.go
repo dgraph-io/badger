@@ -852,7 +852,8 @@ func arenaSize(opt Options) int64 {
 func writeLevel0Table(ft flushTask, f io.Writer, bloomSize int) error {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
-	b := table.NewTableBuilder(uint64(bloomSize))
+	bopts := table.BuilderOptions{BlockSize: 4 * 1024, BloomSize: uint32(bloomSize)}
+	b := table.NewTableBuilder(bopts)
 	defer b.Close()
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 		if len(ft.dropPrefix) > 0 && bytes.HasPrefix(iter.Key(), ft.dropPrefix) {

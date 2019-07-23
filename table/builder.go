@@ -68,25 +68,27 @@ type Builder struct {
 	entryOffsets []uint32 // Offsets of entries present in current block.
 
 	tableIndex *pb.TableIndex
+	bf         bbloom.Bloom
+}
 
-	keyBuf   *bytes.Buffer
-	keyCount int
-	bf       bbloom.Bloom
+// BuilderOptions contains fields that can be configured for table builder.
+type BuilderOptions struct {
+	// BloomSize is the size of bloom filter in bytes.
+	BloomSize uint32
+	// BlockSize is the size of each block inside SSTable in bytes.
+	BlockSize uint32
 }
 
 // NewTableBuilder makes a new TableBuilder.
-func NewTableBuilder(bloomSize uint64) *Builder {
+func NewTableBuilder(opts BuilderOptions) *Builder {
 	b := &Builder{
-		keyBuf:     newBuffer(1 << 20),
 		buf:        newBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
-
-		// TODO(Ashish): make this configurable
-		blockSize: 4 * 1024,
+		blockSize:  opts.BlockSize,
 	}
 
 	// TODO: change this, add more comments.
-	b.bf = bbloom.New(float64(bloomSize), float64(4))
+	b.bf = bbloom.New(float64(opts.BloomSize), float64(4))
 
 	return b
 }

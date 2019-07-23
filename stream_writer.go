@@ -196,11 +196,12 @@ type sortedWriter struct {
 }
 
 func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
+	bopts := table.BuilderOptions{BlockSize: 4 * 1024, BloomSize: uint32(sw.db.opt.BloomSize)}
 	w := &sortedWriter{
 		db:       sw.db,
 		streamId: streamId,
 		throttle: sw.throttle,
-		builder:  table.NewTableBuilder(uint64(sw.db.opt.BloomSize)),
+		builder:  table.NewTableBuilder(bopts),
 		reqCh:    make(chan *request, 3),
 	}
 	sw.closer.AddRunning(1)
@@ -286,7 +287,8 @@ func (w *sortedWriter) send() error {
 		err := w.createTable(data)
 		w.throttle.Done(err)
 	}(w.builder)
-	w.builder = table.NewTableBuilder(uint64(w.db.opt.BloomSize))
+	bopts := table.BuilderOptions{BlockSize: 4 * 1024, BloomSize: uint32(w.db.opt.BloomSize)}
+	w.builder = table.NewTableBuilder(bopts)
 	return nil
 }
 
