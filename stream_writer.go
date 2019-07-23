@@ -200,7 +200,7 @@ func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
 		db:       sw.db,
 		streamId: streamId,
 		throttle: sw.throttle,
-		builder:  table.NewTableBuilder(),
+		builder:  table.NewTableBuilder(uint64(sw.db.opt.BloomSize)),
 		reqCh:    make(chan *request, 3),
 	}
 	sw.closer.AddRunning(1)
@@ -286,7 +286,7 @@ func (w *sortedWriter) send() error {
 		err := w.createTable(data)
 		w.throttle.Done(err)
 	}(w.builder)
-	w.builder = table.NewTableBuilder()
+	w.builder = table.NewTableBuilder(uint64(w.db.opt.BloomSize))
 	return nil
 }
 
@@ -311,8 +311,7 @@ func (w *sortedWriter) createTable(data []byte) error {
 	if _, err := fd.Write(data); err != nil {
 		return err
 	}
-	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode,
-		w.db.opt.ChecksumVerificationMode, w.db.opt.BloomEnabled)
+	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode, w.db.opt.ChecksumVerificationMode)
 	if err != nil {
 		return err
 	}

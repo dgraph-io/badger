@@ -1828,7 +1828,7 @@ func TestVerifyChecksum(t *testing.T) {
 }
 
 func TestBloomDisabled(t *testing.T) {
-	opts := DefaultOptions("").WithBloomEnabled(false).
+	opts := DefaultOptions("").
 		WithMaxTableSize(1 << 15)
 	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
 		for i := 0; i < 10; i++ {

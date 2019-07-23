@@ -52,7 +52,7 @@ type Options struct {
 	MaxLevels           int
 	ValueThreshold      int
 	NumMemtables        int
-	BloomEnabled        bool
+	BloomSize           int
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -98,7 +98,7 @@ func DefaultOptions(path string) Options {
 		NumLevelZeroTables:      5,
 		NumLevelZeroTablesStall: 10,
 		NumMemtables:            5,
-		BloomEnabled:            true,
+		BloomSize:               1572864, // 1.5 MB
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
@@ -289,15 +289,15 @@ func (opt Options) WithNumMemtables(val int) Options {
 	return opt
 }
 
-// WithBloomEnabled returns a new Options value with BloomEnabled set to given value.
+// WithBloomSize returns a new Options value with BloomSize set to given value.
 //
-// BloomEnabled tells if any SSTable should have bloom filter of keys with it. Before reading
-// a key from table, bloom filter is checked for key existence. If BloomEnabled is false, it
-// might impact read performance of DB.
+// BloomSize tells apporximate size of bloom filter any SSTable should have. Before reading
+// a key from table, bloom filter is checked for key existence. BloomSize might impact read
+// performance of DB. Small BloomSize can result in more false positive rate.
 //
-// The default value of BloomEnabled it true.
-func (opt Options) WithBloomEnabled(val bool) Options {
-	opt.BloomEnabled = val
+// The default value of WithBloomSize is 1572864.
+func (opt Options) WithBloomSize(val int) Options {
+	opt.BloomSize = val
 	return opt
 }
 

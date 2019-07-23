@@ -849,10 +849,10 @@ func arenaSize(opt Options) int64 {
 }
 
 // WriteLevel0Table flushes memtable.
-func writeLevel0Table(ft flushTask, f io.Writer) error {
+func writeLevel0Table(ft flushTask, f io.Writer, bloomSize int) error {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
-	b := table.NewTableBuilder()
+	b := table.NewTableBuilder(uint64(bloomSize))
 	defer b.Close()
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 		if len(ft.dropPrefix) > 0 && bytes.HasPrefix(iter.Key(), ft.dropPrefix) {
@@ -901,7 +901,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	dirSyncCh := make(chan error)
 	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
 
-	err = writeLevel0Table(ft, fd)
+	err = writeLevel0Table(ft, fd, db.opt.BloomSize)
 	dirSyncErr := <-dirSyncCh
 
 	if err != nil {
@@ -913,8 +913,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
 
-	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode,
-		db.opt.ChecksumVerificationMode, db.opt.BloomEnabled)
+	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err

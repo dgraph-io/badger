@@ -355,7 +355,7 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	}
 	// Bloom filter lookup would only work if opt.Prefix does NOT have the read
 	// timestamp as part of the key.
-	if opt.prefixIsKey && t.BloomEnabled() && t.DoesNotHave(opt.Prefix) {
+	if opt.prefixIsKey && t.DoesNotHave(opt.Prefix) {
 		return false
 	}
 	return true

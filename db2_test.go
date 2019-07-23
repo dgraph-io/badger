@@ -516,7 +516,7 @@ func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 // createTableWithRange function is used in TestCompactionFilePicking. It creates
 // a table with key starting from start and ending with end.
 func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
-	b := table.NewTableBuilder()
+	b := table.NewTableBuilder(1572864)
 	nums := []int{start, end}
 	for _, i := range nums {
 		key := make([]byte, 8)
@@ -533,7 +533,7 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	_, err = fd.Write(b.Finish())
 	require.NoError(t, err, "unable to write to file")
 
-	tab, err := table.OpenTable(fd, options.LoadToRAM, options.NoVerification, db.opt.BloomEnabled)
+	tab, err := table.OpenTable(fd, options.LoadToRAM, options.NoVerification)
 	require.NoError(t, err)
 	return tab
 }

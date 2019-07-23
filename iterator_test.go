@@ -38,7 +38,6 @@ type tableMock struct {
 func (tm *tableMock) Smallest() []byte            { return tm.left }
 func (tm *tableMock) Biggest() []byte             { return tm.right }
 func (tm *tableMock) DoesNotHave(key []byte) bool { return false }
-func (tm *tableMock) BloomEnabled() bool          { return true }
 
 func TestPickTables(t *testing.T) {
 	opt := DefaultIteratorOptions

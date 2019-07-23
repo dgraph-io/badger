@@ -150,8 +150,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				return
 			}
 
-			t, err := table.OpenTable(fd, db.opt.TableLoadingMode,
-				db.opt.ChecksumVerificationMode, db.opt.BloomEnabled)
+			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -492,7 +491,7 @@ func (s *levelsController) compactBuildTables(
 	var lastKey, skipKey []byte
 	for it.Valid() {
 		timeStart := time.Now()
-		builder := table.NewTableBuilder()
+		builder := table.NewTableBuilder(uint64(s.kv.opt.BloomSize))
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
 			// See if we need to skip the prefix.
@@ -573,8 +572,7 @@ func (s *levelsController) compactBuildTables(
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
 
-			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode,
-				s.kv.opt.ChecksumVerificationMode, s.kv.opt.BloomEnabled)
+			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, s.kv.opt.ChecksumVerificationMode)
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}

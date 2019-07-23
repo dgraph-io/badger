@@ -19,10 +19,10 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	"io"
 	"math"
 
 	"github.com/AndreasBriese/bbloom"
+
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 )
@@ -69,22 +69,26 @@ type Builder struct {
 
 	tableIndex *pb.TableIndex
 
-	keyBuf       *bytes.Buffer
-	keyCount     int
-	bloomEnabled bool
+	keyBuf   *bytes.Buffer
+	keyCount int
+	bf       bbloom.Bloom
 }
 
 // NewTableBuilder makes a new TableBuilder.
-func NewTableBuilder() *Builder {
-	return &Builder{
-		keyBuf:       newBuffer(1 << 20),
-		bloomEnabled: true,
-		buf:          newBuffer(1 << 20),
-		tableIndex:   &pb.TableIndex{},
+func NewTableBuilder(bloomSize uint64) *Builder {
+	b := &Builder{
+		keyBuf:     newBuffer(1 << 20),
+		buf:        newBuffer(1 << 20),
+		tableIndex: &pb.TableIndex{},
 
 		// TODO(Ashish): make this configurable
 		blockSize: 4 * 1024,
 	}
+
+	// TODO: change this, add more comments.
+	b.bf = bbloom.New(float64(bloomSize), float64(4))
+
+	return b
 }
 
 // Close closes the TableBuilder.
@@ -106,14 +110,15 @@ func (b Builder) keyDiff(newKey []byte) []byte {
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	// Add key to bloom filter.
-	if b.bloomEnabled && len(key) > 0 {
-		var klen [2]byte
-		keyNoTs := y.ParseKey(key)
-		binary.BigEndian.PutUint16(klen[:], uint16(len(keyNoTs)))
-		b.keyBuf.Write(klen[:])
-		b.keyBuf.Write(keyNoTs)
-		b.keyCount++
-	}
+	// if len(key) > 0 {
+	// 	var klen [2]byte
+	// 	keyNoTs := y.ParseKey(key)
+	// 	binary.BigEndian.PutUint16(klen[:], uint16(len(keyNoTs)))
+	// 	b.keyBuf.Write(klen[:])
+	// 	b.keyBuf.Write(keyNoTs)
+	// 	b.keyCount++
+	// }
+	b.bf.Add(key)
 
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
@@ -243,28 +248,28 @@ The table structure looks like
 +---------+------------+-----------+---------------+
 */
 func (b *Builder) Finish() []byte {
-	if b.bloomEnabled {
-		bf := bbloom.New(float64(b.keyCount), 0.01)
-		var klen [2]byte
-		key := make([]byte, 1024)
-		for {
-			if _, err := b.keyBuf.Read(klen[:]); err == io.EOF {
-				break
-			} else if err != nil {
-				y.Check(err)
-			}
-			kl := int(binary.BigEndian.Uint16(klen[:]))
-			if cap(key) < kl {
-				key = make([]byte, 2*int(kl)) // 2 * uint16 will overflow
-			}
-			key = key[:kl]
-			y.Check2(b.keyBuf.Read(key))
-			bf.Add(key)
-		}
+	// if b.bloomEnabled {
+	// 	bf := bbloom.New(float64(b.keyCount), 0.01)
+	// 	var klen [2]byte
+	// 	key := make([]byte, 1024)
+	// 	for {
+	// 		if _, err := b.keyBuf.Read(klen[:]); err == io.EOF {
+	// 			break
+	// 		} else if err != nil {
+	// 			y.Check(err)
+	// 		}
+	// 		kl := int(binary.BigEndian.Uint16(klen[:]))
+	// 		if cap(key) < kl {
+	// 			key = make([]byte, 2*int(kl)) // 2 * uint16 will overflow
+	// 		}
+	// 		key = key[:kl]
+	// 		y.Check2(b.keyBuf.Read(key))
+	// 		bf.Add(key)
+	// 	}
 
-		// Add bloom filter to the index.
-		b.tableIndex.BloomFilter = bf.JSONMarshal()
-	}
+	// Add bloom filter to the index.
+	b.tableIndex.BloomFilter = b.bf.JSONMarshal()
+	// }
 
 	b.finishBlock() // This will never start a new block.
 
