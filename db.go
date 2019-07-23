@@ -849,10 +849,9 @@ func arenaSize(opt Options) int64 {
 }
 
 // WriteLevel0Table flushes memtable.
-func writeLevel0Table(ft flushTask, f io.Writer, bloomSize int) error {
+func writeLevel0Table(ft flushTask, f io.Writer, bopts table.BuilderOptions) error {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
-	bopts := table.BuilderOptions{BlockSize: 4 * 1024, BloomSize: uint32(bloomSize)}
 	b := table.NewTableBuilder(bopts)
 	defer b.Close()
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
@@ -902,7 +901,11 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	dirSyncCh := make(chan error)
 	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
 
-	err = writeLevel0Table(ft, fd, db.opt.BloomSize)
+	bopts := table.BuilderOptions{
+		BlockSize: uint32(db.opt.BlockSize),
+		BloomSize: uint32(db.opt.BloomSize),
+	}
+	err = writeLevel0Table(ft, fd, bopts)
 	dirSyncErr := <-dirSyncCh
 
 	if err != nil {
