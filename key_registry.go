@@ -34,8 +34,8 @@ type keyRegistry struct {
 	fp          *os.File
 }
 
-func newKeyRegistry(storageKey []byte) *KeyRegistry {
-	return &KeyRegistry{
+func newKeyRegistry(storageKey []byte) *keyRegistry {
+	return &keyRegistry{
 		dataKeys:   make(map[uint64]*pb.DataKey),
 		nextKeyID:  0,
 		storageKey: storageKey,
@@ -68,7 +68,7 @@ func openKeyRegistry(dir string, readOnly bool, storageKey []byte) (*keyRegistry
 	return buildKeyRegistry(fp, storageKey)
 }
 
-func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
+func buildKeyRegistry(fp *os.File, storageKey []byte) (*keyRegistry, error) {
 	readPos := int64(0)
 	iv, err := y.Read(fp, readPos, aes.BlockSize)
 	if err != nil {
@@ -81,7 +81,7 @@ func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 	}
 	if len(storageKey) > 0 {
 		var err error
-		eSanityText, err = y.XORBlock(storageKey, iv, eSanityText, 0)
+		eSanityText, err = y.XORBlock(storageKey, iv, eSanityText)
 		if err != nil {
 			return nil, err
 		}
@@ -119,7 +119,7 @@ func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 		}
 		if len(storageKey) > 0 {
 			var err error
-			dataKey.Data, err = y.XORBlock(storageKey, dataKey.IV, dataKey.Data, 0)
+			dataKey.Data, err = y.XORBlock(storageKey, dataKey.IV, dataKey.Data)
 			if err != nil {
 				return nil, err
 			}
@@ -141,7 +141,7 @@ func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 	return kr, nil
 }
 
-func rewriteRegistry(dir string, reg *KeyRegistry, storageKey []byte) error {
+func rewriteRegistry(dir string, reg *keyRegistry, storageKey []byte) error {
 	reWritePath := filepath.Join(dir, keyRegistryRewriteFileName)
 	fp, err := y.OpenTruncFile(reWritePath, false)
 	if err != nil {
@@ -154,7 +154,7 @@ func rewriteRegistry(dir string, reg *KeyRegistry, storageKey []byte) error {
 	eSanity := sanityText
 	if len(storageKey) > 0 {
 		var err error
-		eSanity, err = y.XORBlock(storageKey, iv, eSanity, 0)
+		eSanity, err = y.XORBlock(storageKey, iv, eSanity)
 		if err != nil {
 			return err
 		}
@@ -230,15 +230,15 @@ func (kr *keyRegistry) getDataKey() (*pb.DataKey, error) {
 	return kr.dataKeys[kr.nextKeyID], nil
 }
 
-func (kr *KeyRegistry) close() {
-	kr.fp.Close()
+func (kr *keyRegistry) close() error {
+	return kr.fp.Close()
 }
 
 func storeDataKey(fp *os.File, storageKey []byte, k *pb.DataKey, sync bool) error {
 	if len(storageKey) > 0 {
 		var err error
 		// In memory, we'll have decrypted key.
-		k.Data, err = y.XORBlock(storageKey, k.IV, k.Data, 0)
+		k.Data, err = y.XORBlock(storageKey, k.IV, k.Data)
 		if err != nil {
 			return err
 		}

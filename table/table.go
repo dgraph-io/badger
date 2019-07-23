@@ -286,7 +286,7 @@ func (t *Table) readIndex() error {
 	}
 	if len(t.dataKey.Data) > 0 {
 		var err error
-		data, err = y.XORBlock(t.dataKey.Data, iv, data, 0)
+		data, err = y.XORBlock(t.dataKey.Data, iv, data)
 		if err != nil {
 			return err
 		}
@@ -336,7 +336,7 @@ func (t *Table) block(idx int) (*block, error) {
 	if len(t.dataKey.Data) > 0 {
 		// We encrypt and store the checksum.
 		// So, decrypting after checksum verfication.
-		deBlk, err := y.XORBlock(t.dataKey.Data, iv, blk.data[:readPos], 0)
+		deBlk, err := y.XORBlock(t.dataKey.Data, iv, blk.data[:readPos])
 		if err != nil {
 			return nil, err
 		}

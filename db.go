@@ -90,7 +90,7 @@ type DB struct {
 	orc *oracle
 
 	pub      *publisher
-	registry *KeyRegistry
+	registry *keyRegistry
 }
 
 const (
@@ -477,6 +477,10 @@ func (db *DB) close() (err error) {
 	}
 	if manifestErr := db.manifest.close(); err == nil {
 		err = errors.Wrap(manifestErr, "DB.Close")
+	}
+
+	if registryErr := db.registry.close(); err == nil {
+		err = errors.Wrap(registryErr, "DB.Close")
 	}
 
 	// Fsync directories to ensure that lock file, and any other removed files whose directory
@@ -872,7 +876,7 @@ func arenaSize(opt Options) int64 {
 }
 
 // WriteLevel0Table flushes memtable.
-func (db *DB) writeLevel0Table(ft flushTask, f io.Writer, dataKey *pb.DataKey) error {
+func writeLevel0Table(ft flushTask, f io.Writer, dataKey *pb.DataKey) error {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder(&table.BuilderOptions{
@@ -929,7 +933,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	if err != nil {
 		return y.Wrap(err)
 	}
-	err = db.writeLevel0Table(ft, fd, dk)
+	err = writeLevel0Table(ft, fd, dk)
 	dirSyncErr := <-dirSyncCh
 	if err != nil {
 		db.elog.Errorf("ERROR while writing to level 0: %v", err)

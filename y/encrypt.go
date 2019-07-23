@@ -24,12 +24,11 @@ import (
 )
 
 // XORBlock encrypts the given data with AES and XOR's with IV
-func XORBlock(key, iv, src []byte, counter int) ([]byte, error) {
+func XORBlock(key, iv, src []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
-	// TODO: @sch00lb0y increment the IV based on the counter
 	stream := cipher.NewCTR(block, iv)
 	dst := make([]byte, len(src))
 	stream.XORKeyStream(dst, src)

@@ -153,14 +153,14 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 
 /*
 Structure of Block.
-+-------------------+---------------------+--------------------+--------------+------------------+
-| Entry1            | Entry2              | Entry3             | Entry4       | Entry5           |
-+-------------------+---------------------+--------------------+--------------+------------------+
-| Entry6            | ...                 | ...                | ...          | EntryN           |
-+-------------------+---------------------+--------------------+--------------+------------------+
-| Block Meta(contains list of offsets used| Block Meta Size    | Block        | Checksum Size    |
-| to perform binary search in the block)  | (4 Bytes)          | Checksum     | (4 Bytes)        |
-+-----------------------------------------+--------------------+--------------+------------------+
++-------------------+---------------------+--------------------+--------------+------------------+------------------+
+| Entry1            | Entry2              | Entry3             | Entry4       | Entry5           |    Entry6        |
++-------------------+---------------------+--------------------+--------------+------------------+------------------+
+| Entry7            | ...                 | ...                | ...          | ......           |    EntryN        |
++-------------------+---------------------+--------------------+--------------+------------------+------------------+
+| Block Meta(contains list of offsets used| Block Meta Size    | Block        | Checksum Size    |       IV         |
+| to perform binary search in the block)  | (4 Bytes)          | Checksum     | (4 Bytes)        | (encryption only)|
++-----------------------------------------+--------------------+--------------+------------------+------------------+
 */
 func (b *Builder) finishBlock() {
 	ebuf := make([]byte, len(b.entryOffsets)*4+4)
@@ -174,7 +174,7 @@ func (b *Builder) finishBlock() {
 		var err error
 		iv, err = y.GenereateIV()
 		y.Check(err)
-		eb, err := y.XORBlock(b.opts.DataKey.Data, iv, b.buf[b.baseOffset:], 0)
+		eb, err := y.XORBlock(b.opts.DataKey.Data, iv, b.buf[b.baseOffset:])
 		y.Check(err)
 		copy(b.buf[b.baseOffset:], eb)
 	}
@@ -207,8 +207,10 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		4 + // size of list
 		8 + // Sum64 in checksum proto
 		4) // checksum length
-	estimatedSize := uint32(len(b.buf)) - b.baseOffset + uint32(6 /*header size for entry*/) +
-		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
+	estimatedSize := uint32(len(b.buf)) - b.baseOffset +
+		uint32(6 /*header size for entry*/) + uint32(len(key)) +
+		uint32(value.EncodedSize()) + entriesOffsetsSize
+
 	if len(b.opts.DataKey.Data) > 0 {
 		// If datakey present, add IV length as well.
 		estimatedSize += aes.BlockSize
@@ -254,13 +256,13 @@ func (b *Builder) ReachedCapacity(cap int64) bool {
 // Finish finishes the table by appending the index.
 /*
 The table structure looks like
-+---------+------------+-----------+---------------+
-| Block 1 | Block 2    | Block 3   | Block 4       |
-+---------+------------+-----------+---------------+
-| Block 5 | Block 6    | Block ... | Block N       |
-+---------+------------+-----------+---------------+
-| Index   | Index Size | Checksum  | Checksum Size |
-+---------+------------+-----------+---------------+
++----------+-------------+------------+---------------+---------------------------+
+| Block 1  | Block 2     | Block 3    | Block 4       |       Block 5             |
++----------+-------------+------------+---------------+---------------------------+
+| Block 6  | Block 7     | Block ...  | Block ...     |       Block N             |
++----------+-------- ----+---- -------+---------------+---------------------------+
+| Index    | Index Size  | Checksum   | Checksum Size |    IV (encryption only)   |
++----------+-------------+------------+---------------+---------------------------+
 */
 func (b *Builder) Finish() []byte {
 	bf := bbloom.New(float64(b.keyCount), 0.01)
@@ -291,7 +293,7 @@ func (b *Builder) Finish() []byte {
 	if len(b.opts.DataKey.Data) > 0 {
 		iv, err = y.GenereateIV()
 		y.Check(err)
-		index, err = y.XORBlock(b.opts.DataKey.Data, iv, index, 0)
+		index, err = y.XORBlock(b.opts.DataKey.Data, iv, index)
 		y.Check(err)
 	}
 	chksum, err := getChecksum(index)
