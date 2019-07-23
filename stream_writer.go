@@ -321,7 +321,8 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	if _, err := fd.Write(data); err != nil {
 		return err
 	}
-	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode, w.db.opt.ChecksumVerificationMode, builder.DataKey())
+	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode, w.db.opt.ChecksumVerificationMode,
+		builder.DataKey())
 	if err != nil {
 		return err
 	}

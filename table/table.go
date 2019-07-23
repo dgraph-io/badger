@@ -38,7 +38,6 @@ import (
 )
 
 const fileSuffix = ".sst"
-const keySuffix = ".key"
 
 // TableInterface is useful for testing.
 type TableInterface interface {

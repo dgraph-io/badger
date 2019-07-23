@@ -26,7 +26,7 @@ const keyRegistryRewriteFileName = "REWRITE-KEYREGISTRY"
 var sanityText = []byte("!Badger!Registry!")
 
 // KeyRegistry used to maintain all the data keys.
-type KeyRegistry struct {
+type keyRegistry struct {
 	dataKeys    map[uint64]*pb.DataKey
 	lastCreated int64
 	nextKeyID   uint64
@@ -41,7 +41,7 @@ func newKeyRegistry(storageKey []byte) *KeyRegistry {
 		storageKey: storageKey,
 	}
 }
-func openKeyRegistry(dir string, readOnly bool, storageKey []byte) (*KeyRegistry, error) {
+func openKeyRegistry(dir string, readOnly bool, storageKey []byte) (*keyRegistry, error) {
 	path := filepath.Join(dir, keyRegistryFileName)
 	var flags uint32
 	if readOnly {
@@ -86,7 +86,7 @@ func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 			return nil, err
 		}
 	}
-	if bytes.Compare(eSanityText, sanityText) != 0 {
+	if !bytes.Equal(eSanityText, sanityText) {
 		return nil, ErrStorageKeyMismatch
 	}
 	readPos += int64(len(sanityText))
@@ -133,7 +133,10 @@ func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 		kr.dataKeys[kr.nextKeyID] = dataKey
 		readPos += l
 	}
-	fp.Seek(0, io.SeekEnd)
+	_, err = fp.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, err
+	}
 	kr.fp = fp
 	return kr, nil
 }
@@ -185,7 +188,7 @@ func rewriteRegistry(dir string, reg *KeyRegistry, storageKey []byte) error {
 	return nil
 }
 
-func (kr *KeyRegistry) dataKey(id uint64) (*pb.DataKey, error) {
+func (kr *keyRegistry) dataKey(id uint64) (*pb.DataKey, error) {
 	if id == 0 {
 		return &pb.DataKey{}, nil
 	}
@@ -196,7 +199,7 @@ func (kr *KeyRegistry) dataKey(id uint64) (*pb.DataKey, error) {
 	return dk, nil
 }
 
-func (kr *KeyRegistry) getDataKey() (*pb.DataKey, error) {
+func (kr *keyRegistry) getDataKey() (*pb.DataKey, error) {
 	if len(kr.storageKey) == 0 {
 		return &pb.DataKey{}, nil
 	}
@@ -247,8 +250,14 @@ func storeDataKey(fp *os.File, storageKey []byte, k *pb.DataKey, sync bool) erro
 	var lenCrcBuf [8]byte
 	binary.BigEndian.PutUint32(lenCrcBuf[0:4], uint32(len(data)))
 	binary.BigEndian.PutUint32(lenCrcBuf[4:8], crc32.Checksum(data, y.CastagnoliCrcTable))
-	fp.Write(lenCrcBuf[:])
-	fp.Write(data)
+	_, err = fp.Write(lenCrcBuf[:])
+	if err != nil {
+		return err
+	}
+	_, err = fp.Write(data)
+	if err != nil {
+		return err
+	}
 	if sync {
 		err := fp.Sync()
 		if err != nil {

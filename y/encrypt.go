@@ -19,6 +19,8 @@ package y
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
+	"io"
 )
 
 // XORBlock encrypts the given data with AES and XOR's with IV
@@ -32,4 +34,14 @@ func XORBlock(key, iv, src []byte, counter int) ([]byte, error) {
 	dst := make([]byte, len(src))
 	stream.XORKeyStream(dst, src)
 	return dst, nil
+}
+
+// GenereateIV generate IV.
+func GenereateIV() ([]byte, error) {
+	iv := make([]byte, aes.BlockSize)
+	_, err := io.ReadFull(rand.Reader, iv)
+	if err != nil {
+		return iv, err
+	}
+	return iv, nil
 }

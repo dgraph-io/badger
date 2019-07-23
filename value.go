@@ -683,12 +683,6 @@ func (vlog *valueLog) populateFilesMap() error {
 
 func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	path := vlog.fpath(fid)
-	// baseIV := make([]byte, 12)
-	// rand.Read(baseIV)
-	// dk, err := vlog.db.registry.getDataKey()
-	// if err != nil {
-	// 	return nil, err
-	// }
 	lf := &logFile{
 		fid:         fid,
 		path:        path,
@@ -703,21 +697,6 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	if lf.fd, err = y.CreateSyncedFile(path, vlog.opt.SyncWrites); err != nil {
 		return nil, errFile(err, lf.path, "Create value log file")
 	}
-	// All vlog will have key id and base IV. irrespective,
-	// whether the file is plain or encrypted. because, vlog can
-	// have both encrypted and unencrypted entry.
-	// var id [8]byte
-	// binary.BigEndian.PutUint64(id[:], dk.KeyID)
-	// _, err = lf.fd.Write(id[:])
-	// if err != nil {
-	// 	lf.fd.Close()
-	// 	return nil, err
-	// }
-	// _, err = lf.fd.Write(baseIV[:])
-	// if err != nil {
-	// 	lf.fd.Close()
-	// 	return nil, err
-	// }
 	if err = syncDir(vlog.dirPath); err != nil {
 		return nil, errFile(err, vlog.dirPath, "Sync value log dir")
 	}

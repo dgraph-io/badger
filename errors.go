@@ -111,9 +111,10 @@ var (
 	ErrNilCallback = errors.New("Callback cannot be nil")
 
 	// ErrNoPrefixes is returned when subscriber doesn't provide any prefix.
-	ErrNoPrefixes = errors.New("At least one key prefix is required")
+	ErrNoPrefixes = errors.New("At lekeast one key prefix is required")
 
-	// ErrStorageKeyMismatch is returned when the storage key is not matched with the key previously given
+	// ErrStorageKeyMismatch is returned when the storage key is not
+	// matched with the key previously given
 	ErrStorageKeyMismatch = errors.New("Storage key mismatch")
 
 	// ErrReadOnlyRotation is return when the user tries to rotate keys in read only mode.

@@ -295,6 +295,7 @@ func (b *Builder) Finish() []byte {
 		y.Check(err)
 	}
 	chksum, err := getChecksum(index)
+	y.Check(err)
 	b.buf = append(b.buf, index...)
 	// Write index size.
 	var buf [4]byte
