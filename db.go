@@ -913,7 +913,12 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
 
-	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode)
+	opts := table.OpenOptions{
+		Fd:      fd,
+		Mode:    db.opt.TableLoadingMode,
+		ChkMode: db.opt.ChecksumVerificationMode,
+	}
+	tbl, err := table.OpenTable(opts)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err

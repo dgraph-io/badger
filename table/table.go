@@ -134,34 +134,39 @@ func (b block) NewIterator() *blockIterator {
 	return bi
 }
 
+// OpenOptions contains configurable options for opening a Table.
+type OpenOptions struct {
+	Fd      *os.File
+	Mode    options.FileLoadingMode
+	ChkMode options.ChecksumVerificationMode
+}
+
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function
 // entry. Returns a table with one reference count on it (decrementing which may delete the file!
 // -- consider t.Close() instead). The fd has to writeable because we call Truncate on it before
 // deleting. Checksum for all blocks of table is verified based on value of chkMode.
-// TODO:(Ashish): convert individual args to option struct.
-func OpenTable(fd *os.File, mode options.FileLoadingMode,
-	chkMode options.ChecksumVerificationMode) (*Table, error) {
+func OpenTable(opts OpenOptions) (*Table, error) {
 
-	fileInfo, err := fd.Stat()
+	fileInfo, err := opts.Fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
 		// from the file.
-		_ = fd.Close()
+		_ = opts.Fd.Close()
 		return nil, y.Wrap(err)
 	}
 
 	filename := fileInfo.Name()
 	id, ok := ParseFileID(filename)
 	if !ok {
-		_ = fd.Close()
+		_ = opts.Fd.Close()
 		return nil, errors.Errorf("Invalid filename: %s", filename)
 	}
 	t := &Table{
-		fd:          fd,
+		fd:          opts.Fd,
 		ref:         1, // Caller is given one reference.
 		id:          id,
-		loadingMode: mode,
-		chkMode:     chkMode,
+		loadingMode: opts.Mode,
+		chkMode:     opts.ChkMode,
 	}
 
 	t.tableSize = int(fileInfo.Size())
@@ -184,7 +189,7 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode,
 		t.biggest = it2.Key()
 	}
 
-	switch mode {
+	switch opts.Mode {
 	case options.LoadToRAM:
 		if _, err := t.fd.Seek(0, io.SeekStart); err != nil {
 			return nil, err
@@ -201,20 +206,20 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode,
 				"Bytes in file: %d Bytes actually Read: %d", t.tableSize, n)
 		}
 	case options.MemoryMap:
-		t.mmap, err = y.Mmap(fd, false, fileInfo.Size())
+		t.mmap, err = y.Mmap(opts.Fd, false, fileInfo.Size())
 		if err != nil {
-			_ = fd.Close()
+			_ = opts.Fd.Close()
 			return nil, y.Wrapf(err, "Unable to map file: %q", fileInfo.Name())
 		}
 	case options.FileIO:
 		t.mmap = nil
 	default:
-		panic(fmt.Sprintf("Invalid loading mode: %v", mode))
+		panic(fmt.Sprintf("Invalid loading mode: %v", opts.Mode))
 	}
 
 	if t.chkMode == options.OnTableRead || t.chkMode == options.OnTableAndBlockRead {
 		if err := t.VerifyChecksum(); err != nil {
-			_ = fd.Close()
+			_ = opts.Fd.Close()
 			return nil, err
 		}
 	}
