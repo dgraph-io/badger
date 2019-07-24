@@ -92,7 +92,7 @@ func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 		}
 	}
 	if !bytes.Equal(eSanityText, sanityText) {
-		return nil, ErrStorageKeyMismatch
+		return nil, ErrEncryptionKeyMismatch
 	}
 	readPos += int64(len(sanityText))
 	stat, err := fp.Stat()
