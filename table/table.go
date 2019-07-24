@@ -258,7 +258,7 @@ func (t *Table) readIndex() error {
 	readPos := t.tableSize
 	var iv []byte
 	// Read checksum len from the last 4 bytes.
-	if len(t.dataKey.Data) > 0 {
+	if t.dataKey != nil {
 		readPos -= aes.BlockSize
 		iv = t.readNoFail(readPos, aes.BlockSize)
 	}
@@ -284,7 +284,7 @@ func (t *Table) readIndex() error {
 	if err := y.VerifyChecksum(data, expectedChk); err != nil {
 		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename())
 	}
-	if len(t.dataKey.Data) > 0 {
+	if t.dataKey != nil {
 		var err error
 		data, err = y.XORBlock(t.dataKey.Data, iv, data)
 		if err != nil {
@@ -316,7 +316,7 @@ func (t *Table) block(idx int) (*block, error) {
 		return nil, err
 	}
 
-	if len(t.dataKey.Data) > 0 {
+	if t.dataKey != nil {
 		iv = data[len(data)-aes.BlockSize:]
 		data = data[:len(data)-aes.BlockSize]
 	}
@@ -333,7 +333,7 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 	// Skip reading checksum.
 	readPos -= blk.chkLen
-	if len(t.dataKey.Data) > 0 {
+	if t.dataKey != nil {
 		// We encrypt and store the checksum.
 		// So, decrypting after checksum verfication.
 		deBlk, err := y.XORBlock(t.dataKey.Data, iv, blk.data[:readPos])
@@ -395,7 +395,10 @@ func (t *Table) VerifyChecksum() error {
 
 // KeyID returns datakey's ID.
 func (t *Table) KeyID() uint64 {
-	return t.dataKey.KeyID
+	if t.dataKey != nil {
+		return t.dataKey.KeyID
+	}
+	return 0
 }
 
 // ParseFileID reads the file id out of a filename.

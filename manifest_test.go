@@ -127,7 +127,7 @@ func buildTestTable(t *testing.T, prefix string, n int) *os.File {
 // keyValues is n by 2 where n is number of pairs.
 func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	b := table.NewTableBuilder(&table.BuilderOptions{
-		DataKey: &pb.DataKey{},
+		DataKey: nil,
 	})
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
@@ -172,7 +172,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lh0 := newLevelHandler(kv, 0)
 	lh1 := newLevelHandler(kv, 1)
 	f := buildTestTable(t, "k", 2)
-	t1, err := table.OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, &pb.DataKey{})
+	t1, err := table.OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer t1.DecrRef()
 
@@ -193,7 +193,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lc.runCompactDef(0, cd)
 
 	f = buildTestTable(t, "l", 2)
-	t2, err := table.OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, &pb.DataKey{})
+	t2, err := table.OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer t2.DecrRef()
 	done = lh0.tryAddLevel0Table(t2)

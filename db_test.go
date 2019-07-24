@@ -652,7 +652,7 @@ func TestLoadEncryption(t *testing.T) {
 	rand.Read(key)
 	{
 		opt := getTestOptions(dir)
-		opt.StorageKey = key
+		opt.EncryptionKey = key
 		kv, err := Open(opt)
 		require.NoError(t, err)
 		for i := 0; i < n; i++ {
@@ -665,7 +665,7 @@ func TestLoadEncryption(t *testing.T) {
 		kv.Close()
 	}
 	opt := getTestOptions(dir)
-	opt.StorageKey = key
+	opt.EncryptionKey = key
 	kv, err := Open(opt)
 	require.NoError(t, err)
 	require.Equal(t, uint64(10001), kv.orc.readTs())

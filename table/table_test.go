@@ -57,7 +57,9 @@ func buildTestTable(t *testing.T, prefix string, n int) *os.File {
 
 // keyValues is n by 2 where n is number of pairs.
 func buildTable(t *testing.T, keyValues [][]string) *os.File {
-	b := NewTableBuilder(&BuilderOptions{})
+	b := NewTableBuilder(&BuilderOptions{
+		DataKey: nil,
+	})
 	defer b.Close()
 	rand.Seed(time.Now().UnixNano())
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
