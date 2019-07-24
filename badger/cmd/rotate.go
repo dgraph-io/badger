@@ -27,7 +27,6 @@ import (
 
 var oldKeyPath string
 var newKeyPath string
-var dir string
 var rotateCmd = &cobra.Command{
 	Use:   "rotate",
 	Short: "Rotate encryption key.",
@@ -41,8 +40,6 @@ func init() {
 		"", "Path of the old key")
 	rotateCmd.Flags().StringVarP(&newKeyPath, "new-key-path", "n",
 		"", "Path of the new key")
-	rotateCmd.Flags().StringVarP(&dir, "dir", "d",
-		"", "Badger directory.")
 	rotateCmd.MarkFlagRequired("dir")
 }
 
@@ -51,7 +48,7 @@ func doRotate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	kr, err := badger.OpenKeyRegistry(dir, false, oldKey)
+	kr, err := badger.OpenKeyRegistry(sstDir, false, oldKey)
 	if err != nil {
 		return err
 	}
@@ -60,7 +57,7 @@ func doRotate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	err = badger.RewriteRegistry(dir, kr, newKey)
+	err = badger.RewriteRegistry(sstDir, kr, newKey)
 	if err != nil {
 		return err
 	}
