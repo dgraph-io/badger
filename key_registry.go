@@ -16,17 +16,17 @@ import (
 	"github.com/dgraph-io/badger/pb"
 )
 
-// keyRegistryFileName is file name of key registry.
-const keyRegistryFileName = "KEYREGISTRY"
+// KeyRegistryFileName is file name of key registry.
+const KeyRegistryFileName = "KeyRegistry"
 
-// keyRegistryRewriteFileName is  file name of key registry.
-const keyRegistryRewriteFileName = "REWRITE-KEYREGISTRY"
+// KeyRegistryRewriteFileName is  file name of key registry.
+const KeyRegistryRewriteFileName = "REWRITE-KeyRegistry"
 
 // SanityText is used to check whether the given user provided storage key is valid or not
 var sanityText = []byte("!Badger!Registry!")
 
 // KeyRegistry used to maintain all the data keys.
-type keyRegistry struct {
+type KeyRegistry struct {
 	dataKeys    map[uint64]*pb.DataKey
 	lastCreated int64
 	nextKeyID   uint64
@@ -34,15 +34,15 @@ type keyRegistry struct {
 	fp          *os.File
 }
 
-func newKeyRegistry(storageKey []byte) *keyRegistry {
-	return &keyRegistry{
+func newKeyRegistry(storageKey []byte) *KeyRegistry {
+	return &KeyRegistry{
 		dataKeys:   make(map[uint64]*pb.DataKey),
 		nextKeyID:  0,
 		storageKey: storageKey,
 	}
 }
-func openKeyRegistry(dir string, readOnly bool, storageKey []byte) (*keyRegistry, error) {
-	path := filepath.Join(dir, keyRegistryFileName)
+func OpenKeyRegistry(dir string, readOnly bool, storageKey []byte) (*KeyRegistry, error) {
+	path := filepath.Join(dir, KeyRegistryFileName)
 	var flags uint32
 	if readOnly {
 		flags |= y.ReadOnly
@@ -57,7 +57,7 @@ func openKeyRegistry(dir string, readOnly bool, storageKey []byte) (*keyRegistry
 			return kr, nil
 		}
 		fp.Close()
-		if err := rewriteRegistry(dir, kr, storageKey); err != nil {
+		if err := RewriteRegistry(dir, kr, storageKey); err != nil {
 			return nil, err
 		}
 		fp, err = y.OpenExistingFile(path, flags)
@@ -65,10 +65,15 @@ func openKeyRegistry(dir string, readOnly bool, storageKey []byte) (*keyRegistry
 			return nil, err
 		}
 	}
-	return buildKeyRegistry(fp, storageKey)
+	kr, err := buildKeyRegistry(fp, storageKey)
+	if err != nil {
+		fp.Close()
+		return nil, err
+	}
+	return kr, nil
 }
 
-func buildKeyRegistry(fp *os.File, storageKey []byte) (*keyRegistry, error) {
+func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 	readPos := int64(0)
 	iv, err := y.Read(fp, readPos, aes.BlockSize)
 	if err != nil {
@@ -141,8 +146,9 @@ func buildKeyRegistry(fp *os.File, storageKey []byte) (*keyRegistry, error) {
 	return kr, nil
 }
 
-func rewriteRegistry(dir string, reg *keyRegistry, storageKey []byte) error {
-	reWritePath := filepath.Join(dir, keyRegistryRewriteFileName)
+// RewriteRegistry will rewrite the existing key registry file with new one
+func RewriteRegistry(dir string, reg *KeyRegistry, storageKey []byte) error {
+	reWritePath := filepath.Join(dir, KeyRegistryRewriteFileName)
 	fp, err := y.OpenTruncFile(reWritePath, false)
 	if err != nil {
 		return err
@@ -160,12 +166,13 @@ func rewriteRegistry(dir string, reg *keyRegistry, storageKey []byte) error {
 		}
 	}
 	if _, err = fp.Write(iv); err != nil {
+		fp.Close()
 		return err
 	}
 	if _, err = fp.Write(eSanity); err != nil {
+		fp.Close()
 		return err
 	}
-	defer fp.Close()
 	for _, k := range reg.dataKeys {
 		err := storeDataKey(fp, storageKey, k, false)
 		if err != nil {
@@ -173,9 +180,10 @@ func rewriteRegistry(dir string, reg *keyRegistry, storageKey []byte) error {
 		}
 	}
 	if err = y.FileSync(fp); err != nil {
-		return nil
+		fp.Close()
+		return err
 	}
-	registryPath := filepath.Join(dir, keyRegistryFileName)
+	registryPath := filepath.Join(dir, KeyRegistryFileName)
 	if err = fp.Close(); err != nil {
 		return err
 	}
@@ -188,7 +196,7 @@ func rewriteRegistry(dir string, reg *keyRegistry, storageKey []byte) error {
 	return nil
 }
 
-func (kr *keyRegistry) dataKey(id uint64) (*pb.DataKey, error) {
+func (kr *KeyRegistry) dataKey(id uint64) (*pb.DataKey, error) {
 	if id == 0 {
 		return &pb.DataKey{}, nil
 	}
@@ -199,7 +207,7 @@ func (kr *keyRegistry) dataKey(id uint64) (*pb.DataKey, error) {
 	return dk, nil
 }
 
-func (kr *keyRegistry) getDataKey() (*pb.DataKey, error) {
+func (kr *KeyRegistry) getDataKey() (*pb.DataKey, error) {
 	if len(kr.storageKey) == 0 {
 		return &pb.DataKey{}, nil
 	}
@@ -230,7 +238,8 @@ func (kr *keyRegistry) getDataKey() (*pb.DataKey, error) {
 	return kr.dataKeys[kr.nextKeyID], nil
 }
 
-func (kr *keyRegistry) close() error {
+// Close closes the key registry.
+func (kr *KeyRegistry) Close() error {
 	return kr.fp.Close()
 }
 

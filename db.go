@@ -90,7 +90,7 @@ type DB struct {
 	orc *oracle
 
 	pub      *publisher
-	registry *keyRegistry
+	registry *KeyRegistry
 }
 
 const (
@@ -284,27 +284,9 @@ func Open(opt Options) (db *DB, err error) {
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
 	}
-	// First we'll try to open with old key. Because, It may be plain text.
-	// If it fails, then we'll open with storage key. If old key suceed and a new
-	// key present, then we'll rewrite with new key and open it back.
-	kr, err := openKeyRegistry(opt.Dir, opt.ReadOnly, opt.OldStorageKey)
-	if err == ErrStorageKeyMismatch {
-		var err error
-		kr, err = openKeyRegistry(opt.Dir, opt.ReadOnly, opt.StorageKey)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		if len(opt.StorageKey) > 0 {
-			err := rewriteRegistry(opt.Dir, kr, opt.StorageKey)
-			if err != nil {
-				return nil, err
-			}
-			kr, err = openKeyRegistry(opt.Dir, opt.ReadOnly, opt.StorageKey)
-			if err != nil {
-				return nil, err
-			}
-		}
+	kr, err := OpenKeyRegistry(opt.Dir, opt.ReadOnly, opt.EncryptionKey)
+	if err != nil {
+		return nil, err
 	}
 	db.registry = kr
 	// Calculate initial size.
@@ -479,7 +461,7 @@ func (db *DB) close() (err error) {
 		err = errors.Wrap(manifestErr, "DB.Close")
 	}
 
-	if registryErr := db.registry.close(); err == nil {
+	if registryErr := db.registry.Close(); err == nil {
 		err = errors.Wrap(registryErr, "DB.Close")
 	}
 
