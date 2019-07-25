@@ -166,24 +166,21 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode,
 		chkMode:     chkMode,
 		dataKey:     dataKey,
 	}
+
 	t.tableSize = int(fileInfo.Size())
 
 	if err := t.readIndex(); err != nil {
 		return nil, y.Wrap(err)
 	}
 
-	it := t.NewIterator(false)
+	// Understading that table will have atleat 1 block.
+	t.smallest = t.blockIndex[0].Key
+
+	it := t.NewIterator(true)
 	defer it.Close()
 	it.Rewind()
 	if it.Valid() {
-		t.smallest = it.Key()
-	}
-
-	it2 := t.NewIterator(true)
-	defer it2.Close()
-	it2.Rewind()
-	if it2.Valid() {
-		t.biggest = it2.Key()
+		t.biggest = it.Key()
 	}
 
 	switch mode {
@@ -256,6 +253,8 @@ func (t *Table) readNoFail(off, sz int) []byte {
 
 func (t *Table) readIndex() error {
 	readPos := t.tableSize
+
+	// Read checksum len from the last 4 bytes.
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
 	checksumLen := int(binary.BigEndian.Uint32(buf))
@@ -275,6 +274,7 @@ func (t *Table) readIndex() error {
 	// Read index.
 	readPos -= indexLen
 	data := t.readNoFail(readPos, indexLen)
+
 	if err := y.VerifyChecksum(data, expectedChk); err != nil {
 		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename())
 	}
@@ -308,7 +308,6 @@ func (t *Table) block(idx int) (*block, error) {
 	blk := &block{
 		offset: int(ko.Offset),
 	}
-	var err error
 	data, err := t.read(blk.offset, int(ko.Len))
 	if err != nil {
 		return nil, err
@@ -329,6 +328,7 @@ func (t *Table) block(idx int) (*block, error) {
 			return nil, err
 		}
 	}
+
 	// Skip reading checksum.
 	readPos -= blk.chkLen
 	if t.dataKey != nil {
@@ -338,13 +338,14 @@ func (t *Table) block(idx int) (*block, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Doesn't contains checksum.
 		blk.data = deBlk
 	}
 	//Move position to read numEntries in block.
 	readPos -= 4
 	blk.numEntries = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
 	blk.entriesIndexStart = readPos - (blk.numEntries * 4)
-	return blk, err
+	return blk, nil
 }
 
 // Size is its file size in bytes
@@ -393,7 +394,7 @@ func (t *Table) VerifyChecksum() error {
 // KeyID returns datakey's ID for the table.
 func (t *Table) KeyID() uint64 {
 	if t.dataKey != nil {
-		return t.dataKey.KeyID
+		return t.dataKey.KeyId
 	}
 	return 0
 }

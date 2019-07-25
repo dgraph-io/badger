@@ -32,7 +32,7 @@ var sanityText = []byte("!Badger!Registry!")
 type KeyRegistry struct {
 	sync.RWMutex
 	dataKeys    map[uint64]*pb.DataKey
-	lastCreated int64
+	lastCreated int64 //lastCreated is the timestamp of the last data key generated.
 	nextKeyID   uint64
 	storageKey  []byte
 	fp          *os.File
@@ -81,11 +81,13 @@ func OpenKeyRegistry(dir string, readOnly bool, storageKey []byte) (*KeyRegistry
 
 func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 	readPos := int64(0)
+	// Read the IV.
 	iv, err := y.ReadAt(fp, readPos, aes.BlockSize)
 	if err != nil {
 		return nil, err
 	}
 	readPos += aes.BlockSize
+	// Read sanity text.
 	eSanityText, err := y.ReadAt(fp, readPos, len(sanityText))
 	if err != nil {
 		return nil, err
@@ -97,6 +99,7 @@ func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 			return nil, err
 		}
 	}
+	// Check the given key is valid or not.
 	if !bytes.Equal(eSanityText, sanityText) {
 		return nil, ErrEncryptionKeyMismatch
 	}
@@ -107,6 +110,7 @@ func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 	}
 	kr := newKeyRegistry(storageKey)
 	for {
+		// Read all the datakey till the file ends.
 		if readPos == stat.Size() {
 			break
 		}
@@ -124,28 +128,30 @@ func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 			return nil, errBadChecksum
 		}
 		dataKey := &pb.DataKey{}
-		err = dataKey.Unmarshal(data)
-		if err != nil {
+		if err = dataKey.Unmarshal(data); err != nil {
 			return nil, err
 		}
 		if len(storageKey) > 0 {
 			var err error
-			dataKey.Data, err = y.XORBlock(storageKey, dataKey.IV, dataKey.Data)
+			// Decrypt the key if the storage key exits.
+			dataKey.Data, err = y.XORBlock(storageKey, dataKey.Iv, dataKey.Data)
 			if err != nil {
 				return nil, err
 			}
 		}
-		if dataKey.KeyID > kr.nextKeyID {
-			kr.nextKeyID = dataKey.KeyID
+		if dataKey.KeyId > kr.nextKeyID {
+			// Set the maximum key ID for next key ID generation.
+			kr.nextKeyID = dataKey.KeyId
 		}
-		if dataKey.CreatedAt > (kr.lastCreated) {
+		if dataKey.CreatedAt > kr.lastCreated {
+			// Set the last generated key timestamp.
 			kr.lastCreated = dataKey.CreatedAt
 		}
+		// No need to lock, since we building the initial state.
 		kr.dataKeys[kr.nextKeyID] = dataKey
 		readPos += l
 	}
-	_, err = fp.Seek(0, io.SeekEnd)
-	if err != nil {
+	if _, err = fp.Seek(0, io.SeekEnd); err != nil {
 		return nil, err
 	}
 	kr.fp = fp
@@ -155,6 +161,7 @@ func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 // RewriteRegistry will rewrite the existing key registry file with new one
 func RewriteRegistry(dir string, reg *KeyRegistry, storageKey []byte) error {
 	reWritePath := filepath.Join(dir, KeyRegistryRewriteFileName)
+	// Open temporary file to write the data and do atomic rename.
 	fp, err := y.OpenTruncFile(reWritePath, false)
 	if err != nil {
 		return err
@@ -163,6 +170,8 @@ func RewriteRegistry(dir string, reg *KeyRegistry, storageKey []byte) error {
 	if err != nil {
 		return err
 	}
+
+	// Encrypt sanity text if the storage presents.
 	eSanity := sanityText
 	if len(storageKey) > 0 {
 		var err error
@@ -179,6 +188,8 @@ func RewriteRegistry(dir string, reg *KeyRegistry, storageKey []byte) error {
 		fp.Close()
 		return err
 	}
+
+	// Write all the datakeys to the disk.
 	for _, k := range reg.dataKeys {
 		err := storeDataKey(fp, storageKey, k, false)
 		if err != nil {
@@ -193,13 +204,11 @@ func RewriteRegistry(dir string, reg *KeyRegistry, storageKey []byte) error {
 	if err = fp.Close(); err != nil {
 		return err
 	}
+	// Rename to the original file.
 	if err = os.Rename(reWritePath, registryPath); err != nil {
 		return err
 	}
-	if err = syncDir(dir); err != nil {
-		return err
-	}
-	return nil
+	return syncDir(dir)
 }
 
 func (kr *KeyRegistry) dataKey(id uint64) (*pb.DataKey, error) {
@@ -217,13 +226,18 @@ func (kr *KeyRegistry) getDataKey() (*pb.DataKey, error) {
 	if len(kr.storageKey) == 0 {
 		return nil, nil
 	}
+
+	// Time diffrence from the last generated time.
 	diff := time.Since(time.Unix(kr.lastCreated, 0))
 	if diff.Hours()/24 < RotationPeriod {
+		// If less than 10 days, returns the last generaterd key.
 		kr.RLock()
 		defer kr.RUnlock()
 		dk := kr.dataKeys[kr.nextKeyID]
 		return dk, nil
 	}
+
+	// Otherwise Increment the KeyID and generate new datakey
 	kr.nextKeyID++
 	k := make([]byte, len(kr.storageKey))
 	iv, err := y.GenereateIV()
@@ -235,11 +249,12 @@ func (kr *KeyRegistry) getDataKey() (*pb.DataKey, error) {
 		return nil, err
 	}
 	dk := &pb.DataKey{
-		KeyID:     kr.nextKeyID,
+		KeyId:     kr.nextKeyID,
 		Data:      k,
 		CreatedAt: time.Now().Unix(),
-		IV:        iv,
+		Iv:        iv,
 	}
+	// Store the datekey to the disk.
 	err = storeDataKey(kr.fp, kr.storageKey, dk, true)
 	if err != nil {
 		return nil, err
@@ -262,8 +277,7 @@ func storeDataKey(fp *os.File, storageKey []byte, k *pb.DataKey, sync bool) erro
 	if len(storageKey) > 0 {
 		var err error
 		// In memory, we'll have decrypted key.
-		k.Data, err = y.XORBlock(storageKey, k.IV, k.Data)
-		if err != nil {
+		if k.Data, err = y.XORBlock(storageKey, k.Iv, k.Data); err != nil {
 			return err
 		}
 	}
@@ -278,15 +292,11 @@ func storeDataKey(fp *os.File, storageKey []byte, k *pb.DataKey, sync bool) erro
 	if err != nil {
 		return err
 	}
-	_, err = fp.Write(data)
-	if err != nil {
+	if _, err = fp.Write(data); err != nil {
 		return err
 	}
 	if sync {
-		err := y.FileSync(fp)
-		if err != nil {
-			return err
-		}
+		return y.FileSync(fp)
 	}
 	return nil
 }

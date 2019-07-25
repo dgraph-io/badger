@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
+ * Copyright 2019 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,61 +16,55 @@
 package badger
 
 import (
-	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/dgraph-io/badger/y"
 )
 
 func TestBuildRegistry(t *testing.T) {
 	storageKey := make([]byte, 32)
-	path := fmt.Sprintf("%s%c%d", os.TempDir(), os.PathSeparator, rand.Int63())
-	os.Mkdir(path, os.ModePerm)
-	_, err := rand.Read(storageKey)
-	y.Check(err)
-	kr, err := OpenKeyRegistry(path, false, storageKey)
-	defer os.Remove(filepath.Join(path, KeyRegistryFileName))
+	dir, err := ioutil.TempDir("", "badger-test")
+	_, err = rand.Read(storageKey)
+	require.NoError(t, err)
+	kr, err := OpenKeyRegistry(dir, false, storageKey)
+	defer os.Remove(dir)
 	require.NoError(t, err)
 	dk, err := kr.getDataKey()
 	require.NoError(t, err)
 	kr.lastCreated = 0
 	dk1, err := kr.getDataKey()
 	require.NoError(t, err)
-	kr.Close()
-	kr2, err := OpenKeyRegistry(path, false, storageKey)
+	require.NoError(t, kr.Close())
+	kr2, err := OpenKeyRegistry(dir, false, storageKey)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(kr2.dataKeys))
-	require.Equal(t, dk.Data, kr.dataKeys[dk.KeyID].Data)
-	require.Equal(t, dk1.Data, kr.dataKeys[dk1.KeyID].Data)
-	kr.Close()
-
+	require.Equal(t, dk.Data, kr.dataKeys[dk.KeyId].Data)
+	require.Equal(t, dk1.Data, kr.dataKeys[dk1.KeyId].Data)
+	require.NoError(t, kr2.Close())
 }
 
 func TestRewriteRegistry(t *testing.T) {
-	path := fmt.Sprintf("%s%c%d", os.TempDir(), os.PathSeparator, rand.Int63())
-	os.Mkdir(path, os.ModePerm)
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
 	storageKey := make([]byte, 32)
-	_, err := rand.Read(storageKey)
-	y.Check(err)
-	kr, err := OpenKeyRegistry(path, false, storageKey)
-	defer os.Remove(filepath.Join(path, KeyRegistryFileName))
+	_, err = rand.Read(storageKey)
+	require.NoError(t, err)
+	kr, err := OpenKeyRegistry(dir, false, storageKey)
+	defer os.Remove(dir)
 	require.NoError(t, err)
 	_, err = kr.getDataKey()
 	require.NoError(t, err)
 	kr.lastCreated = 0
 	_, err = kr.getDataKey()
 	require.NoError(t, err)
-	kr.Close()
+	require.NoError(t, kr.Close())
 	delete(kr.dataKeys, 1)
-	RewriteRegistry(path, kr, storageKey)
-	kr2, err := OpenKeyRegistry(path, false, storageKey)
+	require.NoError(t, RewriteRegistry(dir, kr, storageKey))
+	kr2, err := OpenKeyRegistry(dir, false, storageKey)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(kr2.dataKeys))
-	kr.Close()
-	os.Remove(filepath.Join(path, KeyRegistryFileName))
+	require.NoError(t, kr2.Close())
 }

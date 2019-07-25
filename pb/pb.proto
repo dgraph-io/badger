@@ -72,8 +72,8 @@ message Checksum {
 }
 
 message DataKey {
-  uint64 KeyID      = 1;
-  bytes  Data       = 2;
-  bytes  IV         = 3;
+  uint64 key_id      = 1;
+  bytes  data       = 2;
+  bytes  iv         = 3;
   int64  created_at = 4;
 }

@@ -30,7 +30,6 @@ import (
 
 	"github.com/cespare/xxhash"
 	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
@@ -94,7 +93,7 @@ func TestTableIterator(t *testing.T) {
 	for _, n := range []int{99, 100, 101} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
-			table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, &pb.DataKey{})
+			table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
 			require.NoError(t, err)
 			defer table.DecrRef()
 			it := table.NewIterator(false)
@@ -116,7 +115,7 @@ func TestSeekToFirst(t *testing.T) {
 	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
-			table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, &pb.DataKey{})
+			table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
 			require.NoError(t, err)
 			defer table.DecrRef()
 			it := table.NewIterator(false)
@@ -134,7 +133,7 @@ func TestSeekToLast(t *testing.T) {
 	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
-			table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, &pb.DataKey{})
+			table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
 			require.NoError(t, err)
 			defer table.DecrRef()
 			it := table.NewIterator(false)
@@ -155,7 +154,7 @@ func TestSeekToLast(t *testing.T) {
 
 func TestSeek(t *testing.T) {
 	f := buildTestTable(t, "k", 10000)
-	table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, &pb.DataKey{})
+	table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer table.DecrRef()
 
@@ -190,7 +189,7 @@ func TestSeek(t *testing.T) {
 
 func TestSeekForPrev(t *testing.T) {
 	f := buildTestTable(t, "k", 10000)
-	table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, &pb.DataKey{})
+	table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer table.DecrRef()
 
@@ -228,7 +227,7 @@ func TestIterateFromStart(t *testing.T) {
 	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
-			table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, &pb.DataKey{})
+			table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
 			require.NoError(t, err)
 			defer table.DecrRef()
 			ti := table.NewIterator(false)
@@ -255,7 +254,7 @@ func TestIterateFromEnd(t *testing.T) {
 	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
-			table, err := OpenTable(f, options.FileIO, options.OnTableAndBlockRead, &pb.DataKey{})
+			table, err := OpenTable(f, options.FileIO, options.OnTableAndBlockRead, nil)
 			require.NoError(t, err)
 			defer table.DecrRef()
 			ti := table.NewIterator(false)
@@ -278,7 +277,7 @@ func TestIterateFromEnd(t *testing.T) {
 
 func TestTable(t *testing.T) {
 	f := buildTestTable(t, "key", 10000)
-	table, err := OpenTable(f, options.FileIO, options.OnTableAndBlockRead, &pb.DataKey{})
+	table, err := OpenTable(f, options.FileIO, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer table.DecrRef()
 	ti := table.NewIterator(false)
@@ -305,7 +304,7 @@ func TestTable(t *testing.T) {
 
 func TestIterateBackAndForth(t *testing.T) {
 	f := buildTestTable(t, "key", 10000)
-	table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, &pb.DataKey{})
+	table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer table.DecrRef()
 
@@ -346,7 +345,7 @@ func TestIterateBackAndForth(t *testing.T) {
 
 func TestUniIterator(t *testing.T) {
 	f := buildTestTable(t, "key", 10000)
-	table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, &pb.DataKey{})
+	table, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer table.DecrRef()
 	{
@@ -382,7 +381,7 @@ func TestConcatIteratorOneTable(t *testing.T) {
 		{"k2", "a2"},
 	})
 
-	tbl, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, &pb.DataKey{})
+	tbl, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer tbl.DecrRef()
 
@@ -402,13 +401,13 @@ func TestConcatIterator(t *testing.T) {
 	f := buildTestTable(t, "keya", 10000)
 	f2 := buildTestTable(t, "keyb", 10000)
 	f3 := buildTestTable(t, "keyc", 10000)
-	tbl, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, &pb.DataKey{})
+	tbl, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer tbl.DecrRef()
-	tbl2, err := OpenTable(f2, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
+	tbl2, err := OpenTable(f2, options.LoadToRAM, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer tbl2.DecrRef()
-	tbl3, err := OpenTable(f3, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
+	tbl3, err := OpenTable(f3, options.LoadToRAM, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer tbl3.DecrRef()
 
@@ -487,10 +486,10 @@ func TestMergingIterator(t *testing.T) {
 		{"k1", "b1"},
 		{"k2", "b2"},
 	})
-	tbl1, err := OpenTable(f1, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
+	tbl1, err := OpenTable(f1, options.LoadToRAM, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer tbl1.DecrRef()
-	tbl2, err := OpenTable(f2, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
+	tbl2, err := OpenTable(f2, options.LoadToRAM, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer tbl2.DecrRef()
 	it1 := tbl1.NewIterator(false)
@@ -527,10 +526,10 @@ func TestMergingIteratorReversed(t *testing.T) {
 		{"k1", "b1"},
 		{"k2", "b2"},
 	})
-	tbl1, err := OpenTable(f1, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
+	tbl1, err := OpenTable(f1, options.LoadToRAM, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer tbl1.DecrRef()
-	tbl2, err := OpenTable(f2, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
+	tbl2, err := OpenTable(f2, options.LoadToRAM, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer tbl2.DecrRef()
 	it1 := tbl1.NewIterator(true)
@@ -566,10 +565,10 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 	})
 	f2 := buildTable(t, [][]string{})
 
-	t1, err := OpenTable(f1, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
+	t1, err := OpenTable(f1, options.LoadToRAM, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer t1.DecrRef()
-	t2, err := OpenTable(f2, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
+	t2, err := OpenTable(f2, options.LoadToRAM, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer t2.DecrRef()
 
@@ -606,10 +605,10 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 		{"k2", "a2"},
 	})
 
-	t1, err := OpenTable(f1, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
+	t1, err := OpenTable(f1, options.LoadToRAM, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer t1.DecrRef()
-	t2, err := OpenTable(f2, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
+	t2, err := OpenTable(f2, options.LoadToRAM, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err)
 	defer t2.DecrRef()
 
@@ -656,7 +655,7 @@ func TestTableBigValues(t *testing.T) {
 	}
 
 	f.Write(builder.Finish())
-	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
+	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, nil)
 	require.NoError(t, err, "unable to open table")
 	defer tbl.DecrRef()
 
@@ -684,7 +683,7 @@ func TestTableChecksum(t *testing.T) {
 	require.NoError(t, err, "unable to get file information")
 	f.WriteAt(rb, rand.Int63n(fi.Size()))
 
-	_, err = OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
+	_, err = OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, nil)
 	if err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatal("Test should have been failed with checksum mismatch error")
 	}
@@ -747,7 +746,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}))
 		}
 		f.Write(builder.Finish())
-		tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{})
+		tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, nil)
 		y.Check(err)
 		tables = append(tables, tbl)
 		defer tbl.DecrRef()
@@ -831,7 +830,7 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 	}
 
 	f.Write(builder.Finish())
-	tbl, err := OpenTable(f, options.LoadToRAM, options.NoVerification, &pb.DataKey{})
+	tbl, err := OpenTable(f, options.LoadToRAM, options.NoVerification, nil)
 	require.NoError(b, err, "unable to open table")
 	return tbl
 }
