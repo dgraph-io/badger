@@ -18,11 +18,10 @@ package y
 
 import (
 	"bytes"
-	"container/list"
 	"encoding/binary"
 	"fmt"
+	"hash"
 	"hash/crc32"
-	"io"
 	"math"
 	"os"
 	"sync"
@@ -303,55 +302,117 @@ func (t *Throttle) Finish() error {
 	return t.finishErr
 }
 
-// type page struct {
-// 	buf bytes.Buffer
-// }
-
 // NoAllocBuffer ...
 type NoAllocBuffer struct {
-	li       *list.List
+	pageList []*[]byte
+	pageIdx  int
 	currBuf  []byte
 	pageSize int
-	idx      int
+	currIdx  int
 }
 
 // NewNoAllocBuffer ...
 func NewNoAllocBuffer(pageSize int) *NoAllocBuffer {
-	n := &NoAllocBuffer{li: list.New(), currBuf: make([]byte, pageSize), pageSize: pageSize}
+	n := &NoAllocBuffer{
+		pageList: make([]*[]byte, 20),
+		pageSize: pageSize}
+	buf := make([]byte, pageSize)
+	n.AddPage(buf)
 	return n
 }
 
 func (n *NoAllocBuffer) Len() int {
-	return n.idx + n.li.Len()*n.pageSize
+	return n.currIdx + len(n.pageList) - 1 + n.currIdx
 }
+
 func (n *NoAllocBuffer) Write(b []byte) (int, error) {
-	if n.idx+len(b) > n.pageSize {
-		n.li.PushBack(n.currBuf[:n.idx])
-		n.currBuf = make([]byte, n.pageSize)
-		n.idx = 0
+	if n.currIdx+len(b) > n.pageSize {
+		// Fill up the current buffer
+		bytesUsed := n.fill(b)
+		// Trim b and add the remaining bytes to the next buffer
+		b = b[bytesUsed:]
+		buf := make([]byte, n.pageSize)
+		n.currIdx = 0
+		n.AddPage(buf)
 	}
-	AssertTruef(n.idx < len(n.currBuf), "%d should be less than %d", n.idx, len(n.currBuf))
-	copy(n.currBuf[n.idx:], b)
-	n.idx += len(b)
+	copy(n.currBuf[n.currIdx:], b)
+	n.currIdx += len(b)
 	return len(b), nil
+}
+
+func (n *NoAllocBuffer) AddPage(b []byte) {
+	// Increase the size of list by 2X
+	if n.pageIdx > len(n.pageList)-1 {
+		// Let append increase the space.
+		n.pageList = append(n.pageList, &b)
+	} else {
+		n.pageList[n.pageIdx] = &b
+	}
+	n.pageIdx++
+	n.currBuf = b
+}
+func (n *NoAllocBuffer) fill(b []byte) int {
+	emptySpace := n.pageSize - n.currIdx
+	copy(n.currBuf[n.currIdx:], b[:emptySpace])
+	// We've filled up the entire buffer
+	n.currIdx = n.pageSize
+	return emptySpace
 }
 
 func (n *NoAllocBuffer) WriteByte(b byte) (int, error) {
 	return n.Write([]byte{b})
 }
 
+// Bytes with offset
 func (n *NoAllocBuffer) Bytes() []byte {
-	buf := make([]byte, (n.li.Len()*n.pageSize)+n.idx)
-	cur := buf
-	for itr := n.li.Front(); itr != nil; itr = itr.Next() {
-		b := itr.Value.([]byte)
-		copy(cur[:n.pageSize], b)
-		cur = cur[n.pageSize:]
+	buf := make([]byte, 0, (len(n.pageList) * n.pageSize))
+	for i := 0; i < n.pageIdx; i++ {
+		page := *n.pageList[i]
+		// The last page is not completely filled. Trim the page to only useful data.
+		if i == n.pageIdx-1 {
+			page = page[:n.currIdx]
+		}
+		buf = append(buf, page...)
 	}
-	copy(cur[:n.idx], n.currBuf[:n.idx])
 	return buf
 }
 
-func (n *NoAllocBuffer) readTo(w io.Writer) {
+type NoAllocHashBuffer struct {
+	buf  *NoAllocBuffer
+	hash hash.Hash32
+}
 
+func NewNoAllocHashBuffer(pageSize int) *NoAllocHashBuffer {
+	return &NoAllocHashBuffer{
+		buf:  NewNoAllocBuffer(pageSize),
+		hash: crc32.New(CastagnoliCrcTable),
+	}
+}
+
+func (n *NoAllocHashBuffer) Write(b []byte) (int, error) {
+	// Add to underlying buffer
+	bytesWritten, err := n.buf.Write(b)
+	if err != nil {
+		return bytesWritten, err
+	}
+	// Add to hash
+	return n.hash.Write(b)
+}
+
+func (n *NoAllocHashBuffer) WriteByte(b byte) (int, error) {
+	return n.buf.Write([]byte{b})
+}
+
+func (n *NoAllocHashBuffer) Sum32() uint32 {
+	chksum := n.hash.Sum32()
+	n.hash.Reset()
+	return chksum
+}
+
+func (n *NoAllocHashBuffer) Bytes() []byte {
+	return n.buf.Bytes()
+}
+
+func (n *NoAllocHashBuffer) Len() int {
+	return n.buf.Len()
 }
