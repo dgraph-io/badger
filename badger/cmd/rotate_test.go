@@ -45,6 +45,8 @@ func TestRotate(t *testing.T) {
 	opts.EncryptionKey = key
 	db, err := badger.Open(opts)
 	require.NoError(t, err)
+	// Closing so that we can open another db
+	// in the upcomming test cases.
 	require.NoError(t, db.Close())
 
 	// Creating another sample key.
@@ -60,8 +62,7 @@ func TestRotate(t *testing.T) {
 	sstDir = dir
 
 	// Checking mismatch key.
-	err = doRotate(nil, []string{})
-	require.Equal(t, err, badger.ErrEncryptionKeyMismatch)
+	require.EqualError(t, doRotate(nil, []string{}), badger.ErrEncryptionKeyMismatch.Error())
 	oldKeyPath = fp.Name()
 	newKeyPath = fp2.Name()
 

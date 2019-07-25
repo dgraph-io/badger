@@ -86,7 +86,7 @@ func TestTableIndex(t *testing.T) {
 func TestBlockEncryption(t *testing.T) {
 	key := make([]byte, 32)
 	_, err := rand.Read(key)
-	y.Check(err)
+	require.NoError(t, err)
 
 	keysCount := 10000
 	builder := NewTableBuilder(&BuilderOptions{
@@ -95,6 +95,7 @@ func TestBlockEncryption(t *testing.T) {
 		},
 	})
 	filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
+	defer os.Remove(filename)
 	f, err := y.OpenSyncedFile(filename, true)
 	require.NoError(t, err)
 
@@ -114,7 +115,8 @@ func TestBlockEncryption(t *testing.T) {
 		}
 		y.Check(builder.Add(k, vs))
 	}
-	f.Write(builder.Finish())
+	_, err = f.Write(builder.Finish())
+	require.NoError(t, err)
 	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{
 		Data: key,
 	})

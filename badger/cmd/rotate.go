@@ -65,15 +65,12 @@ func doRotate(cmd *cobra.Command, args []string) error {
 
 func getKey(path string) ([]byte, error) {
 	if path == "" {
+		// Empty bytes for plain text to encryption(vice versa).
 		return []byte{}, nil
 	}
 	fp, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	res, err := ioutil.ReadAll(fp)
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
+	return ioutil.ReadAll(fp)
 }

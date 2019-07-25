@@ -134,8 +134,7 @@ func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 		if len(storageKey) > 0 {
 			var err error
 			// Decrypt the key if the storage key exits.
-			dataKey.Data, err = y.XORBlock(storageKey, dataKey.Iv, dataKey.Data)
-			if err != nil {
+			if dataKey.Data, err = y.XORBlock(storageKey, dataKey.Iv, dataKey.Data); err != nil {
 				return nil, err
 			}
 		}
@@ -288,8 +287,7 @@ func storeDataKey(fp *os.File, storageKey []byte, k *pb.DataKey, sync bool) erro
 	var lenCrcBuf [8]byte
 	binary.BigEndian.PutUint32(lenCrcBuf[0:4], uint32(len(data)))
 	binary.BigEndian.PutUint32(lenCrcBuf[4:8], crc32.Checksum(data, y.CastagnoliCrcTable))
-	_, err = fp.Write(lenCrcBuf[:])
-	if err != nil {
+	if _, err = fp.Write(lenCrcBuf[:]); err != nil {
 		return err
 	}
 	if _, err = fp.Write(data); err != nil {

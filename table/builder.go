@@ -141,6 +141,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	y.AssertTrue(b.buf.Len() < math.MaxUint32)
 	offset := uint32(b.buf.Len()) - b.baseOffset
 	b.entryOffsets = append(b.entryOffsets, uint32(offset))
+
 	// Layout: header, diffKey, value.
 	var hbuf [8]byte
 	h.Encode(hbuf[:])
@@ -299,13 +300,18 @@ func (b *Builder) Finish() []byte {
 	index = append(index, iv...)
 	chksum, err := getChecksum(index)
 	y.Check(err)
-	b.buf.Write(index)
+	n, err := b.buf.Write(index)
+	y.Check(err)
+
+	y.AssertTrue(n < math.MaxUint32)
 	// Write index size.
 	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], uint32(len(index)))
-	b.buf.Write(buf[:])
+	binary.BigEndian.PutUint32(buf[:], uint32(n))
+	_, err = b.buf.Write(buf[:])
+	y.Check(err)
 	// Write CheckSum.
-	b.buf.Write(chksum)
+	_, err = b.buf.Write(chksum)
+	y.Check(err)
 	return b.buf.Bytes()
 }
 
