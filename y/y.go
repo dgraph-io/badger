@@ -301,8 +301,8 @@ func (t *Throttle) Finish() error {
 	return t.finishErr
 }
 
-// Read reads data for the given size and offset.
-func Read(fp *os.File, off int64, size int) ([]byte, error) {
+// ReadAt reads data for the given size and offset.
+func ReadAt(fp *os.File, off int64, size int) ([]byte, error) {
 	res := make([]byte, size)
 	if _, err := fp.ReadAt(res, off); err != nil {
 		return nil, err

@@ -242,7 +242,7 @@ func (t *Table) read(off, sz int) ([]byte, error) {
 		}
 		return t.mmap[off : off+sz], nil
 	}
-	res, err := y.Read(t.fd, int64(off), sz)
+	res, err := y.ReadAt(t.fd, int64(off), sz)
 	y.NumReads.Add(1)
 	y.NumBytesRead.Add(int64(len(res)))
 	return res, err
@@ -256,12 +256,6 @@ func (t *Table) readNoFail(off, sz int) []byte {
 
 func (t *Table) readIndex() error {
 	readPos := t.tableSize
-	var iv []byte
-	// Read checksum len from the last 4 bytes.
-	if t.dataKey != nil {
-		readPos -= aes.BlockSize
-		iv = t.readNoFail(readPos, aes.BlockSize)
-	}
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
 	checksumLen := int(binary.BigEndian.Uint32(buf))
@@ -284,7 +278,11 @@ func (t *Table) readIndex() error {
 	if err := y.VerifyChecksum(data, expectedChk); err != nil {
 		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename())
 	}
+	var iv []byte
 	if t.dataKey != nil {
+		// Data will have both index data and IV.
+		iv = data[len(data)-aes.BlockSize:]
+		data = data[:len(data)-aes.BlockSize]
 		var err error
 		data, err = y.XORBlock(t.dataKey.Data, iv, data)
 		if err != nil {
@@ -393,7 +391,7 @@ func (t *Table) VerifyChecksum() error {
 	return nil
 }
 
-// KeyID returns datakey's ID.
+// KeyID returns datakey's ID for the table.
 func (t *Table) KeyID() uint64 {
 	if t.dataKey != nil {
 		return t.dataKey.KeyID

@@ -34,6 +34,7 @@ func TestBuildRegistry(t *testing.T) {
 	_, err := rand.Read(storageKey)
 	y.Check(err)
 	kr, err := OpenKeyRegistry(path, false, storageKey)
+	defer os.Remove(filepath.Join(path, KeyRegistryFileName))
 	require.NoError(t, err)
 	dk, err := kr.getDataKey()
 	require.NoError(t, err)
@@ -47,7 +48,7 @@ func TestBuildRegistry(t *testing.T) {
 	require.Equal(t, dk.Data, kr.dataKeys[dk.KeyID].Data)
 	require.Equal(t, dk1.Data, kr.dataKeys[dk1.KeyID].Data)
 	kr.Close()
-	os.Remove(filepath.Join(path, KeyRegistryFileName))
+
 }
 
 func TestRewriteRegistry(t *testing.T) {
@@ -57,12 +58,12 @@ func TestRewriteRegistry(t *testing.T) {
 	_, err := rand.Read(storageKey)
 	y.Check(err)
 	kr, err := OpenKeyRegistry(path, false, storageKey)
+	defer os.Remove(filepath.Join(path, KeyRegistryFileName))
 	require.NoError(t, err)
 	_, err = kr.getDataKey()
 	require.NoError(t, err)
 	kr.lastCreated = 0
 	_, err = kr.getDataKey()
-	require.NoError(t, err)
 	require.NoError(t, err)
 	kr.Close()
 	delete(kr.dataKeys, 1)

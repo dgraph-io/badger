@@ -40,7 +40,6 @@ func init() {
 		"", "Path of the old key")
 	rotateCmd.Flags().StringVarP(&newKeyPath, "new-key-path", "n",
 		"", "Path of the new key")
-	rotateCmd.MarkFlagRequired("dir")
 }
 
 func doRotate(cmd *cobra.Command, args []string) error {

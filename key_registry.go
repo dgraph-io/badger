@@ -9,24 +9,28 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
-	"github.com/dgraph-io/badger/y"
-
 	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/y"
 )
 
-// KeyRegistryFileName is file name of key registry.
-const KeyRegistryFileName = "KeyRegistry"
-
-// KeyRegistryRewriteFileName is  file name of key registry.
-const KeyRegistryRewriteFileName = "REWRITE-KeyRegistry"
+const (
+	// KeyRegistryFileName is the file name for the key registry file.
+	KeyRegistryFileName = "KEYREGISTRY"
+	// KeyRegistryRewriteFileName is the file name for the rewrite key registry file.
+	KeyRegistryRewriteFileName = "REWRITE-KEYREGISTRY"
+	// RotationPeriod is the key rotation period for datakey.
+	RotationPeriod = 10
+)
 
 // SanityText is used to check whether the given user provided storage key is valid or not
 var sanityText = []byte("!Badger!Registry!")
 
 // KeyRegistry used to maintain all the data keys.
 type KeyRegistry struct {
+	sync.RWMutex
 	dataKeys    map[uint64]*pb.DataKey
 	lastCreated int64
 	nextKeyID   uint64
@@ -41,6 +45,9 @@ func newKeyRegistry(storageKey []byte) *KeyRegistry {
 		storageKey: storageKey,
 	}
 }
+
+// OpenKeyRegistry opens key registry if it exists, otherwise it'll create key registry
+// and returns key registry.
 func OpenKeyRegistry(dir string, readOnly bool, storageKey []byte) (*KeyRegistry, error) {
 	path := filepath.Join(dir, KeyRegistryFileName)
 	var flags uint32
@@ -56,7 +63,6 @@ func OpenKeyRegistry(dir string, readOnly bool, storageKey []byte) (*KeyRegistry
 		if readOnly {
 			return kr, nil
 		}
-		fp.Close()
 		if err := RewriteRegistry(dir, kr, storageKey); err != nil {
 			return nil, err
 		}
@@ -75,12 +81,12 @@ func OpenKeyRegistry(dir string, readOnly bool, storageKey []byte) (*KeyRegistry
 
 func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 	readPos := int64(0)
-	iv, err := y.Read(fp, readPos, aes.BlockSize)
+	iv, err := y.ReadAt(fp, readPos, aes.BlockSize)
 	if err != nil {
 		return nil, err
 	}
 	readPos += aes.BlockSize
-	eSanityText, err := y.Read(fp, readPos, len(sanityText))
+	eSanityText, err := y.ReadAt(fp, readPos, len(sanityText))
 	if err != nil {
 		return nil, err
 	}
@@ -104,13 +110,13 @@ func buildKeyRegistry(fp *os.File, storageKey []byte) (*KeyRegistry, error) {
 		if readPos == stat.Size() {
 			break
 		}
-		lenCrcBuf, err := y.Read(fp, readPos, 8)
+		lenCrcBuf, err := y.ReadAt(fp, readPos, 8)
 		if err != nil {
 			return nil, err
 		}
 		readPos += 8
 		l := int64(binary.BigEndian.Uint32(lenCrcBuf[0:4]))
-		data, err := y.Read(fp, readPos, int(l))
+		data, err := y.ReadAt(fp, readPos, int(l))
 		if err != nil {
 			return nil, err
 		}
@@ -212,30 +218,39 @@ func (kr *KeyRegistry) getDataKey() (*pb.DataKey, error) {
 		return nil, nil
 	}
 	diff := time.Now().Sub(time.Unix(kr.lastCreated, 0))
-	if diff.Hours()/24 > 10 {
-		kr.nextKeyID++
-		k := make([]byte, len(kr.storageKey))
-		iv, err := y.GenereateIV()
-		if err != nil {
-			return nil, err
-		}
-		rand.Read(k)
-		dk := &pb.DataKey{}
-		dk.KeyID = kr.nextKeyID
-		dk.Data = k
-		dk.CreatedAt = time.Now().Unix()
-		dk.IV = iv
-		err = storeDataKey(kr.fp, kr.storageKey, dk, true)
-		if err != nil {
-			return nil, err
-		}
-		// storeDatakey encrypts the datakey
-		// So, placing unencrypted key in the memory
-		dk.Data = k
-		kr.dataKeys[kr.nextKeyID] = dk
+	if diff.Hours()/24 < RotationPeriod {
+		kr.RLock()
+		defer kr.RUnlock()
+		dk := kr.dataKeys[kr.nextKeyID]
 		return dk, nil
 	}
-	return kr.dataKeys[kr.nextKeyID], nil
+	kr.nextKeyID++
+	k := make([]byte, len(kr.storageKey))
+	iv, err := y.GenereateIV()
+	if err != nil {
+		return nil, err
+	}
+	_, err = rand.Read(k)
+	if err != nil {
+		return nil, err
+	}
+	dk := &pb.DataKey{
+		KeyID:     kr.nextKeyID,
+		Data:      k,
+		CreatedAt: time.Now().Unix(),
+		IV:        iv,
+	}
+	err = storeDataKey(kr.fp, kr.storageKey, dk, true)
+	if err != nil {
+		return nil, err
+	}
+	// storeDatakey encrypts the datakey So, placing unencrypted key in the memory
+	dk.Data = k
+	kr.Lock()
+	defer kr.Unlock()
+	kr.lastCreated = dk.CreatedAt
+	kr.dataKeys[kr.nextKeyID] = dk
+	return dk, nil
 }
 
 // Close closes the key registry.
@@ -268,7 +283,7 @@ func storeDataKey(fp *os.File, storageKey []byte, k *pb.DataKey, sync bool) erro
 		return err
 	}
 	if sync {
-		err := fp.Sync()
+		err := y.FileSync(fp)
 		if err != nil {
 			return err
 		}

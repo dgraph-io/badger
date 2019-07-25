@@ -67,9 +67,8 @@ type levelManifest struct {
 // TableManifest contains information about a specific level
 // in the LSM tree.
 type TableManifest struct {
-	Level    uint8
-	Checksum []byte
-	KeyID    uint64
+	Level uint8
+	KeyID uint64
 }
 
 // manifestFile holds the file pointer (and other info) about the manifest file, which is a log

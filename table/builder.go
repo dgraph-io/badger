@@ -260,7 +260,7 @@ The table structure looks like
 +----------+-------------+------------+---------------+---------------------------+
 | Block 6  | Block 7     | Block ...  | Block ...     |       Block N             |
 +----------+-------- ----+---- -------+---------------+---------------------------+
-| Index    | Index Size  | Checksum   | Checksum Size |    IV (encryption only)   |
+| Index + IV (encryption only)        | Index Size    | Checksum   | Checksum Size|      |
 +----------+-------------+------------+---------------+---------------------------+
 */
 func (b *Builder) Finish() []byte {
@@ -295,6 +295,8 @@ func (b *Builder) Finish() []byte {
 		index, err = y.XORBlock(b.opts.DataKey.Data, iv, index)
 		y.Check(err)
 	}
+	// Index hold IV as well, If we are encrypting the sst.
+	index = append(index, iv...)
 	chksum, err := getChecksum(index)
 	y.Check(err)
 	b.buf.Write(index)
@@ -304,7 +306,6 @@ func (b *Builder) Finish() []byte {
 	b.buf.Write(buf[:])
 	// Write CheckSum.
 	b.buf.Write(chksum)
-	b.buf.Write(iv)
 	return b.buf.Bytes()
 }
 

@@ -39,8 +39,5 @@ func XORBlock(key, iv, src []byte) ([]byte, error) {
 func GenereateIV() ([]byte, error) {
 	iv := make([]byte, aes.BlockSize)
 	_, err := io.ReadFull(rand.Reader, iv)
-	if err != nil {
-		return iv, err
-	}
-	return iv, nil
+	return iv, err
 }
