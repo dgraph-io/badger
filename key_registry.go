@@ -217,7 +217,7 @@ func (kr *KeyRegistry) getDataKey() (*pb.DataKey, error) {
 	if len(kr.storageKey) == 0 {
 		return nil, nil
 	}
-	diff := time.Now().Sub(time.Unix(kr.lastCreated, 0))
+	diff := time.Since(time.Unix(kr.lastCreated, 0))
 	if diff.Hours()/24 < RotationPeriod {
 		kr.RLock()
 		defer kr.RUnlock()

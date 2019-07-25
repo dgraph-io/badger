@@ -338,7 +338,6 @@ func (t *Table) block(idx int) (*block, error) {
 		if err != nil {
 			return nil, err
 		}
-		deBlk = append(deBlk, blk.data[readPos:]...)
 		blk.data = deBlk
 	}
 	//Move position to read numEntries in block.
