@@ -159,13 +159,23 @@ func (itr *blockIterator) parseKV(h header) {
 	copy(itr.key[h.plen:], itr.data[itr.pos:itr.pos+uint32(h.klen)])
 	itr.pos += uint32(h.klen)
 
-	if itr.pos+uint32(h.vlen) > uint32(len(itr.data)) {
-		itr.err = errors.Errorf("Value exceeded size of block: %d %d %d %d %v",
-			itr.pos, h.klen, h.vlen, len(itr.data), h)
+	var valEndOffset uint32
+	// We're at the last entry in the block.
+	if itr.currentIdx == itr.numEntries-1 {
+		valEndOffset = uint32(itr.entriesIndexStart)
+	} else {
+		// Get starting offset of the next entry which is the end of the current entry.
+		valEndOffset = itr.getOffset(itr.currentIdx + 1)
+	}
+
+	if valEndOffset > uint32(len(itr.data)) {
+		itr.err = errors.Errorf("Value endoffset exceeded size of block. "+
+			"Pos:%d Len:%d EndOffset:%d Header:%v", itr.pos, len(itr.data), valEndOffset, h)
 		return
 	}
-	itr.val = y.SafeCopy(itr.val, itr.data[itr.pos:itr.pos+uint32(h.vlen)])
-	itr.pos += uint32(h.vlen)
+	itr.val = y.SafeCopy(itr.val, itr.data[itr.pos:valEndOffset])
+	// Set pos to the end of current entry.
+	itr.pos = valEndOffset
 }
 
 func (itr *blockIterator) Next() {
