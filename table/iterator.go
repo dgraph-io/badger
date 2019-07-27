@@ -43,9 +43,9 @@ type blockIterator struct {
 func (itr *blockIterator) Reset() {
 	itr.pos = 0
 	itr.err = nil
-	itr.baseKey = []byte{}
-	itr.key = []byte{}
-	itr.val = []byte{}
+	itr.baseKey = itr.baseKey[:0]
+	itr.key = itr.key[:0]
+	itr.val = itr.val[:0]
 	itr.init = false
 	itr.currentIdx = -1
 }
