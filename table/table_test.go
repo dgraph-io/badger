@@ -56,7 +56,7 @@ func buildTestTable(t *testing.T, prefix string, n int) *os.File {
 
 // keyValues is n by 2 where n is number of pairs.
 func buildTable(t *testing.T, keyValues [][]string) *os.File {
-	opts := BuilderOptions{BlockSize: 4 * 1024, BloomSize: 1572864}
+	opts := BuilderOptions{BlockSize: 4 * 1024, BloomFalsePostiveProb: 0.01}
 	b := NewTableBuilder(opts)
 	defer b.Close()
 	rand.Seed(time.Now().UnixNano())
@@ -646,7 +646,7 @@ func TestTableBigValues(t *testing.T) {
 	require.NoError(t, err, "unable to create file")
 
 	n := 100 // Insert 100 keys.
-	opts := BuilderOptions{BlockSize: 4 * 1024, BloomSize: 1572864}
+	opts := BuilderOptions{BlockSize: 4 * 1024, BloomFalsePostiveProb: 0.01}
 	builder := NewTableBuilder(opts)
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), 0)
@@ -715,7 +715,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 	// Iterate b.N times over the entire table.
 	for i := 0; i < b.N; i++ {
 		func() {
-			opts := BuilderOptions{BlockSize: 4 * 0124, BloomSize: 1572864}
+			opts := BuilderOptions{BlockSize: 4 * 0124, BloomFalsePostiveProb: 0.01}
 			newBuilder := NewTableBuilder(opts)
 			it := tbl.NewIterator(false)
 			defer it.Close()
@@ -736,7 +736,7 @@ func BenchmarkReadMerged(b *testing.B) {
 	var tables []*Table
 	for i := 0; i < m; i++ {
 		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-		opts := BuilderOptions{BlockSize: 4 * 1024, BloomSize: 1572864}
+		opts := BuilderOptions{BlockSize: 4 * 1024, BloomFalsePostiveProb: 0.01}
 		builder := NewTableBuilder(opts)
 		f, err := y.OpenSyncedFile(filename, true)
 		y.Check(err)
@@ -821,7 +821,7 @@ func BenchmarkRandomRead(b *testing.B) {
 
 func getTableForBenchmarks(b *testing.B, count int) *Table {
 	rand.Seed(time.Now().Unix())
-	opts := BuilderOptions{BlockSize: 4 * 1024, BloomSize: 1572864}
+	opts := BuilderOptions{BlockSize: 4 * 1024, BloomFalsePostiveProb: 0.01}
 	builder := NewTableBuilder(opts)
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)

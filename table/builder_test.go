@@ -41,7 +41,7 @@ func TestTableIndex(t *testing.T) {
 
 	t.Run("multiple keys", func(t *testing.T) {
 		keysCount := 10000
-		opts := BuilderOptions{BlockSize: 4 * 1024, BloomSize: 1572864}
+		opts := BuilderOptions{BlockSize: 4 * 1024, BloomFalsePostiveProb: float64(0.01)}
 		builder := NewTableBuilder(opts)
 		filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
 		f, err := y.OpenSyncedFile(filename, true)

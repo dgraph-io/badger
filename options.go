@@ -47,13 +47,13 @@ type Options struct {
 
 	// Fine tuning options.
 
-	MaxTableSize        int64
-	LevelSizeMultiplier int
-	MaxLevels           int
-	ValueThreshold      int
-	NumMemtables        int
-	BloomSize           int
-	BlockSize           int
+	MaxTableSize           int64
+	LevelSizeMultiplier    int
+	MaxLevels              int
+	ValueThreshold         int
+	NumMemtables           int
+	BlockSize              int
+	BloomFalsePositiveProb float64
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -99,7 +99,7 @@ func DefaultOptions(path string) Options {
 		NumLevelZeroTables:      5,
 		NumLevelZeroTablesStall: 10,
 		NumMemtables:            5,
-		BloomSize:               1572864, // 1.5 MB
+		BloomFalsePositiveProb:  0.01,
 		BlockSize:               4 * 1024,
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
@@ -291,15 +291,17 @@ func (opt Options) WithNumMemtables(val int) Options {
 	return opt
 }
 
-// WithBloomSize returns a new Options value with BloomSize set to the given value.
+// WithBloomFalsePositiveProb returns a new Options value with BloomFalsePositiveProb set
+// to the given value.
 //
-// BloomSize sets the approximate size of the bloom filter any SSTable should have. Before reading
-// a key from table, the bloom filter is checked for key existence. BloomSize might impact read
-// performance of DB. A small BloomSize can result in more false positive rate.
+// BloomFalsePositiveProb sets the false positive probability of the bloom filter in any SSTable.
+// Before reading a key from table, the bloom filter is checked for key existence.
+// BloomFalsePositiveProb might impact read performance of DB. Lower BloomFalsePositiveProb value
+// might consume more memory.
 //
-// The default value of BloomSize is 1572864.
-func (opt Options) WithBloomSize(val int) Options {
-	opt.BloomSize = val
+// The default value of BloomSize is 0.01.
+func (opt Options) WithBloomFalsePositiveProb(val float64) Options {
+	opt.BloomFalsePositiveProb = val
 	return opt
 }
 

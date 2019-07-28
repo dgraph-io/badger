@@ -902,8 +902,8 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
 
 	bopts := table.BuilderOptions{
-		BlockSize: uint32(db.opt.BlockSize),
-		BloomSize: uint32(db.opt.BloomSize),
+		BlockSize:             db.opt.BlockSize,
+		BloomFalsePostiveProb: db.opt.BloomFalsePositiveProb,
 	}
 	err = writeLevel0Table(ft, fd, bopts)
 	dirSyncErr := <-dirSyncCh

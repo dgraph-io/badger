@@ -29,8 +29,8 @@ import (
 	"sync/atomic"
 
 	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/ristretto/z"
 
-	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
@@ -62,7 +62,7 @@ type Table struct {
 	smallest, biggest []byte // Smallest and largest keys.
 	id                uint64 // file id, part of filename
 
-	bf bbloom.Bloom
+	bf z.Bloom
 
 	Checksum []byte
 	chkMode  options.ChecksumVerificationMode // indicates when to verify checksum for blocks.
@@ -286,7 +286,7 @@ func (t *Table) readIndex() error {
 	err := index.Unmarshal(data)
 	y.Check(err)
 
-	t.bf = bbloom.JSONUnmarshal(index.BloomFilter)
+	t.bf = *z.JSONUnmarshal(index.BloomFilter)
 	t.blockIndex = index.Offsets
 	return nil
 }
@@ -340,7 +340,7 @@ func (t *Table) ID() uint64 { return t.id }
 
 // DoesNotHave returns true if (but not "only if") the table does not have the key.  It does a
 // bloom filter lookup.
-func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(key) }
+func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.HasBytes(key) }
 
 // VerifyChecksum verifies checksum for all blocks of table. This function is called by
 // OpenTable() function. This function is also called inside levelsController.VerifyChecksum().

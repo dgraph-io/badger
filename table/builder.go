@@ -21,10 +21,9 @@ import (
 	"encoding/binary"
 	"math"
 
-	"github.com/AndreasBriese/bbloom"
-
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 func newBuffer(sz int) *bytes.Buffer {
@@ -62,33 +61,32 @@ type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf *bytes.Buffer
 
-	blockSize    uint32   // Max size of block.
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
 	entryOffsets []uint32 // Offsets of entries present in current block.
 
 	tableIndex *pb.TableIndex
-	bf         bbloom.Bloom
+	keyHashes  []uint64
+
+	opts *BuilderOptions
 }
 
 // BuilderOptions contains configurable options for table builder.
 type BuilderOptions struct {
-	// BloomSize is the size of bloom filter in bytes.
-	BloomSize int
+	// BloomFalsePostiveProb is the false postive probabiltiy of bloom filter.
+	BloomFalsePostiveProb float64
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
 }
 
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts BuilderOptions) *Builder {
-	b := &Builder{
+	return &Builder{
 		buf:        newBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
-		blockSize:  uint32(opts.BlockSize),
+		keyHashes:  make([]uint64, 0),
+		opts:       &opts,
 	}
-	b.bf = bbloom.New(float64(opts.BloomSize*8 /*No of bits*/), float64(4) /*No of locs*/)
-
-	return b
 }
 
 // Close closes the TableBuilder.
@@ -109,7 +107,7 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
-	b.bf.Add(y.ParseKey(key))
+	b.keyHashes = append(b.keyHashes, z.AESHash(y.ParseKey(key)))
 
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
@@ -190,7 +188,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 
-	return estimatedSize > b.blockSize
+	return estimatedSize > uint32(b.opts.BlockSize)
 }
 
 // Add adds a key-value pair to the block.
@@ -239,8 +237,12 @@ The table structure looks like
 +---------+------------+-----------+---------------+
 */
 func (b *Builder) Finish() []byte {
+	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opts.BloomFalsePostiveProb)
+	for _, h := range b.keyHashes {
+		bf.Add(h)
+	}
 	// Add bloom filter to the index.
-	b.tableIndex.BloomFilter = b.bf.JSONMarshal()
+	b.tableIndex.BloomFilter = bf.JSONMarshal()
 
 	b.finishBlock() // This will never start a new block.
 
