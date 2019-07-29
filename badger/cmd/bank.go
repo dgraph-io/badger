@@ -364,7 +364,8 @@ func runTest(cmd *cobra.Command, args []string) error {
 		defer tmpDb.Close()
 	}
 
-	wb := db.NewWriteBatch()
+	wb, err := db.NewWriteBatch()
+	y.Check(err)
 	for i := 0; i < numAccounts; i++ {
 		y.Check(wb.Set(key(i), toSlice(initialBal)))
 	}
@@ -458,8 +459,8 @@ func runTest(cmd *cobra.Command, args []string) error {
 				err = tmpDb.DropAll()
 				y.Check(err)
 
-				batch := tmpDb.NewWriteBatch()
-
+				batch, err := tmpDb.NewWriteBatch()
+				y.Check(err)
 				stream := db.NewStream()
 				stream.Send = func(list *pb.KVList) error {
 					for _, kv := range list.Kv {
@@ -524,7 +525,8 @@ func runTest(cmd *cobra.Command, args []string) error {
 				accountIDS = append(accountIDS, key(i))
 			}
 			updater := func(kvs *pb.KVList) {
-				batch := subscribeDB.NewWriteBatch()
+				batch, err := subscribeDB.NewWriteBatch()
+				y.Check(err)
 				for _, kv := range kvs.GetKv() {
 					y.Check(batch.Set(kv.Key, kv.Value))
 				}
