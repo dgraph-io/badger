@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"math"
 	"os"
 	"sync"
@@ -299,4 +300,47 @@ func (t *Throttle) Finish() error {
 	})
 
 	return t.finishErr
+}
+
+type page struct {
+	buf []byte
+}
+
+type Buffer struct {
+	pageSize int
+	pages    []*page
+}
+
+func NewBuffer(pageSize int) *Buffer {
+	return &Buffer{pageSize: pageSize}
+}
+
+func (b *Buffer) Write(data []byte) {
+	// Add to existing page. Once it fills up, create a new page and add to it.
+	// create a new page. Add it to the linked list.
+	page := &page{buf: make([]byte, 0, b.pageSize)}
+	page.buf = append(page.buf, data[remaining:]...)
+}
+
+func (b *Buffer) NewReader() io.Reader {
+	// Allocates the right slice. Copies over the data and returns.
+
+}
+
+// To create hash.
+func (b *Buffer) NewReader(offset, length int) io.Reader {
+	// Iterates over the pages and writes to io.Writer.
+	return &reader{b: b, offset: offset, length: length}
+}
+
+type reader struct {
+	b      *Buffer
+	offset int
+	length int
+}
+
+// io.Copy(fd, b.NewReader(0, -1))
+
+func (r *reader) Read(p []byte) (int, error) {
+
 }

@@ -162,6 +162,7 @@ func (b *Builder) finishBlock() {
 	binary.BigEndian.PutUint32(ebuf[len(ebuf)-4:], uint32(len(b.entryOffsets)))
 	b.buf.Write(ebuf)
 
+	// reader := b.buf.NewReader(b.baseOffset, -1)
 	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
 	b.writeChecksum(blockBuf)
 
