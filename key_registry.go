@@ -3,10 +3,10 @@ package badger
 import (
 	"bytes"
 	"crypto/aes"
+	"crypto/rand"
 	"encoding/binary"
 	"hash/crc32"
 	"io"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"sync"

@@ -173,7 +173,8 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode,
 		return nil, y.Wrap(err)
 	}
 
-	// Understading that table will have atleat 1 block.
+	// Assuming there will always be at least one block in the table,
+	// the key of the first index block is the smallest key of the table.
 	t.smallest = t.blockIndex[0].Key
 
 	it := t.NewIterator(true)
