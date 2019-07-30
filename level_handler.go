@@ -250,6 +250,9 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 			if version := y.ParseTs(it.Key()); maxVs.Version < version {
 				maxVs = it.Value()
 				maxVs.Version = version
+				// Break from the for loop once we find a version of the key.
+				// The first match is the latest match.
+				break
 			}
 		}
 	}

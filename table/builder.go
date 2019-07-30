@@ -93,13 +93,12 @@ func (b *Builder) Empty() bool { return b.buf.Len() == 0 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
 func (b Builder) keyDiff(newKey []byte) []byte {
-	var i int
-	for i = 0; i < len(newKey) && i < len(b.baseKey); i++ {
+	for i := 0; i < len(newKey) && i < len(b.baseKey); i++ {
 		if newKey[i] != b.baseKey[i] {
-			break
+			return newKey[i:]
 		}
 	}
-	return newKey[i:]
+	return newKey
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
