@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
-	"io"
 	"math"
 	"os"
 	"sync"
@@ -307,40 +306,114 @@ type page struct {
 }
 
 type Buffer struct {
+	length   int
 	pageSize int
 	pages    []*page
 }
 
 func NewBuffer(pageSize int) *Buffer {
-	return &Buffer{pageSize: pageSize}
+	b := &Buffer{pageSize: pageSize}
+	b.pages = make([]*page, 0)
+	b.pages = append(b.pages, &page{buf: make([]byte, 0, b.pageSize)})
+	b.length = 0
+	return b
 }
 
-func (b *Buffer) Write(data []byte) {
-	// Add to existing page. Once it fills up, create a new page and add to it.
-	// create a new page. Add it to the linked list.
-	page := &page{buf: make([]byte, 0, b.pageSize)}
-	page.buf = append(page.buf, data[remaining:]...)
+func (b *Buffer) Write(data []byte) (int, error) {
+	written := 0
+	for {
+		cp := b.pages[len(b.pages)-1] // current page
+		remaining := cap(cp.buf) - len(cp.buf)
+		m := min(remaining, len(data)-written)
+		cp.buf = append(cp.buf, data[written:written+m]...)
+
+		written += m
+		if written >= len(data) {
+			break
+		}
+
+		b.pages = append(b.pages, &page{buf: make([]byte, 0, b.pageSize)})
+	}
+	b.length += len(data)
+
+	return written, nil
 }
 
-func (b *Buffer) NewReader() io.Reader {
-	// Allocates the right slice. Copies over the data and returns.
-
+func (b *Buffer) WriteByte(data byte) {
+	b.Write([]byte{data})
 }
+
+func (b *Buffer) Len() int {
+	return b.length
+}
+
+func (b *Buffer) ReadAt(offset, length int) []byte {
+	if b.length-offset < length || length == -1 {
+		length = b.length - offset
+	}
+
+	if length == 0 {
+		return nil
+	}
+
+	buf := make([]byte, length) // allocate all buffer at start
+	pageIdx := offset / b.pageSize
+	startIdx := offset % b.pageSize
+
+	cp := b.pages[pageIdx]
+	read := 0
+	for {
+		read += copy(buf[read:], cp.buf[startIdx:])
+		if read >= length {
+			break
+		}
+
+		pageIdx++
+		// Not checking here for boundry as we have already fixed length at start.
+		cp = b.pages[pageIdx]
+		startIdx = 0
+	}
+
+	return buf
+}
+
+// func (b *Buffer) NewReader() io.Reader {
+// 	// Allocates the right slice. Copies over the data and returns.
+// 	// sz := 0
+// 	// for _, page := range b.pages {
+// 	// 	sz += len(page.buf)
+// 	// }
+
+// 	// buf := make([]byte, sz)
+// 	// for _, page := range b.pages {
+// 	// 	buf = append(buf, page.buf...)
+// 	// }
+
+// 	// return reader
+// 	return nil
+// }
 
 // To create hash.
-func (b *Buffer) NewReader(offset, length int) io.Reader {
-	// Iterates over the pages and writes to io.Writer.
-	return &reader{b: b, offset: offset, length: length}
-}
+// func (b *Buffer) NewReaderAt(offset, length int) io.Reader {
+// 	// Iterates over the pages and writes to io.Writer.
+// 	return &reader{b: b, offset: offset, length: length}
+// }
 
-type reader struct {
-	b      *Buffer
-	offset int
-	length int
-}
+// type reader struct {
+// 	b      *Buffer
+// 	offset int
+// 	length int
+// }
 
-// io.Copy(fd, b.NewReader(0, -1))
+// // io.Copy(fd, b.NewReader(0, -1))
 
-func (r *reader) Read(p []byte) (int, error) {
+// func (r *reader) Read(p []byte) (int, error) {
+// 	return 0, nil
+// }
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

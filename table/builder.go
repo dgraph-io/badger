@@ -60,7 +60,7 @@ func (h header) Size() int { return 8 }
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	buf *bytes.Buffer
+	buf *y.Buffer
 
 	blockSize    uint32   // Max size of block.
 	baseKey      []byte   // Base key for the current block.
@@ -76,8 +76,9 @@ type Builder struct {
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder() *Builder {
 	return &Builder{
-		keyBuf:     newBuffer(1 << 20),
-		buf:        newBuffer(1 << 20),
+		keyBuf: newBuffer(1 << 20),
+		// buf:        newBuffer(1 << 20),
+		buf:        y.NewBuffer(4 * 1024),
 		tableIndex: &pb.TableIndex{},
 
 		// TODO(Ashish): make this configurable
@@ -140,7 +141,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	b.buf.Write(hbuf[:])
 	b.buf.Write(diffKey) // We only need to store the key difference.
 
-	v.EncodeTo(b.buf)
+	v.EncodeToYBuf(b.buf)
 }
 
 /*
@@ -163,7 +164,8 @@ func (b *Builder) finishBlock() {
 	b.buf.Write(ebuf)
 
 	// reader := b.buf.NewReader(b.baseOffset, -1)
-	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
+	// blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
+	blockBuf := b.buf.ReadAt(int(b.baseOffset), -1)
 	b.writeChecksum(blockBuf)
 
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
@@ -278,7 +280,8 @@ func (b *Builder) Finish() []byte {
 	y.Check(err)
 
 	b.writeChecksum(index)
-	return b.buf.Bytes()
+	// return b.buf.Bytes()
+	return b.buf.ReadAt(0, -1)
 }
 
 func (b *Builder) writeChecksum(data []byte) {
