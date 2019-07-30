@@ -21,6 +21,8 @@ import (
 	"encoding/binary"
 	"math"
 
+	"github.com/dgryski/go-farm"
+
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 	"github.com/dgraph-io/ristretto/z"
@@ -73,8 +75,8 @@ type Builder struct {
 
 // BuilderOptions contains configurable options for table builder.
 type BuilderOptions struct {
-	// BloomFalsePostiveProb is the false postive probabiltiy of bloom filter.
-	BloomFalsePostiveProb float64
+	// BloomFalsePostive is the false postive probabiltiy of bloom filter.
+	BloomFalsePostive float64
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
 }
@@ -84,7 +86,6 @@ func NewTableBuilder(opts BuilderOptions) *Builder {
 	return &Builder{
 		buf:        newBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
-		keyHashes:  make([]uint64, 0),
 		opts:       &opts,
 	}
 }
@@ -107,7 +108,7 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
-	b.keyHashes = append(b.keyHashes, z.AESHash(y.ParseKey(key)))
+	b.keyHashes = append(b.keyHashes, farm.Fingerprint64(y.ParseKey(key)))
 
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
@@ -237,7 +238,7 @@ The table structure looks like
 +---------+------------+-----------+---------------+
 */
 func (b *Builder) Finish() []byte {
-	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opts.BloomFalsePostiveProb)
+	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opts.BloomFalsePostive)
 	for _, h := range b.keyHashes {
 		bf.Add(h)
 	}

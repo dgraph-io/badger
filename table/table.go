@@ -28,6 +28,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/dgryski/go-farm"
+
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/ristretto/z"
 
@@ -340,7 +342,7 @@ func (t *Table) ID() uint64 { return t.id }
 
 // DoesNotHave returns true if (but not "only if") the table does not have the key.  It does a
 // bloom filter lookup.
-func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.HasBytes(key) }
+func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(farm.Fingerprint64(key)) }
 
 // VerifyChecksum verifies checksum for all blocks of table. This function is called by
 // OpenTable() function. This function is also called inside levelsController.VerifyChecksum().

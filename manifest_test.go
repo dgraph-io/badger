@@ -126,7 +126,7 @@ func buildTestTable(t *testing.T, prefix string, n int) *os.File {
 // TODO - Move these to somewhere where table package can also use it.
 // keyValues is n by 2 where n is number of pairs.
 func buildTable(t *testing.T, keyValues [][]string) *os.File {
-	bopts := table.BuilderOptions{BlockSize: 4 * 1024, BloomFalsePostiveProb: 0.01}
+	bopts := table.BuilderOptions{BlockSize: 4 * 1024, BloomFalsePostive: 0.01}
 	b := table.NewTableBuilder(bopts)
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.

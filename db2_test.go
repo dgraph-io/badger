@@ -517,8 +517,8 @@ func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 // a table with key starting from start and ending with end.
 func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	bopts := table.BuilderOptions{
-		BlockSize:             db.opt.BlockSize,
-		BloomFalsePostiveProb: db.opt.BloomFalsePositiveProb,
+		BlockSize:         db.opt.BlockSize,
+		BloomFalsePostive: db.opt.BloomFalsePositive,
 	}
 	b := table.NewTableBuilder(bopts)
 	nums := []int{start, end}

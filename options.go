@@ -47,13 +47,13 @@ type Options struct {
 
 	// Fine tuning options.
 
-	MaxTableSize           int64
-	LevelSizeMultiplier    int
-	MaxLevels              int
-	ValueThreshold         int
-	NumMemtables           int
-	BlockSize              int
-	BloomFalsePositiveProb float64
+	MaxTableSize        int64
+	LevelSizeMultiplier int
+	MaxLevels           int
+	ValueThreshold      int
+	NumMemtables        int
+	BlockSize           int
+	BloomFalsePositive  float64
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -99,7 +99,7 @@ func DefaultOptions(path string) Options {
 		NumLevelZeroTables:      5,
 		NumLevelZeroTablesStall: 10,
 		NumMemtables:            5,
-		BloomFalsePositiveProb:  0.01,
+		BloomFalsePositive:      0.01,
 		BlockSize:               4 * 1024,
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
@@ -291,17 +291,17 @@ func (opt Options) WithNumMemtables(val int) Options {
 	return opt
 }
 
-// WithBloomFalsePositiveProb returns a new Options value with BloomFalsePositiveProb set
+// WithBloomFalsePositive returns a new Options value with BloomFalsePositive set
 // to the given value.
 //
-// BloomFalsePositiveProb sets the false positive probability of the bloom filter in any SSTable.
+// BloomFalsePositive sets the false positive probability of the bloom filter in any SSTable.
 // Before reading a key from table, the bloom filter is checked for key existence.
-// BloomFalsePositiveProb might impact read performance of DB. Lower BloomFalsePositiveProb value
-// might consume more memory.
+// BloomFalsePositive might impact read performance of DB. Lower BloomFalsePositive value might
+// consume more memory.
 //
 // The default value of BloomSize is 0.01.
-func (opt Options) WithBloomFalsePositiveProb(val float64) Options {
-	opt.BloomFalsePositiveProb = val
+func (opt Options) WithBloomFalsePositive(val float64) Options {
+	opt.BloomFalsePositive = val
 	return opt
 }
 
