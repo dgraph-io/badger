@@ -628,6 +628,9 @@ func (db *DB) writeRequests(reqs []*request) error {
 		for _, r := range reqs {
 			r.Err = err
 			r.Wg.Done()
+			if err != nil {
+				orc.doneCommit(commitTs)
+			}
 		}
 	}
 	db.elog.Printf("writeRequests called. Writing to value log")
@@ -637,7 +640,12 @@ func (db *DB) writeRequests(reqs []*request) error {
 		done(err)
 		return err
 	}
+	// lsmCh <- reqs. If the channel fills up, we naturally block.
+	// done(nil)
+	// If you return here, then we can do more writes to disk.
 
+	// Another goroutine.
+	// for loop over lsmCh
 	db.elog.Printf("Sending updates to subscribers")
 	db.pub.sendUpdates(reqs)
 	db.elog.Printf("Writing to memtable")
@@ -668,7 +676,8 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 		db.updateHead(b.Ptrs)
 	}
-	done(nil)
+	// done(nil)
+	// oracle done here.
 	db.elog.Printf("%d entries written", count)
 	return nil
 }
