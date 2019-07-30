@@ -1806,32 +1806,44 @@ func TestForceFlushMemtable(t *testing.T) {
 
 func TestVerifyChecksum(t *testing.T) {
 	// use stream write for writing.
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		value := make([]byte, 32)
-		y.Check2(rand.Read(value))
-		l := &pb.KVList{}
-		st := 0
-		for i := 0; i < 1000; i++ {
-			key := make([]byte, 8)
-			binary.BigEndian.PutUint64(key, uint64(i))
-			l.Kv = append(l.Kv, &pb.KV{
-				Key:      key,
-				Value:    value,
-				StreamId: uint32(st),
-				Version:  1,
-			})
-			if i%100 == 0 {
-				st++
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	require.NoError(t, err)
+	path, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	opts := []Options{}
+	opts = append(opts, getTestOptions(path))
+	path, err = ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	opts = append(opts, getTestOptions(path).WithEncryptionKey(key))
+	for _, opt := range opts {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			value := make([]byte, 32)
+			y.Check2(rand.Read(value))
+			l := &pb.KVList{}
+			st := 0
+			for i := 0; i < 1000; i++ {
+				key := make([]byte, 8)
+				binary.BigEndian.PutUint64(key, uint64(i))
+				l.Kv = append(l.Kv, &pb.KV{
+					Key:      key,
+					Value:    value,
+					StreamId: uint32(st),
+					Version:  1,
+				})
+				if i%100 == 0 {
+					st++
+				}
 			}
-		}
 
-		sw := db.NewStreamWriter()
-		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
-		require.NoError(t, sw.Write(l), "sw.Write() failed")
-		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+			sw := db.NewStreamWriter()
+			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+			require.NoError(t, sw.Write(l), "sw.Write() failed")
+			require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
-		require.NoError(t, db.VerifyChecksum(), "checksum verification failed for DB")
-	})
+			require.NoError(t, db.VerifyChecksum(), "checksum verification failed for DB")
+		})
+	}
 }
 
 func TestMain(m *testing.M) {

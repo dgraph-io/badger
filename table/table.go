@@ -252,6 +252,20 @@ func (t *Table) readNoFail(off, sz int) []byte {
 	return res
 }
 
+func (t *Table) decrypt(data []byte) ([]byte, error) {
+	if t.dataKey != nil {
+		iv := data[len(data)-aes.BlockSize:]
+		data = data[:len(data)-aes.BlockSize]
+		var err error
+		data, err = y.XORBlock(t.dataKey.Data, iv, data)
+		if err != nil {
+			return data, err
+		}
+		return data, nil
+	}
+	return data, nil
+}
+
 func (t *Table) readIndex() error {
 	readPos := t.tableSize
 
@@ -279,19 +293,12 @@ func (t *Table) readIndex() error {
 	if err := y.VerifyChecksum(data, expectedChk); err != nil {
 		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename())
 	}
-	var iv []byte
-	if t.dataKey != nil {
-		// Data will have both index data and IV.
-		iv = data[len(data)-aes.BlockSize:]
-		data = data[:len(data)-aes.BlockSize]
-		var err error
-		data, err = y.XORBlock(t.dataKey.Data, iv, data)
-		if err != nil {
-			return err
-		}
+	var err error
+	if data, err = t.decrypt(data); err != nil {
+		return err
 	}
 	index := pb.TableIndex{}
-	err := index.Unmarshal(data)
+	err = index.Unmarshal(data)
 	y.Check(err)
 
 	t.bf = bbloom.JSONUnmarshal(index.BloomFilter)
@@ -304,7 +311,6 @@ func (t *Table) block(idx int) (*block, error) {
 	if idx >= len(t.blockIndex) {
 		return nil, errors.New("block out of index")
 	}
-	var iv []byte
 	ko := t.blockIndex[idx]
 	blk := &block{
 		offset: int(ko.Offset),
@@ -313,12 +319,9 @@ func (t *Table) block(idx int) (*block, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	if t.dataKey != nil {
-		iv = data[len(data)-aes.BlockSize:]
-		data = data[:len(data)-aes.BlockSize]
+	if blk.data, err = t.decrypt(data); err != nil {
+		return nil, err
 	}
-	blk.data = data
 	// Read meta data related to block.
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
@@ -329,19 +332,8 @@ func (t *Table) block(idx int) (*block, error) {
 			return nil, err
 		}
 	}
-
-	// Skip reading checksum.
+	// Removing checksum.
 	readPos -= blk.chkLen
-	if t.dataKey != nil {
-		// We encrypt and store the checksum.
-		// So, decrypting after checksum verfication.
-		deBlk, err := y.XORBlock(t.dataKey.Data, iv, blk.data[:readPos])
-		if err != nil {
-			return nil, err
-		}
-		// Doesn't contains checksum.
-		blk.data = deBlk
-	}
 	//Move position to read numEntries in block.
 	readPos -= 4
 	blk.numEntries = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))

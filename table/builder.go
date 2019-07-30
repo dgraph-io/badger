@@ -168,21 +168,14 @@ func (b *Builder) finishBlock() {
 	}
 	binary.BigEndian.PutUint32(ebuf[len(ebuf)-4:], uint32(len(b.entryOffsets)))
 	b.buf.Write(ebuf)
-	var iv []byte
-	if b.opts.DataKey != nil {
-		var err error
-		iv, err = y.GenereateIV()
-		y.Check(err)
-		eb, err := y.XORBlock(b.opts.DataKey.Data, iv, b.buf.Bytes()[b.baseOffset:])
-		y.Check(err)
-		b.buf.Truncate(int(b.baseOffset))
-		b.buf.Write(eb)
-	}
 	// Obtain checksum.
 	chksum, err := getChecksum(b.buf.Bytes()[b.baseOffset:])
 	y.Check(err)
 	b.buf.Write(chksum)
-	b.buf.Write(iv)
+	data, err := b.encrypt(b.buf.Bytes()[b.baseOffset:])
+	y.Check(err)
+	b.buf.Truncate(int(b.baseOffset))
+	b.buf.Write(data)
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
 	// implement padding. This might be useful while using direct I/O.
 
@@ -267,7 +260,6 @@ The table structure looks like
 func (b *Builder) Finish() []byte {
 	bf := bbloom.New(float64(b.keyCount), 0.01)
 	var klen [2]byte
-	var iv []byte
 	key := make([]byte, 1024)
 	for {
 		if _, err := b.keyBuf.Read(klen[:]); err == io.EOF {
@@ -288,16 +280,9 @@ func (b *Builder) Finish() []byte {
 	b.finishBlock() // This will never start a new block.
 
 	index, err := b.tableIndex.Marshal()
+	index, err = b.encrypt(index)
 	y.Check(err)
 	// Calculate CheckSum for the index.
-	if b.opts.DataKey != nil {
-		iv, err = y.GenereateIV()
-		y.Check(err)
-		index, err = y.XORBlock(b.opts.DataKey.Data, iv, index)
-		y.Check(err)
-	}
-	// Index hold IV as well, If we are encrypting the sst.
-	index = append(index, iv...)
 	chksum, err := getChecksum(index)
 	y.Check(err)
 	n, err := b.buf.Write(index)
@@ -318,6 +303,24 @@ func (b *Builder) Finish() []byte {
 // DataKey returns datakey of the builder.
 func (b *Builder) DataKey() *pb.DataKey {
 	return b.opts.DataKey
+}
+
+func (b *Builder) encrypt(data []byte) ([]byte, error) {
+	// Encrypt will xor if the datakey present and append IV
+	// to the given data block.
+	if b.DataKey() != nil {
+		iv, err := y.GenereateIV()
+		if err != nil {
+			return data, err
+		}
+		data, err = y.XORBlock(b.DataKey().Data, iv, data)
+		if err != nil {
+			return data, err
+		}
+		data = append(data, iv...)
+		return data, nil
+	}
+	return data, nil
 }
 
 // getChecksum returns checksum and also writes the length of checksum.
