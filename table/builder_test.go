@@ -18,6 +18,7 @@ package table
 
 import (
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"testing"
@@ -61,7 +62,8 @@ func TestTableIndex(t *testing.T) {
 			}
 			y.Check(builder.Add(k, vs))
 		}
-		f.Write(builder.Finish())
+		// f.Write(builder.Finish())
+		io.Copy(f, builder.Finish())
 
 		tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
 		require.NoError(t, err, "unable to open table")

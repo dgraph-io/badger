@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"math/rand"
 	"os"
 	"sort"
@@ -81,7 +82,8 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 			y.Check(err)
 		}
 	}
-	f.Write(b.Finish())
+	// f.Write(b.Finish())
+	io.Copy(f, b.Finish())
 	f.Close()
 	f, _ = y.OpenSyncedFile(filename, true)
 	return f
@@ -652,7 +654,8 @@ func TestTableBigValues(t *testing.T) {
 		require.NoError(t, builder.Add(key, vs))
 	}
 
-	f.Write(builder.Finish())
+	// f.Write(builder.Finish())
+	io.Copy(f, builder.Finish())
 	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
 	require.NoError(t, err, "unable to open table")
 	defer tbl.DecrRef()
@@ -743,7 +746,8 @@ func BenchmarkReadMerged(b *testing.B) {
 			v := fmt.Sprintf("%d", id)
 			y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}))
 		}
-		f.Write(builder.Finish())
+		// f.Write(builder.Finish())
+		io.Copy(f, builder.Finish())
 		tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead)
 		y.Check(err)
 		tables = append(tables, tbl)
@@ -827,7 +831,8 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 		y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)}))
 	}
 
-	f.Write(builder.Finish())
+	// f.Write(builder.Finish())
+	io.Copy(f, builder.Finish())
 	tbl, err := OpenTable(f, options.LoadToRAM, options.NoVerification)
 	require.NoError(b, err, "unable to open table")
 	return tbl

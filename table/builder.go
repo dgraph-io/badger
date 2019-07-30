@@ -165,7 +165,8 @@ func (b *Builder) finishBlock() {
 
 	// reader := b.buf.NewReader(b.baseOffset, -1)
 	// blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
-	blockBuf := b.buf.ReadAt(int(b.baseOffset), -1)
+	// blockBuf := b.buf.ReadAt(int(b.baseOffset), -1)
+	blockBuf := []byte("random")
 	b.writeChecksum(blockBuf)
 
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
@@ -243,7 +244,7 @@ The table structure looks like
 | Index   | Index Size | Checksum  | Checksum Size |
 +---------+------------+-----------+---------------+
 */
-func (b *Builder) Finish() []byte {
+func (b *Builder) Finish() io.Reader {
 	bf := bbloom.New(float64(b.keyCount), 0.01)
 	var klen [2]byte
 	key := make([]byte, 1024)
@@ -281,7 +282,7 @@ func (b *Builder) Finish() []byte {
 
 	b.writeChecksum(index)
 	// return b.buf.Bytes()
-	return b.buf.ReadAt(0, -1)
+	return b.buf.NewReader()
 }
 
 func (b *Builder) writeChecksum(data []byte) {

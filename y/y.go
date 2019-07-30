@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"math"
 	"os"
 	"sync"
@@ -377,21 +378,26 @@ func (b *Buffer) ReadAt(offset, length int) []byte {
 	return buf
 }
 
-// func (b *Buffer) NewReader() io.Reader {
-// 	// Allocates the right slice. Copies over the data and returns.
-// 	// sz := 0
-// 	// for _, page := range b.pages {
-// 	// 	sz += len(page.buf)
-// 	// }
+func (b *Buffer) NewReader() io.Reader {
+	// Allocates the right slice. Copies over the data and returns.
+	// sz := 0
+	// for _, page := range b.pages {
+	// 	sz += len(page.buf)
+	// }
 
-// 	// buf := make([]byte, sz)
-// 	// for _, page := range b.pages {
-// 	// 	buf = append(buf, page.buf...)
-// 	// }
+	// buf := make([]byte, sz)
+	// for _, page := range b.pages {
+	// 	buf = append(buf, page.buf...)
+	// }
 
-// 	// return reader
-// 	return nil
-// }
+	// return reader
+
+	return &reader{
+		b:        b,
+		pageIdx:  0,
+		startIdx: 0,
+	}
+}
 
 // To create hash.
 // func (b *Buffer) NewReaderAt(offset, length int) io.Reader {
@@ -399,17 +405,37 @@ func (b *Buffer) ReadAt(offset, length int) []byte {
 // 	return &reader{b: b, offset: offset, length: length}
 // }
 
-// type reader struct {
-// 	b      *Buffer
-// 	offset int
-// 	length int
-// }
+type reader struct {
+	b *Buffer
+	// offset int
+	// length int
+	pageIdx  int
+	startIdx int
+}
 
 // // io.Copy(fd, b.NewReader(0, -1))
 
-// func (r *reader) Read(p []byte) (int, error) {
-// 	return 0, nil
-// }
+func (r *reader) Read(p []byte) (int, error) {
+	if r.pageIdx >= len(r.b.pages) {
+		return 0, io.EOF
+	}
+
+	read := 0
+	for {
+		read += copy(p[read:], r.b.pages[r.pageIdx].buf[r.startIdx:])
+		if read >= len(p) {
+			break
+		}
+
+		r.pageIdx++
+		if r.pageIdx >= len(r.b.pages) {
+			break
+		}
+		r.startIdx = 0
+	}
+
+	return read, nil
+}
 
 func min(a, b int) int {
 	if a < b {
