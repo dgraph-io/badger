@@ -86,6 +86,7 @@ func NewTableBuilder(opts BuilderOptions) *Builder {
 	return &Builder{
 		buf:        newBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
+		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opts:       &opts,
 	}
 }

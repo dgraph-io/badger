@@ -63,7 +63,7 @@ type Table struct {
 	smallest, biggest []byte // Smallest and largest keys.
 	id                uint64 // file id, part of filename
 
-	bf z.Bloom
+	bf *z.Bloom
 
 	Checksum []byte
 	chkMode  options.ChecksumVerificationMode // indicates when to verify checksum for blocks.
@@ -287,7 +287,7 @@ func (t *Table) readIndex() error {
 	err := index.Unmarshal(data)
 	y.Check(err)
 
-	t.bf = *z.JSONUnmarshal(index.BloomFilter)
+	t.bf = z.JSONUnmarshal(index.BloomFilter)
 	t.blockIndex = index.Offsets
 	return nil
 }
