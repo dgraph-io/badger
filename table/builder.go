@@ -21,6 +21,8 @@ import (
 	"encoding/binary"
 	"io"
 	"math"
+	"reflect"
+	"unsafe"
 
 	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/pb"
@@ -40,17 +42,15 @@ type header struct {
 }
 
 // Encode encodes the header.
-func (h header) Encode(b []byte) {
-	binary.BigEndian.PutUint16(b[0:2], h.plen)
-	binary.BigEndian.PutUint16(b[2:4], h.klen)
-	binary.BigEndian.PutUint32(b[4:8], h.vlen)
+func (h header) Encode() []byte {
+	var b [8]byte
+	*(*header)(unsafe.Pointer(&b[0])) = h
+	return b[:]
 }
 
 // Decode decodes the header.
 func (h *header) Decode(buf []byte) int {
-	h.plen = binary.BigEndian.Uint16(buf[0:2])
-	h.klen = binary.BigEndian.Uint16(buf[2:4])
-	h.vlen = binary.BigEndian.Uint32(buf[4:8])
+	*h = *(*header)(unsafe.Pointer(&buf[0]))
 	return h.Size()
 }
 
@@ -135,9 +135,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len())-b.baseOffset)
 
 	// Layout: header, diffKey, value.
-	var hbuf [8]byte
-	h.Encode(hbuf[:])
-	b.buf.Write(hbuf[:])
+	b.buf.Write(h.Encode())
 	b.buf.Write(diffKey) // We only need to store the key difference.
 
 	v.EncodeTo(b.buf)
@@ -155,12 +153,8 @@ Structure of Block.
 +-----------------------------------------+--------------------+--------------+------------------+
 */
 func (b *Builder) finishBlock() {
-	ebuf := make([]byte, len(b.entryOffsets)*4+4)
-	for i, offset := range b.entryOffsets {
-		binary.BigEndian.PutUint32(ebuf[4*i:4*i+4], uint32(offset))
-	}
-	binary.BigEndian.PutUint32(ebuf[len(ebuf)-4:], uint32(len(b.entryOffsets)))
-	b.buf.Write(ebuf)
+	b.buf.Write(u32SliceToBytes(b.entryOffsets))
+	b.buf.Write(u32ToBytes(uint32(len(b.entryOffsets))))
 
 	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
 	b.writeChecksum(blockBuf)
@@ -307,4 +301,38 @@ func (b *Builder) writeChecksum(data []byte) {
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	_, err = b.buf.Write(buf[:])
 	y.Check(err)
+}
+
+func u32ToBytes(v uint32) []byte {
+	var uBuf [4]byte
+	binary.BigEndian.PutUint32(uBuf[:], v)
+	return uBuf[:]
+}
+
+func u32SliceToBytes(u32s []uint32) []byte {
+	if len(u32s) == 0 {
+		return nil
+	}
+	var b []byte
+	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+	hdr.Len = len(u32s) * 4
+	hdr.Cap = hdr.Len
+	hdr.Data = uintptr(unsafe.Pointer(&u32s[0]))
+	return b
+}
+
+func bytesToU32Slice(b []byte) []uint32 {
+	if len(b) == 0 {
+		return nil
+	}
+	var u32s []uint32
+	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&u32s))
+	hdr.Len = len(b) / 4
+	hdr.Cap = hdr.Len
+	hdr.Data = uintptr(unsafe.Pointer(&b[0]))
+	return u32s
+}
+
+func bytesToU32(b []byte) uint32 {
+	return binary.BigEndian.Uint32(b)
 }

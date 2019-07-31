@@ -18,7 +18,6 @@ package table
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io"
 	"sort"
 
@@ -27,13 +26,13 @@ import (
 )
 
 type blockIterator struct {
-	data              []byte
-	pos               uint32
-	err               error
-	baseKey           []byte
-	numEntries        int
-	entriesIndexStart int
-	currentIdx        int
+	data         []byte
+	pos          uint32
+	err          error
+	baseKey      []byte
+	numEntries   int
+	entryOffsets []uint32
+	currentIdx   int
 
 	key  []byte
 	val  []byte
@@ -73,15 +72,10 @@ var (
 	current = 1
 )
 
-func (itr *blockIterator) getOffset(idx int) uint32 {
-	y.AssertTrue(idx >= 0 && idx < itr.numEntries)
-	return binary.BigEndian.Uint32(itr.data[itr.entriesIndexStart+4*idx:])
-}
-
 func (itr *blockIterator) getKey(idx int) []byte {
 	y.AssertTrue(idx >= 0 && idx < itr.numEntries)
 
-	idxPos := itr.getOffset(idx)
+	idxPos := itr.entryOffsets[idx]
 	var h header
 	idxPos += uint32(h.Decode(itr.data[idxPos:]))
 
@@ -128,7 +122,7 @@ func (itr *blockIterator) Seek(key []byte, whence int) {
 
 	// Found first idx for which key is >= key to be sought.
 	itr.currentIdx = idx
-	itr.pos = itr.getOffset(itr.currentIdx)
+	itr.pos = itr.entryOffsets[itr.currentIdx]
 	var h header
 	itr.pos += uint32(h.Decode(itr.data[itr.pos:]))
 	itr.parseKV(h)
@@ -203,7 +197,7 @@ func (itr *blockIterator) Prev() {
 		return
 	}
 
-	itr.pos = itr.getOffset(itr.currentIdx)
+	itr.pos = itr.entryOffsets[itr.currentIdx]
 
 	var h header
 	y.AssertTruef(itr.pos < uint32(len(itr.data)), "%d %d", itr.pos, len(itr.data))

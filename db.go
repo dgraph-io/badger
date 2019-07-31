@@ -132,8 +132,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			nv = make([]byte, len(e.Value))
 			copy(nv, e.Value)
 		} else {
-			nv = make([]byte, vptrSize)
-			vp.Encode(nv)
+			nv = vp.Encode()
 			meta = meta | bitValuePointer
 		}
 
@@ -605,10 +604,9 @@ func (db *DB) writeToLSM(b *request) error {
 					ExpiresAt: entry.ExpiresAt,
 				})
 		} else {
-			var offsetBuf [vptrSize]byte
 			db.mt.Put(entry.Key,
 				y.ValueStruct{
-					Value:     b.Ptrs[i].Encode(offsetBuf[:]),
+					Value:     b.Ptrs[i].Encode(),
 					Meta:      entry.meta | bitValuePointer,
 					UserMeta:  entry.UserMeta,
 					ExpiresAt: entry.ExpiresAt,
@@ -883,13 +881,12 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// Store badger head even if vptr is zero, need it for readTs
 	db.opt.Debugf("Storing value log head: %+v\n", ft.vptr)
 	db.elog.Printf("Storing offset: %+v\n", ft.vptr)
-	offset := make([]byte, vptrSize)
-	ft.vptr.Encode(offset)
+	val := ft.vptr.Encode()
 
 	// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
 	// commits.
 	headTs := y.KeyWithTs(head, db.orc.nextTs())
-	ft.mt.Put(headTs, y.ValueStruct{Value: offset})
+	ft.mt.Put(headTs, y.ValueStruct{Value: val})
 
 	fileID := db.lc.reserveFileID()
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
