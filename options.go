@@ -299,7 +299,7 @@ func (opt Options) WithNumMemtables(val int) Options {
 // BloomFalsePositive might impact read performance of DB. Lower BloomFalsePositive value might
 // consume more memory.
 //
-// The default value of BloomSize is 0.01.
+// The default value of BloomFalsePositive is 0.01.
 func (opt Options) WithBloomFalsePositive(val float64) Options {
 	opt.BloomFalsePositive = val
 	return opt

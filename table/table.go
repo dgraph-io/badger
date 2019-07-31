@@ -29,13 +29,12 @@ import (
 	"sync/atomic"
 
 	"github.com/dgryski/go-farm"
-
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/ristretto/z"
+	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
-	"github.com/pkg/errors"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 const fileSuffix = ".sst"
