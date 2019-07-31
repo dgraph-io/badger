@@ -47,7 +47,6 @@ var (
 	keySz   int
 	valSz   int
 	numKeys float64
-	force   bool
 	sorted  bool
 
 	sizeWritten    uint64
@@ -64,8 +63,6 @@ func init() {
 	writeBenchCmd.Flags().IntVarP(&valSz, "val-size", "v", 128, "Size of value")
 	writeBenchCmd.Flags().Float64VarP(&numKeys, "keys-mil", "m", 10.0,
 		"Number of keys to add in millions")
-	writeBenchCmd.Flags().BoolVarP(&force, "force-compact", "f", true,
-		"Force compact level 0 on close.")
 	writeBenchCmd.Flags().BoolVarP(&sorted, "sorted", "s", false, "Write keys in sorted order.")
 }
 
@@ -159,7 +156,6 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithValueDir(vlogDir).
 		WithTruncate(truncate).
 		WithSyncWrites(false).
-		WithCompactL0OnClose(force).
 		WithLogger(nil))
 	if err != nil {
 		return err

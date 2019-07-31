@@ -61,7 +61,6 @@ type Options struct {
 	ValueLogMaxEntries uint32
 
 	NumCompactors     int
-	CompactL0OnClose  bool
 	LogRotatesToFlush int32
 
 	// ChecksumVerificationMode decides when db should verify checksum for SStable blocks.
@@ -99,7 +98,6 @@ func DefaultOptions(path string) Options {
 		NumMemtables:            5,
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
-		CompactL0OnClose:        true,
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
@@ -351,17 +349,6 @@ func (opt Options) WithValueLogMaxEntries(val uint32) Options {
 // The default value of NumCompactors is 2.
 func (opt Options) WithNumCompactors(val int) Options {
 	opt.NumCompactors = val
-	return opt
-}
-
-// WithCompactL0OnClose returns a new Options value with CompactL0OnClose set to the given value.
-//
-// CompactL0OnClose determines whether Level 0 should be compacted before closing the DB.
-// This ensures that both reads and writes are efficient when the DB is opened later.
-//
-// The default value of CompactL0OnClose is true.
-func (opt Options) WithCompactL0OnClose(val bool) Options {
-	opt.CompactL0OnClose = val
 	return opt
 }
 

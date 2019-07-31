@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -205,8 +204,6 @@ func Open(opt Options) (db *DB, err error) {
 	if opt.ReadOnly {
 		// Can't truncate if the DB is read only.
 		opt.Truncate = false
-		// Do not perform compaction in read only mode.
-		opt.CompactL0OnClose = false
 	}
 
 	for _, path := range []string{opt.Dir, opt.ValueDir} {
@@ -420,17 +417,16 @@ func (db *DB) close() (err error) {
 
 	// Force Compact L0
 	// We don't need to care about cstatus since no parallel compaction is running.
-	if db.opt.CompactL0OnClose {
-		err := db.lc.doCompact(compactionPriority{level: 0, score: 1.73})
-		switch err {
-		case errFillTables:
-			// This error only means that there might be enough tables to do a compaction. So, we
-			// should not report it to the end user to avoid confusing them.
-		case nil:
-			db.opt.Infof("Force compaction on level 0 done")
-		default:
-			db.opt.Warningf("While forcing compaction on level 0: %v", err)
-		}
+	err = db.lc.doCompact(compactionPriority{level: 0, score: 1.73})
+	switch err {
+	case errFillTables:
+		// This error only means that there might be enough tables to do a compaction. So, we
+		// should not report it to the end user to avoid confusing them.
+		err = nil
+	case nil:
+		db.opt.Infof("Force compaction on level 0 done")
+	default:
+		db.opt.Warningf("While forcing compaction on level 0: %v", err)
 	}
 
 	if lcErr := db.lc.close(); err == nil {
@@ -848,8 +844,8 @@ func arenaSize(opt Options) int64 {
 	return opt.MaxTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
 
-// WriteLevel0Table flushes memtable.
-func writeLevel0Table(ft flushTask, f io.Writer) error {
+// buildL0Table builds a new table from the memtable.
+func buildL0Table(ft flushTask) ([]byte, error) {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder()
@@ -859,11 +855,10 @@ func writeLevel0Table(ft flushTask, f io.Writer) error {
 			continue
 		}
 		if err := b.Add(iter.Key(), iter.Value()); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	_, err := f.Write(b.Finish())
-	return err
+	return b.Finish(), nil
 }
 
 type flushTask struct {
@@ -897,23 +892,11 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return y.Wrap(err)
 	}
 
-	// Don't block just to sync the directory entry.
-	dirSyncCh := make(chan error)
-	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
-
-	err = writeLevel0Table(ft, fd)
-	dirSyncErr := <-dirSyncCh
-
+	data, err := buildL0Table(ft)
 	if err != nil {
-		db.elog.Errorf("ERROR while writing to level 0: %v", err)
-		return err
+		return errors.Wrapf(err, "failed to build L0 table")
 	}
-	if dirSyncErr != nil {
-		// Do dir sync as best effort. No need to return due to an error there.
-		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
-	}
-
-	tbl, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode)
+	tbl, err := table.OpenInMemoryTable(fd, data)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err
