@@ -404,23 +404,28 @@ type reader struct {
 
 // // io.Copy(fd, b.NewReader(0, -1))
 
-func (r *reader) Read(p []byte) (int, error) {
-	if r.pageIdx >= len(r.b.pages) {
-		return 0, io.EOF
+func (r *reader) Read(buf []byte) (int, error) {
+	if len(buf) == 0 {
+		return 0, nil
 	}
 
 	read := 0
-	for {
-		read += copy(p[read:], r.b.pages[r.pageIdx].buf[r.startIdx:])
-		if read >= len(p) {
-			break
+	for r.pageIdx < len(r.b.pages) {
+		cp := r.b.pages[r.pageIdx]
+		n := copy(buf[read:], cp.buf[r.startIdx:])
+		read += n
+		r.startIdx += n
+		if r.startIdx >= len(cp.buf) {
+			r.pageIdx++
+			r.startIdx = 0
 		}
+		if read >= len(buf) {
+			return read, nil
+		}
+	}
 
-		r.pageIdx++
-		if r.pageIdx >= len(r.b.pages) {
-			break
-		}
-		r.startIdx = 0
+	if read < len(buf) {
+		return read, io.EOF
 	}
 
 	return read, nil
@@ -428,14 +433,18 @@ func (r *reader) Read(p []byte) (int, error) {
 
 func (r *reader) WriteTo(w io.Writer) (int64, error) {
 	var written int64
-	for ; r.pageIdx < len(r.b.pages); r.pageIdx++ {
-		n, err := w.Write(r.b.pages[r.pageIdx].buf[r.startIdx:])
+	for r.pageIdx < len(r.b.pages) {
+		cp := r.b.pages[r.pageIdx]
+		n, err := w.Write(cp.buf[r.startIdx:])
+		r.startIdx += n
 		written += int64(n)
 		if err != nil {
-			fmt.Println("(((((((((((((((((((((")
 			return written, err
 		}
-		r.startIdx = 0
+		if r.startIdx >= len(cp.buf) {
+			r.pageIdx++
+			r.startIdx = 0
+		}
 	}
 
 	return written, nil
