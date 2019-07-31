@@ -156,7 +156,7 @@ func (sw *StreamWriter) Flush() error {
 		return err
 	}
 
-	if !sw.db.opt.managedTxns {
+	if !sw.db.opt.ManagedTxns {
 		if sw.db.orc != nil {
 			sw.db.orc.Stop()
 		}

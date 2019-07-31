@@ -276,7 +276,7 @@ func compareTwo(db *badger.DB, before, after uint64) {
 func runDisect(cmd *cobra.Command, args []string) error {
 	// The total did not match up. So, let's disect the DB to find the
 	// transction which caused the total mismatch.
-	db, err := badger.OpenManaged(badger.DefaultOptions(sstDir).
+	db, err := badger.OpenManaged(options.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(true))
 	if err != nil {
@@ -321,7 +321,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	rand.Seed(time.Now().UnixNano())
 
 	// Open DB
-	opts := badger.DefaultOptions(sstDir).
+	opts := options.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithMaxTableSize(4 << 20). // Force more compactions.
 		WithNumLevelZeroTables(2).
@@ -346,7 +346,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		dir, err := ioutil.TempDir("", "bank_subscribe")
 		y.Check(err)
 
-		subscribeDB, err = badger.Open(badger.DefaultOptions(dir).WithSyncWrites(false))
+		subscribeDB, err = badger.Open(options.DefaultOptions(dir).WithSyncWrites(false))
 		if err != nil {
 			return err
 		}
@@ -357,7 +357,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		dir, err := ioutil.TempDir("", "bank_stream")
 		y.Check(err)
 
-		tmpDb, err = badger.Open(badger.DefaultOptions(dir).WithSyncWrites(false))
+		tmpDb, err = badger.Open(options.DefaultOptions(dir).WithSyncWrites(false))
 		if err != nil {
 			return err
 		}

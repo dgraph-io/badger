@@ -207,7 +207,7 @@ func TestBigKeyValuePairs(t *testing.T) {
 	}
 
 	// Passing an empty directory since it will be filled by runBadgerTest.
-	opts := DefaultOptions("").
+	opts := options.DefaultOptions("").
 		WithMaxTableSize(1 << 20).
 		WithValueLogMaxEntries(64)
 	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
@@ -298,7 +298,7 @@ func TestPushValueLogLimit(t *testing.T) {
 	}
 
 	// Passing an empty directory since it will be filled by runBadgerTest.
-	opt := DefaultOptions("").
+	opt := options.DefaultOptions("").
 		WithValueLogMaxEntries(64).
 		WithValueLogFileSize(2 << 30)
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
@@ -346,7 +346,7 @@ func BenchmarkDBOpen(b *testing.B) {
 	}
 	dir := *benchDir
 	// Passing an empty directory since it will be filled by runBadgerTest.
-	opt := DefaultOptions(dir).
+	opt := options.DefaultOptions(dir).
 		WithReadOnly(true)
 	for i := 0; i < b.N; i++ {
 		db, err := Open(opt)
@@ -368,7 +368,7 @@ func TestDiscardMapTooBig(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	db, err := Open(DefaultOptions(dir))
+	db, err := Open(options.DefaultOptions(dir))
 	require.NoError(t, err, "error while openning db")
 
 	// Add some data so that memtable flush happens on close
@@ -383,7 +383,7 @@ func TestDiscardMapTooBig(t *testing.T) {
 
 	require.NoError(t, db.Close())
 	// reopen the same DB
-	db, err = Open(DefaultOptions(dir))
+	db, err = Open(options.DefaultOptions(dir))
 	require.NoError(t, err, "error while openning db")
 	require.NoError(t, db.Close())
 }
@@ -394,7 +394,7 @@ func TestBigValues(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	opts := DefaultOptions("").
+	opts := options.DefaultOptions("").
 		WithValueThreshold(1 << 20).
 		WithValueLogMaxEntries(100)
 	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
@@ -444,7 +444,7 @@ func TestCompactionFilePicking(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	db, err := Open(DefaultOptions(dir).WithTableLoadingMode(options.LoadToRAM))
+	db, err := Open(options.DefaultOptions(dir).WithTableLoadingMode(options.LoadToRAM))
 	require.NoError(t, err, "error while opening db")
 	defer func() {
 		require.NoError(t, db.Close())

@@ -164,7 +164,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := Open(DefaultOptions(dir))
+	kv, err := Open(options.DefaultOptions(dir))
 	require.NoError(t, err)
 
 	lh0 := newLevelHandler(kv, 0)

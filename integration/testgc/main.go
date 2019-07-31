@@ -102,7 +102,7 @@ func main() {
 	dir := "/mnt/drive/badgertest"
 	os.RemoveAll(dir)
 
-	db, err := badger.Open(badger.DefaultOptions(dir).
+	db, err := badger.Open(options.DefaultOptions(dir).
 		WithTableLoadingMode(options.MemoryMap).
 		WithValueLogLoadingMode(options.FileIO).
 		WithSyncWrites(false))

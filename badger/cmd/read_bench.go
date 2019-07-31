@@ -79,7 +79,7 @@ func readBench(cmd *cobra.Command, args []string) error {
 	y.AssertTrue(numGoroutines > 0)
 	mode := getLoadingMode(loadingMode)
 
-	db, err := badger.Open(badger.DefaultOptions(sstDir).
+	db, err := badger.Open(options.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(readOnly).
 		WithTableLoadingMode(mode).

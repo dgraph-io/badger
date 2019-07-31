@@ -22,6 +22,7 @@ import (
 	"path"
 
 	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/options"
 	"github.com/spf13/cobra"
 )
 
@@ -65,7 +66,7 @@ func doRestore(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open DB
-	db, err := badger.Open(badger.DefaultOptions(sstDir).WithValueDir(vlogDir))
+	db, err := badger.Open(options.DefaultOptions(sstDir).WithValueDir(vlogDir))
 	if err != nil {
 		return err
 	}

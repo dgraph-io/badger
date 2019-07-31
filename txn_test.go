@@ -713,7 +713,7 @@ func TestManagedDB(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	opt := getTestOptions(dir)
-	opt.managedTxns = true
+	opt.ManagedTxns = true
 	db, err := Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
@@ -803,7 +803,7 @@ func TestArmV7Issue311Fix(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	db, err := Open(DefaultOptions(dir).
+	db, err := Open(options.DefaultOptions(dir).
 		WithTableLoadingMode(options.MemoryMap).
 		WithValueLogFileSize(16 << 20).
 		WithLevelOneSize(8 << 20).

@@ -26,6 +26,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dgraph-io/badger/options"
 	bpb "github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
@@ -62,7 +63,7 @@ func TestStream(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	db, err := OpenManaged(DefaultOptions(dir))
+	db, err := OpenManaged(options.DefaultOptions(dir))
 	require.NoError(t, err)
 
 	var count int

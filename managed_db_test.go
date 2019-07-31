@@ -61,7 +61,7 @@ func TestDropAllManaged(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
-	opts.managedTxns = true
+	opts.ManagedTxns = true
 	opts.ValueLogFileSize = 5 << 20
 	db, err := Open(opts)
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestDropAllManaged(t *testing.T) {
 	db.Close()
 
 	// Ensure that value log is correctly replayed, that we are preserving badgerHead.
-	opts.managedTxns = true
+	opts.ManagedTxns = true
 	db2, err := Open(opts)
 	require.NoError(t, err)
 	require.Equal(t, int(N), numKeysManaged(db2, math.MaxUint64))
@@ -294,7 +294,7 @@ func TestDropAllRace(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
-	opts.managedTxns = true
+	opts.ManagedTxns = true
 	db, err := Open(opts)
 	require.NoError(t, err)
 
@@ -510,7 +510,7 @@ func TestDropPrefixRace(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	opts := getTestOptions(dir)
-	opts.managedTxns = true
+	opts.ManagedTxns = true
 	db, err := Open(opts)
 	require.NoError(t, err)
 

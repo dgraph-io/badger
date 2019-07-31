@@ -70,8 +70,8 @@ func (s *levelHandler) getSummary(sum *summary) {
 
 func (s *DB) validate() error { return s.lc.validate() }
 
-func getTestOptions(dir string) Options {
-	opt := DefaultOptions(dir).
+func getTestOptions(dir string) options.Options {
+	opt := options.DefaultOptions(dir).
 		WithMaxTableSize(1 << 15). // Force more compaction.
 		WithLevelOneSize(4 << 15). // Force more compaction.
 		WithSyncWrites(false)
@@ -113,12 +113,12 @@ func txnDelete(t *testing.T, kv *DB, key []byte) {
 }
 
 // Opens a badger db and runs a a test on it.
-func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB)) {
+func runBadgerTest(t *testing.T, opts *options.Options, test func(t *testing.T, db *DB)) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	if opts == nil {
-		opts = new(Options)
+		opts = new(options.Options)
 		*opts = getTestOptions(dir)
 	} else {
 		opts.Dir = dir
@@ -325,7 +325,7 @@ func TestForceCompactL0(t *testing.T) {
 
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 15 << 20
-	opts.managedTxns = true
+	opts.ManagedTxns = true
 	db, err := Open(opts)
 	require.NoError(t, err)
 
@@ -346,7 +346,7 @@ func TestForceCompactL0(t *testing.T) {
 	}
 	db.Close()
 
-	opts.managedTxns = true
+	opts.ManagedTxns = true
 	db, err = Open(opts)
 	require.NoError(t, err)
 	require.Equal(t, len(db.lc.levels[0].tables), 0)
@@ -713,7 +713,7 @@ func TestIterateParallel(t *testing.T) {
 		itr.Close() // Double close.
 	}
 
-	opt := DefaultOptions("")
+	opt := options.DefaultOptions("")
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		var wg sync.WaitGroup
 		var txns []*Txn
@@ -757,7 +757,7 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
-	kv, err := Open(DefaultOptions(dir))
+	kv, err := Open(options.DefaultOptions(dir))
 	if err != nil {
 		t.Error(err)
 		t.Fail()
@@ -770,7 +770,7 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 	kv.Close()
 
 	// Reopen KV
-	kv, err = Open(DefaultOptions(dir))
+	kv, err = Open(options.DefaultOptions(dir))
 	if err != nil {
 		t.Error(err)
 		t.Fail()
@@ -1126,7 +1126,7 @@ func TestLargeKeys(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	db, err := Open(DefaultOptions(dir).WithValueLogFileSize(1024 * 1024 * 1024))
+	db, err := Open(options.DefaultOptions(dir).WithValueLogFileSize(1024 * 1024 * 1024))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1158,7 +1158,7 @@ func TestCreateDirs(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	db, err := Open(DefaultOptions(filepath.Join(dir, "badger")))
+	db, err := Open(options.DefaultOptions(filepath.Join(dir, "badger")))
 	require.NoError(t, err)
 	db.Close()
 	_, err = os.Stat(dir)
@@ -1171,7 +1171,7 @@ func TestGetSetDeadlock(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	db, err := Open(DefaultOptions(dir).WithValueLogFileSize(1 << 20))
+	db, err := Open(options.DefaultOptions(dir).WithValueLogFileSize(1 << 20))
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -1214,7 +1214,7 @@ func TestWriteDeadlock(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	db, err := Open(DefaultOptions(dir).WithValueLogFileSize(10 << 20))
+	db, err := Open(options.DefaultOptions(dir).WithValueLogFileSize(10 << 20))
 	require.NoError(t, err)
 
 	print := func(count *int) {
@@ -1433,8 +1433,8 @@ func TestLSMOnly(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	opts := LSMOnlyOptions(dir)
-	dopts := DefaultOptions(dir)
+	opts := options.LSMOnlyOptions(dir)
+	dopts := options.DefaultOptions(dir)
 	require.NotEqual(t, dopts.ValueThreshold, opts.ValueThreshold)
 
 	dopts.ValueThreshold = 1 << 21
@@ -1442,9 +1442,9 @@ func TestLSMOnly(t *testing.T) {
 	require.Contains(t, err.Error(), "Invalid ValueThreshold")
 
 	// Also test for error, when ValueThresholdSize is greater than maxBatchSize.
-	dopts.ValueThreshold = LSMOnlyOptions(dir).ValueThreshold
+	dopts.ValueThreshold = options.LSMOnlyOptions(dir).ValueThreshold
 	// maxBatchSize is calculated from MaxTableSize.
-	dopts.MaxTableSize = int64(LSMOnlyOptions(dir).ValueThreshold)
+	dopts.MaxTableSize = int64(options.LSMOnlyOptions(dir).ValueThreshold)
 	_, err = Open(dopts)
 	require.Error(t, err, "db creation should have been failed")
 	require.Contains(t, err.Error(), "Valuethreshold greater than max batch size")
@@ -1557,7 +1557,7 @@ func ExampleOpen() {
 		log.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	db, err := Open(DefaultOptions(dir))
+	db, err := Open(options.DefaultOptions(dir))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1613,7 +1613,7 @@ func ExampleTxn_NewIterator() {
 	}
 	defer os.RemoveAll(dir)
 
-	db, err := Open(DefaultOptions(dir))
+	db, err := Open(options.DefaultOptions(dir))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1668,7 +1668,7 @@ func TestSyncForRace(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	db, err := Open(DefaultOptions(dir).WithSyncWrites(false))
+	db, err := Open(options.DefaultOptions(dir).WithSyncWrites(false))
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -1775,7 +1775,7 @@ func TestForceFlushMemtable(t *testing.T) {
 		mt.DecrRef()
 	}
 	db.imm = db.imm[:0]
-	db.mt = skl.NewSkiplist(arenaSize(db.opt)) // Set it up for future writes.
+	db.mt = skl.NewSkiplist(db.arenaSize()) // Set it up for future writes.
 	db.Unlock()
 
 	// get latest value of value log head
@@ -1846,7 +1846,7 @@ func ExampleDB_Subscribe() {
 		log.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	db, err := Open(DefaultOptions(dir))
+	db, err := Open(options.DefaultOptions(dir))
 	if err != nil {
 		log.Fatal(err)
 	}

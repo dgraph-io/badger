@@ -98,7 +98,7 @@ func TestValueGCManaged(t *testing.T) {
 	N := 10000
 	opt := getTestOptions(dir)
 	opt.ValueLogMaxEntries = uint32(N / 10)
-	opt.managedTxns = true
+	opt.ManagedTxns = true
 	db, err := Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
@@ -845,7 +845,7 @@ func TestBug578(t *testing.T) {
 	y.Check(err)
 	defer os.RemoveAll(dir)
 
-	db, err := Open(DefaultOptions(dir).
+	db, err := Open(options.DefaultOptions(dir).
 		WithValueLogMaxEntries(64).
 		WithMaxTableSize(1 << 13))
 	require.NoError(t, err)
@@ -939,7 +939,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	db, err := Open(DefaultOptions(dir).WithTruncate(true))
+	db, err := Open(options.DefaultOptions(dir).WithTruncate(true))
 	require.NoError(t, err)
 	// Insert 1 entry so that we have valid data in first vlog file
 	require.NoError(t, db.Update(func(txn *Txn) error {
@@ -954,7 +954,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), []byte("foo"), 0664))
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 2), []byte("foo"), 0664))
 
-	db, err = Open(DefaultOptions(dir).WithTruncate(true))
+	db, err = Open(options.DefaultOptions(dir).WithTruncate(true))
 	require.NoError(t, err)
 
 	// Ensure vlog file with id=1 is not present

@@ -21,6 +21,7 @@ import (
 	"os"
 
 	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/spf13/cobra"
 )
@@ -51,7 +52,7 @@ func init() {
 
 func doBackup(cmd *cobra.Command, args []string) error {
 	// Open DB
-	db, err := badger.Open(badger.DefaultOptions(sstDir).
+	db, err := badger.Open(options.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithTruncate(truncate))
 	if err != nil {

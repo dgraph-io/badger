@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/stretchr/testify/require"
 )
@@ -128,7 +129,7 @@ func TestBackupRestore2(t *testing.T) {
 	s2Path := filepath.Join(tmpdir, "test2")
 	s3Path := filepath.Join(tmpdir, "test3")
 
-	db1, err := Open(DefaultOptions(s1Path))
+	db1, err := Open(options.DefaultOptions(s1Path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +164,7 @@ func TestBackupRestore2(t *testing.T) {
 	}
 	fmt.Println("backup1 length:", backup.Len())
 
-	db2, err := Open(DefaultOptions(s2Path))
+	db2, err := Open(options.DefaultOptions(s2Path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +215,7 @@ func TestBackupRestore2(t *testing.T) {
 		t.Fatal(err)
 	}
 	fmt.Println("backup2 length:", backup.Len())
-	db3, err := Open(DefaultOptions(s3Path))
+	db3, err := Open(options.DefaultOptions(s3Path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +288,7 @@ func TestBackup(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpdir)
 
-	db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup0")))
+	db1, err := Open(options.DefaultOptions(filepath.Join(tmpdir, "backup0")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +338,7 @@ func TestBackupRestore3(t *testing.T) {
 
 	// backup
 	{
-		db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup1")))
+		db1, err := Open(options.DefaultOptions(filepath.Join(tmpdir, "backup1")))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -352,7 +353,7 @@ func TestBackupRestore3(t *testing.T) {
 	require.True(t, bb.Len() > 0)
 
 	// restore
-	db2, err := Open(DefaultOptions(filepath.Join(tmpdir, "restore1")))
+	db2, err := Open(options.DefaultOptions(filepath.Join(tmpdir, "restore1")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +398,7 @@ func TestBackupLoadIncremental(t *testing.T) {
 
 	// backup
 	{
-		db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup2")))
+		db1, err := Open(options.DefaultOptions(filepath.Join(tmpdir, "backup2")))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -457,7 +458,7 @@ func TestBackupLoadIncremental(t *testing.T) {
 	require.True(t, bb.Len() > 0)
 
 	// restore
-	db2, err := Open(DefaultOptions(filepath.Join(tmpdir, "restore2")))
+	db2, err := Open(options.DefaultOptions(filepath.Join(tmpdir, "restore2")))
 	if err != nil {
 		t.Fatal(err)
 	}

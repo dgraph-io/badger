@@ -87,7 +87,7 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open DB
-	db, err := badger.Open(badger.DefaultOptions(sstDir).
+	db, err := badger.Open(options.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(true).
 		WithTableLoadingMode(options.MemoryMap))

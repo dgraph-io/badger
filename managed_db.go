@@ -16,13 +16,15 @@
 
 package badger
 
+import "github.com/dgraph-io/badger/options"
+
 // OpenManaged returns a new DB, which allows more control over setting
 // transaction timestamps, aka managed mode.
 //
 // This is only useful for databases built on top of Badger (like Dgraph), and
 // can be ignored by most users.
-func OpenManaged(opts Options) (*DB, error) {
-	opts.managedTxns = true
+func OpenManaged(opts options.Options) (*DB, error) {
+	opts.ManagedTxns = true
 	return Open(opts)
 }
 
@@ -32,7 +34,7 @@ func OpenManaged(opts Options) (*DB, error) {
 // This is only useful for databases built on top of Badger (like Dgraph), and
 // can be ignored by most users.
 func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
-	if !db.opt.managedTxns {
+	if !db.opt.ManagedTxns {
 		panic("Cannot use NewTransactionAt with managedDB=false. Use NewTransaction instead.")
 	}
 	txn := db.newTransaction(update, true)
@@ -46,7 +48,7 @@ func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
 // This is only useful for databases built on top of Badger (like Dgraph), and
 // can be ignored by most users.
 func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
-	if !txn.db.opt.managedTxns {
+	if !txn.db.opt.ManagedTxns {
 		panic("Cannot use CommitAt with managedDB=false. Use Commit instead.")
 	}
 	txn.commitTs = commitTs
@@ -61,7 +63,7 @@ func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
 // versions can be discarded from the LSM tree, and thence from the value log to
 // reclaim disk space. Can only be used with managed transactions.
 func (db *DB) SetDiscardTs(ts uint64) {
-	if !db.opt.managedTxns {
+	if !db.opt.ManagedTxns {
 		panic("Cannot use SetDiscardTs with managedDB=false.")
 	}
 	db.orc.setDiscardTs(ts)

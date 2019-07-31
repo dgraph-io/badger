@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 )
@@ -49,11 +50,11 @@ func getSortedKVList(valueSize, listSize int) *pb.KVList {
 
 // check if we can read values after writing using stream writer
 func TestStreamWriter1(t *testing.T) {
-	normalModeOpts := DefaultOptions("")
-	managedModeOpts := DefaultOptions("")
-	managedModeOpts.managedTxns = true
+	normalModeOpts := options.DefaultOptions("")
+	managedModeOpts := options.DefaultOptions("")
+	managedModeOpts.ManagedTxns = true
 
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
+	for _, opts := range []*options.Options{&normalModeOpts, &managedModeOpts} {
 		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
@@ -90,11 +91,11 @@ func TestStreamWriter1(t *testing.T) {
 
 // write more keys to db after writing keys using stream writer
 func TestStreamWriter2(t *testing.T) {
-	normalModeOpts := DefaultOptions("")
-	managedModeOpts := DefaultOptions("")
-	managedModeOpts.managedTxns = true
+	normalModeOpts := options.DefaultOptions("")
+	managedModeOpts := options.DefaultOptions("")
+	managedModeOpts.ManagedTxns = true
 
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
+	for _, opts := range []*options.Options{&normalModeOpts, &managedModeOpts} {
 		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
@@ -111,8 +112,8 @@ func TestStreamWriter2(t *testing.T) {
 			val := make([]byte, valueSize)
 			y.Check2(rand.Read(val))
 			for i := 0; i < noOfKeys; i++ {
-				txn := db.newTransaction(true, opts.managedTxns)
-				if opts.managedTxns {
+				txn := db.newTransaction(true, opts.ManagedTxns)
+				if opts.ManagedTxns {
 					txn.readTs = math.MaxUint64
 					txn.commitTs = maxVs
 				}
@@ -142,11 +143,11 @@ func TestStreamWriter2(t *testing.T) {
 }
 
 func TestStreamWriter3(t *testing.T) {
-	normalModeOpts := DefaultOptions("")
-	managedModeOpts := DefaultOptions("")
-	managedModeOpts.managedTxns = true
+	normalModeOpts := options.DefaultOptions("")
+	managedModeOpts := options.DefaultOptions("")
+	managedModeOpts.ManagedTxns = true
 
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
+	for _, opts := range []*options.Options{&normalModeOpts, &managedModeOpts} {
 		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
@@ -180,8 +181,8 @@ func TestStreamWriter3(t *testing.T) {
 			y.Check2(rand.Read(val))
 			counter = 1
 			for i := 0; i < noOfKeys; i++ {
-				txn := db.newTransaction(true, opts.managedTxns)
-				if opts.managedTxns {
+				txn := db.newTransaction(true, opts.ManagedTxns)
+				if opts.ManagedTxns {
 					txn.readTs = math.MaxUint64
 					txn.commitTs = maxVs
 				}
