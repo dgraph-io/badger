@@ -75,3 +75,36 @@ func TestTableIndex(t *testing.T) {
 		}
 	})
 }
+
+func BenchmarkBuilder(b *testing.B) {
+	rand.Seed(time.Now().Unix())
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%032d", i))
+	}
+
+	val := make([]byte, 32)
+	rand.Read(val)
+	vs := y.ValueStruct{Value: []byte(val)}
+
+	keysCount := 1300000
+	for i := 0; i < b.N; i++ {
+		func() {
+			builder := NewTableBuilder()
+			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
+			f, err := y.OpenSyncedFile(filename, false)
+			require.NoError(b, err)
+
+			for i := 0; i < keysCount; i++ {
+				y.Check(builder.Add(key(i), vs))
+			}
+
+			// _ = builder.Finish()
+			// bo := bufio.NewWriterSize(f, 100<<20)
+			// f.Write(builder.Finish())
+			// fmt.Println(builder.buf.Len())
+			io.Copy(f, builder.Finish())
+			// bo.Flush()
+			// _, err = builder.Finish().WriteTo(f)
+		}()
+	}
+}
