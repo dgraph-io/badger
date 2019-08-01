@@ -16,6 +16,16 @@ type valuePointer struct {
 	Offset uint32
 }
 
+func (p valuePointer) cacheKey() []byte {
+	out := make([]byte, 12)
+	binary.BigEndian.PutUint32(out, p.Fid)
+	rest := out[4:]
+	binary.BigEndian.PutUint32(rest, p.Len)
+	rest = rest[4:]
+	binary.BigEndian.PutUint32(rest, p.Offset)
+	return out
+}
+
 func (p valuePointer) Less(o valuePointer) bool {
 	if p.Fid != o.Fid {
 		return p.Fid < o.Fid

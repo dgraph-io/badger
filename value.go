@@ -38,6 +38,7 @@ import (
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
 )
@@ -636,6 +637,8 @@ type valueLog struct {
 
 	garbageCh      chan struct{}
 	lfDiscardStats *lfDiscardStats
+
+	cache *ristretto.Cache
 }
 
 func vlogFilePath(dirPath string, fid uint32) string {
@@ -761,6 +764,23 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	vlog.elog = trace.NewEventLog("Badger", "Valuelog")
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 	vlog.lfDiscardStats = &lfDiscardStats{m: make(map[uint32]int64)}
+
+	var err error
+	vlog.cache, err = ristretto.NewCache(&ristretto.Config{
+		NumCounters: 50e6,
+		MaxCost: 100e9,
+		BufferItems: 64,
+		Log: true,
+	})
+	go func() {
+		t := time.NewTicker(5*time.Second)
+		for range t.C {
+			l := vlog.cache.Log()
+			db.opt.Infof("Cache stats: ratio %f hits %d misses %d evictions %d", l.Ratio(),
+				l.GetHits(), l.GetMisses(), l.GetEvictions())
+		}
+	}()
+
 	if err := vlog.populateFilesMap(); err != nil {
 		return err
 	}
@@ -1093,6 +1113,10 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 			vp.Offset, vlog.woffset())
 	}
 
+	if buf, ok := vlog.cache.Get(vp.cacheKey()); ok {
+		return buf.([]byte), nil, nil
+	}
+
 	buf, cb, err := vlog.readValueBytes(vp, s)
 	if err != nil {
 		return nil, cb, err
@@ -1101,7 +1125,10 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	var h header
 	headerLen := h.Decode(buf)
 	n := uint32(headerLen) + h.klen
-	return buf[n : n+h.vlen], cb, nil
+
+	slice := append([]byte{}, buf[n : n+h.vlen]...)
+	vlog.cache.Set(vp.cacheKey(), slice, int64(len(slice)*8))
+	return slice, cb, nil
 }
 
 func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
