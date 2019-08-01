@@ -79,7 +79,8 @@ func (sw *StreamWriter) Prepare() error {
 }
 
 // Write writes KVList to DB. Each KV within the list contains the stream id which StreamWriter
-// would use to demux the writes. Write is not thread safe and it should NOT be called concurrently.
+// would use to demux the writes. Write is thread safe and can be called concurrently by mulitple
+// goroutines.
 func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 	if len(kvs.GetKv()) == 0 {
 		return nil
