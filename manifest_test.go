@@ -143,7 +143,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	})
 	for _, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		err := b.Add(y.KeyWithTs([]byte(kv[0]), 10), y.ValueStruct{
+		b.Add(y.KeyWithTs([]byte(kv[0]), 10), y.ValueStruct{
 			Value:    []byte(kv[1]),
 			Meta:     'A',
 			UserMeta: 0,
