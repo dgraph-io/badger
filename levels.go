@@ -150,7 +150,11 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				return
 			}
 
-			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode)
+			opts := table.Options{
+				LoadingMode: db.opt.TableLoadingMode,
+				ChkMode:     db.opt.ChecksumVerificationMode,
+			}
+			t, err := table.OpenTable(fd, opts)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -491,7 +495,7 @@ func (s *levelsController) compactBuildTables(
 	var lastKey, skipKey []byte
 	for it.Valid() {
 		timeStart := time.Now()
-		bopts := table.BuilderOptions{
+		bopts := table.Options{
 			BlockSize:         s.kv.opt.BlockSize,
 			BloomFalsePostive: s.kv.opt.BloomFalsePositive,
 		}
@@ -576,7 +580,11 @@ func (s *levelsController) compactBuildTables(
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
 
-			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, s.kv.opt.ChecksumVerificationMode)
+			opts := table.Options{
+				LoadingMode: s.kv.opt.TableLoadingMode,
+				ChkMode:     s.kv.opt.ChecksumVerificationMode,
+			}
+			tbl, err := table.OpenTable(fd, opts)
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}

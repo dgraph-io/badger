@@ -70,24 +70,16 @@ type Builder struct {
 	tableIndex *pb.TableIndex
 	keyHashes  []uint64
 
-	opts *BuilderOptions
-}
-
-// BuilderOptions contains configurable options for table builder.
-type BuilderOptions struct {
-	// BloomFalsePostive is the false postive probabiltiy of bloom filter.
-	BloomFalsePostive float64
-	// BlockSize is the size of each block inside SSTable in bytes.
-	BlockSize int
+	opt *Options
 }
 
 // NewTableBuilder makes a new TableBuilder.
-func NewTableBuilder(opts BuilderOptions) *Builder {
+func NewTableBuilder(opts Options) *Builder {
 	return &Builder{
 		buf:        newBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
-		opts:       &opts,
+		opt:        &opts,
 	}
 }
 
@@ -190,7 +182,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 
-	return estimatedSize > uint32(b.opts.BlockSize)
+	return estimatedSize > uint32(b.opt.BlockSize)
 }
 
 // Add adds a key-value pair to the block.
@@ -239,7 +231,7 @@ The table structure looks like
 +---------+------------+-----------+---------------+
 */
 func (b *Builder) Finish() []byte {
-	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opts.BloomFalsePostive)
+	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePostive)
 	for _, h := range b.keyHashes {
 		bf.Add(h)
 	}
