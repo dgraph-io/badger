@@ -433,6 +433,7 @@ func (txn *Txn) NewKeyIterator(key []byte, opt IteratorOptions) *Iterator {
 	}
 	opt.Prefix = key // This key must be without the timestamp.
 	opt.prefixIsKey = true
+	opt.AllVersions = true
 	return txn.NewIterator(opt)
 }
 
@@ -456,6 +457,9 @@ func (it *Iterator) Item() *Item {
 func (it *Iterator) Valid() bool {
 	if it.item == nil {
 		return false
+	}
+	if it.opt.prefixIsKey {
+		return bytes.Equal(it.item.key, it.opt.Prefix)
 	}
 	return bytes.HasPrefix(it.item.key, it.opt.Prefix)
 }
