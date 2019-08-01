@@ -28,15 +28,35 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dgraph-io/badger/pb"
-
-	"github.com/AndreasBriese/bbloom"
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgryski/go-farm"
 	"github.com/pkg/errors"
+
+	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 const fileSuffix = ".sst"
+
+// Options contains configurable options for Table/Builder.
+type Options struct {
+	// Options for Openning Table.
+
+	// ChkMode is the checksum verification mode for Table.
+	ChkMode options.ChecksumVerificationMode
+
+	// LoadingMode is the mode to be used for loading Table.
+	LoadingMode options.FileLoadingMode
+
+	// Options for Table builder.
+
+	// BloomFalsePostive is the false postive probabiltiy of bloom filter.
+	BloomFalsePostive float64
+
+	// BlockSize is the size of each block inside SSTable in bytes.
+	BlockSize int
+}
 
 // TableInterface is useful for testing.
 type TableInterface interface {
@@ -55,17 +75,16 @@ type Table struct {
 	blockIndex []*pb.BlockOffset
 	ref        int32 // For file garbage collection. Atomic.
 
-	loadingMode options.FileLoadingMode
-	mmap        []byte // Memory mapped.
+	mmap []byte // Memory mapped.
 
 	// The following are initialized once and const.
 	smallest, biggest []byte // Smallest and largest keys.
 	id                uint64 // file id, part of filename
 
-	bf bbloom.Bloom
-
+	bf       *z.Bloom
 	Checksum []byte
-	chkMode  options.ChecksumVerificationMode // indicates when to verify checksum for blocks.
+
+	opt *Options
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
@@ -81,7 +100,7 @@ func (t *Table) DecrRef() error {
 		// at least one reference pointing to them.
 
 		// It's necessary to delete windows files
-		if t.loadingMode == options.MemoryMap {
+		if t.opt.LoadingMode == options.MemoryMap {
 			if err := y.Munmap(t.mmap); err != nil {
 				return err
 			}
@@ -136,10 +155,7 @@ func (b block) verifyCheckSum() error {
 // entry. Returns a table with one reference count on it (decrementing which may delete the file!
 // -- consider t.Close() instead). The fd has to writeable because we call Truncate on it before
 // deleting. Checksum for all blocks of table is verified based on value of chkMode.
-// TODO:(Ashish): convert individual args to option struct.
-func OpenTable(fd *os.File, mode options.FileLoadingMode,
-	chkMode options.ChecksumVerificationMode) (*Table, error) {
-
+func OpenTable(fd *os.File, opts Options) (*Table, error) {
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -155,11 +171,10 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode,
 		return nil, errors.Errorf("Invalid filename: %s", filename)
 	}
 	t := &Table{
-		fd:          fd,
-		ref:         1, // Caller is given one reference.
-		id:          id,
-		loadingMode: mode,
-		chkMode:     chkMode,
+		fd:  fd,
+		ref: 1, // Caller is given one reference.
+		id:  id,
+		opt: &opts,
 	}
 
 	t.tableSize = int(fileInfo.Size())
@@ -184,7 +199,7 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode,
 		t.biggest = it2.Key()
 	}
 
-	switch mode {
+	switch opts.LoadingMode {
 	case options.LoadToRAM:
 		if _, err := t.fd.Seek(0, io.SeekStart); err != nil {
 			return nil, err
@@ -209,10 +224,10 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode,
 	case options.FileIO:
 		t.mmap = nil
 	default:
-		panic(fmt.Sprintf("Invalid loading mode: %v", mode))
+		panic(fmt.Sprintf("Invalid loading mode: %v", opts.LoadingMode))
 	}
 
-	if t.chkMode == options.OnTableRead || t.chkMode == options.OnTableAndBlockRead {
+	if t.opt.ChkMode == options.OnTableRead || t.opt.ChkMode == options.OnTableAndBlockRead {
 		if err := t.VerifyChecksum(); err != nil {
 			_ = fd.Close()
 			return nil, err
@@ -224,7 +239,7 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode,
 
 // Close closes the open table.  (Releases resources back to the OS.)
 func (t *Table) Close() error {
-	if t.loadingMode == options.MemoryMap {
+	if t.opt.LoadingMode == options.MemoryMap {
 		if err := y.Munmap(t.mmap); err != nil {
 			return err
 		}
@@ -286,7 +301,7 @@ func (t *Table) readIndex() error {
 	err := index.Unmarshal(data)
 	y.Check(err)
 
-	t.bf = bbloom.JSONUnmarshal(index.BloomFilter)
+	t.bf = z.JSONUnmarshal(index.BloomFilter)
 	t.blockIndex = index.Offsets
 	return nil
 }
@@ -314,7 +329,7 @@ func (t *Table) block(idx int) (block, error) {
 	blk.entriesIndexStart = readPos - (blk.numEntries * 4)
 
 	// Verify checksum on if checksum verification mode is OnRead on OnStartAndRead.
-	if t.chkMode == options.OnBlockRead || t.chkMode == options.OnTableAndBlockRead {
+	if t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead {
 		if err = blk.verifyCheckSum(); err != nil {
 			return block{}, err
 		}
@@ -340,7 +355,7 @@ func (t *Table) ID() uint64 { return t.id }
 
 // DoesNotHave returns true if (but not "only if") the table does not have the key.  It does a
 // bloom filter lookup.
-func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(key) }
+func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(farm.Fingerprint64(key)) }
 
 // VerifyChecksum verifies checksum for all blocks of table. This function is called by
 // OpenTable() function. This function is also called inside levelsController.VerifyChecksum().
@@ -354,7 +369,7 @@ func (t *Table) VerifyChecksum() error {
 
 		// OnBlockRead or OnTableAndBlockRead, we don't need to call verify checksum
 		// on block, verification would be done while reading block itself.
-		if !(t.chkMode == options.OnBlockRead || t.chkMode == options.OnTableAndBlockRead) {
+		if !(t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead) {
 			if err = b.verifyCheckSum(); err != nil {
 				return y.Wrapf(err,
 					"checksum validation failed for table: %s, block: %d, offset:%d",
