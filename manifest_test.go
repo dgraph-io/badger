@@ -148,11 +148,6 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 			Meta:     'A',
 			UserMeta: 0,
 		})
-		if t != nil {
-			require.NoError(t, err)
-		} else {
-			y.Check(err)
-		}
 	}
 	f.Write(b.Finish())
 	f.Close()
