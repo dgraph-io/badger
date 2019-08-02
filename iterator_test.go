@@ -74,8 +74,7 @@ func TestIteratePrefix(t *testing.T) {
 		val := []byte("OK")
 		n := 10000
 
-		batch, err := db.NewWriteBatch()
-		require.NoError(t, err)
+		batch := db.NewWriteBatch()
 		for i := 0; i < n; i++ {
 			if (i % 1000) == 0 {
 				t.Logf("Put i=%d\n", i)
@@ -192,8 +191,7 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 		return []byte(fmt.Sprintf("%06d", i))
 	}
 
-	batch, err := db.NewWriteBatch()
-	require.NoError(b, err)
+	batch := db.NewWriteBatch()
 	for i := 0; i < N; i++ {
 		y.Check(batch.Set(bkey(i), val))
 	}

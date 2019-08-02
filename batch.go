@@ -20,7 +20,6 @@ import (
 	"sync"
 
 	"github.com/dgraph-io/badger/y"
-	"github.com/pkg/errors"
 )
 
 // WriteBatch holds the necessary info to perform batched writes.
@@ -38,26 +37,11 @@ type WriteBatch struct {
 // waiting for them to commit, thus achieving good performance. This API hides away the logic of
 // creating and committing transactions. Due to the nature of SSI guaratees provided by Badger,
 // blind writes can never encounter transaction conflicts (ErrConflict).
-func (db *DB) NewWriteBatch() (*WriteBatch, error) {
+func (db *DB) NewWriteBatch() *WriteBatch {
 	if db.opt.managedTxns {
-		return nil,
-			errors.New("cannot use NewWriteBatch in managed mode. Use NewWriteBatchAt instead")
+		panic("cannot use NewWriteBatch in managed mode. Use NewWriteBatchAt instead")
 	}
-	return db.newWriteBatch(), nil
-}
-
-// NewWriteBatchAt is similar to NewWriteBatch but it allows user to set the commit timestamp.
-// NewWriteBatchAt is supposed to be used in the managed mode.
-func (db *DB) NewWriteBatchAt(commitTs uint64) (*WriteBatch, error) {
-	if !db.opt.managedTxns {
-		return nil, errors.New(
-			"cannot use NewWriteBatchAt with managedDB=false. Use NewTransaction instead")
-	}
-
-	wb := db.newWriteBatch()
-	wb.commitTs = commitTs
-	wb.txn.commitTs = commitTs
-	return wb, nil
+	return db.newWriteBatch()
 }
 
 func (db *DB) newWriteBatch() *WriteBatch {

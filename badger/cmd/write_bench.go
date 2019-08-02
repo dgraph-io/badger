@@ -74,8 +74,7 @@ func writeRandom(db *badger.DB, num uint64) error {
 	y.Check2(rand.Read(value))
 
 	es := uint64(keySz + valSz) // entry size is keySz + valSz
-	batch, err := db.NewWriteBatch()
-	y.Check(err)
+	batch := db.NewWriteBatch()
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, keySz)
 		y.Check2(rand.Read(key))

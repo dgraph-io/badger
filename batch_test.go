@@ -33,8 +33,7 @@ func TestWriteBatch(t *testing.T) {
 	}
 
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		wb, err := db.NewWriteBatch()
-		require.NoError(t, err)
+		wb := db.NewWriteBatch()
 		defer wb.Cancel()
 
 		N, M := 50000, 1000
@@ -49,7 +48,7 @@ func TestWriteBatch(t *testing.T) {
 		require.NoError(t, wb.Flush())
 		t.Logf("Time taken for %d writes (w/ test options): %s\n", N+M, time.Since(start))
 
-		err = db.View(func(txn *Txn) error {
+		err := db.View(func(txn *Txn) error {
 			itr := txn.NewIterator(DefaultIteratorOptions)
 			defer itr.Close()
 
@@ -80,8 +79,7 @@ func TestWriteBatchManagedMode(t *testing.T) {
 	opt.managedTxns = true
 	opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-		wb, err := db.NewWriteBatchAt(10)
-		require.NoError(t, err)
+		wb := db.NewWriteBatchAt(10)
 		defer wb.Cancel()
 
 		N, M := 50000, 1000
@@ -96,7 +94,7 @@ func TestWriteBatchManagedMode(t *testing.T) {
 		require.NoError(t, wb.Flush())
 		t.Logf("Time taken for %d writes (w/ test options): %s\n", N+M, time.Since(start))
 
-		err = db.View(func(txn *Txn) error {
+		err := db.View(func(txn *Txn) error {
 			itr := txn.NewIterator(DefaultIteratorOptions)
 			defer itr.Close()
 

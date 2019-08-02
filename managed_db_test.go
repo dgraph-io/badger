@@ -112,8 +112,7 @@ func TestDropAll(t *testing.T) {
 
 	N := uint64(10000)
 	populate := func(db *DB) {
-		writer, err := db.NewWriteBatch()
-		require.NoError(t, err)
+		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
 			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
@@ -149,8 +148,7 @@ func TestDropAllTwice(t *testing.T) {
 
 	N := uint64(10000)
 	populate := func(db *DB) {
-		writer, err := db.NewWriteBatch()
-		require.NoError(t, err)
+		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
 			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
@@ -178,8 +176,7 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 
 	N := uint64(10000)
 	populate := func(db *DB) {
-		writer, err := db.NewWriteBatch()
-		require.NoError(t, err)
+		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
 			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
@@ -244,8 +241,7 @@ func TestDropReadOnly(t *testing.T) {
 	require.NoError(t, err)
 	N := uint64(1000)
 	populate := func(db *DB) {
-		writer, err := db.NewWriteBatch()
-		require.NoError(t, err)
+		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
 			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
@@ -277,8 +273,7 @@ func TestWriteAfterClose(t *testing.T) {
 	require.NoError(t, err)
 	N := uint64(1000)
 	populate := func(db *DB) {
-		writer, err := db.NewWriteBatch()
-		require.NoError(t, err)
+		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
 			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
@@ -369,8 +364,7 @@ func TestDropPrefix(t *testing.T) {
 
 	N := uint64(10000)
 	populate := func(db *DB) {
-		writer, err := db.NewWriteBatch()
-		require.NoError(t, err)
+		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
 			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
@@ -421,8 +415,7 @@ func TestDropPrefixWithPendingTxn(t *testing.T) {
 
 	N := uint64(10000)
 	populate := func(db *DB) {
-		writer, err := db.NewWriteBatch()
-		require.NoError(t, err)
+		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
 			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
@@ -490,8 +483,7 @@ func TestDropPrefixReadOnly(t *testing.T) {
 	require.NoError(t, err)
 	N := uint64(1000)
 	populate := func(db *DB) {
-		writer, err := db.NewWriteBatch()
-		require.NoError(t, err)
+		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
 			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
 		}
