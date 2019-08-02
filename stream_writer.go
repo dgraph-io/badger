@@ -41,7 +41,7 @@ const headStreamId uint32 = math.MaxUint32
 // StreamWriter should not be called on in-use DB instances. It is designed only to bootstrap new
 // DBs.
 type StreamWriter struct {
-	writeLock sync.Mutex
+	writeLock  sync.Mutex
 	db         *DB
 	done       func()
 	throttle   *y.Throttle
