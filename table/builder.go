@@ -173,7 +173,8 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		return false
 	}
 
-	y.AssertTrue((uint32(len(b.entryOffsets))+1)*4+4+8+4 < math.MaxUint32) // check for below statements
+	// Integer overflow check for statements below.
+	y.AssertTrue((uint32(len(b.entryOffsets))+1)*4+4+8+4 < math.MaxUint32) 
 	// We should include current entry also in size, that's why +1 to len(b.entryOffsets).
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 +
 		4 + // size of list
