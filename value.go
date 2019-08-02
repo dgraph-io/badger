@@ -765,14 +765,17 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 	vlog.lfDiscardStats = &lfDiscardStats{m: make(map[uint32]int64)}
 
-	var err error
 	if vlog.opt.ValueLogCacheSize > 0 {
-		vlog.cache, err = ristretto.NewCache(&ristretto.Config{
+		cache, err := ristretto.NewCache(&ristretto.Config{
 			NumCounters: 200e6,
 			MaxCost:     vlog.opt.ValueLogCacheSize,
 			BufferItems: 64,
 			Log:         true,
 		})
+		if err != nil {
+			return err
+		}
+		vlog.cache = cache
 	}
 
 	if err := vlog.populateFilesMap(); err != nil {
