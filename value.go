@@ -766,20 +766,14 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	vlog.lfDiscardStats = &lfDiscardStats{m: make(map[uint32]int64)}
 
 	var err error
-	vlog.cache, err = ristretto.NewCache(&ristretto.Config{
-		NumCounters: 50e6,
-		MaxCost: 100e9,
-		BufferItems: 64,
-		Log: true,
-	})
-	go func() {
-		t := time.NewTicker(5*time.Second)
-		for range t.C {
-			l := vlog.cache.Log()
-			db.opt.Infof("Cache stats: ratio %f hits %d misses %d evictions %d", l.Ratio(),
-				l.GetHits(), l.GetMisses(), l.GetEvictions())
-		}
-	}()
+	if vlog.opt.ValueLogCacheSize > 0 {
+		vlog.cache, err = ristretto.NewCache(&ristretto.Config{
+			NumCounters: 200e6,
+			MaxCost:     vlog.opt.ValueLogCacheSize,
+			BufferItems: 64,
+			Log:         true,
+		})
+	}
 
 	if err := vlog.populateFilesMap(); err != nil {
 		return err
@@ -1113,8 +1107,10 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 			vp.Offset, vlog.woffset())
 	}
 
-	if buf, ok := vlog.cache.Get(vp.cacheKey()); ok {
-		return buf.([]byte), nil, nil
+	if vlog.cache != nil {
+		if buf, ok := vlog.cache.Get(vp.cacheKey()); ok {
+			return buf.([]byte), nil, nil
+		}
 	}
 
 	buf, cb, err := vlog.readValueBytes(vp, s)
@@ -1126,7 +1122,11 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	headerLen := h.Decode(buf)
 	n := uint32(headerLen) + h.klen
 
-	slice := append([]byte{}, buf[n : n+h.vlen]...)
+	if vlog.cache == nil {
+		return buf[n : n+h.vlen], cb, nil
+	}
+
+	slice := append([]byte{}, buf[n:n+h.vlen]...)
 	vlog.cache.Set(vp.cacheKey(), slice, int64(len(slice)*8))
 	return slice, cb, nil
 }

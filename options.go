@@ -61,6 +61,7 @@ type Options struct {
 	LevelOneSize       int64
 	ValueLogFileSize   int64
 	ValueLogMaxEntries uint32
+	ValueLogCacheSize  int64
 
 	NumCompactors     int
 	CompactL0OnClose  bool
@@ -111,6 +112,7 @@ func DefaultOptions(path string) Options {
 		ValueLogFileSize: 1<<30 - 1,
 
 		ValueLogMaxEntries: 1000000,
+		ValueLogCacheSize:  0,
 		ValueThreshold:     32,
 		Truncate:           false,
 		Logger:             defaultLogger,
@@ -369,6 +371,17 @@ func (opt Options) WithValueLogFileSize(val int64) Options {
 // The default value of ValueLogMaxEntries is one million (1000000).
 func (opt Options) WithValueLogMaxEntries(val uint32) Options {
 	opt.ValueLogMaxEntries = val
+	return opt
+}
+
+// WithValueLogCacheSize returns a new Options value with ValueLogCacheSize set to the given value.
+//
+// ValueLogCacheSize sets the max size of the value log cache in bytes. A value of zero means the
+// cache is disabled.
+//
+// The default value of ValueLogCacheSize is 0.
+func (opt Options) WithValueLogCacheSize(val int64) Options {
+	opt.ValueLogCacheSize = val
 	return opt
 }
 
