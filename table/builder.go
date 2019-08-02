@@ -121,7 +121,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	}
 
 	// store current entry's offset
-	y.AssertTrue(b.buf.Len() < math.MaxUint32)
+	y.AssertTrue(uint32(b.buf.Len()) < math.MaxUint32)
 	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len())-b.baseOffset)
 
 	// Layout: header, diffKey, value.
@@ -173,7 +173,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		return false
 	}
 
-	y.AssertTrue((len(b.entryOffsets)+1)*4+4+8+4 < math.MaxUint32) // check for below statements
+	y.AssertTrue((uint32(len(b.entryOffsets))+1)*4+4+8+4 < math.MaxUint32) // check for below statements
 	// We should include current entry also in size, that's why +1 to len(b.entryOffsets).
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 +
 		4 + // size of list
@@ -191,7 +191,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
 		b.baseKey = []byte{}
-		y.AssertTrue(b.buf.Len() < math.MaxUint32)
+		y.AssertTrue(uint32(b.buf.Len()) < math.MaxUint32)
 		b.baseOffset = uint32(b.buf.Len())
 		b.entryOffsets = b.entryOffsets[:0]
 	}
@@ -246,7 +246,7 @@ func (b *Builder) Finish() []byte {
 	n, err := b.buf.Write(index)
 	y.Check(err)
 
-	y.AssertTrue(n < math.MaxUint32)
+	y.AssertTrue(uint32(n) < math.MaxUint32)
 	// Write index size.
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
@@ -278,7 +278,7 @@ func (b *Builder) writeChecksum(data []byte) {
 	n, err := b.buf.Write(chksum)
 	y.Check(err)
 
-	y.AssertTrue(n < math.MaxUint32)
+	y.AssertTrue(uint32(n) < math.MaxUint32)
 	// Write checksum size.
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
