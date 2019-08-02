@@ -770,12 +770,18 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			NumCounters: 200e6,
 			MaxCost:     vlog.opt.ValueLogCacheSize,
 			BufferItems: 64,
-			Log:         true,
+			Metrics:     true,
 		})
 		if err != nil {
 			return err
 		}
 		vlog.cache = cache
+		go func(){
+			t := time.NewTicker(5*time.Second)
+			for range t.C {
+				db.opt.Infof(cache.Metrics().String())
+			}
+		}()
 	}
 
 	if err := vlog.populateFilesMap(); err != nil {
