@@ -570,3 +570,49 @@ func TestDropPrefixRace(t *testing.T) {
 	require.True(t, after < before)
 	db.Close()
 }
+
+func TestWriteBatchManagedMode(t *testing.T) {
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%10d", i))
+	}
+	val := func(i int) []byte {
+		return []byte(fmt.Sprintf("%128d", i))
+	}
+	opt := DefaultOptions("")
+	opt.managedTxns = true
+	opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		wb := db.NewWriteBatchAt(1)
+		defer wb.Cancel()
+
+		N, M := 50000, 1000
+		start := time.Now()
+
+		for i := 0; i < N; i++ {
+			require.NoError(t, wb.Set(key(i), val(i)))
+		}
+		for i := 0; i < M; i++ {
+			require.NoError(t, wb.Delete(key(i)))
+		}
+		require.NoError(t, wb.Flush())
+		t.Logf("Time taken for %d writes (w/ test options): %s\n", N+M, time.Since(start))
+
+		err := db.View(func(txn *Txn) error {
+			itr := txn.NewIterator(DefaultIteratorOptions)
+			defer itr.Close()
+
+			i := M
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				require.Equal(t, string(key(i)), string(item.Key()))
+				valcopy, err := item.ValueCopy(nil)
+				require.NoError(t, err)
+				require.Equal(t, val(i), valcopy)
+				i++
+			}
+			require.Equal(t, N, i)
+			return nil
+		})
+		require.NoError(t, err)
+	})
+}
