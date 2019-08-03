@@ -1136,7 +1136,7 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	}
 
 	slice := append([]byte{}, buf[n:n+h.vlen]...)
-	vlog.cache.Set(vp.cacheKey(), slice, int64(len(slice)*8))
+	vlog.cache.Set(vp.cacheKey(), slice, int64(len(slice)))
 	return slice, cb, nil
 }
 
