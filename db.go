@@ -858,9 +858,7 @@ func writeLevel0Table(ft flushTask, f io.Writer, bopts table.Options) error {
 		if len(ft.dropPrefix) > 0 && bytes.HasPrefix(iter.Key(), ft.dropPrefix) {
 			continue
 		}
-		if err := b.Add(iter.Key(), iter.Value()); err != nil {
-			return err
-		}
+		b.Add(iter.Key(), iter.Value())
 	}
 	_, err := f.Write(b.Finish())
 	return err
