@@ -186,7 +186,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 }
 
 // Add adds a key-value pair to the block.
-func (b *Builder) Add(key []byte, value y.ValueStruct) error {
+func (b *Builder) Add(key []byte, value y.ValueStruct) {
 	if b.shouldFinishBlock(key, value) {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
@@ -196,7 +196,6 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 		b.entryOffsets = b.entryOffsets[:0]
 	}
 	b.addHelper(key, value)
-	return nil // Currently, there is no meaningful error.
 }
 
 // TODO: vvv this was the comment on ReachedCapacity.

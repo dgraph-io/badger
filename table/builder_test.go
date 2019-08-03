@@ -61,7 +61,7 @@ func TestTableIndex(t *testing.T) {
 				blockCount++
 				blockFirstKeys = append(blockFirstKeys, k)
 			}
-			y.Check(builder.Add(k, vs))
+			builder.Add(k, vs)
 		}
 		f.Write(builder.Finish())
 

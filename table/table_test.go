@@ -75,12 +75,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	})
 	for _, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		err := b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0})
-		if t != nil {
-			require.NoError(t, err)
-		} else {
-			y.Check(err)
-		}
+		b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0})
 	}
 	f.Write(b.Finish())
 	f.Close()
@@ -668,7 +663,7 @@ func TestTableBigValues(t *testing.T) {
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), 0)
 		vs := y.ValueStruct{Value: value(i)}
-		require.NoError(t, builder.Add(key, vs))
+		builder.Add(key, vs)
 	}
 
 	f.Write(builder.Finish())
@@ -764,7 +759,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			// id := i*tableSize+j (not interleaved)
 			k := fmt.Sprintf("%016x", id)
 			v := fmt.Sprintf("%d", id)
-			y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}))
+			builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0})
 		}
 		f.Write(builder.Finish())
 		opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
@@ -849,7 +844,7 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 	for i := 0; i < count; i++ {
 		k := fmt.Sprintf("%016x", i)
 		v := fmt.Sprintf("%d", i)
-		y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)}))
+		builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)})
 	}
 
 	f.Write(builder.Finish())
