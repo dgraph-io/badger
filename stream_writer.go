@@ -286,7 +286,8 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	}
 
 	w.lastKey = y.SafeCopy(w.lastKey, key)
-	return w.builder.Add(key, vs)
+	w.builder.Add(key, vs)
+	return nil
 }
 
 func (w *sortedWriter) send() error {

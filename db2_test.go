@@ -503,7 +503,7 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 		binary.BigEndian.PutUint64(key[:], uint64(i))
 		key = y.KeyWithTs(key, uint64(0))
 		val := y.ValueStruct{Value: []byte(fmt.Sprintf("%d", i))}
-		require.NoError(t, b.Add(key, val))
+		b.Add(key, val)
 	}
 
 	fileID := db.lc.reserveFileID()

@@ -156,7 +156,7 @@ func (b *Builder) finishBlock() {
 
 // Add adds a key-value pair to the block.
 // If doNotRestart is true, we will not restart even if b.counter >= restartInterval.
-func (b *Builder) Add(key []byte, value y.ValueStruct) error {
+func (b *Builder) Add(key []byte, value y.ValueStruct) {
 	if b.counter >= restartInterval {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
@@ -167,7 +167,6 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) error {
 		b.prevOffset = math.MaxUint32 // First key-value pair of block has header.prev=MaxInt.
 	}
 	b.addHelper(key, value)
-	return nil // Currently, there is no meaningful error.
 }
 
 // TODO: vvv this was the comment on ReachedCapacity.

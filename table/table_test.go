@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"os"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,12 +65,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	})
 	for _, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		err := b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0})
-		if t != nil {
-			require.NoError(t, err)
-		} else {
-			y.Check(err)
-		}
+		b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0})
 	}
 	f.Write(b.Finish())
 	f.Close()
@@ -624,6 +620,23 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 	require.False(t, it.Valid())
 }
 
+// This test is for verifying checksum failure during table open.
+func TestTableChecksum(t *testing.T) {
+	rand.Seed(time.Now().Unix())
+	// we are going to write random byte at random location in table file.
+	rb := make([]byte, 1)
+	rand.Read(rb)
+	f := buildTestTable(t, "k", 10000)
+	fi, err := f.Stat()
+	require.NoError(t, err, "unable to get file information")
+	f.WriteAt(rb, rand.Int63n(fi.Size()))
+
+	_, err = OpenTable(f, options.LoadToRAM, []byte("wrong"))
+	if err == nil || !strings.Contains(err.Error(), "checksum") {
+		t.Fatal("Test should have been failed with checksum mismatch error")
+	}
+}
+
 func BenchmarkRead(b *testing.B) {
 	n := int(5 * 1e6)
 	tbl := getTableForBenchmarks(b, n)
@@ -678,7 +691,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			// id := i*tableSize+j (not interleaved)
 			k := fmt.Sprintf("%016x", id)
 			v := fmt.Sprintf("%d", id)
-			y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}))
+			builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0})
 		}
 		f.Write(builder.Finish())
 		tbl, err := OpenTable(f, options.LoadToRAM, nil)
@@ -739,7 +752,7 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 	for i := 0; i < count; i++ {
 		k := fmt.Sprintf("%016x", i)
 		v := fmt.Sprintf("%d", i)
-		y.Check(builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)}))
+		builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)})
 	}
 
 	f.Write(builder.Finish())
