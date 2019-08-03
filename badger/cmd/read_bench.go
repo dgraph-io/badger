@@ -50,6 +50,7 @@ var (
 	loadingMode string
 	keysOnly    bool
 	readOnly    bool
+	iterate     bool
 )
 
 func init() {
@@ -64,6 +65,9 @@ func init() {
 		&keysOnly, "keys-only", false, "If false, values will also be read.")
 	readBenchCmd.Flags().BoolVar(
 		&readOnly, "read-only", true, "If true, DB will be opened in read only mode.")
+	readBenchCmd.Flags().BoolVar(
+		&iterate, "iterate", false, "If true, one single iteration would be done.")
+
 	readBenchCmd.Flags().StringVar(
 		&loadingMode, "loading-mode", "mmap", "Mode for accessing SSTables and value log files. "+
 			"Valid loading modes are fileio and mmap.")
@@ -83,11 +87,34 @@ func readBench(cmd *cobra.Command, args []string) error {
 		WithValueDir(vlogDir).
 		WithReadOnly(readOnly).
 		WithTableLoadingMode(mode).
-		WithValueLogLoadingMode(mode))
+		WithValueLogLoadingMode(mode).
+		WithValueLogCacheSize(2 << 30))
 	if err != nil {
 		return y.Wrapf(err, "unable to open DB")
 	}
 	defer db.Close()
+
+	if iterate {
+		startTime = time.Now()
+		go printStats(nil)
+		return db.View(func(txn *badger.Txn) error {
+			opt := badger.DefaultIteratorOptions
+			opt.AllVersions = true
+			itr := txn.NewIterator(opt)
+			defer itr.Close()
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				key := item.KeyCopy(nil)
+				val, err := item.ValueCopy(nil)
+				if err != nil {
+					return err
+				}
+				atomic.AddUint64(&sizeRead, uint64(len(key)+len(val)))
+				atomic.AddUint64(&entriesRead, 1)
+			}
+			return nil
+		})
+	}
 
 	now := time.Now()
 	keys, err := getSampleKeys(db)

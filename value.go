@@ -776,8 +776,8 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			return err
 		}
 		vlog.cache = cache
-		go func(){
-			t := time.NewTicker(5*time.Second)
+		go func() {
+			t := time.NewTicker(5 * time.Second)
 			for range t.C {
 				db.opt.Infof(cache.Metrics().String())
 			}
@@ -1107,7 +1107,7 @@ func (vlog *valueLog) getFileRLocked(fid uint32) (*logFile, error) {
 
 // Read reads the value log at a given location.
 // TODO: Make this read private.
-func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
+func (vlog *valueLog) Read(vp valuePointer, s *y.Slice, hint cacheHint) ([]byte, func(), error) {
 	// Check for valid offset if we are reading to writable log.
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	if vp.Fid == maxFid && vp.Offset >= vlog.woffset() {
@@ -1116,7 +1116,7 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 			vp.Offset, vlog.woffset())
 	}
 
-	if vlog.cache != nil {
+	if vlog.cache != nil && hint == useCache {
 		if buf, ok := vlog.cache.Get(vp.cacheKey()); ok {
 			return buf.([]byte), nil, nil
 		}
@@ -1131,7 +1131,7 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	headerLen := h.Decode(buf)
 	n := uint32(headerLen) + h.klen
 
-	if vlog.cache == nil {
+	if vlog.cache == nil || hint == skipCache {
 		return buf[n : n+h.vlen], cb, nil
 	}
 
@@ -1488,7 +1488,7 @@ func (vlog *valueLog) populateDiscardStats() error {
 			break
 		}
 		// Read entry from value log.
-		result, cb, err := vlog.Read(vp, new(y.Slice))
+		result, cb, err := vlog.Read(vp, new(y.Slice), skipCache)
 		runCallback(cb)
 		val = y.SafeCopy(val, result)
 		// The result is stored in val. We can break the loop from here.

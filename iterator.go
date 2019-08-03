@@ -100,7 +100,7 @@ func (item *Item) Value(fn func(val []byte) error) error {
 		}
 		return item.err
 	}
-	buf, cb, err := item.yieldItemValue()
+	buf, cb, err := item.yieldItemValue(useCache)
 	defer runCallback(cb)
 	if err != nil {
 		return err
@@ -122,7 +122,7 @@ func (item *Item) ValueCopy(dst []byte) ([]byte, error) {
 	if item.status == prefetched {
 		return y.SafeCopy(dst, item.val), item.err
 	}
-	buf, cb, err := item.yieldItemValue()
+	buf, cb, err := item.yieldItemValue(useCache)
 	defer runCallback(cb)
 	return y.SafeCopy(dst, buf), err
 }
@@ -146,7 +146,14 @@ func (item *Item) DiscardEarlierVersions() bool {
 	return item.meta&bitDiscardEarlierVersions > 0
 }
 
-func (item *Item) yieldItemValue() ([]byte, func(), error) {
+type cacheHint int
+
+const (
+	useCache cacheHint = iota
+	skipCache
+)
+
+func (item *Item) yieldItemValue(hint cacheHint) ([]byte, func(), error) {
 	key := item.Key() // No need to copy.
 	for {
 		if !item.hasValue() {
@@ -165,7 +172,7 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 
 		var vp valuePointer
 		vp.Decode(item.vptr)
-		result, cb, err := item.db.vlog.Read(vp, item.slice)
+		result, cb, err := item.db.vlog.Read(vp, item.slice, hint)
 		if err != ErrRetry {
 			return result, cb, err
 		}
@@ -212,7 +219,7 @@ func runCallback(cb func()) {
 }
 
 func (item *Item) prefetchValue() {
-	val, cb, err := item.yieldItemValue()
+	val, cb, err := item.yieldItemValue(skipCache)
 	defer runCallback(cb)
 
 	item.err = err
