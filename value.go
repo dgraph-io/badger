@@ -1164,23 +1164,18 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	if candidate.fid != math.MaxUint32 { // Found a candidate
 		tr.LazyPrintf("Found candidate via discard stats: %v", candidate)
 		files = append(files, vlog.filesMap[candidate.fid])
-	} else {
-		tr.LazyPrintf("Could not find candidate via discard stats. Randomly picking one.")
+		return files
 	}
 
-	// Fallback to randomly picking a log file
-	var idxHead int
-	for i, fid := range fids {
-		if fid == head.Fid {
-			idxHead = i
-			break
-		}
-	}
-	if idxHead == 0 { // Not found or first file
+	tr.LazyPrintf("Could not find candidate via discard stats. Randomly picking one.")
+
+	// Fallback to randomly picking a log file.
+	if head.Fid == 0 { // Not found or first file
 		tr.LazyPrintf("Could not find any file.")
 		return nil
 	}
-	idx := rand.Intn(idxHead) // Don’t include head.Fid. We pick a random file before it.
+	// Don’t include head.Fid. We pick a random file before it.
+	idx := rand.Intn(int(head.Fid))
 	if idx > 0 {
 		idx = rand.Intn(idx + 1) // Another level of rand to favor smaller fids.
 	}
@@ -1351,7 +1346,6 @@ func (vlog *valueLog) waitOnGC(lc *y.Closer) {
 func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
-		// Pick a log file for GC.
 		tr := trace.New("Badger.ValueLog", "GC")
 		tr.SetMaxEvents(100)
 		defer func() {
@@ -1360,6 +1354,7 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 		}()
 
 		var err error
+		// Pick a log file for GC.
 		files := vlog.pickLog(head, tr)
 		if len(files) == 0 {
 			tr.LazyPrintf("PickLog returned zero results.")
