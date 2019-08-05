@@ -313,7 +313,7 @@ func (b *Builder) encrypt(data []byte) ([]byte, error) {
 		if err != nil {
 			return data, err
 		}
-		data, err = y.XORBlock(b.DataKey().Data, iv, data)
+		data, err = y.XORBlock(data, b.DataKey().Data, iv)
 		if err != nil {
 			return data, err
 		}

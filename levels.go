@@ -496,7 +496,7 @@ func (s *levelsController) compactBuildTables(
 	var lastKey, skipKey []byte
 	for it.Valid() {
 		timeStart := time.Now()
-		dk, err := s.kv.registry.getDataKey()
+		dk, err := s.kv.registry.latestDataKey()
 		if err != nil {
 			return nil, nil, err
 		}

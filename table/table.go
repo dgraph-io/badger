@@ -257,7 +257,7 @@ func (t *Table) decrypt(data []byte) ([]byte, error) {
 		iv := data[len(data)-aes.BlockSize:]
 		data = data[:len(data)-aes.BlockSize]
 		var err error
-		data, err = y.XORBlock(t.dataKey.Data, iv, data)
+		data, err = y.XORBlock(data, t.dataKey.Data, iv)
 		if err != nil {
 			return data, err
 		}

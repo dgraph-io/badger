@@ -196,7 +196,7 @@ type sortedWriter struct {
 }
 
 func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
-	dk, err := sw.db.registry.getDataKey()
+	dk, err := sw.db.registry.latestDataKey()
 	y.Check(err)
 	w := &sortedWriter{
 		db:       sw.db,
@@ -289,7 +289,7 @@ func (w *sortedWriter) send() error {
 		err := w.createTable(builder)
 		w.throttle.Done(err)
 	}(w.builder)
-	dk, err := w.db.registry.getDataKey()
+	dk, err := w.db.registry.latestDataKey()
 	if err != nil {
 		return err
 	}

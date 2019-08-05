@@ -25,20 +25,25 @@ import (
 )
 
 func TestBuildRegistry(t *testing.T) {
-	storageKey := make([]byte, 32)
+	encryptionKey := make([]byte, 32)
 	dir, err := ioutil.TempDir("", "badger-test")
-	_, err = rand.Read(storageKey)
+	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
-	kr, err := OpenKeyRegistry(dir, false, storageKey)
+	opt := Options{
+		Dir:           dir,
+		ReadOnly:      false,
+		EncryptionKey: encryptionKey,
+	}
+	kr, err := OpenKeyRegistry(opt)
 	defer os.Remove(dir)
 	require.NoError(t, err)
-	dk, err := kr.getDataKey()
+	dk, err := kr.latestDataKey()
 	require.NoError(t, err)
 	kr.lastCreated = 0
-	dk1, err := kr.getDataKey()
+	dk1, err := kr.latestDataKey()
 	require.NoError(t, err)
 	require.NoError(t, kr.Close())
-	kr2, err := OpenKeyRegistry(dir, false, storageKey)
+	kr2, err := OpenKeyRegistry(opt)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(kr2.dataKeys))
 	require.Equal(t, dk.Data, kr.dataKeys[dk.KeyId].Data)
@@ -47,24 +52,54 @@ func TestBuildRegistry(t *testing.T) {
 }
 
 func TestRewriteRegistry(t *testing.T) {
+	encryptionKey := make([]byte, 32)
 	dir, err := ioutil.TempDir("", "badger-test")
+	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
-	storageKey := make([]byte, 32)
-	_, err = rand.Read(storageKey)
-	require.NoError(t, err)
-	kr, err := OpenKeyRegistry(dir, false, storageKey)
+	opt := Options{
+		Dir:           dir,
+		ReadOnly:      false,
+		EncryptionKey: encryptionKey,
+	}
+	kr, err := OpenKeyRegistry(opt)
 	defer os.Remove(dir)
 	require.NoError(t, err)
-	_, err = kr.getDataKey()
+	_, err = kr.latestDataKey()
 	require.NoError(t, err)
 	kr.lastCreated = 0
-	_, err = kr.getDataKey()
+	_, err = kr.latestDataKey()
 	require.NoError(t, err)
 	require.NoError(t, kr.Close())
 	delete(kr.dataKeys, 1)
-	require.NoError(t, RewriteRegistry(dir, kr, storageKey))
-	kr2, err := OpenKeyRegistry(dir, false, storageKey)
+	require.NoError(t, WriteKeyRegistry(kr, opt))
+	kr2, err := OpenKeyRegistry(opt)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(kr2.dataKeys))
 	require.NoError(t, kr2.Close())
+}
+
+func TestMismatch(t *testing.T) {
+	encryptionKey := make([]byte, 32)
+	dir, err := ioutil.TempDir("", "badger-test")
+	_, err = rand.Read(encryptionKey)
+	require.NoError(t, err)
+	opt := Options{
+		Dir:           dir,
+		ReadOnly:      false,
+		EncryptionKey: encryptionKey,
+	}
+	kr, err := OpenKeyRegistry(opt)
+	defer os.Remove(dir)
+	require.NoError(t, err)
+	kr.Close()
+	kr, err = OpenKeyRegistry(opt)
+	require.NoError(t, err)
+	kr.Close()
+	encryptionKey = make([]byte, 32)
+	_, err = rand.Read(encryptionKey)
+	require.NoError(t, err)
+	opt.EncryptionKey = encryptionKey
+	kr, err = OpenKeyRegistry(opt)
+	require.Error(t, err)
+	require.EqualError(t, err, ErrEncryptionKeyMismatch.Error())
 }

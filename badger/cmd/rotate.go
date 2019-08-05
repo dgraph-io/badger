@@ -47,7 +47,12 @@ func doRotate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	kr, err := badger.OpenKeyRegistry(sstDir, false, oldKey)
+	opt := badger.Options{
+		Dir:           sstDir,
+		ReadOnly:      false,
+		EncryptionKey: oldKey,
+	}
+	kr, err := badger.OpenKeyRegistry(opt)
 	if err != nil {
 		return err
 	}
@@ -56,7 +61,8 @@ func doRotate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	err = badger.RewriteRegistry(sstDir, kr, newKey)
+	opt.EncryptionKey = newKey
+	err = badger.WriteKeyRegistry(kr, opt)
 	if err != nil {
 		return err
 	}

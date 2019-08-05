@@ -391,7 +391,7 @@ func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {
 		}
 		build.Tables[tc.Id] = TableManifest{
 			Level: uint8(tc.Level),
-			KeyID: tc.KeyID,
+			KeyID: tc.KeyId,
 		}
 		for len(build.Levels) <= int(tc.Level) {
 			build.Levels = append(build.Levels, levelManifest{make(map[uint64]struct{})})
@@ -428,7 +428,7 @@ func newCreateChange(id uint64, level int, KeyID uint64) *pb.ManifestChange {
 		Id:    id,
 		Op:    pb.ManifestChange_CREATE,
 		Level: uint32(level),
-		KeyID: KeyID,
+		KeyId: KeyID,
 	}
 }
 

@@ -49,6 +49,14 @@ func TestRotate(t *testing.T) {
 	// in the upcomming test cases.
 	require.NoError(t, db.Close())
 
+	// Checking whether able to open db after closing the db.
+	// Cuz, we'll decrypt the encrypted sanity text.
+	db, err = badger.Open(opts)
+	require.NoError(t, err)
+	// Closing so that we can open another db
+	// in the upcomming test cases.
+	require.NoError(t, db.Close())
+
 	// Creating another sample key.
 	key2 := make([]byte, 32)
 	_, err = rand.Read(key2)

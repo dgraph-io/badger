@@ -284,7 +284,7 @@ func Open(opt Options) (db *DB, err error) {
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
 	}
-	kr, err := OpenKeyRegistry(opt.Dir, opt.ReadOnly, opt.EncryptionKey)
+	kr, err := OpenKeyRegistry(opt)
 	if err != nil {
 		return nil, err
 	}
@@ -911,7 +911,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// Don't block just to sync the directory entry.
 	dirSyncCh := make(chan error)
 	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
-	dk, err := db.registry.getDataKey()
+	dk, err := db.registry.latestDataKey()
 	if err != nil {
 		return y.Wrap(err)
 	}

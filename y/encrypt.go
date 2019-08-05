@@ -20,11 +20,10 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"io"
 )
 
 // XORBlock encrypts the given data with AES and XOR's with IV
-func XORBlock(key, iv, src []byte) ([]byte, error) {
+func XORBlock(src, key, iv []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -38,6 +37,6 @@ func XORBlock(key, iv, src []byte) ([]byte, error) {
 // GenereateIV generate IV.
 func GenereateIV() ([]byte, error) {
 	iv := make([]byte, aes.BlockSize)
-	_, err := io.ReadFull(rand.Reader, iv)
+	_, err := rand.Read(iv)
 	return iv, err
 }
