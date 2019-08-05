@@ -1132,16 +1132,16 @@ func valueBytesToEntry(buf []byte) (e Entry) {
 	return
 }
 
-func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFile) {
+func (vlog *valueLog) pickFromDiscardStats(head valuePointer, tr trace.Trace) (*logFile, int64) {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
 	fids := vlog.sortedFids()
 	if len(fids) <= 1 {
 		tr.LazyPrintf("Only one or less value log file.")
-		return nil
+		return nil, 0
 	} else if head.Fid == 0 {
 		tr.LazyPrintf("Head pointer is at zero.")
-		return nil
+		return nil, 0
 	}
 
 	// Pick a candidate that contains the largest amount of discardable data
@@ -1163,25 +1163,28 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 
 	if candidate.fid != math.MaxUint32 { // Found a candidate
 		tr.LazyPrintf("Found candidate via discard stats: %v", candidate)
-		files = append(files, vlog.filesMap[candidate.fid])
-		return files
+		return vlog.filesMap[candidate.fid], candidate.discard
 	}
+	return nil, 0
+}
 
-	tr.LazyPrintf("Could not find candidate via discard stats. Randomly picking one.")
-
+func (vlog *valueLog) pickRandomFile(head valuePointer, tr trace.Trace) *logFile {
 	// Fallback to randomly picking a log file.
 	if head.Fid == 0 { // Not found or first file
 		tr.LazyPrintf("Could not find any file.")
 		return nil
 	}
+	vlog.filesLock.RLock()
+	defer vlog.filesLock.RUnlock()
+
+	fids := vlog.sortedFids()
 	// Don’t include head.Fid. We pick a random file before it.
 	idx := rand.Intn(int(head.Fid))
 	if idx > 0 {
 		idx = rand.Intn(idx + 1) // Another level of rand to favor smaller fids.
 	}
 	tr.LazyPrintf("Randomly chose fid: %d", fids[idx])
-	files = append(files, vlog.filesMap[fids[idx]])
-	return files
+	return vlog.filesMap[fids[idx]]
 }
 
 func discardEntry(e Entry, vs y.ValueStruct) bool {
@@ -1343,6 +1346,15 @@ func (vlog *valueLog) waitOnGC(lc *y.Closer) {
 	vlog.garbageCh <- struct{}{}
 }
 
+// runGc picks a value log file and tries to GC it. It picks log file to GC in the following order.
+// 1. Pick the file with maximum stale data from discard maps.
+//      a. If the file has stale data more then discard ratio, GC the file and return.
+//      b. Else add it to the list of files to be GCed. This file will be sampled to measure
+//		   the amount of stale data in it.
+// 2. Pick a random file from the list of files and add it to the list of files to GC.
+//
+// All the files to be GCed are then sampled to check if there is enough stale data. The first file
+// for which sampling is successful is garbage collected.
 func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
@@ -1353,14 +1365,32 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 			<-vlog.garbageCh
 		}()
 
-		var err error
+		var files []*logFile
 		// Pick a log file for GC.
-		files := vlog.pickLog(head, tr)
-		if len(files) == 0 {
-			tr.LazyPrintf("PickLog returned zero results.")
-			return ErrNoRewrite
+		file, discard := vlog.pickFromDiscardStats(head, tr)
+		// Found a valid file from discard stats.
+		if file != nil {
+			// If stale data is more than discard ratio.
+			if float64(discard) > discardRatio*float64(file.size) {
+				err := vlog.rewrite(file, tr)
+				if err == nil {
+					// Remove file from discard stats.
+					vlog.lfDiscardStats.Lock()
+					delete(vlog.lfDiscardStats.m, file.fid)
+					vlog.lfDiscardStats.Unlock()
+
+					return vlog.deleteMoveKeysFor(file.fid, tr)
+				}
+				return err
+			}
+			// This files doesn't have enough stale data to discard.
+			// We'll sample it to check if it can still be cleaned up.
+			files = append(files, file)
 		}
+		tr.LazyPrintf("Could not find candidate via discard stats. Randomly picking one.")
+		files = append(files, vlog.pickRandomFile(head, tr))
 		tried := make(map[uint32]bool)
+		var err error
 		for _, lf := range files {
 			if _, done := tried[lf.fid]; done {
 				continue
