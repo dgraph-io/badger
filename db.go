@@ -845,20 +845,18 @@ func arenaSize(opt Options) int64 {
 }
 
 // buildL0Table builds a new table from the memtable.
-func buildL0Table(ft flushTask) ([]byte, error) {
+func buildL0Table(ft flushTask, bopts table.Options) []byte {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
-	b := table.NewTableBuilder()
+	b := table.NewTableBuilder(bopts)
 	defer b.Close()
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 		if len(ft.dropPrefix) > 0 && bytes.HasPrefix(iter.Key(), ft.dropPrefix) {
 			continue
 		}
-		if err := b.Add(iter.Key(), iter.Value()); err != nil {
-			return nil, err
-		}
+		b.Add(iter.Key(), iter.Value())
 	}
-	return b.Finish(), nil
+	return b.Finish()
 }
 
 type flushTask struct {
@@ -891,12 +889,12 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	if err != nil {
 		return y.Wrap(err)
 	}
-
-	data, err := buildL0Table(ft)
-	if err != nil {
-		return errors.Wrapf(err, "failed to build L0 table")
+	bopts := table.Options{
+		BlockSize:         db.opt.BlockSize,
+		BloomFalsePostive: db.opt.BloomFalsePositive,
 	}
-	tbl, err := table.OpenInMemoryTable(fd, data)
+
+	tbl, err := table.OpenInMemoryTable(fd, buildL0Table(ft, bopts))
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err
