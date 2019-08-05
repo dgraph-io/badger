@@ -89,9 +89,14 @@ func TestBlockEncryption(t *testing.T) {
 	require.NoError(t, err)
 
 	keysCount := 10000
-	opts := Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead, DataKey: &pb.DataKey{
-		Data: key,
-	}}
+	opts := Options{
+		LoadingMode:       options.MemoryMap,
+		BloomFalsePostive: 0.01,
+		ChkMode:           options.OnTableAndBlockRead,
+		DataKey: &pb.DataKey{
+			Data: key,
+		},
+	}
 	builder := NewTableBuilder(opts)
 	filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
 	defer os.Remove(filename)
