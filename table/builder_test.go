@@ -23,11 +23,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/pb"
-
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -36,16 +35,16 @@ func TestTableIndex(t *testing.T) {
 	keyPrefix := "key"
 	t.Run("single key", func(t *testing.T) {
 		f := buildTestTable(t, keyPrefix, 1)
-		tbl, err := OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
+		opts := Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead, DataKey: nil}
+		tbl, err := OpenTable(f, opts)
 		require.NoError(t, err)
 		require.Len(t, tbl.blockIndex, 1)
 	})
 
 	t.Run("multiple keys", func(t *testing.T) {
 		keysCount := 10000
-		builder := NewTableBuilder(&BuilderOptions{
-			DataKey: nil,
-		})
+		opts := Options{BlockSize: 4 * 1024, BloomFalsePostive: 0.01, DataKey: nil}
+		builder := NewTableBuilder(opts)
 		filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
 		f, err := y.OpenSyncedFile(filename, true)
 		require.NoError(t, err)
@@ -63,11 +62,12 @@ func TestTableIndex(t *testing.T) {
 				blockCount++
 				blockFirstKeys = append(blockFirstKeys, k)
 			}
-			y.Check(builder.Add(k, vs))
+			builder.Add(k, vs)
 		}
 		f.Write(builder.Finish())
 
-		tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, nil)
+		opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead, DataKey: nil}
+		tbl, err := OpenTable(f, opts)
 		require.NoError(t, err, "unable to open table")
 
 		// Ensure index is built correctly
@@ -89,11 +89,10 @@ func TestBlockEncryption(t *testing.T) {
 	require.NoError(t, err)
 
 	keysCount := 10000
-	builder := NewTableBuilder(&BuilderOptions{
-		DataKey: &pb.DataKey{
-			Data: key,
-		},
-	})
+	opts := Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead, DataKey: &pb.DataKey{
+		Data: key,
+	}}
+	builder := NewTableBuilder(opts)
 	filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
 	defer os.Remove(filename)
 	f, err := y.OpenSyncedFile(filename, true)
@@ -113,13 +112,11 @@ func TestBlockEncryption(t *testing.T) {
 			blockCount++
 			blockFirstKeys = append(blockFirstKeys, k)
 		}
-		y.Check(builder.Add(k, vs))
+		builder.Add(k, vs)
 	}
 	_, err = f.Write(builder.Finish())
 	require.NoError(t, err)
-	tbl, err := OpenTable(f, options.LoadToRAM, options.OnTableAndBlockRead, &pb.DataKey{
-		Data: key,
-	})
+	tbl, err := OpenTable(f, opts)
 	require.NoError(t, err, "unable to open table")
 
 	// Ensure index is built correctly

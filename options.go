@@ -52,6 +52,8 @@ type Options struct {
 	MaxLevels           int
 	ValueThreshold      int
 	NumMemtables        int
+	BlockSize           int
+	BloomFalsePositive  float64
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -97,6 +99,8 @@ func DefaultOptions(path string) Options {
 		NumLevelZeroTables:      5,
 		NumLevelZeroTablesStall: 10,
 		NumMemtables:            5,
+		BloomFalsePositive:      0.01,
+		BlockSize:               4 * 1024,
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
@@ -285,6 +289,31 @@ func (opt Options) WithValueThreshold(val int) Options {
 // The default value of NumMemtables is 5.
 func (opt Options) WithNumMemtables(val int) Options {
 	opt.NumMemtables = val
+	return opt
+}
+
+// WithBloomFalsePositive returns a new Options value with BloomFalsePositive set
+// to the given value.
+//
+// BloomFalsePositive sets the false positive probability of the bloom filter in any SSTable.
+// Before reading a key from table, the bloom filter is checked for key existence.
+// BloomFalsePositive might impact read performance of DB. Lower BloomFalsePositive value might
+// consume more memory.
+//
+// The default value of BloomFalsePositive is 0.01.
+func (opt Options) WithBloomFalsePositive(val float64) Options {
+	opt.BloomFalsePositive = val
+	return opt
+}
+
+// WithBlockSize returns a new Options value with BlockSize set to the given value.
+//
+// BlockSize sets the size of any block in SSTable. SSTable is divided into multiple blocks
+// internally. Each block is compressed using prefix diff encoding.
+//
+// The default value of BlockSize is 4KB.
+func (opt Options) WithBlockSize(val int) Options {
+	opt.BlockSize = val
 	return opt
 }
 

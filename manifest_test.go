@@ -126,9 +126,8 @@ func buildTestTable(t *testing.T, prefix string, n int) *os.File {
 // TODO - Move these to somewhere where table package can also use it.
 // keyValues is n by 2 where n is number of pairs.
 func buildTable(t *testing.T, keyValues [][]string) *os.File {
-	b := table.NewTableBuilder(&table.BuilderOptions{
-		DataKey: nil,
-	})
+	bopts := table.Options{BlockSize: 4 * 1024, BloomFalsePostive: 0.01}
+	b := table.NewTableBuilder(bopts)
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
@@ -145,16 +144,11 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	})
 	for _, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		err := b.Add(y.KeyWithTs([]byte(kv[0]), 10), y.ValueStruct{
+		b.Add(y.KeyWithTs([]byte(kv[0]), 10), y.ValueStruct{
 			Value:    []byte(kv[1]),
 			Meta:     'A',
 			UserMeta: 0,
 		})
-		if t != nil {
-			require.NoError(t, err)
-		} else {
-			y.Check(err)
-		}
 	}
 	f.Write(b.Finish())
 	f.Close()
@@ -172,7 +166,8 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lh0 := newLevelHandler(kv, 0)
 	lh1 := newLevelHandler(kv, 1)
 	f := buildTestTable(t, "k", 2)
-	t1, err := table.OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
+	opts := table.Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	t1, err := table.OpenTable(f, opts)
 	require.NoError(t, err)
 	defer t1.DecrRef()
 
@@ -193,7 +188,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lc.runCompactDef(0, cd)
 
 	f = buildTestTable(t, "l", 2)
-	t2, err := table.OpenTable(f, options.MemoryMap, options.OnTableAndBlockRead, nil)
+	t2, err := table.OpenTable(f, opts)
 	require.NoError(t, err)
 	defer t2.DecrRef()
 	done = lh0.tryAddLevel0Table(t2)

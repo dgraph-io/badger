@@ -19,7 +19,6 @@ package badger
 import (
 	"bytes"
 	"fmt"
-	"math"
 	"math/rand"
 	"os"
 	"sort"
@@ -155,7 +154,12 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				rerr = err
 				return
 			}
-			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, db.opt.ChecksumVerificationMode, dk)
+			opts := table.Options{
+				LoadingMode: db.opt.TableLoadingMode,
+				ChkMode:     db.opt.ChecksumVerificationMode,
+				DataKey:     dk,
+			}
+			t, err := table.OpenTable(fd, opts)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -428,7 +432,7 @@ func (s *levelsController) compactBuildTables(
 
 	var hasOverlap bool
 	{
-		kr := getKeyRange(cd.top)
+		kr := getKeyRange(cd.top...)
 		for i, lh := range s.levels {
 			if i <= lev { // Skip upper levels.
 				continue
@@ -500,9 +504,12 @@ func (s *levelsController) compactBuildTables(
 		if err != nil {
 			return nil, nil, err
 		}
-		builder := table.NewTableBuilder(&table.BuilderOptions{
-			DataKey: dk,
-		})
+		bopts := table.Options{
+			BlockSize:         s.kv.opt.BlockSize,
+			BloomFalsePostive: s.kv.opt.BloomFalsePositive,
+			DataKey:           dk,
+		}
+		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
 			// See if we need to skip the prefix.
@@ -567,7 +574,7 @@ func (s *levelsController) compactBuildTables(
 				}
 			}
 			numKeys++
-			y.Check(builder.Add(it.Key(), it.Value()))
+			builder.Add(it.Key(), it.Value())
 		}
 		// It was true that it.Valid() at least once in the loop above, which means we
 		// called Add() at least once, and builder is not Empty().
@@ -582,8 +589,12 @@ func (s *levelsController) compactBuildTables(
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
 
-			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode,
-				s.kv.opt.ChecksumVerificationMode, builder.DataKey())
+			opts := table.Options{
+				LoadingMode: s.kv.opt.TableLoadingMode,
+				ChkMode:     s.kv.opt.ChecksumVerificationMode,
+				DataKey:     builder.DataKey(),
+			}
+			tbl, err := table.OpenTable(fd, opts)
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}
@@ -692,7 +703,7 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	}
 	cd.thisRange = infRange
 
-	kr := getKeyRange(cd.top)
+	kr := getKeyRange(cd.top...)
 	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, kr)
 	cd.bot = make([]*table.Table, right-left)
 	copy(cd.bot, cd.nextLevel.tables[left:right])
@@ -700,7 +711,7 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	if len(cd.bot) == 0 {
 		cd.nextRange = kr
 	} else {
-		cd.nextRange = getKeyRange(cd.bot)
+		cd.nextRange = getKeyRange(cd.bot...)
 	}
 
 	if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
@@ -710,30 +721,44 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	return true
 }
 
+// sortByOverlap sorts tables in increasing order of overlap with next level.
+func (s *levelsController) sortByOverlap(tables []*table.Table, cd *compactDef) {
+	if len(tables) == 0 || cd.nextLevel == nil {
+		return
+	}
+
+	tableOverlap := make([]int, len(tables))
+	for i := range tables {
+		// get key range for table
+		tableRange := getKeyRange(tables[i])
+		// get overlap with next level
+		left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, tableRange)
+		tableOverlap[i] = right - left
+	}
+
+	sort.Slice(tables, func(i, j int) bool {
+		return tableOverlap[i] < tableOverlap[j]
+	})
+}
+
 func (s *levelsController) fillTables(cd *compactDef) bool {
 	cd.lockLevels()
 	defer cd.unlockLevels()
 
-	tbls := make([]*table.Table, len(cd.thisLevel.tables))
-	copy(tbls, cd.thisLevel.tables)
-	if len(tbls) == 0 {
+	tables := make([]*table.Table, len(cd.thisLevel.tables))
+	copy(tables, cd.thisLevel.tables)
+	if len(tables) == 0 {
 		return false
 	}
 
-	// Find the biggest table, and compact that first.
-	// TODO: Try other table picking strategies.
-	sort.Slice(tbls, func(i, j int) bool {
-		return tbls[i].Size() > tbls[j].Size()
-	})
+	// We want to pick files from current level in order of increasing overlap with next level
+	// tables. Idea here is to first compact file from current level which has least overlap with
+	// next level. This provides us better write amplification.
+	s.sortByOverlap(tables, cd)
 
-	for _, t := range tbls {
+	for _, t := range tables {
 		cd.thisSize = t.Size()
-		cd.thisRange = keyRange{
-			// We pick all the versions of the smallest and the biggest key.
-			left: y.KeyWithTs(y.ParseKey(t.Smallest()), math.MaxUint64),
-			// Note that version zero would be the rightmost key.
-			right: y.KeyWithTs(y.ParseKey(t.Biggest()), 0),
-		}
+		cd.thisRange = getKeyRange(t)
 		if s.cstatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
 			continue
 		}
@@ -751,7 +776,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 			}
 			return true
 		}
-		cd.nextRange = getKeyRange(cd.bot)
+		cd.nextRange = getKeyRange(cd.bot...)
 
 		if s.cstatus.overlapsWith(cd.nextLevel.level, cd.nextRange) {
 			continue

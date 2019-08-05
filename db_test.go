@@ -84,20 +84,12 @@ func getTestOptions(dir string) Options {
 func getItemValue(t *testing.T, item *Item) (val []byte) {
 	t.Helper()
 	var v []byte
-	size := item.ValueSize()
 	err := item.Value(func(val []byte) error {
-		if val == nil {
-			v = nil
-		} else {
-			v = append([]byte{}, val...)
-		}
+		v = append(v, val...)
 		return nil
 	})
 	if err != nil {
 		t.Error(err)
-	}
-	if int64(len(v)) != size {
-		t.Errorf("incorrect size: expected %d, got %d", len(v), size)
 	}
 	if v == nil {
 		return nil
@@ -1874,6 +1866,9 @@ func ExampleDB_Subscribe() {
 	}
 	defer os.RemoveAll(dir)
 	db, err := Open(DefaultOptions(dir))
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer db.Close()
 
 	// Create the context here so we can cancel it after sending the writes.

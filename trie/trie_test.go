@@ -33,13 +33,13 @@ func TestGet(t *testing.T) {
 	ids := trie.Get([]byte("hel"))
 	require.Equal(t, 1, len(ids))
 
-	require.Equal(t, map[uint64]struct{}{20: struct{}{}}, ids)
+	require.Equal(t, map[uint64]struct{}{20: {}}, ids)
 	ids = trie.Get([]byte("badger"))
 	require.Equal(t, 1, len(ids))
-	require.Equal(t, map[uint64]struct{}{30: struct{}{}}, ids)
+	require.Equal(t, map[uint64]struct{}{30: {}}, ids)
 	ids = trie.Get([]byte("hello"))
 	require.Equal(t, 4, len(ids))
-	require.Equal(t, map[uint64]struct{}{1: struct{}{}, 3: struct{}{}, 4: struct{}{}, 20: struct{}{}}, ids)
+	require.Equal(t, map[uint64]struct{}{1: {}, 3: {}, 4: {}, 20: {}}, ids)
 }
 
 func TestTrieDelete(t *testing.T) {
@@ -48,5 +48,5 @@ func TestTrieDelete(t *testing.T) {
 	trie.Add([]byte("hello"), 3)
 	trie.Add([]byte("hello"), 4)
 	trie.Delete([]byte("hello"), 4)
-	require.Equal(t, map[uint64]struct{}{1: struct{}{}, 3: struct{}{}}, trie.Get([]byte("hello")))
+	require.Equal(t, map[uint64]struct{}{1: {}, 3: {}}, trie.Get([]byte("hello")))
 }

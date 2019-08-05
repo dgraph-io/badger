@@ -96,6 +96,8 @@ func OpenKeyRegistry(opt Options) (*KeyRegistry, error) {
 		fp.Close()
 		return nil, err
 	}
+	// We are seeking the end because, we don't incremental read.
+	// In readKeyRegistry we use ReadAt.
 	_, err = kr.fp.Seek(0, io.SeekEnd)
 	if err != nil {
 		fp.Close()
