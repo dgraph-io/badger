@@ -240,7 +240,9 @@ func OpenInMemoryTable(fd *os.File, data []byte) (*Table, error) {
 		tableSize: len(data),
 	}
 
-	t.init()
+	if err := t.init(); err != nil {
+		return nil, err
+	}
 	return t, nil
 }
 
