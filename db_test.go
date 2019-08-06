@@ -1882,7 +1882,7 @@ func ExampleDB_Subscribe() {
 		defer wg.Done()
 		cb := func(kvs *KVList) {
 			for _, kv := range kvs.Kv {
-				fmt.Printf("%s is now set to %s\n", kv.Key, kv.Value)
+				log.Printf("%s is now set to %s\n", kv.Key, kv.Value)
 			}
 		}
 		if err := db.Subscribe(ctx, cb, prefix); err != nil && err != context.Canceled {
@@ -1890,7 +1890,6 @@ func ExampleDB_Subscribe() {
 		}
 		log.Printf("subscription closed")
 	}()
-
 	// Write both keys, but only one should be printed in the Output.
 	err = db.Update(func(txn *Txn) error { return txn.Set(aKey, aValue) })
 	if err != nil {
