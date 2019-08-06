@@ -73,6 +73,9 @@ func OpenKeyRegistry(opt Options) (*KeyRegistry, error) {
 	}
 	fp, err := y.OpenExistingFile(path, flags)
 	if err != nil {
+		// OpenExistingFile just open file.
+		// So checking whether the file exist or not, If not
+		// We'll create new keyregistry.
 		if !os.IsNotExist(err) {
 			return nil, err
 		}
@@ -216,6 +219,7 @@ func WriteKeyRegistry(reg *KeyRegistry, opt Options) error {
 	buf := &bytes.Buffer{}
 	iv, err := y.GenereateIV()
 	if err != nil {
+		fp.Close()
 		return err
 	}
 
@@ -228,14 +232,10 @@ func WriteKeyRegistry(reg *KeyRegistry, opt Options) error {
 			return err
 		}
 	}
-	if _, err = buf.Write(iv); err != nil {
-		fp.Close()
-		return err
-	}
-	if _, err = buf.Write(eSanity); err != nil {
-		fp.Close()
-		return err
-	}
+	_, err = buf.Write(iv)
+	y.Check(err)
+	_, err = buf.Write(eSanity)
+	y.Check(err)
 
 	// Write all the datakeys to the disk.
 	for _, k := range reg.dataKeys {
@@ -354,11 +354,8 @@ func storeDataKey(buf *bytes.Buffer, storageKey []byte, k *pb.DataKey) error {
 	var lenCrcBuf [8]byte
 	binary.BigEndian.PutUint32(lenCrcBuf[0:4], uint32(len(data)))
 	binary.BigEndian.PutUint32(lenCrcBuf[4:8], crc32.Checksum(data, y.CastagnoliCrcTable))
-	if _, err = buf.Write(lenCrcBuf[:]); err != nil {
-		return err
-	}
-	if _, err = buf.Write(data); err != nil {
-		return err
-	}
-	return nil
+	_, err = buf.Write(lenCrcBuf[:])
+	y.Check(err)
+	_, err = buf.Write(data)
+	return err
 }
