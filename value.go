@@ -1169,7 +1169,6 @@ func (vlog *valueLog) pickFromDiscardStats(head valuePointer, tr trace.Trace) (*
 }
 
 func (vlog *valueLog) pickRandomFile(head valuePointer, tr trace.Trace) *logFile {
-	// Fallback to randomly picking a log file.
 	if head.Fid == 0 { // Not found or first file
 		tr.LazyPrintf("Could not find any file.")
 		return nil
