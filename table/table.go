@@ -124,15 +124,13 @@ func (b block) verifyCheckSum() error {
 	return y.VerifyChecksum(b.data[:readPos], cs)
 }
 
-func (b block) NewIterator() *blockIterator {
-	bi := &blockIterator{
-		data:              b.data,
-		numEntries:        b.numEntries,
-		entriesIndexStart: b.entriesIndexStart,
-	}
+// func (b block) NewIterator() *blockIterator {
+// 	bi := &blockIterator{
+// 		data: b.data,
+// 	}
 
-	return bi
-}
+// 	return bi
+// }
 
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function
 // entry. Returns a table with one reference count on it (decrementing which may delete the file!
@@ -174,6 +172,7 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode,
 	defer it.Close()
 	it.Rewind()
 	if it.Valid() {
+		fmt.Println("Smallest", it.Key())
 		t.smallest = it.Key()
 	}
 
@@ -181,6 +180,7 @@ func OpenTable(fd *os.File, mode options.FileLoadingMode,
 	defer it2.Close()
 	it2.Rewind()
 	if it2.Valid() {
+		fmt.Println("biggest", it2.Key())
 		t.biggest = it2.Key()
 	}
 
@@ -291,14 +291,14 @@ func (t *Table) readIndex() error {
 	return nil
 }
 
-func (t *Table) block(idx int) (*block, error) {
+func (t *Table) block(idx int) (block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= len(t.blockIndex) {
-		return nil, errors.New("block out of index")
+		return block{}, errors.New("block out of index")
 	}
 
 	ko := t.blockIndex[idx]
-	blk := &block{
+	blk := block{
 		offset: int(ko.Offset),
 	}
 	var err error
@@ -316,7 +316,7 @@ func (t *Table) block(idx int) (*block, error) {
 	// Verify checksum on if checksum verification mode is OnRead on OnStartAndRead.
 	if t.chkMode == options.OnBlockRead || t.chkMode == options.OnTableAndBlockRead {
 		if err = blk.verifyCheckSum(); err != nil {
-			return nil, err
+			return block{}, err
 		}
 	}
 

@@ -21,6 +21,8 @@ import (
 	"encoding/binary"
 	"io"
 	"math"
+	"reflect"
+	"unsafe"
 
 	"github.com/AndreasBriese/bbloom"
 	"github.com/dgraph-io/badger/pb"
@@ -50,6 +52,8 @@ func (h *header) Decode(buf []byte) int {
 	h.klen = binary.BigEndian.Uint16(buf[2:4])
 	return h.Size()
 }
+
+const headerSize = 4
 
 // Size returns size of the header. Currently it's just a constant.
 func (h header) Size() int { return 4 }
@@ -303,4 +307,38 @@ func (b *Builder) writeChecksum(data []byte) {
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
 	_, err = b.buf.Write(buf[:])
 	y.Check(err)
+}
+
+func u32ToBytes(v uint32) []byte {
+	var uBuf [4]byte
+	binary.LittleEndian.PutUint32(uBuf[:], v)
+	return uBuf[:]
+}
+
+func u32SliceToBytes(u32s []uint32) []byte {
+	if len(u32s) == 0 {
+		return nil
+	}
+	var b []byte
+	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+	hdr.Len = len(u32s) * 4
+	hdr.Cap = hdr.Len
+	hdr.Data = uintptr(unsafe.Pointer(&u32s[0]))
+	return b
+}
+
+func bytesToU32Slice(b []byte) []uint32 {
+	if len(b) == 0 {
+		return nil
+	}
+	var u32s []uint32
+	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&u32s))
+	hdr.Len = len(b) / 4
+	hdr.Cap = hdr.Len
+	hdr.Data = uintptr(unsafe.Pointer(&b[0]))
+	return u32s
+}
+
+func bytesToU32(b []byte) uint32 {
+	return binary.LittleEndian.Uint32(b)
 }
