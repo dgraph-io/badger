@@ -41,6 +41,7 @@ func TestBuildRegistry(t *testing.T) {
 	require.NoError(t, err)
 	kr.lastCreated = 0
 	dk1, err := kr.latestDataKey()
+	require.Equal(t, 2, len(kr.dataKeys))
 	require.NoError(t, err)
 	require.NoError(t, kr.Close())
 	kr2, err := OpenKeyRegistry(opt)
