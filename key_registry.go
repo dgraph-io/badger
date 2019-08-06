@@ -149,7 +149,6 @@ func (kri *keyRegistryIterator) Next() (bool, error) {
 	// Read crc buf and data length.
 	_, err := kri.fp.Read(kri.lenCrcBuf[:])
 	if err != nil {
-		fmt.Println(err.Error())
 		return false, isEOF(err)
 	}
 	l := int64(binary.BigEndian.Uint32(kri.lenCrcBuf[0:4]))

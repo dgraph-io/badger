@@ -1882,7 +1882,7 @@ func ExampleDB_Subscribe() {
 		defer wg.Done()
 		cb := func(kvs *KVList) {
 			for _, kv := range kvs.Kv {
-				log.Printf("%s is now set to %s\n", kv.Key, kv.Value)
+				fmt.Printf("%s is now set to %s\n", kv.Key, kv.Value)
 			}
 		}
 		if err := db.Subscribe(ctx, cb, prefix); err != nil && err != context.Canceled {
