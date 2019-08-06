@@ -122,9 +122,8 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	}
 
 	// store current entry's offset
-	y.AssertTrue(b.buf.Len() < math.MaxUint32)
-	offset := uint32(b.buf.Len()) - b.baseOffset
-	b.entryOffsets = append(b.entryOffsets, uint32(offset))
+	y.AssertTrue(uint32(b.buf.Len()) < math.MaxUint32)
+	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len())-b.baseOffset)
 
 	// Layout: header, diffKey, value.
 	var hbuf [8]byte
@@ -136,15 +135,17 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 
 /*
 Structure of Block.
-+-------------------+---------------------+--------------------+--------------+------------------+------------------+
-| Entry1            | Entry2              | Entry3             | Entry4       | Entry5           |    Entry6        |
-+-------------------+---------------------+--------------------+--------------+------------------+------------------+
-| Entry7            | ...                 | ...                | ...          | ......           |    EntryN        |
-+-------------------+---------------------+--------------------+--------------+------------------+------------------+
-| Block Meta(contains list of offsets used| Block Meta Size    | Block        | Checksum Size    |       IV         |
-| to perform binary search in the block)  | (4 Bytes)          | Checksum     | (4 Bytes)        | (encryption only)|
-+-----------------------------------------+--------------------+--------------+------------------+------------------+
++-------------------+---------------------+--------------------+--------------+------------------+
+| Entry1            | Entry2              | Entry3             | Entry4       | Entry5           |
++-------------------+---------------------+--------------------+--------------+------------------+
+| Entry6            | ...                 | ...                | ...          | EntryN           |
++-------------------+---------------------+--------------------+--------------+------------------+
+| Block Meta(contains list of offsets used| Block Meta Size    | Block        | Checksum Size    |
+| to perform binary search in the block)  | (4 Bytes)          | Checksum     | (4 Bytes)        |
++-----------------------------------------+--------------------+--------------+------------------+
+IV is added in the end of the block if we are encrypting.
 */
+
 func (b *Builder) finishBlock() {
 	ebuf := make([]byte, len(b.entryOffsets)*4+4)
 	for i, offset := range b.entryOffsets {
@@ -178,7 +179,8 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		return false
 	}
 
-	y.AssertTrue((len(b.entryOffsets)+1)*4+4+8+4 < math.MaxUint32) // check for below statements
+	// Integer overflow check for statements below.
+	y.AssertTrue((uint32(len(b.entryOffsets))+1)*4+4+8+4 < math.MaxUint32)
 	// We should include current entry also in size, that's why +1 to len(b.entryOffsets).
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 +
 		4 + // size of list
@@ -202,7 +204,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
 		b.baseKey = []byte{}
-		y.AssertTrue(b.buf.Len() < math.MaxUint32)
+		y.AssertTrue(uint32(b.buf.Len()) < math.MaxUint32)
 		b.baseOffset = uint32(b.buf.Len())
 		b.entryOffsets = b.entryOffsets[:0]
 	}
@@ -232,13 +234,14 @@ func (b *Builder) ReachedCapacity(cap int64) bool {
 // Finish finishes the table by appending the index.
 /*
 The table structure looks like
-+----------+-------------+------------+---------------+---------------------------+
-| Block 1  | Block 2     | Block 3    | Block 4       |       Block 5             |
-+----------+-------------+------------+---------------+---------------------------+
-| Block 6  | Block 7     | Block ...  | Block ...     |       Block N             |
-+----------+-------- ----+---- -------+---------------+---------------------------+
-| Index + IV (encryption only)        | Index Size    | Checksum   | Checksum Size|      |
-+----------+-------------+------------+---------------+---------------------------+
++---------+------------+-----------+---------------+
+| Block 1 | Block 2    | Block 3   | Block 4       |
++---------+------------+-----------+---------------+
+| Block 5 | Block 6    | Block ... | Block N       |
++---------+------------+-----------+---------------+
+| Index   | Index Size | Checksum  | Checksum Size |
++---------+------------+-----------+---------------+
+IV is added at the end if we are encrypting table index.
 */
 func (b *Builder) Finish() []byte {
 	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePostive)
@@ -260,7 +263,7 @@ func (b *Builder) Finish() []byte {
 	n, err := b.buf.Write(index)
 	y.Check(err)
 
-	y.AssertTrue(n < math.MaxUint32)
+	y.AssertTrue(uint32(n) < math.MaxUint32)
 	// Write index size.
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
