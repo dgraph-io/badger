@@ -268,7 +268,7 @@ func (t *Table) readNoFail(off, sz int) []byte {
 	return res
 }
 
-func (t *Table) decrypt(data []byte) ([]byte, error) {
+func (t *Table) decryptIfEncrypted(data []byte) ([]byte, error) {
 	if t.opt.DataKey != nil {
 		iv := data[len(data)-aes.BlockSize:]
 		data = data[:len(data)-aes.BlockSize]
@@ -310,7 +310,7 @@ func (t *Table) readIndex() error {
 		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename())
 	}
 	var err error
-	if data, err = t.decrypt(data); err != nil {
+	if data, err = t.decryptIfEncrypted(data); err != nil {
 		return err
 	}
 	index := pb.TableIndex{}
@@ -335,7 +335,7 @@ func (t *Table) block(idx int) (*block, error) {
 	if err != nil {
 		return nil, err
 	}
-	if blk.data, err = t.decrypt(data); err != nil {
+	if blk.data, err = t.decryptIfEncrypted(data); err != nil {
 		return nil, err
 	}
 	// Read meta data related to block.
@@ -348,10 +348,8 @@ func (t *Table) block(idx int) (*block, error) {
 			return nil, err
 		}
 	}
-	// Removing checksum.
-	readPos -= blk.chkLen
-	//Move position to read numEntries in block.
-	readPos -= 4
+	// Removing checksum and position to read numEntries in block.
+	readPos -= blk.chkLen + 4
 	blk.numEntries = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
 	blk.entriesIndexStart = readPos - (blk.numEntries * 4)
 	return blk, nil

@@ -157,7 +157,7 @@ func (b *Builder) finishBlock() {
 	chksum, err := getChecksum(b.buf.Bytes()[b.baseOffset:])
 	y.Check(err)
 	b.buf.Write(chksum)
-	data, err := b.encrypt(b.buf.Bytes()[b.baseOffset:])
+	data, err := b.encryptIfNeeded(b.buf.Bytes()[b.baseOffset:])
 	y.Check(err)
 	b.buf.Truncate(int(b.baseOffset))
 	b.buf.Write(data)
@@ -255,7 +255,7 @@ func (b *Builder) Finish() []byte {
 
 	index, err := b.tableIndex.Marshal()
 	y.Check(err)
-	index, err = b.encrypt(index)
+	index, err = b.encryptIfNeeded(index)
 	y.Check(err)
 	// Calculate CheckSum for the index.
 	chksum, err := getChecksum(index)
@@ -280,7 +280,8 @@ func (b *Builder) DataKey() *pb.DataKey {
 	return b.opt.DataKey
 }
 
-func (b *Builder) encrypt(data []byte) ([]byte, error) {
+// encryptIfNeeded will encrypt the data if the datakey present.
+func (b *Builder) encryptIfNeeded(data []byte) ([]byte, error) {
 	// Encrypt will xor if the datakey present and append IV
 	// to the given data block.
 	if b.DataKey() != nil {

@@ -117,9 +117,6 @@ var (
 	// matched with the key previously given
 	ErrEncryptionKeyMismatch = errors.New("Encryption key mismatch")
 
-	// ErrReadOnlyRotation is return when the user tries to rotate keys in read only mode.
-	ErrReadOnlyRotation = errors.New("Cannot rotate key in read only mode")
-
 	// ErrInvalidDataKeyID is returned if the datakey id is invalid
 	ErrInvalidDataKeyID = errors.New("Invalid datakey id")
 )

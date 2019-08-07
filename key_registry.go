@@ -21,7 +21,6 @@ import (
 	"crypto/aes"
 	"crypto/rand"
 	"encoding/binary"
-	"fmt"
 	"hash/crc32"
 	"io"
 	"os"
@@ -113,6 +112,8 @@ type keyRegistryIterator struct {
 	lenCrcBuf [8]byte
 }
 
+// newKeyRegistryIterator returns iterator, which will allow you to iterate
+// over the data key of the the key registry.
 func newKeyRegistryIterator(fp *os.File, encryptionKey []byte) (*keyRegistryIterator, error) {
 	iv := make([]byte, aes.BlockSize)
 	_, err := fp.Read(iv)
@@ -286,7 +287,7 @@ func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 
 	// Time diffrence from the last generated time.
 	diff := time.Since(time.Unix(kr.lastCreated, 0))
-	if diff.Hours() < RotationPeriod.Hours() {
+	if diff < RotationPeriod {
 		// If less than 10 days, returns the last generaterd key.
 		kr.RLock()
 		defer kr.RUnlock()
@@ -321,7 +322,6 @@ func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 	if _, err = kr.fp.Write(buf.Bytes()); err != nil {
 		return nil, err
 	}
-	fmt.Println("storing")
 	if err = y.FileSync(kr.fp); err != nil {
 		return nil, err
 	}
@@ -342,7 +342,7 @@ func (kr *KeyRegistry) Close() error {
 func storeDataKey(buf *bytes.Buffer, storageKey []byte, k *pb.DataKey) error {
 	if len(storageKey) > 0 {
 		var err error
-		// In memory, we'll have decrypted key.
+		// In memory, we'll have to decrypted key.
 		if k.Data, err = y.XORBlock(k.Data, storageKey, k.Iv); err != nil {
 			return err
 		}
