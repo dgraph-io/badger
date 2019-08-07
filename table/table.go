@@ -128,7 +128,7 @@ type block struct {
 	chkLen            int // checksum length
 }
 
-func (b block) verifyCheckSum() error {
+func (b *block) verifyCheckSum() error {
 	readPos := len(b.data) - 4 - b.chkLen
 	if readPos < 0 {
 		// This should be rare, hence can create a error instead of having global error.
@@ -143,7 +143,7 @@ func (b block) verifyCheckSum() error {
 	return y.VerifyChecksum(b.data[:readPos], cs)
 }
 
-func (b block) NewIterator() *blockIterator {
+func (b *block) NewIterator() *blockIterator {
 	bi := &blockIterator{
 		data:              b.data,
 		numEntries:        b.numEntries,
