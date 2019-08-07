@@ -44,11 +44,12 @@ performance analysis.
 }
 
 var (
-	keySz   int
-	valSz   int
-	numKeys float64
-	force   bool
-	sorted  bool
+	keySz    int
+	valSz    int
+	numKeys  float64
+	force    bool
+	sorted   bool
+	showLogs bool
 
 	sizeWritten    uint64
 	entriesWritten uint64
@@ -67,6 +68,7 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&force, "force-compact", "f", true,
 		"Force compact level 0 on close.")
 	writeBenchCmd.Flags().BoolVarP(&sorted, "sorted", "s", false, "Write keys in sorted order.")
+	writeBenchCmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "Show Badger logs.")
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
@@ -155,12 +157,17 @@ func writeSorted(db *badger.DB, num uint64) error {
 }
 
 func writeBench(cmd *cobra.Command, args []string) error {
-	db, err := badger.Open(badger.DefaultOptions(sstDir).
+	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithTruncate(truncate).
 		WithSyncWrites(false).
-		WithCompactL0OnClose(force).
-		WithLogger(nil))
+		WithCompactL0OnClose(force)
+
+	if !showLogs {
+		opt = opt.WithLogger(nil)
+	}
+
+	db, err := badger.Open(opt)
 	if err != nil {
 		return err
 	}
