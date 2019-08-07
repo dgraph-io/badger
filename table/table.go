@@ -143,14 +143,12 @@ func (b *block) verifyCheckSum() error {
 	return y.VerifyChecksum(b.data[:readPos], cs)
 }
 
-func (b *block) NewIterator() *blockIterator {
-	bi := &blockIterator{
-		data:              b.data,
-		numEntries:        b.numEntries,
-		entriesIndexStart: b.entriesIndexStart,
-	}
+func (b *block) ResetIterator(bi *blockIterator) {
+	bi.data = b.data
+	bi.numEntries = b.numEntries
+	bi.entriesIndexStart = b.entriesIndexStart
 
-	return bi
+	bi.Reset()
 }
 
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function

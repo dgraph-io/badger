@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"io"
 	"sort"
+	"sync"
 
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
@@ -236,6 +237,10 @@ func (itr *blockIterator) Value() []byte {
 	return itr.val
 }
 
+var biPool = sync.Pool{
+	New: func() interface{} { return &blockIterator{} },
+}
+
 // Iterator is an iterator for a Table.
 type Iterator struct {
 	t    *Table
@@ -283,7 +288,8 @@ func (itr *Iterator) seekToFirst() {
 		itr.err = err
 		return
 	}
-	itr.bi = block.NewIterator()
+	itr.bi = biPool.Get().(*blockIterator)
+	block.ResetIterator(itr.bi)
 	itr.bi.SeekToFirst()
 	itr.err = itr.bi.Error()
 }
@@ -300,7 +306,8 @@ func (itr *Iterator) seekToLast() {
 		itr.err = err
 		return
 	}
-	itr.bi = block.NewIterator()
+	itr.bi = biPool.Get().(*blockIterator)
+	block.ResetIterator(itr.bi)
 	itr.bi.SeekToLast()
 	itr.err = itr.bi.Error()
 }
@@ -312,7 +319,8 @@ func (itr *Iterator) seekHelper(blockIdx int, key []byte) {
 		itr.err = err
 		return
 	}
-	itr.bi = block.NewIterator()
+	itr.bi = biPool.Get().(*blockIterator)
+	block.ResetIterator(itr.bi)
 	itr.bi.Seek(key, origin)
 	itr.err = itr.bi.Error()
 }
@@ -385,7 +393,8 @@ func (itr *Iterator) next() {
 			itr.err = err
 			return
 		}
-		itr.bi = block.NewIterator()
+		itr.bi = biPool.Get().(*blockIterator)
+		block.ResetIterator(itr.bi)
 		itr.bi.SeekToFirst()
 		itr.err = itr.bi.Error()
 		return
@@ -393,6 +402,7 @@ func (itr *Iterator) next() {
 
 	itr.bi.Next()
 	if !itr.bi.Valid() {
+		biPool.Put(itr.bi)
 		itr.bpos++
 		itr.bi = nil
 		itr.next()
@@ -413,7 +423,8 @@ func (itr *Iterator) prev() {
 			itr.err = err
 			return
 		}
-		itr.bi = block.NewIterator()
+		itr.bi = biPool.Get().(*blockIterator)
+		block.ResetIterator(itr.bi)
 		itr.bi.SeekToLast()
 		itr.err = itr.bi.Error()
 		return
@@ -421,6 +432,7 @@ func (itr *Iterator) prev() {
 
 	itr.bi.Prev()
 	if !itr.bi.Valid() {
+		biPool.Put(itr.bi)
 		itr.bpos--
 		itr.bi = nil
 		itr.prev()
