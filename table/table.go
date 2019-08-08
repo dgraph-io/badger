@@ -144,11 +144,11 @@ func (b *block) verifyCheckSum() error {
 }
 
 func (b *block) ResetIterator(bi *blockIterator) {
+	bi.Reset()
+
 	bi.data = b.data
 	bi.numEntries = b.numEntries
 	bi.entriesIndexStart = b.entriesIndexStart
-
-	bi.Reset()
 }
 
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function
