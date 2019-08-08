@@ -128,7 +128,7 @@ type block struct {
 	chkLen            int // checksum length
 }
 
-func (b block) verifyCheckSum() error {
+func (b *block) verifyCheckSum() error {
 	readPos := len(b.data) - 4 - b.chkLen
 	if readPos < 0 {
 		// This should be rare, hence can create a error instead of having global error.
@@ -143,14 +143,12 @@ func (b block) verifyCheckSum() error {
 	return y.VerifyChecksum(b.data[:readPos], cs)
 }
 
-func (b block) NewIterator() *blockIterator {
-	bi := &blockIterator{
-		data:              b.data,
-		numEntries:        b.numEntries,
-		entriesIndexStart: b.entriesIndexStart,
-	}
+func (b *block) resetIterator(bi *blockIterator) {
+	bi.Reset()
 
-	return bi
+	bi.data = b.data
+	bi.numEntries = b.numEntries
+	bi.entriesIndexStart = b.entriesIndexStart
 }
 
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function

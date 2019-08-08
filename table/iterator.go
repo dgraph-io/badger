@@ -50,6 +50,18 @@ func (itr *blockIterator) Reset() {
 	itr.currentIdx = -1
 }
 
+// invalidatePointer detaches block iterator from current block.
+func (itr *blockIterator) invalidatePointer() {
+	itr.data = nil
+	itr.numEntries = -1
+	itr.entriesIndexStart = -1
+}
+
+// isInvalidPointer returns if block iterator is attachted with any block or not.
+func (itr *blockIterator) isInvalidPointer() bool {
+	return itr.data == nil && itr.numEntries == -1 && itr.entriesIndexStart == -1
+}
+
 func (itr *blockIterator) Init() {
 	if !itr.init {
 		itr.currentIdx = -1
@@ -251,7 +263,9 @@ type Iterator struct {
 // NewIterator returns a new iterator of the Table
 func (t *Table) NewIterator(reversed bool) *Iterator {
 	t.IncrRef() // Important.
-	ti := &Iterator{t: t, reversed: reversed}
+	bi := &blockIterator{}
+	bi.invalidatePointer()
+	ti := &Iterator{t: t, reversed: reversed, bi: bi}
 	ti.next()
 	return ti
 }
@@ -263,6 +277,7 @@ func (itr *Iterator) Close() error {
 
 func (itr *Iterator) reset() {
 	itr.bpos = 0
+	itr.bi.invalidatePointer()
 	itr.err = nil
 }
 
@@ -283,7 +298,8 @@ func (itr *Iterator) seekToFirst() {
 		itr.err = err
 		return
 	}
-	itr.bi = block.NewIterator()
+
+	block.resetIterator(itr.bi)
 	itr.bi.SeekToFirst()
 	itr.err = itr.bi.Error()
 }
@@ -300,7 +316,8 @@ func (itr *Iterator) seekToLast() {
 		itr.err = err
 		return
 	}
-	itr.bi = block.NewIterator()
+
+	block.resetIterator(itr.bi)
 	itr.bi.SeekToLast()
 	itr.err = itr.bi.Error()
 }
@@ -312,7 +329,8 @@ func (itr *Iterator) seekHelper(blockIdx int, key []byte) {
 		itr.err = err
 		return
 	}
-	itr.bi = block.NewIterator()
+
+	block.resetIterator(itr.bi)
 	itr.bi.Seek(key, origin)
 	itr.err = itr.bi.Error()
 }
@@ -379,13 +397,14 @@ func (itr *Iterator) next() {
 		return
 	}
 
-	if itr.bi == nil {
+	if itr.bi.isInvalidPointer() {
 		block, err := itr.t.block(itr.bpos)
 		if err != nil {
 			itr.err = err
 			return
 		}
-		itr.bi = block.NewIterator()
+
+		block.resetIterator(itr.bi)
 		itr.bi.SeekToFirst()
 		itr.err = itr.bi.Error()
 		return
@@ -393,8 +412,8 @@ func (itr *Iterator) next() {
 
 	itr.bi.Next()
 	if !itr.bi.Valid() {
+		itr.bi.invalidatePointer()
 		itr.bpos++
-		itr.bi = nil
 		itr.next()
 		return
 	}
@@ -407,13 +426,14 @@ func (itr *Iterator) prev() {
 		return
 	}
 
-	if itr.bi == nil {
+	if itr.bi.isInvalidPointer() {
 		block, err := itr.t.block(itr.bpos)
 		if err != nil {
 			itr.err = err
 			return
 		}
-		itr.bi = block.NewIterator()
+
+		block.resetIterator(itr.bi)
 		itr.bi.SeekToLast()
 		itr.err = itr.bi.Error()
 		return
@@ -421,8 +441,8 @@ func (itr *Iterator) prev() {
 
 	itr.bi.Prev()
 	if !itr.bi.Valid() {
+		itr.bi.invalidatePointer()
 		itr.bpos--
-		itr.bi = nil
 		itr.prev()
 		return
 	}
