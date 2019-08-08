@@ -1387,7 +1387,14 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 			files = append(files, file)
 		}
 		tr.LazyPrintf("Could not find candidate via discard stats. Randomly picking one.")
-		files = append(files, vlog.pickRandomFile(head, tr))
+		// Pick a random file for garbage collection.
+		file = vlog.pickRandomFile(head, tr)
+		// If the newly picked file is same as the one picked from discard stats, try once again to
+		// pick a different file.
+		if file == files[0] {
+			file = vlog.pickRandomFile(head, tr)
+		}
+		files = append(files, file)
 		tried := make(map[uint32]bool)
 		var err error
 		for _, lf := range files {
