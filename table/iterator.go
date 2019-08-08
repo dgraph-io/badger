@@ -43,11 +43,23 @@ type blockIterator struct {
 func (itr *blockIterator) Reset() {
 	itr.pos = 0
 	itr.err = nil
-	itr.baseKey = []byte{}
-	itr.key = []byte{}
-	itr.val = []byte{}
+	itr.baseKey = itr.baseKey[:0]
+	itr.key = itr.key[:0]
+	itr.val = itr.val[:0]
 	itr.init = false
 	itr.currentIdx = -1
+}
+
+// invalidatePointer detaches block iterator from current block.
+func (itr *blockIterator) invalidatePointer() {
+	itr.data = nil
+	itr.numEntries = -1
+	itr.entriesIndexStart = -1
+}
+
+// isInvalidPointer returns if block iterator is attachted with any block or not.
+func (itr *blockIterator) isInvalidPointer() bool {
+	return itr.data == nil && itr.numEntries == -1 && itr.entriesIndexStart == -1
 }
 
 func (itr *blockIterator) Init() {
@@ -159,13 +171,24 @@ func (itr *blockIterator) parseKV(h header) {
 	copy(itr.key[h.plen:], itr.data[itr.pos:itr.pos+uint32(h.klen)])
 	itr.pos += uint32(h.klen)
 
-	if itr.pos+uint32(h.vlen) > uint32(len(itr.data)) {
-		itr.err = errors.Errorf("Value exceeded size of block: %d %d %d %d %v",
-			itr.pos, h.klen, h.vlen, len(itr.data), h)
+	var valEndOffset uint32
+	// We're at the last entry in the block.
+	if itr.currentIdx == itr.numEntries-1 {
+		valEndOffset = uint32(itr.entriesIndexStart)
+	} else {
+		// Get starting offset of the next entry which is the end of the current entry.
+		valEndOffset = itr.getOffset(itr.currentIdx + 1)
+	}
+
+	if valEndOffset > uint32(len(itr.data)) {
+		itr.err = errors.Errorf("Value endoffset exceeded size of block. "+
+			"Pos:%d Len:%d EndOffset:%d Header:%v", itr.pos, len(itr.data), valEndOffset, h)
 		return
 	}
-	itr.val = y.SafeCopy(itr.val, itr.data[itr.pos:itr.pos+uint32(h.vlen)])
-	itr.pos += uint32(h.vlen)
+	// TODO (ibrahim): Can we avoid this copy?
+	itr.val = y.SafeCopy(itr.val, itr.data[itr.pos:valEndOffset])
+	// Set pos to the end of current entry.
+	itr.pos = valEndOffset
 }
 
 func (itr *blockIterator) Next() {
@@ -240,7 +263,9 @@ type Iterator struct {
 // NewIterator returns a new iterator of the Table
 func (t *Table) NewIterator(reversed bool) *Iterator {
 	t.IncrRef() // Important.
-	ti := &Iterator{t: t, reversed: reversed}
+	bi := &blockIterator{}
+	bi.invalidatePointer()
+	ti := &Iterator{t: t, reversed: reversed, bi: bi}
 	ti.next()
 	return ti
 }
@@ -252,6 +277,7 @@ func (itr *Iterator) Close() error {
 
 func (itr *Iterator) reset() {
 	itr.bpos = 0
+	itr.bi.invalidatePointer()
 	itr.err = nil
 }
 
@@ -272,7 +298,8 @@ func (itr *Iterator) seekToFirst() {
 		itr.err = err
 		return
 	}
-	itr.bi = block.NewIterator()
+
+	block.resetIterator(itr.bi)
 	itr.bi.SeekToFirst()
 	itr.err = itr.bi.Error()
 }
@@ -289,7 +316,8 @@ func (itr *Iterator) seekToLast() {
 		itr.err = err
 		return
 	}
-	itr.bi = block.NewIterator()
+
+	block.resetIterator(itr.bi)
 	itr.bi.SeekToLast()
 	itr.err = itr.bi.Error()
 }
@@ -301,7 +329,8 @@ func (itr *Iterator) seekHelper(blockIdx int, key []byte) {
 		itr.err = err
 		return
 	}
-	itr.bi = block.NewIterator()
+
+	block.resetIterator(itr.bi)
 	itr.bi.Seek(key, origin)
 	itr.err = itr.bi.Error()
 }
@@ -368,13 +397,14 @@ func (itr *Iterator) next() {
 		return
 	}
 
-	if itr.bi == nil {
+	if itr.bi.isInvalidPointer() {
 		block, err := itr.t.block(itr.bpos)
 		if err != nil {
 			itr.err = err
 			return
 		}
-		itr.bi = block.NewIterator()
+
+		block.resetIterator(itr.bi)
 		itr.bi.SeekToFirst()
 		itr.err = itr.bi.Error()
 		return
@@ -382,8 +412,8 @@ func (itr *Iterator) next() {
 
 	itr.bi.Next()
 	if !itr.bi.Valid() {
+		itr.bi.invalidatePointer()
 		itr.bpos++
-		itr.bi = nil
 		itr.next()
 		return
 	}
@@ -396,13 +426,14 @@ func (itr *Iterator) prev() {
 		return
 	}
 
-	if itr.bi == nil {
+	if itr.bi.isInvalidPointer() {
 		block, err := itr.t.block(itr.bpos)
 		if err != nil {
 			itr.err = err
 			return
 		}
-		itr.bi = block.NewIterator()
+
+		block.resetIterator(itr.bi)
 		itr.bi.SeekToLast()
 		itr.err = itr.bi.Error()
 		return
@@ -410,8 +441,8 @@ func (itr *Iterator) prev() {
 
 	itr.bi.Prev()
 	if !itr.bi.Valid() {
+		itr.bi.invalidatePointer()
 		itr.bpos--
-		itr.bi = nil
 		itr.prev()
 		return
 	}
