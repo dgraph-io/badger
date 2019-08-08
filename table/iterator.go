@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"io"
 	"sort"
-	"sync"
 
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
@@ -237,16 +236,13 @@ func (itr *blockIterator) Value() []byte {
 	return itr.val
 }
 
-var biPool = sync.Pool{
-	New: func() interface{} { return &blockIterator{} },
-}
-
 // Iterator is an iterator for a Table.
 type Iterator struct {
-	t    *Table
-	bpos int
-	bi   *blockIterator
-	err  error
+	t       *Table
+	bpos    int
+	bi      *blockIterator
+	biValid bool // Tells if bi is valid or not.
+	err     error
 
 	// Internally, Iterator is bidirectional. However, we only expose the
 	// unidirectional functionality for now.
@@ -256,7 +252,7 @@ type Iterator struct {
 // NewIterator returns a new iterator of the Table
 func (t *Table) NewIterator(reversed bool) *Iterator {
 	t.IncrRef() // Important.
-	ti := &Iterator{t: t, reversed: reversed}
+	ti := &Iterator{t: t, reversed: reversed, biValid: false, bi: &blockIterator{}}
 	ti.next()
 	return ti
 }
@@ -268,6 +264,7 @@ func (itr *Iterator) Close() error {
 
 func (itr *Iterator) reset() {
 	itr.bpos = 0
+	itr.biValid = false
 	itr.err = nil
 }
 
@@ -288,7 +285,8 @@ func (itr *Iterator) seekToFirst() {
 		itr.err = err
 		return
 	}
-	itr.bi = biPool.Get().(*blockIterator)
+
+	itr.biValid = true
 	block.ResetIterator(itr.bi)
 	itr.bi.SeekToFirst()
 	itr.err = itr.bi.Error()
@@ -306,7 +304,8 @@ func (itr *Iterator) seekToLast() {
 		itr.err = err
 		return
 	}
-	itr.bi = biPool.Get().(*blockIterator)
+
+	itr.biValid = true
 	block.ResetIterator(itr.bi)
 	itr.bi.SeekToLast()
 	itr.err = itr.bi.Error()
@@ -319,7 +318,8 @@ func (itr *Iterator) seekHelper(blockIdx int, key []byte) {
 		itr.err = err
 		return
 	}
-	itr.bi = biPool.Get().(*blockIterator)
+
+	itr.biValid = true
 	block.ResetIterator(itr.bi)
 	itr.bi.Seek(key, origin)
 	itr.err = itr.bi.Error()
@@ -387,13 +387,14 @@ func (itr *Iterator) next() {
 		return
 	}
 
-	if itr.bi == nil {
+	if !itr.biValid {
 		block, err := itr.t.block(itr.bpos)
 		if err != nil {
 			itr.err = err
 			return
 		}
-		itr.bi = biPool.Get().(*blockIterator)
+
+		itr.biValid = true
 		block.ResetIterator(itr.bi)
 		itr.bi.SeekToFirst()
 		itr.err = itr.bi.Error()
@@ -402,9 +403,8 @@ func (itr *Iterator) next() {
 
 	itr.bi.Next()
 	if !itr.bi.Valid() {
-		biPool.Put(itr.bi)
+		itr.biValid = false
 		itr.bpos++
-		itr.bi = nil
 		itr.next()
 		return
 	}
@@ -417,13 +417,14 @@ func (itr *Iterator) prev() {
 		return
 	}
 
-	if itr.bi == nil {
+	if !itr.biValid {
 		block, err := itr.t.block(itr.bpos)
 		if err != nil {
 			itr.err = err
 			return
 		}
-		itr.bi = biPool.Get().(*blockIterator)
+
+		itr.biValid = true
 		block.ResetIterator(itr.bi)
 		itr.bi.SeekToLast()
 		itr.err = itr.bi.Error()
@@ -432,9 +433,8 @@ func (itr *Iterator) prev() {
 
 	itr.bi.Prev()
 	if !itr.bi.Valid() {
-		biPool.Put(itr.bi)
+		itr.biValid = false
 		itr.bpos--
-		itr.bi = nil
 		itr.prev()
 		return
 	}
