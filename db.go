@@ -200,10 +200,14 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, errors.Errorf("Valuethreshold greater than max batch size of %d. Either "+
 			"reduce opt.ValueThreshold or increase opt.MaxTableSize.", opt.maxBatchSize)
 	}
+	// Compact L0 on close if either it is set or if KeepL0InMemory is set.
+	opt.CompactL0OnClose = opt.CompactL0OnClose || opt.KeepL0InMemory
 
 	if opt.ReadOnly {
 		// Can't truncate if the DB is read only.
 		opt.Truncate = false
+		// Do not perform compaction in read only mode.
+		opt.CompactL0OnClose = false
 	}
 
 	for _, path := range []string{opt.Dir, opt.ValueDir} {
@@ -417,16 +421,17 @@ func (db *DB) close() (err error) {
 
 	// Force Compact L0
 	// We don't need to care about cstatus since no parallel compaction is running.
-	err = db.lc.doCompact(compactionPriority{level: 0, score: 1.73})
-	switch err {
-	case errFillTables:
-		// This error only means that there might be enough tables to do a compaction. So, we
-		// should not report it to the end user to avoid confusing them.
-		err = nil
-	case nil:
-		db.opt.Infof("Force compaction on level 0 done")
-	default:
-		db.opt.Warningf("While forcing compaction on level 0: %v", err)
+	if db.opt.CompactL0OnClose {
+		err := db.lc.doCompact(compactionPriority{level: 0, score: 1.73})
+		switch err {
+		case errFillTables:
+			// This error only means that there might be enough tables to do a compaction. So, we
+			// should not report it to the end user to avoid confusing them.
+		case nil:
+			db.opt.Infof("Force compaction on level 0 done")
+		default:
+			db.opt.Warningf("While forcing compaction on level 0: %v", err)
+		}
 	}
 
 	if lcErr := db.lc.close(); err == nil {
@@ -889,12 +894,40 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	if err != nil {
 		return y.Wrap(err)
 	}
+
+	// Don't block just to sync the directory entry.
+	dirSyncCh := make(chan error)
+	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
+
 	bopts := table.Options{
 		BlockSize:         db.opt.BlockSize,
 		BloomFalsePostive: db.opt.BloomFalsePositive,
 	}
+	tableData := buildL0Table(ft, bopts)
+	if !db.opt.KeepL0InMemory {
+		_, err := fd.Write(tableData)
+		if err != nil {
+			db.elog.Errorf("ERROR while writing to level 0: %v", err)
+			return err
+		}
+	}
+	dirSyncErr := <-dirSyncCh
 
-	tbl, err := table.OpenInMemoryTable(fd, buildL0Table(ft, bopts))
+	if dirSyncErr != nil {
+		// Do dir sync as best effort. No need to return due to an error there.
+		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
+	}
+
+	opts := table.Options{
+		LoadingMode: db.opt.TableLoadingMode,
+		ChkMode:     db.opt.ChecksumVerificationMode,
+	}
+	var tbl *table.Table
+	if db.opt.KeepL0InMemory {
+		tbl, err = table.OpenInMemoryTable(fd, tableData)
+	} else {
+		tbl, err = table.OpenTable(fd, opts)
+	}
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err

@@ -436,6 +436,8 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 	opt.Truncate = true
+	// avoid compaction on close, so that discard map remains same
+	opt.CompactL0OnClose = false
 
 	db, err := Open(opt)
 	require.NoError(t, err)

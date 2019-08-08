@@ -54,6 +54,7 @@ type Options struct {
 	NumMemtables        int
 	BlockSize           int
 	BloomFalsePositive  float64
+	KeepL0InMemory      bool
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -63,6 +64,7 @@ type Options struct {
 	ValueLogMaxEntries uint32
 
 	NumCompactors     int
+	CompactL0OnClose  bool
 	LogRotatesToFlush int32
 
 	// ChecksumVerificationMode decides when db should verify checksum for SStable blocks.
@@ -102,6 +104,8 @@ func DefaultOptions(path string) Options {
 		BlockSize:               4 * 1024,
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
+		CompactL0OnClose:        true,
+		KeepL0InMemory:          true,
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
@@ -381,6 +385,17 @@ func (opt Options) WithNumCompactors(val int) Options {
 	return opt
 }
 
+// WithCompactL0OnClose returns a new Options value with CompactL0OnClose set to the given value.
+//
+// CompactL0OnClose determines whether Level 0 should be compacted before closing the DB.
+// This ensures that both reads and writes are efficient when the DB is opened later.
+//
+// The default value of CompactL0OnClose is true.
+func (opt Options) WithCompactL0OnClose(val bool) Options {
+	opt.CompactL0OnClose = val
+	return opt
+}
+
 // WithLogRotatesToFlush returns a new Options value with LogRotatesToFlush set to the given value.
 //
 // LogRotatesToFlush sets the number of value log file rotates after which the Memtables are
@@ -392,5 +407,18 @@ func (opt Options) WithNumCompactors(val int) Options {
 // The default value of LogRotatesToFlush is 2.
 func (opt Options) WithLogRotatesToFlush(val int32) Options {
 	opt.LogRotatesToFlush = val
+	return opt
+}
+
+// WithKeepL0InMemory returns a new Options value with KeepL0InMemory set to the given value.
+//
+// When KeepL0InMemory is set to true we will keep all Level 0 files in memory. This leads to better
+// performance in writes as well as compactions. In case of DB crash, the value log replay will take
+// longer since memtables and all level 0 tables will have to be recreated. This option also sets
+// ForceL0OnClose to true.
+//
+// The default value of KeepL0InMemory is true.
+func (opt Options) WithKeepL0InMemory(val bool) Options {
+	opt.KeepL0InMemory = val
 	return opt
 }
