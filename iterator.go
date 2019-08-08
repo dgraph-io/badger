@@ -24,8 +24,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
-
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/table"
 
@@ -149,7 +147,6 @@ func (item *Item) DiscardEarlierVersions() bool {
 }
 
 func (item *Item) yieldItemValue() ([]byte, func(), error) {
-	fmt.Println("item nil", item == nil)
 	key := item.Key() // No need to copy.
 	for {
 		if !item.hasValue() {
@@ -200,8 +197,6 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 		}
 		// Bug fix: Always copy the vs.Value into vptr here. Otherwise, when item is reused this
 		// slice gets overwritten.
-		spew.Dump(item.vptr)
-		spew.Dump(vs.Value)
 		item.vptr = y.SafeCopy(item.vptr, vs.Value)
 		item.meta &^= bitValuePointer // Clear the value pointer bit.
 		if vs.Meta&bitValuePointer > 0 {

@@ -123,33 +123,19 @@ func (t *Table) DecrRef() error {
 type block struct {
 	offset            int
 	data              []byte
+	checksum          []byte
 	numEntries        int // number of entries present in the block
 	entriesIndexStart int // start index of entryOffsets list
 	chkLen            int // checksum length
 }
 
 func (b block) verifyCheckSum() error {
-	readPos := len(b.data) - 4 - b.chkLen
-	if readPos < 0 {
-		// This should be rare, hence can create a error instead of having global error.
-		return fmt.Errorf("block does not contain checksum")
-	}
-
 	cs := &pb.Checksum{}
-	if err := cs.Unmarshal(b.data[readPos : readPos+b.chkLen]); err != nil {
+	if err := cs.Unmarshal(b.checksum); err != nil {
 		return y.Wrapf(err, "unable to unmarshal checksum for block")
 	}
-
-	return y.VerifyChecksum(b.data[:readPos], cs)
+	return y.VerifyChecksum(b.data, cs)
 }
-
-// func (b block) NewIterator() *blockIterator {
-// 	bi := &blockIterator{
-// 		data: b.data,
-// 	}
-
-// 	return bi
-// }
 
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function
 // entry. Returns a table with one reference count on it (decrementing which may delete the file!
@@ -187,7 +173,6 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 	defer it.Close()
 	it.Rewind()
 	if it.Valid() {
-		fmt.Println("Smallest", it.Key())
 		t.smallest = it.Key()
 	}
 
@@ -195,7 +180,6 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 	defer it2.Close()
 	it2.Rewind()
 	if it2.Valid() {
-		fmt.Println("biggest", it2.Key())
 		t.biggest = it2.Key()
 	}
 
@@ -322,19 +306,20 @@ func (t *Table) block(idx int) (block, error) {
 	// Read meta data related to block.
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
-
+	readPos -= blk.chkLen
+	blk.checksum = blk.data[readPos : readPos+blk.chkLen]
 	// Skip reading checksum, and move position to read numEntries in block.
-	readPos -= (blk.chkLen + 4)
+	readPos -= 4
 	blk.numEntries = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
-	blk.entriesIndexStart = readPos - (blk.numEntries * 4)
-
+	readPos += 4
+	// Drop checksum and checksum length.
+	blk.data = blk.data[:readPos]
 	// Verify checksum on if checksum verification mode is OnRead on OnStartAndRead.
 	if t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead {
 		if err = blk.verifyCheckSum(); err != nil {
 			return block{}, err
 		}
 	}
-
 	return blk, err
 }
 

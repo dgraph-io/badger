@@ -37,20 +37,20 @@ func newBuffer(sz int) *bytes.Buffer {
 }
 
 type header struct {
-	plen uint16 // Overlap with base key.
-	klen uint16 // Length of the diff.
+	overlapLength uint16 // Overlap with base key.
+	diffLength    uint16 // Length of the diff.
 }
 
 // Encode encodes the header.
 func (h header) Encode(b []byte) {
-	binary.BigEndian.PutUint16(b[0:2], h.plen)
-	binary.BigEndian.PutUint16(b[2:4], h.klen)
+	binary.BigEndian.PutUint16(b[0:2], h.overlapLength)
+	binary.BigEndian.PutUint16(b[2:4], h.diffLength)
 }
 
 // Decode decodes the header.
 func (h *header) Decode(buf []byte) int {
-	h.plen = binary.BigEndian.Uint16(buf[0:2])
-	h.klen = binary.BigEndian.Uint16(buf[2:4])
+	h.overlapLength = binary.BigEndian.Uint16(buf[0:2])
+	h.diffLength = binary.BigEndian.Uint16(buf[2:4])
 	return h.Size()
 }
 
@@ -116,8 +116,8 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	}
 
 	h := header{
-		plen: uint16(len(key) - len(diffKey)),
-		klen: uint16(len(diffKey)),
+		overlapLength: uint16(len(key) - len(diffKey)),
+		diffLength:    uint16(len(diffKey)),
 	}
 
 	// store current entry's offset
