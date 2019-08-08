@@ -43,7 +43,7 @@ type header struct {
 
 // Encode encodes the header.
 func (h header) Encode() []byte {
-	var b [8]byte
+	var b [4]byte
 	*(*header)(unsafe.Pointer(&b[0])) = h
 	return b[:]
 }

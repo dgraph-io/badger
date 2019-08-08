@@ -121,11 +121,12 @@ func (t *Table) DecrRef() error {
 }
 
 type block struct {
-	offset       int
-	data         []byte
-	numEntries   int // number of entries present in the block
-	entryOffsets []uint32
-	chkLen       int // checksum length
+	offset            int
+	data              []byte
+	numEntries        int // number of entries present in the block
+	entryOffsets      []uint32
+	entriesIndexStart int
+	chkLen            int // checksum length
 }
 
 func (b block) verifyCheckSum() error {
@@ -145,9 +146,10 @@ func (b block) verifyCheckSum() error {
 
 func (b block) NewIterator() *blockIterator {
 	bi := &blockIterator{
-		data:         b.data,
-		numEntries:   b.numEntries,
-		entryOffsets: b.entryOffsets,
+		data:              b.data,
+		numEntries:        b.numEntries,
+		entryOffsets:      b.entryOffsets,
+		entriesIndexStart: b.entriesIndexStart,
 	}
 
 	return bi
@@ -331,6 +333,7 @@ func (t *Table) block(idx int) (*block, error) {
 
 	blk.entryOffsets = bytesToU32Slice(blk.data[entriesIndexStart:entriesIndexEnd])
 
+	blk.entriesIndexStart = entriesIndexStart
 	// Verify checksum on if checksum verification mode is OnRead on OnStartAndRead.
 	if t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead {
 		if err = blk.verifyCheckSum(); err != nil {

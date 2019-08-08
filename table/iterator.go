@@ -26,13 +26,14 @@ import (
 )
 
 type blockIterator struct {
-	data         []byte
-	pos          uint32
-	err          error
-	baseKey      []byte
-	numEntries   int
-	entryOffsets []uint32
-	currentIdx   int
+	data              []byte
+	pos               uint32
+	err               error
+	baseKey           []byte
+	numEntries        int
+	entryOffsets      []uint32
+	entriesIndexStart int
+	currentIdx        int
 
 	key  []byte
 	val  []byte
@@ -159,7 +160,7 @@ func (itr *blockIterator) parseKV(h header) {
 		valEndOffset = uint32(itr.entriesIndexStart)
 	} else {
 		// Get starting offset of the next entry which is the end of the current entry.
-		valEndOffset = itr.getOffset(itr.currentIdx + 1)
+		valEndOffset = itr.entryOffsets[itr.currentIdx+1]
 	}
 
 	if valEndOffset > uint32(len(itr.data)) {
