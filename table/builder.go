@@ -19,14 +19,15 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	"io"
 	"math"
 	"reflect"
 	"unsafe"
 
-	"github.com/AndreasBriese/bbloom"
+	"github.com/dgryski/go-farm"
+
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 func newBuffer(sz int) *bytes.Buffer {
@@ -38,7 +39,6 @@ func newBuffer(sz int) *bytes.Buffer {
 type header struct {
 	plen uint16 // Overlap with base key.
 	klen uint16 // Length of the diff.
-	vlen uint32 // Length of value.
 }
 
 // Encode encodes the header.
@@ -55,33 +55,30 @@ func (h *header) Decode(buf []byte) int {
 }
 
 // Size returns size of the header. Currently it's just a constant.
-func (h header) Size() int { return 8 }
+func (h header) Size() int { return 4 }
 
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf *bytes.Buffer
 
-	blockSize    uint32   // Max size of block.
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
 	entryOffsets []uint32 // Offsets of entries present in current block.
 
 	tableIndex *pb.TableIndex
+	keyHashes  []uint64
 
-	keyBuf   *bytes.Buffer
-	keyCount int
+	opt *Options
 }
 
 // NewTableBuilder makes a new TableBuilder.
-func NewTableBuilder() *Builder {
+func NewTableBuilder(opts Options) *Builder {
 	return &Builder{
-		keyBuf:     newBuffer(1 << 20),
 		buf:        newBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
-
-		// TODO(Ashish): make this configurable
-		blockSize: 4 * 1024,
+		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
+		opt:        &opts,
 	}
 }
 
@@ -92,7 +89,7 @@ func (b *Builder) Close() {}
 func (b *Builder) Empty() bool { return b.buf.Len() == 0 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
-func (b Builder) keyDiff(newKey []byte) []byte {
+func (b *Builder) keyDiff(newKey []byte) []byte {
 	var i int
 	for i = 0; i < len(newKey) && i < len(b.baseKey); i++ {
 		if newKey[i] != b.baseKey[i] {
@@ -103,15 +100,7 @@ func (b Builder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
-	// Add key to bloom filter.
-	if len(key) > 0 {
-		var klen [2]byte
-		keyNoTs := y.ParseKey(key)
-		binary.BigEndian.PutUint16(klen[:], uint16(len(keyNoTs)))
-		b.keyBuf.Write(klen[:])
-		b.keyBuf.Write(keyNoTs)
-		b.keyCount++
-	}
+	b.keyHashes = append(b.keyHashes, farm.Fingerprint64(y.ParseKey(key)))
 
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
@@ -127,11 +116,10 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	h := header{
 		plen: uint16(len(key) - len(diffKey)),
 		klen: uint16(len(diffKey)),
-		vlen: uint32(v.EncodedSize()),
 	}
 
 	// store current entry's offset
-	y.AssertTrue(b.buf.Len() < math.MaxUint32)
+	y.AssertTrue(uint32(b.buf.Len()) < math.MaxUint32)
 	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len())-b.baseOffset)
 
 	// Layout: header, diffKey, value.
@@ -177,7 +165,8 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		return false
 	}
 
-	y.AssertTrue((len(b.entryOffsets)+1)*4+4+8+4 < math.MaxUint32) // check for below statements
+	// Integer overflow check for statements below.
+	y.AssertTrue((uint32(len(b.entryOffsets))+1)*4+4+8+4 < math.MaxUint32)
 	// We should include current entry also in size, that's why +1 to len(b.entryOffsets).
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 +
 		4 + // size of list
@@ -186,21 +175,20 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 
-	return estimatedSize > b.blockSize
+	return estimatedSize > uint32(b.opt.BlockSize)
 }
 
 // Add adds a key-value pair to the block.
-func (b *Builder) Add(key []byte, value y.ValueStruct) error {
+func (b *Builder) Add(key []byte, value y.ValueStruct) {
 	if b.shouldFinishBlock(key, value) {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
 		b.baseKey = []byte{}
-		y.AssertTrue(b.buf.Len() < math.MaxUint32)
+		y.AssertTrue(uint32(b.buf.Len()) < math.MaxUint32)
 		b.baseOffset = uint32(b.buf.Len())
 		b.entryOffsets = b.entryOffsets[:0]
 	}
 	b.addHelper(key, value)
-	return nil // Currently, there is no meaningful error.
 }
 
 // TODO: vvv this was the comment on ReachedCapacity.
@@ -235,26 +223,13 @@ The table structure looks like
 +---------+------------+-----------+---------------+
 */
 func (b *Builder) Finish() []byte {
-	bf := bbloom.New(float64(b.keyCount), 0.01)
-	var klen [2]byte
-	key := make([]byte, 1024)
-	for {
-		if _, err := b.keyBuf.Read(klen[:]); err == io.EOF {
-			break
-		} else if err != nil {
-			y.Check(err)
-		}
-		kl := int(binary.BigEndian.Uint16(klen[:]))
-		if cap(key) < kl {
-			key = make([]byte, 2*int(kl)) // 2 * uint16 will overflow
-		}
-		key = key[:kl]
-		y.Check2(b.keyBuf.Read(key))
-		bf.Add(key)
+	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePostive)
+	for _, h := range b.keyHashes {
+		bf.Add(h)
 	}
-
 	// Add bloom filter to the index.
 	b.tableIndex.BloomFilter = bf.JSONMarshal()
+
 	b.finishBlock() // This will never start a new block.
 
 	index, err := b.tableIndex.Marshal()
@@ -263,7 +238,7 @@ func (b *Builder) Finish() []byte {
 	n, err := b.buf.Write(index)
 	y.Check(err)
 
-	y.AssertTrue(n < math.MaxUint32)
+	y.AssertTrue(uint32(n) < math.MaxUint32)
 	// Write index size.
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
@@ -295,7 +270,7 @@ func (b *Builder) writeChecksum(data []byte) {
 	n, err := b.buf.Write(chksum)
 	y.Check(err)
 
-	y.AssertTrue(n < math.MaxUint32)
+	y.AssertTrue(uint32(n) < math.MaxUint32)
 	// Write checksum size.
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
