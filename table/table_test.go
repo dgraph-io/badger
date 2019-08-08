@@ -668,7 +668,7 @@ func TestTableBigValues(t *testing.T) {
 		builder.Add(key, vs)
 	}
 
-	f.Write(builder.Finish())
+	io.Copy(f, builder.Finish())
 	opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(t, err, "unable to open table")
@@ -763,7 +763,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			v := fmt.Sprintf("%d", id)
 			builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0})
 		}
-		f.Write(builder.Finish())
+		io.Copy(f, builder.Finish())
 		opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 		tbl, err := OpenTable(f, opts)
 		y.Check(err)
@@ -849,7 +849,7 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 		builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)})
 	}
 
-	f.Write(builder.Finish())
+	io.Copy(f, builder.Finish())
 	opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.NoVerification}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(b, err, "unable to open table")
