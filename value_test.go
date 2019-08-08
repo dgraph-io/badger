@@ -866,6 +866,7 @@ func TestBug578(t *testing.T) {
 		}
 		h.readRange(0, 10)
 	}
+	require.NoError(t, db.Close())
 }
 
 func BenchmarkReadWrite(b *testing.B) {
