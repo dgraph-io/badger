@@ -285,7 +285,7 @@ func (b *Builder) encryptIfNeeded(data []byte) ([]byte, error) {
 	// Encrypt will xor if the datakey present and append IV
 	// to the given data block.
 	if b.DataKey() != nil {
-		iv, err := y.GenereateIV()
+		iv, err := y.GenerateIV()
 		if err != nil {
 			return data, err
 		}

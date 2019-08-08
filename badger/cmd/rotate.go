@@ -21,6 +21,7 @@ import (
 	"os"
 
 	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/y"
 
 	"github.com/spf13/cobra"
 )
@@ -37,15 +38,17 @@ var rotateCmd = &cobra.Command{
 func init() {
 	RootCmd.AddCommand(rotateCmd)
 	rotateCmd.Flags().StringVarP(&oldKeyPath, "old-key-path", "o",
-		"", "Path of the old key")
+		"", "Path of the old key. It'll be considered as plain text, If no path"+
+			"provided.")
 	rotateCmd.Flags().StringVarP(&newKeyPath, "new-key-path", "n",
-		"", "Path of the new key")
+		"", "Path of the new key. It'll be considered as plain text, If no path"+
+			"provided.")
 }
 
 func doRotate(cmd *cobra.Command, args []string) error {
 	oldKey, err := getKey(oldKeyPath)
 	if err != nil {
-		return err
+		return y.Wrapf(err, "Error while opening old key.")
 	}
 	opt := badger.Options{
 		Dir:           sstDir,
@@ -54,7 +57,7 @@ func doRotate(cmd *cobra.Command, args []string) error {
 	}
 	kr, err := badger.OpenKeyRegistry(opt)
 	if err != nil {
-		return err
+		return y.Wrapf(err, "Unable to open key registry.")
 	}
 	kr.Close()
 	newKey, err := getKey(newKeyPath)
@@ -64,7 +67,7 @@ func doRotate(cmd *cobra.Command, args []string) error {
 	opt.EncryptionKey = newKey
 	err = badger.WriteKeyRegistry(kr, opt)
 	if err != nil {
-		return err
+		return y.Wrapf(err, "Error while writing key registry.")
 	}
 	return nil
 }
@@ -78,5 +81,6 @@ func getKey(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer fp.Close()
 	return ioutil.ReadAll(fp)
 }

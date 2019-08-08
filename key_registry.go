@@ -85,7 +85,7 @@ func OpenKeyRegistry(opt Options) (*KeyRegistry, error) {
 		}
 		// Writing the key regitry to the file.
 		if err := WriteKeyRegistry(kr, opt); err != nil {
-			return nil, err
+			return nil, y.Wrapf(err, "Error while writing key registry.")
 		}
 		fp, err = y.OpenExistingFile(path, flags)
 		if err != nil {
@@ -115,31 +115,34 @@ type keyRegistryIterator struct {
 // newKeyRegistryIterator returns iterator, which will allow you to iterate
 // over the data key of the the key registry.
 func newKeyRegistryIterator(fp *os.File, encryptionKey []byte) (*keyRegistryIterator, error) {
+	return &keyRegistryIterator{
+		encryptionKey: encryptionKey,
+		fp:            fp,
+	}, isValidRegistry(fp, encryptionKey)
+}
+
+// isValidRegistry checks the given encryption key is valid or not.
+func isValidRegistry(fp *os.File, encryptionKey []byte) error {
 	iv := make([]byte, aes.BlockSize)
 	_, err := fp.Read(iv)
 	if err != nil {
-		return nil, err
+		return y.Wrapf(err, "Error while reading IV for ket registry.")
 	}
 	eSanityText := make([]byte, len(sanityText))
-	_, err = fp.Read(eSanityText)
-	if err != nil {
-		return nil, err
+	if _, err = fp.Read(eSanityText); err != nil {
+		return err
 	}
 	if len(encryptionKey) > 0 {
-		// Decrpting sanity text.
-		eSanityText, err = y.XORBlock(eSanityText, encryptionKey, iv)
-		if err != nil {
-			return nil, err
+		// Decrypting sanity text.
+		if eSanityText, err = y.XORBlock(eSanityText, encryptionKey, iv); err != nil {
+			return err
 		}
 	}
 	// Check the given key is valid or not.
 	if !bytes.Equal(eSanityText, sanityText) {
-		return nil, ErrEncryptionKeyMismatch
+		return ErrEncryptionKeyMismatch
 	}
-	return &keyRegistryIterator{
-		encryptionKey: encryptionKey,
-		fp:            fp,
-	}, nil
+	return nil
 }
 
 func (kri *keyRegistryIterator) Next() (bool, error) {
@@ -210,6 +213,7 @@ func readKeyRegistry(fp *os.File, encryptionKey []byte) (*KeyRegistry, error) {
 }
 
 // WriteKeyRegistry will rewrite the existing key registry file with new one
+// It is okay to give closed key registry. Since, it's using only the datakey.
 func WriteKeyRegistry(reg *KeyRegistry, opt Options) error {
 	tmpPath := filepath.Join(opt.Dir, KeyRegistryRewriteFileName)
 	// Open temporary file to write the data and do atomic rename.
@@ -217,11 +221,17 @@ func WriteKeyRegistry(reg *KeyRegistry, opt Options) error {
 	if err != nil {
 		return err
 	}
-	buf := &bytes.Buffer{}
-	iv, err := y.GenereateIV()
-	if err != nil {
+
+	// closeBeforeReturn will close the fd before returing error.
+	closeBeforeReturn := func(err error) error {
 		fp.Close()
 		return err
+	}
+
+	buf := &bytes.Buffer{}
+	iv, err := y.GenerateIV()
+	if err != nil {
+		return closeBeforeReturn(err)
 	}
 
 	// Encrypt sanity text if the storage presents.
@@ -230,7 +240,7 @@ func WriteKeyRegistry(reg *KeyRegistry, opt Options) error {
 		var err error
 		eSanity, err = y.XORBlock(eSanity, opt.EncryptionKey, iv)
 		if err != nil {
-			return err
+			return closeBeforeReturn(err)
 		}
 	}
 	_, err = buf.Write(iv)
@@ -242,23 +252,22 @@ func WriteKeyRegistry(reg *KeyRegistry, opt Options) error {
 	for _, k := range reg.dataKeys {
 		// Wrting the datakey to the given file fd.
 		if err := storeDataKey(buf, opt.EncryptionKey, k); err != nil {
-			fp.Close()
-			return err
+			return closeBeforeReturn(err)
 		}
 	}
 
 	// Write buf to the disk.
 	if _, err = fp.Write(buf.Bytes()); err != nil {
-		fp.Close()
-		return err
+		return closeBeforeReturn(err)
 	}
 
 	// Sync the file.
 	if err = y.FileSync(fp); err != nil {
-		fp.Close()
-		return err
+		return closeBeforeReturn(err)
 	}
 	registryPath := filepath.Join(opt.Dir, KeyRegistryFileName)
+
+	// We need to close the file before renaming.
 	if err = fp.Close(); err != nil {
 		return err
 	}
@@ -298,7 +307,7 @@ func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 	// Otherwise Increment the KeyID and generate new datakey.
 	kr.nextKeyID++
 	k := make([]byte, len(kr.encryptionKey))
-	iv, err := y.GenereateIV()
+	iv, err := y.GenerateIV()
 	if err != nil {
 		return nil, err
 	}

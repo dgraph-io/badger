@@ -272,12 +272,7 @@ func (t *Table) decryptIfEncrypted(data []byte) ([]byte, error) {
 	if t.opt.DataKey != nil {
 		iv := data[len(data)-aes.BlockSize:]
 		data = data[:len(data)-aes.BlockSize]
-		var err error
-		data, err = y.XORBlock(data, t.opt.DataKey.Data, iv)
-		if err != nil {
-			return data, err
-		}
-		return data, nil
+		return y.XORBlock(data, t.opt.DataKey.Data, iv)
 	}
 	return data, nil
 }

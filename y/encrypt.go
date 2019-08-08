@@ -34,8 +34,8 @@ func XORBlock(src, key, iv []byte) ([]byte, error) {
 	return dst, nil
 }
 
-// GenereateIV generate IV.
-func GenereateIV() ([]byte, error) {
+// GenerateIV generate IV.
+func GenerateIV() ([]byte, error) {
 	iv := make([]byte, aes.BlockSize)
 	_, err := rand.Read(iv)
 	return iv, err
