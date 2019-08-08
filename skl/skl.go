@@ -280,6 +280,87 @@ func (s *Skiplist) getHeight() int32 {
 	return atomic.LoadInt32(&s.height)
 }
 
+// Batch writer for skiplist
+// We have to make our skiplist single writer
+// for every batch 5 entries of sorted and use previous insertion
+// memory. So, don't change height for each insertion
+// Pick random height on each batch and in the each batch
+// we can do random height in between the fixed height
+
+// Hint stores the previous insertion prev and next so it allow
+// us to take fast path.
+type Hint struct {
+	prev [maxHeight + 1]*node
+	next [maxHeight + 1]*node
+}
+
+// Since it is a single writer height won't change
+
+// PutWitHint will improve the serial write.
+func (s *Skiplist) PutWitHint(key []byte, v y.ValueStruct, hint *Hint) {
+	// Since we allow overwrite, we may not need to create a new node. We might not even need to
+	// increase the height. Let's defer these actions.
+	listHeight := s.getHeight()
+	if hint.prev[listHeight] == nil {
+		hint.prev[listHeight] = s.head
+		hint.next[listHeight] = nil
+	}
+	for i := int(listHeight) - 1; i >= 0; i-- {
+		// Use higher level to speed up for current level.
+		hint.prev[i], hint.next[i] = s.findSpliceForLevel(key, hint.prev[i+1], i)
+		if hint.prev[i] == hint.next[i] {
+			hint.prev[i].setValue(s.arena, v)
+			return
+		}
+	}
+
+	// We do need to create a new node.
+	height := randomHeight()
+	x := newNode(s.arena, key, v, height)
+
+	// Try to increase s.height via CAS.
+	listHeight = s.getHeight()
+	for height > int(listHeight) {
+		if atomic.CompareAndSwapInt32(&s.height, listHeight, int32(height)) {
+			// Successfully increased skiplist.height.
+			break
+		}
+		listHeight = s.getHeight()
+	}
+
+	// We always insert from the base level and up. After you add a node in base level, we cannot
+	// create a node in the level above because it would have discovered the node in the base level.
+	for i := 0; i < height; i++ {
+		for {
+			if hint.prev[i] == nil {
+				y.AssertTrue(i > 1) // This cannot happen in base level.
+				// We haven't computed prev, next for this level because height exceeds old listHeight.
+				// For these levels, we expect the lists to be sparse, so we can just search from head.
+				hint.prev[i], hint.next[i] = s.findSpliceForLevel(key, s.head, i)
+				// Someone adds the exact same key before we are able to do so. This can only happen on
+				// the base level. But we know we are not on the base level.
+				y.AssertTrue(hint.prev[i] != hint.next[i])
+			}
+			nextOffset := s.arena.getNodeOffset(hint.next[i])
+			x.tower[i] = nextOffset
+			if hint.prev[i].casNextOffset(i, nextOffset, s.arena.getNodeOffset(x)) {
+				// Managed to insert x between prev[i] and next[i]. Go to the next level.
+				break
+			}
+			panic("yo")
+			// CAS failed. We need to recompute prev and next.
+			// It is unlikely to be helpful to try to use a different level as we redo the search,
+			// because it is unlikely that lots of nodes are inserted between prev[i] and next[i].
+			hint.prev[i], hint.next[i] = s.findSpliceForLevel(key, hint.prev[i], i)
+			if hint.prev[i] == hint.next[i] {
+				y.AssertTruef(i == 0, "Equality can happen only on base level: %d", i)
+				hint.prev[i].setValue(s.arena, v)
+				return
+			}
+		}
+	}
+}
+
 // Put inserts the key-value pair.
 func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	// Since we allow overwrite, we may not need to create a new node. We might not even need to

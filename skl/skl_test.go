@@ -17,18 +17,19 @@
 package skl
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/dgraph-io/badger/y"
+	"github.com/stretchr/testify/require"
 )
 
 const arenaSize = 1 << 20
@@ -459,60 +460,105 @@ func randomKey(rng *rand.Rand) []byte {
 
 // Standard test. Some fraction is read. Some fraction is write. Writes have
 // to go through mutex lock.
-func BenchmarkReadWrite(b *testing.B) {
-	value := newValue(123)
-	for i := 0; i <= 10; i++ {
-		readFrac := float32(i) / 10.0
-		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
-			l := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
-			defer l.DecrRef()
-			b.ResetTimer()
-			var count int
-			b.RunParallel(func(pb *testing.PB) {
-				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-				for pb.Next() {
-					if rng.Float32() < readFrac {
-						v := l.Get(randomKey(rng))
-						if v.Value != nil {
-							count++
-						}
-					} else {
-						l.Put(randomKey(rng), y.ValueStruct{Value: value, Meta: 0, UserMeta: 0})
-					}
-				}
-			})
+// func BenchmarkReadWrite(b *testing.B) {
+// 	value := newValue(123)
+// 	for i := 0; i <= 10; i++ {
+// 		readFrac := float32(i) / 10.0
+// 		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
+// 			l := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
+// 			defer l.DecrRef()
+// 			b.ResetTimer()
+// 			var count int
+// 			b.RunParallel(func(pb *testing.PB) {
+// 				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+// 				for pb.Next() {
+// 					if rng.Float32() < readFrac {
+// 						v := l.Get(randomKey(rng))
+// 						if v.Value != nil {
+// 							count++
+// 						}
+// 					} else {
+// 						l.Put(randomKey(rng), y.ValueStruct{Value: value, Meta: 0, UserMeta: 0})
+// 					}
+// 				}
+// 			})
+// 		})
+// 	}
+// }
+
+// // Standard test. Some fraction is read. Some fraction is write. Writes have
+// // to go through mutex lock.
+// func BenchmarkReadWriteMap(b *testing.B) {
+// 	value := newValue(123)
+// 	for i := 0; i <= 10; i++ {
+// 		readFrac := float32(i) / 10.0
+// 		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
+// 			m := make(map[string][]byte)
+// 			var mutex sync.RWMutex
+// 			b.ResetTimer()
+// 			var count int
+// 			b.RunParallel(func(pb *testing.PB) {
+// 				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+// 				for pb.Next() {
+// 					if rand.Float32() < readFrac {
+// 						mutex.RLock()
+// 						_, ok := m[string(randomKey(rng))]
+// 						mutex.RUnlock()
+// 						if ok {
+// 							count++
+// 						}
+// 					} else {
+// 						mutex.Lock()
+// 						m[string(randomKey(rng))] = value
+// 						mutex.Unlock()
+// 					}
+// 				}
+// 			})
+// 		})
+// 	}
+// }
+
+func BenchmarkWithOutHint(b *testing.B) {
+	n := 1000000
+	value := y.ValueStruct{Value: newValue(123), Meta: 0, UserMeta: 0}
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	l := NewSkiplist(int64(((n * 10) + 1) * MaxNodeSize))
+	b.ResetTimer()
+	for i := 0; i < n; i++ {
+		entries := [][]byte{}
+		for i := 0; i < 5; i++ {
+			entries = append(entries, randomKey(rng))
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			return bytes.Compare(entries[i], entries[j]) < 0
 		})
+		for i := 0; i < 5; i++ {
+			l.Put(entries[i], value)
+		}
 	}
 }
 
-// Standard test. Some fraction is read. Some fraction is write. Writes have
-// to go through mutex lock.
-func BenchmarkReadWriteMap(b *testing.B) {
-	value := newValue(123)
-	for i := 0; i <= 10; i++ {
-		readFrac := float32(i) / 10.0
-		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
-			m := make(map[string][]byte)
-			var mutex sync.RWMutex
-			b.ResetTimer()
-			var count int
-			b.RunParallel(func(pb *testing.PB) {
-				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-				for pb.Next() {
-					if rand.Float32() < readFrac {
-						mutex.RLock()
-						_, ok := m[string(randomKey(rng))]
-						mutex.RUnlock()
-						if ok {
-							count++
-						}
-					} else {
-						mutex.Lock()
-						m[string(randomKey(rng))] = value
-						mutex.Unlock()
-					}
-				}
-			})
+func BenchmarkWithHint(b *testing.B) {
+	n := 1000000
+	value := y.ValueStruct{Value: newValue(123), Meta: 0, UserMeta: 0}
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	l := NewSkiplist(int64(((n * 10) + 1) * MaxNodeSize))
+	b.ResetTimer()
+	for i := 0; i < n; i++ {
+		entries := [][]byte{}
+		for i := 0; i < 5; i++ {
+			entries = append(entries, randomKey(rng))
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			return bytes.Compare(entries[i], entries[j]) < 0
 		})
+		hint := &Hint{
+			prev: [maxHeight + 1]*node{},
+			next: [maxHeight + 1]*node{},
+		}
+
+		for i := 0; i < 5; i++ {
+			l.PutWitHint(entries[i], value, hint)
+		}
 	}
 }
