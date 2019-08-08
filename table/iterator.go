@@ -299,7 +299,7 @@ func (itr *Iterator) seekToFirst() {
 		return
 	}
 
-	block.ResetIterator(itr.bi)
+	block.resetIterator(itr.bi)
 	itr.bi.SeekToFirst()
 	itr.err = itr.bi.Error()
 }
@@ -317,7 +317,7 @@ func (itr *Iterator) seekToLast() {
 		return
 	}
 
-	block.ResetIterator(itr.bi)
+	block.resetIterator(itr.bi)
 	itr.bi.SeekToLast()
 	itr.err = itr.bi.Error()
 }
@@ -330,7 +330,7 @@ func (itr *Iterator) seekHelper(blockIdx int, key []byte) {
 		return
 	}
 
-	block.ResetIterator(itr.bi)
+	block.resetIterator(itr.bi)
 	itr.bi.Seek(key, origin)
 	itr.err = itr.bi.Error()
 }
@@ -404,7 +404,7 @@ func (itr *Iterator) next() {
 			return
 		}
 
-		block.ResetIterator(itr.bi)
+		block.resetIterator(itr.bi)
 		itr.bi.SeekToFirst()
 		itr.err = itr.bi.Error()
 		return
@@ -433,7 +433,7 @@ func (itr *Iterator) prev() {
 			return
 		}
 
-		block.ResetIterator(itr.bi)
+		block.resetIterator(itr.bi)
 		itr.bi.SeekToLast()
 		itr.err = itr.bi.Error()
 		return

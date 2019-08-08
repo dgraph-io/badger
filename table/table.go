@@ -143,7 +143,7 @@ func (b *block) verifyCheckSum() error {
 	return y.VerifyChecksum(b.data[:readPos], cs)
 }
 
-func (b *block) ResetIterator(bi *blockIterator) {
+func (b *block) resetIterator(bi *blockIterator) {
 	bi.Reset()
 
 	bi.data = b.data
