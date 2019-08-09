@@ -291,14 +291,14 @@ func (t *Table) readIndex() error {
 	return nil
 }
 
-func (t *Table) block(idx int) (block, error) {
+func (t *Table) block(idx int) (*block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= len(t.blockIndex) {
-		return block{}, errors.New("block out of index")
+		return nil, errors.New("block out of index")
 	}
 
 	ko := t.blockIndex[idx]
-	blk := block{
+	blk := &block{
 		offset: int(ko.Offset),
 	}
 	var err error
@@ -327,7 +327,7 @@ func (t *Table) block(idx int) (block, error) {
 	// Verify checksum on if checksum verification mode is OnRead on OnStartAndRead.
 	if t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead {
 		if err = blk.verifyCheckSum(); err != nil {
-			return block{}, err
+			return nil, err
 		}
 	}
 	return blk, err

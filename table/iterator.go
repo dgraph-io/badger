@@ -35,16 +35,16 @@ type blockIterator struct {
 	val          []byte
 	entryOffsets []uint32
 
-	// prevOverlapLen stores the overlap of the previous key with the base key.
+	// prevOverlap stores the overlap of the previous key with the base key.
 	// This avoids unnecssary copy of base key when the overlap is same for multiple keys.
-	prevOverlapLen uint16
+	prevOverlap uint16
 }
 
 func (itr *blockIterator) setBlock(b *block) {
 	itr.err = nil
 	itr.idx = 0
 	itr.baseKey = itr.baseKey[:0]
-	itr.prevOverlapLen = 0
+	itr.prevOverlap = 0
 	itr.key = itr.key[:0]
 	itr.val = itr.val[:0]
 	// Drop the index from the block. We don't need it anymore.
@@ -67,7 +67,7 @@ func (itr *blockIterator) setIdx(i int) {
 	if len(itr.baseKey) == 0 {
 		var baseHeader header
 		baseHeader.Decode(itr.data)
-		itr.baseKey = itr.data[headerSize : headerSize+baseHeader.diffLength]
+		itr.baseKey = itr.data[headerSize : headerSize+baseHeader.diff]
 	}
 	var endOffset int
 	if itr.idx+1 == itr.numEntries {
@@ -79,15 +79,16 @@ func (itr *blockIterator) setIdx(i int) {
 	entryData := itr.data[startOffset:endOffset]
 	var h header
 	h.Decode(entryData)
-	// Copy overlap only if it's length is more than the overlap of
-	// the previous key with the base key.
-	if h.overlapLength > itr.prevOverlapLen {
-		itr.key = append(itr.key[:0], itr.baseKey[:h.overlapLength]...)
+	// Header contains the length of key overlap and difference compared to the base key. If the key
+	// before this one had the same or better key overlap, we can avoid copying that part into
+	// itr.key. But, if the overlap was lesser, we could copy over just that portion.
+	if h.overlap > itr.prevOverlap {
+		itr.key = append(itr.key[:itr.prevOverlap], itr.baseKey[itr.prevOverlap:h.overlap]...)
 	}
-	itr.prevOverlapLen = h.overlapLength
-	valueOff := headerSize + int(h.diffLength)
+	itr.prevOverlap = h.overlap
+	valueOff := headerSize + int(h.diff)
 	diffKey := entryData[headerSize:valueOff]
-	itr.key = append(itr.key[:h.overlapLength], diffKey...)
+	itr.key = append(itr.key[:h.overlap], diffKey...)
 	itr.val = entryData[valueOff:]
 }
 
@@ -305,7 +306,7 @@ func (itr *Iterator) next() {
 		return
 	}
 
-	if itr.bi.data == nil {
+	if len(itr.bi.data) == 0 {
 		block, err := itr.t.block(itr.bpos)
 		if err != nil {
 			itr.err = err
@@ -333,7 +334,7 @@ func (itr *Iterator) prev() {
 		return
 	}
 
-	if itr.bi.data == nil {
+	if len(itr.bi.data) == 0 {
 		block, err := itr.t.block(itr.bpos)
 		if err != nil {
 			itr.err = err

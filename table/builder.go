@@ -35,8 +35,8 @@ func newBuffer(sz int) *bytes.Buffer {
 }
 
 type header struct {
-	overlapLength uint16 // Overlap with base key.
-	diffLength    uint16 // Length of the diff.
+	overlap uint16 // Overlap with base key.
+	diff    uint16 // Length of the diff.
 }
 
 // Encode encodes the header.
@@ -114,8 +114,8 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	}
 
 	h := header{
-		overlapLength: uint16(len(key) - len(diffKey)),
-		diffLength:    uint16(len(diffKey)),
+		overlap: uint16(len(key) - len(diffKey)),
+		diff:    uint16(len(diffKey)),
 	}
 
 	// store current entry's offset
