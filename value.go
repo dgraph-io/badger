@@ -1349,11 +1349,12 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 
 func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) error {
 	vlog.lfDiscardStats.Lock()
+	defer vlog.lfDiscardStats.Unlock()
+
 	for fid, sz := range stats {
 		vlog.lfDiscardStats.m[fid] += sz
 		vlog.lfDiscardStats.updatesSinceFlush++
 	}
-	vlog.lfDiscardStats.Unlock()
 	if vlog.lfDiscardStats.updatesSinceFlush > discardStatsFlushThreshold {
 		if err := vlog.flushDiscardStats(); err != nil {
 			return err
