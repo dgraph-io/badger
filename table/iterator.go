@@ -18,7 +18,6 @@ package table
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io"
 	"sort"
 
@@ -28,7 +27,7 @@ import (
 
 type blockIterator struct {
 	data       []byte
-	idx        int
+	idx        int // Idx of the entry inside a block
 	err        error
 	baseKey    []byte
 	numEntries int
@@ -46,24 +45,10 @@ func (itr *blockIterator) setBlock(b block) {
 	itr.keyPrefixLen = 0
 	itr.key = itr.key[:0]
 	itr.val = itr.val[:0]
-	itr.data = b.data
+	// Drop the index from the block. We don't need it anymore.
+	itr.data = b.data[:b.entriesIndexStart]
 	itr.numEntries = b.numEntries
-	itr.loadEntryEndOffsets()
-}
-
-// loadEntryEndOffsets loads the entryEndOffsets for binary searching for a key.
-func (itr *blockIterator) loadEntryEndOffsets() {
-	// The block doesn't have an index.
-	if len(itr.data) < 8 {
-		return
-	}
-	readPos := len(itr.data) - 8 // skip reading number of entries.
-	itr.entryEndOffsets = make([]uint32, itr.numEntries)
-	for i := itr.numEntries - 1; i > 0; i-- {
-		itr.entryEndOffsets[i] = binary.BigEndian.Uint32(itr.data[readPos : readPos+4])
-		readPos -= 4
-	}
-	itr.data = itr.data[:readPos]
+	itr.entryEndOffsets = b.entryOffsets
 }
 
 // Seek brings us to the first block element that is >= input key.

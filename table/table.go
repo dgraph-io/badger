@@ -126,6 +126,7 @@ type block struct {
 	checksum          []byte
 	numEntries        int // number of entries present in the block
 	entriesIndexStart int // start index of entryOffsets list
+	entryOffsets      []uint32
 	chkLen            int // checksum length
 }
 
@@ -259,7 +260,7 @@ func (t *Table) readIndex() error {
 	// Read checksum len from the last 4 bytes.
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
-	checksumLen := int(binary.BigEndian.Uint32(buf))
+	checksumLen := int(y.BytesToU32(buf))
 
 	// Read checksum.
 	expectedChk := &pb.Checksum{}
@@ -272,7 +273,7 @@ func (t *Table) readIndex() error {
 	// Read index size from the footer.
 	readPos -= 4
 	buf = t.readNoFail(readPos, 4)
-	indexLen := int(binary.BigEndian.Uint32(buf))
+	indexLen := int(y.BytesToU32(buf))
 	// Read index.
 	readPos -= indexLen
 	data := t.readNoFail(readPos, indexLen)
@@ -306,14 +307,23 @@ func (t *Table) block(idx int) (block, error) {
 	// Read meta data related to block.
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
+
+	// Read checksum and store it
 	readPos -= blk.chkLen
 	blk.checksum = blk.data[readPos : readPos+blk.chkLen]
-	// Skip reading checksum, and move position to read numEntries in block.
+	// Move back and read numEntries in the block.
 	readPos -= 4
 	blk.numEntries = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
-	readPos += 4
+	entriesIndexStart := readPos - (blk.numEntries * 4)
+	entriesIndexEnd := entriesIndexStart + blk.numEntries*4
+	blk.entryOffsets = y.BytesToU32Slice(blk.data[entriesIndexStart:entriesIndexEnd])
+
+	blk.entriesIndexStart = entriesIndexStart
+
 	// Drop checksum and checksum length.
-	blk.data = blk.data[:readPos]
+	// The checksum is calculated for actual data + entry index + index length
+	blk.data = blk.data[:readPos+4]
+
 	// Verify checksum on if checksum verification mode is OnRead on OnStartAndRead.
 	if t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead {
 		if err = blk.verifyCheckSum(); err != nil {
