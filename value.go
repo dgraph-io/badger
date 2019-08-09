@@ -19,7 +19,6 @@ package badger
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"hash"
@@ -244,7 +243,7 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 		}
 		return nil, err
 	}
-	crc := binary.BigEndian.Uint32(crcBuf[:])
+	crc := y.BytesToU32(crcBuf[:])
 	if crc != tee.Sum32() {
 		return nil, errTruncate
 	}

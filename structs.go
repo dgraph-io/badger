@@ -36,8 +36,9 @@ const vptrSize = 12
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode() []byte {
 	b := make([]byte, vptrSize)
+	// Copy over the content from p to b.
 	*(*valuePointer)(unsafe.Pointer(&b[0])) = p
-	return b[:]
+	return b
 }
 
 // Decode decodes the value pointer into the provided byte buffer.

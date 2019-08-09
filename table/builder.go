@@ -18,9 +18,7 @@ package table
 
 import (
 	"bytes"
-	"encoding/binary"
 	"math"
-	"reflect"
 	"unsafe"
 
 	"github.com/dgryski/go-farm"
@@ -141,8 +139,8 @@ Structure of Block.
 +-----------------------------------------+--------------------+--------------+------------------+
 */
 func (b *Builder) finishBlock() {
-	b.buf.Write(u32SliceToBytes(b.entryOffsets))
-	b.buf.Write(u32ToBytes(uint32(len(b.entryOffsets))))
+	b.buf.Write(y.U32SliceToBytes(b.entryOffsets))
+	b.buf.Write(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
 	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
 	b.writeChecksum(blockBuf)
@@ -240,9 +238,7 @@ func (b *Builder) Finish() []byte {
 
 	y.AssertTrue(uint32(n) < math.MaxUint32)
 	// Write index size.
-	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], uint32(n))
-	_, err = b.buf.Write(buf[:])
+	_, err = b.buf.Write(y.U32ToBytes(uint32(n)))
 	y.Check(err)
 
 	b.writeChecksum(index)
@@ -272,42 +268,6 @@ func (b *Builder) writeChecksum(data []byte) {
 
 	y.AssertTrue(uint32(n) < math.MaxUint32)
 	// Write checksum size.
-	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], uint32(n))
-	_, err = b.buf.Write(buf[:])
+	_, err = b.buf.Write(y.U32ToBytes(uint32(n)))
 	y.Check(err)
-}
-
-func u32ToBytes(v uint32) []byte {
-	var uBuf [4]byte
-	binary.BigEndian.PutUint32(uBuf[:], v)
-	return uBuf[:]
-}
-
-func u32SliceToBytes(u32s []uint32) []byte {
-	if len(u32s) == 0 {
-		return nil
-	}
-	var b []byte
-	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&b))
-	hdr.Len = len(u32s) * 4
-	hdr.Cap = hdr.Len
-	hdr.Data = uintptr(unsafe.Pointer(&u32s[0]))
-	return b
-}
-
-func bytesToU32Slice(b []byte) []uint32 {
-	if len(b) == 0 {
-		return nil
-	}
-	var u32s []uint32
-	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&u32s))
-	hdr.Len = len(b) / 4
-	hdr.Cap = hdr.Len
-	hdr.Data = uintptr(unsafe.Pointer(&b[0]))
-	return u32s
-}
-
-func bytesToU32(b []byte) uint32 {
-	return binary.BigEndian.Uint32(b)
 }
