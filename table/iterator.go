@@ -107,7 +107,7 @@ var (
 	current = 1
 )
 
-// Seek brings us to the first block element that is >= input key.
+// seek brings us to the first block element that is >= input key.
 func (itr *blockIterator) seek(key []byte, whence int) {
 	itr.err = nil
 	startIndex := 0 // This tells from which index we should start binary search.
@@ -128,7 +128,6 @@ func (itr *blockIterator) seek(key []byte, whence int) {
 		return y.CompareKeys(itr.key, key) >= 0
 	})
 	itr.setIdx(foundEntryIdx)
-
 }
 
 // seekToFirst brings us to the first element.
@@ -147,20 +146,6 @@ func (itr *blockIterator) next() {
 
 func (itr *blockIterator) prev() {
 	itr.setIdx(itr.idx - 1)
-}
-
-func (itr *blockIterator) Key() []byte {
-	if itr.err != nil {
-		return nil
-	}
-	return itr.key
-}
-
-func (itr *blockIterator) Value() []byte {
-	if itr.err != nil {
-		return nil
-	}
-	return itr.val
 }
 
 // Iterator is an iterator for a Table.
@@ -357,12 +342,12 @@ func (itr *Iterator) prev() {
 
 // Key follows the y.Iterator interface
 func (itr *Iterator) Key() []byte {
-	return itr.bi.Key()
+	return itr.bi.key
 }
 
 // Value follows the y.Iterator interface
 func (itr *Iterator) Value() (ret y.ValueStruct) {
-	ret.Decode(itr.bi.Value())
+	ret.Decode(itr.bi.val)
 	return
 }
 
