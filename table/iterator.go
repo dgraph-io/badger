@@ -40,7 +40,7 @@ type blockIterator struct {
 	prevOverlapLen uint16
 }
 
-func (itr *blockIterator) setBlock(b block) {
+func (itr *blockIterator) setBlock(b *block) {
 	itr.err = nil
 	itr.idx = 0
 	itr.baseKey = itr.baseKey[:0]
@@ -107,7 +107,7 @@ var (
 )
 
 // Seek brings us to the first block element that is >= input key.
-func (itr *blockIterator) Seek(key []byte, whence int) {
+func (itr *blockIterator) seek(key []byte, whence int) {
 	itr.err = nil
 	startIndex := 0 // This tells from which index we should start binary search.
 
@@ -119,6 +119,7 @@ func (itr *blockIterator) Seek(key []byte, whence int) {
 	}
 
 	foundEntryIdx := sort.Search(len(itr.entryOffsets), func(idx int) bool {
+		// If idx is less than start index then just return false.
 		if idx < startIndex {
 			return false
 		}
@@ -130,12 +131,12 @@ func (itr *blockIterator) Seek(key []byte, whence int) {
 }
 
 // seekToFirst brings us to the first element.
-func (itr *blockIterator) SeekToFirst() {
+func (itr *blockIterator) seekToFirst() {
 	itr.setIdx(0)
 }
 
 // seekToLast brings us to the last element.
-func (itr *blockIterator) SeekToLast() {
+func (itr *blockIterator) seekToLast() {
 	itr.setIdx(len(itr.entryOffsets) - 1)
 }
 
@@ -209,7 +210,7 @@ func (itr *Iterator) seekToFirst() {
 		return
 	}
 	itr.bi.setBlock(block)
-	itr.bi.SeekToFirst()
+	itr.bi.seekToFirst()
 	itr.err = itr.bi.Error()
 }
 
@@ -226,7 +227,7 @@ func (itr *Iterator) seekToLast() {
 		return
 	}
 	itr.bi.setBlock(block)
-	itr.bi.SeekToLast()
+	itr.bi.seekToLast()
 	itr.err = itr.bi.Error()
 }
 
@@ -238,7 +239,7 @@ func (itr *Iterator) seekHelper(blockIdx int, key []byte) {
 		return
 	}
 	itr.bi.setBlock(block)
-	itr.bi.Seek(key, origin)
+	itr.bi.seek(key, origin)
 	itr.err = itr.bi.Error()
 }
 
@@ -311,7 +312,7 @@ func (itr *Iterator) next() {
 			return
 		}
 		itr.bi.setBlock(block)
-		itr.bi.SeekToFirst()
+		itr.bi.seekToFirst()
 		itr.err = itr.bi.Error()
 		return
 	}
@@ -339,7 +340,7 @@ func (itr *Iterator) prev() {
 			return
 		}
 		itr.bi.setBlock(block)
-		itr.bi.SeekToLast()
+		itr.bi.seekToLast()
 		itr.err = itr.bi.Error()
 		return
 	}
