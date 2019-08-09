@@ -17,7 +17,6 @@
 package table
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -306,16 +305,17 @@ func (t *Table) block(idx int) (*block, error) {
 
 	// Read meta data related to block.
 	readPos := len(blk.data) - 4 // First read checksum length.
-	blk.chkLen = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
+	blk.chkLen = int(y.BytesToU32(blk.data[readPos : readPos+4]))
 
 	// Read checksum and store it
 	readPos -= blk.chkLen
 	blk.checksum = blk.data[readPos : readPos+blk.chkLen]
 	// Move back and read numEntries in the block.
 	readPos -= 4
-	blk.numEntries = int(binary.BigEndian.Uint32(blk.data[readPos : readPos+4]))
+	blk.numEntries = int(y.BytesToU32(blk.data[readPos : readPos+4]))
 	entriesIndexStart := readPos - (blk.numEntries * 4)
 	entriesIndexEnd := entriesIndexStart + blk.numEntries*4
+
 	blk.entryOffsets = y.BytesToU32Slice(blk.data[entriesIndexStart:entriesIndexEnd])
 
 	blk.entriesIndexStart = entriesIndexStart
