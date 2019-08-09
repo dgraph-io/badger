@@ -1011,7 +1011,7 @@ func (db *DB) calculateSize() {
 	if db.opt.ValueDir != db.opt.Dir {
 		_, vlogSize = totalSize(db.opt.ValueDir)
 	}
-	y.VlogSize.Set(db.opt.Dir, newInt(vlogSize))
+	y.VlogSize.Set(db.opt.ValueDir, newInt(vlogSize))
 }
 
 func (db *DB) updateSize(lc *y.Closer) {
@@ -1087,7 +1087,7 @@ func (db *DB) Size() (lsm, vlog int64) {
 		return
 	}
 	lsm = y.LSMSize.Get(db.opt.Dir).(*expvar.Int).Value()
-	vlog = y.VlogSize.Get(db.opt.Dir).(*expvar.Int).Value()
+	vlog = y.VlogSize.Get(db.opt.ValueDir).(*expvar.Int).Value()
 	return
 }
 
