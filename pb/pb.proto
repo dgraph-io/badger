@@ -69,3 +69,10 @@ message Checksum {
   Algorithm algo = 1; // For storing type of Checksum algorithm used
   uint64 sum = 2;
 }
+
+message DataKey {
+  uint64 key_id      = 1;
+  bytes  data       = 2;
+  bytes  iv         = 3;
+  int64  created_at = 4;
+}
