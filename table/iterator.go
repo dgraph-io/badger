@@ -53,7 +53,7 @@ func (itr *blockIterator) setBlock(b block) {
 	itr.entryOffsets = b.entryOffsets
 }
 
-// setIdx sets the iterator to the entry index and set the current key and value.
+// setIdx sets the iterator to the entry at index i and set it's key and value.
 func (itr *blockIterator) setIdx(i int) {
 	itr.idx = i
 	if i >= len(itr.entryOffsets) || i < 0 {
