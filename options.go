@@ -80,8 +80,8 @@ type Options struct {
 	// ------------------------------
 	maxBatchCount                 int64         // max entries in batch
 	maxBatchSize                  int64         // max batch size in bytes
-	EncryptionKey                 []byte        // Encryption key
-	EncryptionKeyRotationDuration time.Duration // Rotation duration for encryption.
+	EncryptionKey                 []byte        // encryption key
+	EncryptionKeyRotationDuration time.Duration // key rotation duration
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -235,7 +235,7 @@ func (opt Options) WithTruncate(val bool) Options {
 // WithLogger returns a new Options value with Logger set to the given value.
 //
 // Logger provides a way to configure what logger each value of badger.DB uses.
-//10 * 24 * time.Hour
+//
 // The default value of Logger writes to stderr using the log package from the Go standard library.
 func (opt Options) WithLogger(val Logger) Options {
 	opt.Logger = val
@@ -256,10 +256,10 @@ func (opt Options) WithMaxTableSize(val int64) Options {
 // value.
 //
 // LevelSizeMultiplier sets the ratio between the maximum sizes of contiguous levels in the LSM.
-// Once a level grow10 * 24 * time.Hours to be larger than this ratio allowed, the compaction process will be
-//  triggered.10 * 24 * time.Hour
-//10 * 24 * time.Hour
-// The default value10 * 24 * time.Hour of LevelSizeMultiplier is 10.
+// Once a level grows to be larger than this ratio allowed, the compaction process will be
+//  triggered.
+//
+// The default value of LevelSizeMultiplier is 10.
 func (opt Options) WithLevelSizeMultiplier(val int) Options {
 	opt.LevelSizeMultiplier = val
 	return opt
@@ -422,10 +422,11 @@ func (opt Options) WithEncryptionKey(key []byte) Options {
 	return opt
 }
 
-// WithEncryptionRotationDuration returns new Options value with the duration set to the given value.
+// WithEncryptionRotationDuration returns new Options value with the duration set to
+// the given value.
 //
-// Key Registry will use this duration to create new keys. If the previous generated key exceed the
-// given duration. Then the key registry will create new key.
+// Key Registry will use this duration to create new keys. If the previous generated
+// key exceed the given duration. Then the key registry will create new key.
 func (opt Options) WithEncryptionRotationDuration(d time.Duration) Options {
 	opt.EncryptionKeyRotationDuration = d
 	return opt
