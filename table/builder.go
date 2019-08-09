@@ -19,7 +19,6 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	"io"
 	"math"
 
 	"github.com/dgryski/go-farm"
@@ -96,7 +95,7 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 			break
 		}
 	}
-	return newKey[i:]
+	return newKey[i:len(newKey)]
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
@@ -231,7 +230,7 @@ The table structure looks like
 | Index   | Index Size | Checksum  | Checksum Size |
 +---------+------------+-----------+---------------+
 */
-func (b *Builder) Finish() io.Reader {
+func (b *Builder) Finish() []byte {
 	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePostive)
 	for _, h := range b.keyHashes {
 		bf.Add(h)
@@ -256,7 +255,7 @@ func (b *Builder) Finish() io.Reader {
 
 	b.writeChecksum(index)
 	// return b.buf.Bytes()
-	return b.buf.NewReader()
+	return b.buf.Bytes()
 }
 
 func (b *Builder) writeChecksum(data []byte) {

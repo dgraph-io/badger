@@ -378,6 +378,16 @@ func (b *Buffer) ReadAt(offset, length int) []byte {
 	return buf
 }
 
+func (b *Buffer) Bytes() []byte {
+	buf := make([]byte, b.length)
+	written := 0
+	for i := 0; i < len(b.pages); i++ {
+		written += copy(buf[written:], b.pages[i].buf[:])
+	}
+
+	return buf
+}
+
 func (b *Buffer) NewReader() io.Reader {
 	// Allocates the right slice. Copies over the data and returns.
 
@@ -385,6 +395,12 @@ func (b *Buffer) NewReader() io.Reader {
 		b:        b,
 		pageIdx:  0,
 		startIdx: 0,
+	}
+}
+
+func (b *Buffer) WriteTo(w io.Writer) {
+	for i := 0; i < len(b.pages); i++ {
+		w.Write(b.pages[i].buf[:])
 	}
 }
 

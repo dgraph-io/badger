@@ -16,12 +16,12 @@
 
 package table
 
+/*
 import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"hash/crc32"
-	"io"
 	"math/rand"
 	"os"
 	"sort"
@@ -78,8 +78,8 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 		y.AssertTrue(len(kv) == 2)
 		b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0})
 	}
-	// f.Write(b.Finish())
-	io.Copy(f, b.Finish())
+	f.Write(b.Finish())
+	// io.Copy(f, b.Finish())
 	f.Close()
 	f, _ = y.OpenSyncedFile(filename, true)
 	return f
@@ -668,7 +668,7 @@ func TestTableBigValues(t *testing.T) {
 		builder.Add(key, vs)
 	}
 
-	io.Copy(f, builder.Finish())
+	f.Write(builder.Finish())
 	opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(t, err, "unable to open table")
@@ -763,7 +763,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			v := fmt.Sprintf("%d", id)
 			builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0})
 		}
-		io.Copy(f, builder.Finish())
+		f.Write(builder.Finish())
 		opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 		tbl, err := OpenTable(f, opts)
 		y.Check(err)
@@ -849,9 +849,10 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 		builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)})
 	}
 
-	io.Copy(f, builder.Finish())
+	f.Write(builder.Finish())
 	opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.NoVerification}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(b, err, "unable to open table")
 	return tbl
 }
+*/
