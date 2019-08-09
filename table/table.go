@@ -105,6 +105,11 @@ func (t *Table) DecrRef() error {
 				return err
 			}
 		}
+		// fd can be nil if the table belongs to L0 and it is opened in memory. See
+		// OpenTableInMemory method.
+		if t.fd == nil {
+			return nil
+		}
 		if err := t.fd.Truncate(0); err != nil {
 			// This is very important to let the FS know that the file is deleted.
 			return err
@@ -209,7 +214,7 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 		panic(fmt.Sprintf("Invalid loading mode: %v", opts.LoadingMode))
 	}
 
-	if err := t.init(); err != nil {
+	if err := t.initBiggestAndSmallest(); err != nil {
 		return nil, errors.Wrapf(err, "failed to initialize table")
 	}
 	if opts.ChkMode == options.OnTableRead || opts.ChkMode == options.OnTableAndBlockRead {
@@ -224,39 +229,27 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 
 // OpenInMemoryTable is similar to OpenTable but it opens a new table from the provided data.
 // OpenInMemoryTable is used for L0 tables.
-func OpenInMemoryTable(fd *os.File, data []byte) (*Table, error) {
-	filename := fd.Name()
-	id, ok := ParseFileID(filename)
-	if !ok {
-		_ = fd.Close()
-		return nil, errors.Errorf("Invalid filename: %s", filename)
-	}
+func OpenInMemoryTable(fid uint64, data []byte) (*Table, error) {
 	t := &Table{
-		fd:        fd,
 		ref:       1, // Caller is given one reference.
-		id:        id,
+		id:        fid,
 		opt:       &Options{LoadingMode: options.LoadToRAM},
 		mmap:      data,
 		tableSize: len(data),
 	}
 
-	if err := t.init(); err != nil {
+	if err := t.initBiggestAndSmallest(); err != nil {
 		return nil, err
 	}
 	return t, nil
 }
 
-func (t *Table) init() error {
+func (t *Table) initBiggestAndSmallest() error {
 	if err := t.readIndex(); err != nil {
 		return errors.Wrapf(err, "failed to read index.")
 	}
 
-	it := t.NewIterator(false)
-	defer it.Close()
-	it.Rewind()
-	if it.Valid() {
-		t.smallest = it.Key()
-	}
+	t.smallest = t.blockIndex[0].Key
 
 	it2 := t.NewIterator(true)
 	defer it2.Close()

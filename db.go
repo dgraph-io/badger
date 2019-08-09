@@ -889,7 +889,23 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	headTs := y.KeyWithTs(head, db.orc.nextTs())
 	ft.mt.Put(headTs, y.ValueStruct{Value: offset})
 
+	bopts := table.Options{
+		BlockSize:         db.opt.BlockSize,
+		BloomFalsePostive: db.opt.BloomFalsePositive,
+	}
+	tableData := buildL0Table(ft, bopts)
 	fileID := db.lc.reserveFileID()
+
+	if db.opt.KeepL0InMemory {
+		tbl, err := table.OpenInMemoryTable(fileID, tableData)
+		if err != nil {
+			return errors.Wrapf(err, "failed to open table in memory: %d", fileID)
+		}
+		err = db.lc.addLevel0Table(tbl) // This will incrRef (if we don't error, sure)
+		_ = tbl.DecrRef()               // Releases our ref.
+		return err
+	}
+
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
 	if err != nil {
 		return y.Wrap(err)
@@ -899,17 +915,9 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	dirSyncCh := make(chan error)
 	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
 
-	bopts := table.Options{
-		BlockSize:         db.opt.BlockSize,
-		BloomFalsePostive: db.opt.BloomFalsePositive,
-	}
-	tableData := buildL0Table(ft, bopts)
-	if !db.opt.KeepL0InMemory {
-		_, err := fd.Write(tableData)
-		if err != nil {
-			db.elog.Errorf("ERROR while writing to level 0: %v", err)
-			return err
-		}
+	if _, err = fd.Write(tableData); err != nil {
+		db.elog.Errorf("ERROR while writing to level 0: %v", err)
+		return err
 	}
 	dirSyncErr := <-dirSyncCh
 
@@ -922,12 +930,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		LoadingMode: db.opt.TableLoadingMode,
 		ChkMode:     db.opt.ChecksumVerificationMode,
 	}
-	var tbl *table.Table
-	if db.opt.KeepL0InMemory {
-		tbl, err = table.OpenInMemoryTable(fd, tableData)
-	} else {
-		tbl, err = table.OpenTable(fd, opts)
-	}
+	tbl, err := table.OpenTable(fd, opts)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err
