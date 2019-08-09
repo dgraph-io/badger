@@ -123,8 +123,8 @@ type block struct {
 	offset            int
 	data              []byte
 	numEntries        int // number of entries present in the block
+	entriesIndexStart int // start index of entryOffsets list
 	entryOffsets      []uint32
-	entriesIndexStart int
 	chkLen            int // checksum length
 }
 
