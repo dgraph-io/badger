@@ -18,8 +18,8 @@ package table
 
 import (
 	"bytes"
-	"encoding/binary"
 	"math"
+	"unsafe"
 
 	"github.com/dgryski/go-farm"
 
@@ -40,15 +40,15 @@ type header struct {
 }
 
 // Encode encodes the header.
-func (h header) Encode(b []byte) {
-	binary.BigEndian.PutUint16(b[0:2], h.plen)
-	binary.BigEndian.PutUint16(b[2:4], h.klen)
+func (h header) Encode() []byte {
+	var b [4]byte
+	*(*header)(unsafe.Pointer(&b[0])) = h
+	return b[:]
 }
 
 // Decode decodes the header.
 func (h *header) Decode(buf []byte) int {
-	h.plen = binary.BigEndian.Uint16(buf[0:2])
-	h.klen = binary.BigEndian.Uint16(buf[2:4])
+	*h = *(*header)(unsafe.Pointer(&buf[0]))
 	return h.Size()
 }
 
@@ -121,9 +121,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len())-b.baseOffset)
 
 	// Layout: header, diffKey, value.
-	var hbuf [4]byte
-	h.Encode(hbuf[:])
-	b.buf.Write(hbuf[:])
+	b.buf.Write(h.Encode())
 	b.buf.Write(diffKey) // We only need to store the key difference.
 
 	v.EncodeTo(b.buf)
@@ -141,12 +139,8 @@ Structure of Block.
 +-----------------------------------------+--------------------+--------------+------------------+
 */
 func (b *Builder) finishBlock() {
-	ebuf := make([]byte, len(b.entryOffsets)*4+4)
-	for i, offset := range b.entryOffsets {
-		binary.BigEndian.PutUint32(ebuf[4*i:4*i+4], uint32(offset))
-	}
-	binary.BigEndian.PutUint32(ebuf[len(ebuf)-4:], uint32(len(b.entryOffsets)))
-	b.buf.Write(ebuf)
+	b.buf.Write(y.U32SliceToBytes(b.entryOffsets))
+	b.buf.Write(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
 	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
 	b.writeChecksum(blockBuf)
@@ -244,9 +238,7 @@ func (b *Builder) Finish() []byte {
 
 	y.AssertTrue(uint32(n) < math.MaxUint32)
 	// Write index size.
-	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], uint32(n))
-	_, err = b.buf.Write(buf[:])
+	_, err = b.buf.Write(y.U32ToBytes(uint32(n)))
 	y.Check(err)
 
 	b.writeChecksum(index)
@@ -276,8 +268,6 @@ func (b *Builder) writeChecksum(data []byte) {
 
 	y.AssertTrue(uint32(n) < math.MaxUint32)
 	// Write checksum size.
-	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], uint32(n))
-	_, err = b.buf.Write(buf[:])
+	_, err = b.buf.Write(y.U32ToBytes(uint32(n)))
 	y.Check(err)
 }
