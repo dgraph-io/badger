@@ -53,25 +53,6 @@ func (itr *blockIterator) setBlock(b block) {
 	itr.entryOffsets = b.entryOffsets
 }
 
-// Seek brings us to the first block element that is >= input key.
-func (itr *blockIterator) seek(key []byte) {
-	foundEntryIdx := sort.Search(len(itr.entryOffsets), func(idx int) bool {
-		itr.setIdx(idx)
-		return y.CompareKeys(itr.key, key) >= 0
-	})
-	itr.setIdx(foundEntryIdx)
-}
-
-// seekToFirst brings us to the first element.
-func (itr *blockIterator) seekToFirst() {
-	itr.setIdx(0)
-}
-
-// seekToLast brings us to the last element.
-func (itr *blockIterator) seekToLast() {
-	itr.setIdx(len(itr.entryOffsets) - 1)
-}
-
 // setIdx sets the iterator to the entry index and set the current key and value.
 func (itr *blockIterator) setIdx(i int) {
 	itr.idx = i
@@ -148,11 +129,12 @@ func (itr *blockIterator) Seek(key []byte, whence int) {
 
 }
 
+// seekToFirst brings us to the first element.
 func (itr *blockIterator) SeekToFirst() {
 	itr.setIdx(0)
 }
 
-// SeekToLast brings us to the last element. Valid should return true.
+// seekToLast brings us to the last element.
 func (itr *blockIterator) SeekToLast() {
 	itr.setIdx(len(itr.entryOffsets) - 1)
 }
