@@ -26,84 +26,84 @@ import (
 )
 
 type blockIterator struct {
-	data       []byte
-	idx        int // Idx of the entry inside a block
-	err        error
-	baseKey    []byte
-	numEntries int
-	key        []byte
-	val        []byte
+	data         []byte
+	idx          int // Idx of the entry inside a block
+	err          error
+	baseKey      []byte
+	numEntries   int
+	key          []byte
+	val          []byte
+	entryOffsets []uint32
 
-	keyPrefixLen    uint16
-	entryEndOffsets []uint32
+	// prevOverlapLen stores the overlap of the previous key with the base key.
+	// This avoids unnecssary copy of base key when the overlap is same for multiple keys.
+	prevOverlapLen uint16
 }
 
 func (itr *blockIterator) setBlock(b block) {
 	itr.err = nil
 	itr.idx = 0
 	itr.baseKey = itr.baseKey[:0]
-	itr.keyPrefixLen = 0
+	itr.prevOverlapLen = 0
 	itr.key = itr.key[:0]
 	itr.val = itr.val[:0]
 	// Drop the index from the block. We don't need it anymore.
 	itr.data = b.data[:b.entriesIndexStart]
 	itr.numEntries = b.numEntries
-	itr.entryEndOffsets = b.entryOffsets
+	itr.entryOffsets = b.entryOffsets
 }
 
 // Seek brings us to the first block element that is >= input key.
-// The binary search will begin at `start`, you can use it to skip some items.
 func (itr *blockIterator) seek(key []byte) {
-	foundEntryIdx := sort.Search(len(itr.entryEndOffsets), func(idx int) bool {
+	foundEntryIdx := sort.Search(len(itr.entryOffsets), func(idx int) bool {
 		itr.setIdx(idx)
 		return y.CompareKeys(itr.key, key) >= 0
 	})
 	itr.setIdx(foundEntryIdx)
 }
 
-// seekToFirst brings us to the first element. Valid should return true.
+// seekToFirst brings us to the first element.
 func (itr *blockIterator) seekToFirst() {
 	itr.setIdx(0)
 }
 
-// seekToLast brings us to the last element. Valid should return true.
+// seekToLast brings us to the last element.
 func (itr *blockIterator) seekToLast() {
-	itr.setIdx(len(itr.entryEndOffsets) - 1)
+	itr.setIdx(len(itr.entryOffsets) - 1)
 }
 
 // setIdx sets the iterator to the entry index and set the current key and value.
 func (itr *blockIterator) setIdx(i int) {
 	itr.idx = i
-	if i >= len(itr.entryEndOffsets) || i < 0 {
+	if i >= len(itr.entryOffsets) || i < 0 {
 		itr.err = io.EOF
 		return
 	}
 	itr.err = nil
-	var startOffset int
-	startOffset = int(itr.entryEndOffsets[i])
+	startOffset := int(itr.entryOffsets[i])
 
 	// Set base key.
 	if len(itr.baseKey) == 0 {
 		var baseHeader header
 		baseHeader.Decode(itr.data)
-		itr.baseKey = itr.data[headerSize : headerSize+baseHeader.overlapLength]
+		itr.baseKey = itr.data[headerSize : headerSize+baseHeader.diffLength]
 	}
 	var endOffset int
 	if itr.idx+1 == itr.numEntries {
 		endOffset = len(itr.data)
 	} else {
-		endOffset = int(itr.entryEndOffsets[i+1])
+		endOffset = int(itr.entryOffsets[i+1])
 	}
 
 	entryData := itr.data[startOffset:endOffset]
 	var h header
 	h.Decode(entryData)
-	// Copy overlap
-	if h.overlapLength > itr.keyPrefixLen {
+	// Copy overlap only if it's length is more than the overlap of
+	// the previous key with the base key.
+	if h.overlapLength > itr.prevOverlapLen {
 		itr.key = append(itr.key[:0], itr.baseKey[:h.overlapLength]...)
 	}
-
-	itr.keyPrefixLen = h.overlapLength
+	itr.prevOverlapLen = h.overlapLength
 	valueOff := headerSize + int(h.diffLength)
 	diffKey := entryData[headerSize:valueOff]
 	itr.key = append(itr.key[:h.overlapLength], diffKey...)
@@ -137,7 +137,7 @@ func (itr *blockIterator) Seek(key []byte, whence int) {
 		startIndex = itr.idx
 	}
 
-	foundEntryIdx := sort.Search(len(itr.entryEndOffsets), func(idx int) bool {
+	foundEntryIdx := sort.Search(len(itr.entryOffsets), func(idx int) bool {
 		if idx < startIndex {
 			return false
 		}
@@ -154,7 +154,7 @@ func (itr *blockIterator) SeekToFirst() {
 
 // SeekToLast brings us to the last element. Valid should return true.
 func (itr *blockIterator) SeekToLast() {
-	itr.setIdx(len(itr.entryEndOffsets) - 1)
+	itr.setIdx(len(itr.entryOffsets) - 1)
 }
 
 func (itr *blockIterator) next() {

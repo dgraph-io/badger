@@ -55,7 +55,7 @@ func (h *header) Decode(buf []byte) int {
 const headerSize = 4
 
 // Size returns size of the header. Currently it's just a constant.
-func (h header) Size() int { return 4 }
+func (h header) Size() int { return headerSize }
 
 // Builder is used in building a table.
 type Builder struct {
