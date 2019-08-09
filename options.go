@@ -76,9 +76,9 @@ type Options struct {
 
 	// 4. Flags for testing purposes
 	// ------------------------------
-	maxBatchCount int64 // max entries in batch
-	maxBatchSize  int64 // max batch size in bytes
-
+	maxBatchCount int64  // max entries in batch
+	maxBatchSize  int64  // max batch size in bytes
+	EncryptionKey []byte // Encryption key
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -115,6 +115,7 @@ func DefaultOptions(path string) Options {
 		Truncate:           false,
 		Logger:             defaultLogger,
 		LogRotatesToFlush:  2,
+		EncryptionKey:      []byte{},
 	}
 }
 
@@ -405,5 +406,14 @@ func (opt Options) WithCompactL0OnClose(val bool) Options {
 // The default value of LogRotatesToFlush is 2.
 func (opt Options) WithLogRotatesToFlush(val int32) Options {
 	opt.LogRotatesToFlush = val
+	return opt
+}
+
+// WithEncryptionKey return a new Options value with EncryptionKey set to the given value.
+//
+// EncryptionKey is used to encrypt the data with AES. Type of AES is used based on the key
+// size. For example 16 bytes will use AES-128. 24 bytes will use AES-192.32 bytes will use AES-256.
+func (opt Options) WithEncryptionKey(key []byte) Options {
+	opt.EncryptionKey = key
 	return opt
 }
