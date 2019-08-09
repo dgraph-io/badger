@@ -95,7 +95,7 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 			break
 		}
 	}
-	return newKey[i:len(newKey)]
+	return newKey[i:]
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct) {

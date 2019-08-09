@@ -16,7 +16,6 @@
 
 package table
 
-/*
 import (
 	"bytes"
 	"crypto/sha256"
@@ -855,4 +854,3 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 	require.NoError(b, err, "unable to open table")
 	return tbl
 }
-*/
