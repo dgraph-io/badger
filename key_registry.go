@@ -26,7 +26,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/dgraph-io/badger/pb"
@@ -38,8 +37,6 @@ const (
 	KeyRegistryFileName = "KEYREGISTRY"
 	// KeyRegistryRewriteFileName is the file name for the rewrite key registry file.
 	KeyRegistryRewriteFileName = "REWRITE-KEYREGISTRY"
-	// RotationPeriod is the key rotation period for datakey.
-	RotationPeriod = 10 * 24 * time.Hour
 )
 
 // SanityText is used to check whether the given user provided storage key is valid or not
@@ -48,18 +45,19 @@ var sanityText = []byte("Hello Badger")
 // KeyRegistry used to maintain all the data keys.
 type KeyRegistry struct {
 	sync.RWMutex
-	dataKeys      map[uint64]*pb.DataKey
-	lastCreated   int64 //lastCreated is the timestamp of the last data key generated.
-	nextKeyID     uint64
-	encryptionKey []byte
-	fp            *os.File
+	dataKeys    map[uint64]*pb.DataKey
+	lastCreated int64 //lastCreated is the timestamp of the last data key generated.
+	nextKeyID   uint64
+	fp          *os.File
+	opt         Options
 }
 
-func newKeyRegistry(storageKey []byte) *KeyRegistry {
+// newKeyRegistry returns KeyRegistry.
+func newKeyRegistry(opt Options) *KeyRegistry {
 	return &KeyRegistry{
-		dataKeys:      make(map[uint64]*pb.DataKey),
-		nextKeyID:     0,
-		encryptionKey: storageKey,
+		dataKeys:  make(map[uint64]*pb.DataKey),
+		nextKeyID: 0,
+		opt:       opt,
 	}
 }
 
@@ -74,29 +72,27 @@ func OpenKeyRegistry(opt Options) (*KeyRegistry, error) {
 		flags |= y.Sync
 	}
 	fp, err := y.OpenExistingFile(path, flags)
-	if err != nil {
-		// OpenExistingFile just open file.
-		// So checking whether the file exist or not. If not
-		// We'll create new keyregistry.
-		if os.IsNotExist(err) {
-			// Creating new registry file if not exist.
-			kr := newKeyRegistry(opt.EncryptionKey)
-			if opt.ReadOnly {
-				return kr, nil
-			}
-			// Writing the key regitry to the file.
-			if err := WriteKeyRegistry(kr, opt); err != nil {
-				return nil, y.Wrapf(err, "Error while writing key registry.")
-			}
-			fp, err = y.OpenExistingFile(path, flags)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			return nil, y.Wrapf(err, "Error while opening key registry.")
+	// OpenExistingFile just open file.
+	// So checking whether the file exist or not. If not
+	// We'll create new keyregistry.
+	if err != nil && os.IsNotExist(err) {
+		// Creating new registry file if not exist.
+		kr := newKeyRegistry(opt)
+		if opt.ReadOnly {
+			return kr, nil
 		}
+		// Writing the key regitry to the file.
+		if err := WriteKeyRegistry(kr, opt); err != nil {
+			return nil, y.Wrapf(err, "Error while writing key registry.")
+		}
+		fp, err = y.OpenExistingFile(path, flags)
+		if err != nil {
+			return nil, err
+		}
+	} else if err != nil {
+		return nil, y.Wrapf(err, "Error while opening key registry.")
 	}
-	kr, err := readKeyRegistry(fp, opt.EncryptionKey)
+	kr, err := readKeyRegistry(fp, opt)
 	if err != nil {
 		// This case happens only if the file is opened properly and
 		// not able to read.
@@ -121,6 +117,7 @@ func newKeyRegistryIterator(fp *os.File, encryptionKey []byte) (*keyRegistryIter
 	return &keyRegistryIterator{
 		encryptionKey: encryptionKey,
 		fp:            fp,
+		lenCrcBuf:     [8]byte{},
 	}, isValidRegistry(fp, encryptionKey)
 }
 
@@ -184,12 +181,13 @@ func (kri *keyRegistryIterator) Next() (*pb.DataKey, error) {
 	return dataKey, nil
 }
 
-func readKeyRegistry(fp *os.File, encryptionKey []byte) (*KeyRegistry, error) {
-	itr, err := newKeyRegistryIterator(fp, encryptionKey)
+// readKeyRegistry will read the key registry file and build the key registry struct.
+func readKeyRegistry(fp *os.File, opt Options) (*KeyRegistry, error) {
+	itr, err := newKeyRegistryIterator(fp, opt.EncryptionKey)
 	if err != nil {
 		return nil, err
 	}
-	kr := newKeyRegistry(encryptionKey)
+	kr := newKeyRegistry(opt)
 	var dk *pb.DataKey
 	dk, err = itr.Next()
 	for err == nil && dk != nil {
@@ -209,6 +207,13 @@ func readKeyRegistry(fp *os.File, encryptionKey []byte) (*KeyRegistry, error) {
 	return kr, err
 }
 
+/*
+Structure of Key Registry.
++-------------------+---------------------+--------------------+--------------+------------------+
+| Sanity Text       | IV                  | DataKey1           | DataKey2     | ...              |
++-------------------+---------------------+--------------------+--------------+------------------+
+*/
+
 // WriteKeyRegistry will rewrite the existing key registry file with new one
 // It is okay to give closed key registry. Since, it's using only the datakey.
 func WriteKeyRegistry(reg *KeyRegistry, opt Options) error {
@@ -218,19 +223,16 @@ func WriteKeyRegistry(reg *KeyRegistry, opt Options) error {
 	if err != nil {
 		return err
 	}
-
 	// closeBeforeReturn will close the fd before returing error.
 	closeBeforeReturn := func(err error) error {
 		fp.Close()
 		return err
 	}
-
 	buf := &bytes.Buffer{}
 	iv, err := y.GenerateIV()
 	if err != nil {
 		return closeBeforeReturn(err)
 	}
-
 	// Encrypt sanity text if the storage presents.
 	eSanity := sanityText
 	if len(opt.EncryptionKey) > 0 {
@@ -244,7 +246,6 @@ func WriteKeyRegistry(reg *KeyRegistry, opt Options) error {
 	y.Check(err)
 	_, err = buf.Write(eSanity)
 	y.Check(err)
-
 	// Write all the datakeys to the buf.
 	for _, k := range reg.dataKeys {
 		// Writing the datakey to the given file fd.
@@ -252,23 +253,18 @@ func WriteKeyRegistry(reg *KeyRegistry, opt Options) error {
 			return closeBeforeReturn(err)
 		}
 	}
-
 	// Write buf to the disk.
 	if _, err = fp.Write(buf.Bytes()); err != nil {
 		return closeBeforeReturn(err)
 	}
-
-	registryPath := filepath.Join(opt.Dir, KeyRegistryFileName)
-
 	// We need to close the file before renaming.
 	if err = fp.Close(); err != nil {
 		return err
 	}
 	// Rename to the original file.
-	if err = os.Rename(tmpPath, registryPath); err != nil {
+	if err = os.Rename(tmpPath, filepath.Join(opt.Dir, KeyRegistryFileName)); err != nil {
 		return err
 	}
-
 	// Sync Dir.
 	return syncDir(opt.Dir)
 }
@@ -280,29 +276,32 @@ func (kr *KeyRegistry) dataKey(id uint64) (*pb.DataKey, error) {
 	}
 	dk, ok := kr.dataKeys[id]
 	if !ok {
-		return nil, ErrInvalidDataKeyID
+		return nil, y.Wrapf(ErrInvalidDataKeyID, "Error for the KEY ID %d", id)
 	}
 	return dk, nil
 }
 
+// latest datakey will give you the lastest generated datakey based on the rotation
+// period. If the last generated datakey lifetime exceeds more than the rotation period.
+// It'll create new datakey.
 func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
-	if len(kr.encryptionKey) == 0 {
+	if len(kr.opt.EncryptionKey) == 0 {
 		return nil, nil
 	}
-
 	// Time diffrence from the last generated time.
 	diff := time.Since(time.Unix(kr.lastCreated, 0))
-	if diff < RotationPeriod {
-		// If less than 10 days, returns the last generaterd key.
+	if diff < kr.opt.EncryptionKeyRotationDuration {
+		// If less than EncryptionKeyRotationDuration, returns the last generaterd key.
 		kr.RLock()
 		defer kr.RUnlock()
 		dk := kr.dataKeys[kr.nextKeyID]
 		return dk, nil
 	}
-
+	kr.Lock()
+	defer kr.Unlock()
 	// Otherwise Increment the KeyID and generate new datakey.
-	keyID := atomic.AddUint64(&kr.nextKeyID, 1)
-	k := make([]byte, len(kr.encryptionKey))
+	kr.nextKeyID++
+	k := make([]byte, len(kr.opt.EncryptionKey))
 	iv, err := y.GenerateIV()
 	if err != nil {
 		return nil, err
@@ -312,26 +311,24 @@ func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 		return nil, err
 	}
 	dk := &pb.DataKey{
-		KeyId:     keyID,
+		KeyId:     kr.nextKeyID,
 		Data:      k,
 		CreatedAt: time.Now().Unix(),
 		Iv:        iv,
 	}
 	// Store the datekey.
 	buf := &bytes.Buffer{}
-	if err = storeDataKey(buf, kr.encryptionKey, dk); err != nil {
+	if err = storeDataKey(buf, kr.opt.EncryptionKey, dk); err != nil {
 		return nil, err
 	}
-	// Persist the datakey to the disk
+	// PeEntry5rsist the datakey to the disk
 	if _, err = kr.fp.Write(buf.Bytes()); err != nil {
 		return nil, err
 	}
 	// storeDatakey encrypts the datakey So, placing unencrypted key in the memory.
 	dk.Data = k
-	kr.Lock()
-	defer kr.Unlock()
 	kr.lastCreated = dk.CreatedAt
-	kr.dataKeys[keyID] = dk
+	kr.dataKeys[kr.nextKeyID] = dk
 	return dk, nil
 }
 
@@ -340,7 +337,10 @@ func (kr *KeyRegistry) Close() error {
 	return kr.fp.Close()
 }
 
+// storeDataKey stores datakey in a encrypted format in the given buffer. If storage key preset.
 func storeDataKey(buf *bytes.Buffer, storageKey []byte, k *pb.DataKey) error {
+	// xor will encrypt the IV and xor with the given data.
+	// It'll used for both encryption and decryption.
 	xor := func() error {
 		if len(storageKey) == 0 {
 			return nil
@@ -365,6 +365,6 @@ func storeDataKey(buf *bytes.Buffer, storageKey []byte, k *pb.DataKey) error {
 	y.Check(err)
 	_, err = buf.Write(data)
 	y.Check(err)
-	// Decrypting the datakey back.
+	// Decrypting the datakey back since we're using the pointer.
 	return xor()
 }

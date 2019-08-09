@@ -29,11 +29,7 @@ func TestBuildRegistry(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
-	opt := Options{
-		Dir:           dir,
-		ReadOnly:      false,
-		EncryptionKey: encryptionKey,
-	}
+	opt := getTestOptions(dir).WithEncryptionKey(encryptionKey)
 	kr, err := OpenKeyRegistry(opt)
 	defer os.Remove(dir)
 	require.NoError(t, err)
@@ -57,11 +53,7 @@ func TestRewriteRegistry(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
-	opt := Options{
-		Dir:           dir,
-		ReadOnly:      false,
-		EncryptionKey: encryptionKey,
-	}
+	opt := getTestOptions(dir).WithEncryptionKey(encryptionKey)
 	kr, err := OpenKeyRegistry(opt)
 	defer os.Remove(dir)
 	require.NoError(t, err)
@@ -84,11 +76,7 @@ func TestMismatch(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
-	opt := Options{
-		Dir:           dir,
-		ReadOnly:      false,
-		EncryptionKey: encryptionKey,
-	}
+	opt := getTestOptions(dir).WithEncryptionKey(encryptionKey)
 	kr, err := OpenKeyRegistry(opt)
 	defer os.Remove(dir)
 	require.NoError(t, err)
@@ -110,11 +98,7 @@ func TestEncryptionAndDecryption(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
-	opt := Options{
-		Dir:           dir,
-		ReadOnly:      false,
-		EncryptionKey: encryptionKey,
-	}
+	opt := getTestOptions(dir).WithEncryptionKey(encryptionKey)
 	kr, err := OpenKeyRegistry(opt)
 	defer os.Remove(dir)
 	require.NoError(t, err)
@@ -124,5 +108,6 @@ func TestEncryptionAndDecryption(t *testing.T) {
 	kr, err = OpenKeyRegistry(opt)
 	require.NoError(t, err)
 	dk1, err := kr.latestDataKey()
+	require.NoError(t, err)
 	require.Equal(t, dk.Data, dk1.Data)
 }

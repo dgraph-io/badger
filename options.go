@@ -17,6 +17,8 @@
 package badger
 
 import (
+	"time"
+
 	"github.com/dgraph-io/badger/options"
 )
 
@@ -76,9 +78,10 @@ type Options struct {
 
 	// 4. Flags for testing purposes
 	// ------------------------------
-	maxBatchCount int64  // max entries in batch
-	maxBatchSize  int64  // max batch size in bytes
-	EncryptionKey []byte // Encryption key
+	maxBatchCount                 int64         // max entries in batch
+	maxBatchSize                  int64         // max batch size in bytes
+	EncryptionKey                 []byte        // Encryption key
+	EncryptionKeyRotationDuration time.Duration // Rotation duration for encryption.
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -110,12 +113,13 @@ func DefaultOptions(path string) Options {
 		// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
 		ValueLogFileSize: 1<<30 - 1,
 
-		ValueLogMaxEntries: 1000000,
-		ValueThreshold:     32,
-		Truncate:           false,
-		Logger:             defaultLogger,
-		LogRotatesToFlush:  2,
-		EncryptionKey:      []byte{},
+		ValueLogMaxEntries:            1000000,
+		ValueThreshold:                32,
+		Truncate:                      false,
+		Logger:                        defaultLogger,
+		LogRotatesToFlush:             2,
+		EncryptionKey:                 []byte{},
+		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 	}
 }
 
@@ -231,7 +235,7 @@ func (opt Options) WithTruncate(val bool) Options {
 // WithLogger returns a new Options value with Logger set to the given value.
 //
 // Logger provides a way to configure what logger each value of badger.DB uses.
-//
+//10 * 24 * time.Hour
 // The default value of Logger writes to stderr using the log package from the Go standard library.
 func (opt Options) WithLogger(val Logger) Options {
 	opt.Logger = val
@@ -252,10 +256,10 @@ func (opt Options) WithMaxTableSize(val int64) Options {
 // value.
 //
 // LevelSizeMultiplier sets the ratio between the maximum sizes of contiguous levels in the LSM.
-// Once a level grows to be larger than this ratio allowed, the compaction process will be
-//  triggered.
-//
-// The default value of LevelSizeMultiplier is 10.
+// Once a level grow10 * 24 * time.Hours to be larger than this ratio allowed, the compaction process will be
+//  triggered.10 * 24 * time.Hour
+//10 * 24 * time.Hour
+// The default value10 * 24 * time.Hour of LevelSizeMultiplier is 10.
 func (opt Options) WithLevelSizeMultiplier(val int) Options {
 	opt.LevelSizeMultiplier = val
 	return opt
@@ -415,5 +419,14 @@ func (opt Options) WithLogRotatesToFlush(val int32) Options {
 // size. For example 16 bytes will use AES-128. 24 bytes will use AES-192.32 bytes will use AES-256.
 func (opt Options) WithEncryptionKey(key []byte) Options {
 	opt.EncryptionKey = key
+	return opt
+}
+
+// WithEncryptionRotationDuration returns new Options value with the duration set to the given value.
+//
+// Key Registry will use this duration to create new keys. If the previous generated key exceed the
+// given duration. Then the key registry will create new key.
+func (opt Options) WithEncryptionRotationDuration(d time.Duration) Options {
+	opt.EncryptionKeyRotationDuration = d
 	return opt
 }
