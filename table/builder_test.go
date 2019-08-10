@@ -92,17 +92,17 @@ func BenchmarkBuilder(b *testing.B) {
 		func() {
 			opts := Options{BlockSize: 4 * 1024, BloomFalsePostive: 0.01}
 			builder := NewTableBuilder(opts)
-			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
-			f, err := y.OpenSyncedFile(filename, false)
-			require.NoError(b, err)
+			// filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
+			// f, err := y.OpenSyncedFile(filename, false)
+			// require.NoError(b, err)
 
 			for i := 0; i < keysCount; i++ {
 				builder.Add(key(i), vs)
 			}
 
-			// _ = builder.Finish()
+			builder.Finish()
 			// bo := bufio.NewWriterSize(f, 100<<20)
-			f.Write(builder.Finish())
+			// f.Write(builder.Finish())
 			// f.Write(builder.Finish())
 			// fmt.Println(builder.buf.Len())
 			// io.Copy(f, builder.Finish())

@@ -74,7 +74,7 @@ type Builder struct {
 func NewTableBuilder(opts Options) *Builder {
 	return &Builder{
 		// buf:        newBuffer(1 << 20),
-		buf:        y.NewBuffer(4 * 1024),
+		buf:        y.NewBuffer(4 << 20),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
