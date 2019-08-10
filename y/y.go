@@ -347,15 +347,15 @@ type page struct {
 }
 
 type Buffer struct {
-	length   int
-	pageSize int
-	pages    []*page
+	length      int
+	curPageSize int
+	pages       []*page
 }
 
 func NewBuffer(pageSize int) *Buffer {
-	b := &Buffer{pageSize: pageSize}
+	b := &Buffer{curPageSize: pageSize}
 	b.pages = make([]*page, 0)
-	b.pages = append(b.pages, &page{buf: make([]byte, 0, b.pageSize)})
+	b.pages = append(b.pages, &page{buf: make([]byte, 0, b.curPageSize)})
 	b.length = 0
 	return b
 }
@@ -364,16 +364,16 @@ func (b *Buffer) Write(data []byte) (int, error) {
 	written := 0
 	for {
 		cp := b.pages[len(b.pages)-1] // current page
-		remaining := cap(cp.buf) - len(cp.buf)
-		m := min(remaining, len(data)-written)
-		cp.buf = append(cp.buf, data[written:written+m]...)
-
-		written += m
-		if written >= len(data) {
+		sz := len(cp.buf)
+		n := copy(cp.buf[sz:cap(cp.buf)], data)
+		cp.buf = cp.buf[:sz+n]
+		if len(data) == n {
 			break
 		}
+		data = data[n:]
 
-		b.pages = append(b.pages, &page{buf: make([]byte, 0, b.pageSize)})
+		b.curPageSize *= 2
+		b.pages = append(b.pages, &page{buf: make([]byte, 0, b.curPageSize)})
 	}
 	b.length += len(data)
 
@@ -398,8 +398,8 @@ func (b *Buffer) ReadAt(offset, length int) []byte {
 	}
 
 	buf := make([]byte, length) // allocate all buffer at start
-	pageIdx := offset / b.pageSize
-	startIdx := offset % b.pageSize
+	pageIdx := offset / b.curPageSize
+	startIdx := offset % b.curPageSize
 
 	cp := b.pages[pageIdx]
 	read := 0
@@ -422,7 +422,7 @@ func (b *Buffer) Bytes() []byte {
 	buf := make([]byte, b.length)
 	written := 0
 	for i := 0; i < len(b.pages); i++ {
-		written += copy(buf[written:], b.pages[i].buf[:])
+		written += copy(buf[written:], b.pages[i].buf)
 	}
 
 	return buf

@@ -99,8 +99,8 @@ func BenchmarkBuilder(b *testing.B) {
 			builder.Add(key(i), vs)
 		}
 
-		data := builder.Finish()
-		b.Logf("data size: %d\n", len(data))
+		_ = builder.Finish()
+		// b.Logf("data size: %d\n", len(data))
 		// bo := bufio.NewWriterSize(f, 100<<20)
 		// f.Write(builder.Finish())
 		// f.Write(builder.Finish())
