@@ -46,7 +46,7 @@ var sanityText = []byte("Hello Badger")
 type KeyRegistry struct {
 	sync.RWMutex
 	dataKeys    map[uint64]*pb.DataKey
-	lastCreated int64 //lastCreated is the timestamp of the last data key generated.
+	lastCreated int64 //lastCreated is the timestamp(seconds) of the last data key generated.
 	nextKeyID   uint64
 	fp          *os.File
 	opt         Options
@@ -81,7 +81,7 @@ func OpenKeyRegistry(opt Options) (*KeyRegistry, error) {
 		if opt.ReadOnly {
 			return kr, nil
 		}
-		// Writing the key regitry to the file.
+		// Writing the key registry to the file.
 		if err := WriteKeyRegistry(kr, opt); err != nil {
 			return nil, y.Wrapf(err, "Error while writing key registry.")
 		}
@@ -111,22 +111,22 @@ type keyRegistryIterator struct {
 	lenCrcBuf [8]byte
 }
 
-// newKeyRegistryIterator returns iterator, which will allow you to iterate
+// newKeyRegistryIterator returns iterator which will allow you to iterate
 // over the data key of the the key registry.
 func newKeyRegistryIterator(fp *os.File, encryptionKey []byte) (*keyRegistryIterator, error) {
 	return &keyRegistryIterator{
 		encryptionKey: encryptionKey,
 		fp:            fp,
 		lenCrcBuf:     [8]byte{},
-	}, isValidRegistry(fp, encryptionKey)
+	}, validRegistry(fp, encryptionKey)
 }
 
 // isValidRegistry checks the given encryption key is valid or not.
-func isValidRegistry(fp *os.File, encryptionKey []byte) error {
+func validRegistry(fp *os.File, encryptionKey []byte) error {
 	iv := make([]byte, aes.BlockSize)
 	_, err := fp.Read(iv)
 	if err != nil {
-		return y.Wrapf(err, "Error while reading IV for ket registry.")
+		return y.Wrapf(err, "Error while reading IV for key registry.")
 	}
 	eSanityText := make([]byte, len(sanityText))
 	if _, err = fp.Read(eSanityText); err != nil {
@@ -145,7 +145,7 @@ func isValidRegistry(fp *os.File, encryptionKey []byte) error {
 	return nil
 }
 
-func (kri *keyRegistryIterator) Next() (*pb.DataKey, error) {
+func (kri *keyRegistryIterator) next() (*pb.DataKey, error) {
 	// isEOF returns nil if it is EOF.
 	isEOF := func(err error) error {
 		if err == io.EOF {
@@ -166,7 +166,7 @@ func (kri *keyRegistryIterator) Next() (*pb.DataKey, error) {
 	}
 	// Check checksum.
 	if crc32.Checksum(data, y.CastagnoliCrcTable) != binary.BigEndian.Uint32(kri.lenCrcBuf[4:]) {
-		return nil, errBadChecksum
+		return nil, y.Wrapf(err, "Error while checking checksum for data key.")
 	}
 	dataKey := &pb.DataKey{}
 	if err = dataKey.Unmarshal(data); err != nil {
@@ -189,7 +189,7 @@ func readKeyRegistry(fp *os.File, opt Options) (*KeyRegistry, error) {
 	}
 	kr := newKeyRegistry(opt)
 	var dk *pb.DataKey
-	dk, err = itr.Next()
+	dk, err = itr.next()
 	for err == nil && dk != nil {
 		if dk.KeyId > kr.nextKeyID {
 			// Set the maximum key ID for next key ID generation.
@@ -202,7 +202,7 @@ func readKeyRegistry(fp *os.File, opt Options) (*KeyRegistry, error) {
 		// No need to lock, since we are building the initial state.
 		kr.dataKeys[kr.nextKeyID] = dk
 		// Forward the iterator.
-		dk, err = itr.Next()
+		dk, err = itr.next()
 	}
 	return kr, err
 }
@@ -210,11 +210,11 @@ func readKeyRegistry(fp *os.File, opt Options) (*KeyRegistry, error) {
 /*
 Structure of Key Registry.
 +-------------------+---------------------+--------------------+--------------+------------------+
-| Sanity Text       | IV                  | DataKey1           | DataKey2     | ...              |
+|     IV            | Sanity Text         | DataKey1           | DataKey2     | ...              |
 +-------------------+---------------------+--------------------+--------------+------------------+
 */
 
-// WriteKeyRegistry will rewrite the existing key registry file with new one
+// WriteKeyRegistry will rewrite the existing key registry file with new one.
 // It is okay to give closed key registry. Since, it's using only the datakey.
 func WriteKeyRegistry(reg *KeyRegistry, opt Options) error {
 	tmpPath := filepath.Join(opt.Dir, KeyRegistryRewriteFileName)
@@ -233,7 +233,7 @@ func WriteKeyRegistry(reg *KeyRegistry, opt Options) error {
 	if err != nil {
 		return closeBeforeReturn(err)
 	}
-	// Encrypt sanity text if the storage presents.
+	// Encrypt sanity text if the encryption key presents.
 	eSanity := sanityText
 	if len(opt.EncryptionKey) > 0 {
 		var err error
@@ -248,7 +248,7 @@ func WriteKeyRegistry(reg *KeyRegistry, opt Options) error {
 	y.Check(err)
 	// Write all the datakeys to the buf.
 	for _, k := range reg.dataKeys {
-		// Writing the datakey to the given file fd.
+		// Writing the datakey to the given buffer.
 		if err := storeDataKey(buf, opt.EncryptionKey, k); err != nil {
 			return closeBeforeReturn(err)
 		}
@@ -286,21 +286,19 @@ func (kr *KeyRegistry) dataKey(id uint64) (*pb.DataKey, error) {
 // It'll create new datakey.
 func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 	if len(kr.opt.EncryptionKey) == 0 {
+		// nil is for no encryption.
 		return nil, nil
 	}
+	kr.RLock()
 	// Time diffrence from the last generated time.
 	diff := time.Since(time.Unix(kr.lastCreated, 0))
 	if diff < kr.opt.EncryptionKeyRotationDuration {
-		// If less than EncryptionKeyRotationDuration, returns the last generaterd key.
-		kr.RLock()
+		// If less than EncryptionKeyRotationDuration, returns the last generated key.
 		defer kr.RUnlock()
 		dk := kr.dataKeys[kr.nextKeyID]
 		return dk, nil
 	}
-	kr.Lock()
-	defer kr.Unlock()
-	// Otherwise Increment the KeyID and generate new datakey.
-	kr.nextKeyID++
+	kr.RUnlock()
 	k := make([]byte, len(kr.opt.EncryptionKey))
 	iv, err := y.GenerateIV()
 	if err != nil {
@@ -310,6 +308,10 @@ func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 	if err != nil {
 		return nil, err
 	}
+	kr.Lock()
+	defer kr.Unlock()
+	// Otherwise Increment the KeyID and generate new datakey.
+	kr.nextKeyID++
 	dk := &pb.DataKey{
 		KeyId:     kr.nextKeyID,
 		Data:      k,
@@ -321,7 +323,7 @@ func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 	if err = storeDataKey(buf, kr.opt.EncryptionKey, dk); err != nil {
 		return nil, err
 	}
-	// PeEntry5rsist the datakey to the disk
+	// Persist the datakey to the disk
 	if _, err = kr.fp.Write(buf.Bytes()); err != nil {
 		return nil, err
 	}
@@ -349,7 +351,7 @@ func storeDataKey(buf *bytes.Buffer, storageKey []byte, k *pb.DataKey) error {
 		k.Data, err = y.XORBlock(k.Data, storageKey, k.Iv)
 		return err
 	}
-	// In memory datakey will in plain text, so encrypting before storing to the disk.
+	// In memory datakey will in plain text so encrypting before storing to the disk.
 	var err error
 	if err = xor(); err != nil {
 		return err

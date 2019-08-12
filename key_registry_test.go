@@ -35,14 +35,18 @@ func TestBuildRegistry(t *testing.T) {
 	require.NoError(t, err)
 	dk, err := kr.latestDataKey()
 	require.NoError(t, err)
+	// We're resetting the last created timestamp. So, it creates
+	// new datakey.
 	kr.lastCreated = 0
 	dk1, err := kr.latestDataKey()
+	// We generated two key. So, checking the length.
 	require.Equal(t, 2, len(kr.dataKeys))
 	require.NoError(t, err)
 	require.NoError(t, kr.Close())
 	kr2, err := OpenKeyRegistry(opt)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(kr2.dataKeys))
+	// Asserting the correctness of the datakey after opening the registry.
 	require.Equal(t, dk.Data, kr.dataKeys[dk.KeyId].Data)
 	require.Equal(t, dk1.Data, kr.dataKeys[dk1.KeyId].Data)
 	require.NoError(t, kr2.Close())
@@ -59,6 +63,8 @@ func TestRewriteRegistry(t *testing.T) {
 	require.NoError(t, err)
 	_, err = kr.latestDataKey()
 	require.NoError(t, err)
+	// We're resetting the last created timestamp. So, it creates
+	// new datakey.
 	kr.lastCreated = 0
 	_, err = kr.latestDataKey()
 	require.NoError(t, err)
@@ -80,10 +86,12 @@ func TestMismatch(t *testing.T) {
 	kr, err := OpenKeyRegistry(opt)
 	defer os.Remove(dir)
 	require.NoError(t, err)
-	kr.Close()
+	require.NoError(t, kr.Close())
+	// Opening with the same key and asserting.
 	kr, err = OpenKeyRegistry(opt)
 	require.NoError(t, err)
-	kr.Close()
+	require.NoError(t, kr.Close())
+	// Opening with the invalid key and asserting.
 	encryptionKey = make([]byte, 32)
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
@@ -104,10 +112,13 @@ func TestEncryptionAndDecryption(t *testing.T) {
 	require.NoError(t, err)
 	dk, err := kr.latestDataKey()
 	require.NoError(t, err)
-	kr.Close()
+	require.NoError(t, kr.Close())
+	// Checking the corretness of the datakey after closing and
+	// opening the key registry.
 	kr, err = OpenKeyRegistry(opt)
 	require.NoError(t, err)
 	dk1, err := kr.latestDataKey()
 	require.NoError(t, err)
 	require.Equal(t, dk.Data, dk1.Data)
+	require.NoError(t, kr.Close())
 }

@@ -119,4 +119,7 @@ var (
 
 	// ErrInvalidDataKeyID is returned if the datakey id is invalid
 	ErrInvalidDataKeyID = errors.New("Invalid datakey id")
+
+	// ErrBadChecksum is returned if there is a checksum mismatch
+	ErrBadChecksum = errors.New("Checksum mismatch")
 )
