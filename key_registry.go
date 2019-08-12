@@ -146,23 +146,16 @@ func validRegistry(fp *os.File, encryptionKey []byte) error {
 }
 
 func (kri *keyRegistryIterator) next() (*pb.DataKey, error) {
-	// isEOF returns nil if it is EOF.
-	isEOF := func(err error) error {
-		if err == io.EOF {
-			return nil
-		}
-		return err
-	}
 	var err error
 	// Read crc buf and data length.
 	if _, err = kri.fp.Read(kri.lenCrcBuf[:]); err != nil {
-		return nil, isEOF(err)
+		return nil, err
 	}
 	l := int64(binary.BigEndian.Uint32(kri.lenCrcBuf[0:4]))
 	// Read protobuf data.
 	data := make([]byte, l)
 	if _, err = kri.fp.Read(data); err != nil {
-		return nil, isEOF(err)
+		return nil, err
 	}
 	// Check checksum.
 	if crc32.Checksum(data, y.CastagnoliCrcTable) != binary.BigEndian.Uint32(kri.lenCrcBuf[4:]) {
@@ -203,6 +196,12 @@ func readKeyRegistry(fp *os.File, opt Options) (*KeyRegistry, error) {
 		kr.dataKeys[kr.nextKeyID] = dk
 		// Forward the iterator.
 		dk, err = itr.next()
+	}
+	if err != nil {
+		// We read all the key. So, Ignoring this error.
+		if err == io.EOF {
+			err = nil
+		}
 	}
 	return kr, err
 }
