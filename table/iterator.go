@@ -180,8 +180,8 @@ func (itr *blockIterator) parseKV(h header) {
 			"Pos:%d Len:%d EndOffset:%d Header:%v", itr.pos, len(itr.data), valEndOffset, h)
 		return
 	}
-	// TODO (ibrahim): Can we avoid this copy?
-	itr.val = y.SafeCopy(itr.val, itr.data[itr.pos:valEndOffset])
+
+	itr.val = itr.data[itr.pos:valEndOffset]
 	// Set pos to the end of current entry.
 	itr.pos = valEndOffset
 }
