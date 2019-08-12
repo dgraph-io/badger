@@ -1085,3 +1085,26 @@ func TestDiscardStatsMove(t *testing.T) {
 	require.Equal(t, stat, db.vlog.lfDiscardStats.m)
 	require.NoError(t, db.Close())
 }
+
+func TestBlockedDiscardStats(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.Remove(dir)
+
+	ops := getTestOptions(dir)
+	ops.ValueLogMaxEntries = 1
+	db, err := Open(ops)
+	require.NoError(t, err)
+	stat := make(map[uint32]int64, ops.ValueThreshold+10)
+	for i := uint32(0); i < uint32(ops.ValueThreshold+10); i++ {
+		stat[i] = 0
+	}
+	// Set discard stats.
+	db.vlog.lfDiscardStats = &lfDiscardStats{
+		m: stat,
+	}
+	db.blockWrite()
+	require.NoError(t, db.vlog.flushDiscardStats())
+	db.unblockWrite()
+	require.NoError(t, db.Close())
+}
