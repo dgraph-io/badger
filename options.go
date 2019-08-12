@@ -418,7 +418,8 @@ func (opt Options) WithLogRotatesToFlush(val int32) Options {
 // WithEncryptionKey return a new Options value with EncryptionKey set to the given value.
 //
 // EncryptionKey is used to encrypt the data with AES. Type of AES is used based on the key
-// size. For example 16 bytes will use AES-128. 24 bytes will use AES-192. 32 bytes will use AES-256.
+// size. For example 16 bytes will use AES-128. 24 bytes will use AES-192. 32 bytes will
+// use AES-256.
 func (opt Options) WithEncryptionKey(key []byte) Options {
 	opt.EncryptionKey = key
 	return opt
