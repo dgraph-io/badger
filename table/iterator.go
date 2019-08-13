@@ -69,10 +69,13 @@ func (itr *blockIterator) setIdx(i int) {
 		itr.baseKey = itr.data[headerSize : headerSize+baseHeader.diff]
 	}
 	var endOffset int
+	// idx points to the last entry in the block.
 	if itr.idx+1 == len(itr.entryOffsets) {
 		endOffset = len(itr.data)
 	} else {
-		endOffset = int(itr.entryOffsets[i+1])
+		// idx point to some entry other than the last one in the block.
+		// EndOffset of the current entry is the start offset of the next entry.
+		endOffset = int(itr.entryOffsets[itr.idx+1])
 	}
 
 	entryData := itr.data[startOffset:endOffset]
