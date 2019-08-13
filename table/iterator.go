@@ -49,7 +49,6 @@ func (itr *blockIterator) setBlock(b *block) {
 	itr.val = itr.val[:0]
 	// Drop the index from the block. We don't need it anymore.
 	itr.data = b.data[:b.entriesIndexStart]
-	itr.numEntries = b.numEntries
 	itr.entryOffsets = b.entryOffsets
 }
 
@@ -70,7 +69,7 @@ func (itr *blockIterator) setIdx(i int) {
 		itr.baseKey = itr.data[headerSize : headerSize+baseHeader.diff]
 	}
 	var endOffset int
-	if itr.idx+1 == itr.numEntries {
+	if itr.idx+1 == len(itr.entryOffsets) {
 		endOffset = len(itr.data)
 	} else {
 		endOffset = int(itr.entryOffsets[i+1])

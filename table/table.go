@@ -123,7 +123,6 @@ type block struct {
 	offset            int
 	data              []byte
 	checksum          []byte
-	numEntries        int // number of entries present in the block
 	entriesIndexStart int // start index of entryOffsets list
 	entryOffsets      []uint32
 	chkLen            int // checksum length
@@ -312,9 +311,9 @@ func (t *Table) block(idx int) (*block, error) {
 	blk.checksum = blk.data[readPos : readPos+blk.chkLen]
 	// Move back and read numEntries in the block.
 	readPos -= 4
-	blk.numEntries = int(y.BytesToU32(blk.data[readPos : readPos+4]))
-	entriesIndexStart := readPos - (blk.numEntries * 4)
-	entriesIndexEnd := entriesIndexStart + blk.numEntries*4
+	numEntries := int(y.BytesToU32(blk.data[readPos : readPos+4]))
+	entriesIndexStart := readPos - (numEntries * 4)
+	entriesIndexEnd := entriesIndexStart + numEntries*4
 
 	blk.entryOffsets = y.BytesToU32Slice(blk.data[entriesIndexStart:entriesIndexEnd])
 
