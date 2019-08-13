@@ -30,7 +30,6 @@ type blockIterator struct {
 	idx          int // Idx of the entry inside a block
 	err          error
 	baseKey      []byte
-	numEntries   int
 	key          []byte
 	val          []byte
 	entryOffsets []uint32
