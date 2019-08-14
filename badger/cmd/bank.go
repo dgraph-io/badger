@@ -94,7 +94,7 @@ func init() {
 			"interface in order to verify that all the data is published correctly.")
 	bankTest.Flags().BoolVarP(&verbose, "verbose", "v", false,
 		"If true, the test will print all the executed bank transfers to standard output. "+
-			"This outputs a lot so it's best to turn it off when running the test for a while")
+			"This outputs a lot so it's best to turn it off when running the test for a while.")
 
 	bankDisect.Flags().IntVarP(&numPrevious, "previous", "p", 12,
 		"Starting from the violation txn, how many previous versions to retrieve.")
