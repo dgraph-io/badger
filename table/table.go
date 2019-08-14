@@ -122,34 +122,18 @@ func (t *Table) DecrRef() error {
 type block struct {
 	offset            int
 	data              []byte
-	numEntries        int // number of entries present in the block
+	checksum          []byte
 	entriesIndexStart int // start index of entryOffsets list
 	entryOffsets      []uint32
 	chkLen            int // checksum length
 }
 
-func (b *block) verifyCheckSum() error {
-	readPos := len(b.data) - 4 - b.chkLen
-	if readPos < 0 {
-		// This should be rare, hence can create a error instead of having global error.
-		return fmt.Errorf("block does not contain checksum")
-	}
-
+func (b block) verifyCheckSum() error {
 	cs := &pb.Checksum{}
-	if err := cs.Unmarshal(b.data[readPos : readPos+b.chkLen]); err != nil {
+	if err := cs.Unmarshal(b.checksum); err != nil {
 		return y.Wrapf(err, "unable to unmarshal checksum for block")
 	}
-
-	return y.VerifyChecksum(b.data[:readPos], cs)
-}
-
-func (b *block) resetIterator(bi *blockIterator) {
-	bi.Reset()
-
-	bi.data = b.data
-	bi.numEntries = b.numEntries
-	bi.entryOffsets = b.entryOffsets
-	bi.entriesIndexStart = b.entriesIndexStart
+	return y.VerifyChecksum(b.data, cs)
 }
 
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function
@@ -322,22 +306,29 @@ func (t *Table) block(idx int) (*block, error) {
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(y.BytesToU32(blk.data[readPos : readPos+4]))
 
-	// Skip reading checksum, and move position to read numEntries in block.
-	readPos -= (blk.chkLen + 4)
-	blk.numEntries = int(y.BytesToU32(blk.data[readPos : readPos+4]))
-	entriesIndexStart := readPos - (blk.numEntries * 4)
-	entriesIndexEnd := entriesIndexStart + blk.numEntries*4
+	// Read checksum and store it
+	readPos -= blk.chkLen
+	blk.checksum = blk.data[readPos : readPos+blk.chkLen]
+	// Move back and read numEntries in the block.
+	readPos -= 4
+	numEntries := int(y.BytesToU32(blk.data[readPos : readPos+4]))
+	entriesIndexStart := readPos - (numEntries * 4)
+	entriesIndexEnd := entriesIndexStart + numEntries*4
 
 	blk.entryOffsets = y.BytesToU32Slice(blk.data[entriesIndexStart:entriesIndexEnd])
 
 	blk.entriesIndexStart = entriesIndexStart
+
+	// Drop checksum and checksum length.
+	// The checksum is calculated for actual data + entry index + index length
+	blk.data = blk.data[:readPos+4]
+
 	// Verify checksum on if checksum verification mode is OnRead on OnStartAndRead.
 	if t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead {
 		if err = blk.verifyCheckSum(); err != nil {
 			return nil, err
 		}
 	}
-
 	return blk, err
 }
 

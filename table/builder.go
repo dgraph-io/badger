@@ -35,8 +35,8 @@ func newBuffer(sz int) *bytes.Buffer {
 }
 
 type header struct {
-	plen uint16 // Overlap with base key.
-	klen uint16 // Length of the diff.
+	overlap uint16 // Overlap with base key.
+	diff    uint16 // Length of the diff.
 }
 
 // Encode encodes the header.
@@ -52,8 +52,10 @@ func (h *header) Decode(buf []byte) int {
 	return h.Size()
 }
 
+const headerSize = 4
+
 // Size returns size of the header. Currently it's just a constant.
-func (h header) Size() int { return 4 }
+func (h header) Size() int { return headerSize }
 
 // Builder is used in building a table.
 type Builder struct {
@@ -112,8 +114,8 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	}
 
 	h := header{
-		plen: uint16(len(key) - len(diffKey)),
-		klen: uint16(len(diffKey)),
+		overlap: uint16(len(key) - len(diffKey)),
+		diff:    uint16(len(diffKey)),
 	}
 
 	// store current entry's offset
