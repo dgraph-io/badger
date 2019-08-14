@@ -352,6 +352,15 @@ func (itr *Iterator) Value() (ret y.ValueStruct) {
 	return
 }
 
+// CopyValue copies the current value and returns it as decoded
+// ValueStruct.
+func (itr *Iterator) CopyValue() (ret y.ValueStruct) {
+	dst := make([]byte, len(itr.bi.val))
+	dst = y.SafeCopy(dst, itr.bi.val)
+	ret.Decode(dst)
+	return
+}
+
 // Next follows the y.Iterator interface
 func (itr *Iterator) Next() {
 	if !itr.reversed {

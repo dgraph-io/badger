@@ -225,7 +225,6 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 	// Do not cancel txn.
 
 	go func() {
-		time.Sleep(2 * time.Second)
 		require.NoError(t, db.DropAll())
 	}()
 	wg.Wait()

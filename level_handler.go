@@ -248,7 +248,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 		}
 		if y.SameKey(key, it.Key()) {
 			if version := y.ParseTs(it.Key()); maxVs.Version < version {
-				maxVs = it.Value()
+				maxVs = it.CopyValue()
 				maxVs.Version = version
 			}
 		}
