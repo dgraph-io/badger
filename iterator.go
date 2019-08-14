@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"hash/crc32"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -361,6 +362,36 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 		return false
 	}
 	return true
+}
+
+func (opt *IteratorOptions) pickTables(ts []*table.Table) []*table.Table {
+	if len(opt.Prefix) == 0 {
+		return ts
+	}
+	trim := func(key []byte) []byte {
+		if len(key) > len(opt.Prefix) {
+			return key[:len(opt.Prefix)]
+		}
+		return key
+	}
+	sIdx := sort.Search(len(ts), func(i int) bool {
+		return bytes.Compare(trim(ts[i].Biggest()), opt.Prefix) >= 0
+	})
+	eIdx := sort.Search(len(ts), func(i int) bool {
+		return bytes.Compare(trim(ts[i].Smallest()), opt.Prefix) > 0
+	})
+	filtered := ts[sIdx:eIdx]
+	if !opt.prefixIsKey {
+		return filtered
+	}
+	var out []*table.Table
+	for i := 0; i < len(filtered); i++ {
+		if filtered[i].DoesNotHave(opt.Prefix) {
+			continue
+		}
+		out = append(out, filtered[i])
+	}
+	return out
 }
 
 // DefaultIteratorOptions contains default options when iterating over Badger key-value stores.
