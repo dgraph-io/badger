@@ -352,9 +352,9 @@ func (itr *Iterator) Value() (ret y.ValueStruct) {
 	return
 }
 
-// CopyValue copies the current value and returns it as decoded
+// ValueCopy copies the current value and returns it as decoded
 // ValueStruct.
-func (itr *Iterator) CopyValue() (ret y.ValueStruct) {
+func (itr *Iterator) ValueCopy() (ret y.ValueStruct) {
 	dst := make([]byte, len(itr.bi.val))
 	dst = y.SafeCopy(dst, itr.bi.val)
 	ret.Decode(dst)
