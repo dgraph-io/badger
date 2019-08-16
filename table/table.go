@@ -50,8 +50,8 @@ type Options struct {
 
 	// Options for Table builder.
 
-	// BloomFalsePostive is the false postive probabiltiy of bloom filter.
-	BloomFalsePostive float64
+	// BloomFalsePositive is the false positive probabiltiy of bloom filter.
+	BloomFalsePositive float64
 
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
