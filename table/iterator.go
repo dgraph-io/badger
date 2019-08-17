@@ -401,7 +401,8 @@ type ConcatIterator struct {
 func NewConcatIterator(tbls []*Table, reversed bool) *ConcatIterator {
 	iters := make([]*Iterator, len(tbls))
 	for i := 0; i < len(tbls); i++ {
-		iters[i] = tbls[i].NewIterator(reversed)
+		// Save cycles by not initializing the iterators until needed.
+		// iters[i] = tbls[i].NewIterator(reversed)
 	}
 	return &ConcatIterator{
 		reversed: reversed,
@@ -415,9 +416,12 @@ func (s *ConcatIterator) setIdx(idx int) {
 	s.idx = idx
 	if idx < 0 || idx >= len(s.iters) {
 		s.cur = nil
-	} else {
-		s.cur = s.iters[s.idx]
+		return
 	}
+	if s.iters[idx] == nil {
+		s.iters[idx] = s.tables[idx].NewIterator(s.reversed)
+	}
+	s.cur = s.iters[s.idx]
 }
 
 // Rewind implements y.Interface
