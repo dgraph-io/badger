@@ -340,20 +340,21 @@ type IteratorOptions struct {
 	InternalAccess bool // Used to allow internal access to badger keys.
 }
 
+func (opt *IteratorOptions) compareToPrefix(key []byte) int {
+	if len(key) > len(opt.Prefix) {
+		key = key[:len(opt.Prefix)]
+	}
+	return bytes.Compare(key, opt.Prefix)
+}
+
 func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	if len(opt.Prefix) == 0 {
 		return true
 	}
-	trim := func(key []byte) []byte {
-		if len(key) > len(opt.Prefix) {
-			return key[:len(opt.Prefix)]
-		}
-		return key
-	}
-	if bytes.Compare(trim(t.Smallest()), opt.Prefix) > 0 {
+	if opt.compareToPrefix(t.Smallest()) > 0 {
 		return false
 	}
-	if bytes.Compare(trim(t.Biggest()), opt.Prefix) < 0 {
+	if opt.compareToPrefix(t.Biggest()) < 0 {
 		return false
 	}
 	// Bloom filter lookup would only work if opt.Prefix does NOT have the read
@@ -364,32 +365,42 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	return true
 }
 
-func (opt *IteratorOptions) pickTables(ts []*table.Table) []*table.Table {
+// pickTables does not need to copy over the tables, because the caller is
+// expected to create iterators from the table. This function also assumes that
+// the tables are sorted in the right order.
+func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 	if len(opt.Prefix) == 0 {
-		return ts
+		return all
 	}
-	trim := func(key []byte) []byte {
-		if len(key) > len(opt.Prefix) {
-			return key[:len(opt.Prefix)]
-		}
-		return key
+	sIdx := sort.Search(len(all), func(i int) bool {
+		return opt.compareToPrefix(all[i].Biggest()) >= 0
+	})
+	if sIdx == len(all) {
+		// Not found.
+		return []*table.Table{}
 	}
-	sIdx := sort.Search(len(ts), func(i int) bool {
-		return bytes.Compare(trim(ts[i].Biggest()), opt.Prefix) >= 0
-	})
-	eIdx := sort.Search(len(ts), func(i int) bool {
-		return bytes.Compare(trim(ts[i].Smallest()), opt.Prefix) > 0
-	})
-	filtered := ts[sIdx:eIdx]
+
+	filtered := all[sIdx:]
 	if !opt.prefixIsKey {
-		return filtered
+		eIdx := sort.Search(len(filtered), func(i int) bool {
+			return opt.compareToPrefix(filtered[i].Smallest()) > 0
+		})
+		return filtered[:eIdx]
 	}
+
 	var out []*table.Table
-	for i := 0; i < len(filtered); i++ {
-		if filtered[i].DoesNotHave(opt.Prefix) {
+	for _, t := range filtered {
+		// When we encounter the first table whose smallest key is higher than
+		// opt.Prefix, we can stop.
+		if opt.compareToPrefix(t.Smallest()) > 0 {
+			return out
+		}
+		// opt.Prefix is actually the key. So, we can run bloom filter checks
+		// as well.
+		if t.DoesNotHave(opt.Prefix) {
 			continue
 		}
-		out = append(out, filtered[i])
+		out = append(out, t)
 	}
 	return out
 }
