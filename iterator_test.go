@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
@@ -64,6 +65,48 @@ func TestPickTables(t *testing.T) {
 	outside("abd", "a", "ab")
 	outside("abd", "ab", "abc")
 	outside("abd", "ab", "abc123")
+}
+
+func TestPickTables(t *testing.T) {
+	type MockKeys struct {
+		small string
+		large string
+	}
+	genTables := func(mks ...MockKeys) []*table.Table {
+		out := make([]*table.Table, 0)
+		for _, mk := range mks {
+			out = append(out, table.GetMockTable(mk.small, mk.large))
+		}
+		return out
+	}
+	tables := genTables(MockKeys{small: "a", large: "abc"},
+		MockKeys{small: "abcd", large: "cde"},
+		MockKeys{small: "cge", large: "chf"},
+		MockKeys{small: "glr", large: "gyup"})
+	opt := DefaultIteratorOptions
+	opt.prefixIsKey = false
+	opt.Prefix = []byte("c")
+	filtered := opt.pickTables(tables)
+	require.Equal(t, 2, len(filtered))
+	require.Equal(t, filtered[0].Smallest(), []byte("abcd"))
+	require.Equal(t, filtered[1].Smallest(), []byte("cge"))
+	tables = genTables(MockKeys{small: "a", large: "abc"},
+		MockKeys{small: "abcd", large: "ade"},
+		MockKeys{small: "cge", large: "chf"},
+		MockKeys{small: "glr", large: "gyup"})
+	filtered = opt.pickTables(tables)
+	require.Equal(t, 1, len(filtered))
+	require.Equal(t, filtered[0].Smallest(), []byte("cge"))
+	tables = genTables(MockKeys{small: "a", large: "abc"},
+		MockKeys{small: "abcd", large: "ade"},
+		MockKeys{small: "cge", large: "chf"},
+		MockKeys{small: "ckr", large: "cyup"},
+		MockKeys{small: "csfr", large: "gyup"})
+	filtered = opt.pickTables(tables)
+	require.Equal(t, 3, len(filtered))
+	require.Equal(t, filtered[0].Smallest(), []byte("cge"))
+	require.Equal(t, filtered[1].Smallest(), []byte("ckr"))
+	require.Equal(t, filtered[2].Smallest(), []byte("csfr"))
 }
 
 func TestIteratePrefix(t *testing.T) {
