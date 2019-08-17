@@ -508,6 +508,37 @@ func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 	}
 }
 
+// getMemTablesForPrefix returns the memtables which contains keys with the given
+// prefix.
+func (db *DB) getMemTablesForPrefix(prefix []byte) ([]*skl.Skiplist, func()) {
+	db.RLock()
+	defer db.RUnlock()
+
+	tables := make([]*skl.Skiplist, 0)
+
+	if y.ContainsPrefix(prefix, db.mt.Smallest(), db.mt.Biggest()) {
+		// Get mutable memtable.
+		db.mt.IncrRef()
+		tables = append(tables, db.mt)
+	}
+
+	// Get immutable memtables.
+	last := len(db.imm) - 1
+	for i := range db.imm {
+		if y.ContainsPrefix(prefix,
+			db.imm[last-i].Smallest(),
+			db.imm[last-i].Biggest()) {
+			db.imm[last-i].IncrRef()
+			tables = append(tables, db.imm[last-i])
+		}
+	}
+	return tables, func() {
+		for _, tbl := range tables {
+			tbl.DecrRef()
+		}
+	}
+}
+
 // get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
 //

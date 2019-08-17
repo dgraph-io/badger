@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 
 	"github.com/dgraph-io/badger/y"
@@ -341,10 +342,7 @@ type IteratorOptions struct {
 }
 
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
-	if len(key) > len(opt.Prefix) {
-		key = key[:len(opt.Prefix)]
-	}
-	return bytes.Compare(key, opt.Prefix)
+	return y.CompareToPrefix(key, opt.Prefix)
 }
 
 func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
@@ -448,7 +446,13 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 
 	// TODO: If Prefix is set, only pick those memtables which have keys with
 	// the prefix.
-	tables, decr := txn.db.getMemTables()
+	var tables []*skl.Skiplist
+	var decr func()
+	if opt.prefixIsKey {
+		tables, decr = txn.db.getMemTablesForPrefix(opt.Prefix)
+	} else {
+		tables, decr = txn.db.getMemTables()
+	}
 	defer decr()
 	txn.db.vlog.incrIteratorCount()
 	var iters []y.Iterator

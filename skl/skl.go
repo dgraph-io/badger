@@ -75,10 +75,11 @@ type node struct {
 
 // Skiplist maps keys to values (in memory)
 type Skiplist struct {
-	height int32 // Current height. 1 <= height <= kMaxHeight. CAS.
-	head   *node
-	ref    int32
-	arena  *Arena
+	height        int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	head          *node
+	ref           int32
+	arena         *Arena
+	biggestOffset uint32
 }
 
 // IncrRef increases the refcount
@@ -128,10 +129,11 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 	arena := newArena(arenaSize)
 	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
 	return &Skiplist{
-		height: 1,
-		head:   head,
-		arena:  arena,
-		ref:    1,
+		height:        1,
+		head:          head,
+		arena:         arena,
+		ref:           1,
+		biggestOffset: 0,
 	}
 }
 
@@ -316,6 +318,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	// We always insert from the base level and up. After you add a node in base level, we cannot
 	// create a node in the level above because it would have discovered the node in the base level.
 	for i := 0; i < height; i++ {
+	CASLOOP:
 		for {
 			if prev[i] == nil {
 				y.AssertTrue(i > 1) // This cannot happen in base level.
@@ -328,9 +331,24 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 			}
 			nextOffset := s.arena.getNodeOffset(next[i])
 			x.tower[i] = nextOffset
-			if prev[i].casNextOffset(i, nextOffset, s.arena.getNodeOffset(x)) {
-				// Managed to insert x between prev[i] and next[i]. Go to the next level.
-				break
+			xOffset := s.arena.getNodeOffset(x)
+			if prev[i].casNextOffset(i, nextOffset, xOffset) {
+				if i != 0 && nextOffset != 0 {
+					// Managed to insert x between prev[i] and next[i]. Go to the next level.
+					break CASLOOP
+				}
+				for {
+					bOffset := s.getBiggestOffset()
+					if bOffset > xOffset {
+						// Some other cas operation updated the bigger offset.
+						// So, break the loop
+						break CASLOOP
+					}
+					if atomic.CompareAndSwapUint32(&s.biggestOffset, bOffset, xOffset) {
+						// Updated the biggest node offset sucessfully.
+						break CASLOOP
+					}
+				}
 			}
 			// CAS failed. We need to recompute prev and next.
 			// It is unlikely to be helpful to try to use a different level as we redo the search,
@@ -388,6 +406,30 @@ func (s *Skiplist) Get(key []byte) y.ValueStruct {
 	vs := s.arena.getVal(valOffset, valSize)
 	vs.Version = y.ParseTs(nextKey)
 	return vs
+}
+
+// Smallest returns smallest key of this skiplist.
+func (s *Skiplist) Smallest() []byte {
+	// First entry of the lowest level is the smallest.
+	next := s.getNext(s.head, 0)
+	if next == nil {
+		return []byte{}
+	}
+	return next.key(s.arena)
+}
+
+func (s *Skiplist) getBiggestOffset() uint32 {
+	return atomic.LoadUint32(&s.biggestOffset)
+}
+
+// Biggest returns largest key of this skiplist.
+func (s *Skiplist) Biggest() []byte {
+	bOffset := s.getBiggestOffset()
+	if bOffset == 0 {
+		return []byte{}
+	}
+	n := s.arena.getNode(bOffset)
+	return n.key(s.arena)
 }
 
 // NewIterator returns a skiplist iterator.  You have to Close() the iterator.

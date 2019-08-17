@@ -340,3 +340,20 @@ func BytesToU32Slice(b []byte) []uint32 {
 	hdr.Data = uintptr(unsafe.Pointer(&b[0]))
 	return u32s
 }
+
+// CompareToPrefix compares given prefix with the key
+func CompareToPrefix(key, prefix []byte) int {
+	if len(key) > len(prefix) {
+		key = key[:len(prefix)]
+	}
+	return bytes.Compare(key, prefix)
+}
+
+// ContainsPrefix check whether the given prefix fall between smallest
+// and largest.
+func ContainsPrefix(prefix, smallest, largest []byte) bool {
+	if CompareToPrefix(smallest, prefix) > 0 && CompareKeys(largest, prefix) < 0 {
+		return false
+	}
+	return true
+}

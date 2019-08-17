@@ -109,7 +109,6 @@ func TestBasic(t *testing.T) {
 
 	v = l.Get(y.KeyWithTs([]byte("key2"), 0))
 	require.True(t, v.Value == nil)
-
 	v = l.Get(y.KeyWithTs([]byte("key3"), 0))
 	require.True(t, v.Value != nil)
 	require.EqualValues(t, "00062", string(v.Value))
@@ -126,6 +125,30 @@ func TestBasic(t *testing.T) {
 	require.NotNil(t, v.Value)
 	require.EqualValues(t, val5, v.Value)
 	require.EqualValues(t, 60, v.Meta)
+}
+
+func TestBiggestAndSmallest(t *testing.T) {
+	l := NewSkiplist(arenaSize)
+	i := 0
+	// Testing with multiple keys.
+	for {
+		if i == 100 {
+			break
+		}
+		l.Put(y.KeyWithTs([]byte(fmt.Sprintf("key%d", i)), 0), y.ValueStruct{Value: newValue(55), Meta: 57, UserMeta: 0})
+		i++
+	}
+	require.Equal(t, []byte("key0"), y.ParseKey(l.Smallest()))
+	require.Equal(t, []byte("key99"), y.ParseKey(l.Biggest()))
+	l = NewSkiplist(arenaSize)
+	// Testing with one key.
+	l.Put(y.KeyWithTs([]byte("key0"), 0), y.ValueStruct{Value: newValue(55), Meta: 57, UserMeta: 0})
+	require.Equal(t, []byte("key0"), y.ParseKey(l.Smallest()))
+	require.Equal(t, []byte("key0"), y.ParseKey(l.Biggest()))
+	l = NewSkiplist(arenaSize)
+	// Empty skiplist return empty byte array.
+	require.Equal(t, []byte{}, l.Smallest())
+	require.Equal(t, []byte{}, l.Biggest())
 }
 
 // TestConcurrentBasic tests concurrent writes followed by concurrent reads.
