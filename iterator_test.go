@@ -67,7 +67,7 @@ func TestPickTables(t *testing.T) {
 	outside("abd", "ab", "abc123")
 }
 
-func TestPickTables(t *testing.T) {
+func TestPickSortTables(t *testing.T) {
 	type MockKeys struct {
 		small string
 		large string
