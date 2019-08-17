@@ -409,6 +409,7 @@ var DefaultIteratorOptions = IteratorOptions{
 	PrefetchSize:   100,
 	Reverse:        false,
 	AllVersions:    false,
+	prefixIsKey:    false,
 }
 
 // Iterator helps iterating over the KV pairs in a lexicographically sorted order.
