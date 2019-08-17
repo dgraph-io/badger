@@ -74,7 +74,8 @@ func getTestOptions(dir string) Options {
 	opt := DefaultOptions(dir).
 		WithMaxTableSize(1 << 15). // Force more compaction.
 		WithLevelOneSize(4 << 15). // Force more compaction.
-		WithSyncWrites(false)
+		WithSyncWrites(false).
+		WithTableLoadingMode(options.FileIO)
 	if !*mmap {
 		return opt.WithValueLogLoadingMode(options.FileIO)
 	}
@@ -120,6 +121,7 @@ func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB))
 	if opts == nil {
 		opts = new(Options)
 		*opts = getTestOptions(dir)
+
 	} else {
 		opts.Dir = dir
 		opts.ValueDir = dir

@@ -352,7 +352,7 @@ func CompareToPrefix(key, prefix []byte) int {
 // ContainsPrefix check whether the given prefix fall between smallest
 // and largest.
 func ContainsPrefix(prefix, smallest, largest []byte) bool {
-	if CompareToPrefix(smallest, prefix) > 0 && CompareKeys(largest, prefix) < 0 {
+	if CompareToPrefix(smallest, prefix) > 0 && CompareToPrefix(largest, prefix) < 0 {
 		return false
 	}
 	return true
