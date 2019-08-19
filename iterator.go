@@ -368,7 +368,9 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 // pickTables does not need to copy over the tables, because the caller is
 // expected to create iterators from the table. This function also assumes that
 // the tables are sorted in the right order.
-func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
+func (opt *IteratorOptions) pickTables(tables []*table.Table) []*table.Table {
+	all := make([]*table.Table, len(tables))
+	copy(all, tables)
 	if len(opt.Prefix) == 0 {
 		return all
 	}

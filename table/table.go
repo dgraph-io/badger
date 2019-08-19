@@ -401,11 +401,3 @@ func IDToFilename(id uint64) string {
 func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, IDToFilename(id))
 }
-
-// GetMockTable is used for testing purpose.
-func GetMockTable(s, b string) *Table {
-	return &Table{
-		smallest: []byte(s),
-		biggest:  []byte(b),
-	}
-}
