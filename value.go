@@ -1390,7 +1390,7 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 		file = vlog.pickRandomFile(head, tr)
 		// If the newly picked file is same as the one picked from discard stats, try once again to
 		// pick a different file.
-		if file == files[0] {
+		if len(files) != 0 && file == files[0] {
 			file = vlog.pickRandomFile(head, tr)
 		}
 		files = append(files, file)
