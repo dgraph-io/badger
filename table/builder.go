@@ -22,6 +22,7 @@ import (
 	"unsafe"
 
 	"github.com/dgryski/go-farm"
+	"github.com/golang/protobuf/proto"
 
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
@@ -232,7 +233,7 @@ func (b *Builder) Finish() []byte {
 
 	b.finishBlock() // This will never start a new block.
 
-	index, err := b.tableIndex.Marshal()
+	index, err := proto.Marshal(b.tableIndex)
 	y.Check(err)
 	// Write index the file.
 	n, err := b.buf.Write(index)
@@ -263,7 +264,7 @@ func (b *Builder) writeChecksum(data []byte) {
 	}
 
 	// Write checksum to the file.
-	chksum, err := checksum.Marshal()
+	chksum, err := proto.Marshal(&checksum)
 	y.Check(err)
 	n, err := b.buf.Write(chksum)
 	y.Check(err)

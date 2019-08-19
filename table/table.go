@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 
 	"github.com/dgryski/go-farm"
+	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/options"
@@ -130,7 +131,7 @@ type block struct {
 
 func (b block) verifyCheckSum() error {
 	cs := &pb.Checksum{}
-	if err := cs.Unmarshal(b.checksum); err != nil {
+	if err := proto.Unmarshal(b.checksum, cs); err != nil {
 		return y.Wrapf(err, "unable to unmarshal checksum for block")
 	}
 	return y.VerifyChecksum(b.data, cs)
@@ -264,7 +265,7 @@ func (t *Table) readIndex() error {
 	expectedChk := &pb.Checksum{}
 	readPos -= checksumLen
 	buf = t.readNoFail(readPos, checksumLen)
-	if err := expectedChk.Unmarshal(buf); err != nil {
+	if err := proto.Unmarshal(buf, expectedChk); err != nil {
 		return err
 	}
 
@@ -281,7 +282,7 @@ func (t *Table) readIndex() error {
 	}
 
 	index := pb.TableIndex{}
-	err := index.Unmarshal(data)
+	err := proto.Unmarshal(data, &index)
 	y.Check(err)
 
 	t.bf = z.JSONUnmarshal(index.BloomFilter)
