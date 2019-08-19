@@ -18,6 +18,7 @@ package table
 
 import (
 	"bytes"
+	"crypto/aes"
 	"math"
 	"unsafe"
 
@@ -140,12 +141,22 @@ Structure of Block.
 | to perform binary search in the block)  | (4 Bytes)          | Checksum     | (4 Bytes)        |
 +-----------------------------------------+--------------------+--------------+------------------+
 */
+// The structure of the block will remain same while encrypting. But we store the above
+// data in the encrypted format and also append IV at the end of the block.
 func (b *Builder) finishBlock() {
 	b.buf.Write(y.U32SliceToBytes(b.entryOffsets))
 	b.buf.Write(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
 	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
 	b.writeChecksum(blockBuf)
+
+	if b.shouldEncrypt() {
+		block := b.buf.Bytes()[b.baseOffset:]
+		eBlock, err := b.encrypt(block)
+		y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
+		b.buf.Truncate(int(b.baseOffset))
+		b.buf.Write(eBlock)
+	}
 
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
 	// implement padding. This might be useful while using direct I/O.
@@ -175,6 +186,11 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 
+	if b.shouldEncrypt() {
+		// IV is added at the end of the block, while encrypting.
+		// So, size of IV is added to estimatedSize.
+		estimatedSize += aes.BlockSize
+	}
 	return estimatedSize > uint32(b.opt.BlockSize)
 }
 
@@ -222,6 +238,9 @@ The table structure looks like
 | Index   | Index Size | Checksum  | Checksum Size |
 +---------+------------+-----------+---------------+
 */
+// The table structure remains same while encrypting. The only
+// diffrence is that, we store encrypted data. The index will
+// have additional IV while on the disk.
 func (b *Builder) Finish() []byte {
 	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePostive)
 	for _, h := range b.keyHashes {
@@ -234,6 +253,11 @@ func (b *Builder) Finish() []byte {
 
 	index, err := b.tableIndex.Marshal()
 	y.Check(err)
+
+	if b.shouldEncrypt() {
+		index, err = b.encrypt(index)
+		y.Check(err)
+	}
 	// Write index the file.
 	n, err := b.buf.Write(index)
 	y.Check(err)
@@ -272,4 +296,31 @@ func (b *Builder) writeChecksum(data []byte) {
 	// Write checksum size.
 	_, err = b.buf.Write(y.U32ToBytes(uint32(n)))
 	y.Check(err)
+}
+
+// DataKey returns datakey of the builder.
+func (b *Builder) DataKey() *pb.DataKey {
+	return b.opt.DataKey
+}
+
+// encrypt will encrypt the give data and appends
+// IV to the end of the encrypted data. It should be called
+// only after checking shouldEncrypt method.
+func (b *Builder) encrypt(data []byte) ([]byte, error) {
+	iv, err := y.GenerateIV()
+	if err != nil {
+		return data, err
+	}
+	data, err = y.XORBlock(data, b.DataKey().Data, iv)
+	if err != nil {
+		return data, err
+	}
+	data = append(data, iv...)
+	return data, nil
+}
+
+// shouldEncrypt tells us whether to encrypt the data or not.
+// We encrypt only if the data key exist. Otherwise, not.
+func (b *Builder) shouldEncrypt() bool {
+	return b.opt.DataKey != nil
 }

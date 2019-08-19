@@ -17,6 +17,7 @@
 package table
 
 import (
+	"crypto/aes"
 	"fmt"
 	"io"
 	"os"
@@ -55,6 +56,9 @@ type Options struct {
 
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
+
+	// DataKey is the key to decrypt the encrypted text.
+	DataKey *pb.DataKey
 }
 
 // TableInterface is useful for testing.
@@ -281,6 +285,12 @@ func (t *Table) readIndex() error {
 	}
 
 	index := pb.TableIndex{}
+	// Decrypt the table index. If it is encrypted.
+	if t.shouldDecrypt() {
+		var err error
+		data, err = t.decrypt(data)
+		y.Check(err)
+	}
 	err := index.Unmarshal(data)
 	y.Check(err)
 
@@ -300,7 +310,16 @@ func (t *Table) block(idx int) (*block, error) {
 		offset: int(ko.Offset),
 	}
 	var err error
-	blk.data, err = t.read(blk.offset, int(ko.Len))
+	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
+		return nil, err
+	}
+
+	if t.shouldDecrypt() {
+		// Decrypt the block. If it is encrypted.
+		if blk.data, err = t.decrypt(blk.data); err != nil {
+			return nil, err
+		}
+	}
 
 	// Read meta data related to block.
 	readPos := len(blk.data) - 4 // First read checksum length.
@@ -373,6 +392,22 @@ func (t *Table) VerifyChecksum() error {
 	}
 
 	return nil
+}
+
+// shouldDecrypt tells wether to decrypt or not.
+// We decrypt only if the datakey exist for the table.
+func (t *Table) shouldDecrypt() bool {
+	return t.opt.DataKey != nil
+}
+
+// decrypt decrypt the given data.
+// It should be called only after checking shouldDecrypt.
+func (t *Table) decrypt(data []byte) ([]byte, error) {
+	// Last BlockSize bytes of the data is the IV.
+	iv := data[len(data)-aes.BlockSize:]
+	// Rest all bytes are data.
+	data = data[:len(data)-aes.BlockSize]
+	return y.XORBlock(data, t.opt.DataKey.Data, iv)
 }
 
 // ParseFileID reads the file id out of a filename.
