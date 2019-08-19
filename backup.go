@@ -117,7 +117,7 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 }
 
 func writeTo(list *pb.KVList, w io.Writer) error {
-	if err := binary.Write(w, binary.LittleEndian, uint64(list.Size())); err != nil {
+	if err := binary.Write(w, binary.LittleEndian, uint64(proto.Size(list))); err != nil {
 		return err
 	}
 	buf, err := proto.Marshal(list)
