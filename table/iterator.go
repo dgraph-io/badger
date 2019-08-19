@@ -510,7 +510,9 @@ func (s *ConcatIterator) Close() error {
 	for _, t := range s.tables {
 		// DeReference the tables while closing
 		// the iterator.
-		t.DecrRef()
+		if err := t.DecrRef(); err != nil {
+			return err
+		}
 	}
 	for _, it := range s.iters {
 		if it == nil {
