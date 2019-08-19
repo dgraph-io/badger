@@ -534,6 +534,9 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 	if lf == nil {
 		return nil
 	}
+	lf.lock.Lock()
+	defer lf.lock.Unlock()
+
 	path := vlog.fpath(lf.fid)
 	if err := lf.munmap(); err != nil {
 		_ = lf.fd.Close()
