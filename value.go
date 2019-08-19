@@ -1168,16 +1168,23 @@ func (vlog *valueLog) pickFromDiscardStats(head valuePointer, tr trace.Trace) (*
 }
 
 func (vlog *valueLog) pickRandomFile(head valuePointer, tr trace.Trace) *logFile {
-	if head.Fid == 0 { // Not found or first file
-		tr.LazyPrintf("Could not find any file.")
-		return nil
-	}
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
 
 	fids := vlog.sortedFids()
+	var idxHead int
+	for i, fid := range fids {
+		if fid == head.Fid {
+			idxHead = i
+			break
+		}
+	}
+	if idxHead == 0 { // Not found or first file
+		tr.LazyPrintf("Could not find any file.")
+		return nil
+	}
 	// Don’t include head.Fid. We pick a random file before it.
-	idx := rand.Intn(int(head.Fid))
+	idx := rand.Intn(idxHead)
 	if idx > 0 {
 		idx = rand.Intn(idx + 1) // Another level of rand to favor smaller fids.
 	}
