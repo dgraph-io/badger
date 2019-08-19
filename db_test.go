@@ -543,6 +543,7 @@ func TestIterate2Basic(t *testing.T) {
 		opt := IteratorOptions{}
 		opt.PrefetchValues = true
 		opt.PrefetchSize = 10
+		opt.prefixIsKey = false
 
 		txn := db.NewTransaction(false)
 		it := txn.NewIterator(opt)
