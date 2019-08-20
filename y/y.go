@@ -350,6 +350,7 @@ type Buffer struct {
 	length      int
 	curPageSize int
 	pages       []*page
+	pbuf        []byte
 }
 
 func NewBuffer(pageSize int) *Buffer {
@@ -361,12 +362,14 @@ func NewBuffer(pageSize int) *Buffer {
 }
 
 func (b *Buffer) Write(data []byte) (int, error) {
+	dlen := len(data)
 	written := 0
 	for {
 		cp := b.pages[len(b.pages)-1] // current page
 		sz := len(cp.buf)
 		n := copy(cp.buf[sz:cap(cp.buf)], data)
 		cp.buf = cp.buf[:sz+n]
+		written += n
 		if len(data) == n {
 			break
 		}
@@ -375,7 +378,7 @@ func (b *Buffer) Write(data []byte) (int, error) {
 		b.curPageSize *= 2
 		b.pages = append(b.pages, &page{buf: make([]byte, 0, b.curPageSize)})
 	}
-	b.length += len(data)
+	b.length += dlen
 
 	return written, nil
 }
@@ -397,24 +400,27 @@ func (b *Buffer) ReadAt(offset, length int) []byte {
 		return nil
 	}
 
-	buf := make([]byte, length) // allocate all buffer at start
-	pageIdx := offset / b.curPageSize
-	startIdx := offset % b.curPageSize
+	buf := make([]byte, length) // Allocate whole buffer at start.
 
-	cp := b.pages[pageIdx]
+	var pageIdx, startIdx, sizeNow int
+	for i, page := range b.pages {
+		if sizeNow+len(page.buf)-1 < offset {
+			sizeNow += len(page.buf)
+		} else {
+			pageIdx = i
+			startIdx = offset - sizeNow
+		}
+	}
+
 	read := 0
 	for {
+		cp := b.pages[pageIdx]
 		read += copy(buf[read:], cp.buf[startIdx:])
 		if read >= length {
 			break
 		}
-
-		pageIdx++
-		// Not checking here for boundry as we have already fixed length at start.
-		cp = b.pages[pageIdx]
 		startIdx = 0
 	}
-
 	return buf
 }
 

@@ -89,7 +89,7 @@ func BenchmarkBuilder(b *testing.B) {
 
 	keysCount := 1300000
 	for i := 0; i < b.N; i++ {
-		opts := Options{BlockSize: 4 * 1024, BloomFalsePostive: 0.01}
+		opts := Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 		builder := NewTableBuilder(opts)
 		// filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
 		// f, err := y.OpenSyncedFile(filename, false)
