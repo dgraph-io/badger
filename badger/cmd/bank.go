@@ -69,6 +69,7 @@ var stopAll int32
 var mmap bool
 var checkStream bool
 var checkSubscriber bool
+var verbose bool
 
 const keyPrefix = "account:"
 
@@ -91,6 +92,9 @@ func init() {
 	bankTest.Flags().BoolVarP(&checkSubscriber, "check_subscriber", "w", false,
 		"If true, the test will send transactions to another badger instance via the subscriber "+
 			"interface in order to verify that all the data is published correctly.")
+	bankTest.Flags().BoolVarP(&verbose, "verbose", "v", false,
+		"If true, the test will print all the executed bank transfers to standard output. "+
+			"This outputs a lot so it's best to turn it off when running the test for a while.")
 
 	bankDisect.Flags().IntVarP(&numPrevious, "previous", "p", 12,
 		"Starting from the violation txn, how many previous versions to retrieve.")
@@ -429,7 +433,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 				}
 				err := moveMoney(db, from, to)
 				atomic.AddUint64(&total, 1)
-				if err == nil {
+				if err == nil && verbose {
 					log.Printf("Moved $5. %d -> %d\n", from, to)
 				} else {
 					atomic.AddUint64(&errors, 1)
