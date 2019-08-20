@@ -1390,7 +1390,7 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) error {
 	}
 	if vlog.lfDiscardStats.updatesSinceFlush > discardStatsFlushThreshold {
 		vlog.lfDiscardStats.Unlock()
-		// flushDiscardStats also aquires lock. So, we need to unlock here.
+		// flushDiscardStats also acquires lock. So, we need to unlock here.
 		return vlog.flushDiscardStats()
 	}
 	vlog.lfDiscardStats.Unlock()
@@ -1426,7 +1426,7 @@ func (vlog *valueLog) flushDiscardStats() error {
 
 // encodedDiscardStats returns []byte representation of lfDiscardStats
 // This will be called while storing stats in BadgerDB
-// caller should aquire lock before encoding the stats.
+// caller should acquire lock before encoding the stats.
 func (vlog *valueLog) encodedDiscardStats() []byte {
 	encodedStats, _ := json.Marshal(vlog.lfDiscardStats.m)
 	return encodedStats
