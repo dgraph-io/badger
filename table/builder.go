@@ -222,7 +222,7 @@ The table structure looks like
 | Index   | Index Size | Checksum  | Checksum Size |
 +---------+------------+-----------+---------------+
 */
-func (b *Builder) Finish() []byte {
+func (b *Builder) Finish() *y.Buffer {
 	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePositive)
 	for _, h := range b.keyHashes {
 		bf.Add(h)
@@ -244,7 +244,7 @@ func (b *Builder) Finish() []byte {
 	y.Check(err)
 
 	b.writeChecksum(index)
-	return b.buf.Bytes()
+	return b.buf
 }
 
 func (b *Builder) writeChecksum(data []byte) {

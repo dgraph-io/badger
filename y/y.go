@@ -453,6 +453,20 @@ func (b *Buffer) Bytes() []byte {
 	return buf
 }
 
+// WriteTo writes whole buffer to w. It returns number of bytes returned and any error encountered.
+func (b *Buffer) WriteTo(w io.Writer) (int64, error) {
+	written := int64(0)
+	for i := 0; i < len(b.pages); i++ {
+		n, err := w.Write(b.pages[i].buf[:])
+		written += int64(n)
+		if err != nil {
+			return written, err
+		}
+	}
+
+	return written, nil
+}
+
 // TODO: reader can be removed.
 
 func (b *Buffer) NewReader() io.Reader {
@@ -462,12 +476,6 @@ func (b *Buffer) NewReader() io.Reader {
 		b:        b,
 		pageIdx:  0,
 		startIdx: 0,
-	}
-}
-
-func (b *Buffer) WriteTo(w io.Writer) {
-	for i := 0; i < len(b.pages); i++ {
-		w.Write(b.pages[i].buf[:])
 	}
 }
 

@@ -297,8 +297,8 @@ func (w *sortedWriter) send() error {
 		return err
 	}
 	go func(builder *table.Builder) {
-		data := builder.Finish()
-		err := w.createTable(data)
+		buf := builder.Finish()
+		err := w.createTable(buf)
 		w.throttle.Done(err)
 	}(w.builder)
 
@@ -319,16 +319,19 @@ func (w *sortedWriter) Done() error {
 	return w.send()
 }
 
-func (w *sortedWriter) createTable(data []byte) error {
-	if len(data) == 0 {
+func (w *sortedWriter) createTable(buf *y.Buffer) error {
+	if buf.Len() == 0 {
 		return nil
 	}
 	fileID := w.db.lc.reserveFileID()
-	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, w.db.opt.Dir), true)
+	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, w.db.opt.Dir), false)
 	if err != nil {
 		return err
 	}
-	if _, err := fd.Write(data); err != nil {
+	if _, err := buf.WriteTo(fd); err != nil {
+		return err
+	}
+	if err := fd.Sync(); err != nil {
 		return err
 	}
 	opts := table.Options{

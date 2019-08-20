@@ -150,7 +150,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 			UserMeta: 0,
 		})
 	}
-	f.Write(b.Finish())
+	y.Check2(b.Finish().WriteTo(f))
 	f.Close()
 	f, _ = y.OpenSyncedFile(filename, true)
 	return f

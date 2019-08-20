@@ -62,8 +62,8 @@ func TestTableIndex(t *testing.T) {
 			}
 			builder.Add(k, vs)
 		}
-		f.Write(builder.Finish())
-		// io.Copy(f, builder.Finish())
+		_, err = builder.Finish().WriteTo(f)
+		require.NoError(t, err, "unable to write to file")
 
 		opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 		tbl, err := OpenTable(f, opts)
