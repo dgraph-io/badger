@@ -141,8 +141,7 @@ Structure of Block.
 | to perform binary search in the block)  | (4 Bytes)          | Checksum     | (4 Bytes)        |
 +-----------------------------------------+--------------------+--------------+------------------+
 */
-// The structure of the block will remain same while encrypting. But we store the above
-// data in the encrypted format and also append IV at the end of the block.
+// In case the data is encrypted, the "IV" is added to the end of the block.
 func (b *Builder) finishBlock() {
 	b.buf.Write(y.U32SliceToBytes(b.entryOffsets))
 	b.buf.Write(y.U32ToBytes(uint32(len(b.entryOffsets))))
@@ -238,9 +237,7 @@ The table structure looks like
 | Index   | Index Size | Checksum  | Checksum Size |
 +---------+------------+-----------+---------------+
 */
-// The table structure remains same while encrypting. The only
-// diffrence is that, we store encrypted data. The index will
-// have additional IV while on the disk.
+// In case the data is encrypted, the "IV" is added to the end of the index.
 func (b *Builder) Finish() []byte {
 	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePostive)
 	for _, h := range b.keyHashes {
@@ -303,9 +300,8 @@ func (b *Builder) DataKey() *pb.DataKey {
 	return b.opt.DataKey
 }
 
-// encrypt will encrypt the give data and appends
-// IV to the end of the encrypted data. It should be called
-// only after checking shouldEncrypt method.
+// encrypt will encrypt the given data and appends IV to the end of the encrypted data.
+// This should be only called only after checking shouldEncrypt method.
 func (b *Builder) encrypt(data []byte) ([]byte, error) {
 	iv, err := y.GenerateIV()
 	if err != nil {

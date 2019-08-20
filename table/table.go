@@ -41,7 +41,7 @@ const fileSuffix = ".sst"
 
 // Options contains configurable options for Table/Builder.
 type Options struct {
-	// Options for Openning Table.
+	// Options for Opening Table.
 
 	// ChkMode is the checksum verification mode for Table.
 	ChkMode options.ChecksumVerificationMode
@@ -57,7 +57,7 @@ type Options struct {
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
 
-	// DataKey is the key to decrypt the encrypted text.
+	// DataKey is the key used to decrypt the encrypted text.
 	DataKey *pb.DataKey
 }
 
@@ -285,11 +285,12 @@ func (t *Table) readIndex() error {
 	}
 
 	index := pb.TableIndex{}
-	// Decrypt the table index. If it is encrypted.
+	// Decrypt the table index if it is encrypted.
 	if t.shouldDecrypt() {
 		var err error
-		data, err = t.decrypt(data)
-		y.Check(err)
+		if data, err = t.decrypt(data); err != nil {
+			return err
+		}
 	}
 	err := index.Unmarshal(data)
 	y.Check(err)
@@ -315,7 +316,7 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 
 	if t.shouldDecrypt() {
-		// Decrypt the block. If it is encrypted.
+		// Decrypt the block if it is encrypted.
 		if blk.data, err = t.decrypt(blk.data); err != nil {
 			return nil, err
 		}
@@ -394,14 +395,13 @@ func (t *Table) VerifyChecksum() error {
 	return nil
 }
 
-// shouldDecrypt tells wether to decrypt or not.
-// We decrypt only if the datakey exist for the table.
+// shouldDecrypt tells whether to decrypt or not. We decrypt only if the datakey exist
+// for the table.
 func (t *Table) shouldDecrypt() bool {
 	return t.opt.DataKey != nil
 }
 
-// decrypt decrypt the given data.
-// It should be called only after checking shouldDecrypt.
+// decrypt decrypts the given data. It should be called only after checking shouldDecrypt.
 func (t *Table) decrypt(data []byte) ([]byte, error) {
 	// Last BlockSize bytes of the data is the IV.
 	iv := data[len(data)-aes.BlockSize:]
