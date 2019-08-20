@@ -75,7 +75,11 @@ func TestPickSortTables(t *testing.T) {
 	genTables := func(mks ...MockKeys) []*table.Table {
 		out := make([]*table.Table, 0)
 		for _, mk := range mks {
-			out = append(out, table.GetMockTable(mk.small, mk.large))
+			f := buildTable(t, [][]string{{mk.small, "some value"}, {mk.large, "some value"}})
+			opts := table.Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+			tbl, err := table.OpenTable(f, opts)
+			require.NoError(t, err)
+			out = append(out, tbl)
 		}
 		return out
 	}
@@ -88,15 +92,16 @@ func TestPickSortTables(t *testing.T) {
 	opt.Prefix = []byte("c")
 	filtered := opt.pickTables(tables)
 	require.Equal(t, 2, len(filtered))
-	require.Equal(t, filtered[0].Smallest(), []byte("abcd"))
-	require.Equal(t, filtered[1].Smallest(), []byte("cge"))
+	// build table adding time stamp so removing tailing bytes.
+	require.Equal(t, filtered[0].Smallest()[:4], []byte("abcd"))
+	require.Equal(t, filtered[1].Smallest()[:3], []byte("cge"))
 	tables = genTables(MockKeys{small: "a", large: "abc"},
 		MockKeys{small: "abcd", large: "ade"},
 		MockKeys{small: "cge", large: "chf"},
 		MockKeys{small: "glr", large: "gyup"})
 	filtered = opt.pickTables(tables)
 	require.Equal(t, 1, len(filtered))
-	require.Equal(t, filtered[0].Smallest(), []byte("cge"))
+	require.Equal(t, filtered[0].Smallest()[:3], []byte("cge"))
 	tables = genTables(MockKeys{small: "a", large: "abc"},
 		MockKeys{small: "abcd", large: "ade"},
 		MockKeys{small: "cge", large: "chf"},
@@ -104,9 +109,9 @@ func TestPickSortTables(t *testing.T) {
 		MockKeys{small: "csfr", large: "gyup"})
 	filtered = opt.pickTables(tables)
 	require.Equal(t, 3, len(filtered))
-	require.Equal(t, filtered[0].Smallest(), []byte("cge"))
-	require.Equal(t, filtered[1].Smallest(), []byte("ckr"))
-	require.Equal(t, filtered[2].Smallest(), []byte("csfr"))
+	require.Equal(t, filtered[0].Smallest()[:3], []byte("cge"))
+	require.Equal(t, filtered[1].Smallest()[:3], []byte("ckr"))
+	require.Equal(t, filtered[2].Smallest()[:4], []byte("csfr"))
 }
 
 func TestIteratePrefix(t *testing.T) {

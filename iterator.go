@@ -363,12 +363,13 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	return true
 }
 
-// pickTables does not need to copy over the tables, because the caller is
-// expected to create iterators from the table. This function also assumes that
-// the tables are sorted in the right order.
+// pickTables picks the necessary table for the iterator. This function also assumes
+// that the tables are sorted in the right order.
 func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 	if len(opt.Prefix) == 0 {
-		return all
+		out := make([]*table.Table, len(all))
+		copy(out, all)
+		return out
 	}
 	sIdx := sort.Search(len(all), func(i int) bool {
 		return opt.compareToPrefix(all[i].Biggest()) >= 0
@@ -383,7 +384,9 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		eIdx := sort.Search(len(filtered), func(i int) bool {
 			return opt.compareToPrefix(filtered[i].Smallest()) > 0
 		})
-		return filtered[:eIdx]
+		out := make([]*table.Table, len(filtered[:eIdx]))
+		copy(out, filtered[:eIdx])
+		return out
 	}
 
 	var out []*table.Table
