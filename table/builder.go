@@ -75,7 +75,6 @@ type Builder struct {
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
 	return &Builder{
-		// buf:        newBuffer(1 << 20),
 		buf:        y.NewBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
@@ -145,10 +144,7 @@ func (b *Builder) finishBlock() {
 	b.buf.Write(y.U32SliceToBytes(b.entryOffsets))
 	b.buf.Write(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
-	// reader := b.buf.NewReader(b.baseOffset, -1)
-	// blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
-	// blockBuf := b.buf.ReadAt(int(b.baseOffset), -1)
-	blockBuf := []byte("random")
+	blockBuf := b.buf.ReadAt(int(b.baseOffset), -1)
 	b.writeChecksum(blockBuf)
 
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
@@ -248,7 +244,6 @@ func (b *Builder) Finish() []byte {
 	y.Check(err)
 
 	b.writeChecksum(index)
-	// return b.buf.Bytes()
 	return b.buf.Bytes()
 }
 

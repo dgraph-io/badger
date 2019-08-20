@@ -342,17 +342,24 @@ func BytesToU32Slice(b []byte) []uint32 {
 	return u32s
 }
 
+// page struct contains one underlying buffer.
 type page struct {
 	buf []byte
 }
 
+// Buffer consists of many pages. A page is a wrapper over []byte. Buffer can be as a replacement of
+// bytes.Buffer. Instead of having single underlying buffer, it has multiple underlying buffers.
+// Hence we avoid any copy during relocation(as happenes in bytes.Buffer). Buffer allocates memory
+// in chunks(pages). Once a chunk(page) is full, it will allocate double the size of previous
+// chunk. Its function are not thread safe.
 type Buffer struct {
 	length      int
 	curPageSize int
 	pages       []*page
-	pbuf        []byte
+	readBuf     []byte
 }
 
+// NewBuffer returns a new buffer with first page as pageSize.
 func NewBuffer(pageSize int) *Buffer {
 	b := &Buffer{curPageSize: pageSize}
 	b.pages = make([]*page, 0)
@@ -361,8 +368,8 @@ func NewBuffer(pageSize int) *Buffer {
 	return b
 }
 
+// Write writes data to Buffer b. It returns number of bytes written and any error encountered.
 func (b *Buffer) Write(data []byte) (int, error) {
-	dlen := len(data)
 	written := 0
 	for {
 		cp := b.pages[len(b.pages)-1] // current page
@@ -378,19 +385,24 @@ func (b *Buffer) Write(data []byte) (int, error) {
 		b.curPageSize *= 2
 		b.pages = append(b.pages, &page{buf: make([]byte, 0, b.curPageSize)})
 	}
-	b.length += dlen
+	b.length += written
 
 	return written, nil
 }
 
-func (b *Buffer) WriteByte(data byte) {
-	b.Write([]byte{data})
+// WriteByte writes data byte to Buffer and returns any encountered error.
+func (b *Buffer) WriteByte(data byte) error {
+	_, err := b.Write([]byte{data}) // Can be changed later.
+	return err
 }
 
+// Len returns length of Buffer.
 func (b *Buffer) Len() int {
 	return b.length
 }
 
+// ReadAt reads length byte starting from offset. If length is -1, it will read all data starting
+// from offset.
 func (b *Buffer) ReadAt(offset, length int) []byte {
 	if b.length-offset < length || length == -1 {
 		length = b.length - offset
@@ -400,7 +412,11 @@ func (b *Buffer) ReadAt(offset, length int) []byte {
 		return nil
 	}
 
-	buf := make([]byte, length) // Allocate whole buffer at start.
+	if length > cap(b.readBuf) {
+		b.readBuf = make([]byte, length) // Allocate whole buffer at start.
+	} else {
+		b.readBuf = b.readBuf[:length]
+	}
 
 	var pageIdx, startIdx, sizeNow int
 	for i, page := range b.pages {
@@ -409,21 +425,24 @@ func (b *Buffer) ReadAt(offset, length int) []byte {
 		} else {
 			pageIdx = i
 			startIdx = offset - sizeNow
+			break
 		}
 	}
 
 	read := 0
 	for {
 		cp := b.pages[pageIdx]
-		read += copy(buf[read:], cp.buf[startIdx:])
+		read += copy(b.readBuf[read:], cp.buf[startIdx:])
 		if read >= length {
 			break
 		}
+		pageIdx++
 		startIdx = 0
 	}
-	return buf
+	return b.readBuf
 }
 
+// Bytes returns while Buffer data as single []byte.
 func (b *Buffer) Bytes() []byte {
 	buf := make([]byte, b.length)
 	written := 0
@@ -433,6 +452,8 @@ func (b *Buffer) Bytes() []byte {
 
 	return buf
 }
+
+// TODO: reader can be removed.
 
 func (b *Buffer) NewReader() io.Reader {
 	// Allocates the right slice. Copies over the data and returns.
@@ -510,11 +531,4 @@ func (r *reader) WriteTo(w io.Writer) (int64, error) {
 	}
 
 	return written, nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
