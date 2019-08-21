@@ -341,6 +341,8 @@ type IteratorOptions struct {
 }
 
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
+	// We should compare key without timestamp. For example key - a[TS] might be > "aa" prefix.
+	key = y.ParseKey(key)
 	if len(key) > len(opt.Prefix) {
 		key = key[:len(opt.Prefix)]
 	}

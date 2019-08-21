@@ -45,12 +45,12 @@ func TestPickTables(t *testing.T) {
 
 	within := func(prefix, left, right string) {
 		opt.Prefix = []byte(prefix)
-		tm := &tableMock{left: []byte(left), right: []byte(right)}
+		tm := &tableMock{left: y.KeyWithTs([]byte(left), 10), right: y.KeyWithTs([]byte(right), 10)}
 		require.True(t, opt.pickTable(tm))
 	}
 	outside := func(prefix, left, right string) {
 		opt.Prefix = []byte(prefix)
-		tm := &tableMock{left: []byte(left), right: []byte(right)}
+		tm := &tableMock{left: y.KeyWithTs([]byte(left), 10), right: y.KeyWithTs([]byte(right), 10)}
 		require.False(t, opt.pickTable(tm))
 	}
 	within("abc", "ab", "ad")
@@ -112,6 +112,11 @@ func TestPickSortTables(t *testing.T) {
 	require.Equal(t, filtered[0].Smallest()[:3], []byte("cge"))
 	require.Equal(t, filtered[1].Smallest()[:3], []byte("ckr"))
 	require.Equal(t, filtered[2].Smallest()[:4], []byte("csfr"))
+
+	opt.Prefix = []byte("aa")
+	filtered = opt.pickTables(tables)
+	require.Equal(t, y.ParseKey(filtered[0].Smallest()), []byte("a"))
+	require.Equal(t, y.ParseKey(filtered[0].Biggest()), []byte("abc"))
 }
 
 func TestIteratePrefix(t *testing.T) {
