@@ -150,7 +150,8 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 			UserMeta: 0,
 		})
 	}
-	y.Check2(b.Finish().WriteTo(f))
+	_, err = f.Write(b.Finish())
+	require.NoError(t, err, "unable to write to file.")
 	f.Close()
 	f, _ = y.OpenSyncedFile(filename, true)
 	return f

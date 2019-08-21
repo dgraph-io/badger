@@ -571,17 +571,13 @@ func (s *levelsController) compactBuildTables(
 		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			numKeys, numSkips, time.Since(timeStart))
 		build := func(fileID uint64) (*table.Table, error) {
-			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), false)
+			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
 			if err != nil {
 				return nil, errors.Wrapf(err, "While opening new table: %d", fileID)
 			}
 
-			if _, err := builder.Finish().WriteTo(fd); err != nil {
+			if _, err := fd.Write(builder.Finish()); err != nil {
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
-			}
-
-			if err := fd.Sync(); err != nil {
-				return nil, errors.Wrapf(err, "Unable to sync file: %d", fileID)
 			}
 
 			opts := table.Options{

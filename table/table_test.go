@@ -77,7 +77,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 		y.AssertTrue(len(kv) == 2)
 		b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0})
 	}
-	_, err = b.Finish().WriteTo(f)
+	_, err = f.Write(b.Finish())
 	require.NoError(t, err, "writing to file failed")
 	f.Close()
 	f, _ = y.OpenSyncedFile(filename, true)
@@ -667,7 +667,7 @@ func TestTableBigValues(t *testing.T) {
 		builder.Add(key, vs)
 	}
 
-	_, err = builder.Finish().WriteTo(f)
+	_, err = f.Write(builder.Finish())
 	require.NoError(t, err, "unable to write to file")
 	opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 	tbl, err := OpenTable(f, opts)
@@ -763,7 +763,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			v := fmt.Sprintf("%d", id)
 			builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0})
 		}
-		_, err = builder.Finish().WriteTo(f)
+		_, err = f.Write(builder.Finish())
 		require.NoError(b, err, "unable to write to file")
 		opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 		tbl, err := OpenTable(f, opts)
@@ -850,39 +850,10 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 		builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)})
 	}
 
-	_, err = builder.Finish().WriteTo(f)
+	_, err = f.Write(builder.Finish())
 	require.NoError(b, err, "unable to write to file")
 	opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.NoVerification}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(b, err, "unable to open table")
 	return tbl
-}
-
-func BenchmarkFilewrite(b *testing.B) {
-	a := bytes.Repeat([]byte("a"), 1024)
-	rand.Seed(time.Now().Unix())
-	b.Run("sync-flag", func(b *testing.B) {
-		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-		f, err := y.OpenSyncedFile(filename, true)
-		require.NoError(b, err)
-		for i := 0; i < b.N; i++ {
-			for i := 0; i < 100; i++ {
-				_, err := f.Write(a)
-				require.NoError(b, err)
-			}
-		}
-	})
-
-	b.Run("fysnc", func(b *testing.B) {
-		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-		f, err := y.OpenSyncedFile(filename, false)
-		require.NoError(b, err)
-		for i := 0; i < b.N; i++ {
-			for i := 0; i < 100; i++ {
-				_, err := f.Write(a)
-				require.NoError(b, err)
-			}
-			require.NoError(b, f.Sync())
-		}
-	})
 }

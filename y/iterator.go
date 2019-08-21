@@ -86,10 +86,10 @@ func (v *ValueStruct) EncodeTo(buf *bytes.Buffer) {
 	buf.Write(v.Value)
 }
 
-// EncodeTo should be kept in sync with the Encode function above. The reason
+// EncodeToPageBuf should be kept in sync with the Encode function above. The reason
 // this function exists is to avoid creating byte arrays per key-value pair in
 // table/builder.go.
-func (v *ValueStruct) EncodeToYBuf(buf *Buffer) {
+func (v *ValueStruct) EncodeToPageBuf(buf *PageBuffer) {
 	buf.WriteByte(v.Meta)
 	buf.WriteByte(v.UserMeta)
 	var enc [binary.MaxVarintLen64]byte

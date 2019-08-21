@@ -60,7 +60,7 @@ func (h header) Size() int { return headerSize }
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	buf *y.Buffer
+	buf *y.PageBuffer
 
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -75,7 +75,7 @@ type Builder struct {
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
 	return &Builder{
-		buf:        y.NewBuffer(1 << 20),
+		buf:        y.NewPageBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
@@ -126,7 +126,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	b.buf.Write(h.Encode())
 	b.buf.Write(diffKey) // We only need to store the key difference.
 
-	v.EncodeToYBuf(b.buf)
+	v.EncodeToPageBuf(b.buf)
 }
 
 /*
@@ -222,7 +222,7 @@ The table structure looks like
 | Index   | Index Size | Checksum  | Checksum Size |
 +---------+------------+-----------+---------------+
 */
-func (b *Builder) Finish() *y.Buffer {
+func (b *Builder) Finish() []byte {
 	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePositive)
 	for _, h := range b.keyHashes {
 		bf.Add(h)
@@ -244,7 +244,7 @@ func (b *Builder) Finish() *y.Buffer {
 	y.Check(err)
 
 	b.writeChecksum(index)
-	return b.buf
+	return b.buf.Bytes()
 }
 
 func (b *Builder) writeChecksum(data []byte) {

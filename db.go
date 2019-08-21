@@ -858,7 +858,7 @@ func writeLevel0Table(ft flushTask, f io.Writer, bopts table.Options) error {
 		}
 		b.Add(iter.Key(), iter.Value())
 	}
-	_, err := b.Finish().WriteTo(f)
+	_, err := f.Write(b.Finish())
 	return err
 }
 

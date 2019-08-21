@@ -62,7 +62,7 @@ func TestTableIndex(t *testing.T) {
 			}
 			builder.Add(k, vs)
 		}
-		_, err = builder.Finish().WriteTo(f)
+		_, err = f.Write(builder.Finish())
 		require.NoError(t, err, "unable to write to file")
 
 		opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
@@ -87,27 +87,15 @@ func BenchmarkBuilder(b *testing.B) {
 	rand.Read(val)
 	vs := y.ValueStruct{Value: []byte(val)}
 
-	keysCount := 1300000
+	keysCount := 1300000 // This number of entries consumes ~64MB of memory.
 	for i := 0; i < b.N; i++ {
 		opts := Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 		builder := NewTableBuilder(opts)
-		// filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
-		// f, err := y.OpenSyncedFile(filename, false)
-		// require.NoError(b, err)
 
 		for i := 0; i < keysCount; i++ {
 			builder.Add(key(i), vs)
 		}
 
 		_ = builder.Finish()
-		// b.Logf("data size: %d\n", len(data))
-		// bo := bufio.NewWriterSize(f, 100<<20)
-		// f.Write(builder.Finish())
-		// f.Write(builder.Finish())
-		// fmt.Println(builder.buf.Len())
-		// io.Copy(f, builder.Finish())
-		// f.Sync()
-		// bo.Flush()
-		// _, err = builder.Finish().WriteTo(f)
 	}
 }

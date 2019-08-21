@@ -347,29 +347,29 @@ type page struct {
 	buf []byte
 }
 
-// Buffer consists of many pages. A page is a wrapper over []byte. Buffer can be as a replacement of
-// bytes.Buffer. Instead of having single underlying buffer, it has multiple underlying buffers.
-// Hence we avoid any copy during relocation(as happenes in bytes.Buffer). Buffer allocates memory
-// in chunks(pages). Once a chunk(page) is full, it will allocate double the size of previous
-// chunk. Its function are not thread safe.
-type Buffer struct {
+// PageBuffer consists of many pages. A page is a wrapper over []byte. PageBuffer can act as a
+// replacement of bytes.Buffer. Instead of having single underlying buffer, it has multiple
+// underlying buffers. Hence it avoids any copy during relocation(as happenes in bytes.Buffer).
+// Buffer allocates memory in pages. Once a page is full, it will allocate page with double the size
+// of previous page. Its function are not thread safe.
+type PageBuffer struct {
 	length      int
 	curPageSize int
 	pages       []*page
 	readBuf     []byte
 }
 
-// NewBuffer returns a new buffer with first page as pageSize.
-func NewBuffer(pageSize int) *Buffer {
-	b := &Buffer{curPageSize: pageSize}
+// NewPageBuffer returns a new PageBuffer with first page having size pageSize.
+func NewPageBuffer(pageSize int) *PageBuffer {
+	b := &PageBuffer{curPageSize: pageSize}
 	b.pages = make([]*page, 0)
 	b.pages = append(b.pages, &page{buf: make([]byte, 0, b.curPageSize)})
 	b.length = 0
 	return b
 }
 
-// Write writes data to Buffer b. It returns number of bytes written and any error encountered.
-func (b *Buffer) Write(data []byte) (int, error) {
+// Write writes data to PageBuffer b. It returns number of bytes written and any error encountered.
+func (b *PageBuffer) Write(data []byte) (int, error) {
 	written := 0
 	for {
 		cp := b.pages[len(b.pages)-1] // current page
@@ -390,20 +390,20 @@ func (b *Buffer) Write(data []byte) (int, error) {
 	return written, nil
 }
 
-// WriteByte writes data byte to Buffer and returns any encountered error.
-func (b *Buffer) WriteByte(data byte) error {
+// WriteByte writes data byte to PageBuffer and returns any encountered error.
+func (b *PageBuffer) WriteByte(data byte) error {
 	_, err := b.Write([]byte{data}) // Can be changed later.
 	return err
 }
 
-// Len returns length of Buffer.
-func (b *Buffer) Len() int {
+// Len returns length of PageBuffer.
+func (b *PageBuffer) Len() int {
 	return b.length
 }
 
-// ReadAt reads length byte starting from offset. If length is -1, it will read all data starting
-// from offset.
-func (b *Buffer) ReadAt(offset, length int) []byte {
+// ReadAt reads length bytes starting from offset. If length is -1,
+// it will read all data starting from offset.
+func (b *PageBuffer) ReadAt(offset, length int) []byte {
 	if b.length-offset < length || length == -1 {
 		length = b.length - offset
 	}
@@ -442,8 +442,8 @@ func (b *Buffer) ReadAt(offset, length int) []byte {
 	return b.readBuf
 }
 
-// Bytes returns while Buffer data as single []byte.
-func (b *Buffer) Bytes() []byte {
+// Bytes returns whole Buffer data as single []byte.
+func (b *PageBuffer) Bytes() []byte {
 	buf := make([]byte, b.length)
 	written := 0
 	for i := 0; i < len(b.pages); i++ {
@@ -454,87 +454,13 @@ func (b *Buffer) Bytes() []byte {
 }
 
 // WriteTo writes whole buffer to w. It returns number of bytes returned and any error encountered.
-func (b *Buffer) WriteTo(w io.Writer) (int64, error) {
+func (b *PageBuffer) WriteTo(w io.Writer) (int64, error) {
 	written := int64(0)
 	for i := 0; i < len(b.pages); i++ {
 		n, err := w.Write(b.pages[i].buf[:])
 		written += int64(n)
 		if err != nil {
 			return written, err
-		}
-	}
-
-	return written, nil
-}
-
-// TODO: reader can be removed.
-
-func (b *Buffer) NewReader() io.Reader {
-	// Allocates the right slice. Copies over the data and returns.
-
-	return &reader{
-		b:        b,
-		pageIdx:  0,
-		startIdx: 0,
-	}
-}
-
-// To create hash.
-// func (b *Buffer) NewReaderAt(offset, length int) io.Reader {
-// 	// Iterates over the pages and writes to io.Writer.
-// 	return &reader{b: b, offset: offset, length: length}
-// }
-
-type reader struct {
-	b *Buffer
-	// offset int
-	// length int
-	pageIdx  int
-	startIdx int
-}
-
-// // io.Copy(fd, b.NewReader(0, -1))
-
-func (r *reader) Read(buf []byte) (int, error) {
-	if len(buf) == 0 {
-		return 0, nil
-	}
-
-	read := 0
-	for r.pageIdx < len(r.b.pages) {
-		cp := r.b.pages[r.pageIdx]
-		n := copy(buf[read:], cp.buf[r.startIdx:])
-		read += n
-		r.startIdx += n
-		if r.startIdx >= len(cp.buf) {
-			r.pageIdx++
-			r.startIdx = 0
-		}
-		if read >= len(buf) {
-			return read, nil
-		}
-	}
-
-	if read < len(buf) {
-		return read, io.EOF
-	}
-
-	return read, nil
-}
-
-func (r *reader) WriteTo(w io.Writer) (int64, error) {
-	var written int64
-	for r.pageIdx < len(r.b.pages) {
-		cp := r.b.pages[r.pageIdx]
-		n, err := w.Write(cp.buf[r.startIdx:])
-		r.startIdx += n
-		written += int64(n)
-		if err != nil {
-			return written, err
-		}
-		if r.startIdx >= len(cp.buf) {
-			r.pageIdx++
-			r.startIdx = 0
 		}
 	}
 
