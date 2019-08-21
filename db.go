@@ -901,7 +901,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		if err != nil {
 			return errors.Wrapf(err, "failed to open table in memory: %d", fileID)
 		}
-		err = db.lc.addLevel0Table(tbl) // This will incrRef (if we don't error, sure)
+		err = db.lc.addLevel0Table(tbl) // This will incrRef
 		_ = tbl.DecrRef()               // Releases our ref.
 		return err
 	}
@@ -936,7 +936,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return err
 	}
 	// We own a ref on tbl.
-	err = db.lc.addLevel0Table(tbl) // This will incrRef (if we don't error, sure)
+	err = db.lc.addLevel0Table(tbl) // This will incrRef
 	_ = tbl.DecrRef()               // Releases our ref.
 	return err
 }

@@ -389,7 +389,7 @@ func (opt Options) WithNumCompactors(val int) Options {
 //
 // CompactL0OnClose determines whether Level 0 should be compacted before closing the DB.
 // This ensures that both reads and writes are efficient when the DB is opened later.
-//
+// CompactL0OnClose is set to true if KeepL0InMemory is set to true.
 // The default value of CompactL0OnClose is true.
 func (opt Options) WithCompactL0OnClose(val bool) Options {
 	opt.CompactL0OnClose = val
@@ -412,10 +412,10 @@ func (opt Options) WithLogRotatesToFlush(val int32) Options {
 
 // WithKeepL0InMemory returns a new Options value with KeepL0InMemory set to the given value.
 //
-// When KeepL0InMemory is set to true we will keep all Level 0 files in memory. This leads to better
-// performance in writes as well as compactions. In case of DB crash, the value log replay will take
-// longer since memtables and all level 0 tables will have to be recreated. This option also sets
-// ForceL0OnClose to true.
+// When KeepL0InMemory is set to true we will keep all Level 0 tables in memory. This leads to
+// better performance in writes as well as compactions. In case of DB crash, the value log replay
+// will take longer since memtables and all level 0 tables will have to be recreated. This option
+// also sets CompactL0OnClose to true.
 //
 // The default value of KeepL0InMemory is true.
 func (opt Options) WithKeepL0InMemory(val bool) Options {
