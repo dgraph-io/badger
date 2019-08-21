@@ -44,12 +44,14 @@ func TestPickTables(t *testing.T) {
 
 	within := func(prefix, left, right string) {
 		opt.Prefix = []byte(prefix)
-		tm := &tableMock{left: []byte(left), right: []byte(right)}
+		// PickTable expects smallest and biggest to contain timestamps.
+		tm := &tableMock{left: y.KeyWithTs([]byte(left), 1), right: y.KeyWithTs([]byte(right), 1)}
 		require.True(t, opt.pickTable(tm))
 	}
 	outside := func(prefix, left, right string) {
 		opt.Prefix = []byte(prefix)
-		tm := &tableMock{left: []byte(left), right: []byte(right)}
+		// PickTable expects smallest and biggest to contain timestamps.
+		tm := &tableMock{left: y.KeyWithTs([]byte(left), 1), right: y.KeyWithTs([]byte(right), 1)}
 		require.False(t, opt.pickTable(tm))
 	}
 	within("abc", "ab", "ad")
