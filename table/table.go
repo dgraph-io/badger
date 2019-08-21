@@ -401,6 +401,15 @@ func (t *Table) shouldDecrypt() bool {
 	return t.opt.DataKey != nil
 }
 
+// KeyID returns data key id.
+func (t *Table) KeyID() uint64 {
+	if t.opt.DataKey != nil {
+		return t.opt.DataKey.KeyId
+	}
+	// By default it's 0, if it is plain text.
+	return 0
+}
+
 // decrypt decrypts the given data. It should be called only after checking shouldDecrypt.
 func (t *Table) decrypt(data []byte) ([]byte, error) {
 	// Last BlockSize bytes of the data is the IV.

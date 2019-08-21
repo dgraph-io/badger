@@ -89,7 +89,8 @@ type DB struct {
 
 	orc *oracle
 
-	pub *publisher
+	pub      *publisher
+	registry *KeyRegistry
 }
 
 const (
@@ -283,6 +284,11 @@ func Open(opt Options) (db *DB, err error) {
 		pub:           newPublisher(),
 	}
 
+	kr, err := OpenKeyRegistry(opt)
+	if err != nil {
+		return nil, err
+	}
+	db.registry = kr
 	// Calculate initial size.
 	db.calculateSize()
 	db.closers.updateSize = y.NewCloser(1)
@@ -453,6 +459,9 @@ func (db *DB) close() (err error) {
 	}
 	if manifestErr := db.manifest.close(); err == nil {
 		err = errors.Wrap(manifestErr, "DB.Close")
+	}
+	if registryErr := db.registry.Close(); err == nil {
+		err = errors.Wrap(registryErr, "DB.Close")
 	}
 
 	// Fsync directories to ensure that lock file, and any other removed files whose directory
@@ -895,10 +904,14 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// Don't block just to sync the directory entry.
 	dirSyncCh := make(chan error)
 	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
-
+	dk, err := db.registry.latestDataKey()
+	if err != nil {
+		return y.Wrap(err)
+	}
 	bopts := table.Options{
 		BlockSize:         db.opt.BlockSize,
 		BloomFalsePostive: db.opt.BloomFalsePositive,
+		DataKey:           dk,
 	}
 	err = writeLevel0Table(ft, fd, bopts)
 	dirSyncErr := <-dirSyncCh
@@ -915,6 +928,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	opts := table.Options{
 		LoadingMode: db.opt.TableLoadingMode,
 		ChkMode:     db.opt.ChecksumVerificationMode,
+		DataKey:     dk,
 	}
 	tbl, err := table.OpenTable(fd, opts)
 	if err != nil {

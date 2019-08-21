@@ -297,14 +297,17 @@ func (w *sortedWriter) send() error {
 		return err
 	}
 	go func(builder *table.Builder) {
-		data := builder.Finish()
-		err := w.createTable(data)
+		err := w.createTable(builder)
 		w.throttle.Done(err)
 	}(w.builder)
-
+	dk, err := w.db.registry.latestDataKey()
+	if err != nil {
+		return err
+	}
 	bopts := table.Options{
 		BlockSize:         w.db.opt.BlockSize,
 		BloomFalsePostive: w.db.opt.BloomFalsePositive,
+		DataKey:           dk,
 	}
 	w.builder = table.NewTableBuilder(bopts)
 	return nil
@@ -319,7 +322,8 @@ func (w *sortedWriter) Done() error {
 	return w.send()
 }
 
-func (w *sortedWriter) createTable(data []byte) error {
+func (w *sortedWriter) createTable(builder *table.Builder) error {
+	data := builder.Finish()
 	if len(data) == 0 {
 		return nil
 	}
@@ -334,6 +338,7 @@ func (w *sortedWriter) createTable(data []byte) error {
 	opts := table.Options{
 		LoadingMode: w.db.opt.TableLoadingMode,
 		ChkMode:     w.db.opt.ChecksumVerificationMode,
+		DataKey:     builder.DataKey(),
 	}
 	tbl, err := table.OpenTable(fd, opts)
 	if err != nil {
