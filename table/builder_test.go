@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 )
 
@@ -41,38 +42,49 @@ func TestTableIndex(t *testing.T) {
 	})
 
 	t.Run("multiple keys", func(t *testing.T) {
-		keysCount := 10000
-		opts := Options{BlockSize: 4 * 1024, BloomFalsePostive: 0.01}
-		builder := NewTableBuilder(opts)
-		filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
-		f, err := y.OpenSyncedFile(filename, true)
+		opts := []Options{}
+		// Normal mode.
+		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePostive: 0.01})
+		// Encryption mode.
+		key := make([]byte, 32)
+		_, err := rand.Read(key)
 		require.NoError(t, err)
+		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePostive: 0.01,
+			DataKey: &pb.DataKey{Data: key}})
+		keysCount := 10000
+		for _, opt := range opts {
+			builder := NewTableBuilder(opt)
+			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
+			f, err := y.OpenSyncedFile(filename, true)
+			require.NoError(t, err)
 
-		blockFirstKeys := make([][]byte, 0)
-		blockCount := 0
-		for i := 0; i < keysCount; i++ {
-			k := []byte(fmt.Sprintf("%016x", i))
-			v := fmt.Sprintf("%d", i)
-			vs := y.ValueStruct{Value: []byte(v)}
-			if i == 0 { // This is first key for first block.
-				blockFirstKeys = append(blockFirstKeys, k)
-				blockCount = 1
-			} else if builder.shouldFinishBlock(k, vs) {
-				blockCount++
-				blockFirstKeys = append(blockFirstKeys, k)
+			blockFirstKeys := make([][]byte, 0)
+			blockCount := 0
+			for i := 0; i < keysCount; i++ {
+				k := []byte(fmt.Sprintf("%016x", i))
+				v := fmt.Sprintf("%d", i)
+				vs := y.ValueStruct{Value: []byte(v)}
+				if i == 0 { // This is first key for first block.
+					blockFirstKeys = append(blockFirstKeys, k)
+					blockCount = 1
+				} else if builder.shouldFinishBlock(k, vs) {
+					blockCount++
+					blockFirstKeys = append(blockFirstKeys, k)
+				}
+				builder.Add(k, vs)
 			}
-			builder.Add(k, vs)
-		}
-		f.Write(builder.Finish())
+			f.Write(builder.Finish())
 
-		opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
-		tbl, err := OpenTable(f, opts)
-		require.NoError(t, err, "unable to open table")
+			topt := Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead,
+				DataKey: opt.DataKey}
+			tbl, err := OpenTable(f, topt)
+			require.NoError(t, err, "unable to open table")
 
-		// Ensure index is built correctly
-		require.Equal(t, blockCount, len(tbl.blockIndex))
-		for i, ko := range tbl.blockIndex {
-			require.Equal(t, ko.Key, blockFirstKeys[i])
+			// Ensure index is built correctly
+			require.Equal(t, blockCount, len(tbl.blockIndex))
+			for i, ko := range tbl.blockIndex {
+				require.Equal(t, ko.Key, blockFirstKeys[i])
+			}
 		}
 	})
 }
