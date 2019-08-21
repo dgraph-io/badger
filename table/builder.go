@@ -153,6 +153,7 @@ func (b *Builder) finishBlock() {
 		block := b.buf.Bytes()[b.baseOffset:]
 		eBlock, err := b.encrypt(block)
 		y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
+		// We're rewriting the block, after encrypting.
 		b.buf.Truncate(int(b.baseOffset))
 		b.buf.Write(eBlock)
 	}
