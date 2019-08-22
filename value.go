@@ -19,7 +19,6 @@ package badger
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"hash"
@@ -244,7 +243,7 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 		}
 		return nil, err
 	}
-	crc := binary.BigEndian.Uint32(crcBuf[:])
+	crc := y.BytesToU32(crcBuf[:])
 	if crc != tee.Sum32() {
 		return nil, errTruncate
 	}
@@ -400,8 +399,8 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			ne.Value = append([]byte{}, e.Value...)
 			es := int64(ne.estimateSize(vlog.opt.ValueThreshold))
 			// Ensure length and size of wb is within transaction limits.
-			if int64(len(wb)+1) > vlog.opt.maxBatchCount ||
-				size+es > vlog.opt.maxBatchSize {
+			if int64(len(wb)+1) >= vlog.opt.maxBatchCount ||
+				size+es >= vlog.opt.maxBatchSize {
 				tr.LazyPrintf("request has %d entries, size %d", len(wb), size)
 				if err := vlog.db.batchSet(wb); err != nil {
 					return err
@@ -570,6 +569,9 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 	if lf == nil {
 		return nil
 	}
+	lf.lock.Lock()
+	defer lf.lock.Unlock()
+
 	path := vlog.fpath(lf.fid)
 	if err := lf.munmap(); err != nil {
 		_ = lf.fd.Close()
@@ -1384,11 +1386,12 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 
 func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) error {
 	vlog.lfDiscardStats.Lock()
+	defer vlog.lfDiscardStats.Unlock()
+
 	for fid, sz := range stats {
 		vlog.lfDiscardStats.m[fid] += sz
 		vlog.lfDiscardStats.updatesSinceFlush++
 	}
-	vlog.lfDiscardStats.Unlock()
 	if vlog.lfDiscardStats.updatesSinceFlush > discardStatsFlushThreshold {
 		if err := vlog.flushDiscardStats(); err != nil {
 			return err

@@ -29,6 +29,7 @@ import (
 
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
+	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 )
 
@@ -186,7 +187,7 @@ func (mf *manifestFile) close() error {
 // the wrong time.)
 func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange) error {
 	changes := pb.ManifestChangeSet{Changes: changesParam}
-	buf, err := changes.Marshal()
+	buf, err := proto.Marshal(&changes)
 	if err != nil {
 		return err
 	}
@@ -241,7 +242,7 @@ func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 	changes := m.asChanges()
 	set := pb.ManifestChangeSet{Changes: changes}
 
-	changeBuf, err := set.Marshal()
+	changeBuf, err := proto.Marshal(&set)
 	if err != nil {
 		fp.Close()
 		return nil, 0, err
@@ -340,7 +341,7 @@ func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error
 	if !bytes.Equal(magicBuf[0:4], magicText[:]) {
 		return Manifest{}, 0, errBadMagic
 	}
-	version := binary.BigEndian.Uint32(magicBuf[4:8])
+	version := y.BytesToU32(magicBuf[4:8])
 	if version != magicVersion {
 		return Manifest{}, 0,
 			fmt.Errorf("manifest has unsupported version: %d (we support %d)", version, magicVersion)
@@ -358,7 +359,7 @@ func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error
 			}
 			return Manifest{}, 0, err
 		}
-		length := binary.BigEndian.Uint32(lenCrcBuf[0:4])
+		length := y.BytesToU32(lenCrcBuf[0:4])
 		var buf = make([]byte, length)
 		if _, err := io.ReadFull(&r, buf); err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -366,12 +367,12 @@ func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error
 			}
 			return Manifest{}, 0, err
 		}
-		if crc32.Checksum(buf, y.CastagnoliCrcTable) != binary.BigEndian.Uint32(lenCrcBuf[4:8]) {
+		if crc32.Checksum(buf, y.CastagnoliCrcTable) != y.BytesToU32(lenCrcBuf[4:8]) {
 			return Manifest{}, 0, errBadChecksum
 		}
 
 		var changeSet pb.ManifestChangeSet
-		if err := changeSet.Unmarshal(buf); err != nil {
+		if err := proto.Unmarshal(buf, &changeSet); err != nil {
 			return Manifest{}, 0, err
 		}
 

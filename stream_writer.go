@@ -79,7 +79,7 @@ func (sw *StreamWriter) Prepare() error {
 }
 
 // Write writes KVList to DB. Each KV within the list contains the stream id which StreamWriter
-// would use to demux the writes. Write is thread safe and can be called concurrently by mulitple
+// would use to demux the writes. Write is thread safe and can be called concurrently by multiple
 // goroutines.
 func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 	if len(kvs.GetKv()) == 0 {
@@ -156,8 +156,7 @@ func (sw *StreamWriter) Flush() error {
 	}
 
 	// Encode and write the value log head into a new table.
-	data := make([]byte, vptrSize)
-	maxHead.Encode(data)
+	data := maxHead.Encode()
 	headWriter := sw.newWriter(headStreamId)
 	if err := headWriter.Add(
 		y.KeyWithTs(head, sw.maxVersion),
@@ -209,8 +208,8 @@ type sortedWriter struct {
 
 func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
 	bopts := table.Options{
-		BlockSize:         sw.db.opt.BlockSize,
-		BloomFalsePostive: sw.db.opt.BloomFalsePositive,
+		BlockSize:          sw.db.opt.BlockSize,
+		BloomFalsePositive: sw.db.opt.BloomFalsePositive,
 	}
 	w := &sortedWriter{
 		db:       sw.db,
@@ -247,9 +246,8 @@ func (w *sortedWriter) handleRequests(closer *y.Closer) {
 					ExpiresAt: e.ExpiresAt,
 				}
 			} else {
-				vbuf := make([]byte, vptrSize)
 				vs = y.ValueStruct{
-					Value:     vptr.Encode(vbuf),
+					Value:     vptr.Encode(),
 					Meta:      e.meta | bitValuePointer,
 					UserMeta:  e.UserMeta,
 					ExpiresAt: e.ExpiresAt,
@@ -305,8 +303,8 @@ func (w *sortedWriter) send() error {
 	}(w.builder)
 
 	bopts := table.Options{
-		BlockSize:         w.db.opt.BlockSize,
-		BloomFalsePostive: w.db.opt.BloomFalsePositive,
+		BlockSize:          w.db.opt.BlockSize,
+		BloomFalsePositive: w.db.opt.BloomFalsePositive,
 	}
 	w.builder = table.NewTableBuilder(bopts)
 	return nil
