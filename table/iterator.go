@@ -35,7 +35,7 @@ type blockIterator struct {
 	entryOffsets []uint32
 
 	// prevOverlap stores the overlap of the previous key with the base key.
-	// This avoids unnecssary copy of base key when the overlap is same for multiple keys.
+	// This avoids unnecessary copy of base key when the overlap is same for multiple keys.
 	prevOverlap uint16
 }
 
@@ -341,7 +341,8 @@ func (itr *Iterator) prev() {
 	}
 }
 
-// Key follows the y.Iterator interface
+// Key follows the y.Iterator interface.
+// Returns the key with timestamp.
 func (itr *Iterator) Key() []byte {
 	return itr.bi.key
 }

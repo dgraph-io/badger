@@ -349,10 +349,10 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 		}
 		return key
 	}
-	if bytes.Compare(trim(t.Smallest()), opt.Prefix) > 0 {
+	if bytes.Compare(trim(y.ParseKey(t.Smallest())), opt.Prefix) > 0 {
 		return false
 	}
-	if bytes.Compare(trim(t.Biggest()), opt.Prefix) < 0 {
+	if bytes.Compare(trim(y.ParseKey(t.Biggest())), opt.Prefix) < 0 {
 		return false
 	}
 	// Bloom filter lookup would only work if opt.Prefix does NOT have the read
