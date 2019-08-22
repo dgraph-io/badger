@@ -349,9 +349,9 @@ type page struct {
 
 // PageBuffer consists of many pages. A page is a wrapper over []byte. PageBuffer can act as a
 // replacement of bytes.Buffer. Instead of having single underlying buffer, it has multiple
-// underlying buffers. Hence it avoids any copy during relocation(as happenes in bytes.Buffer).
-// Buffer allocates memory in pages. Once a page is full, it will allocate page with double the size
-// of previous page. Its function are not thread safe.
+// underlying buffers. Hence it avoids any copy during relocation(as happens in bytes.Buffer).
+// PageBuffer allocates memory in pages. Once a page is full, it will allocate page with double the
+// size of previous page. Its function are not thread safe.
 type PageBuffer struct {
 	length      int
 	curPageSize int
@@ -453,7 +453,7 @@ func (b *PageBuffer) Bytes() []byte {
 	return buf
 }
 
-// WriteTo writes whole buffer to w. It returns number of bytes returned and any error encountered.
+// WriteTo writes whole buffer to w. It returns number of bytes wrttten and any error encountered.
 func (b *PageBuffer) WriteTo(w io.Writer) (int64, error) {
 	written := int64(0)
 	for i := 0; i < len(b.pages); i++ {
