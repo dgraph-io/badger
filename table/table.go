@@ -65,7 +65,7 @@ type Table struct {
 	mmap        []byte // Memory mapped.
 
 	// The following are initialized once and const.
-	smallest, biggest []byte // Smallest and largest keys.
+	smallest, biggest []byte // Smallest and largest keys (with timestamps).
 	id                uint64 // file id, part of filename
 
 	bf bbloom.Bloom

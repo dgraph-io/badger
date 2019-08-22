@@ -382,7 +382,8 @@ func (itr *Iterator) prev() {
 	}
 }
 
-// Key follows the y.Iterator interface
+// Key follows the y.Iterator interface.
+// Returns the key with timestamp.
 func (itr *Iterator) Key() []byte {
 	return itr.bi.Key()
 }
