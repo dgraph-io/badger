@@ -76,7 +76,8 @@ func TestPickSortTables(t *testing.T) {
 		out := make([]*table.Table, 0)
 		for _, mk := range mks {
 			f := buildTable(t, [][]string{{mk.small, "some value"}, {mk.large, "some value"}})
-			opts := table.Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+			opts := table.Options{LoadingMode: options.MemoryMap,
+				ChkMode: options.OnTableAndBlockRead}
 			tbl, err := table.OpenTable(f, opts)
 			require.NoError(t, err)
 			out = append(out, tbl)
@@ -92,7 +93,7 @@ func TestPickSortTables(t *testing.T) {
 	opt.Prefix = []byte("c")
 	filtered := opt.pickTables(tables)
 	require.Equal(t, 2, len(filtered))
-	// build table adding time stamp so removing tailing bytes.
+	// build table adds time stamp so removing tailing bytes.
 	require.Equal(t, filtered[0].Smallest()[:4], []byte("abcd"))
 	require.Equal(t, filtered[1].Smallest()[:3], []byte("cge"))
 	tables = genTables(MockKeys{small: "a", large: "abc"},
