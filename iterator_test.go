@@ -43,21 +43,25 @@ func (tm *tableMock) DoesNotHave(key []byte) bool { return false }
 func TestPickTables(t *testing.T) {
 	opt := DefaultIteratorOptions
 
-	within := func(prefix, left, right string) {
-		opt.Prefix = []byte(prefix)
-		tm := &tableMock{left: y.KeyWithTs([]byte(left), 10), right: y.KeyWithTs([]byte(right), 10)}
-		require.True(t, opt.pickTable(tm))
+	within := func(prefix, left, right []byte) {
+		opt.Prefix = prefix
+		// PickTable expects smallest and biggest to contain timestamps.
+		tm := &tableMock{left: y.KeyWithTs(left, 1), right: y.KeyWithTs(right, 1)}
+		require.True(t, opt.pickTable(tm), "within failed for %b %b %b\n", prefix, left, right)
 	}
 	outside := func(prefix, left, right string) {
 		opt.Prefix = []byte(prefix)
-		tm := &tableMock{left: y.KeyWithTs([]byte(left), 10), right: y.KeyWithTs([]byte(right), 10)}
-		require.False(t, opt.pickTable(tm))
+		// PickTable expects smallest and biggest to contain timestamps.
+		tm := &tableMock{left: y.KeyWithTs([]byte(left), 1), right: y.KeyWithTs([]byte(right), 1)}
+		require.False(t, opt.pickTable(tm), "outside failed for %b %b %b", prefix, left, right)
 	}
-	within("abc", "ab", "ad")
-	within("abc", "abc", "ad")
-	within("abc", "abb123", "ad")
-	within("abc", "abc123", "abd234")
-	within("abc", "abc123", "abc456")
+	within([]byte("abc"), []byte("ab"), []byte("ad"))
+	within([]byte("abc"), []byte("abc"), []byte("ad"))
+	within([]byte("abc"), []byte("abb123"), []byte("ad"))
+	within([]byte("abc"), []byte("abc123"), []byte("abd234"))
+	within([]byte("abc"), []byte("abc123"), []byte("abc456"))
+	// Regression test for https://github.com/dgraph-io/badger/issues/992
+	within([]byte{0, 0, 1}, []byte{0}, []byte{0, 0, 1})
 
 	outside("abd", "abe", "ad")
 	outside("abd", "ac", "ad")

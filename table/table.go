@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 
 	"github.com/dgryski/go-farm"
+	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/options"
@@ -50,8 +51,8 @@ type Options struct {
 
 	// Options for Table builder.
 
-	// BloomFalsePostive is the false postive probabiltiy of bloom filter.
-	BloomFalsePostive float64
+	// BloomFalsePositive is the false positive probabiltiy of bloom filter.
+	BloomFalsePositive float64
 
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
@@ -77,7 +78,7 @@ type Table struct {
 	mmap []byte // Memory mapped.
 
 	// The following are initialized once and const.
-	smallest, biggest []byte // Smallest and largest keys.
+	smallest, biggest []byte // Smallest and largest keys (with timestamps).
 	id                uint64 // file id, part of filename
 
 	bf       *z.Bloom
@@ -130,7 +131,7 @@ type block struct {
 
 func (b block) verifyCheckSum() error {
 	cs := &pb.Checksum{}
-	if err := cs.Unmarshal(b.checksum); err != nil {
+	if err := proto.Unmarshal(b.checksum, cs); err != nil {
 		return y.Wrapf(err, "unable to unmarshal checksum for block")
 	}
 	return y.VerifyChecksum(b.data, cs)
@@ -264,7 +265,7 @@ func (t *Table) readIndex() error {
 	expectedChk := &pb.Checksum{}
 	readPos -= checksumLen
 	buf = t.readNoFail(readPos, checksumLen)
-	if err := expectedChk.Unmarshal(buf); err != nil {
+	if err := proto.Unmarshal(buf, expectedChk); err != nil {
 		return err
 	}
 
@@ -281,7 +282,7 @@ func (t *Table) readIndex() error {
 	}
 
 	index := pb.TableIndex{}
-	err := index.Unmarshal(data)
+	err := proto.Unmarshal(data, &index)
 	y.Check(err)
 
 	t.bf = z.JSONUnmarshal(index.BloomFilter)
