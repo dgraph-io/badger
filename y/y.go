@@ -362,7 +362,6 @@ type PageBuffer struct {
 // NewPageBuffer returns a new PageBuffer with first page having size pageSize.
 func NewPageBuffer(pageSize int) *PageBuffer {
 	b := &PageBuffer{curPageSize: pageSize}
-	b.pages = make([]*page, 0)
 	b.pages = append(b.pages, &page{buf: make([]byte, 0, b.curPageSize)})
 	b.length = 0
 	return b
