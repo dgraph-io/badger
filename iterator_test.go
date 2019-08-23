@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
@@ -68,6 +69,59 @@ func TestPickTables(t *testing.T) {
 	outside("abd", "a", "ab")
 	outside("abd", "ab", "abc")
 	outside("abd", "ab", "abc123")
+}
+
+func TestPickSortTables(t *testing.T) {
+	type MockKeys struct {
+		small string
+		large string
+	}
+	genTables := func(mks ...MockKeys) []*table.Table {
+		out := make([]*table.Table, 0)
+		for _, mk := range mks {
+			f := buildTable(t, [][]string{{mk.small, "some value"}, {mk.large, "some value"}})
+			opts := table.Options{LoadingMode: options.MemoryMap,
+				ChkMode: options.OnTableAndBlockRead}
+			tbl, err := table.OpenTable(f, opts)
+			require.NoError(t, err)
+			out = append(out, tbl)
+		}
+		return out
+	}
+	tables := genTables(MockKeys{small: "a", large: "abc"},
+		MockKeys{small: "abcd", large: "cde"},
+		MockKeys{small: "cge", large: "chf"},
+		MockKeys{small: "glr", large: "gyup"})
+	opt := DefaultIteratorOptions
+	opt.prefixIsKey = false
+	opt.Prefix = []byte("c")
+	filtered := opt.pickTables(tables)
+	require.Equal(t, 2, len(filtered))
+	// build table adds time stamp so removing tailing bytes.
+	require.Equal(t, filtered[0].Smallest()[:4], []byte("abcd"))
+	require.Equal(t, filtered[1].Smallest()[:3], []byte("cge"))
+	tables = genTables(MockKeys{small: "a", large: "abc"},
+		MockKeys{small: "abcd", large: "ade"},
+		MockKeys{small: "cge", large: "chf"},
+		MockKeys{small: "glr", large: "gyup"})
+	filtered = opt.pickTables(tables)
+	require.Equal(t, 1, len(filtered))
+	require.Equal(t, filtered[0].Smallest()[:3], []byte("cge"))
+	tables = genTables(MockKeys{small: "a", large: "abc"},
+		MockKeys{small: "abcd", large: "ade"},
+		MockKeys{small: "cge", large: "chf"},
+		MockKeys{small: "ckr", large: "cyup"},
+		MockKeys{small: "csfr", large: "gyup"})
+	filtered = opt.pickTables(tables)
+	require.Equal(t, 3, len(filtered))
+	require.Equal(t, filtered[0].Smallest()[:3], []byte("cge"))
+	require.Equal(t, filtered[1].Smallest()[:3], []byte("ckr"))
+	require.Equal(t, filtered[2].Smallest()[:4], []byte("csfr"))
+
+	opt.Prefix = []byte("aa")
+	filtered = opt.pickTables(tables)
+	require.Equal(t, y.ParseKey(filtered[0].Smallest()), []byte("a"))
+	require.Equal(t, y.ParseKey(filtered[0].Biggest()), []byte("abc"))
 }
 
 func TestIteratePrefix(t *testing.T) {
