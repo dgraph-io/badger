@@ -3,7 +3,7 @@ module github.com/dgraph-io/badger
 go 1.12
 
 require (
-	github.com/AndreasBriese/bbloom v0.0.0-20190306092124-e2d15f34fcf9
+	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96
 	github.com/cespare/xxhash v1.1.0
 	github.com/dgraph-io/ristretto v0.0.0-20190801024210-18ba08fdea80
 	github.com/dgryski/go-farm v0.0.0-20190423205320-6a90982ecee2
