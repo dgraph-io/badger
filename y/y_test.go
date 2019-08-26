@@ -107,7 +107,7 @@ func TestPagebufferTruncate(t *testing.T) {
 	b := NewPageBuffer(32)
 	n, err := b.Write(wb[:])
 	require.Equal(t, n, len(wb), "length of buffer and length written should be equal")
-	require.NoError(t, err, "uanble to write bytes to buffer")
+	require.NoError(t, err, "unable to write bytes to buffer")
 
 	rb := b.ReadAt(0, -1)
 	require.True(t, bytes.Equal(wb[:], rb), "bytes written and read should be equal")
@@ -120,7 +120,7 @@ func TestPagebufferTruncate(t *testing.T) {
 	// Again write wb.
 	n, err = b.Write(wb[:])
 	require.Equal(t, n, len(wb), "length of buffer and length written should be equal")
-	require.NoError(t, err, "uanble to write bytes to buffer")
+	require.NoError(t, err, "unable to write bytes to buffer")
 
 	// Truncate to 1000.
 	b.Truncate(1000)
@@ -137,11 +137,11 @@ func TestPagebufferReader(t *testing.T) {
 	b := NewPageBuffer(32)
 	n, err := b.Write(wb[:])
 	require.Equal(t, n, len(wb), "length of buffer and length written should be equal")
-	require.NoError(t, err, "uanble to write bytes to buffer")
+	require.NoError(t, err, "unable to write bytes to buffer")
 	// Also append some bytes so that last page is not full.
 	n, err = b.Write(wb[:10])
 	require.Equal(t, n, 10, "length of buffer and length written should be equal")
-	require.NoError(t, err, "uanble to write bytes to buffer")
+	require.NoError(t, err, "unable to write bytes to buffer")
 
 	reader := b.NewReaderAt(0)
 	// Read first 512 bytes.
@@ -183,7 +183,7 @@ func TestPagebufferReader2(t *testing.T) {
 	b := NewPageBuffer(32)
 	n, err := b.Write(wb[:])
 	require.Equal(t, n, len(wb), "length of buffer and length written should be equal")
-	require.NoError(t, err, "uanble to write bytes to buffer")
+	require.NoError(t, err, "unable to write bytes to buffer")
 	// Also append some bytes so that last page is not full.
 	n, err = b.Write(wb[:10])
 	require.Equal(t, n, 10, "length of buffer and length written should be equal")
@@ -211,7 +211,7 @@ func TestPagebufferReader3(t *testing.T) {
 	b := NewPageBuffer(32)
 	n, err := b.Write(wb[:])
 	require.Equal(t, n, len(wb), "length of buffer and length written should be equal")
-	require.NoError(t, err, "uanble to write bytes to buffer")
+	require.NoError(t, err, "unable to write bytes to buffer")
 
 	reader := b.NewReaderAt(0)
 
