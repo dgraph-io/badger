@@ -360,14 +360,17 @@ type PageBuffer struct {
 	length      int // Length of PageBuffer.
 	curPageSize int // Size of last page allocated.
 
-	readBuf []byte // Will be resued everytime we read something.
+	// Will be reused everytime we read something. This has been kept at PageBuffer level to avoid
+	// allocation everytime(we call ReadAt frequently from Builder to calculate checksum).
+	// PageBuffer may take lot of memory in some cases because of this.
+	readBuf []byte
 }
 
 // NewPageBuffer returns a new PageBuffer with first page having size pageSize.
 func NewPageBuffer(pageSize int) *PageBuffer {
 	b := &PageBuffer{
 		curPageSize: pageSize,
-		// Not initialising any int fields as default value is 0 for those.
+		// Not initializing any int fields as default value is 0 for those.
 	}
 
 	b.pages = append(b.pages, &page{buf: make([]byte, 0, b.curPageSize)})
@@ -503,7 +506,7 @@ func (b *PageBuffer) Bytes() []byte {
 	return buf
 }
 
-// WriteTo writes whole buffer to w. It returns number of bytes wrttten and any error encountered.
+// WriteTo writes whole buffer to w. It returns number of bytes written and any error encountered.
 func (b *PageBuffer) WriteTo(w io.Writer) (int64, error) {
 	written := int64(0)
 	for i := 0; i < len(b.pages); i++ {
