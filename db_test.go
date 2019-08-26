@@ -37,10 +37,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/skl"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/skl"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 var mmap = flag.Bool("vlog_mmap", true, "Specify if value log must be memory-mapped")

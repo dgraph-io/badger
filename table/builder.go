@@ -24,8 +24,8 @@ import (
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
 
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 )
 
