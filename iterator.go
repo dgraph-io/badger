@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 
 	"github.com/dgraph-io/badger/y"
@@ -340,23 +341,11 @@ type IteratorOptions struct {
 	InternalAccess bool // Used to allow internal access to badger keys.
 }
 
-func (opt *IteratorOptions) compareToPrefix(key []byte) int {
-	// We should compare key without timestamp. For example key - a[TS] might be > "aa" prefix.
-	key = y.ParseKey(key)
-	if len(key) > len(opt.Prefix) {
-		key = key[:len(opt.Prefix)]
-	}
-	return bytes.Compare(key, opt.Prefix)
-}
-
 func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	if len(opt.Prefix) == 0 {
 		return true
 	}
-	if opt.compareToPrefix(t.Smallest()) > 0 {
-		return false
-	}
-	if opt.compareToPrefix(t.Biggest()) < 0 {
+	if !y.ContainsPrefix(opt.Prefix, t) {
 		return false
 	}
 	// Bloom filter lookup would only work if opt.Prefix does NOT have the read
@@ -376,7 +365,7 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		return out
 	}
 	sIdx := sort.Search(len(all), func(i int) bool {
-		return opt.compareToPrefix(all[i].Biggest()) >= 0
+		return y.CompareToPrefix(all[i].Biggest(), opt.Prefix) >= 0
 	})
 	if sIdx == len(all) {
 		// Not found.
@@ -386,7 +375,7 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 	filtered := all[sIdx:]
 	if !opt.prefixIsKey {
 		eIdx := sort.Search(len(filtered), func(i int) bool {
-			return opt.compareToPrefix(filtered[i].Smallest()) > 0
+			return y.CompareToPrefix(filtered[i].Smallest(), opt.Prefix) > 0
 		})
 		out := make([]*table.Table, len(filtered[:eIdx]))
 		copy(out, filtered[:eIdx])
@@ -397,7 +386,7 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 	for _, t := range filtered {
 		// When we encounter the first table whose smallest key is higher than
 		// opt.Prefix, we can stop.
-		if opt.compareToPrefix(t.Smallest()) > 0 {
+		if y.CompareToPrefix(t.Smallest(), opt.Prefix) > 0 {
 			return out
 		}
 		// opt.Prefix is actually the key. So, we can run bloom filter checks
@@ -451,9 +440,13 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 		panic("Only one iterator can be active at one time, for a RW txn.")
 	}
 
-	// TODO: If Prefix is set, only pick those memtables which have keys with
-	// the prefix.
-	tables, decr := txn.db.getMemTables()
+	var tables []*skl.Skiplist
+	var decr func()
+	if len(opt.Prefix) > 0 {
+		tables, decr = txn.db.getMemTablesForPrefix(opt.Prefix)
+	} else {
+		tables, decr = txn.db.getMemTables()
+	}
 	defer decr()
 	txn.db.vlog.incrIteratorCount()
 	var iters []y.Iterator

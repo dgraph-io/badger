@@ -448,6 +448,90 @@ func TestIteratorSeek(t *testing.T) {
 	require.EqualValues(t, "01990", v.Value)
 }
 
+func TestBiggestAndSmallest(t *testing.T) {
+	l := NewSkiplist(arenaSize)
+	i := 0
+	// Testing with multiple keys.
+	for {
+		if i == 100 {
+			break
+		}
+		l.Put(y.KeyWithTs([]byte(fmt.Sprintf("key%d", i)), 0), y.ValueStruct{Value: newValue(55), Meta: 57, UserMeta: 0})
+		i++
+	}
+	require.Equal(t, []byte("key0"), y.ParseKey(l.Smallest()))
+	require.Equal(t, []byte("key99"), y.ParseKey(l.Biggest()))
+	l = NewSkiplist(arenaSize)
+	// Testing with one key.
+	l.Put(y.KeyWithTs([]byte("key0"), 0), y.ValueStruct{Value: newValue(55), Meta: 57, UserMeta: 0})
+	require.Equal(t, []byte("key0"), y.ParseKey(l.Smallest()))
+	require.Equal(t, []byte("key0"), y.ParseKey(l.Biggest()))
+	l = NewSkiplist(arenaSize)
+	// Empty skiplist return empty byte array.
+	require.Equal(t, []byte{}, l.Smallest())
+	require.Equal(t, []byte{}, l.Biggest())
+}
+
+func TestBiggestAndSmallestConcurrent(t *testing.T) {
+	l := NewSkiplist(arenaSize)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+
+		i := 0
+		// Testing with multiple keys.
+		for {
+			if i == 100 {
+				break
+			}
+			l.Put(y.KeyWithTs([]byte(fmt.Sprintf("key%d", i)), 0), y.ValueStruct{Value: newValue(55), Meta: 57, UserMeta: 0})
+			i++
+		}
+		wg.Done()
+	}()
+	wg.Add(1)
+	go func() {
+
+		i := 101
+		// Testing with multiple keys.
+		for {
+			if i == 200 {
+				break
+			}
+			l.Put(y.KeyWithTs([]byte(fmt.Sprintf("key%d", i)), 0), y.ValueStruct{Value: newValue(55), Meta: 57, UserMeta: 0})
+			i++
+		}
+		wg.Done()
+	}()
+	wg.Wait()
+	wg.Add(1)
+	go func() {
+
+		i := 900
+		// Testing with multiple keys.
+		for {
+			if i == 1000 {
+				break
+			}
+			l.Put(y.KeyWithTs([]byte(fmt.Sprintf("key%d", i)), 0), y.ValueStruct{Value: newValue(55), Meta: 57, UserMeta: 0})
+			i++
+		}
+		wg.Done()
+	}()
+	wg.Wait()
+	require.Equal(t, []byte("key0"), y.ParseKey(l.Smallest()))
+	fmt.Println(l.Get(y.KeyWithTs([]byte(fmt.Sprintf("key%d", 199)), 0)))
+	require.Equal(t, []byte("key999"), y.ParseKey(l.Biggest()))
+	l = NewSkiplist(arenaSize)
+	// Testing with one key.
+	l.Put(y.KeyWithTs([]byte("key0"), 0), y.ValueStruct{Value: newValue(55), Meta: 57, UserMeta: 0})
+	require.Equal(t, []byte("key0"), y.ParseKey(l.Smallest()))
+	require.Equal(t, []byte("key0"), y.ParseKey(l.Biggest()))
+	l = NewSkiplist(arenaSize)
+	// Empty skiplist return empty byte array.
+	require.Equal(t, []byte{}, l.Smallest())
+	require.Equal(t, []byte{}, l.Biggest())
+}
 func randomKey(rng *rand.Rand) []byte {
 	b := make([]byte, 8)
 	key := rng.Uint32()

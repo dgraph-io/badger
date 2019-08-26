@@ -340,3 +340,31 @@ func BytesToU32Slice(b []byte) []uint32 {
 	hdr.Data = uintptr(unsafe.Pointer(&b[0]))
 	return u32s
 }
+
+// CompareToPrefix compares given prefix with the key
+func CompareToPrefix(key, prefix []byte) int {
+	// We should compare key without timestamp. For example key - a[TS] might be > "aa" prefix.
+	key = ParseKey(key)
+	if len(key) > len(prefix) {
+		key = key[:len(prefix)]
+	}
+	return bytes.Compare(key, prefix)
+}
+
+type Range interface {
+	Smallest() []byte
+	Biggest() []byte
+}
+
+// ContainsPrefix check whether the given prefix fall between smallest
+// and largest.
+func ContainsPrefix(prefix []byte, r Range) bool {
+	// If it is empty skip list then we'll return false.
+	if len(r.Smallest()) == 0 {
+		return false
+	}
+	if CompareToPrefix(r.Smallest(), prefix) > 0 || CompareToPrefix(r.Biggest(), prefix) < 0 {
+		return false
+	}
+	return true
+}
