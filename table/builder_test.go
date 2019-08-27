@@ -23,9 +23,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
-	"github.com/stretchr/testify/require"
 )
 
 func TestTableIndex(t *testing.T) {

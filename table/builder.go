@@ -61,7 +61,7 @@ func (h header) Size() int { return headerSize }
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	buf *y.PageBuffer
+	buf *bytes.Buffer
 
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -76,7 +76,7 @@ type Builder struct {
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
 	return &Builder{
-		buf:        y.NewPageBuffer(1 << 20),
+		buf:        newBuffer(1 << 20),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
@@ -127,7 +127,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	b.buf.Write(h.Encode())
 	b.buf.Write(diffKey) // We only need to store the key difference.
 
-	v.EncodeToPageBuf(b.buf)
+	v.EncodeTo(b.buf)
 }
 
 /*
@@ -145,7 +145,7 @@ func (b *Builder) finishBlock() {
 	b.buf.Write(y.U32SliceToBytes(b.entryOffsets))
 	b.buf.Write(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
-	blockBuf := b.buf.ReadAt(int(b.baseOffset), -1)
+	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
 	b.writeChecksum(blockBuf)
 
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
