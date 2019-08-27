@@ -1071,3 +1071,38 @@ func TestTruncatedDiscardStat(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 }
+
+// This test ensures, flushDiscardStats() doesn't crash.
+func TestBlockedDiscardStats(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.Remove(dir)
+	db, err := Open(getTestOptions(dir))
+	require.NoError(t, err)
+	// Set discard stats.
+	db.vlog.lfDiscardStats = &lfDiscardStats{
+		m: map[uint32]int64{0: 0},
+	}
+	db.blockWrite()
+	require.NoError(t, db.vlog.flushDiscardStats())
+	db.unblockWrite()
+	require.NoError(t, db.Close())
+}
+
+// Regression test for https://github.com/dgraph-io/badger/issues/970
+func TestBlockedDiscardStatsOnClose(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.Remove(dir)
+
+	db, err := Open(getTestOptions(dir))
+	require.NoError(t, err)
+	// Set discard stats.
+	db.vlog.lfDiscardStats = &lfDiscardStats{
+		m: map[uint32]int64{0: 0},
+	}
+	// This is important. Set updateSinceFlush to discardStatsFlushThresold so
+	// that the next update call flushes the discard stats.
+	db.vlog.lfDiscardStats.updatesSinceFlush = discardStatsFlushThreshold + 1
+	require.NoError(t, db.Close())
+}
