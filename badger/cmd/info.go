@@ -313,7 +313,7 @@ func printInfo(dir, valueDir string) error {
 		})
 		for _, tableID := range tableIDs {
 			tableFile := table.IDToFilename(tableID)
-			tm, ok1 := manifest.Tables[tableID]
+			_, ok1 := manifest.Tables[tableID]
 			file, ok2 := fileinfoByName[tableFile]
 			if ok1 && ok2 {
 				fileinfoMarked[tableFile] = true
