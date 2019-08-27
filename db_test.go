@@ -582,57 +582,64 @@ func TestIterate2Basic(t *testing.T) {
 	})
 }
 
-func TestLoad(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
+func TestLoadAndEncryption(t *testing.T) {
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	n := 10000
-	{
-		kv, err := Open(getTestOptions(dir))
+	opts := []Options{getTestOptions(""), getTestOptions("").WithEncryptionKey(key)}
+	for _, opt := range opts {
+		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
+		defer os.RemoveAll(dir)
+		opt = opt.WithDir(dir)
+		opt = opt.WithValueDir(dir)
+		n := 10000
+		{
+			kv, err := Open(opt)
+			require.NoError(t, err)
+			for i := 0; i < n; i++ {
+				if (i % 10000) == 0 {
+					fmt.Printf("Putting i=%d\n", i)
+				}
+				k := []byte(fmt.Sprintf("%09d", i))
+				txnSet(t, kv, k, k, 0x00)
+			}
+			kv.Close()
+		}
+		kv, err := Open(opt)
+		require.NoError(t, err)
+		require.Equal(t, uint64(10001), kv.orc.readTs())
+
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
-				fmt.Printf("Putting i=%d\n", i)
+				fmt.Printf("Testing i=%d\n", i)
 			}
-			k := []byte(fmt.Sprintf("%09d", i))
-			txnSet(t, kv, k, k, 0x00)
+			k := fmt.Sprintf("%09d", i)
+			require.NoError(t, kv.View(func(txn *Txn) error {
+				item, err := txn.Get([]byte(k))
+				require.NoError(t, err)
+				require.EqualValues(t, k, string(getItemValue(t, item)))
+				return nil
+			}))
 		}
 		kv.Close()
-	}
+		summary := kv.lc.getSummary()
 
-	kv, err := Open(getTestOptions(dir))
-	require.NoError(t, err)
-	require.Equal(t, uint64(10001), kv.orc.readTs())
-
-	for i := 0; i < n; i++ {
-		if (i % 10000) == 0 {
-			fmt.Printf("Testing i=%d\n", i)
+		// Check that files are garbage collected.
+		idMap := getIDMap(dir)
+		for fileID := range idMap {
+			// Check that name is in summary.filenames.
+			require.True(t, summary.fileIDs[fileID], "%d", fileID)
 		}
-		k := fmt.Sprintf("%09d", i)
-		require.NoError(t, kv.View(func(txn *Txn) error {
-			item, err := txn.Get([]byte(k))
-			require.NoError(t, err)
-			require.EqualValues(t, k, string(getItemValue(t, item)))
-			return nil
-		}))
-	}
-	kv.Close()
-	summary := kv.lc.getSummary()
+		require.EqualValues(t, len(idMap), len(summary.fileIDs))
 
-	// Check that files are garbage collected.
-	idMap := getIDMap(dir)
-	for fileID := range idMap {
-		// Check that name is in summary.filenames.
-		require.True(t, summary.fileIDs[fileID], "%d", fileID)
+		var fileIDs []uint64
+		for k := range summary.fileIDs { // Map to array.
+			fileIDs = append(fileIDs, k)
+		}
+		sort.Slice(fileIDs, func(i, j int) bool { return fileIDs[i] < fileIDs[j] })
+		fmt.Printf("FileIDs: %v\n", fileIDs)
 	}
-	require.EqualValues(t, len(idMap), len(summary.fileIDs))
-
-	var fileIDs []uint64
-	for k := range summary.fileIDs { // Map to array.
-		fileIDs = append(fileIDs, k)
-	}
-	sort.Slice(fileIDs, func(i, j int) bool { return fileIDs[i] < fileIDs[j] })
-	fmt.Printf("FileIDs: %v\n", fileIDs)
 }
 
 func TestIterateDeleted(t *testing.T) {
@@ -1791,32 +1798,50 @@ func TestForceFlushMemtable(t *testing.T) {
 
 func TestVerifyChecksum(t *testing.T) {
 	// use stream write for writing.
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		value := make([]byte, 32)
-		y.Check2(rand.Read(value))
-		l := &pb.KVList{}
-		st := 0
-		for i := 0; i < 1000; i++ {
-			key := make([]byte, 8)
-			binary.BigEndian.PutUint64(key, uint64(i))
-			l.Kv = append(l.Kv, &pb.KV{
-				Key:      key,
-				Value:    value,
-				StreamId: uint32(st),
-				Version:  1,
-			})
-			if i%100 == 0 {
-				st++
+
+	// Without encryption.
+	path, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.Remove(path)
+	opts := []Options{}
+	opts = append(opts, getTestOptions(path))
+
+	// With encryption.
+	path, err = ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.Remove(path)
+	key := make([]byte, 32)
+	_, err = rand.Read(key)
+	require.NoError(t, err)
+	opts = append(opts, getTestOptions(path).WithEncryptionKey(key))
+	for _, opt := range opts {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			value := make([]byte, 32)
+			y.Check2(rand.Read(value))
+			l := &pb.KVList{}
+			st := 0
+			for i := 0; i < 1000; i++ {
+				key := make([]byte, 8)
+				binary.BigEndian.PutUint64(key, uint64(i))
+				l.Kv = append(l.Kv, &pb.KV{
+					Key:      key,
+					Value:    value,
+					StreamId: uint32(st),
+					Version:  1,
+				})
+				if i%100 == 0 {
+					st++
+				}
 			}
-		}
 
-		sw := db.NewStreamWriter()
-		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
-		require.NoError(t, sw.Write(l), "sw.Write() failed")
-		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+			sw := db.NewStreamWriter()
+			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+			require.NoError(t, sw.Write(l), "sw.Write() failed")
+			require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
-		require.NoError(t, db.VerifyChecksum(), "checksum verification failed for DB")
-	})
+			require.NoError(t, db.VerifyChecksum(), "checksum verification failed for DB")
+		})
+	}
 }
 
 func TestMain(m *testing.M) {
