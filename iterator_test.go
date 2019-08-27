@@ -26,6 +26,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dgraph-io/badger/skl"
+
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
@@ -297,6 +299,46 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 			if err != nil {
 				b.Fatalf("Error while View: %v", err)
 			}
+		}
+	})
+}
+
+func BenchmarkGetMemtable(b *testing.B) {
+	arenaSize := 1 << 20
+	key := func(prefix string, i int) []byte {
+		return y.KeyWithTs([]byte(fmt.Sprintf("%s%03d", prefix, i)), 0)
+	}
+	newValue := func(v int) []byte {
+		return []byte(fmt.Sprintf("%05d", v))
+	}
+	genSkl := func(prefix string) *skl.Skiplist {
+		sl := skl.NewSkiplist(int64(arenaSize))
+		for i := 0; i < 10000; i++ {
+			sl.Put(key(prefix, i), y.ValueStruct{Value: newValue(i), Meta: 0, UserMeta: 0})
+		}
+		return sl
+	}
+	db := DB{}
+	db.mt = genSkl("hello")
+	db.imm = make([]*skl.Skiplist, 0, 7)
+	db.imm = append(db.imm, []*skl.Skiplist{genSkl("yo"), genSkl("sup"), genSkl("badger"),
+		genSkl("hello")}...)
+	b.Run("getMemtable", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			ts, decr := db.getMemTables()
+			if len(ts) != 5 {
+				b.Fatalf("expected 5 tables but got %d", len(ts))
+			}
+			decr()
+		}
+	})
+	b.Run("getMemtableWithPick", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			ts, decr := db.getMemTablesForPrefix([]byte("hello"))
+			if len(ts) != 2 {
+				b.Fatalf("expected 2 tables but got %d", len(ts))
+			}
+			decr()
 		}
 	})
 }
