@@ -5,7 +5,6 @@ go:
     - "1.12"
 
 os:
-    - linux
     - osx
 
 notifications:
