@@ -1413,15 +1413,14 @@ func (vlog *valueLog) flushDiscardStats() error {
 		Value: vlog.encodedDiscardStats(),
 	}}
 	req, err := vlog.db.sendToWriteCh(entries)
-	if err != nil {
+	if err == ErrBlockedWrites {
 		// We'll block write while closing db.
 		// When L0 compaction in close may push discard stats.
 		// So ignoring it.
 		// https://github.com/dgraph-io/badger/issues/970
-		if err != ErrBlockedWrites {
-			return errors.Wrapf(err, "failed to push discard stats to write channel")
-		}
 		return nil
+	} else if err != nil {
+		return errors.Wrapf(err, "failed to push discard stats to write channel")
 	}
 	vlog.lfDiscardStats.updatesSinceFlush = 0
 	return req.Wait()
