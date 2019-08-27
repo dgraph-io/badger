@@ -21,6 +21,8 @@ import (
 	"math"
 	"unsafe"
 
+	"github.com/golang/snappy"
+
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
 
@@ -148,6 +150,14 @@ func (b *Builder) finishBlock() {
 	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
 	b.writeChecksum(blockBuf)
 
+	// Compress the block
+	if b.opt.CompressionEnabled {
+		blockBuf = snappy.Encode(nil, b.buf.Bytes()[b.baseOffset:])
+		// Truncate already written data
+		b.buf.Truncate(int(b.baseOffset))
+		// Write compressed data
+		b.buf.Write(blockBuf)
+	}
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
 	// implement padding. This might be useful while using direct I/O.
 

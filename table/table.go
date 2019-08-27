@@ -27,6 +27,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/golang/snappy"
+
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
@@ -56,6 +58,9 @@ type Options struct {
 
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
+
+	// True if compression is enabled
+	CompressionEnabled bool
 }
 
 // TableInterface is useful for testing.
@@ -302,7 +307,19 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 	var err error
 	blk.data, err = t.read(blk.offset, int(ko.Len))
+	if err != nil {
+		return nil, errors.Wrapf(err,
+			"failed to read from file: %s at offset: %d, len: %d", t.fd.Name(), blk.offset, ko.Len)
+	}
 
+	if t.opt.CompressionEnabled {
+		blk.data, err = snappy.Decode(nil, blk.data)
+		if err != nil {
+			return nil, errors.Wrapf(err,
+				"failed to decode compressed data in file: %s at offset: %d, len: %d",
+				t.fd.Name(), blk.offset, ko.Len)
+		}
+	}
 	// Read meta data related to block.
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(y.BytesToU32(blk.data[readPos : readPos+4]))

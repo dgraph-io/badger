@@ -34,7 +34,7 @@ func TestTableIndex(t *testing.T) {
 	keyPrefix := "key"
 	t.Run("single key", func(t *testing.T) {
 		f := buildTestTable(t, keyPrefix, 1)
-		opts := Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+		opts := Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead, CompressionEnabled: true}
 		tbl, err := OpenTable(f, opts)
 		require.NoError(t, err)
 		require.Len(t, tbl.blockIndex, 1)

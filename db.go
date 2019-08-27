@@ -896,11 +896,14 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	dirSyncCh := make(chan error)
 	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
 
-	bopts := table.Options{
+	topts := table.Options{
 		BlockSize:          db.opt.BlockSize,
 		BloomFalsePositive: db.opt.BloomFalsePositive,
+		LoadingMode:        db.opt.TableLoadingMode,
+		ChkMode:            db.opt.ChecksumVerificationMode,
+		CompressionEnabled: true,
 	}
-	err = writeLevel0Table(ft, fd, bopts)
+	err = writeLevel0Table(ft, fd, topts)
 	dirSyncErr := <-dirSyncCh
 
 	if err != nil {
@@ -912,11 +915,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
 
-	opts := table.Options{
-		LoadingMode: db.opt.TableLoadingMode,
-		ChkMode:     db.opt.ChecksumVerificationMode,
-	}
-	tbl, err := table.OpenTable(fd, opts)
+	tbl, err := table.OpenTable(fd, topts)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err

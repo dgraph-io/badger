@@ -208,6 +208,7 @@ type sortedWriter struct {
 
 func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
 	bopts := table.Options{
+		CompressionEnabled: true,
 		BlockSize:          sw.db.opt.BlockSize,
 		BloomFalsePositive: sw.db.opt.BloomFalsePositive,
 	}
@@ -303,6 +304,7 @@ func (w *sortedWriter) send() error {
 	}(w.builder)
 
 	bopts := table.Options{
+		CompressionEnabled: true,
 		BlockSize:          w.db.opt.BlockSize,
 		BloomFalsePositive: w.db.opt.BloomFalsePositive,
 	}
@@ -332,8 +334,9 @@ func (w *sortedWriter) createTable(data []byte) error {
 		return err
 	}
 	opts := table.Options{
-		LoadingMode: w.db.opt.TableLoadingMode,
-		ChkMode:     w.db.opt.ChecksumVerificationMode,
+		CompressionEnabled: true,
+		LoadingMode:        w.db.opt.TableLoadingMode,
+		ChkMode:            w.db.opt.ChecksumVerificationMode,
 	}
 	tbl, err := table.OpenTable(fd, opts)
 	if err != nil {

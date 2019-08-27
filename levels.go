@@ -151,8 +151,9 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			}
 
 			opts := table.Options{
-				LoadingMode: db.opt.TableLoadingMode,
-				ChkMode:     db.opt.ChecksumVerificationMode,
+				LoadingMode:        db.opt.TableLoadingMode,
+				ChkMode:            db.opt.ChecksumVerificationMode,
+				CompressionEnabled: true,
 			}
 			t, err := table.OpenTable(fd, opts)
 			if err != nil {
@@ -496,6 +497,7 @@ func (s *levelsController) compactBuildTables(
 	for it.Valid() {
 		timeStart := time.Now()
 		bopts := table.Options{
+			CompressionEnabled: true,
 			BlockSize:          s.kv.opt.BlockSize,
 			BloomFalsePositive: s.kv.opt.BloomFalsePositive,
 		}
@@ -581,8 +583,9 @@ func (s *levelsController) compactBuildTables(
 			}
 
 			opts := table.Options{
-				LoadingMode: s.kv.opt.TableLoadingMode,
-				ChkMode:     s.kv.opt.ChecksumVerificationMode,
+				CompressionEnabled: true,
+				LoadingMode:        s.kv.opt.TableLoadingMode,
+				ChkMode:            s.kv.opt.ChecksumVerificationMode,
 			}
 			tbl, err := table.OpenTable(fd, opts)
 			// decrRef is added below.
