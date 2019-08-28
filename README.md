@@ -450,7 +450,7 @@ forward or backward through the keys one at a time.
 
 By default, Badger prefetches the values of the next 100 items. You can adjust
 that with the `IteratorOptions.PrefetchSize` field. However, setting it to
-a value higher than GOMAXPROCS (which we recommend to be 128 or higher)
+a value higher than `GOMAXPROCS` (which we recommend to be 128 or higher)
 shouldn’t give any additional benefits. You can also turn off the fetching of
 values altogether. See section below on key-only iteration.
 
@@ -842,28 +842,30 @@ If you're seeing panics like above, this would be because you're operating on a 
 
 ### Are there any Go specific settings that I should use?
 
-We *highly* recommend setting a high number for GOMAXPROCS, which allows Go to
+We *highly* recommend setting a high number for `GOMAXPROCS`, which allows Go to
 observe the full IOPS throughput provided by modern SSDs. In Dgraph, we have set
 it to 128. For more details, [see this
 thread](https://groups.google.com/d/topic/golang-nuts/jPb_h3TvlKE/discussion).
 
 ### Are there any linux specific settings that I should use?
 
-We recommend setting max file descriptors to a high number depending upon the expected size of you
-data.
+We recommend setting `max file descriptors` to a high number depending upon the expected size of
+your data. On Linux and Mac, you can check the file descriptor limit with `ulimit -n -H` for the
+hard limit and `ulimit -n -S` for the soft limit. A soft limit of `65535` is a good lower bound.
+You can adjust the limit as needed.
 
 ### I see "manifest has unsupported version: X (we support Y)" error.
 
 This error means you have a badger directory which was created by an older version of badger and
 you're trying to open in a newer version of badger. The underlying data format can change across
-badger versions and users will have to migrate thier data directory.
+badger versions and users will have to migrate their data directory.
 Badger data can be migrated from version X of badger to version Y of badger by following the steps
 listed below.
 Assume you were on badger v1.5.5 and you wish to migrate to v2.0.0-rc1 version
 1. Install badger version v1.5.5.
     - `cd $GOPATH/src/github.com/dgraph-io/badger`
     - `git checkout v1.5.5`
-    - `cd badger && go install .`
+    - `cd badger && go install`
 
       This should install old badger binary in your $GOBIN.
 2. Create Backup
@@ -871,7 +873,7 @@ Assume you were on badger v1.5.5 and you wish to migrate to v2.0.0-rc1 version
 3. Install badger version v2.0.0-rc1
     - `cd $GOPATH/src/github.com/dgraph-io/badger`
     - `git checkout v2.0.0-rc1`
-    - `cd badger && go install .`
+    - `cd badger && go install`
 
       This should install new badger binary in your $GOBIN
 4. Install badger version v2.0.0-rc1
