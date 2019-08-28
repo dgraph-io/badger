@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
@@ -42,21 +43,25 @@ func (tm *tableMock) DoesNotHave(key []byte) bool { return false }
 func TestPickTables(t *testing.T) {
 	opt := DefaultIteratorOptions
 
-	within := func(prefix, left, right string) {
-		opt.Prefix = []byte(prefix)
-		tm := &tableMock{left: []byte(left), right: []byte(right)}
-		require.True(t, opt.pickTable(tm))
+	within := func(prefix, left, right []byte) {
+		opt.Prefix = prefix
+		// PickTable expects smallest and biggest to contain timestamps.
+		tm := &tableMock{left: y.KeyWithTs(left, 1), right: y.KeyWithTs(right, 1)}
+		require.True(t, opt.pickTable(tm), "within failed for %b %b %b\n", prefix, left, right)
 	}
 	outside := func(prefix, left, right string) {
 		opt.Prefix = []byte(prefix)
-		tm := &tableMock{left: []byte(left), right: []byte(right)}
-		require.False(t, opt.pickTable(tm))
+		// PickTable expects smallest and biggest to contain timestamps.
+		tm := &tableMock{left: y.KeyWithTs([]byte(left), 1), right: y.KeyWithTs([]byte(right), 1)}
+		require.False(t, opt.pickTable(tm), "outside failed for %b %b %b", prefix, left, right)
 	}
-	within("abc", "ab", "ad")
-	within("abc", "abc", "ad")
-	within("abc", "abb123", "ad")
-	within("abc", "abc123", "abd234")
-	within("abc", "abc123", "abc456")
+	within([]byte("abc"), []byte("ab"), []byte("ad"))
+	within([]byte("abc"), []byte("abc"), []byte("ad"))
+	within([]byte("abc"), []byte("abb123"), []byte("ad"))
+	within([]byte("abc"), []byte("abc123"), []byte("abd234"))
+	within([]byte("abc"), []byte("abc123"), []byte("abc456"))
+	// Regression test for https://github.com/dgraph-io/badger/issues/992
+	within([]byte{0, 0, 1}, []byte{0}, []byte{0, 0, 1})
 
 	outside("abd", "abe", "ad")
 	outside("abd", "ac", "ad")
@@ -64,6 +69,59 @@ func TestPickTables(t *testing.T) {
 	outside("abd", "a", "ab")
 	outside("abd", "ab", "abc")
 	outside("abd", "ab", "abc123")
+}
+
+func TestPickSortTables(t *testing.T) {
+	type MockKeys struct {
+		small string
+		large string
+	}
+	genTables := func(mks ...MockKeys) []*table.Table {
+		out := make([]*table.Table, 0)
+		for _, mk := range mks {
+			f := buildTable(t, [][]string{{mk.small, "some value"}, {mk.large, "some value"}})
+			opts := table.Options{LoadingMode: options.MemoryMap,
+				ChkMode: options.OnTableAndBlockRead}
+			tbl, err := table.OpenTable(f, opts)
+			require.NoError(t, err)
+			out = append(out, tbl)
+		}
+		return out
+	}
+	tables := genTables(MockKeys{small: "a", large: "abc"},
+		MockKeys{small: "abcd", large: "cde"},
+		MockKeys{small: "cge", large: "chf"},
+		MockKeys{small: "glr", large: "gyup"})
+	opt := DefaultIteratorOptions
+	opt.prefixIsKey = false
+	opt.Prefix = []byte("c")
+	filtered := opt.pickTables(tables)
+	require.Equal(t, 2, len(filtered))
+	// build table adds time stamp so removing tailing bytes.
+	require.Equal(t, filtered[0].Smallest()[:4], []byte("abcd"))
+	require.Equal(t, filtered[1].Smallest()[:3], []byte("cge"))
+	tables = genTables(MockKeys{small: "a", large: "abc"},
+		MockKeys{small: "abcd", large: "ade"},
+		MockKeys{small: "cge", large: "chf"},
+		MockKeys{small: "glr", large: "gyup"})
+	filtered = opt.pickTables(tables)
+	require.Equal(t, 1, len(filtered))
+	require.Equal(t, filtered[0].Smallest()[:3], []byte("cge"))
+	tables = genTables(MockKeys{small: "a", large: "abc"},
+		MockKeys{small: "abcd", large: "ade"},
+		MockKeys{small: "cge", large: "chf"},
+		MockKeys{small: "ckr", large: "cyup"},
+		MockKeys{small: "csfr", large: "gyup"})
+	filtered = opt.pickTables(tables)
+	require.Equal(t, 3, len(filtered))
+	require.Equal(t, filtered[0].Smallest()[:3], []byte("cge"))
+	require.Equal(t, filtered[1].Smallest()[:3], []byte("ckr"))
+	require.Equal(t, filtered[2].Smallest()[:4], []byte("csfr"))
+
+	opt.Prefix = []byte("aa")
+	filtered = opt.pickTables(tables)
+	require.Equal(t, y.ParseKey(filtered[0].Smallest()), []byte("a"))
+	require.Equal(t, y.ParseKey(filtered[0].Biggest()), []byte("abc"))
 }
 
 func TestIteratePrefix(t *testing.T) {

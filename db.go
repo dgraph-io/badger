@@ -909,9 +909,9 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return y.Wrap(err)
 	}
 	bopts := table.Options{
-		BlockSize:         db.opt.BlockSize,
-		BloomFalsePostive: db.opt.BloomFalsePositive,
-		DataKey:           dk,
+		BlockSize:          db.opt.BlockSize,
+		BloomFalsePositive: db.opt.BloomFalsePositive,
+		DataKey:            dk,
 	}
 	err = writeLevel0Table(ft, fd, bopts)
 	dirSyncErr := <-dirSyncCh

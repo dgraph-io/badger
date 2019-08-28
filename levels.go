@@ -505,9 +505,9 @@ func (s *levelsController) compactBuildTables(
 			return nil, nil, err
 		}
 		bopts := table.Options{
-			BlockSize:         s.kv.opt.BlockSize,
-			BloomFalsePostive: s.kv.opt.BloomFalsePositive,
-			DataKey:           dk,
+			BlockSize:          s.kv.opt.BlockSize,
+			BloomFalsePositive: s.kv.opt.BloomFalsePositive,
+			DataKey:            dk,
 		}
 		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64

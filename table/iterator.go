@@ -35,7 +35,7 @@ type blockIterator struct {
 	entryOffsets []uint32
 
 	// prevOverlap stores the overlap of the previous key with the base key.
-	// This avoids unnecssary copy of base key when the overlap is same for multiple keys.
+	// This avoids unnecessary copy of base key when the overlap is same for multiple keys.
 	prevOverlap uint16
 }
 
@@ -341,7 +341,8 @@ func (itr *Iterator) prev() {
 	}
 }
 
-// Key follows the y.Iterator interface
+// Key follows the y.Iterator interface.
+// Returns the key with timestamp.
 func (itr *Iterator) Key() []byte {
 	return itr.bi.key
 }
@@ -401,7 +402,12 @@ type ConcatIterator struct {
 func NewConcatIterator(tbls []*Table, reversed bool) *ConcatIterator {
 	iters := make([]*Iterator, len(tbls))
 	for i := 0; i < len(tbls); i++ {
-		iters[i] = tbls[i].NewIterator(reversed)
+		// Increment the reference count. Since, we're not creating the iterator right now.
+		// Here, We'll hold the reference of the tables, till the lifecycle of the iterator.
+		tbls[i].IncrRef()
+
+		// Save cycles by not initializing the iterators until needed.
+		// iters[i] = tbls[i].NewIterator(reversed)
 	}
 	return &ConcatIterator{
 		reversed: reversed,
@@ -415,9 +421,12 @@ func (s *ConcatIterator) setIdx(idx int) {
 	s.idx = idx
 	if idx < 0 || idx >= len(s.iters) {
 		s.cur = nil
-	} else {
-		s.cur = s.iters[s.idx]
+		return
 	}
+	if s.iters[idx] == nil {
+		s.iters[idx] = s.tables[idx].NewIterator(s.reversed)
+	}
+	s.cur = s.iters[s.idx]
 }
 
 // Rewind implements y.Interface
@@ -497,7 +506,16 @@ func (s *ConcatIterator) Next() {
 
 // Close implements y.Interface.
 func (s *ConcatIterator) Close() error {
+	for _, t := range s.tables {
+		// DeReference the tables while closing the iterator.
+		if err := t.DecrRef(); err != nil {
+			return err
+		}
+	}
 	for _, it := range s.iters {
+		if it == nil {
+			continue
+		}
 		if err := it.Close(); err != nil {
 			return errors.Wrap(err, "ConcatIterator")
 		}

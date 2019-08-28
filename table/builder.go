@@ -23,6 +23,7 @@ import (
 	"unsafe"
 
 	"github.com/dgryski/go-farm"
+	"github.com/golang/protobuf/proto"
 
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
@@ -240,7 +241,7 @@ The table structure looks like
 */
 // In case the data is encrypted, the "IV" is added to the end of the index.
 func (b *Builder) Finish() []byte {
-	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePostive)
+	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePositive)
 	for _, h := range b.keyHashes {
 		bf.Add(h)
 	}
@@ -249,7 +250,7 @@ func (b *Builder) Finish() []byte {
 
 	b.finishBlock() // This will never start a new block.
 
-	index, err := b.tableIndex.Marshal()
+	index, err := proto.Marshal(b.tableIndex)
 	y.Check(err)
 
 	if b.shouldEncrypt() {
@@ -285,7 +286,7 @@ func (b *Builder) writeChecksum(data []byte) {
 	}
 
 	// Write checksum to the file.
-	chksum, err := checksum.Marshal()
+	chksum, err := proto.Marshal(&checksum)
 	y.Check(err)
 	n, err := b.buf.Write(chksum)
 	y.Check(err)
