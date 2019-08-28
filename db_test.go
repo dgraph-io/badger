@@ -583,16 +583,12 @@ func TestIterate2Basic(t *testing.T) {
 }
 
 func TestLoadAndEncryption(t *testing.T) {
-	key := make([]byte, 32)
-	_, err := rand.Read(key)
-	require.NoError(t, err)
-	opts := []Options{getTestOptions(""), getTestOptions("").WithEncryptionKey(key)}
-	for _, opt := range opts {
+	testLoad := func(t *testing.T, opt Options) {
 		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
 		defer os.RemoveAll(dir)
-		opt = opt.WithDir(dir)
-		opt = opt.WithValueDir(dir)
+		opt.Dir = dir
+		opt.ValueDir = dir
 		n := 10000
 		{
 			kv, err := Open(opt)
@@ -640,6 +636,15 @@ func TestLoadAndEncryption(t *testing.T) {
 		sort.Slice(fileIDs, func(i, j int) bool { return fileIDs[i] < fileIDs[j] })
 		fmt.Printf("FileIDs: %v\n", fileIDs)
 	}
+	t.Run("TestLoad Without Encryption", func(t *testing.T) {
+		testLoad(t, getTestOptions(""))
+	})
+	t.Run("TestLoad With Encryption", func(t *testing.T) {
+		key := make([]byte, 32)
+		_, err := rand.Read(key)
+		require.NoError(t, err)
+		testLoad(t, getTestOptions("").WithEncryptionKey(key))
+	})
 }
 
 func TestIterateDeleted(t *testing.T) {
@@ -1797,24 +1802,13 @@ func TestForceFlushMemtable(t *testing.T) {
 }
 
 func TestVerifyChecksum(t *testing.T) {
-	// use stream write for writing.
-
-	// Without encryption.
-	path, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer os.Remove(path)
-	opts := []Options{}
-	opts = append(opts, getTestOptions(path))
-
-	// With encryption.
-	path, err = ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer os.Remove(path)
-	key := make([]byte, 32)
-	_, err = rand.Read(key)
-	require.NoError(t, err)
-	opts = append(opts, getTestOptions(path).WithEncryptionKey(key))
-	for _, opt := range opts {
+	testVerfiyCheckSum := func(t *testing.T, opt Options) {
+		path, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer os.Remove(path)
+		opt.ValueDir = path
+		opt.Dir = path
+		// use stream write for writing.
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			value := make([]byte, 32)
 			y.Check2(rand.Read(value))
@@ -1842,6 +1836,17 @@ func TestVerifyChecksum(t *testing.T) {
 			require.NoError(t, db.VerifyChecksum(), "checksum verification failed for DB")
 		})
 	}
+	t.Run("Testing Verify Checksum without encryption", func(t *testing.T) {
+		testVerfiyCheckSum(t, getTestOptions(""))
+	})
+	t.Run("Testing Verify Checksum with Encryption", func(t *testing.T) {
+		key := make([]byte, 32)
+		_, err := rand.Read(key)
+		require.NoError(t, err)
+		opt := getTestOptions("")
+		opt.EncryptionKey = key
+		testVerfiyCheckSum(t, opt)
+	})
 }
 
 func TestMain(m *testing.M) {

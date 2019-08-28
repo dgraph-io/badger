@@ -44,12 +44,12 @@ func TestTableIndex(t *testing.T) {
 	t.Run("multiple keys", func(t *testing.T) {
 		opts := []Options{}
 		// Normal mode.
-		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePostive: 0.01})
+		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01})
 		// Encryption mode.
 		key := make([]byte, 32)
 		_, err := rand.Read(key)
 		require.NoError(t, err)
-		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePostive: 0.01,
+		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
 			DataKey: &pb.DataKey{Data: key}})
 		keysCount := 10000
 		for _, opt := range opts {
