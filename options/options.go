@@ -43,3 +43,16 @@ const (
 	// on SSTable opening and on every block read.
 	OnTableAndBlockRead
 )
+
+// CompressionType ...
+type CompressionType uint32
+
+// The following constants should always be kept in sync with CompressionType protobuf
+const (
+	// NoCompression ...
+	NoCompression CompressionType = 0
+	// Snappy ...
+	SnappyCompression CompressionType = 1
+	// ZSTD ...
+	ZSTDCompression CompressionType = 2
+)

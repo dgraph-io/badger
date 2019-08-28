@@ -27,8 +27,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/golang/snappy"
-
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
@@ -43,7 +41,7 @@ const fileSuffix = ".sst"
 
 // Options contains configurable options for Table/Builder.
 type Options struct {
-	// Options for Openning Table.
+	// Options for Opening Table.
 
 	// ChkMode is the checksum verification mode for Table.
 	ChkMode options.ChecksumVerificationMode
@@ -59,8 +57,8 @@ type Options struct {
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
 
-	// True if compression is enabled
-	CompressionEnabled bool
+	// Compression ...
+	Compression options.CompressionType
 }
 
 // TableInterface is useful for testing.
@@ -90,6 +88,11 @@ type Table struct {
 	Checksum []byte
 
 	opt *Options
+}
+
+// CompressionType ..
+func (t *Table) CompressionType() options.CompressionType {
+	return t.opt.Compression
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
@@ -312,8 +315,8 @@ func (t *Table) block(idx int) (*block, error) {
 			"failed to read from file: %s at offset: %d, len: %d", t.fd.Name(), blk.offset, ko.Len)
 	}
 
-	if t.opt.CompressionEnabled {
-		blk.data, err = snappy.Decode(nil, blk.data)
+	if t.opt.Compression != options.NoCompression {
+		blk.data, err = DecompressData(t.opt.Compression, blk.data, nil)
 		if err != nil {
 			return nil, errors.Wrapf(err,
 				"failed to decode compressed data in file: %s at offset: %d, len: %d",

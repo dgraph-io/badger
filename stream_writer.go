@@ -207,16 +207,11 @@ type sortedWriter struct {
 }
 
 func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
-	bopts := table.Options{
-		CompressionEnabled: true,
-		BlockSize:          sw.db.opt.BlockSize,
-		BloomFalsePositive: sw.db.opt.BloomFalsePositive,
-	}
 	w := &sortedWriter{
 		db:       sw.db,
 		streamId: streamId,
 		throttle: sw.throttle,
-		builder:  table.NewTableBuilder(bopts),
+		builder:  table.NewTableBuilder(BuildTableOptions(sw.db.opt)),
 		reqCh:    make(chan *request, 3),
 	}
 	sw.closer.AddRunning(1)
@@ -303,12 +298,7 @@ func (w *sortedWriter) send() error {
 		w.throttle.Done(err)
 	}(w.builder)
 
-	bopts := table.Options{
-		CompressionEnabled: true,
-		BlockSize:          w.db.opt.BlockSize,
-		BloomFalsePositive: w.db.opt.BloomFalsePositive,
-	}
-	w.builder = table.NewTableBuilder(bopts)
+	w.builder = table.NewTableBuilder(BuildTableOptions(w.db.opt))
 	return nil
 }
 
@@ -333,12 +323,7 @@ func (w *sortedWriter) createTable(data []byte) error {
 	if _, err := fd.Write(data); err != nil {
 		return err
 	}
-	opts := table.Options{
-		CompressionEnabled: true,
-		LoadingMode:        w.db.opt.TableLoadingMode,
-		ChkMode:            w.db.opt.ChecksumVerificationMode,
-	}
-	tbl, err := table.OpenTable(fd, opts)
+	tbl, err := table.OpenTable(fd, BuildTableOptions(w.db.opt))
 	if err != nil {
 		return err
 	}

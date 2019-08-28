@@ -18,6 +18,7 @@ package badger
 
 import (
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/table"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -44,6 +45,7 @@ type Options struct {
 	ReadOnly            bool
 	Truncate            bool
 	Logger              Logger
+	Compression         options.CompressionType
 
 	// Fine tuning options.
 
@@ -104,6 +106,7 @@ func DefaultOptions(path string) Options {
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
+		Compression:             options.ZSTDCompression,
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
@@ -115,6 +118,17 @@ func DefaultOptions(path string) Options {
 		Truncate:           false,
 		Logger:             defaultLogger,
 		LogRotatesToFlush:  2,
+	}
+}
+
+// BuildTableOptions ...
+func BuildTableOptions(opt Options) table.Options {
+	return table.Options{
+		BlockSize:          opt.BlockSize,
+		BloomFalsePositive: opt.BloomFalsePositive,
+		LoadingMode:        opt.TableLoadingMode,
+		ChkMode:            opt.ChecksumVerificationMode,
+		Compression:        opt.Compression,
 	}
 }
 
@@ -405,5 +419,11 @@ func (opt Options) WithCompactL0OnClose(val bool) Options {
 // The default value of LogRotatesToFlush is 2.
 func (opt Options) WithLogRotatesToFlush(val int32) Options {
 	opt.LogRotatesToFlush = val
+	return opt
+}
+
+// WithCompressionType ...
+func (opt Options) WithCompressionType(cType options.CompressionType) Options {
+	opt.Compression = cType
 	return opt
 }

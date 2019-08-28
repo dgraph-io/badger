@@ -150,12 +150,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				return
 			}
 
-			opts := table.Options{
-				LoadingMode:        db.opt.TableLoadingMode,
-				ChkMode:            db.opt.ChecksumVerificationMode,
-				CompressionEnabled: true,
-			}
-			t, err := table.OpenTable(fd, opts)
+			t, err := table.OpenTable(fd, BuildTableOptions(db.opt))
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -496,12 +491,7 @@ func (s *levelsController) compactBuildTables(
 	var lastKey, skipKey []byte
 	for it.Valid() {
 		timeStart := time.Now()
-		bopts := table.Options{
-			CompressionEnabled: true,
-			BlockSize:          s.kv.opt.BlockSize,
-			BloomFalsePositive: s.kv.opt.BloomFalsePositive,
-		}
-		builder := table.NewTableBuilder(bopts)
+		builder := table.NewTableBuilder(BuildTableOptions(s.kv.opt))
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
 			// See if we need to skip the prefix.
@@ -582,12 +572,7 @@ func (s *levelsController) compactBuildTables(
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
 
-			opts := table.Options{
-				CompressionEnabled: true,
-				LoadingMode:        s.kv.opt.TableLoadingMode,
-				ChkMode:            s.kv.opt.ChecksumVerificationMode,
-			}
-			tbl, err := table.OpenTable(fd, opts)
+			tbl, err := table.OpenTable(fd, BuildTableOptions(s.kv.opt))
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}
@@ -647,7 +632,7 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeS
 	changes := []*pb.ManifestChange{}
 	for _, table := range newTables {
 		changes = append(changes,
-			newCreateChange(table.ID(), cd.nextLevel.level))
+			newCreateChange(table.ID(), cd.nextLevel.level, table.CompressionType()))
 	}
 	for _, table := range cd.top {
 		changes = append(changes, newDeleteChange(table.ID()))
@@ -877,7 +862,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	// the proper order. (That means this update happens before that of some compaction which
 	// deletes the table.)
 	err := s.kv.manifest.addChanges([]*pb.ManifestChange{
-		newCreateChange(t.ID(), 0),
+		newCreateChange(t.ID(), 0, t.CompressionType()),
 	})
 	if err != nil {
 		return err

@@ -21,11 +21,14 @@ import (
 	"math"
 	"unsafe"
 
+	"github.com/DataDog/zstd"
 	"github.com/golang/snappy"
+	"github.com/pkg/errors"
 
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
 
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 	"github.com/dgraph-io/ristretto/z"
@@ -151,8 +154,12 @@ func (b *Builder) finishBlock() {
 	b.writeChecksum(blockBuf)
 
 	// Compress the block
-	if b.opt.CompressionEnabled {
-		blockBuf = snappy.Encode(nil, b.buf.Bytes()[b.baseOffset:])
+	if b.opt.Compression != options.NoCompression {
+		var err error
+		// TODO: Find a way to reuse buffers. Current implementation creates a
+		// new buffer for each CompressData call.
+		blockBuf, err = CompressData(b.opt.Compression, b.buf.Bytes()[b.baseOffset:], nil)
+		y.Check(err)
 		// Truncate already written data
 		b.buf.Truncate(int(b.baseOffset))
 		// Write compressed data
@@ -283,4 +290,30 @@ func (b *Builder) writeChecksum(data []byte) {
 	// Write checksum size.
 	_, err = b.buf.Write(y.U32ToBytes(uint32(n)))
 	y.Check(err)
+}
+
+// CompressData ...
+func CompressData(ctype options.CompressionType, data, dst []byte) ([]byte, error) {
+	switch ctype {
+	case options.NoCompression:
+		return data, nil
+	case options.SnappyCompression:
+		return snappy.Encode(dst, data), nil
+	case options.ZSTDCompression:
+		return zstd.Compress(dst, data)
+	}
+	return nil, errors.Errorf("Unsupported compression type %s", ctype)
+}
+
+// DecompressData ...
+func DecompressData(ctype options.CompressionType, data, dst []byte) ([]byte, error) {
+	switch ctype {
+	case options.NoCompression:
+		return data, nil
+	case options.SnappyCompression:
+		return snappy.Decode(dst, data)
+	case options.ZSTDCompression:
+		return zstd.Decompress(dst, data)
+	}
+	return nil, errors.New("Unsupported compression type")
 }
