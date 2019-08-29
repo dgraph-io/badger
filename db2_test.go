@@ -505,9 +505,10 @@ func TestCompactionFilePicking(t *testing.T) {
 // addToManifest function is used in TestCompactionFilePicking. It adds table to db manifest.
 func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 	change := &pb.ManifestChange{
-		Id:    tab.ID(),
-		Op:    pb.ManifestChange_CREATE,
-		Level: level,
+		Id:          tab.ID(),
+		Op:          pb.ManifestChange_CREATE,
+		Level:       level,
+		Compression: uint32(tab.CompressionType()),
 	}
 	require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{change}),
 		"unable to add to manifest")

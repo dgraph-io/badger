@@ -302,7 +302,7 @@ func CompressData(ctype options.CompressionType, data, dst []byte) ([]byte, erro
 	case options.ZSTDCompression:
 		return zstd.Compress(dst, data)
 	}
-	return nil, errors.Errorf("Unsupported compression type %s", ctype)
+	return nil, errors.New("Unsupported compression type")
 }
 
 // DecompressData ...

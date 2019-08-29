@@ -149,8 +149,10 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				rerr = errors.Wrapf(err, "Opening file: %q", fname)
 				return
 			}
-
-			t, err := table.OpenTable(fd, BuildTableOptions(db.opt))
+			topt := BuildTableOptions(db.opt)
+			// Set compression from table manifest
+			topt.Compression = tf.Compression
+			t, err := table.OpenTable(fd, topt)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -787,7 +789,6 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		}
 	}()
 	changeSet := buildChangeSet(&cd, newTables)
-
 	// We write to the manifest _before_ we delete files (and after we created files)
 	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
 		return err

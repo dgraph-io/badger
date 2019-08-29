@@ -56,7 +56,7 @@ func buildTestTable(t *testing.T, prefix string, n int) *os.File {
 
 // keyValues is n by 2 where n is number of pairs.
 func buildTable(t *testing.T, keyValues [][]string) *os.File {
-	opts := Options{CompressionEnabled: true, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+	opts := Options{Compression: options.ZSTDCompression, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	b := NewTableBuilder(opts)
 	defer b.Close()
 	rand.Seed(time.Now().UnixNano())
@@ -87,7 +87,7 @@ func TestTableIterator(t *testing.T) {
 	for _, n := range []int{99, 100, 101} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
-			opts := Options{CompressionEnabled: true, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+			opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
 			defer table.DecrRef()
@@ -110,7 +110,7 @@ func TestSeekToFirst(t *testing.T) {
 	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
-			opts := Options{CompressionEnabled: true, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+			opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
 			defer table.DecrRef()
@@ -129,7 +129,7 @@ func TestSeekToLast(t *testing.T) {
 	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
-			opts := Options{CompressionEnabled: true, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+			opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
 			defer table.DecrRef()
@@ -151,7 +151,7 @@ func TestSeekToLast(t *testing.T) {
 
 func TestSeek(t *testing.T) {
 	f := buildTestTable(t, "k", 10000)
-	opts := Options{CompressionEnabled: true, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
 	table, err := OpenTable(f, opts)
 	require.NoError(t, err)
 	defer table.DecrRef()
@@ -187,7 +187,7 @@ func TestSeek(t *testing.T) {
 
 func TestSeekForPrev(t *testing.T) {
 	f := buildTestTable(t, "k", 10000)
-	opts := Options{CompressionEnabled: true, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
 	table, err := OpenTable(f, opts)
 	require.NoError(t, err)
 	defer table.DecrRef()
@@ -226,7 +226,7 @@ func TestIterateFromStart(t *testing.T) {
 	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
-			opts := Options{CompressionEnabled: true, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+			opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
 			defer table.DecrRef()
@@ -254,7 +254,7 @@ func TestIterateFromEnd(t *testing.T) {
 	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			f := buildTestTable(t, "key", n)
-			opts := Options{CompressionEnabled: true, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+			opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
 			defer table.DecrRef()
@@ -278,7 +278,7 @@ func TestIterateFromEnd(t *testing.T) {
 
 func TestTable(t *testing.T) {
 	f := buildTestTable(t, "key", 10000)
-	opts := Options{CompressionEnabled: true, LoadingMode: options.FileIO, ChkMode: options.OnTableAndBlockRead}
+	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.FileIO, ChkMode: options.OnTableAndBlockRead}
 	table, err := OpenTable(f, opts)
 	require.NoError(t, err)
 	defer table.DecrRef()
@@ -306,7 +306,7 @@ func TestTable(t *testing.T) {
 
 func TestIterateBackAndForth(t *testing.T) {
 	f := buildTestTable(t, "key", 10000)
-	opts := Options{CompressionEnabled: true, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
 	table, err := OpenTable(f, opts)
 	require.NoError(t, err)
 	defer table.DecrRef()
@@ -348,7 +348,7 @@ func TestIterateBackAndForth(t *testing.T) {
 
 func TestUniIterator(t *testing.T) {
 	f := buildTestTable(t, "key", 10000)
-	opts := Options{CompressionEnabled: true, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
 	table, err := OpenTable(f, opts)
 	require.NoError(t, err)
 	defer table.DecrRef()
@@ -385,7 +385,7 @@ func TestConcatIteratorOneTable(t *testing.T) {
 		{"k2", "a2"},
 	})
 
-	opts := Options{CompressionEnabled: true, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(t, err)
 	defer tbl.DecrRef()
@@ -406,7 +406,7 @@ func TestConcatIterator(t *testing.T) {
 	f := buildTestTable(t, "keya", 10000)
 	f2 := buildTestTable(t, "keyb", 10000)
 	f3 := buildTestTable(t, "keyc", 10000)
-	opts := Options{CompressionEnabled: true, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(t, err)
 	defer tbl.DecrRef()
@@ -493,7 +493,7 @@ func TestMergingIterator(t *testing.T) {
 		{"k1", "b1"},
 		{"k2", "b2"},
 	})
-	opts := Options{CompressionEnabled: true, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 	tbl1, err := OpenTable(f1, opts)
 	require.NoError(t, err)
 	defer tbl1.DecrRef()
@@ -534,7 +534,7 @@ func TestMergingIteratorReversed(t *testing.T) {
 		{"k1", "b1"},
 		{"k2", "b2"},
 	})
-	opts := Options{CompressionEnabled: true, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 	tbl1, err := OpenTable(f1, opts)
 	require.NoError(t, err)
 	defer tbl1.DecrRef()
@@ -574,7 +574,7 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 	})
 	f2 := buildTable(t, [][]string{})
 
-	opts := Options{CompressionEnabled: true, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 	t1, err := OpenTable(f1, opts)
 	require.NoError(t, err)
 	defer t1.DecrRef()
@@ -615,7 +615,7 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 		{"k2", "a2"},
 	})
 
-	opts := Options{CompressionEnabled: true, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 	t1, err := OpenTable(f1, opts)
 	require.NoError(t, err)
 	defer t1.DecrRef()
@@ -658,7 +658,7 @@ func TestTableBigValues(t *testing.T) {
 	require.NoError(t, err, "unable to create file")
 
 	n := 100 // Insert 100 keys.
-	opts := Options{CompressionEnabled: true, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+	opts := Options{Compression: options.ZSTDCompression, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	builder := NewTableBuilder(opts)
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), 0)
@@ -667,7 +667,7 @@ func TestTableBigValues(t *testing.T) {
 	}
 
 	f.Write(builder.Finish())
-	opts = Options{CompressionEnabled: true, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+	opts = Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(t, err, "unable to open table")
 	defer tbl.DecrRef()
@@ -696,7 +696,7 @@ func TestTableChecksum(t *testing.T) {
 	require.NoError(t, err, "unable to get file information")
 	f.WriteAt(rb, rand.Int63n(fi.Size()))
 
-	opts := Options{CompressionEnabled: true, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 	_, err = OpenTable(f, opts)
 	if err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatal("Test should have been failed with checksum mismatch error")
@@ -729,7 +729,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 	// Iterate b.N times over the entire table.
 	for i := 0; i < b.N; i++ {
 		func() {
-			opts := Options{CompressionEnabled: true, BlockSize: 4 * 0124, BloomFalsePositive: 0.01}
+			opts := Options{Compression: options.ZSTDCompression, BlockSize: 4 * 0124, BloomFalsePositive: 0.01}
 			newBuilder := NewTableBuilder(opts)
 			it := tbl.NewIterator(false)
 			defer it.Close()
@@ -750,7 +750,7 @@ func BenchmarkReadMerged(b *testing.B) {
 	var tables []*Table
 	for i := 0; i < m; i++ {
 		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-		opts := Options{CompressionEnabled: true, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+		opts := Options{Compression: options.ZSTDCompression, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 		builder := NewTableBuilder(opts)
 		f, err := y.OpenSyncedFile(filename, true)
 		y.Check(err)
@@ -762,7 +762,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0})
 		}
 		f.Write(builder.Finish())
-		opts = Options{CompressionEnabled: true, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+		opts = Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 		tbl, err := OpenTable(f, opts)
 		y.Check(err)
 		tables = append(tables, tbl)
@@ -836,7 +836,7 @@ func BenchmarkRandomRead(b *testing.B) {
 
 func getTableForBenchmarks(b *testing.B, count int) *Table {
 	rand.Seed(time.Now().Unix())
-	opts := Options{CompressionEnabled: true, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+	opts := Options{Compression: options.ZSTDCompression, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	builder := NewTableBuilder(opts)
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
@@ -848,7 +848,7 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 	}
 
 	f.Write(builder.Finish())
-	opts = Options{CompressionEnabled: true, LoadingMode: options.LoadToRAM, ChkMode: options.NoVerification}
+	opts = Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.NoVerification}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(b, err, "unable to open table")
 	return tbl

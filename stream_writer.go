@@ -353,9 +353,10 @@ func (w *sortedWriter) createTable(data []byte) error {
 	}
 	// Now that table can be opened successfully, let's add this to the MANIFEST.
 	change := &pb.ManifestChange{
-		Id:    tbl.ID(),
-		Op:    pb.ManifestChange_CREATE,
-		Level: uint32(lhandler.level),
+		Id:          tbl.ID(),
+		Op:          pb.ManifestChange_CREATE,
+		Level:       uint32(lhandler.level),
+		Compression: uint32(tbl.CompressionType()),
 	}
 	if err := w.db.manifest.addChanges([]*pb.ManifestChange{change}); err != nil {
 		return err
