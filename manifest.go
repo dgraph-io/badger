@@ -426,10 +426,12 @@ func applyChangeSet(build *Manifest, changeSet *pb.ManifestChangeSet) error {
 
 func newCreateChange(id uint64, level int, keyID uint64) *pb.ManifestChange {
 	return &pb.ManifestChange{
-		Id:    id,
-		Op:    pb.ManifestChange_CREATE,
-		Level: uint32(level),
-		KeyId: keyID,
+		Id:             id,
+		Op:             pb.ManifestChange_CREATE,
+		Level:          uint32(level),
+		KeyId:          keyID,
+		EncryptionAlgo: pb.EncryptionAlgo_aes,
+		// Hardcoding it, since we're supporting only AES for now.
 	}
 }
 

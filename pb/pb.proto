@@ -40,6 +40,10 @@ message ManifestChangeSet {
         repeated ManifestChange changes = 1;
 }
 
+enum EncryptionAlgo {
+                aes = 0;  
+}
+
 message ManifestChange {
         uint64 Id = 1;
         enum Operation {
@@ -49,6 +53,7 @@ message ManifestChange {
         Operation Op   = 2;
         uint32 Level   = 3; // Only used for CREATE
         uint64 key_id  = 4;
+        EncryptionAlgo encryption_algo = 5;
 }
 
 message BlockOffset {
