@@ -339,7 +339,7 @@ func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 	if _, err = kr.fp.Write(buf.Bytes()); err != nil {
 		return nil, err
 	}
-	// storeDatakey encrypts the datakey So, placing unencrypted key in the memory.
+	// storeDatakey encrypts the datakey So, placing un-encrypted key in the memory.
 	dk.Data = k
 	kr.lastCreated = dk.CreatedAt
 	kr.dataKeys[kr.nextKeyID] = dk
