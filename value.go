@@ -61,6 +61,7 @@ const (
 
 	// The number of updates after which discard map should be flushed into badger.
 	discardStatsFlushThreshold = 100
+	vlogHeaderSize             = 20
 )
 
 type logFile struct {
@@ -142,29 +143,37 @@ func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 			nbr = int64(valsz)
 		}
 	}
-	if lf.EncryptionEnabled() {
-		iv := make([]byte, aes.BlockSize)
-		copy(iv[:12], lf.baseIV)
-		binary.BigEndian.PutUint32(iv[12:], p.Offset)
-		buf, err = y.XORBlock(buf, lf.dataKey.Data, iv)
-	}
 	y.NumReads.Add(1)
 	y.NumBytesRead.Add(nbr)
 	return buf, err
 }
 
+func (lf *logFile) generateIVFromOffset(offset uint32) []byte {
+	iv := make([]byte, aes.BlockSize)
+	copy(iv[:12], lf.baseIV)
+	binary.BigEndian.PutUint32(iv[12:], offset)
+	return iv
+}
+
 // initialize will initialize the datakey and baseIV
 func (lf *logFile) initialize() error {
+	var err error
 	buf := make([]byte, 20)
 	if lf.loadingMode == options.FileIO {
-		if _, err := lf.fd.ReadAt(buf, 0); err != nil {
+		var n int
+		if n, err = lf.fd.ReadAt(buf, 0); err != nil {
 			return y.Wrapf(err, "Error while reading key id and baseIV")
 		}
+		if n != 20 {
+			return y.Wrapf(err, "Invalid vlog file %d", lf.fid)
+		}
 	} else {
+		if len(lf.fmap) < 20 {
+			return y.Wrapf(err, "Invalid vlog file %d", lf.fid)
+		}
 		buf = lf.fmap[:20]
 	}
 	keyID := binary.BigEndian.Uint64(buf[:8])
-	var err error
 	var dk *pb.DataKey
 	if dk, err = lf.registry.dataKey(keyID); err != nil {
 		return y.Wrapf(err, "Error while retriving datakey")
@@ -208,6 +217,7 @@ type safeRead struct {
 	v []byte
 
 	recordOffset uint32
+	lf           *logFile
 }
 
 // hashReader implements io.Reader, io.ByteReader interfaces. It also keeps track of the number
@@ -330,6 +340,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		k:            make([]byte, 10),
 		v:            make([]byte, 10),
 		recordOffset: offset,
+		lf:           lf,
 	}
 
 	var lastCommit uint64
@@ -749,10 +760,6 @@ func (vlog *valueLog) createVlogFile(fid uint32, registry *KeyRegistry) (*logFil
 		dataKey:     dk,
 		registry:    registry,
 	}
-	// writableLogOffset is only written by write func, by read by Read func.
-	// To avoid a race condition, all reads and updates to this variable must be
-	// done via atomics.
-	atomic.StoreUint32(&vlog.writableLogOffset, 0)
 	vlog.numEntriesWritten = 0
 
 	if lf.fd, err = y.CreateSyncedFile(path, vlog.opt.SyncWrites); err != nil {
@@ -774,7 +781,10 @@ func (vlog *valueLog) createVlogFile(fid uint32, registry *KeyRegistry) (*logFil
 	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
 		return nil, errFile(err, lf.path, "Mmap value log file")
 	}
-
+	// writableLogOffset is only written by write func, by read by Read func.
+	// To avoid a race condition, all reads and updates to this variable must be
+	// done via atomics.
+	atomic.StoreUint32(&vlog.writableLogOffset, vlogHeaderSize)
 	vlog.filesLock.Lock()
 	vlog.filesMap[fid] = lf
 	vlog.filesLock.Unlock()
@@ -864,7 +874,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 
 		var offset uint32
 		if fid == ptr.Fid {
-			offset = ptr.Offset + ptr.Len
+			offset = ptr.Offset + ptr.Len + vlogHeaderSize
 		}
 		vlog.db.opt.Infof("Replaying file id: %d at offset: %d\n", fid, offset)
 		now := time.Now()
@@ -943,8 +953,7 @@ func (lf *logFile) open(filename string, flags uint32, registry *KeyRegistry) er
 		return errors.Wrapf(err, "Unable to map file: %q", fstat.Name())
 	}
 	lf.registry = registry
-	lf.initialize()
-	return nil
+	return lf.initialize()
 }
 
 func (vlog *valueLog) Close() error {
@@ -1134,14 +1143,17 @@ func (vlog *valueLog) write(reqs []*request) error {
 				iv := make([]byte, aes.BlockSize)
 				copy(iv[:12], curlf.baseIV)
 				binary.BigEndian.PutUint32(iv[12:], p.Offset)
-				// we'll encrypt only key and value.
+				// we'll encrypt only key and value so ignoring header
 				eBuf := buf.Bytes()[bufOffset:]
-				eBuf, err := y.XORBlock(eBuf, curlf.dataKey.Data, iv)
+				eBlock := eBuf[len(eBuf)-len(e.Key)-len(e.Value)-4:]
+				eBlock, err = y.XORBlock(eBlock, curlf.dataKey.Data, iv)
 				if err != nil {
 					return y.Wrapf(err, "vlog file %d: error while encrypting entry", maxFid)
 				}
 				buf.Truncate(bufOffset)
-				buf.Write(eBuf)
+				// Writing the header back
+				buf.Write(eBuf[:len(eBuf)-len(e.Key)-len(e.Value)-4])
+				buf.Write(eBlock)
 			}
 			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
@@ -1186,18 +1198,68 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 			"Invalid value pointer offset: %d greater than current offset: %d",
 			vp.Offset, vlog.woffset())
 	}
-
-	buf, cb, err := vlog.readValueBytes(vp, s)
-	if err != nil {
-		return nil, cb, err
-	}
-
-	var h header
-	headerLen := h.Decode(buf)
-	n := uint32(headerLen) + h.klen
-	return buf[n : n+h.vlen], cb, nil
+	return vlog.readValue(vp, s)
 }
 
+func (vlog *valueLog) readValue(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
+	lf, err := vlog.getFileRLocked(vp.Fid)
+	if err != nil {
+		return nil, nil, err
+	}
+	buf, err := lf.read(vp, s)
+	if err != nil {
+		return buf, lf.lock.RUnlock, err
+	}
+	var h header
+	headerLen := h.Decode(buf)
+	kv := buf[headerLen:]
+	if lf.EncryptionEnabled() {
+		kv, err = y.XORBlock(kv, lf.dataKey.Data, lf.generateIVFromOffset(vp.Offset))
+		if err != nil {
+			return buf, lf.lock.RUnlock, err
+		}
+	}
+	value := kv[h.klen : h.klen+h.vlen]
+	if vlog.opt.ValueLogLoadingMode == options.MemoryMap {
+		return value, lf.lock.RUnlock, err
+	}
+	// If we are using File I/O we unlock the file immediately
+	// and return an empty function as callback.
+	lf.lock.RUnlock()
+	return value, nil, err
+}
+
+func (vlog *valueLog) readEntry(vp valuePointer, s *y.Slice) (*Entry, func(), error) {
+	lf, err := vlog.getFileRLocked(vp.Fid)
+	if err != nil {
+		return nil, nil, err
+	}
+	buf, err := lf.read(vp, s)
+	if err != nil {
+		return nil, lf.lock.RUnlock, err
+	}
+	var h header
+	headerLen := h.Decode(buf)
+	kv := buf[headerLen:]
+	if lf.EncryptionEnabled() {
+		kv, err = y.XORBlock(kv, lf.dataKey.Data, lf.generateIVFromOffset(vp.Offset))
+		if err != nil {
+			return nil, lf.lock.RUnlock, err
+		}
+	}
+	e := new(Entry)
+	e.Key = kv[:h.klen]
+	e.Value = kv[h.klen : h.klen+h.vlen]
+	e.meta = h.meta
+	e.UserMeta = h.userMeta
+	if vlog.opt.ValueLogLoadingMode == options.MemoryMap {
+		return e, lf.lock.RUnlock, err
+	}
+	// If we are using File I/O we unlock the file immediately
+	// and return an empty function as callback.
+	lf.lock.RUnlock()
+	return e, nil, err
+}
 func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
 	lf, err := vlog.getFileRLocked(vp.Fid)
 	if err != nil {
@@ -1396,11 +1458,11 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 		} else {
 			vlog.elog.Printf("Reason=%+v\n", r)
 
-			buf, cb, err := vlog.readValueBytes(vp, s)
+			ne, cb, err := vlog.readEntry(vp, s)
 			if err != nil {
+				runCallback(cb)
 				return errStop
 			}
-			ne := valueBytesToEntry(buf)
 			ne.offset = vp.Offset
 			ne.print("Latest Entry Header in LSM")
 			e.print("Latest Entry in Log")

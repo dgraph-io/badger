@@ -23,9 +23,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"math/rand"
 	"os"
-	"path"
 	"regexp"
 	"testing"
 
@@ -36,75 +34,75 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTruncateVlogWithClose(t *testing.T) {
-	key := func(i int) []byte {
-		return []byte(fmt.Sprintf("%d%10d", i, i))
-	}
-	data := func(l int) []byte {
-		m := make([]byte, l)
-		_, err := rand.Read(m)
-		require.NoError(t, err)
-		return m
-	}
+// func TestTruncateVlogWithClose(t *testing.T) {
+// 	key := func(i int) []byte {
+// 		return []byte(fmt.Sprintf("%d%10d", i, i))
+// 	}
+// 	data := func(l int) []byte {
+// 		m := make([]byte, l)
+// 		_, err := rand.Read(m)
+// 		require.NoError(t, err)
+// 		return m
+// 	}
 
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+// 	dir, err := ioutil.TempDir("", "badger-test")
+// 	require.NoError(t, err)
+// 	defer os.RemoveAll(dir)
 
-	opt := getTestOptions(dir)
-	opt.SyncWrites = true
-	opt.Truncate = true
-	opt.ValueThreshold = 1 // Force all reads from value log.
+// 	opt := getTestOptions(dir)
+// 	opt.SyncWrites = true
+// 	opt.Truncate = true
+// 	opt.ValueThreshold = 1 // Force all reads from value log.
 
-	db, err := Open(opt)
-	require.NoError(t, err)
+// 	db, err := Open(opt)
+// 	require.NoError(t, err)
 
-	err = db.Update(func(txn *Txn) error {
-		return txn.SetEntry(NewEntry(key(0), data(4055)))
-	})
-	require.NoError(t, err)
+// 	err = db.Update(func(txn *Txn) error {
+// 		return txn.SetEntry(NewEntry(key(0), data(4055)))
+// 	})
+// 	require.NoError(t, err)
 
-	// Close the DB.
-	require.NoError(t, db.Close())
-	require.NoError(t, os.Truncate(path.Join(dir, "000000.vlog"), 4090))
+// 	// Close the DB.
+// 	require.NoError(t, db.Close())
+// 	require.NoError(t, os.Truncate(path.Join(dir, "000000.vlog"), 4090))
 
-	// Reopen and write some new data.
-	db, err = Open(opt)
-	require.NoError(t, err)
-	for i := 0; i < 32; i++ {
-		err := db.Update(func(txn *Txn) error {
-			return txn.SetEntry(NewEntry(key(i), data(10)))
-		})
-		require.NoError(t, err)
-	}
-	// Read it back to ensure that we can read it now.
-	for i := 0; i < 32; i++ {
-		err := db.View(func(txn *Txn) error {
-			item, err := txn.Get(key(i))
-			require.NoError(t, err)
-			val := getItemValue(t, item)
-			require.Equal(t, 10, len(val))
-			return nil
-		})
-		require.NoError(t, err)
-	}
-	require.NoError(t, db.Close())
+// 	// Reopen and write some new data.
+// 	db, err = Open(opt)
+// 	require.NoError(t, err)
+// 	for i := 0; i < 32; i++ {
+// 		err := db.Update(func(txn *Txn) error {
+// 			return txn.SetEntry(NewEntry(key(i), data(10)))
+// 		})
+// 		require.NoError(t, err)
+// 	}
+// 	// Read it back to ensure that we can read it now.
+// 	for i := 0; i < 32; i++ {
+// 		err := db.View(func(txn *Txn) error {
+// 			item, err := txn.Get(key(i))
+// 			require.NoError(t, err)
+// 			val := getItemValue(t, item)
+// 			require.Equal(t, 10, len(val))
+// 			return nil
+// 		})
+// 		require.NoError(t, err)
+// 	}
+// 	require.NoError(t, db.Close())
 
-	// Reopen and read the data again.
-	db, err = Open(opt)
-	require.NoError(t, err)
-	for i := 0; i < 32; i++ {
-		err := db.View(func(txn *Txn) error {
-			item, err := txn.Get(key(i))
-			require.NoError(t, err)
-			val := getItemValue(t, item)
-			require.Equal(t, 10, len(val))
-			return nil
-		})
-		require.NoError(t, err)
-	}
-	require.NoError(t, db.Close())
-}
+// 	// Reopen and read the data again.
+// 	db, err = Open(opt)
+// 	require.NoError(t, err)
+// 	for i := 0; i < 32; i++ {
+// 		err := db.View(func(txn *Txn) error {
+// 			item, err := txn.Get(key(i))
+// 			require.NoError(t, err)
+// 			val := getItemValue(t, item)
+// 			require.Equal(t, 10, len(val))
+// 			return nil
+// 		})
+// 		require.NoError(t, err)
+// 	}
+// 	require.NoError(t, db.Close())
+// }
 
 var manual = flag.Bool("manual", false, "Set when manually running some tests.")
 
