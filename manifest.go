@@ -224,7 +224,7 @@ func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange) error {
 var magicText = [4]byte{'B', 'd', 'g', 'r'}
 
 // The magic version number.
-const magicVersion = 7
+const magicVersion = 8
 
 func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 	rewritePath := filepath.Join(dir, manifestRewriteFilename)
