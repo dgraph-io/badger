@@ -814,13 +814,21 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			flags |= y.Sync
 		}
 
-		// Open log file "lf" in read-write mode.
-		if err := lf.open(vlog.fpath(lf.fid), flags); err != nil {
-			return err
+		// We cannot mmap the files upfront here. Windows does not like mmapped files to be
+		// truncated. We might need to truncate files during a replay.
+		var err error
+		lf.fd, err = y.OpenExistingFile(vlog.fpath(fid), flags)
+		if err != nil {
+			return errors.Wrapf(err, "Open existing file: %q", lf.path)
 		}
+
 		// This file is before the value head pointer. So, we don't need to
 		// replay it, and can just open it in readonly mode.
 		if fid < ptr.Fid {
+			// Mmap the file here, we don't need to replay it.
+			if err := lf.init(); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -845,6 +853,14 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			return err
 		}
 		vlog.db.opt.Infof("Replay took: %s\n", time.Since(now))
+
+		if fid < vlog.maxFid {
+			// This file has been replayed. It can now be mmapped.
+			// For maxFid, the mmap would be done by the specially written code below.
+			if err := lf.init(); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Seek to the end to start writing.
@@ -874,17 +890,13 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	return nil
 }
 
-func (lf *logFile) open(filename string, flags uint32) error {
-	var err error
-	if lf.fd, err = y.OpenExistingFile(filename, flags); err != nil {
-		return errors.Wrapf(err, "Open existing file: %q", lf.path)
-	}
+func (lf *logFile) init() error {
 	fstat, err := lf.fd.Stat()
 	if err != nil {
 		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
 	}
 	sz := fstat.Size()
-	if sz <= vlogHeaderSize {
+	if sz == 0 {
 		// File is empty. We don't need to mmap it. Return.
 		return nil
 	}
