@@ -58,6 +58,10 @@ const (
 	// The number of updates after which discard map should be flushed into badger.
 	discardStatsFlushThreshold = 100
 
+	// size of vlog header.
+	// +----------------+------------------+
+	// | keyID(8 bytes) |  baseIV(12 bytes)|
+	// +----------------+------------------+
 	vlogHeaderSize = 20
 )
 
@@ -706,7 +710,7 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 		return nil, errFile(err, lf.path, "Mmap value log file")
 	}
 	// reserving 20 bytes for KeyID and base IV.
-	buf := make([]byte, 20)
+	buf := make([]byte, vlogHeaderSize)
 	if _, err = lf.fd.Write(buf); err != nil {
 		return nil, y.Wrapf(err, "Error while writing vlog-%d header ", fid)
 	}
