@@ -57,6 +57,12 @@ const (
 
 	// The number of updates after which discard map should be flushed into badger.
 	discardStatsFlushThreshold = 100
+
+	// size of vlog header.
+	// +----------------+------------------+
+	// | keyID(8 bytes) |  baseIV(12 bytes)|
+	// +----------------+------------------+
+	vlogHeaderSize = 20
 )
 
 type logFile struct {
@@ -260,7 +266,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 	if err != nil {
 		return 0, err
 	}
-	if int64(offset) == fi.Size() {
+	if int64(offset) >= fi.Size() {
 		// We're at the end of the file already. No need to do anything.
 		return offset, nil
 	}
@@ -283,7 +289,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 	}
 
 	var lastCommit uint64
-	var validEndOffset uint32
+	validEndOffset := uint32(vlogHeaderSize)
 	for {
 		e, err := read.Entry(reader)
 		if err == io.EOF {
@@ -417,7 +423,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 		return nil
 	}
 
-	_, err := vlog.iterate(f, 0, func(e Entry, vp valuePointer) error {
+	_, err := vlog.iterate(f, vlogHeaderSize, func(e Entry, vp valuePointer) error {
 		return fe(e)
 	})
 	if err != nil {
@@ -685,6 +691,11 @@ func (vlog *valueLog) populateFilesMap() error {
 	return nil
 }
 
+func bootstrapLogfile(fd *os.File) error {
+	// reserving 20 bytes for KeyID and base IV.
+	return fd.Truncate(vlogHeaderSize)
+}
+
 func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	path := vlog.fpath(fid)
 	lf := &logFile{
@@ -695,8 +706,6 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	// writableLogOffset is only written by write func, by read by Read func.
 	// To avoid a race condition, all reads and updates to this variable must be
 	// done via atomics.
-	atomic.StoreUint32(&vlog.writableLogOffset, 0)
-	vlog.numEntriesWritten = 0
 
 	var err error
 	if lf.fd, err = y.CreateSyncedFile(path, vlog.opt.SyncWrites); err != nil {
@@ -708,6 +717,15 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
 		return nil, errFile(err, lf.path, "Mmap value log file")
 	}
+	if err = bootstrapLogfile(lf.fd); err != nil {
+		return nil, err
+	}
+
+	// writableLogOffset is only written by write func, by read by Read func.
+	// To avoid a race condition, all reads and updates to this variable must be
+	// done via atomics.
+	atomic.StoreUint32(&vlog.writableLogOffset, vlogHeaderSize)
+	vlog.numEntriesWritten = 0
 
 	vlog.filesLock.Lock()
 	vlog.filesMap[fid] = lf
@@ -737,7 +755,6 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 
 	// End offset is different from file size. So, we should truncate the file
 	// to that size.
-	y.AssertTrue(int64(endOffset) <= fi.Size())
 	if !vlog.opt.Truncate {
 		return ErrTruncateNeeded
 	}
@@ -746,9 +763,15 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	// If fid == maxFid then it's okay to truncate the entire file since it will be
 	// used for future additions. Also, it's okay if the last file has size zero.
 	// We mmap 2*opt.ValueLogSize for the last file. See vlog.Open() function
-	if endOffset == 0 && lf.fid != vlog.maxFid {
-		return errDeleteVlogFile
+	// if endOffset <= vlogHeaderSize && lf.fid != vlog.maxFid {
+
+	if endOffset <= vlogHeaderSize {
+		if lf.fid != vlog.maxFid {
+			return errDeleteVlogFile
+		}
+		return bootstrapLogfile(lf.fd)
 	}
+
 	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
 		return errFile(err, lf.path, fmt.Sprintf(
 			"Truncation needed at offset %d. Can be done manually as well.", endOffset))
@@ -827,6 +850,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	if err != nil {
 		return errFile(err, last.path, "file.Seek to end")
 	}
+	fmt.Printf("Setting writableLogOffset to %d\n", lastOffset)
 	vlog.writableLogOffset = uint32(lastOffset)
 
 	// Update the head to point to the updated tail. Otherwise, even after doing a successful
@@ -856,7 +880,7 @@ func (lf *logFile) open(filename string, flags uint32) error {
 		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
 	}
 	sz := fstat.Size()
-	if sz == 0 {
+	if sz <= vlogHeaderSize {
 		// File is empty. We don't need to mmap it. Return.
 		return nil
 	}
@@ -1252,7 +1276,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	y.AssertTrue(vlog.db != nil)
 	s := new(y.Slice)
 	var numIterations int
-	_, err = vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
+	_, err = vlog.iterate(lf, vlogHeaderSize, func(e Entry, vp valuePointer) error {
 		numIterations++
 		esz := float64(vp.Len) / (1 << 20) // in MBs.
 		if skipped < skipFirstM {
