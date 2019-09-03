@@ -57,6 +57,8 @@ const (
 
 	// The number of updates after which discard map should be flushed into badger.
 	discardStatsFlushThreshold = 100
+
+	vlogHeaderSize = 20
 )
 
 type logFile struct {
@@ -417,7 +419,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 		return nil
 	}
 
-	_, err := vlog.iterate(f, 0, func(e Entry, vp valuePointer) error {
+	_, err := vlog.iterate(f, vlogHeaderSize, func(e Entry, vp valuePointer) error {
 		return fe(e)
 	})
 	if err != nil {
@@ -692,11 +694,6 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 		path:        path,
 		loadingMode: vlog.opt.ValueLogLoadingMode,
 	}
-	// writableLogOffset is only written by write func, by read by Read func.
-	// To avoid a race condition, all reads and updates to this variable must be
-	// done via atomics.
-	atomic.StoreUint32(&vlog.writableLogOffset, 0)
-	vlog.numEntriesWritten = 0
 
 	var err error
 	if lf.fd, err = y.CreateSyncedFile(path, vlog.opt.SyncWrites); err != nil {
@@ -708,7 +705,14 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
 		return nil, errFile(err, lf.path, "Mmap value log file")
 	}
-
+	// reserving 20 bytes for KeyID and base IV.
+	buf := make([]byte, 20)
+	lf.fd.Write(buf)
+	// writableLogOffset is only written by write func, by read by Read func.
+	// To avoid a race condition, all reads and updates to this variable must be
+	// done via atomics.
+	atomic.StoreUint32(&vlog.writableLogOffset, vlogHeaderSize)
+	vlog.numEntriesWritten = 0
 	vlog.filesLock.Lock()
 	vlog.filesMap[fid] = lf
 	vlog.filesLock.Unlock()
@@ -800,6 +804,11 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		var offset uint32
 		if fid == ptr.Fid {
 			offset = ptr.Offset + ptr.Len
+		}
+		if offset == 0 {
+			// No entries from this vlog has been persisted so advancing the offset to
+			// the begining of the entries.
+			offset = vlogHeaderSize
 		}
 		vlog.db.opt.Infof("Replaying file id: %d at offset: %d\n", fid, offset)
 		now := time.Now()
@@ -1252,7 +1261,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	y.AssertTrue(vlog.db != nil)
 	s := new(y.Slice)
 	var numIterations int
-	_, err = vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
+	_, err = vlog.iterate(lf, vlogHeaderSize, func(e Entry, vp valuePointer) error {
 		numIterations++
 		esz := float64(vp.Len) / (1 << 20) // in MBs.
 		if skipped < skipFirstM {
