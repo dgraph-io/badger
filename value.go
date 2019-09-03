@@ -19,6 +19,7 @@ package badger
 import (
 	"bufio"
 	"bytes"
+	"crypto/aes"
 	cryptorand "crypto/rand"
 	"encoding/binary"
 	"encoding/json"
@@ -148,13 +149,13 @@ func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 
 // initialize will initialize the datakey and baseIV
 func (lf *logFile) initialize() error {
-	buf := make([]byte, 16)
+	buf := make([]byte, 20)
 	if lf.loadingMode == options.FileIO {
 		if _, err := lf.fd.ReadAt(buf, 0); err != nil {
 			return y.Wrapf(err, "Error while reading key id and baseIV")
 		}
 	} else {
-		buf = lf.fmap[:16]
+		buf = lf.fmap[:20]
 	}
 	keyID := binary.BigEndian.Uint64(buf[:8])
 	var err error
@@ -163,6 +164,7 @@ func (lf *logFile) initialize() error {
 		return y.Wrapf(err, "Error while retriving datakey")
 	}
 	lf.dataKey = dk
+	lf.baseIV = buf[8:]
 	return nil
 }
 
@@ -751,7 +753,7 @@ func (vlog *valueLog) createVlogFile(fid uint32, registry *KeyRegistry) (*logFil
 		return nil, errFile(err, lf.path, "Create value log file")
 	}
 	// write the key id.
-	buf := make([]byte, 18)
+	buf := make([]byte, 20)
 	binary.BigEndian.PutUint64(buf[:8], lf.keyID())
 	// generate base IV. It'll be used with offset of vptr to encrypt the entry.
 	if _, err = cryptorand.Read(buf[8:]); err != nil {
@@ -1123,7 +1125,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 				return err
 			}
 			if curlf.EncryptionEnabled() {
-				iv := make([]byte, 16)
+				iv := make([]byte, aes.BlockSize)
 				copy(iv[:12], curlf.baseIV)
 				binary.BigEndian.PutUint32(iv[12:], p.Offset)
 				// we'll encrypt only key and value.
@@ -1189,12 +1191,12 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
 	lf, err := vlog.getFileRLocked(vp.Fid)
 	if err != nil {
-		return nil, nil, err
+		return nil, lf.lock.RUnlock, err
 	}
 
 	buf, err := lf.read(vp, s)
 	if err != nil {
-		return nil, nil, err
+		return nil, lf.lock.RUnlock, err
 	}
 	var h header
 	headerLen := h.Decode(buf)
@@ -1203,7 +1205,7 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, func(
 		copy(iv[:12], lf.baseIV)
 		binary.BigEndian.PutUint32(iv[12:], vp.Offset)
 		if buf, err = y.XORBlock(buf[headerLen:], lf.dataKey.Data, iv); err != nil {
-			return nil, nil, err
+			return nil, lf.lock.RUnlock, err
 		}
 		// truncate the key
 		buf = buf[h.klen : h.klen+h.vlen]
