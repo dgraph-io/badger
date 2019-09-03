@@ -832,8 +832,8 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			continue
 		}
 
-		var offset uint32
-		if fid == ptr.Fid {
+		offset := uint32(vlogHeaderSize)
+		if fid == ptr.Fid && !ptr.IsZero() {
 			offset = ptr.Offset + ptr.Len
 		}
 		vlog.db.opt.Infof("Replaying file id: %d at offset: %d\n", fid, offset)
