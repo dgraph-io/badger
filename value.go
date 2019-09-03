@@ -874,7 +874,6 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	if err != nil {
 		return errFile(err, last.path, "file.Seek to end")
 	}
-	fmt.Printf("Setting writableLogOffset to %d\n", lastOffset)
 	vlog.writableLogOffset = uint32(lastOffset)
 
 	// Update the head to point to the updated tail. Otherwise, even after doing a successful
