@@ -264,7 +264,7 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, error) {
 	fi, err := lf.fd.Stat()
 	if err != nil {
-		return 0, err
+		return vlogHeaderSize, err
 	}
 	if int64(offset) == fi.Size() {
 		// We're at the end of the file already. No need to do anything.
@@ -273,12 +273,12 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 	if vlog.opt.ReadOnly {
 		// We're not at the end of the file. We'd need to replay the entries, or
 		// possibly truncate the file.
-		return 0, ErrReplayNeeded
+		return vlogHeaderSize, ErrReplayNeeded
 	}
 
 	// We're not at the end of the file. Let's Seek to the offset and start reading.
 	if _, err := lf.fd.Seek(int64(offset), io.SeekStart); err != nil {
-		return 0, errFile(err, lf.path, "Unable to seek")
+		return vlogHeaderSize, errFile(err, lf.path, "Unable to seek")
 	}
 
 	reader := bufio.NewReader(lf.fd)
@@ -290,6 +290,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 
 	var lastCommit uint64
 	var validEndOffset uint32
+	validEndOffset = vlogHeaderSize
 	for {
 		e, err := read.Entry(reader)
 		if err == io.EOF {
@@ -297,7 +298,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		} else if err == io.ErrUnexpectedEOF || err == errTruncate {
 			break
 		} else if err != nil {
-			return 0, err
+			return vlogHeaderSize, err
 		} else if e == nil {
 			continue
 		}
@@ -756,7 +757,7 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	// If fid == maxFid then it's okay to truncate the entire file since it will be
 	// used for future additions. Also, it's okay if the last file has size zero.
 	// We mmap 2*opt.ValueLogSize for the last file. See vlog.Open() function
-	if endOffset == 0 && lf.fid != vlog.maxFid {
+	if endOffset == vlogHeaderSize && lf.fid != vlog.maxFid {
 		return errDeleteVlogFile
 	}
 	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
