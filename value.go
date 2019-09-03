@@ -707,7 +707,9 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	}
 	// reserving 20 bytes for KeyID and base IV.
 	buf := make([]byte, 20)
-	lf.fd.Write(buf)
+	if _, err = lf.fd.Write(buf); err != nil {
+		return nil, y.Wrapf(err, "Error while writing vlog-%d header ", fid)
+	}
 	// writableLogOffset is only written by write func, by read by Read func.
 	// To avoid a race condition, all reads and updates to this variable must be
 	// done via atomics.
