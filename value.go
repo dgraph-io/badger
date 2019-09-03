@@ -82,6 +82,57 @@ type logFile struct {
 	registry    *KeyRegistry
 }
 
+func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int, error) {
+	h := header{
+		klen:      uint32(len(e.Key)),
+		vlen:      uint32(len(e.Value)),
+		expiresAt: e.ExpiresAt,
+		meta:      e.meta,
+		userMeta:  e.UserMeta,
+	}
+
+	var headerEnc [maxHeaderSize]byte
+	sz := h.Encode(headerEnc[:])
+	buf.Write(headerEnc[:sz])
+	hash := crc32.New(y.CastagnoliCrcTable)
+	if _, err := hash.Write(headerEnc[:sz]); err != nil {
+		return 0, err
+	}
+
+	// we'll encrypt only key and value.
+	if lf.EncryptionEnabled() {
+		eBuf := make([]byte, 0, len(e.Key)+len(e.Value))
+		eBuf = append(eBuf, e.Key...)
+		eBuf = append(eBuf, e.Value...)
+		var err error
+		eBuf, err = y.XORBlock(eBuf, lf.dataKey.Data, lf.generateIVFromOffset(offset))
+		if err != nil {
+			return 0, err
+		}
+		buf.Write(eBuf)
+	} else {
+		buf.Write(e.Key)
+		if _, err := hash.Write(e.Key); err != nil {
+			return 0, err
+		}
+
+		buf.Write(e.Value)
+		if _, err := hash.Write(e.Value); err != nil {
+			return 0, err
+		}
+	}
+
+	var crcBuf [crc32.Size]byte
+	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
+	buf.Write(crcBuf[:])
+
+	return len(headerEnc[:sz]) + len(e.Key) + len(e.Value) + len(crcBuf), nil
+}
+
+func (lf *logFile) decryptKV(buf []byte, offset uint32) ([]byte, error) {
+	return y.XORBlock(buf, lf.dataKey.Data, lf.generateIVFromOffset(offset))
+}
+
 // KeyID returns datakey's ID.
 func (lf *logFile) keyID() uint64 {
 	if lf.dataKey == nil {
@@ -281,21 +332,21 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 
 	e := &Entry{}
 	e.offset = r.recordOffset
-	e.Key = r.k[:kl]
-	e.Value = r.v[:vl]
 	e.hlen = hlen
-	if _, err := io.ReadFull(tee, e.Key); err != nil {
+	buf := make([]byte, h.klen+h.vlen)
+	if _, err := io.ReadFull(reader, buf[:]); err != nil {
 		if err == io.EOF {
 			err = errTruncate
 		}
 		return nil, err
 	}
-	if _, err := io.ReadFull(tee, e.Value); err != nil {
-		if err == io.EOF {
-			err = errTruncate
+	if r.lf.EncryptionEnabled() {
+		if buf, err = r.lf.decryptKV(buf[:], r.recordOffset); err != nil {
+			return nil, err
 		}
-		return nil, err
 	}
+	e.Key = buf[:h.klen]
+	e.Value = buf[h.klen:]
 	var crcBuf [crc32.Size]byte
 	if _, err := io.ReadFull(reader, crcBuf[:]); err != nil {
 		if err == io.EOF {
@@ -876,6 +927,11 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		if fid == ptr.Fid {
 			offset = ptr.Offset + ptr.Len + vlogHeaderSize
 		}
+		if offset == 0 {
+			// No entries from this vlog has been persisted so advancing the offset to
+			// the begining of the entries.
+			offset = vlogHeaderSize
+		}
 		vlog.db.opt.Infof("Replaying file id: %d at offset: %d\n", fid, offset)
 		now := time.Now()
 		// Replay and possible truncation done. Now we can open the file as per
@@ -1134,26 +1190,9 @@ func (vlog *valueLog) write(reqs []*request) error {
 			p.Fid = curlf.fid
 			// Use the offset including buffer length so far.
 			p.Offset = vlog.woffset() + uint32(buf.Len())
-			bufOffset := buf.Len()
-			plen, err := encodeEntry(e, &buf) // Now encode the entry into buffer.
+			plen, err := curlf.encodeEntry(e, &buf, p.Offset) // Now encode the entry into buffer.
 			if err != nil {
 				return err
-			}
-			if curlf.EncryptionEnabled() {
-				iv := make([]byte, aes.BlockSize)
-				copy(iv[:12], curlf.baseIV)
-				binary.BigEndian.PutUint32(iv[12:], p.Offset)
-				// we'll encrypt only key and value so ignoring header
-				eBuf := buf.Bytes()[bufOffset:]
-				eBlock := eBuf[len(eBuf)-len(e.Key)-len(e.Value)-4:]
-				eBlock, err = y.XORBlock(eBlock, curlf.dataKey.Data, iv)
-				if err != nil {
-					return y.Wrapf(err, "vlog file %d: error while encrypting entry", maxFid)
-				}
-				buf.Truncate(bufOffset)
-				// Writing the header back
-				buf.Write(eBuf[:len(eBuf)-len(e.Key)-len(e.Value)-4])
-				buf.Write(eBlock)
 			}
 			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
@@ -1405,7 +1444,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	y.AssertTrue(vlog.db != nil)
 	s := new(y.Slice)
 	var numIterations int
-	_, err = vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
+	_, err = vlog.iterate(lf, vlogHeaderSize, func(e Entry, vp valuePointer) error {
 		numIterations++
 		esz := float64(vp.Len) / (1 << 20) // in MBs.
 		if skipped < skipFirstM {
