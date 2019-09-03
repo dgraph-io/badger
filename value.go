@@ -289,7 +289,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 	}
 
 	var lastCommit uint64
-	validEndOffset := uint32(vlogHeaderSize)
+	var validEndOffset uint32
 	for {
 		e, err := read.Entry(reader)
 		if err == io.EOF {
@@ -693,7 +693,11 @@ func (vlog *valueLog) populateFilesMap() error {
 
 func bootstrapLogfile(fd *os.File) error {
 	// reserving 20 bytes for KeyID and base IV.
-	return fd.Truncate(vlogHeaderSize)
+	if err := fd.Truncate(vlogHeaderSize); err != nil {
+		return err
+	}
+	_, err := fd.Seek(0, os.SEEK_END)
+	return err
 }
 
 func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
