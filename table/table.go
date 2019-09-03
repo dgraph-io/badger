@@ -27,7 +27,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 
@@ -62,7 +61,7 @@ type Options struct {
 type TableInterface interface {
 	Smallest() []byte
 	Biggest() []byte
-	DoesNotHave(key []byte) bool
+	DoesNotHaveHash(hash uint64) bool
 }
 
 // Table represents a loaded table file with the info we have about it
@@ -348,9 +347,9 @@ func (t *Table) Filename() string { return t.fd.Name() }
 // ID is the table's ID number (used to make the file name).
 func (t *Table) ID() uint64 { return t.id }
 
-// DoesNotHave returns true if (but not "only if") the table does not have the key.  It does a
-// bloom filter lookup.
-func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(farm.Fingerprint64(key)) }
+// DoesNotHaveHash returns true if (but not "only if") the table does not have the key hash.
+// It does a bloom filter lookup.
+func (t *Table) DoesNotHaveHash(hash uint64) bool { return !t.bf.Has(hash) }
 
 // VerifyChecksum verifies checksum for all blocks of table. This function is called by
 // OpenTable() function. This function is also called inside levelsController.VerifyChecksum().
