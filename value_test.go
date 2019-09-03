@@ -961,19 +961,14 @@ func TestValueLogTruncate(t *testing.T) {
 	// Ensure vlog file with id=1 is not present
 	require.Nil(t, db.vlog.filesMap[1])
 
-	// Ensure filesize of fid=2 is zero
-	zeroFile, ok := db.vlog.filesMap[2]
-	require.True(t, ok)
-	fileStat, err := zeroFile.fd.Stat()
-	require.NoError(t, err)
-	require.Zero(t, fileStat.Size())
+	require.Nil(t, db.vlog.filesMap[2])
 
 	fileCountAfterCorruption := len(db.vlog.filesMap)
 	// +1 because the file with id=2 will be completely truncated. It won't be deleted.
 	// There would be two files. fid=0 with valid data, fid=2 with zero data (truncated).
-	require.Equal(t, fileCountBeforeCorruption+1, fileCountAfterCorruption)
+	require.Equal(t, fileCountBeforeCorruption, fileCountAfterCorruption)
 	// Max file ID would point to the last vlog file, which is fid=2 in this case
-	require.Equal(t, 2, int(db.vlog.maxFid))
+	require.Equal(t, 0, int(db.vlog.maxFid))
 	require.NoError(t, db.Close())
 }
 

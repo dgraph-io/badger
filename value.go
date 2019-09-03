@@ -746,8 +746,6 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 		return nil
 	}
 
-	// End offset is different from file size. So, we should truncate the file
-	// to that size.
 	y.AssertTrue(int64(endOffset) <= fi.Size())
 	if !vlog.opt.Truncate {
 		return ErrTruncateNeeded
@@ -778,13 +776,17 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	if err := vlog.populateFilesMap(); err != nil {
 		return err
 	}
-	// If no files are found, then create a new file.
-	if len(vlog.filesMap) == 0 {
-		_, err := vlog.createVlogFile(0)
-		return err
+	fids := vlog.sortedFids()
+	// deleteVlog file will delete the given vlog.
+	deleteVlog := func(fid uint32) error {
+		delete(vlog.filesMap, fid)
+		path := vlog.fpath(fid)
+		if err := os.Remove(path); err != nil {
+			return y.Wrapf(err, "failed to delete empty value log file: %q", path)
+		}
+		return nil
 	}
 
-	fids := vlog.sortedFids()
 	for _, fid := range fids {
 		lf, ok := vlog.filesMap[fid]
 		y.AssertTrue(ok)
@@ -799,7 +801,17 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		}
 
 		// Open log file "lf" in read-write mode.
-		if err := lf.open(vlog.fpath(lf.fid), flags); err != nil {
+		if err := lf.open(vlog.fpath(lf.fid), flags); err == errDeleteVlogFile {
+			if !vlog.opt.Truncate {
+				return errors.Errorf("vlog %d is invalid so manually delete it", lf.fid)
+			}
+			err = deleteVlog(lf.fid)
+			if err != nil {
+				return err
+			}
+			// move forward.
+			continue
+		} else if err != nil {
 			return err
 		}
 		// This file is before the value head pointer. So, we don't need to
@@ -813,8 +825,8 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			offset = ptr.Offset + ptr.Len
 		}
 		if offset == 0 {
-			// No entries from this vlog has been persisted so advancing the offset to
-			// the begining of the entries.
+			// No entries from this vlog have been persisted so advancing the offset to
+			// the beginning of the entries.
 			offset = vlogHeaderSize
 		}
 		vlog.db.opt.Infof("Replaying file id: %d at offset: %d\n", fid, offset)
@@ -823,17 +835,31 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		// user specified options.
 		if err := vlog.replayLog(lf, offset, replayFn); err != nil {
 			// Log file is corrupted. Delete it.
-			if err == errDeleteVlogFile {
-				delete(vlog.filesMap, fid)
-				path := vlog.fpath(lf.fid)
-				if err := os.Remove(path); err != nil {
-					return y.Wrapf(err, "failed to delete empty value log file: %q", path)
-				}
-				continue
+			if err != errDeleteVlogFile {
+				return err
 			}
-			return err
+			err = deleteVlog(lf.fid)
+			if err != nil {
+				return err
+			}
+			// move forward.
+			continue
 		}
 		vlog.db.opt.Infof("Replay took: %s\n", time.Since(now))
+	}
+	// since we're deleting the vlog. We should update the maxFID, which will get updated
+	// on populateFilesMap
+	vlog.maxFid = 0
+	for id := range vlog.filesMap {
+		if id > vlog.maxFid {
+			vlog.maxFid = id
+		}
+	}
+
+	// If no files are found, then create a new file.
+	if len(vlog.filesMap) == 0 {
+		_, err := vlog.createVlogFile(0)
+		return err
 	}
 
 	// Seek to the end to start writing.
@@ -872,8 +898,12 @@ func (lf *logFile) open(filename string, flags uint32) error {
 		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
 	}
 	sz := fstat.Size()
-	if sz == 0 {
-		// File is empty. We don't need to mmap it. Return.
+	if sz < vlogHeaderSize {
+		// File is invalid so we'll delete it if truncate is enabled otherwise we'll tell the user
+		// to do so
+		return errDeleteVlogFile
+	} else if sz == vlogHeaderSize {
+		// No entry so we don't mmap here.
 		return nil
 	}
 	y.AssertTrue(sz <= math.MaxUint32)
