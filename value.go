@@ -383,6 +383,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			ne := new(Entry)
 			ne.meta = 0 // Remove all bits. Different keyspace doesn't need these bits.
 			ne.UserMeta = e.UserMeta
+			ne.ExpiresAt = e.ExpiresAt
 
 			// Create a new key in a separate keyspace, prefixed by moveKey. We are not
 			// allowed to rewrite an older version of key in the LSM tree, because then this older
