@@ -84,7 +84,8 @@ type Table struct {
 	bf       *z.Bloom
 	Checksum []byte
 
-	opt *Options
+	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
+	opt        *Options
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
@@ -162,10 +163,11 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 		return nil, errors.Errorf("Invalid filename: %s", filename)
 	}
 	t := &Table{
-		fd:  fd,
-		ref: 1, // Caller is given one reference.
-		id:  id,
-		opt: &opts,
+		fd:         fd,
+		ref:        1, // Caller is given one reference.
+		id:         id,
+		opt:        &opts,
+		IsInmemory: false,
 	}
 
 	t.tableSize = int(fileInfo.Size())
@@ -213,13 +215,13 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 
 // OpenInMemoryTable is similar to OpenTable but it opens a new table from the provided data.
 // OpenInMemoryTable is used for L0 tables.
-func OpenInMemoryTable(fid uint64, data []byte) (*Table, error) {
+func OpenInMemoryTable(data []byte) (*Table, error) {
 	t := &Table{
-		ref:       1, // Caller is given one reference.
-		id:        fid,
-		opt:       &Options{LoadingMode: options.LoadToRAM},
-		mmap:      data,
-		tableSize: len(data),
+		ref:        1, // Caller is given one reference.
+		opt:        &Options{LoadingMode: options.LoadToRAM},
+		mmap:       data,
+		tableSize:  len(data),
+		IsInmemory: true,
 	}
 
 	if err := t.initBiggestAndSmallest(); err != nil {
@@ -251,7 +253,9 @@ func (t *Table) Close() error {
 			return err
 		}
 	}
-
+	if t.fd == nil {
+		return nil
+	}
 	return t.fd.Close()
 }
 

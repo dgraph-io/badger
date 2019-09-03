@@ -891,16 +891,15 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		BloomFalsePositive: db.opt.BloomFalsePositive,
 	}
 	tableData := buildL0Table(ft, bopts)
-	fileID := db.lc.reserveFileID()
-
 	if db.opt.KeepL0InMemory {
-		tbl, err := table.OpenInMemoryTable(fileID, tableData)
+		tbl, err := table.OpenInMemoryTable(tableData)
 		if err != nil {
-			return errors.Wrapf(err, "failed to open table in memory: %d", fileID)
+			return errors.Wrapf(err, "failed to open table in memory")
 		}
 		return db.lc.addLevel0Table(tbl)
 	}
 
+	fileID := db.lc.reserveFileID()
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
 	if err != nil {
 		return y.Wrap(err)
