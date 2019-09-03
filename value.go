@@ -142,6 +142,12 @@ func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 			nbr = int64(valsz)
 		}
 	}
+	if lf.EncryptionEnabled() {
+		iv := make([]byte, aes.BlockSize)
+		copy(iv[:12], lf.baseIV)
+		binary.BigEndian.PutUint32(iv[12:], p.Offset)
+		buf, err = y.XORBlock(buf, lf.dataKey.Data, iv)
+	}
 	y.NumReads.Add(1)
 	y.NumBytesRead.Add(nbr)
 	return buf, err
@@ -1130,16 +1136,12 @@ func (vlog *valueLog) write(reqs []*request) error {
 				binary.BigEndian.PutUint32(iv[12:], p.Offset)
 				// we'll encrypt only key and value.
 				eBuf := buf.Bytes()[bufOffset:]
-				eStartOffset := len(eBuf) - len(e.Key) - len(e.Value)
-				eBlock, err := y.XORBlock(eBuf[eStartOffset:], curlf.dataKey.Data, iv)
+				eBuf, err := y.XORBlock(eBuf, curlf.dataKey.Data, iv)
 				if err != nil {
 					return y.Wrapf(err, "vlog file %d: error while encrypting entry", maxFid)
 				}
 				buf.Truncate(bufOffset)
-				// Write the header back
-				buf.Write(eBuf[:eStartOffset])
-				// Write the encrypted block
-				buf.Write(eBlock)
+				buf.Write(eBuf)
 			}
 			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
@@ -1185,31 +1187,24 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 			vp.Offset, vlog.woffset())
 	}
 
-	return vlog.readValueBytes(vp, s)
+	buf, cb, err := vlog.readValueBytes(vp, s)
+	if err != nil {
+		return nil, cb, err
+	}
+
+	var h header
+	headerLen := h.Decode(buf)
+	n := uint32(headerLen) + h.klen
+	return buf[n : n+h.vlen], cb, nil
 }
 
 func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
 	lf, err := vlog.getFileRLocked(vp.Fid)
 	if err != nil {
-		return nil, lf.lock.RUnlock, err
+		return nil, nil, err
 	}
 
 	buf, err := lf.read(vp, s)
-	if err != nil {
-		return nil, lf.lock.RUnlock, err
-	}
-	var h header
-	headerLen := h.Decode(buf)
-	if lf.EncryptionEnabled() {
-		iv := make([]byte, 16)
-		copy(iv[:12], lf.baseIV)
-		binary.BigEndian.PutUint32(iv[12:], vp.Offset)
-		if buf, err = y.XORBlock(buf[headerLen:], lf.dataKey.Data, iv); err != nil {
-			return nil, lf.lock.RUnlock, err
-		}
-		// truncate the key
-		buf = buf[h.klen : h.klen+h.vlen]
-	}
 	if vlog.opt.ValueLogLoadingMode == options.MemoryMap {
 		return buf, lf.lock.RUnlock, err
 	}
