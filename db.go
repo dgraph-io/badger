@@ -898,9 +898,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		if err != nil {
 			return errors.Wrapf(err, "failed to open table in memory: %d", fileID)
 		}
-		err = db.lc.addLevel0Table(tbl) // This will incrRef
-		_ = tbl.DecrRef()               // Releases our ref.
-		return err
+		return db.lc.addLevel0Table(tbl)
 	}
 
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
@@ -909,16 +907,15 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	}
 
 	// Don't block just to sync the directory entry.
-	dirSyncCh := make(chan error)
+	dirSyncCh := make(chan error, 1)
 	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
 
 	if _, err = fd.Write(tableData); err != nil {
 		db.elog.Errorf("ERROR while writing to level 0: %v", err)
 		return err
 	}
-	dirSyncErr := <-dirSyncCh
 
-	if dirSyncErr != nil {
+	if dirSyncErr := <-dirSyncCh; dirSyncErr != nil {
 		// Do dir sync as best effort. No need to return due to an error there.
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
