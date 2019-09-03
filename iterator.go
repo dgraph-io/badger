@@ -25,10 +25,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgryski/go-farm"
-
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/table"
+	"github.com/dgryski/go-farm"
 
 	"github.com/dgraph-io/badger/y"
 )
@@ -363,7 +362,7 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	}
 	// Bloom filter lookup would only work if opt.Prefix does NOT have the read
 	// timestamp as part of the key.
-	if opt.prefixIsKey && t.DoesNotHaveHash(farm.Fingerprint64(opt.Prefix)) {
+	if opt.prefixIsKey && t.DoesNotHave(farm.Fingerprint64(opt.Prefix)) {
 		return false
 	}
 	return true
@@ -405,7 +404,7 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		}
 		// opt.Prefix is actually the key. So, we can run bloom filter checks
 		// as well.
-		if t.DoesNotHaveHash(hash) {
+		if t.DoesNotHave(hash) {
 			continue
 		}
 		out = append(out, t)

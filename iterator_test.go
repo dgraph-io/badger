@@ -36,9 +36,9 @@ type tableMock struct {
 	left, right []byte
 }
 
-func (tm *tableMock) Smallest() []byte                 { return tm.left }
-func (tm *tableMock) Biggest() []byte                  { return tm.right }
-func (tm *tableMock) DoesNotHaveHash(hash uint64) bool { return false }
+func (tm *tableMock) Smallest() []byte             { return tm.left }
+func (tm *tableMock) Biggest() []byte              { return tm.right }
+func (tm *tableMock) DoesNotHave(hash uint64) bool { return false }
 
 func TestPickTables(t *testing.T) {
 	opt := DefaultIteratorOptions

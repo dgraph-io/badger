@@ -236,7 +236,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 	hash := farm.Fingerprint64(keyNoTs)
 	var maxVs y.ValueStruct
 	for _, th := range tables {
-		if th.DoesNotHaveHash(hash) {
+		if th.DoesNotHave(hash) {
 			y.NumLSMBloomHits.Add(s.strLevel, 1)
 			continue
 		}
