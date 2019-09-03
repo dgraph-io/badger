@@ -275,6 +275,10 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		// possibly truncate the file.
 		return 0, ErrReplayNeeded
 	}
+	if offset == 0 {
+		// If offset is set to zero, let's advance past the encryption key header.
+		offset = vlogHeaderSize
+	}
 
 	// We're not at the end of the file. Let's Seek to the offset and start reading.
 	if _, err := lf.fd.Seek(int64(offset), io.SeekStart); err != nil {
@@ -423,7 +427,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 		return nil
 	}
 
-	_, err := vlog.iterate(f, vlogHeaderSize, func(e Entry, vp valuePointer) error {
+	_, err := vlog.iterate(f, 0, func(e Entry, vp valuePointer) error {
 		return fe(e)
 	})
 	if err != nil {
@@ -832,8 +836,8 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			continue
 		}
 
-		offset := uint32(vlogHeaderSize)
-		if fid == ptr.Fid && !ptr.IsZero() {
+		var offset uint32
+		if fid == ptr.Fid {
 			offset = ptr.Offset + ptr.Len
 		}
 		vlog.db.opt.Infof("Replaying file id: %d at offset: %d\n", fid, offset)
@@ -1292,7 +1296,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	y.AssertTrue(vlog.db != nil)
 	s := new(y.Slice)
 	var numIterations int
-	_, err = vlog.iterate(lf, vlogHeaderSize, func(e Entry, vp valuePointer) error {
+	_, err = vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
 		numIterations++
 		esz := float64(vp.Len) / (1 << 20) // in MBs.
 		if skipped < skipFirstM {
