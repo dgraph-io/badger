@@ -266,7 +266,11 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 	if err != nil {
 		return 0, err
 	}
-	if int64(offset) >= fi.Size() {
+	if offset == 0 {
+		// If offset is set to zero, let's advance past the encryption key header.
+		offset = vlogHeaderSize
+	}
+	if int64(offset) == fi.Size() {
 		// We're at the end of the file already. No need to do anything.
 		return offset, nil
 	}
@@ -274,10 +278,6 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		// We're not at the end of the file. We'd need to replay the entries, or
 		// possibly truncate the file.
 		return 0, ErrReplayNeeded
-	}
-	if offset == 0 {
-		// If offset is set to zero, let's advance past the encryption key header.
-		offset = vlogHeaderSize
 	}
 
 	// We're not at the end of the file. Let's Seek to the offset and start reading.
