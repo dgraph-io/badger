@@ -99,11 +99,12 @@ func (t *Table) DecrRef() error {
 		// We can safely delete this file, because for all the current files, we always have
 		// at least one reference pointing to them.
 
-		// It's necessary to delete windows files
+		// It's necessary to delete windows files.
 		if t.opt.LoadingMode == options.MemoryMap {
 			if err := y.Munmap(t.mmap); err != nil {
 				return err
 			}
+			t.mmap = nil
 		}
 		if err := t.fd.Truncate(0); err != nil {
 			// This is very important to let the FS know that the file is deleted.

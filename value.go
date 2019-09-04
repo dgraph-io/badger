@@ -97,9 +97,16 @@ func (lf *logFile) munmap() (err error) {
 		// Nothing to do
 		return nil
 	}
+	// File is already unmapped.
+	if len(lf.fmap) == 0 {
+		return nil
+	}
 	if err := y.Munmap(lf.fmap); err != nil {
 		return errors.Wrapf(err, "Unable to munmap value log: %q", lf.path)
 	}
+	// This is important. We should set the map to nil because ummap
+	// system call doesn't change the length or capacity of the fmap slice.
+	lf.fmap = nil
 	return nil
 }
 
@@ -135,6 +142,10 @@ func (lf *logFile) doneWriting(offset uint32) error {
 	// to the fd.)
 	if err := y.FileSync(lf.fd); err != nil {
 		return errors.Wrapf(err, "Unable to sync value log: %q", lf.path)
+	}
+
+	if err := lf.munmap(); err != nil {
+		return errors.Wrapf(err, "failed to mumap vlog file %s", lf.fd.Name())
 	}
 
 	// TODO: Confirm if we need to run a file sync after truncation.
@@ -722,11 +733,11 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	if err = syncDir(vlog.dirPath); err != nil {
 		return nil, errFile(err, vlog.dirPath, "Sync value log dir")
 	}
-	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
-		return nil, errFile(err, lf.path, "Mmap value log file")
-	}
 	if err = bootstrapLogfile(lf.fd); err != nil {
 		return nil, err
+	}
+	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
+		return nil, errFile(err, lf.path, "Mmap value log file")
 	}
 
 	// writableLogOffset is only written by write func, by read by Read func.
