@@ -861,7 +861,7 @@ you're trying to open in a newer version of badger. The underlying data format c
 badger versions and users will have to migrate their data directory.
 Badger data can be migrated from version X of badger to version Y of badger by following the steps
 listed below.
-Assume you were on badger v1.5.5 and you wish to migrate to v2.0.0-rc1 version
+Assume you were on badger v1.5.5 and you wish to migrate to v2.0.0 version
 1. Install badger version v1.5.5.
     - `cd $GOPATH/src/github.com/dgraph-io/badger`
     - `git checkout v1.5.5`
@@ -870,13 +870,13 @@ Assume you were on badger v1.5.5 and you wish to migrate to v2.0.0-rc1 version
       This should install the old badger binary in your $GOBIN.
 2. Create Backup
     - `badger backup --dir path/to/badger/directory -f badger.backup`
-3. Install badger version v2.0.0-rc1
+3. Install badger version v2.0.0
     - `cd $GOPATH/src/github.com/dgraph-io/badger`
-    - `git checkout v2.0.0-rc1`
+    - `git checkout v2.0.0`
     - `cd badger && go install`
 
       This should install new badger binary in your $GOBIN
-4. Install badger version v2.0.0-rc1
+4. Install badger version v2.0.0
     - `badger restore --dir path/to/new/badger/directory -f badger.backup`
 
       This will create a new directory on `path/to/new/badger/directory` and add badger data in
