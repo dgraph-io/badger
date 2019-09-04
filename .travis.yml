@@ -4,9 +4,9 @@ go:
     - "1.11"
     - "1.12"
 
-matrix:
-  include:
-    - os: osx
+os:
+    - osx
+
 notifications:
   email: false
   slack:
