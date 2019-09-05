@@ -11,7 +11,7 @@ key-value stores like [RocksDB](https://github.com/facebook/rocksdb).
 Badger is stable and is being used to serve data sets worth hundreds of
 terabytes. Badger supports concurrent ACID transactions with serializable
 snapshot isolation (SSI) guarantees. A Jepsen-style bank test runs nightly for
-8h, with `--race` flag and ensures maintainance of transactional guarantees.
+8h, with `--race` flag and ensures the maintenance of transactional guarantees.
 Badger has also been tested to work with filesystem level anomalies, to ensure
 persistence and consistency.
 
@@ -158,7 +158,7 @@ of your application, you have the option to retry the operation if you receive
 this error.
 
 An `ErrTxnTooBig` will be reported in case the number of pending writes/deletes in
-the transaction exceed a certain limit. In that case, it is best to commit the
+the transaction exceeds a certain limit. In that case, it is best to commit the
 transaction and start a new transaction immediately. Here is an example (we are
 not checking for errors in some places for simplicity):
 
@@ -301,7 +301,7 @@ is thread-safe and can be used concurrently via various goroutines.
 Badger would lease a range of integers to hand out from memory, with the
 bandwidth provided to `DB.GetSequence`. The frequency at which disk writes are
 done is determined by this lease bandwidth and the frequency of `Next`
-invocations. Setting a bandwith too low would do more disk writes, setting it
+invocations. Setting a bandwidth too low would do more disk writes, setting it
 too high would result in wasted integers if Badger is closed or crashes.
 To avoid wasted integers, call `Release` before closing Badger.
 
@@ -861,28 +861,28 @@ you're trying to open in a newer version of badger. The underlying data format c
 badger versions and users will have to migrate their data directory.
 Badger data can be migrated from version X of badger to version Y of badger by following the steps
 listed below.
-Assume you were on badger v1.5.5 and you wish to migrate to v2.0.0-rc1 version
+Assume you were on badger v1.5.5 and you wish to migrate to v2.0.0 version
 1. Install badger version v1.5.5.
     - `cd $GOPATH/src/github.com/dgraph-io/badger`
     - `git checkout v1.5.5`
     - `cd badger && go install`
 
-      This should install old badger binary in your $GOBIN.
+      This should install the old badger binary in your $GOBIN.
 2. Create Backup
     - `badger backup --dir path/to/badger/directory -f badger.backup`
-3. Install badger version v2.0.0-rc1
+3. Install badger version v2.0.0
     - `cd $GOPATH/src/github.com/dgraph-io/badger`
-    - `git checkout v2.0.0-rc1`
+    - `git checkout v2.0.0`
     - `cd badger && go install`
 
       This should install new badger binary in your $GOBIN
-4. Install badger version v2.0.0-rc1
+4. Install badger version v2.0.0
     - `badger restore --dir path/to/new/badger/directory -f badger.backup`
 
       This will create a new directory on `path/to/new/badger/directory` and add badger data in
       newer format to it.
 
-NOTE - The above steps shouldn't cause any data loss but please ensure the new data is  valid before
+NOTE - The above steps shouldn't cause any data loss but please ensure the new data is valid before
 deleting the old badger directory.
 ## Contact
 - Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, feature requests and discussions.
