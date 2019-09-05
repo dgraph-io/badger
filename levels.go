@@ -52,7 +52,7 @@ var (
 )
 
 // revertToManifest checks that all necessary table files exist and removes all table files not
-// referenced by the manifest.  idMap is a set of table file id's that were read from the directory
+// referenced by the manifest. idMap is a set of table file id's that were read from the directory
 // listing.
 func revertToManifest(kv *DB, mf *Manifest, idMap map[uint64]struct{}) error {
 	// 1. Check all files in manifest exist.
@@ -990,6 +990,7 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 			var count uint64
 			if withKeysCount {
 				it := t.NewIterator(false)
+				defer it.Close()
 				for it.Rewind(); it.Valid(); it.Next() {
 					count++
 				}

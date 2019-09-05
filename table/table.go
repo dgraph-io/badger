@@ -222,12 +222,13 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 	return t, nil
 }
 
-// Close closes the open table.  (Releases resources back to the OS.)
+// Close closes the open table. (Releases resources back to the OS.)
 func (t *Table) Close() error {
 	if t.opt.LoadingMode == options.MemoryMap {
 		if err := y.Munmap(t.mmap); err != nil {
 			return err
 		}
+		t.mmap = nil
 	}
 
 	return t.fd.Close()

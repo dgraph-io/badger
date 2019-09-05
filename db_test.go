@@ -632,7 +632,6 @@ func TestLoad(t *testing.T) {
 		fileIDs = append(fileIDs, k)
 	}
 	sort.Slice(fileIDs, func(i, j int) bool { return fileIDs[i] < fileIDs[j] })
-	fmt.Printf("FileIDs: %v\n", fileIDs)
 }
 
 func TestIterateDeleted(t *testing.T) {
@@ -1210,7 +1209,6 @@ func TestGetSetDeadlock(t *testing.T) {
 
 func TestWriteDeadlock(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
-	fmt.Println(dir)
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
