@@ -353,68 +353,38 @@ type page struct {
 // PageBuffer allocates memory in pages. Once a page is full, it will allocate page with double the
 // size of previous page. Its function are not thread safe.
 type PageBuffer struct {
-	pages    []*page
-	pageIdx  int // Idx of page where next write will happen.
-	startIdx int // startIdx of page pages[pageIdx] from where next write will happen.
+	pages []*page
 
-	length      int // Length of PageBuffer.
-	curPageSize int // Size of last page allocated.
-
-	// Will be reused everytime we read something. This has been kept at PageBuffer level to avoid
-	// allocation everytime(we call ReadAt frequently from Builder to calculate checksum).
-	// PageBuffer may take lot of memory in some cases because of this.
-	readBuf []byte
+	length       int // Length of PageBuffer.
+	nextPageSize int // Size of next page to be allocated.
 }
 
 // NewPageBuffer returns a new PageBuffer with first page having size pageSize.
 func NewPageBuffer(pageSize int) *PageBuffer {
-	b := &PageBuffer{
-		curPageSize: pageSize,
-		// Not initializing any int fields as default value is 0 for those.
-	}
-
-	b.pages = append(b.pages, &page{buf: make([]byte, 0, b.curPageSize)})
-
-	// increase curPageSize by 2, after allocation of first page.
-	b.curPageSize = b.curPageSize * 2
+	b := &PageBuffer{}
+	b.pages = append(b.pages, &page{buf: make([]byte, 0, pageSize)})
+	b.nextPageSize = pageSize * 2
 	return b
-}
-
-func (b *PageBuffer) page(idx int) *page {
-	if idx < len(b.pages) {
-		return b.pages[idx]
-	}
-
-	if idx > len(b.pages) {
-		panic("invalid idx")
-	}
-
-	b.pages = append(b.pages, &page{buf: make([]byte, 0, b.curPageSize)})
-	b.curPageSize = b.curPageSize * 2
-
-	return b.pages[idx]
 }
 
 // Write writes data to PageBuffer b. It returns number of bytes written and any error encountered.
 func (b *PageBuffer) Write(data []byte) (int, error) {
 	dataLen := len(data)
 	for {
-		cp := b.page(b.pageIdx) // Current page.
-		startIdx := b.startIdx  // Offset inside page.
+		cp := b.pages[len(b.pages)-1] // Current page.
 
-		n := copy(cp.buf[startIdx:cap(cp.buf)], data)
-		b.startIdx += n
-		cp.buf = cp.buf[:b.startIdx]
+		n := copy(cp.buf[len(cp.buf):cap(cp.buf)], data)
+		cp.buf = cp.buf[:len(cp.buf)+n]
+		b.length += n
 
 		if len(data) == n {
 			break
 		}
 		data = data[n:]
 
-		b.pageIdx++
-		b.startIdx = 0
+		b.pages = append(b.pages, &page{buf: make([]byte, 0, b.nextPageSize)})
+		b.nextPageSize *= 2
 	}
-	b.length += dataLen
 
 	return dataLen, nil
 }
@@ -430,52 +400,15 @@ func (b *PageBuffer) Len() int {
 	return b.length
 }
 
-// ReadAt reads length bytes starting from offset. If length is -1,
-// it will read all data starting from offset.
-func (b *PageBuffer) ReadAt(offset, length int) []byte {
-	// Figure out the extact length to be read.
-	if b.length-offset < length || length == -1 {
-		length = b.length - offset
-	}
-
-	if length == 0 {
-		return nil
-	}
-
-	if length > cap(b.readBuf) {
-		b.readBuf = make([]byte, length) // Allocate whole buffer at start.
-	} else {
-		b.readBuf = b.readBuf[:length]
-	}
-
-	pageIdx, startIdx := b.pageForOffset(offset)
-
-	read := 0
-	for pageIdx <= b.pageIdx {
-		cp := b.page(pageIdx)
-		read += copy(b.readBuf[read:], cp.buf[startIdx:])
-		if read >= length {
-			break
-		}
-		pageIdx++
-		startIdx = 0
-	}
-	return b.readBuf
-}
-
 // pageForOffset returns pageIdx and startIdx for the offset.
 func (b *PageBuffer) pageForOffset(offset int) (int, int) {
 	AssertTrue(offset < b.length)
 
 	var pageIdx, startIdx, sizeNow int
-	for i := 0; i <= b.pageIdx; i++ {
-		cp := b.page(i)
-		pageLen := len(cp.buf)
-		if i == b.pageIdx && b.startIdx < len(cp.buf) { // Handling for last page.
-			pageLen = b.startIdx + 1 // Length will 1 more than startIdx.
-		}
+	for i := 0; i < len(b.pages); i++ {
+		cp := b.pages[i]
 
-		if sizeNow+pageLen-1 < offset {
+		if sizeNow+len(cp.buf)-1 < offset {
 			sizeNow += len(cp.buf)
 		} else {
 			pageIdx = i
@@ -490,8 +423,10 @@ func (b *PageBuffer) pageForOffset(offset int) (int, int) {
 // Truncate truncates PageBuffer to length n.
 func (b *PageBuffer) Truncate(n int) {
 	pageIdx, startIdx := b.pageForOffset(n)
-	b.pageIdx = pageIdx
-	b.startIdx = startIdx
+	// For simplicity of the code reject extra pages. These pages can be kept.
+	b.pages = b.pages[:pageIdx+1]
+	cp := b.pages[len(b.pages)-1]
+	cp.buf = cp.buf[:startIdx]
 	b.length = n
 }
 
@@ -541,17 +476,15 @@ type PageBufferReader struct {
 // Read reads upto len(p) bytes. It returns number of bytes read and any error encountered.
 func (r *PageBufferReader) Read(p []byte) (int, error) {
 	// Check if there is enough to Read.
-	if r.pageIdx > r.buf.pageIdx || (r.pageIdx == r.buf.pageIdx && r.startIdx >= r.buf.startIdx) {
+	pc := len(r.buf.pages)
+	if r.pageIdx >= pc || (r.pageIdx == pc-1 && r.startIdx >= len(r.buf.pages[pc-1].buf)) {
 		return 0, io.EOF
 	}
 
 	read := 0
-	for r.pageIdx <= r.buf.pageIdx {
-		cp := r.buf.page(r.pageIdx) // Current Page.
-		endIdx := len(cp.buf)       // How much length to read from current page.
-		if r.pageIdx == r.buf.pageIdx {
-			endIdx = r.buf.startIdx
-		}
+	for r.pageIdx < pc {
+		cp := r.buf.pages[r.pageIdx] // Current Page.
+		endIdx := len(cp.buf)        // Last Idx upto which we can read from this page.
 
 		n := copy(p[read:], cp.buf[r.startIdx:endIdx])
 		read += n

@@ -60,21 +60,6 @@ func TestPageBuffer(t *testing.T) {
 	bytesBuffer.Write(bigBytes[:])
 
 	require.True(t, bytes.Equal(pageBuffer.Bytes(), bytesBuffer.Bytes()))
-
-	// Test ReadAt full length.
-	offset := int(rand.Int31n(int32(pageBuffer.Len())))
-	read1 := pageBuffer.ReadAt(offset, -1)
-	read2 := bytesBuffer.Bytes()[offset:]
-
-	require.True(t, bytes.Equal(read1, read2))
-
-	// Test ReadAt fixed length.
-	offset = int(rand.Int31n(int32(pageBuffer.Len())))
-	length := int(rand.Int31n(int32(pageBuffer.Len() - offset)))
-	read1 = pageBuffer.ReadAt(offset, length)
-	read2 = bytesBuffer.Bytes()[offset : offset+length]
-
-	require.True(t, bytes.Equal(read1, read2))
 }
 
 func TestBufferWrite(t *testing.T) {
@@ -83,18 +68,20 @@ func TestBufferWrite(t *testing.T) {
 	var wb [128]byte
 	rand.Read(wb[:])
 
-	b := NewPageBuffer(32)
+	pb := NewPageBuffer(32)
+	bb := new(bytes.Buffer)
 
 	end := 32
-	start := 0
 	for i := 0; i < 3; i++ {
-		n, err := b.Write(wb[:end])
+		n, err := pb.Write(wb[:end])
 		require.NoError(t, err, "unable to write bytes to buffer")
 		require.Equal(t, n, end, "length of buffer and length written should be equal")
 
-		require.True(t, bytes.Equal(wb[:end], b.ReadAt(start, end)))
+		// append to bb also for testing.
+		bb.Write(wb[:end])
+
+		require.True(t, bytes.Equal(pb.Bytes(), bb.Bytes()), "Both bytes should match")
 		end = end * 2
-		start = b.length
 	}
 }
 
@@ -109,13 +96,11 @@ func TestPagebufferTruncate(t *testing.T) {
 	require.Equal(t, n, len(wb), "length of buffer and length written should be equal")
 	require.NoError(t, err, "unable to write bytes to buffer")
 
-	rb := b.ReadAt(0, -1)
-	require.True(t, bytes.Equal(wb[:], rb), "bytes written and read should be equal")
+	require.True(t, bytes.Equal(wb[:], b.Bytes()), "bytes written and read should be equal")
 
 	// Truncate to 512.
 	b.Truncate(512)
-	rb = b.ReadAt(0, -1)
-	require.True(t, bytes.Equal(rb, wb[:512]))
+	require.True(t, bytes.Equal(b.Bytes(), wb[:512]))
 
 	// Again write wb.
 	n, err = b.Write(wb[:])
@@ -124,8 +109,7 @@ func TestPagebufferTruncate(t *testing.T) {
 
 	// Truncate to 1000.
 	b.Truncate(1000)
-	rb = b.ReadAt(0, -1)
-	require.True(t, bytes.Equal(rb, append(wb[:512], wb[:]...)[:1000]))
+	require.True(t, bytes.Equal(b.Bytes(), append(wb[:512], wb[:]...)[:1000]))
 }
 
 func TestPagebufferReader(t *testing.T) {
@@ -149,8 +133,8 @@ func TestPagebufferReader(t *testing.T) {
 	n, err = reader.Read(rb[:])
 	require.NoError(t, err, "unable to read error")
 	require.True(t, n == len(rb), "length read should be equal")
-	// Read same number of bytes using ReaderAt.
-	rb2 := b.ReadAt(0, 512)
+	// Match if read bytes are correct or not.
+	rb2 := b.Bytes()[:512]
 	require.True(t, bytes.Equal(rb[:], rb2))
 
 	// Next read using reader.
@@ -158,7 +142,7 @@ func TestPagebufferReader(t *testing.T) {
 	require.NoError(t, err, "unable to read error")
 	require.True(t, n == len(rb), "length read should be equal")
 	// Read same number of bytes using ReaderAt.
-	rb2 = b.ReadAt(512, 512)
+	rb2 = b.Bytes()[512:1024]
 	require.True(t, bytes.Equal(rb[:], rb2))
 
 	// Next read using reader for reading last 10 bytes.
@@ -166,7 +150,7 @@ func TestPagebufferReader(t *testing.T) {
 	require.NoError(t, err, "unable to read error")
 	require.True(t, n == 10, "length read should be equal")
 	// Read same number of bytes using ReaderAt.
-	rb2 = b.ReadAt(1024, 10)
+	rb2 = b.Bytes()[1024 : 1024+10]
 	require.True(t, bytes.Equal(rb[:10], rb2))
 
 	// Check if EOF is returned at end or not.
@@ -187,7 +171,7 @@ func TestPagebufferReader2(t *testing.T) {
 	// Also append some bytes so that last page is not full.
 	n, err = b.Write(wb[:10])
 	require.Equal(t, n, 10, "length of buffer and length written should be equal")
-	require.NoError(t, err, "uanble to write bytes to buffer")
+	require.NoError(t, err, "unable to write bytes to buffer")
 
 	randOffset := int(rand.Int31n(int32(b.length)))
 	randLength := int(rand.Int31n(int32(b.length - randOffset)))
@@ -198,7 +182,7 @@ func TestPagebufferReader2(t *testing.T) {
 	require.NoError(t, err, "unable to read error")
 	require.True(t, n == len(rb), "length read should be equal")
 	// Read same number of bytes using ReaderAt.
-	rb2 := b.ReadAt(randOffset, randLength)
+	rb2 := b.Bytes()[randOffset : randOffset+randLength]
 	require.True(t, bytes.Equal(rb[:], rb2))
 }
 
@@ -225,7 +209,7 @@ func TestPagebufferReader3(t *testing.T) {
 		require.Equal(t, n, chunk, "length read should be equal to chunck")
 		require.True(t, bytes.Equal(readBuf, wb[currentOffset:currentOffset+chunk]))
 
-		rb := b.ReadAt(currentOffset, chunk)
+		rb := b.Bytes()[currentOffset : currentOffset+chunk]
 		require.True(t, bytes.Equal(wb[currentOffset:currentOffset+chunk], rb))
 
 		currentOffset += chunk
