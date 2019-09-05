@@ -61,7 +61,12 @@ const (
 
 	// The number of updates after which discard map should be flushed into badger.
 	discardStatsFlushThreshold = 100
-	vlogHeaderSize             = 20
+
+	// size of vlog header.
+	// +----------------+------------------+
+	// | keyID(8 bytes) |  baseIV(12 bytes)|
+	// +----------------+------------------+
+	vlogHeaderSize = 20
 )
 
 type logFile struct {
@@ -371,6 +376,10 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 	if err != nil {
 		return 0, err
 	}
+	if offset == 0 {
+		// If offset is set to zero, let's advance past the encryption key header.
+		offset = vlogHeaderSize
+	}
 	if int64(offset) == fi.Size() {
 		// We're at the end of the file already. No need to do anything.
 		return offset, nil
@@ -495,6 +504,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			ne := new(Entry)
 			ne.meta = 0 // Remove all bits. Different keyspace doesn't need these bits.
 			ne.UserMeta = e.UserMeta
+			ne.ExpiresAt = e.ExpiresAt
 
 			// Create a new key in a separate keyspace, prefixed by moveKey. We are not
 			// allowed to rewrite an older version of key in the LSM tree, because then this older
@@ -797,6 +807,19 @@ func (vlog *valueLog) populateFilesMap() error {
 	return nil
 }
 
+func (lf *logFile) bootstrapLogfile() error {
+	// write the key id.
+	buf := make([]byte, 20)
+	binary.BigEndian.PutUint64(buf[:8], lf.keyID())
+	// generate base IV. It'll be used with offset of vptr to encrypt the entry.
+	if _, err := cryptorand.Read(buf[8:]); err != nil {
+		return y.Wrapf(err, "Error while creating base IV, while creating logfile")
+	}
+	lf.baseIV = buf[8:]
+	lf.fd.Write(buf)
+	return nil
+}
+
 func (vlog *valueLog) createVlogFile(fid uint32, registry *KeyRegistry) (*logFile, error) {
 	path := vlog.fpath(fid)
 
@@ -811,20 +834,17 @@ func (vlog *valueLog) createVlogFile(fid uint32, registry *KeyRegistry) (*logFil
 		dataKey:     dk,
 		registry:    registry,
 	}
-	vlog.numEntriesWritten = 0
+	// writableLogOffset is only written by write func, by read by Read func.
+	// To avoid a race condition, all reads and updates to this variable must be
+	// done via atomics.
 
 	if lf.fd, err = y.CreateSyncedFile(path, vlog.opt.SyncWrites); err != nil {
 		return nil, errFile(err, lf.path, "Create value log file")
 	}
-	// write the key id.
-	buf := make([]byte, 20)
-	binary.BigEndian.PutUint64(buf[:8], lf.keyID())
-	// generate base IV. It'll be used with offset of vptr to encrypt the entry.
-	if _, err = cryptorand.Read(buf[8:]); err != nil {
-		return nil, y.Wrapf(err, "Error while creating base IV, while creating logfile")
+
+	if err = lf.bootstrapLogfile(); err != nil {
+		return nil, err
 	}
-	lf.baseIV = buf[8:]
-	lf.fd.Write(buf)
 
 	if err = syncDir(vlog.dirPath); err != nil {
 		return nil, errFile(err, vlog.dirPath, "Sync value log dir")
@@ -836,6 +856,8 @@ func (vlog *valueLog) createVlogFile(fid uint32, registry *KeyRegistry) (*logFil
 	// To avoid a race condition, all reads and updates to this variable must be
 	// done via atomics.
 	atomic.StoreUint32(&vlog.writableLogOffset, vlogHeaderSize)
+	vlog.numEntriesWritten = 0
+
 	vlog.filesLock.Lock()
 	vlog.filesMap[fid] = lf
 	vlog.filesLock.Unlock()
@@ -844,7 +866,8 @@ func (vlog *valueLog) createVlogFile(fid uint32, registry *KeyRegistry) (*logFil
 }
 
 func errFile(err error, path string, msg string) error {
-	return fmt.Errorf("%s. Path=%s. Error=%v", msg, path, err)
+	return fmt.Errorf("%s. Path=%s. Error=%v", msg, path,
+		err)
 }
 
 func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) error {
@@ -864,7 +887,6 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 
 	// End offset is different from file size. So, we should truncate the file
 	// to that size.
-	y.AssertTrue(int64(endOffset) <= fi.Size())
 	if !vlog.opt.Truncate {
 		return ErrTruncateNeeded
 	}
@@ -873,9 +895,15 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	// If fid == maxFid then it's okay to truncate the entire file since it will be
 	// used for future additions. Also, it's okay if the last file has size zero.
 	// We mmap 2*opt.ValueLogSize for the last file. See vlog.Open() function
-	if endOffset == 0 && lf.fid != vlog.maxFid {
-		return errDeleteVlogFile
+	// if endOffset <= vlogHeaderSize && lf.fid != vlog.maxFid {
+
+	if endOffset <= vlogHeaderSize {
+		if lf.fid != vlog.maxFid {
+			return errDeleteVlogFile
+		}
+		return lf.bootstrapLogfile()
 	}
+
 	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
 		return errFile(err, lf.path, fmt.Sprintf(
 			"Truncation needed at offset %d. Can be done manually as well.", endOffset))
@@ -913,24 +941,27 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			flags |= y.Sync
 		}
 
-		// Open log file "lf" in read-write mode.
-		if err := lf.open(vlog.fpath(lf.fid), flags, db.vlog.db.registry); err != nil {
-			return err
+		// We cannot mmap the files upfront here. Windows does not like mmapped files to be
+		// truncated. We might need to truncate files during a replay.
+		var err error
+		lf.fd, err = y.OpenExistingFile(vlog.fpath(fid), flags)
+		if err != nil {
+			return errors.Wrapf(err, "Open existing file: %q", lf.path)
 		}
+
 		// This file is before the value head pointer. So, we don't need to
 		// replay it, and can just open it in readonly mode.
 		if fid < ptr.Fid {
+			// Mmap the file here, we don't need to replay it.
+			if err := lf.init(); err != nil {
+				return err
+			}
 			continue
 		}
 
 		var offset uint32
 		if fid == ptr.Fid {
-			offset = ptr.Offset + ptr.Len + vlogHeaderSize
-		}
-		if offset == 0 {
-			// No entries from this vlog has been persisted so advancing the offset to
-			// the begining of the entries.
-			offset = vlogHeaderSize
+			offset = ptr.Offset + ptr.Len
 		}
 		vlog.db.opt.Infof("Replaying file id: %d at offset: %d\n", fid, offset)
 		now := time.Now()
@@ -949,6 +980,14 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			return err
 		}
 		vlog.db.opt.Infof("Replay took: %s\n", time.Since(now))
+
+		if fid < vlog.maxFid {
+			// This file has been replayed. It can now be mmapped.
+			// For maxFid, the mmap would be done by the specially written code below.
+			if err := lf.init(); err != nil {
+				return err
+			}
+		}
 	}
 	// Seek to the end to start writing.
 	last, ok := vlog.filesMap[vlog.maxFid]
@@ -988,11 +1027,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	return nil
 }
 
-func (lf *logFile) open(filename string, flags uint32, registry *KeyRegistry) error {
-	var err error
-	if lf.fd, err = y.OpenExistingFile(filename, flags); err != nil {
-		return errors.Wrapf(err, "Open existing file: %q", lf.path)
-	}
+func (lf *logFile) init() error {
 	fstat, err := lf.fd.Stat()
 	if err != nil {
 		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
@@ -1008,7 +1043,6 @@ func (lf *logFile) open(filename string, flags uint32, registry *KeyRegistry) er
 		_ = lf.fd.Close()
 		return errors.Wrapf(err, "Unable to map file: %q", fstat.Name())
 	}
-	lf.registry = registry
 	return lf.initialize()
 }
 

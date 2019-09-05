@@ -934,48 +934,48 @@ func BenchmarkReadWrite(b *testing.B) {
 	}
 }
 
-// // Regression test for https://github.com/dgraph-io/badger/issues/817
-// func TestValueLogTruncate(t *testing.T) {
-// 	dir, err := ioutil.TempDir("", "badger-test")
-// 	require.NoError(t, err)
-// 	defer os.RemoveAll(dir)
+// Regression test for https://github.com/dgraph-io/badger/issues/817
+func TestValueLogTruncate(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
 
-// 	db, err := Open(DefaultOptions(dir).WithTruncate(true))
-// 	require.NoError(t, err)
-// 	// Insert 1 entry so that we have valid data in first vlog file
-// 	require.NoError(t, db.Update(func(txn *Txn) error {
-// 		return txn.Set([]byte("foo"), nil)
-// 	}))
+	db, err := Open(DefaultOptions(dir).WithTruncate(true))
+	require.NoError(t, err)
+	// Insert 1 entry so that we have valid data in first vlog file
+	require.NoError(t, db.Update(func(txn *Txn) error {
+		return txn.Set([]byte("foo"), nil)
+	}))
 
-// 	fileCountBeforeCorruption := len(db.vlog.filesMap)
+	fileCountBeforeCorruption := len(db.vlog.filesMap)
 
-// 	require.NoError(t, db.Close())
+	require.NoError(t, db.Close())
 
-// 	// Create two vlog files corrupted data. These will be truncated when DB starts next time
-// 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), []byte("foo"), 0664))
-// 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 2), []byte("foo"), 0664))
+	// Create two vlog files corrupted data. These will be truncated when DB starts next time
+	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), []byte("foo"), 0664))
+	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 2), []byte("foo"), 0664))
 
-// 	db, err = Open(DefaultOptions(dir).WithTruncate(true))
-// 	require.NoError(t, err)
+	db, err = Open(DefaultOptions(dir).WithTruncate(true))
+	require.NoError(t, err)
 
-// 	// Ensure vlog file with id=1 is not present
-// 	require.Nil(t, db.vlog.filesMap[1])
+	// Ensure vlog file with id=1 is not present
+	require.Nil(t, db.vlog.filesMap[1])
 
-// 	// Ensure filesize of fid=2 is zero
-// 	zeroFile, ok := db.vlog.filesMap[2]
-// 	require.True(t, ok)
-// 	fileStat, err := zeroFile.fd.Stat()
-// 	require.NoError(t, err)
-// 	require.Zero(t, fileStat.Size())
+	// Ensure filesize of fid=2 is zero
+	zeroFile, ok := db.vlog.filesMap[2]
+	require.True(t, ok)
+	fileStat, err := zeroFile.fd.Stat()
+	require.NoError(t, err)
+	require.Equal(t, int64(vlogHeaderSize), fileStat.Size())
 
-// 	fileCountAfterCorruption := len(db.vlog.filesMap)
-// 	// +1 because the file with id=2 will be completely truncated. It won't be deleted.
-// 	// There would be two files. fid=0 with valid data, fid=2 with zero data (truncated).
-// 	require.Equal(t, fileCountBeforeCorruption+1, fileCountAfterCorruption)
-// 	// Max file ID would point to the last vlog file, which is fid=2 in this case
-// 	require.Equal(t, 2, int(db.vlog.maxFid))
-// 	require.NoError(t, db.Close())
-// }
+	fileCountAfterCorruption := len(db.vlog.filesMap)
+	// +1 because the file with id=2 will be completely truncated. It won't be deleted.
+	// There would be two files. fid=0 with valid data, fid=2 with zero data (truncated).
+	require.Equal(t, fileCountBeforeCorruption+1, fileCountAfterCorruption)
+	// Max file ID would point to the last vlog file, which is fid=2 in this case
+	require.Equal(t, 2, int(db.vlog.maxFid))
+	require.NoError(t, db.Close())
+}
 
 // Regression test for https://github.com/dgraph-io/dgraph/issues/3669
 func TestTruncatedDiscardStat(t *testing.T) {
