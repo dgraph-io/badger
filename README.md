@@ -813,7 +813,7 @@ handle(wb.Flush()) // Wait for all txns to finish.
 Note that `WriteBatch` API does not allow any reads. For read-modify-write
 workloads, you should be using the `Transaction` API.
 
-### I don't see any disk write. Why?
+### I don't see any disk writes. Why?
 
 If you're using Badger with `SyncWrites=false`, then your writes might not be written to value log
 and won't get synced to disk immediately. Writes to LSM tree are done inmemory first, before they
@@ -847,7 +847,7 @@ observe the full IOPS throughput provided by modern SSDs. In Dgraph, we have set
 it to 128. For more details, [see this
 thread](https://groups.google.com/d/topic/golang-nuts/jPb_h3TvlKE/discussion).
 
-### Are there any linux specific settings that I should use?
+### Are there any Linux specific settings that I should use?
 
 We recommend setting `max file descriptors` to a high number depending upon the expected size of
 your data. On Linux and Mac, you can check the file descriptor limit with `ulimit -n -H` for the
