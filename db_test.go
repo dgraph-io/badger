@@ -1107,14 +1107,14 @@ func TestExpiryImproperDBClose(t *testing.T) {
 		require.NoError(t, db1.Close())
 	}
 
-	// t.Run("Test plain text", func(t *testing.T) {
-	// 	dir, err := ioutil.TempDir("", "badger-test")
-	// 	require.NoError(t, err)
-	// 	defer os.RemoveAll(dir)
-	// 	opt := getTestOptions(dir)
-	// 	opt.ValueLogLoadingMode = options.FileIO
-	// 	testReplay(opt)
-	// })
+	t.Run("Test plain text", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer os.RemoveAll(dir)
+		opt := getTestOptions(dir)
+		opt.ValueLogLoadingMode = options.FileIO
+		testReplay(opt)
+	})
 
 	t.Run("Test encryption", func(t *testing.T) {
 		dir, err := ioutil.TempDir("", "badger-test")

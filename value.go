@@ -836,6 +836,7 @@ func (lf *logFile) open(path string, flags uint32) error {
 		return y.Wrapf(err, "While opening vlog file %d", lf.fid)
 	}
 	lf.dataKey = dk
+	lf.baseIV = buf[8:]
 	return nil
 }
 
