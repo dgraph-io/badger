@@ -87,6 +87,11 @@ type logFile struct {
 	registry    *KeyRegistry
 }
 
+// encodeEntry will encode entry to the buf
+// layout of entry
+// +--------+-----+-------+-------+
+// | header | key | value | crc32 |
+// +--------+-----+-------+-------+
 func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int, error) {
 	h := header{
 		klen:      uint32(len(e.Key)),
@@ -96,6 +101,7 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 		userMeta:  e.UserMeta,
 	}
 
+	// encode header
 	var headerEnc [maxHeaderSize]byte
 	sz := h.Encode(headerEnc[:])
 	buf.Write(headerEnc[:sz])
@@ -106,6 +112,9 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 
 	// we'll encrypt only key and value.
 	if lf.EncryptionEnabled() {
+		// TODO: no need to allocate the bytes. we can calculate the encrypted buf one by one
+		// since we're using ctr mode. Ordering won't changed. Need some refactoring in XORBlock
+		// which will work like stream cipher.
 		eBuf := make([]byte, 0, len(e.Key)+len(e.Value))
 		eBuf = append(eBuf, e.Key...)
 		eBuf = append(eBuf, e.Value...)
@@ -129,11 +138,11 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 			return 0, err
 		}
 	}
-
+	// write crc32 hash.
 	var crcBuf [crc32.Size]byte
 	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
 	buf.Write(crcBuf[:])
-
+	// return encoded length.
 	return len(headerEnc[:sz]) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
@@ -163,10 +172,7 @@ func (lf *logFile) mmap(size int64) (err error) {
 }
 
 func (lf *logFile) EncryptionEnabled() bool {
-	if lf.dataKey == nil {
-		return false
-	}
-	return true
+	return lf.dataKey != nil
 }
 
 func (lf *logFile) munmap() (err error) {
@@ -860,7 +866,9 @@ func (lf *logFile) bootstrapLogfile() error {
 		return y.Wrapf(err, "Error while creating base IV, while creating logfile")
 	}
 	lf.baseIV = buf[8:]
-	lf.fd.Write(buf)
+	if _, err = lf.fd.Write(buf); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1314,58 +1322,32 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 			"Invalid value pointer offset: %d greater than current offset: %d",
 			vp.Offset, vlog.woffset())
 	}
-	return vlog.readValue(vp, s)
+	// read the value entry
+	ve, cb, err := vlog.readValPtr(vp, s)
+	if err != nil {
+		return nil, cb, err
+	}
+	// parse the value and return it.
+	val := ve.kv[ve.head.klen : ve.head.klen+ve.head.vlen]
+	return val, cb, nil
 }
 
-func (vlog *valueLog) readValPtr(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
-	lf, err := vlog.getFileRLocked(vp.Fid)
-	if err != nil {
-		return nil, nil, err
-	}
-	buf, err := lf.read(vp, s)
-	if err != nil {
-		return buf, lf.lock.RUnlock, err
-	}
-	var h header
-	headerLen := h.Decode(buf)
-	kv := buf[headerLen:]
-	if lf.EncryptionEnabled() {
-		kv, err = y.XORBlock(kv, lf.dataKey.Data, lf.generateIVFromOffset(vp.Offset))
-		if err != nil {
-			return buf, lf.lock.RUnlock, err
-		}
-	}
+// vlogEntry will consist of header and key value buf.
+type vlogEntry struct {
+	head *header
+	kv   []byte
+}
+
+// encodes to txn entry.
+func (ve *vlogEntry) encodeToEntry() (e Entry) {
+	e.meta = ve.head.meta
+	e.UserMeta = ve.head.userMeta
+	e.Key = ve.kv[:ve.head.klen]
+	e.Value = ve.kv[ve.head.klen : ve.head.klen+ve.head.vlen]
 	return
 }
-func (vlog *valueLog) readValue(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
-	lf, err := vlog.getFileRLocked(vp.Fid)
-	if err != nil {
-		return nil, nil, err
-	}
-	buf, err := lf.read(vp, s)
-	if err != nil {
-		return buf, lf.lock.RUnlock, err
-	}
-	var h header
-	headerLen := h.Decode(buf)
-	kv := buf[headerLen:]
-	if lf.EncryptionEnabled() {
-		kv, err = y.XORBlock(kv, lf.dataKey.Data, lf.generateIVFromOffset(vp.Offset))
-		if err != nil {
-			return buf, lf.lock.RUnlock, err
-		}
-	}
-	value := kv[h.klen : h.klen+h.vlen]
-	if vlog.opt.ValueLogLoadingMode == options.MemoryMap {
-		return value, lf.lock.RUnlock, err
-	}
-	// If we are using File I/O we unlock the file immediately
-	// and return an empty function as callback.
-	lf.lock.RUnlock()
-	return value, nil, err
-}
 
-func (vlog *valueLog) readEntry(vp valuePointer, s *y.Slice) (*Entry, func(), error) {
+func (vlog *valueLog) readValPtr(vp valuePointer, s *y.Slice) (*vlogEntry, func(), error) {
 	lf, err := vlog.getFileRLocked(vp.Fid)
 	if err != nil {
 		return nil, nil, err
@@ -1383,45 +1365,14 @@ func (vlog *valueLog) readEntry(vp valuePointer, s *y.Slice) (*Entry, func(), er
 			return nil, lf.lock.RUnlock, err
 		}
 	}
-	e := new(Entry)
-	e.Key = kv[:h.klen]
-	e.Value = kv[h.klen : h.klen+h.vlen]
-	e.meta = h.meta
-	e.UserMeta = h.userMeta
+	ve := &vlogEntry{head: &h, kv: kv}
 	if vlog.opt.ValueLogLoadingMode == options.MemoryMap {
-		return e, lf.lock.RUnlock, err
+		return ve, lf.lock.RUnlock, err
 	}
 	// If we are using File I/O we unlock the file immediately
 	// and return an empty function as callback.
 	lf.lock.RUnlock()
-	return e, nil, err
-}
-func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
-	lf, err := vlog.getFileRLocked(vp.Fid)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	buf, err := lf.read(vp, s)
-	if vlog.opt.ValueLogLoadingMode == options.MemoryMap {
-		return buf, lf.lock.RUnlock, err
-	}
-	// If we are using File I/O we unlock the file immediately
-	// and return an empty function as callback.
-	lf.lock.RUnlock()
-	return buf, nil, err
-}
-
-func valueBytesToEntry(buf []byte) (e Entry) {
-	var h header
-	hlen := h.Decode(buf)
-	// Move ahead of the header.
-	buf = buf[hlen:]
-	e.Key = buf[:h.klen]
-	e.meta = h.meta
-	e.UserMeta = h.userMeta
-	e.Value = buf[h.klen : h.klen+h.vlen]
-	return
+	return ve, nil, err
 }
 
 func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFile) {
@@ -1593,12 +1544,12 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 
 		} else {
 			vlog.elog.Printf("Reason=%+v\n", r)
-
-			ne, cb, err := vlog.readEntry(vp, s)
+			ve, cb, err := vlog.readValPtr(vp, s)
 			if err != nil {
 				runCallback(cb)
 				return errStop
 			}
+			ne := ve.encodeToEntry()
 			ne.offset = vp.Offset
 			ne.print("Latest Entry Header in LSM")
 			e.print("Latest Entry in Log")

@@ -67,14 +67,14 @@ func TestValueBasic(t *testing.T) {
 	t.Logf("Pointer written: %+v %+v\n", b.Ptrs[0], b.Ptrs[1])
 
 	s := new(y.Slice)
-	buf1, cb1, err1 := log.readValueBytes(b.Ptrs[0], s)
-	buf2, cb2, err2 := log.readValueBytes(b.Ptrs[1], s)
+	ve, cb1, err1 := log.readValPtr(b.Ptrs[0], s)
+	ve, cb2, err2 := log.readValPtr(b.Ptrs[1], s)
 	require.NoError(t, err1)
 	require.NoError(t, err2)
 	defer runCallback(cb1)
 	defer runCallback(cb2)
 
-	readEntries := []Entry{valueBytesToEntry(buf1), valueBytesToEntry(buf2)}
+	readEntries := []Entry{ve.encodeToEntry(), ve.encodeToEntry()}
 	require.EqualValues(t, []Entry{
 		{
 			Key:   []byte("samplekey"),
@@ -914,12 +914,12 @@ func BenchmarkReadWrite(b *testing.B) {
 						}
 						idx := rand.Intn(ln)
 						s := new(y.Slice)
-						buf, cb, err := vl.readValueBytes(ptrs[idx], s)
+						ve, cb, err := vl.readValPtr(ptrs[idx], s)
 						if err != nil {
 							b.Fatalf("Benchmark Read: %v", err)
 						}
 
-						e := valueBytesToEntry(buf)
+						e := ve.encodeToEntry()
 						if len(e.Key) != 16 {
 							b.Fatalf("Key is invalid")
 						}
