@@ -115,6 +115,9 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 			return 0, err
 		}
 		buf.Write(eBuf)
+		if _, err := hash.Write(eBuf); err != nil {
+			return 0, err
+		}
 	} else {
 		buf.Write(e.Key)
 		if _, err := hash.Write(e.Key); err != nil {
@@ -339,7 +342,7 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 	e.offset = r.recordOffset
 	e.hlen = hlen
 	buf := make([]byte, h.klen+h.vlen)
-	if _, err := io.ReadFull(reader, buf[:]); err != nil {
+	if _, err := io.ReadFull(tee, buf[:]); err != nil {
 		if err == io.EOF {
 			err = errTruncate
 		}
@@ -726,7 +729,7 @@ func (vlog *valueLog) dropAll() (int, error) {
 	}
 
 	vlog.db.opt.Infof("Value logs deleted. Creating value log file: 0")
-	if _, err := vlog.createVlogFile(0, vlog.db.registry); err != nil {
+	if _, err := vlog.createVlogFile(0); err != nil {
 		return count, err
 	}
 	atomic.StoreUint32(&vlog.maxFid, 0)
@@ -807,9 +810,49 @@ func (vlog *valueLog) populateFilesMap() error {
 	return nil
 }
 
+func (lf *logFile) open(path string, flags uint32) error {
+	var err error
+	if lf.fd, err = y.OpenExistingFile(path, flags); err != nil {
+		return err
+	}
+	fi, err := lf.fd.Stat()
+	if err != nil {
+		return errFile(err, lf.path, "Unable to run file.Stat")
+	}
+	if fi.Size() < vlogHeaderSize {
+		// Every vlog file should have at least vlogHeaderSize. If it is less than vlogHeaderSize
+		// then it must have corrupted. But no need to handle here. log replayer will truncate
+		// and bootstrap the logfile. So ignoring here.
+		return nil
+	}
+	buf := make([]byte, vlogHeaderSize)
+	if _, err = lf.fd.Read(buf); err != nil {
+		return y.Wrapf(err, "Error while reading vlog file %d", lf.fid)
+	}
+	keyID := binary.BigEndian.Uint64(buf[:8])
+	var dk *pb.DataKey
+	// retrive datakey.
+	if dk, err = lf.registry.dataKey(keyID); err != nil {
+		return y.Wrapf(err, "While opening vlog file %d", lf.fid)
+	}
+	lf.dataKey = dk
+	return nil
+}
+
 func (lf *logFile) bootstrapLogfile() error {
-	// write the key id.
+	var err error
+	if _, err = lf.fd.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	// genereate data key for the log file.
+	var dk *pb.DataKey
+	if dk, err = lf.registry.latestDataKey(); err != nil {
+		return err
+	}
+	lf.dataKey = dk
+	// We'll always preserv 20 bytes for key id and baseIV.
 	buf := make([]byte, 20)
+	// write key id to the buf.
 	binary.BigEndian.PutUint64(buf[:8], lf.keyID())
 	// generate base IV. It'll be used with offset of vptr to encrypt the entry.
 	if _, err := cryptorand.Read(buf[8:]); err != nil {
@@ -820,7 +863,7 @@ func (lf *logFile) bootstrapLogfile() error {
 	return nil
 }
 
-func (vlog *valueLog) createVlogFile(fid uint32, registry *KeyRegistry) (*logFile, error) {
+func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	path := vlog.fpath(fid)
 
 	dk, err := vlog.db.registry.latestDataKey()
@@ -832,7 +875,7 @@ func (vlog *valueLog) createVlogFile(fid uint32, registry *KeyRegistry) (*logFil
 		path:        path,
 		loadingMode: vlog.opt.ValueLogLoadingMode,
 		dataKey:     dk,
-		registry:    registry,
+		registry:    vlog.db.registry,
 	}
 	// writableLogOffset is only written by write func, by read by Read func.
 	// To avoid a race condition, all reads and updates to this variable must be
@@ -924,7 +967,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	}
 	// If no files are found, then create a new file.
 	if len(vlog.filesMap) == 0 {
-		_, err := vlog.createVlogFile(0, db.vlog.db.registry)
+		_, err := vlog.createVlogFile(0)
 		return err
 	}
 	fids := vlog.sortedFids()
@@ -944,8 +987,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		// We cannot mmap the files upfront here. Windows does not like mmapped files to be
 		// truncated. We might need to truncate files during a replay.
 		var err error
-		lf.fd, err = y.OpenExistingFile(vlog.fpath(fid), flags)
-		if err != nil {
+		if err = lf.open(vlog.fpath(fid), flags); err != nil {
 			return errors.Wrapf(err, "Open existing file: %q", lf.path)
 		}
 
@@ -997,7 +1039,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	// based on the
 	if last.EncryptionEnabled() != vlog.db.shouldEncrypt() {
 		newid := atomic.AddUint32(&vlog.maxFid, 1)
-		_, err := vlog.createVlogFile(newid, vlog.db.registry)
+		_, err := vlog.createVlogFile(newid)
 		if err != nil {
 			return err
 		}
@@ -1200,7 +1242,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 			newid := atomic.AddUint32(&vlog.maxFid, 1)
 			y.AssertTruef(newid > 0, "newid has overflown uint32: %v", newid)
-			newlf, err := vlog.createVlogFile(newid, vlog.db.registry)
+			newlf, err := vlog.createVlogFile(newid)
 			if err != nil {
 				return err
 			}
