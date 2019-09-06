@@ -111,7 +111,7 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 	}
 
 	// we'll encrypt only key and value.
-	if lf.EncryptionEnabled() {
+	if lf.encryptionEnabled() {
 		// TODO: no need to allocate the bytes. we can calculate the encrypted buf one by one
 		// since we're using ctr mode. Ordering won't changed. Need some refactoring in XORBlock
 		// which will work like stream cipher.
@@ -171,7 +171,7 @@ func (lf *logFile) mmap(size int64) (err error) {
 	return err
 }
 
-func (lf *logFile) EncryptionEnabled() bool {
+func (lf *logFile) encryptionEnabled() bool {
 	return lf.dataKey != nil
 }
 
@@ -213,39 +213,12 @@ func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 	return buf, err
 }
 
+// generateIVFromOffset will genrate IV by appending given offset with the base IV.
 func (lf *logFile) generateIVFromOffset(offset uint32) []byte {
 	iv := make([]byte, aes.BlockSize)
 	copy(iv[:12], lf.baseIV)
 	binary.BigEndian.PutUint32(iv[12:], offset)
 	return iv
-}
-
-// initialize will initialize the datakey and baseIV
-func (lf *logFile) initialize() error {
-	var err error
-	buf := make([]byte, 20)
-	if lf.loadingMode == options.FileIO {
-		var n int
-		if n, err = lf.fd.ReadAt(buf, 0); err != nil {
-			return y.Wrapf(err, "Error while reading key id and baseIV")
-		}
-		if n != 20 {
-			return y.Wrapf(err, "Invalid vlog file %d", lf.fid)
-		}
-	} else {
-		if len(lf.fmap) < 20 {
-			return y.Wrapf(err, "Invalid vlog file %d", lf.fid)
-		}
-		buf = lf.fmap[:20]
-	}
-	keyID := binary.BigEndian.Uint64(buf[:8])
-	var dk *pb.DataKey
-	if dk, err = lf.registry.dataKey(keyID); err != nil {
-		return y.Wrapf(err, "Error while retriving datakey")
-	}
-	lf.dataKey = dk
-	lf.baseIV = buf[8:]
-	return nil
 }
 
 func (lf *logFile) doneWriting(offset uint32) error {
@@ -354,7 +327,7 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 		}
 		return nil, err
 	}
-	if r.lf.EncryptionEnabled() {
+	if r.lf.encryptionEnabled() {
 		if buf, err = r.lf.decryptKV(buf[:], r.recordOffset); err != nil {
 			return nil, err
 		}
@@ -857,11 +830,11 @@ func (lf *logFile) bootstrapLogfile() error {
 		return err
 	}
 	lf.dataKey = dk
-	// We'll always preserv 20 bytes for key id and baseIV.
-	buf := make([]byte, 20)
+	// We'll always preserv vlogHeaderSize for key id and baseIV.
+	buf := make([]byte, vlogHeaderSize)
 	// write key id to the buf.
 	binary.BigEndian.PutUint64(buf[:8], lf.keyID())
-	// generate base IV. It'll be used with offset of vptr to encrypt the entry.
+	// generate base IV. It'll be used with offset of the vptr to encrypt the entry.
 	if _, err := cryptorand.Read(buf[8:]); err != nil {
 		return y.Wrapf(err, "Error while creating base IV, while creating logfile")
 	}
@@ -1044,9 +1017,9 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	last, ok := vlog.filesMap[vlog.maxFid]
 	y.AssertTrue(ok)
 	// We'll create a new vlog if the last vlog is encrypted and db is opened in
-	// plain text mode or vice vesa. because new entries will be encrypted or plain text
-	// based on the
-	if last.EncryptionEnabled() != vlog.db.shouldEncrypt() {
+	// plain text mode or vice vesa. because single vlog file can't have both
+	// encrypted entries and plain text entries.
+	if last.encryptionEnabled() != vlog.db.shouldEncrypt() {
 		newid := atomic.AddUint32(&vlog.maxFid, 1)
 		_, err := vlog.createVlogFile(newid)
 		if err != nil {
@@ -1338,7 +1311,7 @@ type vlogEntry struct {
 	kv   []byte
 }
 
-// encodes to txn entry.
+// encodeToEntry encodes to txn entry.
 func (ve *vlogEntry) encodeToEntry() (e Entry) {
 	e.meta = ve.head.meta
 	e.UserMeta = ve.head.userMeta
@@ -1359,7 +1332,7 @@ func (vlog *valueLog) readValPtr(vp valuePointer, s *y.Slice) (*vlogEntry, func(
 	var h header
 	headerLen := h.Decode(buf)
 	kv := buf[headerLen:]
-	if lf.EncryptionEnabled() {
+	if lf.encryptionEnabled() {
 		kv, err = y.XORBlock(kv, lf.dataKey.Data, lf.generateIVFromOffset(vp.Offset))
 		if err != nil {
 			return nil, lf.lock.RUnlock, err
@@ -1492,7 +1465,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	y.AssertTrue(vlog.db != nil)
 	s := new(y.Slice)
 	var numIterations int
-	_, err = vlog.iterate(lf, vlogHeaderSize, func(e Entry, vp valuePointer) error {
+	_, err = vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
 		numIterations++
 		esz := float64(vp.Len) / (1 << 20) // in MBs.
 		if skipped < skipFirstM {
