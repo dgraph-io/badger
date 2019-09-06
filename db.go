@@ -1010,7 +1010,7 @@ func (db *DB) updateSize(lc *y.Closer) {
 // RunValueLogGC triggers a value log garbage collection.
 //
 // It picks value log files to perform GC based on statistics that are collected
-// duing compactions.  If no such statistics are available, then log files are
+// during compactions.  If no such statistics are available, then log files are
 // picked in random order. The process stops as soon as the first log file is
 // encountered which does not result in garbage collection.
 //
