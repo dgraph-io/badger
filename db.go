@@ -326,7 +326,7 @@ func Open(opt Options) (db *DB, err error) {
 	go db.doWrites(replayCloser)
 
 	if err = db.vlog.open(db, vptr, db.replayFunction()); err != nil {
-		return db, err
+		return db, y.Wrapf(err, "During db.vlog.open")
 	}
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 
@@ -1044,7 +1044,7 @@ func (db *DB) updateSize(lc *y.Closer) {
 // RunValueLogGC triggers a value log garbage collection.
 //
 // It picks value log files to perform GC based on statistics that are collected
-// duing compactions.  If no such statistics are available, then log files are
+// during compactions.  If no such statistics are available, then log files are
 // picked in random order. The process stops as soon as the first log file is
 // encountered which does not result in garbage collection.
 //

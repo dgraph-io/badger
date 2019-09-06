@@ -966,7 +966,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.True(t, ok)
 	fileStat, err := zeroFile.fd.Stat()
 	require.NoError(t, err)
-	require.Zero(t, fileStat.Size())
+	require.Equal(t, int64(vlogHeaderSize), fileStat.Size())
 
 	fileCountAfterCorruption := len(db.vlog.filesMap)
 	// +1 because the file with id=2 will be completely truncated. It won't be deleted.
