@@ -1086,7 +1086,7 @@ func (lf *logFile) init() error {
 		_ = lf.fd.Close()
 		return errors.Wrapf(err, "Unable to map file: %q", fstat.Name())
 	}
-	return lf.initialize()
+	return nil
 }
 
 func (vlog *valueLog) Close() error {
@@ -1317,6 +1317,26 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	return vlog.readValue(vp, s)
 }
 
+func (vlog *valueLog) readValPtr(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
+	lf, err := vlog.getFileRLocked(vp.Fid)
+	if err != nil {
+		return nil, nil, err
+	}
+	buf, err := lf.read(vp, s)
+	if err != nil {
+		return buf, lf.lock.RUnlock, err
+	}
+	var h header
+	headerLen := h.Decode(buf)
+	kv := buf[headerLen:]
+	if lf.EncryptionEnabled() {
+		kv, err = y.XORBlock(kv, lf.dataKey.Data, lf.generateIVFromOffset(vp.Offset))
+		if err != nil {
+			return buf, lf.lock.RUnlock, err
+		}
+	}
+	return
+}
 func (vlog *valueLog) readValue(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
 	lf, err := vlog.getFileRLocked(vp.Fid)
 	if err != nil {
