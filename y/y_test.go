@@ -199,7 +199,7 @@ func TestPagebufferReader3(t *testing.T) {
 
 	reader := b.NewReaderAt(0)
 
-	chunk := 10 // Read 10 bytes in loop
+	chunk := 10 // Read 10 bytes in loop.
 	readBuf := make([]byte, chunk)
 	currentOffset := 0
 

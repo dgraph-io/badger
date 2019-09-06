@@ -445,7 +445,7 @@ func (b *PageBuffer) Bytes() []byte {
 func (b *PageBuffer) WriteTo(w io.Writer) (int64, error) {
 	written := int64(0)
 	for i := 0; i < len(b.pages); i++ {
-		n, err := w.Write(b.pages[i].buf[:])
+		n, err := w.Write(b.pages[i].buf)
 		written += int64(n)
 		if err != nil {
 			return written, err
