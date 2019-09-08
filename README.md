@@ -488,7 +488,8 @@ db.View(func(txn *badger.Txn) error {
   it := txn.NewIterator(opts)
   defer it.Close()
   
-  // E.g, Stored Keys "log-2019-09-09-server-09-11-15", "log-2019-09-10-server-09-11-15", "log-2019-09-09-app-09-11-15"
+  // E.g, Stored Keys:
+  // "log-2019-09-09-server-09-11-15", "log-2019-09-10-server-09-11-15", "log-2019-09-09-app-09-11-15"
   // "log-2019-09-09-crash-09-11-15", "log-2019-09-11-server-09-11-15", etc.,
   
   // appending `0xFF` for reverse scan against the date 2019-09-09, 
