@@ -523,8 +523,7 @@ func (it *Iterator) ValidForPrefix(prefix []byte) bool {
 
 // ContainForPrefix returns false when iteration is done
 // or when the current key doesn't contain the specified prefix.
-// useful in prefix scanning to match if key contains any of prefix
-// E.g, for it.Seek(prefix); it.ContainForPrefix(contain); it.Next() {
+// Useful in prefix scanning to match if other keyword should also contains in key as well, E.g is in "README.md" file
 func (it *Iterator) ContainForPrefix(prefix []byte) bool {
 	return it.Valid() && bytes.Contains(it.item.key, prefix)
 }
