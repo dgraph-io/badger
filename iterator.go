@@ -523,9 +523,9 @@ func (it *Iterator) ValidForPrefix(prefix []byte) bool {
 
 // ContainForPrefix returns false when iteration is done
 // or when the current key doesn't contain the specified prefix.
-// Useful in prefix scanning to match if other keyword should also contains in key as well, E.g is in "README.md" file
-func (it *Iterator) ContainForPrefix(prefix []byte) bool {
-	return it.Valid() && bytes.Contains(it.item.key, prefix)
+// Useful in prefix scanning to match if other keyword should also contains in key as well.
+func (it *Iterator) ContainForPrefix(contain []byte) bool {
+	return it.Valid() && bytes.Contains(it.item.key, contain)
 }
 
 // Close would close the iterator. It is important to call this when you're done with iteration.
