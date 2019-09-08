@@ -521,6 +521,14 @@ func (it *Iterator) ValidForPrefix(prefix []byte) bool {
 	return it.Valid() && bytes.HasPrefix(it.item.key, prefix)
 }
 
+// ContainForPrefix returns false when iteration is done
+// or when the current key doesn't contain the specified prefix.
+// useful in prefix scanning to match if key contains any of prefix
+// E.g, for it.Seek(prefix); it.ContainForPrefix(contain); it.Next() {
+func (it *Iterator) ContainForPrefix(prefix []byte) bool {
+	return it.Valid() && bytes.Contains(it.item.key, prefix)
+}
+
 // Close would close the iterator. It is important to call this when you're done with iteration.
 func (it *Iterator) Close() {
 	if it.closed {
