@@ -477,6 +477,42 @@ db.View(func(txn *badger.Txn) error {
 })
 ```
 
+#### Prefix with Contain and Reverse scans
+To iterate over a key prefix, you can combine `Seek()` and `ContainForPrefix()` with Reverse iterator:
+
+```go
+db.View(func(txn *badger.Txn) error {
+  opts := badger.DefaultIteratorOptions
+  opts.PrefetchSize = 20
+  opts.Reverse = true
+  it := txn.NewIterator(opts)
+  defer it.Close()
+  
+  // Eg, Stored Keys:
+  // "log-2019-09-09-server-09-11-15", "log-2019-09-10-server-09-11-15", "log-2019-09-09-app-09-11-15"
+  // "log-2019-09-09-crash-09-11-15", "log-2019-09-11-server-09-11-15", etc.,
+  
+  // appending `0xFF` for reverse scan against the date 2019-09-09, 
+  prefix := append([]byte("log-2019-09-09"), 0xFF)
+  
+  // key should also contain "server" keyword in key to limit the search only for server log and not app or analytics log.
+  contain := []byte("server")
+  
+  for it.Seek(prefix); it.ContainForPrefix(contain); it.Next() {
+    item := it.Item()
+    k := item.Key()
+    err := item.Value(func(v []byte) error {
+      fmt.Printf("key=%s, value=%s\n", k, v)
+      return nil
+    })
+    if err != nil {
+      return err
+    }
+  }
+  return nil
+})
+```
+
 #### Key-only iteration
 Badger supports a unique mode of iteration called _key-only_ iteration. It is
 several order of magnitudes faster than regular iteration, because it involves
