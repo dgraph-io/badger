@@ -488,7 +488,7 @@ db.View(func(txn *badger.Txn) error {
   it := txn.NewIterator(opts)
   defer it.Close()
   
-  // E.g, Stored Keys:
+  // Eg, Stored Keys:
   // "log-2019-09-09-server-09-11-15", "log-2019-09-10-server-09-11-15", "log-2019-09-09-app-09-11-15"
   // "log-2019-09-09-crash-09-11-15", "log-2019-09-11-server-09-11-15", etc.,
   
@@ -511,6 +511,7 @@ db.View(func(txn *badger.Txn) error {
   }
   return nil
 })
+```
 
 #### Key-only iteration
 Badger supports a unique mode of iteration called _key-only_ iteration. It is
