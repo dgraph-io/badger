@@ -40,6 +40,7 @@ For more details on our version naming schema please read [Choosing a version](#
     + [Setting Time To Live(TTL) and User Metadata on Keys](#setting-time-to-livettl-and-user-metadata-on-keys)
     + [Iterating over keys](#iterating-over-keys)
       - [Prefix scans](#prefix-scans)
+      - [Prefix with Contain and Reverse scans](#prefix-with-contain-and-reverse-scans)
       - [Key-only iteration](#key-only-iteration)
     + [Stream](#stream)
     + [Garbage Collection](#garbage-collection)
