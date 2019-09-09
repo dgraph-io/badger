@@ -475,28 +475,35 @@ type PageBufferReader struct {
 func (r *PageBufferReader) Read(p []byte) (int, error) {
 	// Check if there is enough to Read.
 	pc := len(r.buf.pages)
-	if r.pageIdx >= pc || (r.pageIdx == pc-1 && r.startIdx >= len(r.buf.pages[pc-1].buf)) {
-		return 0, io.EOF
-	}
 
 	read := 0
-	for r.pageIdx < pc {
+	for r.pageIdx < pc && read < len(p) {
 		cp := r.buf.pages[r.pageIdx] // Current Page.
-		endIdx := len(cp.buf)        // Last Idx upto which we can read from this page.
+		endIdx := len(cp.buf)        // Last Idx up to which we can read from this page.
 
 		n := copy(p[read:], cp.buf[r.startIdx:endIdx])
 		read += n
 		r.startIdx += n
 
-		if r.startIdx >= len(cp.buf) {
+		// Instead of len(cp.buf), we comparing with cap(cp.buf). This ensures that we move to next
+		// page only when we have read all data. Reading from last page is an edge case. We don't
+		// want to move to next page until last page is full to its capacity.
+		if r.startIdx >= cap(cp.buf) {
 			// We should move to next page.
 			r.pageIdx++
 			r.startIdx = 0
+			continue
 		}
 
-		if read >= len(p) {
+		// When last page in not full to its capacity and we have read all data up to its
+		// length, just break out of the loop.
+		if r.pageIdx == pc-1 {
 			break
 		}
+	}
+
+	if read == 0 {
+		return read, io.EOF
 	}
 
 	return read, nil

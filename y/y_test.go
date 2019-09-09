@@ -206,7 +206,7 @@ func TestPagebufferReader3(t *testing.T) {
 	for i := 0; i < len(wb)/chunk; i++ {
 		n, err = reader.Read(readBuf)
 		require.NoError(t, err, "unable to read from reader")
-		require.Equal(t, n, chunk, "length read should be equal to chunck")
+		require.Equal(t, chunk, n, "length read should be equal to chunk")
 		require.True(t, bytes.Equal(readBuf, wb[currentOffset:currentOffset+chunk]))
 
 		rb := b.Bytes()[currentOffset : currentOffset+chunk]
@@ -216,6 +216,10 @@ func TestPagebufferReader3(t *testing.T) {
 	}
 
 	// Read EOF.
+	n, err = reader.Read(readBuf)
+	require.Equal(t, err, io.EOF, "should return EOF")
+
+	// Read EOF again.
 	n, err = reader.Read(readBuf)
 	require.Equal(t, err, io.EOF, "should return EOF")
 }
