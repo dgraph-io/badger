@@ -490,8 +490,15 @@ db.View(func(txn *badger.Txn) error {
   defer it.Close()
   
   // Eg, Stored Keys:
-  // "log-2019-09-09-server-09-11-15", "log-2019-09-10-server-09-11-15", "log-2019-09-09-app-09-11-15"
-  // "log-2019-09-09-crash-09-11-15", "log-2019-09-11-server-09-11-15", etc.,
+  // "log-2019-09-09-web-server-09-11-15", "log-2019-09-09-web-db-19-11-15",
+  // "log-2019-09-10-web-server-09-11-15", "log-2019-09-10-web-db-19-11-15",
+  // "log-2019-09-11-web-server-09-11-15", "log-2019-09-11-web-db-19-11-15",
+  // "log-2019-09-09-app-api-09-11-15", "log-2019-09-09-app-db-09-11-15",
+  // "log-2019-09-10-app-api-09-11-15", "log-2019-09-10-app-db-09-11-15",
+  // "log-2019-09-11-app-api-09-11-15", "log-2019-09-11-app-db-09-11-15",
+  // "log-2019-09-09-crash-app-09-11-15", "log-2019-09-09-crash-db-09-11-15",
+  // "log-2019-09-10-crash-app-09-11-15", "log-2019-09-10-crash-db-09-11-15",
+  // "log-2019-09-11-crash-app-09-11-15", "log-2019-09-11-crash-db-09-11-15",
   
   // appending `0xFF` for reverse scan against the date 2019-09-09, 
   prefix := append([]byte("log-2019-09-09"), 0xFF)
