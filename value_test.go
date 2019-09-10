@@ -68,13 +68,13 @@ func TestValueBasic(t *testing.T) {
 
 	s := new(y.Slice)
 	ve, cb1, err1 := log.readValPtr(b.Ptrs[0], s)
-	ve, cb2, err2 := log.readValPtr(b.Ptrs[1], s)
+	ve2, cb2, err2 := log.readValPtr(b.Ptrs[1], s)
 	require.NoError(t, err1)
 	require.NoError(t, err2)
 	defer runCallback(cb1)
 	defer runCallback(cb2)
 
-	readEntries := []Entry{ve.encodeToEntry(), ve.encodeToEntry()}
+	readEntries := []Entry{ve.encodeToEntry(), ve2.encodeToEntry()}
 	require.EqualValues(t, []Entry{
 		{
 			Key:   []byte("samplekey"),

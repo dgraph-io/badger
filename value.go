@@ -821,6 +821,13 @@ func (lf *logFile) open(path string, flags uint32) error {
 
 func (lf *logFile) bootstrapLogfile() error {
 	var err error
+	// delete all the data. because bootstrapLogFile is been called while creating vlog and as well
+	// as replaying log. While replaying log, there may be any data left. So we need to truncate
+	// everything.
+	if err = lf.fd.Truncate(0); err != nil {
+		return y.Wrapf(err, "Error while bootstraping.")
+	}
+
 	if _, err = lf.fd.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
