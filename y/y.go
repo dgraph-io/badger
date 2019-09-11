@@ -389,7 +389,7 @@ func (b *PageBuffer) Write(data []byte) (int, error) {
 
 // WriteByte writes data byte to PageBuffer and returns any encountered error.
 func (b *PageBuffer) WriteByte(data byte) error {
-	_, err := b.Write([]byte{data}) // Can be changed later.
+	_, err := b.Write([]byte{data})
 	return err
 }
 

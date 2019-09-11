@@ -39,7 +39,7 @@ func BenchmarkBuffer(b *testing.B) {
 func TestPageBuffer(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 
-	var bytesBuffer bytes.Buffer // This is just of verifying result.
+	var bytesBuffer bytes.Buffer // This is just for verifying result.
 	bytesBuffer.Grow(512)
 
 	pageBuffer := NewPageBuffer(512)
@@ -112,6 +112,7 @@ func TestPagebufferTruncate(t *testing.T) {
 	require.True(t, bytes.Equal(b.Bytes(), append(wb[:512], wb[:]...)[:1000]))
 }
 
+// Test PageBufferReader using large buffers.
 func TestPagebufferReader(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 
@@ -141,7 +142,7 @@ func TestPagebufferReader(t *testing.T) {
 	n, err = reader.Read(rb[:])
 	require.NoError(t, err, "unable to read error")
 	require.True(t, n == len(rb), "length read should be equal")
-	// Read same number of bytes using ReaderAt.
+	// Read same number of bytes using Bytes method.
 	rb2 = b.Bytes()[512:1024]
 	require.True(t, bytes.Equal(rb[:], rb2))
 
@@ -149,15 +150,17 @@ func TestPagebufferReader(t *testing.T) {
 	n, err = reader.Read(rb[:10])
 	require.NoError(t, err, "unable to read error")
 	require.True(t, n == 10, "length read should be equal")
-	// Read same number of bytes using ReaderAt.
+	// Read same number of bytes using Bytes method.
 	rb2 = b.Bytes()[1024 : 1024+10]
 	require.True(t, bytes.Equal(rb[:10], rb2))
 
 	// Check if EOF is returned at end or not.
 	n, err = reader.Read(rb[:10])
 	require.Equal(t, err, io.EOF, "EOF should be returned at end")
+	require.Zero(t, n, "read length should be 0")
 }
 
+// Test PageBuffer by reading at random offset, random length.
 func TestPagebufferReader2(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 
@@ -181,11 +184,12 @@ func TestPagebufferReader2(t *testing.T) {
 	n, err = reader.Read(rb[:])
 	require.NoError(t, err, "unable to read error")
 	require.True(t, n == len(rb), "length read should be equal")
-	// Read same number of bytes using ReaderAt.
+	// Read same number of bytes using Bytes method.
 	rb2 := b.Bytes()[randOffset : randOffset+randLength]
 	require.True(t, bytes.Equal(rb[:], rb2))
 }
 
+// Test PageBuffer while reading multiple chunks. Chunks are smaller than pages of PageBuffer.
 func TestPagebufferReader3(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 
@@ -220,6 +224,30 @@ func TestPagebufferReader3(t *testing.T) {
 	require.Equal(t, err, io.EOF, "should return EOF")
 
 	// Read EOF again.
+	n, err = reader.Read(readBuf)
+	require.Equal(t, err, io.EOF, "should return EOF")
+}
+
+// Test when read buffer is larger than PageBuffer.
+func TestPagebufferReader4(t *testing.T) {
+	rand.Seed(time.Now().Unix())
+
+	var wb [20]byte
+	rand.Read(wb[:])
+
+	b := NewPageBuffer(32)
+	n, err := b.Write(wb[:])
+	require.Equal(t, n, len(wb), "length of buffer and length written should be equal")
+	require.NoError(t, err, "unable to write bytes to buffer")
+
+	reader := b.NewReaderAt(0)
+	readBuf := make([]byte, 100)
+
+	n, err = reader.Read(readBuf)
+	require.NoError(t, err, "unable to read from reader")
+	require.Equal(t, 20, n, "length read should be equal to chunk")
+
+	// Read EOF.
 	n, err = reader.Read(readBuf)
 	require.Equal(t, err, io.EOF, "should return EOF")
 }
