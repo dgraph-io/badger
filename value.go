@@ -121,7 +121,7 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 		var err error
 		eBuf, err = y.XORBlock(eBuf, lf.dataKey.Data, lf.generateIV(offset))
 		if err != nil {
-			return 0, err
+			return 0, y.Wrapf(err, "Error while encoding entry for vlog.")
 		}
 		// write encrypted buf.
 		_, err = buf.Write(eBuf)
@@ -839,7 +839,7 @@ func (lf *logFile) open(path string, flags uint32) error {
 	}
 	keyID := binary.BigEndian.Uint64(buf[:8])
 	var dk *pb.DataKey
-	// retrive datakey.
+	// retrieve datakey.
 	if dk, err = lf.registry.dataKey(keyID); err != nil {
 		return y.Wrapf(err, "While opening vlog file %d", lf.fid)
 	}
@@ -871,7 +871,7 @@ func (lf *logFile) bootstrap() error {
 		return err
 	}
 	lf.dataKey = dk
-	// We'll always preserv vlogHeaderSize for key id and baseIV.
+	// We'll always preserve vlogHeaderSize for key id and baseIV.
 	buf := make([]byte, vlogHeaderSize)
 	// write key id to the buf.
 	// key id will be zero if the db is in plain text.
@@ -882,6 +882,8 @@ func (lf *logFile) bootstrap() error {
 	}
 	// Initialize base IV.
 	lf.baseIV = buf[8:]
+	y.AssertTrue(len(lf.baseIV) == 12)
+	// write the key id and base IV to the file.
 	_, err = lf.fd.Write(buf)
 	return err
 }
@@ -932,8 +934,7 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 }
 
 func errFile(err error, path string, msg string) error {
-	return fmt.Errorf("%s. Path=%s. Error=%v", msg, path,
-		err)
+	return fmt.Errorf("%s. Path=%s. Error=%v", msg, path, err)
 }
 
 func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) error {
@@ -1058,7 +1059,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	last, ok := vlog.filesMap[vlog.maxFid]
 	y.AssertTrue(ok)
 	// We'll create a new vlog if the last vlog is encrypted and db is opened in
-	// plain text mode or vice vesa. because single vlog file can't have both
+	// plain text mode or vice versa. A single vlog file can't have both
 	// encrypted entries and plain text entries.
 	if last.encryptionEnabled() != vlog.db.shouldEncrypt() {
 		newid := atomic.AddUint32(&vlog.maxFid, 1)
