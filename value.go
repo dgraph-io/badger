@@ -113,30 +113,35 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 	// we'll encrypt only key and value.
 	if lf.encryptionEnabled() {
 		// TODO: no need to allocate the bytes. we can calculate the encrypted buf one by one
-		// since we're using ctr mode. Ordering won't changed. Need some refactoring in XORBlock
-		// which will work like stream cipher.
+		// since we're using ctr mode of AES encryption. Ordering won't changed. Need some
+		// refactoring in XORBlock which will work like stream cipher.
 		eBuf := make([]byte, 0, len(e.Key)+len(e.Value))
 		eBuf = append(eBuf, e.Key...)
 		eBuf = append(eBuf, e.Value...)
 		var err error
-		eBuf, err = y.XORBlock(eBuf, lf.dataKey.Data, lf.generateIVFromOffset(offset))
+		eBuf, err = y.XORBlock(eBuf, lf.dataKey.Data, lf.generateIV(offset))
 		if err != nil {
 			return 0, err
 		}
-		buf.Write(eBuf)
-		if _, err := hash.Write(eBuf); err != nil {
-			return 0, err
-		}
+		// write encrypted buf.
+		_, err = buf.Write(eBuf)
+		y.Check(err)
+		// write the hash.
+		_, err = hash.Write(eBuf)
+		y.Check(err)
 	} else {
-		buf.Write(e.Key)
-		if _, err := hash.Write(e.Key); err != nil {
-			return 0, err
-		}
-
+		// Encryption is disabled so writing directly to the buffer.
+		// write key.
+		_, err := buf.Write(e.Key)
+		y.Check(err)
+		// write key hash.
+		_, err = hash.Write(e.Key)
+		y.Check(err)
+		// write value.
 		buf.Write(e.Value)
-		if _, err := hash.Write(e.Value); err != nil {
-			return 0, err
-		}
+		// write value hash.
+		_, err = hash.Write(e.Value)
+		y.Check(err)
 	}
 	// write crc32 hash.
 	var crcBuf [crc32.Size]byte
@@ -146,8 +151,30 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 	return len(headerEnc[:sz]) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
+func (lf *logFile) decodeEntry(buf []byte, offset uint32) (*Entry, error) {
+	var h header
+	hlen := h.Decode(buf)
+	kv := buf[hlen:]
+	if lf.encryptionEnabled() {
+		var err error
+		// No need to worry about mmap. because, XORBlock allocate a byte array to do the
+		// xor. So, the given slice is not being mutated.
+		if kv, err = lf.decryptKV(kv, offset); err != nil {
+			return nil, err
+		}
+	}
+	ne := new(Entry)
+	ne.meta = h.meta
+	ne.UserMeta = h.userMeta
+	ne.ExpiresAt = h.expiresAt
+	ne.offset = offset
+	ne.Key = kv[:h.klen]
+	ne.Value = kv[h.klen : h.klen+h.vlen]
+	return ne, nil
+}
+
 func (lf *logFile) decryptKV(buf []byte, offset uint32) ([]byte, error) {
-	return y.XORBlock(buf, lf.dataKey.Data, lf.generateIVFromOffset(offset))
+	return y.XORBlock(buf, lf.dataKey.Data, lf.generateIV(offset))
 }
 
 // KeyID returns datakey's ID.
@@ -213,10 +240,12 @@ func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 	return buf, err
 }
 
-// generateIVFromOffset will genrate IV by appending given offset with the base IV.
-func (lf *logFile) generateIVFromOffset(offset uint32) []byte {
+// generateIV will generate IV by appending given offset with the base IV.
+func (lf *logFile) generateIV(offset uint32) []byte {
 	iv := make([]byte, aes.BlockSize)
-	copy(iv[:12], lf.baseIV)
+	// baseIV is of 12 bytes.
+	y.AssertTrue(12 == copy(iv[:12], lf.baseIV))
+	// remaining 4 bytes is obtained from offset.
 	binary.BigEndian.PutUint32(iv[12:], offset)
 	return iv
 }
@@ -819,9 +848,14 @@ func (lf *logFile) open(path string, flags uint32) error {
 	return nil
 }
 
-func (lf *logFile) bootstrapLogfile() error {
+// bootstrap will initialize the log file with key id and baseIV.
+// The below figure shows the layout of log file.
+// +----------------+------------------+------------------+
+// | keyID(8 bytes) |  baseIV(12 bytes)|	 entry...     |
+// +----------------+------------------+------------------+
+func (lf *logFile) bootstrap() error {
 	var err error
-	// delete all the data. because bootstrapLogFile is been called while creating vlog and as well
+	// delete all the data. because bootstrap is been called while creating vlog and as well
 	// as replaying log. While replaying log, there may be any data left. So we need to truncate
 	// everything.
 	if err = lf.fd.Truncate(0); err != nil {
@@ -840,16 +874,16 @@ func (lf *logFile) bootstrapLogfile() error {
 	// We'll always preserv vlogHeaderSize for key id and baseIV.
 	buf := make([]byte, vlogHeaderSize)
 	// write key id to the buf.
+	// key id will be zero if the db is in plain text.
 	binary.BigEndian.PutUint64(buf[:8], lf.keyID())
 	// generate base IV. It'll be used with offset of the vptr to encrypt the entry.
 	if _, err := cryptorand.Read(buf[8:]); err != nil {
 		return y.Wrapf(err, "Error while creating base IV, while creating logfile")
 	}
+	// Initialize base IV.
 	lf.baseIV = buf[8:]
-	if _, err = lf.fd.Write(buf); err != nil {
-		return err
-	}
-	return nil
+	_, err = lf.fd.Write(buf)
+	return err
 }
 
 func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
@@ -874,7 +908,7 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 		return nil, errFile(err, lf.path, "Create value log file")
 	}
 
-	if err = lf.bootstrapLogfile(); err != nil {
+	if err = lf.bootstrap(); err != nil {
 		return nil, err
 	}
 
@@ -933,7 +967,7 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 		if lf.fid != vlog.maxFid {
 			return errDeleteVlogFile
 		}
-		return lf.bootstrapLogfile()
+		return lf.bootstrap()
 	}
 
 	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
@@ -1346,49 +1380,6 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, *logF
 	return buf, lf, err
 }
 
-// vlogEntry will consist of header and key value buf.
-type vlogEntry struct {
-	head *header
-	kv   []byte
-}
-
-// encodeToEntry encodes to txn entry.
-func (ve *vlogEntry) encodeToEntry() (e Entry) {
-	e.meta = ve.head.meta
-	e.UserMeta = ve.head.userMeta
-	e.Key = ve.kv[:ve.head.klen]
-	e.Value = ve.kv[ve.head.klen : ve.head.klen+ve.head.vlen]
-	return
-}
-
-func (vlog *valueLog) readValPtr(vp valuePointer, s *y.Slice) (*vlogEntry, func(), error) {
-	lf, err := vlog.getFileRLocked(vp.Fid)
-	if err != nil {
-		return nil, nil, err
-	}
-	buf, err := lf.read(vp, s)
-	if err != nil {
-		return nil, lf.lock.RUnlock, err
-	}
-	var h header
-	headerLen := h.Decode(buf)
-	kv := buf[headerLen:]
-	if lf.encryptionEnabled() {
-		kv, err = y.XORBlock(kv, lf.dataKey.Data, lf.generateIVFromOffset(vp.Offset))
-		if err != nil {
-			return nil, lf.lock.RUnlock, err
-		}
-	}
-	ve := &vlogEntry{head: &h, kv: kv}
-	if vlog.opt.ValueLogLoadingMode == options.MemoryMap {
-		return ve, lf.lock.RUnlock, err
-	}
-	// If we are using File I/O we unlock the file immediately
-	// and return an empty function as callback.
-	lf.lock.RUnlock()
-	return ve, nil, err
-}
-
 func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFile) {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
@@ -1563,23 +1554,11 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 				runCallback(vlog.getUnlockCallback(lf))
 				return errStop
 			}
-			var h header
-			hlen := h.Decode(buf)
-			var kv []byte
-			kv = buf[hlen:]
-			if lf.encryptionEnabled() {
-				if kv, err = lf.decryptKV(kv, vp.Offset); err != nil {
-					runCallback(vlog.getUnlockCallback(lf))
-					return errStop
-				}
+			ne, err := lf.decodeEntry(buf, vp.Offset)
+			if err != nil {
+				runCallback(vlog.getUnlockCallback(lf))
+				return errStop
 			}
-			ne := new(Entry)
-			ne.meta = h.meta
-			ne.UserMeta = h.userMeta
-			ne.ExpiresAt = h.expiresAt
-			ne.offset = vp.Offset
-			ne.Key = kv[:h.klen]
-			ne.Value = kv[h.klen : h.klen+h.vlen]
 			ne.print("Latest Entry Header in LSM")
 			e.print("Latest Entry in Log")
 			runCallback(vlog.getUnlockCallback(lf))

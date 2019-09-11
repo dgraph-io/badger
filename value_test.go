@@ -67,24 +67,29 @@ func TestValueBasic(t *testing.T) {
 	t.Logf("Pointer written: %+v %+v\n", b.Ptrs[0], b.Ptrs[1])
 
 	s := new(y.Slice)
-	ve, cb1, err1 := log.readValPtr(b.Ptrs[0], s)
-	ve2, cb2, err2 := log.readValPtr(b.Ptrs[1], s)
+	buf1, lf1, err1 := log.readValueBytes(b.Ptrs[0], s)
+	buf2, lf2, err2 := log.readValueBytes(b.Ptrs[1], s)
 	require.NoError(t, err1)
 	require.NoError(t, err2)
-	defer runCallback(cb1)
-	defer runCallback(cb2)
-
-	readEntries := []Entry{ve.encodeToEntry(), ve2.encodeToEntry()}
+	defer runCallback(log.getUnlockCallback(lf1))
+	defer runCallback(log.getUnlockCallback(lf2))
+	e1, err = lf1.decodeEntry(buf1, b.Ptrs[0].Offset)
+	require.NoError(t, err)
+	e2, err = lf1.decodeEntry(buf2, b.Ptrs[1].Offset)
+	require.NoError(t, err)
+	readEntries := []Entry{*e1, *e2}
 	require.EqualValues(t, []Entry{
 		{
-			Key:   []byte("samplekey"),
-			Value: []byte(val1),
-			meta:  bitValuePointer,
+			Key:    []byte("samplekey"),
+			Value:  []byte(val1),
+			meta:   bitValuePointer,
+			offset: b.Ptrs[0].Offset,
 		},
 		{
-			Key:   []byte("samplekeyb"),
-			Value: []byte(val2),
-			meta:  bitValuePointer,
+			Key:    []byte("samplekeyb"),
+			Value:  []byte(val2),
+			meta:   bitValuePointer,
+			offset: b.Ptrs[1].Offset,
 		},
 	}, readEntries)
 
@@ -914,19 +919,20 @@ func BenchmarkReadWrite(b *testing.B) {
 						}
 						idx := rand.Intn(ln)
 						s := new(y.Slice)
-						ve, cb, err := vl.readValPtr(ptrs[idx], s)
+						buf, lf, err := vl.readValueBytes(ptrs[idx], s)
 						if err != nil {
 							b.Fatalf("Benchmark Read: %v", err)
 						}
 
-						e := ve.encodeToEntry()
+						e, err := lf.decodeEntry(buf, ptrs[idx].Offset)
+						require.NoError(b, err)
 						if len(e.Key) != 16 {
 							b.Fatalf("Key is invalid")
 						}
 						if len(e.Value) != vsz {
 							b.Fatalf("Value is invalid")
 						}
-						cb()
+						runCallback(db.vlog.getUnlockCallback(lf))
 					}
 				}
 			})

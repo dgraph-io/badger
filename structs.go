@@ -1,14 +1,10 @@
 package badger
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
-	"hash/crc32"
 	"time"
 	"unsafe"
-
-	"github.com/dgraph-io/badger/y"
 )
 
 type valuePointer struct {
@@ -140,45 +136,6 @@ func (e *Entry) estimateSize(threshold int) int {
 		return len(e.Key) + len(e.Value) + 2 // Meta, UserMeta
 	}
 	return len(e.Key) + 12 + 2 // 12 for ValuePointer, 2 for metas.
-}
-
-// Encodes e to buf. Returns number of bytes written.
-// The encoded entry looks like
-// +--------+-----+-------+----------+
-// | Header | Key | Value | Checksum |
-// +--------+-----+-------+----------+
-func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
-	h := header{
-		klen:      uint32(len(e.Key)),
-		vlen:      uint32(len(e.Value)),
-		expiresAt: e.ExpiresAt,
-		meta:      e.meta,
-		userMeta:  e.UserMeta,
-	}
-
-	var headerEnc [maxHeaderSize]byte
-	sz := h.Encode(headerEnc[:])
-	buf.Write(headerEnc[:sz])
-	hash := crc32.New(y.CastagnoliCrcTable)
-	if _, err := hash.Write(headerEnc[:sz]); err != nil {
-		return 0, err
-	}
-
-	buf.Write(e.Key)
-	if _, err := hash.Write(e.Key); err != nil {
-		return 0, err
-	}
-
-	buf.Write(e.Value)
-	if _, err := hash.Write(e.Value); err != nil {
-		return 0, err
-	}
-
-	var crcBuf [crc32.Size]byte
-	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
-	buf.Write(crcBuf[:])
-
-	return len(headerEnc[:sz]) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
 func (e Entry) print(prefix string) {

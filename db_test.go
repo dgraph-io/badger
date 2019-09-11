@@ -1086,7 +1086,7 @@ func TestExpiryImproperDBClose(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// Simulate a  by not closing db0, but releasing the locks.
+		// Simulate a crash  by not closing db0, but releasing the locks.
 		if db0.dirLockGuard != nil {
 			require.NoError(t, db0.dirLockGuard.release())
 		}
