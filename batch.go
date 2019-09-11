@@ -30,12 +30,15 @@ type WriteBatch struct {
 	throttle *y.Throttle
 	err      error
 	commitTs uint64
+	// readTs will be 0 for all transactions in non managed mode. will
+	// be explicitly set in managed mode.
+	readTs uint64
 }
 
 // NewWriteBatch creates a new WriteBatch. This provides a way to conveniently do a lot of writes,
 // batching them up as tightly as possible in a single transaction and using callbacks to avoid
 // waiting for them to commit, thus achieving good performance. This API hides away the logic of
-// creating and committing transactions. Due to the nature of SSI guaratees provided by Badger,
+// creating and committing transactions. Due to the nature of SSI guarantees provided by Badger,
 // blind writes can never encounter transaction conflicts (ErrConflict).
 func (db *DB) NewWriteBatch() *WriteBatch {
 	if db.opt.managedTxns {
@@ -143,7 +146,7 @@ func (wb *WriteBatch) commit() error {
 	}
 	wb.txn.CommitWith(wb.callback)
 	wb.txn = wb.db.newTransaction(true, true)
-	wb.txn.readTs = 0 // We're not reading anything.
+	wb.txn.readTs = wb.readTs
 	wb.txn.commitTs = wb.commitTs
 	return wb.err
 }

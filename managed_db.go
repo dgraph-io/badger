@@ -40,16 +40,19 @@ func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
 	return txn
 }
 
-// NewWriteBatchAt is similar to NewWriteBatch but it allows user to set the commit timestamp.
+// NewWriteBatchAt is similar to NewWriteBatch but it allows user to set the read and commit
+// timestamp for all transactions in WriteBatch.
 // NewWriteBatchAt is supposed to be used only in the managed mode.
-func (db *DB) NewWriteBatchAt(commitTs uint64) *WriteBatch {
+func (db *DB) NewWriteBatchAt(readTs, commitTs uint64) *WriteBatch {
 	if !db.opt.managedTxns {
 		panic("cannot use NewWriteBatchAt with managedDB=false. Use NewWriteBatch instead")
 	}
 
 	wb := db.newWriteBatch()
 	wb.commitTs = commitTs
+	wb.readTs = readTs
 	wb.txn.commitTs = commitTs
+	wb.txn.readTs = readTs
 	return wb
 }
 
