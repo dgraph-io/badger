@@ -1302,14 +1302,48 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 			"Invalid value pointer offset: %d greater than current offset: %d",
 			vp.Offset, vlog.woffset())
 	}
-	// read the value entry
-	ve, cb, err := vlog.readValPtr(vp, s)
+	buf, lf, err := vlog.readValueBytes(vp, s)
 	if err != nil {
-		return nil, cb, err
+		return nil, vlog.getUnlockCallback(lf), err
 	}
-	// parse the value and return it.
-	val := ve.kv[ve.head.klen : ve.head.klen+ve.head.vlen]
-	return val, cb, nil
+	var h header
+	headerLen := h.Decode(buf)
+	kv := buf[headerLen:]
+	if lf.encryptionEnabled() {
+		kv, err = lf.decryptKV(kv, vp.Offset)
+		if err != nil {
+			return nil, vlog.getUnlockCallback(lf), err
+		}
+	}
+	return kv[h.klen : h.klen+h.vlen], vlog.getUnlockCallback(lf), nil
+}
+
+// getUnlockCallback will returns a function which unlock the logfile if the logfile is mmaped.
+// otherwise, it unlock the logfile and return nil.
+func (vlog *valueLog) getUnlockCallback(lf *logFile) func() {
+	if lf == nil {
+		return nil
+	}
+	if vlog.opt.ValueLogLoadingMode == options.MemoryMap {
+		return lf.lock.RUnlock
+	}
+	lf.lock.RUnlock()
+	return nil
+}
+
+// readValueBytes return vlog entry slice and read locked log file. Caller should take care of
+// logFile unlocking.
+func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, *logFile, error) {
+	lf, err := vlog.getFileRLocked(vp.Fid)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	buf, err := lf.read(vp, s)
+	if vlog.opt.ValueLogLoadingMode == options.MemoryMap {
+		return buf, lf, err
+	}
+	return buf, lf, err
 }
 
 // vlogEntry will consist of header and key value buf.
@@ -1524,16 +1558,31 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 
 		} else {
 			vlog.elog.Printf("Reason=%+v\n", r)
-			ve, cb, err := vlog.readValPtr(vp, s)
+			buf, lf, err := vlog.readValueBytes(vp, s)
 			if err != nil {
-				runCallback(cb)
+				runCallback(vlog.getUnlockCallback(lf))
 				return errStop
 			}
-			ne := ve.encodeToEntry()
+			var h header
+			hlen := h.Decode(buf)
+			var kv []byte
+			kv = buf[hlen:]
+			if lf.encryptionEnabled() {
+				if kv, err = lf.decryptKV(kv, vp.Offset); err != nil {
+					runCallback(vlog.getUnlockCallback(lf))
+					return errStop
+				}
+			}
+			ne := new(Entry)
+			ne.meta = h.meta
+			ne.UserMeta = h.userMeta
+			ne.ExpiresAt = h.expiresAt
 			ne.offset = vp.Offset
+			ne.Key = kv[:h.klen]
+			ne.Value = kv[h.klen : h.klen+h.vlen]
 			ne.print("Latest Entry Header in LSM")
 			e.print("Latest Entry in Log")
-			runCallback(cb)
+			runCallback(vlog.getUnlockCallback(lf))
 			return errors.Errorf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.",
 				vp, vs.Meta)
 		}
