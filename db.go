@@ -492,6 +492,10 @@ func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 
 	tables := make([]*skl.Skiplist, len(db.imm)+1)
 
+	if db.mt == nil {
+		return nil, nil
+	}
+
 	// Get mutable memtable.
 	tables[0] = db.mt
 	tables[0].IncrRef()
@@ -527,6 +531,9 @@ func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 // to ensure that we pick the highest version of the movekey present.
 func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := db.getMemTables() // Lock should be released.
+	if len(tables) == 0 {
+		return y.ValueStruct{}, errors.New("No tables found. DB may be closed")
+	}
 	defer decr()
 
 	var maxVs *y.ValueStruct
