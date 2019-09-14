@@ -270,13 +270,18 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}()
 
+	elog := noEventLog
+	if opt.EventLogging {
+		elog = trace.NewEventLog("Badger", "DB")
+	}
+
 	db = &DB{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
 		opt:           opt,
 		manifest:      manifestFile,
-		elog:          trace.NewEventLog("Badger", "DB"),
+		elog:          elog,
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
 		orc:           newOracle(opt),
