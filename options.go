@@ -414,8 +414,8 @@ func (opt Options) WithLogRotatesToFlush(val int32) Options {
 //
 // When KeepL0InMemory is set to true we will keep all Level 0 tables in memory. This leads to
 // better performance in writes as well as compactions. In case of DB crash, the value log replay
-// will take longer since memtables and all level 0 tables will have to be recreated. This option
-// also sets CompactL0OnClose to true.
+// will take longer to complete since memtables and all level 0 tables will have to be recreated.
+// This option also sets CompactL0OnClose option to true.
 //
 // The default value of KeepL0InMemory is true.
 func (opt Options) WithKeepL0InMemory(val bool) Options {
