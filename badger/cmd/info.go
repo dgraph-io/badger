@@ -70,7 +70,7 @@ func init() {
 			" This option should be used along with --show-key option")
 	infoCmd.Flags().BoolVar(&opt.readOnly, "read-only", true, "If set to true, DB will be opened "+
 		"in read only mode. If DB has not been closed properly, this option can be set to false "+
-		"open DB. This might result in truncation of corrupt data.")
+		"to open DB. This might result in truncation of corrupt data.")
 }
 
 var infoCmd = &cobra.Command{
