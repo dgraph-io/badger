@@ -866,7 +866,7 @@ func (lf *logFile) bootstrap() error {
 	if _, err = lf.fd.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	// genereate data key for the log file.
+	// generate data key for the log file.
 	var dk *pb.DataKey
 	if dk, err = lf.registry.latestDataKey(); err != nil {
 		return err
@@ -875,7 +875,7 @@ func (lf *logFile) bootstrap() error {
 	// We'll always preserve vlogHeaderSize for key id and baseIV.
 	buf := make([]byte, vlogHeaderSize)
 	// write key id to the buf.
-	// key id will be zero if the db is in plain text.
+	// key id will be zero if the logfile is in plain text.
 	binary.BigEndian.PutUint64(buf[:8], lf.keyID())
 	// generate base IV. It'll be used with offset of the vptr to encrypt the entry.
 	if _, err := cryptorand.Read(buf[8:]); err != nil {
@@ -1339,8 +1339,11 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 			vp.Offset, vlog.woffset())
 	}
 	buf, lf, err := vlog.readValueBytes(vp, s)
+	// log file is locked so, decide whether to lock immediately or let the caller to
+	// unlock it, after caller uses it.
+	cb := vlog.getUnlockCallback(lf)
 	if err != nil {
-		return nil, vlog.getUnlockCallback(lf), err
+		return nil, cb, err
 	}
 	var h header
 	headerLen := h.Decode(buf)
@@ -1348,10 +1351,10 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	if lf.encryptionEnabled() {
 		kv, err = lf.decryptKV(kv, vp.Offset)
 		if err != nil {
-			return nil, vlog.getUnlockCallback(lf), err
+			return nil, cb, err
 		}
 	}
-	return kv[h.klen : h.klen+h.vlen], vlog.getUnlockCallback(lf), nil
+	return kv[h.klen : h.klen+h.vlen], cb, nil
 }
 
 // getUnlockCallback will returns a function which unlock the logfile if the logfile is mmaped.
@@ -1374,11 +1377,7 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, *logF
 	if err != nil {
 		return nil, nil, err
 	}
-
 	buf, err := lf.read(vp, s)
-	if vlog.opt.ValueLogLoadingMode == options.MemoryMap {
-		return buf, lf, err
-	}
 	return buf, lf, err
 }
 
@@ -1552,18 +1551,21 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 		} else {
 			vlog.elog.Printf("Reason=%+v\n", r)
 			buf, lf, err := vlog.readValueBytes(vp, s)
+			// we need to decide, whether to unlock the lock file immediately based on the
+			// loading mode. getUnlockCallback will take care of it.
+			cb := vlog.getUnlockCallback(lf)
 			if err != nil {
-				runCallback(vlog.getUnlockCallback(lf))
+				runCallback(cb)
 				return errStop
 			}
 			ne, err := lf.decodeEntry(buf, vp.Offset)
 			if err != nil {
-				runCallback(vlog.getUnlockCallback(lf))
+				runCallback(cb)
 				return errStop
 			}
 			ne.print("Latest Entry Header in LSM")
 			e.print("Latest Entry in Log")
-			runCallback(vlog.getUnlockCallback(lf))
+			runCallback(cb)
 			return errors.Errorf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.",
 				vp, vs.Meta)
 		}

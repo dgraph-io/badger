@@ -1025,7 +1025,7 @@ func TestSafeEntry(t *testing.T) {
 	s.lf = &logFile{}
 	e := NewEntry([]byte("foo"), []byte("bar"))
 	buf := bytes.NewBuffer(nil)
-	_, err := encodeEntry(e, buf)
+	_, err := s.lf.encodeEntry(e, buf, 0)
 	require.NoError(t, err)
 
 	ne, err := s.Entry(buf)

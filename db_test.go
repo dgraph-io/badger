@@ -1112,7 +1112,6 @@ func TestExpiryImproperDBClose(t *testing.T) {
 		require.NoError(t, err)
 		defer os.RemoveAll(dir)
 		opt := getTestOptions(dir)
-		opt.ValueLogLoadingMode = options.FileIO
 		testReplay(opt)
 	})
 
@@ -1121,7 +1120,6 @@ func TestExpiryImproperDBClose(t *testing.T) {
 		require.NoError(t, err)
 		defer os.RemoveAll(dir)
 		opt := getTestOptions(dir)
-		opt.ValueLogLoadingMode = options.FileIO
 		key := make([]byte, 32)
 		_, err = rand.Read(key)
 		require.NoError(t, err)
