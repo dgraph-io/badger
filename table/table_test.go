@@ -59,9 +59,6 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	opts := Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	b := NewTableBuilder(opts)
 	defer b.Close()
-	ts := time.Now().UTC().UnixNano()
-	fmt.Println("ts", ts)
-	rand.Seed(ts)
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
@@ -855,4 +852,9 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 	tbl, err := OpenTable(f, opts)
 	require.NoError(b, err, "unable to open table")
 	return tbl
+}
+
+func TestMain(m *testing.M) {
+	rand.Seed(time.Now().UTC().UnixNano())
+	os.Exit(m.Run())
 }
