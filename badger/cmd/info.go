@@ -47,6 +47,7 @@ type flagOptions struct {
 	keyHistory    bool
 	showInternal  bool
 	readOnly      bool
+	truncate      bool
 }
 
 var (
@@ -70,7 +71,9 @@ func init() {
 			" This option should be used along with --show-key option")
 	infoCmd.Flags().BoolVar(&opt.readOnly, "read-only", true, "If set to true, DB will be opened "+
 		"in read only mode. If DB has not been closed properly, this option can be set to false "+
-		"to open DB. This might result in truncation of corrupt data.")
+		"to open DB.")
+	infoCmd.Flags().BoolVar(&opt.truncate, "truncate", false, "If set to true, it allows "+
+		"truncation of value log files if they have corrupt data.")
 }
 
 var infoCmd = &cobra.Command{
@@ -94,6 +97,7 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 	db, err := badger.Open(badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(opt.readOnly).
+		WithTruncate(opt.truncate).
 		WithTableLoadingMode(options.MemoryMap))
 	if err != nil {
 		return errors.Wrap(err, "failed to open database")
