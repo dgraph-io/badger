@@ -59,7 +59,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	opts := Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	b := NewTableBuilder(opts)
 	defer b.Close()
-	rand.Seed(time.Now().UnixNano())
+	rand.Seed(time.Now().UTC().UnixNano())
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
