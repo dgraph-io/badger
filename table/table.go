@@ -215,13 +215,14 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 
 // OpenInMemoryTable is similar to OpenTable but it opens a new table from the provided data.
 // OpenInMemoryTable is used for L0 tables.
-func OpenInMemoryTable(data []byte) (*Table, error) {
+func OpenInMemoryTable(data []byte, id uint64) (*Table, error) {
 	t := &Table{
 		ref:        1, // Caller is given one reference.
 		opt:        &Options{LoadingMode: options.LoadToRAM},
 		mmap:       data,
 		tableSize:  len(data),
 		IsInmemory: true,
+		id:         id, // It is important that each table gets a unique ID.
 	}
 
 	if err := t.initBiggestAndSmallest(); err != nil {
