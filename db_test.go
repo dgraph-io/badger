@@ -116,7 +116,9 @@ func txnDelete(t *testing.T, kv *DB, key []byte) {
 func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB)) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 	if opts == nil {
 		opts = new(Options)
 		*opts = getTestOptions(dir)
