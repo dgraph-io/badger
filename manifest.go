@@ -366,9 +366,6 @@ func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error
 		length := y.BytesToU32(lenCrcBuf[0:4])
 		var buf = make([]byte, length)
 		if _, err := io.ReadFull(&r, buf); err != nil {
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				break
-			}
 			return Manifest{}, 0, err
 		}
 		if crc32.Checksum(buf, y.CastagnoliCrcTable) != y.BytesToU32(lenCrcBuf[4:8]) {
