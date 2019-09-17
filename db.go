@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -200,6 +199,8 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, errors.Errorf("Valuethreshold greater than max batch size of %d. Either "+
 			"reduce opt.ValueThreshold or increase opt.MaxTableSize.", opt.maxBatchSize)
 	}
+	// Compact L0 on close if either it is set or if KeepL0InMemory is set.
+	opt.CompactL0OnClose = opt.CompactL0OnClose || opt.KeepL0InMemory
 
 	if opt.ReadOnly {
 		// Can't truncate if the DB is read only.
@@ -320,7 +321,7 @@ func Open(opt Options) (db *DB, err error) {
 	go db.doWrites(replayCloser)
 
 	if err = db.vlog.open(db, vptr, db.replayFunction()); err != nil {
-		return db, err
+		return db, y.Wrapf(err, "During db.vlog.open")
 	}
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 
@@ -846,8 +847,8 @@ func arenaSize(opt Options) int64 {
 	return opt.MaxTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
 
-// WriteLevel0Table flushes memtable.
-func writeLevel0Table(ft flushTask, f io.Writer, bopts table.Options) error {
+// buildL0Table builds a new table from the memtable.
+func buildL0Table(ft flushTask, bopts table.Options) []byte {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder(bopts)
@@ -858,8 +859,7 @@ func writeLevel0Table(ft flushTask, f io.Writer, bopts table.Options) error {
 		}
 		b.Add(iter.Key(), iter.Value())
 	}
-	_, err := f.Write(b.Finish())
-	return err
+	return b.Finish()
 }
 
 type flushTask struct {
@@ -886,36 +886,51 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	headTs := y.KeyWithTs(head, db.orc.nextTs())
 	ft.mt.Put(headTs, y.ValueStruct{Value: val})
 
+	bopts := table.Options{
+		BlockSize:          db.opt.BlockSize,
+		BloomFalsePositive: db.opt.BloomFalsePositive,
+	}
+	tableData := buildL0Table(ft, bopts)
+
 	fileID := db.lc.reserveFileID()
+	if db.opt.KeepL0InMemory {
+		tbl, err := table.OpenInMemoryTable(tableData, fileID)
+		if err != nil {
+			return errors.Wrapf(err, "failed to open table in memory")
+		}
+		return db.lc.addLevel0Table(tbl)
+	}
+
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
 	if err != nil {
 		return y.Wrap(err)
 	}
 
 	// Don't block just to sync the directory entry.
-	dirSyncCh := make(chan error)
+	dirSyncCh := make(chan error, 1)
 	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
 
-	topts := BuildTableOptions(db.opt)
-	err = writeLevel0Table(ft, fd, topts)
-	dirSyncErr := <-dirSyncCh
-
-	if err != nil {
+	if _, err = fd.Write(tableData); err != nil {
 		db.elog.Errorf("ERROR while writing to level 0: %v", err)
 		return err
 	}
-	if dirSyncErr != nil {
+
+	if dirSyncErr := <-dirSyncCh; dirSyncErr != nil {
 		// Do dir sync as best effort. No need to return due to an error there.
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
 
-	tbl, err := table.OpenTable(fd, topts)
+	opts := table.Options{
+		LoadingMode: db.opt.TableLoadingMode,
+		ChkMode:     db.opt.ChecksumVerificationMode,
+	}
+	tbl, err := table.OpenTable(fd, opts)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err
 	}
 	// We own a ref on tbl.
-	err = db.lc.addLevel0Table(tbl) // This will incrRef (if we don't error, sure)
+	err = db.lc.addLevel0Table(tbl) // This will incrRef
 	_ = tbl.DecrRef()               // Releases our ref.
 	return err
 }
@@ -1023,7 +1038,7 @@ func (db *DB) updateSize(lc *y.Closer) {
 // RunValueLogGC triggers a value log garbage collection.
 //
 // It picks value log files to perform GC based on statistics that are collected
-// duing compactions.  If no such statistics are available, then log files are
+// during compactions.  If no such statistics are available, then log files are
 // picked in random order. The process stops as soon as the first log file is
 // encountered which does not result in garbage collection.
 //

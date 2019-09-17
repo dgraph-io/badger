@@ -77,7 +77,8 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 		y.AssertTrue(len(kv) == 2)
 		b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0})
 	}
-	f.Write(b.Finish())
+	_, err = f.Write(b.Finish())
+	require.NoError(t, err, "writing to file failed")
 	f.Close()
 	f, _ = y.OpenSyncedFile(filename, true)
 	return f
@@ -666,8 +667,9 @@ func TestTableBigValues(t *testing.T) {
 		builder.Add(key, vs)
 	}
 
-	f.Write(builder.Finish())
-	opts = Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+	_, err = f.Write(builder.Finish())
+	require.NoError(t, err, "unable to write to file")
+	opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(t, err, "unable to open table")
 	defer tbl.DecrRef()
@@ -761,8 +763,9 @@ func BenchmarkReadMerged(b *testing.B) {
 			v := fmt.Sprintf("%d", id)
 			builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0})
 		}
-		f.Write(builder.Finish())
-		opts = Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+		_, err = f.Write(builder.Finish())
+		require.NoError(b, err, "unable to write to file")
+		opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 		tbl, err := OpenTable(f, opts)
 		y.Check(err)
 		tables = append(tables, tbl)
@@ -847,8 +850,9 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 		builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)})
 	}
 
-	f.Write(builder.Finish())
-	opts = Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.NoVerification}
+	_, err = f.Write(builder.Finish())
+	require.NoError(b, err, "unable to write to file")
+	opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.NoVerification}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(b, err, "unable to open table")
 	return tbl
