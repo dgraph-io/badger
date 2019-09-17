@@ -669,7 +669,6 @@ func TestTableBigValues(t *testing.T) {
 
 	_, err = f.Write(builder.Finish())
 	require.NoError(t, err, "unable to write to file")
-	opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(t, err, "unable to open table")
 	defer tbl.DecrRef()
