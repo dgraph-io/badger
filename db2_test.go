@@ -542,3 +542,54 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	require.NoError(t, err)
 	return tab
 }
+
+func TestReadSameVlog(t *testing.T) {
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%d%10d", i, i))
+	}
+	testReadingSameKey := func(t *testing.T, opt Options) {
+		// Forcing to read all values from vlog.
+		opt.ValueThreshold = 1
+		db, err := Open(opt)
+		require.NoError(t, err)
+		for i := 0; i < 50; i++ {
+			err = db.Update(func(txn *Txn) error {
+				return txn.Set(key(i), key(i))
+			})
+		}
+		// reading it again several times
+		for i := 0; i < 50; i++ {
+			for j := 0; j < 10; j++ {
+				err = db.View(func(txn *Txn) error {
+					item, err := txn.Get(key(i))
+					require.NoError(t, err)
+					require.Equal(t, key(i), getItemValue(t, item))
+					return nil
+				})
+			}
+		}
+	}
+
+	t.Run("Test Read Again Plain Text", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer os.RemoveAll(dir)
+
+		opt := getTestOptions(dir)
+		testReadingSameKey(t, opt)
+	})
+
+	t.Run("Test Read Again Encryption", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer os.RemoveAll(dir)
+		opt := getTestOptions(dir)
+		// Generate encryption key.
+		eKey := make([]byte, 32)
+		_, err = rand.Read(eKey)
+		require.NoError(t, err)
+		opt.EncryptionKey = eKey
+		// Test reading with encryption enabled.
+		testReadingSameKey(t, opt)
+	})
+}

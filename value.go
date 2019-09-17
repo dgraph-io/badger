@@ -124,29 +124,24 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 			return 0, y.Wrapf(err, "Error while encoding entry for vlog.")
 		}
 		// write encrypted buf.
-		_, err = buf.Write(eBuf)
-		y.Check(err)
+		y.Check2(buf.Write(eBuf))
 		// write the hash.
-		_, err = hash.Write(eBuf)
-		y.Check(err)
+		y.Check2(hash.Write(eBuf))
 	} else {
 		// Encryption is disabled so writing directly to the buffer.
 		// write key.
-		_, err := buf.Write(e.Key)
-		y.Check(err)
+		y.Check2(buf.Write(e.Key))
 		// write key hash.
-		_, err = hash.Write(e.Key)
-		y.Check(err)
+		y.Check2(hash.Write(e.Key))
 		// write value.
-		buf.Write(e.Value)
+		y.Check2(buf.Write(e.Value))
 		// write value hash.
-		_, err = hash.Write(e.Value)
-		y.Check(err)
+		y.Check2(hash.Write(e.Value))
 	}
 	// write crc32 hash.
 	var crcBuf [crc32.Size]byte
 	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
-	buf.Write(crcBuf[:])
+	y.Check2(buf.Write(crcBuf[:]))
 	// return encoded length.
 	return len(headerEnc[:sz]) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
@@ -157,20 +152,21 @@ func (lf *logFile) decodeEntry(buf []byte, offset uint32) (*Entry, error) {
 	kv := buf[hlen:]
 	if lf.encryptionEnabled() {
 		var err error
-		// No need to worry about mmap. because, XORBlock allocate a byte array to do the
+		// No need to worry about mmap. because, XORBlock allocates a byte array to do the
 		// xor. So, the given slice is not being mutated.
 		if kv, err = lf.decryptKV(kv, offset); err != nil {
 			return nil, err
 		}
 	}
-	ne := new(Entry)
-	ne.meta = h.meta
-	ne.UserMeta = h.userMeta
-	ne.ExpiresAt = h.expiresAt
-	ne.offset = offset
-	ne.Key = kv[:h.klen]
-	ne.Value = kv[h.klen : h.klen+h.vlen]
-	return ne, nil
+	e := &Entry{
+		meta:      h.meta,
+		UserMeta:  h.userMeta,
+		ExpiresAt: h.expiresAt,
+		offset:    offset,
+		Key:       kv[:h.klen],
+		Value:     kv[h.klen : h.klen+h.vlen],
+	}
+	return e, nil
 }
 
 func (lf *logFile) decryptKV(buf []byte, offset uint32) ([]byte, error) {
@@ -829,7 +825,7 @@ func (lf *logFile) open(path string, flags uint32) error {
 	}
 	if fi.Size() < vlogHeaderSize {
 		// Every vlog file should have at least vlogHeaderSize. If it is less than vlogHeaderSize
-		// then it must have corrupted. But no need to handle here. log replayer will truncate
+		// then it must been corrupted. But no need to handle here. log replayer will truncate
 		// and bootstrap the logfile. So ignoring here.
 		return nil
 	}
