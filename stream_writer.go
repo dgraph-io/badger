@@ -331,6 +331,7 @@ func (w *sortedWriter) createTable(data []byte) error {
 	if _, err := fd.Write(data); err != nil {
 		return err
 	}
+
 	opts := table.Options{
 		LoadingMode: w.db.opt.TableLoadingMode,
 		ChkMode:     w.db.opt.ChecksumVerificationMode,
