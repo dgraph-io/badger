@@ -62,8 +62,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-	fmt.Println("creating file", filename)
-	f, err := y.OpenSyncedFile(filename, true)
+	f, err := y.CreateSyncedFile(filename, true)
 	if t != nil {
 		require.NoError(t, err)
 	} else {
