@@ -101,15 +101,13 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 		userMeta:  e.UserMeta,
 	}
 
-	// encode header
+	// encode header.
 	var headerEnc [maxHeaderSize]byte
 	sz := h.Encode(headerEnc[:])
-	buf.Write(headerEnc[:sz])
+	y.Check2(buf.Write(headerEnc[:sz]))
+	// write hash.
 	hash := crc32.New(y.CastagnoliCrcTable)
-	if _, err := hash.Write(headerEnc[:sz]); err != nil {
-		return 0, err
-	}
-
+	y.Check2(hash.Write(headerEnc[:sz]))
 	// we'll encrypt only key and value.
 	if lf.encryptionEnabled() {
 		// TODO: no need to allocate the bytes. we can calculate the encrypted buf one by one
