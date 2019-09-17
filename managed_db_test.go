@@ -144,13 +144,15 @@ func TestDropAll(t *testing.T) {
 func TestDropAllTwice(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 5 << 20
 	db, err := Open(opts)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, db.Close())
-		require.NoError(t, os.RemoveAll(dir))
 	}()
 
 	N := uint64(10000)
@@ -184,7 +186,6 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, db.Close())
-		require.NoError(t, os.RemoveAll(dir))
 	}()
 
 	N := uint64(10000)
@@ -237,7 +238,9 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 	}()
 	// Do not cancel txn.
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		time.Sleep(2 * time.Second)
 		require.NoError(t, db.DropAll())
 	}()
@@ -437,7 +440,6 @@ func TestDropPrefixWithPendingTxn(t *testing.T) {
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, db.Close())
-		require.NoError(t, os.RemoveAll(dir))
 	}()
 
 	N := uint64(10000)
