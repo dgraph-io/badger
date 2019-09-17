@@ -1000,10 +1000,10 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 			var count uint64
 			if withKeysCount {
 				it := t.NewIterator(false)
-				defer it.Close()
 				for it.Rewind(); it.Valid(); it.Next() {
 					count++
 				}
+				it.Close()
 			}
 
 			info := TableInfo{
