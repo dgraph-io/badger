@@ -90,6 +90,7 @@ func (t *Table) DecrRef() error {
 			if err := y.Munmap(t.mmap); err != nil {
 				return err
 			}
+			t.mmap = nil
 		}
 		if err := t.fd.Truncate(0); err != nil {
 			// This is very important to let the FS know that the file is deleted.
@@ -196,6 +197,7 @@ func (t *Table) Close() error {
 		if err := y.Munmap(t.mmap); err != nil {
 			return err
 		}
+		t.mmap = nil
 	}
 
 	return t.fd.Close()

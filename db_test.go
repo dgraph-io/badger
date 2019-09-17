@@ -124,7 +124,9 @@ func txnDelete(t *testing.T, kv *DB, key []byte) {
 func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB)) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 	if opts == nil {
 		opts = new(Options)
 		*opts = getTestOptions(dir)
@@ -134,7 +136,9 @@ func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB))
 	}
 	db, err := Open(*opts)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
 	test(t, db)
 }
 
@@ -329,7 +333,9 @@ func TestTxnTooBig(t *testing.T) {
 func TestForceCompactL0(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 15 << 20
@@ -593,7 +599,9 @@ func TestIterate2Basic(t *testing.T) {
 func TestLoad(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 	n := 10000
 	{
 		kv, err := Open(getTestOptions(dir))
@@ -640,7 +648,6 @@ func TestLoad(t *testing.T) {
 		fileIDs = append(fileIDs, k)
 	}
 	sort.Slice(fileIDs, func(i, j int) bool { return fileIDs[i] < fileIDs[j] })
-	fmt.Printf("FileIDs: %v\n", fileIDs)
 }
 
 func TestIterateDeleted(t *testing.T) {
@@ -764,7 +771,9 @@ func TestIterateParallel(t *testing.T) {
 func TestDeleteWithoutSyncWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 	kv, err := Open(DefaultOptions(dir))
 	if err != nil {
 		t.Error(err)
@@ -877,7 +886,9 @@ func TestIteratorPrefetchSize(t *testing.T) {
 func TestSetIfAbsentAsync(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 	kv, _ := Open(getTestOptions(dir))
 
 	bkey := func(i int) []byte {
@@ -1132,12 +1143,15 @@ var benchmarkData = []struct {
 func TestLargeKeys(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
 
 	db, err := Open(DefaultOptions(dir).WithValueLogFileSize(1024 * 1024 * 1024))
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		require.NoError(t, db.Close())
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 	for i := 0; i < 1000; i++ {
 		tx := db.NewTransaction(true)
 		for _, kv := range benchmarkData {
@@ -1164,7 +1178,9 @@ func TestLargeKeys(t *testing.T) {
 func TestCreateDirs(t *testing.T) {
 	dir, err := ioutil.TempDir("", "parent")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 
 	db, err := Open(DefaultOptions(filepath.Join(dir, "badger")))
 	require.NoError(t, err)
@@ -1177,7 +1193,9 @@ func TestGetSetDeadlock(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	fmt.Println(dir)
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 
 	db, err := Open(DefaultOptions(dir).WithValueLogFileSize(1 << 20))
 	require.NoError(t, err)
@@ -1218,12 +1236,14 @@ func TestGetSetDeadlock(t *testing.T) {
 
 func TestWriteDeadlock(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
-	fmt.Println(dir)
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
 
 	db, err := Open(DefaultOptions(dir).WithValueLogFileSize(10 << 20))
 	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, db.Close())
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 
 	print := func(count *int) {
 		*count++
@@ -1370,7 +1390,9 @@ func TestSequence_Release(t *testing.T) {
 func TestReadOnly(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 	opts := getTestOptions(dir)
 
 	// Create the DB
@@ -1385,6 +1407,7 @@ func TestReadOnly(t *testing.T) {
 	_, err = Open(opts)
 	require.Error(t, err)
 	if err == ErrWindowsNotSupported {
+		require.NoError(t, db.Close())
 		return
 	}
 	require.Contains(t, err.Error(), "Another process is using this Badger database")
@@ -1439,7 +1462,9 @@ func TestReadOnly(t *testing.T) {
 func TestLSMOnly(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 
 	opts := LSMOnlyOptions(dir)
 	dopts := DefaultOptions(dir)
@@ -1556,7 +1581,11 @@ func ExampleOpen() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			log.Fatal(err)
+		}
+	}()
 	db, err := Open(DefaultOptions(dir))
 	if err != nil {
 		log.Fatal(err)
@@ -1611,7 +1640,11 @@ func ExampleTxn_NewIterator() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			log.Fatal(err)
+		}
+	}()
 
 	db, err := Open(DefaultOptions(dir))
 	if err != nil {
@@ -1666,7 +1699,9 @@ func ExampleTxn_NewIterator() {
 func TestSyncForRace(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 
 	db, err := Open(DefaultOptions(dir).WithSyncWrites(false))
 	require.NoError(t, err)
@@ -1716,7 +1751,9 @@ func TestSyncForRace(t *testing.T) {
 func TestNoCrash(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err, "cannot create badger dir")
-	defer os.RemoveAll(dir)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
 
 	ops := getTestOptions(dir)
 	ops.ValueLogMaxEntries = 1
@@ -1815,7 +1852,11 @@ func ExampleDB_Subscribe() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			log.Fatal(err)
+		}
+	}()
 	db, err := Open(DefaultOptions(dir))
 	if err != nil {
 		log.Fatal(err)

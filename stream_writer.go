@@ -365,6 +365,8 @@ func (w *sortedWriter) createTable(data []byte) error {
 	if err := lhandler.replaceTables([]*table.Table{}, []*table.Table{tbl}); err != nil {
 		return err
 	}
+	// Release the ref held by OpenTable.
+	_ = tbl.DecrRef()
 	w.db.opt.Infof("Table created: %d at level: %d for stream: %d. Size: %s\n",
 		fileID, lhandler.level, w.streamId, humanize.Bytes(uint64(tbl.Size())))
 	return nil
