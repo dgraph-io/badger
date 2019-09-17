@@ -787,13 +787,13 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	return nil
 }
 
-func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry, eventLogging bool) error {
+func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	opt := db.opt
 	vlog.opt = opt
 	vlog.dirPath = opt.ValueDir
 	vlog.db = db
 	vlog.elog = noEventLog
-	if eventLogging {
+	if opt.EventLogging {
 		vlog.elog = trace.NewEventLog("Badger", "Valuelog")
 	}
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
