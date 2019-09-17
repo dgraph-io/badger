@@ -823,7 +823,7 @@ func (lf *logFile) open(path string, flags uint32) error {
 	}
 	if fi.Size() < vlogHeaderSize {
 		// Every vlog file should have at least vlogHeaderSize. If it is less than vlogHeaderSize
-		// then it must been corrupted. But no need to handle here. log replayer will truncate
+		// then it must have been corrupted. But no need to handle here. log replayer will truncate
 		// and bootstrap the logfile. So ignoring here.
 		return nil
 	}
