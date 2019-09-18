@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-package badger
+package y
 
 import "golang.org/x/net/trace"
 
 var (
-	noEventLog trace.EventLog = nilEventLog{}
+	NoEventLog trace.EventLog = nilEventLog{}
 )
 
 type nilEventLog struct{}

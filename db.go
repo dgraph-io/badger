@@ -270,7 +270,7 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}()
 
-	elog := noEventLog
+	elog := y.NoEventLog
 	if opt.EventLogging {
 		elog = trace.NewEventLog("Badger", "DB")
 	}

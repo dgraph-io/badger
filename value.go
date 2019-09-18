@@ -792,7 +792,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	vlog.opt = opt
 	vlog.dirPath = opt.ValueDir
 	vlog.db = db
-	vlog.elog = noEventLog
+	vlog.elog = y.NoEventLog
 	if opt.EventLogging {
 		vlog.elog = trace.NewEventLog("Badger", "Valuelog")
 	}
