@@ -120,7 +120,7 @@ func openOrCreateManifestFile(dir string, readOnly bool) (
 }
 
 func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold int) (
-	ret *manifestFile, result Manifest, err error) {
+	*manifestFile, Manifest, error) {
 
 	path := filepath.Join(dir, ManifestFilename)
 	var flags uint32
@@ -331,7 +331,7 @@ var (
 // Also, returns the last offset after a completely read manifest entry -- the file must be
 // truncated at that point before further appends are made (if there is a partial entry after
 // that).  In normal conditions, truncOffset is the file size.
-func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error) {
+func ReplayManifestFile(fp *os.File) (Manifest, int64, error) {
 	r := countingReader{wrapped: bufio.NewReader(fp)}
 
 	var magicBuf [8]byte
@@ -385,7 +385,7 @@ func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error
 		}
 	}
 
-	return build, offset, err
+	return build, offset, nil
 }
 
 func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {
