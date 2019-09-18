@@ -262,3 +262,115 @@ func (s *MergeIterator) Close() error {
 	}
 	return nil
 }
+
+// FastMergeIterator is a specialized MergeIterator that works better than the merge Iterator for
+// small number of iterators. We found out that if we have less than 18 iterators in merge iterator,
+// the fast merge iterator performs better.
+type FastMergeIterator struct {
+	second  Iterator
+	smaller Iterator
+	bigger  Iterator
+	reverse bool
+}
+
+func (mt *FastMergeIterator) fix() {
+	if !mt.bigger.Valid() {
+		return
+	}
+	var cmp int
+	for mt.smaller.Valid() {
+		cmp = CompareKeys(mt.smaller.Key(), mt.bigger.Key())
+		if cmp == 0 {
+			mt.second.Next()
+			if !mt.second.Valid() {
+				return
+			}
+			continue
+		}
+		if mt.reverse {
+			if cmp < 0 {
+				mt.smaller, mt.bigger = mt.bigger, mt.smaller
+			}
+		} else {
+			if cmp > 0 {
+				mt.smaller, mt.bigger = mt.bigger, mt.smaller
+			}
+		}
+		return
+	}
+	mt.smaller, mt.bigger = mt.bigger, mt.smaller
+}
+
+// Next returns the next element. If it is the same as the current key, ignore it.
+func (mt *FastMergeIterator) Next() {
+	mt.smaller.Next()
+	mt.fix()
+}
+
+// Rewind seeks to first element (or last element for reverse iterator).
+func (mt *FastMergeIterator) Rewind() {
+	mt.smaller.Rewind()
+	mt.bigger.Rewind()
+	mt.fix()
+}
+
+// Seek brings us to element with key >= given key.
+func (mt *FastMergeIterator) Seek(key []byte) {
+	mt.smaller.Seek(key)
+	mt.bigger.Seek(key)
+	mt.fix()
+}
+
+// Valid returns whether the FastMergeIterator is at a valid element.
+func (mt *FastMergeIterator) Valid() bool {
+	return mt.smaller.Valid()
+}
+
+// Key returns the key associated with the current iterator
+func (mt *FastMergeIterator) Key() []byte {
+	return mt.smaller.Key()
+}
+
+// Value returns the value associated with the iterator.
+func (mt *FastMergeIterator) Value() ValueStruct {
+	return mt.smaller.Value()
+}
+
+// Close implements y.Iterator
+func (mt *FastMergeIterator) Close() error {
+	err1 := mt.smaller.Close()
+	err2 := mt.bigger.Close()
+	if err1 != nil {
+		return errors.Wrap(err1, "FastMergeIterator")
+	}
+	return errors.Wrap(err2, "FastMergeIterator")
+}
+
+// NewFastMergeIterator creates a merge iterator
+func NewFastMergeIterator(iters []Iterator, reverse bool) Iterator {
+	if len(iters) == 1 {
+		return iters[0]
+	} else if len(iters) == 2 {
+		return &FastMergeIterator{
+			smaller: iters[0],
+			bigger:  iters[1],
+			second:  iters[1],
+			reverse: reverse}
+	}
+	mid := len(iters) / 2
+	return NewFastMergeIterator(
+		[]Iterator{
+			NewFastMergeIterator(iters[:mid], reverse),
+			NewFastMergeIterator(iters[mid:], reverse),
+		}, reverse)
+}
+
+// GetMergeIterator returns a new merge Iterator based on the number of iters provided.
+func GetMergeIterator(iters []Iterator, reverse bool) Iterator {
+	// We found out that if there are less than 18 tables in the merge iterator,
+	// the "FastMergeIterator" is faster than the "MergeIterator".
+	if len(iters) < 18 {
+		return NewFastMergeIterator(iters, reverse)
+	}
+	return NewMergeIterator(iters, reverse)
+}

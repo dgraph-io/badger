@@ -466,9 +466,10 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
 	}
 	iters = txn.db.lc.appendIterators(iters, &opt) // This will increment references.
+
 	res := &Iterator{
 		txn:    txn,
-		iitr:   y.NewMergeIterator(iters, opt.Reverse),
+		iitr:   y.GetMergeIterator(iters, opt.Reverse),
 		opt:    opt,
 		readTs: txn.readTs,
 	}
