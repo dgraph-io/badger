@@ -1,2 +1,5 @@
 p/
 badger-test*/
+.idea*
+.idea/*
+.idea

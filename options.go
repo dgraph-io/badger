@@ -68,6 +68,8 @@ type Options struct {
 	CompactL0OnClose  bool
 	LogRotatesToFlush int32
 
+	BypassLockGuard bool
+
 	// ChecksumVerificationMode decides when db should verify checksum for SStable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
 
