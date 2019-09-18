@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -201,6 +200,8 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, errors.Errorf("Valuethreshold greater than max batch size of %d. Either "+
 			"reduce opt.ValueThreshold or increase opt.MaxTableSize.", opt.maxBatchSize)
 	}
+	// Compact L0 on close if either it is set or if KeepL0InMemory is set.
+	opt.CompactL0OnClose = opt.CompactL0OnClose || opt.KeepL0InMemory
 
 	if opt.ReadOnly {
 		// Can't truncate if the DB is read only.
@@ -855,8 +856,8 @@ func arenaSize(opt Options) int64 {
 	return opt.MaxTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
 
-// WriteLevel0Table flushes memtable.
-func writeLevel0Table(ft flushTask, f io.Writer, bopts table.Options) error {
+// buildL0Table builds a new table from the memtable.
+func buildL0Table(ft flushTask, bopts table.Options) []byte {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder(bopts)
@@ -867,8 +868,7 @@ func writeLevel0Table(ft flushTask, f io.Writer, bopts table.Options) error {
 		}
 		b.Add(iter.Key(), iter.Value())
 	}
-	_, err := f.Write(b.Finish())
-	return err
+	return b.Finish()
 }
 
 type flushTask struct {
@@ -895,15 +895,6 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	headTs := y.KeyWithTs(head, db.orc.nextTs())
 	ft.mt.Put(headTs, y.ValueStruct{Value: val})
 
-	fileID := db.lc.reserveFileID()
-	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
-	if err != nil {
-		return y.Wrap(err)
-	}
-
-	// Don't block just to sync the directory entry.
-	dirSyncCh := make(chan error)
-	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
 	dk, err := db.registry.latestDataKey()
 	if err != nil {
 		return y.Wrap(err)
@@ -913,14 +904,32 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		BloomFalsePositive: db.opt.BloomFalsePositive,
 		DataKey:            dk,
 	}
-	err = writeLevel0Table(ft, fd, bopts)
-	dirSyncErr := <-dirSyncCh
+	tableData := buildL0Table(ft, bopts)
 
+	fileID := db.lc.reserveFileID()
+	if db.opt.KeepL0InMemory {
+		tbl, err := table.OpenInMemoryTable(tableData, fileID, dk)
+		if err != nil {
+			return errors.Wrapf(err, "failed to open table in memory")
+		}
+		return db.lc.addLevel0Table(tbl)
+	}
+
+	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
 	if err != nil {
+		return y.Wrap(err)
+	}
+
+	// Don't block just to sync the directory entry.
+	dirSyncCh := make(chan error, 1)
+	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
+
+	if _, err = fd.Write(tableData); err != nil {
 		db.elog.Errorf("ERROR while writing to level 0: %v", err)
 		return err
 	}
-	if dirSyncErr != nil {
+
+	if dirSyncErr := <-dirSyncCh; dirSyncErr != nil {
 		// Do dir sync as best effort. No need to return due to an error there.
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
@@ -936,7 +945,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return err
 	}
 	// We own a ref on tbl.
-	err = db.lc.addLevel0Table(tbl) // This will incrRef (if we don't error, sure)
+	err = db.lc.addLevel0Table(tbl) // This will incrRef
 	_ = tbl.DecrRef()               // Releases our ref.
 	return err
 }

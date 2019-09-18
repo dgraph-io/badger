@@ -56,6 +56,7 @@ type Options struct {
 	NumMemtables        int
 	BlockSize           int
 	BloomFalsePositive  float64
+	KeepL0InMemory      bool
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -109,6 +110,7 @@ func DefaultOptions(path string) Options {
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
+		KeepL0InMemory:          true,
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
@@ -394,7 +396,7 @@ func (opt Options) WithNumCompactors(val int) Options {
 //
 // CompactL0OnClose determines whether Level 0 should be compacted before closing the DB.
 // This ensures that both reads and writes are efficient when the DB is opened later.
-//
+// CompactL0OnClose is set to true if KeepL0InMemory is set to true.
 // The default value of CompactL0OnClose is true.
 func (opt Options) WithCompactL0OnClose(val bool) Options {
 	opt.CompactL0OnClose = val
@@ -432,5 +434,18 @@ func (opt Options) WithEncryptionKey(key []byte) Options {
 // key exceed the given duration. Then the key registry will create new key.
 func (opt Options) WithEncryptionRotationDuration(d time.Duration) Options {
 	opt.EncryptionKeyRotationDuration = d
+	return opt
+}
+
+// WithKeepL0InMemory returns a new Options value with KeepL0InMemory set to the given value.
+//
+// When KeepL0InMemory is set to true we will keep all Level 0 tables in memory. This leads to
+// better performance in writes as well as compactions. In case of DB crash, the value log replay
+// will take longer to complete since memtables and all level 0 tables will have to be recreated.
+// This option also sets CompactL0OnClose option to true.
+//
+// The default value of KeepL0InMemory is true.
+func (opt Options) WithKeepL0InMemory(val bool) Options {
+	opt.KeepL0InMemory = val
 	return opt
 }

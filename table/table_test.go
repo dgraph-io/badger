@@ -59,11 +59,10 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 	opts := Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	b := NewTableBuilder(opts)
 	defer b.Close()
-	rand.Seed(time.Now().UnixNano())
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-	f, err := y.OpenSyncedFile(filename, true)
+	f, err := y.CreateSyncedFile(filename, true)
 	if t != nil {
 		require.NoError(t, err)
 	} else {
@@ -77,7 +76,8 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 		y.AssertTrue(len(kv) == 2)
 		b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0})
 	}
-	f.Write(b.Finish())
+	_, err = f.Write(b.Finish())
+	require.NoError(t, err, "writing to file failed")
 	f.Close()
 	f, _ = y.OpenSyncedFile(filename, true)
 	return f
@@ -666,7 +666,8 @@ func TestTableBigValues(t *testing.T) {
 		builder.Add(key, vs)
 	}
 
-	f.Write(builder.Finish())
+	_, err = f.Write(builder.Finish())
+	require.NoError(t, err, "unable to write to file")
 	opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(t, err, "unable to open table")
@@ -761,7 +762,8 @@ func BenchmarkReadMerged(b *testing.B) {
 			v := fmt.Sprintf("%d", id)
 			builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0})
 		}
-		f.Write(builder.Finish())
+		_, err = f.Write(builder.Finish())
+		require.NoError(b, err, "unable to write to file")
 		opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 		tbl, err := OpenTable(f, opts)
 		y.Check(err)
@@ -847,9 +849,15 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 		builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)})
 	}
 
-	f.Write(builder.Finish())
+	_, err = f.Write(builder.Finish())
+	require.NoError(b, err, "unable to write to file")
 	opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.NoVerification}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(b, err, "unable to open table")
 	return tbl
+}
+
+func TestMain(m *testing.M) {
+	rand.Seed(time.Now().UTC().UnixNano())
+	os.Exit(m.Run())
 }

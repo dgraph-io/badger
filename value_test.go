@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"os"
 	"reflect"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -972,8 +973,15 @@ func TestValueLogTruncate(t *testing.T) {
 	require.True(t, ok)
 	fileStat, err := zeroFile.fd.Stat()
 	require.NoError(t, err)
-	require.Equal(t, int64(vlogHeaderSize), fileStat.Size())
 
+	// The size of last vlog file in windows is equal to 2*opt.ValueLogFileSize. This is because
+	// we mmap the last value log file and windows doesn't allow us to mmap a file more than
+	// it's acutal size. So we increase the file size and then mmap it. See mmap_windows.go file.
+	if runtime.GOOS == "windows" {
+		require.Equal(t, 2*db.opt.ValueLogFileSize, fileStat.Size())
+	} else {
+		require.Equal(t, int64(vlogHeaderSize), fileStat.Size())
+	}
 	fileCountAfterCorruption := len(db.vlog.filesMap)
 	// +1 because the file with id=2 will be completely truncated. It won't be deleted.
 	// There would be two files. fid=0 with valid data, fid=2 with zero data (truncated).

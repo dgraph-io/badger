@@ -73,7 +73,10 @@ func TestTableIndex(t *testing.T) {
 				}
 				builder.Add(k, vs)
 			}
-			f.Write(builder.Finish())
+			builder.Add(k, vs)
+		}
+		_, err = f.Write(builder.Finish())
+		require.NoError(t, err, "unable to write to file")
 
 			topt := Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead,
 				DataKey: opt.DataKey}
@@ -87,4 +90,27 @@ func TestTableIndex(t *testing.T) {
 			}
 		}
 	})
+}
+
+func BenchmarkBuilder(b *testing.B) {
+	rand.Seed(time.Now().Unix())
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%032d", i))
+	}
+
+	val := make([]byte, 32)
+	rand.Read(val)
+	vs := y.ValueStruct{Value: []byte(val)}
+
+	keysCount := 1300000 // This number of entries consumes ~64MB of memory.
+	for i := 0; i < b.N; i++ {
+		opts := Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+		builder := NewTableBuilder(opts)
+
+		for i := 0; i < keysCount; i++ {
+			builder.Add(key(i), vs)
+		}
+
+		_ = builder.Finish()
+	}
 }

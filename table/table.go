@@ -87,7 +87,8 @@ type Table struct {
 	bf       *z.Bloom
 	Checksum []byte
 
-	opt *Options
+	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
+	opt        *Options
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
@@ -102,11 +103,17 @@ func (t *Table) DecrRef() error {
 		// We can safely delete this file, because for all the current files, we always have
 		// at least one reference pointing to them.
 
-		// It's necessary to delete windows files
+		// It's necessary to delete windows files.
 		if t.opt.LoadingMode == options.MemoryMap {
 			if err := y.Munmap(t.mmap); err != nil {
 				return err
 			}
+			t.mmap = nil
+		}
+		// fd can be nil if the table belongs to L0 and it is opened in memory. See
+		// OpenTableInMemory method.
+		if t.fd == nil {
+			return nil
 		}
 		if err := t.fd.Truncate(0); err != nil {
 			// This is very important to let the FS know that the file is deleted.
@@ -160,31 +167,14 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 		return nil, errors.Errorf("Invalid filename: %s", filename)
 	}
 	t := &Table{
-		fd:  fd,
-		ref: 1, // Caller is given one reference.
-		id:  id,
-		opt: &opts,
+		fd:         fd,
+		ref:        1, // Caller is given one reference.
+		id:         id,
+		opt:        &opts,
+		IsInmemory: false,
 	}
 
 	t.tableSize = int(fileInfo.Size())
-
-	if err := t.readIndex(); err != nil {
-		return nil, y.Wrap(err)
-	}
-
-	it := t.NewIterator(false)
-	defer it.Close()
-	it.Rewind()
-	if it.Valid() {
-		t.smallest = it.Key()
-	}
-
-	it2 := t.NewIterator(true)
-	defer it2.Close()
-	it2.Rewind()
-	if it2.Valid() {
-		t.biggest = it2.Key()
-	}
 
 	switch opts.LoadingMode {
 	case options.LoadToRAM:
@@ -214,14 +204,51 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 		panic(fmt.Sprintf("Invalid loading mode: %v", opts.LoadingMode))
 	}
 
-	if t.opt.ChkMode == options.OnTableRead || t.opt.ChkMode == options.OnTableAndBlockRead {
+	if err := t.initBiggestAndSmallest(); err != nil {
+		return nil, errors.Wrapf(err, "failed to initialize table")
+	}
+	if opts.ChkMode == options.OnTableRead || opts.ChkMode == options.OnTableAndBlockRead {
 		if err := t.VerifyChecksum(); err != nil {
 			_ = fd.Close()
-			return nil, err
+			return nil, errors.Wrapf(err, "failed to verify checksum")
 		}
 	}
 
 	return t, nil
+}
+
+// OpenInMemoryTable is similar to OpenTable but it opens a new table from the provided data.
+// OpenInMemoryTable is used for L0 tables.
+func OpenInMemoryTable(data []byte, id uint64, dk *pb.DataKey) (*Table, error) {
+	t := &Table{
+		ref:        1, // Caller is given one reference.
+		opt:        &Options{LoadingMode: options.LoadToRAM, DataKey: dk},
+		mmap:       data,
+		tableSize:  len(data),
+		IsInmemory: true,
+		id:         id, // It is important that each table gets a unique ID.
+	}
+
+	if err := t.initBiggestAndSmallest(); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func (t *Table) initBiggestAndSmallest() error {
+	if err := t.readIndex(); err != nil {
+		return errors.Wrapf(err, "failed to read index.")
+	}
+
+	t.smallest = t.blockIndex[0].Key
+
+	it2 := t.NewIterator(true)
+	defer it2.Close()
+	it2.Rewind()
+	if it2.Valid() {
+		t.biggest = it2.Key()
+	}
+	return nil
 }
 
 // Close closes the open table.  (Releases resources back to the OS.)
@@ -230,8 +257,11 @@ func (t *Table) Close() error {
 		if err := y.Munmap(t.mmap); err != nil {
 			return err
 		}
+		t.mmap = nil
 	}
-
+	if t.fd == nil {
+		return nil
+	}
 	return t.fd.Close()
 }
 
