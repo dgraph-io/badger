@@ -1544,3 +1544,8 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList), prefixes ...[]
 		}
 	}
 }
+
+// shouldEncrypt returns bool, which tells whether to encrypt or not.
+func (db *DB) shouldEncrypt() bool {
+	return len(db.opt.EncryptionKey) > 0
+}
