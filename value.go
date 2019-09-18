@@ -992,7 +992,10 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	vlog.opt = opt
 	vlog.dirPath = opt.ValueDir
 	vlog.db = db
-	vlog.elog = trace.NewEventLog("Badger", "Valuelog")
+	vlog.elog = y.NoEventLog
+	if opt.EventLogging {
+		vlog.elog = trace.NewEventLog("Badger", "Valuelog")
+	}
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 	vlog.lfDiscardStats = &lfDiscardStats{m: make(map[uint32]int64)}
 	if err := vlog.populateFilesMap(); err != nil {

@@ -46,6 +46,7 @@ type Options struct {
 	ReadOnly            bool
 	Truncate            bool
 	Logger              Logger
+	EventLogging        bool
 
 	// Fine tuning options.
 
@@ -122,6 +123,7 @@ func DefaultOptions(path string) Options {
 		Truncate:                      false,
 		Logger:                        defaultLogger,
 		LogRotatesToFlush:             2,
+		EventLogging:                  true,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 	}
@@ -243,6 +245,16 @@ func (opt Options) WithTruncate(val bool) Options {
 // The default value of Logger writes to stderr using the log package from the Go standard library.
 func (opt Options) WithLogger(val Logger) Options {
 	opt.Logger = val
+	return opt
+}
+
+// WithEventLogging returns a new Options value with EventLogging set to the given value.
+//
+// EventLogging provides a way to enable or disable trace.EventLog logging.
+//
+// The default value of EventLogging is true.
+func (opt Options) WithEventLogging(enabled bool) Options {
+	opt.EventLogging = enabled
 	return opt
 }
 
