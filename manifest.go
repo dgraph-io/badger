@@ -120,7 +120,7 @@ func openOrCreateManifestFile(dir string, readOnly bool) (
 }
 
 func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold int) (
-	ret *manifestFile, result Manifest, err error) {
+	*manifestFile, Manifest, error) {
 
 	path := filepath.Join(dir, ManifestFilename)
 	var flags uint32
@@ -331,7 +331,7 @@ var (
 // Also, returns the last offset after a completely read manifest entry -- the file must be
 // truncated at that point before further appends are made (if there is a partial entry after
 // that).  In normal conditions, truncOffset is the file size.
-func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error) {
+func ReplayManifestFile(fp *os.File) (Manifest, int64, error) {
 	r := countingReader{wrapped: bufio.NewReader(fp)}
 
 	var magicBuf [8]byte
@@ -344,7 +344,11 @@ func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error
 	version := y.BytesToU32(magicBuf[4:8])
 	if version != magicVersion {
 		return Manifest{}, 0,
-			fmt.Errorf("manifest has unsupported version: %d (we support %d)", version, magicVersion)
+			//nolint:lll
+			fmt.Errorf("manifest has unsupported version: %d (we support %d).\n"+
+				"Please see https://github.com/dgraph-io/badger/blob/master/README.md#i-see-manifest-has-unsupported-version-x-we-support-y-error"+
+				" on how to fix this.",
+				version, magicVersion)
 	}
 
 	build := createManifest()
@@ -381,7 +385,7 @@ func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error
 		}
 	}
 
-	return build, offset, err
+	return build, offset, nil
 }
 
 func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {

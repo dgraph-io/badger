@@ -44,6 +44,7 @@ type Options struct {
 	ReadOnly            bool
 	Truncate            bool
 	Logger              Logger
+	EventLogging        bool
 
 	// Fine tuning options.
 
@@ -54,6 +55,7 @@ type Options struct {
 	NumMemtables        int
 	BlockSize           int
 	BloomFalsePositive  float64
+	KeepL0InMemory      bool
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -104,6 +106,7 @@ func DefaultOptions(path string) Options {
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
+		KeepL0InMemory:          true,
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
@@ -114,6 +117,7 @@ func DefaultOptions(path string) Options {
 		ValueThreshold:     32,
 		Truncate:           false,
 		Logger:             defaultLogger,
+		EventLogging:       true,
 		LogRotatesToFlush:  2,
 	}
 }
@@ -234,6 +238,16 @@ func (opt Options) WithTruncate(val bool) Options {
 // The default value of Logger writes to stderr using the log package from the Go standard library.
 func (opt Options) WithLogger(val Logger) Options {
 	opt.Logger = val
+	return opt
+}
+
+// WithEventLogging returns a new Options value with EventLogging set to the given value.
+//
+// EventLogging provides a way to enable or disable trace.EventLog logging.
+//
+// The default value of EventLogging is true.
+func (opt Options) WithEventLogging(enabled bool) Options {
+	opt.EventLogging = enabled
 	return opt
 }
 
@@ -387,7 +401,7 @@ func (opt Options) WithNumCompactors(val int) Options {
 //
 // CompactL0OnClose determines whether Level 0 should be compacted before closing the DB.
 // This ensures that both reads and writes are efficient when the DB is opened later.
-//
+// CompactL0OnClose is set to true if KeepL0InMemory is set to true.
 // The default value of CompactL0OnClose is true.
 func (opt Options) WithCompactL0OnClose(val bool) Options {
 	opt.CompactL0OnClose = val
@@ -405,5 +419,18 @@ func (opt Options) WithCompactL0OnClose(val bool) Options {
 // The default value of LogRotatesToFlush is 2.
 func (opt Options) WithLogRotatesToFlush(val int32) Options {
 	opt.LogRotatesToFlush = val
+	return opt
+}
+
+// WithKeepL0InMemory returns a new Options value with KeepL0InMemory set to the given value.
+//
+// When KeepL0InMemory is set to true we will keep all Level 0 tables in memory. This leads to
+// better performance in writes as well as compactions. In case of DB crash, the value log replay
+// will take longer to complete since memtables and all level 0 tables will have to be recreated.
+// This option also sets CompactL0OnClose option to true.
+//
+// The default value of KeepL0InMemory is true.
+func (opt Options) WithKeepL0InMemory(val bool) Options {
+	opt.KeepL0InMemory = val
 	return opt
 }
