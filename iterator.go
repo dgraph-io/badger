@@ -469,7 +469,7 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 
 	res := &Iterator{
 		txn:    txn,
-		iitr:   y.GetMergeIterator(iters, opt.Reverse),
+		iitr:   table.NewMergeIterator(iters, opt.Reverse),
 		opt:    opt,
 		readTs: txn.readTs,
 	}
