@@ -73,10 +73,8 @@ func TestTableIndex(t *testing.T) {
 				}
 				builder.Add(k, vs)
 			}
-			builder.Add(k, vs)
-		}
-		_, err = f.Write(builder.Finish())
-		require.NoError(t, err, "unable to write to file")
+			_, err = f.Write(builder.Finish())
+			require.NoError(t, err, "unable to write to file")
 
 			topt := Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead,
 				DataKey: opt.DataKey}
