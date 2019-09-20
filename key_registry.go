@@ -193,7 +193,7 @@ func readKeyRegistry(fp *os.File, opt Options) (*KeyRegistry, error) {
 			kr.lastCreated = dk.CreatedAt
 		}
 		// No need to lock, since we are building the initial state.
-		kr.dataKeys[kr.nextKeyID] = dk
+		kr.dataKeys[dk.KeyId] = dk
 		// Forward the iterator.
 		dk, err = itr.next()
 	}
