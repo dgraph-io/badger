@@ -41,7 +41,7 @@ const fileSuffix = ".sst"
 
 // Options contains configurable options for Table/Builder.
 type Options struct {
-	// Options for Opening Table.
+	// Options for Opening/Building Table.
 
 	// ChkMode is the checksum verification mode for Table.
 	ChkMode options.ChecksumVerificationMode
@@ -319,7 +319,7 @@ func (t *Table) readIndex() error {
 	if t.shouldDecrypt() {
 		var err error
 		if data, err = t.decrypt(data); err != nil {
-			return err
+			return y.Wrapf(err, "Error while decrypting table index in Table.readIndex")
 		}
 	}
 	err := proto.Unmarshal(data, &index)

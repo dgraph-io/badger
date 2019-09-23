@@ -290,7 +290,14 @@ func Open(opt Options) (db *DB, err error) {
 		pub:           newPublisher(),
 	}
 
-	kr, err := OpenKeyRegistry(opt)
+	krOpt := KeyRegistryOptions{
+		ReadOnly:                      opt.ReadOnly,
+		Dir:                           opt.Dir,
+		EncryptionKey:                 opt.EncryptionKey,
+		EncryptionKeyRotationDuration: opt.EncryptionKeyRotationDuration,
+	}
+
+	kr, err := OpenKeyRegistry(krOpt)
 	if err != nil {
 		return nil, err
 	}
@@ -902,7 +909,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 
 	dk, err := db.registry.latestDataKey()
 	if err != nil {
-		return y.Wrap(err)
+		return y.Wrapf(err, "failed to get datakey in db.handleFlushTask")
 	}
 	bopts := table.Options{
 		BlockSize:          db.opt.BlockSize,

@@ -24,14 +24,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func getRegistryTestOptions(dir string, key []byte) KeyRegistryOptions {
+	return KeyRegistryOptions{
+		Dir:           dir,
+		EncryptionKey: key,
+		ReadOnly:      false,
+	}
+}
 func TestBuildRegistry(t *testing.T) {
 	encryptionKey := make([]byte, 32)
 	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer require.NoError(t, os.Remove(dir))
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
-	opt := getTestOptions(dir).WithEncryptionKey(encryptionKey)
+	opt := getRegistryTestOptions(dir, encryptionKey)
 	kr, err := OpenKeyRegistry(opt)
-	defer os.Remove(dir)
 	require.NoError(t, err)
 	dk, err := kr.latestDataKey()
 	require.NoError(t, err)
@@ -55,11 +63,12 @@ func TestBuildRegistry(t *testing.T) {
 func TestRewriteRegistry(t *testing.T) {
 	encryptionKey := make([]byte, 32)
 	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer require.NoError(t, os.Remove(dir))
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
-	opt := getTestOptions(dir).WithEncryptionKey(encryptionKey)
+	opt := getRegistryTestOptions(dir, encryptionKey)
 	kr, err := OpenKeyRegistry(opt)
-	defer os.Remove(dir)
 	require.NoError(t, err)
 	_, err = kr.latestDataKey()
 	require.NoError(t, err)
@@ -80,11 +89,12 @@ func TestRewriteRegistry(t *testing.T) {
 func TestMismatch(t *testing.T) {
 	encryptionKey := make([]byte, 32)
 	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer require.NoError(t, os.Remove(dir))
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
-	opt := getTestOptions(dir).WithEncryptionKey(encryptionKey)
+	opt := getRegistryTestOptions(dir, encryptionKey)
 	kr, err := OpenKeyRegistry(opt)
-	defer os.Remove(dir)
 	require.NoError(t, err)
 	require.NoError(t, kr.Close())
 	// Opening with the same key and asserting.
@@ -104,16 +114,17 @@ func TestMismatch(t *testing.T) {
 func TestEncryptionAndDecryption(t *testing.T) {
 	encryptionKey := make([]byte, 32)
 	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer require.NoError(t, os.Remove(dir))
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
-	opt := getTestOptions(dir).WithEncryptionKey(encryptionKey)
+	opt := getRegistryTestOptions(dir, encryptionKey)
 	kr, err := OpenKeyRegistry(opt)
-	defer os.Remove(dir)
 	require.NoError(t, err)
 	dk, err := kr.latestDataKey()
 	require.NoError(t, err)
 	require.NoError(t, kr.Close())
-	// Checking the corretness of the datakey after closing and
+	// Checking the correctness of the datakey after closing and
 	// opening the key registry.
 	kr, err = OpenKeyRegistry(opt)
 	require.NoError(t, err)

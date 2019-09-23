@@ -255,6 +255,9 @@ func (lf *logFile) doneWriting(offset uint32) error {
 		return errors.Wrapf(err, "Unable to sync value log: %q", lf.path)
 	}
 
+	// acquire lock before unmap.
+	lf.lock.Lock()
+	defer lf.lock.Unlock()
 	// Unmap file before we truncate it. Windows cannot truncate a file that is mmapped.
 	if err := lf.munmap(); err != nil {
 		return errors.Wrapf(err, "failed to mumap vlog file %s", lf.fd.Name())
@@ -829,7 +832,7 @@ func (vlog *valueLog) populateFilesMap() error {
 func (lf *logFile) open(path string, flags uint32) error {
 	var err error
 	if lf.fd, err = y.OpenExistingFile(path, flags); err != nil {
-		return err
+		return y.Wrapf(err, "Error while opening file in logfile %s", path)
 	}
 	fi, err := lf.fd.Stat()
 	if err != nil {
@@ -872,7 +875,7 @@ func (lf *logFile) bootstrap() error {
 	}
 
 	if _, err = lf.fd.Seek(0, io.SeekStart); err != nil {
-		return err
+		return y.Wrapf(err, "Error while SeekStart in logFile.bootstarp")
 	}
 	// generate data key for the log file.
 	var dk *pb.DataKey
@@ -900,21 +903,16 @@ func (lf *logFile) bootstrap() error {
 func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	path := vlog.fpath(fid)
 
-	dk, err := vlog.db.registry.latestDataKey()
-	if err != nil {
-		return nil, y.Wrapf(err, "Error while creating datakey for vlog")
-	}
 	lf := &logFile{
 		fid:         fid,
 		path:        path,
 		loadingMode: vlog.opt.ValueLogLoadingMode,
-		dataKey:     dk,
 		registry:    vlog.db.registry,
 	}
 	// writableLogOffset is only written by write func, by read by Read func.
 	// To avoid a race condition, all reads and updates to this variable must be
 	// done via atomics.
-
+	var err error
 	if lf.fd, err = y.CreateSyncedFile(path, vlog.opt.SyncWrites); err != nil {
 		return nil, errFile(err, lf.path, "Create value log file")
 	}
@@ -1004,7 +1002,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	// If no files are found, then create a new file.
 	if len(vlog.filesMap) == 0 {
 		_, err := vlog.createVlogFile(0)
-		return err
+		return y.Wrapf(err, "Error while creating log file in valueLog.open")
 	}
 	fids := vlog.sortedFids()
 	for _, fid := range fids {

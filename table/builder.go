@@ -307,11 +307,11 @@ func (b *Builder) DataKey() *pb.DataKey {
 func (b *Builder) encrypt(data []byte) ([]byte, error) {
 	iv, err := y.GenerateIV()
 	if err != nil {
-		return data, err
+		return data, y.Wrapf(err, "Error while generating IV in Builder.encrypt")
 	}
 	data, err = y.XORBlock(data, b.DataKey().Data, iv)
 	if err != nil {
-		return data, err
+		return data, y.Wrapf(err, "Error while encrypting in Builder.encrypt")
 	}
 	data = append(data, iv...)
 	return data, nil

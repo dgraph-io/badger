@@ -444,7 +444,7 @@ func (opt Options) WithEncryptionKey(key []byte) Options {
 //
 // Key Registry will use this duration to create new keys. If the previous generated
 // key exceed the given duration. Then the key registry will create new key.
-func (opt Options) WithEncryptionRotationDuration(d time.Duration) Options {
+func (opt Options) WithEncryptionKeyRotationDuration(d time.Duration) Options {
 	opt.EncryptionKeyRotationDuration = d
 	return opt
 }

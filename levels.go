@@ -151,7 +151,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			}
 			dk, err := db.registry.dataKey(tf.KeyID)
 			if err != nil {
-				rerr = errors.Wrapf(err, "Error while creating datakey")
+				rerr = errors.Wrapf(err, "Error while reading datakey")
 				return
 			}
 			opts := table.Options{
@@ -505,7 +505,8 @@ func (s *levelsController) compactBuildTables(
 		timeStart := time.Now()
 		dk, err := s.kv.registry.latestDataKey()
 		if err != nil {
-			return nil, nil, err
+			return nil, nil,
+				y.Wrapf(err, "Error while retriving datakey in levelsController.compactBuildTables")
 		}
 		bopts := table.Options{
 			BlockSize:          s.kv.opt.BlockSize,

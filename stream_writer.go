@@ -302,7 +302,7 @@ func (w *sortedWriter) send() error {
 	}(w.builder)
 	dk, err := w.db.registry.latestDataKey()
 	if err != nil {
-		return err
+		return y.Wrapf(err, "Error while retriving datakey in sortedWriter.send")
 	}
 	bopts := table.Options{
 		BlockSize:          w.db.opt.BlockSize,

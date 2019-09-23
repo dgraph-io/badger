@@ -114,9 +114,12 @@ var (
 	ErrNoPrefixes = errors.New("At least one key prefix is required")
 
 	// ErrEncryptionKeyMismatch is returned when the storage key is not
-	// matched with the key previously given
+	// matched with the key previously given.
 	ErrEncryptionKeyMismatch = errors.New("Encryption key mismatch")
 
-	// ErrInvalidDataKeyID is returned if the datakey id is invalid
+	// ErrInvalidDataKeyID is returned if the datakey id is invalid.
 	ErrInvalidDataKeyID = errors.New("Invalid datakey id")
+
+	// ErrChecksumMismatch is returned when checksum mismatch.
+	ErrChecksumMismatch = errors.New("Checksum mismatch")
 )
