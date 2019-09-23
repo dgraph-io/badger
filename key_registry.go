@@ -71,6 +71,15 @@ func newKeyRegistry(opt KeyRegistryOptions) *KeyRegistry {
 // OpenKeyRegistry opens key registry if it exists, otherwise it'll create key registry
 // and returns key registry.
 func OpenKeyRegistry(opt KeyRegistryOptions) (*KeyRegistry, error) {
+	// sanity check the encryption key length.
+	if len(opt.EncryptionKey) > 0 {
+		switch len(opt.EncryptionKey) {
+		default:
+			return nil, y.Wrapf(ErrInvalidEncryptionKey, "During OpenKeyRegistry")
+		case 16, 24, 32:
+			break
+		}
+	}
 	path := filepath.Join(opt.Dir, KeyRegistryFileName)
 	var flags uint32
 	if opt.ReadOnly {
@@ -178,7 +187,7 @@ func (kri *keyRegistryIterator) next() (*pb.DataKey, error) {
 	}
 	// Check checksum.
 	if crc32.Checksum(data, y.CastagnoliCrcTable) != binary.BigEndian.Uint32(kri.lenCrcBuf[4:]) {
-		return nil, y.Wrapf(ErrChecksumMismatch, "Error while checking checksum for data key.")
+		return nil, y.Wrapf(y.ErrChecksumMismatch, "Error while checking checksum for data key.")
 	}
 	dataKey := &pb.DataKey{}
 	if err = dataKey.Unmarshal(data); err != nil {
@@ -295,7 +304,7 @@ func (kr *KeyRegistry) dataKey(id uint64) (*pb.DataKey, error) {
 	return dk, nil
 }
 
-// latestDataKey will give you the lastest generated datakey based on the rotation
+// latestDataKey will give you the latest generated datakey based on the rotation
 // period. If the last generated datakey lifetime exceeds the rotation period.
 // It'll create new datakey.
 func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {

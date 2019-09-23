@@ -506,7 +506,7 @@ func (s *levelsController) compactBuildTables(
 		dk, err := s.kv.registry.latestDataKey()
 		if err != nil {
 			return nil, nil,
-				y.Wrapf(err, "Error while retriving datakey in levelsController.compactBuildTables")
+				y.Wrapf(err, "Error while retrieving datakey in levelsController.compactBuildTables")
 		}
 		bopts := table.Options{
 			BlockSize:          s.kv.opt.BlockSize,

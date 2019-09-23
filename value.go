@@ -875,12 +875,12 @@ func (lf *logFile) bootstrap() error {
 	}
 
 	if _, err = lf.fd.Seek(0, io.SeekStart); err != nil {
-		return y.Wrapf(err, "Error while SeekStart in logFile.bootstarp")
+		return y.Wrapf(err, "Error while SeekStart for the logfile %d in logFile.bootstarp", lf.fid)
 	}
 	// generate data key for the log file.
 	var dk *pb.DataKey
 	if dk, err = lf.registry.latestDataKey(); err != nil {
-		return y.Wrapf(err, "Error while retriving datakey in logFile.bootstarp")
+		return y.Wrapf(err, "Error while retrieving datakey in logFile.bootstarp")
 	}
 	lf.dataKey = dk
 	// We'll always preserve vlogHeaderSize for key id and baseIV.

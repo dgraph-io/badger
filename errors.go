@@ -120,6 +120,6 @@ var (
 	// ErrInvalidDataKeyID is returned if the datakey id is invalid.
 	ErrInvalidDataKeyID = errors.New("Invalid datakey id")
 
-	// ErrChecksumMismatch is returned when checksum mismatch.
-	ErrChecksumMismatch = errors.New("Checksum mismatch")
+	ErrInvalidEncryptionKey = errors.New("Encryption key's length should be" +
+		"either 16, 24, or 32 bytes")
 )

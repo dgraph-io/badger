@@ -319,7 +319,8 @@ func (t *Table) readIndex() error {
 	if t.shouldDecrypt() {
 		var err error
 		if data, err = t.decrypt(data); err != nil {
-			return y.Wrapf(err, "Error while decrypting table index in Table.readIndex")
+			return y.Wrapf(err,
+				"Error while decrypting table index for the table %d in Table.readIndex", t.id)
 		}
 	}
 	err := proto.Unmarshal(data, &index)

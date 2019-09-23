@@ -100,7 +100,7 @@ func init() {
 	bankDisect.Flags().IntVarP(&numPrevious, "previous", "p", 12,
 		"Starting from the violation txn, how many previous versions to retrieve.")
 	bankDisect.Flags().BoolVarP(&encryptionEnabled, "encryption", "e", false,
-		"If it is true, badger will encrypt all the data storing on the disk.")
+		"If it is true, badger will encrypt all the data stored on the disk.")
 }
 
 func key(account int) []byte {
