@@ -880,7 +880,7 @@ func (lf *logFile) bootstrap() error {
 	// generate data key for the log file.
 	var dk *pb.DataKey
 	if dk, err = lf.registry.latestDataKey(); err != nil {
-		return err
+		return y.Wrapf(err, "Error while retriving datakey in logFile.bootstarp")
 	}
 	lf.dataKey = dk
 	// We'll always preserve vlogHeaderSize for key id and baseIV.
@@ -1079,7 +1079,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		newid := atomic.AddUint32(&vlog.maxFid, 1)
 		_, err := vlog.createVlogFile(newid)
 		if err != nil {
-			return err
+			return y.Wrapf(err, "Error while creating log file %d in valueLog.open", newid)
 		}
 		last, ok = vlog.filesMap[vlog.maxFid]
 		y.AssertTrue(ok)
