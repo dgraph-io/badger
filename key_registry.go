@@ -106,6 +106,10 @@ func OpenKeyRegistry(opt KeyRegistryOptions) (*KeyRegistry, error) {
 		fp.Close()
 		return nil, err
 	}
+	if opt.ReadOnly {
+		// We'll close the file in readonly mode.
+		return kr, fp.Close()
+	}
 	kr.fp = fp
 	return kr, nil
 }
@@ -156,13 +160,21 @@ func (kri *keyRegistryIterator) next() (*pb.DataKey, error) {
 	var err error
 	// Read crc buf and data length.
 	if _, err = kri.fp.Read(kri.lenCrcBuf[:]); err != nil {
-		return nil, y.Wrapf(err, "While reading crc in keyRegistryIterator.next")
+		// EOF means end of the iteration.
+		if err != io.EOF {
+			return nil, y.Wrapf(err, "While reading crc in keyRegistryIterator.next")
+		}
+		return nil, err
 	}
 	l := int64(binary.BigEndian.Uint32(kri.lenCrcBuf[0:4]))
 	// Read protobuf data.
 	data := make([]byte, l)
 	if _, err = kri.fp.Read(data); err != nil {
-		return nil, y.Wrapf(err, "While reading protobuf in keyRegistryIterator.next")
+		// EOF means end of the iteration.
+		if err != io.EOF {
+			return nil, y.Wrapf(err, "While reading protobuf in keyRegistryIterator.next")
+		}
+		return nil, err
 	}
 	// Check checksum.
 	if crc32.Checksum(data, y.CastagnoliCrcTable) != binary.BigEndian.Uint32(kri.lenCrcBuf[4:]) {
@@ -351,7 +363,10 @@ func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 
 // Close closes the key registry.
 func (kr *KeyRegistry) Close() error {
-	return kr.fp.Close()
+	if !kr.opt.ReadOnly {
+		return kr.fp.Close()
+	}
+	return nil
 }
 
 // storeDataKey stores datakey in an encrypted format in the given buffer. If storage key preset.
