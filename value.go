@@ -150,7 +150,7 @@ func (lf *logFile) doneWriting(offset uint32) error {
 
 	// Unmap file before we truncate it. Windows cannot truncate a file that is mmapped.
 	if err := lf.munmap(); err != nil {
-		return errors.Wrapf(err, "failed to mumap vlog file %s", lf.fd.Name())
+		return errors.Wrapf(err, "failed to munmap vlog file %s", lf.fd.Name())
 	}
 
 	// TODO: Confirm if we need to run a file sync after truncation.
