@@ -255,12 +255,16 @@ func (lf *logFile) doneWriting(offset uint32) error {
 		return errors.Wrapf(err, "Unable to sync value log: %q", lf.path)
 	}
 
-	// acquire lock before unmap.
+	// Before we were acquiring a lock here on lf.lock, because we were invalidating the file
+	// descriptor due to reopening it as read-only. Now, we don't invalidate the fd, but unmap it,
+	// truncate it and remap it. That creates a window where we have segfaults because the mmap is
+	// no longer valid, while someone might be reading it. Therefore, we need a lock here again.
 	lf.lock.Lock()
 	defer lf.lock.Unlock()
+
 	// Unmap file before we truncate it. Windows cannot truncate a file that is mmapped.
 	if err := lf.munmap(); err != nil {
-		return errors.Wrapf(err, "failed to mumap vlog file %s", lf.fd.Name())
+		return errors.Wrapf(err, "failed to munmap vlog file %s", lf.fd.Name())
 	}
 
 	// TODO: Confirm if we need to run a file sync after truncation.
