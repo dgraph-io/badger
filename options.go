@@ -17,6 +17,8 @@
 package badger
 
 import (
+	"time"
+
 	"github.com/dgraph-io/badger/options"
 )
 
@@ -67,9 +69,12 @@ type Options struct {
 	NumCompactors     int
 	CompactL0OnClose  bool
 	LogRotatesToFlush int32
-
 	// When set, checksum will be validated for each entry read from the value log file.
 	VerifyValueChecksum bool
+
+	// Encryption related options.
+	EncryptionKey                 []byte        // encryption key
+	EncryptionKeyRotationDuration time.Duration // key rotation duration
 
 	// ChecksumVerificationMode decides when db should verify checksum for SStable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
@@ -83,7 +88,6 @@ type Options struct {
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
-
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -117,12 +121,14 @@ func DefaultOptions(path string) Options {
 		// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
 		ValueLogFileSize: 1<<30 - 1,
 
-		ValueLogMaxEntries: 1000000,
-		ValueThreshold:     32,
-		Truncate:           false,
-		Logger:             defaultLogger,
-		EventLogging:       true,
-		LogRotatesToFlush:  2,
+		ValueLogMaxEntries:            1000000,
+		ValueThreshold:                32,
+		Truncate:                      false,
+		Logger:                        defaultLogger,
+		LogRotatesToFlush:             2,
+		EventLogging:                  true,
+		EncryptionKey:                 []byte{},
+		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 	}
 }
 
@@ -423,6 +429,26 @@ func (opt Options) WithCompactL0OnClose(val bool) Options {
 // The default value of LogRotatesToFlush is 2.
 func (opt Options) WithLogRotatesToFlush(val int32) Options {
 	opt.LogRotatesToFlush = val
+	return opt
+}
+
+// WithEncryptionKey return a new Options value with EncryptionKey set to the given value.
+//
+// EncryptionKey is used to encrypt the data with AES. Type of AES is used based on the key
+// size. For example 16 bytes will use AES-128. 24 bytes will use AES-192. 32 bytes will
+// use AES-256.
+func (opt Options) WithEncryptionKey(key []byte) Options {
+	opt.EncryptionKey = key
+	return opt
+}
+
+// WithEncryptionRotationDuration returns new Options value with the duration set to
+// the given value.
+//
+// Key Registry will use this duration to create new keys. If the previous generated
+// key exceed the given duration. Then the key registry will create new key.
+func (opt Options) WithEncryptionKeyRotationDuration(d time.Duration) Options {
+	opt.EncryptionKeyRotationDuration = d
 	return opt
 }
 

@@ -5,7 +5,7 @@ go 1.12
 require (
 	github.com/cespare/xxhash v1.1.0
 	github.com/cespare/xxhash/v2 v2.1.0 // indirect
-	github.com/dgraph-io/ristretto v0.0.0-20190903064322-eb48d2f7ca30
+	github.com/dgraph-io/ristretto v0.0.0-20190916120426-cd2835491e0e
 	github.com/dgryski/go-farm v0.0.0-20190423205320-6a90982ecee2
 	github.com/dustin/go-humanize v1.0.0
 	github.com/golang/protobuf v1.3.1
