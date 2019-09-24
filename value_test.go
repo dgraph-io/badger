@@ -1154,10 +1154,9 @@ func TestValueEntryCorruption(t *testing.T) {
 	orig := make([]byte, 1)
 	_, err = file.ReadAt(orig, int64(offset))
 	require.NoError(t, err)
-
+	// Corrupt a single bit.
 	_, err = file.WriteAt([]byte{7}, int64(offset))
 	require.NoError(t, err)
-
 	require.NoError(t, file.Close())
 
 	db, err = Open(opt)
