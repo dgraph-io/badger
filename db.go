@@ -88,7 +88,8 @@ type DB struct {
 
 	orc *oracle
 
-	pub *publisher
+	pub      *publisher
+	registry *KeyRegistry
 }
 
 const (
@@ -289,6 +290,18 @@ func Open(opt Options) (db *DB, err error) {
 		pub:           newPublisher(),
 	}
 
+	krOpt := KeyRegistryOptions{
+		ReadOnly:                      opt.ReadOnly,
+		Dir:                           opt.Dir,
+		EncryptionKey:                 opt.EncryptionKey,
+		EncryptionKeyRotationDuration: opt.EncryptionKeyRotationDuration,
+	}
+
+	kr, err := OpenKeyRegistry(krOpt)
+	if err != nil {
+		return nil, err
+	}
+	db.registry = kr
 	// Calculate initial size.
 	db.calculateSize()
 	db.closers.updateSize = y.NewCloser(1)
@@ -459,6 +472,9 @@ func (db *DB) close() (err error) {
 	}
 	if manifestErr := db.manifest.close(); err == nil {
 		err = errors.Wrap(manifestErr, "DB.Close")
+	}
+	if registryErr := db.registry.Close(); err == nil {
+		err = errors.Wrap(registryErr, "DB.Close")
 	}
 
 	// Fsync directories to ensure that lock file, and any other removed files whose directory
@@ -891,15 +907,20 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	headTs := y.KeyWithTs(head, db.orc.nextTs())
 	ft.mt.Put(headTs, y.ValueStruct{Value: val})
 
+	dk, err := db.registry.latestDataKey()
+	if err != nil {
+		return y.Wrapf(err, "failed to get datakey in db.handleFlushTask")
+	}
 	bopts := table.Options{
 		BlockSize:          db.opt.BlockSize,
 		BloomFalsePositive: db.opt.BloomFalsePositive,
+		DataKey:            dk,
 	}
 	tableData := buildL0Table(ft, bopts)
 
 	fileID := db.lc.reserveFileID()
 	if db.opt.KeepL0InMemory {
-		tbl, err := table.OpenInMemoryTable(tableData, fileID)
+		tbl, err := table.OpenInMemoryTable(tableData, fileID, dk)
 		if err != nil {
 			return errors.Wrapf(err, "failed to open table in memory")
 		}
@@ -928,6 +949,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	opts := table.Options{
 		LoadingMode: db.opt.TableLoadingMode,
 		ChkMode:     db.opt.ChecksumVerificationMode,
+		DataKey:     dk,
 	}
 	tbl, err := table.OpenTable(fd, opts)
 	if err != nil {
@@ -1542,4 +1564,9 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList), prefixes ...[]
 			slurp(batch)
 		}
 	}
+}
+
+// shouldEncrypt returns bool, which tells whether to encrypt or not.
+func (db *DB) shouldEncrypt() bool {
+	return len(db.opt.EncryptionKey) > 0
 }

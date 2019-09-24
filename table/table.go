@@ -17,6 +17,7 @@
 package table
 
 import (
+	"crypto/aes"
 	"fmt"
 	"io"
 	"os"
@@ -40,7 +41,7 @@ const fileSuffix = ".sst"
 
 // Options contains configurable options for Table/Builder.
 type Options struct {
-	// Options for Openning Table.
+	// Options for Opening/Building Table.
 
 	// ChkMode is the checksum verification mode for Table.
 	ChkMode options.ChecksumVerificationMode
@@ -55,6 +56,9 @@ type Options struct {
 
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
+
+	// DataKey is the key used to decrypt the encrypted text.
+	DataKey *pb.DataKey
 }
 
 // TableInterface is useful for testing.
@@ -215,10 +219,10 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 
 // OpenInMemoryTable is similar to OpenTable but it opens a new table from the provided data.
 // OpenInMemoryTable is used for L0 tables.
-func OpenInMemoryTable(data []byte, id uint64) (*Table, error) {
+func OpenInMemoryTable(data []byte, id uint64, dk *pb.DataKey) (*Table, error) {
 	t := &Table{
 		ref:        1, // Caller is given one reference.
-		opt:        &Options{LoadingMode: options.LoadToRAM},
+		opt:        &Options{LoadingMode: options.LoadToRAM, DataKey: dk},
 		mmap:       data,
 		tableSize:  len(data),
 		IsInmemory: true,
@@ -311,6 +315,14 @@ func (t *Table) readIndex() error {
 	}
 
 	index := pb.TableIndex{}
+	// Decrypt the table index if it is encrypted.
+	if t.shouldDecrypt() {
+		var err error
+		if data, err = t.decrypt(data); err != nil {
+			return y.Wrapf(err,
+				"Error while decrypting table index for the table %d in Table.readIndex", t.id)
+		}
+	}
 	err := proto.Unmarshal(data, &index)
 	y.Check(err)
 
@@ -330,7 +342,16 @@ func (t *Table) block(idx int) (*block, error) {
 		offset: int(ko.Offset),
 	}
 	var err error
-	blk.data, err = t.read(blk.offset, int(ko.Len))
+	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
+		return nil, err
+	}
+
+	if t.shouldDecrypt() {
+		// Decrypt the block if it is encrypted.
+		if blk.data, err = t.decrypt(blk.data); err != nil {
+			return nil, err
+		}
+	}
 
 	// Read meta data related to block.
 	readPos := len(blk.data) - 4 // First read checksum length.
@@ -403,6 +424,30 @@ func (t *Table) VerifyChecksum() error {
 	}
 
 	return nil
+}
+
+// shouldDecrypt tells whether to decrypt or not. We decrypt only if the datakey exist
+// for the table.
+func (t *Table) shouldDecrypt() bool {
+	return t.opt.DataKey != nil
+}
+
+// KeyID returns data key id.
+func (t *Table) KeyID() uint64 {
+	if t.opt.DataKey != nil {
+		return t.opt.DataKey.KeyId
+	}
+	// By default it's 0, if it is plain text.
+	return 0
+}
+
+// decrypt decrypts the given data. It should be called only after checking shouldDecrypt.
+func (t *Table) decrypt(data []byte) ([]byte, error) {
+	// Last BlockSize bytes of the data is the IV.
+	iv := data[len(data)-aes.BlockSize:]
+	// Rest all bytes are data.
+	data = data[:len(data)-aes.BlockSize]
+	return y.XORBlock(data, t.opt.DataKey.Data, iv)
 }
 
 // ParseFileID reads the file id out of a filename.

@@ -68,8 +68,8 @@ type levelManifest struct {
 // TableManifest contains information about a specific level
 // in the LSM tree.
 type TableManifest struct {
-	Level    uint8
-	Checksum []byte
+	Level uint8
+	KeyID uint64
 }
 
 // manifestFile holds the file pointer (and other info) about the manifest file, which is a log
@@ -100,7 +100,7 @@ const (
 func (m *Manifest) asChanges() []*pb.ManifestChange {
 	changes := make([]*pb.ManifestChange, 0, len(m.Tables))
 	for id, tm := range m.Tables {
-		changes = append(changes, newCreateChange(id, int(tm.Level)))
+		changes = append(changes, newCreateChange(id, int(tm.Level), tm.KeyID))
 	}
 	return changes
 }
@@ -396,6 +396,7 @@ func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {
 		}
 		build.Tables[tc.Id] = TableManifest{
 			Level: uint8(tc.Level),
+			KeyID: tc.KeyId,
 		}
 		for len(build.Levels) <= int(tc.Level) {
 			build.Levels = append(build.Levels, levelManifest{make(map[uint64]struct{})})
@@ -427,11 +428,14 @@ func applyChangeSet(build *Manifest, changeSet *pb.ManifestChangeSet) error {
 	return nil
 }
 
-func newCreateChange(id uint64, level int) *pb.ManifestChange {
+func newCreateChange(id uint64, level int, keyID uint64) *pb.ManifestChange {
 	return &pb.ManifestChange{
-		Id:    id,
-		Op:    pb.ManifestChange_CREATE,
-		Level: uint32(level),
+		Id:             id,
+		Op:             pb.ManifestChange_CREATE,
+		Level:          uint32(level),
+		KeyId:          keyID,
+		EncryptionAlgo: pb.EncryptionAlgo_aes,
+		// Hardcoding it, since we're supporting only AES for now.
 	}
 }
 

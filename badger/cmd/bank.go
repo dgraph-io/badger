@@ -70,6 +70,7 @@ var mmap bool
 var checkStream bool
 var checkSubscriber bool
 var verbose bool
+var encryptionEnabled bool
 
 const keyPrefix = "account:"
 
@@ -98,6 +99,8 @@ func init() {
 
 	bankDisect.Flags().IntVarP(&numPrevious, "previous", "p", 12,
 		"Starting from the violation txn, how many previous versions to retrieve.")
+	bankDisect.Flags().BoolVarP(&encryptionEnabled, "encryption", "e", false,
+		"If it is true, badger will encrypt all the data stored on the disk.")
 }
 
 func key(account int) []byte {
@@ -338,6 +341,14 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}
 	log.Printf("Opening DB with options: %+v\n", opts)
 
+	if encryptionEnabled {
+		key := make([]byte, 32)
+		_, err := rand.Read(key)
+		if err != nil {
+			return err
+		}
+		opts = opts.WithEncryptionKey(key)
+	}
 	db, err := badger.Open(opts)
 	if err != nil {
 		return err

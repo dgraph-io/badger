@@ -149,10 +149,15 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				rerr = errors.Wrapf(err, "Opening file: %q", fname)
 				return
 			}
-
+			dk, err := db.registry.dataKey(tf.KeyID)
+			if err != nil {
+				rerr = errors.Wrapf(err, "Error while reading datakey")
+				return
+			}
 			opts := table.Options{
 				LoadingMode: db.opt.TableLoadingMode,
 				ChkMode:     db.opt.ChecksumVerificationMode,
+				DataKey:     dk,
 			}
 			t, err := table.OpenTable(fd, opts)
 			if err != nil {
@@ -498,9 +503,15 @@ func (s *levelsController) compactBuildTables(
 	var lastKey, skipKey []byte
 	for it.Valid() {
 		timeStart := time.Now()
+		dk, err := s.kv.registry.latestDataKey()
+		if err != nil {
+			return nil, nil,
+				y.Wrapf(err, "Error while retrieving datakey in levelsController.compactBuildTables")
+		}
 		bopts := table.Options{
 			BlockSize:          s.kv.opt.BlockSize,
 			BloomFalsePositive: s.kv.opt.BloomFalsePositive,
+			DataKey:            dk,
 		}
 		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64
@@ -586,6 +597,7 @@ func (s *levelsController) compactBuildTables(
 			opts := table.Options{
 				LoadingMode: s.kv.opt.TableLoadingMode,
 				ChkMode:     s.kv.opt.ChecksumVerificationMode,
+				DataKey:     builder.DataKey(),
 			}
 			tbl, err := table.OpenTable(fd, opts)
 			// decrRef is added below.
@@ -647,7 +659,7 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeS
 	changes := []*pb.ManifestChange{}
 	for _, table := range newTables {
 		changes = append(changes,
-			newCreateChange(table.ID(), cd.nextLevel.level))
+			newCreateChange(table.ID(), cd.nextLevel.level, table.KeyID()))
 	}
 	for _, table := range cd.top {
 		// Add a delete change only if the table is not in memory.
@@ -883,7 +895,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		// the proper order. (That means this update happens before that of some compaction which
 		// deletes the table.)
 		err := s.kv.manifest.addChanges([]*pb.ManifestChange{
-			newCreateChange(t.ID(), 0),
+			newCreateChange(t.ID(), 0, t.KeyID()),
 		})
 		if err != nil {
 			return err

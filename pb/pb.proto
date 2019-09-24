@@ -40,6 +40,10 @@ message ManifestChangeSet {
         repeated ManifestChange changes = 1;
 }
 
+enum EncryptionAlgo {
+                aes = 0;  
+}
+
 message ManifestChange {
         uint64 Id = 1;
         enum Operation {
@@ -48,6 +52,8 @@ message ManifestChange {
         }
         Operation Op   = 2;
         uint32 Level   = 3; // Only used for CREATE
+        uint64 key_id  = 4;
+        EncryptionAlgo encryption_algo = 5;
 }
 
 message BlockOffset {
@@ -68,4 +74,11 @@ message Checksum {
   }
   Algorithm algo = 1; // For storing type of Checksum algorithm used
   uint64 sum = 2;
+}
+
+message DataKey {
+  uint64 key_id      = 1;
+  bytes  data       = 2;
+  bytes  iv         = 3;
+  int64  created_at = 4;
 }
