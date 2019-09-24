@@ -1165,6 +1165,16 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 		return nil, cb, err
 	}
 
+	if vlog.opt.VerifyValueChecksum {
+		hash := crc32.New(y.CastagnoliCrcTable)
+		hash.Write(buf)
+		// Fetch checksum from the end of the buffer.
+		checksum := buf[len(buf)-crc32.Size:]
+		if hash.Sum32() != y.BytesToU32(checksum) {
+			runCallback(cb)
+			return nil, nil, errors.Wrapf(y.ErrChecksumMismatch, "value corrupted for vp: %+v", vp)
+		}
+	}
 	var h header
 	headerLen := h.Decode(buf)
 	n := uint32(headerLen) + h.klen
