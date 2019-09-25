@@ -227,10 +227,11 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 
 // OpenInMemoryTable is similar to OpenTable but it opens a new table from the provided data.
 // OpenInMemoryTable is used for L0 tables.
-func OpenInMemoryTable(data []byte, id uint64, dk *pb.DataKey) (*Table, error) {
+func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
+	opt.LoadingMode = options.LoadToRAM
 	t := &Table{
 		ref:        1, // Caller is given one reference.
-		opt:        &Options{LoadingMode: options.LoadToRAM, DataKey: dk},
+		opt:        opt,
 		mmap:       data,
 		tableSize:  len(data),
 		IsInmemory: true,
@@ -355,19 +356,19 @@ func (t *Table) block(idx int) (*block, error) {
 			"failed to read from file: %s at offset: %d, len: %d", t.fd.Name(), blk.offset, ko.Len)
 	}
 
+	if t.shouldDecrypt() {
+		// Decrypt the block if it is encrypted.
+		if blk.data, err = t.decrypt(blk.data); err != nil {
+			return nil, err
+		}
+	}
+
 	if t.opt.Compression != options.NoCompression {
 		blk.data, err = DecompressData(t.opt.Compression, blk.data, nil)
 		if err != nil {
 			return nil, errors.Wrapf(err,
 				"failed to decode compressed data in file: %s at offset: %d, len: %d",
 				t.fd.Name(), blk.offset, ko.Len)
-		}
-	}
-
-	if t.shouldDecrypt() {
-		// Decrypt the block if it is encrypted.
-		if blk.data, err = t.decrypt(blk.data); err != nil {
-			return nil, err
 		}
 	}
 

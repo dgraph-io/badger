@@ -43,7 +43,23 @@ func key(prefix string, i int) string {
 	return prefix + fmt.Sprintf("%04d", i)
 }
 
+func getTestTableOptions() Options {
+	return Options{
+		Compression:        options.ZSTDCompression,
+		LoadingMode:        options.LoadToRAM,
+		ChkMode:            options.OnTableAndBlockRead,
+		BlockSize:          4 * 1024,
+		BloomFalsePositive: 0.01,
+	}
+
+}
 func buildTestTable(t *testing.T, prefix string, n int, opts Options) *os.File {
+	if opts.BloomFalsePositive == 0 {
+		opts.BloomFalsePositive = 0.01
+	}
+	if opts.BlockSize == 0 {
+		opts.BlockSize = 4 * 1024
+	}
 	y.AssertTrue(n <= 10000)
 	keyValues := make([][]string, n)
 	for i := 0; i < n; i++ {
@@ -86,7 +102,7 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
 func TestTableIterator(t *testing.T) {
 	for _, n := range []int{99, 100, 101} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
-			opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+			opts := getTestTableOptions()
 			f := buildTestTable(t, "key", n, opts)
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
@@ -109,7 +125,7 @@ func TestTableIterator(t *testing.T) {
 func TestSeekToFirst(t *testing.T) {
 	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
-			opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+			opts := getTestTableOptions()
 			f := buildTestTable(t, "key", n, opts)
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
@@ -128,7 +144,7 @@ func TestSeekToFirst(t *testing.T) {
 func TestSeekToLast(t *testing.T) {
 	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
-			opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+			opts := getTestTableOptions()
 			f := buildTestTable(t, "key", n, opts)
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
@@ -150,7 +166,7 @@ func TestSeekToLast(t *testing.T) {
 }
 
 func TestSeek(t *testing.T) {
-	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	opts := getTestTableOptions()
 	f := buildTestTable(t, "k", 10000, opts)
 	table, err := OpenTable(f, opts)
 	require.NoError(t, err)
@@ -186,7 +202,7 @@ func TestSeek(t *testing.T) {
 }
 
 func TestSeekForPrev(t *testing.T) {
-	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	opts := getTestTableOptions()
 	f := buildTestTable(t, "k", 10000, opts)
 	table, err := OpenTable(f, opts)
 	require.NoError(t, err)
@@ -225,7 +241,7 @@ func TestIterateFromStart(t *testing.T) {
 	// Vary the number of elements added.
 	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
-			opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+			opts := getTestTableOptions()
 			f := buildTestTable(t, "key", n, opts)
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
@@ -253,7 +269,7 @@ func TestIterateFromEnd(t *testing.T) {
 	// Vary the number of elements added.
 	for _, n := range []int{99, 100, 101, 199, 200, 250, 9999, 10000} {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
-			opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+			opts := getTestTableOptions()
 			f := buildTestTable(t, "key", n, opts)
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
@@ -277,7 +293,8 @@ func TestIterateFromEnd(t *testing.T) {
 }
 
 func TestTable(t *testing.T) {
-	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.FileIO, ChkMode: options.OnTableAndBlockRead}
+	opts := getTestTableOptions()
+	opts.LoadingMode = options.FileIO
 	f := buildTestTable(t, "key", 10000, opts)
 	table, err := OpenTable(f, opts)
 	require.NoError(t, err)
@@ -305,7 +322,7 @@ func TestTable(t *testing.T) {
 }
 
 func TestIterateBackAndForth(t *testing.T) {
-	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	opts := getTestTableOptions()
 	f := buildTestTable(t, "key", 10000, opts)
 	table, err := OpenTable(f, opts)
 	require.NoError(t, err)
@@ -347,7 +364,7 @@ func TestIterateBackAndForth(t *testing.T) {
 }
 
 func TestUniIterator(t *testing.T) {
-	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	opts := getTestTableOptions()
 	f := buildTestTable(t, "key", 10000, opts)
 	table, err := OpenTable(f, opts)
 	require.NoError(t, err)
@@ -380,7 +397,7 @@ func TestUniIterator(t *testing.T) {
 
 // Try having only one table.
 func TestConcatIteratorOneTable(t *testing.T) {
-	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	opts := getTestTableOptions()
 	f := buildTable(t, [][]string{
 		{"k1", "a1"},
 		{"k2", "a2"},
@@ -403,14 +420,13 @@ func TestConcatIteratorOneTable(t *testing.T) {
 }
 
 func TestConcatIterator(t *testing.T) {
-	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	opts := getTestTableOptions()
 	f := buildTestTable(t, "keya", 10000, opts)
 	f2 := buildTestTable(t, "keyb", 10000, opts)
 	f3 := buildTestTable(t, "keyc", 10000, opts)
 	tbl, err := OpenTable(f, opts)
 	require.NoError(t, err)
 	defer tbl.DecrRef()
-	opts.LoadingMode = options.LoadToRAM
 	tbl2, err := OpenTable(f2, opts)
 	require.NoError(t, err)
 	defer tbl2.DecrRef()
@@ -485,7 +501,7 @@ func TestConcatIterator(t *testing.T) {
 }
 
 func TestMergingIterator(t *testing.T) {
-	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+	opts := getTestTableOptions()
 	f1 := buildTable(t, [][]string{
 		{"k1", "a1"},
 		{"k2", "a2"},
@@ -526,7 +542,7 @@ func TestMergingIterator(t *testing.T) {
 }
 
 func TestMergingIteratorReversed(t *testing.T) {
-	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+	opts := getTestTableOptions()
 	f1 := buildTable(t, [][]string{
 		{"k1", "a1"},
 		{"k2", "a2"},
@@ -568,7 +584,7 @@ func TestMergingIteratorReversed(t *testing.T) {
 
 // Take only the first iterator.
 func TestMergingIteratorTakeOne(t *testing.T) {
-	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+	opts := getTestTableOptions()
 	f1 := buildTable(t, [][]string{
 		{"k1", "a1"},
 		{"k2", "a2"},
@@ -609,7 +625,7 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 
 // Take only the second iterator.
 func TestMergingIteratorTakeTwo(t *testing.T) {
-	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+	opts := getTestTableOptions()
 	f1 := buildTable(t, [][]string{}, opts)
 	f2 := buildTable(t, [][]string{
 		{"k1", "a1"},
@@ -691,7 +707,7 @@ func TestTableChecksum(t *testing.T) {
 	// we are going to write random byte at random location in table file.
 	rb := make([]byte, 1)
 	rand.Read(rb)
-	opts := Options{Compression: options.ZSTDCompression, LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+	opts := getTestTableOptions()
 	f := buildTestTable(t, "k", 10000, opts)
 	fi, err := f.Stat()
 	require.NoError(t, err, "unable to get file information")
@@ -763,7 +779,6 @@ func BenchmarkReadMerged(b *testing.B) {
 		}
 		_, err = f.Write(builder.Finish())
 		require.NoError(b, err, "unable to write to file")
-		opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
 		tbl, err := OpenTable(f, opts)
 		y.Check(err)
 		tables = append(tables, tbl)

@@ -51,6 +51,9 @@ func TestTableIndex(t *testing.T) {
 		require.NoError(t, err)
 		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
 			DataKey: &pb.DataKey{Data: key}})
+		// Compression mode.
+		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+			Compression: options.ZSTDCompression})
 		keysCount := 10000
 		for _, opt := range opts {
 			builder := NewTableBuilder(opt)
@@ -76,10 +79,8 @@ func TestTableIndex(t *testing.T) {
 			_, err = f.Write(builder.Finish())
 			require.NoError(t, err, "unable to write to file")
 
-			topt := Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead,
-				DataKey: opt.DataKey}
-			tbl, err := OpenTable(f, topt)
-			if topt.DataKey == nil {
+			tbl, err := OpenTable(f, opt)
+			if opt.DataKey == nil {
 				// key id is zero if thre is no datakey.
 				require.Equal(t, tbl.KeyID(), uint64(0))
 			}

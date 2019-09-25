@@ -651,7 +651,8 @@ func TestLoad(t *testing.T) {
 		key := make([]byte, 32)
 		_, err := rand.Read(key)
 		require.NoError(t, err)
-		opt := getTestOptions("").WithEncryptionKey(key)
+		opt := getTestOptions("")
+		opt.EncryptionKey = key
 		opt.Compression = options.NoCompression
 		testLoad(t, opt)
 	})
@@ -659,7 +660,8 @@ func TestLoad(t *testing.T) {
 		key := make([]byte, 32)
 		_, err := rand.Read(key)
 		require.NoError(t, err)
-		opt := getTestOptions("").WithEncryptionKey(key)
+		opt := getTestOptions("")
+		opt.EncryptionKey = key
 		opt.Compression = options.ZSTDCompression
 		testLoad(t, opt)
 	})

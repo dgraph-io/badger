@@ -507,11 +507,8 @@ func (s *levelsController) compactBuildTables(
 			return nil, nil,
 				y.Wrapf(err, "Error while retrieving datakey in levelsController.compactBuildTables")
 		}
-		bopts := table.Options{
-			BlockSize:          s.kv.opt.BlockSize,
-			BloomFalsePositive: s.kv.opt.BloomFalsePositive,
-			DataKey:            dk,
-		}
+		bopts := BuildTableOptions(s.kv.opt)
+		bopts.DataKey = dk
 		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
@@ -592,13 +589,7 @@ func (s *levelsController) compactBuildTables(
 			if _, err := fd.Write(builder.Finish()); err != nil {
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
-
-			opts := table.Options{
-				LoadingMode: s.kv.opt.TableLoadingMode,
-				ChkMode:     s.kv.opt.ChecksumVerificationMode,
-				DataKey:     builder.DataKey(),
-			}
-			tbl, err := table.OpenTable(fd, opts)
+			tbl, err := table.OpenTable(fd, bopts)
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}

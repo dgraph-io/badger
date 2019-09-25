@@ -911,16 +911,13 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	if err != nil {
 		return y.Wrapf(err, "failed to get datakey in db.handleFlushTask")
 	}
-	bopts := table.Options{
-		BlockSize:          db.opt.BlockSize,
-		BloomFalsePositive: db.opt.BloomFalsePositive,
-		DataKey:            dk,
-	}
+	bopts := BuildTableOptions(db.opt)
+	bopts.DataKey = dk
 	tableData := buildL0Table(ft, bopts)
 
 	fileID := db.lc.reserveFileID()
 	if db.opt.KeepL0InMemory {
-		tbl, err := table.OpenInMemoryTable(tableData, fileID, dk)
+		tbl, err := table.OpenInMemoryTable(tableData, fileID, &bopts)
 		if err != nil {
 			return errors.Wrapf(err, "failed to open table in memory")
 		}
@@ -945,13 +942,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		// Do dir sync as best effort. No need to return due to an error there.
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
-
-	opts := table.Options{
-		LoadingMode: db.opt.TableLoadingMode,
-		ChkMode:     db.opt.ChecksumVerificationMode,
-		DataKey:     dk,
-	}
-	tbl, err := table.OpenTable(fd, opts)
+	tbl, err := table.OpenTable(fd, bopts)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err
