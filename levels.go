@@ -155,7 +155,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				return
 			}
 			topt := BuildTableOptions(db.opt)
-			// Set compression from table manifest
+			// Set compression from table manifest.
 			topt.Compression = tf.Compression
 			topt.DataKey = dk
 			t, err := table.OpenTable(fd, topt)

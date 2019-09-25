@@ -432,7 +432,8 @@ func applyChangeSet(build *Manifest, changeSet *pb.ManifestChangeSet) error {
 	return nil
 }
 
-func newCreateChange(id uint64, level int, keyID uint64, c options.CompressionType) *pb.ManifestChange {
+func newCreateChange(
+	id uint64, level int, keyID uint64, c options.CompressionType) *pb.ManifestChange {
 	return &pb.ManifestChange{
 		Id:    id,
 		Op:    pb.ManifestChange_CREATE,
