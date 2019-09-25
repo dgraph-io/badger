@@ -304,6 +304,7 @@ func (w *sortedWriter) send() error {
 		BlockSize:          w.db.opt.BlockSize,
 		BloomFalsePositive: w.db.opt.BloomFalsePositive,
 		DataKey:            dk,
+		Compression:        w.db.opt.Compression,
 	}
 	w.builder = table.NewTableBuilder(bopts)
 	return nil
@@ -336,6 +337,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 		LoadingMode: w.db.opt.TableLoadingMode,
 		ChkMode:     w.db.opt.ChecksumVerificationMode,
 		DataKey:     builder.DataKey(),
+		Compression: w.db.opt.Compression,
 	}
 	tbl, err := table.OpenTable(fd, opts)
 	if err != nil {
