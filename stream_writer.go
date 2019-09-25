@@ -128,7 +128,11 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 	for streamId, req := range streamReqs {
 		writer, ok := sw.writers[streamId]
 		if !ok {
-			writer = sw.newWriter(streamId)
+			var err error
+			writer, err = sw.newWriter(streamId)
+			if err != nil {
+				return errors.Wrapf(err, "failed to create writer with ID %d", streamId)
+			}
 			sw.writers[streamId] = writer
 		}
 		writer.reqCh <- req
@@ -157,7 +161,10 @@ func (sw *StreamWriter) Flush() error {
 
 	// Encode and write the value log head into a new table.
 	data := maxHead.Encode()
-	headWriter := sw.newWriter(headStreamId)
+	headWriter, err := sw.newWriter(headStreamId)
+	if err != nil {
+		return errors.Wrap(err, "failed to create head writer")
+	}
 	if err := headWriter.Add(
 		y.KeyWithTs(head, sw.maxVersion),
 		y.ValueStruct{Value: data}); err != nil {
@@ -206,10 +213,16 @@ type sortedWriter struct {
 	head     valuePointer
 }
 
-func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
+func (sw *StreamWriter) newWriter(streamId uint32) (*sortedWriter, error) {
+	dk, err := sw.db.registry.latestDataKey()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create new writer")
+	}
+
 	bopts := table.Options{
 		BlockSize:          sw.db.opt.BlockSize,
 		BloomFalsePositive: sw.db.opt.BloomFalsePositive,
+		DataKey:            dk,
 	}
 	w := &sortedWriter{
 		db:       sw.db,
@@ -220,7 +233,7 @@ func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
 	}
 	sw.closer.AddRunning(1)
 	go w.handleRequests(sw.closer)
-	return w
+	return w, nil
 }
 
 // ErrUnsortedKey is returned when any out of order key arrives at sortedWriter during call to Add.
