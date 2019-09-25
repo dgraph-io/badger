@@ -52,7 +52,7 @@ var (
 )
 
 // revertToManifest checks that all necessary table files exist and removes all table files not
-// referenced by the manifest.  idMap is a set of table file id's that were read from the directory
+// referenced by the manifest. idMap is a set of table file id's that were read from the directory
 // listing.
 func revertToManifest(kv *DB, mf *Manifest, idMap map[uint64]struct{}) error {
 	// 1. Check all files in manifest exist.
@@ -149,9 +149,15 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				rerr = errors.Wrapf(err, "Opening file: %q", fname)
 				return
 			}
+			dk, err := db.registry.dataKey(tf.KeyID)
+			if err != nil {
+				rerr = errors.Wrapf(err, "Error while reading datakey")
+				return
+			}
 			topt := BuildTableOptions(db.opt)
 			// Set compression from table manifest
 			topt.Compression = tf.Compression
+			topt.DataKey = dk
 			t, err := table.OpenTable(fd, topt)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
@@ -496,7 +502,17 @@ func (s *levelsController) compactBuildTables(
 	var lastKey, skipKey []byte
 	for it.Valid() {
 		timeStart := time.Now()
-		builder := table.NewTableBuilder(BuildTableOptions(s.kv.opt))
+		dk, err := s.kv.registry.latestDataKey()
+		if err != nil {
+			return nil, nil,
+				y.Wrapf(err, "Error while retrieving datakey in levelsController.compactBuildTables")
+		}
+		bopts := table.Options{
+			BlockSize:          s.kv.opt.BlockSize,
+			BloomFalsePositive: s.kv.opt.BloomFalsePositive,
+			DataKey:            dk,
+		}
+		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
 			// See if we need to skip the prefix.
@@ -577,7 +593,12 @@ func (s *levelsController) compactBuildTables(
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
 
-			tbl, err := table.OpenTable(fd, BuildTableOptions(s.kv.opt))
+			opts := table.Options{
+				LoadingMode: s.kv.opt.TableLoadingMode,
+				ChkMode:     s.kv.opt.ChecksumVerificationMode,
+				DataKey:     builder.DataKey(),
+			}
+			tbl, err := table.OpenTable(fd, opts)
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}
@@ -637,7 +658,7 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeS
 	changes := []*pb.ManifestChange{}
 	for _, table := range newTables {
 		changes = append(changes,
-			newCreateChange(table.ID(), cd.nextLevel.level, table.CompressionType()))
+			newCreateChange(table.ID(), cd.nextLevel.level, table.KeyID(), table.CompressionType()))
 	}
 	for _, table := range cd.top {
 		// Add a delete change only if the table is not in memory.
@@ -873,7 +894,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		// the proper order. (That means this update happens before that of some compaction which
 		// deletes the table.)
 		err := s.kv.manifest.addChanges([]*pb.ManifestChange{
-			newCreateChange(t.ID(), 0, t.CompressionType()),
+			newCreateChange(t.ID(), 0, t.KeyID(), t.CompressionType()),
 		})
 		if err != nil {
 			return err
@@ -993,6 +1014,7 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 				for it.Rewind(); it.Valid(); it.Next() {
 					count++
 				}
+				it.Close()
 			}
 
 			info := TableInfo{

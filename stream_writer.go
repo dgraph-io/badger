@@ -293,12 +293,19 @@ func (w *sortedWriter) send() error {
 		return err
 	}
 	go func(builder *table.Builder) {
-		data := builder.Finish()
-		err := w.createTable(data)
+		err := w.createTable(builder)
 		w.throttle.Done(err)
 	}(w.builder)
-
-	w.builder = table.NewTableBuilder(BuildTableOptions(w.db.opt))
+	dk, err := w.db.registry.latestDataKey()
+	if err != nil {
+		return y.Wrapf(err, "Error while retriving datakey in sortedWriter.send")
+	}
+	bopts := table.Options{
+		BlockSize:          w.db.opt.BlockSize,
+		BloomFalsePositive: w.db.opt.BloomFalsePositive,
+		DataKey:            dk,
+	}
+	w.builder = table.NewTableBuilder(bopts)
 	return nil
 }
 
@@ -311,7 +318,8 @@ func (w *sortedWriter) Done() error {
 	return w.send()
 }
 
-func (w *sortedWriter) createTable(data []byte) error {
+func (w *sortedWriter) createTable(builder *table.Builder) error {
+	data := builder.Finish()
 	if len(data) == 0 {
 		return nil
 	}
@@ -323,7 +331,13 @@ func (w *sortedWriter) createTable(data []byte) error {
 	if _, err := fd.Write(data); err != nil {
 		return err
 	}
-	tbl, err := table.OpenTable(fd, BuildTableOptions(w.db.opt))
+
+	opts := table.Options{
+		LoadingMode: w.db.opt.TableLoadingMode,
+		ChkMode:     w.db.opt.ChecksumVerificationMode,
+		DataKey:     builder.DataKey(),
+	}
+	tbl, err := table.OpenTable(fd, opts)
 	if err != nil {
 		return err
 	}
@@ -364,6 +378,8 @@ func (w *sortedWriter) createTable(data []byte) error {
 	if err := lhandler.replaceTables([]*table.Table{}, []*table.Table{tbl}); err != nil {
 		return err
 	}
+	// Release the ref held by OpenTable.
+	_ = tbl.DecrRef()
 	w.db.opt.Infof("Table created: %d at level: %d for stream: %d. Size: %s\n",
 		fileID, lhandler.level, w.streamId, humanize.Bytes(uint64(tbl.Size())))
 	return nil

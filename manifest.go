@@ -71,7 +71,7 @@ type levelManifest struct {
 // in the LSM tree.
 type TableManifest struct {
 	Level       uint8
-	Checksum    []byte
+	KeyID       uint64
 	Compression options.CompressionType
 }
 
@@ -103,7 +103,7 @@ const (
 func (m *Manifest) asChanges() []*pb.ManifestChange {
 	changes := make([]*pb.ManifestChange, 0, len(m.Tables))
 	for id, tm := range m.Tables {
-		changes = append(changes, newCreateChange(id, int(tm.Level), tm.Compression))
+		changes = append(changes, newCreateChange(id, int(tm.Level), tm.KeyID, tm.Compression))
 	}
 	return changes
 }
@@ -123,7 +123,7 @@ func openOrCreateManifestFile(dir string, readOnly bool) (
 }
 
 func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold int) (
-	ret *manifestFile, result Manifest, err error) {
+	*manifestFile, Manifest, error) {
 
 	path := filepath.Join(dir, ManifestFilename)
 	var flags uint32
@@ -334,7 +334,7 @@ var (
 // Also, returns the last offset after a completely read manifest entry -- the file must be
 // truncated at that point before further appends are made (if there is a partial entry after
 // that).  In normal conditions, truncOffset is the file size.
-func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error) {
+func ReplayManifestFile(fp *os.File) (Manifest, int64, error) {
 	r := countingReader{wrapped: bufio.NewReader(fp)}
 
 	var magicBuf [8]byte
@@ -388,7 +388,7 @@ func ReplayManifestFile(fp *os.File) (ret Manifest, truncOffset int64, err error
 		}
 	}
 
-	return build, offset, err
+	return build, offset, nil
 }
 
 func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {
@@ -399,6 +399,7 @@ func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {
 		}
 		build.Tables[tc.Id] = TableManifest{
 			Level:       uint8(tc.Level),
+			KeyID:       tc.KeyId,
 			Compression: options.CompressionType(tc.Compression),
 		}
 		for len(build.Levels) <= int(tc.Level) {
@@ -431,12 +432,15 @@ func applyChangeSet(build *Manifest, changeSet *pb.ManifestChangeSet) error {
 	return nil
 }
 
-func newCreateChange(id uint64, level int, c options.CompressionType) *pb.ManifestChange {
+func newCreateChange(id uint64, level int, keyID uint64, c options.CompressionType) *pb.ManifestChange {
 	return &pb.ManifestChange{
-		Id:          id,
-		Op:          pb.ManifestChange_CREATE,
-		Level:       uint32(level),
-		Compression: uint32(c),
+		Id:    id,
+		Op:    pb.ManifestChange_CREATE,
+		Level: uint32(level),
+		KeyId: keyID,
+		// Hard coding it, since we're supporting only AES for now.
+		EncryptionAlgo: pb.EncryptionAlgo_aes,
+		Compression:    uint32(c),
 	}
 }
 
