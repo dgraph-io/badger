@@ -47,12 +47,11 @@ const (
 // CompressionType specifies how a block should be compressed.
 type CompressionType uint32
 
-// The following constants should always be kept in sync with CompressionType protobuf
 const (
 	// NoCompression mode indicates that a block is not compressed.
 	NoCompression CompressionType = 0
-	// SnappyCompression mode indicates that a block is not compressed.
+	// SnappyCompression mode indicates that a block is compressed using Snappy algorithm.
 	SnappyCompression CompressionType = 1
-	// ZSTDCompression mode indicates that a block is not compressed.
+	// ZSTDCompression mode indicates that a block is compressed using ZSTD algorithm.
 	ZSTDCompression CompressionType = 2
 )

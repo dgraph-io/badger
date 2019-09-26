@@ -339,7 +339,7 @@ func (b *Builder) shouldEncrypt() bool {
 	return b.opt.DataKey != nil
 }
 
-// compressData compresses the given data
+// compressData compresses the given data.
 func (b *Builder) compressData(data []byte) ([]byte, error) {
 	switch b.opt.Compression {
 	case options.NoCompression:

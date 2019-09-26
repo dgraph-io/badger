@@ -62,7 +62,7 @@ type Options struct {
 	// DataKey is the key used to decrypt the encrypted text.
 	DataKey *pb.DataKey
 
-	// Compression ...
+	// Compression indicates the compression algorithm used for block compression.
 	Compression options.CompressionType
 }
 
@@ -96,7 +96,7 @@ type Table struct {
 	opt        *Options
 }
 
-// CompressionType ..
+// CompressionType returns the compression algorithm used for block compression.
 func (t *Table) CompressionType() options.CompressionType {
 	return t.opt.Compression
 }
