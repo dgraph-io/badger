@@ -44,15 +44,15 @@ const (
 	OnTableAndBlockRead
 )
 
-// CompressionType ...
+// CompressionType specifies how a block should be compressed.
 type CompressionType uint32
 
 // The following constants should always be kept in sync with CompressionType protobuf
 const (
-	// NoCompression ...
+	// NoCompression mode indicates that a block is not compressed.
 	NoCompression CompressionType = 0
-	// Snappy ...
+	// SnappyCompression mode indicates that a block is not compressed.
 	SnappyCompression CompressionType = 1
-	// ZSTD ...
+	// ZSTDCompression mode indicates that a block is not compressed.
 	ZSTDCompression CompressionType = 2
 )

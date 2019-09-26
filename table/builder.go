@@ -23,11 +23,10 @@ import (
 	"unsafe"
 
 	"github.com/DataDog/zstd"
-	"github.com/golang/snappy"
-	"github.com/pkg/errors"
-
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
+	"github.com/golang/snappy"
+	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
@@ -155,16 +154,16 @@ func (b *Builder) finishBlock() {
 	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
 	b.writeChecksum(blockBuf)
 
-	// Compress the block
+	// Compress the block.
 	if b.opt.Compression != options.NoCompression {
 		var err error
 		// TODO: Find a way to reuse buffers. Current implementation creates a
 		// new buffer for each compressData call.
 		blockBuf, err = b.compressData(b.buf.Bytes()[b.baseOffset:])
 		y.Check(err)
-		// Truncate already written data
+		// Truncate already written data.
 		b.buf.Truncate(int(b.baseOffset))
-		// Write compressed data
+		// Write compressed data.
 		b.buf.Write(blockBuf)
 	}
 	if b.shouldEncrypt() {

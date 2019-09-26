@@ -476,7 +476,10 @@ func (opt Options) WithKeepL0InMemory(val bool) Options {
 	return opt
 }
 
-// WithCompressionType ...
+// WithCompressionType returns a new Options value with CompressionType set to the given value.
+//
+// When compression type is set, every block will be compressed using the specified algorithm.
+// This option doesn't affect existing tables. Only the newly created tables will be compressed.
 func (opt Options) WithCompressionType(cType options.CompressionType) Options {
 	opt.Compression = cType
 	return opt

@@ -28,7 +28,6 @@ import (
 	"sync"
 
 	"github.com/dgraph-io/badger/options"
-
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 	"github.com/golang/protobuf/proto"
