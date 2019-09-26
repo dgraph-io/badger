@@ -21,6 +21,7 @@ install:
   - go version
   - go env
   - python --version
+  - gcc --version
 
 # To run your custom scripts instead of automatic MSBuild
 build_script:
