@@ -216,7 +216,7 @@ type sortedWriter struct {
 func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 	dk, err := sw.db.registry.latestDataKey()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create new writer")
+		return nil, err
 	}
 
 	bopts := table.Options{
