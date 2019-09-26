@@ -28,7 +28,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/DataDog/zstd"
 	"github.com/golang/protobuf/proto"
+	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/options"
@@ -364,7 +366,7 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 
 	if t.opt.Compression != options.NoCompression {
-		blk.data, err = DecompressData(t.opt.Compression, blk.data, nil)
+		blk.data, err = t.decompressData(blk.data)
 		if err != nil {
 			return nil, errors.Wrapf(err,
 				"failed to decode compressed data in file: %s at offset: %d, len: %d",
@@ -494,4 +496,17 @@ func IDToFilename(id uint64) string {
 // filepath.
 func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, IDToFilename(id))
+}
+
+// decompressData decompresses the given data.
+func (t *Table) decompressData(data []byte) ([]byte, error) {
+	switch t.opt.Compression {
+	case options.NoCompression:
+		return data, nil
+	case options.SnappyCompression:
+		return snappy.Decode(nil, data)
+	case options.ZSTDCompression:
+		return zstd.Decompress(nil, data)
+	}
+	return nil, errors.New("Unsupported compression type")
 }

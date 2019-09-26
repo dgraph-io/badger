@@ -159,8 +159,8 @@ func (b *Builder) finishBlock() {
 	if b.opt.Compression != options.NoCompression {
 		var err error
 		// TODO: Find a way to reuse buffers. Current implementation creates a
-		// new buffer for each CompressData call.
-		blockBuf, err = CompressData(b.opt.Compression, b.buf.Bytes()[b.baseOffset:], nil)
+		// new buffer for each compressData call.
+		blockBuf, err = b.compressData(b.buf.Bytes()[b.baseOffset:])
 		y.Check(err)
 		// Truncate already written data
 		b.buf.Truncate(int(b.baseOffset))
@@ -340,28 +340,15 @@ func (b *Builder) shouldEncrypt() bool {
 	return b.opt.DataKey != nil
 }
 
-// CompressData ...
-func CompressData(ctype options.CompressionType, data, dst []byte) ([]byte, error) {
-	switch ctype {
+// compressData compresses the given data
+func (b *Builder) compressData(data []byte) ([]byte, error) {
+	switch b.opt.Compression {
 	case options.NoCompression:
 		return data, nil
 	case options.SnappyCompression:
-		return snappy.Encode(dst, data), nil
+		return snappy.Encode(nil, data), nil
 	case options.ZSTDCompression:
-		return zstd.Compress(dst, data)
-	}
-	return nil, errors.New("Unsupported compression type")
-}
-
-// DecompressData ...
-func DecompressData(ctype options.CompressionType, data, dst []byte) ([]byte, error) {
-	switch ctype {
-	case options.NoCompression:
-		return data, nil
-	case options.SnappyCompression:
-		return snappy.Decode(dst, data)
-	case options.ZSTDCompression:
-		return zstd.Decompress(dst, data)
+		return zstd.Compress(nil, data)
 	}
 	return nil, errors.New("Unsupported compression type")
 }
