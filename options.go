@@ -114,7 +114,7 @@ func DefaultOptions(path string) Options {
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          true,
-		Compression:             options.ZSTDCompression,
+		Compression:             options.ZSTD,
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
@@ -132,8 +132,7 @@ func DefaultOptions(path string) Options {
 	}
 }
 
-// BuildTableOptions ...
-func BuildTableOptions(opt Options) table.Options {
+func buildTableOptions(opt Options) table.Options {
 	return table.Options{
 		BlockSize:          opt.BlockSize,
 		BloomFalsePositive: opt.BloomFalsePositive,

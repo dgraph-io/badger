@@ -911,7 +911,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	if err != nil {
 		return y.Wrapf(err, "failed to get datakey in db.handleFlushTask")
 	}
-	bopts := BuildTableOptions(db.opt)
+	bopts := buildTableOptions(db.opt)
 	bopts.DataKey = dk
 	tableData := buildL0Table(ft, bopts)
 

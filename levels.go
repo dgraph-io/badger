@@ -154,7 +154,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				rerr = errors.Wrapf(err, "Error while reading datakey")
 				return
 			}
-			topt := BuildTableOptions(db.opt)
+			topt := buildTableOptions(db.opt)
 			// Set compression from table manifest.
 			topt.Compression = tf.Compression
 			topt.DataKey = dk
@@ -507,7 +507,7 @@ func (s *levelsController) compactBuildTables(
 			return nil, nil,
 				y.Wrapf(err, "Error while retrieving datakey in levelsController.compactBuildTables")
 		}
-		bopts := BuildTableOptions(s.kv.opt)
+		bopts := buildTableOptions(s.kv.opt)
 		bopts.DataKey = dk
 		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64

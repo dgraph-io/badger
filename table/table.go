@@ -365,13 +365,11 @@ func (t *Table) block(idx int) (*block, error) {
 		}
 	}
 
-	if t.opt.Compression != options.NoCompression {
-		blk.data, err = t.decompressData(blk.data)
-		if err != nil {
-			return nil, errors.Wrapf(err,
-				"failed to decode compressed data in file: %s at offset: %d, len: %d",
-				t.fd.Name(), blk.offset, ko.Len)
-		}
+	blk.data, err = t.decompressData(blk.data)
+	if err != nil {
+		return nil, errors.Wrapf(err,
+			"failed to decode compressed data in file: %s at offset: %d, len: %d",
+			t.fd.Name(), blk.offset, ko.Len)
 	}
 
 	// Read meta data related to block.
@@ -501,11 +499,11 @@ func NewFilename(id uint64, dir string) string {
 // decompressData decompresses the given data.
 func (t *Table) decompressData(data []byte) ([]byte, error) {
 	switch t.opt.Compression {
-	case options.NoCompression:
+	case options.None:
 		return data, nil
-	case options.SnappyCompression:
+	case options.Snappy:
 		return snappy.Decode(nil, data)
-	case options.ZSTDCompression:
+	case options.ZSTD:
 		return zstd.Decompress(nil, data)
 	}
 	return nil, errors.New("Unsupported compression type")

@@ -155,7 +155,7 @@ func (b *Builder) finishBlock() {
 	b.writeChecksum(blockBuf)
 
 	// Compress the block.
-	if b.opt.Compression != options.NoCompression {
+	if b.opt.Compression != options.None {
 		var err error
 		// TODO: Find a way to reuse buffers. Current implementation creates a
 		// new buffer for each compressData call.
@@ -342,11 +342,11 @@ func (b *Builder) shouldEncrypt() bool {
 // compressData compresses the given data.
 func (b *Builder) compressData(data []byte) ([]byte, error) {
 	switch b.opt.Compression {
-	case options.NoCompression:
+	case options.None:
 		return data, nil
-	case options.SnappyCompression:
+	case options.Snappy:
 		return snappy.Encode(nil, data), nil
-	case options.ZSTDCompression:
+	case options.ZSTD:
 		return zstd.Compress(nil, data)
 	}
 	return nil, errors.New("Unsupported compression type")

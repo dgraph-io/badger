@@ -644,7 +644,7 @@ func TestLoad(t *testing.T) {
 	}
 	t.Run("TestLoad Without Encryption/Compression", func(t *testing.T) {
 		opt := getTestOptions("")
-		opt.Compression = options.NoCompression
+		opt.Compression = options.None
 		testLoad(t, opt)
 	})
 	t.Run("TestLoad With Encryption and no compression", func(t *testing.T) {
@@ -653,7 +653,7 @@ func TestLoad(t *testing.T) {
 		require.NoError(t, err)
 		opt := getTestOptions("")
 		opt.EncryptionKey = key
-		opt.Compression = options.NoCompression
+		opt.Compression = options.None
 		testLoad(t, opt)
 	})
 	t.Run("TestLoad With Encryption and compression", func(t *testing.T) {
@@ -662,12 +662,12 @@ func TestLoad(t *testing.T) {
 		require.NoError(t, err)
 		opt := getTestOptions("")
 		opt.EncryptionKey = key
-		opt.Compression = options.ZSTDCompression
+		opt.Compression = options.ZSTD
 		testLoad(t, opt)
 	})
 	t.Run("TestLoad without Encryption and with compression", func(t *testing.T) {
 		opt := getTestOptions("")
-		opt.Compression = options.ZSTDCompression
+		opt.Compression = options.ZSTD
 		testLoad(t, opt)
 	})
 }

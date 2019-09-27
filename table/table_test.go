@@ -45,7 +45,7 @@ func key(prefix string, i int) string {
 
 func getTestTableOptions() Options {
 	return Options{
-		Compression:        options.ZSTDCompression,
+		Compression:        options.ZSTD,
 		LoadingMode:        options.LoadToRAM,
 		ChkMode:            options.OnTableAndBlockRead,
 		BlockSize:          4 * 1024,
@@ -72,7 +72,7 @@ func buildTestTable(t *testing.T, prefix string, n int, opts Options) *os.File {
 
 // keyValues is n by 2 where n is number of pairs.
 func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
-	// opts := Options{Compression: options.ZSTDCompression, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+	// opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	b := NewTableBuilder(opts)
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
@@ -674,7 +674,7 @@ func TestTableBigValues(t *testing.T) {
 	require.NoError(t, err, "unable to create file")
 
 	n := 100 // Insert 100 keys.
-	opts := Options{Compression: options.ZSTDCompression, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	builder := NewTableBuilder(opts)
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), 0)
@@ -745,7 +745,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 	// Iterate b.N times over the entire table.
 	for i := 0; i < b.N; i++ {
 		func() {
-			opts := Options{Compression: options.ZSTDCompression, BlockSize: 4 * 0124, BloomFalsePositive: 0.01}
+			opts := Options{Compression: options.ZSTD, BlockSize: 4 * 0124, BloomFalsePositive: 0.01}
 			newBuilder := NewTableBuilder(opts)
 			it := tbl.NewIterator(false)
 			defer it.Close()
@@ -766,7 +766,7 @@ func BenchmarkReadMerged(b *testing.B) {
 	var tables []*Table
 	for i := 0; i < m; i++ {
 		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-		opts := Options{Compression: options.ZSTDCompression, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+		opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 		builder := NewTableBuilder(opts)
 		f, err := y.OpenSyncedFile(filename, true)
 		y.Check(err)
@@ -852,7 +852,7 @@ func BenchmarkRandomRead(b *testing.B) {
 
 func getTableForBenchmarks(b *testing.B, count int) *Table {
 	rand.Seed(time.Now().Unix())
-	opts := Options{Compression: options.ZSTDCompression, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	builder := NewTableBuilder(opts)
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
