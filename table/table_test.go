@@ -589,7 +589,7 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 		{"k1", "a1"},
 		{"k2", "a2"},
 	}, opts)
-	f2 := buildTable(t, [][]string{}, opts)
+	f2 := buildTable(t, [][]string{{"l1", "b1"}}, opts)
 
 	t1, err := OpenTable(f1, opts)
 	require.NoError(t, err)
@@ -620,13 +620,20 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 	require.EqualValues(t, 'A', vs.Meta)
 	it.Next()
 
+	k = it.Key()
+	require.EqualValues(t, "l1", string(y.ParseKey(k)))
+	vs = it.Value()
+	require.EqualValues(t, "b1", string(vs.Value))
+	require.EqualValues(t, 'A', vs.Meta)
+	it.Next()
+
 	require.False(t, it.Valid())
 }
 
 // Take only the second iterator.
 func TestMergingIteratorTakeTwo(t *testing.T) {
 	opts := getTestTableOptions()
-	f1 := buildTable(t, [][]string{}, opts)
+	f1 := buildTable(t, [][]string{{"l1", "b1"}}, opts)
 	f2 := buildTable(t, [][]string{
 		{"k1", "a1"},
 		{"k2", "a2"},
@@ -660,6 +667,15 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 	require.EqualValues(t, "a2", string(vs.Value))
 	require.EqualValues(t, 'A', vs.Meta)
 	it.Next()
+	require.True(t, it.Valid())
+
+	k = it.Key()
+	require.EqualValues(t, "l1", string(y.ParseKey(k)))
+	vs = it.Value()
+	require.EqualValues(t, "b1", string(vs.Value))
+	require.EqualValues(t, 'A', vs.Meta)
+	it.Next()
+
 	require.False(t, it.Valid())
 }
 

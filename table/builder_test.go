@@ -97,6 +97,22 @@ func TestTableIndex(t *testing.T) {
 	})
 }
 
+func TestInvalidCompression(t *testing.T) {
+	keyPrefix := "key"
+	opts := Options{Compression: options.ZSTD}
+	f := buildTestTable(t, keyPrefix, 1000, opts)
+	t.Run("with correct decompression algo", func(t *testing.T) {
+		_, err := OpenTable(f, opts)
+		require.NoError(t, err)
+	})
+	t.Run("with incorrect decompression algo", func(t *testing.T) {
+		// Set incorrect compression algorithm.
+		opts.Compression = options.Snappy
+		_, err := OpenTable(f, opts)
+		require.Error(t, err)
+	})
+}
+
 func BenchmarkBuilder(b *testing.B) {
 	rand.Seed(time.Now().Unix())
 	key := func(i int) []byte {
