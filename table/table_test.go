@@ -881,7 +881,6 @@ func getTableForBenchmarks(b *testing.B, count int) *Table {
 
 	_, err = f.Write(builder.Finish())
 	require.NoError(b, err, "unable to write to file")
-	opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.NoVerification}
 	tbl, err := OpenTable(f, opts)
 	require.NoError(b, err, "unable to open table")
 	return tbl
