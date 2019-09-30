@@ -36,8 +36,8 @@ message KVList {
 }
 
 message ManifestChangeSet {
-        // A set of changes that are applied atomically.
-        repeated ManifestChange changes = 1;
+  // A set of changes that are applied atomically.
+  repeated ManifestChange changes = 1;
 }
 
 enum EncryptionAlgo {
@@ -45,15 +45,16 @@ enum EncryptionAlgo {
 }
 
 message ManifestChange {
-        uint64 Id = 1;
-        enum Operation {
-                CREATE = 0;
-                DELETE = 1;
-        }
-        Operation Op   = 2;
-        uint32 Level   = 3; // Only used for CREATE
-        uint64 key_id  = 4;
-        EncryptionAlgo encryption_algo = 5;
+  uint64 Id = 1;            // Table ID.
+  enum Operation {
+          CREATE = 0;
+          DELETE = 1;
+  }
+  Operation Op   = 2;
+  uint32 Level   = 3;       // Only used for CREATE.
+  uint64 key_id  = 4;
+  EncryptionAlgo encryption_algo = 5;
+  uint32 compression = 6;   // Only used for CREATE Op.
 }
 
 message BlockOffset {

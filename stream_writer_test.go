@@ -323,7 +323,6 @@ func TestStreamWriter6(t *testing.T) {
 			}
 		}
 		require.NoError(t, db.Close())
-
 		db, err := Open(db.opt)
 		require.NoError(t, err)
 		require.NoError(t, db.Close())

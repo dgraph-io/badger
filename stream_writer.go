@@ -219,11 +219,8 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 		return nil, err
 	}
 
-	bopts := table.Options{
-		BlockSize:          sw.db.opt.BlockSize,
-		BloomFalsePositive: sw.db.opt.BloomFalsePositive,
-		DataKey:            dk,
-	}
+	bopts := buildTableOptions(sw.db.opt)
+	bopts.DataKey = dk
 	w := &sortedWriter{
 		db:       sw.db,
 		streamID: streamID,
@@ -317,11 +314,8 @@ func (w *sortedWriter) send() error {
 	if err != nil {
 		return y.Wrapf(err, "Error while retriving datakey in sortedWriter.send")
 	}
-	bopts := table.Options{
-		BlockSize:          w.db.opt.BlockSize,
-		BloomFalsePositive: w.db.opt.BloomFalsePositive,
-		DataKey:            dk,
-	}
+	bopts := buildTableOptions(w.db.opt)
+	bopts.DataKey = dk
 	w.builder = table.NewTableBuilder(bopts)
 	return nil
 }
@@ -348,12 +342,8 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	if _, err := fd.Write(data); err != nil {
 		return err
 	}
-
-	opts := table.Options{
-		LoadingMode: w.db.opt.TableLoadingMode,
-		ChkMode:     w.db.opt.ChecksumVerificationMode,
-		DataKey:     builder.DataKey(),
-	}
+	opts := buildTableOptions(w.db.opt)
+	opts.DataKey = builder.DataKey()
 	tbl, err := table.OpenTable(fd, opts)
 	if err != nil {
 		return err
@@ -384,9 +374,10 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	}
 	// Now that table can be opened successfully, let's add this to the MANIFEST.
 	change := &pb.ManifestChange{
-		Id:    tbl.ID(),
-		Op:    pb.ManifestChange_CREATE,
-		Level: uint32(lhandler.level),
+		Id:          tbl.ID(),
+		Op:          pb.ManifestChange_CREATE,
+		Level:       uint32(lhandler.level),
+		Compression: uint32(tbl.CompressionType()),
 	}
 	if err := w.db.manifest.addChanges([]*pb.ManifestChange{change}); err != nil {
 		return err

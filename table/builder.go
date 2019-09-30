@@ -22,9 +22,13 @@ import (
 	"math"
 	"unsafe"
 
+	"github.com/DataDog/zstd"
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
+	"github.com/golang/snappy"
+	"github.com/pkg/errors"
 
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 	"github.com/dgraph-io/ristretto/z"
@@ -150,6 +154,18 @@ func (b *Builder) finishBlock() {
 	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
 	b.writeChecksum(blockBuf)
 
+	// Compress the block.
+	if b.opt.Compression != options.None {
+		var err error
+		// TODO: Find a way to reuse buffers. Current implementation creates a
+		// new buffer for each compressData call.
+		blockBuf, err = b.compressData(b.buf.Bytes()[b.baseOffset:])
+		y.Check(err)
+		// Truncate already written data.
+		b.buf.Truncate(int(b.baseOffset))
+		// Write compressed data.
+		b.buf.Write(blockBuf)
+	}
 	if b.shouldEncrypt() {
 		block := b.buf.Bytes()[b.baseOffset:]
 		eBlock, err := b.encrypt(block)
@@ -321,4 +337,17 @@ func (b *Builder) encrypt(data []byte) ([]byte, error) {
 // We encrypt only if the data key exist. Otherwise, not.
 func (b *Builder) shouldEncrypt() bool {
 	return b.opt.DataKey != nil
+}
+
+// compressData compresses the given data.
+func (b *Builder) compressData(data []byte) ([]byte, error) {
+	switch b.opt.Compression {
+	case options.None:
+		return data, nil
+	case options.Snappy:
+		return snappy.Encode(nil, data), nil
+	case options.ZSTD:
+		return zstd.Compress(nil, data)
+	}
+	return nil, errors.New("Unsupported compression type")
 }
