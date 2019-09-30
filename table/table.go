@@ -28,7 +28,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/DataDog/zstd"
 	"github.com/golang/protobuf/proto"
+	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/options"
@@ -59,6 +61,9 @@ type Options struct {
 
 	// DataKey is the key used to decrypt the encrypted text.
 	DataKey *pb.DataKey
+
+	// Compression indicates the compression algorithm used for block compression.
+	Compression options.CompressionType
 }
 
 // TableInterface is useful for testing.
@@ -89,6 +94,11 @@ type Table struct {
 
 	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
 	opt        *Options
+}
+
+// CompressionType returns the compression algorithm used for block compression.
+func (t *Table) CompressionType() options.CompressionType {
+	return t.opt.Compression
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
@@ -219,10 +229,11 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 
 // OpenInMemoryTable is similar to OpenTable but it opens a new table from the provided data.
 // OpenInMemoryTable is used for L0 tables.
-func OpenInMemoryTable(data []byte, id uint64, dk *pb.DataKey) (*Table, error) {
+func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
+	opt.LoadingMode = options.LoadToRAM
 	t := &Table{
 		ref:        1, // Caller is given one reference.
-		opt:        &Options{LoadingMode: options.LoadToRAM, DataKey: dk},
+		opt:        opt,
 		mmap:       data,
 		tableSize:  len(data),
 		IsInmemory: true,
@@ -245,9 +256,10 @@ func (t *Table) initBiggestAndSmallest() error {
 	it2 := t.NewIterator(true)
 	defer it2.Close()
 	it2.Rewind()
-	if it2.Valid() {
-		t.biggest = it2.Key()
+	if !it2.Valid() {
+		return errors.Wrapf(it2.err, "failed to initialize biggest for table %s", t.Filename())
 	}
+	t.biggest = it2.Key()
 	return nil
 }
 
@@ -343,7 +355,8 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err,
+			"failed to read from file: %s at offset: %d, len: %d", t.fd.Name(), blk.offset, ko.Len)
 	}
 
 	if t.shouldDecrypt() {
@@ -353,9 +366,23 @@ func (t *Table) block(idx int) (*block, error) {
 		}
 	}
 
+	blk.data, err = t.decompressData(blk.data)
+	if err != nil {
+		return nil, errors.Wrapf(err,
+			"failed to decode compressed data in file: %s at offset: %d, len: %d",
+			t.fd.Name(), blk.offset, ko.Len)
+	}
+
 	// Read meta data related to block.
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(y.BytesToU32(blk.data[readPos : readPos+4]))
+
+	// Checksum length greater than block size could happen if the table was compressed and
+	// it was opened with an incorrect compression algorithm (or the data was corrupted).
+	if blk.chkLen > len(blk.data) {
+		return nil, errors.New("invalid checksum length. Either the data is" +
+			"corrupted or the table options are incorrectly set")
+	}
 
 	// Read checksum and store it
 	readPos -= blk.chkLen
@@ -475,4 +502,17 @@ func IDToFilename(id uint64) string {
 // filepath.
 func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, IDToFilename(id))
+}
+
+// decompressData decompresses the given data.
+func (t *Table) decompressData(data []byte) ([]byte, error) {
+	switch t.opt.Compression {
+	case options.None:
+		return data, nil
+	case options.Snappy:
+		return snappy.Decode(nil, data)
+	case options.ZSTD:
+		return zstd.Decompress(nil, data)
+	}
+	return nil, errors.New("Unsupported compression type")
 }

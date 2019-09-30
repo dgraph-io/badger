@@ -505,9 +505,10 @@ func TestCompactionFilePicking(t *testing.T) {
 // addToManifest function is used in TestCompactionFilePicking. It adds table to db manifest.
 func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 	change := &pb.ManifestChange{
-		Id:    tab.ID(),
-		Op:    pb.ManifestChange_CREATE,
-		Level: level,
+		Id:          tab.ID(),
+		Op:          pb.ManifestChange_CREATE,
+		Level:       level,
+		Compression: uint32(tab.CompressionType()),
 	}
 	require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{change}),
 		"unable to add to manifest")
@@ -516,10 +517,7 @@ func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 // createTableWithRange function is used in TestCompactionFilePicking. It creates
 // a table with key starting from start and ending with end.
 func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
-	bopts := table.Options{
-		BlockSize:          db.opt.BlockSize,
-		BloomFalsePositive: db.opt.BloomFalsePositive,
-	}
+	bopts := buildTableOptions(db.opt)
 	b := table.NewTableBuilder(bopts)
 	nums := []int{start, end}
 	for _, i := range nums {
@@ -537,8 +535,7 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	_, err = fd.Write(b.Finish())
 	require.NoError(t, err, "unable to write to file")
 
-	opts := table.Options{LoadingMode: options.LoadToRAM, ChkMode: options.NoVerification}
-	tab, err := table.OpenTable(fd, opts)
+	tab, err := table.OpenTable(fd, bopts)
 	require.NoError(t, err)
 	return tab
 }

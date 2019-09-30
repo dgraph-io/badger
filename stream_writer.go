@@ -125,11 +125,15 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 		return err
 	}
 
-	for streamId, req := range streamReqs {
-		writer, ok := sw.writers[streamId]
+	for streamID, req := range streamReqs {
+		writer, ok := sw.writers[streamID]
 		if !ok {
-			writer = sw.newWriter(streamId)
-			sw.writers[streamId] = writer
+			var err error
+			writer, err = sw.newWriter(streamID)
+			if err != nil {
+				return errors.Wrapf(err, "failed to create writer with ID %d", streamID)
+			}
+			sw.writers[streamID] = writer
 		}
 		writer.reqCh <- req
 	}
@@ -157,7 +161,10 @@ func (sw *StreamWriter) Flush() error {
 
 	// Encode and write the value log head into a new table.
 	data := maxHead.Encode()
-	headWriter := sw.newWriter(headStreamId)
+	headWriter, err := sw.newWriter(headStreamId)
+	if err != nil {
+		return errors.Wrap(err, "failed to create head writer")
+	}
 	if err := headWriter.Add(
 		y.KeyWithTs(head, sw.maxVersion),
 		y.ValueStruct{Value: data}); err != nil {
@@ -201,26 +208,29 @@ type sortedWriter struct {
 
 	builder  *table.Builder
 	lastKey  []byte
-	streamId uint32
+	streamID uint32
 	reqCh    chan *request
 	head     valuePointer
 }
 
-func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
-	bopts := table.Options{
-		BlockSize:          sw.db.opt.BlockSize,
-		BloomFalsePositive: sw.db.opt.BloomFalsePositive,
+func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
+	dk, err := sw.db.registry.latestDataKey()
+	if err != nil {
+		return nil, err
 	}
+
+	bopts := buildTableOptions(sw.db.opt)
+	bopts.DataKey = dk
 	w := &sortedWriter{
 		db:       sw.db,
-		streamId: streamId,
+		streamID: streamID,
 		throttle: sw.throttle,
 		builder:  table.NewTableBuilder(bopts),
 		reqCh:    make(chan *request, 3),
 	}
 	sw.closer.AddRunning(1)
 	go w.handleRequests(sw.closer)
-	return w
+	return w, nil
 }
 
 // ErrUnsortedKey is returned when any out of order key arrives at sortedWriter during call to Add.
@@ -304,11 +314,8 @@ func (w *sortedWriter) send() error {
 	if err != nil {
 		return y.Wrapf(err, "Error while retriving datakey in sortedWriter.send")
 	}
-	bopts := table.Options{
-		BlockSize:          w.db.opt.BlockSize,
-		BloomFalsePositive: w.db.opt.BloomFalsePositive,
-		DataKey:            dk,
-	}
+	bopts := buildTableOptions(w.db.opt)
+	bopts.DataKey = dk
 	w.builder = table.NewTableBuilder(bopts)
 	return nil
 }
@@ -335,12 +342,8 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	if _, err := fd.Write(data); err != nil {
 		return err
 	}
-
-	opts := table.Options{
-		LoadingMode: w.db.opt.TableLoadingMode,
-		ChkMode:     w.db.opt.ChecksumVerificationMode,
-		DataKey:     builder.DataKey(),
-	}
+	opts := buildTableOptions(w.db.opt)
+	opts.DataKey = builder.DataKey()
 	tbl, err := table.OpenTable(fd, opts)
 	if err != nil {
 		return err
@@ -364,16 +367,17 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 		// better than that.
 		lhandler = lc.levels[len(lc.levels)-1]
 	}
-	if w.streamId == headStreamId {
+	if w.streamID == headStreamId {
 		// This is a special !badger!head key. We should store it at level 0, separate from all the
 		// other keys to avoid an overlap.
 		lhandler = lc.levels[0]
 	}
 	// Now that table can be opened successfully, let's add this to the MANIFEST.
 	change := &pb.ManifestChange{
-		Id:    tbl.ID(),
-		Op:    pb.ManifestChange_CREATE,
-		Level: uint32(lhandler.level),
+		Id:          tbl.ID(),
+		Op:          pb.ManifestChange_CREATE,
+		Level:       uint32(lhandler.level),
+		Compression: uint32(tbl.CompressionType()),
 	}
 	if err := w.db.manifest.addChanges([]*pb.ManifestChange{change}); err != nil {
 		return err
@@ -384,6 +388,6 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	// Release the ref held by OpenTable.
 	_ = tbl.DecrRef()
 	w.db.opt.Infof("Table created: %d at level: %d for stream: %d. Size: %s\n",
-		fileID, lhandler.level, w.streamId, humanize.Bytes(uint64(tbl.Size())))
+		fileID, lhandler.level, w.streamID, humanize.Bytes(uint64(tbl.Size())))
 	return nil
 }

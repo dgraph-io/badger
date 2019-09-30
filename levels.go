@@ -154,12 +154,11 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				rerr = errors.Wrapf(err, "Error while reading datakey")
 				return
 			}
-			opts := table.Options{
-				LoadingMode: db.opt.TableLoadingMode,
-				ChkMode:     db.opt.ChecksumVerificationMode,
-				DataKey:     dk,
-			}
-			t, err := table.OpenTable(fd, opts)
+			topt := buildTableOptions(db.opt)
+			// Set compression from table manifest.
+			topt.Compression = tf.Compression
+			topt.DataKey = dk
+			t, err := table.OpenTable(fd, topt)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -508,11 +507,8 @@ func (s *levelsController) compactBuildTables(
 			return nil, nil,
 				y.Wrapf(err, "Error while retrieving datakey in levelsController.compactBuildTables")
 		}
-		bopts := table.Options{
-			BlockSize:          s.kv.opt.BlockSize,
-			BloomFalsePositive: s.kv.opt.BloomFalsePositive,
-			DataKey:            dk,
-		}
+		bopts := buildTableOptions(s.kv.opt)
+		bopts.DataKey = dk
 		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
@@ -593,13 +589,7 @@ func (s *levelsController) compactBuildTables(
 			if _, err := fd.Write(builder.Finish()); err != nil {
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
-
-			opts := table.Options{
-				LoadingMode: s.kv.opt.TableLoadingMode,
-				ChkMode:     s.kv.opt.ChecksumVerificationMode,
-				DataKey:     builder.DataKey(),
-			}
-			tbl, err := table.OpenTable(fd, opts)
+			tbl, err := table.OpenTable(fd, bopts)
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}
@@ -659,7 +649,7 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeS
 	changes := []*pb.ManifestChange{}
 	for _, table := range newTables {
 		changes = append(changes,
-			newCreateChange(table.ID(), cd.nextLevel.level, table.KeyID()))
+			newCreateChange(table.ID(), cd.nextLevel.level, table.KeyID(), table.CompressionType()))
 	}
 	for _, table := range cd.top {
 		// Add a delete change only if the table is not in memory.
@@ -895,7 +885,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		// the proper order. (That means this update happens before that of some compaction which
 		// deletes the table.)
 		err := s.kv.manifest.addChanges([]*pb.ManifestChange{
-			newCreateChange(t.ID(), 0, t.KeyID()),
+			newCreateChange(t.ID(), 0, t.KeyID(), t.CompressionType()),
 		})
 		if err != nil {
 			return err
