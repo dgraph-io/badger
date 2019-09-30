@@ -72,7 +72,6 @@ func buildTestTable(t *testing.T, prefix string, n int, opts Options) *os.File {
 
 // keyValues is n by 2 where n is number of pairs.
 func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
-	// opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	b := NewTableBuilder(opts)
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
