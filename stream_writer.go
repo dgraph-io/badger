@@ -219,11 +219,8 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 		return nil, err
 	}
 
-	bopts := table.Options{
-		BlockSize:          sw.db.opt.BlockSize,
-		BloomFalsePositive: sw.db.opt.BloomFalsePositive,
-		DataKey:            dk,
-	}
+	bopts := buildTableOptions(sw.db.opt)
+	bopts.DataKey = dk
 	w := &sortedWriter{
 		db:       sw.db,
 		streamID: streamID,
