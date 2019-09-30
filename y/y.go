@@ -72,7 +72,7 @@ func CreateSyncedFile(filename string, sync bool) (*os.File, error) {
 	if sync {
 		flags |= datasyncFileFlag
 	}
-	return os.OpenFile(filename, flags, 0666)
+	return os.OpenFile(filename, flags, 0600)
 }
 
 // OpenSyncedFile creates the file if one doesn't exist.
@@ -81,7 +81,7 @@ func OpenSyncedFile(filename string, sync bool) (*os.File, error) {
 	if sync {
 		flags |= datasyncFileFlag
 	}
-	return os.OpenFile(filename, flags, 0666)
+	return os.OpenFile(filename, flags, 0600)
 }
 
 // OpenTruncFile opens the file with O_RDWR | O_CREATE | O_TRUNC
@@ -90,7 +90,7 @@ func OpenTruncFile(filename string, sync bool) (*os.File, error) {
 	if sync {
 		flags |= datasyncFileFlag
 	}
-	return os.OpenFile(filename, flags, 0666)
+	return os.OpenFile(filename, flags, 0600)
 }
 
 // SafeCopy does append(a[:0], src...).
