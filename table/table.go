@@ -256,9 +256,10 @@ func (t *Table) initBiggestAndSmallest() error {
 	it2 := t.NewIterator(true)
 	defer it2.Close()
 	it2.Rewind()
-	if it2.Valid() {
-		t.biggest = it2.Key()
+	if !it2.Valid() {
+		return errors.Wrapf(it2.err, "failed to initialize biggest for table %s", t.Filename())
 	}
+	t.biggest = it2.Key()
 	return nil
 }
 
@@ -365,18 +366,23 @@ func (t *Table) block(idx int) (*block, error) {
 		}
 	}
 
-	if t.opt.Compression != options.NoCompression {
-		blk.data, err = t.decompressData(blk.data)
-		if err != nil {
-			return nil, errors.Wrapf(err,
-				"failed to decode compressed data in file: %s at offset: %d, len: %d",
-				t.fd.Name(), blk.offset, ko.Len)
-		}
+	blk.data, err = t.decompressData(blk.data)
+	if err != nil {
+		return nil, errors.Wrapf(err,
+			"failed to decode compressed data in file: %s at offset: %d, len: %d",
+			t.fd.Name(), blk.offset, ko.Len)
 	}
 
 	// Read meta data related to block.
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(y.BytesToU32(blk.data[readPos : readPos+4]))
+
+	// Checksum length greater than block size could happen if the table was compressed and
+	// it was opened with an incorrect compression algorithm (or the data was corrupted).
+	if blk.chkLen > len(blk.data) {
+		return nil, errors.New("invalid checksum length. Either the data is" +
+			"corrupted or the table options are incorrectly set")
+	}
 
 	// Read checksum and store it
 	readPos -= blk.chkLen
@@ -501,11 +507,11 @@ func NewFilename(id uint64, dir string) string {
 // decompressData decompresses the given data.
 func (t *Table) decompressData(data []byte) ([]byte, error) {
 	switch t.opt.Compression {
-	case options.NoCompression:
+	case options.None:
 		return data, nil
-	case options.SnappyCompression:
+	case options.Snappy:
 		return snappy.Decode(nil, data)
-	case options.ZSTDCompression:
+	case options.ZSTD:
 		return zstd.Decompress(nil, data)
 	}
 	return nil, errors.New("Unsupported compression type")

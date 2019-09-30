@@ -317,7 +317,7 @@ func (w *sortedWriter) send() error {
 	if err != nil {
 		return y.Wrapf(err, "Error while retriving datakey in sortedWriter.send")
 	}
-	bopts := BuildTableOptions(w.db.opt)
+	bopts := buildTableOptions(w.db.opt)
 	bopts.DataKey = dk
 	w.builder = table.NewTableBuilder(bopts)
 	return nil
@@ -345,7 +345,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	if _, err := fd.Write(data); err != nil {
 		return err
 	}
-	opts := BuildTableOptions(w.db.opt)
+	opts := buildTableOptions(w.db.opt)
 	opts.DataKey = builder.DataKey()
 	tbl, err := table.OpenTable(fd, opts)
 	if err != nil {

@@ -48,10 +48,10 @@ const (
 type CompressionType uint32
 
 const (
-	// NoCompression mode indicates that a block is not compressed.
-	NoCompression CompressionType = 0
-	// SnappyCompression mode indicates that a block is compressed using Snappy algorithm.
-	SnappyCompression CompressionType = 1
-	// ZSTDCompression mode indicates that a block is compressed using ZSTD algorithm.
-	ZSTDCompression CompressionType = 2
+	// None mode indicates that a block is not compressed.
+	None CompressionType = 0
+	// Snappy mode indicates that a block is compressed using Snappy algorithm.
+	Snappy CompressionType = 1
+	// ZSTD mode indicates that a block is compressed using ZSTD algorithm.
+	ZSTD CompressionType = 2
 )

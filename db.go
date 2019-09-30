@@ -891,7 +891,7 @@ type flushTask struct {
 
 // handleFlushTask must be run serially.
 func (db *DB) handleFlushTask(ft flushTask) error {
-	// There can be a scnerio, when empty memtable is flushed. For example, memtable is empty and
+	// There can be a scenario, when empty memtable is flushed. For example, memtable is empty and
 	// after writing request to value log, rotation count exceeds db.LogRotatesToFlush.
 	if ft.mt.Empty() {
 		return nil
@@ -911,7 +911,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	if err != nil {
 		return y.Wrapf(err, "failed to get datakey in db.handleFlushTask")
 	}
-	bopts := BuildTableOptions(db.opt)
+	bopts := buildTableOptions(db.opt)
 	bopts.DataKey = dk
 	tableData := buildL0Table(ft, bopts)
 
