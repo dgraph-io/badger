@@ -79,6 +79,8 @@ func (s *SimpleIterator) Valid() bool {
 	return s.idx >= 0 && s.idx < len(s.keys)
 }
 
+var _ y.Iterator = &SimpleIterator{}
+
 func newSimpleIterator(keys []string, vals []string, reversed bool) *SimpleIterator {
 	k := make([][]byte, len(keys))
 	v := make([][]byte, len(vals))
