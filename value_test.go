@@ -68,24 +68,29 @@ func TestValueBasic(t *testing.T) {
 	t.Logf("Pointer written: %+v %+v\n", b.Ptrs[0], b.Ptrs[1])
 
 	s := new(y.Slice)
-	buf1, cb1, err1 := log.readValueBytes(b.Ptrs[0], s)
-	buf2, cb2, err2 := log.readValueBytes(b.Ptrs[1], s)
+	buf1, lf1, err1 := log.readValueBytes(b.Ptrs[0], s)
+	buf2, lf2, err2 := log.readValueBytes(b.Ptrs[1], s)
 	require.NoError(t, err1)
 	require.NoError(t, err2)
-	defer runCallback(cb1)
-	defer runCallback(cb2)
-
-	readEntries := []Entry{valueBytesToEntry(buf1), valueBytesToEntry(buf2)}
+	defer runCallback(log.getUnlockCallback(lf1))
+	defer runCallback(log.getUnlockCallback(lf2))
+	e1, err = lf1.decodeEntry(buf1, b.Ptrs[0].Offset)
+	require.NoError(t, err)
+	e2, err = lf1.decodeEntry(buf2, b.Ptrs[1].Offset)
+	require.NoError(t, err)
+	readEntries := []Entry{*e1, *e2}
 	require.EqualValues(t, []Entry{
 		{
-			Key:   []byte("samplekey"),
-			Value: []byte(val1),
-			meta:  bitValuePointer,
+			Key:    []byte("samplekey"),
+			Value:  []byte(val1),
+			meta:   bitValuePointer,
+			offset: b.Ptrs[0].Offset,
 		},
 		{
-			Key:   []byte("samplekeyb"),
-			Value: []byte(val2),
-			meta:  bitValuePointer,
+			Key:    []byte("samplekeyb"),
+			Value:  []byte(val2),
+			meta:   bitValuePointer,
+			offset: b.Ptrs[1].Offset,
 		},
 	}, readEntries)
 
@@ -666,7 +671,7 @@ func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 
 	opts.ReadOnly = true
 	// Badger should fail a read-only open with values to replay
-	kv, err = Open(opts)
+	_, err = Open(opts)
 	require.Error(t, err)
 	require.Regexp(t, "Database was not properly closed, cannot open read-only|Read-only mode is not supported on Windows", err.Error())
 }
@@ -915,19 +920,20 @@ func BenchmarkReadWrite(b *testing.B) {
 						}
 						idx := rand.Intn(ln)
 						s := new(y.Slice)
-						buf, cb, err := vl.readValueBytes(ptrs[idx], s)
+						buf, lf, err := vl.readValueBytes(ptrs[idx], s)
 						if err != nil {
 							b.Fatalf("Benchmark Read: %v", err)
 						}
 
-						e := valueBytesToEntry(buf)
+						e, err := lf.decodeEntry(buf, ptrs[idx].Offset)
+						require.NoError(b, err)
 						if len(e.Key) != 16 {
 							b.Fatalf("Key is invalid")
 						}
 						if len(e.Value) != vsz {
 							b.Fatalf("Value is invalid")
 						}
-						cb()
+						runCallback(db.vlog.getUnlockCallback(lf))
 					}
 				}
 			})
@@ -1024,9 +1030,10 @@ func TestTruncatedDiscardStat(t *testing.T) {
 
 func TestSafeEntry(t *testing.T) {
 	var s safeRead
+	s.lf = &logFile{}
 	e := NewEntry([]byte("foo"), []byte("bar"))
 	buf := bytes.NewBuffer(nil)
-	_, err := encodeEntry(e, buf)
+	_, err := s.lf.encodeEntry(e, buf, 0)
 	require.NoError(t, err)
 
 	ne, err := s.Entry(buf)

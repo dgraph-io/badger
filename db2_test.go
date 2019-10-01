@@ -505,9 +505,10 @@ func TestCompactionFilePicking(t *testing.T) {
 // addToManifest function is used in TestCompactionFilePicking. It adds table to db manifest.
 func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 	change := &pb.ManifestChange{
-		Id:    tab.ID(),
-		Op:    pb.ManifestChange_CREATE,
-		Level: level,
+		Id:          tab.ID(),
+		Op:          pb.ManifestChange_CREATE,
+		Level:       level,
+		Compression: uint32(tab.CompressionType()),
 	}
 	require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{change}),
 		"unable to add to manifest")
@@ -516,10 +517,7 @@ func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 // createTableWithRange function is used in TestCompactionFilePicking. It creates
 // a table with key starting from start and ending with end.
 func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
-	bopts := table.Options{
-		BlockSize:          db.opt.BlockSize,
-		BloomFalsePositive: db.opt.BloomFalsePositive,
-	}
+	bopts := buildTableOptions(db.opt)
 	b := table.NewTableBuilder(bopts)
 	nums := []int{start, end}
 	for _, i := range nums {
@@ -537,8 +535,62 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	_, err = fd.Write(b.Finish())
 	require.NoError(t, err, "unable to write to file")
 
-	opts := table.Options{LoadingMode: options.LoadToRAM, ChkMode: options.NoVerification}
-	tab, err := table.OpenTable(fd, opts)
+	tab, err := table.OpenTable(fd, bopts)
 	require.NoError(t, err)
 	return tab
+}
+func deferRemoveDir(t *testing.T, dir string) func() {
+	return func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}
+}
+
+func TestReadSameVlog(t *testing.T) {
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%d%10d", i, i))
+	}
+	testReadingSameKey := func(t *testing.T, db *DB) {
+		// Forcing to read all values from vlog.
+		for i := 0; i < 50; i++ {
+			err := db.Update(func(txn *Txn) error {
+				return txn.Set(key(i), key(i))
+			})
+			require.NoError(t, err)
+		}
+		// reading it again several times
+		for i := 0; i < 50; i++ {
+			for j := 0; j < 10; j++ {
+				err := db.View(func(txn *Txn) error {
+					item, err := txn.Get(key(i))
+					require.NoError(t, err)
+					require.Equal(t, key(i), getItemValue(t, item))
+					return nil
+				})
+				require.NoError(t, err)
+			}
+		}
+	}
+
+	t.Run("Test Read Again Plain Text", func(t *testing.T) {
+		opt := getTestOptions("")
+		// Forcing to read from vlog
+		opt.ValueThreshold = 1
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			testReadingSameKey(t, db)
+		})
+
+	})
+
+	t.Run("Test Read Again Encryption", func(t *testing.T) {
+		opt := getTestOptions("")
+		opt.ValueThreshold = 1
+		// Generate encryption key.
+		eKey := make([]byte, 32)
+		_, err := rand.Read(eKey)
+		require.NoError(t, err)
+		opt.EncryptionKey = eKey
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			testReadingSameKey(t, db)
+		})
+	})
 }

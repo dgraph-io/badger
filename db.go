@@ -88,7 +88,8 @@ type DB struct {
 
 	orc *oracle
 
-	pub *publisher
+	pub      *publisher
+	registry *KeyRegistry
 }
 
 const (
@@ -289,6 +290,18 @@ func Open(opt Options) (db *DB, err error) {
 		pub:           newPublisher(),
 	}
 
+	krOpt := KeyRegistryOptions{
+		ReadOnly:                      opt.ReadOnly,
+		Dir:                           opt.Dir,
+		EncryptionKey:                 opt.EncryptionKey,
+		EncryptionKeyRotationDuration: opt.EncryptionKeyRotationDuration,
+	}
+
+	kr, err := OpenKeyRegistry(krOpt)
+	if err != nil {
+		return nil, err
+	}
+	db.registry = kr
 	// Calculate initial size.
 	db.calculateSize()
 	db.closers.updateSize = y.NewCloser(1)
@@ -459,6 +472,9 @@ func (db *DB) close() (err error) {
 	}
 	if manifestErr := db.manifest.close(); err == nil {
 		err = errors.Wrap(manifestErr, "DB.Close")
+	}
+	if registryErr := db.registry.Close(); err == nil {
+		err = errors.Wrap(registryErr, "DB.Close")
 	}
 
 	// Fsync directories to ensure that lock file, and any other removed files whose directory
@@ -875,7 +891,7 @@ type flushTask struct {
 
 // handleFlushTask must be run serially.
 func (db *DB) handleFlushTask(ft flushTask) error {
-	// There can be a scnerio, when empty memtable is flushed. For example, memtable is empty and
+	// There can be a scenario, when empty memtable is flushed. For example, memtable is empty and
 	// after writing request to value log, rotation count exceeds db.LogRotatesToFlush.
 	if ft.mt.Empty() {
 		return nil
@@ -891,15 +907,17 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	headTs := y.KeyWithTs(head, db.orc.nextTs())
 	ft.mt.Put(headTs, y.ValueStruct{Value: val})
 
-	bopts := table.Options{
-		BlockSize:          db.opt.BlockSize,
-		BloomFalsePositive: db.opt.BloomFalsePositive,
+	dk, err := db.registry.latestDataKey()
+	if err != nil {
+		return y.Wrapf(err, "failed to get datakey in db.handleFlushTask")
 	}
+	bopts := buildTableOptions(db.opt)
+	bopts.DataKey = dk
 	tableData := buildL0Table(ft, bopts)
 
 	fileID := db.lc.reserveFileID()
 	if db.opt.KeepL0InMemory {
-		tbl, err := table.OpenInMemoryTable(tableData, fileID)
+		tbl, err := table.OpenInMemoryTable(tableData, fileID, &bopts)
 		if err != nil {
 			return errors.Wrapf(err, "failed to open table in memory")
 		}
@@ -924,12 +942,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		// Do dir sync as best effort. No need to return due to an error there.
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
-
-	opts := table.Options{
-		LoadingMode: db.opt.TableLoadingMode,
-		ChkMode:     db.opt.ChecksumVerificationMode,
-	}
-	tbl, err := table.OpenTable(fd, opts)
+	tbl, err := table.OpenTable(fd, bopts)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err
@@ -1542,4 +1555,9 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList), prefixes ...[]
 			slurp(batch)
 		}
 	}
+}
+
+// shouldEncrypt returns bool, which tells whether to encrypt or not.
+func (db *DB) shouldEncrypt() bool {
+	return len(db.opt.EncryptionKey) > 0
 }

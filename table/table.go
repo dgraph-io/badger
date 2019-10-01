@@ -17,6 +17,7 @@
 package table
 
 import (
+	"crypto/aes"
 	"fmt"
 	"io"
 	"os"
@@ -27,7 +28,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/DataDog/zstd"
 	"github.com/golang/protobuf/proto"
+	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/options"
@@ -40,7 +43,7 @@ const fileSuffix = ".sst"
 
 // Options contains configurable options for Table/Builder.
 type Options struct {
-	// Options for Openning Table.
+	// Options for Opening/Building Table.
 
 	// ChkMode is the checksum verification mode for Table.
 	ChkMode options.ChecksumVerificationMode
@@ -55,6 +58,12 @@ type Options struct {
 
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
+
+	// DataKey is the key used to decrypt the encrypted text.
+	DataKey *pb.DataKey
+
+	// Compression indicates the compression algorithm used for block compression.
+	Compression options.CompressionType
 }
 
 // TableInterface is useful for testing.
@@ -85,6 +94,11 @@ type Table struct {
 
 	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
 	opt        *Options
+}
+
+// CompressionType returns the compression algorithm used for block compression.
+func (t *Table) CompressionType() options.CompressionType {
+	return t.opt.Compression
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
@@ -215,10 +229,11 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 
 // OpenInMemoryTable is similar to OpenTable but it opens a new table from the provided data.
 // OpenInMemoryTable is used for L0 tables.
-func OpenInMemoryTable(data []byte, id uint64) (*Table, error) {
+func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
+	opt.LoadingMode = options.LoadToRAM
 	t := &Table{
 		ref:        1, // Caller is given one reference.
-		opt:        &Options{LoadingMode: options.LoadToRAM},
+		opt:        opt,
 		mmap:       data,
 		tableSize:  len(data),
 		IsInmemory: true,
@@ -241,9 +256,10 @@ func (t *Table) initBiggestAndSmallest() error {
 	it2 := t.NewIterator(true)
 	defer it2.Close()
 	it2.Rewind()
-	if it2.Valid() {
-		t.biggest = it2.Key()
+	if !it2.Valid() {
+		return errors.Wrapf(it2.err, "failed to initialize biggest for table %s", t.Filename())
 	}
+	t.biggest = it2.Key()
 	return nil
 }
 
@@ -311,6 +327,14 @@ func (t *Table) readIndex() error {
 	}
 
 	index := pb.TableIndex{}
+	// Decrypt the table index if it is encrypted.
+	if t.shouldDecrypt() {
+		var err error
+		if data, err = t.decrypt(data); err != nil {
+			return y.Wrapf(err,
+				"Error while decrypting table index for the table %d in Table.readIndex", t.id)
+		}
+	}
 	err := proto.Unmarshal(data, &index)
 	y.Check(err)
 
@@ -330,11 +354,35 @@ func (t *Table) block(idx int) (*block, error) {
 		offset: int(ko.Offset),
 	}
 	var err error
-	blk.data, err = t.read(blk.offset, int(ko.Len))
+	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
+		return nil, errors.Wrapf(err,
+			"failed to read from file: %s at offset: %d, len: %d", t.fd.Name(), blk.offset, ko.Len)
+	}
+
+	if t.shouldDecrypt() {
+		// Decrypt the block if it is encrypted.
+		if blk.data, err = t.decrypt(blk.data); err != nil {
+			return nil, err
+		}
+	}
+
+	blk.data, err = t.decompressData(blk.data)
+	if err != nil {
+		return nil, errors.Wrapf(err,
+			"failed to decode compressed data in file: %s at offset: %d, len: %d",
+			t.fd.Name(), blk.offset, ko.Len)
+	}
 
 	// Read meta data related to block.
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(y.BytesToU32(blk.data[readPos : readPos+4]))
+
+	// Checksum length greater than block size could happen if the table was compressed and
+	// it was opened with an incorrect compression algorithm (or the data was corrupted).
+	if blk.chkLen > len(blk.data) {
+		return nil, errors.New("invalid checksum length. Either the data is" +
+			"corrupted or the table options are incorrectly set")
+	}
 
 	// Read checksum and store it
 	readPos -= blk.chkLen
@@ -405,6 +453,30 @@ func (t *Table) VerifyChecksum() error {
 	return nil
 }
 
+// shouldDecrypt tells whether to decrypt or not. We decrypt only if the datakey exist
+// for the table.
+func (t *Table) shouldDecrypt() bool {
+	return t.opt.DataKey != nil
+}
+
+// KeyID returns data key id.
+func (t *Table) KeyID() uint64 {
+	if t.opt.DataKey != nil {
+		return t.opt.DataKey.KeyId
+	}
+	// By default it's 0, if it is plain text.
+	return 0
+}
+
+// decrypt decrypts the given data. It should be called only after checking shouldDecrypt.
+func (t *Table) decrypt(data []byte) ([]byte, error) {
+	// Last BlockSize bytes of the data is the IV.
+	iv := data[len(data)-aes.BlockSize:]
+	// Rest all bytes are data.
+	data = data[:len(data)-aes.BlockSize]
+	return y.XORBlock(data, t.opt.DataKey.Data, iv)
+}
+
 // ParseFileID reads the file id out of a filename.
 func ParseFileID(name string) (uint64, bool) {
 	name = path.Base(name)
@@ -430,4 +502,17 @@ func IDToFilename(id uint64) string {
 // filepath.
 func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, IDToFilename(id))
+}
+
+// decompressData decompresses the given data.
+func (t *Table) decompressData(data []byte) ([]byte, error) {
+	switch t.opt.Compression {
+	case options.None:
+		return data, nil
+	case options.Snappy:
+		return snappy.Decode(nil, data)
+	case options.ZSTD:
+		return zstd.Decompress(nil, data)
+	}
+	return nil, errors.New("Unsupported compression type")
 }

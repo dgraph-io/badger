@@ -17,7 +17,10 @@
 package badger
 
 import (
+	"time"
+
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/table"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -44,6 +47,7 @@ type Options struct {
 	ReadOnly            bool
 	Truncate            bool
 	Logger              Logger
+	Compression         options.CompressionType
 	EventLogging        bool
 
 	// Fine tuning options.
@@ -68,6 +72,10 @@ type Options struct {
 	CompactL0OnClose  bool
 	LogRotatesToFlush int32
 
+	// Encryption related options.
+	EncryptionKey                 []byte        // encryption key
+	EncryptionKeyRotationDuration time.Duration // key rotation duration
+
 	// ChecksumVerificationMode decides when db should verify checksum for SStable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
 
@@ -80,7 +88,6 @@ type Options struct {
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
-
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -107,18 +114,31 @@ func DefaultOptions(path string) Options {
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          true,
+		Compression:             options.ZSTD,
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
 		// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
 		ValueLogFileSize: 1<<30 - 1,
 
-		ValueLogMaxEntries: 1000000,
-		ValueThreshold:     32,
-		Truncate:           false,
-		Logger:             defaultLogger,
-		EventLogging:       true,
-		LogRotatesToFlush:  2,
+		ValueLogMaxEntries:            1000000,
+		ValueThreshold:                32,
+		Truncate:                      false,
+		Logger:                        defaultLogger,
+		LogRotatesToFlush:             2,
+		EventLogging:                  true,
+		EncryptionKey:                 []byte{},
+		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
+	}
+}
+
+func buildTableOptions(opt Options) table.Options {
+	return table.Options{
+		BlockSize:          opt.BlockSize,
+		BloomFalsePositive: opt.BloomFalsePositive,
+		LoadingMode:        opt.TableLoadingMode,
+		ChkMode:            opt.ChecksumVerificationMode,
+		Compression:        opt.Compression,
 	}
 }
 
@@ -422,6 +442,26 @@ func (opt Options) WithLogRotatesToFlush(val int32) Options {
 	return opt
 }
 
+// WithEncryptionKey return a new Options value with EncryptionKey set to the given value.
+//
+// EncryptionKey is used to encrypt the data with AES. Type of AES is used based on the key
+// size. For example 16 bytes will use AES-128. 24 bytes will use AES-192. 32 bytes will
+// use AES-256.
+func (opt Options) WithEncryptionKey(key []byte) Options {
+	opt.EncryptionKey = key
+	return opt
+}
+
+// WithEncryptionRotationDuration returns new Options value with the duration set to
+// the given value.
+//
+// Key Registry will use this duration to create new keys. If the previous generated
+// key exceed the given duration. Then the key registry will create new key.
+func (opt Options) WithEncryptionKeyRotationDuration(d time.Duration) Options {
+	opt.EncryptionKeyRotationDuration = d
+	return opt
+}
+
 // WithKeepL0InMemory returns a new Options value with KeepL0InMemory set to the given value.
 //
 // When KeepL0InMemory is set to true we will keep all Level 0 tables in memory. This leads to
@@ -432,5 +472,14 @@ func (opt Options) WithLogRotatesToFlush(val int32) Options {
 // The default value of KeepL0InMemory is true.
 func (opt Options) WithKeepL0InMemory(val bool) Options {
 	opt.KeepL0InMemory = val
+	return opt
+}
+
+// WithCompressionType returns a new Options value with CompressionType set to the given value.
+//
+// When compression type is set, every block will be compressed using the specified algorithm.
+// This option doesn't affect existing tables. Only the newly created tables will be compressed.
+func (opt Options) WithCompressionType(cType options.CompressionType) Options {
+	opt.Compression = cType
 	return opt
 }

@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
 	"github.com/golang/protobuf/proto"
@@ -65,11 +66,12 @@ type levelManifest struct {
 	Tables map[uint64]struct{} // Set of table id's
 }
 
-// TableManifest contains information about a specific level
+// TableManifest contains information about a specific table
 // in the LSM tree.
 type TableManifest struct {
-	Level    uint8
-	Checksum []byte
+	Level       uint8
+	KeyID       uint64
+	Compression options.CompressionType
 }
 
 // manifestFile holds the file pointer (and other info) about the manifest file, which is a log
@@ -100,7 +102,7 @@ const (
 func (m *Manifest) asChanges() []*pb.ManifestChange {
 	changes := make([]*pb.ManifestChange, 0, len(m.Tables))
 	for id, tm := range m.Tables {
-		changes = append(changes, newCreateChange(id, int(tm.Level)))
+		changes = append(changes, newCreateChange(id, int(tm.Level), tm.KeyID, tm.Compression))
 	}
 	return changes
 }
@@ -395,7 +397,9 @@ func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {
 			return fmt.Errorf("MANIFEST invalid, table %d exists", tc.Id)
 		}
 		build.Tables[tc.Id] = TableManifest{
-			Level: uint8(tc.Level),
+			Level:       uint8(tc.Level),
+			KeyID:       tc.KeyId,
+			Compression: options.CompressionType(tc.Compression),
 		}
 		for len(build.Levels) <= int(tc.Level) {
 			build.Levels = append(build.Levels, levelManifest{make(map[uint64]struct{})})
@@ -427,11 +431,16 @@ func applyChangeSet(build *Manifest, changeSet *pb.ManifestChangeSet) error {
 	return nil
 }
 
-func newCreateChange(id uint64, level int) *pb.ManifestChange {
+func newCreateChange(
+	id uint64, level int, keyID uint64, c options.CompressionType) *pb.ManifestChange {
 	return &pb.ManifestChange{
 		Id:    id,
 		Op:    pb.ManifestChange_CREATE,
 		Level: uint32(level),
+		KeyId: keyID,
+		// Hard coding it, since we're supporting only AES for now.
+		EncryptionAlgo: pb.EncryptionAlgo_aes,
+		Compression:    uint32(c),
 	}
 }
 
