@@ -27,7 +27,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-const headStreamId uint32 = math.MaxUint32
+const headStreamID uint32 = math.MaxUint32
 
 var (
 	// ErrStreamClosed is returned when a sent is performed on closed stream.
@@ -126,7 +126,7 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 			ExpiresAt: kv.ExpiresAt,
 			meta:      meta,
 		}
-		// If the value can be colocated with the key in LSM tree, we can skip
+		// If the value can be collocated with the key in LSM tree, we can skip
 		// writing the value to value log.
 		e.skipVlog = sw.db.shouldWriteValueToLSM(*e)
 		req := streamReqs[kv.StreamId]
@@ -212,7 +212,7 @@ func (sw *StreamWriter) Flush() error {
 
 	// Encode and write the value log head into a new table.
 	data := maxHead.Encode()
-	headWriter, err := sw.newWriter(headStreamId)
+	headWriter, err := sw.newWriter(headStreamID)
 	if err != nil {
 		return errors.Wrap(err, "failed to create head writer")
 	}
@@ -431,7 +431,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 		// better than that.
 		lhandler = lc.levels[len(lc.levels)-1]
 	}
-	if w.streamID == headStreamId {
+	if w.streamID == headStreamID {
 		// This is a special !badger!head key. We should store it at level 0, separate from all the
 		// other keys to avoid an overlap.
 		lhandler = lc.levels[0]
