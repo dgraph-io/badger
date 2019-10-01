@@ -11,7 +11,10 @@ type MergeIterator struct {
 	smaller mergeIteratorChild
 	bigger  mergeIteratorChild
 
-	// when the two iterators has the same value, the value in the second iterator is ignored.
+	// When the two iterators has the same value, the value in the second iterator is ignored.
+	// The iterators are swapped when bigger iterator < small iterator. Second always points to
+	// bigger iterator and that allows us to pick the value from smaller iterator (in the intial
+	// state) when both the iterators have the same value.
 	second  y.Iterator
 	reverse bool
 }
@@ -22,7 +25,7 @@ type mergeIteratorChild struct {
 	iter  y.Iterator
 
 	// The two iterators are type asserted from `y.Iterator`, used to inline more function calls.
-	// Calling functions on concrete types is much faster (about 30%) than calling the
+	// Calling functions on concrete types is much faster (about 25-30%) than calling the
 	// iterface's function.
 	merge  *MergeIterator
 	concat *ConcatIterator
@@ -34,7 +37,7 @@ func (child *mergeIteratorChild) setIterator(iter y.Iterator) {
 	child.concat, _ = iter.(*ConcatIterator)
 }
 
-func (child *mergeIteratorChild) reset() {
+func (child *mergeIteratorChild) setKey() {
 	if child.merge != nil {
 		child.valid = child.merge.smaller.valid
 		if child.valid {
@@ -53,24 +56,28 @@ func (child *mergeIteratorChild) reset() {
 	}
 }
 
-func (mt *MergeIterator) fix() {
+func (mt *MergeIterator) fixSmallerBigger() {
 	if !mt.bigger.valid {
 		return
 	}
 	for mt.smaller.valid {
 		cmp := y.CompareKeys(mt.smaller.key, mt.bigger.key)
+		// Both the keys are equal.
 		if cmp == 0 {
 			// Ignore the value in second iterator.
 			mt.second.Next()
 			var secondValid bool
 			if mt.second == mt.smaller.iter {
-				mt.smaller.reset()
+				mt.smaller.setKey()
 				secondValid = mt.smaller.valid
 			} else {
-				mt.bigger.reset()
+				mt.bigger.setKey()
 				secondValid = mt.bigger.valid
 			}
 			if !secondValid {
+				if mt.second == mt.smaller.iter && mt.bigger.valid {
+					mt.swap()
+				}
 				return
 			}
 			continue
@@ -102,26 +109,26 @@ func (mt *MergeIterator) Next() {
 	} else {
 		mt.smaller.iter.Next()
 	}
-	mt.smaller.reset()
-	mt.fix()
+	mt.smaller.setKey()
+	mt.fixSmallerBigger()
 }
 
 // Rewind seeks to first element (or last element for reverse iterator).
 func (mt *MergeIterator) Rewind() {
 	mt.smaller.iter.Rewind()
-	mt.smaller.reset()
+	mt.smaller.setKey()
 	mt.bigger.iter.Rewind()
-	mt.bigger.reset()
-	mt.fix()
+	mt.bigger.setKey()
+	mt.fixSmallerBigger()
 }
 
 // Seek brings us to element with key >= given key.
 func (mt *MergeIterator) Seek(key []byte) {
 	mt.smaller.iter.Seek(key)
-	mt.smaller.reset()
+	mt.smaller.setKey()
 	mt.bigger.iter.Seek(key)
-	mt.bigger.reset()
-	mt.fix()
+	mt.bigger.setKey()
+	mt.fixSmallerBigger()
 }
 
 // Valid returns whether the MergeIterator is at a valid element.
