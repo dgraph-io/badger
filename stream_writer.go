@@ -65,9 +65,10 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 		db: db,
 		// throttle shouldn't make much difference. Memory consumption is based on the number of
 		// concurrent streams being processed.
-		throttle: y.NewThrottle(16),
-		writers:  make(map[uint32]*sortedWriter),
-		closers:  make(map[uint32]*y.Closer),
+		throttle:      y.NewThrottle(16),
+		writers:       make(map[uint32]*sortedWriter),
+		closedStreams: make(map[uint32]bool),
+		closers:       make(map[uint32]*y.Closer),
 	}
 }
 
@@ -181,6 +182,8 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 		}
 
 		sw.closedStreams[streamID] = true
+		delete(sw.writers, streamID)
+		delete(sw.closers, streamID)
 	}
 	return nil
 }
