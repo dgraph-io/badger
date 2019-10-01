@@ -29,6 +29,8 @@ message KV {
 
   // Stream id is used to identify which stream the KV came from.
   uint32 stream_id = 10;
+  // Stream done is used to indicate end of stream.
+  bool stream_done = 11;
 }
 
 message KVList {

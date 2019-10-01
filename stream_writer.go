@@ -29,6 +29,11 @@ import (
 
 const headStreamId uint32 = math.MaxUint32
 
+var (
+	// ErrStreamClosed is returned when a sent is performed on closed stream.
+	ErrStreamClosed = errors.New("stream is already closed")
+)
+
 // StreamWriter is used to write data coming from multiple streams. The streams must not have any
 // overlapping key ranges. Within each stream, the keys must be sorted. Badger Stream framework is
 // capable of generating such an output. So, this StreamWriter can be used at the other end to build
@@ -41,13 +46,14 @@ const headStreamId uint32 = math.MaxUint32
 // StreamWriter should not be called on in-use DB instances. It is designed only to bootstrap new
 // DBs.
 type StreamWriter struct {
-	writeLock  sync.Mutex
-	db         *DB
-	done       func()
-	throttle   *y.Throttle
-	maxVersion uint64
-	writers    map[uint32]*sortedWriter
-	closer     *y.Closer
+	writeLock     sync.Mutex
+	db            *DB
+	done          func()
+	throttle      *y.Throttle
+	maxVersion    uint64
+	writers       map[uint32]*sortedWriter
+	closedStreams map[uint32]bool
+	closers       map[uint32]*y.Closer
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -61,7 +67,7 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 		// concurrent streams being processed.
 		throttle: y.NewThrottle(16),
 		writers:  make(map[uint32]*sortedWriter),
-		closer:   y.NewCloser(0),
+		closers:  make(map[uint32]*y.Closer),
 	}
 }
 
@@ -85,8 +91,23 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 	if len(kvs.GetKv()) == 0 {
 		return nil
 	}
+
+	closedStreams := make(map[uint32]bool)
+	streamWithRecords := make(map[uint32]bool)
 	streamReqs := make(map[uint32]*request)
+
 	for _, kv := range kvs.Kv {
+		if kv.StreamDone {
+			closedStreams[kv.StreamId] = true
+			continue
+		}
+
+		if _, ok := closedStreams[kv.StreamId]; ok {
+			return ErrStreamClosed
+		}
+
+		streamWithRecords[kv.StreamId] = true
+
 		var meta, userMeta byte
 		if len(kv.Meta) > 0 {
 			meta = kv.Meta[0]
@@ -121,6 +142,14 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
+
+	// Check if any of the stream we got records for are closed.
+	for streamID := range streamWithRecords {
+		if _, ok := sw.closedStreams[streamID]; ok {
+			return ErrStreamClosed
+		}
+	}
+
 	if err := sw.db.vlog.write(all); err != nil {
 		return err
 	}
@@ -137,6 +166,22 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 		}
 		writer.reqCh <- req
 	}
+
+	// close any streams if required.
+	for streamID := range closedStreams {
+		writer, ok := sw.writers[streamID]
+		if !ok {
+			return nil
+		}
+
+		closer := sw.closers[streamID]
+		closer.SignalAndWait()
+		if err := writer.Done(); err != nil {
+			return err
+		}
+
+		sw.closedStreams[streamID] = true
+	}
 	return nil
 }
 
@@ -148,7 +193,10 @@ func (sw *StreamWriter) Flush() error {
 
 	defer sw.done()
 
-	sw.closer.SignalAndWait()
+	for _, closer := range sw.closers {
+		closer.SignalAndWait()
+	}
+
 	var maxHead valuePointer
 	for _, writer := range sw.writers {
 		if err := writer.Done(); err != nil {
@@ -228,8 +276,10 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 		builder:  table.NewTableBuilder(bopts),
 		reqCh:    make(chan *request, 3),
 	}
-	sw.closer.AddRunning(1)
-	go w.handleRequests(sw.closer)
+
+	closer := y.NewCloser(1)
+	sw.closers[streamID] = closer
+	go w.handleRequests(closer)
 	return w, nil
 }
 
@@ -324,9 +374,20 @@ func (w *sortedWriter) send() error {
 // to sortedWriter. It completes writing current SST to disk.
 func (w *sortedWriter) Done() error {
 	if w.builder.Empty() {
+		w.builder = nil
 		return nil
 	}
-	return w.send()
+
+	if err := w.throttle.Do(); err != nil {
+		return err
+	}
+	go func(builder *table.Builder) {
+		err := w.createTable(builder)
+		w.throttle.Done(err)
+	}(w.builder)
+
+	w.builder = nil
+	return nil
 }
 
 func (w *sortedWriter) createTable(builder *table.Builder) error {
