@@ -27,10 +27,7 @@ type MergeIterator struct {
 	smaller mergeIteratorChild
 	bigger  mergeIteratorChild
 
-	// When the two iterators has the same value, the value in the second iterator is ignored.
-	// The iterators are swapped when bigger iterator < small iterator. Second always points to
-	// bigger iterator and that allows us to pick the value from smaller iterator (in the intial
-	// state) when both the iterators have the same value.
+	// When the two iterators have the same value, the value in the second iterator is ignored.
 	second  y.Iterator
 	reverse bool
 }
