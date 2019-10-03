@@ -53,7 +53,6 @@ type StreamWriter struct {
 	maxVersion    uint64
 	writers       map[uint32]*sortedWriter
 	closedStreams map[uint32]bool
-	closers       map[uint32]*y.Closer
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -68,7 +67,6 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 		throttle:      y.NewThrottle(16),
 		writers:       make(map[uint32]*sortedWriter),
 		closedStreams: make(map[uint32]bool),
-		closers:       make(map[uint32]*y.Closer),
 	}
 }
 
@@ -175,15 +173,13 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 			return nil
 		}
 
-		closer := sw.closers[streamID]
-		closer.SignalAndWait()
+		writer.closer.SignalAndWait()
 		if err := writer.Done(); err != nil {
 			return err
 		}
 
 		sw.closedStreams[streamID] = true
 		delete(sw.writers, streamID)
-		delete(sw.closers, streamID)
 	}
 	return nil
 }
@@ -196,8 +192,8 @@ func (sw *StreamWriter) Flush() error {
 
 	defer sw.done()
 
-	for _, closer := range sw.closers {
-		closer.SignalAndWait()
+	for _, writer := range sw.writers {
+		writer.closer.SignalAndWait()
 	}
 
 	var maxHead valuePointer
@@ -262,6 +258,7 @@ type sortedWriter struct {
 	streamID uint32
 	reqCh    chan *request
 	head     valuePointer
+	closer   *y.Closer
 }
 
 func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
@@ -270,6 +267,7 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 		return nil, err
 	}
 
+	closer := y.NewCloser(1)
 	bopts := buildTableOptions(sw.db.opt)
 	bopts.DataKey = dk
 	w := &sortedWriter{
@@ -278,19 +276,18 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 		throttle: sw.throttle,
 		builder:  table.NewTableBuilder(bopts),
 		reqCh:    make(chan *request, 3),
+		closer:   closer,
 	}
 
-	closer := y.NewCloser(1)
-	sw.closers[streamID] = closer
-	go w.handleRequests(closer)
+	go w.handleRequests()
 	return w, nil
 }
 
 // ErrUnsortedKey is returned when any out of order key arrives at sortedWriter during call to Add.
 var ErrUnsortedKey = errors.New("Keys not in sorted order")
 
-func (w *sortedWriter) handleRequests(closer *y.Closer) {
-	defer closer.Done()
+func (w *sortedWriter) handleRequests() {
+	defer w.closer.Done()
 
 	process := func(req *request) {
 		for i, e := range req.Entries {
@@ -326,7 +323,7 @@ func (w *sortedWriter) handleRequests(closer *y.Closer) {
 		select {
 		case req := <-w.reqCh:
 			process(req)
-		case <-closer.HasBeenClosed():
+		case <-w.closer.HasBeenClosed():
 			close(w.reqCh)
 			for req := range w.reqCh {
 				process(req)
