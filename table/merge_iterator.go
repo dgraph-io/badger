@@ -88,7 +88,8 @@ func (mt *MergeIterator) fixSmallerBigger() {
 				secondValid = mt.bigger.valid
 			}
 			if !secondValid {
-				// Swap smaller and bigger only if second points to the smaller one and the bigger is valid.
+				// Swap smaller and bigger only if second points to
+				// the smaller one and the bigger is valid.
 				if mt.second == mt.smaller.iter && mt.bigger.valid {
 					mt.swap()
 				}
@@ -150,7 +151,7 @@ func (mt *MergeIterator) Valid() bool {
 	return mt.smaller.valid
 }
 
-// Key returns the key associated with the current iterator
+// Key returns the key associated with the current iterator.
 func (mt *MergeIterator) Key() []byte {
 	return mt.smaller.key
 }
@@ -160,7 +161,7 @@ func (mt *MergeIterator) Value() y.ValueStruct {
 	return mt.smaller.iter.Value()
 }
 
-// Close implements y.Iterator
+// Close implements y.Iterator.
 func (mt *MergeIterator) Close() error {
 	err1 := mt.smaller.iter.Close()
 	err2 := mt.bigger.iter.Close()
@@ -170,7 +171,7 @@ func (mt *MergeIterator) Close() error {
 	return errors.Wrap(err2, "MergeIterator")
 }
 
-// NewMergeIterator creates a merge iterator
+// NewMergeIterator creates a merge iterator.
 func NewMergeIterator(iters []y.Iterator, reverse bool) y.Iterator {
 	if len(iters) == 0 {
 		return nil
