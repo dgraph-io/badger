@@ -21,6 +21,7 @@ import (
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/table"
+	"github.com/dgraph-io/ristretto"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -88,6 +89,8 @@ type Options struct {
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
+
+	cache *ristretto.Cache
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -139,6 +142,7 @@ func buildTableOptions(opt Options) table.Options {
 		LoadingMode:        opt.TableLoadingMode,
 		ChkMode:            opt.ChecksumVerificationMode,
 		Compression:        opt.Compression,
+		Cache:              opt.cache,
 	}
 }
 

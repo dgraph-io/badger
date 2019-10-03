@@ -36,6 +36,7 @@ import (
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto"
 	"github.com/dgraph-io/ristretto/z"
 )
 
@@ -64,6 +65,8 @@ type Options struct {
 
 	// Compression indicates the compression algorithm used for block compression.
 	Compression options.CompressionType
+
+	Cache *ristretto.Cache
 }
 
 // TableInterface is useful for testing.
@@ -348,7 +351,14 @@ func (t *Table) block(idx int) (*block, error) {
 	if idx >= len(t.blockIndex) {
 		return nil, errors.New("block out of index")
 	}
-
+	var blkKey string
+	if t.opt.Cache != nil {
+		blkKey = t.blockCacheKey(idx)
+		cachedBlk, ok := t.opt.Cache.Get(blkKey)
+		if ok && cachedBlk != nil {
+			return cachedBlk.(*block), nil
+		}
+	}
 	ko := t.blockIndex[idx]
 	blk := &block{
 		offset: int(ko.Offset),
@@ -407,7 +417,14 @@ func (t *Table) block(idx int) (*block, error) {
 			return nil, err
 		}
 	}
-	return blk, err
+	if t.opt.Cache != nil {
+		t.opt.Cache.Set(blkKey, blk, 1)
+	}
+	return blk, nil
+}
+
+func (t *Table) blockCacheKey(idx int) string {
+	return fmt.Sprintf("%d_%d", t.ID(), idx)
 }
 
 // Size is its file size in bytes
