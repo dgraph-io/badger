@@ -328,3 +328,71 @@ func TestStreamWriter6(t *testing.T) {
 		require.NoError(t, db.Close())
 	})
 }
+
+func TestStreamDone(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+
+		var val [10]byte
+		rand.Read(val[:])
+		for i := 0; i < 10; i++ {
+			list := &pb.KVList{}
+			kv1 := &pb.KV{
+				Key:      []byte(fmt.Sprintf("%d", i)),
+				Value:    val[:],
+				Version:  1,
+				StreamId: uint32(i),
+			}
+			kv2 := &pb.KV{
+				StreamId:   uint32(i),
+				StreamDone: true,
+			}
+			list.Kv = append(list.Kv, kv1, kv2)
+			require.NoError(t, sw.Write(list), "sw.Write() failed")
+		}
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+		require.NoError(t, db.Close())
+
+		var err error
+		db, err = Open(db.opt)
+		require.NoError(t, err)
+		require.NoError(t, db.Close())
+	})
+}
+
+func TestSendOnClosedStream(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+
+		var val [10]byte
+		rand.Read(val[:])
+		list := &pb.KVList{}
+		kv1 := &pb.KV{
+			Key:      []byte(fmt.Sprintf("%d", 1)),
+			Value:    val[:],
+			Version:  1,
+			StreamId: uint32(1),
+		}
+		kv2 := &pb.KV{
+			StreamId:   uint32(1),
+			StreamDone: true,
+		}
+		list.Kv = append(list.Kv, kv1, kv2)
+		require.NoError(t, sw.Write(list), "sw.Write() failed")
+
+		// Send once stream is closed.
+		list = &pb.KVList{}
+		kv1 = &pb.KV{
+			Key:      []byte(fmt.Sprintf("%d", 2)),
+			Value:    val[:],
+			Version:  1,
+			StreamId: uint32(1),
+		}
+		list.Kv = append(list.Kv, kv1)
+		require.Equal(t, ErrStreamClosed, sw.Write(list), "sw.Write() should fail")
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+		require.NoError(t, db.Close())
+	})
+}
