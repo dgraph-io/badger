@@ -42,7 +42,7 @@ type mergeIteratorChild struct {
 
 	// The two iterators are type asserted from `y.Iterator`, used to inline more function calls.
 	// Calling functions on concrete types is much faster (about 25-30%) than calling the
-	// iterface's function.
+	// interface's function.
 	merge  *MergeIterator
 	concat *ConcatIterator
 }
@@ -91,6 +91,7 @@ func (mt *MergeIterator) fixSmallerBigger() {
 				secondValid = mt.bigger.valid
 			}
 			if !secondValid {
+				// Swap smaller and bigger only if second points to the smaller one and the bigger is valid.
 				if mt.second == mt.smaller.iter && mt.bigger.valid {
 					mt.swap()
 				}
