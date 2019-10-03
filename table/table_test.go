@@ -31,6 +31,7 @@ import (
 	"github.com/cespare/xxhash"
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,6 +39,8 @@ const (
 	KB = 1024
 	MB = KB * 1024
 )
+
+var encKey = []byte("12345678901234567890123456789012")
 
 func key(prefix string, i int) string {
 	return prefix + fmt.Sprintf("%04d", i)
@@ -47,7 +50,6 @@ func getTestTableOptions() Options {
 	return Options{
 		Compression:        options.ZSTD,
 		LoadingMode:        options.LoadToRAM,
-		ChkMode:            options.OnTableAndBlockRead,
 		BlockSize:          4 * 1024,
 		BloomFalsePositive: 0.01,
 	}
@@ -736,7 +738,7 @@ func TestTableChecksum(t *testing.T) {
 
 func BenchmarkRead(b *testing.B) {
 	n := int(5 * 1e6)
-	tbl := getTableForBenchmarks(b, n)
+	tbl := getTableForBenchmarks(b, n, nil)
 	defer tbl.DecrRef()
 
 	b.ResetTimer()
@@ -753,7 +755,14 @@ func BenchmarkRead(b *testing.B) {
 
 func BenchmarkReadAndBuild(b *testing.B) {
 	n := int(5 * 1e6)
-	tbl := getTableForBenchmarks(b, n)
+
+	var cache, _ = ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1000000 * 10,
+		MaxCost:     1000000,
+		BufferItems: 64,
+		Metrics:     true,
+	})
+	tbl := getTableForBenchmarks(b, n, cache)
 	defer tbl.DecrRef()
 
 	b.ResetTimer()
@@ -761,6 +770,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		func() {
 			opts := Options{Compression: options.ZSTD, BlockSize: 4 * 0124, BloomFalsePositive: 0.01}
+			opts.Cache = cache
 			newBuilder := NewTableBuilder(opts)
 			it := tbl.NewIterator(false)
 			defer it.Close()
@@ -779,9 +789,19 @@ func BenchmarkReadMerged(b *testing.B) {
 	y.AssertTrue((n % m) == 0)
 	tableSize := n / m
 	var tables []*Table
+
+	var cache, err = ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1000000 * 10,
+		MaxCost:     1000000,
+		BufferItems: 64,
+		Metrics:     true,
+	})
+	require.NoError(b, err)
+
 	for i := 0; i < m; i++ {
 		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 		opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+		opts.Cache = cache
 		builder := NewTableBuilder(opts)
 		f, err := y.OpenSyncedFile(filename, true)
 		y.Check(err)
@@ -840,7 +860,7 @@ func BenchmarkChecksum(b *testing.B) {
 
 func BenchmarkRandomRead(b *testing.B) {
 	n := int(5 * 1e6)
-	tbl := getTableForBenchmarks(b, n)
+	tbl := getTableForBenchmarks(b, n, nil)
 	defer tbl.DecrRef()
 
 	r := rand.New(rand.NewSource(time.Now().Unix()))
@@ -865,9 +885,20 @@ func BenchmarkRandomRead(b *testing.B) {
 	}
 }
 
-func getTableForBenchmarks(b *testing.B, count int) *Table {
+func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Table {
 	rand.Seed(time.Now().Unix())
 	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+	if cache == nil {
+		var err error
+		cache, err = ristretto.NewCache(&ristretto.Config{
+			NumCounters: 1000000 * 10,
+			MaxCost:     1000000,
+			BufferItems: 64,
+			Metrics:     true,
+		})
+		require.NoError(b, err)
+	}
+	opts.Cache = cache
 	builder := NewTableBuilder(opts)
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
