@@ -485,13 +485,20 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 		entries = append(entries, e)
 	}
 	// log.Printf("%s\n", b.String())
+	// WAL end entry.
 	e := &Entry{
 		Key:   y.KeyWithTs(txnKey, commitTs),
 		Value: []byte(strconv.FormatUint(commitTs, 10)),
 		meta:  bitFinTxn,
 	}
 	entries = append(entries, e)
-
+	// End entry for vlog.
+	e = &Entry{
+		Key:   y.KeyWithTs(txnKeyVlog, commitTs),
+		Value: []byte(strconv.FormatUint(commitTs, 10)),
+		meta:  bitFinTxn,
+	}
+	entries = append(entries, e)
 	req, err := txn.db.sendToWriteCh(entries)
 	if err != nil {
 		orc.doneCommit(commitTs)

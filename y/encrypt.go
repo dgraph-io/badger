@@ -20,6 +20,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/binary"
 )
 
 // XORBlock encrypts the given data with AES and XOR's with IV.
@@ -41,4 +42,13 @@ func GenerateIV() ([]byte, error) {
 	iv := make([]byte, aes.BlockSize)
 	_, err := rand.Read(iv)
 	return iv, err
+}
+
+func GenerateIVFromOffset(baseIV []byte, offset uint32) []byte {
+	iv := make([]byte, aes.BlockSize)
+	// baseIV is of 12 bytes.
+	AssertTrue(12 == copy(iv[:12], baseIV))
+	// remaining 4 bytes is obtained from offset.
+	binary.BigEndian.PutUint32(iv[12:], offset)
+	return iv
 }

@@ -55,7 +55,7 @@ const (
 	bitMergeEntry byte = 1 << 3
 	// The MSB 2 bits are for transactions.
 	bitTxn    byte = 1 << 6 // Set if the entry is part of a txn.
-	bitFinTxn byte = 1 << 7 // Set if the entry is to indicate end of txn in value log.
+	bitFinTxn byte = 1 << 7 // Set if the entry is to indicate end of txn in WAL and VLOG.
 
 	mi int64 = 1 << 20
 
@@ -85,6 +85,22 @@ type logFile struct {
 	dataKey     *pb.DataKey
 	baseIV      []byte
 	registry    *KeyRegistry
+	encoder     *entryEncoder
+	offset      uint32
+}
+
+func (lf *logFile) fileOffset() uint32 {
+	return atomic.LoadUint32(&lf.offset)
+}
+
+func (lf *logFile) encode(e *Entry, buf *bytes.Buffer, offset uint32) (int, error) {
+	return lf.encoder.encode(e, buf, lf.generateIV(offset))
+}
+
+func (lf *logFile) writeLog(buf *bytes.Buffer) error {
+	_, err := lf.fd.Write(buf.Bytes())
+	atomic.AddUint32(&lf.offset, uint32(buf.Len()))
+	return err
 }
 
 // encodeEntry will encode entry to the buf
@@ -299,7 +315,20 @@ type safeRead struct {
 	v []byte
 
 	recordOffset uint32
-	lf           *logFile
+	decrypter    *logDecrypter
+}
+
+type logDecrypter struct {
+	dataKey *pb.DataKey
+	baseIV  []byte
+}
+
+func (ld *logDecrypter) encryptionEnabled() bool {
+	return ld.dataKey != nil
+}
+
+func (ld *logDecrypter) decryptKV(buf []byte, offset uint32) ([]byte, error) {
+	return y.XORBlock(buf, ld.dataKey.Data, y.GenerateIVFromOffset(ld.baseIV, offset))
 }
 
 // hashReader implements io.Reader, io.ByteReader interfaces. It also keeps track of the number
@@ -371,8 +400,8 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 		}
 		return nil, err
 	}
-	if r.lf.encryptionEnabled() {
-		if buf, err = r.lf.decryptKV(buf[:], r.recordOffset); err != nil {
+	if r.decrypter.encryptionEnabled() {
+		if buf, err = r.decrypter.decryptKV(buf[:], r.recordOffset); err != nil {
 			return nil, err
 		}
 	}
@@ -426,7 +455,10 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		k:            make([]byte, 10),
 		v:            make([]byte, 10),
 		recordOffset: offset,
-		lf:           lf,
+		decrypter: &logDecrypter{
+			baseIV:  lf.baseIV,
+			dataKey: lf.dataKey,
+		},
 	}
 
 	var lastCommit uint64
@@ -792,6 +824,9 @@ func vlogFilePath(dirPath string, fid uint32) string {
 	return fmt.Sprintf("%s%s%06d.vlog", dirPath, string(os.PathSeparator), fid)
 }
 
+func walFilePath(dirPath string, fid uint32) string {
+	return fmt.Sprintf("%s%s%06d.log", dirPath, string(os.PathSeparator), fid)
+}
 func (vlog *valueLog) fpath(fid uint32) string {
 	return vlogFilePath(vlog.dirPath, fid)
 }
@@ -861,6 +896,7 @@ func (lf *logFile) open(path string, flags uint32) error {
 	lf.dataKey = dk
 	lf.baseIV = buf[8:]
 	y.AssertTrue(len(lf.baseIV) == 12)
+	lf.offset = uint32(fi.Size())
 	return nil
 }
 
@@ -1329,6 +1365,18 @@ func (vlog *valueLog) write(reqs []*request) error {
 		}
 	}
 	return toDisk()
+}
+
+func (vlog *valueLog) maxFID() uint32 {
+	return atomic.LoadUint32(&vlog.maxFid)
+}
+
+func (vlog *valueLog) getCurrentLogFile() *logFile {
+	vlog.filesLock.RLock()
+	maxFid := atomic.LoadUint32(&vlog.maxFid)
+	curlf := vlog.filesMap[maxFid]
+	vlog.filesLock.RUnlock()
+	return curlf
 }
 
 // Gets the logFile and acquires and RLock() for the mmap. You must call RUnlock on the file

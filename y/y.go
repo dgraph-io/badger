@@ -22,9 +22,12 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"io/ioutil"
 	"math"
 	"os"
 	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -507,4 +510,38 @@ func (r *PageBufferReader) Read(p []byte) (int, error) {
 	}
 
 	return read, nil
+}
+
+// PopulateFilesForSuffix populate the file id to the given map. It filter's files based
+// on the given prefix.
+func PopulateFilesForSuffix(dir string, suffix string) (map[uint64]struct{}, error) {
+	var fileMap map[uint64]struct{}
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return nil, Wrapf(err, "Error reading directory for files")
+	}
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), suffix) {
+			continue
+		}
+		fsz := len(file.Name())
+		fid, err := strconv.ParseUint(file.Name()[:fsz-5], 10, 32)
+		if err != nil {
+			return nil, Wrapf(err, "Unable to parse file id for the file %s", file.Name())
+		}
+		if _, ok := fileMap[fid]; ok {
+			return nil, Wrapf(err, "Duplicate file found %s. Please delete one.", file.Name())
+		}
+		fileMap[fid] = struct{}{}
+	}
+	return fileMap, nil
+}
+
+// FileMapToSlice will convert the file id map to file id slice.
+func FileMapToSlice(fileMap map[uint64]struct{}) []uint64 {
+	fids := make([]uint64, 0, len(fileMap))
+	for fid := range fileMap {
+		fids = append(fids, fid)
+	}
+	return fids
 }

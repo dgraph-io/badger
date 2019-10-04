@@ -1,10 +1,15 @@
 package badger
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"time"
 	"unsafe"
+
+	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/y"
 )
 
 type valuePointer struct {
@@ -186,4 +191,66 @@ func (e *Entry) WithTTL(dur time.Duration) *Entry {
 func (e *Entry) withMergeBit() *Entry {
 	e.meta = bitMergeEntry
 	return e
+}
+
+// entryEncoder is used to encode entry to the log format.
+// It takes care of encryption.
+type entryEncoder struct {
+	dataKey *pb.DataKey
+}
+
+func (encoder *entryEncoder) encode(e *Entry, buf *bytes.Buffer, IV []byte) (int, error) {
+	h := header{
+		klen:      uint32(len(e.Key)),
+		vlen:      uint32(len(e.Value)),
+		expiresAt: e.ExpiresAt,
+		meta:      e.meta,
+		userMeta:  e.UserMeta,
+	}
+
+	// encode header.
+	var headerEnc [maxHeaderSize]byte
+	sz := h.Encode(headerEnc[:])
+	y.Check2(buf.Write(headerEnc[:sz]))
+	// write hash.
+	hash := crc32.New(y.CastagnoliCrcTable)
+	y.Check2(hash.Write(headerEnc[:sz]))
+	// we'll encrypt only key and value.
+	if encoder.encryptionEnabled() {
+		// TODO: no need to allocate the bytes. we can calculate the encrypted buf one by one
+		// since we're using ctr mode of AES encryption. Ordering won't changed. Need some
+		// refactoring in XORBlock which will work like stream cipher.
+		eBuf := make([]byte, 0, len(e.Key)+len(e.Value))
+		eBuf = append(eBuf, e.Key...)
+		eBuf = append(eBuf, e.Value...)
+		var err error
+		eBuf, err = y.XORBlock(eBuf, encoder.dataKey.Data, IV)
+		if err != nil {
+			return 0, y.Wrapf(err, "Error while encoding entry for vlog.")
+		}
+		// write encrypted buf.
+		y.Check2(buf.Write(eBuf))
+		// write the hash.
+		y.Check2(hash.Write(eBuf))
+	} else {
+		// Encryption is disabled so writing directly to the buffer.
+		// write key.
+		y.Check2(buf.Write(e.Key))
+		// write key hash.
+		y.Check2(hash.Write(e.Key))
+		// write value.
+		y.Check2(buf.Write(e.Value))
+		// write value hash.
+		y.Check2(hash.Write(e.Value))
+	}
+	// write crc32 hash.
+	var crcBuf [crc32.Size]byte
+	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
+	y.Check2(buf.Write(crcBuf[:]))
+	// return encoded length.
+	return len(headerEnc[:sz]) + len(e.Key) + len(e.Value) + len(crcBuf), nil
+}
+
+func (encoder *entryEncoder) encryptionEnabled() bool {
+	return encoder.dataKey != nil
 }
