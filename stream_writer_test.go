@@ -395,6 +395,8 @@ func TestSendOnClosedStream(t *testing.T) {
 	// Defer for panic.
 	defer func() {
 		require.NotNil(t, recover(), "should have paniced")
+		require.NoError(t, sw.Flush())
+		require.NoError(t, db.Close())
 	}()
 	// Send once stream is closed.
 	list = &pb.KVList{}
@@ -445,6 +447,8 @@ func TestSendOnClosedStream2(t *testing.T) {
 	// Defer for panic.
 	defer func() {
 		require.NotNil(t, recover(), "should have paniced")
+		require.NoError(t, sw.Flush())
+		require.NoError(t, db.Close())
 	}()
 
 	require.NoError(t, sw.Write(list), "sw.Write() failed")
