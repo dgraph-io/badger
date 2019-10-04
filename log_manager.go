@@ -23,6 +23,8 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"sync"
+	"sync/atomic"
 
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
@@ -36,31 +38,42 @@ type logManager struct {
 	db             *DB
 	entriesWritten uint32
 	elog           trace.EventLog
+	maxWalID       uint32
+	maxVlogID      uint32
+	filesLock      sync.RWMutex
+	vlogFileMap    map[uint32]*logFile
 }
 
-func openLogManager(db *DB, vhead valuePointer, walhead uint64,
-	replayFn logEntry) error {
+func openLogManager(db *DB, vhead valuePointer, walhead uint32,
+	replayFn logEntry) (*logManager, error) {
 	manager := &logManager{
-		opt:  db.opt,
-		db:   db,
-		elog: y.NoEventLog,
+		opt:       db.opt,
+		db:        db,
+		elog:      y.NoEventLog,
+		maxWalID:  0,
+		maxVlogID: 0,
 	}
 	if manager.opt.EventLogging {
 		manager.elog = trace.NewEventLog("Badger", "LogManager")
 	}
 	walFiles, err := y.PopulateFilesForSuffix(db.opt.ValueDir, ".log")
 	if err != nil {
-		return y.Wrapf(err, "Error while populating map in openLogManager")
+		return nil, y.Wrapf(err, "Error while populating map in openLogManager")
 	}
 	// filter the wal files that needs to be replayed.
-	filteredWALIDs := []uint64{}
+	filteredWALIDs := []uint32{}
 	for fid := range walFiles {
-		if fid < walhead {
+		// Calculate the max wal id.
+		if fid > manager.maxWalID {
+			manager.maxWalID = fid
+		}
+		// Filter wal id that needs to be replayed.
+		if fid > walhead {
 			// Delete the wal file if is not needed any more.
 			if !db.opt.ReadOnly {
 				path := walFilePath(manager.opt.ValueDir, uint32(fid))
 				if err := os.Remove(path); err != nil {
-					return y.Wrapf(err, "Error while removing log file %d", fid)
+					return nil, y.Wrapf(err, "Error while removing log file %d", fid)
 				}
 			}
 			continue
@@ -71,29 +84,156 @@ func openLogManager(db *DB, vhead valuePointer, walhead uint64,
 	// We filtered all the WAL file that needs to replayed. Now, We're going
 	// to pick vlog files that needs to be replayed.
 	vlogFiles, err := y.PopulateFilesForSuffix(db.opt.ValueDir, ".vlog")
+	if err != nil {
+		return nil, y.Wrapf(err, "Error while populating vlog files")
+	}
 	// filter the vlog files that needs to be replayed.
-	filteredVlogIDs := []uint64{}
+	filteredVlogIDs := []uint32{}
 	for fid := range vlogFiles {
-		if fid < uint64(vhead.Fid) {
+		//
+		if fid > manager.maxVlogID {
+			manager.maxVlogID = fid
+		}
+		if fid < vhead.Fid {
 			// Skip the vlog files that we don't need to replay.
 			continue
 		}
 		filteredVlogIDs = append(filteredVlogIDs, fid)
 	}
+	// Sort all the ids.
+	sort.Slice(filteredWALIDs, func(i, j int) bool {
+		return filteredWALIDs[i] < filteredWALIDs[j]
+	})
+	sort.Slice(filteredVlogIDs, func(i, j int) bool {
+		return filteredVlogIDs[i] < filteredVlogIDs[j]
+	})
+	replayer := logReplayer{
+		walIDs:      filteredWALIDs,
+		vlogIDs:     filteredVlogIDs,
+		vhead:       vhead,
+		opt:         db.opt,
+		keyRegistry: db.registry,
+	}
+	err = replayer.replay(replayFn)
+	if err != nil {
+		return nil, y.Wrapf(err, "Error while replaying log")
+	}
 
-	return nil
+	if manager.maxWalID == 0 {
+		// No WAL files and vlog file so advancing both the ids.
+		y.AssertTrue(manager.maxVlogID == 0)
+		manager.maxWalID++
+		wal, err := manager.createlogFile(walFilePath(manager.opt.ValueDir, manager.maxWalID),
+			manager.maxWalID)
+		if err != nil {
+			return nil, y.Wrapf(err, "Error while creating wal file %d", manager.maxWalID)
+		}
+		// No need to lock here. Since we're creating the log manager.
+		manager.wal = wal
+		manager.maxVlogID++
+		vlog, err := manager.createlogFile(walFilePath(manager.opt.ValueDir, manager.maxVlogID),
+			manager.maxVlogID)
+		if err != nil {
+			return nil, y.Wrapf(err, "Error while creating vlog file %d", manager.maxVlogID)
+		}
+		manager.vlog = vlog
+		manager.vlogFileMap[manager.maxVlogID] = vlog
+		return manager, nil
+	}
+
+	// Populate all log files.
+	vlogFiles, err = y.PopulateFilesForSuffix(db.opt.ValueDir, ".vlog")
+	if err != nil {
+		return nil, y.Wrapf(err, "Error while populating vlog filesS")
+	}
+	var flags uint32
+	switch {
+	case manager.opt.ReadOnly:
+		// If we have read only, we don't need SyncWrites.
+		flags |= y.ReadOnly
+		// Set sync flag.
+	case manager.opt.SyncWrites:
+		flags |= y.Sync
+	}
+	// populate vlogFile map.
+	for fid := range vlogFiles {
+		vlogFile := &logFile{
+			fid:         fid,
+			path:        vlogFilePath(manager.opt.ValueDir, fid),
+			loadingMode: manager.opt.ValueLogLoadingMode,
+			registry:    manager.db.registry,
+		}
+		if err = vlogFile.open(vlogFilePath(manager.opt.ValueDir, fid), flags); err != nil {
+			return nil, y.Wrapf(err, "Error while opening vlog file %d", fid)
+		}
+		manager.vlogFileMap[fid] = vlogFile
+	}
+
+	if manager.opt.ReadOnly {
+		// No need for wal file in read only mode.
+		return manager, nil
+	}
+
+	if manager.maxWalID == walhead {
+		// Last persisted SST's wal so need to create new WAL file.
+		manager.maxWalID++
+		wal, err := manager.createlogFile(walFilePath(manager.opt.ValueDir, manager.maxWalID),
+			manager.maxWalID)
+		if err != nil {
+			return nil, y.Wrapf(err, "Error while creating wal file %d", manager.maxWalID)
+		}
+		manager.wal = wal
+		return manager, nil
+	}
+	wal := &logFile{
+		fid:         manager.maxWalID,
+		path:        walFilePath(manager.opt.ValueDir, manager.maxWalID),
+		loadingMode: manager.opt.ValueLogLoadingMode,
+		registry:    manager.db.registry,
+	}
+	if err = wal.open(vlogFilePath(manager.opt.ValueDir, manager.maxWalID), flags); err != nil {
+		return nil, y.Wrapf(err, "Error while opening wal file %d", manager.maxWalID)
+	}
+	manager.wal = wal
+	return manager, nil
 }
 
-func (manager *logManager) replayLog(walIDs, vlogIDs []uint64) {
-	// Sort both the ids
-	sort.Slice(walIDs, func(i, j int) bool { return walIDs[i] < walIDs[j] })
-	sort.Slice(vlogIDs, func(i, j int) bool { return vlogIDs[i] < vlogIDs[j] })
+func (manager *logManager) createlogFile(path string, fid uint32) (*logFile, error) {
 
+	lf := &logFile{
+		fid:         fid,
+		path:        path,
+		loadingMode: manager.opt.ValueLogLoadingMode,
+		registry:    manager.db.registry,
+	}
+	// writableLogOffset is only written by write func, by read by Read func.
+	// To avoid a race condition, all reads and updates to this variable must be
+	// done via atomics.
+	var err error
+	if lf.fd, err = y.CreateSyncedFile(path, manager.opt.SyncWrites); err != nil {
+		return nil, errFile(err, lf.path, "Create value log file")
+	}
+
+	if err = lf.bootstrap(); err != nil {
+		return nil, err
+	}
+
+	if err = syncDir(manager.opt.ValueDir); err != nil {
+		return nil, errFile(err, manager.opt.ValueDir, "Sync value log dir")
+	}
+	if err = lf.mmap(2 * manager.opt.ValueLogFileSize); err != nil {
+		return nil, errFile(err, lf.path, "Mmap value log file")
+	}
+	// writableLogOffset is only written by write func, by read by Read func.
+	// To avoid a race condition, all reads and updates to this variable must be
+	// done via atomics.
+	atomic.StoreUint32(&lf.offset, vlogHeaderSize)
+	return lf, nil
 }
 
 type logReplayer struct {
-	walIDs      []uint64
-	vlogIDs     []uint64
+	walIDs      []uint32
+	vlogIDs     []uint32
 	vhead       valuePointer
 	opt         Options
 	keyRegistry *KeyRegistry
@@ -190,7 +330,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			// close the log file.
 			err = walFile.fd.Close()
 			if err != nil {
-				return y.Wrapf(err, "Error while closing the WAL file %d in replay", walFile.path)
+				return y.Wrapf(err, "Error while closing the WAL file %s in replay", walFile.path)
 			}
 			// We successfully iterated till the end of the file. Now we have to advance
 			// the wal File.
@@ -232,7 +372,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			// close the log file.
 			err = vlogFile.fd.Close()
 			if err != nil {
-				return y.Wrapf(err, "Error while closing the vlog file %d in replay", vlogFile.path)
+				return y.Wrapf(err, "Error while closing the vlog file %s in replay", vlogFile.path)
 			}
 			// We successfully iterated till the end of the file. Now we have to advance
 			// the wal File.

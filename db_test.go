@@ -1484,52 +1484,52 @@ func TestReadOnly(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestLSMOnly(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, os.RemoveAll(dir))
-	}()
+// func TestLSMOnly(t *testing.T) {
+// 	dir, err := ioutil.TempDir("", "badger-test")
+// 	require.NoError(t, err)
+// 	defer func() {
+// 		require.NoError(t, os.RemoveAll(dir))
+// 	}()
 
-	opts := LSMOnlyOptions(dir)
-	dopts := DefaultOptions(dir)
-	require.NotEqual(t, dopts.ValueThreshold, opts.ValueThreshold)
+// 	opts := LSMOnlyOptions(dir)
+// 	dopts := DefaultOptions(dir)
+// 	require.NotEqual(t, dopts.ValueThreshold, opts.ValueThreshold)
 
-	dopts.ValueThreshold = 1 << 21
-	_, err = Open(dopts)
-	require.Contains(t, err.Error(), "Invalid ValueThreshold")
+// 	dopts.ValueThreshold = 1 << 21
+// 	_, err = Open(dopts)
+// 	require.Contains(t, err.Error(), "Invalid ValueThreshold")
 
-	// Also test for error, when ValueThresholdSize is greater than maxBatchSize.
-	dopts.ValueThreshold = LSMOnlyOptions(dir).ValueThreshold
-	// maxBatchSize is calculated from MaxTableSize.
-	dopts.MaxTableSize = int64(LSMOnlyOptions(dir).ValueThreshold)
-	_, err = Open(dopts)
-	require.Error(t, err, "db creation should have been failed")
-	require.Contains(t, err.Error(), "Valuethreshold greater than max batch size")
+// 	// Also test for error, when ValueThresholdSize is greater than maxBatchSize.
+// 	dopts.ValueThreshold = LSMOnlyOptions(dir).ValueThreshold
+// 	// maxBatchSize is calculated from MaxTableSize.
+// 	dopts.MaxTableSize = int64(LSMOnlyOptions(dir).ValueThreshold)
+// 	_, err = Open(dopts)
+// 	require.Error(t, err, "db creation should have been failed")
+// 	require.Contains(t, err.Error(), "Valuethreshold greater than max batch size")
 
-	opts.ValueLogMaxEntries = 100
-	db, err := Open(opts)
-	require.NoError(t, err)
-	if err != nil {
-		t.Fatal(err)
-	}
+// 	opts.ValueLogMaxEntries = 100
+// 	db, err := Open(opts)
+// 	require.NoError(t, err)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
 
-	value := make([]byte, 128)
-	_, err = rand.Read(value)
-	for i := 0; i < 500; i++ {
-		require.NoError(t, err)
-		txnSet(t, db, []byte(fmt.Sprintf("key%d", i)), value, 0x00)
-	}
-	require.NoError(t, db.Close()) // Close to force compactions, so Value log GC would run.
+// 	value := make([]byte, 128)
+// 	_, err = rand.Read(value)
+// 	for i := 0; i < 500; i++ {
+// 		require.NoError(t, err)
+// 		txnSet(t, db, []byte(fmt.Sprintf("key%d", i)), value, 0x00)
+// 	}
+// 	require.NoError(t, db.Close()) // Close to force compactions, so Value log GC would run.
 
-	db, err = Open(opts)
-	require.NoError(t, err)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	require.NoError(t, db.RunValueLogGC(0.2))
-}
+// 	db, err = Open(opts)
+// 	require.NoError(t, err)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	defer db.Close()
+// 	require.NoError(t, db.RunValueLogGC(0.2))
+// }
 
 // This test function is doing some intricate sorcery.
 func TestMinReadTs(t *testing.T) {

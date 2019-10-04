@@ -24,13 +24,11 @@ import (
 	"os"
 	"reflect"
 	"runtime"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
-	humanize "github.com/dustin/go-humanize"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/trace"
 )
@@ -96,64 +94,64 @@ func TestValueBasic(t *testing.T) {
 
 }
 
-func TestValueGCManaged(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+// func TestValueGCManaged(t *testing.T) {
+// 	dir, err := ioutil.TempDir("", "badger-test")
+// 	require.NoError(t, err)
+// 	defer os.RemoveAll(dir)
 
-	N := 10000
-	opt := getTestOptions(dir)
-	opt.ValueLogMaxEntries = uint32(N / 10)
-	opt.managedTxns = true
-	db, err := Open(opt)
-	require.NoError(t, err)
-	defer db.Close()
+// 	N := 10000
+// 	opt := getTestOptions(dir)
+// 	opt.ValueLogMaxEntries = uint32(N / 10)
+// 	opt.managedTxns = true
+// 	db, err := Open(opt)
+// 	require.NoError(t, err)
+// 	defer db.Close()
 
-	var ts uint64
-	newTs := func() uint64 {
-		ts++
-		return ts
-	}
+// 	var ts uint64
+// 	newTs := func() uint64 {
+// 		ts++
+// 		return ts
+// 	}
 
-	sz := 64 << 10
-	var wg sync.WaitGroup
-	for i := 0; i < N; i++ {
-		v := make([]byte, sz)
-		rand.Read(v[:rand.Intn(sz)])
+// 	sz := 64 << 10
+// 	var wg sync.WaitGroup
+// 	for i := 0; i < N; i++ {
+// 		v := make([]byte, sz)
+// 		rand.Read(v[:rand.Intn(sz)])
 
-		wg.Add(1)
-		txn := db.NewTransactionAt(newTs(), true)
-		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
-		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
-			wg.Done()
-			require.NoError(t, err)
-		}))
-	}
+// 		wg.Add(1)
+// 		txn := db.NewTransactionAt(newTs(), true)
+// 		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
+// 		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
+// 			wg.Done()
+// 			require.NoError(t, err)
+// 		}))
+// 	}
 
-	for i := 0; i < N; i++ {
-		wg.Add(1)
-		txn := db.NewTransactionAt(newTs(), true)
-		require.NoError(t, txn.Delete([]byte(fmt.Sprintf("key%d", i))))
-		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
-			wg.Done()
-			require.NoError(t, err)
-		}))
-	}
-	wg.Wait()
-	files, err := ioutil.ReadDir(dir)
-	require.NoError(t, err)
-	for _, fi := range files {
-		t.Logf("File: %s. Size: %s\n", fi.Name(), humanize.Bytes(uint64(fi.Size())))
-	}
+// 	for i := 0; i < N; i++ {
+// 		wg.Add(1)
+// 		txn := db.NewTransactionAt(newTs(), true)
+// 		require.NoError(t, txn.Delete([]byte(fmt.Sprintf("key%d", i))))
+// 		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
+// 			wg.Done()
+// 			require.NoError(t, err)
+// 		}))
+// 	}
+// 	wg.Wait()
+// 	files, err := ioutil.ReadDir(dir)
+// 	require.NoError(t, err)
+// 	for _, fi := range files {
+// 		t.Logf("File: %s. Size: %s\n", fi.Name(), humanize.Bytes(uint64(fi.Size())))
+// 	}
 
-	for i := 0; i < 100; i++ {
-		// Try at max 100 times to GC even a single value log file.
-		if err := db.RunValueLogGC(0.0001); err == nil {
-			return // Done
-		}
-	}
-	require.Fail(t, "Unable to GC even a single value log file.")
-}
+// 	for i := 0; i < 100; i++ {
+// 		// Try at max 100 times to GC even a single value log file.
+// 		if err := db.RunValueLogGC(0.0001); err == nil {
+// 			return // Done
+// 		}
+// 	}
+// 	require.Fail(t, "Unable to GC even a single value log file.")
+// }
 
 func TestValueGC(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
@@ -676,42 +674,42 @@ func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 	require.Regexp(t, "Database was not properly closed, cannot open read-only|Read-only mode is not supported on Windows", err.Error())
 }
 
-func TestValueLogTrigger(t *testing.T) {
-	t.Skip("Difficult to trigger compaction, so skipping. Re-enable after fixing #226")
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+// func TestValueLogTrigger(t *testing.T) {
+// 	t.Skip("Difficult to trigger compaction, so skipping. Re-enable after fixing #226")
+// 	dir, err := ioutil.TempDir("", "badger-test")
+// 	require.NoError(t, err)
+// 	defer os.RemoveAll(dir)
 
-	opt := getTestOptions(dir)
-	opt.ValueLogFileSize = 1 << 20
-	kv, err := Open(opt)
-	require.NoError(t, err)
+// 	opt := getTestOptions(dir)
+// 	opt.ValueLogFileSize = 1 << 20
+// 	kv, err := Open(opt)
+// 	require.NoError(t, err)
 
-	// Write a lot of data, so it creates some work for valug log GC.
-	sz := 32 << 10
-	txn := kv.NewTransaction(true)
-	for i := 0; i < 100; i++ {
-		v := make([]byte, sz)
-		rand.Read(v[:rand.Intn(sz)])
-		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
-		if i%20 == 0 {
-			require.NoError(t, txn.Commit())
-			txn = kv.NewTransaction(true)
-		}
-	}
-	require.NoError(t, txn.Commit())
+// 	// Write a lot of data, so it creates some work for valug log GC.
+// 	sz := 32 << 10
+// 	txn := kv.NewTransaction(true)
+// 	for i := 0; i < 100; i++ {
+// 		v := make([]byte, sz)
+// 		rand.Read(v[:rand.Intn(sz)])
+// 		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
+// 		if i%20 == 0 {
+// 			require.NoError(t, txn.Commit())
+// 			txn = kv.NewTransaction(true)
+// 		}
+// 	}
+// 	require.NoError(t, txn.Commit())
 
-	for i := 0; i < 45; i++ {
-		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
-	}
+// 	for i := 0; i < 45; i++ {
+// 		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
+// 	}
 
-	require.NoError(t, kv.RunValueLogGC(0.5))
+// 	require.NoError(t, kv.RunValueLogGC(0.5))
 
-	require.NoError(t, kv.Close())
+// 	require.NoError(t, kv.Close())
 
-	err = kv.RunValueLogGC(0.5)
-	require.Equal(t, ErrRejected, err, "Error should be returned after closing DB.")
-}
+// 	err = kv.RunValueLogGC(0.5)
+// 	require.Equal(t, ErrRejected, err, "Error should be returned after closing DB.")
+// }
 
 func createVlog(t *testing.T, entries []*Entry) []byte {
 	dir, err := ioutil.TempDir("", "badger-test")
@@ -846,35 +844,35 @@ func (th *testHelper) readRange(from, to int) {
 // Test Bug #578, which showed that if a value is moved during value log GC, an
 // older version can end up at a higher level in the LSM tree than a newer
 // version, causing the data to not be returned.
-func TestBug578(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	y.Check(err)
-	defer os.RemoveAll(dir)
+// func TestBug578(t *testing.T) {
+// 	dir, err := ioutil.TempDir("", "badger-test")
+// 	y.Check(err)
+// 	defer os.RemoveAll(dir)
 
-	db, err := Open(DefaultOptions(dir).
-		WithValueLogMaxEntries(64).
-		WithMaxTableSize(1 << 13))
-	require.NoError(t, err)
+// 	db, err := Open(DefaultOptions(dir).
+// 		WithValueLogMaxEntries(64).
+// 		WithMaxTableSize(1 << 13))
+// 	require.NoError(t, err)
 
-	h := testHelper{db: db, t: t}
+// 	h := testHelper{db: db, t: t}
 
-	// Let's run this whole thing a few times.
-	for j := 0; j < 10; j++ {
-		t.Logf("Cycle: %d\n", j)
-		h.writeRange(0, 32)
-		h.writeRange(0, 10)
-		h.writeRange(50, 72)
-		h.writeRange(40, 72)
-		h.writeRange(40, 72)
+// 	// Let's run this whole thing a few times.
+// 	for j := 0; j < 10; j++ {
+// 		t.Logf("Cycle: %d\n", j)
+// 		h.writeRange(0, 32)
+// 		h.writeRange(0, 10)
+// 		h.writeRange(50, 72)
+// 		h.writeRange(40, 72)
+// 		h.writeRange(40, 72)
 
-		// Run value log GC a few times.
-		for i := 0; i < 5; i++ {
-			db.RunValueLogGC(0.5)
-		}
-		h.readRange(0, 10)
-	}
-	require.NoError(t, db.Close())
-}
+// 		// Run value log GC a few times.
+// 		for i := 0; i < 5; i++ {
+// 			db.RunValueLogGC(0.5)
+// 		}
+// 		h.readRange(0, 10)
+// 	}
+// 	require.NoError(t, db.Close())
+// }
 
 func BenchmarkReadWrite(b *testing.B) {
 	rwRatio := []float32{

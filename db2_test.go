@@ -199,95 +199,95 @@ func TestTruncateVlogNoClose3(t *testing.T) {
 	}
 }
 
-func TestBigKeyValuePairs(t *testing.T) {
-	// This test takes too much memory. So, run separately.
-	if !*manual {
-		t.Skip("Skipping test meant to be run manually.")
-		return
-	}
+// func TestBigKeyValuePairs(t *testing.T) {
+// 	// This test takes too much memory. So, run separately.
+// 	if !*manual {
+// 		t.Skip("Skipping test meant to be run manually.")
+// 		return
+// 	}
 
-	// Passing an empty directory since it will be filled by runBadgerTest.
-	opts := DefaultOptions("").
-		WithMaxTableSize(1 << 20).
-		WithValueLogMaxEntries(64)
-	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
-		bigK := make([]byte, 65001)
-		bigV := make([]byte, db.opt.ValueLogFileSize+1)
-		small := make([]byte, 65000)
+// 	// Passing an empty directory since it will be filled by runBadgerTest.
+// 	opts := DefaultOptions("").
+// 		WithMaxTableSize(1 << 20).
+// 		WithValueLogMaxEntries(64)
+// 	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+// 		bigK := make([]byte, 65001)
+// 		bigV := make([]byte, db.opt.ValueLogFileSize+1)
+// 		small := make([]byte, 65000)
 
-		txn := db.NewTransaction(true)
-		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.SetEntry(NewEntry(bigK, small)))
-		require.Regexp(t, regexp.MustCompile("Value.*exceeded"),
-			txn.SetEntry(NewEntry(small, bigV)))
+// 		txn := db.NewTransaction(true)
+// 		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.SetEntry(NewEntry(bigK, small)))
+// 		require.Regexp(t, regexp.MustCompile("Value.*exceeded"),
+// 			txn.SetEntry(NewEntry(small, bigV)))
 
-		require.NoError(t, txn.SetEntry(NewEntry(small, small)))
-		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.SetEntry(NewEntry(bigK, bigV)))
+// 		require.NoError(t, txn.SetEntry(NewEntry(small, small)))
+// 		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.SetEntry(NewEntry(bigK, bigV)))
 
-		require.NoError(t, db.View(func(txn *Txn) error {
-			_, err := txn.Get(small)
-			require.Equal(t, ErrKeyNotFound, err)
-			return nil
-		}))
+// 		require.NoError(t, db.View(func(txn *Txn) error {
+// 			_, err := txn.Get(small)
+// 			require.Equal(t, ErrKeyNotFound, err)
+// 			return nil
+// 		}))
 
-		// Now run a longer test, which involves value log GC.
-		data := fmt.Sprintf("%100d", 1)
-		key := func(i int) string {
-			return fmt.Sprintf("%65000d", i)
-		}
+// 		// Now run a longer test, which involves value log GC.
+// 		data := fmt.Sprintf("%100d", 1)
+// 		key := func(i int) string {
+// 			return fmt.Sprintf("%65000d", i)
+// 		}
 
-		saveByKey := func(key string, value []byte) error {
-			return db.Update(func(txn *Txn) error {
-				return txn.SetEntry(NewEntry([]byte(key), value))
-			})
-		}
+// 		saveByKey := func(key string, value []byte) error {
+// 			return db.Update(func(txn *Txn) error {
+// 				return txn.SetEntry(NewEntry([]byte(key), value))
+// 			})
+// 		}
 
-		getByKey := func(key string) error {
-			return db.View(func(txn *Txn) error {
-				item, err := txn.Get([]byte(key))
-				if err != nil {
-					return err
-				}
-				return item.Value(func(val []byte) error {
-					if len(val) == 0 {
-						log.Fatalf("key not found %q", len(key))
-					}
-					return nil
-				})
-			})
-		}
+// 		getByKey := func(key string) error {
+// 			return db.View(func(txn *Txn) error {
+// 				item, err := txn.Get([]byte(key))
+// 				if err != nil {
+// 					return err
+// 				}
+// 				return item.Value(func(val []byte) error {
+// 					if len(val) == 0 {
+// 						log.Fatalf("key not found %q", len(key))
+// 					}
+// 					return nil
+// 				})
+// 			})
+// 		}
 
-		for i := 0; i < 32; i++ {
-			if i < 30 {
-				require.NoError(t, saveByKey(key(i), []byte(data)))
-			} else {
-				require.NoError(t, saveByKey(key(i), []byte(fmt.Sprintf("%100d", i))))
-			}
-		}
+// 		for i := 0; i < 32; i++ {
+// 			if i < 30 {
+// 				require.NoError(t, saveByKey(key(i), []byte(data)))
+// 			} else {
+// 				require.NoError(t, saveByKey(key(i), []byte(fmt.Sprintf("%100d", i))))
+// 			}
+// 		}
 
-		for j := 0; j < 5; j++ {
-			for i := 0; i < 32; i++ {
-				if i < 30 {
-					require.NoError(t, saveByKey(key(i), []byte(data)))
-				} else {
-					require.NoError(t, saveByKey(key(i), []byte(fmt.Sprintf("%100d", i))))
-				}
-			}
-		}
+// 		for j := 0; j < 5; j++ {
+// 			for i := 0; i < 32; i++ {
+// 				if i < 30 {
+// 					require.NoError(t, saveByKey(key(i), []byte(data)))
+// 				} else {
+// 					require.NoError(t, saveByKey(key(i), []byte(fmt.Sprintf("%100d", i))))
+// 				}
+// 			}
+// 		}
 
-		for i := 0; i < 32; i++ {
-			require.NoError(t, getByKey(key(i)))
-		}
+// 		for i := 0; i < 32; i++ {
+// 			require.NoError(t, getByKey(key(i)))
+// 		}
 
-		var loops int
-		var err error
-		for err == nil {
-			err = db.RunValueLogGC(0.5)
-			require.NotRegexp(t, regexp.MustCompile("truncate"), err)
-			loops++
-		}
-		t.Logf("Ran value log GC %d times. Last error: %v\n", loops, err)
-	})
-}
+// 		var loops int
+// 		var err error
+// 		for err == nil {
+// 			err = db.RunValueLogGC(0.5)
+// 			require.NotRegexp(t, regexp.MustCompile("truncate"), err)
+// 			loops++
+// 		}
+// 		t.Logf("Ran value log GC %d times. Last error: %v\n", loops, err)
+// 	})
+// }
 
 // The following test checks for issue #585.
 func TestPushValueLogLimit(t *testing.T) {
