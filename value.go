@@ -1315,6 +1315,18 @@ func (vlog *valueLog) write(reqs []*request) error {
 			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
 			written++
+
+			if int64(buf.Len()) > vlog.db.opt.ValueLogFileSize {
+				vlog.elog.Printf("Flushing buffer of size %d to vlog", buf.Len())
+				n, err := curlf.fd.Write(buf.Bytes())
+				if err != nil {
+					return errors.Wrapf(err, "Unable to write to value log file: %q", curlf.path)
+				}
+				buf.Reset()
+				y.NumWrites.Add(1)
+				y.NumBytesWritten.Add(int64(n))
+				atomic.AddUint32(&vlog.writableLogOffset, uint32(n))
+			}
 		}
 		vlog.numEntriesWritten += uint32(written)
 		// We write to disk here so that all entries that are part of the same transaction are
