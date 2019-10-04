@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"math/rand"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -362,37 +364,88 @@ func TestStreamDone(t *testing.T) {
 }
 
 func TestSendOnClosedStream(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		sw := db.NewStreamWriter()
-		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
+	opts := getTestOptions(dir)
+	db, err := Open(opts)
+	require.NoError(t, err)
 
-		var val [10]byte
-		rand.Read(val[:])
-		list := &pb.KVList{}
-		kv1 := &pb.KV{
-			Key:      []byte(fmt.Sprintf("%d", 1)),
-			Value:    val[:],
-			Version:  1,
-			StreamId: uint32(1),
-		}
-		kv2 := &pb.KV{
-			StreamId:   uint32(1),
-			StreamDone: true,
-		}
-		list.Kv = append(list.Kv, kv1, kv2)
-		require.NoError(t, sw.Write(list), "sw.Write() failed")
+	sw := db.NewStreamWriter()
+	require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 
-		// Send once stream is closed.
-		list = &pb.KVList{}
-		kv1 = &pb.KV{
-			Key:      []byte(fmt.Sprintf("%d", 2)),
-			Value:    val[:],
-			Version:  1,
-			StreamId: uint32(1),
-		}
-		list.Kv = append(list.Kv, kv1)
-		require.Equal(t, ErrStreamClosed, sw.Write(list), "sw.Write() should fail")
-		require.NoError(t, sw.Flush(), "sw.Flush() failed")
-		require.NoError(t, db.Close())
-	})
+	var val [10]byte
+	rand.Read(val[:])
+	list := &pb.KVList{}
+	kv1 := &pb.KV{
+		Key:      []byte(fmt.Sprintf("%d", 1)),
+		Value:    val[:],
+		Version:  1,
+		StreamId: uint32(1),
+	}
+	kv2 := &pb.KV{
+		StreamId:   uint32(1),
+		StreamDone: true,
+	}
+	list.Kv = append(list.Kv, kv1, kv2)
+	require.NoError(t, sw.Write(list), "sw.Write() failed")
+
+	// Defer for panic.
+	defer func() {
+		require.NotNil(t, recover(), "should have paniced")
+	}()
+	// Send once stream is closed.
+	list = &pb.KVList{}
+	kv1 = &pb.KV{
+		Key:      []byte(fmt.Sprintf("%d", 2)),
+		Value:    val[:],
+		Version:  1,
+		StreamId: uint32(1),
+	}
+	list.Kv = append(list.Kv, kv1)
+	sw.Write(list)
+}
+
+func TestSendOnClosedStream2(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
+	opts := getTestOptions(dir)
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	sw := db.NewStreamWriter()
+	require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+
+	var val [10]byte
+	rand.Read(val[:])
+	list := &pb.KVList{}
+	kv1 := &pb.KV{
+		Key:      []byte(fmt.Sprintf("%d", 1)),
+		Value:    val[:],
+		Version:  1,
+		StreamId: uint32(1),
+	}
+	kv2 := &pb.KV{
+		StreamId:   uint32(1),
+		StreamDone: true,
+	}
+	kv3 := &pb.KV{
+		Key:      []byte(fmt.Sprintf("%d", 2)),
+		Value:    val[:],
+		Version:  1,
+		StreamId: uint32(1),
+	}
+	list.Kv = append(list.Kv, kv1, kv2, kv3)
+
+	// Defer for panic.
+	defer func() {
+		require.NotNil(t, recover(), "should have paniced")
+	}()
+
+	require.NoError(t, sw.Write(list), "sw.Write() failed")
 }
