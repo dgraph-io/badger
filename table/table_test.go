@@ -40,8 +40,6 @@ const (
 	MB = KB * 1024
 )
 
-var encKey = []byte("12345678901234567890123456789012")
-
 func key(prefix string, i int) string {
 	return prefix + fmt.Sprintf("%04d", i)
 }
