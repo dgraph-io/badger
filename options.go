@@ -64,6 +64,8 @@ type Options struct {
 	NumCompactors     int
 	CompactL0OnClose  bool
 	LogRotatesToFlush int32
+	// When set, checksum will be validated for each entry read from the value log file.
+	VerifyValueChecksum bool
 
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
@@ -98,6 +100,7 @@ func DefaultOptions(path string) Options {
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
+		VerifyValueChecksum:     false,
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
@@ -382,5 +385,18 @@ func (opt Options) WithCompactL0OnClose(val bool) Options {
 // The default value of LogRotatesToFlush is 2.
 func (opt Options) WithLogRotatesToFlush(val int32) Options {
 	opt.LogRotatesToFlush = val
+	return opt
+}
+
+// WithVerifyValueChecksum returns a new Options value with VerifyValueChecksum set to
+// the given value.
+//
+// When VerifyValueChecksum is set to true, checksum will be verified for every entry read
+// from the value log. If the value is stored in SST (value size less than value threshold) then the
+// checksum validation will not be done.
+//
+// The default value of VerifyValueChecksum is False.
+func (opt Options) WithVerifyValueChecksum(val bool) Options {
+	opt.VerifyValueChecksum = val
 	return opt
 }

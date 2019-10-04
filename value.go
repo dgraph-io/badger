@@ -1103,6 +1103,21 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	if err != nil {
 		return nil, cb, err
 	}
+
+	if vlog.opt.VerifyValueChecksum {
+		hash := crc32.New(y.CastagnoliCrcTable)
+		if _, err := hash.Write(buf); err != nil {
+			runCallback(cb)
+			return nil, nil, errors.Wrapf(err, "failed to write hash for vp %+v", vp)
+		}
+		// Fetch checksum from the end of the buffer.
+		checksum := buf[len(buf)-crc32.Size:]
+		res := binary.BigEndian.Uint32(checksum)
+		if hash.Sum32() != res {
+			runCallback(cb)
+			return nil, nil, errors.Errorf("checksum mismatch Error: value corrupted for vp: %+v", vp)
+		}
+	}
 	var h header
 	h.Decode(buf)
 	n := uint32(headerBufSize) + h.klen
