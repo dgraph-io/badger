@@ -723,6 +723,7 @@ func TestTableChecksum(t *testing.T) {
 	rb := make([]byte, 1)
 	rand.Read(rb)
 	opts := getTestTableOptions()
+	opts.ChkMode = options.OnTableAndBlockRead
 	f := buildTestTable(t, "k", 10000, opts)
 	fi, err := f.Stat()
 	require.NoError(t, err, "unable to get file information")
