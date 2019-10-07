@@ -1003,10 +1003,7 @@ func TestTruncatedDiscardStat(t *testing.T) {
 	for i := uint32(0); i < uint32(20); i++ {
 		stat[i] = 0
 	}
-	// Set discard stats.
-	db.vlog.lfDiscardStats = &lfDiscardStats{
-		m: stat,
-	}
+	db.vlog.lfDiscardStats.m = stat
 	entries := []*Entry{{
 		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
 		// Insert truncated discard stats. This is important.
@@ -1059,10 +1056,7 @@ func TestDiscardStatsMove(t *testing.T) {
 		stat[i] = 0
 	}
 
-	// Set discard stats.
-	db.vlog.lfDiscardStats = &lfDiscardStats{
-		m: stat,
-	}
+	db.vlog.lfDiscardStats.m = stat
 	entries := []*Entry{{
 		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
 		// The discard stat value is more than value threshold.
@@ -1109,11 +1103,14 @@ func TestBlockedDiscardStats(t *testing.T) {
 	db, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 	// Set discard stats.
-	db.vlog.lfDiscardStats = &lfDiscardStats{
-		m: map[uint32]int64{0: 0},
-	}
+	db.vlog.lfDiscardStats.m = map[uint32]int64{0: 0}
 	db.blockWrite()
-	require.NoError(t, db.vlog.flushDiscardStats())
+	// Here insert discardStats more than the cap(vlog.lfDiscardStats.flushChan), that will ensure
+	// if we have tried to write at least one discard stats entry while writes were blocked.
+	encodedDS := db.vlog.encodedDiscardStats()
+	for i := 0; i < cap(db.vlog.lfDiscardStats.flushChan)+2; i++ {
+		db.vlog.lfDiscardStats.flushChan <- encodedDS
+	}
 	db.unblockWrite()
 	require.NoError(t, db.Close())
 }
@@ -1126,11 +1123,8 @@ func TestBlockedDiscardStatsOnClose(t *testing.T) {
 
 	db, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
-	// Set discard stats.
-	db.vlog.lfDiscardStats = &lfDiscardStats{
-		m: map[uint32]int64{0: 0},
-	}
-	// This is important. Set updateSinceFlush to discardStatsFlushThresold so
+	db.vlog.lfDiscardStats.m = map[uint32]int64{0: 0}
+	// This is important. Set updateSinceFlush to discardStatsFlushThreshold so
 	// that the next update call flushes the discard stats.
 	db.vlog.lfDiscardStats.updatesSinceFlush = discardStatsFlushThreshold + 1
 	require.NoError(t, db.Close())

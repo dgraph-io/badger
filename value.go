@@ -841,6 +841,7 @@ func (lf *logFile) open(path string, flags uint32) error {
 	if lf.fd, err = y.OpenExistingFile(path, flags); err != nil {
 		return y.Wrapf(err, "Error while opening file in logfile %s", path)
 	}
+
 	fi, err := lf.fd.Stat()
 	if err != nil {
 		return errFile(err, lf.path, "Unable to run file.Stat")
@@ -1685,6 +1686,7 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 	if vlog.lfDiscardStats.flushChanClosed {
 		vlog.opt.Warningf("updateDiscardStats called: discard stats flush channel closed, " +
 			"returning without updating")
+		return
 	}
 
 	for fid, sz := range stats {
@@ -1698,7 +1700,7 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 			vlog.lfDiscardStats.updatesSinceFlush = 0
 		default:
 			vlog.opt.Warningf("updateDiscardStats called: discard stats flushChan full, " +
-				"returing without pushing to flushChan")
+				"returning without pushing to flushChan")
 		}
 	}
 }
@@ -1706,10 +1708,13 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 func (vlog *valueLog) startFlushDiscard() {
 	defer vlog.lfDiscardStats.closer.Done()
 
-	process := func(discardStatsByte []byte) error {
+	process := func(ds []byte) error {
+		if len(ds) == 0 {
+			return nil
+		}
 		entries := []*Entry{{
 			Key:   y.KeyWithTs(lfDiscardStatsKey, 1),
-			Value: discardStatsByte,
+			Value: ds,
 		}}
 		req, err := vlog.db.sendToWriteCh(entries)
 		if err == ErrBlockedWrites {
@@ -1739,7 +1744,7 @@ LOOP:
 		}
 	}
 
-	// process already buffered discard stats.
+	// Process already buffered discard stats after flushChan is closed.
 	for encodedDS := range vlog.lfDiscardStats.flushChan {
 		if err := process(encodedDS); err != nil {
 			vlog.opt.Errorf("unable to process discardstats with error: %s", err)
@@ -1748,6 +1753,14 @@ LOOP:
 }
 
 func (vlog *valueLog) closeFlushDiscardStats() {
+	// Before closing, flush latest discardStats also.
+	vlog.lfDiscardStats.Lock()
+	if len(vlog.lfDiscardStats.m) > 0 {
+		encodedDS := vlog.encodedDiscardStats()
+		vlog.lfDiscardStats.flushChan <- encodedDS
+	}
+	vlog.lfDiscardStats.Unlock()
+
 	vlog.lfDiscardStats.closer.SignalAndWait()
 }
 
@@ -1811,6 +1824,6 @@ func (vlog *valueLog) populateDiscardStats() error {
 		return errors.Wrapf(err, "failed to unmarshal discard stats")
 	}
 	vlog.opt.Debugf("Value Log Discard stats: %v", statsMap)
-	vlog.lfDiscardStats = &lfDiscardStats{m: statsMap}
+	vlog.lfDiscardStats.m = statsMap
 	return nil
 }
