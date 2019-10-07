@@ -18,7 +18,6 @@ package badger
 
 import (
 	"fmt"
-	"math/rand"
 	"testing"
 	"time"
 
@@ -66,28 +65,5 @@ func TestWriteBatch(t *testing.T) {
 			return nil
 		})
 		require.NoError(t, err)
-	})
-}
-
-// Regression test for https://github.com/dgraph-io/badger/issues/1062
-func TestWriteBatchOOM(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		wb := db.NewWriteBatch()
-		defer wb.Cancel()
-		// 1,000 entries each of 32 mb values
-		n := 1000
-		vsize := 32000000
-		key := make([]byte, 32)
-		val := make([]byte, vsize)
-		rand.Read(val)
-		for i := 0; i <= n; i++ {
-			_, err := rand.Read(key)
-			require.NoError(t, err)
-			require.NoError(t, wb.Set(key, val))
-			if i%100 == 0 {
-				db.opt.Logger.Debugf("Written %d entries", i)
-			}
-		}
-		require.NoError(t, wb.Flush())
 	})
 }
