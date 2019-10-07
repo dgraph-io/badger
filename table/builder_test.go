@@ -125,7 +125,7 @@ func BenchmarkBuilder(b *testing.B) {
 
 	keysCount := 1300000 // This number of entries consumes ~64MB of memory.
 	for i := 0; i < b.N; i++ {
-		opts := Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+		opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 		builder := NewTableBuilder(opts)
 
 		for i := 0; i < keysCount; i++ {
