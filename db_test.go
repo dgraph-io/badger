@@ -410,6 +410,7 @@ func TestGetMore(t *testing.T) {
 				t.Error(err)
 			}
 			got := string(getItemValue(t, item))
+			fmt.Println(got)
 			if expectedValue != got {
 
 				vs, err := db.get(y.KeyWithTs(k, math.MaxUint64))
@@ -1106,7 +1107,7 @@ func TestExpiryImproperDBClose(t *testing.T) {
 		// We need to close vlog to fix the vlog file size. On windows, the vlog file
 		// is truncated to 2*MaxVlogSize and if we don't close the vlog file, reopening
 		// it would return Truncate Required Error.
-		require.NoError(t, db0.vlog.Close())
+		require.NoError(t, db0.log.Close())
 
 		db1, err := Open(opt)
 		require.NoError(t, err)

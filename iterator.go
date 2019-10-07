@@ -167,7 +167,7 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 
 		var vp valuePointer
 		vp.Decode(item.vptr)
-		result, cb, err := item.db.vlog.Read(vp, item.slice)
+		result, cb, err := item.db.log.Read(vp, item.slice)
 		if err != ErrRetry {
 			return result, cb, err
 		}
@@ -457,7 +457,7 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	// the prefix.
 	tables, decr := txn.db.getMemTables()
 	defer decr()
-	txn.db.vlog.incrIteratorCount()
+	txn.db.log.incrIteratorCount()
 	var iters []y.Iterator
 	if itr := txn.newPendingWritesIterator(opt.Reverse); itr != nil {
 		iters = append(iters, itr)
@@ -542,7 +542,7 @@ func (it *Iterator) Close() {
 	waitFor(it.data)
 
 	// TODO: We could handle this error.
-	_ = it.txn.db.vlog.decrIteratorCount()
+	_ = it.txn.db.log.decrIteratorCount()
 	atomic.AddInt32(&it.txn.numIterators, -1)
 }
 

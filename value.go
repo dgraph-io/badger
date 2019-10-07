@@ -897,6 +897,9 @@ func (lf *logFile) open(path string, flags uint32) error {
 	lf.baseIV = buf[8:]
 	y.AssertTrue(len(lf.baseIV) == 12)
 	lf.offset = uint32(fi.Size())
+	lf.encoder = &entryEncoder{
+		dataKey: dk,
+	}
 	return nil
 }
 
@@ -937,6 +940,9 @@ func (lf *logFile) bootstrap() error {
 	y.AssertTrue(len(lf.baseIV) == 12)
 	// write the key id and base IV to the file.
 	_, err = lf.fd.Write(buf)
+	lf.encoder = &entryEncoder{
+		dataKey: dk,
+	}
 	return err
 }
 

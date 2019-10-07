@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -47,6 +48,7 @@ var (
 	txnKeyVlog        = []byte("!badger!txn!vlog") // For indicating end of entries in txn.
 	badgerMove        = []byte("!badger!move")     // For key-value pairs which got moved during GC.
 	lfDiscardStatsKey = []byte("!badger!discard")  // For storing lfDiscardStats
+	walHead           = []byte("!badger!head!wal") // For storing last persisted wal
 )
 
 type closers struct {
@@ -74,7 +76,6 @@ type DB struct {
 	opt       Options
 	manifest  *manifestFile
 	lc        *levelsController
-	vlog      valueLog
 	vhead     valuePointer // less than or equal to a pointer to the last vlog value put into mt
 	writeCh   chan *request
 	flushChan chan flushTask // For flushing memtables.
@@ -91,6 +92,7 @@ type DB struct {
 
 	pub      *publisher
 	registry *KeyRegistry
+	log      *logManager
 }
 
 const (
@@ -328,7 +330,7 @@ func Open(opt Options) (db *DB, err error) {
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
 	vs, err := db.get(headKey)
 	if err != nil {
-		return nil, errors.Wrap(err, "Retrieving head")
+		return nil, errors.Wrap(err, "Retrieving vlog head")
 	}
 	db.orc.nextTxnTs = vs.Version
 	var vptr valuePointer
@@ -336,12 +338,26 @@ func Open(opt Options) (db *DB, err error) {
 		vptr.Decode(vs.Value)
 	}
 
+	walHeadKey := y.KeyWithTs(walHead, math.MaxUint64)
+
+	vs, err = db.get(walHeadKey)
+	if err != nil {
+		return nil, errors.Wrap(err, "Retriving wal head")
+	}
+	var walHeadFile uint32
+	if len(vs.Value) > 0 {
+		walHeadFile = binary.BigEndian.Uint32(vs.Value)
+	}
+	fmt.Println(walHeadFile)
+
 	replayCloser := y.NewCloser(1)
 	go db.doWrites(replayCloser)
 
-	if err = db.vlog.open(db, vptr, db.replayFunction()); err != nil {
-		return db, y.Wrapf(err, "During db.vlog.open")
+	log, err := openLogManager(db, vptr, walHeadFile, db.replayFunction())
+	if err != nil {
+		return db, y.Wrapf(err, "While opening log manager")
 	}
+	db.log = log
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 
 	// Let's advance nextTxnTs to one more than whatever we observed via
@@ -356,8 +372,8 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.writes = y.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
-	db.closers.valueGC = y.NewCloser(1)
-	go db.vlog.waitOnGC(db.closers.valueGC)
+	//db.closers.valueGC = y.NewCloser(1)
+	//go db.log.waitOnGC(db.closers.valueGC)
 
 	db.closers.pub = y.NewCloser(1)
 	go db.pub.listenForUpdates(db.closers.pub)
@@ -381,14 +397,14 @@ func (db *DB) Close() error {
 func (db *DB) close() (err error) {
 	db.elog.Printf("Closing database")
 
-	if err := db.vlog.flushDiscardStats(); err != nil {
-		return errors.Wrap(err, "failed to flush discard stats")
-	}
+	// if err := db.vlog.flushDiscardStats(); err != nil {
+	// 	return errors.Wrap(err, "failed to flush discard stats")
+	// }
 
 	atomic.StoreInt32(&db.blockWrites, 1)
 
 	// Stop value GC first.
-	db.closers.valueGC.SignalAndWait()
+	//	db.closers.valueGC.SignalAndWait()
 
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
@@ -399,7 +415,7 @@ func (db *DB) close() (err error) {
 	db.closers.pub.SignalAndWait()
 
 	// Now close the value log.
-	if vlogErr := db.vlog.Close(); vlogErr != nil {
+	if vlogErr := db.log.Close(); vlogErr != nil {
 		err = errors.Wrap(vlogErr, "DB.Close")
 	}
 
@@ -504,7 +520,7 @@ const (
 // Sync syncs database content to disk. This function provides
 // more control to user to sync data whenever required.
 func (db *DB) Sync() error {
-	return db.vlog.sync(math.MaxUint32)
+	return db.log.sync(math.MaxUint32)
 }
 
 // getMemtables returns the current memtables and get references.
@@ -653,7 +669,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 	}
 	db.elog.Printf("writeRequests called. Writing to value log")
 
-	err := db.vlog.write(reqs)
+	err := db.log.write(reqs)
 	if err != nil {
 		done(err)
 		return err
@@ -847,7 +863,7 @@ func (db *DB) ensureRoomForWrite() error {
 		atomic.StoreInt32(&db.logRotates, 0)
 
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
-		err = db.vlog.sync(db.vhead.Fid)
+		err = db.log.sync(db.vhead.Fid)
 		if err != nil {
 			return err
 		}
@@ -1454,7 +1470,7 @@ func (db *DB) dropAll() (func(), error) {
 	}
 	db.opt.Infof("Deleted %d SSTables. Now deleting value logs...\n", num)
 
-	num, err = db.vlog.dropAll()
+	num, err = db.log.dropAll()
 	if err != nil {
 		return resume, err
 	}

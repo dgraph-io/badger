@@ -26,6 +26,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
@@ -42,16 +43,18 @@ type logManager struct {
 	maxVlogID      uint32
 	filesLock      sync.RWMutex
 	vlogFileMap    map[uint32]*logFile
+	lfDiscardStats *lfDiscardStats
 }
 
 func openLogManager(db *DB, vhead valuePointer, walhead uint32,
 	replayFn logEntry) (*logManager, error) {
 	manager := &logManager{
-		opt:       db.opt,
-		db:        db,
-		elog:      y.NoEventLog,
-		maxWalID:  0,
-		maxVlogID: 0,
+		opt:         db.opt,
+		db:          db,
+		elog:        y.NoEventLog,
+		maxWalID:    0,
+		maxVlogID:   0,
+		vlogFileMap: map[uint32]*logFile{},
 	}
 	if manager.opt.EventLogging {
 		manager.elog = trace.NewEventLog("Badger", "LogManager")
@@ -131,7 +134,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead uint32,
 		// No need to lock here. Since we're creating the log manager.
 		manager.wal = wal
 		manager.maxVlogID++
-		vlog, err := manager.createlogFile(walFilePath(manager.opt.ValueDir, manager.maxVlogID),
+		vlog, err := manager.createlogFile(vlogFilePath(manager.opt.ValueDir, manager.maxVlogID),
 			manager.maxVlogID)
 		if err != nil {
 			return nil, y.Wrapf(err, "Error while creating vlog file %d", manager.maxVlogID)
@@ -174,7 +177,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead uint32,
 		return manager, nil
 	}
 
-	if manager.maxWalID == walhead {
+	if manager.maxWalID == walhead || walhead == 0 {
 		// Last persisted SST's wal so need to create new WAL file.
 		manager.maxWalID++
 		wal, err := manager.createlogFile(walFilePath(manager.opt.ValueDir, manager.maxWalID),
@@ -191,7 +194,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead uint32,
 		loadingMode: manager.opt.ValueLogLoadingMode,
 		registry:    manager.db.registry,
 	}
-	if err = wal.open(vlogFilePath(manager.opt.ValueDir, manager.maxWalID), flags); err != nil {
+	if err = wal.open(walFilePath(manager.opt.ValueDir, manager.maxWalID), flags); err != nil {
 		return nil, y.Wrapf(err, "Error while opening wal file %d", manager.maxWalID)
 	}
 	manager.wal = wal
@@ -548,6 +551,7 @@ func (manager *logManager) write(reqs []*request) error {
 				return y.Wrapf(err, "Error while encoding entry for vlog %d", manager.vlog.fid)
 			}
 			p.Len = uint32(entryLen)
+			p.Fid = manager.vlog.fid
 			b.Ptrs = append(b.Ptrs, p)
 			written++
 		}
@@ -555,18 +559,20 @@ func (manager *logManager) write(reqs []*request) error {
 		// Write the entry offset to the respective buf.
 		// Write end entry to wal buf.
 		entryOffset := manager.wal.fileOffset() + uint32(walBuf.Len())
-		_, err := manager.wal.encode(txnEntries[len(txnEntries)-2], walBuf, entryOffset)
+		_, err := manager.wal.encode(b.Entries[len(b.Entries)-2], walBuf, entryOffset)
 		if err != nil {
 			return y.Wrapf(err, "Error while encoding end entry for WAL %d", manager.wal.fid)
 		}
 		written++
+		b.Ptrs = append(b.Ptrs, valuePointer{})
 		// Write end entry to vlog buf.
 		entryOffset = manager.vlog.fileOffset() + uint32(vlogBuf.Len())
-		_, err = manager.vlog.encode(txnEntries[len(txnEntries)-1], vlogBuf, entryOffset)
+		_, err = manager.vlog.encode(b.Entries[len(b.Entries)-1], vlogBuf, entryOffset)
 		if err != nil {
 			return y.Wrapf(err, "Error while encoding eng entry for vlog %d", manager.vlog.fid)
 		}
 		written++
+		b.Ptrs = append(b.Ptrs, valuePointer{})
 		manager.entriesWritten += uint32(written)
 	}
 	// Persist the log to the disk.
@@ -578,5 +584,92 @@ func (manager *logManager) write(reqs []*request) error {
 	if err = manager.vlog.writeLog(vlogBuf); err != nil {
 		return y.Wrapf(err, "Error while writing log to vlog %d", manager.vlog.fid)
 	}
+	return nil
+}
+
+func (lm *logManager) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
+	// Check for valid offset if we are reading to writable log.
+	maxFid := atomic.LoadUint32(&lm.maxVlogID)
+	if vp.Fid == maxFid && vp.Offset >= lm.vlog.fileOffset() {
+		return nil, nil, errors.Errorf(
+			"Invalid value pointer offset: %d greater than current offset: %d",
+			vp.Offset, lm.vlog.fileOffset())
+	}
+	buf, lf, err := lm.readValueBytes(vp, s)
+	// log file is locked so, decide whether to lock immediately or let the caller to
+	// unlock it, after caller uses it.
+	cb := lm.getUnlockCallback(lf)
+	if err != nil {
+		return nil, cb, err
+	}
+	var h header
+	headerLen := h.Decode(buf)
+	kv := buf[headerLen:]
+	if lf.encryptionEnabled() {
+		kv, err = lf.decryptKV(kv, vp.Offset)
+		if err != nil {
+			return nil, cb, err
+		}
+	}
+	return kv[h.klen : h.klen+h.vlen], cb, nil
+}
+
+// getUnlockCallback will returns a function which unlock the logfile if the logfile is mmaped.
+// otherwise, it unlock the logfile and return nil.
+func (lm *logManager) getUnlockCallback(lf *logFile) func() {
+	if lf == nil {
+		return nil
+	}
+	if lm.opt.ValueLogLoadingMode == options.MemoryMap {
+		return lf.lock.RUnlock
+	}
+	lf.lock.RUnlock()
+	return nil
+}
+
+// Gets the logFile and acquires and RLock() for the mmap. You must call RUnlock on the file
+// (if non-nil)
+func (lm *logManager) getFileRLocked(fid uint32) (*logFile, error) {
+	lm.filesLock.RLock()
+	defer lm.filesLock.RUnlock()
+	ret, ok := lm.vlogFileMap[fid]
+	if !ok {
+		// log file has gone away, will need to retry the operation.
+		return nil, ErrRetry
+	}
+	ret.lock.RLock()
+	return ret, nil
+}
+
+// readValueBytes return vlog entry slice and read locked log file. Caller should take care of
+// logFile unlocking.
+func (lm *logManager) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, *logFile, error) {
+	lf, err := lm.getFileRLocked(vp.Fid)
+	if err != nil {
+		return nil, nil, err
+	}
+	buf, err := lf.read(vp, s)
+	return buf, lf, err
+}
+
+func (lm *logManager) Close() error {
+	return nil
+}
+
+func (lm *logManager) sync(uint32) error {
+	return nil
+}
+
+func (lm *logManager) dropAll() (int, error) {
+	return 0, nil
+}
+func (lm *logManager) incrIteratorCount() {}
+
+func (lm *logManager) decrIteratorCount() int {
+	return 0
+}
+
+func (lm *logManager) updateDiscardStats(stats map[uint32]int64) error {
+
 	return nil
 }

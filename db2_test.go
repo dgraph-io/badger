@@ -26,7 +26,6 @@ import (
 	"math/rand"
 	"os"
 	"path"
-	"regexp"
 	"testing"
 
 	"github.com/dgraph-io/badger/options"
@@ -377,7 +376,7 @@ func TestDiscardMapTooBig(t *testing.T) {
 	}))
 
 	// overwrite discardstat with large value
-	db.vlog.lfDiscardStats = &lfDiscardStats{
+	db.log.lfDiscardStats = &lfDiscardStats{
 		m: createDiscardStats(),
 	}
 

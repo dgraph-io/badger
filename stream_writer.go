@@ -121,7 +121,7 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
-	if err := sw.db.vlog.write(all); err != nil {
+	if err := sw.db.log.write(all); err != nil {
 		return err
 	}
 
