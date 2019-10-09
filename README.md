@@ -862,7 +862,7 @@ you're trying to open in a newer version of badger. The underlying data format c
 badger versions and users will have to migrate their data directory.
 Badger data can be migrated from version X of badger to version Y of badger by following the steps
 listed below.
-Assume you were on badger v1.6.0 and you wish to migrate to v2.0.0 version
+Assume you were on badger v1.6.0 and you wish to migrate to v2.0.0 version.
 1. Install badger version v1.6.0
     - `cd $GOPATH/src/github.com/dgraph-io/badger`
     - `git checkout v1.6.0`
