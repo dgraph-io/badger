@@ -351,10 +351,10 @@ func (t *Table) block(idx int) (*block, error) {
 	if idx >= len(t.blockIndex) {
 		return nil, errors.New("block out of index")
 	}
-	var blkKey string
+	var cacheKey string
 	if t.opt.Cache != nil {
-		blkKey = t.blockCacheKey(idx)
-		cachedBlk, ok := t.opt.Cache.Get(blkKey)
+		cacheKey = t.blockCacheKey(idx)
+		cachedBlk, ok := t.opt.Cache.Get(cacheKey)
 		if ok && cachedBlk != nil {
 			return cachedBlk.(*block), nil
 		}
@@ -418,7 +418,7 @@ func (t *Table) block(idx int) (*block, error) {
 		}
 	}
 	if t.opt.Cache != nil {
-		t.opt.Cache.Set(blkKey, blk, 1)
+		t.opt.Cache.Set(cacheKey, blk, 1)
 	}
 	return blk, nil
 }
