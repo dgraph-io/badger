@@ -1264,7 +1264,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		if buf.Len() == 0 {
 			return nil
 		}
-		vlog.elog.Printf("Flushing %d blocks of total size: %d", len(reqs), buf.Len())
+		vlog.elog.Printf("Flushing buffer of size %d to vlog", buf.Len())
 		n, err := curlf.fd.Write(buf.Bytes())
 		if err != nil {
 			return errors.Wrapf(err, "Unable to write to value log file: %q", curlf.path)
@@ -1274,11 +1274,15 @@ func (vlog *valueLog) write(reqs []*request) error {
 		y.NumBytesWritten.Add(int64(n))
 		vlog.elog.Printf("Done")
 		atomic.AddUint32(&vlog.writableLogOffset, uint32(n))
-
+		return nil
+	}
+	flushWrites := func() error {
+		if err := toDisk(); err != nil {
+			return err
+		}
 		if vlog.woffset() > uint32(vlog.opt.ValueLogFileSize) ||
 			vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
-			var err error
-			if err = curlf.doneWriting(vlog.woffset()); err != nil {
+			if err := curlf.doneWriting(vlog.woffset()); err != nil {
 				return err
 			}
 
@@ -1316,16 +1320,14 @@ func (vlog *valueLog) write(reqs []*request) error {
 			b.Ptrs = append(b.Ptrs, p)
 			written++
 
+			// It is possible that the size of the buffer grows beyond the max size of the value
+			// log (this happens when a transaction contains entries with large value sizes) and
+			// badger might run into out of memory errors. We flush the buffer here if it's size
+			// grows beyond the max value log size.
 			if int64(buf.Len()) > vlog.db.opt.ValueLogFileSize {
-				vlog.elog.Printf("Flushing buffer of size %d to vlog", buf.Len())
-				n, err := curlf.fd.Write(buf.Bytes())
-				if err != nil {
-					return errors.Wrapf(err, "Unable to write to value log file: %q", curlf.path)
+				if err := toDisk(); err != nil {
+					return err
 				}
-				buf.Reset()
-				y.NumWrites.Add(1)
-				y.NumBytesWritten.Add(int64(n))
-				atomic.AddUint32(&vlog.writableLogOffset, uint32(n))
 			}
 		}
 		vlog.numEntriesWritten += uint32(written)
@@ -1335,12 +1337,12 @@ func (vlog *valueLog) write(reqs []*request) error {
 			vlog.woffset()+uint32(buf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
 				vlog.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries)
 		if writeNow {
-			if err := toDisk(); err != nil {
+			if err := flushWrites(); err != nil {
 				return err
 			}
 		}
 	}
-	return toDisk()
+	return flushWrites()
 }
 
 // Gets the logFile and acquires and RLock() for the mmap. You must call RUnlock on the file
