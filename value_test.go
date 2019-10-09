@@ -410,6 +410,7 @@ func TestValueGC4(t *testing.T) {
 
 	err = kv.vlog.Close()
 	require.NoError(t, err)
+	kv.vlog.closeFlushDiscardStats() // Close flushDiscardStats goroutine also.
 
 	err = kv.vlog.open(kv, valuePointer{Fid: 2}, kv.replayFunction())
 	require.NoError(t, err)
@@ -630,9 +631,9 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	kv, err = Open(opts)
 	require.NoError(t, err)
 	checkKeys(t, kv, [][]byte{k3})
-
 	// Replay value log from beginning, badger head is past k2.
 	require.NoError(t, kv.vlog.Close())
+	kv.vlog.closeFlushDiscardStats() // Close flushDiscardStats goroutine also.
 	require.NoError(t,
 		kv.vlog.open(kv, valuePointer{Fid: 0}, kv.replayFunction()))
 	require.NoError(t, kv.Close())

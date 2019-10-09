@@ -1694,9 +1694,8 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 		vlog.lfDiscardStats.updatesSinceFlush++
 	}
 	if vlog.lfDiscardStats.updatesSinceFlush > discardStatsFlushThreshold {
-		encodedDS := vlog.encodedDiscardStats()
 		select {
-		case vlog.lfDiscardStats.flushChan <- encodedDS:
+		case vlog.lfDiscardStats.flushChan <- vlog.encodedDiscardStats():
 			vlog.lfDiscardStats.updatesSinceFlush = 0
 		default:
 			vlog.opt.Warningf("updateDiscardStats called: discard stats flushChan full, " +
@@ -1708,17 +1707,17 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 func (vlog *valueLog) startFlushDiscard() {
 	defer vlog.lfDiscardStats.closer.Done()
 
-	process := func(ds []byte) error {
-		if len(ds) == 0 {
+	process := func(encodedDS []byte) error {
+		if len(encodedDS) == 0 {
 			return nil
 		}
 		entries := []*Entry{{
 			Key:   y.KeyWithTs(lfDiscardStatsKey, 1),
-			Value: ds,
+			Value: encodedDS,
 		}}
 		req, err := vlog.db.sendToWriteCh(entries)
 		if err == ErrBlockedWrites {
-			// We'll block write while closing db. When L0 compaction in close may push discard
+			// We'll block writes while closing db. When L0 compaction in close may push discard
 			// stats. So ignoring it. https://github.com/dgraph-io/badger/issues/970
 			return nil
 		} else if err != nil {
@@ -1824,6 +1823,11 @@ func (vlog *valueLog) populateDiscardStats() error {
 		return errors.Wrapf(err, "failed to unmarshal discard stats")
 	}
 	vlog.opt.Debugf("Value Log Discard stats: %v", statsMap)
+	vlog.lfDiscardStats.Lock()
+	// TODO: since we are populating discardStats after replay, it might be possible we have
+	// generated discardStats from compaction. So instead of direct assignment just merge both
+	// the maps.
 	vlog.lfDiscardStats.m = statsMap
+	vlog.lfDiscardStats.Unlock()
 	return nil
 }
