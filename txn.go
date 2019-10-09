@@ -296,7 +296,8 @@ func (txn *Txn) checkSize(e *Entry) error {
 	count := txn.count + 1
 	// Extra bytes for version in key.
 	size := txn.size + int64(e.estimateSize(txn.db.opt.ValueThreshold)) + 10
-	if count >= txn.db.opt.maxBatchCount || size >= txn.db.opt.maxBatchSize {
+	// We subtract 2 in the maxBatchCount because, we add two finish mark.
+	if count >= txn.db.opt.maxBatchCount-2 || size >= txn.db.opt.maxBatchSize {
 		return ErrTxnTooBig
 	}
 	txn.count, txn.size = count, size

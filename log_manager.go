@@ -44,6 +44,7 @@ type logManager struct {
 	filesLock      sync.RWMutex
 	vlogFileMap    map[uint32]*logFile
 	lfDiscardStats *lfDiscardStats
+	sync.RWMutex
 }
 
 func openLogManager(db *DB, vhead valuePointer, walhead uint32,
@@ -82,6 +83,13 @@ func openLogManager(db *DB, vhead valuePointer, walhead uint32,
 			continue
 		}
 		filteredWALIDs = append(filteredWALIDs, fid)
+	}
+
+	if manager.maxWalID == 0 && walhead > 0 {
+		// wal file should have file number in increasing order. if the maxWalHead is
+		// set to zero means. all the memtables are persisted and log files are flushed
+		// so advancing the maxWalId to walHead.
+		manager.maxWalID = walhead
 	}
 
 	// We filtered all the WAL file that needs to replayed. Now, We're going
@@ -180,10 +188,9 @@ func openLogManager(db *DB, vhead valuePointer, walhead uint32,
 	if manager.maxWalID == walhead || walhead == 0 {
 		// Last persisted SST's wal so need to create new WAL file.
 		manager.maxWalID++
-		wal, err := manager.createlogFile(walFilePath(manager.opt.ValueDir, manager.maxWalID),
-			manager.maxWalID)
+		wal, err := manager.createNewWal()
 		if err != nil {
-			return nil, y.Wrapf(err, "Error while creating wal file %d", manager.maxWalID)
+			return manager, err
 		}
 		manager.wal = wal
 		return manager, nil
@@ -514,9 +521,15 @@ func (iterator *logIterator) iterateEntries() ([]*Entry, uint64, error) {
 	return entries, commitTs, nil
 }
 
-func (manager *logManager) write(reqs []*request) error {
+func (lm *logManager) write(reqs []*request) error {
 	vlogBuf := &bytes.Buffer{}
 	walBuf := &bytes.Buffer{}
+	// get the wal and vlog files, because files may be rotated while db flush.
+	// so get the current log files.
+	lm.RLock()
+	wal := lm.wal
+	vlog := lm.vlog
+	lm.RUnlock()
 	// Process each request.
 	for i := range reqs {
 		var written int
@@ -531,12 +544,12 @@ func (manager *logManager) write(reqs []*request) error {
 			}
 			var p valuePointer
 			var entryOffset uint32
-			if manager.db.shouldWriteValueToLSM(*e) {
+			if lm.db.shouldWriteValueToLSM(*e) {
 				// value size is less than threshold. So writing to WAL
-				entryOffset = manager.wal.fileOffset() + uint32(walBuf.Len())
-				_, err := manager.wal.encode(e, walBuf, entryOffset)
+				entryOffset = wal.fileOffset() + uint32(walBuf.Len())
+				_, err := wal.encode(e, walBuf, entryOffset)
 				if err != nil {
-					return y.Wrapf(err, "Error while encoding entry for WAL %d", manager.wal.fid)
+					return y.Wrapf(err, "Error while encoding entry for WAL %d", lm.wal.fid)
 				}
 				// This entry is going to persist in sst. So, appending empty val pointer.
 				b.Ptrs = append(b.Ptrs, p)
@@ -544,45 +557,46 @@ func (manager *logManager) write(reqs []*request) error {
 				continue
 			}
 			// Since the value size is bigger, So we're writing to vlog.
-			entryOffset = manager.vlog.fileOffset() + uint32(vlogBuf.Len())
+			entryOffset = vlog.fileOffset() + uint32(vlogBuf.Len())
 			p.Offset = entryOffset
-			entryLen, err := manager.vlog.encode(e, vlogBuf, entryOffset)
+			entryLen, err := vlog.encode(e, vlogBuf, entryOffset)
 			if err != nil {
-				return y.Wrapf(err, "Error while encoding entry for vlog %d", manager.vlog.fid)
+				return y.Wrapf(err, "Error while encoding entry for vlog %d", lm.vlog.fid)
 			}
 			p.Len = uint32(entryLen)
-			p.Fid = manager.vlog.fid
+			p.Fid = vlog.fid
 			b.Ptrs = append(b.Ptrs, p)
 			written++
 		}
 
 		// Write the entry offset to the respective buf.
 		// Write end entry to wal buf.
-		entryOffset := manager.wal.fileOffset() + uint32(walBuf.Len())
-		_, err := manager.wal.encode(b.Entries[len(b.Entries)-2], walBuf, entryOffset)
+		entryOffset := wal.fileOffset() + uint32(walBuf.Len())
+		_, err := wal.encode(b.Entries[len(b.Entries)-2], walBuf, entryOffset)
 		if err != nil {
-			return y.Wrapf(err, "Error while encoding end entry for WAL %d", manager.wal.fid)
+			return y.Wrapf(err, "Error while encoding end entry for WAL %d", lm.wal.fid)
 		}
 		written++
 		b.Ptrs = append(b.Ptrs, valuePointer{})
 		// Write end entry to vlog buf.
-		entryOffset = manager.vlog.fileOffset() + uint32(vlogBuf.Len())
-		_, err = manager.vlog.encode(b.Entries[len(b.Entries)-1], vlogBuf, entryOffset)
+		entryOffset = vlog.fileOffset() + uint32(vlogBuf.Len())
+		_, err = vlog.encode(b.Entries[len(b.Entries)-1], vlogBuf, entryOffset)
 		if err != nil {
-			return y.Wrapf(err, "Error while encoding eng entry for vlog %d", manager.vlog.fid)
+			return y.Wrapf(err, "Error while encoding eng entry for vlog %d", vlog.fid)
 		}
 		written++
 		b.Ptrs = append(b.Ptrs, valuePointer{})
-		manager.entriesWritten += uint32(written)
+		lm.entriesWritten += uint32(written)
 	}
 	// Persist the log to the disk.
 	// TODO: make it concurrent. Golang, should give us async interface :(
+
 	var err error
-	if err = manager.wal.writeLog(walBuf); err != nil {
-		return y.Wrapf(err, "Error while writing log to WAL %d", manager.wal.fid)
+	if err = wal.writeLog(walBuf); err != nil {
+		return y.Wrapf(err, "Error while writing log to WAL %d", wal.fid)
 	}
-	if err = manager.vlog.writeLog(vlogBuf); err != nil {
-		return y.Wrapf(err, "Error while writing log to vlog %d", manager.vlog.fid)
+	if err = vlog.writeLog(vlogBuf); err != nil {
+		return y.Wrapf(err, "Error while writing log to vlog %d", vlog.fid)
 	}
 	return nil
 }
@@ -672,4 +686,38 @@ func (lm *logManager) decrIteratorCount() int {
 func (lm *logManager) updateDiscardStats(stats map[uint32]int64) error {
 
 	return nil
+}
+
+func (lm *logManager) rotateWal() error {
+	lm.Lock()
+	defer lm.Unlock()
+	// close the current log file
+	var err error
+	if err = lm.wal.fd.Close(); err != nil {
+		return y.Wrapf(err, "Error while closing wal %d", lm.wal.fid)
+	}
+	wal, err := lm.createNewWal()
+	if err != nil {
+		return err
+	}
+	lm.wal = wal
+	return nil
+}
+
+func (manager *logManager) createNewWal() (*logFile, error) {
+	manager.maxWalID++
+	wal, err := manager.createlogFile(walFilePath(manager.opt.ValueDir, manager.maxWalID),
+		manager.maxWalID)
+	if err != nil {
+		return nil, y.Wrapf(err, "Error while creating wal file %d", manager.maxWalID)
+	}
+	return wal, nil
+}
+
+func (manager *logManager) currentWalID() uint32 {
+	return atomic.LoadUint32(&manager.maxWalID)
+}
+
+func (manager *logManager) deleteWal(ID uint32) error {
+	return os.Remove(walFilePath(manager.opt.ValueDir, ID))
 }

@@ -515,7 +515,7 @@ func (r *PageBufferReader) Read(p []byte) (int, error) {
 // PopulateFilesForSuffix populate the file id to the given map. It filter's files based
 // on the given prefix.
 func PopulateFilesForSuffix(dir string, suffix string) (map[uint32]struct{}, error) {
-	var fileMap map[uint32]struct{}
+	fileMap := make(map[uint32]struct{}, 0)
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return nil, Wrapf(err, "Error reading directory for files")

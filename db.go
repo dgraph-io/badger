@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
-	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -48,7 +47,7 @@ var (
 	txnKeyVlog        = []byte("!badger!txn!vlog") // For indicating end of entries in txn.
 	badgerMove        = []byte("!badger!move")     // For key-value pairs which got moved during GC.
 	lfDiscardStatsKey = []byte("!badger!discard")  // For storing lfDiscardStats
-	walHead           = []byte("!badger!head!wal") // For storing last persisted wal
+	writeAheadHead    = []byte("!badger!head!wal") // For storing last persisted wal
 )
 
 type closers struct {
@@ -338,7 +337,7 @@ func Open(opt Options) (db *DB, err error) {
 		vptr.Decode(vs.Value)
 	}
 
-	walHeadKey := y.KeyWithTs(walHead, math.MaxUint64)
+	walHeadKey := y.KeyWithTs(writeAheadHead, math.MaxUint64)
 
 	vs, err = db.get(walHeadKey)
 	if err != nil {
@@ -348,7 +347,6 @@ func Open(opt Options) (db *DB, err error) {
 	if len(vs.Value) > 0 {
 		walHeadFile = binary.BigEndian.Uint32(vs.Value)
 	}
-	fmt.Println(walHeadFile)
 
 	replayCloser := y.NewCloser(1)
 	go db.doWrites(replayCloser)
@@ -432,7 +430,9 @@ func (db *DB) close() (err error) {
 				defer db.Unlock()
 				y.AssertTrue(db.mt != nil)
 				select {
-				case db.flushChan <- flushTask{mt: db.mt, vptr: db.vhead}:
+				case db.flushChan <- flushTask{mt: db.mt, vptr: db.vhead,
+					walHead: db.log.currentWalID()}:
+					// No need to rotate new log file. Since we're closing the db.
 					db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
 					db.mt = nil                    // Will segfault if we try writing!
 					db.elog.Printf("pushed to flush chan\n")
@@ -858,7 +858,7 @@ func (db *DB) ensureRoomForWrite() error {
 
 	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	select {
-	case db.flushChan <- flushTask{mt: db.mt, vptr: db.vhead}:
+	case db.flushChan <- flushTask{mt: db.mt, vptr: db.vhead, walHead: db.log.currentWalID()}:
 		// After every memtable flush, let's reset the counter.
 		atomic.StoreInt32(&db.logRotates, 0)
 
@@ -870,6 +870,10 @@ func (db *DB) ensureRoomForWrite() error {
 
 		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 			db.mt.MemSize(), len(db.flushChan))
+		// Create new wal for new memtable.
+		if err = db.log.rotateWal(); err != nil {
+			return y.Wrapf(err, "Error while rotating wal")
+		}
 		// We manage to push this task. Let's modify imm.
 		db.imm = append(db.imm, db.mt)
 		db.mt = skl.NewSkiplist(arenaSize(db.opt))
@@ -904,6 +908,7 @@ type flushTask struct {
 	mt         *skl.Skiplist
 	vptr       valuePointer
 	dropPrefix []byte
+	walHead    uint32
 }
 
 // handleFlushTask must be run serially.
@@ -921,9 +926,13 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 
 	// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
 	// commits.
-	headTs := y.KeyWithTs(head, db.orc.nextTs())
+	ts := db.orc.nextTs()
+	headTs := y.KeyWithTs(head, ts)
 	ft.mt.Put(headTs, y.ValueStruct{Value: val})
-
+	walTs := y.KeyWithTs(writeAheadHead, ts)
+	whead := make([]byte, 4)
+	binary.BigEndian.PutUint32(whead, ft.walHead)
+	ft.mt.Put(walTs, y.ValueStruct{Value: whead})
 	dk, err := db.registry.latestDataKey()
 	if err != nil {
 		return y.Wrapf(err, "failed to get datakey in db.handleFlushTask")
@@ -976,7 +985,11 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// We own a ref on tbl.
 	err = db.lc.addLevel0Table(tbl) // This will incrRef
 	_ = tbl.DecrRef()               // Releases our ref.
-	return err
+
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // flushMemtable must keep running until we send it an empty flushTask. If there
