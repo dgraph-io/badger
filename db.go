@@ -353,7 +353,7 @@ func Open(opt Options) (db *DB, err error) {
 
 	log, err := openLogManager(db, vptr, walHeadFile, db.replayFunction())
 	if err != nil {
-		return db, y.Wrapf(err, "While opening log manager")
+		return nil, y.Wrapf(err, "While opening log manager")
 	}
 	db.log = log
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
@@ -871,7 +871,7 @@ func (db *DB) ensureRoomForWrite() error {
 		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 			db.mt.MemSize(), len(db.flushChan))
 		// Create new wal for new memtable.
-		if err = db.log.rotateWal(); err != nil {
+		if _, err = db.log.rotateLog(WAL); err != nil {
 			return y.Wrapf(err, "Error while rotating wal")
 		}
 		// We manage to push this task. Let's modify imm.

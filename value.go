@@ -98,8 +98,10 @@ func (lf *logFile) encode(e *Entry, buf *bytes.Buffer, offset uint32) (int, erro
 }
 
 func (lf *logFile) writeLog(buf *bytes.Buffer) error {
-	_, err := lf.fd.Write(buf.Bytes())
+	n, err := lf.fd.Write(buf.Bytes())
 	atomic.AddUint32(&lf.offset, uint32(buf.Len()))
+	y.NumBytesWritten.Add(int64(n))
+	y.NumWrites.Add(1)
 	return err
 }
 

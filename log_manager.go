@@ -18,6 +18,7 @@ package badger
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"os"
@@ -32,12 +33,20 @@ import (
 	"golang.org/x/net/trace"
 )
 
+type logType int
+
+const (
+	VLOG logType = iota
+	WAL
+)
+
 type logManager struct {
 	opt            Options
 	wal            *logFile
 	vlog           *logFile
 	db             *DB
-	entriesWritten uint32
+	walWritten     uint32
+	vlogWritten    uint32
 	elog           trace.EventLog
 	maxWalID       uint32
 	maxVlogID      uint32
@@ -72,7 +81,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead uint32,
 			manager.maxWalID = fid
 		}
 		// Filter wal id that needs to be replayed.
-		if fid > walhead {
+		if fid <= walhead {
 			// Delete the wal file if is not needed any more.
 			if !db.opt.ReadOnly {
 				path := walFilePath(manager.opt.ValueDir, uint32(fid))
@@ -344,7 +353,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			}
 			// We successfully iterated till the end of the file. Now we have to advance
 			// the wal File.
-			if len(lp.walIDs) < currentWalIndex {
+			if currentWalIndex < len(lp.walIDs) {
 				break
 			}
 			currentWalIndex++
@@ -386,7 +395,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			}
 			// We successfully iterated till the end of the file. Now we have to advance
 			// the wal File.
-			if len(lp.vlogIDs) < currentVlogIndex {
+			if currentVlogIndex < len(lp.vlogIDs) {
 				break
 			}
 			currentVlogIndex++
@@ -442,6 +451,17 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 				return y.Wrapf(err, "Error while inserting entry to lsm.")
 			}
 		}
+
+		// we replayed all the entries here. so marking finish txn so the entries for the
+		// this txn goes to LSM.
+		e := &Entry{
+			Key:   y.KeyWithTs(txnKeyVlog, walCommitTs),
+			Value: []byte(strconv.FormatUint(walCommitTs, 10)),
+			meta:  bitFinTxn,
+		}
+		if err := replayFn(*e, valuePointer{}); err != nil {
+			return y.Wrapf(err, "Error while inserting finish mark to lsm.")
+		}
 		// Advance for next batch of txn entries.
 		walEntries, walCommitTs, walErr = walIterator.iterateEntries()
 		vlogEntries, vlogCommitTs, vlogErr = walIterator.iterateEntries()
@@ -474,6 +494,7 @@ func newLogIterator(log *logFile, offset uint32) (*logIterator, error) {
 				dataKey: log.dataKey,
 			},
 		},
+		reader: bufio.NewReader(log.fd),
 	}, nil
 }
 
@@ -497,7 +518,6 @@ func (iterator *logIterator) iterateEntries() ([]*Entry, uint64, error) {
 			}
 			if commitTs != txnTs {
 				// we got an entry here without finish mark so, revinding the state.
-				commitTs = 0
 				entries = []*Entry{}
 				return entries, 0, errTruncate
 			}
@@ -507,13 +527,19 @@ func (iterator *logIterator) iterateEntries() ([]*Entry, uint64, error) {
 		// Here it is finish txn mark.
 		if e.meta&bitFinTxn > 0 {
 			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
-			if err != nil || commitTs != txnTs {
-				commitTs = 0
+			if err != nil {
+				entries = []*Entry{}
+				return entries, 0, err
+			}
+			// If there is no entries means no entries from the current txn is not part
+			// of log files. we only got finish mark. so we're not checking commitTs != txnTs
+			if len(entries) != 0 && commitTs != txnTs {
 				entries = []*Entry{}
 				return entries, 0, errTruncate
 			}
 			// We got finish mark for this entry batch. Now, the iteration for this entry batch
 			// is done so stoping the iteration for this ts.
+			commitTs = txnTs
 			iterator.validOffset = iterator.entryReader.recordOffset
 			break
 		}
@@ -530,17 +556,51 @@ func (lm *logManager) write(reqs []*request) error {
 	wal := lm.wal
 	vlog := lm.vlog
 	lm.RUnlock()
+	toDisk := func() error {
+		// Persist the log to the disk.
+		// TODO: make it concurrent. Golang, should give us async interface :(
+		if walBuf.Len() == 0 && vlogBuf.Len() == 0 {
+			return nil
+		}
+		var err error
+		if err = wal.writeLog(walBuf); err != nil {
+			return y.Wrapf(err, "Error while writing log to WAL %d", wal.fid)
+		}
+		if err = vlog.writeLog(vlogBuf); err != nil {
+			return y.Wrapf(err, "Error while writing log to vlog %d", vlog.fid)
+		}
+		// reset the buf for next batch of entries.
+		vlogBuf.Reset()
+		walBuf.Reset()
+		// check whether vlog hits the defined threshold.
+		rotate := vlog.fileOffset()+uint32(vlogBuf.Len()) > uint32(lm.opt.ValueLogFileSize) ||
+			lm.walWritten > uint32(lm.opt.ValueLogMaxEntries)
+		if rotate {
+			fmt.Println("rotating")
+			lf, err := lm.rotateLog(VLOG)
+			if err != nil {
+				return y.Wrapf(err, "Error while creating new vlog file %d", lm.maxVlogID)
+			}
+			vlog = lf
+			atomic.AddInt32(&lm.db.logRotates, 1)
+		}
+		return nil
+	}
 	// Process each request.
 	for i := range reqs {
-		var written int
+		var walWritten uint32
+		var vlogWritten uint32
 		b := reqs[i]
 		// Process this batch.
 		// last two entries are end entries for vlog and WAL. so igoring that.
 		txnEntries := b.Entries[0 : len(b.Entries)-2]
+		y.AssertTrue(len(b.Ptrs) == 0)
+	inner:
 		for j := range txnEntries {
 			e := b.Entries[j]
 			if e.skipVlog {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
+				continue inner
 			}
 			var p valuePointer
 			var entryOffset uint32
@@ -553,8 +613,8 @@ func (lm *logManager) write(reqs []*request) error {
 				}
 				// This entry is going to persist in sst. So, appending empty val pointer.
 				b.Ptrs = append(b.Ptrs, p)
-				written++
-				continue
+				walWritten++
+				continue inner
 			}
 			// Since the value size is bigger, So we're writing to vlog.
 			entryOffset = vlog.fileOffset() + uint32(vlogBuf.Len())
@@ -566,39 +626,50 @@ func (lm *logManager) write(reqs []*request) error {
 			p.Len = uint32(entryLen)
 			p.Fid = vlog.fid
 			b.Ptrs = append(b.Ptrs, p)
-			written++
+			vlogWritten++
 		}
 
 		// Write the entry offset to the respective buf.
 		// Write end entry to wal buf.
 		entryOffset := wal.fileOffset() + uint32(walBuf.Len())
+
+		y.AssertTrue(b.Entries[len(b.Entries)-2].meta&bitFinTxn > 0)
 		_, err := wal.encode(b.Entries[len(b.Entries)-2], walBuf, entryOffset)
 		if err != nil {
 			return y.Wrapf(err, "Error while encoding end entry for WAL %d", lm.wal.fid)
 		}
-		written++
+		walWritten++
 		b.Ptrs = append(b.Ptrs, valuePointer{})
 		// Write end entry to vlog buf.
 		entryOffset = vlog.fileOffset() + uint32(vlogBuf.Len())
-		_, err = vlog.encode(b.Entries[len(b.Entries)-1], vlogBuf, entryOffset)
+
+		y.AssertTrue(b.Entries[len(b.Entries)-1].meta&bitFinTxn > 0)
+		entryLen, err := vlog.encode(b.Entries[len(b.Entries)-1], vlogBuf, entryOffset)
 		if err != nil {
 			return y.Wrapf(err, "Error while encoding eng entry for vlog %d", vlog.fid)
 		}
-		written++
-		b.Ptrs = append(b.Ptrs, valuePointer{})
-		lm.entriesWritten += uint32(written)
+		vlogWritten++
+		b.Ptrs = append(b.Ptrs, valuePointer{
+			Fid:    vlog.fid,
+			Offset: entryOffset,
+			Len:    uint32(entryLen),
+		})
+		y.AssertTrue(len(b.Entries) == len(b.Ptrs))
+		// update written metrics
+		atomic.AddUint32(&lm.walWritten, walWritten)
+		atomic.AddUint32(&lm.vlogWritten, vlogWritten)
+		// We write to disk here so that all entries that are part of the same transaction are
+		// written to the same vlog file.
+		writeNow :=
+			vlog.fileOffset()+uint32(vlogBuf.Len()) > uint32(lm.opt.ValueLogFileSize) ||
+				lm.walWritten > uint32(lm.opt.ValueLogMaxEntries)
+		if writeNow {
+			if err := toDisk(); err != nil {
+				return err
+			}
+		}
 	}
-	// Persist the log to the disk.
-	// TODO: make it concurrent. Golang, should give us async interface :(
-
-	var err error
-	if err = wal.writeLog(walBuf); err != nil {
-		return y.Wrapf(err, "Error while writing log to WAL %d", wal.fid)
-	}
-	if err = vlog.writeLog(vlogBuf); err != nil {
-		return y.Wrapf(err, "Error while writing log to vlog %d", vlog.fid)
-	}
-	return nil
+	return toDisk()
 }
 
 func (lm *logManager) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
@@ -688,20 +759,38 @@ func (lm *logManager) updateDiscardStats(stats map[uint32]int64) error {
 	return nil
 }
 
-func (lm *logManager) rotateWal() error {
+func (lm *logManager) rotateLog(logtype logType) (*logFile, error) {
 	lm.Lock()
 	defer lm.Unlock()
 	// close the current log file
-	var err error
-	if err = lm.wal.fd.Close(); err != nil {
-		return y.Wrapf(err, "Error while closing wal %d", lm.wal.fid)
+	path := ""
+	fid := uint32(0)
+	// get the path and fid based on the log type.
+	switch logtype {
+	case WAL:
+		lm.maxWalID++
+		path = walFilePath(lm.opt.ValueDir, lm.maxWalID)
+		fid = lm.maxWalID
+		break
+	case VLOG:
+		lm.maxVlogID++
+		path = vlogFilePath(lm.opt.ValueDir, lm.maxVlogID)
+		fid = lm.maxVlogID
 	}
-	wal, err := lm.createNewWal()
+	lf, err := lm.createlogFile(path,
+		fid)
 	if err != nil {
-		return err
+		return nil, y.Wrapf(err, "Error while creating log file %d of log type %d", fid, logtype)
 	}
-	lm.wal = wal
-	return nil
+	// switch the log file according to the type
+	switch logtype {
+	case WAL:
+		lm.wal = lf
+		break
+	case VLOG:
+		lm.vlog = lf
+	}
+	return lf, nil
 }
 
 func (manager *logManager) createNewWal() (*logFile, error) {
