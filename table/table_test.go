@@ -735,6 +735,13 @@ func TestTableChecksum(t *testing.T) {
 	}
 }
 
+var cacheConfig = ristretto.Config{
+	NumCounters: 1000000 * 10,
+	MaxCost:     1000000,
+	BufferItems: 64,
+	Metrics:     true,
+}
+
 func BenchmarkRead(b *testing.B) {
 	n := int(5 * 1e6)
 	tbl := getTableForBenchmarks(b, n, nil)
@@ -755,12 +762,7 @@ func BenchmarkRead(b *testing.B) {
 func BenchmarkReadAndBuild(b *testing.B) {
 	n := int(5 * 1e6)
 
-	var cache, _ = ristretto.NewCache(&ristretto.Config{
-		NumCounters: 1000000 * 10,
-		MaxCost:     1000000,
-		BufferItems: 64,
-		Metrics:     true,
-	})
+	var cache, _ = ristretto.NewCache(&cacheConfig)
 	tbl := getTableForBenchmarks(b, n, cache)
 	defer tbl.DecrRef()
 
@@ -789,12 +791,7 @@ func BenchmarkReadMerged(b *testing.B) {
 	tableSize := n / m
 	var tables []*Table
 
-	var cache, err = ristretto.NewCache(&ristretto.Config{
-		NumCounters: 1000000 * 10,
-		MaxCost:     1000000,
-		BufferItems: 64,
-		Metrics:     true,
-	})
+	var cache, err = ristretto.NewCache(&cacheConfig)
 	require.NoError(b, err)
 
 	for i := 0; i < m; i++ {
@@ -889,12 +886,7 @@ func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Tab
 	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	if cache == nil {
 		var err error
-		cache, err = ristretto.NewCache(&ristretto.Config{
-			NumCounters: 1000000 * 10,
-			MaxCost:     1000000,
-			BufferItems: 64,
-			Metrics:     true,
-		})
+		cache, err = ristretto.NewCache(&cacheConfig)
 		require.NoError(b, err)
 	}
 	opts.Cache = cache
