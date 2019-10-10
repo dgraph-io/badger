@@ -1744,21 +1744,21 @@ func TestSyncForRace(t *testing.T) {
 	closeChan := make(chan struct{})
 	doneChan := make(chan struct{})
 
-	go func() {
-		ticker := time.NewTicker(100 * time.Microsecond)
-		for {
-			select {
-			case <-ticker.C:
-				if err := db.Sync(); err != nil {
-					require.NoError(t, err)
-				}
-				db.opt.Debugf("Sync Iteration completed")
-			case <-closeChan:
-				close(doneChan)
-				return
-			}
-		}
-	}()
+	// go func() {
+	// 	ticker := time.NewTicker(100 * time.Microsecond)
+	// 	for {
+	// 		select {
+	// 		case <-ticker.C:
+	// 			if err := db.Sync(); err != nil {
+	// 				require.NoError(t, err)
+	// 			}
+	// 			db.opt.Debugf("Sync Iteration completed")
+	// 		case <-closeChan:
+	// 			close(doneChan)
+	// 			return
+	// 		}
+	// 	}
+	// }()
 
 	sz := 128 << 10 // 5 entries per value log file.
 	v := make([]byte, sz)

@@ -639,7 +639,6 @@ func (db *DB) shouldWriteValueToLSM(e Entry) bool {
 }
 
 func (db *DB) writeToLSM(b *request) error {
-	fmt.Printf("%+v \n", b)
 	if len(b.Ptrs) != len(b.Entries) {
 		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
@@ -808,9 +807,8 @@ func (db *DB) doWrites(lc *y.Closer) {
 		}
 
 	writeCase:
-		reqC := make([]*request, 0, len(reqs))
-		copy(reqC, reqs)
-		go writeRequests(reqC)
+
+		go writeRequests(reqs)
 		reqs = make([]*request, 0, 10)
 		reqLen.Set(0)
 	}
