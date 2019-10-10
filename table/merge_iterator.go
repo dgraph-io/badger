@@ -24,8 +24,8 @@ import (
 // MergeIterator merges multiple iterators.
 // NOTE: MergeIterator owns the array of iterators and is responsible for closing them.
 type MergeIterator struct {
-	smaller mergeIteratorChild
-	bigger  mergeIteratorChild
+	small mergeIteratorChild
+	big   mergeIteratorChild
 
 	// When the two iterators have the same value, the value in the second iterator is ignored.
 	second  y.Iterator
@@ -52,9 +52,9 @@ func (child *mergeIteratorChild) setIterator(iter y.Iterator) {
 
 func (child *mergeIteratorChild) setKey() {
 	if child.merge != nil {
-		child.valid = child.merge.smaller.valid
+		child.valid = child.merge.small.valid
 		if child.valid {
-			child.key = child.merge.smaller.key
+			child.key = child.merge.small.key
 		}
 	} else if child.concat != nil {
 		child.valid = child.concat.Valid()
@@ -70,27 +70,27 @@ func (child *mergeIteratorChild) setKey() {
 }
 
 func (mt *MergeIterator) fixSmallerBigger() {
-	if !mt.bigger.valid {
+	if !mt.big.valid {
 		return
 	}
-	for mt.smaller.valid {
-		cmp := y.CompareKeys(mt.smaller.key, mt.bigger.key)
+	for mt.small.valid {
+		cmp := y.CompareKeys(mt.small.key, mt.big.key)
 		// Both the keys are equal.
 		if cmp == 0 {
 			// Ignore the value in second iterator.
 			mt.second.Next()
 			var secondValid bool
-			if mt.second == mt.smaller.iter {
-				mt.smaller.setKey()
-				secondValid = mt.smaller.valid
+			if mt.second == mt.small.iter {
+				mt.small.setKey()
+				secondValid = mt.small.valid
 			} else {
-				mt.bigger.setKey()
-				secondValid = mt.bigger.valid
+				mt.big.setKey()
+				secondValid = mt.big.valid
 			}
 			if !secondValid {
-				// Swap smaller and bigger only if second points to
-				// the smaller one and the bigger is valid.
-				if mt.second == mt.smaller.iter && mt.bigger.valid {
+				// Swap small and big only if second points to
+				// the small one and the big is valid.
+				if mt.second == mt.small.iter && mt.big.valid {
 					mt.swap()
 				}
 				return
@@ -112,59 +112,59 @@ func (mt *MergeIterator) fixSmallerBigger() {
 }
 
 func (mt *MergeIterator) swap() {
-	mt.smaller, mt.bigger = mt.bigger, mt.smaller
+	mt.small, mt.big = mt.big, mt.small
 }
 
 // Next returns the next element. If it is the same as the current key, ignore it.
 func (mt *MergeIterator) Next() {
-	if mt.smaller.merge != nil {
-		mt.smaller.merge.Next()
-	} else if mt.smaller.concat != nil {
-		mt.smaller.concat.Next()
+	if mt.small.merge != nil {
+		mt.small.merge.Next()
+	} else if mt.small.concat != nil {
+		mt.small.concat.Next()
 	} else {
-		mt.smaller.iter.Next()
+		mt.small.iter.Next()
 	}
-	mt.smaller.setKey()
+	mt.small.setKey()
 	mt.fixSmallerBigger()
 }
 
 // Rewind seeks to first element (or last element for reverse iterator).
 func (mt *MergeIterator) Rewind() {
-	mt.smaller.iter.Rewind()
-	mt.smaller.setKey()
-	mt.bigger.iter.Rewind()
-	mt.bigger.setKey()
+	mt.small.iter.Rewind()
+	mt.small.setKey()
+	mt.big.iter.Rewind()
+	mt.big.setKey()
 	mt.fixSmallerBigger()
 }
 
 // Seek brings us to element with key >= given key.
 func (mt *MergeIterator) Seek(key []byte) {
-	mt.smaller.iter.Seek(key)
-	mt.smaller.setKey()
-	mt.bigger.iter.Seek(key)
-	mt.bigger.setKey()
+	mt.small.iter.Seek(key)
+	mt.small.setKey()
+	mt.big.iter.Seek(key)
+	mt.big.setKey()
 	mt.fixSmallerBigger()
 }
 
 // Valid returns whether the MergeIterator is at a valid element.
 func (mt *MergeIterator) Valid() bool {
-	return mt.smaller.valid
+	return mt.small.valid
 }
 
 // Key returns the key associated with the current iterator.
 func (mt *MergeIterator) Key() []byte {
-	return mt.smaller.key
+	return mt.small.key
 }
 
 // Value returns the value associated with the iterator.
 func (mt *MergeIterator) Value() y.ValueStruct {
-	return mt.smaller.iter.Value()
+	return mt.small.iter.Value()
 }
 
 // Close implements y.Iterator.
 func (mt *MergeIterator) Close() error {
-	err1 := mt.smaller.iter.Close()
-	err2 := mt.bigger.iter.Close()
+	err1 := mt.small.iter.Close()
+	err2 := mt.big.iter.Close()
 	if err1 != nil {
 		return errors.Wrap(err1, "MergeIterator")
 	}
@@ -182,8 +182,8 @@ func NewMergeIterator(iters []y.Iterator, reverse bool) y.Iterator {
 			second:  iters[1],
 			reverse: reverse,
 		}
-		mi.smaller.setIterator(iters[0])
-		mi.bigger.setIterator(iters[1])
+		mi.small.setIterator(iters[0])
+		mi.big.setIterator(iters[1])
 		return mi
 	}
 	mid := len(iters) / 2
