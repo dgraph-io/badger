@@ -72,7 +72,7 @@ func (child *node) setKey() {
 	}
 }
 
-func (mt *MergeIterator) fixSmallerBigger() {
+func (mt *MergeIterator) fix() {
 	if !mt.big.valid {
 		return
 	}
@@ -128,7 +128,7 @@ func (mt *MergeIterator) Next() {
 		mt.small.iter.Next()
 	}
 	mt.small.setKey()
-	mt.fixSmallerBigger()
+	mt.fix()
 }
 
 // Rewind seeks to first element (or last element for reverse iterator).
@@ -137,7 +137,7 @@ func (mt *MergeIterator) Rewind() {
 	mt.small.setKey()
 	mt.big.iter.Rewind()
 	mt.big.setKey()
-	mt.fixSmallerBigger()
+	mt.fix()
 }
 
 // Seek brings us to element with key >= given key.
@@ -146,7 +146,7 @@ func (mt *MergeIterator) Seek(key []byte) {
 	mt.small.setKey()
 	mt.big.iter.Seek(key)
 	mt.big.setKey()
-	mt.fixSmallerBigger()
+	mt.fix()
 }
 
 // Valid returns whether the MergeIterator is at a valid element.
