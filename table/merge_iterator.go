@@ -24,15 +24,15 @@ import (
 // MergeIterator merges multiple iterators.
 // NOTE: MergeIterator owns the array of iterators and is responsible for closing them.
 type MergeIterator struct {
-	small mergeIteratorChild
-	big   mergeIteratorChild
+	small node
+	big   node
 
 	// When the two iterators have the same value, the value in the second iterator is ignored.
 	second  y.Iterator
 	reverse bool
 }
 
-type mergeIteratorChild struct {
+type node struct {
 	valid bool
 	key   []byte
 	iter  y.Iterator
@@ -44,13 +44,13 @@ type mergeIteratorChild struct {
 	concat *ConcatIterator
 }
 
-func (child *mergeIteratorChild) setIterator(iter y.Iterator) {
+func (child *node) setIterator(iter y.Iterator) {
 	child.iter = iter
 	child.merge, _ = iter.(*MergeIterator)
 	child.concat, _ = iter.(*ConcatIterator)
 }
 
-func (child *mergeIteratorChild) setKey() {
+func (child *node) setKey() {
 	if child.merge != nil {
 		child.valid = child.merge.small.valid
 		if child.valid {
