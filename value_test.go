@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -410,7 +411,6 @@ func TestValueGC4(t *testing.T) {
 
 	err = kv.vlog.Close()
 	require.NoError(t, err)
-	kv.vlog.stopFlushDiscardStats() // Close flushDiscardStats goroutine also.
 
 	err = kv.vlog.open(kv, valuePointer{Fid: 2}, kv.replayFunction())
 	require.NoError(t, err)
@@ -448,6 +448,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 
 	db, err := Open(opt)
 	require.NoError(t, err)
+	db.vlog.lfDiscardStats.flushChan = make(chan map[uint32]int64)
 
 	sz := 128 << 10 // 5 entries per value log file.
 	v := make([]byte, sz)
@@ -633,7 +634,6 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	checkKeys(t, kv, [][]byte{k3})
 	// Replay value log from beginning, badger head is past k2.
 	require.NoError(t, kv.vlog.Close())
-	kv.vlog.stopFlushDiscardStats() // Close flushDiscardStats goroutine also.
 	require.NoError(t,
 		kv.vlog.open(kv, valuePointer{Fid: 0}, kv.replayFunction()))
 	require.NoError(t, kv.Close())
@@ -992,7 +992,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
-// Regression test for https://github.com/dgraph-io/dgraph/issues/3669
+// // Regression test for https://github.com/dgraph-io/dgraph/issues/3669
 func TestTruncatedDiscardStat(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
@@ -1005,10 +1005,11 @@ func TestTruncatedDiscardStat(t *testing.T) {
 		stat[i] = 0
 	}
 	db.vlog.lfDiscardStats.m = stat
+	encodedDS, _ := json.Marshal(db.vlog.lfDiscardStats.m)
 	entries := []*Entry{{
 		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
 		// Insert truncated discard stats. This is important.
-		Value: db.vlog.encodedDiscardStats()[:10],
+		Value: encodedDS[:10],
 	}}
 	// Push discard stats entry to the write channel.
 	req, err := db.sendToWriteCh(entries)
@@ -1058,10 +1059,11 @@ func TestDiscardStatsMove(t *testing.T) {
 	}
 
 	db.vlog.lfDiscardStats.m = stat
+	encodedDS, _ := json.Marshal(db.vlog.lfDiscardStats.m)
 	entries := []*Entry{{
 		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
 		// The discard stat value is more than value threshold.
-		Value: db.vlog.encodedDiscardStats(),
+		Value: encodedDS,
 	}}
 	// Push discard stats entry to the write channel.
 	req, err := db.sendToWriteCh(entries)
@@ -1081,7 +1083,6 @@ func TestDiscardStatsMove(t *testing.T) {
 	require.NoError(t, db.Update(func(txn *Txn) error {
 		e := NewEntry([]byte("ff"), []byte("1"))
 		return txn.SetEntry(e)
-
 	}))
 
 	tr := trace.New("Badger.ValueLog", "GC")
@@ -1091,6 +1092,9 @@ func TestDiscardStatsMove(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	db, err = Open(ops)
+	// discardStats will be populdate using vlog.populateDiscardStats(), which pushes discard stats
+	// to vlog.lfDiscardStats.flushChan. Hence wait for some time, for discard stats to be updated.
+	time.Sleep(1 * time.Second)
 	require.NoError(t, err)
 	require.Equal(t, stat, db.vlog.lfDiscardStats.m)
 	require.NoError(t, db.Close())
@@ -1108,9 +1112,8 @@ func TestBlockedDiscardStats(t *testing.T) {
 	db.blockWrite()
 	// Push discard stats more than the capacity of flushChan. This ensures at least one flush
 	// operation completes successfully after the writes were blocked.
-	encodedDS := db.vlog.encodedDiscardStats()
 	for i := 0; i < cap(db.vlog.lfDiscardStats.flushChan)+2; i++ {
-		db.vlog.lfDiscardStats.flushChan <- encodedDS
+		db.vlog.lfDiscardStats.flushChan <- db.vlog.lfDiscardStats.m
 	}
 	db.unblockWrite()
 	require.NoError(t, db.Close())
