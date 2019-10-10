@@ -137,7 +137,7 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 	defer sw.writeLock.Unlock()
 
 	// We are writing all requests to vlog even if some request belongs to already closed stream.
-	// It is safe to do because we are panicing while writing to sorted writer, which will be nil
+	// It is safe to do because we are panicking while writing to sorted writer, which will be nil
 	// for closed stream. At restart, stream writer will drop all the data in Prepare function.
 	if err := sw.db.vlog.write(all); err != nil {
 		return err
@@ -270,7 +270,6 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 		return nil, err
 	}
 
-	closer := y.NewCloser(1)
 	bopts := buildTableOptions(sw.db.opt)
 	bopts.DataKey = dk
 	w := &sortedWriter{
@@ -279,7 +278,7 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 		throttle: sw.throttle,
 		builder:  table.NewTableBuilder(bopts),
 		reqCh:    make(chan *request, 3),
-		closer:   closer,
+		closer:   y.NewCloser(1),
 	}
 
 	go w.handleRequests()
