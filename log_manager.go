@@ -56,7 +56,7 @@ type logManager struct {
 	sync.RWMutex
 }
 
-func openLogManager(db *DB, vhead valuePointer, walhead uint32,
+func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	replayFn logEntry) (*logManager, error) {
 	manager := &logManager{
 		opt:         db.opt,
@@ -81,7 +81,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead uint32,
 			manager.maxWalID = fid
 		}
 		// Filter wal id that needs to be replayed.
-		if fid <= walhead {
+		if fid <= walhead.Fid {
 			// Delete the wal file if is not needed any more.
 			if !db.opt.ReadOnly {
 				path := walFilePath(manager.opt.ValueDir, uint32(fid))
@@ -94,11 +94,11 @@ func openLogManager(db *DB, vhead valuePointer, walhead uint32,
 		filteredWALIDs = append(filteredWALIDs, fid)
 	}
 
-	if manager.maxWalID == 0 && walhead > 0 {
+	if manager.maxWalID == 0 && walhead.Fid > 0 {
 		// wal file should have file number in increasing order. if the maxWalHead is
 		// set to zero means. all the memtables are persisted and log files are flushed
 		// so advancing the maxWalId to walHead.
-		manager.maxWalID = walhead
+		manager.maxWalID = walhead.Fid
 	}
 
 	// We filtered all the WAL file that needs to replayed. Now, We're going
@@ -133,6 +133,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead uint32,
 		vhead:       vhead,
 		opt:         db.opt,
 		keyRegistry: db.registry,
+		whead:       walhead,
 	}
 	err = replayer.replay(replayFn)
 	if err != nil {
@@ -194,7 +195,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead uint32,
 		return manager, nil
 	}
 
-	if manager.maxWalID == walhead || walhead == 0 {
+	if manager.maxWalID == walhead.Fid || walhead.Fid == 0 {
 		// Last persisted SST's wal so need to create new WAL file.
 		manager.maxWalID++
 		wal, err := manager.createNewWal()
@@ -256,10 +257,13 @@ type logReplayer struct {
 	vhead       valuePointer
 	opt         Options
 	keyRegistry *KeyRegistry
+	whead       valuePointer
 }
 
 func (lp *logReplayer) replay(replayFn logEntry) error {
+	// NOTES: what to truncate. how we truncate?
 	var flags uint32
+	truncateNeeded := false
 	switch {
 	case lp.opt.ReadOnly:
 		// If we have read only, we don't need SyncWrites.
@@ -270,6 +274,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 	}
 	// No need to replay if all the SST's are flushed properly.
 	if len(lp.walIDs) == 0 {
+		y.AssertTrue(len(lp.vlogIDs) == 0)
 		return nil
 	}
 	currentVlogIndex := 0
@@ -284,14 +289,14 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		return y.Wrapf(err, "Error while opening vlog file %d in log replayer", lp.vlogIDs[currentVlogIndex])
 	}
 
-	if vlogFile.fileOffset() < 20 {
-		if err := vlogFile.bootstrap(); err != nil {
-			return y.Wrapf(err, "Error while bootstraping vlog file %d", vlogFile.fid)
-		}
-	}
 	vlogOffset := uint32(vlogHeaderSize)
 	if vlogFile.fid == lp.vhead.Fid {
 		vlogOffset = lp.vhead.Offset
+	}
+	if vlogFile.fileOffset() < vlogOffset {
+		// we only bootstarp last log file and there is no log file to replay.
+		y.AssertTrue(len(lp.vlogIDs) == 1)
+		truncateNeeded = true
 	}
 	currentWalIndex := 0
 	vlogIterator, err := newLogIterator(vlogFile, vlogOffset)
@@ -309,18 +314,22 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		return y.Wrapf(err, "Error while opening WAL file %d in logReplayer",
 			lp.walIDs[currentWalIndex])
 	}
-	if walFile.fileOffset() < vlogHeaderSize {
-		if err := walFile.bootstrap(); err != nil {
-			return y.Wrapf(err, "Error while bootstraping wal file %d", walFile.fid)
-		}
+	walOffset := uint32(vlogHeaderSize)
+	if walFile.fid == lp.whead.Fid {
+		walOffset = lp.whead.Offset
 	}
-	walIterator, err := newLogIterator(walFile, vlogHeaderSize)
+	if walFile.fileOffset() < walOffset {
+		// we only bootstarp last log file and there is no log file to replay.
+		y.AssertTrue(len(lp.walIDs) == 1)
+		truncateNeeded = true
+	}
+	walIterator, err := newLogIterator(walFile, walOffset)
 	if err != nil {
 		return y.Wrapf(err, "Error while creating log iterator for the wal file %s", walFile.path)
 	}
 	walEntries, walCommitTs, walErr := walIterator.iterateEntries()
 	vlogEntries, vlogCommitTs, vlogErr := vlogIterator.iterateEntries()
-	truncateNeeded := false
+
 	isTruncateNeeded := func(validOffset uint32, log *logFile) (bool, error) {
 		info, err := log.fd.Stat()
 		if err != nil {
@@ -592,26 +601,29 @@ func (lm *logManager) write(reqs []*request) error {
 		var vlogWritten uint32
 		b := reqs[i]
 		// Process this batch.
-		// last two entries are end entries for vlog and WAL. so igoring that.
-		txnEntries := b.Entries[0 : len(b.Entries)-2]
 		y.AssertTrue(len(b.Ptrs) == 0)
 	inner:
-		for j := range txnEntries {
-			e := b.Entries[j]
-			if e.skipVlog {
+		// last two entries are end entries for vlog and WAL finish mark. so igoring that.
+		for j := 0; j < len(b.Entries)-2; j++ {
+
+			if b.Entries[j].skipVlog {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
 				continue inner
 			}
 			var p valuePointer
 			var entryOffset uint32
-			if lm.db.shouldWriteValueToLSM(*e) {
+			if lm.db.shouldWriteValueToLSM(*b.Entries[j]) {
 				// value size is less than threshold. So writing to WAL
 				entryOffset = wal.fileOffset() + uint32(walBuf.Len())
-				_, err := wal.encode(e, walBuf, entryOffset)
+				_, err := wal.encode(b.Entries[j], walBuf, entryOffset)
 				if err != nil {
 					return y.Wrapf(err, "Error while encoding entry for WAL %d", lm.wal.fid)
 				}
 				// This entry is going to persist in sst. So, appending empty val pointer.
+				// we only need offset and fid for replaying.
+				p.Offset = entryOffset
+				p.Fid = wal.fid
+				p.log = WAL
 				b.Ptrs = append(b.Ptrs, p)
 				walWritten++
 				continue inner
@@ -619,12 +631,13 @@ func (lm *logManager) write(reqs []*request) error {
 			// Since the value size is bigger, So we're writing to vlog.
 			entryOffset = vlog.fileOffset() + uint32(vlogBuf.Len())
 			p.Offset = entryOffset
-			entryLen, err := vlog.encode(e, vlogBuf, entryOffset)
+			entryLen, err := vlog.encode(b.Entries[j], vlogBuf, entryOffset)
 			if err != nil {
 				return y.Wrapf(err, "Error while encoding entry for vlog %d", lm.vlog.fid)
 			}
 			p.Len = uint32(entryLen)
 			p.Fid = vlog.fid
+			p.log = VLOG
 			b.Ptrs = append(b.Ptrs, p)
 			vlogWritten++
 		}

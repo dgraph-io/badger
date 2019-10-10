@@ -1805,7 +1805,7 @@ func TestNoCrash(t *testing.T) {
 
 	db.Lock()
 	// make head to point to first file
-	db.vhead = valuePointer{0, 0, 0}
+	db.vhead = valuePointer{0, 0, 0, 0}
 	db.Unlock()
 	db.Close()
 

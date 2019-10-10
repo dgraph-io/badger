@@ -16,6 +16,9 @@ type valuePointer struct {
 	Fid    uint32
 	Len    uint32
 	Offset uint32
+	// we don't encode logtype because we just need it in the in-memory phase. to differentiate
+	// between type of vptr.
+	log logType
 }
 
 func (p valuePointer) Less(o valuePointer) bool {

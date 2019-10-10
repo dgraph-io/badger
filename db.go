@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -76,6 +77,7 @@ type DB struct {
 	manifest  *manifestFile
 	lc        *levelsController
 	vhead     valuePointer // less than or equal to a pointer to the last vlog value put into mt
+	whead     valuePointer // less than or equal to a pointer to the last wal value put into mt
 	writeCh   chan *request
 	flushChan chan flushTask // For flushing memtables.
 	closeOnce sync.Once      // For closing DB only once.
@@ -343,15 +345,15 @@ func Open(opt Options) (db *DB, err error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "Retriving wal head")
 	}
-	var walHeadFile uint32
+	var walHead valuePointer
 	if len(vs.Value) > 0 {
-		walHeadFile = binary.BigEndian.Uint32(vs.Value)
+		walHead.Decode(vs.Value)
 	}
 
 	replayCloser := y.NewCloser(1)
 	go db.doWrites(replayCloser)
 
-	log, err := openLogManager(db, vptr, walHeadFile, db.replayFunction())
+	log, err := openLogManager(db, vptr, walHead, db.replayFunction())
 	if err != nil {
 		return nil, y.Wrapf(err, "While opening log manager")
 	}
@@ -430,8 +432,8 @@ func (db *DB) close() (err error) {
 				defer db.Unlock()
 				y.AssertTrue(db.mt != nil)
 				select {
-				case db.flushChan <- flushTask{mt: db.mt, vptr: db.vhead,
-					walHead: db.log.currentWalID()}:
+				case db.flushChan <- flushTask{mt: db.mt, vhead: db.vhead,
+					walHead: db.whead}:
 					// No need to rotate new log file. Since we're closing the db.
 					db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
 					db.mt = nil                    // Will segfault if we try writing!
@@ -597,22 +599,33 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 }
 
 func (db *DB) updateHead(ptrs []valuePointer) {
-	var ptr valuePointer
+	var walPtr valuePointer
+	var vlogPtr valuePointer
 	for i := len(ptrs) - 1; i >= 0; i-- {
 		p := ptrs[i]
-		if !p.IsZero() {
-			ptr = p
+		// update the wal ptr.
+		if !p.IsZero() && p.log == WAL {
+			walPtr = p
 			break
 		}
+		// update the vlog ptr.
+		if !p.IsZero() && p.log == VLOG {
+			vlogPtr = p
+			break
+		}
+
 	}
-	if ptr.IsZero() {
+	if vlogPtr.IsZero() {
+		y.AssertTrue(walPtr.IsZero())
 		return
 	}
 
 	db.Lock()
 	defer db.Unlock()
-	y.AssertTrue(!ptr.Less(db.vhead))
-	db.vhead = ptr
+	y.AssertTrue(!vlogPtr.Less(db.vhead))
+	y.AssertTrue(!walPtr.Less(db.whead))
+	db.vhead = vlogPtr
+	db.whead = walPtr
 }
 
 var requestPool = sync.Pool{
@@ -626,10 +639,10 @@ func (db *DB) shouldWriteValueToLSM(e Entry) bool {
 }
 
 func (db *DB) writeToLSM(b *request) error {
+	fmt.Printf("%+v \n", b)
 	if len(b.Ptrs) != len(b.Entries) {
 		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
-
 	for i, entry := range b.Entries {
 		if entry.meta&bitFinTxn != 0 {
 			continue
@@ -795,7 +808,9 @@ func (db *DB) doWrites(lc *y.Closer) {
 		}
 
 	writeCase:
-		go writeRequests(reqs)
+		reqC := make([]*request, 0, len(reqs))
+		copy(reqC, reqs)
+		go writeRequests(reqC)
 		reqs = make([]*request, 0, 10)
 		reqLen.Set(0)
 	}
@@ -858,7 +873,7 @@ func (db *DB) ensureRoomForWrite() error {
 
 	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	select {
-	case db.flushChan <- flushTask{mt: db.mt, vptr: db.vhead, walHead: db.log.currentWalID()}:
+	case db.flushChan <- flushTask{mt: db.mt, vhead: db.vhead, walHead: db.whead}:
 		// After every memtable flush, let's reset the counter.
 		atomic.StoreInt32(&db.logRotates, 0)
 
@@ -906,13 +921,14 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 
 type flushTask struct {
 	mt         *skl.Skiplist
-	vptr       valuePointer
+	vhead      valuePointer
 	dropPrefix []byte
-	walHead    uint32
+	walHead    valuePointer
 }
 
 // handleFlushTask must be run serially.
 func (db *DB) handleFlushTask(ft flushTask) error {
+	fmt.Printf("%+v \n", ft)
 	// There can be a scnerio, when empty memtable is flushed. For example, memtable is empty and
 	// after writing request to value log, rotation count exceeds db.LogRotatesToFlush.
 	if ft.mt.Empty() {
@@ -920,18 +936,21 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	}
 
 	// Store badger head even if vptr is zero, need it for readTs
-	db.opt.Debugf("Storing value log head: %+v\n", ft.vptr)
-	db.elog.Printf("Storing offset: %+v\n", ft.vptr)
-	val := ft.vptr.Encode()
+	db.opt.Debugf("Storing value log head: %+v\n", ft.vhead)
+	db.elog.Printf("Storing offset: %+v\n", ft.vhead)
+	vhead := ft.vhead.Encode()
 
 	// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
 	// commits.
 	ts := db.orc.nextTs()
 	headTs := y.KeyWithTs(head, ts)
-	ft.mt.Put(headTs, y.ValueStruct{Value: val})
+	ft.mt.Put(headTs, y.ValueStruct{Value: vhead})
+
+	// Storing wal head.
+	db.opt.Debugf("Storing wal head: %+v\n", ft.walHead)
+	db.elog.Printf("Storing offset: %+v\n", ft.walHead)
 	walTs := y.KeyWithTs(writeAheadHead, ts)
-	whead := make([]byte, 4)
-	binary.BigEndian.PutUint32(whead, ft.walHead)
+	whead := ft.walHead.Encode()
 	ft.mt.Put(walTs, y.ValueStruct{Value: whead})
 	dk, err := db.registry.latestDataKey()
 	if err != nil {
@@ -1520,7 +1539,8 @@ func (db *DB) DropPrefix(prefix []byte) error {
 		task := flushTask{
 			mt: memtable,
 			// Ensure that the head of value log gets persisted to disk.
-			vptr:       db.vhead,
+			vhead:      db.vhead,
+			walHead:    db.whead,
 			dropPrefix: prefix,
 		}
 		db.opt.Debugf("Flushing memtable")
