@@ -28,6 +28,9 @@ type MergeIterator struct {
 	big   node
 
 	// When the two iterators have the same value, the value in the second iterator is ignored.
+	// On level 0, we can have multiple iterators with the same key. In this case we want to
+	// use value of the iterator that was added first to the merge iterator. Second keeps track of the
+	// iterator that was added second so that we can resolve the same key conflict.
 	second  y.Iterator
 	reverse bool
 }
@@ -77,7 +80,7 @@ func (mt *MergeIterator) fixSmallerBigger() {
 		cmp := y.CompareKeys(mt.small.key, mt.big.key)
 		// Both the keys are equal.
 		if cmp == 0 {
-			// Ignore the value in second iterator.
+			// Key conflict. Ignore the value in second iterator.
 			mt.second.Next()
 			var secondValid bool
 			if mt.second == mt.small.iter {
