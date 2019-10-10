@@ -381,7 +381,7 @@ func (db *DB) close() (err error) {
 	db.elog.Printf("Closing database")
 
 	// Before closing writes, stop flushing discardStats.
-	db.vlog.closeFlushDiscardStats()
+	db.vlog.stopFlushDiscardStats()
 
 	atomic.StoreInt32(&db.blockWrites, 1)
 

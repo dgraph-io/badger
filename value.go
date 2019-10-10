@@ -1011,7 +1011,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	if err := vlog.populateFilesMap(); err != nil {
 		return err
 	}
-	go vlog.startFlushDiscard()
+	go vlog.startFlushDiscardStats()
 	// If no files are found, then create a new file.
 	if len(vlog.filesMap) == 0 {
 		_, err := vlog.createVlogFile(0)
@@ -1681,8 +1681,9 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 	vlog.lfDiscardStats.Lock()
 	defer vlog.lfDiscardStats.Unlock()
 
-	// Compaction is closed after closing of flushing of discard stats.
-	// Hence check if flushChan is already closed.
+	// While closing DB(db.close()), we first close flushing of discardStats(which results in
+	// closing of flushChan). Compaction is closed after it. Hence before, pushing anything to
+	// flushChan, check if it is already closed.
 	if vlog.lfDiscardStats.flushChanClosed {
 		vlog.opt.Warningf("updateDiscardStats called: discard stats flush channel closed, " +
 			"returning without updating")
@@ -1704,7 +1705,7 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 	}
 }
 
-func (vlog *valueLog) startFlushDiscard() {
+func (vlog *valueLog) startFlushDiscardStats() {
 	defer vlog.lfDiscardStats.closer.Done()
 
 	process := func(encodedDS []byte) error {
@@ -1717,8 +1718,8 @@ func (vlog *valueLog) startFlushDiscard() {
 		}}
 		req, err := vlog.db.sendToWriteCh(entries)
 		if err == ErrBlockedWrites {
-			// We'll block writes while closing db. When L0 compaction in close may push discard
-			// stats. So ignoring it. https://github.com/dgraph-io/badger/issues/970
+			// Writes will be blocked if DropAll() call is made, to avoid crash ignore
+			// ErrBlockedWrites https://github.com/dgraph-io/badger/issues/970.
 			return nil
 		} else if err != nil {
 			return errors.Wrapf(err, "failed to push discard stats to write channel")
@@ -1751,12 +1752,11 @@ LOOP:
 	}
 }
 
-func (vlog *valueLog) closeFlushDiscardStats() {
+func (vlog *valueLog) stopFlushDiscardStats() {
 	// Before closing, flush latest discardStats also.
 	vlog.lfDiscardStats.Lock()
 	if len(vlog.lfDiscardStats.m) > 0 {
-		encodedDS := vlog.encodedDiscardStats()
-		vlog.lfDiscardStats.flushChan <- encodedDS
+		vlog.lfDiscardStats.flushChan <- vlog.encodedDiscardStats()
 	}
 	vlog.lfDiscardStats.Unlock()
 
