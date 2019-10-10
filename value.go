@@ -1260,7 +1260,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 	vlog.filesLock.RUnlock()
 
 	var buf bytes.Buffer
-	toDisk := func() error {
+	flushWrites := func() error {
 		if buf.Len() == 0 {
 			return nil
 		}
@@ -1276,8 +1276,8 @@ func (vlog *valueLog) write(reqs []*request) error {
 		atomic.AddUint32(&vlog.writableLogOffset, uint32(n))
 		return nil
 	}
-	flushWrites := func() error {
-		if err := toDisk(); err != nil {
+	toDisk := func() error {
+		if err := flushWrites(); err != nil {
 			return err
 		}
 		if vlog.woffset() > uint32(vlog.opt.ValueLogFileSize) ||
@@ -1325,7 +1325,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			// badger might run into out of memory errors. We flush the buffer here if it's size
 			// grows beyond the max value log size.
 			if int64(buf.Len()) > vlog.db.opt.ValueLogFileSize {
-				if err := toDisk(); err != nil {
+				if err := flushWrites(); err != nil {
 					return err
 				}
 			}
@@ -1337,12 +1337,12 @@ func (vlog *valueLog) write(reqs []*request) error {
 			vlog.woffset()+uint32(buf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
 				vlog.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries)
 		if writeNow {
-			if err := flushWrites(); err != nil {
+			if err := toDisk(); err != nil {
 				return err
 			}
 		}
 	}
-	return flushWrites()
+	return toDisk()
 }
 
 // Gets the logFile and acquires and RLock() for the mmap. You must call RUnlock on the file
