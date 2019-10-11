@@ -137,6 +137,7 @@ type Entry struct {
 	offset   uint32
 	skipVlog bool
 	hlen     int // Length of the header.
+	forceWal bool
 }
 
 func (e *Entry) estimateSize(threshold int) int {

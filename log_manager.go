@@ -81,7 +81,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 			manager.maxWalID = fid
 		}
 		// Filter wal id that needs to be replayed.
-		if fid <= walhead.Fid {
+		if fid < walhead.Fid {
 			// Delete the wal file if is not needed any more.
 			if !db.opt.ReadOnly {
 				path := walFilePath(manager.opt.ValueDir, uint32(fid))
@@ -443,12 +443,14 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			truncateNeeded = true
 			break
 		}
+		replayed := false
 		// Insert the entries back to LSM.
 		for _, e := range walEntries {
 			// Inserting empty value pointer since the value pointer are not going to lsm.
 			if err := replayFn(*e, valuePointer{}); err != nil {
 				return y.Wrapf(err, "Error while inserting entry to lsm.")
 			}
+			replayed = true
 		}
 		for _, e := range vlogEntries {
 			vp := valuePointer{
@@ -459,17 +461,21 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			if err := replayFn(*e, vp); err != nil {
 				return y.Wrapf(err, "Error while inserting entry to lsm.")
 			}
+			replayed = true
 		}
 
-		// we replayed all the entries here. so marking finish txn so the entries for the
-		// this txn goes to LSM.
-		e := &Entry{
-			Key:   y.KeyWithTs(txnKeyVlog, walCommitTs),
-			Value: []byte(strconv.FormatUint(walCommitTs, 10)),
-			meta:  bitFinTxn,
-		}
-		if err := replayFn(*e, valuePointer{}); err != nil {
-			return y.Wrapf(err, "Error while inserting finish mark to lsm.")
+		if replayed {
+			// we replayed all the entries here. so marking finish txn so the entries for the
+			// this txn goes to LSM. We can't send finish mark without replaying atleast one entry.
+			// so this case exist.
+			e := &Entry{
+				Key:   y.KeyWithTs(txnKeyVlog, walCommitTs),
+				Value: []byte(strconv.FormatUint(walCommitTs, 10)),
+				meta:  bitFinTxn,
+			}
+			if err := replayFn(*e, valuePointer{}); err != nil {
+				return y.Wrapf(err, "Error while inserting finish mark to lsm.")
+			}
 		}
 		// Advance for next batch of txn entries.
 		walEntries, walCommitTs, walErr = walIterator.iterateEntries()
@@ -601,10 +607,11 @@ func (lm *logManager) write(reqs []*request) error {
 		var vlogWritten uint32
 		b := reqs[i]
 		// Process this batch.
+		fmt.Printf("%+v \n", b.Ptrs)
 		y.AssertTrue(len(b.Ptrs) == 0)
 	inner:
 		// last two entries are end entries for vlog and WAL finish mark. so igoring that.
-		for j := 0; j < len(b.Entries)-2; j++ {
+		for j := 0; j < len(b.Entries); j++ {
 
 			if b.Entries[j].skipVlog {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
@@ -612,7 +619,7 @@ func (lm *logManager) write(reqs []*request) error {
 			}
 			var p valuePointer
 			var entryOffset uint32
-			if lm.db.shouldWriteValueToLSM(*b.Entries[j]) {
+			if b.Entries[j].forceWal {
 				// value size is less than threshold. So writing to WAL
 				entryOffset = wal.fileOffset() + uint32(walBuf.Len())
 				_, err := wal.encode(b.Entries[j], walBuf, entryOffset)
@@ -641,32 +648,6 @@ func (lm *logManager) write(reqs []*request) error {
 			b.Ptrs = append(b.Ptrs, p)
 			vlogWritten++
 		}
-
-		// Write the entry offset to the respective buf.
-		// Write end entry to wal buf.
-		entryOffset := wal.fileOffset() + uint32(walBuf.Len())
-
-		y.AssertTrue(b.Entries[len(b.Entries)-2].meta&bitFinTxn > 0)
-		_, err := wal.encode(b.Entries[len(b.Entries)-2], walBuf, entryOffset)
-		if err != nil {
-			return y.Wrapf(err, "Error while encoding end entry for WAL %d", lm.wal.fid)
-		}
-		walWritten++
-		b.Ptrs = append(b.Ptrs, valuePointer{})
-		// Write end entry to vlog buf.
-		entryOffset = vlog.fileOffset() + uint32(vlogBuf.Len())
-
-		y.AssertTrue(b.Entries[len(b.Entries)-1].meta&bitFinTxn > 0)
-		entryLen, err := vlog.encode(b.Entries[len(b.Entries)-1], vlogBuf, entryOffset)
-		if err != nil {
-			return y.Wrapf(err, "Error while encoding eng entry for vlog %d", vlog.fid)
-		}
-		vlogWritten++
-		b.Ptrs = append(b.Ptrs, valuePointer{
-			Fid:    vlog.fid,
-			Offset: entryOffset,
-			Len:    uint32(entryLen),
-		})
 		y.AssertTrue(len(b.Entries) == len(b.Ptrs))
 		// update written metrics
 		atomic.AddUint32(&lm.walWritten, walWritten)

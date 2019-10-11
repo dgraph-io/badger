@@ -606,18 +606,23 @@ func (db *DB) updateHead(ptrs []valuePointer) {
 		// update the wal ptr.
 		if !p.IsZero() && p.log == WAL {
 			walPtr = p
-			break
 		}
 		// update the vlog ptr.
 		if !p.IsZero() && p.log == VLOG {
 			vlogPtr = p
-			break
 		}
 
+		if !walPtr.IsZero() && !vlogPtr.IsZero() {
+			break
+		}
 	}
 	if vlogPtr.IsZero() {
 		y.AssertTrue(walPtr.IsZero())
 		return
+	}
+
+	if walPtr.IsZero() {
+		y.AssertTrue(vlogPtr.IsZero())
 	}
 
 	db.Lock()

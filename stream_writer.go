@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"fmt"
 	"math"
 	"sync"
 
@@ -217,6 +218,7 @@ func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
 		throttle: sw.throttle,
 		builder:  table.NewTableBuilder(bopts),
 		reqCh:    make(chan *request, 3),
+		head:     valuePointer{},
 	}
 	sw.closer.AddRunning(1)
 	go w.handleRequests(sw.closer)
@@ -232,6 +234,8 @@ func (w *sortedWriter) handleRequests(closer *y.Closer) {
 	process := func(req *request) {
 		for i, e := range req.Entries {
 			vptr := req.Ptrs[i]
+			fmt.Println(w.head)
+			fmt.Println(vptr)
 			if !vptr.IsZero() {
 				y.AssertTrue(w.head.Less(vptr))
 				w.head = vptr

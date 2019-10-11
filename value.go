@@ -1239,6 +1239,7 @@ func (req *request) DecrRef() {
 	if nRef > 0 {
 		return
 	}
+	fmt.Println("Yo man")
 	req.Entries = nil
 	requestPool.Put(req)
 }

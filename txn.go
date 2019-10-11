@@ -483,14 +483,18 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 		// descending order of commit timestamp.
 		e.Key = y.KeyWithTs(e.Key, commitTs)
 		e.meta |= bitTxn
+		if txn.db.shouldWriteValueToLSM(*e) {
+			e.forceWal = true
+		}
 		entries = append(entries, e)
 	}
 	// log.Printf("%s\n", b.String())
 	// WAL end entry.
 	e := &Entry{
-		Key:   y.KeyWithTs(txnKey, commitTs),
-		Value: []byte(strconv.FormatUint(commitTs, 10)),
-		meta:  bitFinTxn,
+		Key:      y.KeyWithTs(txnKey, commitTs),
+		Value:    []byte(strconv.FormatUint(commitTs, 10)),
+		meta:     bitFinTxn,
+		forceWal: true,
 	}
 	entries = append(entries, e)
 	// End entry for vlog.
