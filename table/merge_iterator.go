@@ -17,6 +17,8 @@
 package table
 
 import (
+	"fmt"
+
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
 )
@@ -24,8 +26,10 @@ import (
 // MergeIterator merges multiple iterators.
 // NOTE: MergeIterator owns the array of iterators and is responsible for closing them.
 type MergeIterator struct {
-	small node
-	big   node
+	left  node
+	right node
+
+	small *node
 
 	// When the two iterators have the same value, the value in the second iterator is ignored.
 	// On level 0, we can have multiple iterators with the same key. In this case we want to
@@ -55,9 +59,9 @@ func (child *node) setIterator(iter y.Iterator) {
 
 func (child *node) setKey() {
 	if child.merge != nil {
-		child.valid = child.merge.small.valid
+		child.valid = child.merge.left.valid
 		if child.valid {
-			child.key = child.merge.small.key
+			child.key = child.merge.left.key
 		}
 	} else if child.concat != nil {
 		child.valid = child.concat.Valid()
@@ -73,11 +77,11 @@ func (child *node) setKey() {
 }
 
 func (mt *MergeIterator) fix() {
-	if !mt.big.valid {
+	if !mt.bigger().valid {
 		return
 	}
 	for mt.small.valid {
-		cmp := y.CompareKeys(mt.small.key, mt.big.key)
+		cmp := y.CompareKeys(mt.small.key, mt.bigger().key)
 		// Both the keys are equal.
 		if cmp == 0 {
 			// Key conflict. Ignore the value in second iterator.
@@ -86,15 +90,19 @@ func (mt *MergeIterator) fix() {
 			if mt.second == mt.small.iter {
 				mt.small.setKey()
 				secondValid = mt.small.valid
+			} else if mt.second == mt.bigger().iter {
+				mt.bigger().setKey()
+				secondValid = mt.bigger().valid
 			} else {
-				mt.big.setKey()
-				secondValid = mt.big.valid
+				fmt.Println(mt.second)
+				panic("////")
 			}
 			if !secondValid {
 				// Swap small and big only if second points to
 				// the small one and the big is valid.
-				if mt.second == mt.small.iter && mt.big.valid {
-					mt.swap()
+				if mt.second == mt.small.iter && mt.bigger().valid {
+					// mt.small = &mt.right
+					mt.swapSmall()
 				}
 				return
 			}
@@ -102,20 +110,37 @@ func (mt *MergeIterator) fix() {
 		}
 		if mt.reverse {
 			if cmp < 0 {
-				mt.swap()
+				mt.swapSmall()
 			}
 		} else {
 			if cmp > 0 {
-				mt.swap()
+				mt.swapSmall()
 			}
 		}
 		return
 	}
-	mt.swap()
+	mt.swapSmall()
 }
 
-func (mt *MergeIterator) swap() {
-	mt.small, mt.big = mt.big, mt.small
+func (mt *MergeIterator) bigger() *node {
+	if mt.small == &mt.left {
+		return &mt.right
+	}
+	return &mt.left
+}
+
+func (mt *MergeIterator) swapSmall() {
+	if mt.small == &mt.left {
+		mt.small = &mt.right
+		return
+	}
+	if mt.small == &mt.right {
+		mt.small = &mt.left
+		return
+	}
+	fmt.Println("mt.small is nil ", mt.small == nil)
+	panic(".....")
+	// mt.left, mt.right = mt.right, mt.left
 }
 
 // Next returns the next element. If it is the same as the current key, ignore it.
@@ -133,19 +158,19 @@ func (mt *MergeIterator) Next() {
 
 // Rewind seeks to first element (or last element for reverse iterator).
 func (mt *MergeIterator) Rewind() {
-	mt.small.iter.Rewind()
-	mt.small.setKey()
-	mt.big.iter.Rewind()
-	mt.big.setKey()
+	mt.left.iter.Rewind()
+	mt.left.setKey()
+	mt.right.iter.Rewind()
+	mt.right.setKey()
 	mt.fix()
 }
 
 // Seek brings us to element with key >= given key.
 func (mt *MergeIterator) Seek(key []byte) {
-	mt.small.iter.Seek(key)
-	mt.small.setKey()
-	mt.big.iter.Seek(key)
-	mt.big.setKey()
+	mt.left.iter.Seek(key)
+	mt.left.setKey()
+	mt.right.iter.Seek(key)
+	mt.right.setKey()
 	mt.fix()
 }
 
@@ -166,8 +191,8 @@ func (mt *MergeIterator) Value() y.ValueStruct {
 
 // Close implements y.Iterator.
 func (mt *MergeIterator) Close() error {
-	err1 := mt.small.iter.Close()
-	err2 := mt.big.iter.Close()
+	err1 := mt.left.iter.Close()
+	err2 := mt.right.iter.Close()
 	if err1 != nil {
 		return errors.Wrap(err1, "MergeIterator")
 	}
@@ -185,8 +210,10 @@ func NewMergeIterator(iters []y.Iterator, reverse bool) y.Iterator {
 			second:  iters[1],
 			reverse: reverse,
 		}
-		mi.small.setIterator(iters[0])
-		mi.big.setIterator(iters[1])
+		mi.left.setIterator(iters[0])
+		mi.right.setIterator(iters[1])
+		// mi.small.setIterator(iters[0])
+		mi.small = &mi.left
 		return mi
 	}
 	mid := len(iters) / 2
