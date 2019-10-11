@@ -35,7 +35,7 @@ func (p valuePointer) IsZero() bool {
 	return p.Fid == 0 && p.Offset == 0 && p.Len == 0
 }
 
-const vptrSize = 12
+const vptrSize = unsafe.Sizeof(valuePointer{})
 
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode() []byte {

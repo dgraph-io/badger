@@ -33,7 +33,7 @@ import (
 	"golang.org/x/net/trace"
 )
 
-type logType int
+type logType uint32
 
 const (
 	VLOG logType = iota
