@@ -1007,10 +1007,10 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		closer:    y.NewCloser(1),
 		flushChan: make(chan map[uint32]int64, 16),
 	}
+	go vlog.flushDiscardStats()
 	if err := vlog.populateFilesMap(); err != nil {
 		return err
 	}
-	go vlog.flushDiscardStats()
 	// If no files are found, then create a new file.
 	if len(vlog.filesMap) == 0 {
 		_, err := vlog.createVlogFile(0)
@@ -1139,7 +1139,7 @@ func (lf *logFile) init() error {
 }
 
 func (vlog *valueLog) Close() error {
-	// close discardStats.
+	// close flushDiscardStats.
 	vlog.lfDiscardStats.closer.SignalAndWait()
 
 	vlog.elog.Printf("Stopping garbage collection of values.")
@@ -1228,7 +1228,7 @@ func (reqs requests) DecrRef() {
 // sync function syncs content of latest value log file to disk. Syncing of value log directory is
 // not required here as it happens every time a value log file rotation happens(check createVlogFile
 // function). During rotation, previous value log file also gets synced to disk. It only syncs file
-// if fid >= vlog.maxFid. In some cases such as replay(while openning db), it might be called with
+// if fid >= vlog.maxFid. In some cases such as replay(while opening db), it might be called with
 // fid < vlog.maxFid. To sync irrespective of file id just call it with math.MaxUint32.
 func (vlog *valueLog) sync(fid uint32) error {
 	if vlog.opt.SyncWrites {
@@ -1691,7 +1691,7 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 func (vlog *valueLog) flushDiscardStats() {
 	defer vlog.lfDiscardStats.closer.Done()
 
-	addStats := func(stats map[uint32]int64) []byte {
+	mergeStats := func(stats map[uint32]int64) (encodedDS []byte) {
 		vlog.lfDiscardStats.Lock()
 		defer vlog.lfDiscardStats.Unlock()
 		for fid, count := range stats {
@@ -1699,18 +1699,15 @@ func (vlog *valueLog) flushDiscardStats() {
 			vlog.lfDiscardStats.updatesSinceFlush++
 		}
 
-		if vlog.lfDiscardStats.updatesSinceFlush >= discardStatsFlushThreshold {
-			encodedDS, _ := json.Marshal(vlog.lfDiscardStats.m)
-			if len(encodedDS) > 0 {
-				return encodedDS
-			}
+		if vlog.lfDiscardStats.updatesSinceFlush > discardStatsFlushThreshold {
+			encodedDS, _ = json.Marshal(vlog.lfDiscardStats.m)
+			vlog.lfDiscardStats.updatesSinceFlush = 0
 		}
-
-		return nil
+		return
 	}
 
 	process := func(stats map[uint32]int64) error {
-		encodedDS := addStats(stats)
+		encodedDS := mergeStats(stats)
 		if encodedDS == nil {
 			return nil
 		}
@@ -1719,7 +1716,6 @@ func (vlog *valueLog) flushDiscardStats() {
 			Key:   y.KeyWithTs(lfDiscardStatsKey, 1),
 			Value: encodedDS,
 		}}
-
 		req, err := vlog.db.sendToWriteCh(entries)
 		if err == ErrBlockedWrites {
 			// Writes will be blocked if DropAll() call is made, to avoid crash ignore
@@ -1734,8 +1730,8 @@ func (vlog *valueLog) flushDiscardStats() {
 	for {
 		select {
 		case <-vlog.lfDiscardStats.closer.HasBeenClosed():
+			// For simplicity just return without processing already present in stats in flushChan.
 			return
-
 		case stats := <-vlog.lfDiscardStats.flushChan:
 			if err := process(stats); err != nil {
 				vlog.opt.Errorf("unable to process discardstats with error: %s", err)
