@@ -493,10 +493,10 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 	time.Sleep(1 * time.Second) // Wait for discardStats to be populated by populateDiscardStats().
-	db.vlog.lfDiscardStats.Lock()
+	db.vlog.lfDiscardStats.RLock()
 	require.True(t, reflect.DeepEqual(persistedMap, db.vlog.lfDiscardStats.m),
 		"Discard maps are not equal")
-	db.vlog.lfDiscardStats.Unlock()
+	db.vlog.lfDiscardStats.RUnlock()
 }
 
 func TestChecksums(t *testing.T) {
@@ -1108,9 +1108,9 @@ func TestDiscardStatsMove(t *testing.T) {
 	// to vlog.lfDiscardStats.flushChan. Hence wait for some time, for discard stats to be updated.
 	time.Sleep(1 * time.Second)
 	require.NoError(t, err)
-	db.vlog.lfDiscardStats.Lock()
+	db.vlog.lfDiscardStats.RLock()
 	require.Equal(t, stat, db.vlog.lfDiscardStats.m)
-	db.vlog.lfDiscardStats.Unlock()
+	db.vlog.lfDiscardStats.RUnlock()
 	require.NoError(t, db.Close())
 }
 
