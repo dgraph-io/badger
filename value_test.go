@@ -483,9 +483,9 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	db.vlog.lfDiscardStats.Unlock()
 
 	// db.vlog.lfDiscardStats.updatesSinceFlush is already > discardStatsFlushThreshold,
-	// send empty map to flushChan, so that latest discardStats map can be persited.
+	// send empty map to flushChan, so that latest discardStats map can be persisted.
 	db.vlog.lfDiscardStats.flushChan <- map[uint32]int64{}
-	time.Sleep(1 * time.Second) // Wait to map to be persisted.
+	time.Sleep(1 * time.Second) // Wait for map to be persisted.
 	err = db.Close()
 	require.NoError(t, err)
 
@@ -1000,7 +1000,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
-// // Regression test for https://github.com/dgraph-io/dgraph/issues/3669
+// Regression test for https://github.com/dgraph-io/dgraph/issues/3669
 func TestTruncatedDiscardStat(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)

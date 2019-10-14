@@ -1700,7 +1700,11 @@ func (vlog *valueLog) flushDiscardStats() {
 		}
 
 		if vlog.lfDiscardStats.updatesSinceFlush > discardStatsFlushThreshold {
-			encodedDS, _ = json.Marshal(vlog.lfDiscardStats.m)
+			var err error
+			encodedDS, err = json.Marshal(vlog.lfDiscardStats.m)
+			if err != nil {
+				return
+			}
 			vlog.lfDiscardStats.updatesSinceFlush = 0
 		}
 		return
