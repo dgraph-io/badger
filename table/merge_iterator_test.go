@@ -17,7 +17,6 @@
 package table
 
 import (
-	"fmt"
 	"sort"
 	"testing"
 
@@ -103,10 +102,8 @@ func getAll(it y.Iterator) ([]string, []string) {
 	for ; it.Valid(); it.Next() {
 		k := it.Key()
 		keys = append(keys, string(y.ParseKey(k)))
-		fmt.Println(keys)
 		v := it.Value()
 		vals = append(vals, string(v.Value))
-		fmt.Println(vals)
 	}
 	return keys, vals
 }
@@ -164,10 +161,10 @@ func TestMergeSingleReversed(t *testing.T) {
 func TestMergeMore(t *testing.T) {
 	it := newSimpleIterator([]string{"1", "3", "7"}, []string{"a1", "a3", "a7"}, false)
 	it2 := newSimpleIterator([]string{"2", "3", "5"}, []string{"b2", "b3", "b5"}, false)
-	// it3 := newSimpleIterator([]string{"1"}, []string{"c1"}, false)
+	it3 := newSimpleIterator([]string{"1"}, []string{"c1"}, false)
 	it4 := newSimpleIterator([]string{"1", "7", "9"}, []string{"d1", "d7", "d9"}, false)
 
-	mergeIt := NewMergeIterator([]y.Iterator{it, it2, it4}, false)
+	mergeIt := NewMergeIterator([]y.Iterator{it, it2, it3, it4}, false)
 	expectedKeys := []string{"1", "2", "3", "5", "7", "9"}
 	expectedVals := []string{"a1", "b2", "a3", "b5", "a7", "d9"}
 	mergeIt.Rewind()

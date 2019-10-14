@@ -17,8 +17,6 @@
 package table
 
 import (
-	"fmt"
-
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
 )
@@ -51,148 +49,153 @@ type node struct {
 	concat *ConcatIterator
 }
 
-func (child *node) setIterator(iter y.Iterator) {
-	child.iter = iter
-	child.merge, _ = iter.(*MergeIterator)
-	child.concat, _ = iter.(*ConcatIterator)
+func (n *node) setIterator(iter y.Iterator) {
+	n.iter = iter
+	n.merge, _ = iter.(*MergeIterator)
+	n.concat, _ = iter.(*ConcatIterator)
 }
 
-func (child *node) setKey() {
-	if child.merge != nil {
-		child.valid = child.merge.left.valid
-		if child.valid {
-			child.key = child.merge.left.key
+func (n *node) setKey() {
+	if n.merge != nil {
+		n.valid = n.merge.small.valid
+		if n.valid {
+			n.key = n.merge.small.key
 		}
-	} else if child.concat != nil {
-		child.valid = child.concat.Valid()
-		if child.valid {
-			child.key = child.concat.Key()
+	} else if n.concat != nil {
+		n.valid = n.concat.Valid()
+		if n.valid {
+			n.key = n.concat.Key()
 		}
 	} else {
-		child.valid = child.iter.Valid()
-		if child.valid {
-			child.key = child.iter.Key()
+		n.valid = n.iter.Valid()
+		if n.valid {
+			n.key = n.iter.Key()
 		}
 	}
 }
 
-func (mt *MergeIterator) fix() {
-	if !mt.bigger().valid {
+func (n *node) next() {
+	if n.merge != nil {
+		n.merge.Next()
+	} else if n.concat != nil {
+		n.concat.Next()
+	} else {
+		n.iter.Next()
+	}
+	n.setKey()
+}
+
+func (n *node) rewind() {
+	n.iter.Rewind()
+	n.setKey()
+}
+
+func (n *node) seek(key []byte) {
+	n.iter.Seek(key)
+	n.setKey()
+}
+
+func (mi *MergeIterator) fix() {
+	if !mi.bigger().valid {
 		return
 	}
-	for mt.small.valid {
-		cmp := y.CompareKeys(mt.small.key, mt.bigger().key)
+	for mi.small.valid {
+		cmp := y.CompareKeys(mi.small.key, mi.bigger().key)
 		// Both the keys are equal.
 		if cmp == 0 {
 			// Key conflict. Ignore the value in second iterator.
-			mt.second.Next()
+			mi.second.Next()
 			var secondValid bool
-			if mt.second == mt.small.iter {
-				mt.small.setKey()
-				secondValid = mt.small.valid
-			} else if mt.second == mt.bigger().iter {
-				mt.bigger().setKey()
-				secondValid = mt.bigger().valid
+			if mi.second == mi.small.iter {
+				mi.small.setKey()
+				secondValid = mi.small.valid
+			} else if mi.second == mi.bigger().iter {
+				mi.bigger().setKey()
+				secondValid = mi.bigger().valid
 			} else {
-				fmt.Println(mt.second)
-				panic("////")
+				panic("mt.second invalid")
 			}
 			if !secondValid {
 				// Swap small and big only if second points to
 				// the small one and the big is valid.
-				if mt.second == mt.small.iter && mt.bigger().valid {
-					// mt.small = &mt.right
-					mt.swapSmall()
+				if mi.second == mi.small.iter && mi.bigger().valid {
+					mi.swapSmall()
 				}
 				return
 			}
 			continue
 		}
-		if mt.reverse {
+		if mi.reverse {
 			if cmp < 0 {
-				mt.swapSmall()
+				mi.swapSmall()
 			}
 		} else {
 			if cmp > 0 {
-				mt.swapSmall()
+				mi.swapSmall()
 			}
 		}
 		return
 	}
-	mt.swapSmall()
+	mi.swapSmall()
 }
 
-func (mt *MergeIterator) bigger() *node {
-	if mt.small == &mt.left {
-		return &mt.right
+func (mi *MergeIterator) bigger() *node {
+	if mi.small == &mi.left {
+		return &mi.right
 	}
-	return &mt.left
+	return &mi.left
 }
 
-func (mt *MergeIterator) swapSmall() {
-	if mt.small == &mt.left {
-		mt.small = &mt.right
+func (mi *MergeIterator) swapSmall() {
+	if mi.small == &mi.left {
+		mi.small = &mi.right
 		return
 	}
-	if mt.small == &mt.right {
-		mt.small = &mt.left
+	if mi.small == &mi.right {
+		mi.small = &mi.left
 		return
 	}
-	fmt.Println("mt.small is nil ", mt.small == nil)
-	panic(".....")
-	// mt.left, mt.right = mt.right, mt.left
 }
 
 // Next returns the next element. If it is the same as the current key, ignore it.
-func (mt *MergeIterator) Next() {
-	if mt.small.merge != nil {
-		mt.small.merge.Next()
-	} else if mt.small.concat != nil {
-		mt.small.concat.Next()
-	} else {
-		mt.small.iter.Next()
-	}
-	mt.small.setKey()
-	mt.fix()
+func (mi *MergeIterator) Next() {
+	mi.small.next()
+	mi.fix()
 }
 
 // Rewind seeks to first element (or last element for reverse iterator).
-func (mt *MergeIterator) Rewind() {
-	mt.left.iter.Rewind()
-	mt.left.setKey()
-	mt.right.iter.Rewind()
-	mt.right.setKey()
-	mt.fix()
+func (mi *MergeIterator) Rewind() {
+	mi.left.rewind()
+	mi.right.rewind()
+	mi.fix()
 }
 
 // Seek brings us to element with key >= given key.
-func (mt *MergeIterator) Seek(key []byte) {
-	mt.left.iter.Seek(key)
-	mt.left.setKey()
-	mt.right.iter.Seek(key)
-	mt.right.setKey()
-	mt.fix()
+func (mi *MergeIterator) Seek(key []byte) {
+	mi.left.seek(key)
+	mi.right.seek(key)
+	mi.fix()
 }
 
 // Valid returns whether the MergeIterator is at a valid element.
-func (mt *MergeIterator) Valid() bool {
-	return mt.small.valid
+func (mi *MergeIterator) Valid() bool {
+	return mi.small.valid
 }
 
 // Key returns the key associated with the current iterator.
-func (mt *MergeIterator) Key() []byte {
-	return mt.small.key
+func (mi *MergeIterator) Key() []byte {
+	return mi.small.key
 }
 
 // Value returns the value associated with the iterator.
-func (mt *MergeIterator) Value() y.ValueStruct {
-	return mt.small.iter.Value()
+func (mi *MergeIterator) Value() y.ValueStruct {
+	return mi.small.iter.Value()
 }
 
 // Close implements y.Iterator.
-func (mt *MergeIterator) Close() error {
-	err1 := mt.left.iter.Close()
-	err2 := mt.right.iter.Close()
+func (mi *MergeIterator) Close() error {
+	err1 := mi.left.iter.Close()
+	err2 := mi.right.iter.Close()
 	if err1 != nil {
 		return errors.Wrap(err1, "MergeIterator")
 	}
