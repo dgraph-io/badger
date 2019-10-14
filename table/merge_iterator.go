@@ -215,7 +215,6 @@ func NewMergeIterator(iters []y.Iterator, reverse bool) y.Iterator {
 		}
 		mi.left.setIterator(iters[0])
 		mi.right.setIterator(iters[1])
-		// mi.small.setIterator(iters[0])
 		mi.small = &mi.left
 		return mi
 	}
