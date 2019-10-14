@@ -17,8 +17,8 @@
 package badger
 
 import (
-	"fmt"
 	"math"
+	"strconv"
 	"sync"
 
 	"github.com/dgraph-io/badger/pb"
@@ -146,22 +146,46 @@ func (sw *StreamWriter) Flush() error {
 	defer sw.done()
 
 	sw.closer.SignalAndWait()
-	var maxHead valuePointer
 	for _, writer := range sw.writers {
 		if err := writer.Done(); err != nil {
 			return err
 		}
-		if maxHead.Less(writer.head) {
-			maxHead = writer.head
-		}
 	}
 
-	// Encode and write the value log head into a new table.
-	data := maxHead.Encode()
+	// Write two finish mark to define the end of streamwriter bootstraping.
+	req := new(request)
+	req.Entries = make([]*Entry, 0, 2)
+	// append finish mark for wal.
+	req.Entries = append(req.Entries, &Entry{
+		Key:      y.KeyWithTs(txnKey, sw.maxVersion),
+		Value:    []byte(strconv.FormatUint(sw.maxVersion, 10)),
+		meta:     bitFinTxn,
+		forceWal: true,
+	})
+	// append finish mark for vlog.
+	req.Entries = append(req.Entries, &Entry{
+		Key:   y.KeyWithTs(txnKeyVlog, sw.maxVersion),
+		Value: []byte(strconv.FormatUint(sw.maxVersion, 10)),
+		meta:  bitFinTxn,
+	})
+	if err := sw.db.log.write([]*request{req}); err != nil {
+		return y.Wrapf(err, "Error while finish mark to log manager.")
+	}
+	y.AssertTrue(!req.Ptrs[0].IsZero())
+	y.AssertTrue(!req.Ptrs[1].IsZero())
+	// encode wal head and vlog head.
+	walHead := req.Ptrs[0].Encode()
+	vlogHead := req.Ptrs[1].Encode()
+	// persist wal and vlog head.
 	headWriter := sw.newWriter(headStreamId)
 	if err := headWriter.Add(
-		y.KeyWithTs(head, sw.maxVersion),
-		y.ValueStruct{Value: data}); err != nil {
+		req.Entries[0].Key,
+		y.ValueStruct{Value: walHead}); err != nil {
+		return err
+	}
+	if err := headWriter.Add(
+		req.Entries[1].Key,
+		y.ValueStruct{Value: vlogHead}); err != nil {
 		return err
 	}
 	if err := headWriter.Done(); err != nil {
@@ -234,8 +258,6 @@ func (w *sortedWriter) handleRequests(closer *y.Closer) {
 	process := func(req *request) {
 		for i, e := range req.Entries {
 			vptr := req.Ptrs[i]
-			fmt.Println(w.head)
-			fmt.Println(vptr)
 			if !vptr.IsZero() {
 				y.AssertTrue(w.head.Less(vptr))
 				w.head = vptr

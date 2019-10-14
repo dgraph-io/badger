@@ -320,7 +320,7 @@ func TestStreamWriter6(t *testing.T) {
 				require.Equal(t, 2, int(tab.KeyCount),
 					fmt.Sprintf("failed for level: %d", tab.Level))
 			} else {
-				require.Equal(t, 1, int(tab.KeyCount)) // level 0 table will have head key
+				require.Equal(t, 2, int(tab.KeyCount)) // level 0 table will have head key
 			}
 		}
 		require.NoError(t, db.Close())

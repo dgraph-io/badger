@@ -21,11 +21,14 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"math"
+	"math/rand"
 	"os"
 	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
@@ -41,18 +44,20 @@ const (
 )
 
 type logManager struct {
-	opt            Options
-	wal            *logFile
-	vlog           *logFile
-	db             *DB
-	walWritten     uint32
-	vlogWritten    uint32
-	elog           trace.EventLog
-	maxWalID       uint32
-	maxVlogID      uint32
-	filesLock      sync.RWMutex
-	vlogFileMap    map[uint32]*logFile
-	lfDiscardStats *lfDiscardStats
+	opt                  Options
+	wal                  *logFile
+	vlog                 *logFile
+	db                   *DB
+	walWritten           uint32
+	vlogWritten          uint32
+	elog                 trace.EventLog
+	maxWalID             uint32
+	maxVlogID            uint32
+	filesLock            sync.RWMutex
+	vlogFileMap          map[uint32]*logFile
+	lfDiscardStats       *lfDiscardStats
+	garbageCh            chan struct{}
+	vlogFilesTobeDeleted []uint32
 	sync.RWMutex
 }
 
@@ -65,6 +70,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		maxWalID:    0,
 		maxVlogID:   0,
 		vlogFileMap: map[uint32]*logFile{},
+		garbageCh:   make(chan struct{}, 1),
 	}
 	if manager.opt.EventLogging {
 		manager.elog = trace.NewEventLog("Badger", "LogManager")
@@ -464,10 +470,13 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			replayed = true
 		}
 
-		if replayed {
+		isGc := vlogCommitTs == math.MaxUint64
+
+		if replayed && !isGc {
 			// we replayed all the entries here. so marking finish txn so the entries for the
 			// this txn goes to LSM. We can't send finish mark without replaying atleast one entry.
 			// so this case exist.
+			// we set finish mark only for txn entries not for gc entries.
 			e := &Entry{
 				Key:   y.KeyWithTs(txnKeyVlog, walCommitTs),
 				Value: []byte(strconv.FormatUint(walCommitTs, 10)),
@@ -546,6 +555,12 @@ func (iterator *logIterator) iterateEntries() ([]*Entry, uint64, error) {
 				entries = []*Entry{}
 				return entries, 0, err
 			}
+			if commitTs == 0 && txnTs == math.MaxUint64 {
+				// we got finish mark for gc. so no need to check commitTs != txnTs
+				iterator.validOffset = iterator.entryReader.recordOffset
+				commitTs = math.MaxInt64
+				break
+			}
 			// If there is no entries means no entries from the current txn is not part
 			// of log files. we only got finish mark. so we're not checking commitTs != txnTs
 			if len(entries) != 0 && commitTs != txnTs {
@@ -558,6 +573,9 @@ func (iterator *logIterator) iterateEntries() ([]*Entry, uint64, error) {
 			iterator.validOffset = iterator.entryReader.recordOffset
 			break
 		}
+
+		// This entries are from gc. so appending to the entries as it is.
+		entries = append(entries, e)
 	}
 	return entries, commitTs, nil
 }
@@ -747,6 +765,9 @@ func (lm *logManager) incrIteratorCount() {}
 func (lm *logManager) decrIteratorCount() int {
 	return 0
 }
+func (lm *logManager) iteratorCount() int {
+	return 0
+}
 
 func (lm *logManager) updateDiscardStats(stats map[uint32]int64) error {
 
@@ -803,4 +824,421 @@ func (manager *logManager) currentWalID() uint32 {
 
 func (manager *logManager) deleteWal(ID uint32) error {
 	return os.Remove(walFilePath(manager.opt.ValueDir, ID))
+}
+
+// sortedFids returns the file id's not pending deletion, sorted.  Assumes we have shared access to
+// filesMap.
+func (manager *logManager) sortedFids() []uint32 {
+	toBeDeleted := make(map[uint32]struct{})
+	for _, fid := range manager.vlogFilesTobeDeleted {
+		toBeDeleted[fid] = struct{}{}
+	}
+	ret := make([]uint32, 0, len(manager.vlogFileMap))
+	for fid := range manager.vlogFileMap {
+		if _, ok := toBeDeleted[fid]; !ok {
+			ret = append(ret, fid)
+		}
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return ret[i] < ret[j]
+	})
+	return ret
+}
+
+func (manager *logManager) deleteVlogLogFile(lf *logFile) error {
+	if lf == nil {
+		return nil
+	}
+	lf.lock.Lock()
+	defer lf.lock.Unlock()
+
+	path := vlogFilePath(manager.opt.ValueDir, lf.fid)
+	if err := lf.munmap(); err != nil {
+		_ = lf.fd.Close()
+		return err
+	}
+	if err := lf.fd.Close(); err != nil {
+		return err
+	}
+	return os.Remove(path)
+}
+
+func (manager *logManager) pickLog(head valuePointer, tr trace.Trace) (files []*logFile) {
+	manager.filesLock.RLock()
+	defer manager.filesLock.RUnlock()
+	fids := manager.sortedFids()
+	if len(fids) <= 1 {
+		tr.LazyPrintf("Only one or less value log file.")
+		return nil
+	} else if head.Fid == 0 {
+		tr.LazyPrintf("Head pointer is at zero.")
+		return nil
+	}
+
+	// Pick a candidate that contains the largest amount of discardable data
+	candidate := struct {
+		fid     uint32
+		discard int64
+	}{math.MaxUint32, 0}
+	manager.lfDiscardStats.Lock()
+	for _, fid := range fids {
+		if fid >= head.Fid {
+			break
+		}
+		if manager.lfDiscardStats.m[fid] > candidate.discard {
+			candidate.fid = fid
+			candidate.discard = manager.lfDiscardStats.m[fid]
+		}
+	}
+	manager.lfDiscardStats.Unlock()
+
+	if candidate.fid != math.MaxUint32 { // Found a candidate
+		tr.LazyPrintf("Found candidate via discard stats: %v", candidate)
+		files = append(files, manager.vlogFileMap[candidate.fid])
+	} else {
+		tr.LazyPrintf("Could not find candidate via discard stats. Randomly picking one.")
+	}
+
+	// Fallback to randomly picking a log file
+	var idxHead int
+	for i, fid := range fids {
+		if fid == head.Fid {
+			idxHead = i
+			break
+		}
+	}
+	if idxHead == 0 { // Not found or first file
+		tr.LazyPrintf("Could not find any file.")
+		return nil
+	}
+	idx := rand.Intn(idxHead) // Don’t include head.Fid. We pick a random file before it.
+	if idx > 0 {
+		idx = rand.Intn(idx + 1) // Another level of rand to favor smaller fids.
+	}
+	tr.LazyPrintf("Randomly chose fid: %d", fids[idx])
+	files = append(files, manager.vlogFileMap[fids[idx]])
+	return files
+}
+
+func (manager *logManager) rewrite(f *logFile, tr trace.Trace) error {
+	maxFid := atomic.LoadUint32(&manager.maxVlogID)
+	y.AssertTruef(uint32(f.fid) < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
+	tr.LazyPrintf("Rewriting fid: %d", f.fid)
+
+	wb := make([]*Entry, 0, 1000)
+	var size int64
+
+	y.AssertTrue(manager.db != nil)
+	var count, moved int
+	fe := func(e *Entry) error {
+		count++
+		if count%100000 == 0 {
+			tr.LazyPrintf("Processing entry %d", count)
+		}
+
+		vs, err := manager.db.get(e.Key)
+		if err != nil {
+			return err
+		}
+		if discardEntry(*e, vs) {
+			return nil
+		}
+
+		// Value is still present in value log.
+		if len(vs.Value) == 0 {
+			return errors.Errorf("Empty value: %+v", vs)
+		}
+		var vp valuePointer
+		vp.Decode(vs.Value)
+
+		if vp.Fid > f.fid {
+			return nil
+		}
+		if vp.Offset > e.offset {
+			return nil
+		}
+		if vp.Fid == f.fid && vp.Offset == e.offset {
+			moved++
+			// This new entry only contains the key, and a pointer to the value.
+			ne := new(Entry)
+			ne.meta = 0 // Remove all bits. Different keyspace doesn't need these bits.
+			ne.UserMeta = e.UserMeta
+			ne.ExpiresAt = e.ExpiresAt
+
+			// Create a new key in a separate keyspace, prefixed by moveKey. We are not
+			// allowed to rewrite an older version of key in the LSM tree, because then this older
+			// version would be at the top of the LSM tree. To work correctly, reads expect the
+			// latest versions to be at the top, and the older versions at the bottom.
+			if bytes.HasPrefix(e.Key, badgerMove) {
+				ne.Key = append([]byte{}, e.Key...)
+			} else {
+				ne.Key = make([]byte, len(badgerMove)+len(e.Key))
+				n := copy(ne.Key, badgerMove)
+				copy(ne.Key[n:], e.Key)
+			}
+
+			ne.Value = append([]byte{}, e.Value...)
+			es := int64(ne.estimateSize(manager.opt.ValueThreshold))
+			// Ensure length and size of wb is within transaction limits.
+			if int64(len(wb)+3) >= manager.opt.maxBatchCount ||
+				size+es >= manager.opt.maxBatchSize {
+				tr.LazyPrintf("request has %d entries, size %d", len(wb), size)
+				// set finish mark for wal
+				wb = append(wb, &Entry{
+					Key:      y.KeyWithTs(txnKey, math.MaxUint64),
+					Value:    []byte(strconv.FormatUint(math.MaxUint64, 10)),
+					meta:     bitFinTxn,
+					forceWal: true,
+				})
+				// set finish mark for vlog
+				wb = append(wb, &Entry{
+					Key:   y.KeyWithTs(txnKeyVlog, math.MaxUint64),
+					Value: []byte(strconv.FormatUint(math.MaxUint64, 10)),
+					meta:  bitFinTxn,
+				})
+				if err := manager.db.batchSet(wb); err != nil {
+					return err
+				}
+				size = 0
+				wb = wb[:0]
+			}
+			wb = append(wb, ne)
+			size += es
+		} else {
+			manager.db.opt.Warningf("This entry should have been caught. %+v\n", e)
+		}
+		return nil
+	}
+
+	iterator, err := newLogIterator(f, vlogHeaderSize)
+	if err != nil {
+		return y.Wrapf(err, "Error while creating log iterator for vlog %d in logmanager.rewrite", f.fid)
+	}
+	for {
+		entries, _, err := iterator.iterateEntries()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return y.Wrapf(err, "Error while iterating entries for the vlog file %d", f.fid)
+		}
+		for _, e := range entries {
+			if err := fe(e); err != nil {
+				return y.Wrapf(err, "Error while rewriting entry")
+			}
+		}
+	}
+
+	tr.LazyPrintf("request has %d entries, size %d", len(wb), size)
+	batchSize := 1024
+	var loops int
+	for i := 0; i < len(wb); {
+		// TODO: asdf.
+		loops++
+		if batchSize == 0 {
+			manager.db.opt.Warningf("We shouldn't reach batch size of zero.")
+			return ErrNoRewrite
+		}
+		end := i + batchSize
+		if end > len(wb) {
+			end = len(wb)
+		}
+		batch := wb[i:end]
+		// set finish mark for this batch.
+		batch = append(batch, &Entry{
+			Key:      y.KeyWithTs(txnKey, math.MaxUint64),
+			Value:    []byte(strconv.FormatUint(math.MaxUint64, 10)),
+			meta:     bitFinTxn,
+			forceWal: true,
+		})
+		batch = append(batch, &Entry{
+			Key:   y.KeyWithTs(txnKeyVlog, math.MaxUint64),
+			Value: []byte(strconv.FormatUint(math.MaxUint64, 10)),
+			meta:  bitFinTxn,
+		})
+		if err := manager.db.batchSet(batch); err != nil {
+			if err == ErrTxnTooBig {
+				// Decrease the batch size to half.
+				batchSize = batchSize / 2
+				tr.LazyPrintf("Dropped batch size to %d", batchSize)
+				continue
+			}
+			return err
+		}
+		i += batchSize
+	}
+	tr.LazyPrintf("Processed %d entries in %d loops", len(wb), loops)
+	tr.LazyPrintf("Total entries: %d. Moved: %d", count, moved)
+	tr.LazyPrintf("Removing fid: %d", f.fid)
+	var deleteFileNow bool
+	// Entries written to LSM. Remove the older file now.
+	{
+		manager.filesLock.Lock()
+		// Just a sanity-check.
+		if _, ok := manager.vlogFileMap[f.fid]; !ok {
+			manager.filesLock.Unlock()
+			return errors.Errorf("Unable to find fid: %d", f.fid)
+		}
+		if manager.iteratorCount() == 0 {
+			delete(manager.vlogFileMap, f.fid)
+			deleteFileNow = true
+		} else {
+			manager.vlogFilesTobeDeleted = append(manager.vlogFilesTobeDeleted, f.fid)
+		}
+		manager.filesLock.Unlock()
+	}
+
+	if deleteFileNow {
+		if err := manager.deleteVlogLogFile(f); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (manager *logManager) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace) (err error) {
+	// Update stats before exiting
+	defer func() {
+		if err == nil {
+			manager.lfDiscardStats.Lock()
+			delete(manager.lfDiscardStats.m, lf.fid)
+			manager.lfDiscardStats.Unlock()
+		}
+	}()
+
+	type reason struct {
+		total   float64
+		discard float64
+		count   int
+	}
+
+	fi, err := lf.fd.Stat()
+	if err != nil {
+		tr.LazyPrintf("Error while finding file size: %v", err)
+		tr.SetError()
+		return err
+	}
+
+	// Set up the sampling window sizes.
+	sizeWindow := float64(fi.Size()) * 0.1                             // 10% of the file as window.
+	sizeWindowM := sizeWindow / (1 << 20)                              // in MBs.
+	countWindow := int(float64(manager.opt.ValueLogMaxEntries) * 0.01) // 1% of num entries.
+	tr.LazyPrintf("Size window: %5.2f. Count window: %d.", sizeWindow, countWindow)
+
+	// Pick a random start point for the log.
+	skipFirstM := float64(rand.Int63n(fi.Size())) // Pick a random starting location.
+	skipFirstM -= sizeWindow                      // Avoid hitting EOF by moving back by window.
+	skipFirstM /= float64(mi)                     // Convert to MBs.
+	tr.LazyPrintf("Skip first %5.2f MB of file of size: %d MB", skipFirstM, fi.Size()/mi)
+	var skipped float64
+
+	var r reason
+	start := time.Now()
+	y.AssertTrue(manager.db != nil)
+	s := new(y.Slice)
+	var numIterations int
+	iterator, err := newLogIterator(lf, vlogHeaderSize)
+	if err != nil {
+		return y.Wrapf(err, "Error while creating log iterator vlog %d", lf.fid)
+	}
+	for {
+		entries, _, err := iterator.iterateEntries()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return y.Wrapf(err, "Error while iterating entries in vlog %d", lf.fid)
+		}
+		for _, e := range entries {
+			vp := valuePointer{
+				Len:    uint32(int(e.hlen) + len(e.Key) + len(e.Value) + crc32.Size),
+				Fid:    lf.fid,
+				Offset: e.offset,
+			}
+			numIterations++
+			esz := float64(vp.Len) / (1 << 20) // in MBs.
+			if skipped < skipFirstM {
+				skipped += esz
+				return nil
+			}
+
+			// Sample until we reach the window sizes or exceed 10 seconds.
+			if r.count > countWindow {
+				tr.LazyPrintf("Stopping sampling after %d entries.", countWindow)
+				return errStop
+			}
+			if r.total > sizeWindowM {
+				tr.LazyPrintf("Stopping sampling after reaching window size.")
+				return errStop
+			}
+			if time.Since(start) > 10*time.Second {
+				tr.LazyPrintf("Stopping sampling after 10 seconds.")
+				return errStop
+			}
+			r.total += esz
+			r.count++
+
+			vs, err := manager.db.get(e.Key)
+			if err != nil {
+				return err
+			}
+			if discardEntry(*e, vs) {
+				r.discard += esz
+				return nil
+			}
+
+			// Value is still present in value log.
+			y.AssertTrue(len(vs.Value) > 0)
+			vp.Decode(vs.Value)
+
+			if vp.Fid > lf.fid {
+				// Value is present in a later log. Discard.
+				r.discard += esz
+				return nil
+			}
+			if vp.Offset > e.offset {
+				// Value is present in a later offset, but in the same log.
+				r.discard += esz
+				return nil
+			}
+			if vp.Fid == lf.fid && vp.Offset == e.offset {
+				// This is still the active entry. This would need to be rewritten.
+
+			} else {
+				manager.elog.Printf("Reason=%+v\n", r)
+				buf, lf, err := manager.readValueBytes(vp, s)
+				// we need to decide, whether to unlock the lock file immediately based on the
+				// loading mode. getUnlockCallback will take care of it.
+				cb := manager.getUnlockCallback(lf)
+				if err != nil {
+					runCallback(cb)
+					return errStop
+				}
+				ne, err := lf.decodeEntry(buf, vp.Offset)
+				if err != nil {
+					runCallback(cb)
+					return errStop
+				}
+				ne.print("Latest Entry Header in LSM")
+				e.print("Latest Entry in Log")
+				runCallback(cb)
+				return errors.Errorf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.",
+					vp, vs.Meta)
+			}
+		}
+	}
+
+	tr.LazyPrintf("Fid: %d. Skipped: %5.2fMB Num iterations: %d. Data status=%+v\n",
+		lf.fid, skipped, numIterations, r)
+
+	// If we couldn't sample at least a 1000 KV pairs or at least 75% of the window size,
+	// and what we can discard is below the threshold, we should skip the rewrite.
+	if (r.count < countWindow && r.total < sizeWindowM*0.75) || r.discard < discardRatio*r.total {
+		tr.LazyPrintf("Skipping GC on fid: %d", lf.fid)
+		return ErrNoRewrite
+	}
+	if err = manager.rewrite(lf, tr); err != nil {
+		return err
+	}
+	tr.LazyPrintf("Done rewriting.")
+	return nil
 }
