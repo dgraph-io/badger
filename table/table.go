@@ -155,7 +155,7 @@ type block struct {
 }
 
 func (b *block) size() int64 {
-	return int64(3*int(unsafe.Sizeof(int(0))) +
+	return int64(3*int(unsafe.Sizeof(int(0))) /* Size of offset, entriesIndexStart and chkLen */ +
 		cap(b.data) + cap(b.checksum) + cap(b.entryOffsets)*4)
 }
 
@@ -432,6 +432,7 @@ func (t *Table) block(idx int) (*block, error) {
 
 func (t *Table) blockCacheKey(idx int) uint64 {
 	y.AssertTrue(t.id < math.MaxUint32)
+	y.AssertTrue(idx < math.MaxUint32)
 	return (t.ID() << 32) | uint64(idx)
 }
 
