@@ -18,7 +18,6 @@ package badger
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"hash/crc32"
 	"io"
 	"math"
@@ -430,7 +429,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 				break
 			}
 			vlogIterator, err = newLogIterator(vlogFile, vlogHeaderSize)
-			vlogEntries, vlogCommitTs, vlogErr = walIterator.iterateEntries()
+			vlogEntries, vlogCommitTs, vlogErr = vlogIterator.iterateEntries()
 			continue
 		}
 		// Some error other than truncation and end of file so handle it.
@@ -488,19 +487,37 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		}
 		// Advance for next batch of txn entries.
 		walEntries, walCommitTs, walErr = walIterator.iterateEntries()
-		vlogEntries, vlogCommitTs, vlogErr = walIterator.iterateEntries()
+		vlogEntries, vlogCommitTs, vlogErr = vlogIterator.iterateEntries()
 	}
 
 	if truncateNeeded {
-		panic("Sup implement this guy.")
+		// He not handling any corruption in the middle. It is expected that all the log file before
+		// are in good state. In previous implementation, the log files are deleted if truncation
+		// enabled. we can do the same if necessary.
+
+		// we can truncate only last file.
+		y.AssertTrue(len(lp.walIDs)-1 == currentWalIndex)
+		y.AssertTrue(len(lp.vlogIDs)-1 == currentVlogIndex)
+		if lp.opt.ReadOnly {
+			return ErrTruncateNeeded
+		}
+		// None of the log files are mmaped so far, so it is good to truncate here.
+		var err error
+		if err = walFile.fd.Truncate(int64(walIterator.previousOffset)); err != nil {
+			return y.Wrapf(err, "Error while truncating wal file %d", walFile.fid)
+		}
+		if err = vlogFile.fd.Truncate(int64(vlogIterator.previousOffset)); err != nil {
+			return y.Wrapf(err, "Error while truncating vlog file %d", vlogFile.fid)
+		}
 	}
 	return nil
 }
 
 type logIterator struct {
-	entryReader *safeRead
-	reader      *bufio.Reader
-	validOffset uint32
+	entryReader    *safeRead
+	reader         *bufio.Reader
+	validOffset    uint32
+	previousOffset uint32
 }
 
 func newLogIterator(log *logFile, offset uint32) (*logIterator, error) {
@@ -518,7 +535,8 @@ func newLogIterator(log *logFile, offset uint32) (*logIterator, error) {
 				dataKey: log.dataKey,
 			},
 		},
-		reader: bufio.NewReader(log.fd),
+		previousOffset: offset,
+		reader:         bufio.NewReader(log.fd),
 	}, nil
 }
 
@@ -570,6 +588,7 @@ func (iterator *logIterator) iterateEntries() ([]*Entry, uint64, error) {
 			// We got finish mark for this entry batch. Now, the iteration for this entry batch
 			// is done so stoping the iteration for this ts.
 			commitTs = txnTs
+			iterator.previousOffset = iterator.validOffset
 			iterator.validOffset = iterator.entryReader.recordOffset
 			break
 		}
@@ -609,13 +628,21 @@ func (lm *logManager) write(reqs []*request) error {
 		rotate := vlog.fileOffset()+uint32(vlogBuf.Len()) > uint32(lm.opt.ValueLogFileSize) ||
 			lm.walWritten > uint32(lm.opt.ValueLogMaxEntries)
 		if rotate {
-			fmt.Println("rotating")
+			// we need to rotate both the files here. Because, the trasaction entries have to corresponding entries.
+			// This is needed while doing truncation. For example, one vlog file courrupted in the middle. So we delete the
+			// vlog file if there is truncation. Then we replay the next vlog file, with different timestamp. the wal file
+			// will have lesser timestamp. There, we miss the order. So, it is important to keep WAL and vlog mapping.
 			lf, err := lm.rotateLog(VLOG)
 			if err != nil {
 				return y.Wrapf(err, "Error while creating new vlog file %d", lm.maxVlogID)
 			}
 			vlog = lf
 			atomic.AddInt32(&lm.db.logRotates, 1)
+			lf, err = lm.rotateLog(WAL)
+			if err != nil {
+				return y.Wrapf(err, "Error while creating new wal file %d", lm.maxWalID)
+			}
+			wal = lf
 		}
 		return nil
 	}
@@ -625,7 +652,6 @@ func (lm *logManager) write(reqs []*request) error {
 		var vlogWritten uint32
 		b := reqs[i]
 		// Process this batch.
-		fmt.Printf("%+v \n", b.Ptrs)
 		y.AssertTrue(len(b.Ptrs) == 0)
 	inner:
 		// last two entries are end entries for vlog and WAL finish mark. so igoring that.
@@ -800,10 +826,23 @@ func (lm *logManager) rotateLog(logtype logType) (*logFile, error) {
 	// switch the log file according to the type
 	switch logtype {
 	case WAL:
+		// we don't mmap wal so just close it.
+		if err = lm.wal.fd.Close(); err != nil {
+			return nil, y.Wrapf(err, "Error while closing WAL file in rotateLog %d", lm.wal.fid)
+		}
 		lm.wal = lf
 		break
 	case VLOG:
+		// Here we mmaped the file and don't close it. This log file is part of vlog filesMap and it is used by
+		// value pointer.
+		if err = lm.vlog.doneWriting(lm.vlog.fileOffset()); err != nil {
+			return nil, y.Wrapf(err, "Error while doneWriting vlog %d", lm.vlog.fid)
+		}
 		lm.vlog = lf
+		// update the files map.
+		lm.filesLock.Lock()
+		defer lm.filesLock.Unlock()
+		lm.vlogFileMap[lf.fid] = lf
 	}
 	return lf, nil
 }

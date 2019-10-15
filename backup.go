@@ -22,6 +22,8 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"math"
+	"strconv"
 
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
@@ -163,7 +165,7 @@ func (l *KVLoader) Set(kv *pb.KV) error {
 	}
 	estimatedSize := int64(e.estimateSize(l.db.opt.ValueThreshold))
 	// Flush entries if inserting the next entry would overflow the transactional limits.
-	if int64(len(l.entries))+1 >= l.db.opt.maxBatchCount ||
+	if int64(len(l.entries))+3 >= l.db.opt.maxBatchCount ||
 		l.entriesSize+estimatedSize >= l.db.opt.maxBatchSize {
 		if err := l.send(); err != nil {
 			return err
@@ -178,6 +180,19 @@ func (l *KVLoader) send() error {
 	if err := l.throttle.Do(); err != nil {
 		return err
 	}
+	// set finish mark for this batch.
+	l.entries = append(l.entries, &Entry{
+		Key:      y.KeyWithTs(txnKey, math.MaxUint64),
+		Value:    []byte(strconv.FormatUint(math.MaxUint64, 10)),
+		meta:     bitFinTxn,
+		forceWal: true,
+	})
+	l.entries = append(l.entries, &Entry{
+		Key:   y.KeyWithTs(txnKeyVlog, math.MaxUint64),
+		Value: []byte(strconv.FormatUint(math.MaxUint64, 10)),
+		meta:  bitFinTxn,
+	})
+
 	if err := l.db.batchSetAsync(l.entries, func(err error) {
 		l.throttle.Done(err)
 	}); err != nil {
