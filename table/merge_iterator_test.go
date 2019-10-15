@@ -256,14 +256,28 @@ func TestMergeIteratorDuplicate(t *testing.T) {
 	it2 := newSimpleIterator([]string{"1", "3"}, []string{"b1", "b3"}, false)
 	it3 := newSimpleIterator([]string{"0", "1", "2"}, []string{"c0", "c1", "c2"}, false)
 	t.Run("forward", func(t *testing.T) {
-		it := NewMergeIterator([]y.Iterator{it3, it2, it1}, false)
+		t.Run("one", func(t *testing.T) {
+			it := NewMergeIterator([]y.Iterator{it3, it2, it1}, false)
+			expectedKeys := []string{"0", "1", "2", "3"}
+			expectedVals := []string{"c0", "c1", "c2", "b3"}
+			it.Rewind()
+			k, v := getAll(it)
+			require.Equal(t, expectedKeys, k)
+			require.Equal(t, expectedVals, v)
+		})
+		t.Run("two", func(t *testing.T) {
+			it1 := newSimpleIterator([]string{"0", "1", "2"}, []string{"0", "1", "2"}, false)
+			it2 := newSimpleIterator([]string{"1"}, []string{"1"}, false)
+			it3 := newSimpleIterator([]string{"2"}, []string{"2"}, false)
+			it := NewMergeIterator([]y.Iterator{it3, it2, it1}, false)
 
-		expectedKeys := []string{"0", "1", "2", "3"}
-		expectedVals := []string{"c0", "c1", "c2", "b3"}
-		it.Rewind()
-		k, v := getAll(it)
-		require.Equal(t, expectedKeys, k)
-		require.Equal(t, expectedVals, v)
+			var cnt int
+			for it.Rewind(); it.Valid(); it.Next() {
+				require.EqualValues(t, cnt+48, it.Key()[0])
+				cnt++
+			}
+			require.Equal(t, 3, cnt)
+		})
 	})
 
 	t.Run("reverse", func(t *testing.T) {
@@ -279,19 +293,5 @@ func TestMergeIteratorDuplicate(t *testing.T) {
 		k, v := getAll(it)
 		require.Equal(t, expectedKeys, k)
 		require.Equal(t, expectedVals, v)
-	})
-
-	t.Run("edge case", func(t *testing.T) {
-		it1 := newSimpleIterator([]string{"0", "1", "2"}, []string{"0", "1", "2"}, false)
-		it2 := newSimpleIterator([]string{"1"}, []string{"1"}, false)
-		it3 := newSimpleIterator([]string{"2"}, []string{"2"}, false)
-		it := NewMergeIterator([]y.Iterator{it3, it2, it1}, false)
-
-		var cnt int
-		for it.Rewind(); it.Valid(); it.Next() {
-			require.EqualValues(t, cnt+48, it.Key()[0])
-			cnt++
-		}
-		require.Equal(t, 3, cnt)
 	})
 }
