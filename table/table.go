@@ -155,7 +155,7 @@ type block struct {
 
 func (b *block) size() int64 {
 	return int64(3*int(unsafe.Sizeof(int(0))) +
-		len(b.data) + len(b.checksum) + len(b.entryOffsets)*4)
+		cap(b.data) + cap(b.checksum) + cap(b.entryOffsets)*4)
 }
 
 func (b block) verifyCheckSum() error {
