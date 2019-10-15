@@ -72,6 +72,8 @@ type Options struct {
 	NumCompactors     int
 	CompactL0OnClose  bool
 	LogRotatesToFlush int32
+	// When set, checksum will be validated for each entry read from the value log file.
+	VerifyValueChecksum bool
 
 	// Encryption related options.
 	EncryptionKey                 []byte        // encryption key
@@ -115,6 +117,7 @@ func DefaultOptions(path string) Options {
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          true,
+		VerifyValueChecksum:     false,
 		Compression:             options.ZSTD,
 		MaxCacheSize:            2 << 30, // 2 GB
 		// Nothing to read/write value log using standard File I/O
@@ -486,10 +489,23 @@ func (opt Options) WithCompressionType(cType options.CompressionType) Options {
 	return opt
 }
 
+// WithVerifyValueChecksum returns a new Options value with VerifyValueChecksum set to
+// the given value.
+//
+// When VerifyValueChecksum is set to true, checksum will be verified for every entry read
+// from the value log. If the value is stored in SST (value size less than value threshold) then the
+// checksum validation will not be done.
+//
+// The default value of VerifyValueChecksum is False.
+func (opt Options) WithVerifyValueChecksum(val bool) Options {
+	opt.VerifyValueChecksum = val
+	return opt
+}
+
 // WithMaxCacheSize returns a new Options value with MaxCacheSize set to the given value.
 //
 // This value specifies how much data cache should hold in memory. A small size of cache means lower
-// memory comsumption and lookups/iterations would take longer.
+// memory consumption and lookups/iterations would take longer.
 func (opt Options) WithMaxCacheSize(size int64) Options {
 	opt.MaxCacheSize = size
 	return opt
