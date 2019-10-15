@@ -119,7 +119,7 @@ func DefaultOptions(path string) Options {
 		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
 		Compression:             options.ZSTD,
-		MaxCacheSize:            2 << 30, // 2 GB
+		MaxCacheSize:            1 << 30, // 1 GB
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.

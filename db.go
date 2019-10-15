@@ -280,7 +280,7 @@ func Open(opt Options) (db *DB, err error) {
 	}
 
 	config := ristretto.Config{
-		NumCounters: 10 * opt.MaxCacheSize,
+		NumCounters: 5 * opt.MaxCacheSize,
 		MaxCost:     opt.MaxCacheSize,
 		BufferItems: 64,
 		Metrics:     false,
