@@ -888,10 +888,6 @@ func (db *DB) ensureRoomForWrite() error {
 
 		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 			db.mt.MemSize(), len(db.flushChan))
-		// Create new wal for new memtable.
-		if _, err = db.log.rotateLog(WAL); err != nil {
-			return y.Wrapf(err, "Error while rotating wal")
-		}
 		// We manage to push this task. Let's modify imm.
 		db.imm = append(db.imm, db.mt)
 		db.mt = skl.NewSkiplist(arenaSize(db.opt))

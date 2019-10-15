@@ -73,6 +73,30 @@ func TestWriteBatch(t *testing.T) {
 	})
 }
 
+func BenchmarkWriteBatch(b *testing.B) {
+	dir, err := ioutil.TempDir(".", "badger-test")
+	y.Check(err)
+	defer os.RemoveAll(dir)
+	opts := getTestOptions(dir)
+	opts.TableLoadingMode = options.LoadToRAM
+	db, err := Open(opts)
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%10d", i))
+	}
+	val := func(i int) []byte {
+		return []byte(fmt.Sprintf("%128d", i))
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		wb := db.NewWriteBatch()
+		for j := 0; j < 10000; j++ {
+			wb.Set(key(j), val(j))
+		}
+		wb.Flush()
+		wb.Cancel()
+	}
+}
+
 func BenchmarkLogWrite(b *testing.B) {
 	dir, err := ioutil.TempDir(".", "badger-test")
 	y.Check(err)
