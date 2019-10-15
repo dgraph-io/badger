@@ -92,26 +92,28 @@ func (mi *MergeIterator) fix() {
 	if !mi.bigger().valid {
 		return
 	}
-	for mi.small.valid {
-		cmp := y.CompareKeys(mi.small.key, mi.bigger().key)
-		// Both the keys are equal.
-		if cmp == 0 {
-			mi.right.next()
-			mi.fix()
-			return
-		}
-		if mi.reverse {
-			if cmp < 0 {
-				mi.swapSmall()
-			}
-		} else {
-			if cmp > 0 {
-				mi.swapSmall()
-			}
-		}
+	if !mi.small.valid {
+		mi.swapSmall()
 		return
 	}
-	mi.swapSmall()
+	cmp := y.CompareKeys(mi.small.key, mi.bigger().key)
+	// Both the keys are equal.
+	if cmp == 0 {
+		// In case of same keys, move the right iterator ahead.
+		mi.right.next()
+		if &mi.right == mi.small {
+			mi.swapSmall()
+		}
+	}
+	if mi.reverse {
+		if cmp < 0 {
+			mi.swapSmall()
+		}
+	} else {
+		if cmp > 0 {
+			mi.swapSmall()
+		}
+	}
 }
 
 func (mi *MergeIterator) bigger() *node {
