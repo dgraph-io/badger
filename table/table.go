@@ -20,6 +20,7 @@ import (
 	"crypto/aes"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -430,6 +431,7 @@ func (t *Table) block(idx int) (*block, error) {
 }
 
 func (t *Table) blockCacheKey(idx int) uint64 {
+	y.AssertTrue(t.id < math.MaxUint32)
 	return (t.ID() << 32) | uint64(idx)
 }
 

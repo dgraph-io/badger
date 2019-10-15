@@ -26,6 +26,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1927,11 +1928,11 @@ func TestVerifyChecksum(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	// call flag.Parse() here if TestMain uses flags
-	//	go func() {
-	//		if err := http.ListenAndServe("localhost:8080", nil); err != nil {
-	//			log.Fatalf("Unable to open http port at 8080")
-	//		}
-	//	}()
+	go func() {
+		if err := http.ListenAndServe("localhost:8080", nil); err != nil {
+			log.Fatalf("Unable to open http port at 8080")
+		}
+	}()
 	os.Exit(m.Run())
 }
 
