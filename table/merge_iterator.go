@@ -24,16 +24,9 @@ import (
 // MergeIterator merges multiple iterators.
 // NOTE: MergeIterator owns the array of iterators and is responsible for closing them.
 type MergeIterator struct {
-	left  node
-	right node
-
-	small *node
-
-	// When the two iterators have the same value, the value in the second iterator is ignored.
-	// On level 0, we can have multiple iterators with the same key. In this case we want to
-	// use value of the iterator that was added first to the merge iterator. Second keeps track of the
-	// iterator that was added second so that we can resolve the same key conflict.
-	second  y.Iterator
+	left    node
+	right   node
+	small   *node
 	reverse bool
 }
 
@@ -103,27 +96,9 @@ func (mi *MergeIterator) fix() {
 		cmp := y.CompareKeys(mi.small.key, mi.bigger().key)
 		// Both the keys are equal.
 		if cmp == 0 {
-			// Key conflict. Ignore the value in second iterator.
-			mi.second.Next()
-			var secondValid bool
-			if mi.second == mi.small.iter {
-				mi.small.setKey()
-				secondValid = mi.small.valid
-			} else if mi.second == mi.bigger().iter {
-				mi.bigger().setKey()
-				secondValid = mi.bigger().valid
-			} else {
-				panic("mt.second invalid")
-			}
-			if !secondValid {
-				// Swap small and big only if second points to
-				// the small one and the big is valid.
-				if mi.second == mi.small.iter && mi.bigger().valid {
-					mi.swapSmall()
-				}
-				return
-			}
-			continue
+			mi.right.next()
+			mi.fix()
+			return
 		}
 		if mi.reverse {
 			if cmp < 0 {
@@ -210,7 +185,6 @@ func NewMergeIterator(iters []y.Iterator, reverse bool) y.Iterator {
 		return iters[0]
 	} else if len(iters) == 2 {
 		mi := &MergeIterator{
-			second:  iters[1],
 			reverse: reverse,
 		}
 		mi.left.setIterator(iters[0])
