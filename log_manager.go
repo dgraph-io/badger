@@ -616,19 +616,19 @@ func (lm *logManager) write(reqs []*request) error {
 		}
 		var walErr error
 		var vlogErr error
-		var wg sync.WaitGroup
-		wg.Add(2)
+		// var wg sync.WaitGroup
+		// wg.Add(2)
 
-		go func() {
-			walErr = wal.writeLog(walBuf)
-			wg.Done()
-		}()
+		//	go func() {
+		walErr = wal.writeLog(walBuf)
+		// 	wg.Done()
+		// }()
 
-		go func() {
-			vlogErr = vlog.writeLog(vlogBuf)
-			wg.Done()
-		}()
-		wg.Wait()
+		//	go func() {
+		vlogErr = vlog.writeLog(vlogBuf)
+		// 	wg.Done()
+		// }()
+		// wg.Wait()
 		if walErr != nil {
 			return y.Wrapf(walErr, "Error while writing log to WAL %d", wal.fid)
 		}

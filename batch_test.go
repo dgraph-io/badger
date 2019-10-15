@@ -18,10 +18,13 @@ package badger
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
 	"testing"
 	"time"
 
-	"github.com/pkg/profile"
+	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,7 +37,7 @@ func TestWriteBatch(t *testing.T) {
 	}
 
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
+		//	defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
 		wb := db.NewWriteBatch()
 		defer wb.Cancel()
 
@@ -68,4 +71,36 @@ func TestWriteBatch(t *testing.T) {
 		})
 		require.NoError(t, err)
 	})
+}
+
+func BenchmarkLogWrite(b *testing.B) {
+	dir, err := ioutil.TempDir(".", "badger-test")
+	y.Check(err)
+	defer os.RemoveAll(dir)
+	opts := getTestOptions(dir)
+	opts.TableLoadingMode = options.LoadToRAM
+	db, err := Open(opts)
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%10d", i))
+	}
+	val := func(i int) []byte {
+		return []byte(fmt.Sprintf("%128d", i))
+	}
+
+	y.Check(err)
+	defer db.Close()
+	for i := 0; i < b.N; i++ {
+		req := new(request)
+		for j := 0; j < 30; j++ {
+			e := &Entry{
+				Key:   key(j),
+				Value: val(j),
+			}
+			if j%2 == 0 {
+				e.forceWal = true
+			}
+			req.Entries = append(req.Entries, e)
+		}
+		db.log.write([]*request{req})
+	}
 }
