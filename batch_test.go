@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/profile"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,6 +34,7 @@ func TestWriteBatch(t *testing.T) {
 	}
 
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
 		wb := db.NewWriteBatch()
 		defer wb.Cancel()
 

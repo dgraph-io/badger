@@ -614,12 +614,26 @@ func (lm *logManager) write(reqs []*request) error {
 		if walBuf.Len() == 0 && vlogBuf.Len() == 0 {
 			return nil
 		}
-		var err error
-		if err = wal.writeLog(walBuf); err != nil {
-			return y.Wrapf(err, "Error while writing log to WAL %d", wal.fid)
+		var walErr error
+		var vlogErr error
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			walErr = wal.writeLog(walBuf)
+			wg.Done()
+		}()
+
+		go func() {
+			vlogErr = vlog.writeLog(vlogBuf)
+			wg.Done()
+		}()
+		wg.Wait()
+		if walErr != nil {
+			return y.Wrapf(walErr, "Error while writing log to WAL %d", wal.fid)
 		}
-		if err = vlog.writeLog(vlogBuf); err != nil {
-			return y.Wrapf(err, "Error while writing log to vlog %d", vlog.fid)
+		if vlogErr != nil {
+			return y.Wrapf(vlogErr, "Error while writing log to vlog %d", vlog.fid)
 		}
 		// reset the buf for next batch of entries.
 		vlogBuf.Reset()
