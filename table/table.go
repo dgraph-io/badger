@@ -431,7 +431,7 @@ func (t *Table) block(idx int) (*block, error) {
 }
 
 func (t *Table) blockCacheKey(idx int) uint64 {
-	y.AssertTrue(t.id < math.MaxUint32)
+	y.AssertTrue(t.ID() < math.MaxUint32)
 	y.AssertTrue(idx < math.MaxUint32)
 	return (t.ID() << 32) | uint64(idx)
 }
