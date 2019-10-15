@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/DataDog/zstd"
 	"github.com/golang/protobuf/proto"
@@ -150,6 +151,11 @@ type block struct {
 	entriesIndexStart int // start index of entryOffsets list
 	entryOffsets      []uint32
 	chkLen            int // checksum length
+}
+
+func (b *block) size() int64 {
+	return int64(3*int(unsafe.Sizeof(int(0))) +
+		len(b.data) + len(b.checksum) + len(b.entryOffsets)*4)
 }
 
 func (b block) verifyCheckSum() error {
@@ -351,12 +357,11 @@ func (t *Table) block(idx int) (*block, error) {
 	if idx >= len(t.blockIndex) {
 		return nil, errors.New("block out of index")
 	}
-	var cacheKey string
 	if t.opt.Cache != nil {
-		cacheKey = t.blockCacheKey(idx)
-		cachedBlk, ok := t.opt.Cache.Get(cacheKey)
-		if ok && cachedBlk != nil {
-			return cachedBlk.(*block), nil
+		key := t.blockCacheKey(idx)
+		blk, ok := t.opt.Cache.Get(key)
+		if ok && blk != nil {
+			return blk.(*block), nil
 		}
 	}
 	ko := t.blockIndex[idx]
@@ -418,13 +423,14 @@ func (t *Table) block(idx int) (*block, error) {
 		}
 	}
 	if t.opt.Cache != nil {
-		t.opt.Cache.Set(cacheKey, blk, 1)
+		key := t.blockCacheKey(idx)
+		t.opt.Cache.Set(key, blk, blk.size())
 	}
 	return blk, nil
 }
 
-func (t *Table) blockCacheKey(idx int) string {
-	return fmt.Sprintf("%d_%d", t.ID(), idx)
+func (t *Table) blockCacheKey(idx int) uint64 {
+	return (t.ID() << 32) | uint64(idx)
 }
 
 // Size is its file size in bytes

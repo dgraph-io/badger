@@ -35,6 +35,7 @@ import (
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
@@ -88,8 +89,9 @@ type DB struct {
 
 	orc *oracle
 
-	pub      *publisher
-	registry *KeyRegistry
+	pub        *publisher
+	registry   *KeyRegistry
+	blockCache *ristretto.Cache
 }
 
 const (
@@ -277,6 +279,16 @@ func Open(opt Options) (db *DB, err error) {
 		elog = trace.NewEventLog("Badger", "DB")
 	}
 
+	config := ristretto.Config{
+		NumCounters: 10 * db.opt.MaxCacheSize,
+		MaxCost:     db.opt.MaxCacheSize,
+		BufferItems: 64,
+		Metrics:     false,
+	}
+	cache, err := ristretto.NewCache(&config)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create cache")
+	}
 	db = &DB{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
@@ -288,6 +300,7 @@ func Open(opt Options) (db *DB, err error) {
 		valueDirGuard: valueDirLockGuard,
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
+		blockCache:    cache,
 	}
 
 	krOpt := KeyRegistryOptions{
@@ -913,6 +926,8 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	}
 	bopts := buildTableOptions(db.opt)
 	bopts.DataKey = dk
+	// Builder does not need cache but the same options are used for opening table.
+	bopts.Cache = db.blockCache
 	tableData := buildL0Table(ft, bopts)
 
 	fileID := db.lc.reserveFileID()

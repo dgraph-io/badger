@@ -21,7 +21,6 @@ import (
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/ristretto"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -61,6 +60,7 @@ type Options struct {
 	BlockSize           int
 	BloomFalsePositive  float64
 	KeepL0InMemory      bool
+	MaxCacheSize        int64
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -89,8 +89,6 @@ type Options struct {
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
-
-	blockCache *ristretto.Cache
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -118,6 +116,7 @@ func DefaultOptions(path string) Options {
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          true,
 		Compression:             options.ZSTD,
+		MaxCacheSize:            2 << 30, // 2 GB
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
@@ -142,7 +141,6 @@ func buildTableOptions(opt Options) table.Options {
 		LoadingMode:        opt.TableLoadingMode,
 		ChkMode:            opt.ChecksumVerificationMode,
 		Compression:        opt.Compression,
-		Cache:              opt.blockCache,
 	}
 }
 
@@ -485,5 +483,14 @@ func (opt Options) WithKeepL0InMemory(val bool) Options {
 // This option doesn't affect existing tables. Only the newly created tables will be compressed.
 func (opt Options) WithCompressionType(cType options.CompressionType) Options {
 	opt.Compression = cType
+	return opt
+}
+
+// WithMaxCacheSize returns a new Options value with MaxCacheSize set to the given value.
+//
+// This value specifies how much data cache should hold in memory. A small size of cache means lower
+// memory comsumption and lookups/iterations would take longer.
+func (opt Options) WithMaxCacheSize(size int64) Options {
+	opt.MaxCacheSize = size
 	return opt
 }
