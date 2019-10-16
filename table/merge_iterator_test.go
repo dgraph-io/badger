@@ -256,6 +256,15 @@ func TestMergeIteratorDuplicate(t *testing.T) {
 	it2 := newSimpleIterator([]string{"1", "3"}, []string{"b1", "b3"}, false)
 	it3 := newSimpleIterator([]string{"0", "1", "2"}, []string{"c0", "c1", "c2"}, false)
 	t.Run("forward", func(t *testing.T) {
+		t.Run("only duplicates", func(t *testing.T) {
+			it := NewMergeIterator([]y.Iterator{it1, it3}, false)
+			expectedKeys := []string{"0", "1", "2"}
+			expectedVals := []string{"a0", "a1", "a2"}
+			it.Rewind()
+			k, v := getAll(it)
+			require.Equal(t, expectedKeys, k)
+			require.Equal(t, expectedVals, v)
+		})
 		t.Run("one", func(t *testing.T) {
 			it := NewMergeIterator([]y.Iterator{it3, it2, it1}, false)
 			expectedKeys := []string{"0", "1", "2", "3"}
