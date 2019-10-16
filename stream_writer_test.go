@@ -338,7 +338,7 @@ func TestStreamDone(t *testing.T) {
 
 		var val [10]byte
 		rand.Read(val[:])
-		for i := 0; i < 1000; i++ {
+		for i := 0; i < 10; i++ {
 			list := &pb.KVList{}
 			kv1 := &pb.KV{
 				Key:      []byte(fmt.Sprintf("%d", i)),
