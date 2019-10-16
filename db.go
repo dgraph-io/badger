@@ -280,7 +280,7 @@ func Open(opt Options) (db *DB, err error) {
 	}
 
 	config := ristretto.Config{
-		NumCounters: 5 * opt.MaxCacheSize,
+		NumCounters: 10 * (opt.MaxCacheSize / int64(opt.BlockSize)),
 		MaxCost:     opt.MaxCacheSize,
 		BufferItems: 64,
 		Metrics:     false,
@@ -470,6 +470,7 @@ func (db *DB) close() (err error) {
 	db.elog.Printf("Waiting for closer")
 	db.closers.updateSize.SignalAndWait()
 	db.orc.Stop()
+	db.blockCache.Close()
 
 	db.elog.Finish()
 
