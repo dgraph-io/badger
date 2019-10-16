@@ -619,9 +619,7 @@ func (s *levelsController) compactBuildTables(
 	sort.Slice(newTables, func(i, j int) bool {
 		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
-	if err := s.kv.vlog.updateDiscardStats(discardStats); err != nil {
-		return nil, nil, errors.Wrap(err, "failed to update discard stats")
-	}
+	s.kv.vlog.updateDiscardStats(discardStats)
 	s.kv.opt.Debugf("Discard stats: %v", discardStats)
 	return newTables, func() error { return decrRefs(newTables) }, nil
 }
