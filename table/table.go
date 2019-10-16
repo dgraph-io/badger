@@ -362,7 +362,8 @@ func (t *Table) block(idx int) (*block, error) {
 		key := t.blockCacheKey(idx)
 		blk, ok := t.opt.Cache.Get(key)
 		if ok && blk != nil {
-			return blk.(*block), nil
+			b := blk.(block)
+			return &b, nil
 		}
 	}
 	ko := t.blockIndex[idx]
@@ -425,7 +426,7 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 	if t.opt.Cache != nil {
 		key := t.blockCacheKey(idx)
-		t.opt.Cache.Set(key, blk, blk.size())
+		t.opt.Cache.Set(key, *blk, blk.size())
 	}
 	return blk, nil
 }
