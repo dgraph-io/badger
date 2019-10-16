@@ -762,8 +762,10 @@ func (vlog *valueLog) dropAll() (int, error) {
 // lfDiscardStats keeps track of the amount of data that could be discarded for
 // a given logfile.
 type lfDiscardStats struct {
-	sync.Mutex
+	sync.RWMutex
 	m                 map[uint32]int64
+	flushChan         chan map[uint32]int64
+	closer            *y.Closer
 	updatesSinceFlush int
 }
 
@@ -838,6 +840,7 @@ func (lf *logFile) open(path string, flags uint32) error {
 	if lf.fd, err = y.OpenExistingFile(path, flags); err != nil {
 		return y.Wrapf(err, "Error while opening file in logfile %s", path)
 	}
+
 	fi, err := lf.fd.Stat()
 	if err != nil {
 		return errFile(err, lf.path, "Unable to run file.Stat")
@@ -999,7 +1002,12 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		vlog.elog = trace.NewEventLog("Badger", "Valuelog")
 	}
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
-	vlog.lfDiscardStats = &lfDiscardStats{m: make(map[uint32]int64)}
+	vlog.lfDiscardStats = &lfDiscardStats{
+		m:         make(map[uint32]int64),
+		closer:    y.NewCloser(1),
+		flushChan: make(chan map[uint32]int64, 16),
+	}
+	go vlog.flushDiscardStats()
 	if err := vlog.populateFilesMap(); err != nil {
 		return err
 	}
@@ -1131,6 +1139,9 @@ func (lf *logFile) init() error {
 }
 
 func (vlog *valueLog) Close() error {
+	// close flushDiscardStats.
+	vlog.lfDiscardStats.closer.SignalAndWait()
+
 	vlog.elog.Printf("Stopping garbage collection of values.")
 	defer vlog.elog.Finish()
 
@@ -1217,7 +1228,7 @@ func (reqs requests) DecrRef() {
 // sync function syncs content of latest value log file to disk. Syncing of value log directory is
 // not required here as it happens every time a value log file rotation happens(check createVlogFile
 // function). During rotation, previous value log file also gets synced to disk. It only syncs file
-// if fid >= vlog.maxFid. In some cases such as replay(while openning db), it might be called with
+// if fid >= vlog.maxFid. In some cases such as replay(while opening db), it might be called with
 // fid < vlog.maxFid. To sync irrespective of file id just call it with math.MaxUint32.
 func (vlog *valueLog) sync(fid uint32) error {
 	if vlog.opt.SyncWrites {
@@ -1443,7 +1454,7 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 		fid     uint32
 		discard int64
 	}{math.MaxUint32, 0}
-	vlog.lfDiscardStats.Lock()
+	vlog.lfDiscardStats.RLock()
 	for _, fid := range fids {
 		if fid >= head.Fid {
 			break
@@ -1453,7 +1464,7 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 			candidate.discard = vlog.lfDiscardStats.m[fid]
 		}
 	}
-	vlog.lfDiscardStats.Unlock()
+	vlog.lfDiscardStats.RUnlock()
 
 	if candidate.fid != math.MaxUint32 { // Found a candidate
 		tr.LazyPrintf("Found candidate via discard stats: %v", candidate)
@@ -1682,58 +1693,72 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 	}
 }
 
-func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) error {
-	vlog.lfDiscardStats.Lock()
-
-	for fid, sz := range stats {
-		vlog.lfDiscardStats.m[fid] += sz
-		vlog.lfDiscardStats.updatesSinceFlush++
+func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
+	select {
+	case vlog.lfDiscardStats.flushChan <- stats:
+	default:
+		vlog.opt.Warningf("updateDiscardStats called: discard stats flushChan full, " +
+			"returning without pushing to flushChan")
 	}
-	if vlog.lfDiscardStats.updatesSinceFlush > discardStatsFlushThreshold {
-		vlog.lfDiscardStats.Unlock()
-		// flushDiscardStats also acquires lock. So, we need to unlock here.
-		return vlog.flushDiscardStats()
-	}
-	vlog.lfDiscardStats.Unlock()
-	return nil
 }
 
-// flushDiscardStats inserts discard stats into badger. Returns error on failure.
-func (vlog *valueLog) flushDiscardStats() error {
-	vlog.lfDiscardStats.Lock()
-	defer vlog.lfDiscardStats.Unlock()
+func (vlog *valueLog) flushDiscardStats() {
+	defer vlog.lfDiscardStats.closer.Done()
 
-	if len(vlog.lfDiscardStats.m) == 0 {
-		return nil
+	mergeStats := func(stats map[uint32]int64) ([]byte, error) {
+		vlog.lfDiscardStats.Lock()
+		defer vlog.lfDiscardStats.Unlock()
+		for fid, count := range stats {
+			vlog.lfDiscardStats.m[fid] += count
+			vlog.lfDiscardStats.updatesSinceFlush++
+		}
+
+		if vlog.lfDiscardStats.updatesSinceFlush > discardStatsFlushThreshold {
+			encodedDS, err := json.Marshal(vlog.lfDiscardStats.m)
+			if err != nil {
+				return nil, err
+			}
+			vlog.lfDiscardStats.updatesSinceFlush = 0
+			return encodedDS, nil
+		}
+		return nil, nil
 	}
-	entries := []*Entry{{
-		Key:   y.KeyWithTs(lfDiscardStatsKey, 1),
-		Value: vlog.encodedDiscardStats(),
-	}}
-	req, err := vlog.db.sendToWriteCh(entries)
-	if err == ErrBlockedWrites {
-		// We'll block write while closing db.
-		// When L0 compaction in close may push discard stats.
-		// So ignoring it.
-		// https://github.com/dgraph-io/badger/issues/970
-		return nil
-	} else if err != nil {
-		return errors.Wrapf(err, "failed to push discard stats to write channel")
+
+	process := func(stats map[uint32]int64) error {
+		encodedDS, err := mergeStats(stats)
+		if err != nil || encodedDS == nil {
+			return err
+		}
+
+		entries := []*Entry{{
+			Key:   y.KeyWithTs(lfDiscardStatsKey, 1),
+			Value: encodedDS,
+		}}
+		req, err := vlog.db.sendToWriteCh(entries)
+		// No special handling of ErrBlockedWrites is required as err is just logged in
+		// for loop below.
+		if err != nil {
+			return errors.Wrapf(err, "failed to push discard stats to write channel")
+		}
+		return req.Wait()
 	}
-	vlog.lfDiscardStats.updatesSinceFlush = 0
-	return req.Wait()
+
+	closer := vlog.lfDiscardStats.closer
+	for {
+		select {
+		case <-closer.HasBeenClosed():
+			// For simplicity just return without processing already present in stats in flushChan.
+			return
+		case stats := <-vlog.lfDiscardStats.flushChan:
+			if err := process(stats); err != nil {
+				vlog.opt.Errorf("unable to process discardstats with error: %s", err)
+			}
+		}
+	}
 }
 
-// encodedDiscardStats returns []byte representation of lfDiscardStats
-// This will be called while storing stats in BadgerDB
-// caller should acquire lock before encoding the stats.
-func (vlog *valueLog) encodedDiscardStats() []byte {
-	encodedStats, _ := json.Marshal(vlog.lfDiscardStats.m)
-	return encodedStats
-}
-
-// populateDiscardStats populates vlog.lfDiscardStats
-// This function will be called while initializing valueLog
+// populateDiscardStats populates vlog.lfDiscardStats.
+// This function will be called while initializing valueLog.
 func (vlog *valueLog) populateDiscardStats() error {
 	key := y.KeyWithTs(lfDiscardStatsKey, math.MaxUint64)
 	var statsMap map[uint32]int64
@@ -1785,6 +1810,6 @@ func (vlog *valueLog) populateDiscardStats() error {
 		return errors.Wrapf(err, "failed to unmarshal discard stats")
 	}
 	vlog.opt.Debugf("Value Log Discard stats: %v", statsMap)
-	vlog.lfDiscardStats = &lfDiscardStats{m: statsMap}
+	vlog.lfDiscardStats.flushChan <- statsMap
 	return nil
 }

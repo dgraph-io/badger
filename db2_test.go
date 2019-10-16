@@ -369,22 +369,20 @@ func TestDiscardMapTooBig(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	db, err := Open(DefaultOptions(dir))
-	require.NoError(t, err, "error while openning db")
+	require.NoError(t, err, "error while opening db")
 
-	// Add some data so that memtable flush happens on close
+	// Add some data so that memtable flush happens on close.
 	require.NoError(t, db.Update(func(txn *Txn) error {
 		return txn.Set([]byte("foo"), []byte("bar"))
 	}))
 
 	// overwrite discardstat with large value
-	db.vlog.lfDiscardStats = &lfDiscardStats{
-		m: createDiscardStats(),
-	}
+	db.vlog.lfDiscardStats.m = createDiscardStats()
 
 	require.NoError(t, db.Close())
 	// reopen the same DB
 	db, err = Open(DefaultOptions(dir))
-	require.NoError(t, err, "error while openning db")
+	require.NoError(t, err, "error while opening db")
 	require.NoError(t, db.Close())
 }
 
