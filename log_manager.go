@@ -18,6 +18,7 @@ package badger
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"math"
@@ -99,12 +100,12 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		filteredWALIDs = append(filteredWALIDs, fid)
 	}
 
-	if manager.maxWalID == 0 && walhead.Fid > 0 {
-		// wal file should have file number in increasing order. if the maxWalHead is
-		// set to zero means. all the memtables are persisted and log files are flushed
-		// so advancing the maxWalId to walHead.
-		manager.maxWalID = walhead.Fid
-	}
+	// if manager.maxWalID == 0 && walhead.Fid > 0 {
+	// 	// wal file should have file number in increasing order. if the maxWalHead is
+	// 	// set to zero means. all the memtables are persisted and log files are flushed
+	// 	// so advancing the maxWalId to walHead.
+	// 	manager.maxWalID = walhead.Fid
+	// }
 
 	// We filtered all the WAL file that needs to replayed. Now, We're going
 	// to pick vlog files that needs to be replayed.
@@ -162,8 +163,15 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		if err != nil {
 			return nil, y.Wrapf(err, "Error while creating vlog file %d", manager.maxVlogID)
 		}
+		if err = vlog.init(); err != nil {
+			return nil, y.Wrapf(err, "Error while init vlog file %d", vlog.fid)
+		}
 		manager.vlog = vlog
 		manager.vlogFileMap[manager.maxVlogID] = vlog
+		// mmap the current vlog.
+		if err = manager.vlog.mmap(2 * manager.opt.ValueLogFileSize); err != nil {
+			return nil, y.Wrapf(err, "Error while mmaping vlog file %d", manager.vlog.fid)
+		}
 		return manager, nil
 	}
 
@@ -192,6 +200,11 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		if err = vlogFile.open(vlogFilePath(manager.opt.ValueDir, fid), flags); err != nil {
 			return nil, y.Wrapf(err, "Error while opening vlog file %d", fid)
 		}
+		if fid < manager.maxVlogID {
+			if err = vlogFile.init(); err != nil {
+				return nil, y.Wrapf(err, "Error while init vlog file %d", vlogFile.fid)
+			}
+		}
 		manager.vlogFileMap[fid] = vlogFile
 	}
 
@@ -200,16 +213,16 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		return manager, nil
 	}
 
-	if manager.maxWalID == walhead.Fid || walhead.Fid == 0 {
-		// Last persisted SST's wal so need to create new WAL file.
-		manager.maxWalID++
-		wal, err := manager.createNewWal()
-		if err != nil {
-			return manager, err
-		}
-		manager.wal = wal
-		return manager, nil
-	}
+	// if manager.maxWalID == walhead.Fid || walhead.Fid == 0 {
+	// 	// Last persisted SST's wal so need to create new WAL file.
+	// 	manager.maxWalID++
+	// 	wal, err := manager.createNewWal()
+	// 	if err != nil {
+	// 		return manager, err
+	// 	}
+	// 	manager.wal = wal
+	// 	return manager, nil
+	// }
 	wal := &logFile{
 		fid:         manager.maxWalID,
 		path:        walFilePath(manager.opt.ValueDir, manager.maxWalID),
@@ -219,7 +232,24 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	if err = wal.open(walFilePath(manager.opt.ValueDir, manager.maxWalID), flags); err != nil {
 		return nil, y.Wrapf(err, "Error while opening wal file %d", manager.maxWalID)
 	}
+	// seek to the end
+	offset, err := wal.fd.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, y.Wrapf(err, "Error while seek end for the wal %d", wal.fid)
+	}
+	wal.offset = uint32(offset)
 	manager.wal = wal
+	manager.vlog = manager.vlogFileMap[manager.maxVlogID]
+	// seek to the end
+	offset, err = manager.vlog.fd.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, y.Wrapf(err, "Error while seek end for the value log %d", manager.vlog.fid)
+	}
+	manager.vlog.offset = uint32(offset)
+	// mmap the current vlog.
+	if err = manager.vlog.mmap(2 * manager.opt.ValueLogFileSize); err != nil {
+		return nil, y.Wrapf(err, "Error while mmaping vlog file %d", manager.vlog.fid)
+	}
 	return manager, nil
 }
 
@@ -349,7 +379,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		}
 
 		// Advance wal if we reach end of the current wal file
-		if walErr == io.EOF {
+		if walErr == io.ErrUnexpectedEOF || walErr == io.EOF {
 			var err error
 			// check whether we iterated till the valid offset.
 			truncateNeeded, err = isTruncateNeeded(walIterator.validOffset, walFile)
@@ -391,7 +421,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			continue
 		}
 		// Advance vlog if we reach the end of this present log file.
-		if vlogErr == io.EOF {
+		if vlogErr == io.ErrUnexpectedEOF || vlogErr == io.EOF {
 			var err error
 			// check whether we iterated till the valid offset.
 			truncateNeeded, err = isTruncateNeeded(vlogIterator.validOffset, vlogFile)
@@ -491,7 +521,8 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 	}
 
 	if truncateNeeded {
-		// He not handling any corruption in the middle. It is expected that all the log file before
+		panic("fuck yo")
+		// Here not handling any corruption in the middle. It is expected that all the log file before
 		// are in good state. In previous implementation, the log files are deleted if truncation
 		// enabled. we can do the same if necessary.
 
@@ -501,14 +532,35 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		if lp.opt.ReadOnly {
 			return ErrTruncateNeeded
 		}
+		offset := uint32(0)
+		if walCommitTs == 0 {
+			// wal file is corrupted so the offset is the valid offset.
+			offset = walIterator.validOffset
+		} else {
+			// wal is not corrupted. so the batch for the current transaction is corrupted in val.
+			// so truncating to the last batch offset.
+			offset = walIterator.previousOffset
+		}
 		// None of the log files are mmaped so far, so it is good to truncate here.
 		var err error
-		if err = walFile.fd.Truncate(int64(walIterator.previousOffset)); err != nil {
+		if err = walFile.fd.Truncate(int64(offset)); err != nil {
 			return y.Wrapf(err, "Error while truncating wal file %d", walFile.fid)
 		}
-		if err = vlogFile.fd.Truncate(int64(vlogIterator.previousOffset)); err != nil {
+		walFile.offset = offset
+		offset = uint32(0)
+		if vlogCommitTs == 0 {
+			// wal file is corrupted so the offset is the valid offset.
+			offset = vlogIterator.validOffset
+		} else {
+			// wal is not corrupted. so the batch for the current transaction is corrupted in val.
+			// so truncating to the last batch offset.
+			offset = vlogIterator.previousOffset
+		}
+		// we'll calculate the offset, by using the same mechanism which we used for wal
+		if err = vlogFile.fd.Truncate(int64(offset)); err != nil {
 			return y.Wrapf(err, "Error while truncating vlog file %d", vlogFile.fid)
 		}
+		vlogFile.offset = offset
 	}
 	return nil
 }
@@ -537,6 +589,7 @@ func newLogIterator(log *logFile, offset uint32) (*logIterator, error) {
 		},
 		previousOffset: offset,
 		reader:         bufio.NewReader(log.fd),
+		validOffset:    offset,
 	}, nil
 }
 
@@ -616,28 +669,18 @@ func (lm *logManager) write(reqs []*request) error {
 		}
 		var walErr error
 		var vlogErr error
-		// var wg sync.WaitGroup
-		// wg.Add(2)
-
-		//	go func() {
 		walErr = wal.writeLog(walBuf)
-		// 	wg.Done()
-		// }()
-
-		//	go func() {
-		vlogErr = vlog.writeLog(vlogBuf)
-		// 	wg.Done()
-		// }()
-		// wg.Wait()
 		if walErr != nil {
 			return y.Wrapf(walErr, "Error while writing log to WAL %d", wal.fid)
 		}
+		vlogErr = vlog.writeLog(vlogBuf)
 		if vlogErr != nil {
 			return y.Wrapf(vlogErr, "Error while writing log to vlog %d", vlog.fid)
 		}
 		// reset the buf for next batch of entries.
 		vlogBuf.Reset()
 		walBuf.Reset()
+		// TODO: @balaji check the calculation.
 		// check whether vlog hits the defined threshold.
 		rotate := vlog.fileOffset()+uint32(vlogBuf.Len()) > uint32(lm.opt.ValueLogFileSize) ||
 			lm.walWritten > uint32(lm.opt.ValueLogMaxEntries)
@@ -684,8 +727,6 @@ func (lm *logManager) write(reqs []*request) error {
 				if err != nil {
 					return y.Wrapf(err, "Error while encoding entry for WAL %d", lm.wal.fid)
 				}
-				// This entry is going to persist in sst. So, appending empty val pointer.
-				// we only need offset and fid for replaying.
 				p.Offset = entryOffset
 				p.Fid = wal.fid
 				p.log = WAL
@@ -725,13 +766,15 @@ func (lm *logManager) write(reqs []*request) error {
 }
 
 func (lm *logManager) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
+	// ASK: do we need this check?
 	// Check for valid offset if we are reading to writable log.
-	maxFid := atomic.LoadUint32(&lm.maxVlogID)
-	if vp.Fid == maxFid && vp.Offset >= lm.vlog.fileOffset() {
-		return nil, nil, errors.Errorf(
-			"Invalid value pointer offset: %d greater than current offset: %d",
-			vp.Offset, lm.vlog.fileOffset())
-	}
+	//maxFid := atomic.LoadUint32(&lm.maxVlogID)
+	// if vp.Fid == maxFid && vp.Offset >= lm.vlog.fileOffset() {
+	// 	return nil, nil, errors.Errorf(
+	// 		"Invalid value pointer offset: %d greater than current offset: %d",
+	// 		vp.Offset, lm.vlog.fileOffset())
+	// }
+	fmt.Println(vp.Offset)
 	buf, lf, err := lm.readValueBytes(vp, s)
 	// log file is locked so, decide whether to lock immediately or let the caller to
 	// unlock it, after caller uses it.
@@ -790,7 +833,30 @@ func (lm *logManager) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, *logF
 }
 
 func (lm *logManager) Close() error {
-	return nil
+	lm.elog.Printf("Stopping garbage collection of values.")
+	defer lm.elog.Finish()
+
+	var err error
+	for id, f := range lm.vlogFileMap {
+		f.lock.Lock() // We won’t release the lock.
+		if munmapErr := f.munmap(); munmapErr != nil && err == nil {
+			err = munmapErr
+		}
+
+		maxFid := atomic.LoadUint32(&lm.maxVlogID)
+		if !lm.opt.ReadOnly && id == maxFid {
+			// truncate writable log file to correct offset.
+			if truncErr := f.fd.Truncate(
+				int64(f.fileOffset())); truncErr != nil && err == nil {
+				err = truncErr
+			}
+		}
+
+		if closeErr := f.fd.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}
+	return err
 }
 
 func (lm *logManager) sync(uint32) error {
