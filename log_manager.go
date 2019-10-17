@@ -59,6 +59,7 @@ type logManager struct {
 	garbageCh            chan struct{}
 	vlogFilesTobeDeleted []uint32
 	sync.RWMutex
+	numActiveIterators int32
 }
 
 func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
@@ -150,16 +151,16 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		// No WAL files and vlog file so advancing both the ids.
 		y.AssertTrue(manager.maxVlogID == 0)
 		manager.maxWalID++
-		wal, err := manager.createlogFile(walFilePath(manager.opt.ValueDir, manager.maxWalID),
-			manager.maxWalID)
+		wal, err := manager.createlogFile(manager.maxWalID,
+			WAL)
 		if err != nil {
 			return nil, y.Wrapf(err, "Error while creating wal file %d", manager.maxWalID)
 		}
 		// No need to lock here. Since we're creating the log manager.
 		manager.wal = wal
 		manager.maxVlogID++
-		vlog, err := manager.createlogFile(vlogFilePath(manager.opt.ValueDir, manager.maxVlogID),
-			manager.maxVlogID)
+		vlog, err := manager.createlogFile(manager.maxVlogID,
+			VLOG)
 		if err != nil {
 			return nil, y.Wrapf(err, "Error while creating vlog file %d", manager.maxVlogID)
 		}
@@ -253,8 +254,15 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	return manager, nil
 }
 
-func (manager *logManager) createlogFile(path string, fid uint32) (*logFile, error) {
+func (manager *logManager) createlogFile(fid uint32, logtype logType) (*logFile, error) {
+	var path string
 
+	switch logtype {
+	case WAL:
+		path = walFilePath(manager.opt.ValueDir, fid)
+	case VLOG:
+		path = vlogFilePath(manager.opt.ValueDir, fid)
+	}
 	lf := &logFile{
 		fid:         fid,
 		path:        path,
@@ -276,13 +284,17 @@ func (manager *logManager) createlogFile(path string, fid uint32) (*logFile, err
 	if err = syncDir(manager.opt.ValueDir); err != nil {
 		return nil, errFile(err, manager.opt.ValueDir, "Sync value log dir")
 	}
-	if err = lf.mmap(2 * manager.opt.ValueLogFileSize); err != nil {
-		return nil, errFile(err, lf.path, "Mmap value log file")
-	}
 	// writableLogOffset is only written by write func, by read by Read func.
 	// To avoid a race condition, all reads and updates to this variable must be
 	// done via atomics.
 	atomic.StoreUint32(&lf.offset, vlogHeaderSize)
+	if logtype == WAL {
+		return lf, nil
+	}
+	// we mmap only for vlog.
+	if err = lf.mmap(2 * manager.opt.ValueLogFileSize); err != nil {
+		return nil, errFile(err, lf.path, "Mmap value log file")
+	}
 	return lf, nil
 }
 
@@ -866,15 +878,115 @@ func (lm *logManager) sync(uint32) error {
 }
 
 func (lm *logManager) dropAll() (int, error) {
-	return 0, nil
-}
-func (lm *logManager) incrIteratorCount() {}
+	// We don't want to block dropAll on any pending transactions. So, don't worry about iterator
+	// count.
+	var count int
+	deleteAll := func() error {
+		lm.filesLock.Lock()
+		defer lm.filesLock.Unlock()
+		for _, lf := range lm.vlogFileMap {
+			if err := lm.deleteLogFile(lf, VLOG); err != nil {
+				return err
+			}
+			count++
+		}
+		lm.vlogFileMap = make(map[uint32]*logFile)
+		return nil
+	}
+	var err error
+	if err = deleteAll(); err != nil {
+		return count, err
+	}
+	// close the current wal.
+	lm.Lock()
+	defer lm.Unlock()
+	if err = lm.wal.fd.Close(); err != nil {
+		return count, y.Wrapf(err, "Erro while closing wal file %d", lm.wal.fid)
+	}
 
-func (lm *logManager) decrIteratorCount() int {
-	return 0
+	// delete the current log file.
+	if err = lm.deleteLogFile(lm.wal, WAL); err != nil {
+		return count, y.Wrapf(err, "Error while removing wal file %d", lm.wal.fid)
+	}
+	// delete all the wal files in the directory.
+	walFiles, err := y.PopulateFilesForSuffix(lm.opt.ValueDir, ".log")
+	if err != nil {
+		return count, y.Wrapf(err, "Error while obtaining all wal files detail in dropAll")
+	}
+	for fid := range walFiles {
+		path := walFilePath(lm.opt.ValueDir, fid)
+		if err = os.Remove(path); err != nil {
+			return count, y.Wrapf(err, "Error while deleting wal file %s", path)
+		}
+	}
+	atomic.StoreUint32(&lm.maxWalID, 1)
+	atomic.StoreUint32(&lm.maxVlogID, 1)
+	lm.db.opt.Infof("Value logs and WAl are  deleted. Creating value log and wal file")
+	// create wal file.
+	wal, err := lm.createlogFile(1, WAL)
+	if err != nil {
+		return count, y.Wrapf(err, "Error while creating wal file %d", 1)
+	}
+	lm.wal = wal
+	// create vlog file.
+	vlog, err := lm.createlogFile(1, VLOG)
+	if err != nil {
+		return count, y.Wrapf(err, "Error while creating vlog file %d", 1)
+	}
+	lm.vlog = vlog
+	return count, nil
+}
+func (lm *logManager) incrIteratorCount() {
+	atomic.AddInt32(&lm.numActiveIterators, 1)
+}
+
+func (lm *logManager) decrIteratorCount() error {
+	num := atomic.AddInt32(&lm.numActiveIterators, -1)
+	if num != 0 {
+		return nil
+	}
+
+	lm.filesLock.Lock()
+	lfs := make([]*logFile, 0, len(lm.vlogFilesTobeDeleted))
+	for _, id := range lm.vlogFilesTobeDeleted {
+		lfs = append(lfs, lm.vlogFileMap[id])
+		delete(lm.vlogFileMap, id)
+	}
+	lm.vlogFilesTobeDeleted = nil
+	lm.filesLock.Unlock()
+
+	for _, lf := range lfs {
+		if err := lm.deleteLogFile(lf, VLOG); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (lm *logManager) deleteLogFile(lf *logFile, logtype logType) error {
+	if lf == nil {
+		return nil
+	}
+	lf.lock.Lock()
+	defer lf.lock.Unlock()
+	var path string
+	switch logtype {
+	case WAL:
+		path = walFilePath(lm.opt.ValueDir, lf.fid)
+	case VLOG:
+		path = vlogFilePath(lm.opt.ValueDir, lf.fid)
+		if err := lf.munmap(); err != nil {
+			_ = lf.fd.Close()
+			return err
+		}
+	}
+	if err := lf.fd.Close(); err != nil {
+		return err
+	}
+	return os.Remove(path)
 }
 func (lm *logManager) iteratorCount() int {
-	return 0
+	return int(atomic.LoadInt32(&lm.numActiveIterators))
 }
 
 func (lm *logManager) updateDiscardStats(stats map[uint32]int64) error {
@@ -886,22 +998,16 @@ func (lm *logManager) rotateLog(logtype logType) (*logFile, error) {
 	lm.Lock()
 	defer lm.Unlock()
 	// close the current log file
-	path := ""
 	fid := uint32(0)
 	// get the path and fid based on the log type.
 	switch logtype {
 	case WAL:
-		lm.maxWalID++
-		path = walFilePath(lm.opt.ValueDir, lm.maxWalID)
 		fid = lm.maxWalID
 		break
 	case VLOG:
-		lm.maxVlogID++
-		path = vlogFilePath(lm.opt.ValueDir, lm.maxVlogID)
 		fid = lm.maxVlogID
 	}
-	lf, err := lm.createlogFile(path,
-		fid)
+	lf, err := lm.createlogFile(fid, logtype)
 	if err != nil {
 		return nil, y.Wrapf(err, "Error while creating log file %d of log type %d", fid, logtype)
 	}
@@ -915,8 +1021,8 @@ func (lm *logManager) rotateLog(logtype logType) (*logFile, error) {
 		lm.wal = lf
 		break
 	case VLOG:
-		// Here we mmaped the file and don't close it. This log file is part of vlog filesMap and it is used by
-		// value pointer.
+		// Here we mmaped the file so don't close it. This log file is part of vlog filesMap and it is used by
+		// value pointer. doneWriting will take take care of unmmap, truncate and mmap it back.
 		if err = lm.vlog.doneWriting(lm.vlog.fileOffset()); err != nil {
 			return nil, y.Wrapf(err, "Error while doneWriting vlog %d", lm.vlog.fid)
 		}
@@ -927,16 +1033,6 @@ func (lm *logManager) rotateLog(logtype logType) (*logFile, error) {
 		lm.vlogFileMap[lf.fid] = lf
 	}
 	return lf, nil
-}
-
-func (manager *logManager) createNewWal() (*logFile, error) {
-	manager.maxWalID++
-	wal, err := manager.createlogFile(walFilePath(manager.opt.ValueDir, manager.maxWalID),
-		manager.maxWalID)
-	if err != nil {
-		return nil, y.Wrapf(err, "Error while creating wal file %d", manager.maxWalID)
-	}
-	return wal, nil
 }
 
 func (manager *logManager) currentWalID() uint32 {
@@ -982,6 +1078,97 @@ func (manager *logManager) deleteVlogLogFile(lf *logFile) error {
 		return err
 	}
 	return os.Remove(path)
+}
+
+func (manager *logManager) runGC(discardRatio float64, head valuePointer) error {
+	select {
+	case manager.garbageCh <- struct{}{}:
+		// Pick a log file for GC.
+		tr := trace.New("Badger.ValueLog", "GC")
+		tr.SetMaxEvents(100)
+		defer func() {
+			tr.Finish()
+			<-manager.garbageCh
+		}()
+
+		var err error
+		files := manager.pickLog(head, tr)
+		if len(files) == 0 {
+			tr.LazyPrintf("PickLog returned zero results.")
+			return ErrNoRewrite
+		}
+		tried := make(map[uint32]bool)
+		for _, lf := range files {
+			if _, done := tried[lf.fid]; done {
+				continue
+			}
+			tried[lf.fid] = true
+			err = manager.doRunGC(lf, discardRatio, tr)
+			if err == nil {
+				return manager.deleteMoveKeysFor(lf.fid, tr)
+			}
+		}
+		return err
+	default:
+		return ErrRejected
+	}
+}
+
+func (manager *logManager) deleteMoveKeysFor(fid uint32, tr trace.Trace) error {
+	db := manager.db
+	var result []*Entry
+	var count, pointers uint64
+	tr.LazyPrintf("Iterating over move keys to find invalids for fid: %d", fid)
+	err := db.View(func(txn *Txn) error {
+		opt := DefaultIteratorOptions
+		opt.InternalAccess = true
+		opt.PrefetchValues = false
+		itr := txn.NewIterator(opt)
+		defer itr.Close()
+
+		for itr.Seek(badgerMove); itr.ValidForPrefix(badgerMove); itr.Next() {
+			count++
+			item := itr.Item()
+			if item.meta&bitValuePointer == 0 {
+				continue
+			}
+			pointers++
+			var vp valuePointer
+			vp.Decode(item.vptr)
+			if vp.Fid == fid {
+				e := &Entry{Key: y.KeyWithTs(item.Key(), item.Version()), meta: bitDelete}
+				result = append(result, e)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		tr.LazyPrintf("Got error while iterating move keys: %v", err)
+		tr.SetError()
+		return err
+	}
+	tr.LazyPrintf("Num total move keys: %d. Num pointers: %d", count, pointers)
+	tr.LazyPrintf("Number of invalid move keys found: %d", len(result))
+	batchSize := 10240
+	for i := 0; i < len(result); {
+		end := i + batchSize
+		if end > len(result) {
+			end = len(result)
+		}
+		if err := db.batchSet(result[i:end]); err != nil {
+			if err == ErrTxnTooBig {
+				batchSize /= 2
+				tr.LazyPrintf("Dropped batch size to %d", batchSize)
+				continue
+			}
+			tr.LazyPrintf("Error while doing batchSet: %v", err)
+			tr.SetError()
+			return err
+		}
+		i += batchSize
+	}
+	tr.LazyPrintf("Move keys deletion done.")
+	return nil
 }
 
 func (manager *logManager) pickLog(head valuePointer, tr trace.Trace) (files []*logFile) {

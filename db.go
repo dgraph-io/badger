@@ -1137,27 +1137,27 @@ func (db *DB) updateSize(lc *y.Closer) {
 //
 // Note: Every time GC is run, it would produce a spike of activity on the LSM
 // tree.
-// func (db *DB) RunValueLogGC(discardRatio float64) error {
-// 	if discardRatio >= 1.0 || discardRatio <= 0.0 {
-// 		return ErrInvalidRequest
-// 	}
+func (db *DB) RunValueLogGC(discardRatio float64) error {
+	if discardRatio >= 1.0 || discardRatio <= 0.0 {
+		return ErrInvalidRequest
+	}
 
-// 	// Find head on disk
-// 	headKey := y.KeyWithTs(head, math.MaxUint64)
-// 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
-// 	val, err := db.lc.get(headKey, nil)
-// 	if err != nil {
-// 		return errors.Wrap(err, "Retrieving head from on-disk LSM")
-// 	}
+	// Find head on disk
+	headKey := y.KeyWithTs(head, math.MaxUint64)
+	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
+	val, err := db.lc.get(headKey, nil)
+	if err != nil {
+		return errors.Wrap(err, "Retrieving head from on-disk LSM")
+	}
 
-// 	var head valuePointer
-// 	if len(val.Value) > 0 {
-// 		head.Decode(val.Value)
-// 	}
+	var head valuePointer
+	if len(val.Value) > 0 {
+		head.Decode(val.Value)
+	}
 
-// 	// Pick a log file and run GC
-// 	return db.vlog.runGC(discardRatio, head)
-// }
+	// Pick a log file and run GC
+	return db.log.runGC(discardRatio, head)
+}
 
 // Size returns the size of lsm and value log files in bytes. It can be used to decide how often to
 // call RunValueLogGC.

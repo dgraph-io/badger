@@ -16,6 +16,18 @@
 
 package badger
 
+import (
+	"fmt"
+	"io/ioutil"
+	"math/rand"
+	"os"
+	"sync"
+	"testing"
+
+	humanize "github.com/dustin/go-humanize"
+	"github.com/stretchr/testify/require"
+)
+
 // func TestValueBasic(t *testing.T) {
 // 	dir, err := ioutil.TempDir("", "badger-test")
 // 	y.Check(err)
@@ -77,64 +89,64 @@ package badger
 
 // }
 
-// // func TestValueGCManaged(t *testing.T) {
-// // 	dir, err := ioutil.TempDir("", "badger-test")
-// // 	require.NoError(t, err)
-// // 	defer os.RemoveAll(dir)
+func TestValueGCManaged(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
 
-// // 	N := 10000
-// // 	opt := getTestOptions(dir)
-// // 	opt.ValueLogMaxEntries = uint32(N / 10)
-// // 	opt.managedTxns = true
-// // 	db, err := Open(opt)
-// // 	require.NoError(t, err)
-// // 	defer db.Close()
+	N := 100
+	opt := getTestOptions(dir)
+	opt.ValueLogMaxEntries = uint32(N / 10)
+	opt.managedTxns = true
+	db, err := Open(opt)
+	require.NoError(t, err)
+	defer db.Close()
 
-// // 	var ts uint64
-// // 	newTs := func() uint64 {
-// // 		ts++
-// // 		return ts
-// // 	}
+	var ts uint64
+	newTs := func() uint64 {
+		ts++
+		return ts
+	}
 
-// // 	sz := 64 << 10
-// // 	var wg sync.WaitGroup
-// // 	for i := 0; i < N; i++ {
-// // 		v := make([]byte, sz)
-// // 		rand.Read(v[:rand.Intn(sz)])
+	sz := 64 << 10
+	var wg sync.WaitGroup
+	for i := 0; i < N; i++ {
+		v := make([]byte, sz)
+		rand.Read(v[:rand.Intn(sz)])
 
-// // 		wg.Add(1)
-// // 		txn := db.NewTransactionAt(newTs(), true)
-// // 		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
-// // 		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
-// // 			wg.Done()
-// // 			require.NoError(t, err)
-// // 		}))
-// // 	}
+		wg.Add(1)
+		txn := db.NewTransactionAt(newTs(), true)
+		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
+		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
+			wg.Done()
+			require.NoError(t, err)
+		}))
+	}
 
-// // 	for i := 0; i < N; i++ {
-// // 		wg.Add(1)
-// // 		txn := db.NewTransactionAt(newTs(), true)
-// // 		require.NoError(t, txn.Delete([]byte(fmt.Sprintf("key%d", i))))
-// // 		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
-// // 			wg.Done()
-// // 			require.NoError(t, err)
-// // 		}))
-// // 	}
-// // 	wg.Wait()
-// // 	files, err := ioutil.ReadDir(dir)
-// // 	require.NoError(t, err)
-// // 	for _, fi := range files {
-// // 		t.Logf("File: %s. Size: %s\n", fi.Name(), humanize.Bytes(uint64(fi.Size())))
-// // 	}
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		txn := db.NewTransactionAt(newTs(), true)
+		require.NoError(t, txn.Delete([]byte(fmt.Sprintf("key%d", i))))
+		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
+			wg.Done()
+			require.NoError(t, err)
+		}))
+	}
+	wg.Wait()
+	files, err := ioutil.ReadDir(dir)
+	require.NoError(t, err)
+	for _, fi := range files {
+		t.Logf("File: %s. Size: %s\n", fi.Name(), humanize.Bytes(uint64(fi.Size())))
+	}
 
-// // 	for i := 0; i < 100; i++ {
-// // 		// Try at max 100 times to GC even a single value log file.
-// // 		if err := db.RunValueLogGC(0.0001); err == nil {
-// // 			return // Done
-// // 		}
-// // 	}
-// // 	require.Fail(t, "Unable to GC even a single value log file.")
-// // }
+	for i := 0; i < 100; i++ {
+		// Try at max 100 times to GC even a single value log file.
+		if err := db.RunValueLogGC(0.0001); err == nil {
+			return // Done
+		}
+	}
+	require.Fail(t, "Unable to GC even a single value log file.")
+}
 
 // func TestValueGC(t *testing.T) {
 // 	dir, err := ioutil.TempDir("", "badger-test")

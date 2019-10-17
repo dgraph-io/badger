@@ -26,6 +26,7 @@ import (
 	"math/rand"
 	"os"
 	"path"
+	"regexp"
 	"testing"
 
 	"github.com/dgraph-io/badger/options"
@@ -51,7 +52,7 @@ func TestTruncateVLog(t *testing.T) {
 
 	opt := getTestOptions(dir)
 	opt.SyncWrites = true
-	//	opt.Truncate = true
+	opt.Truncate = true
 	opt.ValueThreshold = 1 // Force all reads from value log.
 	db, err := Open(opt)
 	require.NoError(t, err)
@@ -78,6 +79,104 @@ func TestTruncateVLog(t *testing.T) {
 	stat, err := os.Stat(path.Join(dir, "000001.vlog"))
 	require.NoError(t, err)
 	require.NoError(t, os.Truncate(path.Join(dir, "000001.vlog"), stat.Size()-2))
+	db1, err := Open(opt)
+	require.NoError(t, err)
+
+	// two transaction should be read successfully.
+	for i := 0; i < 2; i++ {
+		err := db1.View(func(txn *Txn) error {
+			item, err := txn.Get(key(i))
+			require.NoError(t, err)
+			val := getItemValue(t, item)
+			require.Equal(t, 4055, len(val))
+			return nil
+		})
+		require.NoError(t, err)
+	}
+	// Now we write some data in recovered db and write some stuff.
+	for i := 3; i < 32; i++ {
+		err = db1.Update(func(txn *Txn) error {
+			return txn.SetEntry(NewEntry(key(i), data(4055)))
+		})
+		require.NoError(t, err)
+	}
+
+	// now we'll read it back.
+	// Read it back to ensure that we can read it now.
+	for i := 3; i < 32; i++ {
+		err := db1.View(func(txn *Txn) error {
+			fmt.Println(i)
+			item, err := txn.Get(key(i))
+			require.NoError(t, err)
+			val := getItemValue(t, item)
+			require.Equal(t, 4055, len(val))
+			return nil
+		})
+		require.NoError(t, err)
+	}
+	// Close the DB.
+	require.NoError(t, db1.Close())
+
+	// now we open again and read it.
+	db1, err = Open(opt)
+	require.NoError(t, err)
+
+	for i := 3; i < 32; i++ {
+		err := db1.View(func(txn *Txn) error {
+			fmt.Println(i)
+			item, err := txn.Get(key(i))
+			require.NoError(t, err)
+			val := getItemValue(t, item)
+			require.Equal(t, 4055, len(val))
+			return nil
+		})
+		require.NoError(t, err)
+	}
+}
+
+func TestTruncateWAL(t *testing.T) {
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%d%10d", i, i))
+	}
+	data := func(l int) []byte {
+		m := make([]byte, l)
+		_, err := rand.Read(m)
+		require.NoError(t, err)
+		return m
+	}
+	dir, err := ioutil.TempDir("", "hello-badger-test")
+	require.NoError(t, err)
+	//defer os.RemoveAll(dir)
+
+	opt := getTestOptions(dir)
+	opt.SyncWrites = true
+	opt.Truncate = true
+	opt.ValueThreshold = 1 // Force all reads from value log.
+	db, err := Open(opt)
+	require.NoError(t, err)
+
+	for i := 0; i < 3; i++ {
+		err = db.Update(func(txn *Txn) error {
+			return txn.SetEntry(NewEntry(key(i), data(4055)))
+		})
+		require.NoError(t, err)
+	}
+
+	// Simulate a crash  by not closing db0, but releasing the locks.
+	if db.dirLockGuard != nil {
+		require.NoError(t, db.dirLockGuard.release())
+	}
+	if db.valueDirGuard != nil {
+		require.NoError(t, db.valueDirGuard.release())
+	}
+	// We need to close vlog to fix the vlog file size. On windows, the vlog file
+	// is truncated to 2*MaxVlogSize and if we don't close the vlog file, reopening
+	// it would return Truncate Required Error.
+	// truncate last few byte of the vlog so that we're able to recover
+	// two transaction.
+	stat, err := os.Stat(path.Join(dir, "000001.log"))
+	require.NoError(t, err)
+	require.NoError(t, os.Truncate(path.Join(dir, "000001.log"), stat.Size()-2))
 	db1, err := Open(opt)
 	require.NoError(t, err)
 
@@ -295,95 +394,95 @@ func TestTruncateVlogNoClose3(t *testing.T) {
 	}
 }
 
-// func TestBigKeyValuePairs(t *testing.T) {
-// 	// This test takes too much memory. So, run separately.
-// 	if !*manual {
-// 		t.Skip("Skipping test meant to be run manually.")
-// 		return
-// 	}
+func TestBigKeyValuePairs(t *testing.T) {
+	// This test takes too much memory. So, run separately.
+	if !*manual {
+		t.Skip("Skipping test meant to be run manually.")
+		return
+	}
 
-// 	// Passing an empty directory since it will be filled by runBadgerTest.
-// 	opts := DefaultOptions("").
-// 		WithMaxTableSize(1 << 20).
-// 		WithValueLogMaxEntries(64)
-// 	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
-// 		bigK := make([]byte, 65001)
-// 		bigV := make([]byte, db.opt.ValueLogFileSize+1)
-// 		small := make([]byte, 65000)
+	// Passing an empty directory since it will be filled by runBadgerTest.
+	opts := DefaultOptions("").
+		WithMaxTableSize(1 << 20).
+		WithValueLogMaxEntries(64)
+	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+		bigK := make([]byte, 65001)
+		bigV := make([]byte, db.opt.ValueLogFileSize+1)
+		small := make([]byte, 65000)
 
-// 		txn := db.NewTransaction(true)
-// 		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.SetEntry(NewEntry(bigK, small)))
-// 		require.Regexp(t, regexp.MustCompile("Value.*exceeded"),
-// 			txn.SetEntry(NewEntry(small, bigV)))
+		txn := db.NewTransaction(true)
+		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.SetEntry(NewEntry(bigK, small)))
+		require.Regexp(t, regexp.MustCompile("Value.*exceeded"),
+			txn.SetEntry(NewEntry(small, bigV)))
 
-// 		require.NoError(t, txn.SetEntry(NewEntry(small, small)))
-// 		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.SetEntry(NewEntry(bigK, bigV)))
+		require.NoError(t, txn.SetEntry(NewEntry(small, small)))
+		require.Regexp(t, regexp.MustCompile("Key.*exceeded"), txn.SetEntry(NewEntry(bigK, bigV)))
 
-// 		require.NoError(t, db.View(func(txn *Txn) error {
-// 			_, err := txn.Get(small)
-// 			require.Equal(t, ErrKeyNotFound, err)
-// 			return nil
-// 		}))
+		require.NoError(t, db.View(func(txn *Txn) error {
+			_, err := txn.Get(small)
+			require.Equal(t, ErrKeyNotFound, err)
+			return nil
+		}))
 
-// 		// Now run a longer test, which involves value log GC.
-// 		data := fmt.Sprintf("%100d", 1)
-// 		key := func(i int) string {
-// 			return fmt.Sprintf("%65000d", i)
-// 		}
+		// Now run a longer test, which involves value log GC.
+		data := fmt.Sprintf("%100d", 1)
+		key := func(i int) string {
+			return fmt.Sprintf("%65000d", i)
+		}
 
-// 		saveByKey := func(key string, value []byte) error {
-// 			return db.Update(func(txn *Txn) error {
-// 				return txn.SetEntry(NewEntry([]byte(key), value))
-// 			})
-// 		}
+		saveByKey := func(key string, value []byte) error {
+			return db.Update(func(txn *Txn) error {
+				return txn.SetEntry(NewEntry([]byte(key), value))
+			})
+		}
 
-// 		getByKey := func(key string) error {
-// 			return db.View(func(txn *Txn) error {
-// 				item, err := txn.Get([]byte(key))
-// 				if err != nil {
-// 					return err
-// 				}
-// 				return item.Value(func(val []byte) error {
-// 					if len(val) == 0 {
-// 						log.Fatalf("key not found %q", len(key))
-// 					}
-// 					return nil
-// 				})
-// 			})
-// 		}
+		getByKey := func(key string) error {
+			return db.View(func(txn *Txn) error {
+				item, err := txn.Get([]byte(key))
+				if err != nil {
+					return err
+				}
+				return item.Value(func(val []byte) error {
+					if len(val) == 0 {
+						log.Fatalf("key not found %q", len(key))
+					}
+					return nil
+				})
+			})
+		}
 
-// 		for i := 0; i < 32; i++ {
-// 			if i < 30 {
-// 				require.NoError(t, saveByKey(key(i), []byte(data)))
-// 			} else {
-// 				require.NoError(t, saveByKey(key(i), []byte(fmt.Sprintf("%100d", i))))
-// 			}
-// 		}
+		for i := 0; i < 32; i++ {
+			if i < 30 {
+				require.NoError(t, saveByKey(key(i), []byte(data)))
+			} else {
+				require.NoError(t, saveByKey(key(i), []byte(fmt.Sprintf("%100d", i))))
+			}
+		}
 
-// 		for j := 0; j < 5; j++ {
-// 			for i := 0; i < 32; i++ {
-// 				if i < 30 {
-// 					require.NoError(t, saveByKey(key(i), []byte(data)))
-// 				} else {
-// 					require.NoError(t, saveByKey(key(i), []byte(fmt.Sprintf("%100d", i))))
-// 				}
-// 			}
-// 		}
+		for j := 0; j < 5; j++ {
+			for i := 0; i < 32; i++ {
+				if i < 30 {
+					require.NoError(t, saveByKey(key(i), []byte(data)))
+				} else {
+					require.NoError(t, saveByKey(key(i), []byte(fmt.Sprintf("%100d", i))))
+				}
+			}
+		}
 
-// 		for i := 0; i < 32; i++ {
-// 			require.NoError(t, getByKey(key(i)))
-// 		}
+		for i := 0; i < 32; i++ {
+			require.NoError(t, getByKey(key(i)))
+		}
 
-// 		var loops int
-// 		var err error
-// 		for err == nil {
-// 			err = db.RunValueLogGC(0.5)
-// 			require.NotRegexp(t, regexp.MustCompile("truncate"), err)
-// 			loops++
-// 		}
-// 		t.Logf("Ran value log GC %d times. Last error: %v\n", loops, err)
-// 	})
-// }
+		var loops int
+		var err error
+		for err == nil {
+			err = db.RunValueLogGC(0.5)
+			require.NotRegexp(t, regexp.MustCompile("truncate"), err)
+			loops++
+		}
+		t.Logf("Ran value log GC %d times. Last error: %v\n", loops, err)
+	})
+}
 
 // The following test checks for issue #585.
 func TestPushValueLogLimit(t *testing.T) {
