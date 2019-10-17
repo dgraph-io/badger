@@ -25,6 +25,7 @@ import (
 	"math/rand"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -452,4 +453,61 @@ func TestSendOnClosedStream2(t *testing.T) {
 	}()
 
 	require.NoError(t, sw.Write(list), "sw.Write() failed")
+}
+
+// This test verifies if we have updated max head correctly after calling stream writer flush.
+func TestMaxHeadUpdate(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+		var val [50]byte
+		// Value size should be than opt.ValueThreshold.
+		require.Greater(t, len(val), db.opt.ValueThreshold)
+		rand.Read(val[:])
+		for i := 0; i < 10; i++ {
+			list := &pb.KVList{}
+			kv := &pb.KV{
+				Key:      []byte(fmt.Sprintf("%d", i)),
+				Value:    val[:],
+				Version:  1,
+				StreamId: uint32(i),
+			}
+			list.Kv = append(list.Kv, kv)
+			require.NoError(t, sw.Write(list), "sw.Write() failed")
+		}
+
+		// Wait for entries to be written by sortedWriter as reqs are pushed on buffered channel.
+		time.Sleep(10 * time.Millisecond)
+
+		// Get max head from all sorted writers.
+		var maxHead valuePointer
+		for _, writer := range sw.writers {
+			if maxHead.Less(writer.head) {
+				maxHead = writer.head
+			}
+		}
+
+		// Close only last five streams using done. We are closing streams with max vlog pointer.
+		for i := uint32(9); i >= 5; i-- {
+			list := &pb.KVList{}
+			kv := &pb.KV{
+				StreamId:   i,
+				StreamDone: true,
+			}
+			list.Kv = append(list.Kv, kv)
+			require.NoError(t, sw.Write(list), "sw.Write() failed")
+		}
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+
+		vs, err := db.get(y.KeyWithTs(head, math.MaxUint64)) // Get head from DB.
+		require.NoError(t, err, "unable to get head")
+		var vp valuePointer
+		vp.Decode(vs.Value)
+		require.Equal(t, vp, maxHead)
+		require.NoError(t, db.Close())
+
+		db, err = Open(db.opt)
+		require.NoError(t, err)
+		require.NoError(t, db.Close())
+	})
 }
