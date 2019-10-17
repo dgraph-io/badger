@@ -38,7 +38,7 @@ import (
 func TestValueBasic(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	y.Check(err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	kv, _ := Open(getTestOptions(dir))
 	defer kv.Close()
@@ -94,7 +94,7 @@ func TestValueBasic(t *testing.T) {
 func TestValueGCManaged(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	N := 10000
 	opt := getTestOptions(dir)
@@ -153,7 +153,7 @@ func TestValueGCManaged(t *testing.T) {
 func TestValueGC(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 
@@ -206,7 +206,7 @@ func TestValueGC(t *testing.T) {
 func TestValueGC2(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 
@@ -282,7 +282,7 @@ func TestValueGC2(t *testing.T) {
 func TestValueGC3(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 
@@ -357,7 +357,7 @@ func TestValueGC3(t *testing.T) {
 func TestValueGC4(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 	opt.Truncate = true
@@ -433,7 +433,7 @@ func TestValueGC4(t *testing.T) {
 func TestPersistLFDiscardStats(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 	opt.Truncate = true
@@ -496,7 +496,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 func TestChecksums(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	// Set up SST with K1=V1
 	opts := getTestOptions(dir)
@@ -579,7 +579,7 @@ func TestChecksums(t *testing.T) {
 func TestPartialAppendToValueLog(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	// Create skeleton files.
 	opts := getTestOptions(dir)
@@ -644,7 +644,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	// Create skeleton files.
 	opts := getTestOptions(dir)
@@ -683,7 +683,7 @@ func TestValueLogTrigger(t *testing.T) {
 	t.Skip("Difficult to trigger compaction, so skipping. Re-enable after fixing #226")
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
@@ -719,7 +719,7 @@ func TestValueLogTrigger(t *testing.T) {
 func createVlog(t *testing.T, entries []*Entry) []byte {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
@@ -743,7 +743,7 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 func TestPenultimateLogCorruption(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogLoadingMode = options.FileIO
 	// Each txn generates at least two entries. 3 txns will fit each file.
@@ -852,7 +852,7 @@ func (th *testHelper) readRange(from, to int) {
 func TestBug578(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	y.Check(err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir).
 		WithValueLogMaxEntries(64).
@@ -892,7 +892,7 @@ func BenchmarkReadWrite(b *testing.B) {
 			b.Run(fmt.Sprintf("%3.1f,%04d", rw, vsz), func(b *testing.B) {
 				dir, err := ioutil.TempDir("", "vlog-benchmark")
 				y.Check(err)
-				defer os.RemoveAll(dir)
+				defer removeDir(dir)
 
 				db, err := Open(getTestOptions(dir))
 				y.Check(err)
@@ -947,7 +947,7 @@ func BenchmarkReadWrite(b *testing.B) {
 func TestValueLogTruncate(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir).WithTruncate(true))
 	require.NoError(t, err)
@@ -1149,7 +1149,7 @@ func TestBlockedDiscardStatsOnClose(t *testing.T) {
 func TestValueEntryCorruption(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer func() { require.NoError(t, os.RemoveAll(dir)) }()
+	defer removeDir(dir)
 
 	opt := getTestOptions(dir)
 	opt.VerifyValueChecksum = true

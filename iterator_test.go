@@ -234,7 +234,7 @@ func TestIteratePrefix(t *testing.T) {
 func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 	dir, err := ioutil.TempDir(".", "badger-test")
 	y.Check(err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.TableLoadingMode = options.LoadToRAM
 	db, err := Open(opts)

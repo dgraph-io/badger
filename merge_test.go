@@ -19,7 +19,6 @@ package badger
 import (
 	"encoding/binary"
 	"io/ioutil"
-	"os"
 	"testing"
 	"time"
 
@@ -114,7 +113,7 @@ func TestGetMergeOperator(t *testing.T) {
 	t.Run("Old keys should be removed after compaction", func(t *testing.T) {
 		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
-		defer os.RemoveAll(dir)
+		defer removeDir(dir)
 
 		opts := getTestOptions(dir)
 		db, err := Open(opts)

@@ -35,7 +35,7 @@ import (
 func TestBackupRestore1(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	db, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 
@@ -73,7 +73,7 @@ func TestBackupRestore1(t *testing.T) {
 	// Use different directory.
 	dir, err = ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	bak, err := ioutil.TempFile(dir, "badgerbak")
 	require.NoError(t, err)
 	_, err = db.Backup(bak, 0)
@@ -119,9 +119,7 @@ func TestBackupRestore2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		os.RemoveAll(tmpdir)
-	}()
+	defer removeDir(tmpdir)
 
 	s1Path := filepath.Join(tmpdir, "test1")
 	s2Path := filepath.Join(tmpdir, "test2")
@@ -284,7 +282,7 @@ func TestBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpdir)
+	defer removeDir(tmpdir)
 
 	db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup0")))
 	if err != nil {
@@ -329,7 +327,7 @@ func TestBackupRestore3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpdir)
+	defer removeDir(tmpdir)
 
 	N := 1000
 	entries := createEntries(N)
@@ -387,7 +385,7 @@ func TestBackupLoadIncremental(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpdir)
+	defer removeDir(tmpdir)
 
 	N := 100
 	entries := createEntries(N)

@@ -49,7 +49,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	opt := getTestOptions(dir)
 	opt.SyncWrites = true
@@ -346,7 +346,7 @@ func TestDiscardMapTooBig(t *testing.T) {
 	}
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir))
 	require.NoError(t, err, "error while opening db")
@@ -420,7 +420,7 @@ func TestBigValues(t *testing.T) {
 func TestCompactionFilePicking(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir).WithTableLoadingMode(options.LoadToRAM))
 	require.NoError(t, err, "error while opening db")
