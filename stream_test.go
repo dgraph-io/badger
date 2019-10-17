@@ -157,4 +157,5 @@ func TestStream(t *testing.T) {
 	for pred, count := range m {
 		require.Equal(t, 50, count, "Count mismatch for pred: %s", pred)
 	}
+	require.NoError(t, db.Close())
 }
