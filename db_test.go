@@ -1625,6 +1625,7 @@ func TestGoroutineLeak(t *testing.T) {
 			require.Equal(t, true, updated)
 		})
 	}
+	time.Sleep(2 * time.Second)
 	require.Equal(t, before, runtime.NumGoroutine())
 }
 

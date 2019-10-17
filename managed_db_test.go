@@ -89,6 +89,7 @@ func TestDropAllManaged(t *testing.T) {
 	require.NoError(t, db.DropAll())
 	require.NoError(t, db.DropAll()) // Just call it twice, for fun.
 	require.Equal(t, 0, numKeysManaged(db, math.MaxUint64))
+
 	// Check that we can still write to db, and using lower timestamps.
 	populate(db, 1)
 	require.Equal(t, int(N), numKeysManaged(db, math.MaxUint64))
