@@ -624,7 +624,7 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 func TestTableChecksum(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 	// we are going to write random byte at random location in table file.
-	rb := make([]byte, 1)
+	rb := make([]byte, 100)
 	rand.Read(rb)
 	f := buildTestTable(t, "k", 10000)
 	fi, err := f.Stat()
