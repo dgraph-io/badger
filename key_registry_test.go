@@ -18,7 +18,6 @@ package badger
 import (
 	"io/ioutil"
 	"math/rand"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -35,9 +34,7 @@ func TestBuildRegistry(t *testing.T) {
 	encryptionKey := make([]byte, 32)
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, os.RemoveAll(dir))
-	}()
+	defer removeDir(dir)
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
 	opt := getRegistryTestOptions(dir, encryptionKey)
@@ -66,9 +63,7 @@ func TestRewriteRegistry(t *testing.T) {
 	encryptionKey := make([]byte, 32)
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, os.RemoveAll(dir))
-	}()
+	defer removeDir(dir)
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
 	opt := getRegistryTestOptions(dir, encryptionKey)
@@ -94,9 +89,7 @@ func TestMismatch(t *testing.T) {
 	encryptionKey := make([]byte, 32)
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, os.RemoveAll(dir))
-	}()
+	defer removeDir(dir)
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
 	opt := getRegistryTestOptions(dir, encryptionKey)
@@ -121,9 +114,7 @@ func TestEncryptionAndDecryption(t *testing.T) {
 	encryptionKey := make([]byte, 32)
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, os.RemoveAll(dir))
-	}()
+	defer removeDir(dir)
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
 	opt := getRegistryTestOptions(dir, encryptionKey)
