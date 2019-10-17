@@ -732,7 +732,6 @@ func TestTableChecksum(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatal("Test should have been failed with checksum mismatch error")
 	}
-	require.NoError(t, os.Remove(f.Name()))
 }
 
 func BenchmarkRead(b *testing.B) {
