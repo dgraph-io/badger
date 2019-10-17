@@ -48,6 +48,7 @@ type StreamWriter struct {
 	throttle   *y.Throttle
 	maxVersion uint64
 	writers    map[uint32]*sortedWriter
+	maxHead    valuePointer
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -176,6 +177,10 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 			return err
 		}
 
+		if sw.maxHead.Less(writer.head) {
+			sw.maxHead = writer.head
+		}
+
 		sw.writers[streamId] = nil
 	}
 	return nil
@@ -195,7 +200,6 @@ func (sw *StreamWriter) Flush() error {
 		}
 	}
 
-	var maxHead valuePointer
 	for _, writer := range sw.writers {
 		if writer == nil {
 			continue
@@ -203,13 +207,13 @@ func (sw *StreamWriter) Flush() error {
 		if err := writer.Done(); err != nil {
 			return err
 		}
-		if maxHead.Less(writer.head) {
-			maxHead = writer.head
+		if sw.maxHead.Less(writer.head) {
+			sw.maxHead = writer.head
 		}
 	}
 
 	// Encode and write the value log head into a new table.
-	data := maxHead.Encode()
+	data := sw.maxHead.Encode()
 	headWriter, err := sw.newWriter(headStreamId)
 	if err != nil {
 		return errors.Wrap(err, "failed to create head writer")
