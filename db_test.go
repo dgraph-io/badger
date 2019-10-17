@@ -1594,6 +1594,7 @@ func TestMinReadTs(t *testing.T) {
 }
 
 func TestGoroutineLeak(t *testing.T) {
+	time.Sleep(1 * time.Second)
 	before := runtime.NumGoroutine()
 	t.Logf("Num go: %d", before)
 	for i := 0; i < 12; i++ {
