@@ -720,7 +720,7 @@ func TestTableBigValues(t *testing.T) {
 func TestTableChecksum(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 	// we are going to write random byte at random location in table file.
-	rb := make([]byte, 1)
+	rb := make([]byte, 100)
 	rand.Read(rb)
 	opts := getTestTableOptions()
 	f := buildTestTable(t, "k", 10000, opts)
@@ -732,6 +732,7 @@ func TestTableChecksum(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatal("Test should have been failed with checksum mismatch error")
 	}
+	require.NoError(t, os.Remove(f.Name()))
 }
 
 func BenchmarkRead(b *testing.B) {
