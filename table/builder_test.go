@@ -92,7 +92,7 @@ func TestTableIndex(t *testing.T) {
 				require.Equal(t, ko.Key, blockFirstKeys[i])
 			}
 			f.Close()
-			os.RemoveAll(filename)
+			require.NoError(t, os.RemoveAll(filename))
 		}
 	})
 }

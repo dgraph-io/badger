@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -60,7 +59,7 @@ var ctxb = context.Background()
 func TestStream(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	db, err := OpenManaged(DefaultOptions(dir))
 	require.NoError(t, err)
