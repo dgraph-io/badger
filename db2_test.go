@@ -56,7 +56,7 @@ func TestTruncateVLog(t *testing.T) {
 	db, err := Open(opt)
 	require.NoError(t, err)
 
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 3; i++ {
 		err = db.Update(func(txn *Txn) error {
 			return txn.SetEntry(NewEntry(key(i), data(4055)))
 		})
@@ -64,26 +64,25 @@ func TestTruncateVLog(t *testing.T) {
 	}
 
 	// Simulate a crash  by not closing db0, but releasing the locks.
-	// if db.dirLockGuard != nil {
-	// 	require.NoError(t, db.dirLockGuard.release())
-	// }
-	// if db.valueDirGuard != nil {
-	// 	require.NoError(t, db.valueDirGuard.release())
-	// }
+	if db.dirLockGuard != nil {
+		require.NoError(t, db.dirLockGuard.release())
+	}
+	if db.valueDirGuard != nil {
+		require.NoError(t, db.valueDirGuard.release())
+	}
 	// We need to close vlog to fix the vlog file size. On windows, the vlog file
 	// is truncated to 2*MaxVlogSize and if we don't close the vlog file, reopening
 	// it would return Truncate Required Error.
-	require.NoError(t, db.Close())
 	// truncate last few byte of the vlog so that we're able to recover
 	// two transaction.
-	// stat, err := os.Stat(path.Join(dir, "000001.vlog"))
-	// require.NoError(t, err)
-	// require.NoError(t, os.Truncate(path.Join(dir, "000001.vlog"), stat.Size()-2))
+	stat, err := os.Stat(path.Join(dir, "000001.vlog"))
+	require.NoError(t, err)
+	require.NoError(t, os.Truncate(path.Join(dir, "000001.vlog"), stat.Size()-2))
 	db1, err := Open(opt)
 	require.NoError(t, err)
 
 	// two transaction should be read successfully.
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 2; i++ {
 		err := db1.View(func(txn *Txn) error {
 			item, err := txn.Get(key(i))
 			require.NoError(t, err)
@@ -116,6 +115,22 @@ func TestTruncateVLog(t *testing.T) {
 	}
 	// Close the DB.
 	require.NoError(t, db1.Close())
+
+	// now we open again and read it.
+	db1, err = Open(opt)
+	require.NoError(t, err)
+
+	for i := 3; i < 32; i++ {
+		err := db1.View(func(txn *Txn) error {
+			fmt.Println(i)
+			item, err := txn.Get(key(i))
+			require.NoError(t, err)
+			val := getItemValue(t, item)
+			require.Equal(t, 4055, len(val))
+			return nil
+		})
+		require.NoError(t, err)
+	}
 }
 func TestTruncateVlogWithClose(t *testing.T) {
 	key := func(i int) []byte {

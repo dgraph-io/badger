@@ -521,7 +521,9 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 	}
 
 	if truncateNeeded {
-		panic("fuck yo")
+		if !lp.opt.Truncate {
+			return ErrTruncateNeeded
+		}
 		// Here not handling any corruption in the middle. It is expected that all the log file before
 		// are in good state. In previous implementation, the log files are deleted if truncation
 		// enabled. we can do the same if necessary.
