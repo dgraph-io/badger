@@ -3,7 +3,8 @@ language: go
 go:
     - "1.11"
     - "1.12"
-
+    - "1.13"
+    - tip
 os:
     - osx
 
