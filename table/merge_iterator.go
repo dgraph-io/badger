@@ -44,6 +44,8 @@ type node struct {
 
 func (n *node) setIterator(iter y.Iterator) {
 	n.iter = iter
+	// It's okay if the conversion below fails. We handle the nil values of
+	// merge and concat in all the methods.
 	n.merge, _ = iter.(*MergeIterator)
 	n.concat, _ = iter.(*ConcatIterator)
 }
@@ -104,15 +106,22 @@ func (mi *MergeIterator) fix() {
 		if &mi.right == mi.small {
 			mi.swapSmall()
 		}
-	}
-	if mi.reverse {
-		if cmp < 0 {
+		return
+	} else if cmp < 0 { // Small is less than bigger().
+		if mi.reverse {
+			mi.swapSmall()
+		} else {
+			// we don't need to do anything. Small already points to the smallest.
+		}
+		return
+	} else { // bigger() is less than small.
+		if mi.reverse {
+			// Do nothing since we're iterating in reverse. Small currently points to
+			// the bigger key and that's okay in reverse iteration.
+		} else {
 			mi.swapSmall()
 		}
-	} else {
-		if cmp > 0 {
-			mi.swapSmall()
-		}
+		return
 	}
 }
 
@@ -191,6 +200,7 @@ func NewMergeIterator(iters []y.Iterator, reverse bool) y.Iterator {
 		}
 		mi.left.setIterator(iters[0])
 		mi.right.setIterator(iters[1])
+		// Assign left iterator randomly. This will be fixed when user calls rewind/seek.
 		mi.small = &mi.left
 		return mi
 	}
