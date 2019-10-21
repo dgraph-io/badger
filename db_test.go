@@ -74,7 +74,8 @@ func getTestOptions(dir string) Options {
 	opt := DefaultOptions(dir).
 		WithMaxTableSize(1 << 15). // Force more compaction.
 		WithLevelOneSize(4 << 15). // Force more compaction.
-		WithSyncWrites(false)
+		WithSyncWrites(false).
+		WithMaxCacheSize(10 << 20)
 	if !*mmap {
 		return opt.WithValueLogLoadingMode(options.FileIO)
 	}
