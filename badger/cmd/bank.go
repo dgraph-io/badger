@@ -19,6 +19,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -63,18 +64,24 @@ failure of the total invariant.
 	RunE: runDisect,
 }
 
-var numGoroutines, numAccounts, numPrevious int
-var duration string
-var stopAll int32
-var mmap bool
-var checkStream bool
-var checkSubscriber bool
-var verbose bool
-var encryptionEnabled bool
+var (
+	numGoroutines     int
+	numAccounts       int
+	numPrevious       int
+	duration          string
+	stopAll           int32
+	mmap              bool
+	checkStream       bool
+	checkSubscriber   bool
+	verbose           bool
+	encryptionEnabled bool
+	decryptionKey     string
+)
 
-const keyPrefix = "account:"
-
-const initialBal uint64 = 100
+const (
+	keyPrefix         = "account:"
+	initialBal uint64 = 100
+)
 
 func init() {
 	RootCmd.AddCommand(testCmd)
@@ -96,11 +103,13 @@ func init() {
 	bankTest.Flags().BoolVarP(&verbose, "verbose", "v", false,
 		"If true, the test will print all the executed bank transfers to standard output. "+
 			"This outputs a lot so it's best to turn it off when running the test for a while.")
+	bankTest.Flags().BoolVarP(&encryptionEnabled, "encryption", "e", false,
+		"If it is true, badger will encrypt all the data stored on the disk.")
 
 	bankDisect.Flags().IntVarP(&numPrevious, "previous", "p", 12,
 		"Starting from the violation txn, how many previous versions to retrieve.")
-	bankDisect.Flags().BoolVarP(&encryptionEnabled, "encryption", "e", false,
-		"If it is true, badger will encrypt all the data stored on the disk.")
+	bankDisect.Flags().StringVar(&decryptionKey, "decryption-key", "",
+		"If set, DB will be opened using the provided decryption key (in hex).")
 }
 
 func key(account int) []byte {
@@ -281,11 +290,18 @@ func compareTwo(db *badger.DB, before, after uint64) {
 }
 
 func runDisect(cmd *cobra.Command, args []string) error {
+	var key []byte
+	if len(decryptionKey) > 0 {
+		var err error
+		key, err = hex.DecodeString(decryptionKey)
+		y.Check(err)
+	}
 	// The total did not match up. So, let's disect the DB to find the
 	// transction which caused the total mismatch.
 	db, err := badger.OpenManaged(badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
-		WithReadOnly(true))
+		WithReadOnly(true).
+		WithEncryptionKey(key))
 	if err != nil {
 		return err
 	}
@@ -339,7 +355,6 @@ func runTest(cmd *cobra.Command, args []string) error {
 	if mmap {
 		opts = opts.WithTableLoadingMode(options.MemoryMap)
 	}
-	log.Printf("Opening DB with options: %+v\n", opts)
 
 	if encryptionEnabled {
 		key := make([]byte, 32)
@@ -348,7 +363,9 @@ func runTest(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		opts = opts.WithEncryptionKey(key)
+		log.Printf("Using encryption key %s\n", hex.EncodeToString(key))
 	}
+	log.Printf("Opening DB with options: %+v\n", opts)
 	db, err := badger.Open(opts)
 	if err != nil {
 		return err
