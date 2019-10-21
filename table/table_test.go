@@ -503,12 +503,25 @@ func TestMergingIterator(t *testing.T) {
 	opts := getTestTableOptions()
 	f1 := buildTable(t, [][]string{
 		{"k1", "a1"},
-		{"k2", "a2"},
+		{"k4", "a4"},
+		{"k5", "a5"},
 	}, opts)
 	f2 := buildTable(t, [][]string{
-		{"k1", "b1"},
 		{"k2", "b2"},
+		{"k3", "b3"},
+		{"k4", "b4"},
 	}, opts)
+
+	expected := []struct {
+		key   string
+		value string
+	}{
+		{"k1", "a1"},
+		{"k2", "b2"},
+		{"k3", "b3"},
+		{"k4", "a4"},
+		{"k5", "a5"},
+	}
 	tbl1, err := OpenTable(f1, opts)
 	require.NoError(t, err)
 	defer tbl1.DecrRef()
@@ -517,26 +530,19 @@ func TestMergingIterator(t *testing.T) {
 	defer tbl2.DecrRef()
 	it1 := tbl1.NewIterator(false)
 	it2 := NewConcatIterator([]*Table{tbl2}, false)
-	it := y.NewMergeIterator([]y.Iterator{it1, it2}, false)
+	it := NewMergeIterator([]y.Iterator{it1, it2}, false)
 	defer it.Close()
 
-	it.Rewind()
-	require.True(t, it.Valid())
-	k := it.Key()
-	require.EqualValues(t, "k1", string(y.ParseKey(k)))
-	vs := it.Value()
-	require.EqualValues(t, "a1", string(vs.Value))
-	require.EqualValues(t, 'A', vs.Meta)
-	it.Next()
-
-	require.True(t, it.Valid())
-	k = it.Key()
-	require.EqualValues(t, "k2", string(y.ParseKey(k)))
-	vs = it.Value()
-	require.EqualValues(t, "a2", string(vs.Value))
-	require.EqualValues(t, 'A', vs.Meta)
-	it.Next()
-
+	var i int
+	for it.Rewind(); it.Valid(); it.Next() {
+		k := it.Key()
+		vs := it.Value()
+		require.EqualValues(t, expected[i].key, string(y.ParseKey(k)))
+		require.EqualValues(t, expected[i].value, string(vs.Value))
+		require.EqualValues(t, 'A', vs.Meta)
+		i++
+	}
+	require.Equal(t, i, len(expected))
 	require.False(t, it.Valid())
 }
 
@@ -545,11 +551,26 @@ func TestMergingIteratorReversed(t *testing.T) {
 	f1 := buildTable(t, [][]string{
 		{"k1", "a1"},
 		{"k2", "a2"},
+		{"k4", "a4"},
+		{"k5", "a5"},
 	}, opts)
 	f2 := buildTable(t, [][]string{
-		{"k1", "b1"},
-		{"k2", "b2"},
+		{"k1", "b2"},
+		{"k3", "b3"},
+		{"k4", "b4"},
+		{"k5", "b5"},
 	}, opts)
+
+	expected := []struct {
+		key   string
+		value string
+	}{
+		{"k5", "a5"},
+		{"k4", "a4"},
+		{"k3", "b3"},
+		{"k2", "a2"},
+		{"k1", "a1"},
+	}
 	tbl1, err := OpenTable(f1, opts)
 	require.NoError(t, err)
 	defer tbl1.DecrRef()
@@ -558,26 +579,20 @@ func TestMergingIteratorReversed(t *testing.T) {
 	defer tbl2.DecrRef()
 	it1 := tbl1.NewIterator(true)
 	it2 := NewConcatIterator([]*Table{tbl2}, true)
-	it := y.NewMergeIterator([]y.Iterator{it1, it2}, true)
+	it := NewMergeIterator([]y.Iterator{it1, it2}, true)
 	defer it.Close()
 
-	it.Rewind()
-	require.True(t, it.Valid())
-	k := it.Key()
-	require.EqualValues(t, "k2", string(y.ParseKey(k)))
-	vs := it.Value()
-	require.EqualValues(t, "a2", string(vs.Value))
-	require.EqualValues(t, 'A', vs.Meta)
-	it.Next()
+	var i int
+	for it.Rewind(); it.Valid(); it.Next() {
+		k := it.Key()
+		vs := it.Value()
+		require.EqualValues(t, expected[i].key, string(y.ParseKey(k)))
+		require.EqualValues(t, expected[i].value, string(vs.Value))
+		require.EqualValues(t, 'A', vs.Meta)
+		i++
+	}
 
-	require.True(t, it.Valid())
-	k = it.Key()
-	require.EqualValues(t, "k1", string(y.ParseKey(k)))
-	vs = it.Value()
-	require.EqualValues(t, "a1", string(vs.Value))
-	require.EqualValues(t, 'A', vs.Meta)
-	it.Next()
-
+	require.Equal(t, i, len(expected))
 	require.False(t, it.Valid())
 }
 
@@ -599,7 +614,7 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 
 	it1 := NewConcatIterator([]*Table{t1}, false)
 	it2 := NewConcatIterator([]*Table{t2}, false)
-	it := y.NewMergeIterator([]y.Iterator{it1, it2}, false)
+	it := NewMergeIterator([]y.Iterator{it1, it2}, false)
 	defer it.Close()
 
 	it.Rewind()
@@ -647,7 +662,7 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 
 	it1 := NewConcatIterator([]*Table{t1}, false)
 	it2 := NewConcatIterator([]*Table{t2}, false)
-	it := y.NewMergeIterator([]y.Iterator{it1, it2}, false)
+	it := NewMergeIterator([]y.Iterator{it1, it2}, false)
 	defer it.Close()
 
 	it.Rewind()
@@ -808,7 +823,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			for _, tbl := range tables {
 				iters = append(iters, tbl.NewIterator(false))
 			}
-			it := y.NewMergeIterator(iters, false)
+			it := NewMergeIterator(iters, false)
 			defer it.Close()
 			for it.Rewind(); it.Valid(); it.Next() {
 			}

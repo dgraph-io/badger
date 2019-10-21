@@ -482,7 +482,7 @@ func (s *levelsController) compactBuildTables(
 		valid = append(valid, table)
 	}
 	iters = append(iters, table.NewConcatIterator(valid, false))
-	it := y.NewMergeIterator(iters, false)
+	it := table.NewMergeIterator(iters, false)
 	defer it.Close() // Important to close the iterator to do ref counting.
 
 	it.Rewind()
