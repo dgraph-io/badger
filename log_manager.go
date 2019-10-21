@@ -1068,9 +1068,11 @@ func (lm *logManager) rotateLog(logtype logType) (*logFile, error) {
 	// get the path and fid based on the log type.
 	switch logtype {
 	case WAL:
+		lm.maxWalID++
 		fid = lm.maxWalID
 		break
 	case VLOG:
+		lm.maxVlogID++
 		fid = lm.maxVlogID
 	}
 	lf, err := lm.createlogFile(fid, logtype)
