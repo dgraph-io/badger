@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"fmt"
 	"math"
 	"sync"
 
@@ -47,7 +48,7 @@ type StreamWriter struct {
 	throttle   *y.Throttle
 	maxVersion uint64
 	writers    map[uint32]*sortedWriter
-	closer     *y.Closer
+	maxHead    valuePointer
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -61,7 +62,6 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 		// concurrent streams being processed.
 		throttle: y.NewThrottle(16),
 		writers:  make(map[uint32]*sortedWriter),
-		closer:   y.NewCloser(0),
 	}
 }
 
@@ -85,8 +85,23 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 	if len(kvs.GetKv()) == 0 {
 		return nil
 	}
+
+	// closedStreams keeps track of all streams which are going to be marked as done. We are
+	// keeping track of all streams so that we can close them at the end, after inserting all
+	// the valid kvs.
+	closedStreams := make(map[uint32]struct{})
 	streamReqs := make(map[uint32]*request)
 	for _, kv := range kvs.Kv {
+		if kv.StreamDone {
+			closedStreams[kv.StreamId] = struct{}{}
+			continue
+		}
+
+		// Panic if some kv comes after stream has been marked as closed.
+		if _, ok := closedStreams[kv.StreamId]; ok {
+			panic(fmt.Sprintf("write performed on closed stream: %d", kv.StreamId))
+		}
+
 		var meta, userMeta byte
 		if len(kv.Meta) > 0 {
 			meta = kv.Meta[0]
@@ -104,7 +119,7 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 			ExpiresAt: kv.ExpiresAt,
 			meta:      meta,
 		}
-		// If the value can be colocated with the key in LSM tree, we can skip
+		// If the value can be collocated with the key in LSM tree, we can skip
 		// writing the value to value log.
 		e.skipVlog = sw.db.shouldWriteValueToLSM(*e)
 		req := streamReqs[kv.StreamId]
@@ -121,6 +136,10 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
+
+	// We are writing all requests to vlog even if some request belongs to already closed stream.
+	// It is safe to do because we are panicking while writing to sorted writer, which will be nil
+	// for closed stream. At restart, stream writer will drop all the data in Prepare function.
 	if err := sw.db.vlog.write(all); err != nil {
 		return err
 	}
@@ -135,7 +154,34 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 			}
 			sw.writers[streamID] = writer
 		}
+
+		if writer == nil {
+			panic(fmt.Sprintf("write performed on closed stream: %d", streamID))
+		}
+
 		writer.reqCh <- req
+	}
+
+	// Now we can close any streams if required. We will make writer for
+	// the closed streams as nil.
+	for streamId := range closedStreams {
+		writer, ok := sw.writers[streamId]
+		if !ok {
+			sw.db.opt.Logger.Warningf("Trying to close stream: %d, but no sorted "+
+				"writer found for it", streamId)
+			continue
+		}
+
+		writer.closer.SignalAndWait()
+		if err := writer.Done(); err != nil {
+			return err
+		}
+
+		if sw.maxHead.Less(writer.head) {
+			sw.maxHead = writer.head
+		}
+
+		sw.writers[streamId] = nil
 	}
 	return nil
 }
@@ -148,19 +194,26 @@ func (sw *StreamWriter) Flush() error {
 
 	defer sw.done()
 
-	sw.closer.SignalAndWait()
-	var maxHead valuePointer
 	for _, writer := range sw.writers {
+		if writer != nil {
+			writer.closer.SignalAndWait()
+		}
+	}
+
+	for _, writer := range sw.writers {
+		if writer == nil {
+			continue
+		}
 		if err := writer.Done(); err != nil {
 			return err
 		}
-		if maxHead.Less(writer.head) {
-			maxHead = writer.head
+		if sw.maxHead.Less(writer.head) {
+			sw.maxHead = writer.head
 		}
 	}
 
 	// Encode and write the value log head into a new table.
-	data := maxHead.Encode()
+	data := sw.maxHead.Encode()
 	headWriter, err := sw.newWriter(headStreamId)
 	if err != nil {
 		return errors.Wrap(err, "failed to create head writer")
@@ -211,6 +264,8 @@ type sortedWriter struct {
 	streamID uint32
 	reqCh    chan *request
 	head     valuePointer
+	// Have separate closer for each writer, as it can be closed at any time.
+	closer *y.Closer
 }
 
 func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
@@ -227,17 +282,18 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 		throttle: sw.throttle,
 		builder:  table.NewTableBuilder(bopts),
 		reqCh:    make(chan *request, 3),
+		closer:   y.NewCloser(1),
 	}
-	sw.closer.AddRunning(1)
-	go w.handleRequests(sw.closer)
+
+	go w.handleRequests()
 	return w, nil
 }
 
 // ErrUnsortedKey is returned when any out of order key arrives at sortedWriter during call to Add.
 var ErrUnsortedKey = errors.New("Keys not in sorted order")
 
-func (w *sortedWriter) handleRequests(closer *y.Closer) {
-	defer closer.Done()
+func (w *sortedWriter) handleRequests() {
+	defer w.closer.Done()
 
 	process := func(req *request) {
 		for i, e := range req.Entries {
@@ -273,7 +329,7 @@ func (w *sortedWriter) handleRequests(closer *y.Closer) {
 		select {
 		case req := <-w.reqCh:
 			process(req)
-		case <-closer.HasBeenClosed():
+		case <-w.closer.HasBeenClosed():
 			close(w.reqCh)
 			for req := range w.reqCh {
 				process(req)
@@ -292,7 +348,7 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	sameKey := y.SameKey(key, w.lastKey)
 	// Same keys should go into the same SSTable.
 	if !sameKey && w.builder.ReachedCapacity(w.db.opt.MaxTableSize) {
-		if err := w.send(); err != nil {
+		if err := w.send(false); err != nil {
 			return err
 		}
 	}
@@ -302,7 +358,7 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	return nil
 }
 
-func (w *sortedWriter) send() error {
+func (w *sortedWriter) send(done bool) error {
 	if err := w.throttle.Do(); err != nil {
 		return err
 	}
@@ -310,6 +366,13 @@ func (w *sortedWriter) send() error {
 		err := w.createTable(builder)
 		w.throttle.Done(err)
 	}(w.builder)
+	// If done is true, this indicates we can close the writer.
+	// No need to allocate underlying TableBuilder now.
+	if done {
+		w.builder = nil
+		return nil
+	}
+
 	dk, err := w.db.registry.latestDataKey()
 	if err != nil {
 		return y.Wrapf(err, "Error while retriving datakey in sortedWriter.send")
@@ -324,9 +387,12 @@ func (w *sortedWriter) send() error {
 // to sortedWriter. It completes writing current SST to disk.
 func (w *sortedWriter) Done() error {
 	if w.builder.Empty() {
+		// Assign builder as nil, so that underlying memory can be garbage collected.
+		w.builder = nil
 		return nil
 	}
-	return w.send()
+
+	return w.send(true)
 }
 
 func (w *sortedWriter) createTable(builder *table.Builder) error {

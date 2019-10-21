@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/rand"
-	"os"
 	"strconv"
 	"sync"
 	"testing"
@@ -710,7 +709,7 @@ func TestIteratorAllVersionsWithDeleted2(t *testing.T) {
 func TestManagedDB(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	opt := getTestOptions(dir)
 	opt.managedTxns = true
@@ -801,7 +800,7 @@ func TestArmV7Issue311Fix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir).
 		WithTableLoadingMode(options.MemoryMap).

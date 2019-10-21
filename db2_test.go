@@ -49,7 +49,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	opt := getTestOptions(dir)
 	opt.SyncWrites = true
@@ -366,25 +366,23 @@ func TestDiscardMapTooBig(t *testing.T) {
 	}
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir))
-	require.NoError(t, err, "error while openning db")
+	require.NoError(t, err, "error while opening db")
 
-	// Add some data so that memtable flush happens on close
+	// Add some data so that memtable flush happens on close.
 	require.NoError(t, db.Update(func(txn *Txn) error {
 		return txn.Set([]byte("foo"), []byte("bar"))
 	}))
 
 	// overwrite discardstat with large value
-	db.vlog.lfDiscardStats = &lfDiscardStats{
-		m: createDiscardStats(),
-	}
+	db.vlog.lfDiscardStats.m = createDiscardStats()
 
 	require.NoError(t, db.Close())
 	// reopen the same DB
 	db, err = Open(DefaultOptions(dir))
-	require.NoError(t, err, "error while openning db")
+	require.NoError(t, err, "error while opening db")
 	require.NoError(t, db.Close())
 }
 
@@ -442,7 +440,7 @@ func TestBigValues(t *testing.T) {
 func TestCompactionFilePicking(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir).WithTableLoadingMode(options.LoadToRAM))
 	require.NoError(t, err, "error while opening db")
@@ -538,11 +536,6 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	tab, err := table.OpenTable(fd, bopts)
 	require.NoError(t, err)
 	return tab
-}
-func deferRemoveDir(t *testing.T, dir string) func() {
-	return func() {
-		require.NoError(t, os.RemoveAll(dir))
-	}
 }
 
 func TestReadSameVlog(t *testing.T) {

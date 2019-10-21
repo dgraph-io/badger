@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -38,7 +39,7 @@ import (
 func TestValueBasic(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	y.Check(err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	kv, _ := Open(getTestOptions(dir))
 	defer kv.Close()
@@ -99,7 +100,7 @@ func TestValueBasic(t *testing.T) {
 func TestValueGCManaged(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	N := 10000
 	opt := getTestOptions(dir)
@@ -158,7 +159,7 @@ func TestValueGCManaged(t *testing.T) {
 func TestValueGC(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 
@@ -211,7 +212,7 @@ func TestValueGC(t *testing.T) {
 func TestValueGC2(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 
@@ -287,7 +288,7 @@ func TestValueGC2(t *testing.T) {
 func TestValueGC3(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 
@@ -362,7 +363,7 @@ func TestValueGC3(t *testing.T) {
 func TestValueGC4(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 	opt.Truncate = true
@@ -438,7 +439,7 @@ func TestValueGC4(t *testing.T) {
 func TestPersistLFDiscardStats(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
 	opt.Truncate = true
@@ -470,29 +471,38 @@ func TestPersistLFDiscardStats(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// wait for compaction to complete
-	time.Sleep(1 * time.Second)
+	time.Sleep(1 * time.Second) // wait for compaction to complete
 
 	persistedMap := make(map[uint32]int64)
 	db.vlog.lfDiscardStats.Lock()
+	require.True(t, len(db.vlog.lfDiscardStats.m) > 0, "some discardStats should be generated")
 	for k, v := range db.vlog.lfDiscardStats.m {
 		persistedMap[k] = v
 	}
+	db.vlog.lfDiscardStats.updatesSinceFlush = discardStatsFlushThreshold + 1
 	db.vlog.lfDiscardStats.Unlock()
+
+	// db.vlog.lfDiscardStats.updatesSinceFlush is already > discardStatsFlushThreshold,
+	// send empty map to flushChan, so that latest discardStats map can be persisted.
+	db.vlog.lfDiscardStats.flushChan <- map[uint32]int64{}
+	time.Sleep(1 * time.Second) // Wait for map to be persisted.
 	err = db.Close()
 	require.NoError(t, err)
 
 	db, err = Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
+	time.Sleep(1 * time.Second) // Wait for discardStats to be populated by populateDiscardStats().
+	db.vlog.lfDiscardStats.RLock()
 	require.True(t, reflect.DeepEqual(persistedMap, db.vlog.lfDiscardStats.m),
 		"Discard maps are not equal")
+	db.vlog.lfDiscardStats.RUnlock()
 }
 
 func TestChecksums(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	// Set up SST with K1=V1
 	opts := getTestOptions(dir)
@@ -575,7 +585,7 @@ func TestChecksums(t *testing.T) {
 func TestPartialAppendToValueLog(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	// Create skeleton files.
 	opts := getTestOptions(dir)
@@ -630,7 +640,6 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	kv, err = Open(opts)
 	require.NoError(t, err)
 	checkKeys(t, kv, [][]byte{k3})
-
 	// Replay value log from beginning, badger head is past k2.
 	require.NoError(t, kv.vlog.Close())
 	require.NoError(t,
@@ -641,7 +650,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	// Create skeleton files.
 	opts := getTestOptions(dir)
@@ -680,7 +689,7 @@ func TestValueLogTrigger(t *testing.T) {
 	t.Skip("Difficult to trigger compaction, so skipping. Re-enable after fixing #226")
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
@@ -716,7 +725,7 @@ func TestValueLogTrigger(t *testing.T) {
 func createVlog(t *testing.T, entries []*Entry) []byte {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
@@ -740,7 +749,7 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 func TestPenultimateLogCorruption(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogLoadingMode = options.FileIO
 	// Each txn generates at least two entries. 3 txns will fit each file.
@@ -849,7 +858,7 @@ func (th *testHelper) readRange(from, to int) {
 func TestBug578(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	y.Check(err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir).
 		WithValueLogMaxEntries(64).
@@ -889,7 +898,7 @@ func BenchmarkReadWrite(b *testing.B) {
 			b.Run(fmt.Sprintf("%3.1f,%04d", rw, vsz), func(b *testing.B) {
 				dir, err := ioutil.TempDir("", "vlog-benchmark")
 				y.Check(err)
-				defer os.RemoveAll(dir)
+				defer removeDir(dir)
 
 				db, err := Open(getTestOptions(dir))
 				y.Check(err)
@@ -945,7 +954,7 @@ func BenchmarkReadWrite(b *testing.B) {
 func TestValueLogTruncate(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir).WithTruncate(true))
 	require.NoError(t, err)
@@ -1003,14 +1012,12 @@ func TestTruncatedDiscardStat(t *testing.T) {
 	for i := uint32(0); i < uint32(20); i++ {
 		stat[i] = 0
 	}
-	// Set discard stats.
-	db.vlog.lfDiscardStats = &lfDiscardStats{
-		m: stat,
-	}
+	db.vlog.lfDiscardStats.m = stat
+	encodedDS, _ := json.Marshal(db.vlog.lfDiscardStats.m)
 	entries := []*Entry{{
 		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
 		// Insert truncated discard stats. This is important.
-		Value: db.vlog.encodedDiscardStats()[:10],
+		Value: encodedDS[:10],
 	}}
 	// Push discard stats entry to the write channel.
 	req, err := db.sendToWriteCh(entries)
@@ -1059,14 +1066,14 @@ func TestDiscardStatsMove(t *testing.T) {
 		stat[i] = 0
 	}
 
-	// Set discard stats.
-	db.vlog.lfDiscardStats = &lfDiscardStats{
-		m: stat,
-	}
+	db.vlog.lfDiscardStats.Lock()
+	db.vlog.lfDiscardStats.m = stat
+	encodedDS, _ := json.Marshal(db.vlog.lfDiscardStats.m)
+	db.vlog.lfDiscardStats.Unlock()
 	entries := []*Entry{{
 		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
 		// The discard stat value is more than value threshold.
-		Value: db.vlog.encodedDiscardStats(),
+		Value: encodedDS,
 	}}
 	// Push discard stats entry to the write channel.
 	req, err := db.sendToWriteCh(entries)
@@ -1076,7 +1083,9 @@ func TestDiscardStatsMove(t *testing.T) {
 	// Unset discard stats. We've already pushed the stats. If we don't unset it then it will be
 	// pushed again on DB close. Also, the first insertion was in vlog file 1, this insertion would
 	// be in value log file 3.
+	db.vlog.lfDiscardStats.Lock()
 	db.vlog.lfDiscardStats.m = nil
+	db.vlog.lfDiscardStats.Unlock()
 
 	// Push more entries so that we get more than 1 value log files.
 	require.NoError(t, db.Update(func(txn *Txn) error {
@@ -1086,7 +1095,6 @@ func TestDiscardStatsMove(t *testing.T) {
 	require.NoError(t, db.Update(func(txn *Txn) error {
 		e := NewEntry([]byte("ff"), []byte("1"))
 		return txn.SetEntry(e)
-
 	}))
 
 	tr := trace.New("Badger.ValueLog", "GC")
@@ -1096,8 +1104,13 @@ func TestDiscardStatsMove(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	db, err = Open(ops)
+	// discardStats will be populate using vlog.populateDiscardStats(), which pushes discard stats
+	// to vlog.lfDiscardStats.flushChan. Hence wait for some time, for discard stats to be updated.
+	time.Sleep(1 * time.Second)
 	require.NoError(t, err)
+	db.vlog.lfDiscardStats.RLock()
 	require.Equal(t, stat, db.vlog.lfDiscardStats.m)
+	db.vlog.lfDiscardStats.RUnlock()
 	require.NoError(t, db.Close())
 }
 
@@ -1109,11 +1122,13 @@ func TestBlockedDiscardStats(t *testing.T) {
 	db, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 	// Set discard stats.
-	db.vlog.lfDiscardStats = &lfDiscardStats{
-		m: map[uint32]int64{0: 0},
-	}
+	db.vlog.lfDiscardStats.m = map[uint32]int64{0: 0}
 	db.blockWrite()
-	require.NoError(t, db.vlog.flushDiscardStats())
+	// Push discard stats more than the capacity of flushChan. This ensures at least one flush
+	// operation completes successfully after the writes were blocked.
+	for i := 0; i < cap(db.vlog.lfDiscardStats.flushChan)+2; i++ {
+		db.vlog.lfDiscardStats.flushChan <- db.vlog.lfDiscardStats.m
+	}
 	db.unblockWrite()
 	require.NoError(t, db.Close())
 }
@@ -1126,11 +1141,8 @@ func TestBlockedDiscardStatsOnClose(t *testing.T) {
 
 	db, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
-	// Set discard stats.
-	db.vlog.lfDiscardStats = &lfDiscardStats{
-		m: map[uint32]int64{0: 0},
-	}
-	// This is important. Set updateSinceFlush to discardStatsFlushThresold so
+	db.vlog.lfDiscardStats.m = map[uint32]int64{0: 0}
+	// This is important. Set updateSinceFlush to discardStatsFlushThreshold so
 	// that the next update call flushes the discard stats.
 	db.vlog.lfDiscardStats.updatesSinceFlush = discardStatsFlushThreshold + 1
 	require.NoError(t, db.Close())
@@ -1140,7 +1152,7 @@ func TestBlockedDiscardStatsOnClose(t *testing.T) {
 func TestValueEntryCorruption(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer func() { require.NoError(t, os.RemoveAll(dir)) }()
+	defer removeDir(dir)
 
 	opt := getTestOptions(dir)
 	opt.VerifyValueChecksum = true
