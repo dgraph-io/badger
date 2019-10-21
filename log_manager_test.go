@@ -129,11 +129,14 @@ func TestValueGCManaged(t *testing.T) {
 		t.Logf("File: %s. Size: %s\n", fi.Name(), humanize.Bytes(uint64(fi.Size())))
 	}
 
-	// for i := 0; i < 100; i++ {
-	// 	// Try at max 100 times to GC even a single value log file.
-	// 	if err := db.RunValueLogGC(0.0001); err == nil {
-	// 		return // Done
-	// 	}
-	// }
-	// require.Fail(t, "Unable to GC even a single value log file.")
+	for i := 0; i < 100; i++ {
+		// Try at max 100 times to GC even a single value log file.
+		err := db.RunValueLogGC(0.0001)
+		fmt.Println("I'm herer")
+		fmt.Printf("%+v \n", err)
+		if err == nil {
+			return // Done
+		}
+	}
+	require.Fail(t, "Unable to GC even a single value log file.")
 }

@@ -1309,6 +1309,7 @@ func (manager *logManager) pickLog(head valuePointer, tr trace.Trace) (files []*
 }
 
 func (manager *logManager) rewrite(f *logFile, tr trace.Trace) error {
+	fmt.Println("rewriting")
 	maxFid := atomic.LoadUint32(&manager.maxVlogID)
 	y.AssertTruef(uint32(f.fid) < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
 	tr.LazyPrintf("Rewriting fid: %d", f.fid)
