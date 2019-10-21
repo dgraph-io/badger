@@ -103,7 +103,7 @@ func init() {
 	bankTest.Flags().BoolVarP(&verbose, "verbose", "v", false,
 		"If true, the test will print all the executed bank transfers to standard output. "+
 			"This outputs a lot so it's best to turn it off when running the test for a while.")
-	bankTest.Flags().BoolVarP(&encryptionEnabled, "encryption", "e", false,
+	bankTest.Flags().BoolVarP(&encryptionEnabled, "encryption", "e", true,
 		"If it is true, badger will encrypt all the data stored on the disk.")
 
 	bankDisect.Flags().IntVarP(&numPrevious, "previous", "p", 12,
