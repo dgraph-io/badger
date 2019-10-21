@@ -84,7 +84,7 @@ func TestValueGCManaged(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	N := 500
+	N := 10000
 	opt := getTestOptions(dir)
 	opt.ValueLogMaxEntries = uint32(N / 10)
 	opt.managedTxns = true

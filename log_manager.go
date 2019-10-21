@@ -721,6 +721,8 @@ func (lm *logManager) write(reqs []*request) error {
 				return y.Wrapf(err, "Error while creating new wal file %d", lm.maxWalID)
 			}
 			wal = lf
+			// reset written entries.
+			lm.walWritten = 0
 		}
 		return nil
 	}
