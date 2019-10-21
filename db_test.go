@@ -74,7 +74,8 @@ func getTestOptions(dir string) Options {
 	opt := DefaultOptions(dir).
 		WithMaxTableSize(1 << 15). // Force more compaction.
 		WithLevelOneSize(4 << 15). // Force more compaction.
-		WithSyncWrites(false)
+		WithSyncWrites(false).
+		WithMaxCacheSize(10 << 20)
 	if !*mmap {
 		return opt.WithValueLogLoadingMode(options.FileIO)
 	}
@@ -1571,6 +1572,7 @@ func TestMinReadTs(t *testing.T) {
 }
 
 func TestGoroutineLeak(t *testing.T) {
+	time.Sleep(1 * time.Second)
 	before := runtime.NumGoroutine()
 	t.Logf("Num go: %d", before)
 	for i := 0; i < 12; i++ {
@@ -1602,6 +1604,7 @@ func TestGoroutineLeak(t *testing.T) {
 			require.Equal(t, true, updated)
 		})
 	}
+	time.Sleep(2 * time.Second)
 	require.Equal(t, before, runtime.NumGoroutine())
 }
 

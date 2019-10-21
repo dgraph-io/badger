@@ -410,6 +410,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	}
 	opts := buildTableOptions(w.db.opt)
 	opts.DataKey = builder.DataKey()
+	opts.Cache = w.db.blockCache
 	tbl, err := table.OpenTable(fd, opts)
 	if err != nil {
 		return err

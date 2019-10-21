@@ -20,6 +20,7 @@ import (
 	"crypto/aes"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/DataDog/zstd"
 	"github.com/golang/protobuf/proto"
@@ -36,10 +38,12 @@ import (
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto"
 	"github.com/dgraph-io/ristretto/z"
 )
 
 const fileSuffix = ".sst"
+const intSize = int(unsafe.Sizeof(int(0)))
 
 // Options contains configurable options for Table/Builder.
 type Options struct {
@@ -64,6 +68,8 @@ type Options struct {
 
 	// Compression indicates the compression algorithm used for block compression.
 	Compression options.CompressionType
+
+	Cache *ristretto.Cache
 }
 
 // TableInterface is useful for testing.
@@ -147,6 +153,11 @@ type block struct {
 	entriesIndexStart int // start index of entryOffsets list
 	entryOffsets      []uint32
 	chkLen            int // checksum length
+}
+
+func (b *block) size() int64 {
+	return int64(3*intSize /* Size of the offset, entriesIndexStart and chkLen */ +
+		cap(b.data) + cap(b.checksum) + cap(b.entryOffsets)*4)
 }
 
 func (b block) verifyCheckSum() error {
@@ -348,7 +359,13 @@ func (t *Table) block(idx int) (*block, error) {
 	if idx >= len(t.blockIndex) {
 		return nil, errors.New("block out of index")
 	}
-
+	if t.opt.Cache != nil {
+		key := t.blockCacheKey(idx)
+		blk, ok := t.opt.Cache.Get(key)
+		if ok && blk != nil {
+			return blk.(*block), nil
+		}
+	}
 	ko := t.blockIndex[idx]
 	blk := &block{
 		offset: int(ko.Offset),
@@ -407,7 +424,17 @@ func (t *Table) block(idx int) (*block, error) {
 			return nil, err
 		}
 	}
-	return blk, err
+	if t.opt.Cache != nil {
+		key := t.blockCacheKey(idx)
+		t.opt.Cache.Set(key, blk, blk.size())
+	}
+	return blk, nil
+}
+
+func (t *Table) blockCacheKey(idx int) uint64 {
+	y.AssertTrue(t.ID() < math.MaxUint32)
+	y.AssertTrue(idx < math.MaxUint32)
+	return (t.ID() << 32) | uint64(idx)
 }
 
 // Size is its file size in bytes

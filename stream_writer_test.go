@@ -51,8 +51,8 @@ func getSortedKVList(valueSize, listSize int) *pb.KVList {
 
 // check if we can read values after writing using stream writer
 func TestStreamWriter1(t *testing.T) {
-	normalModeOpts := DefaultOptions("")
-	managedModeOpts := DefaultOptions("")
+	normalModeOpts := getTestOptions("")
+	managedModeOpts := getTestOptions("")
 	managedModeOpts.managedTxns = true
 
 	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
@@ -92,8 +92,8 @@ func TestStreamWriter1(t *testing.T) {
 
 // write more keys to db after writing keys using stream writer
 func TestStreamWriter2(t *testing.T) {
-	normalModeOpts := DefaultOptions("")
-	managedModeOpts := DefaultOptions("")
+	normalModeOpts := getTestOptions("")
+	managedModeOpts := getTestOptions("")
 	managedModeOpts.managedTxns = true
 
 	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
@@ -144,8 +144,8 @@ func TestStreamWriter2(t *testing.T) {
 }
 
 func TestStreamWriter3(t *testing.T) {
-	normalModeOpts := DefaultOptions("")
-	managedModeOpts := DefaultOptions("")
+	normalModeOpts := getTestOptions("")
+	managedModeOpts := getTestOptions("")
 	managedModeOpts.managedTxns = true
 
 	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {

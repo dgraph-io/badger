@@ -35,6 +35,7 @@ import (
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
@@ -88,8 +89,9 @@ type DB struct {
 
 	orc *oracle
 
-	pub      *publisher
-	registry *KeyRegistry
+	pub        *publisher
+	registry   *KeyRegistry
+	blockCache *ristretto.Cache
 }
 
 const (
@@ -277,6 +279,18 @@ func Open(opt Options) (db *DB, err error) {
 		elog = trace.NewEventLog("Badger", "DB")
 	}
 
+	config := ristretto.Config{
+		// Use 5% of cache memory for storing counters.
+		NumCounters: int64(float64(opt.MaxCacheSize) * 0.05 * 2),
+		MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
+		BufferItems: 64,
+		// Enable metrics once https://github.com/dgraph-io/ristretto/issues/92 is resolved.
+		Metrics: false,
+	}
+	cache, err := ristretto.NewCache(&config)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create cache")
+	}
 	db = &DB{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
@@ -288,6 +302,7 @@ func Open(opt Options) (db *DB, err error) {
 		valueDirGuard: valueDirLockGuard,
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
+		blockCache:    cache,
 	}
 
 	krOpt := KeyRegistryOptions{
@@ -365,6 +380,14 @@ func Open(opt Options) (db *DB, err error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
+}
+
+// CacheMetrics returns the metrics for the underlying cache.
+func (db *DB) CacheMetrics() *ristretto.Metrics {
+	return nil
+	// Do not enable ristretto metrics in badger until issue
+	// https://github.com/dgraph-io/ristretto/issues/92 is resolved.
+	// return db.blockCache.Metrics()
 }
 
 // Close closes a DB. It's crucial to call it to ensure all the pending updates make their way to
@@ -453,6 +476,7 @@ func (db *DB) close() (err error) {
 	db.elog.Printf("Waiting for closer")
 	db.closers.updateSize.SignalAndWait()
 	db.orc.Stop()
+	db.blockCache.Close()
 
 	db.elog.Finish()
 
@@ -909,6 +933,8 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	}
 	bopts := buildTableOptions(db.opt)
 	bopts.DataKey = dk
+	// Builder does not need cache but the same options are used for opening table.
+	bopts.Cache = db.blockCache
 	tableData := buildL0Table(ft, bopts)
 
 	fileID := db.lc.reserveFileID()
@@ -1447,6 +1473,7 @@ func (db *DB) dropAll() (func(), error) {
 	db.vhead = valuePointer{} // Zero it out.
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
+	db.blockCache.Clear()
 	return resume, nil
 }
 

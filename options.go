@@ -57,9 +57,12 @@ type Options struct {
 	MaxLevels           int
 	ValueThreshold      int
 	NumMemtables        int
-	BlockSize           int
-	BloomFalsePositive  float64
-	KeepL0InMemory      bool
+	// Changing BlockSize across DB runs will not break badger. The block size is
+	// read from the block index stored at the end of the table.
+	BlockSize          int
+	BloomFalsePositive float64
+	KeepL0InMemory     bool
+	MaxCacheSize       int64
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -118,6 +121,7 @@ func DefaultOptions(path string) Options {
 		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
 		Compression:             options.ZSTD,
+		MaxCacheSize:            1 << 30, // 1 GB
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
@@ -497,5 +501,14 @@ func (opt Options) WithCompressionType(cType options.CompressionType) Options {
 // The default value of VerifyValueChecksum is False.
 func (opt Options) WithVerifyValueChecksum(val bool) Options {
 	opt.VerifyValueChecksum = val
+	return opt
+}
+
+// WithMaxCacheSize returns a new Options value with MaxCacheSize set to the given value.
+//
+// This value specifies how much data cache should hold in memory. A small size of cache means lower
+// memory consumption and lookups/iterations would take longer.
+func (opt Options) WithMaxCacheSize(size int64) Options {
+	opt.MaxCacheSize = size
 	return opt
 }
