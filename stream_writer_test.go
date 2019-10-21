@@ -292,7 +292,6 @@ func TestStreamWriter5(t *testing.T) {
 // if those are going to same table.
 func TestStreamWriter6(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		fmt.Println(db.opt.Dir)
 		list := &pb.KVList{}
 		str := []string{"a", "a", "b", "b", "c", "c"}
 		ver := 1
@@ -324,7 +323,6 @@ func TestStreamWriter6(t *testing.T) {
 			}
 		}
 		require.NoError(t, db.Close())
-
 		db, err := Open(db.opt)
 		require.NoError(t, err)
 		require.NoError(t, db.Close())

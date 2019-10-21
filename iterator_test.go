@@ -79,9 +79,9 @@ func TestPickSortTables(t *testing.T) {
 	genTables := func(mks ...MockKeys) []*table.Table {
 		out := make([]*table.Table, 0)
 		for _, mk := range mks {
-			f := buildTable(t, [][]string{{mk.small, "some value"}, {mk.large, "some value"}})
 			opts := table.Options{LoadingMode: options.MemoryMap,
 				ChkMode: options.OnTableAndBlockRead}
+			f := buildTable(t, [][]string{{mk.small, "some value"}, {mk.large, "some value"}}, opts)
 			tbl, err := table.OpenTable(f, opts)
 			require.NoError(t, err)
 			out = append(out, tbl)

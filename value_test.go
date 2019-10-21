@@ -1,37 +1,45 @@
-/*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// /*
+//  * Copyright 2017 Dgraph Labs, Inc. and Contributors
+//  *
+//  * Licensed under the Apache License, Version 2.0 (the "License");
+//  * you may not use this file except in compliance with the License.
+//  * You may obtain a copy of the License at
+//  *
+//  *     http://www.apache.org/licenses/LICENSE-2.0
+//  *
+//  * Unless required by applicable law or agreed to in writing, software
+//  * distributed under the License is distributed on an "AS IS" BASIS,
+//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  * See the License for the specific language governing permissions and
+//  * limitations under the License.
+//  */
 
-package badger
+ package badger
 
-import (
-	"fmt"
-	"io/ioutil"
-	"math/rand"
-	"os"
-	"sync"
-	"testing"
+// import (
+// 	"bytes"
+// 	"encoding/json"
+// 	"fmt"
+// 	"io/ioutil"
+// 	"math/rand"
+// 	"os"
+// 	"reflect"
+// 	"runtime"
+// 	"sync"
+// 	"testing"
+// 	"time"
 
-	humanize "github.com/dustin/go-humanize"
-	"github.com/stretchr/testify/require"
-)
+// 	"github.com/dgraph-io/badger/options"
+// 	"github.com/dgraph-io/badger/y"
+// 	humanize "github.com/dustin/go-humanize"
+// 	"github.com/stretchr/testify/require"
+// 	"golang.org/x/net/trace"
+// )
 
 // func TestValueBasic(t *testing.T) {
 // 	dir, err := ioutil.TempDir("", "badger-test")
 // 	y.Check(err)
-// 	defer os.RemoveAll(dir)
+// 	defer removeDir(dir)
 
 // 	kv, _ := Open(getTestOptions(dir))
 // 	defer kv.Close()
@@ -89,69 +97,69 @@ import (
 
 // }
 
-func TestValueGCManaged(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+// func TestValueGCManaged(t *testing.T) {
+// 	dir, err := ioutil.TempDir("", "badger-test")
+// 	require.NoError(t, err)
+// 	defer removeDir(dir)
 
-	N := 100
-	opt := getTestOptions(dir)
-	opt.ValueLogMaxEntries = uint32(N / 10)
-	opt.managedTxns = true
-	db, err := Open(opt)
-	require.NoError(t, err)
-	defer db.Close()
+// 	N := 10000
+// 	opt := getTestOptions(dir)
+// 	opt.ValueLogMaxEntries = uint32(N / 10)
+// 	opt.managedTxns = true
+// 	db, err := Open(opt)
+// 	require.NoError(t, err)
+// 	defer db.Close()
 
-	var ts uint64
-	newTs := func() uint64 {
-		ts++
-		return ts
-	}
+// 	var ts uint64
+// 	newTs := func() uint64 {
+// 		ts++
+// 		return ts
+// 	}
 
-	sz := 64 << 10
-	var wg sync.WaitGroup
-	for i := 0; i < N; i++ {
-		v := make([]byte, sz)
-		rand.Read(v[:rand.Intn(sz)])
+// 	sz := 64 << 10
+// 	var wg sync.WaitGroup
+// 	for i := 0; i < N; i++ {
+// 		v := make([]byte, sz)
+// 		rand.Read(v[:rand.Intn(sz)])
 
-		wg.Add(1)
-		txn := db.NewTransactionAt(newTs(), true)
-		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
-		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
-			wg.Done()
-			require.NoError(t, err)
-		}))
-	}
+// 		wg.Add(1)
+// 		txn := db.NewTransactionAt(newTs(), true)
+// 		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
+// 		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
+// 			wg.Done()
+// 			require.NoError(t, err)
+// 		}))
+// 	}
 
-	for i := 0; i < N; i++ {
-		wg.Add(1)
-		txn := db.NewTransactionAt(newTs(), true)
-		require.NoError(t, txn.Delete([]byte(fmt.Sprintf("key%d", i))))
-		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
-			wg.Done()
-			require.NoError(t, err)
-		}))
-	}
-	wg.Wait()
-	files, err := ioutil.ReadDir(dir)
-	require.NoError(t, err)
-	for _, fi := range files {
-		t.Logf("File: %s. Size: %s\n", fi.Name(), humanize.Bytes(uint64(fi.Size())))
-	}
+// 	for i := 0; i < N; i++ {
+// 		wg.Add(1)
+// 		txn := db.NewTransactionAt(newTs(), true)
+// 		require.NoError(t, txn.Delete([]byte(fmt.Sprintf("key%d", i))))
+// 		require.NoError(t, txn.CommitAt(newTs(), func(err error) {
+// 			wg.Done()
+// 			require.NoError(t, err)
+// 		}))
+// 	}
+// 	wg.Wait()
+// 	files, err := ioutil.ReadDir(dir)
+// 	require.NoError(t, err)
+// 	for _, fi := range files {
+// 		t.Logf("File: %s. Size: %s\n", fi.Name(), humanize.Bytes(uint64(fi.Size())))
+// 	}
 
-	for i := 0; i < 100; i++ {
-		// Try at max 100 times to GC even a single value log file.
-		if err := db.RunValueLogGC(0.0001); err == nil {
-			return // Done
-		}
-	}
-	require.Fail(t, "Unable to GC even a single value log file.")
-}
+// 	for i := 0; i < 100; i++ {
+// 		// Try at max 100 times to GC even a single value log file.
+// 		if err := db.RunValueLogGC(0.0001); err == nil {
+// 			return // Done
+// 		}
+// 	}
+// 	require.Fail(t, "Unable to GC even a single value log file.")
+// }
 
 // func TestValueGC(t *testing.T) {
 // 	dir, err := ioutil.TempDir("", "badger-test")
 // 	require.NoError(t, err)
-// 	defer os.RemoveAll(dir)
+// 	defer removeDir(dir)
 // 	opt := getTestOptions(dir)
 // 	opt.ValueLogFileSize = 1 << 20
 
@@ -204,7 +212,7 @@ func TestValueGCManaged(t *testing.T) {
 // func TestValueGC2(t *testing.T) {
 // 	dir, err := ioutil.TempDir("", "badger-test")
 // 	require.NoError(t, err)
-// 	defer os.RemoveAll(dir)
+// 	defer removeDir(dir)
 // 	opt := getTestOptions(dir)
 // 	opt.ValueLogFileSize = 1 << 20
 
@@ -280,7 +288,7 @@ func TestValueGCManaged(t *testing.T) {
 // func TestValueGC3(t *testing.T) {
 // 	dir, err := ioutil.TempDir("", "badger-test")
 // 	require.NoError(t, err)
-// 	defer os.RemoveAll(dir)
+// 	defer removeDir(dir)
 // 	opt := getTestOptions(dir)
 // 	opt.ValueLogFileSize = 1 << 20
 
@@ -355,7 +363,7 @@ func TestValueGCManaged(t *testing.T) {
 // func TestValueGC4(t *testing.T) {
 // 	dir, err := ioutil.TempDir("", "badger-test")
 // 	require.NoError(t, err)
-// 	defer os.RemoveAll(dir)
+// 	defer removeDir(dir)
 // 	opt := getTestOptions(dir)
 // 	opt.ValueLogFileSize = 1 << 20
 // 	opt.Truncate = true
@@ -431,7 +439,7 @@ func TestValueGCManaged(t *testing.T) {
 // func TestPersistLFDiscardStats(t *testing.T) {
 // 	dir, err := ioutil.TempDir("", "badger-test")
 // 	require.NoError(t, err)
-// 	defer os.RemoveAll(dir)
+// 	defer removeDir(dir)
 // 	opt := getTestOptions(dir)
 // 	opt.ValueLogFileSize = 1 << 20
 // 	opt.Truncate = true
@@ -463,29 +471,38 @@ func TestValueGCManaged(t *testing.T) {
 // 		require.NoError(t, err)
 // 	}
 
-// 	// wait for compaction to complete
-// 	time.Sleep(1 * time.Second)
+// 	time.Sleep(1 * time.Second) // wait for compaction to complete
 
 // 	persistedMap := make(map[uint32]int64)
 // 	db.vlog.lfDiscardStats.Lock()
+// 	require.True(t, len(db.vlog.lfDiscardStats.m) > 0, "some discardStats should be generated")
 // 	for k, v := range db.vlog.lfDiscardStats.m {
 // 		persistedMap[k] = v
 // 	}
+// 	db.vlog.lfDiscardStats.updatesSinceFlush = discardStatsFlushThreshold + 1
 // 	db.vlog.lfDiscardStats.Unlock()
+
+// 	// db.vlog.lfDiscardStats.updatesSinceFlush is already > discardStatsFlushThreshold,
+// 	// send empty map to flushChan, so that latest discardStats map can be persisted.
+// 	db.vlog.lfDiscardStats.flushChan <- map[uint32]int64{}
+// 	time.Sleep(1 * time.Second) // Wait for map to be persisted.
 // 	err = db.Close()
 // 	require.NoError(t, err)
 
 // 	db, err = Open(opt)
 // 	require.NoError(t, err)
 // 	defer db.Close()
+// 	time.Sleep(1 * time.Second) // Wait for discardStats to be populated by populateDiscardStats().
+// 	db.vlog.lfDiscardStats.RLock()
 // 	require.True(t, reflect.DeepEqual(persistedMap, db.vlog.lfDiscardStats.m),
 // 		"Discard maps are not equal")
+// 	db.vlog.lfDiscardStats.RUnlock()
 // }
 
 // func TestChecksums(t *testing.T) {
 // 	dir, err := ioutil.TempDir("", "badger-test")
 // 	require.NoError(t, err)
-// 	defer os.RemoveAll(dir)
+// 	defer removeDir(dir)
 
 // 	// Set up SST with K1=V1
 // 	opts := getTestOptions(dir)
@@ -568,7 +585,7 @@ func TestValueGCManaged(t *testing.T) {
 // func TestPartialAppendToValueLog(t *testing.T) {
 // 	dir, err := ioutil.TempDir("", "badger-test")
 // 	require.NoError(t, err)
-// 	defer os.RemoveAll(dir)
+// 	defer removeDir(dir)
 
 // 	// Create skeleton files.
 // 	opts := getTestOptions(dir)
@@ -623,7 +640,6 @@ func TestValueGCManaged(t *testing.T) {
 // 	kv, err = Open(opts)
 // 	require.NoError(t, err)
 // 	checkKeys(t, kv, [][]byte{k3})
-
 // 	// Replay value log from beginning, badger head is past k2.
 // 	require.NoError(t, kv.vlog.Close())
 // 	require.NoError(t,
@@ -634,7 +650,7 @@ func TestValueGCManaged(t *testing.T) {
 // func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 // 	dir, err := ioutil.TempDir("", "badger-test")
 // 	require.NoError(t, err)
-// 	defer os.RemoveAll(dir)
+// 	defer removeDir(dir)
 
 // 	// Create skeleton files.
 // 	opts := getTestOptions(dir)
@@ -664,52 +680,52 @@ func TestValueGCManaged(t *testing.T) {
 
 // 	opts.ReadOnly = true
 // 	// Badger should fail a read-only open with values to replay
-// 	kv, err = Open(opts)
+// 	_, err = Open(opts)
 // 	require.Error(t, err)
 // 	require.Regexp(t, "Database was not properly closed, cannot open read-only|Read-only mode is not supported on Windows", err.Error())
 // }
 
-// // func TestValueLogTrigger(t *testing.T) {
-// // 	t.Skip("Difficult to trigger compaction, so skipping. Re-enable after fixing #226")
-// // 	dir, err := ioutil.TempDir("", "badger-test")
-// // 	require.NoError(t, err)
-// // 	defer os.RemoveAll(dir)
+// func TestValueLogTrigger(t *testing.T) {
+// 	t.Skip("Difficult to trigger compaction, so skipping. Re-enable after fixing #226")
+// 	dir, err := ioutil.TempDir("", "badger-test")
+// 	require.NoError(t, err)
+// 	defer removeDir(dir)
 
-// // 	opt := getTestOptions(dir)
-// // 	opt.ValueLogFileSize = 1 << 20
-// // 	kv, err := Open(opt)
-// // 	require.NoError(t, err)
+// 	opt := getTestOptions(dir)
+// 	opt.ValueLogFileSize = 1 << 20
+// 	kv, err := Open(opt)
+// 	require.NoError(t, err)
 
-// // 	// Write a lot of data, so it creates some work for valug log GC.
-// // 	sz := 32 << 10
-// // 	txn := kv.NewTransaction(true)
-// // 	for i := 0; i < 100; i++ {
-// // 		v := make([]byte, sz)
-// // 		rand.Read(v[:rand.Intn(sz)])
-// // 		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
-// // 		if i%20 == 0 {
-// // 			require.NoError(t, txn.Commit())
-// // 			txn = kv.NewTransaction(true)
-// // 		}
-// // 	}
-// // 	require.NoError(t, txn.Commit())
+// 	// Write a lot of data, so it creates some work for valug log GC.
+// 	sz := 32 << 10
+// 	txn := kv.NewTransaction(true)
+// 	for i := 0; i < 100; i++ {
+// 		v := make([]byte, sz)
+// 		rand.Read(v[:rand.Intn(sz)])
+// 		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
+// 		if i%20 == 0 {
+// 			require.NoError(t, txn.Commit())
+// 			txn = kv.NewTransaction(true)
+// 		}
+// 	}
+// 	require.NoError(t, txn.Commit())
 
-// // 	for i := 0; i < 45; i++ {
-// // 		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
-// // 	}
+// 	for i := 0; i < 45; i++ {
+// 		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
+// 	}
 
-// // 	require.NoError(t, kv.RunValueLogGC(0.5))
+// 	require.NoError(t, kv.RunValueLogGC(0.5))
 
-// // 	require.NoError(t, kv.Close())
+// 	require.NoError(t, kv.Close())
 
-// // 	err = kv.RunValueLogGC(0.5)
-// // 	require.Equal(t, ErrRejected, err, "Error should be returned after closing DB.")
-// // }
+// 	err = kv.RunValueLogGC(0.5)
+// 	require.Equal(t, ErrRejected, err, "Error should be returned after closing DB.")
+// }
 
 // func createVlog(t *testing.T, entries []*Entry) []byte {
 // 	dir, err := ioutil.TempDir("", "badger-test")
 // 	require.NoError(t, err)
-// 	defer os.RemoveAll(dir)
+// 	defer removeDir(dir)
 
 // 	opts := getTestOptions(dir)
 // 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
@@ -733,7 +749,7 @@ func TestValueGCManaged(t *testing.T) {
 // func TestPenultimateLogCorruption(t *testing.T) {
 // 	dir, err := ioutil.TempDir("", "badger-test")
 // 	require.NoError(t, err)
-// 	defer os.RemoveAll(dir)
+// 	defer removeDir(dir)
 // 	opt := getTestOptions(dir)
 // 	opt.ValueLogLoadingMode = options.FileIO
 // 	// Each txn generates at least two entries. 3 txns will fit each file.
@@ -839,35 +855,35 @@ func TestValueGCManaged(t *testing.T) {
 // // Test Bug #578, which showed that if a value is moved during value log GC, an
 // // older version can end up at a higher level in the LSM tree than a newer
 // // version, causing the data to not be returned.
-// // func TestBug578(t *testing.T) {
-// // 	dir, err := ioutil.TempDir("", "badger-test")
-// // 	y.Check(err)
-// // 	defer os.RemoveAll(dir)
+// func TestBug578(t *testing.T) {
+// 	dir, err := ioutil.TempDir("", "badger-test")
+// 	y.Check(err)
+// 	defer removeDir(dir)
 
-// // 	db, err := Open(DefaultOptions(dir).
-// // 		WithValueLogMaxEntries(64).
-// // 		WithMaxTableSize(1 << 13))
-// // 	require.NoError(t, err)
+// 	db, err := Open(DefaultOptions(dir).
+// 		WithValueLogMaxEntries(64).
+// 		WithMaxTableSize(1 << 13))
+// 	require.NoError(t, err)
 
-// // 	h := testHelper{db: db, t: t}
+// 	h := testHelper{db: db, t: t}
 
-// // 	// Let's run this whole thing a few times.
-// // 	for j := 0; j < 10; j++ {
-// // 		t.Logf("Cycle: %d\n", j)
-// // 		h.writeRange(0, 32)
-// // 		h.writeRange(0, 10)
-// // 		h.writeRange(50, 72)
-// // 		h.writeRange(40, 72)
-// // 		h.writeRange(40, 72)
+// 	// Let's run this whole thing a few times.
+// 	for j := 0; j < 10; j++ {
+// 		t.Logf("Cycle: %d\n", j)
+// 		h.writeRange(0, 32)
+// 		h.writeRange(0, 10)
+// 		h.writeRange(50, 72)
+// 		h.writeRange(40, 72)
+// 		h.writeRange(40, 72)
 
-// // 		// Run value log GC a few times.
-// // 		for i := 0; i < 5; i++ {
-// // 			db.RunValueLogGC(0.5)
-// // 		}
-// // 		h.readRange(0, 10)
-// // 	}
-// // 	require.NoError(t, db.Close())
-// // }
+// 		// Run value log GC a few times.
+// 		for i := 0; i < 5; i++ {
+// 			db.RunValueLogGC(0.5)
+// 		}
+// 		h.readRange(0, 10)
+// 	}
+// 	require.NoError(t, db.Close())
+// }
 
 // func BenchmarkReadWrite(b *testing.B) {
 // 	rwRatio := []float32{
@@ -882,7 +898,7 @@ func TestValueGCManaged(t *testing.T) {
 // 			b.Run(fmt.Sprintf("%3.1f,%04d", rw, vsz), func(b *testing.B) {
 // 				dir, err := ioutil.TempDir("", "vlog-benchmark")
 // 				y.Check(err)
-// 				defer os.RemoveAll(dir)
+// 				defer removeDir(dir)
 
 // 				db, err := Open(getTestOptions(dir))
 // 				y.Check(err)
@@ -938,7 +954,7 @@ func TestValueGCManaged(t *testing.T) {
 // func TestValueLogTruncate(t *testing.T) {
 // 	dir, err := ioutil.TempDir("", "badger-test")
 // 	require.NoError(t, err)
-// 	defer os.RemoveAll(dir)
+// 	defer removeDir(dir)
 
 // 	db, err := Open(DefaultOptions(dir).WithTruncate(true))
 // 	require.NoError(t, err)
@@ -996,14 +1012,12 @@ func TestValueGCManaged(t *testing.T) {
 // 	for i := uint32(0); i < uint32(20); i++ {
 // 		stat[i] = 0
 // 	}
-// 	// Set discard stats.
-// 	db.vlog.lfDiscardStats = &lfDiscardStats{
-// 		m: stat,
-// 	}
+// 	db.vlog.lfDiscardStats.m = stat
+// 	encodedDS, _ := json.Marshal(db.vlog.lfDiscardStats.m)
 // 	entries := []*Entry{{
 // 		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
 // 		// Insert truncated discard stats. This is important.
-// 		Value: db.vlog.encodedDiscardStats()[:10],
+// 		Value: encodedDS[:10],
 // 	}}
 // 	// Push discard stats entry to the write channel.
 // 	req, err := db.sendToWriteCh(entries)
@@ -1052,14 +1066,14 @@ func TestValueGCManaged(t *testing.T) {
 // 		stat[i] = 0
 // 	}
 
-// 	// Set discard stats.
-// 	db.vlog.lfDiscardStats = &lfDiscardStats{
-// 		m: stat,
-// 	}
+// 	db.vlog.lfDiscardStats.Lock()
+// 	db.vlog.lfDiscardStats.m = stat
+// 	encodedDS, _ := json.Marshal(db.vlog.lfDiscardStats.m)
+// 	db.vlog.lfDiscardStats.Unlock()
 // 	entries := []*Entry{{
 // 		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
 // 		// The discard stat value is more than value threshold.
-// 		Value: db.vlog.encodedDiscardStats(),
+// 		Value: encodedDS,
 // 	}}
 // 	// Push discard stats entry to the write channel.
 // 	req, err := db.sendToWriteCh(entries)
@@ -1069,7 +1083,9 @@ func TestValueGCManaged(t *testing.T) {
 // 	// Unset discard stats. We've already pushed the stats. If we don't unset it then it will be
 // 	// pushed again on DB close. Also, the first insertion was in vlog file 1, this insertion would
 // 	// be in value log file 3.
+// 	db.vlog.lfDiscardStats.Lock()
 // 	db.vlog.lfDiscardStats.m = nil
+// 	db.vlog.lfDiscardStats.Unlock()
 
 // 	// Push more entries so that we get more than 1 value log files.
 // 	require.NoError(t, db.Update(func(txn *Txn) error {
@@ -1079,7 +1095,6 @@ func TestValueGCManaged(t *testing.T) {
 // 	require.NoError(t, db.Update(func(txn *Txn) error {
 // 		e := NewEntry([]byte("ff"), []byte("1"))
 // 		return txn.SetEntry(e)
-
 // 	}))
 
 // 	tr := trace.New("Badger.ValueLog", "GC")
@@ -1089,8 +1104,13 @@ func TestValueGCManaged(t *testing.T) {
 // 	require.NoError(t, db.Close())
 
 // 	db, err = Open(ops)
+// 	// discardStats will be populate using vlog.populateDiscardStats(), which pushes discard stats
+// 	// to vlog.lfDiscardStats.flushChan. Hence wait for some time, for discard stats to be updated.
+// 	time.Sleep(1 * time.Second)
 // 	require.NoError(t, err)
+// 	db.vlog.lfDiscardStats.RLock()
 // 	require.Equal(t, stat, db.vlog.lfDiscardStats.m)
+// 	db.vlog.lfDiscardStats.RUnlock()
 // 	require.NoError(t, db.Close())
 // }
 
@@ -1102,11 +1122,13 @@ func TestValueGCManaged(t *testing.T) {
 // 	db, err := Open(getTestOptions(dir))
 // 	require.NoError(t, err)
 // 	// Set discard stats.
-// 	db.vlog.lfDiscardStats = &lfDiscardStats{
-// 		m: map[uint32]int64{0: 0},
-// 	}
+// 	db.vlog.lfDiscardStats.m = map[uint32]int64{0: 0}
 // 	db.blockWrite()
-// 	require.NoError(t, db.vlog.flushDiscardStats())
+// 	// Push discard stats more than the capacity of flushChan. This ensures at least one flush
+// 	// operation completes successfully after the writes were blocked.
+// 	for i := 0; i < cap(db.vlog.lfDiscardStats.flushChan)+2; i++ {
+// 		db.vlog.lfDiscardStats.flushChan <- db.vlog.lfDiscardStats.m
+// 	}
 // 	db.unblockWrite()
 // 	require.NoError(t, db.Close())
 // }
@@ -1119,12 +1141,54 @@ func TestValueGCManaged(t *testing.T) {
 
 // 	db, err := Open(getTestOptions(dir))
 // 	require.NoError(t, err)
-// 	// Set discard stats.
-// 	db.vlog.lfDiscardStats = &lfDiscardStats{
-// 		m: map[uint32]int64{0: 0},
-// 	}
-// 	// This is important. Set updateSinceFlush to discardStatsFlushThresold so
+// 	db.vlog.lfDiscardStats.m = map[uint32]int64{0: 0}
+// 	// This is important. Set updateSinceFlush to discardStatsFlushThreshold so
 // 	// that the next update call flushes the discard stats.
 // 	db.vlog.lfDiscardStats.updatesSinceFlush = discardStatsFlushThreshold + 1
+// 	require.NoError(t, db.Close())
+// }
+
+// // Regression test for https://github.com/dgraph-io/badger/issues/1049
+// func TestValueEntryCorruption(t *testing.T) {
+// 	dir, err := ioutil.TempDir("", "badger-test")
+// 	require.NoError(t, err)
+// 	defer removeDir(dir)
+
+// 	opt := getTestOptions(dir)
+// 	opt.VerifyValueChecksum = true
+// 	db, err := Open(opt)
+// 	require.NoError(t, err)
+
+// 	k := []byte("KEY")
+// 	v := []byte(fmt.Sprintf("val%100d", 10))
+// 	require.Greater(t, len(v), db.opt.ValueThreshold)
+// 	txnSet(t, db, k, v, 0)
+
+// 	path := db.vlog.fpath(0)
+// 	require.NoError(t, db.Close())
+
+// 	file, err := os.OpenFile(path, os.O_RDWR, 0644)
+// 	require.NoError(t, err)
+// 	offset := 50
+// 	orig := make([]byte, 1)
+// 	_, err = file.ReadAt(orig, int64(offset))
+// 	require.NoError(t, err)
+// 	// Corrupt a single bit.
+// 	_, err = file.WriteAt([]byte{7}, int64(offset))
+// 	require.NoError(t, err)
+// 	require.NoError(t, file.Close())
+
+// 	db, err = Open(opt)
+// 	require.NoError(t, err)
+
+// 	txn := db.NewTransaction(false)
+// 	entry, err := txn.Get(k)
+// 	require.NoError(t, err)
+
+// 	x, err := entry.ValueCopy(nil)
+// 	require.Error(t, err)
+// 	require.Contains(t, err.Error(), "checksum mismatch")
+// 	require.Nil(t, x)
+
 // 	require.NoError(t, db.Close())
 // }

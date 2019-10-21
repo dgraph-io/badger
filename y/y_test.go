@@ -222,10 +222,12 @@ func TestPagebufferReader3(t *testing.T) {
 	// Read EOF.
 	n, err = reader.Read(readBuf)
 	require.Equal(t, err, io.EOF, "should return EOF")
+	require.Equal(t, n, 0)
 
 	// Read EOF again.
 	n, err = reader.Read(readBuf)
 	require.Equal(t, err, io.EOF, "should return EOF")
+	require.Equal(t, n, 0)
 }
 
 // Test when read buffer is larger than PageBuffer.
@@ -250,4 +252,5 @@ func TestPagebufferReader4(t *testing.T) {
 	// Read EOF.
 	n, err = reader.Read(readBuf)
 	require.Equal(t, err, io.EOF, "should return EOF")
+	require.Equal(t, n, 0)
 }

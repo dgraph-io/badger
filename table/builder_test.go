@@ -34,8 +34,8 @@ func TestTableIndex(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 	keyPrefix := "key"
 	t.Run("single key", func(t *testing.T) {
-		f := buildTestTable(t, keyPrefix, 1)
-		opts := Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+		opts := Options{Compression: options.ZSTD}
+		f := buildTestTable(t, keyPrefix, 1, opts)
 		tbl, err := OpenTable(f, opts)
 		require.NoError(t, err)
 		require.Len(t, tbl.blockIndex, 1)
@@ -51,6 +51,9 @@ func TestTableIndex(t *testing.T) {
 		require.NoError(t, err)
 		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
 			DataKey: &pb.DataKey{Data: key}})
+		// Compression mode.
+		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+			Compression: options.ZSTD})
 		keysCount := 10000
 		for _, opt := range opts {
 			builder := NewTableBuilder(opt)
@@ -76,10 +79,8 @@ func TestTableIndex(t *testing.T) {
 			_, err = f.Write(builder.Finish())
 			require.NoError(t, err, "unable to write to file")
 
-			topt := Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead,
-				DataKey: opt.DataKey}
-			tbl, err := OpenTable(f, topt)
-			if topt.DataKey == nil {
+			tbl, err := OpenTable(f, opt)
+			if opt.DataKey == nil {
 				// key id is zero if thre is no datakey.
 				require.Equal(t, tbl.KeyID(), uint64(0))
 			}
@@ -93,6 +94,22 @@ func TestTableIndex(t *testing.T) {
 			f.Close()
 			os.RemoveAll(filename)
 		}
+	})
+}
+
+func TestInvalidCompression(t *testing.T) {
+	keyPrefix := "key"
+	opts := Options{Compression: options.ZSTD}
+	f := buildTestTable(t, keyPrefix, 1000, opts)
+	t.Run("with correct decompression algo", func(t *testing.T) {
+		_, err := OpenTable(f, opts)
+		require.NoError(t, err)
+	})
+	t.Run("with incorrect decompression algo", func(t *testing.T) {
+		// Set incorrect compression algorithm.
+		opts.Compression = options.Snappy
+		_, err := OpenTable(f, opts)
+		require.Error(t, err)
 	})
 }
 

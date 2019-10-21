@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/table"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -46,6 +47,7 @@ type Options struct {
 	ReadOnly            bool
 	Truncate            bool
 	Logger              Logger
+	Compression         options.CompressionType
 	EventLogging        bool
 
 	// Fine tuning options.
@@ -69,6 +71,8 @@ type Options struct {
 	NumCompactors     int
 	CompactL0OnClose  bool
 	LogRotatesToFlush int32
+	// When set, checksum will be validated for each entry read from the value log file.
+	VerifyValueChecksum bool
 
 	// Encryption related options.
 	EncryptionKey                 []byte        // encryption key
@@ -112,6 +116,8 @@ func DefaultOptions(path string) Options {
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          true,
+		VerifyValueChecksum:     false,
+		Compression:             options.ZSTD,
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
@@ -126,6 +132,16 @@ func DefaultOptions(path string) Options {
 		EventLogging:                  true,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
+	}
+}
+
+func buildTableOptions(opt Options) table.Options {
+	return table.Options{
+		BlockSize:          opt.BlockSize,
+		BloomFalsePositive: opt.BloomFalsePositive,
+		LoadingMode:        opt.TableLoadingMode,
+		ChkMode:            opt.ChecksumVerificationMode,
+		Compression:        opt.Compression,
 	}
 }
 
@@ -459,5 +475,27 @@ func (opt Options) WithEncryptionKeyRotationDuration(d time.Duration) Options {
 // The default value of KeepL0InMemory is true.
 func (opt Options) WithKeepL0InMemory(val bool) Options {
 	opt.KeepL0InMemory = val
+	return opt
+}
+
+// WithCompressionType returns a new Options value with CompressionType set to the given value.
+//
+// When compression type is set, every block will be compressed using the specified algorithm.
+// This option doesn't affect existing tables. Only the newly created tables will be compressed.
+func (opt Options) WithCompressionType(cType options.CompressionType) Options {
+	opt.Compression = cType
+	return opt
+}
+
+// WithVerifyValueChecksum returns a new Options value with VerifyValueChecksum set to
+// the given value.
+//
+// When VerifyValueChecksum is set to true, checksum will be verified for every entry read
+// from the value log. If the value is stored in SST (value size less than value threshold) then the
+// checksum validation will not be done.
+//
+// The default value of VerifyValueChecksum is False.
+func (opt Options) WithVerifyValueChecksum(val bool) Options {
+	opt.VerifyValueChecksum = val
 	return opt
 }

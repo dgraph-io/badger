@@ -112,7 +112,7 @@ func TestMismatch(t *testing.T) {
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
 	opt.EncryptionKey = encryptionKey
-	kr, err = OpenKeyRegistry(opt)
+	_, err = OpenKeyRegistry(opt)
 	require.Error(t, err)
 	require.EqualError(t, err, ErrEncryptionKeyMismatch.Error())
 }

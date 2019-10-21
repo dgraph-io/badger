@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
-	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -378,6 +377,8 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.pub = y.NewCloser(1)
 	go db.pub.listenForUpdates(db.closers.pub)
 
+	go db.log.flushDiscardStats()
+
 	valueDirLockGuard = nil
 	dirLockGuard = nil
 	manifestFile = nil
@@ -397,14 +398,10 @@ func (db *DB) Close() error {
 func (db *DB) close() (err error) {
 	db.elog.Printf("Closing database")
 
-	// if err := db.vlog.flushDiscardStats(); err != nil {
-	// 	return errors.Wrap(err, "failed to flush discard stats")
-	// }
-
 	atomic.StoreInt32(&db.blockWrites, 1)
 
 	// Stop value GC first.
-	//	db.closers.valueGC.SignalAndWait()
+	db.closers.valueGC.SignalAndWait()
 
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
@@ -927,8 +924,7 @@ type flushTask struct {
 
 // handleFlushTask must be run serially.
 func (db *DB) handleFlushTask(ft flushTask) error {
-	fmt.Printf("%+v \n", ft)
-	// There can be a scnerio, when empty memtable is flushed. For example, memtable is empty and
+	// There can be a scenario, when empty memtable is flushed. For example, memtable is empty and
 	// after writing request to value log, rotation count exceeds db.LogRotatesToFlush.
 	if ft.mt.Empty() {
 		return nil
@@ -955,16 +951,13 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	if err != nil {
 		return y.Wrapf(err, "failed to get datakey in db.handleFlushTask")
 	}
-	bopts := table.Options{
-		BlockSize:          db.opt.BlockSize,
-		BloomFalsePositive: db.opt.BloomFalsePositive,
-		DataKey:            dk,
-	}
+	bopts := buildTableOptions(db.opt)
+	bopts.DataKey = dk
 	tableData := buildL0Table(ft, bopts)
 
 	fileID := db.lc.reserveFileID()
 	if db.opt.KeepL0InMemory {
-		tbl, err := table.OpenInMemoryTable(tableData, fileID, dk)
+		tbl, err := table.OpenInMemoryTable(tableData, fileID, &bopts)
 		if err != nil {
 			return errors.Wrapf(err, "failed to open table in memory")
 		}
@@ -989,13 +982,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		// Do dir sync as best effort. No need to return due to an error there.
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
-
-	opts := table.Options{
-		LoadingMode: db.opt.TableLoadingMode,
-		ChkMode:     db.opt.ChecksumVerificationMode,
-		DataKey:     dk,
-	}
-	tbl, err := table.OpenTable(fd, opts)
+	tbl, err := table.OpenTable(fd, bopts)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err

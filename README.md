@@ -2,9 +2,10 @@
 
 ![Badger mascot](images/diggy-shadow.png)
 
-BadgerDB is an embeddable, persistent and fast key-value (KV) database
-written in pure Go. It's meant to be a performant alternative to non-Go-based
-key-value stores like [RocksDB](https://github.com/facebook/rocksdb).
+BadgerDB is an embeddable, persistent and fast key-value (KV) database written
+in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
+fast, distributed graph database. It's meant to be a performant alternative to
+non-Go-based key-value stores like RocksDB.
 
 ## Project Status [Jun 26, 2019]
 
@@ -735,6 +736,7 @@ Below is a list of known projects that use Badger:
 
 * [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
 * [Dgraph](https://github.com/dgraph-io/dgraph) - Distributed graph database.
+* [TalariaDB](https://github.com/grab/talaria) - Distributed, low latency time-series database.
 * [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed application data analytics.
 * [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
 * [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
@@ -861,10 +863,10 @@ you're trying to open in a newer version of badger. The underlying data format c
 badger versions and users will have to migrate their data directory.
 Badger data can be migrated from version X of badger to version Y of badger by following the steps
 listed below.
-Assume you were on badger v1.5.5 and you wish to migrate to v2.0.0 version
-1. Install badger version v1.5.5.
+Assume you were on badger v1.6.0 and you wish to migrate to v2.0.0 version.
+1. Install badger version v1.6.0
     - `cd $GOPATH/src/github.com/dgraph-io/badger`
-    - `git checkout v1.5.5`
+    - `git checkout v1.6.0`
     - `cd badger && go install`
 
       This should install the old badger binary in your $GOBIN.

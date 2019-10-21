@@ -18,6 +18,7 @@ package badger
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -72,6 +73,11 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		maxVlogID:   0,
 		vlogFileMap: map[uint32]*logFile{},
 		garbageCh:   make(chan struct{}, 1),
+		lfDiscardStats: &lfDiscardStats{
+			m:         make(map[uint32]int64),
+			closer:    y.NewCloser(1),
+			flushChan: make(chan map[uint32]int64, 16),
+		},
 	}
 	if manager.opt.EventLogging {
 		manager.elog = trace.NewEventLog("Badger", "LogManager")
@@ -251,6 +257,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	if err = manager.vlog.mmap(2 * manager.opt.ValueLogFileSize); err != nil {
 		return nil, y.Wrapf(err, "Error while mmaping vlog file %d", manager.vlog.fid)
 	}
+
 	return manager, nil
 }
 
@@ -989,9 +996,68 @@ func (lm *logManager) iteratorCount() int {
 	return int(atomic.LoadInt32(&lm.numActiveIterators))
 }
 
-func (lm *logManager) updateDiscardStats(stats map[uint32]int64) error {
+func (lm *logManager) flushDiscardStats() {
+	defer lm.lfDiscardStats.closer.Done()
 
-	return nil
+	mergeStats := func(stats map[uint32]int64) ([]byte, error) {
+		lm.lfDiscardStats.Lock()
+		defer lm.lfDiscardStats.Unlock()
+		for fid, count := range stats {
+			lm.lfDiscardStats.m[fid] += count
+			lm.lfDiscardStats.updatesSinceFlush++
+		}
+
+		if lm.lfDiscardStats.updatesSinceFlush > discardStatsFlushThreshold {
+			encodedDS, err := json.Marshal(lm.lfDiscardStats.m)
+			if err != nil {
+				return nil, err
+			}
+			lm.lfDiscardStats.updatesSinceFlush = 0
+			return encodedDS, nil
+		}
+		return nil, nil
+	}
+
+	process := func(stats map[uint32]int64) error {
+		encodedDS, err := mergeStats(stats)
+		if err != nil || encodedDS == nil {
+			return err
+		}
+
+		entries := []*Entry{{
+			Key:   y.KeyWithTs(lfDiscardStatsKey, 1),
+			Value: encodedDS,
+		}}
+		req, err := lm.db.sendToWriteCh(entries)
+		// No special handling of ErrBlockedWrites is required as err is just logged in
+		// for loop below.
+		if err != nil {
+			return errors.Wrapf(err, "failed to push discard stats to write channel")
+		}
+		return req.Wait()
+	}
+
+	closer := lm.lfDiscardStats.closer
+	for {
+		select {
+		case <-closer.HasBeenClosed():
+			// For simplicity just return without processing already present in stats in flushChan.
+			return
+		case stats := <-lm.lfDiscardStats.flushChan:
+			if err := process(stats); err != nil {
+				lm.opt.Errorf("unable to process discardstats with error: %s", err)
+			}
+		}
+	}
+}
+
+func (lm *logManager) updateDiscardStats(stats map[uint32]int64) {
+	select {
+	case lm.lfDiscardStats.flushChan <- stats:
+	default:
+		lm.opt.Warningf("updateDiscardStats called: discard stats flushChan full, " +
+			"returning without pushing to flushChan")
+	}
 }
 
 func (lm *logManager) rotateLog(logtype logType) (*logFile, error) {
@@ -1548,5 +1614,62 @@ func (manager *logManager) doRunGC(lf *logFile, discardRatio float64, tr trace.T
 		return err
 	}
 	tr.LazyPrintf("Done rewriting.")
+	return nil
+}
+
+// populateDiscardStats populates vlog.lfDiscardStats.
+// This function will be called while initializing valueLog.
+func (lm *logManager) populateDiscardStats() error {
+	key := y.KeyWithTs(lfDiscardStatsKey, math.MaxUint64)
+	var statsMap map[uint32]int64
+	var val []byte
+	var vp valuePointer
+	for {
+		vs, err := lm.db.get(key)
+		if err != nil {
+			return err
+		}
+		// Value doesn't exist.
+		if vs.Meta == 0 && len(vs.Value) == 0 {
+			lm.opt.Debugf("Value log discard stats empty")
+			return nil
+		}
+		vp.Decode(vs.Value)
+		// Entry stored in LSM tree.
+		if vs.Meta&bitValuePointer == 0 {
+			val = y.SafeCopy(val, vs.Value)
+			break
+		}
+		// Read entry from value log.
+		result, cb, err := lm.Read(vp, new(y.Slice))
+		runCallback(cb)
+		val = y.SafeCopy(val, result)
+		// The result is stored in val. We can break the loop from here.
+		if err == nil {
+			break
+		}
+		if err != ErrRetry {
+			return err
+		}
+		// If we're at this point it means we haven't found the value yet and if the current key has
+		// badger move prefix, we should break from here since we've already tried the original key
+		// and the key with move prefix. "val" would be empty since we haven't found the value yet.
+		if bytes.HasPrefix(key, badgerMove) {
+			break
+		}
+		// If we're at this point it means the discard stats key was moved by the GC and the actual
+		// entry is the one prefixed by badger move key.
+		// Prepend existing key with badger move and search for the key.
+		key = append(badgerMove, key...)
+	}
+
+	if len(val) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(val, &statsMap); err != nil {
+		return errors.Wrapf(err, "failed to unmarshal discard stats")
+	}
+	lm.opt.Debugf("Value Log Discard stats: %v", statsMap)
+	lm.lfDiscardStats.flushChan <- statsMap
 	return nil
 }

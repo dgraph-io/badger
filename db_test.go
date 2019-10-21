@@ -589,7 +589,7 @@ func TestIterate2Basic(t *testing.T) {
 	})
 }
 
-func TestLoadAndEncryption(t *testing.T) {
+func TestLoad(t *testing.T) {
 	testLoad := func(t *testing.T, opt Options) {
 		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
@@ -643,14 +643,33 @@ func TestLoadAndEncryption(t *testing.T) {
 		sort.Slice(fileIDs, func(i, j int) bool { return fileIDs[i] < fileIDs[j] })
 		fmt.Printf("FileIDs: %v\n", fileIDs)
 	}
-	t.Run("TestLoad Without Encryption", func(t *testing.T) {
-		testLoad(t, getTestOptions(""))
+	t.Run("TestLoad Without Encryption/Compression", func(t *testing.T) {
+		opt := getTestOptions("")
+		opt.Compression = options.None
+		testLoad(t, opt)
 	})
-	t.Run("TestLoad With Encryption", func(t *testing.T) {
+	t.Run("TestLoad With Encryption and no compression", func(t *testing.T) {
 		key := make([]byte, 32)
 		_, err := rand.Read(key)
 		require.NoError(t, err)
-		testLoad(t, getTestOptions("").WithEncryptionKey(key))
+		opt := getTestOptions("")
+		opt.EncryptionKey = key
+		opt.Compression = options.None
+		testLoad(t, opt)
+	})
+	t.Run("TestLoad With Encryption and compression", func(t *testing.T) {
+		key := make([]byte, 32)
+		_, err := rand.Read(key)
+		require.NoError(t, err)
+		opt := getTestOptions("")
+		opt.EncryptionKey = key
+		opt.Compression = options.ZSTD
+		testLoad(t, opt)
+	})
+	t.Run("TestLoad without Encryption and with compression", func(t *testing.T) {
+		opt := getTestOptions("")
+		opt.Compression = options.ZSTD
+		testLoad(t, opt)
 	})
 }
 
