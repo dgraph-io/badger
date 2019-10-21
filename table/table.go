@@ -43,6 +43,7 @@ import (
 )
 
 const fileSuffix = ".sst"
+const intSize = int(unsafe.Sizeof(int(0)))
 
 // Options contains configurable options for Table/Builder.
 type Options struct {
@@ -155,7 +156,7 @@ type block struct {
 }
 
 func (b *block) size() int64 {
-	return int64(3*int(unsafe.Sizeof(int(0))) /* Size of offset, entriesIndexStart and chkLen */ +
+	return int64(3*intSize /* Size of the offset, entriesIndexStart and chkLen */ +
 		cap(b.data) + cap(b.checksum) + cap(b.entryOffsets)*4)
 }
 

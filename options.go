@@ -57,10 +57,12 @@ type Options struct {
 	MaxLevels           int
 	ValueThreshold      int
 	NumMemtables        int
-	BlockSize           int
-	BloomFalsePositive  float64
-	KeepL0InMemory      bool
-	MaxCacheSize        int64
+	// Changing BlockSize across DB runs will not break badger. The block size is
+	// read from the block index stored at the end of the table.
+	BlockSize          int
+	BloomFalsePositive float64
+	KeepL0InMemory     bool
+	MaxCacheSize       int64
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int

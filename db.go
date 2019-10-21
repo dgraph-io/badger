@@ -280,10 +280,11 @@ func Open(opt Options) (db *DB, err error) {
 	}
 
 	config := ristretto.Config{
-		NumCounters: 10 * (opt.MaxCacheSize / int64(opt.BlockSize)),
-		MaxCost:     opt.MaxCacheSize,
+		// Use 5% of cache memory for storing counters.
+		NumCounters: int64(float64(opt.MaxCacheSize) * 0.05 * 2),
+		MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
 		BufferItems: 64,
-		Metrics:     false,
+		Metrics:     true,
 	}
 	cache, err := ristretto.NewCache(&config)
 	if err != nil {
@@ -378,6 +379,11 @@ func Open(opt Options) (db *DB, err error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
+}
+
+// CacheMetrics returns the metrics for the underlying cache.
+func (db *DB) CacheMetrics() *ristretto.Metrics {
+	return db.blockCache.Metrics()
 }
 
 // Close closes a DB. It's crucial to call it to ensure all the pending updates make their way to
