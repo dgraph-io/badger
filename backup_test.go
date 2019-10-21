@@ -125,7 +125,7 @@ func TestBackupRestore2(t *testing.T) {
 	s2Path := filepath.Join(tmpdir, "test2")
 	s3Path := filepath.Join(tmpdir, "test3")
 
-	db1, err := Open(DefaultOptions(s1Path))
+	db1, err := Open(getTestOptions(s1Path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestBackupRestore2(t *testing.T) {
 	}
 	fmt.Println("backup1 length:", backup.Len())
 
-	db2, err := Open(DefaultOptions(s2Path))
+	db2, err := Open(getTestOptions(s2Path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestBackupRestore2(t *testing.T) {
 		t.Fatal(err)
 	}
 	fmt.Println("backup2 length:", backup.Len())
-	db3, err := Open(DefaultOptions(s3Path))
+	db3, err := Open(getTestOptions(s3Path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,7 +454,7 @@ func TestBackupLoadIncremental(t *testing.T) {
 	require.True(t, bb.Len() > 0)
 
 	// restore
-	db2, err := Open(DefaultOptions(filepath.Join(tmpdir, "restore2")))
+	db2, err := Open(getTestOptions(filepath.Join(tmpdir, "restore2")))
 	if err != nil {
 		t.Fatal(err)
 	}
