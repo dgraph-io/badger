@@ -284,7 +284,8 @@ func Open(opt Options) (db *DB, err error) {
 		NumCounters: int64(float64(opt.MaxCacheSize) * 0.05 * 2),
 		MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
 		BufferItems: 64,
-		Metrics:     true,
+		// Enable metrics once https://github.com/dgraph-io/ristretto/issues/92 is resolved.
+		Metrics: false,
 	}
 	cache, err := ristretto.NewCache(&config)
 	if err != nil {
