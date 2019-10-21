@@ -650,12 +650,12 @@ func TestL0GCBug(t *testing.T) {
 	if db1.valueDirGuard != nil {
 		require.NoError(t, db1.valueDirGuard.release())
 	}
+	require.NoError(t, db1.vlog.Close())
 
 	db2, err := Open(opts)
 	require.NoError(t, err)
 
 	// Ensure we still have all the keys.
 	checkKeys(db2)
-	require.Error(t, db1.Close())
 	require.NoError(t, db2.Close())
 }
