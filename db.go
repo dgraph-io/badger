@@ -371,8 +371,8 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.writes = y.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
-	//db.closers.valueGC = y.NewCloser(1)
-	//go db.log.waitOnGC(db.closers.valueGC)
+	db.closers.valueGC = y.NewCloser(1)
+	go db.log.waitOnGC(db.closers.valueGC)
 
 	db.closers.pub = y.NewCloser(1)
 	go db.pub.listenForUpdates(db.closers.pub)

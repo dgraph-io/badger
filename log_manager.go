@@ -1146,6 +1146,16 @@ func (manager *logManager) deleteVlogLogFile(lf *logFile) error {
 	return os.Remove(path)
 }
 
+func (manager *logManager) waitOnGC(lc *y.Closer) {
+	defer lc.Done()
+
+	<-lc.HasBeenClosed() // Wait for lc to be closed.
+
+	// Block any GC in progress to finish, and don't allow any more writes to runGC by filling up
+	// the channel of size 1.
+	manager.garbageCh <- struct{}{}
+}
+
 func (manager *logManager) runGC(discardRatio float64, head valuePointer) error {
 	select {
 	case manager.garbageCh <- struct{}{}:
