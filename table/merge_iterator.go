@@ -44,8 +44,8 @@ type node struct {
 
 func (n *node) setIterator(iter y.Iterator) {
 	n.iter = iter
-	// It's okay if the conversion below fails. We handle the nil values of
-	// merge and concat in all the methods.
+	// It's okay if the type assertion below fails and n.merge/n.concat are set to nil.
+	// We handle the nil values of merge and concat in all the methods.
 	n.merge, _ = iter.(*MergeIterator)
 	n.concat, _ = iter.(*ConcatIterator)
 }
