@@ -550,6 +550,7 @@ func TestMergingIteratorReversed(t *testing.T) {
 	opts := getTestTableOptions()
 	f1 := buildTable(t, [][]string{
 		{"k1", "a1"},
+		{"k2", "a2"},
 		{"k4", "a4"},
 		{"k5", "a5"},
 	}, opts)
@@ -567,7 +568,7 @@ func TestMergingIteratorReversed(t *testing.T) {
 		{"k5", "a5"},
 		{"k4", "a4"},
 		{"k3", "b3"},
-		// {"k2", "b2"},
+		{"k2", "a2"},
 		{"k1", "a1"},
 	}
 	tbl1, err := OpenTable(f1, opts)
