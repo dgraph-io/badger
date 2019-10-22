@@ -22,7 +22,7 @@ import (
 	"errors"
 )
 
-var errZstdCgo = errors.New("zstd compression requires building with cgo enabled")
+var errZstdCgo = errors.New("zstd compression requires building badger with cgo enabled")
 
 func zstdDecompress(dst, src []byte) ([]byte, error) {
 	return nil, errZstdCgo
