@@ -378,6 +378,7 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 	var h header
 	hlen, err := h.DecodeFrom(tee)
 	if err != nil {
+		fmt.Println(err)
 		return nil, err
 	}
 	if h.klen > uint32(1<<16) { // Key length must be below uint16.

@@ -257,7 +257,11 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	if err = manager.vlog.mmap(2 * manager.opt.ValueLogFileSize); err != nil {
 		return nil, y.Wrapf(err, "Error while mmaping vlog file %d", manager.vlog.fid)
 	}
-
+	if err := manager.populateDiscardStats(); err != nil {
+		// Print the error and continue. We don't want to prevent value log open if there's an error
+		// with the fetching discards stats.
+		db.opt.Errorf("Failed to populate discard stats: %s", err)
+	}
 	return manager, nil
 }
 
@@ -517,7 +521,6 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			}
 			replayed = true
 		}
-
 		isGc := vlogCommitTs == math.MaxUint64
 
 		if replayed && !isGc {
@@ -650,7 +653,7 @@ func (iterator *logIterator) iterateEntries() ([]*Entry, uint64, error) {
 			if commitTs == 0 && txnTs == math.MaxUint64 {
 				// we got finish mark for gc. so no need to check commitTs != txnTs
 				iterator.validOffset = iterator.entryReader.recordOffset
-				commitTs = math.MaxInt64
+				commitTs = math.MaxUint64
 				break
 			}
 			// If there is no entries means no entries from the current txn is not part
@@ -1030,6 +1033,19 @@ func (lm *logManager) flushDiscardStats() {
 			Key:   y.KeyWithTs(lfDiscardStatsKey, 1),
 			Value: encodedDS,
 		}}
+		// set finish mark for wal
+		entries = append(entries, &Entry{
+			Key:      y.KeyWithTs(txnKey, math.MaxUint64),
+			Value:    []byte(strconv.FormatUint(math.MaxUint64, 10)),
+			meta:     bitFinTxn,
+			forceWal: true,
+		})
+		// set finish mark for vlog
+		entries = append(entries, &Entry{
+			Key:   y.KeyWithTs(txnKeyVlog, math.MaxUint64),
+			Value: []byte(strconv.FormatUint(math.MaxUint64, 10)),
+			meta:  bitFinTxn,
+		})
 		req, err := lm.db.sendToWriteCh(entries)
 		// No special handling of ErrBlockedWrites is required as err is just logged in
 		// for loop below.
