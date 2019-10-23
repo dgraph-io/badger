@@ -587,3 +587,75 @@ func TestReadSameVlog(t *testing.T) {
 		})
 	})
 }
+
+// The test ensures we don't lose data when badger is opened with KeepL0InMemory and GC is being
+// done.
+func TestL0GCBug(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	// Do not change any of the options below unless it's necessary.
+	opts := getTestOptions(dir)
+	opts.MaxTableSize = 1920
+	opts.NumMemtables = 1
+	opts.ValueLogMaxEntries = 2
+	opts.ValueThreshold = 2
+	opts.KeepL0InMemory = true
+	// Setting LoadingMode to mmap seems to cause segmentation fault while closing DB.
+	opts.ValueLogLoadingMode = options.FileIO
+	opts.TableLoadingMode = options.FileIO
+
+	db1, err := Open(opts)
+	require.NoError(t, err)
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%10d", i))
+	}
+	val := []byte{1, 1, 1, 1, 1, 1, 1, 1}
+	// Insert 100 entries. This will create about 50 vlog files and 2 SST files.
+	for i := 0; i < 100; i++ {
+		err = db1.Update(func(txn *Txn) error {
+			return txn.SetEntry(NewEntry(key(i), val))
+		})
+		require.NoError(t, err)
+	}
+	// Run value log GC multiple times. This would ensure at least
+	// one value log file is garbage collected.
+	for i := 0; i < 10; i++ {
+		err := db1.RunValueLogGC(0.01)
+		if err != nil && err != ErrNoRewrite {
+			t.Fatalf(err.Error())
+		}
+	}
+
+	// CheckKeys reads all the keys previously stored.
+	checkKeys := func(db *DB) {
+		for i := 0; i < 100; i++ {
+			err := db.View(func(txn *Txn) error {
+				item, err := txn.Get(key(i))
+				require.NoError(t, err)
+				val1 := getItemValue(t, item)
+				require.Equal(t, val, val1)
+				return nil
+			})
+			require.NoError(t, err)
+		}
+	}
+
+	checkKeys(db1)
+	// Simulate a crash by not closing db1 but releasing the locks.
+	if db1.dirLockGuard != nil {
+		require.NoError(t, db1.dirLockGuard.release())
+	}
+	if db1.valueDirGuard != nil {
+		require.NoError(t, db1.valueDirGuard.release())
+	}
+	require.NoError(t, db1.vlog.Close())
+
+	db2, err := Open(opts)
+	require.NoError(t, err)
+
+	// Ensure we still have all the keys.
+	checkKeys(db2)
+	require.NoError(t, db2.Close())
+}
