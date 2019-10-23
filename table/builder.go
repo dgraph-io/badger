@@ -45,6 +45,8 @@ type header struct {
 	diff    uint16 // Length of the diff.
 }
 
+const headerSize = 4
+
 // Encode encodes the header.
 func (h header) Encode() []byte {
 	var b [4]byte
@@ -53,12 +55,11 @@ func (h header) Encode() []byte {
 }
 
 // Decode decodes the header.
-func (h *header) Decode(buf []byte) int {
+func (h *header) Decode(buf [headerSize]byte) {
+	// When we convert a array to a struct via pointer casting, it is necessary that the size
+	// of the struct is equal to size of the array.
 	*h = *(*header)(unsafe.Pointer(&buf[0]))
-	return h.Size()
 }
-
-const headerSize = 4
 
 // Size returns size of the header. Currently it's just a constant.
 func (h header) Size() int { return headerSize }
