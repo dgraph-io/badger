@@ -762,6 +762,7 @@ Below is a list of known projects that use Badger:
 * [Cete](https://github.com/mosuka/cete) - Simple and highly available distributed key-value store built on Badger. Makes it easy bringing up a cluster of Badger with Raft consensus algorithm by hashicorp/raft. 
 * [Volument](https://volument.com/) - A new take on website analytics backed by Badger.
 * [Sloop](https://github.com/salesforce/sloop) - Kubernetes History Visualization.
+* [KVdb](https://kvdb.io/) - Hosted key-value store and serverless platform built on top of Badger.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
