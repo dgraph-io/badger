@@ -538,7 +538,7 @@ func (t *Table) decompressData(data []byte) ([]byte, error) {
 	case options.Snappy:
 		return snappy.Decode(nil, data)
 	case options.ZSTD:
-		return zstdDecompress(nil, data)
+		return y.ZSTDDecompress(nil, data)
 	}
 	return nil, errors.New("Unsupported compression type")
 }

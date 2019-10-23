@@ -16,16 +16,21 @@
  * limitations under the License.
  */
 
-package table
+package y
 
 import (
 	"github.com/DataDog/zstd"
 )
 
-func zstdDecompress(dst, src []byte) ([]byte, error) {
+// CgoEnabled is used to check if CGO is enabled while building badger.
+const CgoEnabled = true
+
+// ZSTDDecompress decompresses a block using ZSTD algorithm.
+func ZSTDDecompress(dst, src []byte) ([]byte, error) {
 	return zstd.Decompress(dst, src)
 }
 
-func zstdCompress(dst, src []byte) ([]byte, error) {
+// ZSTDCompress compresses a block using ZSTD algorithm.
+func ZSTDCompress(dst, src []byte) ([]byte, error) {
 	return zstd.Compress(dst, src)
 }

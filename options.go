@@ -21,6 +21,7 @@ import (
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/table"
+	"github.com/dgraph-io/badger/y"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -98,6 +99,11 @@ type Options struct {
 // DefaultOptions sets a list of recommended options for good performance.
 // Feel free to modify these to suit your needs with the WithX methods.
 func DefaultOptions(path string) Options {
+	defaultCompression := options.ZSTD
+	// Use snappy as default compression algorithm if badger is built without CGO.
+	if !y.CgoEnabled {
+		defaultCompression = options.Snappy
+	}
 	return Options{
 		Dir:                 path,
 		ValueDir:            path,
@@ -120,7 +126,7 @@ func DefaultOptions(path string) Options {
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
-		Compression:             options.ZSTD,
+		Compression:             defaultCompression,
 		MaxCacheSize:            1 << 30, // 1 GB
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
