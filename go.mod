@@ -6,7 +6,7 @@ require (
 	github.com/DataDog/zstd v1.4.1
 	github.com/cespare/xxhash v1.1.0
 	github.com/cespare/xxhash/v2 v2.1.0 // indirect
-	github.com/dgraph-io/ristretto v0.0.0-20191010170704-2ba187ef9534
+	github.com/dgraph-io/ristretto v0.0.0-20191023190035-3cc39b3d7c56
 	github.com/dgryski/go-farm v0.0.0-20190423205320-6a90982ecee2
 	github.com/dustin/go-humanize v1.0.0
 	github.com/golang/protobuf v1.3.1
