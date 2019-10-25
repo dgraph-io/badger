@@ -30,7 +30,6 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/DataDog/zstd"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
@@ -539,7 +538,7 @@ func (t *Table) decompressData(data []byte) ([]byte, error) {
 	case options.Snappy:
 		return snappy.Decode(nil, data)
 	case options.ZSTD:
-		return zstd.Decompress(nil, data)
+		return y.ZSTDDecompress(nil, data)
 	}
 	return nil, errors.New("Unsupported compression type")
 }
