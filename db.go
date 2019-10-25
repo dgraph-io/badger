@@ -383,7 +383,7 @@ func Open(opt Options) (db *DB, err error) {
 
 // CacheMetrics returns the metrics for the underlying cache.
 func (db *DB) CacheMetrics() *ristretto.Metrics {
-	return db.blockCache.Metrics()
+	return db.blockCache.Metrics
 }
 
 // Close closes a DB. It's crucial to call it to ensure all the pending updates make their way to
