@@ -121,10 +121,11 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			db.elog.Printf("First key=%q\n", e.Key)
 		}
 		first = false
-
+		db.orc.Lock()
 		if db.orc.nextTxnTs < y.ParseTs(e.Key) {
 			db.orc.nextTxnTs = y.ParseTs(e.Key)
 		}
+		db.orc.Unlock()
 
 		nk := make([]byte, len(e.Key))
 		copy(nk, e.Key)

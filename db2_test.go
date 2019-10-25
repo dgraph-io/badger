@@ -597,8 +597,8 @@ func TestL0GCBug(t *testing.T) {
 
 	// Do not change any of the options below unless it's necessary.
 	opts := getTestOptions(dir)
-	opts.MaxTableSize = 1920
-	opts.NumMemtables = 1
+	opts.NumLevelZeroTables = 50
+	opts.NumLevelZeroTablesStall = 51
 	opts.ValueLogMaxEntries = 2
 	opts.ValueThreshold = 2
 	opts.KeepL0InMemory = true
