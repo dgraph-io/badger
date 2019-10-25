@@ -2,6 +2,8 @@
 
 set -e
 
+export GO111MODULE=on
+
 # Ensure that we can compile the binary.
 pushd badger
 go build -v .
