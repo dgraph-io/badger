@@ -13,6 +13,8 @@ type valuePointer struct {
 	Offset uint32
 }
 
+const vptrSize = unsafe.Sizeof(valuePointer{})
+
 func (p valuePointer) Less(o valuePointer) bool {
 	if p.Fid != o.Fid {
 		return p.Fid < o.Fid
@@ -27,8 +29,6 @@ func (p valuePointer) IsZero() bool {
 	return p.Fid == 0 && p.Offset == 0 && p.Len == 0
 }
 
-const vptrSize = 12
-
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode() []byte {
 	b := make([]byte, vptrSize)
@@ -39,7 +39,15 @@ func (p valuePointer) Encode() []byte {
 
 // Decode decodes the value pointer into the provided byte buffer.
 func (p *valuePointer) Decode(b []byte) {
-	*p = *(*valuePointer)(unsafe.Pointer(&b[0]))
+	// tempBuf will be allocated on the stack and so it shouldn't
+	// cause significant performance degradation.
+	tempBuf := make([]byte, vptrSize)
+	// Copy vptrSize bytes from b to tempBuf. We need to do this because of pointer alignment
+	// issues. It might be possible that alignment of b is different from alignment of p
+	// (valuePointer). Creating a new slice with same size as that of vptrSize ensures we
+	// don't have any pointer alignment issues. See https://github.com/dgraph-io/badger/issues/1096
+	copy(tempBuf, b)
+	*p = *(*valuePointer)(unsafe.Pointer(&tempBuf[0]))
 }
 
 // header is used in value log as a header before Entry.

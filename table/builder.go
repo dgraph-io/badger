@@ -45,7 +45,7 @@ type header struct {
 	diff    uint16 // Length of the diff.
 }
 
-const headerSize = 4
+const headerSize = uint16(unsafe.Sizeof(header{}))
 
 // Encode encodes the header.
 func (h header) Encode() []byte {
@@ -55,14 +55,17 @@ func (h header) Encode() []byte {
 }
 
 // Decode decodes the header.
-func (h *header) Decode(buf [headerSize]byte) {
-	// When we convert a array to a struct via pointer casting, it is necessary that the size
-	// of the struct is equal to size of the array.
-	*h = *(*header)(unsafe.Pointer(&buf[0]))
+func (h *header) Decode(buf []byte) {
+	// tempBuf will be allocated on the stack and so it shouldn't
+	// cause significant performance degradation.
+	tempBuf := make([]byte, headerSize)
+	// Copy headerSize bytes from buf to tempBuf. We need to do this because of pointer alignment
+	// issues. It might be possible that alignment of buf is different from alignment of p
+	// (header). Creating a new slice with same size as that of headerSize ensures we
+	// don't have any pointer alignment issues. See https://github.com/dgraph-io/badger/issues/1096
+	copy(tempBuf, buf)
+	*h = *(*header)(unsafe.Pointer(&tempBuf[0]))
 }
-
-// Size returns size of the header. Currently it's just a constant.
-func (h header) Size() int { return headerSize }
 
 // Builder is used in building a table.
 type Builder struct {

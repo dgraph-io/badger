@@ -63,13 +63,8 @@ func (itr *blockIterator) setIdx(i int) {
 
 	// Set base key.
 	if len(itr.baseKey) == 0 {
-		var headerArr [headerSize]byte
-		// Copy over header data from the block data into headerArr. We need to do this because
-		// header.Decode() uses unsafe operation to convert an array to a struct. See issue
-		// https://github.com/dgraph-io/badger/issues/1096
-		copy(headerArr[:], itr.data)
 		var baseHeader header
-		baseHeader.Decode(headerArr)
+		baseHeader.Decode(itr.data)
 		itr.baseKey = itr.data[headerSize : headerSize+baseHeader.diff]
 	}
 	var endOffset int
@@ -84,12 +79,7 @@ func (itr *blockIterator) setIdx(i int) {
 
 	entryData := itr.data[startOffset:endOffset]
 	var h header
-	var headerData [headerSize]byte
-	// Copy over header data from the block data into headerData. We need to do this because
-	// header.Decode() uses unsafe operation to convert an array to a struct. See issue
-	// https://github.com/dgraph-io/badger/issues/1096
-	copy(headerData[:], entryData)
-	h.Decode(headerData)
+	h.Decode(entryData)
 	// Header contains the length of key overlap and difference compared to the base key. If the key
 	// before this one had the same or better key overlap, we can avoid copying that part into
 	// itr.key. But, if the overlap was lesser, we could copy over just that portion.
@@ -97,7 +87,7 @@ func (itr *blockIterator) setIdx(i int) {
 		itr.key = append(itr.key[:itr.prevOverlap], itr.baseKey[itr.prevOverlap:h.overlap]...)
 	}
 	itr.prevOverlap = h.overlap
-	valueOff := headerSize + int(h.diff)
+	valueOff := headerSize + h.diff
 	diffKey := entryData[headerSize:valueOff]
 	itr.key = append(itr.key[:h.overlap], diffKey...)
 	itr.val = entryData[valueOff:]
