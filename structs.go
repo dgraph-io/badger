@@ -39,7 +39,7 @@ func (p valuePointer) Encode() []byte {
 
 // Decode decodes the value pointer into the provided byte buffer.
 func (p *valuePointer) Decode(b []byte) {
-	*p = *(*valuePointer)(unsafe.Pointer(&b[0]))
+	copy((*[vptrSize]byte)(unsafe.Pointer(p))[:], b)
 }
 
 // header is used in value log as a header before Entry.

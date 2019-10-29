@@ -53,9 +53,8 @@ func (h header) Encode() []byte {
 }
 
 // Decode decodes the header.
-func (h *header) Decode(buf []byte) int {
-	*h = *(*header)(unsafe.Pointer(&buf[0]))
-	return h.Size()
+func (h *header) Decode(buf []byte) {
+	copy((*[headerSize]byte)(unsafe.Pointer(h))[:], buf)
 }
 
 const headerSize = 4
