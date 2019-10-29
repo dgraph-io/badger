@@ -45,6 +45,8 @@ type header struct {
 	diff    uint16 // Length of the diff.
 }
 
+const headerSize = uint16(unsafe.Sizeof(header{}))
+
 // Encode encodes the header.
 func (h header) Encode() []byte {
 	var b [4]byte
@@ -56,11 +58,6 @@ func (h header) Encode() []byte {
 func (h *header) Decode(buf []byte) {
 	copy((*[headerSize]byte)(unsafe.Pointer(h))[:], buf)
 }
-
-const headerSize = 4
-
-// Size returns size of the header. Currently it's just a constant.
-func (h header) Size() int { return headerSize }
 
 // Builder is used in building a table.
 type Builder struct {
