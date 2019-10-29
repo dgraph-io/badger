@@ -21,7 +21,7 @@ import (
 	"io"
 	"sort"
 
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 )
 

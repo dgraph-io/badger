@@ -30,14 +30,13 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/DataDog/zstd"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto"
 	"github.com/dgraph-io/ristretto/z"
 )
@@ -539,7 +538,7 @@ func (t *Table) decompressData(data []byte) ([]byte, error) {
 	case options.Snappy:
 		return snappy.Decode(nil, data)
 	case options.ZSTD:
-		return zstd.Decompress(nil, data)
+		return y.ZSTDDecompress(nil, data)
 	}
 	return nil, errors.New("Unsupported compression type")
 }

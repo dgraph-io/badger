@@ -29,10 +29,10 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -597,8 +597,8 @@ func TestL0GCBug(t *testing.T) {
 
 	// Do not change any of the options below unless it's necessary.
 	opts := getTestOptions(dir)
-	opts.MaxTableSize = 1920
-	opts.NumMemtables = 1
+	opts.NumLevelZeroTables = 50
+	opts.NumLevelZeroTablesStall = 51
 	opts.ValueLogMaxEntries = 2
 	opts.ValueThreshold = 2
 	opts.KeepL0InMemory = true

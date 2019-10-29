@@ -1,5 +1,7 @@
+// +build cgo
+
 /*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
+ * Copyright 2019 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,29 +16,21 @@
  * limitations under the License.
  */
 
-package main
+package y
 
 import (
-	"fmt"
-	"net/http"
-	_ "net/http/pprof"
-	"runtime"
-
-	"github.com/dgraph-io/badger/v2/badger/cmd"
+	"github.com/DataDog/zstd"
 )
 
-func main() {
-	go func() {
-		for i := 8080; i < 9080; i++ {
-			fmt.Printf("Listening for /debug HTTP requests at port: %d\n", i)
-			if err := http.ListenAndServe(fmt.Sprintf("localhost:%d", i), nil); err != nil {
-				fmt.Println("Port busy. Trying another one...")
-				continue
+// CgoEnabled is used to check if CGO is enabled while building badger.
+const CgoEnabled = true
 
-			}
-		}
-	}()
-	runtime.SetBlockProfileRate(100)
-	runtime.GOMAXPROCS(128)
-	cmd.Execute()
+// ZSTDDecompress decompresses a block using ZSTD algorithm.
+func ZSTDDecompress(dst, src []byte) ([]byte, error) {
+	return zstd.Decompress(dst, src)
+}
+
+// ZSTDCompress compresses a block using ZSTD algorithm.
+func ZSTDCompress(dst, src []byte) ([]byte, error) {
+	return zstd.Compress(dst, src)
 }

@@ -22,15 +22,14 @@ import (
 	"math"
 	"unsafe"
 
-	"github.com/DataDog/zstd"
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 )
 
@@ -343,7 +342,7 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 	case options.Snappy:
 		return snappy.Encode(nil, data), nil
 	case options.ZSTD:
-		return zstd.Compress(nil, data)
+		return y.ZSTDCompress(nil, data)
 	}
 	return nil, errors.New("Unsupported compression type")
 }

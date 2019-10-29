@@ -30,11 +30,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/skl"
-	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/skl"
+	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
@@ -121,10 +121,11 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			db.elog.Printf("First key=%q\n", e.Key)
 		}
 		first = false
-
+		db.orc.Lock()
 		if db.orc.nextTxnTs < y.ParseTs(e.Key) {
 			db.orc.nextTxnTs = y.ParseTs(e.Key)
 		}
+		db.orc.Unlock()
 
 		nk := make([]byte, len(e.Key))
 		copy(nk, e.Key)
@@ -284,8 +285,7 @@ func Open(opt Options) (db *DB, err error) {
 		NumCounters: int64(float64(opt.MaxCacheSize) * 0.05 * 2),
 		MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
 		BufferItems: 64,
-		// Enable metrics once https://github.com/dgraph-io/ristretto/issues/92 is resolved.
-		Metrics: false,
+		Metrics:     true,
 	}
 	cache, err := ristretto.NewCache(&config)
 	if err != nil {
@@ -384,10 +384,7 @@ func Open(opt Options) (db *DB, err error) {
 
 // CacheMetrics returns the metrics for the underlying cache.
 func (db *DB) CacheMetrics() *ristretto.Metrics {
-	return nil
-	// Do not enable ristretto metrics in badger until issue
-	// https://github.com/dgraph-io/ristretto/issues/92 is resolved.
-	// return db.blockCache.Metrics()
+	return db.blockCache.Metrics
 }
 
 // Close closes a DB. It's crucial to call it to ensure all the pending updates make their way to
