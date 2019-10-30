@@ -156,6 +156,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	if manager.maxWalID == 0 {
 		// No WAL files and vlog file so advancing both the ids.
 		y.AssertTrue(manager.maxVlogID == 0)
+		y.AssertTrue(manager.maxWalID == 0)
 		manager.maxWalID++
 		wal, err := manager.createlogFile(manager.maxWalID,
 			WAL)
@@ -207,6 +208,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		if err = vlogFile.open(vlogFilePath(manager.opt.ValueDir, fid), flags); err != nil {
 			return nil, y.Wrapf(err, "Error while opening vlog file %d", fid)
 		}
+		// TODO: check for max fid mmap.
 		if fid < manager.maxVlogID {
 			if err = vlogFile.init(); err != nil {
 				return nil, y.Wrapf(err, "Error while init vlog file %d", vlogFile.fid)
@@ -335,9 +337,10 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		y.AssertTrue(len(lp.vlogIDs) == 0)
 		return nil
 	}
+
 	currentVlogIndex := 0
 	vlogFile := &logFile{
-		fid:         uint32(lp.vlogIDs[0]),
+		fid:         uint32(lp.vlogIDs[currentVlogIndex]),
 		path:        vlogFilePath(lp.opt.ValueDir, uint32(lp.vlogIDs[currentVlogIndex])),
 		loadingMode: lp.opt.ValueLogLoadingMode,
 		registry:    lp.keyRegistry,
@@ -357,7 +360,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		truncateNeeded = true
 	}
 	currentWalIndex := 0
-	vlogIterator, err := newLogIterator(vlogFile, vlogOffset)
+	vlogIterator, err := newLogIterator(vlogFile, vlogOffset, lp.opt)
 	if err != nil {
 		return y.Wrapf(err, "Error while creating log iterator for the vlog file %s", vlogFile.path)
 	}
@@ -381,7 +384,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		y.AssertTrue(len(lp.walIDs) == 1)
 		truncateNeeded = true
 	}
-	walIterator, err := newLogIterator(walFile, walOffset)
+	walIterator, err := newLogIterator(walFile, walOffset, lp.opt)
 	if err != nil {
 		return y.Wrapf(err, "Error while creating log iterator for the wal file %s", walFile.path)
 	}
@@ -396,22 +399,19 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		return info.Size() != int64(validOffset), nil
 	}
 	for {
-		if walErr == errTruncate || vlogErr == errTruncate {
-			truncateNeeded = true
+		if walErr == errTruncate || vlogErr == errTruncate || truncateNeeded {
 			break
 		}
 
-		// Advance wal if we reach end of the current wal file
-		if walErr == io.ErrUnexpectedEOF || walErr == io.EOF {
+		// If any of the log reaches EOF we need to advance both the log file because vlog and wal has 1 to 1 mapping
+		// isTruncateNeeded check will take care of truncation.
+		if walErr == io.ErrUnexpectedEOF || walErr == io.EOF || vlogErr == io.ErrUnexpectedEOF || vlogErr == io.EOF {
 			var err error
 			// check whether we iterated till the valid offset.
 			truncateNeeded, err = isTruncateNeeded(walIterator.validOffset, walFile)
 			if err != nil {
 				return y.Wrapf(err, "Error while checking truncation for the wal file %s",
 					walFile.path)
-			}
-			if truncateNeeded {
-				break
 			}
 			// close the log file.
 			err = walFile.fd.Close()
@@ -420,11 +420,11 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			}
 			// We successfully iterated till the end of the file. Now we have to advance
 			// the wal File.
-			if currentWalIndex < len(lp.walIDs) {
+			if currentWalIndex >= len(lp.walIDs)-1 {
 				break
 			}
 			currentWalIndex++
-			walFile := &logFile{
+			walFile = &logFile{
 				fid:         uint32(lp.walIDs[currentWalIndex]),
 				path:        walFilePath(lp.opt.ValueDir, uint32(lp.walIDs[currentWalIndex])),
 				loadingMode: lp.opt.ValueLogLoadingMode,
@@ -435,26 +435,25 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 				return y.Wrapf(err, "Error while opening WAL file %d in logReplayer",
 					lp.walIDs[currentWalIndex])
 			}
+
 			if walFile.fileOffset() < vlogHeaderSize {
+				// we simply change the flag and advance vlog so that vlog id will be advanced.
 				truncateNeeded = true
-				break
+			} else {
+				walIterator, err = newLogIterator(walFile, vlogHeaderSize, lp.opt)
+				walEntries, walCommitTs, walErr = walIterator.iterateEntries()
 			}
-			walIterator, err = newLogIterator(walFile, vlogHeaderSize)
-			walEntries, walCommitTs, walErr = walIterator.iterateEntries()
-			continue
-		}
-		// Advance vlog if we reach the end of this present log file.
-		if vlogErr == io.ErrUnexpectedEOF || vlogErr == io.EOF {
-			var err error
-			// check whether we iterated till the valid offset.
-			truncateNeeded, err = isTruncateNeeded(vlogIterator.validOffset, vlogFile)
-			if err != nil {
-				return y.Wrapf(err, "Error while checking truncation for the vlog file %s",
-					walFile.path)
+
+			// we'll check whether we need truncation only if there is no truncation for wal file.
+			if !truncateNeeded {
+				// check whether we iterated till the valid offset.
+				truncateNeeded, err = isTruncateNeeded(vlogIterator.validOffset, vlogFile)
+				if err != nil {
+					return y.Wrapf(err, "Error while checking truncation for the vlog file %s",
+						walFile.path)
+				}
 			}
-			if truncateNeeded {
-				break
-			}
+
 			// close the log file.
 			err = vlogFile.fd.Close()
 			if err != nil {
@@ -462,7 +461,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			}
 			// We successfully iterated till the end of the file. Now we have to advance
 			// the wal File.
-			if currentVlogIndex < len(lp.vlogIDs) {
+			if currentVlogIndex >= len(lp.vlogIDs)-1 {
 				break
 			}
 			currentVlogIndex++
@@ -479,10 +478,10 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			}
 			if vlogFile.fileOffset() < vlogHeaderSize {
 				truncateNeeded = true
-				break
+			} else {
+				vlogIterator, err = newLogIterator(vlogFile, vlogHeaderSize, lp.opt)
+				vlogEntries, vlogCommitTs, vlogErr = vlogIterator.iterateEntries()
 			}
-			vlogIterator, err = newLogIterator(vlogFile, vlogHeaderSize)
-			vlogEntries, vlogCommitTs, vlogErr = vlogIterator.iterateEntries()
 			continue
 		}
 		// Some error other than truncation and end of file so handle it.
@@ -565,8 +564,48 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			// so truncating to the last batch offset.
 			offset = walIterator.previousOffset
 		}
+		// wal file and vlog files are closed, we need to open it now.
+		walFile := &logFile{
+			fid:         uint32(lp.walIDs[currentWalIndex]),
+			path:        walFilePath(lp.opt.ValueDir, uint32(lp.walIDs[currentWalIndex])),
+			loadingMode: lp.opt.ValueLogLoadingMode,
+			registry:    lp.keyRegistry,
+		}
+		err = walFile.open(walFile.path, flags)
+		if err != nil {
+			return y.Wrapf(err, "Error while opening WAL file %d in logReplayer",
+				lp.walIDs[currentWalIndex])
+		}
+		vlogFile = &logFile{
+			fid:         uint32(lp.walIDs[currentVlogIndex]),
+			path:        vlogFilePath(lp.opt.ValueDir, uint32(lp.walIDs[currentVlogIndex])),
+			loadingMode: lp.opt.ValueLogLoadingMode,
+			registry:    lp.keyRegistry,
+		}
+		err = vlogFile.open(vlogFile.path, flags)
+		if err != nil {
+			return y.Wrapf(err, "Error while opening WAL file %d in logReplayer",
+				lp.walIDs[currentVlogIndex])
+		}
+		walStat, err := walFile.fd.Stat()
+		if err != nil {
+			return y.Wrapf(err, "Error while retriving wal file %d stat", walFile.fid)
+		}
+		vlogStat, err := vlogFile.fd.Stat()
+		if err != nil {
+			return y.Wrapf(err, "Error while retriving vlog file %d stat", vlogFile.fid)
+		}
+		if walStat.Size() < vlogHeaderSize || vlogStat.Size() < vlogHeaderSize {
+			// which means the whole file is corrupted so we need to bootstarp both the log file.
+			if err = walFile.bootstrap(); err != nil {
+				return y.Wrapf(err, "Error while bootstraping wal file %d", walFile.fid)
+			}
+			if err = vlogFile.bootstrap(); err != nil {
+				return y.Wrapf(err, "Error while bootstraping vlog file %d", vlogFile.fid)
+			}
+			return nil
+		}
 		// None of the log files are mmaped so far, so it is good to truncate here.
-		var err error
 		if err = walFile.fd.Truncate(int64(offset)); err != nil {
 			return y.Wrapf(err, "Error while truncating wal file %d", walFile.fid)
 		}
@@ -596,11 +635,23 @@ type logIterator struct {
 	previousOffset uint32
 }
 
-func newLogIterator(log *logFile, offset uint32) (*logIterator, error) {
-	_, err := log.fd.Seek(int64(offset), io.SeekStart)
+func newLogIterator(log *logFile, offset uint32, opt Options) (*logIterator, error) {
+	stat, err := log.fd.Stat()
 	if err != nil {
 		return nil, err
 	}
+	if opt.ReadOnly {
+		if int64(offset) != stat.Size() {
+			// We're not at the end of the file. We'd need to replay the entries, or
+			// possibly truncate the file.
+			return nil, ErrReplayNeeded
+		}
+	}
+	_, err = log.fd.Seek(int64(offset), io.SeekStart)
+	if err != nil {
+		return nil, err
+	}
+
 	return &logIterator{
 		entryReader: &safeRead{
 			k:            make([]byte, 10),
@@ -808,6 +859,19 @@ func (lm *logManager) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	if err != nil {
 		return nil, cb, err
 	}
+	if lm.opt.VerifyValueChecksum {
+		hash := crc32.New(y.CastagnoliCrcTable)
+		if _, err := hash.Write(buf); err != nil {
+			runCallback(cb)
+			return nil, nil, errors.Wrapf(err, "failed to write hash for vp %+v", vp)
+		}
+		// Fetch checksum from the end of the buffer.
+		checksum := buf[len(buf)-crc32.Size:]
+		if hash.Sum32() != y.BytesToU32(checksum) {
+			runCallback(cb)
+			return nil, nil, errors.Wrapf(y.ErrChecksumMismatch, "value corrupted for vp: %+v", vp)
+		}
+	}
 	var h header
 	headerLen := h.Decode(buf)
 	kv := buf[headerLen:]
@@ -882,6 +946,9 @@ func (lm *logManager) Close() error {
 			err = closeErr
 		}
 	}
+	if closedErr := lm.wal.fd.Close(); closedErr != nil {
+		err = closedErr
+	}
 	return err
 }
 
@@ -912,10 +979,6 @@ func (lm *logManager) dropAll() (int, error) {
 	// close the current wal.
 	lm.Lock()
 	defer lm.Unlock()
-	if err = lm.wal.fd.Close(); err != nil {
-		return count, y.Wrapf(err, "Erro while closing wal file %d", lm.wal.fid)
-	}
-
 	// delete the current log file.
 	if err = lm.deleteLogFile(lm.wal, WAL); err != nil {
 		return count, y.Wrapf(err, "Error while removing wal file %d", lm.wal.fid)
@@ -946,6 +1009,9 @@ func (lm *logManager) dropAll() (int, error) {
 		return count, y.Wrapf(err, "Error while creating vlog file %d", 1)
 	}
 	lm.vlog = vlog
+	lm.filesLock.Lock()
+	lm.vlogFileMap[1] = vlog
+	lm.filesLock.Unlock()
 	return count, nil
 }
 func (lm *logManager) incrIteratorCount() {
@@ -1415,7 +1481,7 @@ func (manager *logManager) rewrite(f *logFile, tr trace.Trace) error {
 		return nil
 	}
 
-	iterator, err := newLogIterator(f, vlogHeaderSize)
+	iterator, err := newLogIterator(f, vlogHeaderSize, manager.opt)
 	if err != nil {
 		return y.Wrapf(err, "Error while creating log iterator for vlog %d in logmanager.rewrite", f.fid)
 	}
@@ -1542,7 +1608,7 @@ func (manager *logManager) doRunGC(lf *logFile, discardRatio float64, tr trace.T
 	y.AssertTrue(manager.db != nil)
 	s := new(y.Slice)
 	var numIterations int
-	iterator, err := newLogIterator(lf, vlogHeaderSize)
+	iterator, err := newLogIterator(lf, vlogHeaderSize, manager.opt)
 	if err != nil {
 		return y.Wrapf(err, "Error while creating log iterator vlog %d", lf.fid)
 	}

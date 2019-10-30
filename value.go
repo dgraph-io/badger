@@ -1252,6 +1252,7 @@ func (req *request) DecrRef() {
 		return
 	}
 	req.Entries = nil
+	req.Ptrs = nil
 	requestPool.Put(req)
 }
 

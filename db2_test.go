@@ -261,7 +261,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 
 	// Close the DB.
 	require.NoError(t, db.Close())
-	require.NoError(t, os.Truncate(path.Join(dir, "000000.vlog"), 4090))
+	require.NoError(t, os.Truncate(path.Join(dir, "000001.vlog"), 4090))
 
 	// Reopen and write some new data.
 	db, err = Open(opt)
