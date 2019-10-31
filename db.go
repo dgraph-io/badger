@@ -820,6 +820,19 @@ func (db *DB) doWrites(lc *y.Closer) {
 // will be returned.
 //   Check(kv.BatchSet(entries))
 func (db *DB) batchSet(entries []*Entry) error {
+	// finish mark for wal
+	entries = append(entries, &Entry{
+		Key:      y.KeyWithTs(txnKey, math.MaxUint64),
+		Value:    []byte(strconv.FormatUint(math.MaxUint64, 10)),
+		meta:     bitFinTxn,
+		forceWal: true,
+	})
+	// finish mark for vlog.
+	entries = append(entries, &Entry{
+		Key:   y.KeyWithTs(txnKeyVlog, math.MaxUint64),
+		Value: []byte(strconv.FormatUint(math.MaxUint64, 10)),
+		meta:  bitFinTxn,
+	})
 	req, err := db.sendToWriteCh(entries)
 	if err != nil {
 		return err
@@ -835,6 +848,18 @@ func (db *DB) batchSet(entries []*Entry) error {
 //      Check(err)
 //   }
 func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
+	// set finish mark for this batch.
+	entries = append(entries, &Entry{
+		Key:      y.KeyWithTs(txnKey, math.MaxUint64),
+		Value:    []byte(strconv.FormatUint(math.MaxUint64, 10)),
+		meta:     bitFinTxn,
+		forceWal: true,
+	})
+	entries = append(entries, &Entry{
+		Key:   y.KeyWithTs(txnKeyVlog, math.MaxUint64),
+		Value: []byte(strconv.FormatUint(math.MaxUint64, 10)),
+		meta:  bitFinTxn,
+	})
 	req, err := db.sendToWriteCh(entries)
 	if err != nil {
 		return err

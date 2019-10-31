@@ -22,8 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
-	"math"
-	"strconv"
 
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
@@ -180,18 +178,6 @@ func (l *KVLoader) send() error {
 	if err := l.throttle.Do(); err != nil {
 		return err
 	}
-	// set finish mark for this batch.
-	l.entries = append(l.entries, &Entry{
-		Key:      y.KeyWithTs(txnKey, math.MaxUint64),
-		Value:    []byte(strconv.FormatUint(math.MaxUint64, 10)),
-		meta:     bitFinTxn,
-		forceWal: true,
-	})
-	l.entries = append(l.entries, &Entry{
-		Key:   y.KeyWithTs(txnKeyVlog, math.MaxUint64),
-		Value: []byte(strconv.FormatUint(math.MaxUint64, 10)),
-		meta:  bitFinTxn,
-	})
 
 	if err := l.db.batchSetAsync(l.entries, func(err error) {
 		l.throttle.Done(err)

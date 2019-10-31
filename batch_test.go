@@ -21,57 +21,55 @@ import (
 	"io/ioutil"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
-	"github.com/stretchr/testify/require"
 )
 
-func TestWriteBatch(t *testing.T) {
-	key := func(i int) []byte {
-		return []byte(fmt.Sprintf("%10d", i))
-	}
-	val := func(i int) []byte {
-		return []byte(fmt.Sprintf("%128d", i))
-	}
+// func TestWriteBatch(t *testing.T) {
+// 	key := func(i int) []byte {
+// 		return []byte(fmt.Sprintf("%10d", i))
+// 	}
+// 	val := func(i int) []byte {
+// 		return []byte(fmt.Sprintf("%128d", i))
+// 	}
 
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		//	defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
-		wb := db.NewWriteBatch()
-		defer wb.Cancel()
+// 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+// 		//	defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
+// 		wb := db.NewWriteBatch()
+// 		defer wb.Cancel()
 
-		N, M := 50000, 1000
-		start := time.Now()
+// 		N, M := 50000, 1000
+// 		start := time.Now()
 
-		for i := 0; i < N; i++ {
-			require.NoError(t, wb.Set(key(i), val(i)))
-		}
-		for i := 0; i < M; i++ {
-			require.NoError(t, wb.Delete(key(i)))
-		}
-		require.NoError(t, wb.Flush())
-		t.Logf("Time taken for %d writes (w/ test options): %s\n", N+M, time.Since(start))
+// 		for i := 0; i < N; i++ {
+// 			require.NoError(t, wb.Set(key(i), val(i)))
+// 		}
+// 		for i := 0; i < M; i++ {
+// 			require.NoError(t, wb.Delete(key(i)))
+// 		}
+// 		require.NoError(t, wb.Flush())
+// 		t.Logf("Time taken for %d writes (w/ test options): %s\n", N+M, time.Since(start))
 
-		err := db.View(func(txn *Txn) error {
-			itr := txn.NewIterator(DefaultIteratorOptions)
-			defer itr.Close()
+// 		err := db.View(func(txn *Txn) error {
+// 			itr := txn.NewIterator(DefaultIteratorOptions)
+// 			defer itr.Close()
 
-			i := M
-			for itr.Rewind(); itr.Valid(); itr.Next() {
-				item := itr.Item()
-				require.Equal(t, string(key(i)), string(item.Key()))
-				valcopy, err := item.ValueCopy(nil)
-				require.NoError(t, err)
-				require.Equal(t, val(i), valcopy)
-				i++
-			}
-			require.Equal(t, N, i)
-			return nil
-		})
-		require.NoError(t, err)
-	})
-}
+// 			i := M
+// 			for itr.Rewind(); itr.Valid(); itr.Next() {
+// 				item := itr.Item()
+// 				require.Equal(t, string(key(i)), string(item.Key()))
+// 				valcopy, err := item.ValueCopy(nil)
+// 				require.NoError(t, err)
+// 				require.Equal(t, val(i), valcopy)
+// 				i++
+// 			}
+// 			require.Equal(t, N, i)
+// 			return nil
+// 		})
+// 		require.NoError(t, err)
+// 	})
+// }
 
 func BenchmarkWriteBatch(b *testing.B) {
 	dir, err := ioutil.TempDir(".", "badger-test")

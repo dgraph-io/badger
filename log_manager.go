@@ -107,13 +107,6 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		filteredWALIDs = append(filteredWALIDs, fid)
 	}
 
-	// if manager.maxWalID == 0 && walhead.Fid > 0 {
-	// 	// wal file should have file number in increasing order. if the maxWalHead is
-	// 	// set to zero means. all the memtables are persisted and log files are flushed
-	// 	// so advancing the maxWalId to walHead.
-	// 	manager.maxWalID = walhead.Fid
-	// }
-
 	// We filtered all the WAL file that needs to replayed. Now, We're going
 	// to pick vlog files that needs to be replayed.
 	vlogFiles, err := y.PopulateFilesForSuffix(db.opt.ValueDir, ".vlog")
@@ -123,7 +116,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	// filter the vlog files that needs to be replayed.
 	filteredVlogIDs := []uint32{}
 	for fid := range vlogFiles {
-		//
+		// set max vlog ID.
 		if fid > manager.maxVlogID {
 			manager.maxVlogID = fid
 		}
@@ -352,7 +345,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 
 	vlogOffset := uint32(vlogHeaderSize)
 	if vlogFile.fid == lp.vhead.Fid {
-		vlogOffset = lp.vhead.Offset
+		vlogOffset = lp.vhead.Offset + lp.vhead.Len
 	}
 	if vlogFile.fileOffset() < vlogOffset {
 		// we only bootstarp last log file and there is no log file to replay.
@@ -377,7 +370,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 	}
 	walOffset := uint32(vlogHeaderSize)
 	if walFile.fid == lp.whead.Fid {
-		walOffset = lp.whead.Offset
+		walOffset = lp.whead.Offset + lp.whead.Len
 	}
 	if walFile.fileOffset() < walOffset {
 		// we only bootstarp last log file and there is no log file to replay.
@@ -400,6 +393,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 	}
 	for {
 		if walErr == errTruncate || vlogErr == errTruncate || truncateNeeded {
+			truncateNeeded = true
 			break
 		}
 
@@ -421,9 +415,21 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			// We successfully iterated till the end of the file. Now we have to advance
 			// the wal File.
 			if currentWalIndex >= len(lp.walIDs)-1 {
+				// WAL is completed but we still need to check vlog is corruped or not.
+				// because WAL and vlog is one to one mapping.
+				// we'll check whether we need truncation only if there is no truncation for wal file.
+				if !truncateNeeded {
+					// check whether we iterated till the valid offset.
+					truncateNeeded, err = isTruncateNeeded(vlogIterator.validOffset, vlogFile)
+					if err != nil {
+						return y.Wrapf(err, "Error while checking truncation for the vlog file %s",
+							walFile.path)
+					}
+				}
 				break
 			}
 			currentWalIndex++
+			currentVlogIndex++
 			walFile = &logFile{
 				fid:         uint32(lp.walIDs[currentWalIndex]),
 				path:        walFilePath(lp.opt.ValueDir, uint32(lp.walIDs[currentWalIndex])),
@@ -459,12 +465,6 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			if err != nil {
 				return y.Wrapf(err, "Error while closing the vlog file %s in replay", vlogFile.path)
 			}
-			// We successfully iterated till the end of the file. Now we have to advance
-			// the wal File.
-			if currentVlogIndex >= len(lp.vlogIDs)-1 {
-				break
-			}
-			currentVlogIndex++
 			vlogFile = &logFile{
 				fid:         uint32(lp.walIDs[currentVlogIndex]),
 				path:        vlogFilePath(lp.opt.ValueDir, uint32(lp.walIDs[currentVlogIndex])),
@@ -800,11 +800,12 @@ func (lm *logManager) write(reqs []*request) error {
 			if b.Entries[j].forceWal {
 				// value size is less than threshold. So writing to WAL
 				entryOffset = wal.fileOffset() + uint32(walBuf.Len())
-				_, err := wal.encode(b.Entries[j], walBuf, entryOffset)
+				entryLen, err := wal.encode(b.Entries[j], walBuf, entryOffset)
 				if err != nil {
 					return y.Wrapf(err, "Error while encoding entry for WAL %d", lm.wal.fid)
 				}
 				p.Offset = entryOffset
+				p.Len = uint32(entryLen)
 				p.Fid = wal.fid
 				p.log = WAL
 				b.Ptrs = append(b.Ptrs, p)
@@ -851,7 +852,6 @@ func (lm *logManager) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	// 		"Invalid value pointer offset: %d greater than current offset: %d",
 	// 		vp.Offset, lm.vlog.fileOffset())
 	// }
-	fmt.Println(vp.Offset)
 	buf, lf, err := lm.readValueBytes(vp, s)
 	// log file is locked so, decide whether to lock immediately or let the caller to
 	// unlock it, after caller uses it.
@@ -1454,19 +1454,6 @@ func (manager *logManager) rewrite(f *logFile, tr trace.Trace) error {
 			if int64(len(wb)+3) >= manager.opt.maxBatchCount ||
 				size+es >= manager.opt.maxBatchSize {
 				tr.LazyPrintf("request has %d entries, size %d", len(wb), size)
-				// set finish mark for wal
-				wb = append(wb, &Entry{
-					Key:      y.KeyWithTs(txnKey, math.MaxUint64),
-					Value:    []byte(strconv.FormatUint(math.MaxUint64, 10)),
-					meta:     bitFinTxn,
-					forceWal: true,
-				})
-				// set finish mark for vlog
-				wb = append(wb, &Entry{
-					Key:   y.KeyWithTs(txnKeyVlog, math.MaxUint64),
-					Value: []byte(strconv.FormatUint(math.MaxUint64, 10)),
-					meta:  bitFinTxn,
-				})
 				if err := manager.db.batchSet(wb); err != nil {
 					return err
 				}
@@ -1514,18 +1501,6 @@ func (manager *logManager) rewrite(f *logFile, tr trace.Trace) error {
 			end = len(wb)
 		}
 		batch := wb[i:end]
-		// set finish mark for this batch.
-		batch = append(batch, &Entry{
-			Key:      y.KeyWithTs(txnKey, math.MaxUint64),
-			Value:    []byte(strconv.FormatUint(math.MaxUint64, 10)),
-			meta:     bitFinTxn,
-			forceWal: true,
-		})
-		batch = append(batch, &Entry{
-			Key:   y.KeyWithTs(txnKeyVlog, math.MaxUint64),
-			Value: []byte(strconv.FormatUint(math.MaxUint64, 10)),
-			meta:  bitFinTxn,
-		})
 		if err := manager.db.batchSet(batch); err != nil {
 			if err == ErrTxnTooBig {
 				// Decrease the batch size to half.

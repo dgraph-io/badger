@@ -105,7 +105,6 @@ func TestTruncateVLog(t *testing.T) {
 	// Read it back to ensure that we can read it now.
 	for i := 3; i < 32; i++ {
 		err := db1.View(func(txn *Txn) error {
-			fmt.Println(i)
 			item, err := txn.Get(key(i))
 			require.NoError(t, err)
 			val := getItemValue(t, item)
@@ -123,7 +122,6 @@ func TestTruncateVLog(t *testing.T) {
 
 	for i := 3; i < 32; i++ {
 		err := db1.View(func(txn *Txn) error {
-			fmt.Println(i)
 			item, err := txn.Get(key(i))
 			require.NoError(t, err)
 			val := getItemValue(t, item)

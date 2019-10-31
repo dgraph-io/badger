@@ -140,8 +140,6 @@ func TestValueGCManaged(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		// Try at max 100 times to GC even a single value log file.
 		err := db.RunValueLogGC(0.0001)
-		fmt.Println("I'm herer")
-		fmt.Printf("%+v \n", err)
 		if err == nil {
 			return // Done
 		}
