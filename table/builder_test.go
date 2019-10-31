@@ -99,7 +99,7 @@ func TestTableIndex(t *testing.T) {
 
 func TestInvalidCompression(t *testing.T) {
 	keyPrefix := "key"
-	opts := Options{Compression: options.Snappy}
+	opts := Options{Compression: options.None}
 	f := buildTestTable(t, keyPrefix, 1000, opts)
 	t.Run("with correct decompression algo", func(t *testing.T) {
 		_, err := OpenTable(f, opts)
