@@ -57,7 +57,7 @@ func (h header) Encode() []byte {
 func (h *header) Decode(buf []byte) {
 	// Copy over data from buf into h. Using *h=unsafe.pointer(...) leads to
 	// pointer alignment issues. See https://github.com/dgraph-io/badger/issues/1096
-	copy((*[headerSize]byte)(unsafe.Pointer(h))[:], buf)
+	copy(((*[headerSize]byte)(unsafe.Pointer(h))[:]), buf)
 }
 
 // Builder is used in building a table.
