@@ -659,12 +659,12 @@ func TestLoad(t *testing.T) {
 		require.NoError(t, err)
 		opt := getTestOptions("")
 		opt.EncryptionKey = key
-		opt.Compression = options.ZSTD
+		opt.Compression = options.Snappy
 		testLoad(t, opt)
 	})
 	t.Run("TestLoad without Encryption and with compression", func(t *testing.T) {
 		opt := getTestOptions("")
-		opt.Compression = options.ZSTD
+		opt.Compression = options.Snappy
 		testLoad(t, opt)
 	})
 }

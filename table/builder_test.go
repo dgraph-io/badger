@@ -34,7 +34,7 @@ func TestTableIndex(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 	keyPrefix := "key"
 	t.Run("single key", func(t *testing.T) {
-		opts := Options{Compression: options.ZSTD}
+		opts := Options{Compression: options.Snappy}
 		f := buildTestTable(t, keyPrefix, 1, opts)
 		tbl, err := OpenTable(f, opts)
 		require.NoError(t, err)
@@ -53,7 +53,7 @@ func TestTableIndex(t *testing.T) {
 			DataKey: &pb.DataKey{Data: key}})
 		// Compression mode.
 		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-			Compression: options.ZSTD})
+			Compression: options.Snappy})
 		keysCount := 10000
 		for _, opt := range opts {
 			builder := NewTableBuilder(opt)
@@ -99,7 +99,7 @@ func TestTableIndex(t *testing.T) {
 
 func TestInvalidCompression(t *testing.T) {
 	keyPrefix := "key"
-	opts := Options{Compression: options.ZSTD}
+	opts := Options{Compression: options.Snappy}
 	f := buildTestTable(t, keyPrefix, 1000, opts)
 	t.Run("with correct decompression algo", func(t *testing.T) {
 		_, err := OpenTable(f, opts)

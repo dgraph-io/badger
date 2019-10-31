@@ -46,7 +46,7 @@ func key(prefix string, i int) string {
 
 func getTestTableOptions() Options {
 	return Options{
-		Compression:        options.ZSTD,
+		Compression:        options.Snappy,
 		LoadingMode:        options.LoadToRAM,
 		BlockSize:          4 * 1024,
 		BloomFalsePositive: 0.01,
@@ -704,7 +704,7 @@ func TestTableBigValues(t *testing.T) {
 	require.NoError(t, err, "unable to create file")
 
 	n := 100 // Insert 100 keys.
-	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+	opts := Options{Compression: options.Snappy, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	builder := NewTableBuilder(opts)
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), 0)
@@ -785,7 +785,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 	// Iterate b.N times over the entire table.
 	for i := 0; i < b.N; i++ {
 		func() {
-			opts := Options{Compression: options.ZSTD, BlockSize: 4 * 0124, BloomFalsePositive: 0.01}
+			opts := Options{Compression: options.Snappy, BlockSize: 4 * 0124, BloomFalsePositive: 0.01}
 			opts.Cache = cache
 			newBuilder := NewTableBuilder(opts)
 			it := tbl.NewIterator(false)
@@ -811,7 +811,7 @@ func BenchmarkReadMerged(b *testing.B) {
 
 	for i := 0; i < m; i++ {
 		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-		opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+		opts := Options{Compression: options.Snappy, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 		opts.Cache = cache
 		builder := NewTableBuilder(opts)
 		f, err := y.OpenSyncedFile(filename, true)
@@ -898,7 +898,7 @@ func BenchmarkRandomRead(b *testing.B) {
 
 func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Table {
 	rand.Seed(time.Now().Unix())
-	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+	opts := Options{Compression: options.Snappy, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	if cache == nil {
 		var err error
 		cache, err = ristretto.NewCache(&cacheConfig)
