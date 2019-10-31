@@ -52,6 +52,4 @@ const (
 	None CompressionType = 0
 	// Snappy mode indicates that a block is compressed using Snappy algorithm.
 	Snappy CompressionType = 1
-	// ZSTD mode indicates that a block is compressed using ZSTD algorithm.
-	ZSTD CompressionType = 2
 )
