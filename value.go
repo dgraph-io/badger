@@ -93,10 +93,6 @@ func (lf *logFile) fileOffset() uint32 {
 	return atomic.LoadUint32(&lf.offset)
 }
 
-func (lf *logFile) encode(e *Entry, buf *bytes.Buffer, offset uint32) (int, error) {
-	return lf.encoder.encode(e, buf, lf.generateIV(offset))
-}
-
 func (lf *logFile) writeLog(buf *bytes.Buffer) error {
 	n, err := lf.fd.Write(buf.Bytes())
 	atomic.AddUint32(&lf.offset, uint32(n))

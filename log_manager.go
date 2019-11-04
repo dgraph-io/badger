@@ -820,7 +820,7 @@ func (lm *logManager) write(reqs []*request) error {
 			if b.Entries[j].forceWal {
 				// value size is less than threshold. So writing to WAL
 				entryOffset = wal.fileOffset() + uint32(walBuf.Len())
-				entryLen, err := wal.encode(b.Entries[j], walBuf, entryOffset)
+				entryLen, err := wal.encodeEntry(b.Entries[j], walBuf, entryOffset)
 				if err != nil {
 					return y.Wrapf(err, "Error while encoding entry for WAL %d", lm.wal.fid)
 				}
@@ -835,7 +835,7 @@ func (lm *logManager) write(reqs []*request) error {
 			// Since the value size is bigger, So we're writing to vlog.
 			entryOffset = vlog.fileOffset() + uint32(vlogBuf.Len())
 			p.Offset = entryOffset
-			entryLen, err := vlog.encode(b.Entries[j], vlogBuf, entryOffset)
+			entryLen, err := vlog.encodeEntry(b.Entries[j], vlogBuf, entryOffset)
 			if err != nil {
 				return y.Wrapf(err, "Error while encoding entry for vlog %d", lm.vlog.fid)
 			}
