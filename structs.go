@@ -11,6 +11,7 @@ type valuePointer struct {
 	Fid    uint32
 	Len    uint32
 	Offset uint32
+	log    logType
 }
 
 func (p valuePointer) Less(o valuePointer) bool {
@@ -27,7 +28,7 @@ func (p valuePointer) IsZero() bool {
 	return p.Fid == 0 && p.Offset == 0 && p.Len == 0
 }
 
-const vptrSize = 12
+const vptrSize = unsafe.Sizeof(valuePointer{})
 
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode() []byte {
@@ -116,6 +117,21 @@ func (h *header) DecodeFrom(reader *hashReader) (int, error) {
 	return reader.bytesRead, nil
 }
 
+// logDecrypter is used to decrypt entry present in the log file.
+type logDecrypter struct {
+	dataKey *pb.DataKey
+	baseIV  []byte
+}
+
+func (ld *logDecrypter) encryptionEnabled() bool {
+	return ld.dataKey != nil
+}
+
+func (ld *logDecrypter) decryptKV(buf []byte, offset uint32) ([]byte, error) {
+	return y.XORBlock(buf, ld.dataKey.Data, y.GenerateIVFromOffset(ld.baseIV, offset))
+}
+}
+
 // Entry provides Key, Value, UserMeta and ExpiresAt. This struct can be used by
 // the user to set data.
 type Entry struct {
@@ -129,6 +145,7 @@ type Entry struct {
 	offset   uint32
 	skipVlog bool
 	hlen     int // Length of the header.
+	forceWal bool
 }
 
 func (e *Entry) estimateSize(threshold int) int {
