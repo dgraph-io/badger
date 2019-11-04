@@ -92,10 +92,6 @@ func (lf *logFile) fileOffset() uint32 {
 	return atomic.LoadUint32(&lf.offset)
 }
 
-func (lf *logFile) encode(e *Entry, buf *bytes.Buffer, offset uint32) (int, error) {
-	return lf.encoder.encode(e, buf, lf.generateIV(offset))
-}
-
 func (lf *logFile) writeLog(buf *bytes.Buffer) error {
 	n, err := lf.fd.Write(buf.Bytes())
 	atomic.AddUint32(&lf.offset, uint32(n))
@@ -316,7 +312,7 @@ type safeRead struct {
 	v []byte
 
 	recordOffset uint32
-	lf           *logFile
+	decrypter    *logDecrypter
 }
 
 // hashReader implements io.Reader, io.ByteReader interfaces. It also keeps track of the number
@@ -388,8 +384,8 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 		}
 		return nil, err
 	}
-	if r.lf.encryptionEnabled() {
-		if buf, err = r.lf.decryptKV(buf[:], r.recordOffset); err != nil {
+	if r.decrypter.encryptionEnabled() {
+		if buf, err = r.decrypter.decryptKV(buf[:], r.recordOffset); err != nil {
 			return nil, err
 		}
 	}
@@ -443,7 +439,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		k:            make([]byte, 10),
 		v:            make([]byte, 10),
 		recordOffset: offset,
-		lf:           lf,
+		//	lf:           lf,
 	}
 
 	var lastCommit uint64

@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -1035,22 +1034,22 @@ func TestTruncatedDiscardStat(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
-func TestSafeEntry(t *testing.T) {
-	var s safeRead
-	s.lf = &logFile{}
-	e := NewEntry([]byte("foo"), []byte("bar"))
-	buf := bytes.NewBuffer(nil)
-	_, err := s.lf.encodeEntry(e, buf, 0)
-	require.NoError(t, err)
+// func TestSafeEntry(t *testing.T) {
+// 	var s safeRead
+// 	s.lf = &logFile{}
+// 	e := NewEntry([]byte("foo"), []byte("bar"))
+// 	buf := bytes.NewBuffer(nil)
+// 	_, err := s.lf.encodeEntry(e, buf, 0)
+// 	require.NoError(t, err)
 
-	ne, err := s.Entry(buf)
-	require.NoError(t, err)
-	require.Equal(t, e.Key, ne.Key, "key mismatch")
-	require.Equal(t, e.Value, ne.Value, "value mismatch")
-	require.Equal(t, e.meta, ne.meta, "meta mismatch")
-	require.Equal(t, e.UserMeta, ne.UserMeta, "usermeta mismatch")
-	require.Equal(t, e.ExpiresAt, ne.ExpiresAt, "expiresAt mismatch")
-}
+// 	ne, err := s.Entry(buf)
+// 	require.NoError(t, err)
+// 	require.Equal(t, e.Key, ne.Key, "key mismatch")
+// 	require.Equal(t, e.Value, ne.Value, "value mismatch")
+// 	require.Equal(t, e.meta, ne.meta, "meta mismatch")
+// 	require.Equal(t, e.UserMeta, ne.UserMeta, "usermeta mismatch")
+// 	require.Equal(t, e.ExpiresAt, ne.ExpiresAt, "expiresAt mismatch")
+// }
 
 // Regression test for https://github.com/dgraph-io/badger/issues/926
 func TestDiscardStatsMove(t *testing.T) {

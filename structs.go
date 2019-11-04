@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"time"
 	"unsafe"
+
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 type valuePointer struct {
@@ -129,7 +132,6 @@ func (ld *logDecrypter) encryptionEnabled() bool {
 
 func (ld *logDecrypter) decryptKV(buf []byte, offset uint32) ([]byte, error) {
 	return y.XORBlock(buf, ld.dataKey.Data, y.GenerateIVFromOffset(ld.baseIV, offset))
-}
 }
 
 // Entry provides Key, Value, UserMeta and ExpiresAt. This struct can be used by
