@@ -44,6 +44,7 @@ const (
 	WAL
 )
 
+// logManager will takes care of both WAL and vlog replaying and writing.
 type logManager struct {
 	opt                  Options
 	wal                  *logFile
@@ -63,6 +64,7 @@ type logManager struct {
 	numActiveIterators int32
 }
 
+// openLogManager will replay all the logs and give back the logmanager struct.
 func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	replayFn logEntry) (*logManager, error) {
 	manager := &logManager{
@@ -82,6 +84,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	if manager.opt.EventLogging {
 		manager.elog = trace.NewEventLog("Badger", "LogManager")
 	}
+	// Take all WAL file.
 	walFiles, err := y.PopulateFilesForSuffix(db.opt.ValueDir, ".log")
 	if err != nil {
 		return nil, y.Wrapf(err, "Error while populating map in openLogManager")
@@ -141,6 +144,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		keyRegistry: db.registry,
 		whead:       walhead,
 	}
+	// replay the log.
 	err = replayer.replay(replayFn)
 	if err != nil {
 		return nil, y.Wrapf(err, "Error while replaying log")
@@ -149,7 +153,6 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	if manager.maxWalID == 0 {
 		// No WAL files and vlog file so advancing both the ids.
 		y.AssertTrue(manager.maxVlogID == 0)
-		y.AssertTrue(manager.maxWalID == 0)
 		manager.maxWalID++
 		wal, err := manager.createlogFile(manager.maxWalID,
 			WAL)
@@ -201,7 +204,9 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		if err = vlogFile.open(vlogFilePath(manager.opt.ValueDir, fid), flags); err != nil {
 			return nil, y.Wrapf(err, "Error while opening vlog file %d", fid)
 		}
-		// TODO: check for max fid mmap.
+		// Only initialize the the vlog which is not current vlog.
+		// Because, we need to mmap the last vlog for higher number to do the further
+		// write.
 		if fid < manager.maxVlogID {
 			if err = vlogFile.init(); err != nil {
 				return nil, y.Wrapf(err, "Error while init vlog file %d", vlogFile.fid)
@@ -211,20 +216,15 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	}
 
 	if manager.opt.ReadOnly {
+		// Initialize the last vlog file as well.
+		lf := manager.vlogFileMap[manager.maxVlogID]
+		if err = lf.init(); err != nil {
+			return nil, y.Wrapf(err, "Error while init vlog file %d", lf.fid)
+		}
 		// No need for wal file in read only mode.
 		return manager, nil
 	}
 
-	// if manager.maxWalID == walhead.Fid || walhead.Fid == 0 {
-	// 	// Last persisted SST's wal so need to create new WAL file.
-	// 	manager.maxWalID++
-	// 	wal, err := manager.createNewWal()
-	// 	if err != nil {
-	// 		return manager, err
-	// 	}
-	// 	manager.wal = wal
-	// 	return manager, nil
-	// }
 	wal := &logFile{
 		fid:         manager.maxWalID,
 		path:        walFilePath(manager.opt.ValueDir, manager.maxWalID),
@@ -304,6 +304,7 @@ func (manager *logManager) createlogFile(fid uint32, logtype logType) (*logFile,
 	return lf, nil
 }
 
+// logReplayer is used to replay all the log.
 type logReplayer struct {
 	walIDs      []uint32
 	vlogIDs     []uint32
@@ -313,8 +314,9 @@ type logReplayer struct {
 	whead       valuePointer
 }
 
+// replay will take replayFn as input and replayed will replay all the entries to the
+// memtable.
 func (lp *logReplayer) replay(replayFn logEntry) error {
-	// NOTES: what to truncate. how we truncate?
 	var flags uint32
 	truncateNeeded := false
 	switch {
@@ -428,6 +430,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 				}
 				break
 			}
+			// advance both the wal and vlog.
 			currentWalIndex++
 			currentVlogIndex++
 			walFile = &logFile{
@@ -460,11 +463,12 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 				}
 			}
 
-			// close the log file.
+			// close the current vlogs file.
 			err = vlogFile.fd.Close()
 			if err != nil {
 				return y.Wrapf(err, "Error while closing the vlog file %s in replay", vlogFile.path)
 			}
+			// advance for the next vlog file.
 			vlogFile = &logFile{
 				fid:         uint32(lp.walIDs[currentVlogIndex]),
 				path:        vlogFilePath(lp.opt.ValueDir, uint32(lp.walIDs[currentVlogIndex])),
@@ -555,15 +559,6 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		if lp.opt.ReadOnly {
 			return ErrTruncateNeeded
 		}
-		offset := uint32(0)
-		if walCommitTs == 0 {
-			// wal file is corrupted so the offset is the valid offset.
-			offset = walIterator.validOffset
-		} else {
-			// wal is not corrupted. so the batch for the current transaction is corrupted in val.
-			// so truncating to the last batch offset.
-			offset = walIterator.previousOffset
-		}
 		// wal file and vlog files are closed, we need to open it now.
 		walFile := &logFile{
 			fid:         uint32(lp.walIDs[currentWalIndex]),
@@ -603,8 +598,26 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			if err = vlogFile.bootstrap(); err != nil {
 				return y.Wrapf(err, "Error while bootstraping vlog file %d", vlogFile.fid)
 			}
-			return nil
+			// we have bootstraped the files properly. We'll close it now the log files. logmanager will
+			// open again and use it.
+			if err = walFile.fd.Close(); err != nil {
+				return y.Wrapf(err, "Error whole closing wal file %d", walFile.fid)
+			}
+
+			return vlogFile.fd.Close()
 		}
+		// Now we have to figure out, what offset that need to truncated for the wal and vlog.
+		offset := uint32(0)
+		// if ts is zero, then that file is corrupted.
+		if walCommitTs == 0 {
+			// wal file is corrupted so the offset is the valid offset.
+			offset = walIterator.validOffset
+		} else {
+			// wal is not corrupted. so the batch for the current transaction is corrupted in val.
+			// so truncating to the last batch offset.
+			offset = walIterator.previousOffset
+		}
+
 		// None of the log files are mmaped so far, so it is good to truncate here.
 		if err = walFile.fd.Truncate(int64(offset)); err != nil {
 			return y.Wrapf(err, "Error while truncating wal file %d", walFile.fid)
@@ -612,10 +625,10 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		walFile.offset = offset
 		offset = uint32(0)
 		if vlogCommitTs == 0 {
-			// wal file is corrupted so the offset is the valid offset.
+			// vlog file is corrupted so the offset is the valid offset.
 			offset = vlogIterator.validOffset
 		} else {
-			// wal is not corrupted. so the batch for the current transaction is corrupted in val.
+			// vlog is not corrupted. so the batch for the current transaction is corrupted in wal.
 			// so truncating to the last batch offset.
 			offset = vlogIterator.previousOffset
 		}
@@ -628,6 +641,7 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 	return nil
 }
 
+// logIterator is used to iterate batch of transaction entries in the log file.
 type logIterator struct {
 	entryReader    *safeRead
 	reader         *bufio.Reader
@@ -635,6 +649,7 @@ type logIterator struct {
 	previousOffset uint32
 }
 
+// newLogIterator will return the log iterator.
 func newLogIterator(log *logFile, offset uint32, opt Options) (*logIterator, error) {
 	stat, err := log.fd.Stat()
 	if err != nil {
@@ -668,6 +683,8 @@ func newLogIterator(log *logFile, offset uint32, opt Options) (*logIterator, err
 	}, nil
 }
 
+// iterateEntries will iterate entries batch by batch. The batch end of transaction is
+// determined by finish txn mark.
 func (iterator *logIterator) iterateEntries() ([]*Entry, uint64, error) {
 	var commitTs uint64
 	var entries []*Entry
@@ -727,6 +744,8 @@ func (iterator *logIterator) iterateEntries() ([]*Entry, uint64, error) {
 	return entries, commitTs, nil
 }
 
+// write will write the log of the request. write method will decide where to write the entry. Whether in
+// vlog or wal file.
 func (lm *logManager) write(reqs []*request) error {
 	vlogBuf := &bytes.Buffer{}
 	walBuf := &bytes.Buffer{}
@@ -760,10 +779,11 @@ func (lm *logManager) write(reqs []*request) error {
 		rotate := vlog.fileOffset()+uint32(vlogBuf.Len()) > uint32(lm.opt.ValueLogFileSize) ||
 			lm.walWritten > uint32(lm.opt.ValueLogMaxEntries)
 		if rotate {
-			// we need to rotate both the files here. Because, the trasaction entries have to corresponding entries.
-			// This is needed while doing truncation. For example, one vlog file courrupted in the middle. So we delete the
-			// vlog file if there is truncation. Then we replay the next vlog file, with different timestamp. the wal file
-			// will have lesser timestamp. There, we miss the order. So, it is important to keep WAL and vlog mapping.
+			// we need to rotate both the files here. Because, the trasaction entries have to corresponding
+			// entries. This is needed while doing truncation. For example, one vlog file courrupted in the
+			// middle. So we delete the vlog file if there is truncation. Then we replay the next vlog file,
+			// with different timestamp. the wal file will have lesser timestamp. There, we miss the order.
+			// So, it is important to keep WAL and vlog mapping.
 			lf, err := lm.rotateLog(VLOG)
 			if err != nil {
 				return y.Wrapf(err, "Error while creating new vlog file %d", lm.maxVlogID)

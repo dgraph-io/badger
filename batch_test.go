@@ -87,7 +87,7 @@ func BenchmarkWriteBatch(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		wb := db.NewWriteBatch()
-		for j := 0; j < 10000; j++ {
+		for j := 0; j < 50000; j++ {
 			wb.Set(key(j), val(j))
 		}
 		wb.Flush()
