@@ -86,7 +86,7 @@ func init() {
 	testCmd.AddCommand(bankTest)
 	testCmd.AddCommand(bankDisect)
 
-	testCmd.Flags().IntVarP(
+	bankTest.Flags().IntVarP(
 		&numAccounts, "accounts", "a", 10000, "Number of accounts in the bank.")
 	bankTest.Flags().IntVarP(
 		&numGoroutines, "conc", "c", 16, "Number of concurrent transactions to run.")
@@ -344,8 +344,8 @@ func runTest(cmd *cobra.Command, args []string) error {
 		// Do not GC any versions, because we need them for the disect..
 		WithNumVersionsToKeep(int(math.MaxInt32)).
 		WithValueThreshold(1) // Make all values go to value log
-	if mmap {
-		opts = opts.WithTableLoadingMode(options.MemoryMap)
+	if !mmap {
+		opts = opts.WithTableLoadingMode(options.LoadToRAM)
 	}
 
 	if encryptionKey != "" {
