@@ -806,10 +806,6 @@ type valueLog struct {
 	lfDiscardStats *lfDiscardStats
 }
 
-func vlogFilePath(dirPath string, fid uint32) string {
-	return fmt.Sprintf("%s%s%06d.vlog", dirPath, string(os.PathSeparator), fid)
-}
-
 func (vlog *valueLog) fpath(fid uint32) string {
 	return vlogFilePath(vlog.dirPath, fid)
 }

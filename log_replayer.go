@@ -21,6 +21,7 @@ import (
 	"hash/crc32"
 	"io"
 	"math"
+	"os"
 	"strconv"
 
 	"github.com/dgraph-io/badger/v2/y"
@@ -37,11 +38,20 @@ type logReplayer struct {
 	whead       valuePointer
 }
 
-// replay will take replayFn as input and replayed will replay all the entries to the
-// memtable.
-func (lp *logReplayer) replay(replayFn logEntry) error {
+func (lp *logReplayer) openLogFile(ltype logType, index int) (*logFile, error) {
+	lFile := &logFile{
+		loadingMode: lp.opt.ValueLogLoadingMode,
+		registry:    lp.keyRegistry,
+	}
+	switch ltype {
+	case VLOG:
+		lFile.fid = uint32(lp.vlogIDs[index])
+		lFile.path = vlogFilePath(lp.opt.ValueDir, uint32(lp.walIDs[index]))
+	case WAL:
+		lFile.fid = uint32(lp.walIDs[index])
+		lFile.path = walFilePath(lp.opt.ValueDir, uint32(lp.walIDs[index]))
+	}
 	var flags uint32
-	truncateNeeded := false
 	switch {
 	case lp.opt.ReadOnly:
 		// If we have read only, we don't need SyncWrites.
@@ -50,63 +60,64 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 	case lp.opt.SyncWrites:
 		flags |= y.Sync
 	}
+	if err := lFile.open(lFile.path, flags); err != nil {
+		return nil, y.Wrapf(err, "Error while opening log file of type: %d and ID: %d in logReplayer",
+			ltype, lp.walIDs[index])
+	}
+	return lFile, nil
+}
+
+// replay will take replayFn as input and replayed will replay all the entries to the
+// memtable.
+func (lp *logReplayer) replay(replayFn logEntry) error {
 	// No need to replay if all the SST's are flushed properly.
 	if len(lp.walIDs) == 0 {
 		y.AssertTrue(len(lp.vlogIDs) == 0)
 		return nil
 	}
 
-	currentVlogIndex := 0
-	vlogFile := &logFile{
-		fid:         uint32(lp.vlogIDs[currentVlogIndex]),
-		loadingMode: lp.opt.ValueLogLoadingMode,
-		registry:    lp.keyRegistry,
+	var (
+		vlogFile, walFile *logFile
+		truncateNeeded    bool
+		err               error
+		currentVlogIndex  int
+		currentWalIndex   int
+	)
+	if vlogFile, err = lp.openLogFile(VLOG, currentVlogIndex); err != nil {
+		return err
 	}
-	err := vlogFile.open(vlogFilePath(lp.opt.ValueDir, uint32(lp.vlogIDs[currentVlogIndex])), flags)
-	if err != nil {
-		return y.Wrapf(err, "Error while opening vlog file %d in log replayer", lp.vlogIDs[currentVlogIndex])
-	}
-
 	vlogOffset := uint32(vlogHeaderSize)
-	if vlogFile.fid == lp.vhead.Fid {
-		vlogOffset = lp.vhead.Offset + lp.vhead.Len
-	}
+	// At this point, the first file to be replayed should be the one that contains the vlog head.
+	y.AssertTruef(vlogFile.fid == lp.vhead.Fid,
+		"vlog.fid: %d vhead.fid: %d", vlogFile.fid, lp.vhead.Fid)
 	if vlogFile.fileOffset() < vlogOffset {
 		// we only bootstarp last log file and there is no log file to replay.
 		y.AssertTrue(len(lp.vlogIDs) == 1)
 		truncateNeeded = true
 	}
-	currentWalIndex := 0
+	// Move vlogOffset to the end of vhead entry.
+	vlogOffset = lp.vhead.Offset + lp.vhead.Len
 	vlogIterator, err := newLogIterator(vlogFile, vlogOffset, lp.opt)
 	if err != nil {
 		return y.Wrapf(err, "Error while creating log iterator for the vlog file %s", vlogFile.path)
 	}
-	walFile := &logFile{
-		fid:         uint32(lp.walIDs[currentWalIndex]),
-		path:        walFilePath(lp.opt.ValueDir, uint32(lp.walIDs[currentWalIndex])),
-		loadingMode: lp.opt.ValueLogLoadingMode,
-		registry:    lp.keyRegistry,
+	if walFile, err = lp.openLogFile(WAL, currentWalIndex); err != nil {
+		return err
 	}
-	err = walFile.open(walFile.path, flags)
-	if err != nil {
-		return y.Wrapf(err, "Error while opening WAL file %d in logReplayer",
-			lp.walIDs[currentWalIndex])
-	}
-	walOffset := uint32(vlogHeaderSize)
-	if walFile.fid == lp.whead.Fid {
-		walOffset = lp.whead.Offset + lp.whead.Len
-	}
-	if walFile.fileOffset() < walOffset {
+	// At this point, the first file to be replayed should be the one that contains the WAL head.
+	y.AssertTruef(walFile.fid == lp.whead.Fid,
+		"wal.fid: %d whead.fid: %d", walFile.fid, lp.whead.Fid)
+	if walFile.fileOffset() < uint32(vlogHeaderSize) {
 		// we only bootstarp last log file and there is no log file to replay.
 		y.AssertTrue(len(lp.walIDs) == 1)
 		truncateNeeded = true
 	}
+	// Move walOffset to the end of whead entry.
+	walOffset := lp.whead.Offset + lp.whead.Len
 	walIterator, err := newLogIterator(walFile, walOffset, lp.opt)
 	if err != nil {
 		return y.Wrapf(err, "Error while creating log iterator for the wal file %s", walFile.path)
 	}
-	walEntries, walCommitTs, walErr := walIterator.iterateEntries()
-	vlogEntries, vlogCommitTs, vlogErr := vlogIterator.iterateEntries()
 
 	isTruncateNeeded := func(validOffset uint32, log *logFile) (bool, error) {
 		info, err := log.fd.Stat()
@@ -115,6 +126,8 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		}
 		return info.Size() != int64(validOffset), nil
 	}
+	walEntries, walCommitTs, walErr := walIterator.iterateEntries()
+	vlogEntries, vlogCommitTs, vlogErr := vlogIterator.iterateEntries()
 	for {
 		if walErr == errTruncate || vlogErr == errTruncate || truncateNeeded {
 			truncateNeeded = true
@@ -124,16 +137,13 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		// If any of the log reaches EOF we need to advance both the log file because vlog and wal has 1 to 1 mapping
 		// isTruncateNeeded check will take care of truncation.
 		if walErr == io.ErrUnexpectedEOF || walErr == io.EOF || vlogErr == io.ErrUnexpectedEOF || vlogErr == io.EOF {
-			var err error
 			// check whether we iterated till the valid offset.
-			truncateNeeded, err = isTruncateNeeded(walIterator.validOffset, walFile)
-			if err != nil {
+			if truncateNeeded, err = isTruncateNeeded(walIterator.validOffset, walFile); err != nil {
 				return y.Wrapf(err, "Error while checking truncation for the wal file %s",
 					walFile.path)
 			}
 			// close the log file.
-			err = walFile.fd.Close()
-			if err != nil {
+			if err = walFile.fd.Close(); err != nil {
 				return y.Wrapf(err, "Error while closing the WAL file %s in replay", walFile.path)
 			}
 			// We successfully iterated till the end of the file. Now we have to advance
@@ -155,16 +165,8 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			// advance both the wal and vlog.
 			currentWalIndex++
 			currentVlogIndex++
-			walFile = &logFile{
-				fid:         uint32(lp.walIDs[currentWalIndex]),
-				path:        walFilePath(lp.opt.ValueDir, uint32(lp.walIDs[currentWalIndex])),
-				loadingMode: lp.opt.ValueLogLoadingMode,
-				registry:    lp.keyRegistry,
-			}
-			err = walFile.open(walFile.path, flags)
-			if err != nil {
-				return y.Wrapf(err, "Error while opening WAL file %d in logReplayer",
-					lp.walIDs[currentWalIndex])
+			if walFile, err = lp.openLogFile(WAL, currentWalIndex); err != nil {
+				return err
 			}
 
 			if walFile.fileOffset() < vlogHeaderSize {
@@ -186,21 +188,12 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			}
 
 			// close the current vlogs file.
-			err = vlogFile.fd.Close()
-			if err != nil {
+			if err = vlogFile.fd.Close(); err != nil {
 				return y.Wrapf(err, "Error while closing the vlog file %s in replay", vlogFile.path)
 			}
-			// advance for the next vlog file.
-			vlogFile = &logFile{
-				fid:         uint32(lp.walIDs[currentVlogIndex]),
-				path:        vlogFilePath(lp.opt.ValueDir, uint32(lp.walIDs[currentVlogIndex])),
-				loadingMode: lp.opt.ValueLogLoadingMode,
-				registry:    lp.keyRegistry,
-			}
-			err = vlogFile.open(vlogFile.path, flags)
-			if err != nil {
-				return y.Wrapf(err, "Error while opening WAL file %d in logReplayer",
-					lp.walIDs[currentVlogIndex])
+
+			if vlogFile, err = lp.openLogFile(VLOG, currentVlogIndex); err != nil {
+				return err
 			}
 			if vlogFile.fileOffset() < vlogHeaderSize {
 				truncateNeeded = true
@@ -280,34 +273,20 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 		y.AssertTrue(len(lp.vlogIDs)-1 == currentVlogIndex)
 
 		// wal file and vlog files are closed, we need to open it now.
-		walFile := &logFile{
-			fid:         uint32(lp.walIDs[currentWalIndex]),
-			path:        walFilePath(lp.opt.ValueDir, uint32(lp.walIDs[currentWalIndex])),
-			loadingMode: lp.opt.ValueLogLoadingMode,
-			registry:    lp.keyRegistry,
-		}
-		err = walFile.open(walFile.path, flags)
-		if err != nil {
+		if walFile, err = lp.openLogFile(WAL, currentWalIndex); err != nil {
 			return y.Wrapf(err, "Error while opening WAL file %d in logReplayer",
 				lp.walIDs[currentWalIndex])
 		}
-		vlogFile = &logFile{
-			fid:         uint32(lp.walIDs[currentVlogIndex]),
-			path:        vlogFilePath(lp.opt.ValueDir, uint32(lp.walIDs[currentVlogIndex])),
-			loadingMode: lp.opt.ValueLogLoadingMode,
-			registry:    lp.keyRegistry,
-		}
-		err = vlogFile.open(vlogFile.path, flags)
-		if err != nil {
+		if vlogFile, err = lp.openLogFile(VLOG, currentVlogIndex); err != nil {
 			return y.Wrapf(err, "Error while opening WAL file %d in logReplayer",
 				lp.walIDs[currentVlogIndex])
 		}
-		walStat, err := walFile.fd.Stat()
-		if err != nil {
+
+		var walStat, vlogStat os.FileInfo
+		if walStat, err = walFile.fd.Stat(); err != nil {
 			return y.Wrapf(err, "Error while retriving wal file %d stat", walFile.fid)
 		}
-		vlogStat, err := vlogFile.fd.Stat()
-		if err != nil {
+		if vlogStat, err = vlogFile.fd.Stat(); err != nil {
 			return y.Wrapf(err, "Error while retriving vlog file %d stat", vlogFile.fid)
 		}
 		if walStat.Size() < vlogHeaderSize || vlogStat.Size() < vlogHeaderSize {
