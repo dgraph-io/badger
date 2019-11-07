@@ -439,7 +439,10 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		k:            make([]byte, 10),
 		v:            make([]byte, 10),
 		recordOffset: offset,
-		//	lf:           lf,
+		decrypter: &logDecrypter{
+			baseIV:  lf.baseIV,
+			dataKey: lf.dataKey,
+		},
 	}
 
 	var lastCommit uint64
