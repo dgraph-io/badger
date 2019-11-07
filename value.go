@@ -876,6 +876,7 @@ func (lf *logFile) open(path string, flags uint32) error {
 	}
 	lf.dataKey = dk
 	lf.baseIV = buf[8:]
+	lf.path = path
 	y.AssertTrue(len(lf.baseIV) == 12)
 	return nil
 }
