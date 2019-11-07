@@ -32,5 +32,5 @@ func ZSTDDecompress(dst, src []byte) ([]byte, error) {
 
 // ZSTDCompress compresses a block using ZSTD algorithm.
 func ZSTDCompress(dst, src []byte) ([]byte, error) {
-	return zstd.CompressLevel(dst, src, zstd.BestCompression)
+	return zstd.CompressLevel(dst, src, 15)
 }
