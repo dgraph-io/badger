@@ -49,6 +49,10 @@ func walFilePath(dirPath string, fid uint32) string {
 	return fmt.Sprintf("%s%s%06d.log", dirPath, string(os.PathSeparator), fid)
 }
 
+func vlogFilePath(dirPath string, fid uint32) string {
+	return fmt.Sprintf("%s%s%06d.vlog", dirPath, string(os.PathSeparator), fid)
+}
+
 // logManager will takes care of both WAL and vlog replaying and writing.
 type logManager struct {
 	sync.RWMutex
