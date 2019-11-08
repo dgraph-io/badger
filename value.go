@@ -94,10 +94,13 @@ func (lf *logFile) fileOffset() uint32 {
 
 func (lf *logFile) writeLog(buf *bytes.Buffer) error {
 	n, err := lf.fd.Write(buf.Bytes())
+	if err != nil {
+		return y.Wrapf(err, "Error while writing log")
+	}
 	atomic.AddUint32(&lf.offset, uint32(n))
 	y.NumBytesWritten.Add(int64(n))
 	y.NumWrites.Add(1)
-	return err
+	return nil
 }
 
 // encodeEntry will encode entry to the buf

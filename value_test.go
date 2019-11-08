@@ -1036,7 +1036,6 @@ func TestTruncatedDiscardStat(t *testing.T) {
 
 // func TestSafeEntry(t *testing.T) {
 // 	var s safeRead
-// 	s.lf = &logFile{}
 // 	e := NewEntry([]byte("foo"), []byte("bar"))
 // 	buf := bytes.NewBuffer(nil)
 // 	_, err := s.lf.encodeEntry(e, buf, 0)

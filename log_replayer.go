@@ -117,13 +117,16 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 	}
 	for {
 		if walErr == errTruncate || vlogErr == errTruncate || truncateNeeded {
+			// We could have errTruncate from iterator.But, truncateNeeded is still false.So, it is important
+			// to set
 			truncateNeeded = true
 			break
 		}
 
-		// If any of the log reaches EOF we need to advance both the log file because vlog and wal has 1 to 1 mapping
-		// isTruncateNeeded check will take care of truncation.
-		if walErr == io.ErrUnexpectedEOF || walErr == io.EOF || vlogErr == io.ErrUnexpectedEOF || vlogErr == io.EOF {
+		// If any of the log reaches EOF we need to advance both the log file because vlog and wal has 1 to 1
+		// mapping isTruncateNeeded check will take care of truncation.
+		if walErr == io.ErrUnexpectedEOF || walErr == io.EOF || vlogErr == io.ErrUnexpectedEOF ||
+			vlogErr == io.EOF {
 			var err error
 			// check whether we iterated till the valid offset.
 			truncateNeeded, err = isTruncateNeeded(walIterator.validOffset, walFile)
@@ -172,6 +175,9 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 				truncateNeeded = true
 			} else {
 				walIterator, err = newLogIterator(walFile, vlogHeaderSize, lp.opt)
+				if err != nil {
+					return y.Wrapf(err, "Error while creating log iterator for the wal file %s", walFile.path)
+				}
 				walEntries, walCommitTs, walErr = walIterator.iterateEntries()
 			}
 
@@ -206,6 +212,10 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 				truncateNeeded = true
 			} else {
 				vlogIterator, err = newLogIterator(vlogFile, vlogHeaderSize, lp.opt)
+				if err != nil {
+					return y.Wrapf(err,
+						"Error while creating log iterator for the vlog file %s", vlogFile.path)
+				}
 				vlogEntries, vlogCommitTs, vlogErr = vlogIterator.iterateEntries()
 			}
 			continue
@@ -343,7 +353,6 @@ func (lp *logReplayer) replay(replayFn logEntry) error {
 			return y.Wrapf(err, "Error while truncating wal file %d", walFile.fid)
 		}
 		walFile.offset = offset
-		offset = uint32(0)
 		if vlogCommitTs == 0 {
 			// vlog file is corrupted so the offset is the valid offset.
 			offset = vlogIterator.validOffset
@@ -425,9 +434,9 @@ func (iterator *logIterator) iterateEntries() ([]*Entry, uint64, error) {
 				commitTs = txnTs
 			}
 			if commitTs != txnTs {
-				// we got an entry here without finish mark so, revinding the state.
-				entries = []*Entry{}
-				return entries, 0, errTruncate
+				// We got an entry that has txn timestamp different than what we were expecting.
+				// This wouldn't happen unless the data is lost/corrupted.
+				return nil, 0, errTruncate
 			}
 			entries = append(entries, e)
 			continue
@@ -436,8 +445,7 @@ func (iterator *logIterator) iterateEntries() ([]*Entry, uint64, error) {
 		if e.meta&bitFinTxn > 0 {
 			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
 			if err != nil {
-				entries = []*Entry{}
-				return entries, 0, err
+				return nil, 0, err
 			}
 			if commitTs == 0 && txnTs == math.MaxUint64 {
 				// we got finish mark for gc. so no need to check commitTs != txnTs
@@ -448,9 +456,9 @@ func (iterator *logIterator) iterateEntries() ([]*Entry, uint64, error) {
 			// If there is no entries means no entries from the current txn is not part
 			// of log files. we only got finish mark. so we're not checking commitTs != txnTs
 			if len(entries) != 0 && commitTs != txnTs {
-				entries = []*Entry{}
-				return entries, 0, errTruncate
+				return nil, 0, errTruncate
 			}
+			y.AssertTrue(commitTs == txnTs)
 			// We got finish mark for this entry batch. Now, the iteration for this entry batch
 			// is done so stoping the iteration for this ts.
 			commitTs = txnTs
