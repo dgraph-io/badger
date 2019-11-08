@@ -197,7 +197,7 @@ func (lm *logManager) bootstrapManager() error {
 
 func (lm *logManager) initLogManager() error {
 	// Populate all log files.
-	vlogFiles, err := y.PopulateFilesForSuffix(lm.db.opt.ValueDir, ".vlog")
+	vlogFiles, err := y.PopulateFilesForSuffix(lm.db.opt.ValueDir, valueFileSuffix)
 	if err != nil {
 		return y.Wrapf(err, "Error while populating vlog filesS")
 	}
@@ -287,9 +287,6 @@ func (lm *logManager) createlogFile(fid uint32, logtype logType) (*logFile, erro
 		loadingMode: lm.opt.ValueLogLoadingMode,
 		registry:    lm.db.registry,
 	}
-	// writableLogOffset is only written by write func, by read by Read func.
-	// To avoid a race condition, all reads and updates to this variable must be
-	// done via atomics.
 	var err error
 	if lf.fd, err = y.CreateSyncedFile(path, lm.opt.SyncWrites); err != nil {
 		return nil, errFile(err, lf.path, "Create value log file")
@@ -316,8 +313,8 @@ func (lm *logManager) createlogFile(fid uint32, logtype logType) (*logFile, erro
 	return lf, nil
 }
 
-// write will write the log of the request. write method will decide where to write the entry. Whether in
-// vlog or wal file.
+// write will write the log of the request. write method will decide where to write the entry.
+// Whether in vlog or wal file.
 func (lm *logManager) write(reqs []*request) error {
 	vlogBuf := &bytes.Buffer{}
 	walBuf := &bytes.Buffer{}
@@ -347,14 +344,15 @@ func (lm *logManager) write(reqs []*request) error {
 		walBuf.Reset()
 		// check whether vlog hits the defined threshold.
 		rotate := vlog.fileOffset()+uint32(vlogBuf.Len()) > uint32(lm.opt.ValueLogFileSize) ||
-			lm.vlogWritten > uint32(lm.opt.ValueLogMaxEntries) || wal.fileOffset()+uint32(walBuf.Len()) >
-			uint32(lm.opt.ValueLogFileSize)
+			lm.vlogWritten > uint32(lm.opt.ValueLogMaxEntries) ||
+			wal.fileOffset()+uint32(walBuf.Len()) > uint32(lm.opt.ValueLogFileSize)
 		if rotate {
-			// we need to rotate both the files here. Because, the trasaction entries have to corresponding
-			// entries. This is needed while doing truncation. For example, one vlog file courrupted in the
-			// middle. So we delete the vlog file if there is truncation. Then we replay the next vlog file,
-			// with different timestamp. the wal file will have lesser timestamp. There, we miss the order.
-			// So, it is important to keep WAL and vlog mapping.
+			// we need to rotate both the files here. Because, the trasaction entries have to
+			// corresponding entries. This is needed while doing truncation. For example, one vlog
+			// file courrupted in the middle. So we delete the vlog file if there is truncation.
+			// Then we replay the next vlog file,with different timestamp. the wal file will have
+			// lesser timestamp. There, we miss the order.So, it is important to keep WAL and
+			// vlog mapping.
 			if err := lm.rotateLog(); err != nil {
 				return y.Wrapf(err, "Error while rotating log file")
 			}
@@ -412,8 +410,8 @@ func (lm *logManager) write(reqs []*request) error {
 		// written to the same vlog file.
 		writeNow :=
 			vlog.fileOffset()+uint32(vlogBuf.Len()) > uint32(lm.opt.ValueLogFileSize) ||
-				lm.vlogWritten > uint32(lm.opt.ValueLogMaxEntries) || wal.fileOffset()+uint32(walBuf.Len()) >
-				uint32(lm.opt.ValueLogFileSize)
+				lm.vlogWritten > uint32(lm.opt.ValueLogMaxEntries) ||
+				wal.fileOffset()+uint32(walBuf.Len()) > uint32(lm.opt.ValueLogFileSize)
 		if writeNow {
 			if err := toDisk(); err != nil {
 				return err
@@ -443,8 +441,9 @@ func (lm *logManager) rotateLog() error {
 	if err != nil {
 		return y.Wrapf(err, "Error while creating vlog file %d", maxLogID)
 	}
-	// Here we mmaped the file so don't close it. This log file is part of vlog filesMap and it is used by
-	// value pointer. doneWriting will take take care of unmmap, truncate and mmap it back.
+	// Here we mmaped the file so don't close it. This log file is part of vlog filesMap and
+	// it is used by value pointer. doneWriting will take take care of unmmap, truncate and mmap
+	//it back.
 	if err = lm.vlog.doneWriting(lm.vlog.fileOffset()); err != nil {
 		return y.Wrapf(err, "Error while doneWriting vlog %d", lm.vlog.fid)
 	}

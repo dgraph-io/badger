@@ -512,7 +512,8 @@ func (r *PageBufferReader) Read(p []byte) (int, error) {
 	return read, nil
 }
 
-// PopulateFilesForSuffix returns a map containing all files present in the dir with the given suffix.
+// PopulateFilesForSuffix returns a map containing all files present in the dir
+// with the given suffix.
 func PopulateFilesForSuffix(dir string, suffix string) (map[uint32]struct{}, error) {
 	fileMap := make(map[uint32]struct{})
 	files, err := ioutil.ReadDir(dir)
