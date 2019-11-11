@@ -98,6 +98,9 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		s.cstatus.levels[i] = new(levelCompactStatus)
 	}
 
+	if db.opt.DiskLess {
+		return s, nil
+	}
 	// Compare manifest against directory, check for existent/non-existent files, and remove.
 	if err := revertToManifest(db, mf, getIDMap(db.opt.Dir)); err != nil {
 		return nil, err
@@ -603,7 +606,15 @@ func (s *levelsController) compactBuildTables(
 		fileID := s.reserveFileID()
 		go func(builder *table.Builder) {
 			defer builder.Close()
-			tbl, err := build(fileID)
+			var (
+				tbl *table.Table
+				err error
+			)
+			if s.kv.opt.DiskLess {
+				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
+			} else {
+				tbl, err = build(fileID)
+			}
 			resultCh <- newTableResult{tbl, err}
 		}(builder)
 	}
@@ -619,7 +630,7 @@ func (s *levelsController) compactBuildTables(
 		}
 	}
 
-	if firstErr == nil {
+	if firstErr == nil && !s.kv.opt.DiskLess {
 		// Ensure created files' directory entries are visible.  We don't mind the extra latency
 		// from not doing this ASAP after all file creation has finished because this is a
 		// background operation.
@@ -641,8 +652,10 @@ func (s *levelsController) compactBuildTables(
 	sort.Slice(newTables, func(i, j int) bool {
 		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
-	s.kv.vlog.updateDiscardStats(discardStats)
-	s.kv.opt.Debugf("Discard stats: %v", discardStats)
+	if !s.kv.opt.DiskLess {
+		s.kv.vlog.updateDiscardStats(discardStats)
+		s.kv.opt.Debugf("Discard stats: %v", discardStats)
+	}
 	return newTables, func() error { return decrRefs(newTables) }, nil
 }
 
@@ -809,9 +822,11 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	}()
 	changeSet := buildChangeSet(&cd, newTables)
 
-	// We write to the manifest _before_ we delete files (and after we created files)
-	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
-		return err
+	if !s.kv.opt.DiskLess {
+		// We write to the manifest _before_ we delete files (and after we created files)
+		if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
+			return err
+		}
 	}
 
 	// See comment earlier in this function about the ordering of these ops, and the order in which

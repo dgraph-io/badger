@@ -1972,3 +1972,31 @@ func removeDir(dir string) func() {
 		}
 	}
 }
+
+func TestWriteDiskLess(t *testing.T) {
+	opt := DefaultOptions("")
+	opt.DiskLess = true
+	db, err := Open(opt)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
+	for i := 0; i < 100; i++ {
+		txnSet(t, db, []byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)), 0x00)
+	}
+	err = db.View(func(txn *Txn) error {
+		for i := 0; i < 100; i++ {
+			item, err := txn.Get([]byte(fmt.Sprintf("key%d", i)))
+			require.NoError(t, err)
+			expected := []byte(fmt.Sprintf("val%d", i))
+			return item.Value(func(val []byte) error {
+				require.Equal(t, expected, val,
+					"Invalid value for key %q. expected: %q, actual: %q",
+					item.Key(), expected, val)
+				return nil
+			})
+		}
+		return nil
+	})
+	require.NoError(t, err)
+}

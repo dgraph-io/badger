@@ -188,6 +188,9 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 
 // Open returns a new DB object.
 func Open(opt Options) (db *DB, err error) {
+	if opt.DiskLess && (opt.Dir != "" || opt.ValueDir != "") {
+		return nil, errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
+	}
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
@@ -212,68 +215,71 @@ func Open(opt Options) (db *DB, err error) {
 		// Do not perform compaction in read only mode.
 		opt.CompactL0OnClose = false
 	}
-
-	for _, path := range []string{opt.Dir, opt.ValueDir} {
-		dirExists, err := exists(path)
-		if err != nil {
-			return nil, y.Wrapf(err, "Invalid Dir: %q", path)
-		}
-		if !dirExists {
-			if opt.ReadOnly {
-				return nil, errors.Errorf("Cannot find directory %q for read-only open", path)
-			}
-			// Try to create the directory
-			err = os.Mkdir(path, 0700)
-			if err != nil {
-				return nil, y.Wrapf(err, "Error Creating Dir: %q", path)
-			}
-		}
-	}
-	absDir, err := filepath.Abs(opt.Dir)
-	if err != nil {
-		return nil, err
-	}
-	absValueDir, err := filepath.Abs(opt.ValueDir)
-	if err != nil {
-		return nil, err
-	}
 	var dirLockGuard, valueDirLockGuard *directoryLockGuard
-	dirLockGuard, err = acquireDirectoryLock(opt.Dir, lockFile, opt.ReadOnly)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if dirLockGuard != nil {
-			_ = dirLockGuard.release()
+	var manifestFile *manifestFile
+	var manifest Manifest
+	if !opt.DiskLess {
+		for _, path := range []string{opt.Dir, opt.ValueDir} {
+			dirExists, err := exists(path)
+			if err != nil {
+				return nil, y.Wrapf(err, "Invalid Dir: %q", path)
+			}
+			if !dirExists {
+				if opt.ReadOnly {
+					return nil, errors.Errorf("Cannot find directory %q for read-only open", path)
+				}
+				// Try to create the directory
+				err = os.Mkdir(path, 0700)
+				if err != nil {
+					return nil, y.Wrapf(err, "Error Creating Dir: %q", path)
+				}
+			}
 		}
-	}()
-	if absValueDir != absDir {
-		valueDirLockGuard, err = acquireDirectoryLock(opt.ValueDir, lockFile, opt.ReadOnly)
+		absDir, err := filepath.Abs(opt.Dir)
+		if err != nil {
+			return nil, err
+		}
+		absValueDir, err := filepath.Abs(opt.ValueDir)
+		if err != nil {
+			return nil, err
+		}
+		dirLockGuard, err = acquireDirectoryLock(opt.Dir, lockFile, opt.ReadOnly)
 		if err != nil {
 			return nil, err
 		}
 		defer func() {
-			if valueDirLockGuard != nil {
-				_ = valueDirLockGuard.release()
+			if dirLockGuard != nil {
+				_ = dirLockGuard.release()
+			}
+		}()
+		if absValueDir != absDir {
+			valueDirLockGuard, err = acquireDirectoryLock(opt.ValueDir, lockFile, opt.ReadOnly)
+			if err != nil {
+				return nil, err
+			}
+			defer func() {
+				if valueDirLockGuard != nil {
+					_ = valueDirLockGuard.release()
+				}
+			}()
+		}
+		if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
+			return nil, ErrValueLogSize
+		}
+		if !(opt.ValueLogLoadingMode == options.FileIO ||
+			opt.ValueLogLoadingMode == options.MemoryMap) {
+			return nil, ErrInvalidLoadingMode
+		}
+		manifestFile, manifest, err = openOrCreateManifestFile(opt.Dir, opt.ReadOnly)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if manifestFile != nil {
+				_ = manifestFile.close()
 			}
 		}()
 	}
-	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
-		return nil, ErrValueLogSize
-	}
-	if !(opt.ValueLogLoadingMode == options.FileIO ||
-		opt.ValueLogLoadingMode == options.MemoryMap) {
-		return nil, ErrInvalidLoadingMode
-	}
-	manifestFile, manifest, err := openOrCreateManifestFile(opt.Dir, opt.ReadOnly)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if manifestFile != nil {
-			_ = manifestFile.close()
-		}
-	}()
 
 	elog := y.NoEventLog
 	if opt.EventLogging {
@@ -310,6 +316,7 @@ func Open(opt Options) (db *DB, err error) {
 		Dir:                           opt.Dir,
 		EncryptionKey:                 opt.EncryptionKey,
 		EncryptionKeyRotationDuration: opt.EncryptionKeyRotationDuration,
+		DiskLess:                      opt.DiskLess,
 	}
 
 	kr, err := OpenKeyRegistry(krOpt)
@@ -317,10 +324,12 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, err
 	}
 	db.registry = kr
-	// Calculate initial size.
-	db.calculateSize()
-	db.closers.updateSize = y.NewCloser(1)
-	go db.updateSize(db.closers.updateSize)
+	if !opt.DiskLess {
+		// Calculate initial size.
+		db.calculateSize()
+		db.closers.updateSize = y.NewCloser(1)
+		go db.updateSize(db.closers.updateSize)
+	}
 	db.mt = skl.NewSkiplist(arenaSize(opt))
 
 	// newLevelsController potentially loads files in directory.
@@ -370,9 +379,10 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.writes = y.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
-	db.closers.valueGC = y.NewCloser(1)
-	go db.vlog.waitOnGC(db.closers.valueGC)
-
+	if !db.opt.DiskLess {
+		db.closers.valueGC = y.NewCloser(1)
+		go db.vlog.waitOnGC(db.closers.valueGC)
+	}
 	db.closers.pub = y.NewCloser(1)
 	go db.pub.listenForUpdates(db.closers.pub)
 
@@ -402,9 +412,10 @@ func (db *DB) close() (err error) {
 
 	atomic.StoreInt32(&db.blockWrites, 1)
 
-	// Stop value GC first.
-	db.closers.valueGC.SignalAndWait()
-
+	if !db.opt.DiskLess {
+		// Stop value GC first.
+		db.closers.valueGC.SignalAndWait()
+	}
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
 
@@ -471,11 +482,16 @@ func (db *DB) close() (err error) {
 		err = errors.Wrap(lcErr, "DB.Close")
 	}
 	db.elog.Printf("Waiting for closer")
-	db.closers.updateSize.SignalAndWait()
+	if !db.opt.DiskLess {
+		db.closers.updateSize.SignalAndWait()
+	}
 	db.orc.Stop()
 	db.blockCache.Close()
 
 	db.elog.Finish()
+	if db.opt.DiskLess {
+		return
+	}
 
 	if db.dirLockGuard != nil {
 		if guardErr := db.dirLockGuard.release(); err == nil {
@@ -622,11 +638,14 @@ var requestPool = sync.Pool{
 }
 
 func (db *DB) shouldWriteValueToLSM(e Entry) bool {
-	return len(e.Value) < db.opt.ValueThreshold
+	return db.opt.DiskLess || (len(e.Value) < db.opt.ValueThreshold)
 }
 
 func (db *DB) writeToLSM(b *request) error {
-	if len(b.Ptrs) != len(b.Entries) {
+	// We should check the length of b.Prts and b.Entries only when badger is not
+	// running in diskless mode. In diskless mode, we don't write anything to the
+	// value log and that's why the length of b.Ptrs will always be zero.
+	if !db.opt.DiskLess && len(b.Ptrs) != len(b.Entries) {
 		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
 
@@ -667,18 +686,19 @@ func (db *DB) writeRequests(reqs []*request) error {
 			r.Wg.Done()
 		}
 	}
-	db.elog.Printf("writeRequests called. Writing to value log")
+	if !db.opt.DiskLess {
+		db.elog.Printf("writeRequests called. Writing to value log")
+		if err := db.vlog.write(reqs); err != nil {
+			done(err)
+			return err
+		}
 
-	err := db.vlog.write(reqs)
-	if err != nil {
-		done(err)
-		return err
 	}
-
 	db.elog.Printf("Sending updates to subscribers")
 	db.pub.sendUpdates(reqs)
 	db.elog.Printf("Writing to memtable")
 	var count int
+	var err error
 	for _, b := range reqs {
 		if len(b.Entries) == 0 {
 			continue

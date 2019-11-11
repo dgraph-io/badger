@@ -132,3 +132,25 @@ func TestEncryptionAndDecryption(t *testing.T) {
 	require.Equal(t, dk.Data, dk1.Data)
 	require.NoError(t, kr.Close())
 }
+
+func TestKeyRegistryDiskLess(t *testing.T) {
+	encryptionKey := make([]byte, 32)
+	_, err := rand.Read(encryptionKey)
+	require.NoError(t, err)
+
+	opt := getRegistryTestOptions("", encryptionKey)
+	opt.DiskLess = true
+
+	kr, err := OpenKeyRegistry(opt)
+	require.NoError(t, err)
+	_, err = kr.latestDataKey()
+	require.NoError(t, err)
+	// We're resetting the last created timestamp. So, it creates
+	// new datakey.
+	kr.lastCreated = 0
+	_, err = kr.latestDataKey()
+	// We generated two key. So, checking the length.
+	require.Equal(t, 2, len(kr.dataKeys))
+	require.NoError(t, err)
+	require.NoError(t, kr.Close())
+}

@@ -50,6 +50,7 @@ type Options struct {
 	Logger              Logger
 	Compression         options.CompressionType
 	EventLogging        bool
+	DiskLess            bool
 
 	// Fine tuning options.
 

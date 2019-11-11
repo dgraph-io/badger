@@ -57,6 +57,7 @@ type KeyRegistryOptions struct {
 	ReadOnly                      bool
 	EncryptionKey                 []byte
 	EncryptionKeyRotationDuration time.Duration
+	DiskLess                      bool
 }
 
 // newKeyRegistry returns KeyRegistry.
@@ -79,6 +80,9 @@ func OpenKeyRegistry(opt KeyRegistryOptions) (*KeyRegistry, error) {
 		case 16, 24, 32:
 			break
 		}
+	}
+	if opt.DiskLess {
+		return newKeyRegistry(opt), nil
 	}
 	path := filepath.Join(opt.Dir, KeyRegistryFileName)
 	var flags uint32
@@ -354,14 +358,16 @@ func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 		CreatedAt: time.Now().Unix(),
 		Iv:        iv,
 	}
-	// Store the datekey.
-	buf := &bytes.Buffer{}
-	if err = storeDataKey(buf, kr.opt.EncryptionKey, dk); err != nil {
-		return nil, err
-	}
-	// Persist the datakey to the disk
-	if _, err = kr.fp.Write(buf.Bytes()); err != nil {
-		return nil, err
+	if !kr.opt.DiskLess {
+		// Store the datekey.
+		buf := &bytes.Buffer{}
+		if err = storeDataKey(buf, kr.opt.EncryptionKey, dk); err != nil {
+			return nil, err
+		}
+		// Persist the datakey to the disk
+		if _, err = kr.fp.Write(buf.Bytes()); err != nil {
+			return nil, err
+		}
 	}
 	// storeDatakey encrypts the datakey So, placing un-encrypted key in the memory.
 	dk.Data = k
@@ -372,7 +378,7 @@ func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 
 // Close closes the key registry.
 func (kr *KeyRegistry) Close() error {
-	if !kr.opt.ReadOnly {
+	if !(kr.opt.ReadOnly || kr.opt.DiskLess) {
 		return kr.fp.Close()
 	}
 	return nil

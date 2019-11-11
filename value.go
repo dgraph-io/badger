@@ -1001,6 +1001,9 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	if opt.EventLogging {
 		vlog.elog = trace.NewEventLog("Badger", "Valuelog")
 	}
+	if opt.DiskLess {
+		return nil
+	}
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 	vlog.lfDiscardStats = &lfDiscardStats{
 		m:         make(map[uint32]int64),
@@ -1139,6 +1142,10 @@ func (lf *logFile) init() error {
 }
 
 func (vlog *valueLog) Close() error {
+	if vlog.db.opt.DiskLess {
+		vlog.elog.Finish()
+		return nil
+	}
 	// close flushDiscardStats.
 	vlog.lfDiscardStats.closer.SignalAndWait()
 
@@ -1231,7 +1238,7 @@ func (reqs requests) DecrRef() {
 // if fid >= vlog.maxFid. In some cases such as replay(while opening db), it might be called with
 // fid < vlog.maxFid. To sync irrespective of file id just call it with math.MaxUint32.
 func (vlog *valueLog) sync(fid uint32) error {
-	if vlog.opt.SyncWrites {
+	if vlog.opt.SyncWrites || vlog.db.opt.DiskLess {
 		return nil
 	}
 
