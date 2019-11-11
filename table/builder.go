@@ -57,6 +57,7 @@ func (h header) Encode() []byte {
 func (h *header) Decode(buf []byte) {
 	// Copy over data from buf into h. Using *h=unsafe.pointer(...) leads to
 	// pointer alignment issues. See https://github.com/dgraph-io/badger/issues/1096
+	// and comment https://github.com/dgraph-io/badger/pull/1097#pullrequestreview-307361714
 	copy(((*[headerSize]byte)(unsafe.Pointer(h))[:]), buf[:headerSize])
 }
 
