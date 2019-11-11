@@ -1,3 +1,19 @@
+/*
+ * Copyright 2019 Dgraph Labs, Inc. and Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package badger
 
 import (
@@ -13,6 +29,8 @@ type valuePointer struct {
 	Offset uint32
 }
 
+const vptrSize = unsafe.Sizeof(valuePointer{})
+
 func (p valuePointer) Less(o valuePointer) bool {
 	if p.Fid != o.Fid {
 		return p.Fid < o.Fid
@@ -27,8 +45,6 @@ func (p valuePointer) IsZero() bool {
 	return p.Fid == 0 && p.Offset == 0 && p.Len == 0
 }
 
-const vptrSize = 12
-
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode() []byte {
 	b := make([]byte, vptrSize)
@@ -39,7 +55,10 @@ func (p valuePointer) Encode() []byte {
 
 // Decode decodes the value pointer into the provided byte buffer.
 func (p *valuePointer) Decode(b []byte) {
-	*p = *(*valuePointer)(unsafe.Pointer(&b[0]))
+	// Copy over data from b into p. Using *p=unsafe.pointer(...) leads to
+	// pointer alignment issues. See https://github.com/dgraph-io/badger/issues/1096
+	// and comment https://github.com/dgraph-io/badger/pull/1097#pullrequestreview-307361714
+	copy(((*[vptrSize]byte)(unsafe.Pointer(p))[:]), b[:vptrSize])
 }
 
 // header is used in value log as a header before Entry.

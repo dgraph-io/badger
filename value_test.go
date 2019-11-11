@@ -1017,7 +1017,7 @@ func TestTruncatedDiscardStat(t *testing.T) {
 	entries := []*Entry{{
 		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
 		// Insert truncated discard stats. This is important.
-		Value: encodedDS[:10],
+		Value: encodedDS[:13],
 	}}
 	// Push discard stats entry to the write channel.
 	req, err := db.sendToWriteCh(entries)
