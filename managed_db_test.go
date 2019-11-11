@@ -142,6 +142,9 @@ func TestDropAllTwice(t *testing.T) {
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 5 << 20
+	opts.DiskLess = true
+	opts.Dir = ""
+	opts.ValueDir = ""
 	db, err := Open(opts)
 	require.NoError(t, err)
 	defer func() {
@@ -152,7 +155,7 @@ func TestDropAllTwice(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
+			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(false)))
 		}
 		require.NoError(t, writer.Flush())
 	}

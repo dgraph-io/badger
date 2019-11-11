@@ -732,6 +732,9 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 }
 
 func (vlog *valueLog) dropAll() (int, error) {
+	if vlog.db.opt.DiskLess {
+		return 0, nil
+	}
 	// We don't want to block dropAll on any pending transactions. So, don't worry about iterator
 	// count.
 	var count int

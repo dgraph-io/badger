@@ -395,7 +395,7 @@ func TestBigValues(t *testing.T) {
 	opts := DefaultOptions("").
 		WithValueThreshold(1 << 20).
 		WithValueLogMaxEntries(100)
-	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+	test := func(t *testing.T, db *DB) {
 		keyCount := 1000
 
 		data := bytes.Repeat([]byte("a"), (1 << 20)) // Valuesize 1 MB.
@@ -431,6 +431,19 @@ func TestBigValues(t *testing.T) {
 		for i := 0; i < keyCount; i++ {
 			require.NoError(t, getByKey(key(i)))
 		}
+	}
+	t.Run("disk mode", func(t *testing.T) {
+		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+			test(t, db)
+		})
+	})
+	t.Run("disk less mode", func(t *testing.T) {
+		opts.DiskLess = true
+		opts.Dir = ""
+		opts.ValueDir = ""
+		db, err := Open(opts)
+		require.NoError(t, err)
+		test(t, db)
 	})
 }
 

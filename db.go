@@ -1120,6 +1120,9 @@ func (db *DB) updateSize(lc *y.Closer) {
 // Note: Every time GC is run, it would produce a spike of activity on the LSM
 // tree.
 func (db *DB) RunValueLogGC(discardRatio float64) error {
+	if db.opt.DiskLess {
+		return errors.New("Cannot run value log GC when DB is opened in diskless mode")
+	}
 	if discardRatio >= 1.0 || discardRatio <= 0.0 {
 		return ErrInvalidRequest
 	}

@@ -242,19 +242,20 @@ func (s *levelsController) dropTree() (int, error) {
 		return 0, nil
 	}
 
-	// Generate the manifest changes.
-	changes := []*pb.ManifestChange{}
-	for _, table := range all {
-		// Add a delete change only if the table is not in memory.
-		if !table.IsInmemory {
-			changes = append(changes, newDeleteChange(table.ID()))
+	if !s.kv.opt.DiskLess {
+		// Generate the manifest changes.
+		changes := []*pb.ManifestChange{}
+		for _, table := range all {
+			// Add a delete change only if the table is not in memory.
+			if !table.IsInmemory {
+				changes = append(changes, newDeleteChange(table.ID()))
+			}
+		}
+		changeSet := pb.ManifestChangeSet{Changes: changes}
+		if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
+			return 0, err
 		}
 	}
-	changeSet := pb.ManifestChangeSet{Changes: changes}
-	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
-		return 0, err
-	}
-
 	// Now that manifest has been successfully written, we can delete the tables.
 	for _, l := range s.levels {
 		l.Lock()
@@ -457,6 +458,10 @@ func (s *levelsController) compactBuildTables(
 	// value log file should be GCed.
 	discardStats := make(map[uint32]int64)
 	updateStats := func(vs y.ValueStruct) {
+		// We don't need to store/update discard stats when badger is running in Disk-less mode.
+		if s.kv.opt.DiskLess {
+			return
+		}
 		if vs.Meta&bitValuePointer > 0 {
 			var vp valuePointer
 			vp.Decode(vs.Value)
