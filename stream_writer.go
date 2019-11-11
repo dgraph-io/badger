@@ -129,7 +129,7 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 		}
 		req.Entries = append(req.Entries, e)
 	}
-	var all []*request
+	all := make([]*request, 0, len(streamReqs))
 	for _, req := range streamReqs {
 		all = append(all, req)
 	}
