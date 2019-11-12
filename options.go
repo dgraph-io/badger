@@ -519,3 +519,12 @@ func (opt Options) WithMaxCacheSize(size int64) Options {
 	opt.MaxCacheSize = size
 	return opt
 }
+
+// WithDiskLess returns a new Options value with DiskLess set to the given value.
+//
+// When badger is running in diskless mode, everything is stored in memory. No value/sst files are
+// created. In case of a crash all data will be lost.
+func (opt Options) WithDiskLess(b bool) Options {
+	opt.DiskLess = b
+	return opt
+}
