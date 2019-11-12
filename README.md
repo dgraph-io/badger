@@ -68,7 +68,7 @@ $ go get github.com/dgraph-io/badger/...
 This will retrieve the library and install the `badger` command line
 utility into your `$GOBIN` path.
 
-##### Note: Badger uses https://github.com/DataDog/zstd for compression and it requires gcc/cgo. If you wish to use badger without gcc/cgo, you can run `CGO_ENABLED=0 go get github.com/dgraph-io/badger/...` which will download badger without the support for ZSTD compression algorithm.
+##### Note: Badger does not directly use CGO but it relies on https://github.com/DataDog/zstd for compression and it requires gcc/cgo. If you wish to use badger without gcc/cgo, you can run `CGO_ENABLED=0 go get github.com/dgraph-io/badger/...` which will download badger without the support for ZSTD compression algorithm.
 
 #### Choosing a version
 
@@ -893,7 +893,7 @@ deleting the old badger directory.
 
 ### Why do I need gcc to build badger? Does badger need CGO?
 
-Badger relies on https://github.com/DataDog/zstd library for
+Badger does not directly use CGO but it relies on https://github.com/DataDog/zstd library for
 zstd compression and the library requires `gcc/cgo`. You can build badger without cgo by running
 `CGO_ENABLED=0 go build`. This will build badger without the support for ZSTD compression algorithm.
 
