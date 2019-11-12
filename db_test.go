@@ -2054,7 +2054,7 @@ func TestWriteDiskLess(t *testing.T) {
 			item, err := txn.Get([]byte(fmt.Sprintf("key%d", j)))
 			require.NoError(t, err)
 			expected := []byte(fmt.Sprintf("val%d", j))
-			return item.Value(func(val []byte) error {
+			item.Value(func(val []byte) error {
 				require.Equal(t, expected, val,
 					"Invalid value for key %q. expected: %q, actual: %q",
 					item.Key(), expected, val)
