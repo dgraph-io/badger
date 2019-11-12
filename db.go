@@ -1494,9 +1494,11 @@ func (db *DB) dropAll() (func(), error) {
 	}
 	db.opt.Infof("Deleted %d SSTables. Now deleting value logs...\n", num)
 
-	num, err = db.vlog.dropAll()
-	if err != nil {
-		return resume, err
+	if !db.opt.DiskLess {
+		num, err = db.vlog.dropAll()
+		if err != nil {
+			return resume, err
+		}
 	}
 	db.vhead = valuePointer{} // Zero it out.
 	db.lc.nextFileID = 1
