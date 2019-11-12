@@ -183,9 +183,6 @@ func (lm *logManager) bootstrapManager() error {
 	if lm.vlog, err = lm.createlogFile(lm.maxLogID, VLOG); err != nil {
 		return y.Wrapf(err, "Error while creating vlog file %d", lm.maxLogID)
 	}
-	if err = lm.vlog.init(); err != nil {
-		return y.Wrapf(err, "Error while init vlog file %d", lm.vlog.fid)
-	}
 	lm.vlogFileMap[lm.maxLogID] = lm.vlog
 	// mmap the current vlog.
 	return lm.vlog.mmap(2 * lm.opt.ValueLogFileSize)
