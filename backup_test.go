@@ -276,48 +276,56 @@ func populateEntries(db *DB, entries []*pb.KV) error {
 }
 
 func TestBackup(t *testing.T) {
-	var bb bytes.Buffer
+	test := func(t *testing.T, db *DB) {
+		var bb bytes.Buffer
+		N := 1000
+		entries := createEntries(N)
+		require.NoError(t, populateEntries(db, entries))
 
-	tmpdir, err := ioutil.TempDir("", "badger-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer removeDir(tmpdir)
+		_, err := db.Backup(&bb, 0)
+		require.NoError(t, err)
 
-	db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup0")))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	N := 1000
-	entries := createEntries(N)
-	require.NoError(t, populateEntries(db1, entries))
-
-	_, err = db1.Backup(&bb, 0)
-	require.NoError(t, err)
-
-	err = db1.View(func(txn *Txn) error {
-		opts := DefaultIteratorOptions
-		it := txn.NewIterator(opts)
-		defer it.Close()
-		var count int
-		for it.Rewind(); it.Valid(); it.Next() {
-			item := it.Item()
-			idx, err := strconv.Atoi(string(item.Key())[3:])
-			if err != nil {
-				return err
+		err = db.View(func(txn *Txn) error {
+			opts := DefaultIteratorOptions
+			it := txn.NewIterator(opts)
+			defer it.Close()
+			var count int
+			for it.Rewind(); it.Valid(); it.Next() {
+				item := it.Item()
+				idx, err := strconv.Atoi(string(item.Key())[3:])
+				if err != nil {
+					return err
+				}
+				if idx > N || !bytes.Equal(entries[idx].Key, item.Key()) {
+					return fmt.Errorf("%s: %s", string(item.Key()), ErrKeyNotFound)
+				}
+				count++
 			}
-			if idx > N || !bytes.Equal(entries[idx].Key, item.Key()) {
-				return fmt.Errorf("%s: %s", string(item.Key()), ErrKeyNotFound)
+			if N != count {
+				return fmt.Errorf("wrong number of items: %d expected, %d actual", N, count)
 			}
-			count++
+			return nil
+		})
+		require.NoError(t, err)
+	}
+	t.Run("disk mode", func(t *testing.T) {
+		tmpdir, err := ioutil.TempDir("", "badger-test")
+		if err != nil {
+			t.Fatal(err)
 		}
-		if N != count {
-			return fmt.Errorf("wrong number of items: %d expected, %d actual", N, count)
-		}
-		return nil
+		defer removeDir(tmpdir)
+		opt := DefaultOptions(filepath.Join(tmpdir, "backup0"))
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			test(t, db)
+		})
 	})
-	require.NoError(t, err)
+	t.Run("disk less mode", func(t *testing.T) {
+		opt := DefaultOptions("")
+		opt.DiskLess = true
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			test(t, db)
+		})
+	})
 }
 
 func TestBackupRestore3(t *testing.T) {

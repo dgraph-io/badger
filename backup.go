@@ -26,16 +26,12 @@ import (
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/golang/protobuf/proto"
-	"github.com/pkg/errors"
 )
 
 // Backup is a wrapper function over Stream.Backup to generate full and incremental backups of the
 // DB. For more control over how many goroutines are used to generate the backup, or if you wish to
 // backup only a certain range of keys, use Stream.Backup directly.
 func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
-	if db.opt.DiskLess {
-		return 0, errors.New("Backup cannot be used when DB is opened in diskless mode")
-	}
 	stream := db.NewStream()
 	stream.LogPrefix = "DB.Backup"
 	return stream.Backup(w, since)
