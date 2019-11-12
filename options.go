@@ -513,7 +513,7 @@ func (opt Options) WithVerifyValueChecksum(val bool) Options {
 // WithChecksumVerificationMode returns a new Options value with ChecksumVerificationMode set to
 // the given value.
 //
-// ChecksumVerificationMode indicates whether the db should verify checksums for SSTable blocks.
+// ChecksumVerificationMode indicates when the db should verify checksums for SSTable blocks.
 //
 // The default value of VerifyValueChecksum is options.NoVerification.
 func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificationMode) Options {
