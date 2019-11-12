@@ -82,7 +82,7 @@ type Options struct {
 	EncryptionKey                 []byte        // encryption key
 	EncryptionKeyRotationDuration time.Duration // key rotation duration
 
-	// ChecksumVerificationMode decides when db should verify checksum for SStable blocks.
+	// ChecksumVerificationMode decides when db should verify checksums for SSTable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
 
 	// Transaction start and commit timestamps are managed by end-user.
@@ -507,6 +507,17 @@ func (opt Options) WithCompressionType(cType options.CompressionType) Options {
 // The default value of VerifyValueChecksum is False.
 func (opt Options) WithVerifyValueChecksum(val bool) Options {
 	opt.VerifyValueChecksum = val
+	return opt
+}
+
+// WithChecksumVerificationMode returns a new Options value with ChecksumVerificationMode set to
+// the given value.
+//
+// ChecksumVerificationMode indicates whether the db should verify checksums for SSTable blocks.
+//
+// The default value of VerifyValueChecksum is options.NoVerification.
+func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificationMode) Options {
+	opt.ChecksumVerificationMode = cvMode
 	return opt
 }
 
