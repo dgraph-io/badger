@@ -175,22 +175,18 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 func (lm *logManager) bootstrapManager() error {
 	// First time opening DB. So, no need to replay just create log files and give it back.
 	lm.maxLogID++
-	wal, err := lm.createlogFile(lm.maxLogID, WAL)
-	if err != nil {
+	var err error
+	// No need to lock here. Since we're creating the log manager.
+	if lm.wal, err = lm.createlogFile(lm.maxLogID, WAL); err != nil {
 		return y.Wrapf(err, "Error while creating wal file %d", lm.maxLogID)
 	}
-	// No need to lock here. Since we're creating the log manager.
-	lm.wal = wal
-	vlog, err := lm.createlogFile(lm.maxLogID,
-		VLOG)
-	if err != nil {
+	if lm.vlog, err = lm.createlogFile(lm.maxLogID, VLOG); err != nil {
 		return y.Wrapf(err, "Error while creating vlog file %d", lm.maxLogID)
 	}
-	if err = vlog.init(); err != nil {
-		return y.Wrapf(err, "Error while init vlog file %d", vlog.fid)
+	if err = lm.vlog.init(); err != nil {
+		return y.Wrapf(err, "Error while init vlog file %d", lm.vlog.fid)
 	}
-	lm.vlog = vlog
-	lm.vlogFileMap[lm.maxLogID] = vlog
+	lm.vlogFileMap[lm.maxLogID] = lm.vlog
 	// mmap the current vlog.
 	return lm.vlog.mmap(2 * lm.opt.ValueLogFileSize)
 }
