@@ -2050,10 +2050,10 @@ func TestWriteDiskLess(t *testing.T) {
 		txnSet(t, db, []byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)), 0x00)
 	}
 	err = db.View(func(txn *Txn) error {
-		for i := 0; i < 100; i++ {
-			item, err := txn.Get([]byte(fmt.Sprintf("key%d", i)))
+		for j := 0; j < 100; j++ {
+			item, err := txn.Get([]byte(fmt.Sprintf("key%d", j)))
 			require.NoError(t, err)
-			expected := []byte(fmt.Sprintf("val%d", i))
+			expected := []byte(fmt.Sprintf("val%d", j))
 			return item.Value(func(val []byte) error {
 				require.Equal(t, expected, val,
 					"Invalid value for key %q. expected: %q, actual: %q",
