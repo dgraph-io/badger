@@ -242,6 +242,7 @@ func (s *levelsController) dropTree() (int, error) {
 		return 0, nil
 	}
 
+	// Skip writing changes to the manifest file if DB is opened in disk less mode.
 	if !s.kv.opt.DiskLess {
 		// Generate the manifest changes.
 		changes := []*pb.ManifestChange{}
@@ -635,7 +636,8 @@ func (s *levelsController) compactBuildTables(
 		}
 	}
 
-	if firstErr == nil && !s.kv.opt.DiskLess {
+	// We don't need to sync the directory if badger is running in diskless mode.
+	if !s.kv.opt.DiskLess && firstErr == nil {
 		// Ensure created files' directory entries are visible.  We don't mind the extra latency
 		// from not doing this ASAP after all file creation has finished because this is a
 		// background operation.
@@ -657,6 +659,7 @@ func (s *levelsController) compactBuildTables(
 	sort.Slice(newTables, func(i, j int) bool {
 		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
+	// Skip updating discard stats in diskless mode.
 	if !s.kv.opt.DiskLess {
 		s.kv.vlog.updateDiscardStats(discardStats)
 		s.kv.opt.Debugf("Discard stats: %v", discardStats)
@@ -825,9 +828,10 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 			err = decErr
 		}
 	}()
-	changeSet := buildChangeSet(&cd, newTables)
 
+	// Skip writing to manifest file if db is opened in diskless mode.
 	if !s.kv.opt.DiskLess {
+		changeSet := buildChangeSet(&cd, newTables)
 		// We write to the manifest _before_ we delete files (and after we created files)
 		if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
 			return err

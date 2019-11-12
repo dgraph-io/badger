@@ -444,6 +444,7 @@ func TestBigValues(t *testing.T) {
 		db, err := Open(opts)
 		require.NoError(t, err)
 		test(t, db)
+		require.NoError(t, db.Close())
 	})
 }
 

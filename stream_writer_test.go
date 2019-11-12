@@ -55,7 +55,10 @@ func TestStreamWriter1(t *testing.T) {
 	managedModeOpts := getTestOptions("")
 	managedModeOpts.managedTxns = true
 
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
+	diskLessModeOpts := getTestOptions("")
+	diskLessModeOpts.DiskLess = true
+
+	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts, &diskLessModeOpts} {
 		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
@@ -96,7 +99,10 @@ func TestStreamWriter2(t *testing.T) {
 	managedModeOpts := getTestOptions("")
 	managedModeOpts.managedTxns = true
 
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
+	diskLessModeOpts := getTestOptions("")
+	diskLessModeOpts.DiskLess = true
+
+	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts, &diskLessModeOpts} {
 		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
@@ -148,7 +154,10 @@ func TestStreamWriter3(t *testing.T) {
 	managedModeOpts := getTestOptions("")
 	managedModeOpts.managedTxns = true
 
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
+	diskLessModeOpts := getTestOptions("")
+	diskLessModeOpts.DiskLess = true
+
+	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts, &diskLessModeOpts} {
 		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000

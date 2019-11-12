@@ -244,13 +244,13 @@ func (sw *StreamWriter) Flush() error {
 	}
 
 	// Now sync the directories, so all the files are registered.
-	if sw.db.opt.ValueDir != sw.db.opt.Dir {
+	if !sw.db.opt.DiskLess && (sw.db.opt.ValueDir != sw.db.opt.Dir) {
 		if err := syncDir(sw.db.opt.ValueDir); err != nil {
 			return err
 		}
-	}
-	if err := syncDir(sw.db.opt.Dir); err != nil {
-		return err
+		if err := syncDir(sw.db.opt.Dir); err != nil {
+			return err
+		}
 	}
 	return sw.db.lc.validate()
 }
@@ -401,19 +401,26 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 		return nil
 	}
 	fileID := w.db.lc.reserveFileID()
-	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, w.db.opt.Dir), true)
-	if err != nil {
-		return err
-	}
-	if _, err := fd.Write(data); err != nil {
-		return err
-	}
 	opts := buildTableOptions(w.db.opt)
 	opts.DataKey = builder.DataKey()
 	opts.Cache = w.db.blockCache
-	tbl, err := table.OpenTable(fd, opts)
-	if err != nil {
-		return err
+	var tbl *table.Table
+	if w.db.opt.DiskLess {
+		var err error
+		if tbl, err = table.OpenInMemoryTable(data, fileID, &opts); err != nil {
+			return err
+		}
+	} else {
+		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, w.db.opt.Dir), true)
+		if err != nil {
+			return err
+		}
+		if _, err := fd.Write(data); err != nil {
+			return err
+		}
+		if tbl, err = table.OpenTable(fd, opts); err != nil {
+			return err
+		}
 	}
 	lc := w.db.lc
 
@@ -439,15 +446,18 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 		// other keys to avoid an overlap.
 		lhandler = lc.levels[0]
 	}
-	// Now that table can be opened successfully, let's add this to the MANIFEST.
-	change := &pb.ManifestChange{
-		Id:          tbl.ID(),
-		Op:          pb.ManifestChange_CREATE,
-		Level:       uint32(lhandler.level),
-		Compression: uint32(tbl.CompressionType()),
-	}
-	if err := w.db.manifest.addChanges([]*pb.ManifestChange{change}); err != nil {
-		return err
+	// Don't create a change if bader is running in diskless mode.
+	if !w.db.opt.DiskLess {
+		// Now that table can be opened successfully, let's add this to the MANIFEST.
+		change := &pb.ManifestChange{
+			Id:          tbl.ID(),
+			Op:          pb.ManifestChange_CREATE,
+			Level:       uint32(lhandler.level),
+			Compression: uint32(tbl.CompressionType()),
+		}
+		if err := w.db.manifest.addChanges([]*pb.ManifestChange{change}); err != nil {
+			return err
+		}
 	}
 	if err := lhandler.replaceTables([]*table.Table{}, []*table.Table{tbl}); err != nil {
 		return err

@@ -91,6 +91,7 @@ func TestTxnReadAfterWrite(t *testing.T) {
 		db, err := Open(opt)
 		require.NoError(t, err)
 		test(t, db)
+		require.NoError(t, db.Close())
 	})
 }
 

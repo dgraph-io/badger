@@ -206,7 +206,16 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, errors.Errorf("Valuethreshold greater than max batch size of %d. Either "+
 			"reduce opt.ValueThreshold or increase opt.MaxTableSize.", opt.maxBatchSize)
 	}
-	// Compact L0 on close if either it is set or if KeepL0InMemory is set.
+	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
+		return nil, ErrValueLogSize
+	}
+	if !(opt.ValueLogLoadingMode == options.FileIO ||
+		opt.ValueLogLoadingMode == options.MemoryMap) {
+		return nil, ErrInvalidLoadingMode
+	}
+
+	// Compact L0 on close if either it is set or if KeepL0InMemory is set. When
+	// keepL0InMemory is set we need to compact L0 on close otherwise we might lose data.
 	opt.CompactL0OnClose = opt.CompactL0OnClose || opt.KeepL0InMemory
 
 	if opt.ReadOnly {
@@ -218,29 +227,11 @@ func Open(opt Options) (db *DB, err error) {
 	var dirLockGuard, valueDirLockGuard *directoryLockGuard
 	var manifestFile *manifestFile
 	var manifest Manifest
+	// Create directories and acquire lock on it only if badger is not running in diskless mode.
+	// We don't have any directories/files in diskless mode so we don't need to acquire
+	// any locks on them.
 	if !opt.DiskLess {
-		for _, path := range []string{opt.Dir, opt.ValueDir} {
-			dirExists, err := exists(path)
-			if err != nil {
-				return nil, y.Wrapf(err, "Invalid Dir: %q", path)
-			}
-			if !dirExists {
-				if opt.ReadOnly {
-					return nil, errors.Errorf("Cannot find directory %q for read-only open", path)
-				}
-				// Try to create the directory
-				err = os.Mkdir(path, 0700)
-				if err != nil {
-					return nil, y.Wrapf(err, "Error Creating Dir: %q", path)
-				}
-			}
-		}
-		absDir, err := filepath.Abs(opt.Dir)
-		if err != nil {
-			return nil, err
-		}
-		absValueDir, err := filepath.Abs(opt.ValueDir)
-		if err != nil {
+		if err := createDirs(opt); err != nil {
 			return nil, err
 		}
 		dirLockGuard, err = acquireDirectoryLock(opt.Dir, lockFile, opt.ReadOnly)
@@ -252,6 +243,14 @@ func Open(opt Options) (db *DB, err error) {
 				_ = dirLockGuard.release()
 			}
 		}()
+		absDir, err := filepath.Abs(opt.Dir)
+		if err != nil {
+			return nil, err
+		}
+		absValueDir, err := filepath.Abs(opt.ValueDir)
+		if err != nil {
+			return nil, err
+		}
 		if absValueDir != absDir {
 			valueDirLockGuard, err = acquireDirectoryLock(opt.ValueDir, lockFile, opt.ReadOnly)
 			if err != nil {
@@ -262,13 +261,6 @@ func Open(opt Options) (db *DB, err error) {
 					_ = valueDirLockGuard.release()
 				}
 			}()
-		}
-		if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
-			return nil, ErrValueLogSize
-		}
-		if !(opt.ValueLogLoadingMode == options.FileIO ||
-			opt.ValueLogLoadingMode == options.MemoryMap) {
-			return nil, ErrInvalidLoadingMode
 		}
 		manifestFile, manifest, err = openOrCreateManifestFile(opt.Dir, opt.ReadOnly)
 		if err != nil {
@@ -319,11 +311,10 @@ func Open(opt Options) (db *DB, err error) {
 		DiskLess:                      opt.DiskLess,
 	}
 
-	kr, err := OpenKeyRegistry(krOpt)
-	if err != nil {
+	if db.registry, err = OpenKeyRegistry(krOpt); err != nil {
 		return nil, err
 	}
-	db.registry = kr
+	// We don't need to calculate db size when it's running in diskless mode.
 	if !opt.DiskLess {
 		// Calculate initial size.
 		db.calculateSize()
@@ -379,6 +370,7 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.writes = y.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
+	// When db is running in diskless mode, we don't need to start go routines related to GC.
 	if !db.opt.DiskLess {
 		db.closers.valueGC = y.NewCloser(1)
 		go db.vlog.waitOnGC(db.closers.valueGC)
@@ -412,6 +404,7 @@ func (db *DB) close() (err error) {
 
 	atomic.StoreInt32(&db.blockWrites, 1)
 
+	// In diskless mode, valueGC go routine is not running, so skip it.
 	if !db.opt.DiskLess {
 		// Stop value GC first.
 		db.closers.valueGC.SignalAndWait()
@@ -482,6 +475,7 @@ func (db *DB) close() (err error) {
 		err = errors.Wrap(lcErr, "DB.Close")
 	}
 	db.elog.Printf("Waiting for closer")
+	// We don't calculate disk size in disk-less mode, so skip it.
 	if !db.opt.DiskLess {
 		db.closers.updateSize.SignalAndWait()
 	}
@@ -686,13 +680,14 @@ func (db *DB) writeRequests(reqs []*request) error {
 			r.Wg.Done()
 		}
 	}
+	// When DB is running in diskless mode, we don't write anything to the value log.
+	// The value log doesn't exists, there are no files on the disk.
 	if !db.opt.DiskLess {
 		db.elog.Printf("writeRequests called. Writing to value log")
 		if err := db.vlog.write(reqs); err != nil {
 			done(err)
 			return err
 		}
-
 	}
 	db.elog.Printf("Sending updates to subscribers")
 	db.pub.sendUpdates(reqs)
@@ -1494,11 +1489,9 @@ func (db *DB) dropAll() (func(), error) {
 	}
 	db.opt.Infof("Deleted %d SSTables. Now deleting value logs...\n", num)
 
-	if !db.opt.DiskLess {
-		num, err = db.vlog.dropAll()
-		if err != nil {
-			return resume, err
-		}
+	num, err = db.vlog.dropAll()
+	if err != nil {
+		return resume, err
 	}
 	db.vhead = valuePointer{} // Zero it out.
 	db.lc.nextFileID = 1
@@ -1613,4 +1606,24 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList), prefixes ...[]
 // shouldEncrypt returns bool, which tells whether to encrypt or not.
 func (db *DB) shouldEncrypt() bool {
 	return len(db.opt.EncryptionKey) > 0
+}
+
+func createDirs(opt Options) error {
+	for _, path := range []string{opt.Dir, opt.ValueDir} {
+		dirExists, err := exists(path)
+		if err != nil {
+			return y.Wrapf(err, "Invalid Dir: %q", path)
+		}
+		if !dirExists {
+			if opt.ReadOnly {
+				return errors.Errorf("Cannot find directory %q for read-only open", path)
+			}
+			// Try to create the directory
+			err = os.Mkdir(path, 0700)
+			if err != nil {
+				return y.Wrapf(err, "Error Creating Dir: %q", path)
+			}
+		}
+	}
+	return nil
 }

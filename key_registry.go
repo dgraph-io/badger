@@ -81,6 +81,7 @@ func OpenKeyRegistry(opt KeyRegistryOptions) (*KeyRegistry, error) {
 			break
 		}
 	}
+	// If db is opened in diskless mode, we don't need to key registry on the disk.
 	if opt.DiskLess {
 		return newKeyRegistry(opt), nil
 	}
@@ -358,6 +359,7 @@ func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 		CreatedAt: time.Now().Unix(),
 		Iv:        iv,
 	}
+	// Don't store the datakey on file if badger is running in diskless mode.
 	if !kr.opt.DiskLess {
 		// Store the datekey.
 		buf := &bytes.Buffer{}
