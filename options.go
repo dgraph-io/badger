@@ -490,7 +490,7 @@ func (opt Options) WithKeepL0InMemory(val bool) Options {
 
 // WithCompression returns a new Options value with Compression set to the given value.
 //
-// When Compression is enabled, every block will be compressed using the specified algorithm.
+// When compression is enabled, every block will be compressed using the specified algorithm.
 // This option doesn't affect existing tables. Only the newly created tables will be compressed.
 //
 // The default compression algorithm used is zstd when built with Cgo. Without Cgo, the default is
