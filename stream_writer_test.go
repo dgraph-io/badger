@@ -51,14 +51,7 @@ func getSortedKVList(valueSize, listSize int) *pb.KVList {
 
 // check if we can read values after writing using stream writer
 func TestStreamWriter1(t *testing.T) {
-	normalModeOpts := getTestOptions("")
-	managedModeOpts := getTestOptions("")
-	managedModeOpts.managedTxns = true
-
-	diskLessModeOpts := getTestOptions("")
-	diskLessModeOpts.DiskLess = true
-
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts, &diskLessModeOpts} {
+	test := func(t *testing.T, opts *Options) {
 		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
@@ -91,18 +84,25 @@ func TestStreamWriter1(t *testing.T) {
 			require.NoError(t, err, "error while retrieving key")
 		})
 	}
+	t.Run("Normal mode", func(t *testing.T) {
+		normalModeOpts := getTestOptions("")
+		test(t, &normalModeOpts)
+	})
+	t.Run("Managed mode", func(t *testing.T) {
+		managedModeOpts := getTestOptions("")
+		managedModeOpts.managedTxns = true
+		test(t, &managedModeOpts)
+	})
+	t.Run("DiskLess mode", func(t *testing.T) {
+		diskLessModeOpts := getTestOptions("")
+		diskLessModeOpts.DiskLess = true
+		test(t, &diskLessModeOpts)
+	})
 }
 
 // write more keys to db after writing keys using stream writer
 func TestStreamWriter2(t *testing.T) {
-	normalModeOpts := getTestOptions("")
-	managedModeOpts := getTestOptions("")
-	managedModeOpts.managedTxns = true
-
-	diskLessModeOpts := getTestOptions("")
-	diskLessModeOpts.DiskLess = true
-
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts, &diskLessModeOpts} {
+	test := func(t *testing.T, opts *Options) {
 		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
@@ -147,17 +147,24 @@ func TestStreamWriter2(t *testing.T) {
 			require.Nil(t, err, "error should be nil while iterating")
 		})
 	}
+	t.Run("Normal mode", func(t *testing.T) {
+		normalModeOpts := getTestOptions("")
+		test(t, &normalModeOpts)
+	})
+	t.Run("Managed mode", func(t *testing.T) {
+		managedModeOpts := getTestOptions("")
+		managedModeOpts.managedTxns = true
+		test(t, &managedModeOpts)
+	})
+	t.Run("DiskLess mode", func(t *testing.T) {
+		diskLessModeOpts := getTestOptions("")
+		diskLessModeOpts.DiskLess = true
+		test(t, &diskLessModeOpts)
+	})
 }
 
 func TestStreamWriter3(t *testing.T) {
-	normalModeOpts := getTestOptions("")
-	managedModeOpts := getTestOptions("")
-	managedModeOpts.managedTxns = true
-
-	diskLessModeOpts := getTestOptions("")
-	diskLessModeOpts.DiskLess = true
-
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts, &diskLessModeOpts} {
+	test := func(t *testing.T, opts *Options) {
 		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
@@ -229,6 +236,20 @@ func TestStreamWriter3(t *testing.T) {
 			require.Nil(t, err, "error should be nil while iterating")
 		})
 	}
+	t.Run("Normal mode", func(t *testing.T) {
+		normalModeOpts := getTestOptions("")
+		test(t, &normalModeOpts)
+	})
+	t.Run("Managed mode", func(t *testing.T) {
+		managedModeOpts := getTestOptions("")
+		managedModeOpts.managedTxns = true
+		test(t, &managedModeOpts)
+	})
+	t.Run("DiskLess mode", func(t *testing.T) {
+		diskLessModeOpts := getTestOptions("")
+		diskLessModeOpts.DiskLess = true
+		test(t, &diskLessModeOpts)
+	})
 }
 
 // After inserting all data from streams, StreamWriter reinitializes Oracle and updates its nextTs
