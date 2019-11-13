@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -1570,6 +1571,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList), prefixes ...[]
 	recvCh, id := db.pub.newSubscriber(c, prefixes...)
 	slurp := func(batch *pb.KVList) {
 		defer func() {
+			fmt.Println("defer called", len(batch.GetKv()))
 			if len(batch.GetKv()) > 0 {
 				cb(batch)
 			}
@@ -1598,6 +1600,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList), prefixes ...[]
 			// Delete the subscriber to avoid further updates.
 			return ctx.Err()
 		case batch := <-recvCh:
+			fmt.Println("slurp called")
 			slurp(batch)
 		}
 	}
