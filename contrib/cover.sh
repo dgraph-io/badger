@@ -10,9 +10,6 @@ set -ex
 
 pushd $SRC &> /dev/null
 
-go test -v -run "Leak"
-go test -v -run "Leak" -race
-
 # create coverage output
 echo 'mode: atomic' > $OUT
 for PKG in $(go list ./...|grep -v -E 'vendor'); do
