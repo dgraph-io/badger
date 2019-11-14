@@ -59,10 +59,9 @@ type logManager struct {
 	vlogWritten          uint32
 	maxLogID             uint32
 	vlogFilesTobeDeleted []uint32
-	// we need to know number of active iterator when we go GC. beacuse,
+	// we need to know number of active iterator when we go GC. because,
 	// we can delete the log files, when itreator using the log file.
 	numActiveIterators int32
-	opt                Options
 	// latest log file that going to be used for write.
 	wal            *logFile
 	vlog           *logFile
@@ -78,10 +77,8 @@ type logManager struct {
 func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	replayFn logEntry) (*logManager, error) {
 	manager := &logManager{
-		opt:         db.opt,
 		db:          db,
 		elog:        y.NoEventLog,
-		maxLogID:    0,
 		vlogFileMap: map[uint32]*logFile{},
 		garbageCh:   make(chan struct{}, 1),
 		lfDiscardStats: &lfDiscardStats{
@@ -90,10 +87,10 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 			flushChan: make(chan map[uint32]int64, 16),
 		},
 	}
-	if manager.opt.EventLogging {
+	if manager.db.opt.EventLogging {
 		manager.elog = trace.NewEventLog("Badger", "LogManager")
 	}
-	// logFilesToBeReplayed will picks the log file that need to be replayed.
+	// logFilesToBeReplayed will pick the log file that need to be replayed.
 	logFilesToBeReplayed := func(logIDS map[uint32]struct{}, head valuePointer,
 		logtype logType) ([]uint32, error) {
 		toBeReplayed := []uint32{}
@@ -106,7 +103,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 			if fid < head.Fid {
 				// Delete the wal file since it's not needed anymore.
 				if !db.opt.ReadOnly && logtype == WAL {
-					path := walFilePath(manager.opt.ValueDir, uint32(fid))
+					path := walFilePath(manager.db.opt.ValueDir, uint32(fid))
 					if err := os.Remove(path); err != nil {
 						return nil, y.Wrapf(err, "Error while removing log file %d", fid)
 					}
@@ -134,7 +131,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 
 	// We filtered all the WAL file that need to replayed. Now, We're going
 	// to pick vlog files that needs to be replayed.
-	vlogFiles, err := y.PopulateFilesForSuffix(db.opt.ValueDir, ".vlog")
+	vlogFiles, err := y.PopulateFilesForSuffix(db.opt.ValueDir, valueFileSuffix)
 	if err != nil {
 		return nil, y.Wrapf(err, "Error while populating vlog files")
 	}
@@ -144,11 +141,12 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		return nil, y.Wrapf(err, "Error while picking vlog files for replaying")
 	}
 
+	// if maxLogID is zero that means we don't have any files to replay.
 	if manager.maxLogID == 0 {
 		y.AssertTrue(len(filteredVlogIDs) == 0)
 		y.AssertTrue(len(filteredWALIDs) == 0)
 		if err = manager.bootstrapManager(); err != nil {
-			return nil, y.Wrapf(err, "Error while bootstrping log manager")
+			return nil, y.Wrapf(err, "Error while bootstrapping log manager")
 		}
 		return manager, nil
 	}
@@ -170,7 +168,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	return manager, nil
 }
 
-// bootstrapManager is used when db is creating for the first time.It'll create the initial
+// bootstrapManager is used when db is created for the first time. It'll create the initial
 // vlog and wal file.
 func (lm *logManager) bootstrapManager() error {
 	// First time opening DB. So, no need to replay just create log files and give it back.
@@ -192,7 +190,7 @@ func (lm *logManager) bootstrapManager() error {
 	lm.vlog = vlog
 	lm.vlogFileMap[lm.maxLogID] = vlog
 	// mmap the current vlog.
-	return lm.vlog.mmap(2 * lm.opt.ValueLogFileSize)
+	return lm.vlog.mmap(2 * lm.db.opt.ValueLogFileSize)
 }
 
 func (lm *logManager) initLogManager() error {
@@ -203,22 +201,21 @@ func (lm *logManager) initLogManager() error {
 	}
 	var flags uint32
 	switch {
-	case lm.opt.ReadOnly:
+	case lm.db.opt.ReadOnly:
 		// If we have read only, we don't need SyncWrites.
 		flags |= y.ReadOnly
 		// Set sync flag.
-	case lm.opt.SyncWrites:
+	case lm.db.opt.SyncWrites:
 		flags |= y.Sync
 	}
 	// populate vlogFile map.
 	for fid := range vlogFiles {
 		vlogFile := &logFile{
 			fid:         fid,
-			path:        vlogFilePath(lm.opt.ValueDir, fid),
-			loadingMode: lm.opt.ValueLogLoadingMode,
+			loadingMode: lm.db.opt.ValueLogLoadingMode,
 			registry:    lm.db.registry,
 		}
-		if err = vlogFile.open(vlogFilePath(lm.opt.ValueDir, fid), flags); err != nil {
+		if err = vlogFile.open(vlogFilePath(lm.db.opt.ValueDir, fid), flags); err != nil {
 			return y.Wrapf(err, "Error while opening vlog file %d", fid)
 		}
 		// Only initialize the the vlog which is not current vlog.
@@ -232,7 +229,7 @@ func (lm *logManager) initLogManager() error {
 		lm.vlogFileMap[fid] = vlogFile
 	}
 
-	if lm.opt.ReadOnly {
+	if lm.db.opt.ReadOnly {
 		// Initialize the last vlog file as well.
 		lf := lm.vlogFileMap[lm.maxLogID]
 		if err = lf.init(); err != nil {
@@ -244,11 +241,11 @@ func (lm *logManager) initLogManager() error {
 
 	wal := &logFile{
 		fid:         lm.maxLogID,
-		path:        walFilePath(lm.opt.ValueDir, lm.maxLogID),
-		loadingMode: lm.opt.ValueLogLoadingMode,
+		path:        walFilePath(lm.db.opt.ValueDir, lm.maxLogID),
+		loadingMode: lm.db.opt.ValueLogLoadingMode,
 		registry:    lm.db.registry,
 	}
-	if err = wal.open(walFilePath(lm.opt.ValueDir, lm.maxLogID), flags); err != nil {
+	if err = wal.open(walFilePath(lm.db.opt.ValueDir, lm.maxLogID), flags); err != nil {
 		return y.Wrapf(err, "Error while opening wal file %d", lm.maxLogID)
 	}
 	// seek to the end
@@ -266,7 +263,7 @@ func (lm *logManager) initLogManager() error {
 	}
 	lm.vlog.offset = uint32(offset)
 	// mmap the current vlog.
-	if err = lm.vlog.mmap(2 * lm.opt.ValueLogFileSize); err != nil {
+	if err = lm.vlog.mmap(2 * lm.db.opt.ValueLogFileSize); err != nil {
 		return y.Wrapf(err, "Error while mmaping vlog file %d", lm.vlog.fid)
 	}
 	return lm.populateDiscardStats()
@@ -277,18 +274,18 @@ func (lm *logManager) createlogFile(fid uint32, logtype logType) (*logFile, erro
 
 	switch logtype {
 	case WAL:
-		path = walFilePath(lm.opt.ValueDir, fid)
+		path = walFilePath(lm.db.opt.ValueDir, fid)
 	case VLOG:
-		path = vlogFilePath(lm.opt.ValueDir, fid)
+		path = vlogFilePath(lm.db.opt.ValueDir, fid)
 	}
 	lf := &logFile{
 		fid:         fid,
 		path:        path,
-		loadingMode: lm.opt.ValueLogLoadingMode,
+		loadingMode: lm.db.opt.ValueLogLoadingMode,
 		registry:    lm.db.registry,
 	}
 	var err error
-	if lf.fd, err = y.CreateSyncedFile(path, lm.opt.SyncWrites); err != nil {
+	if lf.fd, err = y.CreateSyncedFile(path, lm.db.opt.SyncWrites); err != nil {
 		return nil, errFile(err, lf.path, "Create value log file")
 	}
 
@@ -296,10 +293,10 @@ func (lm *logManager) createlogFile(fid uint32, logtype logType) (*logFile, erro
 		return nil, err
 	}
 
-	if err = syncDir(lm.opt.ValueDir); err != nil {
-		return nil, errFile(err, lm.opt.ValueDir, "Sync value log dir")
+	if err = syncDir(lm.db.opt.ValueDir); err != nil {
+		return nil, errFile(err, lm.db.opt.ValueDir, "Sync value log dir")
 	}
-	// writableLogOffset is only written by write func, by read by Read func.
+	// offset is only written by write func, by read by Read func.
 	// To avoid a race condition, all reads and updates to this variable must be
 	// done via atomics.
 	atomic.StoreUint32(&lf.offset, vlogHeaderSize)
@@ -307,7 +304,7 @@ func (lm *logManager) createlogFile(fid uint32, logtype logType) (*logFile, erro
 		return lf, nil
 	}
 	// we mmap only for vlog.
-	if err = lf.mmap(2 * lm.opt.ValueLogFileSize); err != nil {
+	if err = lf.mmap(2 * lm.db.opt.ValueLogFileSize); err != nil {
 		return nil, errFile(err, lf.path, "Mmap value log file")
 	}
 	return lf, nil
@@ -343,9 +340,9 @@ func (lm *logManager) write(reqs []*request) error {
 		vlogBuf.Reset()
 		walBuf.Reset()
 		// check whether vlog hits the defined threshold.
-		rotate := vlog.fileOffset()+uint32(vlogBuf.Len()) > uint32(lm.opt.ValueLogFileSize) ||
-			lm.vlogWritten > uint32(lm.opt.ValueLogMaxEntries) ||
-			wal.fileOffset()+uint32(walBuf.Len()) > uint32(lm.opt.ValueLogFileSize)
+		rotate := vlog.fileOffset()+uint32(vlogBuf.Len()) > uint32(lm.db.opt.ValueLogFileSize) ||
+			lm.vlogWritten > uint32(lm.db.opt.ValueLogMaxEntries) ||
+			wal.fileOffset()+uint32(walBuf.Len()) > uint32(lm.db.opt.ValueLogFileSize)
 		if rotate {
 			// we need to rotate both the files here. Because, the trasaction entries have to
 			// corresponding entries. This is needed while doing truncation. For example, one vlog
@@ -409,9 +406,9 @@ func (lm *logManager) write(reqs []*request) error {
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
 		writeNow :=
-			vlog.fileOffset()+uint32(vlogBuf.Len()) > uint32(lm.opt.ValueLogFileSize) ||
-				lm.vlogWritten > uint32(lm.opt.ValueLogMaxEntries) ||
-				wal.fileOffset()+uint32(walBuf.Len()) > uint32(lm.opt.ValueLogFileSize)
+			vlog.fileOffset()+uint32(vlogBuf.Len()) > uint32(lm.db.opt.ValueLogFileSize) ||
+				lm.vlogWritten > uint32(lm.db.opt.ValueLogMaxEntries) ||
+				wal.fileOffset()+uint32(walBuf.Len()) > uint32(lm.db.opt.ValueLogFileSize)
 		if writeNow {
 			if err := toDisk(); err != nil {
 				return err
@@ -443,7 +440,7 @@ func (lm *logManager) rotateLog() error {
 	}
 	// Here we mmaped the file so don't close it. This log file is part of vlog filesMap and
 	// it is used by value pointer. doneWriting will take take care of unmmap, truncate and mmap
-	//it back.
+	// it back.
 	if err = lm.vlog.doneWriting(lm.vlog.fileOffset()); err != nil {
 		return y.Wrapf(err, "Error while doneWriting vlog %d", lm.vlog.fid)
 	}
@@ -471,7 +468,7 @@ func (lm *logManager) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 	if err != nil {
 		return nil, cb, err
 	}
-	if lm.opt.VerifyValueChecksum {
+	if lm.db.opt.VerifyValueChecksum {
 		hash := crc32.New(y.CastagnoliCrcTable)
 		if _, err := hash.Write(buf); err != nil {
 			runCallback(cb)
@@ -502,7 +499,7 @@ func (lm *logManager) getUnlockCallback(lf *logFile) func() {
 	if lf == nil {
 		return nil
 	}
-	if lm.opt.ValueLogLoadingMode == options.MemoryMap {
+	if lm.db.opt.ValueLogLoadingMode == options.MemoryMap {
 		return lf.lock.RUnlock
 	}
 	lf.lock.RUnlock()
@@ -546,7 +543,7 @@ func (lm *logManager) Close() error {
 		}
 
 		maxFid := atomic.LoadUint32(&lm.maxLogID)
-		if !lm.opt.ReadOnly && id == maxFid {
+		if !lm.db.opt.ReadOnly && id == maxFid {
 			// truncate writable log file to correct offset.
 			if truncErr := f.fd.Truncate(
 				int64(f.fileOffset())); truncErr != nil && err == nil {
@@ -578,7 +575,7 @@ func (lm *logManager) populateDiscardStats() error {
 		}
 		// Value doesn't exist.
 		if vs.Meta == 0 && len(vs.Value) == 0 {
-			lm.opt.Debugf("Value log discard stats empty")
+			lm.db.opt.Debugf("Value log discard stats empty")
 			return nil
 		}
 		vp.Decode(vs.Value)
@@ -616,7 +613,7 @@ func (lm *logManager) populateDiscardStats() error {
 	if err := json.Unmarshal(val, &statsMap); err != nil {
 		return errors.Wrapf(err, "failed to unmarshal discard stats")
 	}
-	lm.opt.Debugf("Value Log Discard stats: %v", statsMap)
+	lm.db.opt.Debugf("Value Log Discard stats: %v", statsMap)
 	lm.lfDiscardStats.flushChan <- statsMap
 	return nil
 }
