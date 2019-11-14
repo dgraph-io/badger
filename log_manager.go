@@ -90,7 +90,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	if manager.db.opt.EventLogging {
 		manager.elog = trace.NewEventLog("Badger", "LogManager")
 	}
-	// logFilesToBeReplayed will pick the log file that need to be replayed.
+	// logFilesToBeReplayed will pick the log file that needs to be replayed.
 	logFilesToBeReplayed := func(logIDS map[uint32]struct{}, head valuePointer,
 		logtype logType) ([]uint32, error) {
 		toBeReplayed := []uint32{}
@@ -123,7 +123,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		return nil, y.Wrapf(err, "Error while populating map in openLogManager")
 	}
 
-	// pick log files that need to be replayed.
+	// pick log files that needs to be replayed.
 	filteredWALIDs, err := logFilesToBeReplayed(walFiles, walhead, WAL)
 	if err != nil {
 		return nil, y.Wrapf(err, "Error while picking wal files for replaying")
@@ -135,7 +135,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 	if err != nil {
 		return nil, y.Wrapf(err, "Error while populating vlog files")
 	}
-	// filter the vlog files that needs to be replayed.
+	// filter the vlog files that need to be replayed.
 	filteredVlogIDs, err := logFilesToBeReplayed(vlogFiles, vhead, VLOG)
 	if err != nil {
 		return nil, y.Wrapf(err, "Error while picking vlog files for replaying")
