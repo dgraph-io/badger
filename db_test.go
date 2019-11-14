@@ -1627,53 +1627,52 @@ func TestMinReadTs(t *testing.T) {
 	})
 }
 
-func TestGoroutineLeak(t *testing.T) {
-	test := func(t *testing.T, opt *Options) {
-		time.Sleep(1 * time.Second)
-		before := runtime.NumGoroutine()
-		t.Logf("Num go: %d", before)
-		for i := 0; i < 12; i++ {
-			runBadgerTest(t, opt, func(t *testing.T, db *DB) {
-				var done uint32
-				ctx, cancel := context.WithCancel(context.Background())
-				var wg sync.WaitGroup
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					err := db.Subscribe(ctx, func(kvs *pb.KVList) {
-						require.Equal(t, []byte("value"), kvs.Kv[0].GetValue())
-						atomic.StoreUint32(&done, 1)
-						//atomic.StoreUint32(&done, 1)
-					}, []byte("key"))
-					if err != nil {
-						require.Equal(t, err.Error(), context.Canceled.Error())
-					}
-				}()
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					for atomic.LoadUint32(&done) != 1 {
-						err := db.Update(func(txn *Txn) error {
-							return txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
-						})
-						require.NoError(t, err)
-					}
-					cancel()
-				}()
-				wg.Wait()
-			})
-		}
-		time.Sleep(2 * time.Second)
-		require.Equal(t, before, runtime.NumGoroutine())
+func goroutineLeak(t *testing.T, opt *Options) {
+	time.Sleep(1 * time.Second)
+	before := runtime.NumGoroutine()
+	t.Logf("Num go: %d", before)
+	for i := 0; i < 12; i++ {
+		runBadgerTest(t, opt, func(t *testing.T, db *DB) {
+			var done uint32
+			ctx, cancel := context.WithCancel(context.Background())
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				err := db.Subscribe(ctx, func(kvs *pb.KVList) {
+					require.Equal(t, []byte("value"), kvs.Kv[0].GetValue())
+					atomic.StoreUint32(&done, 1)
+				}, []byte("key"))
+				if err != nil {
+					require.Equal(t, err.Error(), context.Canceled.Error())
+				}
+			}()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for atomic.LoadUint32(&done) != 1 {
+					err := db.Update(func(txn *Txn) error {
+						return txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
+					})
+					require.NoError(t, err)
+				}
+				cancel()
+			}()
+			wg.Wait()
+		})
 	}
-	t.Run("disk mode", func(t *testing.T) {
-		test(t, nil)
-	})
-	t.Run("disk less mode", func(t *testing.T) {
-		opt := getTestOptions("")
-		opt.DiskLess = true
-		test(t, &opt)
-	})
+	time.Sleep(2 * time.Second)
+	require.Equal(t, before, runtime.NumGoroutine())
+}
+
+func TestGoroutineLeak(t *testing.T) {
+	goroutineLeak(t, nil)
+}
+
+func TestGoroutineLeakDiskless(t *testing.T) {
+	opt := getTestOptions("")
+	opt.DiskLess = true
+	goroutineLeak(t, &opt)
 }
 
 func ExampleOpen() {
