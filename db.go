@@ -621,7 +621,7 @@ func (db *DB) updateHead(ptrs []valuePointer) {
 
 	db.Lock()
 	defer db.Unlock()
-	y.AssertTrue(!ptr.Less(db.vhead))
+	y.AssertTruef(!ptr.Less(db.vhead), " %+v is not less than %+v", ptr, db.vhead)
 	db.vhead = ptr
 }
 
