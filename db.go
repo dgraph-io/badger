@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -37,6 +38,7 @@ import (
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto"
 	humanize "github.com/dustin/go-humanize"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
 )
@@ -91,6 +93,7 @@ type DB struct {
 
 	pub        *publisher
 	registry   *KeyRegistry
+	uuid       uuid.UUID
 	blockCache *ristretto.Cache
 }
 
@@ -290,6 +293,7 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, errors.Wrap(err, "failed to create cache")
 	}
 	db = &DB{
+		uuid:          uuid.New(),
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
@@ -303,6 +307,7 @@ func Open(opt Options) (db *DB, err error) {
 		blockCache:    cache,
 	}
 
+	fmt.Println("Opened DB with uuid %s", db.uuid.String())
 	krOpt := KeyRegistryOptions{
 		ReadOnly:                      opt.ReadOnly,
 		Dir:                           opt.Dir,
@@ -621,7 +626,8 @@ func (db *DB) updateHead(ptrs []valuePointer) {
 
 	db.Lock()
 	defer db.Unlock()
-	y.AssertTruef(!ptr.Less(db.vhead), " %+v is not less than %+v", ptr, db.vhead)
+	y.AssertTruef(!ptr.Less(db.vhead),
+		"uuid: %s | %+v is not less than %+v", db.uuid.String(), ptr, db.vhead)
 	db.vhead = ptr
 }
 
