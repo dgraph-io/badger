@@ -375,7 +375,7 @@ func ReplayManifestFile(fp *os.File) (Manifest, int64, error) {
 		if length > uint32(stat.Size()) {
 			return Manifest{}, 0, errors.Errorf(
 				"Buffer length: %d greater than file size: %d. Manifest file might be corrupted",
-			)
+				length, stat.Size())
 		}
 		var buf = make([]byte, length)
 		if _, err := io.ReadFull(&r, buf); err != nil {
