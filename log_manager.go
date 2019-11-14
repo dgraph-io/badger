@@ -173,22 +173,15 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 func (lm *logManager) bootstrapManager() error {
 	// First time opening DB. So, no need to replay just create log files and give it back.
 	lm.maxLogID++
-	wal, err := lm.createlogFile(lm.maxLogID, WAL)
-	if err != nil {
+	var err error
+	// No need to lock here. Since we're creating the log manager.
+	if lm.wal, err = lm.createlogFile(lm.maxLogID, WAL); err != nil {
 		return y.Wrapf(err, "Error while creating wal file %d", lm.maxLogID)
 	}
-	// No need to lock here. Since we're creating the log manager.
-	lm.wal = wal
-	vlog, err := lm.createlogFile(lm.maxLogID,
-		VLOG)
-	if err != nil {
+	if lm.vlog, err = lm.createlogFile(lm.maxLogID, VLOG); err != nil {
 		return y.Wrapf(err, "Error while creating vlog file %d", lm.maxLogID)
 	}
-	if err = vlog.init(); err != nil {
-		return y.Wrapf(err, "Error while init vlog file %d", vlog.fid)
-	}
-	lm.vlog = vlog
-	lm.vlogFileMap[lm.maxLogID] = vlog
+	lm.vlogFileMap[lm.maxLogID] = lm.vlog
 	// mmap the current vlog.
 	return lm.vlog.mmap(2 * lm.db.opt.ValueLogFileSize)
 }
@@ -344,12 +337,12 @@ func (lm *logManager) write(reqs []*request) error {
 			lm.vlogWritten > uint32(lm.db.opt.ValueLogMaxEntries) ||
 			wal.fileOffset()+uint32(walBuf.Len()) > uint32(lm.db.opt.ValueLogFileSize)
 		if rotate {
-			// we need to rotate both the files here. Because, the trasaction entries have to
-			// corresponding entries. This is needed while doing truncation. For example, one vlog
-			// file courrupted in the middle. So we delete the vlog file if there is truncation.
-			// Then we replay the next vlog file,with different timestamp. the wal file will have
-			// lesser timestamp. There, we miss the order.So, it is important to keep WAL and
-			// vlog mapping.
+			// We need to rotate both the files here because the transaction entries in vlog need to
+			// have to corresponding entries in WAL file. This is needed while doing truncation.
+			// For example, if one vlog file is corrupted in the middle, we will delete the entire
+			// vlog file. Then we replay the next vlog file, with different timestamp.
+			// The WAL file will have a different timestamp which is wrong. So, it is
+			// important to keep WAL and VLOG mapping.
 			if err := lm.rotateLog(); err != nil {
 				return y.Wrapf(err, "Error while rotating log file")
 			}
@@ -364,9 +357,9 @@ func (lm *logManager) write(reqs []*request) error {
 	for i := range reqs {
 		var vlogWritten uint32
 		b := reqs[i]
-		// Process this transaction.
 		y.AssertTrue(len(b.Ptrs) == 0)
 	inner:
+		// Process this transaction.
 		for j := 0; j < len(b.Entries); j++ {
 
 			if b.Entries[j].skipVlog {
