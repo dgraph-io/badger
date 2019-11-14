@@ -234,7 +234,6 @@ func (lm *logManager) initLogManager() error {
 
 	wal := &logFile{
 		fid:         lm.maxLogID,
-		path:        walFilePath(lm.db.opt.ValueDir, lm.maxLogID),
 		loadingMode: lm.db.opt.ValueLogLoadingMode,
 		registry:    lm.db.registry,
 	}
