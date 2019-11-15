@@ -742,6 +742,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	// Txns should not interleave among other txns or rewrites.
 	req := requestPool.Get().(*request)
 	req.Entries = entries
+	req.Ptrs = req.Ptrs[:0]
 	req.Wg = sync.WaitGroup{}
 	req.Wg.Add(1)
 	req.IncrRef()     // for db write
