@@ -44,6 +44,8 @@ type header struct {
 	diff    uint16 // Length of the diff.
 }
 
+const headerSize = uint16(unsafe.Sizeof(header{}))
+
 // Encode encodes the header.
 func (h header) Encode() []byte {
 	var b [4]byte
@@ -52,15 +54,12 @@ func (h header) Encode() []byte {
 }
 
 // Decode decodes the header.
-func (h *header) Decode(buf []byte) int {
-	*h = *(*header)(unsafe.Pointer(&buf[0]))
-	return h.Size()
+func (h *header) Decode(buf []byte) {
+	// Copy over data from buf into h. Using *h=unsafe.pointer(...) leads to
+	// pointer alignment issues. See https://github.com/dgraph-io/badger/issues/1096
+	// and comment https://github.com/dgraph-io/badger/pull/1097#pullrequestreview-307361714
+	copy(((*[headerSize]byte)(unsafe.Pointer(h))[:]), buf[:headerSize])
 }
-
-const headerSize = 4
-
-// Size returns size of the header. Currently it's just a constant.
-func (h header) Size() int { return headerSize }
 
 // Builder is used in building a table.
 type Builder struct {

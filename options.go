@@ -83,7 +83,7 @@ type Options struct {
 	EncryptionKey                 []byte        // encryption key
 	EncryptionKeyRotationDuration time.Duration // key rotation duration
 
-	// ChecksumVerificationMode decides when db should verify checksum for SStable blocks.
+	// ChecksumVerificationMode decides when db should verify checksums for SSTable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
 
 	// Transaction start and commit timestamps are managed by end-user.
@@ -489,11 +489,14 @@ func (opt Options) WithKeepL0InMemory(val bool) Options {
 	return opt
 }
 
-// WithCompressionType returns a new Options value with CompressionType set to the given value.
+// WithCompression returns a new Options value with Compression set to the given value.
 //
-// When compression type is set, every block will be compressed using the specified algorithm.
+// When compression is enabled, every block will be compressed using the specified algorithm.
 // This option doesn't affect existing tables. Only the newly created tables will be compressed.
-func (opt Options) WithCompressionType(cType options.CompressionType) Options {
+//
+// The default compression algorithm used is zstd when built with Cgo. Without Cgo, the default is
+// snappy. Compression is enabled by default.
+func (opt Options) WithCompression(cType options.CompressionType) Options {
 	opt.Compression = cType
 	return opt
 }
@@ -508,6 +511,17 @@ func (opt Options) WithCompressionType(cType options.CompressionType) Options {
 // The default value of VerifyValueChecksum is False.
 func (opt Options) WithVerifyValueChecksum(val bool) Options {
 	opt.VerifyValueChecksum = val
+	return opt
+}
+
+// WithChecksumVerificationMode returns a new Options value with ChecksumVerificationMode set to
+// the given value.
+//
+// ChecksumVerificationMode indicates when the db should verify checksums for SSTable blocks.
+//
+// The default value of VerifyValueChecksum is options.NoVerification.
+func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificationMode) Options {
+	opt.ChecksumVerificationMode = cvMode
 	return opt
 }
 
