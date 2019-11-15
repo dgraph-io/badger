@@ -146,6 +146,15 @@ func DefaultOptions(path string) Options {
 	}
 }
 
+// DiskLessOptions retuns badger options for diskless mode along with other recommended options
+// for good performance.
+// Feel free to modify these to suit your needs with the WithX methods.
+func DiskLessOptions() Options {
+	opt := DefaultOptions("")
+	opt.DiskLess = true
+	return opt
+}
+
 func buildTableOptions(opt Options) table.Options {
 	return table.Options{
 		BlockSize:          opt.BlockSize,

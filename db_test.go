@@ -284,8 +284,7 @@ func TestGet(t *testing.T) {
 		})
 	})
 	t.Run("disk-less mode", func(t *testing.T) {
-		opts := DefaultOptions("")
-		opts.DiskLess = true
+		opts := DiskLessOptions()
 		db, err := Open(opts)
 		require.NoError(t, err)
 		test(t, db)
@@ -545,8 +544,7 @@ func TestExistsMore(t *testing.T) {
 		})
 	})
 	t.Run("disk less mode", func(t *testing.T) {
-		opt := getTestOptions("")
-		opt.DiskLess = true
+		opt := DiskLessOptions()
 		db, err := Open(opt)
 		require.NoError(t, err)
 		test(t, db)
@@ -620,8 +618,7 @@ func TestIterate2Basic(t *testing.T) {
 		})
 	})
 	t.Run("disk less mode", func(t *testing.T) {
-		opt := getTestOptions("")
-		opt.DiskLess = true
+		opt := DiskLessOptions()
 		db, err := Open(opt)
 		require.NoError(t, err)
 		test(t, db)
@@ -1258,8 +1255,7 @@ func TestLargeKeys(t *testing.T) {
 		test(t, opt)
 	})
 	t.Run("disk less mode", func(t *testing.T) {
-		opt := DefaultOptions("").WithValueLogFileSize(1024 * 1024 * 1024)
-		opt.DiskLess = true
+		opt := DiskLessOptions().WithValueLogFileSize(1024 * 1024 * 1024)
 		test(t, opt)
 	})
 }
@@ -1670,8 +1666,7 @@ func TestGoroutineLeak(t *testing.T) {
 		test(t, nil)
 	})
 	t.Run("disk less mode", func(t *testing.T) {
-		opt := getTestOptions("")
-		opt.DiskLess = true
+		opt := DiskLessOptions()
 		test(t, &opt)
 	})
 }
@@ -2042,8 +2037,7 @@ func removeDir(dir string) func() {
 }
 
 func TestWriteDiskLess(t *testing.T) {
-	opt := DefaultOptions("")
-	opt.DiskLess = true
+	opt := DiskLessOptions()
 	db, err := Open(opt)
 	require.NoError(t, err)
 	defer func() {
