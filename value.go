@@ -1407,6 +1407,8 @@ func newMyTrace(tr trace.Trace) *myTrace {
 	}
 }
 func (tr *myTrace) LazyLog(x fmt.Stringer, sensitive bool) {
+	fmt.Printf("%s ", tr.uuid)
+	fmt.Println(x)
 	tr.LazyLog(x, sensitive)
 }
 
@@ -1422,7 +1424,8 @@ func (tr *myTrace) Finish() { tr.tr.Finish() }
 
 func (tr *myTrace) LazyPrintf(x string, y ...interface{}) {
 	fmt.Printf("%s ", tr.uuid)
-	tr.tr.LazyPrintf(x, y...)
+	fmt.Printf(x, y...)
+	fmt.Println()
 }
 
 func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
