@@ -37,6 +37,7 @@ import (
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
 )
@@ -422,7 +423,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			wb = append(wb, ne)
 			size += es
 		} else {
-			vlog.db.opt.Warningf("This entry should have been caught. %+v\n", e)
+			vlog.db.opt.Warningf("This entry should have been caught. %+v.\n From DB: %+v. Vlog ID: %d \n", e, vp, f.fid)
 		}
 		return nil
 	}
@@ -1394,12 +1395,44 @@ func (vlog *valueLog) waitOnGC(lc *y.Closer) {
 	vlog.garbageCh <- struct{}{}
 }
 
+type myTrace struct {
+	uuid uuid.UUID
+	tr   trace.Trace
+}
+
+func newMyTrace(tr trace.Trace) *myTrace {
+	return &myTrace{
+		tr:   tr,
+		uuid: uuid.New(),
+	}
+}
+func (tr *myTrace) LazyLog(x fmt.Stringer, sensitive bool) {
+	tr.LazyLog(x, sensitive)
+}
+
+func (tr *myTrace) SetError() { tr.tr.SetError() }
+
+func (tr *myTrace) SetRecycler(f func(interface{})) { tr.tr.SetRecycler(f) }
+
+func (tr *myTrace) SetTraceInfo(traceID, spanID uint64) { tr.tr.SetTraceInfo(traceID, spanID) }
+
+func (tr *myTrace) SetMaxEvents(m int) { tr.tr.SetMaxEvents(m) }
+
+func (tr *myTrace) Finish() { tr.tr.Finish() }
+
+func (tr *myTrace) LazyPrintf(x string, y ...interface{}) {
+	fmt.Printf("%s ", tr.uuid)
+	tr.tr.LazyPrintf(x, y...)
+}
+
 func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
 		// Pick a log file for GC.
-		tr := trace.New("Badger.ValueLog", "GC")
-		tr.SetMaxEvents(100)
+		tr1 := trace.New("Badger.ValueLog", "GC")
+		tr1.SetMaxEvents(100)
+		tr := newMyTrace(tr1)
+
 		defer func() {
 			tr.Finish()
 			<-vlog.garbageCh
