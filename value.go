@@ -423,7 +423,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			wb = append(wb, ne)
 			size += es
 		} else {
-			vlog.db.opt.Warningf("This entry should have been caught. %+v.\n From DB: %+v. Vlog ID: %d \n", e, vp, f.fid)
+			vlog.db.opt.Warningf("This entry should have been caught. k:%s v:%s m:%s .From DB: %+v. Vlog ID: %d \n", e.Key, e.Value, e.meta, vp, f.fid)
 		}
 		return nil
 	}
