@@ -297,12 +297,14 @@ func (w *sortedWriter) handleRequests() {
 
 	process := func(req *request) {
 		for i, e := range req.Entries {
-			vptr := req.Ptrs[i]
-			if !vptr.IsZero() {
-				y.AssertTrue(w.head.Less(vptr))
-				w.head = vptr
+			// If badger is running in diskless mode, req.Ptrs == 0.
+			if i < len(req.Ptrs) {
+				vptr := req.Ptrs[i]
+				if !vptr.IsZero() {
+					y.AssertTrue(w.head.Less(vptr))
+					w.head = vptr
+				}
 			}
-
 			var vs y.ValueStruct
 			if e.skipVlog {
 				vs = y.ValueStruct{
@@ -312,6 +314,7 @@ func (w *sortedWriter) handleRequests() {
 					ExpiresAt: e.ExpiresAt,
 				}
 			} else {
+				vptr := req.Ptrs[i]
 				vs = y.ValueStruct{
 					Value:     vptr.Encode(),
 					Meta:      e.meta | bitValuePointer,
