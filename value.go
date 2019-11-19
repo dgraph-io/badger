@@ -1242,7 +1242,7 @@ func (reqs requests) DecrRef() {
 // if fid >= vlog.maxFid. In some cases such as replay(while opening db), it might be called with
 // fid < vlog.maxFid. To sync irrespective of file id just call it with math.MaxUint32.
 func (vlog *valueLog) sync(fid uint32) error {
-	if vlog.opt.SyncWrites || vlog.db.opt.DiskLess {
+	if vlog.opt.SyncWrites {
 		return nil
 	}
 
@@ -1276,6 +1276,9 @@ func (vlog *valueLog) woffset() uint32 {
 
 // write is thread-unsafe by design and should not be called concurrently.
 func (vlog *valueLog) write(reqs []*request) error {
+	if vlog.db.opt.DiskLess {
+		return nil
+	}
 	vlog.filesLock.RLock()
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	curlf := vlog.filesMap[maxFid]
@@ -1662,7 +1665,9 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 
 func (vlog *valueLog) waitOnGC(lc *y.Closer) {
 	defer lc.Done()
-
+	if vlog.db.opt.DiskLess {
+		return
+	}
 	<-lc.HasBeenClosed() // Wait for lc to be closed.
 
 	// Block any GC in progress to finish, and don't allow any more writes to runGC by filling up

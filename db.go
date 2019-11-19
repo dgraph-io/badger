@@ -225,8 +225,8 @@ func Open(opt Options) (db *DB, err error) {
 		opt.CompactL0OnClose = false
 	}
 	var dirLockGuard, valueDirLockGuard *directoryLockGuard
-	var manifestFile *manifestFile
 	var manifest Manifest
+	manifestfile := &manifestFile{}
 	// Create directories and acquire lock on it only if badger is not running in diskless mode.
 	// We don't have any directories/files in diskless mode so we don't need to acquire
 	// any locks on them.
@@ -262,13 +262,13 @@ func Open(opt Options) (db *DB, err error) {
 				}
 			}()
 		}
-		manifestFile, manifest, err = openOrCreateManifestFile(opt.Dir, opt.ReadOnly)
+		manifestfile, manifest, err = openOrCreateManifestFile(opt.Dir, opt.ReadOnly)
 		if err != nil {
 			return nil, err
 		}
 		defer func() {
-			if manifestFile != nil {
-				_ = manifestFile.close()
+			if manifestfile != nil {
+				_ = manifestfile.close()
 			}
 		}()
 	}
@@ -294,7 +294,7 @@ func Open(opt Options) (db *DB, err error) {
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
 		opt:           opt,
-		manifest:      manifestFile,
+		manifest:      manifestfile,
 		elog:          elog,
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
@@ -303,6 +303,10 @@ func Open(opt Options) (db *DB, err error) {
 		blockCache:    cache,
 	}
 
+	if db.opt.DiskLess {
+		db.opt.SyncWrites = true
+		db.opt.ValueThreshold = maxValueThreshold
+	}
 	krOpt := KeyRegistryOptions{
 		ReadOnly:                      opt.ReadOnly,
 		Dir:                           opt.Dir,
@@ -314,13 +318,9 @@ func Open(opt Options) (db *DB, err error) {
 	if db.registry, err = OpenKeyRegistry(krOpt); err != nil {
 		return nil, err
 	}
-	// We don't need to calculate db size when it's running in diskless mode.
-	if !opt.DiskLess {
-		// Calculate initial size.
-		db.calculateSize()
-		db.closers.updateSize = y.NewCloser(1)
-		go db.updateSize(db.closers.updateSize)
-	}
+	db.calculateSize()
+	db.closers.updateSize = y.NewCloser(1)
+	go db.updateSize(db.closers.updateSize)
 	db.mt = skl.NewSkiplist(arenaSize(opt))
 
 	// newLevelsController potentially loads files in directory.
@@ -371,16 +371,14 @@ func Open(opt Options) (db *DB, err error) {
 	go db.doWrites(db.closers.writes)
 
 	// When db is running in diskless mode, we don't need to start go routines related to GC.
-	if !db.opt.DiskLess {
-		db.closers.valueGC = y.NewCloser(1)
-		go db.vlog.waitOnGC(db.closers.valueGC)
-	}
+	db.closers.valueGC = y.NewCloser(1)
+	go db.vlog.waitOnGC(db.closers.valueGC)
 	db.closers.pub = y.NewCloser(1)
 	go db.pub.listenForUpdates(db.closers.pub)
 
 	valueDirLockGuard = nil
 	dirLockGuard = nil
-	manifestFile = nil
+	manifestfile = nil
 	return db, nil
 }
 
@@ -404,11 +402,8 @@ func (db *DB) close() (err error) {
 
 	atomic.StoreInt32(&db.blockWrites, 1)
 
-	// In diskless mode, valueGC go routine is not running, so skip it.
-	if !db.opt.DiskLess {
-		// Stop value GC first.
-		db.closers.valueGC.SignalAndWait()
-	}
+	// Stop value GC first.
+	db.closers.valueGC.SignalAndWait()
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
 
@@ -507,10 +502,10 @@ func (db *DB) close() (err error) {
 	// Fsync directories to ensure that lock file, and any other removed files whose directory
 	// we haven't specifically fsynced, are guaranteed to have their directory entry removal
 	// persisted to disk.
-	if syncErr := syncDir(db.opt.Dir); err == nil {
+	if syncErr := db.syncDir(db.opt.Dir); err == nil {
 		err = errors.Wrap(syncErr, "DB.Close")
 	}
-	if syncErr := syncDir(db.opt.ValueDir); err == nil {
+	if syncErr := db.syncDir(db.opt.ValueDir); err == nil {
 		err = errors.Wrap(syncErr, "DB.Close")
 	}
 
@@ -680,14 +675,10 @@ func (db *DB) writeRequests(reqs []*request) error {
 			r.Wg.Done()
 		}
 	}
-	// When DB is running in diskless mode, we don't write anything to the value log.
-	// The value log doesn't exists, there are no files on the disk.
-	if !db.opt.DiskLess {
-		db.elog.Printf("writeRequests called. Writing to value log")
-		if err := db.vlog.write(reqs); err != nil {
-			done(err)
-			return err
-		}
+	db.elog.Printf("writeRequests called. Writing to value log")
+	if err := db.vlog.write(reqs); err != nil {
+		done(err)
+		return err
 	}
 	db.elog.Printf("Sending updates to subscribers")
 	db.pub.sendUpdates(reqs)
@@ -966,7 +957,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 
 	// Don't block just to sync the directory entry.
 	dirSyncCh := make(chan error, 1)
-	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
+	go func() { dirSyncCh <- db.syncDir(db.opt.Dir) }()
 
 	if _, err = fd.Write(tableData); err != nil {
 		db.elog.Errorf("ERROR while writing to level 0: %v", err)
@@ -1037,6 +1028,9 @@ func exists(path string) (bool, error) {
 // This function does a filewalk, calculates the size of vlog and sst files and stores it in
 // y.LSMSize and y.VlogSize.
 func (db *DB) calculateSize() {
+	if db.opt.DiskLess {
+		return
+	}
 	newInt := func(val int64) *expvar.Int {
 		v := new(expvar.Int)
 		v.Add(val)
@@ -1073,6 +1067,9 @@ func (db *DB) calculateSize() {
 }
 
 func (db *DB) updateSize(lc *y.Closer) {
+	if db.opt.DiskLess {
+		return
+	}
 	defer lc.Done()
 
 	metricsTicker := time.NewTicker(time.Minute)
@@ -1607,6 +1604,13 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList), prefixes ...[]
 // shouldEncrypt returns bool, which tells whether to encrypt or not.
 func (db *DB) shouldEncrypt() bool {
 	return len(db.opt.EncryptionKey) > 0
+}
+
+func (db *DB) syncDir(dir string) error {
+	if db.opt.DiskLess {
+		return nil
+	}
+	return syncDir(dir)
 }
 
 func createDirs(opt Options) error {
