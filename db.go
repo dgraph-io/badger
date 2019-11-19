@@ -304,7 +304,7 @@ func Open(opt Options) (db *DB, err error) {
 	}
 
 	if db.opt.DiskLess {
-		db.opt.SyncWrites = true
+		db.opt.SyncWrites = false
 		db.opt.ValueThreshold = maxValueThreshold
 	}
 	krOpt := KeyRegistryOptions{
