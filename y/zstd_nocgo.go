@@ -33,6 +33,6 @@ func ZSTDDecompress(dst, src []byte) ([]byte, error) {
 }
 
 // ZSTDCompress compresses a block using ZSTD algorithm.
-func ZSTDCompress(dst, src []byte) ([]byte, error) {
+func ZSTDCompress(dst, src []byte, compressionLevel int) ([]byte, error) {
 	return nil, errZstdCgo
 }
