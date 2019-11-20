@@ -32,7 +32,6 @@ import (
 	"runtime"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1630,38 +1629,34 @@ func TestGoroutineLeak(t *testing.T) {
 		before := runtime.NumGoroutine()
 		t.Logf("Num go: %d", before)
 		for i := 0; i < 12; i++ {
-			runBadgerTest(t, opt, func(t *testing.T, db *DB) {
-				var done uint32
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				updated := false
 				ctx, cancel := context.WithCancel(context.Background())
 				var wg sync.WaitGroup
 				wg.Add(1)
 				go func() {
-					defer wg.Done()
 					err := db.Subscribe(ctx, func(kvs *pb.KVList) {
 						require.Equal(t, []byte("value"), kvs.Kv[0].GetValue())
-						atomic.StoreUint32(&done, 1)
-						//atomic.StoreUint32(&done, 1)
+						updated = true
+						wg.Done()
 					}, []byte("key"))
 					if err != nil {
 						require.Equal(t, err.Error(), context.Canceled.Error())
 					}
 				}()
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					for atomic.LoadUint32(&done) != 1 {
-						err := db.Update(func(txn *Txn) error {
-							return txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
-						})
-						require.NoError(t, err)
-					}
-					cancel()
-				}()
+				// Wait for the go routine to be scheduled.
+				time.Sleep(time.Second)
+				err := db.Update(func(txn *Txn) error {
+					return txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
+				})
+				require.NoError(t, err)
 				wg.Wait()
+				cancel()
+				require.Equal(t, true, updated)
 			})
+			time.Sleep(2 * time.Second)
+			require.Equal(t, before, runtime.NumGoroutine())
 		}
-		time.Sleep(2 * time.Second)
-		require.Equal(t, before, runtime.NumGoroutine())
 	}
 	t.Run("disk mode", func(t *testing.T) {
 		test(t, nil)
@@ -2011,6 +2006,8 @@ func ExampleDB_Subscribe() {
 		log.Printf("subscription closed")
 	}()
 
+	// Wait for the above go routine to be scheduled.
+	time.Sleep(time.Second)
 	// Write both keys, but only one should be printed in the Output.
 	err = db.Update(func(txn *Txn) error { return txn.Set(aKey, aValue) })
 	if err != nil {
