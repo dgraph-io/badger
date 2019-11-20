@@ -353,6 +353,11 @@ func ReplayManifestFile(fp *os.File) (Manifest, int64, error) {
 				version, magicVersion)
 	}
 
+	stat, err := fp.Stat()
+	if err != nil {
+		return Manifest{}, 0, err
+	}
+
 	build := createManifest()
 	var offset int64
 	for {
@@ -366,6 +371,12 @@ func ReplayManifestFile(fp *os.File) (Manifest, int64, error) {
 			return Manifest{}, 0, err
 		}
 		length := y.BytesToU32(lenCrcBuf[0:4])
+		// Sanity check to ensure we don't over-allocate memory.
+		if length > uint32(stat.Size()) {
+			return Manifest{}, 0, errors.Errorf(
+				"Buffer length: %d greater than file size: %d. Manifest file might be corrupted",
+				length, stat.Size())
+		}
 		var buf = make([]byte, length)
 		if _, err := io.ReadFull(&r, buf); err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
