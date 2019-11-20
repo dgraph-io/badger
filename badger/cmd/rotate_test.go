@@ -85,4 +85,8 @@ func TestRotate(t *testing.T) {
 	oldKeyPath = newKeyPath
 	newKeyPath = ""
 	require.NoError(t, doRotate(nil, []string{}))
+	opts.EncryptionKey = []byte{}
+	db, err = badger.Open(opts)
+	require.NoError(t, err)
+	defer db.Close()
 }

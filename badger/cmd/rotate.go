@@ -58,7 +58,6 @@ func doRotate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	kr.Close()
 	newKey, err := getKey(newKeyPath)
 	if err != nil {
 		return err
