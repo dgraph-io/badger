@@ -224,11 +224,8 @@ func Open(opt Options) (db *DB, err error) {
 		// Do not perform compaction in read only mode.
 		opt.CompactL0OnClose = false
 	}
-	var (
-		dirLockGuard, valueDirLockGuard *directoryLockGuard
-		manifest                        Manifest
-		manifestfile                    *manifestFile
-	)
+	var dirLockGuard, valueDirLockGuard *directoryLockGuard
+
 	// Create directories and acquire lock on it only if badger is not running in InMemory mode.
 	// We don't have any directories/files in InMemory mode so we don't need to acquire
 	// any locks on them.
@@ -266,15 +263,16 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}
 
-	manifestfile, manifest, err = openOrCreateManifestFile(opt.Dir, opt.ReadOnly, opt.InMemory)
+	manifestFile, manifest, err := openOrCreateManifestFile(opt.Dir, opt.ReadOnly, opt.InMemory)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if manifestfile != nil {
-			_ = manifestfile.close()
+		if manifestFile != nil {
+			_ = manifestFile.close()
 		}
 	}()
+
 	elog := y.NoEventLog
 	if opt.EventLogging {
 		elog = trace.NewEventLog("Badger", "DB")
@@ -296,7 +294,7 @@ func Open(opt Options) (db *DB, err error) {
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
 		opt:           opt,
-		manifest:      manifestfile,
+		manifest:      manifestFile,
 		elog:          elog,
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
@@ -382,7 +380,7 @@ func Open(opt Options) (db *DB, err error) {
 
 	valueDirLockGuard = nil
 	dirLockGuard = nil
-	manifestfile = nil
+	manifestFile = nil
 	return db, nil
 }
 
@@ -477,10 +475,7 @@ func (db *DB) close() (err error) {
 		err = errors.Wrap(lcErr, "DB.Close")
 	}
 	db.elog.Printf("Waiting for closer")
-	// We don't calculate disk size in disk-less mode, so skip it.
-	if !db.opt.InMemory {
-		db.closers.updateSize.SignalAndWait()
-	}
+	db.closers.updateSize.SignalAndWait()
 	db.orc.Stop()
 	db.blockCache.Close()
 
@@ -634,7 +629,7 @@ var requestPool = sync.Pool{
 }
 
 func (db *DB) shouldWriteValueToLSM(e Entry) bool {
-	return (len(e.Value) < db.opt.ValueThreshold)
+	return len(e.Value) < db.opt.ValueThreshold
 }
 
 func (db *DB) writeToLSM(b *request) error {
@@ -1075,10 +1070,10 @@ func (db *DB) calculateSize() {
 }
 
 func (db *DB) updateSize(lc *y.Closer) {
+	defer lc.Done()
 	if db.opt.InMemory {
 		return
 	}
-	defer lc.Done()
 
 	metricsTicker := time.NewTicker(time.Minute)
 	defer metricsTicker.Stop()

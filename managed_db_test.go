@@ -137,37 +137,46 @@ func TestDropAll(t *testing.T) {
 }
 
 func TestDropAllTwice(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer removeDir(dir)
-	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 5 << 20
-	opts.InMemory = true
-	opts.Dir = ""
-	opts.ValueDir = ""
-	db, err := Open(opts)
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, db.Close())
-	}()
+	test := func(t *testing.T, opts Options) {
+		db, err := Open(opts)
 
-	N := uint64(10000)
-	populate := func(db *DB) {
-		writer := db.NewWriteBatch()
-		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(false)))
+		require.NoError(t, err)
+		defer func() {
+			require.NoError(t, db.Close())
+		}()
+
+		N := uint64(10000)
+		populate := func(db *DB) {
+			writer := db.NewWriteBatch()
+			for i := uint64(0); i < N; i++ {
+				require.NoError(t, writer.Set([]byte(key("key", int(i))), val(false)))
+			}
+			require.NoError(t, writer.Flush())
 		}
-		require.NoError(t, writer.Flush())
+
+		populate(db)
+		require.Equal(t, int(N), numKeys(db))
+
+		require.NoError(t, db.DropAll())
+		require.Equal(t, 0, numKeys(db))
+
+		// Call DropAll again.
+		require.NoError(t, db.DropAll())
 	}
+	t.Run("disk mode", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer removeDir(dir)
+		opts := getTestOptions(dir)
+		opts.ValueLogFileSize = 5 << 20
+		test(t, opts)
+	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		opts := getTestOptions("")
+		opts.InMemory = true
+		test(t, opts)
 
-	populate(db)
-	require.Equal(t, int(N), numKeys(db))
-
-	require.NoError(t, db.DropAll())
-	require.Equal(t, 0, numKeys(db))
-
-	// Call DropAll again.
-	require.NoError(t, db.DropAll())
+	})
 }
 
 func TestDropAllWithPendingTxn(t *testing.T) {

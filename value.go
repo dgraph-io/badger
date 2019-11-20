@@ -1708,6 +1708,10 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 }
 
 func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
+	if vlog.opt.InMemory {
+		return
+	}
+
 	select {
 	case vlog.lfDiscardStats.flushChan <- stats:
 	default:

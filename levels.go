@@ -634,12 +634,11 @@ func (s *levelsController) compactBuildTables(
 		}
 	}
 
-	// We don't need to sync the directory if badger is running in InMemory mode.
-	if !s.kv.opt.InMemory && firstErr == nil {
+	if firstErr == nil {
 		// Ensure created files' directory entries are visible.  We don't mind the extra latency
 		// from not doing this ASAP after all file creation has finished because this is a
 		// background operation.
-		firstErr = syncDir(s.kv.opt.Dir)
+		firstErr = s.kv.syncDir(s.kv.opt.Dir)
 	}
 
 	if firstErr != nil {
@@ -657,11 +656,8 @@ func (s *levelsController) compactBuildTables(
 	sort.Slice(newTables, func(i, j int) bool {
 		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
-	// Skip updating discard stats in InMemory mode.
-	if !s.kv.opt.InMemory {
-		s.kv.vlog.updateDiscardStats(discardStats)
-		s.kv.opt.Debugf("Discard stats: %v", discardStats)
-	}
+	s.kv.vlog.updateDiscardStats(discardStats)
+	s.kv.opt.Debugf("Discard stats: %v", discardStats)
 	return newTables, func() error { return decrRefs(newTables) }, nil
 }
 
@@ -826,8 +822,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 			err = decErr
 		}
 	}()
-
 	changeSet := buildChangeSet(&cd, newTables)
+
 	// We write to the manifest _before_ we delete files (and after we created files)
 	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
 		return err

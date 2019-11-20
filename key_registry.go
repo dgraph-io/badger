@@ -81,7 +81,7 @@ func OpenKeyRegistry(opt KeyRegistryOptions) (*KeyRegistry, error) {
 			break
 		}
 	}
-	// If db is opened in InMemory mode, we don't need to key registry on the disk.
+	// If db is opened in InMemory mode, we don't need to write key registry to the disk.
 	if opt.InMemory {
 		return newKeyRegistry(opt), nil
 	}

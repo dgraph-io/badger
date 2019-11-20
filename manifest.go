@@ -122,9 +122,7 @@ func (m *Manifest) clone() Manifest {
 func openOrCreateManifestFile(dir string, readOnly bool, inMemory bool) (
 	ret *manifestFile, result Manifest, err error) {
 	if inMemory {
-		return &manifestFile{
-			inMemory: true,
-		}, Manifest{}, nil
+		return &manifestFile{inMemory: true}, Manifest{}, nil
 	}
 	return helpOpenOrCreateManifestFile(dir, readOnly, manifestDeletionsRewriteThreshold)
 }
