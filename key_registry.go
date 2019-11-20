@@ -57,7 +57,7 @@ type KeyRegistryOptions struct {
 	ReadOnly                      bool
 	EncryptionKey                 []byte
 	EncryptionKeyRotationDuration time.Duration
-	DiskLess                      bool
+	InMemory                      bool
 }
 
 // newKeyRegistry returns KeyRegistry.
@@ -81,8 +81,8 @@ func OpenKeyRegistry(opt KeyRegistryOptions) (*KeyRegistry, error) {
 			break
 		}
 	}
-	// If db is opened in diskless mode, we don't need to key registry on the disk.
-	if opt.DiskLess {
+	// If db is opened in InMemory mode, we don't need to key registry on the disk.
+	if opt.InMemory {
 		return newKeyRegistry(opt), nil
 	}
 	path := filepath.Join(opt.Dir, KeyRegistryFileName)
@@ -359,8 +359,8 @@ func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 		CreatedAt: time.Now().Unix(),
 		Iv:        iv,
 	}
-	// Don't store the datakey on file if badger is running in diskless mode.
-	if !kr.opt.DiskLess {
+	// Don't store the datakey on file if badger is running in InMemory mode.
+	if !kr.opt.InMemory {
 		// Store the datekey.
 		buf := &bytes.Buffer{}
 		if err = storeDataKey(buf, kr.opt.EncryptionKey, dk); err != nil {
@@ -380,7 +380,7 @@ func (kr *KeyRegistry) latestDataKey() (*pb.DataKey, error) {
 
 // Close closes the key registry.
 func (kr *KeyRegistry) Close() error {
-	if !(kr.opt.ReadOnly || kr.opt.DiskLess) {
+	if !(kr.opt.ReadOnly || kr.opt.InMemory) {
 		return kr.fp.Close()
 	}
 	return nil

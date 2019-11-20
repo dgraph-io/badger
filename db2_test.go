@@ -437,8 +437,8 @@ func TestBigValues(t *testing.T) {
 			test(t, db)
 		})
 	})
-	t.Run("disk less mode", func(t *testing.T) {
-		opts.DiskLess = true
+	t.Run("InMemory mode", func(t *testing.T) {
+		opts.InMemory = true
 		opts.Dir = ""
 		opts.ValueDir = ""
 		db, err := Open(opts)

@@ -319,9 +319,9 @@ func TestBackup(t *testing.T) {
 			test(t, db)
 		})
 	})
-	t.Run("disk less mode", func(t *testing.T) {
+	t.Run("InMemory mode", func(t *testing.T) {
 		opt := DefaultOptions("")
-		opt.DiskLess = true
+		opt.InMemory = true
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			test(t, db)
 		})

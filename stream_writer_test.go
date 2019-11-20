@@ -93,9 +93,9 @@ func TestStreamWriter1(t *testing.T) {
 		managedModeOpts.managedTxns = true
 		test(t, &managedModeOpts)
 	})
-	t.Run("DiskLess mode", func(t *testing.T) {
+	t.Run("InMemory mode", func(t *testing.T) {
 		diskLessModeOpts := getTestOptions("")
-		diskLessModeOpts.DiskLess = true
+		diskLessModeOpts.InMemory = true
 		test(t, &diskLessModeOpts)
 	})
 }
@@ -156,9 +156,9 @@ func TestStreamWriter2(t *testing.T) {
 		managedModeOpts.managedTxns = true
 		test(t, &managedModeOpts)
 	})
-	t.Run("DiskLess mode", func(t *testing.T) {
+	t.Run("InMemory mode", func(t *testing.T) {
 		diskLessModeOpts := getTestOptions("")
-		diskLessModeOpts.DiskLess = true
+		diskLessModeOpts.InMemory = true
 		test(t, &diskLessModeOpts)
 	})
 }
@@ -245,9 +245,9 @@ func TestStreamWriter3(t *testing.T) {
 		managedModeOpts.managedTxns = true
 		test(t, &managedModeOpts)
 	})
-	t.Run("DiskLess mode", func(t *testing.T) {
+	t.Run("InMemory mode", func(t *testing.T) {
 		diskLessModeOpts := getTestOptions("")
-		diskLessModeOpts.DiskLess = true
+		diskLessModeOpts.InMemory = true
 		test(t, &diskLessModeOpts)
 	})
 }

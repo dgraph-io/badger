@@ -127,7 +127,7 @@ func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB))
 		opts.ValueDir = dir
 	}
 
-	if opts.DiskLess {
+	if opts.InMemory {
 		opts.Dir = ""
 		opts.ValueDir = ""
 	}
@@ -283,8 +283,8 @@ func TestGet(t *testing.T) {
 			test(t, db)
 		})
 	})
-	t.Run("disk-less mode", func(t *testing.T) {
-		opts := DiskLessOptions()
+	t.Run("InMemory mode", func(t *testing.T) {
+		opts := DefaultOptions("").WithInmemory(true)
 		db, err := Open(opts)
 		require.NoError(t, err)
 		test(t, db)
@@ -543,8 +543,8 @@ func TestExistsMore(t *testing.T) {
 			test(t, db)
 		})
 	})
-	t.Run("disk less mode", func(t *testing.T) {
-		opt := DiskLessOptions()
+	t.Run("InMemory mode", func(t *testing.T) {
+		opt := DefaultOptions("").WithInmemory(true)
 		db, err := Open(opt)
 		require.NoError(t, err)
 		test(t, db)
@@ -617,8 +617,8 @@ func TestIterate2Basic(t *testing.T) {
 			test(t, db)
 		})
 	})
-	t.Run("disk less mode", func(t *testing.T) {
-		opt := DiskLessOptions()
+	t.Run("InMemory mode", func(t *testing.T) {
+		opt := DefaultOptions("").WithInmemory(true)
 		db, err := Open(opt)
 		require.NoError(t, err)
 		test(t, db)
@@ -1254,8 +1254,9 @@ func TestLargeKeys(t *testing.T) {
 		opt := DefaultOptions(dir).WithValueLogFileSize(1024 * 1024 * 1024)
 		test(t, opt)
 	})
-	t.Run("disk less mode", func(t *testing.T) {
-		opt := DiskLessOptions().WithValueLogFileSize(1024 * 1024 * 1024)
+	t.Run("InMemory mode", func(t *testing.T) {
+		opt := DefaultOptions("").WithValueLogFileSize(1024 * 1024 * 1024)
+		opt.InMemory = true
 		test(t, opt)
 	})
 }
@@ -1665,8 +1666,8 @@ func TestGoroutineLeak(t *testing.T) {
 	t.Run("disk mode", func(t *testing.T) {
 		test(t, nil)
 	})
-	t.Run("disk less mode", func(t *testing.T) {
-		opt := DiskLessOptions()
+	t.Run("InMemory mode", func(t *testing.T) {
+		opt := DefaultOptions("").WithInmemory(true)
 		test(t, &opt)
 	})
 }
@@ -2036,8 +2037,8 @@ func removeDir(dir string) func() {
 	}
 }
 
-func TestWriteDiskLess(t *testing.T) {
-	opt := DiskLessOptions()
+func TestWriteInemory(t *testing.T) {
+	opt := DefaultOptions("").WithInmemory(true)
 	db, err := Open(opt)
 	require.NoError(t, err)
 	defer func() {

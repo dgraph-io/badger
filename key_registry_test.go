@@ -133,13 +133,13 @@ func TestEncryptionAndDecryption(t *testing.T) {
 	require.NoError(t, kr.Close())
 }
 
-func TestKeyRegistryDiskLess(t *testing.T) {
+func TestKeyRegistryInMemory(t *testing.T) {
 	encryptionKey := make([]byte, 32)
 	_, err := rand.Read(encryptionKey)
 	require.NoError(t, err)
 
 	opt := getRegistryTestOptions("", encryptionKey)
-	opt.DiskLess = true
+	opt.InMemory = true
 
 	kr, err := OpenKeyRegistry(opt)
 	require.NoError(t, err)

@@ -50,7 +50,7 @@ type Options struct {
 	Logger              Logger
 	Compression         options.CompressionType
 	EventLogging        bool
-	DiskLess            bool
+	InMemory            bool
 
 	// Fine tuning options.
 
@@ -144,15 +144,6 @@ func DefaultOptions(path string) Options {
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 	}
-}
-
-// DiskLessOptions retuns badger options for diskless mode along with other recommended options
-// for good performance.
-// Feel free to modify these to suit your needs with the WithX methods.
-func DiskLessOptions() Options {
-	opt := DefaultOptions("")
-	opt.DiskLess = true
-	return opt
 }
 
 func buildTableOptions(opt Options) table.Options {
@@ -543,11 +534,11 @@ func (opt Options) WithMaxCacheSize(size int64) Options {
 	return opt
 }
 
-// WithDiskLess returns a new Options value with DiskLess set to the given value.
+// WithInMemory returns a new Options value with Inmemory mode set to the given value.
 //
-// When badger is running in diskless mode, everything is stored in memory. No value/sst files are
+// When badger is running in InMemory mode, everything is stored in memory. No value/sst files are
 // created. In case of a crash all data will be lost.
-func (opt Options) WithDiskLess(b bool) Options {
-	opt.DiskLess = b
+func (opt Options) WithInmemory(b bool) Options {
+	opt.InMemory = b
 	return opt
 }

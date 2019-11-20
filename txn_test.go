@@ -85,9 +85,9 @@ func TestTxnReadAfterWrite(t *testing.T) {
 			test(t, db)
 		})
 	})
-	t.Run("disk less mode", func(t *testing.T) {
+	t.Run("InMemory mode", func(t *testing.T) {
 		opt := getTestOptions("")
-		opt.DiskLess = true
+		opt.InMemory = true
 		db, err := Open(opt)
 		require.NoError(t, err)
 		test(t, db)
@@ -679,9 +679,9 @@ func TestIteratorAllVersionsWithDeleted(t *testing.T) {
 			test(t, db)
 		})
 	})
-	t.Run("disk less mode", func(t *testing.T) {
+	t.Run("InMemory mode", func(t *testing.T) {
 		opt := getTestOptions("")
-		opt.DiskLess = true
+		opt.InMemory = true
 		db, err := Open(opt)
 		require.NoError(t, err)
 		test(t, db)
@@ -823,8 +823,8 @@ func TestManagedDB(t *testing.T) {
 		test(t, db)
 		require.NoError(t, db.Close())
 	})
-	t.Run("disk less mode", func(t *testing.T) {
-		opt.DiskLess = true
+	t.Run("InMemory mode", func(t *testing.T) {
+		opt.InMemory = true
 		opt.Dir = ""
 		opt.ValueDir = ""
 		db, err := Open(opt)

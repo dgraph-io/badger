@@ -71,9 +71,9 @@ func TestWriteBatch(t *testing.T) {
 			test(t, db)
 		})
 	})
-	t.Run("disk less mode", func(t *testing.T) {
+	t.Run("InMemory mode", func(t *testing.T) {
 		opt := getTestOptions("")
-		opt.DiskLess = true
+		opt.InMemory = true
 		db, err := Open(opt)
 		require.NoError(t, err)
 		test(t, db)

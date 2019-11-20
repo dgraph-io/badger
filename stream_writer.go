@@ -297,7 +297,7 @@ func (w *sortedWriter) handleRequests() {
 
 	process := func(req *request) {
 		for i, e := range req.Entries {
-			// If badger is running in diskless mode, req.Ptrs == 0.
+			// If badger is running in InMemory mode, req.Ptrs == 0.
 			if i < len(req.Ptrs) {
 				vptr := req.Ptrs[i]
 				if !vptr.IsZero() {
@@ -408,7 +408,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	opts.DataKey = builder.DataKey()
 	opts.Cache = w.db.blockCache
 	var tbl *table.Table
-	if w.db.opt.DiskLess {
+	if w.db.opt.InMemory {
 		var err error
 		if tbl, err = table.OpenInMemoryTable(data, fileID, &opts); err != nil {
 			return err
@@ -449,8 +449,8 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 		// other keys to avoid an overlap.
 		lhandler = lc.levels[0]
 	}
-	// Don't create a change if bader is running in diskless mode.
-	if !w.db.opt.DiskLess {
+	// Don't create a change if bader is running in InMemory mode.
+	if !w.db.opt.InMemory {
 		// Now that table can be opened successfully, let's add this to the MANIFEST.
 		change := &pb.ManifestChange{
 			Id:          tbl.ID(),

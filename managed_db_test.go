@@ -142,7 +142,7 @@ func TestDropAllTwice(t *testing.T) {
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 5 << 20
-	opts.DiskLess = true
+	opts.InMemory = true
 	opts.Dir = ""
 	opts.ValueDir = ""
 	db, err := Open(opts)

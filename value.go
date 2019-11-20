@@ -732,8 +732,8 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 }
 
 func (vlog *valueLog) dropAll() (int, error) {
-	// If db is opened in diskless mode, we don't need to do anything since there are no vlog files.
-	if vlog.db.opt.DiskLess {
+	// If db is opened in InMemory mode, we don't need to do anything since there are no vlog files.
+	if vlog.db.opt.InMemory {
 		return 0, nil
 	}
 	// We don't want to block dropAll on any pending transactions. So, don't worry about iterator
@@ -1000,8 +1000,8 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	vlog.opt = db.opt
 	vlog.db = db
 	// We don't need to open any vlog files or collect stats for GC if DB is opened
-	// in diskless mode. Diskless mode doesn't create any files/directories on disk.
-	if vlog.opt.DiskLess {
+	// in InMemory mode. InMemory mode doesn't create any files/directories on disk.
+	if vlog.opt.InMemory {
 		return nil
 	}
 	vlog.dirPath = vlog.opt.ValueDir
@@ -1147,7 +1147,7 @@ func (lf *logFile) init() error {
 }
 
 func (vlog *valueLog) Close() error {
-	if vlog.db.opt.DiskLess {
+	if vlog.db.opt.InMemory {
 		return nil
 	}
 	// close flushDiscardStats.
@@ -1276,7 +1276,7 @@ func (vlog *valueLog) woffset() uint32 {
 
 // write is thread-unsafe by design and should not be called concurrently.
 func (vlog *valueLog) write(reqs []*request) error {
-	if vlog.db.opt.DiskLess {
+	if vlog.db.opt.InMemory {
 		return nil
 	}
 	vlog.filesLock.RLock()
@@ -1665,9 +1665,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 
 func (vlog *valueLog) waitOnGC(lc *y.Closer) {
 	defer lc.Done()
-	if vlog.db.opt.DiskLess {
-		return
-	}
+
 	<-lc.HasBeenClosed() // Wait for lc to be closed.
 
 	// Block any GC in progress to finish, and don't allow any more writes to runGC by filling up

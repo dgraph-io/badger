@@ -98,7 +98,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		s.cstatus.levels[i] = new(levelCompactStatus)
 	}
 
-	if db.opt.DiskLess {
+	if db.opt.InMemory {
 		return s, nil
 	}
 	// Compare manifest against directory, check for existent/non-existent files, and remove.
@@ -243,7 +243,7 @@ func (s *levelsController) dropTree() (int, error) {
 	}
 
 	// Skip writing changes to the manifest file if DB is opened in disk less mode.
-	if !s.kv.opt.DiskLess {
+	if !s.kv.opt.InMemory {
 		// Generate the manifest changes.
 		changes := []*pb.ManifestChange{}
 		for _, table := range all {
@@ -460,7 +460,7 @@ func (s *levelsController) compactBuildTables(
 	discardStats := make(map[uint32]int64)
 	updateStats := func(vs y.ValueStruct) {
 		// We don't need to store/update discard stats when badger is running in Disk-less mode.
-		if s.kv.opt.DiskLess {
+		if s.kv.opt.InMemory {
 			return
 		}
 		if vs.Meta&bitValuePointer > 0 {
@@ -616,7 +616,7 @@ func (s *levelsController) compactBuildTables(
 				tbl *table.Table
 				err error
 			)
-			if s.kv.opt.DiskLess {
+			if s.kv.opt.InMemory {
 				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
 			} else {
 				tbl, err = build(fileID)
@@ -636,8 +636,8 @@ func (s *levelsController) compactBuildTables(
 		}
 	}
 
-	// We don't need to sync the directory if badger is running in diskless mode.
-	if !s.kv.opt.DiskLess && firstErr == nil {
+	// We don't need to sync the directory if badger is running in InMemory mode.
+	if !s.kv.opt.InMemory && firstErr == nil {
 		// Ensure created files' directory entries are visible.  We don't mind the extra latency
 		// from not doing this ASAP after all file creation has finished because this is a
 		// background operation.
@@ -659,8 +659,8 @@ func (s *levelsController) compactBuildTables(
 	sort.Slice(newTables, func(i, j int) bool {
 		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
-	// Skip updating discard stats in diskless mode.
-	if !s.kv.opt.DiskLess {
+	// Skip updating discard stats in InMemory mode.
+	if !s.kv.opt.InMemory {
 		s.kv.vlog.updateDiscardStats(discardStats)
 		s.kv.opt.Debugf("Discard stats: %v", discardStats)
 	}
@@ -829,8 +829,8 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		}
 	}()
 
-	// Skip writing to manifest file if db is opened in diskless mode.
-	if !s.kv.opt.DiskLess {
+	// Skip writing to manifest file if db is opened in InMemory mode.
+	if !s.kv.opt.InMemory {
 		changeSet := buildChangeSet(&cd, newTables)
 		// We write to the manifest _before_ we delete files (and after we created files)
 		if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {

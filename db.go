@@ -188,7 +188,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 
 // Open returns a new DB object.
 func Open(opt Options) (db *DB, err error) {
-	if opt.DiskLess && (opt.Dir != "" || opt.ValueDir != "") {
+	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
 		return nil, errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
 	}
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
@@ -227,10 +227,10 @@ func Open(opt Options) (db *DB, err error) {
 	var dirLockGuard, valueDirLockGuard *directoryLockGuard
 	var manifest Manifest
 	manifestfile := &manifestFile{}
-	// Create directories and acquire lock on it only if badger is not running in diskless mode.
-	// We don't have any directories/files in diskless mode so we don't need to acquire
+	// Create directories and acquire lock on it only if badger is not running in InMemory mode.
+	// We don't have any directories/files in InMemory mode so we don't need to acquire
 	// any locks on them.
-	if !opt.DiskLess {
+	if !opt.InMemory {
 		if err := createDirs(opt); err != nil {
 			return nil, err
 		}
@@ -303,7 +303,7 @@ func Open(opt Options) (db *DB, err error) {
 		blockCache:    cache,
 	}
 
-	if db.opt.DiskLess {
+	if db.opt.InMemory {
 		db.opt.SyncWrites = false
 		db.opt.ValueThreshold = maxValueThreshold
 	}
@@ -312,7 +312,7 @@ func Open(opt Options) (db *DB, err error) {
 		Dir:                           opt.Dir,
 		EncryptionKey:                 opt.EncryptionKey,
 		EncryptionKeyRotationDuration: opt.EncryptionKeyRotationDuration,
-		DiskLess:                      opt.DiskLess,
+		InMemory:                      opt.InMemory,
 	}
 
 	if db.registry, err = OpenKeyRegistry(krOpt); err != nil {
@@ -370,9 +370,10 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.writes = y.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
-	// When db is running in diskless mode, we don't need to start go routines related to GC.
-	db.closers.valueGC = y.NewCloser(1)
-	go db.vlog.waitOnGC(db.closers.valueGC)
+	if !db.opt.InMemory {
+		db.closers.valueGC = y.NewCloser(1)
+		go db.vlog.waitOnGC(db.closers.valueGC)
+	}
 	db.closers.pub = y.NewCloser(1)
 	go db.pub.listenForUpdates(db.closers.pub)
 
@@ -402,8 +403,10 @@ func (db *DB) close() (err error) {
 
 	atomic.StoreInt32(&db.blockWrites, 1)
 
-	// Stop value GC first.
-	db.closers.valueGC.SignalAndWait()
+	if !db.opt.InMemory {
+		// Stop value GC first.
+		db.closers.valueGC.SignalAndWait()
+	}
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
 
@@ -471,14 +474,14 @@ func (db *DB) close() (err error) {
 	}
 	db.elog.Printf("Waiting for closer")
 	// We don't calculate disk size in disk-less mode, so skip it.
-	if !db.opt.DiskLess {
+	if !db.opt.InMemory {
 		db.closers.updateSize.SignalAndWait()
 	}
 	db.orc.Stop()
 	db.blockCache.Close()
 
 	db.elog.Finish()
-	if db.opt.DiskLess {
+	if db.opt.InMemory {
 		return
 	}
 
@@ -627,14 +630,14 @@ var requestPool = sync.Pool{
 }
 
 func (db *DB) shouldWriteValueToLSM(e Entry) bool {
-	return db.opt.DiskLess || (len(e.Value) < db.opt.ValueThreshold)
+	return db.opt.InMemory || (len(e.Value) < db.opt.ValueThreshold)
 }
 
 func (db *DB) writeToLSM(b *request) error {
 	// We should check the length of b.Prts and b.Entries only when badger is not
-	// running in diskless mode. In diskless mode, we don't write anything to the
+	// running in InMemory mode. In InMemory mode, we don't write anything to the
 	// value log and that's why the length of b.Ptrs will always be zero.
-	if !db.opt.DiskLess && len(b.Ptrs) != len(b.Entries) {
+	if !db.opt.InMemory && len(b.Ptrs) != len(b.Entries) {
 		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
 
@@ -1028,7 +1031,7 @@ func exists(path string) (bool, error) {
 // This function does a filewalk, calculates the size of vlog and sst files and stores it in
 // y.LSMSize and y.VlogSize.
 func (db *DB) calculateSize() {
-	if db.opt.DiskLess {
+	if db.opt.InMemory {
 		return
 	}
 	newInt := func(val int64) *expvar.Int {
@@ -1067,7 +1070,7 @@ func (db *DB) calculateSize() {
 }
 
 func (db *DB) updateSize(lc *y.Closer) {
-	if db.opt.DiskLess {
+	if db.opt.InMemory {
 		return
 	}
 	defer lc.Done()
@@ -1113,8 +1116,8 @@ func (db *DB) updateSize(lc *y.Closer) {
 // Note: Every time GC is run, it would produce a spike of activity on the LSM
 // tree.
 func (db *DB) RunValueLogGC(discardRatio float64) error {
-	if db.opt.DiskLess {
-		return errors.New("Cannot run value log GC when DB is opened in diskless mode")
+	if db.opt.InMemory {
+		return errors.New("Cannot run value log GC when DB is opened in InMemory mode")
 	}
 	if discardRatio >= 1.0 || discardRatio <= 0.0 {
 		return ErrInvalidRequest
@@ -1607,7 +1610,7 @@ func (db *DB) shouldEncrypt() bool {
 }
 
 func (db *DB) syncDir(dir string) error {
-	if db.opt.DiskLess {
+	if db.opt.InMemory {
 		return nil
 	}
 	return syncDir(dir)
