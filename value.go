@@ -1218,7 +1218,7 @@ func (req *request) DecrRef() {
 		return
 	}
 	req.Entries = nil
-	requestPool.Put(req)
+	//requestPool.Put(req)
 }
 
 func (req *request) Wait() error {
