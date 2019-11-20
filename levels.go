@@ -827,13 +827,10 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		}
 	}()
 
-	// Skip writing to manifest file if db is opened in InMemory mode.
-	if !s.kv.opt.InMemory {
-		changeSet := buildChangeSet(&cd, newTables)
-		// We write to the manifest _before_ we delete files (and after we created files)
-		if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
-			return err
-		}
+	changeSet := buildChangeSet(&cd, newTables)
+	// We write to the manifest _before_ we delete files (and after we created files)
+	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
+		return err
 	}
 
 	// See comment earlier in this function about the ordering of these ops, and the order in which
