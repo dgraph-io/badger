@@ -374,6 +374,7 @@ func Open(opt Options) (db *DB, err error) {
 		db.closers.valueGC = y.NewCloser(1)
 		go db.vlog.waitOnGC(db.closers.valueGC)
 	}
+
 	db.closers.pub = y.NewCloser(1)
 	go db.pub.listenForUpdates(db.closers.pub)
 
@@ -407,6 +408,7 @@ func (db *DB) close() (err error) {
 		// Stop value GC first.
 		db.closers.valueGC.SignalAndWait()
 	}
+
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
 
@@ -630,7 +632,7 @@ var requestPool = sync.Pool{
 }
 
 func (db *DB) shouldWriteValueToLSM(e Entry) bool {
-	return db.opt.InMemory || (len(e.Value) < db.opt.ValueThreshold)
+	return (len(e.Value) < db.opt.ValueThreshold)
 }
 
 func (db *DB) writeToLSM(b *request) error {
@@ -679,15 +681,16 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 	}
 	db.elog.Printf("writeRequests called. Writing to value log")
-	if err := db.vlog.write(reqs); err != nil {
+	err := db.vlog.write(reqs)
+	if err != nil {
 		done(err)
 		return err
 	}
+
 	db.elog.Printf("Sending updates to subscribers")
 	db.pub.sendUpdates(reqs)
 	db.elog.Printf("Writing to memtable")
 	var count int
-	var err error
 	for _, b := range reqs {
 		if len(b.Entries) == 0 {
 			continue
@@ -1117,7 +1120,7 @@ func (db *DB) updateSize(lc *y.Closer) {
 // tree.
 func (db *DB) RunValueLogGC(discardRatio float64) error {
 	if db.opt.InMemory {
-		return errors.New("Cannot run value log GC when DB is opened in InMemory mode")
+		return ErrGCInMemoryMode
 	}
 	if discardRatio >= 1.0 || discardRatio <= 0.0 {
 		return ErrInvalidRequest

@@ -122,4 +122,6 @@ var (
 
 	ErrInvalidEncryptionKey = errors.New("Encryption key's length should be" +
 		"either 16, 24, or 32 bytes")
+
+	ErrGCInMemoryMode = errors.New("Cannot run value log GC when DB is opened in InMemory mode")
 )
