@@ -1527,10 +1527,7 @@ func TestGoroutineLeak(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			var wg sync.WaitGroup
 			wg.Add(1)
-			var subWg sync.WaitGroup
-			subWg.Add(1)
 			go func() {
-				subWg.Done()
 				err := db.Subscribe(ctx, func(kvs *pb.KVList) {
 					require.Equal(t, []byte("value"), kvs.Kv[0].GetValue())
 					updated = true
@@ -1540,7 +1537,8 @@ func TestGoroutineLeak(t *testing.T) {
 					require.Equal(t, err.Error(), context.Canceled.Error())
 				}
 			}()
-			subWg.Wait()
+			// Wait for the go routine to be scheduled.
+			time.Sleep(time.Second)
 			err := db.Update(func(txn *Txn) error {
 				return txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
 			})
@@ -1844,6 +1842,8 @@ func ExampleDB_Subscribe() {
 		log.Printf("subscription closed")
 	}()
 
+	// Wait for the above go routine to be scheduled.
+	time.Sleep(time.Second)
 	// Write both keys, but only one should be printed in the Output.
 	err = db.Update(func(txn *Txn) error { return txn.Set(aKey, aValue) })
 	if err != nil {
