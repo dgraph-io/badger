@@ -242,21 +242,19 @@ func (s *levelsController) dropTree() (int, error) {
 		return 0, nil
 	}
 
-	// Skip writing changes to the manifest file if DB is opened in disk less mode.
-	if !s.kv.opt.InMemory {
-		// Generate the manifest changes.
-		changes := []*pb.ManifestChange{}
-		for _, table := range all {
-			// Add a delete change only if the table is not in memory.
-			if !table.IsInmemory {
-				changes = append(changes, newDeleteChange(table.ID()))
-			}
-		}
-		changeSet := pb.ManifestChangeSet{Changes: changes}
-		if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
-			return 0, err
+	// Generate the manifest changes.
+	changes := []*pb.ManifestChange{}
+	for _, table := range all {
+		// Add a delete change only if the table is not in memory.
+		if !table.IsInmemory {
+			changes = append(changes, newDeleteChange(table.ID()))
 		}
 	}
+	changeSet := pb.ManifestChangeSet{Changes: changes}
+	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
+		return 0, err
+	}
+
 	// Now that manifest has been successfully written, we can delete the tables.
 	for _, l := range s.levels {
 		l.Lock()

@@ -224,9 +224,11 @@ func Open(opt Options) (db *DB, err error) {
 		// Do not perform compaction in read only mode.
 		opt.CompactL0OnClose = false
 	}
-	var dirLockGuard, valueDirLockGuard *directoryLockGuard
-	var manifest Manifest
-	manifestfile := &manifestFile{}
+	var (
+		dirLockGuard, valueDirLockGuard *directoryLockGuard
+		manifest                        Manifest
+		manifestfile                    *manifestFile
+	)
 	// Create directories and acquire lock on it only if badger is not running in InMemory mode.
 	// We don't have any directories/files in InMemory mode so we don't need to acquire
 	// any locks on them.
@@ -262,17 +264,17 @@ func Open(opt Options) (db *DB, err error) {
 				}
 			}()
 		}
-		manifestfile, manifest, err = openOrCreateManifestFile(opt.Dir, opt.ReadOnly)
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
-			if manifestfile != nil {
-				_ = manifestfile.close()
-			}
-		}()
 	}
 
+	manifestfile, manifest, err = openOrCreateManifestFile(opt.Dir, opt.ReadOnly, opt.InMemory)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if manifestfile != nil {
+			_ = manifestfile.close()
+		}
+	}()
 	elog := y.NoEventLog
 	if opt.EventLogging {
 		elog = trace.NewEventLog("Badger", "DB")
