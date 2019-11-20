@@ -1654,9 +1654,9 @@ func TestGoroutineLeak(t *testing.T) {
 				cancel()
 				require.Equal(t, true, updated)
 			})
-			time.Sleep(2 * time.Second)
-			require.Equal(t, before, runtime.NumGoroutine())
 		}
+		time.Sleep(2 * time.Second)
+		require.Equal(t, before, runtime.NumGoroutine())
 	}
 	t.Run("disk mode", func(t *testing.T) {
 		test(t, nil)
