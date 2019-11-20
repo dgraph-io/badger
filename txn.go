@@ -294,16 +294,8 @@ func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
 
 func (txn *Txn) checkSize(e *Entry) error {
 	count := txn.count + 1
-	var size int64
-	// If badger is opened in InMemory mode, the size of transaction should include
-	// the actual size of the value.
-	if txn.db.opt.InMemory {
-		size = txn.size + int64(len(e.Key)) + int64(len(e.Value)) + 2 /* Meta and user meta */
-	} else {
-		size = txn.size + int64(e.estimateSize(txn.db.opt.ValueThreshold))
-	}
 	// Extra bytes for the version in key.
-	size += 10
+	size := txn.size + int64(e.estimateSize(txn.db.opt.ValueThreshold)) + 10
 	if count >= txn.db.opt.maxBatchCount || size >= txn.db.opt.maxBatchSize {
 		return ErrTxnTooBig
 	}
