@@ -493,10 +493,6 @@ func (itr *logIterator) closeLogFile() error {
 }
 
 func (itr *logIterator) advanceLogFile() error {
-	// close the current log file
-	if err := itr.closeLogFile(); err != nil {
-		return err
-	}
 	// advance the log log Index.
 	itr.currentLogIndex++
 	lf, err := itr.openCurrentLogFile()
