@@ -157,6 +157,7 @@ func openLogManager(db *DB, vhead valuePointer, walhead valuePointer,
 		opt:         db.opt,
 		keyRegistry: db.registry,
 		whead:       walhead,
+		manager:     manager,
 	}
 	// replay the log.
 	if err = replayer.replay(replayFn); err != nil {

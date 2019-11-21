@@ -88,6 +88,13 @@ type logFile struct {
 	offset      uint32
 }
 
+func (lf *logFile) validLogFile() (bool, error) {
+	stat, err := lf.fd.Stat()
+	if err != nil {
+		return true, y.Wrapf(err, "unable to run stats on logfile %s", lf.path)
+	}
+	return stat.Size() < vlogHeaderSize, nil
+}
 func (lf *logFile) fileOffset() uint32 {
 	return atomic.LoadUint32(&lf.offset)
 }
