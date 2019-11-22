@@ -1197,6 +1197,14 @@ type request struct {
 	ref  int32
 }
 
+func (req *request) reset() {
+	req.Entries = req.Entries[:0]
+	req.Ptrs = req.Ptrs[:0]
+	req.Wg = sync.WaitGroup{}
+	req.Err = nil
+	req.ref = 0
+}
+
 func (req *request) IncrRef() {
 	atomic.AddInt32(&req.ref, 1)
 }
@@ -1222,6 +1230,12 @@ type requests []*request
 func (reqs requests) DecrRef() {
 	for _, req := range reqs {
 		req.DecrRef()
+	}
+}
+
+func (reqs requests) IncrRef() {
+	for _, req := range reqs {
+		req.IncrRef()
 	}
 }
 
