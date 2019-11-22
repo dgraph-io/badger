@@ -676,11 +676,10 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	// We can only service one request because we need each txn to be stored in a contigous section.
 	// Txns should not interleave among other txns or rewrites.
 	req := requestPool.Get().(*request)
+	req.reset()
 	req.Entries = entries
-	req.Wg = sync.WaitGroup{}
 	req.Wg.Add(1)
 	req.IncrRef()     // for db write
-	req.IncrRef()     // for publisher updates
 	db.writeCh <- req // Handled in doWrites.
 	y.NumPuts.Add(int64(len(entries)))
 
