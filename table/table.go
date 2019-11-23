@@ -69,6 +69,9 @@ type Options struct {
 	Compression options.CompressionType
 
 	Cache *ristretto.Cache
+
+	// ZSTDCompressionLevel is the ZSTD compression level used for compressing blocks.
+	ZSTDCompressionLevel int
 }
 
 // TableInterface is useful for testing.
@@ -432,7 +435,7 @@ func (t *Table) block(idx int) (*block, error) {
 
 func (t *Table) blockCacheKey(idx int) uint64 {
 	y.AssertTrue(t.ID() < math.MaxUint32)
-	y.AssertTrue(idx < math.MaxUint32)
+	y.AssertTrue(uint32(idx) < math.MaxUint32)
 	return (t.ID() << 32) | uint64(idx)
 }
 

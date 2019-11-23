@@ -622,11 +622,11 @@ func (db *DB) updateHead(ptrs []valuePointer) {
 	db.vhead = ptr
 }
 
-//var requestPool = sync.Pool{
-//	New: func() interface{} {
-//		return new(request)
-//	},
-//}
+var requestPool = sync.Pool{
+	New: func() interface{} {
+		return new(request)
+	},
+}
 
 func (db *DB) shouldWriteValueToLSM(e Entry) bool {
 	return len(e.Value) < db.opt.ValueThreshold
@@ -734,14 +734,11 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 
 	// We can only service one request because we need each txn to be stored in a contigous section.
 	// Txns should not interleave among other txns or rewrites.
-	//req := requestPool.Get().(*request)
-	req := new(request)
+	req := requestPool.Get().(*request)
+	req.reset()
 	req.Entries = entries
-	req.Ptrs = req.Ptrs[:0]
-	req.Wg = sync.WaitGroup{}
 	req.Wg.Add(1)
 	req.IncrRef()     // for db write
-	req.IncrRef()     // for publisher updates
 	db.writeCh <- req // Handled in doWrites.
 	y.NumPuts.Add(int64(len(entries)))
 

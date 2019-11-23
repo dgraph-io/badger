@@ -52,7 +52,7 @@ func (p *publisher) listenForUpdates(c *y.Closer) {
 		p.cleanSubscribers()
 		c.Done()
 	}()
-	slurp := func(batch []*request) {
+	slurp := func(batch requests) {
 		for {
 			select {
 			case reqs := <-p.pubCh:
@@ -150,8 +150,9 @@ func (p *publisher) deleteSubscriber(id uint64) {
 	delete(p.subscribers, id)
 }
 
-func (p *publisher) sendUpdates(reqs []*request) {
+func (p *publisher) sendUpdates(reqs requests) {
 	if p.noOfSubscribers() != 0 {
+		reqs.IncrRef()
 		p.pubCh <- reqs
 	}
 }
