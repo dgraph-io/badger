@@ -28,7 +28,6 @@ import (
 	"path"
 	"regexp"
 	"runtime"
-	"sync"
 	"testing"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -705,31 +704,23 @@ func TestWindowsDataLoss(t *testing.T) {
 	}
 	require.NoError(t, db.Close())
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		fmt.Println()
-		fmt.Println("Second DB Open")
-		opt.Truncate = true
-		db, err = Open(opt)
-		require.NoError(t, err)
+	fmt.Println()
+	fmt.Println("Second DB Open")
+	opt.Truncate = true
+	db, err = Open(opt)
+	require.NoError(t, err)
 
-		// Return after reading one entry. We're simulating a crash.
-		// Simulate a crash by not closing db but releasing the locks.
-		if db.dirLockGuard != nil {
-			require.NoError(t, db.dirLockGuard.release())
-		}
-		if db.valueDirGuard != nil {
-			require.NoError(t, db.valueDirGuard.release())
-		}
-		// Don't use vlog.Close here. We don't want to fix the file size. Only un-mmap
-		// the data so that we can truncate the file durning the next vlog.Open.
-		require.NoError(t, y.Munmap(db.vlog.filesMap[db.vlog.maxFid].fmap))
-		return
-	}()
-	// Wait for db to crash.
-	wg.Wait()
+	// Return after reading one entry. We're simulating a crash.
+	// Simulate a crash by not closing db but releasing the locks.
+	if db.dirLockGuard != nil {
+		require.NoError(t, db.dirLockGuard.release())
+	}
+	if db.valueDirGuard != nil {
+		require.NoError(t, db.valueDirGuard.release())
+	}
+	// Don't use vlog.Close here. We don't want to fix the file size. Only un-mmap
+	// the data so that we can truncate the file durning the next vlog.Open.
+	require.NoError(t, y.Munmap(db.vlog.filesMap[db.vlog.maxFid].fmap))
 
 	fmt.Println()
 	fmt.Println("Third DB Open")
