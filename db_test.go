@@ -1216,11 +1216,9 @@ var benchmarkData = []struct {
 	{nil, randBytes(1000000), false},
 	{randBytes(100000), nil, false},
 	{randBytes(1000000), nil, false},
-	{randBytes(64000), randBytes(1000000), true},
 }
 
 func TestLargeKeys(t *testing.T) {
-	t.Skip()
 	test := func(t *testing.T, opt Options) {
 		db, err := Open(opt)
 		require.NoError(t, err)
