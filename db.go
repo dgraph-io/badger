@@ -263,7 +263,7 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}
 
-	manifestFile, manifest, err := openOrCreateManifestFile(opt.Dir, opt.ReadOnly, opt.InMemory)
+	manifestFile, manifest, err := openOrCreateManifestFile(opt)
 	if err != nil {
 		return nil, err
 	}

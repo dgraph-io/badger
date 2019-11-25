@@ -117,14 +117,14 @@ func (m *Manifest) clone() Manifest {
 	return ret
 }
 
-// openOrCreateManifestFile opens a Badger manifest file if it exists, or creates on if
-// one doesn’t.
-func openOrCreateManifestFile(dir string, readOnly bool, inMemory bool) (
+// openOrCreateManifestFile opens a Badger manifest file if it exists, or creates one if
+// doesn’t exists.
+func openOrCreateManifestFile(opt Options) (
 	ret *manifestFile, result Manifest, err error) {
-	if inMemory {
+	if opt.InMemory {
 		return &manifestFile{inMemory: true}, Manifest{}, nil
 	}
-	return helpOpenOrCreateManifestFile(dir, readOnly, manifestDeletionsRewriteThreshold)
+	return helpOpenOrCreateManifestFile(opt.Dir, opt.ReadOnly, manifestDeletionsRewriteThreshold)
 }
 
 func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold int) (
