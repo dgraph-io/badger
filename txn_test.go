@@ -33,7 +33,6 @@ import (
 
 func TestTxnSimple(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-
 		txn := db.NewTransaction(true)
 
 		for i := 0; i < 10; i++ {
@@ -56,7 +55,7 @@ func TestTxnSimple(t *testing.T) {
 }
 
 func TestTxnReadAfterWrite(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	test := func(t *testing.T, db *DB) {
 		var wg sync.WaitGroup
 		N := 100
 		wg.Add(N)
@@ -80,6 +79,19 @@ func TestTxnReadAfterWrite(t *testing.T) {
 			}(i)
 		}
 		wg.Wait()
+	}
+	t.Run("disk mode", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			test(t, db)
+		})
+	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		opt := getTestOptions("")
+		opt.InMemory = true
+		db, err := Open(opt)
+		require.NoError(t, err)
+		test(t, db)
+		require.NoError(t, db.Close())
 	})
 }
 
@@ -615,7 +627,7 @@ func TestTxnIterationEdgeCase3(t *testing.T) {
 }
 
 func TestIteratorAllVersionsWithDeleted(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	test := func(t *testing.T, db *DB) {
 		// Write two keys
 		err := db.Update(func(txn *Txn) error {
 			require.NoError(t, txn.SetEntry(NewEntry([]byte("answer1"), []byte("42"))))
@@ -661,6 +673,19 @@ func TestIteratorAllVersionsWithDeleted(t *testing.T) {
 			return nil
 		})
 		require.NoError(t, err)
+	}
+	t.Run("disk mode", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			test(t, db)
+		})
+	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		opt := getTestOptions("")
+		opt.InMemory = true
+		db, err := Open(opt)
+		require.NoError(t, err)
+		test(t, db)
+		require.NoError(t, db.Close())
 	})
 }
 
@@ -713,86 +738,101 @@ func TestManagedDB(t *testing.T) {
 
 	opt := getTestOptions(dir)
 	opt.managedTxns = true
-	db, err := Open(opt)
-	require.NoError(t, err)
-	defer db.Close()
 
-	key := func(i int) []byte {
-		return []byte(fmt.Sprintf("key-%02d", i))
-	}
-
-	val := func(i int) []byte {
-		return []byte(fmt.Sprintf("val-%d", i))
-	}
-
-	require.Panics(t, func() {
-		db.Update(func(tx *Txn) error { return nil })
-	})
-
-	err = db.View(func(tx *Txn) error { return nil })
-	require.NoError(t, err)
-
-	// Write data at t=3.
-	txn := db.NewTransactionAt(3, true)
-	for i := 0; i <= 3; i++ {
-		require.NoError(t, txn.SetEntry(NewEntry(key(i), val(i))))
-	}
-	require.Panics(t, func() { txn.Commit() })
-	require.NoError(t, txn.CommitAt(3, nil))
-
-	// Read data at t=2.
-	txn = db.NewTransactionAt(2, false)
-	for i := 0; i <= 3; i++ {
-		_, err := txn.Get(key(i))
-		require.Equal(t, ErrKeyNotFound, err)
-	}
-	txn.Discard()
-
-	// Read data at t=3.
-	txn = db.NewTransactionAt(3, false)
-	for i := 0; i <= 3; i++ {
-		item, err := txn.Get(key(i))
-		require.NoError(t, err)
-		require.Equal(t, uint64(3), item.Version())
-		v, err := item.ValueCopy(nil)
-		require.NoError(t, err)
-		require.Equal(t, val(i), v)
-	}
-	txn.Discard()
-
-	// Write data at t=7.
-	txn = db.NewTransactionAt(6, true)
-	for i := 0; i <= 7; i++ {
-		_, err := txn.Get(key(i))
-		if err == nil {
-			continue // Don't overwrite existing keys.
+	test := func(t *testing.T, db *DB) {
+		key := func(i int) []byte {
+			return []byte(fmt.Sprintf("key-%02d", i))
 		}
-		require.NoError(t, txn.SetEntry(NewEntry(key(i), val(i))))
-	}
-	require.NoError(t, txn.CommitAt(7, nil))
 
-	// Read data at t=9.
-	txn = db.NewTransactionAt(9, false)
-	for i := 0; i <= 9; i++ {
-		item, err := txn.Get(key(i))
-		if i <= 7 {
-			require.NoError(t, err)
-		} else {
+		val := func(i int) []byte {
+			return []byte(fmt.Sprintf("val-%d", i))
+		}
+
+		require.Panics(t, func() {
+			db.Update(func(tx *Txn) error { return nil })
+		})
+
+		err = db.View(func(tx *Txn) error { return nil })
+		require.NoError(t, err)
+
+		// Write data at t=3.
+		txn := db.NewTransactionAt(3, true)
+		for i := 0; i <= 3; i++ {
+			require.NoError(t, txn.SetEntry(NewEntry(key(i), val(i))))
+		}
+		require.Panics(t, func() { txn.Commit() })
+		require.NoError(t, txn.CommitAt(3, nil))
+
+		// Read data at t=2.
+		txn = db.NewTransactionAt(2, false)
+		for i := 0; i <= 3; i++ {
+			_, err := txn.Get(key(i))
 			require.Equal(t, ErrKeyNotFound, err)
 		}
+		txn.Discard()
 
-		if i <= 3 {
+		// Read data at t=3.
+		txn = db.NewTransactionAt(3, false)
+		for i := 0; i <= 3; i++ {
+			item, err := txn.Get(key(i))
+			require.NoError(t, err)
 			require.Equal(t, uint64(3), item.Version())
-		} else if i <= 7 {
-			require.Equal(t, uint64(7), item.Version())
-		}
-		if i <= 7 {
 			v, err := item.ValueCopy(nil)
 			require.NoError(t, err)
 			require.Equal(t, val(i), v)
 		}
+		txn.Discard()
+
+		// Write data at t=7.
+		txn = db.NewTransactionAt(6, true)
+		for i := 0; i <= 7; i++ {
+			_, err := txn.Get(key(i))
+			if err == nil {
+				continue // Don't overwrite existing keys.
+			}
+			require.NoError(t, txn.SetEntry(NewEntry(key(i), val(i))))
+		}
+		require.NoError(t, txn.CommitAt(7, nil))
+
+		// Read data at t=9.
+		txn = db.NewTransactionAt(9, false)
+		for i := 0; i <= 9; i++ {
+			item, err := txn.Get(key(i))
+			if i <= 7 {
+				require.NoError(t, err)
+			} else {
+				require.Equal(t, ErrKeyNotFound, err)
+			}
+
+			if i <= 3 {
+				require.Equal(t, uint64(3), item.Version())
+			} else if i <= 7 {
+				require.Equal(t, uint64(7), item.Version())
+			}
+			if i <= 7 {
+				v, err := item.ValueCopy(nil)
+				require.NoError(t, err)
+				require.Equal(t, val(i), v)
+			}
+		}
+		txn.Discard()
 	}
-	txn.Discard()
+	t.Run("disk mode", func(t *testing.T) {
+		db, err := Open(opt)
+		require.NoError(t, err)
+		test(t, db)
+		require.NoError(t, db.Close())
+	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		opt.InMemory = true
+		opt.Dir = ""
+		opt.ValueDir = ""
+		db, err := Open(opt)
+		require.NoError(t, err)
+		test(t, db)
+		require.NoError(t, db.Close())
+	})
+
 }
 
 func TestArmV7Issue311Fix(t *testing.T) {

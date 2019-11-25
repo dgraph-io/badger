@@ -125,6 +125,11 @@ func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB))
 		opts.Dir = dir
 		opts.ValueDir = dir
 	}
+
+	if opts.InMemory {
+		opts.Dir = ""
+		opts.ValueDir = ""
+	}
 	db, err := Open(*opts)
 	require.NoError(t, err)
 	defer func() {
@@ -229,7 +234,7 @@ func TestConcurrentWrite(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	test := func(t *testing.T, db *DB) {
 		txnSet(t, db, []byte("key1"), []byte("val1"), 0x08)
 
 		txn := db.NewTransaction(false)
@@ -271,6 +276,18 @@ func TestGet(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, longVal, getItemValue(t, item))
 		txn.Discard()
+	}
+	t.Run("disk mode", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			test(t, db)
+		})
+	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		opts := DefaultOptions("").WithInmemory(true)
+		db, err := Open(opts)
+		require.NoError(t, err)
+		test(t, db)
+		require.NoError(t, db.Close())
 	})
 }
 
@@ -459,7 +476,7 @@ func TestGetMore(t *testing.T) {
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestExistsMore(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	test := func(t *testing.T, db *DB) {
 		//	n := 500000
 		n := 10000
 		m := 45
@@ -519,12 +536,23 @@ func TestExistsMore(t *testing.T) {
 			}))
 		}
 		fmt.Println("Done and closing")
+	}
+	t.Run("disk mode", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			test(t, db)
+		})
+	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		opt := DefaultOptions("").WithInmemory(true)
+		db, err := Open(opt)
+		require.NoError(t, err)
+		test(t, db)
+		require.NoError(t, db.Close())
 	})
 }
 
 func TestIterate2Basic(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-
+	test := func(t *testing.T, db *DB) {
 		bkey := func(i int) []byte {
 			return []byte(fmt.Sprintf("%09d", i))
 		}
@@ -582,7 +610,20 @@ func TestIterate2Basic(t *testing.T) {
 			}
 		}
 		it.Close()
+	}
+	t.Run("disk mode", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			test(t, db)
+		})
 	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		opt := DefaultOptions("").WithInmemory(true)
+		db, err := Open(opt)
+		require.NoError(t, err)
+		test(t, db)
+		require.NoError(t, db.Close())
+	})
+
 }
 
 func TestLoad(t *testing.T) {
@@ -1178,34 +1219,44 @@ var benchmarkData = []struct {
 }
 
 func TestLargeKeys(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer removeDir(dir)
+	test := func(t *testing.T, opt Options) {
+		db, err := Open(opt)
+		require.NoError(t, err)
+		for i := 0; i < 1000; i++ {
+			tx := db.NewTransaction(true)
+			for _, kv := range benchmarkData {
+				k := make([]byte, len(kv.key))
+				copy(k, kv.key)
 
-	db, err := Open(DefaultOptions(dir).WithValueLogFileSize(1024 * 1024 * 1024))
-	require.NoError(t, err)
-	for i := 0; i < 1000; i++ {
-		tx := db.NewTransaction(true)
-		for _, kv := range benchmarkData {
-			k := make([]byte, len(kv.key))
-			copy(k, kv.key)
-
-			v := make([]byte, len(kv.value))
-			copy(v, kv.value)
-			if err := tx.SetEntry(NewEntry(k, v)); err != nil {
-				// check is success should be true
-				if kv.success {
-					t.Fatalf("failed with: %s", err)
+				v := make([]byte, len(kv.value))
+				copy(v, kv.value)
+				if err := tx.SetEntry(NewEntry(k, v)); err != nil {
+					// check is success should be true
+					if kv.success {
+						t.Fatalf("failed with: %s", err)
+					}
+				} else if !kv.success {
+					t.Fatal("insertion should fail")
 				}
-			} else if !kv.success {
-				t.Fatal("insertion should fail")
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatalf("#%d: batchSet err: %v", i, err)
 			}
 		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("#%d: batchSet err: %v", i, err)
-		}
+		require.NoError(t, db.Close())
 	}
-	require.NoError(t, db.Close())
+	t.Run("disk mode", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer removeDir(dir)
+		opt := DefaultOptions(dir).WithValueLogFileSize(1024 * 1024 * 1024)
+		test(t, opt)
+	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		opt := DefaultOptions("").WithValueLogFileSize(1024 * 1024 * 1024)
+		opt.InMemory = true
+		test(t, opt)
+	})
 }
 
 func TestCreateDirs(t *testing.T) {
@@ -1215,7 +1266,7 @@ func TestCreateDirs(t *testing.T) {
 
 	db, err := Open(DefaultOptions(filepath.Join(dir, "badger")))
 	require.NoError(t, err)
-	db.Close()
+	require.NoError(t, db.Close())
 	_, err = os.Stat(dir)
 	require.NoError(t, err)
 }
@@ -1572,38 +1623,47 @@ func TestMinReadTs(t *testing.T) {
 }
 
 func TestGoroutineLeak(t *testing.T) {
-	time.Sleep(1 * time.Second)
-	before := runtime.NumGoroutine()
-	t.Logf("Num go: %d", before)
-	for i := 0; i < 12; i++ {
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-			updated := false
-			ctx, cancel := context.WithCancel(context.Background())
-			var wg sync.WaitGroup
-			wg.Add(1)
-			go func() {
-				err := db.Subscribe(ctx, func(kvs *pb.KVList) {
-					require.Equal(t, []byte("value"), kvs.Kv[0].GetValue())
-					updated = true
-					wg.Done()
-				}, []byte("key"))
-				if err != nil {
-					require.Equal(t, err.Error(), context.Canceled.Error())
-				}
-			}()
-			// Wait for the go routine to be scheduled.
-			time.Sleep(time.Second)
-			err := db.Update(func(txn *Txn) error {
-				return txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
+	test := func(t *testing.T, opt *Options) {
+		time.Sleep(1 * time.Second)
+		before := runtime.NumGoroutine()
+		t.Logf("Num go: %d", before)
+		for i := 0; i < 12; i++ {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				updated := false
+				ctx, cancel := context.WithCancel(context.Background())
+				var wg sync.WaitGroup
+				wg.Add(1)
+				go func() {
+					err := db.Subscribe(ctx, func(kvs *pb.KVList) {
+						require.Equal(t, []byte("value"), kvs.Kv[0].GetValue())
+						updated = true
+						wg.Done()
+					}, []byte("key"))
+					if err != nil {
+						require.Equal(t, err.Error(), context.Canceled.Error())
+					}
+				}()
+				// Wait for the go routine to be scheduled.
+				time.Sleep(time.Second)
+				err := db.Update(func(txn *Txn) error {
+					return txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
+				})
+				require.NoError(t, err)
+				wg.Wait()
+				cancel()
+				require.Equal(t, true, updated)
 			})
-			require.NoError(t, err)
-			wg.Wait()
-			cancel()
-			require.Equal(t, true, updated)
-		})
+		}
+		time.Sleep(2 * time.Second)
+		require.Equal(t, before, runtime.NumGoroutine())
 	}
-	time.Sleep(2 * time.Second)
-	require.Equal(t, before, runtime.NumGoroutine())
+	t.Run("disk mode", func(t *testing.T) {
+		test(t, nil)
+	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		opt := DefaultOptions("").WithInmemory(true)
+		test(t, &opt)
+	})
 }
 
 func ExampleOpen() {
@@ -1971,4 +2031,31 @@ func removeDir(dir string) func() {
 			panic(err)
 		}
 	}
+}
+
+func TestWriteInemory(t *testing.T) {
+	opt := DefaultOptions("").WithInmemory(true)
+	db, err := Open(opt)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
+	for i := 0; i < 100; i++ {
+		txnSet(t, db, []byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)), 0x00)
+	}
+	err = db.View(func(txn *Txn) error {
+		for j := 0; j < 100; j++ {
+			item, err := txn.Get([]byte(fmt.Sprintf("key%d", j)))
+			require.NoError(t, err)
+			expected := []byte(fmt.Sprintf("val%d", j))
+			item.Value(func(val []byte) error {
+				require.Equal(t, expected, val,
+					"Invalid value for key %q. expected: %q, actual: %q",
+					item.Key(), expected, val)
+				return nil
+			})
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }

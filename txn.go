@@ -294,7 +294,7 @@ func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
 
 func (txn *Txn) checkSize(e *Entry) error {
 	count := txn.count + 1
-	// Extra bytes for version in key.
+	// Extra bytes for the version in key.
 	size := txn.size + int64(e.estimateSize(txn.db.opt.ValueThreshold)) + 10
 	if count >= txn.db.opt.maxBatchCount || size >= txn.db.opt.maxBatchSize {
 		return ErrTxnTooBig

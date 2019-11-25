@@ -732,6 +732,10 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 }
 
 func (vlog *valueLog) dropAll() (int, error) {
+	// If db is opened in InMemory mode, we don't need to do anything since there are no vlog files.
+	if vlog.db.opt.InMemory {
+		return 0, nil
+	}
 	// We don't want to block dropAll on any pending transactions. So, don't worry about iterator
 	// count.
 	var count int
@@ -993,12 +997,16 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 }
 
 func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
-	opt := db.opt
-	vlog.opt = opt
-	vlog.dirPath = opt.ValueDir
+	vlog.opt = db.opt
 	vlog.db = db
+	// We don't need to open any vlog files or collect stats for GC if DB is opened
+	// in InMemory mode. InMemory mode doesn't create any files/directories on disk.
+	if vlog.opt.InMemory {
+		return nil
+	}
+	vlog.dirPath = vlog.opt.ValueDir
 	vlog.elog = y.NoEventLog
-	if opt.EventLogging {
+	if vlog.opt.EventLogging {
 		vlog.elog = trace.NewEventLog("Badger", "Valuelog")
 	}
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
@@ -1108,7 +1116,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	vlog.db.vhead = valuePointer{Fid: vlog.maxFid, Offset: uint32(lastOffset)}
 
 	// Map the file if needed. When we create a file, it is automatically mapped.
-	if err = last.mmap(2 * opt.ValueLogFileSize); err != nil {
+	if err = last.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
 		return errFile(err, last.path, "Map log file")
 	}
 	if err := vlog.populateDiscardStats(); err != nil {
@@ -1139,6 +1147,9 @@ func (lf *logFile) init() error {
 }
 
 func (vlog *valueLog) Close() error {
+	if vlog.db.opt.InMemory {
+		return nil
+	}
 	// close flushDiscardStats.
 	vlog.lfDiscardStats.closer.SignalAndWait()
 
@@ -1279,6 +1290,9 @@ func (vlog *valueLog) woffset() uint32 {
 
 // write is thread-unsafe by design and should not be called concurrently.
 func (vlog *valueLog) write(reqs []*request) error {
+	if vlog.db.opt.InMemory {
+		return nil
+	}
 	vlog.filesLock.RLock()
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	curlf := vlog.filesMap[maxFid]
@@ -1708,6 +1722,10 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 }
 
 func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
+	if vlog.opt.InMemory {
+		return
+	}
+
 	select {
 	case vlog.lfDiscardStats.flushChan <- stats:
 	default:

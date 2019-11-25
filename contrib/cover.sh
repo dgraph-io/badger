@@ -17,6 +17,7 @@ for PKG in $(go list ./...|grep -v -E 'vendor'); do
   tail -n +2 $TMP >> $OUT
 done
 
+echo "Running test with vlog_mmap false"
 # Another round of tests after turning off mmap
 go test -v -vlog_mmap=false github.com/dgraph-io/badger
 

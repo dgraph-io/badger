@@ -50,6 +50,7 @@ type Options struct {
 	Logger              Logger
 	Compression         options.CompressionType
 	EventLogging        bool
+	InMemory            bool
 
 	// Fine tuning options.
 
@@ -541,6 +542,15 @@ func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificat
 // memory consumption and lookups/iterations would take longer.
 func (opt Options) WithMaxCacheSize(size int64) Options {
 	opt.MaxCacheSize = size
+	return opt
+}
+
+// WithInMemory returns a new Options value with Inmemory mode set to the given value.
+//
+// When badger is running in InMemory mode, everything is stored in memory. No value/sst files are
+// created. In case of a crash all data will be lost.
+func (opt Options) WithInmemory(b bool) Options {
+	opt.InMemory = b
 	return opt
 }
 

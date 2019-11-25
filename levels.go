@@ -98,6 +98,9 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		s.cstatus.levels[i] = new(levelCompactStatus)
 	}
 
+	if db.opt.InMemory {
+		return s, nil
+	}
 	// Compare manifest against directory, check for existent/non-existent files, and remove.
 	if err := revertToManifest(db, mf, getIDMap(db.opt.Dir)); err != nil {
 		return nil, err
@@ -454,6 +457,10 @@ func (s *levelsController) compactBuildTables(
 	// value log file should be GCed.
 	discardStats := make(map[uint32]int64)
 	updateStats := func(vs y.ValueStruct) {
+		// We don't need to store/update discard stats when badger is running in Disk-less mode.
+		if s.kv.opt.InMemory {
+			return
+		}
 		if vs.Meta&bitValuePointer > 0 {
 			var vp valuePointer
 			vp.Decode(vs.Value)
@@ -603,7 +610,15 @@ func (s *levelsController) compactBuildTables(
 		fileID := s.reserveFileID()
 		go func(builder *table.Builder) {
 			defer builder.Close()
-			tbl, err := build(fileID)
+			var (
+				tbl *table.Table
+				err error
+			)
+			if s.kv.opt.InMemory {
+				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
+			} else {
+				tbl, err = build(fileID)
+			}
 			resultCh <- newTableResult{tbl, err}
 		}(builder)
 	}
@@ -623,7 +638,7 @@ func (s *levelsController) compactBuildTables(
 		// Ensure created files' directory entries are visible.  We don't mind the extra latency
 		// from not doing this ASAP after all file creation has finished because this is a
 		// background operation.
-		firstErr = syncDir(s.kv.opt.Dir)
+		firstErr = s.kv.syncDir(s.kv.opt.Dir)
 	}
 
 	if firstErr != nil {

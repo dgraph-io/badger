@@ -188,6 +188,9 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 
 // Open returns a new DB object.
 func Open(opt Options) (db *DB, err error) {
+	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
+		return nil, errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
+	}
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
@@ -203,7 +206,16 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, errors.Errorf("Valuethreshold greater than max batch size of %d. Either "+
 			"reduce opt.ValueThreshold or increase opt.MaxTableSize.", opt.maxBatchSize)
 	}
-	// Compact L0 on close if either it is set or if KeepL0InMemory is set.
+	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
+		return nil, ErrValueLogSize
+	}
+	if !(opt.ValueLogLoadingMode == options.FileIO ||
+		opt.ValueLogLoadingMode == options.MemoryMap) {
+		return nil, ErrInvalidLoadingMode
+	}
+
+	// Compact L0 on close if either it is set or if KeepL0InMemory is set. When
+	// keepL0InMemory is set we need to compact L0 on close otherwise we might lose data.
 	opt.CompactL0OnClose = opt.CompactL0OnClose || opt.KeepL0InMemory
 
 	if opt.ReadOnly {
@@ -212,60 +224,46 @@ func Open(opt Options) (db *DB, err error) {
 		// Do not perform compaction in read only mode.
 		opt.CompactL0OnClose = false
 	}
-
-	for _, path := range []string{opt.Dir, opt.ValueDir} {
-		dirExists, err := exists(path)
-		if err != nil {
-			return nil, y.Wrapf(err, "Invalid Dir: %q", path)
-		}
-		if !dirExists {
-			if opt.ReadOnly {
-				return nil, errors.Errorf("Cannot find directory %q for read-only open", path)
-			}
-			// Try to create the directory
-			err = os.Mkdir(path, 0700)
-			if err != nil {
-				return nil, y.Wrapf(err, "Error Creating Dir: %q", path)
-			}
-		}
-	}
-	absDir, err := filepath.Abs(opt.Dir)
-	if err != nil {
-		return nil, err
-	}
-	absValueDir, err := filepath.Abs(opt.ValueDir)
-	if err != nil {
-		return nil, err
-	}
 	var dirLockGuard, valueDirLockGuard *directoryLockGuard
-	dirLockGuard, err = acquireDirectoryLock(opt.Dir, lockFile, opt.ReadOnly)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if dirLockGuard != nil {
-			_ = dirLockGuard.release()
+
+	// Create directories and acquire lock on it only if badger is not running in InMemory mode.
+	// We don't have any directories/files in InMemory mode so we don't need to acquire
+	// any locks on them.
+	if !opt.InMemory {
+		if err := createDirs(opt); err != nil {
+			return nil, err
 		}
-	}()
-	if absValueDir != absDir {
-		valueDirLockGuard, err = acquireDirectoryLock(opt.ValueDir, lockFile, opt.ReadOnly)
+		dirLockGuard, err = acquireDirectoryLock(opt.Dir, lockFile, opt.ReadOnly)
 		if err != nil {
 			return nil, err
 		}
 		defer func() {
-			if valueDirLockGuard != nil {
-				_ = valueDirLockGuard.release()
+			if dirLockGuard != nil {
+				_ = dirLockGuard.release()
 			}
 		}()
+		absDir, err := filepath.Abs(opt.Dir)
+		if err != nil {
+			return nil, err
+		}
+		absValueDir, err := filepath.Abs(opt.ValueDir)
+		if err != nil {
+			return nil, err
+		}
+		if absValueDir != absDir {
+			valueDirLockGuard, err = acquireDirectoryLock(opt.ValueDir, lockFile, opt.ReadOnly)
+			if err != nil {
+				return nil, err
+			}
+			defer func() {
+				if valueDirLockGuard != nil {
+					_ = valueDirLockGuard.release()
+				}
+			}()
+		}
 	}
-	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
-		return nil, ErrValueLogSize
-	}
-	if !(opt.ValueLogLoadingMode == options.FileIO ||
-		opt.ValueLogLoadingMode == options.MemoryMap) {
-		return nil, ErrInvalidLoadingMode
-	}
-	manifestFile, manifest, err := openOrCreateManifestFile(opt.Dir, opt.ReadOnly)
+
+	manifestFile, manifest, err := openOrCreateManifestFile(opt)
 	if err != nil {
 		return nil, err
 	}
@@ -305,19 +303,21 @@ func Open(opt Options) (db *DB, err error) {
 		blockCache:    cache,
 	}
 
+	if db.opt.InMemory {
+		db.opt.SyncWrites = false
+		db.opt.ValueThreshold = maxValueThreshold
+	}
 	krOpt := KeyRegistryOptions{
 		ReadOnly:                      opt.ReadOnly,
 		Dir:                           opt.Dir,
 		EncryptionKey:                 opt.EncryptionKey,
 		EncryptionKeyRotationDuration: opt.EncryptionKeyRotationDuration,
+		InMemory:                      opt.InMemory,
 	}
 
-	kr, err := OpenKeyRegistry(krOpt)
-	if err != nil {
+	if db.registry, err = OpenKeyRegistry(krOpt); err != nil {
 		return nil, err
 	}
-	db.registry = kr
-	// Calculate initial size.
 	db.calculateSize()
 	db.closers.updateSize = y.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
@@ -370,8 +370,10 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.writes = y.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
-	db.closers.valueGC = y.NewCloser(1)
-	go db.vlog.waitOnGC(db.closers.valueGC)
+	if !db.opt.InMemory {
+		db.closers.valueGC = y.NewCloser(1)
+		go db.vlog.waitOnGC(db.closers.valueGC)
+	}
 
 	db.closers.pub = y.NewCloser(1)
 	go db.pub.listenForUpdates(db.closers.pub)
@@ -402,8 +404,10 @@ func (db *DB) close() (err error) {
 
 	atomic.StoreInt32(&db.blockWrites, 1)
 
-	// Stop value GC first.
-	db.closers.valueGC.SignalAndWait()
+	if !db.opt.InMemory {
+		// Stop value GC first.
+		db.closers.valueGC.SignalAndWait()
+	}
 
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
@@ -476,6 +480,9 @@ func (db *DB) close() (err error) {
 	db.blockCache.Close()
 
 	db.elog.Finish()
+	if db.opt.InMemory {
+		return
+	}
 
 	if db.dirLockGuard != nil {
 		if guardErr := db.dirLockGuard.release(); err == nil {
@@ -497,10 +504,10 @@ func (db *DB) close() (err error) {
 	// Fsync directories to ensure that lock file, and any other removed files whose directory
 	// we haven't specifically fsynced, are guaranteed to have their directory entry removal
 	// persisted to disk.
-	if syncErr := syncDir(db.opt.Dir); err == nil {
+	if syncErr := db.syncDir(db.opt.Dir); err == nil {
 		err = errors.Wrap(syncErr, "DB.Close")
 	}
-	if syncErr := syncDir(db.opt.ValueDir); err == nil {
+	if syncErr := db.syncDir(db.opt.ValueDir); err == nil {
 		err = errors.Wrap(syncErr, "DB.Close")
 	}
 
@@ -626,7 +633,10 @@ func (db *DB) shouldWriteValueToLSM(e Entry) bool {
 }
 
 func (db *DB) writeToLSM(b *request) error {
-	if len(b.Ptrs) != len(b.Entries) {
+	// We should check the length of b.Prts and b.Entries only when badger is not
+	// running in InMemory mode. In InMemory mode, we don't write anything to the
+	// value log and that's why the length of b.Ptrs will always be zero.
+	if !db.opt.InMemory && len(b.Ptrs) != len(b.Entries) {
 		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
 
@@ -668,7 +678,6 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 	}
 	db.elog.Printf("writeRequests called. Writing to value log")
-
 	err := db.vlog.write(reqs)
 	if err != nil {
 		done(err)
@@ -949,7 +958,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 
 	// Don't block just to sync the directory entry.
 	dirSyncCh := make(chan error, 1)
-	go func() { dirSyncCh <- syncDir(db.opt.Dir) }()
+	go func() { dirSyncCh <- db.syncDir(db.opt.Dir) }()
 
 	if _, err = fd.Write(tableData); err != nil {
 		db.elog.Errorf("ERROR while writing to level 0: %v", err)
@@ -1020,6 +1029,9 @@ func exists(path string) (bool, error) {
 // This function does a filewalk, calculates the size of vlog and sst files and stores it in
 // y.LSMSize and y.VlogSize.
 func (db *DB) calculateSize() {
+	if db.opt.InMemory {
+		return
+	}
 	newInt := func(val int64) *expvar.Int {
 		v := new(expvar.Int)
 		v.Add(val)
@@ -1057,6 +1069,9 @@ func (db *DB) calculateSize() {
 
 func (db *DB) updateSize(lc *y.Closer) {
 	defer lc.Done()
+	if db.opt.InMemory {
+		return
+	}
 
 	metricsTicker := time.NewTicker(time.Minute)
 	defer metricsTicker.Stop()
@@ -1099,6 +1114,9 @@ func (db *DB) updateSize(lc *y.Closer) {
 // Note: Every time GC is run, it would produce a spike of activity on the LSM
 // tree.
 func (db *DB) RunValueLogGC(discardRatio float64) error {
+	if db.opt.InMemory {
+		return ErrGCInMemoryMode
+	}
 	if discardRatio >= 1.0 || discardRatio <= 0.0 {
 		return ErrInvalidRequest
 	}
@@ -1587,4 +1605,31 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList), prefixes ...[]
 // shouldEncrypt returns bool, which tells whether to encrypt or not.
 func (db *DB) shouldEncrypt() bool {
 	return len(db.opt.EncryptionKey) > 0
+}
+
+func (db *DB) syncDir(dir string) error {
+	if db.opt.InMemory {
+		return nil
+	}
+	return syncDir(dir)
+}
+
+func createDirs(opt Options) error {
+	for _, path := range []string{opt.Dir, opt.ValueDir} {
+		dirExists, err := exists(path)
+		if err != nil {
+			return y.Wrapf(err, "Invalid Dir: %q", path)
+		}
+		if !dirExists {
+			if opt.ReadOnly {
+				return errors.Errorf("Cannot find directory %q for read-only open", path)
+			}
+			// Try to create the directory
+			err = os.Mkdir(path, 0700)
+			if err != nil {
+				return y.Wrapf(err, "Error Creating Dir: %q", path)
+			}
+		}
+	}
+	return nil
 }

@@ -87,6 +87,9 @@ type manifestFile struct {
 
 	// Used to track the current state of the manifest, used when rewriting.
 	manifest Manifest
+
+	// Used to indicate if badger was opened in InMemory mode.
+	inMemory bool
 }
 
 const (
@@ -114,11 +117,14 @@ func (m *Manifest) clone() Manifest {
 	return ret
 }
 
-// openOrCreateManifestFile opens a Badger manifest file if it exists, or creates on if
-// one doesn’t.
-func openOrCreateManifestFile(dir string, readOnly bool) (
+// openOrCreateManifestFile opens a Badger manifest file if it exists, or creates one if
+// doesn’t exists.
+func openOrCreateManifestFile(opt Options) (
 	ret *manifestFile, result Manifest, err error) {
-	return helpOpenOrCreateManifestFile(dir, readOnly, manifestDeletionsRewriteThreshold)
+	if opt.InMemory {
+		return &manifestFile{inMemory: true}, Manifest{}, nil
+	}
+	return helpOpenOrCreateManifestFile(opt.Dir, opt.ReadOnly, manifestDeletionsRewriteThreshold)
 }
 
 func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold int) (
@@ -180,6 +186,9 @@ func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold 
 }
 
 func (mf *manifestFile) close() error {
+	if mf.inMemory {
+		return nil
+	}
 	return mf.fp.Close()
 }
 
@@ -188,6 +197,9 @@ func (mf *manifestFile) close() error {
 // this depends on the filesystem -- some might append garbage data if a system crash happens at
 // the wrong time.)
 func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange) error {
+	if mf.inMemory {
+		return nil
+	}
 	changes := pb.ManifestChangeSet{Changes: changesParam}
 	buf, err := proto.Marshal(&changes)
 	if err != nil {
