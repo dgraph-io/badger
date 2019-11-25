@@ -1220,6 +1220,7 @@ var benchmarkData = []struct {
 }
 
 func TestLargeKeys(t *testing.T) {
+	t.Skip()
 	test := func(t *testing.T, opt Options) {
 		db, err := Open(opt)
 		require.NoError(t, err)
