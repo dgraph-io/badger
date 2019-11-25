@@ -140,6 +140,29 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 	return decrRefs(toDel)
 }
 
+func (s *levelHandler) addTables(toAdd []*table.Table) error {
+	s.Lock()
+	defer s.Unlock()
+
+	// Increase totalSize first.
+	for _, t := range toAdd {
+		s.totalSize += t.Size()
+		t.IncrRef()
+		s.tables = append(s.tables, t)
+	}
+
+	return nil
+}
+
+func (s *levelHandler) sortTables() {
+	s.RLock()
+	defer s.RUnlock()
+
+	sort.Slice(s.tables, func(i, j int) bool {
+		return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
+	})
+}
+
 func decrRefs(tables []*table.Table) error {
 	for _, table := range tables {
 		if err := table.DecrRef(); err != nil {
