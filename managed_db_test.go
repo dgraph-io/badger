@@ -191,7 +191,7 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 		require.NoError(t, db.Close())
 	}()
 
-	N := uint64(10000)
+	N := uint64(100000)
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
