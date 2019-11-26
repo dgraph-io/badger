@@ -135,3 +135,16 @@ func BenchmarkBuilder(b *testing.B) {
 		_ = builder.Finish()
 	}
 }
+
+func TestKVSize(t *testing.T) {
+	opts := Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+	b := NewTableBuilder(opts)
+	defer b.Close()
+
+	k := y.KeyWithTs([]byte(key("foo", 0)), 0)
+	v := []byte(fmt.Sprintf("%d", 0))
+
+	b.Add(k, y.ValueStruct{Value: v, Meta: 'A', UserMeta: 0})
+	var entrySize uint64 = 15 /* DiffKey len */ + 4 /* Header Size */ + 4 /* Encoded vp */
+	require.Equal(t, b.tableIndex.KvSize, entrySize)
+}

@@ -19,6 +19,7 @@ package table
 import (
 	"bytes"
 	"crypto/aes"
+	"fmt"
 	"math"
 	"unsafe"
 
@@ -69,11 +70,9 @@ type Builder struct {
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
 	entryOffsets []uint32 // Offsets of entries present in current block.
-
-	tableIndex *pb.TableIndex
-	keyHashes  []uint64
-
-	opt *Options
+	tableIndex   *pb.TableIndex
+	keyHashes    []uint64 // Used for building bloomfilter.
+	opt          *Options
 }
 
 // NewTableBuilder makes a new TableBuilder.
@@ -131,6 +130,8 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	b.buf.Write(diffKey) // We only need to store the key difference.
 
 	v.EncodeTo(b.buf)
+	fmt.Println(v.EncodedSize(), len(diffKey), len(b.baseKey))
+	b.tableIndex.KvSize += uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
 }
 
 /*

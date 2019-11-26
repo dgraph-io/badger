@@ -1014,6 +1014,7 @@ type TableInfo struct {
 	Left     []byte
 	Right    []byte
 	KeyCount uint64 // Number of keys in the table
+	KVSize   uint64
 }
 
 func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo) {
@@ -1035,6 +1036,7 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 				Left:     t.Smallest(),
 				Right:    t.Biggest(),
 				KeyCount: count,
+				KVSize:   t.TotalKVSize(),
 			}
 			result = append(result, info)
 		}

@@ -927,3 +927,14 @@ func TestMain(m *testing.M) {
 	rand.Seed(time.Now().UTC().UnixNano())
 	os.Exit(m.Run())
 }
+
+func TestOpenKVSize(t *testing.T) {
+	opts := getTestTableOptions()
+	f := buildTestTable(t, "foo", 1, opts)
+
+	table, err := OpenTable(f, opts)
+	require.NoError(t, err)
+
+	var entrySize uint64 = 15 /* DiffKey len */ + 4 /* Header Size */ + 4 /* Encoded vp */
+	require.Equal(t, entrySize, table.kvSize)
+}
