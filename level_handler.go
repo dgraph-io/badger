@@ -140,7 +140,12 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 	return decrRefs(toDel)
 }
 
-func (s *levelHandler) addTables(toAdd []*table.Table) error {
+// addTable adds toAdd tables to levelHandler. Normally when we add tables to levelHandler, we sort
+// tables based on table.Smallest. This is required for correctness of the system. But in some cases
+// this can be avoided(such as stream writer). We can just add tables to levelHandler's table list
+// and after all addTables calls, we can sort table list(check sortTable method).
+// NOTE: addTables and sortTables duplicate some code from replaceTables().
+func (s *levelHandler) addTables(toAdd []*table.Table) {
 	s.Lock()
 	defer s.Unlock()
 
@@ -150,10 +155,9 @@ func (s *levelHandler) addTables(toAdd []*table.Table) error {
 		t.IncrRef()
 		s.tables = append(s.tables, t)
 	}
-
-	return nil
 }
 
+// sortTables sorts tables of levelHandler based on table.Smallest.
 func (s *levelHandler) sortTables() {
 	s.RLock()
 	defer s.RUnlock()
