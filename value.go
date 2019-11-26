@@ -201,7 +201,7 @@ func (lf *logFile) munmap() (err error) {
 		// Nothing to do
 		return nil
 	}
-
+	fmt.Println("unmap file", lf.fid)
 	if err := y.Munmap(lf.fmap); err != nil {
 		return errors.Wrapf(err, "Unable to munmap value log: %q", lf.path)
 	}
@@ -1429,6 +1429,7 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 			return nil, nil, errors.Wrapf(y.ErrChecksumMismatch, "value corrupted for vp: %+v", vp)
 		}
 	}
+	fmt.Println("reading vp", vp)
 	var h header
 	headerLen := h.Decode(buf)
 	kv := buf[headerLen:]

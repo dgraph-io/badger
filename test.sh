@@ -25,9 +25,9 @@ rm -rf p
 echo
 echo "==> Starting tests with value log mmapped..."
 sleep 5
-go test -v --vlog_mmap=true -race ./...
+go test -v --vlog_mmap=true -race -run "TestDropAllWithPendingTxn"
 
 echo
 echo "==> Starting tests with value log not mmapped..."
 sleep 5
-go test -v --vlog_mmap=false -race ./...
+go test -v --vlog_mmap=false -race -run "TestDropAllWithPendingTxn"
