@@ -19,7 +19,6 @@ package table
 import (
 	"bytes"
 	"crypto/aes"
-	"fmt"
 	"math"
 	"unsafe"
 
@@ -130,7 +129,6 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	b.buf.Write(diffKey) // We only need to store the key difference.
 
 	v.EncodeTo(b.buf)
-	fmt.Println(v.EncodedSize(), len(diffKey), len(b.baseKey))
 	b.tableIndex.KvSize += uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
 }
 
