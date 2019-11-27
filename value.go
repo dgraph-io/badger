@@ -1418,7 +1418,7 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 
 	if vlog.opt.VerifyValueChecksum {
 		hash := crc32.New(y.CastagnoliCrcTable)
-		if _, err := hash.Write(buf); err != nil {
+		if _, err := hash.Write(buf[:len(buf)-crc32.Size]); err != nil {
 			runCallback(cb)
 			return nil, nil, errors.Wrapf(err, "failed to write hash for vp %+v", vp)
 		}
