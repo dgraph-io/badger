@@ -756,10 +756,10 @@ func (vlog *valueLog) dropAll() (int, error) {
 	}
 
 	vlog.db.opt.Infof("Value logs deleted. Creating value log file: 0")
+	atomic.StoreUint32(&vlog.maxFid, 0)
 	if _, err := vlog.createVlogFile(0); err != nil {
 		return count, err
 	}
-	atomic.StoreUint32(&vlog.maxFid, 0)
 	return count, nil
 }
 
