@@ -243,6 +243,11 @@ func (sw *StreamWriter) Flush() error {
 		return err
 	}
 
+	// Sort tables at the end.
+	for _, l := range sw.db.lc.levels {
+		l.sortTables()
+	}
+
 	// Now sync the directories, so all the files are registered.
 	if sw.db.opt.ValueDir != sw.db.opt.Dir {
 		if err := sw.db.syncDir(sw.db.opt.ValueDir); err != nil {
@@ -459,9 +464,11 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	if err := w.db.manifest.addChanges([]*pb.ManifestChange{change}); err != nil {
 		return err
 	}
-	if err := lhandler.replaceTables([]*table.Table{}, []*table.Table{tbl}); err != nil {
-		return err
-	}
+
+	// We are not calling lhandler.replaceTables() here, as it sorts tables on every addition.
+	// We can sort all tables only once during Flush() call.
+	lhandler.addTable(tbl)
+
 	// Release the ref held by OpenTable.
 	_ = tbl.DecrRef()
 	w.db.opt.Infof("Table created: %d at level: %d for stream: %d. Size: %s\n",
