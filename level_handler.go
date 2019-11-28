@@ -140,24 +140,22 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 	return decrRefs(toDel)
 }
 
-// addTable adds toAdd tables to levelHandler. Normally when we add tables to levelHandler, we sort
-// tables based on table.Smallest. This is required for correctness of the system. But in some cases
-// this can be avoided(such as stream writer). We can just add tables to levelHandler's table list
-// and after all addTables calls, we can sort table list(check sortTable method).
-// NOTE: addTables and sortTables duplicate some code from replaceTables().
-func (s *levelHandler) addTables(toAdd []*table.Table) {
+// addTable adds toAdd table to levelHandler. Normally when we add tables to levelHandler, we sort
+// tables based on table.Smallest. This is required for correctness of the system. But in case of
+// stream writer this can be avoided. We can just add tables to levelHandler's table list
+// and after all addTable calls, we can sort table list(check sortTable method).
+// NOTE: levelHandler.sortTables() should be called after call addTable calls are done.
+func (s *levelHandler) addTable(t *table.Table) {
 	s.Lock()
 	defer s.Unlock()
 
-	// Increase totalSize first.
-	for _, t := range toAdd {
-		s.totalSize += t.Size()
-		t.IncrRef()
-		s.tables = append(s.tables, t)
-	}
+	s.totalSize += t.Size() // Increase totalSize first.
+	t.IncrRef()
+	s.tables = append(s.tables, t)
 }
 
 // sortTables sorts tables of levelHandler based on table.Smallest.
+// Normally it should be called after all addTable calls.
 func (s *levelHandler) sortTables() {
 	s.RLock()
 	defer s.RUnlock()

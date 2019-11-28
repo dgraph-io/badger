@@ -457,7 +457,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 
 	// We are not calling lhandler.replaceTables() here, as it sorts tables on every addition.
 	// We can sort all tables only once during Flush() call.
-	lhandler.addTables([]*table.Table{tbl})
+	lhandler.addTable(tbl)
 
 	// Release the ref held by OpenTable.
 	_ = tbl.DecrRef()
