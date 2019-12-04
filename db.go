@@ -191,8 +191,8 @@ func Open(opt Options) (db *DB, err error) {
 	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
 		return nil, errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
 	}
-	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
-	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
+
+	opt.maxBatchCount = opt.MaxBatchSize / int64(skl.MaxNodeSize)
 
 	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
 	if opt.ValueThreshold > maxValueThreshold {
@@ -200,12 +200,6 @@ func Open(opt Options) (db *DB, err error) {
 			maxValueThreshold)
 	}
 
-	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
-	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
-	if int64(opt.ValueThreshold) > opt.maxBatchSize {
-		return nil, errors.Errorf("Valuethreshold greater than max batch size of %d. Either "+
-			"reduce opt.ValueThreshold or increase opt.MaxTableSize.", opt.maxBatchSize)
-	}
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
@@ -725,10 +719,10 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	}
 	var count, size int64
 	for _, e := range entries {
-		size += int64(e.estimateSize(db.opt.ValueThreshold))
+		size += int64(e.estimateSize())
 		count++
 	}
-	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
+	if count >= db.opt.maxBatchCount || size >= db.opt.MaxBatchSize {
 		return nil, ErrTxnTooBig
 	}
 
@@ -890,7 +884,7 @@ func (db *DB) ensureRoomForWrite() error {
 }
 
 func arenaSize(opt Options) int64 {
-	return opt.MaxTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
+	return opt.MaxTableSize + opt.MaxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
 
 // buildL0Table builds a new table from the memtable.
@@ -1287,7 +1281,7 @@ func (db *DB) MaxBatchCount() int64 {
 
 // MaxBatchSize returns max possible batch size
 func (db *DB) MaxBatchSize() int64 {
-	return db.opt.maxBatchSize
+	return db.opt.MaxBatchSize
 }
 
 func (db *DB) stopMemoryFlush() {

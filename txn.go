@@ -295,11 +295,8 @@ func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
 func (txn *Txn) checkSize(e *Entry) error {
 	count := txn.count + 1
 	// Extra bytes for the version in key.
-	// Choossing not to use e.estimateSize here since the value returned is inaccurate when e.Value > ValueThreshold.
-	// The entire entry ends up being stored in txn.pendingWrites so this is a more conservative approach that avoids OOM
-	// errors in the case that the user is writing lots of large values in a txn.
-	size := txn.size + int64(len(e.Key)+len(e.Value)+2) + 10
-	if count >= txn.db.opt.maxBatchCount || size >= txn.db.opt.maxBatchSize {
+	size := txn.size + int64(e.estimateSize()) + 10
+	if count >= txn.db.opt.maxBatchCount || size >= txn.db.opt.MaxBatchSize {
 		return ErrTxnTooBig
 	}
 	txn.count, txn.size = count, size

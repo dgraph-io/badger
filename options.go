@@ -55,6 +55,7 @@ type Options struct {
 	// Fine tuning options.
 
 	MaxTableSize        int64
+	MaxBatchSize        int64
 	LevelSizeMultiplier int
 	MaxLevels           int
 	ValueThreshold      int
@@ -96,7 +97,6 @@ type Options struct {
 	// 4. Flags for testing purposes
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
-	maxBatchSize  int64 // max batch size in bytes
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -153,6 +153,7 @@ func DefaultOptions(path string) Options {
 		EventLogging:                  true,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
+		MaxBatchSize:                  500 << (10 * 2),     // Default 500MB
 	}
 }
 
@@ -563,5 +564,15 @@ func (opt Options) WithInmemory(b bool) Options {
 // The default value of ZSTDCompressionLevel is 15.
 func (opt Options) WithZSTDCompressionLevel(cLevel int) Options {
 	opt.ZSTDCompressionLevel = cLevel
+	return opt
+}
+
+// WithMaxBatchSize returns a new Options value with MaxBatchSize set
+// to the given value.
+//
+// This value specifies the maximum number of bytes that can being written in
+// a single Transaction.
+func (opt Options) WithMaxBatchSize(size int64) Options {
+	opt.MaxBatchSize = size
 	return opt
 }

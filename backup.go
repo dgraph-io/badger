@@ -161,10 +161,10 @@ func (l *KVLoader) Set(kv *pb.KV) error {
 		ExpiresAt: kv.ExpiresAt,
 		meta:      meta,
 	}
-	estimatedSize := int64(e.estimateSize(l.db.opt.ValueThreshold))
+	estimatedSize := int64(e.estimateSize())
 	// Flush entries if inserting the next entry would overflow the transactional limits.
 	if int64(len(l.entries))+1 >= l.db.opt.maxBatchCount ||
-		l.entriesSize+estimatedSize >= l.db.opt.maxBatchSize {
+		l.entriesSize+estimatedSize >= l.db.opt.MaxBatchSize {
 		if err := l.send(); err != nil {
 			return err
 		}

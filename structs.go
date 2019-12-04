@@ -150,11 +150,8 @@ type Entry struct {
 	hlen     int // Length of the header.
 }
 
-func (e *Entry) estimateSize(threshold int) int {
-	if len(e.Value) < threshold {
-		return len(e.Key) + len(e.Value) + 2 // Meta, UserMeta
-	}
-	return len(e.Key) + 12 + 2 // 12 for ValuePointer, 2 for metas.
+func (e *Entry) estimateSize() int {
+	return len(e.Key) + len(e.Value) + 2 // Meta, UserMeta
 }
 
 func (e Entry) print(prefix string) {
