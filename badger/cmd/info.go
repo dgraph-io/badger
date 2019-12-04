@@ -99,7 +99,8 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 
 	var encryptionKey []byte
 	if opt.encryptionKeyFile != "" {
-		encryptionKey, err := ioutil.ReadFile(opt.encryptionKeyFile)
+		var err error
+		encryptionKey, err = ioutil.ReadFile(opt.encryptionKeyFile)
 		if err != nil {
 			return errors.Wrapf(err, "Unable to read encryption key file: %s", opt.encryptionKeyFile)
 		}
@@ -110,9 +111,10 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		WithValueDir(vlogDir).
 		WithReadOnly(opt.readOnly).
 		WithTruncate(opt.truncate).
-		WithTableLoadingMode(options.MemoryMap)).
-		WithEncryptionKey(encryptionKey)
+		WithTableLoadingMode(options.MemoryMap).
+		WithEncryptionKey(encryptionKey))
 	encryptionKey = nil
+
 	if err != nil {
 		return errors.Wrap(err, "failed to open database")
 	}
