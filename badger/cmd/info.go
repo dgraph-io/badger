@@ -38,16 +38,17 @@ import (
 )
 
 type flagOptions struct {
-	showTables    bool
-	showHistogram bool
-	showKeys      bool
-	withPrefix    string
-	keyLookup     string
-	itemMeta      bool
-	keyHistory    bool
-	showInternal  bool
-	readOnly      bool
-	truncate      bool
+	showTables        bool
+	showHistogram     bool
+	showKeys          bool
+	withPrefix        string
+	keyLookup         string
+	encryptionKeyFile string
+	itemMeta          bool
+	keyHistory        bool
+	showInternal      bool
+	readOnly          bool
+	truncate          bool
 }
 
 var (
@@ -64,6 +65,8 @@ func init() {
 	infoCmd.Flags().StringVar(&opt.withPrefix, "with-prefix", "",
 		"Consider only the keys with specified prefix")
 	infoCmd.Flags().StringVarP(&opt.keyLookup, "lookup", "l", "", "Hex of the key to lookup")
+	infoCmd.Flags().StringVarP(&opt.encryptionKeyFile, "encryption_key_file", "e", "",
+		"File storing the encryption key.")
 	infoCmd.Flags().BoolVar(&opt.itemMeta, "show-meta", true, "Output item meta data as well")
 	infoCmd.Flags().BoolVar(&opt.keyHistory, "history", false, "Show all versions of a key")
 	infoCmd.Flags().BoolVar(
@@ -74,6 +77,7 @@ func init() {
 		"to open DB.")
 	infoCmd.Flags().BoolVar(&opt.truncate, "truncate", false, "If set to true, it allows "+
 		"truncation of value log files if they have corrupt data.")
+
 }
 
 var infoCmd = &cobra.Command{
@@ -93,12 +97,22 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to print information in MANIFEST file")
 	}
 
+	var encryptionKey []byte
+	if opt.encryptionKeyFile != "" {
+		encryptionKey, err := ioutil.ReadFile(opt.encryptionKeyFile)
+		if err != nil {
+			return errors.Wrapf(err, "Unable to read encryption key file: %s", opt.encryptionKeyFile)
+		}
+	}
+
 	// Open DB
 	db, err := badger.Open(badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(opt.readOnly).
 		WithTruncate(opt.truncate).
-		WithTableLoadingMode(options.MemoryMap))
+		WithTableLoadingMode(options.MemoryMap)).
+		WithEncryptionKey(encryptionKey)
+	encryptionKey = nil
 	if err != nil {
 		return errors.Wrap(err, "failed to open database")
 	}
