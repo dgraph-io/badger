@@ -1149,6 +1149,8 @@ func TestBlockedDiscardStatsOnClose(t *testing.T) {
 }
 
 func TestValueEntryChecksum(t *testing.T) {
+	k := []byte("KEY")
+	v := []byte(fmt.Sprintf("val%100d", 10))
 	t.Run("ok", func(t *testing.T) {
 		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
@@ -1159,11 +1161,8 @@ func TestValueEntryChecksum(t *testing.T) {
 		db, err := Open(opt)
 		require.NoError(t, err)
 
-		k := []byte("KEY")
-		v := []byte(fmt.Sprintf("val%100d", 10))
 		require.Greater(t, len(v), db.opt.ValueThreshold)
 		txnSet(t, db, k, v, 0)
-		require.NoError(t, err)
 		require.NoError(t, db.Close())
 
 		db, err = Open(opt)
@@ -1190,8 +1189,6 @@ func TestValueEntryChecksum(t *testing.T) {
 		db, err := Open(opt)
 		require.NoError(t, err)
 
-		k := []byte("KEY")
-		v := []byte(fmt.Sprintf("val%100d", 10))
 		require.Greater(t, len(v), db.opt.ValueThreshold)
 		txnSet(t, db, k, v, 0)
 
