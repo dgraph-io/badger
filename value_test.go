@@ -1137,7 +1137,7 @@ func TestBlockedDiscardStats(t *testing.T) {
 func TestBlockedDiscardStatsOnClose(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.Remove(dir)
+	defer removeDir(dir)
 
 	db, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
@@ -1148,47 +1148,76 @@ func TestBlockedDiscardStatsOnClose(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
-// Regression test for https://github.com/dgraph-io/badger/issues/1049
-func TestValueEntryCorruption(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer removeDir(dir)
-
-	opt := getTestOptions(dir)
-	opt.VerifyValueChecksum = true
-	db, err := Open(opt)
-	require.NoError(t, err)
-
+func TestValueEntryChecksum(t *testing.T) {
 	k := []byte("KEY")
 	v := []byte(fmt.Sprintf("val%100d", 10))
-	require.Greater(t, len(v), db.opt.ValueThreshold)
-	txnSet(t, db, k, v, 0)
+	t.Run("ok", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer removeDir(dir)
 
-	path := db.vlog.fpath(0)
-	require.NoError(t, db.Close())
+		opt := getTestOptions(dir)
+		opt.VerifyValueChecksum = true
+		db, err := Open(opt)
+		require.NoError(t, err)
 
-	file, err := os.OpenFile(path, os.O_RDWR, 0644)
-	require.NoError(t, err)
-	offset := 50
-	orig := make([]byte, 1)
-	_, err = file.ReadAt(orig, int64(offset))
-	require.NoError(t, err)
-	// Corrupt a single bit.
-	_, err = file.WriteAt([]byte{7}, int64(offset))
-	require.NoError(t, err)
-	require.NoError(t, file.Close())
+		require.Greater(t, len(v), db.opt.ValueThreshold)
+		txnSet(t, db, k, v, 0)
+		require.NoError(t, db.Close())
 
-	db, err = Open(opt)
-	require.NoError(t, err)
+		db, err = Open(opt)
+		require.NoError(t, err)
 
-	txn := db.NewTransaction(false)
-	entry, err := txn.Get(k)
-	require.NoError(t, err)
+		txn := db.NewTransaction(false)
+		entry, err := txn.Get(k)
+		require.NoError(t, err)
 
-	x, err := entry.ValueCopy(nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "checksum mismatch")
-	require.Nil(t, x)
+		x, err := entry.ValueCopy(nil)
+		require.NoError(t, err)
+		require.Equal(t, v, x)
 
-	require.NoError(t, db.Close())
+		require.NoError(t, db.Close())
+	})
+	// Regression test for https://github.com/dgraph-io/badger/issues/1049
+	t.Run("Corruption", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer removeDir(dir)
+
+		opt := getTestOptions(dir)
+		opt.VerifyValueChecksum = true
+		db, err := Open(opt)
+		require.NoError(t, err)
+
+		require.Greater(t, len(v), db.opt.ValueThreshold)
+		txnSet(t, db, k, v, 0)
+
+		path := db.vlog.fpath(0)
+		require.NoError(t, db.Close())
+
+		file, err := os.OpenFile(path, os.O_RDWR, 0644)
+		require.NoError(t, err)
+		offset := 50
+		orig := make([]byte, 1)
+		_, err = file.ReadAt(orig, int64(offset))
+		require.NoError(t, err)
+		// Corrupt a single bit.
+		_, err = file.WriteAt([]byte{7}, int64(offset))
+		require.NoError(t, err)
+		require.NoError(t, file.Close())
+
+		db, err = Open(opt)
+		require.NoError(t, err)
+
+		txn := db.NewTransaction(false)
+		entry, err := txn.Get(k)
+		require.NoError(t, err)
+
+		x, err := entry.ValueCopy(nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "checksum mismatch")
+		require.Nil(t, x)
+
+		require.NoError(t, db.Close())
+	})
 }
