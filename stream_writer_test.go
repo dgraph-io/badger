@@ -453,3 +453,46 @@ func TestSendOnClosedStream2(t *testing.T) {
 
 	require.NoError(t, sw.Write(list), "sw.Write() failed")
 }
+
+func TestStreamWriterEncrypted(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+
+	opts := DefaultOptions(dir)
+	defer removeDir(dir)
+
+	opts = opts.WithEncryptionKey([]byte("badgerkey16bytes"))
+	db, err := Open(opts)
+	require.NoError(t, err)
+	key := []byte("mykey")
+	value := []byte("myvalue")
+
+	list := &pb.KVList{}
+	list.Kv = append(list.Kv, &pb.KV{
+		Key:     key,
+		Value:   value,
+		Version: 20,
+	})
+
+	sw := db.NewStreamWriter()
+	require.NoError(t, sw.Prepare(), "Prepare failed")
+	require.NoError(t, sw.Write(list), "Write failed")
+	require.NoError(t, sw.Flush(), "Flush failed")
+
+	err = db.View(func(txn *Txn) error {
+		item, err := txn.Get(key)
+		require.NoError(t, err)
+		val, err := item.ValueCopy(nil)
+		require.Equal(t, value, val)
+		require.NoError(t, err)
+		return nil
+	})
+	require.NoError(t, err, "Error while retrieving key")
+	require.NoError(t, db.Close())
+
+	opts = opts.WithEncryptionKey([]byte("badgerkey16bytes"))
+	db, err = Open(opts)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+}

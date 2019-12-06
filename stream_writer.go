@@ -442,6 +442,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	// Now that table can be opened successfully, let's add this to the MANIFEST.
 	change := &pb.ManifestChange{
 		Id:          tbl.ID(),
+		KeyId:       tbl.KeyID(),
 		Op:          pb.ManifestChange_CREATE,
 		Level:       uint32(lhandler.level),
 		Compression: uint32(tbl.CompressionType()),
