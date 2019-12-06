@@ -1009,12 +1009,12 @@ func (s *levelsController) appendIterators(
 
 // TableInfo represents the information about a table.
 type TableInfo struct {
-	ID       uint64
-	Level    int
-	Left     []byte
-	Right    []byte
-	KeyCount uint64 // Number of keys in the table
-	KVSize   uint64
+	ID          uint64
+	Level       int
+	Left        []byte
+	Right       []byte
+	KeyCount    uint64 // Number of keys in the table
+	EstimatedSz uint64
 }
 
 func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo) {
@@ -1031,12 +1031,12 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 			}
 
 			info := TableInfo{
-				ID:       t.ID(),
-				Level:    l.level,
-				Left:     t.Smallest(),
-				Right:    t.Biggest(),
-				KeyCount: count,
-				KVSize:   t.TotalKVSize(),
+				ID:          t.ID(),
+				Level:       l.level,
+				Left:        t.Smallest(),
+				Right:       t.Biggest(),
+				KeyCount:    count,
+				EstimatedSz: t.EstimatedSize(),
 			}
 			result = append(result, info)
 		}

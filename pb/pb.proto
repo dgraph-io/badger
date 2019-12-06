@@ -68,7 +68,7 @@ message BlockOffset {
 message TableIndex {
   repeated BlockOffset offsets = 1;
   bytes bloom_filter = 2;
-  uint64 kv_size = 3;
+  uint64 estimated_size = 3;
 }
 
 message Checksum {

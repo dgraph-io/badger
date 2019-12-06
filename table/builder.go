@@ -129,7 +129,15 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	b.buf.Write(diffKey) // We only need to store the key difference.
 
 	v.EncodeTo(b.buf)
-	b.tableIndex.KvSize += uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
+	// Size of KV on SST.
+	sstSz := uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
+	// Size of KV on value log.
+	vlogSz := 15 /* Approximate size of vlog header */ + uint64(len(key)) +
+		// Approximate value size. If the value is stored in vlog, this might
+		// be off by a huge margin.
+		uint64(len(v.Value))
+	// Total estimated size.
+	b.tableIndex.EstimatedSize += (sstSz + vlogSz)
 }
 
 /*
