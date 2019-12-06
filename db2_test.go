@@ -27,6 +27,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"runtime"
 	"testing"
 
 	"github.com/dgraph-io/badger/options"
@@ -514,4 +515,91 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	tab, err := table.OpenTable(fd, options.LoadToRAM, nil)
 	require.NoError(t, err)
 	return tab
+}
+
+// Regression test for https://github.com/dgraph-io/badger/issues/1126
+//
+// The test has 3 steps
+// Step 1 - Create badger data. It is necessary that the value size is
+//          greater than valuethreshold. The value log file size after
+//          this step is around 170 bytes.
+// Step 2 - Re-open the same badger and simulate a crash. The value log file
+//          size after this crash is around 2 GB (we increase the file size to mmap it).
+// Step 3 - Re-open the same badger. We should be able to read all the data
+//          inserted in the first step.
+func TestWindowsDataLoss(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("The test is only for Windows.")
+	}
+
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt := DefaultOptions(dir).WithSyncWrites(true)
+
+	fmt.Println("First DB Open")
+	db, err := Open(opt)
+	require.NoError(t, err)
+	keyCount := 20
+	var keyList [][]byte // Stores all the keys generated.
+	for i := 0; i < keyCount; i++ {
+		// It is important that we create different transactions for each request.
+		err := db.Update(func(txn *Txn) error {
+			key := []byte(fmt.Sprintf("%d", i))
+			v := []byte("barValuebarValuebarValuebarValuebarValue")
+			require.Greater(t, len(v), opt.ValueThreshold)
+
+			//32 bytes length and now it's not working
+			err := txn.Set(key, v)
+			require.NoError(t, err)
+			keyList = append(keyList, key)
+			return nil
+		})
+		require.NoError(t, err)
+	}
+	require.NoError(t, db.Close())
+
+	fmt.Println()
+	fmt.Println("Second DB Open")
+	opt.Truncate = true
+	db, err = Open(opt)
+	require.NoError(t, err)
+
+	// Return after reading one entry. We're simulating a crash.
+	// Simulate a crash by not closing db but releasing the locks.
+	if db.dirLockGuard != nil {
+		require.NoError(t, db.dirLockGuard.release())
+	}
+	if db.valueDirGuard != nil {
+		require.NoError(t, db.valueDirGuard.release())
+	}
+	// Don't use vlog.Close here. We don't want to fix the file size. Only un-mmap
+	// the data so that we can truncate the file durning the next vlog.Open.
+	require.NoError(t, y.Munmap(db.vlog.filesMap[db.vlog.maxFid].fmap))
+
+	fmt.Println()
+	fmt.Println("Third DB Open")
+	opt.Truncate = true
+	db, err = Open(opt)
+	require.NoError(t, err)
+	defer db.Close()
+
+	txn := db.NewTransaction(false)
+	defer txn.Discard()
+	it := txn.NewIterator(DefaultIteratorOptions)
+	defer it.Close()
+
+	var result [][]byte // stores all the keys read from the db.
+	for it.Rewind(); it.Valid(); it.Next() {
+		item := it.Item()
+		k := item.Key()
+		err := item.Value(func(v []byte) error {
+			_ = v
+			return nil
+		})
+		require.NoError(t, err)
+		result = append(result, k)
+	}
+	require.ElementsMatch(t, keyList, result)
 }
