@@ -2025,11 +2025,9 @@ func ExampleDB_Subscribe() {
 	// a-key is now set to a-value
 }
 
-func removeDir(dir string) func() {
-	return func() {
-		if err := os.RemoveAll(dir); err != nil {
-			panic(err)
-		}
+func removeDir(dir string) {
+	if err := os.RemoveAll(dir); err != nil {
+		panic(err)
 	}
 }
 
