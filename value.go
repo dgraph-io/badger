@@ -430,7 +430,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 	}
 
 	var lastCommit uint64
-	var validEndOffset uint32
+	var validEndOffset uint32 = offset
 	for {
 		e, err := read.Entry(reader)
 		if err == io.EOF {
