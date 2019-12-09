@@ -1322,7 +1322,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		y.NumBytesWritten.Add(int64(n))
 		vlog.elog.Printf("Done")
 		atomic.AddUint32(&vlog.writableLogOffset, uint32(n))
-		atomic.AddUint32(&curlf.size, uint32(n))
+		atomic.StoreUint32(&curlf.size, vlog.writableLogOffset)
 		return nil
 	}
 	toDisk := func() error {
