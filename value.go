@@ -854,7 +854,10 @@ func (lf *logFile) open(path string, flags uint32) error {
 	if err != nil {
 		return errFile(err, lf.path, "Unable to run file.Stat")
 	}
-	if fi.Size() < vlogHeaderSize {
+	sz := fi.Size()
+	y.AssertTruef(sz <= math.MaxUint32, "file size: %d greater than %d", sz, math.MaxUint32)
+	lf.size = uint32(sz)
+	if sz < vlogHeaderSize {
 		// Every vlog file should have at least vlogHeaderSize. If it is less than vlogHeaderSize
 		// then it must have been corrupted. But no need to handle here. log replayer will truncate
 		// and bootstrap the logfile. So ignoring here.
