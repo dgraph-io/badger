@@ -228,8 +228,8 @@ func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 		valsz := p.Len
 		lfsz := atomic.LoadUint32(&lf.size)
 		if int64(offset) >= size || int64(offset+valsz) > size ||
-			// Ensure the read is within the file's actual size. It might be possible that the
-			// offset+valsz length is beyond the file's actual size. This could happen when
+			// Ensure that the read is within the file's actual size. It might be possible that
+			// the offset+valsz length is beyond the file's actual size. This could happen when
 			// dropAll and iterations are running simultaneously.
 			int64(offset+valsz) > int64(lfsz) {
 			err = y.ErrEOF
