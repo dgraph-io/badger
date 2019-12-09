@@ -226,11 +226,12 @@ func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 		// causing the read to fail with ErrEOF. See issue #585.
 		size := int64(len(lf.fmap))
 		valsz := p.Len
+		lfsz := atomic.LoadUint32(&lf.size)
 		if int64(offset) >= size || int64(offset+valsz) > size ||
 			// Ensure the read is within the file's actual size. It might be possible that the
 			// offset+valsz length is beyond the file's actual size. This could happen when
 			// dropAll and iterations are running simultaneously.
-			int64(offset+valsz) > int64(lf.size) {
+			int64(offset+valsz) > int64(lfsz) {
 			err = y.ErrEOF
 		} else {
 			buf = lf.fmap[offset : offset+valsz]
@@ -1320,7 +1321,8 @@ func (vlog *valueLog) write(reqs []*request) error {
 		y.NumWrites.Add(1)
 		y.NumBytesWritten.Add(int64(n))
 		vlog.elog.Printf("Done")
-		curlf.size = atomic.AddUint32(&vlog.writableLogOffset, uint32(n))
+		atomic.AddUint32(&vlog.writableLogOffset, uint32(n))
+		atomic.AddUint32(&curlf.size, uint32(n))
 		return nil
 	}
 	toDisk := func() error {
