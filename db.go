@@ -903,7 +903,12 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 		if len(ft.dropPrefix) > 0 && bytes.HasPrefix(iter.Key(), ft.dropPrefix) {
 			continue
 		}
-		b.Add(iter.Key(), iter.Value())
+		vs := iter.Value()
+		var vp valuePointer
+		if vs.Meta&bitValuePointer > 0 {
+			vp.Decode(vs.Value)
+		}
+		b.Add(iter.Key(), iter.Value(), vp.Len)
 	}
 	return b.Finish()
 }

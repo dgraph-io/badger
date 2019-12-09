@@ -101,7 +101,7 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 	return newKey[i:]
 }
 
-func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
+func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	b.keyHashes = append(b.keyHashes, farm.Fingerprint64(y.ParseKey(key)))
 
 	// diffKey stores the difference of key with baseKey.
@@ -131,13 +131,8 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	v.EncodeTo(b.buf)
 	// Size of KV on SST.
 	sstSz := uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
-	// Size of KV on value log.
-	vlogSz := 15 /* Approximate size of vlog header */ + uint64(len(key)) +
-		// Approximate value size. If the value is stored in vlog, this might
-		// be off by a huge margin.
-		uint64(len(v.Value))
-	// Total estimated size.
-	b.tableIndex.EstimatedSize += (sstSz + vlogSz)
+	// Total estimated size = size on SST + size on vlog (length of value pointer).
+	b.tableIndex.EstimatedSize += (sstSz + vpLen)
 }
 
 /*
@@ -217,7 +212,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 }
 
 // Add adds a key-value pair to the block.
-func (b *Builder) Add(key []byte, value y.ValueStruct) {
+func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 	if b.shouldFinishBlock(key, value) {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
@@ -226,7 +221,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) {
 		b.baseOffset = uint32(b.buf.Len())
 		b.entryOffsets = b.entryOffsets[:0]
 	}
-	b.addHelper(key, value)
+	b.addHelper(key, value, uint64(valueLen))
 }
 
 // TODO: vvv this was the comment on ReachedCapacity.

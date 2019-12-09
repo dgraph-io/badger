@@ -90,7 +90,7 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
 	})
 	for _, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0})
+		b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0}, 0)
 	}
 	_, err = f.Write(b.Finish())
 	require.NoError(t, err, "writing to file failed")
@@ -710,7 +710,7 @@ func TestTableBigValues(t *testing.T) {
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), 0)
 		vs := y.ValueStruct{Value: value(i)}
-		builder.Add(key, vs)
+		builder.Add(key, vs, 0)
 	}
 
 	_, err = f.Write(builder.Finish())
@@ -793,7 +793,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 			defer it.Close()
 			for it.seekToFirst(); it.Valid(); it.next() {
 				vs := it.Value()
-				newBuilder.Add(it.Key(), vs)
+				newBuilder.Add(it.Key(), vs, 0)
 			}
 			newBuilder.Finish()
 		}()
@@ -822,7 +822,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			// id := i*tableSize+j (not interleaved)
 			k := fmt.Sprintf("%016x", id)
 			v := fmt.Sprintf("%d", id)
-			builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0})
+			builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}, 0)
 		}
 		_, err = f.Write(builder.Finish())
 		require.NoError(b, err, "unable to write to file")
@@ -913,7 +913,7 @@ func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Tab
 	for i := 0; i < count; i++ {
 		k := fmt.Sprintf("%016x", i)
 		v := fmt.Sprintf("%d", i)
-		builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)})
+		builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)}, 0)
 	}
 
 	_, err = f.Write(builder.Finish())
@@ -930,11 +930,10 @@ func TestMain(m *testing.M) {
 
 func TestOpenKVSize(t *testing.T) {
 	opts := getTestTableOptions()
-	f := buildTestTable(t, "foo", 1, opts)
-
-	table, err := OpenTable(f, opts)
+	table, err := OpenTable(buildTestTable(t, "foo", 1, opts), opts)
 	require.NoError(t, err)
 
+	// The following values might change if the table/header structure is changed.
 	var entrySize uint64 = 15 /* DiffKey len */ + 4 /* Header Size */ + 4 /* Encoded vp */
-	require.Equal(t, entrySize, table.kvSize)
+	require.Equal(t, entrySize, table.EstimatedSize())
 }

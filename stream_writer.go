@@ -357,7 +357,11 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	}
 
 	w.lastKey = y.SafeCopy(w.lastKey, key)
-	w.builder.Add(key, vs)
+	var vp valuePointer
+	if vs.Meta&bitValuePointer > 0 {
+		vp.Decode(vs.Value)
+	}
+	w.builder.Add(key, vs, vp.Len)
 	return nil
 }
 

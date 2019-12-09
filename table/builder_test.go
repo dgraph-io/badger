@@ -74,7 +74,7 @@ func TestTableIndex(t *testing.T) {
 					blockCount++
 					blockFirstKeys = append(blockFirstKeys, k)
 				}
-				builder.Add(k, vs)
+				builder.Add(k, vs, 0)
 			}
 			_, err = f.Write(builder.Finish())
 			require.NoError(t, err, "unable to write to file")
@@ -129,22 +129,9 @@ func BenchmarkBuilder(b *testing.B) {
 		builder := NewTableBuilder(opts)
 
 		for i := 0; i < keysCount; i++ {
-			builder.Add(key(i), vs)
+			builder.Add(key(i), vs, 0)
 		}
 
 		_ = builder.Finish()
 	}
-}
-
-func TestKVSize(t *testing.T) {
-	opts := Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
-	b := NewTableBuilder(opts)
-	defer b.Close()
-
-	k := y.KeyWithTs([]byte(key("foo", 0)), 0)
-	v := []byte(fmt.Sprintf("%d", 0))
-
-	b.Add(k, y.ValueStruct{Value: v, Meta: 'A', UserMeta: 0})
-	var entrySize uint64 = 15 /* DiffKey len */ + 4 /* Header Size */ + 4 /* Encoded vp */
-	require.Equal(t, b.tableIndex.KvSize, entrySize)
 }

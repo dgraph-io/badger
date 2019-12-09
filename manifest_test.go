@@ -153,7 +153,7 @@ func buildTable(t *testing.T, keyValues [][]string, bopts table.Options) *os.Fil
 			Value:    []byte(kv[1]),
 			Meta:     'A',
 			UserMeta: 0,
-		})
+		}, 0)
 	}
 	_, err = f.Write(b.Finish())
 	require.NoError(t, err, "unable to write to file.")
