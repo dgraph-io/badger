@@ -899,7 +899,8 @@ func (s *levelsController) close() error {
 }
 
 // get returns the found value if any. If not found, we return nil.
-func (s *levelsController) get(key []byte, maxVs *y.ValueStruct, startLevel int) (y.ValueStruct, error) {
+func (s *levelsController) get(key []byte, maxVs *y.ValueStruct, startLevel int) (
+	y.ValueStruct, error) {
 	// It's important that we iterate the levels from 0 on upward.  The reason is, if we iterated
 	// in opposite order, or in parallel (naively calling all the h.RLock() in some order) we could
 	// read level L's tables post-compaction and level L+1's tables pre-compaction.  (If we do
