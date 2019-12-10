@@ -70,7 +70,7 @@ type Builder struct {
 	baseOffset   uint32   // Offset for the current block.
 	entryOffsets []uint32 // Offsets of entries present in current block.
 	tableIndex   *pb.TableIndex
-	keyHashes    []uint64 // Used for building bloomfilter.
+	keyHashes    []uint64 // Used for building the bloomfilter.
 	opt          *Options
 }
 

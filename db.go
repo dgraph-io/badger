@@ -899,12 +899,12 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 	defer iter.Close()
 	b := table.NewTableBuilder(bopts)
 	defer b.Close()
+	var vp valuePointer
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 		if len(ft.dropPrefix) > 0 && bytes.HasPrefix(iter.Key(), ft.dropPrefix) {
 			continue
 		}
 		vs := iter.Value()
-		var vp valuePointer
 		if vs.Meta&bitValuePointer > 0 {
 			vp.Decode(vs.Value)
 		}

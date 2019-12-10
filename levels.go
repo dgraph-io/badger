@@ -508,6 +508,7 @@ func (s *levelsController) compactBuildTables(
 	resultCh := make(chan newTableResult)
 	var numBuilds, numVersions int
 	var lastKey, skipKey []byte
+	var vp valuePointer
 	for it.Valid() {
 		timeStart := time.Now()
 		dk, err := s.kv.registry.latestDataKey()
@@ -584,7 +585,6 @@ func (s *levelsController) compactBuildTables(
 				}
 			}
 			numKeys++
-			var vp valuePointer
 			if vs.Meta&bitValuePointer > 0 {
 				vp.Decode(vs.Value)
 			}

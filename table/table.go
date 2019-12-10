@@ -97,9 +97,10 @@ type Table struct {
 	smallest, biggest []byte // Smallest and largest keys (with timestamps).
 	id                uint64 // file id, part of filename
 
-	bf            *z.Bloom
-	Checksum      []byte
-	estimatedSize uint64 // Stores the total size of key-values stored in this table.
+	bf       *z.Bloom
+	Checksum []byte
+	// Stores the total size of key-values stored in this table (including the size on vlog).
+	estimatedSize uint64
 
 	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
 	opt        *Options
@@ -441,7 +442,8 @@ func (t *Table) blockCacheKey(idx int) uint64 {
 	return (t.ID() << 32) | uint64(idx)
 }
 
-// EstimatedSize returns the total size of key-values stored in this table.
+// EstimatedSize returns the total size of key-values stored in this table (including the
+// disk space occupied on the value log).
 func (t *Table) EstimatedSize() uint64 { return t.estimatedSize }
 
 // Size is its file size in bytes
