@@ -226,7 +226,12 @@ func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 		// causing the read to fail with ErrEOF. See issue #585.
 		size := int64(len(lf.fmap))
 		valsz := p.Len
-		if int64(offset) >= size || int64(offset+valsz) > size {
+		lfsz := atomic.LoadUint32(&lf.size)
+		if int64(offset) >= size || int64(offset+valsz) > size ||
+			// Ensure that the read is within the file's actual size. It might be possible that
+			// the offset+valsz length is beyond the file's actual size. This could happen when
+			// dropAll and iterations are running simultaneously.
+			int64(offset+valsz) > int64(lfsz) {
 			err = y.ErrEOF
 		} else {
 			buf = lf.fmap[offset : offset+valsz]
@@ -725,6 +730,7 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 		_ = lf.fd.Close()
 		return err
 	}
+	lf.fmap = nil
 	if err := lf.fd.Close(); err != nil {
 		return err
 	}
@@ -849,7 +855,10 @@ func (lf *logFile) open(path string, flags uint32) error {
 	if err != nil {
 		return errFile(err, lf.path, "Unable to run file.Stat")
 	}
-	if fi.Size() < vlogHeaderSize {
+	sz := fi.Size()
+	y.AssertTruef(sz <= math.MaxUint32, "file size: %d greater than %d", sz, math.MaxUint32)
+	lf.size = uint32(sz)
+	if sz < vlogHeaderSize {
 		// Every vlog file should have at least vlogHeaderSize. If it is less than vlogHeaderSize
 		// then it must have been corrupted. But no need to handle here. log replayer will truncate
 		// and bootstrap the logfile. So ignoring here.
@@ -1313,6 +1322,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		y.NumBytesWritten.Add(int64(n))
 		vlog.elog.Printf("Done")
 		atomic.AddUint32(&vlog.writableLogOffset, uint32(n))
+		atomic.StoreUint32(&curlf.size, vlog.writableLogOffset)
 		return nil
 	}
 	toDisk := func() error {
@@ -1401,7 +1411,7 @@ func (vlog *valueLog) getFileRLocked(fid uint32) (*logFile, error) {
 // Read reads the value log at a given location.
 // TODO: Make this read private.
 func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
-	// Check for valid offset if we are reading to writable log.
+	// Check for valid offset if we are reading from writable log.
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	if vp.Fid == maxFid && vp.Offset >= vlog.woffset() {
 		return nil, nil, errors.Errorf(
