@@ -69,11 +69,9 @@ type Builder struct {
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
 	entryOffsets []uint32 // Offsets of entries present in current block.
-
-	tableIndex *pb.TableIndex
-	keyHashes  []uint64
-
-	opt *Options
+	tableIndex   *pb.TableIndex
+	keyHashes    []uint64 // Used for building the bloomfilter.
+	opt          *Options
 }
 
 // NewTableBuilder makes a new TableBuilder.
@@ -103,7 +101,7 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 	return newKey[i:]
 }
 
-func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
+func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	b.keyHashes = append(b.keyHashes, farm.Fingerprint64(y.ParseKey(key)))
 
 	// diffKey stores the difference of key with baseKey.
@@ -131,6 +129,10 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	b.buf.Write(diffKey) // We only need to store the key difference.
 
 	v.EncodeTo(b.buf)
+	// Size of KV on SST.
+	sstSz := uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
+	// Total estimated size = size on SST + size on vlog (length of value pointer).
+	b.tableIndex.EstimatedSize += (sstSz + vpLen)
 }
 
 /*
@@ -210,7 +212,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 }
 
 // Add adds a key-value pair to the block.
-func (b *Builder) Add(key []byte, value y.ValueStruct) {
+func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 	if b.shouldFinishBlock(key, value) {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
@@ -219,7 +221,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) {
 		b.baseOffset = uint32(b.buf.Len())
 		b.entryOffsets = b.entryOffsets[:0]
 	}
-	b.addHelper(key, value)
+	b.addHelper(key, value, uint64(valueLen))
 }
 
 // TODO: vvv this was the comment on ReachedCapacity.

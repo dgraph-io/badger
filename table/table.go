@@ -99,6 +99,8 @@ type Table struct {
 
 	bf       *z.Bloom
 	Checksum []byte
+	// Stores the total size of key-values stored in this table (including the size on vlog).
+	estimatedSize uint64
 
 	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
 	opt        *Options
@@ -351,6 +353,7 @@ func (t *Table) readIndex() error {
 	err := proto.Unmarshal(data, &index)
 	y.Check(err)
 
+	t.estimatedSize = index.EstimatedSize
 	t.bf = z.JSONUnmarshal(index.BloomFilter)
 	t.blockIndex = index.Offsets
 	return nil
@@ -438,6 +441,10 @@ func (t *Table) blockCacheKey(idx int) uint64 {
 	y.AssertTrue(uint32(idx) < math.MaxUint32)
 	return (t.ID() << 32) | uint64(idx)
 }
+
+// EstimatedSize returns the total size of key-values stored in this table (including the
+// disk space occupied on the value log).
+func (t *Table) EstimatedSize() uint64 { return t.estimatedSize }
 
 // Size is its file size in bytes
 func (t *Table) Size() int64 { return int64(t.tableSize) }

@@ -508,6 +508,7 @@ func (s *levelsController) compactBuildTables(
 	resultCh := make(chan newTableResult)
 	var numBuilds, numVersions int
 	var lastKey, skipKey []byte
+	var vp valuePointer
 	for it.Valid() {
 		timeStart := time.Now()
 		dk, err := s.kv.registry.latestDataKey()
@@ -584,7 +585,10 @@ func (s *levelsController) compactBuildTables(
 				}
 			}
 			numKeys++
-			builder.Add(it.Key(), it.Value())
+			if vs.Meta&bitValuePointer > 0 {
+				vp.Decode(vs.Value)
+			}
+			builder.Add(it.Key(), vs, vp.Len)
 		}
 		// It was true that it.Valid() at least once in the loop above, which means we
 		// called Add() at least once, and builder is not Empty().
@@ -1009,11 +1013,12 @@ func (s *levelsController) appendIterators(
 
 // TableInfo represents the information about a table.
 type TableInfo struct {
-	ID       uint64
-	Level    int
-	Left     []byte
-	Right    []byte
-	KeyCount uint64 // Number of keys in the table
+	ID          uint64
+	Level       int
+	Left        []byte
+	Right       []byte
+	KeyCount    uint64 // Number of keys in the table
+	EstimatedSz uint64
 }
 
 func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo) {
@@ -1030,11 +1035,12 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 			}
 
 			info := TableInfo{
-				ID:       t.ID(),
-				Level:    l.level,
-				Left:     t.Smallest(),
-				Right:    t.Biggest(),
-				KeyCount: count,
+				ID:          t.ID(),
+				Level:       l.level,
+				Left:        t.Smallest(),
+				Right:       t.Biggest(),
+				KeyCount:    count,
+				EstimatedSz: t.EstimatedSize(),
 			}
 			result = append(result, info)
 		}

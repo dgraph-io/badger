@@ -74,7 +74,7 @@ func TestTableIndex(t *testing.T) {
 					blockCount++
 					blockFirstKeys = append(blockFirstKeys, k)
 				}
-				builder.Add(k, vs)
+				builder.Add(k, vs, 0)
 			}
 			_, err = f.Write(builder.Finish())
 			require.NoError(t, err, "unable to write to file")
@@ -129,7 +129,7 @@ func BenchmarkBuilder(b *testing.B) {
 		builder := NewTableBuilder(opts)
 
 		for i := 0; i < keysCount; i++ {
-			builder.Add(key(i), vs)
+			builder.Add(key(i), vs, 0)
 		}
 
 		_ = builder.Finish()
