@@ -17,6 +17,8 @@
 package table
 
 import (
+	"bytes"
+
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 )
@@ -24,9 +26,11 @@ import (
 // MergeIterator merges multiple iterators.
 // NOTE: MergeIterator owns the array of iterators and is responsible for closing them.
 type MergeIterator struct {
-	left    node
-	right   node
-	small   *node
+	left  node
+	right node
+	small *node
+
+	curKey  []byte
 	reverse bool
 }
 
@@ -145,8 +149,22 @@ func (mi *MergeIterator) swapSmall() {
 
 // Next returns the next element. If it is the same as the current key, ignore it.
 func (mi *MergeIterator) Next() {
-	mi.small.next()
-	mi.fix()
+	for mi.Valid() {
+		if !bytes.Equal(mi.small.key, mi.curKey) {
+			break
+		}
+		mi.small.next()
+		mi.fix()
+	}
+	mi.setCurrent()
+}
+
+func (mi *MergeIterator) setCurrent() {
+	if cap(mi.curKey) < len(mi.small.key) {
+		mi.curKey = make([]byte, 2*len(mi.small.key))
+	}
+	mi.curKey = mi.curKey[:len(mi.small.key)]
+	copy(mi.curKey, mi.small.key)
 }
 
 // Rewind seeks to first element (or last element for reverse iterator).
@@ -154,6 +172,7 @@ func (mi *MergeIterator) Rewind() {
 	mi.left.rewind()
 	mi.right.rewind()
 	mi.fix()
+	mi.setCurrent()
 }
 
 // Seek brings us to element with key >= given key.
@@ -161,6 +180,7 @@ func (mi *MergeIterator) Seek(key []byte) {
 	mi.left.seek(key)
 	mi.right.seek(key)
 	mi.fix()
+	mi.setCurrent()
 }
 
 // Valid returns whether the MergeIterator is at a valid element.
