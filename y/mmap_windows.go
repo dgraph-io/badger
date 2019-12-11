@@ -25,7 +25,7 @@ import (
 	"unsafe"
 )
 
-func Mmap(fd *os.File, write bool, size int64) ([]byte, error) {
+func mmap(fd *os.File, write bool, size int64) ([]byte, error) {
 	protect := syscall.PAGE_READONLY
 	access := syscall.FILE_MAP_READ
 
@@ -81,11 +81,11 @@ func Mmap(fd *os.File, write bool, size int64) ([]byte, error) {
 	return data, nil
 }
 
-func Munmap(b []byte) error {
+func munmap(b []byte) error {
 	return syscall.UnmapViewOfFile(uintptr(unsafe.Pointer(&b[0])))
 }
 
-func Madvise(b []byte, readahead bool) error {
+func madvise(b []byte, readahead bool) error {
 	// Do Nothing. We don’t care about this setting on Windows
 	return nil
 }
