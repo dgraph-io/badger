@@ -157,37 +157,6 @@ func TestMergeSingleReversed(t *testing.T) {
 	require.EqualValues(t, reversed(vals), v)
 	closeAndCheck(t, mergeIt, 1)
 }
-func TestMergeDuplicates(t *testing.T) {
-	it := newSimpleIterator([]string{"1", "1", "1"}, []string{"a1", "a3", "a7"}, false)
-	it2 := newSimpleIterator([]string{"1", "1", "1"}, []string{"b2", "b3", "b5"}, false)
-	it3 := newSimpleIterator([]string{"1"}, []string{"c1"}, false)
-	it4 := newSimpleIterator([]string{"1", "1", "2"}, []string{"d1", "d7", "d9"}, false)
-	t.Run("forward", func(t *testing.T) {
-		expectedKeys := []string{"1", "2"}
-		expectedVals := []string{"a1", "d9"}
-		mergeIt := NewMergeIterator([]y.Iterator{it, it2, it3, it4}, false)
-		mergeIt.Rewind()
-		k, v := getAll(mergeIt)
-		require.EqualValues(t, expectedKeys, k)
-		require.EqualValues(t, expectedVals, v)
-		closeAndCheck(t, mergeIt, 4)
-	})
-
-	t.Run("reverse", func(t *testing.T) {
-		it.reversed = true
-		it2.reversed = true
-		it3.reversed = true
-		it4.reversed = true
-		expectedKeys := []string{"2", "1"}
-		expectedVals := []string{"d9", "a7"}
-		mergeIt := NewMergeIterator([]y.Iterator{it, it2, it3, it4}, true)
-		mergeIt.Rewind()
-		k, v := getAll(mergeIt)
-		require.EqualValues(t, expectedKeys, k)
-		require.EqualValues(t, expectedVals, v)
-		closeAndCheck(t, mergeIt, 4)
-	})
-}
 
 func TestMergeMore(t *testing.T) {
 	it := newSimpleIterator([]string{"1", "3", "7"}, []string{"a1", "a3", "a7"}, false)
@@ -365,5 +334,37 @@ func TestMergeIteratorDuplicate(t *testing.T) {
 		k, v := getAll(it)
 		require.Equal(t, expectedKeys, k)
 		require.Equal(t, expectedVals, v)
+	})
+}
+
+func TestMergeDuplicates(t *testing.T) {
+	it := newSimpleIterator([]string{"1", "1", "1"}, []string{"a1", "a3", "a7"}, false)
+	it2 := newSimpleIterator([]string{"1", "1", "1"}, []string{"b2", "b3", "b5"}, false)
+	it3 := newSimpleIterator([]string{"1"}, []string{"c1"}, false)
+	it4 := newSimpleIterator([]string{"1", "1", "2"}, []string{"d1", "d7", "d9"}, false)
+	t.Run("forward", func(t *testing.T) {
+		expectedKeys := []string{"1", "2"}
+		expectedVals := []string{"a1", "d9"}
+		mergeIt := NewMergeIterator([]y.Iterator{it, it2, it3, it4}, false)
+		mergeIt.Rewind()
+		k, v := getAll(mergeIt)
+		require.EqualValues(t, expectedKeys, k)
+		require.EqualValues(t, expectedVals, v)
+		closeAndCheck(t, mergeIt, 4)
+	})
+
+	t.Run("reverse", func(t *testing.T) {
+		it.reversed = true
+		it2.reversed = true
+		it3.reversed = true
+		it4.reversed = true
+		expectedKeys := []string{"2", "1"}
+		expectedVals := []string{"d9", "a7"}
+		mergeIt := NewMergeIterator([]y.Iterator{it, it2, it3, it4}, true)
+		mergeIt.Rewind()
+		k, v := getAll(mergeIt)
+		require.EqualValues(t, expectedKeys, k)
+		require.EqualValues(t, expectedVals, v)
+		closeAndCheck(t, mergeIt, 4)
 	})
 }
