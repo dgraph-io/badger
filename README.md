@@ -126,7 +126,7 @@ cannot open the same database at the same time.
 
 #### In-Memory Mode/Diskless Mode
 By default, badger ensures all the data is presisted to the disk. It also supports a pure
-`In-Memory` mode. When badger is running in `in-memory` mode, all the data is stored in the memory.
+`In-Memory` mode. When Badger is running in `in-memory` mode, all the data is stored in the memory.
 The read/writes are much faster in `in-memory` mode but all the data stored in badger will be lost
 in case of a crash or close. To open badger in `in-memory` mode, set the `InMemory` option.
 
