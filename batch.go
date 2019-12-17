@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/pkg/errors"
 )
 
 // WriteBatch holds the necessary info to perform batched writes.
@@ -144,8 +145,19 @@ func (wb *WriteBatch) commit() error {
 	wb.txn.CommitWith(wb.callback)
 	wb.txn = wb.db.newTransaction(true, true)
 	wb.txn.readTs = 0 // We're not reading anything.
+	// txn.commitTs will be used only if badger is running in managed mode.
 	wb.txn.commitTs = wb.commitTs
 	return wb.err
+}
+
+// Commit commits the current transaction running within the write batch.
+func (wb *WriteBatch) Commit() error {
+	wb.Lock()
+	defer wb.Unlock()
+	if err := wb.Commit(); err != nil {
+		return errors.Wrap(err, "commit failed")
+	}
+	return nil
 }
 
 // Flush must be called at the end to ensure that any pending writes get committed to Badger. Flush
