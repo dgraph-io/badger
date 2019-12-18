@@ -160,11 +160,7 @@ func (mi *MergeIterator) Next() {
 }
 
 func (mi *MergeIterator) setCurrent() {
-	if cap(mi.curKey) < len(mi.small.key) {
-		mi.curKey = make([]byte, 2*len(mi.small.key))
-	}
-	mi.curKey = mi.curKey[:len(mi.small.key)]
-	copy(mi.curKey, mi.small.key)
+	mi.curKey = append(mi.curKey[:0], mi.small.key...)
 }
 
 // Rewind seeks to first element (or last element for reverse iterator).
