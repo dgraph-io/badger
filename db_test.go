@@ -1634,10 +1634,11 @@ func TestGoroutineLeak(t *testing.T) {
 				var wg sync.WaitGroup
 				wg.Add(1)
 				go func() {
-					err := db.Subscribe(ctx, func(kvs *pb.KVList) {
+					err := db.Subscribe(ctx, func(kvs *pb.KVList) error {
 						require.Equal(t, []byte("value"), kvs.Kv[0].GetValue())
 						updated = true
 						wg.Done()
+						return nil
 					}, []byte("key"))
 					if err != nil {
 						require.Equal(t, err.Error(), context.Canceled.Error())
@@ -1994,10 +1995,11 @@ func ExampleDB_Subscribe() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		cb := func(kvs *KVList) {
+		cb := func(kvs *KVList) error {
 			for _, kv := range kvs.Kv {
 				fmt.Printf("%s is now set to %s\n", kv.Key, kv.Value)
 			}
+			return nil
 		}
 		if err := db.Subscribe(ctx, cb, prefix); err != nil && err != context.Canceled {
 			log.Fatal(err)
