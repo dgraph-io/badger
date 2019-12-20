@@ -6,6 +6,18 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
 
 ## [Unreleased]
 
+### New APIs
+
+- badger
+  - ErrGCInMemoryMode (5b6321)
+
+- badger.Options
+  - WithInMemory (5b6321)
+  - WithZSTDCompressionLevel (3eb4e72)
+  
+- Badger.TableInfo
+  - EstimatedSz (f46f8ea)
+  
 ### Features
 
 - Introduce in-memory mode in badger. (#1113)
@@ -23,7 +35,7 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
 
 ### Performance
 
-- Set level 15 as default compression level in ZSTD. (#1111) 
+- Set level 15 as default compression level in Zstd. (#1111) 
 - Optimize createTable in stream_writer.go. (#1132)
 
 ## [2.0.0] - 2019-11-12
