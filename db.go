@@ -1563,7 +1563,7 @@ type KVList = pb.KVList
 // This function blocks until the given context is done or an error occurs.
 // The given function will be called with a new KVList containing the modified keys and the
 // corresponding values.
-func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList), prefixes ...[]byte) error {
+func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, prefixes ...[]byte) error {
 	if cb == nil {
 		return ErrNilCallback
 	}
@@ -1572,37 +1572,41 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList), prefixes ...[]
 	}
 	c := y.NewCloser(1)
 	recvCh, id := db.pub.newSubscriber(c, prefixes...)
-	slurp := func(batch *pb.KVList) {
-		defer func() {
-			if len(batch.GetKv()) > 0 {
-				cb(batch)
-			}
-		}()
+	slurp := func(batch *pb.KVList) error {
 		for {
 			select {
 			case kvs := <-recvCh:
 				batch.Kv = append(batch.Kv, kvs.Kv...)
 			default:
-				return
+				if len(batch.GetKv()) > 0 {
+					return cb(batch)
+				}
+				return nil
 			}
 		}
 	}
 	for {
 		select {
 		case <-c.HasBeenClosed():
-			slurp(new(pb.KVList))
-			// Drain if any pending updates.
-			c.Done()
 			// No need to delete here. Closer will be called only while
 			// closing DB. Subscriber will be deleted by cleanSubscribers.
-			return nil
+			err := slurp(new(pb.KVList))
+			// Drain if any pending updates.
+			c.Done()
+			return err
 		case <-ctx.Done():
 			c.Done()
 			db.pub.deleteSubscriber(id)
 			// Delete the subscriber to avoid further updates.
 			return ctx.Err()
 		case batch := <-recvCh:
-			slurp(batch)
+			err := slurp(batch)
+			if err != nil {
+				c.Done()
+				// Delete the subsriber if there is an error by the callback.
+				db.pub.deleteSubscriber(id)
+				return err
+			}
 		}
 	}
 }
