@@ -1645,7 +1645,7 @@ func TestGoroutineLeak(t *testing.T) {
 					}
 				}()
 				// Wait for the go routine to be scheduled.
-				time.Sleep(2 * time.Second)
+				time.Sleep(time.Second)
 				err := db.Update(func(txn *Txn) error {
 					return txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
 				})
@@ -1658,9 +1658,9 @@ func TestGoroutineLeak(t *testing.T) {
 		time.Sleep(2 * time.Second)
 		require.Equal(t, before, runtime.NumGoroutine())
 	}
-	// t.Run("disk mode", func(t *testing.T) {
-	// 	test(t, nil)
-	// })
+	t.Run("disk mode", func(t *testing.T) {
+		test(t, nil)
+	})
 	t.Run("InMemory mode", func(t *testing.T) {
 		opt := DefaultOptions("").WithInmemory(true)
 		test(t, &opt)
