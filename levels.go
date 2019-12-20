@@ -430,28 +430,32 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	return prios
 }
 
+// checkOverlap checks if the given tables overlap with any level above the given "lev".
+func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
+	kr := getKeyRange(tables...)
+	for i, lh := range s.levels {
+		if i < lev { // Skip lower levels.
+			continue
+		}
+		lh.RLock()
+		left, right := lh.overlappingTables(levelHandlerRLocked{}, kr)
+		lh.RUnlock()
+		if right-left > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // compactBuildTables merge topTables and botTables to form a list of new tables.
 func (s *levelsController) compactBuildTables(
 	lev int, cd compactDef) ([]*table.Table, func() error, error) {
 	topTables := cd.top
 	botTables := cd.bot
 
-	var hasOverlap bool
-	{
-		kr := getKeyRange(cd.top...)
-		for i, lh := range s.levels {
-			if i <= lev { // Skip upper levels.
-				continue
-			}
-			lh.RLock()
-			left, right := lh.overlappingTables(levelHandlerRLocked{}, kr)
-			lh.RUnlock()
-			if right-left > 0 {
-				hasOverlap = true
-				break
-			}
-		}
-	}
+	// Check overlap of the top and bottom tables overlap with levels which
+	// are not being compacted in this compaction. "lev" is the top level.
+	hasOverlap := s.checkOverlap(cd.top, lev+2) || s.checkOverlap(cd.bot, lev+2)
 
 	// Try to collect stats so that we can inform value log about GC. That would help us find which
 	// value log file should be GCed.
