@@ -6,6 +6,26 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
 
 ## [Unreleased]
 
+### Features
+
+- Introduce in-memory mode in badger. (#1113)
+
+### Fixed
+
+- Limit manifest's change set size. (#1119)
+- Cast idx to uint32 to fix compilation on i386. (#1118)
+- Fix request increment ref bug. (#1121)
+- Fix windows dataloss issue. (#1134)
+- Fix VerifyValueChecksum checks. (#1138)
+- Fix encryption in stream writer. (#1146)
+- Fix segmentation fault in vlog.Read. (header.Decode) (#1150) 
+- Fix merge iterator duplicates issue. (#1157)
+
+### Performance
+
+- Set level 15 as default compression level in ZSTD. (#1111) 
+- Optimize createTable in stream_writer.go. (#1132)
+
 ## [2.0.0] - 2019-11-12
 
 ### New APIs
