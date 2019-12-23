@@ -8,9 +8,6 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
 
 ### New APIs
 
-- badger
-  - ErrGCInMemoryMode (5b6321)
-
 - badger.Options
   - WithInMemory (5b6321)
   - WithZSTDCompressionLevel (3eb4e72)
