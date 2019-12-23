@@ -283,7 +283,7 @@ func TestGet(t *testing.T) {
 		})
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
-		opts := DefaultOptions("").WithInmemory(true)
+		opts := DefaultOptions("").WithInMemory(true)
 		db, err := Open(opts)
 		require.NoError(t, err)
 		test(t, db)
@@ -543,7 +543,7 @@ func TestExistsMore(t *testing.T) {
 		})
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
-		opt := DefaultOptions("").WithInmemory(true)
+		opt := DefaultOptions("").WithInMemory(true)
 		db, err := Open(opt)
 		require.NoError(t, err)
 		test(t, db)
@@ -617,7 +617,7 @@ func TestIterate2Basic(t *testing.T) {
 		})
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
-		opt := DefaultOptions("").WithInmemory(true)
+		opt := DefaultOptions("").WithInMemory(true)
 		db, err := Open(opt)
 		require.NoError(t, err)
 		test(t, db)
@@ -1662,7 +1662,7 @@ func TestGoroutineLeak(t *testing.T) {
 		test(t, nil)
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
-		opt := DefaultOptions("").WithInmemory(true)
+		opt := DefaultOptions("").WithInMemory(true)
 		test(t, &opt)
 	})
 }
@@ -2034,7 +2034,7 @@ func removeDir(dir string) {
 }
 
 func TestWriteInemory(t *testing.T) {
-	opt := DefaultOptions("").WithInmemory(true)
+	opt := DefaultOptions("").WithInMemory(true)
 	db, err := Open(opt)
 	require.NoError(t, err)
 	defer func() {
