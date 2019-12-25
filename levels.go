@@ -453,9 +453,12 @@ func (s *levelsController) compactBuildTables(
 	topTables := cd.top
 	botTables := cd.bot
 
-	// Check overlap of the top and bottom tables overlap with levels which
-	// are not being compacted in this compaction. "lev" is the top level.
-	hasOverlap := s.checkOverlap(cd.top, lev+2) || s.checkOverlap(cd.bot, lev+2)
+	// Check overlap of the top level with the levels which are not being
+	// compacted in this compaction. We don't need to check overlap of the bottom
+	// tables with other levels because if the top tables overlap with any of the lower
+	// levels, it implies bottom level also overlaps because top and bottom tables
+	// overlap with each other.
+	hasOverlap := s.checkOverlap(cd.top, cd.nextLevel.level+1)
 
 	// Try to collect stats so that we can inform value log about GC. That would help us find which
 	// value log file should be GCed.
