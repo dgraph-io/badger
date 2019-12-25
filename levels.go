@@ -430,7 +430,7 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	return prios
 }
 
-// checkOverlap checks if the given tables overlap with any level above the given "lev".
+// checkOverlap checks if the given tables overlap with any level from the given "lev" onwards.
 func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
 	kr := getKeyRange(tables...)
 	for i, lh := range s.levels {
