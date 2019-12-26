@@ -21,7 +21,6 @@ import (
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/table"
-	"github.com/dgraph-io/badger/v2/y"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -73,10 +72,9 @@ type Options struct {
 	ValueLogFileSize   int64
 	ValueLogMaxEntries uint32
 
-	NumCompactors        int
-	CompactL0OnClose     bool
-	LogRotatesToFlush    int32
-	ZSTDCompressionLevel int
+	NumCompactors     int
+	CompactL0OnClose  bool
+	LogRotatesToFlush int32
 
 	// When set, checksum will be validated for each entry read from the value log file.
 	VerifyValueChecksum bool
@@ -102,11 +100,6 @@ type Options struct {
 // DefaultOptions sets a list of recommended options for good performance.
 // Feel free to modify these to suit your needs with the WithX methods.
 func DefaultOptions(path string) Options {
-	defaultCompression := options.ZSTD
-	// Use snappy as default compression algorithm if badger is built without CGO.
-	if !y.CgoEnabled {
-		defaultCompression = options.Snappy
-	}
 	return Options{
 		Dir:                 path,
 		ValueDir:            path,
@@ -129,16 +122,8 @@ func DefaultOptions(path string) Options {
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
-		Compression:             defaultCompression,
+		Compression:             options.ZSTD,
 		MaxCacheSize:            1 << 30, // 1 GB
-		// Benchmarking compression level against performance showed that level 15 gives
-		// the best speed vs ratio tradeoff.
-		// For a data size of 4KB we get
-		// Level: 3  Ratio: 2.72 Time:  24112 n/s
-		// Level: 10 Ratio: 2.95 Time:  75655 n/s
-		// Level: 15 Ratio: 4.38 Time: 239042 n/s
-		// See https://github.com/dgraph-io/badger/pull/1111#issue-338120757
-		ZSTDCompressionLevel: 15,
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
@@ -158,12 +143,11 @@ func DefaultOptions(path string) Options {
 
 func buildTableOptions(opt Options) table.Options {
 	return table.Options{
-		BlockSize:            opt.BlockSize,
-		BloomFalsePositive:   opt.BloomFalsePositive,
-		LoadingMode:          opt.TableLoadingMode,
-		ChkMode:              opt.ChecksumVerificationMode,
-		Compression:          opt.Compression,
-		ZSTDCompressionLevel: opt.ZSTDCompressionLevel,
+		BlockSize:          opt.BlockSize,
+		BloomFalsePositive: opt.BloomFalsePositive,
+		LoadingMode:        opt.TableLoadingMode,
+		ChkMode:            opt.ChecksumVerificationMode,
+		Compression:        opt.Compression,
 	}
 }
 
@@ -551,17 +535,5 @@ func (opt Options) WithMaxCacheSize(size int64) Options {
 // created. In case of a crash all data will be lost.
 func (opt Options) WithInmemory(b bool) Options {
 	opt.InMemory = b
-	return opt
-}
-
-// WithZSTDCompressionLevel returns a new Options value with ZSTDCompressionLevel set
-// to the given value.
-//
-// The ZSTD compression algorithm supports 20 compression levels. The higher the compression
-// level, the better is the compression ratio but lower is the performance. Lower levels
-// have better performance and higher levels have better compression ratios.
-// The default value of ZSTDCompressionLevel is 15.
-func (opt Options) WithZSTDCompressionLevel(cLevel int) Options {
-	opt.ZSTDCompressionLevel = cLevel
 	return opt
 }
