@@ -1,5 +1,3 @@
-// +build cgo
-
 /*
  * Copyright 2019 Dgraph Labs, Inc. and Contributors
  *
@@ -19,18 +17,34 @@
 package y
 
 import (
-	"github.com/DataDog/zstd"
+	"sync"
+
+	"github.com/klauspost/compress/zstd"
 )
 
-// CgoEnabled is used to check if CGO is enabled while building badger.
-const CgoEnabled = true
+var (
+	zstdDec *zstd.Decoder
+	zstdEnc *zstd.Encoder
+
+	zstdEncOnce, zstdDecOnce sync.Once
+)
 
 // ZSTDDecompress decompresses a block using ZSTD algorithm.
 func ZSTDDecompress(dst, src []byte) ([]byte, error) {
-	return zstd.Decompress(dst, src)
+	var err error
+	zstdDecOnce.Do(func() {
+		zstdDec, err = zstd.NewReader(nil)
+		AssertTrue(err != nil)
+	})
+	return zstdDec.DecodeAll(src, dst)
 }
 
 // ZSTDCompress compresses a block using ZSTD algorithm.
-func ZSTDCompress(dst, src []byte, compressionLevel int) ([]byte, error) {
-	return zstd.CompressLevel(dst, src, compressionLevel)
+func ZSTDCompress(dst, src []byte) ([]byte, error) {
+	var err error
+	zstdEncOnce.Do(func() {
+		zstdEnc, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true), zstd.WithEncoderLevel(zstd.SpeedFastest))
+		AssertTrue(err != nil)
+	})
+	return zstdEnc.EncodeAll(src, dst), nil
 }
