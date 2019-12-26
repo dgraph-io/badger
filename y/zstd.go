@@ -34,7 +34,7 @@ func ZSTDDecompress(dst, src []byte) ([]byte, error) {
 	var err error
 	zstdDecOnce.Do(func() {
 		zstdDec, err = zstd.NewReader(nil)
-		AssertTrue(err != nil)
+		AssertTrue(err == nil)
 	})
 	return zstdDec.DecodeAll(src, dst)
 }
@@ -44,7 +44,7 @@ func ZSTDCompress(dst, src []byte) ([]byte, error) {
 	var err error
 	zstdEncOnce.Do(func() {
 		zstdEnc, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true), zstd.WithEncoderLevel(zstd.SpeedFastest))
-		AssertTrue(err != nil)
+		AssertTrue(err == nil)
 	})
 	return zstdEnc.EncodeAll(src, dst), nil
 }
