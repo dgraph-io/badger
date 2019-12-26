@@ -600,7 +600,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			// Now if we try to GC vlog file 10, the entry read from vlog file will point to vlog10
 			// but the entry read from LSM Tree will point to vlog6. This might seem like an issue
 			// but it's not really an issue because the user has set the number of versions to
-			// keep to 1 and the latest version of moveKey points to the corrent vlog file and
+			// keep to 1 and the latest version of moveKey points to the correct vlog file and
 			// offset. The stale move key on L3 will be eventually dropped by compaction because
 			// there is a newer versions in the upper levels.
 		}
