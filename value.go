@@ -856,7 +856,7 @@ func (lf *logFile) open(path string, flags uint32) error {
 		return errFile(err, lf.path, "Unable to run file.Stat")
 	}
 	sz := fi.Size()
-	y.AssertTruef(sz <= math.MaxUint32, "file size: %d greater than %d", sz, math.MaxUint32)
+	y.AssertTruef(sz <= math.MaxUint32, "file size: %d greater than %d", uint32(sz), uint32(math.MaxUint32))
 	lf.size = uint32(sz)
 	if sz < vlogHeaderSize {
 		// Every vlog file should have at least vlogHeaderSize. If it is less than vlogHeaderSize
