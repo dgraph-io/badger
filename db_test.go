@@ -1161,6 +1161,9 @@ func TestExpiryImproperDBClose(t *testing.T) {
 		// it would return Truncate Required Error.
 		require.NoError(t, db0.vlog.Close())
 
+		require.NoError(t, db0.registry.Close())
+		require.NoError(t, db0.manifest.close())
+
 		db1, err := Open(opt)
 		require.NoError(t, err)
 		err = db1.View(func(txn *Txn) error {

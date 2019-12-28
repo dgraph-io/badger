@@ -197,7 +197,7 @@ func (lf *logFile) encryptionEnabled() bool {
 }
 
 func (lf *logFile) munmap() (err error) {
-	if lf.loadingMode != options.MemoryMap {
+	if lf.loadingMode != options.MemoryMap || len(lf.fmap) == 0 {
 		// Nothing to do
 		return nil
 	}
