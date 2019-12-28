@@ -1677,7 +1677,7 @@ func ExampleOpen() {
 	defer removeDir(dir)
 	db, err := Open(DefaultOptions(dir))
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer db.Close()
 
@@ -1689,7 +1689,7 @@ func ExampleOpen() {
 	})
 
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	txn := db.NewTransaction(true) // Read-write txn
@@ -1699,7 +1699,7 @@ func ExampleOpen() {
 	}
 	err = txn.Commit()
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	err = db.View(func(txn *Txn) error {
@@ -1716,7 +1716,7 @@ func ExampleOpen() {
 	})
 
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	// Output:
@@ -1727,13 +1727,13 @@ func ExampleOpen() {
 func ExampleTxn_NewIterator() {
 	dir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir))
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer db.Close()
 
@@ -1751,13 +1751,13 @@ func ExampleTxn_NewIterator() {
 	for i := 0; i < n; i++ {
 		err := txn.SetEntry(NewEntry(bkey(i), bval(i)))
 		if err != nil {
-			log.Fatal(err)
+			panic(err)
 		}
 	}
 
 	err = txn.Commit()
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	opt := DefaultIteratorOptions
@@ -1774,7 +1774,7 @@ func ExampleTxn_NewIterator() {
 		return nil
 	})
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	fmt.Printf("Counted %d elements", count)
 	// Output:
