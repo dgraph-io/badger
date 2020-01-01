@@ -18,8 +18,10 @@ package badger
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"hash/crc32"
 	"io/ioutil"
 	"math/rand"
 	"os"
@@ -1220,4 +1222,107 @@ func TestValueEntryChecksum(t *testing.T) {
 
 		require.NoError(t, db.Close())
 	})
+}
+
+func TestValueProtect(t *testing.T) {
+	k := []byte("KEY")
+	v := []byte(fmt.Sprintf("val%100d", 10))
+
+	t.Run("Bit-Flipping", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer removeDir(dir)
+
+		opt := getTestOptions(dir)
+		opt.ValueProtect = ValueProtectFull
+
+		db, err := Open(opt)
+		require.NoError(t, err)
+
+		require.Greater(t, len(v), db.opt.ValueThreshold)
+		txnSet(t, db, k, v, 0)
+
+		path := db.vlog.fpath(0)
+		require.NoError(t, db.Close())
+
+		file, err := os.OpenFile(path, os.O_RDWR, 0644)
+		require.NoError(t, err)
+		offset := 50
+		orig := make([]byte, 1)
+		_, err = file.ReadAt(orig, int64(offset))
+		require.NoError(t, err)
+		// Corrupt a single bit.
+		bf := orig[0] ^ 1
+		_, err = file.WriteAt([]byte{bf}, int64(offset))
+		require.NoError(t, err)
+		require.NoError(t, file.Close())
+
+		db, err = Open(opt)
+		require.NoError(t, err)
+
+		txn := db.NewTransaction(false)
+		entry, err := txn.Get(k)
+		require.NoError(t, err)
+
+		x, err := entry.ValueCopy(nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "checksum mismatch")
+		require.Nil(t, x)
+
+		require.NoError(t, db.Close())
+	})
+
+	// Misdirected write (with effects similar to lost write),
+	// it may pass the checksum. (old data in the position is structured too)
+	t.Run("Write_SDC", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer removeDir(dir)
+
+		opt := getTestOptions(dir)
+		opt.VerifyValueChecksum = true
+		opt.ValueProtect = ValueProtectTypical
+
+		db, err := Open(opt)
+		require.NoError(t, err)
+
+		require.Greater(t, len(v), db.opt.ValueThreshold)
+		txnSet(t, db, k, v, 0)
+
+		txn := db.NewTransaction(false)
+		entry, err := txn.Get(k)
+		require.NoError(t, err)
+		var vp valuePointer
+		vp.Decode(entry.vptr)
+		buf := make([]byte, vp.Len)
+		hash := crc32.New(y.CastagnoliCrcTable)
+		_, err = hash.Write(buf[:len(buf)-crc32.Size])
+		require.NoError(t, err)
+		var crcBuf [crc32.Size]byte
+		binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
+		copy(buf[len(buf)-4:], crcBuf[:])
+		txn.Discard()
+
+		path := db.vlog.fpath(0)
+		require.NoError(t, db.Close())
+
+		file, err := os.OpenFile(path, os.O_RDWR, 0644)
+		require.NoError(t, err)
+		_, err = file.WriteAt(buf, vlogHeaderSize)
+		require.NoError(t, err)
+		require.NoError(t, file.Close())
+
+		db, err = Open(opt)
+		require.NoError(t, err)
+
+		txn = db.NewTransaction(false)
+		txn.commitAndSend()
+		entry, err = txn.Get(k)
+		require.NoError(t, err)
+
+		x, err := entry.ValueCopy(nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "key mismatch")
+		require.Nil(t, x)
+		})
 }

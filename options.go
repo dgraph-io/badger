@@ -80,6 +80,9 @@ type Options struct {
 
 	// When set, checksum will be validated for each entry read from the value log file.
 	VerifyValueChecksum bool
+	// ValueProtect enables or disables silent data corruption detection in value log.
+	// Available values: NONE | TYPICAL | FULL
+	ValueProtect int
 
 	// Encryption related options.
 	EncryptionKey                 []byte        // encryption key
@@ -97,6 +100,30 @@ type Options struct {
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
+}
+
+const (
+	ValueProtectNone  = iota
+	ValueProtectTypical
+	ValueProtectFull
+)
+
+// WithValueProtect returns a new Options value with
+// silent data corruption detection level set to the given value.
+//
+// Default is none.
+func (opt Options) WithValueProtect(lvl int) Options {
+
+	l := lvl
+	switch lvl {
+	case ValueProtectFull:
+	case ValueProtectTypical:
+	default:
+		l = ValueProtectNone
+	}
+
+	opt.ValueProtect = l
+	return opt
 }
 
 // DefaultOptions sets a list of recommended options for good performance.

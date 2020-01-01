@@ -167,7 +167,7 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 
 		var vp valuePointer
 		vp.Decode(item.vptr)
-		result, cb, err := item.db.vlog.Read(vp, item.slice)
+		result, cb, err := item.db.vlog.Read(key, vp, item.slice)
 		if err != ErrRetry {
 			return result, cb, err
 		}

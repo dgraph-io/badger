@@ -1408,9 +1408,12 @@ func (vlog *valueLog) getFileRLocked(fid uint32) (*logFile, error) {
 	return ret, nil
 }
 
+// ErrKeyMismatch is returned when the key in vlog is mismatched with requested key.
+var ErrKeyMismatch = errors.New("vlog key mismatch")
+
 // Read reads the value log at a given location.
 // TODO: Make this read private.
-func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) {
+func (vlog *valueLog) Read(key []byte, vp valuePointer, s *y.Slice) ([]byte, func(), error) {
 	// Check for valid offset if we are reading from writable log.
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	if vp.Fid == maxFid && vp.Offset >= vlog.woffset() {
@@ -1426,7 +1429,7 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 		return nil, cb, err
 	}
 
-	if vlog.opt.VerifyValueChecksum {
+	if vlog.opt.VerifyValueChecksum || vlog.opt.ValueProtect == ValueProtectFull {
 		hash := crc32.New(y.CastagnoliCrcTable)
 		if _, err := hash.Write(buf[:len(buf)-crc32.Size]); err != nil {
 			runCallback(cb)
@@ -1448,6 +1451,13 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 			return nil, cb, err
 		}
 	}
+
+	if vlog.opt.ValueProtect == ValueProtectFull || vlog.opt.ValueProtect == ValueProtectTypical {
+		if !bytes.Equal(key, kv[:h.klen]) {
+			return nil, nil, errors.Wrapf(ErrKeyMismatch, "value corrupted for vp: %+v", vp)
+		}
+	}
+
 	return kv[h.klen : h.klen+h.vlen], cb, nil
 }
 
@@ -1823,7 +1833,7 @@ func (vlog *valueLog) populateDiscardStats() error {
 			break
 		}
 		// Read entry from value log.
-		result, cb, err := vlog.Read(vp, new(y.Slice))
+		result, cb, err := vlog.Read(key, vp, new(y.Slice))
 		runCallback(cb)
 		val = y.SafeCopy(val, result)
 		// The result is stored in val. We can break the loop from here.
