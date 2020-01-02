@@ -17,7 +17,11 @@
 package badger
 
 import (
-	"github.com/dgraph-io/badger/options"
+	"time"
+
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -44,6 +48,9 @@ type Options struct {
 	ReadOnly            bool
 	Truncate            bool
 	Logger              Logger
+	Compression         options.CompressionType
+	EventLogging        bool
+	InMemory            bool
 
 	// Fine tuning options.
 
@@ -52,6 +59,12 @@ type Options struct {
 	MaxLevels           int
 	ValueThreshold      int
 	NumMemtables        int
+	// Changing BlockSize across DB runs will not break badger. The block size is
+	// read from the block index stored at the end of the table.
+	BlockSize          int
+	BloomFalsePositive float64
+	KeepL0InMemory     bool
+	MaxCacheSize       int64
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -60,9 +73,20 @@ type Options struct {
 	ValueLogFileSize   int64
 	ValueLogMaxEntries uint32
 
-	NumCompactors     int
-	CompactL0OnClose  bool
-	LogRotatesToFlush int32
+	NumCompactors        int
+	CompactL0OnClose     bool
+	LogRotatesToFlush    int32
+	ZSTDCompressionLevel int
+
+	// When set, checksum will be validated for each entry read from the value log file.
+	VerifyValueChecksum bool
+
+	// Encryption related options.
+	EncryptionKey                 []byte        // encryption key
+	EncryptionKeyRotationDuration time.Duration // key rotation duration
+
+	// ChecksumVerificationMode decides when db should verify checksums for SSTable blocks.
+	ChecksumVerificationMode options.ChecksumVerificationMode
 
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
@@ -73,12 +97,16 @@ type Options struct {
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
-
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
 // Feel free to modify these to suit your needs with the WithX methods.
 func DefaultOptions(path string) Options {
+	defaultCompression := options.ZSTD
+	// Use snappy as default compression algorithm if badger is built without CGO.
+	if !y.CgoEnabled {
+		defaultCompression = options.Snappy
+	}
 	return Options{
 		Dir:                 path,
 		ValueDir:            path,
@@ -94,29 +122,60 @@ func DefaultOptions(path string) Options {
 		NumLevelZeroTables:      5,
 		NumLevelZeroTablesStall: 10,
 		NumMemtables:            5,
+		BloomFalsePositive:      0.01,
+		BlockSize:               4 * 1024,
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
+		KeepL0InMemory:          true,
+		VerifyValueChecksum:     false,
+		Compression:             defaultCompression,
+		MaxCacheSize:            1 << 30, // 1 GB
+		// Benchmarking compression level against performance showed that level 15 gives
+		// the best speed vs ratio tradeoff.
+		// For a data size of 4KB we get
+		// Level: 3  Ratio: 2.72 Time:  24112 n/s
+		// Level: 10 Ratio: 2.95 Time:  75655 n/s
+		// Level: 15 Ratio: 4.38 Time: 239042 n/s
+		// See https://github.com/dgraph-io/badger/pull/1111#issue-338120757
+		ZSTDCompressionLevel: 15,
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
 		// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
 		ValueLogFileSize: 1<<30 - 1,
 
-		ValueLogMaxEntries: 1000000,
-		ValueThreshold:     32,
-		Truncate:           false,
-		Logger:             defaultLogger,
-		LogRotatesToFlush:  2,
+		ValueLogMaxEntries:            1000000,
+		ValueThreshold:                32,
+		Truncate:                      false,
+		Logger:                        defaultLogger,
+		LogRotatesToFlush:             2,
+		EventLogging:                  true,
+		EncryptionKey:                 []byte{},
+		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 	}
 }
 
+func buildTableOptions(opt Options) table.Options {
+	return table.Options{
+		BlockSize:            opt.BlockSize,
+		BloomFalsePositive:   opt.BloomFalsePositive,
+		LoadingMode:          opt.TableLoadingMode,
+		ChkMode:              opt.ChecksumVerificationMode,
+		Compression:          opt.Compression,
+		ZSTDCompressionLevel: opt.ZSTDCompressionLevel,
+	}
+}
+
+const (
+	maxValueThreshold = (1 << 20) // 1 MB
+)
+
 // LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold
-// so values would be colocated with the LSM tree, with value log largely acting
+// so values would be collocated with the LSM tree, with value log largely acting
 // as a write-ahead log only. These options would reduce the disk usage of value
 // log, and make Badger act more like a typical LSM tree.
 func LSMOnlyOptions(path string) Options {
-	// Max value length which fits in uint16.
 	// Let's not set any other options, because they can cause issues with the
 	// size of key-value a user can pass to Badger. For e.g., if we set
 	// ValueLogFileSize to 64MB, a user can't pass a value more than that.
@@ -126,8 +185,8 @@ func LSMOnlyOptions(path string) Options {
 	// achieve a heavier usage of LSM tree.
 	// NOTE: If a user does not want to set 64KB as the ValueThreshold because
 	// of performance reasons, 1KB would be a good option too, allowing
-	// values smaller than 1KB to be colocated with the keys in the LSM tree.
-	return DefaultOptions(path).WithValueThreshold(65500)
+	// values smaller than 1KB to be collocated with the keys in the LSM tree.
+	return DefaultOptions(path).WithValueThreshold(maxValueThreshold /* 1 MB */)
 }
 
 // WithDir returns a new Options value with Dir set to the given value.
@@ -227,6 +286,16 @@ func (opt Options) WithLogger(val Logger) Options {
 	return opt
 }
 
+// WithEventLogging returns a new Options value with EventLogging set to the given value.
+//
+// EventLogging provides a way to enable or disable trace.EventLog logging.
+//
+// The default value of EventLogging is true.
+func (opt Options) WithEventLogging(enabled bool) Options {
+	opt.EventLogging = enabled
+	return opt
+}
+
 // WithMaxTableSize returns a new Options value with MaxTableSize set to the given value.
 //
 // MaxTableSize sets the maximum size in bytes for each LSM table or file.
@@ -263,9 +332,9 @@ func (opt Options) WithMaxLevels(val int) Options {
 // WithValueThreshold returns a new Options value with ValueThreshold set to the given value.
 //
 // ValueThreshold sets the threshold used to decide whether a value is stored directly in the LSM
-// tree or separatedly in the log value files.
+// tree or separately in the log value files.
 //
-// The default value of ValueThreshold is 32, but LSMOnlyOptions sets it to 65500.
+// The default value of ValueThreshold is 32, but LSMOnlyOptions sets it to maxValueThreshold.
 func (opt Options) WithValueThreshold(val int) Options {
 	opt.ValueThreshold = val
 	return opt
@@ -278,6 +347,31 @@ func (opt Options) WithValueThreshold(val int) Options {
 // The default value of NumMemtables is 5.
 func (opt Options) WithNumMemtables(val int) Options {
 	opt.NumMemtables = val
+	return opt
+}
+
+// WithBloomFalsePositive returns a new Options value with BloomFalsePositive set
+// to the given value.
+//
+// BloomFalsePositive sets the false positive probability of the bloom filter in any SSTable.
+// Before reading a key from table, the bloom filter is checked for key existence.
+// BloomFalsePositive might impact read performance of DB. Lower BloomFalsePositive value might
+// consume more memory.
+//
+// The default value of BloomFalsePositive is 0.01.
+func (opt Options) WithBloomFalsePositive(val float64) Options {
+	opt.BloomFalsePositive = val
+	return opt
+}
+
+// WithBlockSize returns a new Options value with BlockSize set to the given value.
+//
+// BlockSize sets the size of any block in SSTable. SSTable is divided into multiple blocks
+// internally. Each block is compressed using prefix diff encoding.
+//
+// The default value of BlockSize is 4KB.
+func (opt Options) WithBlockSize(val int) Options {
+	opt.BlockSize = val
 	return opt
 }
 
@@ -352,7 +446,7 @@ func (opt Options) WithNumCompactors(val int) Options {
 //
 // CompactL0OnClose determines whether Level 0 should be compacted before closing the DB.
 // This ensures that both reads and writes are efficient when the DB is opened later.
-//
+// CompactL0OnClose is set to true if KeepL0InMemory is set to true.
 // The default value of CompactL0OnClose is true.
 func (opt Options) WithCompactL0OnClose(val bool) Options {
 	opt.CompactL0OnClose = val
@@ -370,5 +464,104 @@ func (opt Options) WithCompactL0OnClose(val bool) Options {
 // The default value of LogRotatesToFlush is 2.
 func (opt Options) WithLogRotatesToFlush(val int32) Options {
 	opt.LogRotatesToFlush = val
+	return opt
+}
+
+// WithEncryptionKey return a new Options value with EncryptionKey set to the given value.
+//
+// EncryptionKey is used to encrypt the data with AES. Type of AES is used based on the key
+// size. For example 16 bytes will use AES-128. 24 bytes will use AES-192. 32 bytes will
+// use AES-256.
+func (opt Options) WithEncryptionKey(key []byte) Options {
+	opt.EncryptionKey = key
+	return opt
+}
+
+// WithEncryptionRotationDuration returns new Options value with the duration set to
+// the given value.
+//
+// Key Registry will use this duration to create new keys. If the previous generated
+// key exceed the given duration. Then the key registry will create new key.
+func (opt Options) WithEncryptionKeyRotationDuration(d time.Duration) Options {
+	opt.EncryptionKeyRotationDuration = d
+	return opt
+}
+
+// WithKeepL0InMemory returns a new Options value with KeepL0InMemory set to the given value.
+//
+// When KeepL0InMemory is set to true we will keep all Level 0 tables in memory. This leads to
+// better performance in writes as well as compactions. In case of DB crash, the value log replay
+// will take longer to complete since memtables and all level 0 tables will have to be recreated.
+// This option also sets CompactL0OnClose option to true.
+//
+// The default value of KeepL0InMemory is true.
+func (opt Options) WithKeepL0InMemory(val bool) Options {
+	opt.KeepL0InMemory = val
+	return opt
+}
+
+// WithCompression returns a new Options value with Compression set to the given value.
+//
+// When compression is enabled, every block will be compressed using the specified algorithm.
+// This option doesn't affect existing tables. Only the newly created tables will be compressed.
+//
+// The default compression algorithm used is zstd when built with Cgo. Without Cgo, the default is
+// snappy. Compression is enabled by default.
+func (opt Options) WithCompression(cType options.CompressionType) Options {
+	opt.Compression = cType
+	return opt
+}
+
+// WithVerifyValueChecksum returns a new Options value with VerifyValueChecksum set to
+// the given value.
+//
+// When VerifyValueChecksum is set to true, checksum will be verified for every entry read
+// from the value log. If the value is stored in SST (value size less than value threshold) then the
+// checksum validation will not be done.
+//
+// The default value of VerifyValueChecksum is False.
+func (opt Options) WithVerifyValueChecksum(val bool) Options {
+	opt.VerifyValueChecksum = val
+	return opt
+}
+
+// WithChecksumVerificationMode returns a new Options value with ChecksumVerificationMode set to
+// the given value.
+//
+// ChecksumVerificationMode indicates when the db should verify checksums for SSTable blocks.
+//
+// The default value of VerifyValueChecksum is options.NoVerification.
+func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificationMode) Options {
+	opt.ChecksumVerificationMode = cvMode
+	return opt
+}
+
+// WithMaxCacheSize returns a new Options value with MaxCacheSize set to the given value.
+//
+// This value specifies how much data cache should hold in memory. A small size of cache means lower
+// memory consumption and lookups/iterations would take longer.
+func (opt Options) WithMaxCacheSize(size int64) Options {
+	opt.MaxCacheSize = size
+	return opt
+}
+
+// WithInMemory returns a new Options value with Inmemory mode set to the given value.
+//
+// When badger is running in InMemory mode, everything is stored in memory. No value/sst files are
+// created. In case of a crash all data will be lost.
+func (opt Options) WithInMemory(b bool) Options {
+	opt.InMemory = b
+	return opt
+}
+
+// WithZSTDCompressionLevel returns a new Options value with ZSTDCompressionLevel set
+// to the given value.
+//
+// The ZSTD compression algorithm supports 20 compression levels. The higher the compression
+// level, the better is the compression ratio but lower is the performance. Lower levels
+// have better performance and higher levels have better compression ratios.
+// The default value of ZSTDCompressionLevel is 15.
+func (opt Options) WithZSTDCompressionLevel(cLevel int) Options {
+	opt.ZSTDCompressionLevel = cLevel
 	return opt
 }

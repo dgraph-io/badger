@@ -32,7 +32,7 @@ func TestWriteBatch(t *testing.T) {
 		return []byte(fmt.Sprintf("%128d", i))
 	}
 
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	test := func(t *testing.T, db *DB) {
 		wb := db.NewWriteBatch()
 		defer wb.Cancel()
 
@@ -65,5 +65,18 @@ func TestWriteBatch(t *testing.T) {
 			return nil
 		})
 		require.NoError(t, err)
+	}
+	t.Run("disk mode", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			test(t, db)
+		})
+	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		opt := getTestOptions("")
+		opt.InMemory = true
+		db, err := Open(opt)
+		require.NoError(t, err)
+		test(t, db)
+		require.NoError(t, db.Close())
 	})
 }

@@ -2,6 +2,8 @@
 
 set -e
 
+go version
+
 # Ensure that we can compile the binary.
 pushd badger
 go build -v .

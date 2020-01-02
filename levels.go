@@ -19,7 +19,6 @@ package badger
 import (
 	"bytes"
 	"fmt"
-	"math"
 	"math/rand"
 	"os"
 	"sort"
@@ -30,9 +29,9 @@ import (
 
 	"golang.org/x/net/trace"
 
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 )
 
@@ -53,7 +52,7 @@ var (
 )
 
 // revertToManifest checks that all necessary table files exist and removes all table files not
-// referenced by the manifest.  idMap is a set of table file id's that were read from the directory
+// referenced by the manifest. idMap is a set of table file id's that were read from the directory
 // listing.
 func revertToManifest(kv *DB, mf *Manifest, idMap map[uint64]struct{}) error {
 	// 1. Check all files in manifest exist.
@@ -99,6 +98,9 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		s.cstatus.levels[i] = new(levelCompactStatus)
 	}
 
+	if db.opt.InMemory {
+		return s, nil
+	}
 	// Compare manifest against directory, check for existent/non-existent files, and remove.
 	if err := revertToManifest(db, mf, getIDMap(db.opt.Dir)); err != nil {
 		return nil, err
@@ -150,8 +152,17 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				rerr = errors.Wrapf(err, "Opening file: %q", fname)
 				return
 			}
-
-			t, err := table.OpenTable(fd, db.opt.TableLoadingMode, tf.Checksum)
+			dk, err := db.registry.dataKey(tf.KeyID)
+			if err != nil {
+				rerr = errors.Wrapf(err, "Error while reading datakey")
+				return
+			}
+			topt := buildTableOptions(db.opt)
+			// Set compression from table manifest.
+			topt.Compression = tf.Compression
+			topt.DataKey = dk
+			topt.Cache = db.blockCache
+			t, err := table.OpenTable(fd, topt)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
@@ -234,7 +245,10 @@ func (s *levelsController) dropTree() (int, error) {
 	// Generate the manifest changes.
 	changes := []*pb.ManifestChange{}
 	for _, table := range all {
-		changes = append(changes, newDeleteChange(table.ID()))
+		// Add a delete change only if the table is not in memory.
+		if !table.IsInmemory {
+			changes = append(changes, newDeleteChange(table.ID()))
+		}
 	}
 	changeSet := pb.ManifestChangeSet{Changes: changes}
 	if err := s.kv.manifest.addChanges(changeSet.Changes); err != nil {
@@ -424,7 +438,7 @@ func (s *levelsController) compactBuildTables(
 
 	var hasOverlap bool
 	{
-		kr := getKeyRange(cd.top)
+		kr := getKeyRange(cd.top...)
 		for i, lh := range s.levels {
 			if i <= lev { // Skip upper levels.
 				continue
@@ -443,6 +457,10 @@ func (s *levelsController) compactBuildTables(
 	// value log file should be GCed.
 	discardStats := make(map[uint32]int64)
 	updateStats := func(vs y.ValueStruct) {
+		// We don't need to store/update discard stats when badger is running in Disk-less mode.
+		if s.kv.opt.InMemory {
+			return
+		}
 		if vs.Meta&bitValuePointer > 0 {
 			var vp valuePointer
 			vp.Decode(vs.Value)
@@ -472,7 +490,7 @@ func (s *levelsController) compactBuildTables(
 		valid = append(valid, table)
 	}
 	iters = append(iters, table.NewConcatIterator(valid, false))
-	it := y.NewMergeIterator(iters, false)
+	it := table.NewMergeIterator(iters, false)
 	defer it.Close() // Important to close the iterator to do ref counting.
 
 	it.Rewind()
@@ -490,9 +508,19 @@ func (s *levelsController) compactBuildTables(
 	resultCh := make(chan newTableResult)
 	var numBuilds, numVersions int
 	var lastKey, skipKey []byte
+	var vp valuePointer
 	for it.Valid() {
 		timeStart := time.Now()
-		builder := table.NewTableBuilder()
+		dk, err := s.kv.registry.latestDataKey()
+		if err != nil {
+			return nil, nil,
+				y.Wrapf(err, "Error while retrieving datakey in levelsController.compactBuildTables")
+		}
+		bopts := buildTableOptions(s.kv.opt)
+		bopts.DataKey = dk
+		// Builder does not need cache but the same options are used for opening table.
+		bopts.Cache = s.kv.blockCache
+		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
 			// See if we need to skip the prefix.
@@ -557,34 +585,46 @@ func (s *levelsController) compactBuildTables(
 				}
 			}
 			numKeys++
-			y.Check(builder.Add(it.Key(), it.Value()))
+			if vs.Meta&bitValuePointer > 0 {
+				vp.Decode(vs.Value)
+			}
+			builder.Add(it.Key(), vs, vp.Len)
 		}
 		// It was true that it.Valid() at least once in the loop above, which means we
 		// called Add() at least once, and builder is not Empty().
 		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			numKeys, numSkips, time.Since(timeStart))
-		if !builder.Empty() {
-			numBuilds++
-			fileID := s.reserveFileID()
-			go func(builder *table.Builder) {
-				defer builder.Close()
+		build := func(fileID uint64) (*table.Table, error) {
+			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
+			if err != nil {
+				return nil, errors.Wrapf(err, "While opening new table: %d", fileID)
+			}
 
-				fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
-				if err != nil {
-					resultCh <- newTableResult{nil, errors.Wrapf(err, "While opening new table: %d", fileID)}
-					return
-				}
-
-				if _, err := fd.Write(builder.Finish()); err != nil {
-					resultCh <- newTableResult{nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)}
-					return
-				}
-
-				tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode, nil)
-				// decrRef is added below.
-				resultCh <- newTableResult{tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())}
-			}(builder)
+			if _, err := fd.Write(builder.Finish()); err != nil {
+				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
+			}
+			tbl, err := table.OpenTable(fd, bopts)
+			// decrRef is added below.
+			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}
+		if builder.Empty() {
+			continue
+		}
+		numBuilds++
+		fileID := s.reserveFileID()
+		go func(builder *table.Builder) {
+			defer builder.Close()
+			var (
+				tbl *table.Table
+				err error
+			)
+			if s.kv.opt.InMemory {
+				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
+			} else {
+				tbl, err = build(fileID)
+			}
+			resultCh <- newTableResult{tbl, err}
+		}(builder)
 	}
 
 	newTables := make([]*table.Table, 0, 20)
@@ -602,7 +642,7 @@ func (s *levelsController) compactBuildTables(
 		// Ensure created files' directory entries are visible.  We don't mind the extra latency
 		// from not doing this ASAP after all file creation has finished because this is a
 		// background operation.
-		firstErr = syncDir(s.kv.opt.Dir)
+		firstErr = s.kv.syncDir(s.kv.opt.Dir)
 	}
 
 	if firstErr != nil {
@@ -620,9 +660,7 @@ func (s *levelsController) compactBuildTables(
 	sort.Slice(newTables, func(i, j int) bool {
 		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
-	if err := s.kv.vlog.updateDiscardStats(discardStats); err != nil {
-		return nil, nil, errors.Wrap(err, "failed to update discard stats")
-	}
+	s.kv.vlog.updateDiscardStats(discardStats)
 	s.kv.opt.Debugf("Discard stats: %v", discardStats)
 	return newTables, func() error { return decrRefs(newTables) }, nil
 }
@@ -631,10 +669,13 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeS
 	changes := []*pb.ManifestChange{}
 	for _, table := range newTables {
 		changes = append(changes,
-			newCreateChange(table.ID(), cd.nextLevel.level, table.Checksum))
+			newCreateChange(table.ID(), cd.nextLevel.level, table.KeyID(), table.CompressionType()))
 	}
 	for _, table := range cd.top {
-		changes = append(changes, newDeleteChange(table.ID()))
+		// Add a delete change only if the table is not in memory.
+		if !table.IsInmemory {
+			changes = append(changes, newDeleteChange(table.ID()))
+		}
 	}
 	for _, table := range cd.bot {
 		changes = append(changes, newDeleteChange(table.ID()))
@@ -680,7 +721,7 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	}
 	cd.thisRange = infRange
 
-	kr := getKeyRange(cd.top)
+	kr := getKeyRange(cd.top...)
 	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, kr)
 	cd.bot = make([]*table.Table, right-left)
 	copy(cd.bot, cd.nextLevel.tables[left:right])
@@ -688,7 +729,7 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	if len(cd.bot) == 0 {
 		cd.nextRange = kr
 	} else {
-		cd.nextRange = getKeyRange(cd.bot)
+		cd.nextRange = getKeyRange(cd.bot...)
 	}
 
 	if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
@@ -698,30 +739,44 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	return true
 }
 
+// sortByOverlap sorts tables in increasing order of overlap with next level.
+func (s *levelsController) sortByOverlap(tables []*table.Table, cd *compactDef) {
+	if len(tables) == 0 || cd.nextLevel == nil {
+		return
+	}
+
+	tableOverlap := make([]int, len(tables))
+	for i := range tables {
+		// get key range for table
+		tableRange := getKeyRange(tables[i])
+		// get overlap with next level
+		left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, tableRange)
+		tableOverlap[i] = right - left
+	}
+
+	sort.Slice(tables, func(i, j int) bool {
+		return tableOverlap[i] < tableOverlap[j]
+	})
+}
+
 func (s *levelsController) fillTables(cd *compactDef) bool {
 	cd.lockLevels()
 	defer cd.unlockLevels()
 
-	tbls := make([]*table.Table, len(cd.thisLevel.tables))
-	copy(tbls, cd.thisLevel.tables)
-	if len(tbls) == 0 {
+	tables := make([]*table.Table, len(cd.thisLevel.tables))
+	copy(tables, cd.thisLevel.tables)
+	if len(tables) == 0 {
 		return false
 	}
 
-	// Find the biggest table, and compact that first.
-	// TODO: Try other table picking strategies.
-	sort.Slice(tbls, func(i, j int) bool {
-		return tbls[i].Size() > tbls[j].Size()
-	})
+	// We want to pick files from current level in order of increasing overlap with next level
+	// tables. Idea here is to first compact file from current level which has least overlap with
+	// next level. This provides us better write amplification.
+	s.sortByOverlap(tables, cd)
 
-	for _, t := range tbls {
+	for _, t := range tables {
 		cd.thisSize = t.Size()
-		cd.thisRange = keyRange{
-			// We pick all the versions of the smallest and the biggest key.
-			left: y.KeyWithTs(y.ParseKey(t.Smallest()), math.MaxUint64),
-			// Note that version zero would be the rightmost key.
-			right: y.KeyWithTs(y.ParseKey(t.Biggest()), 0),
-		}
+		cd.thisRange = getKeyRange(t)
 		if s.cstatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
 			continue
 		}
@@ -739,7 +794,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 			}
 			return true
 		}
-		cd.nextRange = getKeyRange(cd.bot)
+		cd.nextRange = getKeyRange(cd.bot...)
 
 		if s.cstatus.overlapsWith(cd.nextLevel.level, cd.nextRange) {
 			continue
@@ -842,15 +897,19 @@ func (s *levelsController) doCompact(p compactionPriority) error {
 }
 
 func (s *levelsController) addLevel0Table(t *table.Table) error {
-	// We update the manifest _before_ the table becomes part of a levelHandler, because at that
-	// point it could get used in some compaction.  This ensures the manifest file gets updated in
-	// the proper order. (That means this update happens before that of some compaction which
-	// deletes the table.)
-	err := s.kv.manifest.addChanges([]*pb.ManifestChange{
-		newCreateChange(t.ID(), 0, t.Checksum),
-	})
-	if err != nil {
-		return err
+	// Add table to manifest file only if it is not opened in memory. We don't want to add a table
+	// to the manifest file if it exists only in memory.
+	if !t.IsInmemory {
+		// We update the manifest _before_ the table becomes part of a levelHandler, because at that
+		// point it could get used in some compaction.  This ensures the manifest file gets updated in
+		// the proper order. (That means this update happens before that of some compaction which
+		// deletes the table.)
+		err := s.kv.manifest.addChanges([]*pb.ManifestChange{
+			newCreateChange(t.ID(), 0, t.KeyID(), t.CompressionType()),
+		})
+		if err != nil {
+			return err
+		}
 	}
 
 	for !s.levels[0].tryAddLevel0Table(t) {
@@ -899,14 +958,19 @@ func (s *levelsController) close() error {
 }
 
 // get returns the found value if any. If not found, we return nil.
-func (s *levelsController) get(key []byte, maxVs *y.ValueStruct) (y.ValueStruct, error) {
-	// It's important that we iterate the levels from 0 on upward.  The reason is, if we iterated
+func (s *levelsController) get(key []byte, maxVs *y.ValueStruct, startLevel int) (
+	y.ValueStruct, error) {
+	// It's important that we iterate the levels from 0 on upward. The reason is, if we iterated
 	// in opposite order, or in parallel (naively calling all the h.RLock() in some order) we could
-	// read level L's tables post-compaction and level L+1's tables pre-compaction.  (If we do
+	// read level L's tables post-compaction and level L+1's tables pre-compaction. (If we do
 	// parallelize this, we will need to call the h.RLock() function by increasing order of level
 	// number.)
 	version := y.ParseTs(key)
 	for _, h := range s.levels {
+		// Ignore all levels below startLevel. This is useful for GC when L0 is kept in memory.
+		if h.level < startLevel {
+			continue
+		}
 		vs, err := h.get(key) // Calls h.RLock() and h.RUnlock().
 		if err != nil {
 			return y.ValueStruct{}, errors.Wrapf(err, "get key: %q", key)
@@ -949,11 +1013,12 @@ func (s *levelsController) appendIterators(
 
 // TableInfo represents the information about a table.
 type TableInfo struct {
-	ID       uint64
-	Level    int
-	Left     []byte
-	Right    []byte
-	KeyCount uint64 // Number of keys in the table
+	ID          uint64
+	Level       int
+	Left        []byte
+	Right       []byte
+	KeyCount    uint64 // Number of keys in the table
+	EstimatedSz uint64
 }
 
 func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo) {
@@ -966,14 +1031,16 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 				for it.Rewind(); it.Valid(); it.Next() {
 					count++
 				}
+				it.Close()
 			}
 
 			info := TableInfo{
-				ID:       t.ID(),
-				Level:    l.level,
-				Left:     t.Smallest(),
-				Right:    t.Biggest(),
-				KeyCount: count,
+				ID:          t.ID(),
+				Level:       l.level,
+				Left:        t.Smallest(),
+				Right:       t.Biggest(),
+				KeyCount:    count,
+				EstimatedSz: t.EstimatedSize(),
 			}
 			result = append(result, info)
 		}
@@ -986,4 +1053,32 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 		return result[i].ID < result[j].ID
 	})
 	return
+}
+
+// verifyChecksum verifies checksum for all tables on all levels.
+func (s *levelsController) verifyChecksum() error {
+	var tables []*table.Table
+	for _, l := range s.levels {
+		l.RLock()
+		tables = tables[:0]
+		for _, t := range l.tables {
+			tables = append(tables, t)
+			t.IncrRef()
+		}
+		l.RUnlock()
+
+		for _, t := range tables {
+			errChkVerify := t.VerifyChecksum()
+			if err := t.DecrRef(); err != nil {
+				s.kv.opt.Errorf("unable to decrease reference of table: %s while "+
+					"verifying checksum with error: %s", t.Filename(), err)
+			}
+
+			if errChkVerify != nil {
+				return errChkVerify
+			}
+		}
+	}
+
+	return nil
 }

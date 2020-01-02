@@ -5,14 +5,13 @@ import (
 	"io/ioutil"
 	"math"
 	"math/rand"
-	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,7 +58,7 @@ func numKeysManaged(db *DB, readTs uint64) int {
 func TestDropAllManaged(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.managedTxns = true
 	opts.ValueLogFileSize = 5 << 20
@@ -88,23 +87,23 @@ func TestDropAllManaged(t *testing.T) {
 	require.NoError(t, db.DropAll()) // Just call it twice, for fun.
 	require.Equal(t, 0, numKeysManaged(db, math.MaxUint64))
 
-	// Check that we can still write to mdb, and using lower timestamps.
+	// Check that we can still write to db, and using lower timestamps.
 	populate(db, 1)
 	require.Equal(t, int(N), numKeysManaged(db, math.MaxUint64))
-	db.Close()
+	require.NoError(t, db.Close())
 
 	// Ensure that value log is correctly replayed, that we are preserving badgerHead.
 	opts.managedTxns = true
 	db2, err := Open(opts)
 	require.NoError(t, err)
 	require.Equal(t, int(N), numKeysManaged(db2, math.MaxUint64))
-	db2.Close()
+	require.NoError(t, db2.Close())
 }
 
 func TestDropAll(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 5 << 20
 	db, err := Open(opts)
@@ -128,51 +127,69 @@ func TestDropAll(t *testing.T) {
 	// Check that we can still write to mdb, and using lower timestamps.
 	populate(db)
 	require.Equal(t, int(N), numKeys(db))
-	db.Close()
+	require.NoError(t, db.Close())
 
 	// Ensure that value log is correctly replayed.
 	db2, err := Open(opts)
 	require.NoError(t, err)
 	require.Equal(t, int(N), numKeys(db2))
-	db2.Close()
+	require.NoError(t, db2.Close())
 }
 
 func TestDropAllTwice(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 5 << 20
-	db, err := Open(opts)
-	require.NoError(t, err)
+	test := func(t *testing.T, opts Options) {
+		db, err := Open(opts)
 
-	N := uint64(10000)
-	populate := func(db *DB) {
-		writer := db.NewWriteBatch()
-		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
+		require.NoError(t, err)
+		defer func() {
+			require.NoError(t, db.Close())
+		}()
+
+		N := uint64(10000)
+		populate := func(db *DB) {
+			writer := db.NewWriteBatch()
+			for i := uint64(0); i < N; i++ {
+				require.NoError(t, writer.Set([]byte(key("key", int(i))), val(false)))
+			}
+			require.NoError(t, writer.Flush())
 		}
-		require.NoError(t, writer.Flush())
+
+		populate(db)
+		require.Equal(t, int(N), numKeys(db))
+
+		require.NoError(t, db.DropAll())
+		require.Equal(t, 0, numKeys(db))
+
+		// Call DropAll again.
+		require.NoError(t, db.DropAll())
 	}
+	t.Run("disk mode", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer removeDir(dir)
+		opts := getTestOptions(dir)
+		opts.ValueLogFileSize = 5 << 20
+		test(t, opts)
+	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		opts := getTestOptions("")
+		opts.InMemory = true
+		test(t, opts)
 
-	populate(db)
-	require.Equal(t, int(N), numKeys(db))
-
-	require.NoError(t, db.DropAll())
-	require.Equal(t, 0, numKeys(db))
-
-	// Call DropAll again.
-	require.NoError(t, db.DropAll())
+	})
 }
 
 func TestDropAllWithPendingTxn(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 5 << 20
 	db, err := Open(opts)
 	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
 
 	N := uint64(10000)
 	populate := func(db *DB) {
@@ -224,7 +241,9 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 	}()
 	// Do not cancel txn.
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		time.Sleep(2 * time.Second)
 		require.NoError(t, db.DropAll())
 	}()
@@ -234,7 +253,7 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 func TestDropReadOnly(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 5 << 20
 	db, err := Open(opts)
@@ -266,7 +285,7 @@ func TestDropReadOnly(t *testing.T) {
 func TestWriteAfterClose(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 5 << 20
 	db, err := Open(opts)
@@ -292,7 +311,7 @@ func TestWriteAfterClose(t *testing.T) {
 func TestDropAllRace(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.managedTxns = true
 	db, err := Open(opts)
@@ -356,7 +375,7 @@ func TestDropAllRace(t *testing.T) {
 func TestDropPrefix(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 5 << 20
 	db, err := Open(opts)
@@ -407,11 +426,14 @@ func TestDropPrefix(t *testing.T) {
 func TestDropPrefixWithPendingTxn(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 5 << 20
 	db, err := Open(opts)
 	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
 
 	N := uint64(10000)
 	populate := func(db *DB) {
@@ -476,7 +498,7 @@ func TestDropPrefixWithPendingTxn(t *testing.T) {
 func TestDropPrefixReadOnly(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 5 << 20
 	db, err := Open(opts)
@@ -508,7 +530,7 @@ func TestDropPrefixReadOnly(t *testing.T) {
 func TestDropPrefixRace(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.managedTxns = true
 	db, err := Open(opts)
@@ -569,4 +591,50 @@ func TestDropPrefixRace(t *testing.T) {
 	t.Logf("Before: %d. After dropprefix: %d\n", before, after)
 	require.True(t, after < before)
 	db.Close()
+}
+
+func TestWriteBatchManagedMode(t *testing.T) {
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%10d", i))
+	}
+	val := func(i int) []byte {
+		return []byte(fmt.Sprintf("%128d", i))
+	}
+	opt := DefaultOptions("")
+	opt.managedTxns = true
+	opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		wb := db.NewWriteBatchAt(1)
+		defer wb.Cancel()
+
+		N, M := 50000, 1000
+		start := time.Now()
+
+		for i := 0; i < N; i++ {
+			require.NoError(t, wb.Set(key(i), val(i)))
+		}
+		for i := 0; i < M; i++ {
+			require.NoError(t, wb.Delete(key(i)))
+		}
+		require.NoError(t, wb.Flush())
+		t.Logf("Time taken for %d writes (w/ test options): %s\n", N+M, time.Since(start))
+
+		err := db.View(func(txn *Txn) error {
+			itr := txn.NewIterator(DefaultIteratorOptions)
+			defer itr.Close()
+
+			i := M
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				require.Equal(t, string(key(i)), string(item.Key()))
+				valcopy, err := item.ValueCopy(nil)
+				require.NoError(t, err)
+				require.Equal(t, val(i), valcopy)
+				i++
+			}
+			require.Equal(t, N, i)
+			return nil
+		})
+		require.NoError(t, err)
+	})
 }

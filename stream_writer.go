@@ -17,11 +17,13 @@
 package badger
 
 import (
+	"fmt"
 	"math"
+	"sync"
 
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 )
@@ -40,12 +42,13 @@ const headStreamId uint32 = math.MaxUint32
 // StreamWriter should not be called on in-use DB instances. It is designed only to bootstrap new
 // DBs.
 type StreamWriter struct {
+	writeLock  sync.Mutex
 	db         *DB
 	done       func()
 	throttle   *y.Throttle
 	maxVersion uint64
 	writers    map[uint32]*sortedWriter
-	closer     *y.Closer
+	maxHead    valuePointer
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -59,7 +62,6 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 		// concurrent streams being processed.
 		throttle: y.NewThrottle(16),
 		writers:  make(map[uint32]*sortedWriter),
-		closer:   y.NewCloser(0),
 	}
 }
 
@@ -68,19 +70,38 @@ func (db *DB) NewStreamWriter() *StreamWriter {
 // calling Prepare, because it could result in permanent data loss. Not calling Prepare would result
 // in a corrupt Badger instance.
 func (sw *StreamWriter) Prepare() error {
+	sw.writeLock.Lock()
+	defer sw.writeLock.Unlock()
+
 	var err error
 	sw.done, err = sw.db.dropAll()
 	return err
 }
 
 // Write writes KVList to DB. Each KV within the list contains the stream id which StreamWriter
-// would use to demux the writes. Write is not thread safe and it should NOT be called concurrently.
+// would use to demux the writes. Write is thread safe and can be called concurrently by multiple
+// goroutines.
 func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 	if len(kvs.GetKv()) == 0 {
 		return nil
 	}
+
+	// closedStreams keeps track of all streams which are going to be marked as done. We are
+	// keeping track of all streams so that we can close them at the end, after inserting all
+	// the valid kvs.
+	closedStreams := make(map[uint32]struct{})
 	streamReqs := make(map[uint32]*request)
 	for _, kv := range kvs.Kv {
+		if kv.StreamDone {
+			closedStreams[kv.StreamId] = struct{}{}
+			continue
+		}
+
+		// Panic if some kv comes after stream has been marked as closed.
+		if _, ok := closedStreams[kv.StreamId]; ok {
+			panic(fmt.Sprintf("write performed on closed stream: %d", kv.StreamId))
+		}
+
 		var meta, userMeta byte
 		if len(kv.Meta) > 0 {
 			meta = kv.Meta[0]
@@ -98,7 +119,7 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 			ExpiresAt: kv.ExpiresAt,
 			meta:      meta,
 		}
-		// If the value can be colocated with the key in LSM tree, we can skip
+		// If the value can be collocated with the key in LSM tree, we can skip
 		// writing the value to value log.
 		e.skipVlog = sw.db.shouldWriteValueToLSM(*e)
 		req := streamReqs[kv.StreamId]
@@ -108,21 +129,59 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 		}
 		req.Entries = append(req.Entries, e)
 	}
-	var all []*request
+	all := make([]*request, 0, len(streamReqs))
 	for _, req := range streamReqs {
 		all = append(all, req)
 	}
+
+	sw.writeLock.Lock()
+	defer sw.writeLock.Unlock()
+
+	// We are writing all requests to vlog even if some request belongs to already closed stream.
+	// It is safe to do because we are panicking while writing to sorted writer, which will be nil
+	// for closed stream. At restart, stream writer will drop all the data in Prepare function.
 	if err := sw.db.vlog.write(all); err != nil {
 		return err
 	}
 
-	for streamId, req := range streamReqs {
+	for streamID, req := range streamReqs {
+		writer, ok := sw.writers[streamID]
+		if !ok {
+			var err error
+			writer, err = sw.newWriter(streamID)
+			if err != nil {
+				return errors.Wrapf(err, "failed to create writer with ID %d", streamID)
+			}
+			sw.writers[streamID] = writer
+		}
+
+		if writer == nil {
+			panic(fmt.Sprintf("write performed on closed stream: %d", streamID))
+		}
+
+		writer.reqCh <- req
+	}
+
+	// Now we can close any streams if required. We will make writer for
+	// the closed streams as nil.
+	for streamId := range closedStreams {
 		writer, ok := sw.writers[streamId]
 		if !ok {
-			writer = sw.newWriter(streamId)
-			sw.writers[streamId] = writer
+			sw.db.opt.Logger.Warningf("Trying to close stream: %d, but no sorted "+
+				"writer found for it", streamId)
+			continue
 		}
-		writer.reqCh <- req
+
+		writer.closer.SignalAndWait()
+		if err := writer.Done(); err != nil {
+			return err
+		}
+
+		if sw.maxHead.Less(writer.head) {
+			sw.maxHead = writer.head
+		}
+
+		sw.writers[streamId] = nil
 	}
 	return nil
 }
@@ -130,23 +189,35 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 // Flush is called once we are done writing all the entries. It syncs DB directories. It also
 // updates Oracle with maxVersion found in all entries (if DB is not managed).
 func (sw *StreamWriter) Flush() error {
+	sw.writeLock.Lock()
+	defer sw.writeLock.Unlock()
+
 	defer sw.done()
 
-	sw.closer.SignalAndWait()
-	var maxHead valuePointer
 	for _, writer := range sw.writers {
+		if writer != nil {
+			writer.closer.SignalAndWait()
+		}
+	}
+
+	for _, writer := range sw.writers {
+		if writer == nil {
+			continue
+		}
 		if err := writer.Done(); err != nil {
 			return err
 		}
-		if maxHead.Less(writer.head) {
-			maxHead = writer.head
+		if sw.maxHead.Less(writer.head) {
+			sw.maxHead = writer.head
 		}
 	}
 
 	// Encode and write the value log head into a new table.
-	data := make([]byte, vptrSize)
-	maxHead.Encode(data)
-	headWriter := sw.newWriter(headStreamId)
+	data := sw.maxHead.Encode()
+	headWriter, err := sw.newWriter(headStreamId)
+	if err != nil {
+		return errors.Wrap(err, "failed to create head writer")
+	}
 	if err := headWriter.Add(
 		y.KeyWithTs(head, sw.maxVersion),
 		y.ValueStruct{Value: data}); err != nil {
@@ -172,13 +243,18 @@ func (sw *StreamWriter) Flush() error {
 		return err
 	}
 
+	// Sort tables at the end.
+	for _, l := range sw.db.lc.levels {
+		l.sortTables()
+	}
+
 	// Now sync the directories, so all the files are registered.
 	if sw.db.opt.ValueDir != sw.db.opt.Dir {
-		if err := syncDir(sw.db.opt.ValueDir); err != nil {
+		if err := sw.db.syncDir(sw.db.opt.ValueDir); err != nil {
 			return err
 		}
 	}
-	if err := syncDir(sw.db.opt.Dir); err != nil {
+	if err := sw.db.syncDir(sw.db.opt.Dir); err != nil {
 		return err
 	}
 	return sw.db.lc.validate()
@@ -190,38 +266,50 @@ type sortedWriter struct {
 
 	builder  *table.Builder
 	lastKey  []byte
-	streamId uint32
+	streamID uint32
 	reqCh    chan *request
 	head     valuePointer
+	// Have separate closer for each writer, as it can be closed at any time.
+	closer *y.Closer
 }
 
-func (sw *StreamWriter) newWriter(streamId uint32) *sortedWriter {
+func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
+	dk, err := sw.db.registry.latestDataKey()
+	if err != nil {
+		return nil, err
+	}
+
+	bopts := buildTableOptions(sw.db.opt)
+	bopts.DataKey = dk
 	w := &sortedWriter{
 		db:       sw.db,
-		streamId: streamId,
+		streamID: streamID,
 		throttle: sw.throttle,
-		builder:  table.NewTableBuilder(),
+		builder:  table.NewTableBuilder(bopts),
 		reqCh:    make(chan *request, 3),
+		closer:   y.NewCloser(1),
 	}
-	sw.closer.AddRunning(1)
-	go w.handleRequests(sw.closer)
-	return w
+
+	go w.handleRequests()
+	return w, nil
 }
 
 // ErrUnsortedKey is returned when any out of order key arrives at sortedWriter during call to Add.
 var ErrUnsortedKey = errors.New("Keys not in sorted order")
 
-func (w *sortedWriter) handleRequests(closer *y.Closer) {
-	defer closer.Done()
+func (w *sortedWriter) handleRequests() {
+	defer w.closer.Done()
 
 	process := func(req *request) {
 		for i, e := range req.Entries {
-			vptr := req.Ptrs[i]
-			if !vptr.IsZero() {
-				y.AssertTrue(w.head.Less(vptr))
-				w.head = vptr
+			// If badger is running in InMemory mode, len(req.Ptrs) == 0.
+			if i < len(req.Ptrs) {
+				vptr := req.Ptrs[i]
+				if !vptr.IsZero() {
+					y.AssertTrue(w.head.Less(vptr))
+					w.head = vptr
+				}
 			}
-
 			var vs y.ValueStruct
 			if e.skipVlog {
 				vs = y.ValueStruct{
@@ -231,9 +319,9 @@ func (w *sortedWriter) handleRequests(closer *y.Closer) {
 					ExpiresAt: e.ExpiresAt,
 				}
 			} else {
-				vbuf := make([]byte, vptrSize)
+				vptr := req.Ptrs[i]
 				vs = y.ValueStruct{
-					Value:     vptr.Encode(vbuf),
+					Value:     vptr.Encode(),
 					Meta:      e.meta | bitValuePointer,
 					UserMeta:  e.UserMeta,
 					ExpiresAt: e.ExpiresAt,
@@ -249,7 +337,7 @@ func (w *sortedWriter) handleRequests(closer *y.Closer) {
 		select {
 		case req := <-w.reqCh:
 			process(req)
-		case <-closer.HasBeenClosed():
+		case <-w.closer.HasBeenClosed():
 			close(w.reqCh)
 			for req := range w.reqCh {
 				process(req)
@@ -268,25 +356,42 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	sameKey := y.SameKey(key, w.lastKey)
 	// Same keys should go into the same SSTable.
 	if !sameKey && w.builder.ReachedCapacity(w.db.opt.MaxTableSize) {
-		if err := w.send(); err != nil {
+		if err := w.send(false); err != nil {
 			return err
 		}
 	}
 
 	w.lastKey = y.SafeCopy(w.lastKey, key)
-	return w.builder.Add(key, vs)
+	var vp valuePointer
+	if vs.Meta&bitValuePointer > 0 {
+		vp.Decode(vs.Value)
+	}
+	w.builder.Add(key, vs, vp.Len)
+	return nil
 }
 
-func (w *sortedWriter) send() error {
+func (w *sortedWriter) send(done bool) error {
 	if err := w.throttle.Do(); err != nil {
 		return err
 	}
 	go func(builder *table.Builder) {
-		data := builder.Finish()
-		err := w.createTable(data)
+		err := w.createTable(builder)
 		w.throttle.Done(err)
 	}(w.builder)
-	w.builder = table.NewTableBuilder()
+	// If done is true, this indicates we can close the writer.
+	// No need to allocate underlying TableBuilder now.
+	if done {
+		w.builder = nil
+		return nil
+	}
+
+	dk, err := w.db.registry.latestDataKey()
+	if err != nil {
+		return y.Wrapf(err, "Error while retriving datakey in sortedWriter.send")
+	}
+	bopts := buildTableOptions(w.db.opt)
+	bopts.DataKey = dk
+	w.builder = table.NewTableBuilder(bopts)
 	return nil
 }
 
@@ -294,26 +399,40 @@ func (w *sortedWriter) send() error {
 // to sortedWriter. It completes writing current SST to disk.
 func (w *sortedWriter) Done() error {
 	if w.builder.Empty() {
+		// Assign builder as nil, so that underlying memory can be garbage collected.
+		w.builder = nil
 		return nil
 	}
-	return w.send()
+
+	return w.send(true)
 }
 
-func (w *sortedWriter) createTable(data []byte) error {
+func (w *sortedWriter) createTable(builder *table.Builder) error {
+	data := builder.Finish()
 	if len(data) == 0 {
 		return nil
 	}
 	fileID := w.db.lc.reserveFileID()
-	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, w.db.opt.Dir), true)
-	if err != nil {
-		return err
-	}
-	if _, err := fd.Write(data); err != nil {
-		return err
-	}
-	tbl, err := table.OpenTable(fd, w.db.opt.TableLoadingMode, nil)
-	if err != nil {
-		return err
+	opts := buildTableOptions(w.db.opt)
+	opts.DataKey = builder.DataKey()
+	opts.Cache = w.db.blockCache
+	var tbl *table.Table
+	if w.db.opt.InMemory {
+		var err error
+		if tbl, err = table.OpenInMemoryTable(data, fileID, &opts); err != nil {
+			return err
+		}
+	} else {
+		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, w.db.opt.Dir), true)
+		if err != nil {
+			return err
+		}
+		if _, err := fd.Write(data); err != nil {
+			return err
+		}
+		if tbl, err = table.OpenTable(fd, opts); err != nil {
+			return err
+		}
 	}
 	lc := w.db.lc
 
@@ -334,25 +453,30 @@ func (w *sortedWriter) createTable(data []byte) error {
 		// better than that.
 		lhandler = lc.levels[len(lc.levels)-1]
 	}
-	if w.streamId == headStreamId {
+	if w.streamID == headStreamId {
 		// This is a special !badger!head key. We should store it at level 0, separate from all the
 		// other keys to avoid an overlap.
 		lhandler = lc.levels[0]
 	}
 	// Now that table can be opened successfully, let's add this to the MANIFEST.
 	change := &pb.ManifestChange{
-		Id:       tbl.ID(),
-		Op:       pb.ManifestChange_CREATE,
-		Level:    uint32(lhandler.level),
-		Checksum: tbl.Checksum,
+		Id:          tbl.ID(),
+		KeyId:       tbl.KeyID(),
+		Op:          pb.ManifestChange_CREATE,
+		Level:       uint32(lhandler.level),
+		Compression: uint32(tbl.CompressionType()),
 	}
 	if err := w.db.manifest.addChanges([]*pb.ManifestChange{change}); err != nil {
 		return err
 	}
-	if err := lhandler.replaceTables([]*table.Table{}, []*table.Table{tbl}); err != nil {
-		return err
-	}
+
+	// We are not calling lhandler.replaceTables() here, as it sorts tables on every addition.
+	// We can sort all tables only once during Flush() call.
+	lhandler.addTable(tbl)
+
+	// Release the ref held by OpenTable.
+	_ = tbl.DecrRef()
 	w.db.opt.Infof("Table created: %d at level: %d for stream: %d. Size: %s\n",
-		fileID, lhandler.level, w.streamId, humanize.Bytes(uint64(tbl.Size())))
+		fileID, lhandler.level, w.streamID, humanize.Bytes(uint64(tbl.Size())))
 	return nil
 }

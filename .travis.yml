@@ -3,10 +3,15 @@ language: go
 go:
     - "1.11"
     - "1.12"
+    - "1.13"
+    - tip
+os:
+    - osx
+    
+jobs:
+  allow_failures:
+    - go: tip
 
-matrix:
-  include:
-    - os: osx
 notifications:
   email: false
   slack:

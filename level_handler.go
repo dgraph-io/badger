@@ -21,8 +21,10 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgryski/go-farm"
+
+	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 )
 
@@ -138,6 +140,31 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 	return decrRefs(toDel)
 }
 
+// addTable adds toAdd table to levelHandler. Normally when we add tables to levelHandler, we sort
+// tables based on table.Smallest. This is required for correctness of the system. But in case of
+// stream writer this can be avoided. We can just add tables to levelHandler's table list
+// and after all addTable calls, we can sort table list(check sortTable method).
+// NOTE: levelHandler.sortTables() should be called after call addTable calls are done.
+func (s *levelHandler) addTable(t *table.Table) {
+	s.Lock()
+	defer s.Unlock()
+
+	s.totalSize += t.Size() // Increase totalSize first.
+	t.IncrRef()
+	s.tables = append(s.tables, t)
+}
+
+// sortTables sorts tables of levelHandler based on table.Smallest.
+// Normally it should be called after all addTable calls.
+func (s *levelHandler) sortTables() {
+	s.RLock()
+	defer s.RUnlock()
+
+	sort.Slice(s.tables, func(i, j int) bool {
+		return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
+	})
+}
+
 func decrRefs(tables []*table.Table) error {
 	for _, table := range tables {
 		if err := table.DecrRef(); err != nil {
@@ -231,9 +258,10 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getTableForKey(key)
 	keyNoTs := y.ParseKey(key)
 
+	hash := farm.Fingerprint64(keyNoTs)
 	var maxVs y.ValueStruct
 	for _, th := range tables {
-		if th.DoesNotHave(keyNoTs) {
+		if th.DoesNotHave(hash) {
 			y.NumLSMBloomHits.Add(s.strLevel, 1)
 			continue
 		}
@@ -248,7 +276,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 		}
 		if y.SameKey(key, it.Key()) {
 			if version := y.ParseTs(it.Key()); maxVs.Version < version {
-				maxVs = it.Value()
+				maxVs = it.ValueCopy()
 				maxVs.Version = version
 			}
 		}
@@ -262,20 +290,22 @@ func (s *levelHandler) appendIterators(iters []y.Iterator, opt *IteratorOptions)
 	s.RLock()
 	defer s.RUnlock()
 
-	tables := make([]*table.Table, 0, len(s.tables))
-	for _, t := range s.tables {
-		if opt.pickTable(t) {
-			tables = append(tables, t)
-		}
-	}
-	if len(tables) == 0 {
-		return iters
-	}
-
 	if s.level == 0 {
 		// Remember to add in reverse order!
 		// The newer table at the end of s.tables should be added first as it takes precedence.
-		return appendIteratorsReversed(iters, tables, opt.Reverse)
+		// Level 0 tables are not in key sorted order, so we need to consider them one by one.
+		var out []*table.Table
+		for _, t := range s.tables {
+			if opt.pickTable(t) {
+				out = append(out, t)
+			}
+		}
+		return appendIteratorsReversed(iters, out, opt.Reverse)
+	}
+
+	tables := opt.pickTables(s.tables)
+	if len(tables) == 0 {
+		return iters
 	}
 	return append(iters, table.NewConcatIterator(tables, opt.Reverse))
 }

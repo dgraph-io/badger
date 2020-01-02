@@ -23,8 +23,9 @@ import (
 	"encoding/binary"
 	"io"
 
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
+	"github.com/golang/protobuf/proto"
 )
 
 // Backup is a wrapper function over Stream.Backup to generate full and incremental backups of the
@@ -116,10 +117,10 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 }
 
 func writeTo(list *pb.KVList, w io.Writer) error {
-	if err := binary.Write(w, binary.LittleEndian, uint64(list.Size())); err != nil {
+	if err := binary.Write(w, binary.LittleEndian, uint64(proto.Size(list))); err != nil {
 		return err
 	}
-	buf, err := list.Marshal()
+	buf, err := proto.Marshal(list)
 	if err != nil {
 		return err
 	}
@@ -127,20 +128,25 @@ func writeTo(list *pb.KVList, w io.Writer) error {
 	return err
 }
 
-type loader struct {
-	db       *DB
-	throttle *y.Throttle
-	entries  []*Entry
+// KVLoader is used to write KVList objects in to badger. It can be used to restore a backup.
+type KVLoader struct {
+	db          *DB
+	throttle    *y.Throttle
+	entries     []*Entry
+	entriesSize int64
 }
 
-func (db *DB) newLoader(maxPendingWrites int) *loader {
-	return &loader{
+// NewKVLoader returns a new instance of KVLoader.
+func (db *DB) NewKVLoader(maxPendingWrites int) *KVLoader {
+	return &KVLoader{
 		db:       db,
 		throttle: y.NewThrottle(maxPendingWrites),
+		entries:  make([]*Entry, 0, db.opt.maxBatchCount),
 	}
 }
 
-func (l *loader) set(kv *pb.KV) error {
+// Set writes the key-value pair to the database.
+func (l *KVLoader) Set(kv *pb.KV) error {
 	var userMeta, meta byte
 	if len(kv.UserMeta) > 0 {
 		userMeta = kv.UserMeta[0]
@@ -148,21 +154,27 @@ func (l *loader) set(kv *pb.KV) error {
 	if len(kv.Meta) > 0 {
 		meta = kv.Meta[0]
 	}
-
-	l.entries = append(l.entries, &Entry{
+	e := &Entry{
 		Key:       y.KeyWithTs(kv.Key, kv.Version),
 		Value:     kv.Value,
 		UserMeta:  userMeta,
 		ExpiresAt: kv.ExpiresAt,
 		meta:      meta,
-	})
-	if len(l.entries) >= 1000 {
-		return l.send()
 	}
+	estimatedSize := int64(e.estimateSize(l.db.opt.ValueThreshold))
+	// Flush entries if inserting the next entry would overflow the transactional limits.
+	if int64(len(l.entries))+1 >= l.db.opt.maxBatchCount ||
+		l.entriesSize+estimatedSize >= l.db.opt.maxBatchSize {
+		if err := l.send(); err != nil {
+			return err
+		}
+	}
+	l.entries = append(l.entries, e)
+	l.entriesSize += estimatedSize
 	return nil
 }
 
-func (l *loader) send() error {
+func (l *KVLoader) send() error {
 	if err := l.throttle.Do(); err != nil {
 		return err
 	}
@@ -172,11 +184,13 @@ func (l *loader) send() error {
 		return err
 	}
 
-	l.entries = make([]*Entry, 0, 1000)
+	l.entries = make([]*Entry, 0, l.db.opt.maxBatchCount)
+	l.entriesSize = 0
 	return nil
 }
 
-func (l *loader) finish() error {
+// Finish is meant to be called after all the key-value pairs have been loaded.
+func (l *KVLoader) Finish() error {
 	if len(l.entries) > 0 {
 		if err := l.send(); err != nil {
 			return err
@@ -187,7 +201,8 @@ func (l *loader) finish() error {
 
 // Load reads a protobuf-encoded list of all entries from a reader and writes
 // them to the database. This can be used to restore the database from a backup
-// made by calling DB.Backup().
+// made by calling DB.Backup(). If more complex logic is needed to restore a badger
+// backup, the KVLoader interface should be used instead.
 //
 // DB.Load() should be called on a database that is not running any other
 // concurrent transactions while it is running.
@@ -195,7 +210,7 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 	br := bufio.NewReaderSize(r, 16<<10)
 	unmarshalBuf := make([]byte, 1<<10)
 
-	ldr := db.newLoader(maxPendingWrites)
+	ldr := db.NewKVLoader(maxPendingWrites)
 	for {
 		var sz uint64
 		err := binary.Read(br, binary.LittleEndian, &sz)
@@ -214,12 +229,12 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 		}
 
 		list := &pb.KVList{}
-		if err := list.Unmarshal(unmarshalBuf[:sz]); err != nil {
+		if err := proto.Unmarshal(unmarshalBuf[:sz], list); err != nil {
 			return err
 		}
 
 		for _, kv := range list.Kv {
-			if err := ldr.set(kv); err != nil {
+			if err := ldr.Set(kv); err != nil {
 				return err
 			}
 
@@ -231,7 +246,7 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 		}
 	}
 
-	if err := ldr.finish(); err != nil {
+	if err := ldr.Finish(); err != nil {
 		return err
 	}
 	db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
