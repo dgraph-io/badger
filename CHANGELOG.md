@@ -9,7 +9,7 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
 ### New APIs
 
 - badger.Options
-  - WithInMemory (5b6321)
+  - WithInMemory (f5b6321)
   - WithZSTDCompressionLevel (3eb4e72)
   
 - Badger.TableInfo
