@@ -80,7 +80,7 @@ type Skiplist struct {
 	head   *node
 	ref    int32
 	arena  *Arena
-	rng    rand.Source
+	rand   *rand.Rand
 }
 
 // IncrRef increases the refcount
@@ -134,7 +134,7 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 		head:   head,
 		arena:  arena,
 		ref:    1,
-		rng:    rand.NewSource(time.Now().UnixNano()),
+		rand:   rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -170,7 +170,7 @@ func (s *node) casNextOffset(h int, old, val uint32) bool {
 
 func (s *Skiplist) randomHeight() int {
 	h := 1
-	for h < maxHeight && uint32(s.rng.Int63()) <= heightIncrease {
+	for h < maxHeight && s.rand.Uint32() <= heightIncrease {
 		h++
 	}
 	return h
