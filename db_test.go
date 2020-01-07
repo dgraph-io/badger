@@ -1203,7 +1203,7 @@ func randBytes(n int) []byte {
 	recv := make([]byte, n)
 	in, err := rand.Read(recv)
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	return recv[:in]
 }
@@ -1672,7 +1672,7 @@ func TestGoroutineLeak(t *testing.T) {
 func ExampleOpen() {
 	dir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer removeDir(dir)
 	db, err := Open(DefaultOptions(dir))
@@ -1695,7 +1695,7 @@ func ExampleOpen() {
 	txn := db.NewTransaction(true) // Read-write txn
 	err = txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	err = txn.Commit()
 	if err != nil {
@@ -1959,7 +1959,7 @@ func TestMain(m *testing.M) {
 	// call flag.Parse() here if TestMain uses flags
 	go func() {
 		if err := http.ListenAndServe("localhost:8080", nil); err != nil {
-			log.Fatalf("Unable to open http port at 8080")
+			panic("Unable to open http port at 8080")
 		}
 	}()
 	os.Exit(m.Run())
@@ -1979,12 +1979,12 @@ func ExampleDB_Subscribe() {
 	// Open the DB.
 	dir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer removeDir(dir)
 	db, err := Open(DefaultOptions(dir))
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer db.Close()
 
@@ -2003,7 +2003,7 @@ func ExampleDB_Subscribe() {
 			}
 		}
 		if err := db.Subscribe(ctx, cb, prefix); err != nil && err != context.Canceled {
-			log.Fatal(err)
+			panic(err)
 		}
 		log.Printf("subscription closed")
 	}()
@@ -2013,11 +2013,11 @@ func ExampleDB_Subscribe() {
 	// Write both keys, but only one should be printed in the Output.
 	err = db.Update(func(txn *Txn) error { return txn.Set(aKey, aValue) })
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	err = db.Update(func(txn *Txn) error { return txn.Set(bKey, bValue) })
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	log.Printf("stopping subscription")
