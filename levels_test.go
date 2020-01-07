@@ -147,7 +147,7 @@ func getAllAndCheck(t *testing.T, db *DB, expected []keyValVersion) {
 				expect.key, item.Key())
 			require.Equal(t, expect.val, string(v), "key: %s expected value: %s actual %s",
 				item.key, expect.val, v)
-			require.Equal(t, expect.version, int(item.Version()), "key: %s expected version: %d "+
+			require.Equal(t, expect.version, int(item.Version()), "key: %s expected version: %d ",
 				"actual %d", item.key, expect.version, item.Version())
 			i++
 		}
@@ -193,6 +193,49 @@ func TestCompaction(t *testing.T) {
 		// foo version 2 should be dropped after compaction.
 		getAllAndCheck(t, db, []keyValVersion{{"foo", "bar", 3}, {"fooz", "baz", 1}})
 	})
+
+	t.Run("level 0 to level 1 with lower overlap", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer removeDir(dir)
+
+		// Disable compactions and keep single version of each key.
+		opt := DefaultOptions(dir).WithNumCompactors(0).WithNumVersionsToKeep(1)
+		db, err := OpenManaged(opt)
+		require.NoError(t, err)
+
+		l0 := []keyValVersion{{"foo", "bar", 3}, {"fooz", "baz", 1}}
+		l01 := []keyValVersion{{"foo", "bar", 2}}
+		l1 := []keyValVersion{{"foo", "bar", 1}}
+		l2 := []keyValVersion{{"foo", "bar", 0}}
+		// Level 0 has table l0 and l01.
+		createAndOpen(db, l0, 0)
+		createAndOpen(db, l01, 0)
+		// Level 1 has table l1.
+		createAndOpen(db, l1, 1)
+		// Level 2 has table l2.
+		createAndOpen(db, l2, 2)
+
+		// Set a high discard timestamp so that all the keys are below the discard timestamp.
+		db.SetDiscardTs(10)
+
+		getAllAndCheck(t, db, []keyValVersion{
+			{"foo", "bar", 3}, {"foo", "bar", 2}, {"foo", "bar", 1},
+			{"foo", "bar", 0}, {"fooz", "baz", 1},
+		})
+		cdef := compactDef{
+			thisLevel: db.lc.levels[0],
+			nextLevel: db.lc.levels[1],
+			top:       db.lc.levels[0].tables,
+			bot:       db.lc.levels[1].tables,
+		}
+		require.NoError(t, db.lc.runCompactDef(0, cdef))
+		// foo version 2 and version 1 should be dropped after compaction.
+		getAllAndCheck(t, db, []keyValVersion{
+			{"foo", "bar", 3}, {"foo", "bar", 0}, {"fooz", "baz", 1},
+		})
+	})
+
 	t.Run("level 1 to level 2", func(t *testing.T) {
 		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
