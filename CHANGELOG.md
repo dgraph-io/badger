@@ -4,7 +4,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Serialization Versioning](VERSIONING.md).
 
-## [Unreleased]
+## [2.0.1] - 2020-01-02 
+
+### New APIs
+
+- badger.Options
+  - WithInMemory (f5b6321)
+  - WithZSTDCompressionLevel (3eb4e72)
+  
+- Badger.TableInfo
+  - EstimatedSz (f46f8ea)
+  
+### Features
+
+- Introduce in-memory mode in badger. (#1113)
+
+### Fixed
+
+- Limit manifest's change set size. (#1119)
+- Cast idx to uint32 to fix compilation on i386. (#1118)
+- Fix request increment ref bug. (#1121)
+- Fix windows dataloss issue. (#1134)
+- Fix VerifyValueChecksum checks. (#1138)
+- Fix encryption in stream writer. (#1146)
+- Fix segmentation fault in vlog.Read. (header.Decode) (#1150) 
+- Fix merge iterator duplicates issue. (#1157)
+
+### Performance
+
+- Set level 15 as default compression level in Zstd. (#1111) 
+- Optimize createTable in stream_writer.go. (#1132)
 
 ## [2.0.0] - 2019-11-12
 
@@ -245,7 +274,8 @@ Bug fix:
 ## [1.0.1] - 2017-11-06
 * Fix an uint16 overflow when resizing key slice
 
-[Unreleased]: https://github.com/dgraph-io/badger/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/dgraph-io/badger/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/dgraph-io/badger/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/dgraph-io/badger/compare/v1.6.0...v2.0.0
 [1.6.0]: https://github.com/dgraph-io/badger/compare/v1.5.5...v1.6.0
 [1.5.5]: https://github.com/dgraph-io/badger/compare/v1.5.3...v1.5.5

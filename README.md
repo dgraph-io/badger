@@ -124,6 +124,16 @@ func main() {
 Please note that Badger obtains a lock on the directories so multiple processes
 cannot open the same database at the same time.
 
+#### In-Memory Mode/Diskless Mode
+By default, Badger ensures all the data is persisted to the disk. It also supports a pure
+in-memory mode. When Badger is running in in-memory mode, all the data is stored in the memory.
+Reads and writes are much faster in in-memory mode, but all the data stored in Badger will be lost
+in case of a crash or close. To open badger in in-memory mode, set the `InMemory` option.
+
+```
+opt := badger.DefaultOptions("").WithInMemory(true)
+```
+
 ### Transactions
 
 #### Read-only transactions

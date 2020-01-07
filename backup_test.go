@@ -129,6 +129,7 @@ func TestBackupRestore2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer db1.Close()
 	key1 := []byte("key1")
 	key2 := []byte("key2")
 	rawValue := []byte("NotLongValue")
@@ -164,6 +165,7 @@ func TestBackupRestore2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer db2.Close()
 	err = db2.Load(&backup, 16)
 	if err != nil {
 		t.Fatal(err)
@@ -215,6 +217,7 @@ func TestBackupRestore2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer db3.Close()
 
 	err = db3.Load(&backup, 16)
 	if err != nil {
@@ -330,7 +333,6 @@ func TestBackup(t *testing.T) {
 
 func TestBackupRestore3(t *testing.T) {
 	var bb bytes.Buffer
-
 	tmpdir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
 		t.Fatal(err)
@@ -346,7 +348,7 @@ func TestBackupRestore3(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
+		defer db1.Close()
 		require.NoError(t, populateEntries(db1, entries))
 
 		_, err = db1.Backup(&bb, 0)
@@ -361,6 +363,7 @@ func TestBackupRestore3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer db2.Close()
 	require.NoError(t, db2.Load(&bb, 16))
 
 	// verify
@@ -406,6 +409,7 @@ func TestBackupLoadIncremental(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer db1.Close()
 
 		require.NoError(t, populateEntries(db1, entries))
 		since, err := db1.Backup(&bb, 0)
@@ -466,6 +470,8 @@ func TestBackupLoadIncremental(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer db2.Close()
+
 	require.NoError(t, db2.Load(&bb, 16))
 
 	// verify
