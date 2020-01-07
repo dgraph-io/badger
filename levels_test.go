@@ -365,7 +365,8 @@ func TestDiscardTs(t *testing.T) {
 		db.SetDiscardTs(3)
 
 		getAllAndCheck(t, db, []keyValVersion{
-			{"foo", "bar", 4}, {"foo", "bar", 3}, {"foo", "bar", 2}, {"foo", "bbb", 1}, {"fooz", "baz", 2},
+			{"foo", "bar", 4}, {"foo", "bar", 3}, {"foo", "bar", 2},
+			{"foo", "bbb", 1}, {"fooz", "baz", 2},
 		})
 		cdef := compactDef{
 			thisLevel: db.lc.levels[0],

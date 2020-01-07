@@ -434,7 +434,7 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
 	kr := getKeyRange(tables...)
 	for i, lh := range s.levels {
-		if i < lev { // Skip lower levels.
+		if i < lev { // Skip upper levels.
 			continue
 		}
 		lh.RLock()
@@ -447,7 +447,7 @@ func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
 	return false
 }
 
-// compactBuildTables merge topTables and botTables to form a list of new tables.
+// compactBuildTables merges topTables and botTables to form a list of new tables.
 func (s *levelsController) compactBuildTables(
 	lev int, cd compactDef) ([]*table.Table, func() error, error) {
 	topTables := cd.top
