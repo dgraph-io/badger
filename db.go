@@ -278,17 +278,6 @@ func Open(opt Options) (db *DB, err error) {
 		elog = trace.NewEventLog("Badger", "DB")
 	}
 
-	config := ristretto.Config{
-		// Use 5% of cache memory for storing counters.
-		NumCounters: int64(float64(opt.MaxCacheSize) * 0.05 * 2),
-		MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
-		BufferItems: 64,
-		Metrics:     true,
-	}
-	cache, err := ristretto.NewCache(&config)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create cache")
-	}
 	db = &DB{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
@@ -300,7 +289,20 @@ func Open(opt Options) (db *DB, err error) {
 		valueDirGuard: valueDirLockGuard,
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
-		blockCache:    cache,
+	}
+
+	if opt.MaxCacheSize > 0 {
+		config := ristretto.Config{
+			// Use 5% of cache memory for storing counters.
+			NumCounters: int64(float64(opt.MaxCacheSize) * 0.05 * 2),
+			MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
+			BufferItems: 64,
+			Metrics:     true,
+		}
+		db.blockCache, err = ristretto.NewCache(&config)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create cache")
+		}
 	}
 
 	if db.opt.InMemory {
@@ -386,7 +388,10 @@ func Open(opt Options) (db *DB, err error) {
 
 // CacheMetrics returns the metrics for the underlying cache.
 func (db *DB) CacheMetrics() *ristretto.Metrics {
-	return db.blockCache.Metrics
+	if db.blockCache != nil {
+		return db.blockCache.Metrics
+	}
+	return nil
 }
 
 // Close closes a DB. It's crucial to call it to ensure all the pending updates make their way to
@@ -477,7 +482,9 @@ func (db *DB) close() (err error) {
 	db.elog.Printf("Waiting for closer")
 	db.closers.updateSize.SignalAndWait()
 	db.orc.Stop()
-	db.blockCache.Close()
+	if db.blockCache != nil {
+		db.blockCache.Close()
+	}
 
 	db.elog.Finish()
 	if db.opt.InMemory {
@@ -1500,7 +1507,9 @@ func (db *DB) dropAll() (func(), error) {
 	db.vhead = valuePointer{} // Zero it out.
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
-	db.blockCache.Clear()
+	if db.blockCache != nil {
+		db.blockCache.Clear()
+	}
 	return resume, nil
 }
 
