@@ -4,15 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Serialization Versioning](VERSIONING.md).
 
-## [Unreleased]
+## [2.0.1] - 2020-01-02 
 
 ### New APIs
 
-- badger
-  - ErrGCInMemoryMode (5b6321)
-
 - badger.Options
-  - WithInMemory (5b6321)
+  - WithInMemory (f5b6321)
   - WithZSTDCompressionLevel (3eb4e72)
   
 - Badger.TableInfo
@@ -277,7 +274,8 @@ Bug fix:
 ## [1.0.1] - 2017-11-06
 * Fix an uint16 overflow when resizing key slice
 
-[Unreleased]: https://github.com/dgraph-io/badger/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/dgraph-io/badger/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/dgraph-io/badger/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/dgraph-io/badger/compare/v1.6.0...v2.0.0
 [1.6.0]: https://github.com/dgraph-io/badger/compare/v1.5.5...v1.6.0
 [1.5.5]: https://github.com/dgraph-io/badger/compare/v1.5.3...v1.5.5
