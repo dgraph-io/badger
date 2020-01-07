@@ -549,7 +549,7 @@ func (opt Options) WithMaxCacheSize(size int64) Options {
 //
 // When badger is running in InMemory mode, everything is stored in memory. No value/sst files are
 // created. In case of a crash all data will be lost.
-func (opt Options) WithInmemory(b bool) Options {
+func (opt Options) WithInMemory(b bool) Options {
 	opt.InMemory = b
 	return opt
 }
