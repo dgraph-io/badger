@@ -1161,6 +1161,9 @@ func TestExpiryImproperDBClose(t *testing.T) {
 		// it would return Truncate Required Error.
 		require.NoError(t, db0.vlog.Close())
 
+		require.NoError(t, db0.registry.Close())
+		require.NoError(t, db0.manifest.close())
+
 		db1, err := Open(opt)
 		require.NoError(t, err)
 		err = db1.View(func(txn *Txn) error {
@@ -1200,7 +1203,7 @@ func randBytes(n int) []byte {
 	recv := make([]byte, n)
 	in, err := rand.Read(recv)
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	return recv[:in]
 }
@@ -1670,12 +1673,12 @@ func TestGoroutineLeak(t *testing.T) {
 func ExampleOpen() {
 	dir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer removeDir(dir)
 	db, err := Open(DefaultOptions(dir))
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer db.Close()
 
@@ -1687,17 +1690,17 @@ func ExampleOpen() {
 	})
 
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	txn := db.NewTransaction(true) // Read-write txn
 	err = txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	err = txn.Commit()
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	err = db.View(func(txn *Txn) error {
@@ -1714,7 +1717,7 @@ func ExampleOpen() {
 	})
 
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	// Output:
@@ -1725,13 +1728,13 @@ func ExampleOpen() {
 func ExampleTxn_NewIterator() {
 	dir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir))
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer db.Close()
 
@@ -1749,13 +1752,13 @@ func ExampleTxn_NewIterator() {
 	for i := 0; i < n; i++ {
 		err := txn.SetEntry(NewEntry(bkey(i), bval(i)))
 		if err != nil {
-			log.Fatal(err)
+			panic(err)
 		}
 	}
 
 	err = txn.Commit()
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	opt := DefaultIteratorOptions
@@ -1772,7 +1775,7 @@ func ExampleTxn_NewIterator() {
 		return nil
 	})
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	fmt.Printf("Counted %d elements", count)
 	// Output:
@@ -1957,7 +1960,7 @@ func TestMain(m *testing.M) {
 	// call flag.Parse() here if TestMain uses flags
 	go func() {
 		if err := http.ListenAndServe("localhost:8080", nil); err != nil {
-			log.Fatalf("Unable to open http port at 8080")
+			panic("Unable to open http port at 8080")
 		}
 	}()
 	os.Exit(m.Run())
@@ -1977,12 +1980,12 @@ func ExampleDB_Subscribe() {
 	// Open the DB.
 	dir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer removeDir(dir)
 	db, err := Open(DefaultOptions(dir))
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	defer db.Close()
 
@@ -2002,7 +2005,7 @@ func ExampleDB_Subscribe() {
 			return nil
 		}
 		if err := db.Subscribe(ctx, cb, prefix); err != nil && err != context.Canceled {
-			log.Fatal(err)
+			panic(err)
 		}
 		log.Printf("subscription closed")
 	}()
@@ -2012,11 +2015,11 @@ func ExampleDB_Subscribe() {
 	// Write both keys, but only one should be printed in the Output.
 	err = db.Update(func(txn *Txn) error { return txn.Set(aKey, aValue) })
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	err = db.Update(func(txn *Txn) error { return txn.Set(bKey, bValue) })
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	log.Printf("stopping subscription")
