@@ -627,22 +627,29 @@ func TestL0GCBug(t *testing.T) {
 		return []byte(fmt.Sprintf("%10d", i))
 	}
 	val := []byte{1, 1, 1, 1, 1, 1, 1, 1}
-	// Insert 100 entries. This will create about 50 vlog files and 2 SST files.
-	for i := 0; i < 100; i++ {
-		err = db1.Update(func(txn *Txn) error {
-			return txn.SetEntry(NewEntry(key(i), val))
-		})
-		require.NoError(t, err)
+	// Insert 100 entries. This will create about 50*3 vlog files and 6 SST files.
+	for i := 0; i < 3; i++ {
+		for j := 0; j < 100; j++ {
+			err = db1.Update(func(txn *Txn) error {
+				return txn.SetEntry(NewEntry(key(j), val))
+			})
+			require.NoError(t, err)
+		}
 	}
 	// Run value log GC multiple times. This would ensure at least
 	// one value log file is garbage collected.
+	success := 0
 	for i := 0; i < 10; i++ {
 		err := db1.RunValueLogGC(0.01)
+		if err == nil {
+			success++
+		}
 		if err != nil && err != ErrNoRewrite {
 			t.Fatalf(err.Error())
 		}
 	}
-
+	// Ensure alteast one GC call was successful.
+	require.NotZero(t, success)
 	// CheckKeys reads all the keys previously stored.
 	checkKeys := func(db *DB) {
 		for i := 0; i < 100; i++ {
@@ -665,7 +672,12 @@ func TestL0GCBug(t *testing.T) {
 	if db1.valueDirGuard != nil {
 		require.NoError(t, db1.valueDirGuard.release())
 	}
-	require.NoError(t, db1.vlog.Close())
+	for _, f := range db1.vlog.filesMap {
+		require.NoError(t, f.fd.Close())
+	}
+	require.NoError(t, db1.registry.Close())
+	require.NoError(t, db1.lc.close())
+	require.NoError(t, db1.manifest.close())
 
 	db2, err := Open(opts)
 	require.NoError(t, err)
@@ -723,7 +735,6 @@ func TestWindowsDataLoss(t *testing.T) {
 	opt.Truncate = true
 	db, err = Open(opt)
 	require.NoError(t, err)
-
 	// Return after reading one entry. We're simulating a crash.
 	// Simulate a crash by not closing db but releasing the locks.
 	if db.dirLockGuard != nil {
@@ -735,6 +746,12 @@ func TestWindowsDataLoss(t *testing.T) {
 	// Don't use vlog.Close here. We don't want to fix the file size. Only un-mmap
 	// the data so that we can truncate the file durning the next vlog.Open.
 	require.NoError(t, y.Munmap(db.vlog.filesMap[db.vlog.maxFid].fmap))
+	for _, f := range db.vlog.filesMap {
+		require.NoError(t, f.fd.Close())
+	}
+	require.NoError(t, db.registry.Close())
+	require.NoError(t, db.manifest.close())
+	require.NoError(t, db.lc.close())
 
 	fmt.Println()
 	fmt.Println("Third DB Open")
