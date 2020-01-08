@@ -170,6 +170,8 @@ func (s *node) casNextOffset(h int, old, val uint32) bool {
 
 func (s *Skiplist) randomHeight() int {
 	h := 1
+	// rand.Uint32() is not thread safe. Currently, all writes to memtable are sequential
+	// so it should be okay to use rand.Uint32.
 	for h < maxHeight && s.rand.Uint32() <= heightIncrease {
 		h++
 	}
