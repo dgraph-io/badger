@@ -425,7 +425,8 @@ func TestDiscardFirstVersion(t *testing.T) {
 
 		// - Version 10, 9 lie above version 7 so they should be there.
 		// - Version 4, 3, 2 lie below the discardTs but they don't have the
-		//   "bitDiscardEarlierVersions" versions set so they should not be removed.
+		//   "bitDiscardEarlierVersions" versions set so they should not be removed because number
+		//    of versions to keep is set to infinite.
 		// - Version 1 is below DiscardTS and below the first "bitDiscardEarlierVersions"
 		//   marker so IT WILL BE REMOVED.
 		ExpectedKeys := []keyValVersion{
