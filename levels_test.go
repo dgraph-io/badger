@@ -179,7 +179,8 @@ func TestCompaction(t *testing.T) {
 			db.SetDiscardTs(10)
 
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"foo", "bar", 1, 0}, {"fooz", "baz", 1, 0},
+				{"foo", "bar", 3, 0}, {"foo", "bar", 2, 0},
+				{"foo", "bar", 1, 0}, {"fooz", "baz", 1, 0},
 			})
 			cdef := compactDef{
 				thisLevel: db.lc.levels[0],
@@ -308,7 +309,8 @@ func TestDiscardTs(t *testing.T) {
 			db.SetDiscardTs(1)
 
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"fooz", "baz", 3, 0},
+				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0},
+				{"foo", "bar", 2, 0}, {"fooz", "baz", 3, 0},
 			})
 			cdef := compactDef{
 				thisLevel: db.lc.levels[0],
@@ -319,14 +321,16 @@ func TestDiscardTs(t *testing.T) {
 			require.NoError(t, db.lc.runCompactDef(0, cdef))
 			// No keys should be dropped.
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"fooz", "baz", 3, 0},
+				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0},
+				{"foo", "bar", 2, 0}, {"fooz", "baz", 3, 0},
 			})
 		})
 	})
 	t.Run("some keys above discardTs", func(t *testing.T) {
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			l0 := []keyValVersion{
-				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"fooz", "baz", 2, 0},
+				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0},
+				{"foo", "bar", 2, 0}, {"fooz", "baz", 2, 0},
 			}
 			l1 := []keyValVersion{{"foo", "bbb", 1, 0}}
 			createAndOpen(db, l0, 0)
@@ -367,7 +371,8 @@ func TestDiscardTs(t *testing.T) {
 			db.SetDiscardTs(10)
 
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"fooz", "baz", 3, 0},
+				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0},
+				{"foo", "bar", 2, 0}, {"fooz", "baz", 3, 0},
 			})
 			cdef := compactDef{
 				thisLevel: db.lc.levels[0],
