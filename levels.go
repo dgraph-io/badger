@@ -925,15 +925,13 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 			s.cstatus.RUnlock()
 			timeStart = time.Now()
 		}
-		// Before we unstall, we need to make sure that level 0 and 1 are healthy. Otherwise, we
-		// will very quickly fill up level 0 again and if the compaction strategy favors level 0,
-		// then level 1 is going to super full.
+		// Before we unstall, we need to make sure that level 0 is healthy. Otherwise, we
+		// will very quickly fill up level 0 again.
 		for i := 0; ; i++ {
-			// Passing 0 for delSize to compactable means we're treating incomplete compactions as
-			// not having finished -- we wait for them to finish.  Also, it's crucial this behavior
-			// replicates pickCompactLevels' behavior in computing compactability in order to
-			// guarantee progress.
-			if !s.isLevel0Compactable() && !s.levels[1].isCompactable(0) {
+			// It's crucial that this behavior replicates pickCompactLevels' behavior in
+			// computing compactability in order to guarantee progress.
+			// Break the loop once L0 has enough space to accommodate new tables.
+			if !s.isLevel0Compactable() {
 				break
 			}
 			time.Sleep(10 * time.Millisecond)
