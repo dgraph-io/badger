@@ -372,12 +372,19 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 		var vp valuePointer
 		vp.Decode(vs.Value)
 
+		// If the entry found from the LSM Tree points to a newer vlog file, don't do anything.
 		if vp.Fid > f.fid {
 			return nil
 		}
+		// If the entry found from the LSM Tree points to an offset greater than the one
+		// read from vlog, don't do anything.
 		if vp.Offset > e.offset {
 			return nil
 		}
+		// If the entry read from LSM Tree and vlog file point to the same vlog file and offset,
+		// insert them back into the DB.
+		// NOTE: It might be possible that the entry read from the LSM Tree points to
+		// an older vlog file. See the comments in the else part.
 		if vp.Fid == f.fid && vp.Offset == e.offset {
 			moved++
 			// This new entry only contains the key, and a pointer to the value.
@@ -413,7 +420,46 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			wb = append(wb, ne)
 			size += es
 		} else {
-			vlog.db.opt.Warningf("This entry should have been caught. %+v\n", e)
+			// It might be possible that the entry read from LSM Tree points to an older vlog file.
+			// This can happen in the following situation. Assume DB is opened with
+			// numberOfVersionsToKeep=1
+			//
+			// Now, if we have ONLY one key in the system "FOO" which has been updated 3 times and
+			// the same key has been garbage collected 3 times, we'll have 3 versions of the movekey
+			// for the same key "FOO".
+			// NOTE: moveKeyi is the moveKey with version i
+			// Assume we have 3 move keys in L0.
+			// - moveKey1 (points to vlog file 10),
+			// - moveKey2 (points to vlog file 14) and
+			// - moveKey3 (points to vlog file 15).
+
+			// Also, assume there is another move key "moveKey1" (points to vlog file 6) (this is
+			// also a move Key for key "FOO" ) on upper levels (let's say 3). The move key
+			//  "moveKey1" on level 0 was inserted because vlog file 6 was GCed.
+			//
+			// Here's what the arrangement looks like
+			// L0 => (moveKey1 => vlog10), (moveKey2 => vlog14), (moveKey3 => vlog15)
+			// L1 => ....
+			// L2 => ....
+			// L3 => (moveKey1 => vlog6)
+			//
+			// When L0 compaction runs, it keeps only moveKey3 because the number of versions
+			// to keep is set to 1. (we've dropped moveKey1's latest version)
+			//
+			// The new arrangement of keys is
+			// L0 => ....
+			// L1 => (moveKey3 => vlog15)
+			// L2 => ....
+			// L3 => (moveKey1 => vlog6)
+			//
+			// Now if we try to GC vlog file 10, the entry read from vlog file will point to vlog10
+			// but the entry read from LSM Tree will point to vlog6. The move key read from LSM tree
+			// will point to vlog6 because we've asked for version 1 of the move key.
+			//
+			// This might seem like an issue but it's not really an issue because the user has set
+			// the number of versions to keep to 1 and the latest version of moveKey points to the
+			// correct vlog file and offset. The stale move key on L3 will be eventually dropped by
+			// compaction because there is a newer versions in the upper levels.
 		}
 		return nil
 	}
