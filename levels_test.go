@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"math"
 	"testing"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -39,7 +40,7 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 	// Add all keys and versions to the table.
 	for _, item := range td {
 		key := y.KeyWithTs([]byte(item.key), uint64(item.version))
-		val := y.ValueStruct{Value: []byte(item.val)}
+		val := y.ValueStruct{Value: []byte(item.val), Meta: item.meta}
 		b.Add(key, val, 0)
 	}
 	fd, err := y.CreateSyncedFile(table.NewFilename(db.lc.reserveFileID(), db.opt.Dir), true)
@@ -67,6 +68,7 @@ type keyValVersion struct {
 	key     string
 	val     string
 	version int
+	meta    byte
 }
 
 func TestCheckOverlap(t *testing.T) {
@@ -76,8 +78,8 @@ func TestCheckOverlap(t *testing.T) {
 		// with rest of the levels.
 		t.Run("same keys", func(t *testing.T) {
 			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-				l0 := []keyValVersion{{"foo", "bar", 3}}
-				l1 := []keyValVersion{{"foo", "bar", 2}}
+				l0 := []keyValVersion{{"foo", "bar", 3, 0}}
+				l1 := []keyValVersion{{"foo", "bar", 2, 0}}
 				createAndOpen(db, l0, 0)
 				createAndOpen(db, l1, 1)
 
@@ -95,8 +97,8 @@ func TestCheckOverlap(t *testing.T) {
 		})
 		t.Run("overlapping keys", func(t *testing.T) {
 			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-				l0 := []keyValVersion{{"a", "x", 1}, {"b", "x", 1}, {"foo", "bar", 3}}
-				l1 := []keyValVersion{{"foo", "bar", 2}}
+				l0 := []keyValVersion{{"a", "x", 1, 0}, {"b", "x", 1, 0}, {"foo", "bar", 3, 0}}
+				l1 := []keyValVersion{{"foo", "bar", 2, 0}}
 				createAndOpen(db, l0, 0)
 				createAndOpen(db, l1, 1)
 
@@ -113,8 +115,8 @@ func TestCheckOverlap(t *testing.T) {
 	})
 	t.Run("non-overlapping", func(t *testing.T) {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-			l0 := []keyValVersion{{"a", "x", 1}, {"b", "x", 1}, {"c", "bar", 3}}
-			l1 := []keyValVersion{{"foo", "bar", 2}}
+			l0 := []keyValVersion{{"a", "x", 1, 0}, {"b", "x", 1, 0}, {"c", "bar", 3, 0}}
+			l1 := []keyValVersion{{"foo", "bar", 2, 0}}
 			createAndOpen(db, l0, 0)
 			createAndOpen(db, l1, 1)
 
@@ -146,8 +148,10 @@ func getAllAndCheck(t *testing.T, db *DB, expected []keyValVersion) {
 				expect.key, item.Key())
 			require.Equal(t, expect.val, string(v), "key: %s expected value: %s actual %s",
 				item.key, expect.val, v)
-			require.Equal(t, expect.version, int(item.Version()), "key: %s expected version: %d ",
-				"actual %d", item.key, expect.version, item.Version())
+			require.Equal(t, expect.version, int(item.Version()),
+				"key: %s expected version: %d actual %d", item.key, expect.version, item.Version())
+			require.Equal(t, expect.meta, item.meta,
+				"key: %s expected meta: %d meta %d", item.key, expect.meta, item.meta)
 			i++
 		}
 		require.Equal(t, len(expected), i, "keys examined should be equal to keys expected")
@@ -162,9 +166,9 @@ func TestCompaction(t *testing.T) {
 	opt.managedTxns = true
 	t.Run("level 0 to level 1", func(t *testing.T) {
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-			l0 := []keyValVersion{{"foo", "bar", 3}, {"fooz", "baz", 1}}
-			l01 := []keyValVersion{{"foo", "bar", 2}}
-			l1 := []keyValVersion{{"foo", "bar", 1}}
+			l0 := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			l01 := []keyValVersion{{"foo", "bar", 2, 0}}
+			l1 := []keyValVersion{{"foo", "bar", 1, 0}}
 			// Level 0 has table l0 and l01.
 			createAndOpen(db, l0, 0)
 			createAndOpen(db, l01, 0)
@@ -175,7 +179,7 @@ func TestCompaction(t *testing.T) {
 			db.SetDiscardTs(10)
 
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 3}, {"foo", "bar", 2}, {"foo", "bar", 1}, {"fooz", "baz", 1},
+				{"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"foo", "bar", 1, 0}, {"fooz", "baz", 1, 0},
 			})
 			cdef := compactDef{
 				thisLevel: db.lc.levels[0],
@@ -185,16 +189,16 @@ func TestCompaction(t *testing.T) {
 			}
 			require.NoError(t, db.lc.runCompactDef(0, cdef))
 			// foo version 2 should be dropped after compaction.
-			getAllAndCheck(t, db, []keyValVersion{{"foo", "bar", 3}, {"fooz", "baz", 1}})
+			getAllAndCheck(t, db, []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}})
 		})
 	})
 
 	t.Run("level 0 to level 1 with lower overlap", func(t *testing.T) {
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-			l0 := []keyValVersion{{"foo", "bar", 3}, {"fooz", "baz", 1}}
-			l01 := []keyValVersion{{"foo", "bar", 2}}
-			l1 := []keyValVersion{{"foo", "bar", 1}}
-			l2 := []keyValVersion{{"foo", "bar", 0}}
+			l0 := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			l01 := []keyValVersion{{"foo", "bar", 2, 0}}
+			l1 := []keyValVersion{{"foo", "bar", 1, 0}}
+			l2 := []keyValVersion{{"foo", "bar", 0, 0}}
 			// Level 0 has table l0 and l01.
 			createAndOpen(db, l0, 0)
 			createAndOpen(db, l01, 0)
@@ -207,8 +211,8 @@ func TestCompaction(t *testing.T) {
 			db.SetDiscardTs(10)
 
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 3}, {"foo", "bar", 2}, {"foo", "bar", 1},
-				{"foo", "bar", 0}, {"fooz", "baz", 1},
+				{"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"foo", "bar", 1, 0},
+				{"foo", "bar", 0, 0}, {"fooz", "baz", 1, 0},
 			})
 			cdef := compactDef{
 				thisLevel: db.lc.levels[0],
@@ -219,15 +223,15 @@ func TestCompaction(t *testing.T) {
 			require.NoError(t, db.lc.runCompactDef(0, cdef))
 			// foo version 2 and version 1 should be dropped after compaction.
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 3}, {"foo", "bar", 0}, {"fooz", "baz", 1},
+				{"foo", "bar", 3, 0}, {"foo", "bar", 0, 0}, {"fooz", "baz", 1, 0},
 			})
 		})
 	})
 
 	t.Run("level 1 to level 2", func(t *testing.T) {
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-			l1 := []keyValVersion{{"foo", "bar", 3}, {"fooz", "baz", 1}}
-			l2 := []keyValVersion{{"foo", "bar", 2}}
+			l1 := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
+			l2 := []keyValVersion{{"foo", "bar", 2, 0}}
 			createAndOpen(db, l1, 1)
 			createAndOpen(db, l2, 2)
 
@@ -235,7 +239,7 @@ func TestCompaction(t *testing.T) {
 			db.SetDiscardTs(10)
 
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 3}, {"foo", "bar", 2}, {"fooz", "baz", 1},
+				{"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"fooz", "baz", 1, 0},
 			})
 			cdef := compactDef{
 				thisLevel: db.lc.levels[1],
@@ -245,7 +249,7 @@ func TestCompaction(t *testing.T) {
 			}
 			require.NoError(t, db.lc.runCompactDef(1, cdef))
 			// foo version 2 should be dropped after compaction.
-			getAllAndCheck(t, db, []keyValVersion{{"foo", "bar", 3}, {"fooz", "baz", 1}})
+			getAllAndCheck(t, db, []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}})
 		})
 	})
 }
@@ -257,9 +261,9 @@ func TestHeadKeyCleanup(t *testing.T) {
 
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		l0 := []keyValVersion{
-			{string(head), "foo", 5}, {string(head), "bar", 4}, {string(head), "baz", 3},
+			{string(head), "foo", 5, 0}, {string(head), "bar", 4, 0}, {string(head), "baz", 3, 0},
 		}
-		l1 := []keyValVersion{{string(head), "fooz", 2}, {string(head), "foozbaz", 1}}
+		l1 := []keyValVersion{{string(head), "fooz", 2, 0}, {string(head), "foozbaz", 1, 0}}
 		// Level 0 has table l0 and l01.
 		createAndOpen(db, l0, 0)
 		// Level 1 has table l1.
@@ -269,8 +273,8 @@ func TestHeadKeyCleanup(t *testing.T) {
 		db.SetDiscardTs(10)
 
 		getAllAndCheck(t, db, []keyValVersion{
-			{string(head), "foo", 5}, {string(head), "bar", 4}, {string(head), "baz", 3},
-			{string(head), "fooz", 2}, {string(head), "foozbaz", 1},
+			{string(head), "foo", 5, 0}, {string(head), "bar", 4, 0}, {string(head), "baz", 3, 0},
+			{string(head), "fooz", 2, 0}, {string(head), "foozbaz", 1, 0},
 		})
 		cdef := compactDef{
 			thisLevel: db.lc.levels[0],
@@ -280,7 +284,7 @@ func TestHeadKeyCleanup(t *testing.T) {
 		}
 		require.NoError(t, db.lc.runCompactDef(0, cdef))
 		// foo version 2 should be dropped after compaction.
-		getAllAndCheck(t, db, []keyValVersion{{string(head), "foo", 5}})
+		getAllAndCheck(t, db, []keyValVersion{{string(head), "foo", 5, 0}})
 	})
 }
 
@@ -291,9 +295,9 @@ func TestDiscardTs(t *testing.T) {
 
 	t.Run("all keys above discardTs", func(t *testing.T) {
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-			l0 := []keyValVersion{{"foo", "bar", 4}, {"fooz", "baz", 3}}
-			l01 := []keyValVersion{{"foo", "bar", 3}}
-			l1 := []keyValVersion{{"foo", "bar", 2}}
+			l0 := []keyValVersion{{"foo", "bar", 4, 0}, {"fooz", "baz", 3, 0}}
+			l01 := []keyValVersion{{"foo", "bar", 3, 0}}
+			l1 := []keyValVersion{{"foo", "bar", 2, 0}}
 			// Level 0 has table l0 and l01.
 			createAndOpen(db, l0, 0)
 			createAndOpen(db, l01, 0)
@@ -304,7 +308,7 @@ func TestDiscardTs(t *testing.T) {
 			db.SetDiscardTs(1)
 
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 4}, {"foo", "bar", 3}, {"foo", "bar", 2}, {"fooz", "baz", 3},
+				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"fooz", "baz", 3, 0},
 			})
 			cdef := compactDef{
 				thisLevel: db.lc.levels[0],
@@ -315,16 +319,16 @@ func TestDiscardTs(t *testing.T) {
 			require.NoError(t, db.lc.runCompactDef(0, cdef))
 			// No keys should be dropped.
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 4}, {"foo", "bar", 3}, {"foo", "bar", 2}, {"fooz", "baz", 3},
+				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"fooz", "baz", 3, 0},
 			})
 		})
 	})
 	t.Run("some keys above discardTs", func(t *testing.T) {
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			l0 := []keyValVersion{
-				{"foo", "bar", 4}, {"foo", "bar", 3}, {"foo", "bar", 2}, {"fooz", "baz", 2},
+				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"fooz", "baz", 2, 0},
 			}
-			l1 := []keyValVersion{{"foo", "bbb", 1}}
+			l1 := []keyValVersion{{"foo", "bbb", 1, 0}}
 			createAndOpen(db, l0, 0)
 			createAndOpen(db, l1, 1)
 
@@ -332,8 +336,8 @@ func TestDiscardTs(t *testing.T) {
 			db.SetDiscardTs(3)
 
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 4}, {"foo", "bar", 3}, {"foo", "bar", 2},
-				{"foo", "bbb", 1}, {"fooz", "baz", 2},
+				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0}, {"foo", "bar", 2, 0},
+				{"foo", "bbb", 1, 0}, {"fooz", "baz", 2, 0},
 			})
 			cdef := compactDef{
 				thisLevel: db.lc.levels[0],
@@ -344,15 +348,15 @@ func TestDiscardTs(t *testing.T) {
 			require.NoError(t, db.lc.runCompactDef(0, cdef))
 			// foo1 and foo2 should be dropped.
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 4}, {"foo", "bar", 3}, {"fooz", "baz", 2},
+				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0}, {"fooz", "baz", 2, 0},
 			})
 		})
 	})
 	t.Run("all keys below discardTs", func(t *testing.T) {
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-			l0 := []keyValVersion{{"foo", "bar", 4}, {"fooz", "baz", 3}}
-			l01 := []keyValVersion{{"foo", "bar", 3}}
-			l1 := []keyValVersion{{"foo", "bar", 2}}
+			l0 := []keyValVersion{{"foo", "bar", 4, 0}, {"fooz", "baz", 3, 0}}
+			l01 := []keyValVersion{{"foo", "bar", 3, 0}}
+			l1 := []keyValVersion{{"foo", "bar", 2, 0}}
 			// Level 0 has table l0 and l01.
 			createAndOpen(db, l0, 0)
 			createAndOpen(db, l01, 0)
@@ -363,7 +367,7 @@ func TestDiscardTs(t *testing.T) {
 			db.SetDiscardTs(10)
 
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 4}, {"foo", "bar", 3}, {"foo", "bar", 2}, {"fooz", "baz", 3},
+				{"foo", "bar", 4, 0}, {"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"fooz", "baz", 3, 0},
 			})
 			cdef := compactDef{
 				thisLevel: db.lc.levels[0],
@@ -373,7 +377,59 @@ func TestDiscardTs(t *testing.T) {
 			}
 			require.NoError(t, db.lc.runCompactDef(0, cdef))
 			// Only one version of every key should be left.
-			getAllAndCheck(t, db, []keyValVersion{{"foo", "bar", 4}, {"fooz", "baz", 3}})
+			getAllAndCheck(t, db, []keyValVersion{{"foo", "bar", 4, 0}, {"fooz", "baz", 3, 0}})
 		})
+	})
+}
+
+// This is a test to ensure that the first entry with DiscardEarlierversion bit < DiscardTs
+// is kept around (when numversionstokeep is infinite).
+func TestDiscardFirstVersion(t *testing.T) {
+	opt := DefaultOptions("")
+	opt.NumCompactors = 0
+	opt.NumVersionsToKeep = math.MaxUint32
+	opt.managedTxns = true
+
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		l0 := []keyValVersion{{"foo", "bar", 1, 0}}
+		l01 := []keyValVersion{{"foo", "bar", 2, bitDiscardEarlierVersions}}
+		l02 := []keyValVersion{{"foo", "bar", 3, 0}}
+		l03 := []keyValVersion{{"foo", "bar", 4, 0}}
+		l04 := []keyValVersion{{"foo", "bar", 9, 0}}
+		l05 := []keyValVersion{{"foo", "bar", 10, bitDiscardEarlierVersions}}
+
+		// Level 0 has all the tables.
+		createAndOpen(db, l0, 0)
+		createAndOpen(db, l01, 0)
+		createAndOpen(db, l02, 0)
+		createAndOpen(db, l03, 0)
+		createAndOpen(db, l04, 0)
+		createAndOpen(db, l05, 0)
+
+		// Discard Time stamp is set to 7.
+		db.SetDiscardTs(7)
+
+		// Compact L0 to L1
+		cdef := compactDef{
+			thisLevel: db.lc.levels[0],
+			nextLevel: db.lc.levels[1],
+			top:       db.lc.levels[0].tables,
+			bot:       db.lc.levels[1].tables,
+		}
+		require.NoError(t, db.lc.runCompactDef(0, cdef))
+
+		// - Version 10, 9 lie above version 7 so they should be there.
+		// - Version 4, 3, 2 lie below the discardTs but they don't have the
+		//   "bitDiscardEarlierVersions" versions set so they should not be removed.
+		// - Version 1 is below DiscardTS and below the first "bitDiscardEarlierVersions"
+		//   marker so IT WILL BE REMOVED.
+		ExpectedKeys := []keyValVersion{
+			{"foo", "bar", 10, bitDiscardEarlierVersions},
+			{"foo", "bar", 9, 0},
+			{"foo", "bar", 4, 0},
+			{"foo", "bar", 3, 0},
+			{"foo", "bar", 2, bitDiscardEarlierVersions}}
+
+		getAllAndCheck(t, db, ExpectedKeys)
 	})
 }
