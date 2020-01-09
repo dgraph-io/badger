@@ -477,9 +477,11 @@ func TestL0Stall(t *testing.T) {
 		}()
 		time.Sleep(time.Second)
 
+		db.lc.levels[0].Lock()
 		// Drop two tables from Level 0 so that addLevel0Table can make progress. Earlier table
 		// count was 4 which is equal to L0 stall count.
 		db.lc.levels[0].tables = db.lc.levels[0].tables[2:]
+		db.lc.levels[0].Unlock()
 
 		select {
 		case <-timeout:
