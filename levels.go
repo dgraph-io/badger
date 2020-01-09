@@ -430,28 +430,35 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	return prios
 }
 
-// compactBuildTables merge topTables and botTables to form a list of new tables.
+// checkOverlap checks if the given tables overlap with any level from the given "lev" onwards.
+func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
+	kr := getKeyRange(tables...)
+	for i, lh := range s.levels {
+		if i < lev { // Skip upper levels.
+			continue
+		}
+		lh.RLock()
+		left, right := lh.overlappingTables(levelHandlerRLocked{}, kr)
+		lh.RUnlock()
+		if right-left > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// compactBuildTables merges topTables and botTables to form a list of new tables.
 func (s *levelsController) compactBuildTables(
 	lev int, cd compactDef) ([]*table.Table, func() error, error) {
 	topTables := cd.top
 	botTables := cd.bot
 
-	var hasOverlap bool
-	{
-		kr := getKeyRange(cd.top...)
-		for i, lh := range s.levels {
-			if i <= lev { // Skip upper levels.
-				continue
-			}
-			lh.RLock()
-			left, right := lh.overlappingTables(levelHandlerRLocked{}, kr)
-			lh.RUnlock()
-			if right-left > 0 {
-				hasOverlap = true
-				break
-			}
-		}
-	}
+	// Check overlap of the top level with the levels which are not being
+	// compacted in this compaction. We don't need to check overlap of the bottom
+	// tables with other levels because if the top tables overlap with any of the lower
+	// levels, it implies bottom level also overlaps because top and bottom tables
+	// overlap with each other.
+	hasOverlap := s.checkOverlap(cd.top, cd.nextLevel.level+1)
 
 	// Try to collect stats so that we can inform value log about GC. That would help us find which
 	// value log file should be GCed.
@@ -561,10 +568,15 @@ func (s *levelsController) compactBuildTables(
 				// versions which are below the minReadTs, otherwise, we might end up discarding the
 				// only valid version for a running transaction.
 				numVersions++
-				lastValidVersion := vs.Meta&bitDiscardEarlierVersions > 0
-				if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) ||
-					numVersions > s.kv.opt.NumVersionsToKeep ||
-					lastValidVersion {
+
+				// Keep the current version and discard all the next versions if
+				// - The `discardEarlierVersions` bit is set OR
+				// - We've already processed `NumVersionsToKeep` number of versions
+				// (including the current item being processed)
+				lastValidVersion := vs.Meta&bitDiscardEarlierVersions > 0 ||
+					numVersions == s.kv.opt.NumVersionsToKeep
+
+				if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) || lastValidVersion {
 					// If this version of the key is deleted or expired, skip all the rest of the
 					// versions. Ensure that we're only removing versions below readTs.
 					skipKey = y.SafeCopy(skipKey, it.Key())
