@@ -19,6 +19,7 @@ package badger
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
@@ -438,4 +439,76 @@ func TestDiscardFirstVersion(t *testing.T) {
 
 		getAllAndCheck(t, db, ExpectedKeys)
 	})
+}
+
+// This test ensures we don't stall when L1's size is greater than opt.LevelOneSize.
+// We should stall only when L0 tables more than the opt.NumLevelZeroTableStall.
+func TestL0Stall(t *testing.T) {
+	opt := DefaultOptions("")
+	// Disable all compactions.
+	opt.NumCompactors = 0
+	// Number of level zero tables.
+	opt.NumLevelZeroTables = 3
+	// Addition of new tables will stall if there are 4 or more L0 tables.
+	opt.NumLevelZeroTablesStall = 4
+	// Level 1 size is 10 bytes.
+	opt.LevelOneSize = 10
+
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		l0 := []keyValVersion{{"foo", "bar", 1, 0}}
+		l01 := []keyValVersion{{"foo", "bar", 2, 0}}
+		l02 := []keyValVersion{{"foo", "bar", 3, 0}}
+		l03 := []keyValVersion{{"foo", "bar", 4, 0}}
+
+		// Level 0 has all the tables.
+		createAndOpen(db, l0, 0)
+		createAndOpen(db, l01, 0)
+		createAndOpen(db, l02, 0)
+		createAndOpen(db, l03, 0)
+
+		timeout := time.After(5 * time.Second)
+		done := make(chan bool)
+
+		// This is important. Set level 1 size more than the opt.LevelOneSize (we've set it to 10).
+		db.lc.levels[1].totalSize = 100
+		go func() {
+			db.lc.addLevel0Table(createEmptyTable(db))
+			done <- true
+		}()
+		time.Sleep(time.Second)
+
+		// Drop two tables from Level 0 so that addLevel0Table can make progress. Earlier table
+		// count was 4 which is equal to L0 stall count.
+		db.lc.levels[0].tables = db.lc.levels[0].tables[2:]
+
+		select {
+		case <-timeout:
+			t.Fatal("Test didn't finish in time")
+		case <-done:
+		}
+	})
+}
+
+func createEmptyTable(db *DB) *table.Table {
+	opts := table.Options{
+		BloomFalsePositive: db.opt.BloomFalsePositive,
+		LoadingMode:        options.LoadToRAM,
+		ChkMode:            options.NoVerification,
+	}
+	b := table.NewTableBuilder(opts)
+	// Add one key so that we can open this table.
+	b.Add(y.KeyWithTs([]byte("foo"), 1), y.ValueStruct{}, 0)
+	fd, err := y.CreateSyncedFile(table.NewFilename(db.lc.reserveFileID(), db.opt.Dir), true)
+	if err != nil {
+		panic(err)
+	}
+
+	if _, err := fd.Write(b.Finish()); err != nil {
+		panic(err)
+	}
+	tab, err := table.OpenTable(fd, table.Options{})
+	if err != nil {
+		panic(err)
+	}
+	return tab
 }
