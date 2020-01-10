@@ -499,7 +499,7 @@ func BenchmarkReadWriteMap(b *testing.B) {
 			b.RunParallel(func(pb *testing.PB) {
 				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 				for pb.Next() {
-					if rand.Float32() < readFrac {
+					if rng.Float32() < readFrac {
 						mutex.RLock()
 						_, ok := m[string(randomKey(rng))]
 						mutex.RUnlock()

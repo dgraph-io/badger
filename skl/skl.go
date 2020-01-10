@@ -34,12 +34,11 @@ package skl
 
 import (
 	"math"
-	"math/rand"
 	"sync/atomic"
-	"time"
 	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 const (
@@ -80,7 +79,6 @@ type Skiplist struct {
 	head   *node
 	ref    int32
 	arena  *Arena
-	rand   *rand.Rand
 }
 
 // IncrRef increases the refcount
@@ -134,7 +132,6 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 		head:   head,
 		arena:  arena,
 		ref:    1,
-		rand:   rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -170,9 +167,7 @@ func (s *node) casNextOffset(h int, old, val uint32) bool {
 
 func (s *Skiplist) randomHeight() int {
 	h := 1
-	// rand.Uint32() is not thread safe. Currently, all writes to memtable are sequential
-	// so it should be okay to use rand.Uint32.
-	for h < maxHeight && s.rand.Uint32() <= heightIncrease {
+	for h < maxHeight && z.FastRand() <= heightIncrease {
 		h++
 	}
 	return h
