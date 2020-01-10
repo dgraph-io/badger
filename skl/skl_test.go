@@ -516,3 +516,16 @@ func BenchmarkReadWriteMap(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkWrite(b *testing.B) {
+	value := newValue(123)
+	l := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
+	defer l.DecrRef()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+		for pb.Next() {
+			l.Put(randomKey(rng), y.ValueStruct{Value: value, Meta: 0, UserMeta: 0})
+		}
+	})
+}
