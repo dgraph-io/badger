@@ -25,9 +25,13 @@ rm -rf p
 echo
 echo "==> Starting tests with value log mmapped..."
 sleep 5
-go test -v --vlog_mmap=true -race ./...
-
+# Run top level package tests with mmap flag.
+go test -v --vlog_mmap=true -race github.com/dgraph-io/badger/v2
 echo
 echo "==> Starting tests with value log not mmapped..."
 sleep 5
-go test -v --vlog_mmap=false -race ./...
+go test -v --vlog_mmap=false -race github.com/dgraph-io/badger/v2
+
+# Run test for rest of the packages.
+go test -v -race $(go list ./... | grep github.com/dgraph-io/badger/v2/.)
+
