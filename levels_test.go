@@ -443,7 +443,7 @@ func TestDiscardFirstVersion(t *testing.T) {
 
 // This test ensures we don't stall when L1's size is greater than opt.LevelOneSize.
 // We should stall only when L0 tables more than the opt.NumLevelZeroTableStall.
-func TestL0Stall(t *testing.T) {
+func TestL1Stall(t *testing.T) {
 	opt := DefaultOptions("")
 	// Disable all compactions.
 	opt.NumCompactors = 0
@@ -513,4 +513,59 @@ func createEmptyTable(db *DB) *table.Table {
 		panic(err)
 	}
 	return tab
+}
+
+func TestL0Stall(t *testing.T) {
+	test := func(t *testing.T, opt *Options) {
+		runBadgerTest(t, opt, func(t *testing.T, db *DB) {
+			db.lc.levels[0].Lock()
+			// Add NumLevelZeroTableStall+1 number of tables to level 0. This would fill up level
+			// zero and all new additions are expected to stall if L0 is in memory.
+			for i := 0; i < opt.NumLevelZeroTablesStall+1; i++ {
+				db.lc.levels[0].tables = append(db.lc.levels[0].tables, createEmptyTable(db))
+			}
+			db.lc.levels[0].Unlock()
+
+			timeout := time.After(5 * time.Second)
+			done := make(chan bool)
+
+			go func() {
+				db.lc.addLevel0Table(createEmptyTable(db))
+				done <- true
+			}()
+			// Let it stall for a second.
+			time.Sleep(time.Second)
+
+			select {
+			case <-timeout:
+				if opt.KeepL0InMemory {
+					t.Log("Timeout triggered")
+					// Mark this test as successful since L0 is in memory and the
+					// addition of new table to L0 is supposed to stall.
+				} else {
+					t.Fatal("Test didn't finish in time")
+				}
+			case <-done:
+				// The test completed before 5 second timeout. Mark it as successful.
+			}
+		})
+	}
+
+	opt := DefaultOptions("")
+	opt.EventLogging = false
+	// Disable all compactions.
+	opt.NumCompactors = 0
+	// Number of level zero tables.
+	opt.NumLevelZeroTables = 3
+	// Addition of new tables will stall if there are 4 or more L0 tables.
+	opt.NumLevelZeroTablesStall = 4
+
+	t.Run("with KeepL0InMemory", func(t *testing.T) {
+		opt.KeepL0InMemory = true
+		test(t, &opt)
+	})
+	t.Run("with L0 on disk", func(t *testing.T) {
+		opt.KeepL0InMemory = false
+		test(t, &opt)
+	})
 }
