@@ -131,14 +131,16 @@ func DefaultOptions(path string) Options {
 		VerifyValueChecksum:     false,
 		Compression:             defaultCompression,
 		MaxCacheSize:            1 << 30, // 1 GB
-		// Benchmarking compression level against performance showed that level 15 gives
-		// the best speed vs ratio tradeoff.
-		// For a data size of 4KB we get
-		// Level: 3  Ratio: 2.72 Time:  24112 n/s
-		// Level: 10 Ratio: 2.95 Time:  75655 n/s
-		// Level: 15 Ratio: 4.38 Time: 239042 n/s
-		// See https://github.com/dgraph-io/badger/pull/1111#issue-338120757
-		ZSTDCompressionLevel: 15,
+		// Use level 1 ZSTD Compression Level. Any level higher than 1 seems to
+		// deteriorate badger's performance.
+		//
+		// no_compression-16              10	 502848865 ns/op	 165.46 MB/s
+		// zstd_compression/level_1-16     7	 739037966 ns/op	 112.58 MB/s
+		// zstd_compression/level_3-16     7	 756950250 ns/op	 109.91 MB/s
+		// zstd_compression/level_15-16    1	11135686219 ns/op	   7.47 MB/s
+		// Benchmark code is in builder_test.go file
+		ZSTDCompressionLevel: 1,
+
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
