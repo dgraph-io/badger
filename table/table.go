@@ -232,6 +232,7 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 	if err := t.initBiggestAndSmallest(); err != nil {
 		return nil, errors.Wrapf(err, "failed to initialize table")
 	}
+
 	if opts.ChkMode == options.OnTableRead || opts.ChkMode == options.OnTableAndBlockRead {
 		if err := t.VerifyChecksum(); err != nil {
 			_ = fd.Close()
@@ -316,6 +317,7 @@ func (t *Table) readNoFail(off, sz int) []byte {
 func (t *Table) readIndex() error {
 	readPos := t.tableSize
 
+	y.AssertTruef(readPos > 0, "readPos less than zero: %d", readPos)
 	// Read checksum len from the last 4 bytes.
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
