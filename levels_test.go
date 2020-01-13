@@ -455,16 +455,10 @@ func TestL1Stall(t *testing.T) {
 	opt.LevelOneSize = 10
 
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-		l0 := []keyValVersion{{"foo", "bar", 1, 0}}
-		l01 := []keyValVersion{{"foo", "bar", 2, 0}}
-		l02 := []keyValVersion{{"foo", "bar", 3, 0}}
-		l03 := []keyValVersion{{"foo", "bar", 4, 0}}
-
-		// Level 0 has all the tables.
-		createAndOpen(db, l0, 0)
-		createAndOpen(db, l01, 0)
-		createAndOpen(db, l02, 0)
-		createAndOpen(db, l03, 0)
+		// Level 0 has 4 tables.
+		db.lc.levels[0].Lock()
+		db.lc.levels[0].tables = []*table.Table{createEmptyTable(db), createEmptyTable(db),
+			createEmptyTable(db), createEmptyTable(db)}
 
 		timeout := time.After(5 * time.Second)
 		done := make(chan bool)
