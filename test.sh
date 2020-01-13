@@ -30,7 +30,6 @@ rm -rf p
 # Then the normal tests.
 echo
 echo "==> Starting test for table, skl and y package"
-sleep 5
 go test -v -race github.com/dgraph-io/badger/v2/skl
 # Run test for all package except the top level packge. The top level package support the
 # `vlog_mmap` flag which rest of the packages don't support.
@@ -38,11 +37,10 @@ go test -v -race $packages
 
 echo
 echo "==> Starting tests with value log mmapped..."
-sleep 5
 # Run top level package tests with mmap flag.
 go test -v -race github.com/dgraph-io/badger/v2 --vlog_mmap=true
+
 echo
 echo "==> Starting tests with value log not mmapped..."
-sleep 5
 go test -v -race github.com/dgraph-io/badger/v2 --vlog_mmap=false 
 
