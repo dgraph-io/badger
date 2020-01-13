@@ -424,9 +424,6 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 			prios = append(prios, pri)
 		}
 	}
-	sort.Slice(prios, func(i, j int) bool {
-		return prios[i].score > prios[j].score
-	})
 	return prios
 }
 
