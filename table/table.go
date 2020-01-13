@@ -317,7 +317,9 @@ func (t *Table) readNoFail(off, sz int) []byte {
 func (t *Table) readIndex() error {
 	readPos := t.tableSize
 
-	y.AssertTruef(readPos > 0, "readPos less than zero: %d", readPos)
+	if readPos <= 0 {
+		return errors.New("readPos less than zero. Data corrupted")
+	}
 	// Read checksum len from the last 4 bytes.
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
