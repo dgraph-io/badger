@@ -4,6 +4,10 @@ set -e
 
 go version
 
+if [[ ! -z "$TEAMCITY_VERSION" ]]; then
+  export GOFLAGS="-json"
+fi
+
 # Ensure that we can compile the binary.
 pushd badger
 go build -v .
