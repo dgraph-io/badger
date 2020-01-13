@@ -459,6 +459,7 @@ func TestL1Stall(t *testing.T) {
 		db.lc.levels[0].Lock()
 		db.lc.levels[0].tables = []*table.Table{createEmptyTable(db), createEmptyTable(db),
 			createEmptyTable(db), createEmptyTable(db)}
+		db.lc.levels[0].Unlock()
 
 		timeout := time.After(5 * time.Second)
 		done := make(chan bool)
