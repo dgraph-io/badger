@@ -21,7 +21,6 @@ import (
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/table"
-	"github.com/dgraph-io/badger/v2/y"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -102,11 +101,6 @@ type Options struct {
 // DefaultOptions sets a list of recommended options for good performance.
 // Feel free to modify these to suit your needs with the WithX methods.
 func DefaultOptions(path string) Options {
-	defaultCompression := options.ZSTD
-	// Use snappy as default compression algorithm if badger is built without CGO.
-	if !y.CgoEnabled {
-		defaultCompression = options.Snappy
-	}
 	return Options{
 		Dir:                 path,
 		ValueDir:            path,
@@ -129,16 +123,17 @@ func DefaultOptions(path string) Options {
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
-		Compression:             defaultCompression,
+		Compression:             options.None,
 		MaxCacheSize:            1 << 30, // 1 GB
-		// Use level 1 ZSTD Compression Level. Any level higher than 1 seems to
-		// deteriorate badger's performance.
-		//
-		// no_compression-16              10	 502848865 ns/op	 165.46 MB/s
-		// zstd_compression/level_1-16     7	 739037966 ns/op	 112.58 MB/s
-		// zstd_compression/level_3-16     7	 756950250 ns/op	 109.91 MB/s
-		// zstd_compression/level_15-16    1	11135686219 ns/op	   7.47 MB/s
-		// Benchmark code is in builder_test.go file
+		// The following benchmarks were done on a 4 KB block size (default block size). The
+		// compression is ratio supposed to increase with increasing compression level but since the
+		// input for compression algorithm is small (4 KB), we don't get significant benefit at
+		// level 3.
+		// no_compression-16              10	 502848865 ns/op	 165.46 MB/s	-
+		// zstd_compression/level_1-16     7	 739037966 ns/op	 112.58 MB/s	2.93
+		// zstd_compression/level_3-16     7	 756950250 ns/op	 109.91 MB/s	2.72
+		// zstd_compression/level_15-16    1	11135686219 ns/op	   7.47 MB/s	4.38
+		// Benchmark code can be found in table/builder_test.go file
 		ZSTDCompressionLevel: 1,
 
 		// Nothing to read/write value log using standard File I/O
@@ -562,7 +557,18 @@ func (opt Options) WithInMemory(b bool) Options {
 // The ZSTD compression algorithm supports 20 compression levels. The higher the compression
 // level, the better is the compression ratio but lower is the performance. Lower levels
 // have better performance and higher levels have better compression ratios.
-// The default value of ZSTDCompressionLevel is 15.
+// Use level 1 ZSTD Compression Level. Any level higher than 1 seems to
+// deteriorate badger's performance.
+// The following benchmarks were done on a 4 KB block size (default block size). The compression is
+// ratio supposed to increase with increasing compression level but since the input for compression
+// algorithm is small (4 KB), we don't get significant benefit at level 3. It is advised to write
+// your own benchmarks before choosing a compression algorithm or level.
+//
+// no_compression-16              10	 502848865 ns/op	 165.46 MB/s	-
+// zstd_compression/level_1-16     7	 739037966 ns/op	 112.58 MB/s	2.93
+// zstd_compression/level_3-16     7	 756950250 ns/op	 109.91 MB/s	2.72
+// zstd_compression/level_15-16    1	11135686219 ns/op	   7.47 MB/s	4.38
+// Benchmark code can be found in table/builder_test.go file
 func (opt Options) WithZSTDCompressionLevel(cLevel int) Options {
 	opt.ZSTDCompressionLevel = cLevel
 	return opt
