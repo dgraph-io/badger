@@ -743,7 +743,10 @@ func TestTableChecksum(t *testing.T) {
 	f := buildTestTable(t, "k", 10000, opts)
 	fi, err := f.Stat()
 	require.NoError(t, err, "unable to get file information")
-	f.WriteAt(rb, rand.Int63n(fi.Size()))
+	// Write random bytes at random location.
+	n, err := f.WriteAt(rb, rand.Int63n(fi.Size()))
+	require.NoError(t, err)
+	require.Equal(t, n, len(rb))
 
 	_, err = OpenTable(f, opts)
 	if err == nil || !strings.Contains(err.Error(), "checksum") {
