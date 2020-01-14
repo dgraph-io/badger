@@ -1315,7 +1315,7 @@ func (reqs requests) IncrRef() {
 // if fid >= vlog.maxFid. In some cases such as replay(while opening db), it might be called with
 // fid < vlog.maxFid. To sync irrespective of file id just call it with math.MaxUint32.
 func (vlog *valueLog) sync(fid uint32) error {
-	if vlog.opt.SyncWrites {
+	if vlog.opt.SyncWrites || vlog.opt.InMemory {
 		return nil
 	}
 
