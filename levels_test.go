@@ -20,28 +20,22 @@ import (
 	"math"
 	"testing"
 
-	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/pb"
-	"github.com/dgraph-io/badger/v2/table"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/pb"
+	"github.com/dgraph-io/badger/table"
+	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
 
 // createAndOpen creates a table with the given data and adds it to the given level.
 func createAndOpen(db *DB, td []keyValVersion, level int) {
-	opts := table.Options{
-		BlockSize:          db.opt.BlockSize,
-		BloomFalsePositive: db.opt.BloomFalsePositive,
-		LoadingMode:        options.LoadToRAM,
-		ChkMode:            options.NoVerification,
-	}
-	b := table.NewTableBuilder(opts)
+	b := table.NewTableBuilder()
 
 	// Add all keys and versions to the table.
 	for _, item := range td {
 		key := y.KeyWithTs([]byte(item.key), uint64(item.version))
 		val := y.ValueStruct{Value: []byte(item.val), Meta: item.meta}
-		b.Add(key, val, 0)
+		b.Add(key, val)
 	}
 	fd, err := y.CreateSyncedFile(table.NewFilename(db.lc.reserveFileID(), db.opt.Dir), true)
 	if err != nil {
@@ -51,12 +45,12 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 	if _, err = fd.Write(b.Finish()); err != nil {
 		panic(err)
 	}
-	tab, err := table.OpenTable(fd, opts)
+	tab, err := table.OpenTable(fd, options.LoadToRAM, nil)
 	if err != nil {
 		panic(err)
 	}
 	if err := db.manifest.addChanges([]*pb.ManifestChange{
-		newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
+		newCreateChange(tab.ID(), level, nil),
 	}); err != nil {
 		panic(err)
 	}
