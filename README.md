@@ -736,6 +736,7 @@ Below is a list of known projects that use Badger:
 
 * [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
 * [Dgraph](https://github.com/dgraph-io/dgraph) - Distributed graph database.
+* [Jaeger](https://github.com/jaegertracing/jaeger) - Distributed tracing platform.
 * [TalariaDB](https://github.com/grab/talaria) - Distributed, low latency time-series database.
 * [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed application data analytics.
 * [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
