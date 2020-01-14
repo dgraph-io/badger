@@ -467,7 +467,9 @@ func TestL1Stall(t *testing.T) {
 		// This is important. Set level 1 size more than the opt.LevelOneSize (we've set it to 10).
 		db.lc.levels[1].totalSize = 100
 		go func() {
-			db.lc.addLevel0Table(createEmptyTable(db))
+			tab := createEmptyTable(db)
+			db.lc.addLevel0Table(tab)
+			tab.DecrRef()
 			done <- true
 		}()
 		time.Sleep(time.Second)
@@ -475,6 +477,8 @@ func TestL1Stall(t *testing.T) {
 		db.lc.levels[0].Lock()
 		// Drop two tables from Level 0 so that addLevel0Table can make progress. Earlier table
 		// count was 4 which is equal to L0 stall count.
+		toDrop := db.lc.levels[0].tables[:2]
+		decrRefs(toDrop)
 		db.lc.levels[0].tables = db.lc.levels[0].tables[2:]
 		db.lc.levels[0].Unlock()
 
@@ -507,6 +511,13 @@ func createEmptyTable(db *DB) *table.Table {
 	if err != nil {
 		panic(err)
 	}
+	// Add dummy entry to manifest file so that it doesn't complain during compaction.
+	if err := db.manifest.addChanges([]*pb.ManifestChange{
+		newCreateChange(tab.ID(), 0, 0, tab.CompressionType()),
+	}); err != nil {
+		panic(err)
+	}
+
 	return tab
 }
 
@@ -525,7 +536,9 @@ func TestL0Stall(t *testing.T) {
 			done := make(chan bool)
 
 			go func() {
-				db.lc.addLevel0Table(createEmptyTable(db))
+				tab := createEmptyTable(db)
+				db.lc.addLevel0Table(tab)
+				tab.DecrRef()
 				done <- true
 			}()
 			// Let it stall for a second.
