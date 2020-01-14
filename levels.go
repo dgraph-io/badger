@@ -424,6 +424,10 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 			prios = append(prios, pri)
 		}
 	}
+	// We used to sort compaction priorities based on the score. But, we
+	// decided to compact based on the level, not the priority. So, upper
+	// levels (level 0, level 1, etc) always get compacted first, before the
+	// lower levels -- this allows us to avoid stalls.
 	return prios
 }
 
