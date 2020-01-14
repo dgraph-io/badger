@@ -1996,6 +1996,7 @@ func ExampleDB_Subscribe() {
 	// Use the WaitGroup to make sure we wait for the subscription to stop before continuing.
 	var wg sync.WaitGroup
 	wg.Add(1)
+	ch := make(chan struct{})
 	go func() {
 		defer wg.Done()
 		cb := func(kvs *KVList) error {
@@ -2004,12 +2005,14 @@ func ExampleDB_Subscribe() {
 			}
 			return nil
 		}
+		ch <- struct{}{}
 		if err := db.Subscribe(ctx, cb, prefix); err != nil && err != context.Canceled {
 			panic(err)
 		}
 		log.Printf("subscription closed")
 	}()
 
+	<-ch
 	// Wait for the above go routine to be scheduled.
 	time.Sleep(time.Second)
 	// Write both keys, but only one should be printed in the Output.
