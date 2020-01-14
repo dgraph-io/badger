@@ -32,8 +32,6 @@ import (
 )
 
 type oracle struct {
-	// A 64-bit integer must be at the top for memory alignment. See issue #311.
-	refCount  int64
 	isManaged bool // Does not change value, so no locking required.
 
 	sync.Mutex // For nextTxnTs and commits.
@@ -51,17 +49,21 @@ type oracle struct {
 	readMark  *y.WaterMark // Used by DB.
 
 	// commits stores a key fingerprint and latest commit counter for it.
-	// refCount is used to clear out commits map to avoid a memory blowup.
-	commits map[uint64]uint64
+	committedTxns []committedTxn
+	lastCleanupTs uint64
 
 	// closer is used to stop watermarks.
 	closer *y.Closer
 }
 
+type committedTxn struct {
+	ts     uint64
+	writes map[uint64]struct{}
+}
+
 func newOracle(opt Options) *oracle {
 	orc := &oracle{
 		isManaged: opt.managedTxns,
-		commits:   make(map[uint64]uint64),
 		// We're not initializing nextTxnTs and readOnlyTs. It would be done after replay in Open.
 		//
 		// WaterMarks must be 64-bit aligned for atomic package, hence we must use pointers here.
@@ -77,28 +79,6 @@ func newOracle(opt Options) *oracle {
 
 func (o *oracle) Stop() {
 	o.closer.SignalAndWait()
-}
-
-func (o *oracle) addRef() {
-	atomic.AddInt64(&o.refCount, 1)
-}
-
-func (o *oracle) decrRef() {
-	if atomic.AddInt64(&o.refCount, -1) != 0 {
-		return
-	}
-
-	// Clear out commits maps to release memory.
-	o.Lock()
-	defer o.Unlock()
-	// Avoids the race where something new is added to commitsMap
-	// after we check refCount and before we take Lock.
-	if atomic.LoadInt64(&o.refCount) != 0 {
-		return
-	}
-	if len(o.commits) >= 1000 { // If the map is still small, let it slide.
-		o.commits = make(map[uint64]uint64)
-	}
 }
 
 func (o *oracle) readTs() uint64 {
@@ -138,6 +118,7 @@ func (o *oracle) setDiscardTs(ts uint64) {
 	o.Lock()
 	defer o.Unlock()
 	o.discardTs = ts
+	o.cleanupCommittedTransactions()
 }
 
 func (o *oracle) discardAtOrBelow() uint64 {
@@ -154,13 +135,20 @@ func (o *oracle) hasConflict(txn *Txn) bool {
 	if len(txn.reads) == 0 {
 		return false
 	}
-	for _, ro := range txn.reads {
+	for _, committedTxn := range o.committedTxns {
 		// A commit at the read timestamp is expected.
 		// But, any commit after the read timestamp should cause a conflict.
-		if ts, has := o.commits[ro]; has && ts > txn.readTs {
-			return true
+		if committedTxn.ts <= txn.readTs {
+			continue
+		}
+
+		for _, ro := range txn.reads {
+			if _, has := committedTxn.writes[ro]; has {
+				return true
+			}
 		}
 	}
+
 	return false
 }
 
@@ -170,6 +158,11 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 
 	if o.hasConflict(txn) {
 		return 0
+	}
+
+	if !o.isManaged {
+		o.doneRead(txn)
+		o.cleanupCommittedTransactions()
 	}
 
 	var ts uint64
@@ -184,10 +177,48 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 		ts = txn.commitTs
 	}
 
-	for _, w := range txn.writes {
-		o.commits[w] = ts // Update the commitTs.
+	if ts > o.lastCleanupTs {
+		o.committedTxns = append(o.committedTxns, committedTxn{
+			ts:     ts,
+			writes: txn.writes,
+		})
 	}
+
 	return ts
+}
+
+func (o *oracle) doneRead(txn *Txn) {
+	if !txn.doneRead {
+		txn.doneRead = true
+		o.readMark.Done(txn.readTs)
+	}
+}
+
+func (o *oracle) cleanupCommittedTransactions() { // Must be called under o.Lock
+	// Same logic as discardAtOrBelow but unlocked
+	var maxReadTs uint64
+	if o.isManaged {
+		maxReadTs = o.discardTs
+	} else {
+		maxReadTs = o.readMark.DoneUntil()
+	}
+
+	if maxReadTs <= o.lastCleanupTs {
+		return
+	}
+	o.lastCleanupTs = maxReadTs
+
+	var newIdx int
+	for oldIdx, txn := range o.committedTxns {
+		if txn.ts <= maxReadTs {
+			continue
+		}
+		if oldIdx != newIdx {
+			o.committedTxns[newIdx] = txn
+		}
+		newIdx++
+	}
+	o.committedTxns = o.committedTxns[:newIdx]
 }
 
 func (o *oracle) doneCommit(cts uint64) {
@@ -203,14 +234,15 @@ type Txn struct {
 	readTs   uint64
 	commitTs uint64
 
-	update bool     // update is used to conditionally keep track of reads.
-	reads  []uint64 // contains fingerprints of keys read.
-	writes []uint64 // contains fingerprints of keys written.
+	update bool                // update is used to conditionally keep track of reads.
+	reads  []uint64            // contains fingerprints of keys read.
+	writes map[uint64]struct{} // contains fingerprints of keys written.
 
 	pendingWrites map[string]*Entry // cache stores any writes done by txn.
 
 	db        *DB
 	discarded bool
+	doneRead  bool
 
 	size         int64
 	count        int64
@@ -333,7 +365,7 @@ func (txn *Txn) modify(e *Entry) error {
 		return err
 	}
 	fp := z.MemHash(e.Key) // Avoid dealing with byte arrays.
-	txn.writes = append(txn.writes, fp)
+	txn.writes[fp] = struct{}{}
 	txn.pendingWrites[string(e.Key)] = e
 	return nil
 }
@@ -447,10 +479,7 @@ func (txn *Txn) Discard() {
 	}
 	txn.discarded = true
 	if !txn.db.orc.isManaged {
-		txn.db.orc.readMark.Done(txn.readTs)
-	}
-	if txn.update {
-		txn.db.orc.decrRef()
+		txn.db.orc.doneRead(txn)
 	}
 }
 
@@ -647,21 +676,9 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 		size:   int64(len(txnKey) + 10), // Some buffer for the extra entry.
 	}
 	if update {
+		txn.writes = make(map[uint64]struct{})
 		txn.pendingWrites = make(map[string]*Entry)
-		txn.db.orc.addRef()
 	}
-	// It is important that the oracle addRef happens BEFORE we retrieve a read
-	// timestamp. Otherwise, it is possible that the oracle commit map would
-	// become nil after we get the read timestamp.
-	// The sequence of events can be:
-	// 1. This txn gets a read timestamp.
-	// 2. Another txn working on the same keyset commits them, and decrements
-	//    the reference to oracle.
-	// 3. Oracle ref reaches zero, resetting commit map.
-	// 4. This txn increments the oracle reference.
-	// 5. Now this txn would go on to commit the keyset, and no conflicts
-	//    would be detected.
-	// See issue: https://github.com/dgraph-io/badger/issues/574
 	if !isManaged {
 		txn.readTs = db.orc.readTs()
 	}

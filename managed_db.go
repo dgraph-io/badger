@@ -47,7 +47,7 @@ func (db *DB) NewWriteBatchAt(commitTs uint64) *WriteBatch {
 		panic("cannot use NewWriteBatchAt with managedDB=false. Use NewWriteBatch instead")
 	}
 
-	wb := db.newWriteBatch()
+	wb := db.newWriteBatch(true)
 	wb.commitTs = commitTs
 	wb.txn.commitTs = commitTs
 	return wb
