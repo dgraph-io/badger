@@ -123,7 +123,7 @@ func DefaultOptions(path string) Options {
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
-		Compression:             options.None,
+		Compression:             options.ZSTD,
 		MaxCacheSize:            1 << 30, // 1 GB
 		// The following benchmarks were done on a 4 KB block size (default block size). The
 		// compression is ratio supposed to increase with increasing compression level but since the
