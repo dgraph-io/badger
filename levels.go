@@ -928,10 +928,10 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time
 		{
-			s.elog.Printf("STALLED STALLED STALLED: %v\n", time.Since(lastUnstalled))
+			fmt.Printf("STALLED STALLED STALLED: %v\n", time.Since(lastUnstalled))
 			s.cstatus.RLock()
 			for i := 0; i < s.kv.opt.MaxLevels; i++ {
-				s.elog.Printf("level=%d. Status=%s Size=%d\n",
+				fmt.Printf("level=%d. Status=%s Size=%d\n",
 					i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
 			}
 			s.cstatus.RUnlock()
@@ -951,12 +951,12 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 			time.Sleep(10 * time.Millisecond)
 			if i%100 == 0 {
 				prios := s.pickCompactLevels()
-				s.elog.Printf("Waiting to add level 0 table. Compaction priorities: %+v\n", prios)
+				fmt.Printf("Waiting to add level 0 table. Compaction priorities: %+v\n", prios)
 				i = 0
 			}
 		}
 		{
-			s.elog.Printf("UNSTALLED UNSTALLED UNSTALLED: %v\n", time.Since(timeStart))
+			fmt.Printf("UNSTALLED UNSTALLED UNSTALLED: %v\n", time.Since(timeStart))
 			lastUnstalled = time.Now()
 		}
 	}

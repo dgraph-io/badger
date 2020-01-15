@@ -91,6 +91,7 @@ func TestDropAllManaged(t *testing.T) {
 	populate(db, 1)
 	require.Equal(t, int(N), numKeysManaged(db, math.MaxUint64))
 	require.NoError(t, db.Close())
+	fmt.Println("DB closed")
 
 	// Ensure that value log is correctly replayed, that we are preserving badgerHead.
 	opts.managedTxns = true
