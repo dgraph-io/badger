@@ -21,6 +21,8 @@ go test -v --manual=true -run='TestTruncateVlogNoClose2$' .
 go test -v --manual=true -run='TestTruncateVlogNoClose3$' .
 rm -rf p
 
+go test -v -race -run TestDropAllManaged --vlog_mmap=true
+
 # Then the normal tests.
 echo
 echo "==> Starting tests with value log mmapped..."
