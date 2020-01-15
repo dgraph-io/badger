@@ -26,7 +26,6 @@ import (
 	"log"
 	"math"
 	"math/rand"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1798,12 +1797,7 @@ func TestForceFlushMemtable(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	// call flag.Parse() here if TestMain uses flags
-	go func() {
-		if err := http.ListenAndServe("localhost:8080", nil); err != nil {
-			panic("Unable to open http port at 8080")
-		}
-	}()
+	flag.Parse()
 	os.Exit(m.Run())
 }
 
