@@ -19,6 +19,7 @@ package badger
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
@@ -437,5 +438,142 @@ func TestDiscardFirstVersion(t *testing.T) {
 			{"foo", "bar", 2, bitDiscardEarlierVersions}}
 
 		getAllAndCheck(t, db, ExpectedKeys)
+	})
+}
+
+// This test ensures we don't stall when L1's size is greater than opt.LevelOneSize.
+// We should stall only when L0 tables more than the opt.NumLevelZeroTableStall.
+func TestL1Stall(t *testing.T) {
+	opt := DefaultOptions("")
+	// Disable all compactions.
+	opt.NumCompactors = 0
+	// Number of level zero tables.
+	opt.NumLevelZeroTables = 3
+	// Addition of new tables will stall if there are 4 or more L0 tables.
+	opt.NumLevelZeroTablesStall = 4
+	// Level 1 size is 10 bytes.
+	opt.LevelOneSize = 10
+
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		// Level 0 has 4 tables.
+		db.lc.levels[0].Lock()
+		db.lc.levels[0].tables = []*table.Table{createEmptyTable(db), createEmptyTable(db),
+			createEmptyTable(db), createEmptyTable(db)}
+		db.lc.levels[0].Unlock()
+
+		timeout := time.After(5 * time.Second)
+		done := make(chan bool)
+
+		// This is important. Set level 1 size more than the opt.LevelOneSize (we've set it to 10).
+		db.lc.levels[1].totalSize = 100
+		go func() {
+			tab := createEmptyTable(db)
+			db.lc.addLevel0Table(tab)
+			tab.DecrRef()
+			done <- true
+		}()
+		time.Sleep(time.Second)
+
+		db.lc.levels[0].Lock()
+		// Drop two tables from Level 0 so that addLevel0Table can make progress. Earlier table
+		// count was 4 which is equal to L0 stall count.
+		toDrop := db.lc.levels[0].tables[:2]
+		decrRefs(toDrop)
+		db.lc.levels[0].tables = db.lc.levels[0].tables[2:]
+		db.lc.levels[0].Unlock()
+
+		select {
+		case <-timeout:
+			t.Fatal("Test didn't finish in time")
+		case <-done:
+		}
+	})
+}
+
+func createEmptyTable(db *DB) *table.Table {
+	opts := table.Options{
+		BloomFalsePositive: db.opt.BloomFalsePositive,
+		LoadingMode:        options.LoadToRAM,
+		ChkMode:            options.NoVerification,
+	}
+	b := table.NewTableBuilder(opts)
+	// Add one key so that we can open this table.
+	b.Add(y.KeyWithTs([]byte("foo"), 1), y.ValueStruct{}, 0)
+	fd, err := y.CreateSyncedFile(table.NewFilename(db.lc.reserveFileID(), db.opt.Dir), true)
+	if err != nil {
+		panic(err)
+	}
+
+	if _, err := fd.Write(b.Finish()); err != nil {
+		panic(err)
+	}
+	tab, err := table.OpenTable(fd, table.Options{})
+	if err != nil {
+		panic(err)
+	}
+	// Add dummy entry to manifest file so that it doesn't complain during compaction.
+	if err := db.manifest.addChanges([]*pb.ManifestChange{
+		newCreateChange(tab.ID(), 0, 0, tab.CompressionType()),
+	}); err != nil {
+		panic(err)
+	}
+
+	return tab
+}
+
+func TestL0Stall(t *testing.T) {
+	test := func(t *testing.T, opt *Options) {
+		runBadgerTest(t, opt, func(t *testing.T, db *DB) {
+			db.lc.levels[0].Lock()
+			// Add NumLevelZeroTableStall+1 number of tables to level 0. This would fill up level
+			// zero and all new additions are expected to stall if L0 is in memory.
+			for i := 0; i < opt.NumLevelZeroTablesStall+1; i++ {
+				db.lc.levels[0].tables = append(db.lc.levels[0].tables, createEmptyTable(db))
+			}
+			db.lc.levels[0].Unlock()
+
+			timeout := time.After(5 * time.Second)
+			done := make(chan bool)
+
+			go func() {
+				tab := createEmptyTable(db)
+				db.lc.addLevel0Table(tab)
+				tab.DecrRef()
+				done <- true
+			}()
+			// Let it stall for a second.
+			time.Sleep(time.Second)
+
+			select {
+			case <-timeout:
+				if opt.KeepL0InMemory {
+					t.Log("Timeout triggered")
+					// Mark this test as successful since L0 is in memory and the
+					// addition of new table to L0 is supposed to stall.
+				} else {
+					t.Fatal("Test didn't finish in time")
+				}
+			case <-done:
+				// The test completed before 5 second timeout. Mark it as successful.
+			}
+		})
+	}
+
+	opt := DefaultOptions("")
+	opt.EventLogging = false
+	// Disable all compactions.
+	opt.NumCompactors = 0
+	// Number of level zero tables.
+	opt.NumLevelZeroTables = 3
+	// Addition of new tables will stall if there are 4 or more L0 tables.
+	opt.NumLevelZeroTablesStall = 4
+
+	t.Run("with KeepL0InMemory", func(t *testing.T) {
+		opt.KeepL0InMemory = true
+		test(t, &opt)
+	})
+	t.Run("with L0 on disk", func(t *testing.T) {
+		opt.KeepL0InMemory = false
+		test(t, &opt)
 	})
 }
