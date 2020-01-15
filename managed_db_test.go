@@ -42,6 +42,7 @@ func numKeys(db *DB) int {
 }
 
 func numKeysManaged(db *DB, readTs uint64) int {
+	fmt.Println("numkeys- started")
 	txn := db.NewTransactionAt(readTs, false)
 	defer txn.Discard()
 
@@ -52,6 +53,7 @@ func numKeysManaged(db *DB, readTs uint64) int {
 	for itr.Rewind(); itr.Valid(); itr.Next() {
 		count++
 	}
+	fmt.Println("numkeys- done")
 	return count
 }
 
@@ -67,6 +69,7 @@ func TestDropAllManaged(t *testing.T) {
 
 	N := uint64(10000)
 	populate := func(db *DB, start uint64) {
+		fmt.Println("populate-start")
 		var wg sync.WaitGroup
 		for i := start; i < start+N; i++ {
 			wg.Add(1)
@@ -77,6 +80,7 @@ func TestDropAllManaged(t *testing.T) {
 				wg.Done()
 			}))
 		}
+		fmt.Println("populate-done")
 		wg.Wait()
 	}
 
@@ -89,9 +93,11 @@ func TestDropAllManaged(t *testing.T) {
 
 	// Check that we can still write to db, and using lower timestamps.
 	populate(db, 1)
+	fmt.Println("count started")
 	require.Equal(t, int(N), numKeysManaged(db, math.MaxUint64))
-	require.NoError(t, db.Close())
 	fmt.Println("DB closed")
+	require.NoError(t, db.Close())
+	fmt.Println("DB closed-done")
 
 	// Ensure that value log is correctly replayed, that we are preserving badgerHead.
 	opts.managedTxns = true
