@@ -557,7 +557,7 @@ func (opt Options) WithInMemory(b bool) Options {
 // The ZSTD compression algorithm supports 20 compression levels. The higher the compression
 // level, the better is the compression ratio but lower is the performance. Lower levels
 // have better performance and higher levels have better compression ratios.
-// Use level 1 ZSTD Compression Level. Any level higher than 1 seems to
+// We recommend using level 1 ZSTD Compression Level. Any level higher than 1 seems to
 // deteriorate badger's performance.
 // The following benchmarks were done on a 4 KB block size (default block size). The compression is
 // ratio supposed to increase with increasing compression level but since the input for compression
