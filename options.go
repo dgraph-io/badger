@@ -539,7 +539,8 @@ func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificat
 // WithMaxCacheSize returns a new Options value with MaxCacheSize set to the given value.
 //
 // This value specifies how much data cache should hold in memory. A small size of cache means lower
-// memory consumption and lookups/iterations would take longer.
+// memory consumption and lookups/iterations would take longer. Setting size to zero disables the
+// cache altogether.
 func (opt Options) WithMaxCacheSize(size int64) Options {
 	opt.MaxCacheSize = size
 	return opt
