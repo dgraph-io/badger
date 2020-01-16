@@ -1640,7 +1640,7 @@ func createDirs(opt Options) error {
 				return errors.Errorf("Cannot find directory %q for read-only open", path)
 			}
 			// Try to create the directory
-			err = os.Mkdir(path, 0700)
+			err = os.MkdirAll(path, 0700)
 			if err != nil {
 				return y.Wrapf(err, "Error Creating Dir: %q", path)
 			}
