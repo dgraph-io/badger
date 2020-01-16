@@ -482,9 +482,7 @@ func (db *DB) close() (err error) {
 	db.elog.Printf("Waiting for closer")
 	db.closers.updateSize.SignalAndWait()
 	db.orc.Stop()
-	if db.blockCache != nil {
-		db.blockCache.Close()
-	}
+	db.blockCache.Close()
 
 	db.elog.Finish()
 	if db.opt.InMemory {
@@ -1507,9 +1505,8 @@ func (db *DB) dropAll() (func(), error) {
 	db.vhead = valuePointer{} // Zero it out.
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
-	if db.blockCache != nil {
-		db.blockCache.Clear()
-	}
+	db.blockCache.Clear()
+
 	return resume, nil
 }
 
