@@ -232,6 +232,7 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 	if err := t.initBiggestAndSmallest(); err != nil {
 		return nil, errors.Wrapf(err, "failed to initialize table")
 	}
+
 	if opts.ChkMode == options.OnTableRead || opts.ChkMode == options.OnTableAndBlockRead {
 		if err := t.VerifyChecksum(); err != nil {
 			_ = fd.Close()
@@ -320,6 +321,9 @@ func (t *Table) readIndex() error {
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
 	checksumLen := int(y.BytesToU32(buf))
+	if checksumLen < 0 {
+		return errors.New("checksum length less than zero. Data corrupted")
+	}
 
 	// Read checksum.
 	expectedChk := &pb.Checksum{}
@@ -354,7 +358,10 @@ func (t *Table) readIndex() error {
 	y.Check(err)
 
 	t.estimatedSize = index.EstimatedSize
-	t.bf = z.JSONUnmarshal(index.BloomFilter)
+	if t.bf, err = z.JSONUnmarshal(index.BloomFilter); err != nil {
+		return y.Wrapf(err, "failed to unmarshal bloom filter for the table %d in Table.readIndex",
+			t.id)
+	}
 	t.blockIndex = index.Offsets
 	return nil
 }
