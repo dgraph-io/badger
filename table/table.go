@@ -358,7 +358,10 @@ func (t *Table) readIndex() error {
 	y.Check(err)
 
 	t.estimatedSize = index.EstimatedSize
-	t.bf = z.JSONUnmarshal(index.BloomFilter)
+	if t.bf, err = z.JSONUnmarshal(index.BloomFilter); err != nil {
+		return y.Wrapf(err, "failed to unmarshal bloom filter for the table %d in Table.readIndex",
+			t.id)
+	}
 	t.blockIndex = index.Offsets
 	return nil
 }
