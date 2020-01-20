@@ -935,6 +935,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	db.elog.Printf("Storing offset: %+v\n", ft.vptr)
 	val := ft.vptr.Encode()
 
+	fmt.Println("vptr.encode - done")
 	// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
 	// commits.
 	headTs := y.KeyWithTs(head, db.orc.nextTs())
@@ -944,6 +945,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	if err != nil {
 		return y.Wrapf(err, "failed to get datakey in db.handleFlushTask")
 	}
+	fmt.Println("latestDataKey - done")
 	bopts := buildTableOptions(db.opt)
 	bopts.DataKey = dk
 	// Builder does not need cache but the same options are used for opening table.
@@ -956,7 +958,10 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		if err != nil {
 			return errors.Wrapf(err, "failed to open table in memory")
 		}
-		return db.lc.addLevel0Table(tbl)
+		fmt.Println("OpenInMemoryTable - done")
+		err = db.lc.addLevel0Table(tbl)
+		fmt.Println("addLevel0Table - done")
+		return err
 	}
 
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
@@ -964,6 +969,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return y.Wrap(err)
 	}
 
+	fmt.Println("syncfile - done")
 	// Don't block just to sync the directory entry.
 	dirSyncCh := make(chan error, 1)
 	go func() { dirSyncCh <- db.syncDir(db.opt.Dir) }()
@@ -972,16 +978,19 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		db.elog.Errorf("ERROR while writing to level 0: %v", err)
 		return err
 	}
+	fmt.Println("fd.write - done")
 
 	if dirSyncErr := <-dirSyncCh; dirSyncErr != nil {
 		// Do dir sync as best effort. No need to return due to an error there.
 		db.elog.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
 	}
+	fmt.Println("dirSyncCh - done")
 	tbl, err := table.OpenTable(fd, bopts)
 	if err != nil {
 		db.elog.Printf("ERROR while opening table: %v", err)
 		return err
 	}
+	fmt.Println("table.OpenTable -done")
 	// We own a ref on tbl.
 	err = db.lc.addLevel0Table(tbl) // This will incrRef
 	_ = tbl.DecrRef()               // Releases our ref.
