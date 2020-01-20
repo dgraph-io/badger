@@ -27,7 +27,7 @@ go test -v -race -run TestDropAllManaged --vlog_mmap=true
 echo
 echo "==> Starting tests with value log mmapped..."
 sleep 5
-go test -v --vlog_mmap=true -race ./...
+go test -v --vlog_mmap=true -timeout=2m -race ./...
 
 echo
 echo "==> Starting tests with value log not mmapped..."
