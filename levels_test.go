@@ -468,7 +468,7 @@ func TestL1Stall(t *testing.T) {
 		db.lc.levels[1].totalSize = 100
 		go func() {
 			tab := createEmptyTable(db)
-			db.lc.addLevel0Table(tab)
+			require.NoError(t, db.lc.addLevel0Table(tab))
 			tab.DecrRef()
 			done <- true
 		}()
@@ -499,22 +499,10 @@ func createEmptyTable(db *DB) *table.Table {
 	b := table.NewTableBuilder(opts)
 	// Add one key so that we can open this table.
 	b.Add(y.KeyWithTs([]byte("foo"), 1), y.ValueStruct{}, 0)
-	fd, err := y.CreateSyncedFile(table.NewFilename(db.lc.reserveFileID(), db.opt.Dir), true)
-	if err != nil {
-		panic(err)
-	}
 
-	if _, err := fd.Write(b.Finish()); err != nil {
-		panic(err)
-	}
-	tab, err := table.OpenTable(fd, table.Options{})
+	// Open table in memory to avoid adding changes to manifest file.
+	tab, err := table.OpenInMemoryTable(b.Finish(), db.lc.reserveFileID(), &opts)
 	if err != nil {
-		panic(err)
-	}
-	// Add dummy entry to manifest file so that it doesn't complain during compaction.
-	if err := db.manifest.addChanges([]*pb.ManifestChange{
-		newCreateChange(tab.ID(), 0, 0, tab.CompressionType()),
-	}); err != nil {
 		panic(err)
 	}
 
@@ -537,7 +525,7 @@ func TestL0Stall(t *testing.T) {
 
 			go func() {
 				tab := createEmptyTable(db)
-				db.lc.addLevel0Table(tab)
+				require.NoError(t, db.lc.addLevel0Table(tab))
 				tab.DecrRef()
 				done <- true
 			}()
