@@ -124,14 +124,42 @@ func BenchmarkBuilder(b *testing.B) {
 	vs := y.ValueStruct{Value: []byte(val)}
 
 	keysCount := 1300000 // This number of entries consumes ~64MB of memory.
-	for i := 0; i < b.N; i++ {
-		opts := Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
-		builder := NewTableBuilder(opts)
 
-		for i := 0; i < keysCount; i++ {
-			builder.Add(key(i), vs, 0)
+	bench := func(b *testing.B, opt *Options) {
+		// KeyCount * (keySize + ValSize)
+		b.SetBytes(int64(keysCount) * (32 + 32))
+		for i := 0; i < b.N; i++ {
+			opt.BlockSize = 4 * 1024
+			opt.BloomFalsePositive = 0.01
+			builder := NewTableBuilder(*opt)
+
+			for i := 0; i < keysCount; i++ {
+				builder.Add(key(i), vs, 0)
+			}
+
+			_ = builder.Finish()
 		}
-
-		_ = builder.Finish()
 	}
+
+	b.Run("no compression", func(b *testing.B) {
+		var opt Options
+		opt.Compression = options.None
+		bench(b, &opt)
+	})
+	b.Run("zstd compression", func(b *testing.B) {
+		var opt Options
+		opt.Compression = options.ZSTD
+		b.Run("level 1", func(b *testing.B) {
+			opt.ZSTDCompressionLevel = 1
+			bench(b, &opt)
+		})
+		b.Run("level 3", func(b *testing.B) {
+			opt.ZSTDCompressionLevel = 3
+			bench(b, &opt)
+		})
+		b.Run("level 15", func(b *testing.B) {
+			opt.ZSTDCompressionLevel = 15
+			bench(b, &opt)
+		})
+	})
 }
