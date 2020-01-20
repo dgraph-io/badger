@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
-	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -888,7 +887,6 @@ func (db *DB) ensureRoomForWrite() error {
 		db.imm = append(db.imm, db.mt)
 		db.mt = skl.NewSkiplist(arenaSize(db.opt))
 		// New memtable is empty. We certainly have room.
-		fmt.Println("Flush memtable-done")
 		return nil
 	default:
 		// We need to do this to unlock and allow the flusher to modify imm.
@@ -928,7 +926,6 @@ type flushTask struct {
 
 // handleFlushTask must be run serially.
 func (db *DB) handleFlushTask(ft flushTask) error {
-	fmt.Println("handle flush task- started")
 	// There can be a scenario, when empty memtable is flushed. For example, memtable is empty and
 	// after writing request to value log, rotation count exceeds db.LogRotatesToFlush.
 	if ft.mt.Empty() {
@@ -990,7 +987,6 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// We own a ref on tbl.
 	err = db.lc.addLevel0Table(tbl) // This will incrRef
 	_ = tbl.DecrRef()               // Releases our ref.
-	fmt.Println("handle flush task- done")
 	return err
 }
 
@@ -1005,7 +1001,6 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 			continue
 		}
 		for {
-			fmt.Println("received a flush task- started")
 			err := db.handleFlushTask(ft)
 			if err == nil {
 				// Update s.imm. Need a lock.
@@ -1026,7 +1021,6 @@ func (db *DB) flushMemtable(lc *y.Closer) error {
 			db.opt.Errorf("Failure while flushing memtable to disk: %v. Retrying...\n", err)
 			time.Sleep(time.Second)
 		}
-		fmt.Println("received a flush task- done")
 	}
 	return nil
 }

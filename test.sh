@@ -27,8 +27,6 @@ go test -v -run='TestTruncateVlogNoClose2$' --manual=true
 go test -v -run='TestTruncateVlogNoClose3$' --manual=true
 rm -rf p
 
-go test -v -race -run TestDropAllManaged --vlog_mmap=true
-
 # Then the normal tests.
 echo
 echo "==> Starting test for table, skl and y package"
