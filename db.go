@@ -418,18 +418,15 @@ func (db *DB) close() (err error) {
 	// Stop writes next.
 	db.closers.writes.SignalAndWait()
 
-	fmt.Println("writes stopped")
 	// Don't accept any more write.
 	close(db.writeCh)
 
 	db.closers.pub.SignalAndWait()
 
-	fmt.Println("pub stopped")
 	// Now close the value log.
 	if vlogErr := db.vlog.Close(); vlogErr != nil {
 		err = errors.Wrap(vlogErr, "DB.Close")
 	}
-	fmt.Println("vlog closed")
 
 	// Make sure that block writer is done pushing stuff into memtable!
 	// Otherwise, you will have a race condition: we are trying to flush memtables
@@ -462,17 +459,13 @@ func (db *DB) close() (err error) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	fmt.Println("stopping memory flush and compactions")
 	db.stopMemoryFlush()
 	db.stopCompactions()
 
-	fmt.Println("stopping memory flush and compactions-done")
 	// Force Compact L0
 	// We don't need to care about cstatus since no parallel compaction is running.
 	if db.opt.CompactL0OnClose {
-		fmt.Println("level 0 compaction")
 		err := db.lc.doCompact(compactionPriority{level: 0, score: 1.73})
-		fmt.Println("level 0 compaction-done")
 		switch err {
 		case errFillTables:
 			// This error only means that there might be enough tables to do a compaction. So, we
@@ -484,26 +477,19 @@ func (db *DB) close() (err error) {
 		}
 	}
 
-	fmt.Println("lc close")
 	if lcErr := db.lc.close(); err == nil {
 		err = errors.Wrap(lcErr, "DB.Close")
 	}
-	fmt.Println("lc close-done")
 	db.elog.Printf("Waiting for closer")
 	db.closers.updateSize.SignalAndWait()
-
-	fmt.Println("updates size done")
 	db.orc.Stop()
-	fmt.Println("orc close")
 	db.blockCache.Close()
 
-	fmt.Println("cache close")
 	db.elog.Finish()
 	if db.opt.InMemory {
 		return
 	}
 
-	fmt.Println("removing dirLockGuard")
 	if db.dirLockGuard != nil {
 		if guardErr := db.dirLockGuard.release(); err == nil {
 			err = errors.Wrap(guardErr, "DB.Close")
@@ -514,16 +500,13 @@ func (db *DB) close() (err error) {
 			err = errors.Wrap(guardErr, "DB.Close")
 		}
 	}
-	fmt.Println("removing dirLockGuard-done")
 	if manifestErr := db.manifest.close(); err == nil {
 		err = errors.Wrap(manifestErr, "DB.Close")
 	}
-	fmt.Println("manifest close")
 	if registryErr := db.registry.Close(); err == nil {
 		err = errors.Wrap(registryErr, "DB.Close")
 	}
 
-	fmt.Println("registry close")
 	// Fsync directories to ensure that lock file, and any other removed files whose directory
 	// we haven't specifically fsynced, are guaranteed to have their directory entry removal
 	// persisted to disk.
@@ -534,7 +517,6 @@ func (db *DB) close() (err error) {
 		err = errors.Wrap(syncErr, "DB.Close")
 	}
 
-	fmt.Println("sync dir-done")
 	return err
 }
 
