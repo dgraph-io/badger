@@ -48,7 +48,6 @@ type Options struct {
 	Truncate            bool
 	Logger              Logger
 	Compression         options.CompressionType
-	Logging             bool
 	InMemory            bool
 
 	// Fine tuning options.
@@ -147,7 +146,6 @@ func DefaultOptions(path string) Options {
 		Truncate:                      false,
 		Logger:                        defaultLogger,
 		LogRotatesToFlush:             2,
-		Logging:                       true,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 	}
@@ -280,16 +278,6 @@ func (opt Options) WithTruncate(val bool) Options {
 // The default value of Logger writes to stderr using the log package from the Go standard library.
 func (opt Options) WithLogger(val Logger) Options {
 	opt.Logger = val
-	return opt
-}
-
-// WithLogging returns a new Options value with Logging set to the given value.
-//
-// Logging provides a way to enable or disable Logger logging.
-//
-// The default value of Logging is true.
-func (opt Options) WithLogging(enabled bool) Options {
-	opt.Logging = enabled
 	return opt
 }
 

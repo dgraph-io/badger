@@ -68,6 +68,10 @@ type defaultLog struct {
 
 var defaultLogger = &defaultLog{Logger: log.New(os.Stderr, "badger ", log.LstdFlags)}
 
+func DefaultLogger() *defaultLog {
+	return defaultLogger
+}
+
 func (l *defaultLog) Errorf(f string, v ...interface{}) {
 	l.Printf("ERROR: "+f, v...)
 }
@@ -83,15 +87,3 @@ func (l *defaultLog) Infof(f string, v ...interface{}) {
 func (l *defaultLog) Debugf(f string, v ...interface{}) {
 	l.Printf("DEBUG: "+f, v...)
 }
-
-var NilLogger Logger = nilLogger{}
-
-type nilLogger struct{}
-
-func (nill nilLogger) Debugf(f string, v ...interface{}) {}
-
-func (nill nilLogger) Errorf(f string, v ...interface{}) {}
-
-func (nill nilLogger) Infof(f string, v ...interface{}) {}
-
-func (nill nilLogger) Warningf(f string, v ...interface{}) {}
