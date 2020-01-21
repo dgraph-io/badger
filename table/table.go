@@ -97,10 +97,11 @@ type Table struct {
 	smallest, biggest []byte // Smallest and largest keys (with timestamps).
 	id                uint64 // file id, part of filename
 
-	bf       *z.Bloom
 	Checksum []byte
 	// Stores the total size of key-values stored in this table (including the size on vlog).
 	estimatedSize uint64
+	indexStart    int
+	indexLen      int
 
 	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
 	opt        *Options
@@ -336,10 +337,12 @@ func (t *Table) readIndex() error {
 	// Read index size from the footer.
 	readPos -= 4
 	buf = t.readNoFail(readPos, 4)
-	indexLen := int(y.BytesToU32(buf))
+	t.indexLen = int(y.BytesToU32(buf))
+
 	// Read index.
-	readPos -= indexLen
-	data := t.readNoFail(readPos, indexLen)
+	readPos -= t.indexLen
+	t.indexStart = readPos
+	data := t.readNoFail(readPos, t.indexLen)
 
 	if err := y.VerifyChecksum(data, expectedChk); err != nil {
 		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename())
@@ -358,12 +361,19 @@ func (t *Table) readIndex() error {
 	y.Check(err)
 
 	t.estimatedSize = index.EstimatedSize
-	if t.bf, err = z.JSONUnmarshal(index.BloomFilter); err != nil {
+	t.blockIndex = index.Offsets
+
+	var bf *z.Bloom
+	if bf, err = z.JSONUnmarshal(index.BloomFilter); err != nil {
 		return y.Wrapf(err, "failed to unmarshal bloom filter for the table %d in Table.readIndex",
 			t.id)
 	}
-	t.blockIndex = index.Offsets
+	t.opt.Cache.Set(t.bfKey(), bf, int64(len(index.BloomFilter)))
 	return nil
+}
+
+func (t *Table) bfKey() uint64 {
+	return uint64((math.MaxUint32-1)<<32) | uint64(t.id)
 }
 
 func (t *Table) block(idx int) (*block, error) {
@@ -470,7 +480,31 @@ func (t *Table) ID() uint64 { return t.id }
 
 // DoesNotHave returns true if (but not "only if") the table does not have the key hash.
 // It does a bloom filter lookup.
-func (t *Table) DoesNotHave(hash uint64) bool { return !t.bf.Has(hash) }
+func (t *Table) DoesNotHave(hash uint64) bool {
+	var bf *z.Bloom
+	// Found bloomfilter in the cache.
+	if b, ok := t.opt.Cache.Get(t.bfKey()); b != nil && ok {
+		bf = b.(*z.Bloom)
+		return !bf.Has(hash)
+	}
+	// Read bloom filter from the SST.
+	data := t.readNoFail(t.indexStart, t.indexLen)
+	index := pb.TableIndex{}
+	var err error
+	// Decrypt the table index if it is encrypted.
+	if t.shouldDecrypt() {
+		data, err = t.decrypt(data)
+		y.Check(err)
+
+	}
+	y.Check(proto.Unmarshal(data, &index))
+
+	bf, err = z.JSONUnmarshal(index.BloomFilter)
+	y.Check(err)
+
+	t.opt.Cache.Set(t.bfKey(), bf, int64(len(index.BloomFilter)))
+	return !bf.Has(hash)
+}
 
 // VerifyChecksum verifies checksum for all blocks of table. This function is called by
 // OpenTable() function. This function is also called inside levelsController.VerifyChecksum().
