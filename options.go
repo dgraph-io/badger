@@ -48,7 +48,7 @@ type Options struct {
 	Truncate            bool
 	Logger              Logger
 	Compression         options.CompressionType
-	EventLogging        bool
+	Logging             bool
 	InMemory            bool
 
 	// Fine tuning options.
@@ -147,7 +147,7 @@ func DefaultOptions(path string) Options {
 		Truncate:                      false,
 		Logger:                        defaultLogger,
 		LogRotatesToFlush:             2,
-		EventLogging:                  true,
+		Logging:                       true,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 	}
@@ -283,13 +283,13 @@ func (opt Options) WithLogger(val Logger) Options {
 	return opt
 }
 
-// WithEventLogging returns a new Options value with EventLogging set to the given value.
+// WithLogging returns a new Options value with Logging set to the given value.
 //
-// EventLogging provides a way to enable or disable trace.EventLog logging.
+// Logging provides a way to enable or disable Logger logging.
 //
-// The default value of EventLogging is true.
-func (opt Options) WithEventLogging(enabled bool) Options {
-	opt.EventLogging = enabled
+// The default value of Logging is true.
+func (opt Options) WithLogging(enabled bool) Options {
+	opt.Logging = enabled
 	return opt
 }
 

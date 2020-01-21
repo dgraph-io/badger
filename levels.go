@@ -37,7 +37,7 @@ import (
 
 type levelsController struct {
 	nextFileID uint64 // Atomic
-	elog       trace.EventLog
+	logger     Logger
 
 	// The following are initialized once and const.
 	levels []*levelHandler
@@ -62,7 +62,7 @@ func revertToManifest(kv *DB, mf *Manifest, idMap map[uint64]struct{}) error {
 	// 2. Delete files that shouldn't exist.
 	for id := range idMap {
 		if _, ok := mf.Tables[id]; !ok {
-			kv.elog.Printf("Table file %d not referenced in MANIFEST\n", id)
+			kv.logger.Debugf("Table file %d not referenced in MANIFEST\n", id)
 			filename := table.NewFilename(id, kv.opt.Dir)
 			if err := os.Remove(filename); err != nil {
 				return y.Wrapf(err, "While removing table %d", id)
@@ -77,7 +77,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 	y.AssertTrue(db.opt.NumLevelZeroTablesStall > db.opt.NumLevelZeroTables)
 	s := &levelsController{
 		kv:     db,
-		elog:   db.elog,
+		logger: db.logger,
 		levels: make([]*levelHandler, db.opt.MaxLevels),
 	}
 	s.cstatus.levels = make([]*levelCompactStatus, db.opt.MaxLevels)
@@ -926,10 +926,10 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time
 		{
-			s.elog.Printf("STALLED STALLED STALLED: %v\n", time.Since(s.lastUnstalled))
+			s.logger.Debugf("STALLED STALLED STALLED: %v\n", time.Since(s.lastUnstalled))
 			s.cstatus.RLock()
 			for i := 0; i < s.kv.opt.MaxLevels; i++ {
-				s.elog.Printf("level=%d. Status=%s Size=%d\n",
+				s.logger.Debugf("level=%d. Status=%s Size=%d\n",
 					i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
 			}
 			s.cstatus.RUnlock()
@@ -947,12 +947,12 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 			time.Sleep(10 * time.Millisecond)
 			if i%100 == 0 {
 				prios := s.pickCompactLevels()
-				s.elog.Printf("Waiting to add level 0 table. Compaction priorities: %+v\n", prios)
+				s.logger.Debugf("Waiting to add level 0 table. Compaction priorities: %+v\n", prios)
 				i = 0
 			}
 		}
 		{
-			s.elog.Printf("UNSTALLED UNSTALLED UNSTALLED: %v\n", time.Since(timeStart))
+			s.logger.Debugf("UNSTALLED UNSTALLED UNSTALLED: %v\n", time.Since(timeStart))
 			s.lastUnstalled = time.Now()
 		}
 	}

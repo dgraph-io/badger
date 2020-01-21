@@ -548,7 +548,7 @@ func TestL0Stall(t *testing.T) {
 	}
 
 	opt := DefaultOptions("")
-	opt.EventLogging = false
+	opt.Logging = false
 	// Disable all compactions.
 	opt.NumCompactors = 0
 	// Number of level zero tables.
