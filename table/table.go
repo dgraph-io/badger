@@ -504,7 +504,6 @@ func (t *Table) DoesNotHave(hash uint64) bool {
 	if t.shouldDecrypt() {
 		data, err = t.decrypt(data)
 		y.Check(err)
-
 	}
 	y.Check(proto.Unmarshal(data, &index))
 
