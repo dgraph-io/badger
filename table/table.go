@@ -148,7 +148,7 @@ func (t *Table) DecrRef() error {
 			return err
 		}
 		// Delete all blocks from the cache.
-		for i, _ := range t.blockIndex {
+		for i := range t.blockIndex {
 			t.opt.Cache.Del(t.blockCacheKey(i))
 		}
 		// Delete bloom filter from the cache.
