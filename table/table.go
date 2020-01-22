@@ -81,7 +81,7 @@ type TableInterface interface {
 	DoesNotHave(hash uint64) bool
 }
 
-// Table represents a loaded table file with the info we have about it
+// Table represents a loaded table file with the info we have about it.
 type Table struct {
 	sync.Mutex
 
@@ -147,6 +147,13 @@ func (t *Table) DecrRef() error {
 		if err := os.Remove(filename); err != nil {
 			return err
 		}
+		// Delete all blocks from the cache.
+		for i, _ := range t.blockIndex {
+			t.opt.Cache.Del(t.blockCacheKey(i))
+		}
+		// Delete bloom filter from the cache.
+		t.opt.Cache.Del(t.bfKey())
+
 	}
 	return nil
 }
@@ -368,12 +375,14 @@ func (t *Table) readIndex() error {
 		return y.Wrapf(err, "failed to unmarshal bloom filter for the table %d in Table.readIndex",
 			t.id)
 	}
+
 	t.opt.Cache.Set(t.bfKey(), bf, int64(len(index.BloomFilter)))
 	return nil
 }
 
+// Returns the cache key for the bloom filter.
 func (t *Table) bfKey() uint64 {
-	return uint64((math.MaxUint32-1)<<32) | uint64(t.id)
+	return math.MaxUint64 - t.id
 }
 
 func (t *Table) block(idx int) (*block, error) {

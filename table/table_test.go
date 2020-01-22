@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"hash/crc32"
+	"io/ioutil"
 	"math/rand"
 	"os"
 	"sort"
@@ -39,6 +40,8 @@ const (
 	KB = 1024
 	MB = KB * 1024
 )
+
+var fileID uint64
 
 func key(prefix string, i int) string {
 	return prefix + fmt.Sprintf("%04d", i)
@@ -77,13 +80,14 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
-	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	fileID++
+	filename := fmt.Sprintf("%s%s%d.sst", dir, string(os.PathSeparator), fileID)
 	f, err := y.CreateSyncedFile(filename, true)
-	if t != nil {
-		require.NoError(t, err)
-	} else {
-		y.Check(err)
-	}
+	require.NoError(t, err)
 
 	sort.Slice(keyValues, func(i, j int) bool {
 		return keyValues[i][0] < keyValues[j][0]
@@ -939,4 +943,49 @@ func TestOpenKVSize(t *testing.T) {
 	// The following values might change if the table/header structure is changed.
 	var entrySize uint64 = 15 /* DiffKey len */ + 4 /* Header Size */ + 4 /* Encoded vp */
 	require.Equal(t, entrySize, table.EstimatedSize())
+}
+
+func TestBloomFilterCache(t *testing.T) {
+	cache, err := ristretto.NewCache(&ristretto.Config{
+		NumCounters: 10,       // number of keys to track frequency of (10).
+		MaxCost:     10 << 20, // maximum cost of cache (10 MB).
+		BufferItems: 64,       // number of keys per Get buffer.
+		Metrics:     true,
+	})
+	require.NoError(t, err)
+	defer cache.Close()
+
+	opts := getTestTableOptions()
+	opts.Cache = cache
+
+	data := buildTestTable(t, "foo", 1, opts)
+
+	require.Equal(t, uint64(0), cache.Metrics.KeysAdded())
+	require.Equal(t, uint64(0), cache.Metrics.Hits())
+
+	table, err := OpenTable(data, opts)
+	require.NoError(t, err)
+	defer table.DecrRef()
+
+	// Wait for cache.set to be applied.
+	time.Sleep(time.Second)
+
+	require.Equal(t, uint64(0), cache.Metrics.Hits())
+
+	// The bloom filter lookup should hit the cache.
+	require.True(t, table.DoesNotHave(123))
+	require.Equal(t, uint64(1), cache.Metrics.Hits())
+
+	// Do it once again for fun!
+	require.True(t, table.DoesNotHave(123))
+	require.Equal(t, uint64(2), cache.Metrics.Hits())
+
+	// Drop the bloom filter from cache.
+	cache.Del(table.bfKey())
+
+	misses := cache.Metrics.Misses()
+	require.True(t, table.DoesNotHave(123))
+	require.Equal(t, uint64(2), cache.Metrics.Hits())
+	// The bf was removed from the cache. We should get a cache miss.
+	require.Equal(t, misses+1, cache.Metrics.Misses())
 }
