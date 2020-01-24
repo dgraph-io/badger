@@ -18,6 +18,7 @@ package table
 
 import (
 	"crypto/aes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
@@ -152,7 +153,7 @@ func (t *Table) DecrRef() error {
 			t.opt.Cache.Del(t.blockCacheKey(i))
 		}
 		// Delete bloom filter from the cache.
-		t.opt.Cache.Del(t.bfKey())
+		t.opt.Cache.Del(t.bfCacheKey())
 
 	}
 	return nil
@@ -370,19 +371,17 @@ func (t *Table) readIndex() error {
 	t.estimatedSize = index.EstimatedSize
 	t.blockIndex = index.Offsets
 
-	var bf *z.Bloom
-	if bf, err = z.JSONUnmarshal(index.BloomFilter); err != nil {
-		return y.Wrapf(err, "failed to unmarshal bloom filter for the table %d in Table.readIndex",
-			t.id)
+	// Avoid the cost of unmarshalling the bloom filters if the cache is absent.
+	if t.opt.Cache != nil {
+		var bf *z.Bloom
+		if bf, err = z.JSONUnmarshal(index.BloomFilter); err != nil {
+			return y.Wrapf(err, "failed to unmarshal bloom filter for the table %d in Table.readIndex",
+				t.id)
+		}
+
+		t.opt.Cache.Set(t.bfCacheKey(), bf, int64(len(index.BloomFilter)))
 	}
-
-	t.opt.Cache.Set(t.bfKey(), bf, int64(len(index.BloomFilter)))
 	return nil
-}
-
-// Returns the cache key for the bloom filter.
-func (t *Table) bfKey() uint64 {
-	return math.MaxUint64 - t.id
 }
 
 func (t *Table) block(idx int) (*block, error) {
@@ -462,10 +461,25 @@ func (t *Table) block(idx int) (*block, error) {
 	return blk, nil
 }
 
-func (t *Table) blockCacheKey(idx int) uint64 {
-	y.AssertTrue(t.ID() < math.MaxUint32)
+// bfCacheKey returns the cache key for bloom filter.
+func (t *Table) bfCacheKey() []byte {
+	y.AssertTrue(t.id < math.MaxUint32)
+	buf := make([]byte, 4)
+	binary.BigEndian.PutUint32(buf, uint32(t.id))
+
+	// Without the "bf" prefix, we will have conflict with the blockCacheKey.
+	return append([]byte("bf"), buf...)
+}
+
+func (t *Table) blockCacheKey(idx int) []byte {
+	y.AssertTrue(t.id < math.MaxUint32)
 	y.AssertTrue(uint32(idx) < math.MaxUint32)
-	return (t.ID() << 32) | uint64(idx)
+
+	buf := make([]byte, 8)
+	// Assume t.ID does not overflow uint32.
+	binary.BigEndian.PutUint32(buf[:4], uint32(t.ID()))
+	binary.BigEndian.PutUint32(buf[4:], uint32(idx))
+	return buf
 }
 
 // EstimatedSize returns the total size of key-values stored in this table (including the
@@ -491,11 +505,27 @@ func (t *Table) ID() uint64 { return t.id }
 // It does a bloom filter lookup.
 func (t *Table) DoesNotHave(hash uint64) bool {
 	var bf *z.Bloom
-	// Found bloomfilter in the cache.
-	if b, ok := t.opt.Cache.Get(t.bfKey()); b != nil && ok {
+
+	// Return fast if cache is absent.
+	if t.opt.Cache == nil {
+		bf, _ := t.readBloomFilter()
+		return !bf.Has(hash)
+	}
+
+	// Check if the bloomfilter exists in the cache.
+	if b, ok := t.opt.Cache.Get(t.bfCacheKey()); b != nil && ok {
 		bf = b.(*z.Bloom)
 		return !bf.Has(hash)
 	}
+
+	bf, sz := t.readBloomFilter()
+	t.opt.Cache.Set(t.bfCacheKey(), bf, int64(sz))
+	return !bf.Has(hash)
+}
+
+// readBloomFilter reads the bloom filter from the SST and returns its length
+// along with the bloom filter.
+func (t *Table) readBloomFilter() (*z.Bloom, int) {
 	// Read bloom filter from the SST.
 	data := t.readNoFail(t.indexStart, t.indexLen)
 	index := pb.TableIndex{}
@@ -507,11 +537,9 @@ func (t *Table) DoesNotHave(hash uint64) bool {
 	}
 	y.Check(proto.Unmarshal(data, &index))
 
-	bf, err = z.JSONUnmarshal(index.BloomFilter)
+	bf, err := z.JSONUnmarshal(index.BloomFilter)
 	y.Check(err)
-
-	t.opt.Cache.Set(t.bfKey(), bf, int64(len(index.BloomFilter)))
-	return !bf.Has(hash)
+	return bf, len(index.BloomFilter)
 }
 
 // VerifyChecksum verifies checksum for all blocks of table. This function is called by
