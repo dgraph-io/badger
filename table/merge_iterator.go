@@ -18,6 +18,7 @@ package table
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
@@ -150,6 +151,7 @@ func (mi *MergeIterator) swapSmall() {
 // Next returns the next element. If it is the same as the current key, ignore it.
 func (mi *MergeIterator) Next() {
 	for mi.Valid() {
+		fmt.Println("skipping")
 		if !bytes.Equal(mi.small.key, mi.curKey) {
 			break
 		}
