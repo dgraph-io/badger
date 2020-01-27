@@ -20,8 +20,6 @@ import (
 	"container/heap"
 	"context"
 	"sync/atomic"
-
-	badger "github.com/dgraph-io/badger/v2"
 )
 
 type uint64Heap []uint64
@@ -64,13 +62,13 @@ type WaterMark struct {
 	lastIndex uint64
 	Name      string
 	markCh    chan mark
-	logger    badger.Logger
+	logger    Logger
 }
 
 // Init initializes a WaterMark struct. MUST be called before using it.
-func (w *WaterMark) Init(closer *Closer, opt badger.Options) {
+func (w *WaterMark) Init(closer *Closer, logger Logger) {
 	w.markCh = make(chan mark, 100)
-	w.logger = opt.Logger
+	w.logger = logger
 	go w.process(closer)
 }
 

@@ -21,6 +21,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -46,7 +47,7 @@ type Options struct {
 	NumVersionsToKeep   int
 	ReadOnly            bool
 	Truncate            bool
-	Logger              Logger
+	Logger              y.Logger
 	Compression         options.CompressionType
 	InMemory            bool
 
@@ -144,7 +145,7 @@ func DefaultOptions(path string) Options {
 		ValueLogMaxEntries:            1000000,
 		ValueThreshold:                32,
 		Truncate:                      false,
-		Logger:                        defaultLogger,
+		Logger:                        y.DefaultLogger(),
 		LogRotatesToFlush:             2,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
@@ -276,7 +277,7 @@ func (opt Options) WithTruncate(val bool) Options {
 // Logger provides a way to configure what logger each value of badger.DB uses.
 //
 // The default value of Logger writes to stderr using the log package from the Go standard library.
-func (opt Options) WithLogger(val Logger) Options {
+func (opt Options) WithLogger(val y.Logger) Options {
 	opt.Logger = val
 	return opt
 }
@@ -561,4 +562,37 @@ func (opt Options) WithInMemory(b bool) Options {
 func (opt Options) WithZSTDCompressionLevel(cLevel int) Options {
 	opt.ZSTDCompressionLevel = cLevel
 	return opt
+}
+
+// Errorf logs an ERROR log message to the logger specified in opts or to the
+// global logger if no logger is specified in opts.
+func (opt *Options) Errorf(format string, v ...interface{}) {
+	if opt.Logger == nil {
+		return
+	}
+	opt.Logger.Errorf(format, v...)
+}
+
+// Infof logs an INFO message to the logger specified in opts.
+func (opt *Options) Infof(format string, v ...interface{}) {
+	if opt.Logger == nil {
+		return
+	}
+	opt.Logger.Infof(format, v...)
+}
+
+// Warningf logs a WARNING message to the logger specified in opts.
+func (opt *Options) Warningf(format string, v ...interface{}) {
+	if opt.Logger == nil {
+		return
+	}
+	opt.Logger.Warningf(format, v...)
+}
+
+// Debugf logs a DEBUG message to the logger specified in opts.
+func (opt *Options) Debugf(format string, v ...interface{}) {
+	if opt.Logger == nil {
+		return
+	}
+	opt.Logger.Debugf(format, v...)
 }
