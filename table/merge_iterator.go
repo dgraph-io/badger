@@ -151,7 +151,7 @@ func (mi *MergeIterator) swapSmall() {
 // Next returns the next element. If it is the same as the current key, ignore it.
 func (mi *MergeIterator) Next() {
 	for mi.Valid() {
-		fmt.Println("skipping")
+		fmt.Printf("skipping: %s", mi.small.key)
 		if !bytes.Equal(mi.small.key, mi.curKey) {
 			break
 		}
