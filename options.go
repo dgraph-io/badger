@@ -145,7 +145,7 @@ func DefaultOptions(path string) Options {
 		ValueLogMaxEntries:            1000000,
 		ValueThreshold:                32,
 		Truncate:                      false,
-		Logger:                        y.DefaultLogger(),
+		Logger:                        y.DefaultLogger,
 		LogRotatesToFlush:             2,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.

@@ -33,11 +33,7 @@ type defaultLog struct {
 	*log.Logger
 }
 
-var defaultLogger = &defaultLog{Logger: log.New(os.Stderr, "badger ", log.LstdFlags)}
-
-func DefaultLogger() *defaultLog {
-	return defaultLogger
-}
+var DefaultLogger = &defaultLog{Logger: log.New(os.Stderr, "badger ", log.LstdFlags)}
 
 func (l *defaultLog) Errorf(f string, v ...interface{}) {
 	l.Printf("ERROR: "+f, v...)
