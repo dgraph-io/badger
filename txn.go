@@ -154,7 +154,7 @@ func (o *oracle) hasConflict(txn *Txn) bool {
 	if len(txn.reads) == 0 {
 		return false
 	}
-	for _, ro := range txn.reads {
+	for ro, _ := range txn.reads {
 		// A commit at the read timestamp is expected.
 		// But, any commit after the read timestamp should cause a conflict.
 		if ts, has := o.commits[ro]; has && ts > txn.readTs {
@@ -203,9 +203,9 @@ type Txn struct {
 	readTs   uint64
 	commitTs uint64
 
-	update bool     // update is used to conditionally keep track of reads.
-	reads  []uint64 // contains fingerprints of keys read.
-	writes []uint64 // contains fingerprints of keys written.
+	update bool                // update is used to conditionally keep track of reads.
+	reads  map[uint64]struct{} // contains fingerprints of keys read.
+	writes []uint64            // contains fingerprints of keys written.
 
 	pendingWrites map[string]*Entry // cache stores any writes done by txn.
 
@@ -429,7 +429,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 func (txn *Txn) addReadKey(key []byte) {
 	if txn.update {
 		fp := z.MemHash(key)
-		txn.reads = append(txn.reads, fp)
+		txn.reads[fp] = struct{}{}
 	}
 }
 
@@ -645,6 +645,7 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 		db:     db,
 		count:  1,                       // One extra entry for BitFin.
 		size:   int64(len(txnKey) + 10), // Some buffer for the extra entry.
+		reads:  make(map[uint64]struct{}),
 	}
 	if update {
 		txn.pendingWrites = make(map[string]*Entry)
