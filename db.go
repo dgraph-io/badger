@@ -649,23 +649,19 @@ func (db *DB) writeToLSM(b *request) error {
 		if entry.meta&bitFinTxn != 0 {
 			continue
 		}
-		if db.shouldWriteValueToLSM(*entry) { // Will include deletion / tombstone case.
-			db.mt.Put(entry.Key,
-				y.ValueStruct{
-					Value:     entry.Value,
-					Meta:      entry.meta,
-					UserMeta:  entry.UserMeta,
-					ExpiresAt: entry.ExpiresAt,
-				})
-		} else {
-			db.mt.Put(entry.Key,
-				y.ValueStruct{
-					Value:     b.Ptrs[i].Encode(),
-					Meta:      entry.meta | bitValuePointer,
-					UserMeta:  entry.UserMeta,
-					ExpiresAt: entry.ExpiresAt,
-				})
+		val := y.ValueStruct{
+			Value:     entry.Value,
+			Meta:      entry.meta,
+			UserMeta:  entry.UserMeta,
+			ExpiresAt: entry.ExpiresAt,
 		}
+
+		if entry.meta&bitValuePointer == bitValuePointer {
+			// Replace the value with a pointer to the value log.
+			val.Value = b.Ptrs[i].Encode()
+		}
+
+		db.mt.Put(entry.Key, val)
 	}
 	return nil
 }
