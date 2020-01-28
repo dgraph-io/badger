@@ -129,6 +129,7 @@ func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB))
 		opts.Dir = ""
 		opts.ValueDir = ""
 	}
+	opts.BlockSize = 50000
 	db, err := Open(*opts)
 	require.NoError(t, err)
 	defer func() {
@@ -182,6 +183,7 @@ func TestUpdateAndView(t *testing.T) {
 }
 
 func TestConcurrentWrite(t *testing.T) {
+	t.Skip()
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// Not a benchmark. Just a simple test for concurrent writes.
 		n := 20
@@ -370,12 +372,17 @@ func TestForceCompactL0(t *testing.T) {
 		}
 		require.NoError(t, txn.CommitAt(version+1, nil))
 	}
-	db.Close()
+	fmt.Println("db close")
+	require.NoError(t, db.Close())
+
+	fmt.Println("db reopen")
 
 	opts.managedTxns = true
 	db, err = Open(opts)
 	require.NoError(t, err)
+	db.lc.levels[0].Lock()
 	require.Equal(t, len(db.lc.levels[0].tables), 0)
+	db.lc.levels[0].Unlock()
 	require.NoError(t, db.Close())
 }
 
@@ -402,9 +409,7 @@ func TestGetMore(t *testing.T) {
 		for i := 0; i < n; i++ {
 			txn := db.NewTransaction(false)
 			item, err := txn.Get(data(i))
-			if err != nil {
-				t.Error(err)
-			}
+			require.NoError(t, err)
 			require.EqualValues(t, string(data(i)), string(getItemValue(t, item)))
 			txn.Discard()
 		}
@@ -576,8 +581,8 @@ func TestIterate2Basic(t *testing.T) {
 		}
 
 		opt := IteratorOptions{}
-		opt.PrefetchValues = true
-		opt.PrefetchSize = 10
+		//opt.PrefetchValues = true
+		//opt.PrefetchSize = 10
 
 		txn := db.NewTransaction(false)
 		it := txn.NewIterator(opt)
@@ -596,10 +601,10 @@ func TestIterate2Basic(t *testing.T) {
 					rewind = false
 					continue
 				}
-				require.EqualValues(t, bkey(count), string(key))
+				require.EqualValues(t, string(bkey(count)), string(key))
 				val := getItemValue(t, item)
 				require.EqualValues(t, bval(count), string(val))
-				require.Equal(t, byte(count%127), item.UserMeta())
+				require.Equal(t, byte(count%127), item.UserMeta(), "count unequal")
 				count++
 			}
 			require.EqualValues(t, n, count)

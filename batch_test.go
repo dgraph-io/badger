@@ -25,6 +25,7 @@ import (
 )
 
 func TestWriteBatch(t *testing.T) {
+	t.Skip()
 	key := func(i int) []byte {
 		return []byte(fmt.Sprintf("%10d", i))
 	}
@@ -67,6 +68,7 @@ func TestWriteBatch(t *testing.T) {
 		require.NoError(t, err)
 	}
 	t.Run("disk mode", func(t *testing.T) {
+		t.Skip()
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			test(t, db)
 		})

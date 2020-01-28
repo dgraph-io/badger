@@ -30,6 +30,54 @@ import (
 	"github.com/dgraph-io/badger/v2/y"
 )
 
+func TestTableInsert(t *testing.T) {
+	keysCount := 100000
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%016x", i))
+	}
+	//bkey := func(i int) []byte {
+	//	return []byte(fmt.Sprintf("%09d", i))
+	//}
+	bval := func(i int) []byte {
+		return []byte(fmt.Sprintf("%025d", i))
+	}
+	opts := []Options{}
+	// Normal mode.
+	opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01})
+	// Encryption mode.
+	ekey := make([]byte, 32)
+	_, err := rand.Read(ekey)
+	require.NoError(t, err)
+	opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+		DataKey: &pb.DataKey{Data: ekey}})
+	// Compression mode.
+	opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+		Compression: options.ZSTD})
+	for _, opt := range opts {
+		builder := NewTableBuilder(opt)
+		filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
+		f, err := y.OpenSyncedFile(filename, true)
+		require.NoError(t, err)
+
+		for i := 0; i < keysCount; i++ {
+			vs := y.ValueStruct{Value: bval(i)}
+			builder.Add(key(i), vs, 0)
+		}
+		_, err = f.Write(builder.Finish())
+		require.NoError(t, err, "unable to write to file")
+
+		tbl, err := OpenTable(f, opt)
+		require.NoError(t, err)
+
+		it := tbl.NewIterator(false)
+		start := 0
+		for it.Rewind(); it.Valid(); it.Next() {
+			require.Equal(t, key(start), it.Key())
+			start++
+		}
+		require.False(t, it.Valid())
+	}
+}
 func TestTableIndex(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 	keyPrefix := "key"
@@ -51,10 +99,10 @@ func TestTableIndex(t *testing.T) {
 		require.NoError(t, err)
 		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
 			DataKey: &pb.DataKey{Data: key}})
-		// Compression mode.
+		/// Compression mode.
 		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
 			Compression: options.ZSTD})
-		keysCount := 10000
+		keysCount := 50000
 		for _, opt := range opts {
 			builder := NewTableBuilder(opt)
 			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
@@ -79,7 +127,9 @@ func TestTableIndex(t *testing.T) {
 			_, err = f.Write(builder.Finish())
 			require.NoError(t, err, "unable to write to file")
 
+			require.Equal(t, blockCount, len(builder.tableIndex.Offsets))
 			tbl, err := OpenTable(f, opt)
+			require.NoError(t, err)
 			if opt.DataKey == nil {
 				// key id is zero if thre is no datakey.
 				require.Equal(t, tbl.KeyID(), uint64(0))

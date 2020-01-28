@@ -606,6 +606,7 @@ func TestReadSameVlog(t *testing.T) {
 // The test ensures we don't lose data when badger is opened with KeepL0InMemory and GC is being
 // done.
 func TestL0GCBug(t *testing.T) {
+	t.Skip()
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
