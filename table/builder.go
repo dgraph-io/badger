@@ -64,12 +64,32 @@ func (h *header) Decode(buf []byte) {
 }
 
 type blockbuf struct {
-	data []byte
+	data *bytes.Buffer
 	key  []byte
+	idx  int
+	done bool
+}
+
+var bufPool = sync.Pool{
+	New: func() interface{} {
+		// The Pool's New function should generally only return pointer
+		// types, since a pointer can be put into the return interface
+		// value without an allocation:
+		return new(bytes.Buffer)
+	},
+}
+
+var blockPool = sync.Pool{
+	New: func() interface{} {
+		var buffer bytes.Buffer
+		buffer.Grow(4 << 10)
+		return &buffer
+	},
 }
 
 // Builder is used in building a table.
 type Builder struct {
+	idx int
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf *bytes.Buffer
 	m   sync.Mutex
@@ -85,33 +105,20 @@ type Builder struct {
 	throttle y.Throttle
 	blockCh  chan *blockbuf
 	//handleBlock chan []byte
-	block       *bytes.Buffer
-	blockCloser *y.Closer
+	block *bytes.Buffer
+	//blockCloser *y.Closer
+	blockCloser sync.WaitGroup
 	length      uint32 // Accessed via atomics.
+	inChan      [](chan *blockbuf)
+	outChan     [](chan *blockbuf)
 }
 
-func (b *Builder) handleBlock() {
+func (b *Builder) writeBlock() {
+	//defer fmt.Println("writeblock exit")
 	defer b.blockCloser.Done()
-	var err error
-	for item := range b.blockCh {
-		//fmt.Println("received len", len(item.data))
-		blockBuf := item.data
-		// Compress the block.
-		if b.opt.Compression != options.None {
-			// TODO: Find a way to reuse buffers. Current implementation creates a
-			// new buffer for each compressData call.
-			blockBuf, err = b.compressData(blockBuf)
-			y.Check(err)
-		}
-		if b.shouldEncrypt() {
-			blockBuf, err = b.encrypt(blockBuf)
-			y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
-		}
-
-		//fmt.Println("added block at", b.buf.Len(), len(blockBuf))
-
-		// Write compressed/encrypted data.
-		b.buf.Write(blockBuf)
+	slurp := func(block *blockbuf) {
+		buf := block.data.Bytes()
+		b.buf.Write(buf)
 		var off uint32
 		if len(b.tableIndex.Offsets) == 0 {
 			off = 0
@@ -121,30 +128,88 @@ func (b *Builder) handleBlock() {
 		}
 		// Add key to the block index
 		bo := &pb.BlockOffset{
-			Key:    item.key,
+			Key:    block.key,
 			Offset: off,
-			Len:    uint32(len(blockBuf)),
+			Len:    uint32(len(buf)),
 		}
-		atomic.AddUint32(&b.length, uint32(len(blockBuf)))
-		b.m.Lock()
+		atomic.AddUint32(&b.length, uint32(len(buf)))
 		//b.baseOffset = b.baseOffset + uint32(len(blockBuf))
+		//fmt.Printf("adding key %s\n", bo.Key)
 		b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
-		b.m.Unlock()
+		blockPool.Put(block.data)
 	}
+
+	i := 0
+	count := 0
+	for {
+		block := <-b.outChan[i%len(b.outChan)]
+		if block.done {
+			//	fmt.Println("done", i%len(b.outChan))
+			count++
+			if count == len(b.outChan) {
+				return
+			}
+		} else {
+			slurp(block)
+		}
+		i++
+	}
+}
+
+func (b *Builder) handleBlock(i int) {
+	//defer fmt.Println("handleBlock exit", i)
+	defer b.blockCloser.Done()
+	inCh := b.inChan[i]
+	outCh := b.outChan[i]
+	//fmt.Println("starting", i)
+	var err error
+	var item *blockbuf
+	for item = range inCh {
+		//fmt.Println("received len", len(item.data))
+		// Compress the block.
+		buf := item.data.Bytes()
+		if b.opt.Compression != options.None {
+			// TODO: Find a way to reuse buffers. Current implementation creates a
+			// new buffer for each compressData call.
+			buf, err = b.compressData(buf)
+			y.Check(err)
+		}
+		if b.shouldEncrypt() {
+			buf, err = b.encrypt(buf)
+			y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
+		}
+		// Write compressed/encrypted data.
+		//fmt.Println("insert ", i)
+		outCh <- item
+		//fmt.Println("insert done", i)
+	}
+	//fmt.Println("closeing ", i)
+	outCh <- &blockbuf{done: true}
+	//fmt.Println("closeing done", i)
 }
 
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
+	count := 10
 	b := &Builder{
-		buf:         newBuffer(1 << 20),
-		tableIndex:  &pb.TableIndex{},
-		keyHashes:   make([]uint64, 0, 1024), // Avoid some malloc calls.
-		opt:         &opts,
-		block:       newBuffer(opts.BlockSize),
-		blockCloser: y.NewCloser(1),
-		blockCh:     make(chan *blockbuf, 20),
+		buf:        newBuffer(1 << 20),
+		tableIndex: &pb.TableIndex{},
+		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
+		opt:        &opts,
+		block:      newBuffer(opts.BlockSize),
+		//blockCloser: y.NewCloser(count),
+		blockCh: make(chan *blockbuf, 20),
+		//blockReceive: make([]chan *blockbuf, count),
 	}
-	go b.handleBlock()
+	b.blockCloser.Add(count + 1)
+	for i := 0; i < count; i++ {
+		b.outChan = append(b.outChan, make(chan *blockbuf))
+		b.inChan = append(b.inChan, make(chan *blockbuf))
+	}
+	for i := 0; i < count; i++ {
+		go b.handleBlock(i)
+	}
+	go b.writeBlock()
 	return b
 }
 
@@ -221,11 +286,18 @@ func (b *Builder) finishBlock() {
 	b.block.Write(buildChecksum(b.block.Bytes()))
 
 	// Pass it to handle block function
-	b.blockCh <- &blockbuf{data: b.block.Bytes(), key: y.Copy(b.baseKey)}
-	b.block = newBuffer(b.opt.BlockSize)
+	b.getNextCh() <- &blockbuf{idx: b.idx, data: b.block, key: y.Copy(b.baseKey)}
+	b.block = blockPool.Get().(*bytes.Buffer)
+	b.block.Reset()
 
 }
 
+func (b *Builder) getNextCh() chan *blockbuf {
+	ch := b.inChan[b.idx%len(b.inChan)]
+	b.idx++
+	return ch
+
+}
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	// If there is no entry till now, we will return false.
 	if len(b.entryOffsets) <= 0 {
@@ -302,9 +374,15 @@ func (b *Builder) Finish() []byte {
 
 	b.finishBlock() // This will never start a new block.
 
-	close(b.blockCh)
+	for _, ch := range b.inChan {
+		close(ch)
+	}
+	//fmt.Println("blockcloser")
 	// Finish writing all the blocks.
-	b.blockCloser.SignalAndWait()
+	//b.blockCloser.SignalAndWait()
+	b.blockCloser.Wait()
+
+	//	fmt.Println("blockcloser-done")
 
 	index, err := proto.Marshal(b.tableIndex)
 	y.Check(err)

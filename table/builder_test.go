@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 )
 
@@ -43,16 +42,16 @@ func TestTableInsert(t *testing.T) {
 	}
 	opts := []Options{}
 	// Normal mode.
-	opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01})
+	opts = append(opts, Options{BlockSize: 1 * 500, BloomFalsePositive: 0.01})
 	// Encryption mode.
-	ekey := make([]byte, 32)
-	_, err := rand.Read(ekey)
-	require.NoError(t, err)
-	opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-		DataKey: &pb.DataKey{Data: ekey}})
-	// Compression mode.
-	opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-		Compression: options.ZSTD})
+	//ekey := make([]byte, 32)
+	//_, err := rand.Read(ekey)
+	//require.NoError(t, err)
+	//opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+	//	DataKey: &pb.DataKey{Data: ekey}})
+	//// Compression mode.
+	//opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+	//	Compression: options.ZSTD})
 	for _, opt := range opts {
 		builder := NewTableBuilder(opt)
 		filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
@@ -94,15 +93,15 @@ func TestTableIndex(t *testing.T) {
 		// Normal mode.
 		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01})
 		// Encryption mode.
-		key := make([]byte, 32)
-		_, err := rand.Read(key)
-		require.NoError(t, err)
-		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-			DataKey: &pb.DataKey{Data: key}})
-		/// Compression mode.
-		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-			Compression: options.ZSTD})
-		keysCount := 50000
+		//key := make([]byte, 32)
+		//_, err := rand.Read(key)
+		//require.NoError(t, err)
+		//opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+		//	DataKey: &pb.DataKey{Data: key}})
+		///// Compression mode.
+		//opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+		//	Compression: options.ZSTD})
+		keysCount := 5000
 		for _, opt := range opts {
 			builder := NewTableBuilder(opt)
 			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
