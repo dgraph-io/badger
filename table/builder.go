@@ -341,10 +341,11 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 // TODO: Look into why there is a discrepancy. I suspect it is because of Write(empty, empty)
 // at the end. The diff can vary.
 
+// TODO (ibrahim) - Add a test for this.
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
 	b.m.Lock()
-	estimateSz := atomic.LoadUint32(&b.length) +
+	estimateSz := atomic.LoadUint32(&b.length) + uint32(b.block.Len()) +
 		uint32(4) + // Index length
 		uint32(5*(len(b.tableIndex.Offsets))) // approximate index size
 	b.m.Unlock()
