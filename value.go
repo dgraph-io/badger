@@ -447,7 +447,7 @@ loop:
 			break loop
 		case err != nil:
 			return 0, err
-		default:
+		case e == nil:
 			continue
 		}
 
