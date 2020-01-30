@@ -15,9 +15,9 @@ pushd badger
 go build -v .
 popd
 
-# Run the memory intensive tests first.
-go test -v -run='TestBigKeyValuePairs$' --manual=true
-go test -v -run='TestPushValueLogLimit' --manual=true
+# # Run the memory intensive tests first.
+# go test -v -run='TestBigKeyValuePairs$' --manual=true
+# go test -v -run='TestPushValueLogLimit' --manual=true
 
 # Run the special Truncate test.
 rm -rf p

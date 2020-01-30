@@ -440,15 +440,15 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 loop:
 	for {
 		e, err := read.Entry(reader)
-		switch err {
-		case io.EOF:
+		switch {
+		case err == io.EOF:
 			break loop
-		case io.ErrUnexpectedEOF, errTruncate:
+		case err == io.ErrUnexpectedEOF || err == errTruncate:
 			break loop
-		case nil:
-			continue
-		default:
+		case err != nil:
 			return 0, err
+		default:
+			continue
 		}
 
 		var vp valuePointer

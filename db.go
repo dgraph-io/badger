@@ -1216,10 +1216,12 @@ func (seq *Sequence) Release() error {
 func (seq *Sequence) updateLease() error {
 	return seq.db.Update(func(txn *Txn) error {
 		item, err := txn.Get(seq.key)
-		switch err {
-		case ErrKeyNotFound:
+		switch {
+		case err == ErrKeyNotFound:
 			seq.next = 0
-		case nil:
+		case err != nil:
+			return err
+		default:
 			var num uint64
 			if err := item.Value(func(v []byte) error {
 				num = binary.BigEndian.Uint64(v)
@@ -1228,8 +1230,6 @@ func (seq *Sequence) updateLease() error {
 				return err
 			}
 			seq.next = num
-		default:
-			return err
 		}
 
 		lease := seq.next + seq.bandwidth
