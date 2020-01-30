@@ -39,23 +39,20 @@ func TestTableInsert(t *testing.T) {
 	//	return []byte(fmt.Sprintf("%09d", i))
 	//}
 	bval := func(i int) []byte {
-		v := make([]byte, 4<<10)
-		rand.Read(v)
-		return v
-		//return []byte(fmt.Sprintf("%025d", i))
+		return []byte(fmt.Sprintf("%025d", i))
 	}
 	opts := []Options{}
 	// Normal mode.
-	opts = append(opts, Options{BlockSize: 1 * 500, BloomFalsePositive: 0.01})
+	//opts = append(opts, Options{BlockSize: 4 * 500, BloomFalsePositive: 0.01})
 	// Encryption mode.
-	ekey := make([]byte, 32)
-	_, err := rand.Read(ekey)
-	require.NoError(t, err)
-	opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-		DataKey: &pb.DataKey{Data: ekey}})
+	//ekey := make([]byte, 32)
+	//_, err := rand.Read(ekey)
+	//require.NoError(t, err)
+	//opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+	//	DataKey: &pb.DataKey{Data: ekey}})
 	// Compression mode.
 	opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-		Compression: options.ZSTD, ZSTDCompressionLevel: 1})
+		Compression: options.ZSTD, ZSTDCompressionLevel: 15})
 	for _, opt := range opts {
 		builder := NewTableBuilder(opt)
 		filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
@@ -97,16 +94,16 @@ func TestTableIndex(t *testing.T) {
 		// Normal mode.
 		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01})
 		// Encryption mode.
-		//key := make([]byte, 32)
-		//_, err := rand.Read(key)
-		//require.NoError(t, err)
-		//opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-		//	DataKey: &pb.DataKey{Data: key}})
-		///// Compression mode.
-		//opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-		//	Compression: options.ZSTD})
-		keysCount := 5000
-		for _, opt := range opts {
+		key := make([]byte, 32)
+		_, err := rand.Read(key)
+		require.NoError(t, err)
+		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+			DataKey: &pb.DataKey{Data: key}})
+		// Compression mode.
+		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+			Compression: options.ZSTD})
+		keysCount := 1000
+		for _, opt := range opts[:1] {
 			builder := NewTableBuilder(opt)
 			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
 			f, err := y.OpenSyncedFile(filename, true)
@@ -116,7 +113,7 @@ func TestTableIndex(t *testing.T) {
 			blockCount := 0
 			for i := 0; i < keysCount; i++ {
 				k := []byte(fmt.Sprintf("%016x", i))
-				v := fmt.Sprintf("%d", i)
+				v := fmt.Sprintf("%0500d", i)
 				vs := y.ValueStruct{Value: []byte(v)}
 				if i == 0 { // This is first key for first block.
 					blockFirstKeys = append(blockFirstKeys, k)
@@ -176,6 +173,7 @@ func BenchmarkBuilder(b *testing.B) {
 	rand.Read(val)
 	vs := y.ValueStruct{Value: []byte(val)}
 
+	var res []byte
 	keysCount := 1300000 // This number of entries consumes ~64MB of memory.
 
 	bench := func(b *testing.B, opt *Options) {
@@ -190,9 +188,10 @@ func BenchmarkBuilder(b *testing.B) {
 				builder.Add(key(i), vs, 0)
 			}
 
-			_ = builder.Finish()
+			res = builder.Finish()
 		}
 	}
+	_ = res
 
 	b.Run("no compression", func(b *testing.B) {
 		var opt Options

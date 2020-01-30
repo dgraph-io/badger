@@ -102,15 +102,18 @@ type Builder struct {
 	opt          *Options
 
 	// Used to concurrently compress the blocks.
-	block       *bytes.Buffer
-	blockCloser sync.WaitGroup
-	length      uint32 // Accessed via atomics.
-	inChan      [](chan *blockbuf)
-	outChan     [](chan *blockbuf)
+	block     *bytes.Buffer
+	inCloser  sync.WaitGroup
+	outCloser sync.WaitGroup
+	length    uint32 // Accessed via atomics.
+	inChan    chan *blockbuf
+	outChan   chan *blockbuf
 }
 
 func (b *Builder) writeBlock() {
-	defer b.blockCloser.Done()
+	//defer fmt.Println("write done")
+	defer b.outCloser.Done()
+
 	slurp := func(block *blockbuf) {
 		buf := block.data.Bytes()
 		b.buf.Write(buf)
@@ -132,30 +135,47 @@ func (b *Builder) writeBlock() {
 		blockPool.Put(block.data)
 	}
 
-	i := 0
+	expected := 0
 	count := 0
-	for {
-		block := <-b.outChan[i%len(b.outChan)]
-		if block.done {
-			count++
-			if count == len(b.outChan) {
-				return
-			}
-		} else {
+	blockMap := make(map[int]*blockbuf)
+	for block := range b.outChan {
+		count++
+		if block.idx == expected {
 			slurp(block)
+			expected++
+			continue
 		}
-		i++
+
+		// Add it to the map
+		blockMap[block.idx] = block
+		// Check if the block exists in the map
+		if block, ok := blockMap[expected]; ok {
+			slurp(block)
+			delete(blockMap, expected)
+			expected++
+		}
 	}
+
+	// empty the map
+	for len(blockMap) > 0 {
+		block, ok := blockMap[expected]
+		if !ok {
+			panic("this should not happen")
+		}
+		slurp(block)
+		delete(blockMap, expected)
+		expected++
+	}
+
 }
 
 func (b *Builder) handleBlock(i int) {
-	defer b.blockCloser.Done()
-	inCh := b.inChan[i]
-	outCh := b.outChan[i]
+	//	defer fmt.Println("handle done")
+	defer b.inCloser.Done()
 
 	var err error
 	var item *blockbuf
-	for item = range inCh {
+	for item = range b.inChan {
 		// Compress the block.
 		buf := item.data.Bytes()
 		modified := false
@@ -176,9 +196,8 @@ func (b *Builder) handleBlock(i int) {
 			item.data.Reset()
 			item.data.Write(buf)
 		}
-		outCh <- item
+		b.outChan <- item
 	}
-	outCh <- &blockbuf{done: true}
 }
 
 // NewTableBuilder makes a new TableBuilder.
@@ -190,13 +209,12 @@ func NewTableBuilder(opts Options) *Builder {
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
 		block:      newBuffer(opts.BlockSize),
+		inChan:     make(chan *blockbuf, 100000),
+		outChan:    make(chan *blockbuf, 100000),
 	}
-	b.blockCloser.Add(count + 1)
+	b.inCloser.Add(count)
+	b.outCloser.Add(1)
 
-	for i := 0; i < count; i++ {
-		b.outChan = append(b.outChan, make(chan *blockbuf, 100))
-		b.inChan = append(b.inChan, make(chan *blockbuf, 100))
-	}
 	for i := 0; i < count; i++ {
 		go b.handleBlock(i)
 	}
@@ -274,21 +292,25 @@ func (b *Builder) finishBlock() {
 	b.block.Write(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
 	//blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
-	b.block.Write(buildChecksum(b.block.Bytes()))
+	buildChecksum(b.block, b.block.Bytes())
 
 	// Pass it to handle block function
-	b.getNextCh() <- &blockbuf{idx: b.idx, data: b.block, key: y.Copy(b.baseKey)}
+	//fmt.Println("sending block", b.idx)
+	key := y.Copy(b.baseKey)
+	block := &blockbuf{idx: b.idx, data: b.block, key: key}
+	b.inChan <- block
+	b.idx++
 	b.block = blockPool.Get().(*bytes.Buffer)
 	b.block.Reset()
 
 }
 
-func (b *Builder) getNextCh() chan *blockbuf {
-	ch := b.inChan[b.idx%len(b.inChan)]
-	b.idx++
-	return ch
-
-}
+//func (b *Builder) getNextCh() chan *blockbuf {
+//	ch := b.inChan[b.idx%len(b.inChan)]
+//	b.idx++
+//	return ch
+//
+//}
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	// If there is no entry till now, we will return false.
 	if len(b.entryOffsets) <= 0 {
@@ -366,12 +388,13 @@ func (b *Builder) Finish() []byte {
 
 	b.finishBlock() // This will never start a new block.
 
-	for _, ch := range b.inChan {
-		close(ch)
-	}
+	close(b.inChan)
 
 	// Finish writing all the blocks.
-	b.blockCloser.Wait()
+	b.inCloser.Wait()
+
+	close(b.outChan)
+	b.outCloser.Wait()
 
 	index, err := proto.Marshal(b.tableIndex)
 	y.Check(err)
@@ -390,14 +413,13 @@ func (b *Builder) Finish() []byte {
 	y.Check(err)
 
 	//fmt.Println("finish block")
-	b.buf.Write(buildChecksum(index))
+	buildChecksum(b.buf, index)
 	return b.buf.Bytes()
 }
 
 // buildChecksum builds a []byte slice in which first 4 bytes contain the
 // length of the checksum followed by bytes containing actual checksum.
-func buildChecksum(data []byte) []byte {
-	var buf bytes.Buffer
+func buildChecksum(buf *bytes.Buffer, data []byte) []byte {
 	// Build checksum for the index.
 	checksum := pb.Checksum{
 		// TODO: The checksum type should be configurable from the
