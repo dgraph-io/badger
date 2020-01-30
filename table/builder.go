@@ -102,11 +102,7 @@ type Builder struct {
 	opt          *Options
 
 	// Used to concurrently compress the blocks.
-	throttle y.Throttle
-	blockCh  chan *blockbuf
-	//handleBlock chan []byte
-	block *bytes.Buffer
-	//blockCloser *y.Closer
+	block       *bytes.Buffer
 	blockCloser sync.WaitGroup
 	length      uint32 // Accessed via atomics.
 	inChan      [](chan *blockbuf)
@@ -114,7 +110,6 @@ type Builder struct {
 }
 
 func (b *Builder) writeBlock() {
-	//defer fmt.Println("writeblock exit")
 	defer b.blockCloser.Done()
 	slurp := func(block *blockbuf) {
 		buf := block.data.Bytes()
@@ -133,8 +128,6 @@ func (b *Builder) writeBlock() {
 			Len:    uint32(len(buf)),
 		}
 		atomic.AddUint32(&b.length, uint32(len(buf)))
-		//b.baseOffset = b.baseOffset + uint32(len(blockBuf))
-		//fmt.Printf("adding key %s\n", bo.Key)
 		b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
 		blockPool.Put(block.data)
 	}
@@ -144,7 +137,6 @@ func (b *Builder) writeBlock() {
 	for {
 		block := <-b.outChan[i%len(b.outChan)]
 		if block.done {
-			//	fmt.Println("done", i%len(b.outChan))
 			count++
 			if count == len(b.outChan) {
 				return
@@ -157,54 +149,53 @@ func (b *Builder) writeBlock() {
 }
 
 func (b *Builder) handleBlock(i int) {
-	//defer fmt.Println("handleBlock exit", i)
 	defer b.blockCloser.Done()
 	inCh := b.inChan[i]
 	outCh := b.outChan[i]
-	//fmt.Println("starting", i)
+
 	var err error
 	var item *blockbuf
 	for item = range inCh {
-		//fmt.Println("received len", len(item.data))
 		// Compress the block.
 		buf := item.data.Bytes()
+		modified := false
 		if b.opt.Compression != options.None {
+			modified = true
 			// TODO: Find a way to reuse buffers. Current implementation creates a
 			// new buffer for each compressData call.
 			buf, err = b.compressData(buf)
 			y.Check(err)
 		}
 		if b.shouldEncrypt() {
+			modified = true
 			buf, err = b.encrypt(buf)
 			y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
 		}
-		// Write compressed/encrypted data.
-		//fmt.Println("insert ", i)
+		if modified {
+			// Rewrite the buffer with new content
+			item.data.Reset()
+			item.data.Write(buf)
+		}
 		outCh <- item
-		//fmt.Println("insert done", i)
 	}
-	//fmt.Println("closeing ", i)
 	outCh <- &blockbuf{done: true}
-	//fmt.Println("closeing done", i)
 }
 
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
-	count := 10
+	count := 15
 	b := &Builder{
-		buf:        newBuffer(1 << 20),
+		buf:        newBuffer(10 << 20),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
 		block:      newBuffer(opts.BlockSize),
-		//blockCloser: y.NewCloser(count),
-		blockCh: make(chan *blockbuf, 20),
-		//blockReceive: make([]chan *blockbuf, count),
 	}
 	b.blockCloser.Add(count + 1)
+
 	for i := 0; i < count; i++ {
-		b.outChan = append(b.outChan, make(chan *blockbuf))
-		b.inChan = append(b.inChan, make(chan *blockbuf))
+		b.outChan = append(b.outChan, make(chan *blockbuf, 100))
+		b.inChan = append(b.inChan, make(chan *blockbuf, 100))
 	}
 	for i := 0; i < count; i++ {
 		go b.handleBlock(i)
@@ -378,12 +369,9 @@ func (b *Builder) Finish() []byte {
 	for _, ch := range b.inChan {
 		close(ch)
 	}
-	//fmt.Println("blockcloser")
-	// Finish writing all the blocks.
-	//b.blockCloser.SignalAndWait()
-	b.blockCloser.Wait()
 
-	//	fmt.Println("blockcloser-done")
+	// Finish writing all the blocks.
+	b.blockCloser.Wait()
 
 	index, err := proto.Marshal(b.tableIndex)
 	y.Check(err)
@@ -429,7 +417,6 @@ func buildChecksum(data []byte) []byte {
 	y.Check(err)
 	n, err := buf.Write(chksum)
 	y.Check(err)
-	//fmt.Println("chksum len", n)
 
 	y.AssertTrue(uint32(n) < math.MaxUint32)
 	// Write checksum size.
