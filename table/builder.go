@@ -64,7 +64,7 @@ func (h *header) Decode(buf []byte) {
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	buf *bytes.Buffer
+	buf []byte
 
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -77,7 +77,7 @@ type Builder struct {
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
 	return &Builder{
-		buf:        newBuffer(1 << 20),
+		buf:        make([]byte, 0, 1<<20),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
@@ -88,7 +88,7 @@ func NewTableBuilder(opts Options) *Builder {
 func (b *Builder) Close() {}
 
 // Empty returns whether it's empty.
-func (b *Builder) Empty() bool { return b.buf.Len() == 0 }
+func (b *Builder) Empty() bool { return len(b.buf) == 0 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
 func (b *Builder) keyDiff(newKey []byte) []byte {
@@ -121,14 +121,16 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	}
 
 	// store current entry's offset
-	y.AssertTrue(uint32(b.buf.Len()) < math.MaxUint32)
-	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len())-b.baseOffset)
+	y.AssertTrue(uint32(len(b.buf)) < math.MaxUint32)
+	b.entryOffsets = append(b.entryOffsets, uint32(len(b.buf))-b.baseOffset)
 
 	// Layout: header, diffKey, value.
-	b.buf.Write(h.Encode())
-	b.buf.Write(diffKey) // We only need to store the key difference.
+	b.buf = append(b.buf, h.Encode()...)
+	b.buf = append(b.buf, diffKey...)
 
-	v.EncodeTo(b.buf)
+	bb := &bytes.Buffer{}
+	v.EncodeTo(bb)
+	b.buf = append(b.buf, bb.Bytes()...)
 	// Size of KV on SST.
 	sstSz := uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
 	// Total estimated size = size on SST + size on vlog (length of value pointer).
@@ -148,10 +150,10 @@ Structure of Block.
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
 func (b *Builder) finishBlock() {
-	b.buf.Write(y.U32SliceToBytes(b.entryOffsets))
-	b.buf.Write(y.U32ToBytes(uint32(len(b.entryOffsets))))
+	b.buf = append(b.buf, y.U32SliceToBytes(b.entryOffsets)...)
+	b.buf = append(b.buf, y.U32ToBytes(uint32(len(b.entryOffsets)))...)
 
-	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
+	blockBuf := b.buf[b.baseOffset:] // Store checksum for current block.
 	b.writeChecksum(blockBuf)
 
 	// Compress the block.
@@ -159,21 +161,17 @@ func (b *Builder) finishBlock() {
 		var err error
 		// TODO: Find a way to reuse buffers. Current implementation creates a
 		// new buffer for each compressData call.
-		blockBuf, err = b.compressData(b.buf.Bytes()[b.baseOffset:])
+		blockBuf, err = b.compressData(b.buf[b.baseOffset:])
 		y.Check(err)
-		// Truncate already written data.
-		b.buf.Truncate(int(b.baseOffset))
-		// Write compressed data.
-		b.buf.Write(blockBuf)
 	}
 	if b.shouldEncrypt() {
-		block := b.buf.Bytes()[b.baseOffset:]
+		block := b.buf[b.baseOffset:]
 		eBlock, err := b.encrypt(block)
 		y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
-		// We're rewriting the block, after encrypting.
-		b.buf.Truncate(int(b.baseOffset))
-		b.buf.Write(eBlock)
+		blockBuf = eBlock
 	}
+
+	b.buf = append(b.buf[b.baseOffset:], blockBuf...)
 
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
 	// implement padding. This might be useful while using direct I/O.
@@ -182,7 +180,7 @@ func (b *Builder) finishBlock() {
 	bo := &pb.BlockOffset{
 		Key:    y.Copy(b.baseKey),
 		Offset: b.baseOffset,
-		Len:    uint32(b.buf.Len()) - b.baseOffset,
+		Len:    uint32(len(blockBuf)),
 	}
 	b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
 }
@@ -200,7 +198,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		4 + // size of list
 		8 + // Sum64 in checksum proto
 		4) // checksum length
-	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(6 /*header size for entry*/) +
+	estimatedSize := uint32(len(b.buf)) - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 
 	if b.shouldEncrypt() {
@@ -217,8 +215,8 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
 		b.baseKey = []byte{}
-		y.AssertTrue(uint32(b.buf.Len()) < math.MaxUint32)
-		b.baseOffset = uint32(b.buf.Len())
+		y.AssertTrue(uint32(len(b.buf)) < math.MaxUint32)
+		b.baseOffset = uint32(len(b.buf))
 		b.entryOffsets = b.entryOffsets[:0]
 	}
 	b.addHelper(key, value, uint64(valueLen))
@@ -232,7 +230,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	blocksSize := b.buf.Len() + // length of current buffer
+	blocksSize := len(b.buf) + // length of current buffer
 		len(b.entryOffsets)*4 + // all entry offsets size
 		4 + // count of all entry offsets
 		8 + // checksum bytes
@@ -273,17 +271,13 @@ func (b *Builder) Finish() []byte {
 		index, err = b.encrypt(index)
 		y.Check(err)
 	}
+	b.buf = append(b.buf, index...)
 	// Write index the file.
-	n, err := b.buf.Write(index)
-	y.Check(err)
 
-	y.AssertTrue(uint32(n) < math.MaxUint32)
-	// Write index size.
-	_, err = b.buf.Write(y.U32ToBytes(uint32(n)))
-	y.Check(err)
+	b.buf = append(b.buf, y.U32ToBytes(uint32(len(index)))...)
 
 	b.writeChecksum(index)
-	return b.buf.Bytes()
+	return b.buf
 }
 
 func (b *Builder) writeChecksum(data []byte) {
@@ -304,13 +298,10 @@ func (b *Builder) writeChecksum(data []byte) {
 	// Write checksum to the file.
 	chksum, err := proto.Marshal(&checksum)
 	y.Check(err)
-	n, err := b.buf.Write(chksum)
-	y.Check(err)
+	b.buf = append(b.buf, chksum...)
 
-	y.AssertTrue(uint32(n) < math.MaxUint32)
 	// Write checksum size.
-	_, err = b.buf.Write(y.U32ToBytes(uint32(n)))
-	y.Check(err)
+	b.buf = append(b.buf, y.U32ToBytes(uint32(len(chksum)))...)
 }
 
 // DataKey returns datakey of the builder.

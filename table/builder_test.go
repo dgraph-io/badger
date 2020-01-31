@@ -54,7 +54,7 @@ func TestTableIndex(t *testing.T) {
 		// Compression mode.
 		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
 			Compression: options.ZSTD})
-		keysCount := 10000
+		keysCount := 2
 		for _, opt := range opts {
 			builder := NewTableBuilder(opt)
 			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
@@ -65,7 +65,9 @@ func TestTableIndex(t *testing.T) {
 			blockCount := 0
 			for i := 0; i < keysCount; i++ {
 				k := []byte(fmt.Sprintf("%016x", i))
-				v := fmt.Sprintf("%d", i)
+				v := make([]byte, 4<<10)
+				rand.Read(v)
+				//v := fmt.Sprintf("%d", i)
 				vs := y.ValueStruct{Value: []byte(v)}
 				if i == 0 { // This is first key for first block.
 					blockFirstKeys = append(blockFirstKeys, k)
@@ -80,6 +82,7 @@ func TestTableIndex(t *testing.T) {
 			require.NoError(t, err, "unable to write to file")
 
 			tbl, err := OpenTable(f, opt)
+			require.NoError(t, err)
 			if opt.DataKey == nil {
 				// key id is zero if thre is no datakey.
 				require.Equal(t, tbl.KeyID(), uint64(0))
