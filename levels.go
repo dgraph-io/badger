@@ -84,12 +84,13 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 
 	for i := 0; i < db.opt.MaxLevels; i++ {
 		s.levels[i] = newLevelHandler(db, i)
-		if i == 0 {
+		switch i {
+		case 0:
 			// Do nothing.
-		} else if i == 1 {
+		case 1:
 			// Level 1 probably shouldn't be too much bigger than level 0.
 			s.levels[i].maxTotalSize = db.opt.LevelOneSize
-		} else {
+		default:
 			s.levels[i].maxTotalSize = s.levels[i-1].maxTotalSize * int64(db.opt.LevelSizeMultiplier)
 		}
 		s.cstatus.levels[i] = new(levelCompactStatus)
@@ -360,12 +361,15 @@ func (s *levelsController) runWorker(lc *y.Closer) {
 		// Can add a done channel or other stuff.
 		case <-ticker.C:
 			prios := s.pickCompactLevels()
+		loop:
 			for _, p := range prios {
-				if err := s.doCompact(p); err == nil {
-					break
-				} else if err == errFillTables {
+				err := s.doCompact(p)
+				switch err {
+				case nil:
+					break loop
+				case errFillTables:
 					// pass
-				} else {
+				default:
 					s.kv.opt.Warningf("While running doCompact: %v\n", err)
 				}
 			}
@@ -475,9 +479,10 @@ func (s *levelsController) compactBuildTables(
 
 	// Create iterators across all the tables involved first.
 	var iters []y.Iterator
-	if lev == 0 {
+	switch {
+	case lev == 0:
 		iters = appendIteratorsReversed(iters, topTables, false)
-	} else if len(topTables) > 0 {
+	case len(topTables) > 0:
 		y.AssertTrue(len(topTables) == 1)
 		iters = []y.Iterator{topTables[0].NewIterator(false)}
 	}
@@ -579,14 +584,15 @@ func (s *levelsController) compactBuildTables(
 					// versions. Ensure that we're only removing versions below readTs.
 					skipKey = y.SafeCopy(skipKey, it.Key())
 
-					if lastValidVersion {
+					switch {
+					case lastValidVersion:
 						// Add this key. We have set skipKey, so the following key versions
 						// would be skipped.
-					} else if hasOverlap {
+					case hasOverlap:
 						// If this key range has overlap with lower levels, then keep the deletion
 						// marker with the latest version, discarding the rest. We have set skipKey,
 						// so the following key versions would be skipped.
-					} else {
+					default:
 						// If no overlap, we can skip all the versions, by continuing here.
 						numSkips++
 						updateStats(vs)

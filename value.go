@@ -436,15 +436,18 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 
 	var lastCommit uint64
 	var validEndOffset uint32 = offset
+
+loop:
 	for {
 		e, err := read.Entry(reader)
-		if err == io.EOF {
-			break
-		} else if err == io.ErrUnexpectedEOF || err == errTruncate {
-			break
-		} else if err != nil {
+		switch {
+		case err == io.EOF:
+			break loop
+		case err == io.ErrUnexpectedEOF || err == errTruncate:
+			break loop
+		case err != nil:
 			return 0, err
-		} else if e == nil {
+		case e == nil:
 			continue
 		}
 
@@ -455,29 +458,30 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		vp.Offset = e.offset
 		vp.Fid = lf.fid
 
-		if e.meta&bitTxn > 0 {
+		switch {
+		case e.meta&bitTxn > 0:
 			txnTs := y.ParseTs(e.Key)
 			if lastCommit == 0 {
 				lastCommit = txnTs
 			}
 			if lastCommit != txnTs {
-				break
+				break loop
 			}
 
-		} else if e.meta&bitFinTxn > 0 {
+		case e.meta&bitFinTxn > 0:
 			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
 			if err != nil || lastCommit != txnTs {
-				break
+				break loop
 			}
 			// Got the end of txn. Now we can store them.
 			lastCommit = 0
 			validEndOffset = read.recordOffset
 
-		} else {
+		default:
 			if lastCommit != 0 {
 				// This is most likely an entry which was moved as part of GC.
 				// We shouldn't get this entry in the middle of a transaction.
-				break
+				break loop
 			}
 			validEndOffset = read.recordOffset
 		}
@@ -1537,10 +1541,11 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
 	fids := vlog.sortedFids()
-	if len(fids) <= 1 {
+	switch {
+	case len(fids) <= 1:
 		tr.LazyPrintf("Only one or less value log file.")
 		return nil
-	} else if head.Fid == 0 {
+	case head.Fid == 0:
 		tr.LazyPrintf("Head pointer is at zero.")
 		return nil
 	}
