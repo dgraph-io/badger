@@ -153,9 +153,10 @@ func (b *Builder) finishBlock() {
 	b.buf = append(b.buf, y.U32SliceToBytes(b.entryOffsets)...)
 	b.buf = append(b.buf, y.U32ToBytes(uint32(len(b.entryOffsets)))...)
 
+	b.writeChecksum(b.buf[b.baseOffset:])
 	blockBuf := b.buf[b.baseOffset:] // Store checksum for current block.
-	b.writeChecksum(blockBuf)
 
+	modified := false
 	// Compress the block.
 	if b.opt.Compression != options.None {
 		var err error
@@ -163,15 +164,19 @@ func (b *Builder) finishBlock() {
 		// new buffer for each compressData call.
 		blockBuf, err = b.compressData(b.buf[b.baseOffset:])
 		y.Check(err)
-	}
-	if b.shouldEncrypt() {
-		block := b.buf[b.baseOffset:]
-		eBlock, err := b.encrypt(block)
-		y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
-		blockBuf = eBlock
+		modified = true
 	}
 
-	b.buf = append(b.buf[b.baseOffset:], blockBuf...)
+	if b.shouldEncrypt() {
+		eBlock, err := b.encrypt(blockBuf)
+		y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
+		blockBuf = eBlock
+		modified = true
+	}
+
+	if modified {
+		b.buf = append(b.buf[:b.baseOffset], blockBuf...)
+	}
 
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
 	// implement padding. This might be useful while using direct I/O.
@@ -180,7 +185,7 @@ func (b *Builder) finishBlock() {
 	bo := &pb.BlockOffset{
 		Key:    y.Copy(b.baseKey),
 		Offset: b.baseOffset,
-		Len:    uint32(len(blockBuf)),
+		Len:    uint32(len(b.buf)) - b.baseOffset,
 	}
 	b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
 }

@@ -431,20 +431,15 @@ func (t *Table) block(idx int) (*block, error) {
 			"corrupted or the table options are incorrectly set")
 	}
 
-	fmt.Println("readpos", readPos)
 	// Read checksum and store it
 	readPos -= blk.chkLen
 	blk.checksum = blk.data[readPos : readPos+blk.chkLen]
 	// Move back and read numEntries in the block.
 	readPos -= 4
-	fmt.Println("readpos", readPos)
 	numEntries := int(y.BytesToU32(blk.data[readPos : readPos+4]))
-	fmt.Println("num entries", numEntries)
 	entriesIndexStart := readPos - (numEntries * 4)
-	fmt.Println("readpos", entriesIndexStart)
 	entriesIndexEnd := entriesIndexStart + numEntries*4
 
-	fmt.Println("readpos", entriesIndexEnd, entriesIndexStart)
 	blk.entryOffsets = y.BytesToU32Slice(blk.data[entriesIndexStart:entriesIndexEnd])
 
 	blk.entriesIndexStart = entriesIndexStart

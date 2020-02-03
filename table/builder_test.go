@@ -49,6 +49,8 @@ func TestTableIndex(t *testing.T) {
 		key := make([]byte, 32)
 		_, err := rand.Read(key)
 		require.NoError(t, err)
+		opts = append(opts, Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+			DataKey: &pb.DataKey{Data: key}})
 		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
 			DataKey: &pb.DataKey{Data: key}})
 		// Compression mode.
@@ -80,7 +82,6 @@ func TestTableIndex(t *testing.T) {
 			}
 			_, err = f.Write(builder.Finish())
 			require.NoError(t, err, "unable to write to file")
-
 			tbl, err := OpenTable(f, opt)
 			require.NoError(t, err)
 			if opt.DataKey == nil {
@@ -149,7 +150,7 @@ func BenchmarkBuilder(b *testing.B) {
 		opt.Compression = options.None
 		bench(b, &opt)
 	})
-	b.Run("zstd compression", func(b *testing.B) {
+	b.Run("ZSTD compression", func(b *testing.B) {
 		var opt Options
 		opt.Compression = options.ZSTD
 		b.Run("level 1", func(b *testing.B) {
