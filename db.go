@@ -89,9 +89,10 @@ type DB struct {
 
 	orc *oracle
 
-	pub        *publisher
-	registry   *KeyRegistry
-	blockCache *ristretto.Cache
+	pub         *publisher
+	registry    *KeyRegistry
+	blockCache  *ristretto.Cache
+	blobManager blobManager
 }
 
 const (
@@ -340,6 +341,9 @@ func Open(opt Options) (db *DB, err error) {
 		}()
 	}
 
+	// TODO - Open BlobManager
+	db.blobManager.Open(db, db.opt)
+
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
 	vs, err := db.get(headKey)
@@ -483,6 +487,8 @@ func (db *DB) close() (err error) {
 	db.closers.updateSize.SignalAndWait()
 	db.orc.Stop()
 	db.blockCache.Close()
+
+	db.blobManager.close()
 
 	db.elog.Finish()
 	if db.opt.InMemory {
@@ -638,34 +644,18 @@ func (db *DB) shouldWriteValueToLSM(e Entry) bool {
 }
 
 func (db *DB) writeToLSM(b *request) error {
-	// We should check the length of b.Prts and b.Entries only when badger is not
-	// running in InMemory mode. In InMemory mode, we don't write anything to the
-	// value log and that's why the length of b.Ptrs will always be zero.
-	if !db.opt.InMemory && len(b.Ptrs) != len(b.Entries) {
-		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
-	}
-
-	for i, entry := range b.Entries {
+	for _, entry := range b.Entries {
 		if entry.meta&bitFinTxn != 0 {
 			continue
 		}
-		if db.shouldWriteValueToLSM(*entry) { // Will include deletion / tombstone case.
-			db.mt.Put(entry.Key,
-				y.ValueStruct{
-					Value:     entry.Value,
-					Meta:      entry.meta,
-					UserMeta:  entry.UserMeta,
-					ExpiresAt: entry.ExpiresAt,
-				})
-		} else {
-			db.mt.Put(entry.Key,
-				y.ValueStruct{
-					Value:     b.Ptrs[i].Encode(),
-					Meta:      entry.meta | bitValuePointer,
-					UserMeta:  entry.UserMeta,
-					ExpiresAt: entry.ExpiresAt,
-				})
-		}
+		db.mt.Put(entry.Key,
+			y.ValueStruct{
+				Value:     entry.Value,
+				Meta:      entry.meta,
+				UserMeta:  entry.UserMeta,
+				ExpiresAt: entry.ExpiresAt,
+			})
+
 	}
 	return nil
 }
@@ -898,24 +888,46 @@ func arenaSize(opt Options) int64 {
 	return opt.MaxTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
 
+func (db *DB) newBlobFileBuilder() *blobFileBuilder {
+	return newBlobFileBuilder(db.blobManager.allocFileID(), db.opt.Dir)
+}
+
 // buildL0Table builds a new table from the memtable.
-func buildL0Table(ft flushTask, bopts table.Options) []byte {
+func (db *DB) buildL0Table(ft flushTask, bopts table.Options) ([]byte, error) {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder(bopts)
 	defer b.Close()
-	var vp valuePointer
+
+	var bb *blobFileBuilder
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 		if len(ft.dropPrefix) > 0 && bytes.HasPrefix(iter.Key(), ft.dropPrefix) {
 			continue
 		}
 		vs := iter.Value()
-		if vs.Meta&bitValuePointer > 0 {
-			vp.Decode(vs.Value)
+		valLen := uint32(len(vs.Value))
+		if len(vs.Value) > db.opt.ValueThreshold {
+			if bb == nil {
+				bb = db.newBlobFileBuilder()
+			}
+			bp, err := bb.addValue(vs.Value)
+			if err != nil {
+				return nil, err
+			}
+			vs.Meta |= bitValuePointer
+			vs.Value = bp
 		}
-		b.Add(iter.Key(), iter.Value(), vp.Len)
+		b.Add(iter.Key(), vs, valLen)
 	}
-	return b.Finish()
+
+	if bb != nil {
+		bf, err := bb.finish()
+		if err != nil {
+			return nil, err
+		}
+		db.blobManager.addFile(bf)
+	}
+	return b.Finish(), nil
 }
 
 type flushTask struct {
@@ -950,8 +962,11 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	bopts.DataKey = dk
 	// Builder does not need cache but the same options are used for opening table.
 	bopts.Cache = db.blockCache
-	tableData := buildL0Table(ft, bopts)
 
+	tableData, err := db.buildL0Table(ft, bopts)
+	if err != nil {
+		return err
+	}
 	fileID := db.lc.reserveFileID()
 	if db.opt.KeepL0InMemory {
 		tbl, err := table.OpenInMemoryTable(tableData, fileID, &bopts)
@@ -963,7 +978,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
 	if err != nil {
-		return y.Wrap(err)
+		return err
 	}
 
 	// Don't block just to sync the directory entry.
@@ -1502,6 +1517,10 @@ func (db *DB) dropAll() (func(), error) {
 	if err != nil {
 		return resume, err
 	}
+	if err = db.blobManager.dropAll(); err != nil {
+		return nil, err
+	}
+
 	db.vhead = valuePointer{} // Zero it out.
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)

@@ -78,16 +78,15 @@ func parseBlobFileName(name string) (uint32, bool) {
 	return uint32(id), true
 }
 
-func newBlobFileBuilder(fid uint32, dir string) (*blobFileBuilder, error) {
+func newBlobFileBuilder(fid uint32, dir string) *blobFileBuilder {
 	return &blobFileBuilder{
 		dir: dir,
 		fid: fid,
 		buf: &bytes.Buffer{},
-	}, nil
+	}
 }
 
 func (bfb *blobFileBuilder) addValue(value []byte) (bp []byte, err error) {
-	offset := uint32(bfb.buf.Len())
 
 	var lenBuf [4]byte
 	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(value)))
@@ -95,6 +94,8 @@ func (bfb *blobFileBuilder) addValue(value []byte) (bp []byte, err error) {
 	if _, err = bfb.buf.Write(lenBuf[:]); err != nil {
 		return nil, err
 	}
+	// Store offset from the point where the value starts. This is intentional.
+	offset := uint32(bfb.buf.Len())
 	if _, err = bfb.buf.Write(value); err != nil {
 		return nil, err
 	}
@@ -107,7 +108,7 @@ func (bfb *blobFileBuilder) addValue(value []byte) (bp []byte, err error) {
 
 func (bfb *blobFileBuilder) finish() (*blobFile, error) {
 	name := filepath.Join(bfb.dir, newBlobFileName(bfb.fid))
-	file, err := os.OpenFile(name, os.O_WRONLY, 0666)
+	file, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +168,27 @@ func (bm *blobManager) Open(db *DB, opt Options) error {
 	return nil
 }
 
+func (bm *blobManager) close() {
+	bm.filesLock.Lock()
+	for _, f := range bm.fileList {
+		_ = f.fd.Close()
+	}
+	bm.fileList = nil
+	bm.filesLock.Unlock()
+}
+
+func (bm *blobManager) dropAll() error {
+	bm.filesLock.Lock()
+	for _, f := range bm.fileList {
+		_ = f.fd.Close()
+		if err := os.Remove(f.fd.Name()); err != nil {
+			return err
+		}
+	}
+	bm.fileList = make(map[uint32]*blobFile)
+	bm.filesLock.Unlock()
+	return nil
+}
 func (bm *blobManager) allocFileID() uint32 {
 	return atomic.AddUint32(&bm.maxFileID, 1)
 }
@@ -176,9 +198,25 @@ func (bm *blobManager) read(ptr []byte, s *y.Slice) ([]byte, error) {
 	bp.decode(ptr)
 
 	bm.filesLock.RLock()
-	bf := bm.fileList[bp.fid]
+	bf, ok := bm.fileList[bp.fid]
 	bm.filesLock.RUnlock()
 
-	_ = bf
-	return nil, nil
+	if !ok {
+		return nil, errors.Errorf("blob file %d not found", bp.fid)
+	}
+	buf := s.Resize(int(bp.length))
+	n, err := bf.fd.ReadAt(buf, int64(bp.offset))
+	if err != nil {
+		return nil, err
+	}
+	if uint32(n) != bp.length {
+		return nil, errors.New("read error")
+	}
+	return buf, nil
+}
+
+func (bm *blobManager) addFile(file *blobFile) {
+	bm.filesLock.Lock()
+	bm.fileList[file.fid] = file
+	bm.filesLock.Unlock()
 }

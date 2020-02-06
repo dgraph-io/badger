@@ -110,6 +110,7 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 	y.Check2(hash.Write(headerEnc[:sz]))
 	// we'll encrypt only key and value.
 	if lf.encryptionEnabled() {
+		panic("TBD")
 		// TODO: no need to allocate the bytes. we can calculate the encrypted buf one by one
 		// since we're using ctr mode of AES encryption. Ordering won't changed. Need some
 		// refactoring in XORBlock which will work like stream cipher.
@@ -193,6 +194,8 @@ func (lf *logFile) mmap(size int64) (err error) {
 }
 
 func (lf *logFile) encryptionEnabled() bool {
+	// TODO - Fix this once encryption is enabled.
+	return false
 	return lf.dataKey != nil
 }
 
@@ -1410,9 +1413,11 @@ func (vlog *valueLog) write(reqs []*request) error {
 			}
 			var p valuePointer
 
+			e.logOffset.fid = curlf.fid
 			p.Fid = curlf.fid
 			// Use the offset including buffer length so far.
 			p.Offset = vlog.woffset() + uint32(buf.Len())
+			e.logOffset.offset = p.Offset
 			plen, err := curlf.encodeEntry(e, &buf, p.Offset) // Now encode the entry into buffer.
 			if err != nil {
 				return err

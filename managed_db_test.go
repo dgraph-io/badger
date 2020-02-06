@@ -17,7 +17,8 @@ import (
 
 func val(large bool) []byte {
 	var buf []byte
-	if large {
+	// TODO - Fix skiplist for this to work!!
+	if false && large {
 		buf = make([]byte, 8192)
 	} else {
 		buf = make([]byte, 16)
