@@ -137,9 +137,12 @@ type blobManager struct {
 	dirPath   string
 }
 
-func (bm *blobManager) Open(db *DB, opt Options) error {
+func (bm *blobManager) Open(opt *Options) error {
+	if opt.InMemory {
+		return nil
+	}
 	// TODO - Figure out if this should be valueDir or just Dir.
-	bm.dirPath = db.opt.Dir
+	bm.dirPath = opt.Dir
 	bm.fileList = make(map[uint32]*blobFile)
 
 	fileInfos, err := ioutil.ReadDir(bm.dirPath)

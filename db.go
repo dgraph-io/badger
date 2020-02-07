@@ -341,10 +341,6 @@ func Open(opt Options) (db *DB, err error) {
 		}()
 	}
 
-	if err := db.blobManager.Open(db, db.opt); err != nil {
-		return nil, err
-	}
-
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
 	vs, err := db.get(headKey)
@@ -363,7 +359,12 @@ func Open(opt Options) (db *DB, err error) {
 	if err = db.vlog.open(db, vptr, db.replayFunction()); err != nil {
 		return db, y.Wrapf(err, "During db.vlog.open")
 	}
+
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
+
+	if err := db.blobManager.Open(&opt); err != nil {
+		return nil, err
+	}
 
 	// Let's advance nextTxnTs to one more than whatever we observed via
 	// replaying the logs.
