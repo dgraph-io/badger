@@ -1,3 +1,19 @@
+/*
+ * Copyright 2020 Dgraph Labs, Inc. and Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package badger
 
 import (
@@ -12,7 +28,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
@@ -21,44 +36,9 @@ import (
 const blobFileSuffix = ".blob"
 
 type blobFile struct {
-	path     string
-	fid      uint32
-	fd       *os.File
-	fileSize uint32
-
-	//mappingSize    uint32
-	//mmap           []byte
-	//mappingEntries []mappingEntry
-
-	// only accessed by gcHandler
-	//totalDiscard uint32
-}
-
-type blobFileBuilder struct {
-	dir string
 	fid uint32
-	buf *bytes.Buffer
+	fd  *os.File
 }
-
-type blobPointer struct {
-	logicalAddr
-	length uint32
-}
-
-func (bp *blobPointer) decode(val []byte) {
-	ptr := (*blobPointer)(unsafe.Pointer(&val[0]))
-	*bp = *ptr
-}
-
-type logicalAddr struct {
-	fid    uint32
-	offset uint32
-}
-
-//type mappingEntry struct {
-//	logicalAddr
-//	physicalOffset uint32
-//}
 
 func newBlobFileName(id uint32) string {
 	return fmt.Sprintf("%06d", id) + blobFileSuffix
@@ -78,6 +58,52 @@ func parseBlobFileName(name string) (uint32, bool) {
 	return uint32(id), true
 }
 
+// Finish finishes a blob file and opens the built blob file.
+func (bfb *blobFileBuilder) finish() (*blobFile, error) {
+	name := filepath.Join(bfb.dir, newBlobFileName(bfb.fid))
+	file, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
+	if err != nil {
+		return nil, errors.Wrapf(err, "finish blob file: %d", bfb.fid)
+	}
+	if _, err := file.Write(bfb.buf.Bytes()); err != nil {
+		return nil, errors.Wrapf(err, "failed to write to blob file: %d", bfb.fid)
+	}
+	if err = file.Close(); err != nil {
+		return nil, err
+	}
+	return newBlobFile(file.Name(), bfb.fid)
+}
+
+func newBlobFile(path string, fid uint32) (*blobFile, error) {
+	file, err := os.OpenFile(path, os.O_RDWR, 0666)
+	if err != nil {
+		return nil, err
+	}
+	return &blobFile{
+		fid: fid,
+		fd:  file,
+	}, nil
+}
+
+// read reads the value writen at offset stored in the given blobpointer.
+func (bf *blobFile) read(vp *valuePointer, s *y.Slice) ([]byte, error) {
+	buf := s.Resize(int(vp.Len))
+	n, err := bf.fd.ReadAt(buf, int64(vp.Offset))
+	if err != nil {
+		return nil, err
+	}
+	if uint32(n) != vp.Len {
+		return nil, errors.Errorf("read %d bytes, expectd %d", n, vp.Len)
+	}
+	return buf, nil
+}
+
+type blobFileBuilder struct {
+	dir string
+	fid uint32
+	buf *bytes.Buffer
+}
+
 func newBlobFileBuilder(fid uint32, dir string) *blobFileBuilder {
 	return &blobFileBuilder{
 		dir: dir,
@@ -86,52 +112,21 @@ func newBlobFileBuilder(fid uint32, dir string) *blobFileBuilder {
 	}
 }
 
-func (bfb *blobFileBuilder) addValue(value []byte) (bp []byte, err error) {
-
+func (bfb *blobFileBuilder) addValue(value []byte) (*valuePointer, error) {
 	var lenBuf [4]byte
 	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(value)))
-
-	if _, err = bfb.buf.Write(lenBuf[:]); err != nil {
+	if _, err := bfb.buf.Write(lenBuf[:]); err != nil {
 		return nil, err
 	}
 	// Store offset from the point where the value starts. This is intentional.
 	offset := uint32(bfb.buf.Len())
-	if _, err = bfb.buf.Write(value); err != nil {
+	if _, err := bfb.buf.Write(value); err != nil {
 		return nil, err
 	}
-	bp = make([]byte, 12)
-	binary.LittleEndian.PutUint32(bp, bfb.fid)
-	binary.LittleEndian.PutUint32(bp[4:], offset)
-	binary.LittleEndian.PutUint32(bp[8:], uint32(len(value)))
-	return
-}
-
-func (bfb *blobFileBuilder) finish() (*blobFile, error) {
-	name := filepath.Join(bfb.dir, newBlobFileName(bfb.fid))
-	file, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := file.Write(bfb.buf.Bytes()); err != nil {
-		return nil, err
-	}
-	_ = file.Close()
-	return newBlobFile(file.Name(), bfb.fid, uint32(len(bfb.buf.Bytes())))
-}
-
-func newBlobFile(path string, fid, fileSize uint32) (*blobFile, error) {
-	file, err := os.OpenFile(path, os.O_RDWR, 0666)
-	if err != nil {
-		return nil, err
-	}
-	if _, err = file.Seek(0, 2); err != nil {
-		return nil, err
-	}
-	return &blobFile{
-		path:     path,
-		fid:      fid,
-		fd:       file,
-		fileSize: fileSize,
+	return &valuePointer{
+		Fid:    bfb.fid,
+		Offset: offset,
+		Len:    uint32(len(value)),
 	}, nil
 }
 
@@ -159,7 +154,7 @@ func (bm *blobManager) Open(db *DB, opt Options) error {
 		}
 
 		path := filepath.Join(bm.dirPath, fileInfo.Name())
-		blobFile, err := newBlobFile(path, fid, uint32(fileInfo.Size()))
+		blobFile, err := newBlobFile(path, fid)
 		if err != nil {
 			return err
 		}
@@ -171,7 +166,7 @@ func (bm *blobManager) Open(db *DB, opt Options) error {
 func (bm *blobManager) close() {
 	bm.filesLock.Lock()
 	for _, f := range bm.fileList {
-		_ = f.fd.Close()
+		y.Check(f.fd.Close())
 	}
 	bm.fileList = nil
 	bm.filesLock.Unlock()
@@ -180,7 +175,7 @@ func (bm *blobManager) close() {
 func (bm *blobManager) dropAll() error {
 	bm.filesLock.Lock()
 	for _, f := range bm.fileList {
-		_ = f.fd.Close()
+		y.Check(f.fd.Close())
 		if err := os.Remove(f.fd.Name()); err != nil {
 			return err
 		}
@@ -194,25 +189,17 @@ func (bm *blobManager) allocFileID() uint32 {
 }
 
 func (bm *blobManager) read(ptr []byte, s *y.Slice) ([]byte, error) {
-	var bp blobPointer
-	bp.decode(ptr)
+	var vp valuePointer
+	vp.Decode(ptr)
 
 	bm.filesLock.RLock()
-	bf, ok := bm.fileList[bp.fid]
+	bf, ok := bm.fileList[vp.Fid]
 	bm.filesLock.RUnlock()
 
 	if !ok {
-		return nil, errors.Errorf("blob file %d not found", bp.fid)
+		return nil, errors.Errorf("blob file %d not found", vp.Fid)
 	}
-	buf := s.Resize(int(bp.length))
-	n, err := bf.fd.ReadAt(buf, int64(bp.offset))
-	if err != nil {
-		return nil, err
-	}
-	if uint32(n) != bp.length {
-		return nil, errors.New("read error")
-	}
-	return buf, nil
+	return bf.read(&vp, s)
 }
 
 func (bm *blobManager) addFile(file *blobFile) {

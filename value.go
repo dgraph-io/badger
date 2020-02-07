@@ -110,7 +110,6 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 	y.Check2(hash.Write(headerEnc[:sz]))
 	// we'll encrypt only key and value.
 	if lf.encryptionEnabled() {
-		panic("TBD")
 		// TODO: no need to allocate the bytes. we can calculate the encrypted buf one by one
 		// since we're using ctr mode of AES encryption. Ordering won't changed. Need some
 		// refactoring in XORBlock which will work like stream cipher.

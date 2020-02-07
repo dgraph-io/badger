@@ -910,12 +910,12 @@ func (db *DB) buildL0Table(ft flushTask, bopts table.Options) ([]byte, error) {
 			if bb == nil {
 				bb = db.newBlobFileBuilder()
 			}
-			bp, err := bb.addValue(vs.Value)
+			vp, err := bb.addValue(vs.Value)
 			if err != nil {
 				return nil, err
 			}
 			vs.Meta |= bitValuePointer
-			vs.Value = bp
+			vs.Value = vp.Encode()
 		}
 		b.Add(iter.Key(), vs, valLen)
 	}

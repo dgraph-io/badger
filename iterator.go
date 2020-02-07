@@ -147,68 +147,15 @@ func (item *Item) DiscardEarlierVersions() bool {
 }
 
 func (item *Item) yieldItemValue() ([]byte, error) {
+	// Decode and return value stored in blob file.
 	if item.meta&bitValuePointer > 0 {
 		if item.slice == nil {
 			item.slice = new(y.Slice)
 		}
 		return item.db.blobManager.read(item.vptr, item.slice)
 	}
+	// Otherwise just return the value stored in the vptr.
 	return item.vptr, nil
-	//for {
-	//	if !item.hasValue() {
-	//		return nil, nil, nil
-	//	}
-
-	//	if item.slice == nil {
-	//		item.slice = new(y.Slice)
-	//	}
-
-	//	if (item.meta & bitValuePointer) == 0 {
-	//		val := item.slice.Resize(len(item.vptr))
-	//		copy(val, item.vptr)
-	//		return val, nil, nil
-	//	}
-
-	//	var vp valuePointer
-	//	vp.Decode(item.vptr)
-	//	result, cb, err := item.db.vlog.Read(vp, item.slice)
-	//	if err != ErrRetry {
-	//		return result, cb, err
-	//	}
-	//	if bytes.HasPrefix(key, badgerMove) {
-	//		// err == ErrRetry
-	//		// Error is retry even after checking the move keyspace. So, let's
-	//		// just assume that value is not present.
-	//		return nil, cb, nil
-	//	}
-
-	//	// The value pointer is pointing to a deleted value log. Look for the
-	//	// move key and read that instead.
-	//	runCallback(cb)
-	//	// Do not put badgerMove on the left in append. It seems to cause some sort of manipulation.
-	//	keyTs := y.KeyWithTs(item.Key(), item.Version())
-	//	key = make([]byte, len(badgerMove)+len(keyTs))
-	//	n := copy(key, badgerMove)
-	//	copy(key[n:], keyTs)
-	//	// Note that we can't set item.key to move key, because that would
-	//	// change the key user sees before and after this call. Also, this move
-	//	// logic is internal logic and should not impact the external behavior
-	//	// of the retrieval.
-	//	vs, err := item.db.get(key)
-	//	if err != nil {
-	//		return nil, nil, err
-	//	}
-	//	if vs.Version != item.Version() {
-	//		return nil, nil, nil
-	//	}
-	//	// Bug fix: Always copy the vs.Value into vptr here. Otherwise, when item is reused this
-	//	// slice gets overwritten.
-	//	item.vptr = y.SafeCopy(item.vptr, vs.Value)
-	//	item.meta &^= bitValuePointer // Clear the value pointer bit.
-	//	if vs.Meta&bitValuePointer > 0 {
-	//		item.meta |= bitValuePointer // This meta would only be about value pointer.
-	//	}
-	//}
 }
 
 func runCallback(cb func()) {
