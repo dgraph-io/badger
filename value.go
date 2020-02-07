@@ -1412,11 +1412,9 @@ func (vlog *valueLog) write(reqs []*request) error {
 			}
 			var p valuePointer
 
-			e.logOffset.fid = curlf.fid
 			p.Fid = curlf.fid
 			// Use the offset including buffer length so far.
 			p.Offset = vlog.woffset() + uint32(buf.Len())
-			e.logOffset.offset = p.Offset
 			plen, err := curlf.encodeEntry(e, &buf, p.Offset) // Now encode the entry into buffer.
 			if err != nil {
 				return err
