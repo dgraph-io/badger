@@ -341,8 +341,9 @@ func Open(opt Options) (db *DB, err error) {
 		}()
 	}
 
-	// TODO - Open BlobManager
-	db.blobManager.Open(db, db.opt)
+	if err := db.blobManager.Open(db, db.opt); err != nil {
+		return nil, err
+	}
 
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
