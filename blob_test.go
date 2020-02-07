@@ -42,6 +42,7 @@ func TestBlobInsertAndRead(t *testing.T) {
 
 	bf, err := bfb.finish()
 	require.NoError(t, err)
+	defer bf.close()
 
 	var s y.Slice
 	for i, bp := range vpList {

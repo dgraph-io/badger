@@ -98,6 +98,10 @@ func (bf *blobFile) read(vp *valuePointer, s *y.Slice) ([]byte, error) {
 	return buf, nil
 }
 
+func (bf *blobFile) close() error {
+	return bf.fd.Close()
+}
+
 type blobFileBuilder struct {
 	dir string
 	fid uint32
@@ -169,7 +173,7 @@ func (bm *blobManager) Open(opt *Options) error {
 func (bm *blobManager) close() {
 	bm.filesLock.Lock()
 	for _, f := range bm.fileList {
-		y.Check(f.fd.Close())
+		y.Check(f.close())
 	}
 	bm.fileList = nil
 	bm.filesLock.Unlock()
