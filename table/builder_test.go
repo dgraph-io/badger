@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 )
 
@@ -34,7 +33,7 @@ func TestTableIndex(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 	keyPrefix := "key"
 	t.Run("single key", func(t *testing.T) {
-		opts := Options{Compression: options.ZSTD}
+		opts := Options{Compression: options.None}
 		f := buildTestTable(t, keyPrefix, 1, opts)
 		tbl, err := OpenTable(f, opts)
 		require.NoError(t, err)
@@ -46,17 +45,17 @@ func TestTableIndex(t *testing.T) {
 		// Normal mode.
 		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01})
 		// Encryption mode.
-		key := make([]byte, 32)
-		_, err := rand.Read(key)
-		require.NoError(t, err)
-		opts = append(opts, Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-			DataKey: &pb.DataKey{Data: key}})
-		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-			DataKey: &pb.DataKey{Data: key}})
-		// Compression mode.
-		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-			Compression: options.ZSTD})
-		keysCount := 2
+		// key := make([]byte, 32)
+		// _, err := rand.Read(key)
+		// require.NoError(t, err)
+		// opts = append(opts, Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+		// 	DataKey: &pb.DataKey{Data: key}})
+		// opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+		// 	DataKey: &pb.DataKey{Data: key}})
+		// // Compression mode.
+		// opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+		// 	Compression: options.ZSTD})
+		keysCount := 200
 		for _, opt := range opts {
 			builder := NewTableBuilder(opt)
 			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())

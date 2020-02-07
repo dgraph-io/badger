@@ -19,7 +19,9 @@ package table
 import (
 	"bytes"
 	"crypto/aes"
+	"fmt"
 	"math"
+	"sync"
 	"unsafe"
 
 	"github.com/dgryski/go-farm"
@@ -72,15 +74,53 @@ type Builder struct {
 	tableIndex   *pb.TableIndex
 	keyHashes    []uint64 // Used for building the bloomfilter.
 	opt          *Options
+	blockCh      chan *bblock
+	closer       *y.Closer
+	blockList    []*bblock
+	mu           sync.Mutex
 }
 
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
-	return &Builder{
+	b := &Builder{
 		buf:        make([]byte, 0, 1<<20),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
+		blockCh:    make(chan *bblock, 1000),
+		closer:     y.NewCloser(1),
+	}
+
+	go b.handleBlocks()
+	return b
+}
+
+func (b *Builder) handleBlocks() {
+	defer b.closer.Done()
+
+	for block := range b.blockCh {
+		b.mu.Lock()
+		data := block.data[block.start:block.end]
+		// Compress the block.
+		if b.opt.Compression != options.None {
+			var err error
+			// TODO: Find a way to reuse buffers. Current implementation creates a
+			// new buffer for each compressData call.
+			data, err = b.compressData(data)
+			y.Check(err)
+		}
+
+		if b.shouldEncrypt() {
+			eBlock, err := b.encrypt(data)
+			y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
+			data = eBlock
+		}
+
+		copy(b.buf[block.start:], data)
+		b.mu.Unlock()
+
+		block.end = block.start + uint32(len(data))
+		////b.buf = append(b.buf[:b.baseOffset], blockBuf...)
 	}
 }
 
@@ -137,6 +177,13 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	b.tableIndex.EstimatedSize += (sstSz + vpLen)
 }
 
+type bblock struct {
+	data  []byte
+	start uint32
+	end   uint32
+	done  bool
+}
+
 /*
 Structure of Block.
 +-------------------+---------------------+--------------------+--------------+------------------+
@@ -154,40 +201,32 @@ func (b *Builder) finishBlock() {
 	b.buf = append(b.buf, y.U32ToBytes(uint32(len(b.entryOffsets)))...)
 
 	b.writeChecksum(b.buf[b.baseOffset:])
-	blockBuf := b.buf[b.baseOffset:] // Store checksum for current block.
 
-	modified := false
-	// Compress the block.
-	if b.opt.Compression != options.None {
-		var err error
-		// TODO: Find a way to reuse buffers. Current implementation creates a
-		// new buffer for each compressData call.
-		blockBuf, err = b.compressData(b.buf[b.baseOffset:])
-		y.Check(err)
-		modified = true
-	}
-
+	// If encryptiong is enabled, add extra 16 bytes. This is to ensure that the encrypted data also fits in the original block.
 	if b.shouldEncrypt() {
-		eBlock, err := b.encrypt(blockBuf)
-		y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
-		blockBuf = eBlock
-		modified = true
+		b.buf = append(b.buf, make([]byte, 16)...)
 	}
 
-	if modified {
-		b.buf = append(b.buf[:b.baseOffset], blockBuf...)
+	block := &bblock{
+		data:  b.buf,
+		start: b.baseOffset,
+		end:   uint32(len(b.buf)),
 	}
 
-	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
-	// implement padding. This might be useful while using direct I/O.
-
-	// Add key to the block index
 	bo := &pb.BlockOffset{
 		Key:    y.Copy(b.baseKey),
 		Offset: b.baseOffset,
 		Len:    uint32(len(b.buf)) - b.baseOffset,
 	}
+
 	b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
+	b.blockList = append(b.blockList, block)
+	b.blockCh <- block
+
+	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
+	// implement padding. This might be useful while using direct I/O.
+
+	// Add key to the block index
 }
 
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
@@ -268,6 +307,20 @@ func (b *Builder) Finish() []byte {
 	b.tableIndex.BloomFilter = bf.JSONMarshal()
 
 	b.finishBlock() // This will never start a new block.
+
+	close(b.blockCh)
+
+	b.closer.Wait()
+	start := uint32(0)
+	fmt.Println("len b.buf", len(b.buf))
+	// Fix all the blocks
+	for _, block := range b.blockList {
+		fmt.Println("start and end", block.start, block.end)
+		copy(b.buf[start:], b.buf[block.start:block.end])
+		start += block.end
+	}
+
+	b.buf = b.buf[:start]
 
 	index, err := proto.Marshal(b.tableIndex)
 	y.Check(err)
