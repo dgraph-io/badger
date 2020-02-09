@@ -110,9 +110,10 @@ type Table struct {
 
 	Checksum []byte
 	// Stores the total size of key-values stored in this table (including the size on vlog).
-	estimatedSize uint64
-	indexStart    int
-	indexLen      int
+	estimatedSize  uint64
+	indexStart     int
+	indexLen       int
+	hasBloomFilter bool
 
 	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
 	opt        *Options
@@ -380,8 +381,9 @@ func (t *Table) readIndex() error {
 
 	t.estimatedSize = index.EstimatedSize
 	t.blockIndex = index.Offsets
+	t.hasBloomFilter = len(index.BloomFilter) > 0
 
-	if t.opt.LoadBloomsOnOpen {
+	if t.hasBloomFilter && t.opt.LoadBloomsOnOpen {
 		t.bfLock.Lock()
 		t.bf, _ = t.readBloomFilter()
 		t.bfLock.Unlock()
@@ -507,9 +509,12 @@ func (t *Table) Filename() string { return t.fd.Name() }
 // ID is the table's ID number (used to make the file name).
 func (t *Table) ID() uint64 { return t.id }
 
-// DoesNotHave returns true if (but not "only if") the table does not have the key hash.
+// DoesNotHave returns true if and only if the table does not have the key hash.
 // It does a bloom filter lookup.
 func (t *Table) DoesNotHave(hash uint64) bool {
+	if !t.hasBloomFilter {
+		return false
+	}
 	var bf *z.Bloom
 
 	// Return fast if the cache is absent.

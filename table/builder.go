@@ -372,12 +372,14 @@ The table structure looks like
 */
 // In case the data is encrypted, the "IV" is added to the end of the index.
 func (b *Builder) Finish() []byte {
-	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePositive)
-	for _, h := range b.keyHashes {
-		bf.Add(h)
+	if b.opt.BloomFalsePositive > 0 {
+		bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePositive)
+		for _, h := range b.keyHashes {
+			bf.Add(h)
+		}
+		// Add bloom filter to the index.
+		b.tableIndex.BloomFilter = bf.JSONMarshal()
 	}
-	// Add bloom filter to the index.
-	b.tableIndex.BloomFilter = bf.JSONMarshal()
 
 	b.finishBlock() // This will never start a new block.
 
