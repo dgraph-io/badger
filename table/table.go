@@ -381,7 +381,7 @@ func (t *Table) readIndex() error {
 	t.estimatedSize = index.EstimatedSize
 	t.blockIndex = index.Offsets
 
-	if t.opt.LoadBloomsOnOpen {
+	if t.indexLen > 0 && t.opt.LoadBloomsOnOpen {
 		t.bfLock.Lock()
 		t.bf, _ = t.readBloomFilter()
 		t.bfLock.Unlock()
@@ -507,9 +507,12 @@ func (t *Table) Filename() string { return t.fd.Name() }
 // ID is the table's ID number (used to make the file name).
 func (t *Table) ID() uint64 { return t.id }
 
-// DoesNotHave returns true if (but not "only if") the table does not have the key hash.
+// DoesNotHave returns true if and only if the table does not have the key hash.
 // It does a bloom filter lookup.
 func (t *Table) DoesNotHave(hash uint64) bool {
+	if t.indexLen == 0 {
+		return false
+	}
 	var bf *z.Bloom
 
 	// Return fast if the cache is absent.
