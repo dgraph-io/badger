@@ -1567,9 +1567,6 @@ func TestLSMOnly(t *testing.T) {
 	opts.ValueLogMaxEntries = 100
 	db, err := Open(opts)
 	require.NoError(t, err)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	value := make([]byte, 128)
 	_, err = rand.Read(value)
@@ -1581,9 +1578,7 @@ func TestLSMOnly(t *testing.T) {
 
 	db, err = Open(opts)
 	require.NoError(t, err)
-	if err != nil {
-		t.Fatal(err)
-	}
+
 	defer db.Close()
 	require.NoError(t, db.RunValueLogGC(0.2))
 }
