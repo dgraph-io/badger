@@ -797,9 +797,8 @@ func TestManagedDB(t *testing.T) {
 
 func TestArmV7Issue311Fix(t *testing.T) {
 	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir).
@@ -808,31 +807,21 @@ func TestArmV7Issue311Fix(t *testing.T) {
 		WithLevelOneSize(8 << 20).
 		WithMaxTableSize(2 << 20).
 		WithSyncWrites(false))
-	if err != nil {
-		t.Fatalf("cannot open db at location %s: %v", dir, err)
-	}
+
+	require.NoError(t, err)
 
 	err = db.View(func(txn *Txn) error { return nil })
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	err = db.Update(func(txn *Txn) error {
 		return txn.SetEntry(NewEntry([]byte{0x11}, []byte{0x22}))
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	err = db.Update(func(txn *Txn) error {
 		return txn.SetEntry(NewEntry([]byte{0x11}, []byte{0x22}))
 	})
 
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err = db.Close(); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
 }
