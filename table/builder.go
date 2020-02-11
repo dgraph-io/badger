@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"math"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -75,6 +76,7 @@ type bblock struct {
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf []byte
+	sz  int
 
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -95,15 +97,15 @@ type Builder struct {
 func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
 		// Additional 200 bytes to store index (approximate).
-		buf:        make([]byte, 0, opts.TableSize+MB*100),
+		buf:        make([]byte, opts.TableSize+MB*200),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
 		inChan:     make(chan *bblock, 1),
 	}
 
-	count := 1
-	b.inCloser.Add(1)
+	count := runtime.NumCPU()
+	b.inCloser.Add(count)
 	for i := 0; i < count; i++ {
 		go b.handleBlock(i)
 	}
@@ -143,7 +145,7 @@ func (b *Builder) handleBlock(i int) {
 func (b *Builder) Close() {}
 
 // Empty returns whether it's empty.
-func (b *Builder) Empty() bool { return len(b.buf) == 0 }
+func (b *Builder) Empty() bool { return b.sz == 0 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
 func (b *Builder) keyDiff(newKey []byte) []byte {
@@ -176,23 +178,31 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	}
 
 	// store current entry's offset
-	y.AssertTrue(uint32(len(b.buf)) < math.MaxUint32)
-	b.entryOffsets = append(b.entryOffsets, uint32(len(b.buf))-b.baseOffset)
+	y.AssertTrue(uint32(b.sz) < math.MaxUint32)
+	b.entryOffsets = append(b.entryOffsets, uint32(b.sz)-b.baseOffset)
 
 	//	fmt.Println("cap of b.buf", cap(b.buf[len(b.buf):]))
 
 	// Layout: header, diffKey, value.
-	b.buf = append(b.buf, h.Encode()...)
-	b.buf = append(b.buf, diffKey...)
+	b.append(h.Encode())
+	//b.buf = append(b.buf, h.Encode()...)
+	b.append(diffKey)
+	//b.buf = append(b.buf, diffKey...)
 
 	bb := &bytes.Buffer{}
 	v.EncodeTo(bb)
 
-	b.buf = append(b.buf, bb.Bytes()...)
+	b.append(bb.Bytes())
+	//b.buf = append(b.buf, bb.Bytes()...)
 	// Size of KV on SST.
 	sstSz := uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
 	// Total estimated size = size on SST + size on vlog (length of value pointer).
 	b.tableIndex.EstimatedSize += (sstSz + vpLen)
+}
+
+func (b *Builder) append(data []byte) {
+	copy(b.buf[b.sz:], data)
+	b.sz += len(data)
 }
 
 /*
@@ -210,8 +220,11 @@ Structure of Block.
 func (b *Builder) finishBlock() {
 	//copy(b.buf[len(b.buf):], y.U32SliceToBytes(b.entryOffsets))
 	//copy(b.buf[len(b.buf):], y.U32ToBytes(uint32(len(b.entryOffsets))))
-	b.buf = append(b.buf, y.U32SliceToBytes(b.entryOffsets)...)
-	b.buf = append(b.buf, y.U32ToBytes(uint32(len(b.entryOffsets)))...)
+	//b.buf = append(b.buf, y.U32SliceToBytes(b.entryOffsets)...)
+	//spew.Dump(b.entryOffsets)
+	b.append(y.U32SliceToBytes(b.entryOffsets))
+	//b.buf = append(b.buf, y.U32ToBytes(uint32(len(b.entryOffsets)))...)
+	b.append(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
 	//fmt.Println("cap ", len(b.buf), cap(b.buf))
 	b.writeChecksum(b.buf[b.baseOffset:])
@@ -222,11 +235,14 @@ func (b *Builder) finishBlock() {
 	// Add 30 bytes of empty space
 	//copy(b.buf[len(b.buf):], make([]byte, padding))
 	//fmt.Println("cap ", len(b.buf), cap(b.buf))
-	b.buf = append(b.buf, make([]byte, padding)...)
+
+	b.append(make([]byte, padding))
+	//b.buf = append(b.buf, make([]byte, padding)...)
 
 	// Add 30 bytes of empty space
 	//======================================================
-	block := &bblock{idx: b.idx, start: b.baseOffset, end: uint32(len(b.buf) - padding), data: b.buf}
+	//block := &bblock{idx: b.idx, start: b.baseOffset, end: uint32(len(b.buf) - padding), data: b.buf}
+	block := &bblock{idx: b.idx, start: b.baseOffset, end: uint32(b.sz - padding), data: b.buf}
 	b.idx++
 	b.blockList = append(b.blockList, block)
 
@@ -254,7 +270,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		4 + // size of list
 		8 + // Sum64 in checksum proto
 		4) // checksum length
-	estimatedSize := uint32(len(b.buf)) - b.baseOffset + uint32(6 /*header size for entry*/) +
+	estimatedSize := uint32(b.sz) - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 
 	if b.shouldEncrypt() {
@@ -271,8 +287,8 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
 		b.baseKey = []byte{}
-		y.AssertTrue(uint32(len(b.buf)) < math.MaxUint32)
-		b.baseOffset = uint32(len(b.buf))
+		y.AssertTrue(uint32(b.sz) < math.MaxUint32)
+		b.baseOffset = uint32((b.sz))
 		b.entryOffsets = b.entryOffsets[:0]
 	}
 	b.addHelper(key, value, uint64(valueLen))
@@ -286,7 +302,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	blocksSize := len(b.buf) + // length of current buffer
+	blocksSize := b.sz + // length of current buffer
 		len(b.entryOffsets)*4 + // all entry offsets size
 		4 + // count of all entry offsets
 		8 + // checksum bytes
@@ -341,11 +357,37 @@ func (b *Builder) Finish() []byte {
 		index, err = b.encrypt(index)
 		y.Check(err)
 	}
+	//b.append(index)
 	b.buf = append(b.buf, index...)
 	// Write index the file.
 	b.buf = append(b.buf, y.U32ToBytes(uint32(len(index)))...)
+	//b.append(y.U32ToBytes(uint32(len(index))))
 
-	b.writeChecksum(index)
+	//b.append(make([]byte, 10))
+	//b.writeChecksum(index)
+	// Build checksum for the index.
+	checksum := pb.Checksum{
+		// TODO: The checksum type should be configurable from the
+		// options.
+		// We chose to use CRC32 as the default option because
+		// it performed better compared to xxHash64.
+		// See the BenchmarkChecksum in table_test.go file
+		// Size     =>   1024 B        2048 B
+		// CRC32    => 63.7 ns/op     112 ns/op
+		// xxHash64 => 87.5 ns/op     158 ns/op
+		Sum:  y.CalculateChecksum(index, pb.Checksum_CRC32C),
+		Algo: pb.Checksum_CRC32C,
+	}
+
+	// Write checksum to the file.
+	chksum, err := proto.Marshal(&checksum)
+	y.Check(err)
+	b.buf = append(b.buf, chksum...)
+	//b.buf = append(b.buf, chksum...)
+
+	// Write checksum size.
+	//b.buf = append(b.buf, y.U32ToBytes(uint32(len(chksum)))...)
+	b.buf = append(b.buf, y.U32ToBytes(uint32(len(chksum)))...)
 	return b.buf
 }
 
@@ -367,10 +409,12 @@ func (b *Builder) writeChecksum(data []byte) {
 	// Write checksum to the file.
 	chksum, err := proto.Marshal(&checksum)
 	y.Check(err)
-	b.buf = append(b.buf, chksum...)
+	b.append(chksum)
+	//b.buf = append(b.buf, chksum...)
 
 	// Write checksum size.
-	b.buf = append(b.buf, y.U32ToBytes(uint32(len(chksum)))...)
+	//b.buf = append(b.buf, y.U32ToBytes(uint32(len(chksum)))...)
+	b.append(y.U32ToBytes(uint32(len(chksum))))
 }
 
 // DataKey returns datakey of the builder.

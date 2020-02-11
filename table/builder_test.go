@@ -32,7 +32,7 @@ import (
 
 func TestTableIndex(t *testing.T) {
 	rand.Seed(time.Now().Unix())
-	keysCount := 1000
+	keysCount := 100000
 	key := make([]byte, 32)
 	_, err := rand.Read(key)
 	require.NoError(t, err)
