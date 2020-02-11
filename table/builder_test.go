@@ -32,30 +32,39 @@ import (
 
 func TestTableIndex(t *testing.T) {
 	rand.Seed(time.Now().Unix())
-	keyPrefix := "key"
-	t.Run("single key", func(t *testing.T) {
-		opts := Options{Compression: options.ZSTD}
-		f := buildTestTable(t, keyPrefix, 1, opts)
-		tbl, err := OpenTable(f, opts)
-		require.NoError(t, err)
-		require.Len(t, tbl.blockIndex, 1)
-	})
+	keysCount := 1000
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	require.NoError(t, err)
+	subTest := []struct {
+		name string
+		opts Options
+	}{
+		{
+			name: "No encyption/compression",
+			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01},
+		},
+		{
+			// Encryption mode.
+			name: "Only encryption",
+			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, DataKey: &pb.DataKey{Data: key}},
+		},
+		{
+			// Compression mode.
+			name: "Only compression",
+			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, Compression: options.ZSTD},
+		},
+		{
+			// Compression mode and encryption.
+			name: "Compression and encryption",
+			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, Compression: options.ZSTD,
+				DataKey: &pb.DataKey{Data: key}},
+		},
+	}
 
-	t.Run("multiple keys", func(t *testing.T) {
-		opts := []Options{}
-		// Normal mode.
-		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01})
-		// Encryption mode.
-		key := make([]byte, 32)
-		_, err := rand.Read(key)
-		require.NoError(t, err)
-		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-			DataKey: &pb.DataKey{Data: key}})
-		// Compression mode.
-		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-			Compression: options.ZSTD})
-		keysCount := 2
-		for _, opt := range opts {
+	for _, tt := range subTest {
+		t.Run(tt.name, func(t *testing.T) {
+			opt := tt.opts
 			builder := NewTableBuilder(opt)
 			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
 			f, err := y.OpenSyncedFile(filename, true)
@@ -65,7 +74,7 @@ func TestTableIndex(t *testing.T) {
 			blockCount := 0
 			for i := 0; i < keysCount; i++ {
 				k := []byte(fmt.Sprintf("%016x", i))
-				v := make([]byte, 4<<10)
+				v := make([]byte, 10)
 				rand.Read(v)
 				//v := fmt.Sprintf("%d", i)
 				vs := y.ValueStruct{Value: []byte(v)}
@@ -96,8 +105,8 @@ func TestTableIndex(t *testing.T) {
 			}
 			f.Close()
 			require.NoError(t, os.RemoveAll(filename))
-		}
-	})
+		})
+	}
 }
 
 func TestInvalidCompression(t *testing.T) {

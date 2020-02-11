@@ -49,6 +49,9 @@ const intSize = int(unsafe.Sizeof(int(0)))
 type Options struct {
 	// Options for Opening/Building Table.
 
+	// Maximum size of the table
+	TableSize uint64
+
 	// ChkMode is the checksum verification mode for Table.
 	ChkMode options.ChecksumVerificationMode
 
@@ -427,24 +430,19 @@ func (t *Table) block(idx int) (*block, error) {
 	// Checksum length greater than block size could happen if the table was compressed and
 	// it was opened with an incorrect compression algorithm (or the data was corrupted).
 	if blk.chkLen > len(blk.data) {
-		return nil, errors.New("invalid checksum length. Either the data is" +
+		return nil, errors.New("invalid checksum length. Either the data is " +
 			"corrupted or the table options are incorrectly set")
 	}
 
-	fmt.Println("readpos", readPos)
 	// Read checksum and store it
 	readPos -= blk.chkLen
 	blk.checksum = blk.data[readPos : readPos+blk.chkLen]
 	// Move back and read numEntries in the block.
 	readPos -= 4
-	fmt.Println("readpos", readPos)
 	numEntries := int(y.BytesToU32(blk.data[readPos : readPos+4]))
-	fmt.Println("num entries", numEntries)
 	entriesIndexStart := readPos - (numEntries * 4)
-	fmt.Println("readpos", entriesIndexStart)
 	entriesIndexEnd := entriesIndexStart + numEntries*4
 
-	fmt.Println("readpos", entriesIndexEnd, entriesIndexStart)
 	blk.entryOffsets = y.BytesToU32Slice(blk.data[entriesIndexStart:entriesIndexEnd])
 
 	blk.entriesIndexStart = entriesIndexStart

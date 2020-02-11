@@ -60,13 +60,13 @@ func (itr *blockIterator) setIdx(i int) {
 	}
 	itr.err = nil
 	startOffset := int(itr.entryOffsets[i])
-
 	// Set base key.
 	if len(itr.baseKey) == 0 {
 		var baseHeader header
 		baseHeader.Decode(itr.data)
 		itr.baseKey = itr.data[headerSize : headerSize+baseHeader.diff]
 	}
+
 	var endOffset int
 	// idx points to the last entry in the block.
 	if itr.idx+1 == len(itr.entryOffsets) {

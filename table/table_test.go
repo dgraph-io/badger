@@ -356,7 +356,7 @@ func TestIterateBackAndForth(t *testing.T) {
 
 	it.seekToFirst()
 	k = it.Key()
-	require.EqualValues(t, key("key", 0), y.ParseKey(k))
+	require.EqualValues(t, key("key", 0), string(y.ParseKey(k)))
 }
 
 func TestUniIterator(t *testing.T) {

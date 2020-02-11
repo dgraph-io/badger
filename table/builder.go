@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"math"
+	"sync"
 	"unsafe"
 
 	"github.com/dgryski/go-farm"
@@ -61,6 +62,15 @@ func (h *header) Decode(buf []byte) {
 	copy(((*[headerSize]byte)(unsafe.Pointer(h))[:]), buf[:headerSize])
 }
 
+type bblock struct {
+	data  []byte
+	key   []byte
+	idx   int
+	start uint32
+	end   uint32
+	done  bool
+}
+
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
@@ -72,15 +82,60 @@ type Builder struct {
 	tableIndex   *pb.TableIndex
 	keyHashes    []uint64 // Used for building the bloomfilter.
 	opt          *Options
+
+	// Used to concurrently compress the blocks.
+	inCloser  sync.WaitGroup
+	length    uint32
+	idx       int
+	inChan    chan *bblock
+	blockList []*bblock
 }
 
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
-	return &Builder{
-		buf:        make([]byte, 0, 1<<20),
+	b := &Builder{
+		// Additional 200 bytes to store index (approximate).
+		buf:        make([]byte, 0, opts.TableSize+MB*100),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
+		inChan:     make(chan *bblock, 1),
+	}
+
+	count := 1
+	b.inCloser.Add(1)
+	for i := 0; i < count; i++ {
+		go b.handleBlock(i)
+	}
+	return b
+}
+
+func (b *Builder) handleBlock(i int) {
+	defer b.inCloser.Done()
+	for item := range b.inChan {
+		//		uid := uuid.New()
+		//		fmt.Println(uid, "-routine", i, "Processing", item.idx, "start", item.start, "with end", item.end)
+		// Extract the item
+		blockBuf := item.data[item.start:item.end]
+		// Compress the block.
+		if b.opt.Compression != options.None {
+			var err error
+			// TODO: Find a way to reuse buffers. Current implementation creates a
+			// new buffer for each compressData call.
+			blockBuf, err = b.compressData(blockBuf)
+			y.Check(err)
+		}
+		if b.shouldEncrypt() {
+			eBlock, err := b.encrypt(blockBuf)
+			y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
+			blockBuf = eBlock
+		}
+
+		// THIS IS IMPORTAN!!!!!
+		copy(b.buf[item.start:], blockBuf)
+
+		newend := item.start + uint32(len(blockBuf))
+		item.end = newend
 	}
 }
 
@@ -124,12 +179,15 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	y.AssertTrue(uint32(len(b.buf)) < math.MaxUint32)
 	b.entryOffsets = append(b.entryOffsets, uint32(len(b.buf))-b.baseOffset)
 
+	//	fmt.Println("cap of b.buf", cap(b.buf[len(b.buf):]))
+
 	// Layout: header, diffKey, value.
 	b.buf = append(b.buf, h.Encode()...)
 	b.buf = append(b.buf, diffKey...)
 
 	bb := &bytes.Buffer{}
 	v.EncodeTo(bb)
+
 	b.buf = append(b.buf, bb.Bytes()...)
 	// Size of KV on SST.
 	sstSz := uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
@@ -150,31 +208,27 @@ Structure of Block.
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
 func (b *Builder) finishBlock() {
+	//copy(b.buf[len(b.buf):], y.U32SliceToBytes(b.entryOffsets))
+	//copy(b.buf[len(b.buf):], y.U32ToBytes(uint32(len(b.entryOffsets))))
 	b.buf = append(b.buf, y.U32SliceToBytes(b.entryOffsets)...)
 	b.buf = append(b.buf, y.U32ToBytes(uint32(len(b.entryOffsets)))...)
 
+	//fmt.Println("cap ", len(b.buf), cap(b.buf))
+	b.writeChecksum(b.buf[b.baseOffset:])
+
 	blockBuf := b.buf[b.baseOffset:] // Store checksum for current block.
-	b.writeChecksum(blockBuf)
+	//fmt.Println("cap ", len(b.buf), cap(b.buf))
+	padding := 200
+	// Add 30 bytes of empty space
+	//copy(b.buf[len(b.buf):], make([]byte, padding))
+	//fmt.Println("cap ", len(b.buf), cap(b.buf))
+	b.buf = append(b.buf, make([]byte, padding)...)
 
-	// Compress the block.
-	if b.opt.Compression != options.None {
-		var err error
-		// TODO: Find a way to reuse buffers. Current implementation creates a
-		// new buffer for each compressData call.
-		blockBuf, err = b.compressData(b.buf[b.baseOffset:])
-		y.Check(err)
-	}
-	if b.shouldEncrypt() {
-		block := b.buf[b.baseOffset:]
-		eBlock, err := b.encrypt(block)
-		y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
-		blockBuf = eBlock
-	}
-
-	b.buf = append(b.buf[b.baseOffset:], blockBuf...)
-
-	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
-	// implement padding. This might be useful while using direct I/O.
+	// Add 30 bytes of empty space
+	//======================================================
+	block := &bblock{idx: b.idx, start: b.baseOffset, end: uint32(len(b.buf) - padding), data: b.buf}
+	b.idx++
+	b.blockList = append(b.blockList, block)
 
 	// Add key to the block index
 	bo := &pb.BlockOffset{
@@ -183,6 +237,8 @@ func (b *Builder) finishBlock() {
 		Len:    uint32(len(blockBuf)),
 	}
 	b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
+	// Push to the block handler.
+	b.inChan <- block
 }
 
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
@@ -264,6 +320,20 @@ func (b *Builder) Finish() []byte {
 
 	b.finishBlock() // This will never start a new block.
 
+	close(b.inChan)
+	// Wait for handler to finish
+	b.inCloser.Wait()
+
+	start := uint32(0)
+	for i, bl := range b.blockList {
+		b.tableIndex.Offsets[i].Len = bl.end - bl.start
+		b.tableIndex.Offsets[i].Offset = start
+
+		copy(b.buf[start:], b.buf[bl.start:bl.end])
+		start = bl.end
+	}
+	b.buf = b.buf[:start]
+
 	index, err := proto.Marshal(b.tableIndex)
 	y.Check(err)
 
@@ -273,7 +343,6 @@ func (b *Builder) Finish() []byte {
 	}
 	b.buf = append(b.buf, index...)
 	// Write index the file.
-
 	b.buf = append(b.buf, y.U32ToBytes(uint32(len(index)))...)
 
 	b.writeChecksum(index)
