@@ -32,7 +32,7 @@ import (
 
 func TestTableIndex(t *testing.T) {
 	rand.Seed(time.Now().Unix())
-	keysCount := 1000000
+	keysCount := 10000000
 	key := make([]byte, 32)
 	_, err := rand.Read(key)
 	require.NoError(t, err)
@@ -42,28 +42,29 @@ func TestTableIndex(t *testing.T) {
 	}{
 		{
 			name: "No encyption/compression",
-			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01},
+			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 200 << 20},
 		},
 		{
 			// Encryption mode.
 			name: "Only encryption",
-			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, DataKey: &pb.DataKey{Data: key}},
+			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 200 << 20, DataKey: &pb.DataKey{Data: key}},
 		},
 		{
 			// Compression mode.
 			name: "Only compression",
-			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, Compression: options.ZSTD, ZSTDCompressionLevel: 3},
+			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 200 << 20, Compression: options.ZSTD, ZSTDCompressionLevel: 3},
 		},
 		{
 			// Compression mode and encryption.
 			name: "Compression and encryption",
-			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, Compression: options.ZSTD,
+			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 200 << 20, Compression: options.ZSTD,
 				ZSTDCompressionLevel: 3, DataKey: &pb.DataKey{Data: key}},
 		},
 	}
 
 	for _, tt := range subTest {
 		t.Run(tt.name, func(t *testing.T) {
+			start := time.Now()
 			opt := tt.opts
 			builder := NewTableBuilder(opt)
 			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
@@ -103,6 +104,7 @@ func TestTableIndex(t *testing.T) {
 			}
 			f.Close()
 			require.NoError(t, os.RemoveAll(filename))
+			fmt.Println("time taken", time.Since(start))
 		})
 	}
 }
@@ -135,8 +137,12 @@ func BenchmarkBuilder(b *testing.B) {
 
 	keysCount := 1300000 // This number of entries consumes ~64MB of memory.
 
+	var keyList [][]byte
+	for i := 0; i < keysCount; i++ {
+		keyList = append(keyList, key(i))
+	}
 	bench := func(b *testing.B, opt *Options) {
-		// KeyCount * (keySize + ValSize)
+		b.ResetTimer()
 		b.SetBytes(int64(keysCount) * (32 + 32))
 		for i := 0; i < b.N; i++ {
 			opt.BlockSize = 4 * 1024
@@ -144,7 +150,7 @@ func BenchmarkBuilder(b *testing.B) {
 			builder := NewTableBuilder(*opt)
 
 			for i := 0; i < keysCount; i++ {
-				builder.Add(key(i), vs, 0)
+				builder.Add(keyList[i], vs, 0)
 			}
 
 			_ = builder.Finish()
