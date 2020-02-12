@@ -7,7 +7,6 @@ go:
   - tip
 os:
   - osx
-  - linux
 env:
   jobs:
   - GOARCH=386
@@ -20,10 +19,13 @@ jobs:
   allow_failures:
     - go: tip
   exclude:
-    # Exclude builds for 386 architecture on go 1.11 and 1.12
+    # Exclude builds for 386 architecture on go 1.11, 1.12 and tip
+    # Since we don't want it to run for 32 bit
     - go: "1.11"
       env: GOARCH=386
     - go: "1.12"
+      env: GOARCH=386
+    - go: tip
       env: GOARCH=386
 
 notifications:
