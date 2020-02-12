@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"crypto/aes"
 	"math"
-	"runtime"
 	"sync"
 	"unsafe"
 
@@ -77,6 +76,7 @@ type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf []byte
 	sz  int
+	bb  bytes.Buffer
 
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -101,10 +101,10 @@ func NewTableBuilder(opts Options) *Builder {
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
-		inChan:     make(chan *bblock, 1),
+		inChan:     make(chan *bblock, 1000),
 	}
 
-	count := runtime.NumCPU()
+	count := 4 //runtime.NumCPU()
 	b.inCloser.Add(count)
 	for i := 0; i < count; i++ {
 		go b.handleBlock(i)
@@ -189,8 +189,10 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	b.append(diffKey)
 	//b.buf = append(b.buf, diffKey...)
 
-	bb := &bytes.Buffer{}
+	bb := &b.bb
+	bb.Reset()
 	v.EncodeTo(bb)
+	//b.sz += v.EncodeTo1(b.buf, b.sz)
 
 	b.append(bb.Bytes())
 	//b.buf = append(b.buf, bb.Bytes()...)
