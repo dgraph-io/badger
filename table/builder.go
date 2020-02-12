@@ -19,8 +19,8 @@ package table
 import (
 	"bytes"
 	"crypto/aes"
+	"fmt"
 	"math"
-	"runtime"
 	"sync"
 	"unsafe"
 
@@ -104,7 +104,8 @@ func NewTableBuilder(opts Options) *Builder {
 		inChan:     make(chan *bblock, 1000),
 	}
 
-	count := runtime.NumCPU()
+	count := 1 //runtime.NumCPU()
+	fmt.Println("with count", count, "chanlen", cap(b.inChan))
 	b.inCloser.Add(count)
 	for i := 0; i < count; i++ {
 		go b.handleBlock(i)
@@ -344,6 +345,7 @@ func (b *Builder) Finish() []byte {
 	// Wait for handler to finish
 	b.inCloser.Wait()
 
+	//fmt.Println("num of blocks", len(b.tableIndex.Offsets))
 	start := uint32(0)
 	for i, bl := range b.blockList {
 		b.tableIndex.Offsets[i].Len = bl.end - bl.start
