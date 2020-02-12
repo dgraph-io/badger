@@ -19,6 +19,7 @@ package y
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 )
 
 // ValueStruct represents the value info that can be associated with a key, but also the internal
@@ -64,11 +65,13 @@ func (v *ValueStruct) Decode(b []byte) {
 }
 
 // Encode expects a slice of length at least v.EncodedSize().
-func (v *ValueStruct) Encode(b []byte) {
+func (v *ValueStruct) Encode(b []byte) int {
 	b[0] = v.Meta
 	b[1] = v.UserMeta
 	sz := binary.PutUvarint(b[2:], v.ExpiresAt)
-	copy(b[2+sz:], v.Value)
+	n := copy(b[2+sz:], v.Value)
+	//	fmt.Println("sz", 2+sz+n)
+	return 2 + sz + n
 }
 
 // EncodeTo should be kept in sync with the Encode function above. The reason
@@ -79,6 +82,7 @@ func (v *ValueStruct) EncodeTo(buf *bytes.Buffer) {
 	buf.WriteByte(v.UserMeta)
 	var enc [binary.MaxVarintLen64]byte
 	sz := binary.PutUvarint(enc[:], v.ExpiresAt)
+	fmt.Println("sz", sz)
 	buf.Write(enc[:sz])
 	buf.Write(v.Value)
 }

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"math"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -76,7 +77,6 @@ type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf []byte
 	sz  int
-	bb  bytes.Buffer
 
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -104,13 +104,15 @@ func NewTableBuilder(opts Options) *Builder {
 		inChan:     make(chan *bblock, 1000),
 	}
 
-	count := 4 //runtime.NumCPU()
+	count := runtime.NumCPU()
 	b.inCloser.Add(count)
 	for i := 0; i < count; i++ {
 		go b.handleBlock(i)
 	}
 	return b
 }
+
+var slicePool = sync.Pool{New: func() interface{} { return make([]byte, 0, 100) }}
 
 func (b *Builder) handleBlock(i int) {
 	defer b.inCloser.Done()
@@ -119,12 +121,15 @@ func (b *Builder) handleBlock(i int) {
 		//		fmt.Println(uid, "-routine", i, "Processing", item.idx, "start", item.start, "with end", item.end)
 		// Extract the item
 		blockBuf := item.data[item.start:item.end]
+		var dst []byte
 		// Compress the block.
 		if b.opt.Compression != options.None {
 			var err error
 			// TODO: Find a way to reuse buffers. Current implementation creates a
 			// new buffer for each compressData call.
-			blockBuf, err = b.compressData(blockBuf)
+			dst = slicePool.Get().([]byte)
+			dst = dst[:0]
+			blockBuf, err = b.compressData(dst, blockBuf)
 			y.Check(err)
 		}
 		if b.shouldEncrypt() {
@@ -135,6 +140,8 @@ func (b *Builder) handleBlock(i int) {
 
 		// THIS IS IMPORTAN!!!!!
 		copy(b.buf[item.start:], blockBuf)
+
+		slicePool.Put(dst)
 
 		newend := item.start + uint32(len(blockBuf))
 		item.end = newend
@@ -189,13 +196,8 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	b.append(diffKey)
 	//b.buf = append(b.buf, diffKey...)
 
-	bb := &b.bb
-	bb.Reset()
-	v.EncodeTo(bb)
-	//b.sz += v.EncodeTo1(b.buf, b.sz)
+	b.sz += v.Encode(b.buf[b.sz:])
 
-	b.append(bb.Bytes())
-	//b.buf = append(b.buf, bb.Bytes()...)
 	// Size of KV on SST.
 	sstSz := uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
 	// Total estimated size = size on SST + size on vlog (length of value pointer).
@@ -446,14 +448,14 @@ func (b *Builder) shouldEncrypt() bool {
 }
 
 // compressData compresses the given data.
-func (b *Builder) compressData(data []byte) ([]byte, error) {
+func (b *Builder) compressData(dst, data []byte) ([]byte, error) {
 	switch b.opt.Compression {
 	case options.None:
 		return data, nil
 	case options.Snappy:
-		return snappy.Encode(nil, data), nil
+		return snappy.Encode(dst, data), nil
 	case options.ZSTD:
-		return y.ZSTDCompress(nil, data, b.opt.ZSTDCompressionLevel)
+		return y.ZSTDCompress(dst, data, b.opt.ZSTDCompressionLevel)
 	}
 	return nil, errors.New("Unsupported compression type")
 }

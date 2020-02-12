@@ -32,7 +32,7 @@ import (
 
 func TestTableIndex(t *testing.T) {
 	rand.Seed(time.Now().Unix())
-	keysCount := 100000
+	keysCount := 1000000
 	key := make([]byte, 32)
 	_, err := rand.Read(key)
 	require.NoError(t, err)
@@ -52,13 +52,13 @@ func TestTableIndex(t *testing.T) {
 		{
 			// Compression mode.
 			name: "Only compression",
-			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, Compression: options.ZSTD},
+			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, Compression: options.ZSTD, ZSTDCompressionLevel: 3},
 		},
 		{
 			// Compression mode and encryption.
 			name: "Compression and encryption",
 			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, Compression: options.ZSTD,
-				DataKey: &pb.DataKey{Data: key}},
+				ZSTDCompressionLevel: 3, DataKey: &pb.DataKey{Data: key}},
 		},
 	}
 
@@ -74,9 +74,7 @@ func TestTableIndex(t *testing.T) {
 			blockCount := 0
 			for i := 0; i < keysCount; i++ {
 				k := []byte(fmt.Sprintf("%016x", i))
-				v := make([]byte, 10)
-				rand.Read(v)
-				//v := fmt.Sprintf("%d", i)
+				v := fmt.Sprintf("%d", i)
 				vs := y.ValueStruct{Value: []byte(v)}
 				if i == 0 { // This is first key for first block.
 					blockFirstKeys = append(blockFirstKeys, k)
