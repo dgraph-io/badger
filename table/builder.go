@@ -227,9 +227,9 @@ func (b *Builder) finishBlock() {
 	b.append(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
 	//fmt.Println("cap ", len(b.buf), cap(b.buf))
-	b.writeChecksum(b.buf[b.baseOffset:])
+	b.writeChecksum(b.buf[b.baseOffset:b.sz])
 
-	blockBuf := b.buf[b.baseOffset:] // Store checksum for current block.
+	blockBuf := b.buf[b.baseOffset:b.sz] // Store checksum for current block.
 	//fmt.Println("cap ", len(b.buf), cap(b.buf))
 	padding := 200
 	// Add 30 bytes of empty space
