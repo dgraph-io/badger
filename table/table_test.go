@@ -35,11 +35,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const (
-	KB = 1024
-	MB = KB * 1024
-)
-
 func key(prefix string, i int) string {
 	return prefix + fmt.Sprintf("%04d", i)
 }

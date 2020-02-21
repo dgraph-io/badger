@@ -35,6 +35,11 @@ import (
 	"github.com/dgraph-io/ristretto/z"
 )
 
+const (
+	KB = 1024
+	MB = KB * 1024
+)
+
 func newBuffer(sz int) *bytes.Buffer {
 	b := new(bytes.Buffer)
 	b.Grow(sz)
@@ -66,10 +71,8 @@ func (h *header) Decode(buf []byte) {
 type bblock struct {
 	data  []byte
 	key   []byte
-	idx   int
-	start uint32
-	end   uint32
-	done  bool
+	start uint32 // Points to the starting offset of the block.
+	end   uint32 // Points to the end offset of the block.
 }
 
 // Builder is used in building a table.
@@ -85,11 +88,9 @@ type Builder struct {
 	keyHashes    []uint64 // Used for building the bloomfilter.
 	opt          *Options
 
-	// Used to concurrently compress the blocks.
-	inCloser  sync.WaitGroup
-	length    uint32
-	idx       int
-	inChan    chan *bblock
+	// Used to concurrently compress/encrypt blocks.
+	wg        sync.WaitGroup
+	blockChan chan *bblock
 	blockList []*bblock
 }
 
@@ -97,21 +98,23 @@ type Builder struct {
 func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
 		// Additional 200 bytes to store index (approximate).
+		// We trim the additional space in table.Finish().
 		buf:        make([]byte, opts.TableSize+MB*200),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
 	}
 
-	// If encryption or compression is not enabled, write directly to the buffer.
+	// If encryption or compression is not enabled, do not start compression/encryption goroutines
+	// and write directly to the buffer.
 	if b.opt.Compression == options.None && b.opt.DataKey == nil {
 		return b
 	}
 
-	b.inChan = make(chan *bblock, 1000)
+	b.blockChan = make(chan *bblock, 1000)
+
 	count := runtime.NumCPU()
-	//fmt.Println("with count", count, "chanlen", cap(b.inChan))
-	b.inCloser.Add(count)
+	b.wg.Add(count)
 	for i := 0; i < count; i++ {
 		go b.handleBlock(i)
 	}
@@ -121,20 +124,18 @@ func NewTableBuilder(opts Options) *Builder {
 var slicePool = sync.Pool{New: func() interface{} { return make([]byte, 0, 100) }}
 
 func (b *Builder) handleBlock(i int) {
-	defer b.inCloser.Done()
-	for item := range b.inChan {
-		//		uid := uuid.New()
-		//		fmt.Println(uid, "-routine", i, "Processing", item.idx, "start", item.start, "with end", item.end)
+	defer b.wg.Done()
+	for item := range b.blockChan {
 		// Extract the item
 		blockBuf := item.data[item.start:item.end]
 		var dst []byte
 		// Compress the block.
 		if b.opt.Compression != options.None {
 			var err error
-			// TODO: Find a way to reuse buffers. Current implementation creates a
-			// new buffer for each compressData call.
+
 			dst = slicePool.Get().([]byte)
 			dst = dst[:0]
+
 			blockBuf, err = b.compressData(dst, blockBuf)
 			y.Check(err)
 		}
@@ -144,7 +145,7 @@ func (b *Builder) handleBlock(i int) {
 			blockBuf = eBlock
 		}
 
-		// THIS IS IMPORTAN!!!!!
+		// Copy over compressed/encrypted data back to the main buffer.
 		copy(b.buf[item.start:], blockBuf)
 
 		slicePool.Put(dst)
@@ -194,13 +195,9 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	y.AssertTrue(uint32(b.sz) < math.MaxUint32)
 	b.entryOffsets = append(b.entryOffsets, uint32(b.sz)-b.baseOffset)
 
-	//	fmt.Println("cap of b.buf", cap(b.buf[len(b.buf):]))
-
 	// Layout: header, diffKey, value.
 	b.append(h.Encode())
-	//b.buf = append(b.buf, h.Encode()...)
 	b.append(diffKey)
-	//b.buf = append(b.buf, diffKey...)
 
 	b.sz += v.Encode(b.buf[b.sz:])
 
@@ -213,6 +210,10 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 func (b *Builder) append(data []byte) {
 	copy(b.buf[b.sz:], data)
 	b.sz += len(data)
+}
+
+func (b *Builder) addPadding(sz int) {
+	b.sz += sz
 }
 
 /*
@@ -228,53 +229,41 @@ Structure of Block.
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
 func (b *Builder) finishBlock() {
-	//copy(b.buf[len(b.buf):], y.U32SliceToBytes(b.entryOffsets))
-	//copy(b.buf[len(b.buf):], y.U32ToBytes(uint32(len(b.entryOffsets))))
-	//b.buf = append(b.buf, y.U32SliceToBytes(b.entryOffsets)...)
-	//spew.Dump(b.entryOffsets)
 	b.append(y.U32SliceToBytes(b.entryOffsets))
-	//b.buf = append(b.buf, y.U32ToBytes(uint32(len(b.entryOffsets)))...)
 	b.append(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
-	//fmt.Println("cap ", len(b.buf), cap(b.buf))
 	b.writeChecksum(b.buf[b.baseOffset:b.sz])
 
-	blockBuf := b.buf[b.baseOffset:b.sz] // Store checksum for current block.
-	if b.opt.Compression == options.None && b.opt.DataKey == nil {
-		// Add key to the block index
-		bo := &pb.BlockOffset{
-			Key:    y.Copy(b.baseKey),
-			Offset: b.baseOffset,
-			Len:    uint32(len(blockBuf)),
-		}
-		b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
+	// If compression/encryption is disabled, no need to send the block to the blockChan.
+	// There's nothing to be done.
+	if b.blockChan == nil {
+		b.addBlockToIndex()
 		return
 	}
+
+	// When a block is encrypted, it's length increases. We add 200 bytes to padding to
+	// handle cases when block size increases.
 	padding := 200
-	//fmt.Println("cap ", len(b.buf), cap(b.buf))
-	// Add 30 bytes of empty space
-	//copy(b.buf[len(b.buf):], make([]byte, padding))
-	//fmt.Println("cap ", len(b.buf), cap(b.buf))
+	b.addPadding(padding)
 
-	b.append(make([]byte, padding))
-	//b.buf = append(b.buf, make([]byte, padding)...)
-
-	// Add 30 bytes of empty space
-	//======================================================
-	//block := &bblock{idx: b.idx, start: b.baseOffset, end: uint32(len(b.buf) - padding), data: b.buf}
-	block := &bblock{idx: b.idx, start: b.baseOffset, end: uint32(b.sz - padding), data: b.buf}
-	b.idx++
+	// Block end is the actual end of the block ignoring the padding.
+	block := &bblock{start: b.baseOffset, end: uint32(b.sz - padding), data: b.buf}
 	b.blockList = append(b.blockList, block)
 
-	// Add key to the block index
+	b.addBlockToIndex()
+	// Push to the block handler.
+	b.blockChan <- block
+}
+
+func (b *Builder) addBlockToIndex() {
+	blockBuf := b.buf[b.baseOffset:b.sz]
+	// Add key to the block index.
 	bo := &pb.BlockOffset{
 		Key:    y.Copy(b.baseKey),
 		Offset: b.baseOffset,
 		Len:    uint32(len(blockBuf)),
 	}
 	b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
-	// Push to the block handler.
-	b.inChan <- block
 }
 
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
@@ -356,21 +345,24 @@ func (b *Builder) Finish() []byte {
 
 	b.finishBlock() // This will never start a new block.
 
-	if b.inChan != nil {
-		close(b.inChan)
+	if b.blockChan != nil {
+		close(b.blockChan)
 	}
-	// Wait for handler to finish
-	b.inCloser.Wait()
+	// Wait for block handler to finish.
+	b.wg.Wait()
 
-	//fmt.Println("num of blocks", len(b.tableIndex.Offsets))
+	// Fix block boundaries. This includes moving the blocks so that we
+	// don't have any interleaving space between them.
 	if len(b.blockList) > 0 {
 		start := uint32(0)
 		for i, bl := range b.blockList {
+			// Length of the block is start minues the end.
 			b.tableIndex.Offsets[i].Len = bl.end - bl.start
 			b.tableIndex.Offsets[i].Offset = start
 
+			// Copy over the block to the corrent position in the main buffer.
 			copy(b.buf[start:], b.buf[bl.start:bl.end])
-			start = bl.end
+			start = b.tableIndex.Offsets[i].Offset + b.tableIndex.Offsets[i].Len
 		}
 		b.buf = b.buf[:start]
 	}
@@ -382,24 +374,12 @@ func (b *Builder) Finish() []byte {
 		index, err = b.encrypt(index)
 		y.Check(err)
 	}
-	//b.append(index)
 	b.buf = append(b.buf, index...)
-	// Write index the file.
+	// Write index the buffer.
 	b.buf = append(b.buf, y.U32ToBytes(uint32(len(index)))...)
-	//b.append(y.U32ToBytes(uint32(len(index))))
 
-	//b.append(make([]byte, 10))
-	//b.writeChecksum(index)
 	// Build checksum for the index.
 	checksum := pb.Checksum{
-		// TODO: The checksum type should be configurable from the
-		// options.
-		// We chose to use CRC32 as the default option because
-		// it performed better compared to xxHash64.
-		// See the BenchmarkChecksum in table_test.go file
-		// Size     =>   1024 B        2048 B
-		// CRC32    => 63.7 ns/op     112 ns/op
-		// xxHash64 => 87.5 ns/op     158 ns/op
 		Sum:  y.CalculateChecksum(index, pb.Checksum_CRC32C),
 		Algo: pb.Checksum_CRC32C,
 	}
@@ -408,10 +388,8 @@ func (b *Builder) Finish() []byte {
 	chksum, err := proto.Marshal(&checksum)
 	y.Check(err)
 	b.buf = append(b.buf, chksum...)
-	//b.buf = append(b.buf, chksum...)
 
 	// Write checksum size.
-	//b.buf = append(b.buf, y.U32ToBytes(uint32(len(chksum)))...)
 	b.buf = append(b.buf, y.U32ToBytes(uint32(len(chksum)))...)
 	return b.buf
 }
