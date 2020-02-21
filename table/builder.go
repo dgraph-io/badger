@@ -97,9 +97,9 @@ type Builder struct {
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
-		// Additional 200 bytes to store index (approximate).
+		// Additional 2 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
-		buf:        make([]byte, opts.TableSize+MB*200),
+		buf:        make([]byte, opts.TableSize+MB*2),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
