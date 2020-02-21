@@ -19,8 +19,8 @@ package table
 import (
 	"bytes"
 	"crypto/aes"
-	"fmt"
 	"math"
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -101,11 +101,16 @@ func NewTableBuilder(opts Options) *Builder {
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
-		inChan:     make(chan *bblock, 1000),
 	}
 
-	count := 1 //runtime.NumCPU()
-	fmt.Println("with count", count, "chanlen", cap(b.inChan))
+	// If encryption or compression is not enabled, write directly to the buffer.
+	if b.opt.Compression == options.None && b.opt.DataKey == nil {
+		return b
+	}
+
+	b.inChan = make(chan *bblock, 1000)
+	count := runtime.NumCPU()
+	//fmt.Println("with count", count, "chanlen", cap(b.inChan))
 	b.inCloser.Add(count)
 	for i := 0; i < count; i++ {
 		go b.handleBlock(i)
@@ -235,8 +240,18 @@ func (b *Builder) finishBlock() {
 	b.writeChecksum(b.buf[b.baseOffset:b.sz])
 
 	blockBuf := b.buf[b.baseOffset:b.sz] // Store checksum for current block.
-	//fmt.Println("cap ", len(b.buf), cap(b.buf))
+	if b.opt.Compression == options.None && b.opt.DataKey == nil {
+		// Add key to the block index
+		bo := &pb.BlockOffset{
+			Key:    y.Copy(b.baseKey),
+			Offset: b.baseOffset,
+			Len:    uint32(len(blockBuf)),
+		}
+		b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
+		return
+	}
 	padding := 200
+	//fmt.Println("cap ", len(b.buf), cap(b.buf))
 	// Add 30 bytes of empty space
 	//copy(b.buf[len(b.buf):], make([]byte, padding))
 	//fmt.Println("cap ", len(b.buf), cap(b.buf))
@@ -341,20 +356,24 @@ func (b *Builder) Finish() []byte {
 
 	b.finishBlock() // This will never start a new block.
 
-	close(b.inChan)
+	if b.inChan != nil {
+		close(b.inChan)
+	}
 	// Wait for handler to finish
 	b.inCloser.Wait()
 
 	//fmt.Println("num of blocks", len(b.tableIndex.Offsets))
-	start := uint32(0)
-	for i, bl := range b.blockList {
-		b.tableIndex.Offsets[i].Len = bl.end - bl.start
-		b.tableIndex.Offsets[i].Offset = start
+	if len(b.blockList) > 0 {
+		start := uint32(0)
+		for i, bl := range b.blockList {
+			b.tableIndex.Offsets[i].Len = bl.end - bl.start
+			b.tableIndex.Offsets[i].Offset = start
 
-		copy(b.buf[start:], b.buf[bl.start:bl.end])
-		start = bl.end
+			copy(b.buf[start:], b.buf[bl.start:bl.end])
+			start = bl.end
+		}
+		b.buf = b.buf[:start]
 	}
-	b.buf = b.buf[:start]
 
 	index, err := proto.Marshal(b.tableIndex)
 	y.Check(err)

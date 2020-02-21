@@ -149,8 +149,8 @@ func BenchmarkBuilder(b *testing.B) {
 			opt.BloomFalsePositive = 0.01
 			builder := NewTableBuilder(*opt)
 
-			for i := 0; i < keysCount; i++ {
-				builder.Add(keyList[i], vs, 0)
+			for j := 0; j < keysCount; j++ {
+				builder.Add(keyList[j], vs, 0)
 			}
 
 			_ = builder.Finish()
