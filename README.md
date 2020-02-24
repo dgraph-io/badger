@@ -240,7 +240,7 @@ on it.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42"))
+  e := badger.NewEntry([]byte("answer"), []byte("42"))
   err := txn.SetEntry(e)
   return err
 })
@@ -389,7 +389,7 @@ and `Txn.SetEntry()` API methods.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42")).WithTTL(time.Hour)
+  e := badger.NewEntry([]byte("answer"), []byte("42")).WithTTL(time.Hour)
   err := txn.SetEntry(e)
   return err
 })
@@ -402,7 +402,7 @@ metadata can be set using `Entry.WithMeta()` and `Txn.SetEntry()` API methods.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1))
+  e := badger.NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1))
   err := txn.SetEntry(e)
   return err
 })
@@ -413,7 +413,7 @@ then can be set using `Txn.SetEntry()`.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1)).WithTTL(time.Hour)
+  e := badger.NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1)).WithTTL(time.Hour)
   err := txn.SetEntry(e)
   return err
 })
