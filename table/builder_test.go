@@ -42,22 +42,22 @@ func TestTableIndex(t *testing.T) {
 	}{
 		{
 			name: "No encyption/compression",
-			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 200 << 20},
+			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 30 << 20},
 		},
 		{
 			// Encryption mode.
 			name: "Only encryption",
-			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 200 << 20, DataKey: &pb.DataKey{Data: key}},
+			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 30 << 20, DataKey: &pb.DataKey{Data: key}},
 		},
 		{
 			// Compression mode.
 			name: "Only compression",
-			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 200 << 20, Compression: options.ZSTD, ZSTDCompressionLevel: 3},
+			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 30 << 20, Compression: options.ZSTD, ZSTDCompressionLevel: 3},
 		},
 		{
 			// Compression mode and encryption.
 			name: "Compression and encryption",
-			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 200 << 20, Compression: options.ZSTD,
+			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 30 << 20, Compression: options.ZSTD,
 				ZSTDCompressionLevel: 3, DataKey: &pb.DataKey{Data: key}},
 		},
 	}
@@ -142,19 +142,19 @@ func BenchmarkBuilder(b *testing.B) {
 		keyList = append(keyList, key(i))
 	}
 	bench := func(b *testing.B, opt *Options) {
-		b.ResetTimer()
 		b.SetBytes(int64(keysCount) * (32 + 32))
+		opt.BlockSize = 4 * 1024
+		opt.BloomFalsePositive = 0.01
+		// TODO: Fix this. The size is dependant on benchtime and keycounts.
+		opt.TableSize = 5 << 30
+		builder := NewTableBuilder(*opt)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			opt.BlockSize = 4 * 1024
-			opt.BloomFalsePositive = 0.01
-			builder := NewTableBuilder(*opt)
-
 			for j := 0; j < keysCount; j++ {
 				builder.Add(keyList[j], vs, 0)
 			}
-
-			_ = builder.Finish()
 		}
+		_ = builder.Finish()
 	}
 
 	b.Run("no compression", func(b *testing.B) {

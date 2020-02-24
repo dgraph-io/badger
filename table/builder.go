@@ -116,14 +116,14 @@ func NewTableBuilder(opts Options) *Builder {
 	count := runtime.NumCPU()
 	b.wg.Add(count)
 	for i := 0; i < count; i++ {
-		go b.handleBlock(i)
+		go b.handleBlock()
 	}
 	return b
 }
 
 var slicePool = sync.Pool{New: func() interface{} { return make([]byte, 0, 100) }}
 
-func (b *Builder) handleBlock(i int) {
+func (b *Builder) handleBlock() {
 	defer b.wg.Done()
 	for item := range b.blockChan {
 		// Extract the item
@@ -360,11 +360,12 @@ func (b *Builder) Finish() []byte {
 			b.tableIndex.Offsets[i].Len = bl.end - bl.start
 			b.tableIndex.Offsets[i].Offset = start
 
-			// Copy over the block to the corrent position in the main buffer.
+			// Copy over the block to the current position in the main buffer.
 			copy(b.buf[start:], b.buf[bl.start:bl.end])
 			start = b.tableIndex.Offsets[i].Offset + b.tableIndex.Offsets[i].Len
 		}
-		b.buf = b.buf[:start]
+		// Start writing to the buffer from the point until which we have valid data
+		b.sz = int(start)
 	}
 
 	index, err := proto.Marshal(b.tableIndex)
@@ -374,24 +375,12 @@ func (b *Builder) Finish() []byte {
 		index, err = b.encrypt(index)
 		y.Check(err)
 	}
-	b.buf = append(b.buf, index...)
 	// Write index the buffer.
-	b.buf = append(b.buf, y.U32ToBytes(uint32(len(index)))...)
+	b.append(index)
+	b.append(y.U32ToBytes(uint32(len(index))))
 
-	// Build checksum for the index.
-	checksum := pb.Checksum{
-		Sum:  y.CalculateChecksum(index, pb.Checksum_CRC32C),
-		Algo: pb.Checksum_CRC32C,
-	}
-
-	// Write checksum to the file.
-	chksum, err := proto.Marshal(&checksum)
-	y.Check(err)
-	b.buf = append(b.buf, chksum...)
-
-	// Write checksum size.
-	b.buf = append(b.buf, y.U32ToBytes(uint32(len(chksum)))...)
-	return b.buf
+	b.writeChecksum(index)
+	return b.buf[:b.sz]
 }
 
 func (b *Builder) writeChecksum(data []byte) {
@@ -413,10 +402,8 @@ func (b *Builder) writeChecksum(data []byte) {
 	chksum, err := proto.Marshal(&checksum)
 	y.Check(err)
 	b.append(chksum)
-	//b.buf = append(b.buf, chksum...)
 
 	// Write checksum size.
-	//b.buf = append(b.buf, y.U32ToBytes(uint32(len(chksum)))...)
 	b.append(y.U32ToBytes(uint32(len(chksum))))
 }
 
