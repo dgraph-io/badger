@@ -49,7 +49,7 @@ const intSize = int(unsafe.Sizeof(int(0)))
 type Options struct {
 	// Options for Opening/Building Table.
 
-	// Maximum size of the table
+	// Maximum size of the table.
 	TableSize uint64
 
 	// ChkMode is the checksum verification mode for Table.

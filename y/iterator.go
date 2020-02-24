@@ -19,7 +19,6 @@ package y
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 )
 
 // ValueStruct represents the value info that can be associated with a key, but also the internal
@@ -70,7 +69,6 @@ func (v *ValueStruct) Encode(b []byte) int {
 	b[1] = v.UserMeta
 	sz := binary.PutUvarint(b[2:], v.ExpiresAt)
 	n := copy(b[2+sz:], v.Value)
-	//	fmt.Println("sz", 2+sz+n)
 	return 2 + sz + n
 }
 
@@ -82,7 +80,7 @@ func (v *ValueStruct) EncodeTo(buf *bytes.Buffer) {
 	buf.WriteByte(v.UserMeta)
 	var enc [binary.MaxVarintLen64]byte
 	sz := binary.PutUvarint(enc[:], v.ExpiresAt)
-	fmt.Println("sz", sz)
+
 	buf.Write(enc[:sz])
 	buf.Write(v.Value)
 }

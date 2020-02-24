@@ -42,29 +42,49 @@ func TestTableIndex(t *testing.T) {
 	}{
 		{
 			name: "No encyption/compression",
-			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 30 << 20},
+			opts: Options{
+				BlockSize:          4 * 1024,
+				BloomFalsePositive: 0.01,
+				TableSize:          30 << 20,
+			},
 		},
 		{
 			// Encryption mode.
 			name: "Only encryption",
-			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 30 << 20, DataKey: &pb.DataKey{Data: key}},
+			opts: Options{
+				BlockSize:          4 * 1024,
+				BloomFalsePositive: 0.01,
+				TableSize:          30 << 20,
+				DataKey:            &pb.DataKey{Data: key},
+			},
 		},
 		{
 			// Compression mode.
 			name: "Only compression",
-			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 30 << 20, Compression: options.ZSTD, ZSTDCompressionLevel: 3},
+			opts: Options{
+				BlockSize:            4 * 1024,
+				BloomFalsePositive:   0.01,
+				TableSize:            30 << 20,
+				Compression:          options.ZSTD,
+				ZSTDCompressionLevel: 3,
+			},
 		},
 		{
 			// Compression mode and encryption.
 			name: "Compression and encryption",
-			opts: Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01, TableSize: 30 << 20, Compression: options.ZSTD,
-				ZSTDCompressionLevel: 3, DataKey: &pb.DataKey{Data: key}},
+			opts: Options{
+				BlockSize:            4 * 1024,
+				BloomFalsePositive:   0.01,
+				TableSize:            30 << 20,
+				Compression:          options.ZSTD,
+				ZSTDCompressionLevel: 3,
+				DataKey:              &pb.DataKey{Data: key},
+			},
 		},
 	}
 
 	for _, tt := range subTest {
 		t.Run(tt.name, func(t *testing.T) {
-			start := time.Now()
 			opt := tt.opts
 			builder := NewTableBuilder(opt)
 			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
@@ -92,7 +112,7 @@ func TestTableIndex(t *testing.T) {
 			tbl, err := OpenTable(f, opt)
 			require.NoError(t, err)
 			if opt.DataKey == nil {
-				// key id is zero if thre is no datakey.
+				// key id is zero if there is no datakey.
 				require.Equal(t, tbl.KeyID(), uint64(0))
 			}
 			require.NoError(t, err, "unable to open table")
@@ -104,7 +124,6 @@ func TestTableIndex(t *testing.T) {
 			}
 			f.Close()
 			require.NoError(t, os.RemoveAll(filename))
-			fmt.Println("time taken", time.Since(start))
 		})
 	}
 }

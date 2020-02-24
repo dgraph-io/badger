@@ -60,6 +60,7 @@ func (itr *blockIterator) setIdx(i int) {
 	}
 	itr.err = nil
 	startOffset := int(itr.entryOffsets[i])
+
 	// Set base key.
 	if len(itr.baseKey) == 0 {
 		var baseHeader header
