@@ -1061,13 +1061,15 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	return nil
 }
 
-func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
+// init initializes the value log struct. This initialization needs to happen
+// before compactions start.
+func (vlog *valueLog) init(db *DB) {
 	vlog.opt = db.opt
 	vlog.db = db
 	// We don't need to open any vlog files or collect stats for GC if DB is opened
 	// in InMemory mode. InMemory mode doesn't create any files/directories on disk.
 	if vlog.opt.InMemory {
-		return nil
+		return
 	}
 	vlog.dirPath = vlog.opt.ValueDir
 	vlog.elog = y.NoEventLog
@@ -1080,6 +1082,15 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		closer:    y.NewCloser(1),
 		flushChan: make(chan map[uint32]int64, 16),
 	}
+}
+
+func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
+	// We don't need to open any vlog files or collect stats for GC if DB is opened
+	// in InMemory mode. InMemory mode doesn't create any files/directories on disk.
+	if db.opt.InMemory {
+		return nil
+	}
+
 	go vlog.flushDiscardStats()
 	if err := vlog.populateFilesMap(); err != nil {
 		return err

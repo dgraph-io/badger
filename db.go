@@ -331,6 +331,19 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, err
 	}
 
+	// Initialize vlog struct.
+	db.vlog.init(db)
+
+	if !opt.ReadOnly {
+		db.closers.compactors = y.NewCloser(1)
+		db.lc.startCompact(db.closers.compactors)
+
+		db.closers.memtable = y.NewCloser(1)
+		go func() {
+			_ = db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
+		}()
+	}
+
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
 	vs, err := db.get(headKey)
@@ -350,16 +363,6 @@ func Open(opt Options) (db *DB, err error) {
 		return db, y.Wrapf(err, "During db.vlog.open")
 	}
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
-
-	if !opt.ReadOnly {
-		db.closers.compactors = y.NewCloser(1)
-		db.lc.startCompact(db.closers.compactors)
-
-		db.closers.memtable = y.NewCloser(1)
-		go func() {
-			_ = db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
-		}()
-	}
 
 	// Let's advance nextTxnTs to one more than whatever we observed via
 	// replaying the logs.
