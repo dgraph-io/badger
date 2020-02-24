@@ -80,11 +80,11 @@ func TestTableIndex(t *testing.T) {
 			require.NoError(t, err, "unable to write to file")
 
 			tbl, err := OpenTable(f, opt)
+			require.NoError(t, err, "unable to open table")
 			if opt.DataKey == nil {
 				// key id is zero if thre is no datakey.
 				require.Equal(t, tbl.KeyID(), uint64(0))
 			}
-			require.NoError(t, err, "unable to open table")
 
 			// Ensure index is built correctly
 			require.Equal(t, blockCount, len(tbl.blockIndex))

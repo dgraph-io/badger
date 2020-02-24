@@ -393,7 +393,7 @@ func TestDiscardTs(t *testing.T) {
 func TestDiscardFirstVersion(t *testing.T) {
 	opt := DefaultOptions("")
 	opt.NumCompactors = 0
-	opt.NumVersionsToKeep = math.MaxUint32
+	opt.NumVersionsToKeep = math.MaxInt32
 	opt.managedTxns = true
 
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
