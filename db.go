@@ -146,7 +146,8 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			ExpiresAt: e.ExpiresAt,
 		}
 
-		if e.meta&bitFinTxn > 0 {
+		switch {
+		case e.meta&bitFinTxn > 0:
 			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
 			if err != nil {
 				return errors.Wrapf(err, "Unable to parse txn fin: %q", e.Value)
@@ -160,7 +161,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			txn = txn[:0]
 			lastCommit = 0
 
-		} else if e.meta&bitTxn > 0 {
+		case e.meta&bitTxn > 0:
 			txnTs := y.ParseTs(nk)
 			if lastCommit == 0 {
 				lastCommit = txnTs
@@ -174,7 +175,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			te := txnEntry{nk: nk, v: v}
 			txn = append(txn, te)
 
-		} else {
+		default:
 			// This entry is from a rewrite.
 			toLSM(nk, v)
 
@@ -1055,9 +1056,10 @@ func (db *DB) calculateSize() {
 				return err
 			}
 			ext := filepath.Ext(path)
-			if ext == ".sst" {
+			switch ext {
+			case ".sst":
 				lsmSize += info.Size()
-			} else if ext == ".vlog" {
+			case ".vlog":
 				vlogSize += info.Size()
 			}
 			return nil
@@ -1214,11 +1216,12 @@ func (seq *Sequence) Release() error {
 func (seq *Sequence) updateLease() error {
 	return seq.db.Update(func(txn *Txn) error {
 		item, err := txn.Get(seq.key)
-		if err == ErrKeyNotFound {
+		switch {
+		case err == ErrKeyNotFound:
 			seq.next = 0
-		} else if err != nil {
+		case err != nil:
 			return err
-		} else {
+		default:
 			var num uint64
 			if err := item.Value(func(v []byte) error {
 				num = binary.BigEndian.Uint64(v)
