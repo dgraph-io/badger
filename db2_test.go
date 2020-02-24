@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"path"
@@ -307,7 +308,7 @@ func TestPushValueLogLimit(t *testing.T) {
 
 		for i := 0; i < 32; i++ {
 			if i == 4 {
-				v := make([]byte, 2<<30)
+				v := make([]byte, math.MaxInt32)
 				err := db.Update(func(txn *Txn) error {
 					return txn.SetEntry(NewEntry([]byte(key(i)), v))
 				})
