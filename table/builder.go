@@ -127,8 +127,8 @@ func NewTableBuilder(opts Options) *Builder {
 	// The waitgroup will be decremented in the writeblocks goroutine.
 	b.block.wg.Add(1)
 
-	b.blockChan = make(chan *bblock, 100)
-	b.receiveChan = make(chan *bblock, 100)
+	b.blockChan = make(chan *bblock, 1000)
+	b.receiveChan = make(chan *bblock, 1000)
 
 	count := runtime.NumCPU()
 	b.wg.Add(count)
