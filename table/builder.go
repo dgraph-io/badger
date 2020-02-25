@@ -19,6 +19,7 @@ package table
 import (
 	"bytes"
 	"crypto/aes"
+	"log"
 	"math"
 	"runtime"
 	"sync"
@@ -68,30 +69,40 @@ func (h *header) Decode(buf []byte) {
 	copy(((*[headerSize]byte)(unsafe.Pointer(h))[:]), buf[:headerSize])
 }
 
+// bblock is a builder block.
 type bblock struct {
-	data  []byte
-	key   []byte
-	start uint32 // Points to the starting offset of the block.
-	end   uint32 // Points to the end offset of the block.
+	buf          bytes.Buffer
+	baseKey      []byte
+	entryOffsets []uint32 // Offsets of entries present in current block.
+	// The waitgroup allows us to write block in serial order even if they are
+	// processed out of order. The wg is incremented when a block is createa
+	// and decremented when it is written to the main buffer (in writeBlocks go
+	// routine).
+	wg sync.WaitGroup
+}
+
+func (bb *bblock) reset() {
+	bb.buf.Reset()
+	bb.entryOffsets = bb.entryOffsets[:0]
+	bb.baseKey = bb.baseKey[:0]
 }
 
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	buf []byte
-	sz  int
+	buf   *bytes.Buffer
+	block *bblock
+	//blockBuf *bytes.Buffer
 
-	baseKey      []byte   // Base key for the current block.
-	baseOffset   uint32   // Offset for the current block.
-	entryOffsets []uint32 // Offsets of entries present in current block.
-	tableIndex   *pb.TableIndex
-	keyHashes    []uint64 // Used for building the bloomfilter.
-	opt          *Options
+	baseOffset uint32 // Offset for the current block.
+	tableIndex *pb.TableIndex
+	keyHashes  []uint64 // Used for building the bloomfilter.
+	opt        *Options
 
 	// Used to concurrently compress/encrypt blocks.
-	wg        sync.WaitGroup
-	blockChan chan *bblock
-	blockList []*bblock
+	wg          sync.WaitGroup
+	blockChan   chan *bblock
+	receiveChan chan *bblock
 }
 
 // NewTableBuilder makes a new TableBuilder.
@@ -99,11 +110,13 @@ func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
 		// Additional 2 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
-		buf:        make([]byte, opts.TableSize+MB*2),
+		buf:        newBuffer(opts.TableSize + 5*MB),
 		tableIndex: &pb.TableIndex{},
-		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
+		keyHashes:  make([]uint64, 0, 1<<20), // Avoid some malloc calls.
 		opt:        &opts,
+		block:      &bblock{},
 	}
+	b.block.buf.Grow(opts.BlockSize)
 
 	// If encryption or compression is not enabled, do not start compression/encryption goroutines
 	// and write directly to the buffer.
@@ -111,23 +124,41 @@ func NewTableBuilder(opts Options) *Builder {
 		return b
 	}
 
-	b.blockChan = make(chan *bblock, 1000)
+	// The waitgroup will be decremented in the writeblocks goroutine.
+	b.block.wg.Add(1)
+
+	b.blockChan = make(chan *bblock, 100)
+	b.receiveChan = make(chan *bblock, 100)
 
 	count := runtime.NumCPU()
 	b.wg.Add(count)
 	for i := 0; i < count; i++ {
 		go b.handleBlock()
 	}
+
+	b.wg.Add(1)
+	go b.writeBlocks()
 	return b
 }
 
 var slicePool = sync.Pool{New: func() interface{} { return make([]byte, 0, 100) }}
+var blockPool = sync.Pool{New: func() interface{} { return &bblock{} }}
+
+func (b *Builder) writeBlocks() {
+	defer b.wg.Done()
+	for item := range b.receiveChan {
+		item.wg.Wait()
+		b.buf.Write(item.buf.Bytes())
+		b.addBlockToIndex(item)
+		blockPool.Put(item)
+	}
+}
 
 func (b *Builder) handleBlock() {
 	defer b.wg.Done()
 	for item := range b.blockChan {
 		// Extract the item
-		blockBuf := item.data[item.start:item.end]
+		blockBuf := item.buf.Bytes()
 		var dst []byte
 		// Compress the block.
 		if b.opt.Compression != options.None {
@@ -145,27 +176,25 @@ func (b *Builder) handleBlock() {
 			blockBuf = eBlock
 		}
 
-		// Copy over compressed/encrypted data back to the main buffer.
-		copy(b.buf[item.start:], blockBuf)
-
 		slicePool.Put(dst)
 
-		newend := item.start + uint32(len(blockBuf))
-		item.end = newend
+		item.buf.Reset()
+		item.buf.Write(blockBuf)
+		item.wg.Done()
 	}
 }
 
 // Close closes the TableBuilder.
 func (b *Builder) Close() {}
 
-// Empty returns whether it's empty.
-func (b *Builder) Empty() bool { return b.sz == 0 }
+// Empty returns whether it's empty. Both, the main builder buffer and block buffer should be empty.
+func (b *Builder) Empty() bool { return b.buf.Len()+b.block.buf.Len() == 0 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
 func (b *Builder) keyDiff(newKey []byte) []byte {
 	var i int
-	for i = 0; i < len(newKey) && i < len(b.baseKey); i++ {
-		if newKey[i] != b.baseKey[i] {
+	for i = 0; i < len(newKey) && i < len(b.block.baseKey); i++ {
+		if newKey[i] != b.block.baseKey[i] {
 			break
 		}
 	}
@@ -177,10 +206,10 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
-	if len(b.baseKey) == 0 {
+	if len(b.block.baseKey) == 0 {
 		// Make a copy. Builder should not keep references. Otherwise, caller has to be very careful
 		// and will have to make copies of keys every time they add to builder, which is even worse.
-		b.baseKey = append(b.baseKey[:0], key...)
+		b.block.baseKey = append(b.block.baseKey[:0], key...)
 		diffKey = key
 	} else {
 		diffKey = b.keyDiff(key)
@@ -192,28 +221,22 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	}
 
 	// store current entry's offset
-	y.AssertTrue(uint32(b.sz) < math.MaxUint32)
-	b.entryOffsets = append(b.entryOffsets, uint32(b.sz)-b.baseOffset)
+	y.AssertTrue(uint32(b.buf.Len()) < math.MaxUint32)
+
+	// TODO: (FIX THIS!!!) - It will not work here.
+	// This can be done in the writeBlock channel.
+	b.block.entryOffsets = append(b.block.entryOffsets, uint32(b.block.buf.Len()))
 
 	// Layout: header, diffKey, value.
-	b.append(h.Encode())
-	b.append(diffKey)
+	b.block.buf.Write(h.Encode())
+	b.block.buf.Write(diffKey)
 
-	b.sz += v.Encode(b.buf[b.sz:])
+	v.EncodeTo(&b.block.buf)
 
 	// Size of KV on SST.
 	sstSz := uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
 	// Total estimated size = size on SST + size on vlog (length of value pointer).
 	b.tableIndex.EstimatedSize += (sstSz + vpLen)
-}
-
-func (b *Builder) append(data []byte) {
-	copy(b.buf[b.sz:], data)
-	b.sz += len(data)
-}
-
-func (b *Builder) addPadding(sz int) {
-	b.sz += sz
 }
 
 /*
@@ -229,38 +252,39 @@ Structure of Block.
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
 func (b *Builder) finishBlock() {
-	b.append(y.U32SliceToBytes(b.entryOffsets))
-	b.append(y.U32ToBytes(uint32(len(b.entryOffsets))))
+	b.block.buf.Write(y.U32SliceToBytes(b.block.entryOffsets))
+	b.block.buf.Write(y.U32ToBytes(uint32(len(b.block.entryOffsets))))
 
-	b.writeChecksum(b.buf[b.baseOffset:b.sz])
+	writeChecksum(&b.block.buf, b.block.buf.Bytes())
 
 	// If compression/encryption is disabled, no need to send the block to the blockChan.
-	// There's nothing to be done.
+	// Write the block to the main builder buffer and return.
 	if b.blockChan == nil {
-		b.addBlockToIndex()
+		b.buf.Write(b.block.buf.Bytes())
+		b.addBlockToIndex(b.block)
+		// Reuse the block buffer.
+		b.block.reset()
 		return
 	}
 
-	// When a block is encrypted, it's length increases. We add 200 bytes to padding to
-	// handle cases when block size increases.
-	padding := 200
-	b.addPadding(padding)
+	//b.blockList = append(b.blockList, b.block)
 
-	// Block end is the actual end of the block ignoring the padding.
-	block := &bblock{start: b.baseOffset, end: uint32(b.sz - padding), data: b.buf}
-	b.blockList = append(b.blockList, block)
+	// TODO: Add block to index after it is written to the main table buffer.
+	// b.addBlockToIndex()
 
-	b.addBlockToIndex()
 	// Push to the block handler.
-	b.blockChan <- block
+	b.blockChan <- b.block
+	b.receiveChan <- b.block
 }
 
-func (b *Builder) addBlockToIndex() {
-	blockBuf := b.buf[b.baseOffset:b.sz]
+// This can also be done in the write block goroutine.
+// addBlockToIndex should be called only after the block has been written to the main buffer.
+func (b *Builder) addBlockToIndex(block *bblock) {
+	blockBuf := block.buf.Bytes()
 	// Add key to the block index.
 	bo := &pb.BlockOffset{
-		Key:    y.Copy(b.baseKey),
-		Offset: b.baseOffset,
+		Key:    y.Copy(block.baseKey),
+		Offset: uint32(b.buf.Len() - len(blockBuf)),
 		Len:    uint32(len(blockBuf)),
 	}
 	b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
@@ -268,18 +292,21 @@ func (b *Builder) addBlockToIndex() {
 
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	// If there is no entry till now, we will return false.
-	if len(b.entryOffsets) <= 0 {
+	if len(b.block.entryOffsets) <= 0 {
 		return false
 	}
 
 	// Integer overflow check for statements below.
-	y.AssertTrue((uint32(len(b.entryOffsets))+1)*4+4+8+4 < math.MaxUint32)
+	if (uint32(len(b.block.entryOffsets))+1)*4+4+8+4 > math.MaxUint32 {
+		log.Fatalf("foo")
+	}
 	// We should include current entry also in size, that's why +1 to len(b.entryOffsets).
-	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 +
+	entriesOffsetsSize := uint32((len(b.block.entryOffsets)+1)*4 +
 		4 + // size of list
 		8 + // Sum64 in checksum proto
 		4) // checksum length
-	estimatedSize := uint32(b.sz) - b.baseOffset + uint32(6 /*header size for entry*/) +
+	// Add size of the incoming key to the current size of the buffer.
+	estimatedSize := uint32(b.block.buf.Len()) + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 
 	if b.shouldEncrypt() {
@@ -295,10 +322,10 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 	if b.shouldFinishBlock(key, value) {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
-		b.baseKey = []byte{}
-		y.AssertTrue(uint32(b.sz) < math.MaxUint32)
-		b.baseOffset = uint32((b.sz))
-		b.entryOffsets = b.entryOffsets[:0]
+		b.block = blockPool.Get().(*bblock)
+		b.block.reset()
+		b.block.buf.Grow(b.opt.BlockSize)
+		b.block.wg.Add(1)
 	}
 	b.addHelper(key, value, uint64(valueLen))
 }
@@ -311,8 +338,8 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	blocksSize := b.sz + // length of current buffer
-		len(b.entryOffsets)*4 + // all entry offsets size
+	blocksSize := b.buf.Len() + // length of current buffer
+		len(b.block.entryOffsets)*4 + // all entry offsets size
 		4 + // count of all entry offsets
 		8 + // checksum bytes
 		4 // checksum length
@@ -347,27 +374,28 @@ func (b *Builder) Finish() []byte {
 
 	if b.blockChan != nil {
 		close(b.blockChan)
+		close(b.receiveChan)
 	}
 	// Wait for block handler to finish.
 	b.wg.Wait()
 
-	// Fix block boundaries. This includes moving the blocks so that we
-	// don't have any interleaving space between them.
-	if len(b.blockList) > 0 {
-		start := uint32(0)
-		for i, bl := range b.blockList {
-			// Length of the block is start minues the end.
-			b.tableIndex.Offsets[i].Len = bl.end - bl.start
-			b.tableIndex.Offsets[i].Offset = start
-
-			// Copy over the block to the current position in the main buffer.
-			copy(b.buf[start:], b.buf[bl.start:bl.end])
-			start = b.tableIndex.Offsets[i].Offset + b.tableIndex.Offsets[i].Len
-		}
-		// Start writing to the buffer from the point until which we have valid data
-		b.sz = int(start)
-	}
-
+	//	// Fix block boundaries. This includes moving the blocks so that we
+	//	// don't have any interleaving space between them.
+	//	if len(b.blockList) > 0 {
+	//		start := uint32(0)
+	//		for i, bl := range b.blockList {
+	//			// Length of the block is start minues the end.
+	//			b.tableIndex.Offsets[i].Len = bl.end - bl.start
+	//			b.tableIndex.Offsets[i].Offset = start
+	//
+	//			// Copy over the block to the current position in the main buffer.
+	//			copy(b.buf[start:], b.buf[bl.start:bl.end])
+	//			start = b.tableIndex.Offsets[i].Offset + b.tableIndex.Offsets[i].Len
+	//		}
+	//		// Start writing to the buffer from the point until which we have valid data
+	//		b.sz = int(start)
+	//	}
+	//
 	index, err := proto.Marshal(b.tableIndex)
 	y.Check(err)
 
@@ -376,14 +404,14 @@ func (b *Builder) Finish() []byte {
 		y.Check(err)
 	}
 	// Write index the buffer.
-	b.append(index)
-	b.append(y.U32ToBytes(uint32(len(index))))
+	b.buf.Write(index)
+	b.buf.Write(y.U32ToBytes(uint32(len(index))))
 
-	b.writeChecksum(index)
-	return b.buf[:b.sz]
+	writeChecksum(b.buf, index)
+	return b.buf.Bytes()
 }
 
-func (b *Builder) writeChecksum(data []byte) {
+func writeChecksum(buf *bytes.Buffer, data []byte) {
 	// Build checksum for the index.
 	checksum := pb.Checksum{
 		// TODO: The checksum type should be configurable from the
@@ -401,10 +429,10 @@ func (b *Builder) writeChecksum(data []byte) {
 	// Write checksum to the file.
 	chksum, err := proto.Marshal(&checksum)
 	y.Check(err)
-	b.append(chksum)
+	buf.Write(chksum)
 
 	// Write checksum size.
-	b.append(y.U32ToBytes(uint32(len(chksum))))
+	buf.Write(y.U32ToBytes(uint32(len(chksum))))
 }
 
 // DataKey returns datakey of the builder.

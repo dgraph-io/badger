@@ -165,7 +165,7 @@ func BenchmarkBuilder(b *testing.B) {
 		opt.BlockSize = 4 * 1024
 		opt.BloomFalsePositive = 0.01
 		// TODO: Fix this. The size is dependant on benchtime and keycounts.
-		opt.TableSize = 5 << 30
+		//	opt.TableSize = 5 << 30
 		builder := NewTableBuilder(*opt)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
