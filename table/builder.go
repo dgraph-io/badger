@@ -103,6 +103,7 @@ type Builder struct {
 	wg          sync.WaitGroup
 	blockChan   chan *bblock
 	receiveChan chan *bblock
+	totalSize   int
 }
 
 // NewTableBuilder makes a new TableBuilder.
@@ -188,7 +189,7 @@ func (b *Builder) handleBlock() {
 func (b *Builder) Close() {}
 
 // Empty returns whether it's empty. Both, the main builder buffer and block buffer should be empty.
-func (b *Builder) Empty() bool { return b.buf.Len()+b.block.buf.Len() == 0 }
+func (b *Builder) Empty() bool { return b.totalSize == 0 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
 func (b *Builder) keyDiff(newKey []byte) []byte {
@@ -256,6 +257,8 @@ func (b *Builder) finishBlock() {
 	b.block.buf.Write(y.U32ToBytes(uint32(len(b.block.entryOffsets))))
 
 	writeChecksum(&b.block.buf, b.block.buf.Bytes())
+
+	b.totalSize += b.block.buf.Len()
 
 	// If compression/encryption is disabled, no need to send the block to the blockChan.
 	// Write the block to the main builder buffer and return.
@@ -338,14 +341,12 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	blocksSize := b.buf.Len() + // length of current buffer
+	blocksSize := b.totalSize + // length of current buffer
 		len(b.block.entryOffsets)*4 + // all entry offsets size
 		4 + // count of all entry offsets
 		8 + // checksum bytes
 		4 // checksum length
-	estimateSz := blocksSize +
-		4 + // Index length
-		5*(len(b.tableIndex.Offsets)) // approximate index size
+	estimateSz := blocksSize + 200 // Approximate size of the index
 
 	return int64(estimateSz) > cap
 }
