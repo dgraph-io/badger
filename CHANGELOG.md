@@ -11,7 +11,6 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
 - Cast sz to uint32 to fix compilation on 32 bit. (#1175)
 - Fix checkOverlap in compaction. (#1166)
 - Avoid sync in inmemory mode. (#1190)
-- Improve write stalling on level 0 and 1.
 - Support disabling the cache completely. (#1185)
 - Add support for caching bloomfilters. (#1204)
 - Fix int overflow for 32bit. (#1216)
@@ -22,6 +21,7 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
 
 - Use fastRand instead of locked-rand in skiplist. (#1173)
 - Disable compression and set ZSTD Compression Level to 1. (#1191)
+- Improve write stalling on level 0 and 1. (#1186)
 
 ## [2.0.1] - 2020-01-02 
 
