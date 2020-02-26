@@ -221,7 +221,7 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	}
 
 	// store current entry's offset
-	y.AssertTrue(uint32(b.buf.Len()) < math.MaxUint32)
+	y.AssertTrue(uint32(b.block.buf.Len()) < math.MaxUint32)
 
 	// TODO: (FIX THIS!!!) - It will not work here.
 	// This can be done in the writeBlock channel.
