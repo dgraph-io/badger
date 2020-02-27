@@ -331,6 +331,9 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, err
 	}
 
+	// Initialize vlog struct.
+	db.vlog.init(db)
+
 	if !opt.ReadOnly {
 		db.closers.compactors = y.NewCloser(1)
 		db.lc.startCompact(db.closers.compactors)
