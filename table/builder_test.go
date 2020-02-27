@@ -30,6 +30,13 @@ import (
 	"github.com/dgraph-io/badger/v2/y"
 )
 
+func TestTableEmpty(t *testing.T) {
+	opts := Options{BlockSize: 4 << 10, BloomFalsePositive: 0.01}
+	builder := NewTableBuilder(opts)
+	builder.Add(y.KeyWithTs([]byte("foo"), 12), y.ValueStruct{Value: []byte("foo")}, 0)
+	require.False(t, builder.Empty())
+}
+
 func TestTableIndex(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 	keysCount := 100000

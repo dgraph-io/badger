@@ -229,10 +229,13 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	b.block.entryOffsets = append(b.block.entryOffsets, uint32(b.block.buf.Len()))
 
 	// Layout: header, diffKey, value.
-	b.block.buf.Write(h.Encode())
+	encHeader := h.Encode()
+	b.block.buf.Write(encHeader)
+	b.totalSize += len(encHeader)
 	b.block.buf.Write(diffKey)
+	b.totalSize += len(diffKey)
 
-	v.EncodeTo(&b.block.buf)
+	b.totalSize += v.EncodeTo(&b.block.buf)
 
 	// Size of KV on SST.
 	sstSz := uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
@@ -253,12 +256,13 @@ Structure of Block.
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
 func (b *Builder) finishBlock() {
+	initialSz := b.block.buf.Len()
 	b.block.buf.Write(y.U32SliceToBytes(b.block.entryOffsets))
 	b.block.buf.Write(y.U32ToBytes(uint32(len(b.block.entryOffsets))))
 
 	writeChecksum(&b.block.buf, b.block.buf.Bytes())
 
-	b.totalSize += b.block.buf.Len()
+	b.totalSize += b.block.buf.Len() - initialSz
 
 	// If compression/encryption is disabled, no need to send the block to the blockChan.
 	// Write the block to the main builder buffer and return.

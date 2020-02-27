@@ -75,7 +75,7 @@ func (v *ValueStruct) Encode(b []byte) int {
 // EncodeTo should be kept in sync with the Encode function above. The reason
 // this function exists is to avoid creating byte arrays per key-value pair in
 // table/builder.go.
-func (v *ValueStruct) EncodeTo(buf *bytes.Buffer) {
+func (v *ValueStruct) EncodeTo(buf *bytes.Buffer) int {
 	buf.WriteByte(v.Meta)
 	buf.WriteByte(v.UserMeta)
 	var enc [binary.MaxVarintLen64]byte
@@ -83,6 +83,7 @@ func (v *ValueStruct) EncodeTo(buf *bytes.Buffer) {
 
 	buf.Write(enc[:sz])
 	buf.Write(v.Value)
+	return 2 + len(enc[:sz]) + len(v.Value)
 }
 
 // Iterator is an interface for a basic iterator.
