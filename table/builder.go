@@ -19,7 +19,6 @@ package table
 import (
 	"bytes"
 	"crypto/aes"
-	"log"
 	"math"
 	"runtime"
 	"sync"
@@ -75,7 +74,7 @@ type bblock struct {
 	baseKey      []byte
 	entryOffsets []uint32 // Offsets of entries present in current block.
 	// The waitgroup allows us to write block in serial order even if they are
-	// processed out of order. The wg is incremented when a block is createa
+	// processed out of order. The wg is incremented when a block is created
 	// and decremented when it is written to the main buffer (in writeBlocks go
 	// routine).
 	wg sync.WaitGroup
@@ -90,11 +89,9 @@ func (bb *bblock) reset() {
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	buf   *bytes.Buffer
-	block *bblock
-	//blockBuf *bytes.Buffer
+	buf   *bytes.Buffer // This is the main builder buffer
+	block *bblock       // Represents a block of the table. New entries are written to block.buf
 
-	baseOffset uint32 // Offset for the current block.
 	tableIndex *pb.TableIndex
 	keyHashes  []uint64 // Used for building the bloomfilter.
 	opt        *Options
@@ -103,14 +100,13 @@ type Builder struct {
 	wg          sync.WaitGroup
 	blockChan   chan *bblock
 	receiveChan chan *bblock
-	totalSize   int
+	totalSize   int // Stores the total size of table.
 }
 
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
-		// Additional 2 MB to store index (approximate).
-		// We trim the additional space in table.Finish().
+		// Additional 5 MB to store index (approximate).
 		buf:        newBuffer(opts.TableSize + 5*MB),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1<<20), // Avoid some malloc calls.
@@ -125,41 +121,51 @@ func NewTableBuilder(opts Options) *Builder {
 		return b
 	}
 
-	// The waitgroup will be decremented in the writeblocks goroutine.
-	b.block.wg.Add(1)
-
+	// Do not move this declaration inside builder struct initialization. It is
+	// important that b.blockChan is nil if compression and encryptions both
+	// are disabled.
 	b.blockChan = make(chan *bblock, 1000)
 	b.receiveChan = make(chan *bblock, 1000)
+	// The waitgroup will be decremented in the writeblocks goroutine.
+	b.block.wg.Add(1)
 
 	count := runtime.NumCPU()
 	b.wg.Add(count)
 	for i := 0; i < count; i++ {
+		// Handleblock encrypts/compresses a block.
 		go b.handleBlock()
 	}
 
 	b.wg.Add(1)
+	// Write block writes a processed block to the main builder buffer.
 	go b.writeBlocks()
+
 	return b
 }
 
 var slicePool = sync.Pool{New: func() interface{} { return make([]byte, 0, 100) }}
 var blockPool = sync.Pool{New: func() interface{} { return &bblock{} }}
 
+// writeBlocks writes a block to the main builder after after it has been
+// processed by the handleblock goroutine.
 func (b *Builder) writeBlocks() {
 	defer b.wg.Done()
-	for item := range b.receiveChan {
-		item.wg.Wait()
-		b.buf.Write(item.buf.Bytes())
-		b.addBlockToIndex(item)
-		blockPool.Put(item)
+	for bb := range b.receiveChan {
+		// Wait for the block to be processed by the handleblock goroutine.
+		bb.wg.Wait()
+
+		b.buf.Write(bb.buf.Bytes())
+		b.addBlockToIndex(bb)
+
+		blockPool.Put(bb)
 	}
 }
 
+// handleBlock encrypts/compresses a block.
 func (b *Builder) handleBlock() {
 	defer b.wg.Done()
-	for item := range b.blockChan {
-		// Extract the item
-		blockBuf := item.buf.Bytes()
+	for bb := range b.blockChan {
+		blockBuf := bb.buf.Bytes()
 		var dst []byte
 		// Compress the block.
 		if b.opt.Compression != options.None {
@@ -177,18 +183,19 @@ func (b *Builder) handleBlock() {
 			blockBuf = eBlock
 		}
 
-		slicePool.Put(dst)
+		bb.buf.Reset()
+		// Write the processed block to the original block buffer.
+		bb.buf.Write(blockBuf)
 
-		item.buf.Reset()
-		item.buf.Write(blockBuf)
-		item.wg.Done()
+		slicePool.Put(dst)
+		bb.wg.Done()
 	}
 }
 
 // Close closes the TableBuilder.
 func (b *Builder) Close() {}
 
-// Empty returns whether it's empty. Both, the main builder buffer and block buffer should be empty.
+// Empty returns whether it's empty.
 func (b *Builder) Empty() bool { return b.totalSize == 0 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
@@ -221,11 +228,9 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 		diff:    uint16(len(diffKey)),
 	}
 
-	// store current entry's offset
 	y.AssertTrue(uint32(b.block.buf.Len()) < math.MaxUint32)
 
-	// TODO: (FIX THIS!!!) - It will not work here.
-	// This can be done in the writeBlock channel.
+	// store current entry's offset
 	b.block.entryOffsets = append(b.block.entryOffsets, uint32(b.block.buf.Len()))
 
 	// Layout: header, diffKey, value.
@@ -274,17 +279,11 @@ func (b *Builder) finishBlock() {
 		return
 	}
 
-	//b.blockList = append(b.blockList, b.block)
-
-	// TODO: Add block to index after it is written to the main table buffer.
-	// b.addBlockToIndex()
-
 	// Push to the block handler.
 	b.blockChan <- b.block
 	b.receiveChan <- b.block
 }
 
-// This can also be done in the write block goroutine.
 // addBlockToIndex should be called only after the block has been written to the main buffer.
 func (b *Builder) addBlockToIndex(block *bblock) {
 	blockBuf := block.buf.Bytes()
@@ -304,9 +303,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	}
 
 	// Integer overflow check for statements below.
-	if (uint32(len(b.block.entryOffsets))+1)*4+4+8+4 > math.MaxUint32 {
-		log.Fatalf("foo")
-	}
+	y.AssertTrue((uint32(len(b.block.entryOffsets))+1)*4+4+8+4 < math.MaxUint32)
 	// We should include current entry also in size, that's why +1 to len(b.entryOffsets).
 	entriesOffsetsSize := uint32((len(b.block.entryOffsets)+1)*4 +
 		4 + // size of list
@@ -344,7 +341,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 // at the end. The diff can vary.
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
-func (b *Builder) ReachedCapacity(cap int64) bool {
+func (b *Builder) ReachedCapacity() bool {
 	blocksSize := b.totalSize + // length of current buffer
 		len(b.block.entryOffsets)*4 + // all entry offsets size
 		4 + // count of all entry offsets
@@ -352,7 +349,7 @@ func (b *Builder) ReachedCapacity(cap int64) bool {
 		4 // checksum length
 	estimateSz := blocksSize + 200 // Approximate size of the index
 
-	return int64(estimateSz) > cap
+	return estimateSz > b.opt.TableSize
 }
 
 // Finish finishes the table by appending the index.
@@ -384,23 +381,6 @@ func (b *Builder) Finish() []byte {
 	// Wait for block handler to finish.
 	b.wg.Wait()
 
-	//	// Fix block boundaries. This includes moving the blocks so that we
-	//	// don't have any interleaving space between them.
-	//	if len(b.blockList) > 0 {
-	//		start := uint32(0)
-	//		for i, bl := range b.blockList {
-	//			// Length of the block is start minues the end.
-	//			b.tableIndex.Offsets[i].Len = bl.end - bl.start
-	//			b.tableIndex.Offsets[i].Offset = start
-	//
-	//			// Copy over the block to the current position in the main buffer.
-	//			copy(b.buf[start:], b.buf[bl.start:bl.end])
-	//			start = b.tableIndex.Offsets[i].Offset + b.tableIndex.Offsets[i].Len
-	//		}
-	//		// Start writing to the buffer from the point until which we have valid data
-	//		b.sz = int(start)
-	//	}
-	//
 	index, err := proto.Marshal(b.tableIndex)
 	y.Check(err)
 
@@ -416,6 +396,7 @@ func (b *Builder) Finish() []byte {
 	return b.buf.Bytes()
 }
 
+// writeChecksum writes the checksum for "data" and its length to the "buf" buffer.
 func writeChecksum(buf *bytes.Buffer, data []byte) {
 	// Build checksum for the index.
 	checksum := pb.Checksum{

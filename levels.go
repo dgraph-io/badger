@@ -552,7 +552,7 @@ func (s *levelsController) compactBuildTables(
 			}
 
 			if !y.SameKey(it.Key(), lastKey) {
-				if builder.ReachedCapacity(s.kv.opt.MaxTableSize) {
+				if builder.ReachedCapacity() {
 					// Only break if we are on a different key, and have reached capacity. We want
 					// to ensure that all versions of the key are stored in the same sstable, and
 					// not divided across multiple tables at the same level.

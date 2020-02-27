@@ -37,6 +37,17 @@ func TestTableEmpty(t *testing.T) {
 	require.False(t, builder.Empty())
 }
 
+func TestReachedCapacity(t *testing.T) {
+	opts := Options{TableSize: 1 << 20, BlockSize: 4 << 10, BloomFalsePositive: 0.01}
+	builder := NewTableBuilder(opts)
+
+	builder.Add(y.KeyWithTs([]byte("foo"), 12), y.ValueStruct{Value: make([]byte, 1<<10)}, 0)
+	require.False(t, builder.ReachedCapacity())
+
+	builder.Add(y.KeyWithTs([]byte("foo"), 12), y.ValueStruct{Value: make([]byte, 1<<20)}, 0)
+	require.True(t, builder.ReachedCapacity())
+}
+
 func TestTableIndex(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 	keysCount := 100000
@@ -171,8 +182,8 @@ func BenchmarkBuilder(b *testing.B) {
 		b.SetBytes(int64(keysCount) * (32 + 32))
 		opt.BlockSize = 4 * 1024
 		opt.BloomFalsePositive = 0.01
-		// TODO: Fix this. The size is dependant on benchtime and keycounts.
-		//	opt.TableSize = 5 << 30
+		opt.TableSize = 1 << 30 //Try to reduce malloc calls.
+
 		builder := NewTableBuilder(*opt)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
