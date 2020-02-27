@@ -406,6 +406,7 @@ func TestValueGC4(t *testing.T) {
 	err = kv.vlog.Close()
 	require.NoError(t, err)
 
+	kv.vlog.init(kv)
 	err = kv.vlog.open(kv, valuePointer{Fid: 2}, kv.replayFunction())
 	require.NoError(t, err)
 
@@ -636,8 +637,11 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	checkKeys(t, kv, [][]byte{k3})
 	// Replay value log from beginning, badger head is past k2.
 	require.NoError(t, kv.vlog.Close())
-	require.NoError(t,
-		kv.vlog.open(kv, valuePointer{Fid: 0}, kv.replayFunction()))
+
+	kv.vlog.init(kv)
+	require.NoError(
+		t, kv.vlog.open(kv, valuePointer{Fid: 0}, kv.replayFunction()),
+	)
 	require.NoError(t, kv.Close())
 }
 

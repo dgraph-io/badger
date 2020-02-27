@@ -806,13 +806,14 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	return nil
 }
 
-func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
-	opt := db.opt
-	vlog.opt = opt
-	vlog.dirPath = opt.ValueDir
+// init initializes the value log struct. This initialization needs to happen
+// before compactions start.
+func (vlog *valueLog) init(db *DB) {
+	vlog.opt = db.opt
 	vlog.db = db
+	vlog.dirPath = vlog.opt.ValueDir
 	vlog.elog = y.NoEventLog
-	if opt.EventLogging {
+	if db.opt.EventLogging {
 		vlog.elog = trace.NewEventLog("Badger", "Valuelog")
 	}
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
@@ -821,6 +822,9 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		closer:    y.NewCloser(1),
 		flushChan: make(chan map[uint32]int64, 16),
 	}
+}
+
+func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	go vlog.flushDiscardStats()
 	if err := vlog.populateFilesMap(); err != nil {
 		return err
@@ -899,7 +903,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	vlog.db.vhead = valuePointer{Fid: vlog.maxFid, Offset: uint32(lastOffset)}
 
 	// Map the file if needed. When we create a file, it is automatically mapped.
-	if err = last.mmap(2 * opt.ValueLogFileSize); err != nil {
+	if err = last.mmap(2 * db.opt.ValueLogFileSize); err != nil {
 		return errFile(err, last.path, "Map log file")
 	}
 	if err := vlog.populateDiscardStats(); err != nil {
