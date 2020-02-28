@@ -88,6 +88,7 @@ type Table struct {
 
 	fd        *os.File // Own fd.
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
+	wg        sync.WaitGroup
 
 	blockIndex []*pb.BlockOffset
 	ref        int32 // For file garbage collection. Atomic.
@@ -122,6 +123,7 @@ func (t *Table) IncrRef() {
 func (t *Table) DecrRef() error {
 	newRef := atomic.AddInt32(&t.ref, -1)
 	if newRef == 0 {
+		t.wg.Wait() // Wait for the bloom filter go routine to finish.
 		// We can safely delete this file, because for all the current files, we always have
 		// at least one reference pointing to them.
 
@@ -290,6 +292,7 @@ func (t *Table) initBiggestAndSmallest() error {
 
 // Close closes the open table.  (Releases resources back to the OS.)
 func (t *Table) Close() error {
+	t.wg.Wait() // Wait for the bloom filter go routine to finish.
 	if t.opt.LoadingMode == options.MemoryMap {
 		if err := y.Munmap(t.mmap); err != nil {
 			return err
@@ -373,13 +376,14 @@ func (t *Table) readIndex() error {
 
 	// Avoid the cost of unmarshalling the bloom filters if the cache is absent.
 	if t.opt.Cache != nil {
-		var bf *z.Bloom
-		if bf, err = z.JSONUnmarshal(index.BloomFilter); err != nil {
-			return y.Wrapf(err, "failed to unmarshal bloom filter for the table %d in Table.readIndex",
-				t.id)
-		}
+		t.wg.Add(1)
+		go func() {
+			defer t.wg.Done()
+			bf, err := z.JSONUnmarshal(index.BloomFilter)
+			y.Check(err)
+			t.opt.Cache.Set(t.bfCacheKey(), bf, int64(len(index.BloomFilter)))
 
-		t.opt.Cache.Set(t.bfCacheKey(), bf, int64(len(index.BloomFilter)))
+		}()
 	}
 	return nil
 }
