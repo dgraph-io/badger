@@ -382,7 +382,6 @@ func (t *Table) readIndex() error {
 			bf, err := z.JSONUnmarshal(index.BloomFilter)
 			y.Check(err)
 			t.opt.Cache.Set(t.bfCacheKey(), bf, int64(len(index.BloomFilter)))
-
 		}()
 	}
 	return nil
