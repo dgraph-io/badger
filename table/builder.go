@@ -192,7 +192,9 @@ func (b *Builder) handleBlock() {
 		// Write the processed block to the original block buffer.
 		bb.buf.Write(blockBuf)
 
-		slicePool.Put(dst)
+		if dst != nil {
+			slicePool.Put(dst)
+		}
 		bb.wg.Done()
 	}
 }
