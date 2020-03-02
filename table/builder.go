@@ -17,7 +17,6 @@
 package table
 
 import (
-	"bytes"
 	"crypto/aes"
 	"math"
 	"runtime"
@@ -39,12 +38,6 @@ const (
 	KB = 1024
 	MB = KB * 1024
 )
-
-func newBuffer(sz int) *bytes.Buffer {
-	b := new(bytes.Buffer)
-	b.Grow(sz)
-	return b
-}
 
 type header struct {
 	overlap uint16 // Overlap with base key.
@@ -121,22 +114,28 @@ func NewTableBuilder(opts Options) *Builder {
 	return b
 }
 
-var slicePool = sync.Pool{New: func() interface{} { return make([]byte, 0, 100) }}
+var slicePool = sync.Pool{
+	New: func() interface{} {
+		// Make 4 KB blocks for reuse.
+		b := make([]byte, 0, 4<<10)
+		return &b
+	},
+}
 
 func (b *Builder) handleBlock() {
 	defer b.wg.Done()
 	for item := range b.blockChan {
 		// Extract the item
 		blockBuf := item.data[item.start:item.end]
-		var dst []byte
+		var dst *[]byte
 		// Compress the block.
 		if b.opt.Compression != options.None {
 			var err error
 
-			dst = slicePool.Get().([]byte)
-			dst = dst[:0]
+			dst = slicePool.Get().(*[]byte)
+			*dst = (*dst)[:0]
 
-			blockBuf, err = b.compressData(dst, blockBuf)
+			blockBuf, err = b.compressData(*dst, blockBuf)
 			y.Check(err)
 		}
 		if b.shouldEncrypt() {
