@@ -149,7 +149,9 @@ func (b *Builder) handleBlock() {
 		copy(b.buf[item.start:], blockBuf)
 		b.bufLock.Unlock()
 
-		slicePool.Put(dst)
+		if dst != nil {
+			slicePool.Put(dst)
+		}
 
 		newend := item.start + uint32(len(blockBuf))
 		item.end = newend
