@@ -143,7 +143,12 @@ func NewTableBuilder(opts Options) *Builder {
 	return b
 }
 
-var slicePool = sync.Pool{New: func() interface{} { return make([]byte, 0, 100) }}
+var slicePool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 0, 4<<10)
+		return &b
+	},
+}
 var blockPool = sync.Pool{New: func() interface{} { return &bblock{} }}
 
 // writeBlocks writes a block to the main builder after after it has been
@@ -166,15 +171,15 @@ func (b *Builder) handleBlock() {
 	defer b.wg.Done()
 	for bb := range b.blockChan {
 		blockBuf := bb.buf.Bytes()
-		var dst []byte
+		var dst *[]byte
 		// Compress the block.
 		if b.opt.Compression != options.None {
 			var err error
 
-			dst = slicePool.Get().([]byte)
-			dst = dst[:0]
+			dst = slicePool.Get().(*[]byte)
+			*dst = (*dst)[:0]
 
-			blockBuf, err = b.compressData(dst, blockBuf)
+			blockBuf, err = b.compressData(*dst, blockBuf)
 			y.Check(err)
 		}
 		if b.shouldEncrypt() {
