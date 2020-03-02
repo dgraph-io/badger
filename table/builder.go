@@ -70,7 +70,6 @@ func (h *header) Decode(buf []byte) {
 
 type bblock struct {
 	data  []byte
-	key   []byte
 	start uint32 // Points to the starting offset of the block.
 	end   uint32 // Points to the end offset of the block.
 }
