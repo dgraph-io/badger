@@ -78,8 +78,9 @@ type bblock struct {
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	buf []byte
-	sz  int
+	buf     []byte
+	sz      int
+	bufLock sync.Mutex
 
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -145,8 +146,10 @@ func (b *Builder) handleBlock() {
 			blockBuf = eBlock
 		}
 
+		b.bufLock.Lock()
 		// Copy over compressed/encrypted data back to the main buffer.
 		copy(b.buf[item.start:], blockBuf)
+		b.bufLock.Unlock()
 
 		slicePool.Put(dst)
 
@@ -199,6 +202,10 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	b.append(h.Encode())
 	b.append(diffKey)
 
+	// Continue growing until we have enough space.
+	for uint32(len(b.buf)) < uint32(b.sz)+v.EncodedSize() {
+		b.grow()
+	}
 	b.sz += v.Encode(b.buf[b.sz:])
 
 	// Size of KV on SST.
@@ -207,13 +214,29 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	b.tableIndex.EstimatedSize += (sstSz + vpLen)
 }
 
+// grow increases the size of b.buf by 10%.
+func (b *Builder) grow() {
+	b.bufLock.Lock()
+	newBuf := make([]byte, len(b.buf)+len(b.buf)/10)
+	copy(newBuf, b.buf)
+	b.buf = newBuf
+	b.bufLock.Unlock()
+}
 func (b *Builder) append(data []byte) {
+	// Continue growing until we have enough space.
+	for len(b.buf) < b.sz+len(data) {
+		b.grow()
+	}
 	copy(b.buf[b.sz:], data)
 	b.sz += len(data)
 }
 
 func (b *Builder) addPadding(sz int) {
 	b.sz += sz
+	// Continue growing until we have enough space.
+	for len(b.buf) < b.sz {
+		b.grow()
+	}
 }
 
 /*
