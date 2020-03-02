@@ -164,21 +164,27 @@ func BenchmarkBuilder(b *testing.B) {
 		b.SetBytes(int64(keysCount) * (32 + 32))
 		opt.BlockSize = 4 * 1024
 		opt.BloomFalsePositive = 0.01
-		// TODO: Fix this. The size is dependant on benchtime and keycounts.
-		opt.TableSize = 5 << 30
-		builder := NewTableBuilder(*opt)
+		opt.TableSize = 5 << 20
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
+			builder := NewTableBuilder(*opt)
 			for j := 0; j < keysCount; j++ {
 				builder.Add(keyList[j], vs, 0)
 			}
+			_ = builder.Finish()
 		}
-		_ = builder.Finish()
 	}
 
 	b.Run("no compression", func(b *testing.B) {
 		var opt Options
 		opt.Compression = options.None
+		bench(b, &opt)
+	})
+	b.Run("encryption", func(b *testing.B) {
+		var opt Options
+		key := make([]byte, 32)
+		rand.Read(key)
+		opt.DataKey = &pb.DataKey{Data: key}
 		bench(b, &opt)
 	})
 	b.Run("zstd compression", func(b *testing.B) {
