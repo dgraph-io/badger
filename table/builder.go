@@ -131,15 +131,15 @@ func (b *Builder) handleBlock() {
 	for item := range b.blockChan {
 		// Extract the block.
 		blockBuf := item.data[item.start:item.end]
-		var dst *[]byte
+		var dst []byte
 		// Compress the block.
 		if b.opt.Compression != options.None {
 			var err error
 
-			dst = slicePool.Get().(*[]byte)
-			*dst = (*dst)[:0]
+			//dst = slicePool.Get().(*[]byte)
+			//*dst = (*dst)[:0]
 
-			blockBuf, err = b.compressData(*dst, blockBuf)
+			blockBuf, err = b.compressData(dst, blockBuf)
 			y.Check(err)
 		}
 		if b.shouldEncrypt() {
@@ -167,7 +167,7 @@ func (b *Builder) handleBlock() {
 		item.end = item.start + uint32(len(blockBuf))
 
 		if dst != nil {
-			slicePool.Put(dst)
+			//slicePool.Put(dst)
 		}
 	}
 }
