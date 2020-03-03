@@ -386,21 +386,21 @@ func (b *Builder) Finish() []byte {
 	// Wait for block handler to finish.
 	b.wg.Wait()
 
+	dst := b.buf
 	// Fix block boundaries. This includes moving the blocks so that we
 	// don't have any interleaving space between them.
 	if len(b.blockList) > 0 {
-		start := uint32(0)
+		// This will not allocate new memory. The underlying array has enough
+		// space to store the complete b.buf.
+		dst = dst[:0]
 		for i, bl := range b.blockList {
 			// Length of the block is start minus the end.
 			b.tableIndex.Offsets[i].Len = bl.end - bl.start
-			b.tableIndex.Offsets[i].Offset = start
+			b.tableIndex.Offsets[i].Offset = uint32(len(dst))
 
-			// Copy over the block to the current position in the main buffer.
-			copy(b.buf[start:], b.buf[bl.start:bl.end])
-			start = b.tableIndex.Offsets[i].Offset + b.tableIndex.Offsets[i].Len
+			// Append next block.
+			dst = append(dst, b.buf[bl.start:bl.end]...)
 		}
-		// Start writing to the buffer from the point until which we have valid data
-		b.sz = int(start)
 	}
 
 	index, err := proto.Marshal(b.tableIndex)
@@ -410,12 +410,23 @@ func (b *Builder) Finish() []byte {
 		index, err = b.encrypt(index)
 		y.Check(err)
 	}
-	// Write index the buffer.
-	b.append(index)
-	b.append(y.U32ToBytes(uint32(len(index))))
+	// Write index to the buffer.
+	dst = append(dst, index...)
+	dst = append(dst, y.U32ToBytes(uint32(len(index)))...)
 
-	b.writeChecksum(index)
-	return b.buf[:b.sz]
+	// Build checksum for the index.
+	checksum := pb.Checksum{
+		Sum:  y.CalculateChecksum(index, pb.Checksum_CRC32C),
+		Algo: pb.Checksum_CRC32C,
+	}
+	chksum, err := proto.Marshal(&checksum)
+	y.Check(err)
+	// Write checksum to the buffer.
+	dst = append(dst, chksum...)
+
+	// Write checksum size.
+	dst = append(dst, y.U32ToBytes(uint32(len(chksum)))...)
+	return dst
 }
 
 func (b *Builder) writeChecksum(data []byte) {
