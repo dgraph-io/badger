@@ -37,10 +37,6 @@ import (
 const (
 	KB = 1024
 	MB = KB * 1024
-
-	// When a block is encrypted, it's length increases. We add 200 bytes of padding to
-	// handle cases when block size increases. This is an approximate number.
-	padding = 200
 )
 
 type header struct {
@@ -76,7 +72,7 @@ type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf     []byte
 	sz      int
-	bufLock sync.Mutex // This lock guards the buf. We acquire lock when we resize the buf.
+	bufLock sync.Mutex
 
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -94,9 +90,9 @@ type Builder struct {
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
-		// Additional 5 MB to store index (approximate).
+		// Additional 2 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
-		buf:        make([]byte, opts.TableSize+5*MB),
+		buf:        make([]byte, opts.TableSize+MB*2),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
@@ -129,7 +125,7 @@ var slicePool = sync.Pool{
 func (b *Builder) handleBlock() {
 	defer b.wg.Done()
 	for item := range b.blockChan {
-		// Extract the block.
+		// Extract the item
 		blockBuf := item.data[item.start:item.end]
 		var dst *[]byte
 		// Compress the block.
@@ -148,27 +144,17 @@ func (b *Builder) handleBlock() {
 			blockBuf = eBlock
 		}
 
-		// The newend should always be less than or equal to the original end
-		// plus the padding. If the new end is greater than item.end+padding
-		// that means the data from this block cannot be stored in its existing
-		// location and trying to copy it over would mean we would over-write
-		// some data of the next block.
-		y.AssertTruef(uint32(len(blockBuf)) <= item.end+padding,
-			"newend: %d item.end: %d padding: %d", len(blockBuf), item.end, padding)
-
-		// Acquire the buflock here. The builder.grow function might change
-		// the b.buf while this goroutine was running.
 		b.bufLock.Lock()
 		// Copy over compressed/encrypted data back to the main buffer.
 		copy(b.buf[item.start:], blockBuf)
 		b.bufLock.Unlock()
 
-		// Fix the boundary of the block.
-		item.end = item.start + uint32(len(blockBuf))
-
 		if dst != nil {
 			slicePool.Put(dst)
 		}
+
+		newend := item.start + uint32(len(blockBuf))
+		item.end = newend
 	}
 }
 
@@ -216,8 +202,9 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	b.append(h.Encode())
 	b.append(diffKey)
 
-	if uint32(len(b.buf)) < uint32(b.sz)+v.EncodedSize() {
-		b.grow(int(v.EncodedSize()))
+	// Continue growing until we have enough space.
+	for uint32(len(b.buf)) < uint32(b.sz)+v.EncodedSize() {
+		b.grow()
 	}
 	b.sz += v.Encode(b.buf[b.sz:])
 
@@ -227,31 +214,29 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	b.tableIndex.EstimatedSize += (sstSz + vpLen)
 }
 
-// grow increases the size of b.buf by atleast 50%.
-func (b *Builder) grow(n int) {
-	if n < len(b.buf)/2 {
-		n = len(b.buf) / 2
-	}
+// grow increases the size of b.buf by 50%.
+func (b *Builder) grow() {
 	b.bufLock.Lock()
-	newBuf := make([]byte, len(b.buf)+n)
+	newBuf := make([]byte, len(b.buf)+len(b.buf)/2)
 	copy(newBuf, b.buf)
 	b.buf = newBuf
 	b.bufLock.Unlock()
 }
 func (b *Builder) append(data []byte) {
-	// Ensure we have enough space to store new data.
-	if len(b.buf) < b.sz+len(data) {
-		b.grow(len(data))
+	// Continue growing until we have enough space.
+	for len(b.buf) < b.sz+len(data) {
+		b.grow()
 	}
 	copy(b.buf[b.sz:], data)
 	b.sz += len(data)
 }
 
 func (b *Builder) addPadding(sz int) {
-	if len(b.buf) < b.sz+sz {
-		b.grow(sz)
-	}
 	b.sz += sz
+	// Continue growing until we have enough space.
+	for len(b.buf) < b.sz {
+		b.grow()
+	}
 }
 
 /*
@@ -279,6 +264,9 @@ func (b *Builder) finishBlock() {
 		return
 	}
 
+	// When a block is encrypted, it's length increases. We add 200 bytes to padding to
+	// handle cases when block size increases.
+	padding := 200
 	b.addPadding(padding)
 
 	// Block end is the actual end of the block ignoring the padding.
@@ -394,7 +382,7 @@ func (b *Builder) Finish() []byte {
 		// space to store the complete b.buf.
 		dst = dst[:0]
 		for i, bl := range b.blockList {
-			// Length of the block is start minus the end.
+			// Length of the block is start minues the end.
 			b.tableIndex.Offsets[i].Len = bl.end - bl.start
 			b.tableIndex.Offsets[i].Offset = uint32(len(dst))
 
