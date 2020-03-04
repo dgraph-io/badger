@@ -308,7 +308,8 @@ func Open(opt Options) (db *DB, err error) {
 
 	if db.opt.InMemory {
 		db.opt.SyncWrites = false
-		db.opt.ValueThreshold = maxValueThreshold
+		// If badger is running in memory mode, push everything into the LSM Tree.
+		db.opt.ValueThreshold = math.MaxInt32
 	}
 	krOpt := KeyRegistryOptions{
 		ReadOnly:                      opt.ReadOnly,
@@ -330,6 +331,9 @@ func Open(opt Options) (db *DB, err error) {
 	if db.lc, err = newLevelsController(db, &manifest); err != nil {
 		return nil, err
 	}
+
+	// Initialize vlog struct.
+	db.vlog.init(db)
 
 	if !opt.ReadOnly {
 		db.closers.compactors = y.NewCloser(1)
