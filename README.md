@@ -764,6 +764,7 @@ Below is a list of known projects that use Badger:
 * [Volument](https://volument.com/) - A new take on website analytics backed by Badger.
 * [Sloop](https://github.com/salesforce/sloop) - Kubernetes History Visualization.
 * [KVdb](https://kvdb.io/) - Hosted key-value store and serverless platform built on top of Badger.
+* [Dkron](https://dkron.io/) - Distributed, fault tolerant job scheduling system.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
