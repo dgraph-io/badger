@@ -1616,7 +1616,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, prefixes
 			err := slurp(batch)
 			if err != nil {
 				c.Done()
-				// Delete the subsriber if there is an error by the callback.
+				// Delete the subscriber if there is an error by the callback.
 				db.pub.deleteSubscriber(id)
 				return err
 			}
