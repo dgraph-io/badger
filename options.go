@@ -68,6 +68,11 @@ type Options struct {
 	CompactL0OnClose  bool
 	LogRotatesToFlush int32
 
+	// BypassLockGaurd will bypass the lock guard on badger. Bypassing lock
+	// guard can cause data corruption if multiple badger instances are using
+	// the same directory. Use this options with caution.
+	BypassLockGuard bool
+
 	// ChecksumVerificationMode decides when db should verify checksum for SStable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
 
@@ -432,5 +437,18 @@ func (opt Options) WithLogRotatesToFlush(val int32) Options {
 // The default value of KeepL0InMemory is true.
 func (opt Options) WithKeepL0InMemory(val bool) Options {
 	opt.KeepL0InMemory = val
+	return opt
+}
+
+// WithBypassLockGuard returns a new Options value with BypassLockGuard
+// set to the given value.
+//
+// When BypassLockGuard option is set, badger will not acquire a lock on the
+// directory. This could lead to data corruption if multiple badger instances
+// write to the same data directory. Use with option with caution.
+//
+// The default value of BypassLockGuard is false.
+func (opt Options) WithBypassLockGuard(b bool) Options {
+	opt.BypassLockGuard = b
 	return opt
 }
