@@ -104,9 +104,9 @@ func NewTableBuilder(opts Options) *Builder {
 		return b
 	}
 
-	b.blockChan = make(chan *bblock, 1000)
+	count := 2 * runtime.NumCPU()
+	b.blockChan = make(chan *bblock, count*2)
 
-	count := runtime.NumCPU()
 	b.wg.Add(count)
 	for i := 0; i < count; i++ {
 		go b.handleBlock()
