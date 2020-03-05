@@ -62,24 +62,42 @@ func (opt *Options) Debugf(format string, v ...interface{}) {
 	opt.Logger.Debugf(format, v...)
 }
 
+const (
+	DEBUG int = iota
+	INFO
+	WARNING
+	ERROR
+)
+
 type defaultLog struct {
 	*log.Logger
+	level int
 }
 
-var defaultLogger = &defaultLog{Logger: log.New(os.Stderr, "badger ", log.LstdFlags)}
+func defaultLogger(level int) *defaultLog {
+	return &defaultLog{Logger: log.New(os.Stderr, "badger ", log.LstdFlags), level: level}
+}
 
 func (l *defaultLog) Errorf(f string, v ...interface{}) {
-	l.Printf("ERROR: "+f, v...)
+	if l.level <= ERROR {
+		l.Printf("ERROR: "+f, v...)
+	}
 }
 
 func (l *defaultLog) Warningf(f string, v ...interface{}) {
-	l.Printf("WARNING: "+f, v...)
+	if l.level <= WARNING {
+		l.Printf("WARNING: "+f, v...)
+	}
 }
 
 func (l *defaultLog) Infof(f string, v ...interface{}) {
-	l.Printf("INFO: "+f, v...)
+	if l.level <= INFO {
+		l.Printf("INFO: "+f, v...)
+	}
 }
 
 func (l *defaultLog) Debugf(f string, v ...interface{}) {
-	l.Printf("DEBUG: "+f, v...)
+	if l.level <= DEBUG {
+		l.Printf("DEBUG: "+f, v...)
+	}
 }

@@ -145,7 +145,7 @@ func DefaultOptions(path string) Options {
 		ValueLogMaxEntries:            1000000,
 		ValueThreshold:                32,
 		Truncate:                      false,
-		Logger:                        defaultLogger,
+		Logger:                        defaultLogger(INFO),
 		LogRotatesToFlush:             2,
 		EventLogging:                  true,
 		EncryptionKey:                 []byte{},
@@ -203,6 +203,16 @@ func (opt Options) WithDir(val string) Options {
 // This is set automatically to be the path given to `DefaultOptions`.
 func (opt Options) WithValueDir(val string) Options {
 	opt.ValueDir = val
+	return opt
+}
+
+// WithLoggingLevel returns a new Options value with LoggingLevel set to the given value.
+//
+// LoggingLevel sets the level of logging - DEBUG, INFO, WARNING or ERROR.
+//
+// The default value of LoggingLevel is INFO.
+func (opt Options) WithLoggingLevel(val int) Options {
+	opt.Logger = defaultLogger(val)
 	return opt
 }
 
