@@ -585,7 +585,7 @@ func (opt Options) WithZSTDCompressionLevel(cLevel int) Options {
 //
 // When BypassLockGuard option is set, badger will not acquire a lock on the
 // directory. This could lead to data corruption if multiple badger instances
-// write to the same data directory. Use with option with caution.
+// write to the same data directory. Use this option with caution.
 //
 // The default value of BypassLockGuard is false.
 func (opt Options) WithBypassLockGuard(b bool) Options {
