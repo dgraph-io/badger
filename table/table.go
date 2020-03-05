@@ -75,6 +75,13 @@ type Options struct {
 	ZSTDCompressionLevel int
 }
 
+var slicePool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 5<<10)
+		return &b
+	},
+}
+
 // TableInterface is useful for testing.
 type TableInterface interface {
 	Smallest() []byte
@@ -88,7 +95,6 @@ type Table struct {
 
 	fd        *os.File // Own fd.
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
-	buf       []byte   // Used for decompression.
 
 	blockIndex []*pb.BlockOffset
 	ref        int32 // For file garbage collection. Atomic.
@@ -620,19 +626,18 @@ func NewFilename(id uint64, dir string) string {
 
 // decompressData decompresses the given data.
 func (t *Table) decompressData(data []byte) ([]byte, error) {
-	// The additional space in buf is to accommodate encryption header and the
-	// increase in size because of the compression.
-	if t.buf == nil {
-		t.buf = make([]byte, t.opt.BlockSize+1000)
-	}
-	t.buf = t.buf[:0]
+	buf := slicePool.Get().(*[]byte)
+	*buf = (*buf)[:0]
+
 	switch t.opt.Compression {
 	case options.None:
 		return data, nil
 	case options.Snappy:
-		return snappy.Decode(t.buf, data)
+		slicePool.Put(&data)
+		return snappy.Decode(*buf, data)
 	case options.ZSTD:
-		return y.ZSTDDecompress(t.buf, data)
+		slicePool.Put(&data)
+		return y.ZSTDDecompress(*buf, data)
 	}
 	return nil, errors.New("Unsupported compression type")
 }
