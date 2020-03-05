@@ -20,14 +20,16 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"math/rand"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 func getSortedKVList(valueSize, listSize int) *pb.KVList {
@@ -49,11 +51,7 @@ func getSortedKVList(valueSize, listSize int) *pb.KVList {
 
 // check if we can read values after writing using stream writer
 func TestStreamWriter1(t *testing.T) {
-	normalModeOpts := DefaultOptions("")
-	managedModeOpts := DefaultOptions("")
-	managedModeOpts.managedTxns = true
-
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
+	test := func(t *testing.T, opts *Options) {
 		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
@@ -86,15 +84,25 @@ func TestStreamWriter1(t *testing.T) {
 			require.NoError(t, err, "error while retrieving key")
 		})
 	}
+	t.Run("Normal mode", func(t *testing.T) {
+		normalModeOpts := getTestOptions("")
+		test(t, &normalModeOpts)
+	})
+	t.Run("Managed mode", func(t *testing.T) {
+		managedModeOpts := getTestOptions("")
+		managedModeOpts.managedTxns = true
+		test(t, &managedModeOpts)
+	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		diskLessModeOpts := getTestOptions("")
+		diskLessModeOpts.InMemory = true
+		test(t, &diskLessModeOpts)
+	})
 }
 
 // write more keys to db after writing keys using stream writer
 func TestStreamWriter2(t *testing.T) {
-	normalModeOpts := DefaultOptions("")
-	managedModeOpts := DefaultOptions("")
-	managedModeOpts.managedTxns = true
-
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
+	test := func(t *testing.T, opts *Options) {
 		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
@@ -139,14 +147,24 @@ func TestStreamWriter2(t *testing.T) {
 			require.Nil(t, err, "error should be nil while iterating")
 		})
 	}
+	t.Run("Normal mode", func(t *testing.T) {
+		normalModeOpts := getTestOptions("")
+		test(t, &normalModeOpts)
+	})
+	t.Run("Managed mode", func(t *testing.T) {
+		managedModeOpts := getTestOptions("")
+		managedModeOpts.managedTxns = true
+		test(t, &managedModeOpts)
+	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		diskLessModeOpts := getTestOptions("")
+		diskLessModeOpts.InMemory = true
+		test(t, &diskLessModeOpts)
+	})
 }
 
 func TestStreamWriter3(t *testing.T) {
-	normalModeOpts := DefaultOptions("")
-	managedModeOpts := DefaultOptions("")
-	managedModeOpts.managedTxns = true
-
-	for _, opts := range []*Options{&normalModeOpts, &managedModeOpts} {
+	test := func(t *testing.T, opts *Options) {
 		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
@@ -218,6 +236,20 @@ func TestStreamWriter3(t *testing.T) {
 			require.Nil(t, err, "error should be nil while iterating")
 		})
 	}
+	t.Run("Normal mode", func(t *testing.T) {
+		normalModeOpts := getTestOptions("")
+		test(t, &normalModeOpts)
+	})
+	t.Run("Managed mode", func(t *testing.T) {
+		managedModeOpts := getTestOptions("")
+		managedModeOpts.managedTxns = true
+		test(t, &managedModeOpts)
+	})
+	t.Run("InMemory mode", func(t *testing.T) {
+		diskLessModeOpts := getTestOptions("")
+		diskLessModeOpts.InMemory = true
+		test(t, &diskLessModeOpts)
+	})
 }
 
 // After inserting all data from streams, StreamWriter reinitializes Oracle and updates its nextTs
@@ -292,7 +324,6 @@ func TestStreamWriter5(t *testing.T) {
 // if those are going to same table.
 func TestStreamWriter6(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		fmt.Println(db.opt.Dir)
 		list := &pb.KVList{}
 		str := []string{"a", "a", "b", "b", "c", "c"}
 		ver := 1
@@ -324,9 +355,174 @@ func TestStreamWriter6(t *testing.T) {
 			}
 		}
 		require.NoError(t, db.Close())
-
 		db, err := Open(db.opt)
 		require.NoError(t, err)
 		require.NoError(t, db.Close())
 	})
+}
+
+func TestStreamDone(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+
+		var val [10]byte
+		rand.Read(val[:])
+		for i := 0; i < 10; i++ {
+			list := &pb.KVList{}
+			kv1 := &pb.KV{
+				Key:      []byte(fmt.Sprintf("%d", i)),
+				Value:    val[:],
+				Version:  1,
+				StreamId: uint32(i),
+			}
+			kv2 := &pb.KV{
+				StreamId:   uint32(i),
+				StreamDone: true,
+			}
+			list.Kv = append(list.Kv, kv1, kv2)
+			require.NoError(t, sw.Write(list), "sw.Write() failed")
+		}
+		require.NoError(t, sw.Flush(), "sw.Flush() failed")
+		require.NoError(t, db.Close())
+
+		var err error
+		db, err = Open(db.opt)
+		require.NoError(t, err)
+		require.NoError(t, db.Close())
+	})
+}
+
+func TestSendOnClosedStream(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
+	opts := getTestOptions(dir)
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	sw := db.NewStreamWriter()
+	require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+
+	var val [10]byte
+	rand.Read(val[:])
+	list := &pb.KVList{}
+	kv1 := &pb.KV{
+		Key:      []byte(fmt.Sprintf("%d", 1)),
+		Value:    val[:],
+		Version:  1,
+		StreamId: uint32(1),
+	}
+	kv2 := &pb.KV{
+		StreamId:   uint32(1),
+		StreamDone: true,
+	}
+	list.Kv = append(list.Kv, kv1, kv2)
+	require.NoError(t, sw.Write(list), "sw.Write() failed")
+
+	// Defer for panic.
+	defer func() {
+		require.NotNil(t, recover(), "should have paniced")
+		require.NoError(t, sw.Flush())
+		require.NoError(t, db.Close())
+	}()
+	// Send once stream is closed.
+	list = &pb.KVList{}
+	kv1 = &pb.KV{
+		Key:      []byte(fmt.Sprintf("%d", 2)),
+		Value:    val[:],
+		Version:  1,
+		StreamId: uint32(1),
+	}
+	list.Kv = append(list.Kv, kv1)
+	sw.Write(list)
+}
+
+func TestSendOnClosedStream2(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, os.RemoveAll(dir))
+	}()
+	opts := getTestOptions(dir)
+	db, err := Open(opts)
+	require.NoError(t, err)
+
+	sw := db.NewStreamWriter()
+	require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+
+	var val [10]byte
+	rand.Read(val[:])
+	list := &pb.KVList{}
+	kv1 := &pb.KV{
+		Key:      []byte(fmt.Sprintf("%d", 1)),
+		Value:    val[:],
+		Version:  1,
+		StreamId: uint32(1),
+	}
+	kv2 := &pb.KV{
+		StreamId:   uint32(1),
+		StreamDone: true,
+	}
+	kv3 := &pb.KV{
+		Key:      []byte(fmt.Sprintf("%d", 2)),
+		Value:    val[:],
+		Version:  1,
+		StreamId: uint32(1),
+	}
+	list.Kv = append(list.Kv, kv1, kv2, kv3)
+
+	// Defer for panic.
+	defer func() {
+		require.NotNil(t, recover(), "should have paniced")
+		require.NoError(t, sw.Flush())
+		require.NoError(t, db.Close())
+	}()
+
+	require.NoError(t, sw.Write(list), "sw.Write() failed")
+}
+
+func TestStreamWriterEncrypted(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+
+	opts := DefaultOptions(dir)
+	defer removeDir(dir)
+
+	opts = opts.WithEncryptionKey([]byte("badgerkey16bytes"))
+	db, err := Open(opts)
+	require.NoError(t, err)
+	key := []byte("mykey")
+	value := []byte("myvalue")
+
+	list := &pb.KVList{}
+	list.Kv = append(list.Kv, &pb.KV{
+		Key:     key,
+		Value:   value,
+		Version: 20,
+	})
+
+	sw := db.NewStreamWriter()
+	require.NoError(t, sw.Prepare(), "Prepare failed")
+	require.NoError(t, sw.Write(list), "Write failed")
+	require.NoError(t, sw.Flush(), "Flush failed")
+
+	err = db.View(func(txn *Txn) error {
+		item, err := txn.Get(key)
+		require.NoError(t, err)
+		val, err := item.ValueCopy(nil)
+		require.Equal(t, value, val)
+		require.NoError(t, err)
+		return nil
+	})
+	require.NoError(t, err, "Error while retrieving key")
+	require.NoError(t, db.Close())
+
+	opts = opts.WithEncryptionKey([]byte("badgerkey16bytes"))
+	db, err = Open(opts)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
 }

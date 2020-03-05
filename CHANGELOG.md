@@ -4,7 +4,125 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Serialization Versioning](VERSIONING.md).
 
-## [Unreleased]
+## [2.0.2-rc1] - 2020-02-26
+
+### Fixed
+
+- Cast sz to uint32 to fix compilation on 32 bit. (#1175)
+- Fix checkOverlap in compaction. (#1166)
+- Avoid sync in inmemory mode. (#1190)
+- Support disabling the cache completely. (#1185)
+- Add support for caching bloomfilters. (#1204)
+- Fix int overflow for 32bit. (#1216)
+- Remove the 'this entry should've caught' log from value.go. (#1170)
+- Rework concurrency semantics of valueLog.maxFid.  (#1187)
+
+### Performance
+
+- Use fastRand instead of locked-rand in skiplist. (#1173)
+- Improve write stalling on level 0 and 1. (#1186)
+- Disable compression and set ZSTD Compression Level to 1. (#1191)
+
+## [2.0.1] - 2020-01-02 
+
+### New APIs
+
+- badger.Options
+  - WithInMemory (f5b6321)
+  - WithZSTDCompressionLevel (3eb4e72)
+  
+- Badger.TableInfo
+  - EstimatedSz (f46f8ea)
+  
+### Features
+
+- Introduce in-memory mode in badger. (#1113)
+
+### Fixed
+
+- Limit manifest's change set size. (#1119)
+- Cast idx to uint32 to fix compilation on i386. (#1118)
+- Fix request increment ref bug. (#1121)
+- Fix windows dataloss issue. (#1134)
+- Fix VerifyValueChecksum checks. (#1138)
+- Fix encryption in stream writer. (#1146)
+- Fix segmentation fault in vlog.Read. (header.Decode) (#1150) 
+- Fix merge iterator duplicates issue. (#1157)
+
+### Performance
+
+- Set level 15 as default compression level in Zstd. (#1111) 
+- Optimize createTable in stream_writer.go. (#1132)
+
+## [2.0.0] - 2019-11-12
+
+### New APIs
+
+- badger.DB
+  - NewWriteBatchAt (7f43769)
+  - CacheMetrics (b9056f1)
+
+- badger.Options
+  - WithMaxCacheSize (b9056f1)
+  - WithEventLogging (75c6a44)
+  - WithBlockSize (1439463)
+  - WithBloomFalsePositive (1439463)
+  - WithKeepL0InMemory (ee70ff2)
+  - WithVerifyValueChecksum (ee70ff2)
+  - WithCompression (5f3b061)
+  - WithEncryptionKey (a425b0e)
+  - WithEncryptionKeyRotationDuration (a425b0e)
+  - WithChecksumVerificationMode (7b4083d)
+  
+### Features
+
+- Data cache to speed up lookups and iterations. (#1066)
+- Data compression. (#1013)
+- Data encryption-at-rest. (#1042)
+
+### Fixed
+
+- Fix deadlock when flushing discard stats. (#976)
+- Set move key's expiresAt for keys with TTL. (#1006)
+- Fix unsafe usage in Decode. (#1097)
+- Fix race condition on db.orc.nextTxnTs. (#1101)
+- Fix level 0 GC dataloss bug. (#1090)
+- Fix deadlock in discard stats. (#1070)
+- Support checksum verification for values read from vlog. (#1052)
+- Store entire L0 in memory. (#963)
+- Fix table.Smallest/Biggest and iterator Prefix bug. (#997)
+- Use standard proto functions for Marshal/Unmarshal and Size. (#994)
+- Fix boundaries on GC batch size. (#987)
+- VlogSize to store correct directory name to expvar.Map. (#956)
+- Fix transaction too big issue in restore.  (#957)
+- Fix race condition in updateDiscardStats. (#973)
+- Cast results of len to uint32 to fix compilation in i386 arch. (#961)
+- Making the stream writer APIs goroutine-safe. (#959)
+- Fix prefix bug in key iterator and allow all versions. (#950)
+- Drop discard stats if we can't unmarshal it. (#936)
+- Fix race condition in flushDiscardStats function. (#921)
+- Ensure rewrite in vlog is within transactional limits. (#911)
+- Fix discard stats moved by GC bug. (#929)
+- Fix busy-wait loop in Watermark. (#920)
+
+### Performance
+
+- Introduce fast merge iterator. (#1080)
+- Binary search based table picker. (#983)
+- Flush vlog buffer if it grows beyond threshold. (#1067)
+- Introduce StreamDone in Stream Writer. (#1061)
+- Performance Improvements to block iterator. (#977)
+- Prevent unnecessary safecopy in iterator parseKV. (#971)
+- Use pointers instead of binary encoding. (#965)
+- Reuse block iterator inside table iterator. (#972)
+- [breaking/format] Remove vlen from entry header. (#945)
+- Replace FarmHash with AESHash for Oracle conflicts. (#952)
+- [breaking/format] Optimize Bloom filters. (#940)
+- [breaking/format] Use varint for header encoding (without header length). (#935)
+- Change file picking strategy in compaction. (#894)
+- [breaking/format] Block level changes. (#880)
+- [breaking/format] Add key-offset index to the end of SST table. (#881)
+
 
 ## [1.6.0] - 2019-07-01
 
@@ -175,7 +293,9 @@ Bug fix:
 ## [1.0.1] - 2017-11-06
 * Fix an uint16 overflow when resizing key slice
 
-[Unreleased]: https://github.com/dgraph-io/badger/compare/v1.6.0...HEAD
+[2.0.2-rc1]: https://github.com/dgraph-io/badger/compare/v2.0.1...v2.0.2-rc1
+[2.0.1]: https://github.com/dgraph-io/badger/compare/v2.0.0...v2.0.1
+[2.0.0]: https://github.com/dgraph-io/badger/compare/v1.6.0...v2.0.0
 [1.6.0]: https://github.com/dgraph-io/badger/compare/v1.5.5...v1.6.0
 [1.5.5]: https://github.com/dgraph-io/badger/compare/v1.5.3...v1.5.5
 [1.5.3]: https://github.com/dgraph-io/badger/compare/v1.5.2...v1.5.3

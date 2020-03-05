@@ -29,6 +29,8 @@ message KV {
 
   // Stream id is used to identify which stream the KV came from.
   uint32 stream_id = 10;
+  // Stream done is used to indicate end of stream.
+  bool stream_done = 11;
 }
 
 message KVList {
@@ -36,18 +38,25 @@ message KVList {
 }
 
 message ManifestChangeSet {
-        // A set of changes that are applied atomically.
-        repeated ManifestChange changes = 1;
+  // A set of changes that are applied atomically.
+  repeated ManifestChange changes = 1;
+}
+
+enum EncryptionAlgo {
+  aes = 0;
 }
 
 message ManifestChange {
-        uint64 Id = 1;
-        enum Operation {
-                CREATE = 0;
-                DELETE = 1;
-        }
-        Operation Op   = 2;
-        uint32 Level   = 3; // Only used for CREATE
+  uint64 Id = 1;            // Table ID.
+  enum Operation {
+          CREATE = 0;
+          DELETE = 1;
+  }
+  Operation Op   = 2;
+  uint32 Level   = 3;       // Only used for CREATE.
+  uint64 key_id  = 4;
+  EncryptionAlgo encryption_algo = 5;
+  uint32 compression = 6;   // Only used for CREATE Op.
 }
 
 message BlockOffset {
@@ -59,6 +68,7 @@ message BlockOffset {
 message TableIndex {
   repeated BlockOffset offsets = 1;
   bytes bloom_filter = 2;
+  uint64 estimated_size = 3;
 }
 
 message Checksum {
@@ -68,4 +78,11 @@ message Checksum {
   }
   Algorithm algo = 1; // For storing type of Checksum algorithm used
   uint64 sum = 2;
+}
+
+message DataKey {
+  uint64 key_id      = 1;
+  bytes  data       = 2;
+  bytes  iv         = 3;
+  int64  created_at = 4;
 }

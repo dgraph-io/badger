@@ -26,7 +26,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 )
@@ -294,7 +294,7 @@ func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
 
 func (txn *Txn) checkSize(e *Entry) error {
 	count := txn.count + 1
-	// Extra bytes for version in key.
+	// Extra bytes for the version in key.
 	size := txn.size + int64(e.estimateSize(txn.db.opt.ValueThreshold)) + 10
 	if count >= txn.db.opt.maxBatchCount || size >= txn.db.opt.maxBatchSize {
 		return ErrTxnTooBig
@@ -327,6 +327,8 @@ func (txn *Txn) modify(e *Entry) error {
 		return exceedsSize("Key", maxKeySize, e.Key)
 	case int64(len(e.Value)) > txn.db.opt.ValueLogFileSize:
 		return exceedsSize("Value", txn.db.opt.ValueLogFileSize, e.Value)
+	case txn.db.opt.InMemory && len(e.Value) > txn.db.opt.ValueThreshold:
+		return exceedsSize("Value", int64(txn.db.opt.ValueThreshold), e.Value)
 	}
 
 	if err := txn.checkSize(e); err != nil {

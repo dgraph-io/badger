@@ -17,8 +17,11 @@
 package table
 
 import (
+	"crypto/aes"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -26,21 +29,25 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto"
 	"github.com/dgraph-io/ristretto/z"
 )
 
 const fileSuffix = ".sst"
+const intSize = int(unsafe.Sizeof(int(0)))
 
 // Options contains configurable options for Table/Builder.
 type Options struct {
-	// Options for Openning Table.
+	// Options for Opening/Building Table.
 
 	// ChkMode is the checksum verification mode for Table.
 	ChkMode options.ChecksumVerificationMode
@@ -55,6 +62,17 @@ type Options struct {
 
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
+
+	// DataKey is the key used to decrypt the encrypted text.
+	DataKey *pb.DataKey
+
+	// Compression indicates the compression algorithm used for block compression.
+	Compression options.CompressionType
+
+	Cache *ristretto.Cache
+
+	// ZSTDCompressionLevel is the ZSTD compression level used for compressing blocks.
+	ZSTDCompressionLevel int
 }
 
 // TableInterface is useful for testing.
@@ -64,7 +82,7 @@ type TableInterface interface {
 	DoesNotHave(hash uint64) bool
 }
 
-// Table represents a loaded table file with the info we have about it
+// Table represents a loaded table file with the info we have about it.
 type Table struct {
 	sync.Mutex
 
@@ -80,11 +98,19 @@ type Table struct {
 	smallest, biggest []byte // Smallest and largest keys (with timestamps).
 	id                uint64 // file id, part of filename
 
-	bf       *z.Bloom
 	Checksum []byte
+	// Stores the total size of key-values stored in this table (including the size on vlog).
+	estimatedSize uint64
+	indexStart    int
+	indexLen      int
 
 	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
 	opt        *Options
+}
+
+// CompressionType returns the compression algorithm used for block compression.
+func (t *Table) CompressionType() options.CompressionType {
+	return t.opt.Compression
 }
 
 // IncrRef increments the refcount (having to do with whether the file should be deleted)
@@ -122,6 +148,13 @@ func (t *Table) DecrRef() error {
 		if err := os.Remove(filename); err != nil {
 			return err
 		}
+		// Delete all blocks from the cache.
+		for i := range t.blockIndex {
+			t.opt.Cache.Del(t.blockCacheKey(i))
+		}
+		// Delete bloom filter from the cache.
+		t.opt.Cache.Del(t.bfCacheKey())
+
 	}
 	return nil
 }
@@ -133,6 +166,11 @@ type block struct {
 	entriesIndexStart int // start index of entryOffsets list
 	entryOffsets      []uint32
 	chkLen            int // checksum length
+}
+
+func (b *block) size() int64 {
+	return int64(3*intSize /* Size of the offset, entriesIndexStart and chkLen */ +
+		cap(b.data) + cap(b.checksum) + cap(b.entryOffsets)*4)
 }
 
 func (b block) verifyCheckSum() error {
@@ -203,6 +241,7 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 	if err := t.initBiggestAndSmallest(); err != nil {
 		return nil, errors.Wrapf(err, "failed to initialize table")
 	}
+
 	if opts.ChkMode == options.OnTableRead || opts.ChkMode == options.OnTableAndBlockRead {
 		if err := t.VerifyChecksum(); err != nil {
 			_ = fd.Close()
@@ -215,10 +254,11 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 
 // OpenInMemoryTable is similar to OpenTable but it opens a new table from the provided data.
 // OpenInMemoryTable is used for L0 tables.
-func OpenInMemoryTable(data []byte, id uint64) (*Table, error) {
+func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
+	opt.LoadingMode = options.LoadToRAM
 	t := &Table{
 		ref:        1, // Caller is given one reference.
-		opt:        &Options{LoadingMode: options.LoadToRAM},
+		opt:        opt,
 		mmap:       data,
 		tableSize:  len(data),
 		IsInmemory: true,
@@ -241,9 +281,10 @@ func (t *Table) initBiggestAndSmallest() error {
 	it2 := t.NewIterator(true)
 	defer it2.Close()
 	it2.Rewind()
-	if it2.Valid() {
-		t.biggest = it2.Key()
+	if !it2.Valid() {
+		return errors.Wrapf(it2.err, "failed to initialize biggest for table %s", t.Filename())
 	}
+	t.biggest = it2.Key()
 	return nil
 }
 
@@ -289,6 +330,9 @@ func (t *Table) readIndex() error {
 	readPos -= 4
 	buf := t.readNoFail(readPos, 4)
 	checksumLen := int(y.BytesToU32(buf))
+	if checksumLen < 0 {
+		return errors.New("checksum length less than zero. Data corrupted")
+	}
 
 	// Read checksum.
 	expectedChk := &pb.Checksum{}
@@ -301,21 +345,42 @@ func (t *Table) readIndex() error {
 	// Read index size from the footer.
 	readPos -= 4
 	buf = t.readNoFail(readPos, 4)
-	indexLen := int(y.BytesToU32(buf))
+	t.indexLen = int(y.BytesToU32(buf))
+
 	// Read index.
-	readPos -= indexLen
-	data := t.readNoFail(readPos, indexLen)
+	readPos -= t.indexLen
+	t.indexStart = readPos
+	data := t.readNoFail(readPos, t.indexLen)
 
 	if err := y.VerifyChecksum(data, expectedChk); err != nil {
 		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename())
 	}
 
 	index := pb.TableIndex{}
+	// Decrypt the table index if it is encrypted.
+	if t.shouldDecrypt() {
+		var err error
+		if data, err = t.decrypt(data); err != nil {
+			return y.Wrapf(err,
+				"Error while decrypting table index for the table %d in Table.readIndex", t.id)
+		}
+	}
 	err := proto.Unmarshal(data, &index)
 	y.Check(err)
 
-	t.bf = z.JSONUnmarshal(index.BloomFilter)
+	t.estimatedSize = index.EstimatedSize
 	t.blockIndex = index.Offsets
+
+	// Avoid the cost of unmarshalling the bloom filters if the cache is absent.
+	if t.opt.Cache != nil {
+		var bf *z.Bloom
+		if bf, err = z.JSONUnmarshal(index.BloomFilter); err != nil {
+			return y.Wrapf(err, "failed to unmarshal bloom filter for the table %d in Table.readIndex",
+				t.id)
+		}
+
+		t.opt.Cache.Set(t.bfCacheKey(), bf, int64(len(index.BloomFilter)))
+	}
 	return nil
 }
 
@@ -324,17 +389,47 @@ func (t *Table) block(idx int) (*block, error) {
 	if idx >= len(t.blockIndex) {
 		return nil, errors.New("block out of index")
 	}
-
+	if t.opt.Cache != nil {
+		key := t.blockCacheKey(idx)
+		blk, ok := t.opt.Cache.Get(key)
+		if ok && blk != nil {
+			return blk.(*block), nil
+		}
+	}
 	ko := t.blockIndex[idx]
 	blk := &block{
 		offset: int(ko.Offset),
 	}
 	var err error
-	blk.data, err = t.read(blk.offset, int(ko.Len))
+	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
+		return nil, errors.Wrapf(err,
+			"failed to read from file: %s at offset: %d, len: %d", t.fd.Name(), blk.offset, ko.Len)
+	}
+
+	if t.shouldDecrypt() {
+		// Decrypt the block if it is encrypted.
+		if blk.data, err = t.decrypt(blk.data); err != nil {
+			return nil, err
+		}
+	}
+
+	blk.data, err = t.decompressData(blk.data)
+	if err != nil {
+		return nil, errors.Wrapf(err,
+			"failed to decode compressed data in file: %s at offset: %d, len: %d",
+			t.fd.Name(), blk.offset, ko.Len)
+	}
 
 	// Read meta data related to block.
 	readPos := len(blk.data) - 4 // First read checksum length.
 	blk.chkLen = int(y.BytesToU32(blk.data[readPos : readPos+4]))
+
+	// Checksum length greater than block size could happen if the table was compressed and
+	// it was opened with an incorrect compression algorithm (or the data was corrupted).
+	if blk.chkLen > len(blk.data) {
+		return nil, errors.New("invalid checksum length. Either the data is" +
+			"corrupted or the table options are incorrectly set")
+	}
 
 	// Read checksum and store it
 	readPos -= blk.chkLen
@@ -359,8 +454,37 @@ func (t *Table) block(idx int) (*block, error) {
 			return nil, err
 		}
 	}
-	return blk, err
+	if t.opt.Cache != nil {
+		key := t.blockCacheKey(idx)
+		t.opt.Cache.Set(key, blk, blk.size())
+	}
+	return blk, nil
 }
+
+// bfCacheKey returns the cache key for bloom filter.
+func (t *Table) bfCacheKey() []byte {
+	y.AssertTrue(t.id < math.MaxUint32)
+	buf := make([]byte, 4)
+	binary.BigEndian.PutUint32(buf, uint32(t.id))
+
+	// Without the "bf" prefix, we will have conflict with the blockCacheKey.
+	return append([]byte("bf"), buf...)
+}
+
+func (t *Table) blockCacheKey(idx int) []byte {
+	y.AssertTrue(t.id < math.MaxUint32)
+	y.AssertTrue(uint32(idx) < math.MaxUint32)
+
+	buf := make([]byte, 8)
+	// Assume t.ID does not overflow uint32.
+	binary.BigEndian.PutUint32(buf[:4], uint32(t.ID()))
+	binary.BigEndian.PutUint32(buf[4:], uint32(idx))
+	return buf
+}
+
+// EstimatedSize returns the total size of key-values stored in this table (including the
+// disk space occupied on the value log).
+func (t *Table) EstimatedSize() uint64 { return t.estimatedSize }
 
 // Size is its file size in bytes
 func (t *Table) Size() int64 { return int64(t.tableSize) }
@@ -379,7 +503,44 @@ func (t *Table) ID() uint64 { return t.id }
 
 // DoesNotHave returns true if (but not "only if") the table does not have the key hash.
 // It does a bloom filter lookup.
-func (t *Table) DoesNotHave(hash uint64) bool { return !t.bf.Has(hash) }
+func (t *Table) DoesNotHave(hash uint64) bool {
+	var bf *z.Bloom
+
+	// Return fast if cache is absent.
+	if t.opt.Cache == nil {
+		bf, _ := t.readBloomFilter()
+		return !bf.Has(hash)
+	}
+
+	// Check if the bloomfilter exists in the cache.
+	if b, ok := t.opt.Cache.Get(t.bfCacheKey()); b != nil && ok {
+		bf = b.(*z.Bloom)
+		return !bf.Has(hash)
+	}
+
+	bf, sz := t.readBloomFilter()
+	t.opt.Cache.Set(t.bfCacheKey(), bf, int64(sz))
+	return !bf.Has(hash)
+}
+
+// readBloomFilter reads the bloom filter from the SST and returns its length
+// along with the bloom filter.
+func (t *Table) readBloomFilter() (*z.Bloom, int) {
+	// Read bloom filter from the SST.
+	data := t.readNoFail(t.indexStart, t.indexLen)
+	index := pb.TableIndex{}
+	var err error
+	// Decrypt the table index if it is encrypted.
+	if t.shouldDecrypt() {
+		data, err = t.decrypt(data)
+		y.Check(err)
+	}
+	y.Check(proto.Unmarshal(data, &index))
+
+	bf, err := z.JSONUnmarshal(index.BloomFilter)
+	y.Check(err)
+	return bf, len(index.BloomFilter)
+}
 
 // VerifyChecksum verifies checksum for all blocks of table. This function is called by
 // OpenTable() function. This function is also called inside levelsController.VerifyChecksum().
@@ -403,6 +564,30 @@ func (t *Table) VerifyChecksum() error {
 	}
 
 	return nil
+}
+
+// shouldDecrypt tells whether to decrypt or not. We decrypt only if the datakey exist
+// for the table.
+func (t *Table) shouldDecrypt() bool {
+	return t.opt.DataKey != nil
+}
+
+// KeyID returns data key id.
+func (t *Table) KeyID() uint64 {
+	if t.opt.DataKey != nil {
+		return t.opt.DataKey.KeyId
+	}
+	// By default it's 0, if it is plain text.
+	return 0
+}
+
+// decrypt decrypts the given data. It should be called only after checking shouldDecrypt.
+func (t *Table) decrypt(data []byte) ([]byte, error) {
+	// Last BlockSize bytes of the data is the IV.
+	iv := data[len(data)-aes.BlockSize:]
+	// Rest all bytes are data.
+	data = data[:len(data)-aes.BlockSize]
+	return y.XORBlock(data, t.opt.DataKey.Data, iv)
 }
 
 // ParseFileID reads the file id out of a filename.
@@ -430,4 +615,17 @@ func IDToFilename(id uint64) string {
 // filepath.
 func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, IDToFilename(id))
+}
+
+// decompressData decompresses the given data.
+func (t *Table) decompressData(data []byte) ([]byte, error) {
+	switch t.opt.Compression {
+	case options.None:
+		return data, nil
+	case options.Snappy:
+		return snappy.Decode(nil, data)
+	case options.ZSTD:
+		return y.ZSTDDecompress(nil, data)
+	}
+	return nil, errors.New("Unsupported compression type")
 }

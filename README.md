@@ -2,9 +2,10 @@
 
 ![Badger mascot](images/diggy-shadow.png)
 
-BadgerDB is an embeddable, persistent and fast key-value (KV) database
-written in pure Go. It's meant to be a performant alternative to non-Go-based
-key-value stores like [RocksDB](https://github.com/facebook/rocksdb).
+BadgerDB is an embeddable, persistent and fast key-value (KV) database written
+in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
+fast, distributed graph database. It's meant to be a performant alternative to
+non-Go-based key-value stores like RocksDB.
 
 ## Project Status [Jun 26, 2019]
 
@@ -67,6 +68,8 @@ $ go get github.com/dgraph-io/badger/...
 This will retrieve the library and install the `badger` command line
 utility into your `$GOBIN` path.
 
+##### Note: Badger does not directly use CGO but it relies on https://github.com/DataDog/zstd for compression and it requires gcc/cgo. If you wish to use badger without gcc/cgo, you can run `CGO_ENABLED=0 go get github.com/dgraph-io/badger/...` which will download badger without the support for ZSTD compression algorithm.
+
 #### Choosing a version
 
 BadgerDB is a pretty special package from the point of view that the most important change we can
@@ -109,7 +112,7 @@ import (
 func main() {
   // Open the Badger database located in the /tmp/badger directory.
   // It will be created if it doesn't exist.
-  db, err := badger.Open(badger.DefaultOptions("tmp/badger"))
+  db, err := badger.Open(badger.DefaultOptions("/tmp/badger"))
   if err != nil {
 	  log.Fatal(err)
   }
@@ -120,6 +123,16 @@ func main() {
 
 Please note that Badger obtains a lock on the directories so multiple processes
 cannot open the same database at the same time.
+
+#### In-Memory Mode/Diskless Mode
+By default, Badger ensures all the data is persisted to the disk. It also supports a pure
+in-memory mode. When Badger is running in in-memory mode, all the data is stored in the memory.
+Reads and writes are much faster in in-memory mode, but all the data stored in Badger will be lost
+in case of a crash or close. To open badger in in-memory mode, set the `InMemory` option.
+
+```
+opt := badger.DefaultOptions("").WithInMemory(true)
+```
 
 ### Transactions
 
@@ -166,7 +179,7 @@ not checking for errors in some places for simplicity):
 updates := make(map[string]string)
 txn := db.NewTransaction(true)
 for k,v := range updates {
-  if err := txn.Set([]byte(k),[]byte(v)); err == ErrTxnTooBig {
+  if err := txn.Set([]byte(k),[]byte(v)); err == badger.ErrTxnTooBig {
     _ = txn.Commit()
     txn = db.NewTransaction(true)
     _ = txn.Set([]byte(k),[]byte(v))
@@ -239,7 +252,7 @@ on it.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42"))
+  e := badger.NewEntry([]byte("answer"), []byte("42"))
   err := txn.SetEntry(e)
   return err
 })
@@ -388,7 +401,7 @@ and `Txn.SetEntry()` API methods.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42")).WithTTL(time.Hour)
+  e := badger.NewEntry([]byte("answer"), []byte("42")).WithTTL(time.Hour)
   err := txn.SetEntry(e)
   return err
 })
@@ -401,7 +414,7 @@ metadata can be set using `Entry.WithMeta()` and `Txn.SetEntry()` API methods.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1))
+  e := badger.NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1))
   err := txn.SetEntry(e)
   return err
 })
@@ -412,7 +425,7 @@ then can be set using `Txn.SetEntry()`.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1)).WithTTL(time.Hour)
+  e := badger.NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1)).WithTTL(time.Hour)
   err := txn.SetEntry(e)
   return err
 })
@@ -735,6 +748,8 @@ Below is a list of known projects that use Badger:
 
 * [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
 * [Dgraph](https://github.com/dgraph-io/dgraph) - Distributed graph database.
+* [Jaeger](https://github.com/jaegertracing/jaeger) - Distributed tracing platform.
+* [TalariaDB](https://github.com/grab/talaria) - Distributed, low latency time-series database.
 * [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed application data analytics.
 * [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
 * [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
@@ -759,6 +774,9 @@ Below is a list of known projects that use Badger:
 * [Surfline](https://www.surfline.com) - Serving global wave and weather forecast data with Badger.
 * [Cete](https://github.com/mosuka/cete) - Simple and highly available distributed key-value store built on Badger. Makes it easy bringing up a cluster of Badger with Raft consensus algorithm by hashicorp/raft. 
 * [Volument](https://volument.com/) - A new take on website analytics backed by Badger.
+* [Sloop](https://github.com/salesforce/sloop) - Kubernetes History Visualization.
+* [KVdb](https://kvdb.io/) - Hosted key-value store and serverless platform built on top of Badger.
+* [Dkron](https://dkron.io/) - Distributed, fault tolerant job scheduling system.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
@@ -861,10 +879,10 @@ you're trying to open in a newer version of badger. The underlying data format c
 badger versions and users will have to migrate their data directory.
 Badger data can be migrated from version X of badger to version Y of badger by following the steps
 listed below.
-Assume you were on badger v1.5.5 and you wish to migrate to v2.0.0 version
-1. Install badger version v1.5.5.
+Assume you were on badger v1.6.0 and you wish to migrate to v2.0.0 version.
+1. Install badger version v1.6.0
     - `cd $GOPATH/src/github.com/dgraph-io/badger`
-    - `git checkout v1.5.5`
+    - `git checkout v1.6.0`
     - `cd badger && go install`
 
       This should install the old badger binary in your $GOBIN.
@@ -884,6 +902,13 @@ Assume you were on badger v1.5.5 and you wish to migrate to v2.0.0 version
 
 NOTE - The above steps shouldn't cause any data loss but please ensure the new data is valid before
 deleting the old badger directory.
+
+### Why do I need gcc to build badger? Does badger need CGO?
+
+Badger does not directly use CGO but it relies on https://github.com/DataDog/zstd library for
+zstd compression and the library requires `gcc/cgo`. You can build badger without cgo by running
+`CGO_ENABLED=0 go build`. This will build badger without the support for ZSTD compression algorithm.
+
 ## Contact
 - Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, feature requests and discussions.
 - Please use [Github issue tracker](https://github.com/dgraph-io/badger/issues) for filing bugs or feature requests.

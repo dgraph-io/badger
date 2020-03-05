@@ -1,5 +1,3 @@
-// +build !windows,!darwin
-
 /*
  * Copyright 2019 Dgraph Labs, Inc. and Contributors
  *
@@ -20,6 +18,8 @@ package y
 
 import (
 	"os"
+	"syscall"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -39,13 +39,17 @@ func munmap(b []byte) error {
 	return unix.Munmap(b)
 }
 
-// Madvise uses the madvise system call to give advise about the use of memory
-// when using a slice that is memory-mapped to a file. Set the readahead flag to
-// false if page references are expected in random order.
+// This is required because the unix package does not support the madvise system call on OS X.
 func madvise(b []byte, readahead bool) error {
-	flags := unix.MADV_NORMAL
+	advice := unix.MADV_NORMAL
 	if !readahead {
-		flags = unix.MADV_RANDOM
+		advice = unix.MADV_RANDOM
 	}
-	return unix.Madvise(b, flags)
+
+	_, _, e1 := syscall.Syscall(syscall.SYS_MADVISE, uintptr(unsafe.Pointer(&b[0])),
+		uintptr(len(b)), uintptr(advice))
+	if e1 != 0 {
+		return e1
+	}
+	return nil
 }

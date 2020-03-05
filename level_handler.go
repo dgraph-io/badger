@@ -23,8 +23,8 @@ import (
 
 	"github.com/dgryski/go-farm"
 
-	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 )
 
@@ -140,6 +140,31 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 	return decrRefs(toDel)
 }
 
+// addTable adds toAdd table to levelHandler. Normally when we add tables to levelHandler, we sort
+// tables based on table.Smallest. This is required for correctness of the system. But in case of
+// stream writer this can be avoided. We can just add tables to levelHandler's table list
+// and after all addTable calls, we can sort table list(check sortTable method).
+// NOTE: levelHandler.sortTables() should be called after call addTable calls are done.
+func (s *levelHandler) addTable(t *table.Table) {
+	s.Lock()
+	defer s.Unlock()
+
+	s.totalSize += t.Size() // Increase totalSize first.
+	t.IncrRef()
+	s.tables = append(s.tables, t)
+}
+
+// sortTables sorts tables of levelHandler based on table.Smallest.
+// Normally it should be called after all addTable calls.
+func (s *levelHandler) sortTables() {
+	s.RLock()
+	defer s.RUnlock()
+
+	sort.Slice(s.tables, func(i, j int) bool {
+		return y.CompareKeys(s.tables[i].Smallest(), s.tables[j].Smallest()) < 0
+	})
+}
+
 func decrRefs(tables []*table.Table) error {
 	for _, table := range tables {
 		if err := table.DecrRef(); err != nil {
@@ -163,7 +188,9 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 	// Need lock as we may be deleting the first table during a level 0 compaction.
 	s.Lock()
 	defer s.Unlock()
-	if len(s.tables) >= s.db.opt.NumLevelZeroTablesStall {
+	// Return false only if L0 is in memory and number of tables is more than number of
+	// ZeroTableStall. For on disk L0, we should just add the tables to the level.
+	if s.db.opt.KeepL0InMemory && len(s.tables) >= s.db.opt.NumLevelZeroTablesStall {
 		return false
 	}
 

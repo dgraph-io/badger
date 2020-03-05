@@ -176,7 +176,7 @@ func TestPagebufferReader2(t *testing.T) {
 	require.Equal(t, n, 10, "length of buffer and length written should be equal")
 	require.NoError(t, err, "unable to write bytes to buffer")
 
-	randOffset := int(rand.Int31n(int32(b.length)))
+	randOffset := int(rand.Int31n(int32(b.length) - 1))
 	randLength := int(rand.Int31n(int32(b.length - randOffset)))
 	reader := b.NewReaderAt(randOffset)
 	// Read randLength bytes.
@@ -222,10 +222,12 @@ func TestPagebufferReader3(t *testing.T) {
 	// Read EOF.
 	n, err = reader.Read(readBuf)
 	require.Equal(t, err, io.EOF, "should return EOF")
+	require.Equal(t, n, 0)
 
 	// Read EOF again.
 	n, err = reader.Read(readBuf)
 	require.Equal(t, err, io.EOF, "should return EOF")
+	require.Equal(t, n, 0)
 }
 
 // Test when read buffer is larger than PageBuffer.
@@ -250,4 +252,5 @@ func TestPagebufferReader4(t *testing.T) {
 	// Read EOF.
 	n, err = reader.Read(readBuf)
 	require.Equal(t, err, io.EOF, "should return EOF")
+	require.Equal(t, n, 0)
 }

@@ -112,4 +112,16 @@ var (
 
 	// ErrNoPrefixes is returned when subscriber doesn't provide any prefix.
 	ErrNoPrefixes = errors.New("At least one key prefix is required")
+
+	// ErrEncryptionKeyMismatch is returned when the storage key is not
+	// matched with the key previously given.
+	ErrEncryptionKeyMismatch = errors.New("Encryption key mismatch")
+
+	// ErrInvalidDataKeyID is returned if the datakey id is invalid.
+	ErrInvalidDataKeyID = errors.New("Invalid datakey id")
+
+	ErrInvalidEncryptionKey = errors.New("Encryption key's length should be" +
+		"either 16, 24, or 32 bytes")
+
+	ErrGCInMemoryMode = errors.New("Cannot run value log GC when DB is opened in InMemory mode")
 )

@@ -1,14 +1,26 @@
+/*
+ * Copyright 2019 Dgraph Labs, Inc. and Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package badger
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
-	"hash/crc32"
 	"time"
 	"unsafe"
-
-	"github.com/dgraph-io/badger/y"
 )
 
 type valuePointer struct {
@@ -16,6 +28,8 @@ type valuePointer struct {
 	Len    uint32
 	Offset uint32
 }
+
+const vptrSize = unsafe.Sizeof(valuePointer{})
 
 func (p valuePointer) Less(o valuePointer) bool {
 	if p.Fid != o.Fid {
@@ -31,8 +45,6 @@ func (p valuePointer) IsZero() bool {
 	return p.Fid == 0 && p.Offset == 0 && p.Len == 0
 }
 
-const vptrSize = 12
-
 // Encode encodes Pointer into byte buffer.
 func (p valuePointer) Encode() []byte {
 	b := make([]byte, vptrSize)
@@ -43,7 +55,10 @@ func (p valuePointer) Encode() []byte {
 
 // Decode decodes the value pointer into the provided byte buffer.
 func (p *valuePointer) Decode(b []byte) {
-	*p = *(*valuePointer)(unsafe.Pointer(&b[0]))
+	// Copy over data from b into p. Using *p=unsafe.pointer(...) leads to
+	// pointer alignment issues. See https://github.com/dgraph-io/badger/issues/1096
+	// and comment https://github.com/dgraph-io/badger/pull/1097#pullrequestreview-307361714
+	copy(((*[vptrSize]byte)(unsafe.Pointer(p))[:]), b[:vptrSize])
 }
 
 // header is used in value log as a header before Entry.
@@ -140,45 +155,6 @@ func (e *Entry) estimateSize(threshold int) int {
 		return len(e.Key) + len(e.Value) + 2 // Meta, UserMeta
 	}
 	return len(e.Key) + 12 + 2 // 12 for ValuePointer, 2 for metas.
-}
-
-// Encodes e to buf. Returns number of bytes written.
-// The encoded entry looks like
-// +--------+-----+-------+----------+
-// | Header | Key | Value | Checksum |
-// +--------+-----+-------+----------+
-func encodeEntry(e *Entry, buf *bytes.Buffer) (int, error) {
-	h := header{
-		klen:      uint32(len(e.Key)),
-		vlen:      uint32(len(e.Value)),
-		expiresAt: e.ExpiresAt,
-		meta:      e.meta,
-		userMeta:  e.UserMeta,
-	}
-
-	var headerEnc [maxHeaderSize]byte
-	sz := h.Encode(headerEnc[:])
-	buf.Write(headerEnc[:sz])
-	hash := crc32.New(y.CastagnoliCrcTable)
-	if _, err := hash.Write(headerEnc[:sz]); err != nil {
-		return 0, err
-	}
-
-	buf.Write(e.Key)
-	if _, err := hash.Write(e.Key); err != nil {
-		return 0, err
-	}
-
-	buf.Write(e.Value)
-	if _, err := hash.Write(e.Value); err != nil {
-		return 0, err
-	}
-
-	var crcBuf [crc32.Size]byte
-	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
-	buf.Write(crcBuf[:])
-
-	return len(headerEnc[:sz]) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
 func (e Entry) print(prefix string) {

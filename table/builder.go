@@ -18,14 +18,18 @@ package table
 
 import (
 	"bytes"
+	"crypto/aes"
 	"math"
 	"unsafe"
 
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
+	"github.com/golang/snappy"
+	"github.com/pkg/errors"
 
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 )
 
@@ -40,6 +44,8 @@ type header struct {
 	diff    uint16 // Length of the diff.
 }
 
+const headerSize = uint16(unsafe.Sizeof(header{}))
+
 // Encode encodes the header.
 func (h header) Encode() []byte {
 	var b [4]byte
@@ -48,15 +54,12 @@ func (h header) Encode() []byte {
 }
 
 // Decode decodes the header.
-func (h *header) Decode(buf []byte) int {
-	*h = *(*header)(unsafe.Pointer(&buf[0]))
-	return h.Size()
+func (h *header) Decode(buf []byte) {
+	// Copy over data from buf into h. Using *h=unsafe.pointer(...) leads to
+	// pointer alignment issues. See https://github.com/dgraph-io/badger/issues/1096
+	// and comment https://github.com/dgraph-io/badger/pull/1097#pullrequestreview-307361714
+	copy(((*[headerSize]byte)(unsafe.Pointer(h))[:]), buf[:headerSize])
 }
-
-const headerSize = 4
-
-// Size returns size of the header. Currently it's just a constant.
-func (h header) Size() int { return headerSize }
 
 // Builder is used in building a table.
 type Builder struct {
@@ -66,11 +69,9 @@ type Builder struct {
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
 	entryOffsets []uint32 // Offsets of entries present in current block.
-
-	tableIndex *pb.TableIndex
-	keyHashes  []uint64
-
-	opt *Options
+	tableIndex   *pb.TableIndex
+	keyHashes    []uint64 // Used for building the bloomfilter.
+	opt          *Options
 }
 
 // NewTableBuilder makes a new TableBuilder.
@@ -100,7 +101,7 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 	return newKey[i:]
 }
 
-func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
+func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	b.keyHashes = append(b.keyHashes, farm.Fingerprint64(y.ParseKey(key)))
 
 	// diffKey stores the difference of key with baseKey.
@@ -128,6 +129,10 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct) {
 	b.buf.Write(diffKey) // We only need to store the key difference.
 
 	v.EncodeTo(b.buf)
+	// Size of KV on SST.
+	sstSz := uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
+	// Total estimated size = size on SST + size on vlog (length of value pointer).
+	b.tableIndex.EstimatedSize += (sstSz + vpLen)
 }
 
 /*
@@ -141,12 +146,34 @@ Structure of Block.
 | to perform binary search in the block)  | (4 Bytes)          | Checksum     | (4 Bytes)        |
 +-----------------------------------------+--------------------+--------------+------------------+
 */
+// In case the data is encrypted, the "IV" is added to the end of the block.
 func (b *Builder) finishBlock() {
 	b.buf.Write(y.U32SliceToBytes(b.entryOffsets))
 	b.buf.Write(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
 	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
 	b.writeChecksum(blockBuf)
+
+	// Compress the block.
+	if b.opt.Compression != options.None {
+		var err error
+		// TODO: Find a way to reuse buffers. Current implementation creates a
+		// new buffer for each compressData call.
+		blockBuf, err = b.compressData(b.buf.Bytes()[b.baseOffset:])
+		y.Check(err)
+		// Truncate already written data.
+		b.buf.Truncate(int(b.baseOffset))
+		// Write compressed data.
+		b.buf.Write(blockBuf)
+	}
+	if b.shouldEncrypt() {
+		block := b.buf.Bytes()[b.baseOffset:]
+		eBlock, err := b.encrypt(block)
+		y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
+		// We're rewriting the block, after encrypting.
+		b.buf.Truncate(int(b.baseOffset))
+		b.buf.Write(eBlock)
+	}
 
 	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
 	// implement padding. This might be useful while using direct I/O.
@@ -176,11 +203,16 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 
+	if b.shouldEncrypt() {
+		// IV is added at the end of the block, while encrypting.
+		// So, size of IV is added to estimatedSize.
+		estimatedSize += aes.BlockSize
+	}
 	return estimatedSize > uint32(b.opt.BlockSize)
 }
 
 // Add adds a key-value pair to the block.
-func (b *Builder) Add(key []byte, value y.ValueStruct) {
+func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 	if b.shouldFinishBlock(key, value) {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
@@ -189,7 +221,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) {
 		b.baseOffset = uint32(b.buf.Len())
 		b.entryOffsets = b.entryOffsets[:0]
 	}
-	b.addHelper(key, value)
+	b.addHelper(key, value, uint64(valueLen))
 }
 
 // TODO: vvv this was the comment on ReachedCapacity.
@@ -223,6 +255,7 @@ The table structure looks like
 | Index   | Index Size | Checksum  | Checksum Size |
 +---------+------------+-----------+---------------+
 */
+// In case the data is encrypted, the "IV" is added to the end of the index.
 func (b *Builder) Finish() []byte {
 	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePositive)
 	for _, h := range b.keyHashes {
@@ -235,6 +268,11 @@ func (b *Builder) Finish() []byte {
 
 	index, err := proto.Marshal(b.tableIndex)
 	y.Check(err)
+
+	if b.shouldEncrypt() {
+		index, err = b.encrypt(index)
+		y.Check(err)
+	}
 	// Write index the file.
 	n, err := b.buf.Write(index)
 	y.Check(err)
@@ -273,4 +311,43 @@ func (b *Builder) writeChecksum(data []byte) {
 	// Write checksum size.
 	_, err = b.buf.Write(y.U32ToBytes(uint32(n)))
 	y.Check(err)
+}
+
+// DataKey returns datakey of the builder.
+func (b *Builder) DataKey() *pb.DataKey {
+	return b.opt.DataKey
+}
+
+// encrypt will encrypt the given data and appends IV to the end of the encrypted data.
+// This should be only called only after checking shouldEncrypt method.
+func (b *Builder) encrypt(data []byte) ([]byte, error) {
+	iv, err := y.GenerateIV()
+	if err != nil {
+		return data, y.Wrapf(err, "Error while generating IV in Builder.encrypt")
+	}
+	data, err = y.XORBlock(data, b.DataKey().Data, iv)
+	if err != nil {
+		return data, y.Wrapf(err, "Error while encrypting in Builder.encrypt")
+	}
+	data = append(data, iv...)
+	return data, nil
+}
+
+// shouldEncrypt tells us whether to encrypt the data or not.
+// We encrypt only if the data key exist. Otherwise, not.
+func (b *Builder) shouldEncrypt() bool {
+	return b.opt.DataKey != nil
+}
+
+// compressData compresses the given data.
+func (b *Builder) compressData(data []byte) ([]byte, error) {
+	switch b.opt.Compression {
+	case options.None:
+		return data, nil
+	case options.Snappy:
+		return snappy.Encode(nil, data), nil
+	case options.ZSTD:
+		return y.ZSTDCompress(nil, data, b.opt.ZSTDCompressionLevel)
+	}
+	return nil, errors.New("Unsupported compression type")
 }

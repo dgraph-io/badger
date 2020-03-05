@@ -26,9 +26,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -79,9 +79,9 @@ func TestPickSortTables(t *testing.T) {
 	genTables := func(mks ...MockKeys) []*table.Table {
 		out := make([]*table.Table, 0)
 		for _, mk := range mks {
-			f := buildTable(t, [][]string{{mk.small, "some value"}, {mk.large, "some value"}})
 			opts := table.Options{LoadingMode: options.MemoryMap,
 				ChkMode: options.OnTableAndBlockRead}
+			f := buildTable(t, [][]string{{mk.small, "some value"}, {mk.large, "some value"}}, opts)
 			tbl, err := table.OpenTable(f, opts)
 			require.NoError(t, err)
 			out = append(out, tbl)
@@ -236,7 +236,7 @@ func TestIteratePrefix(t *testing.T) {
 func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 	dir, err := ioutil.TempDir(".", "badger-test")
 	y.Check(err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	opts := getTestOptions(dir)
 	opts.TableLoadingMode = options.LoadToRAM
 	db, err := Open(opts)

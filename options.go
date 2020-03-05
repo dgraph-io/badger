@@ -17,7 +17,10 @@
 package badger
 
 import (
-	"github.com/dgraph-io/badger/options"
+	"time"
+
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/table"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -44,7 +47,9 @@ type Options struct {
 	ReadOnly            bool
 	Truncate            bool
 	Logger              Logger
+	Compression         options.CompressionType
 	EventLogging        bool
+	InMemory            bool
 
 	// Fine tuning options.
 
@@ -53,9 +58,12 @@ type Options struct {
 	MaxLevels           int
 	ValueThreshold      int
 	NumMemtables        int
-	BlockSize           int
-	BloomFalsePositive  float64
-	KeepL0InMemory      bool
+	// Changing BlockSize across DB runs will not break badger. The block size is
+	// read from the block index stored at the end of the table.
+	BlockSize          int
+	BloomFalsePositive float64
+	KeepL0InMemory     bool
+	MaxCacheSize       int64
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -64,16 +72,24 @@ type Options struct {
 	ValueLogFileSize   int64
 	ValueLogMaxEntries uint32
 
-	NumCompactors     int
-	CompactL0OnClose  bool
-	LogRotatesToFlush int32
+	NumCompactors        int
+	CompactL0OnClose     bool
+	LogRotatesToFlush    int32
+	ZSTDCompressionLevel int
+
+	// When set, checksum will be validated for each entry read from the value log file.
+	VerifyValueChecksum bool
+
+	// Encryption related options.
+	EncryptionKey                 []byte        // encryption key
+	EncryptionKeyRotationDuration time.Duration // key rotation duration
 
 	// BypassLockGaurd will bypass the lock guard on badger. Bypassing lock
 	// guard can cause data corruption if multiple badger instances are using
 	// the same directory. Use this options with caution.
 	BypassLockGuard bool
 
-	// ChecksumVerificationMode decides when db should verify checksum for SStable blocks.
+	// ChecksumVerificationMode decides when db should verify checksums for SSTable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
 
 	// Transaction start and commit timestamps are managed by end-user.
@@ -85,7 +101,6 @@ type Options struct {
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
-
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -112,18 +127,45 @@ func DefaultOptions(path string) Options {
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          true,
+		VerifyValueChecksum:     false,
+		Compression:             options.None,
+		MaxCacheSize:            1 << 30, // 1 GB
+		// The following benchmarks were done on a 4 KB block size (default block size). The
+		// compression is ratio supposed to increase with increasing compression level but since the
+		// input for compression algorithm is small (4 KB), we don't get significant benefit at
+		// level 3.
+		// no_compression-16              10	 502848865 ns/op	 165.46 MB/s	-
+		// zstd_compression/level_1-16     7	 739037966 ns/op	 112.58 MB/s	2.93
+		// zstd_compression/level_3-16     7	 756950250 ns/op	 109.91 MB/s	2.72
+		// zstd_compression/level_15-16    1	11135686219 ns/op	   7.47 MB/s	4.38
+		// Benchmark code can be found in table/builder_test.go file
+		ZSTDCompressionLevel: 1,
+
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
 		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
 		// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
 		ValueLogFileSize: 1<<30 - 1,
 
-		ValueLogMaxEntries: 1000000,
-		ValueThreshold:     32,
-		Truncate:           false,
-		Logger:             defaultLogger,
-		EventLogging:       true,
-		LogRotatesToFlush:  2,
+		ValueLogMaxEntries:            1000000,
+		ValueThreshold:                32,
+		Truncate:                      false,
+		Logger:                        defaultLogger,
+		LogRotatesToFlush:             2,
+		EventLogging:                  true,
+		EncryptionKey:                 []byte{},
+		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
+	}
+}
+
+func buildTableOptions(opt Options) table.Options {
+	return table.Options{
+		BlockSize:            opt.BlockSize,
+		BloomFalsePositive:   opt.BloomFalsePositive,
+		LoadingMode:          opt.TableLoadingMode,
+		ChkMode:              opt.ChecksumVerificationMode,
+		Compression:          opt.Compression,
+		ZSTDCompressionLevel: opt.ZSTDCompressionLevel,
 	}
 }
 
@@ -427,6 +469,26 @@ func (opt Options) WithLogRotatesToFlush(val int32) Options {
 	return opt
 }
 
+// WithEncryptionKey return a new Options value with EncryptionKey set to the given value.
+//
+// EncryptionKey is used to encrypt the data with AES. Type of AES is used based on the key
+// size. For example 16 bytes will use AES-128. 24 bytes will use AES-192. 32 bytes will
+// use AES-256.
+func (opt Options) WithEncryptionKey(key []byte) Options {
+	opt.EncryptionKey = key
+	return opt
+}
+
+// WithEncryptionRotationDuration returns new Options value with the duration set to
+// the given value.
+//
+// Key Registry will use this duration to create new keys. If the previous generated
+// key exceed the given duration. Then the key registry will create new key.
+func (opt Options) WithEncryptionKeyRotationDuration(d time.Duration) Options {
+	opt.EncryptionKeyRotationDuration = d
+	return opt
+}
+
 // WithKeepL0InMemory returns a new Options value with KeepL0InMemory set to the given value.
 //
 // When KeepL0InMemory is set to true we will keep all Level 0 tables in memory. This leads to
@@ -437,6 +499,84 @@ func (opt Options) WithLogRotatesToFlush(val int32) Options {
 // The default value of KeepL0InMemory is true.
 func (opt Options) WithKeepL0InMemory(val bool) Options {
 	opt.KeepL0InMemory = val
+	return opt
+}
+
+// WithCompression returns a new Options value with Compression set to the given value.
+//
+// When compression is enabled, every block will be compressed using the specified algorithm.
+// This option doesn't affect existing tables. Only the newly created tables will be compressed.
+//
+// The default compression algorithm used is zstd when built with Cgo. Without Cgo, the default is
+// snappy. Compression is enabled by default.
+func (opt Options) WithCompression(cType options.CompressionType) Options {
+	opt.Compression = cType
+	return opt
+}
+
+// WithVerifyValueChecksum returns a new Options value with VerifyValueChecksum set to
+// the given value.
+//
+// When VerifyValueChecksum is set to true, checksum will be verified for every entry read
+// from the value log. If the value is stored in SST (value size less than value threshold) then the
+// checksum validation will not be done.
+//
+// The default value of VerifyValueChecksum is False.
+func (opt Options) WithVerifyValueChecksum(val bool) Options {
+	opt.VerifyValueChecksum = val
+	return opt
+}
+
+// WithChecksumVerificationMode returns a new Options value with ChecksumVerificationMode set to
+// the given value.
+//
+// ChecksumVerificationMode indicates when the db should verify checksums for SSTable blocks.
+//
+// The default value of VerifyValueChecksum is options.NoVerification.
+func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificationMode) Options {
+	opt.ChecksumVerificationMode = cvMode
+	return opt
+}
+
+// WithMaxCacheSize returns a new Options value with MaxCacheSize set to the given value.
+//
+// This value specifies how much data cache should hold in memory. A small size of cache means lower
+// memory consumption and lookups/iterations would take longer. Setting size to zero disables the
+// cache altogether.
+func (opt Options) WithMaxCacheSize(size int64) Options {
+	opt.MaxCacheSize = size
+	return opt
+}
+
+// WithInMemory returns a new Options value with Inmemory mode set to the given value.
+//
+// When badger is running in InMemory mode, everything is stored in memory. No value/sst files are
+// created. In case of a crash all data will be lost.
+func (opt Options) WithInMemory(b bool) Options {
+	opt.InMemory = b
+	return opt
+}
+
+// WithZSTDCompressionLevel returns a new Options value with ZSTDCompressionLevel set
+// to the given value.
+//
+// The ZSTD compression algorithm supports 20 compression levels. The higher the compression
+// level, the better is the compression ratio but lower is the performance. Lower levels
+// have better performance and higher levels have better compression ratios.
+// We recommend using level 1 ZSTD Compression Level. Any level higher than 1 seems to
+// deteriorate badger's performance.
+// The following benchmarks were done on a 4 KB block size (default block size). The compression is
+// ratio supposed to increase with increasing compression level but since the input for compression
+// algorithm is small (4 KB), we don't get significant benefit at level 3. It is advised to write
+// your own benchmarks before choosing a compression algorithm or level.
+//
+// no_compression-16              10	 502848865 ns/op	 165.46 MB/s	-
+// zstd_compression/level_1-16     7	 739037966 ns/op	 112.58 MB/s	2.93
+// zstd_compression/level_3-16     7	 756950250 ns/op	 109.91 MB/s	2.72
+// zstd_compression/level_15-16    1	11135686219 ns/op	   7.47 MB/s	4.38
+// Benchmark code can be found in table/builder_test.go file
+func (opt Options) WithZSTDCompressionLevel(cLevel int) Options {
+	opt.ZSTDCompressionLevel = cLevel
 	return opt
 }
 

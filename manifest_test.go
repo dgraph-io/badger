@@ -27,17 +27,17 @@ import (
 
 	"golang.org/x/net/trace"
 
-	"github.com/dgraph-io/badger/options"
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/table"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/stretchr/testify/require"
 )
 
 func TestManifestBasic(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	opt := getTestOptions(dir)
 	{
@@ -72,7 +72,7 @@ func TestManifestBasic(t *testing.T) {
 func helpTestManifestFileCorruption(t *testing.T, off int64, errorContent string) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	opt := getTestOptions(dir)
 	{
@@ -112,7 +112,7 @@ func key(prefix string, i int) string {
 	return prefix + fmt.Sprintf("%04d", i)
 }
 
-func buildTestTable(t *testing.T, prefix string, n int) *os.File {
+func buildTestTable(t *testing.T, prefix string, n int, opts table.Options) *os.File {
 	y.AssertTrue(n <= 10000)
 	keyValues := make([][]string, n)
 	for i := 0; i < n; i++ {
@@ -120,13 +120,18 @@ func buildTestTable(t *testing.T, prefix string, n int) *os.File {
 		v := fmt.Sprintf("%d", i)
 		keyValues[i] = []string{k, v}
 	}
-	return buildTable(t, keyValues)
+	return buildTable(t, keyValues, opts)
 }
 
 // TODO - Move these to somewhere where table package can also use it.
 // keyValues is n by 2 where n is number of pairs.
-func buildTable(t *testing.T, keyValues [][]string) *os.File {
-	bopts := table.Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+func buildTable(t *testing.T, keyValues [][]string, bopts table.Options) *os.File {
+	if bopts.BloomFalsePositive == 0 {
+		bopts.BloomFalsePositive = 0.01
+	}
+	if bopts.BlockSize == 0 {
+		bopts.BlockSize = 4 * 1024
+	}
 	b := table.NewTableBuilder(bopts)
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
@@ -148,7 +153,7 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 			Value:    []byte(kv[1]),
 			Meta:     'A',
 			UserMeta: 0,
-		})
+		}, 0)
 	}
 	_, err = f.Write(b.Finish())
 	require.NoError(t, err, "unable to write to file.")
@@ -160,14 +165,15 @@ func buildTable(t *testing.T, keyValues [][]string) *os.File {
 func TestOverlappingKeyRangeError(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	kv, err := Open(DefaultOptions(dir))
 	require.NoError(t, err)
+	defer kv.Close()
 
 	lh0 := newLevelHandler(kv, 0)
 	lh1 := newLevelHandler(kv, 1)
-	f := buildTestTable(t, "k", 2)
 	opts := table.Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	f := buildTestTable(t, "k", 2, opts)
 	t1, err := table.OpenTable(f, opts)
 	require.NoError(t, err)
 	defer t1.DecrRef()
@@ -188,7 +194,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	require.Equal(t, true, done)
 	lc.runCompactDef(0, cd)
 
-	f = buildTestTable(t, "l", 2)
+	f = buildTestTable(t, "l", 2, opts)
 	t2, err := table.OpenTable(f, opts)
 	require.NoError(t, err)
 	defer t2.DecrRef()
@@ -207,7 +213,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 func TestManifestRewrite(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	deletionsThreshold := 10
 	mf, m, err := helpOpenOrCreateManifestFile(dir, false, deletionsThreshold)
 	defer func() {
@@ -220,13 +226,13 @@ func TestManifestRewrite(t *testing.T) {
 	require.Equal(t, 0, m.Deletions)
 
 	err = mf.addChanges([]*pb.ManifestChange{
-		newCreateChange(0, 0),
+		newCreateChange(0, 0, 0, 0),
 	})
 	require.NoError(t, err)
 
 	for i := uint64(0); i < uint64(deletionsThreshold*3); i++ {
 		ch := []*pb.ManifestChange{
-			newCreateChange(i+1, 0),
+			newCreateChange(i+1, 0, 0, 0),
 			newDeleteChange(i),
 		}
 		err := mf.addChanges(ch)

@@ -27,8 +27,9 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/dgraph-io/badger/pb"
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 )
@@ -65,11 +66,12 @@ type levelManifest struct {
 	Tables map[uint64]struct{} // Set of table id's
 }
 
-// TableManifest contains information about a specific level
+// TableManifest contains information about a specific table
 // in the LSM tree.
 type TableManifest struct {
-	Level    uint8
-	Checksum []byte
+	Level       uint8
+	KeyID       uint64
+	Compression options.CompressionType
 }
 
 // manifestFile holds the file pointer (and other info) about the manifest file, which is a log
@@ -85,6 +87,9 @@ type manifestFile struct {
 
 	// Used to track the current state of the manifest, used when rewriting.
 	manifest Manifest
+
+	// Used to indicate if badger was opened in InMemory mode.
+	inMemory bool
 }
 
 const (
@@ -100,7 +105,7 @@ const (
 func (m *Manifest) asChanges() []*pb.ManifestChange {
 	changes := make([]*pb.ManifestChange, 0, len(m.Tables))
 	for id, tm := range m.Tables {
-		changes = append(changes, newCreateChange(id, int(tm.Level)))
+		changes = append(changes, newCreateChange(id, int(tm.Level), tm.KeyID, tm.Compression))
 	}
 	return changes
 }
@@ -112,11 +117,14 @@ func (m *Manifest) clone() Manifest {
 	return ret
 }
 
-// openOrCreateManifestFile opens a Badger manifest file if it exists, or creates on if
-// one doesn’t.
-func openOrCreateManifestFile(dir string, readOnly bool) (
+// openOrCreateManifestFile opens a Badger manifest file if it exists, or creates one if
+// doesn’t exists.
+func openOrCreateManifestFile(opt Options) (
 	ret *manifestFile, result Manifest, err error) {
-	return helpOpenOrCreateManifestFile(dir, readOnly, manifestDeletionsRewriteThreshold)
+	if opt.InMemory {
+		return &manifestFile{inMemory: true}, Manifest{}, nil
+	}
+	return helpOpenOrCreateManifestFile(opt.Dir, opt.ReadOnly, manifestDeletionsRewriteThreshold)
 }
 
 func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold int) (
@@ -178,6 +186,9 @@ func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold 
 }
 
 func (mf *manifestFile) close() error {
+	if mf.inMemory {
+		return nil
+	}
 	return mf.fp.Close()
 }
 
@@ -186,6 +197,9 @@ func (mf *manifestFile) close() error {
 // this depends on the filesystem -- some might append garbage data if a system crash happens at
 // the wrong time.)
 func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange) error {
+	if mf.inMemory {
+		return nil
+	}
 	changes := pb.ManifestChangeSet{Changes: changesParam}
 	buf, err := proto.Marshal(&changes)
 	if err != nil {
@@ -351,6 +365,11 @@ func ReplayManifestFile(fp *os.File) (Manifest, int64, error) {
 				version, magicVersion)
 	}
 
+	stat, err := fp.Stat()
+	if err != nil {
+		return Manifest{}, 0, err
+	}
+
 	build := createManifest()
 	var offset int64
 	for {
@@ -364,6 +383,12 @@ func ReplayManifestFile(fp *os.File) (Manifest, int64, error) {
 			return Manifest{}, 0, err
 		}
 		length := y.BytesToU32(lenCrcBuf[0:4])
+		// Sanity check to ensure we don't over-allocate memory.
+		if length > uint32(stat.Size()) {
+			return Manifest{}, 0, errors.Errorf(
+				"Buffer length: %d greater than file size: %d. Manifest file might be corrupted",
+				length, stat.Size())
+		}
 		var buf = make([]byte, length)
 		if _, err := io.ReadFull(&r, buf); err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -395,7 +420,9 @@ func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {
 			return fmt.Errorf("MANIFEST invalid, table %d exists", tc.Id)
 		}
 		build.Tables[tc.Id] = TableManifest{
-			Level: uint8(tc.Level),
+			Level:       uint8(tc.Level),
+			KeyID:       tc.KeyId,
+			Compression: options.CompressionType(tc.Compression),
 		}
 		for len(build.Levels) <= int(tc.Level) {
 			build.Levels = append(build.Levels, levelManifest{make(map[uint64]struct{})})
@@ -427,11 +454,16 @@ func applyChangeSet(build *Manifest, changeSet *pb.ManifestChangeSet) error {
 	return nil
 }
 
-func newCreateChange(id uint64, level int) *pb.ManifestChange {
+func newCreateChange(
+	id uint64, level int, keyID uint64, c options.CompressionType) *pb.ManifestChange {
 	return &pb.ManifestChange{
 		Id:    id,
 		Op:    pb.ManifestChange_CREATE,
 		Level: uint32(level),
+		KeyId: keyID,
+		// Hard coding it, since we're supporting only AES for now.
+		EncryptionAlgo: pb.EncryptionAlgo_aes,
+		Compression:    uint32(c),
 	}
 }
 

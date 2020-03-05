@@ -21,7 +21,7 @@ import (
 	"io"
 	"sort"
 
-	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 )
 
@@ -87,7 +87,7 @@ func (itr *blockIterator) setIdx(i int) {
 		itr.key = append(itr.key[:itr.prevOverlap], itr.baseKey[itr.prevOverlap:h.overlap]...)
 	}
 	itr.prevOverlap = h.overlap
-	valueOff := headerSize + int(h.diff)
+	valueOff := headerSize + h.diff
 	diffKey := entryData[headerSize:valueOff]
 	itr.key = append(itr.key[:h.overlap], diffKey...)
 	itr.val = entryData[valueOff:]
