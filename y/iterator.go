@@ -64,12 +64,12 @@ func (v *ValueStruct) Decode(b []byte) {
 }
 
 // Encode expects a slice of length at least v.EncodedSize().
-func (v *ValueStruct) Encode(b []byte) int {
+func (v *ValueStruct) Encode(b []byte) uint32 {
 	b[0] = v.Meta
 	b[1] = v.UserMeta
 	sz := binary.PutUvarint(b[2:], v.ExpiresAt)
 	n := copy(b[2+sz:], v.Value)
-	return 2 + sz + n
+	return uint32(2 + sz + n)
 }
 
 // EncodeTo should be kept in sync with the Encode function above. The reason

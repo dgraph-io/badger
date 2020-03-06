@@ -75,7 +75,7 @@ type bblock struct {
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
 	buf     []byte
-	sz      int
+	sz      uint32
 	bufLock sync.Mutex // This lock guards the buf. We acquire lock when we resize the buf.
 
 	baseKey      []byte   // Base key for the current block.
@@ -209,15 +209,15 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	}
 
 	// store current entry's offset
-	y.AssertTrue(uint32(b.sz) < math.MaxUint32)
-	b.entryOffsets = append(b.entryOffsets, uint32(b.sz)-b.baseOffset)
+	y.AssertTrue(b.sz < math.MaxUint32)
+	b.entryOffsets = append(b.entryOffsets, b.sz-b.baseOffset)
 
 	// Layout: header, diffKey, value.
 	b.append(h.Encode())
 	b.append(diffKey)
 
-	if uint32(len(b.buf)) < uint32(b.sz)+v.EncodedSize() {
-		b.grow(int(v.EncodedSize()))
+	if uint32(len(b.buf)) < b.sz+v.EncodedSize() {
+		b.grow(v.EncodedSize())
 	}
 	b.sz += v.Encode(b.buf[b.sz:])
 
@@ -228,27 +228,28 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 }
 
 // grow increases the size of b.buf by atleast 50%.
-func (b *Builder) grow(n int) {
-	if n < len(b.buf)/2 {
-		n = len(b.buf) / 2
+func (b *Builder) grow(n uint32) {
+	l := uint32(len(b.buf))
+	if n < l/2 {
+		n = l / 2
 	}
 	b.bufLock.Lock()
-	newBuf := make([]byte, len(b.buf)+n)
+	newBuf := make([]byte, l+n)
 	copy(newBuf, b.buf)
 	b.buf = newBuf
 	b.bufLock.Unlock()
 }
 func (b *Builder) append(data []byte) {
 	// Ensure we have enough space to store new data.
-	if len(b.buf) < b.sz+len(data) {
-		b.grow(len(data))
+	if uint32(len(b.buf)) < b.sz+uint32(len(data)) {
+		b.grow(uint32(len(data)))
 	}
 	copy(b.buf[b.sz:], data)
-	b.sz += len(data)
+	b.sz += uint32(len(data))
 }
 
-func (b *Builder) addPadding(sz int) {
-	if len(b.buf) < b.sz+sz {
+func (b *Builder) addPadding(sz uint32) {
+	if uint32(len(b.buf)) < b.sz+sz {
 		b.grow(sz)
 	}
 	b.sz += sz
@@ -347,13 +348,13 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
 	blocksSize := b.sz + // length of current buffer
-		len(b.entryOffsets)*4 + // all entry offsets size
+		uint32(len(b.entryOffsets)*4) + // all entry offsets size
 		4 + // count of all entry offsets
 		8 + // checksum bytes
 		4 // checksum length
 	estimateSz := blocksSize +
 		4 + // Index length
-		5*(len(b.tableIndex.Offsets)) // approximate index size
+		5*(uint32(len(b.tableIndex.Offsets))) // approximate index size
 
 	return int64(estimateSz) > cap
 }
@@ -386,22 +387,27 @@ func (b *Builder) Finish() []byte {
 	// Wait for block handler to finish.
 	b.wg.Wait()
 
-	dst := b.buf[:0]
+	dst := b.buf
 	// Fix block boundaries. This includes moving the blocks so that we
 	// don't have any interleaving space between them.
 	if len(b.blockList) > 0 {
+		dstLen := uint32(0)
 		for i, bl := range b.blockList {
-			// Length of the block is start minus the end.
-			b.tableIndex.Offsets[i].Len = bl.end - bl.start
+			off := b.tableIndex.Offsets[i]
+			// Length of the block is end minus the start.
+			off.Len = bl.end - bl.start
 			// New offset of the block is the point in the main buffer till
 			// which we have written data.
-			b.tableIndex.Offsets[i].Offset = uint32(len(dst))
+			off.Offset = dstLen
 
-			dst = append(dst, b.buf[bl.start:bl.end]...)
+			copy(dst[dstLen:], b.buf[bl.start:bl.end])
+
+			// New length is the start of the block plus its length.
+			dstLen = off.Offset + off.Len
 		}
 		// Start writing to the buffer from the point until which we have valid data.
 		// Fix the length because append and writeChecksum also rely on it.
-		b.sz = len(dst)
+		b.sz = dstLen
 	}
 
 	index, err := proto.Marshal(b.tableIndex)
