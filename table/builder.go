@@ -386,21 +386,22 @@ func (b *Builder) Finish() []byte {
 	// Wait for block handler to finish.
 	b.wg.Wait()
 
+	dst := b.buf[:0]
 	// Fix block boundaries. This includes moving the blocks so that we
 	// don't have any interleaving space between them.
 	if len(b.blockList) > 0 {
-		start := uint32(0)
 		for i, bl := range b.blockList {
 			// Length of the block is start minus the end.
 			b.tableIndex.Offsets[i].Len = bl.end - bl.start
-			b.tableIndex.Offsets[i].Offset = start
+			// New offset of the block is the point in the main buffer till
+			// which we have written data.
+			b.tableIndex.Offsets[i].Offset = uint32(len(dst))
 
-			// Copy over the block to the current position in the main buffer.
-			copy(b.buf[start:], b.buf[bl.start:bl.end])
-			start = b.tableIndex.Offsets[i].Offset + b.tableIndex.Offsets[i].Len
+			dst = append(dst, b.buf[bl.start:bl.end]...)
 		}
-		// Start writing to the buffer from the point until which we have valid data
-		b.sz = int(start)
+		// Start writing to the buffer from the point until which we have valid data.
+		// Fix the length because append and writeChecksum also rely on it.
+		b.sz = len(dst)
 	}
 
 	index, err := proto.Marshal(b.tableIndex)
