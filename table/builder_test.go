@@ -57,7 +57,7 @@ func TestTableIndex(t *testing.T) {
 		keysCount := 10000
 		for _, opt := range opts {
 			builder := NewTableBuilder(opt)
-			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
+			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
 			f, err := y.OpenSyncedFile(filename, true)
 			require.NoError(t, err)
 
@@ -80,11 +80,11 @@ func TestTableIndex(t *testing.T) {
 			require.NoError(t, err, "unable to write to file")
 
 			tbl, err := OpenTable(f, opt)
+			require.NoError(t, err, "unable to open table")
 			if opt.DataKey == nil {
 				// key id is zero if thre is no datakey.
 				require.Equal(t, tbl.KeyID(), uint64(0))
 			}
-			require.NoError(t, err, "unable to open table")
 
 			// Ensure index is built correctly
 			require.Equal(t, blockCount, len(tbl.blockIndex))
@@ -124,14 +124,42 @@ func BenchmarkBuilder(b *testing.B) {
 	vs := y.ValueStruct{Value: []byte(val)}
 
 	keysCount := 1300000 // This number of entries consumes ~64MB of memory.
-	for i := 0; i < b.N; i++ {
-		opts := Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
-		builder := NewTableBuilder(opts)
 
-		for i := 0; i < keysCount; i++ {
-			builder.Add(key(i), vs, 0)
+	bench := func(b *testing.B, opt *Options) {
+		// KeyCount * (keySize + ValSize)
+		b.SetBytes(int64(keysCount) * (32 + 32))
+		for i := 0; i < b.N; i++ {
+			opt.BlockSize = 4 * 1024
+			opt.BloomFalsePositive = 0.01
+			builder := NewTableBuilder(*opt)
+
+			for i := 0; i < keysCount; i++ {
+				builder.Add(key(i), vs, 0)
+			}
+
+			_ = builder.Finish()
 		}
-
-		_ = builder.Finish()
 	}
+
+	b.Run("no compression", func(b *testing.B) {
+		var opt Options
+		opt.Compression = options.None
+		bench(b, &opt)
+	})
+	b.Run("zstd compression", func(b *testing.B) {
+		var opt Options
+		opt.Compression = options.ZSTD
+		b.Run("level 1", func(b *testing.B) {
+			opt.ZSTDCompressionLevel = 1
+			bench(b, &opt)
+		})
+		b.Run("level 3", func(b *testing.B) {
+			opt.ZSTDCompressionLevel = 3
+			bench(b, &opt)
+		})
+		b.Run("level 15", func(b *testing.B) {
+			opt.ZSTDCompressionLevel = 15
+			bench(b, &opt)
+		})
+	})
 }
