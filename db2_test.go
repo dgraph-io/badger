@@ -669,16 +669,13 @@ func TestL0GCBug(t *testing.T) {
 	// Simulate a crash by not closing db1 but releasing the locks.
 	if db1.dirLockGuard != nil {
 		require.NoError(t, db1.dirLockGuard.release())
+		db1.dirLockGuard = nil
 	}
 	if db1.valueDirGuard != nil {
 		require.NoError(t, db1.valueDirGuard.release())
+		db1.valueDirGuard = nil
 	}
-	for _, f := range db1.vlog.filesMap {
-		require.NoError(t, f.fd.Close())
-	}
-	require.NoError(t, db1.registry.Close())
-	require.NoError(t, db1.lc.close())
-	require.NoError(t, db1.manifest.close())
+	require.NoError(t, db1.Close())
 
 	db2, err := Open(opts)
 	require.NoError(t, err)
