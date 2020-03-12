@@ -77,9 +77,13 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
-	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Uint32())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.CreateSyncedFile(filename, true)
-	require.NoError(t, err)
+	if t != nil {
+		require.NoError(t, err)
+	} else {
+		y.Check(err)
+	}
 
 	sort.Slice(keyValues, func(i, j int) bool {
 		return keyValues[i][0] < keyValues[j][0]
