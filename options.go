@@ -155,6 +155,7 @@ func DefaultOptions(path string) Options {
 
 func buildTableOptions(opt Options) table.Options {
 	return table.Options{
+		TableSize:            uint64(opt.MaxTableSize),
 		BlockSize:            opt.BlockSize,
 		BloomFalsePositive:   opt.BloomFalsePositive,
 		LoadingMode:          opt.TableLoadingMode,
