@@ -124,7 +124,7 @@ func DefaultOptions(path string) Options {
 		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
 		Compression:             options.None,
-		MaxCacheSize:            1 << 30, // 1 GB
+		MaxCacheSize:            0,
 		// The following benchmarks were done on a 4 KB block size (default block size). The
 		// compression is ratio supposed to increase with increasing compression level but since the
 		// input for compression algorithm is small (4 KB), we don't get significant benefit at
@@ -536,8 +536,13 @@ func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificat
 // WithMaxCacheSize returns a new Options value with MaxCacheSize set to the given value.
 //
 // This value specifies how much data cache should hold in memory. A small size of cache means lower
-// memory consumption and lookups/iterations would take longer. Setting size to zero disables the
+// memory consumption and lookups/iterations would take longer.
+// It is recommended to use a cache if you're using compression or encryption.
+// If compression and encryption both are disabled, adding a cache will lead to
+// unnecessary overhead which will affect the read performance. Setting size to zero disables the
 // cache altogether.
+//
+// Default value of MaxCacheSize is zero.
 func (opt Options) WithMaxCacheSize(size int64) Options {
 	opt.MaxCacheSize = size
 	return opt
