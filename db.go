@@ -1580,9 +1580,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, prefixes
 	if cb == nil {
 		return ErrNilCallback
 	}
-	if len(prefixes) == 0 {
-		return ErrNoPrefixes
-	}
+
 	c := y.NewCloser(1)
 	recvCh, id := db.pub.newSubscriber(c, prefixes...)
 	slurp := func(batch *pb.KVList) error {
@@ -1616,7 +1614,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, prefixes
 			err := slurp(batch)
 			if err != nil {
 				c.Done()
-				// Delete the subsriber if there is an error by the callback.
+				// Delete the subscriber if there is an error by the callback.
 				db.pub.deleteSubscriber(id)
 				return err
 			}
