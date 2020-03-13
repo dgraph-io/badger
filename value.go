@@ -270,7 +270,11 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		// possibly truncate the file.
 		return 0, ErrReplayNeeded
 	}
-
+	if int64(offset) > fi.Size() {
+		// Return 0 which would truncate the entire file. This was the original behavior before
+		// commit 7539f0a:Fix windows dataloss issue (#1134) was merged.
+		return 0, nil
+	}
 	// We're not at the end of the file. Let's Seek to the offset and start reading.
 	if _, err := lf.fd.Seek(int64(offset), io.SeekStart); err != nil {
 		return 0, errFile(err, lf.path, "Unable to seek")
@@ -849,10 +853,8 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			flags |= y.Sync
 		}
 
-		var err error
-		// Open log file "lf" in read-write mode.
-		if lf.fd, err = y.OpenExistingFile(vlog.fpath(fid), flags); err != nil {
-			return y.Wrapf(err, "Error while opening file in logfile %s", vlog.fpath(fid))
+		if err := lf.open(vlog.fpath(fid), flags); err != nil {
+			return err
 		}
 
 		// This file is before the value head pointer. So, we don't need to
