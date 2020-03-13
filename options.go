@@ -67,6 +67,11 @@ type Options struct {
 	// When set, checksum will be validated for each entry read from the value log file.
 	VerifyValueChecksum bool
 
+	// BypassLockGaurd will bypass the lock guard on badger. Bypassing lock
+	// guard can cause data corruption if multiple badger instances are using
+	// the same directory. Use this options with caution.
+	BypassLockGuard bool
+
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.
@@ -398,5 +403,18 @@ func (opt Options) WithLogRotatesToFlush(val int32) Options {
 // The default value of VerifyValueChecksum is False.
 func (opt Options) WithVerifyValueChecksum(val bool) Options {
 	opt.VerifyValueChecksum = val
+	return opt
+}
+
+// WithBypassLockGuard returns a new Options value with BypassLockGuard
+// set to the given value.
+//
+// When BypassLockGuard option is set, badger will not acquire a lock on the
+// directory. This could lead to data corruption if multiple badger instances
+// write to the same data directory. Use this option with caution.
+//
+// The default value of BypassLockGuard is false.
+func (opt Options) WithBypassLockGuard(b bool) Options {
+	opt.BypassLockGuard = b
 	return opt
 }
