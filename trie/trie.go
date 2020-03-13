@@ -59,6 +59,13 @@ func (t *Trie) Add(prefix []byte, id uint64) {
 func (t *Trie) Get(key []byte) map[uint64]struct{} {
 	out := make(map[uint64]struct{})
 	node := t.root
+	// If root has ids that means we have subscribers for "nil/[]byte{}"
+	// prefix. Add them to the list.
+	if len(node.ids) > 0 {
+		for _, i := range node.ids {
+			out[i] = struct{}{}
+		}
+	}
 	for _, val := range key {
 		child, ok := node.children[val]
 		if !ok {
