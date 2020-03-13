@@ -1014,12 +1014,15 @@ func TestDiscardStatsMove(t *testing.T) {
 	for i := uint32(0); i < uint32(ops.ValueThreshold+10); i++ {
 		stat[i] = 0
 	}
+
+	db.vlog.lfDiscardStats.Lock()
 	db.vlog.lfDiscardStats.m = stat
 	encodedDS, _ := json.Marshal(db.vlog.lfDiscardStats.m)
+	db.vlog.lfDiscardStats.Unlock()
+
 	entries := []*Entry{{
 		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
 		// The discard stat value is more than value threshold.
-
 		Value: encodedDS,
 	}}
 	// Push discard stats entry to the write channel.
@@ -1027,13 +1030,12 @@ func TestDiscardStatsMove(t *testing.T) {
 	require.NoError(t, err)
 	req.Wait()
 
-	// pushed again on DB close.
-	db.vlog.lfDiscardStats.m = nil
-
 	// Unset discard stats. We've already pushed the stats. If we don't unset it then it will be
 	// pushed again on DB close. Also, the first insertion was in vlog file 1, this insertion would
 	// be in value log file 3.
+	db.vlog.lfDiscardStats.Lock()
 	db.vlog.lfDiscardStats.m = nil
+	db.vlog.lfDiscardStats.Unlock()
 
 	// Push more entries so that we get more than 1 value log files.
 	require.NoError(t, db.Update(func(txn *Txn) error {
@@ -1054,7 +1056,13 @@ func TestDiscardStatsMove(t *testing.T) {
 
 	db, err = Open(ops)
 	require.NoError(t, err)
+	// discardStats will be populate using vlog.populateDiscardStats(), which pushes discard stats
+	// to vlog.lfDiscardStats.flushChan. Hence wait for some time, for discard stats to be updated.
+	time.Sleep(1 * time.Second)
+	require.NoError(t, err)
+	db.vlog.lfDiscardStats.RLock()
 	require.Equal(t, stat, db.vlog.lfDiscardStats.m)
+	db.vlog.lfDiscardStats.RUnlock()
 	require.NoError(t, db.Close())
 }
 
@@ -1071,14 +1079,12 @@ func TestTruncatedDiscardStat(t *testing.T) {
 		stat[i] = 0
 	}
 
-	db.vlog.lfDiscardStats.Lock()
 	db.vlog.lfDiscardStats.m = stat
 	encodedDS, _ := json.Marshal(db.vlog.lfDiscardStats.m)
-	db.vlog.lfDiscardStats.Unlock()
 	entries := []*Entry{{
 		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
 		// Insert truncated discard stats. This is important.
-		Value: encodedDS[:10],
+		Value: encodedDS[:13],
 	}}
 	// Push discard stats entry to the write channel.
 	req, err := db.sendToWriteCh(entries)
@@ -1086,36 +1092,13 @@ func TestTruncatedDiscardStat(t *testing.T) {
 	req.Wait()
 
 	// Unset discard stats. We've already pushed the stats. If we don't unset it then it will be
-	// pushed again on DB close. Also, the first insertion was in vlog file 1, this insertion would
-	// be in value log file 3.
-	db.vlog.lfDiscardStats.Lock()
+	// pushed again on DB close.
 	db.vlog.lfDiscardStats.m = nil
-	db.vlog.lfDiscardStats.Unlock()
 
-	// Push more entries so that we get more than 1 value log files.
-	require.NoError(t, db.Update(func(txn *Txn) error {
-		e := NewEntry([]byte("f"), []byte("1"))
-		return txn.SetEntry(e)
-	}))
-	require.NoError(t, db.Update(func(txn *Txn) error {
-		e := NewEntry([]byte("ff"), []byte("1"))
-		return txn.SetEntry(e)
-	}))
-
-	tr := trace.New("Badger.ValueLog", "GC")
-	// Use first value log file for GC. This value log file contains the discard stats.
-	lf := db.vlog.filesMap[0]
-	require.NoError(t, db.vlog.rewrite(lf, tr))
 	require.NoError(t, db.Close())
 
 	db, err = Open(ops)
-	// discardStats will be populate using vlog.populateDiscardStats(), which pushes discard stats
-	// to vlog.lfDiscardStats.flushChan. Hence wait for some time, for discard stats to be updated.
-	time.Sleep(1 * time.Second)
 	require.NoError(t, err)
-	db.vlog.lfDiscardStats.RLock()
-	require.Equal(t, stat, db.vlog.lfDiscardStats.m)
-	db.vlog.lfDiscardStats.RUnlock()
 	require.NoError(t, db.Close())
 }
 
