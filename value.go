@@ -853,13 +853,18 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			flags |= y.Sync
 		}
 
+		// We cannot mmap the files upfront here. Windows does not like mmapped files to be
+		// truncated. We might need to truncate files during a replay.
 		if err := lf.open(vlog.fpath(fid), flags); err != nil {
 			return err
 		}
-
 		// This file is before the value head pointer. So, we don't need to
 		// replay it, and can just open it in readonly mode.
 		if fid < ptr.Fid {
+			// Mmap the file here, we don't need to replay it.
+			if err := lf.mmap(int64(lf.size)); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -888,6 +893,13 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			return err
 		}
 		vlog.db.opt.Infof("Replay took: %s\n", time.Since(now))
+		if fid < vlog.maxFid {
+			// This file has been replayed. It can now be mmapped.
+			// For maxFid, the mmap would be done by the specially written code below.
+			if err := lf.mmap(int64(lf.size)); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Seek to the end to start writing.
@@ -916,26 +928,23 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	return nil
 }
 
-func (lf *logFile) open(filename string, flags uint32) error {
+func (lf *logFile) open(path string, flags uint32) error {
 	var err error
-	if lf.fd, err = y.OpenExistingFile(filename, flags); err != nil {
-		return errors.Wrapf(err, "Open existing file: %q", lf.path)
+	if lf.fd, err = y.OpenExistingFile(path, flags); err != nil {
+		return y.Wrapf(err, "Error while opening file in logfile %s", path)
 	}
-	fstat, err := lf.fd.Stat()
+
+	fi, err := lf.fd.Stat()
 	if err != nil {
-		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
+		return errFile(err, lf.path, "Unable to run file.Stat")
 	}
-	sz := fstat.Size()
-	if sz == 0 {
-		// File is empty. We don't need to mmap it. Return.
-		return nil
-	}
-	y.AssertTrue(sz <= math.MaxUint32)
+	sz := fi.Size()
+	y.AssertTruef(
+		sz <= math.MaxUint32,
+		"file size: %d greater than %d",
+		uint32(sz), uint32(math.MaxUint32),
+	)
 	lf.size = uint32(sz)
-	if err = lf.mmap(sz); err != nil {
-		_ = lf.fd.Close()
-		return errors.Wrapf(err, "Unable to map file: %q", fstat.Name())
-	}
 	return nil
 }
 
