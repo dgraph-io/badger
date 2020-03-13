@@ -14,10 +14,13 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
  - Badger.Options
 	- WithEventLogging (#1035)
 	- WithVerifyValueChecksum (#1052)
+	- WithBypassLockGuard (#1243)
+
 ### Features
  - Support checksum verification for values read from vlog (#1052)
  - Add EventLogging option (#1035)
  - Support WriteBatch API in managed mode (#948)
+ - Add support for watching nil prefix in Subscribe API (#1246)
 
 ### Fixed
  - Initialize vlog before starting compactions in db.Open (#1226)
