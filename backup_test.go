@@ -276,6 +276,7 @@ func TestBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { require.NoError(t, db1.Close()) }()
 
 	N := 1000
 	entries := createEntries(N)
