@@ -65,7 +65,7 @@ type Options struct {
 	KeepL0InMemory     bool
 	MaxCacheSize       int64
 	MaxBfCacheSize     int64
-	LoadBfLazily       bool
+	LoadBloomOnOpen    bool
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -128,7 +128,7 @@ func DefaultOptions(path string) Options {
 		Compression:             options.None,
 		MaxCacheSize:            1 << 30, // 1 GB
 		MaxBfCacheSize:          0,
-		LoadBfLazily:            false,
+		LoadBloomOnOpen:         true,
 		// The following benchmarks were done on a 4 KB block size (default block size). The
 		// compression is ratio supposed to increase with increasing compression level but since the
 		// input for compression algorithm is small (4 KB), we don't get significant benefit at
@@ -161,7 +161,7 @@ func buildTableOptions(opt Options) table.Options {
 	return table.Options{
 		BlockSize:            opt.BlockSize,
 		BloomFalsePositive:   opt.BloomFalsePositive,
-		LoadBfLazily:         opt.LoadBfLazily,
+		LoadBloomOnOpen:      opt.LoadBloomOnOpen,
 		LoadingMode:          opt.TableLoadingMode,
 		ChkMode:              opt.ChecksumVerificationMode,
 		Compression:          opt.Compression,
@@ -596,15 +596,15 @@ func (opt Options) WithMaxBfCacheSize(size int64) Options {
 	return opt
 }
 
-// WithLoadBfLazily returns a new Options value with LoadBfLazily set to the given value.
+// WithLoadBloomOnOpen returns a new Options value with LoadBloomOnOpen set to the given value.
 //
-// Badger uses bloom filters to speed up key lookups. When LoadBfLazily is set
+// Badger uses bloom filters to speed up key lookups. When LoadBloomOnOpen is set
 // to false, all bloom filters will be loaded on DB open. This is supposed to
 // improve the read speed but it will affect the time taken to open the DB. Set
 // this option to true to reduce the time taken to open the DB.
 //
-// The default value of LoadBfLazily is false.
-func (opt Options) WithLoadBfLazily(b bool) Options {
-	opt.LoadBfLazily = b
+// The default value of LoadBloomOnOpen is false.
+func (opt Options) WithLoadBloomOnOpen(b bool) Options {
+	opt.LoadBloomOnOpen = b
 	return opt
 }

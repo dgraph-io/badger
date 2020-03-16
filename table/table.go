@@ -75,9 +75,9 @@ type Options struct {
 	// ZSTDCompressionLevel is the ZSTD compression level used for compressing blocks.
 	ZSTDCompressionLevel int
 
-	// When LoadBfLazily is set, bloom filters will be read only when they are accessed.
+	// When LoadBloomOnOpen is set, bloom filters will be read only when they are accessed.
 	// Otherwise they will be loaded on table open.
-	LoadBfLazily bool
+	LoadBloomOnOpen bool
 }
 
 // TableInterface is useful for testing.
@@ -377,7 +377,7 @@ func (t *Table) readIndex() error {
 	t.estimatedSize = index.EstimatedSize
 	t.blockIndex = index.Offsets
 
-	if !t.opt.LoadBfLazily {
+	if !t.opt.LoadBloomOnOpen {
 		t.bf, _ = t.readBloomFilter()
 	}
 
@@ -510,7 +510,7 @@ func (t *Table) DoesNotHave(hash uint64) bool {
 	if t.opt.BfCache == nil {
 		// Load bloomfilter into memory if the cache is absent.
 		if t.bf == nil {
-			y.AssertTrue(t.opt.LoadBfLazily)
+			y.AssertTrue(t.opt.LoadBloomOnOpen)
 			t.bf, _ = t.readBloomFilter()
 		}
 		return !t.bf.Has(hash)
