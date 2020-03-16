@@ -380,7 +380,7 @@ func (t *Table) readIndex() error {
 	t.estimatedSize = index.EstimatedSize
 	t.blockIndex = index.Offsets
 
-	if !t.opt.LoadBloomsOnOpen {
+	if t.opt.LoadBloomsOnOpen {
 		t.bf, _ = t.readBloomFilter()
 	}
 
@@ -513,7 +513,7 @@ func (t *Table) DoesNotHave(hash uint64) bool {
 	if t.opt.BfCache == nil {
 		// Load bloomfilter into memory if the cache is absent.
 		if t.bf == nil {
-			y.AssertTrue(t.opt.LoadBloomsOnOpen)
+			y.AssertTrue(!t.opt.LoadBloomsOnOpen)
 			t.bf, _ = t.readBloomFilter()
 		}
 		return !t.bf.Has(hash)
