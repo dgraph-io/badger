@@ -126,7 +126,7 @@ func DefaultOptions(path string) Options {
 		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
 		Compression:             options.None,
-		MaxCacheSize:            0, // 1 << 30, // 1 GB
+		MaxCacheSize:            1 << 30, // 1 GB
 		MaxBfCacheSize:          0,
 		LoadBfLazily:            false,
 		// The following benchmarks were done on a 4 KB block size (default block size). The
