@@ -234,33 +234,35 @@ func Open(opt Options) (db *DB, err error) {
 		if err := createDirs(opt); err != nil {
 			return nil, err
 		}
-		dirLockGuard, err = acquireDirectoryLock(opt.Dir, lockFile, opt.ReadOnly)
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
-			if dirLockGuard != nil {
-				_ = dirLockGuard.release()
-			}
-		}()
-		absDir, err := filepath.Abs(opt.Dir)
-		if err != nil {
-			return nil, err
-		}
-		absValueDir, err := filepath.Abs(opt.ValueDir)
-		if err != nil {
-			return nil, err
-		}
-		if absValueDir != absDir {
-			valueDirLockGuard, err = acquireDirectoryLock(opt.ValueDir, lockFile, opt.ReadOnly)
+		if !opt.BypassLockGuard {
+			dirLockGuard, err = acquireDirectoryLock(opt.Dir, lockFile, opt.ReadOnly)
 			if err != nil {
 				return nil, err
 			}
 			defer func() {
-				if valueDirLockGuard != nil {
-					_ = valueDirLockGuard.release()
+				if dirLockGuard != nil {
+					_ = dirLockGuard.release()
 				}
 			}()
+			absDir, err := filepath.Abs(opt.Dir)
+			if err != nil {
+				return nil, err
+			}
+			absValueDir, err := filepath.Abs(opt.ValueDir)
+			if err != nil {
+				return nil, err
+			}
+			if absValueDir != absDir {
+				valueDirLockGuard, err = acquireDirectoryLock(opt.ValueDir, lockFile, opt.ReadOnly)
+				if err != nil {
+					return nil, err
+				}
+				defer func() {
+					if valueDirLockGuard != nil {
+						_ = valueDirLockGuard.release()
+					}
+				}()
+			}
 		}
 	}
 
@@ -1580,9 +1582,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, prefixes
 	if cb == nil {
 		return ErrNilCallback
 	}
-	if len(prefixes) == 0 {
-		return ErrNoPrefixes
-	}
+
 	c := y.NewCloser(1)
 	recvCh, id := db.pub.newSubscriber(c, prefixes...)
 	slurp := func(batch *pb.KVList) error {
@@ -1616,7 +1616,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, prefixes
 			err := slurp(batch)
 			if err != nil {
 				c.Done()
-				// Delete the subsriber if there is an error by the callback.
+				// Delete the subscriber if there is an error by the callback.
 				db.pub.deleteSubscriber(id)
 				return err
 			}
