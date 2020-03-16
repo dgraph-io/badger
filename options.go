@@ -64,6 +64,8 @@ type Options struct {
 	BloomFalsePositive float64
 	KeepL0InMemory     bool
 	MaxCacheSize       int64
+	MaxBfCacheSize     int64
+	LoadBfLazily       bool
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -124,7 +126,9 @@ func DefaultOptions(path string) Options {
 		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
 		Compression:             options.None,
-		MaxCacheSize:            1 << 30, // 1 GB
+		MaxCacheSize:            0, // 1 << 30, // 1 GB
+		MaxBfCacheSize:          0,
+		LoadBfLazily:            false,
 		// The following benchmarks were done on a 4 KB block size (default block size). The
 		// compression is ratio supposed to increase with increasing compression level but since the
 		// input for compression algorithm is small (4 KB), we don't get significant benefit at
@@ -157,6 +161,7 @@ func buildTableOptions(opt Options) table.Options {
 	return table.Options{
 		BlockSize:            opt.BlockSize,
 		BloomFalsePositive:   opt.BloomFalsePositive,
+		LoadBfLazily:         opt.LoadBfLazily,
 		LoadingMode:          opt.TableLoadingMode,
 		ChkMode:              opt.ChecksumVerificationMode,
 		Compression:          opt.Compression,
@@ -572,5 +577,34 @@ func (opt Options) WithInMemory(b bool) Options {
 // Benchmark code can be found in table/builder_test.go file
 func (opt Options) WithZSTDCompressionLevel(cLevel int) Options {
 	opt.ZSTDCompressionLevel = cLevel
+	return opt
+}
+
+// WithMaxBfCacheSize returns a new Options value with MaxBfCacheSize set to the given value.
+//
+// This value specifies how much memory should be used by the bloom filters.
+// Badger uses bloom filters to speed up lookups. Each table has its own bloom
+// filter and each bloom filter is approximately of 5 MB.
+//
+// Zero value for BfCacheSize means all the bloom filters will be kept in
+// memory and the cache is disabled.
+//
+// The default value of MaxBfCacheSize is 0 which means all bloom filters will
+// be kept in memory.
+func (opt Options) WithMaxBfCacheSize(size int64) Options {
+	opt.MaxBfCacheSize = size
+	return opt
+}
+
+// WithLoadBfLazily returns a new Options value with LoadBfLazily set to the given value.
+//
+// Badger uses bloom filters to speed up key lookups. When LoadBfLazily is set
+// to false, all bloom filters will be loaded on DB open. This is supposed to
+// improve the read speed but it will affect the time taken to open the DB. Set
+// this option to true to reduce the time taken to open the DB.
+//
+// The default value of LoadBfLazily is false.
+func (opt Options) WithLoadBfLazily(b bool) Options {
+	opt.LoadBfLazily = b
 	return opt
 }
