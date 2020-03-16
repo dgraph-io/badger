@@ -65,7 +65,7 @@ type Options struct {
 	KeepL0InMemory     bool
 	MaxCacheSize       int64
 	MaxBfCacheSize     int64
-	LoadBloomOnOpen    bool
+	LoadBloomsOnOpen   bool
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -133,7 +133,7 @@ func DefaultOptions(path string) Options {
 		Compression:             options.None,
 		MaxCacheSize:            1 << 30, // 1 GB
 		MaxBfCacheSize:          0,
-		LoadBloomOnOpen:         true,
+		LoadBloomsOnOpen:        true,
 		// The following benchmarks were done on a 4 KB block size (default block size). The
 		// compression is ratio supposed to increase with increasing compression level but since the
 		// input for compression algorithm is small (4 KB), we don't get significant benefit at
@@ -167,7 +167,7 @@ func buildTableOptions(opt Options) table.Options {
 		TableSize:            uint64(opt.MaxTableSize),
 		BlockSize:            opt.BlockSize,
 		BloomFalsePositive:   opt.BloomFalsePositive,
-		LoadBloomOnOpen:      opt.LoadBloomOnOpen,
+		LoadBloomsOnOpen:     opt.LoadBloomsOnOpen,
 		LoadingMode:          opt.TableLoadingMode,
 		ChkMode:              opt.ChecksumVerificationMode,
 		Compression:          opt.Compression,
@@ -615,15 +615,15 @@ func (opt Options) WithMaxBfCacheSize(size int64) Options {
 	return opt
 }
 
-// WithLoadBloomOnOpen returns a new Options value with LoadBloomOnOpen set to the given value.
+// WithLoadsBloomOnOpen returns a new Options value with LoadBloomsOnOpen set to the given value.
 //
-// Badger uses bloom filters to speed up key lookups. When LoadBloomOnOpen is set
+// Badger uses bloom filters to speed up key lookups. When LoadBloomsOnOpen is set
 // to false, all bloom filters will be loaded on DB open. This is supposed to
 // improve the read speed but it will affect the time taken to open the DB. Set
 // this option to true to reduce the time taken to open the DB.
 //
-// The default value of LoadBloomOnOpen is false.
-func (opt Options) WithLoadBloomOnOpen(b bool) Options {
-	opt.LoadBloomOnOpen = b
+// The default value of LoadBloomsOnOpen is false.
+func (opt Options) WithLoadBloomsOnOpen(b bool) Options {
+	opt.LoadBloomsOnOpen = b
 	return opt
 }
