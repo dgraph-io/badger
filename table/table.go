@@ -72,10 +72,15 @@ type Options struct {
 	// Compression indicates the compression algorithm used for block compression.
 	Compression options.CompressionType
 
-	Cache *ristretto.Cache
+	Cache   *ristretto.Cache
+	BfCache *ristretto.Cache
 
 	// ZSTDCompressionLevel is the ZSTD compression level used for compressing blocks.
 	ZSTDCompressionLevel int
+
+	// When LoadBloomsOnOpen is set, bloom filters will be read only when they are accessed.
+	// Otherwise they will be loaded on table open.
+	LoadBloomsOnOpen bool
 }
 
 // TableInterface is useful for testing.
@@ -93,7 +98,8 @@ type Table struct {
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
 
 	blockIndex []*pb.BlockOffset
-	ref        int32 // For file garbage collection. Atomic.
+	ref        int32    // For file garbage collection. Atomic.
+	bf         *z.Bloom // Nil if BfCache is set.
 
 	mmap []byte // Memory mapped.
 
@@ -156,7 +162,7 @@ func (t *Table) DecrRef() error {
 			t.opt.Cache.Del(t.blockCacheKey(i))
 		}
 		// Delete bloom filter from the cache.
-		t.opt.Cache.Del(t.bfCacheKey())
+		t.opt.BfCache.Del(t.bfCacheKey())
 
 	}
 	return nil
@@ -374,16 +380,10 @@ func (t *Table) readIndex() error {
 	t.estimatedSize = index.EstimatedSize
 	t.blockIndex = index.Offsets
 
-	// Avoid the cost of unmarshalling the bloom filters if the cache is absent.
-	if t.opt.Cache != nil {
-		var bf *z.Bloom
-		if bf, err = z.JSONUnmarshal(index.BloomFilter); err != nil {
-			return y.Wrapf(err, "failed to unmarshal bloom filter for the table %d in Table.readIndex",
-				t.id)
-		}
-
-		t.opt.Cache.Set(t.bfCacheKey(), bf, int64(len(index.BloomFilter)))
+	if !t.opt.LoadBloomsOnOpen {
+		t.bf, _ = t.readBloomFilter()
 	}
+
 	return nil
 }
 
@@ -509,20 +509,24 @@ func (t *Table) ID() uint64 { return t.id }
 func (t *Table) DoesNotHave(hash uint64) bool {
 	var bf *z.Bloom
 
-	// Return fast if cache is absent.
-	if t.opt.Cache == nil {
-		bf, _ := t.readBloomFilter()
-		return !bf.Has(hash)
+	// Return fast if the cache is absent.
+	if t.opt.BfCache == nil {
+		// Load bloomfilter into memory if the cache is absent.
+		if t.bf == nil {
+			y.AssertTrue(t.opt.LoadBloomsOnOpen)
+			t.bf, _ = t.readBloomFilter()
+		}
+		return !t.bf.Has(hash)
 	}
 
 	// Check if the bloomfilter exists in the cache.
-	if b, ok := t.opt.Cache.Get(t.bfCacheKey()); b != nil && ok {
+	if b, ok := t.opt.BfCache.Get(t.bfCacheKey()); b != nil && ok {
 		bf = b.(*z.Bloom)
 		return !bf.Has(hash)
 	}
 
 	bf, sz := t.readBloomFilter()
-	t.opt.Cache.Set(t.bfCacheKey(), bf, int64(sz))
+	t.opt.BfCache.Set(t.bfCacheKey(), bf, int64(sz))
 	return !bf.Has(hash)
 }
 
