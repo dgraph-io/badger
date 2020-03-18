@@ -156,7 +156,7 @@ func DefaultOptions(path string) Options {
 		Truncate:                      false,
 		Logger:                        defaultLogger,
 		LogRotatesToFlush:             2,
-		EventLogging:                  true,
+		EventLogging:                  false,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 	}
@@ -298,7 +298,7 @@ func (opt Options) WithLogger(val Logger) Options {
 //
 // EventLogging provides a way to enable or disable trace.EventLog logging.
 //
-// The default value of EventLogging is true.
+// The default value of EventLogging is false.
 func (opt Options) WithEventLogging(enabled bool) Options {
 	opt.EventLogging = enabled
 	return opt
