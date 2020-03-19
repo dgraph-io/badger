@@ -374,7 +374,7 @@ The table structure looks like
 // In case the data is encrypted, the "IV" is added to the end of the index.
 func (b *Builder) Finish() []byte {
 	var keySlice = make([]uint64, 0, len(b.keyHashes))
-	for i, _ := range b.keyHashes {
+	for i := range b.keyHashes {
 		keySlice = append(keySlice, i)
 	}
 	xfilter, err := xorfilter.Populate(keySlice)
