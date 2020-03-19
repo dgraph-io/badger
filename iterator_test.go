@@ -301,7 +301,7 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 	})
 }
 
-// go test -run xxx --bench KeyIterator --count 10 > result.txt
+// go test -run xxx -bench KeyIterator -count 10 > result.txt
 // benchstat result.txt
 // name           time/op
 // KeyIterator-8  121µs ± 7%
