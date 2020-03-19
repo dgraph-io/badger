@@ -19,6 +19,7 @@ package table
 import (
 	"crypto/aes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -31,6 +32,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/FastFilter/xorfilter"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
@@ -39,7 +41,6 @@ import (
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto"
-	"github.com/dgraph-io/ristretto/z"
 )
 
 const fileSuffix = ".sst"
@@ -98,8 +99,8 @@ type Table struct {
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
 
 	blockIndex []*pb.BlockOffset
-	ref        int32    // For file garbage collection. Atomic.
-	bf         *z.Bloom // Nil if BfCache is set.
+	ref        int32           // For file garbage collection. Atomic.
+	xfilter    *xorfilter.Xor8 // Nil if BfCache is set.
 
 	mmap []byte // Memory mapped.
 
@@ -161,7 +162,7 @@ func (t *Table) DecrRef() error {
 		for i := range t.blockIndex {
 			t.opt.Cache.Del(t.blockCacheKey(i))
 		}
-		// Delete bloom filter from the cache.
+		// Delete xor filter from the cache.
 		t.opt.BfCache.Del(t.bfCacheKey())
 
 	}
@@ -381,7 +382,7 @@ func (t *Table) readIndex() error {
 	t.blockIndex = index.Offsets
 
 	if t.opt.LoadBloomsOnOpen {
-		t.bf, _ = t.readBloomFilter()
+		t.xfilter, _ = t.readXorFilter()
 	}
 
 	return nil
@@ -507,33 +508,31 @@ func (t *Table) ID() uint64 { return t.id }
 // DoesNotHave returns true if (but not "only if") the table does not have the key hash.
 // It does a bloom filter lookup.
 func (t *Table) DoesNotHave(hash uint64) bool {
-	var bf *z.Bloom
-
 	// Return fast if the cache is absent.
 	if t.opt.BfCache == nil {
 		// Load bloomfilter into memory if the cache is absent.
-		if t.bf == nil {
+		if t.xfilter == nil {
 			y.AssertTrue(!t.opt.LoadBloomsOnOpen)
-			t.bf, _ = t.readBloomFilter()
+			t.xfilter, _ = t.readXorFilter()
 		}
-		return !t.bf.Has(hash)
+		return !t.xfilter.Contains(hash)
 	}
 
 	// Check if the bloomfilter exists in the cache.
 	if b, ok := t.opt.BfCache.Get(t.bfCacheKey()); b != nil && ok {
-		bf = b.(*z.Bloom)
-		return !bf.Has(hash)
+		xf := b.(*xorfilter.Xor8)
+		return !xf.Contains(hash)
 	}
 
-	bf, sz := t.readBloomFilter()
-	t.opt.BfCache.Set(t.bfCacheKey(), bf, int64(sz))
-	return !bf.Has(hash)
+	xf, sz := t.readXorFilter()
+	t.opt.BfCache.Set(t.bfCacheKey(), xf, int64(sz))
+	return !xf.Contains(hash)
 }
 
-// readBloomFilter reads the bloom filter from the SST and returns its length
-// along with the bloom filter.
-func (t *Table) readBloomFilter() (*z.Bloom, int) {
-	// Read bloom filter from the SST.
+// readXorFilter reads the xorfilter from the SST and returns its length
+// along with the xorfilter.
+func (t *Table) readXorFilter() (*xorfilter.Xor8, int) {
+	// Read xorfilter from the SST.
 	data := t.readNoFail(t.indexStart, t.indexLen)
 	index := pb.TableIndex{}
 	var err error
@@ -544,9 +543,9 @@ func (t *Table) readBloomFilter() (*z.Bloom, int) {
 	}
 	y.Check(proto.Unmarshal(data, &index))
 
-	bf, err := z.JSONUnmarshal(index.BloomFilter)
-	y.Check(err)
-	return bf, len(index.BloomFilter)
+	var xf xorfilter.Xor8
+	y.Check(json.Unmarshal(index.BloomFilter, &xf))
+	return &xf, len(index.BloomFilter)
 }
 
 // VerifyChecksum verifies checksum for all blocks of table. This function is called by

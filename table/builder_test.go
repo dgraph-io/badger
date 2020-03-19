@@ -17,17 +17,21 @@
 package table
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/FastFilter/xorfilter"
+	"github.com/dgryski/go-farm"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 func TestTableIndex(t *testing.T) {
@@ -94,7 +98,7 @@ func TestTableIndex(t *testing.T) {
 			blockFirstKeys := make([][]byte, 0)
 			blockCount := 0
 			for i := 0; i < keysCount; i++ {
-				k := []byte(fmt.Sprintf("%016x", i))
+				k := y.KeyWithTs([]byte(fmt.Sprintf("%016d", i)), 1)
 				v := fmt.Sprintf("%d", i)
 				vs := y.ValueStruct{Value: []byte(v)}
 				if i == 0 { // This is first key for first block.
@@ -154,7 +158,8 @@ func BenchmarkBuilder(b *testing.B) {
 	rand.Read(val)
 	vs := y.ValueStruct{Value: []byte(val)}
 
-	keysCount := 1300000 // This number of entries consumes ~64MB of memory.
+	// Approximate number of 32 byte entries in 64 MB table.
+	keysCount := 840000
 
 	var keyList [][]byte
 	for i := 0; i < keysCount; i++ {
@@ -201,6 +206,111 @@ func BenchmarkBuilder(b *testing.B) {
 		b.Run("level 15", func(b *testing.B) {
 			opt.ZSTDCompressionLevel = 15
 			bench(b, &opt)
+		})
+	})
+}
+
+//name                           time/op
+//Bloom/Set/bloom-8              23.2ms ± 3%
+//Bloom/Set/xorFilter-8           121ms ± 4%
+//Bloom/Get/success/bloom-8      20.9ns ± 5%
+//Bloom/Get/success/xorFilter-8  7.41ns ± 7%
+//Bloom/Get/failure/bloom-8      8.27ns ± 6%
+//Bloom/Get/failure/xorFilter-8  7.52ns ± 5%
+func BenchmarkBloom(b *testing.B) {
+	numKeys := 840000 // Amount of keys in a 64 MB table.
+	// Random key for lookup. Key1 exists, key2 does not.
+	key1 := farm.Fingerprint64([]byte(fmt.Sprintf("%032d", numKeys/2+1283)))
+	key2 := farm.Fingerprint64([]byte(fmt.Sprintf("%032d", numKeys+12312)))
+	keyHashes := make([]uint64, numKeys)
+
+	for i := 0; i < numKeys; i++ {
+		key := []byte(fmt.Sprintf("%032d", i))
+		keyHashes[i] = farm.Fingerprint64(key)
+	}
+
+	var res []byte
+	var zbloom *z.Bloom
+	var xorFilter *xorfilter.Xor8
+
+	prepareZbloom := func() {
+		bf := z.NewBloomFilter(float64(len(keyHashes)), 0.03)
+		for _, h := range keyHashes {
+			bf.Add(h)
+		}
+		zbloom = bf
+	}
+	prepareXORFilter := func() {
+		filter, err := xorfilter.Populate(keyHashes)
+		if err != nil {
+			panic(err)
+		}
+		xorFilter = filter
+
+	}
+	b.Run("Set", func(b *testing.B) {
+		b.Run("bloom", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				// Use 3% false positive rate because that's the default in xor filter.
+				bf := z.NewBloomFilter(float64(len(keyHashes)), 0.03)
+				for _, h := range keyHashes {
+					bf.Add(h)
+				}
+				res = bf.JSONMarshal()
+			}
+		})
+		b.Run("xorFilter", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				filter, _ := xorfilter.Populate(keyHashes)
+				res, _ = json.Marshal(filter)
+			}
+		})
+	})
+	_ = res
+	b.Run("Get", func(b *testing.B) {
+		b.Run("success", func(b *testing.B) {
+			b.Run("bloom", func(b *testing.B) {
+				prepareZbloom()
+				b.ResetTimer()
+
+				for i := 0; i < b.N; i++ {
+					if !zbloom.Has(key1) {
+						b.Fail()
+					}
+				}
+			})
+			b.Run("xorFilter", func(b *testing.B) {
+				prepareXORFilter()
+				b.ResetTimer()
+
+				for i := 0; i < b.N; i++ {
+					if !xorFilter.Contains(key1) {
+						b.Fail()
+					}
+				}
+			})
+		})
+		b.Run("failure", func(b *testing.B) {
+			b.Run("bloom", func(b *testing.B) {
+				prepareZbloom()
+				b.ResetTimer()
+
+				for i := 0; i < b.N; i++ {
+					if zbloom.Has(key2) {
+						b.Fail()
+					}
+				}
+			})
+			b.Run("xorFilter", func(b *testing.B) {
+				prepareXORFilter()
+				b.ResetTimer()
+
+				for i := 0; i < b.N; i++ {
+					if xorFilter.Contains(key2) {
+						b.Fail()
+					}
+				}
+			})
 		})
 	})
 }

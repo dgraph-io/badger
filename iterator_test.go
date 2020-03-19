@@ -300,3 +300,60 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 		}
 	})
 }
+
+// go test -run xxx --bench KeyIterator --count 10 > result.txt
+// benchstat result.txt
+// name           time/op
+// KeyIterator-8  121µs ± 7%
+func BenchmarkKeyIterator(b *testing.B) {
+	dir, err := ioutil.TempDir(".", "badger-test")
+	y.Check(err)
+	defer removeDir(dir)
+
+	opts := DefaultOptions(dir)
+	opts.TableLoadingMode = options.LoadToRAM
+	opts.Logger = nil
+	db, err := Open(opts)
+	require.NoError(b, err)
+	defer db.Close()
+
+	N := 100000
+	val := []byte("OK")
+	bkey := func(i int) []byte {
+		return []byte(fmt.Sprintf("%06d", i))
+	}
+
+	key := []byte(fmt.Sprintf("foo"))
+	batch := db.NewWriteBatch()
+	var inserted int
+	for i := 0; i < N; i++ {
+		require.NoError(b, batch.Set(bkey(i), val))
+		if i%100 == 0 {
+			txn := db.NewTransaction(true)
+			require.NoError(b, txn.Set(key, val))
+			require.NoError(b, txn.Commit())
+			inserted++
+		}
+	}
+	require.NoError(b, batch.Flush())
+
+	iopt := DefaultIteratorOptions
+	iopt.AllVersions = true
+	iopt.PrefetchValues = false
+
+	txn := db.NewTransaction(false)
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		var count int
+		it := txn.NewKeyIterator(key, iopt)
+		for it.Rewind(); it.Valid(); it.Next() {
+			count++
+		}
+		if i == 0 && count != inserted {
+			b.Fail()
+		}
+		it.Close()
+	}
+	txn.Discard()
+}

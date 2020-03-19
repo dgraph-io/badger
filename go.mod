@@ -4,6 +4,7 @@ go 1.12
 
 require (
 	github.com/DataDog/zstd v1.4.1
+	github.com/FastFilter/xorfilter v0.0.0-20200125145223-fef157c13a91
 	github.com/cespare/xxhash v1.1.0
 	github.com/dgraph-io/ristretto v0.0.2-0.20200115201040-8f368f2f2ab3
 	github.com/dgryski/go-farm v0.0.0-20190423205320-6a90982ecee2

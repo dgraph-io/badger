@@ -18,11 +18,13 @@ package table
 
 import (
 	"crypto/aes"
+	"encoding/json"
 	"math"
 	"runtime"
 	"sync"
 	"unsafe"
 
+	"github.com/FastFilter/xorfilter"
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
@@ -31,7 +33,6 @@ import (
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
-	"github.com/dgraph-io/ristretto/z"
 )
 
 const (
@@ -82,7 +83,7 @@ type Builder struct {
 	baseOffset   uint32   // Offset for the current block.
 	entryOffsets []uint32 // Offsets of entries present in current block.
 	tableIndex   *pb.TableIndex
-	keyHashes    []uint64 // Used for building the bloomfilter.
+	keyHashes    map[uint64]struct{} // Used for building the bloomfilter.
 	opt          *Options
 
 	// Used to concurrently compress/encrypt blocks.
@@ -98,7 +99,7 @@ func NewTableBuilder(opts Options) *Builder {
 		// We trim the additional space in table.Finish().
 		buf:        make([]byte, opts.TableSize+5*MB),
 		tableIndex: &pb.TableIndex{},
-		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
+		keyHashes:  make(map[uint64]struct{}),
 		opt:        &opts,
 	}
 
@@ -190,7 +191,7 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
-	b.keyHashes = append(b.keyHashes, farm.Fingerprint64(y.ParseKey(key)))
+	b.keyHashes[farm.Fingerprint64(y.ParseKey(key))] = struct{}{}
 
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
@@ -372,12 +373,17 @@ The table structure looks like
 */
 // In case the data is encrypted, the "IV" is added to the end of the index.
 func (b *Builder) Finish() []byte {
-	bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePositive)
-	for _, h := range b.keyHashes {
-		bf.Add(h)
+	var keySlice = make([]uint64, 0, len(b.keyHashes))
+	for i, _ := range b.keyHashes {
+		keySlice = append(keySlice, i)
 	}
+	xfilter, err := xorfilter.Populate(keySlice)
+	y.Check(err)
+	xbytes, err := json.Marshal(xfilter)
+	y.Check(err)
+
 	// Add bloom filter to the index.
-	b.tableIndex.BloomFilter = bf.JSONMarshal()
+	b.tableIndex.BloomFilter = xbytes
 
 	b.finishBlock() // This will never start a new block.
 
