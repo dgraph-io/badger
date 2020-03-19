@@ -98,7 +98,7 @@ func TestTableIndex(t *testing.T) {
 			blockFirstKeys := make([][]byte, 0)
 			blockCount := 0
 			for i := 0; i < keysCount; i++ {
-				k := y.KeyWithTs([]byte(fmt.Sprintf("%016d", i)), 1)
+				k := []byte(fmt.Sprintf("%016d", i))
 				v := fmt.Sprintf("%d", i)
 				vs := y.ValueStruct{Value: []byte(v)}
 				if i == 0 { // This is first key for first block.
@@ -261,8 +261,16 @@ func BenchmarkBloom(b *testing.B) {
 		})
 		b.Run("xorFilter", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				filter, _ := xorfilter.Populate(keyHashes)
-				res, _ = json.Marshal(filter)
+				filter, err := xorfilter.Populate(keyHashes)
+				if i == 0 && err != nil {
+					b.Log(err)
+					b.Fail()
+				}
+				res, err = json.Marshal(filter)
+				if i == 0 && err != nil {
+					b.Log(err)
+					b.Fail()
+				}
 			}
 		})
 	})
