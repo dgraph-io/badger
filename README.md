@@ -252,7 +252,7 @@ on it.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42"))
+  e := badger.NewEntry([]byte("answer"), []byte("42"))
   err := txn.SetEntry(e)
   return err
 })
@@ -401,7 +401,7 @@ and `Txn.SetEntry()` API methods.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42")).WithTTL(time.Hour)
+  e := badger.NewEntry([]byte("answer"), []byte("42")).WithTTL(time.Hour)
   err := txn.SetEntry(e)
   return err
 })
@@ -414,7 +414,7 @@ metadata can be set using `Entry.WithMeta()` and `Txn.SetEntry()` API methods.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1))
+  e := badger.NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1))
   err := txn.SetEntry(e)
   return err
 })
@@ -425,7 +425,7 @@ then can be set using `Txn.SetEntry()`.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1)).WithTTL(time.Hour)
+  e := badger.NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1)).WithTTL(time.Hour)
   err := txn.SetEntry(e)
   return err
 })
@@ -776,6 +776,7 @@ Below is a list of known projects that use Badger:
 * [Volument](https://volument.com/) - A new take on website analytics backed by Badger.
 * [Sloop](https://github.com/salesforce/sloop) - Kubernetes History Visualization.
 * [KVdb](https://kvdb.io/) - Hosted key-value store and serverless platform built on top of Badger.
+* [Dkron](https://dkron.io/) - Distributed, fault tolerant job scheduling system.
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
