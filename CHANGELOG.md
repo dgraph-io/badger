@@ -6,6 +6,66 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
 
 ## [Unreleased]
 
+## [1.6.1] - 2020-03-13
+
+### New APIs
+ - Badger.DB
+	- NewWriteBatchAt (#948)
+ - Badger.Options
+	- WithEventLogging (#1035)
+	- WithVerifyValueChecksum (#1052)
+	- WithBypassLockGuard (#1243)
+
+### Features
+ - Support checksum verification for values read from vlog (#1052)
+ - Add EventLogging option (#1035)
+ - Support WriteBatch API in managed mode (#948)
+ - Add support for watching nil prefix in Subscribe API (#1246)
+
+### Fixed
+ - Initialize vlog before starting compactions in db.Open (#1226)
+ - Fix int overflow for 32bit (#1216)
+ - Remove the 'this entry should've caught' log from value.go (#1170)
+ - Fix merge iterator duplicates issue (#1157)
+ - Fix segmentation fault in vlog.Read (header.Decode) (#1150)
+ - Fix VerifyValueChecksum checks (#1138)
+ - Fix windows dataloss issue (#1134)
+ - Fix request increment ref bug (#1121)
+ - Limit manifest's change set size (#1119)
+ - Fix deadlock in discard stats (#1070)
+ - Acquire lock before unmapping vlog files (#1050)
+ - Set move key's expiresAt for keys with TTL (#1006)
+ - Fix deadlock when flushing discard stats. (#976)
+ - Fix table.Smallest/Biggest and iterator Prefix bug (#997)
+ - Fix boundaries on GC batch size (#987)
+ - Lock log file before munmap (#949)
+ - VlogSize to store correct directory name to expvar.Map (#956)
+ - Fix transaction too big issue in restore  (#957)
+ - Fix race condition in updateDiscardStats (#973)
+ - Cast results of len to uint32 to fix compilation in i386 arch. (#961)
+ - Drop discard stats if we can't unmarshal it (#936)
+ - Open all vlog files in RDWR mode (#923)
+ - Fix race condition in flushDiscardStats function (#921)
+ - Ensure rewrite in vlog is within transactional limits (#911)
+ - Fix prefix bug in key iterator and allow all versions (#950)
+ - Fix discard stats moved by GC bug (#929)
+
+### Performance
+ - Use fastRand instead of locked-rand in skiplist (#1173)
+ - Fix checkOverlap in compaction (#1166)
+ - Optimize createTable in stream_writer.go (#1132)
+ - Add capacity to slice creation when capacity is known (#1103)
+ - Introduce fast merge iterator
+ - Introduce StreamDone in Stream Writer (#1061)
+ - Flush vlog buffer if it grows beyond threshold (#1067)<Paste>
+ - Binary search based table picker (#983)
+ - Making the stream writer APIs goroutine-safe (#959)
+ - Replace FarmHash with AESHash for Oracle conflicts (#952)
+ - Change file picking strategy in compaction (#894)
+ - Use trie for prefix matching (#851)
+ - Fix busy-wait loop in Watermark (#920)
+
+
 ## [1.6.0] - 2019-07-01
 
 This is a release including almost 200 commits, so expect many changes - some of them
@@ -175,7 +235,8 @@ Bug fix:
 ## [1.0.1] - 2017-11-06
 * Fix an uint16 overflow when resizing key slice
 
-[Unreleased]: https://github.com/dgraph-io/badger/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/dgraph-io/badger/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/dgraph-io/badger/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/dgraph-io/badger/compare/v1.5.5...v1.6.0
 [1.5.5]: https://github.com/dgraph-io/badger/compare/v1.5.3...v1.5.5
 [1.5.3]: https://github.com/dgraph-io/badger/compare/v1.5.2...v1.5.3
