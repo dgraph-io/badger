@@ -501,7 +501,7 @@ func (it *Iterator) newItem() *Item {
 // This item is only valid until it.Next() gets called.
 func (it *Iterator) Item() *Item {
 	tx := it.txn
-	tx.addReadKey(it.item.Key())
+	tx.AddReadKey(it.item.Key())
 	return it.item
 }
 

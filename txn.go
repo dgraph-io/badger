@@ -400,7 +400,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 		}
 		// Only track reads if this is update txn. No need to track read if txn serviced it
 		// internally.
-		txn.addReadKey(key)
+		txn.AddReadKey(key)
 	}
 
 	seek := y.KeyWithTs(key, txn.readTs)
@@ -426,7 +426,9 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	return item, nil
 }
 
-func (txn *Txn) addReadKey(key []byte) {
+// AddReadKey exported so that user can pretend they read some key during transaction
+// This can be useful if user caches some value for keys
+func (txn *Txn) AddReadKey(key []byte) {
 	if txn.update {
 		fp := z.MemHash(key)
 		txn.reads = append(txn.reads, fp)
