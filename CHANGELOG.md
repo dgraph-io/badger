@@ -6,7 +6,7 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
 
 ## [Unreleased]
 
-## [1.6.1] - 2020-03-13
+## [1.6.1] - 2020-03-23
 
 ### New APIs
  - Badger.DB
