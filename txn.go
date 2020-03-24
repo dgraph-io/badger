@@ -48,7 +48,8 @@ type oracle struct {
 	discardTs uint64       // Used by ManagedDB.
 	readMark  *y.WaterMark // Used by DB.
 
-	// commits stores a key fingerprint and latest commit counter for it.
+	// committedTxns contains all committed writes (contains fingerprints
+	// of keys written and their latest commit counter).
 	committedTxns []committedTxn
 	lastCleanupTs uint64
 
@@ -136,8 +137,9 @@ func (o *oracle) hasConflict(txn *Txn) bool {
 		return false
 	}
 	for _, committedTxn := range o.committedTxns {
-		// A commit at the read timestamp is expected.
-		// But, any commit after the read timestamp should cause a conflict.
+		// If the committedTxn.ts is less than txn.readTs that implies that the
+		// committedTxn finished before the current transaction started.
+		// We don't need to check for conflict in that case.
 		if committedTxn.ts <= txn.readTs {
 			continue
 		}
@@ -177,12 +179,16 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 		ts = txn.commitTs
 	}
 
-	if ts > o.lastCleanupTs {
-		o.committedTxns = append(o.committedTxns, committedTxn{
-			ts:     ts,
-			writes: txn.writes,
-		})
-	}
+	y.AssertTruef(
+		ts > o.lastCleanupTs,
+		"ts: %d should not be less than lastCleanupTs: %d",
+		ts, o.lastCleanupTs,
+	)
+
+	o.committedTxns = append(o.committedTxns, committedTxn{
+		ts:     ts,
+		writes: txn.writes,
+	})
 
 	return ts
 }
@@ -203,7 +209,15 @@ func (o *oracle) cleanupCommittedTransactions() { // Must be called under o.Lock
 		maxReadTs = o.readMark.DoneUntil()
 	}
 
-	if maxReadTs <= o.lastCleanupTs {
+	y.AssertTruef(
+		maxReadTs >= o.lastCleanupTs,
+		"maxReadTs: %d should not be less than lastCleanupTs: %d",
+		maxReadTs, o.lastCleanupTs,
+	)
+
+	// do not run clean up if the maxReadTs (read timestamp of the
+	// oldest transaction that is still in flight) has not increased
+	if maxReadTs == o.lastCleanupTs {
 		return
 	}
 	o.lastCleanupTs = maxReadTs
