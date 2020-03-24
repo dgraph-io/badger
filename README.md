@@ -111,7 +111,7 @@ package main
 import (
 	"log"
 
-	badger "github.com/dgraph-io/badger"
+	badger "github.com/dgraph-io/badger/v2"
 )
 
 func main() {
