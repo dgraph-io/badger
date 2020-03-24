@@ -34,11 +34,11 @@ package skl
 
 import (
 	"math"
+	"math/rand"
 	"sync/atomic"
 	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/y"
-	"github.com/dgraph-io/ristretto/z"
 )
 
 const (
@@ -165,9 +165,9 @@ func (s *node) casNextOffset(h int, old, val uint32) bool {
 //	return n != nil && y.CompareKeys(key, n.key) > 0
 //}
 
-func (s *Skiplist) randomHeight() int {
+func randomHeight() int {
 	h := 1
-	for h < maxHeight && z.FastRand() <= heightIncrease {
+	for h < maxHeight && rand.Uint32() <= heightIncrease {
 		h++
 	}
 	return h
@@ -300,7 +300,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	}
 
 	// We do need to create a new node.
-	height := s.randomHeight()
+	height := randomHeight()
 	x := newNode(s.arena, key, v, height)
 
 	// Try to increase s.height via CAS.

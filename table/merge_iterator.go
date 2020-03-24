@@ -55,18 +55,17 @@ func (n *node) setIterator(iter y.Iterator) {
 }
 
 func (n *node) setKey() {
-	switch {
-	case n.merge != nil:
+	if n.merge != nil {
 		n.valid = n.merge.small.valid
 		if n.valid {
 			n.key = n.merge.small.key
 		}
-	case n.concat != nil:
+	} else if n.concat != nil {
 		n.valid = n.concat.Valid()
 		if n.valid {
 			n.key = n.concat.Key()
 		}
-	default:
+	} else {
 		n.valid = n.iter.Valid()
 		if n.valid {
 			n.key = n.iter.Key()
@@ -75,12 +74,11 @@ func (n *node) setKey() {
 }
 
 func (n *node) next() {
-	switch {
-	case n.merge != nil:
+	if n.merge != nil {
 		n.merge.Next()
-	case n.concat != nil:
+	} else if n.concat != nil {
 		n.concat.Next()
-	default:
+	} else {
 		n.iter.Next()
 	}
 	n.setKey()
@@ -105,22 +103,22 @@ func (mi *MergeIterator) fix() {
 		return
 	}
 	cmp := y.CompareKeys(mi.small.key, mi.bigger().key)
-	switch {
-	case cmp == 0: // Both the keys are equal.
+	// Both the keys are equal.
+	if cmp == 0 {
 		// In case of same keys, move the right iterator ahead.
 		mi.right.next()
 		if &mi.right == mi.small {
 			mi.swapSmall()
 		}
 		return
-	case cmp < 0: // Small is less than bigger().
+	} else if cmp < 0 { // Small is less than bigger().
 		if mi.reverse {
 			mi.swapSmall()
 		} else {
 			// we don't need to do anything. Small already points to the smallest.
 		}
 		return
-	default: // bigger() is less than small.
+	} else { // bigger() is less than small.
 		if mi.reverse {
 			// Do nothing since we're iterating in reverse. Small currently points to
 			// the bigger key and that's okay in reverse iteration.
@@ -208,12 +206,11 @@ func (mi *MergeIterator) Close() error {
 
 // NewMergeIterator creates a merge iterator.
 func NewMergeIterator(iters []y.Iterator, reverse bool) y.Iterator {
-	switch len(iters) {
-	case 0:
+	if len(iters) == 0 {
 		return nil
-	case 1:
+	} else if len(iters) == 1 {
 		return iters[0]
-	case 2:
+	} else if len(iters) == 2 {
 		mi := &MergeIterator{
 			reverse: reverse,
 		}

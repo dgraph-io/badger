@@ -146,8 +146,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			ExpiresAt: e.ExpiresAt,
 		}
 
-		switch {
-		case e.meta&bitFinTxn > 0:
+		if e.meta&bitFinTxn > 0 {
 			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
 			if err != nil {
 				return errors.Wrapf(err, "Unable to parse txn fin: %q", e.Value)
@@ -161,7 +160,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			txn = txn[:0]
 			lastCommit = 0
 
-		case e.meta&bitTxn > 0:
+		} else if e.meta&bitTxn > 0 {
 			txnTs := y.ParseTs(nk)
 			if lastCommit == 0 {
 				lastCommit = txnTs
@@ -175,7 +174,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			te := txnEntry{nk: nk, v: v}
 			txn = append(txn, te)
 
-		default:
+		} else {
 			// This entry is from a rewrite.
 			toLSM(nk, v)
 
@@ -279,6 +278,17 @@ func Open(opt Options) (db *DB, err error) {
 		elog = trace.NewEventLog("Badger", "DB")
 	}
 
+	config := ristretto.Config{
+		// Use 5% of cache memory for storing counters.
+		NumCounters: int64(float64(opt.MaxCacheSize) * 0.05 * 2),
+		MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
+		BufferItems: 64,
+		Metrics:     true,
+	}
+	cache, err := ristretto.NewCache(&config)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create cache")
+	}
 	db = &DB{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
@@ -290,20 +300,7 @@ func Open(opt Options) (db *DB, err error) {
 		valueDirGuard: valueDirLockGuard,
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
-	}
-
-	if opt.MaxCacheSize > 0 {
-		config := ristretto.Config{
-			// Use 5% of cache memory for storing counters.
-			NumCounters: int64(float64(opt.MaxCacheSize) * 0.05 * 2),
-			MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
-			BufferItems: 64,
-			Metrics:     true,
-		}
-		db.blockCache, err = ristretto.NewCache(&config)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create cache")
-		}
+		blockCache:    cache,
 	}
 
 	if db.opt.InMemory {
@@ -389,10 +386,7 @@ func Open(opt Options) (db *DB, err error) {
 
 // CacheMetrics returns the metrics for the underlying cache.
 func (db *DB) CacheMetrics() *ristretto.Metrics {
-	if db.blockCache != nil {
-		return db.blockCache.Metrics
-	}
-	return nil
+	return db.blockCache.Metrics
 }
 
 // Close closes a DB. It's crucial to call it to ensure all the pending updates make their way to
@@ -1056,10 +1050,9 @@ func (db *DB) calculateSize() {
 				return err
 			}
 			ext := filepath.Ext(path)
-			switch ext {
-			case ".sst":
+			if ext == ".sst" {
 				lsmSize += info.Size()
-			case ".vlog":
+			} else if ext == ".vlog" {
 				vlogSize += info.Size()
 			}
 			return nil
@@ -1216,12 +1209,11 @@ func (seq *Sequence) Release() error {
 func (seq *Sequence) updateLease() error {
 	return seq.db.Update(func(txn *Txn) error {
 		item, err := txn.Get(seq.key)
-		switch {
-		case err == ErrKeyNotFound:
+		if err == ErrKeyNotFound {
 			seq.next = 0
-		case err != nil:
+		} else if err != nil {
 			return err
-		default:
+		} else {
 			var num uint64
 			if err := item.Value(func(v []byte) error {
 				num = binary.BigEndian.Uint64(v)
@@ -1509,7 +1501,6 @@ func (db *DB) dropAll() (func(), error) {
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
 	db.blockCache.Clear()
-
 	return resume, nil
 }
 

@@ -116,8 +116,9 @@ func TestBackupRestore1(t *testing.T) {
 
 func TestBackupRestore2(t *testing.T) {
 	tmpdir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer removeDir(tmpdir)
 
 	s1Path := filepath.Join(tmpdir, "test1")
@@ -125,9 +126,9 @@ func TestBackupRestore2(t *testing.T) {
 	s3Path := filepath.Join(tmpdir, "test3")
 
 	db1, err := Open(getTestOptions(s1Path))
-	require.NoError(t, err)
-
-	defer db1.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
 	key1 := []byte("key1")
 	key2 := []byte("key2")
 	rawValue := []byte("NotLongValue")
@@ -138,8 +139,9 @@ func TestBackupRestore2(t *testing.T) {
 		}
 		return tx.SetEntry(NewEntry(key2, rawValue))
 	})
-	require.NoError(t, err)
-
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i := byte(1); i < N; i++ {
 		err = db1.Update(func(tx *Txn) error {
 			if err := tx.SetEntry(NewEntry(append(key1, i), rawValue)); err != nil {
@@ -147,21 +149,25 @@ func TestBackupRestore2(t *testing.T) {
 			}
 			return tx.SetEntry(NewEntry(append(key2, i), rawValue))
 		})
-		require.NoError(t, err)
-
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	var backup bytes.Buffer
 	_, err = db1.Backup(&backup, 0)
-	require.NoError(t, err)
-
+	if err != nil {
+		t.Fatal(err)
+	}
 	fmt.Println("backup1 length:", backup.Len())
 
 	db2, err := Open(getTestOptions(s2Path))
-	require.NoError(t, err)
-
-	defer db2.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
 	err = db2.Load(&backup, 16)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for i := byte(1); i < N; i++ {
 		err = db2.View(func(tx *Txn) error {
@@ -182,8 +188,9 @@ func TestBackupRestore2(t *testing.T) {
 			}
 			return nil
 		})
-		require.NoError(t, err)
-
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	for i := byte(1); i < N; i++ {
@@ -193,22 +200,26 @@ func TestBackupRestore2(t *testing.T) {
 			}
 			return tx.SetEntry(NewEntry(append(key2, i), rawValue))
 		})
-		require.NoError(t, err)
-
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	backup.Reset()
 	_, err = db2.Backup(&backup, 0)
-	require.NoError(t, err)
-
+	if err != nil {
+		t.Fatal(err)
+	}
 	fmt.Println("backup2 length:", backup.Len())
 	db3, err := Open(getTestOptions(s3Path))
-	require.NoError(t, err)
-
-	defer db3.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	err = db3.Load(&backup, 16)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for i := byte(1); i < N; i++ {
 		err = db3.View(func(tx *Txn) error {
@@ -229,8 +240,9 @@ func TestBackupRestore2(t *testing.T) {
 			}
 			return nil
 		})
-		require.NoError(t, err)
-
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
 }
@@ -298,8 +310,9 @@ func TestBackup(t *testing.T) {
 	}
 	t.Run("disk mode", func(t *testing.T) {
 		tmpdir, err := ioutil.TempDir("", "badger-test")
-		require.NoError(t, err)
-
+		if err != nil {
+			t.Fatal(err)
+		}
 		defer removeDir(tmpdir)
 		opt := DefaultOptions(filepath.Join(tmpdir, "backup0"))
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
@@ -317,9 +330,11 @@ func TestBackup(t *testing.T) {
 
 func TestBackupRestore3(t *testing.T) {
 	var bb bytes.Buffer
-	tmpdir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
 
+	tmpdir, err := ioutil.TempDir("", "badger-test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer removeDir(tmpdir)
 
 	N := 1000
@@ -328,9 +343,10 @@ func TestBackupRestore3(t *testing.T) {
 	// backup
 	{
 		db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup1")))
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		defer db1.Close()
 		require.NoError(t, populateEntries(db1, entries))
 
 		_, err = db1.Backup(&bb, 0)
@@ -342,9 +358,9 @@ func TestBackupRestore3(t *testing.T) {
 
 	// restore
 	db2, err := Open(DefaultOptions(filepath.Join(tmpdir, "restore1")))
-	require.NoError(t, err)
-
-	defer db2.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, db2.Load(&bb, 16))
 
 	// verify
@@ -374,8 +390,9 @@ func TestBackupRestore3(t *testing.T) {
 
 func TestBackupLoadIncremental(t *testing.T) {
 	tmpdir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer removeDir(tmpdir)
 
 	N := 100
@@ -386,9 +403,9 @@ func TestBackupLoadIncremental(t *testing.T) {
 	// backup
 	{
 		db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup2")))
-		require.NoError(t, err)
-
-		defer db1.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		require.NoError(t, populateEntries(db1, entries))
 		since, err := db1.Backup(&bb, 0)
@@ -446,10 +463,9 @@ func TestBackupLoadIncremental(t *testing.T) {
 
 	// restore
 	db2, err := Open(getTestOptions(filepath.Join(tmpdir, "restore2")))
-	require.NoError(t, err)
-
-	defer db2.Close()
-
+	if err != nil {
+		t.Fatal(err)
+	}
 	require.NoError(t, db2.Load(&bb, 16))
 
 	// verify

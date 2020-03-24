@@ -77,9 +77,13 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
-	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Uint32())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.CreateSyncedFile(filename, true)
-	require.NoError(t, err)
+	if t != nil {
+		require.NoError(t, err)
+	} else {
+		y.Check(err)
+	}
 
 	sort.Slice(keyValues, func(i, j int) bool {
 		return keyValues[i][0] < keyValues[j][0]
@@ -739,10 +743,7 @@ func TestTableChecksum(t *testing.T) {
 	f := buildTestTable(t, "k", 10000, opts)
 	fi, err := f.Stat()
 	require.NoError(t, err, "unable to get file information")
-	// Write random bytes at random location.
-	n, err := f.WriteAt(rb, rand.Int63n(fi.Size()))
-	require.NoError(t, err)
-	require.Equal(t, n, len(rb))
+	f.WriteAt(rb, rand.Int63n(fi.Size()))
 
 	_, err = OpenTable(f, opts)
 	if err == nil || !strings.Contains(err.Error(), "checksum") {

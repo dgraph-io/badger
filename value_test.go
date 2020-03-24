@@ -780,9 +780,6 @@ func TestPenultimateLogCorruption(t *testing.T) {
 	if db0.valueDirGuard != nil {
 		require.NoError(t, db0.valueDirGuard.release())
 	}
-	require.NoError(t, db0.vlog.Close())
-	require.NoError(t, db0.manifest.close())
-	require.NoError(t, db0.registry.Close())
 
 	opt.Truncate = true
 	db1, err := Open(opt)
@@ -802,9 +799,7 @@ func TestPenultimateLogCorruption(t *testing.T) {
 func checkKeys(t *testing.T, kv *DB, keys [][]byte) {
 	i := 0
 	txn := kv.NewTransaction(false)
-	defer txn.Discard()
 	iter := txn.NewIterator(IteratorOptions{})
-	defer iter.Close()
 	for iter.Seek(keys[0]); iter.Valid(); iter.Next() {
 		require.Equal(t, iter.Item().Key(), keys[i])
 		i++

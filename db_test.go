@@ -23,8 +23,10 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"math"
 	"math/rand"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -282,13 +284,6 @@ func TestGet(t *testing.T) {
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
 		opts := DefaultOptions("").WithInMemory(true)
-		db, err := Open(opts)
-		require.NoError(t, err)
-		test(t, db)
-		require.NoError(t, db.Close())
-	})
-	t.Run("cache disabled", func(t *testing.T) {
-		opts := DefaultOptions("").WithInMemory(true).WithMaxCacheSize(0)
 		db, err := Open(opts)
 		require.NoError(t, err)
 		test(t, db)
@@ -1166,9 +1161,6 @@ func TestExpiryImproperDBClose(t *testing.T) {
 		// it would return Truncate Required Error.
 		require.NoError(t, db0.vlog.Close())
 
-		require.NoError(t, db0.registry.Close())
-		require.NoError(t, db0.manifest.close())
-
 		db1, err := Open(opt)
 		require.NoError(t, err)
 		err = db1.View(func(txn *Txn) error {
@@ -1208,7 +1200,7 @@ func randBytes(n int) []byte {
 	recv := make([]byte, n)
 	in, err := rand.Read(recv)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	return recv[:in]
 }
@@ -1566,6 +1558,9 @@ func TestLSMOnly(t *testing.T) {
 	opts.ValueLogMaxEntries = 100
 	db, err := Open(opts)
 	require.NoError(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	value := make([]byte, 128)
 	_, err = rand.Read(value)
@@ -1577,7 +1572,9 @@ func TestLSMOnly(t *testing.T) {
 
 	db, err = Open(opts)
 	require.NoError(t, err)
-
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
 	require.NoError(t, db.RunValueLogGC(0.2))
 }
@@ -1673,12 +1670,12 @@ func TestGoroutineLeak(t *testing.T) {
 func ExampleOpen() {
 	dir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer removeDir(dir)
 	db, err := Open(DefaultOptions(dir))
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer db.Close()
 
@@ -1690,17 +1687,17 @@ func ExampleOpen() {
 	})
 
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	txn := db.NewTransaction(true) // Read-write txn
 	err = txn.SetEntry(NewEntry([]byte("key"), []byte("value")))
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	err = txn.Commit()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	err = db.View(func(txn *Txn) error {
@@ -1717,7 +1714,7 @@ func ExampleOpen() {
 	})
 
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	// Output:
@@ -1728,13 +1725,13 @@ func ExampleOpen() {
 func ExampleTxn_NewIterator() {
 	dir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir))
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer db.Close()
 
@@ -1752,13 +1749,13 @@ func ExampleTxn_NewIterator() {
 	for i := 0; i < n; i++ {
 		err := txn.SetEntry(NewEntry(bkey(i), bval(i)))
 		if err != nil {
-			panic(err)
+			log.Fatal(err)
 		}
 	}
 
 	err = txn.Commit()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	opt := DefaultIteratorOptions
@@ -1775,7 +1772,7 @@ func ExampleTxn_NewIterator() {
 		return nil
 	})
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	fmt.Printf("Counted %d elements", count)
 	// Output:
@@ -1957,8 +1954,77 @@ func TestVerifyChecksum(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	flag.Parse()
+	// call flag.Parse() here if TestMain uses flags
+	go func() {
+		if err := http.ListenAndServe("localhost:8080", nil); err != nil {
+			log.Fatalf("Unable to open http port at 8080")
+		}
+	}()
 	os.Exit(m.Run())
+}
+
+func ExampleDB_Subscribe() {
+	prefix := []byte{'a'}
+
+	// This key should be printed, since it matches the prefix.
+	aKey := []byte("a-key")
+	aValue := []byte("a-value")
+
+	// This key should not be printed.
+	bKey := []byte("b-key")
+	bValue := []byte("b-value")
+
+	// Open the DB.
+	dir, err := ioutil.TempDir("", "badger-test")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer removeDir(dir)
+	db, err := Open(DefaultOptions(dir))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	// Create the context here so we can cancel it after sending the writes.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Use the WaitGroup to make sure we wait for the subscription to stop before continuing.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cb := func(kvs *KVList) error {
+			for _, kv := range kvs.Kv {
+				fmt.Printf("%s is now set to %s\n", kv.Key, kv.Value)
+			}
+			return nil
+		}
+		if err := db.Subscribe(ctx, cb, prefix); err != nil && err != context.Canceled {
+			log.Fatal(err)
+		}
+		log.Printf("subscription closed")
+	}()
+
+	// Wait for the above go routine to be scheduled.
+	time.Sleep(time.Second)
+	// Write both keys, but only one should be printed in the Output.
+	err = db.Update(func(txn *Txn) error { return txn.Set(aKey, aValue) })
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = db.Update(func(txn *Txn) error { return txn.Set(bKey, bValue) })
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("stopping subscription")
+	cancel()
+	log.Printf("waiting for subscription to close")
+	wg.Wait()
+	// Output:
+	// a-key is now set to a-value
 }
 
 func removeDir(dir string) {

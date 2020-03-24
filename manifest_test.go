@@ -168,7 +168,6 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	defer removeDir(dir)
 	kv, err := Open(DefaultOptions(dir))
 	require.NoError(t, err)
-	defer kv.Close()
 
 	lh0 := newLevelHandler(kv, 0)
 	lh1 := newLevelHandler(kv, 1)

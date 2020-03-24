@@ -176,7 +176,7 @@ func TestPagebufferReader2(t *testing.T) {
 	require.Equal(t, n, 10, "length of buffer and length written should be equal")
 	require.NoError(t, err, "unable to write bytes to buffer")
 
-	randOffset := int(rand.Int31n(int32(b.length) - 1))
+	randOffset := int(rand.Int31n(int32(b.length)))
 	randLength := int(rand.Int31n(int32(b.length - randOffset)))
 	reader := b.NewReaderAt(randOffset)
 	// Read randLength bytes.
