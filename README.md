@@ -67,7 +67,7 @@ For more details on our version naming schema please read [Choosing a version](#
 To start using Badger, install Go 1.11 or above and run `go get`:
 
 ```sh
-$ go get github.com/dgraph-io/badger/...
+$ go get github.com/dgraph-io/badger/v2
 ```
 
 This will retrieve the library and install the `badger` command line
