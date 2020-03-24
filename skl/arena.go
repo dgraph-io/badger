@@ -35,8 +35,9 @@ const (
 
 // Arena should be lock-free.
 type Arena struct {
-	n   uint32
-	buf []byte
+	n             uint32
+	buf           []byte
+	buf0Alignment uint32
 }
 
 // newArena returns a new arena.
@@ -47,6 +48,7 @@ func newArena(n int64) *Arena {
 		n:   1,
 		buf: make([]byte, n),
 	}
+	out.buf0Alignment = uint32(uintptr(unsafe.Pointer(&out.buf[0]))) & ^uint32(nodeAlign)
 	return out
 }
 
@@ -73,9 +75,8 @@ func (s *Arena) putNode(height int) uint32 {
 		l, n, len(s.buf))
 
 	// Return the aligned offset.
-	buf0Alighment := uint32(uintptr(unsafe.Pointer(&s.buf[0]))) & ^uint32(nodeAlign)
-	m := (buf0Alighment + (n - l + uint32(nodeAlign))) & ^uint32(nodeAlign)
-	m -= buf0Alighment
+	m := (s.buf0Alignment + (n - l + uint32(nodeAlign))) & ^uint32(nodeAlign)
+	m -= s.buf0Alignment
 	return m
 }
 
