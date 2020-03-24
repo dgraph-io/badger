@@ -52,7 +52,7 @@ func newArena(n int64) *Arena {
 
 func makeAlignedBuf(n int64) []byte {
 	buf := make([]byte, n+int64(nodeAlign))
-	buf0Alignment := uint32(uintptr(unsafe.Pointer(&buf[0]))) & ^uint32(nodeAlign)
+	buf0Alignment := uint32(uintptr(unsafe.Pointer(&buf[0]))) & uint32(nodeAlign)
 	buf = buf[buf0Alignment : int64(buf0Alignment)+n]
 	return buf
 }
