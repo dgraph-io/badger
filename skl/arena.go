@@ -73,8 +73,8 @@ func (s *Arena) putNode(height int) uint32 {
 		l, n, len(s.buf))
 
 	// Return the aligned offset.
-	m := (n - l + uint32(nodeAlign)) & ^uint32(nodeAlign)
-	return m
+	m := (uintptr(unsafe.Pointer(&s.buf[0]))+uintptr(n-l+uint32(nodeAlign))) & ^uintptr(nodeAlign) - uintptr(unsafe.Pointer(&s.buf[0]))
+	return uint32(m)
 }
 
 // Put will *copy* val into arena. To make better use of this, reuse your input
