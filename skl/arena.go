@@ -73,7 +73,8 @@ func (s *Arena) putNode(height int) uint32 {
 		l, n, len(s.buf))
 
 	// Return the aligned offset.
-	m := (uintptr(unsafe.Pointer(&s.buf[0]))+uintptr(n-l+uint32(nodeAlign))) & ^uintptr(nodeAlign) - uintptr(unsafe.Pointer(&s.buf[0]))
+	m := (uintptr(unsafe.Pointer(&s.buf[0])) + uintptr(n-l+uint32(nodeAlign))) & ^uintptr(nodeAlign)
+	m -= uintptr(unsafe.Pointer(&s.buf[0]))
 	return uint32(m)
 }
 
