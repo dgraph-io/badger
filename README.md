@@ -15,9 +15,9 @@ snapshot isolation (SSI) guarantees. A Jepsen-style bank test runs nightly for
 8h, with `--race` flag and ensures the maintenance of transactional guarantees.
 Badger has also been tested to work with filesystem level anomalies, to ensure
 persistence and consistency. Badger is being used by a number of projects which
-includes Dgraph, Jaegar Tracing, UsenetExpress, etc.
+includes Dgraph, Jaeger Tracing, UsenetExpress, and many more.
 
-The list of projects using badger can be found [here](#projects-using-badger).
+The list of projects using Badger can be found [here](#projects-using-badger).
 
 Badger v1.0 was released in Nov 2017, and the latest version that is data-compatible
 with v1.0 is v1.6.0.
