@@ -7,20 +7,25 @@ in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
 fast, distributed graph database. It's meant to be a performant alternative to
 non-Go-based key-value stores like RocksDB.
 
-## Project Status [Jun 26, 2019]
+## Project Status [March 24, 2020]
 
 Badger is stable and is being used to serve data sets worth hundreds of
 terabytes. Badger supports concurrent ACID transactions with serializable
 snapshot isolation (SSI) guarantees. A Jepsen-style bank test runs nightly for
 8h, with `--race` flag and ensures the maintenance of transactional guarantees.
 Badger has also been tested to work with filesystem level anomalies, to ensure
-persistence and consistency.
+persistence and consistency. Badger is being used by a number of projects which
+includes Dgraph, Jaeger Tracing, UsenetExpress, and many more.
+
+The list of projects using Badger can be found [here](#projects-using-badger).
 
 Badger v1.0 was released in Nov 2017, and the latest version that is data-compatible
 with v1.0 is v1.6.0.
 
-Badger v2.0, a new release coming up very soon will use a new storage format which won't
-be compatible with all of the v1.x. The [Changelog] is kept fairly up-to-date.
+Badger v2.0 was released in Nov 2019 with a new storage format which won't
+be compatible with all of the v1.x. Badger v2.0 supports compression, encryption and uses a cache to speed up lookup.
+
+The [Changelog] is kept fairly up-to-date.
 
 For more details on our version naming schema please read [Choosing a version](#choosing-a-version).
 
@@ -53,7 +58,7 @@ For more details on our version naming schema please read [Choosing a version](#
   * [Design](#design)
     + [Comparisons](#comparisons)
     + [Benchmarks](#benchmarks)
-  * [Other Projects Using Badger](#other-projects-using-badger)
+  * [Projects Using Badger](#projects-using-badger)
   * [Frequently Asked Questions](#frequently-asked-questions)
 
 ## Getting Started
@@ -62,7 +67,7 @@ For more details on our version naming schema please read [Choosing a version](#
 To start using Badger, install Go 1.11 or above and run `go get`:
 
 ```sh
-$ go get github.com/dgraph-io/badger/...
+$ go get github.com/dgraph-io/badger/v2
 ```
 
 This will retrieve the library and install the `badger` command line
@@ -106,7 +111,7 @@ package main
 import (
 	"log"
 
-	badger "github.com/dgraph-io/badger"
+	badger "github.com/dgraph-io/badger/v2"
 )
 
 func main() {
@@ -743,7 +748,7 @@ above).
 
 [badger-bench]: https://github.com/dgraph-io/badger-bench
 
-## Other Projects Using Badger
+## Projects Using Badger
 Below is a list of known projects that use Badger:
 
 * [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
