@@ -35,11 +35,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const (
-	KB = 1024
-	MB = KB * 1024
-)
-
 func key(prefix string, i int) string {
 	return prefix + fmt.Sprintf("%04d", i)
 }
@@ -356,7 +351,7 @@ func TestIterateBackAndForth(t *testing.T) {
 
 	it.seekToFirst()
 	k = it.Key()
-	require.EqualValues(t, key("key", 0), y.ParseKey(k))
+	require.EqualValues(t, key("key", 0), string(y.ParseKey(k)))
 }
 
 func TestUniIterator(t *testing.T) {
@@ -701,7 +696,8 @@ func TestTableBigValues(t *testing.T) {
 	require.NoError(t, err, "unable to create file")
 
 	n := 100 // Insert 100 keys.
-	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+		TableSize: uint64(n) * 1 << 20}
 	builder := NewTableBuilder(opts)
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), 0)
