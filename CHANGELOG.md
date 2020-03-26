@@ -6,7 +6,7 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
 
 ## [Unreleased]
 
-## [1.6.1] - 2020-03-24
+## [1.6.1] - 2020-03-26
 
 ### New APIs
  - Badger.DB
@@ -40,7 +40,7 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
  - Fix boundaries on GC batch size (#987)
  - Lock log file before munmap (#949)
  - VlogSize to store correct directory name to expvar.Map (#956)
- - Fix transaction too big issue in restore  (#957)
+ - Fix transaction too big issue in restore (#957)
  - Fix race condition in updateDiscardStats (#973)
  - Cast results of len to uint32 to fix compilation in i386 arch. (#961)
  - Drop discard stats if we can't unmarshal it (#936)
@@ -55,9 +55,9 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
  - Fix checkOverlap in compaction (#1166)
  - Optimize createTable in stream_writer.go (#1132)
  - Add capacity to slice creation when capacity is known (#1103)
- - Introduce fast merge iterator
+ - Introduce fast merge iterator (#1080)
  - Introduce StreamDone in Stream Writer (#1061)
- - Flush vlog buffer if it grows beyond threshold (#1067)<Paste>
+ - Flush vlog buffer if it grows beyond threshold (#1067)
  - Binary search based table picker (#983)
  - Making the stream writer APIs goroutine-safe (#959)
  - Replace FarmHash with AESHash for Oracle conflicts (#952)
