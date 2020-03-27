@@ -1492,7 +1492,7 @@ func TestTestSequence2(t*testing.T){
 		for i:=0;i<5;i++{
 			num2, err := seq3.Next()
 			require.NoError(t, err)
-			require.NotEqual(t,num,num2)
+			require.Equal(t,uint64(i)+3,num2)
 		}
 
 		require.NoError(t, seq3.Release())
