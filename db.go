@@ -1246,7 +1246,7 @@ func (seq *Sequence) Release() error {
 			return err
 		}
 
-		if num == seq.leased{
+		if num == seq.leased {
 			var buf [8]byte
 			binary.BigEndian.PutUint64(buf[:], seq.next)
 			return txn.SetEntry(NewEntry(seq.key, buf[:]))
