@@ -19,6 +19,8 @@ syntax = "proto3";
 
 package pb;
 
+option go_package = "github.com/dgraph-io/badger/v2/pb";
+
 message KV {
   bytes key = 1;
   bytes value = 2;
