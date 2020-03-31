@@ -203,9 +203,10 @@ type Txn struct {
 	readTs   uint64
 	commitTs uint64
 
-	update bool     // update is used to conditionally keep track of reads.
-	reads  []uint64 // contains fingerprints of keys read.
-	writes []uint64 // contains fingerprints of keys written.
+	update    bool       // update is used to conditionally keep track of reads.
+	readsLock sync.Mutex // make sure only one thread can update the reads list at a time. See addReadKey
+	reads     []uint64   // contains fingerprints of keys read.
+	writes    []uint64   // contains fingerprints of keys written.
 
 	pendingWrites map[string]*Entry // cache stores any writes done by txn.
 
@@ -431,6 +432,12 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 func (txn *Txn) addReadKey(key []byte) {
 	if txn.update {
 		fp := z.MemHash(key)
+
+		// Because of the possibility of multiple iterators it is now possible for multiple threads within a read-write
+		// transaction to read keys at the same time. The reads slice is not currently thread-safe and needs to be
+		// locked whenever we mark a key as read.
+		txn.readsLock.Lock()
+		defer txn.readsLock.Unlock()
 		txn.reads = append(txn.reads, fp)
 	}
 }
