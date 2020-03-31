@@ -442,16 +442,16 @@ type Iterator struct {
 //
 // Multiple Iterators:
 // For a read-only txn, multiple iterators can be running simultaneously.  However, for a read-write
-// txn, only one can be running at one time to avoid race conditions, because Txn is thread-unsafe.
+// txn, iterators have the nuance of being a snapshot of the writes for the transaction at the time
+// iterator was created. If writes are performed after an iterator is created, then that iterator
+// will not be able to see those writes. Only writes performed before an iterator was created can be
+// viewed.
 func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	if txn.discarded {
 		panic("Transaction has already been discarded")
 	}
-	// Do not change the order of the next if. We must track the number of running iterators.
-	if atomic.AddInt32(&txn.numIterators, 1) > 1 && txn.update {
-		atomic.AddInt32(&txn.numIterators, -1)
-		panic("Only one iterator can be active at one time, for a RW txn.")
-	}
+
+	atomic.AddInt32(&txn.numIterators, 1)
 
 	// TODO: If Prefix is set, only pick those memtables which have keys with
 	// the prefix.
