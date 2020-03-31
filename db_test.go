@@ -815,9 +815,12 @@ func TestIterateParallel(t *testing.T) {
 		// Check that a RW txn can't run multiple iterators.
 		txn := db.NewTransaction(true)
 		itr := txn.NewIterator(DefaultIteratorOptions)
-		require.Panics(t, func() {
-			txn.NewIterator(DefaultIteratorOptions)
+		require.NotPanics(t, func() {
+			// Now that multiple iterators are supported in read-write transactions, make sure this does not panic
+			// anymore. Then just close the iterator.
+			txn.NewIterator(DefaultIteratorOptions).Close()
 		})
+		// The transaction should still panic since there is still one pending iterator that is open.
 		require.Panics(t, txn.Discard)
 		itr.Close()
 		txn.Discard()
