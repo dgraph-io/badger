@@ -58,6 +58,7 @@ type Options struct {
 	MaxLevels           int
 	ValueThreshold      int
 	NumMemtables        int
+	LinearReads         bool
 	// Changing BlockSize across DB runs will not break badger. The block size is
 	// read from the block index stored at the end of the table.
 	BlockSize          int
@@ -115,6 +116,7 @@ func DefaultOptions(path string) Options {
 		LevelSizeMultiplier: 10,
 		TableLoadingMode:    options.MemoryMap,
 		ValueLogLoadingMode: options.MemoryMap,
+		LinearReads:         false,
 		// table.MemoryMap to mmap() the tables.
 		// table.Nothing to not preload the tables.
 		MaxLevels:               7,

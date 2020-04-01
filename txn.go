@@ -33,8 +33,9 @@ import (
 
 type oracle struct {
 	// A 64-bit integer must be at the top for memory alignment. See issue #311.
-	refCount  int64
-	isManaged bool // Does not change value, so no locking required.
+	refCount    int64
+	isManaged   bool // Does not change value, so no locking required.
+	linearReads bool
 
 	sync.Mutex // For nextTxnTs and commits.
 	// writeChLock lock is for ensuring that transactions go to the write
@@ -60,8 +61,9 @@ type oracle struct {
 
 func newOracle(opt Options) *oracle {
 	orc := &oracle{
-		isManaged: opt.managedTxns,
-		commits:   make(map[uint64]uint64),
+		linearReads: opt.LinearReads,
+		isManaged:   opt.managedTxns,
+		commits:     make(map[uint64]uint64),
 		// We're not initializing nextTxnTs and readOnlyTs. It would be done after replay in Open.
 		//
 		// WaterMarks must be 64-bit aligned for atomic package, hence we must use pointers here.
@@ -109,14 +111,20 @@ func (o *oracle) readTs() uint64 {
 	var readTs uint64
 	o.Lock()
 	readTs = o.nextTxnTs - 1
+	if !o.linearReads {
+		// Use stale readTs if linear reads are disabled.
+		readTs = o.txnMark.DoneUntil()
+	}
 	o.readMark.Begin(readTs)
 	o.Unlock()
 
-	// Wait for all txns which have no conflicts, have been assigned a commit
-	// timestamp and are going through the write to value log and LSM tree
-	// process. Not waiting here could mean that some txns which have been
-	// committed would not be read.
-	y.Check(o.txnMark.WaitForMark(context.Background(), readTs))
+	if o.linearReads {
+		// Wait for all txns which have no conflicts, have been assigned a commit
+		// timestamp and are going through the write to value log and LSM tree
+		// process. Not waiting here could mean that some txns which have been
+		// committed would not be read.
+		y.Check(o.txnMark.WaitForMark(context.Background(), readTs))
+	}
 	return readTs
 }
 
