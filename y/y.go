@@ -37,6 +37,9 @@ var (
 	// and encountering the end of slice.
 	ErrEOF = errors.New("End of mapped region")
 
+	// ErrZstdCgo indicates that badger was built without cgo but ZSTD
+	// compression algorithm is being used for compression. ZSTD cannot work
+	// without CGO.
 	ErrZstdCgo = errors.New("zstd compression requires building badger with cgo enabled")
 )
 
