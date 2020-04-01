@@ -25,6 +25,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -931,4 +932,23 @@ func TestOpenKVSize(t *testing.T) {
 	// The following values might change if the table/header structure is changed.
 	var entrySize uint64 = 15 /* DiffKey len */ + 4 /* Header Size */ + 4 /* Encoded vp */
 	require.Equal(t, entrySize, table.EstimatedSize())
+}
+
+// Run this test with command "go test -race -run TestDoesNotHaveRace"
+func TestDoesNotHaveRace(t *testing.T) {
+	opts := getTestTableOptions()
+	f := buildTestTable(t, "key", 10000, opts)
+	table, err := OpenTable(f, opts)
+	require.NoError(t, err)
+	defer table.DecrRef()
+
+	var wg sync.WaitGroup
+	wg.Add(5)
+	for i := 0; i < 5; i++ {
+		go func() {
+			require.True(t, table.DoesNotHave(uint64(1237882)))
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 }
