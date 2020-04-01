@@ -477,22 +477,35 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
 	// 	txn.readTs, commitTs, txn.reads, txn.writes)
 	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
+
+	isManaged := false
 	for _, e := range txn.pendingWrites {
 		// fmt.Fprintf(&b, "[%q : %q], ", e.Key, e.Value)
 
-		// Suffix the keys with commit ts, so the key versions are sorted in
-		// descending order of commit timestamp.
-		e.Key = y.KeyWithTs(e.Key, commitTs)
-		e.meta |= bitTxn
+		// Managed mode.
+		if e.Version != 0 {
+			e.Key = y.KeyWithTs(e.Key, e.Version)
+			isManaged = true
+		} else {
+			if isManaged {
+				return nil, errors.New("Some entries do not have a timestamp")
+			}
+			// Suffix the keys with commit ts, so the key versions are sorted in
+			// descending order of commit timestamp.
+			e.Key = y.KeyWithTs(e.Key, commitTs)
+			e.meta |= bitTxn
+		}
 		entries = append(entries, e)
 	}
-	// log.Printf("%s\n", b.String())
-	e := &Entry{
-		Key:   y.KeyWithTs(txnKey, commitTs),
-		Value: []byte(strconv.FormatUint(commitTs, 10)),
-		meta:  bitFinTxn,
+	if !isManaged {
+		// log.Printf("%s\n", b.String())
+		e := &Entry{
+			Key:   y.KeyWithTs(txnKey, commitTs),
+			Value: []byte(strconv.FormatUint(commitTs, 10)),
+			meta:  bitFinTxn,
+		}
+		entries = append(entries, e)
 	}
-	entries = append(entries, e)
 
 	req, err := txn.db.sendToWriteCh(entries)
 	if err != nil {
