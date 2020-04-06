@@ -382,8 +382,9 @@ func (t *Table) readIndex() error {
 	t.blockIndex = index.Offsets
 
 	if t.opt.LoadBloomsOnOpen {
-		// We don't need to acquire lock here because this will be called in sequential manner.
+		t.bfLock.Lock()
 		t.bf, _ = t.readBloomFilter()
+		t.bfLock.Unlock()
 	}
 
 	return nil
