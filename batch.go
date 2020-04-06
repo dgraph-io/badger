@@ -19,6 +19,7 @@ package badger
 import (
 	"sync"
 
+	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 )
 
@@ -105,6 +106,20 @@ func (wb *WriteBatch) SetEntry(e *Entry) error {
 	if err := wb.txn.SetEntry(e); err != nil {
 		wb.err = err
 		return err
+	}
+	return nil
+}
+
+func (wb *WriteBatch) Write(kvs *pb.KVList) error {
+	for _, kv := range kvs.Kv {
+		var meta byte
+		if len(kv.UserMeta) > 0 {
+			meta = kv.UserMeta[0]
+		}
+		e := &Entry{Key: kv.Key, Value: kv.Value, UserMeta: meta, Version: kv.Version}
+		if err := wb.SetEntry(e); err != nil {
+			return err
+		}
 	}
 	return nil
 }

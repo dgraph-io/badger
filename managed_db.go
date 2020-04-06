@@ -43,6 +43,7 @@ func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
 // NewWriteBatchAt is similar to NewWriteBatch but it allows user to set the commit timestamp.
 // NewWriteBatchAt is supposed to be used only in the managed mode.
 func (db *DB) NewWriteBatchAt(commitTs uint64) *WriteBatch {
+	//fmt.Println("This is local badger")
 	if !db.opt.managedTxns {
 		panic("cannot use NewWriteBatchAt with managedDB=false. Use NewWriteBatch instead")
 	}

@@ -477,7 +477,6 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
 	// 	txn.readTs, commitTs, txn.reads, txn.writes)
 	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
-
 	isManaged := false
 	for _, e := range txn.pendingWrites {
 		// fmt.Fprintf(&b, "[%q : %q], ", e.Key, e.Value)
