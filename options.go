@@ -126,7 +126,7 @@ func DefaultOptions(path string) Options {
 		BloomFalsePositive:      0.01,
 		BlockSize:               4 * 1024,
 		SyncWrites:              true,
-		NumVersionsToKeep:       1,
+		NumVersionsToKeep:       0,
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
