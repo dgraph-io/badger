@@ -216,6 +216,11 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, ErrInvalidLoadingMode
 	}
 
+	// Return error if badger is built without cgo and compression is set to ZSTD.
+	if opt.Compression == options.ZSTD && !y.CgoEnabled {
+		return nil, y.ErrZstdCgo
+	}
+
 	// Compact L0 on close if either it is set or if KeepL0InMemory is set. When
 	// keepL0InMemory is set we need to compact L0 on close otherwise we might lose data.
 	opt.CompactL0OnClose = opt.CompactL0OnClose || opt.KeepL0InMemory
