@@ -178,7 +178,7 @@ func (l *KVLoader) send() error {
 	if err := l.throttle.Do(); err != nil {
 		return err
 	}
-	if err := l.db.batchSetAsync(l.entries, func(err error) {
+	if err := l.db.BatchSetAsync(l.entries, func(err error) {
 		l.throttle.Done(err)
 	}); err != nil {
 		return err

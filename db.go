@@ -857,13 +857,15 @@ func (db *DB) batchSet(entries []*Entry) error {
 	return req.Wait()
 }
 
-// batchSetAsync is the asynchronous version of batchSet. It accepts a callback
+// BatchSetAsync is the asynchronous version of batchSet. It accepts a callback
 // function which is called when all the sets are complete. If a request level
 // error occurs, it will be passed back via the callback.
 //   err := kv.BatchSetAsync(entries, func(err error)) {
 //      Check(err)
 //   }
-func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
+//
+// Batchset needs keys with version in the last 8 bytes. Use y.KeyWithTs(...).
+func (db *DB) BatchSetAsync(entries []*Entry, f func(error)) error {
 	req, err := db.sendToWriteCh(entries)
 	if err != nil {
 		return err
