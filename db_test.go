@@ -1373,6 +1373,33 @@ func TestSequence_Release(t *testing.T) {
 	})
 }
 
+func TestTestSequence2(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		key := []byte("key")
+		seq1, err := db.GetSequence(key, 2)
+		require.NoError(t, err)
+
+		seq2, err := db.GetSequence(key, 2)
+		require.NoError(t, err)
+		num, err := seq2.Next()
+		require.NoError(t, err)
+		require.Equal(t, uint64(2), num)
+
+		require.NoError(t, seq2.Release())
+		require.NoError(t, seq1.Release())
+
+		seq3, err := db.GetSequence(key, 2)
+		require.NoError(t, err)
+		for i := 0; i < 5; i++ {
+			num2, err := seq3.Next()
+			require.NoError(t, err)
+			require.Equal(t, uint64(i)+3, num2)
+		}
+
+		require.NoError(t, seq3.Release())
+	})
+}
+
 func TestReadOnly(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
