@@ -92,6 +92,7 @@ type DB struct {
 	pub        *publisher
 	registry   *KeyRegistry
 	blockCache *ristretto.Cache
+	bfCache    *ristretto.Cache
 }
 
 const (
@@ -215,6 +216,11 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, ErrInvalidLoadingMode
 	}
 
+	// Return error if badger is built without cgo and compression is set to ZSTD.
+	if opt.Compression == options.ZSTD && !y.CgoEnabled {
+		return nil, y.ErrZstdCgo
+	}
+
 	// Compact L0 on close if either it is set or if KeepL0InMemory is set. When
 	// keepL0InMemory is set we need to compact L0 on close otherwise we might lose data.
 	opt.CompactL0OnClose = opt.CompactL0OnClose || opt.KeepL0InMemory
@@ -234,33 +240,35 @@ func Open(opt Options) (db *DB, err error) {
 		if err := createDirs(opt); err != nil {
 			return nil, err
 		}
-		dirLockGuard, err = acquireDirectoryLock(opt.Dir, lockFile, opt.ReadOnly)
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
-			if dirLockGuard != nil {
-				_ = dirLockGuard.release()
-			}
-		}()
-		absDir, err := filepath.Abs(opt.Dir)
-		if err != nil {
-			return nil, err
-		}
-		absValueDir, err := filepath.Abs(opt.ValueDir)
-		if err != nil {
-			return nil, err
-		}
-		if absValueDir != absDir {
-			valueDirLockGuard, err = acquireDirectoryLock(opt.ValueDir, lockFile, opt.ReadOnly)
+		if !opt.BypassLockGuard {
+			dirLockGuard, err = acquireDirectoryLock(opt.Dir, lockFile, opt.ReadOnly)
 			if err != nil {
 				return nil, err
 			}
 			defer func() {
-				if valueDirLockGuard != nil {
-					_ = valueDirLockGuard.release()
+				if dirLockGuard != nil {
+					_ = dirLockGuard.release()
 				}
 			}()
+			absDir, err := filepath.Abs(opt.Dir)
+			if err != nil {
+				return nil, err
+			}
+			absValueDir, err := filepath.Abs(opt.ValueDir)
+			if err != nil {
+				return nil, err
+			}
+			if absValueDir != absDir {
+				valueDirLockGuard, err = acquireDirectoryLock(opt.ValueDir, lockFile, opt.ReadOnly)
+				if err != nil {
+					return nil, err
+				}
+				defer func() {
+					if valueDirLockGuard != nil {
+						_ = valueDirLockGuard.release()
+					}
+				}()
+			}
 		}
 	}
 
@@ -302,7 +310,21 @@ func Open(opt Options) (db *DB, err error) {
 		}
 		db.blockCache, err = ristretto.NewCache(&config)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to create cache")
+			return nil, errors.Wrap(err, "failed to create data cache")
+		}
+	}
+
+	if opt.MaxBfCacheSize > 0 {
+		config := ristretto.Config{
+			// Use 5% of cache memory for storing counters.
+			NumCounters: int64(float64(opt.MaxBfCacheSize) * 0.05 * 2),
+			MaxCost:     int64(float64(opt.MaxBfCacheSize) * 0.95),
+			BufferItems: 64,
+			Metrics:     true,
+		}
+		db.blockCache, err = ristretto.NewCache(&config)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create bf cache")
 		}
 	}
 
@@ -391,10 +413,18 @@ func Open(opt Options) (db *DB, err error) {
 	return db, nil
 }
 
-// CacheMetrics returns the metrics for the underlying cache.
-func (db *DB) CacheMetrics() *ristretto.Metrics {
+// DataCacheMetrics returns the metrics for the underlying data cache.
+func (db *DB) DataCacheMetrics() *ristretto.Metrics {
 	if db.blockCache != nil {
 		return db.blockCache.Metrics
+	}
+	return nil
+}
+
+// BfCacheMetrics returns the metrics for the underlying bloom filter cache.
+func (db *DB) BfCacheMetrics() *ristretto.Metrics {
+	if db.bfCache != nil {
+		return db.bfCache.Metrics
 	}
 	return nil
 }
@@ -488,6 +518,7 @@ func (db *DB) close() (err error) {
 	db.closers.updateSize.SignalAndWait()
 	db.orc.Stop()
 	db.blockCache.Close()
+	db.bfCache.Close()
 
 	db.elog.Finish()
 	if db.opt.InMemory {
@@ -955,6 +986,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	bopts.DataKey = dk
 	// Builder does not need cache but the same options are used for opening table.
 	bopts.Cache = db.blockCache
+	bopts.BfCache = db.bfCache
 	tableData := buildL0Table(ft, bopts)
 
 	fileID := db.lc.reserveFileID()
@@ -1206,9 +1238,26 @@ func (seq *Sequence) Release() error {
 	seq.Lock()
 	defer seq.Unlock()
 	err := seq.db.Update(func(txn *Txn) error {
-		var buf [8]byte
-		binary.BigEndian.PutUint64(buf[:], seq.next)
-		return txn.SetEntry(NewEntry(seq.key, buf[:]))
+		item, err := txn.Get(seq.key)
+		if err != nil {
+			return err
+		}
+
+		var num uint64
+		if err := item.Value(func(v []byte) error {
+			num = binary.BigEndian.Uint64(v)
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		if num == seq.leased {
+			var buf [8]byte
+			binary.BigEndian.PutUint64(buf[:], seq.next)
+			return txn.SetEntry(NewEntry(seq.key, buf[:]))
+		}
+
+		return nil
 	})
 	if err != nil {
 		return err
@@ -1513,6 +1562,7 @@ func (db *DB) dropAll() (func(), error) {
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
 	db.blockCache.Clear()
+	db.bfCache.Clear()
 
 	return resume, nil
 }
@@ -1580,9 +1630,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, prefixes
 	if cb == nil {
 		return ErrNilCallback
 	}
-	if len(prefixes) == 0 {
-		return ErrNoPrefixes
-	}
+
 	c := y.NewCloser(1)
 	recvCh, id := db.pub.newSubscriber(c, prefixes...)
 	slurp := func(batch *pb.KVList) error {
@@ -1616,7 +1664,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, prefixes
 			err := slurp(batch)
 			if err != nil {
 				c.Done()
-				// Delete the subsriber if there is an error by the callback.
+				// Delete the subscriber if there is an error by the callback.
 				db.pub.deleteSubscriber(id)
 				return err
 			}
