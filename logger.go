@@ -62,8 +62,10 @@ func (opt *Options) Debugf(format string, v ...interface{}) {
 	opt.Logger.Debugf(format, v...)
 }
 
+type loggingLevel int
+
 const (
-	DEBUG int = iota
+	DEBUG loggingLevel = iota
 	INFO
 	WARNING
 	ERROR
@@ -71,10 +73,10 @@ const (
 
 type defaultLog struct {
 	*log.Logger
-	level int
+	level loggingLevel
 }
 
-func defaultLogger(level int) *defaultLog {
+func defaultLogger(level loggingLevel) *defaultLog {
 	return &defaultLog{Logger: log.New(os.Stderr, "badger ", log.LstdFlags), level: level}
 }
 
