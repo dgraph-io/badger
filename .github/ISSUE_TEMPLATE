@@ -13,14 +13,17 @@ $ go version
 ### Does this issue reproduce with the latest master?
 
 
-### What are the hardware specifications of the machine (RAM, OS, Disk)?
-
-
-### What did you do?
-
+### Steps to Reproduce the issue
 <!--
 If possible, provide a recipe for reproducing the error. A complete runnable program is good.
 -->
+
+### What Badger options were set? 
+<!--
+Provide the list of Badger options you've set. If you're using Badger with DefaultOptions, mention DefaultOptions.
+-->
+
+### What did you do?
 
 
 
