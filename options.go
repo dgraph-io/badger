@@ -217,9 +217,10 @@ func (opt Options) WithValueDir(val string) Options {
 	return opt
 }
 
-// WithLoggingLevel returns a new Options value with LoggingLevel set to the given value.
-//
-// LoggingLevel sets the level of logging - DEBUG, INFO, WARNING or ERROR.
+// WithLoggingLevel returns a new Options value with logging level of the
+// default logger set to the given value.
+// LoggingLevel sets the level of logging. It should be one of DEBUG, INFO,
+// WARNING or ERROR levels.
 //
 // The default value of LoggingLevel is INFO.
 func (opt Options) WithLoggingLevel(val loggingLevel) Options {
