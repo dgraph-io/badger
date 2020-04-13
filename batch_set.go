@@ -8,7 +8,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-type batchSet struct {
+type BatchSet struct {
 	sync.Mutex
 
 	db       *DB
@@ -19,26 +19,26 @@ type batchSet struct {
 	throttle *y.Throttle
 }
 
-func (db *DB) NewBatchSet() (*batchSet, error) {
+func (db *DB) NewBatchSet() (*BatchSet, error) {
 	if !db.opt.managedTxns {
 		return nil, errors.New("Batchset can only be used in managed mode")
 	}
 	return newBatchSet(db), nil
 }
 
-func newBatchSet(db *DB) *batchSet {
-	return &batchSet{
+func newBatchSet(db *DB) *BatchSet {
+	return &BatchSet{
 		db:       db,
 		entries:  make([]*Entry, 0, 1000),
 		throttle: y.NewThrottle(16),
 	}
 }
 
-func (bs *batchSet) Set(k, v []byte) error {
-	return bs.SetEntry(&Entry{Key: k, Value: v})
+func (bs *BatchSet) SetAt(k, v []byte, meta byte, version uint64) error {
+	return bs.SetEntryAt(&Entry{Key: k, Value: v, UserMeta: meta}, version)
 }
 
-func (bs *batchSet) SetEntry(e *Entry) error {
+func (bs *BatchSet) SetEntryAt(e *Entry, version uint64) error {
 	bs.Lock()
 	defer bs.Unlock()
 
@@ -60,6 +60,7 @@ func (bs *batchSet) SetEntry(e *Entry) error {
 		return exceedsSize("Value", int64(bs.db.opt.ValueThreshold), e.Value)
 	}
 
+	e.Key = y.KeyWithTs(e.Key, version)
 	err := bs.add(e)
 	switch err {
 	case nil:
@@ -68,7 +69,7 @@ func (bs *batchSet) SetEntry(e *Entry) error {
 		if err := bs.throttle.Do(); err != nil {
 			return err
 		}
-		err = bs.batchSetListAsync(bs.entries, func(err error) {
+		err = bs.BatchSetListAsync(bs.entries, func(err error) {
 			defer bs.throttle.Done(err)
 			if err != nil {
 				bs.err = err
@@ -79,41 +80,57 @@ func (bs *batchSet) SetEntry(e *Entry) error {
 		bs.add(e)
 		return err
 	default:
+		panic(err)
 		return err
 
 	}
 	return nil
 }
 
-func (bs *batchSet) add(e *Entry) error {
+func (bs *BatchSet) add(e *Entry) error {
 	err := bs.checkSize(e)
 	if err != nil {
+		panic(err)
 		return err
 	}
 	bs.entries = append(bs.entries, e)
 	return nil
 }
 
-func (bs *batchSet) reset() {
+func (bs *BatchSet) reset() {
 	bs.entries = make([]*Entry, 0, 1000)
 	bs.count = 0
 	bs.size = 0
 }
 
-func (bs *batchSet) Flush() error {
+func (bs *BatchSet) Flush() error {
 	bs.Lock()
 	defer bs.Unlock()
 
+	if err := bs.throttle.Do(); err != nil {
+		return err
+	}
+	if err := bs.BatchSetListAsync(bs.entries, func(err error) {
+		defer bs.throttle.Done(err)
+		if err != nil {
+			bs.err = err
+			return
+		}
+	}); err != nil {
+		return err
+	}
+
 	if err := bs.throttle.Finish(); err != nil {
+		panic(err)
 		return err
 	}
 
 	return bs.err
 }
 
-// batchSet applies a list of badger.Entry. If a request level error occurs it
+// BatchSet applies a list of badger.Entry. If a request level error occurs it
 // will be returned.
-func (bs *batchSet) batchSetList(entries []*Entry) error {
+func (bs *BatchSet) BatchSetList(entries []*Entry) error {
 	req, err := bs.db.sendToWriteCh(entries)
 	if err != nil {
 		return err
@@ -122,13 +139,13 @@ func (bs *batchSet) batchSetList(entries []*Entry) error {
 	return req.Wait()
 }
 
-// batchSetAsync is the asynchronous version of batchSet. It accepts a callback
+// BatchSetAsync is the asynchronous version of BatchSet. It accepts a callback
 // function which is called when all the sets are complete. If a request level
 // error occurs, it will be passed back via the callback.
 //   err := kv.BatchSetAsync(entries, func(err error)) {
 //      Check(err)
 //   }
-func (bs *batchSet) batchSetListAsync(entries []*Entry, f func(error)) error {
+func (bs *BatchSet) BatchSetListAsync(entries []*Entry, f func(error)) error {
 	req, err := bs.db.sendToWriteCh(entries)
 	if err != nil {
 		return err
@@ -141,7 +158,7 @@ func (bs *batchSet) batchSetListAsync(entries []*Entry, f func(error)) error {
 	return nil
 }
 
-func (bs *batchSet) checkSize(e *Entry) error {
+func (bs *BatchSet) checkSize(e *Entry) error {
 	count := bs.count + 1
 	// Extra bytes for the version in key.
 	size := bs.size + int64(e.estimateSize(bs.db.opt.ValueThreshold)) + 10
