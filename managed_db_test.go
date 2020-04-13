@@ -594,8 +594,13 @@ func TestDropPrefixRace(t *testing.T) {
 }
 
 func TestWriteBatchManagedMode(t *testing.T) {
+	tt := uint64(0)
+	ts := func() uint64 {
+		tt++
+		return tt
+	}
 	key := func(i int) []byte {
-		return []byte(fmt.Sprintf("%10d", i))
+		return y.KeyWithTs([]byte(fmt.Sprintf("%10d", i)), ts())
 	}
 	val := func(i int) []byte {
 		return []byte(fmt.Sprintf("%128d", i))
@@ -626,7 +631,7 @@ func TestWriteBatchManagedMode(t *testing.T) {
 			i := M
 			for itr.Rewind(); itr.Valid(); itr.Next() {
 				item := itr.Item()
-				require.Equal(t, string(key(i)), string(item.Key()))
+				require.Equal(t, string(y.ParseKey(key(i))), string(item.Key()))
 				valcopy, err := item.ValueCopy(nil)
 				require.NoError(t, err)
 				require.Equal(t, val(i), valcopy)

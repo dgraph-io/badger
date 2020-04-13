@@ -29,7 +29,7 @@ type WriteBatch struct {
 	db       *DB
 	throttle *y.Throttle
 	err      error
-	commitTs uint64
+	entries  []*Entry // Used when badger is running in managed mode.
 }
 
 // NewWriteBatch creates a new WriteBatch. This provides a way to conveniently do a lot of writes,
@@ -92,8 +92,16 @@ func (wb *WriteBatch) callback(err error) {
 func (wb *WriteBatch) SetEntry(e *Entry) error {
 	wb.Lock()
 	defer wb.Unlock()
-
-	if err := wb.txn.SetEntry(e); err != ErrTxnTooBig {
+	err := wb.txn.SetEntry(e)
+	switch err {
+	case nil:
+		if wb.db.opt.managedTxns {
+			wb.entries = append(wb.entries, e)
+		}
+		return nil
+	case ErrTxnTooBig:
+		// Don't do anything.
+	default:
 		return err
 	}
 	// Txn has reached it's zenith. Commit now.
@@ -106,6 +114,7 @@ func (wb *WriteBatch) SetEntry(e *Entry) error {
 		wb.err = err
 		return err
 	}
+	wb.entries = append(wb.entries, e)
 	return nil
 }
 
@@ -120,7 +129,20 @@ func (wb *WriteBatch) Delete(k []byte) error {
 	wb.Lock()
 	defer wb.Unlock()
 
-	if err := wb.txn.Delete(k); err != ErrTxnTooBig {
+	err := wb.txn.Delete(k)
+	switch err {
+	case nil:
+		if wb.db.opt.managedTxns {
+			e := &Entry{
+				Key:  k,
+				meta: bitDelete,
+			}
+			wb.entries = append(wb.entries, e)
+		}
+		return nil
+	case ErrTxnTooBig:
+		// Don't do anything.
+	default:
 		return err
 	}
 	if err := wb.commit(); err != nil {
@@ -130,6 +152,10 @@ func (wb *WriteBatch) Delete(k []byte) error {
 		wb.err = err
 		return err
 	}
+	wb.entries = append(wb.entries, &Entry{
+		Key:  k,
+		meta: bitDelete,
+	})
 	return nil
 }
 
@@ -141,10 +167,22 @@ func (wb *WriteBatch) commit() error {
 	if err := wb.throttle.Do(); err != nil {
 		return err
 	}
+	if wb.db.opt.managedTxns {
+		wb.err = wb.db.batchSetAsync(wb.entries, func(err error) {
+			defer wb.throttle.Done(err)
+			if err != nil {
+				wb.err = err
+				return
+			}
+		})
+		wb.entries = make([]*Entry, 0, 1000)
+		wb.txn.Discard()
+		wb.txn = wb.db.newTransaction(true, true)
+		return wb.err
+	}
 	wb.txn.CommitWith(wb.callback)
 	wb.txn = wb.db.newTransaction(true, true)
 	wb.txn.readTs = 0 // We're not reading anything.
-	wb.txn.commitTs = wb.commitTs
 	return wb.err
 }
 

@@ -48,7 +48,7 @@ func (db *DB) NewWriteBatchAt(commitTs uint64) *WriteBatch {
 	}
 
 	wb := db.newWriteBatch()
-	wb.commitTs = commitTs
+	//wb.commitTs = commitTs
 	wb.txn.commitTs = commitTs
 	return wb
 }
