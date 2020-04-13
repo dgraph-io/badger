@@ -832,7 +832,6 @@ type lfDiscardStats struct {
 
 type valueLog struct {
 	dirPath string
-	elog    trace.EventLog
 
 	// guards our view of which files exist, which to be deleted, how many active iterators
 	filesLock        sync.RWMutex
@@ -1072,10 +1071,7 @@ func (vlog *valueLog) init(db *DB) {
 		return
 	}
 	vlog.dirPath = vlog.opt.ValueDir
-	vlog.elog = y.NoEventLog
-	if vlog.opt.EventLogging {
-		vlog.elog = trace.NewEventLog("Badger", "Valuelog")
-	}
+
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 	vlog.lfDiscardStats = &lfDiscardStats{
 		m:         make(map[uint32]int64),
@@ -1229,8 +1225,7 @@ func (vlog *valueLog) Close() error {
 	// close flushDiscardStats.
 	vlog.lfDiscardStats.closer.SignalAndWait()
 
-	vlog.elog.Printf("Stopping garbage collection of values.")
-	defer vlog.elog.Finish()
+	vlog.opt.Debugf("Stopping garbage collection of values.")
 
 	var err error
 	for id, f := range vlog.filesMap {
@@ -1379,7 +1374,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		if buf.Len() == 0 {
 			return nil
 		}
-		vlog.elog.Printf("Flushing buffer of size %d to vlog", buf.Len())
+		vlog.opt.Debugf("Flushing buffer of size %d to vlog", buf.Len())
 		n, err := curlf.fd.Write(buf.Bytes())
 		if err != nil {
 			return errors.Wrapf(err, "Unable to write to value log file: %q", curlf.path)
@@ -1387,7 +1382,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		buf.Reset()
 		y.NumWrites.Add(1)
 		y.NumBytesWritten.Add(int64(n))
-		vlog.elog.Printf("Done")
+		vlog.opt.Debugf("Done")
 		atomic.AddUint32(&vlog.writableLogOffset, uint32(n))
 		atomic.StoreUint32(&curlf.size, vlog.writableLogOffset)
 		return nil
@@ -1717,7 +1712,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 			// This is still the active entry. This would need to be rewritten.
 
 		} else {
-			vlog.elog.Printf("Reason=%+v\n", r)
+			vlog.opt.Debugf("Reason=%+v\n", r)
 			buf, lf, err := vlog.readValueBytes(vp, s)
 			// we need to decide, whether to unlock the lock file immediately based on the
 			// loading mode. getUnlockCallback will take care of it.
