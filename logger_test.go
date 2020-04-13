@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	badger "github.com/dgraph-io/badger/v2"
 )
 
 type mockLogger struct {
@@ -47,7 +46,7 @@ func (l *mockLogger) Debugf(f string, v ...interface{}) {
 // Test that the DB-specific log is used instead of the global log.
 func TestDbLog(t *testing.T) {
 	l := &mockLogger{}
-	opt := badger.Options{Logger: l}
+	opt := Options{Logger: l}
 
 	opt.Errorf("test")
 	require.Equal(t, "ERROR: test", l.output)
@@ -60,7 +59,7 @@ func TestDbLog(t *testing.T) {
 // Test that the global logger is used when no logger is specified in Options.
 func TestNoDbLog(t *testing.T) {
 	l := &mockLogger{}
-	opt := badger.Options{}
+	opt := Options{}
 	opt.Logger = l
 
 	opt.Errorf("test")
