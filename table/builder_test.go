@@ -32,32 +32,62 @@ import (
 
 func TestTableIndex(t *testing.T) {
 	rand.Seed(time.Now().Unix())
-	keyPrefix := "key"
-	t.Run("single key", func(t *testing.T) {
-		opts := Options{Compression: options.ZSTD}
-		f := buildTestTable(t, keyPrefix, 1, opts)
-		tbl, err := OpenTable(f, opts)
-		require.NoError(t, err)
-		require.Len(t, tbl.blockIndex, 1)
-	})
+	keysCount := 100000
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	require.NoError(t, err)
+	subTest := []struct {
+		name string
+		opts Options
+	}{
+		{
+			name: "No encyption/compression",
+			opts: Options{
+				BlockSize:          4 * 1024,
+				BloomFalsePositive: 0.01,
+				TableSize:          30 << 20,
+			},
+		},
+		{
+			// Encryption mode.
+			name: "Only encryption",
+			opts: Options{
+				BlockSize:          4 * 1024,
+				BloomFalsePositive: 0.01,
+				TableSize:          30 << 20,
+				DataKey:            &pb.DataKey{Data: key},
+			},
+		},
+		{
+			// Compression mode.
+			name: "Only compression",
+			opts: Options{
+				BlockSize:            4 * 1024,
+				BloomFalsePositive:   0.01,
+				TableSize:            30 << 20,
+				Compression:          options.ZSTD,
+				ZSTDCompressionLevel: 3,
+			},
+		},
+		{
+			// Compression mode and encryption.
+			name: "Compression and encryption",
+			opts: Options{
+				BlockSize:            4 * 1024,
+				BloomFalsePositive:   0.01,
+				TableSize:            30 << 20,
+				Compression:          options.ZSTD,
+				ZSTDCompressionLevel: 3,
+				DataKey:              &pb.DataKey{Data: key},
+			},
+		},
+	}
 
-	t.Run("multiple keys", func(t *testing.T) {
-		opts := []Options{}
-		// Normal mode.
-		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01})
-		// Encryption mode.
-		key := make([]byte, 32)
-		_, err := rand.Read(key)
-		require.NoError(t, err)
-		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-			DataKey: &pb.DataKey{Data: key}})
-		// Compression mode.
-		opts = append(opts, Options{BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-			Compression: options.ZSTD})
-		keysCount := 10000
-		for _, opt := range opts {
+	for _, tt := range subTest {
+		t.Run(tt.name, func(t *testing.T) {
+			opt := tt.opts
 			builder := NewTableBuilder(opt)
-			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Int63())
+			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
 			f, err := y.OpenSyncedFile(filename, true)
 			require.NoError(t, err)
 
@@ -80,11 +110,12 @@ func TestTableIndex(t *testing.T) {
 			require.NoError(t, err, "unable to write to file")
 
 			tbl, err := OpenTable(f, opt)
+			require.NoError(t, err, "unable to open table")
+
 			if opt.DataKey == nil {
-				// key id is zero if thre is no datakey.
+				// key id is zero if there is no datakey.
 				require.Equal(t, tbl.KeyID(), uint64(0))
 			}
-			require.NoError(t, err, "unable to open table")
 
 			// Ensure index is built correctly
 			require.Equal(t, blockCount, len(tbl.blockIndex))
@@ -93,8 +124,8 @@ func TestTableIndex(t *testing.T) {
 			}
 			f.Close()
 			require.NoError(t, os.RemoveAll(filename))
-		}
-	})
+		})
+	}
 }
 
 func TestInvalidCompression(t *testing.T) {
@@ -125,18 +156,21 @@ func BenchmarkBuilder(b *testing.B) {
 
 	keysCount := 1300000 // This number of entries consumes ~64MB of memory.
 
+	var keyList [][]byte
+	for i := 0; i < keysCount; i++ {
+		keyList = append(keyList, key(i))
+	}
 	bench := func(b *testing.B, opt *Options) {
-		// KeyCount * (keySize + ValSize)
 		b.SetBytes(int64(keysCount) * (32 + 32))
+		opt.BlockSize = 4 * 1024
+		opt.BloomFalsePositive = 0.01
+		opt.TableSize = 5 << 20
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			opt.BlockSize = 4 * 1024
-			opt.BloomFalsePositive = 0.01
 			builder := NewTableBuilder(*opt)
-
-			for i := 0; i < keysCount; i++ {
-				builder.Add(key(i), vs, 0)
+			for j := 0; j < keysCount; j++ {
+				builder.Add(keyList[j], vs, 0)
 			}
-
 			_ = builder.Finish()
 		}
 	}
@@ -144,6 +178,13 @@ func BenchmarkBuilder(b *testing.B) {
 	b.Run("no compression", func(b *testing.B) {
 		var opt Options
 		opt.Compression = options.None
+		bench(b, &opt)
+	})
+	b.Run("encryption", func(b *testing.B) {
+		var opt Options
+		key := make([]byte, 32)
+		rand.Read(key)
+		opt.DataKey = &pb.DataKey{Data: key}
 		bench(b, &opt)
 	})
 	b.Run("zstd compression", func(b *testing.B) {

@@ -25,6 +25,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,11 +34,6 @@ import (
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto"
 	"github.com/stretchr/testify/require"
-)
-
-const (
-	KB = 1024
-	MB = KB * 1024
 )
 
 func key(prefix string, i int) string {
@@ -77,13 +73,9 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
-	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Uint32())
 	f, err := y.CreateSyncedFile(filename, true)
-	if t != nil {
-		require.NoError(t, err)
-	} else {
-		y.Check(err)
-	}
+	require.NoError(t, err)
 
 	sort.Slice(keyValues, func(i, j int) bool {
 		return keyValues[i][0] < keyValues[j][0]
@@ -360,7 +352,7 @@ func TestIterateBackAndForth(t *testing.T) {
 
 	it.seekToFirst()
 	k = it.Key()
-	require.EqualValues(t, key("key", 0), y.ParseKey(k))
+	require.EqualValues(t, key("key", 0), string(y.ParseKey(k)))
 }
 
 func TestUniIterator(t *testing.T) {
@@ -705,7 +697,8 @@ func TestTableBigValues(t *testing.T) {
 	require.NoError(t, err, "unable to create file")
 
 	n := 100 // Insert 100 keys.
-	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+		TableSize: uint64(n) * 1 << 20}
 	builder := NewTableBuilder(opts)
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), 0)
@@ -939,4 +932,23 @@ func TestOpenKVSize(t *testing.T) {
 	// The following values might change if the table/header structure is changed.
 	var entrySize uint64 = 15 /* DiffKey len */ + 4 /* Header Size */ + 4 /* Encoded vp */
 	require.Equal(t, entrySize, table.EstimatedSize())
+}
+
+// Run this test with command "go test -race -run TestDoesNotHaveRace"
+func TestDoesNotHaveRace(t *testing.T) {
+	opts := getTestTableOptions()
+	f := buildTestTable(t, "key", 10000, opts)
+	table, err := OpenTable(f, opts)
+	require.NoError(t, err)
+	defer table.DecrRef()
+
+	var wg sync.WaitGroup
+	wg.Add(5)
+	for i := 0; i < 5; i++ {
+		go func() {
+			require.True(t, table.DoesNotHave(uint64(1237882)))
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 }

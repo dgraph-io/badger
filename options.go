@@ -63,6 +63,8 @@ type Options struct {
 	BloomFalsePositive float64
 	KeepL0InMemory     bool
 	MaxCacheSize       int64
+	MaxBfCacheSize     int64
+	LoadBloomsOnOpen   bool
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -82,6 +84,11 @@ type Options struct {
 	// Encryption related options.
 	EncryptionKey                 []byte        // encryption key
 	EncryptionKeyRotationDuration time.Duration // key rotation duration
+
+	// BypassLockGaurd will bypass the lock guard on badger. Bypassing lock
+	// guard can cause data corruption if multiple badger instances are using
+	// the same directory. Use this options with caution.
+	BypassLockGuard bool
 
 	// ChecksumVerificationMode decides when db should verify checksums for SSTable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
@@ -123,7 +130,9 @@ func DefaultOptions(path string) Options {
 		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
 		Compression:             options.None,
-		MaxCacheSize:            1 << 30, // 1 GB
+		MaxCacheSize:            0,
+		MaxBfCacheSize:          0,
+		LoadBloomsOnOpen:        true,
 		// The following benchmarks were done on a 4 KB block size (default block size). The
 		// compression is ratio supposed to increase with increasing compression level but since the
 		// input for compression algorithm is small (4 KB), we don't get significant benefit at
@@ -144,7 +153,7 @@ func DefaultOptions(path string) Options {
 		ValueLogMaxEntries:            1000000,
 		ValueThreshold:                32,
 		Truncate:                      false,
-		Logger:                        DefaultLog,
+		Logger:                        defaultLogger(INFO),
 		LogRotatesToFlush:             2,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
@@ -153,8 +162,10 @@ func DefaultOptions(path string) Options {
 
 func buildTableOptions(opt Options) table.Options {
 	return table.Options{
+		TableSize:            uint64(opt.MaxTableSize),
 		BlockSize:            opt.BlockSize,
 		BloomFalsePositive:   opt.BloomFalsePositive,
+		LoadBloomsOnOpen:     opt.LoadBloomsOnOpen,
 		LoadingMode:          opt.TableLoadingMode,
 		ChkMode:              opt.ChecksumVerificationMode,
 		Compression:          opt.Compression,
@@ -201,6 +212,17 @@ func (opt Options) WithDir(val string) Options {
 // This is set automatically to be the path given to `DefaultOptions`.
 func (opt Options) WithValueDir(val string) Options {
 	opt.ValueDir = val
+	return opt
+}
+
+// WithLoggingLevel returns a new Options value with logging level of the
+// default logger set to the given value.
+// LoggingLevel sets the level of logging. It should be one of DEBUG, INFO,
+// WARNING or ERROR levels.
+//
+// The default value of LoggingLevel is INFO.
+func (opt Options) WithLoggingLevel(val loggingLevel) Options {
+	opt.Logger = defaultLogger(val)
 	return opt
 }
 
@@ -524,8 +546,13 @@ func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificat
 // WithMaxCacheSize returns a new Options value with MaxCacheSize set to the given value.
 //
 // This value specifies how much data cache should hold in memory. A small size of cache means lower
-// memory consumption and lookups/iterations would take longer. Setting size to zero disables the
+// memory consumption and lookups/iterations would take longer.
+// It is recommended to use a cache if you're using compression or encryption.
+// If compression and encryption both are disabled, adding a cache will lead to
+// unnecessary overhead which will affect the read performance. Setting size to zero disables the
 // cache altogether.
+//
+// Default value of MaxCacheSize is zero.
 func (opt Options) WithMaxCacheSize(size int64) Options {
 	opt.MaxCacheSize = size
 	return opt
@@ -560,5 +587,47 @@ func (opt Options) WithInMemory(b bool) Options {
 // Benchmark code can be found in table/builder_test.go file
 func (opt Options) WithZSTDCompressionLevel(cLevel int) Options {
 	opt.ZSTDCompressionLevel = cLevel
+	return opt
+}
+
+// WithBypassLockGuard returns a new Options value with BypassLockGuard
+// set to the given value.
+//
+// When BypassLockGuard option is set, badger will not acquire a lock on the
+// directory. This could lead to data corruption if multiple badger instances
+// write to the same data directory. Use this option with caution.
+//
+// The default value of BypassLockGuard is false.
+func (opt Options) WithBypassLockGuard(b bool) Options {
+	opt.BypassLockGuard = b
+	return opt
+}
+
+// WithMaxBfCacheSize returns a new Options value with MaxBfCacheSize set to the given value.
+//
+// This value specifies how much memory should be used by the bloom filters.
+// Badger uses bloom filters to speed up lookups. Each table has its own bloom
+// filter and each bloom filter is approximately of 5 MB.
+//
+// Zero value for BfCacheSize means all the bloom filters will be kept in
+// memory and the cache is disabled.
+//
+// The default value of MaxBfCacheSize is 0 which means all bloom filters will
+// be kept in memory.
+func (opt Options) WithMaxBfCacheSize(size int64) Options {
+	opt.MaxBfCacheSize = size
+	return opt
+}
+
+// WithLoadBloomsOnOpen returns a new Options value with LoadBloomsOnOpen set to the given value.
+//
+// Badger uses bloom filters to speed up key lookups. When LoadBloomsOnOpen is set
+// to false, all bloom filters will be loaded on DB open. This is supposed to
+// improve the read speed but it will affect the time taken to open the DB. Set
+// this option to true to reduce the time taken to open the DB.
+//
+// The default value of LoadBloomsOnOpen is false.
+func (opt Options) WithLoadBloomsOnOpen(b bool) Options {
+	opt.LoadBloomsOnOpen = b
 	return opt
 }
