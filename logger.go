@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package y
+package badger
 
 import (
 	"log"
@@ -27,6 +27,39 @@ type Logger interface {
 	Warningf(string, ...interface{})
 	Infof(string, ...interface{})
 	Debugf(string, ...interface{})
+}
+
+// Errorf logs an ERROR log message to the logger specified in opts or to the
+// global logger if no logger is specified in opts.
+func (opt *Options) Errorf(format string, v ...interface{}) {
+	if opt.Logger == nil {
+		return
+	}
+	opt.Logger.Errorf(format, v...)
+}
+
+// Infof logs an INFO message to the logger specified in opts.
+func (opt *Options) Infof(format string, v ...interface{}) {
+	if opt.Logger == nil {
+		return
+	}
+	opt.Logger.Infof(format, v...)
+}
+
+// Warningf logs a WARNING message to the logger specified in opts.
+func (opt *Options) Warningf(format string, v ...interface{}) {
+	if opt.Logger == nil {
+		return
+	}
+	opt.Logger.Warningf(format, v...)
+}
+
+// Debugf logs a DEBUG message to the logger specified in opts.
+func (opt *Options) Debugf(format string, v ...interface{}) {
+	if opt.Logger == nil {
+		return
+	}
+	opt.Logger.Debugf(format, v...)
 }
 
 type defaultLog struct {

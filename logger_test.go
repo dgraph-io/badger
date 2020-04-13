@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package y
+package badger
 
 import (
 	"fmt"
