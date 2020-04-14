@@ -573,36 +573,59 @@ func (s *levelsController) compactBuildTables(
 			// Do not discard entries inserted by merge operator. These entries will be
 			// discarded once they're merged
 			if version <= discardTs && vs.Meta&bitMergeEntry == 0 {
-				// Keep track of the number of versions encountered for this key. Only consider the
-				// versions which are below the minReadTs, otherwise, we might end up discarding the
-				// only valid version for a running transaction.
-				numVersions++
-
-				// Keep the current version and discard all the next versions if
-				// - The `discardEarlierVersions` bit is set OR
-				// - We've already processed `NumVersionsToKeep` number of versions
-				// (including the current item being processed)
-				lastValidVersion := vs.Meta&bitDiscardEarlierVersions > 0 ||
-					numVersions == s.kv.opt.NumVersionsToKeep
-
-				if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) || lastValidVersion {
-					// If this version of the key is deleted or expired, skip all the rest of the
-					// versions. Ensure that we're only removing versions below readTs.
+				// When `NumVersionsToKeep == 1` the skipKey should always be set
+				// and there is no need for `lastValidVersion`. The only required check
+				// is to determine if a deleted key should be written due to `hasOverlap`.
+				if s.kv.opt.NumVersionsToKeep == 1 {
+					// skip all the rest of the versions.
 					skipKey = y.SafeCopy(skipKey, it.Key())
+					if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
+						switch {
+						case hasOverlap:
+							// If this key range has overlap with lower levels, then keep the deletion
+							// marker.
+						default:
+							// If no overlap, we can skip all the versions, by continuing here.
+							numSkips++
+							updateStats(vs)
+							continue // Skip adding this key.
+						}
+					}
+				} else {
+					// Keep track of the number of versions encountered for this key. Only consider the
+					// versions which are below the minReadTs, otherwise, we might end up discarding the
+					// only valid version for a running transaction.
+					numVersions++
 
-					switch {
-					case lastValidVersion:
-						// Add this key. We have set skipKey, so the following key versions
-						// would be skipped.
-					case hasOverlap:
-						// If this key range has overlap with lower levels, then keep the deletion
-						// marker with the latest version, discarding the rest. We have set skipKey,
-						// so the following key versions would be skipped.
-					default:
-						// If no overlap, we can skip all the versions, by continuing here.
-						numSkips++
-						updateStats(vs)
-						continue // Skip adding this key.
+					// Keep the current version and discard all the next versions if
+					// - The `discardEarlierVersions` bit is set OR
+					// - We've already processed `NumVersionsToKeep` number of versions
+					// (including the current item being processed)
+					lastValidVersion := vs.Meta&bitDiscardEarlierVersions > 0 ||
+						numVersions == s.kv.opt.NumVersionsToKeep
+
+					// NOTE: if NumVersionsToKeep == 0 or is very large, old `badger` keys,
+					// such as `head` entries, need to be removed to prevent continuous growth.
+
+					if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) || lastValidVersion {
+						// If this version of the key is deleted or expired, skip all the rest of the
+						// versions. Ensure that we're only removing versions below readTs.
+						skipKey = y.SafeCopy(skipKey, it.Key())
+
+						switch {
+						case lastValidVersion:
+							// Add this key. We have set skipKey, so the following key versions
+							// would be skipped.
+						case hasOverlap:
+							// If this key range has overlap with lower levels, then keep the deletion
+							// marker with the latest version, discarding the rest. We have set skipKey,
+							// so the following key versions would be skipped.
+						default:
+							// If no overlap, we can skip all the versions, by continuing here.
+							numSkips++
+							updateStats(vs)
+							continue // Skip adding this key.
+						}
 					}
 				}
 			}
