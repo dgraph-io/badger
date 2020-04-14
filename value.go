@@ -521,6 +521,15 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 		if discardEntry(e, vs) {
 			return nil
 		}
+		if bytes.HasPrefix(e.Key, badgerMove) {
+			// Verify the actual key entry withouth the badgerPrefix has not been deleted.
+			// If this is not done the badgerMove entry will be kept forever moving from
+			// vlog to vlog during rewrites.
+			avs, err := vlog.db.get(e.Key[len(badgerMove):])
+			if err != nil || avs.Version == 0 {
+				return err
+			}
+		}
 
 		// Value is still present in value log.
 		if len(vs.Value) == 0 {
