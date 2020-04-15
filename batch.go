@@ -88,6 +88,11 @@ func (wb *WriteBatch) callback(err error) {
 	wb.err = err
 }
 
+func (wb *WriteBatch) SetEntryAt(e *Entry, vs uint64) error {
+	e.version = vs
+	return wb.SetEntry(e)
+}
+
 // SetEntry is the equivalent of Txn.SetEntry.
 func (wb *WriteBatch) SetEntry(e *Entry) error {
 	wb.Lock()
@@ -113,6 +118,11 @@ func (wb *WriteBatch) SetEntry(e *Entry) error {
 func (wb *WriteBatch) Set(k, v []byte) error {
 	e := &Entry{Key: k, Value: v}
 	return wb.SetEntry(e)
+}
+
+func (wb *WriteBatch) DeleteAt(k []byte, vs uint64) error {
+	e := Entry{Key: k, meta: bitDelete, version: vs}
+	return wb.SetEntry(&e)
 }
 
 // Delete is equivalent of Txn.Delete.

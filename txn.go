@@ -349,6 +349,12 @@ func (txn *Txn) Set(key, val []byte) error {
 	return txn.SetEntry(NewEntry(key, val))
 }
 
+func (txn *Txn) SetAt(key, val []byte, version uint64) error {
+	e := NewEntry(key, val)
+	e.version = version
+	return txn.SetEntry(e)
+}
+
 // SetEntry takes an Entry struct and adds the key-value pair in the struct,
 // along with other metadata to the database.
 //
@@ -466,8 +472,17 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	defer orc.writeChLock.Unlock()
 
 	commitTs := orc.newCommitTs(txn)
-	if commitTs == 0 {
+	if commitTs == 0 && !txn.db.opt.managedTxns {
 		return nil, ErrConflict
+	}
+
+	keepTogether := true
+	for _, e := range txn.pendingWrites {
+		if e.version == 0 {
+			e.version = commitTs
+		} else {
+			keepTogether = false
+		}
 	}
 
 	// The following debug information is what led to determining the cause of
@@ -482,17 +497,21 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 
 		// Suffix the keys with commit ts, so the key versions are sorted in
 		// descending order of commit timestamp.
-		e.Key = y.KeyWithTs(e.Key, commitTs)
-		e.meta |= bitTxn
+		e.Key = y.KeyWithTs(e.Key, e.version)
+		if keepTogether {
+			e.meta |= bitTxn
+		}
 		entries = append(entries, e)
 	}
-	// log.Printf("%s\n", b.String())
-	e := &Entry{
-		Key:   y.KeyWithTs(txnKey, commitTs),
-		Value: []byte(strconv.FormatUint(commitTs, 10)),
-		meta:  bitFinTxn,
+
+	if keepTogether {
+		e := &Entry{
+			Key:   y.KeyWithTs(txnKey, commitTs),
+			Value: []byte(strconv.FormatUint(commitTs, 10)),
+			meta:  bitFinTxn,
+		}
+		entries = append(entries, e)
 	}
-	entries = append(entries, e)
 
 	req, err := txn.db.sendToWriteCh(entries)
 	if err != nil {
@@ -511,9 +530,6 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 }
 
 func (txn *Txn) commitPrecheck() {
-	if txn.commitTs == 0 && txn.db.opt.managedTxns {
-		panic("Commit cannot be called with managedDB=true. Use CommitAt.")
-	}
 	if txn.discarded {
 		panic("Trying to commit a discarded txn")
 	}
