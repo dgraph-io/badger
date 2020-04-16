@@ -1,7 +1,6 @@
 language: go
 
 go:
-  - "1.11"
   - "1.12"
   - "1.13"
   - tip
@@ -19,10 +18,8 @@ jobs:
   allow_failures:
     - go: tip
   exclude:
-    # Exclude builds for 386 architecture on go 1.11, 1.12 and tip
+    # Exclude builds for 386 architecture on go 1.12 and tip
     # Since we don't want it to run for 32 bit
-    - go: "1.11"
-      env: GOARCH=386
     - go: "1.12"
       env: GOARCH=386
     - go: tip
@@ -35,5 +32,5 @@ notifications:
 
 script:
 - go test -v ./...
-# Another round of tests after turning off mmap
+# Another round of tests after turning off mmap.
 - go test -v -vlog_mmap=false github.com/dgraph-io/badger

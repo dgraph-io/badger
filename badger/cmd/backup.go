@@ -21,7 +21,6 @@ import (
 	"os"
 
 	"github.com/dgraph-io/badger"
-	"github.com/dgraph-io/badger/y"
 	"github.com/spf13/cobra"
 )
 
@@ -74,7 +73,7 @@ func doBackup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err = y.FileSync(f); err != nil {
+	if err = f.Sync(); err != nil {
 		return err
 	}
 
