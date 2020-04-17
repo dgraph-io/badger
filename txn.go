@@ -466,6 +466,8 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	defer orc.writeChLock.Unlock()
 
 	commitTs := orc.newCommitTs(txn)
+	// The commitTs can be zero if transaction is running in managed mode.
+	// Individual entries might have their own timestamps.
 	if commitTs == 0 && !txn.db.opt.managedTxns {
 		return nil, ErrConflict
 	}
@@ -477,6 +479,13 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 		} else {
 			keepTogether = false
 		}
+	}
+
+	// If keepTogether is True, it implies transaction markers will be added.
+	// In that case, commitTs should not be never be zero. This might happen if
+	// someone uses txn.Commit instead of txn.CommitAt in managed mode.
+	if keepTogether && commitTs == 0 {
+		return nil, errors.New("CommitTs cannot be Zero. Use CommitAt instead")
 	}
 
 	// The following debug information is what led to determining the cause of
@@ -552,9 +561,9 @@ func (txn *Txn) commitPrecheck() {
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit() error {
 	txn.commitPrecheck() // Precheck before discarding txn.
-	defer txn.Discard()
 
 	if len(txn.writes) == 0 {
+		txn.Discard()
 		return nil // Nothing to do.
 	}
 
@@ -562,6 +571,7 @@ func (txn *Txn) Commit() error {
 	if err != nil {
 		return err
 	}
+	txn.Discard()
 	// If batchSet failed, LSM would not have been updated. So, no need to rollback anything.
 
 	// TODO: What if some of the txns successfully make it to value log, but others fail.
