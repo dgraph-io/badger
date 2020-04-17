@@ -106,10 +106,9 @@ func (itr *blockIterator) Error() error {
 }
 
 func (itr *blockIterator) Close() {
-	if itr.compressed == true {
-		newPool.Put(&itr.data)
+	if itr.compressed {
+		decompressPool.Put(&itr.data)
 	}
-	//	itr.data = nil
 }
 
 var (

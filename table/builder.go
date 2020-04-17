@@ -118,13 +118,6 @@ func NewTableBuilder(opts Options) *Builder {
 	return b
 }
 
-var newPool = sync.Pool{
-	New: func() interface{} {
-		// Make 4 KB blocks for reuse.
-		b := make([]byte, 0, 4<<10)
-		return &b
-	},
-}
 var slicePool = sync.Pool{
 	New: func() interface{} {
 		// Make 4 KB blocks for reuse.

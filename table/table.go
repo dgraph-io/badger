@@ -83,6 +83,15 @@ type Options struct {
 	LoadBloomsOnOpen bool
 }
 
+// Used to reuse decompression blocks.
+var decompressPool = sync.Pool{
+	New: func() interface{} {
+		// Make 4 KB blocks for reuse.
+		b := make([]byte, 0, 4<<10)
+		return &b
+	},
+}
+
 // TableInterface is useful for testing.
 type TableInterface interface {
 	Smallest() []byte
@@ -631,7 +640,7 @@ func NewFilename(id uint64, dir string) string {
 
 // decompressData decompresses the given data.
 func (t *Table) decompressData(data []byte) ([]byte, error) {
-	dst := newPool.Get().(*[]byte)
+	dst := decompressPool.Get().(*[]byte)
 	*dst = (*dst)[:0]
 
 	switch t.opt.Compression {
