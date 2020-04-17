@@ -631,13 +631,16 @@ func NewFilename(id uint64, dir string) string {
 
 // decompressData decompresses the given data.
 func (t *Table) decompressData(data []byte) ([]byte, error) {
+	dst := newPool.Get().(*[]byte)
+	*dst = (*dst)[:0]
+
 	switch t.opt.Compression {
 	case options.None:
 		return data, nil
 	case options.Snappy:
-		return snappy.Decode(nil, data)
+		return snappy.Decode(*dst, data)
 	case options.ZSTD:
-		return y.ZSTDDecompress(nil, data)
+		return y.ZSTDDecompress(*dst, data)
 	}
 	return nil, errors.New("Unsupported compression type")
 }

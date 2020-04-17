@@ -21,6 +21,7 @@ import (
 	"io"
 	"sort"
 
+	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 )
@@ -33,6 +34,8 @@ type blockIterator struct {
 	key          []byte
 	val          []byte
 	entryOffsets []uint32
+
+	compressed bool
 
 	// prevOverlap stores the overlap of the previous key with the base key.
 	// This avoids unnecessary copy of base key when the overlap is same for multiple keys.
@@ -102,7 +105,12 @@ func (itr *blockIterator) Error() error {
 	return itr.err
 }
 
-func (itr *blockIterator) Close() {}
+func (itr *blockIterator) Close() {
+	if itr.compressed == true {
+		newPool.Put(&itr.data)
+	}
+	//	itr.data = nil
+}
 
 var (
 	origin  = 0
@@ -166,12 +174,14 @@ type Iterator struct {
 func (t *Table) NewIterator(reversed bool) *Iterator {
 	t.IncrRef() // Important.
 	ti := &Iterator{t: t, reversed: reversed}
+	ti.bi.compressed = t.opt.Compression != options.None
 	ti.next()
 	return ti
 }
 
 // Close closes the iterator (and it must be called).
 func (itr *Iterator) Close() error {
+	itr.bi.Close()
 	return itr.t.DecrRef()
 }
 
