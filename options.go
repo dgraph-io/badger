@@ -129,7 +129,7 @@ func DefaultOptions(path string) Options {
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
-		Compression:             options.ZSTD,
+		Compression:             options.None,
 		MaxCacheSize:            0,
 		MaxBfCacheSize:          0,
 		LoadBloomsOnOpen:        true,
