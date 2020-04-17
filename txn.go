@@ -70,8 +70,8 @@ func newOracle(opt Options) *oracle {
 		txnMark:  &y.WaterMark{Name: "badger.TxnTimestamp"},
 		closer:   y.NewCloser(2),
 	}
-	orc.readMark.Init(orc.closer, opt.EventLogging)
-	orc.txnMark.Init(orc.closer, opt.EventLogging)
+	orc.readMark.Init(orc.closer)
+	orc.txnMark.Init(orc.closer)
 	return orc
 }
 

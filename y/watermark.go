@@ -20,8 +20,6 @@ import (
 	"container/heap"
 	"context"
 	"sync/atomic"
-
-	"golang.org/x/net/trace"
 )
 
 type uint64Heap []uint64
@@ -64,17 +62,11 @@ type WaterMark struct {
 	lastIndex uint64
 	Name      string
 	markCh    chan mark
-	elog      trace.EventLog
 }
 
 // Init initializes a WaterMark struct. MUST be called before using it.
-func (w *WaterMark) Init(closer *Closer, eventLogging bool) {
+func (w *WaterMark) Init(closer *Closer) {
 	w.markCh = make(chan mark, 100)
-	if eventLogging {
-		w.elog = trace.NewEventLog("Watermark", w.Name)
-	} else {
-		w.elog = NoEventLog
-	}
 	go w.process(closer)
 }
 
@@ -150,7 +142,6 @@ func (w *WaterMark) process(closer *Closer) {
 	waiters := make(map[uint64][]chan struct{})
 
 	heap.Init(&indices)
-	var loop uint64
 
 	processOne := func(index uint64, done bool) {
 		// If not already done, then set. Otherwise, don't undo a done entry.
@@ -164,13 +155,6 @@ func (w *WaterMark) process(closer *Closer) {
 			delta = -1
 		}
 		pending[index] = prev + delta
-
-		loop++
-		if len(indices) > 0 && loop%10000 == 0 {
-			min := indices[0]
-			w.elog.Printf("WaterMark %s: Done entry %4d. Size: %4d Watermark: %-4d Looking for: "+
-				"%-4d. Value: %d\n", w.Name, index, len(indices), w.DoneUntil(), min, pending[min])
-		}
 
 		// Update mark by going through all indices in order; and checking if they have
 		// been done. Stop at the first index, which isn't done.
@@ -197,7 +181,6 @@ func (w *WaterMark) process(closer *Closer) {
 
 		if until != doneUntil {
 			AssertTrue(atomic.CompareAndSwapUint64(&w.doneUntil, doneUntil, until))
-			w.elog.Printf("%s: Done until %d. Loops: %d\n", w.Name, until, loops)
 		}
 
 		notifyAndRemove := func(idx uint64, toNotify []chan struct{}) {
