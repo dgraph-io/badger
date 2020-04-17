@@ -1040,6 +1040,23 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 		l.RLock()
 		for _, t := range l.tables {
 			var count uint64
+			var smallest, biggest []byte
+
+			// Create copies of smallest and biggest.
+			smallest = append(smallest, t.Smallest()...)
+			biggest = append(biggest, t.Biggest()...)
+
+			if bytes.HasPrefix(smallest, badgerPrefix) {
+				// Find the smallest key which isn't an internal key.
+				it := t.NewIterator(false)
+				for it.Rewind(); it.Valid(); it.Next() {
+					if !bytes.HasPrefix(it.Key(), badgerPrefix) {
+						smallest = append(smallest[:0], it.Key()...)
+						break
+					}
+				}
+				it.Close()
+			}
 			if withKeysCount {
 				it := t.NewIterator(false)
 				for it.Rewind(); it.Valid(); it.Next() {
@@ -1047,12 +1064,11 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 				}
 				it.Close()
 			}
-
 			info := TableInfo{
 				ID:          t.ID(),
 				Level:       l.level,
-				Left:        t.Smallest(),
-				Right:       t.Biggest(),
+				Left:        smallest,
+				Right:       biggest,
 				KeyCount:    count,
 				EstimatedSz: t.EstimatedSize(),
 			}

@@ -564,3 +564,38 @@ func TestL0Stall(t *testing.T) {
 		test(t, &opt)
 	})
 }
+
+func TestGetTableInfo(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		kv := []keyValVersion{
+			{string(head), "", 1, 0},
+			{string(badgerMove), "", 1, 0},
+			{string(badgerMove), "", 2, 0},
+			{string("a"), "", 1, 0},
+			{string("b"), "", 1, 0},
+			{string("za"), "", 1, 0},
+		}
+		createAndOpen(db, kv, 1)
+
+		// Without key count.
+		tab := db.Tables(false)
+		require.Len(t, tab, 1)
+		require.Equal(t, "a", string(y.ParseKey(tab[0].Left)))
+		require.Equal(t, "za", string(y.ParseKey(tab[0].Right)))
+		require.Equal(t, uint64(0), tab[0].KeyCount)
+
+		// With Key count.
+		tab = db.Tables(true)
+		require.Len(t, tab, 1)
+		require.Equal(t, "a", string(y.ParseKey(tab[0].Left)))
+		require.Equal(t, "za", string(y.ParseKey(tab[0].Right)))
+		require.Equal(t, uint64(6), tab[0].KeyCount)
+
+		// Calculate it again, just for fun!
+		tab = db.Tables(true)
+		require.Len(t, tab, 1)
+		require.Equal(t, "a", string(y.ParseKey(tab[0].Left)))
+		require.Equal(t, "za", string(y.ParseKey(tab[0].Right)))
+		require.Equal(t, uint64(6), tab[0].KeyCount)
+	})
+}
