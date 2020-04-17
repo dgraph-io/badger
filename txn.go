@@ -349,12 +349,6 @@ func (txn *Txn) Set(key, val []byte) error {
 	return txn.SetEntry(NewEntry(key, val))
 }
 
-func (txn *Txn) SetAt(key, val []byte, version uint64) error {
-	e := NewEntry(key, val)
-	e.version = version
-	return txn.SetEntry(e)
-}
-
 // SetEntry takes an Entry struct and adds the key-value pair in the struct,
 // along with other metadata to the database.
 //
@@ -493,11 +487,14 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	// 	txn.readTs, commitTs, txn.reads, txn.writes)
 	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
 	for _, e := range txn.pendingWrites {
-		// fmt.Fprintf(&b, "[%q : %q], ", e.Key, e.Value)
-
 		// Suffix the keys with commit ts, so the key versions are sorted in
 		// descending order of commit timestamp.
 		e.Key = y.KeyWithTs(e.Key, e.version)
+		// Add bitTxn only if these entries are part of a transaction. We
+		// support SetEntryAt(..) in managed mode which means a single
+		// transaction can have entries with different timestamps. If entries
+		// in a single transaction have different timestamps, we don't add the
+		// transaction markers.
 		if keepTogether {
 			e.meta |= bitTxn
 		}
