@@ -140,6 +140,9 @@ func (o *oracle) hasConflict(txn *Txn) bool {
 		// If the committedTxn.ts is less than txn.readTs that implies that the
 		// committedTxn finished before the current transaction started.
 		// We don't need to check for conflict in that case.
+		// This change assumes linearizability. Lack of linearizability could
+		// cause the read ts of a new txn to be lower than the commit ts of
+		// a txn before it (@mrjn).
 		if committedTxn.ts <= txn.readTs {
 			continue
 		}
@@ -185,10 +188,15 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 		ts, o.lastCleanupTs,
 	)
 
-	o.committedTxns = append(o.committedTxns, committedTxn{
-		ts:     ts,
-		writes: txn.writes,
-	})
+	if !o.isManaged {
+		// We should ensure that txns are not added to o.committedTxns slice in
+		// managed mode. If the user doesn't set o.discardTs, the commitTxns
+		// slice would keep growing in managed mode.
+		o.committedTxns = append(o.committedTxns, committedTxn{
+			ts:     ts,
+			writes: txn.writes,
+		})
+	}
 
 	return ts
 }
@@ -201,6 +209,12 @@ func (o *oracle) doneRead(txn *Txn) {
 }
 
 func (o *oracle) cleanupCommittedTransactions() { // Must be called under o.Lock
+	if o.isManaged {
+		// In managedMode, we do not store any committedTxns. It is expected
+		// that the system using badger in managedmode performs it's own
+		// conflict detection.
+		return
+	}
 	// Same logic as discardAtOrBelow but unlocked
 	var maxReadTs uint64
 	if o.isManaged {
@@ -222,17 +236,14 @@ func (o *oracle) cleanupCommittedTransactions() { // Must be called under o.Lock
 	}
 	o.lastCleanupTs = maxReadTs
 
-	var newIdx int
-	for oldIdx, txn := range o.committedTxns {
+	tmp := o.committedTxns[:0]
+	for _, txn := range o.committedTxns {
 		if txn.ts <= maxReadTs {
 			continue
 		}
-		if oldIdx != newIdx {
-			o.committedTxns[newIdx] = txn
-		}
-		newIdx++
+		tmp = append(tmp, txn)
 	}
-	o.committedTxns = o.committedTxns[:newIdx]
+	o.committedTxns = tmp
 }
 
 func (o *oracle) doneCommit(cts uint64) {
