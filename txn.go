@@ -466,7 +466,7 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	defer orc.writeChLock.Unlock()
 
 	commitTs := orc.newCommitTs(txn)
-	// The commitTs can be zero if transaction is running in managed mode.
+	// The commitTs can be zero if the transaction is running in managed mode.
 	// Individual entries might have their own timestamps.
 	if commitTs == 0 && !txn.db.opt.managedTxns {
 		return nil, ErrConflict
@@ -479,13 +479,6 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 		} else {
 			keepTogether = false
 		}
-	}
-
-	// If keepTogether is True, it implies transaction markers will be added.
-	// In that case, commitTs should not be never be zero. This might happen if
-	// someone uses txn.Commit instead of txn.CommitAt in managed mode.
-	if keepTogether && commitTs == 0 {
-		return nil, errors.New("CommitTs cannot be Zero. Use CommitAt instead")
 	}
 
 	// The following debug information is what led to determining the cause of
@@ -511,6 +504,8 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	}
 
 	if keepTogether {
+		// CommitTs should not be zero if we're inserting transaction markers.
+		y.AssertTrue(commitTs != 0)
 		e := &Entry{
 			Key:   y.KeyWithTs(txnKey, commitTs),
 			Value: []byte(strconv.FormatUint(commitTs, 10)),
@@ -535,10 +530,26 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	return ret, nil
 }
 
-func (txn *Txn) commitPrecheck() {
+func (txn *Txn) commitPrecheck() error {
 	if txn.discarded {
-		panic("Trying to commit a discarded txn")
+		return errors.New("Trying to commit a discarded txn")
 	}
+	keepTogether := true
+	for _, e := range txn.pendingWrites {
+		if e.version != 0 {
+			keepTogether = false
+		}
+	}
+
+	// If keepTogether is True, it implies transaction markers will be added.
+	// In that case, commitTs should not be never be zero. This might happen if
+	// someone uses txn.Commit instead of txn.CommitAt in managed mode.  This
+	// should happen only in managed mode. In normal mode, keepTogether will
+	// always be true.
+	if keepTogether && txn.db.opt.managedTxns && txn.commitTs == 0 {
+		return errors.New("CommitTs cannot be zero. Please use commitAt instead")
+	}
+	return nil
 }
 
 // Commit commits the transaction, following these steps:
@@ -560,10 +571,13 @@ func (txn *Txn) commitPrecheck() {
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit() error {
-	txn.commitPrecheck() // Precheck before discarding txn.
+	// Precheck before discarding txn.
+	if err := txn.commitPrecheck(); err != nil {
+		return err
+	}
+	defer txn.Discard()
 
 	if len(txn.writes) == 0 {
-		txn.Discard()
 		return nil // Nothing to do.
 	}
 
@@ -571,7 +585,6 @@ func (txn *Txn) Commit() error {
 	if err != nil {
 		return err
 	}
-	txn.Discard()
 	// If batchSet failed, LSM would not have been updated. So, no need to rollback anything.
 
 	// TODO: What if some of the txns successfully make it to value log, but others fail.
@@ -606,12 +619,17 @@ func runTxnCallback(cb *txnCb) {
 // so it is safe to increment sync.WaitGroup before calling CommitWith, and
 // decrementing it in the callback; to block until all callbacks are run.
 func (txn *Txn) CommitWith(cb func(error)) {
-	txn.commitPrecheck() // Precheck before discarding txn.
-	defer txn.Discard()
-
 	if cb == nil {
 		panic("Nil callback provided to CommitWith")
 	}
+
+	// Precheck before discarding txn.
+	if err := txn.commitPrecheck(); err != nil {
+		cb(err)
+		return
+	}
+
+	defer txn.Discard()
 
 	if len(txn.writes) == 0 {
 		// Do not run these callbacks from here, because the CommitWith and the
