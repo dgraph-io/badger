@@ -136,7 +136,7 @@ func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 func (lf *logFile) doneWriting(offset uint32) error {
 	// Sync before acquiring lock. (We call this from write() and thus know we have shared access
 	// to the fd.)
-	if err := lf.fd.Sync(); err != nil {
+	if err := y.FileSync(lf.fd); err != nil {
 		return errors.Wrapf(err, "Unable to sync value log: %q", lf.path)
 	}
 
@@ -180,7 +180,7 @@ func (lf *logFile) doneWriting(offset uint32) error {
 
 // You must hold lf.lock to sync()
 func (lf *logFile) sync() error {
-	return lf.fd.Sync()
+	return y.FileSync(lf.fd)
 }
 
 var errStop = errors.New("Stop iteration")
