@@ -175,7 +175,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			txn = append(txn, te)
 
 		default:
-			// This entry is from a rewrite.
+			// This entry is from a rewrite or via SetEntryAt(..).
 			toLSM(nk, v)
 
 			// We shouldn't get this entry in the middle of a transaction.

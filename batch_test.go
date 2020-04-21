@@ -36,6 +36,9 @@ func TestWriteBatch(t *testing.T) {
 		wb := db.NewWriteBatch()
 		defer wb.Cancel()
 
+		// Sanity check for SetEntryAt.
+		require.Error(t, wb.SetEntryAt(&Entry{}, 12))
+
 		N, M := 50000, 1000
 		start := time.Now()
 

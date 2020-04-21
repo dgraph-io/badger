@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/pkg/errors"
 )
 
 // WriteBatch holds the necessary info to perform batched writes.
@@ -88,6 +89,16 @@ func (wb *WriteBatch) callback(err error) {
 	wb.err = err
 }
 
+// SetEntryAt is the equivalent of Txn.SetEntry but it also allows setting version for the entry.
+// SetEntryAt can be used only in managed mode.
+func (wb *WriteBatch) SetEntryAt(e *Entry, ts uint64) error {
+	if !wb.db.opt.managedTxns {
+		return errors.New("SetEntryAt can only be used in managed mode. Use SetEntry instead")
+	}
+	e.version = ts
+	return wb.SetEntry(e)
+}
+
 // SetEntry is the equivalent of Txn.SetEntry.
 func (wb *WriteBatch) SetEntry(e *Entry) error {
 	wb.Lock()
@@ -113,6 +124,12 @@ func (wb *WriteBatch) SetEntry(e *Entry) error {
 func (wb *WriteBatch) Set(k, v []byte) error {
 	e := &Entry{Key: k, Value: v}
 	return wb.SetEntry(e)
+}
+
+// DeleteAt is equivalent of Txn.Delete but accepts a delete timestamp.
+func (wb *WriteBatch) DeleteAt(k []byte, ts uint64) error {
+	e := Entry{Key: k, meta: bitDelete, version: ts}
+	return wb.SetEntry(&e)
 }
 
 // Delete is equivalent of Txn.Delete.
