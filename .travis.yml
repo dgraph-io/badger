@@ -8,7 +8,6 @@ go:
 os:
   - osx
 env:
-  - GO111MODULE=on
   jobs:
   - GOARCH=386
   - GOARCH=amd64
