@@ -3,7 +3,7 @@ module github.com/dgraph-io/badger
 go 1.12
 
 require (
-	github.com/AndreasBriese/bbloom v0.0.0-20190306092124-e2d15f34fcf9
+	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96
 	github.com/dgraph-io/ristretto v0.0.2
 	github.com/dustin/go-humanize v1.0.0
 	github.com/golang/protobuf v1.3.1
