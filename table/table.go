@@ -86,8 +86,9 @@ type Options struct {
 // Used to reuse decompression blocks.
 var decompressPool = sync.Pool{
 	New: func() interface{} {
+		fmt.Println("new11")
 		// Make 4 KB blocks for reuse.
-		b := make([]byte, 0, 4<<10)
+		b := make([]byte, 4<<10)
 		return &b
 	},
 }
@@ -640,8 +641,9 @@ func NewFilename(id uint64, dir string) string {
 
 // decompressData decompresses the given data.
 func (t *Table) decompressData(data []byte) ([]byte, error) {
+	fmt.Println("Decompress111")
 	dst := decompressPool.Get().(*[]byte)
-	*dst = (*dst)[:0]
+	*dst = (*dst)[:cap(*dst)]
 
 	switch t.opt.Compression {
 	case options.None:

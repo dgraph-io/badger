@@ -106,9 +106,6 @@ func (itr *blockIterator) Error() error {
 }
 
 func (itr *blockIterator) Close() {
-	if itr.compressed {
-		decompressPool.Put(&itr.data)
-	}
 }
 
 var (
@@ -317,6 +314,9 @@ func (itr *Iterator) next() {
 	itr.bi.next()
 	if !itr.bi.Valid() {
 		itr.bpos++
+		if itr.bi.compressed {
+			decompressPool.Put(&itr.bi.data)
+		}
 		itr.bi.data = nil
 		itr.next()
 		return
@@ -345,6 +345,9 @@ func (itr *Iterator) prev() {
 	itr.bi.prev()
 	if !itr.bi.Valid() {
 		itr.bpos--
+		if itr.bi.compressed {
+			decompressPool.Put(&itr.bi.data)
+		}
 		itr.bi.data = nil
 		itr.prev()
 		return
