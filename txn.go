@@ -337,10 +337,11 @@ func (txn *Txn) modify(e *Entry) error {
 	}
 	fp := z.MemHash(e.Key) // Avoid dealing with byte arrays.
 	txn.writes = append(txn.writes, fp)
-	if txn.db.opt.managedTxns {
-		if e, ok := txn.pendingWrites[string(e.Key)]; ok {
-			txn.duplicateWrites = append(txn.duplicateWrites, e)
-		}
+	// If a duplicate entry was inserted in managed mode, move it to the duplicate writes slice.
+	// Add the entry to duplicateWrites only if both the entries have different versions. For
+	// same versions, we will overwrite the existing entry.
+	if oldEntry, ok := txn.pendingWrites[string(e.Key)]; ok && oldEntry.version != e.version {
+		txn.duplicateWrites = append(txn.duplicateWrites, oldEntry)
 	}
 	txn.pendingWrites[string(e.Key)] = e
 	return nil
@@ -479,7 +480,7 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	}
 
 	keepTogether := true
-	fn := func(e *Entry) {
+	setVersion := func(e *Entry) {
 		if e.version == 0 {
 			e.version = commitTs
 		} else {
@@ -487,11 +488,12 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 		}
 	}
 	for _, e := range txn.pendingWrites {
-		fn(e)
+		setVersion(e)
 	}
-
+	// The duplicateWrites slice will be non-empty only if there are duplicate
+	// entries with different versions.
 	for _, e := range txn.duplicateWrites {
-		fn(e)
+		setVersion(e)
 	}
 
 	entries := make([]*Entry, 0, len(txn.pendingWrites)+1+len(txn.duplicateWrites))
