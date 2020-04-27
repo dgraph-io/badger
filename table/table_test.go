@@ -74,7 +74,7 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Uint32())
-	f, err := y.CreateSyncedFile(filename, true)
+	f, err := y.CreateSyncedFile(filename, false)
 	require.NoError(t, err)
 
 	sort.Slice(keyValues, func(i, j int) bool {

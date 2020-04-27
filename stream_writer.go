@@ -424,7 +424,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 			return err
 		}
 	} else {
-		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, w.db.opt.Dir), true)
+		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, w.db.opt.Dir), w.db.opt.SyncWrites)
 		if err != nil {
 			return err
 		}

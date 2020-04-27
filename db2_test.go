@@ -543,7 +543,7 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	}
 
 	fileID := db.lc.reserveFileID()
-	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
+	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), db.opt.SyncWrites)
 	require.NoError(t, err)
 
 	_, err = fd.Write(b.Finish())

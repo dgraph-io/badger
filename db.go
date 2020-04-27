@@ -989,7 +989,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return db.lc.addLevel0Table(tbl)
 	}
 
-	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
+	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), db.opt.SyncWrites)
 	if err != nil {
 		return y.Wrap(err)
 	}

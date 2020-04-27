@@ -44,7 +44,8 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 		val := y.ValueStruct{Value: []byte(item.val), Meta: item.meta}
 		b.Add(key, val, 0)
 	}
-	fd, err := y.CreateSyncedFile(table.NewFilename(db.lc.reserveFileID(), db.opt.Dir), true)
+	fname := table.NewFilename(db.lc.reserveFileID(), db.opt.Dir)
+	fd, err := y.CreateSyncedFile(fname, db.opt.SyncWrites)
 	if err != nil {
 		panic(err)
 	}
