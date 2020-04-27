@@ -611,7 +611,6 @@ func (s *levelsController) compactBuildTables(
 		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			numKeys, numSkips, time.Since(timeStart))
 		build := func(fileID uint64) (*table.Table, error) {
-
 			fname := table.NewFilename(fileID, s.kv.opt.Dir)
 			fd, err := y.CreateSyncedFile(fname, s.kv.opt.SyncWrites)
 			if err != nil {
