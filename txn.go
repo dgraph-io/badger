@@ -496,7 +496,7 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 		setVersion(e)
 	}
 
-	entries := make([]*Entry, 0, len(txn.pendingWrites)+1+len(txn.duplicateWrites))
+	entries := make([]*Entry, 0, len(txn.pendingWrites)+len(txn.duplicateWrites)+1)
 
 	processEntry := func(e *Entry) {
 		// Suffix the keys with commit ts, so the key versions are sorted in
