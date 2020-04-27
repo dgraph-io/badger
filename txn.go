@@ -207,7 +207,8 @@ type Txn struct {
 	reads  []uint64 // contains fingerprints of keys read.
 	writes []uint64 // contains fingerprints of keys written.
 
-	pendingWrites map[string]*Entry // cache stores any writes done by txn.
+	pendingWrites   map[string]*Entry // cache stores any writes done by txn.
+	duplicateWrites []*Entry          // Used in managed mode to store duplicate entries.
 
 	db        *DB
 	discarded bool
@@ -336,6 +337,11 @@ func (txn *Txn) modify(e *Entry) error {
 	}
 	fp := z.MemHash(e.Key) // Avoid dealing with byte arrays.
 	txn.writes = append(txn.writes, fp)
+	if txn.db.opt.managedTxns {
+		if e, ok := txn.pendingWrites[string(e.Key)]; ok {
+			txn.duplicateWrites = append(txn.duplicateWrites, e)
+		}
+	}
 	txn.pendingWrites[string(e.Key)] = e
 	return nil
 }
@@ -473,22 +479,24 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	}
 
 	keepTogether := true
-	for _, e := range txn.pendingWrites {
+	fn := func(e *Entry) {
 		if e.version == 0 {
 			e.version = commitTs
 		} else {
 			keepTogether = false
 		}
 	}
-
-	// The following debug information is what led to determining the cause of
-	// bank txn violation bug, and it took a whole bunch of effort to narrow it
-	// down to here. So, keep this around for at least a couple of months.
-	// var b strings.Builder
-	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
-	// 	txn.readTs, commitTs, txn.reads, txn.writes)
-	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
 	for _, e := range txn.pendingWrites {
+		fn(e)
+	}
+
+	for _, e := range txn.duplicateWrites {
+		fn(e)
+	}
+
+	entries := make([]*Entry, 0, len(txn.pendingWrites)+1+len(txn.duplicateWrites))
+
+	processEntry := func(e *Entry) {
 		// Suffix the keys with commit ts, so the key versions are sorted in
 		// descending order of commit timestamp.
 		e.Key = y.KeyWithTs(e.Key, e.version)
@@ -501,6 +509,19 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 			e.meta |= bitTxn
 		}
 		entries = append(entries, e)
+	}
+
+	// The following debug information is what led to determining the cause of
+	// bank txn violation bug, and it took a whole bunch of effort to narrow it
+	// down to here. So, keep this around for at least a couple of months.
+	// var b strings.Builder
+	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
+	// 	txn.readTs, commitTs, txn.reads, txn.writes)
+	for _, e := range txn.pendingWrites {
+		processEntry(e)
+	}
+	for _, e := range txn.duplicateWrites {
+		processEntry(e)
 	}
 
 	if keepTogether {

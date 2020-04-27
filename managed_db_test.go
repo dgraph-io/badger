@@ -685,3 +685,58 @@ func TestWriteBatchManaged(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+func TestWriteBatchDuplicate(t *testing.T) {
+	N := 1000
+	k := []byte("key")
+	v := []byte("val")
+	fn := func(t *testing.T, db *DB) {
+		wb := db.NewManagedWriteBatch()
+		defer wb.Cancel()
+
+		for i := uint64(0); i < uint64(N); i++ {
+			// Multiple versions of the same key.
+			require.NoError(t, wb.SetEntryAt(&Entry{Key: k, Value: v}, i+1))
+		}
+		require.NoError(t, wb.Flush())
+		err := db.View(func(txn *Txn) error {
+			iopt := DefaultIteratorOptions
+			iopt.AllVersions = true
+			itr := txn.NewIterator(iopt)
+			defer itr.Close()
+
+			i := 0
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				require.Equal(t, k, item.Key())
+				require.Equal(t, uint64(N-i), item.Version())
+				err := item.Value(func(val []byte) error {
+					require.Equal(t, v, val)
+					return nil
+				})
+				require.NoError(t, err)
+				i++
+			}
+			if db.opt.managedTxns {
+				require.Equal(t, N, i)
+			} else {
+				require.Equal(t, 1, i)
+			}
+			return nil
+		})
+		require.NoError(t, err)
+	}
+
+	t.Run("normal mode", func(t *testing.T) {
+		opt := DefaultOptions("")
+		opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+		runBadgerTest(t, &opt, fn)
+
+	})
+	t.Run("managed mode", func(t *testing.T) {
+		opt := DefaultOptions("")
+		opt.managedTxns = true
+		opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+		runBadgerTest(t, &opt, fn)
+	})
+}
