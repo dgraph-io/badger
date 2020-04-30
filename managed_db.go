@@ -54,7 +54,7 @@ func (db *DB) NewWriteBatchAt(commitTs uint64) *WriteBatch {
 }
 func (db *DB) NewManagedWriteBatch() *WriteBatch {
 	if !db.opt.managedTxns {
-		panic("cannot use NewWriteBatchAt with managedDB=false. Use NewWriteBatch instead")
+		panic("cannot use NewManagedWriteBatch with managedDB=false. Use NewWriteBatch instead")
 	}
 
 	wb := db.newWriteBatch()

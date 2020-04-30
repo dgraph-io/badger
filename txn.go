@@ -207,7 +207,8 @@ type Txn struct {
 	reads  []uint64 // contains fingerprints of keys read.
 	writes []uint64 // contains fingerprints of keys written.
 
-	pendingWrites map[string]*Entry // cache stores any writes done by txn.
+	pendingWrites   map[string]*Entry // cache stores any writes done by txn.
+	duplicateWrites []*Entry          // Used in managed mode to store duplicate entries.
 
 	db        *DB
 	discarded bool
@@ -336,6 +337,12 @@ func (txn *Txn) modify(e *Entry) error {
 	}
 	fp := z.MemHash(e.Key) // Avoid dealing with byte arrays.
 	txn.writes = append(txn.writes, fp)
+	// If a duplicate entry was inserted in managed mode, move it to the duplicate writes slice.
+	// Add the entry to duplicateWrites only if both the entries have different versions. For
+	// same versions, we will overwrite the existing entry.
+	if oldEntry, ok := txn.pendingWrites[string(e.Key)]; ok && oldEntry.version != e.version {
+		txn.duplicateWrites = append(txn.duplicateWrites, oldEntry)
+	}
 	txn.pendingWrites[string(e.Key)] = e
 	return nil
 }
@@ -473,22 +480,25 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	}
 
 	keepTogether := true
-	for _, e := range txn.pendingWrites {
+	setVersion := func(e *Entry) {
 		if e.version == 0 {
 			e.version = commitTs
 		} else {
 			keepTogether = false
 		}
 	}
-
-	// The following debug information is what led to determining the cause of
-	// bank txn violation bug, and it took a whole bunch of effort to narrow it
-	// down to here. So, keep this around for at least a couple of months.
-	// var b strings.Builder
-	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
-	// 	txn.readTs, commitTs, txn.reads, txn.writes)
-	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
 	for _, e := range txn.pendingWrites {
+		setVersion(e)
+	}
+	// The duplicateWrites slice will be non-empty only if there are duplicate
+	// entries with different versions.
+	for _, e := range txn.duplicateWrites {
+		setVersion(e)
+	}
+
+	entries := make([]*Entry, 0, len(txn.pendingWrites)+len(txn.duplicateWrites)+1)
+
+	processEntry := func(e *Entry) {
 		// Suffix the keys with commit ts, so the key versions are sorted in
 		// descending order of commit timestamp.
 		e.Key = y.KeyWithTs(e.Key, e.version)
@@ -501,6 +511,19 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 			e.meta |= bitTxn
 		}
 		entries = append(entries, e)
+	}
+
+	// The following debug information is what led to determining the cause of
+	// bank txn violation bug, and it took a whole bunch of effort to narrow it
+	// down to here. So, keep this around for at least a couple of months.
+	// var b strings.Builder
+	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
+	// 	txn.readTs, commitTs, txn.reads, txn.writes)
+	for _, e := range txn.pendingWrites {
+		processEntry(e)
+	}
+	for _, e := range txn.duplicateWrites {
+		processEntry(e)
 	}
 
 	if keepTogether {
@@ -571,15 +594,14 @@ func (txn *Txn) commitPrecheck() error {
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit() error {
+	if len(txn.writes) == 0 {
+		return nil // Nothing to do.
+	}
 	// Precheck before discarding txn.
 	if err := txn.commitPrecheck(); err != nil {
 		return err
 	}
 	defer txn.Discard()
-
-	if len(txn.writes) == 0 {
-		return nil // Nothing to do.
-	}
 
 	txnCb, err := txn.commitAndSend()
 	if err != nil {
@@ -623,14 +645,6 @@ func (txn *Txn) CommitWith(cb func(error)) {
 		panic("Nil callback provided to CommitWith")
 	}
 
-	// Precheck before discarding txn.
-	if err := txn.commitPrecheck(); err != nil {
-		cb(err)
-		return
-	}
-
-	defer txn.Discard()
-
 	if len(txn.writes) == 0 {
 		// Do not run these callbacks from here, because the CommitWith and the
 		// callback might be acquiring the same locks. Instead run the callback
@@ -638,6 +652,14 @@ func (txn *Txn) CommitWith(cb func(error)) {
 		go runTxnCallback(&txnCb{user: cb, err: nil})
 		return
 	}
+
+	// Precheck before discarding txn.
+	if err := txn.commitPrecheck(); err != nil {
+		cb(err)
+		return
+	}
+
+	defer txn.Discard()
 
 	commitCb, err := txn.commitAndSend()
 	if err != nil {
