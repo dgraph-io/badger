@@ -594,15 +594,14 @@ func (txn *Txn) commitPrecheck() error {
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit() error {
+	if len(txn.writes) == 0 {
+		return nil // Nothing to do.
+	}
 	// Precheck before discarding txn.
 	if err := txn.commitPrecheck(); err != nil {
 		return err
 	}
 	defer txn.Discard()
-
-	if len(txn.writes) == 0 {
-		return nil // Nothing to do.
-	}
 
 	txnCb, err := txn.commitAndSend()
 	if err != nil {
@@ -646,14 +645,6 @@ func (txn *Txn) CommitWith(cb func(error)) {
 		panic("Nil callback provided to CommitWith")
 	}
 
-	// Precheck before discarding txn.
-	if err := txn.commitPrecheck(); err != nil {
-		cb(err)
-		return
-	}
-
-	defer txn.Discard()
-
 	if len(txn.writes) == 0 {
 		// Do not run these callbacks from here, because the CommitWith and the
 		// callback might be acquiring the same locks. Instead run the callback
@@ -661,6 +652,14 @@ func (txn *Txn) CommitWith(cb func(error)) {
 		go runTxnCallback(&txnCb{user: cb, err: nil})
 		return
 	}
+
+	// Precheck before discarding txn.
+	if err := txn.commitPrecheck(); err != nil {
+		cb(err)
+		return
+	}
+
+	defer txn.Discard()
 
 	commitCb, err := txn.commitAndSend()
 	if err != nil {
