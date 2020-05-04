@@ -19,6 +19,7 @@ package badger
 import (
 	"sync"
 
+	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 )
@@ -87,6 +88,20 @@ func (wb *WriteBatch) callback(err error) {
 		return
 	}
 	wb.err = err
+}
+
+func (wb *WriteBatch) Write(kvList *pb.KVList) error {
+	for _, kv := range kvList.Kv {
+		e := Entry{Key: kv.Key, Value: kv.Value}
+		if len(kv.UserMeta) > 0 {
+			e.UserMeta = kv.UserMeta[0]
+		}
+		y.AssertTrue(kv.Version != 0)
+		if err := wb.SetEntryAt(&e, kv.Version); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetEntryAt is the equivalent of Txn.SetEntry but it also allows setting version for the entry.
