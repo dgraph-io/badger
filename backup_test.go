@@ -17,7 +17,6 @@
 package badger
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"io/ioutil"
@@ -26,7 +25,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -114,92 +112,6 @@ func TestBackupRestore1(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-}
-
-// TestLSMVPClear verifies entry value pointer flags are cleared
-// when data is restored from a backup with lower ValueThreshold to
-// a running instance with higher ValueThreshold that results in the
-// entry value being written to LSM along with key.
-// To see the slice error prior to `db.writeToLSM` fix, replace db.writeToLSM line 687:
-// 			Meta:      entry.meta &^ bitValuePointer,
-// with:
-// 			Meta: entry.meta,
-func TestLSMVPClear(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer removeDir(dir)
-
-	cleanDB := func() {
-		files, err := filepath.Glob(dir + "/*")
-		require.NoError(t, err)
-		for _, file := range files {
-			if strings.Index(filepath.Base(file), "badger.bak") == 0 {
-				continue
-			}
-			require.NoError(t, os.Remove(file))
-		}
-	}
-
-	verify := func(db *DB, key, value []byte) {
-		require.NoError(t, db.View(func(txn *Txn) error {
-			opts := DefaultIteratorOptions
-			opts.AllVersions = true
-			it := txn.NewIterator(opts)
-			defer it.Close()
-			it.Rewind()
-			require.Equal(t, true, it.Valid())
-			item := it.Item()
-			val, err := item.ValueCopy(nil)
-			if err != nil {
-				return err
-			}
-			require.Equal(t, key, item.Key())
-			require.Equal(t, value, val)
-			return nil
-		}))
-	}
-
-	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 1 << 20
-	opts.MaxTableSize = 16 << 15
-	opts.LevelOneSize = 64 << 15
-	opts.NumVersionsToKeep = 0
-	// set low value threshold to force value write to value log
-	opts.ValueThreshold = 4
-	db, err := Open(opts)
-	require.NoError(t, err)
-	txn := db.NewTransaction(true)
-
-	key := []byte{1}
-	value := []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
-	require.NoError(t, txn.SetEntry(NewEntry(key, value)))
-
-	require.NoError(t, txn.Commit())
-
-	verify(db, key, value)
-
-	f, err := ioutil.TempFile(dir, "badger.bak")
-	require.NoError(t, err)
-	bufferedWriter := bufio.NewWriter(f)
-	_, err = db.Backup(bufferedWriter, 0)
-	require.NoError(t, err)
-	require.NoError(t, bufferedWriter.Flush())
-	db.Close()
-
-	// verify restore works with higher ValueThreshold
-	opts.ValueThreshold = 32
-	cleanDB()
-	db, err = Open(opts)
-	require.NoError(t, err)
-
-	f.Seek(0, 0)
-	bufferedReader := bufio.NewReader(f)
-	require.NoError(t, db.Load(bufferedReader, 10))
-
-	verify(db, key, value)
-
-	db.Close()
-	require.NoError(t, f.Close())
 }
 
 func TestBackupRestore2(t *testing.T) {
@@ -572,4 +484,59 @@ func TestBackupLoadIncremental(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err, "%v %v", updates, actual)
+}
+
+func TestBackupBitClear(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt := getTestOptions(dir)
+	opt.ValueThreshold = 10 // This is important
+	db, err := Open(opt)
+	require.NoError(t, err)
+
+	key := []byte("foo")
+	val := []byte(fmt.Sprintf("%0100d", 1))
+	require.Greater(t, len(val), db.opt.ValueThreshold)
+
+	err = db.Update(func(txn *Txn) error {
+		e := NewEntry(key, val)
+		// Value > valueTheshold so bitValuePointer will be set.
+		return txn.SetEntry(e)
+	})
+	require.NoError(t, err)
+
+	// Use different directory.
+	dir, err = ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	bak, err := ioutil.TempFile(dir, "badgerbak")
+	require.NoError(t, err)
+	_, err = db.Backup(bak, 0)
+	require.NoError(t, err)
+	require.NoError(t, bak.Close())
+	require.NoError(t, db.Close())
+
+	opt = getTestOptions(dir)
+	opt.ValueThreshold = 200 // This is important.
+	db, err = Open(opt)
+	require.NoError(t, err)
+	defer db.Close()
+
+	bak, err = os.Open(bak.Name())
+	require.NoError(t, err)
+	defer bak.Close()
+
+	require.NoError(t, db.Load(bak, 16))
+
+	require.NoError(t, db.View(func(txn *Txn) error {
+		e, err := txn.Get(key)
+		require.NoError(t, err)
+		v, err := e.ValueCopy(nil)
+		require.NoError(t, err)
+		require.Equal(t, val, v)
+		return nil
+	}))
 }
