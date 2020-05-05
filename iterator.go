@@ -169,8 +169,8 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 		vp.Decode(item.vptr)
 		result, cb, err := item.db.vlog.Read(vp, item.slice)
 		if err != ErrRetry {
-			item.db.opt.Logger.Errorf("Unable to read: Key: %v, Version : %v, meta: %v userMeta: %v",
-				key, item.version, item.meta, item.userMeta)
+			//item.db.opt.Logger.Errorf("Unable to read: Key: %v, Version : %v, meta: %v userMeta: %v",
+			//	key, item.version, item.meta, item.userMeta)
 			return result, cb, err
 		}
 		if bytes.HasPrefix(key, badgerMove) {
