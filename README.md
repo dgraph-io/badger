@@ -756,6 +756,7 @@ Below is a list of known projects that use Badger:
 * [Jaeger](https://github.com/jaegertracing/jaeger) - Distributed tracing platform.
 * [TalariaDB](https://github.com/grab/talaria) - Distributed, low latency time-series database.
 * [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed application data analytics.
+* [OctoSQL](https://github.com/cube2222/octosql) - Query tool that allows you to join, analyse and transform data from multiple databases using SQL.
 * [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
 * [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
 * [go-ipfs](https://github.com/ipfs/go-ipfs) - Go client for the InterPlanetary File System (IPFS), a new hypermedia distribution protocol.
