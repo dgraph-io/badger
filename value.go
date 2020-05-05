@@ -1516,7 +1516,8 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 		}
 	}
 	if uint32(len(kv)) <= h.klen+h.vlen {
-		return nil, nil, errors.Errorf("Invalid read: Capacity: %d read at:[%d:%d]",
+		vlog.db.opt.Logger.Errorf("Invalid read: %+v : ....", vp, ...) // All the context goes here.
+		return nil, nil, errors.Errorf("Invalid read: Len: %d read at:[%d:%d]",
 			len(kv), h.klen, h.klen+h.vlen)
 	}
 	return kv[h.klen : h.klen+h.vlen], cb, nil
