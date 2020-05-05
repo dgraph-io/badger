@@ -91,13 +91,16 @@ func (wb *WriteBatch) callback(err error) {
 }
 
 func (wb *WriteBatch) Write(kvList *pb.KVList) error {
+	wb.Lock()
+	defer wb.Unlock()
 	for _, kv := range kvList.Kv {
 		e := Entry{Key: kv.Key, Value: kv.Value}
 		if len(kv.UserMeta) > 0 {
 			e.UserMeta = kv.UserMeta[0]
 		}
 		y.AssertTrue(kv.Version != 0)
-		if err := wb.SetEntryAt(&e, kv.Version); err != nil {
+		e.version = kv.Version
+		if err := wb.handleEntry(&e); err != nil {
 			return err
 		}
 	}
@@ -114,11 +117,8 @@ func (wb *WriteBatch) SetEntryAt(e *Entry, ts uint64) error {
 	return wb.SetEntry(e)
 }
 
-// SetEntry is the equivalent of Txn.SetEntry.
-func (wb *WriteBatch) SetEntry(e *Entry) error {
-	wb.Lock()
-	defer wb.Unlock()
-
+// Should be called with lock acquired.
+func (wb *WriteBatch) handleEntry(e *Entry) error {
 	if err := wb.txn.SetEntry(e); err != ErrTxnTooBig {
 		return err
 	}
@@ -133,6 +133,13 @@ func (wb *WriteBatch) SetEntry(e *Entry) error {
 		return err
 	}
 	return nil
+}
+
+// SetEntry is the equivalent of Txn.SetEntry.
+func (wb *WriteBatch) SetEntry(e *Entry) error {
+	wb.Lock()
+	defer wb.Unlock()
+	return wb.handleEntry(e)
 }
 
 // Set is equivalent of Txn.Set().

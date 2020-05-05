@@ -1435,11 +1435,11 @@ func (vlog *valueLog) write(reqs []*request) error {
 			// log (this happens when a transaction contains entries with large value sizes) and
 			// badger might run into out of memory errors. We flush the buffer here if it's size
 			// grows beyond the max value log size.
-			if int64(buf.Len()) > vlog.db.opt.ValueLogFileSize {
-				if err := flushWrites(); err != nil {
-					return err
-				}
-			}
+			// if int64(buf.Len()) > vlog.db.opt.ValueLogFileSize {
+			// 	if err := flushWrites(); err != nil {
+			// 		return err
+			// 	}
+			// }
 		}
 		vlog.numEntriesWritten += uint32(written)
 		// We write to disk here so that all entries that are part of the same transaction are
