@@ -18,7 +18,9 @@ package table
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"os"
 	"sort"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -33,7 +35,10 @@ type blockIterator struct {
 	baseKey      []byte
 	key          []byte
 	val          []byte
+	offset       int
 	entryOffsets []uint32
+	tid          uint64
+	block        *block
 
 	compressed bool
 
@@ -43,19 +48,27 @@ type blockIterator struct {
 }
 
 func (itr *blockIterator) setBlock(b *block) {
+	itr.block.decrRef()
+
+	itr.block = b
 	itr.err = nil
 	itr.idx = 0
 	itr.baseKey = itr.baseKey[:0]
 	itr.prevOverlap = 0
 	itr.key = itr.key[:0]
 	itr.val = itr.val[:0]
+	itr.offset = b.offset
 	// Drop the index from the block. We don't need it anymore.
 	itr.data = b.data[:b.entriesIndexStart]
 	itr.entryOffsets = b.entryOffsets
+	if b.offset == 6569 {
+		//spew.Dump(itr.entryOffsets)
+	}
 }
 
 // setIdx sets the iterator to the entry at index i and set it's key and value.
 func (itr *blockIterator) setIdx(i int) {
+	// log.Printf("setidx ptr=%p tid=%+v boffset=%+v id:%d len:%d\n", itr, itr.tid, itr.offset, i, len(itr.data))
 	itr.idx = i
 	if i >= len(itr.entryOffsets) || i < 0 {
 		itr.err = io.EOF
@@ -63,7 +76,13 @@ func (itr *blockIterator) setIdx(i int) {
 	}
 	itr.err = nil
 	startOffset := int(itr.entryOffsets[i])
-
+	// fmt.Printf("boffset: %d itr.offset, startOffset = %+v\n", itr.offset, startOffset)
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("recovered tid=%d itr.offset = %+v  %s\n", itr.tid, itr.offset, r)
+			os.Exit(1)
+		}
+	}()
 	// Set base key.
 	if len(itr.baseKey) == 0 {
 		var baseHeader header
@@ -82,8 +101,10 @@ func (itr *blockIterator) setIdx(i int) {
 	}
 
 	entryData := itr.data[startOffset:endOffset]
+
 	var h header
 	h.Decode(entryData)
+	// fmt.Printf("tid=%d itr.offset=%d h = %+v\n", itr.tid, itr.offset, h)
 	// Header contains the length of key overlap and difference compared to the base key. If the key
 	// before this one had the same or better key overlap, we can avoid copying that part into
 	// itr.key. But, if the overlap was lesser, we could copy over just that portion.
@@ -171,7 +192,7 @@ func (t *Table) NewIterator(reversed bool) *Iterator {
 	t.IncrRef() // Important.
 	ti := &Iterator{t: t, reversed: reversed}
 	ti.bi.compressed = t.opt.Compression != options.None
-	ti.next()
+	ti.bi.tid = t.id
 	return ti
 }
 
@@ -314,9 +335,6 @@ func (itr *Iterator) next() {
 	itr.bi.next()
 	if !itr.bi.Valid() {
 		itr.bpos++
-		if itr.bi.compressed {
-			decompressPool.Put(&itr.bi.data)
-		}
 		itr.bi.data = nil
 		itr.next()
 		return
@@ -345,9 +363,6 @@ func (itr *Iterator) prev() {
 	itr.bi.prev()
 	if !itr.bi.Valid() {
 		itr.bpos--
-		if itr.bi.compressed {
-			decompressPool.Put(&itr.bi.data)
-		}
 		itr.bi.data = nil
 		itr.prev()
 		return

@@ -86,10 +86,9 @@ type Options struct {
 // Used to reuse decompression blocks.
 var decompressPool = sync.Pool{
 	New: func() interface{} {
-		fmt.Println("new11")
 		// Make 4 KB blocks for reuse.
-		b := make([]byte, 4<<10)
-		return &b
+		b := make([]byte, 5<<10)
+		return b
 	},
 }
 
@@ -179,6 +178,11 @@ func (t *Table) DecrRef() error {
 	return nil
 }
 
+func CleanupBlock(value interface{}) {
+	b := value.(*block)
+	b.decrRef()
+}
+
 type block struct {
 	offset            int
 	data              []byte
@@ -186,8 +190,23 @@ type block struct {
 	entriesIndexStart int // start index of entryOffsets list
 	entryOffsets      []uint32
 	chkLen            int // checksum length
+	isCompressed      bool
+	ref               int
 }
 
+func (b *block) incrRef() {
+	b.ref++
+}
+func (b *block) decrRef() {
+	if b == nil {
+		return
+	}
+	b.ref--
+	if b.ref == 0 && b.isCompressed {
+		fmt.Printf("done using b.offset = %+v\n", b.offset)
+		decompressPool.Put(b.data)
+	}
+}
 func (b *block) size() int64 {
 	return int64(3*intSize /* Size of the offset, entriesIndexStart and chkLen */ +
 		cap(b.data) + cap(b.checksum) + cap(b.entryOffsets)*4)
@@ -414,7 +433,8 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 	ko := t.blockIndex[idx]
 	blk := &block{
-		offset: int(ko.Offset),
+		offset:       int(ko.Offset),
+		isCompressed: t.opt.Compression != options.None,
 	}
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
@@ -472,6 +492,7 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 	if t.opt.Cache != nil {
 		key := t.blockCacheKey(idx)
+		blk.incrRef()
 		t.opt.Cache.Set(key, blk, blk.size())
 	}
 	return blk, nil
@@ -573,16 +594,18 @@ func (t *Table) VerifyChecksum() error {
 			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
 				t.Filename(), i, os.Offset)
 		}
-
+		b.incrRef()
 		// OnBlockRead or OnTableAndBlockRead, we don't need to call verify checksum
 		// on block, verification would be done while reading block itself.
 		if !(t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead) {
+			b.decrRef()
 			if err = b.verifyCheckSum(); err != nil {
 				return y.Wrapf(err,
 					"checksum validation failed for table: %s, block: %d, offset:%d",
 					t.Filename(), i, os.Offset)
 			}
 		}
+		b.decrRef()
 	}
 
 	return nil
@@ -641,17 +664,15 @@ func NewFilename(id uint64, dir string) string {
 
 // decompressData decompresses the given data.
 func (t *Table) decompressData(data []byte) ([]byte, error) {
-	fmt.Println("Decompress111")
-	dst := decompressPool.Get().(*[]byte)
-	*dst = (*dst)[:cap(*dst)]
+	dst := decompressPool.Get().([]byte)
 
 	switch t.opt.Compression {
 	case options.None:
 		return data, nil
 	case options.Snappy:
-		return snappy.Decode(*dst, data)
+		return snappy.Decode(dst, data)
 	case options.ZSTD:
-		return y.ZSTDDecompress(*dst, data)
+		return y.ZSTDDecompress(dst, data)
 	}
 	return nil, errors.New("Unsupported compression type")
 }

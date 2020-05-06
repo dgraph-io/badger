@@ -299,6 +299,9 @@ func Open(opt Options) (db *DB, err error) {
 			MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
 			BufferItems: 64,
 			Metrics:     true,
+			OnEvict: func(_, _ uint64, value interface{}, _ int64) {
+				table.CleanupBlock(value)
+			},
 		}
 		db.blockCache, err = ristretto.NewCache(&config)
 		if err != nil {
