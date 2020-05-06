@@ -169,7 +169,7 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 		vp.Decode(item.vptr)
 		result, cb, err := item.db.vlog.Read(vp, item.slice)
 		if err != ErrRetry {
-			if result == nil && cb == nil {
+			if err != nil {
 				item.db.opt.Logger.Errorf(`Unable to read: Key: %v, Version : %v,
 				meta: %v, userMeta: %v`, key, item.version, item.meta, item.userMeta)
 			}
