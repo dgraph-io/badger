@@ -52,6 +52,14 @@ func (db *DB) NewWriteBatchAt(commitTs uint64) *WriteBatch {
 	wb.txn.commitTs = commitTs
 	return wb
 }
+func (db *DB) NewManagedWriteBatch() *WriteBatch {
+	if !db.opt.managedTxns {
+		panic("cannot use NewManagedWriteBatch with managedDB=false. Use NewWriteBatch instead")
+	}
+
+	wb := db.newWriteBatch()
+	return wb
+}
 
 // CommitAt commits the transaction, following the same logic as Commit(), but
 // at the given commit timestamp. This will panic if not used with managed transactions.
