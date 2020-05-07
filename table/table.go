@@ -191,21 +191,26 @@ type block struct {
 	entryOffsets      []uint32
 	chkLen            int // checksum length
 	isCompressed      bool
-	ref               int
+	tid               uint64
+	ref               int32
 }
 
 func (b *block) incrRef() {
-	b.ref++
+	atomic.AddInt32(&b.ref, 1)
+	// fmt.Printf("incrref b.tid=%d b.offset=%+v d=%d\n", b.tid, b.offset, d)
 }
 func (b *block) decrRef() {
 	if b == nil {
 		return
 	}
-	b.ref--
-	if b.ref == 0 && b.isCompressed {
-		fmt.Printf("done using b.offset = %+v\n", b.offset)
+	// fmt.Printf("decrref b.tid=%d b.offset= %+v\n", b.tid, b.offset)
+
+	p := atomic.AddInt32(&b.ref, -1)
+	if p == 0 && b.isCompressed {
+		// fmt.Printf("done using tid=%d b.offset=%+v ref=%d\n", b.tid, b.offset, p)
 		decompressPool.Put(b.data)
 	}
+	y.AssertTruef(atomic.LoadInt32(&b.ref) > -1, "assert tid=%d off=%d", b.tid, b.offset)
 }
 func (b *block) size() int64 {
 	return int64(3*intSize /* Size of the offset, entriesIndexStart and chkLen */ +
@@ -428,13 +433,15 @@ func (t *Table) block(idx int) (*block, error) {
 		key := t.blockCacheKey(idx)
 		blk, ok := t.opt.Cache.Get(key)
 		if ok && blk != nil {
-			return blk.(*block), nil
+			b := blk.(*block)
+			return b, nil
 		}
 	}
 	ko := t.blockIndex[idx]
 	blk := &block{
 		offset:       int(ko.Offset),
 		isCompressed: t.opt.Compression != options.None,
+		tid:          t.id,
 	}
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
@@ -595,17 +602,16 @@ func (t *Table) VerifyChecksum() error {
 				t.Filename(), i, os.Offset)
 		}
 		b.incrRef()
+		defer b.decrRef()
 		// OnBlockRead or OnTableAndBlockRead, we don't need to call verify checksum
 		// on block, verification would be done while reading block itself.
 		if !(t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead) {
-			b.decrRef()
 			if err = b.verifyCheckSum(); err != nil {
 				return y.Wrapf(err,
 					"checksum validation failed for table: %s, block: %d, offset:%d",
 					t.Filename(), i, os.Offset)
 			}
 		}
-		b.decrRef()
 	}
 
 	return nil

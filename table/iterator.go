@@ -48,6 +48,12 @@ type blockIterator struct {
 }
 
 func (itr *blockIterator) setBlock(b *block) {
+	// if itr.block != nil {
+	// 	fmt.Printf("setblock tid=%d off=%+v newoff=%d idx=%d\n", itr.block.tid, itr.block.offset, b.offset, itr.idx)
+	// } else {
+	// 	fmt.Printf("setblock tid=%d off=NA newoff=%d idx=%d\n", b.tid, b.offset, itr.idx)
+	// }
+	b.incrRef()
 	itr.block.decrRef()
 
 	itr.block = b
@@ -61,9 +67,6 @@ func (itr *blockIterator) setBlock(b *block) {
 	// Drop the index from the block. We don't need it anymore.
 	itr.data = b.data[:b.entriesIndexStart]
 	itr.entryOffsets = b.entryOffsets
-	if b.offset == 6569 {
-		//spew.Dump(itr.entryOffsets)
-	}
 }
 
 // setIdx sets the iterator to the entry at index i and set it's key and value.
@@ -127,6 +130,7 @@ func (itr *blockIterator) Error() error {
 }
 
 func (itr *blockIterator) Close() {
+	itr.block.decrRef()
 }
 
 var (
