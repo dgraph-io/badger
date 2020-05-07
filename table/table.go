@@ -87,7 +87,7 @@ type Options struct {
 var decompressPool = sync.Pool{
 	New: func() interface{} {
 		// Make 4 KB blocks for reuse.
-		b := make([]byte, 5<<10)
+		b := make([]byte, 4<<10)
 		return b
 	},
 }
@@ -191,26 +191,22 @@ type block struct {
 	entryOffsets      []uint32
 	chkLen            int // checksum length
 	isCompressed      bool
-	tid               uint64
 	ref               int32
 }
 
 func (b *block) incrRef() {
 	atomic.AddInt32(&b.ref, 1)
-	// fmt.Printf("incrref b.tid=%d b.offset=%+v d=%d\n", b.tid, b.offset, d)
 }
 func (b *block) decrRef() {
 	if b == nil {
 		return
 	}
-	// fmt.Printf("decrref b.tid=%d b.offset= %+v\n", b.tid, b.offset)
 
 	p := atomic.AddInt32(&b.ref, -1)
 	if p == 0 && b.isCompressed {
-		// fmt.Printf("done using tid=%d b.offset=%+v ref=%d\n", b.tid, b.offset, p)
 		decompressPool.Put(b.data)
 	}
-	y.AssertTruef(atomic.LoadInt32(&b.ref) > -1, "assert tid=%d off=%d", b.tid, b.offset)
+	y.AssertTrue(p >= 0)
 }
 func (b *block) size() int64 {
 	return int64(3*intSize /* Size of the offset, entriesIndexStart and chkLen */ +
@@ -433,15 +429,13 @@ func (t *Table) block(idx int) (*block, error) {
 		key := t.blockCacheKey(idx)
 		blk, ok := t.opt.Cache.Get(key)
 		if ok && blk != nil {
-			b := blk.(*block)
-			return b, nil
+			return blk.(*block), nil
 		}
 	}
 	ko := t.blockIndex[idx]
 	blk := &block{
 		offset:       int(ko.Offset),
 		isCompressed: t.opt.Compression != options.None,
-		tid:          t.id,
 	}
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
