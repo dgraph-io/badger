@@ -178,10 +178,10 @@ type block struct {
 	offset            int
 	data              []byte
 	checksum          []byte
-	entriesIndexStart int // start index of entryOffsets list
-	entryOffsets      []uint32
-	chkLen            int // checksum length
-	isCompressed      bool
+	entriesIndexStart int      // start index of entryOffsets list
+	entryOffsets      []uint32 // used to binary search an entry in the block.
+	chkLen            int      // checksum length.
+	isCompressed      bool     // used to determine if the blocked should be reused.
 	ref               int32
 }
 
@@ -194,6 +194,12 @@ func (b *block) decrRef() {
 	}
 
 	p := atomic.AddInt32(&b.ref, -1)
+	// Insert the []byte into pool only if the block was compressed. When a block
+	// is compressed a new []byte is used for decompression and this []byte can
+	// be reused.
+	// In case of an uncompressed block, the []byte is a reference to the
+	// table.mmap []byte slice. Any attempt to write data to the mmap []byte
+	// will lead to SEGFAULT.
 	if p == 0 && b.isCompressed {
 		slicePool.Put(&b.data)
 	}
