@@ -83,15 +83,6 @@ type Options struct {
 	LoadBloomsOnOpen bool
 }
 
-// Used to reuse decompression blocks.
-var decompressPool = sync.Pool{
-	New: func() interface{} {
-		// Make 4 KB blocks for reuse.
-		b := make([]byte, 4<<10)
-		return b
-	},
-}
-
 // TableInterface is useful for testing.
 type TableInterface interface {
 	Smallest() []byte
@@ -204,7 +195,7 @@ func (b *block) decrRef() {
 
 	p := atomic.AddInt32(&b.ref, -1)
 	if p == 0 && b.isCompressed {
-		decompressPool.Put(b.data)
+		slicePool.Put(&b.data)
 	}
 	y.AssertTrue(p >= 0)
 }
@@ -664,15 +655,15 @@ func NewFilename(id uint64, dir string) string {
 
 // decompressData decompresses the given data.
 func (t *Table) decompressData(data []byte) ([]byte, error) {
-	dst := decompressPool.Get().([]byte)
+	dst := slicePool.Get().(*[]byte)
 
 	switch t.opt.Compression {
 	case options.None:
 		return data, nil
 	case options.Snappy:
-		return snappy.Decode(dst, data)
+		return snappy.Decode(*dst, data)
 	case options.ZSTD:
-		return y.ZSTDDecompress(dst, data)
+		return y.ZSTDDecompress(*dst, data)
 	}
 	return nil, errors.New("Unsupported compression type")
 }
