@@ -118,13 +118,35 @@ func NewTableBuilder(opts Options) *Builder {
 	return b
 }
 
-var slicePool = sync.Pool{
-	New: func() interface{} {
-		// Make 4 KB blocks for reuse.
-		b := make([]byte, 4<<10)
-		return &b
-	},
+type slicePool struct {
+	pool *sync.Pool
 }
+
+func (s *slicePool) get() *[]byte {
+	return s.pool.Get().(*[]byte)
+}
+
+func (s *slicePool) put(b *[]byte) {
+	// Don't insert empty buffers.
+	if len(*b) == 0 {
+		return
+	}
+	s.pool.Put(b)
+}
+
+func newSlicePool(sz int) *slicePool {
+	return &slicePool{
+		pool: &sync.Pool{
+			New: func() interface{} {
+				b := make([]byte, sz)
+				return &b
+			},
+		},
+	}
+}
+
+// Blocks are of 4 kB by default.
+var blockPool = newSlicePool(4 << 10)
 
 func (b *Builder) handleBlock() {
 	defer b.wg.Done()
@@ -135,7 +157,7 @@ func (b *Builder) handleBlock() {
 		// Compress the block.
 		if b.opt.Compression != options.None {
 			var err error
-			dst = slicePool.Get().(*[]byte)
+			dst = blockPool.get()
 
 			blockBuf, err = b.compressData(*dst, blockBuf)
 			y.Check(err)
@@ -165,7 +187,7 @@ func (b *Builder) handleBlock() {
 		item.end = item.start + uint32(len(blockBuf))
 
 		if dst != nil {
-			slicePool.Put(dst)
+			blockPool.put(dst)
 		}
 	}
 }

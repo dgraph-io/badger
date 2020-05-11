@@ -184,7 +184,7 @@ type block struct {
 	entriesIndexStart int      // start index of entryOffsets list
 	entryOffsets      []uint32 // used to binary search an entry in the block.
 	chkLen            int      // checksum length.
-	isCompressed      bool     // used to determine if the blocked should be reused.
+	isReusable        bool     // used to determine if the blocked should be reused.
 	ref               int32
 }
 
@@ -197,14 +197,14 @@ func (b *block) decrRef() {
 	}
 
 	p := atomic.AddInt32(&b.ref, -1)
-	// Insert the []byte into pool only if the block was compressed. When a block
-	// is compressed a new []byte is used for decompression and this []byte can
+	// Insert the []byte into pool only if the block is resuable. When a block
+	// is reusable a new []byte is used for decompression and this []byte can
 	// be reused.
 	// In case of an uncompressed block, the []byte is a reference to the
 	// table.mmap []byte slice. Any attempt to write data to the mmap []byte
 	// will lead to SEGFAULT.
-	if p == 0 && b.isCompressed {
-		slicePool.Put(&b.data)
+	if p == 0 && b.isReusable {
+		blockPool.put(&b.data)
 	}
 	y.AssertTrue(p >= 0)
 }
@@ -434,8 +434,7 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 	ko := t.blockIndex[idx]
 	blk := &block{
-		offset:       int(ko.Offset),
-		isCompressed: t.opt.Compression != options.None,
+		offset: int(ko.Offset),
 	}
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
@@ -450,8 +449,7 @@ func (t *Table) block(idx int) (*block, error) {
 		}
 	}
 
-	blk.data, err = t.decompressData(blk.data)
-	if err != nil {
+	if err = t.decompress(blk); err != nil {
 		return nil, errors.Wrapf(err,
 			"failed to decode compressed data in file: %s at offset: %d, len: %d",
 			t.fd.Name(), blk.offset, ko.Len)
@@ -662,17 +660,28 @@ func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, IDToFilename(id))
 }
 
-// decompressData decompresses the given data.
-func (t *Table) decompressData(data []byte) ([]byte, error) {
+// decompress decompresses the data stored in a block.
+func (t *Table) decompress(b *block) error {
+	var err error
 	switch t.opt.Compression {
 	case options.None:
-		return data, nil
+		// Nothing to be done here.
 	case options.Snappy:
-		dst := slicePool.Get().(*[]byte)
-		return snappy.Decode(*dst, data)
+		dst := blockPool.get()
+		b.data, err = snappy.Decode(*dst, b.data)
+		if err != nil {
+			return errors.Wrap(err, "failed to decompress")
+		}
+		b.isReusable = true
 	case options.ZSTD:
-		dst := slicePool.Get().(*[]byte)
-		return y.ZSTDDecompress(*dst, data)
+		dst := blockPool.get()
+		b.data, err = y.ZSTDDecompress(*dst, b.data)
+		if err != nil {
+			return errors.Wrap(err, "failed to decompress")
+		}
+		b.isReusable = true
+	default:
+		return errors.New("Unsupported compression type")
 	}
-	return nil, errors.New("Unsupported compression type")
+	return nil
 }
