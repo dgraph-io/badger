@@ -961,6 +961,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	if ft.mt.Empty() {
 		return nil
 	}
+
 	// Store badger head even if vptr is zero, need it for readTs
 	db.opt.Debugf("Storing value log head: %+v\n", ft.vptr)
 	db.opt.Debugf("Storing offset: %+v\n", ft.vptr)
