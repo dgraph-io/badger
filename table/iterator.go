@@ -33,6 +33,7 @@ type blockIterator struct {
 	key          []byte
 	val          []byte
 	entryOffsets []uint32
+	block        *block
 
 	// prevOverlap stores the overlap of the previous key with the base key.
 	// This avoids unnecessary copy of base key when the overlap is same for multiple keys.
@@ -40,6 +41,14 @@ type blockIterator struct {
 }
 
 func (itr *blockIterator) setBlock(b *block) {
+
+	// Decrement the ref for the old block. If the old block was compressed, it
+	// might be added to the buffer pool.
+	itr.block.decrRef()
+	// Increment the ref for the new block.
+	b.incrRef()
+
+	itr.block = b
 	itr.err = nil
 	itr.idx = 0
 	itr.baseKey = itr.baseKey[:0]
@@ -60,7 +69,6 @@ func (itr *blockIterator) setIdx(i int) {
 	}
 	itr.err = nil
 	startOffset := int(itr.entryOffsets[i])
-
 	// Set base key.
 	if len(itr.baseKey) == 0 {
 		var baseHeader header
@@ -79,6 +87,7 @@ func (itr *blockIterator) setIdx(i int) {
 	}
 
 	entryData := itr.data[startOffset:endOffset]
+
 	var h header
 	h.Decode(entryData)
 	// Header contains the length of key overlap and difference compared to the base key. If the key
@@ -102,7 +111,9 @@ func (itr *blockIterator) Error() error {
 	return itr.err
 }
 
-func (itr *blockIterator) Close() {}
+func (itr *blockIterator) Close() {
+	itr.block.decrRef()
+}
 
 var (
 	origin  = 0
@@ -166,12 +177,12 @@ type Iterator struct {
 func (t *Table) NewIterator(reversed bool) *Iterator {
 	t.IncrRef() // Important.
 	ti := &Iterator{t: t, reversed: reversed}
-	ti.next()
 	return ti
 }
 
 // Close closes the iterator (and it must be called).
 func (itr *Iterator) Close() error {
+	itr.bi.Close()
 	return itr.t.DecrRef()
 }
 
