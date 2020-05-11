@@ -300,7 +300,7 @@ func Open(opt Options) (db *DB, err error) {
 			BufferItems: 64,
 			Metrics:     true,
 			OnEvict: func(_, _ uint64, value interface{}, _ int64) {
-				table.CleanupBlock(value)
+				table.BlockEvictHanlder(value)
 			},
 		}
 		db.blockCache, err = ristretto.NewCache(&config)

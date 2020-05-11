@@ -169,7 +169,8 @@ func (t *Table) DecrRef() error {
 	return nil
 }
 
-func CleanupBlock(value interface{}) {
+//
+func BlockEvictHanlder(value interface{}) {
 	b := value.(*block)
 	b.decrRef()
 }
