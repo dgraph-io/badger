@@ -636,7 +636,10 @@ func (s *levelsController) compactBuildTables(
 				err error
 			)
 			if s.kv.opt.InMemory {
-				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
+				var b []byte
+				b = append(b, builder.Finish()...)
+				builder.LetGo()
+				tbl, err = table.OpenInMemoryTable(b, fileID, &bopts)
 			} else {
 				tbl, err = build(fileID)
 			}

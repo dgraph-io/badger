@@ -129,7 +129,7 @@ var blockPool = sync.Pool{
 var slicePool = sync.Pool{
 	New: func() interface{} {
 		// Make 4 KB blocks for reuse.
-		b := make([]byte, 4<<10)
+		b := make([]byte, 0, 4<<10)
 		return &b
 	},
 }
@@ -147,7 +147,9 @@ func (b *Builder) handleBlock() {
 		// Compress the block.
 		if b.opt.Compression != options.None {
 			var err error
+
 			dst = slicePool.Get().(*[]byte)
+			*dst = (*dst)[:0]
 
 			blockBuf, err = b.compressData(*dst, blockBuf)
 			y.Check(err)

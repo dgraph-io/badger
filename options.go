@@ -127,7 +127,7 @@ func DefaultOptions(path string) Options {
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
-		KeepL0InMemory:          false,
+		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
 		Compression:             options.Snappy,
 		MaxCacheSize:            0,
