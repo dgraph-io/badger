@@ -41,9 +41,8 @@ type blockIterator struct {
 }
 
 func (itr *blockIterator) setBlock(b *block) {
-
-	// Decrement the ref for the old block. If the old block was compressed, it
-	// might be added to the buffer pool.
+	// Decrement the ref for the old block. If the old block was compressed, we
+	// might be able to reuse it.
 	itr.block.decrRef()
 	// Increment the ref for the new block.
 	b.incrRef()
@@ -87,7 +86,6 @@ func (itr *blockIterator) setIdx(i int) {
 	}
 
 	entryData := itr.data[startOffset:endOffset]
-
 	var h header
 	h.Decode(entryData)
 	// Header contains the length of key overlap and difference compared to the base key. If the key
@@ -177,6 +175,7 @@ type Iterator struct {
 func (t *Table) NewIterator(reversed bool) *Iterator {
 	t.IncrRef() // Important.
 	ti := &Iterator{t: t, reversed: reversed}
+	ti.next()
 	return ti
 }
 

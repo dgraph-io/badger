@@ -911,7 +911,7 @@ func (db *DB) ensureRoomForWrite() error {
 			return err
 		}
 
-		db.opt.Infof("Flushing memtable, mt.size=%d size of flushChan: %d\n",
+		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 			db.mt.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
 		db.imm = append(db.imm, db.mt)
@@ -962,7 +962,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return nil
 	}
 	// Store badger head even if vptr is zero, need it for readTs
-	db.opt.Infof("Storing value log head: %+v\n", ft.vptr)
+	db.opt.Debugf("Storing value log head: %+v\n", ft.vptr)
 	db.opt.Debugf("Storing offset: %+v\n", ft.vptr)
 	val := ft.vptr.Encode()
 
