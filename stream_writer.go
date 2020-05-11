@@ -431,6 +431,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 		if _, err := fd.Write(data); err != nil {
 			return err
 		}
+		builder.LetGo()
 		if tbl, err = table.OpenTable(fd, opts); err != nil {
 			return err
 		}

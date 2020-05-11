@@ -926,7 +926,7 @@ func arenaSize(opt Options) int64 {
 }
 
 // buildL0Table builds a new table from the memtable.
-func buildL0Table(ft flushTask, bopts table.Options) []byte {
+func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 	iter := ft.mt.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder(bopts)
@@ -942,7 +942,7 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 		}
 		b.Add(iter.Key(), iter.Value(), vp.Len)
 	}
-	return b.Finish()
+	return b
 }
 
 type flushTask struct {
@@ -978,11 +978,11 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// Builder does not need cache but the same options are used for opening table.
 	bopts.Cache = db.blockCache
 	bopts.BfCache = db.bfCache
-	tableData := buildL0Table(ft, bopts)
+	builder := buildL0Table(ft, bopts)
 
 	fileID := db.lc.reserveFileID()
 	if db.opt.KeepL0InMemory {
-		tbl, err := table.OpenInMemoryTable(tableData, fileID, &bopts)
+		tbl, err := table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
 		if err != nil {
 			return errors.Wrapf(err, "failed to open table in memory")
 		}
@@ -998,10 +998,12 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	dirSyncCh := make(chan error, 1)
 	go func() { dirSyncCh <- db.syncDir(db.opt.Dir) }()
 
-	if _, err = fd.Write(tableData); err != nil {
+	if _, err = fd.Write(builder.Finish()); err != nil {
 		db.opt.Errorf("ERROR while writing to level 0: %v", err)
+		builder.LetGo()
 		return err
 	}
+	builder.LetGo()
 
 	if dirSyncErr := <-dirSyncCh; dirSyncErr != nil {
 		// Do dir sync as best effort. No need to return due to an error there.

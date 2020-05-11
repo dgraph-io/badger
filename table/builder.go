@@ -96,7 +96,7 @@ func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
 		// Additional 5 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
-		buf:        make([]byte, opts.TableSize+5*MB),
+		buf:        blockPool.Get().([]byte),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
@@ -118,12 +118,24 @@ func NewTableBuilder(opts Options) *Builder {
 	return b
 }
 
+var blockPool = sync.Pool{
+	New: func() interface{} {
+		// Make 4 KB blocks for reuse.
+		b := make([]byte, 64*MB)
+		return b
+	},
+}
+
 var slicePool = sync.Pool{
 	New: func() interface{} {
 		// Make 4 KB blocks for reuse.
 		b := make([]byte, 0, 4<<10)
 		return &b
 	},
+}
+
+func (b *Builder) LetGo() {
+	blockPool.Put(b.buf)
 }
 
 func (b *Builder) handleBlock() {

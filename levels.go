@@ -619,6 +619,7 @@ func (s *levelsController) compactBuildTables(
 			if _, err := fd.Write(builder.Finish()); err != nil {
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
+			builder.LetGo()
 			tbl, err := table.OpenTable(fd, bopts)
 			// decrRef is added below.
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
