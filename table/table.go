@@ -169,10 +169,12 @@ func (t *Table) DecrRef() error {
 	return nil
 }
 
-//
+// BlockEvictHandler is used to reuse the byte slice stored in the block on cache eviction.
 func BlockEvictHanlder(value interface{}) {
-	b := value.(*block)
-	b.decrRef()
+	b, ok := value.(*block)
+	if ok {
+		b.decrRef()
+	}
 }
 
 type block struct {
