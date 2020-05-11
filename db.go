@@ -591,8 +591,12 @@ func (db *DB) writeToLSM(b *request) error {
 		if db.shouldWriteValueToLSM(*entry) { // Will include deletion / tombstone case.
 			db.mt.Put(entry.Key,
 				y.ValueStruct{
-					Value:     entry.Value,
-					Meta:      entry.meta,
+					Value: entry.Value,
+					// Ensure value pointer flag is removed. Otherwise, the value will fail
+					// to be retrieved during iterator prefetch. `bitValuePointer` is only
+					// known to be set in write to LSM when the entry is loaded from a backup
+					// with lower ValueThreshold and its value was stored in the value log.
+					Meta:      entry.meta &^ bitValuePointer,
 					UserMeta:  entry.UserMeta,
 					ExpiresAt: entry.ExpiresAt,
 				})
