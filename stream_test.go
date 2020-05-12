@@ -159,3 +159,50 @@ func TestStream(t *testing.T) {
 	}
 	require.NoError(t, db.Close())
 }
+
+func TestStreamWithThreadNum(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := OpenManaged(DefaultOptions(dir))
+	require.NoError(t, err)
+
+	var count int
+	for _, prefix := range []string{"p0", "p1", "p2"} {
+		txn := db.NewTransactionAt(math.MaxUint64, true)
+		for i := 1; i <= 100; i++ {
+			require.NoError(t, txn.SetEntry(NewEntry(keyWithPrefix(prefix, i), value(i))))
+			count++
+		}
+		require.NoError(t, txn.CommitAt(5, nil))
+	}
+
+	stream := db.NewStreamAt(math.MaxUint64)
+	stream.LogPrefix = "Testing"
+	stream.KeyToListWithThreadNum = func(key []byte, itr *Iterator, threadNum int) (
+		*bpb.KVList, error){
+		require.Less(t, threadNum, stream.NumGo)
+		return stream.ToList(key, itr)
+	}
+	c := &collector{}
+	stream.Send = func(list *bpb.KVList) error {
+		return c.Send(list)
+	}
+
+	err = stream.Orchestrate(ctxb)
+	require.NoError(t, err)
+	require.Equal(t, 300, len(c.kv), "Expected 300. Got: %d", len(c.kv))
+
+	m := make(map[string]int)
+	for _, kv := range c.kv {
+		prefix, ki := keyToInt(kv.Key)
+		expected := value(ki)
+		require.Equal(t, expected, kv.Value)
+		m[prefix]++
+	}
+	require.Equal(t, 3, len(m))
+	for pred, count := range m {
+		require.Equal(t, 100, count, "Count mismatch for pred: %s", pred)
+	}
+}
