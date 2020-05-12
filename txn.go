@@ -438,8 +438,8 @@ func (txn *Txn) addReadKey(key []byte) {
 		// the same time. The reads slice is not currently thread-safe and
 		// needs to be locked whenever we mark a key as read.
 		txn.readsLock.Lock()
-		defer txn.readsLock.Unlock()
 		txn.reads = append(txn.reads, fp)
+		txn.readsLock.Unlock()
 	}
 }
 
