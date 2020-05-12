@@ -205,4 +205,5 @@ func TestStreamWithThreadNum(t *testing.T) {
 	for pred, count := range m {
 		require.Equal(t, 100, count, "Count mismatch for pred: %s", pred)
 	}
+	require.NoError(t, db.Close())
 }
