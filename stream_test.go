@@ -181,7 +181,7 @@ func TestStreamWithThreadNum(t *testing.T) {
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = "Testing"
 	stream.KeyToListWithThreadNum = func(key []byte, itr *Iterator, threadNum int) (
-		*bpb.KVList, error){
+		*bpb.KVList, error) {
 		require.Less(t, threadNum, stream.NumGo)
 		return stream.ToList(key, itr)
 	}
