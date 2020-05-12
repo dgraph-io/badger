@@ -30,6 +30,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -114,6 +115,23 @@ func OpenKeyRegistry(opt KeyRegistryOptions) (*KeyRegistry, error) {
 		return nil, y.Wrapf(err, "Error while opening key registry.")
 	}
 	kr, err := readKeyRegistry(fp, opt)
+	if err == errRecreate {
+		os.Remove(fp.Name())
+		// Creating new registry file if not exist.
+		kr = newKeyRegistry(opt)
+		if opt.ReadOnly {
+			return kr, nil
+		}
+		// Writing the key registry to the file.
+		if err := WriteKeyRegistry(kr, opt); err != nil {
+			return nil, y.Wrapf(err, "Error while writing key registry.")
+		}
+		fp, err = y.OpenExistingFile(path, flags)
+		if err != nil {
+			return nil, y.Wrapf(err, "Error while opening newly created key registry.")
+		}
+		kr, err = readKeyRegistry(fp, opt)
+	}
 	if err != nil {
 		// This case happens only if the file is opened properly and
 		// not able to read.
@@ -139,12 +157,15 @@ type keyRegistryIterator struct {
 // newKeyRegistryIterator returns iterator which will allow you to iterate
 // over the data key of the key registry.
 func newKeyRegistryIterator(fp *os.File, encryptionKey []byte) (*keyRegistryIterator, error) {
-	return &keyRegistryIterator{
+	kri := &keyRegistryIterator{
 		encryptionKey: encryptionKey,
 		fp:            fp,
 		lenCrcBuf:     [8]byte{},
-	}, validRegistry(fp, encryptionKey)
+	}
+	return kri, validRegistry(fp, encryptionKey)
 }
+
+var errRecreate = errors.New("recreate key registry")
 
 // validRegistry checks that given encryption key is valid or not.
 func validRegistry(fp *os.File, encryptionKey []byte) error {
@@ -157,6 +178,12 @@ func validRegistry(fp *os.File, encryptionKey []byte) error {
 	if _, err = fp.Read(eSanityText); err != nil {
 		return y.Wrapf(err, "Error while reading sanity text.")
 	}
+
+	// Sanity text is plain text. Enable encryption.
+	if bytes.Equal(eSanityText, sanityText) && len(encryptionKey) > 0 {
+		return errRecreate
+	}
+
 	if len(encryptionKey) > 0 {
 		// Decrypting sanity text.
 		if eSanityText, err = y.XORBlock(eSanityText, encryptionKey, iv); err != nil {
