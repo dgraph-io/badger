@@ -816,17 +816,19 @@ func TestIterateParallel(t *testing.T) {
 		txn := db.NewTransaction(true)
 		itr := txn.NewIterator(DefaultIteratorOptions)
 		require.NotPanics(t, func() {
-			// Now that multiple iterators are supported in read-write transactions, make sure this does not panic
-			// anymore. Then just close the iterator.
+			// Now that multiple iterators are supported in read-write
+			// transactions, make sure this does not panic anymore. Then just
+			// close the iterator.
 			txn.NewIterator(DefaultIteratorOptions).Close()
 		})
-		// The transaction should still panic since there is still one pending iterator that is open.
+		// The transaction should still panic since there is still one pending
+		// iterator that is open.
 		require.Panics(t, txn.Discard)
 		itr.Close()
 		txn.Discard()
 
-		// (Regression) Make sure that creating multiple concurrent iterators within a read only transaction continues
-		// to work.
+		// (Regression) Make sure that creating multiple concurrent iterators
+		// within a read only transaction continues to work.
 		t.Run("multiple read-only iterators", func(t *testing.T) {
 			// Run multiple iterators for a RO txn.
 			txn = db.NewTransaction(false)
@@ -838,8 +840,8 @@ func TestIterateParallel(t *testing.T) {
 			wg.Wait()
 		})
 
-		// Make sure that when we create multiple concurrent iterators within a read-write transaction that it actually
-		// iterates successfully.
+		// Make sure that when we create multiple concurrent iterators within a
+		// read-write transaction that it actually iterates successfully.
 		t.Run("multiple read-write iterators", func(t *testing.T) {
 			// Run multiple iterators for a RO txn.
 			txn = db.NewTransaction(true)
