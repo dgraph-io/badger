@@ -433,16 +433,12 @@ func (txn *Txn) addReadKey(key []byte) {
 	if txn.update {
 		fp := z.MemHash(key)
 
-		// Acquire lock only if we have more than one iterator. Single iterator
-		// cannot cause a race condition.
-		if atomic.LoadInt32(&txn.numIterators) > 1 {
-			// Because of the possibility of multiple iterators it is now possible
-			// for multiple threads within a read-write transaction to read keys at
-			// the same time. The reads slice is not currently thread-safe and
-			// needs to be locked whenever we mark a key as read.
-			txn.readsLock.Lock()
-			defer txn.readsLock.Unlock()
-		}
+		// Because of the possibility of multiple iterators it is now possible
+		// for multiple threads within a read-write transaction to read keys at
+		// the same time. The reads slice is not currently thread-safe and
+		// needs to be locked whenever we mark a key as read.
+		txn.readsLock.Lock()
+		defer txn.readsLock.Unlock()
 		txn.reads = append(txn.reads, fp)
 	}
 }
