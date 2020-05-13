@@ -812,24 +812,46 @@ func TestIterateParallel(t *testing.T) {
 
 		wg.Wait()
 
-		// Check that a RW txn can't run multiple iterators.
+		// Check that a RW txn can run multiple iterators.
 		txn := db.NewTransaction(true)
 		itr := txn.NewIterator(DefaultIteratorOptions)
-		require.Panics(t, func() {
-			txn.NewIterator(DefaultIteratorOptions)
+		require.NotPanics(t, func() {
+			// Now that multiple iterators are supported in read-write
+			// transactions, make sure this does not panic anymore. Then just
+			// close the iterator.
+			txn.NewIterator(DefaultIteratorOptions).Close()
 		})
+		// The transaction should still panic since there is still one pending
+		// iterator that is open.
 		require.Panics(t, txn.Discard)
 		itr.Close()
 		txn.Discard()
 
-		// Run multiple iterators for a RO txn.
-		txn = db.NewTransaction(false)
-		defer txn.Discard()
-		wg.Add(3)
-		go iterate(txn, &wg)
-		go iterate(txn, &wg)
-		go iterate(txn, &wg)
-		wg.Wait()
+		// (Regression) Make sure that creating multiple concurrent iterators
+		// within a read only transaction continues to work.
+		t.Run("multiple read-only iterators", func(t *testing.T) {
+			// Run multiple iterators for a RO txn.
+			txn = db.NewTransaction(false)
+			defer txn.Discard()
+			wg.Add(3)
+			go iterate(txn, &wg)
+			go iterate(txn, &wg)
+			go iterate(txn, &wg)
+			wg.Wait()
+		})
+
+		// Make sure that when we create multiple concurrent iterators within a
+		// read-write transaction that it actually iterates successfully.
+		t.Run("multiple read-write iterators", func(t *testing.T) {
+			// Run multiple iterators for a RO txn.
+			txn = db.NewTransaction(true)
+			defer txn.Discard()
+			wg.Add(3)
+			go iterate(txn, &wg)
+			go iterate(txn, &wg)
+			go iterate(txn, &wg)
+			wg.Wait()
+		})
 	})
 }
 
