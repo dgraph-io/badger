@@ -4,31 +4,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Serialization Versioning](VERSIONING.md).
 
-## [2.0.3] - 2020-03-24
-
-### Fixed
-
-- Add support for watching nil prefix in subscribe API (#1246)
-
-### Performance
-
-- Compress/Encrypt Blocks in the background (#1227)
-- Disable cache by default (#1257)
-
-### Features
-
-- Add BypassDirLock option (#1243)
-- Add separate cache for bloomfilters (#1260)
-
-### New APIs
-- badger.DB
-  - BfCacheMetrics (#1260)
-  - DataCacheMetrics (#1260)
-- badger.Options
-  - WithBypassLockGuard (#1243)
-  - WithLoadBloomsOnOpen (#1260)
-  - WithMaxBfCacheSize (#1260)
-
 ## [2.0.2] - 2020-03-02
 
 ### Fixed
@@ -318,8 +293,6 @@ Bug fix:
 ## [1.0.1] - 2017-11-06
 * Fix an uint16 overflow when resizing key slice
 
-[Unreleased]: https://github.com/dgraph-io/badger/compare/v2.0.3...HEAD
-[2.0.3]: https://github.com/dgraph-io/badger/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/dgraph-io/badger/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/dgraph-io/badger/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/dgraph-io/badger/compare/v1.6.0...v2.0.0
