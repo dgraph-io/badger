@@ -66,8 +66,8 @@ type Stream struct {
 	KeyToList func(key []byte, itr *Iterator) (*pb.KVList, error)
 
 	// KeyToListWithThreadNum works similarly to KeyToList but it's passed the goroutine
-	// number. This is useful to simulate thread-local storage. Only one of the two fields
-	// should be set. Preference is given to this function if both are set.
+	// number. This is useful to simulate thread-local storage. Only one of the two KeyToList
+	// functions should be set. Preference is given to this function if both are set.
 	KeyToListWithThreadNum func(key []byte, itr *Iterator, threadNum int) (*pb.KVList, error)
 
 	// This is the method where Stream sends the final output. All calls to Send are done by a
