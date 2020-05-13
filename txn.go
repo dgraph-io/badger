@@ -183,7 +183,7 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 	}
 
 	y.AssertTruef(
-		ts > o.lastCleanupTs,
+		ts >= o.lastCleanupTs,
 		"ts: %d should not be less than lastCleanupTs: %d",
 		ts, o.lastCleanupTs,
 	)

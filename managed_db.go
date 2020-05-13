@@ -57,7 +57,7 @@ func (db *DB) NewManagedWriteBatch() *WriteBatch {
 		panic("cannot use NewManagedWriteBatch with managedDB=false. Use NewWriteBatch instead")
 	}
 
-	wb := db.newWriteBatch()
+	wb := db.newWriteBatch(true)
 	return wb
 }
 
