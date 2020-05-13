@@ -439,7 +439,6 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 func (txn *Txn) addReadKey(key []byte) {
 	if txn.update {
 		fp := z.MemHash(key)
-
 		// Because of the possibility of multiple iterators it is now possible
 		// for multiple threads within a read-write transaction to read keys at
 		// the same time. The reads slice is not currently thread-safe and

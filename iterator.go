@@ -505,8 +505,8 @@ func (it *Iterator) newItem() *Item {
 // Item returns pointer to the current key-value pair.
 // This item is only valid until it.Next() gets called.
 func (it *Iterator) Item() *Item {
-	tx := it.txn
-	tx.addReadKey(it.item.Key())
+	// tx := it.txn
+	// tx.addReadKey(it.item.Key())
 	return it.item
 }
 
@@ -713,6 +713,10 @@ func (it *Iterator) prefetch() {
 // smallest key greater than the provided key if iterating in the forward direction.
 // Behavior would be reversed if iterating backwards.
 func (it *Iterator) Seek(key []byte) {
+	if len(key) > 0 {
+		tx := it.txn
+		tx.addReadKey(key)
+	}
 	for i := it.data.pop(); i != nil; i = it.data.pop() {
 		i.wg.Wait()
 		it.waste.push(i)
