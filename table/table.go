@@ -204,7 +204,7 @@ func (b *block) decrRef() {
 	// table.mmap []byte slice. Any attempt to write data to the mmap []byte
 	// will lead to SEGFAULT.
 	if p == 0 && b.isReusable {
-		blockPool.put(&b.data)
+		blockPool.Put(&b.data)
 	}
 	y.AssertTrue(p >= 0)
 }
@@ -667,14 +667,14 @@ func (t *Table) decompress(b *block) error {
 	case options.None:
 		// Nothing to be done here.
 	case options.Snappy:
-		dst := blockPool.get()
+		dst := blockPool.Get().(*[]byte)
 		b.data, err = snappy.Decode(*dst, b.data)
 		if err != nil {
 			return errors.Wrap(err, "failed to decompress")
 		}
 		b.isReusable = true
 	case options.ZSTD:
-		dst := blockPool.get()
+		dst := blockPool.Get().(*[]byte)
 		b.data, err = y.ZSTDDecompress(*dst, b.data)
 		if err != nil {
 			return errors.Wrap(err, "failed to decompress")

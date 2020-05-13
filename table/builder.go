@@ -118,35 +118,16 @@ func NewTableBuilder(opts Options) *Builder {
 	return b
 }
 
-type slicePool struct {
-	pool *sync.Pool
+var blockPool = &sync.Pool{
+	New: func() interface{} {
+		// Create 5 Kb blocks even when the default size of blocks is 4 KB. The
+		// ZSTD decompresion library increases the buffer by 2X if it's not big
+		// enough. Using a 5 KB block instead of a 4 KB one avoids the
+		// unncessary 2X allocation by the decompression library.
+		b := make([]byte, 5<<10)
+		return &b
+	},
 }
-
-func (s *slicePool) get() *[]byte {
-	return s.pool.Get().(*[]byte)
-}
-
-func (s *slicePool) put(b *[]byte) {
-	// Don't insert empty buffers.
-	if len(*b) == 0 {
-		return
-	}
-	s.pool.Put(b)
-}
-
-func newSlicePool(sz int) *slicePool {
-	return &slicePool{
-		pool: &sync.Pool{
-			New: func() interface{} {
-				b := make([]byte, sz)
-				return &b
-			},
-		},
-	}
-}
-
-// Blocks are of 4 kB by default.
-var blockPool = newSlicePool(4 << 10)
 
 func (b *Builder) handleBlock() {
 	defer b.wg.Done()
@@ -157,7 +138,7 @@ func (b *Builder) handleBlock() {
 		// Compress the block.
 		if b.opt.Compression != options.None {
 			var err error
-			dst = blockPool.get()
+			dst = blockPool.Get().(*[]byte)
 
 			blockBuf, err = b.compressData(*dst, blockBuf)
 			y.Check(err)
@@ -187,7 +168,7 @@ func (b *Builder) handleBlock() {
 		item.end = item.start + uint32(len(blockBuf))
 
 		if dst != nil {
-			blockPool.put(dst)
+			blockPool.Put(dst)
 		}
 	}
 }
