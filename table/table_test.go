@@ -51,9 +51,6 @@ func getTestTableOptions() Options {
 
 }
 func buildTestTable(t *testing.T, prefix string, n int, opts Options) *os.File {
-	if opts.BloomFalsePositive == 0 {
-		opts.BloomFalsePositive = 0.01
-	}
 	if opts.BlockSize == 0 {
 		opts.BlockSize = 4 * 1024
 	}

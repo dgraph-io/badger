@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgryski/go-farm"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -202,5 +203,57 @@ func BenchmarkBuilder(b *testing.B) {
 			opt.ZSTDCompressionLevel = 15
 			bench(b, &opt)
 		})
+	})
+}
+
+func TestBloomfilter(t *testing.T) {
+	keyPrefix := "p"
+	keyCount := 1000
+
+	createAndTest := func(t *testing.T, withBlooms bool) {
+		opts := Options{
+			BloomFalsePositive: 0.0,
+			LoadBloomsOnOpen:   false,
+		}
+		if withBlooms {
+			opts = Options{
+				BloomFalsePositive: 0.01,
+				LoadBloomsOnOpen:   true,
+			}
+		}
+		f := buildTestTable(t, keyPrefix, keyCount, opts)
+		tab, err := OpenTable(f, opts)
+		require.NoError(t, err)
+		require.Equal(t, withBlooms, tab.hasBloomFilter)
+		// Forward iteration
+		it := tab.NewIterator(false)
+		c := 0
+		for it.Rewind(); it.Valid(); it.Next() {
+			c++
+			hash := farm.Fingerprint64(y.ParseKey(it.Key()))
+			require.False(t, tab.DoesNotHave(hash))
+		}
+		require.Equal(t, keyCount, c)
+
+		// Backward iteration
+		it = tab.NewIterator(true)
+		c = 0
+		for it.Rewind(); it.Valid(); it.Next() {
+			c++
+			hash := farm.Fingerprint64(y.ParseKey(it.Key()))
+			require.False(t, tab.DoesNotHave(hash))
+		}
+		require.Equal(t, keyCount, c)
+
+		// Ensure tab.DoesNotHave works
+		hash := farm.Fingerprint64([]byte("foo"))
+		require.Equal(t, withBlooms, tab.DoesNotHave(hash))
+	}
+
+	t.Run("build with bloom filter", func(t *testing.T) {
+		createAndTest(t, true)
+	})
+	t.Run("build without bloom filter", func(t *testing.T) {
+		createAndTest(t, false)
 	})
 }
