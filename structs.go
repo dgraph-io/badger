@@ -143,6 +143,7 @@ type Entry struct {
 	UserMeta  byte
 	ExpiresAt uint64 // time.Unix
 	meta      byte
+	version   uint64
 
 	// Fields maintained internally.
 	offset   uint32

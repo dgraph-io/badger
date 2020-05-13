@@ -73,8 +73,8 @@ func newOracle(opt Options) *oracle {
 		txnMark:  &y.WaterMark{Name: "badger.TxnTimestamp"},
 		closer:   y.NewCloser(2),
 	}
-	orc.readMark.Init(orc.closer, opt.EventLogging)
-	orc.txnMark.Init(orc.closer, opt.EventLogging)
+	orc.readMark.Init(orc.closer)
+	orc.txnMark.Init(orc.closer)
 	return orc
 }
 
@@ -140,6 +140,9 @@ func (o *oracle) hasConflict(txn *Txn) bool {
 		// If the committedTxn.ts is less than txn.readTs that implies that the
 		// committedTxn finished before the current transaction started.
 		// We don't need to check for conflict in that case.
+		// This change assumes linearizability. Lack of linearizability could
+		// cause the read ts of a new txn to be lower than the commit ts of
+		// a txn before it (@mrjn).
 		if committedTxn.ts <= txn.readTs {
 			continue
 		}
@@ -185,10 +188,15 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 		ts, o.lastCleanupTs,
 	)
 
-	o.committedTxns = append(o.committedTxns, committedTxn{
-		ts:     ts,
-		writes: txn.writes,
-	})
+	if !o.isManaged {
+		// We should ensure that txns are not added to o.committedTxns slice in
+		// managed mode. If the user doesn't set o.discardTs, the commitTxns
+		// slice would keep growing in managed mode.
+		o.committedTxns = append(o.committedTxns, committedTxn{
+			ts:     ts,
+			writes: txn.writes,
+		})
+	}
 
 	return ts
 }
@@ -201,6 +209,12 @@ func (o *oracle) doneRead(txn *Txn) {
 }
 
 func (o *oracle) cleanupCommittedTransactions() { // Must be called under o.Lock
+	if o.isManaged {
+		// In managedMode, we do not store any committedTxns. It is expected
+		// that the system using badger in managedmode performs it's own
+		// conflict detection.
+		return
+	}
 	// Same logic as discardAtOrBelow but unlocked
 	var maxReadTs uint64
 	if o.isManaged {
@@ -222,17 +236,14 @@ func (o *oracle) cleanupCommittedTransactions() { // Must be called under o.Lock
 	}
 	o.lastCleanupTs = maxReadTs
 
-	var newIdx int
-	for oldIdx, txn := range o.committedTxns {
+	tmp := o.committedTxns[:0]
+	for _, txn := range o.committedTxns {
 		if txn.ts <= maxReadTs {
 			continue
 		}
-		if oldIdx != newIdx {
-			o.committedTxns[newIdx] = txn
-		}
-		newIdx++
+		tmp = append(tmp, txn)
 	}
-	o.committedTxns = o.committedTxns[:newIdx]
+	o.committedTxns = tmp
 }
 
 func (o *oracle) doneCommit(cts uint64) {
@@ -252,7 +263,8 @@ type Txn struct {
 	reads  []uint64            // contains fingerprints of keys read.
 	writes map[uint64]struct{} // contains fingerprints of keys written.
 
-	pendingWrites map[string]*Entry // cache stores any writes done by txn.
+	pendingWrites   map[string]*Entry // cache stores any writes done by txn.
+	duplicateWrites []*Entry          // Used in managed mode to store duplicate entries.
 
 	db        *DB
 	discarded bool
@@ -382,6 +394,12 @@ func (txn *Txn) modify(e *Entry) error {
 	}
 	fp := z.MemHash(e.Key) // Avoid dealing with byte arrays.
 	txn.writes[fp] = struct{}{}
+	// If a duplicate entry was inserted in managed mode, move it to the duplicate writes slice.
+	// Add the entry to duplicateWrites only if both the entries have different versions. For
+	// same versions, we will overwrite the existing entry.
+	if oldEntry, ok := txn.pendingWrites[string(e.Key)]; ok && oldEntry.version != e.version {
+		txn.duplicateWrites = append(txn.duplicateWrites, oldEntry)
+	}
 	txn.pendingWrites[string(e.Key)] = e
 	return nil
 }
@@ -509,8 +527,44 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	defer orc.writeChLock.Unlock()
 
 	commitTs := orc.newCommitTs(txn)
-	if commitTs == 0 {
+	// The commitTs can be zero if the transaction is running in managed mode.
+	// Individual entries might have their own timestamps.
+	if commitTs == 0 && !txn.db.opt.managedTxns {
 		return nil, ErrConflict
+	}
+
+	keepTogether := true
+	setVersion := func(e *Entry) {
+		if e.version == 0 {
+			e.version = commitTs
+		} else {
+			keepTogether = false
+		}
+	}
+	for _, e := range txn.pendingWrites {
+		setVersion(e)
+	}
+	// The duplicateWrites slice will be non-empty only if there are duplicate
+	// entries with different versions.
+	for _, e := range txn.duplicateWrites {
+		setVersion(e)
+	}
+
+	entries := make([]*Entry, 0, len(txn.pendingWrites)+len(txn.duplicateWrites)+1)
+
+	processEntry := func(e *Entry) {
+		// Suffix the keys with commit ts, so the key versions are sorted in
+		// descending order of commit timestamp.
+		e.Key = y.KeyWithTs(e.Key, e.version)
+		// Add bitTxn only if these entries are part of a transaction. We
+		// support SetEntryAt(..) in managed mode which means a single
+		// transaction can have entries with different timestamps. If entries
+		// in a single transaction have different timestamps, we don't add the
+		// transaction markers.
+		if keepTogether {
+			e.meta |= bitTxn
+		}
+		entries = append(entries, e)
 	}
 
 	// The following debug information is what led to determining the cause of
@@ -519,23 +573,23 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	// var b strings.Builder
 	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
 	// 	txn.readTs, commitTs, txn.reads, txn.writes)
-	entries := make([]*Entry, 0, len(txn.pendingWrites)+1)
 	for _, e := range txn.pendingWrites {
-		// fmt.Fprintf(&b, "[%q : %q], ", e.Key, e.Value)
+		processEntry(e)
+	}
+	for _, e := range txn.duplicateWrites {
+		processEntry(e)
+	}
 
-		// Suffix the keys with commit ts, so the key versions are sorted in
-		// descending order of commit timestamp.
-		e.Key = y.KeyWithTs(e.Key, commitTs)
-		e.meta |= bitTxn
+	if keepTogether {
+		// CommitTs should not be zero if we're inserting transaction markers.
+		y.AssertTrue(commitTs != 0)
+		e := &Entry{
+			Key:   y.KeyWithTs(txnKey, commitTs),
+			Value: []byte(strconv.FormatUint(commitTs, 10)),
+			meta:  bitFinTxn,
+		}
 		entries = append(entries, e)
 	}
-	// log.Printf("%s\n", b.String())
-	e := &Entry{
-		Key:   y.KeyWithTs(txnKey, commitTs),
-		Value: []byte(strconv.FormatUint(commitTs, 10)),
-		meta:  bitFinTxn,
-	}
-	entries = append(entries, e)
 
 	req, err := txn.db.sendToWriteCh(entries)
 	if err != nil {
@@ -553,13 +607,26 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	return ret, nil
 }
 
-func (txn *Txn) commitPrecheck() {
-	if txn.commitTs == 0 && txn.db.opt.managedTxns {
-		panic("Commit cannot be called with managedDB=true. Use CommitAt.")
-	}
+func (txn *Txn) commitPrecheck() error {
 	if txn.discarded {
-		panic("Trying to commit a discarded txn")
+		return errors.New("Trying to commit a discarded txn")
 	}
+	keepTogether := true
+	for _, e := range txn.pendingWrites {
+		if e.version != 0 {
+			keepTogether = false
+		}
+	}
+
+	// If keepTogether is True, it implies transaction markers will be added.
+	// In that case, commitTs should not be never be zero. This might happen if
+	// someone uses txn.Commit instead of txn.CommitAt in managed mode.  This
+	// should happen only in managed mode. In normal mode, keepTogether will
+	// always be true.
+	if keepTogether && txn.db.opt.managedTxns && txn.commitTs == 0 {
+		return errors.New("CommitTs cannot be zero. Please use commitAt instead")
+	}
+	return nil
 }
 
 // Commit commits the transaction, following these steps:
@@ -581,12 +648,14 @@ func (txn *Txn) commitPrecheck() {
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit() error {
-	txn.commitPrecheck() // Precheck before discarding txn.
-	defer txn.Discard()
-
 	if len(txn.writes) == 0 {
 		return nil // Nothing to do.
 	}
+	// Precheck before discarding txn.
+	if err := txn.commitPrecheck(); err != nil {
+		return err
+	}
+	defer txn.Discard()
 
 	txnCb, err := txn.commitAndSend()
 	if err != nil {
@@ -626,9 +695,6 @@ func runTxnCallback(cb *txnCb) {
 // so it is safe to increment sync.WaitGroup before calling CommitWith, and
 // decrementing it in the callback; to block until all callbacks are run.
 func (txn *Txn) CommitWith(cb func(error)) {
-	txn.commitPrecheck() // Precheck before discarding txn.
-	defer txn.Discard()
-
 	if cb == nil {
 		panic("Nil callback provided to CommitWith")
 	}
@@ -640,6 +706,14 @@ func (txn *Txn) CommitWith(cb func(error)) {
 		go runTxnCallback(&txnCb{user: cb, err: nil})
 		return
 	}
+
+	// Precheck before discarding txn.
+	if err := txn.commitPrecheck(); err != nil {
+		cb(err)
+		return
+	}
+
+	defer txn.Discard()
 
 	commitCb, err := txn.commitAndSend()
 	if err != nil {

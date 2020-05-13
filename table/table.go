@@ -96,6 +96,7 @@ type Table struct {
 
 	fd        *os.File // Own fd.
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
+	bfLock    sync.Mutex
 
 	blockIndex []*pb.BlockOffset
 	ref        int32    // For file garbage collection. Atomic.
@@ -381,7 +382,9 @@ func (t *Table) readIndex() error {
 	t.blockIndex = index.Offsets
 
 	if t.opt.LoadBloomsOnOpen {
+		t.bfLock.Lock()
 		t.bf, _ = t.readBloomFilter()
+		t.bfLock.Unlock()
 	}
 
 	return nil
@@ -511,11 +514,13 @@ func (t *Table) DoesNotHave(hash uint64) bool {
 
 	// Return fast if the cache is absent.
 	if t.opt.BfCache == nil {
+		t.bfLock.Lock()
 		// Load bloomfilter into memory if the cache is absent.
 		if t.bf == nil {
 			y.AssertTrue(!t.opt.LoadBloomsOnOpen)
 			t.bf, _ = t.readBloomFilter()
 		}
+		t.bfLock.Unlock()
 		return !t.bf.Has(hash)
 	}
 

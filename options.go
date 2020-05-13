@@ -48,7 +48,6 @@ type Options struct {
 	Truncate            bool
 	Logger              Logger
 	Compression         options.CompressionType
-	EventLogging        bool
 	InMemory            bool
 
 	// Fine tuning options.
@@ -154,9 +153,8 @@ func DefaultOptions(path string) Options {
 		ValueLogMaxEntries:            1000000,
 		ValueThreshold:                32,
 		Truncate:                      false,
-		Logger:                        defaultLogger,
+		Logger:                        defaultLogger(INFO),
 		LogRotatesToFlush:             2,
-		EventLogging:                  true,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 	}
@@ -214,6 +212,17 @@ func (opt Options) WithDir(val string) Options {
 // This is set automatically to be the path given to `DefaultOptions`.
 func (opt Options) WithValueDir(val string) Options {
 	opt.ValueDir = val
+	return opt
+}
+
+// WithLoggingLevel returns a new Options value with logging level of the
+// default logger set to the given value.
+// LoggingLevel sets the level of logging. It should be one of DEBUG, INFO,
+// WARNING or ERROR levels.
+//
+// The default value of LoggingLevel is INFO.
+func (opt Options) WithLoggingLevel(val loggingLevel) Options {
+	opt.Logger = defaultLogger(val)
 	return opt
 }
 
@@ -291,16 +300,6 @@ func (opt Options) WithTruncate(val bool) Options {
 // The default value of Logger writes to stderr using the log package from the Go standard library.
 func (opt Options) WithLogger(val Logger) Options {
 	opt.Logger = val
-	return opt
-}
-
-// WithEventLogging returns a new Options value with EventLogging set to the given value.
-//
-// EventLogging provides a way to enable or disable trace.EventLog logging.
-//
-// The default value of EventLogging is true.
-func (opt Options) WithEventLogging(enabled bool) Options {
-	opt.EventLogging = enabled
 	return opt
 }
 
