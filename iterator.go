@@ -712,8 +712,7 @@ func (it *Iterator) prefetch() {
 // Behavior would be reversed if iterating backwards.
 func (it *Iterator) Seek(key []byte) {
 	if len(key) > 0 {
-		tx := it.txn
-		tx.addReadKey(key)
+		it.txn.addReadKey(key)
 	}
 	for i := it.data.pop(); i != nil; i = it.data.pop() {
 		i.wg.Wait()
