@@ -934,7 +934,7 @@ func TestConflict(t *testing.T) {
 				}
 				wg.Wait()
 			})
-			require.Equal(t, uint32(1), setCount)
+			require.Equal(t, uint32(1), atomic.LoadUint32(&setCount))
 		}
 	}
 	t.Run("TxnGet", func(t *testing.T) {
