@@ -121,23 +121,7 @@ func TestDropAll(t *testing.T) {
 	populate(db)
 	require.Equal(t, int(N), numKeys(db))
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		require.NoError(t, db.DropAll())
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		time.Sleep(time.Millisecond)
-		err := db.DropPrefix([]byte("aaa"))
-		for err != nil {
-			time.Sleep(time.Millisecond)
-			err = db.DropPrefix([]byte("aaa"))
-		}
-	}()
-	wg.Wait()
+	require.NoError(t, db.DropAll())
 	require.Equal(t, 0, numKeys(db))
 
 	// Check that we can still write to mdb, and using lower timestamps.
