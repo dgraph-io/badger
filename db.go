@@ -1521,10 +1521,10 @@ func (db *DB) prepareToDrop() (func(), error) {
 // writes are paused before running DropAll, and resumed after it is finished.
 func (db *DB) DropAll() error {
 	f, err := db.dropAll()
+	defer f()
 	if err != nil {
 		return err
 	}
-	defer f()
 	return nil
 }
 
