@@ -798,13 +798,23 @@ func TestDropAllDropPrefix(t *testing.T) {
 		require.NoError(t, wb.Flush())
 
 		var wg sync.WaitGroup
-		wg.Add(2)
+		wg.Add(3)
 		go func() {
 			defer wg.Done()
 			err := db.DropPrefix([]byte("000"))
 			for err == ErrBlockedWrites {
-				fmt.Printf("DropPrefix err: %v", err)
+				fmt.Printf("DropPrefix 000 err: %v", err)
 				err = db.DropPrefix([]byte("000"))
+				time.Sleep(time.Millisecond * 500)
+			}
+			require.NoError(t, err)
+		}()
+		go func() {
+			defer wg.Done()
+			err := db.DropPrefix([]byte("111"))
+			for err == ErrBlockedWrites {
+				fmt.Printf("DropPrefix 111 err: %v", err)
+				err = db.DropPrefix([]byte("111"))
 				time.Sleep(time.Millisecond * 500)
 			}
 			require.NoError(t, err)
