@@ -1532,7 +1532,7 @@ func (db *DB) dropAll() (func(), error) {
 	db.opt.Infof("DropAll called. Blocking writes...")
 	f, err := db.prepareToDrop()
 	if err != nil {
-		return nil, err
+		return f, err
 	}
 	// prepareToDrop will stop all the incomming write and flushes any pending flush tasks.
 	// Before we drop, we'll stop the compaction because anyways all the datas are going to
