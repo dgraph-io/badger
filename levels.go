@@ -958,16 +958,15 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	for !s.levels[0].tryAddLevel0Table(t) {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time
-		{
-			s.kv.opt.Debugf("STALLED STALLED STALLED: %v\n", time.Since(s.lastUnstalled))
-			s.cstatus.RLock()
-			for i := 0; i < s.kv.opt.MaxLevels; i++ {
-				s.kv.opt.Debugf("level=%d. Status=%s Size=%d\n",
-					i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
-			}
-			s.cstatus.RUnlock()
-			timeStart = time.Now()
+
+		s.kv.opt.Debugf("STALLED STALLED STALLED: %v\n", time.Since(s.lastUnstalled))
+		s.cstatus.RLock()
+		for i := 0; i < s.kv.opt.MaxLevels; i++ {
+			s.kv.opt.Debugf("level=%d. Status=%s Size=%d\n",
+				i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
 		}
+		s.cstatus.RUnlock()
+		timeStart = time.Now()
 		// Before we unstall, we need to make sure that level 0 is healthy. Otherwise, we
 		// will very quickly fill up level 0 again.
 		for i := 0; ; i++ {
