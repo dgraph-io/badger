@@ -29,7 +29,9 @@ import (
 	"path"
 	"regexp"
 	"runtime"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
@@ -775,4 +777,49 @@ func TestWindowsDataLoss(t *testing.T) {
 		result = append(result, k)
 	}
 	require.ElementsMatch(t, keyList, result)
+}
+
+func TestDropAllDropPrefix(t *testing.T) {
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%10d", i))
+	}
+	val := func(i int) []byte {
+		return []byte(fmt.Sprintf("%128d", i))
+	}
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		wb := db.NewWriteBatch()
+		defer wb.Cancel()
+
+		N := 50000
+
+		for i := 0; i < N; i++ {
+			require.NoError(t, wb.Set(key(i), val(i)))
+		}
+		require.NoError(t, wb.Flush())
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			err := db.DropPrefix([]byte("000"))
+			for err == ErrBlockedWrites {
+				fmt.Printf("DropPrefix err: %v", err)
+				err = db.DropPrefix([]byte("000"))
+				time.Sleep(time.Millisecond * 500)
+			}
+			require.NoError(t, err)
+		}()
+		go func() {
+			time.Sleep(time.Millisecond) // Let drop prefix run first.
+			defer wg.Done()
+			err := db.DropAll()
+			for err == ErrBlockedWrites {
+				fmt.Printf("dropAll err: %v", err)
+				err = db.DropAll()
+				time.Sleep(time.Millisecond * 300)
+			}
+			require.NoError(t, err)
+		}()
+		wg.Wait()
+	})
 }

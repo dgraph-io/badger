@@ -1521,10 +1521,10 @@ func (db *DB) prepareToDrop() (func(), error) {
 // writes are paused before running DropAll, and resumed after it is finished.
 func (db *DB) DropAll() error {
 	f, err := db.dropAll()
-	defer f()
 	if err != nil {
 		return err
 	}
+	defer f()
 	return nil
 }
 
@@ -1585,6 +1585,7 @@ func (db *DB) dropAll() (func(), error) {
 // - Compact rest of the levels, Li->Li, picking tables which have Kp.
 // - Resume memtable flushes, compactions and writes.
 func (db *DB) DropPrefix(prefix []byte) error {
+	db.opt.Infof("DropPrefix Called")
 	f, err := db.prepareToDrop()
 	if err != nil {
 		return err
