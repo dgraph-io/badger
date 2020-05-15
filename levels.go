@@ -715,7 +715,7 @@ func hasAnyPrefixes(s []byte, listOfPrefixes [][]byte) bool{
 	return false
 }
 
-func containsAnyPrefixes(smallValue []byte, largeValue []byte, listOfPrefixes [][]byte) bool{
+func containsAnyPrefixes(smallValue, largeValue []byte, listOfPrefixes [][]byte) bool{
 	for _, prefix := range listOfPrefixes {
 		if bytes.Compare(prefix, smallValue) > 0 &&
 			bytes.Compare(prefix, largeValue) < 0 {
@@ -984,10 +984,9 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 				i = 0
 			}
 		}
-		{
-			s.kv.opt.Debugf("UNSTALLED UNSTALLED UNSTALLED: %v\n", time.Since(timeStart))
-			s.lastUnstalled = time.Now()
-		}
+
+		s.kv.opt.Debugf("UNSTALLED UNSTALLED UNSTALLED: %v\n", time.Since(timeStart))
+		s.lastUnstalled = time.Now()
 	}
 
 	return nil
