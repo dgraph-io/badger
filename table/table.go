@@ -169,15 +169,44 @@ func (t *Table) DecrRef() error {
 	return nil
 }
 
+// BlockEvictHandler is used to reuse the byte slice stored in the block on cache eviction.
+func BlockEvictHandler(value interface{}) {
+	if b, ok := value.(*block); ok {
+		b.decrRef()
+	}
+}
+
 type block struct {
 	offset            int
 	data              []byte
 	checksum          []byte
-	entriesIndexStart int // start index of entryOffsets list
-	entryOffsets      []uint32
-	chkLen            int // checksum length
+	entriesIndexStart int      // start index of entryOffsets list
+	entryOffsets      []uint32 // used to binary search an entry in the block.
+	chkLen            int      // checksum length.
+	isReusable        bool     // used to determine if the blocked should be reused.
+	ref               int32
 }
 
+func (b *block) incrRef() {
+	atomic.AddInt32(&b.ref, 1)
+}
+func (b *block) decrRef() {
+	if b == nil {
+		return
+	}
+
+	p := atomic.AddInt32(&b.ref, -1)
+	// Insert the []byte into pool only if the block is resuable. When a block
+	// is reusable a new []byte is used for decompression and this []byte can
+	// be reused.
+	// In case of an uncompressed block, the []byte is a reference to the
+	// table.mmap []byte slice. Any attempt to write data to the mmap []byte
+	// will lead to SEGFAULT.
+	if p == 0 && b.isReusable {
+		blockPool.Put(&b.data)
+	}
+	y.AssertTrue(p >= 0)
+}
 func (b *block) size() int64 {
 	return int64(3*intSize /* Size of the offset, entriesIndexStart and chkLen */ +
 		cap(b.data) + cap(b.checksum) + cap(b.entryOffsets)*4)
@@ -419,8 +448,7 @@ func (t *Table) block(idx int) (*block, error) {
 		}
 	}
 
-	blk.data, err = t.decompressData(blk.data)
-	if err != nil {
+	if err = t.decompress(blk); err != nil {
 		return nil, errors.Wrapf(err,
 			"failed to decode compressed data in file: %s at offset: %d, len: %d",
 			t.fd.Name(), blk.offset, ko.Len)
@@ -462,6 +490,7 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 	if t.opt.Cache != nil {
 		key := t.blockCacheKey(idx)
+		blk.incrRef()
 		t.opt.Cache.Set(key, blk, blk.size())
 	}
 	return blk, nil
@@ -563,7 +592,8 @@ func (t *Table) VerifyChecksum() error {
 			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
 				t.Filename(), i, os.Offset)
 		}
-
+		b.incrRef()
+		defer b.decrRef()
 		// OnBlockRead or OnTableAndBlockRead, we don't need to call verify checksum
 		// on block, verification would be done while reading block itself.
 		if !(t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead) {
@@ -629,15 +659,28 @@ func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, IDToFilename(id))
 }
 
-// decompressData decompresses the given data.
-func (t *Table) decompressData(data []byte) ([]byte, error) {
+// decompress decompresses the data stored in a block.
+func (t *Table) decompress(b *block) error {
+	var err error
 	switch t.opt.Compression {
 	case options.None:
-		return data, nil
+		// Nothing to be done here.
 	case options.Snappy:
-		return snappy.Decode(nil, data)
+		dst := blockPool.Get().(*[]byte)
+		b.data, err = snappy.Decode(*dst, b.data)
+		if err != nil {
+			return errors.Wrap(err, "failed to decompress")
+		}
+		b.isReusable = true
 	case options.ZSTD:
-		return y.ZSTDDecompress(nil, data)
+		dst := blockPool.Get().(*[]byte)
+		b.data, err = y.ZSTDDecompress(*dst, b.data)
+		if err != nil {
+			return errors.Wrap(err, "failed to decompress")
+		}
+		b.isReusable = true
+	default:
+		return errors.New("Unsupported compression type")
 	}
-	return nil, errors.New("Unsupported compression type")
+	return nil
 }
