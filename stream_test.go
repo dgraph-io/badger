@@ -160,7 +160,7 @@ func TestStream(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
-func TestStreamWithThreadNum(t *testing.T) {
+func TestStreamWithThreadId(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
@@ -180,9 +180,9 @@ func TestStreamWithThreadNum(t *testing.T) {
 
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = "Testing"
-	stream.KeyToListWithThreadNum = func(key []byte, itr *Iterator, threadNum int) (
+	stream.KeyToList = func(key []byte, itr *Iterator) (
 		*bpb.KVList, error) {
-		require.Less(t, threadNum, stream.NumGo)
+		require.Less(t, itr.ThreadId, stream.NumGo)
 		return stream.ToList(key, itr)
 	}
 	c := &collector{}

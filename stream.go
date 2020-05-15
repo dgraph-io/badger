@@ -65,11 +65,6 @@ type Stream struct {
 	// Note: Calls to KeyToList are concurrent.
 	KeyToList func(key []byte, itr *Iterator) (*pb.KVList, error)
 
-	// KeyToListWithThreadNum works similarly to KeyToList but it's passed the goroutine
-	// number. This is useful to simulate thread-local storage. Only one of the two KeyToList
-	// functions should be set. Preference is given to this function if both are set.
-	KeyToListWithThreadNum func(key []byte, itr *Iterator, threadNum int) (*pb.KVList, error)
-
 	// This is the method where Stream sends the final output. All calls to Send are done by a
 	// single goroutine, i.e. logic within Send method can expect single threaded execution.
 	Send func(*pb.KVList) error
@@ -151,7 +146,7 @@ func (st *Stream) produceRanges(ctx context.Context) {
 }
 
 // produceKVs picks up ranges from rangeCh, generates KV lists and sends them to kvChan.
-func (st *Stream) produceKVs(ctx context.Context, threadNum int) error {
+func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	var size int
 	var txn *Txn
 	if st.readTs > 0 {
@@ -167,6 +162,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadNum int) error {
 		iterOpts.Prefix = st.Prefix
 		iterOpts.PrefetchValues = false
 		itr := txn.NewIterator(iterOpts)
+		itr.ThreadId = threadId
 		defer itr.Close()
 
 		// This unique stream id is used to identify all the keys from this iteration.
@@ -193,14 +189,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadNum int) error {
 			}
 
 			// Now convert to key value.
-			var list *pb.KVList
-			var err error
-			if st.KeyToListWithThreadNum != nil {
-				list, err = st.KeyToListWithThreadNum(item.KeyCopy(nil), itr, threadNum)
-			} else {
-				list, err = st.KeyToList(item.KeyCopy(nil), itr)
-			}
-
+			list, err := st.KeyToList(item.KeyCopy(nil), itr)
 			if err != nil {
 				return err
 			}
@@ -332,7 +321,7 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	// KVList. To get 128MB buffer, we can set the channel size to 32.
 	st.kvChan = make(chan *pb.KVList, 32)
 
-	if st.KeyToList == nil && st.KeyToListWithThreadNum == nil {
+	if st.KeyToList == nil {
 		st.KeyToList = st.ToList
 	}
 
@@ -344,12 +333,12 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	for i := 0; i < st.NumGo; i++ {
 		wg.Add(1)
 		// Copy value of i to prevent the value from changing in the next iteration.
-		threadNum := i
+		threadId := i
 
 		go func() {
 			defer wg.Done()
 			// Picks up ranges from rangeCh, generates KV lists, and sends them to kvChan.
-			if err := st.produceKVs(ctx, threadNum); err != nil {
+			if err := st.produceKVs(ctx, threadId); err != nil {
 				select {
 				case errCh <- err:
 				default:
