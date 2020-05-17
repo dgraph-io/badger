@@ -786,6 +786,8 @@ func TestIterateEnd(t *testing.T) {
 		// panic.
 		err := db.View(func(txn *Txn) error {
 			itr := txn.NewIterator(DefaultIteratorOptions)
+			defer itr.Close()
+
 			itr.Rewind() // Move the iterator the beginning of the database.
 
 			for {

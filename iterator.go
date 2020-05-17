@@ -504,7 +504,14 @@ func (it *Iterator) newItem() *Item {
 
 // Item returns pointer to the current key-value pair.
 // This item is only valid until it.Next() gets called.
+// If it returns nil, then there are no more items to iterate over.
 func (it *Iterator) Item() *Item {
+	// Make sure that we aren't at the end of the database. If we are and we don't check this then it could panic if the
+	// user tries to read the item after calling Next after the last item in the DB.
+	if it.item == nil {
+		return nil
+	}
+
 	tx := it.txn
 	tx.addReadKey(it.item.Key())
 	return it.item
