@@ -765,6 +765,53 @@ func TestIterateDeleted(t *testing.T) {
 	})
 }
 
+func TestIterateEnd(t *testing.T) {
+	N := 100
+	key := func(account int) []byte {
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], uint32(account))
+		return append([]byte("/record/"), b[:]...)
+	}
+
+	opt := DefaultOptions("")
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		// Seed the database with some basic values.
+		for i := 0; i < N; i++ {
+			txn := db.NewTransaction(true)
+			require.NoError(t, txn.SetEntry(NewEntry(key(i), []byte("1000"))))
+			require.NoError(t, txn.Commit(), "transaction should commit successfully")
+		}
+
+		// Then try to iterate over all of the records in the database. Make sure that once we hit the end it does not
+		// panic.
+		err := db.View(func(txn *Txn) error {
+			itr := txn.NewIterator(DefaultIteratorOptions)
+			itr.Rewind() // Move the iterator the beginning of the database.
+
+			for {
+				var item *Item
+
+				// Previously this would panic after Next is called on the last record in the DB. This test should
+				// verify that when there are no more items the DB, then Item should return nil rather than panicking.
+				require.NotPanics(t, func() {
+					item = itr.Item()
+				}, "reading the current item from the iterator should not panic")
+
+				// If the item is nil, then there are no more items.
+				if item == nil {
+					break
+				}
+
+				// Try to grab the next item.
+				itr.Next()
+			}
+
+			return nil
+		})
+		require.NoError(t, err)
+	})
+}
+
 func TestIterateParallel(t *testing.T) {
 	key := func(account int) []byte {
 		var b [4]byte
