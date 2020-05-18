@@ -505,8 +505,8 @@ func (it *Iterator) newItem() *Item {
 // Item returns pointer to the current key-value pair.
 // This item is only valid until it.Next() gets called.
 func (it *Iterator) Item() *Item {
-	// tx := it.txn
-	// tx.addReadKey(it.item.Key())
+	tx := it.txn
+	tx.addReadKey(it.item.Key())
 	return it.item
 }
 
