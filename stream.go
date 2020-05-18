@@ -332,7 +332,8 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for i := 0; i < st.NumGo; i++ {
 		wg.Add(1)
-		// Copy value of i to prevent the value from changing in the next iteration.
+		// Copy value of i to prevent the value from changing by the time the goroutine
+		// below starts executing.
 		threadId := i
 
 		go func() {
