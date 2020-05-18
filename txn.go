@@ -165,13 +165,11 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 		return 0
 	}
 
+	var ts uint64
 	if !o.isManaged {
 		o.doneRead(txn)
 		o.cleanupCommittedTransactions()
-	}
 
-	var ts uint64
-	if !o.isManaged {
 		// This is the general case, when user doesn't specify the read and commit ts.
 		ts = o.nextTxnTs
 		o.nextTxnTs++
@@ -182,11 +180,7 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 		ts = txn.commitTs
 	}
 
-	y.AssertTruef(
-		ts >= o.lastCleanupTs,
-		"ts: %d should not be less than lastCleanupTs: %d",
-		ts, o.lastCleanupTs,
-	)
+	y.AssertTrue(ts >= o.lastCleanupTs)
 
 	if !o.isManaged {
 		// We should ensure that txns are not added to o.committedTxns slice in
@@ -223,11 +217,7 @@ func (o *oracle) cleanupCommittedTransactions() { // Must be called under o.Lock
 		maxReadTs = o.readMark.DoneUntil()
 	}
 
-	y.AssertTruef(
-		maxReadTs >= o.lastCleanupTs,
-		"maxReadTs: %d should not be less than lastCleanupTs: %d",
-		maxReadTs, o.lastCleanupTs,
-	)
+	y.AssertTrue(maxReadTs >= o.lastCleanupTs)
 
 	// do not run clean up if the maxReadTs (read timestamp of the
 	// oldest transaction that is still in flight) has not increased
