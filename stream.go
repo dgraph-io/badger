@@ -332,11 +332,8 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for i := 0; i < st.NumGo; i++ {
 		wg.Add(1)
-		// Copy value of i to prevent the value from changing by the time the goroutine
-		// below starts executing.
-		threadId := i
 
-		go func() {
+		go func(threadId int) {
 			defer wg.Done()
 			// Picks up ranges from rangeCh, generates KV lists, and sends them to kvChan.
 			if err := st.produceKVs(ctx, threadId); err != nil {
@@ -345,7 +342,7 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 				default:
 				}
 			}
-		}()
+		}(i)
 	}
 
 	// Pick up key-values from kvChan and send to stream.
