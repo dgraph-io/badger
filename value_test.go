@@ -37,6 +37,7 @@ import (
 )
 
 func TestValueBasic(t *testing.T) {
+	t.Skip()
 	dir, err := ioutil.TempDir("", "badger-test")
 	y.Check(err)
 	defer removeDir(dir)

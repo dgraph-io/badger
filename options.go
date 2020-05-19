@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"math"
 	"time"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -125,14 +126,14 @@ func DefaultOptions(path string) Options {
 		BloomFalsePositive:      0.01,
 		BlockSize:               4 * 1024,
 		SyncWrites:              true,
-		NumVersionsToKeep:       1,
+		NumVersionsToKeep:       math.MaxUint32,
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          true,
 		VerifyValueChecksum:     false,
-		Compression:             options.None,
-		MaxCacheSize:            0,
+		Compression:             options.ZSTD,
+		MaxCacheSize:            1 << 30,
 		MaxBfCacheSize:          0,
-		LoadBloomsOnOpen:        true,
+		LoadBloomsOnOpen:        false,
 		// The following benchmarks were done on a 4 KB block size (default block size). The
 		// compression is ratio supposed to increase with increasing compression level but since the
 		// input for compression algorithm is small (4 KB), we don't get significant benefit at
@@ -142,7 +143,7 @@ func DefaultOptions(path string) Options {
 		// zstd_compression/level_3-16     7	 756950250 ns/op	 109.91 MB/s	2.72
 		// zstd_compression/level_15-16    1	11135686219 ns/op	   7.47 MB/s	4.38
 		// Benchmark code can be found in table/builder_test.go file
-		ZSTDCompressionLevel: 1,
+		ZSTDCompressionLevel: 3,
 
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
@@ -151,7 +152,7 @@ func DefaultOptions(path string) Options {
 		ValueLogFileSize: 1<<30 - 1,
 
 		ValueLogMaxEntries:            1000000,
-		ValueThreshold:                32,
+		ValueThreshold:                1 << 10,
 		Truncate:                      false,
 		Logger:                        defaultLogger(INFO),
 		LogRotatesToFlush:             2,

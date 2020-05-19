@@ -91,7 +91,7 @@ func init() {
 	bankTest.Flags().IntVarP(
 		&numGoroutines, "conc", "c", 16, "Number of concurrent transactions to run.")
 	bankTest.Flags().StringVarP(&duration, "duration", "d", "3m", "How long to run the test.")
-	bankTest.Flags().BoolVarP(&mmap, "mmap", "m", false, "If true, mmap LSM tree. Default is RAM.")
+	bankTest.Flags().BoolVarP(&mmap, "mmap", "m", true, "If true, mmap LSM tree. Default is RAM.")
 	bankTest.Flags().BoolVarP(&checkStream, "check_stream", "s", false,
 		"If true, the test will send transactions to another badger instance via the stream "+
 			"interface in order to verify that all data is streamed correctly.")
@@ -125,7 +125,7 @@ func toSlice(bal uint64) []byte {
 }
 
 func getBalance(txn *badger.Txn, account int) (uint64, error) {
-	item, err := txn.Get(key(account))
+	item, err := get(txn, key(account))
 	if err != nil {
 		return 0, err
 	}
@@ -197,6 +197,22 @@ func diff(a, b []account) string {
 
 var errFailure = errors.New("test failed due to balance mismatch")
 
+func get(txn *badger.Txn, k []byte) (*badger.Item, error) {
+	if rand.Int()%2 == 0 {
+		// return txn.Get(k)
+	}
+
+	iopt := badger.DefaultIteratorOptions
+	iopt.PrefetchValues = false
+	it := txn.NewIterator(iopt)
+	defer it.Close()
+	it.Seek(k)
+	if it.Valid() {
+		return it.Item(), nil
+	}
+	return nil, badger.ErrKeyNotFound
+}
+
 // seekTotal retrives the total of all accounts by seeking for each account key.
 func seekTotal(txn *badger.Txn) ([]account, error) {
 	expected := uint64(numAccounts) * uint64(initialBal)
@@ -204,7 +220,7 @@ func seekTotal(txn *badger.Txn) ([]account, error) {
 
 	var total uint64
 	for i := 0; i < numAccounts; i++ {
-		item, err := txn.Get(key(i))
+		item, err := get(txn, key(i))
 		if err != nil {
 			log.Printf("Error for account: %d. err=%v. key=%q\n", i, err, key(i))
 			return accounts, err
@@ -341,9 +357,12 @@ func runTest(cmd *cobra.Command, args []string) error {
 		WithMaxTableSize(4 << 20). // Force more compactions.
 		WithNumLevelZeroTables(2).
 		WithNumMemtables(2).
+		WithKeepL0InMemory(false).
 		// Do not GC any versions, because we need them for the disect..
 		WithNumVersionsToKeep(int(math.MaxInt32)).
-		WithValueThreshold(1) // Make all values go to value log
+		WithCompression(options.ZSTD).
+		WithMaxCacheSize(10 << 20)
+	// WithValueThreshold(1) // Make all values go to value log
 	if mmap {
 		opts = opts.WithTableLoadingMode(options.MemoryMap)
 	}
