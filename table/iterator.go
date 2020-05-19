@@ -18,8 +18,10 @@ package table
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"sort"
+	"time"
 
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
@@ -34,6 +36,7 @@ type blockIterator struct {
 	val          []byte
 	entryOffsets []uint32
 	block        *block
+	bid          int
 
 	// prevOverlap stores the overlap of the previous key with the base key.
 	// This avoids unnecessary copy of base key when the overlap is same for multiple keys.
@@ -43,13 +46,14 @@ type blockIterator struct {
 func (itr *blockIterator) setBlock(b *block) {
 	// Decrement the ref for the old block. If the old block was compressed, we
 	// might be able to reuse it.
-	itr.block.decrRef()
+	itr.block.decrRef("setblock")
 	// Increment the ref for the new block.
-	b.incrRef()
+	// b.incrRef("setBlock")
 
 	itr.block = b
 	itr.err = nil
 	itr.idx = 0
+	itr.bid = b.id
 	itr.baseKey = itr.baseKey[:0]
 	itr.prevOverlap = 0
 	itr.key = itr.key[:0]
@@ -61,6 +65,11 @@ func (itr *blockIterator) setBlock(b *block) {
 
 // setIdx sets the iterator to the entry at index i and set it's key and value.
 func (itr *blockIterator) setIdx(i int) {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("%s err, itr. = %+v id %+v fromCache: %+v uuid: %s pid:%+v\n", time.Now(), err, itr.bid, itr.block.fromCache, itr.block.uuid, &itr.block.data[0])
+		}
+	}()
 	itr.idx = i
 	if i >= len(itr.entryOffsets) || i < 0 {
 		itr.err = io.EOF
@@ -110,7 +119,7 @@ func (itr *blockIterator) Error() error {
 }
 
 func (itr *blockIterator) Close() {
-	itr.block.decrRef()
+	// itr.block.decrRef()
 }
 
 var (

@@ -33,6 +33,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -169,7 +170,7 @@ func (t *Table) DecrRef() error {
 // BlockEvictHandler is used to reuse the byte slice stored in the block on cache eviction.
 func BlockEvictHandler(value interface{}) {
 	if b, ok := value.(*block); ok {
-		b.decrRef()
+		b.decrRef("evict")
 	}
 }
 
@@ -182,16 +183,21 @@ type block struct {
 	chkLen            int      // checksum length.
 	isReusable        bool     // used to determine if the blocked should be reused.
 	ref               int32
+	id                int
+	fromCache         bool
+	uuid              uuid.UUID
 }
 
-func (b *block) incrRef() {
+func (b *block) incrRef(s string) {
+	// fmt.Printf("%s %+v incrref b.id = %+v oldref %+v uid: %s pid:%+v\n", time.Now(), s, b.id, b.ref, b.uuid, &b.data[0])
 	atomic.AddInt32(&b.ref, 1)
 }
-func (b *block) decrRef() {
+func (b *block) decrRef(s string) {
 	if b == nil {
 		return
 	}
 
+	// fmt.Printf("%s %+v decrref b.id = %+v ref %+v uid: %s pid:%+v\n", time.Now(), s, b.id, b.ref, b.uuid, &b.data[0])
 	p := atomic.AddInt32(&b.ref, -1)
 	// Insert the []byte into pool only if the block is resuable. When a block
 	// is reusable a new []byte is used for decompression and this []byte can
@@ -200,6 +206,7 @@ func (b *block) decrRef() {
 	// table.mmap []byte slice. Any attempt to write data to the mmap []byte
 	// will lead to SEGFAULT.
 	if p == 0 && b.isReusable {
+		// fmt.Printf("%s %+v adding to pool b.id = %+v ref %+v uid: %s pid:%+v\n", time.Now(), s, b.id, b.ref, b.uuid, &b.data[0])
 		blockPool.Put(&b.data)
 	}
 	y.AssertTrue(p >= 0)
@@ -425,12 +432,19 @@ func (t *Table) block(idx int) (*block, error) {
 		key := t.blockCacheKey(idx)
 		blk, ok := t.opt.Cache.Get(key)
 		if ok && blk != nil {
-			return blk.(*block), nil
+			b := blk.(*block)
+			b.fromCache = true
+			b.incrRef("cache hit")
+			// fmt.Printf("%s from cache blk.id = %+v ref: %+v uid:%s pid:%+v\n", time.Now(), b.id, b.ref, b.uuid, &b.data[0])
+			return b, nil
 		}
 	}
 	ko := t.blockIndex[idx]
 	blk := &block{
 		offset: int(ko.Offset),
+		id:     idx,
+		uuid:   uuid.New(),
+		ref:    1,
 	}
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
@@ -485,10 +499,13 @@ func (t *Table) block(idx int) (*block, error) {
 			return nil, err
 		}
 	}
+	// fmt.Printf("%s Not from cache blk.id = %+v ref: %+v uid: %s pid:%+v\n", time.Now(), blk.id, blk.ref, blk.uuid, &blk.data[0])
 	if t.opt.Cache != nil {
 		key := t.blockCacheKey(idx)
-		blk.incrRef()
-		t.opt.Cache.Set(key, blk, blk.size())
+		blk.incrRef("insert in cache")
+		if !t.opt.Cache.Set(key, blk, blk.size()) {
+			blk.decrRef("cache set failed")
+		}
 	}
 	return blk, nil
 }
@@ -589,8 +606,8 @@ func (t *Table) VerifyChecksum() error {
 			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
 				t.Filename(), i, os.Offset)
 		}
-		b.incrRef()
-		defer b.decrRef()
+		b.incrRef("verify checksum")
+		defer b.decrRef("verify checksum")
 		// OnBlockRead or OnTableAndBlockRead, we don't need to call verify checksum
 		// on block, verification would be done while reading block itself.
 		if !(t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead) {
@@ -671,6 +688,7 @@ func (t *Table) decompress(b *block) error {
 		b.isReusable = true
 	case options.ZSTD:
 		dst := blockPool.Get().(*[]byte)
+		// fmt.Printf("%s decompression bid: %+v uuid: %s pid:%+v\n", time.Now(), b.id, b.uuid, &(*dst)[0])
 		b.data, err = y.ZSTDDecompress(*dst, b.data)
 		if err != nil {
 			return errors.Wrap(err, "failed to decompress")
