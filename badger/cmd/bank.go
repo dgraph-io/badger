@@ -197,6 +197,25 @@ func diff(a, b []account) string {
 
 var errFailure = errors.New("test failed due to balance mismatch")
 
+// get function will fetch the value for the key "k" either by using tht
+// txn.Get API or the iterator.Seek API
+func get(txn *badger.Txn, k []byte) (*badger.Item, error) {
+	if rand.Int()%2 == 0 {
+		return txn.Get(k)
+	}
+
+	iopt := badger.DefaultIteratorOptions
+	// PrefectValues is expensive. We don't need it here.
+	iopt.PrefetchValues = false
+	it := txn.NewIterator(iopt)
+	defer it.Close()
+	it.Seek(k)
+	if it.Valid() {
+		return it.Item(), nil
+	}
+	return nil, badger.ErrKeyNotFound
+}
+
 // seekTotal retrives the total of all accounts by seeking for each account key.
 func seekTotal(txn *badger.Txn) ([]account, error) {
 	expected := uint64(numAccounts) * uint64(initialBal)
@@ -343,7 +362,10 @@ func runTest(cmd *cobra.Command, args []string) error {
 		WithNumMemtables(2).
 		// Do not GC any versions, because we need them for the disect..
 		WithNumVersionsToKeep(int(math.MaxInt32)).
-		WithValueThreshold(1) // Make all values go to value log
+		WithValueThreshold(1). // Make all values go to value log
+		WithCompression(options.ZSTD).
+		WithMaxCacheSize(10 << 20)
+
 	if mmap {
 		opts = opts.WithTableLoadingMode(options.MemoryMap)
 	}
