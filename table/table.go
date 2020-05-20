@@ -189,14 +189,17 @@ type block struct {
 }
 
 func (b *block) incrRef(s string) bool {
-	if atomic.AddInt32(&b.ref, 1) == 1 {
-		fmt.Printf("block evicted bidb.bid = %+v\n", b.id)
-		// Block is already evicted.
-		return false
+	for {
+		ref := atomic.LoadInt32(&b.ref)
+		if ref == 0 {
+			return false
+		}
+		if atomic.CompareAndSwapInt32(&b.ref, ref, ref+1) {
+			return true
+		}
 	}
-	// fmt.Printf("%s %+v incrref b.id = %+v oldref %+v uid: %s pid:%+v\n", time.Now(), s, b.id, atomic.LoadInt32(&b.ref), b.uuid, &b.data[0])
-	return true
 }
+
 func (b *block) decrRef(s string) {
 	if b == nil {
 		return
