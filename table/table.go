@@ -187,25 +187,32 @@ type block struct {
 	ref               int32
 }
 
-func (b *block) incrRef() {
-	atomic.AddInt32(&b.ref, 1)
+func (b *block) incrRef() bool {
+	for {
+		ref := atomic.LoadInt32(&b.ref)
+		if ref == 0 {
+			return false
+		}
+		if atomic.CompareAndSwapInt32(&b.ref, ref, ref+1) {
+			return true
+		}
+	}
 }
 func (b *block) decrRef() {
 	if b == nil {
 		return
 	}
 
-	p := atomic.AddInt32(&b.ref, -1)
 	// Insert the []byte into pool only if the block is resuable. When a block
 	// is reusable a new []byte is used for decompression and this []byte can
 	// be reused.
 	// In case of an uncompressed block, the []byte is a reference to the
 	// table.mmap []byte slice. Any attempt to write data to the mmap []byte
 	// will lead to SEGFAULT.
-	if p == 0 && b.isReusable {
+	if atomic.AddInt32(&b.ref, -1) == 0 && b.isReusable {
 		blockPool.Put(&b.data)
 	}
-	y.AssertTrue(p >= 0)
+	y.AssertTrue(atomic.LoadInt32(&b.ref) >= 0)
 }
 func (b *block) size() int64 {
 	return int64(3*intSize /* Size of the offset, entriesIndexStart and chkLen */ +
@@ -428,12 +435,16 @@ func (t *Table) block(idx int) (*block, error) {
 		key := t.blockCacheKey(idx)
 		blk, ok := t.opt.Cache.Get(key)
 		if ok && blk != nil {
-			return blk.(*block), nil
+			b := blk.(*block)
+			if b.incrRef() {
+				return b, nil
+			}
 		}
 	}
 	ko := t.blockIndex[idx]
 	blk := &block{
 		offset: int(ko.Offset),
+		ref:    1,
 	}
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
@@ -490,8 +501,10 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 	if t.opt.Cache != nil {
 		key := t.blockCacheKey(idx)
-		blk.incrRef()
-		t.opt.Cache.Set(key, blk, blk.size())
+		y.AssertTrue(blk.incrRef())
+		if !t.opt.Cache.Set(key, blk, blk.size()) {
+			blk.decrRef()
+		}
 	}
 	return blk, nil
 }
