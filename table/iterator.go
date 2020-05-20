@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"time"
 
@@ -67,7 +68,8 @@ func (itr *blockIterator) setBlock(b *block) {
 func (itr *blockIterator) setIdx(i int) {
 	defer func() {
 		if err := recover(); err != nil {
-			fmt.Printf("%s err, itr. = %+v id %+v fromCache: %+v uuid: %s pid:%+v\n", time.Now(), err, itr.bid, itr.block.fromCache, itr.block.uuid, &itr.block.data[0])
+			fmt.Printf("%s err = %+v id %+v fromCache: %+v uuid: %s pid:%+v\n", time.Now(), err, itr.bid, itr.block.fromCache, itr.block.uuid, &itr.block.data[0])
+			os.Exit(1)
 		}
 	}()
 	itr.idx = i
@@ -184,7 +186,7 @@ type Iterator struct {
 func (t *Table) NewIterator(reversed bool) *Iterator {
 	t.IncrRef() // Important.
 	ti := &Iterator{t: t, reversed: reversed}
-	ti.next()
+	// ti.next()
 	return ti
 }
 

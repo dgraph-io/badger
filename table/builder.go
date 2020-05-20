@@ -93,7 +93,7 @@ var blockPool = &sync.Pool{
 		// unncessary 2X allocation by the decompression library.
 		b := make([]byte, 5<<10)
 		// fmt.Printf("%s slicepool pid:%+v\n", time.Now(), &b[0])
-		return &b
+		return b
 	},
 }
 

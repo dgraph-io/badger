@@ -188,28 +188,32 @@ type block struct {
 	uuid              uuid.UUID
 }
 
-func (b *block) incrRef(s string) {
-	// fmt.Printf("%s %+v incrref b.id = %+v oldref %+v uid: %s pid:%+v\n", time.Now(), s, b.id, b.ref, b.uuid, &b.data[0])
-	atomic.AddInt32(&b.ref, 1)
+func (b *block) incrRef(s string) bool {
+	if atomic.AddInt32(&b.ref, 1) == 1 {
+		fmt.Printf("block evicted bidb.bid = %+v\n", b.id)
+		// Block is already evicted.
+		return false
+	}
+	// fmt.Printf("%s %+v incrref b.id = %+v oldref %+v uid: %s pid:%+v\n", time.Now(), s, b.id, atomic.LoadInt32(&b.ref), b.uuid, &b.data[0])
+	return true
 }
 func (b *block) decrRef(s string) {
 	if b == nil {
 		return
 	}
 
-	// fmt.Printf("%s %+v decrref b.id = %+v ref %+v uid: %s pid:%+v\n", time.Now(), s, b.id, b.ref, b.uuid, &b.data[0])
-	p := atomic.AddInt32(&b.ref, -1)
 	// Insert the []byte into pool only if the block is resuable. When a block
 	// is reusable a new []byte is used for decompression and this []byte can
 	// be reused.
 	// In case of an uncompressed block, the []byte is a reference to the
 	// table.mmap []byte slice. Any attempt to write data to the mmap []byte
 	// will lead to SEGFAULT.
-	if p == 0 && b.isReusable {
-		// fmt.Printf("%s %+v adding to pool b.id = %+v ref %+v uid: %s pid:%+v\n", time.Now(), s, b.id, b.ref, b.uuid, &b.data[0])
-		blockPool.Put(&b.data)
+	if atomic.AddInt32(&b.ref, -1) == 0 && b.isReusable {
+		// fmt.Printf("%s %+v adding to pool b.id = %+v ref %+v uid: %s pid:%+v\n", time.Now(), s, b.id, atomic.LoadInt32(&b.ref), b.uuid, &b.data[0])
+		blockPool.Put(b.data)
 	}
-	y.AssertTrue(p >= 0)
+	// fmt.Printf("%s %+v decrref b.id = %+v ref %+v uid: %s pid:%+v\n", time.Now(), s, b.id, atomic.LoadInt32(&b.ref), b.uuid, &b.data[0])
+	y.AssertTrue(atomic.LoadInt32(&b.ref) >= 0)
 }
 func (b *block) size() int64 {
 	return int64(3*intSize /* Size of the offset, entriesIndexStart and chkLen */ +
@@ -424,6 +428,7 @@ func (t *Table) readIndex() error {
 }
 
 func (t *Table) block(idx int) (*block, error) {
+	// fmt.Printf("t.ID() = %+v, idx = %+v\n", t.ID(), idx)
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= len(t.blockIndex) {
 		return nil, errors.New("block out of index")
@@ -433,10 +438,11 @@ func (t *Table) block(idx int) (*block, error) {
 		blk, ok := t.opt.Cache.Get(key)
 		if ok && blk != nil {
 			b := blk.(*block)
-			b.fromCache = true
-			b.incrRef("cache hit")
-			// fmt.Printf("%s from cache blk.id = %+v ref: %+v uid:%s pid:%+v\n", time.Now(), b.id, b.ref, b.uuid, &b.data[0])
-			return b, nil
+			// b.fromCache = true
+			if b.incrRef("cache hit") {
+				// fmt.Printf("%s from cache blk.id = %+v ref: %+v uid:%s pid:%+v\n", time.Now(), b.id, atomic.LoadInt32(&b.ref), b.uuid, &b.data[0])
+				return b, nil
+			}
 		}
 	}
 	ko := t.blockIndex[idx]
@@ -502,7 +508,7 @@ func (t *Table) block(idx int) (*block, error) {
 	// fmt.Printf("%s Not from cache blk.id = %+v ref: %+v uid: %s pid:%+v\n", time.Now(), blk.id, blk.ref, blk.uuid, &blk.data[0])
 	if t.opt.Cache != nil {
 		key := t.blockCacheKey(idx)
-		blk.incrRef("insert in cache")
+		y.AssertTrue(blk.incrRef("insert in cache"))
 		if !t.opt.Cache.Set(key, blk, blk.size()) {
 			blk.decrRef("cache set failed")
 		}
@@ -680,16 +686,16 @@ func (t *Table) decompress(b *block) error {
 	case options.None:
 		// Nothing to be done here.
 	case options.Snappy:
-		dst := blockPool.Get().(*[]byte)
-		b.data, err = snappy.Decode(*dst, b.data)
+		dst := blockPool.Get().([]byte)
+		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {
 			return errors.Wrap(err, "failed to decompress")
 		}
 		b.isReusable = true
 	case options.ZSTD:
-		dst := blockPool.Get().(*[]byte)
-		// fmt.Printf("%s decompression bid: %+v uuid: %s pid:%+v\n", time.Now(), b.id, b.uuid, &(*dst)[0])
-		b.data, err = y.ZSTDDecompress(*dst, b.data)
+		dst := blockPool.Get().([]byte)
+		// fmt.Printf("%s decompression bid: %+v uuid: %s pid:%+v\n", time.Now(), b.id, b.uuid, &dst[0])
+		b.data, err = y.ZSTDDecompress(dst, b.data)
 		if err != nil {
 			return errors.Wrap(err, "failed to decompress")
 		}

@@ -361,7 +361,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		// Do not GC any versions, because we need them for the disect..
 		WithNumVersionsToKeep(int(math.MaxInt32)).
 		WithCompression(options.ZSTD).
-		WithMaxCacheSize(1 << 20)
+		WithMaxCacheSize(10 << 20)
 	// WithValueThreshold(1) // Make all values go to value log
 	if mmap {
 		opts = opts.WithTableLoadingMode(options.MemoryMap)
