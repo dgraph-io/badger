@@ -125,7 +125,7 @@ func toSlice(bal uint64) []byte {
 }
 
 func getBalance(txn *badger.Txn, account int) (uint64, error) {
-	item, err := txn.Get(key(account))
+	item, err := get(txn, key(account))
 	if err != nil {
 		return 0, err
 	}
@@ -223,7 +223,7 @@ func seekTotal(txn *badger.Txn) ([]account, error) {
 
 	var total uint64
 	for i := 0; i < numAccounts; i++ {
-		item, err := txn.Get(key(i))
+		item, err := get(txn, key(i))
 		if err != nil {
 			log.Printf("Error for account: %d. err=%v. key=%q\n", i, err, key(i))
 			return accounts, err
