@@ -188,8 +188,17 @@ type block struct {
 }
 
 func (b *block) incrRef() {
-	atomic.AddInt32(&b.ref, 1)
+	for {
+		ref := atomic.LoadInt32(&b.ref)
+		if ref == 0 {
+			panic("race condition")
+		}
+		if atomic.CompareAndSwapInt32(&b.ref, ref, ref+1) {
+			break
+		}
+	}
 }
+
 func (b *block) decrRef() {
 	if b == nil {
 		return
