@@ -191,9 +191,12 @@ type block struct {
 // increment was successful. A true value indicates that the block can be used.
 func (b *block) incrRef() bool {
 	for {
+		// We can't blindly add 1 to ref. We need to check whether it has
+		// reached zero first, because if it did, then we should absolutely not
+		// use this block.
 		ref := atomic.LoadInt32(&b.ref)
 		// The ref would not be equal to 0 unless the existing
-		// block get evicted before this line. If the ref is 0. it means that
+		// block get evicted before this line. If the ref is zero, it means that
 		// the block is already added the the blockPool and cannot be used
 		// anymore. The ref of a new block is 1 so the following condition will
 		// be true only if the block got reused before we could increment its
@@ -203,6 +206,7 @@ func (b *block) incrRef() bool {
 		}
 		// Increment the ref only if it is not zero and has not changed between
 		// the time we read it and we're updating it.
+		//
 		if atomic.CompareAndSwapInt32(&b.ref, ref, ref+1) {
 			return true
 		}
@@ -448,11 +452,10 @@ func (t *Table) block(idx int) (*block, error) {
 		key := t.blockCacheKey(idx)
 		blk, ok := t.opt.Cache.Get(key)
 		if ok && blk != nil {
-			b := blk.(*block)
 			// Use the block only if the increment was successful. The block
 			// could get evicted from the cache between the Get() call and the
 			// incrRef() call.
-			if b.incrRef() {
+			if b := blk.(*block); b.incrRef() {
 				return b, nil
 			}
 		}

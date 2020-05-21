@@ -197,8 +197,8 @@ func diff(a, b []account) string {
 
 var errFailure = errors.New("test failed due to balance mismatch")
 
-// get function will fetch the value for the key "k" either by using tht
-// txn.Get API or the iterator.Seek API
+// get function will fetch the value for the key "k" either by using the
+// txn.Get API or the iterator.Seek API.
 func get(txn *badger.Txn, k []byte) (*badger.Item, error) {
 	if rand.Int()%2 == 0 {
 		return txn.Get(k)
