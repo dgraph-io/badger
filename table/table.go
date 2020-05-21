@@ -98,9 +98,8 @@ type Table struct {
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
 	bfLock    sync.Mutex
 
-	blockIndex []*pb.BlockOffset
-	ref        int32    // For file garbage collection. Atomic.
-	bf         *z.Bloom // Nil if BfCache is set.
+	ref int32    // For file garbage collection. Atomic.
+	bf  *z.Bloom // Nil if BfCache is set.
 
 	mmap []byte // Memory mapped.
 
@@ -116,6 +115,8 @@ type Table struct {
 
 	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
 	opt        *Options
+
+	noOfBlocks int // Total number of blocks.
 }
 
 // CompressionType returns the compression algorithm used for block compression.
@@ -159,7 +160,7 @@ func (t *Table) DecrRef() error {
 			return err
 		}
 		// Delete all blocks from the cache.
-		for i := range t.blockIndex {
+		for i := 0; i < t.noOfBlocks; i++ {
 			t.opt.Cache.Del(t.blockCacheKey(i))
 		}
 		// Delete bloom filter from the cache.
@@ -311,11 +312,13 @@ func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
 }
 
 func (t *Table) initBiggestAndSmallest() error {
-	if err := t.readIndex(); err != nil {
+	var err error
+	var ko *pb.BlockOffset
+	if ko, err = t.readIndex(); err != nil {
 		return errors.Wrapf(err, "failed to read index.")
 	}
 
-	t.smallest = t.blockIndex[0].Key
+	t.smallest = ko.Key
 
 	it2 := t.NewIterator(true)
 	defer it2.Close()
@@ -362,7 +365,9 @@ func (t *Table) readNoFail(off, sz int) []byte {
 	return res
 }
 
-func (t *Table) readIndex() error {
+// readIndex reads the index and populate the necessary table fields and returns
+// first block offset
+func (t *Table) readIndex() (*pb.BlockOffset, error) {
 	readPos := t.tableSize
 
 	// Read checksum len from the last 4 bytes.
@@ -370,7 +375,7 @@ func (t *Table) readIndex() error {
 	buf := t.readNoFail(readPos, 4)
 	checksumLen := int(y.BytesToU32(buf))
 	if checksumLen < 0 {
-		return errors.New("checksum length less than zero. Data corrupted")
+		return nil, errors.New("checksum length less than zero. Data corrupted")
 	}
 
 	// Read checksum.
@@ -378,7 +383,7 @@ func (t *Table) readIndex() error {
 	readPos -= checksumLen
 	buf = t.readNoFail(readPos, checksumLen)
 	if err := proto.Unmarshal(buf, expectedChk); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Read index size from the footer.
@@ -392,7 +397,7 @@ func (t *Table) readIndex() error {
 	data := t.readNoFail(readPos, t.indexLen)
 
 	if err := y.VerifyChecksum(data, expectedChk); err != nil {
-		return y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename())
+		return nil, y.Wrapf(err, "failed to verify checksum for table: %s", t.Filename())
 	}
 
 	index := pb.TableIndex{}
@@ -400,7 +405,7 @@ func (t *Table) readIndex() error {
 	if t.shouldDecrypt() {
 		var err error
 		if data, err = t.decrypt(data); err != nil {
-			return y.Wrapf(err,
+			return nil, y.Wrapf(err,
 				"Error while decrypting table index for the table %d in Table.readIndex", t.id)
 		}
 	}
@@ -408,7 +413,7 @@ func (t *Table) readIndex() error {
 	y.Check(err)
 
 	t.estimatedSize = index.EstimatedSize
-	t.blockIndex = index.Offsets
+	t.noOfBlocks = len(index.Offsets)
 
 	if t.opt.LoadBloomsOnOpen {
 		t.bfLock.Lock()
@@ -416,12 +421,50 @@ func (t *Table) readIndex() error {
 		t.bfLock.Unlock()
 	}
 
-	return nil
+	return index.Offsets[0], nil
 }
 
-func (t *Table) block(idx int) (*block, error) {
+// blockIndex returns block index for the given block id.
+func (t *Table) blockIndex(idx int) *pb.BlockOffset {
+	if t.opt.Cache != nil {
+		// Try to get the block index from cache.
+		key := t.blockIndexCacheKey(idx)
+		ko, ok := t.opt.Cache.Get(key)
+		if ok && ko != nil {
+			return ko.(*pb.BlockOffset)
+		}
+	}
+	// Read the block index from sst.
+	tblIndex := t.readTableIndex()
+	ko := tblIndex.Offsets[idx]
+
+	if t.opt.Cache != nil {
+		// Set the block index in the cache.
+		key := t.blockIndexCacheKey(idx)
+		t.opt.Cache.Set(key, ko, calculateOffsetSize(ko))
+	}
+	return ko
+}
+
+func calculateOffsetSize(ko *pb.BlockOffset) int64 {
+	// 1 word = 8 bytes
+	var size int64 = 3*8 + // key array take 3 words
+		1*8 + // offset and len takes 1 word
+		3*8 + // XXX_unrecognized array takes 3 word.
+		1*8 // so far 7 words, in order to round the slab we're adding one more word.
+
+	// add key size.
+	size += int64(cap(ko.Key))
+	// add XXX_unrecognized size.
+	size += int64(cap(ko.XXX_unrecognized))
+	return size
+}
+
+// block returns block from the sst. If the key offset is nil, this fuction will
+// obtain the block offset either from cache or sst.
+func (t *Table) block(idx int, ko *pb.BlockOffset) (*block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
-	if idx >= len(t.blockIndex) {
+	if idx >= t.noOfBlocks {
 		return nil, errors.New("block out of index")
 	}
 	if t.opt.Cache != nil {
@@ -431,7 +474,11 @@ func (t *Table) block(idx int) (*block, error) {
 			return blk.(*block), nil
 		}
 	}
-	ko := t.blockIndex[idx]
+
+	// Read the block index if it's nil
+	if ko == nil {
+		ko = t.blockIndex(idx)
+	}
 	blk := &block{
 		offset: int(ko.Offset),
 	}
@@ -517,6 +564,12 @@ func (t *Table) blockCacheKey(idx int) []byte {
 	return buf
 }
 
+func (t *Table) blockIndexCacheKey(idx int) []byte {
+	y.AssertTrue(t.id < math.MaxUint32)
+	y.AssertTrue(uint32(idx) < math.MaxUint32)
+	return []byte(fmt.Sprintf("t-%d-b-%d", t.id, idx))
+}
+
 // EstimatedSize returns the total size of key-values stored in this table (including the
 // disk space occupied on the value log).
 func (t *Table) EstimatedSize() uint64 { return t.estimatedSize }
@@ -568,6 +621,14 @@ func (t *Table) DoesNotHave(hash uint64) bool {
 // along with the bloom filter.
 func (t *Table) readBloomFilter() (*z.Bloom, int) {
 	// Read bloom filter from the SST.
+	index := t.readTableIndex()
+	bf, err := z.JSONUnmarshal(index.BloomFilter)
+	y.Check(err)
+	return bf, len(index.BloomFilter)
+}
+
+// readTableIndex reads table index from the sst and returns its pb format.
+func (t *Table) readTableIndex() *pb.TableIndex {
 	data := t.readNoFail(t.indexStart, t.indexLen)
 	index := pb.TableIndex{}
 	var err error
@@ -577,17 +638,14 @@ func (t *Table) readBloomFilter() (*z.Bloom, int) {
 		y.Check(err)
 	}
 	y.Check(proto.Unmarshal(data, &index))
-
-	bf, err := z.JSONUnmarshal(index.BloomFilter)
-	y.Check(err)
-	return bf, len(index.BloomFilter)
+	return &index
 }
 
 // VerifyChecksum verifies checksum for all blocks of table. This function is called by
 // OpenTable() function. This function is also called inside levelsController.VerifyChecksum().
 func (t *Table) VerifyChecksum() error {
-	for i, os := range t.blockIndex {
-		b, err := t.block(i)
+	for i, os := range t.readTableIndex().Offsets {
+		b, err := t.block(i, os)
 		if err != nil {
 			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
 				t.Filename(), i, os.Offset)
