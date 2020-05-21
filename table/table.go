@@ -187,18 +187,16 @@ type block struct {
 	ref               int32
 }
 
-// incrRef increments the ref of a block and return a bool indicating if the
-// increment was successful. A true value indicates that the block can be used.
 func (b *block) incrRef() bool {
-	// The ref should not be equal to 1 after incrementing unless the existing
-	// value was 0. If the existing value was 0, it mean that the block is
-	// already added the the blockPool and cannot be used anymore. The ref of a
-	// new block is 1 so the following condition will be true only if the block
-	// got reused before we could increment its ref.
-	if atomic.AddInt32(&b.ref, 1) == 1 {
-		return false
+	for {
+		ref := atomic.LoadInt32(&b.ref)
+		if ref == 0 {
+			return false
+		}
+		if atomic.CompareAndSwapInt32(&b.ref, ref, ref+1) {
+			return true
+		}
 	}
-	return true
 }
 func (b *block) decrRef() {
 	if b == nil {
@@ -428,9 +426,6 @@ func (t *Table) readIndex() error {
 	return nil
 }
 
-// block function return a new block. Each block holds a ref and the byte
-// slice stored in the block will be reused when the ref becomes zero. The
-// caller should release the block by calling block.decrRef() on it.
 func (t *Table) block(idx int) (*block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= len(t.blockIndex) {
@@ -441,9 +436,6 @@ func (t *Table) block(idx int) (*block, error) {
 		blk, ok := t.opt.Cache.Get(key)
 		if ok && blk != nil {
 			b := blk.(*block)
-			// Use the block only if the increment was successful. The block
-			// could get evicted from the cache between the Get() call and the
-			// incrRef() call.
 			if b.incrRef() {
 				return b, nil
 			}
@@ -509,11 +501,7 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 	if t.opt.Cache != nil {
 		key := t.blockCacheKey(idx)
-		// incrRef should never return false here because we're calling it on a
-		// new block with ref=1.
 		y.AssertTrue(blk.incrRef())
-
-		// Decrement the block ref if we could not insert it in the cache.
 		if !t.opt.Cache.Set(key, blk, blk.size()) {
 			blk.decrRef()
 		}
