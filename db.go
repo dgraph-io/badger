@@ -1150,9 +1150,8 @@ func (db *DB) updateSize(lc *y.Closer) {
 // value log write amplification of 2 (1 from original write + 0.5 rewrite +
 // 0.25 + 0.125 + ... = 2). Setting it to higher value would result in fewer
 // space reclaims, while setting it to a lower value would result in more space
-// reclaims at the cost of increased activity on the LSM tree. It will also lead
-// to an increase in the number of internal !badger!move keys which are currently not cleaned up
-// by badger. discardRatio must be in the range (0.0, 1.0), both endpoints excluded, otherwise an
+// reclaims at the cost of increased activity on the LSM tree. discardRatio
+// must be in the range (0.0, 1.0), both endpoints excluded, otherwise an
 // ErrInvalidRequest is returned.
 //
 // Only one GC is allowed at a time. If another value log GC is running, or DB

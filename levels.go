@@ -300,14 +300,14 @@ func (s *levelsController) dropPrefix(prefix []byte) error {
 
 		var tables []*table.Table
 		// Internal move keys related to the given prefix should also be skipped.
-		moveKeyForPrefix := append(badgerMove , prefix...)
-		prefixesToSkip := [][]byte{ prefix, moveKeyForPrefix }
+		moveKeyForPrefix := append(badgerMove, prefix...)
+		prefixesToSkip := [][]byte{prefix, moveKeyForPrefix}
 		for _, table := range l.tables {
 			var absent bool
 			switch {
 			case hasAnyPrefixes(table.Smallest(), prefixesToSkip):
 			case hasAnyPrefixes(table.Biggest(), prefixesToSkip):
-			case containsAnyPrefixes( table.Smallest(), table.Biggest(), prefixesToSkip):
+			case containsAnyPrefixes(table.Smallest(), table.Biggest(), prefixesToSkip):
 			default:
 				absent = true
 			}
@@ -536,8 +536,8 @@ func (s *levelsController) compactBuildTables(
 		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64
 		// Internal move keys related to the given prefix should also be skipped.
-		moveKeyForPrefix := append(badgerMove , cd.dropPrefix...)
-		prefixesToSkip := [][]byte{ cd.dropPrefix, moveKeyForPrefix }
+		moveKeyForPrefix := append(badgerMove, cd.dropPrefix...)
+		prefixesToSkip := [][]byte{cd.dropPrefix, moveKeyForPrefix}
 		for ; it.Valid(); it.Next() {
 			// See if we need to skip the prefix.
 			if len(cd.dropPrefix) > 0 && hasAnyPrefixes(it.Key(), prefixesToSkip) {
@@ -705,9 +705,9 @@ func buildChangeSet(cd *compactDef, newTables []*table.Table) pb.ManifestChangeS
 	return pb.ManifestChangeSet{Changes: changes}
 }
 
-func hasAnyPrefixes(s []byte, listOfPrefixes [][]byte) bool{
+func hasAnyPrefixes(s []byte, listOfPrefixes [][]byte) bool {
 	for _, prefix := range listOfPrefixes {
-		if bytes.HasPrefix(s, prefix){
+		if bytes.HasPrefix(s, prefix) {
 			return true
 		}
 	}
@@ -715,7 +715,7 @@ func hasAnyPrefixes(s []byte, listOfPrefixes [][]byte) bool{
 	return false
 }
 
-func containsAnyPrefixes(smallValue, largeValue []byte, listOfPrefixes [][]byte) bool{
+func containsAnyPrefixes(smallValue, largeValue []byte, listOfPrefixes [][]byte) bool {
 	for _, prefix := range listOfPrefixes {
 		if bytes.Compare(prefix, smallValue) > 0 &&
 			bytes.Compare(prefix, largeValue) < 0 {
@@ -958,15 +958,16 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	for !s.levels[0].tryAddLevel0Table(t) {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time
-
-		s.kv.opt.Debugf("STALLED STALLED STALLED: %v\n", time.Since(s.lastUnstalled))
-		s.cstatus.RLock()
-		for i := 0; i < s.kv.opt.MaxLevels; i++ {
-			s.kv.opt.Debugf("level=%d. Status=%s Size=%d\n",
-				i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
+		{
+			s.kv.opt.Debugf("STALLED STALLED STALLED: %v\n", time.Since(s.lastUnstalled))
+			s.cstatus.RLock()
+			for i := 0; i < s.kv.opt.MaxLevels; i++ {
+				s.kv.opt.Debugf("level=%d. Status=%s Size=%d\n",
+					i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
+			}
+			s.cstatus.RUnlock()
+			timeStart = time.Now()
 		}
-		s.cstatus.RUnlock()
-		timeStart = time.Now()
 		// Before we unstall, we need to make sure that level 0 is healthy. Otherwise, we
 		// will very quickly fill up level 0 again.
 		for i := 0; ; i++ {
@@ -983,9 +984,10 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 				i = 0
 			}
 		}
-
-		s.kv.opt.Debugf("UNSTALLED UNSTALLED UNSTALLED: %v\n", time.Since(timeStart))
-		s.lastUnstalled = time.Now()
+		{
+			s.kv.opt.Debugf("UNSTALLED UNSTALLED UNSTALLED: %v\n", time.Since(timeStart))
+			s.lastUnstalled = time.Now()
+		}
 	}
 
 	return nil
