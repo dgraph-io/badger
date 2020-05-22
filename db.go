@@ -317,7 +317,7 @@ func Open(opt Options) (db *DB, err error) {
 			BufferItems: 64,
 			Metrics:     true,
 		}
-		db.blockCache, err = ristretto.NewCache(&config)
+		db.bfCache, err = ristretto.NewCache(&config)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to create bf cache")
 		}
