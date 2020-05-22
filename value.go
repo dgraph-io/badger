@@ -365,7 +365,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 		if err != nil {
 			return err
 		}
-		if discardEntry(e, vs) {
+		if discardEntry(e, vs, vlog.db) {
 			return nil
 		}
 
@@ -1319,7 +1319,7 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	return files
 }
 
-func discardEntry(e Entry, vs y.ValueStruct) bool {
+func discardEntry(e Entry, vs y.ValueStruct, db *DB) bool {
 	if vs.Version != y.ParseTs(e.Key) {
 		// Version not found. Discard.
 		return true
@@ -1334,6 +1334,16 @@ func discardEntry(e Entry, vs y.ValueStruct) bool {
 	if (vs.Meta & bitFinTxn) > 0 {
 		// Just a txn finish entry. Discard.
 		return true
+	}
+	if bytes.HasPrefix(e.Key, badgerMove) {
+		// Verify the actual key entry without the badgerPrefix has not been deleted.
+		// If this is not done the badgerMove entry will be kept forever moving from
+		// vlog to vlog during rewrites.
+		avs, err := db.get(e.Key[len(badgerMove):])
+		if err != nil {
+			return false
+		}
+		return avs.Version == 0
 	}
 	return false
 }
@@ -1407,7 +1417,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 		if err != nil {
 			return err
 		}
-		if discardEntry(e, vs) {
+		if discardEntry(e, vs, vlog.db) {
 			r.discard += esz
 			return nil
 		}
