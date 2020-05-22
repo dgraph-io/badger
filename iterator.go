@@ -438,6 +438,11 @@ type Iterator struct {
 	lastKey []byte // Used to skip over multiple versions of the same key.
 
 	closed bool
+
+	// ThreadId is an optional value that can be set to identify which goroutine created
+	// the iterator. It can be used, for example, to uniquely identify each of the
+	// iterators created by the stream interface
+	ThreadId int
 }
 
 // NewIterator returns a new iterator. Depending upon the options, either only keys, or both
