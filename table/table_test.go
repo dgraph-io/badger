@@ -967,7 +967,8 @@ func BenchmarkBlockOffsetSizeCalculation(b *testing.B) {
 
 func TestBlockOffsetSizeCalculation(t *testing.T) {
 	// Empty struct testing.
-	require.Equal(t, calculateOffsetSize(&pb.BlockOffset{}), int64(64))
+	require.Equal(t, calculateOffsetsSize([]*pb.BlockOffset{&pb.BlockOffset{}}), int64(88))
 	// Testing with key bytes
-	require.Equal(t, calculateOffsetSize(&pb.BlockOffset{Key: []byte{1, 1}}), int64(66))
+	require.Equal(t, calculateOffsetsSize([]*pb.BlockOffset{&pb.BlockOffset{Key: []byte{1, 1}}}),
+		int64(90))
 }

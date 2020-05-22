@@ -102,6 +102,9 @@ type Options struct {
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
+
+	KeepBlockOffsetsInCache bool // if KeepBlockOffsetsInCache is true and cache is enabled then,
+	// block offsets are kept in cache.
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -157,19 +160,21 @@ func DefaultOptions(path string) Options {
 		LogRotatesToFlush:             2,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
+		KeepBlockOffsetsInCache:       false,
 	}
 }
 
 func buildTableOptions(opt Options) table.Options {
 	return table.Options{
-		TableSize:            uint64(opt.MaxTableSize),
-		BlockSize:            opt.BlockSize,
-		BloomFalsePositive:   opt.BloomFalsePositive,
-		LoadBloomsOnOpen:     opt.LoadBloomsOnOpen,
-		LoadingMode:          opt.TableLoadingMode,
-		ChkMode:              opt.ChecksumVerificationMode,
-		Compression:          opt.Compression,
-		ZSTDCompressionLevel: opt.ZSTDCompressionLevel,
+		TableSize:               uint64(opt.MaxTableSize),
+		BlockSize:               opt.BlockSize,
+		BloomFalsePositive:      opt.BloomFalsePositive,
+		LoadBloomsOnOpen:        opt.LoadBloomsOnOpen,
+		LoadingMode:             opt.TableLoadingMode,
+		ChkMode:                 opt.ChecksumVerificationMode,
+		Compression:             opt.Compression,
+		ZSTDCompressionLevel:    opt.ZSTDCompressionLevel,
+		KeepBlockOffsetsInCache: opt.KeepBlockOffsetsInCache,
 	}
 }
 
@@ -629,5 +634,18 @@ func (opt Options) WithMaxBfCacheSize(size int64) Options {
 // The default value of LoadBloomsOnOpen is false.
 func (opt Options) WithLoadBloomsOnOpen(b bool) Options {
 	opt.LoadBloomsOnOpen = b
+	return opt
+}
+
+// WithKeepBlockOffsetsInCache returns a new Option value with KeepBlockOffsetsInCache set to the
+// given value.
+//
+// Badger uses block offsets to to find the blocks in the sst table. Blocks offset also contains
+// starting key of block. Badger uses those keys to find the block to do an effective key iteration.
+// This option is used to reduce inmemory usage of BlockOffsets.
+//
+// The default value of KeepBlockOffsetInCache is false.
+func (opt Options) WithKeepBlockOffsetsInCache(val bool) Options {
+	opt.KeepBlockOffsetsInCache = val
 	return opt
 }

@@ -203,7 +203,7 @@ func (itr *Iterator) seekToFirst() {
 		return
 	}
 	itr.bpos = 0
-	block, err := itr.t.block(itr.bpos, nil)
+	block, err := itr.t.block(itr.bpos)
 	if err != nil {
 		itr.err = err
 		return
@@ -220,7 +220,7 @@ func (itr *Iterator) seekToLast() {
 		return
 	}
 	itr.bpos = numBlocks - 1
-	block, err := itr.t.block(itr.bpos, nil)
+	block, err := itr.t.block(itr.bpos)
 	if err != nil {
 		itr.err = err
 		return
@@ -232,7 +232,7 @@ func (itr *Iterator) seekToLast() {
 
 func (itr *Iterator) seekHelper(blockIdx int, key []byte) {
 	itr.bpos = blockIdx
-	block, err := itr.t.block(blockIdx, nil)
+	block, err := itr.t.block(blockIdx)
 	if err != nil {
 		itr.err = err
 		return
@@ -252,7 +252,7 @@ func (itr *Iterator) seekFrom(key []byte, whence int) {
 	}
 
 	idx := sort.Search(itr.t.noOfBlocks, func(idx int) bool {
-		ko := itr.t.blockIndex(idx)
+		ko := itr.t.blockOffsets()[idx]
 		return y.CompareKeys(ko.Key, key) > 0
 	})
 	if idx == 0 {
@@ -305,7 +305,7 @@ func (itr *Iterator) next() {
 	}
 
 	if len(itr.bi.data) == 0 {
-		block, err := itr.t.block(itr.bpos, nil)
+		block, err := itr.t.block(itr.bpos)
 		if err != nil {
 			itr.err = err
 			return
@@ -333,7 +333,7 @@ func (itr *Iterator) prev() {
 	}
 
 	if len(itr.bi.data) == 0 {
-		block, err := itr.t.block(itr.bpos, nil)
+		block, err := itr.t.block(itr.bpos)
 		if err != nil {
 			itr.err = err
 			return

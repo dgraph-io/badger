@@ -45,6 +45,13 @@ import (
 const fileSuffix = ".sst"
 const intSize = int(unsafe.Sizeof(int(0)))
 
+// 1 word = 8 bytes
+// sizeOfOffsetStruct is the size of pb.BlockOffset
+const sizeOfOffsetStruct int64 = 3*8 + // key array take 3 words
+	1*8 + // offset and len takes 1 word
+	3*8 + // XXX_unrecognized array takes 3 word.
+	1*8 // so far 7 words, in order to round the slab we're adding one more word.
+
 // Options contains configurable options for Table/Builder.
 type Options struct {
 	// Options for Opening/Building Table.
@@ -81,6 +88,10 @@ type Options struct {
 	// When LoadBloomsOnOpen is set, bloom filters will be read only when they are accessed.
 	// Otherwise they will be loaded on table open.
 	LoadBloomsOnOpen bool
+
+	// KeepBlockOffsetsInCache is set to true and cache is enabled. Then block offsets are
+	// kept in cache.
+	KeepBlockOffsetsInCache bool
 }
 
 // TableInterface is useful for testing.
@@ -98,8 +109,9 @@ type Table struct {
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
 	bfLock    sync.Mutex
 
-	ref int32    // For file garbage collection. Atomic.
-	bf  *z.Bloom // Nil if BfCache is set.
+	blockIndex []*pb.BlockOffset
+	ref        int32    // For file garbage collection. Atomic.
+	bf         *z.Bloom // Nil if BfCache is set.
 
 	mmap []byte // Memory mapped.
 
@@ -421,48 +433,53 @@ func (t *Table) readIndex() (*pb.BlockOffset, error) {
 		t.bfLock.Unlock()
 	}
 
+	if t.opt.KeepBlockOffsetsInCache && t.opt.Cache != nil {
+		t.opt.Cache.Set(
+			t.blockOffsetsCacheKey(),
+			index.Offsets,
+			calculateOffsetsSize(index.Offsets))
+
+		return index.Offsets[0], nil
+	}
+
+	t.blockIndex = index.Offsets
 	return index.Offsets[0], nil
 }
 
-// blockIndex returns block index for the given block id.
-func (t *Table) blockIndex(idx int) *pb.BlockOffset {
-	if t.opt.Cache != nil {
-		// Try to get the block index from cache.
-		key := t.blockIndexCacheKey(idx)
-		ko, ok := t.opt.Cache.Get(key)
-		if ok && ko != nil {
-			return ko.(*pb.BlockOffset)
-		}
+// blockOffsets returns block offsets of this table.
+func (t *Table) blockOffsets() []*pb.BlockOffset {
+	if !t.opt.KeepBlockOffsetsInCache || t.opt.Cache == nil {
+		return t.blockIndex
 	}
-	// Read the block index from sst.
-	tblIndex := t.readTableIndex()
-	ko := tblIndex.Offsets[idx]
 
-	if t.opt.Cache != nil {
-		// Set the block index in the cache.
-		key := t.blockIndexCacheKey(idx)
-		t.opt.Cache.Set(key, ko, calculateOffsetSize(ko))
+	val, ok := t.opt.Cache.Get(t.blockOffsetsCacheKey())
+	if ok {
+		return val.([]*pb.BlockOffset)
 	}
-	return ko
+
+	ti := t.readTableIndex()
+
+	t.opt.Cache.Set(t.blockOffsetsCacheKey(), ti.Offsets, calculateOffsetsSize(ti.Offsets))
+	return ti.Offsets
 }
 
-func calculateOffsetSize(ko *pb.BlockOffset) int64 {
-	// 1 word = 8 bytes
-	var size int64 = 3*8 + // key array take 3 words
-		1*8 + // offset and len takes 1 word
-		3*8 + // XXX_unrecognized array takes 3 word.
-		1*8 // so far 7 words, in order to round the slab we're adding one more word.
+// calculateOffsetsSize returns the size of *pb.BlockOffset array
+func calculateOffsetsSize(offsets []*pb.BlockOffset) int64 {
+	totalSize := sizeOfOffsetStruct * int64(len(offsets))
 
-	// add key size.
-	size += int64(cap(ko.Key))
-	// add XXX_unrecognized size.
-	size += int64(cap(ko.XXX_unrecognized))
-	return size
+	for _, ko := range offsets {
+		// add key size.
+		totalSize += int64(cap(ko.Key))
+		// add XXX_unrecognized size.
+		totalSize += int64(cap(ko.XXX_unrecognized))
+	}
+	// Add three words for array size.
+	return totalSize + 3*8
 }
 
 // block returns block from the sst. If the key offset is nil, this fuction will
 // obtain the block offset either from cache or sst.
-func (t *Table) block(idx int, ko *pb.BlockOffset) (*block, error) {
+func (t *Table) block(idx int) (*block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= t.noOfBlocks {
 		return nil, errors.New("block out of index")
@@ -476,9 +493,7 @@ func (t *Table) block(idx int, ko *pb.BlockOffset) (*block, error) {
 	}
 
 	// Read the block index if it's nil
-	if ko == nil {
-		ko = t.blockIndex(idx)
-	}
+	ko := t.blockOffsets()[idx]
 	blk := &block{
 		offset: int(ko.Offset),
 	}
@@ -564,10 +579,13 @@ func (t *Table) blockCacheKey(idx int) []byte {
 	return buf
 }
 
-func (t *Table) blockIndexCacheKey(idx int) []byte {
+// blockOffsetsCacheKey returns the cache key for block offsets.
+func (t *Table) blockOffsetsCacheKey() []byte {
 	y.AssertTrue(t.id < math.MaxUint32)
-	y.AssertTrue(uint32(idx) < math.MaxUint32)
-	return []byte(fmt.Sprintf("t-%d-b-%d", t.id, idx))
+	buf := make([]byte, 4)
+	binary.BigEndian.PutUint32(buf, uint32(t.id))
+
+	return append([]byte("bo"), buf...)
 }
 
 // EstimatedSize returns the total size of key-values stored in this table (including the
@@ -644,8 +662,8 @@ func (t *Table) readTableIndex() *pb.TableIndex {
 // VerifyChecksum verifies checksum for all blocks of table. This function is called by
 // OpenTable() function. This function is also called inside levelsController.VerifyChecksum().
 func (t *Table) VerifyChecksum() error {
-	for i, os := range t.readTableIndex().Offsets {
-		b, err := t.block(i, os)
+	for i, os := range t.blockOffsets() {
+		b, err := t.block(i)
 		if err != nil {
 			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
 				t.Filename(), i, os.Offset)
