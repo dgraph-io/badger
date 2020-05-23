@@ -1,0 +1,131 @@
+{
+  "title": "Key-value inserting via Txn.Set",
+  "steps": [
+    {
+      "file": "txn.go",
+      "line": 750,
+      "description": "The is the entry point for someone to create a transaction. The `set` operation is performed on a `Txn` object."
+    },
+    {
+      "file": "txn.go",
+      "line": 760,
+      "description": "The important bits of the `Txn` object are the `readTs` which is the read timestamp (badger reads are performed on a specific timestamp) and the `commitTs` the timestamp at which a commit is performed. The `commitTs` in the `commitAndSend` function."
+    },
+    {
+      "file": "txn.go",
+      "line": 771,
+      "description": "`db.orc` is the `oracle`. `oracle` is responsible for handling of timestamps. When `orc.readTs()` is called, `oracle` will return the timestamp of the `last committed transaction`. In managed mode, the readTs is set by the user using the `NewTransactionAt` function."
+    },
+    {
+      "file": "txn.go",
+      "line": 403,
+      "description": "A key value (`foo`: `bar`) is set via the `Txn.Set([]byte(\"foo\"), []byte(\"bar\"))` call."
+    },
+    {
+      "file": "txn.go",
+      "line": 360,
+      "description": "The `Set`/`Delete` operations will end up in this function. This is the crux of the `Set/Delete` operation."
+    },
+    {
+      "file": "txn.go",
+      "line": 370,
+      "description": "A user key cannot have prefix as badgerPrefix which is `!badger!`. This prefix is used to denote internal keys. A key like `!badger!foo` is considered invalid."
+    },
+    {
+      "file": "txn.go",
+      "line": 380,
+      "description": "The check on this line and the two above are used to limit the size of key and value. The `maxKeySize` is depends on the header. Currently it used a `uint16` to store a key and so we cannot have a key size more than `65536`."
+    },
+    {
+      "file": "txn.go",
+      "line": 383,
+      "description": "A transaction keeps data in memory and on commit we push it to the `memtable`. This check is to ensure our transaction doesn't grow beyond a limit."
+    },
+    {
+      "file": "txn.go",
+      "line": 387,
+      "description": "The `txn.writes` is used for conflict detection."
+    },
+    {
+      "file": "txn.go",
+      "line": 392,
+      "description": "This `if` block is used to store duplicate entries. In normal `txn.Set` operation, the `version` for old and new entry will always be `zero`. This was added to support duplicate entries in write batch operation in managed mode (Dgraph uses this while rebuilding index)."
+    },
+    {
+      "file": "txn.go",
+      "line": 394,
+      "description": "The `pendingWrites` hold the entries to be written to the DB. This map will be used in the `commitAndSend` function."
+    },
+    {
+      "file": "txn.go",
+      "line": 648,
+      "description": "After inserting all the entries, the user will call `txn.Commit` or `txn.Discard` function."
+    },
+    {
+      "file": "txn.go",
+      "line": 615,
+      "description": "Badger stores tansaction markers while writing entries to the value log file. These markers are used when vlog file has to be replayed.\nWhen the version is set for entries, we do not set the tansaction markers. Badger expects that all entries within two transaction markers has same commit ts (which is also the version)."
+    },
+    {
+      "file": "txn.go",
+      "line": 658,
+      "description": "`commitAndSend` will actually commit the transaction."
+    },
+    {
+      "file": "txn.go",
+      "line": 527,
+      "description": "`newCommitTs` will check for `conflicts`. If there are conflicts in this transaction, it returns a commitTs of `0`.",
+      "selection": {
+        "start": {
+          "line": 527,
+          "character": 1
+        },
+        "end": {
+          "line": 528,
+          "character": 1
+        }
+      }
+    },
+    {
+      "file": "txn.go",
+      "line": 530,
+      "description": "In managed mode, the commitTs can be zero because individual entries can have their own version. See `writeBatch.SetAt()` function. Dgraph uses this in the reindexing code to set different versions for entries within same transaction."
+    },
+    {
+      "file": "txn.go",
+      "line": 537,
+      "description": "If an entry does not have a version set, we use the `commitTs`. An entry can have version set only in `managed mode`. In normal mode, the version will be set by `commitTs`."
+    },
+    {
+      "file": "txn.go",
+      "line": 563,
+      "description": "Add `transaction` markers only if all entries in this transaction should be kept together."
+    },
+    {
+      "file": "txn.go",
+      "line": 587,
+      "description": "We insert a dummy entry at the end transaction to mark the completion of the transactin. The `bitFinTxn` denotes that this is the last entry of the transaction."
+    },
+    {
+      "file": "txn.go",
+      "line": 592,
+      "description": "The `db.writeCh` is used to serialize the writes operations to the db. The function `sendToWriteCh` will push all the entries in the `entries` slice to the `db.writeCh`."
+    },
+    {
+      "file": "db.go",
+      "line": 781,
+      "description": "After proceesing the entries we push it to the write channel. The `doWrites()` goroutine reads from `writeCh` and then writes data to the value log and the memtable."
+    },
+    {
+      "file": "txn.go",
+      "line": 605,
+      "description": "The transaction is pushed to the `writeCh` and it is not considered to be finished until the `ret` function is called and it returns. The `req.Wait()` in the `ret` function will be blocked until the writes are completed. Badger transaction will be considered completed only when the data has been written to the vlog and the sst."
+    },
+    {
+      "file": "txn.go",
+      "line": 666,
+      "description": "We wait for the `txnCb()` to finish. Once the function completes it execution, we can consider the data to be successfully written to badger and it wil be read by any transaction that starts from now onwards. This also means than if badger crashes after `Commit()` has returned, the data will be recovered when badger starts again (the data is stored in the WAL `.vlog` files)."
+    }
+  ],
+  "ref": "master"
+}
