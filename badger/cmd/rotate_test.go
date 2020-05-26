@@ -126,7 +126,7 @@ func TestRotatePlainTextToEncrypted(t *testing.T) {
 	require.Nil(t, doRotate(nil, []string{}))
 
 	// Try opening DB without the key.
-	db, err = badger.Open(opts)
+	_, err = badger.Open(opts)
 	require.EqualError(t, err, badger.ErrEncryptionKeyMismatch.Error())
 
 	// Check whether db opens with the new key.
