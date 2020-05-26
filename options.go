@@ -151,7 +151,7 @@ func DefaultOptions(path string) Options {
 		ValueLogFileSize: 1<<30 - 1,
 
 		ValueLogMaxEntries:            1000000,
-		ValueThreshold:                32,
+		ValueThreshold:                256 << 10, // 256 KB.
 		Truncate:                      false,
 		Logger:                        defaultLogger(INFO),
 		LogRotatesToFlush:             2,
@@ -341,7 +341,7 @@ func (opt Options) WithMaxLevels(val int) Options {
 // ValueThreshold sets the threshold used to decide whether a value is stored directly in the LSM
 // tree or separately in the log value files.
 //
-// The default value of ValueThreshold is 32, but LSMOnlyOptions sets it to maxValueThreshold.
+// The default value of ValueThreshold is 256 KB, but LSMOnlyOptions sets it to maxValueThreshold.
 func (opt Options) WithValueThreshold(val int) Options {
 	opt.ValueThreshold = val
 	return opt
