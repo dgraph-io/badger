@@ -89,9 +89,11 @@ type Options struct {
 	// Otherwise they will be loaded on table open.
 	LoadBloomsOnOpen bool
 
-	// KeepBlockOffsetsInCache is set to true and cache is enabled. Then block offsets are
-	// kept in cache.
-	KeepBlockOffsetsInCache bool
+	// KeepBlockIndicesInCache decides whether to keep the block offsets in the cache or not.
+	KeepBlockIndicesInCache bool
+
+	// KeepBlocksInCache decides whether to keep the block in the cache or not.
+	KeepBlocksInCache bool
 }
 
 // TableInterface is useful for testing.
@@ -454,7 +456,7 @@ func (t *Table) readIndex() (*pb.BlockOffset, error) {
 		t.bfLock.Unlock()
 	}
 
-	if t.opt.KeepBlockOffsetsInCache && t.opt.Cache != nil {
+	if t.opt.KeepBlockIndicesInCache && t.opt.Cache != nil {
 		t.opt.Cache.Set(
 			t.blockOffsetsCacheKey(),
 			index.Offsets,
@@ -469,12 +471,11 @@ func (t *Table) readIndex() (*pb.BlockOffset, error) {
 
 // blockOffsets returns block offsets of this table.
 func (t *Table) blockOffsets() []*pb.BlockOffset {
-	if !t.opt.KeepBlockOffsetsInCache || t.opt.Cache == nil {
+	if !t.opt.KeepBlockIndicesInCache || t.opt.Cache == nil {
 		return t.blockIndex
 	}
 
-	val, ok := t.opt.Cache.Get(t.blockOffsetsCacheKey())
-	if ok {
+	if val, ok := t.opt.Cache.Get(t.blockOffsetsCacheKey()); ok && val != nil {
 		return val.([]*pb.BlockOffset)
 	}
 
@@ -506,7 +507,7 @@ func (t *Table) block(idx int) (*block, error) {
 	if idx >= t.noOfBlocks {
 		return nil, errors.New("block out of index")
 	}
-	if t.opt.Cache != nil {
+	if t.opt.Cache != nil && t.opt.KeepBlocksInCache {
 		key := t.blockCacheKey(idx)
 		blk, ok := t.opt.Cache.Get(key)
 		if ok && blk != nil {
@@ -578,7 +579,7 @@ func (t *Table) block(idx int) (*block, error) {
 			return nil, err
 		}
 	}
-	if t.opt.Cache != nil {
+	if t.opt.Cache != nil && t.opt.KeepBlocksInCache {
 		key := t.blockCacheKey(idx)
 		// incrRef should never return false here because we're calling it on a
 		// new block with ref=1.

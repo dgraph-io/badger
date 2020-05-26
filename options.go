@@ -93,6 +93,12 @@ type Options struct {
 	// ChecksumVerificationMode decides when db should verify checksums for SSTable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
 
+	// KeepBlockIndicesInCache decides whether to keep the block offsets in the cache or not.
+	KeepBlockIndicesInCache bool
+
+	// KeepBlocksInCache decides whether to keep the sst blocks in the cache or not.
+	KeepBlocksInCache bool
+
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.
@@ -102,9 +108,6 @@ type Options struct {
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch
 	maxBatchSize  int64 // max batch size in bytes
-
-	KeepBlockOffsetsInCache bool // if KeepBlockOffsetsInCache is true and cache is enabled then,
-	// block offsets are kept in cache.
 }
 
 // DefaultOptions sets a list of recommended options for good performance.
@@ -160,7 +163,8 @@ func DefaultOptions(path string) Options {
 		LogRotatesToFlush:             2,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
-		KeepBlockOffsetsInCache:       false,
+		KeepBlocksInCache:             false,
+		KeepBlockIndicesInCache:       false,
 	}
 }
 
@@ -174,7 +178,8 @@ func buildTableOptions(opt Options) table.Options {
 		ChkMode:                 opt.ChecksumVerificationMode,
 		Compression:             opt.Compression,
 		ZSTDCompressionLevel:    opt.ZSTDCompressionLevel,
-		KeepBlockOffsetsInCache: opt.KeepBlockOffsetsInCache,
+		KeepBlockIndicesInCache: opt.KeepBlockIndicesInCache,
+		KeepBlocksInCache:       opt.KeepBlocksInCache,
 	}
 }
 
@@ -637,15 +642,34 @@ func (opt Options) WithLoadBloomsOnOpen(b bool) Options {
 	return opt
 }
 
-// WithKeepBlockOffsetsInCache returns a new Option value with KeepBlockOffsetsInCache set to the
+// WithKeepBlockIndicesInCache returns a new Option value with KeepBlockOffsetInCache set to the
 // given value.
 //
-// Badger uses block offsets to to find the blocks in the sst table. Blocks offset also contains
-// starting key of block. Badger uses those keys to find the block to do an effective key iteration.
-// This option is used to reduce inmemory usage of BlockOffsets.
+// When this option is set badger will store the block offsets in a cache along with
+// the blocks. The size of the cache is determined by the MaxBlockCacheSize option.
+// When indices are stored in the cache, the read performance might be affected but
+// the cache limits the amount of memory used by the indices.
 //
 // The default value of KeepBlockOffsetInCache is false.
-func (opt Options) WithKeepBlockOffsetsInCache(val bool) Options {
-	opt.KeepBlockOffsetsInCache = val
+func (opt Options) WithKeepBlockIndicesInCache(val bool) Options {
+	opt.KeepBlockIndicesInCache = val
+
+	if val && opt.MaxCacheSize == 0 {
+		opt.MaxCacheSize = 100 << 20
+	}
+	return opt
+}
+
+// WithKeepBlocksInCache returns a new Option value with KeepBlocksInCache set to the
+// given value.
+//
+// When this option is set badger will store the block in the cache. The default value of
+// KeepBlocksInCache is false.
+func (opt Options) WithKeepBlocksInCache(val bool) Options {
+	opt.KeepBlocksInCache = val
+
+	if val && opt.MaxCacheSize == 0 {
+		opt.MaxCacheSize = 100 << 20
+	}
 	return opt
 }
