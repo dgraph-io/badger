@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -89,4 +90,60 @@ func TestRotate(t *testing.T) {
 	db, err = badger.Open(opts)
 	require.NoError(t, err)
 	defer db.Close()
+}
+
+// This test shows that rotate tool can be used to enable encryption.
+func TestRotatePlainTextToEncrypted(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	// Open DB without encryption.
+	opts := badger.DefaultOptions(dir)
+	db, err := badger.Open(opts)
+	require.NoError(t, err)
+
+	db.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte("foo"), []byte("bar"))
+	})
+
+	require.NoError(t, db.Close())
+
+	// Create an encryption key.
+	key := make([]byte, 32)
+	y.Check2(rand.Read(key))
+	fp, err := ioutil.TempFile("", "*.key")
+	require.NoError(t, err)
+	_, err = fp.Write(key)
+	require.NoError(t, err)
+	defer fp.Close()
+
+	oldKeyPath = ""
+	newKeyPath = fp.Name()
+	sstDir = dir
+
+	// Enable encryption. newKeyPath is encrypted.
+	require.Nil(t, doRotate(nil, []string{}))
+
+	// Try opening DB without the key.
+	db, err = badger.Open(opts)
+	require.EqualError(t, err, badger.ErrEncryptionKeyMismatch.Error())
+
+	// Check whether db opens with the new key.
+	opts.EncryptionKey = key
+	db, err = badger.Open(opts)
+	require.NoError(t, err)
+
+	db.View(func(txn *badger.Txn) error {
+		iopt := badger.DefaultIteratorOptions
+		it := txn.NewIterator(iopt)
+		defer it.Close()
+		count := 0
+		for it.Rewind(); it.Valid(); it.Next() {
+			count++
+		}
+		require.Equal(t, 1, count)
+		return nil
+	})
+	require.NoError(t, db.Close())
 }
