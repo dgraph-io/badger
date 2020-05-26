@@ -538,6 +538,15 @@ func TestL0Stall(t *testing.T) {
 					t.Log("Timeout triggered")
 					// Mark this test as successful since L0 is in memory and the
 					// addition of new table to L0 is supposed to stall.
+
+					// Remove tables from level 0 so that the stalled
+					// compaction can make progress. This does not have any
+					// effect on the test. This is done so that the goroutine
+					// stuck on addLevel0Table can make progress and end.
+					db.lc.levels[0].Lock()
+					db.lc.levels[0].tables = nil
+					db.lc.levels[0].Unlock()
+					<-done
 				} else {
 					t.Fatal("Test didn't finish in time")
 				}
