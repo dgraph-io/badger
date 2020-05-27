@@ -645,10 +645,10 @@ func (opt Options) WithLoadBloomsOnOpen(b bool) Options {
 // WithKeepBlockIndicesInCache returns a new Option value with KeepBlockOffsetInCache set to the
 // given value.
 //
-// When this option is set badger will store the block offsets in a cache along with
-// the blocks. The size of the cache is determined by the MaxBlockCacheSize option.
-// When indices are stored in the cache, the read performance might be affected but
-// the cache limits the amount of memory used by the indices.
+// When this option is set badger will store the block offsets in a cache along with the blocks.
+// The size of the cache is determined by the MaxCacheSize option.If the MaxCacheSize is set to
+// zero, then MaxCacheSize is set to 100 mb. When indices are stored in the cache, the read
+// performance might be affected but the cache limits the amount of memory used by the indices.
 //
 // The default value of KeepBlockOffsetInCache is false.
 func (opt Options) WithKeepBlockIndicesInCache(val bool) Options {
@@ -663,8 +663,11 @@ func (opt Options) WithKeepBlockIndicesInCache(val bool) Options {
 // WithKeepBlocksInCache returns a new Option value with KeepBlocksInCache set to the
 // given value.
 //
-// When this option is set badger will store the block in the cache. The default value of
-// KeepBlocksInCache is false.
+// When this option is set badger will store the block in the cache. The size of the cache is
+// determined by the MaxCacheSize option.If the MaxCacheSize is set to zero,
+// then MaxCacheSize is set to 100 mb.
+//
+// The default value of KeepBlocksInCache is false.
 func (opt Options) WithKeepBlocksInCache(val bool) Options {
 	opt.KeepBlocksInCache = val
 
