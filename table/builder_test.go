@@ -118,8 +118,8 @@ func TestTableIndex(t *testing.T) {
 			}
 
 			// Ensure index is built correctly
-			require.Equal(t, blockCount, len(tbl.blockIndex))
-			for i, ko := range tbl.blockIndex {
+			require.Equal(t, blockCount, tbl.noOfBlocks)
+			for i, ko := range tbl.readTableIndex().Offsets {
 				require.Equal(t, ko.Key, blockFirstKeys[i])
 			}
 			f.Close()
