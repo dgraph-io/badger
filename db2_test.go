@@ -437,11 +437,15 @@ func TestBigValues(t *testing.T) {
 		}
 	}
 	t.Run("disk mode", func(t *testing.T) {
+		t.Parallel()
+
 		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
+		t.Parallel()
+
 		opts.InMemory = true
 		opts.Dir = ""
 		opts.ValueDir = ""
@@ -583,6 +587,8 @@ func TestReadSameVlog(t *testing.T) {
 	}
 
 	t.Run("Test Read Again Plain Text", func(t *testing.T) {
+		t.Parallel()
+
 		opt := getTestOptions("")
 		// Forcing to read from vlog
 		opt.ValueThreshold = 1
@@ -593,6 +599,8 @@ func TestReadSameVlog(t *testing.T) {
 	})
 
 	t.Run("Test Read Again Encryption", func(t *testing.T) {
+		t.Parallel()
+
 		opt := getTestOptions("")
 		opt.ValueThreshold = 1
 		// Generate encryption key.

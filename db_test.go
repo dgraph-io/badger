@@ -276,11 +276,15 @@ func TestGet(t *testing.T) {
 		txn.Discard()
 	}
 	t.Run("disk mode", func(t *testing.T) {
+		t.Parallel()
+
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
+		t.Parallel()
+
 		opts := DefaultOptions("").WithInMemory(true)
 		db, err := Open(opts)
 		require.NoError(t, err)
@@ -288,6 +292,8 @@ func TestGet(t *testing.T) {
 		require.NoError(t, db.Close())
 	})
 	t.Run("cache disabled", func(t *testing.T) {
+		t.Parallel()
+
 		opts := DefaultOptions("").WithInMemory(true).WithMaxCacheSize(0)
 		db, err := Open(opts)
 		require.NoError(t, err)
@@ -644,11 +650,15 @@ func TestExistsMore(t *testing.T) {
 		fmt.Println("Done and closing")
 	}
 	t.Run("disk mode", func(t *testing.T) {
+		t.Parallel()
+
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
+		t.Parallel()
+
 		opt := DefaultOptions("").WithInMemory(true)
 		db, err := Open(opt)
 		require.NoError(t, err)
@@ -718,11 +728,15 @@ func TestIterate2Basic(t *testing.T) {
 		it.Close()
 	}
 	t.Run("disk mode", func(t *testing.T) {
+		t.Parallel()
+
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
+		t.Parallel()
+
 		opt := DefaultOptions("").WithInMemory(true)
 		db, err := Open(opt)
 		require.NoError(t, err)
@@ -787,11 +801,15 @@ func TestLoad(t *testing.T) {
 		fmt.Printf("FileIDs: %v\n", fileIDs)
 	}
 	t.Run("TestLoad Without Encryption/Compression", func(t *testing.T) {
+		t.Parallel()
+
 		opt := getTestOptions("")
 		opt.Compression = options.None
 		testLoad(t, opt)
 	})
 	t.Run("TestLoad With Encryption and no compression", func(t *testing.T) {
+		t.Parallel()
+
 		key := make([]byte, 32)
 		_, err := rand.Read(key)
 		require.NoError(t, err)
@@ -801,6 +819,8 @@ func TestLoad(t *testing.T) {
 		testLoad(t, opt)
 	})
 	t.Run("TestLoad With Encryption and compression", func(t *testing.T) {
+		t.Parallel()
+
 		key := make([]byte, 32)
 		_, err := rand.Read(key)
 		require.NoError(t, err)
@@ -810,6 +830,8 @@ func TestLoad(t *testing.T) {
 		testLoad(t, opt)
 	})
 	t.Run("TestLoad without Encryption and with compression", func(t *testing.T) {
+		t.Parallel()
+
 		opt := getTestOptions("")
 		opt.Compression = options.ZSTD
 		testLoad(t, opt)
@@ -1306,6 +1328,8 @@ func TestExpiryImproperDBClose(t *testing.T) {
 	}
 
 	t.Run("Test plain text", func(t *testing.T) {
+		t.Parallel()
+
 		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
@@ -1314,6 +1338,8 @@ func TestExpiryImproperDBClose(t *testing.T) {
 	})
 
 	t.Run("Test encryption", func(t *testing.T) {
+		t.Parallel()
+
 		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
@@ -1377,6 +1403,8 @@ func TestLargeKeys(t *testing.T) {
 		require.NoError(t, db.Close())
 	}
 	t.Run("disk mode", func(t *testing.T) {
+		t.Parallel()
+
 		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
@@ -1384,6 +1412,8 @@ func TestLargeKeys(t *testing.T) {
 		test(t, opt)
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
+		t.Parallel()
+
 		opt := DefaultOptions("").WithValueLogFileSize(1024 * 1024 * 1024)
 		opt.InMemory = true
 		test(t, opt)
@@ -1812,9 +1842,13 @@ func TestGoroutineLeak(t *testing.T) {
 		require.Equal(t, before, runtime.NumGoroutine())
 	}
 	t.Run("disk mode", func(t *testing.T) {
+		t.Parallel()
+
 		test(t, nil)
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
+		t.Parallel()
+
 		opt := DefaultOptions("").WithInMemory(true)
 		test(t, &opt)
 	})
@@ -2094,9 +2128,13 @@ func TestVerifyChecksum(t *testing.T) {
 		})
 	}
 	t.Run("Testing Verify Checksum without encryption", func(t *testing.T) {
+		t.Parallel()
+
 		testVerfiyCheckSum(t, getTestOptions(""))
 	})
 	t.Run("Testing Verify Checksum with Encryption", func(t *testing.T) {
+		t.Parallel()
+
 		key := make([]byte, 32)
 		_, err := rand.Read(key)
 		require.NoError(t, err)

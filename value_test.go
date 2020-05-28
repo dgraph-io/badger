@@ -1161,6 +1161,8 @@ func TestValueEntryChecksum(t *testing.T) {
 	k := []byte("KEY")
 	v := []byte(fmt.Sprintf("val%100d", 10))
 	t.Run("ok", func(t *testing.T) {
+		t.Parallel()
+
 		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
@@ -1189,6 +1191,8 @@ func TestValueEntryChecksum(t *testing.T) {
 	})
 	// Regression test for https://github.com/dgraph-io/badger/issues/1049
 	t.Run("Corruption", func(t *testing.T) {
+		t.Parallel()
+
 		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)

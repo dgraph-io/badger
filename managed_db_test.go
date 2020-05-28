@@ -164,6 +164,8 @@ func TestDropAllTwice(t *testing.T) {
 		require.NoError(t, db.DropAll())
 	}
 	t.Run("disk mode", func(t *testing.T) {
+		t.Parallel()
+
 		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
@@ -172,6 +174,8 @@ func TestDropAllTwice(t *testing.T) {
 		test(t, opts)
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
+		t.Parallel()
+
 		opts := getTestOptions("")
 		opts.InMemory = true
 		test(t, opts)
@@ -716,6 +720,8 @@ func TestWriteBatchDuplicate(t *testing.T) {
 	}
 
 	t.Run("writebatch", func(t *testing.T) {
+		t.Parallel()
+
 		opt := DefaultOptions("")
 		opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
 
@@ -732,6 +738,8 @@ func TestWriteBatchDuplicate(t *testing.T) {
 		})
 	})
 	t.Run("writebatch at", func(t *testing.T) {
+		t.Parallel()
+
 		opt := DefaultOptions("")
 		opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
 		opt.managedTxns = true

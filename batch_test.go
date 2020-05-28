@@ -70,11 +70,15 @@ func TestWriteBatch(t *testing.T) {
 		require.NoError(t, err)
 	}
 	t.Run("disk mode", func(t *testing.T) {
+		t.Parallel()
+
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
+		t.Parallel()
+
 		opt := getTestOptions("")
 		opt.InMemory = true
 		db, err := Open(opt)
@@ -87,6 +91,8 @@ func TestWriteBatch(t *testing.T) {
 // This test ensures we don't end up in deadlock in case of empty writebatch.
 func TestEmptyWriteBatch(t *testing.T) {
 	t.Run("normal mode", func(t *testing.T) {
+		t.Parallel()
+
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			wb := db.NewWriteBatch()
 			require.NoError(t, wb.Flush())
@@ -97,6 +103,8 @@ func TestEmptyWriteBatch(t *testing.T) {
 		})
 	})
 	t.Run("managed mode", func(t *testing.T) {
+		t.Parallel()
+
 		opt := getTestOptions("")
 		opt.managedTxns = true
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
