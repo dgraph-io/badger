@@ -223,6 +223,9 @@ func (sw *StreamWriter) Flush() error {
 		y.ValueStruct{Value: data}); err != nil {
 		return err
 	}
+
+	headWriter.closer.SignalAndWait()
+
 	if err := headWriter.Done(); err != nil {
 		return err
 	}
