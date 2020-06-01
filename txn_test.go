@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -864,4 +865,82 @@ func TestArmV7Issue311Fix(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
+}
+
+// This test tries to perform a GetAndSet operation using multiple concurrent
+// transaction and only one of the transactions should be successful.
+// Regression test for https://github.com/dgraph-io/badger/issues/1289
+func TestConflict(t *testing.T) {
+	key := []byte("foo")
+	setCount := uint32(0)
+
+	testAndSet := func(wg *sync.WaitGroup, db *DB) {
+		defer wg.Done()
+		txn := db.NewTransaction(true)
+		defer txn.Discard()
+
+		_, err := txn.Get(key)
+		if err == ErrKeyNotFound {
+			// Unset the error.
+			err = nil
+			require.NoError(t, txn.Set(key, []byte("AA")))
+			txn.CommitWith(func(err error) {
+				if err == nil {
+					require.LessOrEqual(t, uint32(1), atomic.AddUint32(&setCount, 1))
+				} else {
+
+					require.Error(t, err, ErrConflict)
+				}
+			})
+		}
+		require.NoError(t, err)
+	}
+	testAndSetItr := func(wg *sync.WaitGroup, db *DB) {
+		defer wg.Done()
+		txn := db.NewTransaction(true)
+		defer txn.Discard()
+
+		iopt := DefaultIteratorOptions
+		it := txn.NewIterator(iopt)
+
+		found := false
+		for it.Seek(key); it.Valid(); it.Next() {
+			found = true
+		}
+		it.Close()
+
+		if !found {
+			require.NoError(t, txn.Set(key, []byte("AA")))
+			txn.CommitWith(func(err error) {
+				if err == nil {
+					require.LessOrEqual(t, atomic.AddUint32(&setCount, 1), uint32(1))
+				} else {
+					require.Error(t, err, ErrConflict)
+				}
+			})
+		}
+	}
+
+	runTest := func(t *testing.T, fn func(wg *sync.WaitGroup, db *DB)) {
+		loop := 10
+		numGo := 16 // This many concurrent transactions.
+		for i := 0; i < loop; i++ {
+			var wg sync.WaitGroup
+			wg.Add(numGo)
+			setCount = 0
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				for j := 0; j < numGo; j++ {
+					go fn(&wg, db)
+				}
+				wg.Wait()
+			})
+			require.Equal(t, uint32(1), atomic.LoadUint32(&setCount))
+		}
+	}
+	t.Run("TxnGet", func(t *testing.T) {
+		runTest(t, testAndSet)
+	})
+	t.Run("ItrSeek", func(t *testing.T) {
+		runTest(t, testAndSetItr)
+	})
 }
