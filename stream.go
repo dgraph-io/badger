@@ -146,7 +146,7 @@ func (st *Stream) produceRanges(ctx context.Context) {
 }
 
 // produceKVs picks up ranges from rangeCh, generates KV lists and sends them to kvChan.
-func (st *Stream) produceKVs(ctx context.Context) error {
+func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	var size int
 	var txn *Txn
 	if st.readTs > 0 {
@@ -162,6 +162,7 @@ func (st *Stream) produceKVs(ctx context.Context) error {
 		iterOpts.Prefix = st.Prefix
 		iterOpts.PrefetchValues = false
 		itr := txn.NewIterator(iterOpts)
+		itr.ThreadId = threadId
 		defer itr.Close()
 
 		// This unique stream id is used to identify all the keys from this iteration.
@@ -331,16 +332,17 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for i := 0; i < st.NumGo; i++ {
 		wg.Add(1)
-		go func() {
+
+		go func(threadId int) {
 			defer wg.Done()
 			// Picks up ranges from rangeCh, generates KV lists, and sends them to kvChan.
-			if err := st.produceKVs(ctx); err != nil {
+			if err := st.produceKVs(ctx, threadId); err != nil {
 				select {
 				case errCh <- err:
 				default:
 				}
 			}
-		}()
+		}(i)
 	}
 
 	// Pick up key-values from kvChan and send to stream.

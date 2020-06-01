@@ -38,9 +38,9 @@ go test -v -race $packages
 echo
 echo "==> Starting tests with value log mmapped..."
 # Run top level package tests with mmap flag.
-go test -v -race github.com/dgraph-io/badger/v2 --vlog_mmap=true
+go test -timeout=25m -v -race github.com/dgraph-io/badger/v2 --vlog_mmap=true
 
 echo
 echo "==> Starting tests with value log not mmapped..."
-go test -v -race github.com/dgraph-io/badger/v2 --vlog_mmap=false
+go test -timeout=25m -v -race github.com/dgraph-io/badger/v2 --vlog_mmap=false
 
