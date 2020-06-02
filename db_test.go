@@ -1291,6 +1291,12 @@ func TestExpiryImproperDBClose(t *testing.T) {
 			db0.valueDirGuard = nil
 		}
 
+		// On windows, the vlog file is truncated to 2*MaxVlogSize and if we
+		// do not set the trucate flag, reopening the db would return Truncate
+		// Required Error.
+		if runtime.GOOS == "windows" {
+			opt.Truncate = true
+		}
 		db1, err := Open(opt)
 		fmt.Printf("err = %+v\n", err)
 		require.NoError(t, err)
