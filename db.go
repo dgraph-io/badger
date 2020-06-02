@@ -378,7 +378,7 @@ func Open(opt Options) (db *DB, err error) {
 	go db.doWrites(replayCloser)
 
 	if err = db.vlog.open(db, vptr, db.replayFunction()); err != nil {
-		// Perform cleanup
+		// Perform cleanup.
 		replayCloser.SignalAndWait()
 		db.closers.updateSize.SignalAndWait()
 		db.blockCache.Close()

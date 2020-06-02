@@ -801,7 +801,6 @@ func TestPenultimateLogCorruption(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, db1.Close())
-
 }
 
 func checkKeys(t *testing.T, kv *DB, keys [][]byte) {
