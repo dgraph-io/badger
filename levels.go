@@ -593,6 +593,8 @@ func (s *levelsController) compactBuildTables(
 					skipKey = y.SafeCopy(skipKey, it.Key())
 
 					switch {
+					// Add the key to the table only if it has not expired.
+					// We don't want to add the deleted/expired keys.
 					case !isExpired && lastValidVersion:
 						// Add this key. We have set skipKey, so the following key versions
 						// would be skipped.
