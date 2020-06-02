@@ -65,7 +65,8 @@ type committedTxn struct {
 
 func newOracle(opt Options) *oracle {
 	orc := &oracle{
-		isManaged: opt.managedTxns,
+		isManaged:       opt.managedTxns,
+		detectConflicts: opt.DetectConflicts,
 		// We're not initializing nextTxnTs and readOnlyTs. It would be done after replay in Open.
 		//
 		// WaterMarks must be 64-bit aligned for atomic package, hence we must use pointers here.
