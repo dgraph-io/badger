@@ -1269,6 +1269,7 @@ func TestExpiryImproperDBClose(t *testing.T) {
 		// graceful shutdown of db0.
 		db0, err := Open(opt.WithCompactL0OnClose(false))
 		require.NoError(t, err)
+		fmt.Printf("db0.opt.dir = %+v\n", db0.opt.Dir)
 		defer func() { require.NoError(t, db0.Close()) }()
 
 		dur := 1 * time.Hour
@@ -1292,6 +1293,7 @@ func TestExpiryImproperDBClose(t *testing.T) {
 
 		db1, err := Open(opt)
 		require.NoError(t, err)
+		fmt.Printf("db1.opt.dir = %+v\n", db1.opt.Dir)
 		err = db1.View(func(txn *Txn) error {
 			itm, err := txn.Get([]byte("test_key"))
 			require.NoError(t, err)
