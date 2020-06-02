@@ -524,9 +524,9 @@ func TestDropPrefixReadOnly(t *testing.T) {
 		require.Equal(t, err, ErrWindowsNotSupported)
 	} else {
 		require.NoError(t, err)
+		require.Panics(t, func() { db2.DropPrefix([]byte("key0")) })
+		require.NoError(t, db2.Close())
 	}
-	require.Panics(t, func() { db2.DropPrefix([]byte("key0")) })
-	require.NoError(t, db2.Close())
 }
 
 func TestDropPrefixRace(t *testing.T) {
