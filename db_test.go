@@ -1269,7 +1269,6 @@ func TestExpiryImproperDBClose(t *testing.T) {
 		// graceful shutdown of db0.
 		db0, err := Open(opt.WithCompactL0OnClose(false))
 		require.NoError(t, err)
-		defer func() { require.NoError(t, db0.Close()) }()
 
 		dur := 1 * time.Hour
 		expiryTime := uint64(time.Now().Add(dur).Unix())
@@ -1289,13 +1288,8 @@ func TestExpiryImproperDBClose(t *testing.T) {
 			require.NoError(t, db0.valueDirGuard.release())
 			db0.valueDirGuard = nil
 		}
+		require.NoError(t, db0.Close())
 
-		// On windows, the vlog file is truncated to 2*MaxVlogSize and if we
-		// do not set the trucate flag, reopening the db would return Truncate
-		// Required Error.
-		if runtime.GOOS == "windows" {
-			opt.Truncate = true
-		}
 		db1, err := Open(opt)
 		require.NoError(t, err)
 		err = db1.View(func(txn *Txn) error {
