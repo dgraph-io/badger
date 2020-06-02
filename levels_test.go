@@ -269,7 +269,10 @@ func TestCompaction(t *testing.T) {
 				db.SetDiscardTs(10)
 
 				getAllAndCheck(t, db, []keyValVersion{
-					{"foo", "bar", 3, 1}, {"foo", "bar", 2, 0}, {"foo", "bar", 1, 0}, {"fooz", "baz", 1, 1},
+					{"foo", "bar", 3, 1},
+					{"foo", "bar", 2, 0},
+					{"foo", "bar", 1, 0},
+					{"fooz", "baz", 1, 1},
 				})
 				cdef := compactDef{
 					thisLevel: db.lc.levels[1],
@@ -278,10 +281,16 @@ func TestCompaction(t *testing.T) {
 					bot:       db.lc.levels[2].tables,
 				}
 				require.NoError(t, db.lc.runCompactDef(1, cdef))
-				// foo bar version 2 should be dropped after compaction. fooz baz version 1 will remain because overlap exists,
-				// which is expected because `hasOverlap` is only checked once at the beginning of `compactBuildTables` method.
+				// foo bar version 2 should be dropped after compaction. fooz
+				// baz version 1 will remain because overlap exists, which is
+				// expected because `hasOverlap` is only checked once at the
+				// beginning of `compactBuildTables` method.
 				// everything from level 1 is now in level 2.
-				getAllAndCheck(t, db, []keyValVersion{{"foo", "bar", 3, bitDelete}, {"foo", "bar", 1, 0}, {"fooz", "baz", 1, 1}})
+				getAllAndCheck(t, db, []keyValVersion{
+					{"foo", "bar", 3, bitDelete},
+					{"foo", "bar", 1, 0},
+					{"fooz", "baz", 1, 1},
+				})
 
 				cdef = compactDef{
 					thisLevel: db.lc.levels[2],
