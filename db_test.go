@@ -1292,6 +1292,7 @@ func TestExpiryImproperDBClose(t *testing.T) {
 		}
 
 		db1, err := Open(opt)
+		fmt.Printf("err = %+v\n", err)
 		require.NoError(t, err)
 		fmt.Printf("db1.opt.dir = %+v\n", db1.opt.Dir)
 		err = db1.View(func(txn *Txn) error {
