@@ -229,7 +229,6 @@ func (sw *StreamWriter) Flush() error {
 	if err := headWriter.Done(); err != nil {
 		return err
 	}
-	headWriter.closer.SignalAndWait()
 
 	if !sw.db.opt.managedTxns {
 		if sw.db.orc != nil {
