@@ -278,9 +278,9 @@ func TestDropReadOnly(t *testing.T) {
 		require.Equal(t, err, ErrWindowsNotSupported)
 	} else {
 		require.NoError(t, err)
+		require.Panics(t, func() { db2.DropAll() })
+		require.NoError(t, db2.Close())
 	}
-	require.Panics(t, func() { db2.DropAll() })
-	require.NoError(t, db2.Close())
 }
 
 func TestWriteAfterClose(t *testing.T) {
