@@ -526,7 +526,7 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	// down to here. So, keep this around for at least a couple of months.
 	// var b strings.Builder
 	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
-	// 	txn.readTs, commitTs, txn.reads, txn.writes)
+	// 	txn.readTs, commitTs, txn.reads, txn.conflictKeys)
 	for _, e := range txn.pendingWrites {
 		processEntry(e)
 	}
@@ -602,7 +602,9 @@ func (txn *Txn) commitPrecheck() error {
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit() error {
-	if len(txn.writes) == 0 {
+	// txn.conflictKeys can be zero if conflict detection is turned off. So we
+	// should check txn.pendingWrites.
+	if len(txn.pendingWrites) == 0 {
 		return nil // Nothing to do.
 	}
 	// Precheck before discarding txn.
@@ -653,7 +655,7 @@ func (txn *Txn) CommitWith(cb func(error)) {
 		panic("Nil callback provided to CommitWith")
 	}
 
-	if len(txn.writes) == 0 {
+	if len(txn.pendingWrites) == 0 {
 		// Do not run these callbacks from here, because the CommitWith and the
 		// callback might be acquiring the same locks. Instead run the callback
 		// from another goroutine.
