@@ -346,6 +346,7 @@ func Open(opt Options) (db *DB, err error) {
 
 	// newLevelsController potentially loads files in directory.
 	if db.lc, err = newLevelsController(db, &manifest); err != nil {
+		db.closers.updateSize.SignalAndWait()
 		return nil, err
 	}
 
@@ -366,6 +367,11 @@ func Open(opt Options) (db *DB, err error) {
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
 	vs, err := db.get(headKey)
 	if err != nil {
+		db.closers.updateSize.SignalAndWait()
+		if !opt.ReadOnly {
+			db.closers.compactors.SignalAndWait()
+			db.closers.memtable.SignalAndWait()
+		}
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
 	db.orc.nextTxnTs = vs.Version
