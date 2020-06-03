@@ -386,11 +386,11 @@ func (txn *Txn) modify(e *Entry) error {
 		return err
 	}
 
-	// The txn.writes is used for conflict detection. If conflict detection
+	// The txn.conflictKeys is used for conflict detection. If conflict detection
 	// is disabled, we don't need to store key hashes in this map.
 	if txn.db.opt.DetectConflicts {
 		fp := z.MemHash(e.Key) // Avoid dealing with byte arrays.
-		txn.writes[fp] = struct{}{}
+		txn.conflictKeys[fp] = struct{}{}
 	}
 	// If a duplicate entry was inserted in managed mode, move it to the duplicate writes slice.
 	// Add the entry to duplicateWrites only if both the entries have different versions. For
@@ -577,7 +577,7 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	// down to here. So, keep this around for at least a couple of months.
 	// var b strings.Builder
 	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
-	// 	txn.readTs, commitTs, txn.reads, txn.writes)
+	// 	txn.readTs, commitTs, txn.reads, txn.conflictKeys)
 	for _, e := range txn.pendingWrites {
 		processEntry(e)
 	}
