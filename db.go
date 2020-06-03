@@ -378,9 +378,13 @@ func Open(opt Options) (db *DB, err error) {
 	go db.doWrites(replayCloser)
 
 	if err = db.vlog.open(db, vptr, db.replayFunction()); err != nil {
-		// Perform cleanup.
+		// Perform cleanup. Stop all the goroutines that been started so far.
 		replayCloser.SignalAndWait()
 		db.closers.updateSize.SignalAndWait()
+		if !opt.ReadOnly {
+			db.closers.memtable.SignalAndWait()
+			db.closers.compactors.SignalAndWait()
+		}
 		db.blockCache.Close()
 		db.bfCache.Close()
 		db.orc.Stop()
