@@ -59,8 +59,9 @@ type oracle struct {
 }
 
 type committedTxn struct {
-	ts     uint64
-	writes map[uint64]struct{}
+	ts uint64
+	// ConflictKeys Keeps track of the entries written at timestamp ts.
+	conflictKeys map[uint64]struct{}
 }
 
 func newOracle(opt Options) *oracle {
@@ -150,7 +151,7 @@ func (o *oracle) hasConflict(txn *Txn) bool {
 		}
 
 		for _, ro := range txn.reads {
-			if _, has := committedTxn.writes[ro]; has {
+			if _, has := committedTxn.conflictKeys[ro]; has {
 				return true
 			}
 		}
@@ -188,8 +189,8 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 		// We should ensure that txns are not added to o.committedTxns slice when
 		// conflict detection is disabled otherwise this slice would keep growing.
 		o.committedTxns = append(o.committedTxns, committedTxn{
-			ts:     ts,
-			writes: txn.writes,
+			ts:           ts,
+			conflictKeys: txn.conflictKeys,
 		})
 	}
 
@@ -249,10 +250,11 @@ type Txn struct {
 	readTs   uint64
 	commitTs uint64
 
-	update    bool                // update is used to conditionally keep track of reads.
-	reads     []uint64            // contains fingerprints of keys read.
-	writes    map[uint64]struct{} // contains fingerprints of keys written.
-	readsLock sync.Mutex          // guards the reads slice. See addReadKey.
+	update bool     // update is used to conditionally keep track of reads.
+	reads  []uint64 // contains fingerprints of keys read.
+	// contains fingerprints of keys written. This is used for conflict detection.
+	conflictKeys map[uint64]struct{}
+	readsLock    sync.Mutex // guards the reads slice. See addReadKey.
 
 	pendingWrites   map[string]*Entry // cache stores any writes done by txn.
 	duplicateWrites []*Entry          // Used in managed mode to store duplicate entries.
@@ -651,6 +653,8 @@ func (txn *Txn) commitPrecheck() error {
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit() error {
+	// txn.conflictKeys can be zero if conflict detection is turned off. So we
+	// should check txn.pendingWrites.
 	if len(txn.pendingWrites) == 0 {
 		return nil // Nothing to do.
 	}
@@ -770,7 +774,7 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 	}
 	if update {
 		if db.opt.DetectConflicts {
-			txn.writes = make(map[uint64]struct{})
+			txn.conflictKeys = make(map[uint64]struct{})
 		}
 		txn.pendingWrites = make(map[string]*Entry)
 	}
