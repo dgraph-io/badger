@@ -93,6 +93,11 @@ type Options struct {
 	// ChecksumVerificationMode decides when db should verify checksums for SSTable blocks.
 	ChecksumVerificationMode options.ChecksumVerificationMode
 
+	// DetectConflicts determines whether the transactions would be checked for
+	// conflicts. The transactions can be processed at a higher rate when
+	// conflict detection is disabled.
+	DetectConflicts bool
+
 	// KeepBlockIndicesInCache decides whether to keep the block offsets in the cache or not.
 	KeepBlockIndicesInCache bool
 
@@ -163,6 +168,7 @@ func DefaultOptions(path string) Options {
 		LogRotatesToFlush:             2,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
+		DetectConflicts:               true,
 		KeepBlocksInCache:             false,
 		KeepBlockIndicesInCache:       false,
 	}
@@ -640,6 +646,20 @@ func (opt Options) WithMaxBfCacheSize(size int64) Options {
 // The default value of LoadBloomsOnOpen is false.
 func (opt Options) WithLoadBloomsOnOpen(b bool) Options {
 	opt.LoadBloomsOnOpen = b
+	return opt
+}
+
+// WithDetectConflicts returns a new Options value with DetectConflicts set to the given value.
+//
+// Detect conflicts options determines if the transactions would be checked for
+// conflicts before committing them. When this option is set to false
+// (detectConflicts=false) badger can process transactions at a higher rate.
+// Setting this options to false might be useful when the user application
+// deals with conflict detection and resolution.
+//
+// The default value of Detect conflicts is True.
+func (opt Options) WithDetectConflicts(b bool) Options {
+	opt.DetectConflicts = b
 	return opt
 }
 
