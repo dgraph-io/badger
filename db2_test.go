@@ -125,7 +125,6 @@ func TestTruncateVlogNoClose(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	fmt.Println("running")
 	dir := "p"
 	opts := getTestOptions(dir)
 	opts.SyncWrites = true
