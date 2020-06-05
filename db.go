@@ -291,6 +291,12 @@ func Open(opt Options) (db *DB, err error) {
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
 	}
+	// Cleanup all the goroutines started by badger in case of an error.
+	defer func() {
+		if err != nil {
+			db.cleanup()
+		}
+	}()
 
 	if opt.MaxCacheSize > 0 {
 		config := ristretto.Config{
@@ -346,7 +352,6 @@ func Open(opt Options) (db *DB, err error) {
 
 	// newLevelsController potentially loads files in directory.
 	if db.lc, err = newLevelsController(db, &manifest); err != nil {
-		db.closers.updateSize.SignalAndWait()
 		return nil, err
 	}
 
@@ -367,11 +372,6 @@ func Open(opt Options) (db *DB, err error) {
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
 	vs, err := db.get(headKey)
 	if err != nil {
-		db.closers.updateSize.SignalAndWait()
-		if !opt.ReadOnly {
-			db.closers.compactors.SignalAndWait()
-			db.closers.memtable.SignalAndWait()
-		}
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
 	db.orc.nextTxnTs = vs.Version
@@ -384,18 +384,7 @@ func Open(opt Options) (db *DB, err error) {
 	go db.doWrites(replayCloser)
 
 	if err = db.vlog.open(db, vptr, db.replayFunction()); err != nil {
-		// Perform cleanup. Stop all the goroutines that been started so far.
 		replayCloser.SignalAndWait()
-		db.closers.updateSize.SignalAndWait()
-		if !opt.ReadOnly {
-			db.closers.memtable.SignalAndWait()
-			db.closers.compactors.SignalAndWait()
-		}
-		db.blockCache.Close()
-		db.bfCache.Close()
-		db.orc.Stop()
-		db.vlog.Close()
-
 		return nil, y.Wrapf(err, "During db.vlog.open")
 	}
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
@@ -424,6 +413,31 @@ func Open(opt Options) (db *DB, err error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
+}
+
+// cleanup stops all the goroutines started by badger. This is used in open to
+// cleanup goroutines in case of an error.
+func (db *DB) cleanup() {
+	db.blockCache.Close()
+	db.bfCache.Close()
+	db.stopMemoryFlush()
+	db.stopCompactions()
+
+	if db.closers.updateSize != nil {
+		db.closers.updateSize.Signal()
+	}
+	if db.closers.valueGC != nil {
+		db.closers.valueGC.Signal()
+	}
+	if db.closers.writes != nil {
+		db.closers.writes.Signal()
+	}
+	if db.closers.pub != nil {
+		db.closers.pub.Signal()
+	}
+
+	db.orc.Stop()
+	db.vlog.Close()
 }
 
 // DataCacheMetrics returns the metrics for the underlying data cache.
