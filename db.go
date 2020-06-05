@@ -295,6 +295,7 @@ func Open(opt Options) (db *DB, err error) {
 	defer func() {
 		if err != nil {
 			db.cleanup()
+			db = nil
 		}
 	}()
 
@@ -328,7 +329,6 @@ func Open(opt Options) (db *DB, err error) {
 			return nil, errors.Wrap(err, "failed to create bf cache")
 		}
 	}
-
 	if db.opt.InMemory {
 		db.opt.SyncWrites = false
 		// If badger is running in memory mode, push everything into the LSM Tree.
@@ -343,7 +343,7 @@ func Open(opt Options) (db *DB, err error) {
 	}
 
 	if db.registry, err = OpenKeyRegistry(krOpt); err != nil {
-		return nil, err
+		return db, err
 	}
 	db.calculateSize()
 	db.closers.updateSize = y.NewCloser(1)
@@ -352,7 +352,7 @@ func Open(opt Options) (db *DB, err error) {
 
 	// newLevelsController potentially loads files in directory.
 	if db.lc, err = newLevelsController(db, &manifest); err != nil {
-		return nil, err
+		return db, err
 	}
 
 	// Initialize vlog struct.
@@ -372,7 +372,7 @@ func Open(opt Options) (db *DB, err error) {
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
 	vs, err := db.get(headKey)
 	if err != nil {
-		return nil, errors.Wrap(err, "Retrieving head")
+		return db, errors.Wrap(err, "Retrieving head")
 	}
 	db.orc.nextTxnTs = vs.Version
 	var vptr valuePointer
@@ -385,7 +385,7 @@ func Open(opt Options) (db *DB, err error) {
 
 	if err = db.vlog.open(db, vptr, db.replayFunction()); err != nil {
 		replayCloser.SignalAndWait()
-		return nil, y.Wrapf(err, "During db.vlog.open")
+		return db, y.Wrapf(err, "During db.vlog.open")
 	}
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 
