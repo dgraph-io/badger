@@ -564,6 +564,10 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 
 			ne.Value = append([]byte{}, e.Value...)
 			es := int64(ne.estimateSize(vlog.opt.ValueThreshold))
+			// Consider size of value as well while considering the size. There
+			// has been reports of high memory usage in rewrite because we
+			// don't consider the value size.
+			es += int64(len(e.Value))
 			// Ensure length and size of wb is within transaction limits.
 			if int64(len(wb)+1) >= vlog.opt.maxBatchCount ||
 				size+es >= vlog.opt.maxBatchSize {
