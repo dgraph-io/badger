@@ -195,6 +195,7 @@ func (l *KVLoader) send() error {
 
 	l.entries = make([]*Entry, 0, l.db.opt.maxBatchCount)
 	l.entriesSize = 0
+	l.totalSize = 0
 	return nil
 }
 
