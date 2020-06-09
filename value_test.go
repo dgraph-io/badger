@@ -762,6 +762,7 @@ func TestPenultimateLogCorruption(t *testing.T) {
 
 	db0, err := Open(opt)
 	require.NoError(t, err)
+	defer func() { require.NoError(t, db0.Close()) }()
 
 	h := testHelper{db: db0, t: t}
 	h.writeRange(0, 7)
@@ -780,13 +781,12 @@ func TestPenultimateLogCorruption(t *testing.T) {
 	// Simulate a crash by not closing db0, but releasing the locks.
 	if db0.dirLockGuard != nil {
 		require.NoError(t, db0.dirLockGuard.release())
+		db0.dirLockGuard = nil
 	}
 	if db0.valueDirGuard != nil {
 		require.NoError(t, db0.valueDirGuard.release())
+		db0.valueDirGuard = nil
 	}
-	require.NoError(t, db0.vlog.Close())
-	require.NoError(t, db0.manifest.close())
-	require.NoError(t, db0.registry.Close())
 
 	opt.Truncate = true
 	db1, err := Open(opt)

@@ -1265,7 +1265,9 @@ func TestExpiry(t *testing.T) {
 func TestExpiryImproperDBClose(t *testing.T) {
 	testReplay := func(opt Options) {
 
-		db0, err := Open(opt)
+		// L0 compaction doesn't affect the test in any way. It is set to allow
+		// graceful shutdown of db0.
+		db0, err := Open(opt.WithCompactL0OnClose(false))
 		require.NoError(t, err)
 
 		dur := 1 * time.Hour
@@ -1280,17 +1282,13 @@ func TestExpiryImproperDBClose(t *testing.T) {
 		// Simulate a crash  by not closing db0, but releasing the locks.
 		if db0.dirLockGuard != nil {
 			require.NoError(t, db0.dirLockGuard.release())
+			db0.dirLockGuard = nil
 		}
 		if db0.valueDirGuard != nil {
 			require.NoError(t, db0.valueDirGuard.release())
+			db0.valueDirGuard = nil
 		}
-		// We need to close vlog to fix the vlog file size. On windows, the vlog file
-		// is truncated to 2*MaxVlogSize and if we don't close the vlog file, reopening
-		// it would return Truncate Required Error.
-		require.NoError(t, db0.vlog.Close())
-
-		require.NoError(t, db0.registry.Close())
-		require.NoError(t, db0.manifest.close())
+		require.NoError(t, db0.Close())
 
 		db1, err := Open(opt)
 		require.NoError(t, err)

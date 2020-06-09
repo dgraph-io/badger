@@ -291,6 +291,13 @@ func Open(opt Options) (db *DB, err error) {
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
 	}
+	// Cleanup all the goroutines started by badger in case of an error.
+	defer func() {
+		if err != nil {
+			db.cleanup()
+			db = nil
+		}
+	}()
 
 	if opt.MaxCacheSize > 0 {
 		config := ristretto.Config{
@@ -322,7 +329,6 @@ func Open(opt Options) (db *DB, err error) {
 			return nil, errors.Wrap(err, "failed to create bf cache")
 		}
 	}
-
 	if db.opt.InMemory {
 		db.opt.SyncWrites = false
 		// If badger is running in memory mode, push everything into the LSM Tree.
@@ -337,7 +343,7 @@ func Open(opt Options) (db *DB, err error) {
 	}
 
 	if db.registry, err = OpenKeyRegistry(krOpt); err != nil {
-		return nil, err
+		return db, err
 	}
 	db.calculateSize()
 	db.closers.updateSize = y.NewCloser(1)
@@ -346,7 +352,7 @@ func Open(opt Options) (db *DB, err error) {
 
 	// newLevelsController potentially loads files in directory.
 	if db.lc, err = newLevelsController(db, &manifest); err != nil {
-		return nil, err
+		return db, err
 	}
 
 	// Initialize vlog struct.
@@ -366,7 +372,7 @@ func Open(opt Options) (db *DB, err error) {
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
 	vs, err := db.get(headKey)
 	if err != nil {
-		return nil, errors.Wrap(err, "Retrieving head")
+		return db, errors.Wrap(err, "Retrieving head")
 	}
 	db.orc.nextTxnTs = vs.Version
 	var vptr valuePointer
@@ -378,6 +384,7 @@ func Open(opt Options) (db *DB, err error) {
 	go db.doWrites(replayCloser)
 
 	if err = db.vlog.open(db, vptr, db.replayFunction()); err != nil {
+		replayCloser.SignalAndWait()
 		return db, y.Wrapf(err, "During db.vlog.open")
 	}
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
@@ -406,6 +413,31 @@ func Open(opt Options) (db *DB, err error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
+}
+
+// cleanup stops all the goroutines started by badger. This is used in open to
+// cleanup goroutines in case of an error.
+func (db *DB) cleanup() {
+	db.blockCache.Close()
+	db.bfCache.Close()
+	db.stopMemoryFlush()
+	db.stopCompactions()
+
+	if db.closers.updateSize != nil {
+		db.closers.updateSize.Signal()
+	}
+	if db.closers.valueGC != nil {
+		db.closers.valueGC.Signal()
+	}
+	if db.closers.writes != nil {
+		db.closers.writes.Signal()
+	}
+	if db.closers.pub != nil {
+		db.closers.pub.Signal()
+	}
+
+	db.orc.Stop()
+	db.vlog.Close()
 }
 
 // DataCacheMetrics returns the metrics for the underlying data cache.

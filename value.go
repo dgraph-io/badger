@@ -1219,7 +1219,7 @@ func (lf *logFile) init() error {
 }
 
 func (vlog *valueLog) Close() error {
-	if vlog.db.opt.InMemory {
+	if vlog == nil || vlog.db == nil || vlog.db.opt.InMemory {
 		return nil
 	}
 	// close flushDiscardStats.
