@@ -28,6 +28,12 @@ import (
 	"github.com/golang/protobuf/proto"
 )
 
+// flushThreshold determines when a buffer will be flushed. When performing a
+// backup/restore, the entries will be batched up until the total size of batch
+// is more than flushThreshold or entry size (without the value size) is more
+// than the maxBatchSize.
+const flushThreshold = 100 << 20
+
 // Backup is a wrapper function over Stream.Backup to generate full and incremental backups of the
 // DB. For more control over how many goroutines are used to generate the backup, or if you wish to
 // backup only a certain range of keys, use Stream.Backup directly.
@@ -134,6 +140,7 @@ type KVLoader struct {
 	throttle    *y.Throttle
 	entries     []*Entry
 	entriesSize int64
+	totalSize   int64
 }
 
 // NewKVLoader returns a new instance of KVLoader.
@@ -164,13 +171,15 @@ func (l *KVLoader) Set(kv *pb.KV) error {
 	estimatedSize := int64(e.estimateSize(l.db.opt.ValueThreshold))
 	// Flush entries if inserting the next entry would overflow the transactional limits.
 	if int64(len(l.entries))+1 >= l.db.opt.maxBatchCount ||
-		l.entriesSize+estimatedSize >= l.db.opt.maxBatchSize {
+		l.entriesSize+estimatedSize >= l.db.opt.maxBatchSize ||
+		l.totalSize >= flushThreshold {
 		if err := l.send(); err != nil {
 			return err
 		}
 	}
 	l.entries = append(l.entries, e)
 	l.entriesSize += estimatedSize
+	l.totalSize += estimatedSize + int64(len(e.Value))
 	return nil
 }
 
@@ -186,6 +195,7 @@ func (l *KVLoader) send() error {
 
 	l.entries = make([]*Entry, 0, l.db.opt.maxBatchCount)
 	l.entriesSize = 0
+	l.totalSize = 0
 	return nil
 }
 
