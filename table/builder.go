@@ -149,17 +149,13 @@ func (b *Builder) handleBlock() {
 			blockBuf = eBlock
 		}
 
-		// The newend should always be less than or equal to the original end
-		// plus the padding. If the new end is greater than item.end+padding
-		// that means the data from this block cannot be stored in its existing
-		// location and trying to copy it over would mean we would over-write
-		// some data of the next block.
+		// BlockBuf should always less than or equal to allocated space. If the blockBuf is greater
+		// than allocated space that means the data from this block cannot be stored in its
+		// existing location and trying to copy it over would mean we would over-writesome data
+		// of the next block.
 		allocatedSpace := (item.end - item.start) + padding
-		y.AssertTruef(uint32(len(blockBuf)) <= allocatedSpace,
-			"newend: %d item.end: %d padding: %d",
-			(allocatedSpace-uint32(len(blockBuf)))+item.end,
-			item.end,
-			padding)
+		y.AssertTruef(uint32(len(blockBuf)) <= allocatedSpace, "newend: %d oldend: %d padding: %d",
+			item.start+uint32(len(blockBuf)), item.end, padding)
 
 		// Acquire the buflock here. The builder.grow function might change
 		// the b.buf while this goroutine was running.
