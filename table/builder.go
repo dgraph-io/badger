@@ -154,8 +154,12 @@ func (b *Builder) handleBlock() {
 		// that means the data from this block cannot be stored in its existing
 		// location and trying to copy it over would mean we would over-write
 		// some data of the next block.
-		y.AssertTruef(uint32(len(blockBuf)) <= item.end+padding,
-			"newend: %d item.end: %d padding: %d", len(blockBuf), item.end, padding)
+		allocatedSpace := (item.end - item.start) + padding
+		y.AssertTruef(uint32(len(blockBuf)) <= allocatedSpace,
+			"newend: %d item.end: %d padding: %d",
+			(allocatedSpace-uint32(len(blockBuf)))+item.end,
+			item.end,
+			padding)
 
 		// Acquire the buflock here. The builder.grow function might change
 		// the b.buf while this goroutine was running.
