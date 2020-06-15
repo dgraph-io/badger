@@ -151,9 +151,9 @@ func (b *Builder) handleBlock() {
 
 		// BlockBuf should always less than or equal to allocated space. If the blockBuf is greater
 		// than allocated space that means the data from this block cannot be stored in its
-		// existing location and trying to copy it over would mean we would over-writesome data
+		// existing location and trying to copy it over would mean we would over-write some data
 		// of the next block.
-		allocatedSpace := (item.end - item.start) + padding
+		allocatedSpace := (item.end - item.start) + padding + 1
 		y.AssertTruef(uint32(len(blockBuf)) <= allocatedSpace, "newend: %d oldend: %d padding: %d",
 			item.start+uint32(len(blockBuf)), item.end, padding)
 
