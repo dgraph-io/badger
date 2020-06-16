@@ -136,6 +136,10 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 		} else {
 			nv = vp.Encode()
 			meta = meta | bitValuePointer
+			// Update vhead. If the crash happens while replay was in progess
+			// and the head is not updated, we will end up replaying all the
+			// files again.
+			db.vhead = vp
 		}
 
 		v := y.ValueStruct{
