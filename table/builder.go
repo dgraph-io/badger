@@ -204,6 +204,9 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 		diffKey = b.keyDiff(key)
 	}
 
+	y.AssertTrue(len(key)-len(diffKey) <= math.MaxUint16)
+	y.AssertTrue(len(diffKey) <= math.MaxUint16)
+
 	h := header{
 		overlap: uint16(len(key) - len(diffKey)),
 		diff:    uint16(len(diffKey)),
