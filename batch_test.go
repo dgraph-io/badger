@@ -70,6 +70,10 @@ func TestWriteBatch(t *testing.T) {
 		require.NoError(t, err)
 	}
 	t.Run("disk mode", func(t *testing.T) {
+		opt := getTestOptions("")
+		// Set value threshold to 32 bytes otherwise write batch will generate
+		// too many files and we will crash with too many files open error.
+		opt.ValueThreshold = 32
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
