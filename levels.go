@@ -830,6 +830,18 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 		cd.top = []*table.Table{t}
 		left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, cd.thisRange)
 
+		// Sometimes below line(make([]*table.Table, right-left)) panics with error
+		// (runtime error: makeslice: len out of range). One of the reason for this can be when
+		// right < left. We don't know how to reproduce it as of now. We are just logging it so
+		// that we can get more context.
+		if right < left {
+			s.kv.opt.Errorf("right: %d is less than left: %d in overlappingTables for current "+
+				"level: %d, next level: %d, key range(%s, %s)", right, left, cd.thisLevel.level,
+				cd.nextLevel.level, cd.thisRange.left, cd.thisRange.right)
+
+			continue
+		}
+
 		cd.bot = make([]*table.Table, right-left)
 		copy(cd.bot, cd.nextLevel.tables[left:right])
 
