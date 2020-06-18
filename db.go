@@ -218,8 +218,7 @@ func Open(opt Options) (db *DB, err error) {
 	if opt.Compression == options.ZSTD && !y.CgoEnabled {
 		return nil, y.ErrZstdCgo
 	}
-	// Keep L0 in memory if either it is set or if InMemory is set. We
-	// shoudln't have L0 on disk in InMemory Mode.
+	// Keep L0 in memory if either KeepL0InMemory is set or if InMemory is set.
 	opt.KeepL0InMemory = opt.KeepL0InMemory || opt.InMemory
 
 	// Compact L0 on close if either it is set or if KeepL0InMemory is set. When
