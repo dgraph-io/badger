@@ -9,8 +9,7 @@ require (
 	github.com/dustin/go-humanize v1.0.0
 	github.com/golang/protobuf v1.3.1
 	github.com/golang/snappy v0.0.1
-	github.com/google/go-cmp v0.3.1 // indirect
-	github.com/klauspost/compress v1.9.4
+	github.com/klauspost/compress v1.10.9
 	github.com/kr/pretty v0.1.0 // indirect
 	github.com/pkg/errors v0.8.1
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
