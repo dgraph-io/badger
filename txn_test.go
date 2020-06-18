@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -760,7 +761,7 @@ func TestManagedDB(t *testing.T) {
 		for i := 0; i <= 3; i++ {
 			require.NoError(t, txn.SetEntry(NewEntry(key(i), val(i))))
 		}
-		require.Panics(t, func() { txn.Commit() })
+		require.Error(t, txn.Commit())
 		require.NoError(t, txn.CommitAt(3, nil))
 
 		// Read data at t=2.
@@ -837,9 +838,8 @@ func TestManagedDB(t *testing.T) {
 
 func TestArmV7Issue311Fix(t *testing.T) {
 	dir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir).
@@ -848,31 +848,99 @@ func TestArmV7Issue311Fix(t *testing.T) {
 		WithLevelOneSize(8 << 20).
 		WithMaxTableSize(2 << 20).
 		WithSyncWrites(false))
-	if err != nil {
-		t.Fatalf("cannot open db at location %s: %v", dir, err)
-	}
+
+	require.NoError(t, err)
 
 	err = db.View(func(txn *Txn) error { return nil })
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	err = db.Update(func(txn *Txn) error {
 		return txn.SetEntry(NewEntry([]byte{0x11}, []byte{0x22}))
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	err = db.Update(func(txn *Txn) error {
 		return txn.SetEntry(NewEntry([]byte{0x11}, []byte{0x22}))
 	})
 
-	if err != nil {
-		t.Fatal(err)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+}
+
+// This test tries to perform a GetAndSet operation using multiple concurrent
+// transaction and only one of the transactions should be successful.
+// Regression test for https://github.com/dgraph-io/badger/issues/1289
+func TestConflict(t *testing.T) {
+	key := []byte("foo")
+	setCount := uint32(0)
+
+	testAndSet := func(wg *sync.WaitGroup, db *DB) {
+		defer wg.Done()
+		txn := db.NewTransaction(true)
+		defer txn.Discard()
+
+		_, err := txn.Get(key)
+		if err == ErrKeyNotFound {
+			// Unset the error.
+			err = nil
+			require.NoError(t, txn.Set(key, []byte("AA")))
+			txn.CommitWith(func(err error) {
+				if err == nil {
+					require.LessOrEqual(t, uint32(1), atomic.AddUint32(&setCount, 1))
+				} else {
+
+					require.Error(t, err, ErrConflict)
+				}
+			})
+		}
+		require.NoError(t, err)
+	}
+	testAndSetItr := func(wg *sync.WaitGroup, db *DB) {
+		defer wg.Done()
+		txn := db.NewTransaction(true)
+		defer txn.Discard()
+
+		iopt := DefaultIteratorOptions
+		it := txn.NewIterator(iopt)
+
+		found := false
+		for it.Seek(key); it.Valid(); it.Next() {
+			found = true
+		}
+		it.Close()
+
+		if !found {
+			require.NoError(t, txn.Set(key, []byte("AA")))
+			txn.CommitWith(func(err error) {
+				if err == nil {
+					require.LessOrEqual(t, atomic.AddUint32(&setCount, 1), uint32(1))
+				} else {
+					require.Error(t, err, ErrConflict)
+				}
+			})
+		}
 	}
 
-	if err = db.Close(); err != nil {
-		t.Fatal(err)
+	runTest := func(t *testing.T, fn func(wg *sync.WaitGroup, db *DB)) {
+		loop := 10
+		numGo := 16 // This many concurrent transactions.
+		for i := 0; i < loop; i++ {
+			var wg sync.WaitGroup
+			wg.Add(numGo)
+			setCount = 0
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				for j := 0; j < numGo; j++ {
+					go fn(&wg, db)
+				}
+				wg.Wait()
+			})
+			require.Equal(t, uint32(1), atomic.LoadUint32(&setCount))
+		}
 	}
+	t.Run("TxnGet", func(t *testing.T) {
+		runTest(t, testAndSet)
+	})
+	t.Run("ItrSeek", func(t *testing.T) {
+		runTest(t, testAndSetItr)
+	})
 }

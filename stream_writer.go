@@ -223,6 +223,9 @@ func (sw *StreamWriter) Flush() error {
 		y.ValueStruct{Value: data}); err != nil {
 		return err
 	}
+
+	headWriter.closer.SignalAndWait()
+
 	if err := headWriter.Done(); err != nil {
 		return err
 	}
@@ -416,6 +419,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	opts := buildTableOptions(w.db.opt)
 	opts.DataKey = builder.DataKey()
 	opts.Cache = w.db.blockCache
+	opts.BfCache = w.db.bfCache
 	var tbl *table.Table
 	if w.db.opt.InMemory {
 		var err error

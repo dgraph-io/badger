@@ -29,6 +29,9 @@ var (
 	zstdEncOnce, zstdDecOnce sync.Once
 )
 
+// CgoEnabled is used to check if CGO is enabled while building badger.
+const CgoEnabled = false
+
 // ZSTDDecompress decompresses a block using ZSTD algorithm.
 func ZSTDDecompress(dst, src []byte) ([]byte, error) {
 	var err error

@@ -7,20 +7,32 @@ $ go version
 
 </pre>
 
+### What operating system are you using?
+
+
+
 ### What version of Badger are you using?
+
 
 
 ### Does this issue reproduce with the latest master?
 
 
-### What are the hardware specifications of the machine (RAM, OS, Disk)?
+
+### Steps to Reproduce the issue
+<!--
+If possible, provide a recipe for reproducing the error. A complete runnable program is great.
+-->
+
+
+### What Badger options were set? 
+<!--
+Provide the list of Badger options that were set.
+-->
+
 
 
 ### What did you do?
-
-<!--
-If possible, provide a recipe for reproducing the error. A complete runnable program is good.
--->
 
 
 

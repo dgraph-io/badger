@@ -23,10 +23,8 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"math"
 	"math/rand"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -289,6 +287,13 @@ func TestGet(t *testing.T) {
 		test(t, db)
 		require.NoError(t, db.Close())
 	})
+	t.Run("cache disabled", func(t *testing.T) {
+		opts := DefaultOptions("").WithInMemory(true).WithMaxCacheSize(0)
+		db, err := Open(opts)
+		require.NoError(t, err)
+		test(t, db)
+		require.NoError(t, db.Close())
+	})
 }
 
 func TestGetAfterDelete(t *testing.T) {
@@ -371,6 +376,107 @@ func TestForceCompactL0(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(db.lc.levels[0].tables), 0)
 	require.NoError(t, db.Close())
+}
+
+func dirSize(path string) (int64, error) {
+	var size int64
+	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if !info.IsDir() {
+			size += info.Size()
+		}
+		return err
+	})
+	return (size >> 20), err
+}
+
+// BenchmarkDbGrowth ensures DB does not grow with repeated adds and deletes.
+//
+// New keys are created with each for-loop iteration. During each
+// iteration, the previous for-loop iteration's keys are deleted.
+//
+// To reproduce continous growth problem due to `badgerMove` keys,
+// update `value.go` `discardEntry` line 1628 to return false
+//
+// Also with PR #1303, the delete keys are properly cleaned which
+// further reduces disk size.
+func BenchmarkDbGrowth(b *testing.B) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(b, err)
+	defer removeDir(dir)
+
+	start := 0
+	lastStart := 0
+	numKeys := 2000
+	valueSize := 1024
+	value := make([]byte, valueSize)
+
+	discardRatio := 0.001
+	maxWrites := 200
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 64 << 15
+	opts.MaxTableSize = 4 << 15
+	opts.LevelOneSize = 16 << 15
+	opts.NumVersionsToKeep = 1
+	opts.NumLevelZeroTables = 1
+	opts.NumLevelZeroTablesStall = 2
+	opts.KeepL0InMemory = false // enable L0 compaction
+	db, err := Open(opts)
+	require.NoError(b, err)
+	for numWrites := 0; numWrites < maxWrites; numWrites++ {
+		txn := db.NewTransaction(true)
+		if start > 0 {
+			for i := lastStart; i < start; i++ {
+				key := make([]byte, 8)
+				binary.BigEndian.PutUint64(key[:], uint64(i))
+				err := txn.Delete(key)
+				if err == ErrTxnTooBig {
+					require.NoError(b, txn.Commit())
+					txn = db.NewTransaction(true)
+				} else {
+					require.NoError(b, err)
+				}
+			}
+		}
+
+		for i := start; i < numKeys+start; i++ {
+			key := make([]byte, 8)
+			binary.BigEndian.PutUint64(key[:], uint64(i))
+			err := txn.SetEntry(NewEntry(key, value))
+			if err == ErrTxnTooBig {
+				require.NoError(b, txn.Commit())
+				txn = db.NewTransaction(true)
+			} else {
+				require.NoError(b, err)
+			}
+		}
+		require.NoError(b, txn.Commit())
+		require.NoError(b, db.Flatten(1))
+		for {
+			err = db.RunValueLogGC(discardRatio)
+			if err == ErrNoRewrite {
+				break
+			} else {
+				require.NoError(b, err)
+			}
+		}
+		size, err := dirSize(dir)
+		require.NoError(b, err)
+		fmt.Printf("Badger DB Size = %dMB\n", size)
+		lastStart = start
+		start += numKeys
+	}
+
+	db.Close()
+	size, err := dirSize(dir)
+	require.NoError(b, err)
+	require.LessOrEqual(b, size, int64(16))
+	fmt.Printf("Badger DB Size = %dMB\n", size)
 }
 
 // Put a lot of data to move some data to disk.
@@ -807,24 +913,46 @@ func TestIterateParallel(t *testing.T) {
 
 		wg.Wait()
 
-		// Check that a RW txn can't run multiple iterators.
+		// Check that a RW txn can run multiple iterators.
 		txn := db.NewTransaction(true)
 		itr := txn.NewIterator(DefaultIteratorOptions)
-		require.Panics(t, func() {
-			txn.NewIterator(DefaultIteratorOptions)
+		require.NotPanics(t, func() {
+			// Now that multiple iterators are supported in read-write
+			// transactions, make sure this does not panic anymore. Then just
+			// close the iterator.
+			txn.NewIterator(DefaultIteratorOptions).Close()
 		})
+		// The transaction should still panic since there is still one pending
+		// iterator that is open.
 		require.Panics(t, txn.Discard)
 		itr.Close()
 		txn.Discard()
 
-		// Run multiple iterators for a RO txn.
-		txn = db.NewTransaction(false)
-		defer txn.Discard()
-		wg.Add(3)
-		go iterate(txn, &wg)
-		go iterate(txn, &wg)
-		go iterate(txn, &wg)
-		wg.Wait()
+		// (Regression) Make sure that creating multiple concurrent iterators
+		// within a read only transaction continues to work.
+		t.Run("multiple read-only iterators", func(t *testing.T) {
+			// Run multiple iterators for a RO txn.
+			txn = db.NewTransaction(false)
+			defer txn.Discard()
+			wg.Add(3)
+			go iterate(txn, &wg)
+			go iterate(txn, &wg)
+			go iterate(txn, &wg)
+			wg.Wait()
+		})
+
+		// Make sure that when we create multiple concurrent iterators within a
+		// read-write transaction that it actually iterates successfully.
+		t.Run("multiple read-write iterators", func(t *testing.T) {
+			// Run multiple iterators for a RO txn.
+			txn = db.NewTransaction(true)
+			defer txn.Discard()
+			wg.Add(3)
+			go iterate(txn, &wg)
+			go iterate(txn, &wg)
+			go iterate(txn, &wg)
+			wg.Wait()
+		})
 	})
 }
 
@@ -1137,7 +1265,9 @@ func TestExpiry(t *testing.T) {
 func TestExpiryImproperDBClose(t *testing.T) {
 	testReplay := func(opt Options) {
 
-		db0, err := Open(opt)
+		// L0 compaction doesn't affect the test in any way. It is set to allow
+		// graceful shutdown of db0.
+		db0, err := Open(opt.WithCompactL0OnClose(false))
 		require.NoError(t, err)
 
 		dur := 1 * time.Hour
@@ -1152,17 +1282,13 @@ func TestExpiryImproperDBClose(t *testing.T) {
 		// Simulate a crash  by not closing db0, but releasing the locks.
 		if db0.dirLockGuard != nil {
 			require.NoError(t, db0.dirLockGuard.release())
+			db0.dirLockGuard = nil
 		}
 		if db0.valueDirGuard != nil {
 			require.NoError(t, db0.valueDirGuard.release())
+			db0.valueDirGuard = nil
 		}
-		// We need to close vlog to fix the vlog file size. On windows, the vlog file
-		// is truncated to 2*MaxVlogSize and if we don't close the vlog file, reopening
-		// it would return Truncate Required Error.
-		require.NoError(t, db0.vlog.Close())
-
-		require.NoError(t, db0.registry.Close())
-		require.NoError(t, db0.manifest.close())
+		require.NoError(t, db0.Close())
 
 		db1, err := Open(opt)
 		require.NoError(t, err)
@@ -1467,6 +1593,33 @@ func TestSequence_Release(t *testing.T) {
 	})
 }
 
+func TestTestSequence2(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		key := []byte("key")
+		seq1, err := db.GetSequence(key, 2)
+		require.NoError(t, err)
+
+		seq2, err := db.GetSequence(key, 2)
+		require.NoError(t, err)
+		num, err := seq2.Next()
+		require.NoError(t, err)
+		require.Equal(t, uint64(2), num)
+
+		require.NoError(t, seq2.Release())
+		require.NoError(t, seq1.Release())
+
+		seq3, err := db.GetSequence(key, 2)
+		require.NoError(t, err)
+		for i := 0; i < 5; i++ {
+			num2, err := seq3.Next()
+			require.NoError(t, err)
+			require.Equal(t, uint64(i)+3, num2)
+		}
+
+		require.NoError(t, seq3.Release())
+	})
+}
+
 func TestReadOnly(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
@@ -1561,9 +1714,6 @@ func TestLSMOnly(t *testing.T) {
 	opts.ValueLogMaxEntries = 100
 	db, err := Open(opts)
 	require.NoError(t, err)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	value := make([]byte, 128)
 	_, err = rand.Read(value)
@@ -1575,9 +1725,7 @@ func TestLSMOnly(t *testing.T) {
 
 	db, err = Open(opts)
 	require.NoError(t, err)
-	if err != nil {
-		t.Fatal(err)
-	}
+
 	defer db.Close()
 	require.NoError(t, db.RunValueLogGC(0.2))
 }
@@ -1957,77 +2105,8 @@ func TestVerifyChecksum(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	// call flag.Parse() here if TestMain uses flags
-	go func() {
-		if err := http.ListenAndServe("localhost:8080", nil); err != nil {
-			panic("Unable to open http port at 8080")
-		}
-	}()
+	flag.Parse()
 	os.Exit(m.Run())
-}
-
-func ExampleDB_Subscribe() {
-	prefix := []byte{'a'}
-
-	// This key should be printed, since it matches the prefix.
-	aKey := []byte("a-key")
-	aValue := []byte("a-value")
-
-	// This key should not be printed.
-	bKey := []byte("b-key")
-	bValue := []byte("b-value")
-
-	// Open the DB.
-	dir, err := ioutil.TempDir("", "badger-test")
-	if err != nil {
-		panic(err)
-	}
-	defer removeDir(dir)
-	db, err := Open(DefaultOptions(dir))
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-
-	// Create the context here so we can cancel it after sending the writes.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Use the WaitGroup to make sure we wait for the subscription to stop before continuing.
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		cb := func(kvs *KVList) error {
-			for _, kv := range kvs.Kv {
-				fmt.Printf("%s is now set to %s\n", kv.Key, kv.Value)
-			}
-			return nil
-		}
-		if err := db.Subscribe(ctx, cb, prefix); err != nil && err != context.Canceled {
-			panic(err)
-		}
-		log.Printf("subscription closed")
-	}()
-
-	// Wait for the above go routine to be scheduled.
-	time.Sleep(time.Second)
-	// Write both keys, but only one should be printed in the Output.
-	err = db.Update(func(txn *Txn) error { return txn.Set(aKey, aValue) })
-	if err != nil {
-		panic(err)
-	}
-	err = db.Update(func(txn *Txn) error { return txn.Set(bKey, bValue) })
-	if err != nil {
-		panic(err)
-	}
-
-	log.Printf("stopping subscription")
-	cancel()
-	log.Printf("waiting for subscription to close")
-	wg.Wait()
-	// Output:
-	// a-key is now set to a-value
 }
 
 func removeDir(dir string) {

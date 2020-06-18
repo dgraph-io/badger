@@ -7,20 +7,25 @@ in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
 fast, distributed graph database. It's meant to be a performant alternative to
 non-Go-based key-value stores like RocksDB.
 
-## Project Status [Jun 26, 2019]
+## Project Status [March 24, 2020]
 
 Badger is stable and is being used to serve data sets worth hundreds of
 terabytes. Badger supports concurrent ACID transactions with serializable
 snapshot isolation (SSI) guarantees. A Jepsen-style bank test runs nightly for
 8h, with `--race` flag and ensures the maintenance of transactional guarantees.
 Badger has also been tested to work with filesystem level anomalies, to ensure
-persistence and consistency.
+persistence and consistency. Badger is being used by a number of projects which
+includes Dgraph, Jaeger Tracing, UsenetExpress, and many more.
+
+The list of projects using Badger can be found [here](#projects-using-badger).
 
 Badger v1.0 was released in Nov 2017, and the latest version that is data-compatible
 with v1.0 is v1.6.0.
 
-Badger v2.0, a new release coming up very soon will use a new storage format which won't
-be compatible with all of the v1.x. The [Changelog] is kept fairly up-to-date.
+Badger v2.0 was released in Nov 2019 with a new storage format which won't
+be compatible with all of the v1.x. Badger v2.0 supports compression, encryption and uses a cache to speed up lookup.
+
+The [Changelog] is kept fairly up-to-date.
 
 For more details on our version naming schema please read [Choosing a version](#choosing-a-version).
 
@@ -53,16 +58,16 @@ For more details on our version naming schema please read [Choosing a version](#
   * [Design](#design)
     + [Comparisons](#comparisons)
     + [Benchmarks](#benchmarks)
-  * [Other Projects Using Badger](#other-projects-using-badger)
+  * [Projects Using Badger](#projects-using-badger)
   * [Frequently Asked Questions](#frequently-asked-questions)
 
 ## Getting Started
 
 ### Installing
-To start using Badger, install Go 1.11 or above and run `go get`:
+To start using Badger, install Go 1.12 or above and run `go get`:
 
 ```sh
-$ go get github.com/dgraph-io/badger/...
+$ go get github.com/dgraph-io/badger/v2
 ```
 
 This will retrieve the library and install the `badger` command line
@@ -104,7 +109,7 @@ package main
 import (
 	"log"
 
-	badger "github.com/dgraph-io/badger"
+	badger "github.com/dgraph-io/badger/v2"
 )
 
 func main() {
@@ -250,7 +255,7 @@ on it.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42"))
+  e := badger.NewEntry([]byte("answer"), []byte("42"))
   err := txn.SetEntry(e)
   return err
 })
@@ -399,7 +404,7 @@ and `Txn.SetEntry()` API methods.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42")).WithTTL(time.Hour)
+  e := badger.NewEntry([]byte("answer"), []byte("42")).WithTTL(time.Hour)
   err := txn.SetEntry(e)
   return err
 })
@@ -412,7 +417,7 @@ metadata can be set using `Entry.WithMeta()` and `Txn.SetEntry()` API methods.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1))
+  e := badger.NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1))
   err := txn.SetEntry(e)
   return err
 })
@@ -423,7 +428,7 @@ then can be set using `Txn.SetEntry()`.
 
 ```go
 err := db.Update(func(txn *badger.Txn) error {
-  e := NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1)).WithTTL(time.Hour)
+  e := badger.NewEntry([]byte("answer"), []byte("42")).WithMeta(byte(1)).WithTTL(time.Hour)
   err := txn.SetEntry(e)
   return err
 })
@@ -741,22 +746,27 @@ above).
 
 [badger-bench]: https://github.com/dgraph-io/badger-bench
 
-## Other Projects Using Badger
+## Projects Using Badger
 Below is a list of known projects that use Badger:
 
-* [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
 * [Dgraph](https://github.com/dgraph-io/dgraph) - Distributed graph database.
-* [TalariaDB](https://github.com/grab/talaria) - Distributed, low latency time-series database.
-* [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed application data analytics.
-* [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
-* [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
+* [Jaeger](https://github.com/jaegertracing/jaeger) - Distributed tracing platform.
 * [go-ipfs](https://github.com/ipfs/go-ipfs) - Go client for the InterPlanetary File System (IPFS), a new hypermedia distribution protocol.
-* [gorush](https://github.com/appleboy/gorush) - A push notification server written in Go.
+* [Riot](https://github.com/go-ego/riot) - An open-source, distributed search engine.
 * [emitter](https://github.com/emitter-io/emitter) - Scalable, low latency, distributed pub/sub broker with message storage, uses MQTT, gossip and badger.
+* [OctoSQL](https://github.com/cube2222/octosql) - Query tool that allows you to join, analyse and transform data from multiple databases using SQL.
+* [Dkron](https://dkron.io/) - Distributed, fault tolerant job scheduling system.
+* [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
+* [TalariaDB](https://github.com/grab/talaria) - Grab's Distributed, low latency time-series database.
+* [Sloop](https://github.com/salesforce/sloop) - Salesforce's Kubernetes History Visualization Project.
+* [Immudb](https://github.com/codenotary/immudb) - Lightweight, high-speed immutable database for systems and applications.
+* [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
+* [gorush](https://github.com/appleboy/gorush) - A push notification server written in Go.
+* [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
+* [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed application data analytics.
 * [GarageMQ](https://github.com/valinurovam/garagemq) - AMQP server written in Go.
 * [RedixDB](https://alash3al.github.io/redix/) - A real-time persistent key-value store with the same redis protocol.
 * [BBVA](https://github.com/BBVA/raft-badger) - Raft backend implementation using BadgerDB for Hashicorp raft.
-* [Riot](https://github.com/go-ego/riot) - An open-source, distributed search engine.
 * [Fantom](https://github.com/Fantom-foundation/go-lachesis) - aBFT Consensus platform for distributed applications.
 * [decred](https://github.com/decred/dcrdata) - An open, progressive, and self-funding cryptocurrency with a system of community-based governance integrated into its blockchain.
 * [OpenNetSys](https://github.com/opennetsys/c3-go) - Create useful dApps in any software language.
@@ -771,7 +781,6 @@ Below is a list of known projects that use Badger:
 * [Surfline](https://www.surfline.com) - Serving global wave and weather forecast data with Badger.
 * [Cete](https://github.com/mosuka/cete) - Simple and highly available distributed key-value store built on Badger. Makes it easy bringing up a cluster of Badger with Raft consensus algorithm by hashicorp/raft. 
 * [Volument](https://volument.com/) - A new take on website analytics backed by Badger.
-* [Sloop](https://github.com/salesforce/sloop) - Kubernetes History Visualization.
 * [KVdb](https://kvdb.io/) - Hosted key-value store and serverless platform built on top of Badger.
 
 If you are using Badger in a project please send a pull request to add it to the list.

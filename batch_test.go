@@ -36,6 +36,9 @@ func TestWriteBatch(t *testing.T) {
 		wb := db.NewWriteBatch()
 		defer wb.Cancel()
 
+		// Sanity check for SetEntryAt.
+		require.Error(t, wb.SetEntryAt(&Entry{}, 12))
+
 		N, M := 50000, 1000
 		start := time.Now()
 
@@ -78,5 +81,41 @@ func TestWriteBatch(t *testing.T) {
 		require.NoError(t, err)
 		test(t, db)
 		require.NoError(t, db.Close())
+	})
+}
+
+// This test ensures we don't end up in deadlock in case of empty writebatch.
+func TestEmptyWriteBatch(t *testing.T) {
+	t.Run("normal mode", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			wb := db.NewWriteBatch()
+			require.NoError(t, wb.Flush())
+			wb = db.NewWriteBatch()
+			require.NoError(t, wb.Flush())
+			wb = db.NewWriteBatch()
+			require.NoError(t, wb.Flush())
+		})
+	})
+	t.Run("managed mode", func(t *testing.T) {
+		opt := getTestOptions("")
+		opt.managedTxns = true
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			t.Run("WriteBatchAt", func(t *testing.T) {
+				wb := db.NewWriteBatchAt(2)
+				require.NoError(t, wb.Flush())
+				wb = db.NewWriteBatchAt(208)
+				require.NoError(t, wb.Flush())
+				wb = db.NewWriteBatchAt(31)
+				require.NoError(t, wb.Flush())
+			})
+			t.Run("ManagedWriteBatch", func(t *testing.T) {
+				wb := db.NewManagedWriteBatch()
+				require.NoError(t, wb.Flush())
+				wb = db.NewManagedWriteBatch()
+				require.NoError(t, wb.Flush())
+				wb = db.NewManagedWriteBatch()
+				require.NoError(t, wb.Flush())
+			})
+		})
 	})
 }

@@ -33,6 +33,7 @@ type blockIterator struct {
 	key          []byte
 	val          []byte
 	entryOffsets []uint32
+	block        *block
 
 	// prevOverlap stores the overlap of the previous key with the base key.
 	// This avoids unnecessary copy of base key when the overlap is same for multiple keys.
@@ -40,6 +41,11 @@ type blockIterator struct {
 }
 
 func (itr *blockIterator) setBlock(b *block) {
+	// Decrement the ref for the old block. If the old block was compressed, we
+	// might be able to reuse it.
+	itr.block.decrRef()
+
+	itr.block = b
 	itr.err = nil
 	itr.idx = 0
 	itr.baseKey = itr.baseKey[:0]
@@ -67,6 +73,7 @@ func (itr *blockIterator) setIdx(i int) {
 		baseHeader.Decode(itr.data)
 		itr.baseKey = itr.data[headerSize : headerSize+baseHeader.diff]
 	}
+
 	var endOffset int
 	// idx points to the last entry in the block.
 	if itr.idx+1 == len(itr.entryOffsets) {
@@ -101,7 +108,9 @@ func (itr *blockIterator) Error() error {
 	return itr.err
 }
 
-func (itr *blockIterator) Close() {}
+func (itr *blockIterator) Close() {
+	itr.block.decrRef()
+}
 
 var (
 	origin  = 0
@@ -171,6 +180,7 @@ func (t *Table) NewIterator(reversed bool) *Iterator {
 
 // Close closes the iterator (and it must be called).
 func (itr *Iterator) Close() error {
+	itr.bi.Close()
 	return itr.t.DecrRef()
 }
 
@@ -185,7 +195,7 @@ func (itr *Iterator) Valid() bool {
 }
 
 func (itr *Iterator) seekToFirst() {
-	numBlocks := len(itr.t.blockIndex)
+	numBlocks := itr.t.noOfBlocks
 	if numBlocks == 0 {
 		itr.err = io.EOF
 		return
@@ -202,7 +212,7 @@ func (itr *Iterator) seekToFirst() {
 }
 
 func (itr *Iterator) seekToLast() {
-	numBlocks := len(itr.t.blockIndex)
+	numBlocks := itr.t.noOfBlocks
 	if numBlocks == 0 {
 		itr.err = io.EOF
 		return
@@ -239,8 +249,8 @@ func (itr *Iterator) seekFrom(key []byte, whence int) {
 	case current:
 	}
 
-	idx := sort.Search(len(itr.t.blockIndex), func(idx int) bool {
-		ko := itr.t.blockIndex[idx]
+	idx := sort.Search(itr.t.noOfBlocks, func(idx int) bool {
+		ko := itr.t.blockOffsets()[idx]
 		return y.CompareKeys(ko.Key, key) > 0
 	})
 	if idx == 0 {
@@ -259,7 +269,7 @@ func (itr *Iterator) seekFrom(key []byte, whence int) {
 	itr.seekHelper(idx-1, key)
 	if itr.err == io.EOF {
 		// Case 1. Need to visit block[idx].
-		if idx == len(itr.t.blockIndex) {
+		if idx == itr.t.noOfBlocks {
 			// If idx == len(itr.t.blockIndex), then input key is greater than ANY element of table.
 			// There's nothing we can do. Valid() should return false as we seek to end of table.
 			return
@@ -287,7 +297,7 @@ func (itr *Iterator) seekForPrev(key []byte) {
 func (itr *Iterator) next() {
 	itr.err = nil
 
-	if itr.bpos >= len(itr.t.blockIndex) {
+	if itr.bpos >= itr.t.noOfBlocks {
 		itr.err = io.EOF
 		return
 	}
