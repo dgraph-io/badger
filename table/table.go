@@ -785,6 +785,7 @@ func (t *Table) decompress(b *block) error {
 		b.isReusable = true
 	case options.ZSTD:
 		dst := blockPool.Get().(*[]byte)
+		*dst = (*dst)[:0]
 		b.data, err = y.ZSTDDecompress(*dst, b.data)
 		if err != nil {
 			return errors.Wrap(err, "failed to decompress")
