@@ -18,9 +18,7 @@
 
 ### Sign the CLA
 
-Click the **Sign in with Github to agree** button to sign the CLA. See an example [here](https://cla-assistant.io/dgraph-io/badger?pullRequest=1377).
-
-What is [CLA](https://www.clahub.com/pages/why_cla)?
+Click the **Sign in with Github to agree** button to sign the CLA. [An example](https://cla-assistant.io/dgraph-io/badger?pullRequest=1377).
 
 ### Code of Conduct
 
