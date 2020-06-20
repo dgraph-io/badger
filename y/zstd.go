@@ -47,7 +47,11 @@ func ZSTDCompress(dst, src []byte) ([]byte, error) {
 	var err error
 	zstdEncOnce.Do(func() {
 		zstdEnc, err = zstd.NewWriter(
-			nil, zstd.WithZeroFrames(true), zstd.WithEncoderLevel(zstd.SpeedFastest))
+			nil, zstd.WithZeroFrames(true),
+			zstd.WithEncoderLevel(zstd.SpeedFastest),
+			zstd.WithNoEntropyCompression(true),
+			zstd.WithEncoderCRC(false))
+
 		AssertTrue(err == nil)
 	})
 	return zstdEnc.EncodeAll(src, dst), nil
