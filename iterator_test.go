@@ -201,12 +201,14 @@ func TestIteratePrefix(t *testing.T) {
 	}
 
 	t.Run("With Default options", func(t *testing.T) {
+		t.Parallel()
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			testIteratorPrefix(t, db)
 		})
 	})
 
 	t.Run("With Block Offsets in Cache", func(t *testing.T) {
+		t.Parallel()
 		opts := getTestOptions("")
 		opts = opts.WithKeepBlockIndicesInCache(true)
 		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
@@ -215,6 +217,7 @@ func TestIteratePrefix(t *testing.T) {
 	})
 
 	t.Run("With Block Offsets and Blocks in Cache", func(t *testing.T) {
+		t.Parallel()
 		opts := getTestOptions("")
 		opts = opts.WithKeepBlockIndicesInCache(true).WithKeepBlocksInCache(true)
 		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
@@ -223,6 +226,7 @@ func TestIteratePrefix(t *testing.T) {
 	})
 
 	t.Run("With Blocks in Cache", func(t *testing.T) {
+		t.Parallel()
 		opts := getTestOptions("")
 		opts = opts.WithKeepBlocksInCache(true)
 		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
