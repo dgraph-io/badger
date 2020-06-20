@@ -790,8 +790,7 @@ If you are using Badger in a project please send a pull request to add it to the
 
 ## Contributing
 
-If you're interested in contributing to Badger, or want to build it from source,
-see [CONTRIBUTING.md](./CONTRIBUTING.md).
+If you're interested in contributing to Badger see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Frequently Asked Questions
 ### My writes are getting stuck. Why?
