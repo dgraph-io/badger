@@ -36,7 +36,7 @@ func ZSTDDecompress(dst, src []byte) ([]byte, error) {
 		zstdDec, err = zstd.NewReader(nil)
 		AssertTrue(err == nil)
 	})
-	return zstdDec.DecodeAll(src, dst)
+	return zstdDec.DecodeAll(src, dst[:0])
 }
 
 // ZSTDCompress compresses a block using ZSTD algorithm.
