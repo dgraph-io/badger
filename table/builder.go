@@ -484,7 +484,7 @@ func (b *Builder) compressData(dst, data []byte) ([]byte, error) {
 	case options.Snappy:
 		return snappy.Encode(dst, data), nil
 	case options.ZSTD:
-		return y.ZSTDCompress(dst, data)
+		return y.ZSTDCompress(dst, data, b.opt.ZSTDCompressionLevel)
 	}
 	return nil, errors.New("Unsupported compression type")
 }

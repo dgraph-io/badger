@@ -40,12 +40,12 @@ func ZSTDDecompress(dst, src []byte) ([]byte, error) {
 }
 
 // ZSTDCompress compresses a block using ZSTD algorithm.
-func ZSTDCompress(dst, src []byte) ([]byte, error) {
+func ZSTDCompress(dst, src []byte, level int) ([]byte, error) {
 	var err error
 	zstdEncOnce.Do(func() {
 		zstdEnc, err = zstd.NewWriter(
 			nil, zstd.WithZeroFrames(true),
-			zstd.WithEncoderLevel(zstd.SpeedFastest),
+			zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(level)),
 			zstd.WithEncoderCRC(false))
 
 		AssertTrue(err == nil)

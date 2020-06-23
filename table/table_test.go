@@ -43,10 +43,11 @@ func key(prefix string, i int) string {
 
 func getTestTableOptions() Options {
 	return Options{
-		Compression:        options.ZSTD,
-		LoadingMode:        options.LoadToRAM,
-		BlockSize:          4 * 1024,
-		BloomFalsePositive: 0.01,
+		Compression:          options.ZSTD,
+		ZSTDCompressionLevel: 15,
+		LoadingMode:          options.LoadToRAM,
+		BlockSize:            4 * 1024,
+		BloomFalsePositive:   0.01,
 	}
 
 }

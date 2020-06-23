@@ -73,9 +73,10 @@ type Options struct {
 	ValueLogFileSize   int64
 	ValueLogMaxEntries uint32
 
-	NumCompactors     int
-	CompactL0OnClose  bool
-	LogRotatesToFlush int32
+	NumCompactors        int
+	CompactL0OnClose     bool
+	LogRotatesToFlush    int32
+	ZSTDCompressionLevel int
 
 	// When set, checksum will be validated for each entry read from the value log file.
 	VerifyValueChecksum bool
@@ -143,6 +144,7 @@ func DefaultOptions(path string) Options {
 		MaxCacheSize:            0,
 		MaxBfCacheSize:          0,
 		LoadBloomsOnOpen:        true,
+		// TODO: These benchmarks are no longer valid.
 		// The following benchmarks were done on a 4 KB block size (default block size). The
 		// compression is ratio supposed to increase with increasing compression level but since the
 		// input for compression algorithm is small (4 KB), we don't get significant benefit at
@@ -152,6 +154,7 @@ func DefaultOptions(path string) Options {
 		// zstd_compression/level_3-16     7	 756950250 ns/op	 109.91 MB/s	2.72
 		// zstd_compression/level_15-16    1	11135686219 ns/op	   7.47 MB/s	4.38
 		// Benchmark code can be found in table/builder_test.go file
+		ZSTDCompressionLevel: 1,
 
 		// Nothing to read/write value log using standard File I/O
 		// MemoryMap to mmap() the value log files
@@ -578,6 +581,30 @@ func (opt Options) WithMaxCacheSize(size int64) Options {
 // created. In case of a crash all data will be lost.
 func (opt Options) WithInMemory(b bool) Options {
 	opt.InMemory = b
+	return opt
+}
+
+// WithZSTDCompressionLevel returns a new Options value with ZSTDCompressionLevel set
+// to the given value.
+//
+// The ZSTD compression algorithm supports 20 compression levels. The higher the compression
+// level, the better is the compression ratio but lower is the performance. Lower levels
+// have better performance and higher levels have better compression ratios.
+// We recommend using level 1 ZSTD Compression Level. Any level higher than 1 seems to
+// deteriorate badger's performance.
+// The following benchmarks were done on a 4 KB block size (default block size). The compression is
+// ratio supposed to increase with increasing compression level but since the input for compression
+// algorithm is small (4 KB), we don't get significant benefit at level 3. It is advised to write
+// your own benchmarks before choosing a compression algorithm or level.
+//
+// TODO: Following benchmarks are no longer valid.
+// no_compression-16              10	 502848865 ns/op	 165.46 MB/s	-
+// zstd_compression/level_1-16     7	 739037966 ns/op	 112.58 MB/s	2.93
+// zstd_compression/level_3-16     7	 756950250 ns/op	 109.91 MB/s	2.72
+// zstd_compression/level_15-16    1	11135686219 ns/op	   7.47 MB/s	4.38
+// Benchmark code can be found in table/builder_test.go file
+func (opt Options) WithZSTDCompressionLevel(cLevel int) Options {
+	opt.ZSTDCompressionLevel = cLevel
 	return opt
 }
 
