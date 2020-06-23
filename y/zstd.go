@@ -50,5 +50,5 @@ func ZSTDCompress(dst, src []byte, level int) ([]byte, error) {
 
 		AssertTrue(err == nil)
 	})
-	return zstdEnc.EncodeAll(src, dst), nil
+	return zstdEnc.EncodeAll(src, dst[:0]), nil
 }
