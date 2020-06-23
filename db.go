@@ -214,6 +214,9 @@ func Open(opt Options) (db *DB, err error) {
 		return nil, ErrInvalidLoadingMode
 	}
 
+	// Keep L0 in memory if either KeepL0InMemory is set or if InMemory is set.
+	opt.KeepL0InMemory = opt.KeepL0InMemory || opt.InMemory
+
 	// Compact L0 on close if either it is set or if KeepL0InMemory is set. When
 	// keepL0InMemory is set we need to compact L0 on close otherwise we might lose data.
 	opt.CompactL0OnClose = opt.CompactL0OnClose || opt.KeepL0InMemory
