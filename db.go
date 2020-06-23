@@ -139,6 +139,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			// Update vhead. If the crash happens while replay was in progess
 			// and the head is not updated, we will end up replaying all the
 			// files again.
+			y.AssertTrue(!vp.Less(db.vhead))
 			db.vhead = vp
 		}
 
@@ -1002,6 +1003,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return nil
 	}
 
+	y.AssertTrue(!ft.vptr.IsZero())
 	// Store badger head even if vptr is zero, need it for readTs
 	db.opt.Debugf("Storing value log head: %+v\n", ft.vptr)
 	db.opt.Debugf("Storing offset: %+v\n", ft.vptr)
