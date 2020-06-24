@@ -1002,8 +1002,10 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	if ft.mt.Empty() {
 		return nil
 	}
-
-	y.AssertTrue(!ft.vptr.IsZero())
+	// vptr can be zero in-inmemory mode and that's okay because we don't have any value log files and there won't be any replays.
+	if !db.opt.InMemory {
+		y.AssertTrue(!ft.vptr.IsZero())
+	}
 	// Store badger head even if vptr is zero, need it for readTs
 	db.opt.Debugf("Storing value log head: %+v\n", ft.vptr)
 	db.opt.Debugf("Storing offset: %+v\n", ft.vptr)
