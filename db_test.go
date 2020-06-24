@@ -1987,6 +1987,7 @@ func TestNoCrash(t *testing.T) {
 
 	ops := getTestOptions(dir)
 	ops.ValueLogMaxEntries = 1
+	ops.ValueThreshold = 32
 	db, err := Open(ops)
 	require.NoError(t, err, "unable to open db")
 
