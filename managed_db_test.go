@@ -604,7 +604,7 @@ func TestWriteBatchManagedMode(t *testing.T) {
 	}
 	opt := DefaultOptions("")
 	opt.managedTxns = true
-	opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+	opt.MaxTableSize = 1 << 20 // This would create multiple transactions in write batch.
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		wb := db.NewWriteBatchAt(1)
 		defer wb.Cancel()

@@ -41,7 +41,7 @@ func TestValueBasic(t *testing.T) {
 	y.Check(err)
 	defer removeDir(dir)
 
-	kv, _ := Open(getTestOptions(dir))
+	kv, _ := Open(getTestOptions(dir).WithValueThreshold(32))
 	defer kv.Close()
 	log := &kv.vlog
 
@@ -472,7 +472,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	time.Sleep(1 * time.Second) // wait for compaction to complete
+	time.Sleep(2 * time.Second) // wait for compaction to complete
 
 	persistedMap := make(map[uint32]int64)
 	db.vlog.lfDiscardStats.Lock()
@@ -509,6 +509,7 @@ func TestChecksums(t *testing.T) {
 	opts := getTestOptions(dir)
 	opts.Truncate = true
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
+	opts.ValueThreshold = 32
 	kv, err := Open(opts)
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
@@ -592,6 +593,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	opts := getTestOptions(dir)
 	opts.Truncate = true
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
+	opts.ValueThreshold = 32
 	kv, err := Open(opts)
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
@@ -1167,6 +1169,7 @@ func TestValueEntryChecksum(t *testing.T) {
 
 		opt := getTestOptions(dir)
 		opt.VerifyValueChecksum = true
+		opt.ValueThreshold = 32
 		db, err := Open(opt)
 		require.NoError(t, err)
 
@@ -1195,6 +1198,7 @@ func TestValueEntryChecksum(t *testing.T) {
 
 		opt := getTestOptions(dir)
 		opt.VerifyValueChecksum = true
+		opt.ValueThreshold = 32
 		db, err := Open(opt)
 		require.NoError(t, err)
 

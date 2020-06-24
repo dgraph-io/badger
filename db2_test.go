@@ -125,7 +125,6 @@ func TestTruncateVlogNoClose(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	fmt.Println("running")
 	dir := "p"
 	opts := getTestOptions(dir)
 	opts.SyncWrites = true
@@ -707,8 +706,8 @@ func TestWindowsDataLoss(t *testing.T) {
 	defer removeDir(dir)
 
 	opt := DefaultOptions(dir).WithSyncWrites(true)
+	opt.ValueThreshold = 32
 
-	fmt.Println("First DB Open")
 	db, err := Open(opt)
 	require.NoError(t, err)
 	keyCount := 20
@@ -730,8 +729,6 @@ func TestWindowsDataLoss(t *testing.T) {
 	}
 	require.NoError(t, db.Close())
 
-	fmt.Println()
-	fmt.Println("Second DB Open")
 	opt.Truncate = true
 	db, err = Open(opt)
 	require.NoError(t, err)
@@ -753,8 +750,6 @@ func TestWindowsDataLoss(t *testing.T) {
 	require.NoError(t, db.manifest.close())
 	require.NoError(t, db.lc.close())
 
-	fmt.Println()
-	fmt.Println("Third DB Open")
 	opt.Truncate = true
 	db, err = Open(opt)
 	require.NoError(t, err)
