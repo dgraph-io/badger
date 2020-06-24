@@ -1002,7 +1002,8 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	if ft.mt.Empty() {
 		return nil
 	}
-	// vptr can be zero in-inmemory mode and that's okay because we don't have any value log files and there won't be any replays.
+	// vptr can be zero in-inmemory mode and that's okay because we don't have
+	// any value log files and there won't be any replays.
 	if !db.opt.InMemory {
 		y.AssertTrue(!ft.vptr.IsZero())
 	}
