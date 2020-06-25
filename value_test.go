@@ -409,11 +409,9 @@ func TestValueGC4(t *testing.T) {
 	kv.vlog.rewrite(lf0, tr)
 	kv.vlog.rewrite(lf1, tr)
 
-	err = kv.vlog.Close()
-	require.NoError(t, err)
+	require.NoError(t, kv.Close())
 
-	kv.vlog.init(kv)
-	err = kv.vlog.open(kv, valuePointer{Fid: 2}, kv.replayFunction())
+	kv, err = Open(opt)
 	require.NoError(t, err)
 
 	for i := 0; i < 8; i++ {
