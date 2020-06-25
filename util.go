@@ -46,12 +46,12 @@ func (s *levelHandler) validate() error {
 	s.RLock()
 	defer s.RUnlock()
 	numTables := len(s.tables)
-	for j := 1; j < numTables; j++ {
+	for j := 0; j < numTables; j++ {
 		if j >= len(s.tables) {
 			return errors.Errorf("Level %d, j=%d numTables=%d", s.level, j, numTables)
 		}
 
-		if y.CompareKeys(s.tables[j-1].Biggest(), s.tables[j].Smallest()) >= 0 {
+		if j > 0 && y.CompareKeys(s.tables[j-1].Biggest(), s.tables[j].Smallest()) >= 0 {
 			return errors.Errorf(
 				"Inter: Biggest(j-1) \n%s\n vs Smallest(j): \n%s\n: level=%d j=%d numTables=%d",
 				hex.Dump(s.tables[j-1].Biggest()), hex.Dump(s.tables[j].Smallest()),

@@ -778,3 +778,25 @@ func TestL0Stall(t *testing.T) {
 		test(t, &opt)
 	})
 }
+
+// Verify level.Validate works as expected.
+func TestLevelValidate(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// Table is not sorte and it is the only table on this level.
+		l2 := []keyValVersion{{"Z", "", 3, 0}, {"G", "", 3, 0}}
+		// Level 2 has all the tables.
+		createAndOpen(db, l2, 2)
+		require.Error(t, db.lc.validate())
+
+		// Level is not sorted.
+		l31 := []keyValVersion{{"a", "", 3, 0}, {"e", "", 3, 0}}
+		l32 := []keyValVersion{{"x", "", 3, 0}, {"z", "", 3, 0}}
+		l33 := []keyValVersion{{"f", "", 3, 0}, {"g", "", 3, 0}}
+		// Level 3 has all the tables.
+		createAndOpen(db, l31, 3)
+		createAndOpen(db, l32, 3)
+		createAndOpen(db, l33, 3)
+
+		require.Error(t, db.lc.levels[3].validate())
+	})
+}
