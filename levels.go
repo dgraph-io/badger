@@ -284,6 +284,12 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 	}
 
 	opt := s.kv.opt
+	// Iterate levels in the reverse order because if we were to iterate from
+	// lower level (say level 0) to a higher level (say level 3) we could have
+	// a state in which level 0 is compacted and an older version of a key exists in lower level.
+	// At this point, if someone creates an iterator, they would see an old
+	// value for a key from lower levels. Iterating in reverse order ensures we
+	// drop the oldest data first so that lookups never return stale data.
 	for i := len(s.levels) - 1; i >= 0; i-- {
 		l := s.levels[i]
 
@@ -308,36 +314,37 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 			continue
 		}
 
-		// Build a list of compaction operations affecting all the prefixes we
-		// need to drop. We need to build operations that satisfy the invariant that
+		// Build a list of compaction tableGroups affecting all the prefixes we
+		// need to drop. We need to build tableGroups that satisfy the invariant that
 		// bottom tables are consecutive.
-		var operations [][]*table.Table
-		var currentOperation []*table.Table
+		// tableGroup contains groups of consecutive tables.
+		var tableGroups [][]*table.Table
+		var tableGroup []*table.Table
 
-		nextOperation := func() {
-			if len(currentOperation) > 0 {
-				operations = append(operations, currentOperation)
-				currentOperation = nil
+		finishGroup := func() {
+			if len(tableGroup) > 0 {
+				tableGroups = append(tableGroups, tableGroup)
+				tableGroup = nil
 			}
 		}
 
 		for _, table := range l.tables {
 			if containsAnyPrefixes(table.Smallest(), table.Biggest(), prefixes) {
-				currentOperation = append(currentOperation, table)
+				tableGroup = append(tableGroup, table)
 			} else {
-				nextOperation()
+				finishGroup()
 			}
 		}
-		nextOperation()
+		finishGroup()
 
 		l.RUnlock()
 
-		if len(operations) == 0 {
+		if len(tableGroups) == 0 {
 			continue
 		}
 
-		opt.Infof("Dropping prefix at level %d (%d operations)", l.level, len(operations))
-		for _, operation := range operations {
+		opt.Infof("Dropping prefix at level %d (%d tableGroups)", l.level, len(tableGroups))
+		for _, operation := range tableGroups {
 			cd := compactDef{
 				elog:         trace.New(fmt.Sprintf("Badger.L%d", l.level), "Compact"),
 				thisLevel:    l,
