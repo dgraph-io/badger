@@ -642,6 +642,11 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	// Replay value log from beginning, badger head is past k2.
 	require.NoError(t, kv.vlog.Close())
 
+	// clean up the current db.vhead so that we can replay from the beginning.
+	// If we don't clear the current vhead, badger will error out since new
+	// head passed while opening vlog is zero in the following lines.
+	kv.vhead = valuePointer{}
+
 	kv.vlog.init(kv)
 	require.NoError(
 		t, kv.vlog.open(kv, valuePointer{Fid: 0}, kv.replayFunction()),
