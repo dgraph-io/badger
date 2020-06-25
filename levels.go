@@ -517,8 +517,9 @@ nextTable:
 			for _, prefix := range cd.dropPrefixes {
 				if bytes.HasPrefix(table.Smallest(), prefix) &&
 					bytes.HasPrefix(table.Biggest(), prefix) {
-					// All the keys in this table have the dropPrefix. So, this table does not need to be
-					// in the iterator and can be dropped immediately.
+					// All the keys in this table have the dropPrefix. So, this
+					// table does not need to be in the iterator and can be
+					// dropped immediately.
 					continue nextTable
 				}
 			}

@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"math"
 	"testing"
 	"time"
@@ -776,5 +777,39 @@ func TestL0Stall(t *testing.T) {
 	t.Run("with L0 on disk", func(t *testing.T) {
 		opt.KeepL0InMemory = false
 		test(t, &opt)
+	})
+}
+
+// Regression test for https://github.com/dgraph-io/dgraph/issues/5573
+func TestDropPrefixMoveBug(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		l1 := []keyValVersion{{string(append(badgerMove, "F"...)), "", 3, 0}, {"A", "", 1, 0}}
+		createAndOpen(db, l1, 1)
+
+		l2 := []keyValVersion{{string(append(badgerMove, "F"...)), "", 3, 0}, {"A", "", 1, 0}}
+		l21 := []keyValVersion{{"B", "", 2, 0}, {"C", "", 2, 0}}
+		l22 := []keyValVersion{{"F", "", 3, 0}, {"G", "", 3, 0}}
+
+		// Level 2 has all the tables.
+		createAndOpen(db, l2, 2)
+		createAndOpen(db, l21, 2)
+		createAndOpen(db, l22, 2)
+
+		require.NoError(t, db.lc.validate())
+		require.NoError(t, db.DropPrefix([]byte("F")))
+
+		db.View(func(txn *Txn) error {
+			iopt := DefaultIteratorOptions
+			iopt.AllVersions = true
+
+			it := txn.NewIterator(iopt)
+			defer it.Close()
+			for it.Rewind(); it.Valid(); it.Next() {
+				key := it.Item().Key()
+				require.False(t, bytes.HasPrefix(key, []byte("F")))
+			}
+			return nil
+		})
+		require.NoError(t, db.lc.validate())
 	})
 }
