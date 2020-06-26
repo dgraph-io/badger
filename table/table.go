@@ -261,6 +261,14 @@ func (b block) verifyCheckSum() error {
 // -- consider t.Close() instead). The fd has to writeable because we call Truncate on it before
 // deleting. Checksum for all blocks of table is verified based on value of chkMode.
 func OpenTable(fd *os.File, opts Options) (*Table, error) {
+	if blockPool == nil {
+		blockPool = &sync.Pool{
+			New: func() interface{} {
+				b := make([]byte, opts.BlockSize)
+				return &b
+			},
+		}
+	}
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -778,6 +786,7 @@ func (t *Table) decompress(b *block) error {
 		// Nothing to be done here.
 	case options.Snappy:
 		dst := blockPool.Get().(*[]byte)
+		*dst = (*dst)[:cap(*dst)]
 		b.data, err = snappy.Decode(*dst, b.data)
 		if err != nil {
 			return errors.Wrap(err, "failed to decompress")
@@ -785,6 +794,7 @@ func (t *Table) decompress(b *block) error {
 		b.isReusable = true
 	case options.ZSTD:
 		dst := blockPool.Get().(*[]byte)
+		*dst = (*dst)[:cap(*dst)]
 		b.data, err = y.ZSTDDecompress(*dst, b.data)
 		if err != nil {
 			return errors.Wrap(err, "failed to decompress")

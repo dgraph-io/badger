@@ -43,6 +43,8 @@ const (
 	padding = 200
 )
 
+var blockPool *sync.Pool
+
 type header struct {
 	overlap uint16 // Overlap with base key.
 	diff    uint16 // Length of the diff.
@@ -116,17 +118,6 @@ func NewTableBuilder(opts Options) *Builder {
 		go b.handleBlock()
 	}
 	return b
-}
-
-var blockPool = &sync.Pool{
-	New: func() interface{} {
-		// Create 5 Kb blocks even when the default size of blocks is 4 KB. The
-		// ZSTD decompresion library increases the buffer by 2X if it's not big
-		// enough. Using a 5 KB block instead of a 4 KB one avoids the
-		// unncessary 2X allocation by the decompression library.
-		b := make([]byte, 5<<10)
-		return &b
-	},
 }
 
 func (b *Builder) handleBlock() {
