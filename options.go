@@ -21,6 +21,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -108,6 +109,8 @@ type Options struct {
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.
 	managedTxns bool
+
+	blockPool *y.BlockPool
 
 	// 4. Flags for testing purposes
 	// ------------------------------

@@ -73,6 +73,9 @@ type Options struct {
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
 
+	// The pool to use to optimize block allocations.
+	BlockPool *y.BlockPool
+
 	// DataKey is the key used to decrypt the encrypted text.
 	DataKey *pb.DataKey
 
@@ -94,6 +97,14 @@ type Options struct {
 
 	// KeepBlocksInCache decides whether to keep the block in the cache or not.
 	KeepBlocksInCache bool
+}
+
+func (opts *Options) init() {
+	if opts.BlockPool == nil {
+		opts.BlockPool = &y.BlockPool{
+			BlockSize: opts.BlockSize,
+		}
+	}
 }
 
 // TableInterface is useful for testing.
@@ -195,10 +206,10 @@ type block struct {
 	offset            int
 	data              []byte
 	checksum          []byte
-	entriesIndexStart int      // start index of entryOffsets list
-	entryOffsets      []uint32 // used to binary search an entry in the block.
-	chkLen            int      // checksum length.
-	isReusable        bool     // used to determine if the blocked should be reused.
+	entriesIndexStart int          // start index of entryOffsets list
+	entryOffsets      []uint32     // used to binary search an entry in the block.
+	chkLen            int          // checksum length.
+	blockPool         *y.BlockPool // used to determine if the blocked should be reused.
 	ref               int32
 }
 
@@ -238,8 +249,8 @@ func (b *block) decrRef() {
 	// In case of an uncompressed block, the []byte is a reference to the
 	// table.mmap []byte slice. Any attempt to write data to the mmap []byte
 	// will lead to SEGFAULT.
-	if atomic.AddInt32(&b.ref, -1) == 0 && b.isReusable {
-		blockPool.Put(&b.data)
+	if atomic.AddInt32(&b.ref, -1) == 0 && b.blockPool != nil {
+		b.blockPool.Put(b.data)
 	}
 	y.AssertTrue(atomic.LoadInt32(&b.ref) >= 0)
 }
@@ -261,6 +272,8 @@ func (b block) verifyCheckSum() error {
 // -- consider t.Close() instead). The fd has to writeable because we call Truncate on it before
 // deleting. Checksum for all blocks of table is verified based on value of chkMode.
 func OpenTable(fd *os.File, opts Options) (*Table, error) {
+	opts.init()
+
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -329,11 +342,12 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 
 // OpenInMemoryTable is similar to OpenTable but it opens a new table from the provided data.
 // OpenInMemoryTable is used for L0 tables.
-func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
+func OpenInMemoryTable(data []byte, id uint64, opt Options) (*Table, error) {
 	opt.LoadingMode = options.LoadToRAM
+	opt.init()
 	t := &Table{
 		ref:        1, // Caller is given one reference.
-		opt:        opt,
+		opt:        &opt,
 		mmap:       data,
 		tableSize:  len(data),
 		IsInmemory: true,
@@ -781,19 +795,19 @@ func (t *Table) decompress(b *block) error {
 	case options.None:
 		// Nothing to be done here.
 	case options.Snappy:
-		dst := blockPool.Get().(*[]byte)
-		b.data, err = snappy.Decode(*dst, b.data)
+		dst := t.opt.BlockPool.Get()
+		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {
 			return errors.Wrap(err, "failed to decompress")
 		}
-		b.isReusable = true
+		b.blockPool = t.opt.BlockPool
 	case options.ZSTD:
-		dst := blockPool.Get().(*[]byte)
-		b.data, err = y.ZSTDDecompress(*dst, b.data)
+		dst := t.opt.BlockPool.Get()
+		b.data, err = y.ZSTDDecompress(dst, b.data)
 		if err != nil {
 			return errors.Wrap(err, "failed to decompress")
 		}
-		b.isReusable = true
+		b.blockPool = t.opt.BlockPool
 	default:
 		return errors.New("Unsupported compression type")
 	}

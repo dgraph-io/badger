@@ -706,7 +706,7 @@ func createEmptyTable(db *DB) *table.Table {
 	b.Add(y.KeyWithTs([]byte("foo"), 1), y.ValueStruct{}, 0)
 
 	// Open table in memory to avoid adding changes to manifest file.
-	tab, err := table.OpenInMemoryTable(b.Finish(), db.lc.reserveFileID(), &opts)
+	tab, err := table.OpenInMemoryTable(b.Finish(), db.lc.reserveFileID(), opts)
 	if err != nil {
 		panic(err)
 	}

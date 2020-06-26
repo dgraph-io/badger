@@ -194,6 +194,10 @@ func Open(opt Options) (db *DB, err error) {
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
+	opt.blockPool = &y.BlockPool{
+		BlockSize: opt.BlockSize + 2<<10,
+	}
+
 	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
 	if opt.ValueThreshold > maxValueThreshold {
 		return nil, errors.Errorf("Invalid ValueThreshold, must be less or equal to %d",
@@ -1022,7 +1026,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 
 	fileID := db.lc.reserveFileID()
 	if db.opt.KeepL0InMemory {
-		tbl, err := table.OpenInMemoryTable(tableData, fileID, &bopts)
+		tbl, err := table.OpenInMemoryTable(tableData, fileID, bopts)
 		if err != nil {
 			return errors.Wrapf(err, "failed to open table in memory")
 		}

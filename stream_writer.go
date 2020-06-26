@@ -423,7 +423,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	var tbl *table.Table
 	if w.db.opt.InMemory {
 		var err error
-		if tbl, err = table.OpenInMemoryTable(data, fileID, &opts); err != nil {
+		if tbl, err = table.OpenInMemoryTable(data, fileID, opts); err != nil {
 			return err
 		}
 	} else {

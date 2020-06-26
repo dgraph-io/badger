@@ -93,6 +93,8 @@ type Builder struct {
 
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
+	opts.init()
+
 	b := &Builder{
 		// Additional 5 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
@@ -118,29 +120,18 @@ func NewTableBuilder(opts Options) *Builder {
 	return b
 }
 
-var blockPool = &sync.Pool{
-	New: func() interface{} {
-		// Create 5 Kb blocks even when the default size of blocks is 4 KB. The
-		// ZSTD decompresion library increases the buffer by 2X if it's not big
-		// enough. Using a 5 KB block instead of a 4 KB one avoids the
-		// unncessary 2X allocation by the decompression library.
-		b := make([]byte, 5<<10)
-		return &b
-	},
-}
-
 func (b *Builder) handleBlock() {
 	defer b.wg.Done()
 	for item := range b.blockChan {
 		// Extract the block.
 		blockBuf := item.data[item.start:item.end]
-		var dst *[]byte
+		var dst []byte
 		// Compress the block.
 		if b.opt.Compression != options.None {
 			var err error
-			dst = blockPool.Get().(*[]byte)
+			dst = b.opt.BlockPool.Get()
 
-			blockBuf, err = b.compressData(*dst, blockBuf)
+			blockBuf, err = b.compressData(dst, blockBuf)
 			y.Check(err)
 		}
 		if b.shouldEncrypt() {
@@ -168,7 +159,7 @@ func (b *Builder) handleBlock() {
 		item.end = item.start + uint32(len(blockBuf))
 
 		if dst != nil {
-			blockPool.Put(dst)
+			b.opt.BlockPool.Put(dst)
 		}
 	}
 }
