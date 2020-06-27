@@ -60,8 +60,8 @@ func (s *levelHandler) validate() error {
 
 		if y.CompareKeys(s.tables[j].Smallest(), s.tables[j].Biggest()) > 0 {
 			return errors.Errorf(
-				"Intra: %q vs %q: level=%d j=%d numTables=%d",
-				s.tables[j].Smallest(), s.tables[j].Biggest(), s.level, j, numTables)
+				"Intra: \n%s\n vs \n%s\n: level=%d j=%d numTables=%d",
+				hex.Dump(s.tables[j].Smallest()), hex.Dump(s.tables[j].Biggest()), s.level, j, numTables)
 		}
 	}
 	return nil
