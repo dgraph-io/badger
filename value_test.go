@@ -370,7 +370,6 @@ func TestValueGC4(t *testing.T) {
 
 	kv, err := Open(opt)
 	require.NoError(t, err)
-	defer kv.Close()
 
 	sz := 128 << 10 // 5 entries per value log file.
 	txn := kv.NewTransaction(true)
@@ -433,6 +432,7 @@ func TestValueGC4(t *testing.T) {
 			return nil
 		}))
 	}
+	require.NoError(t, kv.Close())
 }
 
 func TestPersistLFDiscardStats(t *testing.T) {
