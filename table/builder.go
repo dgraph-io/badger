@@ -237,6 +237,8 @@ func (b *Builder) grow(n uint32) {
 	if n < l/2 {
 		n = l / 2
 	}
+	y.AssertTruef(uint64(len(b.buf))+uint64(n) < math.MaxUint32,
+		"old: %d new: %d", len(b.buf), n)
 	b.bufLock.Lock()
 	newBuf := make([]byte, l+n)
 	copy(newBuf, b.buf)
@@ -313,7 +315,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	}
 
 	// Integer overflow check for statements below.
-	y.AssertTrue((uint32(len(b.entryOffsets))+1)*4+4+8+4 < math.MaxUint32)
+	y.AssertTrue((len(b.entryOffsets)+1)*4+4+8+4 < math.MaxUint32)
 	// We should include current entry also in size, that's why +1 to len(b.entryOffsets).
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 +
 		4 + // size of list
@@ -332,11 +334,11 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 
 // Add adds a key-value pair to the block.
 func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
+	y.AssertTrue(b.sz < math.MaxUint32)
 	if b.shouldFinishBlock(key, value) {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
 		b.baseKey = []byte{}
-		y.AssertTrue(uint32(b.sz) < math.MaxUint32)
 		b.baseOffset = uint32((b.sz))
 		b.entryOffsets = b.entryOffsets[:0]
 	}
