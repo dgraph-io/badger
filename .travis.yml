@@ -28,6 +28,7 @@ jobs:
     # Define one extra linux build, which we use to run cross
     # compiled 32 bit tests
     - os: linux
+      arch: arm64
       go: "1.14"
       env: go_32=yes
 
@@ -39,9 +40,9 @@ notifications:
 script: >-
     if [ $TRAVIS_OS_NAME = "linux" ] && [ $go_32 ]; then
       uname -a
-      GOOS=linux GOARCH=386 go test -v ./...
+      GOOS=linux GOARCH=arm go test -v ./...
       # Another round of tests after turning off mmap.
-      GOOS=linux GOARCH=386 go test -v -vlog_mmap=false github.com/dgraph-io/badger
+      GOOS=linux GOARCH=arm go test -v -vlog_mmap=false github.com/dgraph-io/badger
     else
       go test -v ./...
       # Another round of tests after turning off mmap.
