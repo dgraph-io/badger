@@ -453,10 +453,9 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 			prios = append(prios, pri)
 		}
 	}
-	// We used to sort compaction priorities based on the score. But, we
-	// decided to compact based on the level, not the priority. So, upper
-	// levels (level 0, level 1, etc) always get compacted first, before the
-	// lower levels -- this allows us to avoid stalls.
+	sort.Slice(prios, func(i, j int) bool {
+		return prios[i].score > prios[j].score
+	})
 	return prios
 }
 
@@ -1027,13 +1026,15 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 			s.cstatus.RUnlock()
 			timeStart = time.Now()
 		}
-		// Before we unstall, we need to make sure that level 0 is healthy. Otherwise, we
-		// will very quickly fill up level 0 again.
+		// Before we unstall, we need to make sure that level 0 and 1 are healthy. Otherwise, we
+		// will very quickly fill up level 0 again and if the compaction strategy favors level 0,
+		// then level 1 is going to super full.
 		for i := 0; ; i++ {
-			// It's crucial that this behavior replicates pickCompactLevels' behavior in
-			// computing compactability in order to guarantee progress.
-			// Break the loop once L0 has enough space to accommodate new tables.
-			if !s.isLevel0Compactable() {
+			// Passing 0 for delSize to compactable means we're treating incomplete compactions as
+			// not having finished -- we wait for them to finish.  Also, it's crucial this behavior
+			// replicates pickCompactLevels' behavior in computing compactability in order to
+			// guarantee progress.
+			if !s.isLevel0Compactable() && !s.levels[1].isCompactable(0) {
 				break
 			}
 			time.Sleep(10 * time.Millisecond)
