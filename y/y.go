@@ -41,6 +41,9 @@ var (
 	// compression algorithm is being used for compression. ZSTD cannot work
 	// without CGO.
 	ErrZstdCgo = errors.New("zstd compression requires building badger with cgo enabled")
+
+	// ErrDoAfterFinish indicates a pointless Do call after Finish
+	ErrDoAfterFinish = errors.New("Do has no any point after Finish")
 )
 
 const (
@@ -249,6 +252,7 @@ type Throttle struct {
 	ch        chan struct{}
 	errCh     chan error
 	finishErr error
+	finished  bool
 }
 
 // NewThrottle creates a new throttle with a max number of workers.
@@ -263,6 +267,9 @@ func NewThrottle(max int) *Throttle {
 // are already maximum number of workers working. If it detects an error from
 // previously Done workers, it would return it.
 func (t *Throttle) Do() error {
+	if t.finished {
+		return ErrDoAfterFinish
+	}
 	for {
 		select {
 		case t.ch <- struct{}{}:
@@ -298,6 +305,7 @@ func (t *Throttle) Finish() error {
 		t.wg.Wait()
 		close(t.ch)
 		close(t.errCh)
+		t.finished = true
 		for err := range t.errCh {
 			if err != nil {
 				t.finishErr = err
