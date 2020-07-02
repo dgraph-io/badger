@@ -136,6 +136,10 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 		} else {
 			nv = vp.Encode()
 			meta = meta | bitValuePointer
+			// Update vhead. If the crash happens while replay was in progess
+			// and the head is not updated, we will end up replaying all the
+			// files again.
+			db.updateHead([]valuePointer{vp})
 		}
 
 		v := y.ValueStruct{
@@ -671,6 +675,8 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	return db.lc.get(key, maxVs, 0)
 }
 
+// updateHead should not be called without the db.Lock() since db.vhead is used
+// by the writer go routines and memtable flushing goroutine.
 func (db *DB) updateHead(ptrs []valuePointer) {
 	var ptr valuePointer
 	for i := len(ptrs) - 1; i >= 0; i-- {
@@ -684,8 +690,6 @@ func (db *DB) updateHead(ptrs []valuePointer) {
 		return
 	}
 
-	db.Lock()
-	defer db.Unlock()
 	y.AssertTrue(!ptr.Less(db.vhead))
 	db.vhead = ptr
 }
@@ -784,7 +788,9 @@ func (db *DB) writeRequests(reqs []*request) error {
 			done(err)
 			return errors.Wrap(err, "writeRequests")
 		}
+		db.Lock()
 		db.updateHead(b.Ptrs)
+		db.Unlock()
 	}
 	done(nil)
 	db.opt.Debugf("%d entries written", count)
