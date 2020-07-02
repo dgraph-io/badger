@@ -1,7 +1,6 @@
 # Contribution Guide
 
 * [Before you get started](#before-you-get-started)
-    * [Sign the CLA](#sign-the-cla)
     * [Code of Conduct](#code-of-conduct)
 * [Your First Contribution](#your-first-contribution)
     * [Find a good first topic](#find-a-good-first-topic)
@@ -12,13 +11,10 @@
     * [Test](#test)
     * [Commit and push](#commit-and-push)
     * [Create a Pull Request](#create-a-pull-request)
+    * [Sign the CLA](#sign-the-cla)
     * [Get a code review](#get-a-code-review)
 
 ## Before you get started
-
-### Sign the CLA
-
-Click the **Sign in with Github to agree** button to sign the CLA. [An example](https://cla-assistant.io/dgraph-io/badger?pullRequest=1377).
 
 ### Code of Conduct
 
@@ -29,8 +25,7 @@ Please make sure to read and observe our [Code of Conduct](./CODE_OF_CONDUCT.md)
 ### Find a good first topic
 
 You can start by finding an existing issue with the
-[good first issue](https://github.com/dgraph-io/badger/labels/good%20first%20issue)
-label. These issues are well suited for new contributors.
+[good first issue](https://github.com/dgraph-io/badger/labels/good%20first%20issue) or [help wanted](https://github.com/dgraph-io/badger/labels/help%20wanted) labels. These issues are well suited for new contributors.
 
 
 ## Setting up your development environment
@@ -91,13 +86,17 @@ $ git commit
 When the changes are ready to review:
 
 ```sh
-$ git push master my_new_feature
+$ git push origin my_new_feature
 ```
 
 ### Create a Pull Request
 
 Just open `https://github.com/$GITHUB_USER/badger/pull/new/my_new_feature` and
-fill the form.
+fill the PR description.
+
+### Sign the CLA
+
+Click the **Sign in with Github to agree** button to sign the CLA. [An example](https://cla-assistant.io/dgraph-io/badger?pullRequest=1377).
 
 ### Get a code review
 
