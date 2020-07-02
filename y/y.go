@@ -26,6 +26,7 @@ import (
 	"os"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -43,7 +44,10 @@ var (
 	ErrZstdCgo = errors.New("zstd compression requires building badger with cgo enabled")
 
 	// ErrDoAfterFinish indicates a pointless Do call after Finish
-	ErrDoAfterFinish = errors.New("Do has no any point after Finish")
+	ErrDoAfterFinish = errors.New("Throttle.Do called after Finish")
+
+	// ErrDoubleFinish indicates that once.Do is not atomic (see Throttle.Finished)
+	ErrDoubleFinish = errors.New("Throttle.Finished called internal part twice")
 )
 
 const (
@@ -252,7 +256,7 @@ type Throttle struct {
 	ch        chan struct{}
 	errCh     chan error
 	finishErr error
-	finished  bool
+	finished  int32
 }
 
 // NewThrottle creates a new throttle with a max number of workers.
@@ -267,7 +271,7 @@ func NewThrottle(max int) *Throttle {
 // are already maximum number of workers working. If it detects an error from
 // previously Done workers, it would return it.
 func (t *Throttle) Do() error {
-	if t.finished {
+	if atomic.LoadInt32(&t.finished) == 1 {
 		return ErrDoAfterFinish
 	}
 	for {
@@ -305,7 +309,12 @@ func (t *Throttle) Finish() error {
 		t.wg.Wait()
 		close(t.ch)
 		close(t.errCh)
-		t.finished = true
+		if !atomic.CompareAndSwapInt32(&t.finished, 0, 1) {
+			// It should not be: once.Do should care for exactly once call.
+			// But let's check anyway
+			t.finishErr = ErrDoubleFinish
+			return
+		}
 		for err := range t.errCh {
 			if err != nil {
 				t.finishErr = err
