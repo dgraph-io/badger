@@ -271,3 +271,14 @@ func TestMulipleSignals(t *testing.T) {
 	require.NotPanics(t, func() { closer.SignalAndWait() })
 	require.NotPanics(t, func() { closer.Signal() })
 }
+
+// This test ensures we don't panic during Do after Finish.
+func TestThrottleDoAfterFinish(t *testing.T) {
+	th := NewThrottle(4)
+	require.NoError(t, th.Do())
+	th.Done(nil)
+	require.NoError(t, th.Finish())
+	require.NotPanics(t, func() {
+		require.Error(t, th.Do())
+	})
+}
