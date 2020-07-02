@@ -254,3 +254,14 @@ func TestPagebufferReader4(t *testing.T) {
 	require.Equal(t, err, io.EOF, "should return EOF")
 	require.Equal(t, n, 0)
 }
+
+// This test ensures we don't panic during Do after Finish.
+func TestThrottleDoAfterFinish(t *testing.T) {
+	th := NewThrottle(4)
+	require.NoError(t, th.Do())
+	th.Done(nil)
+	require.NoError(t, th.Finish())
+	require.NotPanics(t, func() {
+		require.Error(t, th.Do())
+	})
+}
