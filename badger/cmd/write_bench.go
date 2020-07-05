@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 )
@@ -53,6 +54,7 @@ var (
 
 	sizeWritten    uint64
 	entriesWritten uint64
+	gcSuccess      uint64
 )
 
 const (
@@ -69,18 +71,23 @@ func init() {
 		"Force compact level 0 on close.")
 	writeBenchCmd.Flags().BoolVarP(&sorted, "sorted", "s", false, "Write keys in sorted order.")
 	writeBenchCmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "Show Badger logs.")
+	start = time.Now()
 }
 
+var start time.Time
+
 func writeRandom(db *badger.DB, num uint64) error {
-	value := make([]byte, valSz)
-	y.Check2(rand.Read(value))
+	// value := make([]byte, valSz)
+	// y.Check2(rand.Read(value))
+
+	value := []byte(fmt.Sprintf("%0128d", time.Since(start)))
 
 	es := uint64(keySz + valSz) // entry size is keySz + valSz
 	batch := db.NewWriteBatch()
 	for i := uint64(1); i <= num; i++ {
-		key := make([]byte, keySz)
-		y.Check2(rand.Read(key))
-		if err := batch.Set(key, value); err != nil {
+		key := []byte(fmt.Sprintf("%032d", i))
+		e := badger.NewEntry(key, value).WithTTL(time.Minute * 5)
+		if err := batch.SetEntry(e); err != nil {
 			return err
 		}
 
@@ -161,6 +168,14 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithValueDir(vlogDir).
 		WithTruncate(truncate).
 		WithSyncWrites(false).
+		WithKeepBlocksInCache(true).
+		WithKeepBlockIndicesInCache(true).
+		WithMaxBfCacheSize(300 << 20).
+		WithCompression(options.None).
+		WithZSTDCompressionLevel(3).
+		WithMaxCacheSize(1 << 30).
+		WithValueThreshold(1 << 10).
+		// WithEncryptionKey([]byte("badger16byteskey")).
 		WithCompactL0OnClose(force)
 
 	if !showLogs {
@@ -185,6 +200,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	num := uint64(numKeys * mil)
 	c := y.NewCloser(1)
 	go reportStats(c)
+	go runGC(db)
 
 	if sorted {
 		err = writeSorted(db, num)
@@ -194,6 +210,18 @@ func writeBench(cmd *cobra.Command, args []string) error {
 
 	c.SignalAndWait()
 	return err
+}
+
+func runGC(db *badger.DB) {
+	t := time.NewTicker(time.Minute * 5)
+	for {
+		<-t.C
+		if err := db.RunValueLogGC(0.01); err == nil {
+			atomic.AddUint64(&gcSuccess, 1)
+		}
+		fmt.Printf("block cache = %+v\n", db.DataCacheMetrics())
+		fmt.Printf("db.BfCach = %+v\n", db.BfCacheMetrics())
+	}
 }
 
 func reportStats(c *y.Closer) {
@@ -210,10 +238,10 @@ func reportStats(c *y.Closer) {
 			sz := atomic.LoadUint64(&sizeWritten)
 			entries := atomic.LoadUint64(&entriesWritten)
 			bytesRate := sz / uint64(dur.Seconds())
-			entriesRate := entries / uint64(dur.Seconds())
+			gcCount := atomic.LoadUint64(&gcSuccess)
 			fmt.Printf("Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
-				"entries written: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
-				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
+				"entries written: %d, GCCount: %d\n", y.FixedDuration(time.Since(startTime)),
+				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, gcCount)
 		}
 	}
 }

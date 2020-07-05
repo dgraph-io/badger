@@ -29,6 +29,7 @@ import (
 
 	"golang.org/x/net/trace"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
@@ -476,6 +477,14 @@ func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
 	return false
 }
 
+type e struct {
+	Key   []byte
+	Value y.ValueStruct
+}
+type tableData struct {
+	entries []e
+}
+
 // compactBuildTables merges topTables and botTables to form a list of new tables.
 func (s *levelsController) compactBuildTables(
 	lev int, cd compactDef) ([]*table.Table, func() error, error) {
@@ -548,10 +557,12 @@ nextTable:
 		table *table.Table
 		err   error
 	}
-	resultCh := make(chan newTableResult)
+	// resultCh := make(chan newTableResult)
+	newTables := make([]*table.Table, 0, 20)
 	var numBuilds, numVersions int
 	var lastKey, skipKey []byte
 	var vp valuePointer
+	var data []e
 	for it.Valid() {
 		timeStart := time.Now()
 		dk, err := s.kv.registry.latestDataKey()
@@ -565,6 +576,7 @@ nextTable:
 		bopts.Cache = s.kv.blockCache
 		bopts.BfCache = s.kv.bfCache
 		builder := table.NewTableBuilder(bopts)
+		data := data[:0]
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
 			// See if we need to skip the prefix.
@@ -642,6 +654,8 @@ nextTable:
 			if vs.Meta&bitValuePointer > 0 {
 				vp.Decode(vs.Value)
 			}
+			data = append(data, e{Key: append([]byte{}, it.Key()...), Value: vs})
+			// fmt.Printf("key(%d): %s string(vs) = %s\n", y.ParseTs(it.Key()), string(y.ParseKey(it.Key())), string(vs.Value))
 			builder.Add(it.Key(), vs, vp.Len)
 		}
 		// It was true that it.Valid() at least once in the loop above, which means we
@@ -666,31 +680,55 @@ nextTable:
 		}
 		numBuilds++
 		fileID := s.reserveFileID()
-		go func(builder *table.Builder) {
-			defer builder.Close()
-			var (
-				tbl *table.Table
-				err error
-			)
-			if s.kv.opt.InMemory {
-				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
-			} else {
-				tbl, err = build(fileID)
+
+		var tbl *table.Table
+
+		if s.kv.opt.InMemory {
+			tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
+		} else {
+			tbl, err = build(fileID)
+		}
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Println("verifying table", tbl.ID())
+		// Check the built table
+		it := tbl.NewIterator(false)
+		v := 0
+		prev := []byte{}
+		for it.Rewind(); it.Valid(); it.Next() {
+			if !bytes.Equal(it.Key(), data[v].Key) {
+				fmt.Printf("it.Key() = %x\n", it.Key())
+				fmt.Printf("data[v].K = %x\n", data[v].Key)
+				fmt.Printf("prev = %x\n", prev)
+				spew.Dump(data[:10])
+				panic("keys are different")
 			}
-			resultCh <- newTableResult{tbl, err}
-		}(builder)
+			iii := it.Value()
+			if !bytes.Equal(iii.Value, data[v].Value.Value) || iii.Meta != data[v].Value.Meta {
+				fmt.Printf("len: %d string(it.Key(%d) = %x\n", len(it.Key()), y.ParseTs(it.Key()), string(y.ParseKey(it.Key())))
+				fmt.Printf("len: %d string(it.Value().V = %x\n", len(it.Value().Value), string(it.Value().Value))
+				fmt.Printf("len: %d string(data[v].Valu = %x\n", len(data[v].Value.Value), string(data[v].Value.Value))
+				panic("value incorrect")
+			}
+			v++
+			prev = it.Key()
+		}
+		fmt.Printf("tbl.ID() = %+v OK\n", tbl.ID())
+		newTables = append(newTables, tbl)
+		builder.Close()
 	}
 
-	newTables := make([]*table.Table, 0, 20)
 	// Wait for all table builders to finish.
 	var firstErr error
-	for x := 0; x < numBuilds; x++ {
-		res := <-resultCh
-		newTables = append(newTables, res.table)
-		if firstErr == nil {
-			firstErr = res.err
-		}
-	}
+	// for x := 0; x < numBuilds; x++ {
+	// 	res := <-resultCh
+	// 	newTables = append(newTables, res.table)
+	// 	if firstErr == nil {
+	// 		firstErr = res.err
+	// 	}
+	// }
 
 	if firstErr == nil {
 		// Ensure created files' directory entries are visible.  We don't mind the extra latency
@@ -1017,10 +1055,10 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time
 		{
-			s.kv.opt.Debugf("STALLED STALLED STALLED: %v\n", time.Since(s.lastUnstalled))
+			s.kv.opt.Infof("STALLED STALLED STALLED: %v\n", time.Since(s.lastUnstalled))
 			s.cstatus.RLock()
 			for i := 0; i < s.kv.opt.MaxLevels; i++ {
-				s.kv.opt.Debugf("level=%d. Status=%s Size=%d\n",
+				s.kv.opt.Infof("level=%d. Status=%s Size=%d\n",
 					i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
 			}
 			s.cstatus.RUnlock()
@@ -1040,12 +1078,12 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 			time.Sleep(10 * time.Millisecond)
 			if i%100 == 0 {
 				prios := s.pickCompactLevels()
-				s.kv.opt.Debugf("Waiting to add level 0 table. Compaction priorities: %+v\n", prios)
+				s.kv.opt.Infof("Waiting to add level 0 table. Compaction priorities: %+v\n", prios)
 				i = 0
 			}
 		}
 		{
-			s.kv.opt.Debugf("UNSTALLED UNSTALLED UNSTALLED: %v\n", time.Since(timeStart))
+			s.kv.opt.Infof("UNSTALLED UNSTALLED UNSTALLED: %v\n", time.Since(timeStart))
 			s.lastUnstalled = time.Now()
 		}
 	}

@@ -1590,6 +1590,7 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 		tr.LazyPrintf("Could not find candidate via discard stats. Randomly picking one.")
 	}
 
+	return files
 	// Fallback to randomly picking a log file
 	var idxHead int
 	for i, fid := range fids {
@@ -1650,125 +1651,125 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 		}
 	}()
 
-	type reason struct {
-		total   float64
-		discard float64
-		count   int
-	}
+	// type reason struct {
+	// 	total   float64
+	// 	discard float64
+	// 	count   int
+	// }
 
-	fi, err := lf.fd.Stat()
-	if err != nil {
-		tr.LazyPrintf("Error while finding file size: %v", err)
-		tr.SetError()
-		return err
-	}
+	// fi, err := lf.fd.Stat()
+	// if err != nil {
+	// 	tr.LazyPrintf("Error while finding file size: %v", err)
+	// 	tr.SetError()
+	// 	return err
+	// }
 
-	// Set up the sampling window sizes.
-	sizeWindow := float64(fi.Size()) * 0.1                          // 10% of the file as window.
-	sizeWindowM := sizeWindow / (1 << 20)                           // in MBs.
-	countWindow := int(float64(vlog.opt.ValueLogMaxEntries) * 0.01) // 1% of num entries.
-	tr.LazyPrintf("Size window: %5.2f. Count window: %d.", sizeWindow, countWindow)
+	// // Set up the sampling window sizes.
+	// sizeWindow := float64(fi.Size()) * 0.1                          // 10% of the file as window.
+	// sizeWindowM := sizeWindow / (1 << 20)                           // in MBs.
+	// countWindow := int(float64(vlog.opt.ValueLogMaxEntries) * 0.01) // 1% of num entries.
+	// tr.LazyPrintf("Size window: %5.2f. Count window: %d.", sizeWindow, countWindow)
 
-	// Pick a random start point for the log.
-	skipFirstM := float64(rand.Int63n(fi.Size())) // Pick a random starting location.
-	skipFirstM -= sizeWindow                      // Avoid hitting EOF by moving back by window.
-	skipFirstM /= float64(mi)                     // Convert to MBs.
-	tr.LazyPrintf("Skip first %5.2f MB of file of size: %d MB", skipFirstM, fi.Size()/mi)
-	var skipped float64
+	// // Pick a random start point for the log.
+	// skipFirstM := float64(rand.Int63n(fi.Size())) // Pick a random starting location.
+	// skipFirstM -= sizeWindow                      // Avoid hitting EOF by moving back by window.
+	// skipFirstM /= float64(mi)                     // Convert to MBs.
+	// tr.LazyPrintf("Skip first %5.2f MB of file of size: %d MB", skipFirstM, fi.Size()/mi)
+	// var skipped float64
 
-	var r reason
-	start := time.Now()
-	y.AssertTrue(vlog.db != nil)
-	s := new(y.Slice)
-	var numIterations int
-	_, err = vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
-		numIterations++
-		esz := float64(vp.Len) / (1 << 20) // in MBs.
-		if skipped < skipFirstM {
-			skipped += esz
-			return nil
-		}
+	// var r reason
+	// start := time.Now()
+	// y.AssertTrue(vlog.db != nil)
+	// s := new(y.Slice)
+	// var numIterations int
+	// _, err = vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
+	// 	numIterations++
+	// 	esz := float64(vp.Len) / (1 << 20) // in MBs.
+	// 	if skipped < skipFirstM {
+	// 		skipped += esz
+	// 		return nil
+	// 	}
 
-		// Sample until we reach the window sizes or exceed 10 seconds.
-		if r.count > countWindow {
-			tr.LazyPrintf("Stopping sampling after %d entries.", countWindow)
-			return errStop
-		}
-		if r.total > sizeWindowM {
-			tr.LazyPrintf("Stopping sampling after reaching window size.")
-			return errStop
-		}
-		if time.Since(start) > 10*time.Second {
-			tr.LazyPrintf("Stopping sampling after 10 seconds.")
-			return errStop
-		}
-		r.total += esz
-		r.count++
+	// 	// Sample until we reach the window sizes or exceed 10 seconds.
+	// 	if r.count > countWindow {
+	// 		tr.LazyPrintf("Stopping sampling after %d entries.", countWindow)
+	// 		return errStop
+	// 	}
+	// 	if r.total > sizeWindowM {
+	// 		tr.LazyPrintf("Stopping sampling after reaching window size.")
+	// 		return errStop
+	// 	}
+	// 	if time.Since(start) > 10*time.Second {
+	// 		tr.LazyPrintf("Stopping sampling after 10 seconds.")
+	// 		return errStop
+	// 	}
+	// 	r.total += esz
+	// 	r.count++
 
-		vs, err := vlog.db.get(e.Key)
-		if err != nil {
-			return err
-		}
-		if discardEntry(e, vs, vlog.db) {
-			r.discard += esz
-			return nil
-		}
+	// 	vs, err := vlog.db.get(e.Key)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	if discardEntry(e, vs, vlog.db) {
+	// 		r.discard += esz
+	// 		return nil
+	// 	}
 
-		// Value is still present in value log.
-		y.AssertTrue(len(vs.Value) > 0)
-		vp.Decode(vs.Value)
+	// 	// Value is still present in value log.
+	// 	y.AssertTrue(len(vs.Value) > 0)
+	// 	vp.Decode(vs.Value)
 
-		if vp.Fid > lf.fid {
-			// Value is present in a later log. Discard.
-			r.discard += esz
-			return nil
-		}
-		if vp.Offset > e.offset {
-			// Value is present in a later offset, but in the same log.
-			r.discard += esz
-			return nil
-		}
-		if vp.Fid == lf.fid && vp.Offset == e.offset {
-			// This is still the active entry. This would need to be rewritten.
+	// 	if vp.Fid > lf.fid {
+	// 		// Value is present in a later log. Discard.
+	// 		r.discard += esz
+	// 		return nil
+	// 	}
+	// 	if vp.Offset > e.offset {
+	// 		// Value is present in a later offset, but in the same log.
+	// 		r.discard += esz
+	// 		return nil
+	// 	}
+	// 	if vp.Fid == lf.fid && vp.Offset == e.offset {
+	// 		// This is still the active entry. This would need to be rewritten.
 
-		} else {
-			vlog.opt.Debugf("Reason=%+v\n", r)
-			buf, lf, err := vlog.readValueBytes(vp, s)
-			// we need to decide, whether to unlock the lock file immediately based on the
-			// loading mode. getUnlockCallback will take care of it.
-			cb := vlog.getUnlockCallback(lf)
-			if err != nil {
-				runCallback(cb)
-				return errStop
-			}
-			ne, err := lf.decodeEntry(buf, vp.Offset)
-			if err != nil {
-				runCallback(cb)
-				return errStop
-			}
-			ne.print("Latest Entry Header in LSM")
-			e.print("Latest Entry in Log")
-			runCallback(cb)
-			return errors.Errorf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.",
-				vp, vs.Meta)
-		}
-		return nil
-	})
+	// 	} else {
+	// 		vlog.opt.Debugf("Reason=%+v\n", r)
+	// 		buf, lf, err := vlog.readValueBytes(vp, s)
+	// 		// we need to decide, whether to unlock the lock file immediately based on the
+	// 		// loading mode. getUnlockCallback will take care of it.
+	// 		cb := vlog.getUnlockCallback(lf)
+	// 		if err != nil {
+	// 			runCallback(cb)
+	// 			return errStop
+	// 		}
+	// 		ne, err := lf.decodeEntry(buf, vp.Offset)
+	// 		if err != nil {
+	// 			runCallback(cb)
+	// 			return errStop
+	// 		}
+	// 		ne.print("Latest Entry Header in LSM")
+	// 		e.print("Latest Entry in Log")
+	// 		runCallback(cb)
+	// 		return errors.Errorf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.",
+	// 			vp, vs.Meta)
+	// 	}
+	// 	return nil
+	// })
 
-	if err != nil {
-		tr.LazyPrintf("Error while iterating for RunGC: %v", err)
-		tr.SetError()
-		return err
-	}
-	tr.LazyPrintf("Fid: %d. Skipped: %5.2fMB Num iterations: %d. Data status=%+v\n",
-		lf.fid, skipped, numIterations, r)
+	// if err != nil {
+	// 	tr.LazyPrintf("Error while iterating for RunGC: %v", err)
+	// 	tr.SetError()
+	// 	return err
+	// }
+	// tr.LazyPrintf("Fid: %d. Skipped: %5.2fMB Num iterations: %d. Data status=%+v\n",
+	// 	lf.fid, skipped, numIterations, r)
 
-	// If we couldn't sample at least a 1000 KV pairs or at least 75% of the window size,
-	// and what we can discard is below the threshold, we should skip the rewrite.
-	if (r.count < countWindow && r.total < sizeWindowM*0.75) || r.discard < discardRatio*r.total {
-		tr.LazyPrintf("Skipping GC on fid: %d", lf.fid)
-		return ErrNoRewrite
-	}
+	// // If we couldn't sample at least a 1000 KV pairs or at least 75% of the window size,
+	// // and what we can discard is below the threshold, we should skip the rewrite.
+	// if (r.count < countWindow && r.total < sizeWindowM*0.75) || r.discard < discardRatio*r.total {
+	// 	tr.LazyPrintf("Skipping GC on fid: %d", lf.fid)
+	// 	return ErrNoRewrite
+	// }
 	if err = vlog.rewrite(lf, tr); err != nil {
 		return err
 	}
