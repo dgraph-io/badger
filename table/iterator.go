@@ -44,6 +44,8 @@ func (itr *blockIterator) setBlock(b *block) {
 	// Decrement the ref for the old block. If the old block was compressed, we
 	// might be able to reuse it.
 	itr.block.decrRef()
+	// Increment the ref for the new block.
+	b.incrRef()
 
 	itr.block = b
 	itr.err = nil
