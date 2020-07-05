@@ -213,7 +213,6 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	}
 
 	// store current entry's offset
-	y.AssertTrue(b.sz < math.MaxUint32)
 	b.entryOffsets = append(b.entryOffsets, b.sz-b.baseOffset)
 
 	// Layout: header, diffKey, value.
@@ -251,6 +250,7 @@ func (b *Builder) append(data []byte) {
 		b.grow(uint32(len(data)))
 	}
 	copy(b.buf[b.sz:], data)
+	y.AssertTrue(uint64(b.sz)+uint64(len(data)) < math.MaxUint32)
 	b.sz += uint32(len(data))
 }
 
@@ -315,13 +315,13 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	}
 
 	// Integer overflow check for statements below.
-	y.AssertTrue((len(b.entryOffsets)+1)*4+4+8+4 < math.MaxUint32)
+	y.AssertTrue((uint64(len(b.entryOffsets))+1)*4+4+8+4 < math.MaxUint32)
 	// We should include current entry also in size, that's why +1 to len(b.entryOffsets).
 	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 +
 		4 + // size of list
 		8 + // Sum64 in checksum proto
 		4) // checksum length
-	estimatedSize := uint32(b.sz) - b.baseOffset + uint32(6 /*header size for entry*/) +
+	estimatedSize := b.sz - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 
 	if b.shouldEncrypt() {
@@ -334,12 +334,11 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 
 // Add adds a key-value pair to the block.
 func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
-	y.AssertTrue(b.sz < math.MaxUint32)
 	if b.shouldFinishBlock(key, value) {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
 		b.baseKey = []byte{}
-		b.baseOffset = uint32((b.sz))
+		b.baseOffset = b.sz
 		b.entryOffsets = b.entryOffsets[:0]
 	}
 	b.addHelper(key, value, uint64(valueLen))
