@@ -1364,11 +1364,51 @@ func (vlog *valueLog) woffset() uint32 {
 	return atomic.LoadUint32(&vlog.writableLogOffset)
 }
 
+// validateWrites will check whether the given request can fit into 4GB vlog file.
+// NOTE: 4GB is the maximum size we can create for vlog because value pointer offset is of type
+// uint32. If we create more than 4GB, it will overflow uint32. So, limiting the size to 4GB.
+func (vlog *valueLog) validateWrites(reqs []*request) error {
+	vlogOffset := uint64(vlog.woffset())
+	for _, req := range reqs {
+		// calculate size of the request.
+		size := estimateRequestSize(req)
+		estimatedVlogOffset := vlogOffset + size
+		if estimatedVlogOffset > math.MaxUint32 {
+			return errors.Errorf("Request size is bigger than %d", math.MaxUint32)
+		}
+
+		if estimatedVlogOffset >= uint64(vlog.opt.ValueLogFileSize) {
+			// We'll create a new vlog file if the estimated offset is greater or equal to
+			// max vlog size. So, resetting the vlogOffset.
+			vlogOffset = 0
+			continue
+		}
+		// estimated vlog offset will become current vlog offset if the vlog is not rotated.
+		vlogOffset = estimatedVlogOffset
+	}
+	return nil
+}
+
+// estimateRequestSize returns the size that needed to be written for the given request.
+func estimateRequestSize(req *request) uint64 {
+	size := uint64(0)
+	for _, e := range req.Entries {
+		size += uint64(maxHeaderSize + len(e.Key) + len(e.Value) + crc32.Size)
+	}
+	return size
+}
+
 // write is thread-unsafe by design and should not be called concurrently.
 func (vlog *valueLog) write(reqs []*request) error {
 	if vlog.db.opt.InMemory {
 		return nil
 	}
+	// validate writes before writing to vlog. Because, we don't want to partially write and return
+	// an error.
+	if err := vlog.validateWrites(reqs); err != nil {
+		return err
+	}
+
 	vlog.filesLock.RLock()
 	maxFid := vlog.maxFid
 	curlf := vlog.filesMap[maxFid]
