@@ -136,6 +136,10 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 		} else {
 			nv = vp.Encode()
 			meta = meta | bitValuePointer
+			// Update vhead. If the crash happens while replay was in progess
+			// and the head is not updated, we will end up replaying all the
+			// files again.
+			db.updateHead([]valuePointer{vp})
 		}
 
 		v := y.ValueStruct{
@@ -638,6 +642,8 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	return db.lc.get(key, maxVs, 0)
 }
 
+// updateHead should not be called without the db.Lock() since db.vhead is used
+// by the writer go routines and memtable flushing goroutine.
 func (db *DB) updateHead(ptrs []valuePointer) {
 	var ptr valuePointer
 	for i := len(ptrs) - 1; i >= 0; i-- {
@@ -651,8 +657,6 @@ func (db *DB) updateHead(ptrs []valuePointer) {
 		return
 	}
 
-	db.Lock()
-	defer db.Unlock()
 	y.AssertTrue(!ptr.Less(db.vhead))
 	db.vhead = ptr
 }
@@ -751,7 +755,9 @@ func (db *DB) writeRequests(reqs []*request) error {
 			done(err)
 			return errors.Wrap(err, "writeRequests")
 		}
+		db.Lock()
 		db.updateHead(b.Ptrs)
+		db.Unlock()
 	}
 	done(nil)
 	db.opt.Debugf("%d entries written", count)
@@ -940,7 +946,7 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 	defer b.Close()
 	var vp valuePointer
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
-		if len(ft.dropPrefix) > 0 && bytes.HasPrefix(iter.Key(), ft.dropPrefix) {
+		if len(ft.dropPrefixes) > 0 && hasAnyPrefixes(iter.Key(), ft.dropPrefixes) {
 			continue
 		}
 		vs := iter.Value()
@@ -953,9 +959,9 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 }
 
 type flushTask struct {
-	mt         *skl.Skiplist
-	vptr       valuePointer
-	dropPrefix []byte
+	mt           *skl.Skiplist
+	vptr         valuePointer
+	dropPrefixes [][]byte
 }
 
 // handleFlushTask must be run serially.
@@ -1584,7 +1590,7 @@ func (db *DB) dropAll() (func(), error) {
 // - Compact L0->L1, skipping over Kp.
 // - Compact rest of the levels, Li->Li, picking tables which have Kp.
 // - Resume memtable flushes, compactions and writes.
-func (db *DB) DropPrefix(prefix []byte) error {
+func (db *DB) DropPrefix(prefixes ...[]byte) error {
 	db.opt.Infof("DropPrefix Called")
 	f, err := db.prepareToDrop()
 	if err != nil {
@@ -1604,8 +1610,8 @@ func (db *DB) DropPrefix(prefix []byte) error {
 		task := flushTask{
 			mt: memtable,
 			// Ensure that the head of value log gets persisted to disk.
-			vptr:       db.vhead,
-			dropPrefix: prefix,
+			vptr:         db.vhead,
+			dropPrefixes: prefixes,
 		}
 		db.opt.Debugf("Flushing memtable")
 		if err := db.handleFlushTask(task); err != nil {
@@ -1620,7 +1626,7 @@ func (db *DB) DropPrefix(prefix []byte) error {
 	db.mt = skl.NewSkiplist(arenaSize(db.opt))
 
 	// Drop prefixes from the levels.
-	if err := db.lc.dropPrefix(prefix); err != nil {
+	if err := db.lc.dropPrefixes(prefixes); err != nil {
 		return err
 	}
 	db.opt.Infof("DropPrefix done")
