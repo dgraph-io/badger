@@ -278,7 +278,5 @@ func TestThrottleDoAfterFinish(t *testing.T) {
 	require.NoError(t, th.Do())
 	th.Done(nil)
 	require.NoError(t, th.Finish())
-	require.NotPanics(t, func() {
-		require.Error(t, th.Do())
-	})
+	require.Error(t, th.Do())
 }
