@@ -328,7 +328,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		estimatedSize += aes.BlockSize
 	}
 	// Integer overflow check for table size.
-	y.AssertTrue(uint64(b.sz)+uint64(estimatedSize) > math.MaxUint32)
+	y.AssertTrue(uint64(b.sz)+uint64(estimatedSize) < math.MaxUint32)
 
 	return estimatedSize > uint32(b.opt.BlockSize)
 }
