@@ -210,6 +210,7 @@ func (lc *Closer) AddRunning(delta int) {
 
 // Signal signals the HasBeenClosed signal.
 func (lc *Closer) Signal() {
+	// Todo(ibrahim): Change Signal to return error on next badger breaking change.
 	lc.closeOnce.Do(func() {
 		close(lc.closed)
 	})
