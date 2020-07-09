@@ -46,7 +46,7 @@ import (
 )
 
 // maxVlogFileSize is the maximum size of the vlog file which can be created. Vlog Offset is of
-// uint32, so limiting at max uint32
+// uint32, so limiting at max uint32.
 var maxVlogFileSize = math.MaxUint32
 
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
@@ -1368,7 +1368,7 @@ func (vlog *valueLog) woffset() uint32 {
 	return atomic.LoadUint32(&vlog.writableLogOffset)
 }
 
-// validateWrites will check whether the given request can fit into 4GB vlog file.
+// validateWrites will check whether the given requests can fit into 4GB vlog file.
 // NOTE: 4GB is the maximum size we can create for vlog because value pointer offset is of type
 // uint32. If we create more than 4GB, it will overflow uint32. So, limiting the size to 4GB.
 func (vlog *valueLog) validateWrites(reqs []*request) error {
@@ -1378,7 +1378,7 @@ func (vlog *valueLog) validateWrites(reqs []*request) error {
 		size := estimateRequestSize(req)
 		estimatedVlogOffset := vlogOffset + size
 		if estimatedVlogOffset > uint64(maxVlogFileSize) {
-			return errors.Errorf("Request size is bigger than %d", math.MaxUint32)
+			return errors.Errorf("Request size is bigger than %d", maxVlogFileSize)
 		}
 
 		if estimatedVlogOffset >= uint64(vlog.opt.ValueLogFileSize) {
@@ -1387,7 +1387,7 @@ func (vlog *valueLog) validateWrites(reqs []*request) error {
 			vlogOffset = 0
 			continue
 		}
-		// estimated vlog offset will become current vlog offset if the vlog is not rotated.
+		// Estimated vlog offset will become current vlog offset if the vlog is not rotated.
 		vlogOffset = estimatedVlogOffset
 	}
 	return nil
@@ -1407,7 +1407,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 	if vlog.db.opt.InMemory {
 		return nil
 	}
-	// validate writes before writing to vlog. Because, we don't want to partially write and return
+	// Validate writes before writing to vlog. Because, we don't want to partially write and return
 	// an error.
 	if err := vlog.validateWrites(reqs); err != nil {
 		return err
