@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"math/rand"
 	"os"
 	"reflect"
@@ -1236,4 +1237,59 @@ func TestValueEntryChecksum(t *testing.T) {
 
 		require.NoError(t, db.Close())
 	})
+}
+
+func TestValidateWrite(t *testing.T) {
+	bigBuf := make([]byte, math.MaxUint32+1)
+	log := &valueLog{
+		opt: DefaultOptions("."),
+	}
+
+	// Sending a request with big values which will overflow uint32.
+	key := []byte("HelloKey")
+	req := &request{
+		Entries: []*Entry{
+			{
+				Key:   key,
+				Value: bigBuf,
+			},
+			{
+				Key:   key,
+				Value: bigBuf,
+			},
+			{
+				Key:   key,
+				Value: bigBuf,
+			},
+		},
+	}
+
+	err := log.validateWrites([]*request{req})
+	require.Error(t, err)
+
+	// Testing with small values.
+	smallBuf := make([]byte, 4)
+	req1 := &request{
+		Entries: []*Entry{
+			{
+				Key:   key,
+				Value: smallBuf,
+			},
+			{
+				Key:   key,
+				Value: smallBuf,
+			},
+			{
+				Key:   key,
+				Value: smallBuf,
+			},
+		},
+	}
+
+	err = log.validateWrites([]*request{req1})
+	require.NoError(t, err)
+
+	// Batching small and big request.
+	err = log.validateWrites([]*request{req1, req})
+	require.Error(t, err)
 }
