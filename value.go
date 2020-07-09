@@ -45,6 +45,10 @@ import (
 	"golang.org/x/net/trace"
 )
 
+// maxVlogFileSize is the maximum size of the vlog file which can be created. Vlog Offset is of
+// uint32, so limiting at max uint32
+var maxVlogFileSize = math.MaxUint32
+
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
@@ -1373,7 +1377,7 @@ func (vlog *valueLog) validateWrites(reqs []*request) error {
 		// calculate size of the request.
 		size := estimateRequestSize(req)
 		estimatedVlogOffset := vlogOffset + size
-		if estimatedVlogOffset > math.MaxUint32 {
+		if estimatedVlogOffset > uint64(maxVlogFileSize) {
 			return errors.Errorf("Request size is bigger than %d", math.MaxUint32)
 		}
 

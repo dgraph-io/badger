@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"math"
 	"math/rand"
 	"os"
 	"reflect"
@@ -1240,7 +1239,9 @@ func TestValueEntryChecksum(t *testing.T) {
 }
 
 func TestValidateWrite(t *testing.T) {
-	bigBuf := make([]byte, math.MaxUint32+1)
+	// Mocking the file size, so that we don't allocate big memory while running test.
+	maxVlogFileSize = 400
+	bigBuf := make([]byte, maxVlogFileSize+1)
 	log := &valueLog{
 		opt: DefaultOptions("."),
 	}
