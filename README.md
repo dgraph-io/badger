@@ -59,6 +59,7 @@ For more details on our version naming schema please read [Choosing a version](#
     + [Comparisons](#comparisons)
     + [Benchmarks](#benchmarks)
   * [Projects Using Badger](#projects-using-badger)
+  * [Contributing](#contributing)
   * [Frequently Asked Questions](#frequently-asked-questions)
 
 ## Getting Started
@@ -786,6 +787,10 @@ Below is a list of known projects that use Badger:
 * [KVdb](https://kvdb.io/) - Hosted key-value store and serverless platform built on top of Badger.
 
 If you are using Badger in a project please send a pull request to add it to the list.
+
+## Contributing
+
+If you're interested in contributing to Badger see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Frequently Asked Questions
 ### My writes are getting stuck. Why?
