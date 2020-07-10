@@ -1378,7 +1378,8 @@ func (vlog *valueLog) validateWrites(reqs []*request) error {
 		size := estimateRequestSize(req)
 		estimatedVlogOffset := vlogOffset + size
 		if estimatedVlogOffset > uint64(maxVlogFileSize) {
-			return errors.Errorf("Request size is bigger than %d", maxVlogFileSize)
+			return errors.Errorf("Request size offset %d is bigger than maximum offset %d",
+				estimatedVlogOffset, maxVlogFileSize)
 		}
 
 		if estimatedVlogOffset >= uint64(vlog.opt.ValueLogFileSize) {
