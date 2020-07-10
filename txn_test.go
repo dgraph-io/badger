@@ -28,6 +28,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 
 	"github.com/stretchr/testify/require"
 )
@@ -942,5 +943,47 @@ func TestConflict(t *testing.T) {
 	})
 	t.Run("ItrSeek", func(t *testing.T) {
 		runTest(t, testAndSetItr)
+	})
+}
+
+func TestOracleCleanup(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		require := require.New(t)
+
+		doWrite := func(key []byte, expectedReadTs uint64) {
+			writeTxn := db.NewTransaction(true)
+			require.Equal(expectedReadTs, writeTxn.readTs)
+			defer writeTxn.Discard()
+
+			err := writeTxn.Set(key, key)
+			require.NoError(err)
+
+			err = writeTxn.Commit()
+			require.NoError(err)
+		}
+
+		readTxn := db.NewTransaction(false)
+
+		require.Equal(uint64(0), readTxn.readTs)
+
+		key0 := []byte("key0")
+		doWrite([]byte("key0"), 0)
+		require.Equal(1, len(db.orc.committedTxns))
+		txn := db.orc.committedTxns[0]
+		require.Equal(1, len(txn.conflictKeys))
+		_, ok := txn.conflictKeys[z.MemHash(key0)]
+		require.True(ok)
+
+		newReadTxn := db.NewTransaction(false)
+		require.Equal(uint64(1), newReadTxn.readTs)
+		newReadTxn.Discard()
+
+		readTxn.Discard()
+		time.Sleep(1 * time.Second)
+
+		key1 := []byte("key1")
+		doWrite(key1, 1)
+
+		require.Equal(0, len(db.orc.committedTxns))
 	})
 }

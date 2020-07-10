@@ -171,7 +171,6 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 	var ts uint64
 	if !o.isManaged {
 		o.doneRead(txn)
-		o.cleanupCommittedTransactions()
 
 		// This is the general case, when user doesn't specify the read and commit ts.
 		ts = o.nextTxnTs
@@ -192,6 +191,10 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 			ts:           ts,
 			conflictKeys: txn.conflictKeys,
 		})
+
+		if !o.isManaged {
+			o.cleanupCommittedTransactions()
+		}
 	}
 
 	return ts
@@ -229,7 +232,11 @@ func (o *oracle) cleanupCommittedTransactions() { // Must be called under o.Lock
 
 	tmp := o.committedTxns[:0]
 	for _, txn := range o.committedTxns {
-		if txn.ts <= maxReadTs {
+		// If the read watermark is, say 10, it means that all the read transactions
+		// of readTs <= 10 have completed. Remain in-flight transactions of
+		// readTs >= 11, which cannot possibly conflict with transactions
+		// of commitTs <= 11.
+		if txn.ts <= maxReadTs+1 {
 			continue
 		}
 		tmp = append(tmp, txn)
