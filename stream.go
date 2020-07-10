@@ -275,8 +275,8 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 				y.AssertTrue(kvs != nil)
 				batch.Kv = append(batch.Kv, kvs.Kv...)
 
-				// If the size of the batch exceeds maxStreamSize, break from the loop
-				// to avoid creating a batch that is so big certain limits are reached.
+				// If the size of the batch exceeds maxStreamSize, break from the loop to
+				// avoid creating a batch that is so big that certain limits are reached.
 				sz := uint64(proto.Size(batch))
 				if sz > maxStreamSize {
 					break loop
