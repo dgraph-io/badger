@@ -313,6 +313,7 @@ outer:
 			batch = kvs
 
 			// Send the batch immediately if it already exceeds the maximum allowed size.
+			// Calling slurp on this batch will only increase the size further.
 			sz := uint64(proto.Size(batch))
 			if sz > maxStreamSize {
 				if err := sendBatch(batch); err != nil {
