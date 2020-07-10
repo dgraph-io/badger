@@ -89,6 +89,31 @@ This sections lists the changes which were reverted because of non-reproducible 
   - WithLoadBloomsOnOpen (#1260)
   - WithMaxBfCacheSize (#1260)
 
+## [2.0.3] - 2020-03-24
+
+### Fixed
+
+- Add support for watching nil prefix in subscribe API (#1246)
+
+### Performance
+
+- Compress/Encrypt Blocks in the background (#1227)
+- Disable cache by default (#1257)
+
+### Features
+
+- Add BypassDirLock option (#1243)
+- Add separate cache for bloomfilters (#1260)
+
+### New APIs
+- badger.DB
+  - BfCacheMetrics (#1260)
+  - DataCacheMetrics (#1260)
+- badger.Options
+  - WithBypassLockGuard (#1243)
+  - WithLoadBloomsOnOpen (#1260)
+  - WithMaxBfCacheSize (#1260)
+
 ## [2.0.2] - 2020-03-02
 
 ### Fixed
