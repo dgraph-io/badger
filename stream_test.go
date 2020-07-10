@@ -207,3 +207,60 @@ func TestStreamWithThreadId(t *testing.T) {
 	}
 	require.NoError(t, db.Close())
 }
+
+func TestBigStream(t *testing.T) {
+	// Set the maxStreamSize to 1MB for the duration of the test so that the it can use a smaller
+	// dataset than it would otherwise need.
+	originalMaxStreamSize := maxStreamSize
+	maxStreamSize = 1 << 20
+	defer func() {
+		maxStreamSize = originalMaxStreamSize
+	}()
+
+	testSize := int(1e6)
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := OpenManaged(DefaultOptions(dir))
+	require.NoError(t, err)
+
+	var count int
+	for _, prefix := range []string{"p0", "p1", "p2"} {
+		txn := db.NewTransactionAt(math.MaxUint64, true)
+		for i := 1; i <= testSize; i++ {
+			require.NoError(t, txn.SetEntry(NewEntry(keyWithPrefix(prefix, i), value(i))))
+			count++
+			if i % 1000 == 0 {
+				require.NoError(t, txn.CommitAt(5, nil))
+				txn = db.NewTransactionAt(math.MaxUint64, true)
+			}
+		}
+		require.NoError(t, txn.CommitAt(5, nil))
+	}
+
+	stream := db.NewStreamAt(math.MaxUint64)
+	stream.LogPrefix = "Testing"
+	c := &collector{}
+	stream.Send = func(list *bpb.KVList) error {
+		return c.Send(list)
+	}
+
+	// Test case 1. Retrieve everything.
+	err = stream.Orchestrate(ctxb)
+	require.NoError(t, err)
+	require.Equal(t, 3*testSize, len(c.kv), "Expected 30000. Got: %d", len(c.kv))
+
+	m := make(map[string]int)
+	for _, kv := range c.kv {
+		prefix, ki := keyToInt(kv.Key)
+		expected := value(ki)
+		require.Equal(t, expected, kv.Value)
+		m[prefix]++
+	}
+	require.Equal(t, 3, len(m))
+	for pred, count := range m {
+		require.Equal(t, testSize, count, "Count mismatch for pred: %s", pred)
+	}
+}
+
