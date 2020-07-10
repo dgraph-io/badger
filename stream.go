@@ -32,7 +32,10 @@ import (
 
 const pageSize = 4 << 20 // 4MB
 
-// maxStreamSize
+// maxStreamSize is the maximum allowed size of a stream batch. This is a soft limit
+// as a single list that is still over the limit will have to be sent as is since it
+// cannot be split further. This limit prevents the framework from creating batches
+// so big that sending them causes issues (e.g running into the max size gRPC limit).
 var maxStreamSize = uint64(100 << 20) // 100MB
 
 // Stream provides a framework to concurrently iterate over a snapshot of Badger, pick up
