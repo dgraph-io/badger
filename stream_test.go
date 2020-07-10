@@ -77,10 +77,8 @@ func TestStream(t *testing.T) {
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = "Testing"
 	c := &collector{}
-	stream.Send = func(list *bpb.KVList) error {
-		return c.Send(list)
-	}
-
+	stream.Send = c.Send
+	
 	// Test case 1. Retrieve everything.
 	err = stream.Orchestrate(ctxb)
 	require.NoError(t, err)
@@ -186,9 +184,7 @@ func TestStreamWithThreadId(t *testing.T) {
 		return stream.ToList(key, itr)
 	}
 	c := &collector{}
-	stream.Send = func(list *bpb.KVList) error {
-		return c.Send(list)
-	}
+	stream.Send = c.Send
 
 	err = stream.Orchestrate(ctxb)
 	require.NoError(t, err)
@@ -242,9 +238,7 @@ func TestBigStream(t *testing.T) {
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = "Testing"
 	c := &collector{}
-	stream.Send = func(list *bpb.KVList) error {
-		return c.Send(list)
-	}
+	stream.Send = c.Send
 
 	// Test case 1. Retrieve everything.
 	err = stream.Orchestrate(ctxb)
