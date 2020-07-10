@@ -256,5 +256,6 @@ func TestBigStream(t *testing.T) {
 	for pred, count := range m {
 		require.Equal(t, testSize, count, "Count mismatch for pred: %s", pred)
 	}
+	require.NoError(t, db.Close())
 }
 
