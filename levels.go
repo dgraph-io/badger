@@ -663,6 +663,9 @@ nextTable:
 			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
 		}
 		if builder.Empty() {
+			// Cleanup builder resources:
+			builder.Finish()
+			builder.Close()
 			continue
 		}
 		numBuilds++
