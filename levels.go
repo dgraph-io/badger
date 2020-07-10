@@ -674,7 +674,7 @@ nextTable:
 				err error
 			)
 			if s.kv.opt.InMemory {
-				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
+				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, bopts)
 			} else {
 				tbl, err = build(fileID)
 			}
