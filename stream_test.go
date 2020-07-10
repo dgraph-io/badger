@@ -214,7 +214,7 @@ func TestBigStream(t *testing.T) {
 	}()
 
 	testSize := int(1e6)
-	dir, err := ioutil.TempDir("", "badger-test")
+	dir, err := ioutil.TempDir("", "badger-big-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 
