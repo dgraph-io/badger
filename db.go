@@ -394,10 +394,10 @@ func Open(opt Options) (db *DB, err error) {
 
 	// Let's advance nextTxnTs to one more than whatever we observed via
 	// replaying the logs.
-	db.orc.txnMark.Done(db.orc.nextTxnTs)
+	db.orc.txnMark.SetDoneUntil(db.orc.nextTxnTs)
 	// In normal mode, we must update readMark so older versions of keys can be removed during
 	// compaction when run in offline mode via the flatten tool.
-	db.orc.readMark.Done(db.orc.nextTxnTs)
+	db.orc.readMark.SetDoneUntil(db.orc.nextTxnTs)
 	db.orc.incrementNextTs()
 
 	db.closers.writes = y.NewCloser(1)

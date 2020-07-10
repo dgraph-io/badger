@@ -259,6 +259,6 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 	if err := ldr.Finish(); err != nil {
 		return err
 	}
-	db.orc.txnMark.Done(db.orc.nextTxnTs - 1)
+	db.orc.txnMark.SetDoneUntil(db.orc.nextTxnTs - 1)
 	return nil
 }

@@ -236,8 +236,8 @@ func (sw *StreamWriter) Flush() error {
 		}
 		sw.db.orc = newOracle(sw.db.opt)
 		sw.db.orc.nextTxnTs = sw.maxVersion
-		sw.db.orc.txnMark.Done(sw.maxVersion)
-		sw.db.orc.readMark.Done(sw.maxVersion)
+		sw.db.orc.txnMark.SetDoneUntil(sw.maxVersion)
+		sw.db.orc.readMark.SetDoneUntil(sw.maxVersion)
 		sw.db.orc.incrementNextTs()
 	}
 
