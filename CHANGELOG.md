@@ -3,60 +3,60 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [20.07.0-rc1] - 2020-07-10
+## [20.07.0-rc1] - 2020-07-11
 
 ### Fixed
-	- Fix Sequence generates duplicate values (#1281)
-	- Fix race condition in DoesNotHave (#1287)
-	- Fail fast if cgo is disabled and compression is ZSTD (#1284)
-	- Proto: make badger/v2 compatible with v1 (#1293)
-	- Proto: Rename dgraph.badger.v2.pb to badgerpb2 (#1314)
-	- Handle duplicates in ManagedWriteBatch (#1315)
-	- Ensure `bitValuePointer` flag is cleared for LSM entry values written to LSM (#1313)
-	- DropPrefix: Return error on blocked writes (#1329)
-	- Confirm `badgerMove` entry required before rewrite (#1302)
-	- Drop move keys when its key prefix is dropped (#1331)
-	- Iterator: Always add key to txn.reads (#1328)
-	- Restore: Account for value size as well (#1358)
-	- Compaction: Expired keys and delete markers are never purged (#1354)
-	- GC: Consider size of value while rewriting (#1357)
-	- Force KeepL0InMemory to be true when InMemory is true (#1375)
-	- Rework DB.DropPrefix (#1381)
-	- Update head while replaying value log (#1372)
-	- Avoid panic on multiple closer.Signal calls (#1401)
-	- Return error if the vlog writes exceeds more than 4GB (#1400)
+  - Fix Sequence generates duplicate values (#1281)
+  - Fix race condition in DoesNotHave (#1287)
+  - Fail fast if cgo is disabled and compression is ZSTD (#1284)
+  - Proto: make badger/v2 compatible with v1 (#1293)
+  - Proto: Rename dgraph.badger.v2.pb to badgerpb2 (#1314)
+  - Handle duplicates in ManagedWriteBatch (#1315)
+  - Ensure `bitValuePointer` flag is cleared for LSM entry values written to LSM (#1313)
+  - DropPrefix: Return error on blocked writes (#1329)
+  - Confirm `badgerMove` entry required before rewrite (#1302)
+  - Drop move keys when its key prefix is dropped (#1331)
+  - Iterator: Always add key to txn.reads (#1328)
+  - Restore: Account for value size as well (#1358)
+  - Compaction: Expired keys and delete markers are never purged (#1354)
+  - GC: Consider size of value while rewriting (#1357)
+  - Force KeepL0InMemory to be true when InMemory is true (#1375)
+  - Rework DB.DropPrefix (#1381)
+  - Update head while replaying value log (#1372)
+  - Avoid panic on multiple closer.Signal calls (#1401)
+  - Return error if the vlog writes exceeds more than 4GB (#1400)
 
 ### Performance
-	- Clean up transaction oracle as we go (#1275)
-	- Use cache for storing block offsets (#1336)
+  - Clean up transaction oracle as we go (#1275)
+  - Use cache for storing block offsets (#1336)
 
 ### Features
-	- Support disabling conflict detection (#1344)
-	- Add leveled logging (#1249)
-	- Support entry version in Write batch (#1310)
-	- Add Write method to batch write (#1321)
-	- Support multiple iterators in read-write transactions (#1286)
+  - Support disabling conflict detection (#1344)
+  - Add leveled logging (#1249)
+  - Support entry version in Write batch (#1310)
+  - Add Write method to batch write (#1321)
+  - Support multiple iterators in read-write transactions (#1286)
 
 ### New APIs
 - Badger.DB
-	- NewManagedWriteBatch (#1310)
-	- DropPrefix (#1381)
+  - NewManagedWriteBatch (#1310)
+  - DropPrefix (#1381)
 - Badger.Option
-	- WithDetectConflicts (#1344)
-	- WithKeepBlockIndicesInCache (#1336)
-	- WithKeepBlocksInCache (#1336)
+  - WithDetectConflicts (#1344)
+  - WithKeepBlockIndicesInCache (#1336)
+  - WithKeepBlocksInCache (#1336)
 - Badger.WriteBatch
-	- DeleteAt (#1310)
-	- SetEntryAt (#1310)
-	- Write (#1321)
+  - DeleteAt (#1310)
+  - SetEntryAt (#1310)
+  - Write (#1321)
 
 ### Changes to Default Options
-	- DefaultOptions: Set KeepL0InMemory to false (#1345)
-	- Increase default valueThreshold from 32B to 1KB (#1346)
+  - DefaultOptions: Set KeepL0InMemory to false (#1345)
+  - Increase default valueThreshold from 32B to 1KB (#1346)
 
 ### Deprecated
 - Badger.Option
-	- WithEventLogging (#1203)
+  - WithEventLogging (#1203)
 
 ### Reverts
 This sections lists the changes which were reverted because of non-reproducible crashes.
