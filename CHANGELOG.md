@@ -24,7 +24,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 	- Rework DB.DropPrefix (#1381)
 	- Update head while replaying value log (#1372)
 	- Avoid panic on multiple closer.Signal calls (#1401)
-	- Return error if the vlog writes exceeds more that 4GB (#1400)
+	- Return error if the vlog writes exceeds more than 4GB (#1400)
 
 ### Performance
 	- Clean up transaction oracle as we go (#1275)
