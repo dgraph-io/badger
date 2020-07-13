@@ -77,9 +77,7 @@ func TestStream(t *testing.T) {
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = "Testing"
 	c := &collector{}
-	stream.Send = func(list *bpb.KVList) error {
-		return c.Send(list)
-	}
+	stream.Send = c.Send
 
 	// Test case 1. Retrieve everything.
 	err = stream.Orchestrate(ctxb)
@@ -186,9 +184,7 @@ func TestStreamWithThreadId(t *testing.T) {
 		return stream.ToList(key, itr)
 	}
 	c := &collector{}
-	stream.Send = func(list *bpb.KVList) error {
-		return c.Send(list)
-	}
+	stream.Send = c.Send
 
 	err = stream.Orchestrate(ctxb)
 	require.NoError(t, err)
@@ -204,6 +200,57 @@ func TestStreamWithThreadId(t *testing.T) {
 	require.Equal(t, 3, len(m))
 	for pred, count := range m {
 		require.Equal(t, 100, count, "Count mismatch for pred: %s", pred)
+	}
+	require.NoError(t, db.Close())
+}
+
+func TestBigStream(t *testing.T) {
+	// Set the maxStreamSize to 1MB for the duration of the test so that the it can use a smaller
+	// dataset than it would otherwise need.
+	originalMaxStreamSize := maxStreamSize
+	maxStreamSize = 1 << 20
+	defer func() {
+		maxStreamSize = originalMaxStreamSize
+	}()
+
+	testSize := int(1e6)
+	dir, err := ioutil.TempDir("", "badger-big-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := OpenManaged(DefaultOptions(dir))
+	require.NoError(t, err)
+
+	var count int
+	wb := db.NewWriteBatchAt(5)
+	for _, prefix := range []string{"p0", "p1", "p2"} {
+		for i := 1; i <= testSize; i++ {
+			require.NoError(t, wb.SetEntry(NewEntry(keyWithPrefix(prefix, i), value(i))))
+			count++
+		}
+	}
+	require.NoError(t, wb.Flush())
+
+	stream := db.NewStreamAt(math.MaxUint64)
+	stream.LogPrefix = "Testing"
+	c := &collector{}
+	stream.Send = c.Send
+
+	// Test case 1. Retrieve everything.
+	err = stream.Orchestrate(ctxb)
+	require.NoError(t, err)
+	require.Equal(t, 3*testSize, len(c.kv), "Expected 30000. Got: %d", len(c.kv))
+
+	m := make(map[string]int)
+	for _, kv := range c.kv {
+		prefix, ki := keyToInt(kv.Key)
+		expected := value(ki)
+		require.Equal(t, expected, kv.Value)
+		m[prefix]++
+	}
+	require.Equal(t, 3, len(m))
+	for pred, count := range m {
+		require.Equal(t, testSize, count, "Count mismatch for pred: %s", pred)
 	}
 	require.NoError(t, db.Close())
 }

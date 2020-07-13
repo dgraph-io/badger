@@ -32,6 +32,12 @@ import (
 
 const pageSize = 4 << 20 // 4MB
 
+// maxStreamSize is the maximum allowed size of a stream batch. This is a soft limit
+// as a single list that is still over the limit will have to be sent as is since it
+// cannot be split further. This limit prevents the framework from creating batches
+// so big that sending them causes issues (e.g running into the max size gRPC limit).
+var maxStreamSize = uint64(100 << 20) // 100MB
+
 // Stream provides a framework to concurrently iterate over a snapshot of Badger, pick up
 // key-values, batch them up and call Send. Stream does concurrent iteration over many smaller key
 // ranges. It does NOT send keys in lexicographical sorted order. To get keys in sorted
@@ -248,9 +254,29 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	defer t.Stop()
 	now := time.Now()
 
+	sendBatch := func(batch *pb.KVList) error {
+		sz := uint64(proto.Size(batch))
+		bytesSent += sz
+		count += len(batch.Kv)
+		t := time.Now()
+		if err := st.Send(batch); err != nil {
+			return err
+		}
+		st.db.opt.Infof("%s Created batch of size: %s in %s.\n",
+			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
+		return nil
+	}
+
 	slurp := func(batch *pb.KVList) error {
 	loop:
 		for {
+			// Send the batch immediately if it already exceeds the maximum allowed size.
+			// If the size of the batch exceeds maxStreamSize, break from the loop to
+			// avoid creating a batch that is so big that certain limits are reached.
+			sz := uint64(proto.Size(batch))
+			if sz > maxStreamSize {
+				break loop
+			}
 			select {
 			case kvs, ok := <-st.kvChan:
 				if !ok {
@@ -262,16 +288,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 				break loop
 			}
 		}
-		sz := uint64(proto.Size(batch))
-		bytesSent += sz
-		count += len(batch.Kv)
-		t := time.Now()
-		if err := st.Send(batch); err != nil {
-			return err
-		}
-		st.db.opt.Infof("%s Created batch of size: %s in %s.\n",
-			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
-		return nil
+		return sendBatch(batch)
 	}
 
 outer:
@@ -297,6 +314,8 @@ outer:
 			}
 			y.AssertTrue(kvs != nil)
 			batch = kvs
+
+			// Otherwise, slurp more keys into this batch.
 			if err := slurp(batch); err != nil {
 				return err
 			}
