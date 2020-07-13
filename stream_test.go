@@ -78,7 +78,7 @@ func TestStream(t *testing.T) {
 	stream.LogPrefix = "Testing"
 	c := &collector{}
 	stream.Send = c.Send
-	
+
 	// Test case 1. Retrieve everything.
 	err = stream.Orchestrate(ctxb)
 	require.NoError(t, err)
@@ -222,18 +222,14 @@ func TestBigStream(t *testing.T) {
 	require.NoError(t, err)
 
 	var count int
+	wb := db.NewWriteBatchAt(5)
 	for _, prefix := range []string{"p0", "p1", "p2"} {
-		txn := db.NewTransactionAt(math.MaxUint64, true)
 		for i := 1; i <= testSize; i++ {
-			require.NoError(t, txn.SetEntry(NewEntry(keyWithPrefix(prefix, i), value(i))))
+			require.NoError(t, wb.SetEntry(NewEntry(keyWithPrefix(prefix, i), value(i))))
 			count++
-			if i % 1000 == 0 {
-				require.NoError(t, txn.CommitAt(5, nil))
-				txn = db.NewTransactionAt(math.MaxUint64, true)
-			}
 		}
-		require.NoError(t, txn.CommitAt(5, nil))
 	}
+	require.NoError(t, wb.Flush())
 
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = "Testing"
@@ -258,4 +254,3 @@ func TestBigStream(t *testing.T) {
 	}
 	require.NoError(t, db.Close())
 }
-

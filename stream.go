@@ -270,6 +270,13 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	slurp := func(batch *pb.KVList) error {
 	loop:
 		for {
+			// Send the batch immediately if it already exceeds the maximum allowed size.
+			// If the size of the batch exceeds maxStreamSize, break from the loop to
+			// avoid creating a batch that is so big that certain limits are reached.
+			sz := uint64(proto.Size(batch))
+			if sz > maxStreamSize {
+				break loop
+			}
 			select {
 			case kvs, ok := <-st.kvChan:
 				if !ok {
@@ -277,13 +284,6 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 				}
 				y.AssertTrue(kvs != nil)
 				batch.Kv = append(batch.Kv, kvs.Kv...)
-
-				// If the size of the batch exceeds maxStreamSize, break from the loop to
-				// avoid creating a batch that is so big that certain limits are reached.
-				sz := uint64(proto.Size(batch))
-				if sz > maxStreamSize {
-					break loop
-				}
 			default:
 				break loop
 			}
@@ -314,16 +314,6 @@ outer:
 			}
 			y.AssertTrue(kvs != nil)
 			batch = kvs
-
-			// Send the batch immediately if it already exceeds the maximum allowed size.
-			// Calling slurp on this batch will only increase the size further.
-			sz := uint64(proto.Size(batch))
-			if sz > maxStreamSize {
-				if err := sendBatch(batch); err != nil {
-					return err
-				}
-				continue
-			}
 
 			// Otherwise, slurp more keys into this batch.
 			if err := slurp(batch); err != nil {
