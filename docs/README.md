@@ -10,7 +10,6 @@ We use [Hugo](https://gohugo.io/) for our documentation.
 
  Download and install the latest patch of hugo version v0.69.x from [here](https://github.com/gohugoio/hugo/releases/).
 
-
 From within the docs folder, run the command below to get the theme.
 
 cd themes && git clone https://github.com/dgraph-io/hugo-docs
