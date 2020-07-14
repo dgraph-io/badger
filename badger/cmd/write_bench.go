@@ -17,6 +17,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"log"
@@ -24,6 +25,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"path/filepath"
+	"os"
+	"strconv"
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
@@ -65,6 +69,16 @@ var (
 	loadBloomsOnOpen    bool
 	detectConflicts     bool
 	compression         bool
+	showDir             bool
+
+	internalKeyCount    uint32
+	moveKeyCount        uint32
+	invalidKeyCount     uint32
+	validKeyCount       uint32
+	sstCount            uint32
+	vlogCount           uint32
+
+	files               []string
 )
 
 const (
@@ -101,6 +115,8 @@ func init() {
 		"If true, it badger will detect the conflicts")
 	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
 		"If true, badger will use ZSTD mode")
+	writeBenchCmd.Flags().BoolVar(&showDir, "show-dir", false,
+		"If true, the report will include the directory contents")
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
@@ -235,7 +251,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	startTime = time.Now()
 	num := uint64(numKeys * mil)
 	c := y.NewCloser(1)
-	go reportStats(c)
+	go reportStats(db, c)
 
 	if sorted {
 		err = writeSorted(db, num)
@@ -247,16 +263,64 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	return err
 }
 
-func reportStats(c *y.Closer) {
+func reportStats(db *badger.DB, c *y.Closer) {
 	defer c.Done()
 
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
+
 	for {
 		select {
 		case <-c.HasBeenClosed():
 			return
 		case <-t.C:
+			txn := db.NewTransaction(false)
+			defer txn.Discard()
+
+			iopt := badger.DefaultIteratorOptions
+			iopt.AllVersions = true
+			iopt.InternalAccess = true
+
+			it := txn.NewIterator(iopt)
+			defer it.Close()
+			for it.Rewind(); it.Valid(); it.Next() {
+				i := it.Item()
+				if bytes.HasPrefix(i.Key(), []byte("!badger!")) {
+					internalKeyCount++
+				}
+				if bytes.HasPrefix(i.Key(), []byte("!badger!Move")) {
+					moveKeyCount++
+				}
+				if i.IsDeletedOrExpired() {
+					invalidKeyCount++
+				} else {
+					validKeyCount++
+				}
+			}
+
+			// fetch directory contents
+			if showDir {
+				fmt.Printf("The directory contents are:\n")
+				err := filepath.Walk(sstDir, func(path string, info os.FileInfo, err error) error {
+					fileSize := strconv.FormatFloat(float64(info.Size()) / (1024.0 * 1024.0),
+						'f', 2, 64)
+					files = append(files, path + " " + fileSize + " MB")
+					if filepath.Ext(path) == ".vlog" {
+						vlogCount++
+					}
+					if filepath.Ext(path) == ".sst" {
+						sstCount++
+					}
+					return nil
+				})
+				if err == nil {
+					for _, file := range files {
+						fmt.Println(file)
+					}
+					fmt.Printf("SST Count: %d vlog Count: %d\n", sstCount, vlogCount)
+				}
+			}
+
 			dur := time.Since(startTime)
 			sz := atomic.LoadUint64(&sizeWritten)
 			entries := atomic.LoadUint64(&entriesWritten)
@@ -265,6 +329,9 @@ func reportStats(c *y.Closer) {
 			fmt.Printf("Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
 				"entries written: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
+			fmt.Printf("Valid Keys Count: %d\nInvalid Keys Count: %d\nMove Keys Count: %d\n"+
+				"Internal Keys Count: %d\n", validKeyCount, invalidKeyCount, moveKeyCount,
+				internalKeyCount)
 		}
 	}
 }
