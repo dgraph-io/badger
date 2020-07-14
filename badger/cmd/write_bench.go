@@ -65,6 +65,7 @@ var (
 	loadBloomsOnOpen    bool
 	detectConflicts     bool
 	compression         bool
+	withTTL             bool
 )
 
 const (
@@ -101,6 +102,8 @@ func init() {
 		"If true, it badger will detect the conflicts")
 	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
 		"If true, badger will use ZSTD mode")
+	writeBenchCmd.Flags().BoolVar(&withTTL, "entry-ttl", false,
+		"If true, badger will insert entries with TTL")
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
@@ -112,7 +115,14 @@ func writeRandom(db *badger.DB, num uint64) error {
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, keySz)
 		y.Check2(rand.Read(key))
-		if err := batch.Set(key, value); err != nil {
+
+		e := badger.NewEntry(key, value)
+
+		if withTTL {
+			e = badger.NewEntry(key, value).WithTTL(1 * time.Second)
+		}
+
+		if err := batch.SetEntry(e); err != nil {
 			return err
 		}
 
