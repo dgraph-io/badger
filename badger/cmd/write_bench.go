@@ -53,6 +53,14 @@ var (
 
 	sizeWritten    uint64
 	entriesWritten uint64
+
+	valueThreshold      int
+	numVersions         int
+	maxCacheSize        int64
+	keepBlockIdxInCache bool
+	keepBlocksInCache   bool
+	maxBfCacheSize      int64
+	vlogMaxEntries      uint32
 )
 
 const (
@@ -69,6 +77,21 @@ func init() {
 		"Force compact level 0 on close.")
 	writeBenchCmd.Flags().BoolVarP(&sorted, "sorted", "s", false, "Write keys in sorted order.")
 	writeBenchCmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "Show Badger logs.")
+	writeBenchCmd.Flags().IntVarP(&valueThreshold, "value-th", "t", 1<<10, "Value threshold")
+	writeBenchCmd.Flags().IntVarP(&numVersions, "num-ver", "n", 1, "Number of versions to keep")
+	writeBenchCmd.Flags().Int64VarP(&maxCacheSize, "max-cache", "C", 1<<30, "Max size of cache")
+	writeBenchCmd.Flags().BoolVarP(&keepBlockIdxInCache, "keep-bidx", "b", true,
+		"Keep block indices in cache")
+	writeBenchCmd.Flags().BoolVarP(&keepBlocksInCache, "keep-blocks", "B", true,
+		"Keep blocks in cache")
+	writeBenchCmd.Flags().Int64VarP(&maxBfCacheSize, "max-bf-cache", "c", 500<<20,
+		"Maximum Bloom Filter Cache Size")
+	writeBenchCmd.Flags().Uint32VarP(&vlogMaxEntries, "vlog-maxe", "x", 10000,
+		"Value log Max Entries")
+	writeBenchCmd.Flags().StringVarP(&encryptionKey, "encryption-key", "e", "",
+		"If it is true, badger will encrypt all the data stored on the disk.")
+	writeBenchCmd.Flags().StringVar(&loadingMode, "loading-mode", "mmap",
+		`Mode for accessing SSTables and value log files. Valid loading modes are fileio and mmap.`)
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
@@ -157,11 +180,21 @@ func writeSorted(db *badger.DB, num uint64) error {
 }
 
 func writeBench(cmd *cobra.Command, args []string) error {
+	mode := getLoadingMode(loadingMode)
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithTruncate(truncate).
 		WithSyncWrites(false).
-		WithCompactL0OnClose(force)
+		WithCompactL0OnClose(force).
+		WithValueThreshold(valueThreshold).
+		WithNumVersionsToKeep(numVersions).
+		WithMaxCacheSize(maxCacheSize).
+		WithKeepBlockIndicesInCache(keepBlockIdxInCache).
+		WithKeepBlocksInCache(keepBlocksInCache).
+		WithMaxBfCacheSize(maxBfCacheSize).
+		WithValueLogMaxEntries(vlogMaxEntries).
+		WithTableLoadingMode(mode).
+		WithEncryptionKey([]byte(encryptionKey))
 
 	if !showLogs {
 		opt = opt.WithLogger(nil)
