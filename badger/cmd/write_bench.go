@@ -27,7 +27,6 @@ import (
 	"time"
 	"path/filepath"
 	"os"
-	"strconv"
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
@@ -300,11 +299,9 @@ func reportStats(db *badger.DB, c *y.Closer) {
 
 			// fetch directory contents
 			if showDir {
-				fmt.Printf("The directory contents are:\n")
 				err := filepath.Walk(sstDir, func(path string, info os.FileInfo, err error) error {
-					fileSize := strconv.FormatFloat(float64(info.Size()) / (1024.0 * 1024.0),
-						'f', 2, 64)
-					files = append(files, path + " " + fileSize + " MB")
+					fileSize := humanize.Bytes(uint64(info.Size()))
+					files = append(files, "[Content] " + path + " " + fileSize)
 					if filepath.Ext(path) == ".vlog" {
 						vlogCount++
 					}
@@ -316,6 +313,7 @@ func reportStats(db *badger.DB, c *y.Closer) {
 				if err != nil {
 					log.Printf("Error while fetching directory. %v.", err)
 				} else {
+					fmt.Printf("[Content] Number of files:%d\n", len(files))
 					for _, file := range files {
 						fmt.Println(file)
 					}
