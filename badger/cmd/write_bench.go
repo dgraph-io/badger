@@ -106,7 +106,7 @@ func init() {
 	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
 		"If true, badger will use ZSTD mode")
 	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "5m", "GC Period.")
-	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.1, "GC discard ratio.")
+	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
@@ -289,6 +289,8 @@ func runGC(c *y.Closer, db *badger.DB) {
 		case <-t.C:
 			if err := db.RunValueLogGC(gcDiscardRatio); err == nil {
 				atomic.AddUint64(&gcSuccess, 1)
+			} else {
+				log.Printf("[GC] Failed due to following err %v", err)
 			}
 		}
 	}
