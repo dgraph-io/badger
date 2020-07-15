@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [20.07.0-rc2] - 2020-07-14
+
+### Fixed
+- Add a limit to the size of the batches sent over a stream. (#1412)
+
 ## [20.07.0-rc1] - 2020-07-11
 
 ### Fixed
