@@ -117,11 +117,9 @@ func writeRandom(db *badger.DB, num uint64) error {
 		y.Check2(rand.Read(key))
 
 		e := badger.NewEntry(key, value)
-
 		if withTTL {
-			e = badger.NewEntry(key, value).WithTTL(1 * time.Second)
+			e.WithTTL(1 * time.Second)
 		}
-
 		if err := batch.SetEntry(e); err != nil {
 			return err
 		}
