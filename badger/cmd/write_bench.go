@@ -38,9 +38,9 @@ var writeBenchCmd = &cobra.Command{
 	Use:   "write",
 	Short: "Writes random data to Badger to benchmark write speed.",
 	Long: `
-This command writes random data to Badger to benchmark write speed. Useful for testing and
-performance analysis.
-`,
+  This command writes random data to Badger to benchmark write speed. Useful for testing and
+  performance analysis.
+  `,
 	RunE: writeBench,
 }
 
@@ -65,10 +65,13 @@ var (
 	loadBloomsOnOpen    bool
 	detectConflicts     bool
 	compression         bool
+
+	dropall bool
 )
 
 const (
-	mil float64 = 1e6
+	mil           float64       = 1e6
+	dropAllPeriod time.Duration = time.Second * 3
 )
 
 func init() {
@@ -101,6 +104,7 @@ func init() {
 		"If true, it badger will detect the conflicts")
 	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
 		"If true, badger will use ZSTD mode")
+	writeBenchCmd.Flags().BoolVar(&dropall, "dropall", false, "If true, this drops all periodically.")
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
@@ -109,11 +113,18 @@ func writeRandom(db *badger.DB, num uint64) error {
 
 	es := uint64(keySz + valSz) // entry size is keySz + valSz
 	batch := db.NewWriteBatch()
+
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, keySz)
 		y.Check2(rand.Read(key))
-		if err := batch.Set(key, value); err != nil {
-			return err
+		err := batch.Set(key, value)
+		for err == badger.ErrBlockedWrites {
+			time.Sleep(time.Second)
+			batch = db.NewWriteBatch()
+			err = batch.Set(key, value)
+		}
+		if err != nil {
+			panic(err)
 		}
 
 		atomic.AddUint64(&entriesWritten, 1)
@@ -234,8 +245,9 @@ func writeBench(cmd *cobra.Command, args []string) error {
 
 	startTime = time.Now()
 	num := uint64(numKeys * mil)
-	c := y.NewCloser(1)
+	c := y.NewCloser(2)
 	go reportStats(c)
+	go dropAll(c, db)
 
 	if sorted {
 		err = writeSorted(db, num)
@@ -265,6 +277,36 @@ func reportStats(c *y.Closer) {
 			fmt.Printf("Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
 				"entries written: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
+		}
+	}
+}
+
+func dropAll(c *y.Closer, db *badger.DB) {
+	defer c.Done()
+
+	if !dropall {
+		return
+	}
+
+	t := time.NewTicker(dropAllPeriod)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			return
+		case <-t.C:
+			fmt.Println("[DropAll] Started")
+			err := db.DropAll()
+			for err == badger.ErrBlockedWrites {
+				err = db.DropAll()
+				time.Sleep(time.Millisecond * 300)
+			}
+
+			if err != nil {
+				fmt.Println("[DropAll] Failed")
+			} else {
+				fmt.Println("[DropAll] Successful")
+			}
 		}
 	}
 }
