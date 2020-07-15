@@ -240,9 +240,9 @@ func writeBench(cmd *cobra.Command, args []string) error {
 
 	startTime = time.Now()
 	num := uint64(numKeys * mil)
-	c := y.NewCloser(1)
+	c := y.NewCloser(2)
 	go reportStats(c)
-	go runGC(db)
+	go runGC(c, db)
 
 	if sorted {
 		err = writeSorted(db, num)
@@ -276,15 +276,20 @@ func reportStats(c *y.Closer) {
 	}
 }
 
-func runGC(db *badger.DB) {
+func runGC(c *y.Closer, db *badger.DB) {
+	defer c.Done()
 	period, err := time.ParseDuration(gcPeriod)
 	y.Check(err)
 	t := time.NewTicker(period)
 	defer t.Stop()
 	for {
-		<-t.C
-		if err := db.RunValueLogGC(gcDiscardRatio); err == nil {
-			atomic.AddUint64(&gcSuccess, 1)
+		select {
+		case <-c.HasBeenClosed():
+			return
+		case <-t.C:
+			if err := db.RunValueLogGC(gcDiscardRatio); err == nil {
+				atomic.AddUint64(&gcSuccess, 1)
+			}
 		}
 	}
 }
