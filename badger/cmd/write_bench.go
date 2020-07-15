@@ -313,7 +313,9 @@ func reportStats(db *badger.DB, c *y.Closer) {
 					}
 					return nil
 				})
-				if err == nil {
+				if err != nil {
+					log.Printf("Error while fetching directory. %v.", err)
+				} else {
 					for _, file := range files {
 						fmt.Println(file)
 					}
