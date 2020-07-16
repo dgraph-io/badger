@@ -68,6 +68,7 @@ var (
 	dropAllPeriod       string
 	gcPeriod            string
 	gcDiscardRatio      float64
+	ttlDuration         uint32
 
 	gcSuccess uint64
 )
@@ -108,6 +109,8 @@ func init() {
 		"If true, badger will use ZSTD mode")
 	writeBenchCmd.Flags().StringVar(&dropAllPeriod, "dropall", "0s",
 		"Period of dropping all. If 0, doesn't drops all.")
+	writeBenchCmd.Flags().Uint32Var(&ttlDuration, "entry-ttl", 0,
+		"TTL duration in seconds for the entries, 0 means without TTL")
 	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "5m", "GC Period.")
 	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
 }
@@ -122,11 +125,15 @@ func writeRandom(db *badger.DB, num uint64) error {
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, keySz)
 		y.Check2(rand.Read(key))
-		err := batch.Set(key, value)
+    e := badger.NewEntry(key, value)
+    if ttlDuration {
+      e.WithTTL(time.Duration(ttlDuration) * time.Second)
+    }
+    err := batch.SetEntry(e)
 		for err == badger.ErrBlockedWrites {
 			time.Sleep(time.Second)
 			batch = db.NewWriteBatch()
-			err = batch.Set(key, value)
+			err = batch.SetEntry(e)
 		}
 		if err != nil {
 			panic(err)
