@@ -65,6 +65,7 @@ var (
 	loadBloomsOnOpen    bool
 	detectConflicts     bool
 	compression         bool
+	ttlDuration         uint32
 
 	gcPeriod       string
 	gcDiscardRatio float64
@@ -105,6 +106,8 @@ func init() {
 		"If true, it badger will detect the conflicts")
 	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
 		"If true, badger will use ZSTD mode")
+	writeBenchCmd.Flags().Uint32Var(&ttlDuration, "entry-ttl", 0,
+		"TTL duration in seconds for the entries, 0 means without TTL")
 	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "5m", "GC Period.")
 	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
 }
@@ -118,7 +121,12 @@ func writeRandom(db *badger.DB, num uint64) error {
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, keySz)
 		y.Check2(rand.Read(key))
-		if err := batch.Set(key, value); err != nil {
+
+		e := badger.NewEntry(key, value)
+		if ttlDuration != 0 {
+			e.WithTTL(time.Duration(ttlDuration) * time.Second)
+		}
+		if err := batch.SetEntry(e); err != nil {
 			return err
 		}
 
