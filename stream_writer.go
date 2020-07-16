@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math"
 	"sync"
@@ -297,9 +298,6 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 	return w, nil
 }
 
-// ErrUnsortedKey is returned when any out of order key arrives at sortedWriter during call to Add.
-var ErrUnsortedKey = errors.New("Keys not in sorted order")
-
 func (w *sortedWriter) handleRequests() {
 	defer w.closer.Done()
 
@@ -353,7 +351,8 @@ func (w *sortedWriter) handleRequests() {
 // Add adds key and vs to sortedWriter.
 func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	if len(w.lastKey) > 0 && y.CompareKeys(key, w.lastKey) <= 0 {
-		return ErrUnsortedKey
+		return errors.Errorf("keys not in sorted order (last key: %s, key: %s)",
+			hex.Dump(w.lastKey), hex.Dump(key))
 	}
 
 	sameKey := y.SameKey(key, w.lastKey)
