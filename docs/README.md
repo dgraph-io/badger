@@ -15,3 +15,4 @@ From within the docs folder, run the command below to get the theme.
 cd themes && git clone https://github.com/dgraph-io/hugo-docs
 
 Run hugo server within the docs folder and visit http://localhost:1313 to see the documentation site.
+
