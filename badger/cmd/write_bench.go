@@ -65,6 +65,10 @@ var (
 	loadBloomsOnOpen    bool
 	detectConflicts     bool
 	compression         bool
+
+	gcPeriod       string
+	gcDiscardRatio float64
+	gcSuccess      uint64
 )
 
 const (
@@ -101,6 +105,8 @@ func init() {
 		"If true, it badger will detect the conflicts")
 	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
 		"If true, badger will use ZSTD mode")
+	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "5m", "GC Period.")
+	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
@@ -234,8 +240,9 @@ func writeBench(cmd *cobra.Command, args []string) error {
 
 	startTime = time.Now()
 	num := uint64(numKeys * mil)
-	c := y.NewCloser(1)
+	c := y.NewCloser(2)
 	go reportStats(c)
+	go runGC(c, db)
 
 	if sorted {
 		err = writeSorted(db, num)
@@ -263,8 +270,28 @@ func reportStats(c *y.Closer) {
 			bytesRate := sz / uint64(dur.Seconds())
 			entriesRate := entries / uint64(dur.Seconds())
 			fmt.Printf("Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
-				"entries written: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
-				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
+				"entries written: %d, speed: %d/sec, gcSuccess: %d\n", y.FixedDuration(time.Since(startTime)),
+				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate, gcSuccess)
+		}
+	}
+}
+
+func runGC(c *y.Closer, db *badger.DB) {
+	defer c.Done()
+	period, err := time.ParseDuration(gcPeriod)
+	y.Check(err)
+	t := time.NewTicker(period)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			return
+		case <-t.C:
+			if err := db.RunValueLogGC(gcDiscardRatio); err == nil {
+				atomic.AddUint64(&gcSuccess, 1)
+			} else {
+				log.Printf("[GC] Failed due to following err %v", err)
+			}
 		}
 	}
 }
