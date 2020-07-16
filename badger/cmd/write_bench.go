@@ -65,13 +65,11 @@ var (
 	loadBloomsOnOpen    bool
 	detectConflicts     bool
 	compression         bool
-
-	dropall bool
+	dropAllPeriod       string
 )
 
 const (
-	mil           float64       = 1e6
-	dropAllPeriod time.Duration = time.Second * 3
+	mil float64 = 1e6
 )
 
 func init() {
@@ -104,7 +102,8 @@ func init() {
 		"If true, it badger will detect the conflicts")
 	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
 		"If true, badger will use ZSTD mode")
-	writeBenchCmd.Flags().BoolVar(&dropall, "dropall", false, "If true, this drops all periodically.")
+	writeBenchCmd.Flags().StringVar(&dropAllPeriod, "dropall", "0s",
+		"Period of dropping all. If 0, doesn't drops all.")
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
@@ -284,11 +283,13 @@ func reportStats(c *y.Closer) {
 func dropAll(c *y.Closer, db *badger.DB) {
 	defer c.Done()
 
-	if !dropall {
+	dropPeriod, err := time.ParseDuration(dropAllPeriod)
+	y.Check(err)
+	if dropPeriod == 0 {
 		return
 	}
 
-	t := time.NewTicker(dropAllPeriod)
+	t := time.NewTicker(dropPeriod)
 	defer t.Stop()
 	for {
 		select {
