@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 )
@@ -53,6 +54,21 @@ var (
 
 	sizeWritten    uint64
 	entriesWritten uint64
+
+	valueThreshold      int
+	numVersions         int
+	maxCacheSize        int64
+	keepBlockIdxInCache bool
+	keepBlocksInCache   bool
+	maxBfCacheSize      int64
+	vlogMaxEntries      uint32
+	loadBloomsOnOpen    bool
+	detectConflicts     bool
+	compression         bool
+
+	gcPeriod       string
+	gcDiscardRatio float64
+	gcSuccess      uint64
 )
 
 const (
@@ -69,6 +85,28 @@ func init() {
 		"Force compact level 0 on close.")
 	writeBenchCmd.Flags().BoolVarP(&sorted, "sorted", "s", false, "Write keys in sorted order.")
 	writeBenchCmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "Show Badger logs.")
+	writeBenchCmd.Flags().IntVarP(&valueThreshold, "value-th", "t", 1<<10, "Value threshold")
+	writeBenchCmd.Flags().IntVarP(&numVersions, "num-version", "n", 1, "Number of versions to keep")
+	writeBenchCmd.Flags().Int64VarP(&maxCacheSize, "max-cache", "C", 1<<30, "Max size of cache")
+	writeBenchCmd.Flags().BoolVarP(&keepBlockIdxInCache, "keep-bidx", "b", true,
+		"Keep block indices in cache")
+	writeBenchCmd.Flags().BoolVarP(&keepBlocksInCache, "keep-blocks", "B", true,
+		"Keep blocks in cache")
+	writeBenchCmd.Flags().Int64VarP(&maxBfCacheSize, "max-bf-cache", "c", 500<<20,
+		"Maximum Bloom Filter Cache Size")
+	writeBenchCmd.Flags().Uint32Var(&vlogMaxEntries, "vlog-maxe", 10000, "Value log Max Entries")
+	writeBenchCmd.Flags().StringVarP(&encryptionKey, "encryption-key", "e", "",
+		"If it is true, badger will encrypt all the data stored on the disk.")
+	writeBenchCmd.Flags().StringVar(&loadingMode, "loading-mode", "mmap",
+		"Mode for accessing SSTables")
+	writeBenchCmd.Flags().BoolVar(&loadBloomsOnOpen, "load-blooms", false,
+		"Load Bloom filter on DB open.")
+	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", false,
+		"If true, it badger will detect the conflicts")
+	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
+		"If true, badger will use ZSTD mode")
+	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "5m", "GC Period.")
+	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
@@ -157,11 +195,30 @@ func writeSorted(db *badger.DB, num uint64) error {
 }
 
 func writeBench(cmd *cobra.Command, args []string) error {
+	var cmode options.CompressionType
+	if compression {
+		cmode = options.ZSTD
+	} else {
+		cmode = options.None
+	}
+	mode := getLoadingMode(loadingMode)
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithTruncate(truncate).
 		WithSyncWrites(false).
-		WithCompactL0OnClose(force)
+		WithCompactL0OnClose(force).
+		WithValueThreshold(valueThreshold).
+		WithNumVersionsToKeep(numVersions).
+		WithMaxCacheSize(maxCacheSize).
+		WithKeepBlockIndicesInCache(keepBlockIdxInCache).
+		WithKeepBlocksInCache(keepBlocksInCache).
+		WithMaxBfCacheSize(maxBfCacheSize).
+		WithValueLogMaxEntries(vlogMaxEntries).
+		WithTableLoadingMode(mode).
+		WithEncryptionKey([]byte(encryptionKey)).
+		WithLoadBloomsOnOpen(loadBloomsOnOpen).
+		WithDetectConflicts(detectConflicts).
+		WithCompression(cmode)
 
 	if !showLogs {
 		opt = opt.WithLogger(nil)
@@ -183,8 +240,9 @@ func writeBench(cmd *cobra.Command, args []string) error {
 
 	startTime = time.Now()
 	num := uint64(numKeys * mil)
-	c := y.NewCloser(1)
+	c := y.NewCloser(2)
 	go reportStats(c)
+	go runGC(c, db)
 
 	if sorted {
 		err = writeSorted(db, num)
@@ -212,8 +270,28 @@ func reportStats(c *y.Closer) {
 			bytesRate := sz / uint64(dur.Seconds())
 			entriesRate := entries / uint64(dur.Seconds())
 			fmt.Printf("Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
-				"entries written: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
-				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
+				"entries written: %d, speed: %d/sec, gcSuccess: %d\n", y.FixedDuration(time.Since(startTime)),
+				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate, gcSuccess)
+		}
+	}
+}
+
+func runGC(c *y.Closer, db *badger.DB) {
+	defer c.Done()
+	period, err := time.ParseDuration(gcPeriod)
+	y.Check(err)
+	t := time.NewTicker(period)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			return
+		case <-t.C:
+			if err := db.RunValueLogGC(gcDiscardRatio); err == nil {
+				atomic.AddUint64(&gcSuccess, 1)
+			} else {
+				log.Printf("[GC] Failed due to following err %v", err)
+			}
 		}
 	}
 }

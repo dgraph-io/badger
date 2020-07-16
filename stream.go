@@ -32,6 +32,12 @@ import (
 
 const pageSize = 4 << 20 // 4MB
 
+// maxStreamSize is the maximum allowed size of a stream batch. This is a soft limit
+// as a single list that is still over the limit will have to be sent as is since it
+// cannot be split further. This limit prevents the framework from creating batches
+// so big that sending them causes issues (e.g running into the max size gRPC limit).
+var maxStreamSize = uint64(100 << 20) // 100MB
+
 // Stream provides a framework to concurrently iterate over a snapshot of Badger, pick up
 // key-values, batch them up and call Send. Stream does concurrent iteration over many smaller key
 // ranges. It does NOT send keys in lexicographical sorted order. To get keys in sorted
@@ -146,7 +152,7 @@ func (st *Stream) produceRanges(ctx context.Context) {
 }
 
 // produceKVs picks up ranges from rangeCh, generates KV lists and sends them to kvChan.
-func (st *Stream) produceKVs(ctx context.Context) error {
+func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	var size int
 	var txn *Txn
 	if st.readTs > 0 {
@@ -162,6 +168,7 @@ func (st *Stream) produceKVs(ctx context.Context) error {
 		iterOpts.Prefix = st.Prefix
 		iterOpts.PrefetchValues = false
 		itr := txn.NewIterator(iterOpts)
+		itr.ThreadId = threadId
 		defer itr.Close()
 
 		// This unique stream id is used to identify all the keys from this iteration.
@@ -247,9 +254,29 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	defer t.Stop()
 	now := time.Now()
 
+	sendBatch := func(batch *pb.KVList) error {
+		sz := uint64(proto.Size(batch))
+		bytesSent += sz
+		count += len(batch.Kv)
+		t := time.Now()
+		if err := st.Send(batch); err != nil {
+			return err
+		}
+		st.db.opt.Infof("%s Created batch of size: %s in %s.\n",
+			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
+		return nil
+	}
+
 	slurp := func(batch *pb.KVList) error {
 	loop:
 		for {
+			// Send the batch immediately if it already exceeds the maximum allowed size.
+			// If the size of the batch exceeds maxStreamSize, break from the loop to
+			// avoid creating a batch that is so big that certain limits are reached.
+			sz := uint64(proto.Size(batch))
+			if sz > maxStreamSize {
+				break loop
+			}
 			select {
 			case kvs, ok := <-st.kvChan:
 				if !ok {
@@ -261,16 +288,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 				break loop
 			}
 		}
-		sz := uint64(proto.Size(batch))
-		bytesSent += sz
-		count += len(batch.Kv)
-		t := time.Now()
-		if err := st.Send(batch); err != nil {
-			return err
-		}
-		st.db.opt.Infof("%s Created batch of size: %s in %s.\n",
-			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
-		return nil
+		return sendBatch(batch)
 	}
 
 outer:
@@ -296,6 +314,8 @@ outer:
 			}
 			y.AssertTrue(kvs != nil)
 			batch = kvs
+
+			// Otherwise, slurp more keys into this batch.
 			if err := slurp(batch); err != nil {
 				return err
 			}
@@ -331,16 +351,17 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for i := 0; i < st.NumGo; i++ {
 		wg.Add(1)
-		go func() {
+
+		go func(threadId int) {
 			defer wg.Done()
 			// Picks up ranges from rangeCh, generates KV lists, and sends them to kvChan.
-			if err := st.produceKVs(ctx); err != nil {
+			if err := st.produceKVs(ctx, threadId); err != nil {
 				select {
 				case errCh <- err:
 				default:
 				}
 			}
-		}()
+		}(i)
 	}
 
 	// Pick up key-values from kvChan and send to stream.

@@ -19,6 +19,7 @@ package badger
 import (
 	"sync"
 
+	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 )
@@ -30,7 +31,9 @@ type WriteBatch struct {
 	db       *DB
 	throttle *y.Throttle
 	err      error
-	commitTs uint64
+
+	isManaged bool
+	commitTs  uint64
 }
 
 // NewWriteBatch creates a new WriteBatch. This provides a way to conveniently do a lot of writes,
@@ -42,14 +45,15 @@ func (db *DB) NewWriteBatch() *WriteBatch {
 	if db.opt.managedTxns {
 		panic("cannot use NewWriteBatch in managed mode. Use NewWriteBatchAt instead")
 	}
-	return db.newWriteBatch()
+	return db.newWriteBatch(false)
 }
 
-func (db *DB) newWriteBatch() *WriteBatch {
+func (db *DB) newWriteBatch(isManaged bool) *WriteBatch {
 	return &WriteBatch{
-		db:       db,
-		txn:      db.newTransaction(true, true),
-		throttle: y.NewThrottle(16),
+		db:        db,
+		isManaged: isManaged,
+		txn:       db.newTransaction(true, isManaged),
+		throttle:  y.NewThrottle(16),
 	}
 }
 
@@ -89,6 +93,23 @@ func (wb *WriteBatch) callback(err error) {
 	wb.err = err
 }
 
+func (wb *WriteBatch) Write(kvList *pb.KVList) error {
+	wb.Lock()
+	defer wb.Unlock()
+	for _, kv := range kvList.Kv {
+		e := Entry{Key: kv.Key, Value: kv.Value}
+		if len(kv.UserMeta) > 0 {
+			e.UserMeta = kv.UserMeta[0]
+		}
+		y.AssertTrue(kv.Version != 0)
+		e.version = kv.Version
+		if err := wb.handleEntry(&e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SetEntryAt is the equivalent of Txn.SetEntry but it also allows setting version for the entry.
 // SetEntryAt can be used only in managed mode.
 func (wb *WriteBatch) SetEntryAt(e *Entry, ts uint64) error {
@@ -99,11 +120,8 @@ func (wb *WriteBatch) SetEntryAt(e *Entry, ts uint64) error {
 	return wb.SetEntry(e)
 }
 
-// SetEntry is the equivalent of Txn.SetEntry.
-func (wb *WriteBatch) SetEntry(e *Entry) error {
-	wb.Lock()
-	defer wb.Unlock()
-
+// Should be called with lock acquired.
+func (wb *WriteBatch) handleEntry(e *Entry) error {
 	if err := wb.txn.SetEntry(e); err != ErrTxnTooBig {
 		return err
 	}
@@ -118,6 +136,13 @@ func (wb *WriteBatch) SetEntry(e *Entry) error {
 		return err
 	}
 	return nil
+}
+
+// SetEntry is the equivalent of Txn.SetEntry.
+func (wb *WriteBatch) SetEntry(e *Entry) error {
+	wb.Lock()
+	defer wb.Unlock()
+	return wb.handleEntry(e)
 }
 
 // Set is equivalent of Txn.Set().
@@ -156,11 +181,11 @@ func (wb *WriteBatch) commit() error {
 		return wb.err
 	}
 	if err := wb.throttle.Do(); err != nil {
-		return err
+		wb.err = err
+		return wb.err
 	}
 	wb.txn.CommitWith(wb.callback)
-	wb.txn = wb.db.newTransaction(true, true)
-	wb.txn.readTs = 0 // We're not reading anything.
+	wb.txn = wb.db.newTransaction(true, wb.isManaged)
 	wb.txn.commitTs = wb.commitTs
 	return wb.err
 }
@@ -169,11 +194,15 @@ func (wb *WriteBatch) commit() error {
 // returns any error stored by WriteBatch.
 func (wb *WriteBatch) Flush() error {
 	wb.Lock()
+	// commit will set the wb.err so no need to check the error here.
 	_ = wb.commit()
 	wb.txn.Discard()
 	wb.Unlock()
 
 	if err := wb.throttle.Finish(); err != nil {
+		if wb.err != nil {
+			return errors.Errorf("wb.err: %s err: %s", wb.err, err)
+		}
 		return err
 	}
 

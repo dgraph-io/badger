@@ -31,9 +31,15 @@ import (
 
 	"github.com/cespare/xxhash"
 	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	KB = 1024
+	MB = KB * 1024
 )
 
 func key(prefix string, i int) string {
@@ -349,7 +355,7 @@ func TestIterateBackAndForth(t *testing.T) {
 
 	it.seekToFirst()
 	k = it.Key()
-	require.EqualValues(t, key("key", 0), string(y.ParseKey(k)))
+	require.EqualValues(t, key("key", 0), y.ParseKey(k))
 }
 
 func TestUniIterator(t *testing.T) {
@@ -694,8 +700,7 @@ func TestTableBigValues(t *testing.T) {
 	require.NoError(t, err, "unable to create file")
 
 	n := 100 // Insert 100 keys.
-	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
-		TableSize: uint64(n) * 1 << 20}
+	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 	builder := NewTableBuilder(opts)
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), 0)
@@ -948,4 +953,23 @@ func TestDoesNotHaveRace(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+var ko *pb.BlockOffset
+
+// Use this benchmark to manually verify block offset size calculation
+func BenchmarkBlockOffsetSizeCalculation(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		ko = &pb.BlockOffset{
+			Key: []byte{1, 23},
+		}
+	}
+}
+
+func TestBlockOffsetSizeCalculation(t *testing.T) {
+	// Empty struct testing.
+	require.Equal(t, calculateOffsetsSize([]*pb.BlockOffset{&pb.BlockOffset{}}), int64(88))
+	// Testing with key bytes
+	require.Equal(t, calculateOffsetsSize([]*pb.BlockOffset{&pb.BlockOffset{Key: []byte{1, 1}}}),
+		int64(90))
 }

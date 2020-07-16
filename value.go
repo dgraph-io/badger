@@ -45,6 +45,10 @@ import (
 	"golang.org/x/net/trace"
 )
 
+// maxVlogFileSize is the maximum size of the vlog file which can be created. Vlog Offset is of
+// uint32, so limiting at max uint32.
+var maxVlogFileSize = math.MaxUint32
+
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
@@ -518,7 +522,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 		if err != nil {
 			return err
 		}
-		if discardEntry(e, vs) {
+		if discardEntry(e, vs, vlog.db) {
 			return nil
 		}
 
@@ -564,6 +568,11 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 
 			ne.Value = append([]byte{}, e.Value...)
 			es := int64(ne.estimateSize(vlog.opt.ValueThreshold))
+			// Consider size of value as well while considering the total size
+			// of the batch. There have been reports of high memory usage in
+			// rewrite because we don't consider the value size. See #1292.
+			es += int64(len(e.Value))
+
 			// Ensure length and size of wb is within transaction limits.
 			if int64(len(wb)+1) >= vlog.opt.maxBatchCount ||
 				size+es >= vlog.opt.maxBatchSize {
@@ -1219,7 +1228,7 @@ func (lf *logFile) init() error {
 }
 
 func (vlog *valueLog) Close() error {
-	if vlog.db.opt.InMemory {
+	if vlog == nil || vlog.db == nil || vlog.db.opt.InMemory {
 		return nil
 	}
 	// close flushDiscardStats.
@@ -1359,11 +1368,52 @@ func (vlog *valueLog) woffset() uint32 {
 	return atomic.LoadUint32(&vlog.writableLogOffset)
 }
 
+// validateWrites will check whether the given requests can fit into 4GB vlog file.
+// NOTE: 4GB is the maximum size we can create for vlog because value pointer offset is of type
+// uint32. If we create more than 4GB, it will overflow uint32. So, limiting the size to 4GB.
+func (vlog *valueLog) validateWrites(reqs []*request) error {
+	vlogOffset := uint64(vlog.woffset())
+	for _, req := range reqs {
+		// calculate size of the request.
+		size := estimateRequestSize(req)
+		estimatedVlogOffset := vlogOffset + size
+		if estimatedVlogOffset > uint64(maxVlogFileSize) {
+			return errors.Errorf("Request size offset %d is bigger than maximum offset %d",
+				estimatedVlogOffset, maxVlogFileSize)
+		}
+
+		if estimatedVlogOffset >= uint64(vlog.opt.ValueLogFileSize) {
+			// We'll create a new vlog file if the estimated offset is greater or equal to
+			// max vlog size. So, resetting the vlogOffset.
+			vlogOffset = 0
+			continue
+		}
+		// Estimated vlog offset will become current vlog offset if the vlog is not rotated.
+		vlogOffset = estimatedVlogOffset
+	}
+	return nil
+}
+
+// estimateRequestSize returns the size that needed to be written for the given request.
+func estimateRequestSize(req *request) uint64 {
+	size := uint64(0)
+	for _, e := range req.Entries {
+		size += uint64(maxHeaderSize + len(e.Key) + len(e.Value) + crc32.Size)
+	}
+	return size
+}
+
 // write is thread-unsafe by design and should not be called concurrently.
 func (vlog *valueLog) write(reqs []*request) error {
 	if vlog.db.opt.InMemory {
 		return nil
 	}
+	// Validate writes before writing to vlog. Because, we don't want to partially write and return
+	// an error.
+	if err := vlog.validateWrites(reqs); err != nil {
+		return err
+	}
+
 	vlog.filesLock.RLock()
 	maxFid := vlog.maxFid
 	curlf := vlog.filesMap[maxFid]
@@ -1515,6 +1565,11 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 			return nil, cb, err
 		}
 	}
+	if uint32(len(kv)) < h.klen+h.vlen {
+		vlog.db.opt.Logger.Errorf("Invalid read: vp: %+v", vp)
+		return nil, nil, errors.Errorf("Invalid read: Len: %d read at:[%d:%d]",
+			len(kv), h.klen, h.klen+h.vlen)
+	}
 	return kv[h.klen : h.klen+h.vlen], cb, nil
 }
 
@@ -1601,7 +1656,7 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	return files
 }
 
-func discardEntry(e Entry, vs y.ValueStruct) bool {
+func discardEntry(e Entry, vs y.ValueStruct, db *DB) bool {
 	if vs.Version != y.ParseTs(e.Key) {
 		// Version not found. Discard.
 		return true
@@ -1616,6 +1671,16 @@ func discardEntry(e Entry, vs y.ValueStruct) bool {
 	if (vs.Meta & bitFinTxn) > 0 {
 		// Just a txn finish entry. Discard.
 		return true
+	}
+	if bytes.HasPrefix(e.Key, badgerMove) {
+		// Verify the actual key entry without the badgerPrefix has not been deleted.
+		// If this is not done the badgerMove entry will be kept forever moving from
+		// vlog to vlog during rewrites.
+		avs, err := db.get(e.Key[len(badgerMove):])
+		if err != nil {
+			return false
+		}
+		return avs.Version == 0
 	}
 	return false
 }
@@ -1689,7 +1754,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 		if err != nil {
 			return err
 		}
-		if discardEntry(e, vs) {
+		if discardEntry(e, vs, vlog.db) {
 			r.discard += esz
 			return nil
 		}

@@ -139,11 +139,11 @@ func getAllAndCheck(t *testing.T, db *DB, expected []keyValVersion) {
 		defer it.Close()
 		i := 0
 		for it.Rewind(); it.Valid(); it.Next() {
-			require.Less(t, i, len(expected), "DB has more number of key than expected")
 			item := it.Item()
 			v, err := item.ValueCopy(nil)
 			require.NoError(t, err)
 			// fmt.Printf("k: %s v: %d val: %s\n", item.key, item.Version(), v)
+			require.Less(t, i, len(expected), "DB has more number of key than expected")
 			expect := expected[i]
 			require.Equal(t, expect.key, string(item.Key()), "expected key: %s actual key: %s",
 				expect.key, item.Key())
@@ -252,6 +252,211 @@ func TestCompaction(t *testing.T) {
 			require.NoError(t, db.lc.runCompactDef(1, cdef))
 			// foo version 2 should be dropped after compaction.
 			getAllAndCheck(t, db, []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}})
+		})
+	})
+
+	t.Run("level 1 to level 2 with delete", func(t *testing.T) {
+		t.Run("with overlap", func(t *testing.T) {
+			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+				l1 := []keyValVersion{{"foo", "bar", 3, bitDelete}, {"fooz", "baz", 1, bitDelete}}
+				l2 := []keyValVersion{{"foo", "bar", 2, 0}}
+				l3 := []keyValVersion{{"foo", "bar", 1, 0}}
+				createAndOpen(db, l1, 1)
+				createAndOpen(db, l2, 2)
+				createAndOpen(db, l3, 3)
+
+				// Set a high discard timestamp so that all the keys are below the discard timestamp.
+				db.SetDiscardTs(10)
+
+				getAllAndCheck(t, db, []keyValVersion{
+					{"foo", "bar", 3, 1},
+					{"foo", "bar", 2, 0},
+					{"foo", "bar", 1, 0},
+					{"fooz", "baz", 1, 1},
+				})
+				cdef := compactDef{
+					thisLevel: db.lc.levels[1],
+					nextLevel: db.lc.levels[2],
+					top:       db.lc.levels[1].tables,
+					bot:       db.lc.levels[2].tables,
+				}
+				require.NoError(t, db.lc.runCompactDef(1, cdef))
+				// foo bar version 2 should be dropped after compaction. fooz
+				// baz version 1 will remain because overlap exists, which is
+				// expected because `hasOverlap` is only checked once at the
+				// beginning of `compactBuildTables` method.
+				// everything from level 1 is now in level 2.
+				getAllAndCheck(t, db, []keyValVersion{
+					{"foo", "bar", 3, bitDelete},
+					{"foo", "bar", 1, 0},
+					{"fooz", "baz", 1, 1},
+				})
+
+				cdef = compactDef{
+					thisLevel: db.lc.levels[2],
+					nextLevel: db.lc.levels[3],
+					top:       db.lc.levels[2].tables,
+					bot:       db.lc.levels[3].tables,
+				}
+				require.NoError(t, db.lc.runCompactDef(2, cdef))
+				// everything should be removed now
+				getAllAndCheck(t, db, []keyValVersion{})
+			})
+		})
+		t.Run("without overlap", func(t *testing.T) {
+			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+				l1 := []keyValVersion{{"foo", "bar", 3, bitDelete}, {"fooz", "baz", 1, bitDelete}}
+				l2 := []keyValVersion{{"fooo", "barr", 2, 0}}
+				createAndOpen(db, l1, 1)
+				createAndOpen(db, l2, 2)
+
+				// Set a high discard timestamp so that all the keys are below the discard timestamp.
+				db.SetDiscardTs(10)
+
+				getAllAndCheck(t, db, []keyValVersion{
+					{"foo", "bar", 3, 1}, {"fooo", "barr", 2, 0}, {"fooz", "baz", 1, 1},
+				})
+				cdef := compactDef{
+					thisLevel: db.lc.levels[1],
+					nextLevel: db.lc.levels[2],
+					top:       db.lc.levels[1].tables,
+					bot:       db.lc.levels[2].tables,
+				}
+				require.NoError(t, db.lc.runCompactDef(1, cdef))
+				// foo version 2 should be dropped after compaction.
+				getAllAndCheck(t, db, []keyValVersion{{"fooo", "barr", 2, 0}})
+			})
+		})
+	})
+}
+
+func TestCompactionTwoVersions(t *testing.T) {
+	// Disable compactions and keep two versions of each key.
+	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(2)
+	opt.managedTxns = true
+	t.Run("with overlap", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			l1 := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, bitDelete}}
+			l2 := []keyValVersion{{"foo", "bar", 2, 0}}
+			l3 := []keyValVersion{{"foo", "bar", 1, 0}}
+			createAndOpen(db, l1, 1)
+			createAndOpen(db, l2, 2)
+			createAndOpen(db, l3, 3)
+
+			// Set a high discard timestamp so that all the keys are below the discard timestamp.
+			db.SetDiscardTs(10)
+
+			getAllAndCheck(t, db, []keyValVersion{
+				{"foo", "bar", 3, 0},
+				{"foo", "bar", 2, 0},
+				{"foo", "bar", 1, 0},
+				{"fooz", "baz", 1, 1},
+			})
+			cdef := compactDef{
+				thisLevel: db.lc.levels[1],
+				nextLevel: db.lc.levels[2],
+				top:       db.lc.levels[1].tables,
+				bot:       db.lc.levels[2].tables,
+			}
+			require.NoError(t, db.lc.runCompactDef(1, cdef))
+			// Nothing should be dropped after compaction because number of
+			// versions to keep is 2.
+			getAllAndCheck(t, db, []keyValVersion{
+				{"foo", "bar", 3, 0},
+				{"foo", "bar", 2, 0},
+				{"foo", "bar", 1, 0},
+				{"fooz", "baz", 1, 1},
+			})
+
+			cdef = compactDef{
+				thisLevel: db.lc.levels[2],
+				nextLevel: db.lc.levels[3],
+				top:       db.lc.levels[2].tables,
+				bot:       db.lc.levels[3].tables,
+			}
+			require.NoError(t, db.lc.runCompactDef(2, cdef))
+			getAllAndCheck(t, db, []keyValVersion{
+				{"foo", "bar", 3, 0},
+				{"foo", "bar", 2, 0},
+			})
+		})
+	})
+}
+
+func TestCompactionAllVersions(t *testing.T) {
+	// Disable compactions and keep all versions of the each key.
+	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(math.MaxInt32)
+	opt.managedTxns = true
+	t.Run("without overlap", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			l1 := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, bitDelete}}
+			l2 := []keyValVersion{{"foo", "bar", 2, 0}}
+			l3 := []keyValVersion{{"foo", "bar", 1, 0}}
+			createAndOpen(db, l1, 1)
+			createAndOpen(db, l2, 2)
+			createAndOpen(db, l3, 3)
+
+			// Set a high discard timestamp so that all the keys are below the discard timestamp.
+			db.SetDiscardTs(10)
+
+			getAllAndCheck(t, db, []keyValVersion{
+				{"foo", "bar", 3, 0},
+				{"foo", "bar", 2, 0},
+				{"foo", "bar", 1, 0},
+				{"fooz", "baz", 1, 1},
+			})
+			cdef := compactDef{
+				thisLevel: db.lc.levels[1],
+				nextLevel: db.lc.levels[2],
+				top:       db.lc.levels[1].tables,
+				bot:       db.lc.levels[2].tables,
+			}
+			require.NoError(t, db.lc.runCompactDef(1, cdef))
+			// Nothing should be dropped after compaction because all versions
+			// should be kept.
+			getAllAndCheck(t, db, []keyValVersion{
+				{"foo", "bar", 3, 0},
+				{"foo", "bar", 2, 0},
+				{"foo", "bar", 1, 0},
+				{"fooz", "baz", 1, 1},
+			})
+
+			cdef = compactDef{
+				thisLevel: db.lc.levels[2],
+				nextLevel: db.lc.levels[3],
+				top:       db.lc.levels[2].tables,
+				bot:       db.lc.levels[3].tables,
+			}
+			require.NoError(t, db.lc.runCompactDef(2, cdef))
+			getAllAndCheck(t, db, []keyValVersion{
+				{"foo", "bar", 3, 0},
+				{"foo", "bar", 2, 0},
+				{"foo", "bar", 1, 0},
+			})
+		})
+	})
+	t.Run("without overlap", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			l1 := []keyValVersion{{"foo", "bar", 3, bitDelete}, {"fooz", "baz", 1, bitDelete}}
+			l2 := []keyValVersion{{"fooo", "barr", 2, 0}}
+			createAndOpen(db, l1, 1)
+			createAndOpen(db, l2, 2)
+
+			// Set a high discard timestamp so that all the keys are below the discard timestamp.
+			db.SetDiscardTs(10)
+
+			getAllAndCheck(t, db, []keyValVersion{
+				{"foo", "bar", 3, 1}, {"fooo", "barr", 2, 0}, {"fooz", "baz", 1, 1},
+			})
+			cdef := compactDef{
+				thisLevel: db.lc.levels[1],
+				nextLevel: db.lc.levels[2],
+				top:       db.lc.levels[1].tables,
+				bot:       db.lc.levels[2].tables,
+			}
+			require.NoError(t, db.lc.runCompactDef(1, cdef))
+			// foo version 2 should be dropped after compaction.
+			getAllAndCheck(t, db, []keyValVersion{{"fooo", "barr", 2, 0}})
 		})
 	})
 }
@@ -538,6 +743,15 @@ func TestL0Stall(t *testing.T) {
 					t.Log("Timeout triggered")
 					// Mark this test as successful since L0 is in memory and the
 					// addition of new table to L0 is supposed to stall.
+
+					// Remove tables from level 0 so that the stalled
+					// compaction can make progress. This does not have any
+					// effect on the test. This is done so that the goroutine
+					// stuck on addLevel0Table can make progress and end.
+					db.lc.levels[0].Lock()
+					db.lc.levels[0].tables = nil
+					db.lc.levels[0].Unlock()
+					<-done
 				} else {
 					t.Fatal("Test didn't finish in time")
 				}
@@ -562,5 +776,45 @@ func TestL0Stall(t *testing.T) {
 	t.Run("with L0 on disk", func(t *testing.T) {
 		opt.KeepL0InMemory = false
 		test(t, &opt)
+	})
+}
+
+// Regression test for https://github.com/dgraph-io/dgraph/issues/5573
+func TestDropPrefixMoveBug(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// l1 is used to verify that drop prefix actually drops move keys from all the levels.
+		l1 := []keyValVersion{{string(append(badgerMove, "F"...)), "", 0, 0}}
+		createAndOpen(db, l1, 1)
+
+		// Mutiple levels can have the exact same move key with version.
+		l2 := []keyValVersion{{string(append(badgerMove, "F"...)), "", 0, 0}, {"A", "", 0, 0}}
+		l21 := []keyValVersion{{"B", "", 0, 0}, {"C", "", 0, 0}}
+		l22 := []keyValVersion{{"F", "", 0, 0}, {"G", "", 0, 0}}
+
+		// Level 2 has all the tables.
+		createAndOpen(db, l2, 2)
+		createAndOpen(db, l21, 2)
+		createAndOpen(db, l22, 2)
+
+		require.NoError(t, db.lc.validate())
+		require.NoError(t, db.DropPrefix([]byte("F")))
+
+		db.View(func(txn *Txn) error {
+			iopt := DefaultIteratorOptions
+			iopt.AllVersions = true
+
+			it := txn.NewIterator(iopt)
+			defer it.Close()
+
+			specialKey := []byte("F")
+			droppedPrefixes := [][]byte{specialKey, append(badgerMove, specialKey...)}
+			for it.Rewind(); it.Valid(); it.Next() {
+				key := it.Item().Key()
+				// Ensure we don't have any "F" or "!badger!move!F" left
+				require.False(t, hasAnyPrefixes(key, droppedPrefixes))
+			}
+			return nil
+		})
+		require.NoError(t, db.lc.validate())
 	})
 }

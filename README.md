@@ -7,6 +7,8 @@ in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
 fast, distributed graph database. It's meant to be a performant alternative to
 non-Go-based key-value stores like RocksDB.
 
+**Use [Discuss Issues](https://discuss.dgraph.io/c/issues/badger/37) for reporting issues about this repository.**
+
 ## Project Status [March 24, 2020]
 
 Badger is stable and is being used to serve data sets worth hundreds of
@@ -59,6 +61,7 @@ For more details on our version naming schema please read [Choosing a version](#
     + [Comparisons](#comparisons)
     + [Benchmarks](#benchmarks)
   * [Projects Using Badger](#projects-using-badger)
+  * [Contributing](#contributing)
   * [Frequently Asked Questions](#frequently-asked-questions)
 
 ## Getting Started
@@ -751,20 +754,24 @@ above).
 ## Projects Using Badger
 Below is a list of known projects that use Badger:
 
-* [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
 * [Dgraph](https://github.com/dgraph-io/dgraph) - Distributed graph database.
 * [Jaeger](https://github.com/jaegertracing/jaeger) - Distributed tracing platform.
-* [TalariaDB](https://github.com/grab/talaria) - Distributed, low latency time-series database.
-* [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed application data analytics.
-* [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
-* [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
 * [go-ipfs](https://github.com/ipfs/go-ipfs) - Go client for the InterPlanetary File System (IPFS), a new hypermedia distribution protocol.
-* [gorush](https://github.com/appleboy/gorush) - A push notification server written in Go.
+* [Riot](https://github.com/go-ego/riot) - An open-source, distributed search engine.
 * [emitter](https://github.com/emitter-io/emitter) - Scalable, low latency, distributed pub/sub broker with message storage, uses MQTT, gossip and badger.
+* [OctoSQL](https://github.com/cube2222/octosql) - Query tool that allows you to join, analyse and transform data from multiple databases using SQL.
+* [Dkron](https://dkron.io/) - Distributed, fault tolerant job scheduling system.
+* [Sandglass](https://github.com/celrenheit/sandglass) - distributed, horizontally scalable, persistent, time sorted message queue.
+* [TalariaDB](https://github.com/grab/talaria) - Grab's Distributed, low latency time-series database.
+* [Sloop](https://github.com/salesforce/sloop) - Salesforce's Kubernetes History Visualization Project.
+* [Immudb](https://github.com/codenotary/immudb) - Lightweight, high-speed immutable database for systems and applications.
+* [Usenet Express](https://usenetexpress.com/) - Serving over 300TB of data with Badger.
+* [gorush](https://github.com/appleboy/gorush) - A push notification server written in Go.
+* [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
+* [Dispatch Protocol](https://github.com/dispatchlabs/disgo) - Blockchain protocol for distributed application data analytics.
 * [GarageMQ](https://github.com/valinurovam/garagemq) - AMQP server written in Go.
 * [RedixDB](https://alash3al.github.io/redix/) - A real-time persistent key-value store with the same redis protocol.
 * [BBVA](https://github.com/BBVA/raft-badger) - Raft backend implementation using BadgerDB for Hashicorp raft.
-* [Riot](https://github.com/go-ego/riot) - An open-source, distributed search engine.
 * [Fantom](https://github.com/Fantom-foundation/go-lachesis) - aBFT Consensus platform for distributed applications.
 * [decred](https://github.com/decred/dcrdata) - An open, progressive, and self-funding cryptocurrency with a system of community-based governance integrated into its blockchain.
 * [OpenNetSys](https://github.com/opennetsys/c3-go) - Create useful dApps in any software language.
@@ -779,11 +786,13 @@ Below is a list of known projects that use Badger:
 * [Surfline](https://www.surfline.com) - Serving global wave and weather forecast data with Badger.
 * [Cete](https://github.com/mosuka/cete) - Simple and highly available distributed key-value store built on Badger. Makes it easy bringing up a cluster of Badger with Raft consensus algorithm by hashicorp/raft. 
 * [Volument](https://volument.com/) - A new take on website analytics backed by Badger.
-* [Sloop](https://github.com/salesforce/sloop) - Kubernetes History Visualization.
 * [KVdb](https://kvdb.io/) - Hosted key-value store and serverless platform built on top of Badger.
-* [Dkron](https://dkron.io/) - Distributed, fault tolerant job scheduling system.
 
 If you are using Badger in a project please send a pull request to add it to the list.
+
+## Contributing
+
+If you're interested in contributing to Badger see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Frequently Asked Questions
 ### My writes are getting stuck. Why?

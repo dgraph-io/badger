@@ -162,6 +162,7 @@ func TestDropAllTwice(t *testing.T) {
 
 		// Call DropAll again.
 		require.NoError(t, db.DropAll())
+		require.NoError(t, db.Close())
 	}
 	t.Run("disk mode", func(t *testing.T) {
 		dir, err := ioutil.TempDir("", "badger-test")
@@ -175,7 +176,6 @@ func TestDropAllTwice(t *testing.T) {
 		opts := getTestOptions("")
 		opts.InMemory = true
 		test(t, opts)
-
 	})
 }
 
@@ -278,8 +278,9 @@ func TestDropReadOnly(t *testing.T) {
 		require.Equal(t, err, ErrWindowsNotSupported)
 	} else {
 		require.NoError(t, err)
+		require.Panics(t, func() { db2.DropAll() })
+		require.NoError(t, db2.Close())
 	}
-	require.Panics(t, func() { db2.DropAll() })
 }
 
 func TestWriteAfterClose(t *testing.T) {
@@ -523,8 +524,9 @@ func TestDropPrefixReadOnly(t *testing.T) {
 		require.Equal(t, err, ErrWindowsNotSupported)
 	} else {
 		require.NoError(t, err)
+		require.Panics(t, func() { db2.DropPrefix([]byte("key0")) })
+		require.NoError(t, db2.Close())
 	}
-	require.Panics(t, func() { db2.DropPrefix([]byte("key0")) })
 }
 
 func TestDropPrefixRace(t *testing.T) {
@@ -590,7 +592,7 @@ func TestDropPrefixRace(t *testing.T) {
 	after := numKeysManaged(db, math.MaxUint64)
 	t.Logf("Before: %d. After dropprefix: %d\n", before, after)
 	require.True(t, after < before)
-	db.Close()
+	require.NoError(t, db.Close())
 }
 
 func TestWriteBatchManagedMode(t *testing.T) {
@@ -602,7 +604,7 @@ func TestWriteBatchManagedMode(t *testing.T) {
 	}
 	opt := DefaultOptions("")
 	opt.managedTxns = true
-	opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+	opt.MaxTableSize = 1 << 20 // This would create multiple transactions in write batch.
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		wb := db.NewWriteBatchAt(1)
 		defer wb.Cancel()

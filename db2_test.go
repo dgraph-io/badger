@@ -29,7 +29,9 @@ import (
 	"path"
 	"regexp"
 	"runtime"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
@@ -123,7 +125,6 @@ func TestTruncateVlogNoClose(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	fmt.Println("running")
 	dir := "p"
 	opts := getTestOptions(dir)
 	opts.SyncWrites = true
@@ -669,13 +670,16 @@ func TestL0GCBug(t *testing.T) {
 	// Simulate a crash by not closing db1 but releasing the locks.
 	if db1.dirLockGuard != nil {
 		require.NoError(t, db1.dirLockGuard.release())
-		db1.dirLockGuard = nil
 	}
 	if db1.valueDirGuard != nil {
 		require.NoError(t, db1.valueDirGuard.release())
-		db1.valueDirGuard = nil
 	}
-	require.NoError(t, db1.Close())
+	for _, f := range db1.vlog.filesMap {
+		require.NoError(t, f.fd.Close())
+	}
+	require.NoError(t, db1.registry.Close())
+	require.NoError(t, db1.lc.close())
+	require.NoError(t, db1.manifest.close())
 
 	db2, err := Open(opts)
 	require.NoError(t, err)
@@ -705,8 +709,8 @@ func TestWindowsDataLoss(t *testing.T) {
 	defer removeDir(dir)
 
 	opt := DefaultOptions(dir).WithSyncWrites(true)
+	opt.ValueThreshold = 32
 
-	fmt.Println("First DB Open")
 	db, err := Open(opt)
 	require.NoError(t, err)
 	keyCount := 20
@@ -728,8 +732,6 @@ func TestWindowsDataLoss(t *testing.T) {
 	}
 	require.NoError(t, db.Close())
 
-	fmt.Println()
-	fmt.Println("Second DB Open")
 	opt.Truncate = true
 	db, err = Open(opt)
 	require.NoError(t, err)
@@ -751,8 +753,6 @@ func TestWindowsDataLoss(t *testing.T) {
 	require.NoError(t, db.manifest.close())
 	require.NoError(t, db.lc.close())
 
-	fmt.Println()
-	fmt.Println("Third DB Open")
 	opt.Truncate = true
 	db, err = Open(opt)
 	require.NoError(t, err)
@@ -775,4 +775,59 @@ func TestWindowsDataLoss(t *testing.T) {
 		result = append(result, k)
 	}
 	require.ElementsMatch(t, keyList, result)
+}
+
+func TestDropAllDropPrefix(t *testing.T) {
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%10d", i))
+	}
+	val := func(i int) []byte {
+		return []byte(fmt.Sprintf("%128d", i))
+	}
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		wb := db.NewWriteBatch()
+		defer wb.Cancel()
+
+		N := 50000
+
+		for i := 0; i < N; i++ {
+			require.NoError(t, wb.Set(key(i), val(i)))
+		}
+		require.NoError(t, wb.Flush())
+
+		var wg sync.WaitGroup
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			err := db.DropPrefix([]byte("000"))
+			for err == ErrBlockedWrites {
+				fmt.Printf("DropPrefix 000 err: %v", err)
+				err = db.DropPrefix([]byte("000"))
+				time.Sleep(time.Millisecond * 500)
+			}
+			require.NoError(t, err)
+		}()
+		go func() {
+			defer wg.Done()
+			err := db.DropPrefix([]byte("111"))
+			for err == ErrBlockedWrites {
+				fmt.Printf("DropPrefix 111 err: %v", err)
+				err = db.DropPrefix([]byte("111"))
+				time.Sleep(time.Millisecond * 500)
+			}
+			require.NoError(t, err)
+		}()
+		go func() {
+			time.Sleep(time.Millisecond) // Let drop prefix run first.
+			defer wg.Done()
+			err := db.DropAll()
+			for err == ErrBlockedWrites {
+				fmt.Printf("dropAll err: %v", err)
+				err = db.DropAll()
+				time.Sleep(time.Millisecond * 300)
+			}
+			require.NoError(t, err)
+		}()
+		wg.Wait()
+	})
 }

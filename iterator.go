@@ -169,6 +169,10 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 		vp.Decode(item.vptr)
 		result, cb, err := item.db.vlog.Read(vp, item.slice)
 		if err != ErrRetry {
+			if err != nil {
+				item.db.opt.Logger.Errorf(`Unable to read: Key: %v, Version : %v,
+				meta: %v, userMeta: %v`, key, item.version, item.meta, item.userMeta)
+			}
 			return result, cb, err
 		}
 		if bytes.HasPrefix(key, badgerMove) {
@@ -434,6 +438,11 @@ type Iterator struct {
 	lastKey []byte // Used to skip over multiple versions of the same key.
 
 	closed bool
+
+	// ThreadId is an optional value that can be set to identify which goroutine created
+	// the iterator. It can be used, for example, to uniquely identify each of the
+	// iterators created by the stream interface
+	ThreadId int
 }
 
 // NewIterator returns a new iterator. Depending upon the options, either only keys, or both
@@ -442,16 +451,17 @@ type Iterator struct {
 //
 // Multiple Iterators:
 // For a read-only txn, multiple iterators can be running simultaneously.  However, for a read-write
-// txn, only one can be running at one time to avoid race conditions, because Txn is thread-unsafe.
+// txn, iterators have the nuance of being a snapshot of the writes for the transaction at the time
+// iterator was created. If writes are performed after an iterator is created, then that iterator
+// will not be able to see those writes. Only writes performed before an iterator was created can be
+// viewed.
 func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	if txn.discarded {
 		panic("Transaction has already been discarded")
 	}
-	// Do not change the order of the next if. We must track the number of running iterators.
-	if atomic.AddInt32(&txn.numIterators, 1) > 1 && txn.update {
-		atomic.AddInt32(&txn.numIterators, -1)
-		panic("Only one iterator can be active at one time, for a RW txn.")
-	}
+
+	// Keep track of the number of active iterators.
+	atomic.AddInt32(&txn.numIterators, 1)
 
 	// TODO: If Prefix is set, only pick those memtables which have keys with
 	// the prefix.
@@ -708,6 +718,9 @@ func (it *Iterator) prefetch() {
 // smallest key greater than the provided key if iterating in the forward direction.
 // Behavior would be reversed if iterating backwards.
 func (it *Iterator) Seek(key []byte) {
+	if len(key) > 0 {
+		it.txn.addReadKey(key)
+	}
 	for i := it.data.pop(); i != nil; i = it.data.pop() {
 		i.wg.Wait()
 		it.waste.push(i)

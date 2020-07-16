@@ -32,9 +32,8 @@ import (
 )
 
 type oracle struct {
-	// A 64-bit integer must be at the top for memory alignment. See issue #311.
-	refCount  int64
-	isManaged bool // Does not change value, so no locking required.
+	isManaged       bool // Does not change value, so no locking required.
+	detectConflicts bool // Determines if the txns should be checked for conflicts.
 
 	sync.Mutex // For nextTxnTs and commits.
 	// writeChLock lock is for ensuring that transactions go to the write
@@ -50,18 +49,25 @@ type oracle struct {
 	discardTs uint64       // Used by ManagedDB.
 	readMark  *y.WaterMark // Used by DB.
 
-	// commits stores a key fingerprint and latest commit counter for it.
-	// refCount is used to clear out commits map to avoid a memory blowup.
-	commits map[uint64]uint64
+	// committedTxns contains all committed writes (contains fingerprints
+	// of keys written and their latest commit counter).
+	committedTxns []committedTxn
+	lastCleanupTs uint64
 
 	// closer is used to stop watermarks.
 	closer *y.Closer
 }
 
+type committedTxn struct {
+	ts uint64
+	// ConflictKeys Keeps track of the entries written at timestamp ts.
+	conflictKeys map[uint64]struct{}
+}
+
 func newOracle(opt Options) *oracle {
 	orc := &oracle{
-		isManaged: opt.managedTxns,
-		commits:   make(map[uint64]uint64),
+		isManaged:       opt.managedTxns,
+		detectConflicts: opt.DetectConflicts,
 		// We're not initializing nextTxnTs and readOnlyTs. It would be done after replay in Open.
 		//
 		// WaterMarks must be 64-bit aligned for atomic package, hence we must use pointers here.
@@ -77,28 +83,6 @@ func newOracle(opt Options) *oracle {
 
 func (o *oracle) Stop() {
 	o.closer.SignalAndWait()
-}
-
-func (o *oracle) addRef() {
-	atomic.AddInt64(&o.refCount, 1)
-}
-
-func (o *oracle) decrRef() {
-	if atomic.AddInt64(&o.refCount, -1) != 0 {
-		return
-	}
-
-	// Clear out commits maps to release memory.
-	o.Lock()
-	defer o.Unlock()
-	// Avoids the race where something new is added to commitsMap
-	// after we check refCount and before we take Lock.
-	if atomic.LoadInt64(&o.refCount) != 0 {
-		return
-	}
-	if len(o.commits) >= 1000 { // If the map is still small, let it slide.
-		o.commits = make(map[uint64]uint64)
-	}
 }
 
 func (o *oracle) readTs() uint64 {
@@ -138,6 +122,7 @@ func (o *oracle) setDiscardTs(ts uint64) {
 	o.Lock()
 	defer o.Unlock()
 	o.discardTs = ts
+	o.cleanupCommittedTransactions()
 }
 
 func (o *oracle) discardAtOrBelow() uint64 {
@@ -154,13 +139,24 @@ func (o *oracle) hasConflict(txn *Txn) bool {
 	if len(txn.reads) == 0 {
 		return false
 	}
-	for _, ro := range txn.reads {
-		// A commit at the read timestamp is expected.
-		// But, any commit after the read timestamp should cause a conflict.
-		if ts, has := o.commits[ro]; has && ts > txn.readTs {
-			return true
+	for _, committedTxn := range o.committedTxns {
+		// If the committedTxn.ts is less than txn.readTs that implies that the
+		// committedTxn finished before the current transaction started.
+		// We don't need to check for conflict in that case.
+		// This change assumes linearizability. Lack of linearizability could
+		// cause the read ts of a new txn to be lower than the commit ts of
+		// a txn before it (@mrjn).
+		if committedTxn.ts <= txn.readTs {
+			continue
+		}
+
+		for _, ro := range txn.reads {
+			if _, has := committedTxn.conflictKeys[ro]; has {
+				return true
+			}
 		}
 	}
+
 	return false
 }
 
@@ -174,6 +170,9 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 
 	var ts uint64
 	if !o.isManaged {
+		o.doneRead(txn)
+		o.cleanupCommittedTransactions()
+
 		// This is the general case, when user doesn't specify the read and commit ts.
 		ts = o.nextTxnTs
 		o.nextTxnTs++
@@ -184,10 +183,58 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 		ts = txn.commitTs
 	}
 
-	for _, w := range txn.writes {
-		o.commits[w] = ts // Update the commitTs.
+	y.AssertTrue(ts >= o.lastCleanupTs)
+
+	if o.detectConflicts {
+		// We should ensure that txns are not added to o.committedTxns slice when
+		// conflict detection is disabled otherwise this slice would keep growing.
+		o.committedTxns = append(o.committedTxns, committedTxn{
+			ts:           ts,
+			conflictKeys: txn.conflictKeys,
+		})
 	}
+
 	return ts
+}
+
+func (o *oracle) doneRead(txn *Txn) {
+	if !txn.doneRead {
+		txn.doneRead = true
+		o.readMark.Done(txn.readTs)
+	}
+}
+
+func (o *oracle) cleanupCommittedTransactions() { // Must be called under o.Lock
+	if !o.detectConflicts {
+		// When detectConflicts is set to false, we do not store any
+		// committedTxns and so there's nothing to clean up.
+		return
+	}
+	// Same logic as discardAtOrBelow but unlocked
+	var maxReadTs uint64
+	if o.isManaged {
+		maxReadTs = o.discardTs
+	} else {
+		maxReadTs = o.readMark.DoneUntil()
+	}
+
+	y.AssertTrue(maxReadTs >= o.lastCleanupTs)
+
+	// do not run clean up if the maxReadTs (read timestamp of the
+	// oldest transaction that is still in flight) has not increased
+	if maxReadTs == o.lastCleanupTs {
+		return
+	}
+	o.lastCleanupTs = maxReadTs
+
+	tmp := o.committedTxns[:0]
+	for _, txn := range o.committedTxns {
+		if txn.ts <= maxReadTs {
+			continue
+		}
+		tmp = append(tmp, txn)
+	}
+	o.committedTxns = tmp
 }
 
 func (o *oracle) doneCommit(cts uint64) {
@@ -205,13 +252,16 @@ type Txn struct {
 
 	update bool     // update is used to conditionally keep track of reads.
 	reads  []uint64 // contains fingerprints of keys read.
-	writes []uint64 // contains fingerprints of keys written.
+	// contains fingerprints of keys written. This is used for conflict detection.
+	conflictKeys map[uint64]struct{}
+	readsLock    sync.Mutex // guards the reads slice. See addReadKey.
 
 	pendingWrites   map[string]*Entry // cache stores any writes done by txn.
 	duplicateWrites []*Entry          // Used in managed mode to store duplicate entries.
 
 	db        *DB
 	discarded bool
+	doneRead  bool
 
 	size         int64
 	count        int64
@@ -335,8 +385,13 @@ func (txn *Txn) modify(e *Entry) error {
 	if err := txn.checkSize(e); err != nil {
 		return err
 	}
-	fp := z.MemHash(e.Key) // Avoid dealing with byte arrays.
-	txn.writes = append(txn.writes, fp)
+
+	// The txn.conflictKeys is used for conflict detection. If conflict detection
+	// is disabled, we don't need to store key hashes in this map.
+	if txn.db.opt.DetectConflicts {
+		fp := z.MemHash(e.Key) // Avoid dealing with byte arrays.
+		txn.conflictKeys[fp] = struct{}{}
+	}
 	// If a duplicate entry was inserted in managed mode, move it to the duplicate writes slice.
 	// Add the entry to duplicateWrites only if both the entries have different versions. For
 	// same versions, we will overwrite the existing entry.
@@ -438,7 +493,14 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 func (txn *Txn) addReadKey(key []byte) {
 	if txn.update {
 		fp := z.MemHash(key)
+
+		// Because of the possibility of multiple iterators it is now possible
+		// for multiple threads within a read-write transaction to read keys at
+		// the same time. The reads slice is not currently thread-safe and
+		// needs to be locked whenever we mark a key as read.
+		txn.readsLock.Lock()
 		txn.reads = append(txn.reads, fp)
+		txn.readsLock.Unlock()
 	}
 }
 
@@ -456,10 +518,7 @@ func (txn *Txn) Discard() {
 	}
 	txn.discarded = true
 	if !txn.db.orc.isManaged {
-		txn.db.orc.readMark.Done(txn.readTs)
-	}
-	if txn.update {
-		txn.db.orc.decrRef()
+		txn.db.orc.doneRead(txn)
 	}
 }
 
@@ -518,7 +577,7 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 	// down to here. So, keep this around for at least a couple of months.
 	// var b strings.Builder
 	// fmt.Fprintf(&b, "Read: %d. Commit: %d. reads: %v. writes: %v. Keys: ",
-	// 	txn.readTs, commitTs, txn.reads, txn.writes)
+	// 	txn.readTs, commitTs, txn.reads, txn.conflictKeys)
 	for _, e := range txn.pendingWrites {
 		processEntry(e)
 	}
@@ -594,7 +653,9 @@ func (txn *Txn) commitPrecheck() error {
 // If error is nil, the transaction is successfully committed. In case of a non-nil error, the LSM
 // tree won't be updated, so there's no need for any rollback.
 func (txn *Txn) Commit() error {
-	if len(txn.writes) == 0 {
+	// txn.conflictKeys can be zero if conflict detection is turned off. So we
+	// should check txn.pendingWrites.
+	if len(txn.pendingWrites) == 0 {
 		return nil // Nothing to do.
 	}
 	// Precheck before discarding txn.
@@ -645,7 +706,7 @@ func (txn *Txn) CommitWith(cb func(error)) {
 		panic("Nil callback provided to CommitWith")
 	}
 
-	if len(txn.writes) == 0 {
+	if len(txn.pendingWrites) == 0 {
 		// Do not run these callbacks from here, because the CommitWith and the
 		// callback might be acquiring the same locks. Instead run the callback
 		// from another goroutine.
@@ -712,21 +773,11 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 		size:   int64(len(txnKey) + 10), // Some buffer for the extra entry.
 	}
 	if update {
+		if db.opt.DetectConflicts {
+			txn.conflictKeys = make(map[uint64]struct{})
+		}
 		txn.pendingWrites = make(map[string]*Entry)
-		txn.db.orc.addRef()
 	}
-	// It is important that the oracle addRef happens BEFORE we retrieve a read
-	// timestamp. Otherwise, it is possible that the oracle commit map would
-	// become nil after we get the read timestamp.
-	// The sequence of events can be:
-	// 1. This txn gets a read timestamp.
-	// 2. Another txn working on the same keyset commits them, and decrements
-	//    the reference to oracle.
-	// 3. Oracle ref reaches zero, resetting commit map.
-	// 4. This txn increments the oracle reference.
-	// 5. Now this txn would go on to commit the keyset, and no conflicts
-	//    would be detected.
-	// See issue: https://github.com/dgraph-io/badger/issues/574
 	if !isManaged {
 		txn.readTs = db.orc.readTs()
 	}
