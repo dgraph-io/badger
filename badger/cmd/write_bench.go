@@ -125,11 +125,11 @@ func writeRandom(db *badger.DB, num uint64) error {
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, keySz)
 		y.Check2(rand.Read(key))
-    e := badger.NewEntry(key, value)
-    if ttlDuration {
-      e.WithTTL(time.Duration(ttlDuration) * time.Second)
-    }
-    err := batch.SetEntry(e)
+		e := badger.NewEntry(key, value)
+		if ttlDuration != 0 {
+			e.WithTTL(time.Duration(ttlDuration) * time.Second)
+		}
+		err := batch.SetEntry(e)
 		for err == badger.ErrBlockedWrites {
 			time.Sleep(time.Second)
 			batch = db.NewWriteBatch()
