@@ -181,7 +181,8 @@ func (wb *WriteBatch) commit() error {
 		return wb.err
 	}
 	if err := wb.throttle.Do(); err != nil {
-		return err
+		wb.err = err
+		return wb.err
 	}
 	wb.txn.CommitWith(wb.callback)
 	wb.txn = wb.db.newTransaction(true, wb.isManaged)
@@ -193,11 +194,15 @@ func (wb *WriteBatch) commit() error {
 // returns any error stored by WriteBatch.
 func (wb *WriteBatch) Flush() error {
 	wb.Lock()
+	// commit will set the wb.err so no need to check the error here.
 	_ = wb.commit()
 	wb.txn.Discard()
 	wb.Unlock()
 
 	if err := wb.throttle.Finish(); err != nil {
+		if wb.err != nil {
+			return errors.Errorf("wb.err: %s err: %s", wb.err, err)
+		}
 		return err
 	}
 
