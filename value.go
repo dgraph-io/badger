@@ -1005,7 +1005,7 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 		// called for the same fid, again. This could happen if there is an
 		// transient error because of which we couldn't create a new file
 		// and the second attempt to create the file succeeds.
-		os.Remove(lf.fd.Name())
+		y.Check(os.Remove(lf.fd.Name()))
 	}
 
 	if err = lf.bootstrap(); err != nil {
