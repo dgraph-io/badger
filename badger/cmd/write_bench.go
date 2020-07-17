@@ -144,7 +144,7 @@ func writeRandom(db *badger.DB, num uint64) error {
 		y.Check2(rand.Read(key))
 		e := badger.NewEntry(key, value)
 
-		if ttlPeriod != 0 && errParse == nil {
+		if ttlPeriod != 0 {
 			e.WithTTL(ttlPeriod)
 		}
 		err := batch.SetEntry(e)
