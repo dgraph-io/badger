@@ -442,8 +442,7 @@ func dropPrefix(c *y.Closer, db *badger.DB) {
 			err = db.DropPrefix(prefix)
 
 			if err != nil {
-				log.Println(err)
-				return
+				panic(err)
 			}
 
 			if err != nil {
