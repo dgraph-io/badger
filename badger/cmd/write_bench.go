@@ -437,12 +437,13 @@ func dropPrefix(c *y.Closer, db *badger.DB) {
 			return
 		case <-t.C:
 			fmt.Println("[DropPrefix] Started")
-			err := db.DropAll()
-			for err == badger.ErrBlockedWrites {
-				prefix := make([]byte, 1+int(float64(keySz)*0.1))
-				y.Check2(rand.Read(prefix))
-				err = db.DropPrefix(prefix)
-				time.Sleep(time.Millisecond * 300)
+			prefix := make([]byte, 1+int(float64(keySz)*0.1))
+			y.Check2(rand.Read(prefix))
+			err = db.DropPrefix(prefix)
+
+			if err != nil {
+				log.Println(err)
+				return
 			}
 
 			if err != nil {
