@@ -38,9 +38,9 @@ var writeBenchCmd = &cobra.Command{
 	Use:   "write",
 	Short: "Writes random data to Badger to benchmark write speed.",
 	Long: `
-This command writes random data to Badger to benchmark write speed. Useful for testing and
-performance analysis.
-`,
+  This command writes random data to Badger to benchmark write speed. Useful for testing and
+  performance analysis.
+  `,
 	RunE: writeBench,
 }
 
@@ -65,11 +65,12 @@ var (
 	loadBloomsOnOpen    bool
 	detectConflicts     bool
 	compression         bool
+	dropAllPeriod       string
+	gcPeriod            string
+	gcDiscardRatio      float64
 	ttlDuration         uint32
 
-	gcPeriod       string
-	gcDiscardRatio float64
-	gcSuccess      uint64
+	gcSuccess uint64
 )
 
 const (
@@ -106,6 +107,8 @@ func init() {
 		"If true, it badger will detect the conflicts")
 	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
 		"If true, badger will use ZSTD mode")
+	writeBenchCmd.Flags().StringVar(&dropAllPeriod, "dropall", "0s",
+		"Period of dropping all. If 0, doesn't drops all.")
 	writeBenchCmd.Flags().Uint32Var(&ttlDuration, "entry-ttl", 0,
 		"TTL duration in seconds for the entries, 0 means without TTL")
 	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "5m", "GC Period.")
@@ -118,16 +121,22 @@ func writeRandom(db *badger.DB, num uint64) error {
 
 	es := uint64(keySz + valSz) // entry size is keySz + valSz
 	batch := db.NewWriteBatch()
+
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, keySz)
 		y.Check2(rand.Read(key))
-
 		e := badger.NewEntry(key, value)
 		if ttlDuration != 0 {
 			e.WithTTL(time.Duration(ttlDuration) * time.Second)
 		}
-		if err := batch.SetEntry(e); err != nil {
-			return err
+		err := batch.SetEntry(e)
+		for err == badger.ErrBlockedWrites {
+			time.Sleep(time.Second)
+			batch = db.NewWriteBatch()
+			err = batch.SetEntry(e)
+		}
+		if err != nil {
+			panic(err)
 		}
 
 		atomic.AddUint64(&entriesWritten, 1)
@@ -248,8 +257,9 @@ func writeBench(cmd *cobra.Command, args []string) error {
 
 	startTime = time.Now()
 	num := uint64(numKeys * mil)
-	c := y.NewCloser(2)
+	c := y.NewCloser(3)
 	go reportStats(c)
+	go dropAll(c, db)
 	go runGC(c, db)
 
 	if sorted {
@@ -299,6 +309,38 @@ func runGC(c *y.Closer, db *badger.DB) {
 				atomic.AddUint64(&gcSuccess, 1)
 			} else {
 				log.Printf("[GC] Failed due to following err %v", err)
+			}
+		}
+	}
+}
+
+func dropAll(c *y.Closer, db *badger.DB) {
+	defer c.Done()
+
+	dropPeriod, err := time.ParseDuration(dropAllPeriod)
+	y.Check(err)
+	if dropPeriod == 0 {
+		return
+	}
+
+	t := time.NewTicker(dropPeriod)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			return
+		case <-t.C:
+			fmt.Println("[DropAll] Started")
+			err := db.DropAll()
+			for err == badger.ErrBlockedWrites {
+				err = db.DropAll()
+				time.Sleep(time.Millisecond * 300)
+			}
+
+			if err != nil {
+				fmt.Println("[DropAll] Failed")
+			} else {
+				fmt.Println("[DropAll] Successful")
 			}
 		}
 	}
