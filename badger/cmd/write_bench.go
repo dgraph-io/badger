@@ -427,7 +427,6 @@ func dropPrefix(c *y.Closer, db *badger.DB) {
 	y.Check(err)
 	if dropPeriod == 0 {
 		return
-		log.Println("Exit from drop prefix")
 	}
 
 	t := time.NewTicker(dropPeriod)
@@ -441,7 +440,7 @@ func dropPrefix(c *y.Closer, db *badger.DB) {
 			err := db.DropAll()
 			for err == badger.ErrBlockedWrites {
 				prefix := make([]byte, 1+int(float64(keySz)*0.1))
-				rand.Read(prefix)
+				y.Check2(rand.Read(prefix))
 				err = db.DropPrefix(prefix)
 				time.Sleep(time.Millisecond * 300)
 			}
