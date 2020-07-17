@@ -22,11 +22,11 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
-	"path/filepath"
-	"os"
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
@@ -41,9 +41,9 @@ var writeBenchCmd = &cobra.Command{
 	Use:   "write",
 	Short: "Writes random data to Badger to benchmark write speed.",
 	Long: `
-This command writes random data to Badger to benchmark write speed. Useful for testing and
-performance analysis.
-`,
+  This command writes random data to Badger to benchmark write speed. Useful for testing and
+  performance analysis.
+  `,
 	RunE: writeBench,
 }
 
@@ -69,15 +69,20 @@ var (
 	detectConflicts     bool
 	compression         bool
 	showDir             bool
+	ttlDuration         string
 
-	internalKeyCount    uint32
-	moveKeyCount        uint32
-	invalidKeyCount     uint32
-	validKeyCount       uint32
-	sstCount            uint32
-	vlogCount           uint32
+	internalKeyCount uint32
+	moveKeyCount     uint32
+	invalidKeyCount  uint32
+	validKeyCount    uint32
+	sstCount         uint32
+	vlogCount        uint32
+	files            []string
 
-	files               []string
+	dropAllPeriod  string
+	gcPeriod       string
+	gcDiscardRatio float64
+	gcSuccess      uint64
 )
 
 const (
@@ -116,6 +121,12 @@ func init() {
 		"If true, badger will use ZSTD mode")
 	writeBenchCmd.Flags().BoolVar(&showDir, "show-dir", false,
 		"If true, the report will include the directory contents")
+	writeBenchCmd.Flags().StringVar(&dropAllPeriod, "dropall", "0s",
+		"Period of dropping all. If 0, doesn't drops all.")
+	writeBenchCmd.Flags().StringVar(&ttlDuration, "entry-ttl", "0s",
+		"TTL duration in seconds for the entries, 0 means without TTL")
+	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "5m", "GC Period.")
+	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
@@ -124,11 +135,23 @@ func writeRandom(db *badger.DB, num uint64) error {
 
 	es := uint64(keySz + valSz) // entry size is keySz + valSz
 	batch := db.NewWriteBatch()
+
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, keySz)
 		y.Check2(rand.Read(key))
-		if err := batch.Set(key, value); err != nil {
-			return err
+		e := badger.NewEntry(key, value)
+		ttlPeriod, errParse := time.ParseDuration(ttlDuration)
+		if ttlPeriod != 0 && errParse == nil {
+			e.WithTTL(ttlPeriod)
+		}
+		err := batch.SetEntry(e)
+		for err == badger.ErrBlockedWrites {
+			time.Sleep(time.Second)
+			batch = db.NewWriteBatch()
+			err = batch.SetEntry(e)
+		}
+		if err != nil {
+			panic(err)
 		}
 
 		atomic.AddUint64(&entriesWritten, 1)
@@ -249,8 +272,10 @@ func writeBench(cmd *cobra.Command, args []string) error {
 
 	startTime = time.Now()
 	num := uint64(numKeys * mil)
-	c := y.NewCloser(1)
-	go reportStats(db, c)
+	c := y.NewCloser(3)
+	go reportStats(c, db)
+	go dropAll(c, db)
+	go runGC(c, db)
 
 	if sorted {
 		err = writeSorted(db, num)
@@ -262,7 +287,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	return err
 }
 
-func reportStats(db *badger.DB, c *y.Closer) {
+func reportStats(c *y.Closer, db *badger.DB) {
 	defer c.Done()
 
 	t := time.NewTicker(time.Second)
@@ -301,7 +326,7 @@ func reportStats(db *badger.DB, c *y.Closer) {
 			if showDir {
 				err := filepath.Walk(sstDir, func(path string, info os.FileInfo, err error) error {
 					fileSize := humanize.Bytes(uint64(info.Size()))
-					files = append(files, "[Content] " + path + " " + fileSize)
+					files = append(files, "[Content] "+path+" "+fileSize)
 					if filepath.Ext(path) == ".vlog" {
 						vlogCount++
 					}
@@ -327,11 +352,63 @@ func reportStats(db *badger.DB, c *y.Closer) {
 			bytesRate := sz / uint64(dur.Seconds())
 			entriesRate := entries / uint64(dur.Seconds())
 			fmt.Printf("Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
-				"entries written: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
-				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
+				"entries written: %d, speed: %d/sec, gcSuccess: %d\n", y.FixedDuration(time.Since(startTime)),
+				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate, gcSuccess)
 			fmt.Printf("Valid Keys Count: %d\nInvalid Keys Count: %d\nMove Keys Count: %d\n"+
 				"Internal Keys Count: %d\n", validKeyCount, invalidKeyCount, moveKeyCount,
 				internalKeyCount)
+		}
+	}
+}
+
+func runGC(c *y.Closer, db *badger.DB) {
+	defer c.Done()
+	period, err := time.ParseDuration(gcPeriod)
+	y.Check(err)
+	t := time.NewTicker(period)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			return
+		case <-t.C:
+			if err := db.RunValueLogGC(gcDiscardRatio); err == nil {
+				atomic.AddUint64(&gcSuccess, 1)
+			} else {
+				log.Printf("[GC] Failed due to following err %v", err)
+			}
+		}
+	}
+}
+
+func dropAll(c *y.Closer, db *badger.DB) {
+	defer c.Done()
+
+	dropPeriod, err := time.ParseDuration(dropAllPeriod)
+	y.Check(err)
+	if dropPeriod == 0 {
+		return
+	}
+
+	t := time.NewTicker(dropPeriod)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			return
+		case <-t.C:
+			fmt.Println("[DropAll] Started")
+			err := db.DropAll()
+			for err == badger.ErrBlockedWrites {
+				err = db.DropAll()
+				time.Sleep(time.Millisecond * 300)
+			}
+
+			if err != nil {
+				fmt.Println("[DropAll] Failed")
+			} else {
+				fmt.Println("[DropAll] Successful")
+			}
 		}
 	}
 }
