@@ -761,10 +761,22 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	if lf.fd, err = y.CreateSyncedFile(path, vlog.opt.SyncWrites); err != nil {
 		return nil, errFile(err, lf.path, "Create value log file")
 	}
+
+	removeFile := func() {
+		// Remove the file so that we don't get an error when createVlogFile is
+		// called for the same fid, again. This could happen if there is an
+		// transient error because of which we couldn't create a new file
+		// and the second attempt to create the file succeeds.
+		y.Check(os.Remove(lf.fd.Name()))
+	}
+
 	if err = syncDir(vlog.dirPath); err != nil {
+		removeFile()
 		return nil, errFile(err, vlog.dirPath, "Sync value log dir")
 	}
+
 	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
+		removeFile()
 		return nil, errFile(err, lf.path, "Mmap value log file")
 	}
 
