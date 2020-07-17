@@ -17,10 +17,13 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -65,12 +68,21 @@ var (
 	loadBloomsOnOpen    bool
 	detectConflicts     bool
 	compression         bool
-	dropAllPeriod       string
-	gcPeriod            string
-	gcDiscardRatio      float64
-	ttlDuration         uint32
+	showDir             bool
+	ttlDuration         string
 
-	gcSuccess uint64
+	internalKeyCount uint32
+	moveKeyCount     uint32
+	invalidKeyCount  uint32
+	validKeyCount    uint32
+	sstCount         uint32
+	vlogCount        uint32
+	files            []string
+
+	dropAllPeriod  string
+	gcPeriod       string
+	gcDiscardRatio float64
+	gcSuccess      uint64
 )
 
 const (
@@ -107,9 +119,11 @@ func init() {
 		"If true, it badger will detect the conflicts")
 	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
 		"If true, badger will use ZSTD mode")
+	writeBenchCmd.Flags().BoolVar(&showDir, "show-dir", false,
+		"If true, the report will include the directory contents")
 	writeBenchCmd.Flags().StringVar(&dropAllPeriod, "dropall", "0s",
 		"Period of dropping all. If 0, doesn't drops all.")
-	writeBenchCmd.Flags().Uint32Var(&ttlDuration, "entry-ttl", 0,
+	writeBenchCmd.Flags().StringVar(&ttlDuration, "entry-ttl", "0s",
 		"TTL duration in seconds for the entries, 0 means without TTL")
 	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "5m", "GC Period.")
 	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
@@ -122,12 +136,16 @@ func writeRandom(db *badger.DB, num uint64) error {
 	es := uint64(keySz + valSz) // entry size is keySz + valSz
 	batch := db.NewWriteBatch()
 
+	ttlPeriod, errParse := time.ParseDuration(ttlDuration)
+	y.Check(errParse)
+
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, keySz)
 		y.Check2(rand.Read(key))
 		e := badger.NewEntry(key, value)
-		if ttlDuration != 0 {
-			e.WithTTL(time.Duration(ttlDuration) * time.Second)
+
+		if ttlPeriod != 0 {
+			e.WithTTL(ttlPeriod)
 		}
 		err := batch.SetEntry(e)
 		for err == badger.ErrBlockedWrites {
@@ -258,7 +276,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	startTime = time.Now()
 	num := uint64(numKeys * mil)
 	c := y.NewCloser(3)
-	go reportStats(c)
+	go reportStats(c, db)
 	go dropAll(c, db)
 	go runGC(c, db)
 
@@ -272,16 +290,65 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	return err
 }
 
-func reportStats(c *y.Closer) {
+func reportStats(c *y.Closer, db *badger.DB) {
 	defer c.Done()
 
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
+
 	for {
 		select {
 		case <-c.HasBeenClosed():
 			return
 		case <-t.C:
+			txn := db.NewTransaction(false)
+			defer txn.Discard()
+
+			iopt := badger.DefaultIteratorOptions
+			iopt.AllVersions = true
+			iopt.InternalAccess = true
+
+			it := txn.NewIterator(iopt)
+			defer it.Close()
+			for it.Rewind(); it.Valid(); it.Next() {
+				i := it.Item()
+				if bytes.HasPrefix(i.Key(), []byte("!badger!")) {
+					internalKeyCount++
+				}
+				if bytes.HasPrefix(i.Key(), []byte("!badger!Move")) {
+					moveKeyCount++
+				}
+				if i.IsDeletedOrExpired() {
+					invalidKeyCount++
+				} else {
+					validKeyCount++
+				}
+			}
+
+			// fetch directory contents
+			if showDir {
+				err := filepath.Walk(sstDir, func(path string, info os.FileInfo, err error) error {
+					fileSize := humanize.Bytes(uint64(info.Size()))
+					files = append(files, "[Content] "+path+" "+fileSize)
+					if filepath.Ext(path) == ".vlog" {
+						vlogCount++
+					}
+					if filepath.Ext(path) == ".sst" {
+						sstCount++
+					}
+					return nil
+				})
+				if err != nil {
+					log.Printf("Error while fetching directory. %v.", err)
+				} else {
+					fmt.Printf("[Content] Number of files:%d\n", len(files))
+					for _, file := range files {
+						fmt.Println(file)
+					}
+					fmt.Printf("SST Count: %d vlog Count: %d\n", sstCount, vlogCount)
+				}
+			}
+
 			dur := time.Since(startTime)
 			sz := atomic.LoadUint64(&sizeWritten)
 			entries := atomic.LoadUint64(&entriesWritten)
@@ -290,6 +357,9 @@ func reportStats(c *y.Closer) {
 			fmt.Printf("Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
 				"entries written: %d, speed: %d/sec, gcSuccess: %d\n", y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate, gcSuccess)
+			fmt.Printf("Valid Keys Count: %d\nInvalid Keys Count: %d\nMove Keys Count: %d\n"+
+				"Internal Keys Count: %d\n", validKeyCount, invalidKeyCount, moveKeyCount,
+				internalKeyCount)
 		}
 	}
 }
