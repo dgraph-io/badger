@@ -136,11 +136,14 @@ func writeRandom(db *badger.DB, num uint64) error {
 	es := uint64(keySz + valSz) // entry size is keySz + valSz
 	batch := db.NewWriteBatch()
 
+	ttlPeriod, errParse := time.ParseDuration(ttlDuration)
+	y.Check(errParse)
+
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, keySz)
 		y.Check2(rand.Read(key))
 		e := badger.NewEntry(key, value)
-		ttlPeriod, errParse := time.ParseDuration(ttlDuration)
+
 		if ttlPeriod != 0 && errParse == nil {
 			e.WithTTL(ttlPeriod)
 		}
