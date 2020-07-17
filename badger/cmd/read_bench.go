@@ -85,7 +85,6 @@ func readBench(cmd *cobra.Command, args []string) error {
 		WithValueLogLoadingMode(mode)
 
 	fmt.Printf("Opening badger with options = %+v\n", opt)
-
 	db, err := badger.Open(opt)
 	if err != nil {
 		return y.Wrapf(err, "unable to open DB")
