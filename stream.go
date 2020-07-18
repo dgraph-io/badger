@@ -213,8 +213,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			if list == nil || len(list.Kv) == 0 {
 				continue
 			}
-			// TODO
-			// The outlist has to be broken down by pagesize.
 			for _, kv := range list.Kv {
 				size += proto.Size(kv)
 				kv.StreamId = streamId
