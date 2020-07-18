@@ -175,6 +175,17 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		streamId := atomic.AddUint32(&st.nextStreamId, 1)
 
 		outList := new(pb.KVList)
+
+		sendIt := func() error {
+			select {
+			case st.kvChan <- outList:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			outList = new(pb.KVList)
+			size = 0
+			return nil
+		}
 		var prevKey []byte
 		for itr.Seek(kr.left); itr.Valid(); {
 			// it.Valid would only return true for keys with the provided Prefix in iterOpts.
@@ -202,30 +213,23 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			if list == nil || len(list.Kv) == 0 {
 				continue
 			}
-			outList.Kv = append(outList.Kv, list.Kv...)
-			size += proto.Size(list)
-			if size >= pageSize {
-				for _, kv := range outList.Kv {
-					kv.StreamId = streamId
+			for _, kv := range list.Kv {
+				size += proto.Size(kv)
+				kv.StreamId = streamId
+				outList.Kv = append(outList.Kv, kv)
+
+				if size < pageSize {
+					continue
 				}
-				select {
-				case st.kvChan <- outList:
-				case <-ctx.Done():
-					return ctx.Err()
+				if err := sendIt(); err != nil {
+					return err
 				}
-				outList = new(pb.KVList)
-				size = 0
 			}
 		}
 		if len(outList.Kv) > 0 {
-			for _, kv := range outList.Kv {
-				kv.StreamId = streamId
-			}
 			// TODO: Think of a way to indicate that a stream is over.
-			select {
-			case st.kvChan <- outList:
-			case <-ctx.Done():
-				return ctx.Err()
+			if err := sendIt(); err != nil {
+				return err
 			}
 		}
 		return nil
