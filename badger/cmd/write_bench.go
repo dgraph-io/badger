@@ -262,6 +262,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		opt = opt.WithLogger(nil)
 	}
 
+	fmt.Printf("Opening badger with options = %+v\n", opt)
 	db, err := badger.Open(opt)
 	if err != nil {
 		return err
