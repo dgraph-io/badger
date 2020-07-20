@@ -79,10 +79,11 @@ var (
 	vlogCount        uint32
 	files            []string
 
-	dropAllPeriod  string
-	gcPeriod       string
-	gcDiscardRatio float64
-	gcSuccess      uint64
+	dropAllPeriod    string
+	dropPrefixPeriod string
+	gcPeriod         string
+	gcDiscardRatio   float64
+	gcSuccess        uint64
 )
 
 const (
@@ -123,6 +124,8 @@ func init() {
 		"If true, the report will include the directory contents")
 	writeBenchCmd.Flags().StringVar(&dropAllPeriod, "dropall", "0s",
 		"Period of dropping all. If 0, doesn't drops all.")
+	writeBenchCmd.Flags().StringVar(&dropPrefixPeriod, "drop-prefix", "0s",
+		"Period of dropping by random prefixes. If 0, doesn't drops by prefix.")
 	writeBenchCmd.Flags().StringVar(&ttlDuration, "entry-ttl", "0s",
 		"TTL duration in seconds for the entries, 0 means without TTL")
 	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "5m", "GC Period.")
@@ -276,9 +279,10 @@ func writeBench(cmd *cobra.Command, args []string) error {
 
 	startTime = time.Now()
 	num := uint64(numKeys * mil)
-	c := y.NewCloser(3)
+	c := y.NewCloser(4)
 	go reportStats(c, db)
 	go dropAll(c, db)
+	go dropPrefix(c, db)
 	go runGC(c, db)
 
 	if sorted {
@@ -412,6 +416,36 @@ func dropAll(c *y.Closer, db *badger.DB) {
 				fmt.Println("[DropAll] Failed")
 			} else {
 				fmt.Println("[DropAll] Successful")
+			}
+		}
+	}
+}
+
+func dropPrefix(c *y.Closer, db *badger.DB) {
+	defer c.Done()
+
+	dropPeriod, err := time.ParseDuration(dropPrefixPeriod)
+	y.Check(err)
+	if dropPeriod == 0 {
+		return
+	}
+
+	t := time.NewTicker(dropPeriod)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			return
+		case <-t.C:
+			fmt.Println("[DropPrefix] Started")
+			prefix := make([]byte, 1+int(float64(keySz)*0.1))
+			y.Check2(rand.Read(prefix))
+			err = db.DropPrefix(prefix)
+
+			if err != nil {
+				panic(err)
+			} else {
+				fmt.Println("[DropPrefix] Successful")
 			}
 		}
 	}
