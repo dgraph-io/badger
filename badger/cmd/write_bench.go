@@ -443,10 +443,6 @@ func dropPrefix(c *y.Closer, db *badger.DB) {
 
 			if err != nil {
 				panic(err)
-			}
-
-			if err != nil {
-				fmt.Println("[DropPrefix] Failed")
 			} else {
 				fmt.Println("[DropPrefix] Successful")
 			}
