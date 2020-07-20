@@ -78,12 +78,14 @@ func readBench(cmd *cobra.Command, args []string) error {
 	}
 	y.AssertTrue(numGoroutines > 0)
 	mode := getLoadingMode(loadingMode)
-
-	db, err := badger.Open(badger.DefaultOptions(sstDir).
+	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(readOnly).
 		WithTableLoadingMode(mode).
-		WithValueLogLoadingMode(mode))
+		WithValueLogLoadingMode(mode)
+
+	fmt.Printf("Opening badger with options = %+v\n", opt)
+	db, err := badger.Open(opt)
 	if err != nil {
 		return y.Wrapf(err, "unable to open DB")
 	}
