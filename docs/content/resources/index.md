@@ -15,3 +15,7 @@ Go](https://open.dgraph.io/post/badger/)
 - Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, feature requests and discussions.
 - Please use [Github issue tracker](https://github.com/dgraph-io/badger/issues) for filing bugs or feature requests.
 - Follow us on Twitter [@dgraphlabs](https://twitter.com/dgraphlabs).
+
+## Contributing
+
+If you're interested in contributing to Badger see [CONTRIBUTING.md](https://github.com/dgraph-io/badger/blob/master/CONTRIBUTING.md).
