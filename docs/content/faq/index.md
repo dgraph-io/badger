@@ -39,7 +39,7 @@ many updates into a single transaction and `Commit` that transaction using
 callbacks to avoid blocking. This amortizes the cost of a transaction really
 well, and provides the most efficient way to do bulk writes.
 
-```
+```go
 wb := db.NewWriteBatch()
 defer wb.Cancel()
 
