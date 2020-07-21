@@ -25,25 +25,19 @@ noClasses = false
   weight = 2
 
 [[menu.main]]
-  name = "Contact"
-  url = "/contact/"
-  identifier = "contact"
-  weight = 3
-
-[[menu.main]]
   name = "Design"
   url = "/design/"
   identifier = "design"
-  weight = 4
+  weight = 3
 
 [[menu.main]]
   name = "Project Using Badger"
   url = "/project-using-badger/"
   identifier = "project-using-badger"
-  weight = 5
+  weight = 4
 
 [[menu.main]]
   name = "Frequently Asked Questions"
   url = "/faq/"
   identifier = "faq"
-  weight = 6
+  weight = 5

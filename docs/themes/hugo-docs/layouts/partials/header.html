@@ -31,31 +31,12 @@
     <script async src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.10.0/languages/java.min.js" integrity="sha256-RyOs5MjQ+Ef9DQrPHp4QGr2tcNjxLh6mCkkW+sS4doU=" crossorigin="anonymous"></script>
     <script src="//code.jquery.com/jquery-3.2.1.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
 
-    <!-- START: Required by runnable -->
-    <script src="//cdnjs.cloudflare.com/ajax/libs/codemirror/5.25.0/codemirror.js" integrity="sha256-x3BtPVERvw1ozPlwivuFLZoViFCeAAs1Gt6SxEedmo8=" crossorigin="anonymous"></script>
-    <link href="//cdnjs.cloudflare.com/ajax/libs/codemirror/5.25.0/codemirror.css" rel="stylesheet" integrity="sha256-7sZe9dsqyNZC9Mk+WPRB7nVvPPPXyorzm2QKqlgXC4k=" crossorigin="anonymous" />
-    <script async src="//cdnjs.cloudflare.com/ajax/libs/codemirror/5.25.0/addon/edit/closebrackets.min.js" integrity="sha256-qhu2a7DSpQaammMaLw1iruxBpxmgdw8mdQaQWQUokcY=" crossorigin="anonymous"></script>
-    <script async src="//cdnjs.cloudflare.com/ajax/libs/codemirror/5.25.0/mode/javascript/javascript.min.js" integrity="sha256-7Bdg/UdDMmHDPafpQDYZNPCEbnRP7eAvu+2hEoqRCXs=" crossorigin="anonymous"></script>
-    <!-- END: Required by runnable -->
-
-    <script>
-      {{ $currentBranch := getenv "CURRENT_BRANCH" }}
-      {{ $dgraphEndpoint := getenv "DGRAPH_ENDPOINT" }}
-
-      {{/* Set dgraph endpoint depending on the DGRAPH_ENDPOINT environment variable in the script local.sh to ensure that runnables work fine */}}
-      window.DGRAPH_ENDPOINT = {{ if (eq $dgraphEndpoint "" ) }}"https://play.dgraph.io/query?latency=true"{{ else }}{{ $dgraphEndpoint }}{{ end }}
-    </script>
-
     <title>
       {{.Section | default "Badgerdb Documentation" | humanize}} — {{ .Site.Title }}
     </title>
 
     <link
       href='{{ .Site.BaseURL }}/css/theme.css?{{ md5 (readFile "themes/hugo-docs/static/css/theme.css") }}'
-      rel="stylesheet"
-      />
-    <link
-      href='{{ .Site.BaseURL }}/css/runnable.css?{{ md5 (readFile "themes/hugo-docs/static/css/runnable.css") }}'
       rel="stylesheet"
       />
     <link href="//maxcdn.bootstrapcdn.com/bootstrap/4.0.0-alpha.6/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-rwoIResjU2yc3z8GV/NPeZWAv56rSmLldC3R/AZzGRnGxQQKnKkoFVhFQhNUwEyJ" crossorigin="anonymous">

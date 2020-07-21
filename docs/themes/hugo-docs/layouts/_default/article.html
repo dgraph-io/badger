@@ -5,11 +5,11 @@
 
 {{ if (eq $currentVersion "master") }}
   <div class="alert alert-warning">
-    <i class="fa fa-warning"></i> You are looking at the docs for the unreleased <code>master</code> branch of Dgraph. The latest version is <a href="{{ .Site.BaseURL }}/..">{{ $latestVersion }}</a>.
+    <i class="fa fa-warning"></i> You are looking at the docs for the unreleased <code>master</code> branch of Badger. The latest version is <a href="{{ .Site.BaseURL }}/..">{{ $latestVersion }}</a>.
   </div>
 {{ else if not (eq $latestVersion $currentVersion) }}
   <div class="alert alert-warning">
-    <i class="fa fa-warning"></i> You are looking at the docs for an older version of Dgraph ({{ $currentVersion }}). The latest version is <a href="{{ .Site.BaseURL }}/..">{{ $latestVersion }}</a>.
+    <i class="fa fa-warning"></i> You are looking at the docs for an older version of Badger ({{ $currentVersion }}). The latest version is <a href="{{ .Site.BaseURL }}/..">{{ $latestVersion }}</a>.
   </div>
 {{ end }}
 
