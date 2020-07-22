@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -270,4 +271,29 @@ func TestMulipleSignals(t *testing.T) {
 	// Should not panic.
 	require.NotPanics(t, func() { closer.SignalAndWait() })
 	require.NotPanics(t, func() { closer.Signal() })
+}
+
+func TestThrottleDoAfterFinish(t *testing.T) {
+	th := NewThrottle(16)
+
+	var wg sync.WaitGroup
+	for i := 1; i <= 10; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			err := th.Do()
+			switch err {
+			case nil:
+				th.Done(nil)
+			case ErrDoAfterFinish:
+				// pass
+			default:
+				panic("Failed test")
+			}
+			if i == 5 {
+				th.Finish()
+			}
+		}(i)
+	}
+	wg.Wait()
 }
