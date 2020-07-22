@@ -48,6 +48,7 @@ type flagOptions struct {
 	showInternal  bool
 	readOnly      bool
 	truncate      bool
+	encryptionKey string
 }
 
 var (
@@ -74,6 +75,7 @@ func init() {
 		"to open DB.")
 	infoCmd.Flags().BoolVar(&opt.truncate, "truncate", false, "If set to true, it allows "+
 		"truncation of value log files if they have corrupt data.")
+	infoCmd.Flags().StringVar(&opt.encryptionKey, "enc-key", "", "Use the provided encryption key")
 }
 
 var infoCmd = &cobra.Command{
@@ -98,7 +100,8 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		WithValueDir(vlogDir).
 		WithReadOnly(opt.readOnly).
 		WithTruncate(opt.truncate).
-		WithTableLoadingMode(options.MemoryMap))
+		WithTableLoadingMode(options.MemoryMap).
+		WithEncryptionKey([]byte(opt.encryptionKey)))
 	if err != nil {
 		return errors.Wrap(err, "failed to open database")
 	}
