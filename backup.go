@@ -38,7 +38,7 @@ const flushThreshold = 100 << 20
 // given writer, that are newer than or equal to the specified version. It
 // returns a timestamp (version) indicating the version of last entry that is
 // dumped, which after incrementing by 1 can be passed into later invocation to
-// generate incremental backup, of entries that have been added/modified since
+// generate incremental backup of entries that have been added/modified since
 // the last invocation of DB.Backup().
 // DB.Backup is a wrapper function over Stream.Backup to generate full and
 // incremental backups of the DB. For more control over how many goroutines are
@@ -54,7 +54,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 // given writer, that are newer than or equal to the specified version. It returns a
 // timestamp(version) indicating the version of last entry that was dumped, which
 // after incrementing by 1 can be passed into a later invocation to generate an
-// incremental dump, of entries that have been added/modified since the last
+// incremental dump of entries that have been added/modified since the last
 // invocation of Stream.Backup().
 //
 // This can be used to backup the data in a database at a given point in time.
