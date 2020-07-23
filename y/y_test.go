@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -279,4 +280,29 @@ func TestThrottleDoAfterFinish(t *testing.T) {
 	th.Done(nil)
 	require.NoError(t, th.Finish())
 	require.Error(t, th.Do())
+}
+
+func TestThrottleDoAfterFinishRace(t *testing.T) {
+	th := NewThrottle(16)
+
+	var wg sync.WaitGroup
+	for i := 1; i <= 10; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			err := th.Do()
+			switch err {
+			case nil:
+				th.Done(nil)
+			case ErrDoAfterFinish:
+				// pass
+			default:
+				panic("Failed test")
+			}
+			if i == 5 {
+				th.Finish()
+			}
+		}(i)
+	}
+	wg.Wait()
 }
