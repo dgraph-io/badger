@@ -43,7 +43,7 @@ var (
 	ErrZstdCgo = errors.New("zstd compression requires building badger with cgo enabled")
 
 	// ErrDoAfterFinish indicates a pointless Do call after Finish
-	ErrDoAfterFinish = errors.New("Do has no any point after Finish")
+	ErrDoAfterFinish = errors.New("Do should not be called after Finish")
 )
 
 const (
