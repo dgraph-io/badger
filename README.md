@@ -479,7 +479,7 @@ values altogether. See section below on key-only iteration.
 To iterate over a key prefix, you can combine `Seek()` and `ValidForPrefix()`:
 
 ```go
-db.View(func(txn *badger.Txn) error {
+err := db.View(func(txn *badger.Txn) error {
   it := txn.NewIterator(badger.DefaultIteratorOptions)
   defer it.Close()
   prefix := []byte("1234")
