@@ -1,0 +1,23 @@
+{{ $currentVersion := getenv "CURRENT_VERSION" }}
+{{ $versionString := getenv "VERSIONS" }}
+{{ $versions := split $versionString "," }}
+{{ $latestVersion := index $versions 0 }}
+
+{{ if (eq $currentVersion "master") }}
+  <div class="alert alert-warning">
+    <i class="fa fa-warning"></i> You are looking at the docs for the unreleased <code>master</code> branch of Badger. The latest version is <a href="{{ .Site.BaseURL }}/..">{{ $latestVersion }}</a>.
+  </div>
+{{ else if not (eq $latestVersion $currentVersion) }}
+  <div class="alert alert-warning">
+    <i class="fa fa-warning"></i> You are looking at the docs for an older version of Badger ({{ $currentVersion }}). The latest version is <a href="{{ .Site.BaseURL }}/..">{{ $latestVersion }}</a>.
+  </div>
+{{ end }}
+
+<article id="{{ .Slug }}">
+  {{ partial "request-edit.html" . }}
+  {{ partial "suggest-edit.html" . }}
+
+  <h1 class="post-title">{{ .Title }}</h1>
+
+  <div>{{ .Content }}</div>
+</article>
