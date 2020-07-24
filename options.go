@@ -37,6 +37,7 @@ type Options struct {
 
 	Dir      string
 	ValueDir string
+	OnlyWAL  bool
 
 	// Usually modified options.
 

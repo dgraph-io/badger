@@ -857,6 +857,7 @@ type valueLog struct {
 
 	garbageCh      chan struct{}
 	lfDiscardStats *lfDiscardStats
+	delVlog        chan uint32
 }
 
 func vlogFilePath(dirPath string, fid uint32) string {
@@ -1099,6 +1100,8 @@ func (vlog *valueLog) init(db *DB) {
 		closer:    y.NewCloser(1),
 		flushChan: make(chan map[uint32]int64, 16),
 	}
+	vlog.delVlog = make(chan uint32, 5)
+	go vlog.removeVlog()
 }
 
 func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
@@ -2000,4 +2003,34 @@ func (vlog *valueLog) populateDiscardStats() error {
 	vlog.opt.Debugf("Value Log Discard stats: %v", statsMap)
 	vlog.lfDiscardStats.flushChan <- statsMap
 	return nil
+}
+
+func (vlog *valueLog) removeVlog() {
+	for hFid := range vlog.delVlog {
+		if !vlog.db.opt.OnlyWAL {
+			continue
+		}
+		y.AssertTrue(hFid <= vlog.maxFid)
+		vlog.filesLock.RLock()
+		sfids := vlog.sortedFids()
+		vlog.filesLock.RUnlock()
+
+		for _, lfid := range sfids {
+			if lfid >= hFid {
+				break
+			}
+			vlog.filesLock.Lock()
+			lf, ok := vlog.filesMap[lfid]
+			y.AssertTrue(ok)
+			delete(vlog.filesMap, lfid)
+			vlog.filesLock.Unlock()
+			vlog.db.opt.Logger.Infof("Deleting vlog %s", lf.fd.Name())
+
+			if err := vlog.deleteLogFile(lf); err != nil {
+				vlog.db.opt.Logger.Infof("Failed to delete vlog %s, err:%s", lf.fd.Name(), err)
+
+			}
+		}
+
+	}
 }

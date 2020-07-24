@@ -195,6 +195,7 @@ func Open(opt Options) (db *DB, err error) {
 	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
 		return nil, errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
 	}
+	opt.OnlyWAL = true
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
@@ -1058,6 +1059,9 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// We own a ref on tbl.
 	err = db.lc.addLevel0Table(tbl) // This will incrRef
 	_ = tbl.DecrRef()               // Releases our ref.
+	db.opt.Infof("Sending %d", ft.vptr.Fid)
+	// send updated head to the vlog cleaner.
+	db.vlog.delVlog <- ft.vptr.Fid
 	return err
 }
 
