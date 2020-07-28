@@ -121,6 +121,7 @@ type Options struct {
 func DefaultOptions(path string) Options {
 	return Options{
 		Dir:                 path,
+		OnlyWAL:             true,
 		ValueDir:            path,
 		LevelOneSize:        256 << 20,
 		LevelSizeMultiplier: 10,

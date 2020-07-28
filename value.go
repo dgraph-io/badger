@@ -857,7 +857,7 @@ type valueLog struct {
 
 	garbageCh      chan struct{}
 	lfDiscardStats *lfDiscardStats
-	delVlog        chan uint32
+	vc             *vlogCleaner
 }
 
 func vlogFilePath(dirPath string, fid uint32) string {
@@ -1034,6 +1034,8 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	vlog.numEntriesWritten = 0
 	vlog.filesLock.Unlock()
 
+	vlog.cleanOldFiles()
+
 	return lf, nil
 }
 
@@ -1100,8 +1102,13 @@ func (vlog *valueLog) init(db *DB) {
 		closer:    y.NewCloser(1),
 		flushChan: make(chan map[uint32]int64, 16),
 	}
-	vlog.delVlog = make(chan uint32, 5)
-	go vlog.removeVlog()
+	if db.opt.OnlyWAL {
+		vlog.vc = &vlogCleaner{
+			closer:  y.NewCloser(1),
+			delChan: make(chan uint32, 5),
+		}
+		go vlog.removeVlog()
+	}
 }
 
 func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
@@ -1248,6 +1255,7 @@ func (vlog *valueLog) Close() error {
 	}
 	// close flushDiscardStats.
 	vlog.lfDiscardStats.closer.SignalAndWait()
+	vlog.vc.stop()
 
 	vlog.opt.Debugf("Stopping garbage collection of values.")
 
@@ -2005,32 +2013,74 @@ func (vlog *valueLog) populateDiscardStats() error {
 	return nil
 }
 
-func (vlog *valueLog) removeVlog() {
-	for hFid := range vlog.delVlog {
-		if !vlog.db.opt.OnlyWAL {
-			continue
-		}
-		y.AssertTrue(hFid <= vlog.maxFid)
-		vlog.filesLock.RLock()
-		sfids := vlog.sortedFids()
-		vlog.filesLock.RUnlock()
+type vlogCleaner struct {
+	closer  *y.Closer
+	delChan chan uint32
+}
 
-		for _, lfid := range sfids {
-			if lfid >= hFid {
-				break
-			}
-			vlog.filesLock.Lock()
-			lf, ok := vlog.filesMap[lfid]
-			y.AssertTrue(ok)
-			delete(vlog.filesMap, lfid)
-			vlog.filesLock.Unlock()
-			vlog.db.opt.Logger.Infof("Deleting vlog %s", lf.fd.Name())
-
-			if err := vlog.deleteLogFile(lf); err != nil {
-				vlog.db.opt.Logger.Infof("Failed to delete vlog %s, err:%s", lf.fd.Name(), err)
-
-			}
-		}
-
+func (vc *vlogCleaner) stop() {
+	if vc == nil {
+		return
 	}
+	vc.closer.SignalAndWait()
+}
+
+func (vlog *valueLog) cleanOldFiles() {
+	// Nothing to do in case we're not running in onlyWAL mode.
+	if !vlog.db.opt.OnlyWAL {
+		return
+	}
+
+	go func() {
+		// find the head pointer which is on disk.
+		head, err := vlog.db.getPersistedHead()
+		if err != nil {
+			vlog.db.opt.Logger.Warningf("Unable to fetch persisted head")
+			return
+		}
+		select {
+		case <-vlog.vc.closer.HasBeenClosed():
+			return
+		default:
+			vlog.vc.delChan <- head.Fid
+		}
+	}()
+}
+
+func (vlog *valueLog) removeVlog() {
+	y.AssertTrue(vlog.db.opt.OnlyWAL)
+
+	vc := vlog.vc
+	defer vc.closer.Done()
+	for {
+		select {
+		case <-vc.closer.HasBeenClosed():
+			close(vc.delChan)
+			return
+		case hFid := <-vc.delChan:
+
+			vlog.filesLock.RLock()
+			y.AssertTrue(hFid <= vlog.maxFid)
+			sfids := vlog.sortedFids()
+			vlog.filesLock.RUnlock()
+
+			for _, lfid := range sfids {
+				if lfid >= hFid {
+					break
+				}
+				vlog.filesLock.Lock()
+				lf, ok := vlog.filesMap[lfid]
+				y.AssertTrue(ok)
+				delete(vlog.filesMap, lfid)
+				vlog.filesLock.Unlock()
+				vlog.db.opt.Logger.Infof("Deleting vlog %s", lf.fd.Name())
+
+				if err := vlog.deleteLogFile(lf); err != nil {
+					vlog.db.opt.Logger.Infof("Failed to delete vlog %s, err:%s", lf.fd.Name(), err)
+
+				}
+			}
+		}
+	}
+
 }

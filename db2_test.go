@@ -622,6 +622,7 @@ func TestL0GCBug(t *testing.T) {
 	// Setting LoadingMode to mmap seems to cause segmentation fault while closing DB.
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.TableLoadingMode = options.FileIO
+	opts.OnlyWAL = false
 
 	db1, err := Open(opts)
 	require.NoError(t, err)

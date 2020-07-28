@@ -195,7 +195,6 @@ func Open(opt Options) (db *DB, err error) {
 	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
 		return nil, errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
 	}
-	opt.OnlyWAL = true
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
@@ -727,6 +726,7 @@ func (db *DB) writeToLSM(b *request) error {
 					ExpiresAt: entry.ExpiresAt,
 				})
 		} else {
+			y.AssertTrue(!db.opt.OnlyWAL)
 			db.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:     b.Ptrs[i].Encode(),
@@ -1059,9 +1059,6 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// We own a ref on tbl.
 	err = db.lc.addLevel0Table(tbl) // This will incrRef
 	_ = tbl.DecrRef()               // Releases our ref.
-	db.opt.Infof("Sending %d", ft.vptr.Fid)
-	// send updated head to the vlog cleaner.
-	db.vlog.delVlog <- ft.vptr.Fid
 	return err
 }
 
@@ -1207,29 +1204,40 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 		return ErrInvalidRequest
 	}
 
-	// startLevel is the level from which we should search for the head key. When badger is running
-	// with KeepL0InMemory flag, all tables on L0 are kept in memory. This means we should pick head
-	// key from Level 1 onwards because if we pick the headkey from Level 0 we might end up losing
-	// data. See test TestL0GCBug.
+	head, err := db.getPersistedHead()
+	if err != nil {
+		return errors.Wrap(err, "RunValueLogGC")
+	}
+	// Pick a log file and run GC
+	return db.vlog.runGC(discardRatio, *head)
+}
+
+func (db *DB) getPersistedHead() (*valuePointer, error) {
+	// startLevel is the level from which we should search for the head key.
+	// When badger is running with KeepL0InMemory flag, all tables on L0 are
+	// kept in memory. This means we should pick head
+	// key from Level 1 onwards because if we pick the headkey from Level 0 we
+	// might end up losing data. See test TestL0GCBug.
 	startLevel := 0
 	if db.opt.KeepL0InMemory {
 		startLevel = 1
 	}
-	// Find head on disk
+
+	// Need to pass key with timestamp. LSM get removes the last 8 bytes and
+	// compares the key.
 	headKey := y.KeyWithTs(head, math.MaxUint64)
-	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
+
+	// Find the head on disk.
 	val, err := db.lc.get(headKey, nil, startLevel)
 	if err != nil {
-		return errors.Wrap(err, "Retrieving head from on-disk LSM")
+		return nil, errors.Wrap(err, "Retrieving head from on-disk LSM")
 	}
 
 	var head valuePointer
 	if len(val.Value) > 0 {
 		head.Decode(val.Value)
 	}
-
-	// Pick a log file and run GC
-	return db.vlog.runGC(discardRatio, head)
+	return &head, nil
 }
 
 // Size returns the size of lsm and value log files in bytes. It can be used to decide how often to
