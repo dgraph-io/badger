@@ -130,3 +130,4 @@ deleting the old badger directory.
 Badger does not directly use CGO but it relies on https://github.com/DataDog/zstd library for
 zstd compression and the library requires `gcc/cgo`. You can build badger without cgo by running
 `CGO_ENABLED=0 go build`. This will build badger without the support for ZSTD compression algorithm.
+
