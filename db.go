@@ -235,6 +235,11 @@ func Open(opt Options) (db *DB, err error) {
 		// Do not perform compaction in read only mode.
 		opt.CompactL0OnClose = false
 	}
+
+	if opt.VlogOnlyWAL {
+		opt.ValueThreshold = maxValueThreshold
+
+	}
 	var dirLockGuard, valueDirLockGuard *directoryLockGuard
 
 	// Create directories and acquire lock on it only if badger is not running in InMemory mode.
@@ -726,7 +731,8 @@ func (db *DB) writeToLSM(b *request) error {
 					ExpiresAt: entry.ExpiresAt,
 				})
 		} else {
-			y.AssertTrue(!db.opt.OnlyWAL)
+			y.AssertTrue(!db.opt.VlogOnlyWAL)
+
 			db.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:     b.Ptrs[i].Encode(),

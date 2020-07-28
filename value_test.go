@@ -1299,3 +1299,60 @@ func TestValidateWrite(t *testing.T) {
 	err = log.validateWrites([]*request{req1, req})
 	require.Error(t, err)
 }
+
+func TestVlogOnlyWal(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt := DefaultOptions(dir)
+	opt.ValueLogMaxEntries = 10 // Generate more vlog files.
+	opt.VlogOnlyWAL = false
+
+	var count int
+	db, err := Open(opt)
+	require.NoError(t, err)
+
+	insert := func(v []byte) {
+		for i := 0; i <= 100; i++ {
+			txn := db.NewTransaction(true)
+			k := []byte(fmt.Sprintf("foo-%d", i))
+			require.NoError(t, txn.Set(k, v))
+			require.NoError(t, txn.Commit())
+		}
+	}
+	val := []byte("bar")
+	insert(val)
+
+	count = len(db.vlog.filesMap)
+	require.NoError(t, db.Close())
+
+	opt.VlogOnlyWAL = true
+	db, err = Open(opt)
+	require.NoError(t, err)
+
+	read := func(v []byte) {
+		txn := db.NewTransaction(false)
+		for i := 0; i <= 100; i++ {
+			key := []byte(fmt.Sprintf("foo-%d", i))
+			item, err := txn.Get(key)
+			require.NoError(t, err)
+
+			item.Value(func(v []byte) error {
+				require.Equal(t, v, val)
+				return nil
+			})
+		}
+		txn.Discard()
+	}
+
+	read(val)
+
+	val1 := []byte("bar")
+	insert(val1)
+
+	require.Less(t, len(db.vlog.filesMap), count)
+
+	read(val1)
+	require.NoError(t, db.Close())
+}

@@ -355,8 +355,12 @@ func (txn *Txn) checkSize(e *Entry) error {
 }
 
 func exceedsSize(prefix string, max int64, key []byte) error {
+	limit := 1 << 10
+	if len(key) < limit {
+		limit = len(key)
+	}
 	return errors.Errorf("%s with size %d exceeded %d limit. %s:\n%s",
-		prefix, len(key), max, prefix, hex.Dump(key[:1<<10]))
+		prefix, len(key), max, prefix, hex.Dump(key[:limit]))
 }
 
 func (txn *Txn) modify(e *Entry) error {
@@ -371,11 +375,14 @@ func (txn *Txn) modify(e *Entry) error {
 		return ErrEmptyKey
 	case bytes.HasPrefix(e.Key, badgerPrefix):
 		return ErrInvalidKey
+
 	case len(e.Key) > maxKeySize:
 		// Key length can't be more than uint16, as determined by table::header.  To
 		// keep things safe and allow badger move prefix and a timestamp suffix, let's
 		// cut it down to 65000, instead of using 65536.
 		return exceedsSize("Key", maxKeySize, e.Key)
+	case txn.db.opt.VlogOnlyWAL && len(e.Value) > txn.db.opt.ValueThreshold:
+		return exceedsSize("OnlyWAL Value", int64(txn.db.opt.ValueThreshold), e.Value)
 	case int64(len(e.Value)) > txn.db.opt.ValueLogFileSize:
 		return exceedsSize("Value", txn.db.opt.ValueLogFileSize, e.Value)
 	case txn.db.opt.InMemory && len(e.Value) > txn.db.opt.ValueThreshold:

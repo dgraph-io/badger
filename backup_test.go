@@ -493,6 +493,7 @@ func TestBackupBitClear(t *testing.T) {
 
 	opt := getTestOptions(dir)
 	opt.ValueThreshold = 10 // This is important
+	opt.VlogOnlyWAL = false
 	db, err := Open(opt)
 	require.NoError(t, err)
 

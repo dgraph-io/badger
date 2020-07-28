@@ -127,6 +127,7 @@ func TestTruncateVlogNoClose(t *testing.T) {
 	}
 	dir := "p"
 	opts := getTestOptions(dir)
+	opts.VlogOnlyWAL = false
 	opts.SyncWrites = true
 	opts.Truncate = true
 
@@ -213,6 +214,7 @@ func TestBigKeyValuePairs(t *testing.T) {
 	opts := DefaultOptions("").
 		WithMaxTableSize(1 << 20).
 		WithValueLogMaxEntries(64)
+	opts.VlogOnlyWAL = false
 	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
 		bigK := make([]byte, 65001)
 		bigV := make([]byte, db.opt.ValueLogFileSize+1)
@@ -304,6 +306,7 @@ func TestPushValueLogLimit(t *testing.T) {
 	opt := DefaultOptions("").
 		WithValueLogMaxEntries(64).
 		WithValueLogFileSize(2 << 30)
+	opt.VlogOnlyWAL = false
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		data := []byte(fmt.Sprintf("%30d", 1))
 		key := func(i int) string {
@@ -622,7 +625,7 @@ func TestL0GCBug(t *testing.T) {
 	// Setting LoadingMode to mmap seems to cause segmentation fault while closing DB.
 	opts.ValueLogLoadingMode = options.FileIO
 	opts.TableLoadingMode = options.FileIO
-	opts.OnlyWAL = false
+	opts.VlogOnlyWAL = false
 
 	db1, err := Open(opts)
 	require.NoError(t, err)
