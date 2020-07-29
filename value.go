@@ -45,6 +45,8 @@ import (
 	"golang.org/x/net/trace"
 )
 
+type fileType byte
+
 // maxVlogFileSize is the maximum size of the vlog file which can be created. Vlog Offset is of
 // uint32, so limiting at max uint32.
 var maxVlogFileSize = math.MaxUint32
@@ -71,6 +73,12 @@ const (
 	// | keyID(8 bytes) |  baseIV(12 bytes)|
 	// +----------------+------------------+
 	vlogHeaderSize = 20
+
+	vlogFile fileType = 1
+	walFile  fileType = 2
+
+	vlogSuffix = ".vlog"
+	walSuffix  = ".wal"
 )
 
 type logFile struct {
@@ -89,6 +97,7 @@ type logFile struct {
 	dataKey     *pb.DataKey
 	baseIV      []byte
 	registry    *KeyRegistry
+	fileType    fileType
 }
 
 // encodeEntry will encode entry to the buf
@@ -187,6 +196,10 @@ func (lf *logFile) keyID() uint64 {
 func (lf *logFile) mmap(size int64) (err error) {
 	if lf.loadingMode != options.MemoryMap {
 		// Nothing to do
+		return nil
+	}
+	// WAL files are not read. We only write to them so no need to mmap.
+	if lf.fileType == walFile {
 		return nil
 	}
 	lf.fmap, err = y.Mmap(lf.fd, false, size)
@@ -786,7 +799,6 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 	lf.lock.Lock()
 	defer lf.lock.Unlock()
 
-	path := vlog.fpath(lf.fid)
 	if err := lf.munmap(); err != nil {
 		_ = lf.fd.Close()
 		return err
@@ -795,7 +807,7 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 	if err := lf.fd.Close(); err != nil {
 		return err
 	}
-	return os.Remove(path)
+	return os.Remove(lf.path)
 }
 
 func (vlog *valueLog) dropAll() (int, error) {
@@ -822,8 +834,8 @@ func (vlog *valueLog) dropAll() (int, error) {
 		return count, err
 	}
 
-	vlog.db.opt.Infof("Value logs deleted. Creating value log file: 0")
-	if _, err := vlog.createVlogFile(0); err != nil { // Called while writes are stopped.
+	vlog.db.opt.Infof("Value logs deleted. Creating log file: 0")
+	if _, err := vlog.createLogFile(0); err != nil { // Called while writes are stopped.
 		return count, err
 	}
 	return count, nil
@@ -860,12 +872,24 @@ type valueLog struct {
 	vc             *vlogCleaner
 }
 
+func walFilePath(dirPath string, fid uint32) string {
+	return fmt.Sprintf("%s%s%06d.wal", dirPath, string(os.PathSeparator), fid)
+}
+
 func vlogFilePath(dirPath string, fid uint32) string {
 	return fmt.Sprintf("%s%s%06d.vlog", dirPath, string(os.PathSeparator), fid)
 }
 
-func (vlog *valueLog) fpath(fid uint32) string {
-	return vlogFilePath(vlog.dirPath, fid)
+func (vlog *valueLog) fpath(fid uint32, ft fileType) string {
+	switch ft {
+	case vlogFile:
+		return vlogFilePath(vlog.dirPath, fid)
+	case walFile:
+		return walFilePath(vlog.dirPath, fid)
+	default:
+		// This should never happen.
+		panic("unknown file type")
+	}
 }
 
 func (vlog *valueLog) populateFilesMap() error {
@@ -878,11 +902,19 @@ func (vlog *valueLog) populateFilesMap() error {
 
 	found := make(map[uint64]struct{})
 	for _, file := range files {
-		if !strings.HasSuffix(file.Name(), ".vlog") {
+		var suffix string
+		switch {
+		case strings.HasSuffix(file.Name(), vlogSuffix):
+			suffix = vlogSuffix
+		case strings.HasSuffix(file.Name(), walSuffix):
+			suffix = walSuffix
+		default:
 			continue
 		}
+		y.AssertTrue(len(suffix) > 0)
+
 		fsz := len(file.Name())
-		fid, err := strconv.ParseUint(file.Name()[:fsz-5], 10, 32)
+		fid, err := strconv.ParseUint(file.Name()[:fsz-len(suffix)], 10, 32)
 		if err != nil {
 			return errFile(err, file.Name(), "Unable to parse log id.")
 		}
@@ -893,10 +925,22 @@ func (vlog *valueLog) populateFilesMap() error {
 
 		lf := &logFile{
 			fid:         uint32(fid),
-			path:        vlog.fpath(uint32(fid)),
 			loadingMode: vlog.opt.ValueLogLoadingMode,
 			registry:    vlog.db.registry,
 		}
+
+		switch {
+		case strings.HasSuffix(file.Name(), ".wal"):
+			lf.fileType = walFile
+		case strings.HasSuffix(file.Name(), ".vlog"):
+			lf.fileType = vlogFile
+		default:
+			// This should not never happen.
+			return errFile(err, file.Name(), "unknown file type")
+		}
+
+		lf.path = vlog.fpath(uint32(fid), lf.fileType)
+
 		vlog.filesMap[uint32(fid)] = lf
 		if vlog.maxFid < uint32(fid) {
 			vlog.maxFid = uint32(fid)
@@ -905,10 +949,10 @@ func (vlog *valueLog) populateFilesMap() error {
 	return nil
 }
 
-func (lf *logFile) open(path string, flags uint32) error {
+func (lf *logFile) open(flags uint32) error {
 	var err error
-	if lf.fd, err = y.OpenExistingFile(path, flags); err != nil {
-		return y.Wrapf(err, "Error while opening file in logfile %s", path)
+	if lf.fd, err = y.OpenExistingFile(lf.path, flags); err != nil {
+		return y.Wrapf(err, "Error while opening file in logfile %s", lf.path)
 	}
 
 	fi, err := lf.fd.Stat()
@@ -930,13 +974,13 @@ func (lf *logFile) open(path string, flags uint32) error {
 	}
 	buf := make([]byte, vlogHeaderSize)
 	if _, err = lf.fd.Read(buf); err != nil {
-		return y.Wrapf(err, "Error while reading vlog file %d", lf.fid)
+		return y.Wrapf(err, "Error while reading file %d", lf.fid)
 	}
 	keyID := binary.BigEndian.Uint64(buf[:8])
 	var dk *pb.DataKey
 	// retrieve datakey.
 	if dk, err = lf.registry.dataKey(keyID); err != nil {
-		return y.Wrapf(err, "While opening vlog file %d", lf.fid)
+		return y.Wrapf(err, "While opening file %d", lf.fid)
 	}
 	lf.dataKey = dk
 	lf.baseIV = buf[8:]
@@ -984,21 +1028,28 @@ func (lf *logFile) bootstrap() error {
 	return err
 }
 
-func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
-	path := vlog.fpath(fid)
+func (vlog *valueLog) createLogFile(fid uint32) (*logFile, error) {
+	ft := vlogFile
+	if vlog.opt.VlogOnlyWAL {
+		ft = walFile
+	}
 
 	lf := &logFile{
 		fid:         fid,
-		path:        path,
+		fileType:    vlogFile,
+		path:        vlog.fpath(fid, ft),
 		loadingMode: vlog.opt.ValueLogLoadingMode,
 		registry:    vlog.db.registry,
+	}
+	if vlog.opt.VlogOnlyWAL {
+		lf.fileType = walFile
 	}
 	// writableLogOffset is only written by write func, by read by Read func.
 	// To avoid a race condition, all reads and updates to this variable must be
 	// done via atomics.
 	var err error
-	if lf.fd, err = y.CreateSyncedFile(path, vlog.opt.SyncWrites); err != nil {
-		return nil, errFile(err, lf.path, "Create value log file")
+	if lf.fd, err = y.CreateSyncedFile(lf.path, vlog.opt.SyncWrites); err != nil {
+		return nil, errFile(err, lf.path, "Create log file")
 	}
 
 	removeFile := func() {
@@ -1019,6 +1070,7 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 		return nil, errFile(err, vlog.dirPath, "Sync value log dir")
 	}
 
+	// mmap only if we will be reading from the file.
 	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
 		removeFile()
 		return nil, errFile(err, lf.path, "Mmap value log file")
@@ -1124,7 +1176,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	}
 	// If no files are found, then create a new file.
 	if len(vlog.filesMap) == 0 {
-		_, err := vlog.createVlogFile(0)
+		_, err := vlog.createLogFile(0)
 		return y.Wrapf(err, "Error while creating log file in valueLog.open")
 	}
 	fids := vlog.sortedFids()
@@ -1144,7 +1196,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		// We cannot mmap the files upfront here. Windows does not like mmapped files to be
 		// truncated. We might need to truncate files during a replay.
 		var err error
-		if err = lf.open(vlog.fpath(fid), flags); err != nil {
+		if err = lf.open(flags); err != nil {
 			return errors.Wrapf(err, "Open existing file: %q", lf.path)
 		}
 
@@ -1174,9 +1226,8 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 				if err := lf.fd.Close(); err != nil {
 					return errors.Wrapf(err, "failed to close vlog file %s", lf.fd.Name())
 				}
-				path := vlog.fpath(lf.fid)
-				if err := os.Remove(path); err != nil {
-					return y.Wrapf(err, "failed to delete empty value log file: %q", path)
+				if err := os.Remove(lf.path); err != nil {
+					return y.Wrapf(err, "failed to delete empty log file: %q", lf.path)
 				}
 				continue
 			}
@@ -1200,7 +1251,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	// encrypted entries and plain text entries.
 	if last.encryptionEnabled() != vlog.db.shouldEncrypt() {
 		newid := vlog.maxFid + 1
-		_, err := vlog.createVlogFile(newid)
+		_, err := vlog.createLogFile(newid)
 		if err != nil {
 			return y.Wrapf(err, "Error while creating log file %d in valueLog.open", newid)
 		}
@@ -1450,7 +1501,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		vlog.opt.Debugf("Flushing buffer of size %d to vlog", buf.Len())
 		n, err := curlf.fd.Write(buf.Bytes())
 		if err != nil {
-			return errors.Wrapf(err, "Unable to write to value log file: %q", curlf.path)
+			return errors.Wrapf(err, "Unable to write to log file: %q", curlf.path)
 		}
 		buf.Reset()
 		y.NumWrites.Add(1)
@@ -1472,7 +1523,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 			newid := vlog.maxFid + 1
 			y.AssertTruef(newid > 0, "newid has overflown uint32: %v", newid)
-			newlf, err := vlog.createVlogFile(newid)
+			newlf, err := vlog.createLogFile(newid)
 			if err != nil {
 				return err
 			}
@@ -1627,7 +1678,7 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	fids := vlog.sortedFids()
 	switch {
 	case len(fids) <= 1:
-		tr.LazyPrintf("Only one or less value log file.")
+		tr.LazyPrintf("Only one or less log file.")
 		return nil
 	case head.Fid == 0:
 		tr.LazyPrintf("Head pointer is at zero.")
@@ -2066,12 +2117,18 @@ func (vlog *valueLog) vlogCleaner() {
 				vlog.filesLock.Lock()
 				lf, ok := vlog.filesMap[lfid]
 				y.AssertTrue(ok)
+
+				// Delete only WAL files. Vlog files will be deleted by the vlog GC.
+				if lf.fileType == vlogFile {
+					vlog.filesLock.Unlock()
+					continue
+				}
 				delete(vlog.filesMap, lfid)
 				vlog.filesLock.Unlock()
 
-				vlog.db.opt.Logger.Debugf("Deleting vlog %s", lf.fd.Name())
+				vlog.db.opt.Logger.Infof("Deleting wal %s", lf.fd.Name())
 				if err := vlog.deleteLogFile(lf); err != nil {
-					vlog.db.opt.Logger.Errorf("Failed to delete vlog %s, err:%s", lf.fd.Name(), err)
+					vlog.db.opt.Logger.Errorf("Failed to delete wal %s, err:%s", lf.fd.Name(), err)
 
 				}
 			}

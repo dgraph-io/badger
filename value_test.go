@@ -1209,7 +1209,7 @@ func TestValueEntryChecksum(t *testing.T) {
 		require.Greater(t, len(v), db.opt.ValueThreshold)
 		txnSet(t, db, k, v, 0)
 
-		path := db.vlog.fpath(0)
+		path := db.vlog.fpath(0, vlogFile)
 		require.NoError(t, db.Close())
 
 		file, err := os.OpenFile(path, os.O_RDWR, 0644)
@@ -1313,7 +1313,8 @@ func TestVlogOnlyWal(t *testing.T) {
 	db, err := Open(opt)
 	require.NoError(t, err)
 
-	insert := func(v []byte) {
+	insert := func() {
+		v := []byte("bar")
 		for i := 0; i <= 100; i++ {
 			txn := db.NewTransaction(true)
 			k := []byte(fmt.Sprintf("foo-%d", i))
@@ -1321,38 +1322,38 @@ func TestVlogOnlyWal(t *testing.T) {
 			require.NoError(t, txn.Commit())
 		}
 	}
-	val := []byte("bar")
-	insert(val)
+	insert()
 
 	count = len(db.vlog.filesMap)
 	require.NoError(t, db.Close())
 
+	// Use new Dir
+	dir, err = ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt.Dir = dir
+	opt.ValueDir = dir
 	opt.VlogOnlyWAL = true
+
 	db, err = Open(opt)
 	require.NoError(t, err)
 
-	read := func(v []byte) {
-		txn := db.NewTransaction(false)
-		for i := 0; i <= 100; i++ {
-			key := []byte(fmt.Sprintf("foo-%d", i))
-			item, err := txn.Get(key)
-			require.NoError(t, err)
-
-			item.Value(func(v []byte) error {
-				require.Equal(t, v, val)
-				return nil
-			})
-		}
-		txn.Discard()
-	}
-
-	read(val)
-
-	val1 := []byte("bar")
-	insert(val1)
+	insert()
 
 	require.Less(t, len(db.vlog.filesMap), count)
 
-	read(val1)
+	txn := db.NewTransaction(false)
+	for i := 0; i <= 100; i++ {
+		key := []byte(fmt.Sprintf("foo-%d", i))
+		item, err := txn.Get(key)
+		require.NoError(t, err)
+
+		item.Value(func(v []byte) error {
+			require.Equal(t, v, []byte("bar"))
+			return nil
+		})
+	}
+	txn.Discard()
 	require.NoError(t, db.Close())
 }
