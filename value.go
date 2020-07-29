@@ -1685,6 +1685,17 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 		return nil
 	}
 
+	// Remove all wal files from the fids. We don't want GC to run on WAL files.
+	vfids := fids[:0]
+	for _, fid := range fids {
+		lf, ok := vlog.filesMap[fid]
+		y.AssertTrue(ok)
+		if lf.fileType == vlogFile {
+			vfids = append(vfids, fid)
+		}
+	}
+	fids = vfids
+
 	// Pick a candidate that contains the largest amount of discardable data
 	candidate := struct {
 		fid     uint32
