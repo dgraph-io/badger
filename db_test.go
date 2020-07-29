@@ -357,7 +357,7 @@ func TestForceCompactL0(t *testing.T) {
 	data := func(i int) []byte {
 		return []byte(fmt.Sprintf("%b", i))
 	}
-	n := 400
+	n := 80
 	m := 45 // Increasing would cause ErrTxnTooBig
 	sz := 2 << 10
 	v := make([]byte, sz)

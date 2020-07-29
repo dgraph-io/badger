@@ -121,7 +121,7 @@ type Options struct {
 func DefaultOptions(path string) Options {
 	return Options{
 		Dir:                 path,
-		DisableVlog:         true,
+		DisableVlog:         false,
 		ValueDir:            path,
 		LevelOneSize:        256 << 20,
 		LevelSizeMultiplier: 10,
