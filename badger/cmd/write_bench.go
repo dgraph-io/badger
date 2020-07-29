@@ -41,9 +41,9 @@ var writeBenchCmd = &cobra.Command{
 	Use:   "write",
 	Short: "Writes random data to Badger to benchmark write speed.",
 	Long: `
-  This command writes random data to Badger to benchmark write speed. Useful for testing and
-  performance analysis.
-  `,
+	 This command writes random data to Badger to benchmark write speed. Useful for testing and
+	 performance analysis.
+	 `,
 	RunE: writeBench,
 }
 
@@ -102,21 +102,21 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "Show Badger logs.")
 	writeBenchCmd.Flags().IntVarP(&valueThreshold, "value-th", "t", 1<<10, "Value threshold")
 	writeBenchCmd.Flags().IntVarP(&numVersions, "num-version", "n", 1, "Number of versions to keep")
-	writeBenchCmd.Flags().Int64VarP(&maxCacheSize, "max-cache", "C", 1<<30, "Max size of cache")
-	writeBenchCmd.Flags().BoolVarP(&keepBlockIdxInCache, "keep-bidx", "b", true,
+	writeBenchCmd.Flags().Int64VarP(&maxCacheSize, "max-cache", "C", 0, "Max size of cache")
+	writeBenchCmd.Flags().BoolVarP(&keepBlockIdxInCache, "keep-bidx", "b", false,
 		"Keep block indices in cache")
-	writeBenchCmd.Flags().BoolVarP(&keepBlocksInCache, "keep-blocks", "B", true,
+	writeBenchCmd.Flags().BoolVarP(&keepBlocksInCache, "keep-blocks", "B", false,
 		"Keep blocks in cache")
-	writeBenchCmd.Flags().Int64VarP(&maxBfCacheSize, "max-bf-cache", "c", 500<<20,
+	writeBenchCmd.Flags().Int64VarP(&maxBfCacheSize, "max-bf-cache", "c", 0,
 		"Maximum Bloom Filter Cache Size")
-	writeBenchCmd.Flags().Uint32Var(&vlogMaxEntries, "vlog-maxe", 10000, "Value log Max Entries")
+	writeBenchCmd.Flags().Uint32Var(&vlogMaxEntries, "vlog-maxe", 1000000, "Value log Max Entries")
 	writeBenchCmd.Flags().StringVarP(&encryptionKey, "encryption-key", "e", "",
 		"If it is true, badger will encrypt all the data stored on the disk.")
 	writeBenchCmd.Flags().StringVar(&loadingMode, "loading-mode", "mmap",
 		"Mode for accessing SSTables")
-	writeBenchCmd.Flags().BoolVar(&loadBloomsOnOpen, "load-blooms", false,
+	writeBenchCmd.Flags().BoolVar(&loadBloomsOnOpen, "load-blooms", true,
 		"Load Bloom filter on DB open.")
-	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", false,
+	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", true,
 		"If true, it badger will detect the conflicts")
 	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
 		"If true, badger will use ZSTD mode")
@@ -243,7 +243,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithTruncate(truncate).
-		WithSyncWrites(false).
+		WithSyncWrites(true).
 		WithCompactL0OnClose(force).
 		WithValueThreshold(valueThreshold).
 		WithNumVersionsToKeep(numVersions).
