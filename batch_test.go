@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/v2/y"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -125,19 +127,20 @@ func TestEmptyWriteBatch(t *testing.T) {
 }
 
 // This test ensures we don't panic during flush.
+// See issue: https://github.com/dgraph-io/badger/issues/1394
 func TestFlushPanic(t *testing.T) {
 	t.Run("flush after flush", func(t *testing.T) {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			wb := db.NewWriteBatch()
 			wb.Flush()
-			require.NotPanics(t, func() { wb.Flush() })
+			require.Error(t, y.ErrCommitAfterFinish, func() { wb.Flush() })
 		})
 	})
 	t.Run("flush after cancel", func(t *testing.T) {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			wb := db.NewWriteBatch()
 			wb.Cancel()
-			require.NotPanics(t, func() { wb.Flush() })
+			require.Error(t, y.ErrCommitAfterFinish, func() { wb.Flush() })
 		})
 	})
 }

@@ -42,7 +42,8 @@ var (
 	// without CGO.
 	ErrZstdCgo = errors.New("zstd compression requires building badger with cgo enabled")
 
-	// ErrCommitAfterFinish indicates a pointless Do call after Finish
+	// ErrCommitAfterFinish indicates that write batch commit was called after
+	// finish
 	ErrCommitAfterFinish = errors.New("Batch commit not permitted after finish")
 )
 
