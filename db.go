@@ -312,9 +312,6 @@ func Open(opt Options) (db *DB, err error) {
 			MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
 			BufferItems: 64,
 			Metrics:     true,
-			OnEvict: func(_, _ uint64, value interface{}, _ int64) {
-				table.BlockEvictHandler(value)
-			},
 		}
 		db.blockCache, err = ristretto.NewCache(&config)
 		if err != nil {
@@ -1560,11 +1557,10 @@ func (db *DB) prepareToDrop() (func(), error) {
 // writes are paused before running DropAll, and resumed after it is finished.
 func (db *DB) DropAll() error {
 	f, err := db.dropAll()
-	if err != nil {
-		return err
+	if f != nil {
+		f()
 	}
-	defer f()
-	return nil
+	return err
 }
 
 func (db *DB) dropAll() (func(), error) {

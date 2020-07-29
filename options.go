@@ -176,7 +176,6 @@ func DefaultOptions(path string) Options {
 
 func buildTableOptions(opt Options) table.Options {
 	return table.Options{
-		TableSize:               uint64(opt.MaxTableSize),
 		BlockSize:               opt.BlockSize,
 		BloomFalsePositive:      opt.BloomFalsePositive,
 		LoadBloomsOnOpen:        opt.LoadBloomsOnOpen,
@@ -382,6 +381,8 @@ func (opt Options) WithNumMemtables(val int) Options {
 // consume more memory.
 //
 // The default value of BloomFalsePositive is 0.01.
+//
+// Setting this to 0 disables the bloom filter completely.
 func (opt Options) WithBloomFalsePositive(val float64) Options {
 	opt.BloomFalsePositive = val
 	return opt
