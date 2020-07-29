@@ -48,12 +48,13 @@ var writeBenchCmd = &cobra.Command{
 }
 
 var (
-	keySz    int
-	valSz    int
-	numKeys  float64
-	force    bool
-	sorted   bool
-	showLogs bool
+	keySz      int
+	valSz      int
+	numKeys    float64
+	syncWrites bool
+	force      bool
+	sorted     bool
+	showLogs   bool
 
 	sizeWritten    uint64
 	entriesWritten uint64
@@ -96,6 +97,8 @@ func init() {
 	writeBenchCmd.Flags().IntVarP(&valSz, "val-size", "v", 128, "Size of value")
 	writeBenchCmd.Flags().Float64VarP(&numKeys, "keys-mil", "m", 10.0,
 		"Number of keys to add in millions")
+	writeBenchCmd.Flags().BoolVar(&syncWrites, "sync", true,
+		"If true, sync writes to disk.")
 	writeBenchCmd.Flags().BoolVarP(&force, "force-compact", "f", true,
 		"Force compact level 0 on close.")
 	writeBenchCmd.Flags().BoolVarP(&sorted, "sorted", "s", false, "Write keys in sorted order.")
@@ -243,7 +246,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithTruncate(truncate).
-		WithSyncWrites(true).
+		WithSyncWrites(syncWrites).
 		WithCompactL0OnClose(force).
 		WithValueThreshold(valueThreshold).
 		WithNumVersionsToKeep(numVersions).
