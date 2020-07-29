@@ -42,8 +42,8 @@ var (
 	// without CGO.
 	ErrZstdCgo = errors.New("zstd compression requires building badger with cgo enabled")
 
-	// ErrDoAfterFinish indicates a pointless Do call after Finish
-	ErrDoAfterFinish = errors.New("Do should not be called after Finish")
+	// ErrCommitAfterFinish indicates a pointless Do call after Finish
+	ErrCommitAfterFinish = errors.New("Batch commit not permitted after finish")
 )
 
 const (
@@ -256,8 +256,6 @@ type Throttle struct {
 	ch        chan struct{}
 	errCh     chan error
 	finishErr error
-	finishMux sync.Mutex
-	finished  bool
 }
 
 // NewThrottle creates a new throttle with a max number of workers.
@@ -272,11 +270,6 @@ func NewThrottle(max int) *Throttle {
 // are already maximum number of workers working. If it detects an error from
 // previously Done workers, it would return it.
 func (t *Throttle) Do() error {
-	t.finishMux.Lock()
-	defer t.finishMux.Unlock()
-	if t.finished {
-		return ErrDoAfterFinish
-	}
 	for {
 		select {
 		case t.ch <- struct{}{}:
@@ -309,10 +302,6 @@ func (t *Throttle) Done(err error) {
 // From next calls, it will return same error as found on first call.
 func (t *Throttle) Finish() error {
 	t.once.Do(func() {
-		t.finishMux.Lock()
-		t.finished = true
-		t.finishMux.Unlock()
-
 		t.wg.Wait()
 		close(t.ch)
 		close(t.errCh)
