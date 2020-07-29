@@ -37,7 +37,7 @@ type Options struct {
 
 	Dir         string
 	ValueDir    string
-	VlogOnlyWAL bool
+	DisableVlog bool
 
 	// Usually modified options.
 
@@ -121,7 +121,7 @@ type Options struct {
 func DefaultOptions(path string) Options {
 	return Options{
 		Dir:                 path,
-		VlogOnlyWAL:         true,
+		DisableVlog:         true,
 		ValueDir:            path,
 		LevelOneSize:        256 << 20,
 		LevelSizeMultiplier: 10,

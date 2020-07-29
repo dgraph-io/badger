@@ -1030,7 +1030,7 @@ func (lf *logFile) bootstrap() error {
 
 func (vlog *valueLog) createLogFile(fid uint32) (*logFile, error) {
 	ft := vlogFile
-	if vlog.opt.VlogOnlyWAL {
+	if vlog.opt.DisableVlog {
 		ft = walFile
 	}
 
@@ -1041,7 +1041,7 @@ func (vlog *valueLog) createLogFile(fid uint32) (*logFile, error) {
 		loadingMode: vlog.opt.ValueLogLoadingMode,
 		registry:    vlog.db.registry,
 	}
-	if vlog.opt.VlogOnlyWAL {
+	if vlog.opt.DisableVlog {
 		lf.fileType = walFile
 	}
 	// writableLogOffset is only written by write func, by read by Read func.
@@ -1154,7 +1154,7 @@ func (vlog *valueLog) init(db *DB) {
 		closer:    y.NewCloser(1),
 		flushChan: make(chan map[uint32]int64, 16),
 	}
-	if db.opt.VlogOnlyWAL {
+	if db.opt.DisableVlog {
 		vlog.vc = &vlogCleaner{
 			closer:  y.NewCloser(1),
 			delChan: make(chan uint32, 5),
@@ -2078,7 +2078,7 @@ func (vc *vlogCleaner) stop() {
 
 func (vlog *valueLog) purgeOldFiles() {
 	// Nothing to do in case we're not running in onlyWAL mode.
-	if !vlog.db.opt.VlogOnlyWAL {
+	if !vlog.db.opt.DisableVlog {
 		return
 	}
 
@@ -2092,7 +2092,7 @@ func (vlog *valueLog) purgeOldFiles() {
 }
 
 func (vlog *valueLog) vlogCleaner() {
-	y.AssertTrue(vlog.db.opt.VlogOnlyWAL)
+	y.AssertTrue(vlog.db.opt.DisableVlog)
 
 	vc := vlog.vc
 	defer vc.closer.Done()

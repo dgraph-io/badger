@@ -381,7 +381,7 @@ func (txn *Txn) modify(e *Entry) error {
 		// keep things safe and allow badger move prefix and a timestamp suffix, let's
 		// cut it down to 65000, instead of using 65536.
 		return exceedsSize("Key", maxKeySize, e.Key)
-	case txn.db.opt.VlogOnlyWAL && len(e.Value) > txn.db.opt.ValueThreshold:
+	case txn.db.opt.DisableVlog && len(e.Value) > txn.db.opt.ValueThreshold:
 		return exceedsSize("OnlyWAL Value", int64(txn.db.opt.ValueThreshold), e.Value)
 	case int64(len(e.Value)) > txn.db.opt.ValueLogFileSize:
 		return exceedsSize("Value", txn.db.opt.ValueLogFileSize, e.Value)

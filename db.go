@@ -236,7 +236,7 @@ func Open(opt Options) (db *DB, err error) {
 		opt.CompactL0OnClose = false
 	}
 
-	if opt.VlogOnlyWAL {
+	if opt.DisableVlog {
 		opt.ValueThreshold = maxValueThreshold
 
 	}
@@ -731,7 +731,7 @@ func (db *DB) writeToLSM(b *request) error {
 					ExpiresAt: entry.ExpiresAt,
 				})
 		} else {
-			y.AssertTrue(!db.opt.VlogOnlyWAL)
+			y.AssertTrue(!db.opt.DisableVlog)
 
 			db.mt.Put(entry.Key,
 				y.ValueStruct{

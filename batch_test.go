@@ -71,7 +71,7 @@ func TestWriteBatch(t *testing.T) {
 	}
 	t.Run("disk mode", func(t *testing.T) {
 		opt := getTestOptions("")
-		opt.VlogOnlyWAL = false
+		opt.DisableVlog = false
 
 		// Set value threshold to 32 bytes otherwise write batch will generate
 		// too many files and we will crash with too many files open error.
