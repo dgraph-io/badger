@@ -7,6 +7,8 @@ in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
 fast, distributed graph database. It's meant to be a performant alternative to
 non-Go-based key-value stores like RocksDB.
 
+**Use [Discuss Issues](https://discuss.dgraph.io/c/issues/badger/37) for reporting issues about this repository.**
+
 ## Project Status [March 24, 2020]
 
 Badger is stable and is being used to serve data sets worth hundreds of
@@ -477,7 +479,7 @@ values altogether. See section below on key-only iteration.
 To iterate over a key prefix, you can combine `Seek()` and `ValidForPrefix()`:
 
 ```go
-db.View(func(txn *badger.Txn) error {
+err := db.View(func(txn *badger.Txn) error {
   it := txn.NewIterator(badger.DefaultIteratorOptions)
   defer it.Close()
   prefix := []byte("1234")

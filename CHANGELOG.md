@@ -1,8 +1,122 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
-and this project adheres to [Serialization Versioning](VERSIONING.md).
+The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
+
+## [20.07.0-rc2] - 2020-07-14
+
+### Fixed
+- Add a limit to the size of the batches sent over a stream. (#1412)
+
+## [20.07.0-rc1] - 2020-07-11
+
+### Fixed
+  - Fix Sequence generates duplicate values (#1281)
+  - Fix race condition in DoesNotHave (#1287)
+  - Fail fast if cgo is disabled and compression is ZSTD (#1284)
+  - Proto: make badger/v2 compatible with v1 (#1293)
+  - Proto: Rename dgraph.badger.v2.pb to badgerpb2 (#1314)
+  - Handle duplicates in ManagedWriteBatch (#1315)
+  - Ensure `bitValuePointer` flag is cleared for LSM entry values written to LSM (#1313)
+  - DropPrefix: Return error on blocked writes (#1329)
+  - Confirm `badgerMove` entry required before rewrite (#1302)
+  - Drop move keys when its key prefix is dropped (#1331)
+  - Iterator: Always add key to txn.reads (#1328)
+  - Restore: Account for value size as well (#1358)
+  - Compaction: Expired keys and delete markers are never purged (#1354)
+  - GC: Consider size of value while rewriting (#1357)
+  - Force KeepL0InMemory to be true when InMemory is true (#1375)
+  - Rework DB.DropPrefix (#1381)
+  - Update head while replaying value log (#1372)
+  - Avoid panic on multiple closer.Signal calls (#1401)
+  - Return error if the vlog writes exceeds more than 4GB (#1400)
+
+### Performance
+  - Clean up transaction oracle as we go (#1275)
+  - Use cache for storing block offsets (#1336)
+
+### Features
+  - Support disabling conflict detection (#1344)
+  - Add leveled logging (#1249)
+  - Support entry version in Write batch (#1310)
+  - Add Write method to batch write (#1321)
+  - Support multiple iterators in read-write transactions (#1286)
+
+### New APIs
+- Badger.DB
+  - NewManagedWriteBatch (#1310)
+  - DropPrefix (#1381)
+- Badger.Option
+  - WithDetectConflicts (#1344)
+  - WithKeepBlockIndicesInCache (#1336)
+  - WithKeepBlocksInCache (#1336)
+- Badger.WriteBatch
+  - DeleteAt (#1310)
+  - SetEntryAt (#1310)
+  - Write (#1321)
+
+### Changes to Default Options
+  - DefaultOptions: Set KeepL0InMemory to false (#1345)
+  - Increase default valueThreshold from 32B to 1KB (#1346)
+
+### Deprecated
+- Badger.Option
+  - WithEventLogging (#1203)
+
+### Reverts
+This sections lists the changes which were reverted because of non-reproducible crashes.
+- Compress/Encrypt Blocks in the background (#1227)
+
+
+## [2.0.3] - 2020-03-24
+
+### Fixed
+
+- Add support for watching nil prefix in subscribe API (#1246)
+
+### Performance
+
+- Compress/Encrypt Blocks in the background (#1227)
+- Disable cache by default (#1257)
+
+### Features
+
+- Add BypassDirLock option (#1243)
+- Add separate cache for bloomfilters (#1260)
+
+### New APIs
+- badger.DB
+  - BfCacheMetrics (#1260)
+  - DataCacheMetrics (#1260)
+- badger.Options
+  - WithBypassLockGuard (#1243)
+  - WithLoadBloomsOnOpen (#1260)
+  - WithMaxBfCacheSize (#1260)
+
+## [2.0.3] - 2020-03-24
+
+### Fixed
+
+- Add support for watching nil prefix in subscribe API (#1246)
+
+### Performance
+
+- Compress/Encrypt Blocks in the background (#1227)
+- Disable cache by default (#1257)
+
+### Features
+
+- Add BypassDirLock option (#1243)
+- Add separate cache for bloomfilters (#1260)
+
+### New APIs
+- badger.DB
+  - BfCacheMetrics (#1260)
+  - DataCacheMetrics (#1260)
+- badger.Options
+  - WithBypassLockGuard (#1243)
+  - WithLoadBloomsOnOpen (#1260)
+  - WithMaxBfCacheSize (#1260)
 
 ## [2.0.2] - 2020-03-02
 
@@ -293,6 +407,9 @@ Bug fix:
 ## [1.0.1] - 2017-11-06
 * Fix an uint16 overflow when resizing key slice
 
+[Unreleased]: https://github.com/dgraph-io/badger/compare/v20.07.0-rc1...HEAD
+[20.07.0-rc1]: https://github.com/dgraph-io/badger/compare/v2.0.3...v20.07.0-rc1
+[2.0.3]: https://github.com/dgraph-io/badger/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/dgraph-io/badger/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/dgraph-io/badger/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/dgraph-io/badger/compare/v1.6.0...v2.0.0
