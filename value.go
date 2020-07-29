@@ -1269,6 +1269,9 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	// to happen repeatedly.
 	vlog.db.vhead = valuePointer{Fid: vlog.maxFid, Offset: uint32(lastOffset)}
 
+	if vlog.vc != nil {
+		vlog.vc.delChan <- vlog.maxFid
+	}
 	// Map the file if needed. When we create a file, it is automatically mapped.
 	if err = last.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
 		return errFile(err, last.path, "Map log file")
@@ -1723,9 +1726,8 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	// Fallback to randomly picking a log file
 	var idxHead int
 	for i, fid := range fids {
-		if fid == head.Fid {
+		if fid <= head.Fid {
 			idxHead = i
-			break
 		}
 	}
 	if idxHead == 0 { // Not found or first file
