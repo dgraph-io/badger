@@ -1430,6 +1430,16 @@ func (db *DB) startMemoryFlush() {
 // stopped. Ideally, no writes are going on during Flatten. Otherwise, it would create competition
 // between flattening the tree and new tables being created at level zero.
 func (db *DB) Flatten(workers int) error {
+	return db.flattenInternal(workers, true)
+}
+
+// CompactLSM works like Flatten except it only performs one pass of compactions instead of
+// performing compactions until the whole database is in a single level like Flatten does.
+func (db *DB) CompactLSM(workers int) error {
+	return db.flattenInternal(workers, false)
+}
+
+func (db *DB) flattenInternal(workers int, loop bool) error {
 	db.stopCompactions()
 	defer db.startCompactions()
 
@@ -1485,12 +1495,22 @@ func (db *DB) Flatten(workers int) error {
 			if err := compactAway(prios[0]); err != nil {
 				return err
 			}
+
+			// If loop is false, only perform one pass of the outer for loop.
+			if !loop {
+				return nil
+			}
 			continue
 		}
 		// Create an artificial compaction priority, to ensure that we compact the level.
 		cp := compactionPriority{level: levels[0], score: 1.71}
 		if err := compactAway(cp); err != nil {
 			return err
+		}
+
+		// If loop is false, only perform one pass of the outer for loop.
+		if !loop {
+			return nil
 		}
 	}
 }
