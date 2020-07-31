@@ -909,6 +909,7 @@ func (vlog *valueLog) populateFilesMap() error {
 		case strings.HasSuffix(file.Name(), walSuffix):
 			suffix = walSuffix
 		default:
+			// This neither a vlog file nor a wal file, ignore it.
 			continue
 		}
 		y.AssertTrue(len(suffix) > 0)
@@ -930,9 +931,9 @@ func (vlog *valueLog) populateFilesMap() error {
 		}
 
 		switch {
-		case strings.HasSuffix(file.Name(), ".wal"):
+		case strings.HasSuffix(file.Name(), walSuffix):
 			lf.fileType = walFile
-		case strings.HasSuffix(file.Name(), ".vlog"):
+		case strings.HasSuffix(file.Name(), vlogSuffix):
 			lf.fileType = vlogFile
 		default:
 			// This should not never happen.
@@ -1036,14 +1037,12 @@ func (vlog *valueLog) createLogFile(fid uint32) (*logFile, error) {
 
 	lf := &logFile{
 		fid:         fid,
-		fileType:    vlogFile,
+		fileType:    ft,
 		path:        vlog.fpath(fid, ft),
 		loadingMode: vlog.opt.ValueLogLoadingMode,
 		registry:    vlog.db.registry,
 	}
-	if vlog.opt.DisableVlog {
-		lf.fileType = walFile
-	}
+
 	// writableLogOffset is only written by write func, by read by Read func.
 	// To avoid a race condition, all reads and updates to this variable must be
 	// done via atomics.
@@ -1070,7 +1069,6 @@ func (vlog *valueLog) createLogFile(fid uint32) (*logFile, error) {
 		return nil, errFile(err, vlog.dirPath, "Sync value log dir")
 	}
 
-	// mmap only if we will be reading from the file.
 	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
 		removeFile()
 		return nil, errFile(err, lf.path, "Mmap value log file")
