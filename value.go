@@ -1279,6 +1279,10 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	vlog.db.vhead = valuePointer{Fid: vlog.maxFid, Offset: uint32(lastOffset)}
 
 	vlog.wc.dropBefore(vlog.maxFid)
+	if !vlog.db.opt.DisableVlog {
+		// stop the cleaner. We won't have any more wal files.
+		vlog.wc.stop()
+	}
 	// Map the file if needed. When we create a file, it is automatically mapped.
 	if err = last.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
 		return errFile(err, last.path, "Map log file")
@@ -2137,7 +2141,6 @@ func (vlog *valueLog) vlogCleaner() {
 			sfids := vlog.sortedFids()
 			vlog.filesLock.RUnlock()
 
-			foundWAL := false
 			for _, lfid := range sfids {
 				// Do not drop the vlog file on which the head pointer lies.
 				if lfid >= hFid {
@@ -2153,7 +2156,6 @@ func (vlog *valueLog) vlogCleaner() {
 					continue
 				}
 
-				foundWAL = true
 				delete(vlog.filesMap, lfid)
 				vlog.filesLock.Unlock()
 
@@ -2164,9 +2166,6 @@ func (vlog *valueLog) vlogCleaner() {
 				}
 			}
 
-			if !foundWAL && !vlog.db.opt.DisableVlog {
-				wc.closer.Signal()
-			}
 		}
 	}
 
