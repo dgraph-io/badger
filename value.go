@@ -1277,7 +1277,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 
 	vlog.wc.dropBefore(vlog.maxFid)
 	if !vlog.db.opt.WALMode {
-		// stop the cleaner. We won't have any more wal files.
+		// stop the cleaner. We won't have more wal files.
 		vlog.wc.stop()
 	}
 	// Map the file if needed. When we create a file, it is automatically mapped.
@@ -1695,17 +1695,6 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 		tr.LazyPrintf("Head pointer is at zero.")
 		return nil
 	}
-
-	// Remove all wal files from the fids. We don't want GC to run on WAL files.
-	vfids := fids[:0]
-	for _, fid := range fids {
-		lf, ok := vlog.filesMap[fid]
-		y.AssertTrue(ok)
-		if lf.fileType == vlogFile {
-			vfids = append(vfids, fid)
-		}
-	}
-	fids = vfids
 
 	// Pick a candidate that contains the largest amount of discardable data
 	candidate := struct {
@@ -2127,12 +2116,11 @@ func (vlog *valueLog) vlogCleaner() {
 		case <-wc.closer.HasBeenClosed():
 			close(wc.delChan)
 			// Set wc to nil so that we don't push more file IDs. DropBefore
-			// will ignore fid if wc is nil.
+			// will ignore fids if wc is nil.
 			wc = nil
 			return
 
 		case hFid := <-wc.delChan:
-
 			vlog.filesLock.RLock()
 			y.AssertTrue(hFid <= vlog.maxFid)
 			sfids := vlog.sortedFids()
@@ -2152,7 +2140,6 @@ func (vlog *valueLog) vlogCleaner() {
 					vlog.filesLock.Unlock()
 					continue
 				}
-
 				delete(vlog.filesMap, lfid)
 				vlog.filesLock.Unlock()
 
