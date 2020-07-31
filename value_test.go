@@ -1307,7 +1307,7 @@ func TestVlogOnlyWal(t *testing.T) {
 
 	opt := DefaultOptions(dir)
 	opt.ValueLogMaxEntries = 10 // Generate more vlog files.
-	opt.DisableVlog = false
+	opt.WALMode = false
 
 	var count int
 	db, err := Open(opt)
@@ -1334,7 +1334,7 @@ func TestVlogOnlyWal(t *testing.T) {
 
 	opt.Dir = dir
 	opt.ValueDir = dir
-	opt.DisableVlog = true
+	opt.WALMode = true
 
 	db, err = Open(opt)
 	require.NoError(t, err)

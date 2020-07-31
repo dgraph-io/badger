@@ -320,7 +320,7 @@ func (w *sortedWriter) handleRequests() {
 					ExpiresAt: e.ExpiresAt,
 				}
 			} else {
-				y.AssertTrue(!w.db.opt.DisableVlog)
+				y.AssertTrue(!w.db.opt.WALMode)
 				vptr := req.Ptrs[i]
 				vs = y.ValueStruct{
 					Value:     vptr.Encode(),

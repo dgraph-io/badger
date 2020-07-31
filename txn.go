@@ -384,7 +384,7 @@ func (txn *Txn) modify(e *Entry) error {
 		// All values are written in the LSM tree in this mode. If the len goes
 		// beyond value threshold we will end up writing to vlog and this will
 		// cause a crash in badger.
-	case txn.db.opt.DisableVlog && len(e.Value) > txn.db.opt.ValueThreshold:
+	case txn.db.opt.WALMode && len(e.Value) > txn.db.opt.ValueThreshold:
 		return exceedsSize("DisableVlog Value", int64(txn.db.opt.ValueThreshold), e.Value)
 	case int64(len(e.Value)) > txn.db.opt.ValueLogFileSize:
 		return exceedsSize("Value", txn.db.opt.ValueLogFileSize, e.Value)

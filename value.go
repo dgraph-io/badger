@@ -1029,12 +1029,15 @@ func (lf *logFile) bootstrap() error {
 	return err
 }
 
-func (vlog *valueLog) createLogFile(fid uint32) (*logFile, error) {
-	ft := vlogFile
-	if vlog.opt.DisableVlog {
-		ft = walFile
+func (vlog *valueLog) logFileType() fileType {
+	if vlog.opt.WALMode {
+		return walFile
 	}
+	return vlogFile
+}
 
+func (vlog *valueLog) createLogFile(fid uint32) (*logFile, error) {
+	ft := vlog.logFileType()
 	lf := &logFile{
 		fid:         fid,
 		fileType:    ft,
@@ -1243,16 +1246,10 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	last, ok := vlog.filesMap[vlog.maxFid]
 	y.AssertTrue(ok)
 
-	// newFileType is used to determine if we should create a new log file.
-	newFileType := vlogFile
-	if vlog.db.opt.DisableVlog {
-		newFileType = walFile
-	}
-
 	shouldCreateNewFile :=
 		// If the last file was a vlog file and the current one is WAL file (or
 		// vice versa), we should create a new file.
-		(last.fileType != newFileType) ||
+		(last.fileType != vlog.logFileType()) ||
 			// We'll create a new vlog if the last vlog is encrypted and db is opened in
 			// plain text mode or vice versa. A single vlog file can't have both
 			// encrypted entries and plain text entries.
@@ -1279,7 +1276,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	vlog.db.vhead = valuePointer{Fid: vlog.maxFid, Offset: uint32(lastOffset)}
 
 	vlog.wc.dropBefore(vlog.maxFid)
-	if !vlog.db.opt.DisableVlog {
+	if !vlog.db.opt.WALMode {
 		// stop the cleaner. We won't have any more wal files.
 		vlog.wc.stop()
 	}
@@ -2109,7 +2106,7 @@ func (wc *walCleaner) dropBefore(fid uint32) {
 
 func (vlog *valueLog) purgeOldFiles() {
 	// Nothing to do in case we're not running in onlyWAL mode.
-	if !vlog.db.opt.DisableVlog {
+	if !vlog.db.opt.WALMode {
 		return
 	}
 

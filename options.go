@@ -35,9 +35,9 @@ import (
 type Options struct {
 	// Required options.
 
-	Dir         string
-	ValueDir    string
-	DisableVlog bool
+	Dir      string
+	ValueDir string
+	WALMode  bool
 
 	// Usually modified options.
 
@@ -121,7 +121,7 @@ type Options struct {
 func DefaultOptions(path string) Options {
 	return Options{
 		Dir:                 path,
-		DisableVlog:         false,
+		WALMode:             false,
 		ValueDir:            path,
 		LevelOneSize:        256 << 20,
 		LevelSizeMultiplier: 10,
