@@ -1206,6 +1206,13 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 	if db.opt.InMemory {
 		return ErrGCInMemoryMode
 	}
+	// TODO(ibrahim): Fix value GC in WAL mode. We will have to scan the entire
+	// vlog file to ensure we don't have any values with length greater than
+	// maxValueThreshold. If the vlog files has a value with length greater
+	// than maxValueThreshold, we should not GC that file.
+	if db.opt.WALMode {
+		return errors.New("Cannot run value GC in WAL mode")
+	}
 	if discardRatio >= 1.0 || discardRatio <= 0.0 {
 		return ErrInvalidRequest
 	}
