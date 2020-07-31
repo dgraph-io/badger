@@ -869,7 +869,7 @@ type valueLog struct {
 
 	garbageCh      chan struct{}
 	lfDiscardStats *lfDiscardStats
-	vc             *vlogCleaner
+	wc             *walCleaner
 }
 
 func walFilePath(dirPath string, fid uint32) string {
@@ -1152,13 +1152,11 @@ func (vlog *valueLog) init(db *DB) {
 		closer:    y.NewCloser(1),
 		flushChan: make(chan map[uint32]int64, 16),
 	}
-	if db.opt.DisableVlog {
-		vlog.vc = &vlogCleaner{
-			closer:  y.NewCloser(1),
-			delChan: make(chan uint32, 5),
-		}
-		go vlog.vlogCleaner()
+	vlog.wc = &walCleaner{
+		closer:  y.NewCloser(1),
+		delChan: make(chan uint32, 5),
 	}
+	go vlog.vlogCleaner()
 }
 
 func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
@@ -1244,10 +1242,23 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	// Seek to the end to start writing.
 	last, ok := vlog.filesMap[vlog.maxFid]
 	y.AssertTrue(ok)
-	// We'll create a new vlog if the last vlog is encrypted and db is opened in
-	// plain text mode or vice versa. A single vlog file can't have both
-	// encrypted entries and plain text entries.
-	if last.encryptionEnabled() != vlog.db.shouldEncrypt() {
+
+	// newFileType is used to determine if we should create a new log file.
+	newFileType := vlogFile
+	if vlog.db.opt.DisableVlog {
+		newFileType = walFile
+	}
+
+	shouldCreateNewFile :=
+		// If the last file was a vlog file and the current one is WAL file (or
+		// vice versa), we should create a new file.
+		(last.fileType != newFileType) ||
+			// We'll create a new vlog if the last vlog is encrypted and db is opened in
+			// plain text mode or vice versa. A single vlog file can't have both
+			// encrypted entries and plain text entries.
+			(last.encryptionEnabled() != vlog.db.shouldEncrypt())
+
+	if shouldCreateNewFile {
 		newid := vlog.maxFid + 1
 		_, err := vlog.createLogFile(newid)
 		if err != nil {
@@ -1267,9 +1278,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	// to happen repeatedly.
 	vlog.db.vhead = valuePointer{Fid: vlog.maxFid, Offset: uint32(lastOffset)}
 
-	if vlog.vc != nil {
-		vlog.vc.delChan <- vlog.maxFid
-	}
+	vlog.wc.dropBefore(vlog.maxFid)
 	// Map the file if needed. When we create a file, it is automatically mapped.
 	if err = last.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
 		return errFile(err, last.path, "Map log file")
@@ -1307,7 +1316,7 @@ func (vlog *valueLog) Close() error {
 	}
 	// close flushDiscardStats.
 	vlog.lfDiscardStats.closer.SignalAndWait()
-	vlog.vc.stop()
+	vlog.wc.stop()
 
 	vlog.opt.Debugf("Stopping garbage collection of values.")
 
@@ -2075,16 +2084,23 @@ func (vlog *valueLog) populateDiscardStats() error {
 	return nil
 }
 
-type vlogCleaner struct {
+type walCleaner struct {
 	closer  *y.Closer
 	delChan chan uint32
 }
 
-func (vc *vlogCleaner) stop() {
-	if vc == nil {
+func (wc *walCleaner) stop() {
+	if wc == nil {
 		return
 	}
-	vc.closer.SignalAndWait()
+	wc.closer.SignalAndWait()
+}
+
+func (wc *walCleaner) dropBefore(fid uint32) {
+	if wc == nil {
+		return
+	}
+	wc.delChan <- fid
 }
 
 func (vlog *valueLog) purgeOldFiles() {
@@ -2099,27 +2115,29 @@ func (vlog *valueLog) purgeOldFiles() {
 		vlog.db.opt.Logger.Warningf("Unable to fetch persisted head")
 		return
 	}
-	vlog.vc.delChan <- head.Fid
+	vlog.wc.dropBefore(head.Fid)
 }
 
 func (vlog *valueLog) vlogCleaner() {
-	y.AssertTrue(vlog.db.opt.DisableVlog)
-
-	vc := vlog.vc
-	defer vc.closer.Done()
+	wc := vlog.wc
+	defer wc.closer.Done()
 	for {
 		select {
-		case <-vc.closer.HasBeenClosed():
-			close(vc.delChan)
+		case <-wc.closer.HasBeenClosed():
+			close(wc.delChan)
+			// Set wc to nil so that we don't push more file IDs. DropBefore
+			// will ignore fid if wc is nil.
+			wc = nil
 			return
 
-		case hFid := <-vc.delChan:
+		case hFid := <-wc.delChan:
 
 			vlog.filesLock.RLock()
 			y.AssertTrue(hFid <= vlog.maxFid)
 			sfids := vlog.sortedFids()
 			vlog.filesLock.RUnlock()
 
+			foundWAL := false
 			for _, lfid := range sfids {
 				// Do not drop the vlog file on which the head pointer lies.
 				if lfid >= hFid {
@@ -2134,6 +2152,8 @@ func (vlog *valueLog) vlogCleaner() {
 					vlog.filesLock.Unlock()
 					continue
 				}
+
+				foundWAL = true
 				delete(vlog.filesMap, lfid)
 				vlog.filesLock.Unlock()
 
@@ -2142,6 +2162,10 @@ func (vlog *valueLog) vlogCleaner() {
 					vlog.db.opt.Logger.Errorf("Failed to delete wal %s, err:%s", lf.fd.Name(), err)
 
 				}
+			}
+
+			if !foundWAL && !vlog.db.opt.DisableVlog {
+				wc.closer.Signal()
 			}
 		}
 	}
