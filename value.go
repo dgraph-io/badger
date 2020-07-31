@@ -936,7 +936,7 @@ func (vlog *valueLog) populateFilesMap() error {
 		case strings.HasSuffix(file.Name(), vlogSuffix):
 			lf.fileType = vlogFile
 		default:
-			// This should not never happen.
+			// This should never happen.
 			return errFile(err, file.Name(), "unknown file type")
 		}
 
@@ -1029,6 +1029,7 @@ func (lf *logFile) bootstrap() error {
 	return err
 }
 
+// logFileType returns the log file type based on DB options.
 func (vlog *valueLog) logFileType() fileType {
 	if vlog.opt.WALMode {
 		return walFile
@@ -1036,6 +1037,7 @@ func (vlog *valueLog) logFileType() fileType {
 	return vlogFile
 }
 
+// createLogFile creates a new vlog or wal file based on DB options.
 func (vlog *valueLog) createLogFile(fid uint32) (*logFile, error) {
 	ft := vlog.logFileType()
 	lf := &logFile{
@@ -1159,7 +1161,7 @@ func (vlog *valueLog) init(db *DB) {
 		closer:  y.NewCloser(1),
 		delChan: make(chan uint32, 5),
 	}
-	go vlog.vlogCleaner()
+	go vlog.walCleaner()
 }
 
 func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
@@ -1696,6 +1698,19 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 		return nil
 	}
 
+	// Remove all wal files from the fids. We don't want GC to run on WAL files.
+	// TODO(ibrahim): Verify if need the following loop. We clean up the WAL
+	// files when the DB starts in vlog mode.
+	vfids := fids[:0]
+	for _, fid := range fids {
+		lf, ok := vlog.filesMap[fid]
+		y.AssertTrue(ok)
+		if lf.fileType == vlogFile {
+			vfids = append(vfids, fid)
+		}
+	}
+	fids = vfids
+
 	// Pick a candidate that contains the largest amount of discardable data
 	candidate := struct {
 		fid     uint32
@@ -1723,8 +1738,9 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	// Fallback to randomly picking a log file
 	var idxHead int
 	for i, fid := range fids {
-		if fid <= head.Fid {
+		if fid == head.Fid {
 			idxHead = i
+			break
 		}
 	}
 	if idxHead == 0 { // Not found or first file
@@ -2086,6 +2102,8 @@ func (wc *walCleaner) stop() {
 	wc.closer.SignalAndWait()
 }
 
+// dropBefore will drop the WAL files before the fid. It doesn't drop the fid file.
+// dropBefore(12) will drop fid 11 but not fid 12.
 func (wc *walCleaner) dropBefore(fid uint32) {
 	if wc == nil {
 		return
@@ -2093,6 +2111,8 @@ func (wc *walCleaner) dropBefore(fid uint32) {
 	wc.delChan <- fid
 }
 
+// purgeOldFiles will find the head pointer persisted to the disk and pass it
+// to the wal cleaner to remove old wal files.
 func (vlog *valueLog) purgeOldFiles() {
 	// Nothing to do in case we're not running in onlyWAL mode.
 	if !vlog.db.opt.WALMode {
@@ -2108,7 +2128,8 @@ func (vlog *valueLog) purgeOldFiles() {
 	vlog.wc.dropBefore(head.Fid)
 }
 
-func (vlog *valueLog) vlogCleaner() {
+// walCleaner runs in a go routine and takes care of deleted old wal files.
+func (vlog *valueLog) walCleaner() {
 	wc := vlog.wc
 	defer wc.closer.Done()
 	for {
@@ -2122,12 +2143,13 @@ func (vlog *valueLog) vlogCleaner() {
 
 		case hFid := <-wc.delChan:
 			vlog.filesLock.RLock()
+			// Sanity check.
 			y.AssertTrue(hFid <= vlog.maxFid)
 			sfids := vlog.sortedFids()
 			vlog.filesLock.RUnlock()
 
 			for _, lfid := range sfids {
-				// Do not drop the vlog file on which the head pointer lies.
+				// Do not drop the wal file on which the head pointer lies.
 				if lfid >= hFid {
 					break
 				}

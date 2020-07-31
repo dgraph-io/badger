@@ -284,3 +284,9 @@ func TestWALBigValue(t *testing.T) {
 		require.NoError(t, sw.Flush())
 	})
 }
+
+// TODO (ibrahim): Add test which generates some vlog files and then some wal
+// files. Reopen the same DB in vlog mode and run GC. Ensure none of the wal
+// files are GC'ed (if they exist)
+func TestGcWithWAL(t *testing.T) {
+}
