@@ -203,6 +203,7 @@ func (wb *WriteBatch) Flush() error {
 	wb.Lock()
 	err := wb.commit()
 	if err != nil {
+		wb.Unlock()
 		return err
 	}
 	wb.finished = true

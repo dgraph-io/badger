@@ -133,14 +133,14 @@ func TestFlushPanic(t *testing.T) {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			wb := db.NewWriteBatch()
 			wb.Flush()
-			require.Error(t, y.ErrCommitAfterFinish, func() { wb.Flush() })
+			require.Error(t, y.ErrCommitAfterFinish, wb.Flush())
 		})
 	})
 	t.Run("flush after cancel", func(t *testing.T) {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			wb := db.NewWriteBatch()
 			wb.Cancel()
-			require.Error(t, y.ErrCommitAfterFinish, func() { wb.Flush() })
+			require.Error(t, y.ErrCommitAfterFinish, wb.Flush())
 		})
 	})
 }
