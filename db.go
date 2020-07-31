@@ -238,7 +238,6 @@ func Open(opt Options) (db *DB, err error) {
 
 	if opt.WALMode {
 		opt.ValueThreshold = maxValueThreshold
-
 	}
 	var dirLockGuard, valueDirLockGuard *directoryLockGuard
 
@@ -731,6 +730,7 @@ func (db *DB) writeToLSM(b *request) error {
 					ExpiresAt: entry.ExpiresAt,
 				})
 		} else {
+			// In WALMode, we don't use the values stored in the wal files.
 			y.AssertTrue(!db.opt.WALMode)
 
 			db.mt.Put(entry.Key,
