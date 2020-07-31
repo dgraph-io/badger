@@ -359,12 +359,11 @@ func TestForceCompactL0(t *testing.T) {
 	}
 	n := 80
 	m := 45 // Increasing would cause ErrTxnTooBig
-	sz := 2 << 10
+	sz := 32 << 10
 	v := make([]byte, sz)
 	for i := 0; i < n; i += 2 {
 		version := uint64(i)
 		wb := db.NewWriteBatchAt(version + 1)
-		// txn := db.NewTransactionAt(version, true)
 		for j := 0; j < m; j++ {
 			require.NoError(t, wb.SetEntry(NewEntry(data(j), v)))
 		}
