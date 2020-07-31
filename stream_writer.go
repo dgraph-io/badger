@@ -123,6 +123,12 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 		// If the value can be collocated with the key in LSM tree, we can skip
 		// writing the value to value log.
 		e.skipVlog = sw.db.shouldWriteValueToLSM(*e)
+
+		// Skip vlog should always be true in WALMode. We don't store
+		// values in vlog in wal mode.
+		if sw.db.opt.WALMode && !e.skipVlog {
+			return exceedsSize("WALMode Value", int64(sw.db.opt.ValueThreshold), e.Value)
+		}
 		req := streamReqs[kv.StreamId]
 		if req == nil {
 			req = &request{}

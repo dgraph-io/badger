@@ -380,12 +380,12 @@ func (txn *Txn) modify(e *Entry) error {
 		// keep things safe and allow badger move prefix and a timestamp suffix, let's
 		// cut it down to 65000, instead of using 65536.
 		return exceedsSize("Key", maxKeySize, e.Key)
-		// Value len cannot be more than valuethreshold in disableVlog mode.
+		// Value len cannot be more than valuethreshold in WALMode mode.
 		// All values are written in the LSM tree in this mode. If the len goes
 		// beyond value threshold we will end up writing to vlog and this will
 		// cause a crash in badger.
 	case txn.db.opt.WALMode && len(e.Value) > txn.db.opt.ValueThreshold:
-		return exceedsSize("DisableVlog Value", int64(txn.db.opt.ValueThreshold), e.Value)
+		return exceedsSize("WALMode Value", int64(txn.db.opt.ValueThreshold), e.Value)
 	case int64(len(e.Value)) > txn.db.opt.ValueLogFileSize:
 		return exceedsSize("Value", txn.db.opt.ValueLogFileSize, e.Value)
 	case txn.db.opt.InMemory && len(e.Value) > txn.db.opt.ValueThreshold:

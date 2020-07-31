@@ -807,6 +807,12 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	}
 	var count, size int64
 	for _, e := range entries {
+		// Batch set API bypasses the txn.modify function so recheck the length here.
+		if db.opt.WALMode && len(e.Value) > db.opt.ValueThreshold {
+			// Cannot insert a value that's bigger than the value threshold in
+			// WAL mode.
+			return nil, exceedsSize("WALMode Value", int64(db.opt.ValueThreshold), e.Value)
+		}
 		size += int64(e.estimateSize(db.opt.ValueThreshold))
 		count++
 	}
