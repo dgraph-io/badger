@@ -1,7 +1,5 @@
-// +build !windows,!plan9
-
 /*
- * Copyright 2017 Dgraph Labs, Inc. and Contributors
+ * Copyright 2020 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,12 +18,11 @@ package badger
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pkg/errors"
-	"golang.org/x/sys/unix"
 )
 
 // directoryLockGuard holds a lock on a directory and a pid file inside.  The pid file isn't part
@@ -39,43 +36,45 @@ type directoryLockGuard struct {
 	readOnly bool
 }
 
-// acquireDirectoryLock gets a lock on the directory (using flock). If
-// this is not read-only, it will also write our pid to
-// dirPath/pidFileName for convenience.
-func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (
-	*directoryLockGuard, error) {
+// acquireDirectoryLock gets a lock on the directory.
+// It will also write our pid to dirPath/pidFileName for convenience.
+// readOnly is not supported on Plan 9.
+func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*directoryLockGuard, error) {
+	if readOnly {
+		return nil, ErrPlan9NotSupported
+	}
+
 	// Convert to absolute path so that Release still works even if we do an unbalanced
 	// chdir in the meantime.
 	absPidFilePath, err := filepath.Abs(filepath.Join(dirPath, pidFileName))
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot get absolute path for pid lock file")
 	}
-	f, err := os.Open(dirPath)
-	if err != nil {
-		return nil, errors.Wrapf(err, "cannot open directory %q", dirPath)
+
+	// If the file was unpacked or created by some other program, it might not
+	// have the ModeExclusive bit set. Set it before we call OpenFile, so that we
+	// can be confident that a successful OpenFile implies exclusive use.
+	if fi, err := os.Stat(absPidFilePath); err == nil {
+		if fi.Mode()&os.ModeExclusive == 0 {
+			if err := os.Chmod(absPidFilePath, fi.Mode()|os.ModeExclusive); err != nil {
+				return nil, errors.Wrapf(err, "could not set exclusive mode bit")
+			}
+		}
 	}
-	opts := unix.LOCK_EX | unix.LOCK_NB
-	if readOnly {
-		opts = unix.LOCK_SH | unix.LOCK_NB
+	f, err := os.OpenFile(absPidFilePath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0666|os.ModeExclusive)
+	if err != nil {
+		if isLocked(err) {
+			return nil, errors.Wrapf(err,
+				"Cannot open pid lock file %q.  Another process is using this Badger database",
+				absPidFilePath)
+		}
+		return nil, errors.Wrapf(err, "Cannot open pid lock file %q", absPidFilePath)
 	}
 
-	err = unix.Flock(int(f.Fd()), opts)
+	_, err = fmt.Fprintf(f, "%d\n", os.Getpid())
 	if err != nil {
 		f.Close()
-		return nil, errors.Wrapf(err,
-			"Cannot acquire directory lock on %q.  Another process is using this Badger database.",
-			dirPath)
-	}
-
-	if !readOnly {
-		// Yes, we happily overwrite a pre-existing pid file.  We're the
-		// only read-write badger process using this directory.
-		err = ioutil.WriteFile(absPidFilePath, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0666)
-		if err != nil {
-			f.Close()
-			return nil, errors.Wrapf(err,
-				"Cannot write pid file %q", absPidFilePath)
-		}
+		return nil, errors.Wrapf(err, "could not write pid")
 	}
 	return &directoryLockGuard{f, absPidFilePath, readOnly}, nil
 }
@@ -115,4 +114,33 @@ func syncDir(dir string) error {
 		return errors.Wrapf(err, "While syncing directory: %s.", dir)
 	}
 	return errors.Wrapf(closeErr, "While closing directory: %s.", dir)
+}
+
+// Opening an exclusive-use file returns an error.
+// The expected error strings are:
+//
+//  - "open/create -- file is locked" (cwfs, kfs)
+//  - "exclusive lock" (fossil)
+//  - "exclusive use file already open" (ramfs)
+//
+// See https://github.com/golang/go/blob/go1.15rc1/src/cmd/go/internal/lockedfile/lockedfile_plan9.go#L16
+var lockedErrStrings = [...]string{
+	"file is locked",
+	"exclusive lock",
+	"exclusive use file already open",
+}
+
+// Even though plan9 doesn't support the Lock/RLock/Unlock functions to
+// manipulate already-open files, IsLocked is still meaningful: os.OpenFile
+// itself may return errors that indicate that a file with the ModeExclusive bit
+// set is already open.
+func isLocked(err error) bool {
+	s := err.Error()
+
+	for _, frag := range lockedErrStrings {
+		if strings.Contains(s, frag) {
+			return true
+		}
+	}
+	return false
 }
