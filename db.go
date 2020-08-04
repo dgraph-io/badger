@@ -1430,16 +1430,16 @@ func (db *DB) startMemoryFlush() {
 // stopped. Ideally, no writes are going on during Flatten. Otherwise, it would create competition
 // between flattening the tree and new tables being created at level zero.
 func (db *DB) Flatten(workers int) error {
-	return db.flattenInternal(workers, true)
+	return db.flattenInternal(workers, false)
 }
 
 // CompactLSM works like Flatten except it only performs one pass of compactions instead of
 // performing compactions until the whole database is in a single level like Flatten does.
 func (db *DB) CompactLSM(workers int) error {
-	return db.flattenInternal(workers, false)
+	return db.flattenInternal(workers, true)
 }
 
-func (db *DB) flattenInternal(workers int, loop bool) error {
+func (db *DB) flattenInternal(workers int, singlePass bool) error {
 	db.stopCompactions()
 	defer db.startCompactions()
 
@@ -1486,6 +1486,20 @@ func (db *DB) flattenInternal(workers int, loop bool) error {
 				levels = append(levels, i)
 			}
 		}
+
+		// Single pass means we won't try to flatten the entire LSM Tree. We
+		// will try to push the data to the lower levels, once per level.
+		if singlePass {
+			for _, l := range levels {
+				// Create an artificial compaction priority to ensure that we compact the level.
+				cp := compactionPriority{level: l, score: 1.74}
+				if err := compactAway(cp); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+
 		if len(levels) <= 1 {
 			prios := db.lc.pickCompactLevels()
 			if len(prios) == 0 || prios[0].score <= 1.0 {
@@ -1496,21 +1510,12 @@ func (db *DB) flattenInternal(workers int, loop bool) error {
 				return err
 			}
 
-			// If loop is false, only perform one pass of the outer for loop.
-			if !loop {
-				return nil
-			}
 			continue
 		}
 		// Create an artificial compaction priority, to ensure that we compact the level.
 		cp := compactionPriority{level: levels[0], score: 1.71}
 		if err := compactAway(cp); err != nil {
 			return err
-		}
-
-		// If loop is false, only perform one pass of the outer for loop.
-		if !loop {
-			return nil
 		}
 	}
 }
