@@ -909,7 +909,7 @@ func (vlog *valueLog) populateFilesMap() error {
 		case strings.HasSuffix(file.Name(), walSuffix):
 			suffix = walSuffix
 		default:
-			// This neither a vlog file nor a wal file, ignore it.
+			// This is neither a vlog file nor a wal file, ignore it.
 			continue
 		}
 		y.AssertTrue(len(suffix) > 0)
@@ -2160,15 +2160,15 @@ func (vlog *valueLog) walCleaner() {
 				// Delete only WAL files. Vlog files will be deleted by the vlog GC.
 				if lf.fileType == vlogFile {
 					vlog.filesLock.Unlock()
-					continue
-				}
-				delete(vlog.filesMap, lfid)
-				vlog.filesLock.Unlock()
+				} else {
+					delete(vlog.filesMap, lfid)
+					vlog.filesLock.Unlock()
 
-				vlog.db.opt.Logger.Infof("Deleting wal %s", lf.fd.Name())
-				if err := vlog.deleteLogFile(lf); err != nil {
-					vlog.db.opt.Logger.Errorf("Failed to delete wal %s, err:%s", lf.fd.Name(), err)
-
+					vlog.db.opt.Logger.Infof("Deleting wal %s", lf.fd.Name())
+					if err := vlog.deleteLogFile(lf); err != nil {
+						vlog.db.opt.Logger.Errorf("Failed to delete wal %s, err:%s",
+							lf.fd.Name(), err)
+					}
 				}
 			}
 

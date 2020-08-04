@@ -731,8 +731,7 @@ func (db *DB) writeToLSM(b *request) error {
 				})
 		} else {
 			// In WALMode, we don't use the values stored in the wal files.
-			y.AssertTrue(!db.opt.WALMode)
-
+			errors.Errorf("Cannot insert value of size %d in WAL Mode", len(entry.Value))
 			db.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:     b.Ptrs[i].Encode(),
