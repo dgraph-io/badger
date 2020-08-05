@@ -52,6 +52,13 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*d
 	// If the file was unpacked or created by some other program, it might not
 	// have the ModeExclusive bit set. Set it before we call OpenFile, so that we
 	// can be confident that a successful OpenFile implies exclusive use.
+	//
+	// OpenFile fails if the file ModeExclusive bit set *and* the file is already open.
+	// So, if the file is closed when the DB crashed, we're fine. When the process
+	// that was managing the DB crashes, the OS will close the file for us.
+	//
+	// This bit of code is copied from Go's lockedfile internal package:
+	// https://github.com/golang/go/blob/go1.15rc1/src/cmd/go/internal/lockedfile/lockedfile_plan9.go#L58
 	if fi, err := os.Stat(absPidFilePath); err == nil {
 		if fi.Mode()&os.ModeExclusive == 0 {
 			if err := os.Chmod(absPidFilePath, fi.Mode()|os.ModeExclusive); err != nil {
