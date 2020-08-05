@@ -41,6 +41,10 @@ var (
 	// compression algorithm is being used for compression. ZSTD cannot work
 	// without CGO.
 	ErrZstdCgo = errors.New("zstd compression requires building badger with cgo enabled")
+
+	// ErrCommitAfterFinish indicates that write batch commit was called after
+	// finish
+	ErrCommitAfterFinish = errors.New("Batch commit not permitted after finish")
 )
 
 const (
