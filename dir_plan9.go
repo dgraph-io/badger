@@ -32,8 +32,6 @@ type directoryLockGuard struct {
 	f *os.File
 	// The absolute path to our pid file.
 	path string
-	// Was this a shared lock for a read-only database?
-	readOnly bool
 }
 
 // acquireDirectoryLock gets a lock on the directory.
@@ -76,16 +74,13 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*d
 		f.Close()
 		return nil, errors.Wrapf(err, "could not write pid")
 	}
-	return &directoryLockGuard{f, absPidFilePath, readOnly}, nil
+	return &directoryLockGuard{f, absPidFilePath}, nil
 }
 
 // Release deletes the pid file and releases our lock on the directory.
 func (guard *directoryLockGuard) release() error {
-	var err error
-	if !guard.readOnly {
-		// It's important that we remove the pid file first.
-		err = os.Remove(guard.path)
-	}
+	// It's important that we remove the pid file first.
+	err := os.Remove(guard.path)
 
 	if closeErr := guard.f.Close(); err == nil {
 		err = closeErr
