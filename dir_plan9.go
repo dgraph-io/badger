@@ -28,7 +28,7 @@ import (
 // directoryLockGuard holds a lock on a directory and a pid file inside.  The pid file isn't part
 // of the locking mechanism, it's just advisory.
 type directoryLockGuard struct {
-	// File handle on the directory, which we've flocked.
+	// File handle on the directory, which we've locked.
 	f *os.File
 	// The absolute path to our pid file.
 	path string
@@ -72,7 +72,7 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*d
 	}
 
 	_, err = fmt.Fprintf(f, "%d\n", os.Getpid())
-	if err != nil {
+	if _, err = fmt.Fprintf(f, "%d\n", os.Getpid()); err != nil {
 		f.Close()
 		return nil, errors.Wrapf(err, "could not write pid")
 	}
