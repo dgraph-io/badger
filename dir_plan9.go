@@ -69,7 +69,6 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*d
 		return nil, errors.Wrapf(err, "Cannot open pid lock file %q", absPidFilePath)
 	}
 
-	_, err = fmt.Fprintf(f, "%d\n", os.Getpid())
 	if _, err = fmt.Fprintf(f, "%d\n", os.Getpid()); err != nil {
 		f.Close()
 		return nil, errors.Wrapf(err, "could not write pid")
