@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -1747,4 +1748,12 @@ func createDirs(opt Options) error {
 		}
 	}
 	return nil
+}
+
+func (db *DB) CleanVlog(filesToGC []uint32, timeout time.Duration) error {
+	return db.vlog.cleanVlog(filesToGC, timeout)
+}
+
+func (db *DB) VlogDiscardStats(out io.Writer, filesToSample []uint32, timeout time.Duration) error {
+	return db.vlog.writeAllDiscardStats(out, filesToSample, timeout)
 }

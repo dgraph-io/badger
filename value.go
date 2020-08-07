@@ -1697,6 +1697,12 @@ func discardEntry(e Entry, vs y.ValueStruct, db *DB) bool {
 	return false
 }
 
+type reason struct {
+	total   float64
+	discard float64
+	count   int
+}
+
 func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace) (err error) {
 	// Update stats before exiting
 	defer func() {
@@ -1706,31 +1712,61 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 			vlog.lfDiscardStats.Unlock()
 		}
 	}()
-
-	type reason struct {
-		total   float64
-		discard float64
-		count   int
+	s := &sampler{
+		lf:          lf,
+		tr:          tr,
+		countRatio:  0.01,
+		sizeRatio:   0.1,
+		randomStart: true,
 	}
+
+	if _, err = vlog.sample(s, discardRatio); err != nil {
+		return err
+	}
+
+	if err = vlog.rewrite(lf, tr); err != nil {
+		return err
+	}
+	tr.LazyPrintf("Done rewriting.")
+	return nil
+}
+
+type sampler struct {
+	lf          *logFile
+	tr          trace.Trace
+	sizeRatio   float64
+	countRatio  float64
+	randomStart bool
+}
+
+func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, error) {
+	tr := samp.tr
+	sizePercent := samp.sizeRatio
+	countPercent := samp.countRatio
+	lf := samp.lf
 
 	fi, err := lf.fd.Stat()
 	if err != nil {
 		tr.LazyPrintf("Error while finding file size: %v", err)
 		tr.SetError()
-		return err
+		return nil, err
 	}
 
 	// Set up the sampling window sizes.
-	sizeWindow := float64(fi.Size()) * 0.1                          // 10% of the file as window.
-	sizeWindowM := sizeWindow / (1 << 20)                           // in MBs.
-	countWindow := int(float64(vlog.opt.ValueLogMaxEntries) * 0.01) // 1% of num entries.
+	sizeWindow := float64(fi.Size()) * sizePercent                          // 10% of the file as window.
+	sizeWindowM := sizeWindow / (1 << 20)                                   // in MBs.
+	countWindow := int(float64(vlog.opt.ValueLogMaxEntries) * countPercent) // 1% of num entries.
 	tr.LazyPrintf("Size window: %5.2f. Count window: %d.", sizeWindow, countWindow)
 
-	// Pick a random start point for the log.
-	skipFirstM := float64(rand.Int63n(fi.Size())) // Pick a random starting location.
-	skipFirstM -= sizeWindow                      // Avoid hitting EOF by moving back by window.
-	skipFirstM /= float64(mi)                     // Convert to MBs.
-	tr.LazyPrintf("Skip first %5.2f MB of file of size: %d MB", skipFirstM, fi.Size()/mi)
+	var skipFirstM float64
+	// Skip data only if skipData is set.
+	if samp.randomStart {
+		// Pick a random start point for the log.
+		skipFirstM := float64(rand.Int63n(fi.Size())) // Pick a random starting location.
+		skipFirstM -= sizeWindow                      // Avoid hitting EOF by moving back by window.
+		skipFirstM /= float64(mi)                     // Convert to MBs.
+		tr.LazyPrintf("Skip first %5.2f MB of file of size: %d MB", skipFirstM, fi.Size()/mi)
+	}
 	var skipped float64
 
 	var r reason
@@ -1815,22 +1851,17 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	if err != nil {
 		tr.LazyPrintf("Error while iterating for RunGC: %v", err)
 		tr.SetError()
-		return err
+		return nil, err
 	}
 	tr.LazyPrintf("Fid: %d. Skipped: %5.2fMB Num iterations: %d. Data status=%+v\n",
 		lf.fid, skipped, numIterations, r)
-
 	// If we couldn't sample at least a 1000 KV pairs or at least 75% of the window size,
 	// and what we can discard is below the threshold, we should skip the rewrite.
 	if (r.count < countWindow && r.total < sizeWindowM*0.75) || r.discard < discardRatio*r.total {
 		tr.LazyPrintf("Skipping GC on fid: %d", lf.fid)
-		return ErrNoRewrite
+		return nil, ErrNoRewrite
 	}
-	if err = vlog.rewrite(lf, tr); err != nil {
-		return err
-	}
-	tr.LazyPrintf("Done rewriting.")
-	return nil
+	return &r, nil
 }
 
 func (vlog *valueLog) waitOnGC(lc *y.Closer) {
@@ -1999,5 +2030,107 @@ func (vlog *valueLog) populateDiscardStats() error {
 	}
 	vlog.opt.Debugf("Value Log Discard stats: %v", statsMap)
 	vlog.lfDiscardStats.flushChan <- statsMap
+	return nil
+}
+
+// if len(filesToGC) == 0, clean all vlogs
+func (vlog *valueLog) cleanVlog(filesToGC []uint32, timeout time.Duration) error {
+	// Check if gc is not already running.
+	select {
+	case vlog.garbageCh <- struct{}{}:
+	default:
+		return errors.New("Gc already running")
+	}
+	defer func() { <-vlog.garbageCh }()
+
+	timeoutCh := time.After(timeout)
+
+	// Get all files.
+	if len(filesToGC) == 0 {
+		vlog.filesLock.RLock()
+		filesToGC = vlog.sortedFids()
+		vlog.filesLock.RUnlock()
+	}
+
+	tr := trace.New("Badger.ValueLog Forced", "GCF")
+	tr.SetMaxEvents(100)
+
+	head := atomic.LoadUint32(&vlog.maxFid)
+	// Start processing each fid
+	for _, fid := range filesToGC {
+		// Skip the head file.
+		if fid == head {
+			continue
+		}
+		select {
+		case <-timeoutCh:
+			return errors.New("GC Timed out")
+		default:
+		}
+		start := time.Now()
+		vlog.db.opt.Logger.Infof("Processing fid %d", fid)
+		vlog.filesLock.RLock()
+		lf, ok := vlog.filesMap[fid]
+		vlog.filesLock.RUnlock()
+		if !ok {
+			return errors.Errorf("Unknown fid %d", fid)
+		}
+		if err := vlog.rewrite(lf, tr); err != nil {
+			return errors.Wrapf(err, "file: %s", lf.fd.Name())
+		}
+		vlog.db.opt.Logger.Infof("Rewritten fid %d. Took: %s", fid, time.Since(start))
+	}
+	return nil
+}
+
+func (vlog *valueLog) writeAllDiscardStats(out io.Writer, filesToSample []uint32, timeout time.Duration) error {
+	timeoutCh := time.After(timeout)
+
+	// Get all files.
+	if len(filesToSample) == 0 {
+		vlog.filesLock.RLock()
+		filesToSample = vlog.sortedFids()
+		vlog.filesLock.RUnlock()
+	}
+
+	head := atomic.LoadUint32(&vlog.maxFid)
+
+	tr := trace.New("Badger.ValueLog Sampling", "Sampling")
+	tr.SetMaxEvents(100)
+	samp := &sampler{
+		countRatio:  1,
+		sizeRatio:   1,
+		randomStart: false,
+		tr:          tr,
+	}
+	for _, fid := range filesToSample {
+		// Skip the head file.
+		if fid == head {
+			continue
+		}
+		select {
+		case <-timeoutCh:
+			return errors.New("GC Timed out")
+		default:
+		}
+		start := time.Now()
+		vlog.db.opt.Logger.Infof("Sampling fid %d", fid)
+		vlog.filesLock.RLock()
+		lf, ok := vlog.filesMap[fid]
+		vlog.filesLock.RUnlock()
+		if !ok {
+			return errors.Errorf("Unknown fid %d", fid)
+		}
+		samp.lf = lf
+		r, err := vlog.sample(samp, 0)
+		if err != nil {
+			return errors.Wrapf(err, "file: %s", lf.fd.Name())
+		}
+
+		if out != nil {
+			fmt.Fprintf(out, "fid: %d Total: %f Discard: %f\n", lf.fid, r.total, r.discard)
+		}
+		vlog.db.opt.Logger.Infof("Sampled fid %d. Took: %s", fid, time.Since(start))
+	}
 	return nil
 }
