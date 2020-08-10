@@ -103,4 +103,5 @@ func gc(cmd *cobra.Command, args []string) error {
 	} else {
 		return db.GCVlog(fids, dur)
 	}
+	return nil
 }
