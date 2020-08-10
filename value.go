@@ -1713,11 +1713,11 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 		}
 	}()
 	s := &sampler{
-		lf:          lf,
-		tr:          tr,
-		countRatio:  0.01,
-		sizeRatio:   0.1,
-		randomStart: true,
+		lf:            lf,
+		tr:            tr,
+		countRatio:    0.01, // 1% of num entries.
+		sizeRatio:     0.1,  // 10% of the file as window.
+		fromBeginning: false,
 	}
 
 	if _, err = vlog.sample(s, discardRatio); err != nil {
@@ -1732,11 +1732,11 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 }
 
 type sampler struct {
-	lf          *logFile
-	tr          trace.Trace
-	sizeRatio   float64
-	countRatio  float64
-	randomStart bool
+	lf            *logFile
+	tr            trace.Trace
+	sizeRatio     float64
+	countRatio    float64
+	fromBeginning bool
 }
 
 func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, error) {
@@ -1753,14 +1753,14 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 	}
 
 	// Set up the sampling window sizes.
-	sizeWindow := float64(fi.Size()) * sizePercent                          // 10% of the file as window.
-	sizeWindowM := sizeWindow / (1 << 20)                                   // in MBs.
-	countWindow := int(float64(vlog.opt.ValueLogMaxEntries) * countPercent) // 1% of num entries.
+	sizeWindow := float64(fi.Size()) * sizePercent
+	sizeWindowM := sizeWindow / (1 << 20) // in MBs.
+	countWindow := int(float64(vlog.opt.ValueLogMaxEntries) * countPercent)
 	tr.LazyPrintf("Size window: %5.2f. Count window: %d.", sizeWindow, countWindow)
 
 	var skipFirstM float64
-	// Skip data only if skipData is set.
-	if samp.randomStart {
+	// Skip data only if fromBeginning is set to false. Pick a random start point.
+	if !samp.fromBeginning {
 		// Pick a random start point for the log.
 		skipFirstM := float64(rand.Int63n(fi.Size())) // Pick a random starting location.
 		skipFirstM -= sizeWindow                      // Avoid hitting EOF by moving back by window.
@@ -1793,7 +1793,7 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 		}
 		if time.Since(start) > 10*time.Second {
 			tr.LazyPrintf("Stopping sampling after 10 seconds.")
-			return errStop
+			return errors.Wrapf(errStop, "sampling timeout for:%d", lf.fid)
 		}
 		r.total += esz
 		r.count++
@@ -1825,6 +1825,7 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 			// This is still the active entry. This would need to be rewritten.
 
 		} else {
+			// Todo(ibrahim): Can this ever happen? See the else in rewrite function.
 			vlog.opt.Debugf("Reason=%+v\n", r)
 			buf, lf, err := vlog.readValueBytes(vp, s)
 			// we need to decide, whether to unlock the lock file immediately based on the
@@ -2033,7 +2034,7 @@ func (vlog *valueLog) populateDiscardStats() error {
 	return nil
 }
 
-// if len(filesToGC) == 0, clean all vlogs
+//
 func (vlog *valueLog) cleanVlog(filesToGC []uint32, timeout time.Duration) error {
 	// Check if gc is not already running.
 	select {
@@ -2083,7 +2084,15 @@ func (vlog *valueLog) cleanVlog(filesToGC []uint32, timeout time.Duration) error
 	return nil
 }
 
-func (vlog *valueLog) writeAllDiscardStats(out io.Writer, filesToSample []uint32, timeout time.Duration) error {
+type sampleResult struct {
+	Fid     uint32
+	Total   float64
+	Discard float64
+}
+
+// getDiscardStats is used to collect and return the discard stats for the specified filesToSample. If filesToSample is set to nil, all files will be sampled. The timeout determines the timeout for sampling operation.
+func (vlog *valueLog) getDiscardStats(
+	filesToSample []uint32, timeout time.Duration) ([]sampleResult, error) {
 	timeoutCh := time.After(timeout)
 
 	// Get all files.
@@ -2098,39 +2107,41 @@ func (vlog *valueLog) writeAllDiscardStats(out io.Writer, filesToSample []uint32
 	tr := trace.New("Badger.ValueLog Sampling", "Sampling")
 	tr.SetMaxEvents(100)
 	samp := &sampler{
-		countRatio:  1,
-		sizeRatio:   1,
-		randomStart: false,
-		tr:          tr,
+		countRatio:    1,    // 100% of entries in the file.
+		sizeRatio:     1,    // 100% of the file size.
+		fromBeginning: true, // Start reading from the start.
+		tr:            tr,
 	}
+
+	var result []sampleResult
 	for _, fid := range filesToSample {
-		// Skip the head file.
+		// Skip the head file since it is actively being written.
 		if fid == head {
 			continue
 		}
 		select {
 		case <-timeoutCh:
-			return errors.New("GC Timed out")
+			return nil, errors.New("GC Timed out")
 		default:
 		}
 		start := time.Now()
 		vlog.db.opt.Logger.Infof("Sampling fid %d", fid)
+
 		vlog.filesLock.RLock()
 		lf, ok := vlog.filesMap[fid]
 		vlog.filesLock.RUnlock()
 		if !ok {
-			return errors.Errorf("Unknown fid %d", fid)
+			return nil, errors.Errorf("Unknown fid %d", fid)
 		}
 		samp.lf = lf
+		// Set dicard ratio to 0 so that sample never returns a ErrNoRewrite error.
 		r, err := vlog.sample(samp, 0)
 		if err != nil {
-			return errors.Wrapf(err, "file: %s", lf.fd.Name())
+			return nil, errors.Wrapf(err, "file: %s", lf.fd.Name())
 		}
 
-		if out != nil {
-			fmt.Fprintf(out, "fid: %d Total: %f Discard: %f\n", lf.fid, r.total, r.discard)
-		}
+		result = append(result, sampleResult{Fid: fid, Total: r.total, Discard: r.discard})
 		vlog.db.opt.Logger.Infof("Sampled fid %d. Took: %s", fid, time.Since(start))
 	}
-	return nil
+	return result, nil
 }
