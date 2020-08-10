@@ -65,6 +65,8 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*d
 				return nil, errors.Wrapf(err, "could not set exclusive mode bit")
 			}
 		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
 	}
 	f, err := os.OpenFile(absPidFilePath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0666|os.ModeExclusive)
 	if err != nil {
