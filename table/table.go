@@ -247,7 +247,8 @@ func (b *block) decrRef() {
 			manual.Free(b.data)
 		}
 		num := atomic.AddInt32(&numBlocks, -1)
-		fmt.Printf("Num Blocks: %d. Num Allocs: %d\n", num, atomic.LoadInt32(&manual.NumAllocs))
+		allocs := float64(atomic.LoadInt64(&manual.NumAllocs)) / float64((1 << 20))
+		fmt.Printf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, allocs)
 		// blockPool.Put(&b.data)
 	}
 	y.AssertTrue(atomic.LoadInt32(&b.ref) >= 0)
