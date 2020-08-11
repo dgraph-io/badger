@@ -6,7 +6,10 @@ package manual
 
 // #include <stdlib.h>
 import "C"
-import "unsafe"
+import (
+	"sync/atomic"
+	"unsafe"
+)
 
 // The go:linkname directives provides backdoor access to private functions in
 // the runtime. Below we're accessing the throw function.
@@ -17,6 +20,8 @@ func throw(s string)
 // TODO(peter): Rather than relying an C malloc/free, we could fork the Go
 // runtime page allocator and allocate large chunks of memory using mmap or
 // similar.
+
+var NumAllocs int32
 
 // New allocates a slice of size n. The returned slice is from manually managed
 // memory and MUST be released by calling Free. Failure to do so will result in
@@ -44,6 +49,7 @@ func Calloc(n int) []byte {
 		// it cannot allocate memory.
 		throw("out of memory")
 	}
+	atomic.AddInt32(&NumAllocs, 1)
 	// Interpret the C pointer as a pointer to a Go array, then slice.
 	return (*[MaxArrayLen]byte)(unsafe.Pointer(ptr))[:n:n]
 }
@@ -56,5 +62,6 @@ func Free(b []byte) {
 		}
 		ptr := unsafe.Pointer(&b[0])
 		C.free(ptr)
+		atomic.AddInt32(&NumAllocs, -1)
 	}
 }

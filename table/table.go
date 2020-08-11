@@ -242,9 +242,12 @@ func (b *block) decrRef() {
 	// In case of an uncompressed block, the []byte is a reference to the
 	// table.mmap []byte slice. Any attempt to write data to the mmap []byte
 	// will lead to SEGFAULT.
-	if atomic.AddInt32(&b.ref, -1) == 0 && b.freeMe {
-		manual.Free(b.data)
-		fmt.Printf("freeing up %p. Num Blocks: %d\n", b.data, atomic.AddInt32(&numBlocks, -1))
+	if atomic.AddInt32(&b.ref, -1) == 0 {
+		if b.freeMe {
+			manual.Free(b.data)
+		}
+		num := atomic.AddInt32(&numBlocks, -1)
+		fmt.Printf("Num Blocks: %d. Num Allocs: %d\n", num, atomic.LoadInt32(&manual.NumAllocs))
 		// blockPool.Put(&b.data)
 	}
 	y.AssertTrue(atomic.LoadInt32(&b.ref) >= 0)
@@ -533,7 +536,9 @@ func (t *Table) block(idx int) (*block, error) {
 		offset: int(ko.Offset),
 		ref:    1,
 	}
+	defer blk.decrRef() // Deal with any errors, where blk would not be returned.
 	atomic.AddInt32(&numBlocks, 1)
+
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
 		return nil, errors.Wrapf(err,
@@ -593,11 +598,17 @@ func (t *Table) block(idx int) (*block, error) {
 		// new block with ref=1.
 		y.AssertTrue(blk.incrRef())
 
+		// Manish: Set is not guaranteed to actually tell you whether block went into cache or not.
+		// All it is telling you is that Cache has pushed it to the setBuf channel. The policy can
+		// still reject the block. So, perhaps change the policy to call eviction handler, if it
+		// rejects the block.
+
 		// Decrement the block ref if we could not insert it in the cache.
 		if !t.opt.Cache.Set(key, blk, blk.size()) {
 			blk.decrRef()
 		}
 	}
+	blk.incrRef()
 	return blk, nil
 }
 
@@ -718,7 +729,7 @@ func (t *Table) VerifyChecksum() error {
 			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
 				t.Filename(), i, os.Offset)
 		}
-		b.incrRef()
+		// We should not call incrRef here, because the block already has one ref when created.
 		defer b.decrRef()
 		// OnBlockRead or OnTableAndBlockRead, we don't need to call verify checksum
 		// on block, verification would be done while reading block itself.
@@ -730,7 +741,6 @@ func (t *Table) VerifyChecksum() error {
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -794,7 +804,6 @@ func NewFilename(id uint64, dir string) string {
 // decompress decompresses the data stored in a block.
 func (t *Table) decompress(b *block) error {
 	var dst []byte
-	var addr *byte
 	var err error
 
 	switch t.opt.Compression {
@@ -804,7 +813,6 @@ func (t *Table) decompress(b *block) error {
 	case options.Snappy:
 		if sz, err := snappy.DecodedLen(b.data); err == nil {
 			dst = manual.Calloc(sz)
-			addr = &dst[0]
 		}
 		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {
@@ -812,8 +820,7 @@ func (t *Table) decompress(b *block) error {
 			return errors.Wrap(err, "failed to decompress")
 		}
 	case options.ZSTD:
-		dst = manual.Calloc(len(b.data) * 3) // We have to guess.
-		addr = &dst[0]
+		dst = manual.Calloc(len(b.data) * 4) // We have to guess.
 		b.data, err = y.ZSTDDecompress(dst, b.data)
 		if err != nil {
 			manual.Free(dst)
@@ -823,7 +830,7 @@ func (t *Table) decompress(b *block) error {
 		return errors.New("Unsupported compression type")
 	}
 
-	if len(b.data) > 0 && addr != &b.data[0] {
+	if len(b.data) > 0 && len(dst) > 0 && &dst[0] != &b.data[0] {
 		manual.Free(dst)
 	} else {
 		b.freeMe = true
