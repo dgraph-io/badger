@@ -471,7 +471,7 @@ func (b *Builder) encrypt(data []byte, viaC bool) ([]byte, error) {
 	needSz := len(data) + len(iv)
 	var dst []byte
 	if viaC {
-		dst = manual.New(needSz)
+		dst = manual.Calloc(needSz)
 	} else {
 		dst = make([]byte, needSz)
 	}
@@ -516,11 +516,11 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 		return data, nil
 	case options.Snappy:
 		sz := snappy.MaxEncodedLen(len(data))
-		dst := manual.New(sz)
+		dst := manual.Calloc(sz)
 		return snappy.Encode(dst, data), nil
 	case options.ZSTD:
 		sz := zstd.CompressBound(len(data))
-		dst := manual.New(sz)
+		dst := manual.Calloc(sz)
 		return y.ZSTDCompress(dst, data, b.opt.ZSTDCompressionLevel)
 	}
 	return nil, errors.New("Unsupported compression type")

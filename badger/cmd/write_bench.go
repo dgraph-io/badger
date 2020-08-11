@@ -17,7 +17,6 @@
 package cmd
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"log"
@@ -309,29 +308,29 @@ func reportStats(c *y.Closer, db *badger.DB) {
 		case <-c.HasBeenClosed():
 			return
 		case <-t.C:
-			txn := db.NewTransaction(false)
-			defer txn.Discard()
+			// txn := db.NewTransaction(false)
+			// defer txn.Discard()
 
-			iopt := badger.DefaultIteratorOptions
-			iopt.AllVersions = true
-			iopt.InternalAccess = true
+			// iopt := badger.DefaultIteratorOptions
+			// iopt.AllVersions = true
+			// iopt.InternalAccess = true
 
-			it := txn.NewIterator(iopt)
-			defer it.Close()
-			for it.Rewind(); it.Valid(); it.Next() {
-				i := it.Item()
-				if bytes.HasPrefix(i.Key(), []byte("!badger!")) {
-					internalKeyCount++
-				}
-				if bytes.HasPrefix(i.Key(), []byte("!badger!Move")) {
-					moveKeyCount++
-				}
-				if i.IsDeletedOrExpired() {
-					invalidKeyCount++
-				} else {
-					validKeyCount++
-				}
-			}
+			// it := txn.NewIterator(iopt)
+			// defer it.Close()
+			// for it.Rewind(); it.Valid(); it.Next() {
+			// 	i := it.Item()
+			// 	if bytes.HasPrefix(i.Key(), []byte("!badger!")) {
+			// 		internalKeyCount++
+			// 	}
+			// 	if bytes.HasPrefix(i.Key(), []byte("!badger!Move")) {
+			// 		moveKeyCount++
+			// 	}
+			// 	if i.IsDeletedOrExpired() {
+			// 		invalidKeyCount++
+			// 	} else {
+			// 		validKeyCount++
+			// 	}
+			// }
 
 			// fetch directory contents
 			if showDir {

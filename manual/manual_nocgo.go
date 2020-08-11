@@ -10,7 +10,7 @@ package manual
 // compilation).
 
 // New allocates a slice of size n.
-func New(n int) []byte {
+func Calloc(n int) []byte {
 	return make([]byte, n)
 }
 

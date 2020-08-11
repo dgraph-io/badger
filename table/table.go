@@ -204,6 +204,8 @@ type block struct {
 	ref               int32
 }
 
+var numBlocks int32
+
 // incrRef increments the ref of a block and return a bool indicating if the
 // increment was successful. A true value indicates that the block can be used.
 func (b *block) incrRef() bool {
@@ -242,6 +244,7 @@ func (b *block) decrRef() {
 	// will lead to SEGFAULT.
 	if atomic.AddInt32(&b.ref, -1) == 0 && b.freeMe {
 		manual.Free(b.data)
+		fmt.Printf("freeing up %p. Num Blocks: %d\n", b.data, atomic.AddInt32(&numBlocks, -1))
 		// blockPool.Put(&b.data)
 	}
 	y.AssertTrue(atomic.LoadInt32(&b.ref) >= 0)
@@ -530,6 +533,7 @@ func (t *Table) block(idx int) (*block, error) {
 		offset: int(ko.Offset),
 		ref:    1,
 	}
+	atomic.AddInt32(&numBlocks, 1)
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
 		return nil, errors.Wrapf(err,
@@ -799,7 +803,7 @@ func (t *Table) decompress(b *block) error {
 		return nil
 	case options.Snappy:
 		if sz, err := snappy.DecodedLen(b.data); err == nil {
-			dst = manual.New(sz)
+			dst = manual.Calloc(sz)
 			addr = &dst[0]
 		}
 		b.data, err = snappy.Decode(dst, b.data)
@@ -808,7 +812,7 @@ func (t *Table) decompress(b *block) error {
 			return errors.Wrap(err, "failed to decompress")
 		}
 	case options.ZSTD:
-		dst = manual.New(len(b.data) * 3) // We have to guess.
+		dst = manual.Calloc(len(b.data) * 3) // We have to guess.
 		addr = &dst[0]
 		b.data, err = y.ZSTDDecompress(dst, b.data)
 		if err != nil {
