@@ -35,6 +35,7 @@ import (
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
+	"github.com/dgraph-io/badger/v2/manual"
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
@@ -199,7 +200,7 @@ type block struct {
 	entriesIndexStart int      // start index of entryOffsets list
 	entryOffsets      []uint32 // used to binary search an entry in the block.
 	chkLen            int      // checksum length.
-	isReusable        bool     // used to determine if the blocked should be reused.
+	freeMe            bool     // used to determine if the blocked should be reused.
 	ref               int32
 }
 
@@ -239,8 +240,9 @@ func (b *block) decrRef() {
 	// In case of an uncompressed block, the []byte is a reference to the
 	// table.mmap []byte slice. Any attempt to write data to the mmap []byte
 	// will lead to SEGFAULT.
-	if atomic.AddInt32(&b.ref, -1) == 0 && b.isReusable {
-		blockPool.Put(&b.data)
+	if atomic.AddInt32(&b.ref, -1) == 0 && b.freeMe {
+		manual.Free(b.data)
+		// blockPool.Put(&b.data)
 	}
 	y.AssertTrue(atomic.LoadInt32(&b.ref) >= 0)
 }
@@ -749,7 +751,13 @@ func (t *Table) decrypt(data []byte) ([]byte, error) {
 	iv := data[len(data)-aes.BlockSize:]
 	// Rest all bytes are data.
 	data = data[:len(data)-aes.BlockSize]
-	return y.XORBlock(data, t.opt.DataKey.Data, iv)
+
+	// TODO: Check if this is done via Calloc. Otherwise, we'll have a memory leak.
+	dst := make([]byte, len(data))
+	if err := y.XORBlock(dst, data, t.opt.DataKey.Data, iv); err != nil {
+		return nil, errors.Wrapf(err, "while decrypt")
+	}
+	return dst, nil
 }
 
 // ParseFileID reads the file id out of a filename.
@@ -781,26 +789,40 @@ func NewFilename(id uint64, dir string) string {
 
 // decompress decompresses the data stored in a block.
 func (t *Table) decompress(b *block) error {
+	var dst []byte
+	var addr *byte
 	var err error
+
 	switch t.opt.Compression {
 	case options.None:
 		// Nothing to be done here.
+		return nil
 	case options.Snappy:
-		dst := blockPool.Get().(*[]byte)
-		b.data, err = snappy.Decode(*dst, b.data)
+		if sz, err := snappy.DecodedLen(b.data); err == nil {
+			dst = manual.New(sz)
+			addr = &dst[0]
+		}
+		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {
+			manual.Free(dst)
 			return errors.Wrap(err, "failed to decompress")
 		}
-		b.isReusable = true
 	case options.ZSTD:
-		dst := blockPool.Get().(*[]byte)
-		b.data, err = y.ZSTDDecompress(*dst, b.data)
+		dst = manual.New(len(b.data) * 3) // We have to guess.
+		addr = &dst[0]
+		b.data, err = y.ZSTDDecompress(dst, b.data)
 		if err != nil {
+			manual.Free(dst)
 			return errors.Wrap(err, "failed to decompress")
 		}
-		b.isReusable = true
 	default:
 		return errors.New("Unsupported compression type")
+	}
+
+	if len(b.data) > 0 && addr != &b.data[0] {
+		manual.Free(dst)
+	} else {
+		b.freeMe = true
 	}
 	return nil
 }

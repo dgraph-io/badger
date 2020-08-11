@@ -23,11 +23,13 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/DataDog/zstd"
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
+	"github.com/dgraph-io/badger/v2/manual"
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
@@ -118,33 +120,32 @@ func NewTableBuilder(opts Options) *Builder {
 	return b
 }
 
-var blockPool = &sync.Pool{
-	New: func() interface{} {
-		// Create 5 Kb blocks even when the default size of blocks is 4 KB. The
-		// ZSTD decompresion library increases the buffer by 2X if it's not big
-		// enough. Using a 5 KB block instead of a 4 KB one avoids the
-		// unncessary 2X allocation by the decompression library.
-		b := make([]byte, 5<<10)
-		return &b
-	},
-}
+// var blockPool = &sync.Pool{
+// 	New: func() interface{} {
+// 		// Create 5 Kb blocks even when the default size of blocks is 4 KB. The
+// 		// ZSTD decompresion library increases the buffer by 2X if it's not big
+// 		// enough. Using a 5 KB block instead of a 4 KB one avoids the
+// 		// unncessary 2X allocation by the decompression library.
+// 		b := make([]byte, 5<<10)
+// 		return &b
+// 	},
+// }
 
 func (b *Builder) handleBlock() {
 	defer b.wg.Done()
+
+	doCompress := b.opt.Compression != options.None
 	for item := range b.blockChan {
 		// Extract the block.
 		blockBuf := item.data[item.start:item.end]
-		var dst *[]byte
 		// Compress the block.
-		if b.opt.Compression != options.None {
+		if doCompress {
 			var err error
-			dst = blockPool.Get().(*[]byte)
-
-			blockBuf, err = b.compressData(*dst, blockBuf)
+			blockBuf, err = b.compressData(blockBuf)
 			y.Check(err)
 		}
 		if b.shouldEncrypt() {
-			eBlock, err := b.encrypt(blockBuf)
+			eBlock, err := b.encrypt(blockBuf, doCompress)
 			y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
 			blockBuf = eBlock
 		}
@@ -167,8 +168,8 @@ func (b *Builder) handleBlock() {
 		// Fix the boundary of the block.
 		item.end = item.start + uint32(len(blockBuf))
 
-		if dst != nil {
-			blockPool.Put(dst)
+		if doCompress {
+			manual.Free(blockBuf)
 		}
 	}
 }
@@ -420,7 +421,7 @@ func (b *Builder) Finish() []byte {
 	y.Check(err)
 
 	if b.shouldEncrypt() {
-		index, err = b.encrypt(index)
+		index, err = b.encrypt(index, false)
 		y.Check(err)
 	}
 	// Write index the buffer.
@@ -462,17 +463,44 @@ func (b *Builder) DataKey() *pb.DataKey {
 
 // encrypt will encrypt the given data and appends IV to the end of the encrypted data.
 // This should be only called only after checking shouldEncrypt method.
-func (b *Builder) encrypt(data []byte) ([]byte, error) {
+func (b *Builder) encrypt(data []byte, viaC bool) ([]byte, error) {
 	iv, err := y.GenerateIV()
 	if err != nil {
 		return data, y.Wrapf(err, "Error while generating IV in Builder.encrypt")
 	}
-	data, err = y.XORBlock(data, b.DataKey().Data, iv)
-	if err != nil {
+	needSz := len(data) + len(iv)
+	var dst []byte
+	if viaC {
+		dst = manual.New(needSz)
+	} else {
+		dst = make([]byte, needSz)
+	}
+	dst = dst[:len(data)]
+
+	if err = y.XORBlock(dst, data, b.DataKey().Data, iv); err != nil {
+		if viaC {
+			manual.Free(dst)
+		}
 		return data, y.Wrapf(err, "Error while encrypting in Builder.encrypt")
 	}
-	data = append(data, iv...)
-	return data, nil
+	if viaC {
+		manual.Free(data)
+	}
+
+	y.AssertTrue(cap(dst)-len(dst) >= len(iv))
+	dst = append(dst, iv...)
+	// if !viaC || cap(data)-len(data) >= len(iv) {
+	// 	data = append(data, iv...)
+	// } else {
+	// 	// This has to be viaC.
+	// 	var buf []byte
+	// 	buf = manual.New(len(data) + len(iv))
+	// 	copy(buf, data)
+	// 	copy(buf[len(data):], iv)
+	// 	manual.Free(data)
+	// 	data = buf
+	// }
+	return dst, nil
 }
 
 // shouldEncrypt tells us whether to encrypt the data or not.
@@ -482,13 +510,17 @@ func (b *Builder) shouldEncrypt() bool {
 }
 
 // compressData compresses the given data.
-func (b *Builder) compressData(dst, data []byte) ([]byte, error) {
+func (b *Builder) compressData(data []byte) ([]byte, error) {
 	switch b.opt.Compression {
 	case options.None:
 		return data, nil
 	case options.Snappy:
+		sz := snappy.MaxEncodedLen(len(data))
+		dst := manual.New(sz)
 		return snappy.Encode(dst, data), nil
 	case options.ZSTD:
+		sz := zstd.CompressBound(len(data))
+		dst := manual.New(sz)
 		return y.ZSTDCompress(dst, data, b.opt.ZSTDCompressionLevel)
 	}
 	return nil, errors.New("Unsupported compression type")
