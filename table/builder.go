@@ -118,10 +118,13 @@ func NewTableBuilder(opts Options) *Builder {
 	return b
 }
 
-var slicePool = sync.Pool{
+var blockPool = &sync.Pool{
 	New: func() interface{} {
-		// Make 4 KB blocks for reuse.
-		b := make([]byte, 0, 4<<10)
+		// Create 5 Kb blocks even when the default size of blocks is 4 KB. The
+		// ZSTD decompresion library increases the buffer by 2X if it's not big
+		// enough. Using a 5 KB block instead of a 4 KB one avoids the
+		// unncessary 2X allocation by the decompression library.
+		b := make([]byte, 5<<10)
 		return &b
 	},
 }
@@ -135,9 +138,7 @@ func (b *Builder) handleBlock() {
 		// Compress the block.
 		if b.opt.Compression != options.None {
 			var err error
-
-			dst = slicePool.Get().(*[]byte)
-			*dst = (*dst)[:0]
+			dst = blockPool.Get().(*[]byte)
 
 			blockBuf, err = b.compressData(*dst, blockBuf)
 			y.Check(err)
@@ -167,7 +168,7 @@ func (b *Builder) handleBlock() {
 		item.end = item.start + uint32(len(blockBuf))
 
 		if dst != nil {
-			slicePool.Put(dst)
+			blockPool.Put(dst)
 		}
 	}
 }
