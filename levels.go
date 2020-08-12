@@ -541,15 +541,14 @@ nextTable:
 	// that would affect the snapshot view guarantee provided by transactions.
 	discardTs := s.kv.orc.discardAtOrBelow()
 
-	// Start generating new tables.
-	type newTableResult struct {
-		table *table.Table
-		err   error
-	}
-	resultCh := make(chan newTableResult)
 	var numBuilds, numVersions int
 	var lastKey, skipKey []byte
 	var vp valuePointer
+	var newTables []*table.Table
+	mu := new(sync.Mutex) // Guards newTables
+
+	inflightBuilders := y.NewThrottle(5)
+	y.Check(inflightBuilders.Do())
 	for it.Valid() {
 		timeStart := time.Now()
 		dk, err := s.kv.registry.latestDataKey()
@@ -646,19 +645,6 @@ nextTable:
 		// called Add() at least once, and builder is not Empty().
 		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			numKeys, numSkips, time.Since(timeStart))
-		build := func(fileID uint64) (*table.Table, error) {
-			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
-			if err != nil {
-				return nil, errors.Wrapf(err, "While opening new table: %d", fileID)
-			}
-
-			if _, err := fd.Write(builder.Finish(false)); err != nil {
-				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
-			}
-			tbl, err := table.OpenTable(fd, bopts)
-			// decrRef is added below.
-			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
-		}
 		if builder.Empty() {
 			// Cleanup builder resources:
 			builder.Finish(false)
@@ -667,49 +653,56 @@ nextTable:
 		}
 		numBuilds++
 		fileID := s.reserveFileID()
+		if err := inflightBuilders.Do(); err != nil {
+			// Can't return from here, until I decrRef all the tables that I built so far.
+			break
+		}
 		go func(builder *table.Builder) {
 			defer builder.Close()
-			var (
-				tbl *table.Table
-				err error
-			)
+
+			build := func(fileID uint64) (*table.Table, error) {
+				fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
+				if err != nil {
+					return nil, errors.Wrapf(err, "While opening new table: %d", fileID)
+				}
+
+				if _, err := fd.Write(builder.Finish(false)); err != nil {
+					return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
+				}
+				tbl, err := table.OpenTable(fd, bopts)
+				// decrRef is added below.
+				return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
+			}
+
+			var tbl *table.Table
+			var err error
 			if s.kv.opt.InMemory {
 				tbl, err = table.OpenInMemoryTable(builder.Finish(true), fileID, &bopts)
 			} else {
 				tbl, err = build(fileID)
 			}
-			resultCh <- newTableResult{tbl, err}
+			inflightBuilders.Done(err)
+
+			mu.Lock()
+			newTables = append(newTables, tbl)
+			mu.Unlock()
 		}(builder)
 	}
 
-	newTables := make([]*table.Table, 0, 20)
-	// Wait for all table builders to finish.
-	var firstErr error
-	for x := 0; x < numBuilds; x++ {
-		res := <-resultCh
-		newTables = append(newTables, res.table)
-		if firstErr == nil {
-			firstErr = res.err
-		}
-	}
-
-	if firstErr == nil {
+	// Wait for all table builders to finish and also for newTables accumulator to finish.
+	err := inflightBuilders.Finish()
+	if err == nil {
 		// Ensure created files' directory entries are visible.  We don't mind the extra latency
 		// from not doing this ASAP after all file creation has finished because this is a
 		// background operation.
-		firstErr = s.kv.syncDir(s.kv.opt.Dir)
+		err = s.kv.syncDir(s.kv.opt.Dir)
 	}
 
-	if firstErr != nil {
+	if err != nil {
 		// An error happened.  Delete all the newly created table files (by calling DecrRef
 		// -- we're the only holders of a ref).
-		for j := 0; j < numBuilds; j++ {
-			if newTables[j] != nil {
-				_ = newTables[j].DecrRef()
-			}
-		}
-		errorReturn := errors.Wrapf(firstErr, "While running compaction for: %+v", cd)
-		return nil, nil, errorReturn
+		_ = decrRefs(newTables)
+		return nil, nil, errors.Wrapf(err, "while running compactions for: %+v", cd)
 	}
 
 	sort.Slice(newTables, func(i, j int) bool {
