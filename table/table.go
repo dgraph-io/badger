@@ -204,7 +204,7 @@ type block struct {
 	ref               int32
 }
 
-var numBlocks int32
+var NumBlocks int32
 
 // incrRef increments the ref of a block and return a bool indicating if the
 // increment was successful. A true value indicates that the block can be used.
@@ -246,9 +246,7 @@ func (b *block) decrRef() {
 		if b.freeMe {
 			manual.Free(b.data)
 		}
-		num := atomic.AddInt32(&numBlocks, -1)
-		allocs := float64(atomic.LoadInt64(&manual.NumAllocs)) / float64((1 << 20))
-		fmt.Printf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, allocs)
+		atomic.AddInt32(&NumBlocks, -1)
 		// blockPool.Put(&b.data)
 	}
 	y.AssertTrue(atomic.LoadInt32(&b.ref) >= 0)
@@ -538,7 +536,7 @@ func (t *Table) block(idx int) (*block, error) {
 		ref:    1,
 	}
 	defer blk.decrRef() // Deal with any errors, where blk would not be returned.
-	atomic.AddInt32(&numBlocks, 1)
+	atomic.AddInt32(&NumBlocks, 1)
 
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {

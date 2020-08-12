@@ -364,9 +364,9 @@ func reportStats(c *y.Closer, db *badger.DB) {
 			fmt.Printf("Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
 				"entries written: %d, speed: %d/sec, gcSuccess: %d\n", y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate, gcSuccess)
-			fmt.Printf("Valid Keys Count: %d\nInvalid Keys Count: %d\nMove Keys Count: %d\n"+
-				"Internal Keys Count: %d\n", validKeyCount, invalidKeyCount, moveKeyCount,
-				internalKeyCount)
+			// fmt.Printf("Valid Keys Count: %d\nInvalid Keys Count: %d\nMove Keys Count: %d\n"+
+			// 	"Internal Keys Count: %d\n", validKeyCount, invalidKeyCount, moveKeyCount,
+			// 	internalKeyCount)
 		}
 	}
 }
