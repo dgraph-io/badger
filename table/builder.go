@@ -98,7 +98,7 @@ func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
 		// Additional 5 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
-		buf:        make([]byte, opts.TableSize+5*MB),
+		buf:        manual.Calloc(int(opts.TableSize + 16*MB)),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
@@ -164,7 +164,9 @@ func (b *Builder) handleBlock() {
 }
 
 // Close closes the TableBuilder.
-func (b *Builder) Close() {}
+func (b *Builder) Close() {
+	manual.Free(b.buf)
+}
 
 // Empty returns whether it's empty.
 func (b *Builder) Empty() bool { return b.sz == 0 }
@@ -227,9 +229,12 @@ func (b *Builder) grow(n uint32) {
 	if n < l/2 {
 		n = l / 2
 	}
+	newBuf := manual.Calloc(int(l + n))
+	y.AssertTrue(uint32(len(newBuf)) == l+n)
+
 	b.bufLock.Lock()
-	newBuf := make([]byte, l+n)
 	copy(newBuf, b.buf)
+	manual.Free(b.buf)
 	b.buf = newBuf
 	b.bufLock.Unlock()
 }
@@ -365,7 +370,7 @@ The table structure looks like
 +---------+------------+-----------+---------------+
 */
 // In case the data is encrypted, the "IV" is added to the end of the index.
-func (b *Builder) Finish() []byte {
+func (b *Builder) Finish(allocate bool) []byte {
 	if b.opt.BloomFalsePositive > 0 {
 		bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePositive)
 		for _, h := range b.keyHashes {
@@ -418,6 +423,10 @@ func (b *Builder) Finish() []byte {
 	b.append(y.U32ToBytes(uint32(len(index))))
 
 	b.writeChecksum(index)
+
+	if allocate {
+		return append([]byte{}, b.buf[:b.sz]...)
+	}
 	return b.buf[:b.sz]
 }
 

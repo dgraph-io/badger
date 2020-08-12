@@ -652,7 +652,7 @@ nextTable:
 				return nil, errors.Wrapf(err, "While opening new table: %d", fileID)
 			}
 
-			if _, err := fd.Write(builder.Finish()); err != nil {
+			if _, err := fd.Write(builder.Finish(false)); err != nil {
 				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 			}
 			tbl, err := table.OpenTable(fd, bopts)
@@ -661,7 +661,7 @@ nextTable:
 		}
 		if builder.Empty() {
 			// Cleanup builder resources:
-			builder.Finish()
+			builder.Finish(false)
 			builder.Close()
 			continue
 		}
@@ -674,7 +674,7 @@ nextTable:
 				err error
 			)
 			if s.kv.opt.InMemory {
-				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
+				tbl, err = table.OpenInMemoryTable(builder.Finish(true), fileID, &bopts)
 			} else {
 				tbl, err = build(fileID)
 			}
