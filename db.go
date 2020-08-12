@@ -192,6 +192,9 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 
 // Open returns a new DB object.
 func Open(opt Options) (db *DB, err error) {
+	if opt.NumCompactors < 2 {
+		return nil, errors.New("Cannot have less than 2 compactors")
+	}
 	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
 		return nil, errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
 	}
@@ -528,7 +531,7 @@ func (db *DB) close() (err error) {
 	// Force Compact L0
 	// We don't need to care about cstatus since no parallel compaction is running.
 	if db.opt.CompactL0OnClose {
-		err := db.lc.doCompact(compactionPriority{level: 0, score: 1.73})
+		err := db.lc.doCompact(173, compactionPriority{level: 0, score: 1.73})
 		switch err {
 		case errFillTables:
 			// This error only means that there might be enough tables to do a compaction. So, we
@@ -1455,7 +1458,7 @@ func (db *DB) Flatten(workers int) error {
 		errCh := make(chan error, 1)
 		for i := 0; i < workers; i++ {
 			go func() {
-				errCh <- db.lc.doCompact(cp)
+				errCh <- db.lc.doCompact(174, cp)
 			}()
 		}
 		var success int

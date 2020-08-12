@@ -29,6 +29,7 @@ import (
 
 	"golang.org/x/net/trace"
 
+	"github.com/dgraph-io/badger/v2/manual"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
@@ -306,7 +307,7 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 					// function in logs, and forces a compaction.
 					dropPrefixes: prefixes,
 				}
-				if err := s.doCompact(cp); err != nil {
+				if err := s.doCompact(175, cp); err != nil {
 					opt.Warningf("While compacting level 0: %v", err)
 					return nil
 				}
@@ -366,11 +367,13 @@ func (s *levelsController) startCompact(lc *y.Closer) {
 	n := s.kv.opt.NumCompactors
 	lc.AddRunning(n - 1)
 	for i := 0; i < n; i++ {
-		go s.runWorker(lc)
+		// The worker with id=0 is dedicated to L0 and L1. This is not counted
+		// towards the user specified NumCompactors.
+		go s.runCompactor(i, lc)
 	}
 }
 
-func (s *levelsController) runWorker(lc *y.Closer) {
+func (s *levelsController) runCompactor(id int, lc *y.Closer) {
 	defer lc.Done()
 
 	randomDelay := time.NewTimer(time.Duration(rand.Int31n(1000)) * time.Millisecond)
@@ -381,7 +384,7 @@ func (s *levelsController) runWorker(lc *y.Closer) {
 		return
 	}
 
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
@@ -391,7 +394,15 @@ func (s *levelsController) runWorker(lc *y.Closer) {
 			prios := s.pickCompactLevels()
 		loop:
 			for _, p := range prios {
-				err := s.doCompact(p)
+				if id == 0 && p.level > 1 {
+					// If I'm ID zero, I only compact L0 and L1.
+					continue
+				}
+				if id != 0 && p.level <= 1 {
+					// If I'm ID non-zero, I do NOT compact L0 and L1.
+					continue
+				}
+				err := s.doCompact(id, p)
 				switch err {
 				case nil:
 					break loop
@@ -453,10 +464,11 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 			prios = append(prios, pri)
 		}
 	}
-	// We used to sort compaction priorities based on the score. But, we
-	// decided to compact based on the level, not the priority. So, upper
-	// levels (level 0, level 1, etc) always get compacted first, before the
-	// lower levels -- this allows us to avoid stalls.
+	// We should continue to sort the compaction priorities by score. Now that we have a dedicated
+	// compactor for L0 and L1, we don't need to sort by level here.
+	sort.Slice(prios, func(i, j int) bool {
+		return prios[i].score > prios[j].score
+	})
 	return prios
 }
 
@@ -548,7 +560,6 @@ nextTable:
 	mu := new(sync.Mutex) // Guards newTables
 
 	inflightBuilders := y.NewThrottle(5)
-	y.Check(inflightBuilders.Do())
 	for it.Valid() {
 		timeStart := time.Now()
 		dk, err := s.kv.registry.latestDataKey()
@@ -685,6 +696,9 @@ nextTable:
 
 			mu.Lock()
 			newTables = append(newTables, tbl)
+			num := atomic.LoadInt32(&table.NumBlocks)
+			allocs := float64(atomic.LoadInt64(&manual.NumAllocs)) / float64((1 << 20))
+			fmt.Printf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, allocs)
 			mu.Unlock()
 		}(builder)
 	}
@@ -956,7 +970,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 var errFillTables = errors.New("Unable to fill tables")
 
 // doCompact picks some table on level l and compacts it away to the next level.
-func (s *levelsController) doCompact(p compactionPriority) error {
+func (s *levelsController) doCompact(id int, p compactionPriority) error {
 	l := p.level
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
 
@@ -969,7 +983,7 @@ func (s *levelsController) doCompact(p compactionPriority) error {
 	cd.elog.SetMaxEvents(100)
 	defer cd.elog.Finish()
 
-	s.kv.opt.Infof("Got compaction priority: %+v", p)
+	s.kv.opt.Debugf("[Compactor: %d] Attempting to run compaction: %+v", id, p)
 
 	// While picking tables to be compacted, both levels' tables are expected to
 	// remain unchanged.
@@ -985,16 +999,17 @@ func (s *levelsController) doCompact(p compactionPriority) error {
 	}
 	defer s.cstatus.delete(cd) // Remove the ranges from compaction status.
 
-	s.kv.opt.Infof("Running for level: %d\n", cd.thisLevel.level)
+	s.kv.opt.Infof("[Compactor: %d] Running compaction: %+v for level: %d\n",
+		id, p, cd.thisLevel.level)
 	s.cstatus.toLog(cd.elog)
 	if err := s.runCompactDef(l, cd); err != nil {
 		// This compaction couldn't be done successfully.
-		s.kv.opt.Warningf("LOG Compact FAILED with error: %+v: %+v", err, cd)
+		s.kv.opt.Warningf("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)
 		return err
 	}
 
 	s.cstatus.toLog(cd.elog)
-	s.kv.opt.Infof("Compaction for level: %d DONE", cd.thisLevel.level)
+	s.kv.opt.Infof("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
 	return nil
 }
 
@@ -1018,7 +1033,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time
 		{
-			s.kv.opt.Debugf("STALLED STALLED STALLED: %v\n", time.Since(s.lastUnstalled))
+			s.kv.opt.Infof("STALLED STALLED STALLED: %v\n", time.Since(s.lastUnstalled))
 			s.cstatus.RLock()
 			for i := 0; i < s.kv.opt.MaxLevels; i++ {
 				s.kv.opt.Debugf("level=%d. Status=%s Size=%d\n",
