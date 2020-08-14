@@ -49,7 +49,7 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 		panic(err)
 	}
 
-	if _, err = fd.Write(b.Finish()); err != nil {
+	if _, err = fd.Write(b.Finish(false)); err != nil {
 		panic(err)
 	}
 	tab, err := table.OpenTable(fd, opts)
@@ -740,7 +740,7 @@ func createEmptyTable(db *DB) *table.Table {
 	b.Add(y.KeyWithTs([]byte("foo"), 1), y.ValueStruct{}, 0)
 
 	// Open table in memory to avoid adding changes to manifest file.
-	tab, err := table.OpenInMemoryTable(b.Finish(), db.lc.reserveFileID(), &opts)
+	tab, err := table.OpenInMemoryTable(b.Finish(true), db.lc.reserveFileID(), &opts)
 	if err != nil {
 		panic(err)
 	}
@@ -749,52 +749,6 @@ func createEmptyTable(db *DB) *table.Table {
 }
 
 func TestL0Stall(t *testing.T) {
-	test := func(t *testing.T, opt *Options) {
-		runBadgerTest(t, opt, func(t *testing.T, db *DB) {
-			db.lc.levels[0].Lock()
-			// Add NumLevelZeroTableStall+1 number of tables to level 0. This would fill up level
-			// zero and all new additions are expected to stall if L0 is in memory.
-			for i := 0; i < opt.NumLevelZeroTablesStall+1; i++ {
-				db.lc.levels[0].tables = append(db.lc.levels[0].tables, createEmptyTable(db))
-			}
-			db.lc.levels[0].Unlock()
-
-			timeout := time.After(5 * time.Second)
-			done := make(chan bool)
-
-			go func() {
-				tab := createEmptyTable(db)
-				require.NoError(t, db.lc.addLevel0Table(tab))
-				tab.DecrRef()
-				done <- true
-			}()
-			// Let it stall for a second.
-			time.Sleep(time.Second)
-
-			select {
-			case <-timeout:
-				if opt.KeepL0InMemory {
-					t.Log("Timeout triggered")
-					// Mark this test as successful since L0 is in memory and the
-					// addition of new table to L0 is supposed to stall.
-
-					// Remove tables from level 0 so that the stalled
-					// compaction can make progress. This does not have any
-					// effect on the test. This is done so that the goroutine
-					// stuck on addLevel0Table can make progress and end.
-					db.lc.levels[0].Lock()
-					db.lc.levels[0].tables = nil
-					db.lc.levels[0].Unlock()
-					<-done
-				} else {
-					t.Fatal("Test didn't finish in time")
-				}
-			case <-done:
-				// The test completed before 5 second timeout. Mark it as successful.
-			}
-		})
-	}
-
 	opt := DefaultOptions("")
 	// Disable all compactions.
 	opt.NumCompactors = 0
@@ -803,13 +757,45 @@ func TestL0Stall(t *testing.T) {
 	// Addition of new tables will stall if there are 4 or more L0 tables.
 	opt.NumLevelZeroTablesStall = 4
 
-	t.Run("with KeepL0InMemory", func(t *testing.T) {
-		opt.KeepL0InMemory = true
-		test(t, &opt)
-	})
-	t.Run("with L0 on disk", func(t *testing.T) {
-		opt.KeepL0InMemory = false
-		test(t, &opt)
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		db.lc.levels[0].Lock()
+		// Add NumLevelZeroTableStall+1 number of tables to level 0. This would fill up level
+		// zero and all new additions are expected to stall if L0 is in memory.
+		for i := 0; i < opt.NumLevelZeroTablesStall+1; i++ {
+			db.lc.levels[0].tables = append(db.lc.levels[0].tables, createEmptyTable(db))
+		}
+		db.lc.levels[0].Unlock()
+
+		timeout := time.After(5 * time.Second)
+		done := make(chan bool)
+
+		go func() {
+			tab := createEmptyTable(db)
+			require.NoError(t, db.lc.addLevel0Table(tab))
+			tab.DecrRef()
+			done <- true
+		}()
+		// Let it stall for a second.
+		time.Sleep(time.Second)
+
+		select {
+		case <-timeout:
+			t.Log("Timeout triggered")
+			// Mark this test as successful since L0 is in memory and the
+			// addition of new table to L0 is supposed to stall.
+
+			// Remove tables from level 0 so that the stalled
+			// compaction can make progress. This does not have any
+			// effect on the test. This is done so that the goroutine
+			// stuck on addLevel0Table can make progress and end.
+			db.lc.levels[0].Lock()
+			db.lc.levels[0].tables = nil
+			db.lc.levels[0].Unlock()
+			<-done
+		case <-done:
+			// The test completed before 5 second timeout. Mark it as successful.
+			t.Fatal("Test did not stall")
+		}
 	})
 }
 

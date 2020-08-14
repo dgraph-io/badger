@@ -1448,7 +1448,7 @@ func (db *DB) Flatten(workers int) error {
 		errCh := make(chan error, 1)
 		for i := 0; i < workers; i++ {
 			go func() {
-				errCh <- db.lc.doCompact(174, cp)
+				errCh <- db.lc.doCompact(175, cp)
 			}()
 		}
 		var success int
