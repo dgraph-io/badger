@@ -4,7 +4,7 @@
 
 // +build !cgo
 
-package manual
+package y
 
 // Provides versions of New and Free when cgo is not available (e.g. cross
 // compilation).

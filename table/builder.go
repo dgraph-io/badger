@@ -29,7 +29,6 @@ import (
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
-	"github.com/dgraph-io/badger/v2/manual"
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
@@ -98,7 +97,7 @@ func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
 		// Additional 5 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
-		buf:        manual.Calloc(int(opts.TableSize + 16*MB)),
+		buf:        y.Calloc(int(opts.TableSize + 16*MB)),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
@@ -158,14 +157,14 @@ func (b *Builder) handleBlock() {
 		item.end = item.start + uint32(len(blockBuf))
 
 		if doCompress {
-			manual.Free(blockBuf)
+			y.Free(blockBuf)
 		}
 	}
 }
 
 // Close closes the TableBuilder.
 func (b *Builder) Close() {
-	manual.Free(b.buf)
+	y.Free(b.buf)
 }
 
 // Empty returns whether it's empty.
@@ -229,12 +228,12 @@ func (b *Builder) grow(n uint32) {
 	if n < l/2 {
 		n = l / 2
 	}
-	newBuf := manual.Calloc(int(l + n))
+	newBuf := y.Calloc(int(l + n))
 	y.AssertTrue(uint32(len(newBuf)) == l+n)
 
 	b.bufLock.Lock()
 	copy(newBuf, b.buf)
-	manual.Free(b.buf)
+	y.Free(b.buf)
 	b.buf = newBuf
 	b.bufLock.Unlock()
 }
@@ -469,7 +468,7 @@ func (b *Builder) encrypt(data []byte, viaC bool) ([]byte, error) {
 	needSz := len(data) + len(iv)
 	var dst []byte
 	if viaC {
-		dst = manual.Calloc(needSz)
+		dst = y.Calloc(needSz)
 	} else {
 		dst = make([]byte, needSz)
 	}
@@ -477,12 +476,12 @@ func (b *Builder) encrypt(data []byte, viaC bool) ([]byte, error) {
 
 	if err = y.XORBlock(dst, data, b.DataKey().Data, iv); err != nil {
 		if viaC {
-			manual.Free(dst)
+			y.Free(dst)
 		}
 		return data, y.Wrapf(err, "Error while encrypting in Builder.encrypt")
 	}
 	if viaC {
-		manual.Free(data)
+		y.Free(data)
 	}
 
 	y.AssertTrue(cap(dst)-len(dst) >= len(iv))
@@ -492,10 +491,10 @@ func (b *Builder) encrypt(data []byte, viaC bool) ([]byte, error) {
 	// } else {
 	// 	// This has to be viaC.
 	// 	var buf []byte
-	// 	buf = manual.New(len(data) + len(iv))
+	// 	buf = y.New(len(data) + len(iv))
 	// 	copy(buf, data)
 	// 	copy(buf[len(data):], iv)
-	// 	manual.Free(data)
+	// 	y.Free(data)
 	// 	data = buf
 	// }
 	return dst, nil
@@ -514,11 +513,11 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 		return data, nil
 	case options.Snappy:
 		sz := snappy.MaxEncodedLen(len(data))
-		dst := manual.Calloc(sz)
+		dst := y.Calloc(sz)
 		return snappy.Encode(dst, data), nil
 	case options.ZSTD:
 		sz := zstd.CompressBound(len(data))
-		dst := manual.Calloc(sz)
+		dst := y.Calloc(sz)
 		return y.ZSTDCompress(dst, data, b.opt.ZSTDCompressionLevel)
 	}
 	return nil, errors.New("Unsupported compression type")

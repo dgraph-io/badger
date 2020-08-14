@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package manual
+package y
 
 import (
 	"sync"

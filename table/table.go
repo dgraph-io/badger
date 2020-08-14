@@ -35,7 +35,6 @@ import (
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
-	"github.com/dgraph-io/badger/v2/manual"
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
@@ -244,7 +243,7 @@ func (b *block) decrRef() {
 	// will lead to SEGFAULT.
 	if atomic.AddInt32(&b.ref, -1) == 0 {
 		if b.freeMe {
-			manual.Free(b.data)
+			y.Free(b.data)
 		}
 		atomic.AddInt32(&NumBlocks, -1)
 		// blockPool.Put(&b.data)
@@ -811,18 +810,18 @@ func (t *Table) decompress(b *block) error {
 		return nil
 	case options.Snappy:
 		if sz, err := snappy.DecodedLen(b.data); err == nil {
-			dst = manual.Calloc(sz)
+			dst = y.Calloc(sz)
 		}
 		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {
-			manual.Free(dst)
+			y.Free(dst)
 			return errors.Wrap(err, "failed to decompress")
 		}
 	case options.ZSTD:
-		dst = manual.Calloc(len(b.data) * 4) // We have to guess.
+		dst = y.Calloc(len(b.data) * 4) // We have to guess.
 		b.data, err = y.ZSTDDecompress(dst, b.data)
 		if err != nil {
-			manual.Free(dst)
+			y.Free(dst)
 			return errors.Wrap(err, "failed to decompress")
 		}
 	default:
@@ -830,7 +829,7 @@ func (t *Table) decompress(b *block) error {
 	}
 
 	if len(b.data) > 0 && len(dst) > 0 && &dst[0] != &b.data[0] {
-		manual.Free(dst)
+		y.Free(dst)
 	} else {
 		b.freeMe = true
 	}
