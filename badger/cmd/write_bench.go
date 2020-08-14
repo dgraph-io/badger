@@ -71,14 +71,11 @@ var (
 	compression         bool
 	showDir             bool
 	ttlDuration         string
+	showKeysCount       bool
 
-	internalKeyCount uint32
-	moveKeyCount     uint32
-	invalidKeyCount  uint32
-	validKeyCount    uint32
-	sstCount         uint32
-	vlogCount        uint32
-	files            []string
+	sstCount  uint32
+	vlogCount uint32
+	files     []string
 
 	dropAllPeriod    string
 	dropPrefixPeriod string
@@ -133,6 +130,8 @@ func init() {
 		"TTL duration in seconds for the entries, 0 means without TTL")
 	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "5m", "GC Period.")
 	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
+	writeBenchCmd.Flags().BoolVar(&showKeysCount, "show-keys", false,
+		"If true, the report will include the keys statistics")
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
@@ -298,6 +297,42 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	return err
 }
 
+func showKeysStats(db *badger.DB) {
+	var (
+		internalKeyCount uint32
+		moveKeyCount     uint32
+		invalidKeyCount  uint32
+		validKeyCount    uint32
+	)
+
+	txn := db.NewTransaction(false)
+	defer txn.Discard()
+
+	iopt := badger.DefaultIteratorOptions
+	iopt.AllVersions = true
+	iopt.InternalAccess = true
+	it := txn.NewIterator(iopt)
+	defer it.Close()
+
+	for it.Rewind(); it.Valid(); it.Next() {
+		i := it.Item()
+		if bytes.HasPrefix(i.Key(), []byte("!badger!")) {
+			internalKeyCount++
+		}
+		if bytes.HasPrefix(i.Key(), []byte("!badger!Move")) {
+			moveKeyCount++
+		}
+		if i.IsDeletedOrExpired() {
+			invalidKeyCount++
+		} else {
+			validKeyCount++
+		}
+	}
+	fmt.Printf("Valid Keys: %d Invalid Keys: %d Move Keys:"+
+		" %d Internal Keys: %d\n", validKeyCount, invalidKeyCount,
+		moveKeyCount, internalKeyCount)
+}
+
 func reportStats(c *y.Closer, db *badger.DB) {
 	defer c.Done()
 
@@ -309,28 +344,8 @@ func reportStats(c *y.Closer, db *badger.DB) {
 		case <-c.HasBeenClosed():
 			return
 		case <-t.C:
-			txn := db.NewTransaction(false)
-			defer txn.Discard()
-
-			iopt := badger.DefaultIteratorOptions
-			iopt.AllVersions = true
-			iopt.InternalAccess = true
-
-			it := txn.NewIterator(iopt)
-			defer it.Close()
-			for it.Rewind(); it.Valid(); it.Next() {
-				i := it.Item()
-				if bytes.HasPrefix(i.Key(), []byte("!badger!")) {
-					internalKeyCount++
-				}
-				if bytes.HasPrefix(i.Key(), []byte("!badger!Move")) {
-					moveKeyCount++
-				}
-				if i.IsDeletedOrExpired() {
-					invalidKeyCount++
-				} else {
-					validKeyCount++
-				}
+			if showKeysCount {
+				showKeysStats(db)
 			}
 
 			// fetch directory contents
@@ -365,9 +380,6 @@ func reportStats(c *y.Closer, db *badger.DB) {
 			fmt.Printf("Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
 				"entries written: %d, speed: %d/sec, gcSuccess: %d\n", y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate, gcSuccess)
-			fmt.Printf("Valid Keys Count: %d\nInvalid Keys Count: %d\nMove Keys Count: %d\n"+
-				"Internal Keys Count: %d\n", validKeyCount, invalidKeyCount, moveKeyCount,
-				internalKeyCount)
 		}
 	}
 }
