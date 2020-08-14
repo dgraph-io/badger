@@ -73,13 +73,9 @@ var (
 	ttlDuration         string
 	showKeysCount       bool
 
-	internalKeyCount uint32
-	moveKeyCount     uint32
-	invalidKeyCount  uint32
-	validKeyCount    uint32
-	sstCount         uint32
-	vlogCount        uint32
-	files            []string
+	sstCount  uint32
+	vlogCount uint32
+	files     []string
 
 	dropAllPeriod    string
 	dropPrefixPeriod string
@@ -301,7 +297,14 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	return err
 }
 
-func updateKeysStats(db *badger.DB) {
+func showKeysStats(db *badger.DB) {
+	var (
+		internalKeyCount uint32
+		moveKeyCount     uint32
+		invalidKeyCount  uint32
+		validKeyCount    uint32
+	)
+
 	txn := db.NewTransaction(false)
 	defer txn.Discard()
 
@@ -325,6 +328,9 @@ func updateKeysStats(db *badger.DB) {
 			validKeyCount++
 		}
 	}
+	fmt.Printf("Valid Keys: %d Invalid Keys: %d Move Keys:"+
+		" %d Internal Keys: %d\n", validKeyCount, invalidKeyCount,
+		moveKeyCount, internalKeyCount)
 }
 
 func reportStats(c *y.Closer, db *badger.DB) {
@@ -339,10 +345,7 @@ func reportStats(c *y.Closer, db *badger.DB) {
 			return
 		case <-t.C:
 			if showKeysCount {
-				updateKeysStats(db)
-				fmt.Printf("Valid Keys Count: %d Invalid Keys Count: %d Move Keys Count:"+
-					" %d Internal Keys Count: %d\n", validKeyCount, invalidKeyCount,
-					moveKeyCount, internalKeyCount)
+				showKeysStats(db)
 			}
 
 			// fetch directory contents
