@@ -301,6 +301,32 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	return err
 }
 
+func updateKeysStats(db *badger.DB) {
+	txn := db.NewTransaction(false)
+	defer txn.Discard()
+
+	iopt := badger.DefaultIteratorOptions
+	iopt.AllVersions = true
+	iopt.InternalAccess = true
+	it := txn.NewIterator(iopt)
+	defer it.Close()
+
+	for it.Rewind(); it.Valid(); it.Next() {
+		i := it.Item()
+		if bytes.HasPrefix(i.Key(), []byte("!badger!")) {
+			internalKeyCount++
+		}
+		if bytes.HasPrefix(i.Key(), []byte("!badger!Move")) {
+			moveKeyCount++
+		}
+		if i.IsDeletedOrExpired() {
+			invalidKeyCount++
+		} else {
+			validKeyCount++
+		}
+	}
+}
+
 func reportStats(c *y.Closer, db *badger.DB) {
 	defer c.Done()
 
@@ -313,33 +339,9 @@ func reportStats(c *y.Closer, db *badger.DB) {
 			return
 		case <-t.C:
 			if showKeysCount {
-				func() {
-					txn := db.NewTransaction(false)
-					defer txn.Discard()
-
-					iopt := badger.DefaultIteratorOptions
-					iopt.AllVersions = true
-					iopt.InternalAccess = true
-					it := txn.NewIterator(iopt)
-					defer it.Close()
-
-					for it.Rewind(); it.Valid(); it.Next() {
-						i := it.Item()
-						if bytes.HasPrefix(i.Key(), []byte("!badger!")) {
-							internalKeyCount++
-						}
-						if bytes.HasPrefix(i.Key(), []byte("!badger!Move")) {
-							moveKeyCount++
-						}
-						if i.IsDeletedOrExpired() {
-							invalidKeyCount++
-						} else {
-							validKeyCount++
-						}
-					}
-				}()
-				fmt.Printf("Valid Keys Count: %d\nInvalid Keys Count: %d\nMove Keys Count:"+
-					"%d\nInternal Keys Count: %d\n", validKeyCount, invalidKeyCount,
+				updateKeysStats(db)
+				fmt.Printf("Valid Keys Count: %d Invalid Keys Count: %d Move Keys Count:"+
+					" %d Internal Keys Count: %d\n", validKeyCount, invalidKeyCount,
 					moveKeyCount, internalKeyCount)
 			}
 
