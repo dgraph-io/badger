@@ -818,7 +818,8 @@ func (t *Table) decompress(b *block) error {
 			return errors.Wrap(err, "failed to decompress")
 		}
 	case options.ZSTD:
-		dst = y.Calloc(len(b.data) * 4) // We have to guess.
+		sz := int(float64(t.opt.BlockSize) * 1.2)
+		dst = y.Calloc(sz)
 		b.data, err = y.ZSTDDecompress(dst, b.data)
 		if err != nil {
 			y.Free(dst)
