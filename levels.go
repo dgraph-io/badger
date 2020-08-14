@@ -29,7 +29,6 @@ import (
 
 	"golang.org/x/net/trace"
 
-	"github.com/dgraph-io/badger/v2/manual"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
@@ -307,7 +306,7 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 					// function in logs, and forces a compaction.
 					dropPrefixes: prefixes,
 				}
-				if err := s.doCompact(175, cp); err != nil {
+				if err := s.doCompact(174, cp); err != nil {
 					opt.Warningf("While compacting level 0: %v", err)
 					return nil
 				}
@@ -694,11 +693,16 @@ nextTable:
 			}
 			inflightBuilders.Done(err)
 
+			// If we couldn't build the table, return fast.
+			if err != nil {
+				return
+			}
+
 			mu.Lock()
 			newTables = append(newTables, tbl)
 			num := atomic.LoadInt32(&table.NumBlocks)
-			allocs := float64(atomic.LoadInt64(&manual.NumAllocs)) / float64((1 << 20))
-			fmt.Printf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, allocs)
+			allocs := float64(atomic.LoadInt64(&y.NumAllocs)) / float64((1 << 20))
+			s.kv.opt.Logger.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, allocs)
 			mu.Unlock()
 		}(builder)
 	}
