@@ -204,6 +204,12 @@ func Open(opt Options) (db *DB, err error) {
 			maxValueThreshold)
 	}
 
+	// We need a cache if KeepBlocksInCache or KeepBlockIndices is set to true.
+	if (opt.KeepBlocksInCache || opt.KeepBlockIndicesInCache) && opt.MaxCacheSize <= 0 {
+		return nil, errors.New("Cannot use MaxCacheSize=0 with KeepBlocksInCache " +
+			"or KeepBlockIndicesInCache set.")
+	}
+
 	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
 	if int64(opt.ValueThreshold) > opt.maxBatchSize {
