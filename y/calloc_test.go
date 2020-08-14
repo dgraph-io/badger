@@ -53,7 +53,7 @@ func BenchmarkAllocation(b *testing.B) {
 				if len(x) < sz {
 					x = make([]byte, sz)
 				}
-				rand.Read(x)
+				r.Read(x)
 				pool.Put(x)
 			}
 		})
@@ -66,7 +66,7 @@ func BenchmarkAllocation(b *testing.B) {
 			for pb.Next() {
 				sz := r.Intn(100) << 10
 				x := Calloc(sz)
-				rand.Read(x)
+				r.Read(x)
 				Free(x)
 			}
 		})
