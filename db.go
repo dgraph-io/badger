@@ -192,8 +192,11 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 
 // Open returns a new DB object.
 func Open(opt Options) (db *DB, err error) {
-	if opt.NumCompactors < 2 {
-		return nil, errors.New("Cannot have less than 2 compactors")
+	// It's okay to have zero compactors which will disable all compactions but
+	// we cannot have just one compactor otherwise we will end up with all data
+	// one level 2.
+	if opt.NumCompactors == 1 {
+		return nil, errors.New("Cannot have 1 compactor. Need at least 2")
 	}
 	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
 		return nil, errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
