@@ -122,7 +122,7 @@ func DefaultOptions(path string) Options {
 		Dir:                 path,
 		ValueDir:            path,
 		LevelOneSize:        256 << 20,
-		LevelSizeMultiplier: 10,
+		LevelSizeMultiplier: 15,
 		TableLoadingMode:    options.MemoryMap,
 		ValueLogLoadingMode: options.MemoryMap,
 		// table.MemoryMap to mmap() the tables.
@@ -336,7 +336,7 @@ func (opt Options) WithMaxTableSize(val int64) Options {
 // Once a level grows to be larger than this ratio allowed, the compaction process will be
 //  triggered.
 //
-// The default value of LevelSizeMultiplier is 10.
+// The default value of LevelSizeMultiplier is 15.
 func (opt Options) WithLevelSizeMultiplier(val int) Options {
 	opt.LevelSizeMultiplier = val
 	return opt
