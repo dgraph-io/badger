@@ -126,12 +126,12 @@ func init() {
 	writeBenchCmd.Flags().BoolVar(&showDir, "show-dir", false,
 		"If true, the report will include the directory contents")
 	writeBenchCmd.Flags().StringVar(&dropAllPeriod, "dropall", "0s",
-		"Period of dropping all. If 0, doesn't drops all.")
+		"If set, run dropAll periodically over given duration.")
 	writeBenchCmd.Flags().StringVar(&dropPrefixPeriod, "drop-prefix", "0s",
-		"Period of dropping by random prefixes. If 0, doesn't drops by prefix.")
+		"If set, drop random prefixes periodically over given duration.")
 	writeBenchCmd.Flags().StringVar(&ttlDuration, "entry-ttl", "0s",
 		"TTL duration in seconds for the entries, 0 means without TTL")
-	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "5m", "GC Period.")
+	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "0", "GC Period.")
 	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
 }
 
@@ -376,6 +376,10 @@ func runGC(c *y.Closer, db *badger.DB) {
 	defer c.Done()
 	period, err := time.ParseDuration(gcPeriod)
 	y.Check(err)
+	if period == 0 {
+		return
+	}
+
 	t := time.NewTicker(period)
 	defer t.Stop()
 	for {
@@ -394,7 +398,6 @@ func runGC(c *y.Closer, db *badger.DB) {
 
 func dropAll(c *y.Closer, db *badger.DB) {
 	defer c.Done()
-
 	dropPeriod, err := time.ParseDuration(dropAllPeriod)
 	y.Check(err)
 	if dropPeriod == 0 {
@@ -426,7 +429,6 @@ func dropAll(c *y.Closer, db *badger.DB) {
 
 func dropPrefix(c *y.Closer, db *badger.DB) {
 	defer c.Done()
-
 	dropPeriod, err := time.ParseDuration(dropPrefixPeriod)
 	y.Check(err)
 	if dropPeriod == 0 {
