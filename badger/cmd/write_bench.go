@@ -131,7 +131,7 @@ func init() {
 		"If set, drop random prefixes periodically over given duration.")
 	writeBenchCmd.Flags().StringVar(&ttlDuration, "entry-ttl", "0s",
 		"TTL duration in seconds for the entries, 0 means without TTL")
-	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "0", "GC Period.")
+	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "0s", "GC Period.")
 	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
 }
 
