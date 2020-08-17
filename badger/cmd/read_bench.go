@@ -50,6 +50,7 @@ var (
 	loadingMode string
 	keysOnly    bool
 	readOnly    bool
+	fullScan    bool
 )
 
 func init() {
@@ -67,6 +68,28 @@ func init() {
 	readBenchCmd.Flags().StringVar(
 		&loadingMode, "loading-mode", "mmap", "Mode for accessing SSTables and value log files. "+
 			"Valid loading modes are fileio and mmap.")
+	readBenchCmd.Flags().BoolVar(
+		&fullScan, "full-scan", false, "If true, full db will be scanned using iterators.")
+}
+
+// Scan the whole database using the iterators
+func fullScanDB(db *badger.DB) {
+	txn := db.NewTransaction(false)
+	defer txn.Discard()
+
+	// Print the stats
+	c := y.NewCloser(0)
+	c.AddRunning(1)
+	go printStats(c)
+
+	it := txn.NewIterator(badger.DefaultIteratorOptions)
+	defer it.Close()
+	startTime = time.Now()
+	for it.Rewind(); it.Valid(); it.Next() {
+		i := it.Item()
+		atomic.AddUint64(&entriesRead, 1)
+		atomic.AddUint64(&sizeRead, uint64(i.EstimatedSize()))
+	}
 }
 
 func readBench(cmd *cobra.Command, args []string) error {
@@ -90,8 +113,17 @@ func readBench(cmd *cobra.Command, args []string) error {
 		return y.Wrapf(err, "unable to open DB")
 	}
 	defer db.Close()
-
 	now := time.Now()
+
+	fmt.Println("*********************************************************")
+	fmt.Println("Starting to benchmark Reads")
+	fmt.Println("*********************************************************")
+
+	// if fullScan is true then do a complete scan of the db and return
+	if fullScan {
+		fullScanDB(db)
+		return nil
+	}
 	keys, err := getSampleKeys(db)
 	if err != nil {
 		return y.Wrapf(err, "error while sampling keys")
@@ -104,10 +136,6 @@ func readBench(cmd *cobra.Command, args []string) error {
 		fmt.Println("DB is empty, hence returning")
 		return nil
 	}
-
-	fmt.Println("*********************************************************")
-	fmt.Println("Starting to benchmark Reads")
-	fmt.Println("*********************************************************")
 	c := y.NewCloser(0)
 	startTime = time.Now()
 	for i := 0; i < numGoroutines; i++ {
