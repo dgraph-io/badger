@@ -17,6 +17,7 @@
 package cmd
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/dgraph-io/badger/v2"
@@ -34,12 +35,10 @@ This command streams the contents of this DB into another DB with different opti
 	RunE: stream,
 }
 
-var inDir string
 var outDir string
 
 func init() {
 	RootCmd.AddCommand(streamCmd)
-	streamCmd.Flags().StringVarP(&inDir, "in", "i", "", "Path to input DB")
 	streamCmd.Flags().StringVarP(&outDir, "out", "o", "", "Path to input DB")
 	streamCmd.Flags().BoolVarP(&truncate, "truncate", "", false, "Option to truncate the DBs")
 	streamCmd.Flags().BoolVarP(&readOnly, "read_only", "", true,
@@ -47,17 +46,19 @@ func init() {
 }
 
 func stream(cmd *cobra.Command, args[] string) error {
-	inOpt := badger.DefaultOptions(inDir).
+	inOpt := badger.DefaultOptions(sstDir).
 		WithReadOnly(readOnly).
 		WithTruncate(truncate).
 		WithValueThreshold(1 << 10 /* 1KB */).
 		WithNumVersionsToKeep(math.MaxInt32)
 
-	outOpt := inOpt.WithCompression(options.None).WithReadOnly(false)
+	outOpt := inOpt.WithDir(outDir).WithValueDir(outDir).
+		WithCompression(options.None).WithReadOnly(false)
+	fmt.Printf("options %+v", outOpt)
 
 	inDB, err := badger.OpenManaged(inOpt)
 	if err != nil {
-		return errors.Wrapf(err, "cannot open DB at %s", inDir)
+		return errors.Wrapf(err, "cannot open DB at %s", sstDir)
 	}
 	defer inDB.Close()
 	return inDB.StreamDB(outDir, outOpt)
