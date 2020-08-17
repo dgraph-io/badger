@@ -674,7 +674,7 @@ func TestL0GCBug(t *testing.T) {
 	if db1.valueDirGuard != nil {
 		require.NoError(t, db1.valueDirGuard.release())
 	}
-	for _, f := range db1.vlog.filesMap {
+	for _, f := range db1.vlog.vfilesMap {
 		require.NoError(t, f.fd.Close())
 	}
 	require.NoError(t, db1.registry.Close())
@@ -745,8 +745,8 @@ func TestWindowsDataLoss(t *testing.T) {
 	}
 	// Don't use vlog.Close here. We don't want to fix the file size. Only un-mmap
 	// the data so that we can truncate the file durning the next vlog.Open.
-	require.NoError(t, y.Munmap(db.vlog.filesMap[db.vlog.maxFid].fmap))
-	for _, f := range db.vlog.filesMap {
+	require.NoError(t, y.Munmap(db.vlog.vfilesMap[db.vlog.maxWALFid].fmap))
+	for _, f := range db.vlog.vfilesMap {
 		require.NoError(t, f.fd.Close())
 	}
 	require.NoError(t, db.registry.Close())

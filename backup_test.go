@@ -487,6 +487,7 @@ func TestBackupLoadIncremental(t *testing.T) {
 }
 
 func TestBackupBitClear(t *testing.T) {
+	t.Skip()
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)

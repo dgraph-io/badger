@@ -51,7 +51,7 @@ func TestVlogOnlyWal(t *testing.T) {
 	}
 	insert()
 
-	count = len(db.vlog.filesMap)
+	count = len(db.vlog.vfilesMap)
 	require.NoError(t, db.Close())
 
 	// Use new Dir
@@ -68,7 +68,7 @@ func TestVlogOnlyWal(t *testing.T) {
 
 	insert()
 
-	require.Less(t, len(db.vlog.filesMap), count)
+	require.Less(t, len(db.vlog.vfilesMap), count)
 
 	txn := db.NewTransaction(false)
 	for i := 0; i <= 100; i++ {
@@ -193,12 +193,12 @@ func TestWalModeChange(t *testing.T) {
 
 		// Mode change should create a new file.
 		db.vlog.filesLock.Lock()
-		require.Equal(t, maxFid, db.vlog.maxFid)
+		require.Equal(t, maxFid, db.vlog.maxWALFid)
 
-		lf, ok := db.vlog.filesMap[db.vlog.maxFid]
+		lf, ok := db.vlog.vfilesMap[db.vlog.maxWALFid]
 		db.vlog.filesLock.Unlock()
 		require.True(t, ok)
-		require.Equal(t, maxFid, db.vlog.maxFid)
+		require.Equal(t, maxFid, db.vlog.maxWALFid)
 		if walMode {
 			require.Equal(t, lf.fileType, walFile)
 		} else {

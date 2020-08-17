@@ -180,6 +180,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 
 		default:
 			// This entry is from a rewrite or via SetEntryAt(..).
+			// TODO(ibrahim): This should write to wal and vlog.
 			toLSM(nk, v)
 
 			// We shouldn't get this entry in the middle of a transaction.
@@ -691,6 +692,8 @@ func (db *DB) updateHead(ptrs []valuePointer) {
 		return
 	}
 
+	// fmt.Printf("db.vhea = %+v\n", db.vhead)
+	// fmt.Printf("ptr = %+v\n", ptr)
 	y.AssertTrue(!ptr.Less(db.vhead))
 	db.vhead = ptr
 }

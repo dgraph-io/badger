@@ -185,7 +185,7 @@ func TestValueGC(t *testing.T) {
 	}
 
 	kv.vlog.filesLock.RLock()
-	lf := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
+	lf := kv.vlog.vfilesMap[kv.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
@@ -243,7 +243,7 @@ func TestValueGC2(t *testing.T) {
 	}
 
 	kv.vlog.filesLock.RLock()
-	lf := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
+	lf := kv.vlog.vfilesMap[kv.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
@@ -345,7 +345,7 @@ func TestValueGC3(t *testing.T) {
 	// Like other tests, we pull out a logFile to rewrite it directly
 
 	kv.vlog.filesLock.RLock()
-	logFile := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
+	logFile := kv.vlog.vfilesMap[kv.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
 	tr := trace.New("Test", "Test")
@@ -395,8 +395,8 @@ func TestValueGC4(t *testing.T) {
 	}
 
 	kv.vlog.filesLock.RLock()
-	lf0 := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
-	lf1 := kv.vlog.filesMap[kv.vlog.sortedFids()[1]]
+	lf0 := kv.vlog.vfilesMap[kv.vlog.sortedFids()[0]]
+	lf1 := kv.vlog.vfilesMap[kv.vlog.sortedFids()[1]]
 	kv.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
@@ -978,7 +978,7 @@ func TestValueLogTruncate(t *testing.T) {
 		return txn.Set([]byte("foo"), nil)
 	}))
 
-	fileCountBeforeCorruption := len(db.vlog.filesMap)
+	fileCountBeforeCorruption := len(db.vlog.vfilesMap)
 
 	require.NoError(t, db.Close())
 
@@ -990,10 +990,10 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, err)
 
 	// Ensure vlog file with id=1 is not present
-	require.Nil(t, db.vlog.filesMap[1])
+	require.Nil(t, db.vlog.vfilesMap[1])
 
 	// Ensure filesize of fid=2 is zero
-	zeroFile, ok := db.vlog.filesMap[2]
+	zeroFile, ok := db.vlog.vfilesMap[2]
 	require.True(t, ok)
 	fileStat, err := zeroFile.fd.Stat()
 	require.NoError(t, err)
@@ -1006,12 +1006,12 @@ func TestValueLogTruncate(t *testing.T) {
 	} else {
 		require.Equal(t, int64(vlogHeaderSize), fileStat.Size())
 	}
-	fileCountAfterCorruption := len(db.vlog.filesMap)
+	fileCountAfterCorruption := len(db.vlog.vfilesMap)
 	// +1 because the file with id=2 will be completely truncated. It won't be deleted.
 	// There would be two files. fid=0 with valid data, fid=2 with zero data (truncated).
 	require.Equal(t, fileCountBeforeCorruption+1, fileCountAfterCorruption)
 	// Max file ID would point to the last vlog file, which is fid=2 in this case
-	require.Equal(t, 2, int(db.vlog.maxFid))
+	require.Equal(t, 2, int(db.vlog.maxWALFid))
 	require.NoError(t, db.Close())
 }
 
@@ -1114,7 +1114,7 @@ func TestDiscardStatsMove(t *testing.T) {
 
 	tr := trace.New("Badger.ValueLog", "GC")
 	// Use first value log file for GC. This value log file contains the discard stats.
-	lf := db.vlog.filesMap[0]
+	lf := db.vlog.vfilesMap[0]
 	require.NoError(t, db.vlog.rewrite(lf, tr))
 	require.NoError(t, db.Close())
 

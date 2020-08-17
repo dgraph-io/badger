@@ -37,13 +37,13 @@ import (
 func TestManifestBasic(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	defer removeDir(dir)
+	// defer removeDir(dir)
 
 	opt := getTestOptions(dir)
 	{
 		kv, err := Open(opt)
 		require.NoError(t, err)
-		n := 5000
+		n := 3
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
 				fmt.Printf("Putting i=%d\n", i)
@@ -51,7 +51,9 @@ func TestManifestBasic(t *testing.T) {
 			k := []byte(fmt.Sprintf("%16x", rand.Int63()))
 			txnSet(t, kv, k, k, 0x00)
 		}
+		fmt.Println("done")
 		txnSet(t, kv, []byte("testkey"), []byte("testval"), 0x05)
+		fmt.Println("done-done")
 		kv.validate()
 		require.NoError(t, kv.Close())
 	}
