@@ -17,7 +17,6 @@
 package cmd
 
 import (
-	"fmt"
 	"math"
 
 	"github.com/dgraph-io/badger/v2"
@@ -54,7 +53,6 @@ func stream(cmd *cobra.Command, args[] string) error {
 
 	outOpt := inOpt.WithDir(outDir).WithValueDir(outDir).
 		WithCompression(options.None).WithReadOnly(false)
-	fmt.Printf("options %+v", outOpt)
 
 	inDB, err := badger.OpenManaged(inOpt)
 	if err != nil {
