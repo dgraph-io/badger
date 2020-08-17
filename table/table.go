@@ -590,23 +590,21 @@ func (t *Table) block(idx int) (*block, error) {
 			return nil, err
 		}
 	}
+
+	blk.incrRef()
 	if t.opt.Cache != nil && t.opt.KeepBlocksInCache {
 		key := t.blockCacheKey(idx)
 		// incrRef should never return false here because we're calling it on a
 		// new block with ref=1.
 		y.AssertTrue(blk.incrRef())
 
-		// Manish: Set is not guaranteed to actually tell you whether block went into cache or not.
-		// All it is telling you is that Cache has pushed it to the setBuf channel. The policy can
-		// still reject the block. So, perhaps change the policy to call eviction handler, if it
-		// rejects the block.
-
 		// Decrement the block ref if we could not insert it in the cache.
 		if !t.opt.Cache.Set(key, blk, blk.size()) {
 			blk.decrRef()
 		}
+		// We have added an OnReject func in our cache, which gets called in case the block is not
+		// admitted to the cache. So, every block would be accounted for.
 	}
-	blk.incrRef()
 	return blk, nil
 }
 
