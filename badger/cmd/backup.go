@@ -18,6 +18,7 @@ package cmd
 
 import (
 	"bufio"
+	"math"
 	"os"
 
 	"github.com/dgraph-io/badger/v2"
@@ -52,7 +53,8 @@ func doBackup(cmd *cobra.Command, args []string) error {
 	// Open DB
 	db, err := badger.Open(badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
-		WithTruncate(truncate))
+		WithTruncate(truncate).
+		WithNumVersionsToKeep(math.MaxUint32))
 	if err != nil {
 		return err
 	}
