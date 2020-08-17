@@ -1787,6 +1787,8 @@ func createDirs(opt Options) error {
 	return nil
 }
 
+// Stream the contents of this DB to a new DB with options outOptions that will be
+// created in outDir.
 func (db *DB) StreamDB(outDir string , outOptions Options) error {
 	if err := os.MkdirAll(outDir, 0700); err != nil {
 		return errors.Wrapf(err, "cannot create directory for out DB at %s", outDir)
@@ -1798,13 +1800,12 @@ func (db *DB) StreamDB(outDir string , outOptions Options) error {
 		return errors.Wrapf(err, "cannot open out DB at %s", outDir)
 	}
 	defer outDB.Close()
-
-	// Stream contents of DB to the out DB.
 	writer := outDB.NewStreamWriter();
 	if err := writer.Prepare(); err != nil {
 		errors.Wrapf(err, "cannot create stream writer in out DB at %s", outDir)
 	}
 
+	// Stream contents of DB to the output DB.
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = fmt.Sprintf("Streaming DB to new DB at %s", outDir)
 	stream.Send = func(kvs *pb.KVList) error {

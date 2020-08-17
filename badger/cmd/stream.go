@@ -29,7 +29,7 @@ var streamCmd = &cobra.Command{
 	Use:   "stream",
 	Short: "Stream DB into another DB with different options",
 	Long: `
-This command streams the contents of this DB into another DB with different options.
+This command streams the contents of this DB into another DB with the given options.
 `,
 	RunE: stream,
 }
@@ -37,6 +37,7 @@ This command streams the contents of this DB into another DB with different opti
 var outDir string
 
 func init() {
+	// TODO: Add more options.
 	RootCmd.AddCommand(streamCmd)
 	streamCmd.Flags().StringVarP(&outDir, "out", "o", "", "Path to input DB")
 	streamCmd.Flags().BoolVarP(&truncate, "truncate", "", false, "Option to truncate the DBs")
@@ -45,12 +46,14 @@ func init() {
 }
 
 func stream(cmd *cobra.Command, args[] string) error {
+	// Options for input DB.
 	inOpt := badger.DefaultOptions(sstDir).
 		WithReadOnly(readOnly).
 		WithTruncate(truncate).
 		WithValueThreshold(1 << 10 /* 1KB */).
 		WithNumVersionsToKeep(math.MaxInt32)
 
+	// Options for output DB.
 	outOpt := inOpt.WithDir(outDir).WithValueDir(outDir).
 		WithCompression(options.None).WithReadOnly(false)
 
