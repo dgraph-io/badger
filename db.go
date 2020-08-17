@@ -136,11 +136,11 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			nv = make([]byte, vptrSize)
 			vp.Encode(nv)
 			meta = meta | bitValuePointer
-			// Update vhead. If the crash happens while replay was in progess
-			// and the head is not updated, we will end up replaying all the
-			// files again.
-			db.updateHead([]valuePointer{vp})
 		}
+		// Update vhead. If the crash happens while replay was in progess
+		// and the head is not updated, we will end up replaying all the
+		// files starting from file zero, again.
+		db.updateHead([]valuePointer{vp})
 
 		v := y.ValueStruct{
 			Value:     nv,
@@ -871,17 +871,14 @@ type flushTask struct {
 	dropPrefix []byte
 }
 
-// handleFlushTask must be run serially.
-func (db *DB) handleFlushTask(ft flushTask) error {
-	// There can be a scnerio, when empty memtable is flushed. For example, memtable is empty and
-	// after writing request to value log, rotation count exceeds db.LogRotatesToFlush.
-	if ft.mt.Empty() {
-		return nil
+func (db *DB) pushHead(ft flushTask) error {
+	// Ensure we never push a zero valued head pointer.
+	if ft.vptr.IsZero() {
+		return errors.New("Head should not be zero")
 	}
 
 	// Store badger head even if vptr is zero, need it for readTs
 	db.opt.Debugf("Storing value log head: %+v\n", ft.vptr)
-	db.elog.Printf("Storing offset: %+v\n", ft.vptr)
 	offset := make([]byte, vptrSize)
 	ft.vptr.Encode(offset)
 
@@ -889,6 +886,21 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// commits.
 	headTs := y.KeyWithTs(head, db.orc.nextTs())
 	ft.mt.Put(headTs, y.ValueStruct{Value: offset})
+
+	return nil
+}
+
+// handleFlushTask must be run serially.
+func (db *DB) handleFlushTask(ft flushTask) error {
+	// There can be a scenario, when empty memtable is flushed. For example, memtable is empty and
+	// after writing request to value log, rotation count exceeds db.LogRotatesToFlush.
+	if ft.mt.Empty() {
+		return nil
+	}
+
+	if err := db.pushHead(ft); err != nil {
+		return err
+	}
 
 	fileID := db.lc.reserveFileID()
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
