@@ -77,6 +77,7 @@ func fullScanDB(db *badger.DB) {
 	txn := db.NewTransaction(false)
 	defer txn.Discard()
 
+	startTime = time.Now()
 	// Print the stats
 	c := y.NewCloser(0)
 	c.AddRunning(1)
@@ -84,7 +85,6 @@ func fullScanDB(db *badger.DB) {
 
 	it := txn.NewIterator(badger.DefaultIteratorOptions)
 	defer it.Close()
-	startTime = time.Now()
 	for it.Rewind(); it.Valid(); it.Next() {
 		i := it.Item()
 		atomic.AddUint64(&entriesRead, 1)
