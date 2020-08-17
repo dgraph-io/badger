@@ -54,7 +54,7 @@ func doBackup(cmd *cobra.Command, args []string) error {
 	db, err := badger.Open(badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithTruncate(truncate).
-		WithNumVersionsToKeep(math.MaxUint32))
+		WithNumVersionsToKeep(math.MaxInt32))
 	if err != nil {
 		return err
 	}
