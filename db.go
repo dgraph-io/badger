@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -1782,6 +1783,38 @@ func createDirs(opt Options) error {
 				return y.Wrapf(err, "Error Creating Dir: %q", path)
 			}
 		}
+	}
+	return nil
+}
+
+func (db *DB) StreamDB(outDir string , outOptions Options) error {
+	if err := os.MkdirAll(outDir, 0700); err != nil {
+		return errors.Wrapf(err, "cannot create directory for out DB at %s", outDir)
+	}
+
+	// Open output DB.
+	outDB, err := OpenManaged(outOptions)
+	if err != nil {
+		return errors.Wrapf(err, "cannot open out DB at %s", outDir)
+	}
+	defer outDB.Close()
+
+	// Stream contents of DB to the out DB.
+	writer := outDB.NewStreamWriter();
+	if err := writer.Prepare(); err != nil {
+		errors.Wrapf(err, "cannot create stream writer in out DB at %s", outDir)
+	}
+
+	stream := db.NewStreamAt(math.MaxUint64)
+	stream.LogPrefix = fmt.Sprintf("Streaming DB to new DB at %s", outDir)
+	stream.Send = func(kvs *pb.KVList) error {
+		return writer.Write(kvs)
+	}
+	if err := stream.Orchestrate(context.Background()); err != nil {
+		return errors.Wrapf(err, "cannot stream DB to out DB at %s", outDir)
+	}
+	if err := writer.Flush(); err != nil {
+		return errors.Wrapf(err, "cannot flush writer")
 	}
 	return nil
 }
