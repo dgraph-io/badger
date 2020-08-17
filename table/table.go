@@ -362,7 +362,7 @@ func (t *Table) initBiggestAndSmallest() error {
 
 	t.smallest = ko.Key
 
-	it2 := t.NewIterator(true)
+	it2 := t.NewIterator(REVERSED | NOCACHE)
 	defer it2.Close()
 	it2.Rewind()
 	if !it2.Valid() {
@@ -510,7 +510,7 @@ func calculateOffsetsSize(offsets []*pb.BlockOffset) int64 {
 // block function return a new block. Each block holds a ref and the byte
 // slice stored in the block will be reused when the ref becomes zero. The
 // caller should release the block by calling block.decrRef() on it.
-func (t *Table) block(idx int) (*block, error) {
+func (t *Table) block(idx int, useCache bool) (*block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= t.noOfBlocks {
 		return nil, errors.New("block out of index")
@@ -592,7 +592,7 @@ func (t *Table) block(idx int) (*block, error) {
 	}
 
 	blk.incrRef()
-	if t.opt.Cache != nil && t.opt.KeepBlocksInCache {
+	if useCache && t.opt.Cache != nil && t.opt.KeepBlocksInCache {
 		key := t.blockCacheKey(idx)
 		// incrRef should never return false here because we're calling it on a
 		// new block with ref=1.
@@ -720,7 +720,7 @@ func (t *Table) readTableIndex() *pb.TableIndex {
 // OpenTable() function. This function is also called inside levelsController.VerifyChecksum().
 func (t *Table) VerifyChecksum() error {
 	for i, os := range t.blockOffsets() {
-		b, err := t.block(i)
+		b, err := t.block(i, true)
 		if err != nil {
 			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
 				t.Filename(), i, os.Offset)
