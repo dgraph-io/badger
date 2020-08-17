@@ -136,11 +136,11 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 		} else {
 			nv = vp.Encode()
 			meta = meta | bitValuePointer
-			// Update vhead. If the crash happens while replay was in progess
-			// and the head is not updated, we will end up replaying all the
-			// files again.
-			db.updateHead([]valuePointer{vp})
 		}
+		// Update vhead. If the crash happens while replay was in progess
+		// and the head is not updated, we will end up replaying all the
+		// files starting from file zero, again.
+		db.updateHead([]valuePointer{vp})
 
 		v := y.ValueStruct{
 			Value:     nv,
@@ -994,6 +994,29 @@ type flushTask struct {
 	dropPrefixes [][]byte
 }
 
+func (db *DB) pushHead(ft flushTask) error {
+	// We don't need to store head pointer in the in-memory mode since we will
+	// never be replay anything.
+	if db.opt.InMemory {
+		return nil
+	}
+	// Ensure we never push a zero valued head pointer.
+	if ft.vptr.IsZero() {
+		return errors.New("Head should not be zero")
+	}
+
+	// Store badger head even if vptr is zero, need it for readTs
+	db.opt.Debugf("Storing value log head: %+v\n", ft.vptr)
+	val := ft.vptr.Encode()
+
+	// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
+	// commits.
+	headTs := y.KeyWithTs(head, db.orc.nextTs())
+	ft.mt.Put(headTs, y.ValueStruct{Value: val})
+
+	return nil
+}
+
 // handleFlushTask must be run serially.
 func (db *DB) handleFlushTask(ft flushTask) error {
 	// There can be a scenario, when empty memtable is flushed. For example, memtable is empty and
@@ -1002,15 +1025,9 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return nil
 	}
 
-	// Store badger head even if vptr is zero, need it for readTs
-	db.opt.Debugf("Storing value log head: %+v\n", ft.vptr)
-	db.opt.Debugf("Storing offset: %+v\n", ft.vptr)
-	val := ft.vptr.Encode()
-
-	// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
-	// commits.
-	headTs := y.KeyWithTs(head, db.orc.nextTs())
-	ft.mt.Put(headTs, y.ValueStruct{Value: val})
+	if err := db.pushHead(ft); err != nil {
+		return err
+	}
 
 	dk, err := db.registry.latestDataKey()
 	if err != nil {
