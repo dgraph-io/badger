@@ -231,17 +231,6 @@ func (opt Options) WithValueDir(val string) Options {
 	return opt
 }
 
-// WithLoggingLevel returns a new Options value with logging level of the
-// default logger set to the given value.
-// LoggingLevel sets the level of logging. It should be one of DEBUG, INFO,
-// WARNING or ERROR levels.
-//
-// The default value of LoggingLevel is INFO.
-func (opt Options) WithLoggingLevel(val loggingLevel) Options {
-	opt.Logger = defaultLogger(val)
-	return opt
-}
-
 // WithSyncWrites returns a new Options value with SyncWrites set to the given value.
 //
 // When SyncWrites is true all writes are synced to disk. Setting this to false would achieve better
@@ -316,6 +305,17 @@ func (opt Options) WithTruncate(val bool) Options {
 // The default value of Logger writes to stderr using the log package from the Go standard library.
 func (opt Options) WithLogger(val Logger) Options {
 	opt.Logger = val
+	return opt
+}
+
+// WithLoggingLevel returns a new Options value with logging level of the
+// default logger set to the given value.
+// LoggingLevel sets the level of logging. It should be one of DEBUG, INFO,
+// WARNING or ERROR levels.
+//
+// The default value of LoggingLevel is INFO.
+func (opt Options) WithLoggingLevel(val loggingLevel) Options {
+	opt.Logger = defaultLogger(val)
 	return opt
 }
 
