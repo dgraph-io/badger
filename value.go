@@ -1055,9 +1055,16 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 		return nil
 	}
 
+	// Store endoffset in the writableLogOffset if this file is the file with
+	// maxFid. If we don't set the writableLogOffset here, vlog.Close() will
+	// truncate the file to zero since writableLogOffset is set to zero.
+	if lf.fid == atomic.LoadUint32(&vlog.maxFid) {
+		atomic.StoreUint32(&vlog.writableLogOffset, endOffset)
+	}
 	// End offset is different from file size. So, we should truncate the file
 	// to that size.
 	if !vlog.opt.Truncate {
+		vlog.db.opt.Debugf("Truncate Needed. File size: %d Endoffset: %d", fi.Size(), endOffset)
 		return ErrTruncateNeeded
 	}
 
@@ -1073,6 +1080,12 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 		}
 		return lf.bootstrap()
 	}
+	sz := fi.Size()
+	// Endoffset should always be less than the size of the file. If endoffset
+	// is beyond the file, that means we or the user has truncated the file.
+	// TODO(ibrahim): Do we really want this? The DB might not open if we end
+	// up in this situation.
+	y.AssertTruef(endOffset < uint32(sz), "endoffset: %d should be more than sz:%d", endOffset, sz)
 
 	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
 		return errFile(err, lf.path, fmt.Sprintf(
@@ -1256,6 +1269,9 @@ func (vlog *valueLog) Close() error {
 		}
 
 		maxFid := vlog.maxFid
+		// TODO(ibrahim) - Do we need the following truncations on non-windows
+		// platforms? We expand the file only on windows and the vlog.woffset()
+		// should point to end of file on all other platforms.
 		if !vlog.opt.ReadOnly && id == maxFid {
 			// truncate writable log file to correct offset.
 			if truncErr := f.fd.Truncate(
