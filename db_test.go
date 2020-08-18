@@ -378,6 +378,49 @@ func TestForceCompactL0(t *testing.T) {
 	require.NoError(t, db.Close())
 }
 
+func TestStreamDB(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+	opts := getTestOptions(dir)
+
+	db, err := OpenManaged(opts)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
+
+	writer := db.NewManagedWriteBatch()
+	for i := 0; i < 100; i++ {
+		key := []byte(fmt.Sprintf("key%d", i))
+		val := []byte(fmt.Sprintf("val%d", i))
+		require.NoError(t, writer.SetEntryAt(NewEntry(key, val).WithMeta(0x00), 1))
+	}
+	require.NoError(t, writer.Flush())
+
+	outDir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	outOpt := getTestOptions(outDir).WithCompression(options.None).WithReadOnly(false)
+	require.NoError(t, db.StreamDB(outDir, outOpt))
+
+	outDB, err := OpenManaged(outOpt)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, outDB.Close())
+	}()
+
+	for i := 0; i < 100; i++ {
+		key := []byte(fmt.Sprintf("key%d", i))
+		val := []byte(fmt.Sprintf("val%d", i))
+		txn := db.NewTransactionAt(1, false)
+		item, err := txn.Get(key)
+		require.NoError(t, err)
+		require.EqualValues(t, val, getItemValue(t, item))
+		require.Equal(t, byte(0x00), item.UserMeta())
+		txn.Discard()
+	}
+}
+
 func dirSize(path string) (int64, error) {
 	var size int64
 	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
