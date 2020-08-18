@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [20.07.0] - 2020-08-10
+## [2.2007.0] - 2020-08-10
 
 ### Fixed
   - Add a limit to the size of the batches sent over a stream. (#1412)
@@ -403,8 +403,8 @@ Bug fix:
 ## [1.0.1] - 2017-11-06
 * Fix an uint16 overflow when resizing key slice
 
-[Unreleased]: https://github.com/dgraph-io/badger/compare/v20.07.0...HEAD
-[20.07.0]: https://github.com/dgraph-io/badger/compare/v2.0.3...v20.07.0
+[Unreleased]: https://github.com/dgraph-io/badger/compare/v2.2007.0...HEAD
+[2.2007.0]: https://github.com/dgraph-io/badger/compare/v2.0.3...v2.2007.0
 [2.0.3]: https://github.com/dgraph-io/badger/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/dgraph-io/badger/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/dgraph-io/badger/compare/v2.0.0...v2.0.1
