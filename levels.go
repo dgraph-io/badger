@@ -676,7 +676,7 @@ nextTable:
 					return nil, errors.Wrapf(err, "While opening new table: %d", fileID)
 				}
 
-				if _, err := fd.Write(builder.Finish(false)); err != nil {
+				if _, err := fd.Write(builder.Finish()); err != nil {
 					return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 				}
 				tbl, err := table.OpenTable(fd, bopts)
@@ -700,9 +700,6 @@ nextTable:
 
 			mu.Lock()
 			newTables = append(newTables, tbl)
-			num := atomic.LoadInt32(&table.NumBlocks)
-			allocs := float64(atomic.LoadInt64(&y.NumAllocs)) / float64((1 << 20))
-			s.kv.opt.Logger.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, allocs)
 			mu.Unlock()
 		}(builder)
 	}
