@@ -461,7 +461,7 @@ func (opt Options) WithValueLogMaxEntries(val uint32) Options {
 // NumCompactors sets the number of compaction workers to run concurrently.
 // Setting this to zero stops compactions, which could eventually cause writes to block forever.
 //
-// The default value of NumCompactors is 2. One is dedicated just for L0.
+// The default value of NumCompactors is 2. One is dedicated just for L0 and L1.
 func (opt Options) WithNumCompactors(val int) Options {
 	opt.NumCompactors = val
 	return opt

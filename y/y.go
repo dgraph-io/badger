@@ -167,7 +167,6 @@ func SameKey(src, dst []byte) bool {
 // One problem is with n distinct sizes in random order it'll reallocate log(n) times.
 type Slice struct {
 	buf []byte
-	// viaC bool
 }
 
 // Resize reuses the Slice's buffer (or makes a new one) and returns a slice in that buffer of
@@ -178,19 +177,6 @@ func (s *Slice) Resize(sz int) []byte {
 	}
 	return s.buf[0:sz]
 }
-
-// func (s *Slice) Append(dst []byte) []byte {
-// 	if !s.viaC || cap(s.buf)-len(s.buf) >= len(dst) {
-// 		s.buf = append(s.buf, dst)
-// 	} else {
-// 		buf := make([]byte, len(dst)+len(s.buf))
-// 		copy(buf, s.buf)
-// 		copy(buf[len(s.buf):], dst)
-// 		manual.Free(s.buf)
-// 		s.buf = buf
-// 		s.viaC = false
-// 	}
-// }
 
 // FixedDuration returns a string representation of the given duration with the
 // hours, minutes, and seconds.

@@ -106,7 +106,6 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 	}
 
 	hash := crc32.New(y.CastagnoliCrcTable)
-
 	writer := io.MultiWriter(buf, hash)
 
 	// encode header.
@@ -121,7 +120,8 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 		eBuf := make([]byte, 0, len(e.Key)+len(e.Value))
 		eBuf = append(eBuf, e.Key...)
 		eBuf = append(eBuf, e.Value...)
-		if err := y.XORBlockStream(writer, eBuf, lf.dataKey.Data, lf.generateIV(offset)); err != nil {
+		if err := y.XORBlockStream(
+			writer, eBuf, lf.dataKey.Data, lf.generateIV(offset)); err != nil {
 			return 0, y.Wrapf(err, "Error while encoding entry for vlog.")
 		}
 	} else {
