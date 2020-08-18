@@ -114,6 +114,8 @@ func init() {
 		"If it is true, badger will encrypt all the data stored on the disk.")
 	writeBenchCmd.Flags().StringVar(&loadingMode, "loading-mode", "mmap",
 		"Mode for accessing SSTables")
+	infoCmd.Flags().BoolVar(&opt.truncate, "truncate", false, "If set to true, it allows "+
+		"truncation of value log files if they have corrupt data.")
 	writeBenchCmd.Flags().BoolVar(&loadBloomsOnOpen, "load-blooms", true,
 		"Load Bloom filter on DB open.")
 	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", true,
