@@ -669,33 +669,26 @@ func (opt Options) WithDetectConflicts(b bool) Options {
 // given value.
 //
 // When this option is set badger will store the block offsets in a cache along with the blocks.
-// The size of the cache is determined by the MaxCacheSize option.If the MaxCacheSize is set to
-// zero, then MaxCacheSize is set to 100 mb. When indices are stored in the cache, the read
-// performance might be affected but the cache limits the amount of memory used by the indices.
+// The size of the cache is determined by the MaxCacheSize option. When indices
+// are stored in the cache, the read performance might be affected but the
+// cache limits the amount of memory used by the indices.
 //
 // The default value of KeepBlockOffsetInCache is false.
 func (opt Options) WithKeepBlockIndicesInCache(val bool) Options {
 	opt.KeepBlockIndicesInCache = val
-
-	if val && opt.MaxCacheSize == 0 {
-		opt.MaxCacheSize = 100 << 20
-	}
 	return opt
 }
 
 // WithKeepBlocksInCache returns a new Option value with KeepBlocksInCache set to the
 // given value.
 //
-// When this option is set badger will store the block in the cache. The size of the cache is
-// determined by the MaxCacheSize option.If the MaxCacheSize is set to zero,
-// then MaxCacheSize is set to 100 mb.
+// When this option is set badger will store table blocks in the cache. The
+// size of the cache is determined by the MaxCacheSize option. It is not
+// recommended to enable this option if you're not using compression or
+// encryption in badger.
 //
 // The default value of KeepBlocksInCache is false.
 func (opt Options) WithKeepBlocksInCache(val bool) Options {
 	opt.KeepBlocksInCache = val
-
-	if val && opt.MaxCacheSize == 0 {
-		opt.MaxCacheSize = 100 << 20
-	}
 	return opt
 }

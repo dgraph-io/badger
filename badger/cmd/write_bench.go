@@ -102,13 +102,13 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "Show Badger logs.")
 	writeBenchCmd.Flags().IntVarP(&valueThreshold, "value-th", "t", 1<<10, "Value threshold")
 	writeBenchCmd.Flags().IntVarP(&numVersions, "num-version", "n", 1, "Number of versions to keep")
-	writeBenchCmd.Flags().Int64VarP(&maxCacheSize, "max-cache", "C", 0, "Max size of cache")
+	writeBenchCmd.Flags().Int64VarP(&maxCacheSize, "max-cache", "C", 0, "Max size of cache in MB")
 	writeBenchCmd.Flags().BoolVarP(&keepBlockIdxInCache, "keep-bidx", "b", false,
 		"Keep block indices in cache")
 	writeBenchCmd.Flags().BoolVarP(&keepBlocksInCache, "keep-blocks", "B", false,
 		"Keep blocks in cache")
 	writeBenchCmd.Flags().Int64VarP(&maxBfCacheSize, "max-bf-cache", "c", 0,
-		"Maximum Bloom Filter Cache Size")
+		"Maximum Bloom Filter Cache Size in MB")
 	writeBenchCmd.Flags().Uint32Var(&vlogMaxEntries, "vlog-maxe", 1000000, "Value log Max Entries")
 	writeBenchCmd.Flags().StringVarP(&encryptionKey, "encryption-key", "e", "",
 		"If it is true, badger will encrypt all the data stored on the disk.")
@@ -249,10 +249,10 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithCompactL0OnClose(force).
 		WithValueThreshold(valueThreshold).
 		WithNumVersionsToKeep(numVersions).
-		WithMaxCacheSize(maxCacheSize).
+		WithMaxCacheSize(maxCacheSize << 20).
 		WithKeepBlockIndicesInCache(keepBlockIdxInCache).
 		WithKeepBlocksInCache(keepBlocksInCache).
-		WithMaxBfCacheSize(maxBfCacheSize).
+		WithMaxBfCacheSize(maxBfCacheSize << 20).
 		WithValueLogMaxEntries(vlogMaxEntries).
 		WithTableLoadingMode(mode).
 		WithEncryptionKey([]byte(encryptionKey)).

@@ -210,6 +210,12 @@ func Open(opt Options) (db *DB, err error) {
 			maxValueThreshold)
 	}
 
+	// We need a cache if KeepBlocksInCache or KeepBlockIndices is set to true.
+	if (opt.KeepBlocksInCache || opt.KeepBlockIndicesInCache) && opt.MaxCacheSize <= 0 {
+		return nil, errors.New("Cannot use MaxCacheSize=0 with KeepBlocksInCache " +
+			"or KeepBlockIndicesInCache set.")
+	}
+
 	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
 	if int64(opt.ValueThreshold) > opt.maxBatchSize {
@@ -432,11 +438,11 @@ func Open(opt Options) (db *DB, err error) {
 // cleanup stops all the goroutines started by badger. This is used in open to
 // cleanup goroutines in case of an error.
 func (db *DB) cleanup() {
-	db.blockCache.Close()
-	db.bfCache.Close()
 	db.stopMemoryFlush()
 	db.stopCompactions()
 
+	db.blockCache.Close()
+	db.bfCache.Close()
 	if db.closers.updateSize != nil {
 		db.closers.updateSize.Signal()
 	}
@@ -1019,7 +1025,7 @@ func (db *DB) pushHead(ft flushTask) error {
 	}
 
 	// Store badger head even if vptr is zero, need it for readTs
-	db.opt.Debugf("Storing value log head: %+v\n", ft.vptr)
+	db.opt.Infof("Storing value log head: %+v\n", ft.vptr)
 	val := ft.vptr.Encode()
 
 	// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
