@@ -420,11 +420,11 @@ func Open(opt Options) (db *DB, err error) {
 // cleanup stops all the goroutines started by badger. This is used in open to
 // cleanup goroutines in case of an error.
 func (db *DB) cleanup() {
-	db.blockCache.Close()
-	db.bfCache.Close()
 	db.stopMemoryFlush()
 	db.stopCompactions()
 
+	db.blockCache.Close()
+	db.bfCache.Close()
 	if db.closers.updateSize != nil {
 		db.closers.updateSize.Signal()
 	}
@@ -1006,7 +1006,7 @@ func (db *DB) pushHead(ft flushTask) error {
 	}
 
 	// Store badger head even if vptr is zero, need it for readTs
-	db.opt.Debugf("Storing value log head: %+v\n", ft.vptr)
+	db.opt.Infof("Storing value log head: %+v\n", ft.vptr)
 	val := ft.vptr.Encode()
 
 	// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
