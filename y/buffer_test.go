@@ -57,3 +57,30 @@ func TestCallocBufferWrite(t *testing.T) {
 		end = end * 2
 	}
 }
+
+func TestSliceAlloc(t *testing.T) {
+	var buf Buffer
+	count := 10000
+	expectedSlice := make([][]byte, 0, count)
+
+	// Create "count" number of slices.
+	for i := 0; i < count; i++ {
+		sz := rand.Intn(1000)
+		testBuf := make([]byte, sz)
+		rand.Read(testBuf)
+
+		newSlice := buf.SliceAllocate(sz)
+		require.Equal(t, sz, copy(newSlice, testBuf))
+
+		// Save testBuf for verification.
+		expectedSlice = append(expectedSlice, testBuf)
+	}
+
+	offsets := buf.SliceOffsets(nil)
+	require.Equal(t, len(expectedSlice), len(offsets))
+	for i, off := range offsets {
+		// All the slices returned by the buffer should be equal to what we
+		// inserted earlier.
+		require.Equal(t, expectedSlice[i], buf.Slice(off))
+	}
+}
