@@ -53,14 +53,14 @@ func (b *Buffer) Allocate(n int) []byte {
 	return b.buf[off:b.offset]
 }
 
-func (b *Buffer) WriteLen(sz int) {
+func (b *Buffer) writeLen(sz int) {
 	buf := b.Allocate(4)
 	binary.BigEndian.PutUint32(buf, uint32(sz))
 }
 
-func (b *Buffer) AllocateSlice(sz int) []byte {
+func (b *Buffer) SliceAllocate(sz int) []byte {
 	b.Grow(4 + sz)
-	b.WriteLen(sz)
+	b.writeLen(sz)
 	return b.Allocate(sz)
 }
 
