@@ -37,7 +37,8 @@ type directoryLockGuard struct {
 // acquireDirectoryLock gets a lock on the directory.
 // It will also write our pid to dirPath/pidFileName for convenience.
 // readOnly is not supported on Plan 9.
-func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*directoryLockGuard, error) {
+func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (
+	*directoryLockGuard, error) {
 	if readOnly {
 		return nil, ErrPlan9NotSupported
 	}
