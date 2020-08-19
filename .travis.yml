@@ -39,13 +39,11 @@ notifications:
 
 script: >-
     if [ $TRAVIS_OS_NAME = "linux" ] && [ $go_32 ]; then
-      ulimit -a
       uname -a
       GOOS=linux GOARCH=arm go test -v ./...
       # Another round of tests after turning off mmap.
       GOOS=linux GOARCH=arm go test -v -vlog_mmap=false github.com/dgraph-io/badger
     else
-      ulimit -a
       go test -v ./...
       # Another round of tests after turning off mmap.
       go test -v -vlog_mmap=false github.com/dgraph-io/badger
