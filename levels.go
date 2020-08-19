@@ -669,6 +669,7 @@ nextTable:
 		}
 		go func(builder *table.Builder) {
 			defer builder.Close()
+			defer inflightBuilders.Done(err)
 
 			build := func(fileID uint64) (*table.Table, error) {
 				fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
@@ -691,7 +692,6 @@ nextTable:
 			} else {
 				tbl, err = build(fileID)
 			}
-			inflightBuilders.Done(err)
 
 			// If we couldn't build the table, return fast.
 			if err != nil {
