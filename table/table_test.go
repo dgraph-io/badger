@@ -82,7 +82,7 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
 		y.AssertTrue(len(kv) == 2)
 		b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0}, 0)
 	}
-	_, err = f.Write(b.Finish())
+	_, err = f.Write(b.Finish(false))
 	require.NoError(t, err, "writing to file failed")
 	f.Close()
 	f, _ = y.OpenSyncedFile(filename, true)
@@ -704,7 +704,7 @@ func TestTableBigValues(t *testing.T) {
 		builder.Add(key, vs, 0)
 	}
 
-	_, err = f.Write(builder.Finish())
+	_, err = f.Write(builder.Finish(false))
 	require.NoError(t, err, "unable to write to file")
 	tbl, err := OpenTable(f, opts)
 	require.NoError(t, err, "unable to open table")
@@ -789,7 +789,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 				vs := it.Value()
 				newBuilder.Add(it.Key(), vs, 0)
 			}
-			newBuilder.Finish()
+			newBuilder.Finish(false)
 		}()
 	}
 }
@@ -818,7 +818,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			v := fmt.Sprintf("%d", id)
 			builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}, 0)
 		}
-		_, err = f.Write(builder.Finish())
+		_, err = f.Write(builder.Finish(false))
 		require.NoError(b, err, "unable to write to file")
 		tbl, err := OpenTable(f, opts)
 		y.Check(err)
@@ -910,7 +910,7 @@ func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Tab
 		builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)}, 0)
 	}
 
-	_, err = f.Write(builder.Finish())
+	_, err = f.Write(builder.Finish(false))
 	require.NoError(b, err, "unable to write to file")
 	tbl, err := OpenTable(f, opts)
 	require.NoError(b, err, "unable to open table")

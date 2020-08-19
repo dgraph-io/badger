@@ -107,7 +107,7 @@ func TestTableIndex(t *testing.T) {
 				}
 				builder.Add(k, vs, 0)
 			}
-			_, err = f.Write(builder.Finish())
+			_, err = f.Write(builder.Finish(false))
 			require.NoError(t, err, "unable to write to file")
 
 			tbl, err := OpenTable(f, opt)
@@ -131,7 +131,7 @@ func TestTableIndex(t *testing.T) {
 
 func TestInvalidCompression(t *testing.T) {
 	keyPrefix := "key"
-	opts := Options{Compression: options.ZSTD}
+	opts := Options{BlockSize: 4 << 10, Compression: options.ZSTD}
 	f := buildTestTable(t, keyPrefix, 1000, opts)
 	t.Run("with correct decompression algo", func(t *testing.T) {
 		_, err := OpenTable(f, opts)
@@ -172,7 +172,7 @@ func BenchmarkBuilder(b *testing.B) {
 			for j := 0; j < keysCount; j++ {
 				builder.Add(keyList[j], vs, 0)
 			}
-			_ = builder.Finish()
+			_ = builder.Finish(false)
 		}
 	}
 
