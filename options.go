@@ -129,9 +129,9 @@ func DefaultOptions(path string) Options {
 		// table.Nothing to not preload the tables.
 		MaxLevels:               7,
 		MaxTableSize:            64 << 20,
-		NumCompactors:           2, // Compactions can be expensive. Only run 2.
+		NumCompactors:           2, // Run at least 2 compactors. One is dedicated for L0.
 		NumLevelZeroTables:      5,
-		NumLevelZeroTablesStall: 10,
+		NumLevelZeroTablesStall: 15,
 		NumMemtables:            5,
 		BloomFalsePositive:      0.01,
 		BlockSize:               4 * 1024,
@@ -458,7 +458,7 @@ func (opt Options) WithValueLogMaxEntries(val uint32) Options {
 // NumCompactors sets the number of compaction workers to run concurrently.
 // Setting this to zero stops compactions, which could eventually cause writes to block forever.
 //
-// The default value of NumCompactors is 2.
+// The default value of NumCompactors is 2. One is dedicated just for L0.
 func (opt Options) WithNumCompactors(val int) Options {
 	opt.NumCompactors = val
 	return opt

@@ -29,7 +29,7 @@ func main() {
 	go func() {
 		for i := 8080; i < 9080; i++ {
 			fmt.Printf("Listening for /debug HTTP requests at port: %d\n", i)
-			if err := http.ListenAndServe(fmt.Sprintf("localhost:%d", i), nil); err != nil {
+			if err := http.ListenAndServe(fmt.Sprintf("0.0.0.0:%d", i), nil); err != nil {
 				fmt.Println("Port busy. Trying another one...")
 				continue
 
