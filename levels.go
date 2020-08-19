@@ -657,7 +657,7 @@ nextTable:
 			numKeys, numSkips, time.Since(timeStart))
 		if builder.Empty() {
 			// Cleanup builder resources:
-			builder.Finish()
+			builder.Finish(false)
 			builder.Close()
 			continue
 		}
@@ -677,7 +677,7 @@ nextTable:
 					return nil, errors.Wrapf(err, "While opening new table: %d", fileID)
 				}
 
-				if _, err := fd.Write(builder.Finish()); err != nil {
+				if _, err := fd.Write(builder.Finish(false)); err != nil {
 					return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
 				}
 				tbl, err := table.OpenTable(fd, bopts)
@@ -688,7 +688,7 @@ nextTable:
 			var tbl *table.Table
 			var err error
 			if s.kv.opt.InMemory {
-				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
+				tbl, err = table.OpenInMemoryTable(builder.Finish(true), fileID, &bopts)
 			} else {
 				tbl, err = build(fileID)
 			}
@@ -700,6 +700,9 @@ nextTable:
 
 			mu.Lock()
 			newTables = append(newTables, tbl)
+			num := atomic.LoadInt32(&table.NumBlocks)
+			allocs := float64(atomic.LoadInt64(&y.NumAllocs)) / float64((1 << 20))
+			s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, allocs)
 			mu.Unlock()
 		}(builder)
 	}

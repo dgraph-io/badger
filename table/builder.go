@@ -17,11 +17,13 @@
 package table
 
 import (
-	"bytes"
 	"crypto/aes"
 	"math"
+	"runtime"
+	"sync"
 	"unsafe"
 
+	"github.com/DataDog/zstd"
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
@@ -33,11 +35,14 @@ import (
 	"github.com/dgraph-io/ristretto/z"
 )
 
-func newBuffer(sz int) *bytes.Buffer {
-	b := new(bytes.Buffer)
-	b.Grow(sz)
-	return b
-}
+const (
+	KB = 1024
+	MB = KB * 1024
+
+	// When a block is encrypted, it's length increases. We add 256 bytes of padding to
+	// handle cases when block size increases. This is an approximate number.
+	padding = 256
+)
 
 type header struct {
 	overlap uint16 // Overlap with base key.
@@ -61,10 +66,18 @@ func (h *header) Decode(buf []byte) {
 	copy(((*[headerSize]byte)(unsafe.Pointer(h))[:]), buf[:headerSize])
 }
 
+type bblock struct {
+	data  []byte
+	start uint32 // Points to the starting offset of the block.
+	end   uint32 // Points to the end offset of the block.
+}
+
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	buf *bytes.Buffer
+	buf     []byte
+	sz      uint32
+	bufLock sync.Mutex // This lock guards the buf. We acquire lock when we resize the buf.
 
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -72,23 +85,90 @@ type Builder struct {
 	tableIndex   *pb.TableIndex
 	keyHashes    []uint64 // Used for building the bloomfilter.
 	opt          *Options
+
+	// Used to concurrently compress/encrypt blocks.
+	wg        sync.WaitGroup
+	blockChan chan *bblock
+	blockList []*bblock
 }
 
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
-	return &Builder{
-		buf:        newBuffer(1 << 20),
+	b := &Builder{
+		// Additional 16 MB to store index (approximate).
+		// We trim the additional space in table.Finish().
+		buf:        y.Calloc(int(opts.TableSize + 16*MB)),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
 	}
+
+	// If encryption or compression is not enabled, do not start compression/encryption goroutines
+	// and write directly to the buffer.
+	if b.opt.Compression == options.None && b.opt.DataKey == nil {
+		return b
+	}
+
+	count := 2 * runtime.NumCPU()
+	b.blockChan = make(chan *bblock, count*2)
+
+	b.wg.Add(count)
+	for i := 0; i < count; i++ {
+		go b.handleBlock()
+	}
+	return b
+}
+
+func (b *Builder) handleBlock() {
+	defer b.wg.Done()
+
+	doCompress := b.opt.Compression != options.None
+	for item := range b.blockChan {
+		// Extract the block.
+		blockBuf := item.data[item.start:item.end]
+		// Compress the block.
+		if doCompress {
+			var err error
+			blockBuf, err = b.compressData(blockBuf)
+			y.Check(err)
+		}
+		if b.shouldEncrypt() {
+			eBlock, err := b.encrypt(blockBuf, doCompress)
+			y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
+			blockBuf = eBlock
+		}
+
+		// BlockBuf should always less than or equal to allocated space. If the blockBuf is greater
+		// than allocated space that means the data from this block cannot be stored in its
+		// existing location and trying to copy it over would mean we would over-write some data
+		// of the next block.
+		allocatedSpace := (item.end - item.start) + padding + 1
+		y.AssertTruef(uint32(len(blockBuf)) <= allocatedSpace, "newend: %d oldend: %d padding: %d",
+			item.start+uint32(len(blockBuf)), item.end, padding)
+
+		// Acquire the buflock here. The builder.grow function might change
+		// the b.buf while this goroutine was running.
+		b.bufLock.Lock()
+		// Copy over compressed/encrypted data back to the main buffer.
+		copy(b.buf[item.start:], blockBuf)
+		b.bufLock.Unlock()
+
+		// Fix the boundary of the block.
+		item.end = item.start + uint32(len(blockBuf))
+
+		if doCompress {
+			y.Free(blockBuf)
+		}
+	}
 }
 
 // Close closes the TableBuilder.
-func (b *Builder) Close() {}
+func (b *Builder) Close() {
+	y.Free(b.buf)
+}
 
 // Empty returns whether it's empty.
-func (b *Builder) Empty() bool { return b.buf.Len() == 0 }
+func (b *Builder) Empty() bool { return b.sz == 0 }
 
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
 func (b *Builder) keyDiff(newKey []byte) []byte {
@@ -124,18 +204,53 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	}
 
 	// store current entry's offset
-	y.AssertTrue(uint32(b.buf.Len()) < math.MaxUint32)
-	b.entryOffsets = append(b.entryOffsets, uint32(b.buf.Len())-b.baseOffset)
+	y.AssertTrue(b.sz < math.MaxUint32)
+	b.entryOffsets = append(b.entryOffsets, b.sz-b.baseOffset)
 
 	// Layout: header, diffKey, value.
-	b.buf.Write(h.Encode())
-	b.buf.Write(diffKey) // We only need to store the key difference.
+	b.append(h.Encode())
+	b.append(diffKey)
 
-	v.EncodeTo(b.buf)
+	if uint32(len(b.buf)) < b.sz+v.EncodedSize() {
+		b.grow(v.EncodedSize())
+	}
+	b.sz += v.Encode(b.buf[b.sz:])
+
 	// Size of KV on SST.
 	sstSz := uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
 	// Total estimated size = size on SST + size on vlog (length of value pointer).
 	b.tableIndex.EstimatedSize += (sstSz + vpLen)
+}
+
+// grow increases the size of b.buf by atleast 50%.
+func (b *Builder) grow(n uint32) {
+	l := uint32(len(b.buf))
+	if n < l/2 {
+		n = l / 2
+	}
+	newBuf := y.Calloc(int(l + n))
+	y.AssertTrue(uint32(len(newBuf)) == l+n)
+
+	b.bufLock.Lock()
+	copy(newBuf, b.buf)
+	y.Free(b.buf)
+	b.buf = newBuf
+	b.bufLock.Unlock()
+}
+func (b *Builder) append(data []byte) {
+	// Ensure we have enough space to store new data.
+	if uint32(len(b.buf)) < b.sz+uint32(len(data)) {
+		b.grow(uint32(len(data)))
+	}
+	copy(b.buf[b.sz:], data)
+	b.sz += uint32(len(data))
+}
+
+func (b *Builder) addPadding(sz uint32) {
+	if uint32(len(b.buf)) < b.sz+sz {
+		b.grow(sz)
+	}
+	b.sz += sz
 }
 
 /*
@@ -151,41 +266,36 @@ Structure of Block.
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
 func (b *Builder) finishBlock() {
-	b.buf.Write(y.U32SliceToBytes(b.entryOffsets))
-	b.buf.Write(y.U32ToBytes(uint32(len(b.entryOffsets))))
+	b.append(y.U32SliceToBytes(b.entryOffsets))
+	b.append(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
-	blockBuf := b.buf.Bytes()[b.baseOffset:] // Store checksum for current block.
-	b.writeChecksum(blockBuf)
+	b.writeChecksum(b.buf[b.baseOffset:b.sz])
 
-	// Compress the block.
-	if b.opt.Compression != options.None {
-		var err error
-		// TODO: Find a way to reuse buffers. Current implementation creates a
-		// new buffer for each compressData call.
-		blockBuf, err = b.compressData(b.buf.Bytes()[b.baseOffset:])
-		y.Check(err)
-		// Truncate already written data.
-		b.buf.Truncate(int(b.baseOffset))
-		// Write compressed data.
-		b.buf.Write(blockBuf)
-	}
-	if b.shouldEncrypt() {
-		block := b.buf.Bytes()[b.baseOffset:]
-		eBlock, err := b.encrypt(block)
-		y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
-		// We're rewriting the block, after encrypting.
-		b.buf.Truncate(int(b.baseOffset))
-		b.buf.Write(eBlock)
+	// If compression/encryption is disabled, no need to send the block to the blockChan.
+	// There's nothing to be done.
+	if b.blockChan == nil {
+		b.addBlockToIndex()
+		return
 	}
 
-	// TODO(Ashish):Add padding: If we want to make block as multiple of OS pages, we can
-	// implement padding. This might be useful while using direct I/O.
+	b.addPadding(padding)
 
-	// Add key to the block index
+	// Block end is the actual end of the block ignoring the padding.
+	block := &bblock{start: b.baseOffset, end: uint32(b.sz - padding), data: b.buf}
+	b.blockList = append(b.blockList, block)
+
+	b.addBlockToIndex()
+	// Push to the block handler.
+	b.blockChan <- block
+}
+
+func (b *Builder) addBlockToIndex() {
+	blockBuf := b.buf[b.baseOffset:b.sz]
+	// Add key to the block index.
 	bo := &pb.BlockOffset{
 		Key:    y.Copy(b.baseKey),
 		Offset: b.baseOffset,
-		Len:    uint32(b.buf.Len()) - b.baseOffset,
+		Len:    uint32(len(blockBuf)),
 	}
 	b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
 }
@@ -203,7 +313,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		4 + // size of list
 		8 + // Sum64 in checksum proto
 		4) // checksum length
-	estimatedSize := uint32(b.buf.Len()) - b.baseOffset + uint32(6 /*header size for entry*/) +
+	estimatedSize := uint32(b.sz) - b.baseOffset + uint32(6 /*header size for entry*/) +
 		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
 
 	if b.shouldEncrypt() {
@@ -211,6 +321,9 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		// So, size of IV is added to estimatedSize.
 		estimatedSize += aes.BlockSize
 	}
+	// Integer overflow check for table size.
+	y.AssertTrue(uint64(b.sz)+uint64(estimatedSize) < math.MaxUint32)
+
 	return estimatedSize > uint32(b.opt.BlockSize)
 }
 
@@ -220,8 +333,8 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 		b.finishBlock()
 		// Start a new block. Initialize the block.
 		b.baseKey = []byte{}
-		y.AssertTrue(uint32(b.buf.Len()) < math.MaxUint32)
-		b.baseOffset = uint32(b.buf.Len())
+		y.AssertTrue(uint32(b.sz) < math.MaxUint32)
+		b.baseOffset = uint32((b.sz))
 		b.entryOffsets = b.entryOffsets[:0]
 	}
 	b.addHelper(key, value, uint64(valueLen))
@@ -235,14 +348,14 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	blocksSize := b.buf.Len() + // length of current buffer
-		len(b.entryOffsets)*4 + // all entry offsets size
+	blocksSize := b.sz + // length of current buffer
+		uint32(len(b.entryOffsets)*4) + // all entry offsets size
 		4 + // count of all entry offsets
 		8 + // checksum bytes
 		4 // checksum length
 	estimateSz := blocksSize +
 		4 + // Index length
-		5*(len(b.tableIndex.Offsets)) // approximate index size
+		5*(uint32(len(b.tableIndex.Offsets))) // approximate index size
 
 	return int64(estimateSz) > cap
 }
@@ -259,7 +372,7 @@ The table structure looks like
 +---------+------------+-----------+---------------+
 */
 // In case the data is encrypted, the "IV" is added to the end of the index.
-func (b *Builder) Finish() []byte {
+func (b *Builder) Finish(allocate bool) []byte {
 	if b.opt.BloomFalsePositive > 0 {
 		bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePositive)
 		for _, h := range b.keyHashes {
@@ -271,24 +384,52 @@ func (b *Builder) Finish() []byte {
 
 	b.finishBlock() // This will never start a new block.
 
+	if b.blockChan != nil {
+		close(b.blockChan)
+	}
+	// Wait for block handler to finish.
+	b.wg.Wait()
+
+	dst := b.buf
+	// Fix block boundaries. This includes moving the blocks so that we
+	// don't have any interleaving space between them.
+	if len(b.blockList) > 0 {
+		dstLen := uint32(0)
+		for i, bl := range b.blockList {
+			off := b.tableIndex.Offsets[i]
+			// Length of the block is end minus the start.
+			off.Len = bl.end - bl.start
+			// New offset of the block is the point in the main buffer till
+			// which we have written data.
+			off.Offset = dstLen
+
+			copy(dst[dstLen:], b.buf[bl.start:bl.end])
+
+			// New length is the start of the block plus its length.
+			dstLen = off.Offset + off.Len
+		}
+		// Start writing to the buffer from the point until which we have valid data.
+		// Fix the length because append and writeChecksum also rely on it.
+		b.sz = dstLen
+	}
+
 	index, err := proto.Marshal(b.tableIndex)
 	y.Check(err)
 
 	if b.shouldEncrypt() {
-		index, err = b.encrypt(index)
+		index, err = b.encrypt(index, false)
 		y.Check(err)
 	}
-	// Write index the file.
-	n, err := b.buf.Write(index)
-	y.Check(err)
-
-	y.AssertTrue(uint32(n) < math.MaxUint32)
-	// Write index size.
-	_, err = b.buf.Write(y.U32ToBytes(uint32(n)))
-	y.Check(err)
+	// Write index the buffer.
+	b.append(index)
+	b.append(y.U32ToBytes(uint32(len(index))))
 
 	b.writeChecksum(index)
-	return b.buf.Bytes()
+
+	if allocate {
+		return append([]byte{}, b.buf[:b.sz]...)
+	}
+	return b.buf[:b.sz]
 }
 
 func (b *Builder) writeChecksum(data []byte) {
@@ -309,13 +450,10 @@ func (b *Builder) writeChecksum(data []byte) {
 	// Write checksum to the file.
 	chksum, err := proto.Marshal(&checksum)
 	y.Check(err)
-	n, err := b.buf.Write(chksum)
-	y.Check(err)
+	b.append(chksum)
 
-	y.AssertTrue(uint32(n) < math.MaxUint32)
 	// Write checksum size.
-	_, err = b.buf.Write(y.U32ToBytes(uint32(n)))
-	y.Check(err)
+	b.append(y.U32ToBytes(uint32(len(chksum))))
 }
 
 // DataKey returns datakey of the builder.
@@ -325,17 +463,32 @@ func (b *Builder) DataKey() *pb.DataKey {
 
 // encrypt will encrypt the given data and appends IV to the end of the encrypted data.
 // This should be only called only after checking shouldEncrypt method.
-func (b *Builder) encrypt(data []byte) ([]byte, error) {
+func (b *Builder) encrypt(data []byte, viaC bool) ([]byte, error) {
 	iv, err := y.GenerateIV()
 	if err != nil {
 		return data, y.Wrapf(err, "Error while generating IV in Builder.encrypt")
 	}
-	data, err = y.XORBlock(data, b.DataKey().Data, iv)
-	if err != nil {
+	needSz := len(data) + len(iv)
+	var dst []byte
+	if viaC {
+		dst = y.Calloc(needSz)
+	} else {
+		dst = make([]byte, needSz)
+	}
+	dst = dst[:len(data)]
+
+	if err = y.XORBlock(dst, data, b.DataKey().Data, iv); err != nil {
+		if viaC {
+			y.Free(dst)
+		}
 		return data, y.Wrapf(err, "Error while encrypting in Builder.encrypt")
 	}
-	data = append(data, iv...)
-	return data, nil
+	if viaC {
+		y.Free(data)
+	}
+
+	y.AssertTrue(cap(dst)-len(dst) >= len(iv))
+	return append(dst, iv...), nil
 }
 
 // shouldEncrypt tells us whether to encrypt the data or not.
@@ -350,9 +503,13 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 	case options.None:
 		return data, nil
 	case options.Snappy:
-		return snappy.Encode(nil, data), nil
+		sz := snappy.MaxEncodedLen(len(data))
+		dst := y.Calloc(sz)
+		return snappy.Encode(dst, data), nil
 	case options.ZSTD:
-		return y.ZSTDCompress(nil, data, b.opt.ZSTDCompressionLevel)
+		sz := zstd.CompressBound(len(data))
+		dst := y.Calloc(sz)
+		return y.ZSTDCompress(dst, data, b.opt.ZSTDCompressionLevel)
 	}
 	return nil, errors.New("Unsupported compression type")
 }

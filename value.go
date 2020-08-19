@@ -105,13 +105,13 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 		userMeta:  e.UserMeta,
 	}
 
+	hash := crc32.New(y.CastagnoliCrcTable)
+	writer := io.MultiWriter(buf, hash)
+
 	// encode header.
 	var headerEnc [maxHeaderSize]byte
 	sz := h.Encode(headerEnc[:])
-	y.Check2(buf.Write(headerEnc[:sz]))
-	// write hash.
-	hash := crc32.New(y.CastagnoliCrcTable)
-	y.Check2(hash.Write(headerEnc[:sz]))
+	y.Check2(writer.Write(headerEnc[:sz]))
 	// we'll encrypt only key and value.
 	if lf.encryptionEnabled() {
 		// TODO: no need to allocate the bytes. we can calculate the encrypted buf one by one
@@ -120,25 +120,14 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 		eBuf := make([]byte, 0, len(e.Key)+len(e.Value))
 		eBuf = append(eBuf, e.Key...)
 		eBuf = append(eBuf, e.Value...)
-		var err error
-		eBuf, err = y.XORBlock(eBuf, lf.dataKey.Data, lf.generateIV(offset))
-		if err != nil {
+		if err := y.XORBlockStream(
+			writer, eBuf, lf.dataKey.Data, lf.generateIV(offset)); err != nil {
 			return 0, y.Wrapf(err, "Error while encoding entry for vlog.")
 		}
-		// write encrypted buf.
-		y.Check2(buf.Write(eBuf))
-		// write the hash.
-		y.Check2(hash.Write(eBuf))
 	} else {
 		// Encryption is disabled so writing directly to the buffer.
-		// write key.
-		y.Check2(buf.Write(e.Key))
-		// write key hash.
-		y.Check2(hash.Write(e.Key))
-		// write value.
-		y.Check2(buf.Write(e.Value))
-		// write value hash.
-		y.Check2(hash.Write(e.Value))
+		y.Check2(writer.Write(e.Key))
+		y.Check2(writer.Write(e.Value))
 	}
 	// write crc32 hash.
 	var crcBuf [crc32.Size]byte
@@ -172,7 +161,7 @@ func (lf *logFile) decodeEntry(buf []byte, offset uint32) (*Entry, error) {
 }
 
 func (lf *logFile) decryptKV(buf []byte, offset uint32) ([]byte, error) {
-	return y.XORBlock(buf, lf.dataKey.Data, lf.generateIV(offset))
+	return y.XORBlockAllocate(buf, lf.dataKey.Data, lf.generateIV(offset))
 }
 
 // KeyID returns datakey's ID.

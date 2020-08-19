@@ -56,6 +56,9 @@ const sizeOfOffsetStruct int64 = 3*8 + // key array take 3 words
 type Options struct {
 	// Options for Opening/Building Table.
 
+	// Maximum size of the table.
+	TableSize uint64
+
 	// ChkMode is the checksum verification mode for Table.
 	ChkMode options.ChecksumVerificationMode
 
@@ -182,15 +185,71 @@ func (t *Table) DecrRef() error {
 	return nil
 }
 
+// BlockEvictHandler is used to reuse the byte slice stored in the block on cache eviction.
+func BlockEvictHandler(value interface{}) {
+	if b, ok := value.(*block); ok {
+		b.decrRef()
+	}
+}
+
 type block struct {
 	offset            int
 	data              []byte
 	checksum          []byte
-	entriesIndexStart int // start index of entryOffsets list
-	entryOffsets      []uint32
-	chkLen            int // checksum length
+	entriesIndexStart int      // start index of entryOffsets list
+	entryOffsets      []uint32 // used to binary search an entry in the block.
+	chkLen            int      // checksum length.
+	freeMe            bool     // used to determine if the blocked should be reused.
+	ref               int32
 }
 
+var NumBlocks int32
+
+// incrRef increments the ref of a block and return a bool indicating if the
+// increment was successful. A true value indicates that the block can be used.
+func (b *block) incrRef() bool {
+	for {
+		// We can't blindly add 1 to ref. We need to check whether it has
+		// reached zero first, because if it did, then we should absolutely not
+		// use this block.
+		ref := atomic.LoadInt32(&b.ref)
+		// The ref would not be equal to 0 unless the existing
+		// block get evicted before this line. If the ref is zero, it means that
+		// the block is already added the the blockPool and cannot be used
+		// anymore. The ref of a new block is 1 so the following condition will
+		// be true only if the block got reused before we could increment its
+		// ref.
+		if ref == 0 {
+			return false
+		}
+		// Increment the ref only if it is not zero and has not changed between
+		// the time we read it and we're updating it.
+		//
+		if atomic.CompareAndSwapInt32(&b.ref, ref, ref+1) {
+			return true
+		}
+	}
+}
+func (b *block) decrRef() {
+	if b == nil {
+		return
+	}
+
+	// Insert the []byte into pool only if the block is resuable. When a block
+	// is reusable a new []byte is used for decompression and this []byte can
+	// be reused.
+	// In case of an uncompressed block, the []byte is a reference to the
+	// table.mmap []byte slice. Any attempt to write data to the mmap []byte
+	// will lead to SEGFAULT.
+	if atomic.AddInt32(&b.ref, -1) == 0 {
+		if b.freeMe {
+			y.Free(b.data)
+		}
+		atomic.AddInt32(&NumBlocks, -1)
+		// blockPool.Put(&b.data)
+	}
+	y.AssertTrue(atomic.LoadInt32(&b.ref) >= 0)
+}
 func (b *block) size() int64 {
 	return int64(3*intSize /* Size of the offset, entriesIndexStart and chkLen */ +
 		cap(b.data) + cap(b.checksum) + cap(b.entryOffsets)*4)
@@ -209,6 +268,11 @@ func (b block) verifyCheckSum() error {
 // -- consider t.Close() instead). The fd has to writeable because we call Truncate on it before
 // deleting. Checksum for all blocks of table is verified based on value of chkMode.
 func OpenTable(fd *os.File, opts Options) (*Table, error) {
+	// BlockSize is used to compute the approximate size of the decompressed
+	// block. It should not be zero if the table is compressed.
+	if opts.BlockSize == 0 && opts.Compression != options.None {
+		return nil, errors.New("Block size cannot be zero")
+	}
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -448,6 +512,9 @@ func calculateOffsetsSize(offsets []*pb.BlockOffset) int64 {
 	return totalSize + 3*8
 }
 
+// block function return a new block. Each block holds a ref and the byte
+// slice stored in the block will be reused when the ref becomes zero. The
+// caller should release the block by calling block.decrRef() on it.
 func (t *Table) block(idx int) (*block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= t.noOfBlocks {
@@ -457,7 +524,12 @@ func (t *Table) block(idx int) (*block, error) {
 		key := t.blockCacheKey(idx)
 		blk, ok := t.opt.Cache.Get(key)
 		if ok && blk != nil {
-			return blk.(*block), nil
+			// Use the block only if the increment was successful. The block
+			// could get evicted from the cache between the Get() call and the
+			// incrRef() call.
+			if b := blk.(*block); b.incrRef() {
+				return b, nil
+			}
 		}
 	}
 
@@ -465,7 +537,11 @@ func (t *Table) block(idx int) (*block, error) {
 	ko := t.blockOffsets()[idx]
 	blk := &block{
 		offset: int(ko.Offset),
+		ref:    1,
 	}
+	defer blk.decrRef() // Deal with any errors, where blk would not be returned.
+	atomic.AddInt32(&NumBlocks, 1)
+
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
 		return nil, errors.Wrapf(err,
@@ -479,8 +555,7 @@ func (t *Table) block(idx int) (*block, error) {
 		}
 	}
 
-	blk.data, err = t.decompressData(blk.data)
-	if err != nil {
+	if err = t.decompress(blk); err != nil {
 		return nil, errors.Wrapf(err,
 			"failed to decode compressed data in file: %s at offset: %d, len: %d",
 			t.fd.Name(), blk.offset, ko.Len)
@@ -493,7 +568,7 @@ func (t *Table) block(idx int) (*block, error) {
 	// Checksum length greater than block size could happen if the table was compressed and
 	// it was opened with an incorrect compression algorithm (or the data was corrupted).
 	if blk.chkLen > len(blk.data) {
-		return nil, errors.New("invalid checksum length. Either the data is" +
+		return nil, errors.New("invalid checksum length. Either the data is " +
 			"corrupted or the table options are incorrectly set")
 	}
 
@@ -520,9 +595,20 @@ func (t *Table) block(idx int) (*block, error) {
 			return nil, err
 		}
 	}
+
+	blk.incrRef()
 	if t.opt.Cache != nil && t.opt.KeepBlocksInCache {
 		key := t.blockCacheKey(idx)
-		t.opt.Cache.Set(key, blk, blk.size())
+		// incrRef should never return false here because we're calling it on a
+		// new block with ref=1.
+		y.AssertTrue(blk.incrRef())
+
+		// Decrement the block ref if we could not insert it in the cache.
+		if !t.opt.Cache.Set(key, blk, blk.size()) {
+			blk.decrRef()
+		}
+		// We have added an OnReject func in our cache, which gets called in case the block is not
+		// admitted to the cache. So, every block would be accounted for.
 	}
 	return blk, nil
 }
@@ -644,7 +730,8 @@ func (t *Table) VerifyChecksum() error {
 			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
 				t.Filename(), i, os.Offset)
 		}
-
+		// We should not call incrRef here, because the block already has one ref when created.
+		defer b.decrRef()
 		// OnBlockRead or OnTableAndBlockRead, we don't need to call verify checksum
 		// on block, verification would be done while reading block itself.
 		if !(t.opt.ChkMode == options.OnBlockRead || t.opt.ChkMode == options.OnTableAndBlockRead) {
@@ -655,7 +742,6 @@ func (t *Table) VerifyChecksum() error {
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -680,7 +766,13 @@ func (t *Table) decrypt(data []byte) ([]byte, error) {
 	iv := data[len(data)-aes.BlockSize:]
 	// Rest all bytes are data.
 	data = data[:len(data)-aes.BlockSize]
-	return y.XORBlock(data, t.opt.DataKey.Data, iv)
+
+	// TODO: Check if this is done via Calloc. Otherwise, we'll have a memory leak.
+	dst := make([]byte, len(data))
+	if err := y.XORBlock(dst, data, t.opt.DataKey.Data, iv); err != nil {
+		return nil, errors.Wrapf(err, "while decrypt")
+	}
+	return dst, nil
 }
 
 // ParseFileID reads the file id out of a filename.
@@ -710,15 +802,42 @@ func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, IDToFilename(id))
 }
 
-// decompressData decompresses the given data.
-func (t *Table) decompressData(data []byte) ([]byte, error) {
+// decompress decompresses the data stored in a block.
+func (t *Table) decompress(b *block) error {
+	var dst []byte
+	var err error
+
 	switch t.opt.Compression {
 	case options.None:
-		return data, nil
+		// Nothing to be done here.
+		return nil
 	case options.Snappy:
-		return snappy.Decode(nil, data)
+		if sz, err := snappy.DecodedLen(b.data); err == nil {
+			dst = y.Calloc(sz)
+		} else {
+			dst = y.Calloc(len(b.data) * 4) // Take a guess.
+		}
+		b.data, err = snappy.Decode(dst, b.data)
+		if err != nil {
+			y.Free(dst)
+			return errors.Wrap(err, "failed to decompress")
+		}
 	case options.ZSTD:
-		return y.ZSTDDecompress(nil, data)
+		sz := int(float64(t.opt.BlockSize) * 1.2)
+		dst = y.Calloc(sz)
+		b.data, err = y.ZSTDDecompress(dst, b.data)
+		if err != nil {
+			y.Free(dst)
+			return errors.Wrap(err, "failed to decompress")
+		}
+	default:
+		return errors.New("Unsupported compression type")
 	}
-	return nil, errors.New("Unsupported compression type")
+
+	if len(b.data) > 0 && len(dst) > 0 && &dst[0] != &b.data[0] {
+		y.Free(dst)
+	} else {
+		b.freeMe = true
+	}
+	return nil
 }
