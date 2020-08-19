@@ -347,7 +347,6 @@ func reportStats(c *y.Closer, db *badger.DB) {
 			if showKeysCount {
 				showKeysStats(db)
 			}
-
 			// fetch directory contents
 			if showDir {
 				err := filepath.Walk(sstDir, func(path string, info os.FileInfo, err error) error {

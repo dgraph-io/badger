@@ -194,7 +194,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 func Open(opt Options) (db *DB, err error) {
 	// It's okay to have zero compactors which will disable all compactions but
 	// we cannot have just one compactor otherwise we will end up with all data
-	// one level 2.
+	// on level 2.
 	if opt.NumCompactors == 1 {
 		return nil, errors.New("Cannot have 1 compactor. Need at least 2")
 	}
@@ -324,6 +324,12 @@ func Open(opt Options) (db *DB, err error) {
 			MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
 			BufferItems: 64,
 			Metrics:     true,
+			OnEvict: func(i *ristretto.Item) {
+				table.BlockEvictHandler(i.Value)
+			},
+			OnReject: func(i *ristretto.Item) {
+				table.BlockEvictHandler(i.Value)
+			},
 		}
 		db.blockCache, err = ristretto.NewCache(&config)
 		if err != nil {
@@ -986,6 +992,7 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 	defer iter.Close()
 	b := table.NewTableBuilder(bopts)
 	defer b.Close()
+
 	var vp valuePointer
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 		if len(ft.dropPrefixes) > 0 && hasAnyPrefixes(iter.Key(), ft.dropPrefixes) {
@@ -997,7 +1004,7 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 		}
 		b.Add(iter.Key(), iter.Value(), vp.Len)
 	}
-	return b.Finish()
+	return b.Finish(true)
 }
 
 type flushTask struct {
