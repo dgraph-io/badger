@@ -701,9 +701,9 @@ nextTable:
 			mu.Lock()
 			newTables = append(newTables, tbl)
 			num := atomic.LoadInt32(&table.NumBlocks)
-			allocs := float64(atomic.LoadInt64(&y.NumAllocs)) / float64((1 << 20))
-			s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, allocs)
 			mu.Unlock()
+
+			s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, y.NumAllocsMB.Value())
 		}(builder)
 	}
 

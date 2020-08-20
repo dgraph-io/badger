@@ -7,7 +7,6 @@ package y
 // #include <stdlib.h>
 import "C"
 import (
-	"sync/atomic"
 	"unsafe"
 )
 
@@ -20,8 +19,6 @@ func throw(s string)
 // TODO(peter): Rather than relying an C malloc/free, we could fork the Go
 // runtime page allocator and allocate large chunks of memory using mmap or
 // similar.
-
-var NumAllocs int64
 
 // New allocates a slice of size n. The returned slice is from manually managed
 // memory and MUST be released by calling Free. Failure to do so will result in
@@ -49,7 +46,7 @@ func Calloc(n int) []byte {
 		// it cannot allocate memory.
 		throw("out of memory")
 	}
-	atomic.AddInt64(&NumAllocs, int64(n))
+	NumAllocsMB.Add(float64(n) / (1 << 20))
 	// Interpret the C pointer as a pointer to a Go array, then slice.
 	return (*[MaxArrayLen]byte)(unsafe.Pointer(ptr))[:n:n]
 }
@@ -62,6 +59,6 @@ func Free(b []byte) {
 		}
 		ptr := unsafe.Pointer(&b[0])
 		C.free(ptr)
-		atomic.AddInt64(&NumAllocs, -int64(sz))
+		NumAllocsMB.Add(float64(-sz) / (1 << 20))
 	}
 }
