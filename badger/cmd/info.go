@@ -249,8 +249,8 @@ func tableInfo(dir, valueDir string, db *badger.DB) {
 		lk, lt := y.ParseKey(t.Left), y.ParseTs(t.Left)
 		rk, rt := y.ParseKey(t.Right), y.ParseTs(t.Right)
 
-		fmt.Printf("SSTable [L%d, %03d, %07d] [%20X, v%d -> %20X, v%d] [%d]\n",
-			t.Level, t.ID, t.KeyCount, lk, lt, rk, rt, t.IndexSz)
+		fmt.Printf("SSTable [L%d, %03d, %07d] [%20X, v%d -> %20X, v%d] [%s]\n",
+			t.Level, t.ID, t.KeyCount, lk, lt, rk, rt, hbytes(int64(t.IndexSz)))
 	}
 	fmt.Println()
 }
