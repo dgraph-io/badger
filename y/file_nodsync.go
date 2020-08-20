@@ -1,4 +1,4 @@
-// +build dragonfly freebsd windows
+// +build dragonfly freebsd windows plan9
 
 /*
  * Copyright 2017 Dgraph Labs, Inc. and Contributors
