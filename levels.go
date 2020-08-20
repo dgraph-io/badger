@@ -1138,6 +1138,7 @@ type TableInfo struct {
 	Right       []byte
 	KeyCount    uint64 // Number of keys in the table
 	EstimatedSz uint64
+	IndexSz     int
 }
 
 func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo) {
@@ -1160,6 +1161,7 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 				Right:       t.Biggest(),
 				KeyCount:    count,
 				EstimatedSz: t.EstimatedSize(),
+				IndexSz:     t.IndexSize(),
 			}
 			result = append(result, info)
 		}
