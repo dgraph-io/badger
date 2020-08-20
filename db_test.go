@@ -382,7 +382,7 @@ func TestStreamDB(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
-	opts := getTestOptions(dir)
+	opts := getTestOptions(dir).WithCompression(options.ZSTD)
 
 	db, err := OpenManaged(opts)
 	require.NoError(t, err)
@@ -400,8 +400,8 @@ func TestStreamDB(t *testing.T) {
 
 	outDir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
-	outOpt := getTestOptions(outDir).WithCompression(options.None).WithReadOnly(false)
-	require.NoError(t, db.StreamDB(outDir, outOpt))
+	outOpt := getTestOptions(outDir)
+	require.NoError(t, db.StreamDB(outOpt))
 
 	outDB, err := OpenManaged(outOpt)
 	require.NoError(t, err)
@@ -412,7 +412,7 @@ func TestStreamDB(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
 		val := []byte(fmt.Sprintf("val%d", i))
-		txn := db.NewTransactionAt(1, false)
+		txn := outDB.NewTransactionAt(1, false)
 		item, err := txn.Get(key)
 		require.NoError(t, err)
 		require.EqualValues(t, val, getItemValue(t, item))

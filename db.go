@@ -1752,10 +1752,11 @@ func createDirs(opt Options) error {
 
 // Stream the contents of this DB to a new DB with options outOptions that will be
 // created in outDir.
-func (db *DB) StreamDB(outDir string , outOptions Options) error {
-	if err := os.MkdirAll(outDir, 0700); err != nil {
-		return errors.Wrapf(err, "cannot create directory for out DB at %s", outDir)
+func (db *DB) StreamDB(outOptions Options) error {
+	if outOptions.Dir != outOptions.ValueDir {
+		errors.Errorf("table and value log directories should match.")
 	}
+	outDir := outOptions.Dir
 
 	// Open output DB.
 	outDB, err := OpenManaged(outOptions)
@@ -1763,7 +1764,7 @@ func (db *DB) StreamDB(outDir string , outOptions Options) error {
 		return errors.Wrapf(err, "cannot open out DB at %s", outDir)
 	}
 	defer outDB.Close()
-	writer := outDB.NewStreamWriter();
+	writer := outDB.NewStreamWriter()
 	if err := writer.Prepare(); err != nil {
 		errors.Wrapf(err, "cannot create stream writer in out DB at %s", outDir)
 	}

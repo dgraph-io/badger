@@ -17,7 +17,9 @@
 package cmd
 
 import (
+	"io"
 	"math"
+	"os"
 
 	"github.com/dgraph-io/badger/v2"
 	"github.com/dgraph-io/badger/v2/options"
@@ -35,32 +37,62 @@ This command streams the contents of this DB into another DB with the given opti
 }
 
 var outDir string
+var numVersions int
+var compression uint32
 
 func init() {
 	// TODO: Add more options.
 	RootCmd.AddCommand(streamCmd)
-	streamCmd.Flags().StringVarP(&outDir, "out", "o", "", "Path to input DB")
+	streamCmd.Flags().StringVarP(&outDir, "out", "o", "",
+		"Path to output DB. The directory should be empty.")
 	streamCmd.Flags().BoolVarP(&truncate, "truncate", "", false, "Option to truncate the DBs")
 	streamCmd.Flags().BoolVarP(&readOnly, "read_only", "", true,
-		"Option to open in DB in read-only mode")
+		"Option to open input DB in read-only mode")
+	streamCmd.Flags().IntVarP(&numVersions, "num_versions", "", 0,
+		"Option to configure the maximum number of versions per key. "+
+			"Values <= 0 will be considered to have the max number of versions.")
+	streamCmd.Flags().Uint32VarP(&compression, "compression", "", 0,
+		"Option to configure the compression type in output DB. "+
+			"0 to disable, 1 for Snappy, and 2 for ZSTD.")
 }
 
-func stream(cmd *cobra.Command, args[] string) error {
+func stream(cmd *cobra.Command, args []string) error {
+	// Check that outDir doesn't exist or is empty.
+	if _, err := os.Stat(outDir); err == nil {
+		f, err := os.Open(outDir)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		_, err = f.Readdirnames(1)
+		if err != io.EOF {
+			return errors.Errorf("cannot run stream tool on non-empty output directory %s", outDir)
+		}
+	}
+
 	// Options for input DB.
+	if numVersions <= 0 {
+		numVersions = math.MaxInt32
+	}
 	inOpt := badger.DefaultOptions(sstDir).
 		WithReadOnly(readOnly).
 		WithTruncate(truncate).
 		WithValueThreshold(1 << 10 /* 1KB */).
-		WithNumVersionsToKeep(math.MaxInt32)
+		WithNumVersionsToKeep(numVersions)
 
 	// Options for output DB.
+	if compression < 0 || compression > 2 {
+		return errors.Errorf(
+			"compression value must be one of 0 (disabled), 1 (Snappy), or 2 (ZSTD)")
+	}
 	outOpt := inOpt.WithDir(outDir).WithValueDir(outDir).
-		WithCompression(options.None).WithReadOnly(false)
+		WithCompression(options.CompressionType(compression)).WithReadOnly(false)
 
 	inDB, err := badger.OpenManaged(inOpt)
 	if err != nil {
 		return errors.Wrapf(err, "cannot open DB at %s", sstDir)
 	}
 	defer inDB.Close()
-	return inDB.StreamDB(outDir, outOpt)
+	return inDB.StreamDB(outOpt)
 }
