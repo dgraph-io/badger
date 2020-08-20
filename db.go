@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
-	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -392,28 +391,6 @@ func Open(opt Options) (db *DB, err error) {
 
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
-	{
-		txn := db.newTransaction(false, true)
-		defer txn.Discard()
-		iopt := DefaultIteratorOptions
-		iopt.AllVersions = true
-		iopt.InternalAccess = true
-		it := txn.NewKeyIterator(head, iopt)
-		defer it.Close()
-
-		var vptr valuePointer
-		for it.Rewind(); it.Valid(); it.Next() {
-			item := it.Item()
-			err := item.Value(func(val []byte) error {
-				vptr.Decode(val)
-				fmt.Printf("========================== HEAD ===> %+v\n", vptr)
-				return nil
-			})
-			if err != nil {
-				return db, errors.Wrap(err, "while getting head")
-			}
-		}
-	}
 	vs, err := db.get(headKey)
 	if err != nil {
 		return db, errors.Wrap(err, "Retrieving head")
@@ -422,9 +399,7 @@ func Open(opt Options) (db *DB, err error) {
 	var vptr valuePointer
 	if len(vs.Value) > 0 {
 		vptr.Decode(vs.Value)
-		fmt.Printf("========================== GET HEAD ===> %+v\n", vptr)
 	} else {
-		fmt.Printf("=====================================> GET HEAD IS NIL\n")
 	}
 
 	replayCloser := y.NewCloser(1)

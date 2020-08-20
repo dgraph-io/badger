@@ -377,7 +377,7 @@ func (itr *Iterator) ValueCopy() (ret y.ValueStruct) {
 
 // Next follows the y.Iterator interface
 func (itr *Iterator) Next() {
-	if itr.opt&REVERSED > 0 {
+	if itr.opt&REVERSED == 0 {
 		itr.next()
 	} else {
 		itr.prev()
@@ -386,7 +386,7 @@ func (itr *Iterator) Next() {
 
 // Rewind follows the y.Iterator interface
 func (itr *Iterator) Rewind() {
-	if itr.opt&REVERSED > 0 {
+	if itr.opt&REVERSED == 0 {
 		itr.seekToFirst()
 	} else {
 		itr.seekToLast()
@@ -395,7 +395,7 @@ func (itr *Iterator) Rewind() {
 
 // Seek follows the y.Iterator interface
 func (itr *Iterator) Seek(key []byte) {
-	if itr.opt&REVERSED > 0 {
+	if itr.opt&REVERSED == 0 {
 		itr.seek(key)
 	} else {
 		itr.seekForPrev(key)
