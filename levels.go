@@ -1146,7 +1146,7 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 		for _, t := range l.tables {
 			var count uint64
 			if withKeysCount {
-				it := t.NewIterator(table.NOCACHE) // Only used for debugging.
+				it := t.NewIterator(table.NOCACHE)
 				for it.Rewind(); it.Valid(); it.Next() {
 					count++
 				}

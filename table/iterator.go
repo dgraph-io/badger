@@ -167,7 +167,7 @@ type Iterator struct {
 
 	// Internally, Iterator is bidirectional. However, we only expose the
 	// unidirectional functionality for now.
-	opt int
+	opt int // Valid options are REVERSED and NOCACHE.
 }
 
 // NewIterator returns a new iterator of the Table
@@ -414,7 +414,7 @@ type ConcatIterator struct {
 	cur     *Iterator
 	iters   []*Iterator // Corresponds to tables.
 	tables  []*Table    // Disregarding reversed, this is in ascending order.
-	options int
+	options int         // Valid options are REVERSED and NOCACHE.
 }
 
 // NewConcatIterator creates a new concatenated iterator
