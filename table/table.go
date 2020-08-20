@@ -647,7 +647,7 @@ func (t *Table) blockOffsetsCacheKey() []byte {
 	return buf
 }
 
-// IndexSize size is the length of block indices
+// IndexSize is the size of table index in bytes
 func (t *Table) IndexSize() int {
 	indexSz := 0
 	for _, bi := range t.blockOffsets() {
