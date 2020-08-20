@@ -103,6 +103,9 @@ var (
 	// ErrWindowsNotSupported is returned when opt.ReadOnly is used on Windows
 	ErrWindowsNotSupported = errors.New("Read-only mode is not supported on Windows")
 
+	// ErrPlan9NotSupported is returned when opt.ReadOnly is used on Plan 9
+	ErrPlan9NotSupported = errors.New("Read-only mode is not supported on Plan 9")
+
 	// ErrTruncateNeeded is returned when the value log gets corrupt, and requires truncation of
 	// corrupt data to allow Badger to run properly.
 	ErrTruncateNeeded = errors.New(

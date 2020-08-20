@@ -1,4 +1,4 @@
-// +build !windows
+// +build !windows,!plan9
 
 /*
  * Copyright 2017 Dgraph Labs, Inc. and Contributors
