@@ -46,7 +46,7 @@ func Calloc(n int) []byte {
 		// it cannot allocate memory.
 		throw("out of memory")
 	}
-	NumAllocsMB.Add(float64(n) / (1 << 20))
+	NumAllocs.Add(n)
 	// Interpret the C pointer as a pointer to a Go array, then slice.
 	return (*[MaxArrayLen]byte)(unsafe.Pointer(ptr))[:n:n]
 }
@@ -59,6 +59,6 @@ func Free(b []byte) {
 		}
 		ptr := unsafe.Pointer(&b[0])
 		C.free(ptr)
-		NumAllocsMB.Add(float64(-sz) / (1 << 20))
+		NumAllocs.Add(-sz)
 	}
 }

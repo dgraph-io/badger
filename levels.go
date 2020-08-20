@@ -703,7 +703,7 @@ nextTable:
 			num := atomic.LoadInt32(&table.NumBlocks)
 			mu.Unlock()
 
-			s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, y.NumAllocsMB.Value())
+			s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, y.NumAllocs.Value())
 		}(builder)
 	}
 
