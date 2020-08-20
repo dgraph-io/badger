@@ -226,7 +226,7 @@ func TestBloomfilter(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, withBlooms, tab.hasBloomFilter)
 		// Forward iteration
-		it := tab.NewIterator(false)
+		it := tab.NewIterator(0)
 		c := 0
 		for it.Rewind(); it.Valid(); it.Next() {
 			c++
@@ -236,7 +236,7 @@ func TestBloomfilter(t *testing.T) {
 		require.Equal(t, keyCount, c)
 
 		// Backward iteration
-		it = tab.NewIterator(true)
+		it = tab.NewIterator(REVERSED)
 		c = 0
 		for it.Rewind(); it.Valid(); it.Next() {
 			c++
