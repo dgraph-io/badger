@@ -268,6 +268,11 @@ func (b block) verifyCheckSum() error {
 // -- consider t.Close() instead). The fd has to writeable because we call Truncate on it before
 // deleting. Checksum for all blocks of table is verified based on value of chkMode.
 func OpenTable(fd *os.File, opts Options) (*Table, error) {
+	// BlockSize is used to compute the approximate size of the decompressed
+	// block. It should not be zero if the table is compressed.
+	if opts.BlockSize == 0 && opts.Compression != options.None {
+		return nil, errors.New("Block size cannot be zero")
+	}
 	fileInfo, err := fd.Stat()
 	if err != nil {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
@@ -809,6 +814,8 @@ func (t *Table) decompress(b *block) error {
 	case options.Snappy:
 		if sz, err := snappy.DecodedLen(b.data); err == nil {
 			dst = y.Calloc(sz)
+		} else {
+			dst = y.Calloc(len(b.data) * 4) // Take a guess.
 		}
 		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {

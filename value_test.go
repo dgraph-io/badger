@@ -489,6 +489,8 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	err = db.Close()
 	require.NoError(t, err)
 
+	// Avoid running compactors on reopening badger.
+	opt.NumCompactors = 0
 	db, err = Open(opt)
 	require.NoError(t, err)
 	defer db.Close()

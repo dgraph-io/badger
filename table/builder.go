@@ -39,9 +39,9 @@ const (
 	KB = 1024
 	MB = KB * 1024
 
-	// When a block is encrypted, it's length increases. We add 200 bytes of padding to
+	// When a block is encrypted, it's length increases. We add 256 bytes of padding to
 	// handle cases when block size increases. This is an approximate number.
-	padding = 200
+	padding = 256
 )
 
 type header struct {
@@ -95,7 +95,7 @@ type Builder struct {
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
-		// Additional 5 MB to store index (approximate).
+		// Additional 16 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
 		buf:        y.Calloc(int(opts.TableSize + 16*MB)),
 		tableIndex: &pb.TableIndex{},
@@ -488,19 +488,7 @@ func (b *Builder) encrypt(data []byte, viaC bool) ([]byte, error) {
 	}
 
 	y.AssertTrue(cap(dst)-len(dst) >= len(iv))
-	dst = append(dst, iv...)
-	// if !viaC || cap(data)-len(data) >= len(iv) {
-	// 	data = append(data, iv...)
-	// } else {
-	// 	// This has to be viaC.
-	// 	var buf []byte
-	// 	buf = y.New(len(data) + len(iv))
-	// 	copy(buf, data)
-	// 	copy(buf[len(data):], iv)
-	// 	y.Free(data)
-	// 	data = buf
-	// }
-	return dst, nil
+	return append(dst, iv...), nil
 }
 
 // shouldEncrypt tells us whether to encrypt the data or not.

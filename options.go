@@ -231,17 +231,6 @@ func (opt Options) WithValueDir(val string) Options {
 	return opt
 }
 
-// WithLoggingLevel returns a new Options value with logging level of the
-// default logger set to the given value.
-// LoggingLevel sets the level of logging. It should be one of DEBUG, INFO,
-// WARNING or ERROR levels.
-//
-// The default value of LoggingLevel is INFO.
-func (opt Options) WithLoggingLevel(val loggingLevel) Options {
-	opt.Logger = defaultLogger(val)
-	return opt
-}
-
 // WithSyncWrites returns a new Options value with SyncWrites set to the given value.
 //
 // When SyncWrites is true all writes are synced to disk. Setting this to false would achieve better
@@ -316,6 +305,17 @@ func (opt Options) WithTruncate(val bool) Options {
 // The default value of Logger writes to stderr using the log package from the Go standard library.
 func (opt Options) WithLogger(val Logger) Options {
 	opt.Logger = val
+	return opt
+}
+
+// WithLoggingLevel returns a new Options value with logging level of the
+// default logger set to the given value.
+// LoggingLevel sets the level of logging. It should be one of DEBUG, INFO,
+// WARNING or ERROR levels.
+//
+// The default value of LoggingLevel is INFO.
+func (opt Options) WithLoggingLevel(val loggingLevel) Options {
+	opt.Logger = defaultLogger(val)
 	return opt
 }
 
@@ -461,7 +461,7 @@ func (opt Options) WithValueLogMaxEntries(val uint32) Options {
 // NumCompactors sets the number of compaction workers to run concurrently.
 // Setting this to zero stops compactions, which could eventually cause writes to block forever.
 //
-// The default value of NumCompactors is 2. One is dedicated just for L0.
+// The default value of NumCompactors is 2. One is dedicated just for L0 and L1.
 func (opt Options) WithNumCompactors(val int) Options {
 	opt.NumCompactors = val
 	return opt
@@ -669,33 +669,26 @@ func (opt Options) WithDetectConflicts(b bool) Options {
 // given value.
 //
 // When this option is set badger will store the block offsets in a cache along with the blocks.
-// The size of the cache is determined by the MaxCacheSize option.If the MaxCacheSize is set to
-// zero, then MaxCacheSize is set to 100 mb. When indices are stored in the cache, the read
-// performance might be affected but the cache limits the amount of memory used by the indices.
+// The size of the cache is determined by the MaxCacheSize option. When indices
+// are stored in the cache, the read performance might be affected but the
+// cache limits the amount of memory used by the indices.
 //
 // The default value of KeepBlockOffsetInCache is false.
 func (opt Options) WithKeepBlockIndicesInCache(val bool) Options {
 	opt.KeepBlockIndicesInCache = val
-
-	if val && opt.MaxCacheSize == 0 {
-		opt.MaxCacheSize = 100 << 20
-	}
 	return opt
 }
 
 // WithKeepBlocksInCache returns a new Option value with KeepBlocksInCache set to the
 // given value.
 //
-// When this option is set badger will store the block in the cache. The size of the cache is
-// determined by the MaxCacheSize option.If the MaxCacheSize is set to zero,
-// then MaxCacheSize is set to 100 mb.
+// When this option is set badger will store table blocks in the cache. The
+// size of the cache is determined by the MaxCacheSize option. It is not
+// recommended to enable this option if you're not using compression or
+// encryption in badger.
 //
 // The default value of KeepBlocksInCache is false.
 func (opt Options) WithKeepBlocksInCache(val bool) Options {
 	opt.KeepBlocksInCache = val
-
-	if val && opt.MaxCacheSize == 0 {
-		opt.MaxCacheSize = 100 << 20
-	}
 	return opt
 }
