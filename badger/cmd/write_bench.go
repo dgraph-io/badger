@@ -249,10 +249,8 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithCompactL0OnClose(force).
 		WithValueThreshold(valueThreshold).
 		WithNumVersionsToKeep(numVersions).
-		WithMaxCacheSize(maxCacheSize << 20).
-		WithKeepBlockIndicesInCache(keepBlockIdxInCache).
-		WithKeepBlocksInCache(keepBlocksInCache).
-		WithMaxBfCacheSize(maxBfCacheSize << 20).
+		WithBlockCacheSize(maxCacheSize << 20).
+		WithIndexCacheSize(maxBfCacheSize << 20).
 		WithValueLogMaxEntries(vlogMaxEntries).
 		WithTableLoadingMode(mode).
 		WithEncryptionKey([]byte(encryptionKey)).

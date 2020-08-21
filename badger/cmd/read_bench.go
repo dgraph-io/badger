@@ -118,10 +118,8 @@ func readBench(cmd *cobra.Command, args []string) error {
 		WithReadOnly(readOnly).
 		WithTableLoadingMode(mode).
 		WithValueLogLoadingMode(mode).
-		WithMaxCacheSize(sizeMaxCache << 20).
-		WithKeepBlockIndicesInCache(keepBlockIdxCache).
-		WithKeepBlocksInCache(keepBlocksCache).
-		WithMaxBfCacheSize(sizeMaxBfCache << 20)
+		WithBlockCacheSize(sizeMaxCache << 20).
+		WithIndexCacheSize(sizeMaxBfCache << 20)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
 	db, err := badger.Open(opt)
 	if err != nil {
