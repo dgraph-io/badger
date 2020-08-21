@@ -32,6 +32,7 @@ import (
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 )
 
@@ -703,7 +704,7 @@ nextTable:
 			num := atomic.LoadInt32(&table.NumBlocks)
 			mu.Unlock()
 
-			s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, y.NumAllocs.Value())
+			s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, z.NumAllocsMB())
 		}(builder)
 	}
 

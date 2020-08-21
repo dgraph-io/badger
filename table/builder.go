@@ -97,7 +97,7 @@ func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
 		// Additional 16 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
-		buf:        y.Calloc(int(opts.TableSize + 16*MB)),
+		buf:        z.Calloc(int(opts.TableSize + 16*MB)),
 		tableIndex: &pb.TableIndex{},
 		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:        &opts,
@@ -157,14 +157,14 @@ func (b *Builder) handleBlock() {
 		item.end = item.start + uint32(len(blockBuf))
 
 		if doCompress {
-			y.Free(blockBuf)
+			z.Free(blockBuf)
 		}
 	}
 }
 
 // Close closes the TableBuilder.
 func (b *Builder) Close() {
-	y.Free(b.buf)
+	z.Free(b.buf)
 }
 
 // Empty returns whether it's empty.
@@ -228,12 +228,12 @@ func (b *Builder) grow(n uint32) {
 	if n < l/2 {
 		n = l / 2
 	}
-	newBuf := y.Calloc(int(l + n))
+	newBuf := z.Calloc(int(l + n))
 	y.AssertTrue(uint32(len(newBuf)) == l+n)
 
 	b.bufLock.Lock()
 	copy(newBuf, b.buf)
-	y.Free(b.buf)
+	z.Free(b.buf)
 	b.buf = newBuf
 	b.bufLock.Unlock()
 }
@@ -471,7 +471,7 @@ func (b *Builder) encrypt(data []byte, viaC bool) ([]byte, error) {
 	needSz := len(data) + len(iv)
 	var dst []byte
 	if viaC {
-		dst = y.Calloc(needSz)
+		dst = z.Calloc(needSz)
 	} else {
 		dst = make([]byte, needSz)
 	}
@@ -479,12 +479,12 @@ func (b *Builder) encrypt(data []byte, viaC bool) ([]byte, error) {
 
 	if err = y.XORBlock(dst, data, b.DataKey().Data, iv); err != nil {
 		if viaC {
-			y.Free(dst)
+			z.Free(dst)
 		}
 		return data, y.Wrapf(err, "Error while encrypting in Builder.encrypt")
 	}
 	if viaC {
-		y.Free(data)
+		z.Free(data)
 	}
 
 	y.AssertTrue(cap(dst)-len(dst) >= len(iv))
@@ -504,11 +504,11 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 		return data, nil
 	case options.Snappy:
 		sz := snappy.MaxEncodedLen(len(data))
-		dst := y.Calloc(sz)
+		dst := z.Calloc(sz)
 		return snappy.Encode(dst, data), nil
 	case options.ZSTD:
 		sz := zstd.CompressBound(len(data))
-		dst := y.Calloc(sz)
+		dst := z.Calloc(sz)
 		return y.ZSTDCompress(dst, data, b.opt.ZSTDCompressionLevel)
 	}
 	return nil, errors.New("Unsupported compression type")

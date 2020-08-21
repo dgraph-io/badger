@@ -16,7 +16,11 @@
 
 package y
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+
+	"github.com/dgraph-io/ristretto/z"
+)
 
 type Buffer struct {
 	buf    []byte
@@ -25,7 +29,7 @@ type Buffer struct {
 
 func NewBuffer(sz int) *Buffer {
 	return &Buffer{
-		buf:    Calloc(sz),
+		buf:    z.Calloc(sz),
 		offset: 0,
 	}
 }
@@ -44,10 +48,10 @@ const smallBufferSize = 64
 func (b *Buffer) Grow(n int) {
 	// In this case, len and cap are the same.
 	if len(b.buf) == 0 && n <= smallBufferSize {
-		b.buf = Calloc(smallBufferSize)
+		b.buf = z.Calloc(smallBufferSize)
 		return
 	} else if b.buf == nil {
-		b.buf = Calloc(n)
+		b.buf = z.Calloc(n)
 		return
 	}
 	if b.offset+n < len(b.buf) {
@@ -55,9 +59,9 @@ func (b *Buffer) Grow(n int) {
 	}
 
 	sz := 2*len(b.buf) + n
-	newBuf := Calloc(sz)
+	newBuf := z.Calloc(sz)
 	copy(newBuf, b.buf[:b.offset])
-	Free(b.buf)
+	z.Free(b.buf)
 	b.buf = newBuf
 }
 
@@ -108,5 +112,5 @@ func (b *Buffer) Reset() {
 }
 
 func (b *Buffer) Release() {
-	Free(b.buf)
+	z.Free(b.buf)
 }

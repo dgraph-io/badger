@@ -324,12 +324,7 @@ func Open(opt Options) (db *DB, err error) {
 			MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
 			BufferItems: 64,
 			Metrics:     true,
-			OnEvict: func(i *ristretto.Item) {
-				table.BlockEvictHandler(i.Value)
-			},
-			OnReject: func(i *ristretto.Item) {
-				table.BlockEvictHandler(i.Value)
-			},
+			OnExit:      table.BlockEvictHandler,
 		}
 		db.blockCache, err = ristretto.NewCache(&config)
 		if err != nil {
