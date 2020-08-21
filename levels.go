@@ -517,10 +517,10 @@ func (s *levelsController) compactBuildTables(
 	var iters []y.Iterator
 	switch {
 	case lev == 0:
-		iters = appendIteratorsReversed(iters, topTables, false)
+		iters = appendIteratorsReversed(iters, topTables, table.NOCACHE)
 	case len(topTables) > 0:
 		y.AssertTrue(len(topTables) == 1)
-		iters = []y.Iterator{topTables[0].NewIterator(false)}
+		iters = []y.Iterator{topTables[0].NewIterator(table.NOCACHE)}
 	}
 
 	// Next level has level>=1 and we can use ConcatIterator as key ranges do not overlap.
@@ -541,7 +541,7 @@ nextTable:
 		}
 		valid = append(valid, table)
 	}
-	iters = append(iters, table.NewConcatIterator(valid, false))
+	iters = append(iters, table.NewConcatIterator(valid, table.NOCACHE))
 	it := table.NewMergeIterator(iters, false)
 	defer it.Close() // Important to close the iterator to do ref counting.
 
@@ -701,9 +701,9 @@ nextTable:
 			mu.Lock()
 			newTables = append(newTables, tbl)
 			num := atomic.LoadInt32(&table.NumBlocks)
-			allocs := float64(atomic.LoadInt64(&y.NumAllocs)) / float64((1 << 20))
-			s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, allocs)
 			mu.Unlock()
+
+			s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, y.NumAllocs.Value())
 		}(builder)
 	}
 
@@ -1110,10 +1110,10 @@ func (s *levelsController) get(key []byte, maxVs *y.ValueStruct, startLevel int)
 	return y.ValueStruct{}, nil
 }
 
-func appendIteratorsReversed(out []y.Iterator, th []*table.Table, reversed bool) []y.Iterator {
+func appendIteratorsReversed(out []y.Iterator, th []*table.Table, opt int) []y.Iterator {
 	for i := len(th) - 1; i >= 0; i-- {
 		// This will increment the reference of the table handler.
-		out = append(out, th[i].NewIterator(reversed))
+		out = append(out, th[i].NewIterator(opt))
 	}
 	return out
 }
@@ -1147,7 +1147,7 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 		for _, t := range l.tables {
 			var count uint64
 			if withKeysCount {
-				it := t.NewIterator(false)
+				it := t.NewIterator(table.NOCACHE)
 				for it.Rewind(); it.Valid(); it.Next() {
 					count++
 				}
