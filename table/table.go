@@ -243,7 +243,7 @@ func (b *block) decrRef() {
 	// will lead to SEGFAULT.
 	if atomic.AddInt32(&b.ref, -1) == 0 {
 		if b.freeMe {
-			y.Free(b.data)
+			z.Free(b.data)
 		}
 		atomic.AddInt32(&NumBlocks, -1)
 		// blockPool.Put(&b.data)
@@ -822,21 +822,21 @@ func (t *Table) decompress(b *block) error {
 		return nil
 	case options.Snappy:
 		if sz, err := snappy.DecodedLen(b.data); err == nil {
-			dst = y.Calloc(sz)
+			dst = z.Calloc(sz)
 		} else {
-			dst = y.Calloc(len(b.data) * 4) // Take a guess.
+			dst = z.Calloc(len(b.data) * 4) // Take a guess.
 		}
 		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {
-			y.Free(dst)
+			z.Free(dst)
 			return errors.Wrap(err, "failed to decompress")
 		}
 	case options.ZSTD:
 		sz := int(float64(t.opt.BlockSize) * 1.2)
-		dst = y.Calloc(sz)
+		dst = z.Calloc(sz)
 		b.data, err = y.ZSTDDecompress(dst, b.data)
 		if err != nil {
-			y.Free(dst)
+			z.Free(dst)
 			return errors.Wrap(err, "failed to decompress")
 		}
 	default:
@@ -844,7 +844,7 @@ func (t *Table) decompress(b *block) error {
 	}
 
 	if len(b.data) > 0 && len(dst) > 0 && &dst[0] != &b.data[0] {
-		y.Free(dst)
+		z.Free(dst)
 	} else {
 		b.freeMe = true
 	}
