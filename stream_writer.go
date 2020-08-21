@@ -418,8 +418,8 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	fileID := w.db.lc.reserveFileID()
 	opts := buildTableOptions(w.db.opt)
 	opts.DataKey = builder.DataKey()
-	opts.Cache = w.db.blockCache
-	opts.BfCache = w.db.bfCache
+	opts.BlockCache = w.db.blockCache
+	opts.IndexCache = w.db.bfCache
 	var tbl *table.Table
 	if w.db.opt.InMemory {
 		var err error

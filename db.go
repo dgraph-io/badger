@@ -210,12 +210,6 @@ func Open(opt Options) (db *DB, err error) {
 			maxValueThreshold)
 	}
 
-	// We need a cache if KeepBlocksInCache or KeepBlockIndices is set to true.
-	if (opt.KeepBlocksInCache || opt.KeepBlockIndicesInCache) && opt.MaxCacheSize <= 0 {
-		return nil, errors.New("Cannot use MaxCacheSize=0 with KeepBlocksInCache " +
-			"or KeepBlockIndicesInCache set.")
-	}
-
 	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
 	if int64(opt.ValueThreshold) > opt.maxBatchSize {
@@ -317,11 +311,11 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}()
 
-	if opt.MaxCacheSize > 0 {
+	if opt.BlockCacheSize > 0 {
 		config := ristretto.Config{
 			// Use 5% of cache memory for storing counters.
-			NumCounters: int64(float64(opt.MaxCacheSize) * 0.05 * 2),
-			MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
+			NumCounters: int64(float64(opt.BlockCacheSize) * 0.05 * 2),
+			MaxCost:     int64(float64(opt.BlockCacheSize) * 0.95),
 			BufferItems: 64,
 			Metrics:     true,
 			OnExit:      table.BlockEvictHandler,
@@ -332,11 +326,11 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}
 
-	if opt.MaxBfCacheSize > 0 {
+	if opt.IndexCacheSize > 0 {
 		config := ristretto.Config{
 			// Use 5% of cache memory for storing counters.
-			NumCounters: int64(float64(opt.MaxBfCacheSize) * 0.05 * 2),
-			MaxCost:     int64(float64(opt.MaxBfCacheSize) * 0.95),
+			NumCounters: int64(float64(opt.IndexCacheSize) * 0.05 * 2),
+			MaxCost:     int64(float64(opt.IndexCacheSize) * 0.95),
 			BufferItems: 64,
 			Metrics:     true,
 		}
@@ -1050,8 +1044,8 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	bopts := buildTableOptions(db.opt)
 	bopts.DataKey = dk
 	// Builder does not need cache but the same options are used for opening table.
-	bopts.Cache = db.blockCache
-	bopts.BfCache = db.bfCache
+	bopts.BlockCache = db.blockCache
+	bopts.IndexCache = db.bfCache
 	tableData := buildL0Table(ft, bopts)
 
 	fileID := db.lc.reserveFileID()
