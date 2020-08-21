@@ -97,21 +97,17 @@ type TableInterface interface {
 	DoesNotHave(hash uint64) bool
 }
 
-// cachedIndex represent a cached index.
-type cachedIndex struct {
-	blockOffset []*pb.BlockOffset
-	bf          *z.Bloom
-}
-
 // Table represents a loaded table file with the info we have about it.
 type Table struct {
 	sync.Mutex
 
 	fd        *os.File // Own fd.
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
+	bfLock    sync.Mutex
 
-	index cachedIndex
-	ref   int32 // For file garbage collection. Atomic.
+	blockOffset []*pb.BlockOffset
+	ref         int32 // For file garbage collection. Atomic.
+	bf          *z.Bloom
 
 	mmap []byte // Memory mapped.
 
@@ -177,8 +173,8 @@ func (t *Table) DecrRef() error {
 			t.opt.BlockCache.Del(t.blockCacheKey(i))
 		}
 		// Delete bloom filter from the cache.
-		t.opt.IndexCache.Del(t.ID())
-
+		t.opt.IndexCache.Del(t.blockOffsetsCacheKey())
+		t.opt.IndexCache.Del(t.bfCacheKey())
 	}
 	return nil
 }
@@ -457,14 +453,16 @@ func (t *Table) initIndex() (*pb.BlockOffset, error) {
 	// No cache
 	if t.opt.IndexCache == nil {
 		// Keep blooms in memory.
-		if t.hasBloomFilter {
+		if t.hasBloomFilter && t.opt.LoadBloomsOnOpen {
 			bf, err := z.JSONUnmarshal(index.BloomFilter)
 			y.Check(err)
 
-			t.index.bf = bf
+			t.bfLock.Lock()
+			t.bf = bf
+			t.bfLock.Unlock()
 		}
 		// Keep block offsets in memory.
-		t.index.blockOffset = index.Offsets
+		t.blockOffset = index.Offsets
 	}
 
 	// We don't need to put anything in the indexCache here. Table.Open will
@@ -475,16 +473,21 @@ func (t *Table) initIndex() (*pb.BlockOffset, error) {
 // blockOffsets returns block offsets of this table.
 func (t *Table) blockOffsets() []*pb.BlockOffset {
 	if t.opt.IndexCache == nil {
-		return t.index.blockOffset
+		return t.blockOffset
 	}
 
-	if val, ok := t.opt.IndexCache.Get(t.ID()); ok && val != nil {
-		idx := val.(*cachedIndex)
-		return idx.blockOffset
+	if val, ok := t.opt.IndexCache.Get(t.blockOffsetsCacheKey()); ok && val != nil {
+		return val.([]*pb.BlockOffset)
 	}
 
-	offsets, _ := t.readAndSetIndex()
-	return offsets
+	index, err := t.readTableIndex()
+	y.Check(err)
+	t.opt.IndexCache.Set(
+		t.blockOffsetsCacheKey(),
+		index.Offsets,
+		calculateOffsetsSize(index.Offsets))
+
+	return index.Offsets
 }
 
 // calculateOffsetsSize returns the size of *pb.BlockOffset array
@@ -602,6 +605,18 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 	return blk, nil
 }
 
+// bfCacheKey returns the cache key for bloom filter.
+func (t *Table) bfCacheKey() []byte {
+	y.AssertTrue(t.id < math.MaxUint32)
+	buf := make([]byte, 6)
+	// Without the "bf" prefix, we will have conflict with the blockCacheKey.
+	buf[0] = 'b'
+	buf[1] = 'f'
+
+	binary.BigEndian.PutUint32(buf[2:], uint32(t.id))
+	return buf
+}
+
 func (t *Table) blockCacheKey(idx int) []byte {
 	y.AssertTrue(t.id < math.MaxUint32)
 	y.AssertTrue(uint32(idx) < math.MaxUint32)
@@ -611,6 +626,11 @@ func (t *Table) blockCacheKey(idx int) []byte {
 	binary.BigEndian.PutUint32(buf[:4], uint32(t.ID()))
 	binary.BigEndian.PutUint32(buf[4:], uint32(idx))
 	return buf
+}
+
+// blockOffsetsCacheKey returns the cache key for block offsets.
+func (t *Table) blockOffsetsCacheKey() uint64 {
+	return t.id
 }
 
 // EstimatedSize returns the total size of key-values stored in this table (including the
@@ -641,35 +661,35 @@ func (t *Table) DoesNotHave(hash uint64) bool {
 
 	// Return fast if the cache is absent.
 	if t.opt.IndexCache == nil {
-		// TODO check why did we have a lock here.
-		return !t.index.bf.Has(hash)
+		t.bfLock.Lock()
+		if t.bf == nil {
+			y.AssertTrue(!t.opt.LoadBloomsOnOpen)
+			t.bf, _ = t.readBloomFilter()
+		}
+		t.bfLock.Unlock()
+		return !t.bf.Has(hash)
 	}
 
 	// Check if the index exists in the cache.
-	if idx, ok := t.opt.IndexCache.Get(t.ID()); idx != nil && ok {
-		index := idx.(*cachedIndex)
-		return !index.bf.Has(hash)
+	if bf, ok := t.opt.IndexCache.Get(t.bfCacheKey()); bf != nil && ok {
+		return !bf.(*z.Bloom).Has(hash)
 	}
 
-	// We couldn't find the index in cache. Read index and bloom filter and
-	// push both of them.
-	_, bf := t.readAndSetIndex()
+	bf, sz := t.readBloomFilter()
+	t.opt.IndexCache.Set(t.bfCacheKey(), bf, int64(sz))
 	return !bf.Has(hash)
 }
 
-// readAndSetIndex reads table index from the sst and returns its pb format.
-func (t *Table) readAndSetIndex() ([]*pb.BlockOffset, *z.Bloom) {
+// readBloomFilter reads the bloom filter from the SST and returns its length
+// along with the bloom filter.
+func (t *Table) readBloomFilter() (*z.Bloom, int) {
+	// Read bloom filter from the SST.
 	index, err := t.readTableIndex()
 	y.Check(err)
 
 	bf, err := z.JSONUnmarshal(index.BloomFilter)
 	y.Check(err)
-
-	t.opt.IndexCache.Set(t.ID(), &cachedIndex{
-		blockOffset: index.Offsets,
-		bf:          bf,
-	}, calculateOffsetsSize(index.Offsets))
-	return index.Offsets, bf
+	return bf, len(index.BloomFilter)
 }
 
 // readTableIndex reads table index from the sst and returns its pb format.
