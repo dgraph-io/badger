@@ -159,7 +159,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			topt.Compression = tf.Compression
 			topt.DataKey = dk
 			topt.BlockCache = db.blockCache
-			topt.IndexCache = db.bfCache
+			topt.IndexCache = db.indexCache
 			t, err := table.OpenTable(fd, topt)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
@@ -571,7 +571,7 @@ nextTable:
 		bopts.DataKey = dk
 		// Builder does not need cache but the same options are used for opening table.
 		bopts.BlockCache = s.kv.blockCache
-		bopts.IndexCache = s.kv.bfCache
+		bopts.IndexCache = s.kv.indexCache
 		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {

@@ -90,7 +90,7 @@ type DB struct {
 	pub        *publisher
 	registry   *KeyRegistry
 	blockCache *ristretto.Cache
-	bfCache    *ristretto.Cache
+	indexCache *ristretto.Cache
 }
 
 const (
@@ -334,7 +334,7 @@ func Open(opt Options) (db *DB, err error) {
 			BufferItems: 64,
 			Metrics:     true,
 		}
-		db.bfCache, err = ristretto.NewCache(&config)
+		db.indexCache, err = ristretto.NewCache(&config)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to create bf cache")
 		}
@@ -431,7 +431,7 @@ func (db *DB) cleanup() {
 	db.stopCompactions()
 
 	db.blockCache.Close()
-	db.bfCache.Close()
+	db.indexCache.Close()
 	if db.closers.updateSize != nil {
 		db.closers.updateSize.Signal()
 	}
@@ -459,8 +459,8 @@ func (db *DB) DataCacheMetrics() *ristretto.Metrics {
 
 // BfCacheMetrics returns the metrics for the underlying bloom filter cache.
 func (db *DB) BfCacheMetrics() *ristretto.Metrics {
-	if db.bfCache != nil {
-		return db.bfCache.Metrics
+	if db.indexCache != nil {
+		return db.indexCache.Metrics
 	}
 	return nil
 }
@@ -554,7 +554,7 @@ func (db *DB) close() (err error) {
 	db.closers.updateSize.SignalAndWait()
 	db.orc.Stop()
 	db.blockCache.Close()
-	db.bfCache.Close()
+	db.indexCache.Close()
 
 	if db.opt.InMemory {
 		return
@@ -1045,7 +1045,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	bopts.DataKey = dk
 	// Builder does not need cache but the same options are used for opening table.
 	bopts.BlockCache = db.blockCache
-	bopts.IndexCache = db.bfCache
+	bopts.IndexCache = db.indexCache
 	tableData := buildL0Table(ft, bopts)
 
 	fileID := db.lc.reserveFileID()
@@ -1628,7 +1628,7 @@ func (db *DB) dropAll() (func(), error) {
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
 	db.blockCache.Clear()
-	db.bfCache.Clear()
+	db.indexCache.Clear()
 
 	return resume, nil
 }

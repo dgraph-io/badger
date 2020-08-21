@@ -172,7 +172,7 @@ func (t *Table) DecrRef() error {
 		for i := 0; i < t.noOfBlocks; i++ {
 			t.opt.BlockCache.Del(t.blockCacheKey(i))
 		}
-		// Delete bloom filter from the cache.
+		// Delete bloom filter and indices from the cache.
 		t.opt.IndexCache.Del(t.blockOffsetsCacheKey())
 		t.opt.IndexCache.Del(t.bfCacheKey())
 	}
@@ -455,7 +455,10 @@ func (t *Table) initIndex() (*pb.BlockOffset, error) {
 		// Keep blooms in memory.
 		if t.hasBloomFilter && t.opt.LoadBloomsOnOpen {
 			bf, err := z.JSONUnmarshal(index.BloomFilter)
-			y.Check(err)
+			if err != nil {
+				return nil,
+					errors.Wrapf(err, "failed to unmarshal bloomfilter for table:%d", t.id)
+			}
 
 			t.bfLock.Lock()
 			t.bf = bf
