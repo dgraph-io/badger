@@ -106,8 +106,8 @@ type Table struct {
 	bfLock    sync.Mutex
 
 	blockOffset []*pb.BlockOffset
-	ref         int32 // For file garbage collection. Atomic.
-	bf          *z.Bloom
+	ref         int32    // For file garbage collection. Atomic.
+	bf          *z.Bloom // Nil if index cache in enabled.
 
 	mmap []byte // Memory mapped.
 
