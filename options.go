@@ -562,7 +562,7 @@ func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificat
 // unnecessary overhead which will affect the read performance. Setting size to
 // zero disables the cache altogether.
 //
-// Default value of WithBlockCacheSize is zero.
+// Default value of BlockCacheSize is zero.
 func (opt Options) WithBlockCacheSize(size int64) Options {
 	opt.BlockCacheSize = size
 	return opt
