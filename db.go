@@ -436,20 +436,26 @@ func (db *DB) showAllHeadKeys() {
 		db:     db,
 		readTs: math.MaxUint32, // Show all versions.
 	}
-
-	db.opt.Infof("Found the following head pointers")
 	iopt := DefaultIteratorOptions
 	iopt.AllVersions = true
 	iopt.InternalAccess = true
 
 	it := txn.NewKeyIterator(head, iopt)
 	defer it.Close()
-	for it.Rewind(); it.Valid(); it.Next() {
-		it.Item().Value(func(val []byte) error {
+	it.Rewind()
+	if !it.Valid() {
+		db.opt.Infof("No head keys found")
+		return
+	}
+	db.opt.Infof("Found the following head pointers")
+
+	for ; it.Valid(); it.Next() {
+		i := it.Item()
+		i.Value(func(val []byte) error {
 			var vptr valuePointer
 			vptr.Decode(val)
 			db.opt.Infof("Fid: %d Len: %d Offset: %d Version: %d\n",
-				vptr.Fid, vptr.Len, vptr.Offset, it.Item().Version)
+				vptr.Fid, vptr.Len, vptr.Offset, i.Version)
 			return nil
 		})
 	}
