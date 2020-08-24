@@ -286,8 +286,8 @@ func TestGet(t *testing.T) {
 		test(t, db)
 		require.NoError(t, db.Close())
 	})
-	t.Run("cache disabled", func(t *testing.T) {
-		opts := DefaultOptions("").WithInMemory(true).WithBlockCacheSize(0)
+	t.Run("cache enabled", func(t *testing.T) {
+		opts := DefaultOptions("").WithBlockCacheSize(10 << 20)
 		db, err := Open(opts)
 		require.NoError(t, err)
 		test(t, db)

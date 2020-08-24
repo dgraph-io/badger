@@ -464,7 +464,7 @@ func (t *Table) initIndex() (*pb.BlockOffset, error) {
 			t.bf = bf
 			t.bfLock.Unlock()
 		}
-		// Keep block offsets in memory.
+		// Keep block offsets in memory since there is no cache.
 		t.blockOffset = index.Offsets
 	}
 
@@ -608,7 +608,7 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 	return blk, nil
 }
 
-// bfCacheKey returns the cache key for bloom filter.
+// bfCacheKey returns the cache key for bloom filter. Bloom filters are stored in index cache.
 func (t *Table) bfCacheKey() []byte {
 	y.AssertTrue(t.id < math.MaxUint32)
 	buf := make([]byte, 6)
@@ -620,6 +620,7 @@ func (t *Table) bfCacheKey() []byte {
 	return buf
 }
 
+// blockCacheKey is used to store blocks in the block cache.
 func (t *Table) blockCacheKey(idx int) []byte {
 	y.AssertTrue(t.id < math.MaxUint32)
 	y.AssertTrue(uint32(idx) < math.MaxUint32)
@@ -631,7 +632,8 @@ func (t *Table) blockCacheKey(idx int) []byte {
 	return buf
 }
 
-// blockOffsetsCacheKey returns the cache key for block offsets.
+// blockOffsetsCacheKey returns the cache key for block offsets. blockOffsets
+// are stored in the index cache.
 func (t *Table) blockOffsetsCacheKey() uint64 {
 	return t.id
 }
@@ -667,13 +669,14 @@ func (t *Table) DoesNotHave(hash uint64) bool {
 		t.bfLock.Lock()
 		if t.bf == nil {
 			y.AssertTrue(!t.opt.LoadBloomsOnOpen)
+			// Load bloomfilter into memory since the cache is absent.
 			t.bf, _ = t.readBloomFilter()
 		}
 		t.bfLock.Unlock()
 		return !t.bf.Has(hash)
 	}
 
-	// Check if the index exists in the cache.
+	// Check if the bloom filter exists in the cache.
 	if bf, ok := t.opt.IndexCache.Get(t.bfCacheKey()); bf != nil && ok {
 		return !bf.(*z.Bloom).Has(hash)
 	}

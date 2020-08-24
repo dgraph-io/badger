@@ -46,10 +46,8 @@ var (
 	entriesRead uint64    // will store entries read till now
 	startTime   time.Time // start time of read benchmarking
 
-	sizeMaxCache      int64
-	keepBlockIdxCache bool
-	keepBlocksCache   bool
-	sizeMaxBfCache    int64
+	blockCacheSize int64
+	indexCacheSize int64
 
 	sampleSize  int
 	loadingMode string
@@ -75,13 +73,8 @@ func init() {
 			"Valid loading modes are fileio and mmap.")
 	readBenchCmd.Flags().BoolVar(
 		&fullScan, "full-scan", false, "If true, full db will be scanned using iterators.")
-	readBenchCmd.Flags().Int64VarP(&sizeMaxCache, "max-cache", "C", 0, "Max size of cache in MB")
-	readBenchCmd.Flags().BoolVarP(&keepBlockIdxCache, "keep-bidx", "b", false,
-		"Keep block indices in cache")
-	readBenchCmd.Flags().BoolVarP(&keepBlocksCache, "keep-blocks", "B", false,
-		"Keep blocks in cache")
-	readBenchCmd.Flags().Int64VarP(&sizeMaxBfCache, "max-bf-cache", "c", 0,
-		"Maximum Bloom Filter Cache Size in MB")
+	readBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache", 0, "Max size of block cache in MB")
+	readBenchCmd.Flags().Int64Var(&indexCacheSize, "index-cache", 0, "Max size of index cache in MB")
 }
 
 // Scan the whole database using the iterators
@@ -118,8 +111,8 @@ func readBench(cmd *cobra.Command, args []string) error {
 		WithReadOnly(readOnly).
 		WithTableLoadingMode(mode).
 		WithValueLogLoadingMode(mode).
-		WithBlockCacheSize(sizeMaxCache << 20).
-		WithIndexCacheSize(sizeMaxBfCache << 20)
+		WithBlockCacheSize(blockCacheSize << 20).
+		WithIndexCacheSize(indexCacheSize << 20)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
 	db, err := badger.Open(opt)
 	if err != nil {

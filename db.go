@@ -449,16 +449,16 @@ func (db *DB) cleanup() {
 	db.vlog.Close()
 }
 
-// DataCacheMetrics returns the metrics for the underlying data cache.
-func (db *DB) DataCacheMetrics() *ristretto.Metrics {
+// BlockCacheMetrics returns the metrics for the underlying block cache.
+func (db *DB) BlockCacheMetrics() *ristretto.Metrics {
 	if db.blockCache != nil {
 		return db.blockCache.Metrics
 	}
 	return nil
 }
 
-// BfCacheMetrics returns the metrics for the underlying bloom filter cache.
-func (db *DB) BfCacheMetrics() *ristretto.Metrics {
+// IndexCacheMetrics returns the metrics for the underlying index cache.
+func (db *DB) IndexCacheMetrics() *ristretto.Metrics {
 	if db.indexCache != nil {
 		return db.indexCache.Metrics
 	}
