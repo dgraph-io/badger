@@ -383,6 +383,7 @@ func Open(opt Options) (db *DB, err error) {
 			_ = db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
 		}()
 	}
+	db.showAllHeadKeys()
 
 	headKey := y.KeyWithTs(head, math.MaxUint64)
 	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
@@ -428,6 +429,30 @@ func Open(opt Options) (db *DB, err error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
+}
+
+func (db *DB) showAllHeadKeys() {
+	txn := Txn{
+		db:     db,
+		readTs: math.MaxUint32, // Show all versions.
+	}
+
+	db.opt.Infof("Found the following head pointers")
+	iopt := DefaultIteratorOptions
+	iopt.AllVersions = true
+	iopt.InternalAccess = true
+
+	it := txn.NewKeyIterator(head, iopt)
+	defer it.Close()
+	for it.Rewind(); it.Valid(); it.Next() {
+		it.Item().Value(func(val []byte) error {
+			var vptr valuePointer
+			vptr.Decode(val)
+			db.opt.Infof("Fid: %d Len: %d Offset: %d Version: %d\n",
+				vptr.Fid, vptr.Len, vptr.Offset, it.Item().Version)
+			return nil
+		})
+	}
 }
 
 // cleanup stops all the goroutines started by badger. This is used in open to
