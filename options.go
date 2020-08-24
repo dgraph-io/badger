@@ -553,7 +553,7 @@ func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificat
 	return opt
 }
 
-// WithBlockCacheSize returns a new Options value with WithBlockCacheSize set to the given value.
+// WithBlockCacheSize returns a new Options value with BlockCacheSize set to the given value.
 //
 // This value specifies how much data cache should hold in memory. A small size
 // of cache means lower memory consumption and lookups/iterations would take
