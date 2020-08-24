@@ -432,6 +432,8 @@ func Open(opt Options) (db *DB, err error) {
 }
 
 func (db *DB) showAllHeadKeys() {
+	// This is a hack. If we use newTransaction(..) we'll end up in deadlock
+	// since txnmark is not initialized when this function is called.
 	txn := Txn{
 		db:     db,
 		readTs: math.MaxUint32, // Show all versions.
