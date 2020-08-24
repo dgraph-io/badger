@@ -647,6 +647,15 @@ func (t *Table) blockOffsetsCacheKey() []byte {
 	return buf
 }
 
+// IndexSize is the size of table index in bytes
+func (t *Table) IndexSize() int {
+	indexSz := 0
+	for _, bi := range t.blockOffsets() {
+		indexSz += bi.Size()
+	}
+	return indexSz
+}
+
 // EstimatedSize returns the total size of key-values stored in this table (including the
 // disk space occupied on the value log).
 func (t *Table) EstimatedSize() uint64 { return t.estimatedSize }

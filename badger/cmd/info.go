@@ -244,13 +244,13 @@ func tableInfo(dir, valueDir string, db *badger.DB) {
 	tables := db.Tables(true)
 	fmt.Println()
 	fmt.Println("SSTable [Li, Id, Total Keys including internal keys] " +
-		"[Left Key, Version -> Right Key, Version]")
+		"[Left Key, Version -> Right Key, Version]" + "[Index Size]")
 	for _, t := range tables {
 		lk, lt := y.ParseKey(t.Left), y.ParseTs(t.Left)
 		rk, rt := y.ParseKey(t.Right), y.ParseTs(t.Right)
 
-		fmt.Printf("SSTable [L%d, %03d, %07d] [%20X, v%d -> %20X, v%d]\n",
-			t.Level, t.ID, t.KeyCount, lk, lt, rk, rt)
+		fmt.Printf("SSTable [L%d, %03d, %07d] [%20X, v%d -> %20X, v%d] [%s]\n",
+			t.Level, t.ID, t.KeyCount, lk, lt, rk, rt, hbytes(int64(t.IndexSz)))
 	}
 	fmt.Println()
 }
