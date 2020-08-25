@@ -32,7 +32,6 @@ import (
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
-	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 )
 
@@ -701,10 +700,11 @@ nextTable:
 
 			mu.Lock()
 			newTables = append(newTables, tbl)
-			num := atomic.LoadInt32(&table.NumBlocks)
+			// num := atomic.LoadInt32(&table.NumBlocks)
 			mu.Unlock()
 
-			s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, z.NumAllocsMB())
+			// TODO(ibrahim): When ristretto PR #186 merges, bring this back.
+			// s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, (z.NumAllocBytes() / 1 << 20))
 		}(builder)
 	}
 
