@@ -72,8 +72,7 @@ func getTestOptions(dir string) Options {
 	opt := DefaultOptions(dir).
 		WithMaxTableSize(1 << 15). // Force more compaction.
 		WithLevelOneSize(4 << 15). // Force more compaction.
-		WithSyncWrites(false).
-		WithMaxCacheSize(10 << 20)
+		WithSyncWrites(false)
 	if !*mmap {
 		return opt.WithValueLogLoadingMode(options.FileIO)
 	}
@@ -287,12 +286,11 @@ func TestGet(t *testing.T) {
 		test(t, db)
 		require.NoError(t, db.Close())
 	})
-	t.Run("cache disabled", func(t *testing.T) {
-		opts := DefaultOptions("").WithInMemory(true).WithMaxCacheSize(0)
-		db, err := Open(opts)
-		require.NoError(t, err)
-		test(t, db)
-		require.NoError(t, db.Close())
+	t.Run("cache enabled", func(t *testing.T) {
+		opts := DefaultOptions("").WithBlockCacheSize(10 << 20)
+		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+			test(t, db)
+		})
 	})
 }
 

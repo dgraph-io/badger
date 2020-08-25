@@ -365,7 +365,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		WithValueThreshold(1). // Make all values go to value log
 		WithCompression(options.ZSTD).
 		WithKeepL0InMemory(false).
-		WithMaxCacheSize(10 << 20)
+		WithBlockCacheSize(10 << 20)
 
 	if mmap {
 		opts = opts.WithTableLoadingMode(options.MemoryMap)
