@@ -90,7 +90,7 @@ type DB struct {
 	pub        *publisher
 	registry   *KeyRegistry
 	blockCache *ristretto.Cache
-	bfCache    *ristretto.Cache
+	indexCache *ristretto.Cache
 }
 
 const (
@@ -210,12 +210,6 @@ func Open(opt Options) (db *DB, err error) {
 			maxValueThreshold)
 	}
 
-	// We need a cache if KeepBlocksInCache or KeepBlockIndices is set to true.
-	if (opt.KeepBlocksInCache || opt.KeepBlockIndicesInCache) && opt.MaxCacheSize <= 0 {
-		return nil, errors.New("Cannot use MaxCacheSize=0 with KeepBlocksInCache " +
-			"or KeepBlockIndicesInCache set.")
-	}
-
 	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
 	if int64(opt.ValueThreshold) > opt.maxBatchSize {
@@ -317,11 +311,11 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}()
 
-	if opt.MaxCacheSize > 0 {
+	if opt.BlockCacheSize > 0 {
 		config := ristretto.Config{
 			// Use 5% of cache memory for storing counters.
-			NumCounters: int64(float64(opt.MaxCacheSize) * 0.05 * 2),
-			MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
+			NumCounters: int64(float64(opt.BlockCacheSize) * 0.05 * 2),
+			MaxCost:     int64(float64(opt.BlockCacheSize) * 0.95),
 			BufferItems: 64,
 			Metrics:     true,
 			OnExit:      table.BlockEvictHandler,
@@ -332,15 +326,15 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}
 
-	if opt.MaxBfCacheSize > 0 {
+	if opt.IndexCacheSize > 0 {
 		config := ristretto.Config{
 			// Use 5% of cache memory for storing counters.
-			NumCounters: int64(float64(opt.MaxBfCacheSize) * 0.05 * 2),
-			MaxCost:     int64(float64(opt.MaxBfCacheSize) * 0.95),
+			NumCounters: int64(float64(opt.IndexCacheSize) * 0.05 * 2),
+			MaxCost:     int64(float64(opt.IndexCacheSize) * 0.95),
 			BufferItems: 64,
 			Metrics:     true,
 		}
-		db.bfCache, err = ristretto.NewCache(&config)
+		db.indexCache, err = ristretto.NewCache(&config)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to create bf cache")
 		}
@@ -437,7 +431,7 @@ func (db *DB) cleanup() {
 	db.stopCompactions()
 
 	db.blockCache.Close()
-	db.bfCache.Close()
+	db.indexCache.Close()
 	if db.closers.updateSize != nil {
 		db.closers.updateSize.Signal()
 	}
@@ -455,18 +449,18 @@ func (db *DB) cleanup() {
 	db.vlog.Close()
 }
 
-// DataCacheMetrics returns the metrics for the underlying data cache.
-func (db *DB) DataCacheMetrics() *ristretto.Metrics {
+// BlockCacheMetrics returns the metrics for the underlying block cache.
+func (db *DB) BlockCacheMetrics() *ristretto.Metrics {
 	if db.blockCache != nil {
 		return db.blockCache.Metrics
 	}
 	return nil
 }
 
-// BfCacheMetrics returns the metrics for the underlying bloom filter cache.
-func (db *DB) BfCacheMetrics() *ristretto.Metrics {
-	if db.bfCache != nil {
-		return db.bfCache.Metrics
+// IndexCacheMetrics returns the metrics for the underlying index cache.
+func (db *DB) IndexCacheMetrics() *ristretto.Metrics {
+	if db.indexCache != nil {
+		return db.indexCache.Metrics
 	}
 	return nil
 }
@@ -560,7 +554,7 @@ func (db *DB) close() (err error) {
 	db.closers.updateSize.SignalAndWait()
 	db.orc.Stop()
 	db.blockCache.Close()
-	db.bfCache.Close()
+	db.indexCache.Close()
 
 	if db.opt.InMemory {
 		return
@@ -1050,8 +1044,8 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	bopts := buildTableOptions(db.opt)
 	bopts.DataKey = dk
 	// Builder does not need cache but the same options are used for opening table.
-	bopts.Cache = db.blockCache
-	bopts.BfCache = db.bfCache
+	bopts.BlockCache = db.blockCache
+	bopts.IndexCache = db.indexCache
 	tableData := buildL0Table(ft, bopts)
 
 	fileID := db.lc.reserveFileID()
@@ -1634,7 +1628,7 @@ func (db *DB) dropAll() (func(), error) {
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
 	db.blockCache.Clear()
-	db.bfCache.Clear()
+	db.indexCache.Clear()
 
 	return resume, nil
 }
