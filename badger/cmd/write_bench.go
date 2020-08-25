@@ -59,19 +59,15 @@ var (
 	sizeWritten    uint64
 	entriesWritten uint64
 
-	valueThreshold      int
-	numVersions         int
-	maxCacheSize        int64
-	keepBlockIdxInCache bool
-	keepBlocksInCache   bool
-	maxBfCacheSize      int64
-	vlogMaxEntries      uint32
-	loadBloomsOnOpen    bool
-	detectConflicts     bool
-	compression         bool
-	showDir             bool
-	ttlDuration         string
-	showKeysCount       bool
+	valueThreshold   int
+	numVersions      int
+	vlogMaxEntries   uint32
+	loadBloomsOnOpen bool
+	detectConflicts  bool
+	compression      bool
+	showDir          bool
+	ttlDuration      string
+	showKeysCount    bool
 
 	sstCount  uint32
 	vlogCount uint32
@@ -102,13 +98,10 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "Show Badger logs.")
 	writeBenchCmd.Flags().IntVarP(&valueThreshold, "value-th", "t", 1<<10, "Value threshold")
 	writeBenchCmd.Flags().IntVarP(&numVersions, "num-version", "n", 1, "Number of versions to keep")
-	writeBenchCmd.Flags().Int64VarP(&maxCacheSize, "max-cache", "C", 0, "Max size of cache in MB")
-	writeBenchCmd.Flags().BoolVarP(&keepBlockIdxInCache, "keep-bidx", "b", false,
-		"Keep block indices in cache")
-	writeBenchCmd.Flags().BoolVarP(&keepBlocksInCache, "keep-blocks", "B", false,
-		"Keep blocks in cache")
-	writeBenchCmd.Flags().Int64VarP(&maxBfCacheSize, "max-bf-cache", "c", 0,
-		"Maximum Bloom Filter Cache Size in MB")
+	writeBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache", 0,
+		"Size of block cache in MB")
+	writeBenchCmd.Flags().Int64Var(&indexCacheSize, "index-cache", 0,
+		"Size of index cache in MB.")
 	writeBenchCmd.Flags().Uint32Var(&vlogMaxEntries, "vlog-maxe", 1000000, "Value log Max Entries")
 	writeBenchCmd.Flags().StringVarP(&encryptionKey, "encryption-key", "e", "",
 		"If it is true, badger will encrypt all the data stored on the disk.")
@@ -249,10 +242,8 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithCompactL0OnClose(force).
 		WithValueThreshold(valueThreshold).
 		WithNumVersionsToKeep(numVersions).
-		WithMaxCacheSize(maxCacheSize << 20).
-		WithKeepBlockIndicesInCache(keepBlockIdxInCache).
-		WithKeepBlocksInCache(keepBlocksInCache).
-		WithMaxBfCacheSize(maxBfCacheSize << 20).
+		WithBlockCacheSize(blockCacheSize << 20).
+		WithIndexCacheSize(indexCacheSize << 20).
 		WithValueLogMaxEntries(vlogMaxEntries).
 		WithTableLoadingMode(mode).
 		WithEncryptionKey([]byte(encryptionKey)).
