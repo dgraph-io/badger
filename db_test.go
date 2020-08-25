@@ -288,10 +288,9 @@ func TestGet(t *testing.T) {
 	})
 	t.Run("cache enabled", func(t *testing.T) {
 		opts := DefaultOptions("").WithBlockCacheSize(10 << 20)
-		db, err := Open(opts)
-		require.NoError(t, err)
-		test(t, db)
-		require.NoError(t, db.Close())
+		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+			test(t, db)
+		})
 	})
 }
 
