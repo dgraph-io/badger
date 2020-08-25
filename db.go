@@ -453,13 +453,15 @@ func (db *DB) showAllHeadKeys() {
 
 	for ; it.Valid(); it.Next() {
 		i := it.Item()
-		i.Value(func(val []byte) error {
+		err := i.Value(func(val []byte) error {
 			var vptr valuePointer
 			vptr.Decode(val)
 			db.opt.Infof("Fid: %d Len: %d Offset: %d Version: %d\n",
 				vptr.Fid, vptr.Len, vptr.Offset, i.Version)
 			return nil
 		})
+		// This shouldn't happen.
+		y.Check(err)
 	}
 }
 
