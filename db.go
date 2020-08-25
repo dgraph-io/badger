@@ -449,8 +449,8 @@ func (db *DB) showAllHeadKeys() {
 		db.opt.Infof("No head keys found")
 		return
 	}
-	db.opt.Infof("Found the following head pointers")
 
+	db.opt.Infof("Found the following head pointers")
 	for ; it.Valid(); it.Next() {
 		i := it.Item()
 		err := i.Value(func(val []byte) error {
