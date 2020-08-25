@@ -1790,9 +1790,6 @@ func createDirs(opt Options) error {
 // Stream the contents of this DB to a new DB with options outOptions that will be
 // created in outDir.
 func (db *DB) StreamDB(outOptions Options) error {
-	if outOptions.Dir != outOptions.ValueDir {
-		errors.Errorf("table and value log directories should match.")
-	}
 	outDir := outOptions.Dir
 
 	// Open output DB.
