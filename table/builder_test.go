@@ -38,7 +38,7 @@ func TestTableIndex(t *testing.T) {
 		f := buildTestTable(t, keyPrefix, 1, opts)
 		tbl, err := OpenTable(f, opts)
 		require.NoError(t, err)
-		require.Len(t, tbl.blockIndex, 1)
+		require.Len(t, tbl.blockOffset, 1)
 	})
 
 	t.Run("multiple keys", func(t *testing.T) {
@@ -88,7 +88,9 @@ func TestTableIndex(t *testing.T) {
 
 			// Ensure index is built correctly
 			require.Equal(t, blockCount, tbl.noOfBlocks)
-			for i, ko := range tbl.readTableIndex().Offsets {
+			idx, err := tbl.readTableIndex()
+			require.NoError(t, err)
+			for i, ko := range idx.Offsets {
 				require.Equal(t, ko.Key, blockFirstKeys[i])
 			}
 			f.Close()
