@@ -37,6 +37,7 @@ This command streams the contents of this DB into another DB with the given opti
 }
 
 var outDir string
+var numVersions int
 var compressionType uint32
 
 func init() {
