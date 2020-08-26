@@ -613,11 +613,10 @@ func (opt Options) WithBypassLockGuard(b bool) Options {
 // WithLoadBloomsOnOpen returns a new Options value with LoadBloomsOnOpen set to the given value.
 //
 // Badger uses bloom filters to speed up key lookups. When LoadBloomsOnOpen is set
-// to false, all bloom filters will be loaded on DB open. This is supposed to
-// improve the read speed but it will affect the time taken to open the DB. Set
-// this option to true to reduce the time taken to open the DB.
+// to false, bloom filters will be loaded lazily and not on DB open. Set this
+// option to false to reduce the time taken to open the DB.
 //
-// The default value of LoadBloomsOnOpen is false.
+// The default value of LoadBloomsOnOpen is true.
 func (opt Options) WithLoadBloomsOnOpen(b bool) Options {
 	opt.LoadBloomsOnOpen = b
 	return opt
