@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
   - WithIndexCacheSize (#1473)
 
 ### Removed APIs
+- Badger.DB
+  - DataCacheMetrics (#1473)
+  - BfCacheMetrics (#1473)
 - Badger.Option
   - WithKeepBlockIndicesInCache (#1473)
   - WithKeepBlocksInCache (#1473)
