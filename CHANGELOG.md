@@ -23,6 +23,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
   - DataCacheMetrics (#1473)
   - BfCacheMetrics (#1473)
 - Badger.Option
+  - WithMaxCacheSize (#1473)
+  - WithMaxBfCacheSize (#1473)
   - WithKeepBlockIndicesInCache (#1473)
   - WithKeepBlocksInCache (#1473)
 
