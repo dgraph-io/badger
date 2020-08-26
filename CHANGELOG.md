@@ -35,7 +35,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
   - levels: Compaction incorrectly drops some delete markers (#1422)
   - Replay: Update head for LSM entires also (#1456)
 
-## [20.07.0] - 2020-08-10
+## [2.2007.0] - 2020-08-10
 
 ### Fixed
   - Add a limit to the size of the batches sent over a stream. (#1412)
@@ -438,7 +438,7 @@ Bug fix:
 [Unreleased]: https://github.com/dgraph-io/badger/compare/v2.2007.2...HEAD
 [2.2007.2]: https://github.com/dgraph-io/badger/compare/v2.2007.1...v2.2007.2
 [2.2007.1]: https://github.com/dgraph-io/badger/compare/v2.2007.0...v2.2007.1
-[20.07.0]: https://github.com/dgraph-io/badger/compare/v2.0.3...v20.07.0
+[2.2007.0]: https://github.com/dgraph-io/badger/compare/v2.0.3...v2.2007.0
 [2.0.3]: https://github.com/dgraph-io/badger/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/dgraph-io/badger/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/dgraph-io/badger/compare/v2.0.0...v2.0.1
