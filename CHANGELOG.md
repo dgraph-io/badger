@@ -3,6 +3,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [2.2007.2] - 2020-08-26
+
+### Fixed
+  - compaction: Use separate compactors for L0, L1 (#1466)
+  - Rework Block and Index cache (#1473)
+  - Add IsClosed method (#1478)
+
+### New APIs
+- Badger.DB
+  - BlockCacheMetrics (#1473)
+  - IndexCacheMetrics (#1473)
+- Badger.Option
+  - WithBlockCacheSize (#1473)
+  - WithIndexCacheSize (#1473)
+
+### Removed APIs
+- Badger.DB
+  - DataCacheMetrics (#1473)
+  - BfCacheMetrics (#1473)
+- Badger.Option
+  - WithKeepBlockIndicesInCache (#1473)
+  - WithKeepBlocksInCache (#1473)
+
 ## [2.2007.1] - 2020-08-19
 
 ### Fixed
@@ -410,7 +433,8 @@ Bug fix:
 ## [1.0.1] - 2017-11-06
 * Fix an uint16 overflow when resizing key slice
 
-[Unreleased]: https://github.com/dgraph-io/badger/compare/v2.2007.1...HEAD
+[Unreleased]: https://github.com/dgraph-io/badger/compare/v2.2007.2...HEAD
+[2.2007.2]: https://github.com/dgraph-io/badger/compare/v2.2007.1...v2.2007.2
 [2.2007.1]: https://github.com/dgraph-io/badger/compare/v2.2007.0...v2.2007.1
 [2.2007.0]: https://github.com/dgraph-io/badger/compare/v2.0.3...v2.2007.0
 [2.0.3]: https://github.com/dgraph-io/badger/compare/v2.0.2...v2.0.3
