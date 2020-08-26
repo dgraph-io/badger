@@ -82,8 +82,8 @@ type Options struct {
 	// ZSTDCompressionLevel is the ZSTD compression level used for compressing blocks.
 	ZSTDCompressionLevel int
 
-	// When LoadBloomsOnOpen is set, bloom filters will be read only when they are accessed.
-	// Otherwise they will be loaded on table open.
+	// When LoadBloomsOnOpen is set, bloom filters will be loaded while opening
+	// the table. Otherwise, they will be loaded lazily when they're accessed.
 	LoadBloomsOnOpen bool
 }
 
