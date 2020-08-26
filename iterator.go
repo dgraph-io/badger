@@ -459,6 +459,9 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 	if txn.discarded {
 		panic("Transaction has already been discarded")
 	}
+	if txn.db.IsClosed() {
+		panic(ErrDBClosed.Error())
+	}
 
 	// Keep track of the number of active iterators.
 	atomic.AddInt32(&txn.numIterators, 1)

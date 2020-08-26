@@ -120,8 +120,12 @@ var (
 	// ErrInvalidDataKeyID is returned if the datakey id is invalid.
 	ErrInvalidDataKeyID = errors.New("Invalid datakey id")
 
+	// ErrInvalidEncryptionKey is returned if length of encryption keys is invalid.
 	ErrInvalidEncryptionKey = errors.New("Encryption key's length should be" +
 		"either 16, 24, or 32 bytes")
-
+	// ErrGCInMemoryMode is returned when db.RunValueLogGC is called in in-memory mode.
 	ErrGCInMemoryMode = errors.New("Cannot run value log GC when DB is opened in InMemory mode")
+
+	// ErrDBClosed is returned when a get operation is performed after closing the DB.
+	ErrDBClosed = errors.New("DB Closed")
 )

@@ -84,6 +84,7 @@ type DB struct {
 	logRotates int32
 
 	blockWrites int32
+	isClosed    uint32
 
 	orc *oracle
 
@@ -475,6 +476,12 @@ func (db *DB) Close() error {
 	return err
 }
 
+// IsClosed denotes if the badger DB is closed or not. A DB instance should not
+// be used after closing it.
+func (db *DB) IsClosed() bool {
+	return atomic.LoadUint32(&db.isClosed) == 1
+}
+
 func (db *DB) close() (err error) {
 	db.opt.Debugf("Closing database")
 
@@ -555,6 +562,8 @@ func (db *DB) close() (err error) {
 	db.orc.Stop()
 	db.blockCache.Close()
 	db.indexCache.Close()
+
+	atomic.StoreUint32(&db.isClosed, 1)
 
 	if db.opt.InMemory {
 		return
@@ -647,6 +656,9 @@ func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 // been moved, then for the corresponding movekey, we'll look through all the levels of the tree
 // to ensure that we pick the highest version of the movekey present.
 func (db *DB) get(key []byte) (y.ValueStruct, error) {
+	if db.IsClosed() {
+		return y.ValueStruct{}, ErrDBClosed
+	}
 	tables, decr := db.getMemTables() // Lock should be released.
 	defer decr()
 
