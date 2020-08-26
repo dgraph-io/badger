@@ -306,7 +306,7 @@ func TestWriteAfterClose(t *testing.T) {
 	err = db.Update(func(txn *Txn) error {
 		return txn.SetEntry(NewEntry([]byte("a"), []byte("b")))
 	})
-	require.Equal(t, ErrBlockedWrites, err)
+	require.Equal(t, ErrDBClosed, err)
 }
 
 func TestDropAllRace(t *testing.T) {

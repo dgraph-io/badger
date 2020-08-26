@@ -831,3 +831,33 @@ func TestDropAllDropPrefix(t *testing.T) {
 		wg.Wait()
 	})
 }
+
+func TestIsClosed(t *testing.T) {
+	test := func(inMemory bool) {
+		opt := DefaultOptions("")
+		if inMemory {
+			opt.InMemory = true
+		} else {
+			dir, err := ioutil.TempDir("", "badger-test")
+			require.NoError(t, err)
+			defer removeDir(dir)
+
+			opt.Dir = dir
+			opt.ValueDir = dir
+		}
+
+		db, err := Open(opt)
+		require.NoError(t, err)
+		require.False(t, db.IsClosed())
+		require.NoError(t, db.Close())
+		require.True(t, db.IsClosed())
+	}
+
+	t.Run("normal", func(t *testing.T) {
+		test(false)
+	})
+	t.Run("in-memory", func(t *testing.T) {
+		test(true)
+	})
+
+}
