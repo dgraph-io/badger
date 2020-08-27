@@ -4,7 +4,7 @@ go 1.12
 
 require (
 	github.com/cespare/xxhash v1.1.0
-	github.com/dgraph-io/ristretto v0.0.2-0.20200115201040-8f368f2f2ab3
+	github.com/dgraph-io/ristretto v0.0.4-0.20200820164438-623d8ef1614b
 	github.com/dgryski/go-farm v0.0.0-20190423205320-6a90982ecee2
 	github.com/dustin/go-humanize v1.0.0
 	github.com/golang/protobuf v1.3.1

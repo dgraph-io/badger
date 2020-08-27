@@ -125,7 +125,6 @@ func TestTruncateVlogNoClose(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	fmt.Println("running")
 	dir := "p"
 	opts := getTestOptions(dir)
 	opts.SyncWrites = true
@@ -548,7 +547,7 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
 	require.NoError(t, err)
 
-	_, err = fd.Write(b.Finish())
+	_, err = fd.Write(b.Finish(false))
 	require.NoError(t, err, "unable to write to file")
 
 	tab, err := table.OpenTable(fd, bopts)
@@ -707,8 +706,8 @@ func TestWindowsDataLoss(t *testing.T) {
 	defer removeDir(dir)
 
 	opt := DefaultOptions(dir).WithSyncWrites(true)
+	opt.ValueThreshold = 32
 
-	fmt.Println("First DB Open")
 	db, err := Open(opt)
 	require.NoError(t, err)
 	keyCount := 20
@@ -730,8 +729,6 @@ func TestWindowsDataLoss(t *testing.T) {
 	}
 	require.NoError(t, db.Close())
 
-	fmt.Println()
-	fmt.Println("Second DB Open")
 	opt.Truncate = true
 	db, err = Open(opt)
 	require.NoError(t, err)
@@ -753,8 +750,6 @@ func TestWindowsDataLoss(t *testing.T) {
 	require.NoError(t, db.manifest.close())
 	require.NoError(t, db.lc.close())
 
-	fmt.Println()
-	fmt.Println("Third DB Open")
 	opt.Truncate = true
 	db, err = Open(opt)
 	require.NoError(t, err)
@@ -832,4 +827,34 @@ func TestDropAllDropPrefix(t *testing.T) {
 		}()
 		wg.Wait()
 	})
+}
+
+func TestIsClosed(t *testing.T) {
+	test := func(inMemory bool) {
+		opt := DefaultOptions("")
+		if inMemory {
+			opt.InMemory = true
+		} else {
+			dir, err := ioutil.TempDir("", "badger-test")
+			require.NoError(t, err)
+			defer removeDir(dir)
+
+			opt.Dir = dir
+			opt.ValueDir = dir
+		}
+
+		db, err := Open(opt)
+		require.NoError(t, err)
+		require.False(t, db.IsClosed())
+		require.NoError(t, db.Close())
+		require.True(t, db.IsClosed())
+	}
+
+	t.Run("normal", func(t *testing.T) {
+		test(false)
+	})
+	t.Run("in-memory", func(t *testing.T) {
+		test(true)
+	})
+
 }

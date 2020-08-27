@@ -45,6 +45,10 @@ import (
 	"golang.org/x/net/trace"
 )
 
+// maxVlogFileSize is the maximum size of the vlog file which can be created. Vlog Offset is of
+// uint32, so limiting at max uint32.
+var maxVlogFileSize = math.MaxUint32
+
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
@@ -101,13 +105,13 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 		userMeta:  e.UserMeta,
 	}
 
+	hash := crc32.New(y.CastagnoliCrcTable)
+	writer := io.MultiWriter(buf, hash)
+
 	// encode header.
 	var headerEnc [maxHeaderSize]byte
 	sz := h.Encode(headerEnc[:])
-	y.Check2(buf.Write(headerEnc[:sz]))
-	// write hash.
-	hash := crc32.New(y.CastagnoliCrcTable)
-	y.Check2(hash.Write(headerEnc[:sz]))
+	y.Check2(writer.Write(headerEnc[:sz]))
 	// we'll encrypt only key and value.
 	if lf.encryptionEnabled() {
 		// TODO: no need to allocate the bytes. we can calculate the encrypted buf one by one
@@ -116,25 +120,14 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 		eBuf := make([]byte, 0, len(e.Key)+len(e.Value))
 		eBuf = append(eBuf, e.Key...)
 		eBuf = append(eBuf, e.Value...)
-		var err error
-		eBuf, err = y.XORBlock(eBuf, lf.dataKey.Data, lf.generateIV(offset))
-		if err != nil {
+		if err := y.XORBlockStream(
+			writer, eBuf, lf.dataKey.Data, lf.generateIV(offset)); err != nil {
 			return 0, y.Wrapf(err, "Error while encoding entry for vlog.")
 		}
-		// write encrypted buf.
-		y.Check2(buf.Write(eBuf))
-		// write the hash.
-		y.Check2(hash.Write(eBuf))
 	} else {
 		// Encryption is disabled so writing directly to the buffer.
-		// write key.
-		y.Check2(buf.Write(e.Key))
-		// write key hash.
-		y.Check2(hash.Write(e.Key))
-		// write value.
-		y.Check2(buf.Write(e.Value))
-		// write value hash.
-		y.Check2(hash.Write(e.Value))
+		y.Check2(writer.Write(e.Key))
+		y.Check2(writer.Write(e.Value))
 	}
 	// write crc32 hash.
 	var crcBuf [crc32.Size]byte
@@ -168,7 +161,7 @@ func (lf *logFile) decodeEntry(buf []byte, offset uint32) (*Entry, error) {
 }
 
 func (lf *logFile) decryptKV(buf []byte, offset uint32) ([]byte, error) {
-	return y.XORBlock(buf, lf.dataKey.Data, lf.generateIV(offset))
+	return y.XORBlockAllocate(buf, lf.dataKey.Data, lf.generateIV(offset))
 }
 
 // KeyID returns datakey's ID.
@@ -996,14 +989,26 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 		return nil, errFile(err, lf.path, "Create value log file")
 	}
 
+	removeFile := func() {
+		// Remove the file so that we don't get an error when createVlogFile is
+		// called for the same fid, again. This could happen if there is an
+		// transient error because of which we couldn't create a new file
+		// and the second attempt to create the file succeeds.
+		y.Check(os.Remove(lf.fd.Name()))
+	}
+
 	if err = lf.bootstrap(); err != nil {
+		removeFile()
 		return nil, err
 	}
 
 	if err = syncDir(vlog.dirPath); err != nil {
+		removeFile()
 		return nil, errFile(err, vlog.dirPath, "Sync value log dir")
 	}
+
 	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
+		removeFile()
 		return nil, errFile(err, lf.path, "Mmap value log file")
 	}
 
@@ -1364,11 +1369,52 @@ func (vlog *valueLog) woffset() uint32 {
 	return atomic.LoadUint32(&vlog.writableLogOffset)
 }
 
+// validateWrites will check whether the given requests can fit into 4GB vlog file.
+// NOTE: 4GB is the maximum size we can create for vlog because value pointer offset is of type
+// uint32. If we create more than 4GB, it will overflow uint32. So, limiting the size to 4GB.
+func (vlog *valueLog) validateWrites(reqs []*request) error {
+	vlogOffset := uint64(vlog.woffset())
+	for _, req := range reqs {
+		// calculate size of the request.
+		size := estimateRequestSize(req)
+		estimatedVlogOffset := vlogOffset + size
+		if estimatedVlogOffset > uint64(maxVlogFileSize) {
+			return errors.Errorf("Request size offset %d is bigger than maximum offset %d",
+				estimatedVlogOffset, maxVlogFileSize)
+		}
+
+		if estimatedVlogOffset >= uint64(vlog.opt.ValueLogFileSize) {
+			// We'll create a new vlog file if the estimated offset is greater or equal to
+			// max vlog size. So, resetting the vlogOffset.
+			vlogOffset = 0
+			continue
+		}
+		// Estimated vlog offset will become current vlog offset if the vlog is not rotated.
+		vlogOffset = estimatedVlogOffset
+	}
+	return nil
+}
+
+// estimateRequestSize returns the size that needed to be written for the given request.
+func estimateRequestSize(req *request) uint64 {
+	size := uint64(0)
+	for _, e := range req.Entries {
+		size += uint64(maxHeaderSize + len(e.Key) + len(e.Value) + crc32.Size)
+	}
+	return size
+}
+
 // write is thread-unsafe by design and should not be called concurrently.
 func (vlog *valueLog) write(reqs []*request) error {
 	if vlog.db.opt.InMemory {
 		return nil
 	}
+	// Validate writes before writing to vlog. Because, we don't want to partially write and return
+	// an error.
+	if err := vlog.validateWrites(reqs); err != nil {
+		return err
+	}
+
 	vlog.filesLock.RLock()
 	maxFid := vlog.maxFid
 	curlf := vlog.filesMap[maxFid]

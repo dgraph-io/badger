@@ -48,6 +48,7 @@ type flagOptions struct {
 	showInternal  bool
 	readOnly      bool
 	truncate      bool
+	encryptionKey string
 }
 
 var (
@@ -74,6 +75,7 @@ func init() {
 		"to open DB.")
 	infoCmd.Flags().BoolVar(&opt.truncate, "truncate", false, "If set to true, it allows "+
 		"truncation of value log files if they have corrupt data.")
+	infoCmd.Flags().StringVar(&opt.encryptionKey, "enc-key", "", "Use the provided encryption key")
 }
 
 var infoCmd = &cobra.Command{
@@ -98,7 +100,8 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		WithValueDir(vlogDir).
 		WithReadOnly(opt.readOnly).
 		WithTruncate(opt.truncate).
-		WithTableLoadingMode(options.MemoryMap))
+		WithTableLoadingMode(options.MemoryMap).
+		WithEncryptionKey([]byte(opt.encryptionKey)))
 	if err != nil {
 		return errors.Wrap(err, "failed to open database")
 	}
@@ -241,13 +244,13 @@ func tableInfo(dir, valueDir string, db *badger.DB) {
 	tables := db.Tables(true)
 	fmt.Println()
 	fmt.Println("SSTable [Li, Id, Total Keys including internal keys] " +
-		"[Left Key, Version -> Right Key, Version]")
+		"[Left Key, Version -> Right Key, Version]" + "[Index Size]")
 	for _, t := range tables {
 		lk, lt := y.ParseKey(t.Left), y.ParseTs(t.Left)
 		rk, rt := y.ParseKey(t.Right), y.ParseTs(t.Right)
 
-		fmt.Printf("SSTable [L%d, %03d, %07d] [%20X, v%d -> %20X, v%d]\n",
-			t.Level, t.ID, t.KeyCount, lk, lt, rk, rt)
+		fmt.Printf("SSTable [L%d, %03d, %07d] [%20X, v%d -> %20X, v%d] [%s]\n",
+			t.Level, t.ID, t.KeyCount, lk, lt, rk, rt, hbytes(int64(t.IndexSz)))
 	}
 	fmt.Println()
 }

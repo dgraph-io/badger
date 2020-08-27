@@ -62,8 +62,8 @@ type Options struct {
 	BlockSize          int
 	BloomFalsePositive float64
 	KeepL0InMemory     bool
-	MaxCacheSize       int64
-	MaxBfCacheSize     int64
+	BlockCacheSize     int64
+	IndexCacheSize     int64
 	LoadBloomsOnOpen   bool
 
 	NumLevelZeroTables      int
@@ -98,12 +98,6 @@ type Options struct {
 	// conflict detection is disabled.
 	DetectConflicts bool
 
-	// KeepBlockIndicesInCache decides whether to keep the block offsets in the cache or not.
-	KeepBlockIndicesInCache bool
-
-	// KeepBlocksInCache decides whether to keep the sst blocks in the cache or not.
-	KeepBlocksInCache bool
-
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.
@@ -122,16 +116,16 @@ func DefaultOptions(path string) Options {
 		Dir:                 path,
 		ValueDir:            path,
 		LevelOneSize:        256 << 20,
-		LevelSizeMultiplier: 10,
+		LevelSizeMultiplier: 15,
 		TableLoadingMode:    options.MemoryMap,
 		ValueLogLoadingMode: options.MemoryMap,
 		// table.MemoryMap to mmap() the tables.
 		// table.Nothing to not preload the tables.
 		MaxLevels:               7,
 		MaxTableSize:            64 << 20,
-		NumCompactors:           2, // Compactions can be expensive. Only run 2.
+		NumCompactors:           2, // Run at least 2 compactors. One is dedicated for L0.
 		NumLevelZeroTables:      5,
-		NumLevelZeroTablesStall: 10,
+		NumLevelZeroTablesStall: 15,
 		NumMemtables:            5,
 		BloomFalsePositive:      0.01,
 		BlockSize:               4 * 1024,
@@ -141,8 +135,8 @@ func DefaultOptions(path string) Options {
 		KeepL0InMemory:          false,
 		VerifyValueChecksum:     false,
 		Compression:             options.None,
-		MaxCacheSize:            0,
-		MaxBfCacheSize:          0,
+		BlockCacheSize:          0,
+		IndexCacheSize:          0,
 		LoadBloomsOnOpen:        true,
 		// TODO: These benchmarks are no longer valid.
 		// The following benchmarks were done on a 4 KB block size (default block size). The
@@ -163,29 +157,26 @@ func DefaultOptions(path string) Options {
 		ValueLogFileSize: 1<<30 - 1,
 
 		ValueLogMaxEntries:            1000000,
-		ValueThreshold:                32,
+		ValueThreshold:                1 << 10, // 1 KB.
 		Truncate:                      false,
 		Logger:                        defaultLogger(INFO),
 		LogRotatesToFlush:             2,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 		DetectConflicts:               true,
-		KeepBlocksInCache:             false,
-		KeepBlockIndicesInCache:       false,
 	}
 }
 
 func buildTableOptions(opt Options) table.Options {
 	return table.Options{
-		TableSize:               uint64(opt.MaxTableSize),
-		BlockSize:               opt.BlockSize,
-		BloomFalsePositive:      opt.BloomFalsePositive,
-		LoadBloomsOnOpen:        opt.LoadBloomsOnOpen,
-		LoadingMode:             opt.TableLoadingMode,
-		ChkMode:                 opt.ChecksumVerificationMode,
-		Compression:             opt.Compression,
-		KeepBlockIndicesInCache: opt.KeepBlockIndicesInCache,
-		KeepBlocksInCache:       opt.KeepBlocksInCache,
+		TableSize:            uint64(opt.MaxTableSize),
+		BlockSize:            opt.BlockSize,
+		BloomFalsePositive:   opt.BloomFalsePositive,
+		LoadBloomsOnOpen:     opt.LoadBloomsOnOpen,
+		LoadingMode:          opt.TableLoadingMode,
+		ChkMode:              opt.ChecksumVerificationMode,
+		Compression:          opt.Compression,
+		ZSTDCompressionLevel: opt.ZSTDCompressionLevel,
 	}
 }
 
@@ -228,17 +219,6 @@ func (opt Options) WithDir(val string) Options {
 // This is set automatically to be the path given to `DefaultOptions`.
 func (opt Options) WithValueDir(val string) Options {
 	opt.ValueDir = val
-	return opt
-}
-
-// WithLoggingLevel returns a new Options value with logging level of the
-// default logger set to the given value.
-// LoggingLevel sets the level of logging. It should be one of DEBUG, INFO,
-// WARNING or ERROR levels.
-//
-// The default value of LoggingLevel is INFO.
-func (opt Options) WithLoggingLevel(val loggingLevel) Options {
-	opt.Logger = defaultLogger(val)
 	return opt
 }
 
@@ -319,6 +299,17 @@ func (opt Options) WithLogger(val Logger) Options {
 	return opt
 }
 
+// WithLoggingLevel returns a new Options value with logging level of the
+// default logger set to the given value.
+// LoggingLevel sets the level of logging. It should be one of DEBUG, INFO,
+// WARNING or ERROR levels.
+//
+// The default value of LoggingLevel is INFO.
+func (opt Options) WithLoggingLevel(val loggingLevel) Options {
+	opt.Logger = defaultLogger(val)
+	return opt
+}
+
 // WithMaxTableSize returns a new Options value with MaxTableSize set to the given value.
 //
 // MaxTableSize sets the maximum size in bytes for each LSM table or file.
@@ -336,7 +327,7 @@ func (opt Options) WithMaxTableSize(val int64) Options {
 // Once a level grows to be larger than this ratio allowed, the compaction process will be
 //  triggered.
 //
-// The default value of LevelSizeMultiplier is 10.
+// The default value of LevelSizeMultiplier is 15.
 func (opt Options) WithLevelSizeMultiplier(val int) Options {
 	opt.LevelSizeMultiplier = val
 	return opt
@@ -357,7 +348,7 @@ func (opt Options) WithMaxLevels(val int) Options {
 // ValueThreshold sets the threshold used to decide whether a value is stored directly in the LSM
 // tree or separately in the log value files.
 //
-// The default value of ValueThreshold is 32, but LSMOnlyOptions sets it to maxValueThreshold.
+// The default value of ValueThreshold is 1 KB, but LSMOnlyOptions sets it to maxValueThreshold.
 func (opt Options) WithValueThreshold(val int) Options {
 	opt.ValueThreshold = val
 	return opt
@@ -382,6 +373,8 @@ func (opt Options) WithNumMemtables(val int) Options {
 // consume more memory.
 //
 // The default value of BloomFalsePositive is 0.01.
+//
+// Setting this to 0 disables the bloom filter completely.
 func (opt Options) WithBloomFalsePositive(val float64) Options {
 	opt.BloomFalsePositive = val
 	return opt
@@ -459,7 +452,7 @@ func (opt Options) WithValueLogMaxEntries(val uint32) Options {
 // NumCompactors sets the number of compaction workers to run concurrently.
 // Setting this to zero stops compactions, which could eventually cause writes to block forever.
 //
-// The default value of NumCompactors is 2.
+// The default value of NumCompactors is 2. One is dedicated just for L0 and L1.
 func (opt Options) WithNumCompactors(val int) Options {
 	opt.NumCompactors = val
 	return opt
@@ -501,7 +494,7 @@ func (opt Options) WithEncryptionKey(key []byte) Options {
 	return opt
 }
 
-// WithEncryptionRotationDuration returns new Options value with the duration set to
+// WithEncryptionKeyRotationDuration returns new Options value with the duration set to
 // the given value.
 //
 // Key Registry will use this duration to create new keys. If the previous generated
@@ -560,18 +553,18 @@ func (opt Options) WithChecksumVerificationMode(cvMode options.ChecksumVerificat
 	return opt
 }
 
-// WithMaxCacheSize returns a new Options value with MaxCacheSize set to the given value.
+// WithBlockCacheSize returns a new Options value with BlockCacheSize set to the given value.
 //
-// This value specifies how much data cache should hold in memory. A small size of cache means lower
-// memory consumption and lookups/iterations would take longer.
-// It is recommended to use a cache if you're using compression or encryption.
+// This value specifies how much data cache should hold in memory. A small size
+// of cache means lower memory consumption and lookups/iterations would take
+// longer. It is recommended to use a cache if you're using compression or encryption.
 // If compression and encryption both are disabled, adding a cache will lead to
-// unnecessary overhead which will affect the read performance. Setting size to zero disables the
-// cache altogether.
+// unnecessary overhead which will affect the read performance. Setting size to
+// zero disables the cache altogether.
 //
-// Default value of MaxCacheSize is zero.
-func (opt Options) WithMaxCacheSize(size int64) Options {
-	opt.MaxCacheSize = size
+// Default value of BlockCacheSize is zero.
+func (opt Options) WithBlockCacheSize(size int64) Options {
+	opt.BlockCacheSize = size
 	return opt
 }
 
@@ -621,32 +614,33 @@ func (opt Options) WithBypassLockGuard(b bool) Options {
 	return opt
 }
 
-// WithMaxBfCacheSize returns a new Options value with MaxBfCacheSize set to the given value.
-//
-// This value specifies how much memory should be used by the bloom filters.
-// Badger uses bloom filters to speed up lookups. Each table has its own bloom
-// filter and each bloom filter is approximately of 5 MB.
-//
-// Zero value for BfCacheSize means all the bloom filters will be kept in
-// memory and the cache is disabled.
-//
-// The default value of MaxBfCacheSize is 0 which means all bloom filters will
-// be kept in memory.
-func (opt Options) WithMaxBfCacheSize(size int64) Options {
-	opt.MaxBfCacheSize = size
-	return opt
-}
-
 // WithLoadBloomsOnOpen returns a new Options value with LoadBloomsOnOpen set to the given value.
 //
 // Badger uses bloom filters to speed up key lookups. When LoadBloomsOnOpen is set
-// to false, all bloom filters will be loaded on DB open. This is supposed to
-// improve the read speed but it will affect the time taken to open the DB. Set
-// this option to true to reduce the time taken to open the DB.
+// to false, bloom filters will be loaded lazily and not on DB open. Set this
+// option to false to reduce the time taken to open the DB.
 //
-// The default value of LoadBloomsOnOpen is false.
+// The default value of LoadBloomsOnOpen is true.
 func (opt Options) WithLoadBloomsOnOpen(b bool) Options {
 	opt.LoadBloomsOnOpen = b
+	return opt
+}
+
+// WithIndexCacheSize returns a new Options value with IndexCacheSize set to
+// the given value.
+//
+// This value specifies how much memory should be used by table indices. These
+// indices include the block offsets and the bloomfilters. Badger uses bloom
+// filters to speed up lookups. Each table has its own bloom
+// filter and each bloom filter is approximately of 5 MB.
+//
+// Zero value for IndexCacheSize means all the indices will be kept in
+// memory and the cache is disabled.
+//
+// The default value of IndexCacheSize is 0 which means all indices are kept in
+// memory.
+func (opt Options) WithIndexCacheSize(size int64) Options {
+	opt.IndexCacheSize = size
 	return opt
 }
 
@@ -661,40 +655,5 @@ func (opt Options) WithLoadBloomsOnOpen(b bool) Options {
 // The default value of Detect conflicts is True.
 func (opt Options) WithDetectConflicts(b bool) Options {
 	opt.DetectConflicts = b
-	return opt
-}
-
-// WithKeepBlockIndicesInCache returns a new Option value with KeepBlockOffsetInCache set to the
-// given value.
-//
-// When this option is set badger will store the block offsets in a cache along with the blocks.
-// The size of the cache is determined by the MaxCacheSize option.If the MaxCacheSize is set to
-// zero, then MaxCacheSize is set to 100 mb. When indices are stored in the cache, the read
-// performance might be affected but the cache limits the amount of memory used by the indices.
-//
-// The default value of KeepBlockOffsetInCache is false.
-func (opt Options) WithKeepBlockIndicesInCache(val bool) Options {
-	opt.KeepBlockIndicesInCache = val
-
-	if val && opt.MaxCacheSize == 0 {
-		opt.MaxCacheSize = 100 << 20
-	}
-	return opt
-}
-
-// WithKeepBlocksInCache returns a new Option value with KeepBlocksInCache set to the
-// given value.
-//
-// When this option is set badger will store the block in the cache. The size of the cache is
-// determined by the MaxCacheSize option.If the MaxCacheSize is set to zero,
-// then MaxCacheSize is set to 100 mb.
-//
-// The default value of KeepBlocksInCache is false.
-func (opt Options) WithKeepBlocksInCache(val bool) Options {
-	opt.KeepBlocksInCache = val
-
-	if val && opt.MaxCacheSize == 0 {
-		opt.MaxCacheSize = 100 << 20
-	}
 	return opt
 }

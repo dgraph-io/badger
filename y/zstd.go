@@ -52,3 +52,13 @@ func ZSTDCompress(dst, src []byte, level int) ([]byte, error) {
 	})
 	return zstdEnc.EncodeAll(src, dst[:0]), nil
 }
+
+// ZSTDCompressBound returns the worst case size needed for a destination buffer.
+func ZSTDCompressBound(srcSize int) int {
+	lowLimit := 128 << 10 // 128 kB
+	var margin int
+	if srcSize < lowLimit {
+		margin = (lowLimit - srcSize) >> 11
+	}
+	return srcSize + (srcSize >> 8) + margin
+}

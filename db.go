@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -84,13 +85,14 @@ type DB struct {
 	logRotates int32
 
 	blockWrites int32
+	isClosed    uint32
 
 	orc *oracle
 
 	pub        *publisher
 	registry   *KeyRegistry
 	blockCache *ristretto.Cache
-	bfCache    *ristretto.Cache
+	indexCache *ristretto.Cache
 }
 
 const (
@@ -137,6 +139,10 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			nv = vp.Encode()
 			meta = meta | bitValuePointer
 		}
+		// Update vhead. If the crash happens while replay was in progess
+		// and the head is not updated, we will end up replaying all the
+		// files starting from file zero, again.
+		db.updateHead([]valuePointer{vp})
 
 		v := y.ValueStruct{
 			Value:     nv,
@@ -188,6 +194,12 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 
 // Open returns a new DB object.
 func Open(opt Options) (db *DB, err error) {
+	// It's okay to have zero compactors which will disable all compactions but
+	// we cannot have just one compactor otherwise we will end up with all data
+	// on level 2.
+	if opt.NumCompactors == 1 {
+		return nil, errors.New("Cannot have 1 compactor. Need at least 2")
+	}
 	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
 		return nil, errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
 	}
@@ -297,16 +309,14 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}()
 
-	if opt.MaxCacheSize > 0 {
+	if opt.BlockCacheSize > 0 {
 		config := ristretto.Config{
 			// Use 5% of cache memory for storing counters.
-			NumCounters: int64(float64(opt.MaxCacheSize) * 0.05 * 2),
-			MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
+			NumCounters: int64(float64(opt.BlockCacheSize) * 0.05 * 2),
+			MaxCost:     int64(float64(opt.BlockCacheSize) * 0.95),
 			BufferItems: 64,
 			Metrics:     true,
-			OnEvict: func(_, _ uint64, value interface{}, _ int64) {
-				table.BlockEvictHandler(value)
-			},
+			OnExit:      table.BlockEvictHandler,
 		}
 		db.blockCache, err = ristretto.NewCache(&config)
 		if err != nil {
@@ -314,15 +324,15 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}
 
-	if opt.MaxBfCacheSize > 0 {
+	if opt.IndexCacheSize > 0 {
 		config := ristretto.Config{
 			// Use 5% of cache memory for storing counters.
-			NumCounters: int64(float64(opt.MaxBfCacheSize) * 0.05 * 2),
-			MaxCost:     int64(float64(opt.MaxBfCacheSize) * 0.95),
+			NumCounters: int64(float64(opt.IndexCacheSize) * 0.05 * 2),
+			MaxCost:     int64(float64(opt.IndexCacheSize) * 0.95),
 			BufferItems: 64,
 			Metrics:     true,
 		}
-		db.bfCache, err = ristretto.NewCache(&config)
+		db.indexCache, err = ristretto.NewCache(&config)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to create bf cache")
 		}
@@ -395,7 +405,6 @@ func Open(opt Options) (db *DB, err error) {
 	db.orc.readMark.Done(db.orc.nextTxnTs)
 	db.orc.incrementNextTs()
 
-	db.writeCh = make(chan *request, kvWriteChCapacity)
 	db.closers.writes = y.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
@@ -416,11 +425,11 @@ func Open(opt Options) (db *DB, err error) {
 // cleanup stops all the goroutines started by badger. This is used in open to
 // cleanup goroutines in case of an error.
 func (db *DB) cleanup() {
-	db.blockCache.Close()
-	db.bfCache.Close()
 	db.stopMemoryFlush()
 	db.stopCompactions()
 
+	db.blockCache.Close()
+	db.indexCache.Close()
 	if db.closers.updateSize != nil {
 		db.closers.updateSize.Signal()
 	}
@@ -438,18 +447,18 @@ func (db *DB) cleanup() {
 	db.vlog.Close()
 }
 
-// DataCacheMetrics returns the metrics for the underlying data cache.
-func (db *DB) DataCacheMetrics() *ristretto.Metrics {
+// BlockCacheMetrics returns the metrics for the underlying block cache.
+func (db *DB) BlockCacheMetrics() *ristretto.Metrics {
 	if db.blockCache != nil {
 		return db.blockCache.Metrics
 	}
 	return nil
 }
 
-// BfCacheMetrics returns the metrics for the underlying bloom filter cache.
-func (db *DB) BfCacheMetrics() *ristretto.Metrics {
-	if db.bfCache != nil {
-		return db.bfCache.Metrics
+// IndexCacheMetrics returns the metrics for the underlying index cache.
+func (db *DB) IndexCacheMetrics() *ristretto.Metrics {
+	if db.indexCache != nil {
+		return db.indexCache.Metrics
 	}
 	return nil
 }
@@ -462,6 +471,12 @@ func (db *DB) Close() error {
 		err = db.close()
 	})
 	return err
+}
+
+// IsClosed denotes if the badger DB is closed or not. A DB instance should not
+// be used after closing it.
+func (db *DB) IsClosed() bool {
+	return atomic.LoadUint32(&db.isClosed) == 1
 }
 
 func (db *DB) close() (err error) {
@@ -524,7 +539,7 @@ func (db *DB) close() (err error) {
 	// Force Compact L0
 	// We don't need to care about cstatus since no parallel compaction is running.
 	if db.opt.CompactL0OnClose {
-		err := db.lc.doCompact(compactionPriority{level: 0, score: 1.73})
+		err := db.lc.doCompact(173, compactionPriority{level: 0, score: 1.73})
 		switch err {
 		case errFillTables:
 			// This error only means that there might be enough tables to do a compaction. So, we
@@ -543,7 +558,9 @@ func (db *DB) close() (err error) {
 	db.closers.updateSize.SignalAndWait()
 	db.orc.Stop()
 	db.blockCache.Close()
-	db.bfCache.Close()
+	db.indexCache.Close()
+
+	atomic.StoreUint32(&db.isClosed, 1)
 
 	if db.opt.InMemory {
 		return
@@ -636,6 +653,9 @@ func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 // been moved, then for the corresponding movekey, we'll look through all the levels of the tree
 // to ensure that we pick the highest version of the movekey present.
 func (db *DB) get(key []byte) (y.ValueStruct, error) {
+	if db.IsClosed() {
+		return y.ValueStruct{}, ErrDBClosed
+	}
 	tables, decr := db.getMemTables() // Lock should be released.
 	defer decr()
 
@@ -668,6 +688,8 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	return db.lc.get(key, maxVs, 0)
 }
 
+// updateHead should not be called without the db.Lock() since db.vhead is used
+// by the writer go routines and memtable flushing goroutine.
 func (db *DB) updateHead(ptrs []valuePointer) {
 	var ptr valuePointer
 	for i := len(ptrs) - 1; i >= 0; i-- {
@@ -681,8 +703,6 @@ func (db *DB) updateHead(ptrs []valuePointer) {
 		return
 	}
 
-	db.Lock()
-	defer db.Unlock()
 	y.AssertTrue(!ptr.Less(db.vhead))
 	db.vhead = ptr
 }
@@ -781,7 +801,9 @@ func (db *DB) writeRequests(reqs []*request) error {
 			done(err)
 			return errors.Wrap(err, "writeRequests")
 		}
+		db.Lock()
 		db.updateHead(b.Ptrs)
+		db.Unlock()
 	}
 	done(nil)
 	db.opt.Debugf("%d entries written", count)
@@ -968,9 +990,10 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 	defer iter.Close()
 	b := table.NewTableBuilder(bopts)
 	defer b.Close()
+
 	var vp valuePointer
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
-		if len(ft.dropPrefix) > 0 && bytes.HasPrefix(iter.Key(), ft.dropPrefix) {
+		if len(ft.dropPrefixes) > 0 && hasAnyPrefixes(iter.Key(), ft.dropPrefixes) {
 			continue
 		}
 		vs := iter.Value()
@@ -979,13 +1002,36 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 		}
 		b.Add(iter.Key(), iter.Value(), vp.Len)
 	}
-	return b.Finish()
+	return b.Finish(true)
 }
 
 type flushTask struct {
-	mt         *skl.Skiplist
-	vptr       valuePointer
-	dropPrefix []byte
+	mt           *skl.Skiplist
+	vptr         valuePointer
+	dropPrefixes [][]byte
+}
+
+func (db *DB) pushHead(ft flushTask) error {
+	// We don't need to store head pointer in the in-memory mode since we will
+	// never be replay anything.
+	if db.opt.InMemory {
+		return nil
+	}
+	// Ensure we never push a zero valued head pointer.
+	if ft.vptr.IsZero() {
+		return errors.New("Head should not be zero")
+	}
+
+	// Store badger head even if vptr is zero, need it for readTs
+	db.opt.Infof("Storing value log head: %+v\n", ft.vptr)
+	val := ft.vptr.Encode()
+
+	// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
+	// commits.
+	headTs := y.KeyWithTs(head, db.orc.nextTs())
+	ft.mt.Put(headTs, y.ValueStruct{Value: val})
+
+	return nil
 }
 
 // handleFlushTask must be run serially.
@@ -996,15 +1042,9 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return nil
 	}
 
-	// Store badger head even if vptr is zero, need it for readTs
-	db.opt.Debugf("Storing value log head: %+v\n", ft.vptr)
-	db.opt.Debugf("Storing offset: %+v\n", ft.vptr)
-	val := ft.vptr.Encode()
-
-	// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
-	// commits.
-	headTs := y.KeyWithTs(head, db.orc.nextTs())
-	ft.mt.Put(headTs, y.ValueStruct{Value: val})
+	if err := db.pushHead(ft); err != nil {
+		return err
+	}
 
 	dk, err := db.registry.latestDataKey()
 	if err != nil {
@@ -1013,8 +1053,8 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	bopts := buildTableOptions(db.opt)
 	bopts.DataKey = dk
 	// Builder does not need cache but the same options are used for opening table.
-	bopts.Cache = db.blockCache
-	bopts.BfCache = db.bfCache
+	bopts.BlockCache = db.blockCache
+	bopts.IndexCache = db.indexCache
 	tableData := buildL0Table(ft, bopts)
 
 	fileID := db.lc.reserveFileID()
@@ -1432,7 +1472,7 @@ func (db *DB) Flatten(workers int) error {
 		errCh := make(chan error, 1)
 		for i := 0; i < workers; i++ {
 			go func() {
-				errCh <- db.lc.doCompact(cp)
+				errCh <- db.lc.doCompact(175, cp)
 			}()
 		}
 		var success int
@@ -1551,11 +1591,10 @@ func (db *DB) prepareToDrop() (func(), error) {
 // writes are paused before running DropAll, and resumed after it is finished.
 func (db *DB) DropAll() error {
 	f, err := db.dropAll()
-	if err != nil {
-		return err
+	if f != nil {
+		f()
 	}
-	defer f()
-	return nil
+	return err
 }
 
 func (db *DB) dropAll() (func(), error) {
@@ -1598,7 +1637,7 @@ func (db *DB) dropAll() (func(), error) {
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
 	db.blockCache.Clear()
-	db.bfCache.Clear()
+	db.indexCache.Clear()
 
 	return resume, nil
 }
@@ -1614,7 +1653,7 @@ func (db *DB) dropAll() (func(), error) {
 // - Compact L0->L1, skipping over Kp.
 // - Compact rest of the levels, Li->Li, picking tables which have Kp.
 // - Resume memtable flushes, compactions and writes.
-func (db *DB) DropPrefix(prefix []byte) error {
+func (db *DB) DropPrefix(prefixes ...[]byte) error {
 	db.opt.Infof("DropPrefix Called")
 	f, err := db.prepareToDrop()
 	if err != nil {
@@ -1634,8 +1673,8 @@ func (db *DB) DropPrefix(prefix []byte) error {
 		task := flushTask{
 			mt: memtable,
 			// Ensure that the head of value log gets persisted to disk.
-			vptr:       db.vhead,
-			dropPrefix: prefix,
+			vptr:         db.vhead,
+			dropPrefixes: prefixes,
 		}
 		db.opt.Debugf("Flushing memtable")
 		if err := db.handleFlushTask(task); err != nil {
@@ -1650,7 +1689,7 @@ func (db *DB) DropPrefix(prefix []byte) error {
 	db.mt = skl.NewSkiplist(arenaSize(db.opt))
 
 	// Drop prefixes from the levels.
-	if err := db.lc.dropPrefix(prefix); err != nil {
+	if err := db.lc.dropPrefixes(prefixes); err != nil {
 		return err
 	}
 	db.opt.Infof("DropPrefix done")
@@ -1740,6 +1779,37 @@ func createDirs(opt Options) error {
 				return y.Wrapf(err, "Error Creating Dir: %q", path)
 			}
 		}
+	}
+	return nil
+}
+
+// Stream the contents of this DB to a new DB with options outOptions that will be
+// created in outDir.
+func (db *DB) StreamDB(outOptions Options) error {
+	outDir := outOptions.Dir
+
+	// Open output DB.
+	outDB, err := OpenManaged(outOptions)
+	if err != nil {
+		return errors.Wrapf(err, "cannot open out DB at %s", outDir)
+	}
+	defer outDB.Close()
+	writer := outDB.NewStreamWriter()
+	if err := writer.Prepare(); err != nil {
+		errors.Wrapf(err, "cannot create stream writer in out DB at %s", outDir)
+	}
+
+	// Stream contents of DB to the output DB.
+	stream := db.NewStreamAt(math.MaxUint64)
+	stream.LogPrefix = fmt.Sprintf("Streaming DB to new DB at %s", outDir)
+	stream.Send = func(kvs *pb.KVList) error {
+		return writer.Write(kvs)
+	}
+	if err := stream.Orchestrate(context.Background()); err != nil {
+		return errors.Wrapf(err, "cannot stream DB to out DB at %s", outDir)
+	}
+	if err := writer.Flush(); err != nil {
+		return errors.Wrapf(err, "cannot flush writer")
 	}
 	return nil
 }

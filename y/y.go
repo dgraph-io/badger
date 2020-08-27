@@ -41,6 +41,10 @@ var (
 	// compression algorithm is being used for compression. ZSTD cannot work
 	// without CGO.
 	ErrZstdCgo = errors.New("zstd compression requires building badger with cgo enabled")
+
+	// ErrCommitAfterFinish indicates that write batch commit was called after
+	// finish
+	ErrCommitAfterFinish = errors.New("Batch commit not permitted after finish")
 )
 
 const (
@@ -191,8 +195,9 @@ func FixedDuration(d time.Duration) string {
 // to tell the goroutine to shut down, and a WaitGroup with which to wait for it to finish shutting
 // down.
 type Closer struct {
-	closed  chan struct{}
-	waiting sync.WaitGroup
+	closed    chan struct{}
+	waiting   sync.WaitGroup
+	closeOnce sync.Once
 }
 
 // NewCloser constructs a new Closer, with an initial count on the WaitGroup.
@@ -209,7 +214,10 @@ func (lc *Closer) AddRunning(delta int) {
 
 // Signal signals the HasBeenClosed signal.
 func (lc *Closer) Signal() {
-	close(lc.closed)
+	// Todo(ibrahim): Change Signal to return error on next badger breaking change.
+	lc.closeOnce.Do(func() {
+		close(lc.closed)
+	})
 }
 
 // HasBeenClosed gets signaled when Signal() is called.

@@ -49,7 +49,7 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 		panic(err)
 	}
 
-	if _, err = fd.Write(b.Finish()); err != nil {
+	if _, err = fd.Write(b.Finish(false)); err != nil {
 		panic(err)
 	}
 	tab, err := table.OpenTable(fd, opts)
@@ -301,6 +301,40 @@ func TestCompaction(t *testing.T) {
 				require.NoError(t, db.lc.runCompactDef(2, cdef))
 				// everything should be removed now
 				getAllAndCheck(t, db, []keyValVersion{})
+			})
+		})
+		t.Run("with bottom overlap", func(t *testing.T) {
+			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+				l1 := []keyValVersion{{"foo", "bar", 3, bitDelete}}
+				l2 := []keyValVersion{{"foo", "bar", 2, 0}, {"fooz", "baz", 2, bitDelete}}
+				l3 := []keyValVersion{{"fooz", "baz", 1, 0}}
+				createAndOpen(db, l1, 1)
+				createAndOpen(db, l2, 2)
+				createAndOpen(db, l3, 3)
+
+				// Set a high discard timestamp so that all the keys are below the discard timestamp.
+				db.SetDiscardTs(10)
+
+				getAllAndCheck(t, db, []keyValVersion{
+					{"foo", "bar", 3, bitDelete},
+					{"foo", "bar", 2, 0},
+					{"fooz", "baz", 2, bitDelete},
+					{"fooz", "baz", 1, 0},
+				})
+				cdef := compactDef{
+					thisLevel: db.lc.levels[1],
+					nextLevel: db.lc.levels[2],
+					top:       db.lc.levels[1].tables,
+					bot:       db.lc.levels[2].tables,
+				}
+				require.NoError(t, db.lc.runCompactDef(1, cdef))
+				// the top table at L1 doesn't overlap L3, but the bottom table at L2
+				// does, delete keys should not be removed.
+				getAllAndCheck(t, db, []keyValVersion{
+					{"foo", "bar", 3, bitDelete},
+					{"fooz", "baz", 2, bitDelete},
+					{"fooz", "baz", 1, 0},
+				})
 			})
 		})
 		t.Run("without overlap", func(t *testing.T) {
@@ -706,7 +740,7 @@ func createEmptyTable(db *DB) *table.Table {
 	b.Add(y.KeyWithTs([]byte("foo"), 1), y.ValueStruct{}, 0)
 
 	// Open table in memory to avoid adding changes to manifest file.
-	tab, err := table.OpenInMemoryTable(b.Finish(), db.lc.reserveFileID(), &opts)
+	tab, err := table.OpenInMemoryTable(b.Finish(true), db.lc.reserveFileID(), &opts)
 	if err != nil {
 		panic(err)
 	}
@@ -715,52 +749,6 @@ func createEmptyTable(db *DB) *table.Table {
 }
 
 func TestL0Stall(t *testing.T) {
-	test := func(t *testing.T, opt *Options) {
-		runBadgerTest(t, opt, func(t *testing.T, db *DB) {
-			db.lc.levels[0].Lock()
-			// Add NumLevelZeroTableStall+1 number of tables to level 0. This would fill up level
-			// zero and all new additions are expected to stall if L0 is in memory.
-			for i := 0; i < opt.NumLevelZeroTablesStall+1; i++ {
-				db.lc.levels[0].tables = append(db.lc.levels[0].tables, createEmptyTable(db))
-			}
-			db.lc.levels[0].Unlock()
-
-			timeout := time.After(5 * time.Second)
-			done := make(chan bool)
-
-			go func() {
-				tab := createEmptyTable(db)
-				require.NoError(t, db.lc.addLevel0Table(tab))
-				tab.DecrRef()
-				done <- true
-			}()
-			// Let it stall for a second.
-			time.Sleep(time.Second)
-
-			select {
-			case <-timeout:
-				if opt.KeepL0InMemory {
-					t.Log("Timeout triggered")
-					// Mark this test as successful since L0 is in memory and the
-					// addition of new table to L0 is supposed to stall.
-
-					// Remove tables from level 0 so that the stalled
-					// compaction can make progress. This does not have any
-					// effect on the test. This is done so that the goroutine
-					// stuck on addLevel0Table can make progress and end.
-					db.lc.levels[0].Lock()
-					db.lc.levels[0].tables = nil
-					db.lc.levels[0].Unlock()
-					<-done
-				} else {
-					t.Fatal("Test didn't finish in time")
-				}
-			case <-done:
-				// The test completed before 5 second timeout. Mark it as successful.
-			}
-		})
-	}
-
 	opt := DefaultOptions("")
 	// Disable all compactions.
 	opt.NumCompactors = 0
@@ -769,12 +757,84 @@ func TestL0Stall(t *testing.T) {
 	// Addition of new tables will stall if there are 4 or more L0 tables.
 	opt.NumLevelZeroTablesStall = 4
 
-	t.Run("with KeepL0InMemory", func(t *testing.T) {
-		opt.KeepL0InMemory = true
-		test(t, &opt)
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		db.lc.levels[0].Lock()
+		// Add NumLevelZeroTableStall+1 number of tables to level 0. This would fill up level
+		// zero and all new additions are expected to stall if L0 is in memory.
+		for i := 0; i < opt.NumLevelZeroTablesStall+1; i++ {
+			db.lc.levels[0].tables = append(db.lc.levels[0].tables, createEmptyTable(db))
+		}
+		db.lc.levels[0].Unlock()
+
+		timeout := time.After(5 * time.Second)
+		done := make(chan bool)
+
+		go func() {
+			tab := createEmptyTable(db)
+			require.NoError(t, db.lc.addLevel0Table(tab))
+			tab.DecrRef()
+			done <- true
+		}()
+		// Let it stall for a second.
+		time.Sleep(time.Second)
+
+		select {
+		case <-timeout:
+			t.Log("Timeout triggered")
+			// Mark this test as successful since L0 is in memory and the
+			// addition of new table to L0 is supposed to stall.
+
+			// Remove tables from level 0 so that the stalled
+			// compaction can make progress. This does not have any
+			// effect on the test. This is done so that the goroutine
+			// stuck on addLevel0Table can make progress and end.
+			db.lc.levels[0].Lock()
+			db.lc.levels[0].tables = nil
+			db.lc.levels[0].Unlock()
+			<-done
+		case <-done:
+			// The test completed before 5 second timeout. Mark it as successful.
+			t.Fatal("Test did not stall")
+		}
 	})
-	t.Run("with L0 on disk", func(t *testing.T) {
-		opt.KeepL0InMemory = false
-		test(t, &opt)
+}
+
+// Regression test for https://github.com/dgraph-io/dgraph/issues/5573
+func TestDropPrefixMoveBug(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// l1 is used to verify that drop prefix actually drops move keys from all the levels.
+		l1 := []keyValVersion{{string(append(badgerMove, "F"...)), "", 0, 0}}
+		createAndOpen(db, l1, 1)
+
+		// Mutiple levels can have the exact same move key with version.
+		l2 := []keyValVersion{{string(append(badgerMove, "F"...)), "", 0, 0}, {"A", "", 0, 0}}
+		l21 := []keyValVersion{{"B", "", 0, 0}, {"C", "", 0, 0}}
+		l22 := []keyValVersion{{"F", "", 0, 0}, {"G", "", 0, 0}}
+
+		// Level 2 has all the tables.
+		createAndOpen(db, l2, 2)
+		createAndOpen(db, l21, 2)
+		createAndOpen(db, l22, 2)
+
+		require.NoError(t, db.lc.validate())
+		require.NoError(t, db.DropPrefix([]byte("F")))
+
+		db.View(func(txn *Txn) error {
+			iopt := DefaultIteratorOptions
+			iopt.AllVersions = true
+
+			it := txn.NewIterator(iopt)
+			defer it.Close()
+
+			specialKey := []byte("F")
+			droppedPrefixes := [][]byte{specialKey, append(badgerMove, specialKey...)}
+			for it.Rewind(); it.Valid(); it.Next() {
+				key := it.Item().Key()
+				// Ensure we don't have any "F" or "!badger!move!F" left
+				require.False(t, hasAnyPrefixes(key, droppedPrefixes))
+			}
+			return nil
+		})
+		require.NoError(t, db.lc.validate())
 	})
 }

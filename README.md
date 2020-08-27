@@ -7,6 +7,8 @@ in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
 fast, distributed graph database. It's meant to be a performant alternative to
 non-Go-based key-value stores like RocksDB.
 
+**Use [Discuss Issues](https://discuss.dgraph.io/c/issues/badger/37) for reporting issues about this repository.**
+
 ## Project Status [March 24, 2020]
 
 Badger is stable and is being used to serve data sets worth hundreds of
@@ -59,6 +61,7 @@ For more details on our version naming schema please read [Choosing a version](#
     + [Comparisons](#comparisons)
     + [Benchmarks](#benchmarks)
   * [Projects Using Badger](#projects-using-badger)
+  * [Contributing](#contributing)
   * [Frequently Asked Questions](#frequently-asked-questions)
 
 ## Getting Started
@@ -474,7 +477,7 @@ values altogether. See section below on key-only iteration.
 To iterate over a key prefix, you can combine `Seek()` and `ValidForPrefix()`:
 
 ```go
-db.View(func(txn *badger.Txn) error {
+err := db.View(func(txn *badger.Txn) error {
   it := txn.NewIterator(badger.DefaultIteratorOptions)
   defer it.Close()
   prefix := []byte("1234")
@@ -784,6 +787,10 @@ Below is a list of known projects that use Badger:
 * [KVdb](https://kvdb.io/) - Hosted key-value store and serverless platform built on top of Badger.
 
 If you are using Badger in a project please send a pull request to add it to the list.
+
+## Contributing
+
+If you're interested in contributing to Badger see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Frequently Asked Questions
 ### My writes are getting stuck. Why?

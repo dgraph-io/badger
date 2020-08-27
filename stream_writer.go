@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math"
 	"sync"
@@ -297,9 +298,6 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 	return w, nil
 }
 
-// ErrUnsortedKey is returned when any out of order key arrives at sortedWriter during call to Add.
-var ErrUnsortedKey = errors.New("Keys not in sorted order")
-
 func (w *sortedWriter) handleRequests() {
 	defer w.closer.Done()
 
@@ -353,7 +351,8 @@ func (w *sortedWriter) handleRequests() {
 // Add adds key and vs to sortedWriter.
 func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	if len(w.lastKey) > 0 && y.CompareKeys(key, w.lastKey) <= 0 {
-		return ErrUnsortedKey
+		return errors.Errorf("keys not in sorted order (last key: %s, key: %s)",
+			hex.Dump(w.lastKey), hex.Dump(key))
 	}
 
 	sameKey := y.SameKey(key, w.lastKey)
@@ -378,6 +377,7 @@ func (w *sortedWriter) send(done bool) error {
 		return err
 	}
 	go func(builder *table.Builder) {
+		defer builder.Close()
 		err := w.createTable(builder)
 		w.throttle.Done(err)
 	}(w.builder)
@@ -411,15 +411,15 @@ func (w *sortedWriter) Done() error {
 }
 
 func (w *sortedWriter) createTable(builder *table.Builder) error {
-	data := builder.Finish()
+	data := builder.Finish(w.db.opt.InMemory)
 	if len(data) == 0 {
 		return nil
 	}
 	fileID := w.db.lc.reserveFileID()
 	opts := buildTableOptions(w.db.opt)
 	opts.DataKey = builder.DataKey()
-	opts.Cache = w.db.blockCache
-	opts.BfCache = w.db.bfCache
+	opts.BlockCache = w.db.blockCache
+	opts.IndexCache = w.db.indexCache
 	var tbl *table.Table
 	if w.db.opt.InMemory {
 		var err error

@@ -72,8 +72,7 @@ func getTestOptions(dir string) Options {
 	opt := DefaultOptions(dir).
 		WithMaxTableSize(1 << 15). // Force more compaction.
 		WithLevelOneSize(4 << 15). // Force more compaction.
-		WithSyncWrites(false).
-		WithMaxCacheSize(10 << 20)
+		WithSyncWrites(false)
 	if !*mmap {
 		return opt.WithValueLogLoadingMode(options.FileIO)
 	}
@@ -287,12 +286,11 @@ func TestGet(t *testing.T) {
 		test(t, db)
 		require.NoError(t, db.Close())
 	})
-	t.Run("cache disabled", func(t *testing.T) {
-		opts := DefaultOptions("").WithInMemory(true).WithMaxCacheSize(0)
-		db, err := Open(opts)
-		require.NoError(t, err)
-		test(t, db)
-		require.NoError(t, db.Close())
+	t.Run("cache enabled", func(t *testing.T) {
+		opts := DefaultOptions("").WithBlockCacheSize(10 << 20)
+		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+			test(t, db)
+		})
 	})
 }
 
@@ -376,6 +374,49 @@ func TestForceCompactL0(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(db.lc.levels[0].tables), 0)
 	require.NoError(t, db.Close())
+}
+
+func TestStreamDB(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+	opts := getTestOptions(dir).WithCompression(options.ZSTD)
+
+	db, err := OpenManaged(opts)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
+
+	writer := db.NewManagedWriteBatch()
+	for i := 0; i < 100; i++ {
+		key := []byte(fmt.Sprintf("key%d", i))
+		val := []byte(fmt.Sprintf("val%d", i))
+		require.NoError(t, writer.SetEntryAt(NewEntry(key, val).WithMeta(0x00), 1))
+	}
+	require.NoError(t, writer.Flush())
+
+	outDir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	outOpt := getTestOptions(outDir)
+	require.NoError(t, db.StreamDB(outOpt))
+
+	outDB, err := OpenManaged(outOpt)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, outDB.Close())
+	}()
+
+	for i := 0; i < 100; i++ {
+		key := []byte(fmt.Sprintf("key%d", i))
+		val := []byte(fmt.Sprintf("val%d", i))
+		txn := outDB.NewTransactionAt(1, false)
+		item, err := txn.Get(key)
+		require.NoError(t, err)
+		require.EqualValues(t, val, getItemValue(t, item))
+		require.Equal(t, byte(0x00), item.UserMeta())
+		txn.Discard()
+	}
 }
 
 func dirSize(path string) (int64, error) {
@@ -1987,6 +2028,7 @@ func TestNoCrash(t *testing.T) {
 
 	ops := getTestOptions(dir)
 	ops.ValueLogMaxEntries = 1
+	ops.ValueThreshold = 32
 	db, err := Open(ops)
 	require.NoError(t, err, "unable to open db")
 
@@ -2000,8 +2042,9 @@ func TestNoCrash(t *testing.T) {
 	}
 
 	db.Lock()
-	// make head to point to first file
-	db.vhead = valuePointer{0, 0, 0}
+	// make head to point to second file. We cannot make it point to the first
+	// vlog file because we cannot push a zero head pointer.
+	db.vhead = valuePointer{1, 0, 0}
 	db.Unlock()
 	db.Close()
 
