@@ -1053,7 +1053,8 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	// End offset is different from file size. So, we should truncate the file
 	// to that size.
 	if !vlog.opt.Truncate {
-		vlog.db.opt.Debugf("Truncate Needed. File size: %d Endoffset: %d", fi.Size(), endOffset)
+		vlog.db.opt.Warningf("Truncate Needed. File %s size: %d Endoffset: %d",
+			lf.fd.Name(), fi.Size(), endOffset)
 		return ErrTruncateNeeded
 	}
 
@@ -1069,13 +1070,8 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 		}
 		return lf.bootstrap()
 	}
-	sz := fi.Size()
-	// Endoffset should always be less than the size of the file. If endoffset
-	// is beyond the file, that means we or the user has truncated the file.
-	// TODO(ibrahim): Do we really want this? The DB might not open if we end
-	// up in this situation.
-	y.AssertTruef(endOffset < uint32(sz), "endoffset: %d should be more than sz:%d", endOffset, sz)
 
+	vlog.db.opt.Infof("Truncating vlog file %s to offset: %d", lf.fd.Name(), endOffset)
 	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
 		return errFile(err, lf.path, fmt.Sprintf(
 			"Truncation needed at offset %d. Can be done manually as well.", endOffset))
