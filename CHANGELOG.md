@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
   - Rework Block and Index cache (#1473)
   - Add IsClosed method (#1478)
   - Cleanup: Avoid truncating in vlog.Open on error (#1465)
-  - Cleanup: Do no close cache before compactions (#1464)
+  - Cleanup: Do not close cache before compactions (#1464)
 
 ### New APIs
 - Badger.DB
