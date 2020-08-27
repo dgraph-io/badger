@@ -1237,6 +1237,10 @@ func (lf *logFile) init() error {
 	return nil
 }
 
+func (vlog *valueLog) stopFlushDiscardStats() {
+	vlog.lfDiscardStats.closer.Signal()
+}
+
 func (vlog *valueLog) Close() error {
 	if vlog == nil || vlog.db == nil || vlog.db.opt.InMemory {
 		return nil
