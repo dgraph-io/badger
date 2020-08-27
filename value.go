@@ -1232,7 +1232,9 @@ func (lf *logFile) init() error {
 }
 
 func (vlog *valueLog) stopFlushDiscardStats() {
-	vlog.lfDiscardStats.closer.Signal()
+	if vlog.lfDiscardStats != nil {
+		vlog.lfDiscardStats.closer.Signal()
+	}
 }
 
 func (vlog *valueLog) Close() error {
