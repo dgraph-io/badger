@@ -3,12 +3,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
-## [2.2007.2] - 2020-08-26
+## [2.2007.2] - 2020-08-31
 
 ### Fixed
-  - compaction: Use separate compactors for L0, L1 (#1466)
+  - Compaction: Use separate compactors for L0, L1 (#1466)
   - Rework Block and Index cache (#1473)
   - Add IsClosed method (#1478)
+  - Cleanup: Avoid truncating in vlog.Open on error (#1465)
+  - Cleanup: Do no close cache before compactions (#1464)
 
 ### New APIs
 - Badger.DB
@@ -18,7 +20,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
   - WithBlockCacheSize (#1473)
   - WithIndexCacheSize (#1473)
 
-### Removed APIs
+### Removed APIs [Breaking Changes]
 - Badger.DB
   - DataCacheMetrics (#1473)
   - BfCacheMetrics (#1473)
