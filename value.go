@@ -1044,12 +1044,6 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 		return nil
 	}
 
-	// Store endoffset in the writableLogOffset if this file is the file with
-	// maxFid. If we don't set the writableLogOffset here, vlog.Close() will
-	// truncate the file to zero since writableLogOffset is set to zero.
-	if lf.fid == atomic.LoadUint32(&vlog.maxFid) {
-		atomic.StoreUint32(&vlog.writableLogOffset, endOffset)
-	}
 	// End offset is different from file size. So, we should truncate the file
 	// to that size.
 	if !vlog.opt.Truncate {
