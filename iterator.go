@@ -445,6 +445,10 @@ type Iterator struct {
 	ThreadId int
 }
 
+func (it *Iterator) ReadTs() uint64 {
+	return it.readTs
+}
+
 // NewIterator returns a new iterator. Depending upon the options, either only keys, or both
 // key-value pairs would be fetched. The keys are returned in lexicographically sorted order.
 // Using prefetch is recommended if you're doing a long running iteration, for performance.
