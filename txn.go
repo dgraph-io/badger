@@ -788,6 +788,9 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 // returned by the function is relayed by the View method.
 // If View is used with managed transactions, it would assume a read timestamp of MaxUint64.
 func (db *DB) View(fn func(txn *Txn) error) error {
+	if db.IsClosed() {
+		return ErrDBClosed
+	}
 	var txn *Txn
 	if db.opt.managedTxns {
 		txn = db.NewTransactionAt(math.MaxUint64, false)
@@ -803,6 +806,9 @@ func (db *DB) View(fn func(txn *Txn) error) error {
 // for the user. Error returned by the function is relayed by the Update method.
 // Update cannot be used with managed transactions.
 func (db *DB) Update(fn func(txn *Txn) error) error {
+	if db.IsClosed() {
+		return ErrDBClosed
+	}
 	if db.opt.managedTxns {
 		panic("Update can only be used with managedDB=false.")
 	}

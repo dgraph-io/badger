@@ -188,9 +188,8 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 	// Need lock as we may be deleting the first table during a level 0 compaction.
 	s.Lock()
 	defer s.Unlock()
-	// Return false only if L0 is in memory and number of tables is more than number of
-	// ZeroTableStall. For on disk L0, we should just add the tables to the level.
-	if s.db.opt.KeepL0InMemory && len(s.tables) >= s.db.opt.NumLevelZeroTablesStall {
+	// Stall (by returning false) if we are above the specified stall setting for L0.
+	if len(s.tables) >= s.db.opt.NumLevelZeroTablesStall {
 		return false
 	}
 
@@ -268,7 +267,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 			continue
 		}
 
-		it := th.NewIterator(false)
+		it := th.NewIterator(0)
 		defer it.Close()
 
 		y.NumLSMGets.Add(s.strLevel, 1)
@@ -292,6 +291,10 @@ func (s *levelHandler) appendIterators(iters []y.Iterator, opt *IteratorOptions)
 	s.RLock()
 	defer s.RUnlock()
 
+	var topt int
+	if opt.Reverse {
+		topt = table.REVERSED
+	}
 	if s.level == 0 {
 		// Remember to add in reverse order!
 		// The newer table at the end of s.tables should be added first as it takes precedence.
@@ -302,14 +305,14 @@ func (s *levelHandler) appendIterators(iters []y.Iterator, opt *IteratorOptions)
 				out = append(out, t)
 			}
 		}
-		return appendIteratorsReversed(iters, out, opt.Reverse)
+		return appendIteratorsReversed(iters, out, topt)
 	}
 
 	tables := opt.pickTables(s.tables)
 	if len(tables) == 0 {
 		return iters
 	}
-	return append(iters, table.NewConcatIterator(tables, opt.Reverse))
+	return append(iters, table.NewConcatIterator(tables, topt))
 }
 
 type levelHandlerRLocked struct{}

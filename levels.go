@@ -157,8 +157,8 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			// Set compression from table manifest.
 			topt.Compression = tf.Compression
 			topt.DataKey = dk
-			topt.Cache = db.blockCache
-			topt.BfCache = db.bfCache
+			topt.BlockCache = db.blockCache
+			topt.IndexCache = db.indexCache
 			t, err := table.OpenTable(fd, topt)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
@@ -306,7 +306,7 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 					// function in logs, and forces a compaction.
 					dropPrefixes: prefixes,
 				}
-				if err := s.doCompact(cp); err != nil {
+				if err := s.doCompact(174, cp); err != nil {
 					opt.Warningf("While compacting level 0: %v", err)
 					return nil
 				}
@@ -366,11 +366,13 @@ func (s *levelsController) startCompact(lc *y.Closer) {
 	n := s.kv.opt.NumCompactors
 	lc.AddRunning(n - 1)
 	for i := 0; i < n; i++ {
-		go s.runWorker(lc)
+		// The worker with id=0 is dedicated to L0 and L1. This is not counted
+		// towards the user specified NumCompactors.
+		go s.runCompactor(i, lc)
 	}
 }
 
-func (s *levelsController) runWorker(lc *y.Closer) {
+func (s *levelsController) runCompactor(id int, lc *y.Closer) {
 	defer lc.Done()
 
 	randomDelay := time.NewTimer(time.Duration(rand.Int31n(1000)) * time.Millisecond)
@@ -381,7 +383,7 @@ func (s *levelsController) runWorker(lc *y.Closer) {
 		return
 	}
 
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
@@ -391,7 +393,15 @@ func (s *levelsController) runWorker(lc *y.Closer) {
 			prios := s.pickCompactLevels()
 		loop:
 			for _, p := range prios {
-				err := s.doCompact(p)
+				if id == 0 && p.level > 1 {
+					// If I'm ID zero, I only compact L0 and L1.
+					continue
+				}
+				if id != 0 && p.level <= 1 {
+					// If I'm ID non-zero, I do NOT compact L0 and L1.
+					continue
+				}
+				err := s.doCompact(id, p)
 				switch err {
 				case nil:
 					break loop
@@ -453,10 +463,11 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 			prios = append(prios, pri)
 		}
 	}
-	// We used to sort compaction priorities based on the score. But, we
-	// decided to compact based on the level, not the priority. So, upper
-	// levels (level 0, level 1, etc) always get compacted first, before the
-	// lower levels -- this allows us to avoid stalls.
+	// We should continue to sort the compaction priorities by score. Now that we have a dedicated
+	// compactor for L0 and L1, we don't need to sort by level here.
+	sort.Slice(prios, func(i, j int) bool {
+		return prios[i].score > prios[j].score
+	})
 	return prios
 }
 
@@ -506,10 +517,10 @@ func (s *levelsController) compactBuildTables(
 	var iters []y.Iterator
 	switch {
 	case lev == 0:
-		iters = appendIteratorsReversed(iters, topTables, false)
+		iters = appendIteratorsReversed(iters, topTables, table.NOCACHE)
 	case len(topTables) > 0:
 		y.AssertTrue(len(topTables) == 1)
-		iters = []y.Iterator{topTables[0].NewIterator(false)}
+		iters = []y.Iterator{topTables[0].NewIterator(table.NOCACHE)}
 	}
 
 	// Next level has level>=1 and we can use ConcatIterator as key ranges do not overlap.
@@ -530,7 +541,7 @@ nextTable:
 		}
 		valid = append(valid, table)
 	}
-	iters = append(iters, table.NewConcatIterator(valid, false))
+	iters = append(iters, table.NewConcatIterator(valid, table.NOCACHE))
 	it := table.NewMergeIterator(iters, false)
 	defer it.Close() // Important to close the iterator to do ref counting.
 
@@ -541,15 +552,13 @@ nextTable:
 	// that would affect the snapshot view guarantee provided by transactions.
 	discardTs := s.kv.orc.discardAtOrBelow()
 
-	// Start generating new tables.
-	type newTableResult struct {
-		table *table.Table
-		err   error
-	}
-	resultCh := make(chan newTableResult)
 	var numBuilds, numVersions int
 	var lastKey, skipKey []byte
 	var vp valuePointer
+	var newTables []*table.Table
+	mu := new(sync.Mutex) // Guards newTables
+
+	inflightBuilders := y.NewThrottle(5)
 	for it.Valid() {
 		timeStart := time.Now()
 		dk, err := s.kv.registry.latestDataKey()
@@ -560,8 +569,8 @@ nextTable:
 		bopts := buildTableOptions(s.kv.opt)
 		bopts.DataKey = dk
 		// Builder does not need cache but the same options are used for opening table.
-		bopts.Cache = s.kv.blockCache
-		bopts.BfCache = s.kv.bfCache
+		bopts.BlockCache = s.kv.blockCache
+		bopts.IndexCache = s.kv.indexCache
 		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
@@ -646,70 +655,73 @@ nextTable:
 		// called Add() at least once, and builder is not Empty().
 		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			numKeys, numSkips, time.Since(timeStart))
-		build := func(fileID uint64) (*table.Table, error) {
-			fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
-			if err != nil {
-				return nil, errors.Wrapf(err, "While opening new table: %d", fileID)
-			}
-
-			if _, err := fd.Write(builder.Finish()); err != nil {
-				return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
-			}
-			tbl, err := table.OpenTable(fd, bopts)
-			// decrRef is added below.
-			return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
-		}
 		if builder.Empty() {
 			// Cleanup builder resources:
-			builder.Finish()
+			builder.Finish(false)
 			builder.Close()
 			continue
 		}
 		numBuilds++
 		fileID := s.reserveFileID()
+		if err := inflightBuilders.Do(); err != nil {
+			// Can't return from here, until I decrRef all the tables that I built so far.
+			break
+		}
 		go func(builder *table.Builder) {
 			defer builder.Close()
-			var (
-				tbl *table.Table
-				err error
-			)
+			defer inflightBuilders.Done(err)
+
+			build := func(fileID uint64) (*table.Table, error) {
+				fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
+				if err != nil {
+					return nil, errors.Wrapf(err, "While opening new table: %d", fileID)
+				}
+
+				if _, err := fd.Write(builder.Finish(false)); err != nil {
+					return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
+				}
+				tbl, err := table.OpenTable(fd, bopts)
+				// decrRef is added below.
+				return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
+			}
+
+			var tbl *table.Table
+			var err error
 			if s.kv.opt.InMemory {
-				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
+				tbl, err = table.OpenInMemoryTable(builder.Finish(true), fileID, &bopts)
 			} else {
 				tbl, err = build(fileID)
 			}
-			resultCh <- newTableResult{tbl, err}
+
+			// If we couldn't build the table, return fast.
+			if err != nil {
+				return
+			}
+
+			mu.Lock()
+			newTables = append(newTables, tbl)
+			// num := atomic.LoadInt32(&table.NumBlocks)
+			mu.Unlock()
+
+			// TODO(ibrahim): When ristretto PR #186 merges, bring this back.
+			// s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, (z.NumAllocBytes() / 1 << 20))
 		}(builder)
 	}
 
-	newTables := make([]*table.Table, 0, 20)
-	// Wait for all table builders to finish.
-	var firstErr error
-	for x := 0; x < numBuilds; x++ {
-		res := <-resultCh
-		newTables = append(newTables, res.table)
-		if firstErr == nil {
-			firstErr = res.err
-		}
-	}
-
-	if firstErr == nil {
+	// Wait for all table builders to finish and also for newTables accumulator to finish.
+	err := inflightBuilders.Finish()
+	if err == nil {
 		// Ensure created files' directory entries are visible.  We don't mind the extra latency
 		// from not doing this ASAP after all file creation has finished because this is a
 		// background operation.
-		firstErr = s.kv.syncDir(s.kv.opt.Dir)
+		err = s.kv.syncDir(s.kv.opt.Dir)
 	}
 
-	if firstErr != nil {
+	if err != nil {
 		// An error happened.  Delete all the newly created table files (by calling DecrRef
 		// -- we're the only holders of a ref).
-		for j := 0; j < numBuilds; j++ {
-			if newTables[j] != nil {
-				_ = newTables[j].DecrRef()
-			}
-		}
-		errorReturn := errors.Wrapf(firstErr, "While running compaction for: %+v", cd)
-		return nil, nil, errorReturn
+		_ = decrRefs(newTables)
+		return nil, nil, errors.Wrapf(err, "while running compactions for: %+v", cd)
 	}
 
 	sort.Slice(newTables, func(i, j int) bool {
@@ -963,7 +975,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 var errFillTables = errors.New("Unable to fill tables")
 
 // doCompact picks some table on level l and compacts it away to the next level.
-func (s *levelsController) doCompact(p compactionPriority) error {
+func (s *levelsController) doCompact(id int, p compactionPriority) error {
 	l := p.level
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
 
@@ -976,7 +988,7 @@ func (s *levelsController) doCompact(p compactionPriority) error {
 	cd.elog.SetMaxEvents(100)
 	defer cd.elog.Finish()
 
-	s.kv.opt.Infof("Got compaction priority: %+v", p)
+	s.kv.opt.Debugf("[Compactor: %d] Attempting to run compaction: %+v", id, p)
 
 	// While picking tables to be compacted, both levels' tables are expected to
 	// remain unchanged.
@@ -992,16 +1004,17 @@ func (s *levelsController) doCompact(p compactionPriority) error {
 	}
 	defer s.cstatus.delete(cd) // Remove the ranges from compaction status.
 
-	s.kv.opt.Infof("Running for level: %d\n", cd.thisLevel.level)
+	s.kv.opt.Infof("[Compactor: %d] Running compaction: %+v for level: %d\n",
+		id, p, cd.thisLevel.level)
 	s.cstatus.toLog(cd.elog)
 	if err := s.runCompactDef(l, cd); err != nil {
 		// This compaction couldn't be done successfully.
-		s.kv.opt.Warningf("LOG Compact FAILED with error: %+v: %+v", err, cd)
+		s.kv.opt.Warningf("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)
 		return err
 	}
 
 	s.cstatus.toLog(cd.elog)
-	s.kv.opt.Infof("Compaction for level: %d DONE", cd.thisLevel.level)
+	s.kv.opt.Infof("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
 	return nil
 }
 
@@ -1025,7 +1038,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		// Stall. Make sure all levels are healthy before we unstall.
 		var timeStart time.Time
 		{
-			s.kv.opt.Debugf("STALLED STALLED STALLED: %v\n", time.Since(s.lastUnstalled))
+			s.kv.opt.Infof("STALLED STALLED STALLED: %v\n", time.Since(s.lastUnstalled))
 			s.cstatus.RLock()
 			for i := 0; i < s.kv.opt.MaxLevels; i++ {
 				s.kv.opt.Debugf("level=%d. Status=%s Size=%d\n",
@@ -1067,6 +1080,9 @@ func (s *levelsController) close() error {
 // get returns the found value if any. If not found, we return nil.
 func (s *levelsController) get(key []byte, maxVs *y.ValueStruct, startLevel int) (
 	y.ValueStruct, error) {
+	if s.kv.IsClosed() {
+		return y.ValueStruct{}, ErrDBClosed
+	}
 	// It's important that we iterate the levels from 0 on upward. The reason is, if we iterated
 	// in opposite order, or in parallel (naively calling all the h.RLock() in some order) we could
 	// read level L's tables post-compaction and level L+1's tables pre-compaction. (If we do
@@ -1098,10 +1114,10 @@ func (s *levelsController) get(key []byte, maxVs *y.ValueStruct, startLevel int)
 	return y.ValueStruct{}, nil
 }
 
-func appendIteratorsReversed(out []y.Iterator, th []*table.Table, reversed bool) []y.Iterator {
+func appendIteratorsReversed(out []y.Iterator, th []*table.Table, opt int) []y.Iterator {
 	for i := len(th) - 1; i >= 0; i-- {
 		// This will increment the reference of the table handler.
-		out = append(out, th[i].NewIterator(reversed))
+		out = append(out, th[i].NewIterator(opt))
 	}
 	return out
 }
@@ -1126,6 +1142,7 @@ type TableInfo struct {
 	Right       []byte
 	KeyCount    uint64 // Number of keys in the table
 	EstimatedSz uint64
+	IndexSz     int
 }
 
 func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo) {
@@ -1134,7 +1151,7 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 		for _, t := range l.tables {
 			var count uint64
 			if withKeysCount {
-				it := t.NewIterator(false)
+				it := t.NewIterator(table.NOCACHE)
 				for it.Rewind(); it.Valid(); it.Next() {
 					count++
 				}
@@ -1148,6 +1165,7 @@ func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo)
 				Right:       t.Biggest(),
 				KeyCount:    count,
 				EstimatedSz: t.EstimatedSize(),
+				IndexSz:     t.IndexSize(),
 			}
 			result = append(result, info)
 		}

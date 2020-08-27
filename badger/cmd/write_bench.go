@@ -59,19 +59,15 @@ var (
 	sizeWritten    uint64
 	entriesWritten uint64
 
-	valueThreshold      int
-	numVersions         int
-	maxCacheSize        int64
-	keepBlockIdxInCache bool
-	keepBlocksInCache   bool
-	maxBfCacheSize      int64
-	vlogMaxEntries      uint32
-	loadBloomsOnOpen    bool
-	detectConflicts     bool
-	compression         bool
-	showDir             bool
-	ttlDuration         string
-	showKeysCount       bool
+	valueThreshold   int
+	numVersions      int
+	vlogMaxEntries   uint32
+	loadBloomsOnOpen bool
+	detectConflicts  bool
+	compression      bool
+	showDir          bool
+	ttlDuration      string
+	showKeysCount    bool
 
 	sstCount  uint32
 	vlogCount uint32
@@ -102,13 +98,10 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "Show Badger logs.")
 	writeBenchCmd.Flags().IntVarP(&valueThreshold, "value-th", "t", 1<<10, "Value threshold")
 	writeBenchCmd.Flags().IntVarP(&numVersions, "num-version", "n", 1, "Number of versions to keep")
-	writeBenchCmd.Flags().Int64VarP(&maxCacheSize, "max-cache", "C", 0, "Max size of cache")
-	writeBenchCmd.Flags().BoolVarP(&keepBlockIdxInCache, "keep-bidx", "b", false,
-		"Keep block indices in cache")
-	writeBenchCmd.Flags().BoolVarP(&keepBlocksInCache, "keep-blocks", "B", false,
-		"Keep blocks in cache")
-	writeBenchCmd.Flags().Int64VarP(&maxBfCacheSize, "max-bf-cache", "c", 0,
-		"Maximum Bloom Filter Cache Size")
+	writeBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache", 0,
+		"Size of block cache in MB")
+	writeBenchCmd.Flags().Int64Var(&indexCacheSize, "index-cache", 0,
+		"Size of index cache in MB.")
 	writeBenchCmd.Flags().Uint32Var(&vlogMaxEntries, "vlog-maxe", 1000000, "Value log Max Entries")
 	writeBenchCmd.Flags().StringVarP(&encryptionKey, "encryption-key", "e", "",
 		"If it is true, badger will encrypt all the data stored on the disk.")
@@ -123,12 +116,12 @@ func init() {
 	writeBenchCmd.Flags().BoolVar(&showDir, "show-dir", false,
 		"If true, the report will include the directory contents")
 	writeBenchCmd.Flags().StringVar(&dropAllPeriod, "dropall", "0s",
-		"Period of dropping all. If 0, doesn't drops all.")
+		"If set, run dropAll periodically over given duration.")
 	writeBenchCmd.Flags().StringVar(&dropPrefixPeriod, "drop-prefix", "0s",
-		"Period of dropping by random prefixes. If 0, doesn't drops by prefix.")
+		"If set, drop random prefixes periodically over given duration.")
 	writeBenchCmd.Flags().StringVar(&ttlDuration, "entry-ttl", "0s",
 		"TTL duration in seconds for the entries, 0 means without TTL")
-	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "5m", "GC Period.")
+	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "0s", "GC Period.")
 	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
 	writeBenchCmd.Flags().BoolVar(&showKeysCount, "show-keys", false,
 		"If true, the report will include the keys statistics")
@@ -249,10 +242,8 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithCompactL0OnClose(force).
 		WithValueThreshold(valueThreshold).
 		WithNumVersionsToKeep(numVersions).
-		WithMaxCacheSize(maxCacheSize).
-		WithKeepBlockIndicesInCache(keepBlockIdxInCache).
-		WithKeepBlocksInCache(keepBlocksInCache).
-		WithMaxBfCacheSize(maxBfCacheSize).
+		WithBlockCacheSize(blockCacheSize << 20).
+		WithIndexCacheSize(indexCacheSize << 20).
 		WithValueLogMaxEntries(vlogMaxEntries).
 		WithTableLoadingMode(mode).
 		WithEncryptionKey([]byte(encryptionKey)).
@@ -347,7 +338,6 @@ func reportStats(c *y.Closer, db *badger.DB) {
 			if showKeysCount {
 				showKeysStats(db)
 			}
-
 			// fetch directory contents
 			if showDir {
 				err := filepath.Walk(sstDir, func(path string, info os.FileInfo, err error) error {
@@ -388,6 +378,10 @@ func runGC(c *y.Closer, db *badger.DB) {
 	defer c.Done()
 	period, err := time.ParseDuration(gcPeriod)
 	y.Check(err)
+	if period == 0 {
+		return
+	}
+
 	t := time.NewTicker(period)
 	defer t.Stop()
 	for {
@@ -406,7 +400,6 @@ func runGC(c *y.Closer, db *badger.DB) {
 
 func dropAll(c *y.Closer, db *badger.DB) {
 	defer c.Done()
-
 	dropPeriod, err := time.ParseDuration(dropAllPeriod)
 	y.Check(err)
 	if dropPeriod == 0 {
@@ -438,7 +431,6 @@ func dropAll(c *y.Closer, db *badger.DB) {
 
 func dropPrefix(c *y.Closer, db *badger.DB) {
 	defer c.Done()
-
 	dropPeriod, err := time.ParseDuration(dropPrefixPeriod)
 	y.Check(err)
 	if dropPeriod == 0 {

@@ -377,6 +377,7 @@ func (w *sortedWriter) send(done bool) error {
 		return err
 	}
 	go func(builder *table.Builder) {
+		defer builder.Close()
 		err := w.createTable(builder)
 		w.throttle.Done(err)
 	}(w.builder)
@@ -410,15 +411,15 @@ func (w *sortedWriter) Done() error {
 }
 
 func (w *sortedWriter) createTable(builder *table.Builder) error {
-	data := builder.Finish()
+	data := builder.Finish(w.db.opt.InMemory)
 	if len(data) == 0 {
 		return nil
 	}
 	fileID := w.db.lc.reserveFileID()
 	opts := buildTableOptions(w.db.opt)
 	opts.DataKey = builder.DataKey()
-	opts.Cache = w.db.blockCache
-	opts.BfCache = w.db.bfCache
+	opts.BlockCache = w.db.blockCache
+	opts.IndexCache = w.db.indexCache
 	var tbl *table.Table
 	if w.db.opt.InMemory {
 		var err error

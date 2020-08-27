@@ -547,7 +547,7 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
 	require.NoError(t, err)
 
-	_, err = fd.Write(b.Finish())
+	_, err = fd.Write(b.Finish(false))
 	require.NoError(t, err, "unable to write to file")
 
 	tab, err := table.OpenTable(fd, bopts)
@@ -670,16 +670,13 @@ func TestL0GCBug(t *testing.T) {
 	// Simulate a crash by not closing db1 but releasing the locks.
 	if db1.dirLockGuard != nil {
 		require.NoError(t, db1.dirLockGuard.release())
+		db1.dirLockGuard = nil
 	}
 	if db1.valueDirGuard != nil {
 		require.NoError(t, db1.valueDirGuard.release())
+		db1.valueDirGuard = nil
 	}
-	for _, f := range db1.vlog.filesMap {
-		require.NoError(t, f.fd.Close())
-	}
-	require.NoError(t, db1.registry.Close())
-	require.NoError(t, db1.lc.close())
-	require.NoError(t, db1.manifest.close())
+	require.NoError(t, db1.Close())
 
 	db2, err := Open(opts)
 	require.NoError(t, err)
@@ -830,4 +827,34 @@ func TestDropAllDropPrefix(t *testing.T) {
 		}()
 		wg.Wait()
 	})
+}
+
+func TestIsClosed(t *testing.T) {
+	test := func(inMemory bool) {
+		opt := DefaultOptions("")
+		if inMemory {
+			opt.InMemory = true
+		} else {
+			dir, err := ioutil.TempDir("", "badger-test")
+			require.NoError(t, err)
+			defer removeDir(dir)
+
+			opt.Dir = dir
+			opt.ValueDir = dir
+		}
+
+		db, err := Open(opt)
+		require.NoError(t, err)
+		require.False(t, db.IsClosed())
+		require.NoError(t, db.Close())
+		require.True(t, db.IsClosed())
+	}
+
+	t.Run("normal", func(t *testing.T) {
+		test(false)
+	})
+	t.Run("in-memory", func(t *testing.T) {
+		test(true)
+	})
+
 }
