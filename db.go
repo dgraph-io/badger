@@ -383,19 +383,8 @@ func Open(opt Options) (db *DB, err error) {
 			_ = db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
 		}()
 	}
-	db.showAllHeadKeys()
-
-	headKey := y.KeyWithTs(head, math.MaxUint64)
-	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
-	vs, err := db.get(headKey)
-	if err != nil {
-		return db, errors.Wrap(err, "Retrieving head")
-	}
-	db.orc.nextTxnTs = vs.Version
-	var vptr valuePointer
-	if len(vs.Value) > 0 {
-		vptr.Decode(vs.Value)
-	}
+	vptr, version := db.getHead()
+	db.orc.nextTxnTs = version
 
 	replayCloser := y.NewCloser(1)
 	go db.doWrites(replayCloser)
@@ -431,38 +420,46 @@ func Open(opt Options) (db *DB, err error) {
 	return db, nil
 }
 
-func (db *DB) showAllHeadKeys() {
+// getHead prints all the head pointer in the DB and return the max value.
+func (db *DB) getHead() (valuePointer, uint64) {
 	// This is a hack. If we use newTransaction(..) we'll end up in deadlock
 	// since txnmark is not initialized when this function is called.
 	txn := Txn{
 		db:     db,
-		readTs: math.MaxUint32, // Show all versions.
+		readTs: math.MaxUint64, // Show all versions.
 	}
+	var vptr valuePointer
 	iopt := DefaultIteratorOptions
 	iopt.AllVersions = true
 	iopt.InternalAccess = true
 
 	it := txn.NewKeyIterator(head, iopt)
 	defer it.Close()
+
 	it.Rewind()
 	if !it.Valid() {
 		db.opt.Infof("No head keys found")
-		return
+		return vptr, 0
 	}
 
+	var maxVersion uint64
 	db.opt.Infof("Found the following head pointers")
 	for ; it.Valid(); it.Next() {
-		i := it.Item()
-		err := i.Value(func(val []byte) error {
-			var vptr valuePointer
+		item := it.Item()
+		err := item.Value(func(val []byte) error {
 			vptr.Decode(val)
 			db.opt.Infof("Fid: %d Len: %d Offset: %d Version: %d\n",
-				vptr.Fid, vptr.Len, vptr.Offset, i.Version)
+				vptr.Fid, vptr.Len, vptr.Offset, item.Version())
 			return nil
 		})
 		// This shouldn't happen.
 		y.Check(err)
+		maxVersion = item.Version()
 	}
+	// If we have reached here it means there were some head key and so the
+	// version should never be zero.
+	y.AssertTrue(maxVersion != 0)
+	return vptr, maxVersion
 }
 
 // cleanup stops all the goroutines started by badger. This is used in open to
