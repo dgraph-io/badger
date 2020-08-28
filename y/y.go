@@ -30,6 +30,7 @@ import (
 	"unsafe"
 
 	"github.com/pkg/errors"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -195,14 +196,16 @@ func FixedDuration(d time.Duration) string {
 // to tell the goroutine to shut down, and a WaitGroup with which to wait for it to finish shutting
 // down.
 type Closer struct {
-	closed    chan struct{}
-	waiting   sync.WaitGroup
-	closeOnce sync.Once
+	waiting sync.WaitGroup
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewCloser constructs a new Closer, with an initial count on the WaitGroup.
 func NewCloser(initial int) *Closer {
-	ret := &Closer{closed: make(chan struct{})}
+	ret := &Closer{}
+	ret.ctx, ret.cancel = context.WithCancel(context.Background())
 	ret.waiting.Add(initial)
 	return ret
 }
@@ -212,12 +215,18 @@ func (lc *Closer) AddRunning(delta int) {
 	lc.waiting.Add(delta)
 }
 
+// Ctx can be used to get a context, which would automatically get cancelled when Signal is called.
+func (lc *Closer) Ctx() context.Context {
+	if lc == nil {
+		return context.Background()
+	}
+	return lc.ctx
+}
+
 // Signal signals the HasBeenClosed signal.
 func (lc *Closer) Signal() {
 	// Todo(ibrahim): Change Signal to return error on next badger breaking change.
-	lc.closeOnce.Do(func() {
-		close(lc.closed)
-	})
+	lc.cancel()
 }
 
 // HasBeenClosed gets signaled when Signal() is called.
@@ -225,7 +234,7 @@ func (lc *Closer) HasBeenClosed() <-chan struct{} {
 	if lc == nil {
 		return dummyCloserChan
 	}
-	return lc.closed
+	return lc.ctx.Done()
 }
 
 // Done calls Done() on the WaitGroup.
