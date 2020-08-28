@@ -23,7 +23,6 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/DataDog/zstd"
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
@@ -507,7 +506,7 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 		dst := z.Calloc(sz)
 		return snappy.Encode(dst, data), nil
 	case options.ZSTD:
-		sz := zstd.CompressBound(len(data))
+		sz := y.ZSTDCompressBound(len(data))
 		dst := z.Calloc(sz)
 		return y.ZSTDCompress(dst, data, b.opt.ZSTDCompressionLevel)
 	}

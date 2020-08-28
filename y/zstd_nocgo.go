@@ -30,3 +30,8 @@ func ZSTDDecompress(dst, src []byte) ([]byte, error) {
 func ZSTDCompress(dst, src []byte, compressionLevel int) ([]byte, error) {
 	return nil, ErrZstdCgo
 }
+
+// ZSTDCompressBound returns the worst case size needed for a destination buffer.
+func ZSTDCompressBound(srcSize int) int {
+	panic("ZSTD only supported in Cgo.")
+}
