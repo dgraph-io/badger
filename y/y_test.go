@@ -26,15 +26,6 @@ func BenchmarkBuffer(b *testing.B) {
 		}
 	})
 
-	b.Run("calloc-buffer", func(b *testing.B) {
-		buf := NewBuffer(pageSize)
-		defer buf.Release()
-
-		for i := 0; i < b.N; i++ {
-			buf.Write(btw[:])
-		}
-	})
-
 	b.Run("page-buffer", func(b *testing.B) {
 		b.Run(fmt.Sprintf("page-size-%d", pageSize), func(b *testing.B) {
 			pageBuffer := NewPageBuffer(pageSize)
