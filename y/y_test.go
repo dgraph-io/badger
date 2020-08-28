@@ -280,3 +280,12 @@ func TestMulipleSignals(t *testing.T) {
 	require.NotPanics(t, func() { closer.SignalAndWait() })
 	require.NotPanics(t, func() { closer.Signal() })
 }
+
+func TestCloser(t *testing.T) {
+	closer := NewCloser(1)
+	go func() {
+		defer closer.Done()
+		<-closer.Ctx().Done()
+	}()
+	closer.SignalAndWait()
+}
