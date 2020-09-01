@@ -4,11 +4,14 @@ aliases = ["/get-started"]
 +++
 
 
-## Installing
+## Installing Latest release
 To start using Badger, install Go 1.12 or above and run `go get`:
 
 ```
 $ go get github.com/dgraph-io/badger/v2
+$ cd $GOPATH/src/github.com/dgraph-io/badger
+$ git checkout v2.2007.1
+$ cd badger && go install
 ```
 
 This will retrieve the library and install the `badger` command line

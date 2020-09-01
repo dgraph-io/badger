@@ -35,7 +35,7 @@ For more details on our version naming schema please read [Choosing a version](#
 
 ## Table of Contents
  * [Getting Started](#getting-started)
-    + [Installing](#installing-v200)
+    + [Installing](#installing-latest-release)
       - [Choosing a version](#choosing-a-version)
     + [Opening a database](#opening-a-database)
     + [Transactions](#transactions)
@@ -66,13 +66,13 @@ For more details on our version naming schema please read [Choosing a version](#
 
 ## Getting Started
 
-### Installing v2.0.0
+### Installing Latest release
 To start using Badger, install Go 1.12 or above and run `go get`:
 
 ```sh
 $ go get github.com/dgraph-io/badger/v2
 $ cd $GOPATH/src/github.com/dgraph-io/badger
-$ git checkout v2.0.0
+$ git checkout v2.2007.1
 $ cd badger && go install
 ```
 
