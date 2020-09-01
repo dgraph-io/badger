@@ -35,7 +35,7 @@ For more details on our version naming schema please read [Choosing a version](#
 
 ## Table of Contents
  * [Getting Started](#getting-started)
-    + [Installing](#installing)
+    + [Installing](#installing-v200)
       - [Choosing a version](#choosing-a-version)
     + [Opening a database](#opening-a-database)
     + [Transactions](#transactions)
