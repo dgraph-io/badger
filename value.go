@@ -1007,7 +1007,7 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 		return nil, errFile(err, vlog.dirPath, "Sync value log dir")
 	}
 
-	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
+	if err = lf.mmap(vlog.opt.ValueLogFileSize); err != nil {
 		removeFile()
 		return nil, errFile(err, lf.path, "Mmap value log file")
 	}
