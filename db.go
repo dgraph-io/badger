@@ -432,6 +432,7 @@ func (db *DB) getHead() (valuePointer, uint64) {
 	iopt := DefaultIteratorOptions
 	iopt.AllVersions = true
 	iopt.InternalAccess = true
+	iopt.Reverse = true
 
 	it := txn.NewKeyIterator(head, iopt)
 	defer it.Close()
