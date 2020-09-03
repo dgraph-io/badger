@@ -272,7 +272,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 
 	startTime = time.Now()
 	num := uint64(numKeys * mil)
-	c := y.NewCloser(4)
+	c := z.NewCloser(4)
 	go reportStats(c, db)
 	go dropAll(c, db)
 	go dropPrefix(c, db)
@@ -324,7 +324,7 @@ func showKeysStats(db *badger.DB) {
 		moveKeyCount, internalKeyCount)
 }
 
-func reportStats(c *y.Closer, db *badger.DB) {
+func reportStats(c *z.Closer, db *badger.DB) {
 	defer c.Done()
 
 	t := time.NewTicker(time.Second)
@@ -374,7 +374,7 @@ func reportStats(c *y.Closer, db *badger.DB) {
 	}
 }
 
-func runGC(c *y.Closer, db *badger.DB) {
+func runGC(c *z.Closer, db *badger.DB) {
 	defer c.Done()
 	period, err := time.ParseDuration(gcPeriod)
 	y.Check(err)
@@ -398,7 +398,7 @@ func runGC(c *y.Closer, db *badger.DB) {
 	}
 }
 
-func dropAll(c *y.Closer, db *badger.DB) {
+func dropAll(c *z.Closer, db *badger.DB) {
 	defer c.Done()
 	dropPeriod, err := time.ParseDuration(dropAllPeriod)
 	y.Check(err)
@@ -429,7 +429,7 @@ func dropAll(c *y.Closer, db *badger.DB) {
 	}
 }
 
-func dropPrefix(c *y.Closer, db *badger.DB) {
+func dropPrefix(c *z.Closer, db *badger.DB) {
 	defer c.Done()
 	dropPeriod, err := time.ParseDuration(dropPrefixPeriod)
 	y.Check(err)

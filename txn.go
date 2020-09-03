@@ -55,7 +55,7 @@ type oracle struct {
 	lastCleanupTs uint64
 
 	// closer is used to stop watermarks.
-	closer *y.Closer
+	closer *z.Closer
 }
 
 type committedTxn struct {
@@ -74,7 +74,7 @@ func newOracle(opt Options) *oracle {
 		// See https://golang.org/pkg/sync/atomic/#pkg-note-BUG.
 		readMark: &y.WaterMark{Name: "badger.PendingReads"},
 		txnMark:  &y.WaterMark{Name: "badger.TxnTimestamp"},
-		closer:   y.NewCloser(2),
+		closer:   z.NewCloser(2),
 	}
 	orc.readMark.Init(orc.closer)
 	orc.txnMark.Init(orc.closer)

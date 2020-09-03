@@ -41,6 +41,7 @@ import (
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
 )
@@ -824,7 +825,7 @@ type lfDiscardStats struct {
 	sync.RWMutex
 	m                 map[uint32]int64
 	flushChan         chan map[uint32]int64
-	closer            *y.Closer
+	closer            *z.Closer
 	updatesSinceFlush int
 }
 
@@ -1088,7 +1089,7 @@ func (vlog *valueLog) init(db *DB) {
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 	vlog.lfDiscardStats = &lfDiscardStats{
 		m:         make(map[uint32]int64),
-		closer:    y.NewCloser(1),
+		closer:    z.NewCloser(1),
 		flushChan: make(chan map[uint32]int64, 16),
 	}
 }
@@ -1834,7 +1835,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	return nil
 }
 
-func (vlog *valueLog) waitOnGC(lc *y.Closer) {
+func (vlog *valueLog) waitOnGC(lc *z.Closer) {
 	defer lc.Done()
 
 	<-lc.HasBeenClosed() // Wait for lc to be closed.

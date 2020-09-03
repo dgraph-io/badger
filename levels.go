@@ -32,6 +32,7 @@ import (
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 )
 
@@ -362,7 +363,7 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 	return nil
 }
 
-func (s *levelsController) startCompact(lc *y.Closer) {
+func (s *levelsController) startCompact(lc *z.Closer) {
 	n := s.kv.opt.NumCompactors
 	lc.AddRunning(n - 1)
 	for i := 0; i < n; i++ {
@@ -372,7 +373,7 @@ func (s *levelsController) startCompact(lc *y.Closer) {
 	}
 }
 
-func (s *levelsController) runCompactor(id int, lc *y.Closer) {
+func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 	defer lc.Done()
 
 	randomDelay := time.NewTimer(time.Duration(rand.Int31n(1000)) * time.Millisecond)
