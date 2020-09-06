@@ -432,6 +432,9 @@ func (db *DB) getHead() (valuePointer, uint64) {
 	iopt := DefaultIteratorOptions
 	iopt.AllVersions = true
 	iopt.InternalAccess = true
+	// Do not prefetch values. This could cause a race condition since
+	// prefetching is done via goroutines.
+	iopt.PrefetchValues = false
 	iopt.Reverse = true
 
 	it := txn.NewKeyIterator(head, iopt)
