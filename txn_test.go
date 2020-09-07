@@ -28,6 +28,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 
 	"github.com/stretchr/testify/require"
 )
@@ -110,7 +111,7 @@ func TestTxnCommitAsync(t *testing.T) {
 		require.NoError(t, txn.Commit())
 		txn.Discard()
 
-		closer := y.NewCloser(1)
+		closer := z.NewCloser(1)
 		go func() {
 			defer closer.Done()
 			for {

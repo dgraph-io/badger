@@ -31,6 +31,7 @@ import (
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 var readBenchCmd = &cobra.Command{
@@ -84,7 +85,7 @@ func fullScanDB(db *badger.DB) {
 
 	startTime = time.Now()
 	// Print the stats
-	c := y.NewCloser(0)
+	c := z.NewCloser(0)
 	c.AddRunning(1)
 	go printStats(c)
 
@@ -142,7 +143,7 @@ func readBench(cmd *cobra.Command, args []string) error {
 		fmt.Println("DB is empty, hence returning")
 		return nil
 	}
-	c := y.NewCloser(0)
+	c := z.NewCloser(0)
 	startTime = time.Now()
 	for i := 0; i < numGoroutines; i++ {
 		c.AddRunning(1)
@@ -159,7 +160,7 @@ func readBench(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func printStats(c *y.Closer) {
+func printStats(c *z.Closer) {
 	defer c.Done()
 
 	t := time.NewTicker(time.Second)
@@ -181,7 +182,7 @@ func printStats(c *y.Closer) {
 	}
 }
 
-func readKeys(db *badger.DB, c *y.Closer, keys [][]byte) {
+func readKeys(db *badger.DB, c *z.Closer, keys [][]byte) {
 	defer c.Done()
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	for {

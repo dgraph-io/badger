@@ -30,7 +30,6 @@ import (
 	"unsafe"
 
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 )
 
 var (
@@ -63,9 +62,6 @@ var (
 
 	// CastagnoliCrcTable is a CRC32 polynomial table
 	CastagnoliCrcTable = crc32.MakeTable(crc32.Castagnoli)
-
-	// Dummy channel for nil closers.
-	dummyCloserChan = make(chan struct{})
 )
 
 // OpenExistingFile opens an existing file, errors if it doesn't exist.
@@ -190,71 +186,6 @@ func FixedDuration(d time.Duration) string {
 		str = fmt.Sprintf("%02dh", int(d.Hours())) + str
 	}
 	return str
-}
-
-// Closer holds the two things we need to close a goroutine and wait for it to finish: a chan
-// to tell the goroutine to shut down, and a WaitGroup with which to wait for it to finish shutting
-// down.
-type Closer struct {
-	waiting sync.WaitGroup
-
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-// NewCloser constructs a new Closer, with an initial count on the WaitGroup.
-func NewCloser(initial int) *Closer {
-	ret := &Closer{}
-	ret.ctx, ret.cancel = context.WithCancel(context.Background())
-	ret.waiting.Add(initial)
-	return ret
-}
-
-// AddRunning Add()'s delta to the WaitGroup.
-func (lc *Closer) AddRunning(delta int) {
-	lc.waiting.Add(delta)
-}
-
-// Ctx can be used to get a context, which would automatically get cancelled when Signal is called.
-func (lc *Closer) Ctx() context.Context {
-	if lc == nil {
-		return context.Background()
-	}
-	return lc.ctx
-}
-
-// Signal signals the HasBeenClosed signal.
-func (lc *Closer) Signal() {
-	// Todo(ibrahim): Change Signal to return error on next badger breaking change.
-	lc.cancel()
-}
-
-// HasBeenClosed gets signaled when Signal() is called.
-func (lc *Closer) HasBeenClosed() <-chan struct{} {
-	if lc == nil {
-		return dummyCloserChan
-	}
-	return lc.ctx.Done()
-}
-
-// Done calls Done() on the WaitGroup.
-func (lc *Closer) Done() {
-	if lc == nil {
-		return
-	}
-	lc.waiting.Done()
-}
-
-// Wait waits on the WaitGroup.  (It waits for NewCloser's initial value, AddRunning, and Done
-// calls to balance out.)
-func (lc *Closer) Wait() {
-	lc.waiting.Wait()
-}
-
-// SignalAndWait calls Signal(), then Wait().
-func (lc *Closer) SignalAndWait() {
-	lc.Signal()
-	lc.Wait()
 }
 
 // Throttle allows a limited number of workers to run at a time. It also
