@@ -4,23 +4,25 @@ aliases = ["/get-started"]
 +++
 
 
-## Installing Latest release
-To start using Badger, install Go 1.12 or above and run `go get`:
+## Installing
+To start using Badger, install Go 1.12 or above. Badger v2 needs go modules and run `go get`:
 
-```
+```sh
 $ go get github.com/dgraph-io/badger/v2
-$ cd $GOPATH/src/github.com/dgraph-io/badger
-$ git checkout v2.2007.1
-$ cd badger && go install
 ```
-
-This will retrieve the library and install the `badger` command line
-utility into your `$GOBIN` path.
+This will retrieve the library.
 
 {{% notice "note" %}} Badger does not directly use CGO but it relies on https://github.com/DataDog/zstd for compression and it requires gcc/cgo. If you wish to use badger without gcc/cgo, you can run `CGO_ENABLED=0 go get github.com/dgraph-io/badger/...` which will download badger without the support for ZSTD compression algorithm.{{% /notice %}}
 
+### Installing Badger Command Line Tool
 
+Download and extract the latest Badger DB release from https://github.com/dgraph-io/badger/releases and the run the following commands.
 
+```sh
+$ cd badger-<version>/badger
+$ go install
+```
+This will install the badger command line utility into your $GOBIN path.
 
 ### Choosing a version
 
