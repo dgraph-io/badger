@@ -35,6 +35,7 @@ import (
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 var writeBenchCmd = &cobra.Command{
