@@ -18,6 +18,7 @@ package cmd
 
 import (
 	"errors"
+	"math"
 	"os"
 	"path"
 
@@ -65,7 +66,9 @@ func doRestore(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open DB
-	db, err := badger.Open(badger.DefaultOptions(sstDir).WithValueDir(vlogDir))
+	db, err := badger.Open(badger.DefaultOptions(sstDir).
+		WithValueDir(vlogDir).
+		WithNumVersionsToKeep(math.MaxUint32))
 	if err != nil {
 		return err
 	}
