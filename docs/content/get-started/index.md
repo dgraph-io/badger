@@ -16,7 +16,7 @@ This will retrieve the library.
 
 ### Installing Badger Command Line Tool
 
-Download and extract the latest Badger DB release from https://github.com/dgraph-io/badger/releases and the run the following commands.
+Download and extract the latest Badger DB release from https://github.com/dgraph-io/badger/releases and then run the following commands.
 
 ```sh
 $ cd badger-<version>/badger
