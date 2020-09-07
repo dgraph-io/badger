@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/stretchr/testify/require"
 )
 
@@ -320,7 +321,7 @@ func TestDropAllRace(t *testing.T) {
 
 	N := 10000
 	// Start a goroutine to keep trying to write to DB while DropAll happens.
-	closer := y.NewCloser(1)
+	closer := z.NewCloser(1)
 	go func() {
 		defer closer.Done()
 		ticker := time.NewTicker(time.Millisecond)
@@ -540,7 +541,7 @@ func TestDropPrefixRace(t *testing.T) {
 
 	N := 10000
 	// Start a goroutine to keep trying to write to DB while DropPrefix happens.
-	closer := y.NewCloser(1)
+	closer := z.NewCloser(1)
 	go func() {
 		defer closer.Done()
 		ticker := time.NewTicker(time.Millisecond)

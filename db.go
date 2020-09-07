@@ -37,6 +37,7 @@ import (
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto"
+	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 )
@@ -50,12 +51,12 @@ var (
 )
 
 type closers struct {
-	updateSize *y.Closer
-	compactors *y.Closer
-	memtable   *y.Closer
-	writes     *y.Closer
-	valueGC    *y.Closer
-	pub        *y.Closer
+	updateSize *z.Closer
+	compactors *z.Closer
+	memtable   *z.Closer
+	writes     *z.Closer
+	valueGC    *z.Closer
+	pub        *z.Closer
 }
 
 // DB provides the various functions required to interact with Badger.
@@ -358,7 +359,7 @@ func Open(opt Options) (db *DB, err error) {
 		return db, err
 	}
 	db.calculateSize()
-	db.closers.updateSize = y.NewCloser(1)
+	db.closers.updateSize = z.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
 	db.mt = skl.NewSkiplist(arenaSize(opt))
 
@@ -371,10 +372,10 @@ func Open(opt Options) (db *DB, err error) {
 	db.vlog.init(db)
 
 	if !opt.ReadOnly {
-		db.closers.compactors = y.NewCloser(1)
+		db.closers.compactors = z.NewCloser(1)
 		db.lc.startCompact(db.closers.compactors)
 
-		db.closers.memtable = y.NewCloser(1)
+		db.closers.memtable = z.NewCloser(1)
 		go func() {
 			_ = db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
 		}()
@@ -392,7 +393,7 @@ func Open(opt Options) (db *DB, err error) {
 		vptr.Decode(vs.Value)
 	}
 
-	replayCloser := y.NewCloser(1)
+	replayCloser := z.NewCloser(1)
 	go db.doWrites(replayCloser)
 
 	if err = db.vlog.open(db, vptr, db.replayFunction()); err != nil {
@@ -409,15 +410,15 @@ func Open(opt Options) (db *DB, err error) {
 	db.orc.readMark.Done(db.orc.nextTxnTs)
 	db.orc.incrementNextTs()
 
-	db.closers.writes = y.NewCloser(1)
+	db.closers.writes = z.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
 	if !db.opt.InMemory {
-		db.closers.valueGC = y.NewCloser(1)
+		db.closers.valueGC = z.NewCloser(1)
 		go db.vlog.waitOnGC(db.closers.valueGC)
 	}
 
-	db.closers.pub = y.NewCloser(1)
+	db.closers.pub = z.NewCloser(1)
 	go db.pub.listenForUpdates(db.closers.pub)
 
 	valueDirLockGuard = nil
@@ -843,7 +844,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	return req, nil
 }
 
-func (db *DB) doWrites(lc *y.Closer) {
+func (db *DB) doWrites(lc *z.Closer) {
 	defer lc.Done()
 	pendingCh := make(chan struct{}, 1)
 
@@ -1104,7 +1105,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 
 // flushMemtable must keep running until we send it an empty flushTask. If there
 // are errors during handling the flush task, we'll retry indefinitely.
-func (db *DB) flushMemtable(lc *y.Closer) error {
+func (db *DB) flushMemtable(lc *z.Closer) error {
 	defer lc.Done()
 
 	for ft := range db.flushChan {
@@ -1190,7 +1191,7 @@ func (db *DB) calculateSize() {
 	y.VlogSize.Set(db.opt.ValueDir, newInt(vlogSize))
 }
 
-func (db *DB) updateSize(lc *y.Closer) {
+func (db *DB) updateSize(lc *z.Closer) {
 	defer lc.Done()
 	if db.opt.InMemory {
 		return
@@ -1449,7 +1450,7 @@ func (db *DB) stopCompactions() {
 func (db *DB) startCompactions() {
 	// Resume compactions.
 	if db.closers.compactors != nil {
-		db.closers.compactors = y.NewCloser(1)
+		db.closers.compactors = z.NewCloser(1)
 		db.lc.startCompact(db.closers.compactors)
 	}
 }
@@ -1458,7 +1459,7 @@ func (db *DB) startMemoryFlush() {
 	// Start memory fluhser.
 	if db.closers.memtable != nil {
 		db.flushChan = make(chan flushTask, db.opt.NumMemtables)
-		db.closers.memtable = y.NewCloser(1)
+		db.closers.memtable = z.NewCloser(1)
 		go func() {
 			_ = db.flushMemtable(db.closers.memtable)
 		}()
@@ -1549,7 +1550,7 @@ func (db *DB) blockWrite() error {
 }
 
 func (db *DB) unblockWrite() {
-	db.closers.writes = y.NewCloser(1)
+	db.closers.writes = z.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
 	// Resume writes.
@@ -1717,7 +1718,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, prefixes
 		return ErrNilCallback
 	}
 
-	c := y.NewCloser(1)
+	c := z.NewCloser(1)
 	recvCh, id := db.pub.newSubscriber(c, prefixes...)
 	slurp := func(batch *pb.KVList) error {
 		for {

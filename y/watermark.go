@@ -20,6 +20,8 @@ import (
 	"container/heap"
 	"context"
 	"sync/atomic"
+
+	"github.com/dgraph-io/ristretto/z"
 )
 
 type uint64Heap []uint64
@@ -65,7 +67,7 @@ type WaterMark struct {
 }
 
 // Init initializes a WaterMark struct. MUST be called before using it.
-func (w *WaterMark) Init(closer *Closer) {
+func (w *WaterMark) Init(closer *z.Closer) {
 	w.markCh = make(chan mark, 100)
 	go w.process(closer)
 }
@@ -133,7 +135,7 @@ func (w *WaterMark) WaitForMark(ctx context.Context, index uint64) error {
 // if no watermark is emitted at index 101 then waiter would get stuck indefinitely as it
 // can't decide whether the task at 101 has decided not to emit watermark or it didn't get
 // scheduled yet.
-func (w *WaterMark) process(closer *Closer) {
+func (w *WaterMark) process(closer *z.Closer) {
 	defer closer.Done()
 
 	var indices uint64Heap

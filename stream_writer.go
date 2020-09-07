@@ -25,6 +25,7 @@ import (
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 )
@@ -274,7 +275,7 @@ type sortedWriter struct {
 	reqCh    chan *request
 	head     valuePointer
 	// Have separate closer for each writer, as it can be closed at any time.
-	closer *y.Closer
+	closer *z.Closer
 }
 
 func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
@@ -291,7 +292,7 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 		throttle: sw.throttle,
 		builder:  table.NewTableBuilder(bopts),
 		reqCh:    make(chan *request, 3),
-		closer:   y.NewCloser(1),
+		closer:   z.NewCloser(1),
 	}
 
 	go w.handleRequests()
