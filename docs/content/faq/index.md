@@ -116,7 +116,7 @@ Assume you were on badger v1.6.0 and you wish to migrate to v2.0.0 version.
     - `cd badger && go install`
 
       This should install new badger binary in your $GOBIN
-4. Install badger version v2.0.0
+4. Restore data from backup
     - `badger restore --dir path/to/new/badger/directory -f badger.backup`
 
       This will create a new directory on `path/to/new/badger/directory` and add badger data in

@@ -21,7 +21,7 @@ Badger has also been tested to work with filesystem level anomalies, to ensure
 persistence and consistency. Badger is being used by a number of projects which
 includes Dgraph, Jaeger Tracing, UsenetExpress, and many more.
 
-The list of projects using Badger can be found [here](#projects-using-badger).
+The list of projects using Badger can be found [here]({{<relref "projects-using-badger/index.md" >}}).
 
 Badger v1.0 was released in Nov 2017, and the latest version that is data-compatible
 with v1.0 is v1.6.0.
@@ -31,6 +31,6 @@ be compatible with all of the v1.x. Badger v2.0 supports compression, encryption
 
 The [Changelog] is kept fairly up-to-date.
 
-For more details on our version naming schema please read [Choosing a version](#choosing-a-version).
+For more details on our version naming schema please read [Choosing a version]({{< relref "get-started/index.md#choosing-a-version" >}}).
 
 [Changelog]:https://github.com/dgraph-io/badger/blob/master/CHANGELOG.md
