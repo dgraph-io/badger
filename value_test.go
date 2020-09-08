@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"math/rand"
 	"os"
 	"reflect"
@@ -41,7 +42,7 @@ func TestValueBasic(t *testing.T) {
 	y.Check(err)
 	defer removeDir(dir)
 
-	kv, _ := Open(getTestOptions(dir))
+	kv, _ := Open(getTestOptions(dir).WithValueThreshold(32))
 	defer kv.Close()
 	log := &kv.vlog
 
@@ -370,7 +371,6 @@ func TestValueGC4(t *testing.T) {
 
 	kv, err := Open(opt)
 	require.NoError(t, err)
-	defer kv.Close()
 
 	sz := 128 << 10 // 5 entries per value log file.
 	txn := kv.NewTransaction(true)
@@ -409,10 +409,9 @@ func TestValueGC4(t *testing.T) {
 	kv.vlog.rewrite(lf0, tr)
 	kv.vlog.rewrite(lf1, tr)
 
-	err = kv.vlog.Close()
-	require.NoError(t, err)
+	require.NoError(t, kv.Close())
 
-	err = kv.vlog.open(kv, valuePointer{Fid: 2}, kv.replayFunction())
+	kv, err = Open(opt)
 	require.NoError(t, err)
 
 	for i := 0; i < 8; i++ {
@@ -434,6 +433,7 @@ func TestValueGC4(t *testing.T) {
 			return nil
 		}))
 	}
+	require.NoError(t, kv.Close())
 }
 
 func TestPersistLFDiscardStats(t *testing.T) {
@@ -471,7 +471,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	time.Sleep(1 * time.Second) // wait for compaction to complete
+	time.Sleep(2 * time.Second) // wait for compaction to complete
 
 	persistedMap := make(map[uint32]int64)
 	db.vlog.lfDiscardStats.Lock()
@@ -489,6 +489,8 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	err = db.Close()
 	require.NoError(t, err)
 
+	// Avoid running compactors on reopening badger.
+	opt.NumCompactors = 0
 	db, err = Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
@@ -508,6 +510,7 @@ func TestChecksums(t *testing.T) {
 	opts := getTestOptions(dir)
 	opts.Truncate = true
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
+	opts.ValueThreshold = 32
 	kv, err := Open(opts)
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
@@ -591,6 +594,7 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	opts := getTestOptions(dir)
 	opts.Truncate = true
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
+	opts.ValueThreshold = 32
 	kv, err := Open(opts)
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
@@ -642,8 +646,16 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	checkKeys(t, kv, [][]byte{k3})
 	// Replay value log from beginning, badger head is past k2.
 	require.NoError(t, kv.vlog.Close())
-	require.NoError(t,
-		kv.vlog.open(kv, valuePointer{Fid: 0}, kv.replayFunction()))
+
+	// clean up the current db.vhead so that we can replay from the beginning.
+	// If we don't clear the current vhead, badger will error out since new
+	// head passed while opening vlog is zero in the following lines.
+	kv.vhead = valuePointer{}
+
+	kv.vlog.init(kv)
+	require.NoError(
+		t, kv.vlog.open(kv, valuePointer{Fid: 0}, kv.replayFunction()),
+	)
 	require.NoError(t, kv.Close())
 }
 
@@ -758,6 +770,7 @@ func TestPenultimateLogCorruption(t *testing.T) {
 
 	db0, err := Open(opt)
 	require.NoError(t, err)
+	defer func() { require.NoError(t, db0.Close()) }()
 
 	h := testHelper{db: db0, t: t}
 	h.writeRange(0, 7)
@@ -776,9 +789,11 @@ func TestPenultimateLogCorruption(t *testing.T) {
 	// Simulate a crash by not closing db0, but releasing the locks.
 	if db0.dirLockGuard != nil {
 		require.NoError(t, db0.dirLockGuard.release())
+		db0.dirLockGuard = nil
 	}
 	if db0.valueDirGuard != nil {
 		require.NoError(t, db0.valueDirGuard.release())
+		db0.valueDirGuard = nil
 	}
 
 	opt.Truncate = true
@@ -799,7 +814,9 @@ func TestPenultimateLogCorruption(t *testing.T) {
 func checkKeys(t *testing.T, kv *DB, keys [][]byte) {
 	i := 0
 	txn := kv.NewTransaction(false)
+	defer txn.Discard()
 	iter := txn.NewIterator(IteratorOptions{})
+	defer iter.Close()
 	for iter.Seek(keys[0]); iter.Valid(); iter.Next() {
 		require.Equal(t, iter.Item().Key(), keys[i])
 		i++
@@ -1158,6 +1175,7 @@ func TestValueEntryChecksum(t *testing.T) {
 
 		opt := getTestOptions(dir)
 		opt.VerifyValueChecksum = true
+		opt.ValueThreshold = 32
 		db, err := Open(opt)
 		require.NoError(t, err)
 
@@ -1186,6 +1204,7 @@ func TestValueEntryChecksum(t *testing.T) {
 
 		opt := getTestOptions(dir)
 		opt.VerifyValueChecksum = true
+		opt.ValueThreshold = 32
 		db, err := Open(opt)
 		require.NoError(t, err)
 
@@ -1220,4 +1239,65 @@ func TestValueEntryChecksum(t *testing.T) {
 
 		require.NoError(t, db.Close())
 	})
+}
+
+func TestValidateWrite(t *testing.T) {
+	// Mocking the file size, so that we don't allocate big memory while running test.
+	maxVlogFileSize = 400
+	defer func() {
+		maxVlogFileSize = math.MaxUint32
+	}()
+
+	bigBuf := make([]byte, maxVlogFileSize+1)
+	log := &valueLog{
+		opt: DefaultOptions("."),
+	}
+
+	// Sending a request with big values which will overflow uint32.
+	key := []byte("HelloKey")
+	req := &request{
+		Entries: []*Entry{
+			{
+				Key:   key,
+				Value: bigBuf,
+			},
+			{
+				Key:   key,
+				Value: bigBuf,
+			},
+			{
+				Key:   key,
+				Value: bigBuf,
+			},
+		},
+	}
+
+	err := log.validateWrites([]*request{req})
+	require.Error(t, err)
+
+	// Testing with small values.
+	smallBuf := make([]byte, 4)
+	req1 := &request{
+		Entries: []*Entry{
+			{
+				Key:   key,
+				Value: smallBuf,
+			},
+			{
+				Key:   key,
+				Value: smallBuf,
+			},
+			{
+				Key:   key,
+				Value: smallBuf,
+			},
+		},
+	}
+
+	err = log.validateWrites([]*request{req1})
+	require.NoError(t, err)
+
+	// Batching small and big request.
+	err = log.validateWrites([]*request{req1, req})
+	require.Error(t, err)
 }

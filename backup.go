@@ -28,9 +28,22 @@ import (
 	"github.com/golang/protobuf/proto"
 )
 
-// Backup is a wrapper function over Stream.Backup to generate full and incremental backups of the
-// DB. For more control over how many goroutines are used to generate the backup, or if you wish to
-// backup only a certain range of keys, use Stream.Backup directly.
+// flushThreshold determines when a buffer will be flushed. When performing a
+// backup/restore, the entries will be batched up until the total size of batch
+// is more than flushThreshold or entry size (without the value size) is more
+// than the maxBatchSize.
+const flushThreshold = 100 << 20
+
+// Backup dumps a protobuf-encoded list of all entries in the database into the
+// given writer, that are newer than or equal to the specified version. It
+// returns a timestamp (version) indicating the version of last entry that is
+// dumped, which after incrementing by 1 can be passed into later invocation to
+// generate incremental backup of entries that have been added/modified since
+// the last invocation of DB.Backup().
+// DB.Backup is a wrapper function over Stream.Backup to generate full and
+// incremental backups of the DB. For more control over how many goroutines are
+// used to generate the backup, or if you wish to backup only a certain range
+// of keys, use Stream.Backup directly.
 func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 	stream := db.NewStream()
 	stream.LogPrefix = "DB.Backup"
@@ -38,10 +51,11 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 }
 
 // Backup dumps a protobuf-encoded list of all entries in the database into the
-// given writer, that are newer than the specified version. It returns a
-// timestamp indicating when the entries were dumped which can be passed into a
-// later invocation to generate an incremental dump, of entries that have been
-// added/modified since the last invocation of Stream.Backup().
+// given writer, that are newer than or equal to the specified version. It returns a
+// timestamp(version) indicating the version of last entry that was dumped, which
+// after incrementing by 1 can be passed into a later invocation to generate an
+// incremental dump of entries that have been added/modified since the last
+// invocation of Stream.Backup().
 //
 // This can be used to backup the data in a database at a given point in time.
 func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
@@ -134,6 +148,7 @@ type KVLoader struct {
 	throttle    *y.Throttle
 	entries     []*Entry
 	entriesSize int64
+	totalSize   int64
 }
 
 // NewKVLoader returns a new instance of KVLoader.
@@ -164,13 +179,15 @@ func (l *KVLoader) Set(kv *pb.KV) error {
 	estimatedSize := int64(e.estimateSize(l.db.opt.ValueThreshold))
 	// Flush entries if inserting the next entry would overflow the transactional limits.
 	if int64(len(l.entries))+1 >= l.db.opt.maxBatchCount ||
-		l.entriesSize+estimatedSize >= l.db.opt.maxBatchSize {
+		l.entriesSize+estimatedSize >= l.db.opt.maxBatchSize ||
+		l.totalSize >= flushThreshold {
 		if err := l.send(); err != nil {
 			return err
 		}
 	}
 	l.entries = append(l.entries, e)
 	l.entriesSize += estimatedSize
+	l.totalSize += estimatedSize + int64(len(e.Value))
 	return nil
 }
 
@@ -186,6 +203,7 @@ func (l *KVLoader) send() error {
 
 	l.entries = make([]*Entry, 0, l.db.opt.maxBatchCount)
 	l.entriesSize = 0
+	l.totalSize = 0
 	return nil
 }
 

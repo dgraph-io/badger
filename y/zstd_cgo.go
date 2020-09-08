@@ -34,3 +34,8 @@ func ZSTDDecompress(dst, src []byte) ([]byte, error) {
 func ZSTDCompress(dst, src []byte, compressionLevel int) ([]byte, error) {
 	return zstd.CompressLevel(dst, src, compressionLevel)
 }
+
+// ZSTDCompressBound returns the worst case size needed for a destination buffer.
+func ZSTDCompressBound(srcSize int) int {
+	return zstd.CompressBound(srcSize)
+}

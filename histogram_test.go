@@ -27,7 +27,7 @@ func TestBuildKeyValueSizeHistogram(t *testing.T) {
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			entries := int64(40)
 			err := db.Update(func(txn *Txn) error {
-				for i := int64(0); i < entries; i++ {
+				for i := rune(0); i < rune(entries); i++ {
 					err := txn.SetEntry(NewEntry([]byte(string(i)), []byte("B")))
 					if err != nil {
 						return err

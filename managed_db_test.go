@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/stretchr/testify/require"
 )
 
@@ -162,6 +163,7 @@ func TestDropAllTwice(t *testing.T) {
 
 		// Call DropAll again.
 		require.NoError(t, db.DropAll())
+		require.NoError(t, db.Close())
 	}
 	t.Run("disk mode", func(t *testing.T) {
 		dir, err := ioutil.TempDir("", "badger-test")
@@ -175,7 +177,6 @@ func TestDropAllTwice(t *testing.T) {
 		opts := getTestOptions("")
 		opts.InMemory = true
 		test(t, opts)
-
 	})
 }
 
@@ -278,8 +279,9 @@ func TestDropReadOnly(t *testing.T) {
 		require.Equal(t, err, ErrWindowsNotSupported)
 	} else {
 		require.NoError(t, err)
+		require.Panics(t, func() { db2.DropAll() })
+		require.NoError(t, db2.Close())
 	}
-	require.Panics(t, func() { db2.DropAll() })
 }
 
 func TestWriteAfterClose(t *testing.T) {
@@ -305,7 +307,7 @@ func TestWriteAfterClose(t *testing.T) {
 	err = db.Update(func(txn *Txn) error {
 		return txn.SetEntry(NewEntry([]byte("a"), []byte("b")))
 	})
-	require.Equal(t, ErrBlockedWrites, err)
+	require.Equal(t, ErrDBClosed, err)
 }
 
 func TestDropAllRace(t *testing.T) {
@@ -319,7 +321,7 @@ func TestDropAllRace(t *testing.T) {
 
 	N := 10000
 	// Start a goroutine to keep trying to write to DB while DropAll happens.
-	closer := y.NewCloser(1)
+	closer := z.NewCloser(1)
 	go func() {
 		defer closer.Done()
 		ticker := time.NewTicker(time.Millisecond)
@@ -523,8 +525,9 @@ func TestDropPrefixReadOnly(t *testing.T) {
 		require.Equal(t, err, ErrWindowsNotSupported)
 	} else {
 		require.NoError(t, err)
+		require.Panics(t, func() { db2.DropPrefix([]byte("key0")) })
+		require.NoError(t, db2.Close())
 	}
-	require.Panics(t, func() { db2.DropPrefix([]byte("key0")) })
 }
 
 func TestDropPrefixRace(t *testing.T) {
@@ -538,7 +541,7 @@ func TestDropPrefixRace(t *testing.T) {
 
 	N := 10000
 	// Start a goroutine to keep trying to write to DB while DropPrefix happens.
-	closer := y.NewCloser(1)
+	closer := z.NewCloser(1)
 	go func() {
 		defer closer.Done()
 		ticker := time.NewTicker(time.Millisecond)
@@ -590,7 +593,7 @@ func TestDropPrefixRace(t *testing.T) {
 	after := numKeysManaged(db, math.MaxUint64)
 	t.Logf("Before: %d. After dropprefix: %d\n", before, after)
 	require.True(t, after < before)
-	db.Close()
+	require.NoError(t, db.Close())
 }
 
 func TestWriteBatchManagedMode(t *testing.T) {
@@ -602,7 +605,7 @@ func TestWriteBatchManagedMode(t *testing.T) {
 	}
 	opt := DefaultOptions("")
 	opt.managedTxns = true
-	opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+	opt.MaxTableSize = 1 << 20 // This would create multiple transactions in write batch.
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		wb := db.NewWriteBatchAt(1)
 		defer wb.Cancel()
@@ -627,6 +630,7 @@ func TestWriteBatchManagedMode(t *testing.T) {
 			for itr.Rewind(); itr.Valid(); itr.Next() {
 				item := itr.Item()
 				require.Equal(t, string(key(i)), string(item.Key()))
+				require.Equal(t, item.Version(), uint64(1))
 				valcopy, err := item.ValueCopy(nil)
 				require.NoError(t, err)
 				require.Equal(t, val(i), valcopy)
@@ -636,5 +640,132 @@ func TestWriteBatchManagedMode(t *testing.T) {
 			return nil
 		})
 		require.NoError(t, err)
+	})
+}
+func TestWriteBatchManaged(t *testing.T) {
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%10d", i))
+	}
+	val := func(i int) []byte {
+		return []byte(fmt.Sprintf("%128d", i))
+	}
+	opt := DefaultOptions("")
+	opt.managedTxns = true
+	opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		wb := db.NewManagedWriteBatch()
+		defer wb.Cancel()
+
+		N, M := 50000, 1000
+		start := time.Now()
+
+		for i := 0; i < N; i++ {
+			require.NoError(t, wb.SetEntryAt(&Entry{Key: key(i), Value: val(i)}, 1))
+		}
+		for i := 0; i < M; i++ {
+			require.NoError(t, wb.DeleteAt(key(i), 2))
+		}
+		require.NoError(t, wb.Flush())
+		t.Logf("Time taken for %d writes (w/ test options): %s\n", N+M, time.Since(start))
+
+		err := db.View(func(txn *Txn) error {
+			itr := txn.NewIterator(DefaultIteratorOptions)
+			defer itr.Close()
+
+			i := M
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				require.Equal(t, string(key(i)), string(item.Key()))
+				require.Equal(t, item.Version(), uint64(1))
+				valcopy, err := item.ValueCopy(nil)
+				require.NoError(t, err)
+				require.Equal(t, val(i), valcopy)
+				i++
+			}
+			require.Equal(t, N, i)
+			return nil
+		})
+		require.NoError(t, err)
+	})
+}
+
+func TestWriteBatchDuplicate(t *testing.T) {
+	N := 10
+	k := []byte("key")
+	v := []byte("val")
+	readVerify := func(t *testing.T, db *DB, n int, versions []int) {
+		err := db.View(func(txn *Txn) error {
+			iopt := DefaultIteratorOptions
+			iopt.AllVersions = true
+			itr := txn.NewIterator(iopt)
+			defer itr.Close()
+
+			i := 0
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				require.Equal(t, k, item.Key())
+				require.Equal(t, uint64(versions[i]), item.Version())
+				err := item.Value(func(val []byte) error {
+					require.Equal(t, v, val)
+					return nil
+				})
+				require.NoError(t, err)
+				i++
+			}
+			require.Equal(t, n, i)
+			return nil
+		})
+		require.NoError(t, err)
+	}
+
+	t.Run("writebatch", func(t *testing.T) {
+		opt := DefaultOptions("")
+		opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			wb := db.NewWriteBatch()
+			defer wb.Cancel()
+
+			for i := uint64(0); i < uint64(N); i++ {
+				// Multiple versions of the same key.
+				require.NoError(t, wb.SetEntry(&Entry{Key: k, Value: v}))
+			}
+			require.NoError(t, wb.Flush())
+			readVerify(t, db, 1, []int{1})
+		})
+	})
+	t.Run("writebatch at", func(t *testing.T) {
+		opt := DefaultOptions("")
+		opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+		opt.managedTxns = true
+
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			wb := db.NewWriteBatchAt(10)
+			defer wb.Cancel()
+
+			for i := uint64(0); i < uint64(N); i++ {
+				// Multiple versions of the same key.
+				require.NoError(t, wb.SetEntry(&Entry{Key: k, Value: v}))
+			}
+			require.NoError(t, wb.Flush())
+			readVerify(t, db, 1, []int{10})
+		})
+
+	})
+	t.Run("managed writebatch", func(t *testing.T) {
+		opt := DefaultOptions("")
+		opt.managedTxns = true
+		opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			wb := db.NewManagedWriteBatch()
+			defer wb.Cancel()
+
+			for i := uint64(0); i < uint64(N); i++ {
+				// Multiple versions of the same key.
+				require.NoError(t, wb.SetEntryAt(&Entry{Key: k, Value: v}, i))
+			}
+			require.NoError(t, wb.Flush())
+			readVerify(t, db, N, []int{9, 8, 7, 6, 5, 4, 3, 2, 1, 0})
+		})
 	})
 }

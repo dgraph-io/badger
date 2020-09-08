@@ -25,19 +25,16 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/cespare/xxhash"
 	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto"
 	"github.com/stretchr/testify/require"
-)
-
-const (
-	KB = 1024
-	MB = KB * 1024
 )
 
 func key(prefix string, i int) string {
@@ -55,9 +52,6 @@ func getTestTableOptions() Options {
 
 }
 func buildTestTable(t *testing.T, prefix string, n int, opts Options) *os.File {
-	if opts.BloomFalsePositive == 0 {
-		opts.BloomFalsePositive = 0.01
-	}
 	if opts.BlockSize == 0 {
 		opts.BlockSize = 4 * 1024
 	}
@@ -77,13 +71,9 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
-	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Uint32())
 	f, err := y.CreateSyncedFile(filename, true)
-	if t != nil {
-		require.NoError(t, err)
-	} else {
-		y.Check(err)
-	}
+	require.NoError(t, err)
 
 	sort.Slice(keyValues, func(i, j int) bool {
 		return keyValues[i][0] < keyValues[j][0]
@@ -92,7 +82,7 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
 		y.AssertTrue(len(kv) == 2)
 		b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0}, 0)
 	}
-	_, err = f.Write(b.Finish())
+	_, err = f.Write(b.Finish(false))
 	require.NoError(t, err, "writing to file failed")
 	f.Close()
 	f, _ = y.OpenSyncedFile(filename, true)
@@ -107,7 +97,7 @@ func TestTableIterator(t *testing.T) {
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
 			defer table.DecrRef()
-			it := table.NewIterator(false)
+			it := table.NewIterator(0)
 			defer it.Close()
 			count := 0
 			for it.Rewind(); it.Valid(); it.Next() {
@@ -130,7 +120,7 @@ func TestSeekToFirst(t *testing.T) {
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
 			defer table.DecrRef()
-			it := table.NewIterator(false)
+			it := table.NewIterator(0)
 			defer it.Close()
 			it.seekToFirst()
 			require.True(t, it.Valid())
@@ -149,7 +139,7 @@ func TestSeekToLast(t *testing.T) {
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
 			defer table.DecrRef()
-			it := table.NewIterator(false)
+			it := table.NewIterator(0)
 			defer it.Close()
 			it.seekToLast()
 			require.True(t, it.Valid())
@@ -172,7 +162,7 @@ func TestSeek(t *testing.T) {
 	require.NoError(t, err)
 	defer table.DecrRef()
 
-	it := table.NewIterator(false)
+	it := table.NewIterator(0)
 	defer it.Close()
 
 	var data = []struct {
@@ -208,7 +198,7 @@ func TestSeekForPrev(t *testing.T) {
 	require.NoError(t, err)
 	defer table.DecrRef()
 
-	it := table.NewIterator(false)
+	it := table.NewIterator(0)
 	defer it.Close()
 
 	var data = []struct {
@@ -246,7 +236,7 @@ func TestIterateFromStart(t *testing.T) {
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
 			defer table.DecrRef()
-			ti := table.NewIterator(false)
+			ti := table.NewIterator(0)
 			defer ti.Close()
 			ti.reset()
 			ti.seekToFirst()
@@ -274,7 +264,7 @@ func TestIterateFromEnd(t *testing.T) {
 			table, err := OpenTable(f, opts)
 			require.NoError(t, err)
 			defer table.DecrRef()
-			ti := table.NewIterator(false)
+			ti := table.NewIterator(0)
 			defer ti.Close()
 			ti.reset()
 			ti.seek(y.KeyWithTs([]byte("zzzzzz"), 0)) // Seek to end, an invalid element.
@@ -299,7 +289,7 @@ func TestTable(t *testing.T) {
 	table, err := OpenTable(f, opts)
 	require.NoError(t, err)
 	defer table.DecrRef()
-	ti := table.NewIterator(false)
+	ti := table.NewIterator(0)
 	defer ti.Close()
 	kid := 1010
 	seek := y.KeyWithTs([]byte(key("key", kid)), 0)
@@ -329,7 +319,7 @@ func TestIterateBackAndForth(t *testing.T) {
 	defer table.DecrRef()
 
 	seek := y.KeyWithTs([]byte(key("key", 1010)), 0)
-	it := table.NewIterator(false)
+	it := table.NewIterator(0)
 	defer it.Close()
 	it.seek(seek)
 	require.True(t, it.Valid())
@@ -360,7 +350,7 @@ func TestIterateBackAndForth(t *testing.T) {
 
 	it.seekToFirst()
 	k = it.Key()
-	require.EqualValues(t, key("key", 0), y.ParseKey(k))
+	require.EqualValues(t, key("key", 0), string(y.ParseKey(k)))
 }
 
 func TestUniIterator(t *testing.T) {
@@ -370,7 +360,7 @@ func TestUniIterator(t *testing.T) {
 	require.NoError(t, err)
 	defer table.DecrRef()
 	{
-		it := table.NewIterator(false)
+		it := table.NewIterator(0)
 		defer it.Close()
 		var count int
 		for it.Rewind(); it.Valid(); it.Next() {
@@ -382,7 +372,7 @@ func TestUniIterator(t *testing.T) {
 		require.EqualValues(t, 10000, count)
 	}
 	{
-		it := table.NewIterator(true)
+		it := table.NewIterator(REVERSED)
 		defer it.Close()
 		var count int
 		for it.Rewind(); it.Valid(); it.Next() {
@@ -407,7 +397,7 @@ func TestConcatIteratorOneTable(t *testing.T) {
 	require.NoError(t, err)
 	defer tbl.DecrRef()
 
-	it := NewConcatIterator([]*Table{tbl}, false)
+	it := NewConcatIterator([]*Table{tbl}, 0)
 	defer it.Close()
 
 	it.Rewind()
@@ -435,7 +425,7 @@ func TestConcatIterator(t *testing.T) {
 	defer tbl3.DecrRef()
 
 	{
-		it := NewConcatIterator([]*Table{tbl, tbl2, tbl3}, false)
+		it := NewConcatIterator([]*Table{tbl, tbl2, tbl3}, 0)
 		defer it.Close()
 		it.Rewind()
 		require.True(t, it.Valid())
@@ -467,7 +457,7 @@ func TestConcatIterator(t *testing.T) {
 		require.False(t, it.Valid())
 	}
 	{
-		it := NewConcatIterator([]*Table{tbl, tbl2, tbl3}, true)
+		it := NewConcatIterator([]*Table{tbl, tbl2, tbl3}, REVERSED)
 		defer it.Close()
 		it.Rewind()
 		require.True(t, it.Valid())
@@ -529,8 +519,8 @@ func TestMergingIterator(t *testing.T) {
 	tbl2, err := OpenTable(f2, opts)
 	require.NoError(t, err)
 	defer tbl2.DecrRef()
-	it1 := tbl1.NewIterator(false)
-	it2 := NewConcatIterator([]*Table{tbl2}, false)
+	it1 := tbl1.NewIterator(0)
+	it2 := NewConcatIterator([]*Table{tbl2}, 0)
 	it := NewMergeIterator([]y.Iterator{it1, it2}, false)
 	defer it.Close()
 
@@ -578,8 +568,8 @@ func TestMergingIteratorReversed(t *testing.T) {
 	tbl2, err := OpenTable(f2, opts)
 	require.NoError(t, err)
 	defer tbl2.DecrRef()
-	it1 := tbl1.NewIterator(true)
-	it2 := NewConcatIterator([]*Table{tbl2}, true)
+	it1 := tbl1.NewIterator(REVERSED)
+	it2 := NewConcatIterator([]*Table{tbl2}, REVERSED)
 	it := NewMergeIterator([]y.Iterator{it1, it2}, true)
 	defer it.Close()
 
@@ -613,8 +603,8 @@ func TestMergingIteratorTakeOne(t *testing.T) {
 	require.NoError(t, err)
 	defer t2.DecrRef()
 
-	it1 := NewConcatIterator([]*Table{t1}, false)
-	it2 := NewConcatIterator([]*Table{t2}, false)
+	it1 := NewConcatIterator([]*Table{t1}, 0)
+	it2 := NewConcatIterator([]*Table{t2}, 0)
 	it := NewMergeIterator([]y.Iterator{it1, it2}, false)
 	defer it.Close()
 
@@ -661,8 +651,8 @@ func TestMergingIteratorTakeTwo(t *testing.T) {
 	require.NoError(t, err)
 	defer t2.DecrRef()
 
-	it1 := NewConcatIterator([]*Table{t1}, false)
-	it2 := NewConcatIterator([]*Table{t2}, false)
+	it1 := NewConcatIterator([]*Table{t1}, 0)
+	it2 := NewConcatIterator([]*Table{t2}, 0)
 	it := NewMergeIterator([]y.Iterator{it1, it2}, false)
 	defer it.Close()
 
@@ -705,7 +695,8 @@ func TestTableBigValues(t *testing.T) {
 	require.NoError(t, err, "unable to create file")
 
 	n := 100 // Insert 100 keys.
-	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
+	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
+		TableSize: uint64(n) * 1 << 20}
 	builder := NewTableBuilder(opts)
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), 0)
@@ -713,13 +704,13 @@ func TestTableBigValues(t *testing.T) {
 		builder.Add(key, vs, 0)
 	}
 
-	_, err = f.Write(builder.Finish())
+	_, err = f.Write(builder.Finish(false))
 	require.NoError(t, err, "unable to write to file")
 	tbl, err := OpenTable(f, opts)
 	require.NoError(t, err, "unable to open table")
 	defer tbl.DecrRef()
 
-	itr := tbl.NewIterator(false)
+	itr := tbl.NewIterator(0)
 	require.True(t, itr.Valid())
 
 	count := 0
@@ -743,7 +734,10 @@ func TestTableChecksum(t *testing.T) {
 	f := buildTestTable(t, "k", 10000, opts)
 	fi, err := f.Stat()
 	require.NoError(t, err, "unable to get file information")
-	f.WriteAt(rb, rand.Int63n(fi.Size()))
+	// Write random bytes at random location.
+	n, err := f.WriteAt(rb, rand.Int63n(fi.Size()))
+	require.NoError(t, err)
+	require.Equal(t, n, len(rb))
 
 	_, err = OpenTable(f, opts)
 	if err == nil || !strings.Contains(err.Error(), "checksum") {
@@ -767,7 +761,7 @@ func BenchmarkRead(b *testing.B) {
 	// Iterate b.N times over the entire table.
 	for i := 0; i < b.N; i++ {
 		func() {
-			it := tbl.NewIterator(false)
+			it := tbl.NewIterator(0)
 			defer it.Close()
 			for it.seekToFirst(); it.Valid(); it.next() {
 			}
@@ -787,15 +781,15 @@ func BenchmarkReadAndBuild(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		func() {
 			opts := Options{Compression: options.ZSTD, BlockSize: 4 * 0124, BloomFalsePositive: 0.01}
-			opts.Cache = cache
+			opts.BlockCache = cache
 			newBuilder := NewTableBuilder(opts)
-			it := tbl.NewIterator(false)
+			it := tbl.NewIterator(0)
 			defer it.Close()
 			for it.seekToFirst(); it.Valid(); it.next() {
 				vs := it.Value()
 				newBuilder.Add(it.Key(), vs, 0)
 			}
-			newBuilder.Finish()
+			newBuilder.Finish(false)
 		}()
 	}
 }
@@ -813,7 +807,7 @@ func BenchmarkReadMerged(b *testing.B) {
 	for i := 0; i < m; i++ {
 		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 		opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
-		opts.Cache = cache
+		opts.BlockCache = cache
 		builder := NewTableBuilder(opts)
 		f, err := y.OpenSyncedFile(filename, true)
 		y.Check(err)
@@ -824,7 +818,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			v := fmt.Sprintf("%d", id)
 			builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}, 0)
 		}
-		_, err = f.Write(builder.Finish())
+		_, err = f.Write(builder.Finish(false))
 		require.NoError(b, err, "unable to write to file")
 		tbl, err := OpenTable(f, opts)
 		y.Check(err)
@@ -838,7 +832,7 @@ func BenchmarkReadMerged(b *testing.B) {
 		func() {
 			var iters []y.Iterator
 			for _, tbl := range tables {
-				iters = append(iters, tbl.NewIterator(false))
+				iters = append(iters, tbl.NewIterator(0))
 			}
 			it := NewMergeIterator(iters, false)
 			defer it.Close()
@@ -879,7 +873,7 @@ func BenchmarkRandomRead(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		itr := tbl.NewIterator(false)
+		itr := tbl.NewIterator(0)
 		no := r.Intn(n)
 		k := []byte(fmt.Sprintf("%016x", no))
 		v := []byte(fmt.Sprintf("%d", no))
@@ -905,7 +899,7 @@ func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Tab
 		cache, err = ristretto.NewCache(&cacheConfig)
 		require.NoError(b, err)
 	}
-	opts.Cache = cache
+	opts.BlockCache = cache
 	builder := NewTableBuilder(opts)
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)
@@ -916,7 +910,7 @@ func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Tab
 		builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)}, 0)
 	}
 
-	_, err = f.Write(builder.Finish())
+	_, err = f.Write(builder.Finish(false))
 	require.NoError(b, err, "unable to write to file")
 	tbl, err := OpenTable(f, opts)
 	require.NoError(b, err, "unable to open table")
@@ -936,4 +930,42 @@ func TestOpenKVSize(t *testing.T) {
 	// The following values might change if the table/header structure is changed.
 	var entrySize uint64 = 15 /* DiffKey len */ + 4 /* Header Size */ + 4 /* Encoded vp */
 	require.Equal(t, entrySize, table.EstimatedSize())
+}
+
+// Run this test with command "go test -race -run TestDoesNotHaveRace"
+func TestDoesNotHaveRace(t *testing.T) {
+	opts := getTestTableOptions()
+	f := buildTestTable(t, "key", 10000, opts)
+	table, err := OpenTable(f, opts)
+	require.NoError(t, err)
+	defer table.DecrRef()
+
+	var wg sync.WaitGroup
+	wg.Add(5)
+	for i := 0; i < 5; i++ {
+		go func() {
+			require.True(t, table.DoesNotHave(uint64(1237882)))
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+var ko *pb.BlockOffset
+
+// Use this benchmark to manually verify block offset size calculation
+func BenchmarkBlockOffsetSizeCalculation(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		ko = &pb.BlockOffset{
+			Key: []byte{1, 23},
+		}
+	}
+}
+
+func TestBlockOffsetSizeCalculation(t *testing.T) {
+	// Empty struct testing.
+	require.Equal(t, calculateOffsetsSize([]*pb.BlockOffset{&pb.BlockOffset{}}), int64(88))
+	// Testing with key bytes
+	require.Equal(t, calculateOffsetsSize([]*pb.BlockOffset{&pb.BlockOffset{Key: []byte{1, 1}}}),
+		int64(90))
 }

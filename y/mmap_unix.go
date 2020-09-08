@@ -1,4 +1,4 @@
-// +build !windows,!darwin
+// +build !windows,!darwin,!plan9
 
 /*
  * Copyright 2019 Dgraph Labs, Inc. and Contributors

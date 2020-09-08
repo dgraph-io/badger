@@ -18,21 +18,20 @@
 
 package y
 
-import (
-	"errors"
-)
-
-var errZstdCgo = errors.New("zstd compression requires building badger with cgo enabled")
-
 // CgoEnabled is used to check if CGO is enabled while building badger.
 const CgoEnabled = false
 
 // ZSTDDecompress decompresses a block using ZSTD algorithm.
 func ZSTDDecompress(dst, src []byte) ([]byte, error) {
-	return nil, errZstdCgo
+	return nil, ErrZstdCgo
 }
 
 // ZSTDCompress compresses a block using ZSTD algorithm.
 func ZSTDCompress(dst, src []byte, compressionLevel int) ([]byte, error) {
-	return nil, errZstdCgo
+	return nil, ErrZstdCgo
+}
+
+// ZSTDCompressBound returns the worst case size needed for a destination buffer.
+func ZSTDCompressBound(srcSize int) int {
+	panic("ZSTD only supported in Cgo.")
 }

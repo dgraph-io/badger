@@ -159,7 +159,7 @@ func validRegistry(fp *os.File, encryptionKey []byte) error {
 	}
 	if len(encryptionKey) > 0 {
 		// Decrypting sanity text.
-		if eSanityText, err = y.XORBlock(eSanityText, encryptionKey, iv); err != nil {
+		if eSanityText, err = y.XORBlockAllocate(eSanityText, encryptionKey, iv); err != nil {
 			return y.Wrapf(err, "During validRegistry")
 		}
 	}
@@ -200,7 +200,7 @@ func (kri *keyRegistryIterator) next() (*pb.DataKey, error) {
 	}
 	if len(kri.encryptionKey) > 0 {
 		// Decrypt the key if the storage key exists.
-		if dataKey.Data, err = y.XORBlock(dataKey.Data, kri.encryptionKey, dataKey.Iv); err != nil {
+		if dataKey.Data, err = y.XORBlockAllocate(dataKey.Data, kri.encryptionKey, dataKey.Iv); err != nil {
 			return nil, y.Wrapf(err, "While decrypting datakey in keyRegistryIterator.next")
 		}
 	}
@@ -254,7 +254,7 @@ func WriteKeyRegistry(reg *KeyRegistry, opt KeyRegistryOptions) error {
 	eSanity := sanityText
 	if len(opt.EncryptionKey) > 0 {
 		var err error
-		eSanity, err = y.XORBlock(eSanity, opt.EncryptionKey, iv)
+		eSanity, err = y.XORBlockAllocate(eSanity, opt.EncryptionKey, iv)
 		if err != nil {
 			return y.Wrapf(err, "Error while encrpting sanity text in WriteKeyRegistry")
 		}
@@ -395,7 +395,7 @@ func storeDataKey(buf *bytes.Buffer, storageKey []byte, k *pb.DataKey) error {
 			return nil
 		}
 		var err error
-		k.Data, err = y.XORBlock(k.Data, storageKey, k.Iv)
+		k.Data, err = y.XORBlockAllocate(k.Data, storageKey, k.Iv)
 		return err
 	}
 	// In memory datakey will be plain text so encrypting before storing to the disk.

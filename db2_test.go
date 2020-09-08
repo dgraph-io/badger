@@ -23,12 +23,15 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"path"
 	"regexp"
 	"runtime"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
@@ -122,7 +125,6 @@ func TestTruncateVlogNoClose(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	fmt.Println("running")
 	dir := "p"
 	opts := getTestOptions(dir)
 	opts.SyncWrites = true
@@ -310,7 +312,7 @@ func TestPushValueLogLimit(t *testing.T) {
 
 		for i := 0; i < 32; i++ {
 			if i == 4 {
-				v := make([]byte, 2<<30)
+				v := make([]byte, math.MaxInt32)
 				err := db.Update(func(txn *Txn) error {
 					return txn.SetEntry(NewEntry([]byte(key(i)), v))
 				})
@@ -545,7 +547,7 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
 	require.NoError(t, err)
 
-	_, err = fd.Write(b.Finish())
+	_, err = fd.Write(b.Finish(false))
 	require.NoError(t, err, "unable to write to file")
 
 	tab, err := table.OpenTable(fd, bopts)
@@ -627,22 +629,29 @@ func TestL0GCBug(t *testing.T) {
 		return []byte(fmt.Sprintf("%10d", i))
 	}
 	val := []byte{1, 1, 1, 1, 1, 1, 1, 1}
-	// Insert 100 entries. This will create about 50 vlog files and 2 SST files.
-	for i := 0; i < 100; i++ {
-		err = db1.Update(func(txn *Txn) error {
-			return txn.SetEntry(NewEntry(key(i), val))
-		})
-		require.NoError(t, err)
+	// Insert 100 entries. This will create about 50*3 vlog files and 6 SST files.
+	for i := 0; i < 3; i++ {
+		for j := 0; j < 100; j++ {
+			err = db1.Update(func(txn *Txn) error {
+				return txn.SetEntry(NewEntry(key(j), val))
+			})
+			require.NoError(t, err)
+		}
 	}
 	// Run value log GC multiple times. This would ensure at least
 	// one value log file is garbage collected.
+	success := 0
 	for i := 0; i < 10; i++ {
 		err := db1.RunValueLogGC(0.01)
+		if err == nil {
+			success++
+		}
 		if err != nil && err != ErrNoRewrite {
 			t.Fatalf(err.Error())
 		}
 	}
-
+	// Ensure alteast one GC call was successful.
+	require.NotZero(t, success)
 	// CheckKeys reads all the keys previously stored.
 	checkKeys := func(db *DB) {
 		for i := 0; i < 100; i++ {
@@ -661,11 +670,13 @@ func TestL0GCBug(t *testing.T) {
 	// Simulate a crash by not closing db1 but releasing the locks.
 	if db1.dirLockGuard != nil {
 		require.NoError(t, db1.dirLockGuard.release())
+		db1.dirLockGuard = nil
 	}
 	if db1.valueDirGuard != nil {
 		require.NoError(t, db1.valueDirGuard.release())
+		db1.valueDirGuard = nil
 	}
-	require.NoError(t, db1.vlog.Close())
+	require.NoError(t, db1.Close())
 
 	db2, err := Open(opts)
 	require.NoError(t, err)
@@ -695,8 +706,8 @@ func TestWindowsDataLoss(t *testing.T) {
 	defer removeDir(dir)
 
 	opt := DefaultOptions(dir).WithSyncWrites(true)
+	opt.ValueThreshold = 32
 
-	fmt.Println("First DB Open")
 	db, err := Open(opt)
 	require.NoError(t, err)
 	keyCount := 20
@@ -718,12 +729,9 @@ func TestWindowsDataLoss(t *testing.T) {
 	}
 	require.NoError(t, db.Close())
 
-	fmt.Println()
-	fmt.Println("Second DB Open")
 	opt.Truncate = true
 	db, err = Open(opt)
 	require.NoError(t, err)
-
 	// Return after reading one entry. We're simulating a crash.
 	// Simulate a crash by not closing db but releasing the locks.
 	if db.dirLockGuard != nil {
@@ -735,9 +743,13 @@ func TestWindowsDataLoss(t *testing.T) {
 	// Don't use vlog.Close here. We don't want to fix the file size. Only un-mmap
 	// the data so that we can truncate the file durning the next vlog.Open.
 	require.NoError(t, y.Munmap(db.vlog.filesMap[db.vlog.maxFid].fmap))
+	for _, f := range db.vlog.filesMap {
+		require.NoError(t, f.fd.Close())
+	}
+	require.NoError(t, db.registry.Close())
+	require.NoError(t, db.manifest.close())
+	require.NoError(t, db.lc.close())
 
-	fmt.Println()
-	fmt.Println("Third DB Open")
 	opt.Truncate = true
 	db, err = Open(opt)
 	require.NoError(t, err)
@@ -760,4 +772,89 @@ func TestWindowsDataLoss(t *testing.T) {
 		result = append(result, k)
 	}
 	require.ElementsMatch(t, keyList, result)
+}
+
+func TestDropAllDropPrefix(t *testing.T) {
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%10d", i))
+	}
+	val := func(i int) []byte {
+		return []byte(fmt.Sprintf("%128d", i))
+	}
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		wb := db.NewWriteBatch()
+		defer wb.Cancel()
+
+		N := 50000
+
+		for i := 0; i < N; i++ {
+			require.NoError(t, wb.Set(key(i), val(i)))
+		}
+		require.NoError(t, wb.Flush())
+
+		var wg sync.WaitGroup
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			err := db.DropPrefix([]byte("000"))
+			for err == ErrBlockedWrites {
+				fmt.Printf("DropPrefix 000 err: %v", err)
+				err = db.DropPrefix([]byte("000"))
+				time.Sleep(time.Millisecond * 500)
+			}
+			require.NoError(t, err)
+		}()
+		go func() {
+			defer wg.Done()
+			err := db.DropPrefix([]byte("111"))
+			for err == ErrBlockedWrites {
+				fmt.Printf("DropPrefix 111 err: %v", err)
+				err = db.DropPrefix([]byte("111"))
+				time.Sleep(time.Millisecond * 500)
+			}
+			require.NoError(t, err)
+		}()
+		go func() {
+			time.Sleep(time.Millisecond) // Let drop prefix run first.
+			defer wg.Done()
+			err := db.DropAll()
+			for err == ErrBlockedWrites {
+				fmt.Printf("dropAll err: %v", err)
+				err = db.DropAll()
+				time.Sleep(time.Millisecond * 300)
+			}
+			require.NoError(t, err)
+		}()
+		wg.Wait()
+	})
+}
+
+func TestIsClosed(t *testing.T) {
+	test := func(inMemory bool) {
+		opt := DefaultOptions("")
+		if inMemory {
+			opt.InMemory = true
+		} else {
+			dir, err := ioutil.TempDir("", "badger-test")
+			require.NoError(t, err)
+			defer removeDir(dir)
+
+			opt.Dir = dir
+			opt.ValueDir = dir
+		}
+
+		db, err := Open(opt)
+		require.NoError(t, err)
+		require.False(t, db.IsClosed())
+		require.NoError(t, db.Close())
+		require.True(t, db.IsClosed())
+	}
+
+	t.Run("normal", func(t *testing.T) {
+		test(false)
+	})
+	t.Run("in-memory", func(t *testing.T) {
+		test(true)
+	})
+
 }

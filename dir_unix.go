@@ -1,4 +1,4 @@
-// +build !windows
+// +build !windows,!plan9
 
 /*
  * Copyright 2017 Dgraph Labs, Inc. and Contributors
@@ -24,7 +24,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
@@ -109,7 +108,8 @@ func syncDir(dir string) error {
 	if err != nil {
 		return errors.Wrapf(err, "While opening directory: %s.", dir)
 	}
-	err = y.FileSync(f)
+
+	err = f.Sync()
 	closeErr := f.Close()
 	if err != nil {
 		return errors.Wrapf(err, "While syncing directory: %s.", dir)

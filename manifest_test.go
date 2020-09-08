@@ -155,7 +155,7 @@ func buildTable(t *testing.T, keyValues [][]string, bopts table.Options) *os.Fil
 			UserMeta: 0,
 		}, 0)
 	}
-	_, err = f.Write(b.Finish())
+	_, err = f.Write(b.Finish(false))
 	require.NoError(t, err, "unable to write to file.")
 	f.Close()
 	f, _ = y.OpenSyncedFile(filename, true)
@@ -168,6 +168,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	defer removeDir(dir)
 	kv, err := Open(DefaultOptions(dir))
 	require.NoError(t, err)
+	defer kv.Close()
 
 	lh0 := newLevelHandler(kv, 0)
 	lh1 := newLevelHandler(kv, 1)

@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/v2/y"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,6 +37,9 @@ func TestWriteBatch(t *testing.T) {
 	test := func(t *testing.T, db *DB) {
 		wb := db.NewWriteBatch()
 		defer wb.Cancel()
+
+		// Sanity check for SetEntryAt.
+		require.Error(t, wb.SetEntryAt(&Entry{}, 12))
 
 		N, M := 50000, 1000
 		start := time.Now()
@@ -67,7 +72,11 @@ func TestWriteBatch(t *testing.T) {
 		require.NoError(t, err)
 	}
 	t.Run("disk mode", func(t *testing.T) {
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		opt := getTestOptions("")
+		// Set value threshold to 32 bytes otherwise write batch will generate
+		// too many files and we will crash with too many files open error.
+		opt.ValueThreshold = 32
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
@@ -78,5 +87,60 @@ func TestWriteBatch(t *testing.T) {
 		require.NoError(t, err)
 		test(t, db)
 		require.NoError(t, db.Close())
+	})
+}
+
+// This test ensures we don't end up in deadlock in case of empty writebatch.
+func TestEmptyWriteBatch(t *testing.T) {
+	t.Run("normal mode", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			wb := db.NewWriteBatch()
+			require.NoError(t, wb.Flush())
+			wb = db.NewWriteBatch()
+			require.NoError(t, wb.Flush())
+			wb = db.NewWriteBatch()
+			require.NoError(t, wb.Flush())
+		})
+	})
+	t.Run("managed mode", func(t *testing.T) {
+		opt := getTestOptions("")
+		opt.managedTxns = true
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			t.Run("WriteBatchAt", func(t *testing.T) {
+				wb := db.NewWriteBatchAt(2)
+				require.NoError(t, wb.Flush())
+				wb = db.NewWriteBatchAt(208)
+				require.NoError(t, wb.Flush())
+				wb = db.NewWriteBatchAt(31)
+				require.NoError(t, wb.Flush())
+			})
+			t.Run("ManagedWriteBatch", func(t *testing.T) {
+				wb := db.NewManagedWriteBatch()
+				require.NoError(t, wb.Flush())
+				wb = db.NewManagedWriteBatch()
+				require.NoError(t, wb.Flush())
+				wb = db.NewManagedWriteBatch()
+				require.NoError(t, wb.Flush())
+			})
+		})
+	})
+}
+
+// This test ensures we don't panic during flush.
+// See issue: https://github.com/dgraph-io/badger/issues/1394
+func TestFlushPanic(t *testing.T) {
+	t.Run("flush after flush", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			wb := db.NewWriteBatch()
+			wb.Flush()
+			require.Error(t, y.ErrCommitAfterFinish, wb.Flush())
+		})
+	})
+	t.Run("flush after cancel", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			wb := db.NewWriteBatch()
+			wb.Cancel()
+			require.Error(t, y.ErrCommitAfterFinish, wb.Flush())
+		})
 	})
 }
