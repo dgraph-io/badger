@@ -458,6 +458,8 @@ func (db *DB) getHead() (valuePointer, uint64) {
 		})
 		// This shouldn't happen.
 		y.Check(err)
+		// We're iterating in the reverse order so the last item would be the
+		// one with the biggest version.
 		maxVersion = item.Version()
 	}
 	// If we have reached here it means there were some head key and so the
