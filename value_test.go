@@ -364,7 +364,6 @@ func TestValueGC4(t *testing.T) {
 
 	kv, err := Open(opt)
 	require.NoError(t, err)
-	defer kv.Close()
 
 	sz := 128 << 10 // 5 entries per value log file.
 	txn := kv.NewTransaction(true)
@@ -403,11 +402,9 @@ func TestValueGC4(t *testing.T) {
 	kv.vlog.rewrite(lf0, tr)
 	kv.vlog.rewrite(lf1, tr)
 
-	err = kv.vlog.Close()
-	require.NoError(t, err)
+	require.NoError(t, kv.Close())
 
-	kv.vlog.init(kv)
-	err = kv.vlog.open(kv, valuePointer{Fid: 2}, kv.replayFunction())
+	kv, err = Open(opt)
 	require.NoError(t, err)
 
 	for i := 0; i < 8; i++ {
@@ -429,6 +426,7 @@ func TestValueGC4(t *testing.T) {
 			return nil
 		}))
 	}
+	require.NoError(t, kv.Close())
 }
 
 func TestPersistLFDiscardStats(t *testing.T) {
@@ -637,6 +635,11 @@ func TestPartialAppendToValueLog(t *testing.T) {
 	checkKeys(t, kv, [][]byte{k3})
 	// Replay value log from beginning, badger head is past k2.
 	require.NoError(t, kv.vlog.Close())
+
+	// clean up the current db.vhead so that we can replay from the beginning.
+	// If we don't clear the current vhead, badger will error out since new
+	// head passed while opening vlog is zero in the following lines.
+	kv.vhead = valuePointer{}
 
 	kv.vlog.init(kv)
 	require.NoError(
