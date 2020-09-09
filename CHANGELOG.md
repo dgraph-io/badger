@@ -6,6 +6,24 @@ and this project adheres to [Serialization Versioning](VERSIONING.md).
 
 ## [Unreleased]
 
+## [1.6.2] - 2020-09-10
+
+### Fixed
+ - Fix Sequence generates duplicate values (#1281)
+ - Ensure `bitValuePointer` flag is cleared for LSM entry values written to LSM (#1313)
+ - Confirm `badgerMove` entry required before rewrite (#1302)
+ - Drop move keys when its key prefix is dropped (#1331)
+ - Compaction: Expired keys and delete markers are never purged (#1354)
+ - Restore: Account for value size as well (#1358)
+ - GC: Consider size of value while rewriting (#1357)
+ - Rework DB.DropPrefix (#1381)
+ - Update head while replaying value log (#1372)
+ - Remove vlog file if bootstrap, syncDir or mmap fails (#1434)
+ - Levels: Compaction incorrectly drops some delete markers (#1422)
+ - Fix(replay) - Update head for LSM entries also (#1456)
+ - Fix(Backup/Restore): Keep all versions (#1462)
+ - Fix build on Plan 9 (#1451)
+
 ## [1.6.1] - 2020-03-26
 
 ### New APIs
@@ -235,7 +253,8 @@ Bug fix:
 ## [1.0.1] - 2017-11-06
 * Fix an uint16 overflow when resizing key slice
 
-[Unreleased]: https://github.com/dgraph-io/badger/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/dgraph-io/badger/compare/v1.6.2...HEAD
+[1.6.2]: https://github.com/dgraph-io/badger/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/dgraph-io/badger/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/dgraph-io/badger/compare/v1.5.5...v1.6.0
 [1.5.5]: https://github.com/dgraph-io/badger/compare/v1.5.3...v1.5.5
