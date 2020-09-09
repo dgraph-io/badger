@@ -408,7 +408,6 @@ func BenchmarkDbGrowth(b *testing.B) {
 	opts.NumVersionsToKeep = 1
 	opts.NumLevelZeroTables = 1
 	opts.NumLevelZeroTablesStall = 2
-	opts.KeepL0InMemory = false // enable L0 compaction
 	db, err := Open(opts)
 	require.NoError(b, err)
 	for numWrites := 0; numWrites < maxWrites; numWrites++ {
