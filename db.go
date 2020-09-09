@@ -1110,9 +1110,26 @@ func (seq *Sequence) Release() error {
 	seq.Lock()
 	defer seq.Unlock()
 	err := seq.db.Update(func(txn *Txn) error {
-		var buf [8]byte
-		binary.BigEndian.PutUint64(buf[:], seq.next)
-		return txn.SetEntry(NewEntry(seq.key, buf[:]))
+		item, err := txn.Get(seq.key)
+		if err != nil {
+			return err
+		}
+
+		var num uint64
+		if err := item.Value(func(v []byte) error {
+			num = binary.BigEndian.Uint64(v)
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		if num == seq.leased {
+			var buf [8]byte
+			binary.BigEndian.PutUint64(buf[:], seq.next)
+			return txn.SetEntry(NewEntry(seq.key, buf[:]))
+		}
+
+		return nil
 	})
 	if err != nil {
 		return err
