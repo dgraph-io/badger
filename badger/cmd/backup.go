@@ -28,6 +28,7 @@ import (
 
 var backupFile string
 var truncate bool
+var numVersions int
 
 // backupCmd represents the backup command
 var backupCmd = &cobra.Command{
