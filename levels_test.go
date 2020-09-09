@@ -296,6 +296,40 @@ func TestCompaction(t *testing.T) {
 				getAllAndCheck(t, db, []keyValVersion{})
 			})
 		})
+		t.Run("with bottom overlap", func(t *testing.T) {
+			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+				l1 := []keyValVersion{{"foo", "bar", 3, bitDelete}}
+				l2 := []keyValVersion{{"foo", "bar", 2, 0}, {"fooz", "baz", 2, bitDelete}}
+				l3 := []keyValVersion{{"fooz", "baz", 1, 0}}
+				createAndOpen(db, l1, 1)
+				createAndOpen(db, l2, 2)
+				createAndOpen(db, l3, 3)
+
+				// Set a high discard timestamp so that all the keys are below the discard timestamp.
+				db.SetDiscardTs(10)
+
+				getAllAndCheck(t, db, []keyValVersion{
+					{"foo", "bar", 3, bitDelete},
+					{"foo", "bar", 2, 0},
+					{"fooz", "baz", 2, bitDelete},
+					{"fooz", "baz", 1, 0},
+				})
+				cdef := compactDef{
+					thisLevel: db.lc.levels[1],
+					nextLevel: db.lc.levels[2],
+					top:       db.lc.levels[1].tables,
+					bot:       db.lc.levels[2].tables,
+				}
+				require.NoError(t, db.lc.runCompactDef(1, cdef))
+				// the top table at L1 doesn't overlap L3, but the bottom table at L2
+				// does, delete keys should not be removed.
+				getAllAndCheck(t, db, []keyValVersion{
+					{"foo", "bar", 3, bitDelete},
+					{"fooz", "baz", 2, bitDelete},
+					{"fooz", "baz", 1, 0},
+				})
+			})
+		})
 		t.Run("without overlap", func(t *testing.T) {
 			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 				l1 := []keyValVersion{{"foo", "bar", 3, bitDelete}, {"fooz", "baz", 1, bitDelete}}
