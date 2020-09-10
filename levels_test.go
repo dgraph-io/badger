@@ -672,3 +672,43 @@ func TestDiscardFirstVersion(t *testing.T) {
 		getAllAndCheck(t, db, ExpectedKeys)
 	})
 }
+
+// Regression test for https://github.com/dgraph-io/dgraph/issues/5573
+func TestDropPrefixMoveBug(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		// l1 is used to verify that drop prefix actually drops move keys from all the levels.
+		l1 := []keyValVersion{{string(append(badgerMove, "F"...)), "", 0, 0}}
+		createAndOpen(db, l1, 1)
+
+		// Mutiple levels can have the exact same move key with version.
+		l2 := []keyValVersion{{string(append(badgerMove, "F"...)), "", 0, 0}, {"A", "", 0, 0}}
+		l21 := []keyValVersion{{"B", "", 0, 0}, {"C", "", 0, 0}}
+		l22 := []keyValVersion{{"F", "", 0, 0}, {"G", "", 0, 0}}
+
+		// Level 2 has all the tables.
+		createAndOpen(db, l2, 2)
+		createAndOpen(db, l21, 2)
+		createAndOpen(db, l22, 2)
+
+		require.NoError(t, db.lc.validate())
+		require.NoError(t, db.DropPrefix([]byte("F")))
+
+		db.View(func(txn *Txn) error {
+			iopt := DefaultIteratorOptions
+			iopt.AllVersions = true
+
+			it := txn.NewIterator(iopt)
+			defer it.Close()
+
+			specialKey := []byte("F")
+			droppedPrefixes := [][]byte{specialKey, append(badgerMove, specialKey...)}
+			for it.Rewind(); it.Valid(); it.Next() {
+				key := it.Item().Key()
+				// Ensure we don't have any "F" or "!badger!move!F" left
+				require.False(t, hasAnyPrefixes(key, droppedPrefixes))
+			}
+			return nil
+		})
+		require.NoError(t, db.lc.validate())
+	})
+}
