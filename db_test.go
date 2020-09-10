@@ -1861,8 +1861,9 @@ func TestNoCrash(t *testing.T) {
 	}
 
 	db.Lock()
-	// make head to point to first file
-	db.vhead = valuePointer{0, 0, 0}
+	// make head to point to second file. We cannot make it point to the first
+	// vlog file because we cannot push a zero head pointer.
+	db.vhead = valuePointer{1, 0, 0}
 	db.Unlock()
 	db.Close()
 
