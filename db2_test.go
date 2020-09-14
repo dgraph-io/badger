@@ -876,8 +876,8 @@ func TestCleanVlog(t *testing.T) {
 		require.NoError(t, err)
 		fullStaleFiles := 0
 		for _, r := range res {
-			fmt.Printf("r.Fid:%d, Total:%f Discard:%f \n", r.Fid, r.Total, r.Discard)
-			if r.Total == r.Discard {
+			fmt.Printf("r.Fid:%d, Ratio: %f Size: %d\n", r.Fid, r.DiscardRatio, r.FileSize)
+			if r.DiscardRatio == 1 {
 				fullStaleFiles++
 			}
 		}

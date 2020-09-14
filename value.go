@@ -2085,9 +2085,9 @@ func (vlog *valueLog) cleanVlog(filesToGC []uint32, timeout time.Duration) error
 }
 
 type sampleResult struct {
-	Fid     uint32
-	Total   float64
-	Discard float64
+	Fid          uint32
+	FileSize     int64
+	DiscardRatio float64
 }
 
 // getDiscardStats is used to collect and return the discard stats for the specified filesToSample. If filesToSample is set to nil, all files will be sampled. The timeout determines the timeout for sampling operation.
@@ -2140,7 +2140,15 @@ func (vlog *valueLog) getDiscardStats(
 			return nil, errors.Wrapf(err, "file: %s", lf.fd.Name())
 		}
 
-		result = append(result, sampleResult{Fid: fid, Total: r.total, Discard: r.discard})
+		fstat, err := lf.fd.Stat()
+		if err != nil {
+			return nil, errors.Wrapf(err, "Unable to check stat for %q", lf.path)
+		}
+
+		result = append(result, sampleResult{
+			Fid:          fid,
+			DiscardRatio: r.discard / r.total,
+			FileSize:     fstat.Size()})
 		vlog.db.opt.Logger.Infof("Sampled fid %d. Took: %s", fid, time.Since(start))
 	}
 	return result, nil

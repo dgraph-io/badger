@@ -19,6 +19,7 @@ package cmd
 import (
 	"encoding/csv"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -53,15 +54,17 @@ var gopt gcOptions
 
 func init() {
 	RootCmd.AddCommand(gcCmd)
-	gcCmd.Flags().BoolVarP(&gopt.sampleOnly, "sample-only", "s", false, "Perform only sampling and don't do GC. This can be used to find the files that need to be gc'ed.")
-	gcCmd.Flags().StringVarP(&gopt.fid, "fids", "f", "", "Perform GC/Sampling on the specified fids only.")
+	gcCmd.Flags().BoolVarP(&gopt.sampleOnly, "sample-only", "s", false, "Perform only sampling "+
+		"and don't do GC. This can be used to find the files that need to be gc'ed.")
+	gcCmd.Flags().StringVarP(&gopt.fid, "fids", "f", "",
+		"Perform GC/Sampling on the specified fids only.")
 	gcCmd.Flags().IntVarP(&gopt.numVersion, "num-versions", "n", 1, "todo")
 	bankTest.Flags().StringVarP(&gopt.timeout, "duration", "d", "10m", "How long to run the test.")
 }
 
 func gc(cmd *cobra.Command, args []string) error {
 	var fids []uint32
-	// Support commana separated fid list.
+	// Support comma separated fid list.
 	if len(gopt.fid) > 0 {
 		r := csv.NewReader(strings.NewReader(gopt.fid))
 		entries, err := r.ReadAll()
@@ -96,9 +99,10 @@ func gc(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		sort.Slice(res, func(i, j int) bool { return res[i].DiscardRatio > res[j].DiscardRatio })
 
 		for _, r := range res {
-			fmt.Printf("Fid: %d Total: %f Discard: %f\n", r.Fid, r.Total, r.Discard)
+			fmt.Printf("Fid: %d DiscardRatio: %f\n", r.Fid, r.DiscardRatio)
 		}
 	} else {
 		return db.GCVlog(fids, dur)
