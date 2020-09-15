@@ -59,7 +59,7 @@ func init() {
 	gcCmd.Flags().StringVarP(&gopt.fid, "fids", "f", "",
 		"Perform GC/Sampling on the specified fids only.")
 	gcCmd.Flags().IntVarP(&gopt.numVersion, "num-versions", "n", 1, "todo")
-	bankTest.Flags().StringVarP(&gopt.timeout, "duration", "d", "10m", "How long to run the test.")
+	gcCmd.Flags().StringVarP(&gopt.timeout, "duration", "d", "10m", "How long to run the test.")
 }
 
 func gc(cmd *cobra.Command, args []string) error {
