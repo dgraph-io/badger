@@ -1859,3 +1859,8 @@ func (db *DB) StreamDB(outOptions Options) error {
 	}
 	return nil
 }
+
+// Opts returns a copy of the DB options.
+func (db *DB) Opts() Options {
+	return db.opt
+}
