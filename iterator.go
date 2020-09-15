@@ -633,15 +633,20 @@ func (it *Iterator) parseItem() bool {
 	// If iterating in forward direction, then just checking the last key against current key would
 	// be sufficient.
 	if !it.opt.Reverse {
-		for y.SameKey(it.lastKey, key) {
+		flag := false
+		for mi.Valid() && y.SameKey(it.lastKey, mi.Key()) {
 			mi.Next()
-			it.lastKey = y.SafeCopy(it.lastKey, mi.Key())
+			flag = true
+		}
+		if flag {
+			return false
 		}
 		// Only track in forward direction.
 		// We should update lastKey as soon as we find a different key in our snapshot.
 		// Consider keys: a 5, b 7 (del), b 5. When iterating, lastKey = a.
 		// Then we see b 7, which is deleted. If we don't store lastKey = b, we'll then return b 5,
 		// which is wrong. Therefore, update lastKey here.
+		it.lastKey = y.SafeCopy(it.lastKey, mi.Key())
 	}
 
 FILL:

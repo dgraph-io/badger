@@ -181,7 +181,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		closeAllTables(tables)
 		return nil, err
 	}
-	db.opt.Infof("---- All %d tables opened in %s\n", atomic.LoadInt32(&numOpened),
+	db.opt.Infof("something random---- All %d tables opened in %s\n", atomic.LoadInt32(&numOpened),
 		time.Since(start).Round(time.Millisecond))
 	s.nextFileID = maxFileID + 1
 	for i, tbls := range tables {
