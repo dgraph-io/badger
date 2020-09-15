@@ -35,6 +35,7 @@ import (
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 var writeBenchCmd = &cobra.Command{
@@ -59,26 +60,19 @@ var (
 	sizeWritten    uint64
 	entriesWritten uint64
 
-	valueThreshold      int
-	numVersions         int
-	maxCacheSize        int64
-	keepBlockIdxInCache bool
-	keepBlocksInCache   bool
-	maxBfCacheSize      int64
-	vlogMaxEntries      uint32
-	loadBloomsOnOpen    bool
-	detectConflicts     bool
-	compression         bool
-	showDir             bool
-	ttlDuration         string
+	valueThreshold   int
+	numVersions      int
+	vlogMaxEntries   uint32
+	loadBloomsOnOpen bool
+	detectConflicts  bool
+	compression      bool
+	showDir          bool
+	ttlDuration      string
+	showKeysCount    bool
 
-	internalKeyCount uint32
-	moveKeyCount     uint32
-	invalidKeyCount  uint32
-	validKeyCount    uint32
-	sstCount         uint32
-	vlogCount        uint32
-	files            []string
+	sstCount  uint32
+	vlogCount uint32
+	files     []string
 
 	dropAllPeriod    string
 	dropPrefixPeriod string
@@ -105,13 +99,10 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "Show Badger logs.")
 	writeBenchCmd.Flags().IntVarP(&valueThreshold, "value-th", "t", 1<<10, "Value threshold")
 	writeBenchCmd.Flags().IntVarP(&numVersions, "num-version", "n", 1, "Number of versions to keep")
-	writeBenchCmd.Flags().Int64VarP(&maxCacheSize, "max-cache", "C", 0, "Max size of cache")
-	writeBenchCmd.Flags().BoolVarP(&keepBlockIdxInCache, "keep-bidx", "b", false,
-		"Keep block indices in cache")
-	writeBenchCmd.Flags().BoolVarP(&keepBlocksInCache, "keep-blocks", "B", false,
-		"Keep blocks in cache")
-	writeBenchCmd.Flags().Int64VarP(&maxBfCacheSize, "max-bf-cache", "c", 0,
-		"Maximum Bloom Filter Cache Size")
+	writeBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache", 0,
+		"Size of block cache in MB")
+	writeBenchCmd.Flags().Int64Var(&indexCacheSize, "index-cache", 0,
+		"Size of index cache in MB.")
 	writeBenchCmd.Flags().Uint32Var(&vlogMaxEntries, "vlog-maxe", 1000000, "Value log Max Entries")
 	writeBenchCmd.Flags().StringVarP(&encryptionKey, "encryption-key", "e", "",
 		"If it is true, badger will encrypt all the data stored on the disk.")
@@ -126,13 +117,15 @@ func init() {
 	writeBenchCmd.Flags().BoolVar(&showDir, "show-dir", false,
 		"If true, the report will include the directory contents")
 	writeBenchCmd.Flags().StringVar(&dropAllPeriod, "dropall", "0s",
-		"Period of dropping all. If 0, doesn't drops all.")
+		"If set, run dropAll periodically over given duration.")
 	writeBenchCmd.Flags().StringVar(&dropPrefixPeriod, "drop-prefix", "0s",
-		"Period of dropping by random prefixes. If 0, doesn't drops by prefix.")
+		"If set, drop random prefixes periodically over given duration.")
 	writeBenchCmd.Flags().StringVar(&ttlDuration, "entry-ttl", "0s",
 		"TTL duration in seconds for the entries, 0 means without TTL")
-	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "5m", "GC Period.")
+	writeBenchCmd.Flags().StringVarP(&gcPeriod, "gc-every", "g", "0s", "GC Period.")
 	writeBenchCmd.Flags().Float64VarP(&gcDiscardRatio, "gc-ratio", "r", 0.5, "GC discard ratio.")
+	writeBenchCmd.Flags().BoolVar(&showKeysCount, "show-keys", false,
+		"If true, the report will include the keys statistics")
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
@@ -250,10 +243,8 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithCompactL0OnClose(force).
 		WithValueThreshold(valueThreshold).
 		WithNumVersionsToKeep(numVersions).
-		WithMaxCacheSize(maxCacheSize).
-		WithKeepBlockIndicesInCache(keepBlockIdxInCache).
-		WithKeepBlocksInCache(keepBlocksInCache).
-		WithMaxBfCacheSize(maxBfCacheSize).
+		WithBlockCacheSize(blockCacheSize << 20).
+		WithIndexCacheSize(indexCacheSize << 20).
 		WithValueLogMaxEntries(vlogMaxEntries).
 		WithTableLoadingMode(mode).
 		WithEncryptionKey([]byte(encryptionKey)).
@@ -282,7 +273,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 
 	startTime = time.Now()
 	num := uint64(numKeys * mil)
-	c := y.NewCloser(4)
+	c := z.NewCloser(4)
 	go reportStats(c, db)
 	go dropAll(c, db)
 	go dropPrefix(c, db)
@@ -298,7 +289,43 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	return err
 }
 
-func reportStats(c *y.Closer, db *badger.DB) {
+func showKeysStats(db *badger.DB) {
+	var (
+		internalKeyCount uint32
+		moveKeyCount     uint32
+		invalidKeyCount  uint32
+		validKeyCount    uint32
+	)
+
+	txn := db.NewTransaction(false)
+	defer txn.Discard()
+
+	iopt := badger.DefaultIteratorOptions
+	iopt.AllVersions = true
+	iopt.InternalAccess = true
+	it := txn.NewIterator(iopt)
+	defer it.Close()
+
+	for it.Rewind(); it.Valid(); it.Next() {
+		i := it.Item()
+		if bytes.HasPrefix(i.Key(), []byte("!badger!")) {
+			internalKeyCount++
+		}
+		if bytes.HasPrefix(i.Key(), []byte("!badger!Move")) {
+			moveKeyCount++
+		}
+		if i.IsDeletedOrExpired() {
+			invalidKeyCount++
+		} else {
+			validKeyCount++
+		}
+	}
+	fmt.Printf("Valid Keys: %d Invalid Keys: %d Move Keys:"+
+		" %d Internal Keys: %d\n", validKeyCount, invalidKeyCount,
+		moveKeyCount, internalKeyCount)
+}
+
+func reportStats(c *z.Closer, db *badger.DB) {
 	defer c.Done()
 
 	t := time.NewTicker(time.Second)
@@ -309,30 +336,9 @@ func reportStats(c *y.Closer, db *badger.DB) {
 		case <-c.HasBeenClosed():
 			return
 		case <-t.C:
-			txn := db.NewTransaction(false)
-			defer txn.Discard()
-
-			iopt := badger.DefaultIteratorOptions
-			iopt.AllVersions = true
-			iopt.InternalAccess = true
-
-			it := txn.NewIterator(iopt)
-			defer it.Close()
-			for it.Rewind(); it.Valid(); it.Next() {
-				i := it.Item()
-				if bytes.HasPrefix(i.Key(), []byte("!badger!")) {
-					internalKeyCount++
-				}
-				if bytes.HasPrefix(i.Key(), []byte("!badger!Move")) {
-					moveKeyCount++
-				}
-				if i.IsDeletedOrExpired() {
-					invalidKeyCount++
-				} else {
-					validKeyCount++
-				}
+			if showKeysCount {
+				showKeysStats(db)
 			}
-
 			// fetch directory contents
 			if showDir {
 				err := filepath.Walk(sstDir, func(path string, info os.FileInfo, err error) error {
@@ -365,17 +371,18 @@ func reportStats(c *y.Closer, db *badger.DB) {
 			fmt.Printf("Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
 				"entries written: %d, speed: %d/sec, gcSuccess: %d\n", y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate, gcSuccess)
-			fmt.Printf("Valid Keys Count: %d\nInvalid Keys Count: %d\nMove Keys Count: %d\n"+
-				"Internal Keys Count: %d\n", validKeyCount, invalidKeyCount, moveKeyCount,
-				internalKeyCount)
 		}
 	}
 }
 
-func runGC(c *y.Closer, db *badger.DB) {
+func runGC(c *z.Closer, db *badger.DB) {
 	defer c.Done()
 	period, err := time.ParseDuration(gcPeriod)
 	y.Check(err)
+	if period == 0 {
+		return
+	}
+
 	t := time.NewTicker(period)
 	defer t.Stop()
 	for {
@@ -392,9 +399,8 @@ func runGC(c *y.Closer, db *badger.DB) {
 	}
 }
 
-func dropAll(c *y.Closer, db *badger.DB) {
+func dropAll(c *z.Closer, db *badger.DB) {
 	defer c.Done()
-
 	dropPeriod, err := time.ParseDuration(dropAllPeriod)
 	y.Check(err)
 	if dropPeriod == 0 {
@@ -424,9 +430,8 @@ func dropAll(c *y.Closer, db *badger.DB) {
 	}
 }
 
-func dropPrefix(c *y.Closer, db *badger.DB) {
+func dropPrefix(c *z.Closer, db *badger.DB) {
 	defer c.Done()
-
 	dropPeriod, err := time.ParseDuration(dropPrefixPeriod)
 	y.Check(err)
 	if dropPeriod == 0 {

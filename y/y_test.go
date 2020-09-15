@@ -254,20 +254,3 @@ func TestPagebufferReader4(t *testing.T) {
 	require.Equal(t, err, io.EOF, "should return EOF")
 	require.Equal(t, n, 0)
 }
-
-func TestMulipleSignals(t *testing.T) {
-	closer := NewCloser(0)
-	require.NotPanics(t, func() { closer.Signal() })
-	// Should not panic.
-	require.NotPanics(t, func() { closer.Signal() })
-	require.NotPanics(t, func() { closer.SignalAndWait() })
-
-	// Attempt 2.
-	closer = NewCloser(1)
-	require.NotPanics(t, func() { closer.Done() })
-
-	require.NotPanics(t, func() { closer.SignalAndWait() })
-	// Should not panic.
-	require.NotPanics(t, func() { closer.SignalAndWait() })
-	require.NotPanics(t, func() { closer.Signal() })
-}
