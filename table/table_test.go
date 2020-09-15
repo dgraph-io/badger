@@ -781,7 +781,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		func() {
 			opts := Options{Compression: options.ZSTD, BlockSize: 4 * 0124, BloomFalsePositive: 0.01}
-			opts.Cache = cache
+			opts.BlockCache = cache
 			newBuilder := NewTableBuilder(opts)
 			it := tbl.NewIterator(0)
 			defer it.Close()
@@ -807,7 +807,7 @@ func BenchmarkReadMerged(b *testing.B) {
 	for i := 0; i < m; i++ {
 		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 		opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
-		opts.Cache = cache
+		opts.BlockCache = cache
 		builder := NewTableBuilder(opts)
 		f, err := y.OpenSyncedFile(filename, true)
 		y.Check(err)
@@ -899,7 +899,7 @@ func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Tab
 		cache, err = ristretto.NewCache(&cacheConfig)
 		require.NoError(b, err)
 	}
-	opts.Cache = cache
+	opts.BlockCache = cache
 	builder := NewTableBuilder(opts)
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	f, err := y.OpenSyncedFile(filename, true)

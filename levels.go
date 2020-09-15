@@ -158,8 +158,8 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			// Set compression from table manifest.
 			topt.Compression = tf.Compression
 			topt.DataKey = dk
-			topt.Cache = db.blockCache
-			topt.BfCache = db.bfCache
+			topt.BlockCache = db.blockCache
+			topt.IndexCache = db.indexCache
 			t, err := table.OpenTable(fd, topt)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
@@ -363,7 +363,7 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 	return nil
 }
 
-func (s *levelsController) startCompact(lc *y.Closer) {
+func (s *levelsController) startCompact(lc *z.Closer) {
 	n := s.kv.opt.NumCompactors
 	lc.AddRunning(n - 1)
 	for i := 0; i < n; i++ {
@@ -373,7 +373,7 @@ func (s *levelsController) startCompact(lc *y.Closer) {
 	}
 }
 
-func (s *levelsController) runCompactor(id int, lc *y.Closer) {
+func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 	defer lc.Done()
 
 	randomDelay := time.NewTimer(time.Duration(rand.Int31n(1000)) * time.Millisecond)
@@ -570,8 +570,8 @@ nextTable:
 		bopts := buildTableOptions(s.kv.opt)
 		bopts.DataKey = dk
 		// Builder does not need cache but the same options are used for opening table.
-		bopts.Cache = s.kv.blockCache
-		bopts.BfCache = s.kv.bfCache
+		bopts.BlockCache = s.kv.blockCache
+		bopts.IndexCache = s.kv.indexCache
 		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
@@ -701,10 +701,11 @@ nextTable:
 
 			mu.Lock()
 			newTables = append(newTables, tbl)
-			num := atomic.LoadInt32(&table.NumBlocks)
+			// num := atomic.LoadInt32(&table.NumBlocks)
 			mu.Unlock()
 
-			s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, z.NumAllocsMB())
+			// TODO(ibrahim): When ristretto PR #186 merges, bring this back.
+			// s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, (z.NumAllocBytes() / 1 << 20))
 		}(builder)
 	}
 
@@ -1080,6 +1081,9 @@ func (s *levelsController) close() error {
 // get returns the found value if any. If not found, we return nil.
 func (s *levelsController) get(key []byte, maxVs *y.ValueStruct, startLevel int) (
 	y.ValueStruct, error) {
+	if s.kv.IsClosed() {
+		return y.ValueStruct{}, ErrDBClosed
+	}
 	// It's important that we iterate the levels from 0 on upward. The reason is, if we iterated
 	// in opposite order, or in parallel (naively calling all the h.RLock() in some order) we could
 	// read level L's tables post-compaction and level L+1's tables pre-compaction. (If we do

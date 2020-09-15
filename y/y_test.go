@@ -26,15 +26,6 @@ func BenchmarkBuffer(b *testing.B) {
 		}
 	})
 
-	b.Run("calloc-buffer", func(b *testing.B) {
-		buf := NewBuffer(pageSize)
-		defer buf.Release()
-
-		for i := 0; i < b.N; i++ {
-			buf.Write(btw[:])
-		}
-	})
-
 	b.Run("page-buffer", func(b *testing.B) {
 		b.Run(fmt.Sprintf("page-size-%d", pageSize), func(b *testing.B) {
 			pageBuffer := NewPageBuffer(pageSize)
@@ -262,21 +253,4 @@ func TestPagebufferReader4(t *testing.T) {
 	n, err = reader.Read(readBuf)
 	require.Equal(t, err, io.EOF, "should return EOF")
 	require.Equal(t, n, 0)
-}
-
-func TestMulipleSignals(t *testing.T) {
-	closer := NewCloser(0)
-	require.NotPanics(t, func() { closer.Signal() })
-	// Should not panic.
-	require.NotPanics(t, func() { closer.Signal() })
-	require.NotPanics(t, func() { closer.SignalAndWait() })
-
-	// Attempt 2.
-	closer = NewCloser(1)
-	require.NotPanics(t, func() { closer.Done() })
-
-	require.NotPanics(t, func() { closer.SignalAndWait() })
-	// Should not panic.
-	require.NotPanics(t, func() { closer.SignalAndWait() })
-	require.NotPanics(t, func() { closer.Signal() })
 }

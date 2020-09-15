@@ -55,7 +55,7 @@ type oracle struct {
 	lastCleanupTs uint64
 
 	// closer is used to stop watermarks.
-	closer *y.Closer
+	closer *z.Closer
 }
 
 type committedTxn struct {
@@ -74,7 +74,7 @@ func newOracle(opt Options) *oracle {
 		// See https://golang.org/pkg/sync/atomic/#pkg-note-BUG.
 		readMark: &y.WaterMark{Name: "badger.PendingReads"},
 		txnMark:  &y.WaterMark{Name: "badger.TxnTimestamp"},
-		closer:   y.NewCloser(2),
+		closer:   z.NewCloser(2),
 	}
 	orc.readMark.Init(orc.closer)
 	orc.txnMark.Init(orc.closer)
@@ -788,6 +788,9 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 // returned by the function is relayed by the View method.
 // If View is used with managed transactions, it would assume a read timestamp of MaxUint64.
 func (db *DB) View(fn func(txn *Txn) error) error {
+	if db.IsClosed() {
+		return ErrDBClosed
+	}
 	var txn *Txn
 	if db.opt.managedTxns {
 		txn = db.NewTransactionAt(math.MaxUint64, false)
@@ -803,6 +806,9 @@ func (db *DB) View(fn func(txn *Txn) error) error {
 // for the user. Error returned by the function is relayed by the Update method.
 // Update cannot be used with managed transactions.
 func (db *DB) Update(fn func(txn *Txn) error) error {
+	if db.IsClosed() {
+		return ErrDBClosed
+	}
 	if db.opt.managedTxns {
 		panic("Update can only be used with managedDB=false.")
 	}

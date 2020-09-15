@@ -35,6 +35,7 @@ import (
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 var writeBenchCmd = &cobra.Command{
@@ -59,19 +60,15 @@ var (
 	sizeWritten    uint64
 	entriesWritten uint64
 
-	valueThreshold      int
-	numVersions         int
-	maxCacheSize        int64
-	keepBlockIdxInCache bool
-	keepBlocksInCache   bool
-	maxBfCacheSize      int64
-	vlogMaxEntries      uint32
-	loadBloomsOnOpen    bool
-	detectConflicts     bool
-	compression         bool
-	showDir             bool
-	ttlDuration         string
-	showKeysCount       bool
+	valueThreshold   int
+	numVersions      int
+	vlogMaxEntries   uint32
+	loadBloomsOnOpen bool
+	detectConflicts  bool
+	compression      bool
+	showDir          bool
+	ttlDuration      string
+	showKeysCount    bool
 
 	sstCount  uint32
 	vlogCount uint32
@@ -102,13 +99,10 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "Show Badger logs.")
 	writeBenchCmd.Flags().IntVarP(&valueThreshold, "value-th", "t", 1<<10, "Value threshold")
 	writeBenchCmd.Flags().IntVarP(&numVersions, "num-version", "n", 1, "Number of versions to keep")
-	writeBenchCmd.Flags().Int64VarP(&maxCacheSize, "max-cache", "C", 0, "Max size of cache in MB")
-	writeBenchCmd.Flags().BoolVarP(&keepBlockIdxInCache, "keep-bidx", "b", false,
-		"Keep block indices in cache")
-	writeBenchCmd.Flags().BoolVarP(&keepBlocksInCache, "keep-blocks", "B", false,
-		"Keep blocks in cache")
-	writeBenchCmd.Flags().Int64VarP(&maxBfCacheSize, "max-bf-cache", "c", 0,
-		"Maximum Bloom Filter Cache Size in MB")
+	writeBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache", 0,
+		"Size of block cache in MB")
+	writeBenchCmd.Flags().Int64Var(&indexCacheSize, "index-cache", 0,
+		"Size of index cache in MB.")
 	writeBenchCmd.Flags().Uint32Var(&vlogMaxEntries, "vlog-maxe", 1000000, "Value log Max Entries")
 	writeBenchCmd.Flags().StringVarP(&encryptionKey, "encryption-key", "e", "",
 		"If it is true, badger will encrypt all the data stored on the disk.")
@@ -249,10 +243,8 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithCompactL0OnClose(force).
 		WithValueThreshold(valueThreshold).
 		WithNumVersionsToKeep(numVersions).
-		WithMaxCacheSize(maxCacheSize << 20).
-		WithKeepBlockIndicesInCache(keepBlockIdxInCache).
-		WithKeepBlocksInCache(keepBlocksInCache).
-		WithMaxBfCacheSize(maxBfCacheSize << 20).
+		WithBlockCacheSize(blockCacheSize << 20).
+		WithIndexCacheSize(indexCacheSize << 20).
 		WithValueLogMaxEntries(vlogMaxEntries).
 		WithTableLoadingMode(mode).
 		WithEncryptionKey([]byte(encryptionKey)).
@@ -281,7 +273,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 
 	startTime = time.Now()
 	num := uint64(numKeys * mil)
-	c := y.NewCloser(4)
+	c := z.NewCloser(4)
 	go reportStats(c, db)
 	go dropAll(c, db)
 	go dropPrefix(c, db)
@@ -333,7 +325,7 @@ func showKeysStats(db *badger.DB) {
 		moveKeyCount, internalKeyCount)
 }
 
-func reportStats(c *y.Closer, db *badger.DB) {
+func reportStats(c *z.Closer, db *badger.DB) {
 	defer c.Done()
 
 	t := time.NewTicker(time.Second)
@@ -383,7 +375,7 @@ func reportStats(c *y.Closer, db *badger.DB) {
 	}
 }
 
-func runGC(c *y.Closer, db *badger.DB) {
+func runGC(c *z.Closer, db *badger.DB) {
 	defer c.Done()
 	period, err := time.ParseDuration(gcPeriod)
 	y.Check(err)
@@ -407,7 +399,7 @@ func runGC(c *y.Closer, db *badger.DB) {
 	}
 }
 
-func dropAll(c *y.Closer, db *badger.DB) {
+func dropAll(c *z.Closer, db *badger.DB) {
 	defer c.Done()
 	dropPeriod, err := time.ParseDuration(dropAllPeriod)
 	y.Check(err)
@@ -438,7 +430,7 @@ func dropAll(c *y.Closer, db *badger.DB) {
 	}
 }
 
-func dropPrefix(c *y.Closer, db *badger.DB) {
+func dropPrefix(c *z.Closer, db *badger.DB) {
 	defer c.Done()
 	dropPeriod, err := time.ParseDuration(dropPrefixPeriod)
 	y.Check(err)

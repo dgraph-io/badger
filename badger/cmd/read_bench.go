@@ -31,6 +31,7 @@ import (
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 var readBenchCmd = &cobra.Command{
@@ -46,10 +47,8 @@ var (
 	entriesRead uint64    // will store entries read till now
 	startTime   time.Time // start time of read benchmarking
 
-	sizeMaxCache      int64
-	keepBlockIdxCache bool
-	keepBlocksCache   bool
-	sizeMaxBfCache    int64
+	blockCacheSize int64
+	indexCacheSize int64
 
 	sampleSize  int
 	loadingMode string
@@ -75,13 +74,8 @@ func init() {
 			"Valid loading modes are fileio and mmap.")
 	readBenchCmd.Flags().BoolVar(
 		&fullScan, "full-scan", false, "If true, full db will be scanned using iterators.")
-	readBenchCmd.Flags().Int64VarP(&sizeMaxCache, "max-cache", "C", 0, "Max size of cache in MB")
-	readBenchCmd.Flags().BoolVarP(&keepBlockIdxCache, "keep-bidx", "b", false,
-		"Keep block indices in cache")
-	readBenchCmd.Flags().BoolVarP(&keepBlocksCache, "keep-blocks", "B", false,
-		"Keep blocks in cache")
-	readBenchCmd.Flags().Int64VarP(&sizeMaxBfCache, "max-bf-cache", "c", 0,
-		"Maximum Bloom Filter Cache Size in MB")
+	readBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache", 0, "Max size of block cache in MB")
+	readBenchCmd.Flags().Int64Var(&indexCacheSize, "index-cache", 0, "Max size of index cache in MB")
 }
 
 // Scan the whole database using the iterators
@@ -91,7 +85,7 @@ func fullScanDB(db *badger.DB) {
 
 	startTime = time.Now()
 	// Print the stats
-	c := y.NewCloser(0)
+	c := z.NewCloser(0)
 	c.AddRunning(1)
 	go printStats(c)
 
@@ -118,10 +112,8 @@ func readBench(cmd *cobra.Command, args []string) error {
 		WithReadOnly(readOnly).
 		WithTableLoadingMode(mode).
 		WithValueLogLoadingMode(mode).
-		WithMaxCacheSize(sizeMaxCache << 20).
-		WithKeepBlockIndicesInCache(keepBlockIdxCache).
-		WithKeepBlocksInCache(keepBlocksCache).
-		WithMaxBfCacheSize(sizeMaxBfCache << 20)
+		WithBlockCacheSize(blockCacheSize << 20).
+		WithIndexCacheSize(indexCacheSize << 20)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
 	db, err := badger.Open(opt)
 	if err != nil {
@@ -151,7 +143,7 @@ func readBench(cmd *cobra.Command, args []string) error {
 		fmt.Println("DB is empty, hence returning")
 		return nil
 	}
-	c := y.NewCloser(0)
+	c := z.NewCloser(0)
 	startTime = time.Now()
 	for i := 0; i < numGoroutines; i++ {
 		c.AddRunning(1)
@@ -168,7 +160,7 @@ func readBench(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func printStats(c *y.Closer) {
+func printStats(c *z.Closer) {
 	defer c.Done()
 
 	t := time.NewTicker(time.Second)
@@ -190,7 +182,7 @@ func printStats(c *y.Closer) {
 	}
 }
 
-func readKeys(db *badger.DB, c *y.Closer, keys [][]byte) {
+func readKeys(db *badger.DB, c *z.Closer, keys [][]byte) {
 	defer c.Done()
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	for {

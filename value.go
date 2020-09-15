@@ -41,6 +41,7 @@ import (
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
 )
@@ -824,7 +825,7 @@ type lfDiscardStats struct {
 	sync.RWMutex
 	m                 map[uint32]int64
 	flushChan         chan map[uint32]int64
-	closer            *y.Closer
+	closer            *z.Closer
 	updatesSinceFlush int
 }
 
@@ -1047,6 +1048,8 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 	// End offset is different from file size. So, we should truncate the file
 	// to that size.
 	if !vlog.opt.Truncate {
+		vlog.db.opt.Warningf("Truncate Needed. File %s size: %d Endoffset: %d",
+			lf.fd.Name(), fi.Size(), endOffset)
 		return ErrTruncateNeeded
 	}
 
@@ -1063,6 +1066,7 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 		return lf.bootstrap()
 	}
 
+	vlog.db.opt.Infof("Truncating vlog file %s to offset: %d", lf.fd.Name(), endOffset)
 	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
 		return errFile(err, lf.path, fmt.Sprintf(
 			"Truncation needed at offset %d. Can be done manually as well.", endOffset))
@@ -1085,7 +1089,7 @@ func (vlog *valueLog) init(db *DB) {
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 	vlog.lfDiscardStats = &lfDiscardStats{
 		m:         make(map[uint32]int64),
-		closer:    y.NewCloser(1),
+		closer:    z.NewCloser(1),
 		flushChan: make(chan map[uint32]int64, 16),
 	}
 }
@@ -1228,6 +1232,12 @@ func (lf *logFile) init() error {
 	return nil
 }
 
+func (vlog *valueLog) stopFlushDiscardStats() {
+	if vlog.lfDiscardStats != nil {
+		vlog.lfDiscardStats.closer.Signal()
+	}
+}
+
 func (vlog *valueLog) Close() error {
 	if vlog == nil || vlog.db == nil || vlog.db.opt.InMemory {
 		return nil
@@ -1245,6 +1255,9 @@ func (vlog *valueLog) Close() error {
 		}
 
 		maxFid := vlog.maxFid
+		// TODO(ibrahim) - Do we need the following truncations on non-windows
+		// platforms? We expand the file only on windows and the vlog.woffset()
+		// should point to end of file on all other platforms.
 		if !vlog.opt.ReadOnly && id == maxFid {
 			// truncate writable log file to correct offset.
 			if truncErr := f.fd.Truncate(
@@ -1822,7 +1835,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	return nil
 }
 
-func (vlog *valueLog) waitOnGC(lc *y.Closer) {
+func (vlog *valueLog) waitOnGC(lc *z.Closer) {
 	defer lc.Done()
 
 	<-lc.HasBeenClosed() // Wait for lc to be closed.

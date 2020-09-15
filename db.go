@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"expvar"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -36,6 +37,7 @@ import (
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto"
+	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 )
@@ -49,12 +51,12 @@ var (
 )
 
 type closers struct {
-	updateSize *y.Closer
-	compactors *y.Closer
-	memtable   *y.Closer
-	writes     *y.Closer
-	valueGC    *y.Closer
-	pub        *y.Closer
+	updateSize *z.Closer
+	compactors *z.Closer
+	memtable   *z.Closer
+	writes     *z.Closer
+	valueGC    *z.Closer
+	pub        *z.Closer
 }
 
 // DB provides the various functions required to interact with Badger.
@@ -84,13 +86,14 @@ type DB struct {
 	logRotates int32
 
 	blockWrites int32
+	isClosed    uint32
 
 	orc *oracle
 
 	pub        *publisher
 	registry   *KeyRegistry
 	blockCache *ristretto.Cache
-	bfCache    *ristretto.Cache
+	indexCache *ristretto.Cache
 }
 
 const (
@@ -210,12 +213,6 @@ func Open(opt Options) (db *DB, err error) {
 			maxValueThreshold)
 	}
 
-	// We need a cache if KeepBlocksInCache or KeepBlockIndices is set to true.
-	if (opt.KeepBlocksInCache || opt.KeepBlockIndicesInCache) && opt.MaxCacheSize <= 0 {
-		return nil, errors.New("Cannot use MaxCacheSize=0 with KeepBlocksInCache " +
-			"or KeepBlockIndicesInCache set.")
-	}
-
 	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
 	if int64(opt.ValueThreshold) > opt.maxBatchSize {
@@ -317,11 +314,11 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}()
 
-	if opt.MaxCacheSize > 0 {
+	if opt.BlockCacheSize > 0 {
 		config := ristretto.Config{
 			// Use 5% of cache memory for storing counters.
-			NumCounters: int64(float64(opt.MaxCacheSize) * 0.05 * 2),
-			MaxCost:     int64(float64(opt.MaxCacheSize) * 0.95),
+			NumCounters: int64(float64(opt.BlockCacheSize) * 0.05 * 2),
+			MaxCost:     int64(float64(opt.BlockCacheSize) * 0.95),
 			BufferItems: 64,
 			Metrics:     true,
 			OnExit:      table.BlockEvictHandler,
@@ -332,15 +329,15 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}
 
-	if opt.MaxBfCacheSize > 0 {
+	if opt.IndexCacheSize > 0 {
 		config := ristretto.Config{
 			// Use 5% of cache memory for storing counters.
-			NumCounters: int64(float64(opt.MaxBfCacheSize) * 0.05 * 2),
-			MaxCost:     int64(float64(opt.MaxBfCacheSize) * 0.95),
+			NumCounters: int64(float64(opt.IndexCacheSize) * 0.05 * 2),
+			MaxCost:     int64(float64(opt.IndexCacheSize) * 0.95),
 			BufferItems: 64,
 			Metrics:     true,
 		}
-		db.bfCache, err = ristretto.NewCache(&config)
+		db.indexCache, err = ristretto.NewCache(&config)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to create bf cache")
 		}
@@ -362,7 +359,7 @@ func Open(opt Options) (db *DB, err error) {
 		return db, err
 	}
 	db.calculateSize()
-	db.closers.updateSize = y.NewCloser(1)
+	db.closers.updateSize = z.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
 	db.mt = skl.NewSkiplist(arenaSize(opt))
 
@@ -375,10 +372,10 @@ func Open(opt Options) (db *DB, err error) {
 	db.vlog.init(db)
 
 	if !opt.ReadOnly {
-		db.closers.compactors = y.NewCloser(1)
+		db.closers.compactors = z.NewCloser(1)
 		db.lc.startCompact(db.closers.compactors)
 
-		db.closers.memtable = y.NewCloser(1)
+		db.closers.memtable = z.NewCloser(1)
 		go func() {
 			_ = db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
 		}()
@@ -386,7 +383,7 @@ func Open(opt Options) (db *DB, err error) {
 	vptr, version := db.getHead()
 	db.orc.nextTxnTs = version
 
-	replayCloser := y.NewCloser(1)
+	replayCloser := z.NewCloser(1)
 	go db.doWrites(replayCloser)
 
 	if err = db.vlog.open(db, vptr, db.replayFunction()); err != nil {
@@ -403,15 +400,15 @@ func Open(opt Options) (db *DB, err error) {
 	db.orc.readMark.Done(db.orc.nextTxnTs)
 	db.orc.incrementNextTs()
 
-	db.closers.writes = y.NewCloser(1)
+	db.closers.writes = z.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
 	if !db.opt.InMemory {
-		db.closers.valueGC = y.NewCloser(1)
+		db.closers.valueGC = z.NewCloser(1)
 		go db.vlog.waitOnGC(db.closers.valueGC)
 	}
 
-	db.closers.pub = y.NewCloser(1)
+	db.closers.pub = z.NewCloser(1)
 	go db.pub.listenForUpdates(db.closers.pub)
 
 	valueDirLockGuard = nil
@@ -475,7 +472,7 @@ func (db *DB) cleanup() {
 	db.stopCompactions()
 
 	db.blockCache.Close()
-	db.bfCache.Close()
+	db.indexCache.Close()
 	if db.closers.updateSize != nil {
 		db.closers.updateSize.Signal()
 	}
@@ -490,21 +487,24 @@ func (db *DB) cleanup() {
 	}
 
 	db.orc.Stop()
-	db.vlog.Close()
+
+	// Do not use vlog.Close() here. vlog.Close truncates the files. We don't
+	// want to truncate files unless the user has specified the truncate flag.
+	db.vlog.stopFlushDiscardStats()
 }
 
-// DataCacheMetrics returns the metrics for the underlying data cache.
-func (db *DB) DataCacheMetrics() *ristretto.Metrics {
+// BlockCacheMetrics returns the metrics for the underlying block cache.
+func (db *DB) BlockCacheMetrics() *ristretto.Metrics {
 	if db.blockCache != nil {
 		return db.blockCache.Metrics
 	}
 	return nil
 }
 
-// BfCacheMetrics returns the metrics for the underlying bloom filter cache.
-func (db *DB) BfCacheMetrics() *ristretto.Metrics {
-	if db.bfCache != nil {
-		return db.bfCache.Metrics
+// IndexCacheMetrics returns the metrics for the underlying index cache.
+func (db *DB) IndexCacheMetrics() *ristretto.Metrics {
+	if db.indexCache != nil {
+		return db.indexCache.Metrics
 	}
 	return nil
 }
@@ -517,6 +517,12 @@ func (db *DB) Close() error {
 		err = db.close()
 	})
 	return err
+}
+
+// IsClosed denotes if the badger DB is closed or not. A DB instance should not
+// be used after closing it.
+func (db *DB) IsClosed() bool {
+	return atomic.LoadUint32(&db.isClosed) == 1
 }
 
 func (db *DB) close() (err error) {
@@ -598,7 +604,9 @@ func (db *DB) close() (err error) {
 	db.closers.updateSize.SignalAndWait()
 	db.orc.Stop()
 	db.blockCache.Close()
-	db.bfCache.Close()
+	db.indexCache.Close()
+
+	atomic.StoreUint32(&db.isClosed, 1)
 
 	if db.opt.InMemory {
 		return
@@ -691,6 +699,9 @@ func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 // been moved, then for the corresponding movekey, we'll look through all the levels of the tree
 // to ensure that we pick the highest version of the movekey present.
 func (db *DB) get(key []byte) (y.ValueStruct, error) {
+	if db.IsClosed() {
+		return y.ValueStruct{}, ErrDBClosed
+	}
 	tables, decr := db.getMemTables() // Lock should be released.
 	defer decr()
 
@@ -871,7 +882,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	return req, nil
 }
 
-func (db *DB) doWrites(lc *y.Closer) {
+func (db *DB) doWrites(lc *z.Closer) {
 	defer lc.Done()
 	pendingCh := make(chan struct{}, 1)
 
@@ -1088,8 +1099,8 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	bopts := buildTableOptions(db.opt)
 	bopts.DataKey = dk
 	// Builder does not need cache but the same options are used for opening table.
-	bopts.Cache = db.blockCache
-	bopts.BfCache = db.bfCache
+	bopts.BlockCache = db.blockCache
+	bopts.IndexCache = db.indexCache
 	tableData := buildL0Table(ft, bopts)
 
 	fileID := db.lc.reserveFileID()
@@ -1132,7 +1143,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 
 // flushMemtable must keep running until we send it an empty flushTask. If there
 // are errors during handling the flush task, we'll retry indefinitely.
-func (db *DB) flushMemtable(lc *y.Closer) error {
+func (db *DB) flushMemtable(lc *z.Closer) error {
 	defer lc.Done()
 
 	for ft := range db.flushChan {
@@ -1218,7 +1229,7 @@ func (db *DB) calculateSize() {
 	y.VlogSize.Set(db.opt.ValueDir, newInt(vlogSize))
 }
 
-func (db *DB) updateSize(lc *y.Closer) {
+func (db *DB) updateSize(lc *z.Closer) {
 	defer lc.Done()
 	if db.opt.InMemory {
 		return
@@ -1477,7 +1488,7 @@ func (db *DB) stopCompactions() {
 func (db *DB) startCompactions() {
 	// Resume compactions.
 	if db.closers.compactors != nil {
-		db.closers.compactors = y.NewCloser(1)
+		db.closers.compactors = z.NewCloser(1)
 		db.lc.startCompact(db.closers.compactors)
 	}
 }
@@ -1486,7 +1497,7 @@ func (db *DB) startMemoryFlush() {
 	// Start memory fluhser.
 	if db.closers.memtable != nil {
 		db.flushChan = make(chan flushTask, db.opt.NumMemtables)
-		db.closers.memtable = y.NewCloser(1)
+		db.closers.memtable = z.NewCloser(1)
 		go func() {
 			_ = db.flushMemtable(db.closers.memtable)
 		}()
@@ -1577,7 +1588,7 @@ func (db *DB) blockWrite() error {
 }
 
 func (db *DB) unblockWrite() {
-	db.closers.writes = y.NewCloser(1)
+	db.closers.writes = z.NewCloser(1)
 	go db.doWrites(db.closers.writes)
 
 	// Resume writes.
@@ -1672,7 +1683,7 @@ func (db *DB) dropAll() (func(), error) {
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
 	db.blockCache.Clear()
-	db.bfCache.Clear()
+	db.indexCache.Clear()
 
 	return resume, nil
 }
@@ -1745,7 +1756,7 @@ func (db *DB) Subscribe(ctx context.Context, cb func(kv *KVList) error, prefixes
 		return ErrNilCallback
 	}
 
-	c := y.NewCloser(1)
+	c := z.NewCloser(1)
 	recvCh, id := db.pub.newSubscriber(c, prefixes...)
 	slurp := func(batch *pb.KVList) error {
 		for {
@@ -1809,11 +1820,42 @@ func createDirs(opt Options) error {
 				return errors.Errorf("Cannot find directory %q for read-only open", path)
 			}
 			// Try to create the directory
-			err = os.Mkdir(path, 0700)
+			err = os.MkdirAll(path, 0700)
 			if err != nil {
 				return y.Wrapf(err, "Error Creating Dir: %q", path)
 			}
 		}
+	}
+	return nil
+}
+
+// Stream the contents of this DB to a new DB with options outOptions that will be
+// created in outDir.
+func (db *DB) StreamDB(outOptions Options) error {
+	outDir := outOptions.Dir
+
+	// Open output DB.
+	outDB, err := OpenManaged(outOptions)
+	if err != nil {
+		return errors.Wrapf(err, "cannot open out DB at %s", outDir)
+	}
+	defer outDB.Close()
+	writer := outDB.NewStreamWriter()
+	if err := writer.Prepare(); err != nil {
+		errors.Wrapf(err, "cannot create stream writer in out DB at %s", outDir)
+	}
+
+	// Stream contents of DB to the output DB.
+	stream := db.NewStreamAt(math.MaxUint64)
+	stream.LogPrefix = fmt.Sprintf("Streaming DB to new DB at %s", outDir)
+	stream.Send = func(kvs *pb.KVList) error {
+		return writer.Write(kvs)
+	}
+	if err := stream.Orchestrate(context.Background()); err != nil {
+		return errors.Wrapf(err, "cannot stream DB to out DB at %s", outDir)
+	}
+	if err := writer.Flush(); err != nil {
+		return errors.Wrapf(err, "cannot flush writer")
 	}
 	return nil
 }
