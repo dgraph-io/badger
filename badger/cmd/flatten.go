@@ -17,6 +17,9 @@
 package cmd
 
 import (
+	"fmt"
+	"math"
+
 	"github.com/dgraph-io/badger/v2"
 	"github.com/spf13/cobra"
 )
@@ -37,13 +40,23 @@ func init() {
 	flattenCmd.Flags().IntVarP(&numWorkers, "num-workers", "w", 1,
 		"Number of concurrent compactors to run. More compactors would use more"+
 			" server resources to potentially achieve faster compactions.")
+	flattenCmd.Flags().IntVarP(&numVersions, "num_versions", "", 1,
+		"Option to configure the maximum number of versions per key. "+
+			"Values <= 0 will be considered to have the max number of versions.")
 }
 
 func flatten(cmd *cobra.Command, args []string) error {
-	db, err := badger.Open(badger.DefaultOptions(sstDir).
+	if numVersions <= 0 {
+		// Keep all versions.
+		numVersions = math.MaxInt32
+	}
+	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithTruncate(truncate).
-		WithNumCompactors(0))
+		WithNumVersionsToKeep(numVersions).
+		WithNumCompactors(0)
+	fmt.Printf("Opening badger with options = %+v\n", opt)
+	db, err := badger.Open(opt)
 	if err != nil {
 		return err
 	}
