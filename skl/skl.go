@@ -102,20 +102,21 @@ func (s *Skiplist) DecrRef() {
 	s.head = nil
 }
 
-func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
+func newNode(arena *Arena, key []byte, uid uint64, height int) *node {
 	// The base level is already allocated in the node struct.
 	offset := arena.putNode(height)
 	node := arena.getNode(offset)
 	node.keyOffset = arena.putKey(key)
 	node.keySize = uint16(len(key))
 	node.height = uint16(height)
-	node.value = encodeValue(arena.putVal(v), v.EncodedSize())
+	// node.value = encodeValue(arena.putVal(v), v.EncodedSize())
+	node.value = uid
 	return node
 }
 
-func encodeValue(valOffset uint32, valSize uint32) uint64 {
-	return uint64(valSize)<<32 | uint64(valOffset)
-}
+// func encodeValue(valOffset uint32, valSize uint32) uint64 {
+// return uint64(valSize)<<32 | uint64(valOffset)
+// }
 
 func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 	valOffset = uint32(value)
@@ -123,10 +124,18 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 	return
 }
 
+func zeroOut(data []byte, offset int) {
+	data = data[offset:]
+	data[0] = 0x00
+	for bp := 1; bp < len(data); bp *= 2 {
+		copy(data[bp:], data[:bp])
+	}
+}
+
 // NewSkiplist makes a new empty skiplist, with a given arena size
 func NewSkiplist(arenaSize int64) *Skiplist {
 	arena := newArena(arenaSize)
-	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
+	head := newNode(arena, nil, 0, maxHeight)
 	return &Skiplist{
 		height: 1,
 		head:   head,
@@ -135,20 +144,19 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 	}
 }
 
-func (s *node) getValueOffset() (uint32, uint32) {
-	value := atomic.LoadUint64(&s.value)
-	return decodeValue(value)
+func (s *node) getValue() uint64 {
+	return atomic.LoadUint64(&s.value)
 }
 
 func (s *node) key(arena *Arena) []byte {
 	return arena.getKey(s.keyOffset, s.keySize)
 }
 
-func (s *node) setValue(arena *Arena, v y.ValueStruct) {
-	valOffset := arena.putVal(v)
-	value := encodeValue(valOffset, v.EncodedSize())
-	atomic.StoreUint64(&s.value, value)
-}
+// func (s *node) setValue(arena *Arena, uid uint64) {
+// valOffset := arena.putVal(v)
+// 	value := encodeValue(valOffset, v.EncodedSize())
+// 	atomic.StoreUint64(&s.value, value)
+// }
 
 func (s *node) getNextOffset(h int) uint32 {
 	return atomic.LoadUint32(&s.tower[h])
@@ -281,7 +289,7 @@ func (s *Skiplist) getHeight() int32 {
 }
 
 // Put inserts the key-value pair.
-func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
+func (s *Skiplist) Put(key []byte, uid uint64) {
 	// Since we allow overwrite, we may not need to create a new node. We might not even need to
 	// increase the height. Let's defer these actions.
 
@@ -294,14 +302,15 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 		// Use higher level to speed up for current level.
 		prev[i], next[i] = s.findSpliceForLevel(key, prev[i+1], i)
 		if prev[i] == next[i] {
-			prev[i].setValue(s.arena, v)
+			// prev[i].setValue(s.arena, uid)
+			prev[i].value = uid
 			return
 		}
 	}
 
 	// We do need to create a new node.
 	height := s.randomHeight()
-	x := newNode(s.arena, key, v, height)
+	x := newNode(s.arena, key, uid, height)
 
 	// Try to increase s.height via CAS.
 	listHeight = s.getHeight()
@@ -338,7 +347,8 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 			prev[i], next[i] = s.findSpliceForLevel(key, prev[i], i)
 			if prev[i] == next[i] {
 				y.AssertTruef(i == 0, "Equality can happen only on base level: %d", i)
-				prev[i].setValue(s.arena, v)
+				prev[i].value = uid
+				// prev[i].setValue(s.arena, uid)
 				return
 			}
 		}
@@ -373,21 +383,22 @@ func (s *Skiplist) findLast() *node {
 
 // Get gets the value associated with the key. It returns a valid value if it finds equal or earlier
 // version of the same key.
-func (s *Skiplist) Get(key []byte) y.ValueStruct {
+func (s *Skiplist) Get(key []byte) uint64 {
 	n, _ := s.findNear(key, false, true) // findGreaterOrEqual.
 	if n == nil {
-		return y.ValueStruct{}
+		return 0
 	}
 
 	nextKey := s.arena.getKey(n.keyOffset, n.keySize)
 	if !y.SameKey(key, nextKey) {
-		return y.ValueStruct{}
+		return 0
 	}
 
-	valOffset, valSize := n.getValueOffset()
-	vs := s.arena.getVal(valOffset, valSize)
-	vs.Version = y.ParseTs(nextKey)
-	return vs
+	return n.getValue()
+	// valOffset, valSize := n.getValue()
+	// vs := s.arena.getVal(valOffset, valSize)
+	// vs.Version = y.ParseTs(nextKey)
+	// return vs
 }
 
 // NewIterator returns a skiplist iterator.  You have to Close() the iterator.
@@ -422,9 +433,10 @@ func (s *Iterator) Key() []byte {
 }
 
 // Value returns value.
-func (s *Iterator) Value() y.ValueStruct {
-	valOffset, valSize := s.n.getValueOffset()
-	return s.list.arena.getVal(valOffset, valSize)
+func (s *Iterator) Value() uint64 {
+	return s.n.getValue()
+	// valOffset, valSize := s.n.getValue()
+	// return s.list.arena.getVal(valOffset, valSize)
 }
 
 // Next advances to the next position.
@@ -508,7 +520,7 @@ func (s *UniIterator) Seek(key []byte) {
 func (s *UniIterator) Key() []byte { return s.iter.Key() }
 
 // Value implements y.Interface
-func (s *UniIterator) Value() y.ValueStruct { return s.iter.Value() }
+func (s *UniIterator) Value() uint64 { return s.iter.Value() }
 
 // Valid implements y.Interface
 func (s *UniIterator) Valid() bool { return s.iter.Valid() }

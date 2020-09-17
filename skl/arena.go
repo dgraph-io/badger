@@ -17,6 +17,7 @@
 package skl
 
 import (
+	"io/ioutil"
 	"sync/atomic"
 	"unsafe"
 
@@ -41,11 +42,20 @@ type Arena struct {
 
 // newArena returns a new arena.
 func newArena(n int64) *Arena {
+	fd, err := ioutil.TempFile("", "arena")
+	y.Check(err)
+	fd.Truncate(n)
+
+	// mtype := unix.PROT_READ | unix.PROT_WRITE
+	// data, err := unix.Mmap(-1, 0, int(sz), mtype, unix.MAP_SHARED|unix.MAP_ANONYMOUS)
+	data, err := y.Mmap(fd, true, n)
+	y.Check(err)
+	zeroOut(data, 0)
 	// Don't store data at position 0 in order to reserve offset=0 as a kind
 	// of nil pointer.
 	out := &Arena{
 		n:   1,
-		buf: make([]byte, n),
+		buf: data,
 	}
 	return out
 }
@@ -77,20 +87,21 @@ func (s *Arena) putNode(height int) uint32 {
 	return m
 }
 
-// Put will *copy* val into arena. To make better use of this, reuse your input
-// val buffer. Returns an offset into buf. User is responsible for remembering
-// size of val. We could also store this size inside arena but the encoding and
-// decoding will incur some overhead.
-func (s *Arena) putVal(v y.ValueStruct) uint32 {
-	l := uint32(v.EncodedSize())
-	n := atomic.AddUint32(&s.n, l)
-	y.AssertTruef(int(n) <= len(s.buf),
-		"Arena too small, toWrite:%d newTotal:%d limit:%d",
-		l, n, len(s.buf))
-	m := n - l
-	v.Encode(s.buf[m:])
-	return m
-}
+// // Put will *copy* val into arena. To make better use of this, reuse your input
+// // val buffer. Returns an offset into buf. User is responsible for remembering
+// // size of val. We could also store this size inside arena but the encoding and
+// // decoding will incur some overhead.
+// func (s *Arena) putVal(uid uint64) uint32 {
+// 	l := uint32(8) // uint64 is 8 bytes.
+// 	n := atomic.AddUint32(&s.n, l)
+// 	y.AssertTruef(int(n) <= len(s.buf),
+// 		"Arena too small, toWrite:%d newTotal:%d limit:%d",
+// 		l, n, len(s.buf))
+// 	m := n - l
+// 	binary.BigEndian.PutUint64(s.buf[m:], uid)
+// 	// v.Encode(s.buf[m:])
+// 	return m
+// }
 
 func (s *Arena) putKey(key []byte) uint32 {
 	l := uint32(len(key))
