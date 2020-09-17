@@ -33,28 +33,61 @@ Key differences:
 package skl
 
 import (
-	"bytes"
+	"math"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 )
 
-// SkiplistMmap maps keys to values (in memory)
-type SkiplistMmap struct {
+const (
+	maxHeight      = 20
+	heightIncrease = math.MaxUint32 / 3
+)
+
+// MaxNodeSize is the memory footprint of a node of maximum height.
+const MaxNodeSize = int(unsafe.Sizeof(node{}))
+
+type node struct {
+	// Multiple parts of the value are encoded as a single uint64 so that it
+	// can be atomically loaded and stored:
+	//   value offset: uint32 (bits 0-31)
+	//   value size  : uint16 (bits 32-63)
+	value uint64
+
+	// A byte slice is 24 bytes. We are trying to save space here.
+	keyOffset uint32 // Immutable. No need to lock to access key.
+	keySize   uint16 // Immutable. No need to lock to access key.
+
+	// Height of the tower.
+	height uint16
+
+	// Most nodes do not need to use the full height of the tower, since the
+	// probability of each successive level decreases exponentially. Because
+	// these elements are never accessed, they do not need to be allocated.
+	// Therefore, when a node is allocated in the arena, its memory footprint
+	// is deliberately truncated to not include unneeded tower elements.
+	//
+	// All accesses to elements should use CAS operations, with no need to lock.
+	tower [maxHeight]uint32
+}
+
+// Skiplist maps keys to values (in memory)
+type Skiplist struct {
 	height int32 // Current height. 1 <= height <= kMaxHeight. CAS.
 	head   *node
 	ref    int32
-	arena  *ArenaMmap
+	arena  *Arena
 }
 
 // IncrRef increases the refcount
-func (s *SkiplistMmap) IncrRef() {
+func (s *Skiplist) IncrRef() {
 	atomic.AddInt32(&s.ref, 1)
 }
 
 // DecrRef decrements the refcount, deallocating the Skiplist when done using it
-func (s *SkiplistMmap) DecrRef() {
+func (s *Skiplist) DecrRef() {
 	newRef := atomic.AddInt32(&s.ref, -1)
 	if newRef > 0 {
 		return
@@ -69,31 +102,32 @@ func (s *SkiplistMmap) DecrRef() {
 	s.head = nil
 }
 
-func newNodeMmap(arena *ArenaMmap, key string, uid uint64, height int) *node {
+func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 	// The base level is already allocated in the node struct.
 	offset := arena.putNode(height)
 	node := arena.getNode(offset)
 	node.keyOffset = arena.putKey(key)
 	node.keySize = uint16(len(key))
 	node.height = uint16(height)
-	// node.value = encodeValue(arena.putVal(v), v.EncodedSize())
-	node.value = uid
+	node.value = encodeValue(arena.putVal(v), v.EncodedSize())
 	return node
 }
 
-func zeroOut(data []byte, offset int) {
-	data = data[offset:]
-	data[0] = 0x00
-	for bp := 1; bp < len(data); bp *= 2 {
-		copy(data[bp:], data[:bp])
-	}
+func encodeValue(valOffset uint32, valSize uint32) uint64 {
+	return uint64(valSize)<<32 | uint64(valOffset)
+}
+
+func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
+	valOffset = uint32(value)
+	valSize = uint32(value >> 32)
+	return
 }
 
 // NewSkiplist makes a new empty skiplist, with a given arena size
-func NewSkiplistMmap(arenaSize int64) *SkiplistMmap {
-	arena := newArenaMmap(arenaSize)
-	head := newNodeMmap(arena, "", 0, maxHeight)
-	return &SkiplistMmap{
+func NewSkiplist(arenaSize int64) *Skiplist {
+	arena := newArena(arenaSize)
+	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
+	return &Skiplist{
 		height: 1,
 		head:   head,
 		arena:  arena,
@@ -101,15 +135,37 @@ func NewSkiplistMmap(arenaSize int64) *SkiplistMmap {
 	}
 }
 
-func (s *node) keyMmap(arena *ArenaMmap) []byte {
+func (s *node) getValueOffset() (uint32, uint32) {
+	value := atomic.LoadUint64(&s.value)
+	return decodeValue(value)
+}
+
+func (s *node) key(arena *Arena) []byte {
 	return arena.getKey(s.keyOffset, s.keySize)
 }
 
-func (s *node) getValue() uint64 {
-	return atomic.LoadUint64(&s.value)
+func (s *node) setValue(arena *Arena, v y.ValueStruct) {
+	valOffset := arena.putVal(v)
+	value := encodeValue(valOffset, v.EncodedSize())
+	atomic.StoreUint64(&s.value, value)
 }
 
-func (s *SkiplistMmap) randomHeight() int {
+func (s *node) getNextOffset(h int) uint32 {
+	return atomic.LoadUint32(&s.tower[h])
+}
+
+func (s *node) casNextOffset(h int, old, val uint32) bool {
+	return atomic.CompareAndSwapUint32(&s.tower[h], old, val)
+}
+
+// Returns true if key is strictly > n.key.
+// If n is nil, this is an "end" marker and we return false.
+//func (s *Skiplist) keyIsAfterNode(key []byte, n *node) bool {
+//	y.AssertTrue(n != s.head)
+//	return n != nil && y.CompareKeys(key, n.key) > 0
+//}
+
+func (s *Skiplist) randomHeight() int {
 	h := 1
 	for h < maxHeight && z.FastRand() <= heightIncrease {
 		h++
@@ -117,7 +173,7 @@ func (s *SkiplistMmap) randomHeight() int {
 	return h
 }
 
-func (s *SkiplistMmap) getNext(nd *node, height int) *node {
+func (s *Skiplist) getNext(nd *node, height int) *node {
 	return s.arena.getNode(nd.getNextOffset(height))
 }
 
@@ -127,7 +183,7 @@ func (s *SkiplistMmap) getNext(nd *node, height int) *node {
 // If less=false, it finds leftmost node such that node.key > key (if allowEqual=false) or
 // node.key >= key (if allowEqual=true).
 // Returns the node found. The bool returned is true if the node has key equal to given key.
-func (s *SkiplistMmap) findNear(key string, less bool, allowEqual bool) (*node, bool) {
+func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool) {
 	x := s.head
 	level := int(s.getHeight() - 1)
 	for {
@@ -151,8 +207,8 @@ func (s *SkiplistMmap) findNear(key string, less bool, allowEqual bool) (*node, 
 			return x, false
 		}
 
-		nextKey := next.keyMmap(s.arena)
-		cmp := bytes.Compare([]byte(key), nextKey)
+		nextKey := next.key(s.arena)
+		cmp := y.CompareKeys(key, nextKey)
 		if cmp > 0 {
 			// x.key < next.key < key. We can continue to move right.
 			x = next
@@ -199,15 +255,15 @@ func (s *SkiplistMmap) findNear(key string, less bool, allowEqual bool) (*node, 
 // The input "before" tells us where to start looking.
 // If we found a node with the same key, then we return outBefore = outAfter.
 // Otherwise, outBefore.key < key < outAfter.key.
-func (s *SkiplistMmap) findSpliceForLevel(key string, before *node, level int) (*node, *node) {
+func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*node, *node) {
 	for {
 		// Assume before.key < key.
 		next := s.getNext(before, level)
 		if next == nil {
 			return before, next
 		}
-		nextKey := next.keyMmap(s.arena)
-		cmp := bytes.Compare([]byte(key), nextKey)
+		nextKey := next.key(s.arena)
+		cmp := y.CompareKeys(key, nextKey)
 		if cmp == 0 {
 			// Equality case.
 			return next, next
@@ -220,12 +276,12 @@ func (s *SkiplistMmap) findSpliceForLevel(key string, before *node, level int) (
 	}
 }
 
-func (s *SkiplistMmap) getHeight() int32 {
+func (s *Skiplist) getHeight() int32 {
 	return atomic.LoadInt32(&s.height)
 }
 
 // Put inserts the key-value pair.
-func (s *SkiplistMmap) Put(key string, uid uint64) {
+func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	// Since we allow overwrite, we may not need to create a new node. We might not even need to
 	// increase the height. Let's defer these actions.
 
@@ -238,15 +294,14 @@ func (s *SkiplistMmap) Put(key string, uid uint64) {
 		// Use higher level to speed up for current level.
 		prev[i], next[i] = s.findSpliceForLevel(key, prev[i+1], i)
 		if prev[i] == next[i] {
-			// prev[i].setValue(s.arena, uid)
-			prev[i].value = uid
+			prev[i].setValue(s.arena, v)
 			return
 		}
 	}
 
 	// We do need to create a new node.
 	height := s.randomHeight()
-	x := newNodeMmap(s.arena, key, uid, height)
+	x := newNode(s.arena, key, v, height)
 
 	// Try to increase s.height via CAS.
 	listHeight = s.getHeight()
@@ -283,8 +338,7 @@ func (s *SkiplistMmap) Put(key string, uid uint64) {
 			prev[i], next[i] = s.findSpliceForLevel(key, prev[i], i)
 			if prev[i] == next[i] {
 				y.AssertTruef(i == 0, "Equality can happen only on base level: %d", i)
-				prev[i].value = uid
-				// prev[i].setValue(s.arena, uid)
+				prev[i].setValue(s.arena, v)
 				return
 			}
 		}
@@ -292,13 +346,13 @@ func (s *SkiplistMmap) Put(key string, uid uint64) {
 }
 
 // Empty returns if the Skiplist is empty.
-func (s *SkiplistMmap) Empty() bool {
+func (s *Skiplist) Empty() bool {
 	return s.findLast() == nil
 }
 
 // findLast returns the last element. If head (empty list), we return nil. All the find functions
 // will NEVER return the head nodes.
-func (s *SkiplistMmap) findLast() *node {
+func (s *Skiplist) findLast() *node {
 	n := s.head
 	level := int(s.getHeight()) - 1
 	for {
@@ -319,114 +373,112 @@ func (s *SkiplistMmap) findLast() *node {
 
 // Get gets the value associated with the key. It returns a valid value if it finds equal or earlier
 // version of the same key.
-func (s *SkiplistMmap) Get(key string) uint64 {
+func (s *Skiplist) Get(key []byte) y.ValueStruct {
 	n, _ := s.findNear(key, false, true) // findGreaterOrEqual.
 	if n == nil {
-		return 0
+		return y.ValueStruct{}
 	}
 
 	nextKey := s.arena.getKey(n.keyOffset, n.keySize)
-	if !bytes.Equal([]byte(key), nextKey) {
-		return 0
+	if !y.SameKey(key, nextKey) {
+		return y.ValueStruct{}
 	}
 
-	return n.getValue()
-	// valOffset, valSize := n.getValue()
-	// vs := s.arena.getVal(valOffset, valSize)
-	// vs.Version = y.ParseTs(nextKey)
-	// return vs
+	valOffset, valSize := n.getValueOffset()
+	vs := s.arena.getVal(valOffset, valSize)
+	vs.Version = y.ParseTs(nextKey)
+	return vs
 }
 
 // NewIterator returns a skiplist iterator.  You have to Close() the iterator.
-func (s *SkiplistMmap) NewIterator() *IteratorMmap {
+func (s *Skiplist) NewIterator() *Iterator {
 	s.IncrRef()
-	return &IteratorMmap{list: s}
+	return &Iterator{list: s}
 }
 
 // MemSize returns the size of the Skiplist in terms of how much memory is used within its internal
 // arena.
-func (s *SkiplistMmap) MemSize() int64 { return s.arena.size() }
+func (s *Skiplist) MemSize() int64 { return s.arena.size() }
 
-// IteratorMmap is an iterator over skiplist object. For new objects, you just
-// need to initialize IteratorMmap.list.
-type IteratorMmap struct {
-	list *SkiplistMmap
+// Iterator is an iterator over skiplist object. For new objects, you just
+// need to initialize Iterator.list.
+type Iterator struct {
+	list *Skiplist
 	n    *node
 }
 
 // Close frees the resources held by the iterator
-func (s *IteratorMmap) Close() error {
+func (s *Iterator) Close() error {
 	s.list.DecrRef()
 	return nil
 }
 
 // Valid returns true iff the iterator is positioned at a valid node.
-func (s *IteratorMmap) Valid() bool { return s.n != nil }
+func (s *Iterator) Valid() bool { return s.n != nil }
 
 // Key returns the key at the current position.
-func (s *IteratorMmap) Key() string {
-	return string(s.list.arena.getKey(s.n.keyOffset, s.n.keySize))
+func (s *Iterator) Key() []byte {
+	return s.list.arena.getKey(s.n.keyOffset, s.n.keySize)
 }
 
 // Value returns value.
-func (s *IteratorMmap) Value() uint64 {
-	return s.n.getValue()
-	// valOffset, valSize := s.n.getValue()
-	// return s.list.arena.getVal(valOffset, valSize)
+func (s *Iterator) Value() y.ValueStruct {
+	valOffset, valSize := s.n.getValueOffset()
+	return s.list.arena.getVal(valOffset, valSize)
 }
 
 // Next advances to the next position.
-func (s *IteratorMmap) Next() {
+func (s *Iterator) Next() {
 	y.AssertTrue(s.Valid())
 	s.n = s.list.getNext(s.n, 0)
 }
 
 // Prev advances to the previous position.
-func (s *IteratorMmap) Prev() {
+func (s *Iterator) Prev() {
 	y.AssertTrue(s.Valid())
 	s.n, _ = s.list.findNear(s.Key(), true, false) // find <. No equality allowed.
 }
 
 // Seek advances to the first entry with a key >= target.
-func (s *IteratorMmap) Seek(target string) {
+func (s *Iterator) Seek(target []byte) {
 	s.n, _ = s.list.findNear(target, false, true) // find >=.
 }
 
 // SeekForPrev finds an entry with key <= target.
-func (s *IteratorMmap) SeekForPrev(target string) {
+func (s *Iterator) SeekForPrev(target []byte) {
 	s.n, _ = s.list.findNear(target, true, true) // find <=.
 }
 
 // SeekToFirst seeks position at the first entry in list.
 // Final state of iterator is Valid() iff list is not empty.
-func (s *IteratorMmap) SeekToFirst() {
+func (s *Iterator) SeekToFirst() {
 	s.n = s.list.getNext(s.list.head, 0)
 }
 
 // SeekToLast seeks position at the last entry in list.
 // Final state of iterator is Valid() iff list is not empty.
-func (s *IteratorMmap) SeekToLast() {
+func (s *Iterator) SeekToLast() {
 	s.n = s.list.findLast()
 }
 
-// UniIteratorMmap is a unidirectional memtable iterator. It is a thin wrapper around
+// UniIterator is a unidirectional memtable iterator. It is a thin wrapper around
 // Iterator. We like to keep Iterator as before, because it is more powerful and
 // we might support bidirectional iterators in the future.
-type UniIteratorMmap struct {
-	iter     *IteratorMmap
+type UniIterator struct {
+	iter     *Iterator
 	reversed bool
 }
 
 // NewUniIterator returns a UniIterator.
-func (s *SkiplistMmap) NewUniIterator(reversed bool) *UniIteratorMmap {
-	return &UniIteratorMmap{
+func (s *Skiplist) NewUniIterator(reversed bool) *UniIterator {
+	return &UniIterator{
 		iter:     s.NewIterator(),
 		reversed: reversed,
 	}
 }
 
 // Next implements y.Interface
-func (s *UniIteratorMmap) Next() {
+func (s *UniIterator) Next() {
 	if !s.reversed {
 		s.iter.Next()
 	} else {
@@ -435,7 +487,7 @@ func (s *UniIteratorMmap) Next() {
 }
 
 // Rewind implements y.Interface
-func (s *UniIteratorMmap) Rewind() {
+func (s *UniIterator) Rewind() {
 	if !s.reversed {
 		s.iter.SeekToFirst()
 	} else {
@@ -444,7 +496,7 @@ func (s *UniIteratorMmap) Rewind() {
 }
 
 // Seek implements y.Interface
-func (s *UniIteratorMmap) Seek(key string) {
+func (s *UniIterator) Seek(key []byte) {
 	if !s.reversed {
 		s.iter.Seek(key)
 	} else {
@@ -453,13 +505,13 @@ func (s *UniIteratorMmap) Seek(key string) {
 }
 
 // Key implements y.Interface
-func (s *UniIteratorMmap) Key() []byte { return []byte(s.iter.Key()) }
+func (s *UniIterator) Key() []byte { return s.iter.Key() }
 
 // Value implements y.Interface
-func (s *UniIteratorMmap) Value() uint64 { return s.iter.Value() }
+func (s *UniIterator) Value() y.ValueStruct { return s.iter.Value() }
 
 // Valid implements y.Interface
-func (s *UniIteratorMmap) Valid() bool { return s.iter.Valid() }
+func (s *UniIterator) Valid() bool { return s.iter.Valid() }
 
 // Close implements y.Interface (and frees up the iter's resources)
-func (s *UniIteratorMmap) Close() error { return s.iter.Close() }
+func (s *UniIterator) Close() error { return s.iter.Close() }

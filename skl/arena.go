@@ -17,50 +17,50 @@
 package skl
 
 import (
-	"io/ioutil"
 	"sync/atomic"
 	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/y"
 )
 
-// ArenaMmap should be lock-free.
-type ArenaMmap struct {
+const (
+	offsetSize = int(unsafe.Sizeof(uint32(0)))
+
+	// Always align nodes on 64-bit boundaries, even on 32-bit architectures,
+	// so that the node.value field is 64-bit aligned. This is necessary because
+	// node.getValueOffset uses atomic.LoadUint64, which expects its input
+	// pointer to be 64-bit aligned.
+	nodeAlign = int(unsafe.Sizeof(uint64(0))) - 1
+)
+
+// Arena should be lock-free.
+type Arena struct {
 	n   uint32
 	buf []byte
 }
 
-// newArenaMmap returns a new arena.
-func newArenaMmap(n int64) *ArenaMmap {
-	fd, err := ioutil.TempFile("", "arena")
-	y.Check(err)
-	fd.Truncate(n)
-
-	// mtype := unix.PROT_READ | unix.PROT_WRITE
-	// data, err := unix.Mmap(-1, 0, int(sz), mtype, unix.MAP_SHARED|unix.MAP_ANONYMOUS)
-	data, err := y.Mmap(fd, true, n)
-	y.Check(err)
-	zeroOut(data, 0)
+// newArena returns a new arena.
+func newArena(n int64) *Arena {
 	// Don't store data at position 0 in order to reserve offset=0 as a kind
 	// of nil pointer.
-	out := &ArenaMmap{
+	out := &Arena{
 		n:   1,
-		buf: data,
+		buf: make([]byte, n),
 	}
 	return out
 }
 
-func (s *ArenaMmap) size() int64 {
+func (s *Arena) size() int64 {
 	return int64(atomic.LoadUint32(&s.n))
 }
 
-func (s *ArenaMmap) reset() {
+func (s *Arena) reset() {
 	atomic.StoreUint32(&s.n, 0)
 }
 
 // putNode allocates a node in the arena. The node is aligned on a pointer-sized
 // boundary. The arena offset of the node is returned.
-func (s *ArenaMmap) putNode(height int) uint32 {
+func (s *Arena) putNode(height int) uint32 {
 	// Compute the amount of the tower that will never be used, since the height
 	// is less than maxHeight.
 	unusedSize := (maxHeight - height) * offsetSize
@@ -77,23 +77,22 @@ func (s *ArenaMmap) putNode(height int) uint32 {
 	return m
 }
 
-// // Put will *copy* val into arena. To make better use of this, reuse your input
-// // val buffer. Returns an offset into buf. User is responsible for remembering
-// // size of val. We could also store this size inside arena but the encoding and
-// // decoding will incur some overhead.
-// func (s *Arena) putVal(uid uint64) uint32 {
-// 	l := uint32(8) // uint64 is 8 bytes.
-// 	n := atomic.AddUint32(&s.n, l)
-// 	y.AssertTruef(int(n) <= len(s.buf),
-// 		"Arena too small, toWrite:%d newTotal:%d limit:%d",
-// 		l, n, len(s.buf))
-// 	m := n - l
-// 	binary.BigEndian.PutUint64(s.buf[m:], uid)
-// 	// v.Encode(s.buf[m:])
-// 	return m
-// }
+// Put will *copy* val into arena. To make better use of this, reuse your input
+// val buffer. Returns an offset into buf. User is responsible for remembering
+// size of val. We could also store this size inside arena but the encoding and
+// decoding will incur some overhead.
+func (s *Arena) putVal(v y.ValueStruct) uint32 {
+	l := uint32(v.EncodedSize())
+	n := atomic.AddUint32(&s.n, l)
+	y.AssertTruef(int(n) <= len(s.buf),
+		"Arena too small, toWrite:%d newTotal:%d limit:%d",
+		l, n, len(s.buf))
+	m := n - l
+	v.Encode(s.buf[m:])
+	return m
+}
 
-func (s *ArenaMmap) putKey(key string) uint32 {
+func (s *Arena) putKey(key []byte) uint32 {
 	l := uint32(len(key))
 	n := atomic.AddUint32(&s.n, l)
 	y.AssertTruef(int(n) <= len(s.buf),
@@ -106,7 +105,7 @@ func (s *ArenaMmap) putKey(key string) uint32 {
 
 // getNode returns a pointer to the node located at offset. If the offset is
 // zero, then the nil node pointer is returned.
-func (s *ArenaMmap) getNode(offset uint32) *node {
+func (s *Arena) getNode(offset uint32) *node {
 	if offset == 0 {
 		return nil
 	}
@@ -115,20 +114,20 @@ func (s *ArenaMmap) getNode(offset uint32) *node {
 }
 
 // getKey returns byte slice at offset.
-func (s *ArenaMmap) getKey(offset uint32, size uint16) []byte {
+func (s *Arena) getKey(offset uint32, size uint16) []byte {
 	return s.buf[offset : offset+uint32(size)]
 }
 
 // getVal returns byte slice at offset. The given size should be just the value
 // size and should NOT include the meta bytes.
-func (s *ArenaMmap) getVal(offset uint32, size uint32) (ret y.ValueStruct) {
+func (s *Arena) getVal(offset uint32, size uint32) (ret y.ValueStruct) {
 	ret.Decode(s.buf[offset : offset+size])
 	return
 }
 
 // getNodeOffset returns the offset of node in the arena. If the node pointer is
 // nil, then the zero offset is returned.
-func (s *ArenaMmap) getNodeOffset(nd *node) uint32 {
+func (s *Arena) getNodeOffset(nd *node) uint32 {
 	if nd == nil {
 		return 0
 	}

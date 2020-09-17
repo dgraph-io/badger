@@ -7,19 +7,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newValue(v int) uint64 {
+func newValueU(v int) uint64 {
 	return uint64(v)
 }
 
-const arenaSize = 1 << 20
-
 // TestBasic tests single-threaded inserts and updates and gets.
-func TestBasic(t *testing.T) {
-	l := NewSkiplist(arenaSize)
-	val1 := newValue(42)
-	val2 := newValue(52)
-	val3 := newValue(62)
-	val4 := newValue(72)
+func TestBasicMmap(t *testing.T) {
+	l := NewSkiplistMmap(arenaSize)
+	val1 := newValueU(42)
+	val2 := newValueU(52)
+	val3 := newValueU(62)
+	val4 := newValueU(72)
 
 	// Try inserting values.
 	// Somehow require.Nil doesn't work when checking for unsafe.Pointer(nil).
@@ -55,9 +53,9 @@ func TestBasic(t *testing.T) {
 }
 
 // TestIteratorNext tests a basic iteration over all nodes from the beginning.
-func TestIteratorNext(t *testing.T) {
+func TestIteratorNextMmap(t *testing.T) {
 	const n = 100
-	l := NewSkiplist(arenaSize)
+	l := NewSkiplistMmap(arenaSize)
 	defer l.DecrRef()
 	it := l.NewIterator()
 	defer it.Close()
@@ -71,7 +69,7 @@ func TestIteratorNext(t *testing.T) {
 	for i := 0; i < n; i++ {
 		require.True(t, it.Valid())
 		v := it.Value()
-		require.EqualValues(t, newValue(i), v)
+		require.EqualValues(t, newValueU(i), v)
 		it.Next()
 	}
 	require.False(t, it.Valid())
