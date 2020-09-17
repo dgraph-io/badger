@@ -446,7 +446,9 @@ func (t *Table) initIndex() (*pb.BlockOffset, error) {
 		return nil, err
 	}
 
-	t.estimatedSize = index.EstimatedSize
+	// Due to compression the real size on disk is much
+	// smaller than what we estimate from index.EstimatedSize.
+	t.estimatedSize = uint64(t.tableSize)
 	t.hasBloomFilter = len(index.BloomFilter) > 0
 	t.noOfBlocks = len(index.Offsets)
 
