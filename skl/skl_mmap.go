@@ -33,6 +33,7 @@ Key differences:
 package skl
 
 import (
+	"bytes"
 	"math"
 	"sync/atomic"
 	"unsafe"
@@ -102,7 +103,7 @@ func (s *Skiplist) DecrRef() {
 	s.head = nil
 }
 
-func newNode(arena *Arena, key []byte, uid uint64, height int) *node {
+func newNode(arena *Arena, key string, uid uint64, height int) *node {
 	// The base level is already allocated in the node struct.
 	offset := arena.putNode(height)
 	node := arena.getNode(offset)
@@ -135,7 +136,7 @@ func zeroOut(data []byte, offset int) {
 // NewSkiplist makes a new empty skiplist, with a given arena size
 func NewSkiplist(arenaSize int64) *Skiplist {
 	arena := newArena(arenaSize)
-	head := newNode(arena, nil, 0, maxHeight)
+	head := newNode(arena, "", 0, maxHeight)
 	return &Skiplist{
 		height: 1,
 		head:   head,
@@ -191,7 +192,7 @@ func (s *Skiplist) getNext(nd *node, height int) *node {
 // If less=false, it finds leftmost node such that node.key > key (if allowEqual=false) or
 // node.key >= key (if allowEqual=true).
 // Returns the node found. The bool returned is true if the node has key equal to given key.
-func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool) {
+func (s *Skiplist) findNear(key string, less bool, allowEqual bool) (*node, bool) {
 	x := s.head
 	level := int(s.getHeight() - 1)
 	for {
@@ -216,7 +217,7 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 		}
 
 		nextKey := next.key(s.arena)
-		cmp := y.CompareKeys(key, nextKey)
+		cmp := bytes.Compare([]byte(key), nextKey)
 		if cmp > 0 {
 			// x.key < next.key < key. We can continue to move right.
 			x = next
@@ -263,7 +264,7 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 // The input "before" tells us where to start looking.
 // If we found a node with the same key, then we return outBefore = outAfter.
 // Otherwise, outBefore.key < key < outAfter.key.
-func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*node, *node) {
+func (s *Skiplist) findSpliceForLevel(key string, before *node, level int) (*node, *node) {
 	for {
 		// Assume before.key < key.
 		next := s.getNext(before, level)
@@ -271,7 +272,7 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 			return before, next
 		}
 		nextKey := next.key(s.arena)
-		cmp := y.CompareKeys(key, nextKey)
+		cmp := bytes.Compare([]byte(key), nextKey)
 		if cmp == 0 {
 			// Equality case.
 			return next, next
@@ -289,7 +290,7 @@ func (s *Skiplist) getHeight() int32 {
 }
 
 // Put inserts the key-value pair.
-func (s *Skiplist) Put(key []byte, uid uint64) {
+func (s *Skiplist) Put(key string, uid uint64) {
 	// Since we allow overwrite, we may not need to create a new node. We might not even need to
 	// increase the height. Let's defer these actions.
 
@@ -383,14 +384,14 @@ func (s *Skiplist) findLast() *node {
 
 // Get gets the value associated with the key. It returns a valid value if it finds equal or earlier
 // version of the same key.
-func (s *Skiplist) Get(key []byte) uint64 {
+func (s *Skiplist) Get(key string) uint64 {
 	n, _ := s.findNear(key, false, true) // findGreaterOrEqual.
 	if n == nil {
 		return 0
 	}
 
 	nextKey := s.arena.getKey(n.keyOffset, n.keySize)
-	if !y.SameKey(key, nextKey) {
+	if !bytes.Equal([]byte(key), nextKey) {
 		return 0
 	}
 
@@ -428,8 +429,8 @@ func (s *Iterator) Close() error {
 func (s *Iterator) Valid() bool { return s.n != nil }
 
 // Key returns the key at the current position.
-func (s *Iterator) Key() []byte {
-	return s.list.arena.getKey(s.n.keyOffset, s.n.keySize)
+func (s *Iterator) Key() string {
+	return string(s.list.arena.getKey(s.n.keyOffset, s.n.keySize))
 }
 
 // Value returns value.
@@ -452,12 +453,12 @@ func (s *Iterator) Prev() {
 }
 
 // Seek advances to the first entry with a key >= target.
-func (s *Iterator) Seek(target []byte) {
+func (s *Iterator) Seek(target string) {
 	s.n, _ = s.list.findNear(target, false, true) // find >=.
 }
 
 // SeekForPrev finds an entry with key <= target.
-func (s *Iterator) SeekForPrev(target []byte) {
+func (s *Iterator) SeekForPrev(target string) {
 	s.n, _ = s.list.findNear(target, true, true) // find <=.
 }
 
@@ -508,7 +509,7 @@ func (s *UniIterator) Rewind() {
 }
 
 // Seek implements y.Interface
-func (s *UniIterator) Seek(key []byte) {
+func (s *UniIterator) Seek(key string) {
 	if !s.reversed {
 		s.iter.Seek(key)
 	} else {
@@ -517,7 +518,7 @@ func (s *UniIterator) Seek(key []byte) {
 }
 
 // Key implements y.Interface
-func (s *UniIterator) Key() []byte { return s.iter.Key() }
+func (s *UniIterator) Key() []byte { return []byte(s.iter.Key()) }
 
 // Value implements y.Interface
 func (s *UniIterator) Value() uint64 { return s.iter.Value() }

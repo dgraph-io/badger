@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/dgraph-io/badger/v2/y"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,30 +23,30 @@ func TestBasic(t *testing.T) {
 
 	// Try inserting values.
 	// Somehow require.Nil doesn't work when checking for unsafe.Pointer(nil).
-	l.Put(y.KeyWithTs([]byte("key1"), 0), val1)
-	l.Put(y.KeyWithTs([]byte("key2"), 2), val2)
-	l.Put(y.KeyWithTs([]byte("key3"), 0), val3)
+	l.Put("key1", val1)
+	l.Put("key2", val2)
+	l.Put("key3", val3)
 
-	v := l.Get(y.KeyWithTs([]byte("key"), 0))
+	v := l.Get("key")
 	require.True(t, v == 0)
 
-	v = l.Get(y.KeyWithTs([]byte("key1"), 0))
+	v = l.Get("key1")
 	require.Equal(t, val1, v)
 	// require.True(t, v.Value != nil)
 	// require.EqualValues(t, "00042", string(v.Value))
 	// require.EqualValues(t, 55, v.Meta)
 
-	v = l.Get(y.KeyWithTs([]byte("key2"), 0))
-	require.True(t, v == 0)
+	v = l.Get("key2")
+	require.True(t, v == 52)
 
-	v = l.Get(y.KeyWithTs([]byte("key3"), 0))
+	v = l.Get("key3")
 	require.Equal(t, val3, v)
 	// require.True(t, v.Value != nil)
 	// require.EqualValues(t, "00062", string(v.Value))
 	// require.EqualValues(t, 57, v.Meta)
 
-	l.Put(y.KeyWithTs([]byte("key3"), 1), val4)
-	v = l.Get(y.KeyWithTs([]byte("key3"), 1))
+	l.Put("key3", val4)
+	v = l.Get("key3")
 	require.Equal(t, val4, v)
 	// require.True(t, v.Value != nil)
 	// require.EqualValues(t, "00072", string(v.Value))
@@ -66,7 +65,7 @@ func TestIteratorNext(t *testing.T) {
 	it.SeekToFirst()
 	require.False(t, it.Valid())
 	for i := n - 1; i >= 0; i-- {
-		l.Put(y.KeyWithTs([]byte(fmt.Sprintf("%05d", i)), 0), uint64(i))
+		l.Put(fmt.Sprintf("%05d", i), uint64(i))
 	}
 	it.SeekToFirst()
 	for i := 0; i < n; i++ {

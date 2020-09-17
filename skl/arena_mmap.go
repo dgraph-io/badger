@@ -103,7 +103,7 @@ func (s *Arena) putNode(height int) uint32 {
 // 	return m
 // }
 
-func (s *Arena) putKey(key []byte) uint32 {
+func (s *Arena) putKey(key string) uint32 {
 	l := uint32(len(key))
 	n := atomic.AddUint32(&s.n, l)
 	y.AssertTruef(int(n) <= len(s.buf),
