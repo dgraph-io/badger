@@ -174,7 +174,6 @@ type Iterator struct {
 func (t *Table) NewIterator(opt int) *Iterator {
 	t.IncrRef() // Important.
 	ti := &Iterator{t: t, opt: opt}
-	ti.next()
 	return ti
 }
 
