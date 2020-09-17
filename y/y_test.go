@@ -254,3 +254,8 @@ func TestPagebufferReader4(t *testing.T) {
 	require.Equal(t, err, io.EOF, "should return EOF")
 	require.Equal(t, n, 0)
 }
+
+func TestSizeVarintForZero(t *testing.T) {
+	siz := sizeVarint(0)
+	require.Equal(t, 1, siz)
+}
