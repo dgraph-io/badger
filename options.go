@@ -98,6 +98,8 @@ type Options struct {
 	// conflict detection is disabled.
 	DetectConflicts bool
 
+	FlushMemtableEvery time.Duration
+
 	// Transaction start and commit timestamps are managed by end-user.
 	// This is only useful for databases built on top of Badger (like Dgraph).
 	// Not recommended for most users.

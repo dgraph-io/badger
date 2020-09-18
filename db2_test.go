@@ -858,3 +858,31 @@ func TestIsClosed(t *testing.T) {
 	})
 
 }
+
+func TestForceFlush(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt := DefaultOptions(dir)
+	opt.FlushMemtableEvery = 1 * time.Millisecond
+	db, err := Open(opt)
+	require.NoError(t, err)
+
+	txnSet(t, db, []byte("foo"), []byte("bar"), 1)
+	time.Sleep(time.Millisecond)
+
+	// Level 0 should have 0 tables.
+	require.Equal(t, 0, len(db.lc.levels[0].tables))
+	require.False(t, db.mt.Empty())
+
+	time.Sleep(db.opt.FlushMemtableEvery)
+
+	// Insert item two so that ensureRoomForWrites is called.
+	txnSet(t, db, []byte("foo"), []byte("bar"), 1)
+	time.Sleep(time.Second)
+	// Level 0 should have 1 tables.
+	require.Equal(t, 1, len(db.lc.levels[0].tables))
+	require.NoError(t, db.Close())
+
+}

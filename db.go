@@ -84,6 +84,7 @@ type DB struct {
 	// functions. Since we are not going to use any 64bit atomic functions, there is no need for
 	// 64 bit alignment of this struct(see #311).
 	logRotates int32
+	flushTimer *time.Timer
 
 	blockWrites int32
 	isClosed    uint32
@@ -424,6 +425,7 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.pub = z.NewCloser(1)
 	go db.pub.listenForUpdates(db.closers.pub)
 
+	db.flushTimer = time.NewTimer(db.opt.FlushMemtableEvery)
 	valueDirLockGuard = nil
 	dirLockGuard = nil
 	manifestFile = nil
@@ -1010,6 +1012,14 @@ func (db *DB) ensureRoomForWrite() error {
 	// db.head. Hence we are limiting no of value log files to be read to db.logRotates only.
 	forceFlush := atomic.LoadInt32(&db.logRotates) >= db.opt.LogRotatesToFlush
 
+	select {
+	case <-db.flushTimer.C:
+		forceFlush = true
+		db.flushTimer.Reset(db.opt.FlushMemtableEvery)
+	default:
+	}
+
+	// TODO: Can the memtable be empty?
 	if !forceFlush && db.mt.MemSize() < db.opt.MaxTableSize {
 		return nil
 	}
