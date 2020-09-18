@@ -1877,3 +1877,27 @@ func (db *DB) StreamDB(outOptions Options) error {
 func (db *DB) Opts() Options {
 	return db.opt
 }
+
+func (db *DB) MaxVersion(ts uint64) (uint64, error) {
+	maxVersion := uint64(0)
+	var mu sync.Mutex
+	stream := db.NewStream()
+	if ts != 0 {
+		stream = db.NewStreamAt(ts)
+	}
+	stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
+		version := itr.Item().Version()
+		mu.Lock()
+		if version > maxVersion {
+			maxVersion = version
+		}
+		mu.Unlock()
+		return nil, nil
+	}
+	stream.Send = nil
+	if err := stream.Orchestrate(context.Background()); err != nil {
+		return 0, err
+	}
+	return maxVersion, nil
+
+}

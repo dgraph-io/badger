@@ -858,3 +858,20 @@ func TestIsClosed(t *testing.T) {
 	})
 
 }
+
+func TestMaxVersion(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		N := uint64(50000)
+
+		key := func(i int) []byte {
+			return []byte(fmt.Sprintf("%d%10d", i, i))
+		}
+		for i := 0; i < int(N); i++ {
+			txnSet(t, db, key(i), nil, 0)
+		}
+		ver, err := db.MaxVersion(0)
+		require.NoError(t, err)
+		fmt.Printf("db.MaxVersion() = %+v\n", ver)
+		require.Equal(t, N, ver)
+	})
+}
