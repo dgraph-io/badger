@@ -927,9 +927,7 @@ func TestOpenKVSize(t *testing.T) {
 	table, err := OpenTable(buildTestTable(t, "foo", 1, opts), opts)
 	require.NoError(t, err)
 
-	// The following values might change if the table/header structure is changed.
-	var entrySize uint64 = 15 /* DiffKey len */ + 4 /* Header Size */ + 4 /* Encoded vp */
-	require.Equal(t, entrySize, table.EstimatedSize())
+	require.Equal(t, uint64(table.tableSize), table.EstimatedSize())
 }
 
 // Run this test with command "go test -race -run TestDoesNotHaveRace"
