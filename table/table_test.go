@@ -922,18 +922,20 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestOpenKVSize(t *testing.T) {
+func TestOpenKVSizeWithCompression(t *testing.T) {
 	// When compression is on
 	opts := getTestTableOptions()
 	table, err := OpenTable(buildTestTable(t, "foo", 1, opts), opts)
 	require.NoError(t, err)
 
 	require.Equal(t, uint64(table.tableSize), table.EstimatedSize())
+}
 
+func TestOpenKVSizeWithoutCompression(t *testing.T) {
 	// When compression is off
-	opts = getTestTableOptions()
+	opts := getTestTableOptions()
 	opts.Compression = options.None
-	table, err = OpenTable(buildTestTable(t, "foo", 1, opts), opts)
+	table, err := OpenTable(buildTestTable(t, "foo", 1, opts), opts)
 	require.NoError(t, err)
 
 	// The following values might change if the table/header structure is changed.
