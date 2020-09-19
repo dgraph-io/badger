@@ -54,7 +54,7 @@ For more details on our version naming schema please read [Choosing a version](#
 To start using Badger, install Go 1.12 or above. Badger v2 needs go modules. Run the following command to retrieve the library.
 
 ```sh
-$ go get github.com/dgraph-io/badger/v2
+$ go get github.com/dgraph-io/badger
 ```
 This will retrieve the library.
 
