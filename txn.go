@@ -203,7 +203,6 @@ type Txn struct {
 	readTs   uint64
 	commitTs uint64
 
-	update    bool       // update is used to conditionally keep track of reads.
 	readsLock sync.Mutex // guards the reads slice. See addReadKey.
 	reads     []uint64   // contains fingerprints of keys read.
 	writes    []uint64   // contains fingerprints of keys written.
@@ -211,12 +210,14 @@ type Txn struct {
 	pendingWrites   map[string]*Entry // cache stores any writes done by txn.
 	duplicateWrites []*Entry          // Used in managed mode to store duplicate entries.
 
-	db        *DB
-	discarded bool
+	db *DB
 
 	size         int64
 	count        int64
 	numIterators int32
+	discarded    bool
+	doneRead     bool
+	update       bool // update is used to conditionally keep track of reads.
 }
 
 type pendingWritesIterator struct {
@@ -429,7 +430,6 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	item.version = vs.Version
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta
-	item.db = txn.db
 	item.vptr = y.SafeCopy(item.vptr, vs.Value)
 	item.txn = txn
 	item.expiresAt = vs.ExpiresAt

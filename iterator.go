@@ -41,20 +41,21 @@ const (
 // Item is returned during iteration. Both the Key() and Value() output is only valid until
 // iterator.Next() is called.
 type Item struct {
-	status    prefetchStatus
-	err       error
-	wg        sync.WaitGroup
-	db        *DB
 	key       []byte
 	vptr      []byte
-	meta      byte // We need to store meta to know about bitValuePointer.
-	userMeta  byte
-	expiresAt uint64
 	val       []byte
-	slice     *y.Slice // Used only during prefetching.
-	next      *Item
 	version   uint64
-	txn       *Txn
+	expiresAt uint64
+
+	slice *y.Slice // Used only during prefetching.
+	next  *Item
+	txn   *Txn
+
+	err      error
+	wg       sync.WaitGroup
+	status   prefetchStatus
+	meta     byte // We need to store meta to know about bitValuePointer.
+	userMeta byte
 }
 
 // String returns a string representation of Item
@@ -167,10 +168,11 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 
 		var vp valuePointer
 		vp.Decode(item.vptr)
-		result, cb, err := item.db.vlog.Read(vp, item.slice)
+		db := item.txn.db
+		result, cb, err := db.vlog.Read(vp, item.slice)
 		if err != ErrRetry {
 			if err != nil {
-				item.db.opt.Logger.Errorf(`Unable to read: Key: %v, Version : %v,
+				db.opt.Logger.Errorf(`Unable to read: Key: %v, Version : %v,
 				meta: %v, userMeta: %v`, key, item.version, item.meta, item.userMeta)
 			}
 			return result, cb, err
@@ -194,7 +196,7 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 		// change the key user sees before and after this call. Also, this move
 		// logic is internal logic and should not impact the external behavior
 		// of the retrieval.
-		vs, err := item.db.get(key)
+		vs, err := item.txn.db.get(key)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -226,7 +228,7 @@ func (item *Item) prefetchValue() {
 	if val == nil {
 		return
 	}
-	if item.db.opt.ValueLogLoadingMode == options.MemoryMap {
+	if item.txn.db.opt.ValueLogLoadingMode == options.MemoryMap {
 		buf := item.slice.Resize(len(val))
 		copy(buf, val)
 		item.val = buf
@@ -329,20 +331,21 @@ func (l *list) pop() *Item {
 // should work for most applications. Consider using that as a starting point
 // before customizing it for your own needs.
 type IteratorOptions struct {
-	// Indicates whether we should prefetch values during iteration and store them.
-	PrefetchValues bool
-	// How many KV pairs to prefetch while iterating. Valid only if PrefetchValues is true.
+	// PrefetchSize is the number of KV pairs to prefetch while iterating.
+	// Valid only if PrefetchValues is true.
 	PrefetchSize int
-	Reverse      bool // Direction of iteration. False is forward, true is backward.
-	AllVersions  bool // Fetch all valid versions of the same key.
-
-	// The following option is used to narrow down the SSTables that iterator picks up. If
-	// Prefix is specified, only tables which could have this prefix are picked based on their range
-	// of keys.
-	Prefix      []byte // Only iterate over this given prefix.
-	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
-
+	// PrefetchValues Indicates whether we should prefetch values during
+	// iteration and store them.
+	PrefetchValues bool
+	Reverse        bool // Direction of iteration. False is forward, true is backward.
+	AllVersions    bool // Fetch all valid versions of the same key.
 	InternalAccess bool // Used to allow internal access to badger keys.
+
+	// The following option is used to narrow down the SSTables that iterator
+	// picks up. If Prefix is specified, only tables which could have this
+	// prefix are picked based on their range of keys.
+	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
+	Prefix      []byte // Only iterate over this given prefix.
 }
 
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
@@ -505,7 +508,7 @@ func (txn *Txn) NewKeyIterator(key []byte, opt IteratorOptions) *Iterator {
 func (it *Iterator) newItem() *Item {
 	item := it.waste.pop()
 	if item == nil {
-		item = &Item{slice: new(y.Slice), db: it.txn.db, txn: it.txn}
+		item = &Item{slice: new(y.Slice), txn: it.txn}
 	}
 	return item
 }
