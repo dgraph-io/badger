@@ -18,6 +18,7 @@ package badger
 
 import (
 	"fmt"
+	"io/ioutil"
 	"testing"
 	"time"
 
@@ -143,4 +144,18 @@ func TestFlushPanic(t *testing.T) {
 			require.Error(t, y.ErrCommitAfterFinish, wb.Flush())
 		})
 	})
+}
+
+func TestBatchErrDeadlock(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt := DefaultOptions(dir)
+	db, err := OpenManaged(opt)
+	require.NoError(t, err)
+
+	wb := db.NewManagedWriteBatch()
+	require.NoError(t, wb.SetEntryAt(&Entry{Key: []byte("foo")}, 0))
+	require.Error(t, wb.Flush())
 }
