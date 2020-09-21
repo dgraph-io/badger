@@ -185,7 +185,7 @@ func TestValueGC(t *testing.T) {
 	}
 
 	kv.vlog.filesLock.RLock()
-	lf := kv.vlog.vlog.filesMap[kv.vlog.sortedFids()[0]]
+	lf := kv.vlog.vlog.filesMap[kv.vlog.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
@@ -243,7 +243,7 @@ func TestValueGC2(t *testing.T) {
 	}
 
 	kv.vlog.filesLock.RLock()
-	lf := kv.vlog.vlog.filesMap[kv.vlog.sortedFids()[0]]
+	lf := kv.vlog.vlog.filesMap[kv.vlog.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
@@ -345,7 +345,7 @@ func TestValueGC3(t *testing.T) {
 	// Like other tests, we pull out a logFile to rewrite it directly
 
 	kv.vlog.filesLock.RLock()
-	logFile := kv.vlog.vlog.filesMap[kv.vlog.sortedFids()[0]]
+	logFile := kv.vlog.vlog.filesMap[kv.vlog.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
 	tr := trace.New("Test", "Test")
@@ -395,8 +395,8 @@ func TestValueGC4(t *testing.T) {
 	}
 
 	kv.vlog.filesLock.RLock()
-	lf0 := kv.vlog.vlog.filesMap[kv.vlog.sortedFids()[0]]
-	lf1 := kv.vlog.vlog.filesMap[kv.vlog.sortedFids()[1]]
+	lf0 := kv.vlog.vlog.filesMap[kv.vlog.vlog.sortedFids()[0]]
+	lf1 := kv.vlog.vlog.filesMap[kv.vlog.vlog.sortedFids()[1]]
 	kv.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {

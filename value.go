@@ -680,7 +680,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			delete(vlog.vlog.filesMap, f.fid)
 			deleteFileNow = true
 		} else {
-			vlog.filesToBeDeleted = append(vlog.filesToBeDeleted, f.fid)
+			vlog.vlog.filesToBeDeleted = append(vlog.vlog.filesToBeDeleted, f.fid)
 		}
 		vlog.filesLock.Unlock()
 	}
@@ -766,12 +766,12 @@ func (vlog *valueLog) decrIteratorCount() error {
 	}
 
 	vlog.filesLock.Lock()
-	lfs := make([]*logFile, 0, len(vlog.filesToBeDeleted))
-	for _, id := range vlog.filesToBeDeleted {
+	lfs := make([]*logFile, 0, len(vlog.vlog.filesToBeDeleted))
+	for _, id := range vlog.vlog.filesToBeDeleted {
 		lfs = append(lfs, vlog.vlog.filesMap[id])
 		delete(vlog.vlog.filesMap, id)
 	}
-	vlog.filesToBeDeleted = nil
+	vlog.vlog.filesToBeDeleted = nil
 	vlog.filesLock.Unlock()
 
 	for _, lf := range lfs {
@@ -811,6 +811,7 @@ func (vlog *valueLog) dropAll() (int, error) {
 	// count.
 	var count int
 	// Todo(Naman): We should delete wal files too
+	// Ibrahim - Yes, clean all files and start from ID/offset 0.
 	deleteAll := func() error {
 		vlog.filesLock.Lock()
 		defer vlog.filesLock.Unlock()
@@ -849,16 +850,18 @@ type logWrapper struct {
 	maxFid            uint32
 	writableOffset    uint32
 	numEntriesWritten uint32
+	// These are stale vlog files that should be removed once the iterators
+	// pointing to them are closed.
+	filesToBeDeleted []uint32
 }
 
 type valueLog struct {
 	dirPath string
 
 	// guards our view of which files exist, which to be deleted, how many active iterators
-	filesLock        sync.RWMutex
-	vlog             logWrapper
-	wal              logWrapper
-	filesToBeDeleted []uint32
+	filesLock sync.RWMutex
+	vlog      logWrapper
+	wal       logWrapper
 	// A refcount of iterators -- when this hits zero, we can delete the filesToBeDeleted.
 	numActiveIterators int32
 
@@ -1049,6 +1052,8 @@ func (vlog *valueLog) createLogFile(fid uint32, ft fileType) (*logFile, error) {
 
 	// WAL files are used only for writing. We don't need to open them in mmap mode.
 	// TODO(ibrahim): Close WAL fd once we're done writing to it.
+	// TODO(naman): The wal fd is not needed once a new file is created. We
+	// should close the existing file.
 	if ft == walFile {
 		lf.loadingMode = options.FileIO
 	}
@@ -1098,7 +1103,7 @@ func (vlog *valueLog) createLogFile(fid uint32, ft fileType) (*logFile, error) {
 	// To avoid a race condition, all reads and updates to this variable must be
 	// done via atomics.
 	atomic.StoreUint32(&lw.writableOffset, lfHeaderSize)
-	vlog.vlog.numEntriesWritten = 0
+	lw.numEntriesWritten = 0
 	vlog.filesLock.Unlock()
 
 	// Todo(Naman): The below is used for wal cleaning.
@@ -1191,7 +1196,11 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	}
 	// If no files are found, then create a new file.
 	//TODO(ibrahim): what if wal files are cleared but vlog files are left behind?
+	//
+	// Create file 0 if it doesn't exist for any filetype.
+	// Todo(naman): Do not create a vlog file until we have something to write to it.
 	if len(vlog.wal.filesMap) == 0 {
+		// Ibrahim - The following assertion is no longer valid.
 		y.AssertTrue(vlog.vlog.maxFid == 0)
 		y.AssertTrue(vlog.wal.maxFid == 0)
 		// Create only the walFile. We will create the vlog file only when needed.
@@ -1206,13 +1215,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 
 	// Collect vlog fids for mmap
 	// Collect wal fids for replay as well
-	vfids := vlog.sortedFids()
-	wfids := make([]uint32, 0, len(vlog.wal.filesMap))
-	for fid := range vlog.wal.filesMap {
-		wfids = append(wfids, fid)
-	}
-
-	// Todo(Naman): Do we need this?
+	vfids := vlog.vlog.sortedFids()
 	for _, fid := range vfids {
 		lf, ok := vlog.vlog.filesMap[fid]
 		y.AssertTrue(ok)
@@ -1234,6 +1237,11 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		}
 	}
 
+	// Todo(Naman): Do we need this?
+	// Ibrahim - We should open all wal files because we might need to replay
+	// all of them. We can close all the files except the last one after replay
+	// is done.
+	wfids := vlog.wal.sortedFids()
 	for _, fid := range wfids {
 		lf, ok := vlog.wal.filesMap[fid]
 		y.AssertTrue(ok)
@@ -1291,8 +1299,11 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		vlog.db.opt.Infof("Replay took: %s\n", time.Since(now))
 
 		// Todo(Naman): Why? As we are not reading values from WAL?
-		// Earlier we used to mmap vlog files here. Since we're replaying WAL
-		// files now, we don't need to mmap them.
+		// ibrahim - we can mmap the wal files as well since we will read them
+		// whil replaying.
+		//
+		// Keep what we have in master. If we mmap the files after replaying,
+		// let's not mmap the files in that case.
 	}
 
 	initLastFile := func(lw *logWrapper) error {
@@ -1336,6 +1347,9 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	if err := initLastFile(&vlog.vlog); err != nil {
 		return err
 	}
+
+	// TODO(naman): Sanity check. Verify if the last files of both the fileType's have same encrytion mode.
+
 	// Update the head to point to the updated tail. Otherwise, even after doing a successful
 	// replay and closing the DB, the value log head does not get updated, which causes the replay
 	// to happen repeatedly.
@@ -1368,7 +1382,6 @@ func (lf *logFile) init() error {
 	return nil
 }
 
-// TODO(Naman): This is removed in Ibrahim's PR
 func (vlog *valueLog) stopFlushDiscardStats() {
 	if vlog.lfDiscardStats != nil {
 		vlog.lfDiscardStats.closer.Signal()
@@ -1410,13 +1423,15 @@ func (vlog *valueLog) Close() error {
 
 // sortedFids returns the file id's not pending deletion, sorted.  Assumes we have shared access to
 // filesMap.
-func (vlog *valueLog) sortedFids() []uint32 {
+//
+// TODO(Naman): Fix or remove this function.
+func (lw *logWrapper) sortedFids() []uint32 {
 	toBeDeleted := make(map[uint32]struct{})
-	for _, fid := range vlog.filesToBeDeleted {
+	for _, fid := range lw.filesToBeDeleted {
 		toBeDeleted[fid] = struct{}{}
 	}
-	ret := make([]uint32, 0, len(vlog.vlog.filesMap))
-	for fid := range vlog.vlog.filesMap {
+	ret := make([]uint32, 0, len(lw.filesMap))
+	for fid := range lw.filesMap {
 		if _, ok := toBeDeleted[fid]; !ok {
 			ret = append(ret, fid)
 		}
@@ -1559,6 +1574,7 @@ func estimateRequestSize(req *request) uint64 {
 }
 
 // write is thread-unsafe by design and should not be called concurrently.
+// Each request represents one transaction.
 func (vlog *valueLog) write(reqs []*request) error {
 	if vlog.db.opt.InMemory {
 		return nil
@@ -1612,8 +1628,10 @@ func (vlog *valueLog) write(reqs []*request) error {
 		if err := flushWrites(); err != nil {
 			return err
 		}
+		fmt.Printf("vlog.vlog.num = %+v\n", vlog.vlog.numEntriesWritten)
+		fmt.Printf("vlog.wal.NumEntriesWritten = %+v\n", vlog.wal.numEntriesWritten)
 		//Todo(ibrahim): Do we always want to rotate both the files?
-		// For now, we rotate only the WAL file. See ensureRoomForWrite(), it decides if the
+		// Naman - For now, we rotate only the WAL file. See ensureRoomForWrite(), it decides if the
 		// memtable should be flushed or not. This is to done to move the vhead.
 		if vlog.voffset() > uint32(vlog.opt.ValueLogFileSize) ||
 			vlog.vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
@@ -1662,7 +1680,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			}
 
 			// This value shouldn't be written to the value log file. Continue.
-			if !vlog.db.shouldWriteValueToLSM(*e) {
+			if vlog.db.shouldWriteValueToLSM(*e) {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
 				continue
 			}
@@ -1690,7 +1708,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 					return err
 				}
 			}
-		}
+		} // Transaction completed.
 		vlog.wal.numEntriesWritten += uint32(walWritten)
 		vlog.vlog.numEntriesWritten += uint32(vlogWritten)
 		// We write to disk here so that all entries that are part of the same transaction are
@@ -1703,7 +1721,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 				return err
 			}
 		}
-	}
+	} // All requests processed.
 	return toDisk()
 }
 
@@ -1804,7 +1822,9 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, *logF
 func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFile) {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
-	fids := vlog.sortedFids()
+	// TODO(naman): Fix the file locking above. The locks should be part of logWrapper.
+	fids := vlog.vlog.sortedFids()
+	fmt.Printf("fids = %+v\n", fids)
 	switch {
 	case len(fids) <= 1:
 		tr.LazyPrintf("Only one or less value log file.")
@@ -1821,9 +1841,9 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	}{math.MaxUint32, 0}
 	vlog.lfDiscardStats.RLock()
 	for _, fid := range fids {
-		if fid >= head.Fid {
-			break
-		}
+		// if fid >= head.Fid {
+		// 	break
+		// }
 		if vlog.lfDiscardStats.m[fid] > candidate.discard {
 			candidate.fid = fid
 			candidate.discard = vlog.lfDiscardStats.m[fid]
@@ -2045,8 +2065,10 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 			<-vlog.garbageCh
 		}()
 
+		fmt.Printf("vlog.vlog.files = %+v\n", vlog.vlog.filesMap)
 		var err error
 		files := vlog.pickLog(head, tr)
+		fmt.Printf("files = %+v\n", files)
 		if len(files) == 0 {
 			tr.LazyPrintf("PickLog returned zero results.")
 			return ErrNoRewrite
@@ -2212,12 +2234,10 @@ func (vlog *valueLog) rotateFile(lf *logFile) (*logFile, error) {
 	}
 
 	y.AssertTruef(newid > 0, "newid has overflown uint32: %v", newid)
-	// TODO(ibrahim): fix this
 	newlf, err := vlog.createLogFile(newid, lf.fileType)
 	if err != nil {
 		return nil, err
 	}
-	//TODO(ibrahim): Fix this
 	//TODO(Naman): Confirm this, once the wal cleaner is done.
 	if lf.fileType == walFile {
 		atomic.AddInt32(&vlog.db.logRotates, 1)
