@@ -2,6 +2,7 @@ package y
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math/rand"
@@ -253,4 +254,25 @@ func TestPagebufferReader4(t *testing.T) {
 	n, err = reader.Read(readBuf)
 	require.Equal(t, err, io.EOF, "should return EOF")
 	require.Equal(t, n, 0)
+}
+
+func TestSizeVarintForZero(t *testing.T) {
+	siz := sizeVarint(0)
+	require.Equal(t, 1, siz)
+}
+
+func TestEncodedSize(t *testing.T) {
+	valBufSize := uint32(rand.Int31n(1e5))
+	expiry := rand.Uint64()
+	expiryVarintBuf := make([]byte, 64)
+	expVarintSize := uint32(binary.PutUvarint(expiryVarintBuf, expiry))
+	valBuf := make([]byte, valBufSize)
+	_, _ = rand.Read(valBuf)
+
+	valStruct := &ValueStruct{
+		Value:     valBuf,
+		ExpiresAt: expiry,
+	}
+
+	require.Equal(t, valBufSize+uint32(2)+expVarintSize, valStruct.EncodedSize())
 }
