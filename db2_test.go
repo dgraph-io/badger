@@ -918,7 +918,6 @@ func TestMaxVersion(t *testing.T) {
 		for i := uint64(1); i <= N; i++ {
 			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("%d", i))}, i)
 		}
-		fmt.Println("here")
 		require.NoError(t, wb.Flush())
 
 		ver, err := db.MaxVersion()

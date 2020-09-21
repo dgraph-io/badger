@@ -1878,7 +1878,7 @@ func (db *DB) Opts() Options {
 	return db.opt
 }
 
-// MaxVersion returns the maximum commited version for any key in the DB. It
+// MaxVersion returns the maximum commited version across all keys in the DB. It
 // uses the stream framework to find the maximum version.
 func (db *DB) MaxVersion() (uint64, error) {
 	maxVersion := uint64(0)
