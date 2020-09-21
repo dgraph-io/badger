@@ -1890,36 +1890,15 @@ func (db *DB) MaxVersion() (uint64, error) {
 		stream = db.NewStream()
 	}
 
-	stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
-		maxVs := uint64(0)
-		for ; itr.Valid(); itr.Next() {
-			item := itr.Item()
-			if item.IsDeletedOrExpired() {
-				break
-			}
-			if !bytes.Equal(key, item.Key()) {
-				// Break out on the first encounter with another key.
-				break
-			}
-
-			if item.Version() > maxVs {
-				maxVs = item.Version()
-			}
-			if db.opt.NumVersionsToKeep == 1 {
-				break
-			}
-
-			if item.DiscardEarlierVersions() {
-				break
-			}
-		}
+	stream.ChooseKey = func(item *Item) bool {
 		mu.Lock()
-		if maxVs > maxVersion {
-			maxVersion = maxVs
+		if item.Version() > maxVersion {
+			maxVersion = item.Version()
 		}
 		mu.Unlock()
-		return nil, nil
+		return false
 	}
+	stream.KeyToList = nil
 	stream.Send = nil
 	if err := stream.Orchestrate(context.Background()); err != nil {
 		return 0, err
