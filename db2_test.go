@@ -858,3 +858,72 @@ func TestIsClosed(t *testing.T) {
 	})
 
 }
+
+func TestMaxVersion(t *testing.T) {
+	N := uint64(10000)
+	key := func(i int) []byte {
+		return []byte(fmt.Sprintf("%d%10d", i, i))
+	}
+	t.Run("normal", func(t *testing.T) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+			// This will create commits from 1 to N.
+			for i := 0; i < int(N); i++ {
+				txnSet(t, db, key(i), nil, 0)
+			}
+			ver, err := db.MaxVersion()
+			require.NoError(t, err)
+			require.Equal(t, N, ver)
+		})
+	})
+	t.Run("multiple versions", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer removeDir(dir)
+
+		opt := getTestOptions(dir)
+		opt.NumVersionsToKeep = 100
+		db, err := OpenManaged(opt)
+		require.NoError(t, err)
+
+		wb := db.NewManagedWriteBatch()
+		defer wb.Cancel()
+
+		k := make([]byte, 100)
+		rand.Read(k)
+		// Create multiple version of the same key.
+		for i := uint64(1); i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: k}, i)
+		}
+		require.NoError(t, wb.Flush())
+
+		ver, err := db.MaxVersion()
+		require.NoError(t, err)
+		require.Equal(t, N, ver)
+
+		require.NoError(t, db.Close())
+	})
+	t.Run("Managed mode", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer removeDir(dir)
+
+		opt := getTestOptions(dir)
+		db, err := OpenManaged(opt)
+		require.NoError(t, err)
+
+		wb := db.NewManagedWriteBatch()
+		defer wb.Cancel()
+
+		// This will create commits from 1 to N.
+		for i := uint64(1); i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("%d", i))}, i)
+		}
+		require.NoError(t, wb.Flush())
+
+		ver, err := db.MaxVersion()
+		require.NoError(t, err)
+		require.Equal(t, N, ver)
+
+		require.NoError(t, db.Close())
+	})
+}

@@ -1877,3 +1877,53 @@ func (db *DB) StreamDB(outOptions Options) error {
 func (db *DB) Opts() Options {
 	return db.opt
 }
+
+// MaxVersion returns the maximum commited version across all keys in the DB. It
+// uses the stream framework to find the maximum version.
+func (db *DB) MaxVersion() (uint64, error) {
+	maxVersion := uint64(0)
+	var mu sync.Mutex
+	var stream *Stream
+	if db.opt.managedTxns {
+		stream = db.NewStreamAt(math.MaxUint64)
+	} else {
+		stream = db.NewStream()
+	}
+
+	stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
+		maxVs := uint64(0)
+		for ; itr.Valid(); itr.Next() {
+			item := itr.Item()
+			if item.IsDeletedOrExpired() {
+				break
+			}
+			if !bytes.Equal(key, item.Key()) {
+				// Break out on the first encounter with another key.
+				break
+			}
+
+			if item.Version() > maxVs {
+				maxVs = item.Version()
+			}
+			if db.opt.NumVersionsToKeep == 1 {
+				break
+			}
+
+			if item.DiscardEarlierVersions() {
+				break
+			}
+		}
+		mu.Lock()
+		if maxVs > maxVersion {
+			maxVersion = maxVs
+		}
+		mu.Unlock()
+		return nil, nil
+	}
+	stream.Send = nil
+	if err := stream.Orchestrate(context.Background()); err != nil {
+		return 0, err
+	}
+	return maxVersion, nil
+
+}
