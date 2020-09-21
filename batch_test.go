@@ -18,6 +18,7 @@ package badger
 
 import (
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -70,6 +71,14 @@ func TestWriteBatch(t *testing.T) {
 			return nil
 		})
 		require.NoError(t, err)
+
+		// Test getHead as well.
+		headKey := y.KeyWithTs(head, math.MaxUint64)
+		vs, err := db.get(headKey)
+		require.NoError(t, err)
+		_, ver := db.getHead()
+		require.NoError(t, err)
+		require.Equal(t, vs.Version, ver)
 	}
 	t.Run("disk mode", func(t *testing.T) {
 		opt := getTestOptions("")

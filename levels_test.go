@@ -526,6 +526,14 @@ func TestHeadKeyCleanup(t *testing.T) {
 		require.NoError(t, db.lc.runCompactDef(0, cdef))
 		// foo version 2 should be dropped after compaction.
 		getAllAndCheck(t, db, []keyValVersion{{string(head), "foo", 5, 0}})
+
+		// Test getHead as well.
+		headKey := y.KeyWithTs(head, math.MaxUint64)
+		vs, err := db.get(headKey)
+		require.NoError(t, err)
+		_, ver := db.getHead()
+		require.NoError(t, err)
+		require.Equal(t, vs.Version, ver)
 	})
 }
 

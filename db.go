@@ -445,7 +445,6 @@ func (db *DB) getHead() (valuePointer, uint64) {
 	// Do not prefetch values. This could cause a race condition since
 	// prefetching is done via goroutines.
 	iopt.PrefetchValues = false
-	iopt.Reverse = true
 
 	it := txn.NewKeyIterator(head, iopt)
 	defer it.Close()
@@ -456,7 +455,9 @@ func (db *DB) getHead() (valuePointer, uint64) {
 		return vptr, 0
 	}
 
-	var maxVersion uint64
+	// The first item in forward iteration is the one with the maximum version.
+	maxVersion := it.Item().Version()
+
 	db.opt.Infof("Found the following head pointers")
 	for ; it.Valid(); it.Next() {
 		item := it.Item()
@@ -468,9 +469,8 @@ func (db *DB) getHead() (valuePointer, uint64) {
 		})
 		// This shouldn't happen.
 		y.Check(err)
-		// We're iterating in the reverse order so the last item would be the
-		// one with the biggest version.
-		maxVersion = item.Version()
+		// We're iterating forward so version should show up in decreasing order.
+		y.AssertTrue(item.Version() <= maxVersion)
 	}
 	// If we have reached here it means there were some head key and so the
 	// version should never be zero.
