@@ -783,7 +783,6 @@ func (vlog *valueLog) decrIteratorCount() error {
 }
 
 func (vlog *valueLog) deleteLogFile(lf *logFile) error {
-	y.AssertTrue(lf.fileType == vlogFile)
 	if lf == nil {
 		return nil
 	}
@@ -802,33 +801,39 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 }
 
 func (vlog *valueLog) dropAll() (int, error) {
-	// If db is opened in InMemory mode, we don't need to do anything since there are no vlog files.
+	// If db is opened in InMemory mode, we don't need to do anything since there are no log files.
 	if vlog.db.opt.InMemory {
 		return 0, nil
 	}
 	// We don't want to block dropAll on any pending transactions. So, don't worry about iterator
 	// count.
 	var count int
-	// Todo(Naman): We should delete wal files too
+	// Done(Naman): We should delete wal files too
 	// Ibrahim - Yes, clean all files and start from ID/offset 0.
-	deleteAll := func() error {
-		vlog.vlog.filesLock.Lock()
-		defer vlog.vlog.filesLock.Unlock()
-		for _, lf := range vlog.vlog.filesMap {
+	deleteAll := func(lw *logWrapper) error {
+		lw.filesLock.Lock()
+		defer lw.filesLock.Unlock()
+		for _, lf := range lw.filesMap {
 			if err := vlog.deleteLogFile(lf); err != nil {
 				return err
 			}
 			count++
 		}
-		vlog.vlog.filesMap = make(map[uint32]*logFile)
+		lw.filesMap = make(map[uint32]*logFile)
 		return nil
 	}
-	if err := deleteAll(); err != nil {
+	if err := deleteAll(&vlog.vlog); err != nil {
+		return count, err
+	}
+	if err := deleteAll(&vlog.wal); err != nil {
 		return count, err
 	}
 
 	vlog.db.opt.Infof("Value logs deleted. Creating log file: 0")
 	if _, err := vlog.createLogFile(0, walFile); err != nil { // Called while writes are stopped.
+		return count, err
+	}
+	if _, err := vlog.createLogFile(0, vlogFile); err != nil { // Called while writes are stopped.
 		return count, err
 	}
 	return count, nil
@@ -904,7 +909,7 @@ func (vlog *valueLog) populateFilesMap() error {
 		return errFile(err, vlog.dirPath, "Unable to open log dir.")
 	}
 
-	// We could use map[uint64]bool instead, this lead to better memory usage
+	// We could use map[uint64]bool instead, this lead to better memory usage.
 	vfound := make(map[uint64]struct{})
 	wfound := make(map[uint64]struct{})
 
@@ -948,10 +953,9 @@ func (vlog *valueLog) populateFilesMap() error {
 			registry:    vlog.db.registry,
 		}
 		var lw *logWrapper
-		switch ft {
-		case vlogFile:
+		if ft == vlogFile {
 			lw = &vlog.vlog
-		case walFile:
+		} else {
 			lw = &vlog.wal
 		}
 		if lw.maxFid < uint32(fid) {
@@ -1053,7 +1057,7 @@ func (vlog *valueLog) createLogFile(fid uint32, ft fileType) (*logFile, error) {
 
 	// WAL files are used only for writing. We don't need to open them in mmap mode.
 	// TODO(ibrahim): Close WAL fd once we're done writing to it.
-	// TODO(naman): The wal fd is not needed once a new file is created. We
+	// Done(naman): The wal fd is not needed once a new file is created. We
 	// should close the existing file.
 	if ft == walFile {
 		lf.loadingMode = options.FileIO
@@ -1195,69 +1199,61 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	if err := vlog.populateFilesMap(); err != nil {
 		return err
 	}
-	// If no files are found, then create a new file.
-	//TODO(ibrahim): what if wal files are cleared but vlog files are left behind?
-	//
 	// Create file 0 if it doesn't exist for any filetype.
-	// Todo(naman): Do not create a vlog file until we have something to write to it.
 	if len(vlog.wal.filesMap) == 0 {
-		// Create only the walFile. We will create the vlog file only when needed.
 		if _, err := vlog.createLogFile(0, walFile); err != nil {
 			return y.Wrapf(err, "Error while creating wal file in valueLog.open")
 		}
-		// TODO(ibrahim): This isn't always necessary.
+	}
+
+	// Todo(naman): Do not create a vlog file until we have something to write to it.
+	// TODO(ibrahim): This isn't always necessary.
+	// Ibrahim - Create only the walFile. We will create the vlog file only when needed.
+	// Naman - This leads to adding many checks at places because maxFid is by default 0,
+	// and hence a file is expected to exist.
+	if len(vlog.vlog.filesMap) == 0 {
 		if _, err := vlog.createLogFile(0, vlogFile); err != nil {
 			return y.Wrapf(err, "Error while creating vlog file in valueLog.open")
 		}
 	}
 
-	// Collect vlog fids for mmap
+	openLogFile := func(lf *logFile) error {
+		var flags uint32
+		switch {
+		case vlog.opt.ReadOnly:
+			// If we have read only, we don't need SyncWrites.
+			flags |= y.ReadOnly
+			// Set sync flag.
+		case vlog.opt.SyncWrites:
+			flags |= y.Sync
+		}
+
+		// We cannot mmap the files upfront here. Windows does not like mmapped files to be
+		// truncated. We might need to truncate files during a replay.
+		var err error
+		if err = lf.open(flags); err != nil {
+			return errors.Wrapf(err, "Open existing file: %q", lf.path)
+		}
+		return err
+	}
+
+	// Mmap vlog files.
 	vfids := vlog.vlog.sortedFids()
 	for _, fid := range vfids {
 		lf, ok := vlog.vlog.filesMap[fid]
 		y.AssertTrue(ok)
-		var flags uint32
-		switch {
-		case vlog.opt.ReadOnly:
-			// If we have read only, we don't need SyncWrites.
-			flags |= y.ReadOnly
-			// Set sync flag.
-		case vlog.opt.SyncWrites:
-			flags |= y.Sync
-		}
-
-		// We cannot mmap the files upfront here. Windows does not like mmapped files to be
-		// truncated. We might need to truncate files during a replay.
-		var err error
-		if err = lf.open(flags); err != nil {
-			return errors.Wrapf(err, "Open existing file: %q", lf.path)
+		if err := openLogFile(lf); err != nil {
+			return err
 		}
 	}
 
-	// Todo(Naman): Do we need this?
-	// Ibrahim - We should open all wal files because we might need to replay
-	// all of them. We can close all the files except the last one after replay
-	// is done.
-	// Collect wal fids for replay as well
+	// Replay wal files
 	wfids := vlog.wal.sortedFids()
 	for _, fid := range wfids {
 		lf, ok := vlog.wal.filesMap[fid]
 		y.AssertTrue(ok)
-		var flags uint32
-		switch {
-		case vlog.opt.ReadOnly:
-			// If we have read only, we don't need SyncWrites.
-			flags |= y.ReadOnly
-			// Set sync flag.
-		case vlog.opt.SyncWrites:
-			flags |= y.Sync
-		}
-
-		// We cannot mmap the files upfront here. Windows does not like mmapped files to be
-		// truncated. We might need to truncate files during a replay.
-		var err error
-		if err = lf.open(flags); err != nil {
-			return errors.Wrapf(err, "Open existing file: %q", lf.path)
+		if err := openLogFile(lf); err != nil {
+			return err
 		}
 
 		// This file is before the value head pointer. So, we don't need to
@@ -1281,12 +1277,12 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		if err := vlog.replayLog(lf, offset, replayFn); err != nil {
 			// Log file is corrupted. Delete it.
 			if err == errDeleteVlogFile {
-				delete(vlog.vlog.filesMap, fid)
+				delete(vlog.wal.filesMap, fid)
 				// Close the fd of the file before deleting the file otherwise windows complaints.
 				if err := lf.fd.Close(); err != nil {
 					return errors.Wrapf(err, "failed to close wal file %s", lf.fd.Name())
 				}
-				path := vlog.fpath(lf.fid, vlogFile)
+				path := vlog.fpath(lf.fid, walFile)
 				if err := os.Remove(path); err != nil {
 					return y.Wrapf(err, "failed to delete empty wal file: %q", path)
 				}
@@ -1295,6 +1291,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			return err
 		}
 		// Close the WAL file after replaying, except the last one because that may be used.
+		// Currently, wal is not mmaped, hence we need not unmmap the wal files.
 		if lf.fid != vlog.wal.maxFid {
 			if err := lf.fd.Close(); err != nil {
 				return errors.Wrapf(err, "failed to close wal file %s", lf.fd.Name())
@@ -1302,10 +1299,6 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		}
 		vlog.db.opt.Infof("Replay took: %s\n", time.Since(now))
 
-		// Todo(Naman): Why? As we are not reading values from WAL?
-		// ibrahim - we can mmap the wal files as well since we will read them
-		// whil replaying.
-		//
 		// Keep what we have in master. If we mmap the files after replaying,
 		// let's not mmap the files in that case.
 	}
@@ -1332,6 +1325,12 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			_, err := vlog.createLogFile(newid, last.fileType)
 			if err != nil {
 				return y.Wrapf(err, "Error while creating vlog file %d in valueLog.open", newid)
+			}
+			// Close the last file if fileType is wal.
+			if last.fileType == walFile {
+				if err := last.fd.Close(); err != nil {
+					return errors.Wrapf(err, "failed to close wal file %s", last.fd.Name())
+				}
 			}
 			last, ok = lw.filesMap[newid]
 			y.AssertTrue(ok)
@@ -1407,35 +1406,41 @@ func (vlog *valueLog) Close() error {
 
 	vlog.opt.Debugf("Stopping garbage collection of values.")
 
-	// Todo(Naman): Close wal files as well
-	var err error
-	for id, f := range vlog.vlog.filesMap {
-		f.lock.Lock() // We won’t release the lock.
-		if munmapErr := f.munmap(); munmapErr != nil && err == nil {
-			err = munmapErr
-		}
+	// Done(Naman): Close wal files as well
+	close := func(lw *logWrapper) error {
+		var err error
+		for id, f := range lw.filesMap {
+			f.lock.Lock() // We won’t release the lock.
+			if munmapErr := f.munmap(); munmapErr != nil && err == nil {
+				err = munmapErr
+			}
 
-		maxFid := vlog.vlog.maxFid
-		if !vlog.opt.ReadOnly && id == maxFid {
-			// truncate writable log file to correct offset.
-			if truncErr := f.fd.Truncate(
-				int64(vlog.vlog.offset())); truncErr != nil && err == nil {
-				err = truncErr
+			maxFid := lw.maxFid
+			if !vlog.opt.ReadOnly && id == maxFid {
+				// truncate writable log file to correct offset.
+				if truncErr := f.fd.Truncate(
+					int64(lw.offset())); truncErr != nil && err == nil {
+					err = truncErr
+				}
+			}
+
+			if closeErr := f.fd.Close(); closeErr != nil && err == nil {
+				err = closeErr
 			}
 		}
-
-		if closeErr := f.fd.Close(); closeErr != nil && err == nil {
-			err = closeErr
-		}
+		return err
 	}
-	return err
+	if err := close(&vlog.vlog); err != nil {
+		return err
+	}
+	if err := close(&vlog.wal); err != nil {
+		return err
+	}
+	return nil
 }
 
 // sortedFids returns the file id's not pending deletion, sorted.  Assumes we have shared access to
 // filesMap.
-//
-// TODO(Naman): Fix or remove this function.
-// Already fixed.
 func (lw *logWrapper) sortedFids() []uint32 {
 	toBeDeleted := make(map[uint32]struct{})
 	for _, fid := range lw.filesToBeDeleted {
@@ -1646,7 +1651,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			vlog.vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
 
 			var err error
-			if curVlogF, err = vlog.rotateFile(curVlogF); err != nil {
+			if curVlogF, err = vlog.vlog.rotateFile(curVlogF, vlog); err != nil {
 				return err
 			}
 		}
@@ -1654,7 +1659,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			vlog.wal.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
 
 			var err error
-			if curWALF, err = vlog.rotateFile(curWALF); err != nil {
+			if curWALF, err = vlog.wal.rotateFile(curWALF, vlog); err != nil {
 				return err
 			}
 		}
@@ -2223,18 +2228,9 @@ func (vlog *valueLog) populateDiscardStats() error {
 	return nil
 }
 
-func (vlog *valueLog) rotateFile(lf *logFile) (*logFile, error) {
-	var offset, newid uint32
-	switch lf.fileType {
-	case walFile:
-		offset = vlog.wal.offset()
-		newid = vlog.wal.maxFid + 1
-	case vlogFile:
-		offset = vlog.vlog.offset()
-		newid = vlog.vlog.maxFid + 1
-	default:
-		panic("This shouldn't happen")
-	}
+func (lw *logWrapper) rotateFile(lf *logFile, vlog *valueLog) (*logFile, error) {
+	offset := lw.offset()
+	newid := lw.maxFid + 1
 	y.AssertTrue(offset != 0)
 
 	if err := lf.doneWriting(offset); err != nil {
@@ -2246,10 +2242,13 @@ func (vlog *valueLog) rotateFile(lf *logFile) (*logFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	//TODO(Naman): Confirm this, once the wal cleaner is done.
-	// Nothing to do here.
+	// Done(Naman): Confirm this, once the wal cleaner is done.
+	// Close the last wal file
 	if lf.fileType == walFile {
 		atomic.AddInt32(&vlog.db.logRotates, 1)
+		if err := lf.fd.Close(); err != nil {
+			return newlf, errors.Wrapf(err, "failed to close wal file %s", lf.fd.Name())
+		}
 	}
 
 	return newlf, nil
