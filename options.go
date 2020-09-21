@@ -280,7 +280,7 @@ func (opt Options) WithReadOnly(val bool) Options {
 
 // WithTruncate returns a new Options value with Truncate set to the given value.
 //
-// Truncate indicates whether value log files should be truncated to delete corrupt data, if any.
+// Truncate indicates whether wal files should be truncated to delete corrupt data, if any.
 // This option is ignored when ReadOnly is true.
 //
 // The default value of Truncate is false.

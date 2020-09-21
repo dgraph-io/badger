@@ -146,8 +146,8 @@ func TestWrite(t *testing.T) {
 func TestUpdateAndView(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		err := db.Update(func(txn *Txn) error {
-			for i := 0; i < 10; i++ {
-				entry := NewEntry([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)))
+			for i := 0; i < 1; i++ {
+				entry := NewEntry([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%0100d", i)))
 				if err := txn.SetEntry(entry); err != nil {
 					return err
 				}
@@ -160,10 +160,11 @@ func TestUpdateAndView(t *testing.T) {
 			for i := 0; i < 10; i++ {
 				item, err := txn.Get([]byte(fmt.Sprintf("key%d", i)))
 				if err != nil {
+					fmt.Printf("=========== %d\n", i)
 					return err
 				}
 
-				expected := []byte(fmt.Sprintf("val%d", i))
+				expected := []byte(fmt.Sprintf("val%0100d", i))
 				if err := item.Value(func(val []byte) error {
 					require.Equal(t, expected, val,
 						"Invalid value for key %q. expected: %q, actual: %q",
