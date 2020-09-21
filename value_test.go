@@ -184,9 +184,9 @@ func TestValueGC(t *testing.T) {
 		txnDelete(t, kv, []byte(fmt.Sprintf("key%d", i)))
 	}
 
-	kv.vlog.filesLock.RLock()
+	kv.vlog.vlog.filesLock.RLock()
 	lf := kv.vlog.vlog.filesMap[kv.vlog.vlog.sortedFids()[0]]
-	kv.vlog.filesLock.RUnlock()
+	kv.vlog.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
 	//		e.print("lf")
@@ -242,9 +242,9 @@ func TestValueGC2(t *testing.T) {
 		txnSet(t, kv, []byte(fmt.Sprintf("key%d", i)), v, 0)
 	}
 
-	kv.vlog.filesLock.RLock()
+	kv.vlog.vlog.filesLock.RLock()
 	lf := kv.vlog.vlog.filesMap[kv.vlog.vlog.sortedFids()[0]]
-	kv.vlog.filesLock.RUnlock()
+	kv.vlog.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
 	//		e.print("lf")
@@ -344,9 +344,9 @@ func TestValueGC3(t *testing.T) {
 
 	// Like other tests, we pull out a logFile to rewrite it directly
 
-	kv.vlog.filesLock.RLock()
+	kv.vlog.vlog.filesLock.RLock()
 	logFile := kv.vlog.vlog.filesMap[kv.vlog.vlog.sortedFids()[0]]
-	kv.vlog.filesLock.RUnlock()
+	kv.vlog.vlog.filesLock.RUnlock()
 
 	tr := trace.New("Test", "Test")
 	defer tr.Finish()
@@ -394,10 +394,10 @@ func TestValueGC4(t *testing.T) {
 		txnSet(t, kv, []byte(fmt.Sprintf("key%d", i)), v, 0)
 	}
 
-	kv.vlog.filesLock.RLock()
+	kv.vlog.vlog.filesLock.RLock()
 	lf0 := kv.vlog.vlog.filesMap[kv.vlog.vlog.sortedFids()[0]]
 	lf1 := kv.vlog.vlog.filesMap[kv.vlog.vlog.sortedFids()[1]]
-	kv.vlog.filesLock.RUnlock()
+	kv.vlog.vlog.filesLock.RUnlock()
 
 	//	lf.iterate(0, func(e Entry) bool {
 	//		e.print("lf")
