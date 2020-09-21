@@ -158,4 +158,5 @@ func TestBatchErrDeadlock(t *testing.T) {
 	wb := db.NewManagedWriteBatch()
 	require.NoError(t, wb.SetEntryAt(&Entry{Key: []byte("foo")}, 0))
 	require.Error(t, wb.Flush())
+	require.NoError(t, db.Close())
 }
