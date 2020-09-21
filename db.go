@@ -246,7 +246,7 @@ func checkAndSetOptions(opt *Options) error {
 
 	needCache := (opt.Compression != options.None) || (len(opt.EncryptionKey) > 0)
 	if needCache && opt.BlockCacheSize == 0 {
-		opt.Logger.Warningf("BlockCacheSize should be set " +
+		opt.Warningf("BlockCacheSize should be set " +
 			"since compression/encryption are enabled")
 	}
 	return nil
