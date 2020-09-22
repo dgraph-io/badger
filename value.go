@@ -849,6 +849,11 @@ type lfDiscardStats struct {
 	updatesSinceFlush int
 }
 
+type walCleaner struct {
+	closer  *z.Closer
+	delChan chan uint32
+}
+
 type logWrapper struct {
 
 	// guards our view of which files exist, which to be deleted, how many active iterators
@@ -876,6 +881,7 @@ type valueLog struct {
 
 	garbageCh      chan struct{}
 	lfDiscardStats *lfDiscardStats
+	wc             *walCleaner
 }
 
 func vlogFilePath(dirPath string, fid uint32) string {
@@ -1111,8 +1117,7 @@ func (vlog *valueLog) createLogFile(fid uint32, ft fileType) (*logFile, error) {
 	lw.numEntriesWritten = 0
 	lw.filesLock.Unlock()
 
-	// Todo(Naman): The below is used for wal cleaning.
-	// vlog.purgeOldFiles()
+	vlog.purgeOldFiles()
 	return lf, nil
 }
 
@@ -1184,8 +1189,12 @@ func (vlog *valueLog) init(db *DB) {
 		closer:    z.NewCloser(1),
 		flushChan: make(chan map[uint32]int64, 16),
 	}
+	vlog.wc = &walCleaner{
+		closer:  z.NewCloser(1),
+		delChan: make(chan uint32, 5),
+	}
 
-	// Todo(Naman): Add code for wal cleaner here in separate go routine
+	go vlog.walCleaner()
 }
 
 func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
@@ -1290,14 +1299,6 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			}
 			return err
 		}
-		// Close the WAL file after replaying, except the last one because that may be used.
-		// Currently, wal is not mmaped, hence we need not unmmap the wal files.
-		if lf.fid != vlog.wal.maxFid {
-			delete(vlog.wal.filesMap, lf.fid)
-			if err := lf.fd.Close(); err != nil {
-				return errors.Wrapf(err, "failed to close wal file %s", lf.fd.Name())
-			}
-		}
 
 		vlog.db.opt.Infof("Replay took: %s\n", time.Since(now))
 
@@ -1323,13 +1324,6 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			_, err := vlog.createLogFile(newid, last.fileType)
 			if err != nil {
 				return y.Wrapf(err, "Error while creating vlog file %d in valueLog.open", newid)
-			}
-			// Close the last file if fileType is wal.
-			if last.fileType == walFile {
-				delete(lw.filesMap, last.fid)
-				if err := last.fd.Close(); err != nil {
-					return errors.Wrapf(err, "failed to close wal file %s", last.fd.Name())
-				}
 			}
 			last, ok = lw.filesMap[newid]
 			y.AssertTrue(ok)
@@ -1403,6 +1397,9 @@ func (vlog *valueLog) Close() error {
 	// close flushDiscardStats.
 	vlog.lfDiscardStats.closer.SignalAndWait()
 
+	// close wal cleaner.
+	vlog.wc.closer.SignalAndWait()
+
 	vlog.opt.Debugf("Stopping garbage collection of values.")
 
 	// Done(Naman): Close wal files as well
@@ -1471,6 +1468,7 @@ type request struct {
 func (req *request) reset() {
 	req.Entries = req.Entries[:0]
 	req.Ptrs = req.Ptrs[:0]
+	req.head = valuePointer{}
 	req.Wg = sync.WaitGroup{}
 	req.Err = nil
 	req.ref = 0
@@ -2229,6 +2227,68 @@ func (vlog *valueLog) populateDiscardStats() error {
 	return nil
 }
 
+// purgeOldFiles will find the head pointer persisted to the disk and pass it
+// to the wal cleaner to remove old wal files.
+func (vlog *valueLog) purgeOldFiles() {
+	// find the head pointer which is on disk.
+	head, err := vlog.db.getPersistedHead()
+	if err != nil {
+		vlog.db.opt.Logger.Warningf("Unable to fetch persisted head")
+		return
+	}
+	vlog.wc.dropBefore(head.Fid)
+}
+
+func (wc *walCleaner) dropBefore(fid uint32) {
+	if wc == nil {
+		return
+	}
+	wc.delChan <- fid
+}
+
+// walCleaner runs in a go routine and takes care of deleted old wal files.
+func (vlog *valueLog) walCleaner() {
+	wc := vlog.wc
+	wal := &vlog.wal
+	defer wc.closer.Done()
+	for {
+		select {
+		case <-wc.closer.HasBeenClosed():
+			close(wc.delChan)
+			// Set wc to nil so that we don't push more file IDs. DropBefore
+			// will ignore fids if wc is nil.
+			wc = nil
+			return
+
+		case hFid := <-wc.delChan:
+			wal.filesLock.RLock()
+			// Sanity check.
+			y.AssertTrue(hFid <= wal.maxFid)
+			fids := wal.sortedFids()
+			wal.filesLock.RUnlock()
+
+			for _, fid := range fids {
+				// Do not drop the wal file on which the head pointer lies.
+				if fid >= hFid {
+					break
+				}
+				wal.filesLock.Lock()
+				lf, ok := wal.filesMap[fid]
+				y.AssertTrue(ok)
+				y.AssertTrue(lf.fileType == walFile)
+				delete(wal.filesMap, fid)
+				wal.filesLock.Unlock()
+
+				vlog.db.opt.Logger.Infof("Deleting wal %s", lf.fd.Name())
+				if err := vlog.deleteLogFile(lf); err != nil {
+					vlog.db.opt.Logger.Errorf("Failed to delete wal %s, err:%s",
+						lf.fd.Name(), err)
+				}
+			}
+		}
+	}
+}
+
 func (lw *logWrapper) rotateFile(lf *logFile, vlog *valueLog) (*logFile, error) {
 	offset := lw.offset()
 	newid := lw.maxFid + 1
@@ -2244,13 +2304,9 @@ func (lw *logWrapper) rotateFile(lf *logFile, vlog *valueLog) (*logFile, error) 
 		return nil, err
 	}
 	// Done(Naman): Confirm this, once the wal cleaner is done.
-	// Close the last wal file
+	// Increment log rotate only for wal files
 	if lf.fileType == walFile {
 		atomic.AddInt32(&vlog.db.logRotates, 1)
-		delete(lw.filesMap, lf.fid)
-		if err := lf.fd.Close(); err != nil {
-			return newlf, errors.Wrapf(err, "failed to close wal file %s", lf.fd.Name())
-		}
 	}
 
 	return newlf, nil
