@@ -1768,7 +1768,12 @@ func TestLSMOnly(t *testing.T) {
 	require.NoError(t, err)
 
 	defer db.Close()
-	require.NoError(t, db.RunValueLogGC(0.2))
+
+	// require.NoError(t, db.RunValueLogGC(0.2))
+
+	// TODO(naman): Add checks here to verify we don't have any vlog files in
+	// LSM only mode and also check the len of WAL files. Once the wal GC is in
+	// place, we expect it to clean up things.
 }
 
 // This test function is doing some intricate sorcery.
