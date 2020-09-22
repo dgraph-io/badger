@@ -688,7 +688,7 @@ func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 		{Key: k2, Value: v2},
 	})
 	buf = buf[:len(buf)-6]
-	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
+	require.NoError(t, ioutil.WriteFile(walFilePath(dir, 0), buf, 0777))
 
 	opts.ReadOnly = true
 	// Badger should fail a read-only open with values to replay
