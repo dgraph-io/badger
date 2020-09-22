@@ -1293,10 +1293,12 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		// Close the WAL file after replaying, except the last one because that may be used.
 		// Currently, wal is not mmaped, hence we need not unmmap the wal files.
 		if lf.fid != vlog.wal.maxFid {
+			delete(vlog.wal.filesMap, lf.fid)
 			if err := lf.fd.Close(); err != nil {
 				return errors.Wrapf(err, "failed to close wal file %s", lf.fd.Name())
 			}
 		}
+
 		vlog.db.opt.Infof("Replay took: %s\n", time.Since(now))
 
 		// Keep what we have in master. If we mmap the files after replaying,
@@ -1317,10 +1319,6 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		if shouldCreateNewFile {
 			// TODO(ibrahim): Create a new vlog file as well or maybe just increment the maxVlogFid.
 			// Creating a new vlog file as well
-			// Close the current WAL file before creating a new
-			if err := last.fd.Close(); err != nil {
-				return errors.Wrapf(err, "failed to close wal file %s", last.fd.Name())
-			}
 			newid := lw.maxFid + 1
 			_, err := vlog.createLogFile(newid, last.fileType)
 			if err != nil {
@@ -1328,6 +1326,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			}
 			// Close the last file if fileType is wal.
 			if last.fileType == walFile {
+				delete(lw.filesMap, last.fid)
 				if err := last.fd.Close(); err != nil {
 					return errors.Wrapf(err, "failed to close wal file %s", last.fd.Name())
 				}
@@ -2246,6 +2245,7 @@ func (lw *logWrapper) rotateFile(lf *logFile, vlog *valueLog) (*logFile, error) 
 	// Close the last wal file
 	if lf.fileType == walFile {
 		atomic.AddInt32(&vlog.db.logRotates, 1)
+		delete(lw.filesMap, lf.fid)
 		if err := lf.fd.Close(); err != nil {
 			return newlf, errors.Wrapf(err, "failed to close wal file %s", lf.fd.Name())
 		}
