@@ -861,7 +861,15 @@ func (db *DB) writeRequests(reqs []*request) error {
 			return errors.Wrap(err, "writeRequests")
 		}
 		db.Lock()
-		db.updateHead(b.Ptrs)
+		// We need to flush the woffset of the wal.
+
+		var vp valuePointer
+		vp.Fid = db.vlog.wal.maxFid
+		vp.Offset = atomic.LoadUint32(&db.vlog.wal.writableOffset)
+		// TODO(naman): Do we need the len?
+		vp.Len = 0
+
+		db.updateHead([]valuePointer{vp})
 		db.Unlock()
 	}
 	done(nil)

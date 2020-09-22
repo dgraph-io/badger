@@ -1683,7 +1683,7 @@ func TestReadOnly(t *testing.T) {
 		return
 	}
 	require.Contains(t, err.Error(), "Another process is using this Badger database")
-	db.Close()
+	require.NoError(t, db.Close())
 
 	// Open one read-only
 	opts.ReadOnly = true
