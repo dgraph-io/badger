@@ -22,7 +22,7 @@ go test -v -run='TestPushValueLogLimit' --manual=true
 # Run the special Truncate test.
 rm -rf p
 go test -v -run='TestTruncateVlogNoClose$' --manual=true
-truncate --size=4096 p/000000.vlog
+truncate --size=4096 p/000000.wal
 go test -v -run='TestTruncateVlogNoClose2$' --manual=true
 go test -v -run='TestTruncateVlogNoClose3$' --manual=true
 rm -rf p
