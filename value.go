@@ -1610,7 +1610,6 @@ func (vlog *valueLog) write(reqs []*request) error {
 		if buf.Len() == 0 {
 			return nil
 		}
-		vlog.opt.Infof("Flushing buffer of size %d to %s", buf.Len(), lf.fd.Name())
 		n, err := lf.fd.Write(buf.Bytes())
 		if err != nil {
 			return errors.Wrapf(err, "Unable to write to file: %s", lf.fd.Name())
@@ -1641,8 +1640,6 @@ func (vlog *valueLog) write(reqs []*request) error {
 		if err := flushWrites(); err != nil {
 			return err
 		}
-		fmt.Printf("vlog.vlog.num = %+v\n", vlog.vlog.numEntriesWritten)
-		fmt.Printf("vlog.wal.NumEntriesWritten = %+v\n", vlog.wal.numEntriesWritten)
 		//Todo(ibrahim): Do we always want to rotate both the files?
 		// Naman - For now, we rotate only the WAL file. See ensureRoomForWrite(), it decides if the
 		// memtable should be flushed or not. This is to done to move the vhead.
@@ -1836,7 +1833,6 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	vlog.vlog.filesLock.RLock()
 	defer vlog.vlog.filesLock.RUnlock()
 	fids := vlog.vlog.sortedFids()
-	fmt.Printf("fids = %+v\n", fids)
 	switch {
 	case len(fids) <= 1:
 		tr.LazyPrintf("Only one or less value log file.")
@@ -2077,10 +2073,8 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 			<-vlog.garbageCh
 		}()
 
-		fmt.Printf("vlog.vlog.files = %+v\n", vlog.vlog.filesMap)
 		var err error
 		files := vlog.pickLog(head, tr)
-		fmt.Printf("files = %+v\n", files)
 		if len(files) == 0 {
 			tr.LazyPrintf("PickLog returned zero results.")
 			return ErrNoRewrite
