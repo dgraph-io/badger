@@ -1462,6 +1462,7 @@ type request struct {
 	Entries []*Entry
 	// Output values and wait group stuff below
 	Ptrs []valuePointer
+	head valuePointer
 	Wg   sync.WaitGroup
 	Err  error
 	ref  int32
@@ -1664,6 +1665,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 	for i := range reqs {
 		b := reqs[i]
 		b.Ptrs = b.Ptrs[:0]
+		head := &b.head
 		var vlogWritten, walWritten int
 		for j := range b.Entries {
 			e := b.Entries[j]
@@ -1675,9 +1677,15 @@ func (vlog *valueLog) write(reqs []*request) error {
 			// Write the WAL first.
 			wOffset := vlog.wal.offset() + uint32(wbuf.Len())
 			// Now encode the entry into buffer.
-			if _, err := curWALF.encodeEntry(e, &wbuf, wOffset); err != nil {
+			l, err := curWALF.encodeEntry(e, &wbuf, wOffset)
+			if err != nil {
 				return err
 			}
+
+			head.Fid = curWALF.fid
+			// Use the offset including buffer length so far.
+			head.Offset = wOffset
+			head.Len = uint32(l)
 			walWritten++
 			// It is possible that the size of the buffer grows beyond the max size of the value
 			// log (this happens when a transaction contains entries with large value sizes) and
