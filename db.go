@@ -193,43 +193,42 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 	}
 }
 
-// Open returns a new DB object.
-func Open(opt Options) (db *DB, err error) {
+func checkAndSetOptions(opt *Options) error {
 	// It's okay to have zero compactors which will disable all compactions but
 	// we cannot have just one compactor otherwise we will end up with all data
 	// on level 2.
 	if opt.NumCompactors == 1 {
-		return nil, errors.New("Cannot have 1 compactor. Need at least 2")
+		return errors.New("Cannot have 1 compactor. Need at least 2")
 	}
 	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
-		return nil, errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
+		return errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
 	}
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
 	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
 	if opt.ValueThreshold > maxValueThreshold {
-		return nil, errors.Errorf("Invalid ValueThreshold, must be less or equal to %d",
+		return errors.Errorf("Invalid ValueThreshold, must be less or equal to %d",
 			maxValueThreshold)
 	}
 
 	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
 	if int64(opt.ValueThreshold) > opt.maxBatchSize {
-		return nil, errors.Errorf("Valuethreshold greater than max batch size of %d. Either "+
+		return errors.Errorf("Valuethreshold greater than max batch size of %d. Either "+
 			"reduce opt.ValueThreshold or increase opt.MaxTableSize.", opt.maxBatchSize)
 	}
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
-		return nil, ErrValueLogSize
+		return ErrValueLogSize
 	}
 	if !(opt.ValueLogLoadingMode == options.FileIO ||
 		opt.ValueLogLoadingMode == options.MemoryMap) {
-		return nil, ErrInvalidLoadingMode
+		return ErrInvalidLoadingMode
 	}
 
 	// Return error if badger is built without cgo and compression is set to ZSTD.
 	if opt.Compression == options.ZSTD && !y.CgoEnabled {
-		return nil, y.ErrZstdCgo
+		return y.ErrZstdCgo
 	}
 	// Keep L0 in memory if either KeepL0InMemory is set or if InMemory is set.
 	opt.KeepL0InMemory = opt.KeepL0InMemory || opt.InMemory
@@ -243,6 +242,20 @@ func Open(opt Options) (db *DB, err error) {
 		opt.Truncate = false
 		// Do not perform compaction in read only mode.
 		opt.CompactL0OnClose = false
+	}
+
+	needCache := (opt.Compression != options.None) || (len(opt.EncryptionKey) > 0)
+	if needCache && opt.BlockCacheSize == 0 {
+		opt.Warningf("BlockCacheSize should be set " +
+			"since compression/encryption are enabled")
+	}
+	return nil
+}
+
+// Open returns a new DB object.
+func Open(opt Options) (db *DB, err error) {
+	if err := checkAndSetOptions(&opt); err != nil {
+		return nil, err
 	}
 	var dirLockGuard, valueDirLockGuard *directoryLockGuard
 
@@ -380,18 +393,8 @@ func Open(opt Options) (db *DB, err error) {
 			_ = db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
 		}()
 	}
-
-	headKey := y.KeyWithTs(head, math.MaxUint64)
-	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
-	vs, err := db.get(headKey)
-	if err != nil {
-		return db, errors.Wrap(err, "Retrieving head")
-	}
-	db.orc.nextTxnTs = vs.Version
-	var vptr valuePointer
-	if len(vs.Value) > 0 {
-		vptr.Decode(vs.Value)
-	}
+	vptr, version := db.getHead()
+	db.orc.nextTxnTs = version
 
 	replayCloser := z.NewCloser(1)
 	go db.doWrites(replayCloser)
@@ -425,6 +428,54 @@ func Open(opt Options) (db *DB, err error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
+}
+
+// getHead prints all the head pointer in the DB and return the max value.
+func (db *DB) getHead() (valuePointer, uint64) {
+	// This is a hack. If we use newTransaction(..) we'll end up in deadlock
+	// since txnmark is not initialized when this function is called.
+	txn := Txn{
+		db:     db,
+		readTs: math.MaxUint64, // Show all versions.
+	}
+	var vptr valuePointer
+	iopt := DefaultIteratorOptions
+	iopt.AllVersions = true
+	iopt.InternalAccess = true
+	// Do not prefetch values. This could cause a race condition since
+	// prefetching is done via goroutines.
+	iopt.PrefetchValues = false
+	iopt.Reverse = true
+
+	it := txn.NewKeyIterator(head, iopt)
+	defer it.Close()
+
+	it.Rewind()
+	if !it.Valid() {
+		db.opt.Infof("No head keys found")
+		return vptr, 0
+	}
+
+	var maxVersion uint64
+	db.opt.Infof("Found the following head pointers")
+	for ; it.Valid(); it.Next() {
+		item := it.Item()
+		err := item.Value(func(val []byte) error {
+			vptr.Decode(val)
+			db.opt.Infof("Fid: %d Len: %d Offset: %d Version: %d\n",
+				vptr.Fid, vptr.Len, vptr.Offset, item.Version())
+			return nil
+		})
+		// This shouldn't happen.
+		y.Check(err)
+		// We're iterating in the reverse order so the last item would be the
+		// one with the biggest version.
+		maxVersion = item.Version()
+	}
+	// If we have reached here it means there were some head key and so the
+	// version should never be zero.
+	y.AssertTrue(maxVersion != 0)
+	return vptr, maxVersion
 }
 
 // cleanup stops all the goroutines started by badger. This is used in open to
@@ -1834,4 +1885,38 @@ func (db *DB) StreamDB(outOptions Options) error {
 		return errors.Wrapf(err, "cannot flush writer")
 	}
 	return nil
+}
+
+// Opts returns a copy of the DB options.
+func (db *DB) Opts() Options {
+	return db.opt
+}
+
+// MaxVersion returns the maximum commited version across all keys in the DB. It
+// uses the stream framework to find the maximum version.
+func (db *DB) MaxVersion() (uint64, error) {
+	maxVersion := uint64(0)
+	var mu sync.Mutex
+	var stream *Stream
+	if db.opt.managedTxns {
+		stream = db.NewStreamAt(math.MaxUint64)
+	} else {
+		stream = db.NewStream()
+	}
+
+	stream.ChooseKey = func(item *Item) bool {
+		mu.Lock()
+		if item.Version() > maxVersion {
+			maxVersion = item.Version()
+		}
+		mu.Unlock()
+		return false
+	}
+	stream.KeyToList = nil
+	stream.Send = nil
+	if err := stream.Orchestrate(context.Background()); err != nil {
+		return 0, err
+	}
+	return maxVersion, nil
+
 }
