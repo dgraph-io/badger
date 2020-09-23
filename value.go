@@ -833,9 +833,15 @@ func (vlog *valueLog) dropAll() (int, error) {
 	if _, err := vlog.createLogFile(0, walFile); err != nil { // Called while writes are stopped.
 		return count, err
 	}
-	if _, err := vlog.createLogFile(0, vlogFile); err != nil { // Called while writes are stopped.
-		return count, err
-	}
+
+	// reset vlog
+	lw := &vlog.vlog
+	lw.filesLock.Lock()
+	lw.filesMap = make(map[uint32]*logFile)
+	lw.maxFid = 0
+	atomic.StoreUint32(&lw.writableOffset, 0)
+	lw.numEntriesWritten = 0
+	lw.filesLock.Unlock()
 	return count, nil
 }
 
@@ -1208,21 +1214,10 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	if err := vlog.populateFilesMap(); err != nil {
 		return err
 	}
-	// Create file 0 if it doesn't exist for any filetype.
+	// Create file 0 if it doesn't exist for wal.
 	if len(vlog.wal.filesMap) == 0 {
 		if _, err := vlog.createLogFile(0, walFile); err != nil {
 			return y.Wrapf(err, "Error while creating wal file in valueLog.open")
-		}
-	}
-
-	// Todo(naman): Do not create a vlog file until we have something to write to it.
-	// TODO(ibrahim): This isn't always necessary.
-	// Ibrahim - Create only the walFile. We will create the vlog file only when needed.
-	// Naman - This leads to adding many checks at places because maxFid is by default 0,
-	// and hence a file is expected to exist.
-	if len(vlog.vlog.filesMap) == 0 {
-		if _, err := vlog.createLogFile(0, vlogFile); err != nil {
-			return y.Wrapf(err, "Error while creating vlog file in valueLog.open")
 		}
 	}
 
@@ -1344,13 +1339,15 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	if err := initLastFile(&vlog.wal); err != nil {
 		return err
 	}
-	if err := initLastFile(&vlog.vlog); err != nil {
-		return err
+	if len(vlog.vlog.filesMap) != 0 {
+		if err := initLastFile(&vlog.vlog); err != nil {
+			return err
+		}
+		// Sanity check. Verify if the last files of both the fileType's have
+		// same encrytion mode.
+		y.AssertTrue(vlog.vlog.filesMap[vlog.vlog.maxFid].encryptionEnabled() ==
+			vlog.wal.filesMap[vlog.wal.maxFid].encryptionEnabled())
 	}
-
-	// Sanity check. Verify if the last files of both the fileType's have same encrytion mode.
-	y.AssertTrue(vlog.vlog.filesMap[vlog.vlog.maxFid].encryptionEnabled() ==
-		vlog.wal.filesMap[vlog.wal.maxFid].encryptionEnabled())
 
 	// Update the head to point to the updated tail. Otherwise, even after doing a successful
 	// replay and closing the DB, the value log head does not get updated, which causes the replay
@@ -1622,16 +1619,12 @@ func (vlog *valueLog) write(reqs []*request) error {
 	}
 
 	flushWrites := func() error {
-		// Empty wbuf implies we didn't write anything. If this happens we
-		// shouldn't have written anything to the vbuf as well.
-		if wbuf.Len() == 0 {
-			y.AssertTrue(vbuf.Len() == 0)
-			return nil
+		if err := flushBufToFile(&wbuf, curWALF, &vlog.wal); err != nil {
+			return err
 		}
-
-		flushBufToFile(&wbuf, curWALF, &vlog.wal)
-		flushBufToFile(&vbuf, curVlogF, &vlog.vlog)
-
+		if err := flushBufToFile(&vbuf, curVlogF, &vlog.vlog); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -1642,21 +1635,24 @@ func (vlog *valueLog) write(reqs []*request) error {
 		//Todo(ibrahim): Do we always want to rotate both the files?
 		// Naman - For now, we rotate only the WAL file. See ensureRoomForWrite(), it decides if the
 		// memtable should be flushed or not. This is to done to move the vhead.
-		if vlog.vlog.offset() > uint32(vlog.opt.ValueLogFileSize) ||
-			vlog.vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
+		toDiskHelper := func(lw *logWrapper, lf *logFile) error {
+			if lw.offset() > uint32(vlog.opt.ValueLogFileSize) ||
+				lw.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
 
-			var err error
-			if curVlogF, err = vlog.vlog.rotateFile(curVlogF, vlog); err != nil {
-				return err
+				y.AssertTrue(len(lw.filesMap) != 0)
+				var err error
+				if lf, err = lw.rotateFile(lf, vlog); err != nil {
+					return err
+				}
 			}
+			return nil
 		}
-		if vlog.wal.offset() > uint32(vlog.opt.ValueLogFileSize) ||
-			vlog.wal.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
 
-			var err error
-			if curWALF, err = vlog.wal.rotateFile(curWALF, vlog); err != nil {
-				return err
-			}
+		if err := toDiskHelper(&vlog.wal, curWALF); err != nil {
+			return err
+		}
+		if err := toDiskHelper(&vlog.vlog, curVlogF); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -1684,6 +1680,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			// Use the offset including buffer length so far.
 			head.Offset = wOffset
 			head.Len = uint32(l)
+			y.AssertTrue(vlog.wal.offset() <= head.Offset)
 			walWritten++
 			// It is possible that the size of the buffer grows beyond the max size of the value
 			// log (this happens when a transaction contains entries with large value sizes) and
@@ -1703,6 +1700,11 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 			// write the the vlog if needed.
 			var p valuePointer
+			if len(vlog.vlog.filesMap) == 0 {
+				if curVlogF, err = vlog.createLogFile(0, vlogFile); err != nil {
+					return y.Wrapf(err, "Error while creating vlog file in valueLog.open")
+				}
+			}
 
 			p.Fid = curVlogF.fid
 			// Use the offset including buffer length so far.
@@ -1731,7 +1733,9 @@ func (vlog *valueLog) write(reqs []*request) error {
 		// written to the same wal file.
 		writeNow :=
 			vlog.wal.offset()+uint32(wbuf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
-				vlog.wal.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries)
+				vlog.wal.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries) ||
+				vlog.vlog.offset()+uint32(wbuf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
+				vlog.vlog.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries)
 		if writeNow {
 			if err := toDisk(); err != nil {
 				return err

@@ -535,7 +535,9 @@ func TestChecksums(t *testing.T) {
 		{Key: k2, Value: v2},
 	})
 	buf[len(buf)-1]++ // Corrupt last byte
+	// In this case, contents of both wal and vlog will be same.
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
+	require.NoError(t, ioutil.WriteFile(walFilePath(dir, 0), buf, 0777))
 
 	// K1 should exist, but K2 shouldn't.
 	kv, err = Open(opts)
@@ -620,6 +622,8 @@ func TestPartialAppendToValueLog(t *testing.T) {
 		{Key: k2, Value: v2},
 	})
 	buf = buf[:len(buf)-6]
+
+	require.NoError(t, ioutil.WriteFile(walFilePath(dir, 0), buf, 0777))
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
 
 	// Badger should now start up
@@ -752,7 +756,7 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 	require.NoError(t, txn.Commit())
 	require.NoError(t, kv.Close())
 
-	filename := vlogFilePath(dir, 0)
+	filename := walFilePath(dir, 0)
 	buf, err := ioutil.ReadFile(filename)
 	require.NoError(t, err)
 	return buf
