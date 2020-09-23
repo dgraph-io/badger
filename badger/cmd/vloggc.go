@@ -29,21 +29,17 @@ var gcCmd = &cobra.Command{
 	Use:   "gc command is used to clean the vlog files",
 	Short: "GC vlog files",
 	Long: ` GC command can be used to perform garbage collection of vlog files.
-	This command will gc all vlog files unless --fid flag is specified. Calling
-	GC on a vlog file that doesn't have enough stale data would create move
-	keys for the valid data (that was moved) and this will affect the read performance.
+	This command will gc all vlog files that have at least 50% stale data.
 
-	Use --sample-only flag to calculate the amount of stale data in each vlog
-	file and then perform GC on set of files using the --fid flag.
+	Use --dry-run flag to calculate the amount of stale data in each vlog
+	file.
 `,
 	RunE: gc,
 }
 
 type gcOptions struct {
 	dryRun     bool
-	fid        string
 	numVersion int
-	timeout    string
 }
 
 var gopt gcOptions

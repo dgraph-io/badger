@@ -2036,7 +2036,6 @@ func (vlog *valueLog) populateDiscardStats() error {
 	return nil
 }
 
-//
 func (vlog *valueLog) cleanVlog() error {
 	// Check if gc is not already running.
 	select {

@@ -1843,9 +1843,7 @@ func createDirs(opt Options) error {
 }
 
 // GCVlog will GC all the .vlog files that have more than 50% stale data. GC is
-// an expensive process the GC call could take some time to finish. The GCVlog
-// function will sample all the vlog files to find files that have more than
-// 50% state data and then GC them.
+// an expensive process the GC call could take some time to finish.
 func (db *DB) GCVlog() error {
 	return db.vlog.cleanVlog()
 }
