@@ -269,21 +269,13 @@ func (s *levelsController) dropTree() (int, error) {
 }
 
 // dropPrefix runs a L0->L1 compaction, and then runs same level compaction on the rest of the
-// levels. For L0->L1 compaction, it runs compactions normally, but skips over all the keys with the
-// provided prefix and also the internal move keys for the same prefix.
+// levels. For L0->L1 compaction, it runs compactions normally, but skips over
+// all the keys with the provided prefix.
 // For Li->Li compactions, it picks up the tables which would have the prefix. The
 // tables who only have keys with this prefix are quickly dropped. The ones which have other keys
 // are run through MergeIterator and compacted to create new tables. All the mechanisms of
 // compactions apply, i.e. level sizes and MANIFEST are updated as in the normal flow.
 func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
-	// Internal move keys related to the given prefix should also be skipped.
-	for _, prefix := range prefixes {
-		key := make([]byte, 0, len(badgerMove)+len(prefix))
-		key = append(key, badgerMove...)
-		key = append(key, prefix...)
-		prefixes = append(prefixes, key)
-	}
-
 	opt := s.kv.opt
 	// Iterate levels in the reverse order because if we were to iterate from
 	// lower level (say level 0) to a higher level (say level 3) we could have
@@ -1078,8 +1070,10 @@ func (s *levelsController) close() error {
 	return errors.Wrap(err, "levelsController.Close")
 }
 
-// get returns the found value if any. If not found, we return nil.
-func (s *levelsController) get(key []byte, maxVs *y.ValueStruct, startLevel int) (
+// get searches for a given key in all the levels of the LSM tree. It returns
+// key version <= the expected version (maxVs). If not found, it returns an empty
+// y.ValueStruct.
+func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) (
 	y.ValueStruct, error) {
 	if s.kv.IsClosed() {
 		return y.ValueStruct{}, ErrDBClosed
@@ -1102,17 +1096,14 @@ func (s *levelsController) get(key []byte, maxVs *y.ValueStruct, startLevel int)
 		if vs.Value == nil && vs.Meta == 0 {
 			continue
 		}
-		if maxVs == nil || vs.Version == version {
+		if vs.Version == version {
 			return vs, nil
 		}
 		if maxVs.Version < vs.Version {
-			*maxVs = vs
+			maxVs = vs
 		}
 	}
-	if maxVs != nil {
-		return *maxVs, nil
-	}
-	return y.ValueStruct{}, nil
+	return maxVs, nil
 }
 
 func appendIteratorsReversed(out []y.Iterator, th []*table.Table, opt int) []y.Iterator {

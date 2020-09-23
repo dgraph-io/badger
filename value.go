@@ -543,19 +543,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			ne.meta = 0 // Remove all bits. Different keyspace doesn't need these bits.
 			ne.UserMeta = e.UserMeta
 			ne.ExpiresAt = e.ExpiresAt
-
-			// Create a new key in a separate keyspace, prefixed by moveKey. We are not
-			// allowed to rewrite an older version of key in the LSM tree, because then this older
-			// version would be at the top of the LSM tree. To work correctly, reads expect the
-			// latest versions to be at the top, and the older versions at the bottom.
-			if bytes.HasPrefix(e.Key, badgerMove) {
-				ne.Key = append([]byte{}, e.Key...)
-			} else {
-				ne.Key = make([]byte, len(badgerMove)+len(e.Key))
-				n := copy(ne.Key, badgerMove)
-				copy(ne.Key[n:], e.Key)
-			}
-
+			ne.Key = append([]byte{}, e.Key...)
 			ne.Value = append([]byte{}, e.Value...)
 			es := int64(ne.estimateSize(vlog.opt.ValueThreshold))
 			// Consider size of value as well while considering the total size
@@ -576,22 +564,29 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			wb = append(wb, ne)
 			size += es
 		} else {
-			// It might be possible that the entry read from LSM Tree points to an older vlog file.
-			// This can happen in the following situation. Assume DB is opened with
+			// It might be possible that the entry read from LSM Tree points to
+			// an older vlog file.  This can happen in the following situation.
+			// Assume DB is opened with
 			// numberOfVersionsToKeep=1
 			//
-			// Now, if we have ONLY one key in the system "FOO" which has been updated 3 times and
-			// the same key has been garbage collected 3 times, we'll have 3 versions of the movekey
+			// Now, if we have ONLY one key in the system "FOO" which has been
+			// updated 3 times and the same key has been garbage collected 3
+			// times, we'll have 3 versions of the movekey
 			// for the same key "FOO".
-			// NOTE: moveKeyi is the moveKey with version i
+			//
+			// NOTE: moveKeyi is the gc'ed version of the original key with version i
+			// We're calling the gc'ed keys as moveKey to simplify the
+			// explanantion. We used to add move keys but we no longer do that.
+			//
 			// Assume we have 3 move keys in L0.
 			// - moveKey1 (points to vlog file 10),
 			// - moveKey2 (points to vlog file 14) and
 			// - moveKey3 (points to vlog file 15).
-
-			// Also, assume there is another move key "moveKey1" (points to vlog file 6) (this is
-			// also a move Key for key "FOO" ) on upper levels (let's say 3). The move key
-			//  "moveKey1" on level 0 was inserted because vlog file 6 was GCed.
+			//
+			// Also, assume there is another move key "moveKey1" (points to
+			// vlog file 6) (this is also a move Key for key "FOO" ) on upper
+			// levels (let's say 3). The move key "moveKey1" on level 0 was
+			// inserted because vlog file 6 was GCed.
 			//
 			// Here's what the arrangement looks like
 			// L0 => (moveKey1 => vlog10), (moveKey2 => vlog14), (moveKey3 => vlog15)
@@ -608,14 +603,17 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			// L2 => ....
 			// L3 => (moveKey1 => vlog6)
 			//
-			// Now if we try to GC vlog file 10, the entry read from vlog file will point to vlog10
-			// but the entry read from LSM Tree will point to vlog6. The move key read from LSM tree
-			// will point to vlog6 because we've asked for version 1 of the move key.
+			// Now if we try to GC vlog file 10, the entry read from vlog file
+			// will point to vlog10 but the entry read from LSM Tree will point
+			// to vlog6. The move key read from LSM tree will point to vlog6
+			// because we've asked for version 1 of the move key.
 			//
-			// This might seem like an issue but it's not really an issue because the user has set
-			// the number of versions to keep to 1 and the latest version of moveKey points to the
-			// correct vlog file and offset. The stale move key on L3 will be eventually dropped by
-			// compaction because there is a newer versions in the upper levels.
+			// This might seem like an issue but it's not really an issue
+			// because the user has set the number of versions to keep to 1 and
+			// the latest version of moveKey points to the correct vlog file
+			// and offset. The stale move key on L3 will be eventually dropped
+			// by compaction because there is a newer versions in the upper
+			// levels.
 		}
 		return nil
 	}
@@ -678,63 +676,6 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 		}
 	}
 
-	return nil
-}
-
-func (vlog *valueLog) deleteMoveKeysFor(fid uint32, tr trace.Trace) error {
-	db := vlog.db
-	var result []*Entry
-	var count, pointers uint64
-	tr.LazyPrintf("Iterating over move keys to find invalids for fid: %d", fid)
-	err := db.View(func(txn *Txn) error {
-		opt := DefaultIteratorOptions
-		opt.InternalAccess = true
-		opt.PrefetchValues = false
-		itr := txn.NewIterator(opt)
-		defer itr.Close()
-
-		for itr.Seek(badgerMove); itr.ValidForPrefix(badgerMove); itr.Next() {
-			count++
-			item := itr.Item()
-			if item.meta&bitValuePointer == 0 {
-				continue
-			}
-			pointers++
-			var vp valuePointer
-			vp.Decode(item.vptr)
-			if vp.Fid == fid {
-				e := &Entry{Key: y.KeyWithTs(item.Key(), item.Version()), meta: bitDelete}
-				result = append(result, e)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		tr.LazyPrintf("Got error while iterating move keys: %v", err)
-		tr.SetError()
-		return err
-	}
-	tr.LazyPrintf("Num total move keys: %d. Num pointers: %d", count, pointers)
-	tr.LazyPrintf("Number of invalid move keys found: %d", len(result))
-	batchSize := 10240
-	for i := 0; i < len(result); {
-		end := i + batchSize
-		if end > len(result) {
-			end = len(result)
-		}
-		if err := db.batchSet(result[i:end]); err != nil {
-			if err == ErrTxnTooBig {
-				batchSize /= 2
-				tr.LazyPrintf("Dropped batch size to %d", batchSize)
-				continue
-			}
-			tr.LazyPrintf("Error while doing batchSet: %v", err)
-			tr.SetError()
-			return err
-		}
-		i += batchSize
-	}
-	tr.LazyPrintf("Move keys deletion done.")
 	return nil
 }
 
@@ -1528,7 +1469,7 @@ func (vlog *valueLog) getFileRLocked(vp valuePointer) (*logFile, error) {
 	ret, ok := vlog.filesMap[vp.Fid]
 	if !ok {
 		// log file has gone away, will need to retry the operation.
-		return nil, ErrRetry
+		return nil, errors.New("file not found")
 	}
 
 	// Check for valid offset if we are reading from writable log.
@@ -1685,16 +1626,6 @@ func discardEntry(e Entry, vs y.ValueStruct, db *DB) bool {
 	if (vs.Meta & bitFinTxn) > 0 {
 		// Just a txn finish entry. Discard.
 		return true
-	}
-	if bytes.HasPrefix(e.Key, badgerMove) {
-		// Verify the actual key entry without the badgerPrefix has not been deleted.
-		// If this is not done the badgerMove entry will be kept forever moving from
-		// vlog to vlog during rewrites.
-		avs, err := db.get(e.Key[len(badgerMove):])
-		if err != nil {
-			return false
-		}
-		return avs.Version == 0
 	}
 	return false
 }
@@ -1870,7 +1801,7 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 			tried[lf.fid] = true
 			err = vlog.doRunGC(lf, discardRatio, tr)
 			if err == nil {
-				return vlog.deleteMoveKeysFor(lf.fid, tr)
+				return nil
 			}
 		}
 		return err
@@ -1952,47 +1883,33 @@ func (vlog *valueLog) flushDiscardStats() {
 func (vlog *valueLog) populateDiscardStats() error {
 	key := y.KeyWithTs(lfDiscardStatsKey, math.MaxUint64)
 	var statsMap map[uint32]int64
-	var val []byte
-	var vp valuePointer
-	for {
+
+	val, err := func() ([]byte, error) {
 		vs, err := vlog.db.get(key)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		// Value doesn't exist.
 		if vs.Meta == 0 && len(vs.Value) == 0 {
 			vlog.opt.Debugf("Value log discard stats empty")
-			return nil
+			return nil, nil
 		}
-		vp.Decode(vs.Value)
 		// Entry stored in LSM tree.
 		if vs.Meta&bitValuePointer == 0 {
-			val = y.SafeCopy(val, vs.Value)
-			break
+			return y.SafeCopy(nil, vs.Value), err
 		}
-		// Read entry from value log.
+		var vp valuePointer
+		vp.Decode(vs.Value)
+		// Read entry from the value log.
 		result, cb, err := vlog.Read(vp, new(y.Slice))
+		// Copy it before we release the read lock.
+		val := y.SafeCopy(nil, result)
 		runCallback(cb)
-		val = y.SafeCopy(val, result)
-		// The result is stored in val. We can break the loop from here.
-		if err == nil {
-			break
-		}
-		if err != ErrRetry {
-			return err
-		}
-		// If we're at this point it means we haven't found the value yet and if the current key has
-		// badger move prefix, we should break from here since we've already tried the original key
-		// and the key with move prefix. "val" would be empty since we haven't found the value yet.
-		if bytes.HasPrefix(key, badgerMove) {
-			break
-		}
-		// If we're at this point it means the discard stats key was moved by the GC and the actual
-		// entry is the one prefixed by badger move key.
-		// Prepend existing key with badger move and search for the key.
-		key = append(badgerMove, key...)
+		return val, err
+	}()
+	if err != nil {
+		return err
 	}
-
 	if len(val) == 0 {
 		return nil
 	}
