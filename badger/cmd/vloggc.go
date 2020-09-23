@@ -17,15 +17,11 @@
 package cmd
 
 import (
-	"encoding/csv"
 	"fmt"
+	"math"
 	"sort"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/dgraph-io/badger/v2"
-	"github.com/dgraph-io/badger/v2/y"
 	"github.com/spf13/cobra"
 )
 
@@ -44,7 +40,7 @@ var gcCmd = &cobra.Command{
 }
 
 type gcOptions struct {
-	sampleOnly bool
+	dryRun     bool
 	fid        string
 	numVersion int
 	timeout    string
@@ -54,35 +50,16 @@ var gopt gcOptions
 
 func init() {
 	RootCmd.AddCommand(gcCmd)
-	gcCmd.Flags().BoolVarP(&gopt.sampleOnly, "sample-only", "s", false, "Perform only sampling "+
-		"and don't do GC. This can be used to find the files that need to be gc'ed.")
-	gcCmd.Flags().StringVarP(&gopt.fid, "fids", "f", "",
-		"Perform GC/Sampling on the specified fids only.")
-	gcCmd.Flags().IntVarP(&gopt.numVersion, "num-versions", "n", 1, "todo")
-	gcCmd.Flags().StringVarP(&gopt.timeout, "duration", "d", "10m", "How long to run the test.")
+	gcCmd.Flags().BoolVarP(&gopt.dryRun, "dry-run", "d", false, "Perform only sampling "+
+		"and don't do GC. This will output vlog files and their discard ratio.")
+	gcCmd.Flags().IntVarP(&gopt.numVersion, "num-versions", "n", 1, "Number of versions to keep. "+
+		"A value <= 0 would keep all the versions.")
 }
 
 func gc(cmd *cobra.Command, args []string) error {
-	var fids []uint32
-	// Support comma separated fid list.
-	if len(gopt.fid) > 0 {
-		r := csv.NewReader(strings.NewReader(gopt.fid))
-		entries, err := r.ReadAll()
-		if err != nil {
-			return err
-		}
-
-		for _, e := range entries[0] {
-			u64, err := strconv.ParseUint(e, 10, 32)
-			if err != nil {
-				return err
-			}
-			fids = append(fids, uint32(u64))
-		}
+	if gopt.numVersion <= 0 {
+		gopt.numVersion = math.MaxUint32
 	}
-
-	dur, err := time.ParseDuration(duration)
-	y.Check(err)
 
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
@@ -94,8 +71,8 @@ func gc(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	if gopt.sampleOnly {
-		res, err := db.SampleVlog(fids, dur)
+	if gopt.dryRun {
+		res, err := db.SampleVlog()
 		if err != nil {
 			return err
 		}
@@ -105,7 +82,7 @@ func gc(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Fid: %d DiscardRatio: %f\n", r.Fid, r.DiscardRatio)
 		}
 	} else {
-		return db.GCVlog(fids, dur)
+		return db.GCVlog()
 	}
 	return nil
 }

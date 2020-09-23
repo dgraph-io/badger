@@ -2037,7 +2037,7 @@ func (vlog *valueLog) populateDiscardStats() error {
 }
 
 //
-func (vlog *valueLog) cleanVlog(filesToGC []uint32, timeout time.Duration) error {
+func (vlog *valueLog) cleanVlog() error {
 	// Check if gc is not already running.
 	select {
 	case vlog.garbageCh <- struct{}{}:
@@ -2046,13 +2046,10 @@ func (vlog *valueLog) cleanVlog(filesToGC []uint32, timeout time.Duration) error
 	}
 	defer func() { <-vlog.garbageCh }()
 
-	timeoutCh := time.After(timeout)
-
-	// Get all files.
-	if len(filesToGC) == 0 {
-		vlog.filesLock.RLock()
-		filesToGC = vlog.sortedFids()
-		vlog.filesLock.RUnlock()
+	// Sample all the files.
+	sampleResult, err := vlog.db.SampleVlog()
+	if err != nil {
+		return err
 	}
 
 	tr := trace.New("Badger.ValueLog Forced", "GCF")
@@ -2060,15 +2057,15 @@ func (vlog *valueLog) cleanVlog(filesToGC []uint32, timeout time.Duration) error
 
 	head := atomic.LoadUint32(&vlog.maxFid)
 	// Start processing each fid
-	for _, fid := range filesToGC {
+	for _, s := range sampleResult {
+		// Skip vlog files with < 0.5 discard ratio.
+		if s.DiscardRatio < 0.5 {
+			continue
+		}
+		fid := s.Fid
 		// Skip the head file.
 		if fid == head {
 			continue
-		}
-		select {
-		case <-timeoutCh:
-			return errors.New("GC Timed out")
-		default:
 		}
 		start := time.Now()
 		vlog.db.opt.Logger.Infof("Processing fid %d", fid)
@@ -2092,17 +2089,11 @@ type sampleResult struct {
 	DiscardRatio float64
 }
 
-// getDiscardStats is used to collect and return the discard stats for the specified filesToSample. If filesToSample is set to nil, all files will be sampled. The timeout determines the timeout for sampling operation.
-func (vlog *valueLog) getDiscardStats(
-	filesToSample []uint32, timeout time.Duration) ([]sampleResult, error) {
-	timeoutCh := time.After(timeout)
-
-	// Get all files.
-	if len(filesToSample) == 0 {
-		vlog.filesLock.RLock()
-		filesToSample = vlog.sortedFids()
-		vlog.filesLock.RUnlock()
-	}
+// getDiscardStats is used to collect and return the discard stats for all the files.
+func (vlog *valueLog) getDiscardStats() ([]sampleResult, error) {
+	vlog.filesLock.RLock()
+	filesToSample := vlog.sortedFids()
+	vlog.filesLock.RUnlock()
 
 	head := atomic.LoadUint32(&vlog.maxFid)
 
@@ -2120,11 +2111,6 @@ func (vlog *valueLog) getDiscardStats(
 		// Skip the head file since it is actively being written.
 		if fid == head {
 			continue
-		}
-		select {
-		case <-timeoutCh:
-			return nil, errors.New("GC Timed out")
-		default:
 		}
 		start := time.Now()
 		vlog.db.opt.Logger.Infof("Sampling fid %d", fid)

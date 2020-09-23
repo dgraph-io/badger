@@ -869,7 +869,7 @@ func TestCleanVlog(t *testing.T) {
 		// Drop all the foo-%d keys
 		require.NoError(t, db.DropPrefix([]byte("foo")))
 
-		res, err := db.SampleVlog(nil, time.Hour)
+		res, err := db.SampleVlog()
 		require.NoError(t, err)
 		fullStaleFiles := 0
 		for _, r := range res {
@@ -898,7 +898,7 @@ func TestCleanVlog(t *testing.T) {
 		require.Equal(t, count/2, count2)
 
 		// Clean the vlog files.
-		require.NoError(t, db.GCVlog(nil, time.Hour))
+		require.NoError(t, db.GCVlog())
 		// Files should be less now.
 		require.Less(t, len(db.vlog.filesMap), fileCount)
 		count3 := 0

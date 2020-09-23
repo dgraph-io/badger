@@ -1791,28 +1791,18 @@ func createDirs(opt Options) error {
 	return nil
 }
 
-// GCVlog will GC the .vlog files corresponding to the fids in the filesToGC
-// slice. GC is an expensive operation and running GC on a file that mostly
-// consist of valid data will lead to creation of many move keys and this will
-// affect read performance. It is recommended to run SampleVlog to get
-// information about the amount of stale data in the vlog file before
-// attempting to GC it.
-// The GC will stop within the provided timeout.
-//
-// If the filesToGC argument is nil, badger will GC all the vlog files.
-func (db *DB) GCVlog(filesToGC []uint32, timeout time.Duration) error {
-	return db.vlog.cleanVlog(filesToGC, timeout)
+// GCVlog will GC all the .vlog files that have more than 50% stale data. GC is
+// an expensive process the GC call could take some time to finish. The GCVlog
+// function will sample all the vlog files to find files that have more than
+// 50% state data and then GC them.
+func (db *DB) GCVlog() error {
+	return db.vlog.cleanVlog()
 }
 
 // SampleVlog can be used to collect information about the amount of stale data
-// in vlog files. If the fileToSample param in non-nil, only the specified fids
-// will be sampled. If the param is nil, all vlog files will be sampled (this
-// could take some time).
-
-// The sampling will stop within the provided timeout.
-// If the filesToSample argument is nil, badger will GC all the vlog files.
-func (db *DB) SampleVlog(filesToSample []uint32, timeout time.Duration) ([]sampleResult, error) {
-	return db.vlog.getDiscardStats(filesToSample, timeout)
+// in all the vlog files.
+func (db *DB) SampleVlog() ([]sampleResult, error) {
+	return db.vlog.getDiscardStats()
 }
 
 // Stream the contents of this DB to a new DB with options outOptions that will be
