@@ -1635,24 +1635,20 @@ func (vlog *valueLog) write(reqs []*request) error {
 		//Todo(ibrahim): Do we always want to rotate both the files?
 		// Naman - For now, we rotate only the WAL file. See ensureRoomForWrite(), it decides if the
 		// memtable should be flushed or not. This is to done to move the vhead.
-		toDiskHelper := func(lw *logWrapper, lf *logFile) error {
-			if lw.offset() > uint32(vlog.opt.ValueLogFileSize) ||
-				lw.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
+		var err error
+		if vlog.vlog.offset() > uint32(vlog.opt.ValueLogFileSize) ||
+			vlog.vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
 
-				y.AssertTrue(len(lw.filesMap) != 0)
-				var err error
-				if lf, err = lw.rotateFile(lf, vlog); err != nil {
-					return err
-				}
+			if curVlogF, err = vlog.vlog.rotateFile(curVlogF, vlog); err != nil {
+				return err
 			}
-			return nil
 		}
+		if vlog.wal.offset() > uint32(vlog.opt.ValueLogFileSize) ||
+			vlog.wal.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
 
-		if err := toDiskHelper(&vlog.wal, curWALF); err != nil {
-			return err
-		}
-		if err := toDiskHelper(&vlog.vlog, curVlogF); err != nil {
-			return err
+			if curWALF, err = vlog.wal.rotateFile(curWALF, vlog); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
