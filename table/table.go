@@ -388,7 +388,6 @@ func (t *Table) initIndex() (*pb.BlockOffset, error) {
 		// smaller than what we estimate from index.EstimatedSize.
 		t.estimatedSize = uint64(t.tableSize)
 	}
-	t.hasBloomFilter = len(index.BloomFilter) > 0
 	t.noOfBlocks = len(index.Offsets)
 
 	// No cache
