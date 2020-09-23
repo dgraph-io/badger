@@ -829,9 +829,6 @@ func TestL0Stall(t *testing.T) {
 	})
 }
 
-func stringKeyWithTs(s string, ts uint64) []byte {
-	return y.KeyWithTs([]byte(s), ts)
-}
 func TestLevelGet(t *testing.T) {
 	createLevel := func(db *DB, level int, data [][]keyValVersion) {
 		for _, v := range data {
