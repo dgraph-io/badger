@@ -1734,7 +1734,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		writeNow :=
 			vlog.wal.offset()+uint32(wbuf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
 				vlog.wal.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries) ||
-				vlog.vlog.offset()+uint32(wbuf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
+				vlog.vlog.offset()+uint32(vbuf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
 				vlog.vlog.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries)
 		if writeNow {
 			if err := toDisk(); err != nil {
