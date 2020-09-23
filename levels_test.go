@@ -838,29 +838,24 @@ func TestLevelGet(t *testing.T) {
 			createAndOpen(db, v, level)
 		}
 	}
-	type tableData struct {
+	type testData struct {
 		name string
 		// Keys on each level. keyValVersion[0] is the first table and so on.
-		levelKey map[int][][]keyValVersion
-		// want     []struct {
-		// 	key     string
-		// 	version uint64
-		// }
-		expect []keyValVersion
+		levelData map[int][][]keyValVersion
+		expect    []keyValVersion
 	}
-	test := func(t *testing.T, ti tableData, db *DB) {
-		for level, data := range ti.levelKey {
+	test := func(t *testing.T, ti testData, db *DB) {
+		for level, data := range ti.levelData {
 			createLevel(db, level, data)
 		}
 		for _, item := range ti.expect {
 			key := y.KeyWithTs([]byte(item.key), uint64(item.version))
 			vs, err := db.get(key)
 			require.NoError(t, err)
-
 			require.Equal(t, item.val, string(vs.Value), "key:%s ver:%d", item.key, item.version)
 		}
 	}
-	tt := []tableData{
+	tt := []testData{
 		{
 			"Normal",
 			map[int][][]keyValVersion{

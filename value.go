@@ -1468,8 +1468,8 @@ func (vlog *valueLog) getFileRLocked(vp valuePointer) (*logFile, error) {
 	defer vlog.filesLock.RUnlock()
 	ret, ok := vlog.filesMap[vp.Fid]
 	if !ok {
-		// log file has gone away, will need to retry the operation.
-		return nil, errors.New("file not found")
+		// log file has gone away, we can't do anything. Return.
+		return nil, errors.Errorf("file with ID: %d not found", vp.Fid)
 	}
 
 	// Check for valid offset if we are reading from writable log.
@@ -1896,7 +1896,7 @@ func (vlog *valueLog) populateDiscardStats() error {
 		}
 		// Entry stored in LSM tree.
 		if vs.Meta&bitValuePointer == 0 {
-			return y.SafeCopy(nil, vs.Value), err
+			return y.SafeCopy(nil, vs.Value), nil
 		}
 		var vp valuePointer
 		vp.Decode(vs.Value)
