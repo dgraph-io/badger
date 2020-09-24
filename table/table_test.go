@@ -930,13 +930,30 @@ func TestMain(m *testing.M) {
 }
 
 func TestOpenKVSize(t *testing.T) {
-	opts := getTestTableOptions()
-	table, err := OpenTable(buildTestTable(t, "foo", 1, opts), opts)
-	require.NoError(t, err)
+	t.Run("compression", func(t *testing.T) {
+		// When compression is on
+		opts := getTestTableOptions()
+		opts.Compression = options.ZSTD
+		table, err := OpenTable(buildTestTable(t, "foo", 1000, opts), opts)
+		defer table.Close()
+		require.NoError(t, err)
 
-	// The following values might change if the table/header structure is changed.
-	var entrySize uint64 = 15 /* DiffKey len */ + 4 /* Header Size */ + 4 /* Encoded vp */
-	require.Equal(t, entrySize, table.EstimatedSize())
+		// The estimated size is same as table size in case compression is enabled.
+		require.Equal(t, uint64(table.tableSize), table.EstimatedSize())
+	})
+
+	t.Run("no compressin", func(t *testing.T) {
+		// When compression is off
+		opts := getTestTableOptions()
+		opts.Compression = options.None
+		table, err := OpenTable(buildTestTable(t, "foo", 1, opts), opts)
+		require.NoError(t, err)
+		defer table.Close()
+
+		stat, err := table.fd.Stat()
+		require.NoError(t, err)
+		require.Less(t, table.EstimatedSize(), uint64(stat.Size()))
+	})
 }
 
 // Run this test with command "go test -race -run TestDoesNotHaveRace"

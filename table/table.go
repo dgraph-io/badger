@@ -381,7 +381,13 @@ func (t *Table) initIndex() (*pb.BlockOffset, error) {
 		return nil, err
 	}
 
-	t.estimatedSize = index.EstimatedSize
+	if t.opt.Compression == options.None {
+		t.estimatedSize = index.EstimatedSize
+	} else {
+		// Due to compression the real size on disk is much
+		// smaller than what we estimate from index.EstimatedSize.
+		t.estimatedSize = uint64(t.tableSize)
+	}
 	t.noOfBlocks = len(index.Offsets)
 
 	// No cache
