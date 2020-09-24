@@ -142,7 +142,6 @@ func TestTruncateVlogNoClose(t *testing.T) {
 	require.NoError(t, err)
 }
 func TestTruncateVlogNoClose2(t *testing.T) {
-	// TODO(naman): Fix this test.
 	if !*manual {
 		t.Skip("Skipping test meant to be run manually.")
 		return
@@ -176,7 +175,6 @@ func TestTruncateVlogNoClose2(t *testing.T) {
 	}
 }
 func TestTruncateVlogNoClose3(t *testing.T) {
-	// TODO(naman): Fix this test.
 	if !*manual {
 		t.Skip("Skipping test meant to be run manually.")
 		return

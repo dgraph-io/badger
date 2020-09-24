@@ -29,10 +29,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -108,6 +110,20 @@ func txnDelete(t *testing.T, kv *DB, key []byte) {
 	txn := kv.NewTransaction(true)
 	require.NoError(t, txn.Delete(key))
 	require.NoError(t, txn.Commit())
+}
+
+func getSuffixedFiles(dir string, suffix string) ([]os.FileInfo, error) {
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return nil, errFile(err, dir, "Unable to open dir.")
+	}
+	var sfiles []os.FileInfo
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), suffix) {
+			sfiles = append(sfiles, file)
+		}
+	}
+	return sfiles, nil
 }
 
 // Opens a badger db and runs a a test on it.
@@ -1769,11 +1785,12 @@ func TestLSMOnly(t *testing.T) {
 
 	defer db.Close()
 
-	// require.NoError(t, db.RunValueLogGC(0.2))
-
-	// TODO(naman): Add checks here to verify we don't have any vlog files in
-	// LSM only mode and also check the len of WAL files. Once the wal GC is in
-	// place, we expect it to clean up things.
+	vlogFiles, err := getSuffixedFiles(dir, vlogSuffix)
+	require.NoError(t, err)
+	require.Equal(t, 0, len(vlogFiles))
+	walFiles, err := getSuffixedFiles(dir, walSuffix)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, 3, len(walFiles))
 }
 
 // This test function is doing some intricate sorcery.

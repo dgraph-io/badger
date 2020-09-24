@@ -504,6 +504,7 @@ loop:
 }
 
 func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
+	y.AssertTrue(f != nil)
 	vlog.vlog.filesLock.RLock()
 	maxFid := vlog.vlog.maxFid
 	vlog.vlog.filesLock.RUnlock()
@@ -808,8 +809,6 @@ func (vlog *valueLog) dropAll() (int, error) {
 	// We don't want to block dropAll on any pending transactions. So, don't worry about iterator
 	// count.
 	var count int
-	// Done(Naman): We should delete wal files too
-	// Ibrahim - Yes, clean all files and start from ID/offset 0.
 	deleteAll := func(lw *logWrapper) error {
 		lw.filesLock.Lock()
 		defer lw.filesLock.Unlock()
@@ -1069,8 +1068,8 @@ func (vlog *valueLog) createLogFile(fid uint32, ft fileType) (*logFile, error) {
 
 	// WAL files are used only for writing. We don't need to open them in mmap mode.
 	// TODO(ibrahim): Close WAL fd once we're done writing to it.
-	// Done(naman): The wal fd is not needed once a new file is created. We
-	// should close the existing file.
+	// Done(naman): The files are closed by WAL GC which is triggered on every creation of new
+	// wal file.
 	if ft == walFile {
 		lf.loadingMode = options.FileIO
 	}
@@ -1249,6 +1248,10 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		if err := openLogFile(lf); err != nil {
 			return err
 		}
+		// Mmap the file here
+		if err := lf.init(); err != nil {
+			return err
+		}
 	}
 
 	// Replay wal files
@@ -1260,13 +1263,8 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			return err
 		}
 
-		// This file is before the value head pointer. So, we don't need to
-		// replay it, and can just open it in readonly mode.
+		// This file is before the value head pointer.
 		if fid < ptr.Fid {
-			// Mmap the file here, we don't need to replay it.
-			if err := lf.init(); err != nil {
-				return err
-			}
 			continue
 		}
 
@@ -1399,7 +1397,6 @@ func (vlog *valueLog) Close() error {
 
 	vlog.opt.Debugf("Stopping garbage collection of values.")
 
-	// Done(Naman): Close wal files as well
 	close := func(lw *logWrapper) error {
 		var err error
 		for id, f := range lw.filesMap {
@@ -2303,7 +2300,6 @@ func (lw *logWrapper) rotateFile(lf *logFile, vlog *valueLog) (*logFile, error) 
 	if err != nil {
 		return nil, err
 	}
-	// Done(Naman): Confirm this, once the wal cleaner is done.
 	// Increment log rotate only for wal files
 	if lf.fileType == walFile {
 		atomic.AddInt32(&vlog.db.logRotates, 1)
