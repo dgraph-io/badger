@@ -189,7 +189,6 @@ Below is a list of known projects that use Badger:
 * [Volument](https://volument.com/) - A new take on website analytics backed by Badger.
 * [KVdb](https://kvdb.io/) - Hosted key-value store and serverless platform built on top of Badger.
 * [Terminotes](https://gitlab.com/asad-awadia/terminotes) - Self hosted notes storage and search server - storage powered by BadgerDB
-* [Remember-GO](https://github.com/rocketlaunchr/remember-go) - Cache Slow Database Queries - storage powered by BadgerDB
 
 If you are using Badger in a project please send a pull request to add it to the list.
 
