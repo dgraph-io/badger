@@ -31,8 +31,8 @@ noClasses = false
   weight = 3
 
 [[menu.main]]
-  name = "Project Using Badger"
-  url = "/project-using-badger/"
+  name = "Projects using Badger"
+  url = "/projects-using-badger/"
   identifier = "project-using-badger"
   weight = 4
 
