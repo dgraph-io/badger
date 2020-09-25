@@ -798,6 +798,7 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 	if err := lf.fd.Close(); err != nil {
 		return err
 	}
+	y.AssertTrue(lf.path == vlog.fpath(lf.fid, lf.fileType))
 	return os.Remove(lf.path)
 }
 
@@ -827,6 +828,9 @@ func (vlog *valueLog) dropAll() (int, error) {
 	if err := deleteAll(&vlog.wal); err != nil {
 		return count, err
 	}
+
+	y.AssertTrue(len(vlog.vlog.filesMap) == 0)
+	y.AssertTrue(len(vlog.wal.filesMap) == 0)
 
 	vlog.db.opt.Infof("Value logs deleted. Creating log file: 0")
 	if _, err := vlog.createLogFile(0, walFile); err != nil { // Called while writes are stopped.
@@ -920,7 +924,6 @@ func (vlog *valueLog) populateFilesMap() error {
 		return errFile(err, vlog.dirPath, "Unable to open log dir.")
 	}
 
-	// We could use map[uint64]bool instead, this lead to better memory usage.
 	vfound := make(map[uint64]struct{})
 	wfound := make(map[uint64]struct{})
 
@@ -974,6 +977,8 @@ func (vlog *valueLog) populateFilesMap() error {
 		}
 		lw.filesMap[uint32(fid)] = lf
 	}
+	y.AssertTrue(len(vfound) == len(vlog.vlog.filesMap))
+	y.AssertTrue(len(wfound) == len(vlog.wal.filesMap))
 	return nil
 }
 
@@ -1114,6 +1119,7 @@ func (vlog *valueLog) createLogFile(fid uint32, ft fileType) (*logFile, error) {
 	}
 	lw.filesLock.Lock()
 	lw.filesMap[fid] = lf
+	y.AssertTrue(fid == 0 || lw.maxFid < fid)
 	lw.maxFid = fid
 	// lw.writableOffset is only written by write func, by read by Read func.
 	// To avoid a race condition, all reads and updates to this variable must be
@@ -1241,6 +1247,8 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	}
 
 	initLastFile := func(lw *logWrapper) error {
+		// Sanity check
+		y.AssertTrue(len(lw.filesMap) == int(lw.maxFid+1))
 		// Seek to the end to start writing.
 		last, ok := lw.filesMap[lw.maxFid]
 		db.opt.Infof("%v\n", lw.maxFid)
@@ -1306,6 +1314,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 
 		// This file is before the value head pointer.
 		if fid < ptr.Fid {
+			// Todo(Naman): This file should be deleted.
 			continue
 		}
 
@@ -1604,6 +1613,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 	var vbuf bytes.Buffer
 
 	flushBufToFile := func(buf *bytes.Buffer, lf *logFile, lw *logWrapper) error {
+		y.AssertTrue(lf == lw.filesMap[lw.maxFid])
 		if buf.Len() == 0 {
 			return nil
 		}
@@ -1614,6 +1624,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		buf.Reset()
 		y.NumWrites.Add(1)
 		y.NumBytesWritten.Add(int64(n))
+		y.AssertTrue(lw.writableOffset+uint32(n) > lw.writableOffset)
 		atomic.AddUint32(&lw.writableOffset, uint32(n))
 		atomic.StoreUint32(&lf.size, lw.writableOffset)
 		return nil
@@ -2293,7 +2304,9 @@ func (vlog *valueLog) walCleaner() {
 func (lw *logWrapper) rotateFile(lf *logFile, vlog *valueLog) (*logFile, error) {
 	offset := lw.offset()
 	newid := lw.maxFid + 1
+	// Sanity checks
 	y.AssertTrue(offset != 0)
+	y.AssertTrue(lf.fid == lw.maxFid)
 
 	if err := lf.doneWriting(offset); err != nil {
 		return nil, err
