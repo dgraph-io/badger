@@ -1586,7 +1586,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 	if vlog.db.opt.InMemory {
 		return nil
 	}
-	// Validate writes before writing to vlog. Because, we don't want to partially write and return
+	// Validate writes before writing to wal. Because, we don't want to partially write and return
 	// an error.
 	if err := vlog.validateWrites(reqs); err != nil {
 		return err

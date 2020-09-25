@@ -109,6 +109,86 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 	var txn []txnEntry
 	var lastCommit uint64
 
+	toVlog := func(e *Entry) (*valuePointer, error) {
+		vlog := &db.vlog
+		vlog.vlog.filesLock.RLock()
+		curVlogF := vlog.vlog.filesMap[vlog.vlog.maxFid]
+		vlog.vlog.filesLock.RUnlock()
+		var vbuf bytes.Buffer
+
+		flushBufToFile := func(buf *bytes.Buffer, lf *logFile, lw *logWrapper) error {
+			if buf.Len() == 0 {
+				return nil
+			}
+			n, err := lf.fd.Write(buf.Bytes())
+			if err != nil {
+				return errors.Wrapf(err, "Unable to write to file: %s", lf.fd.Name())
+			}
+			buf.Reset()
+			y.NumWrites.Add(1)
+			y.NumBytesWritten.Add(int64(n))
+			atomic.AddUint32(&lw.writableOffset, uint32(n))
+			atomic.StoreUint32(&lf.size, lw.writableOffset)
+			return nil
+		}
+		toDisk := func() error {
+			if err := flushBufToFile(&vbuf, curVlogF, &vlog.vlog); err != nil {
+				return err
+			}
+			var err error
+			if vlog.vlog.offset() > uint32(vlog.opt.ValueLogFileSize) ||
+				vlog.vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
+
+				if curVlogF, err = vlog.vlog.rotateFile(curVlogF, vlog); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+
+		// write the the vlog if needed.
+		var p valuePointer
+		var err error
+		var vlogWritten int
+		if len(vlog.vlog.filesMap) == 0 {
+			if curVlogF, err = vlog.createLogFile(0, vlogFile); err != nil {
+				return nil, y.Wrapf(err, "Error while creating vlog file in valueLog.open")
+			}
+		}
+
+		p.Fid = curVlogF.fid
+		// Use the offset including buffer length so far.
+		p.Offset = vlog.vlog.offset() + uint32(vbuf.Len())
+		plen, err := curVlogF.encodeEntry(e, &vbuf, p.Offset) // Now encode the entry into buffer.
+		if err != nil {
+			return nil, err
+		}
+		p.Len = uint32(plen)
+		vlogWritten++
+		// It is possible that the size of the buffer grows beyond the max size of the value
+		// log (this happens when a transaction contains entries with large value sizes) and
+		// badger might run into out of memory errors. We flush the buffer here if it's size
+		// grows beyond the max value log size.
+		if int64(vbuf.Len()) > vlog.db.opt.ValueLogFileSize {
+			if err := flushBufToFile(&vbuf, curVlogF, &vlog.vlog); err != nil {
+				return nil, err
+			}
+		}
+		vlog.vlog.numEntriesWritten += uint32(vlogWritten)
+		writeNow :=
+			vlog.vlog.offset()+uint32(vbuf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
+				vlog.vlog.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries)
+		if writeNow {
+			if err := toDisk(); err != nil {
+				return nil, err
+			}
+		}
+		if err := toDisk(); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	}
+
 	toLSM := func(nk []byte, vs y.ValueStruct) {
 		for err := db.ensureRoomForWrite(); err != nil; err = db.ensureRoomForWrite() {
 			db.opt.Debugf("Replay: Making room for writes")
@@ -137,7 +217,10 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			nv = make([]byte, len(e.Value))
 			copy(nv, e.Value)
 		} else {
-			nv = vp.Encode()
+			// Write to vlog and get the value pointer to vlog
+			vlogP, err := toVlog(&e)
+			y.AssertTrue(err == nil)
+			nv = vlogP.Encode()
 			meta = meta | bitValuePointer
 		}
 		// Update vhead. If the crash happens while replay was in progess
