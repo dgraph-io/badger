@@ -1,7 +1,3 @@
-{{ $currentVersion := getenv "CURRENT_VERSION" }}
-{{ $versionString := getenv "VERSIONS" }}
-{{ $versions := split $versionString "," }}
-{{ $latestVersion := index $versions 0 }}
 
 <article id="{{ .Slug }}">
   {{ partial "request-edit.html" . }}
