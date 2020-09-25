@@ -783,7 +783,7 @@ func TestPenultimateLogCorruption(t *testing.T) {
 	h.readRange(0, 7)
 
 	for i := 2; i >= 0; i-- {
-		fpath := vlogFilePath(dir, uint32(i))
+		fpath := walFilePath(dir, uint32(i))
 		fi, err := os.Stat(fpath)
 		require.NoError(t, err)
 		require.True(t, fi.Size() > 0, "Empty file at log=%d", i)

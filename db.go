@@ -143,6 +143,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 		// Update vhead. If the crash happens while replay was in progess
 		// and the head is not updated, we will end up replaying all the
 		// files starting from file zero, again.
+		// Todo(Naman): This vp is from wal.
 		db.updateHead([]valuePointer{vp})
 
 		v := y.ValueStruct{

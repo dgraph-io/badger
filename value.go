@@ -1196,7 +1196,7 @@ func (vlog *valueLog) init(db *DB) {
 	}
 	vlog.wc = &walCleaner{
 		closer:  z.NewCloser(1),
-		delChan: make(chan uint32, 5),
+		delChan: make(chan uint32, 10),
 	}
 
 	go vlog.walCleaner()
@@ -1240,6 +1240,41 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		return err
 	}
 
+	initLastFile := func(lw *logWrapper) error {
+		// Seek to the end to start writing.
+		last, ok := lw.filesMap[lw.maxFid]
+		db.opt.Infof("%v\n", lw.maxFid)
+		y.AssertTrue(ok)
+
+		// We'll create a new log file if the last log file is encrypted and db is opened in
+		// plain text mode or vice versa. A single log file can't have both
+		// encrypted entries and plain text entries.
+		shouldCreateNewFile := last.encryptionEnabled() != vlog.db.shouldEncrypt()
+
+		if shouldCreateNewFile {
+			// TODO(ibrahim): Create a new vlog file as well or maybe just increment the maxVlogFid.
+			// Creating a new vlog file as well
+			newid := lw.maxFid + 1
+			_, err := vlog.createLogFile(newid, last.fileType)
+			if err != nil {
+				return y.Wrapf(err, "Error while creating vlog file %d in valueLog.open", newid)
+			}
+			last, ok = lw.filesMap[newid]
+			y.AssertTrue(ok)
+		}
+		lastOffset, err := last.fd.Seek(0, io.SeekEnd)
+		if err != nil {
+			return errFile(err, last.path, "file.Seek to end")
+		}
+		lw.writableOffset = uint32(lastOffset)
+
+		// Map the file if needed. When we create a file, it is automatically mapped.
+		if err = last.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
+			return errFile(err, last.path, "Map log file")
+		}
+		return nil
+	}
+
 	// Mmap vlog files.
 	vfids := vlog.vlog.sortedFids()
 	for _, fid := range vfids {
@@ -1250,6 +1285,12 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		}
 		// Mmap the file here
 		if err := lf.init(); err != nil {
+			return err
+		}
+	}
+
+	if len(vlog.vlog.filesMap) != 0 {
+		if err := initLastFile(&vlog.vlog); err != nil {
 			return err
 		}
 	}
@@ -1299,48 +1340,11 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		// let's not mmap the files in that case.
 	}
 
-	initLastFile := func(lw *logWrapper) error {
-		// Seek to the end to start writing.
-		last, ok := lw.filesMap[lw.maxFid]
-		db.opt.Infof("%v\n", lw.maxFid)
-		y.AssertTrue(ok)
-
-		// We'll create a new vlog if the last vlog is encrypted and db is opened in
-		// plain text mode or vice versa. A single vlog file can't have both
-		// encrypted entries and plain text entries.
-		shouldCreateNewFile := last.encryptionEnabled() != vlog.db.shouldEncrypt()
-
-		if shouldCreateNewFile {
-			// TODO(ibrahim): Create a new vlog file as well or maybe just increment the maxVlogFid.
-			// Creating a new vlog file as well
-			newid := lw.maxFid + 1
-			_, err := vlog.createLogFile(newid, last.fileType)
-			if err != nil {
-				return y.Wrapf(err, "Error while creating vlog file %d in valueLog.open", newid)
-			}
-			last, ok = lw.filesMap[newid]
-			y.AssertTrue(ok)
-		}
-		lastOffset, err := last.fd.Seek(0, io.SeekEnd)
-		if err != nil {
-			return errFile(err, last.path, "file.Seek to end")
-		}
-		lw.writableOffset = uint32(lastOffset)
-
-		// Map the file if needed. When we create a file, it is automatically mapped.
-		if err = last.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
-			return errFile(err, last.path, "Map log file")
-		}
-		return nil
-	}
-
 	if err := initLastFile(&vlog.wal); err != nil {
 		return err
 	}
+
 	if len(vlog.vlog.filesMap) != 0 {
-		if err := initLastFile(&vlog.vlog); err != nil {
-			return err
-		}
 		// Sanity check. Verify if the last files of both the fileType's have
 		// same encrytion mode.
 		y.AssertTrue(vlog.vlog.filesMap[vlog.vlog.maxFid].encryptionEnabled() ==
