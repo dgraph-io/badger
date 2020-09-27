@@ -81,6 +81,7 @@ func (wb *WriteBatch) Cancel() {
 	wb.txn.Discard()
 }
 
+// The caller of this callback must hold the lock.
 func (wb *WriteBatch) callback(err error) {
 	// sync.WaitGroup is thread-safe, so it doesn't need to be run inside wb.Lock.
 	defer wb.throttle.Done(err)
@@ -88,8 +89,6 @@ func (wb *WriteBatch) callback(err error) {
 		return
 	}
 
-	wb.Lock()
-	defer wb.Unlock()
 	if wb.err != nil {
 		return
 	}
