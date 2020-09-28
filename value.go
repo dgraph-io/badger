@@ -1799,8 +1799,7 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 				continue
 			}
 			tried[lf.fid] = true
-			err = vlog.doRunGC(lf, discardRatio, tr)
-			if err == nil {
+			if err = vlog.doRunGC(lf, discardRatio, tr); err == nil {
 				return nil
 			}
 		}
@@ -1883,32 +1882,28 @@ func (vlog *valueLog) flushDiscardStats() {
 func (vlog *valueLog) populateDiscardStats() error {
 	key := y.KeyWithTs(lfDiscardStatsKey, math.MaxUint64)
 	var statsMap map[uint32]int64
-
-	val, err := func() ([]byte, error) {
-		vs, err := vlog.db.get(key)
-		if err != nil {
-			return nil, err
-		}
-		// Value doesn't exist.
-		if vs.Meta == 0 && len(vs.Value) == 0 {
-			vlog.opt.Debugf("Value log discard stats empty")
-			return nil, nil
-		}
-		// Entry stored in LSM tree.
-		if vs.Meta&bitValuePointer == 0 {
-			return y.SafeCopy(nil, vs.Value), nil
-		}
+	vs, err := vlog.db.get(key)
+	if err != nil {
+		return err
+	}
+	// Value doesn't exist.
+	if vs.Meta == 0 && len(vs.Value) == 0 {
+		vlog.opt.Debugf("Value log discard stats empty")
+		return nil
+	}
+	val := vs.Value
+	// Entry is not stored in the LSM tree.
+	if vs.Meta&bitValuePointer > 0 {
 		var vp valuePointer
-		vp.Decode(vs.Value)
+		vp.Decode(val)
 		// Read entry from the value log.
 		result, cb, err := vlog.Read(vp, new(y.Slice))
 		// Copy it before we release the read lock.
-		val := y.SafeCopy(nil, result)
+		val = y.SafeCopy(nil, result)
 		runCallback(cb)
-		return val, err
-	}()
-	if err != nil {
-		return err
+		if err != nil {
+			return err
+		}
 	}
 	if len(val) == 0 {
 		return nil
