@@ -2045,40 +2045,51 @@ func (vlog *valueLog) cleanVlog() error {
 	}
 	defer func() { <-vlog.garbageCh }()
 
-	// Sample all the files.
-	sampleResult, err := vlog.db.SampleVlog()
-	if err != nil {
-		return err
-	}
-
-	tr := trace.New("Badger.ValueLog Forced", "GCF")
-	tr.SetMaxEvents(100)
+	vlog.filesLock.RLock()
+	filesToGC := vlog.sortedFids()
+	vlog.filesLock.RUnlock()
 
 	head := atomic.LoadUint32(&vlog.maxFid)
-	// Start processing each fid
-	for _, s := range sampleResult {
-		// Skip vlog files with < 0.5 discard ratio.
-		if s.DiscardRatio < 0.5 {
-			continue
-		}
-		fid := s.Fid
-		// Skip the head file.
-		if fid == head {
-			continue
-		}
+	for _, fid := range filesToGC {
+		tr := trace.New("Badger.ValueLog Sampling", "Sampling")
 		start := time.Now()
-		vlog.db.opt.Logger.Infof("Processing fid %d", fid)
+		// stop on the head fid.
+		if fid == head {
+			break
+		}
 		vlog.filesLock.RLock()
 		lf, ok := vlog.filesMap[fid]
 		vlog.filesLock.RUnlock()
 		if !ok {
 			return errors.Errorf("Unknown fid %d", fid)
 		}
+
+		s := &sampler{
+			lf:            lf,
+			tr:            tr,
+			countRatio:    1, // 1% of num entries.
+			sizeRatio:     1, // 10% of the file as window.
+			fromBeginning: true,
+		}
+		vlog.db.opt.Logger.Infof("Sampling fid %d", fid)
+		r, err := vlog.sample(s, 0)
+		if err != nil {
+			return err
+		}
+		vlog.db.opt.Logger.Infof("Sampled fid %d. Took: %s", fid, time.Since(start))
+
+		// Skip vlog files with < 0.5 discard ratio.
+		if r.discard/r.total < 0.5 {
+			continue
+		}
+		vlog.db.opt.Logger.Infof("Rewriting fid %d", fid)
+		start = time.Now()
 		if err := vlog.rewrite(lf, tr); err != nil {
 			return errors.Wrapf(err, "file: %s", lf.fd.Name())
 		}
 		vlog.db.opt.Logger.Infof("Rewritten fid %d. Took: %s", fid, time.Since(start))
 	}
+
 	return nil
 }
 
@@ -2121,7 +2132,7 @@ func (vlog *valueLog) getDiscardStats() ([]sampleResult, error) {
 			return nil, errors.Errorf("Unknown fid %d", fid)
 		}
 		samp.lf = lf
-		// Set dicard ratio to 0 so that sample never returns a ErrNoRewrite error.
+		// Set discard ratio to 0 so that sample never returns a ErrNoRewrite error.
 		r, err := vlog.sample(samp, 0)
 		if err != nil {
 			return nil, errors.Wrapf(err, "file: %s", lf.fd.Name())
