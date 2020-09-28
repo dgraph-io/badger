@@ -1239,16 +1239,13 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 
 		// We cannot mmap the files upfront here. Windows does not like mmapped files to be
 		// truncated. We might need to truncate files during a replay.
-		var err error
-		if err = lf.open(flags); err != nil {
+		if err := lf.open(flags); err != nil {
 			return errors.Wrapf(err, "Open existing file: %q", lf.path)
 		}
-		return err
+		return nil
 	}
 
 	initLastFile := func(lw *logWrapper) error {
-		// Sanity check
-		y.AssertTrue(len(lw.filesMap) == int(lw.maxFid+1))
 		// Seek to the end to start writing.
 		last, ok := lw.filesMap[lw.maxFid]
 		db.opt.Infof("%v\n", lw.maxFid)
@@ -1525,24 +1522,25 @@ func (vlog *valueLog) sync(fid uint32) error {
 		return nil
 	}
 
-	vlog.vlog.filesLock.RLock()
-	maxVlogFid := vlog.vlog.maxFid
-	// During replay it is possible to get sync call with fid less than maxVlogFid.
+	wal := &vlog.wal
+	wal.filesLock.RLock()
+	maxFid := wal.maxFid
+	// During replay it is possible to get sync call with fid less than maxFid.
 	// Because older file has already been synced, we can return from here.
-	if fid < maxVlogFid || len(vlog.vlog.filesMap) == 0 {
-		vlog.vlog.filesLock.RUnlock()
+	if fid < maxFid || len(wal.filesMap) == 0 {
+		vlog.wal.filesLock.RUnlock()
 		return nil
 	}
-	curlf := vlog.vlog.filesMap[maxVlogFid]
-	// Sometimes it is possible that vlog.vlog.maxFid has been increased but file creation
+	curlf := wal.filesMap[maxFid]
+	// Sometimes it is possible that wal.maxFid has been increased but file creation
 	// with same id is still in progress and this function is called. In those cases
-	// entry for the file might not be present in vlog.vlog.filesMap.
+	// entry for the file might not be present in wal.filesMap.
 	if curlf == nil {
-		vlog.vlog.filesLock.RUnlock()
+		wal.filesLock.RUnlock()
 		return nil
 	}
 	curlf.lock.RLock()
-	vlog.vlog.filesLock.RUnlock()
+	wal.filesLock.RUnlock()
 
 	err := curlf.sync()
 	curlf.lock.RUnlock()
@@ -1613,7 +1611,6 @@ func (vlog *valueLog) write(reqs []*request) error {
 	var vbuf bytes.Buffer
 
 	flushBufToFile := func(buf *bytes.Buffer, lf *logFile, lw *logWrapper) error {
-		y.AssertTrue(lf == lw.filesMap[lw.maxFid])
 		if buf.Len() == 0 {
 			return nil
 		}
@@ -1714,10 +1711,15 @@ func (vlog *valueLog) write(reqs []*request) error {
 				}
 			}
 
+			// We don't want meta info in vlog files. The meta has to be cleared to make vlog GC work.
+			// But we need this info in the LSM tree. Hence, reset the meta.
+			meta := e.meta
+			e.meta = 0
 			p.Fid = curVlogF.fid
 			// Use the offset including buffer length so far.
 			p.Offset = vlog.vlog.offset() + uint32(vbuf.Len())
 			plen, err := curVlogF.encodeEntry(e, &vbuf, p.Offset) // Now encode the entry into buffer.
+			e.meta = meta
 			if err != nil {
 				return err
 			}
@@ -1847,16 +1849,12 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, *logF
 
 // pickLog picks the vlog file with maximum discard for vlog GC. It also picks a random vlog file
 // favouring the smaller fid.
-func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFile) {
+func (vlog *valueLog) pickLog(tr trace.Trace) (files []*logFile) {
 	vlog.vlog.filesLock.RLock()
 	defer vlog.vlog.filesLock.RUnlock()
 	fids := vlog.vlog.sortedFids()
-	switch {
-	case len(fids) <= 1:
+	if len(fids) <= 1 {
 		tr.LazyPrintf("Only one or less value log file.")
-		return nil
-	case head.Fid == 0:
-		tr.LazyPrintf("Head pointer is at zero.")
 		return nil
 	}
 
@@ -1867,9 +1865,6 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	}{math.MaxUint32, 0}
 	vlog.lfDiscardStats.RLock()
 	for _, fid := range fids {
-		// if fid >= head.Fid {
-		// 	break
-		// }
 		if vlog.lfDiscardStats.m[fid] > candidate.discard {
 			candidate.fid = fid
 			candidate.discard = vlog.lfDiscardStats.m[fid]
@@ -1885,18 +1880,7 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	}
 
 	// Fallback to randomly picking a log file
-	var idxHead int
-	for i, fid := range fids {
-		if fid == head.Fid {
-			idxHead = i
-			break
-		}
-	}
-	if idxHead == 0 { // Not found or first file
-		tr.LazyPrintf("Could not find any file.")
-		return nil
-	}
-	idx := rand.Intn(idxHead) // Don’t include head.Fid. We pick a random file before it.
+	idx := rand.Intn(len(fids))
 	if idx > 0 {
 		idx = rand.Intn(idx + 1) // Another level of rand to favor smaller fids.
 	}
@@ -1999,6 +1983,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 		r.total += esz
 		r.count++
 
+		e.Key = y.KeyWithTs(y.ParseKey(e.Key), math.MaxUint32)
 		vs, err := vlog.db.get(e.Key)
 		if err != nil {
 			return err
@@ -2080,7 +2065,7 @@ func (vlog *valueLog) waitOnGC(lc *z.Closer) {
 	vlog.garbageCh <- struct{}{}
 }
 
-func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
+func (vlog *valueLog) runGC(discardRatio float64) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
 		// Pick a log file for GC.
@@ -2092,7 +2077,7 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 		}()
 
 		var err error
-		files := vlog.pickLog(head, tr)
+		files := vlog.pickLog(tr)
 		if len(files) == 0 {
 			tr.LazyPrintf("PickLog returned zero results.")
 			return ErrNoRewrite

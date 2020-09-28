@@ -33,6 +33,7 @@ import (
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/y"
 	humanize "github.com/dustin/go-humanize"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/trace"
 )
@@ -85,17 +86,22 @@ func TestValueBasic(t *testing.T) {
 		{
 			Key:    []byte("samplekey"),
 			Value:  []byte(val1),
-			meta:   bitValuePointer,
+			meta:   0,
 			offset: b.Ptrs[0].Offset,
 		},
 		{
 			Key:    []byte("samplekeyb"),
 			Value:  []byte(val2),
-			meta:   bitValuePointer,
+			meta:   0,
 			offset: b.Ptrs[1].Offset,
 		},
 	}, readEntries)
-
+	vlogFiles, err := getSuffixedFiles(dir, vlogSuffix)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(vlogFiles))
+	walFiles, err := getSuffixedFiles(dir, walSuffix)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(walFiles), 1)
 }
 
 func TestValueGCManaged(t *testing.T) {
@@ -1309,4 +1315,45 @@ func TestValidateWrite(t *testing.T) {
 	// Batching small and big request.
 	err = log.validateWrites([]*request{req1, req})
 	require.Error(t, err)
+}
+
+func TestCheckNumberOfEntries(t *testing.T) {
+
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+	opt := getTestOptions(dir)
+
+	kv, _ := Open(opt)
+	defer kv.Close()
+
+	N := 10
+	sz := 32 << 10
+	v := make([]byte, sz)
+	rand.Read(v)
+	txn := kv.NewTransaction(true)
+	for i := 0; i < N; i++ {
+		require.NoError(t, txn.SetEntry(NewEntry([]byte(fmt.Sprintf("key%d", i)), v)))
+		if i%20 == 0 {
+			require.NoError(t, txn.Commit())
+			txn = kv.NewTransaction(true)
+		}
+	}
+	require.NoError(t, txn.Commit())
+
+	countEntries := func(lw *logWrapper) int {
+		lw.filesLock.RLock()
+		lf := lw.filesMap[lw.sortedFids()[0]]
+		lw.filesLock.RUnlock()
+
+		var count int
+		kv.vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
+			count++
+			return nil
+		})
+		return count
+	}
+	// wal contains 2 more entries which are transaction marks
+	require.Equal(t, N, countEntries(&kv.vlog.vlog))
+	require.Equal(t, N+2, countEntries(&kv.vlog.wal))
 }
