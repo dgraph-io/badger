@@ -1795,7 +1795,7 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 		}
 		if time.Since(start) > 10*time.Second {
 			tr.LazyPrintf("Stopping sampling after 10 seconds.")
-			return errors.Wrapf(errStop, "sampling timeout for:%d", lf.fid)
+			return errStop
 		}
 		r.total += esz
 		r.count++
