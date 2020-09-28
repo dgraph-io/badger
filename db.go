@@ -1842,6 +1842,18 @@ func createDirs(opt Options) error {
 	return nil
 }
 
+// GCVlog will GC all the .vlog files that have more than 50% stale data. GC is
+// an expensive process and the GCVlog call could take some time to finish.
+func (db *DB) GCVlog() error {
+	return db.vlog.cleanVlog()
+}
+
+// SampleVlog can be used to collect information about the amount of stale data
+// in all the vlog files.
+func (db *DB) SampleVlog() ([]sampleResult, error) {
+	return db.vlog.getDiscardStats()
+}
+
 // Stream the contents of this DB to a new DB with options outOptions that will be
 // created in outDir.
 func (db *DB) StreamDB(outOptions Options) error {
