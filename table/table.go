@@ -479,6 +479,27 @@ func (t *Table) initIndex() (*pb.BlockOffset, error) {
 	return index.Offsets[0], nil
 }
 
+// KeySplits splits the table into n ranges based on the block offsets.
+func (t *Table) KeySplits(n int) []string {
+	var res []string
+	offLen := len(t.blockOffset)
+	jump := offLen / n
+	if jump == 0 {
+		jump = 1
+	}
+
+	for i := 0; i < offLen; i += jump {
+		if i >= offLen {
+			i = offLen - 1
+		}
+		res = append(res, string(t.blockOffset[i].Key))
+		if len(res) == n {
+			break
+		}
+	}
+	return res
+}
+
 // blockOffsets returns block offsets of this table.
 func (t *Table) blockOffsets() []*pb.BlockOffset {
 	if t.opt.IndexCache == nil {

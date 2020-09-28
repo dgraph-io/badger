@@ -1450,14 +1450,25 @@ func (db *DB) Tables(withKeysCount bool) []TableInfo {
 // the DB.
 func (db *DB) KeySplits(prefix []byte) []string {
 	var splits []string
+	tables := db.Tables(false)
+
 	// We just want table ranges here and not keys count.
-	for _, ti := range db.Tables(false) {
+	for _, ti := range tables {
 		// We don't use ti.Left, because that has a tendency to store !badger
 		// keys.
 		if bytes.HasPrefix(ti.Right, prefix) {
 			splits = append(splits, string(ti.Right))
 		}
 	}
+
+	if len(splits) < 32 {
+		numPerTable := 32 / len(tables)
+		if numPerTable == 0 {
+			numPerTable = 1
+		}
+		return db.lc.keySplits(numPerTable)
+	}
+
 	sort.Strings(splits)
 	return splits
 }

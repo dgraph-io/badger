@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -922,4 +923,39 @@ func TestLevelGet(t *testing.T) {
 
 		})
 	}
+}
+
+func TestKeyVersions(t *testing.T) {
+	t.Run("KeyVersions", func(t *testing.T) {
+		t.Run("small table", func(t *testing.T) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				l0 := make([]keyValVersion, 0)
+				for i := 0; i < 10; i++ {
+					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
+				}
+				createAndOpen(db, l0, 0)
+				require.Equal(t, 1, len(db.KeySplits(nil)))
+			})
+		})
+		t.Run("medium table", func(t *testing.T) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				l0 := make([]keyValVersion, 0)
+				for i := 0; i < 1000; i++ {
+					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
+				}
+				createAndOpen(db, l0, 0)
+				require.Equal(t, 7, len(db.KeySplits(nil)))
+			})
+		})
+		t.Run("large table", func(t *testing.T) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				l0 := make([]keyValVersion, 0)
+				for i := 0; i < 10000; i++ {
+					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
+				}
+				createAndOpen(db, l0, 0)
+				require.Equal(t, 32, len(db.KeySplits(nil)))
+			})
+		})
+	})
 }

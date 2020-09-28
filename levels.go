@@ -1199,3 +1199,16 @@ func (s *levelsController) verifyChecksum() error {
 
 	return nil
 }
+
+// Returns the sorted list of splits for all the levels and tables based
+// on the block offsets.
+func (s *levelsController) keySplits(numPerTable int) []string {
+	splits := make([]string, 0)
+	for _, l := range s.levels {
+		for _, t := range l.tables {
+			splits = append(splits, t.KeySplits(numPerTable)...)
+		}
+	}
+	sort.Strings(splits)
+	return splits
+}
