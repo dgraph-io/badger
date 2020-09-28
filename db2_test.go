@@ -829,6 +829,95 @@ func TestDropAllDropPrefix(t *testing.T) {
 	})
 }
 
+func TestCleanVlog(t *testing.T) {
+	opt := DefaultOptions("")
+	opt.ValueLogMaxEntries = 2
+	val := make([]byte, 2<<10)
+	rand.Read(val)
+
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		for i := 0; i < 100; i++ {
+			db.Update(func(txn *Txn) error {
+				txn.Set([]byte(fmt.Sprintf("foo-%d", i)), val)
+				return nil
+			})
+		}
+		// Use separate transaction for foo and bar writes so that they go into
+		// different files.
+		for i := 0; i < 100; i++ {
+			db.Update(func(txn *Txn) error {
+				txn.Set([]byte(fmt.Sprintf("bar-%d", i)), val)
+				return nil
+			})
+		}
+		count := 0
+		db.View(func(txn *Txn) error {
+			iopt := DefaultIteratorOptions
+			it := txn.NewIterator(iopt)
+			defer it.Close()
+			for it.Rewind(); it.Valid(); it.Next() {
+				count++
+				vs, err := it.Item().ValueCopy(nil)
+				require.NoError(t, err)
+				require.Equal(t, val, vs)
+			}
+			return nil
+		})
+
+		fileCount := len(db.vlog.filesMap)
+
+		// Drop all the foo-%d keys
+		require.NoError(t, db.DropPrefix([]byte("foo")))
+
+		res, err := db.SampleVlog()
+		require.NoError(t, err)
+		fullStaleFiles := 0
+		for _, r := range res {
+			fmt.Printf("r.Fid:%d, Ratio: %f Size: %d\n", r.Fid, r.DiscardRatio, r.FileSize)
+			if r.DiscardRatio == 1 {
+				fullStaleFiles++
+			}
+		}
+		require.Equal(t, 50, fullStaleFiles)
+
+		count2 := 0
+		db.View(func(txn *Txn) error {
+			iopt := DefaultIteratorOptions
+			it := txn.NewIterator(iopt)
+			defer it.Close()
+			for it.Rewind(); it.Valid(); it.Next() {
+				count2++
+				vs, err := it.Item().ValueCopy(nil)
+				require.NoError(t, err)
+				require.Equal(t, val, vs)
+			}
+			return nil
+		})
+
+		// We've dropped half the keys.
+		require.Equal(t, count/2, count2)
+
+		// Clean the vlog files.
+		require.NoError(t, db.GCVlog())
+		// Files should be less now.
+		require.Less(t, len(db.vlog.filesMap), fileCount)
+		count3 := 0
+		db.View(func(txn *Txn) error {
+			iopt := DefaultIteratorOptions
+			it := txn.NewIterator(iopt)
+			defer it.Close()
+			for it.Rewind(); it.Valid(); it.Next() {
+				count3++
+				vs, err := it.Item().ValueCopy(nil)
+				require.NoError(t, err)
+				require.Equal(t, val, vs)
+			}
+			return nil
+		})
+		// The amount of keys should be same.
+		require.Equal(t, count2, count3)
+	})
+}
 func TestIsClosed(t *testing.T) {
 	test := func(inMemory bool) {
 		opt := DefaultOptions("")
