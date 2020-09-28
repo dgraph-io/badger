@@ -1461,7 +1461,7 @@ func (db *DB) KeySplits(prefix []byte) []string {
 		}
 	}
 
-	if len(splits) < 32 {
+	if len(splits) < 32 && len(tables) > 0 {
 		numPerTable := 32 / len(tables)
 		if numPerTable == 0 {
 			numPerTable = 1
