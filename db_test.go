@@ -1782,16 +1782,14 @@ func TestLSMOnly(t *testing.T) {
 
 	db, err = Open(opts)
 	require.NoError(t, err)
-
-	defer db.Close()
-
+	vp, err := db.getPersistedHead()
+	db.Close()
+	require.NoError(t, err)
+	assert.LessOrEqual(t, db.vlog.wal.sortedFids()[0], vp.Fid)
 	// There should be no vlog files as value size is less than ValueThreshold.
 	vlogFiles, err := getSuffixedFiles(dir, vlogSuffix)
 	require.NoError(t, err)
 	require.Equal(t, 0, len(vlogFiles))
-	vp, err := db.getPersistedHead()
-	require.NoError(t, err)
-	assert.LessOrEqual(t, db.vlog.wal.sortedFids()[0], vp.Fid)
 }
 
 // This test function is doing some intricate sorcery.

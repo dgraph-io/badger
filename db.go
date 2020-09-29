@@ -110,74 +110,28 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 	var lastCommit uint64
 	var vbuf bytes.Buffer
 	vlog := &db.vlog
-	var curVlogF *logFile
-
-	flushBufToFile := func(buf *bytes.Buffer, lf *logFile, lw *logWrapper) error {
-		if buf.Len() == 0 {
-			return nil
-		}
-		n, err := lf.fd.Write(buf.Bytes())
-		if err != nil {
-			return errors.Wrapf(err, "Unable to write to file: %s", lf.fd.Name())
-		}
-		buf.Reset()
-		y.NumWrites.Add(1)
-		y.NumBytesWritten.Add(int64(n))
-		atomic.AddUint32(&lw.writableOffset, uint32(n))
-		atomic.StoreUint32(&lf.size, lw.writableOffset)
-		return nil
-	}
-
-	toDisk := func() error {
-		if vbuf.Len() == 0 {
-			return nil
-		}
-		y.AssertTrue(curVlogF != nil)
-		if err := flushBufToFile(&vbuf, curVlogF, &vlog.vlog); err != nil {
-			return err
-		}
-		var err error
-		if vlog.vlog.offset() > uint32(vlog.opt.ValueLogFileSize) ||
-			vlog.vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
-
-			if curVlogF, err = vlog.vlog.rotateFile(curVlogF, vlog); err != nil {
-				return err
-			}
-		}
-		return nil
+	vlogWriter := &logWriter{
+		ft:   vlogFile,
+		lf:   vlog.vlog.getCurrentFile(),
+		buf:  &vbuf,
+		lw:   &vlog.vlog,
+		vlog: vlog,
 	}
 
 	toVlog := func(e Entry) (*valuePointer, error) {
-		curVlogF = vlog.vlog.getCurrentFile()
+		vlogWriter.lf = vlog.vlog.getCurrentFile()
+		y.AssertTrue(vlogWriter.lf != nil)
 		// write the the vlog if needed.
 		var p valuePointer
-		var err error
-		if len(vlog.vlog.filesMap) == 0 {
-			if curVlogF, err = vlog.createLogFile(0, vlogFile); err != nil {
-				return nil, y.Wrapf(err, "Error while creating vlog file in valueLog.open")
-			}
-		}
-		y.AssertTrue(curVlogF != nil)
-		e.meta = e.meta &^ (bitTxn | bitFinTxn)
-		p.Fid = curVlogF.fid
-		// Use the offset including buffer length so far.
-		p.Offset = vlog.vlog.offset() + uint32(vbuf.Len())
-		plen, err := curVlogF.encodeEntry(&e, &vbuf, p.Offset) // Now encode the entry into buffer.
-		if err != nil {
+		if err := vlogWriter.writeToLogFile(e, nil, &p); err != nil {
 			return nil, err
 		}
-		p.Len = uint32(plen)
-		if int64(vbuf.Len()) > vlog.db.opt.ValueLogFileSize {
-			if err := flushBufToFile(&vbuf, curVlogF, &vlog.vlog); err != nil {
-				return nil, err
-			}
-		}
 		vlog.vlog.numEntriesWritten++
-		writeNow :=
-			vlog.vlog.offset()+uint32(vbuf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
-				vlog.vlog.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries)
-		if writeNow {
-			if err := toDisk(); err != nil {
+		// Todo(Naman): Do we need to flush to disk now? This is done to have wal entries in same
+		// file in write()
+		if vlog.vlog.offset()+uint32(vbuf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
+			vlog.vlog.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries) {
+			if err := vlogWriter.flushWrites(); err != nil {
 				return nil, err
 			}
 		}
@@ -244,7 +198,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			for _, t := range txn {
 				toLSM(t.nk, t.v)
 			}
-			if err := toDisk(); err != nil {
+			if err := vlogWriter.flushWrites(); err != nil {
 				return err
 			}
 			txn = txn[:0]
