@@ -103,9 +103,9 @@ func TestValueGCManaged(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	N := 2
+	N := 10000
 	opt := getTestOptions(dir)
-	// opt.ValueLogMaxEntries = uint32(N / 10)
+	opt.ValueLogMaxEntries = uint32(N / 10)
 	opt.managedTxns = true
 	db, err := Open(opt)
 	require.NoError(t, err)
@@ -147,11 +147,6 @@ func TestValueGCManaged(t *testing.T) {
 	for _, fi := range files {
 		t.Logf("File: %s. Size: %s\n", fi.Name(), humanize.Bytes(uint64(fi.Size())))
 	}
-
-	db.vlog.iterate(db.vlog.filesMap[0], 0, func(e Entry, vp valuePointer) error {
-		fmt.Println(e.Key, e.meta)
-		return nil
-	})
 
 	for i := 0; i < 100; i++ {
 		// Try at max 100 times to GC even a single value log file.
