@@ -1008,7 +1008,7 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 		return nil, errFile(err, vlog.dirPath, "Sync value log dir")
 	}
 
-	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
+	if err = lf.mmap(2 * int64(vlog.opt.ValueLogFileSize)); err != nil {
 		removeFile()
 		return nil, errFile(err, lf.path, "Mmap value log file")
 	}
@@ -1202,7 +1202,7 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 	vlog.db.vhead = valuePointer{Fid: vlog.maxFid, Offset: uint32(lastOffset)}
 
 	// Map the file if needed. When we create a file, it is automatically mapped.
-	if err = last.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
+	if err = last.mmap(2 * int64(vlog.opt.ValueLogFileSize)); err != nil {
 		return errFile(err, last.path, "Map log file")
 	}
 	if err := vlog.populateDiscardStats(); err != nil {
@@ -1499,7 +1499,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			// log (this happens when a transaction contains entries with large value sizes) and
 			// badger might run into out of memory errors. We flush the buffer here if it's size
 			// grows beyond the max value log size.
-			if int64(buf.Len()) > vlog.db.opt.ValueLogFileSize {
+			if uint32(buf.Len()) > vlog.db.opt.ValueLogFileSize {
 				if err := flushWrites(); err != nil {
 					return err
 				}

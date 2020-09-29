@@ -70,7 +70,7 @@ type Options struct {
 	NumLevelZeroTablesStall int
 
 	LevelOneSize       int64
-	ValueLogFileSize   int64
+	ValueLogFileSize   uint32
 	ValueLogMaxEntries uint32
 
 	NumCompactors        int
@@ -429,7 +429,7 @@ func (opt Options) WithLevelOneSize(val int64) Options {
 // ValueLogFileSize sets the maximum size of a single value log file.
 //
 // The default value of ValueLogFileSize is 1GB.
-func (opt Options) WithValueLogFileSize(val int64) Options {
+func (opt Options) WithValueLogFileSize(val uint32) Options {
 	opt.ValueLogFileSize = val
 	return opt
 }
