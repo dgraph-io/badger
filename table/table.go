@@ -479,7 +479,7 @@ func (t *Table) initIndex() (*pb.BlockOffset, error) {
 	return index.Offsets[0], nil
 }
 
-// KeySplits splits the table into n ranges based on the block offsets.
+// KeySplits splits the table into at least n ranges based on the block offsets.
 func (t *Table) KeySplits(n int) []string {
 	if n == 0 {
 		return nil

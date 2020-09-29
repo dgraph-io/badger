@@ -926,7 +926,13 @@ func TestLevelGet(t *testing.T) {
 }
 
 func TestKeyVersions(t *testing.T) {
-	t.Run("KeyVersions", func(t *testing.T) {
+	inMemoryOpt := DefaultOptions("").
+		WithSyncWrites(false).
+		WithInMemory(true).
+		WithLogRotatesToFlush(math.MaxInt32).
+		WithMaxTableSize(4 << 20)
+
+	t.Run("disk", func(t *testing.T) {
 		t.Run("small table", func(t *testing.T) {
 			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 				l0 := make([]keyValVersion, 0)
@@ -954,8 +960,18 @@ func TestKeyVersions(t *testing.T) {
 					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
 				}
 				createAndOpen(db, l0, 0)
-				require.Equal(t, 32, len(db.KeySplits(nil)))
+				require.Equal(t, 61, len(db.KeySplits(nil)))
 			})
+		})
+	})
+
+	t.Run("in-memory", func(t *testing.T) {
+		runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
+			writer := db.newWriteBatch(false)
+			for i := 0; i < 100000; i++ {
+				writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
+			}
+			require.Equal(t, 9, len(db.KeySplits(nil)))
 		})
 	})
 }
