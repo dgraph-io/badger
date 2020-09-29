@@ -1455,7 +1455,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		if err := flushWrites(); err != nil {
 			return err
 		}
-		if vlog.woffset() > uint32(vlog.opt.ValueLogFileSize) ||
+		if vlog.woffset() > vlog.opt.ValueLogFileSize ||
 			vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
 			if err := curlf.doneWriting(vlog.woffset()); err != nil {
 				return err
@@ -1509,7 +1509,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
 		writeNow :=
-			vlog.woffset()+uint32(buf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
+			vlog.woffset()+uint32(buf.Len()) > vlog.opt.ValueLogFileSize ||
 				vlog.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries)
 		if writeNow {
 			if err := toDisk(); err != nil {
