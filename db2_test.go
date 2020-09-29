@@ -697,6 +697,7 @@ func TestL0GCBug(t *testing.T) {
 // Step 3 - Re-open the same badger. We should be able to read all the data
 //          inserted in the first step.
 func TestWindowsDataLoss(t *testing.T) {
+	// TODO(ibrahim): Do we need this test?
 	if runtime.GOOS != "windows" {
 		t.Skip("The test is only for Windows.")
 	}

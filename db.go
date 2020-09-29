@@ -147,11 +147,8 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 		return nil
 	}
 
-	toVlog := func(e *Entry) (*valuePointer, error) {
-		vlog.vlog.filesLock.RLock()
-		curVlogF = vlog.vlog.filesMap[vlog.vlog.maxFid]
-		vlog.vlog.filesLock.RUnlock()
-
+	toVlog := func(e Entry) (*valuePointer, error) {
+		curVlogF = vlog.vlog.getCurrentFile()
 		// write the the vlog if needed.
 		var p valuePointer
 		var err error
@@ -161,13 +158,11 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			}
 		}
 		y.AssertTrue(curVlogF != nil)
-		meta := e.meta
-		e.meta = 0
+		e.meta = e.meta &^ (bitTxn | bitFinTxn)
 		p.Fid = curVlogF.fid
 		// Use the offset including buffer length so far.
 		p.Offset = vlog.vlog.offset() + uint32(vbuf.Len())
-		plen, err := curVlogF.encodeEntry(e, &vbuf, p.Offset) // Now encode the entry into buffer.
-		e.meta = meta
+		plen, err := curVlogF.encodeEntry(&e, &vbuf, p.Offset) // Now encode the entry into buffer.
 		if err != nil {
 			return nil, err
 		}
@@ -218,7 +213,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			copy(nv, e.Value)
 		} else {
 			// Write to vlog and get the value pointer to vlog
-			vlogP, err := toVlog(&e)
+			vlogP, err := toVlog(e)
 			if err != nil {
 				return errors.Wrapf(err, "Error while getting value pointer to vlog during replay")
 			}
@@ -949,6 +944,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 			return errors.Wrap(err, "writeRequests")
 		}
 		db.Lock()
+		// Update the head pointer for wal. b.Ptrs is the value pointer to vlog.
 		db.updateHead([]valuePointer{b.head})
 		db.Unlock()
 	}

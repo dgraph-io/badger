@@ -86,13 +86,13 @@ func TestValueBasic(t *testing.T) {
 		{
 			Key:    []byte("samplekey"),
 			Value:  []byte(val1),
-			meta:   0,
+			meta:   bitValuePointer,
 			offset: b.Ptrs[0].Offset,
 		},
 		{
 			Key:    []byte("samplekeyb"),
 			Value:  []byte(val2),
-			meta:   0,
+			meta:   bitValuePointer,
 			offset: b.Ptrs[1].Offset,
 		},
 	}, readEntries)
@@ -217,8 +217,6 @@ func TestValueGC(t *testing.T) {
 }
 
 func TestValueGC2(t *testing.T) {
-	// Todo(naman): fix this
-	t.Skip()
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
@@ -1353,6 +1351,9 @@ func TestCheckNumberOfEntries(t *testing.T) {
 		})
 		return count
 	}
+	// All entries go into single file.
+	require.Equal(t, 1, len(kv.vlog.vlog.filesMap))
+	require.Equal(t, 1, len(kv.vlog.wal.filesMap))
 	// wal contains 2 more entries which are transaction marks
 	require.Equal(t, N, countEntries(&kv.vlog.vlog))
 	require.Equal(t, N+2, countEntries(&kv.vlog.wal))

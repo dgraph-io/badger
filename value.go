@@ -1599,13 +1599,8 @@ func (vlog *valueLog) write(reqs []*request) error {
 		return err
 	}
 
-	vlog.vlog.filesLock.RLock()
-	curVlogF := vlog.vlog.filesMap[vlog.vlog.maxFid]
-	vlog.vlog.filesLock.RUnlock()
-
-	vlog.wal.filesLock.RLock()
-	curWALF := vlog.wal.filesMap[vlog.wal.maxFid]
-	vlog.wal.filesLock.RUnlock()
+	curVlogF := vlog.vlog.getCurrentFile()
+	curWALF := vlog.wal.getCurrentFile()
 
 	var wbuf bytes.Buffer
 	var vbuf bytes.Buffer
@@ -1711,10 +1706,11 @@ func (vlog *valueLog) write(reqs []*request) error {
 				}
 			}
 
-			// We don't want meta info in vlog files. The meta has to be cleared to make vlog GC work.
-			// But we need this info in the LSM tree. Hence, reset the meta.
+			// We don't want meta info in vlog files. The txn bits meta have to be cleared to make
+			// vlog GC work. But we need this info in the LSM tree. Hence, reset the changes.
 			meta := e.meta
-			e.meta = 0
+			// Todo(Naman): Do we need rest of the bits or shall we just clear all bits for vlog?
+			e.meta = e.meta &^ (bitTxn | bitFinTxn)
 			p.Fid = curVlogF.fid
 			// Use the offset including buffer length so far.
 			p.Offset = vlog.vlog.offset() + uint32(vbuf.Len())
@@ -2308,4 +2304,10 @@ func (lw *logWrapper) rotateFile(lf *logFile, vlog *valueLog) (*logFile, error) 
 	}
 
 	return newlf, nil
+}
+
+func (lw *logWrapper) getCurrentFile() *logFile {
+	lw.filesLock.RLock()
+	defer lw.filesLock.RUnlock()
+	return lw.filesMap[lw.maxFid]
 }
