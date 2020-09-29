@@ -1470,6 +1470,14 @@ func (db *DB) KeySplits(prefix []byte) []string {
 	}
 
 	sort.Strings(splits)
+	// If splits is still zero, then look at memtables.
+	// // acquire some lock
+	// var memtables []*tbl
+	// memtables := append(memtables, db.imm...)
+	// db.mt
+	// for tables {
+	// 	generate some ranges.
+	// }
 	return splits
 }
 

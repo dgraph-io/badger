@@ -497,9 +497,6 @@ func (t *Table) KeySplits(n int) []string {
 			i = offLen - 1
 		}
 		res = append(res, string(t.blockOffset[i].Key))
-		if len(res) == n {
-			break
-		}
 	}
 	return res
 }
