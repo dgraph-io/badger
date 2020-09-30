@@ -976,12 +976,13 @@ func TestKeyVersions(t *testing.T) {
 	})
 
 	t.Run("in-memory", func(t *testing.T) {
-		t.Run("medium table", func(t *testing.T) {
+		t.Run("small table", func(t *testing.T) {
 			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
 				writer := db.newWriteBatch(false)
-				for i := 0; i < 5000; i++ {
+				for i := 0; i < 10; i++ {
 					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
 				}
+				require.NoError(t, writer.Flush())
 				require.Equal(t, 1, len(db.KeySplits(nil)))
 			})
 		})
@@ -991,6 +992,7 @@ func TestKeyVersions(t *testing.T) {
 				for i := 0; i < 100000; i++ {
 					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
 				}
+				require.NoError(t, writer.Flush())
 				require.Equal(t, 11, len(db.KeySplits(nil)))
 			})
 		})
@@ -1000,6 +1002,7 @@ func TestKeyVersions(t *testing.T) {
 				for i := 0; i < 100000; i++ {
 					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
 				}
+				require.NoError(t, writer.Flush())
 				require.Equal(t, 0, len(db.KeySplits([]byte("a"))))
 			})
 		})

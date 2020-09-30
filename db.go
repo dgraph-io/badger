@@ -1481,13 +1481,12 @@ func (db *DB) KeySplits(prefix []byte) []string {
 		mtSplits := func(mt *skl.Skiplist) {
 			count := 0
 			iter := mt.NewIterator()
-			for iter.SeekToLast(); iter.Valid(); iter.Prev() {
+			for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 				if count%maxPerSplit == 0 {
 					// Add a split every maxPerSplit keys.
 					if bytes.HasPrefix(iter.Key(), prefix) {
 						splits = append(splits, string(iter.Key()))
 					}
-					count = 0
 				}
 				count += 1
 			}
