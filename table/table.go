@@ -662,20 +662,30 @@ func (t *Table) DoesNotHave(hash uint64) bool {
 		return false
 	}
 
-	// Return fast if the cache is absent.
-	t.bfLock.Lock()
-	if t.bf == nil {
-		y.AssertTrue(!t.opt.LoadBloomsOnOpen)
-		// Load bloomfilter into memory since the cache is absent.
-		t.bf = t.readBloomFilter()
+	if t.opt.IndexCache == nil {
+		t.bfLock.Lock()
+		if t.bf == nil {
+			y.AssertTrue(!t.opt.LoadBloomsOnOpen)
+			// Load bloomfilter into memory since the cache is absent.
+			t.bf, _ = t.readBloomFilter()
+		}
+		t.bfLock.Unlock()
+		return !t.bf.Has(hash)
 	}
-	t.bfLock.Unlock()
-	return !t.bf.Has(hash)
+
+	// Check if the bloom filter exists in the cache.
+	if bf, ok := t.opt.IndexCache.Get(t.bfCacheKey()); bf != nil && ok {
+		return !bf.(*z.Bloom).Has(hash)
+	}
+
+	bf, sz := t.readBloomFilter()
+	t.opt.IndexCache.Set(t.bfCacheKey(), bf, int64(sz))
+	return !bf.Has(hash)
 }
 
 // readBloomFilter reads the bloom filter from the SST and returns its length
 // along with the bloom filter.
-func (t *Table) readBloomFilter() *z.Bloom {
+func (t *Table) readBloomFilter() (*z.Bloom, int) {
 	var res []byte
 	index := t.index
 	// Read bloom filter from the index.
@@ -684,7 +694,7 @@ func (t *Table) readBloomFilter() *z.Bloom {
 	}
 	bf, err := z.JSONUnmarshal(res)
 	y.Check(err)
-	return bf
+	return bf, len(res)
 }
 
 // readTableIndex reads table index from the sst and returns its pb format.
