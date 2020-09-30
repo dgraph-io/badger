@@ -1685,9 +1685,11 @@ func (db *DB) dropAll() (func(), error) {
 	db.vhead = valuePointer{} // Zero it out.
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
+
+	db.opt.Infof("Clearing caches")
 	db.blockCache.Clear()
 	db.indexCache.Clear()
-
+	db.opt.Infof("Done - Clearing caches ")
 	return resume, nil
 }
 
