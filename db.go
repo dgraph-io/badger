@@ -1477,7 +1477,8 @@ func (db *DB) KeySplits(prefix []byte) []string {
 		if numPerTable == 0 {
 			numPerTable = 1
 		}
-		splits = db.lc.keySplits(numPerTable, prefix)
+		db.opt.Infof("Getting at least %d splits per table. Num tables is %d", numPerTable, len(tables))
+		splits = append(splits, db.lc.keySplits(numPerTable, prefix)...)
 	}
 	db.opt.Infof("Found %d splits after looking inside tables", len(splits))
 

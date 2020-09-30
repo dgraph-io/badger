@@ -940,7 +940,7 @@ func TestKeyVersions(t *testing.T) {
 					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
 				}
 				createAndOpen(db, l0, 0)
-				require.Equal(t, 1, len(db.KeySplits(nil)))
+				require.Equal(t, 2, len(db.KeySplits(nil)))
 			})
 		})
 		t.Run("medium table", func(t *testing.T) {
@@ -950,7 +950,7 @@ func TestKeyVersions(t *testing.T) {
 					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
 				}
 				createAndOpen(db, l0, 0)
-				require.Equal(t, 7, len(db.KeySplits(nil)))
+				require.Equal(t, 8, len(db.KeySplits(nil)))
 			})
 		})
 		t.Run("large table", func(t *testing.T) {
@@ -960,7 +960,7 @@ func TestKeyVersions(t *testing.T) {
 					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
 				}
 				createAndOpen(db, l0, 0)
-				require.Equal(t, 61, len(db.KeySplits(nil)))
+				require.Equal(t, 62, len(db.KeySplits(nil)))
 			})
 		})
 		t.Run("prefix", func(t *testing.T) {
