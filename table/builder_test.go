@@ -119,11 +119,11 @@ func TestTableIndex(t *testing.T) {
 			}
 
 			// Ensure index is built correctly
-			require.Equal(t, blockCount, tbl.noOfBlocks)
+			require.Equal(t, blockCount, tbl.index.OffsetsLength())
 			idx, err := tbl.readTableIndex()
 			require.NoError(t, err)
-			for i, ko := range idx.Offsets {
-				require.Equal(t, ko.Key, blockFirstKeys[i])
+			for i := 0; i < idx.OffsetsLength(); i++ {
+				require.Equal(t, blockFirstKeys[i], idx.block(i).key())
 			}
 			f.Close()
 			require.NoError(t, os.RemoveAll(filename))

@@ -1133,7 +1133,7 @@ type TableInfo struct {
 	Left        []byte
 	Right       []byte
 	KeyCount    uint64 // Number of keys in the table
-	EstimatedSz uint64
+	EstimatedSz uint32
 	IndexSz     int
 }
 

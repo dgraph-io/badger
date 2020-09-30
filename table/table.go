@@ -35,6 +35,7 @@ import (
 	"github.com/golang/snappy"
 	"github.com/pkg/errors"
 
+	"github.com/dgraph-io/badger/v2/fb"
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
@@ -44,13 +45,6 @@ import (
 
 const fileSuffix = ".sst"
 const intSize = int(unsafe.Sizeof(int(0)))
-
-// 1 word = 8 bytes
-// sizeOfOffsetStruct is the size of pb.BlockOffset
-const sizeOfOffsetStruct int64 = 3*8 + // key array take 3 words
-	1*8 + // offset and len takes 1 word
-	3*8 + // XXX_unrecognized array takes 3 word.
-	1*8 // so far 7 words, in order to round the slab we're adding one more word.
 
 // Options contains configurable options for Table/Builder.
 type Options struct {
@@ -79,6 +73,7 @@ type Options struct {
 	// Compression indicates the compression algorithm used for block compression.
 	Compression options.CompressionType
 
+	// Block cache is used to cache decompressed and decrypted blocks.
 	BlockCache *ristretto.Cache
 	IndexCache *ristretto.Cache
 
@@ -97,6 +92,44 @@ type TableInterface interface {
 	DoesNotHave(hash uint64) bool
 }
 
+type fBlockOffset struct {
+	*fb.BlockOffset
+}
+
+type fTableIndex struct {
+	*fb.TableIndex
+}
+
+// bloomfilter returns the bloom filter stored in the index.
+func (ti *fTableIndex) bloomFilter() []byte {
+	var buf []byte
+	for j := 0; j < ti.BloomFilterLength(); j++ {
+		buf = append(buf, byte(ti.BloomFilter(j)))
+	}
+	return buf
+}
+
+// block returns the block at index i.
+func (ti *fTableIndex) block(i int) *fBlockOffset {
+	var bo fb.BlockOffset
+	var res []byte
+	if ti.Offsets(&bo, i) {
+		for j := 0; j < bo.KeyLength(); j++ {
+			res = append(res, byte(bo.Key(j)))
+		}
+	}
+	return &fBlockOffset{&bo}
+}
+
+// Key retuns the key for the blockoffset.
+func (bo *fBlockOffset) key() []byte {
+	var res []byte
+	for j := 0; j < bo.KeyLength(); j++ {
+		res = append(res, byte(bo.Key(j)))
+	}
+	return res
+}
+
 // Table represents a loaded table file with the info we have about it.
 type Table struct {
 	sync.Mutex
@@ -105,9 +138,9 @@ type Table struct {
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
 	bfLock    sync.Mutex
 
-	blockOffset []*pb.BlockOffset
-	ref         int32    // For file garbage collection. Atomic.
-	bf          *z.Bloom // Nil if index cache in enabled.
+	index *fTableIndex
+	ref   int32 // For file garbage collection. Atomic.
+	bf    *z.Bloom
 
 	mmap []byte // Memory mapped.
 
@@ -117,15 +150,13 @@ type Table struct {
 
 	Checksum []byte
 	// Stores the total size of key-values stored in this table (including the size on vlog).
-	estimatedSize  uint64
+	estimatedSize  uint32
 	indexStart     int
 	indexLen       int
 	hasBloomFilter bool
 
 	IsInmemory bool // Set to true if the table is on level 0 and opened in memory.
 	opt        *Options
-
-	noOfBlocks int // Total number of blocks.
 }
 
 // CompressionType returns the compression algorithm used for block compression.
@@ -144,6 +175,13 @@ func (t *Table) DecrRef() error {
 	if newRef == 0 {
 		// We can safely delete this file, because for all the current files, we always have
 		// at least one reference pointing to them.
+
+		// Delete all blocks from the cache.
+		for i := 0; i < t.index.OffsetsLength(); i++ {
+			t.opt.BlockCache.Del(t.blockCacheKey(i))
+		}
+		// Delete bloom filter and indices from the cache.
+		t.opt.IndexCache.Del(t.bfCacheKey())
 
 		// It's necessary to delete windows files.
 		if t.opt.LoadingMode == options.MemoryMap {
@@ -168,13 +206,6 @@ func (t *Table) DecrRef() error {
 		if err := os.Remove(filename); err != nil {
 			return err
 		}
-		// Delete all blocks from the cache.
-		for i := 0; i < t.noOfBlocks; i++ {
-			t.opt.BlockCache.Del(t.blockCacheKey(i))
-		}
-		// Delete bloom filter and indices from the cache.
-		t.opt.IndexCache.Del(t.blockOffsetsCacheKey())
-		t.opt.IndexCache.Del(t.bfCacheKey())
 	}
 	return nil
 }
@@ -354,12 +385,12 @@ func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
 
 func (t *Table) initBiggestAndSmallest() error {
 	var err error
-	var ko *pb.BlockOffset
+	var ko *fBlockOffset
 	if ko, err = t.initIndex(); err != nil {
 		return errors.Wrapf(err, "failed to read index.")
 	}
 
-	t.smallest = ko.Key
+	t.smallest = ko.key()
 
 	it2 := t.NewIterator(REVERSED | NOCACHE)
 	defer it2.Close()
@@ -371,7 +402,7 @@ func (t *Table) initBiggestAndSmallest() error {
 	return nil
 }
 
-// Close closes the open table.  (Releases resources back to the OS.)
+// Close closes the open table. (Releases resources back to the OS.)
 func (t *Table) Close() error {
 	if t.opt.LoadingMode == options.MemoryMap {
 		if err := y.Munmap(t.mmap); err != nil {
@@ -408,7 +439,7 @@ func (t *Table) readNoFail(off, sz int) []byte {
 
 // initIndex reads the index and populate the necessary table fields and returns
 // first block offset
-func (t *Table) initIndex() (*pb.BlockOffset, error) {
+func (t *Table) initIndex() (*fBlockOffset, error) {
 	readPos := t.tableSize
 
 	// Read checksum len from the last 4 bytes.
@@ -446,71 +477,33 @@ func (t *Table) initIndex() (*pb.BlockOffset, error) {
 		return nil, err
 	}
 
+	t.index = index
 	if t.opt.Compression == options.None {
-		t.estimatedSize = index.EstimatedSize
+		t.estimatedSize = index.EstimatedSize()
 	} else {
 		// Due to compression the real size on disk is much
 		// smaller than what we estimate from index.EstimatedSize.
-		t.estimatedSize = uint64(t.tableSize)
+		t.estimatedSize = uint32(t.tableSize)
 	}
-	t.hasBloomFilter = len(index.BloomFilter) > 0
-	t.noOfBlocks = len(index.Offsets)
+	t.hasBloomFilter = len(index.bloomFilter()) > 0
 
 	// No cache
 	if t.opt.IndexCache == nil {
 		// Keep blooms in memory.
 		if t.hasBloomFilter && t.opt.LoadBloomsOnOpen {
-			bf, err := z.JSONUnmarshal(index.BloomFilter)
+			bf, err := z.JSONUnmarshal(index.bloomFilter())
 			if err != nil {
 				return nil,
 					errors.Wrapf(err, "failed to unmarshal bloomfilter for table:%d", t.id)
 			}
 
 			t.bfLock.Lock()
+			// Keep blooms in memory.
 			t.bf = bf
 			t.bfLock.Unlock()
 		}
-		// Keep block offsets in memory since there is no cache.
-		t.blockOffset = index.Offsets
 	}
-
-	// We don't need to put anything in the indexCache here. Table.Open will
-	// create an iterator and that iterator will push the indices in cache.
-	return index.Offsets[0], nil
-}
-
-// blockOffsets returns block offsets of this table.
-func (t *Table) blockOffsets() []*pb.BlockOffset {
-	if t.opt.IndexCache == nil {
-		return t.blockOffset
-	}
-
-	if val, ok := t.opt.IndexCache.Get(t.blockOffsetsCacheKey()); ok && val != nil {
-		return val.([]*pb.BlockOffset)
-	}
-
-	index, err := t.readTableIndex()
-	y.Check(err)
-	t.opt.IndexCache.Set(
-		t.blockOffsetsCacheKey(),
-		index.Offsets,
-		calculateOffsetsSize(index.Offsets))
-
-	return index.Offsets
-}
-
-// calculateOffsetsSize returns the size of *pb.BlockOffset array
-func calculateOffsetsSize(offsets []*pb.BlockOffset) int64 {
-	totalSize := sizeOfOffsetStruct * int64(len(offsets))
-
-	for _, ko := range offsets {
-		// add key size.
-		totalSize += int64(cap(ko.Key))
-		// add XXX_unrecognized size.
-		totalSize += int64(cap(ko.XXX_unrecognized))
-	}
-	// Add three words for array size.
-	return totalSize + 3*8
+	return index.block(0), nil
 }
 
 // block function return a new block. Each block holds a ref and the byte
@@ -518,7 +511,7 @@ func calculateOffsetsSize(offsets []*pb.BlockOffset) int64 {
 // caller should release the block by calling block.decrRef() on it.
 func (t *Table) block(idx int, useCache bool) (*block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
-	if idx >= t.noOfBlocks {
+	if idx >= t.index.OffsetsLength() {
 		return nil, errors.New("block out of index")
 	}
 	if t.opt.BlockCache != nil {
@@ -535,18 +528,18 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 	}
 
 	// Read the block index if it's nil
-	ko := t.blockOffsets()[idx]
+	ko := t.index.block(idx)
 	blk := &block{
-		offset: int(ko.Offset),
+		offset: int(ko.Offset()),
 		ref:    1,
 	}
 	defer blk.decrRef() // Deal with any errors, where blk would not be returned.
 	atomic.AddInt32(&NumBlocks, 1)
 
 	var err error
-	if blk.data, err = t.read(blk.offset, int(ko.Len)); err != nil {
+	if blk.data, err = t.read(blk.offset, int(ko.Len())); err != nil {
 		return nil, errors.Wrapf(err,
-			"failed to read from file: %s at offset: %d, len: %d", t.fd.Name(), blk.offset, ko.Len)
+			"failed to read from file: %s at offset: %d, len: %d", t.fd.Name(), blk.offset, ko.Len())
 	}
 
 	if t.shouldDecrypt() {
@@ -559,7 +552,7 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 	if err = t.decompress(blk); err != nil {
 		return nil, errors.Wrapf(err,
 			"failed to decode compressed data in file: %s at offset: %d, len: %d",
-			t.fd.Name(), blk.offset, ko.Len)
+			t.fd.Name(), blk.offset, ko.Len())
 	}
 
 	// Read meta data related to block.
@@ -638,24 +631,14 @@ func (t *Table) blockCacheKey(idx int) []byte {
 	return buf
 }
 
-// blockOffsetsCacheKey returns the cache key for block offsets. blockOffsets
-// are stored in the index cache.
-func (t *Table) blockOffsetsCacheKey() uint64 {
-	return t.id
-}
-
 // IndexSize is the size of table index in bytes
 func (t *Table) IndexSize() int {
-	indexSz := 0
-	for _, bi := range t.blockOffsets() {
-		indexSz += bi.Size()
-	}
-	return indexSz
+	return t.indexLen
 }
 
 // EstimatedSize returns the total size of key-values stored in this table (including the
 // disk space occupied on the value log).
-func (t *Table) EstimatedSize() uint64 { return t.estimatedSize }
+func (t *Table) EstimatedSize() uint32 { return t.estimatedSize }
 
 // Size is its file size in bytes
 func (t *Table) Size() int64 { return int64(t.tableSize) }
@@ -680,43 +663,33 @@ func (t *Table) DoesNotHave(hash uint64) bool {
 	}
 
 	// Return fast if the cache is absent.
-	if t.opt.IndexCache == nil {
-		t.bfLock.Lock()
-		if t.bf == nil {
-			y.AssertTrue(!t.opt.LoadBloomsOnOpen)
-			// Load bloomfilter into memory since the cache is absent.
-			t.bf, _ = t.readBloomFilter()
-		}
-		t.bfLock.Unlock()
-		return !t.bf.Has(hash)
+	t.bfLock.Lock()
+	if t.bf == nil {
+		y.AssertTrue(!t.opt.LoadBloomsOnOpen)
+		// Load bloomfilter into memory since the cache is absent.
+		t.bf = t.readBloomFilter()
 	}
-
-	// Check if the bloom filter exists in the cache.
-	if bf, ok := t.opt.IndexCache.Get(t.bfCacheKey()); bf != nil && ok {
-		return !bf.(*z.Bloom).Has(hash)
-	}
-
-	bf, sz := t.readBloomFilter()
-	t.opt.IndexCache.Set(t.bfCacheKey(), bf, int64(sz))
-	return !bf.Has(hash)
+	t.bfLock.Unlock()
+	return !t.bf.Has(hash)
 }
 
 // readBloomFilter reads the bloom filter from the SST and returns its length
 // along with the bloom filter.
-func (t *Table) readBloomFilter() (*z.Bloom, int) {
-	// Read bloom filter from the SST.
-	index, err := t.readTableIndex()
+func (t *Table) readBloomFilter() *z.Bloom {
+	var res []byte
+	index := t.index
+	// Read bloom filter from the index.
+	for j := 0; j < index.BloomFilterLength(); j++ {
+		res = append(res, byte(index.BloomFilter(j)))
+	}
+	bf, err := z.JSONUnmarshal(res)
 	y.Check(err)
-
-	bf, err := z.JSONUnmarshal(index.BloomFilter)
-	y.Check(err)
-	return bf, len(index.BloomFilter)
+	return bf
 }
 
 // readTableIndex reads table index from the sst and returns its pb format.
-func (t *Table) readTableIndex() (*pb.TableIndex, error) {
+func (t *Table) readTableIndex() (*fTableIndex, error) {
 	data := t.readNoFail(t.indexStart, t.indexLen)
-	index := pb.TableIndex{}
 	var err error
 	// Decrypt the table index if it is encrypted.
 	if t.shouldDecrypt() {
@@ -725,18 +698,18 @@ func (t *Table) readTableIndex() (*pb.TableIndex, error) {
 				"Error while decrypting table index for the table %d in readTableIndex", t.id)
 		}
 	}
-	y.Check(proto.Unmarshal(data, &index))
-	return &index, nil
+	return &fTableIndex{fb.GetRootAsTableIndex(data, 0)}, nil
 }
 
 // VerifyChecksum verifies checksum for all blocks of table. This function is called by
 // OpenTable() function. This function is also called inside levelsController.VerifyChecksum().
 func (t *Table) VerifyChecksum() error {
-	for i, os := range t.blockOffsets() {
+	ti := t.index
+	for i := 0; i < ti.OffsetsLength(); i++ {
 		b, err := t.block(i, true)
 		if err != nil {
 			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
-				t.Filename(), i, os.Offset)
+				t.Filename(), i, ti.block(i).Offset())
 		}
 		// We should not call incrRef here, because the block already has one ref when created.
 		defer b.decrRef()
@@ -746,7 +719,7 @@ func (t *Table) VerifyChecksum() error {
 			if err = b.verifyCheckSum(); err != nil {
 				return y.Wrapf(err,
 					"checksum validation failed for table: %s, block: %d, offset:%d",
-					t.Filename(), i, os.Offset)
+					t.Filename(), i, ti.block(i).Offset())
 			}
 		}
 	}

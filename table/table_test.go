@@ -31,7 +31,6 @@ import (
 
 	"github.com/cespare/xxhash"
 	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto"
 	"github.com/stretchr/testify/require"
@@ -932,7 +931,7 @@ func TestOpenKVSize(t *testing.T) {
 		require.NoError(t, err)
 
 		// The estimated size is same as table size in case compression is enabled.
-		require.Equal(t, uint64(table.tableSize), table.EstimatedSize())
+		require.Equal(t, uint32(table.tableSize), table.EstimatedSize())
 	})
 
 	t.Run("no compressin", func(t *testing.T) {
@@ -945,7 +944,7 @@ func TestOpenKVSize(t *testing.T) {
 
 		stat, err := table.fd.Stat()
 		require.NoError(t, err)
-		require.Less(t, table.EstimatedSize(), uint64(stat.Size()))
+		require.Less(t, table.EstimatedSize(), uint32(stat.Size()))
 	})
 }
 
@@ -966,23 +965,4 @@ func TestDoesNotHaveRace(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-}
-
-var ko *pb.BlockOffset
-
-// Use this benchmark to manually verify block offset size calculation
-func BenchmarkBlockOffsetSizeCalculation(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		ko = &pb.BlockOffset{
-			Key: []byte{1, 23},
-		}
-	}
-}
-
-func TestBlockOffsetSizeCalculation(t *testing.T) {
-	// Empty struct testing.
-	require.Equal(t, calculateOffsetsSize([]*pb.BlockOffset{&pb.BlockOffset{}}), int64(88))
-	// Testing with key bytes
-	require.Equal(t, calculateOffsetsSize([]*pb.BlockOffset{&pb.BlockOffset{Key: []byte{1, 1}}}),
-		int64(90))
 }
