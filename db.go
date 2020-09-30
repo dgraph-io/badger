@@ -1464,21 +1464,28 @@ func (db *DB) KeySplits(prefix []byte) []string {
 			splits = append(splits, string(ti.Right))
 		}
 	}
+	db.opt.Infof("Found %d splits after looking at table info", len(splits))
 
 	// If the number of splits is low, look at the offsets inside the
 	// tables to generate more splits.
-	if len(splits) < 32 && len(tables) > 0 {
-		numPerTable := 32 / len(tables)
+	if len(splits) < 32 {
+		numTables := len(tables)
+		if numTables == 0 {
+			numTables = 1
+		}
+		numPerTable := 32 / numTables
 		if numPerTable == 0 {
 			numPerTable = 1
 		}
 		splits = db.lc.keySplits(numPerTable, prefix)
 	}
+	db.opt.Infof("Found %d splits after looking inside tables", len(splits))
 
 	// If the number of splits is still < 32, then look at the memtables.
 	if len(splits) < 32 {
 		maxPerSplit := 10000
 		mtSplits := func(mt *skl.Skiplist) {
+			db.opt.Infof("Getting splits from memtable")
 			count := 0
 			iter := mt.NewIterator()
 			for iter.SeekToFirst(); iter.Valid(); iter.Next() {
@@ -1486,10 +1493,12 @@ func (db *DB) KeySplits(prefix []byte) []string {
 					// Add a split every maxPerSplit keys.
 					if bytes.HasPrefix(iter.Key(), prefix) {
 						splits = append(splits, string(iter.Key()))
+						db.opt.Infof("Appending split key %s to list of splits", string(iter.Key()))
 					}
 				}
 				count += 1
 			}
+			db.opt.Infof("Found %d entries in this memtable", count)
 			iter.Close()
 		}
 
@@ -1497,11 +1506,13 @@ func (db *DB) KeySplits(prefix []byte) []string {
 		defer db.Unlock()
 		memtables := make([]*skl.Skiplist, 0)
 		memtables = append(memtables, db.imm...)
+		db.opt.Infof("Found %d memtables", len(memtables))
 		for _, mt := range memtables {
 			mtSplits(mt)
 		}
 		mtSplits(db.mt)
 	}
+	db.opt.Infof("Found %d splits after looking at memtables", len(splits))
 
 	sort.Strings(splits)
 

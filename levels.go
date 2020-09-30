@@ -1205,9 +1205,11 @@ func (s *levelsController) verifyChecksum() error {
 func (s *levelsController) keySplits(numPerTable int, prefix []byte) []string {
 	splits := make([]string, 0)
 	for _, l := range s.levels {
+		l.RLock()
 		for _, t := range l.tables {
 			splits = append(splits, t.KeySplits(numPerTable, prefix)...)
 		}
+		l.RUnlock()
 	}
 	sort.Strings(splits)
 	return splits
