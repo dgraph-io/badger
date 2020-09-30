@@ -1472,7 +1472,7 @@ func (db *DB) KeySplits(prefix []byte) []string {
 		if numPerTable == 0 {
 			numPerTable = 1
 		}
-		splits = db.lc.keySplits(numPerTable)
+		splits = db.lc.keySplits(numPerTable, prefix)
 	}
 
 	// If the number of splits is still < 32, then look at the memtables.
@@ -1481,13 +1481,15 @@ func (db *DB) KeySplits(prefix []byte) []string {
 		mtSplits := func(mt *skl.Skiplist) {
 			count := 0
 			iter := mt.NewIterator()
-			for iter.SeekToFirst(); iter.Valid(); iter.Next() {
-				count += 1
-				if count == maxPerSplit {
+			for iter.SeekToLast(); iter.Valid(); iter.Prev() {
+				if count%maxPerSplit == 0 {
 					// Add a split every maxPerSplit keys.
-					splits = append(splits, string(iter.Key()))
+					if bytes.HasPrefix(iter.Key(), prefix) {
+						splits = append(splits, string(iter.Key()))
+					}
 					count = 0
 				}
+				count += 1
 			}
 			iter.Close()
 		}

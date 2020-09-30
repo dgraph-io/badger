@@ -963,15 +963,45 @@ func TestKeyVersions(t *testing.T) {
 				require.Equal(t, 61, len(db.KeySplits(nil)))
 			})
 		})
+		t.Run("prefix", func(t *testing.T) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				l0 := make([]keyValVersion, 0)
+				for i := 0; i < 1000; i++ {
+					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
+				}
+				createAndOpen(db, l0, 0)
+				require.Equal(t, 0, len(db.KeySplits([]byte("a"))))
+			})
+		})
 	})
 
 	t.Run("in-memory", func(t *testing.T) {
-		runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
-			writer := db.newWriteBatch(false)
-			for i := 0; i < 100000; i++ {
-				writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
-			}
-			require.Equal(t, 9, len(db.KeySplits(nil)))
+		t.Run("medium table", func(t *testing.T) {
+			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
+				writer := db.newWriteBatch(false)
+				for i := 0; i < 5000; i++ {
+					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
+				}
+				require.Equal(t, 1, len(db.KeySplits(nil)))
+			})
+		})
+		t.Run("large table", func(t *testing.T) {
+			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
+				writer := db.newWriteBatch(false)
+				for i := 0; i < 100000; i++ {
+					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
+				}
+				require.Equal(t, 11, len(db.KeySplits(nil)))
+			})
+		})
+		t.Run("prefix", func(t *testing.T) {
+			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
+				writer := db.newWriteBatch(false)
+				for i := 0; i < 100000; i++ {
+					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
+				}
+				require.Equal(t, 0, len(db.KeySplits([]byte("a"))))
+			})
 		})
 	})
 }
