@@ -1580,6 +1580,7 @@ func (db *DB) Flatten(workers int) error {
 func (db *DB) blockWrite() error {
 	// Stop accepting new writes.
 	if !atomic.CompareAndSwapInt32(&db.blockWrites, 0, 1) {
+		db.opt.Infof("db.blockWrites is not zero")
 		return ErrBlockedWrites
 	}
 
