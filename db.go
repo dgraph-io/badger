@@ -1494,7 +1494,7 @@ func (db *DB) KeySplits(prefix []byte) []string {
 				}
 				count += 1
 			}
-			iter.Close()
+			_ = iter.Close()
 		}
 
 		db.Lock()
