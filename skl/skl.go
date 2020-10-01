@@ -33,7 +33,9 @@ Key differences:
 package skl
 
 import (
+	"fmt"
 	"math"
+	"os"
 	"sync/atomic"
 	"unsafe"
 
@@ -73,12 +75,12 @@ type node struct {
 	tower [maxHeight]uint32
 }
 
-// Skiplist maps keys to values (in memory)
 type Skiplist struct {
 	height int32 // Current height. 1 <= height <= kMaxHeight. CAS.
 	head   *node
 	ref    int32
 	arena  *Arena
+	fd     *os.File
 }
 
 // IncrRef increases the refcount
@@ -123,15 +125,74 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 	return
 }
 
+func OpenSkiplist(arenaSize int64) *Skiplist {
+	fname := "./0000.mem"
+	fd, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE, 0666)
+	if err != nil {
+		panic(err)
+	}
+	sz := arenaSize + 10<<20
+	err = fd.Truncate(sz)
+	if err != nil {
+		panic(err)
+	}
+
+	mmap, err := z.Mmap(fd, true, int64(sz)) // Mmap up to max size.
+	if err != nil {
+		panic(err)
+	}
+	arena := &Arena{
+		n:   1,
+		buf: mmap[4:], // this is your arena.
+	}
+	return &Skiplist{
+		height: *(*int32)(unsafe.Pointer(&mmap)),
+		head:   arena.getNode(0),
+		arena:  arena,
+		ref:    1,
+	}
+}
+
+// zeroOut zeroes out all the bytes in the range [start, end).
+func zeroOut(dst []byte, start, end int) {
+	buf := dst[start:end]
+	buf[0] = 0x00
+	for i := 1; i < len(buf); i *= 2 {
+		copy(buf[i:], buf[:i])
+	}
+}
+
 // NewSkiplist makes a new empty skiplist, with a given arena size
 func NewSkiplist(arenaSize int64) *Skiplist {
-	arena := newArena(arenaSize)
+	fname := "./0000.mem"
+	fd, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE, 0666)
+	if err != nil {
+		panic(err)
+	}
+	sz := arenaSize + 10<<20
+	err = fd.Truncate(sz)
+	if err != nil {
+		panic(err)
+	}
+
+	buf, err := z.Mmap(fd, true, int64(sz)) // Mmap up to max size.
+	if err != nil {
+		panic(err)
+	}
+	zeroOut(buf, 0, int(sz))
+
+	arena := &Arena{
+		n:   1,
+		buf: buf[4:], // this is your arena.
+	}
+
 	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
 	return &Skiplist{
-		height: 1,
+		height: (*int32)(unsafe.Pointer(&buf[0])),
 		head:   head,
 		arena:  arena,
 		ref:    1,
+		fd:     fd,
 	}
 }
 
@@ -277,7 +338,7 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 }
 
 func (s *Skiplist) getHeight() int32 {
-	return atomic.LoadInt32(&s.height)
+	return s.height
 }
 
 // Put inserts the key-value pair.
@@ -286,6 +347,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	// increase the height. Let's defer these actions.
 
 	listHeight := s.getHeight()
+	fmt.Printf("listHei = %+v\n", listHeight)
 	var prev [maxHeight + 1]*node
 	var next [maxHeight + 1]*node
 	prev[listHeight] = s.head
