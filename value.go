@@ -916,22 +916,24 @@ func (lf *logFile) bootstrap() error {
 }
 
 func (lf *logFile) reset() {
+	z.ZeroOut(lf.fmap, vlogHeaderSize, int(lf.writeAt))
 	lf.writeAt = vlogHeaderSize
 }
 
-func (vlog *valueLog) createLogFile(fname string) (*logFile, error) {
+func (vlog *valueLog) newLogFile(fname string) (*logFile, error) {
 	lf := &logFile{
 		fid:         0,
 		path:        fname,
 		loadingMode: vlog.opt.ValueLogLoadingMode,
 		registry:    vlog.db.registry,
+		writeAt:     vlogHeaderSize,
 	}
 	// writableLogOffset is only written by write func, by read by Read func.
 	// To avoid a race condition, all reads and updates to this variable must be
 	// done via atomics.
 	var err error
 
-	// TODO: Do we really need a synced file here?
+	// TODO: Do we really need a synced file here. Also, do we need to create it always?
 	if lf.fd, err = y.CreateSyncedFile(lf.path, vlog.opt.SyncWrites); err != nil {
 		return nil, errFile(err, lf.path, "Create value log file")
 	}
@@ -957,7 +959,7 @@ func (vlog *valueLog) createLogFile(fname string) (*logFile, error) {
 
 func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	path := vlog.fpath(fid)
-	lf, err := vlog.createLogFile(path)
+	lf, err := vlog.newLogFile(path)
 	if err != nil {
 		return nil, err
 	}

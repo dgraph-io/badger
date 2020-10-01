@@ -40,6 +40,7 @@ type Options struct {
 
 	// Usually modified options.
 
+	UseWAL              bool
 	SyncWrites          bool
 	TableLoadingMode    options.FileLoadingMode
 	ValueLogLoadingMode options.FileLoadingMode
@@ -129,6 +130,7 @@ func DefaultOptions(path string) Options {
 		NumMemtables:            5,
 		BloomFalsePositive:      0.01,
 		BlockSize:               4 * 1024,
+		UseWAL:                  true,
 		SyncWrites:              true,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
@@ -219,6 +221,16 @@ func (opt Options) WithDir(val string) Options {
 // This is set automatically to be the path given to `DefaultOptions`.
 func (opt Options) WithValueDir(val string) Options {
 	opt.ValueDir = val
+	return opt
+}
+
+// WithUseWAL returns a new Options value with UseWAL set to the given value.
+//
+// When UseWAL is false, Badger WAL would be disabled.
+//
+// The default value of UseWAL is true.
+func (opt Options) WithUseWAL(val bool) Options {
+	opt.UseWAL = val
 	return opt
 }
 

@@ -74,6 +74,7 @@ type DB struct {
 	// TODO: This needs to be initialized during Open.
 	nextMemFid int
 
+	// TODO: Create or open logfile.
 	wal       *logFile
 	opt       Options
 	manifest  *manifestFile
@@ -832,6 +833,9 @@ func (db *DB) writeToLSM(b *request) error {
 }
 
 func (db *DB) writeToWAL(reqs []*request) error {
+	if !db.opt.UseWAL {
+		return nil
+	}
 	wal := db.wal
 	wal.reset()
 
@@ -859,7 +863,6 @@ func (db *DB) writeRequests(reqs []*request) error {
 		return nil
 	}
 
-	// TODO: Is WAL enabled?
 	if err := db.writeToWAL(reqs); err != nil {
 		return errors.Wrapf(err, "while writing to WAL")
 	}

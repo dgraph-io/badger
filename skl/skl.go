@@ -76,11 +76,12 @@ type node struct {
 
 // Skiplist maps keys to values (in memory)
 type Skiplist struct {
-	height int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	height *int32 // Current height. 1 <= height <= kMaxHeight. CAS.
 	head   *node
 	ref    int32
 	arena  *Arena
 	fd     *os.File
+	buf    []byte
 }
 
 // IncrRef increases the refcount
@@ -94,7 +95,7 @@ func (s *Skiplist) DecrRef() {
 	if newRef > 0 {
 		return
 	}
-	y.Check(z.Munmap(s.arena.buf))
+	y.Check(z.Munmap(s.buf))
 	y.Check(s.fd.Truncate(0))
 	y.Check(os.Remove(s.fd.Name()))
 
@@ -129,19 +130,22 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 
 // NewSkiplist makes a new empty skiplist, with a given arena size
 func NewSkiplist(buf []byte, fd *os.File) *Skiplist {
-	arena := newArena(buf)
+	arena := newArena(buf[4:])
 	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
-	return &Skiplist{
-		height: 1,
+	s := &Skiplist{
+		height: (*int32)(unsafe.Pointer(&buf[0])),
 		head:   head,
 		arena:  arena,
 		ref:    1,
 		fd:     fd,
+		buf:    buf,
 	}
+	atomic.StoreInt32(s.height, 1)
+	return s
 }
 
 func (skl *Skiplist) Sync() error {
-	return z.Msync(skl.arena.buf)
+	return z.Msync(skl.buf)
 }
 
 func (s *node) getValueOffset() (uint32, uint32) {
@@ -286,7 +290,7 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 }
 
 func (s *Skiplist) getHeight() int32 {
-	return atomic.LoadInt32(&s.height)
+	return atomic.LoadInt32(s.height)
 }
 
 // Put inserts the key-value pair.
@@ -315,7 +319,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	// Try to increase s.height via CAS.
 	listHeight = s.getHeight()
 	for height > int(listHeight) {
-		if atomic.CompareAndSwapInt32(&s.height, listHeight, int32(height)) {
+		if atomic.CompareAndSwapInt32(s.height, listHeight, int32(height)) {
 			// Successfully increased skiplist.height.
 			break
 		}
