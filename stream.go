@@ -123,7 +123,6 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 // end byte slices are owned by keyRange struct.
 func (st *Stream) produceRanges(ctx context.Context) {
 	splits := st.db.KeySplits(st.Prefix)
-	st.db.opt.Infof("%s Found %d key splits.\n", st.LogPrefix, len(splits))
 
 	// We don't need to create more key ranges than NumGo goroutines. This way, we will have limited
 	// number of "streams" coming out, which then helps limit the memory used by SSWriter.

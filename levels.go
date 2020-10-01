@@ -1208,7 +1208,6 @@ func (s *levelsController) keySplits(numPerTable int, prefix []byte) []string {
 		l.RLock()
 		for _, t := range l.tables {
 			tableSplits := t.KeySplits(numPerTable, prefix)
-			s.kv.opt.Infof("Got %d splits from table", len(tableSplits))
 			splits = append(splits, tableSplits...)
 		}
 		l.RUnlock()
