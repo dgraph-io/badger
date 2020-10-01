@@ -879,7 +879,8 @@ func TestBug578(t *testing.T) {
 
 	db, err := Open(DefaultOptions(dir).
 		WithValueLogMaxEntries(64).
-		WithMaxTableSize(1 << 13))
+		WithMaxTableSize(1 << 13).
+		WithValueLogFileSize(testOptionLogFileSize))
 	require.NoError(t, err)
 
 	h := testHelper{db: db, t: t}
@@ -973,7 +974,9 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	db, err := Open(DefaultOptions(dir).WithTruncate(true))
+	opts := DefaultOptions(dir).WithTruncate(true).
+		WithValueLogFileSize(testOptionLogFileSize)
+	db, err := Open(opts)
 	require.NoError(t, err)
 	// Insert 1 entry so that we have valid data in first vlog file
 	require.NoError(t, db.Update(func(txn *Txn) error {
@@ -988,7 +991,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), []byte("foo"), 0664))
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 2), []byte("foo"), 0664))
 
-	db, err = Open(DefaultOptions(dir).WithTruncate(true))
+	db, err = Open(opts)
 	require.NoError(t, err)
 
 	// Ensure vlog file with id=1 is not present
@@ -1250,7 +1253,7 @@ func TestValidateWrite(t *testing.T) {
 
 	bigBuf := make([]byte, maxVlogFileSize+1)
 	log := &valueLog{
-		opt: DefaultOptions("."),
+		opt: DefaultOptions(".").WithValueLogFileSize(testOptionLogFileSize),
 	}
 
 	// Sending a request with big values which will overflow uint32.

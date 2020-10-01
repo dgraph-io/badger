@@ -72,6 +72,7 @@ func getTestOptions(dir string) Options {
 	opt := DefaultOptions(dir).
 		WithMaxTableSize(1 << 15). // Force more compaction.
 		WithLevelOneSize(4 << 15). // Force more compaction.
+		WithValueLogFileSize(testOptionLogFileSize).
 		WithSyncWrites(false)
 	if !*mmap {
 		return opt.WithValueLogLoadingMode(options.FileIO)
@@ -280,14 +281,16 @@ func TestGet(t *testing.T) {
 		})
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
-		opts := DefaultOptions("").WithInMemory(true)
+		opts := DefaultOptions("").WithInMemory(true).
+			WithValueLogFileSize(testOptionLogFileSize)
 		db, err := Open(opts)
 		require.NoError(t, err)
 		test(t, db)
 		require.NoError(t, db.Close())
 	})
 	t.Run("cache enabled", func(t *testing.T) {
-		opts := DefaultOptions("").WithBlockCacheSize(10 << 20)
+		opts := DefaultOptions("").WithBlockCacheSize(10 << 20).
+			WithValueLogFileSize(testOptionLogFileSize)
 		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
@@ -690,7 +693,8 @@ func TestExistsMore(t *testing.T) {
 		})
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
-		opt := DefaultOptions("").WithInMemory(true)
+		opt := DefaultOptions("").WithInMemory(true).
+			WithValueLogFileSize(testOptionLogFileSize)
 		db, err := Open(opt)
 		require.NoError(t, err)
 		test(t, db)
@@ -764,7 +768,8 @@ func TestIterate2Basic(t *testing.T) {
 		})
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
-		opt := DefaultOptions("").WithInMemory(true)
+		opt := DefaultOptions("").WithInMemory(true).
+			WithValueLogFileSize(testOptionLogFileSize)
 		db, err := Open(opt)
 		require.NoError(t, err)
 		test(t, db)
@@ -935,7 +940,7 @@ func TestIterateParallel(t *testing.T) {
 		itr.Close() // Double close.
 	}
 
-	opt := DefaultOptions("")
+	opt := DefaultOptions("").WithValueLogFileSize(testOptionLogFileSize)
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		var wg sync.WaitGroup
 		var txns []*Txn
@@ -1001,7 +1006,8 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
-	kv, err := Open(DefaultOptions(dir))
+	kv, err := Open(DefaultOptions(dir).
+		WithValueLogFileSize(testOptionLogFileSize))
 	if err != nil {
 		t.Error(err)
 		t.Fail()
@@ -1014,7 +1020,8 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 	kv.Close()
 
 	// Reopen KV
-	kv, err = Open(DefaultOptions(dir))
+	kv, err = Open(DefaultOptions(dir).
+		WithValueLogFileSize(testOptionLogFileSize))
 	if err != nil {
 		t.Error(err)
 		t.Fail()
@@ -1419,11 +1426,11 @@ func TestLargeKeys(t *testing.T) {
 		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
 		defer removeDir(dir)
-		opt := DefaultOptions(dir).WithValueLogFileSize(1024 * 1024 * 1024)
+		opt := DefaultOptions(dir).WithValueLogFileSize(testOptionLogFileSize)
 		test(t, opt)
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
-		opt := DefaultOptions("").WithValueLogFileSize(1024 * 1024 * 1024)
+		opt := DefaultOptions("").WithValueLogFileSize(testOptionLogFileSize)
 		opt.InMemory = true
 		test(t, opt)
 	})
@@ -1434,7 +1441,8 @@ func TestCreateDirs(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	db, err := Open(DefaultOptions(filepath.Join(dir, "badger")))
+	db, err := Open(DefaultOptions(filepath.Join(dir, "badger")).
+		WithValueLogFileSize(testOptionLogFileSize))
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 	_, err = os.Stat(dir)
@@ -1737,7 +1745,7 @@ func TestLSMOnly(t *testing.T) {
 	defer removeDir(dir)
 
 	opts := LSMOnlyOptions(dir)
-	dopts := DefaultOptions(dir)
+	dopts := DefaultOptions(dir).WithValueLogFileSize(testOptionLogFileSize)
 	require.NotEqual(t, dopts.ValueThreshold, opts.ValueThreshold)
 
 	dopts.ValueThreshold = 1 << 21
@@ -1854,7 +1862,8 @@ func TestGoroutineLeak(t *testing.T) {
 		test(t, nil)
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
-		opt := DefaultOptions("").WithInMemory(true)
+		opt := DefaultOptions("").WithInMemory(true).
+			WithValueLogFileSize(testOptionLogFileSize)
 		test(t, &opt)
 	})
 }
@@ -1865,7 +1874,8 @@ func ExampleOpen() {
 		panic(err)
 	}
 	defer removeDir(dir)
-	db, err := Open(DefaultOptions(dir))
+	db, err := Open(DefaultOptions(dir).
+		WithValueLogFileSize(testOptionLogFileSize))
 	if err != nil {
 		panic(err)
 	}
@@ -1921,7 +1931,8 @@ func ExampleTxn_NewIterator() {
 	}
 	defer removeDir(dir)
 
-	db, err := Open(DefaultOptions(dir))
+	db, err := Open(DefaultOptions(dir).
+		WithValueLogFileSize(testOptionLogFileSize))
 	if err != nil {
 		panic(err)
 	}
@@ -1976,7 +1987,9 @@ func TestSyncForRace(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	db, err := Open(DefaultOptions(dir).WithSyncWrites(false))
+	db, err := Open(DefaultOptions(dir).
+		WithSyncWrites(false).
+		WithValueLogFileSize(testOptionLogFileSize))
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -2159,7 +2172,8 @@ func removeDir(dir string) {
 }
 
 func TestWriteInemory(t *testing.T) {
-	opt := DefaultOptions("").WithInMemory(true)
+	opt := DefaultOptions("").WithInMemory(true).
+		WithValueLogFileSize(testOptionLogFileSize)
 	db, err := Open(opt)
 	require.NoError(t, err)
 	defer func() {

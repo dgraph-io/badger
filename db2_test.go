@@ -212,7 +212,8 @@ func TestBigKeyValuePairs(t *testing.T) {
 	// Passing an empty directory since it will be filled by runBadgerTest.
 	opts := DefaultOptions("").
 		WithMaxTableSize(1 << 20).
-		WithValueLogMaxEntries(64)
+		WithValueLogMaxEntries(64).
+		WithValueLogFileSize(testOptionLogFileSize)
 	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
 		bigK := make([]byte, 65001)
 		bigV := make([]byte, db.opt.ValueLogFileSize+1)

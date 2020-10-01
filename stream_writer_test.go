@@ -488,7 +488,7 @@ func TestStreamWriterEncrypted(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 
-	opts := DefaultOptions(dir)
+	opts := DefaultOptions(dir).WithValueLogFileSize(testOptionLogFileSize)
 	defer removeDir(dir)
 
 	opts = opts.WithEncryptionKey([]byte("badgerkey16bytes"))

@@ -218,7 +218,8 @@ func TestBigStream(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	db, err := OpenManaged(DefaultOptions(dir))
+	db, err := OpenManaged(DefaultOptions(dir).
+		WithValueLogFileSize(testOptionLogFileSize))
 	require.NoError(t, err)
 
 	var count int

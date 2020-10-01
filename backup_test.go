@@ -308,13 +308,14 @@ func TestBackup(t *testing.T) {
 		require.NoError(t, err)
 
 		defer removeDir(tmpdir)
-		opt := DefaultOptions(filepath.Join(tmpdir, "backup0"))
+		opt := DefaultOptions(filepath.Join(tmpdir, "backup0")).
+			WithValueLogFileSize(testOptionLogFileSize)
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
-		opt := DefaultOptions("")
+		opt := DefaultOptions("").WithValueLogFileSize(testOptionLogFileSize)
 		opt.InMemory = true
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			test(t, db)
@@ -335,7 +336,8 @@ func TestBackupRestore3(t *testing.T) {
 	var db1NextTs uint64
 	// backup
 	{
-		db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup1")))
+		db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup1")).
+			WithValueLogFileSize(testOptionLogFileSize))
 		require.NoError(t, err)
 
 		defer db1.Close()
@@ -351,7 +353,8 @@ func TestBackupRestore3(t *testing.T) {
 	require.True(t, bb.Len() > 0)
 
 	// restore
-	db2, err := Open(DefaultOptions(filepath.Join(tmpdir, "restore1")))
+	db2, err := Open(DefaultOptions(filepath.Join(tmpdir, "restore1")).
+		WithValueLogFileSize(testOptionLogFileSize))
 	require.NoError(t, err)
 
 	defer db2.Close()
@@ -398,7 +401,8 @@ func TestBackupLoadIncremental(t *testing.T) {
 	var db1NextTs uint64
 	// backup
 	{
-		db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup2")))
+		db1, err := Open(DefaultOptions(filepath.Join(tmpdir, "backup2")).
+			WithValueLogFileSize(testOptionLogFileSize))
 		require.NoError(t, err)
 
 		defer db1.Close()
