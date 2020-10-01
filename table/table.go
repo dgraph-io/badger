@@ -487,15 +487,15 @@ func (t *Table) KeySplits(n int, prefix []byte) []string {
 	}
 
 	var res []string
-	offLen := len(t.blockOffset)
-	jump := offLen / n
+	offsets := t.blockOffsets()
+	jump := len(offsets) / n
 	if jump == 0 {
 		jump = 1
 	}
 
-	for i := 0; i < offLen; i += jump {
-		if i >= offLen {
-			i = offLen - 1
+	for i := 0; i < len(offsets); i += jump {
+		if i >= len(offsets) {
+			i = len(offsets) - 1
 		}
 		if bytes.HasPrefix(t.blockOffset[i].Key, prefix) {
 			res = append(res, string(t.blockOffset[i].Key))
