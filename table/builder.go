@@ -78,7 +78,7 @@ type Builder struct {
 	buf        []byte
 	sz         uint32
 	bufLock    sync.Mutex // This lock guards the buf. We acquire lock when we resize the buf.
-	actualSize uint32
+	actualSize uint32     // Used to store the sum of sizes of blocks after compression/encryption.
 
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -154,7 +154,9 @@ func (b *Builder) handleBlock() {
 		copy(b.buf[item.start:], blockBuf)
 		b.bufLock.Unlock()
 
+		// Add the actual size of current block.
 		atomic.AddUint32(&b.actualSize, uint32(len(blockBuf)))
+
 		// Fix the boundary of the block.
 		item.end = item.start + uint32(len(blockBuf))
 
