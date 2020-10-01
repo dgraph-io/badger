@@ -377,21 +377,17 @@ func TestStreamWriterCancel(t *testing.T) {
 			ver = (ver + 1) % 2
 		}
 
-		func() {
-			sw := db.NewStreamWriter()
-			defer sw.Cancel()
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+		require.NoError(t, sw.Write(nil), "sw.Write() failed")
+		sw.Cancel()
 
-			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
-			require.NoError(t, sw.Write(list), "sw.Write() failed")
-		}()
-
-		tables := db.Tables(true)
-		require.Equal(t, 0, len(tables), "Count of tables not matching")
-		require.NoError(t, db.Close())
-
-		db, err := Open(db.opt)
-		require.NoError(t, err)
-		require.NoError(t, db.Close())
+		// Use the API incorrectly.
+		sw1 := db.NewStreamWriter()
+		defer sw1.Cancel()
+		require.NoError(t, sw1.Prepare())
+		defer sw1.Cancel()
+		sw1.Flush()
 	})
 }
 
