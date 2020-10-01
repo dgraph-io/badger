@@ -1,3 +1,5 @@
+// +build !386
+
 package badger
 
 // Log file size when running tests on 64bit system.

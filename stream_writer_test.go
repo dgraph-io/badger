@@ -290,11 +290,11 @@ func TestStreamWriter5(t *testing.T) {
 
 		left := make([]byte, 6)
 		left[0] = 0x00
-		copy(left[1:], []byte("break"))
+		copy(left[1:], "break")
 
 		right := make([]byte, 6)
 		right[0] = 0xff
-		copy(right[1:], []byte("break"))
+		copy(right[1:], "break")
 
 		list.Kv = append(list.Kv, &pb.KV{
 			Key:     left,
