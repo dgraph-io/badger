@@ -978,7 +978,7 @@ func TestKeyVersions(t *testing.T) {
 	t.Run("in-memory", func(t *testing.T) {
 		t.Run("small table", func(t *testing.T) {
 			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
-				writer := db.newWriteBatch(false)
+				writer := db.newWriteBatch()
 				for i := 0; i < 10; i++ {
 					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
 				}
@@ -988,7 +988,7 @@ func TestKeyVersions(t *testing.T) {
 		})
 		t.Run("large table", func(t *testing.T) {
 			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
-				writer := db.newWriteBatch(false)
+				writer := db.newWriteBatch()
 				for i := 0; i < 100000; i++ {
 					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
 				}
@@ -998,7 +998,7 @@ func TestKeyVersions(t *testing.T) {
 		})
 		t.Run("prefix", func(t *testing.T) {
 			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
-				writer := db.newWriteBatch(false)
+				writer := db.newWriteBatch()
 				for i := 0; i < 10000; i++ {
 					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
 				}

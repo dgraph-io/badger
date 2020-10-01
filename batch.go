@@ -32,9 +32,8 @@ type WriteBatch struct {
 	throttle *y.Throttle
 	err      error
 
-	isManaged bool
-	commitTs  uint64
-	finished  bool
+	commitTs uint64
+	finished bool
 }
 
 // NewWriteBatch creates a new WriteBatch. This provides a way to conveniently do a lot of writes,
@@ -46,15 +45,14 @@ func (db *DB) NewWriteBatch() *WriteBatch {
 	if db.opt.managedTxns {
 		panic("cannot use NewWriteBatch in managed mode. Use NewWriteBatchAt instead")
 	}
-	return db.newWriteBatch(false)
+	return db.newWriteBatch()
 }
 
-func (db *DB) newWriteBatch(isManaged bool) *WriteBatch {
+func (db *DB) newWriteBatch() *WriteBatch {
 	return &WriteBatch{
-		db:        db,
-		isManaged: isManaged,
-		txn:       db.newTransaction(true, isManaged),
-		throttle:  y.NewThrottle(16),
+		db:       db,
+		txn:      db.newTransaction(true, true),
+		throttle: y.NewThrottle(16),
 	}
 }
 
@@ -191,7 +189,8 @@ func (wb *WriteBatch) commit() error {
 		return wb.err
 	}
 	wb.txn.CommitWith(wb.callback)
-	wb.txn = wb.db.newTransaction(true, wb.isManaged)
+	wb.txn = wb.db.newTransaction(true, true)
+	wb.txn.readTs = 0 // We're not reading anything.
 	wb.txn.commitTs = wb.commitTs
 	return wb.err
 }

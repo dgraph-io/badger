@@ -249,7 +249,6 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithTableLoadingMode(mode).
 		WithEncryptionKey([]byte(encryptionKey)).
 		WithLoadBloomsOnOpen(loadBloomsOnOpen).
-		WithDetectConflicts(detectConflicts).
 		WithCompression(cmode)
 
 	if !showLogs {
