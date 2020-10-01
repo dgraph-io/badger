@@ -654,9 +654,9 @@ func (t *Table) IndexSize() int {
 	return indexSz
 }
 
-// BFSize returns the size of the bloom filter in bytes stored in memory. The
+// BloomFilterSize returns the size of the bloom filter in bytes stored in memory. The
 // size of on-disk representation would be less than the in-memory representation.
-func (t *Table) BFSize() int {
+func (t *Table) BloomFilterSize() int {
 	return t.bf.TotalSize()
 }
 
