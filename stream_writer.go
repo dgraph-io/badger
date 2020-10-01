@@ -123,7 +123,6 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 		}
 		// If the value can be collocated with the key in LSM tree, we can skip
 		// writing the value to value log.
-		e.skipVlog = sw.db.shouldWriteValueToLSM(*e)
 		req := streamReqs[kv.StreamId]
 		if req == nil {
 			req = &request{}
@@ -313,7 +312,8 @@ func (w *sortedWriter) handleRequests() {
 				}
 			}
 			var vs y.ValueStruct
-			if e.skipVlog {
+			vptr := req.Ptrs[i]
+			if vptr.IsZero() {
 				vs = y.ValueStruct{
 					Value:     e.Value,
 					Meta:      e.meta,
@@ -321,7 +321,6 @@ func (w *sortedWriter) handleRequests() {
 					ExpiresAt: e.ExpiresAt,
 				}
 			} else {
-				vptr := req.Ptrs[i]
 				vs = y.ValueStruct{
 					Value:     vptr.Encode(),
 					Meta:      e.meta | bitValuePointer,

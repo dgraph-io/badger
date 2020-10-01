@@ -90,6 +90,7 @@ type logFile struct {
 	dataKey     *pb.DataKey
 	baseIV      []byte
 	registry    *KeyRegistry
+	writeAt     uint32
 }
 
 // encodeEntry will encode entry to the buf
@@ -248,9 +249,8 @@ func (lf *logFile) generateIV(offset uint32) []byte {
 }
 
 func (lf *logFile) doneWriting(offset uint32) error {
-	// Sync before acquiring lock. (We call this from write() and thus know we have shared access
-	// to the fd.)
-	if err := lf.fd.Sync(); err != nil {
+	// Just always sync on rotate.
+	if err := z.Msync(lf.fmap); err != nil {
 		return errors.Wrapf(err, "Unable to sync value log: %q", lf.path)
 	}
 
@@ -284,7 +284,7 @@ func (lf *logFile) doneWriting(offset uint32) error {
 
 // You must hold lf.lock to sync()
 func (lf *logFile) sync() error {
-	return lf.fd.Sync()
+	return z.Msync(lf.fmap)
 }
 
 var errStop = errors.New("Stop iteration")
@@ -420,6 +420,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		return 0, errFile(err, lf.path, "Unable to seek")
 	}
 
+	// TODO: Stop reading directly from files.
 	reader := bufio.NewReader(lf.fd)
 	read := &safeRead{
 		k:            make([]byte, 10),
@@ -914,12 +915,14 @@ func (lf *logFile) bootstrap() error {
 	return err
 }
 
-func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
-	path := vlog.fpath(fid)
+func (lf *logFile) reset() {
+	lf.writeAt = vlogHeaderSize
+}
 
+func (vlog *valueLog) createLogFile(fname string) (*logFile, error) {
 	lf := &logFile{
-		fid:         fid,
-		path:        path,
+		fid:         0,
+		path:        fname,
 		loadingMode: vlog.opt.ValueLogLoadingMode,
 		registry:    vlog.db.registry,
 	}
@@ -927,7 +930,9 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	// To avoid a race condition, all reads and updates to this variable must be
 	// done via atomics.
 	var err error
-	if lf.fd, err = y.CreateSyncedFile(path, vlog.opt.SyncWrites); err != nil {
+
+	// TODO: Do we really need a synced file here?
+	if lf.fd, err = y.CreateSyncedFile(lf.path, vlog.opt.SyncWrites); err != nil {
 		return nil, errFile(err, lf.path, "Create value log file")
 	}
 
@@ -943,15 +948,24 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 		removeFile()
 		return nil, err
 	}
-
-	if err = syncDir(vlog.dirPath); err != nil {
-		removeFile()
-		return nil, errFile(err, vlog.dirPath, "Sync value log dir")
-	}
-
 	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
 		removeFile()
 		return nil, errFile(err, lf.path, "Mmap value log file")
+	}
+	return lf, nil
+}
+
+func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
+	path := vlog.fpath(fid)
+	lf, err := vlog.createLogFile(path)
+	if err != nil {
+		return nil, err
+	}
+	lf.fid = fid
+
+	if err = syncDir(vlog.dirPath); err != nil {
+		y.Check(os.Remove(lf.fd.Name()))
+		return nil, errFile(err, vlog.dirPath, "Sync value log dir")
 	}
 
 	vlog.filesLock.Lock()
@@ -1374,28 +1388,32 @@ func (vlog *valueLog) write(reqs []*request) error {
 	curlf := vlog.filesMap[maxFid]
 	vlog.filesLock.RUnlock()
 
-	var buf bytes.Buffer
-	flushWrites := func() error {
+	defer func() {
+		if vlog.opt.SyncWrites {
+			if err := curlf.sync(); err != nil {
+				vlog.opt.Errorf("Error while curlf sync: %v\n", err)
+			}
+		}
+	}()
+
+	write := func(buf *bytes.Buffer) error {
 		if buf.Len() == 0 {
 			return nil
 		}
-		vlog.opt.Debugf("Flushing buffer of size %d to vlog", buf.Len())
-		n, err := curlf.fd.Write(buf.Bytes())
-		if err != nil {
-			return errors.Wrapf(err, "Unable to write to value log file: %q", curlf.path)
+		n := uint32(buf.Len())
+		endOffset := atomic.AddUint32(&vlog.writableLogOffset, n)
+		if int(endOffset) >= len(curlf.fmap) {
+			return ErrTxnTooBig
 		}
-		buf.Reset()
-		y.NumWrites.Add(1)
-		y.NumBytesWritten.Add(int64(n))
-		vlog.opt.Debugf("Done")
-		atomic.AddUint32(&vlog.writableLogOffset, uint32(n))
+
+		start := int(endOffset - n)
+		y.AssertTrue(copy(curlf.fmap[start:], buf.Bytes()) == int(n))
+
 		atomic.StoreUint32(&curlf.size, vlog.writableLogOffset)
 		return nil
 	}
+
 	toDisk := func() error {
-		if err := flushWrites(); err != nil {
-			return err
-		}
 		if vlog.woffset() > uint32(vlog.opt.ValueLogFileSize) ||
 			vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
 			if err := curlf.doneWriting(vlog.woffset()); err != nil {
@@ -1413,13 +1431,17 @@ func (vlog *valueLog) write(reqs []*request) error {
 		}
 		return nil
 	}
+
+	buf := new(bytes.Buffer)
 	for i := range reqs {
 		b := reqs[i]
 		b.Ptrs = b.Ptrs[:0]
-		var written int
+		var written, bytesWritten int
 		for j := range b.Entries {
+			buf.Reset()
+
 			e := b.Entries[j]
-			if e.skipVlog {
+			if vlog.db.skipVlog(e) {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
 				continue
 			}
@@ -1428,34 +1450,28 @@ func (vlog *valueLog) write(reqs []*request) error {
 			p.Fid = curlf.fid
 			// Use the offset including buffer length so far.
 			p.Offset = vlog.woffset() + uint32(buf.Len())
-			plen, err := curlf.encodeEntry(e, &buf, p.Offset) // Now encode the entry into buffer.
+			plen, err := curlf.encodeEntry(e, buf, p.Offset) // Now encode the entry into buffer.
 			if err != nil {
 				return err
 			}
 			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
-			written++
-
-			// It is possible that the size of the buffer grows beyond the max size of the value
-			// log (this happens when a transaction contains entries with large value sizes) and
-			// badger might run into out of memory errors. We flush the buffer here if it's size
-			// grows beyond the max value log size.
-			if int64(buf.Len()) > vlog.db.opt.ValueLogFileSize {
-				if err := flushWrites(); err != nil {
-					return err
-				}
+			if err := write(buf); err != nil {
+				return err
 			}
+			written++
+			bytesWritten += buf.Len()
+
+			// No need to flush anything, we write to file directly via mmap.
 		}
+		y.NumWrites.Add(int64(written))
+		y.NumBytesWritten.Add(int64(bytesWritten))
+
 		vlog.numEntriesWritten += uint32(written)
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
-		writeNow :=
-			vlog.woffset()+uint32(buf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
-				vlog.numEntriesWritten > uint32(vlog.opt.ValueLogMaxEntries)
-		if writeNow {
-			if err := toDisk(); err != nil {
-				return err
-			}
+		if err := toDisk(); err != nil {
+			return err
 		}
 	}
 	return toDisk()

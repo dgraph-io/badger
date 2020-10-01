@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -67,9 +68,13 @@ type DB struct {
 	// nil if Dir and ValueDir are the same
 	valueDirGuard *directoryLockGuard
 
-	closers   closers
-	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
-	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+	closers closers
+	mt      *skl.Skiplist   // Our latest (actively written) in-memory table
+	imm     []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+	// TODO: This needs to be initialized during Open.
+	nextMemFid int
+
+	wal       *logFile
 	opt       Options
 	manifest  *manifestFile
 	lc        *levelsController
@@ -132,7 +137,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 		copy(nk, e.Key)
 		var nv []byte
 		meta := e.meta
-		if db.shouldWriteValueToLSM(e) {
+		if db.skipVlog(&e) {
 			nv = make([]byte, len(e.Value))
 			copy(nv, e.Value)
 		} else {
@@ -377,7 +382,7 @@ func Open(opt Options) (db *DB, err error) {
 	db.calculateSize()
 	db.closers.updateSize = z.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
-	db.mt = skl.NewSkiplist(arenaSize(opt))
+	db.mt = db.newSkipList()
 
 	// newLevelsController potentially loads files in directory.
 	if db.lc, err = newLevelsController(db, &manifest); err != nil {
@@ -431,6 +436,25 @@ func Open(opt Options) (db *DB, err error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
+}
+
+const memFileExt string = ".mem"
+
+func (db *DB) newSkipList() *skl.Skiplist {
+	f, err := os.OpenFile(path.Join(db.opt.Dir, fmt.Sprintf("%05d%s", db.nextMemFid, memFileExt)),
+		os.O_CREATE|os.O_RDWR, 0666)
+	// Should we crash?
+	y.Check(err)
+	db.nextMemFid++
+
+	sz := arenaSize(db.opt)
+	y.Check(f.Truncate(sz))
+
+	data, err := z.Mmap(f, true, sz)
+	y.Check(err)
+	z.ZeroOut(data, 0, len(data))
+
+	return skl.NewSkiplist(data, f)
 }
 
 // getHead prints all the head pointer in the DB and return the max value.
@@ -765,7 +789,7 @@ var requestPool = sync.Pool{
 	},
 }
 
-func (db *DB) shouldWriteValueToLSM(e Entry) bool {
+func (db *DB) skipVlog(e *Entry) bool {
 	return len(e.Value) < db.opt.ValueThreshold
 }
 
@@ -781,7 +805,7 @@ func (db *DB) writeToLSM(b *request) error {
 		if entry.meta&bitFinTxn != 0 {
 			continue
 		}
-		if db.shouldWriteValueToLSM(*entry) { // Will include deletion / tombstone case.
+		if db.skipVlog(entry) { // Will include deletion / tombstone case.
 			db.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value: entry.Value,
@@ -794,6 +818,7 @@ func (db *DB) writeToLSM(b *request) error {
 					ExpiresAt: entry.ExpiresAt,
 				})
 		} else {
+			// Write pointer to Memtable.
 			db.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:     b.Ptrs[i].Encode(),
@@ -806,11 +831,39 @@ func (db *DB) writeToLSM(b *request) error {
 	return nil
 }
 
+func (db *DB) writeToWAL(reqs []*request) error {
+	wal := db.wal
+	wal.reset()
+
+	buf := new(bytes.Buffer)
+	for _, req := range reqs {
+		for _, e := range req.Entries {
+			buf.Reset()
+			plen, err := wal.encodeEntry(e, buf, wal.writeAt)
+			if err != nil {
+				return err
+			}
+			y.AssertTrue(plen == copy(wal.fmap[wal.writeAt:], buf.Bytes()))
+			wal.writeAt += uint32(plen)
+		}
+	}
+	if db.opt.SyncWrites {
+		return wal.sync()
+	}
+	return nil
+}
+
 // writeRequests is called serially by only one goroutine.
 func (db *DB) writeRequests(reqs []*request) error {
 	if len(reqs) == 0 {
 		return nil
 	}
+
+	// TODO: Is WAL enabled?
+	if err := db.writeToWAL(reqs); err != nil {
+		return errors.Wrapf(err, "while writing to WAL")
+	}
+	defer db.wal.reset()
 
 	done := func(err error) {
 		for _, r := range reqs {
@@ -856,6 +909,12 @@ func (db *DB) writeRequests(reqs []*request) error {
 		db.Lock()
 		db.updateHead(b.Ptrs)
 		db.Unlock()
+	}
+	if db.opt.SyncWrites {
+		if err := db.mt.Sync(); err != nil {
+			done(err)
+			return err
+		}
 	}
 	done(nil)
 	db.opt.Debugf("%d entries written", count)
@@ -1014,8 +1073,10 @@ func (db *DB) ensureRoomForWrite() error {
 		atomic.StoreInt32(&db.logRotates, 0)
 
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
-		err = db.vlog.sync(db.vhead.Fid)
-		if err != nil {
+		if err = db.vlog.sync(db.vhead.Fid); err != nil {
+			return err
+		}
+		if err = db.mt.Sync(); err != nil {
 			return err
 		}
 
@@ -1023,7 +1084,7 @@ func (db *DB) ensureRoomForWrite() error {
 			db.mt.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
 		db.imm = append(db.imm, db.mt)
-		db.mt = skl.NewSkiplist(arenaSize(db.opt))
+		db.mt = db.newSkipList()
 		// New memtable is empty. We certainly have room.
 		return nil
 	default:
@@ -1673,7 +1734,7 @@ func (db *DB) dropAll() (func(), error) {
 		mt.DecrRef()
 	}
 	db.imm = db.imm[:0]
-	db.mt = skl.NewSkiplist(arenaSize(db.opt)) // Set it up for future writes.
+	db.mt = db.newSkipList() // Set it up for future writes.
 
 	num, err := db.lc.dropTree()
 	if err != nil {
@@ -1738,7 +1799,7 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 	db.stopCompactions()
 	defer db.startCompactions()
 	db.imm = db.imm[:0]
-	db.mt = skl.NewSkiplist(arenaSize(db.opt))
+	db.mt = db.newSkipList()
 
 	// Drop prefixes from the levels.
 	if err := db.lc.dropPrefixes(prefixes); err != nil {

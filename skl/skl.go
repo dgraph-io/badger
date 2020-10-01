@@ -34,6 +34,7 @@ package skl
 
 import (
 	"math"
+	"os"
 	"sync/atomic"
 	"unsafe"
 
@@ -79,6 +80,7 @@ type Skiplist struct {
 	head   *node
 	ref    int32
 	arena  *Arena
+	fd     *os.File
 }
 
 // IncrRef increases the refcount
@@ -92,8 +94,10 @@ func (s *Skiplist) DecrRef() {
 	if newRef > 0 {
 		return
 	}
+	y.Check(z.Munmap(s.arena.buf))
+	y.Check(s.fd.Truncate(0))
+	y.Check(os.Remove(s.fd.Name()))
 
-	s.arena.reset()
 	// Indicate we are closed. Good for testing.  Also, lets GC reclaim memory. Race condition
 	// here would suggest we are accessing skiplist when we are supposed to have no reference!
 	s.arena = nil
@@ -124,15 +128,20 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 }
 
 // NewSkiplist makes a new empty skiplist, with a given arena size
-func NewSkiplist(arenaSize int64) *Skiplist {
-	arena := newArena(arenaSize)
+func NewSkiplist(buf []byte, fd *os.File) *Skiplist {
+	arena := newArena(buf)
 	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
 	return &Skiplist{
 		height: 1,
 		head:   head,
 		arena:  arena,
 		ref:    1,
+		fd:     fd,
 	}
+}
+
+func (skl *Skiplist) Sync() error {
+	return z.Msync(skl.arena.buf)
 }
 
 func (s *node) getValueOffset() (uint32, uint32) {

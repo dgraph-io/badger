@@ -40,22 +40,18 @@ type Arena struct {
 }
 
 // newArena returns a new arena.
-func newArena(n int64) *Arena {
+func newArena(buf []byte) *Arena {
 	// Don't store data at position 0 in order to reserve offset=0 as a kind
 	// of nil pointer.
 	out := &Arena{
 		n:   1,
-		buf: make([]byte, n),
+		buf: buf,
 	}
 	return out
 }
 
 func (s *Arena) size() int64 {
 	return int64(atomic.LoadUint32(&s.n))
-}
-
-func (s *Arena) reset() {
-	atomic.StoreUint32(&s.n, 0)
 }
 
 // putNode allocates a node in the arena. The node is aligned on a pointer-sized
