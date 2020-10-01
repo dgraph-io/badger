@@ -3,6 +3,8 @@
 
 # You will need the flatbuffer compiler (flatc) https://google.github.io/flatbuffers/flatbuffers_guide_building.html
 
+# TODO: If flatc is not present, this should download the release, compile it and install it.
+
 flatc --go flatbuffer.fbs
 # Move files to the correct directory.
 mv fb/* ./

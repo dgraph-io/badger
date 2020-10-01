@@ -29,3 +29,4 @@ table BlockOffset {
 }
 
 root_type TableIndex;
+root_type BlockOffset;

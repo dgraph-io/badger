@@ -27,7 +27,7 @@ import (
 	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
-	flatbuffers "github.com/google/flatbuffers/go"
+	fbs "github.com/google/flatbuffers/go"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -74,12 +74,12 @@ type bblock struct {
 	end   uint32 // Points to the end offset of the block.
 }
 
-// blockOffset is used to create the index in builder.Finish
-type blockOffset struct {
-	key    []byte
-	offset uint32
-	len    uint32
-}
+// // blockOffset is used to create the index in builder.Finish
+// type blockOffset struct {
+// 	key    []byte
+// 	offset uint32
+// 	len    uint32
+// }
 
 // Builder is used in building a table.
 type Builder struct {
@@ -92,8 +92,7 @@ type Builder struct {
 	baseOffset uint32 // Offset for the current block.
 
 	entryOffsets  []uint32 // Offsets of entries present in current block.
-	indexBuidler  *flatbuffers.Builder
-	offsets       []*blockOffset
+	offsets       *z.Buffer
 	estimatedSize uint32
 	keyHashes     []uint64 // Used for building the bloomfilter.
 	opt           *Options
@@ -109,10 +108,10 @@ func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
 		// Additional 16 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
-		buf:          z.Calloc(int(opts.TableSize + 16*MB)),
-		indexBuidler: flatbuffers.NewBuilder(1024),
-		keyHashes:    make([]uint64, 0, 1024), // Avoid some malloc calls.
-		opt:          &opts,
+		buf:       z.Calloc(int(opts.TableSize + 16*MB)),
+		keyHashes: make([]uint64, 0, 1024), // Avoid some malloc calls.
+		opt:       &opts,
+		offsets:   z.NewBuffer(1 << 20),
 	}
 
 	// If encryption or compression is not enabled, do not start compression/encryption goroutines
@@ -176,6 +175,7 @@ func (b *Builder) handleBlock() {
 
 // Close closes the TableBuilder.
 func (b *Builder) Close() {
+	b.offsets.Release()
 	z.Free(b.buf)
 }
 
@@ -304,12 +304,19 @@ func (b *Builder) finishBlock() {
 func (b *Builder) addBlockToIndex() {
 	blockBuf := b.buf[b.baseOffset:b.sz]
 	// Add key to the block index.
-	bo := &blockOffset{
-		key:    y.Copy(b.baseKey),
-		offset: b.baseOffset,
-		len:    uint32(len(blockBuf)),
-	}
-	b.offsets = append(b.offsets, bo)
+	builder := fbs.NewBuilder(64)
+	off := builder.CreateByteVector(b.baseKey)
+
+	fb.BlockOffsetStart(builder)
+	fb.BlockOffsetAddKey(builder, off)
+	fb.BlockOffsetAddOffset(builder, b.baseOffset)
+	fb.BlockOffsetAddLen(builder, uint32(len(blockBuf)))
+	uoff := fb.BlockOffsetEnd(builder)
+	builder.Finish(uoff)
+
+	out := builder.FinishedBytes()
+	dst := b.offsets.SliceAllocate(len(out))
+	copy(dst, out)
 }
 
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
@@ -365,9 +372,10 @@ func (b *Builder) ReachedCapacity(cap int64) bool {
 		4 + // count of all entry offsets
 		8 + // checksum bytes
 		4 // checksum length
+
 	estimateSz := blocksSize +
 		4 + // Index length
-		5*(uint32(len(b.offsets))) // approximate index size
+		uint32(b.offsets.Len())
 
 	return int64(estimateSz) > cap
 }
@@ -396,21 +404,24 @@ func (b *Builder) Finish(allocate bool) []byte {
 	dst := b.buf
 	// Fix block boundaries. This includes moving the blocks so that we
 	// don't have any interleaving space between them.
+	bo, next := []byte{}, 1
 	if len(b.blockList) > 0 {
 		dstLen := uint32(0)
-		for i, bl := range b.blockList {
-			off := b.offsets[i]
+		for _, bl := range b.blockList {
+			bo, next = b.offsets.Slice(next)
 			// Length of the block is end minus the start.
-			off.len = bl.end - bl.start
+			fbo := fb.GetRootAsBlockOffset(bo, 0)
+			fbo.MutateLen(bl.end - bl.start)
 			// New offset of the block is the point in the main buffer till
 			// which we have written data.
-			off.offset = dstLen
+			fbo.MutateOffset(dstLen)
 
 			copy(dst[dstLen:], b.buf[bl.start:bl.end])
 
 			// New length is the start of the block plus its length.
-			dstLen = off.offset + off.len
+			dstLen = fbo.Offset() + fbo.Len()
 		}
+		y.AssertTrue(next == 0)
 		// Start writing to the buffer from the point until which we have valid data.
 		// Fix the length because append and writeChecksum also rely on it.
 		b.sz = dstLen
@@ -524,58 +535,59 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 }
 
 func (b *Builder) buildIndex(bf *z.Bloom) []byte {
-	idxBuilder := b.indexBuidler
+	builder := fbs.NewBuilder(3 << 20)
 
-	boList := b.writeBlockOffsets()
+	boList := b.writeBlockOffsets(builder)
 	// Write block offset vector the the idxBuilder.
-	fb.TableIndexStartOffsetsVector(idxBuilder, len(boList))
+	fb.TableIndexStartOffsetsVector(builder, len(boList))
 
 	// Write individual block offsets.
 	for i := 0; i < len(boList); i++ {
-		idxBuilder.PrependUOffsetT(boList[i])
+		builder.PrependUOffsetT(boList[i])
 	}
-	boEnd := idxBuilder.EndVector(len(boList))
+	boEnd := builder.EndVector(len(boList))
 
-	var bfoff flatbuffers.UOffsetT
+	var bfoff fbs.UOffsetT
 	if bf != nil {
 		// Write the bloom filter.
-		bfoff = idxBuilder.CreateByteVector(bf.JSONMarshal())
+		bfoff = builder.CreateByteVector(bf.JSONMarshal())
 	}
 
-	fb.TableIndexStart(idxBuilder)
-	fb.TableIndexAddOffsets(idxBuilder, boEnd)
-	fb.TableIndexAddBloomFilter(idxBuilder, bfoff)
-	fb.TableIndexAddEstimatedSize(idxBuilder, b.estimatedSize)
-	idxBuilder.Finish(fb.TableIndexEnd(idxBuilder))
+	fb.TableIndexStart(builder)
+	fb.TableIndexAddOffsets(builder, boEnd)
+	fb.TableIndexAddBloomFilter(builder, bfoff)
+	fb.TableIndexAddEstimatedSize(builder, b.estimatedSize)
+	builder.Finish(fb.TableIndexEnd(builder))
 
-	return idxBuilder.FinishedBytes()
+	return builder.FinishedBytes()
 }
 
 // writeBlockOffsets writes all the blockOffets in b.offsets and returns the
 // offsets for the newly written items.
-func (b *Builder) writeBlockOffsets() []flatbuffers.UOffsetT {
-	offsets := b.offsets
-	// Collect the offsets of the blockOffsets.
-	var boList []flatbuffers.UOffsetT
-	for i := len(offsets) - 1; i >= 0; i-- {
-		item := offsets[i]
-		off := b.writeBlockOffset(item.key, item.offset, item.len)
-		boList = append(boList, off)
+func (b *Builder) writeBlockOffsets(builder *fbs.Builder) []fbs.UOffsetT {
+	so := b.offsets.SliceOffsets()
+	var uoffs []fbs.UOffsetT
+	for i := len(so) - 1; i >= 0; i-- {
+		// We add these in reverse order.
+		data, _ := b.offsets.Slice(so[i])
+		uoff := b.writeBlockOffset(builder, data)
+		uoffs = append(uoffs, uoff)
 	}
-	return boList
+	return uoffs
 }
 
 // writeBlockOffset writes the given key,offset,len triple to the indexBuilder.
 // It returns the offset of the newly written blockoffset.
-func (b *Builder) writeBlockOffset(key []byte, offset, len uint32) flatbuffers.UOffsetT {
-	idxBuilder := b.indexBuidler
+func (b *Builder) writeBlockOffset(builder *fbs.Builder, data []byte) fbs.UOffsetT {
 	// Write the key to the buffer.
-	k := idxBuilder.CreateByteVector(key)
+	bo := fb.GetRootAsBlockOffset(data, 0)
+
+	k := builder.CreateByteVector(bo.KeyBytes())
 
 	// Build the blockOffset.
-	fb.BlockOffsetStart(idxBuilder)
-	fb.BlockOffsetAddKey(idxBuilder, k)
-	fb.BlockOffsetAddOffset(idxBuilder, offset)
-	fb.BlockOffsetAddLen(idxBuilder, len)
-	return fb.BlockOffsetEnd(idxBuilder)
+	fb.BlockOffsetStart(builder)
+	fb.BlockOffsetAddKey(builder, k)
+	fb.BlockOffsetAddOffset(builder, bo.Offset())
+	fb.BlockOffsetAddLen(builder, bo.Len())
+	return fb.BlockOffsetEnd(builder)
 }
