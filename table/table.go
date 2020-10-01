@@ -17,6 +17,7 @@
 package table
 
 import (
+	"bytes"
 	"crypto/aes"
 	"encoding/binary"
 	"fmt"
@@ -477,6 +478,30 @@ func (t *Table) initIndex() (*pb.BlockOffset, error) {
 	// We don't need to put anything in the indexCache here. Table.Open will
 	// create an iterator and that iterator will push the indices in cache.
 	return index.Offsets[0], nil
+}
+
+// KeySplits splits the table into at least n ranges based on the block offsets.
+func (t *Table) KeySplits(n int, prefix []byte) []string {
+	if n == 0 {
+		return nil
+	}
+
+	var res []string
+	offsets := t.blockOffsets()
+	jump := len(offsets) / n
+	if jump == 0 {
+		jump = 1
+	}
+
+	for i := 0; i < len(offsets); i += jump {
+		if i >= len(offsets) {
+			i = len(offsets) - 1
+		}
+		if bytes.HasPrefix(offsets[i].Key, prefix) {
+			res = append(res, string(offsets[i].Key))
+		}
+	}
+	return res
 }
 
 // blockOffsets returns block offsets of this table.
