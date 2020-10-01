@@ -47,6 +47,7 @@ type StreamWriter struct {
 	writeLock  sync.Mutex
 	db         *DB
 	done       func()
+	isDone     bool
 	throttle   *y.Throttle
 	maxVersion uint64
 	writers    map[uint32]*sortedWriter
@@ -75,8 +76,15 @@ func (sw *StreamWriter) Prepare() error {
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
 
-	var err error
-	sw.done, err = sw.db.dropAll()
+	done, err := sw.db.dropAll()
+	sw.done = func() {
+		if sw.isDone {
+			return
+		}
+		done()
+		sw.isDone = true
+	}
+
 	return err
 }
 
@@ -263,6 +271,20 @@ func (sw *StreamWriter) Flush() error {
 		return err
 	}
 	return sw.db.lc.validate()
+}
+
+// Cancel signals all goroutines to exit.
+func (sw *StreamWriter) Cancel() {
+	sw.writeLock.Lock()
+	defer sw.writeLock.Unlock()
+
+	defer sw.done()
+
+	for _, writer := range sw.writers {
+		if writer != nil {
+			writer.closer.Signal()
+		}
+	}
 }
 
 type sortedWriter struct {
