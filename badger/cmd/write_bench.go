@@ -292,7 +292,6 @@ func writeBench(cmd *cobra.Command, args []string) error {
 func showKeysStats(db *badger.DB) {
 	var (
 		internalKeyCount uint32
-		moveKeyCount     uint32
 		invalidKeyCount  uint32
 		validKeyCount    uint32
 	)
@@ -311,18 +310,14 @@ func showKeysStats(db *badger.DB) {
 		if bytes.HasPrefix(i.Key(), []byte("!badger!")) {
 			internalKeyCount++
 		}
-		if bytes.HasPrefix(i.Key(), []byte("!badger!Move")) {
-			moveKeyCount++
-		}
 		if i.IsDeletedOrExpired() {
 			invalidKeyCount++
 		} else {
 			validKeyCount++
 		}
 	}
-	fmt.Printf("Valid Keys: %d Invalid Keys: %d Move Keys:"+
-		" %d Internal Keys: %d\n", validKeyCount, invalidKeyCount,
-		moveKeyCount, internalKeyCount)
+	fmt.Printf("Valid Keys: %d Invalid Keys: %d Internal Keys: %d\n",
+		validKeyCount, invalidKeyCount, internalKeyCount)
 }
 
 func reportStats(c *z.Closer, db *badger.DB) {
