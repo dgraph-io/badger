@@ -21,6 +21,7 @@ import (
 	"math"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/dgryski/go-farm"
@@ -74,9 +75,10 @@ type bblock struct {
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	buf     []byte
-	sz      uint32
-	bufLock sync.Mutex // This lock guards the buf. We acquire lock when we resize the buf.
+	buf        []byte
+	sz         uint32
+	bufLock    sync.Mutex // This lock guards the buf. We acquire lock when we resize the buf.
+	actualSize uint32
 
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -152,6 +154,7 @@ func (b *Builder) handleBlock() {
 		copy(b.buf[item.start:], blockBuf)
 		b.bufLock.Unlock()
 
+		atomic.AddUint32(&b.actualSize, uint32(len(blockBuf)))
 		// Fix the boundary of the block.
 		item.end = item.start + uint32(len(blockBuf))
 
@@ -347,7 +350,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity(cap int64) bool {
-	blocksSize := b.sz + // length of current buffer
+	blocksSize := atomic.LoadUint32(&b.actualSize) + // actual length of current buffer
 		uint32(len(b.entryOffsets)*4) + // all entry offsets size
 		4 + // count of all entry offsets
 		8 + // checksum bytes
@@ -356,7 +359,7 @@ func (b *Builder) ReachedCapacity(cap int64) bool {
 		4 + // Index length
 		5*(uint32(len(b.tableIndex.Offsets))) // approximate index size
 
-	return int64(estimateSz) > cap
+	return estimateSz >= uint32(float64(cap)*0.90)
 }
 
 // Finish finishes the table by appending the index.
