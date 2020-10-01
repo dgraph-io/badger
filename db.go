@@ -327,10 +327,11 @@ func Open(opt Options) (db *DB, err error) {
 	}()
 
 	if opt.BlockCacheSize > 0 {
+		numInCache := opt.BlockCacheSize / int64(opt.BlockSize)
+
 		config := ristretto.Config{
-			// Use 5% of cache memory for storing counters.
-			NumCounters: int64(float64(opt.BlockCacheSize) * 0.05 * 2),
-			MaxCost:     int64(float64(opt.BlockCacheSize) * 0.95),
+			NumCounters: numInCache * 8,
+			MaxCost:     opt.BlockCacheSize,
 			BufferItems: 64,
 			Metrics:     true,
 			OnExit:      table.BlockEvictHandler,
@@ -342,10 +343,13 @@ func Open(opt Options) (db *DB, err error) {
 	}
 
 	if opt.IndexCacheSize > 0 {
+		// Index size is around 5% of the table size.
+		indexSz := int64(float64(opt.MaxTableSize) * 0.05)
+		numInCache := opt.IndexCacheSize / indexSz
+
 		config := ristretto.Config{
-			// Use 5% of cache memory for storing counters.
-			NumCounters: int64(float64(opt.IndexCacheSize) * 0.05 * 2),
-			MaxCost:     int64(float64(opt.IndexCacheSize) * 0.95),
+			NumCounters: numInCache * 8,
+			MaxCost:     opt.IndexCacheSize,
 			BufferItems: 64,
 			Metrics:     true,
 		}
