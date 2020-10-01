@@ -30,7 +30,7 @@ import (
 	"github.com/golang/protobuf/proto"
 )
 
-const pageSize = 4 << 20 // 4MB
+const batchSize = 16 << 20 // 16 MB
 
 // maxStreamSize is the maximum allowed size of a stream batch. This is a soft limit
 // as a single list that is still over the limit will have to be sent as is since it
@@ -218,7 +218,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				kv.StreamId = streamId
 				outList.Kv = append(outList.Kv, kv)
 
-				if size < pageSize {
+				if size < batchSize {
 					continue
 				}
 				if err := sendIt(); err != nil {

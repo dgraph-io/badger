@@ -49,6 +49,10 @@ var (
 	lfDiscardStatsKey = []byte("!badger!discard") // For storing lfDiscardStats
 )
 
+const (
+	maxNumSplits = 128
+)
+
 type closers struct {
 	updateSize *z.Closer
 	compactors *z.Closer
@@ -1454,15 +1458,81 @@ func (db *DB) Tables(withKeysCount bool) []TableInfo {
 // the DB.
 func (db *DB) KeySplits(prefix []byte) []string {
 	var splits []string
+	tables := db.Tables(false)
+
 	// We just want table ranges here and not keys count.
-	for _, ti := range db.Tables(false) {
+	for _, ti := range tables {
 		// We don't use ti.Left, because that has a tendency to store !badger
 		// keys.
 		if bytes.HasPrefix(ti.Right, prefix) {
 			splits = append(splits, string(ti.Right))
 		}
 	}
+
+	// If the number of splits is low, look at the offsets inside the
+	// tables to generate more splits.
+	if len(splits) < 32 {
+		numTables := len(tables)
+		if numTables == 0 {
+			numTables = 1
+		}
+		numPerTable := 32 / numTables
+		if numPerTable == 0 {
+			numPerTable = 1
+		}
+		splits = db.lc.keySplits(numPerTable, prefix)
+	}
+
+	// If the number of splits is still < 32, then look at the memtables.
+	if len(splits) < 32 {
+		maxPerSplit := 10000
+		mtSplits := func(mt *skl.Skiplist) {
+			count := 0
+			iter := mt.NewIterator()
+			for iter.SeekToFirst(); iter.Valid(); iter.Next() {
+				if count%maxPerSplit == 0 {
+					// Add a split every maxPerSplit keys.
+					if bytes.HasPrefix(iter.Key(), prefix) {
+						splits = append(splits, string(iter.Key()))
+					}
+				}
+				count += 1
+			}
+			_ = iter.Close()
+		}
+
+		db.Lock()
+		defer db.Unlock()
+		memtables := make([]*skl.Skiplist, 0)
+		memtables = append(memtables, db.imm...)
+		for _, mt := range memtables {
+			mtSplits(mt)
+		}
+		mtSplits(db.mt)
+	}
+
 	sort.Strings(splits)
+
+	// Limit the maximum number of splits returned by this function. We check against
+	// maxNumberSplits * 2 so that the jump variable has a value of at least two.
+	// Otherwise, the entire list would be returned without any reduction in size.
+	if len(splits) > maxNumSplits*2 {
+		newSplits := make([]string, 0)
+		jump := len(splits) / maxNumSplits
+		if jump < 2 {
+			jump = 2
+		}
+
+		for i := 0; i < len(splits); i += jump {
+			if i >= len(splits) {
+				i = len(splits) - 1
+			}
+			newSplits = append(newSplits, splits[i])
+		}
+
+		splits = newSplits
+	}
+
 	return splits
 }
 
