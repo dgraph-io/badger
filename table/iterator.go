@@ -21,6 +21,7 @@ import (
 	"io"
 	"sort"
 
+	"github.com/dgraph-io/badger/v2/fb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 )
@@ -252,9 +253,11 @@ func (itr *Iterator) seekFrom(key []byte, whence int) {
 	case current:
 	}
 
+	var ko fb.BlockOffset
 	idx := sort.Search(itr.t.index.OffsetsLength(), func(idx int) bool {
-		ko := itr.t.index.block(idx)
-		return y.CompareKeys(ko.key(), key) > 0
+		// Offsets should never turn false since we're iterating within the OffsetsLength.
+		y.AssertTrue(itr.t.index.Offsets(&ko, idx))
+		return y.CompareKeys(ko.KeyBytes(), key) > 0
 	})
 	if idx == 0 {
 		// The smallest key in our table is already strictly > key. We can return that.

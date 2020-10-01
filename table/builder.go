@@ -555,7 +555,7 @@ func (b *Builder) buildIndex(bf *z.Bloom) []byte {
 // offsets for the newly written items.
 func (b *Builder) writeBlockOffsets() []flatbuffers.UOffsetT {
 	offsets := b.offsets
-	// collect the offsets of the blockOffsets.
+	// Collect the offsets of the blockOffsets.
 	var boList []flatbuffers.UOffsetT
 	for i := len(offsets) - 1; i >= 0; i-- {
 		item := offsets[i]
@@ -572,7 +572,7 @@ func (b *Builder) writeBlockOffset(key []byte, offset, len uint32) flatbuffers.U
 	// Write the key to the buffer.
 	k := idxBuilder.CreateByteVector(key)
 
-	// Builder the blockOffset.
+	// Build the blockOffset.
 	fb.BlockOffsetStart(idxBuilder)
 	fb.BlockOffsetAddKey(idxBuilder, k)
 	fb.BlockOffsetAddOffset(idxBuilder, offset)

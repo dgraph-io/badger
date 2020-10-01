@@ -26,6 +26,7 @@ import (
 	"github.com/dgryski/go-farm"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dgraph-io/badger/v2/fb"
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
@@ -123,7 +124,9 @@ func TestTableIndex(t *testing.T) {
 			idx, err := tbl.readTableIndex()
 			require.NoError(t, err)
 			for i := 0; i < idx.OffsetsLength(); i++ {
-				require.Equal(t, blockFirstKeys[i], idx.block(i).key())
+				var bo fb.BlockOffset
+				require.True(t, idx.Offsets(&bo, i))
+				require.Equal(t, blockFirstKeys[i], bo.KeyBytes())
 			}
 			f.Close()
 			require.NoError(t, os.RemoveAll(filename))

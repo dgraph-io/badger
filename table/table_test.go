@@ -738,10 +738,13 @@ func TestTableChecksum(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, n, len(rb))
 
-	_, err = OpenTable(f, opts)
-	if err == nil || !strings.Contains(err.Error(), "checksum") {
-		t.Fatal("Test should have been failed with checksum mismatch error")
-	}
+	require.Panics(t, func() {
+		// Either OpenTable will panic on corrupted data or the checksum verification will fail.
+		_, err = OpenTable(f, opts)
+		if strings.Contains(err.Error(), "checksum") {
+			panic("checksum mismatch")
+		}
+	})
 }
 
 var cacheConfig = ristretto.Config{
