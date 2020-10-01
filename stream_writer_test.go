@@ -379,7 +379,7 @@ func TestStreamWriterCancel(t *testing.T) {
 
 		sw := db.NewStreamWriter()
 		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
-		require.NoError(t, sw.Write(nil), "sw.Write() failed")
+		require.NoError(t, sw.Write(list), "sw.Write() failed")
 		sw.Cancel()
 
 		// Use the API incorrectly.
