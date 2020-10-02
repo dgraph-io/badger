@@ -101,8 +101,8 @@ type Table struct {
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
 	bfLock    sync.Mutex
 
-	index *fb.TableIndex
-	ref   int32 // For file garbage collection. Atomic.
+	index *fb.TableIndex // Nil if encryption is enabled.
+	ref   int32          // For file garbage collection. Atomic.
 	bf    *z.Bloom
 
 	mmap []byte // Memory mapped.
@@ -124,7 +124,7 @@ type Table struct {
 
 // MaxVersion returns the maximum version across all keys stored in this table.
 func (t *Table) MaxVersion() uint64 {
-	return t.index.MaxVersion()
+	return t.fetchIndex().MaxVersion()
 }
 
 // CompressionType returns the compression algorithm used for block compression.
@@ -145,7 +145,7 @@ func (t *Table) DecrRef() error {
 		// at least one reference pointing to them.
 
 		// Delete all blocks from the cache.
-		for i := 0; i < t.index.OffsetsLength(); i++ {
+		for i := 0; i < t.offsetsLength(); i++ {
 			t.opt.BlockCache.Del(t.blockCacheKey(i))
 		}
 		// Delete bloom filter and indices from the cache.
@@ -445,7 +445,6 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 		return nil, err
 	}
 
-	t.index = index
 	if t.opt.Compression == options.None {
 		t.estimatedSize = index.EstimatedSize()
 	} else {
@@ -470,6 +469,7 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 			t.bf = bf
 			t.bfLock.Unlock()
 		}
+		t.index = index
 	}
 	var bo fb.BlockOffset
 	y.AssertTrue(index.Offsets(&bo, 0))
@@ -484,7 +484,7 @@ func (t *Table) KeySplits(n int, prefix []byte) []string {
 
 	var res []string
 
-	oLen := t.index.OffsetsLength()
+	oLen := t.offsetsLength()
 	jump := oLen / n
 	// offsets := t.blockOffsets()
 	// jump := len(offsets) / n
@@ -497,7 +497,7 @@ func (t *Table) KeySplits(n int, prefix []byte) []string {
 		if i >= oLen {
 			i = oLen - 1
 		}
-		y.AssertTrue(t.index.Offsets(&bo, i))
+		y.AssertTrue(t.offsets(&bo, i))
 		if bytes.HasPrefix(bo.KeyBytes(), prefix) {
 			res = append(res, string(bo.KeyBytes()))
 		}
@@ -505,12 +505,35 @@ func (t *Table) KeySplits(n int, prefix []byte) []string {
 	return res
 }
 
+func (t *Table) fetchIndex() *fb.TableIndex {
+	if t.opt.IndexCache == nil {
+		return t.index
+	}
+
+	if val, ok := t.opt.IndexCache.Get(t.blockOffsetsCacheKey()); ok && val != nil {
+		return val.(*fb.TableIndex)
+	}
+
+	index, err := t.readTableIndex()
+	y.Check(err)
+	t.opt.IndexCache.Set(t.blockOffsetsCacheKey(), index, int64(t.indexLen))
+	return index
+}
+
+func (t *Table) offsetsLength() int {
+	return t.fetchIndex().OffsetsLength()
+}
+
+func (t *Table) offsets(ko *fb.BlockOffset, i int) bool {
+	return t.fetchIndex().Offsets(ko, i)
+}
+
 // block function return a new block. Each block holds a ref and the byte
 // slice stored in the block will be reused when the ref becomes zero. The
 // caller should release the block by calling block.decrRef() on it.
 func (t *Table) block(idx int, useCache bool) (*block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
-	if idx >= t.index.OffsetsLength() {
+	if idx >= t.offsetsLength() {
 		return nil, errors.New("block out of index")
 	}
 	if t.opt.BlockCache != nil {
@@ -527,7 +550,7 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 	}
 
 	var ko fb.BlockOffset
-	y.AssertTrue(t.index.Offsets(&ko, idx))
+	y.AssertTrue(t.offsets(&ko, idx))
 	blk := &block{
 		offset: int(ko.Offset()),
 		ref:    1,
@@ -630,6 +653,12 @@ func (t *Table) blockCacheKey(idx int) []byte {
 	return buf
 }
 
+// blockOffsetsCacheKey returns the cache key for block offsets. blockOffsets
+// are stored in the index cache.
+func (t *Table) blockOffsetsCacheKey() uint64 {
+	return t.id
+}
+
 // IndexSize is the size of table index in bytes
 func (t *Table) IndexSize() int {
 	return t.indexLen
@@ -685,15 +714,11 @@ func (t *Table) DoesNotHave(hash uint64) bool {
 // readBloomFilter reads the bloom filter from the SST and returns its length
 // along with the bloom filter.
 func (t *Table) readBloomFilter() (*z.Bloom, int) {
-	var res []byte
-	index := t.index
+	index := t.fetchIndex()
 	// Read bloom filter from the index.
-	for j := 0; j < index.BloomFilterLength(); j++ {
-		res = append(res, byte(index.BloomFilter(j)))
-	}
-	bf, err := z.JSONUnmarshal(res)
+	bf, err := z.JSONUnmarshal(index.BloomFilterBytes())
 	y.Check(err)
-	return bf, len(res)
+	return bf, index.BloomFilterLength()
 }
 
 // readTableIndex reads table index from the sst and returns its pb format.
@@ -713,7 +738,7 @@ func (t *Table) readTableIndex() (*fb.TableIndex, error) {
 // VerifyChecksum verifies checksum for all blocks of table. This function is called by
 // OpenTable() function. This function is also called inside levelsController.VerifyChecksum().
 func (t *Table) VerifyChecksum() error {
-	ti := t.index
+	ti := t.fetchIndex()
 	for i := 0; i < ti.OffsetsLength(); i++ {
 		b, err := t.block(i, true)
 		if err != nil {

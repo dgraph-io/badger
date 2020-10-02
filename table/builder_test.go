@@ -120,7 +120,7 @@ func TestTableIndex(t *testing.T) {
 			}
 
 			// Ensure index is built correctly
-			require.Equal(t, blockCount, tbl.index.OffsetsLength())
+			require.Equal(t, blockCount, tbl.offsetsLength())
 			idx, err := tbl.readTableIndex()
 			require.NoError(t, err)
 			for i := 0; i < idx.OffsetsLength(); i++ {

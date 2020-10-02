@@ -199,7 +199,7 @@ func (itr *Iterator) useCache() bool {
 }
 
 func (itr *Iterator) seekToFirst() {
-	numBlocks := itr.t.index.OffsetsLength()
+	numBlocks := itr.t.offsetsLength()
 	if numBlocks == 0 {
 		itr.err = io.EOF
 		return
@@ -216,7 +216,7 @@ func (itr *Iterator) seekToFirst() {
 }
 
 func (itr *Iterator) seekToLast() {
-	numBlocks := itr.t.index.OffsetsLength()
+	numBlocks := itr.t.offsetsLength()
 	if numBlocks == 0 {
 		itr.err = io.EOF
 		return
@@ -254,9 +254,9 @@ func (itr *Iterator) seekFrom(key []byte, whence int) {
 	}
 
 	var ko fb.BlockOffset
-	idx := sort.Search(itr.t.index.OffsetsLength(), func(idx int) bool {
-		// Offsets should never turn false since we're iterating within the OffsetsLength.
-		y.AssertTrue(itr.t.index.Offsets(&ko, idx))
+	idx := sort.Search(itr.t.offsetsLength(), func(idx int) bool {
+		// Offsets should never return false since we're iterating within the OffsetsLength.
+		y.AssertTrue(itr.t.offsets(&ko, idx))
 		return y.CompareKeys(ko.KeyBytes(), key) > 0
 	})
 	if idx == 0 {
@@ -275,7 +275,7 @@ func (itr *Iterator) seekFrom(key []byte, whence int) {
 	itr.seekHelper(idx-1, key)
 	if itr.err == io.EOF {
 		// Case 1. Need to visit block[idx].
-		if idx == itr.t.index.OffsetsLength() {
+		if idx == itr.t.offsetsLength() {
 			// If idx == len(itr.t.blockIndex), then input key is greater than ANY element of table.
 			// There's nothing we can do. Valid() should return false as we seek to end of table.
 			return
@@ -303,7 +303,7 @@ func (itr *Iterator) seekForPrev(key []byte) {
 func (itr *Iterator) next() {
 	itr.err = nil
 
-	if itr.bpos >= itr.t.index.OffsetsLength() {
+	if itr.bpos >= itr.t.offsetsLength() {
 		itr.err = io.EOF
 		return
 	}

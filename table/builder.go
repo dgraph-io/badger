@@ -18,6 +18,7 @@ package table
 
 import (
 	"crypto/aes"
+	"encoding/binary"
 	"math"
 	"runtime"
 	"sync"
@@ -74,13 +75,6 @@ type bblock struct {
 	end   uint32 // Points to the end offset of the block.
 }
 
-// // blockOffset is used to create the index in builder.Finish
-// type blockOffset struct {
-// 	key    []byte
-// 	offset uint32
-// 	len    uint32
-// }
-
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
@@ -94,7 +88,7 @@ type Builder struct {
 	entryOffsets  []uint32 // Offsets of entries present in current block.
 	offsets       *z.Buffer
 	estimatedSize uint32
-	keyHashes     []uint64 // Used for building the bloomfilter.
+	keyHashes     *z.Buffer //[]uint64 // Used for building the bloomfilter.
 	opt           *Options
 	maxVersion    uint64
 
@@ -110,7 +104,7 @@ func NewTableBuilder(opts Options) *Builder {
 		// Additional 16 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
 		buf:       z.Calloc(int(opts.TableSize + 16*MB)),
-		keyHashes: make([]uint64, 0, 1024), // Avoid some malloc calls.
+		keyHashes: z.NewBuffer(4 << 20), //make([]uint64, 0, 1024), // Avoid some malloc calls.
 		opt:       &opts,
 		offsets:   z.NewBuffer(1 << 20),
 	}
@@ -177,6 +171,7 @@ func (b *Builder) handleBlock() {
 // Close closes the TableBuilder.
 func (b *Builder) Close() {
 	b.offsets.Release()
+	b.keyHashes.Release()
 	z.Free(b.buf)
 }
 
@@ -195,7 +190,8 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
-	b.keyHashes = append(b.keyHashes, farm.Fingerprint64(y.ParseKey(key)))
+	binary.BigEndian.PutUint64(b.keyHashes.SliceAllocate(8), farm.Fingerprint64(y.ParseKey(key)))
+	// b.keyHashes = append(b.keyHashes, farm.Fingerprint64(y.ParseKey(key)))
 
 	if version := y.ParseTs(key); version > b.maxVersion {
 		b.maxVersion = version
@@ -432,11 +428,14 @@ func (b *Builder) Finish(allocate bool) []byte {
 		b.sz = dstLen
 	}
 
+	// TODO: Switch bloom filters to use flatbuffers.
 	var bf *z.Bloom
-	if b.opt.BloomFalsePositive > 0 {
-		bf = z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePositive)
-		for _, h := range b.keyHashes {
-			bf.Add(h)
+	if b.opt.BloomFalsePositive > 0 && !b.keyHashes.IsEmpty() {
+		bf = z.NewBloomFilter(float64(b.keyHashes.Len()/8), b.opt.BloomFalsePositive)
+		keyHash, next := []byte{}, 1
+		for next != 0 {
+			keyHash, next = b.keyHashes.Slice(next)
+			bf.Add(binary.BigEndian.Uint64(keyHash))
 		}
 	}
 	index := b.buildIndex(bf)
