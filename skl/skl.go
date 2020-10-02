@@ -129,16 +129,7 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 
 // NewSkiplist makes a new empty skiplist
 func NewSkiplist(buf []byte, fd *os.File) *Skiplist {
-	arena := newArena(buf[4:])
-	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
-	s := &Skiplist{
-		height: (*int32)(unsafe.Pointer(&buf[0])),
-		head:   head,
-		arena:  arena,
-		ref:    1,
-		fd:     fd,
-		buf:    buf,
-	}
+	s := OpenSkiplist(buf, fd)
 	atomic.StoreInt32(s.height, 1)
 	return s
 }
