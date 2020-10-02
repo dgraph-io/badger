@@ -18,14 +18,12 @@ package table
 
 import (
 	"crypto/aes"
-	"encoding/binary"
 	"math"
 	"runtime"
 	"sync"
 	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/fb"
-	"github.com/dgryski/go-farm"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
 	fbs "github.com/google/flatbuffers/go"
@@ -88,7 +86,7 @@ type Builder struct {
 	entryOffsets  []uint32 // Offsets of entries present in current block.
 	offsets       *z.Buffer
 	estimatedSize uint32
-	keyHashes     *z.Buffer //[]uint64 // Used for building the bloomfilter.
+	keyHashes     []uint32 // Used for building the bloomfilter.
 	opt           *Options
 	maxVersion    uint64
 
@@ -103,10 +101,9 @@ func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
 		// Additional 16 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
-		buf:       z.Calloc(int(opts.TableSize + 16*MB)),
-		keyHashes: z.NewBuffer(4 << 20), //make([]uint64, 0, 1024), // Avoid some malloc calls.
-		opt:       &opts,
-		offsets:   z.NewBuffer(1 << 20),
+		buf:     z.Calloc(int(opts.TableSize + 16*MB)),
+		opt:     &opts,
+		offsets: z.NewBuffer(1 << 20),
 	}
 
 	// If encryption or compression is not enabled, do not start compression/encryption goroutines
@@ -171,7 +168,6 @@ func (b *Builder) handleBlock() {
 // Close closes the TableBuilder.
 func (b *Builder) Close() {
 	b.offsets.Release()
-	b.keyHashes.Release()
 	z.Free(b.buf)
 }
 
@@ -190,8 +186,7 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 }
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
-	binary.BigEndian.PutUint64(b.keyHashes.SliceAllocate(8), farm.Fingerprint64(y.ParseKey(key)))
-	// b.keyHashes = append(b.keyHashes, farm.Fingerprint64(y.ParseKey(key)))
+	b.keyHashes = append(b.keyHashes, y.Hash(y.ParseKey(key)))
 
 	if version := y.ParseTs(key); version > b.maxVersion {
 		b.maxVersion = version
@@ -428,17 +423,9 @@ func (b *Builder) Finish(allocate bool) []byte {
 		b.sz = dstLen
 	}
 
-	// TODO: Switch bloom filters to use flatbuffers.
-	var bf *z.Bloom
-	if b.opt.BloomFalsePositive > 0 && !b.keyHashes.IsEmpty() {
-		bf = z.NewBloomFilter(float64(b.keyHashes.Len()/8), b.opt.BloomFalsePositive)
-		keyHash, next := []byte{}, 1
-		for next != 0 {
-			keyHash, next = b.keyHashes.Slice(next)
-			bf.Add(binary.BigEndian.Uint64(keyHash))
-		}
-	}
-	index := b.buildIndex(bf)
+	// TODO: Figure out how to map bitsPerKey to BloomFalsePositive.
+	index := b.buildIndex(y.NewFilter(b.keyHashes, 10))
+
 	var err error
 	if b.shouldEncrypt() {
 		index, err = b.encrypt(index, false)
@@ -538,7 +525,7 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 	return nil, errors.New("Unsupported compression type")
 }
 
-func (b *Builder) buildIndex(bf *z.Bloom) []byte {
+func (b *Builder) buildIndex(bloom []byte) []byte {
 	builder := fbs.NewBuilder(3 << 20)
 
 	boList := b.writeBlockOffsets(builder)
@@ -551,11 +538,8 @@ func (b *Builder) buildIndex(bf *z.Bloom) []byte {
 	}
 	boEnd := builder.EndVector(len(boList))
 
-	var bfoff fbs.UOffsetT
-	if bf != nil {
-		// Write the bloom filter.
-		bfoff = builder.CreateByteVector(bf.JSONMarshal())
-	}
+	// Write the bloom filter.
+	bfoff := builder.CreateByteVector(bloom)
 
 	fb.TableIndexStart(builder)
 	fb.TableIndexAddOffsets(builder, boEnd)

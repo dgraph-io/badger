@@ -346,8 +346,6 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}
 
-	opt.IndexCacheSize = 100 << 20
-	// opt.EncryptionKey = []byte("badger16byteskey")
 	if opt.IndexCacheSize > 0 {
 		// Index size is around 5% of the table size.
 		indexSz := int64(float64(opt.MaxTableSize) * 0.05)

@@ -90,7 +90,7 @@ type Options struct {
 type TableInterface interface {
 	Smallest() []byte
 	Biggest() []byte
-	DoesNotHave(hash uint64) bool
+	DoesNotHave(hash uint32) bool
 }
 
 // Table represents a loaded table file with the info we have about it.
@@ -99,11 +99,9 @@ type Table struct {
 
 	fd        *os.File // Own fd.
 	tableSize int      // Initialized in OpenTable, using fd.Stat().
-	bfLock    sync.Mutex
 
 	index *fb.TableIndex // Nil if encryption is enabled.
 	ref   int32          // For file garbage collection. Atomic.
-	bf    *z.Bloom
 
 	mmap []byte // Memory mapped.
 
@@ -148,8 +146,6 @@ func (t *Table) DecrRef() error {
 		for i := 0; i < t.offsetsLength(); i++ {
 			t.opt.BlockCache.Del(t.blockCacheKey(i))
 		}
-		// Delete bloom filter and indices from the cache.
-		t.opt.IndexCache.Del(t.bfCacheKey())
 
 		// It's necessary to delete windows files.
 		if t.opt.LoadingMode == options.MemoryMap {
@@ -456,19 +452,6 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 
 	// No cache
 	if t.opt.IndexCache == nil {
-		// Keep blooms in memory.
-		if t.hasBloomFilter && t.opt.LoadBloomsOnOpen {
-			bf, err := z.JSONUnmarshal(index.BloomFilterBytes())
-			if err != nil {
-				return nil,
-					errors.Wrapf(err, "failed to unmarshal bloomfilter for table:%d", t.id)
-			}
-
-			t.bfLock.Lock()
-			// Keep blooms in memory.
-			t.bf = bf
-			t.bfLock.Unlock()
-		}
 		t.index = index
 	}
 	var bo fb.BlockOffset
@@ -510,13 +493,13 @@ func (t *Table) fetchIndex() *fb.TableIndex {
 		return t.index
 	}
 
-	if val, ok := t.opt.IndexCache.Get(t.blockOffsetsCacheKey()); ok && val != nil {
+	if val, ok := t.opt.IndexCache.Get(t.indexKey()); ok && val != nil {
 		return val.(*fb.TableIndex)
 	}
 
 	index, err := t.readTableIndex()
 	y.Check(err)
-	t.opt.IndexCache.Set(t.blockOffsetsCacheKey(), index, int64(t.indexLen))
+	t.opt.IndexCache.Set(t.indexKey(), index, int64(t.indexLen))
 	return index
 }
 
@@ -629,18 +612,6 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 	return blk, nil
 }
 
-// bfCacheKey returns the cache key for bloom filter. Bloom filters are stored in index cache.
-func (t *Table) bfCacheKey() []byte {
-	y.AssertTrue(t.id < math.MaxUint32)
-	buf := make([]byte, 6)
-	// Without the "bf" prefix, we will have conflict with the blockCacheKey.
-	buf[0] = 'b'
-	buf[1] = 'f'
-
-	binary.BigEndian.PutUint32(buf[2:], uint32(t.id))
-	return buf
-}
-
 // blockCacheKey is used to store blocks in the block cache.
 func (t *Table) blockCacheKey(idx int) []byte {
 	y.AssertTrue(t.id < math.MaxUint32)
@@ -653,9 +624,9 @@ func (t *Table) blockCacheKey(idx int) []byte {
 	return buf
 }
 
-// blockOffsetsCacheKey returns the cache key for block offsets. blockOffsets
+// indexKey returns the cache key for block offsets. blockOffsets
 // are stored in the index cache.
-func (t *Table) blockOffsetsCacheKey() uint64 {
+func (t *Table) indexKey() uint64 {
 	return t.id
 }
 
@@ -685,30 +656,14 @@ func (t *Table) ID() uint64 { return t.id }
 
 // DoesNotHave returns true if and only if the table does not have the key hash.
 // It does a bloom filter lookup.
-func (t *Table) DoesNotHave(hash uint64) bool {
+func (t *Table) DoesNotHave(hash uint32) bool {
 	if !t.hasBloomFilter {
 		return false
 	}
 
-	if t.opt.IndexCache == nil {
-		t.bfLock.Lock()
-		if t.bf == nil {
-			y.AssertTrue(!t.opt.LoadBloomsOnOpen)
-			// Load bloomfilter into memory since the cache is absent.
-			t.bf, _ = t.readBloomFilter()
-		}
-		t.bfLock.Unlock()
-		return !t.bf.Has(hash)
-	}
-
-	// Check if the bloom filter exists in the cache.
-	if bf, ok := t.opt.IndexCache.Get(t.bfCacheKey()); bf != nil && ok {
-		return !bf.(*z.Bloom).Has(hash)
-	}
-
-	bf, sz := t.readBloomFilter()
-	t.opt.IndexCache.Set(t.bfCacheKey(), bf, int64(sz))
-	return !bf.Has(hash)
+	index := t.fetchIndex()
+	bf := index.BloomFilterBytes()
+	return !y.Filter(bf).MayContain(hash)
 }
 
 // readBloomFilter reads the bloom filter from the SST and returns its length
