@@ -278,6 +278,7 @@ func (b *Builder) finishBlock() {
 	// If compression/encryption is disabled, no need to send the block to the blockChan.
 	// There's nothing to be done.
 	if b.blockChan == nil {
+		atomic.StoreUint32(&b.actualSize, b.sz)
 		b.addBlockToIndex()
 		return
 	}
