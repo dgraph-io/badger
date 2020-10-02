@@ -96,6 +96,7 @@ type Builder struct {
 	estimatedSize uint32
 	keyHashes     []uint64 // Used for building the bloomfilter.
 	opt           *Options
+	maxVersion    uint64
 
 	// Used to concurrently compress/encrypt blocks.
 	wg        sync.WaitGroup
@@ -195,6 +196,10 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 
 func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	b.keyHashes = append(b.keyHashes, farm.Fingerprint64(y.ParseKey(key)))
+
+	if version := y.ParseTs(key); version > b.maxVersion {
+		b.maxVersion = version
+	}
 
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
@@ -557,6 +562,7 @@ func (b *Builder) buildIndex(bf *z.Bloom) []byte {
 	fb.TableIndexAddOffsets(builder, boEnd)
 	fb.TableIndexAddBloomFilter(builder, bfoff)
 	fb.TableIndexAddEstimatedSize(builder, b.estimatedSize)
+	fb.TableIndexAddMaxVersion(builder, b.maxVersion)
 	builder.Finish(fb.TableIndexEnd(builder))
 
 	return builder.FinishedBytes()

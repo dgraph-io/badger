@@ -96,7 +96,7 @@ func TestTableIndex(t *testing.T) {
 			blockFirstKeys := make([][]byte, 0)
 			blockCount := 0
 			for i := 0; i < keysCount; i++ {
-				k := []byte(fmt.Sprintf("%016x", i))
+				k := y.KeyWithTs([]byte(fmt.Sprintf("%016x", i)), uint64(i+1))
 				v := fmt.Sprintf("%d", i)
 				vs := y.ValueStruct{Value: []byte(v)}
 				if i == 0 { // This is first key for first block.
@@ -128,6 +128,7 @@ func TestTableIndex(t *testing.T) {
 				require.True(t, idx.Offsets(&bo, i))
 				require.Equal(t, blockFirstKeys[i], bo.KeyBytes())
 			}
+			require.Equal(t, keysCount, int(tbl.MaxVersion()))
 			f.Close()
 			require.NoError(t, os.RemoveAll(filename))
 		})

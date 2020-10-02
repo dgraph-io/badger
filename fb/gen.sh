@@ -1,5 +1,6 @@
 #!/bin/bash
 
+set -e
 
 # You will need the flatbuffer compiler (flatc) https://google.github.io/flatbuffers/flatbuffers_guide_building.html
 

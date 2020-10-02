@@ -122,6 +122,11 @@ type Table struct {
 	opt        *Options
 }
 
+// MaxVersion returns the maximum version across all keys stored in this table.
+func (t *Table) MaxVersion() uint64 {
+	return t.index.MaxVersion()
+}
+
 // CompressionType returns the compression algorithm used for block compression.
 func (t *Table) CompressionType() options.CompressionType {
 	return t.opt.Compression

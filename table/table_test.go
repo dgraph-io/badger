@@ -79,7 +79,8 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
 	})
 	for _, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0}, 0)
+		b.Add(y.KeyWithTs([]byte(kv[0]), 0),
+			y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0}, 0)
 	}
 	_, err = f.Write(b.Finish(false))
 	require.NoError(t, err, "writing to file failed")
@@ -698,7 +699,7 @@ func TestTableBigValues(t *testing.T) {
 		TableSize: uint64(n) * 1 << 20}
 	builder := NewTableBuilder(opts)
 	for i := 0; i < n; i++ {
-		key := y.KeyWithTs([]byte(key("", i)), 0)
+		key := y.KeyWithTs([]byte(key("", i)), uint64(i+1))
 		vs := y.ValueStruct{Value: value(i)}
 		builder.Add(key, vs, 0)
 	}
@@ -720,6 +721,7 @@ func TestTableBigValues(t *testing.T) {
 	}
 	require.False(t, itr.Valid(), "table iterator should be invalid now")
 	require.Equal(t, n, count)
+	require.Equal(t, n, int(tbl.MaxVersion()))
 }
 
 // This test is for verifying checksum failure during table open.
@@ -968,4 +970,25 @@ func TestDoesNotHaveRace(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestMaxVersion(t *testing.T) {
+	opt := getTestTableOptions()
+	b := NewTableBuilder(opt)
+	defer b.Close()
+
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Uint32())
+	f, err := y.CreateSyncedFile(filename, true)
+	require.NoError(t, err)
+
+	N := 1000
+	for i := 0; i < N; i++ {
+		b.Add(y.KeyWithTs([]byte(fmt.Sprintf("foo:%d", i)), uint64(i+1)), y.ValueStruct{}, 0)
+	}
+	_, err = f.Write(b.Finish(false))
+	require.NoError(t, err, "writing to file failed")
+	f.Close()
+	f, _ = y.OpenSyncedFile(filename, false)
+	table, err := OpenTable(f, opt)
+	require.Equal(t, N, int(table.MaxVersion()))
 }

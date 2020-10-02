@@ -20,6 +20,7 @@ table TableIndex {
   offsets:[BlockOffset];
   bloom_filter:[ubyte];
   estimated_size:uint32;
+  max_version:uint64;
 }
 
 table BlockOffset {
