@@ -23,6 +23,7 @@ import (
 	"math"
 	"sync"
 
+	otrace "go.opencensus.io/trace"
 	"golang.org/x/net/trace"
 
 	"github.com/dgraph-io/badger/v2/table"
@@ -128,15 +129,17 @@ type compactStatus struct {
 	levels []*levelCompactStatus
 }
 
-func (cs *compactStatus) toLog(tr trace.Trace) {
+func (cs *compactStatus) toLog(tr trace.Trace, span *otrace.Span) {
 	cs.RLock()
 	defer cs.RUnlock()
 
+	span.Annotate(nil, "Compaction status:")
 	tr.LazyPrintf("Compaction status:")
 	for i, l := range cs.levels {
 		if l.debug() == "" {
 			continue
 		}
+		span.Annotatef(nil, "[%d] %s", i, l.debug())
 		tr.LazyPrintf("[%d] %s", i, l.debug())
 	}
 }

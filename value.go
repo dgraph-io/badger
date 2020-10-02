@@ -19,6 +19,7 @@ package badger
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/aes"
 	cryptorand "crypto/rand"
 	"encoding/binary"
@@ -43,6 +44,7 @@ import (
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
+	otrace "go.opencensus.io/trace"
 	"golang.org/x/net/trace"
 )
 
@@ -490,11 +492,13 @@ loop:
 	return validEndOffset, nil
 }
 
-func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
+func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace, span *otrace.Span) error {
 	vlog.filesLock.RLock()
 	maxFid := vlog.maxFid
 	vlog.filesLock.RUnlock()
 	y.AssertTruef(uint32(f.fid) < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
+
+	span.Annotatef(nil, "Rewriting fid: %d", f.fid)
 	tr.LazyPrintf("Rewriting fid: %d", f.fid)
 
 	wb := make([]*Entry, 0, 1000)
@@ -505,6 +509,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 	fe := func(e Entry) error {
 		count++
 		if count%100000 == 0 {
+			span.Annotatef(nil, "Processing entry %d", count)
 			tr.LazyPrintf("Processing entry %d", count)
 		}
 
@@ -554,6 +559,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			// Ensure length and size of wb is within transaction limits.
 			if int64(len(wb)+1) >= vlog.opt.maxBatchCount ||
 				size+es >= vlog.opt.maxBatchSize {
+				span.Annotatef(nil, "request has %d entries, size %d", len(wb), size)
 				tr.LazyPrintf("request has %d entries, size %d", len(wb), size)
 				if err := vlog.db.batchSet(wb); err != nil {
 					return err
@@ -625,6 +631,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 		return err
 	}
 
+	span.Annotatef(nil, "request has %d entries, size %d", len(wb), size)
 	tr.LazyPrintf("request has %d entries, size %d", len(wb), size)
 	batchSize := 1024
 	var loops int
@@ -642,6 +649,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 			if err == ErrTxnTooBig {
 				// Decrease the batch size to half.
 				batchSize = batchSize / 2
+				span.Annotatef(nil, "Dropped batch size to %d", batchSize)
 				tr.LazyPrintf("Dropped batch size to %d", batchSize)
 				continue
 			}
@@ -649,6 +657,9 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 		}
 		i += batchSize
 	}
+	span.Annotatef(nil, "Processed %d entries in %d loops", len(wb), loops)
+	span.Annotatef(nil, "Total entries: %d. Moved: %d", count, moved)
+	span.Annotatef(nil, "Removing fid: %d", f.fid)
 	tr.LazyPrintf("Processed %d entries in %d loops", len(wb), loops)
 	tr.LazyPrintf("Total entries: %d. Moved: %d", count, moved)
 	tr.LazyPrintf("Removing fid: %d", f.fid)
@@ -1553,15 +1564,17 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, *logF
 	return buf, lf, err
 }
 
-func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFile) {
+func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace, span *otrace.Span) (files []*logFile) {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
 	fids := vlog.sortedFids()
 	switch {
 	case len(fids) <= 1:
+		span.Annotatef(nil, "Only one or less value log file.")
 		tr.LazyPrintf("Only one or less value log file.")
 		return nil
 	case head.Fid == 0:
+		span.Annotatef(nil, "Head pointer is at zero.")
 		tr.LazyPrintf("Head pointer is at zero.")
 		return nil
 	}
@@ -1584,9 +1597,11 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	vlog.lfDiscardStats.RUnlock()
 
 	if candidate.fid != math.MaxUint32 { // Found a candidate
+		span.Annotatef(nil, "Found candidate via discard stats: %v", candidate)
 		tr.LazyPrintf("Found candidate via discard stats: %v", candidate)
 		files = append(files, vlog.filesMap[candidate.fid])
 	} else {
+		span.Annotate(nil, "Could not find candidate via discard stats. Randomly picking one.")
 		tr.LazyPrintf("Could not find candidate via discard stats. Randomly picking one.")
 	}
 
@@ -1599,6 +1614,7 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 		}
 	}
 	if idxHead == 0 { // Not found or first file
+		span.Annotate(nil, "Could not find any file.")
 		tr.LazyPrintf("Could not find any file.")
 		return nil
 	}
@@ -1606,6 +1622,7 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	if idx > 0 {
 		idx = rand.Intn(idx + 1) // Another level of rand to favor smaller fids.
 	}
+	span.Annotatef(nil, "Randomly chose fid: %d", fids[idx])
 	tr.LazyPrintf("Randomly chose fid: %d", fids[idx])
 	files = append(files, vlog.filesMap[fids[idx]])
 	return files
@@ -1636,7 +1653,7 @@ type reason struct {
 	count   int
 }
 
-func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace) (err error) {
+func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace, span *otrace.Span) (err error) {
 	// Update stats before exiting
 	defer func() {
 		if err == nil {
@@ -1648,6 +1665,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	s := &sampler{
 		lf:            lf,
 		tr:            tr,
+		span:          span,
 		countRatio:    0.01, // 1% of num entries.
 		sizeRatio:     0.1,  // 10% of the file as window.
 		fromBeginning: false,
@@ -1657,9 +1675,10 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 		return err
 	}
 
-	if err = vlog.rewrite(lf, tr); err != nil {
+	if err = vlog.rewrite(lf, tr, span); err != nil {
 		return err
 	}
+	span.Annotate(nil, "Done rewriting.")
 	tr.LazyPrintf("Done rewriting.")
 	return nil
 }
@@ -1667,6 +1686,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 type sampler struct {
 	lf            *logFile
 	tr            trace.Trace
+	span          *otrace.Span
 	sizeRatio     float64
 	countRatio    float64
 	fromBeginning bool
@@ -1674,12 +1694,14 @@ type sampler struct {
 
 func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, error) {
 	tr := samp.tr
+	span := samp.span
 	sizePercent := samp.sizeRatio
 	countPercent := samp.countRatio
 	lf := samp.lf
 
 	fi, err := lf.fd.Stat()
 	if err != nil {
+		span.Annotatef(nil, "Error while finding file size: %v", err)
 		tr.LazyPrintf("Error while finding file size: %v", err)
 		tr.SetError()
 		return nil, err
@@ -1689,6 +1711,7 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 	sizeWindow := float64(fi.Size()) * sizePercent
 	sizeWindowM := sizeWindow / (1 << 20) // in MBs.
 	countWindow := int(float64(vlog.opt.ValueLogMaxEntries) * countPercent)
+	span.Annotatef(nil, "Size window: %5.2f. Count window: %d.", sizeWindow, countWindow)
 	tr.LazyPrintf("Size window: %5.2f. Count window: %d.", sizeWindow, countWindow)
 
 	var skipFirstM float64
@@ -1698,6 +1721,7 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 		skipFirstM := float64(rand.Int63n(fi.Size())) // Pick a random starting location.
 		skipFirstM -= sizeWindow                      // Avoid hitting EOF by moving back by window.
 		skipFirstM /= float64(mi)                     // Convert to MBs.
+		span.Annotatef(nil, "Skip first %5.2f MB of file of size: %d MB", skipFirstM, fi.Size()/mi)
 		tr.LazyPrintf("Skip first %5.2f MB of file of size: %d MB", skipFirstM, fi.Size()/mi)
 	}
 	var skipped float64
@@ -1717,14 +1741,17 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 
 		// Sample until we reach the window sizes or exceed 10 seconds.
 		if r.count > countWindow {
+			span.Annotatef(nil, "Stopping sampling after %d entries.", countWindow)
 			tr.LazyPrintf("Stopping sampling after %d entries.", countWindow)
 			return errStop
 		}
 		if r.total > sizeWindowM {
+			span.Annotate(nil, "Stopping sampling after reaching window size.")
 			tr.LazyPrintf("Stopping sampling after reaching window size.")
 			return errStop
 		}
 		if time.Since(start) > 10*time.Second {
+			span.Annotate(nil, "Stopping sampling after 10 seconds.")
 			tr.LazyPrintf("Stopping sampling after 10 seconds.")
 			return errStop
 		}
@@ -1783,15 +1810,19 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 	})
 
 	if err != nil {
+		span.Annotatef(nil, "Error while iterating for RunGC: %v", err)
 		tr.LazyPrintf("Error while iterating for RunGC: %v", err)
 		tr.SetError()
 		return nil, err
 	}
+	span.Annotatef(nil, "Fid: %d. Skipped: %5.2fMB Num iterations: %d. Data status=%+v\n",
+		lf.fid, skipped, numIterations, r)
 	tr.LazyPrintf("Fid: %d. Skipped: %5.2fMB Num iterations: %d. Data status=%+v\n",
 		lf.fid, skipped, numIterations, r)
 	// If we couldn't sample at least a 1000 KV pairs or at least 75% of the window size,
 	// and what we can discard is below the threshold, we should skip the rewrite.
 	if (r.count < countWindow && r.total < sizeWindowM*0.75) || r.discard < discardRatio*r.total {
+		span.Annotatef(nil, "Skipping GC on fid: %d", lf.fid)
 		tr.LazyPrintf("Skipping GC on fid: %d", lf.fid)
 		return nil, ErrNoRewrite
 	}
@@ -1814,14 +1845,17 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 		// Pick a log file for GC.
 		tr := trace.New("Badger.ValueLog", "GC")
 		tr.SetMaxEvents(100)
+
+		_, span := otrace.StartSpan(context.Background(), "Badger.ValueLog")
 		defer func() {
 			tr.Finish()
 			<-vlog.garbageCh
 		}()
 
 		var err error
-		files := vlog.pickLog(head, tr)
+		files := vlog.pickLog(head, tr, span)
 		if len(files) == 0 {
+			span.Annotate(nil, "PickLog returned zero results.")
 			tr.LazyPrintf("PickLog returned zero results.")
 			return ErrNoRewrite
 		}
@@ -1831,7 +1865,7 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 				continue
 			}
 			tried[lf.fid] = true
-			if err = vlog.doRunGC(lf, discardRatio, tr); err == nil {
+			if err = vlog.doRunGC(lf, discardRatio, tr, span); err == nil {
 				return nil
 			}
 		}
@@ -1964,6 +1998,7 @@ func (vlog *valueLog) cleanVlog() error {
 	head := atomic.LoadUint32(&vlog.maxFid)
 	for _, fid := range filesToGC {
 		tr := trace.New("Badger.ValueLog Sampling", "Sampling")
+		_, span := otrace.StartSpan(context.Background(), "Badger.ValueLog Sampling")
 		start := time.Now()
 		// stop on the head fid.
 		if fid == head {
@@ -1979,6 +2014,7 @@ func (vlog *valueLog) cleanVlog() error {
 		s := &sampler{
 			lf:            lf,
 			tr:            tr,
+			span:          span,
 			countRatio:    1, // 1% of num entries.
 			sizeRatio:     1, // 10% of the file as window.
 			fromBeginning: true,
@@ -1996,7 +2032,7 @@ func (vlog *valueLog) cleanVlog() error {
 		}
 		vlog.db.opt.Logger.Infof("Rewriting fid %d", fid)
 		start = time.Now()
-		if err := vlog.rewrite(lf, tr); err != nil {
+		if err := vlog.rewrite(lf, tr, span); err != nil {
 			return errors.Wrapf(err, "file: %s", lf.fd.Name())
 		}
 		vlog.db.opt.Logger.Infof("Rewritten fid %d. Took: %s", fid, time.Since(start))
@@ -2019,6 +2055,7 @@ func (vlog *valueLog) getDiscardStats() ([]sampleResult, error) {
 
 	head := atomic.LoadUint32(&vlog.maxFid)
 
+	_, span := otrace.StartSpan(context.Background(), "Badger.ValueLog Sampling")
 	tr := trace.New("Badger.ValueLog Sampling", "Sampling")
 	tr.SetMaxEvents(100)
 	samp := &sampler{
@@ -2026,6 +2063,7 @@ func (vlog *valueLog) getDiscardStats() ([]sampleResult, error) {
 		sizeRatio:     1,    // 100% of the file size.
 		fromBeginning: true, // Start reading from the start.
 		tr:            tr,
+		span:          span,
 	}
 
 	var result []sampleResult

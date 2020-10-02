@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -34,6 +35,7 @@ import (
 	"github.com/dgraph-io/badger/v2/y"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/stretchr/testify/require"
+	otrace "go.opencensus.io/trace"
 	"golang.org/x/net/trace"
 )
 
@@ -193,9 +195,10 @@ func TestValueGC(t *testing.T) {
 	//		return true
 	//	})
 
+	_, span := otrace.StartSpan(context.Background(), "Test")
 	tr := trace.New("Test", "Test")
 	defer tr.Finish()
-	kv.vlog.rewrite(lf, tr)
+	kv.vlog.rewrite(lf, tr, span)
 	for i := 45; i < 100; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
 
@@ -251,9 +254,10 @@ func TestValueGC2(t *testing.T) {
 	//		return true
 	//	})
 
+	_, span := otrace.StartSpan(context.Background(), "Test")
 	tr := trace.New("Test", "Test")
 	defer tr.Finish()
-	kv.vlog.rewrite(lf, tr)
+	kv.vlog.rewrite(lf, tr, span)
 	for i := 0; i < 5; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
 		require.NoError(t, kv.View(func(txn *Txn) error {
@@ -348,9 +352,10 @@ func TestValueGC3(t *testing.T) {
 	logFile := kv.vlog.filesMap[kv.vlog.sortedFids()[0]]
 	kv.vlog.filesLock.RUnlock()
 
+	_, span := otrace.StartSpan(context.Background(), "Test")
 	tr := trace.New("Test", "Test")
 	defer tr.Finish()
-	kv.vlog.rewrite(logFile, tr)
+	kv.vlog.rewrite(logFile, tr, span)
 	it.Next()
 	require.True(t, it.Valid())
 	item = it.Item()
@@ -404,10 +409,11 @@ func TestValueGC4(t *testing.T) {
 	//		return true
 	//	})
 
+	_, span := otrace.StartSpan(context.Background(), "Test")
 	tr := trace.New("Test", "Test")
 	defer tr.Finish()
-	kv.vlog.rewrite(lf0, tr)
-	kv.vlog.rewrite(lf1, tr)
+	kv.vlog.rewrite(lf0, tr, span)
+	kv.vlog.rewrite(lf1, tr, span)
 
 	require.NoError(t, kv.Close())
 
@@ -1115,9 +1121,10 @@ func TestDiscardStatsMove(t *testing.T) {
 	}))
 
 	tr := trace.New("Badger.ValueLog", "GC")
+	_, span := otrace.StartSpan(context.Background(), "Badger.ValueLog")
 	// Use first value log file for GC. This value log file contains the discard stats.
 	lf := db.vlog.filesMap[0]
-	require.NoError(t, db.vlog.rewrite(lf, tr))
+	require.NoError(t, db.vlog.rewrite(lf, tr, span))
 	require.NoError(t, db.Close())
 
 	db, err = Open(ops)

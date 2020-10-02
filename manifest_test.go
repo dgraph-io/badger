@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -25,6 +26,7 @@ import (
 	"sort"
 	"testing"
 
+	otrace "go.opencensus.io/trace"
 	"golang.org/x/net/trace"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -181,10 +183,13 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	done := lh0.tryAddLevel0Table(t1)
 	require.Equal(t, true, done)
 
+	_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
+
 	cd := compactDef{
 		thisLevel: lh0,
 		nextLevel: lh1,
 		elog:      trace.New("Badger", "Compact"),
+		span:      span,
 	}
 
 	manifest := createManifest()
@@ -205,6 +210,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 		thisLevel: lh0,
 		nextLevel: lh1,
 		elog:      trace.New("Badger", "Compact"),
+		span:      span,
 	}
 	lc.fillTablesL0(&cd)
 	lc.runCompactDef(0, cd)

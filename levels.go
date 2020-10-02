@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	otrace "go.opencensus.io/trace"
 	"golang.org/x/net/trace"
 
 	"github.com/dgraph-io/badger/v2/pb"
@@ -337,9 +339,11 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 		}
 
 		opt.Infof("Dropping prefix at level %d (%d tableGroups)", l.level, len(tableGroups))
+		_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
 		for _, operation := range tableGroups {
 			cd := compactDef{
 				elog:         trace.New(fmt.Sprintf("Badger.L%d", l.level), "Compact"),
+				span:         span,
 				thisLevel:    l,
 				nextLevel:    l,
 				top:          nil,
@@ -780,6 +784,7 @@ func containsAnyPrefixes(smallValue, largeValue []byte, listOfPrefixes [][]byte)
 
 type compactDef struct {
 	elog trace.Trace
+	span *otrace.Span
 
 	thisLevel *levelHandler
 	nextLevel *levelHandler
@@ -972,8 +977,11 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 	l := p.level
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
 
+	_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
+
 	cd := compactDef{
 		elog:         trace.New(fmt.Sprintf("Badger.L%d", l), "Compact"),
+		span:         span,
 		thisLevel:    s.levels[l],
 		nextLevel:    s.levels[l+1],
 		dropPrefixes: p.dropPrefixes,
@@ -999,14 +1007,14 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 
 	s.kv.opt.Infof("[Compactor: %d] Running compaction: %+v for level: %d\n",
 		id, p, cd.thisLevel.level)
-	s.cstatus.toLog(cd.elog)
+	s.cstatus.toLog(cd.elog, cd.span)
 	if err := s.runCompactDef(l, cd); err != nil {
 		// This compaction couldn't be done successfully.
 		s.kv.opt.Warningf("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)
 		return err
 	}
 
-	s.cstatus.toLog(cd.elog)
+	s.cstatus.toLog(cd.elog, cd.span)
 	s.kv.opt.Infof("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
 	return nil
 }
