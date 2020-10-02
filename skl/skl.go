@@ -146,19 +146,10 @@ func NewSkiplist(buf []byte, fd *os.File) *Skiplist {
 // OpenSkiplist loads a skiplist from the mmaped file
 func OpenSkiplist(buf []byte, fd *os.File) *Skiplist {
 	arena := newArena(buf[4:])
-	// This calculations comes from putNode() based on the fact that head is the
-	// first node to be inserted.
-	getHeadOffset := func() uint32 {
-		// Pad the allocation with enough bytes to ensure pointer alignment.
-		l := uint32(MaxNodeSize + nodeAlign)
-		n := 1 + l
-		// Return the aligned offset.
-		m := (n - l + uint32(nodeAlign)) & ^uint32(nodeAlign)
-		return m
-	}
+	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
 	s := &Skiplist{
 		height: (*int32)(unsafe.Pointer(&buf[0])),
-		head:   arena.getNode(getHeadOffset()),
+		head:   head,
 		arena:  arena,
 		ref:    1,
 		fd:     fd,
