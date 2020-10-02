@@ -480,7 +480,6 @@ func (db *DB) cleanup() {
 
 	// Do not use vlog.Close() here. vlog.Close truncates the files. We don't
 	// want to truncate files unless the user has specified the truncate flag.
-	db.vlog.stopFlushDiscardStats()
 }
 
 // BlockCacheMetrics returns the metrics for the underlying block cache.

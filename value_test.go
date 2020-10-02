@@ -474,17 +474,17 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	time.Sleep(2 * time.Second) // wait for compaction to complete
 
 	persistedMap := make(map[uint32]int64)
-	db.vlog.lfDiscardStats.Lock()
-	require.True(t, len(db.vlog.lfDiscardStats.m) > 0, "some discardStats should be generated")
-	for k, v := range db.vlog.lfDiscardStats.m {
+	db.vlog.discardStats.Lock()
+	require.True(t, len(db.vlog.discardStats.m) > 0, "some discardStats should be generated")
+	for k, v := range db.vlog.discardStats.m {
 		persistedMap[k] = v
 	}
-	db.vlog.lfDiscardStats.updatesSinceFlush = discardStatsFlushThreshold + 1
-	db.vlog.lfDiscardStats.Unlock()
+	db.vlog.discardStats.updatesSinceFlush = discardStatsFlushThreshold + 1
+	db.vlog.discardStats.Unlock()
 
 	// db.vlog.lfDiscardStats.updatesSinceFlush is already > discardStatsFlushThreshold,
 	// send empty map to flushChan, so that latest discardStats map can be persisted.
-	db.vlog.lfDiscardStats.flushChan <- map[uint32]int64{}
+	db.vlog.discardStats.flushChan <- map[uint32]int64{}
 	time.Sleep(1 * time.Second) // Wait for map to be persisted.
 	err = db.Close()
 	require.NoError(t, err)
@@ -495,10 +495,10 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 	time.Sleep(1 * time.Second) // Wait for discardStats to be populated by populateDiscardStats().
-	db.vlog.lfDiscardStats.RLock()
-	require.True(t, reflect.DeepEqual(persistedMap, db.vlog.lfDiscardStats.m),
+	db.vlog.discardStats.RLock()
+	require.True(t, reflect.DeepEqual(persistedMap, db.vlog.discardStats.m),
 		"Discard maps are not equal")
-	db.vlog.lfDiscardStats.RUnlock()
+	db.vlog.discardStats.RUnlock()
 }
 
 func TestChecksums(t *testing.T) {
@@ -1029,8 +1029,8 @@ func TestTruncatedDiscardStat(t *testing.T) {
 	for i := uint32(0); i < uint32(20); i++ {
 		stat[i] = 0
 	}
-	db.vlog.lfDiscardStats.m = stat
-	encodedDS, _ := json.Marshal(db.vlog.lfDiscardStats.m)
+	db.vlog.discardStats.m = stat
+	encodedDS, _ := json.Marshal(db.vlog.discardStats.m)
 	entries := []*Entry{{
 		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
 		// Insert truncated discard stats. This is important.
@@ -1043,7 +1043,7 @@ func TestTruncatedDiscardStat(t *testing.T) {
 
 	// Unset discard stats. We've already pushed the stats. If we don't unset it then it will be
 	// pushed again on DB close.
-	db.vlog.lfDiscardStats.m = nil
+	db.vlog.discardStats.m = nil
 
 	require.NoError(t, db.Close())
 
@@ -1083,10 +1083,10 @@ func TestDiscardStatsMove(t *testing.T) {
 		stat[i] = 0
 	}
 
-	db.vlog.lfDiscardStats.Lock()
-	db.vlog.lfDiscardStats.m = stat
-	encodedDS, _ := json.Marshal(db.vlog.lfDiscardStats.m)
-	db.vlog.lfDiscardStats.Unlock()
+	db.vlog.discardStats.Lock()
+	db.vlog.discardStats.m = stat
+	encodedDS, _ := json.Marshal(db.vlog.discardStats.m)
+	db.vlog.discardStats.Unlock()
 	entries := []*Entry{{
 		Key: y.KeyWithTs(lfDiscardStatsKey, 1),
 		// The discard stat value is more than value threshold.
@@ -1100,9 +1100,9 @@ func TestDiscardStatsMove(t *testing.T) {
 	// Unset discard stats. We've already pushed the stats. If we don't unset it then it will be
 	// pushed again on DB close. Also, the first insertion was in vlog file 1, this insertion would
 	// be in value log file 3.
-	db.vlog.lfDiscardStats.Lock()
-	db.vlog.lfDiscardStats.m = nil
-	db.vlog.lfDiscardStats.Unlock()
+	db.vlog.discardStats.Lock()
+	db.vlog.discardStats.m = nil
+	db.vlog.discardStats.Unlock()
 
 	// Push more entries so that we get more than 1 value log files.
 	require.NoError(t, db.Update(func(txn *Txn) error {
@@ -1125,9 +1125,9 @@ func TestDiscardStatsMove(t *testing.T) {
 	// to vlog.lfDiscardStats.flushChan. Hence wait for some time, for discard stats to be updated.
 	time.Sleep(1 * time.Second)
 	require.NoError(t, err)
-	db.vlog.lfDiscardStats.RLock()
-	require.Equal(t, stat, db.vlog.lfDiscardStats.m)
-	db.vlog.lfDiscardStats.RUnlock()
+	db.vlog.discardStats.RLock()
+	require.Equal(t, stat, db.vlog.discardStats.m)
+	db.vlog.discardStats.RUnlock()
 	require.NoError(t, db.Close())
 }
 
@@ -1139,12 +1139,12 @@ func TestBlockedDiscardStats(t *testing.T) {
 	db, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
 	// Set discard stats.
-	db.vlog.lfDiscardStats.m = map[uint32]int64{0: 0}
+	db.vlog.discardStats.m = map[uint32]int64{0: 0}
 	db.blockWrite()
 	// Push discard stats more than the capacity of flushChan. This ensures at least one flush
 	// operation completes successfully after the writes were blocked.
-	for i := 0; i < cap(db.vlog.lfDiscardStats.flushChan)+2; i++ {
-		db.vlog.lfDiscardStats.flushChan <- db.vlog.lfDiscardStats.m
+	for i := 0; i < cap(db.vlog.discardStats.flushChan)+2; i++ {
+		db.vlog.discardStats.flushChan <- db.vlog.discardStats.m
 	}
 	db.unblockWrite()
 	require.NoError(t, db.Close())
@@ -1158,10 +1158,10 @@ func TestBlockedDiscardStatsOnClose(t *testing.T) {
 
 	db, err := Open(getTestOptions(dir))
 	require.NoError(t, err)
-	db.vlog.lfDiscardStats.m = map[uint32]int64{0: 0}
+	db.vlog.discardStats.m = map[uint32]int64{0: 0}
 	// This is important. Set updateSinceFlush to discardStatsFlushThreshold so
 	// that the next update call flushes the discard stats.
-	db.vlog.lfDiscardStats.updatesSinceFlush = discardStatsFlushThreshold + 1
+	db.vlog.discardStats.updatesSinceFlush = discardStatsFlushThreshold + 1
 	require.NoError(t, db.Close())
 }
 

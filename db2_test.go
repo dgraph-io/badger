@@ -380,7 +380,7 @@ func TestDiscardMapTooBig(t *testing.T) {
 	}))
 
 	// overwrite discardstat with large value
-	db.vlog.lfDiscardStats.m = createDiscardStats()
+	db.vlog.discardStats.m = createDiscardStats()
 
 	require.NoError(t, db.Close())
 	// reopen the same DB

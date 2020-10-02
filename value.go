@@ -22,7 +22,6 @@ import (
 	"crypto/aes"
 	cryptorand "crypto/rand"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"hash"
 	"hash/crc32"
@@ -63,9 +62,6 @@ const (
 	bitFinTxn byte = 1 << 7 // Set if the entry is to indicate end of txn in value log.
 
 	mi int64 = 1 << 20
-
-	// The number of updates after which discard map should be flushed into badger.
-	discardStatsFlushThreshold = 100
 
 	// size of vlog header.
 	// +----------------+------------------+
@@ -761,16 +757,6 @@ func (vlog *valueLog) dropAll() (int, error) {
 	return count, nil
 }
 
-// lfDiscardStats keeps track of the amount of data that could be discarded for
-// a given logfile.
-type lfDiscardStats struct {
-	sync.RWMutex
-	m                 map[uint32]int64
-	flushChan         chan map[uint32]int64
-	closer            *z.Closer
-	updatesSinceFlush int
-}
-
 type valueLog struct {
 	dirPath string
 
@@ -787,8 +773,8 @@ type valueLog struct {
 	numEntriesWritten uint32
 	opt               Options
 
-	garbageCh      chan struct{}
-	lfDiscardStats *lfDiscardStats
+	garbageCh    chan struct{}
+	discardStats *discardStats
 }
 
 func vlogFilePath(dirPath string, fid uint32) string {
@@ -1044,11 +1030,9 @@ func (vlog *valueLog) init(db *DB) {
 	vlog.dirPath = vlog.opt.ValueDir
 
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
-	vlog.lfDiscardStats = &lfDiscardStats{
-		m:         make(map[uint32]int64),
-		closer:    z.NewCloser(1),
-		flushChan: make(chan map[uint32]int64, 16),
-	}
+	lf, err := initDiscardStats(vlog.opt)
+	y.Check(err)
+	vlog.discardStats = lf
 }
 
 func (vlog *valueLog) open(db *DB) error {
@@ -1058,7 +1042,6 @@ func (vlog *valueLog) open(db *DB) error {
 		return nil
 	}
 
-	go vlog.flushDiscardStats()
 	if err := vlog.populateFilesMap(); err != nil {
 		return err
 	}
@@ -1143,11 +1126,6 @@ func (vlog *valueLog) open(db *DB) error {
 	if err = last.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
 		return errFile(err, last.path, "Map log file")
 	}
-	if err := vlog.populateDiscardStats(); err != nil {
-		// Print the error and continue. We don't want to prevent value log open if there's an error
-		// with the fetching discards stats.
-		db.opt.Errorf("Failed to populate discard stats: %s", err)
-	}
 	return nil
 }
 
@@ -1170,18 +1148,10 @@ func (lf *logFile) init() error {
 	return nil
 }
 
-func (vlog *valueLog) stopFlushDiscardStats() {
-	if vlog.lfDiscardStats != nil {
-		vlog.lfDiscardStats.closer.Signal()
-	}
-}
-
 func (vlog *valueLog) Close() error {
 	if vlog == nil || vlog.db == nil || vlog.db.opt.InMemory {
 		return nil
 	}
-	// close flushDiscardStats.
-	vlog.lfDiscardStats.closer.SignalAndWait()
 
 	vlog.opt.Debugf("Stopping garbage collection of values.")
 
@@ -1557,27 +1527,10 @@ func (vlog *valueLog) pickLog(tr trace.Trace) (files []*logFile) {
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 
 	// Pick a candidate that contains the largest amount of discardable data
-	candidate := struct {
-		fid     uint32
-		discard int64
-	}{math.MaxUint32, 0}
-	vlog.lfDiscardStats.RLock()
-	for _, fid := range fids {
-		if fid >= maxFid {
-			break
-		}
-		if vlog.lfDiscardStats.m[fid] > candidate.discard {
-			candidate.fid = fid
-			candidate.discard = vlog.lfDiscardStats.m[fid]
-		}
-	}
-	vlog.lfDiscardStats.RUnlock()
-
-	if candidate.fid != math.MaxUint32 { // Found a candidate
-		tr.LazyPrintf("Found candidate via discard stats: %v", candidate)
-		files = append(files, vlog.filesMap[candidate.fid])
-	} else {
-		tr.LazyPrintf("Could not find candidate via discard stats. Randomly picking one.")
+	fid, discard := vlog.discardStats.MaxDiscard()
+	if fid < maxFid {
+		vlog.opt.Infof("Found value log max discard fid: %d discard: %d\n", fid, discard)
+		files = append(files, vlog.filesMap[fid])
 	}
 
 	// Fallback to randomly picking a log file
@@ -1589,14 +1542,13 @@ func (vlog *valueLog) pickLog(tr trace.Trace) (files []*logFile) {
 		}
 	}
 	if idxHead == 0 { // Not found or first file
-		tr.LazyPrintf("Could not find any file.")
 		return nil
 	}
 	idx := rand.Intn(idxHead) // Don’t include head.Fid. We pick a random file before it.
 	if idx > 0 {
 		idx = rand.Intn(idx + 1) // Another level of rand to favor smaller fids.
 	}
-	tr.LazyPrintf("Randomly chose fid: %d", fids[idx])
+	vlog.opt.Infof("Randomly chose fid: %d", fids[idx])
 	files = append(files, vlog.filesMap[fids[idx]])
 	return files
 }
@@ -1630,9 +1582,7 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64, tr trace.Trace)
 	// Update stats before exiting
 	defer func() {
 		if err == nil {
-			vlog.lfDiscardStats.Lock()
-			delete(vlog.lfDiscardStats.m, lf.fid)
-			vlog.lfDiscardStats.Unlock()
+			vlog.discardStats.Update(lf.fid, -1)
 		}
 	}()
 	s := &sampler{
@@ -1835,108 +1785,9 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 	if vlog.opt.InMemory {
 		return
 	}
-
-	select {
-	case vlog.lfDiscardStats.flushChan <- stats:
-	default:
-		vlog.opt.Warningf("updateDiscardStats called: discard stats flushChan full, " +
-			"returning without pushing to flushChan")
+	for fid, discard := range stats {
+		vlog.discardStats.Update(fid, discard)
 	}
-}
-
-func (vlog *valueLog) flushDiscardStats() {
-	defer vlog.lfDiscardStats.closer.Done()
-
-	mergeStats := func(stats map[uint32]int64) ([]byte, error) {
-		vlog.lfDiscardStats.Lock()
-		defer vlog.lfDiscardStats.Unlock()
-		for fid, count := range stats {
-			vlog.lfDiscardStats.m[fid] += count
-			vlog.lfDiscardStats.updatesSinceFlush++
-		}
-
-		if vlog.lfDiscardStats.updatesSinceFlush > discardStatsFlushThreshold {
-			encodedDS, err := json.Marshal(vlog.lfDiscardStats.m)
-			if err != nil {
-				return nil, err
-			}
-			vlog.lfDiscardStats.updatesSinceFlush = 0
-			return encodedDS, nil
-		}
-		return nil, nil
-	}
-
-	process := func(stats map[uint32]int64) error {
-		encodedDS, err := mergeStats(stats)
-		if err != nil || encodedDS == nil {
-			return err
-		}
-
-		entries := []*Entry{{
-			Key:   y.KeyWithTs(lfDiscardStatsKey, 1),
-			Value: encodedDS,
-		}}
-		req, err := vlog.db.sendToWriteCh(entries)
-		// No special handling of ErrBlockedWrites is required as err is just logged in
-		// for loop below.
-		if err != nil {
-			return errors.Wrapf(err, "failed to push discard stats to write channel")
-		}
-		return req.Wait()
-	}
-
-	closer := vlog.lfDiscardStats.closer
-	for {
-		select {
-		case <-closer.HasBeenClosed():
-			// For simplicity just return without processing already present in stats in flushChan.
-			return
-		case stats := <-vlog.lfDiscardStats.flushChan:
-			if err := process(stats); err != nil {
-				vlog.opt.Errorf("unable to process discardstats with error: %s", err)
-			}
-		}
-	}
-}
-
-// TODO: Store this in an mmapped file. No need for lfDiscardStatsKey.
-// populateDiscardStats populates vlog.lfDiscardStats.
-// This function will be called while initializing valueLog.
-func (vlog *valueLog) populateDiscardStats() error {
-	key := y.KeyWithTs(lfDiscardStatsKey, math.MaxUint64)
-	var statsMap map[uint32]int64
-	vs, err := vlog.db.get(key)
-	if err != nil {
-		return err
-	}
-	// Value doesn't exist.
-	if vs.Meta == 0 && len(vs.Value) == 0 {
-		vlog.opt.Debugf("Value log discard stats empty")
-		return nil
-	}
-	val := vs.Value
-	// Entry is not stored in the LSM tree.
-	if vs.Meta&bitValuePointer > 0 {
-		var vp valuePointer
-		vp.Decode(val)
-		// Read entry from the value log.
-		result, cb, err := vlog.Read(vp, new(y.Slice))
-		// Copy it before we release the read lock.
-		val = y.SafeCopy(nil, result)
-		runCallback(cb)
-		if err != nil {
-			return err
-		}
-	}
-	if len(val) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(val, &statsMap); err != nil {
-		return errors.Wrapf(err, "failed to unmarshal discard stats")
-	}
-	vlog.opt.Debugf("Value Log Discard stats: %v", statsMap)
-	vlog.lfDiscardStats.flushChan <- statsMap
-	return nil
 }
 
 func (vlog *valueLog) cleanVlog() error {
