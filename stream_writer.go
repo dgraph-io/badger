@@ -213,24 +213,6 @@ func (sw *StreamWriter) Flush() error {
 		}
 	}
 
-	// Encode and write the value log head into a new table.
-	data := sw.maxHead.Encode()
-	headWriter, err := sw.newWriter(headStreamId)
-	if err != nil {
-		return errors.Wrap(err, "failed to create head writer")
-	}
-	if err := headWriter.Add(
-		y.KeyWithTs(head, sw.maxVersion),
-		y.ValueStruct{Value: data}); err != nil {
-		return err
-	}
-
-	headWriter.closer.SignalAndWait()
-
-	if err := headWriter.Done(); err != nil {
-		return err
-	}
-
 	if !sw.db.opt.managedTxns {
 		if sw.db.orc != nil {
 			sw.db.orc.Stop()

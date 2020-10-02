@@ -1051,7 +1051,7 @@ func (vlog *valueLog) init(db *DB) {
 	}
 }
 
-func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
+func (vlog *valueLog) open(db *DB) error {
 	// We don't need to open any vlog files or collect stats for GC if DB is opened
 	// in InMemory mode. InMemory mode doesn't create any files/directories on disk.
 	if db.opt.InMemory {
@@ -1088,44 +1088,30 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 			return errors.Wrapf(err, "Open existing file: %q", lf.path)
 		}
 
-		// This file is before the value head pointer. So, we don't need to
-		// replay it, and can just open it in readonly mode.
-		if fid < ptr.Fid {
-			// Mmap the file here, we don't need to replay it.
-			if err := lf.init(); err != nil {
-				return err
-			}
-			continue
-		}
-
-		var offset uint32
-		if fid == ptr.Fid {
-			offset = ptr.Offset + ptr.Len
-		}
-		vlog.db.opt.Infof("Replaying file id: %d at offset: %d\n", fid, offset)
-		now := time.Now()
-		// Replay and possible truncation done. Now we can open the file as per
-		// user specified options.
-		if err := vlog.replayLog(lf, offset, replayFn); err != nil {
-			// Log file is corrupted. Delete it.
-			if err == errDeleteVlogFile {
-				delete(vlog.filesMap, fid)
-				// Close the fd of the file before deleting the file otherwise windows complaints.
-				if err := lf.fd.Close(); err != nil {
-					return errors.Wrapf(err, "failed to close vlog file %s", lf.fd.Name())
-				}
-				path := vlog.fpath(lf.fid)
-				if err := os.Remove(path); err != nil {
-					return y.Wrapf(err, "failed to delete empty value log file: %q", path)
-				}
-				continue
-			}
-			return err
-		}
-		vlog.db.opt.Infof("Replay took: %s\n", time.Since(now))
+		// TODO: Use this for the WAL file.
+		// vlog.db.opt.Infof("Replaying file id: %d at offset: %d\n", fid, offset)
+		// now := time.Now()
+		// // Replay and possible truncation done. Now we can open the file as per
+		// // user specified options.
+		// if err := vlog.replayLog(lf, offset, replayFn); err != nil {
+		// 	// Log file is corrupted. Delete it.
+		// 	if err == errDeleteVlogFile {
+		// 		delete(vlog.filesMap, fid)
+		// 		// Close the fd of the file before deleting the file otherwise windows complaints.
+		// 		if err := lf.fd.Close(); err != nil {
+		// 			return errors.Wrapf(err, "failed to close vlog file %s", lf.fd.Name())
+		// 		}
+		// 		path := vlog.fpath(lf.fid)
+		// 		if err := os.Remove(path); err != nil {
+		// 			return y.Wrapf(err, "failed to delete empty value log file: %q", path)
+		// 		}
+		// 		continue
+		// 	}
+		// 	return err
+		// }
+		// vlog.db.opt.Infof("Replay took: %s\n", time.Since(now))
 
 		if fid < vlog.maxFid {
-			// This file has been replayed. It can now be mmapped.
 			// For maxFid, the mmap would be done by the specially written code below.
 			if err := lf.init(); err != nil {
 				return err
@@ -1152,11 +1138,6 @@ func (vlog *valueLog) open(db *DB, ptr valuePointer, replayFn logEntry) error {
 		return errFile(err, last.path, "file.Seek to end")
 	}
 	vlog.writableLogOffset = uint32(lastOffset)
-
-	// Update the head to point to the updated tail. Otherwise, even after doing a successful
-	// replay and closing the DB, the value log head does not get updated, which causes the replay
-	// to happen repeatedly.
-	vlog.db.vhead = valuePointer{Fid: vlog.maxFid, Offset: uint32(lastOffset)}
 
 	// Map the file if needed. When we create a file, it is automatically mapped.
 	if err = last.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
@@ -1306,19 +1287,13 @@ func (reqs requests) IncrRef() {
 // function). During rotation, previous value log file also gets synced to disk. It only syncs file
 // if fid >= vlog.maxFid. In some cases such as replay(while opening db), it might be called with
 // fid < vlog.maxFid. To sync irrespective of file id just call it with math.MaxUint32.
-func (vlog *valueLog) sync(fid uint32) error {
+func (vlog *valueLog) sync() error {
 	if vlog.opt.SyncWrites || vlog.opt.InMemory {
 		return nil
 	}
 
 	vlog.filesLock.RLock()
 	maxFid := vlog.maxFid
-	// During replay it is possible to get sync call with fid less than maxFid.
-	// Because older file has already been synced, we can return from here.
-	if fid < maxFid || len(vlog.filesMap) == 0 {
-		vlog.filesLock.RUnlock()
-		return nil
-	}
 	curlf := vlog.filesMap[maxFid]
 	// Sometimes it is possible that vlog.maxFid has been increased but file creation
 	// with same id is still in progress and this function is called. In those cases
@@ -1571,18 +1546,15 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, *logF
 	return buf, lf, err
 }
 
-func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFile) {
+func (vlog *valueLog) pickLog(tr trace.Trace) (files []*logFile) {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
 	fids := vlog.sortedFids()
-	switch {
-	case len(fids) <= 1:
+	if len(fids) <= 1 {
 		tr.LazyPrintf("Only one or less value log file.")
 		return nil
-	case head.Fid == 0:
-		tr.LazyPrintf("Head pointer is at zero.")
-		return nil
 	}
+	maxFid := atomic.LoadUint32(&vlog.maxFid)
 
 	// Pick a candidate that contains the largest amount of discardable data
 	candidate := struct {
@@ -1591,7 +1563,7 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	}{math.MaxUint32, 0}
 	vlog.lfDiscardStats.RLock()
 	for _, fid := range fids {
-		if fid >= head.Fid {
+		if fid >= maxFid {
 			break
 		}
 		if vlog.lfDiscardStats.m[fid] > candidate.discard {
@@ -1611,7 +1583,7 @@ func (vlog *valueLog) pickLog(head valuePointer, tr trace.Trace) (files []*logFi
 	// Fallback to randomly picking a log file
 	var idxHead int
 	for i, fid := range fids {
-		if fid == head.Fid {
+		if fid >= maxFid {
 			idxHead = i
 			break
 		}
@@ -1826,7 +1798,7 @@ func (vlog *valueLog) waitOnGC(lc *z.Closer) {
 	vlog.garbageCh <- struct{}{}
 }
 
-func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
+func (vlog *valueLog) runGC(discardRatio float64) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
 		// Pick a log file for GC.
@@ -1838,7 +1810,7 @@ func (vlog *valueLog) runGC(discardRatio float64, head valuePointer) error {
 		}()
 
 		var err error
-		files := vlog.pickLog(head, tr)
+		files := vlog.pickLog(tr)
 		if len(files) == 0 {
 			tr.LazyPrintf("PickLog returned zero results.")
 			return ErrNoRewrite
@@ -1927,6 +1899,7 @@ func (vlog *valueLog) flushDiscardStats() {
 	}
 }
 
+// TODO: Store this in an mmapped file. No need for lfDiscardStatsKey.
 // populateDiscardStats populates vlog.lfDiscardStats.
 // This function will be called while initializing valueLog.
 func (vlog *valueLog) populateDiscardStats() error {

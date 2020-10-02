@@ -45,7 +45,6 @@ import (
 
 var (
 	badgerPrefix      = []byte("!badger!")        // Prefix for internal keys used by badger.
-	head              = []byte("!badger!head")    // For storing value offset for replay.
 	txnKey            = []byte("!badger!txn")     // For indicating end of entries in txn.
 	lfDiscardStatsKey = []byte("!badger!discard") // For storing lfDiscardStats
 )
@@ -58,6 +57,10 @@ type closers struct {
 	valueGC    *z.Closer
 	pub        *z.Closer
 }
+
+// TODO: Tables need to store the maxVersion, so we can use them to figure it out instead of relying
+// on head.
+// TODO: Value log discard stats should be an mmapped file.
 
 // DB provides the various functions required to interact with Badger.
 // DB is thread-safe.
@@ -80,7 +83,6 @@ type DB struct {
 	manifest  *manifestFile
 	lc        *levelsController
 	vlog      valueLog
-	vhead     valuePointer // less than or equal to a pointer to the last vlog value put into mt
 	writeCh   chan *request
 	flushChan chan flushTask // For flushing memtables.
 	closeOnce sync.Once      // For closing DB only once.
@@ -145,10 +147,6 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			nv = vp.Encode()
 			meta = meta | bitValuePointer
 		}
-		// Update vhead. If the crash happens while replay was in progess
-		// and the head is not updated, we will end up replaying all the
-		// files starting from file zero, again.
-		db.updateHead([]valuePointer{vp})
 
 		v := y.ValueStruct{
 			Value:     nv,
@@ -402,13 +400,13 @@ func Open(opt Options) (db *DB, err error) {
 			_ = db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
 		}()
 	}
-	vptr, version := db.getHead()
-	db.orc.nextTxnTs = version
+	// TODO: Figure out a way to get the latest version.
+	// db.orc.nextTxnTs = version
 
 	replayCloser := z.NewCloser(1)
 	go db.doWrites(replayCloser)
 
-	if err = db.vlog.open(db, vptr, db.replayFunction()); err != nil {
+	if err = db.vlog.open(db); err != nil {
 		replayCloser.SignalAndWait()
 		return db, y.Wrapf(err, "During db.vlog.open")
 	}
@@ -444,7 +442,6 @@ const memFileExt string = ".mem"
 func (db *DB) newSkipList() *skl.Skiplist {
 	f, err := os.OpenFile(path.Join(db.opt.Dir, fmt.Sprintf("%05d%s", db.nextMemFid, memFileExt)),
 		os.O_CREATE|os.O_RDWR, 0666)
-	// Should we crash?
 	y.Check(err)
 	db.nextMemFid++
 
@@ -456,54 +453,6 @@ func (db *DB) newSkipList() *skl.Skiplist {
 	z.ZeroOut(data, 0, len(data))
 
 	return skl.NewSkiplist(data, f)
-}
-
-// getHead prints all the head pointer in the DB and return the max value.
-func (db *DB) getHead() (valuePointer, uint64) {
-	// This is a hack. If we use newTransaction(..) we'll end up in deadlock
-	// since txnmark is not initialized when this function is called.
-	txn := Txn{
-		db:     db,
-		readTs: math.MaxUint64, // Show all versions.
-	}
-	var vptr valuePointer
-	iopt := DefaultIteratorOptions
-	iopt.AllVersions = true
-	iopt.InternalAccess = true
-	// Do not prefetch values. This could cause a race condition since
-	// prefetching is done via goroutines.
-	iopt.PrefetchValues = false
-	iopt.Reverse = true
-
-	it := txn.NewKeyIterator(head, iopt)
-	defer it.Close()
-
-	it.Rewind()
-	if !it.Valid() {
-		db.opt.Infof("No head keys found")
-		return vptr, 0
-	}
-
-	var maxVersion uint64
-	db.opt.Infof("Found the following head pointers")
-	for ; it.Valid(); it.Next() {
-		item := it.Item()
-		err := item.Value(func(val []byte) error {
-			vptr.Decode(val)
-			db.opt.Infof("Fid: %d Len: %d Offset: %d Version: %d\n",
-				vptr.Fid, vptr.Len, vptr.Offset, item.Version())
-			return nil
-		})
-		// This shouldn't happen.
-		y.Check(err)
-		// We're iterating in the reverse order so the last item would be the
-		// one with the biggest version.
-		maxVersion = item.Version()
-	}
-	// If we have reached here it means there were some head key and so the
-	// version should never be zero.
-	y.AssertTrue(maxVersion != 0)
-	return vptr, maxVersion
 }
 
 // cleanup stops all the goroutines started by badger. This is used in open to
@@ -602,7 +551,7 @@ func (db *DB) close() (err error) {
 				defer db.Unlock()
 				y.AssertTrue(db.mt != nil)
 				select {
-				case db.flushChan <- flushTask{mt: db.mt, vptr: db.vhead}:
+				case db.flushChan <- flushTask{mt: db.mt}:
 					db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
 					db.mt = nil                    // Will segfault if we try writing!
 					db.opt.Debugf("pushed to flush chan\n")
@@ -696,7 +645,7 @@ const (
 // Sync syncs database content to disk. This function provides
 // more control to user to sync data whenever required.
 func (db *DB) Sync() error {
-	return db.vlog.sync(math.MaxUint32)
+	return db.vlog.sync()
 }
 
 // getMemtables returns the current memtables and get references.
@@ -763,25 +712,6 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 		}
 	}
 	return db.lc.get(key, maxVs, 0)
-}
-
-// updateHead should not be called without the db.Lock() since db.vhead is used
-// by the writer go routines and memtable flushing goroutine.
-func (db *DB) updateHead(ptrs []valuePointer) {
-	var ptr valuePointer
-	for i := len(ptrs) - 1; i >= 0; i-- {
-		p := ptrs[i]
-		if !p.IsZero() {
-			ptr = p
-			break
-		}
-	}
-	if ptr.IsZero() {
-		return
-	}
-
-	y.AssertTrue(!ptr.Less(db.vhead))
-	db.vhead = ptr
 }
 
 var requestPool = sync.Pool{
@@ -909,9 +839,6 @@ func (db *DB) writeRequests(reqs []*request) error {
 			done(err)
 			return errors.Wrap(err, "writeRequests")
 		}
-		db.Lock()
-		db.updateHead(b.Ptrs)
-		db.Unlock()
 	}
 	if db.opt.SyncWrites {
 		if err := db.mt.Sync(); err != nil {
@@ -1071,12 +998,12 @@ func (db *DB) ensureRoomForWrite() error {
 
 	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	select {
-	case db.flushChan <- flushTask{mt: db.mt, vptr: db.vhead}:
+	case db.flushChan <- flushTask{mt: db.mt}:
 		// After every memtable flush, let's reset the counter.
 		atomic.StoreInt32(&db.logRotates, 0)
 
 		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
-		if err = db.vlog.sync(db.vhead.Fid); err != nil {
+		if err = db.vlog.sync(); err != nil {
 			return err
 		}
 		if err = db.mt.Sync(); err != nil {
@@ -1123,31 +1050,7 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 
 type flushTask struct {
 	mt           *skl.Skiplist
-	vptr         valuePointer
 	dropPrefixes [][]byte
-}
-
-func (db *DB) pushHead(ft flushTask) error {
-	// We don't need to store head pointer in the in-memory mode since we will
-	// never be replay anything.
-	if db.opt.InMemory {
-		return nil
-	}
-	// Ensure we never push a zero valued head pointer.
-	if ft.vptr.IsZero() {
-		return errors.New("Head should not be zero")
-	}
-
-	// Store badger head even if vptr is zero, need it for readTs
-	db.opt.Infof("Storing value log head: %+v\n", ft.vptr)
-	val := ft.vptr.Encode()
-
-	// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
-	// commits.
-	headTs := y.KeyWithTs(head, db.orc.nextTs())
-	ft.mt.Put(headTs, y.ValueStruct{Value: val})
-
-	return nil
 }
 
 // handleFlushTask must be run serially.
@@ -1156,10 +1059,6 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// after writing request to value log, rotation count exceeds db.LogRotatesToFlush.
 	if ft.mt.Empty() {
 		return nil
-	}
-
-	if err := db.pushHead(ft); err != nil {
-		return err
 	}
 
 	dk, err := db.registry.latestDataKey()
@@ -1353,29 +1252,8 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 		return ErrInvalidRequest
 	}
 
-	// startLevel is the level from which we should search for the head key. When badger is running
-	// with KeepL0InMemory flag, all tables on L0 are kept in memory. This means we should pick head
-	// key from Level 1 onwards because if we pick the headkey from Level 0 we might end up losing
-	// data. See test TestL0GCBug.
-	startLevel := 0
-	if db.opt.KeepL0InMemory {
-		startLevel = 1
-	}
-	// Find head on disk
-	headKey := y.KeyWithTs(head, math.MaxUint64)
-	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
-	val, err := db.lc.get(headKey, y.ValueStruct{}, startLevel)
-	if err != nil {
-		return errors.Wrap(err, "Retrieving head from on-disk LSM")
-	}
-
-	var head valuePointer
-	if len(val.Value) > 0 {
-		head.Decode(val.Value)
-	}
-
 	// Pick a log file and run GC
-	return db.vlog.runGC(discardRatio, head)
+	return db.vlog.runGC(discardRatio)
 }
 
 // Size returns the size of lsm and value log files in bytes. It can be used to decide how often to
@@ -1749,7 +1627,6 @@ func (db *DB) dropAll() (func(), error) {
 	if err != nil {
 		return resume, err
 	}
-	db.vhead = valuePointer{} // Zero it out.
 	db.lc.nextFileID = 1
 	db.opt.Infof("Deleted %d value log files. DropAll done.\n", num)
 	db.blockCache.Clear()
@@ -1789,7 +1666,6 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 		task := flushTask{
 			mt: memtable,
 			// Ensure that the head of value log gets persisted to disk.
-			vptr:         db.vhead,
 			dropPrefixes: prefixes,
 		}
 		db.opt.Debugf("Flushing memtable")
