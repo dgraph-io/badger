@@ -22,12 +22,14 @@ import (
 	"encoding/binary"
 	"expvar"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -380,6 +382,7 @@ func Open(opt Options) (db *DB, err error) {
 	db.calculateSize()
 	db.closers.updateSize = z.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
+	db.openMemTables()
 	db.mt = db.newSkipList()
 
 	// newLevelsController potentially loads files in directory.
@@ -401,6 +404,10 @@ func Open(opt Options) (db *DB, err error) {
 	}
 	// TODO: Figure out a way to get the latest version.
 	// db.orc.nextTxnTs = version
+
+	if err := db.openWALFile(); err != nil {
+		return db, y.Wrapf(err, "During db.openWAL")
+	}
 
 	replayCloser := z.NewCloser(1)
 	go db.doWrites(replayCloser)
@@ -436,7 +443,79 @@ func Open(opt Options) (db *DB, err error) {
 	return db, nil
 }
 
+func (db *DB) openMemTables() error {
+	files, err := ioutil.ReadDir(db.opt.Dir)
+	if err != nil {
+		return errFile(err, db.opt.Dir, "Unable to open mem dir.")
+	}
+
+	mts := make(map[uint32]*os.FileInfo)
+	var fids []uint32
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), memFileExt) {
+			continue
+		}
+		fsz := len(file.Name())
+		fid, err := strconv.ParseUint(file.Name()[:fsz-len(memFileExt)], 10, 32)
+		if err != nil {
+			return errFile(err, file.Name(), "Unable to parse log id.")
+		}
+		mts[uint32(fid)] = &file
+		fids = append(fids, uint32(fid))
+	}
+	// TODO: this may prevent reopening with different parameter
+	y.AssertTrue(len(fids) <= db.opt.NumMemtables+1)
+	sort.Slice(fids, func(i, j int) bool {
+		return fids[i] < fids[j]
+	})
+	return nil
+}
+
+const walFileName = "badger.wal"
+
+func (db *DB) openWALFile() error {
+	var flags uint32
+	switch {
+	case db.opt.ReadOnly:
+		// If we have read only, we don't need SyncWrites.
+		flags |= y.ReadOnly
+		// Set sync flag.
+	case db.opt.SyncWrites:
+		flags |= y.Sync
+	}
+	filepath := path.Join(db.opt.Dir, walFileName)
+	if _, err := os.Stat(filepath); os.IsNotExist(err) {
+		lf, err := db.vlog.newLogFile(filepath)
+		if err != nil {
+			return err
+		}
+		if err = syncDir(db.opt.Dir); err != nil {
+			y.Check(os.Remove(lf.fd.Name()))
+			return errFile(err, db.opt.Dir, "Sync wal dir")
+		}
+		db.wal = lf
+	} else {
+		if err := db.wal.open(filepath, flags); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 const memFileExt string = ".mem"
+
+func (db *DB) openSkipList(filepath string) (*skl.Skiplist, error) {
+	f, err := os.OpenFile(filepath, os.O_RDWR, 0666)
+	if err != nil {
+		return nil, err
+	}
+	sz := arenaSize(db.opt)
+	y.Check(f.Truncate(sz))
+
+	data, err := z.Mmap(f, true, sz)
+	y.Check(err)
+	return skl.OpenSkiplist(data, f), nil
+}
 
 func (db *DB) newSkipList() *skl.Skiplist {
 	f, err := os.OpenFile(path.Join(db.opt.Dir, fmt.Sprintf("%05d%s", db.nextMemFid, memFileExt)),

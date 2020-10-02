@@ -94,7 +94,10 @@ func (s *Arena) putKey(key []byte) uint32 {
 	y.AssertTruef(int(n) <= len(s.buf),
 		"Arena too small, toWrite:%d newTotal:%d limit:%d",
 		l, n, len(s.buf))
+	// m is the offset where you should write.
+	// n = new len - key len give you the offset at which you should write.
 	m := n - l
+	// Copy to buffer from m:n
 	y.AssertTrue(len(key) == copy(s.buf[m:n], key))
 	return m
 }

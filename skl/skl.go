@@ -33,6 +33,7 @@ Key differences:
 package skl
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"sync/atomic"
@@ -74,7 +75,6 @@ type node struct {
 	tower [maxHeight]uint32
 }
 
-// Skiplist maps keys to values (in memory)
 type Skiplist struct {
 	height *int32 // Current height. 1 <= height <= kMaxHeight. CAS.
 	head   *node
@@ -128,7 +128,7 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 	return
 }
 
-// NewSkiplist makes a new empty skiplist, with a given arena size
+// NewSkiplist makes a new empty skiplist
 func NewSkiplist(buf []byte, fd *os.File) *Skiplist {
 	arena := newArena(buf[4:])
 	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
@@ -144,8 +144,33 @@ func NewSkiplist(buf []byte, fd *os.File) *Skiplist {
 	return s
 }
 
-func (skl *Skiplist) Sync() error {
-	return z.Msync(skl.buf)
+// OpenSkiplist loads a skiplist from the mmaped file
+func OpenSkiplist(buf []byte, fd *os.File) *Skiplist {
+	arena := newArena(buf[4:])
+	// This calculations comes from putNode() based on the fact that head is the
+	// first node to be inserted.
+	getHeadOffset := func() uint32 {
+		// Pad the allocation with enough bytes to ensure pointer alignment.
+		l := uint32(MaxNodeSize + nodeAlign)
+		n := 1 + l
+		// Return the aligned offset.
+		m := (n - l + uint32(nodeAlign)) & ^uint32(nodeAlign)
+		return m
+	}
+	s := &Skiplist{
+		height: (*int32)(unsafe.Pointer(&buf[0])),
+		head:   arena.getNode(getHeadOffset()),
+		arena:  arena,
+		ref:    1,
+		fd:     fd,
+		buf:    buf,
+	}
+	return s
+}
+
+// Sync calls sync on Skiplist buffer
+func (s *Skiplist) Sync() error {
+	return z.Msync(s.buf)
 }
 
 func (s *node) getValueOffset() (uint32, uint32) {
@@ -299,6 +324,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	// increase the height. Let's defer these actions.
 
 	listHeight := s.getHeight()
+	fmt.Printf("listHei = %+v\n", listHeight)
 	var prev [maxHeight + 1]*node
 	var next [maxHeight + 1]*node
 	prev[listHeight] = s.head
