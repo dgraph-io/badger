@@ -405,16 +405,15 @@ func Open(opt Options) (db *DB, err error) {
 	// TODO: Figure out a way to get the latest version.
 	// db.orc.nextTxnTs = version
 
-	if err := db.openWALFile(); err != nil {
-		return db, y.Wrapf(err, "During db.openWAL")
-	}
-
 	replayCloser := z.NewCloser(1)
 	go db.doWrites(replayCloser)
 
 	if err = db.vlog.open(db); err != nil {
-		replayCloser.SignalAndWait()
 		return db, y.Wrapf(err, "During db.vlog.open")
+	}
+	if err := db.openWALFile(); err != nil {
+		replayCloser.SignalAndWait()
+		return db, y.Wrapf(err, "During db.openWAL")
 	}
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 
@@ -449,25 +448,32 @@ func (db *DB) openMemTables() error {
 		return errFile(err, db.opt.Dir, "Unable to open mem dir.")
 	}
 
-	mts := make(map[uint32]*os.FileInfo)
-	var fids []uint32
+	mts := make(map[int]*os.FileInfo)
+	var fids []int
 	for _, file := range files {
 		if !strings.HasSuffix(file.Name(), memFileExt) {
 			continue
 		}
 		fsz := len(file.Name())
-		fid, err := strconv.ParseUint(file.Name()[:fsz-len(memFileExt)], 10, 32)
+		fid, err := strconv.ParseInt(file.Name()[:fsz-len(memFileExt)], 10, 32)
 		if err != nil {
 			return errFile(err, file.Name(), "Unable to parse log id.")
 		}
-		mts[uint32(fid)] = &file
-		fids = append(fids, uint32(fid))
+		mts[int(fid)] = &file
+		fids = append(fids, int(fid))
 	}
-	// TODO: this may prevent reopening with different parameter
-	y.AssertTrue(len(fids) <= db.opt.NumMemtables+1)
+	// Sort in ascending order.
 	sort.Slice(fids, func(i, j int) bool {
 		return fids[i] < fids[j]
 	})
+	for _, fid := range fids {
+		skl, err := db.openSkipList(fid)
+		if err != nil {
+			return err
+		}
+		// TODO: We need the max version from the skiplist.
+		db.imm = append(db.imm, skl)
+	}
 	return nil
 }
 
@@ -484,6 +490,7 @@ func (db *DB) openWALFile() error {
 		flags |= y.Sync
 	}
 	filepath := path.Join(db.opt.Dir, walFileName)
+	// Create new file.
 	if _, err := os.Stat(filepath); os.IsNotExist(err) {
 		lf, err := db.vlog.newLogFile(filepath)
 		if err != nil {
@@ -494,17 +501,39 @@ func (db *DB) openWALFile() error {
 			return errFile(err, db.opt.Dir, "Sync wal dir")
 		}
 		db.wal = lf
-	} else {
-		if err := db.wal.open(filepath, flags); err != nil {
-			return err
-		}
+		return nil
 	}
+	// Open existing file.
+	db.wal.open(filepath, flags)
+	db.opt.Infof("Replaying file %s", db.wal.fd.Name())
+	now := time.Now()
+	// Replay and possible truncation done. Now we can open the file as per
+	// user specified options.
+	if err := db.replayLog(db.replayFunction()); err != nil {
+		// TODO: What if replay fails?
+		// Log file is corrupted. Delete it.
+		// if err == errDeleteVlogFile {
+		// 	delete(vlog.filesMap, fid)
+		// 	// Close the fd of the file before deleting the file otherwise windows complaints.
+		// 	if err := lf.fd.Close(); err != nil {
+		// 		return errors.Wrapf(err, "failed to close vlog file %s", lf.fd.Name())
+		// 	}
+		// 	path := vlog.fpath(lf.fid)
+		// 	if err := os.Remove(path); err != nil {
+		// 		return y.Wrapf(err, "failed to delete empty value log file: %q", path)
+		// 	}
+		// 	continue
+		// }
+		return err
+	}
+	db.opt.Infof("Replay took: %s\n", time.Since(now))
 	return nil
 }
 
 const memFileExt string = ".mem"
 
-func (db *DB) openSkipList(filepath string) (*skl.Skiplist, error) {
+func (db *DB) openSkipList(fid int) (*skl.Skiplist, error) {
+	filepath := db.skiplistPath(fid)
 	f, err := os.OpenFile(filepath, os.O_RDWR, 0666)
 	if err != nil {
 		return nil, err
@@ -517,9 +546,12 @@ func (db *DB) openSkipList(filepath string) (*skl.Skiplist, error) {
 	return skl.OpenSkiplist(data, f), nil
 }
 
+func (db *DB) skiplistPath(fid int) string {
+	return path.Join(db.opt.Dir, fmt.Sprintf("%05d%s", fid, memFileExt))
+}
+
 func (db *DB) newSkipList() *skl.Skiplist {
-	f, err := os.OpenFile(path.Join(db.opt.Dir, fmt.Sprintf("%05d%s", db.nextMemFid, memFileExt)),
-		os.O_CREATE|os.O_RDWR, 0666)
+	f, err := os.OpenFile(db.skiplistPath(db.nextMemFid), os.O_CREATE|os.O_RDWR, 0666)
 	y.Check(err)
 	db.nextMemFid++
 

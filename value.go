@@ -176,7 +176,13 @@ func (lf *logFile) mmap(size int64) (err error) {
 		// Nothing to do
 		return nil
 	}
-	lf.fmap, err = y.Mmap(lf.fd, false, size)
+
+	// Increase the file size so that mmap doesn't complain.
+	if err := lf.fd.Truncate(size); err != nil {
+		return err
+	}
+
+	lf.fmap, err = y.Mmap(lf.fd, true, size)
 	if err == nil {
 		err = y.Madvise(lf.fmap, false) // Disable readahead
 	}
@@ -392,7 +398,7 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
-func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, error) {
+func (lf *logFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint32, error) {
 	fi, err := lf.fd.Stat()
 	if err != nil {
 		return 0, err
@@ -405,7 +411,7 @@ func (vlog *valueLog) iterate(lf *logFile, offset uint32, fn logEntry) (uint32, 
 		// We're at the end of the file already. No need to do anything.
 		return offset, nil
 	}
-	if vlog.opt.ReadOnly {
+	if readOnly {
 		// We're not at the end of the file. We'd need to replay the entries, or
 		// possibly truncate the file.
 		return 0, ErrReplayNeeded
@@ -432,7 +438,10 @@ loop:
 	for {
 		e, err := read.Entry(reader)
 		switch {
-		case err == io.EOF:
+		// We have not reached the end of the file but the entry we read is
+		// zero. This happens because we have truncated the file and
+		// zero'ed it out.
+		case err == io.EOF || e.isZero():
 			break loop
 		case err == io.ErrUnexpectedEOF || err == errTruncate:
 			break loop
@@ -615,7 +624,7 @@ func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
 		return nil
 	}
 
-	_, err := vlog.iterate(f, 0, func(e Entry, vp valuePointer) error {
+	_, err := f.iterate(vlog.opt.ReadOnly, 0, func(e Entry, vp valuePointer) error {
 		return fe(e)
 	})
 	if err != nil {
@@ -846,9 +855,11 @@ func (lf *logFile) open(path string, flags uint32) error {
 		return nil
 	}
 	buf := make([]byte, vlogHeaderSize)
-	if _, err = lf.fd.Read(buf); err != nil {
-		return y.Wrapf(err, "Error while reading vlog file %d", lf.fid)
-	}
+
+	y.AssertTrue(vlogHeaderSize == copy(buf, lf.fmap))
+	// if _, err = lf.fd.Read(buf); err != nil {
+	// 	return y.Wrapf(err, "Error while reading vlog file %d", lf.fid)
+	// }
 	keyID := binary.BigEndian.Uint64(buf[:8])
 	var dk *pb.DataKey
 	// retrieve datakey.
@@ -875,6 +886,7 @@ func (lf *logFile) bootstrap() error {
 		return y.Wrapf(err, "Error while bootstraping.")
 	}
 
+	// TODO: Do we need this?
 	if _, err = lf.fd.Seek(0, io.SeekStart); err != nil {
 		return y.Wrapf(err, "Error while SeekStart for the logfile %d in logFile.bootstarp", lf.fid)
 	}
@@ -896,9 +908,11 @@ func (lf *logFile) bootstrap() error {
 	// Initialize base IV.
 	lf.baseIV = buf[8:]
 	y.AssertTrue(len(lf.baseIV) == 12)
+	// _, err = lf.fd.Write(buf)
+	// Copy the header to the file.
 	// write the key id and base IV to the file.
-	_, err = lf.fd.Write(buf)
-	return err
+	y.AssertTrue(vlogHeaderSize == copy(lf.fmap, buf))
+	return nil
 }
 
 func (lf *logFile) reset() {
@@ -932,6 +946,7 @@ func (vlog *valueLog) newLogFile(fname string) (*logFile, error) {
 		y.Check(os.Remove(lf.fd.Name()))
 	}
 
+	// TODO: Increase file size so that mmap doesn't crash.
 	if err = lf.bootstrap(); err != nil {
 		removeFile()
 		return nil, err
@@ -973,14 +988,15 @@ func errFile(err error, path string, msg string) error {
 	return fmt.Errorf("%s. Path=%s. Error=%v", msg, path, err)
 }
 
-func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) error {
+func (db *DB) replayLog(replayFn logEntry) error {
+	lf := db.wal
 	fi, err := lf.fd.Stat()
 	if err != nil {
 		return errFile(err, lf.path, "Unable to run file.Stat")
 	}
 
 	// Alright, let's iterate now.
-	endOffset, err := vlog.iterate(lf, offset, replayFn)
+	endOffset, err := lf.iterate(db.opt.ReadOnly, 0, replayFn)
 	if err != nil {
 		return errFile(err, lf.path, "Unable to replay logfile")
 	}
@@ -990,26 +1006,26 @@ func (vlog *valueLog) replayLog(lf *logFile, offset uint32, replayFn logEntry) e
 
 	// End offset is different from file size. So, we should truncate the file
 	// to that size.
-	if !vlog.opt.Truncate {
-		vlog.db.opt.Warningf("Truncate Needed. File %s size: %d Endoffset: %d",
+	if !db.opt.Truncate {
+		db.opt.Warningf("Truncate Needed. File %s size: %d Endoffset: %d",
 			lf.fd.Name(), fi.Size(), endOffset)
 		return ErrTruncateNeeded
 	}
 
-	// The entire file should be truncated (i.e. it should be deleted).
-	// If fid == maxFid then it's okay to truncate the entire file since it will be
-	// used for future additions. Also, it's okay if the last file has size zero.
-	// We mmap 2*opt.ValueLogSize for the last file. See vlog.Open() function
-	// if endOffset <= vlogHeaderSize && lf.fid != vlog.maxFid {
+	// TODO: DO we need this?
+	// // The entire file should be truncated (i.e. it should be deleted).
+	// // If fid == maxFid then it's okay to truncate the entire file since it will be
+	// // used for future additions. Also, it's okay if the last file has size zero.
+	// // We mmap 2*opt.ValueLogSize for the last file. See vlog.Open() function
+	// // if endOffset <= vlogHeaderSize && lf.fid != vlog.maxFid {
+	// if endOffset <= vlogHeaderSize {
+	// 	if lf.fid != vlog.maxFid {
+	// 		return errDeleteVlogFile
+	// 	}
+	// 	return lf.bootstrap()
+	// }
 
-	if endOffset <= vlogHeaderSize {
-		if lf.fid != vlog.maxFid {
-			return errDeleteVlogFile
-		}
-		return lf.bootstrap()
-	}
-
-	vlog.db.opt.Infof("Truncating vlog file %s to offset: %d", lf.fd.Name(), endOffset)
+	db.opt.Infof("Truncating vlog file %s to offset: %d", lf.fd.Name(), endOffset)
 	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
 		return errFile(err, lf.path, fmt.Sprintf(
 			"Truncation needed at offset %d. Can be done manually as well.", endOffset))
@@ -1647,7 +1663,7 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 	y.AssertTrue(vlog.db != nil)
 	s := new(y.Slice)
 	var numIterations int
-	_, err = vlog.iterate(lf, 0, func(e Entry, vp valuePointer) error {
+	_, err = lf.iterate(vlog.opt.ReadOnly, 0, func(e Entry, vp valuePointer) error {
 		numIterations++
 		esz := float64(vp.Len) / (1 << 20) // in MBs.
 		if skipped < skipFirstM {

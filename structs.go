@@ -150,6 +150,10 @@ type Entry struct {
 	hlen int // Length of the header.
 }
 
+func (e *Entry) isZero() bool {
+	return len(e.Key) == 0
+}
+
 func (e *Entry) estimateSize(threshold int) int {
 	if len(e.Value) < threshold {
 		return len(e.Key) + len(e.Value) + 2 // Meta, UserMeta
