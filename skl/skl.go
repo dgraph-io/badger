@@ -33,7 +33,6 @@ Key differences:
 package skl
 
 import (
-	"fmt"
 	"math"
 	"os"
 	"sync/atomic"
@@ -324,7 +323,6 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	// increase the height. Let's defer these actions.
 
 	listHeight := s.getHeight()
-	fmt.Printf("listHei = %+v\n", listHeight)
 	var prev [maxHeight + 1]*node
 	var next [maxHeight + 1]*node
 	prev[listHeight] = s.head

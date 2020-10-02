@@ -19,6 +19,7 @@ package skl
 import (
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -29,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 const arenaSize = 1 << 20
@@ -50,10 +52,24 @@ func length(s *Skiplist) int {
 	return count
 }
 
+func mmappedSkiplist(sz int64) *Skiplist {
+	f, err := ioutil.TempFile("", "skltest")
+	y.Check(err)
+
+	err = f.Truncate(sz)
+	y.Check(err)
+
+	data, err := z.Mmap(f, true, sz)
+	y.Check(err)
+	z.ZeroOut(data, 0, len(data))
+	return NewSkiplist(data, f)
+
+}
+
 func TestEmpty(t *testing.T) {
 	key := []byte("aaa")
-	l := NewSkiplist(arenaSize)
 
+	l := mmappedSkiplist(arenaSize)
 	v := l.Get(key)
 	require.True(t, v.Value == nil) // Cannot use require.Nil for unsafe.Pointer nil.
 
@@ -86,7 +102,7 @@ func TestEmpty(t *testing.T) {
 
 // TestBasic tests single-threaded inserts and updates and gets.
 func TestBasic(t *testing.T) {
-	l := NewSkiplist(arenaSize)
+	l := mmappedSkiplist(arenaSize)
 	val1 := newValue(42)
 	val2 := newValue(52)
 	val3 := newValue(62)
@@ -131,7 +147,7 @@ func TestBasic(t *testing.T) {
 // TestConcurrentBasic tests concurrent writes followed by concurrent reads.
 func TestConcurrentBasic(t *testing.T) {
 	const n = 1000
-	l := NewSkiplist(arenaSize)
+	l := mmappedSkiplist(arenaSize)
 	var wg sync.WaitGroup
 	key := func(i int) []byte {
 		return y.KeyWithTs([]byte(fmt.Sprintf("%05d", i)), 0)
@@ -162,7 +178,7 @@ func TestConcurrentBasic(t *testing.T) {
 func TestConcurrentBasicBigValues(t *testing.T) {
 	const n = 100
 	arenaSize := int64(120 << 20) // 120 MB
-	l := NewSkiplist(arenaSize)
+	l := mmappedSkiplist(arenaSize)
 	var wg sync.WaitGroup
 	key := func(i int) []byte {
 		return y.KeyWithTs([]byte(fmt.Sprintf("%05d", i)), 0)
@@ -197,7 +213,7 @@ func TestConcurrentBasicBigValues(t *testing.T) {
 func TestOneKey(t *testing.T) {
 	const n = 100
 	key := y.KeyWithTs([]byte("thekey"), 0)
-	l := NewSkiplist(arenaSize)
+	l := mmappedSkiplist(arenaSize)
 	defer l.DecrRef()
 
 	var wg sync.WaitGroup
@@ -230,7 +246,7 @@ func TestOneKey(t *testing.T) {
 }
 
 func TestFindNear(t *testing.T) {
-	l := NewSkiplist(arenaSize)
+	l := mmappedSkiplist(arenaSize)
 	defer l.DecrRef()
 	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("%05d", i*10+5)
@@ -337,7 +353,7 @@ func TestFindNear(t *testing.T) {
 // TestIteratorNext tests a basic iteration over all nodes from the beginning.
 func TestIteratorNext(t *testing.T) {
 	const n = 100
-	l := NewSkiplist(arenaSize)
+	l := mmappedSkiplist(arenaSize)
 	defer l.DecrRef()
 	it := l.NewIterator()
 	defer it.Close()
@@ -361,7 +377,7 @@ func TestIteratorNext(t *testing.T) {
 // TestIteratorPrev tests a basic iteration over all nodes from the end.
 func TestIteratorPrev(t *testing.T) {
 	const n = 100
-	l := NewSkiplist(arenaSize)
+	l := mmappedSkiplist(arenaSize)
 	defer l.DecrRef()
 	it := l.NewIterator()
 	defer it.Close()
@@ -385,7 +401,7 @@ func TestIteratorPrev(t *testing.T) {
 // TestIteratorSeek tests Seek and SeekForPrev.
 func TestIteratorSeek(t *testing.T) {
 	const n = 100
-	l := NewSkiplist(arenaSize)
+	l := mmappedSkiplist(arenaSize)
 	defer l.DecrRef()
 
 	it := l.NewIterator()
@@ -464,7 +480,7 @@ func BenchmarkReadWrite(b *testing.B) {
 	for i := 0; i <= 10; i++ {
 		readFrac := float32(i) / 10.0
 		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
-			l := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
+			l := mmappedSkiplist(int64((b.N + 1) * MaxNodeSize))
 			defer l.DecrRef()
 			b.ResetTimer()
 			var count int
@@ -519,7 +535,7 @@ func BenchmarkReadWriteMap(b *testing.B) {
 
 func BenchmarkWrite(b *testing.B) {
 	value := newValue(123)
-	l := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
+	l := mmappedSkiplist(int64((b.N + 1) * MaxNodeSize))
 	defer l.DecrRef()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
