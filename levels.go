@@ -487,6 +487,9 @@ func (s *levelsController) compactBuildTables(
 	topTables := cd.top
 	botTables := cd.bot
 
+	y.NumCompactionTables.Add(int64(len(topTables) + len(botTables)))
+	defer y.NumCompactionTables.Add(int64(-(len(topTables) + len(botTables))))
+
 	// Check overlap of the top level with the levels which are not being
 	// compacted in this compaction.
 	hasOverlap := s.checkOverlap(cd.allTables(), cd.nextLevel.level+1)
