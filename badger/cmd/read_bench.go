@@ -120,7 +120,6 @@ func readBench(cmd *cobra.Command, args []string) error {
 		return y.Wrapf(err, "unable to open DB")
 	}
 	defer db.Close()
-	now := time.Now()
 
 	fmt.Println("*********************************************************")
 	fmt.Println("Starting to benchmark Reads")
@@ -131,32 +130,7 @@ func readBench(cmd *cobra.Command, args []string) error {
 		fullScanDB(db)
 		return nil
 	}
-	keys, err := getSampleKeys(db)
-	if err != nil {
-		return y.Wrapf(err, "error while sampling keys")
-	}
-	fmt.Println("*********************************************************")
-	fmt.Printf("Total Sampled Keys: %d, read in time: %s\n", len(keys), time.Since(now))
-	fmt.Println("*********************************************************")
-
-	if len(keys) == 0 {
-		fmt.Println("DB is empty, hence returning")
-		return nil
-	}
-	c := z.NewCloser(0)
-	startTime = time.Now()
-	for i := 0; i < numGoroutines; i++ {
-		c.AddRunning(1)
-		go readKeys(db, c, keys)
-	}
-
-	// also start printing stats
-	c.AddRunning(1)
-	go printStats(c)
-
-	<-time.After(dur)
-	c.SignalAndWait()
-
+	read(db, dur)
 	return nil
 }
 
