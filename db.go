@@ -59,6 +59,16 @@ type closers struct {
 	pub        *z.Closer
 }
 
+// TODO: Add IncrRef and DecrRef here.
+// When DecrRef should delete, it can then delete wal.
+// Also, memTable should have a way to open a WAL and bring SkipList up to speed.
+// On start, if there's a logfile, then create corresponding skiplist and create memtable struct.
+type memTable struct {
+	// Give skiplist z.Calloc'd []byte.
+	sl  *skl.Skiplist
+	wal *logFile
+}
+
 // TODO: Tables need to store the maxVersion, so we can use them to figure it out instead of relying
 // on head.
 // TODO: Value log discard stats should be an mmapped file.
@@ -73,8 +83,11 @@ type DB struct {
 	valueDirGuard *directoryLockGuard
 
 	closers closers
-	mt      *skl.Skiplist   // Our latest (actively written) in-memory table
-	imm     []*skl.Skiplist // Add here only AFTER pushing to flushChan.
+
+	// TODO: Switch to memTable
+	mt  *memTable   // Our latest (actively written) in-memory table
+	imm []*memTable // Add here only AFTER pushing to flushChan.
+
 	// TODO: This needs to be initialized during Open.
 	nextMemFid int
 
@@ -864,6 +877,9 @@ func (db *DB) writeToLSM(b *request) error {
 		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
 
+	// TODO: Write it to the db.mt.wal, which is now a memTable struct first.
+	// Then, write to the db.mt.sl (skiplist).
+
 	for i, entry := range b.Entries {
 		if entry.meta&bitFinTxn != 0 {
 			continue
@@ -894,41 +910,11 @@ func (db *DB) writeToLSM(b *request) error {
 	return nil
 }
 
-func (db *DB) writeToWAL(reqs []*request) error {
-	if !db.opt.UseWAL || db.opt.InMemory {
-		return nil
-	}
-	wal := db.wal
-	wal.reset()
-
-	buf := new(bytes.Buffer)
-	for _, req := range reqs {
-		for _, e := range req.Entries {
-			buf.Reset()
-			plen, err := wal.encodeEntry(e, buf, wal.writeAt)
-			if err != nil {
-				return err
-			}
-			y.AssertTrue(plen == copy(wal.fmap[wal.writeAt:], buf.Bytes()))
-			wal.writeAt += uint32(plen)
-		}
-	}
-	if db.opt.SyncWrites {
-		return wal.sync()
-	}
-	return nil
-}
-
 // writeRequests is called serially by only one goroutine.
 func (db *DB) writeRequests(reqs []*request) error {
 	if len(reqs) == 0 {
 		return nil
 	}
-
-	if err := db.writeToWAL(reqs); err != nil {
-		return errors.Wrapf(err, "while writing to WAL")
-	}
-	defer db.wal.reset()
 
 	done := func(err error) {
 		for _, r := range reqs {

@@ -34,7 +34,6 @@ package skl
 
 import (
 	"math"
-	"os"
 	"sync/atomic"
 	"unsafe"
 
@@ -74,15 +73,16 @@ type node struct {
 	tower [maxHeight]uint32
 }
 
+// TODO: Skiplist should take in a byte slice.
 type Skiplist struct {
 	height *int32 // Current height. 1 <= height <= kMaxHeight. CAS.
 	head   *node
 	ref    int32
 	arena  *Arena
-	fd     *os.File
 	buf    []byte
 }
 
+// TODO: Remove the IncrRef and DecrRef from here and move to memTable struct in db.go.
 // IncrRef increases the refcount
 func (s *Skiplist) IncrRef() {
 	atomic.AddInt32(&s.ref, 1)
@@ -94,9 +94,6 @@ func (s *Skiplist) DecrRef() {
 	if newRef > 0 {
 		return
 	}
-	y.Check(z.Munmap(s.buf))
-	y.Check(s.fd.Truncate(0))
-	y.Check(os.Remove(s.fd.Name()))
 
 	// Indicate we are closed. Good for testing.  Also, lets GC reclaim memory. Race condition
 	// here would suggest we are accessing skiplist when we are supposed to have no reference!
@@ -128,14 +125,15 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 }
 
 // NewSkiplist makes a new empty skiplist
-func NewSkiplist(buf []byte, fd *os.File) *Skiplist {
-	s := OpenSkiplist(buf, fd)
+func NewSkiplist(buf []byte) *Skiplist {
+	s := OpenSkiplist(buf)
 	atomic.StoreInt32(s.height, 1)
 	return s
 }
 
 // OpenSkiplist loads a skiplist from the mmaped file
-func OpenSkiplist(buf []byte, fd *os.File) *Skiplist {
+// TODO: Probably don't need this.
+func OpenSkiplist(buf []byte) *Skiplist {
 	arena := newArena(buf[4:])
 	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
 	s := &Skiplist{
@@ -143,7 +141,6 @@ func OpenSkiplist(buf []byte, fd *os.File) *Skiplist {
 		head:   head,
 		arena:  arena,
 		ref:    1,
-		fd:     fd,
 		buf:    buf,
 	}
 	return s

@@ -135,6 +135,26 @@ func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int,
 	return len(headerEnc[:sz]) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
 
+func (lf *logFile) writeRequest(req *request, opt Options) error {
+	if !opt.UseWAL {
+		return nil
+	}
+	buf := new(bytes.Buffer)
+	for _, e := range req.Entries {
+		buf.Reset()
+		plen, err := lf.encodeEntry(e, buf, lf.writeAt)
+		if err != nil {
+			return err
+		}
+		y.AssertTrue(plen == copy(lf.fmap[lf.writeAt:], buf.Bytes()))
+		lf.writeAt += uint32(plen)
+	}
+	if opt.SyncWrites {
+		return lf.sync()
+	}
+	return nil
+}
+
 func (lf *logFile) decodeEntry(buf []byte, offset uint32) (*Entry, error) {
 	var h header
 	hlen := h.Decode(buf)
