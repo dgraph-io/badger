@@ -17,6 +17,7 @@
 package table
 
 import (
+	"bytes"
 	"crypto/aes"
 	"encoding/binary"
 	"fmt"
@@ -468,6 +469,35 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 	var bo fb.BlockOffset
 	y.AssertTrue(index.Offsets(&bo, 0))
 	return &bo, nil
+}
+
+// KeySplits splits the table into at least n ranges based on the block offsets.
+func (t *Table) KeySplits(n int, prefix []byte) []string {
+	if n == 0 {
+		return nil
+	}
+
+	var res []string
+
+	oLen := t.index.OffsetsLength()
+	jump := oLen / n
+	// offsets := t.blockOffsets()
+	// jump := len(offsets) / n
+	if jump == 0 {
+		jump = 1
+	}
+
+	var bo fb.BlockOffset
+	for i := 0; i < oLen; i += jump {
+		if i >= oLen {
+			i = oLen - 1
+		}
+		y.AssertTrue(t.index.Offsets(&bo, i))
+		if bytes.HasPrefix(bo.KeyBytes(), prefix) {
+			res = append(res, string(bo.KeyBytes()))
+		}
+	}
+	return res
 }
 
 // block function return a new block. Each block holds a ref and the byte
