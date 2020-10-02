@@ -40,12 +40,12 @@ type Arena struct {
 }
 
 // newArena returns a new arena.
-func newArena(buf []byte) *Arena {
+func newArena(n int64) *Arena {
 	// Don't store data at position 0 in order to reserve offset=0 as a kind
 	// of nil pointer.
 	out := &Arena{
 		n:   1,
-		buf: buf,
+		buf: make([]byte, n),
 	}
 	return out
 }

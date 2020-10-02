@@ -75,11 +75,10 @@ type node struct {
 
 // TODO: Skiplist should take in a byte slice.
 type Skiplist struct {
-	height *int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	height int32 // Current height. 1 <= height <= kMaxHeight. CAS.
 	head   *node
 	ref    int32
 	arena  *Arena
-	buf    []byte
 }
 
 // TODO: Remove the IncrRef and DecrRef from here and move to memTable struct in db.go.
@@ -134,26 +133,16 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 	return
 }
 
-// NewSkiplist makes a new empty skiplist
-func NewSkiplist(buf []byte) *Skiplist {
-	s := OpenSkiplist(buf)
-	atomic.StoreInt32(s.height, 1)
-	return s
-}
-
-// OpenSkiplist loads a skiplist from the mmaped file
-// TODO: Probably don't need this.
-func OpenSkiplist(buf []byte) *Skiplist {
-	arena := newArena(buf[4:])
+// NewSkiplist makes a new empty skiplist, with a given arena size
+func NewSkiplist(arenaSize int64) *Skiplist {
+	arena := newArena(arenaSize)
 	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
-	s := &Skiplist{
-		height: (*int32)(unsafe.Pointer(&buf[0])),
+	return &Skiplist{
+		height: 1,
 		head:   head,
 		arena:  arena,
 		ref:    1,
-		buf:    buf,
 	}
-	return s
 }
 
 // Sync calls sync on Skiplist buffer

@@ -75,11 +75,11 @@ func (mt *memTable) UpdateSkipList() error {
 
 	addEntry := func(e Entry, vp valuePointer) error {
 		v := y.ValueStruct{
-			Meta: e.meta,
-			UserMeta: e.UserMeta,
+			Meta:      e.meta,
+			UserMeta:  e.UserMeta,
 			ExpiresAt: e.ExpiresAt,
-			Value: e.Value,
-			Version: e.version,
+			Value:     e.Value,
+			Version:   e.version,
 		}
 		mt.sl.Put(e.Key, v)
 		return nil
@@ -126,8 +126,6 @@ type DB struct {
 	// TODO: This needs to be initialized during Open.
 	nextMemFid int
 
-	// TODO: Create or open logfile.
-	wal       *logFile
 	opt       Options
 	manifest  *manifestFile
 	lc        *levelsController
@@ -444,7 +442,7 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.updateSize = z.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
 	db.openMemTables()
-	db.mt = db.newSkipList()
+	db.mt = db.newMemTable()
 
 	// newLevelsController potentially loads files in directory.
 	if db.lc, err = newLevelsController(db, &manifest); err != nil {
@@ -470,12 +468,12 @@ func Open(opt Options) (db *DB, err error) {
 	go db.doWrites(replayCloser)
 
 	if err = db.vlog.open(db); err != nil {
+		replayCloser.SignalAndWait()
 		return db, y.Wrapf(err, "During db.vlog.open")
 	}
-	if err := db.openWALFile(); err != nil {
-		replayCloser.SignalAndWait()
-		return db, y.Wrapf(err, "During db.openWAL")
-	}
+	// if err := db.openWALFile(); err != nil {
+	// 	return db, y.Wrapf(err, "During db.openWAL")
+	// }
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 
 	// Let's advance nextTxnTs to one more than whatever we observed via
@@ -528,12 +526,12 @@ func (db *DB) openMemTables() error {
 		return fids[i] < fids[j]
 	})
 	for _, fid := range fids {
-		skl, err := db.openSkipList(fid)
+		mt, err := db.openMemTable(fid)
 		if err != nil {
 			return err
 		}
 		// TODO: We need the max version from the skiplist.
-		db.imm = append(db.imm, skl)
+		db.imm = append(db.imm, mt)
 	}
 	if len(fids) != 0 {
 		db.nextMemFid = fids[len(fids)-1] + 1
@@ -575,7 +573,7 @@ func (db *DB) openWALFile() error {
 		return nil
 	}
 	// Open existing file.
-	db.wal.open(filepath, flags)
+	lf.open(filepath, flags)
 	db.opt.Infof("Replaying file %s", db.wal.fd.Name())
 	now := time.Now()
 	// Replay and possible truncation done. Now we can open the file as per
@@ -603,21 +601,62 @@ func (db *DB) openWALFile() error {
 
 const memFileExt string = ".mem"
 
-func (db *DB) openSkipList(fid int) (*skl.Skiplist, error) {
-	filepath := db.skiplistPath(fid)
-	f, err := os.OpenFile(filepath, os.O_RDWR, 0666)
-	if err != nil {
+func (db *DB) openMemTable(fid int) (*memTable, error) {
+
+	filepath := db.mtFilePath(fid)
+	lf := &logFile{
+		fid:  uint32(fid),
+		path: filepath,
+		// TODO: Do we need below fields?
+		loadingMode: options.MemoryMap,
+		registry:    db.registry,
+	}
+	if err := lf.open(filepath, uint32(os.O_RDWR)); err != nil {
+		return nil, errors.Wrapf(err, "While opening mem table")
+	}
+	// TODO: What should be the size of mmap?
+	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
+		return errFile(err, lf.path, "Map log file")
+	}
+	s := skl.NewSkiplist()
+	mt := &memTable{
+		wal: lf,
+		sl:  s,
+		ref: 1
+	}
+	if err := mt.UpdateSkipList(); err != nil {
 		return nil, err
 	}
-	sz := arenaSize(db.opt)
-	y.Check(f.Truncate(sz))
-
-	data, err := z.Mmap(f, true, sz)
-	y.Check(err)
-	return skl.OpenSkiplist(data, f), nil
+	return mt, nil
 }
 
-func (db *DB) skiplistPath(fid int) string {
+func (db *DB) newMemTable() (*memTable, error) {
+	filepath := db.mtFilePath(fid)
+	lf := &logFile{
+		fid:         db.nextMemFid,
+		path:        fname,
+		loadingMode: options.MemoryMap,
+		registry:    vlog.db.registry,
+		writeAt:     vlogHeaderSize,
+	}
+	db.nextMemFid++
+	if err := lf.open(filepath, uint32(os.O_RDWR)); err != nil {
+		return nil, errors.Wrapf(err, "While opening mem table")
+	}
+	// TODO: What should be the sixze of mmap?
+	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
+		return errFile(err, lf.path, "Map log file")
+	}
+	s := skl.NewSkiplist()
+	mt := &memTable{
+		wal: lf,
+		sl:  s,
+		ref: 1
+	}
+	return mt, nil
+}
+
+func (db *DB) mtFilePath(fid int) string {
 	return path.Join(db.opt.Dir, fmt.Sprintf("%05d%s", fid, memFileExt))
 }
 
@@ -635,6 +674,7 @@ func (db *DB) newSkipList() *skl.Skiplist {
 
 	return skl.NewSkiplist(data, f)
 }
+
 
 // cleanup stops all the goroutines started by badger. This is used in open to
 // cleanup goroutines in case of an error.
