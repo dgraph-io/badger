@@ -59,14 +59,49 @@ type closers struct {
 	pub        *z.Closer
 }
 
-// TODO: Add IncrRef and DecrRef here.
-// When DecrRef should delete, it can then delete wal.
 // Also, memTable should have a way to open a WAL and bring SkipList up to speed.
 // On start, if there's a logfile, then create corresponding skiplist and create memtable struct.
 type memTable struct {
 	// Give skiplist z.Calloc'd []byte.
 	sl  *skl.Skiplist
 	wal *logFile
+	ref int32
+}
+
+func (mt *memTable) UpdateSkipList() error {
+	if mt.wal == nil || mt.sl == nil {
+		return nil
+	}
+
+	addEntry := func(e Entry, vp valuePointer) error {
+		v := y.ValueStruct{
+			Meta: e.meta,
+			UserMeta: e.UserMeta,
+			ExpiresAt: e.ExpiresAt,
+			Value: e.Value,
+			Version: e.version,
+		}
+		mt.sl.Put(e.Key, v)
+		return nil
+	}
+	mt.wal.iterate(true, 0, addEntry)
+	return nil
+}
+
+// IncrRef increases the refcount
+func (mt *memTable) IncrRef() {
+	atomic.AddInt32(&mt.ref, 1)
+}
+
+// DecrRef decrements the refcount, deallocating the Skiplist when done using it
+func (mt *memTable) DecrRef() {
+	newRef := atomic.AddInt32(&mt.ref, -1)
+	if newRef > 0 {
+		return
+	}
+
+	mt.sl.ReclaimMem()
+	// TODO: delete wal file.
 }
 
 // TODO: Tables need to store the maxVersion, so we can use them to figure it out instead of relying

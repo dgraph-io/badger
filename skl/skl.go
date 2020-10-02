@@ -103,6 +103,16 @@ func (s *Skiplist) DecrRef() {
 	s.head = nil
 }
 
+// ReclaimMem sets the arena and head fields to nil so they can be reclaimed by the GC.
+func (s *Skiplist) ReclaimMem() {
+	// Indicate we are closed. Good for testing.  Also, lets GC reclaim memory. Race condition
+	// here would suggest we are accessing skiplist when we are supposed to have no reference!
+	s.arena = nil
+	// Since the head references the arena's buf, as long as the head is kept around
+	// GC can't release the buf.
+	s.head = nil
+}
+
 func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 	// The base level is already allocated in the node struct.
 	offset := arena.putNode(height)
