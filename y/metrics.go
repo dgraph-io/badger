@@ -67,5 +67,5 @@ func init() {
 	LSMSize = expvar.NewMap("badger_v2_lsm_size_bytes")
 	VlogSize = expvar.NewMap("badger_v2_vlog_size_bytes")
 	PendingWrites = expvar.NewMap("badger_v2_pending_writes_total")
-	NumCompactionTables = expvar.NewInt("badger_v2_tables_being_compacted_total")
+	NumCompactionTables = expvar.NewInt("badger_v2_compactions_current")
 }
