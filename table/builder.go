@@ -424,10 +424,10 @@ func (b *Builder) Finish(allocate bool) []byte {
 		b.sz = dstLen
 	}
 
-	// TODO: Figure out how to map bitsPerKey to BloomFalsePositive.
 	var f y.Filter
 	if b.opt.BloomFalsePositive > 0 {
-		f = y.NewFilter(b.keyHashes, 10)
+		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opt.BloomFalsePositive)
+		f = y.NewFilter(b.keyHashes, bits)
 	}
 	index := b.buildIndex(f)
 

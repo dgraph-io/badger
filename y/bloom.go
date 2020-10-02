@@ -4,6 +4,8 @@
 
 package y
 
+import "math"
+
 // Filter is an encoded set of []byte keys.
 type Filter []byte
 
@@ -42,6 +44,14 @@ func (f Filter) MayContain(h uint32) bool {
 // positive rate.
 func NewFilter(keys []uint32, bitsPerKey int) Filter {
 	return Filter(appendFilter(nil, keys, bitsPerKey))
+}
+
+// BloomBitsPerKey returns the bits per key required by bloomfilter based on
+// the false positive rate.
+func BloomBitsPerKey(numEntries int, fp float64) int {
+	size := -1 * float64(numEntries) * math.Log(fp) / math.Pow(float64(0.69314718056), 2)
+	locs := math.Ceil(float64(0.69314718056) * size / float64(numEntries))
+	return int(locs)
 }
 
 func appendFilter(buf []byte, keys []uint32, bitsPerKey int) []byte {
