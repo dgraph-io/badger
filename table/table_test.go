@@ -965,7 +965,7 @@ func TestDoesNotHaveRace(t *testing.T) {
 	wg.Add(5)
 	for i := 0; i < 5; i++ {
 		go func() {
-			require.True(t, table.DoesNotHave(uint64(1237882)))
+			require.True(t, table.DoesNotHave(uint32(1237882)))
 			wg.Done()
 		}()
 	}

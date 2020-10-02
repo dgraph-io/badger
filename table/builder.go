@@ -27,6 +27,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
 	fbs "github.com/google/flatbuffers/go"
+	flatbuffers "github.com/google/flatbuffers/go"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -424,7 +425,11 @@ func (b *Builder) Finish(allocate bool) []byte {
 	}
 
 	// TODO: Figure out how to map bitsPerKey to BloomFalsePositive.
-	index := b.buildIndex(y.NewFilter(b.keyHashes, 10))
+	var f y.Filter
+	if b.opt.BloomFalsePositive > 0 {
+		f = y.NewFilter(b.keyHashes, 10)
+	}
+	index := b.buildIndex(f)
 
 	var err error
 	if b.shouldEncrypt() {
@@ -538,8 +543,11 @@ func (b *Builder) buildIndex(bloom []byte) []byte {
 	}
 	boEnd := builder.EndVector(len(boList))
 
+	var bfoff flatbuffers.UOffsetT
 	// Write the bloom filter.
-	bfoff := builder.CreateByteVector(bloom)
+	if len(bloom) > 0 {
+		bfoff = builder.CreateByteVector(bloom)
+	}
 
 	fb.TableIndexStart(builder)
 	fb.TableIndexAddOffsets(builder, boEnd)

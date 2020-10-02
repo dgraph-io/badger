@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgryski/go-farm"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v2/fb"
@@ -236,7 +235,7 @@ func TestBloomfilter(t *testing.T) {
 		c := 0
 		for it.Rewind(); it.Valid(); it.Next() {
 			c++
-			hash := farm.Fingerprint64(y.ParseKey(it.Key()))
+			hash := y.Hash(y.ParseKey(it.Key()))
 			require.False(t, tab.DoesNotHave(hash))
 		}
 		require.Equal(t, keyCount, c)
@@ -246,13 +245,13 @@ func TestBloomfilter(t *testing.T) {
 		c = 0
 		for it.Rewind(); it.Valid(); it.Next() {
 			c++
-			hash := farm.Fingerprint64(y.ParseKey(it.Key()))
+			hash := y.Hash(y.ParseKey(it.Key()))
 			require.False(t, tab.DoesNotHave(hash))
 		}
 		require.Equal(t, keyCount, c)
 
 		// Ensure tab.DoesNotHave works
-		hash := farm.Fingerprint64([]byte("foo"))
+		hash := y.Hash([]byte("foo"))
 		require.Equal(t, withBlooms, tab.DoesNotHave(hash))
 	}
 
