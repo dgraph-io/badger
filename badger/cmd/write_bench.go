@@ -112,7 +112,7 @@ func init() {
 		"Load Bloom filter on DB open.")
 	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", true,
 		"If true, it badger will detect the conflicts")
-	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
+	writeBenchCmd.Flags().BoolVar(&compression, "compression", true,
 		"If true, badger will use ZSTD mode")
 	writeBenchCmd.Flags().BoolVar(&showDir, "show-dir", false,
 		"If true, the report will include the directory contents")
@@ -160,6 +160,34 @@ func writeRandom(db *badger.DB, num uint64) error {
 		atomic.AddUint64(&sizeWritten, es)
 	}
 	return batch.Flush()
+}
+
+func read(db *badger.DB, dur time.Duration) {
+	now := time.Now()
+	keys, err := getSampleKeys(db)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("*********************************************************")
+	fmt.Printf("Total Sampled Keys: %d, read in time: %s\n", len(keys), time.Since(now))
+	fmt.Println("*********************************************************")
+
+	if len(keys) == 0 {
+		fmt.Println("DB is empty, hence returning")
+		return
+	}
+	c := z.NewCloser(0)
+	startTime = time.Now()
+	for i := 0; i < numGoroutines; i++ {
+		c.AddRunning(1)
+		go readKeys(db, c, keys)
+	}
+
+	// also start printing stats
+	c.AddRunning(1)
+	go printStats(c)
+	<-time.After(dur)
+	c.SignalAndWait()
 }
 
 func writeSorted(db *badger.DB, num uint64) error {
@@ -282,7 +310,9 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	if sorted {
 		err = writeSorted(db, num)
 	} else {
+		readKeys(db, time.Duration(time.Minute*5))
 		err = writeRandom(db, num)
+
 	}
 
 	c.SignalAndWait()
@@ -307,7 +337,7 @@ func showKeysStats(db *badger.DB) {
 
 	for it.Rewind(); it.Valid(); it.Next() {
 		i := it.Item()
-		if bytes.HasPrefix(i.Key(), []byte("!badger!")) {
+		if bytes.HasPrefix(i.Key(), []byte("!badger!")) {)
 			internalKeyCount++
 		}
 		if i.IsDeletedOrExpired() {
