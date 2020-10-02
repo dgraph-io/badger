@@ -282,7 +282,7 @@ func (sw *StreamWriter) Cancel() {
 
 	for _, writer := range sw.writers {
 		if writer != nil {
-			writer.closer.Signal()
+			writer.closer.SignalAndWait()
 		}
 	}
 }
