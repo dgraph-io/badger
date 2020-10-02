@@ -442,7 +442,7 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 		iters = append(iters, itr)
 	}
 	for i := 0; i < len(tables); i++ {
-		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
+		iters = append(iters, tables[i].sl.NewUniIterator(opt.Reverse))
 	}
 	iters = txn.db.lc.appendIterators(iters, &opt) // This will increment references.
 

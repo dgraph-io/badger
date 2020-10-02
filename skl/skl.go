@@ -145,11 +145,6 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 	}
 }
 
-// Sync calls sync on Skiplist buffer
-func (s *Skiplist) Sync() error {
-	return z.Msync(s.buf)
-}
-
 func (s *node) getValueOffset() (uint32, uint32) {
 	value := atomic.LoadUint64(&s.value)
 	return decodeValue(value)
@@ -292,7 +287,7 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 }
 
 func (s *Skiplist) getHeight() int32 {
-	return atomic.LoadInt32(s.height)
+	return atomic.LoadInt32(&s.height)
 }
 
 // Put inserts the key-value pair.
@@ -321,7 +316,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	// Try to increase s.height via CAS.
 	listHeight = s.getHeight()
 	for height > int(listHeight) {
-		if atomic.CompareAndSwapInt32(s.height, listHeight, int32(height)) {
+		if atomic.CompareAndSwapInt32(&s.height, listHeight, int32(height)) {
 			// Successfully increased skiplist.height.
 			break
 		}

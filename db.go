@@ -63,28 +63,22 @@ type closers struct {
 // On start, if there's a logfile, then create corresponding skiplist and create memtable struct.
 type memTable struct {
 	// Give skiplist z.Calloc'd []byte.
-	sl  *skl.Skiplist
-	wal *logFile
-	ref int32
+	sl        *skl.Skiplist
+	wal       *logFile
+	ref       int32
+	nextTxnTs uint64
 }
 
-func (mt *memTable) UpdateSkipList() error {
+func (mt *memTable) Put(key []byte, value y.ValueStruct) {
+	// TODO: write to log file.
+	mt.sl.Put(key, value)
+}
+
+func (mt *memTable) UpdateSkipList(opt Options) error {
 	if mt.wal == nil || mt.sl == nil {
 		return nil
 	}
-
-	addEntry := func(e Entry, vp valuePointer) error {
-		v := y.ValueStruct{
-			Meta:      e.meta,
-			UserMeta:  e.UserMeta,
-			ExpiresAt: e.ExpiresAt,
-			Value:     e.Value,
-			Version:   e.version,
-		}
-		mt.sl.Put(e.Key, v)
-		return nil
-	}
-	mt.wal.iterate(true, 0, addEntry)
+	mt.wal.iterate(true, 0, mt.replayFunction(opt))
 	return nil
 }
 
@@ -154,7 +148,7 @@ const (
 	kvWriteChCapacity = 1000
 )
 
-func (db *DB) replayFunction() func(Entry, valuePointer) error {
+func (mt *memTable) replayFunction(opt Options) func(Entry, valuePointer) error {
 	var txn []*Entry
 	var lastCommit uint64
 
@@ -162,13 +156,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 		newRequest := request{
 			Entries: txnEntries,
 		}
-		db.vlog.write([]*request{&newRequest})
 		for i, e := range newRequest.Entries {
-			for err := db.ensureRoomForWrite(); err != nil; err = db.ensureRoomForWrite() {
-				db.opt.Debugf("Replay: Making room for writes")
-				time.Sleep(10 * time.Millisecond)
-			}
-
 			v := y.ValueStruct{
 				Value:     e.Value,
 				Meta:      e.meta,
@@ -176,28 +164,26 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 				ExpiresAt: e.ExpiresAt,
 			}
 
-			if db.skipVlog(e) {
+			if opt.skipVlog(e) {
 				v.Meta = v.Meta &^ bitValuePointer
 			} else {
 				v.Value = newRequest.Ptrs[i].Encode()
 				v.Meta = v.Meta | bitValuePointer
 			}
 			// TODO: Do we need a copy of key?
-			db.mt.Put(e.Key, v)
+			mt.sl.Put(e.Key, v)
 		}
 	}
 
 	first := true
 	return func(e Entry, _ valuePointer) error { // Function for replaying.
 		if first {
-			db.opt.Debugf("First key=%q\n", e.Key)
+			opt.Debugf("First key=%q\n", e.Key)
 		}
 		first = false
-		db.orc.Lock()
-		if db.orc.nextTxnTs < y.ParseTs(e.Key) {
-			db.orc.nextTxnTs = y.ParseTs(e.Key)
+		if mt.nextTxnTs < y.ParseTs(e.Key) {
+			mt.nextTxnTs = y.ParseTs(e.Key)
 		}
-		db.orc.Unlock()
 
 		// nk := make([]byte, len(e.Key))
 		// copy(nk, e.Key)
@@ -237,7 +223,7 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 				lastCommit = txnTs
 			}
 			if lastCommit != txnTs {
-				db.opt.Warningf("Found an incomplete txn at timestamp %d. Discarding it.\n",
+				opt.Warningf("Found an incomplete txn at timestamp %d. Discarding it.\n",
 					lastCommit)
 				txn = txn[:0]
 				lastCommit = txnTs
@@ -372,7 +358,7 @@ func Open(opt Options) (db *DB, err error) {
 	}()
 
 	db = &DB{
-		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
+		imm:           make([]*memTable, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
 		opt:           opt,
@@ -442,7 +428,10 @@ func Open(opt Options) (db *DB, err error) {
 	db.closers.updateSize = z.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
 	db.openMemTables()
-	db.mt = db.newMemTable()
+	db.mt, err = db.newMemTable()
+	if err != nil {
+		return nil, errors.Wrapf(err, "cannot create memtable")
+	}
 
 	// newLevelsController potentially loads files in directory.
 	if db.lc, err = newLevelsController(db, &manifest); err != nil {
@@ -526,7 +515,7 @@ func (db *DB) openMemTables() error {
 		return fids[i] < fids[j]
 	})
 	for _, fid := range fids {
-		mt, err := db.openMemTable(fid)
+		mt, err := db.openMemTable(fid, db.opt)
 		if err != nil {
 			return err
 		}
@@ -541,140 +530,129 @@ func (db *DB) openMemTables() error {
 
 const walFileName = "badger.wal"
 
-func (db *DB) openWALFile() error {
-	if db.opt.InMemory {
-		return nil
-	}
-	var flags uint32
-	switch {
-	case db.opt.ReadOnly:
-		// If we have read only, we don't need SyncWrites.
-		flags |= y.ReadOnly
-		// Set sync flag.
-	case db.opt.SyncWrites:
-		flags |= y.Sync
-	}
-	filepath := path.Join(db.opt.Dir, walFileName)
-	// Create new file
-	if _, err := os.Stat(filepath); os.IsNotExist(err) {
-		lf, err := db.vlog.newLogFile(filepath)
-		if err != nil {
-			return err
-		}
-		//TODO: Do not create wal files in in-memory mode.
-		if db.opt.InMemory {
-			return nil
-		}
-		if err = syncDir(db.opt.Dir); err != nil {
-			y.Check(os.Remove(lf.fd.Name()))
-			return errFile(err, db.opt.Dir, "Sync wal dir")
-		}
-		db.wal = lf
-		return nil
-	}
-	// Open existing file.
-	lf.open(filepath, flags)
-	db.opt.Infof("Replaying file %s", db.wal.fd.Name())
-	now := time.Now()
-	// Replay and possible truncation done. Now we can open the file as per
-	// user specified options.
-	if err := db.replayLog(db.replayFunction()); err != nil {
-		// TODO: What if replay fails?
-		// Log file is corrupted. Delete it.
-		// if err == errDeleteVlogFile {
-		// 	delete(vlog.filesMap, fid)
-		// 	// Close the fd of the file before deleting the file otherwise windows complaints.
-		// 	if err := lf.fd.Close(); err != nil {
-		// 		return errors.Wrapf(err, "failed to close vlog file %s", lf.fd.Name())
-		// 	}
-		// 	path := vlog.fpath(lf.fid)
-		// 	if err := os.Remove(path); err != nil {
-		// 		return y.Wrapf(err, "failed to delete empty value log file: %q", path)
-		// 	}
-		// 	continue
-		// }
-		return err
-	}
-	db.opt.Infof("Replay took: %s\n", time.Since(now))
-	return nil
-}
+// func (db *DB) openWALFile() error {
+// 	if db.opt.InMemory {
+// 		return nil
+// 	}
+// 	var flags uint32
+// 	switch {
+// 	case db.opt.ReadOnly:
+// 		// If we have read only, we don't need SyncWrites.
+// 		flags |= y.ReadOnly
+// 		// Set sync flag.
+// 	case db.opt.SyncWrites:
+// 		flags |= y.Sync
+// 	}
+// 	filepath := path.Join(db.opt.Dir, walFileName)
+// 	// Create new file
+// 	if _, err := os.Stat(filepath); os.IsNotExist(err) {
+// 		lf, err := db.vlog.newLogFile(filepath)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		//TODO: Do not create wal files in in-memory mode.
+// 		if db.opt.InMemory {
+// 			return nil
+// 		}
+// 		if err = syncDir(db.opt.Dir); err != nil {
+// 			y.Check(os.Remove(lf.fd.Name()))
+// 			return errFile(err, db.opt.Dir, "Sync wal dir")
+// 		}
+// 		db.wal = lf
+// 		return nil
+// 	}
+// 	// Open existing file.
+// 	lf.open(filepath, flags)
+// 	db.opt.Infof("Replaying file %s", db.wal.fd.Name())
+// 	now := time.Now()
+// 	// Replay and possible truncation done. Now we can open the file as per
+// 	// user specified options.
+// 	if err := db.replayLog(db.replayFunction()); err != nil {
+// 		// TODO: What if replay fails?
+// 		// Log file is corrupted. Delete it.
+// 		// if err == errDeleteVlogFile {
+// 		// 	delete(vlog.filesMap, fid)
+// 		// 	// Close the fd of the file before deleting the file otherwise windows complaints.
+// 		// 	if err := lf.fd.Close(); err != nil {
+// 		// 		return errors.Wrapf(err, "failed to close vlog file %s", lf.fd.Name())
+// 		// 	}
+// 		// 	path := vlog.fpath(lf.fid)
+// 		// 	if err := os.Remove(path); err != nil {
+// 		// 		return y.Wrapf(err, "failed to delete empty value log file: %q", path)
+// 		// 	}
+// 		// 	continue
+// 		// }
+// 		return err
+// 	}
+// 	db.opt.Infof("Replay took: %s\n", time.Since(now))
+// 	return nil
+// }
 
 const memFileExt string = ".mem"
 
-func (db *DB) openMemTable(fid int) (*memTable, error) {
-
+func (db *DB) openMemTable(fid int, opt Options) (*memTable, error) {
 	filepath := db.mtFilePath(fid)
 	lf := &logFile{
-		fid:  uint32(fid),
-		path: filepath,
-		// TODO: Do we need below fields?
+		fid:         uint32(fid),
+		path:        filepath,
 		loadingMode: options.MemoryMap,
 		registry:    db.registry,
 	}
 	if err := lf.open(filepath, uint32(os.O_RDWR)); err != nil {
 		return nil, errors.Wrapf(err, "While opening mem table")
 	}
-	// TODO: What should be the size of mmap?
-	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
-		return errFile(err, lf.path, "Map log file")
-	}
-	s := skl.NewSkiplist()
+	s := skl.NewSkiplist(arenaSize(db.opt))
 	mt := &memTable{
 		wal: lf,
 		sl:  s,
-		ref: 1
+		ref: 1,
 	}
-	if err := mt.UpdateSkipList(); err != nil {
+	if err := mt.UpdateSkipList(opt); err != nil {
 		return nil, err
 	}
 	return mt, nil
 }
 
 func (db *DB) newMemTable() (*memTable, error) {
-	filepath := db.mtFilePath(fid)
+	filepath := db.mtFilePath(db.nextMemFid)
 	lf := &logFile{
-		fid:         db.nextMemFid,
-		path:        fname,
+		fid:         uint32(db.nextMemFid),
+		path:        filepath,
 		loadingMode: options.MemoryMap,
-		registry:    vlog.db.registry,
-		writeAt:     vlogHeaderSize,
+		registry:    db.registry,
+		// TODO: is writeAt still needed.
+		writeAt: vlogHeaderSize,
 	}
 	db.nextMemFid++
-	if err := lf.open(filepath, uint32(os.O_RDWR)); err != nil {
+	if err := lf.openNew(filepath); err != nil {
 		return nil, errors.Wrapf(err, "While opening mem table")
 	}
-	// TODO: What should be the sixze of mmap?
-	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
-		return errFile(err, lf.path, "Map log file")
-	}
-	s := skl.NewSkiplist()
-	mt := &memTable{
+	s := skl.NewSkiplist(arenaSize(db.opt))
+	return &memTable{
 		wal: lf,
 		sl:  s,
-		ref: 1
-	}
-	return mt, nil
+		ref: 1,
+	}, nil
 }
 
 func (db *DB) mtFilePath(fid int) string {
 	return path.Join(db.opt.Dir, fmt.Sprintf("%05d%s", fid, memFileExt))
 }
 
-func (db *DB) newSkipList() *skl.Skiplist {
-	f, err := os.OpenFile(db.skiplistPath(db.nextMemFid), os.O_CREATE|os.O_RDWR, 0666)
-	y.Check(err)
-	db.nextMemFid++
+// func (db *DB) newSkipList() *skl.Skiplist {
+// 	f, err := os.OpenFile(db.skiplistPath(db.nextMemFid), os.O_CREATE|os.O_RDWR, 0666)
+// 	y.Check(err)
+// 	db.nextMemFid++
 
-	sz := arenaSize(db.opt)
-	y.Check(f.Truncate(sz))
+// 	sz := arenaSize(db.opt)
+// 	y.Check(f.Truncate(sz))
 
-	data, err := z.Mmap(f, true, sz)
-	y.Check(err)
-	z.ZeroOut(data, 0, len(data))
+// 	data, err := z.Mmap(f, true, sz)
+// 	y.Check(err)
+// 	z.ZeroOut(data, 0, len(data))
 
-	return skl.NewSkiplist(data, f)
-}
-
+// 	return skl.NewSkiplist(data, f)
+// }
 
 // cleanup stops all the goroutines started by badger. This is used in open to
 // cleanup goroutines in case of an error.
@@ -763,7 +741,7 @@ func (db *DB) close() (err error) {
 	// and remove them completely, while the block / memtable writer is still
 	// trying to push stuff into the memtable. This will also resolve the value
 	// offset problem: as we push into memtable, we update value offsets there.
-	if !db.mt.Empty() {
+	if !db.mt.sl.Empty() {
 		db.opt.Debugf("Flushing memtable")
 		for {
 			pushedFlushTask := func() bool {
@@ -869,11 +847,11 @@ func (db *DB) Sync() error {
 }
 
 // getMemtables returns the current memtables and get references.
-func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
+func (db *DB) getMemTables() ([]*memTable, func()) {
 	db.RLock()
 	defer db.RUnlock()
 
-	tables := make([]*skl.Skiplist, len(db.imm)+1)
+	tables := make([]*memTable, len(db.imm)+1)
 
 	// Get mutable memtable.
 	tables[0] = db.mt
@@ -918,7 +896,7 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 
 	y.NumGets.Add(1)
 	for i := 0; i < len(tables); i++ {
-		vs := tables[i].Get(key)
+		vs := tables[i].sl.Get(key)
 		y.NumMemtableGets.Add(1)
 		if vs.Meta == 0 && vs.Value == nil {
 			continue
@@ -940,8 +918,8 @@ var requestPool = sync.Pool{
 	},
 }
 
-func (db *DB) skipVlog(e *Entry) bool {
-	return len(e.Value) < db.opt.ValueThreshold
+func (opt Options) skipVlog(e *Entry) bool {
+	return len(e.Value) < opt.ValueThreshold
 }
 
 func (db *DB) writeToLSM(b *request) error {
@@ -959,7 +937,7 @@ func (db *DB) writeToLSM(b *request) error {
 		if entry.meta&bitFinTxn != 0 {
 			continue
 		}
-		if db.skipVlog(entry) { // Will include deletion / tombstone case.
+		if db.opt.skipVlog(entry) { // Will include deletion / tombstone case.
 			db.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value: entry.Value,
@@ -1034,7 +1012,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 	}
 	if db.opt.SyncWrites {
-		if err := db.mt.Sync(); err != nil {
+		if err := db.mt.wal.sync(); err != nil {
 			done(err)
 			return err
 		}
@@ -1185,7 +1163,7 @@ func (db *DB) ensureRoomForWrite() error {
 	// db.head. Hence we are limiting no of value log files to be read to db.logRotates only.
 	forceFlush := atomic.LoadInt32(&db.logRotates) >= db.opt.LogRotatesToFlush
 
-	if !forceFlush && db.mt.MemSize() < db.opt.MaxTableSize {
+	if !forceFlush && db.mt.sl.MemSize() < db.opt.MaxTableSize {
 		return nil
 	}
 
@@ -1199,15 +1177,18 @@ func (db *DB) ensureRoomForWrite() error {
 		if err = db.vlog.sync(); err != nil {
 			return err
 		}
-		if err = db.mt.Sync(); err != nil {
+		if err = db.mt.wal.sync(); err != nil {
 			return err
 		}
 
 		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
-			db.mt.MemSize(), len(db.flushChan))
+			db.mt.sl.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
 		db.imm = append(db.imm, db.mt)
-		db.mt = db.newSkipList()
+		db.mt, err = db.newMemTable()
+		if err != nil {
+			return errors.Wrapf(err, "cannot create new mem table")
+		}
 		// New memtable is empty. We certainly have room.
 		return nil
 	default:
@@ -1222,7 +1203,7 @@ func arenaSize(opt Options) int64 {
 
 // buildL0Table builds a new table from the memtable.
 func buildL0Table(ft flushTask, bopts table.Options) []byte {
-	iter := ft.mt.NewIterator()
+	iter := ft.mt.sl.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder(bopts)
 	defer b.Close()
@@ -1242,7 +1223,7 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 }
 
 type flushTask struct {
-	mt           *skl.Skiplist
+	mt           *memTable
 	dropPrefixes [][]byte
 }
 
@@ -1250,7 +1231,7 @@ type flushTask struct {
 func (db *DB) handleFlushTask(ft flushTask) error {
 	// There can be a scenario, when empty memtable is flushed. For example, memtable is empty and
 	// after writing request to value log, rotation count exceeds db.LogRotatesToFlush.
-	if ft.mt.Empty() {
+	if ft.mt.sl.Empty() {
 		return nil
 	}
 
@@ -1808,7 +1789,10 @@ func (db *DB) dropAll() (func(), error) {
 		mt.DecrRef()
 	}
 	db.imm = db.imm[:0]
-	db.mt = db.newSkipList() // Set it up for future writes.
+	db.mt, err = db.newMemTable() // Set it up for future writes.
+	if err != nil {
+		return resume, errors.Wrapf(err, "cannot open new memtable")
+	}
 
 	num, err := db.lc.dropTree()
 	if err != nil {
@@ -1852,7 +1836,7 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 
 	db.imm = append(db.imm, db.mt)
 	for _, memtable := range db.imm {
-		if memtable.Empty() {
+		if memtable.sl.Empty() {
 			memtable.DecrRef()
 			continue
 		}
@@ -1871,7 +1855,10 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 	db.stopCompactions()
 	defer db.startCompactions()
 	db.imm = db.imm[:0]
-	db.mt = db.newSkipList()
+	db.mt, err = db.newMemTable()
+	if err != nil {
+		return errors.Wrapf(err, "cannot create new mem table")
+	}
 
 	// Drop prefixes from the levels.
 	if err := db.lc.dropPrefixes(prefixes); err != nil {

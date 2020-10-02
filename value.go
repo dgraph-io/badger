@@ -851,6 +851,32 @@ func (vlog *valueLog) populateFilesMap() error {
 	return nil
 }
 
+func (lf *logFile) openNew(path string) error {
+	var err error
+	if lf.fd, err = y.CreateSyncedFile(path, false); err != nil {
+		return y.Wrapf(err, "Error while opening file in logfile %s", path)
+	}
+	removeFile := func() {
+		// Remove the file so that we don't get an error when createVlogFile is
+		// called for the same fid, again. This could happen if there is an
+		// transient error because of which we couldn't create a new file
+		// and the second attempt to create the file succeeds.
+		y.Check(os.Remove(lf.fd.Name()))
+	}
+
+	// TODO: Increase file size so that mmap doesn't crash.
+	if err = lf.bootstrap(); err != nil {
+		removeFile()
+		return err
+	}
+	// TODO: figure out size later
+	if err = lf.mmap(1 << 20); err != nil {
+		removeFile()
+		return errFile(err, lf.path, "Mmap value log file")
+	}
+	return nil
+}
+
 func (lf *logFile) open(path string, flags uint32) error {
 	var err error
 	if lf.fd, err = y.OpenExistingFile(path, flags); err != nil {
@@ -1010,50 +1036,50 @@ func errFile(err error, path string, msg string) error {
 	return fmt.Errorf("%s. Path=%s. Error=%v", msg, path, err)
 }
 
-func (db *DB) replayLog(replayFn logEntry) error {
-	lf := db.wal
-	fi, err := lf.fd.Stat()
-	if err != nil {
-		return errFile(err, lf.path, "Unable to run file.Stat")
-	}
+// func (db *DB) replayLog(replayFn logEntry) error {
+// 	lf := db.wal
+// 	fi, err := lf.fd.Stat()
+// 	if err != nil {
+// 		return errFile(err, lf.path, "Unable to run file.Stat")
+// 	}
 
-	// Alright, let's iterate now.
-	endOffset, err := lf.iterate(db.opt.ReadOnly, 0, replayFn)
-	if err != nil {
-		return errFile(err, lf.path, "Unable to replay logfile")
-	}
-	if int64(endOffset) == fi.Size() {
-		return nil
-	}
+// 	// Alright, let's iterate now.
+// 	endOffset, err := lf.iterate(db.opt.ReadOnly, 0, replayFn)
+// 	if err != nil {
+// 		return errFile(err, lf.path, "Unable to replay logfile")
+// 	}
+// 	if int64(endOffset) == fi.Size() {
+// 		return nil
+// 	}
 
-	// End offset is different from file size. So, we should truncate the file
-	// to that size.
-	if !db.opt.Truncate {
-		db.opt.Warningf("Truncate Needed. File %s size: %d Endoffset: %d",
-			lf.fd.Name(), fi.Size(), endOffset)
-		return ErrTruncateNeeded
-	}
+// 	// End offset is different from file size. So, we should truncate the file
+// 	// to that size.
+// 	if !db.opt.Truncate {
+// 		db.opt.Warningf("Truncate Needed. File %s size: %d Endoffset: %d",
+// 			lf.fd.Name(), fi.Size(), endOffset)
+// 		return ErrTruncateNeeded
+// 	}
 
-	// TODO: DO we need this?
-	// // The entire file should be truncated (i.e. it should be deleted).
-	// // If fid == maxFid then it's okay to truncate the entire file since it will be
-	// // used for future additions. Also, it's okay if the last file has size zero.
-	// // We mmap 2*opt.ValueLogSize for the last file. See vlog.Open() function
-	// // if endOffset <= vlogHeaderSize && lf.fid != vlog.maxFid {
-	// if endOffset <= vlogHeaderSize {
-	// 	if lf.fid != vlog.maxFid {
-	// 		return errDeleteVlogFile
-	// 	}
-	// 	return lf.bootstrap()
-	// }
+// 	// TODO: DO we need this?
+// 	// // The entire file should be truncated (i.e. it should be deleted).
+// 	// // If fid == maxFid then it's okay to truncate the entire file since it will be
+// 	// // used for future additions. Also, it's okay if the last file has size zero.
+// 	// // We mmap 2*opt.ValueLogSize for the last file. See vlog.Open() function
+// 	// // if endOffset <= vlogHeaderSize && lf.fid != vlog.maxFid {
+// 	// if endOffset <= vlogHeaderSize {
+// 	// 	if lf.fid != vlog.maxFid {
+// 	// 		return errDeleteVlogFile
+// 	// 	}
+// 	// 	return lf.bootstrap()
+// 	// }
 
-	db.opt.Infof("Truncating vlog file %s to offset: %d", lf.fd.Name(), endOffset)
-	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
-		return errFile(err, lf.path, fmt.Sprintf(
-			"Truncation needed at offset %d. Can be done manually as well.", endOffset))
-	}
-	return nil
-}
+// 	db.opt.Infof("Truncating vlog file %s to offset: %d", lf.fd.Name(), endOffset)
+// 	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
+// 		return errFile(err, lf.path, fmt.Sprintf(
+// 			"Truncation needed at offset %d. Can be done manually as well.", endOffset))
+// 	}
+// 	return nil
+// }
 
 // init initializes the value log struct. This initialization needs to happen
 // before compactions start.
@@ -1426,7 +1452,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			buf.Reset()
 
 			e := b.Entries[j]
-			if vlog.db.skipVlog(e) {
+			if vlog.db.opt.skipVlog(e) {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
 				continue
 			}
