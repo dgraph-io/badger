@@ -67,18 +67,29 @@ type memTable struct {
 	wal       *logFile
 	ref       int32
 	nextTxnTs uint64
+	opt       Options
 }
 
-func (mt *memTable) Put(key []byte, value y.ValueStruct) {
-	// TODO: write to log file.
+func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
+	entry := &Entry{
+		Key:       key,
+		Value:     value.Value,
+		UserMeta:  value.UserMeta,
+		meta:      value.Meta,
+		ExpiresAt: value.ExpiresAt,
+	}
+	if err := mt.wal.writeRequest(&request{Entries: []*Entry{entry}}, mt.opt); err != nil {
+		return errors.Wrapf(err, "cannot write entry to WAL file")
+	}
 	mt.sl.Put(key, value)
+	return nil
 }
 
-func (mt *memTable) UpdateSkipList(opt Options) error {
+func (mt *memTable) UpdateSkipList() error {
 	if mt.wal == nil || mt.sl == nil {
 		return nil
 	}
-	mt.wal.iterate(true, 0, mt.replayFunction(opt))
+	mt.wal.iterate(true, 0, mt.replayFunction(mt.opt))
 	return nil
 }
 
@@ -427,7 +438,7 @@ func Open(opt Options) (db *DB, err error) {
 	db.calculateSize()
 	db.closers.updateSize = z.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
-	db.openMemTables()
+	db.openMemTables(db.opt)
 	db.mt, err = db.newMemTable()
 	if err != nil {
 		return nil, errors.Wrapf(err, "cannot create memtable")
@@ -490,7 +501,7 @@ func Open(opt Options) (db *DB, err error) {
 	return db, nil
 }
 
-func (db *DB) openMemTables() error {
+func (db *DB) openMemTables(opt Options) error {
 	files, err := ioutil.ReadDir(db.opt.Dir)
 	if err != nil {
 		return errFile(err, db.opt.Dir, "Unable to open mem dir.")
@@ -515,7 +526,7 @@ func (db *DB) openMemTables() error {
 		return fids[i] < fids[j]
 	})
 	for _, fid := range fids {
-		mt, err := db.openMemTable(fid, db.opt)
+		mt, err := db.openMemTable(fid)
 		if err != nil {
 			return err
 		}
@@ -590,7 +601,7 @@ const walFileName = "badger.wal"
 
 const memFileExt string = ".mem"
 
-func (db *DB) openMemTable(fid int, opt Options) (*memTable, error) {
+func (db *DB) openMemTable(fid int) (*memTable, error) {
 	filepath := db.mtFilePath(fid)
 	lf := &logFile{
 		fid:         uint32(fid),
@@ -606,8 +617,9 @@ func (db *DB) openMemTable(fid int, opt Options) (*memTable, error) {
 		wal: lf,
 		sl:  s,
 		ref: 1,
+		opt: db.opt,
 	}
-	if err := mt.UpdateSkipList(opt); err != nil {
+	if err := mt.UpdateSkipList(); err != nil {
 		return nil, err
 	}
 	return mt, nil
@@ -632,6 +644,7 @@ func (db *DB) newMemTable() (*memTable, error) {
 		wal: lf,
 		sl:  s,
 		ref: 1,
+		opt: db.opt,
 	}, nil
 }
 
@@ -938,7 +951,7 @@ func (db *DB) writeToLSM(b *request) error {
 			continue
 		}
 		if db.opt.skipVlog(entry) { // Will include deletion / tombstone case.
-			db.mt.Put(entry.Key,
+			err := db.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value: entry.Value,
 					// Ensure value pointer flag is removed. Otherwise, the value will fail
@@ -949,15 +962,21 @@ func (db *DB) writeToLSM(b *request) error {
 					UserMeta:  entry.UserMeta,
 					ExpiresAt: entry.ExpiresAt,
 				})
+			if err != nil {
+				return err
+			}
 		} else {
 			// Write pointer to Memtable.
-			db.mt.Put(entry.Key,
+			err := db.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:     b.Ptrs[i].Encode(),
 					Meta:      entry.meta | bitValuePointer,
 					UserMeta:  entry.UserMeta,
 					ExpiresAt: entry.ExpiresAt,
 				})
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -869,8 +869,7 @@ func (lf *logFile) openNew(path string) error {
 		removeFile()
 		return err
 	}
-	// TODO: figure out size later
-	if err = lf.mmap(1 << 20); err != nil {
+	if err = lf.mmap(1 << 30); err != nil {
 		removeFile()
 		return errFile(err, lf.path, "Mmap value log file")
 	}
