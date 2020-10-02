@@ -44,9 +44,8 @@ import (
 )
 
 var (
-	badgerPrefix      = []byte("!badger!")        // Prefix for internal keys used by badger.
-	txnKey            = []byte("!badger!txn")     // For indicating end of entries in txn.
-	lfDiscardStatsKey = []byte("!badger!discard") // For storing lfDiscardStats
+	badgerPrefix = []byte("!badger!")    // Prefix for internal keys used by badger.
+	txnKey       = []byte("!badger!txn") // For indicating end of entries in txn.
 )
 
 type closers struct {
