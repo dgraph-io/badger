@@ -465,17 +465,14 @@ func (t *Table) KeySplits(n int, prefix []byte) []string {
 		return nil
 	}
 
-	var res []string
-
 	oLen := t.offsetsLength()
 	jump := oLen / n
-	// offsets := t.blockOffsets()
-	// jump := len(offsets) / n
 	if jump == 0 {
 		jump = 1
 	}
 
 	var bo fb.BlockOffset
+	var res []string
 	for i := 0; i < oLen; i += jump {
 		if i >= oLen {
 			i = oLen - 1
