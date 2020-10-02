@@ -908,14 +908,16 @@ func (lf *logFile) bootstrap() error {
 	// Initialize base IV.
 	lf.baseIV = buf[8:]
 	y.AssertTrue(len(lf.baseIV) == 12)
-	// _, err = lf.fd.Write(buf)
-	// Copy the header to the file.
 	// write the key id and base IV to the file.
-	y.AssertTrue(vlogHeaderSize == copy(lf.fmap, buf))
+	_, err = lf.fd.Write(buf)
 	return nil
 }
 
 func (lf *logFile) reset() {
+	// TODO: This is needed in in-memory mode.
+	if lf == nil {
+		return
+	}
 	z.ZeroOut(lf.fmap, vlogHeaderSize, int(lf.writeAt))
 	lf.writeAt = vlogHeaderSize
 }

@@ -109,24 +109,40 @@ const (
 )
 
 func (db *DB) replayFunction() func(Entry, valuePointer) error {
-	type txnEntry struct {
-		nk []byte
-		v  y.ValueStruct
-	}
-
-	var txn []txnEntry
+	var txn []*Entry
 	var lastCommit uint64
 
-	toLSM := func(nk []byte, vs y.ValueStruct) {
-		for err := db.ensureRoomForWrite(); err != nil; err = db.ensureRoomForWrite() {
-			db.opt.Debugf("Replay: Making room for writes")
-			time.Sleep(10 * time.Millisecond)
+	toLSM := func(txnEntries []*Entry) {
+		newRequest := request{
+			Entries: txnEntries,
 		}
-		db.mt.Put(nk, vs)
+		db.vlog.write([]*request{&newRequest})
+		for i, e := range newRequest.Entries {
+			for err := db.ensureRoomForWrite(); err != nil; err = db.ensureRoomForWrite() {
+				db.opt.Debugf("Replay: Making room for writes")
+				time.Sleep(10 * time.Millisecond)
+			}
+
+			v := y.ValueStruct{
+				Value:     e.Value,
+				Meta:      e.meta,
+				UserMeta:  e.UserMeta,
+				ExpiresAt: e.ExpiresAt,
+			}
+
+			if db.skipVlog(e) {
+				v.Meta = v.Meta &^ bitValuePointer
+			} else {
+				v.Value = newRequest.Ptrs[i].Encode()
+				v.Meta = v.Meta | bitValuePointer
+			}
+			// TODO: Do we need a copy of key?
+			db.mt.Put(e.Key, v)
+		}
 	}
 
 	first := true
-	return func(e Entry, vp valuePointer) error { // Function for replaying.
+	return func(e Entry, _ valuePointer) error { // Function for replaying.
 		if first {
 			db.opt.Debugf("First key=%q\n", e.Key)
 		}
@@ -137,24 +153,24 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 		}
 		db.orc.Unlock()
 
-		nk := make([]byte, len(e.Key))
-		copy(nk, e.Key)
-		var nv []byte
-		meta := e.meta
-		if db.skipVlog(&e) {
-			nv = make([]byte, len(e.Value))
-			copy(nv, e.Value)
-		} else {
-			nv = vp.Encode()
-			meta = meta | bitValuePointer
-		}
+		// nk := make([]byte, len(e.Key))
+		// copy(nk, e.Key)
+		// var nv []byte
+		// meta := e.meta
+		// if db.skipVlog(&e) {
+		// 	nv = make([]byte, len(e.Value))
+		// 	copy(nv, e.Value)
+		// } else {
+		// 	nv = vp.Encode()
+		// 	meta = meta | bitValuePointer
+		// }
 
-		v := y.ValueStruct{
-			Value:     nv,
-			Meta:      meta,
-			UserMeta:  e.UserMeta,
-			ExpiresAt: e.ExpiresAt,
-		}
+		// v := y.ValueStruct{
+		// 	Value:     nv,
+		// 	Meta:      meta,
+		// 	UserMeta:  e.UserMeta,
+		// 	ExpiresAt: e.ExpiresAt,
+		// }
 
 		switch {
 		case e.meta&bitFinTxn > 0:
@@ -165,14 +181,12 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 			y.AssertTrue(lastCommit == txnTs)
 			y.AssertTrue(len(txn) > 0)
 			// Got the end of txn. Now we can store them.
-			for _, t := range txn {
-				toLSM(t.nk, t.v)
-			}
+			toLSM(txn)
 			txn = txn[:0]
 			lastCommit = 0
 
 		case e.meta&bitTxn > 0:
-			txnTs := y.ParseTs(nk)
+			txnTs := y.ParseTs(e.Key)
 			if lastCommit == 0 {
 				lastCommit = txnTs
 			}
@@ -182,12 +196,11 @@ func (db *DB) replayFunction() func(Entry, valuePointer) error {
 				txn = txn[:0]
 				lastCommit = txnTs
 			}
-			te := txnEntry{nk: nk, v: v}
-			txn = append(txn, te)
+			txn = append(txn, &e)
 
 		default:
 			// This entry is from a rewrite or via SetEntryAt(..).
-			toLSM(nk, v)
+			toLSM([]*Entry{&e})
 
 			// We shouldn't get this entry in the middle of a transaction.
 			y.AssertTrue(lastCommit == 0)
@@ -474,12 +487,18 @@ func (db *DB) openMemTables() error {
 		// TODO: We need the max version from the skiplist.
 		db.imm = append(db.imm, skl)
 	}
+	if len(fids) != 0 {
+		db.nextMemFid = fids[len(fids)-1] + 1
+	}
 	return nil
 }
 
 const walFileName = "badger.wal"
 
 func (db *DB) openWALFile() error {
+	if db.opt.InMemory {
+		return nil
+	}
 	var flags uint32
 	switch {
 	case db.opt.ReadOnly:
@@ -490,11 +509,15 @@ func (db *DB) openWALFile() error {
 		flags |= y.Sync
 	}
 	filepath := path.Join(db.opt.Dir, walFileName)
-	// Create new file.
+	// Create new file
 	if _, err := os.Stat(filepath); os.IsNotExist(err) {
 		lf, err := db.vlog.newLogFile(filepath)
 		if err != nil {
 			return err
+		}
+		//TODO: Do not create wal files in in-memory mode.
+		if db.opt.InMemory {
+			return nil
 		}
 		if err = syncDir(db.opt.Dir); err != nil {
 			y.Check(os.Remove(lf.fd.Name()))
@@ -872,7 +895,7 @@ func (db *DB) writeToLSM(b *request) error {
 }
 
 func (db *DB) writeToWAL(reqs []*request) error {
-	if !db.opt.UseWAL {
+	if !db.opt.UseWAL || db.opt.InMemory {
 		return nil
 	}
 	wal := db.wal
