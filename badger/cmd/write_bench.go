@@ -162,7 +162,7 @@ func writeRandom(db *badger.DB, num uint64) error {
 	return batch.Flush()
 }
 
-func read(db *badger.DB, dur time.Duration) {
+func readTest(db *badger.DB, dur time.Duration) {
 	now := time.Now()
 	keys, err := getSampleKeys(db)
 	if err != nil {
@@ -311,7 +311,6 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		err = writeSorted(db, num)
 	} else {
 		go func() {
-			time.Sleep(5 * time.Minute)
 			tick := time.NewTicker(10 * time.Minute)
 			defer tick.Stop()
 
@@ -320,7 +319,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 				case <-c.HasBeenClosed():
 					return
 				case <-tick.C:
-					read(db, 5*time.Minute)
+					readTest(db, 5*time.Minute)
 				}
 			}
 		}()
