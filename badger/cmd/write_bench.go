@@ -177,7 +177,7 @@ func read(db *badger.DB, dur time.Duration) {
 		return
 	}
 	c := z.NewCloser(0)
-	startTime = time.Now()
+	readStartTime := time.Now()
 	for i := 0; i < numGoroutines; i++ {
 		c.AddRunning(1)
 		go readKeys(db, c, keys)
@@ -185,7 +185,7 @@ func read(db *badger.DB, dur time.Duration) {
 
 	// also start printing stats
 	c.AddRunning(1)
-	go printStats(c)
+	go printReadStats(c, readStartTime)
 	<-time.After(dur)
 	c.SignalAndWait()
 }
@@ -310,9 +310,21 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	if sorted {
 		err = writeSorted(db, num)
 	} else {
-		readKeys(db, time.Duration(time.Minute*5))
-		err = writeRandom(db, num)
+		go func() {
+			time.Sleep(5 * time.Minute)
+			tick := time.NewTicker(10 * time.Minute)
+			defer tick.Stop()
 
+			for {
+				select {
+				case <-c.HasBeenClosed():
+					return
+				case <-tick.C:
+					read(db, 5*time.Minute)
+				}
+			}
+		}()
+		err = writeRandom(db, num)
 	}
 
 	c.SignalAndWait()
@@ -337,7 +349,7 @@ func showKeysStats(db *badger.DB) {
 
 	for it.Rewind(); it.Valid(); it.Next() {
 		i := it.Item()
-		if bytes.HasPrefix(i.Key(), []byte("!badger!")) {)
+		if bytes.HasPrefix(i.Key(), []byte("!badger!")) {
 			internalKeyCount++
 		}
 		if i.IsDeletedOrExpired() {
@@ -393,7 +405,7 @@ func reportStats(c *z.Closer, db *badger.DB) {
 			entries := atomic.LoadUint64(&entriesWritten)
 			bytesRate := sz / uint64(dur.Seconds())
 			entriesRate := entries / uint64(dur.Seconds())
-			fmt.Printf("Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
+			fmt.Printf("[WRITE] Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
 				"entries written: %d, speed: %d/sec, gcSuccess: %d\n", y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate, gcSuccess)
 		}
@@ -480,6 +492,28 @@ func dropPrefix(c *z.Closer, db *badger.DB) {
 			} else {
 				fmt.Println("[DropPrefix] Successful")
 			}
+		}
+	}
+}
+
+func printReadStats(c *z.Closer, startTime time.Time) {
+	defer c.Done()
+
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			return
+		case <-t.C:
+			dur := time.Since(startTime)
+			sz := atomic.LoadUint64(&sizeRead)
+			entries := atomic.LoadUint64(&entriesRead)
+			bytesRate := sz / uint64(dur.Seconds())
+			entriesRate := entries / uint64(dur.Seconds())
+			fmt.Printf("[READ] Time elapsed: %s, bytes read: %s, speed: %s/sec, "+
+				"entries read: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
+				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
 		}
 	}
 }
