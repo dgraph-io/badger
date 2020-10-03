@@ -39,6 +39,9 @@ func (rcv *TableIndex) Offsets(obj *BlockOffset, j int) bool {
 }
 
 func (rcv *TableIndex) OffsetsLength() int {
+	if rcv == nil {
+		return 0
+	}
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
 	if o != 0 {
 		return rcv._tab.VectorLen(o)
@@ -56,6 +59,9 @@ func (rcv *TableIndex) BloomFilter(j int) byte {
 }
 
 func (rcv *TableIndex) BloomFilterLength() int {
+	if rcv == nil {
+		return 0
+	}
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(6))
 	if o != 0 {
 		return rcv._tab.VectorLen(o)
@@ -81,6 +87,9 @@ func (rcv *TableIndex) MutateBloomFilter(j int, n byte) bool {
 }
 
 func (rcv *TableIndex) EstimatedSize() uint32 {
+	if rcv == nil {
+		return 0
+	}
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
 	if o != 0 {
 		return rcv._tab.GetUint32(o + rcv._tab.Pos)
@@ -108,6 +117,9 @@ func (rcv *TableIndex) MutateMaxVersion(n uint64) bool {
 }
 
 func (rcv *TableIndex) UncompressedSize() uint32 {
+	if rcv == nil {
+		return 0
+	}
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
 	if o != 0 {
 		return rcv._tab.GetUint32(o + rcv._tab.Pos)
