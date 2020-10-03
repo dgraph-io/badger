@@ -638,7 +638,6 @@ func (vlog *valueLog) open(db *DB) error {
 	if err := last.Truncate(int64(lastOff)); err != nil {
 		return y.Wrapf(err, "while truncating last value log file: %s", last.path)
 	}
-	last.size = lastOff
 
 	// Don't write to the old log file. Always create a new one.
 	if _, err := vlog.createVlogFile(); err != nil {

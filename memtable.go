@@ -228,6 +228,11 @@ type logFile struct {
 	writeAt  uint32
 }
 
+func (lf *logFile) Truncate(end int64) error {
+	lf.size = uint32(end)
+	return lf.MmapFile.Truncate(end)
+}
+
 // encodeEntry will encode entry to the buf
 // layout of entry
 // +--------+-----+-------+-------+
