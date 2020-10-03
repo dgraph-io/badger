@@ -34,7 +34,6 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 	opts := table.Options{
 		BlockSize:          db.opt.BlockSize,
 		BloomFalsePositive: db.opt.BloomFalsePositive,
-		LoadingMode:        options.LoadToRAM,
 		ChkMode:            options.NoVerification,
 	}
 	b := table.NewTableBuilder(opts)
@@ -729,7 +728,6 @@ func TestL1Stall(t *testing.T) {
 func createEmptyTable(db *DB) *table.Table {
 	opts := table.Options{
 		BloomFalsePositive: db.opt.BloomFalsePositive,
-		LoadingMode:        options.LoadToRAM,
 		ChkMode:            options.NoVerification,
 	}
 	b := table.NewTableBuilder(opts)

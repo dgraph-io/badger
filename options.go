@@ -41,7 +41,6 @@ type Options struct {
 	// Usually modified options.
 
 	SyncWrites        bool
-	TableLoadingMode  options.FileLoadingMode
 	NumVersionsToKeep int
 	ReadOnly          bool
 	Truncate          bool
@@ -112,13 +111,10 @@ type Options struct {
 // Feel free to modify these to suit your needs with the WithX methods.
 func DefaultOptions(path string) Options {
 	return Options{
-		Dir:                 path,
-		ValueDir:            path,
-		LevelOneSize:        256 << 20,
-		LevelSizeMultiplier: 15,
-		TableLoadingMode:    options.MemoryMap,
-		// table.MemoryMap to mmap() the tables.
-		// table.Nothing to not preload the tables.
+		Dir:                     path,
+		ValueDir:                path,
+		LevelOneSize:            256 << 20,
+		LevelSizeMultiplier:     15,
 		MaxLevels:               7,
 		MaxTableSize:            64 << 20,
 		NumCompactors:           2, // Run at least 2 compactors. One is dedicated for L0.
@@ -171,7 +167,6 @@ func buildTableOptions(opt Options) table.Options {
 		BlockSize:            opt.BlockSize,
 		BloomFalsePositive:   opt.BloomFalsePositive,
 		LoadBloomsOnOpen:     opt.LoadBloomsOnOpen,
-		LoadingMode:          opt.TableLoadingMode,
 		ChkMode:              opt.ChecksumVerificationMode,
 		Compression:          opt.Compression,
 		ZSTDCompressionLevel: opt.ZSTDCompressionLevel,
@@ -228,16 +223,6 @@ func (opt Options) WithValueDir(val string) Options {
 // The default value of SyncWrites is true.
 func (opt Options) WithSyncWrites(val bool) Options {
 	opt.SyncWrites = val
-	return opt
-}
-
-// WithTableLoadingMode returns a new Options value with TableLoadingMode set to the given value.
-//
-// TableLoadingMode indicates which file loading mode should be used for the LSM tree data files.
-//
-// The default value of TableLoadingMode is options.MemoryMap.
-func (opt Options) WithTableLoadingMode(val options.FileLoadingMode) Options {
-	opt.TableLoadingMode = val
 	return opt
 }
 

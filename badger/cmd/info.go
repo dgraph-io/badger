@@ -31,7 +31,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v2"
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
 	humanize "github.com/dustin/go-humanize"
@@ -101,7 +100,6 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		WithValueDir(vlogDir).
 		WithReadOnly(opt.readOnly).
 		WithTruncate(opt.truncate).
-		WithTableLoadingMode(options.MemoryMap).
 		WithEncryptionKey([]byte(opt.encryptionKey)))
 	if err != nil {
 		return errors.Wrap(err, "failed to open database")

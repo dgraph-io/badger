@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 
@@ -844,7 +843,6 @@ func TestArmV7Issue311Fix(t *testing.T) {
 	defer removeDir(dir)
 
 	db, err := Open(DefaultOptions(dir).
-		WithTableLoadingMode(options.MemoryMap).
 		WithValueLogFileSize(16 << 20).
 		WithLevelOneSize(8 << 20).
 		WithMaxTableSize(2 << 20).

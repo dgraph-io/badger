@@ -79,8 +79,7 @@ func TestPickSortTables(t *testing.T) {
 	genTables := func(mks ...MockKeys) []*table.Table {
 		out := make([]*table.Table, 0)
 		for _, mk := range mks {
-			opts := table.Options{LoadingMode: options.MemoryMap,
-				ChkMode: options.OnTableAndBlockRead}
+			opts := table.Options{ChkMode: options.OnTableAndBlockRead}
 			f := buildTable(t, [][]string{{mk.small, "some value"}, {mk.large, "some value"}}, opts)
 			tbl, err := table.OpenTable(f, opts)
 			require.NoError(t, err)
@@ -274,7 +273,6 @@ func BenchmarkIteratePrefixSingleKey(b *testing.B) {
 	y.Check(err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
-	opts.TableLoadingMode = options.LoadToRAM
 	db, err := Open(opts)
 	y.Check(err)
 	defer db.Close()

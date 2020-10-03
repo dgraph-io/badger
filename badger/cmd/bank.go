@@ -371,10 +371,6 @@ func runTest(cmd *cobra.Command, args []string) error {
 		opts = opts.WithLoggingLevel(badger.DEBUG)
 	}
 
-	if mmap {
-		opts = opts.WithTableLoadingMode(options.MemoryMap)
-	}
-
 	if encryptionKey != "" {
 		opts = opts.WithEncryptionKey([]byte(encryptionKey))
 		// The following comment is intentional as we would need the encryption key in case

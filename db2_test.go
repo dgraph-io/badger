@@ -33,7 +33,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
@@ -429,7 +428,7 @@ func TestCompactionFilePicking(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	db, err := Open(DefaultOptions(dir).WithTableLoadingMode(options.LoadToRAM))
+	db, err := Open(DefaultOptions(dir))
 	require.NoError(t, err, "error while opening db")
 	defer func() {
 		require.NoError(t, db.Close())
@@ -595,8 +594,6 @@ func TestL0GCBug(t *testing.T) {
 	opts.ValueThreshold = 2
 	opts.KeepL0InMemory = true
 	// Setting LoadingMode to mmap seems to cause segmentation fault while closing DB.
-	// opts.ValueLogLoadingMode = options.FileIO
-	opts.TableLoadingMode = options.FileIO
 
 	db1, err := Open(opts)
 	require.NoError(t, err)

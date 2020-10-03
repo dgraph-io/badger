@@ -264,7 +264,6 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	} else {
 		cmode = options.None
 	}
-	mode := getLoadingMode(loadingMode)
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithTruncate(truncate).
@@ -275,7 +274,6 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithBlockCacheSize(blockCacheSize << 20).
 		WithIndexCacheSize(indexCacheSize << 20).
 		WithValueLogMaxEntries(vlogMaxEntries).
-		WithTableLoadingMode(mode).
 		WithEncryptionKey([]byte(encryptionKey)).
 		WithLoadBloomsOnOpen(loadBloomsOnOpen).
 		WithDetectConflicts(detectConflicts).

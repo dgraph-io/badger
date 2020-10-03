@@ -21,7 +21,6 @@ import (
 	"crypto/aes"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path"
@@ -56,9 +55,6 @@ type Options struct {
 
 	// ChkMode is the checksum verification mode for Table.
 	ChkMode options.ChecksumVerificationMode
-
-	// LoadingMode is the mode to be used for loading Table.
-	LoadingMode options.FileLoadingMode
 
 	// Options for Table builder.
 
@@ -148,12 +144,10 @@ func (t *Table) DecrRef() error {
 		}
 
 		// It's necessary to delete windows files.
-		if t.opt.LoadingMode == options.MemoryMap {
-			if err := y.Munmap(t.mmap); err != nil {
-				return err
-			}
-			t.mmap = nil
+		if err := y.Munmap(t.mmap); err != nil {
+			return err
 		}
+		t.mmap = nil
 		// fd can be nil if the table belongs to L0 and it is opened in memory. See
 		// OpenTableInMemory method.
 		if t.fd == nil {
@@ -286,32 +280,10 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 
 	t.tableSize = int(fileInfo.Size())
 
-	switch opts.LoadingMode {
-	case options.LoadToRAM:
-		if _, err := t.fd.Seek(0, io.SeekStart); err != nil {
-			return nil, err
-		}
-		t.mmap = make([]byte, t.tableSize)
-		n, err := t.fd.Read(t.mmap)
-		if err != nil {
-			// It's OK to ignore fd.Close() error because we have only read from the file.
-			_ = t.fd.Close()
-			return nil, y.Wrapf(err, "Failed to load file into RAM")
-		}
-		if n != t.tableSize {
-			return nil, errors.Errorf("Failed to read all bytes from the file."+
-				"Bytes in file: %d Bytes actually Read: %d", t.tableSize, n)
-		}
-	case options.MemoryMap:
-		t.mmap, err = y.Mmap(fd, false, fileInfo.Size())
-		if err != nil {
-			_ = fd.Close()
-			return nil, y.Wrapf(err, "Unable to map file: %q", fileInfo.Name())
-		}
-	case options.FileIO:
-		t.mmap = nil
-	default:
-		panic(fmt.Sprintf("Invalid loading mode: %v", opts.LoadingMode))
+	t.mmap, err = y.Mmap(fd, false, fileInfo.Size())
+	if err != nil {
+		_ = fd.Close()
+		return nil, y.Wrapf(err, "Unable to map file: %q", fileInfo.Name())
 	}
 
 	if err := t.initBiggestAndSmallest(); err != nil {
@@ -331,7 +303,6 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 // OpenInMemoryTable is similar to OpenTable but it opens a new table from the provided data.
 // OpenInMemoryTable is used for L0 tables.
 func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
-	opt.LoadingMode = options.LoadToRAM
 	t := &Table{
 		ref:        1, // Caller is given one reference.
 		opt:        opt,
@@ -368,12 +339,10 @@ func (t *Table) initBiggestAndSmallest() error {
 
 // Close closes the open table. (Releases resources back to the OS.)
 func (t *Table) Close() error {
-	if t.opt.LoadingMode == options.MemoryMap {
-		if err := y.Munmap(t.mmap); err != nil {
-			return err
-		}
-		t.mmap = nil
+	if err := y.Munmap(t.mmap); err != nil {
+		return err
 	}
+	t.mmap = nil
 	if t.fd == nil {
 		return nil
 	}
