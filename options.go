@@ -40,15 +40,14 @@ type Options struct {
 
 	// Usually modified options.
 
-	SyncWrites          bool
-	TableLoadingMode    options.FileLoadingMode
-	ValueLogLoadingMode options.FileLoadingMode
-	NumVersionsToKeep   int
-	ReadOnly            bool
-	Truncate            bool
-	Logger              Logger
-	Compression         options.CompressionType
-	InMemory            bool
+	SyncWrites        bool
+	TableLoadingMode  options.FileLoadingMode
+	NumVersionsToKeep int
+	ReadOnly          bool
+	Truncate          bool
+	Logger            Logger
+	Compression       options.CompressionType
+	InMemory          bool
 
 	// Fine tuning options.
 
@@ -118,7 +117,6 @@ func DefaultOptions(path string) Options {
 		LevelOneSize:        256 << 20,
 		LevelSizeMultiplier: 15,
 		TableLoadingMode:    options.MemoryMap,
-		ValueLogLoadingMode: options.MemoryMap,
 		// table.MemoryMap to mmap() the tables.
 		// table.Nothing to not preload the tables.
 		MaxLevels:               7,
@@ -240,18 +238,6 @@ func (opt Options) WithSyncWrites(val bool) Options {
 // The default value of TableLoadingMode is options.MemoryMap.
 func (opt Options) WithTableLoadingMode(val options.FileLoadingMode) Options {
 	opt.TableLoadingMode = val
-	return opt
-}
-
-// WithValueLogLoadingMode returns a new Options value with ValueLogLoadingMode set to the given
-// value.
-//
-// ValueLogLoadingMode indicates which file loading mode should be used for the value log data
-// files.
-//
-// The default value of ValueLogLoadingMode is options.MemoryMap.
-func (opt Options) WithValueLogLoadingMode(val options.FileLoadingMode) Options {
-	opt.ValueLogLoadingMode = val
 	return opt
 }
 

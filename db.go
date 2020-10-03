@@ -133,10 +133,6 @@ func checkAndSetOptions(opt *Options) error {
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return ErrValueLogSize
 	}
-	if !(opt.ValueLogLoadingMode == options.FileIO ||
-		opt.ValueLogLoadingMode == options.MemoryMap) {
-		return ErrInvalidLoadingMode
-	}
 
 	// Return error if badger is built without cgo and compression is set to ZSTD.
 	if opt.Compression == options.ZSTD && !y.CgoEnabled {

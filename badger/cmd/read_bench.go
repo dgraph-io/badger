@@ -111,7 +111,6 @@ func readBench(cmd *cobra.Command, args []string) error {
 		WithValueDir(vlogDir).
 		WithReadOnly(readOnly).
 		WithTableLoadingMode(mode).
-		WithValueLogLoadingMode(mode).
 		WithBlockCacheSize(blockCacheSize << 20).
 		WithIndexCacheSize(indexCacheSize << 20)
 	fmt.Printf("Opening badger with options = %+v\n", opt)

@@ -25,7 +25,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgryski/go-farm"
 
@@ -191,13 +190,9 @@ func (item *Item) prefetchValue() {
 	if val == nil {
 		return
 	}
-	if item.txn.db.opt.ValueLogLoadingMode == options.MemoryMap {
-		buf := item.slice.Resize(len(val))
-		copy(buf, val)
-		item.val = buf
-	} else {
-		item.val = val
-	}
+	buf := item.slice.Resize(len(val))
+	copy(buf, val)
+	item.val = buf
 }
 
 // EstimatedSize returns the approximate size of the key-value pair.

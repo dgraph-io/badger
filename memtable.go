@@ -34,7 +34,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/skl"
 	"github.com/dgraph-io/badger/v2/y"
@@ -96,11 +95,10 @@ const memFileExt string = ".mem"
 func (db *DB) openMemTable(fid int) (*memTable, error) {
 	filepath := db.mtFilePath(fid)
 	lf := &logFile{
-		fid:         uint32(fid),
-		path:        filepath,
-		loadingMode: options.MemoryMap,
-		registry:    db.registry,
-		writeAt:     vlogHeaderSize,
+		fid:      uint32(fid),
+		path:     filepath,
+		registry: db.registry,
+		writeAt:  vlogHeaderSize,
 	}
 	fmt.Printf("openMemTable: filepath: %v\n", filepath)
 	lerr := lf.open(filepath, os.O_RDWR|os.O_CREATE, db.opt)
@@ -220,14 +218,13 @@ type logFile struct {
 	//
 	// Use shared ownership when reading/writing the file or memory map, use
 	// exclusive ownership to open/close the descriptor, unmap or remove the file.
-	lock        sync.RWMutex
-	fid         uint32
-	size        uint32
-	loadingMode options.FileLoadingMode
-	dataKey     *pb.DataKey
-	baseIV      []byte
-	registry    *KeyRegistry
-	writeAt     uint32
+	lock     sync.RWMutex
+	fid      uint32
+	size     uint32
+	dataKey  *pb.DataKey
+	baseIV   []byte
+	registry *KeyRegistry
+	writeAt  uint32
 }
 
 // encodeEntry will encode entry to the buf
@@ -323,12 +320,8 @@ func (lf *logFile) keyID() uint64 {
 	return lf.dataKey.KeyId
 }
 
+// TODO: Do we need this?
 func (lf *logFile) mmap(size int64) (err error) {
-	if lf.loadingMode != options.MemoryMap {
-		// Nothing to do
-		return nil
-	}
-
 	// Increase the file size so that mmap doesn't complain.
 	if err := lf.Fd.Truncate(size); err != nil {
 		return err
@@ -345,47 +338,36 @@ func (lf *logFile) encryptionEnabled() bool {
 	return lf.dataKey != nil
 }
 
-func (lf *logFile) munmap() (err error) {
-	if lf.loadingMode != options.MemoryMap || len(lf.Data) == 0 {
-		// Nothing to do
-		return nil
-	}
-
-	if err := y.Munmap(lf.Data); err != nil {
-		return errors.Wrapf(err, "Unable to munmap value log: %q", lf.path)
-	}
-	// This is important. We should set the map to nil because ummap
-	// system call doesn't change the length or capacity of the fmap slice.
-	lf.Data = nil
-	return nil
-}
+// // TODO: Do we need this?
+// func (lf *logFile) munmap() (err error) {
+// 	if err := y.Munmap(lf.Data); err != nil {
+// 		return errors.Wrapf(err, "Unable to munmap value log: %q", lf.path)
+// 	}
+// 	// This is important. We should set the map to nil because ummap
+// 	// system call doesn't change the length or capacity of the fmap slice.
+// 	lf.Data = nil
+// 	return nil
+// }
 
 // Acquire lock on mmap/file if you are calling this
 func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
 	var nbr int64
 	offset := p.Offset
-	if lf.loadingMode == options.FileIO {
-		buf = s.Resize(int(p.Len))
-		var n int
-		n, err = lf.Fd.ReadAt(buf, int64(offset))
-		nbr = int64(n)
+	// Do not convert size to uint32, because the lf.Data can be of size
+	// 4GB, which overflows the uint32 during conversion to make the size 0,
+	// causing the read to fail with ErrEOF. See issue #585.
+	size := int64(len(lf.Data))
+	valsz := p.Len
+	lfsz := atomic.LoadUint32(&lf.size)
+	if int64(offset) >= size || int64(offset+valsz) > size ||
+		// Ensure that the read is within the file's actual size. It might be possible that
+		// the offset+valsz length is beyond the file's actual size. This could happen when
+		// dropAll and iterations are running simultaneously.
+		int64(offset+valsz) > int64(lfsz) {
+		err = y.ErrEOF
 	} else {
-		// Do not convert size to uint32, because the lf.Data can be of size
-		// 4GB, which overflows the uint32 during conversion to make the size 0,
-		// causing the read to fail with ErrEOF. See issue #585.
-		size := int64(len(lf.Data))
-		valsz := p.Len
-		lfsz := atomic.LoadUint32(&lf.size)
-		if int64(offset) >= size || int64(offset+valsz) > size ||
-			// Ensure that the read is within the file's actual size. It might be possible that
-			// the offset+valsz length is beyond the file's actual size. This could happen when
-			// dropAll and iterations are running simultaneously.
-			int64(offset+valsz) > int64(lfsz) {
-			err = y.ErrEOF
-		} else {
-			buf = lf.Data[offset : offset+valsz]
-			nbr = int64(valsz)
-		}
+		buf = lf.Data[offset : offset+valsz]
+		nbr = int64(valsz)
 	}
 	y.NumReads.Add(1)
 	y.NumBytesRead.Add(nbr)

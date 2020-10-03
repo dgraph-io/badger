@@ -33,7 +33,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
@@ -399,16 +398,7 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 	lf.lock.Lock()
 	defer lf.lock.Unlock()
 
-	path := vlog.fpath(lf.fid)
-	if err := lf.munmap(); err != nil {
-		_ = lf.Fd.Close()
-		return err
-	}
-	lf.Data = nil
-	if err := lf.Fd.Close(); err != nil {
-		return err
-	}
-	return os.Remove(path)
+	return lf.Delete()
 }
 
 func (vlog *valueLog) dropAll() (int, error) {
@@ -495,10 +485,9 @@ func (vlog *valueLog) populateFilesMap() error {
 		found[fid] = struct{}{}
 
 		lf := &logFile{
-			fid:         uint32(fid),
-			path:        vlog.fpath(uint32(fid)),
-			loadingMode: vlog.opt.ValueLogLoadingMode,
-			registry:    vlog.db.registry,
+			fid:      uint32(fid),
+			path:     vlog.fpath(uint32(fid)),
+			registry: vlog.db.registry,
 		}
 		vlog.filesMap[uint32(fid)] = lf
 		if vlog.maxFid < uint32(fid) {
@@ -512,11 +501,10 @@ func (vlog *valueLog) createVlogFile() (*logFile, error) {
 	fid := vlog.maxFid + 1
 	path := vlog.fpath(fid)
 	lf := &logFile{
-		fid:         fid,
-		path:        path,
-		loadingMode: vlog.opt.ValueLogLoadingMode,
-		registry:    vlog.db.registry,
-		writeAt:     vlogHeaderSize,
+		fid:      fid,
+		path:     path,
+		registry: vlog.db.registry,
+		writeAt:  vlogHeaderSize,
 	}
 	err := lf.open(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, vlog.opt)
 	if err != z.NewFile && err != nil {
@@ -712,26 +700,15 @@ func (vlog *valueLog) Close() error {
 	vlog.opt.Debugf("Stopping garbage collection of values.")
 
 	var err error
-	for id, f := range vlog.filesMap {
-		f.lock.Lock() // We won’t release the lock.
-		if munmapErr := f.munmap(); munmapErr != nil && err == nil {
-			err = munmapErr
-		}
+	for id, lf := range vlog.filesMap {
+		lf.lock.Lock() // We won’t release the lock.
+		offset := int64(-1)
 
-		maxFid := vlog.maxFid
-		// TODO(ibrahim) - Do we need the following truncations on non-windows
-		// platforms? We expand the file only on windows and the vlog.woffset()
-		// should point to end of file on all other platforms.
-		if !vlog.opt.ReadOnly && id == maxFid {
-			// truncate writable log file to correct offset.
-			if truncErr := f.Fd.Truncate(
-				int64(vlog.woffset())); truncErr != nil && err == nil {
-				err = truncErr
-			}
+		if !vlog.opt.ReadOnly && id == vlog.maxFid {
+			offset = int64(vlog.woffset())
 		}
-
-		if closeErr := f.Fd.Close(); closeErr != nil && err == nil {
-			err = closeErr
+		if terr := lf.Close(offset); terr != nil && err == nil {
+			err = terr
 		}
 	}
 	return err
@@ -1053,11 +1030,7 @@ func (vlog *valueLog) getUnlockCallback(lf *logFile) func() {
 	if lf == nil {
 		return nil
 	}
-	if vlog.opt.ValueLogLoadingMode == options.MemoryMap {
-		return lf.lock.RUnlock
-	}
-	lf.lock.RUnlock()
-	return nil
+	return lf.lock.RUnlock
 }
 
 // readValueBytes return vlog entry slice and read locked log file. Caller should take care of
