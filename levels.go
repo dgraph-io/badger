@@ -1133,6 +1133,7 @@ type TableInfo struct {
 	KeyCount         uint32 // Number of keys in the table
 	EstimatedSz      uint32
 	UncompressedSize uint32
+	MaxVersion       uint64
 	IndexSz          int
 	BloomFilterSize  int
 }
@@ -1151,6 +1152,7 @@ func (s *levelsController) getTableInfo() (result []TableInfo) {
 				IndexSz:          t.IndexSize(),
 				BloomFilterSize:  t.BloomFilterSize(),
 				UncompressedSize: t.UncompressedSize(),
+				MaxVersion:       t.MaxVersion(),
 			}
 			result = append(result, info)
 		}

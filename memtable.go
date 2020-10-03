@@ -47,7 +47,7 @@ type memTable struct {
 	// Give skiplist z.Calloc'd []byte.
 	sl        *skl.Skiplist
 	wal       *logFile
-	nextTxnTs uint64
+	maxVersion uint64
 	opt       Options
 	buf       *bytes.Buffer
 }
@@ -176,6 +176,9 @@ func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
 		}
 	}
 	mt.sl.Put(key, value)
+	if ts := y.ParseTs(entry.Key); ts > mt.maxVersion {
+		mt.maxVersion = ts
+	}
 	return nil
 }
 
@@ -209,8 +212,8 @@ func (mt *memTable) replayFunction(opt Options) func(Entry, valuePointer) error 
 			opt.Debugf("First key=%q\n", e.Key)
 		}
 		first = false
-		if ts := y.ParseTs(e.Key); ts > mt.nextTxnTs {
-			mt.nextTxnTs = ts
+		if ts := y.ParseTs(e.Key); ts > mt.maxVersion {
+			mt.maxVersion = ts
 		}
 		v := y.ValueStruct{
 			Value:     e.Value,

@@ -328,7 +328,7 @@ func Open(opt Options) (*DB, error) {
 		}
 	}
 	// TODO: Do we need to do +1 from the maxVersion returned?
-	db.orc.nextTxnTs = db.maxVersion()
+	db.orc.nextTxnTs = db.MaxVersion() + 1
 
 	replayCloser := z.NewCloser(1)
 	go db.doWrites(replayCloser)
@@ -367,15 +367,19 @@ func Open(opt Options) (*DB, error) {
 	return db, nil
 }
 
-func (db *DB) maxVersion() uint64 {
+func (db *DB) MaxVersion() uint64 {
 	var maxVersion uint64
-	for _, mt := range db.imm {
-		if mt.nextTxnTs > maxVersion {
-			maxVersion = mt.nextTxnTs
+	update := func(a uint64) {
+		if a > maxVersion {
+			maxVersion = a
 		}
 	}
-	// Get Table infos and find their max version too.
-	// TODO:
+	for _, mt := range db.imm {
+		update(mt.maxVersion)
+	}
+	for _, ti := range db.Tables() {
+		update(ti.MaxVersion)
+	}
 	return maxVersion
 }
 
@@ -1916,33 +1920,4 @@ func (db *DB) StreamDB(outOptions Options) error {
 // Opts returns a copy of the DB options.
 func (db *DB) Opts() Options {
 	return db.opt
-}
-
-// MaxVersion returns the maximum commited version across all keys in the DB. It
-// uses the stream framework to find the maximum version.
-func (db *DB) MaxVersion() (uint64, error) {
-	maxVersion := uint64(0)
-	var mu sync.Mutex
-	var stream *Stream
-	if db.opt.managedTxns {
-		stream = db.NewStreamAt(math.MaxUint64)
-	} else {
-		stream = db.NewStream()
-	}
-
-	stream.ChooseKey = func(item *Item) bool {
-		mu.Lock()
-		if item.Version() > maxVersion {
-			maxVersion = item.Version()
-		}
-		mu.Unlock()
-		return false
-	}
-	stream.KeyToList = nil
-	stream.Send = nil
-	if err := stream.Orchestrate(context.Background()); err != nil {
-		return 0, err
-	}
-	return maxVersion, nil
-
 }
