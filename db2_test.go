@@ -994,7 +994,6 @@ func TestMaxVersion(t *testing.T) {
 }
 
 func TestTxnReadTs(t *testing.T) {
-	t.Skip()
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
