@@ -463,7 +463,7 @@ func (db *DB) monitorCache(c *z.Closer) {
 		hitRatioTooLow := metrics.Ratio() > 0 && metrics.Ratio() < 0.4
 		if lifeTooShort && hitRatioTooLow {
 			db.opt.Warningf("Block Cache might be too small. Metrics: %s\n", metrics)
-			db.opt.Warningf("Life expectancy: %+v\n", le)
+			db.opt.Warningf("Cache life expectancy (in seconds): %+v\n", le)
 		}
 	}
 }

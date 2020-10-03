@@ -99,9 +99,9 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&showLogs, "verbose", "v", false, "Show Badger logs.")
 	writeBenchCmd.Flags().IntVarP(&valueThreshold, "value-th", "t", 1<<10, "Value threshold")
 	writeBenchCmd.Flags().IntVarP(&numVersions, "num-version", "n", 1, "Number of versions to keep")
-	writeBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache", 0,
+	writeBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache-mb", 0,
 		"Size of block cache in MB")
-	writeBenchCmd.Flags().Int64Var(&indexCacheSize, "index-cache", 0,
+	writeBenchCmd.Flags().Int64Var(&indexCacheSize, "index-cache-mb", 0,
 		"Size of index cache in MB.")
 	writeBenchCmd.Flags().Uint32Var(&vlogMaxEntries, "vlog-maxe", 1000000, "Value log Max Entries")
 	writeBenchCmd.Flags().StringVarP(&encryptionKey, "encryption-key", "e", "",

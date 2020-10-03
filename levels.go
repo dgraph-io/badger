@@ -848,17 +848,18 @@ func (s *levelsController) sortByOverlap(tables []*table.Table, cd *compactDef) 
 		return
 	}
 
-	tableOverlap := make([]int, len(tables))
-	for i := range tables {
-		// get key range for table
-		tableRange := getKeyRange(tables[i])
-		// get overlap with next level
-		left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, tableRange)
-		tableOverlap[i] = right - left
-	}
+	// tableOverlap := make([]int, len(tables))
+	// for i := range tables {
+	// 	// get key range for table
+	// 	tableRange := getKeyRange(tables[i])
+	// 	// get overlap with next level
+	// 	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, tableRange)
+	// 	tableOverlap[i] = right - left
+	// }
 
+	// Sort tables by max version.
 	sort.Slice(tables, func(i, j int) bool {
-		return tableOverlap[i] < tableOverlap[j]
+		return tables[i].MaxVersion() < tables[j].MaxVersion()
 	})
 }
 
@@ -872,6 +873,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 		return false
 	}
 
+	// TODO: Fix this comment.
 	// We want to pick files from current level in order of increasing overlap with next level
 	// tables. Idea here is to first compact file from current level which has least overlap with
 	// next level. This provides us better write amplification.
@@ -880,6 +882,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	for _, t := range tables {
 		cd.thisSize = t.Size()
 		cd.thisRange = getKeyRange(t)
+		// If we're already compacting this range, don't do anything.
 		if s.cstatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
 			continue
 		}
@@ -965,9 +968,9 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		len(newTables), time.Since(timeStart))
 
 	if cd.thisLevel.level != 0 && len(newTables) > 20 {
-		s.kv.opt.Infof("This Range\n Left: %s\nRight: %s", hex.Dump(cd.thisRange.left),
+		s.kv.opt.Infof("This Range\nLeft:\n%s\nRight:\n%s\n", hex.Dump(cd.thisRange.left),
 			hex.Dump(cd.thisRange.right))
-		s.kv.opt.Infof("Next Range\n Left: %s\n Right: %s", hex.Dump(cd.nextRange.left),
+		s.kv.opt.Infof("Next Range\nLeft:\n%s\nRight:\n%s\n", hex.Dump(cd.nextRange.left),
 			hex.Dump(cd.nextRange.right))
 	}
 	return nil
