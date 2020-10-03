@@ -638,6 +638,7 @@ func (vlog *valueLog) open(db *DB) error {
 	if err := last.Truncate(int64(lastOff)); err != nil {
 		return y.Wrapf(err, "while truncating last value log file: %s", last.path)
 	}
+	last.size = lastOff
 
 	// Don't write to the old log file. Always create a new one.
 	if _, err := vlog.createVlogFile(); err != nil {
@@ -645,25 +646,6 @@ func (vlog *valueLog) open(db *DB) error {
 	}
 	return nil
 }
-
-// func (lf *logFile) init() error {
-// 	fstat, err := lf.Fd.Stat()
-// 	if err != nil {
-// 		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
-// 	}
-// 	sz := fstat.Size()
-// 	if sz == 0 {
-// 		// File is empty. We don't need to mmap it. Return.
-// 		return nil
-// 	}
-// 	y.AssertTrue(sz <= math.MaxUint32)
-// 	lf.size = uint32(sz)
-// 	if err = lf.mmap(sz); err != nil {
-// 		_ = lf.Fd.Close()
-// 		return errors.Wrapf(err, "Unable to map file: %q", fstat.Name())
-// 	}
-// 	return nil
-// }
 
 func (vlog *valueLog) Close() error {
 	if vlog == nil || vlog.db == nil || vlog.db.opt.InMemory {
