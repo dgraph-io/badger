@@ -28,7 +28,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
 	fbs "github.com/google/flatbuffers/go"
-	flatbuffers "github.com/google/flatbuffers/go"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -553,7 +552,7 @@ func (b *Builder) buildIndex(bloom []byte, tableSz uint32) []byte {
 	}
 	boEnd := builder.EndVector(len(boList))
 
-	var bfoff flatbuffers.UOffsetT
+	var bfoff fbs.UOffsetT
 	// Write the bloom filter.
 	if len(bloom) > 0 {
 		bfoff = builder.CreateByteVector(bloom)
