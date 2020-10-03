@@ -352,7 +352,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 // at the end. The diff can vary.
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
-func (b *Builder) ReachedCapacity(cap int64) bool {
+func (b *Builder) ReachedCapacity(capacity uint64) bool {
 	blocksSize := atomic.LoadUint32(&b.actualSize) + // actual length of current buffer
 		uint32(len(b.entryOffsets)*4) + // all entry offsets size
 		4 + // count of all entry offsets
@@ -362,7 +362,7 @@ func (b *Builder) ReachedCapacity(cap int64) bool {
 		4 + // Index length
 		5*(uint32(len(b.tableIndex.Offsets))) // approximate index size
 
-	return estimateSz >= uint32(float64(cap)*0.90)
+	return uint64(estimateSz) > capacity
 }
 
 // Finish finishes the table by appending the index.
