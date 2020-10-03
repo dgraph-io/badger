@@ -82,7 +82,6 @@ func (db *DB) openMemTables(opt Options) error {
 			return err
 		}
 		// These should no longer be written to. So, make them part of the imm.
-		// TODO: We need the max version from the skiplist.
 		db.imm = append(db.imm, mt)
 	}
 	if len(fids) != 0 {
@@ -103,7 +102,9 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 		registry:    db.registry,
 		writeAt:     vlogHeaderSize,
 	}
+	fmt.Printf("openMemTable: filepath: %v\n", filepath)
 	lerr := lf.open(filepath, os.O_RDWR|os.O_CREATE, db.opt)
+	fmt.Printf("openMemTable: err: %v\n", lerr)
 	if lerr != z.NewFile && lerr != nil {
 		return nil, errors.Wrapf(lerr, "While opening mem table")
 	}
@@ -112,6 +113,7 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 		wal: lf,
 		sl:  s,
 		opt: db.opt,
+		buf: &bytes.Buffer{},
 	}
 	s.OnClose = func() {
 		if err := mt.wal.Delete(); err != nil {
@@ -119,16 +121,29 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 		}
 	}
 	if lerr == z.NewFile {
-		return mt, nil
+		db.opt.Errorf("NewFile 123")
+		return mt, lerr
 	}
 	err := mt.UpdateSkipList()
+	db.opt.Errorf("update skip list")
 	return mt, err
 }
 
+var errExpectingNewFile = errors.New("Expecting to create a new file, but found an existing file")
+
 func (db *DB) newMemTable() (*memTable, error) {
 	mt, err := db.openMemTable(db.nextMemFid)
-	db.nextMemFid++
-	return mt, err
+	if err == z.NewFile {
+		db.opt.Errorf("Got error: %v for id: %d\n", err, db.nextMemFid)
+		db.nextMemFid++
+		return mt, nil
+	}
+
+	if err != nil {
+		db.opt.Errorf("Got error: %v for id: %d\n", err, db.nextMemFid)
+		return nil, errors.Wrapf(err, "newMemTable")
+	}
+	return nil, errors.Errorf("File %s already exists", mt.wal.Fd.Name())
 }
 
 func (db *DB) mtFilePath(fid int) string {
@@ -400,20 +415,8 @@ func (lf *logFile) doneWriting(offset uint32) error {
 	lf.lock.Lock()
 	defer lf.lock.Unlock()
 
-	// Unmap file before we truncate it. Windows cannot truncate a file that is mmapped.
-	if err := lf.munmap(); err != nil {
-		return errors.Wrapf(err, "failed to munmap vlog file %s", lf.Fd.Name())
-	}
-
-	// TODO: Confirm if we need to run a file sync after truncation.
-	// Truncation must run after unmapping, otherwise Windows would crap itself.
-	if err := lf.Fd.Truncate(int64(offset)); err != nil {
+	if err := lf.Truncate(int64(offset)); err != nil {
 		return errors.Wrapf(err, "Unable to truncate file: %q", lf.path)
-	}
-
-	// Reinitialize the log file. This will mmap the entire file.
-	if err := lf.init(); err != nil {
-		return errors.Wrapf(err, "failed to initialize file %s", lf.Fd.Name())
 	}
 
 	// Previously we used to close the file after it was written and reopen it in read-only mode.
@@ -462,7 +465,7 @@ loop:
 		// We have not reached the end of the file but the entry we read is
 		// zero. This happens because we have truncated the file and
 		// zero'ed it out.
-		case err == io.EOF || e.isZero():
+		case err == io.EOF:
 			break loop
 		case err == io.ErrUnexpectedEOF || err == errTruncate:
 			break loop
@@ -470,6 +473,8 @@ loop:
 			return 0, err
 		case e == nil:
 			continue
+		case e.isZero():
+			break loop
 		}
 
 		var vp valuePointer

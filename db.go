@@ -234,6 +234,7 @@ func Open(opt Options) (db *DB, err error) {
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
 		if err != nil {
+			opt.Errorf("Received err: %v. Cleaning up...", err)
 			db.cleanup()
 			db = nil
 		}
@@ -316,6 +317,10 @@ func Open(opt Options) (db *DB, err error) {
 		go func() {
 			_ = db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
 		}()
+		// Flush them to disk asap.
+		for _, mt := range db.imm {
+			db.flushChan <- flushTask{mt: mt}
+		}
 	}
 	// TODO: Do we need to do +1 from the maxVersion returned?
 	db.orc.nextTxnTs = db.maxVersion()

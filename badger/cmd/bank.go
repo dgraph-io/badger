@@ -367,6 +367,10 @@ func runTest(cmd *cobra.Command, args []string) error {
 		WithKeepL0InMemory(false).
 		WithBlockCacheSize(10 << 20)
 
+	if verbose {
+		opts = opts.WithLoggingLevel(badger.DEBUG)
+	}
+
 	if mmap {
 		opts = opts.WithTableLoadingMode(options.MemoryMap)
 	}

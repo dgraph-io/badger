@@ -429,14 +429,15 @@ func (vlog *valueLog) dropAll() (int, error) {
 			count++
 		}
 		vlog.filesMap = make(map[uint32]*logFile)
+		vlog.maxFid = 0
 		return nil
 	}
 	if err := deleteAll(); err != nil {
 		return count, err
 	}
 
-	vlog.db.opt.Infof("Value logs deleted. Creating value log file: 0")
-	if _, err := vlog.createVlogFile(0); err != nil { // Called while writes are stopped.
+	vlog.db.opt.Infof("Value logs deleted. Creating value log file: 1")
+	if _, err := vlog.createVlogFile(); err != nil { // Called while writes are stopped.
 		return count, err
 	}
 	return count, nil
@@ -507,59 +508,24 @@ func (vlog *valueLog) populateFilesMap() error {
 	return nil
 }
 
-func (vlog *valueLog) newLogFile(fname string) (*logFile, error) {
+func (vlog *valueLog) createVlogFile() (*logFile, error) {
+	fid := vlog.maxFid + 1
+	path := vlog.fpath(fid)
 	lf := &logFile{
-		fid:         0,
-		path:        fname,
+		fid:         fid,
+		path:        path,
 		loadingMode: vlog.opt.ValueLogLoadingMode,
 		registry:    vlog.db.registry,
 		writeAt:     vlogHeaderSize,
 	}
-	// writableLogOffset is only written by write func, by read by Read func.
-	// To avoid a race condition, all reads and updates to this variable must be
-	// done via atomics.
-	var err error
-
-	// TODO: Do we really need a synced file here. Also, do we need to create it always?
-	if lf.Fd, err = y.CreateSyncedFile(lf.path, vlog.opt.SyncWrites); err != nil {
-		return nil, errFile(err, lf.path, "Create value log file")
-	}
-
-	removeFile := func() {
-		// Remove the file so that we don't get an error when createVlogFile is
-		// called for the same fid, again. This could happen if there is an
-		// transient error because of which we couldn't create a new file
-		// and the second attempt to create the file succeeds.
-		y.Check(os.Remove(lf.Fd.Name()))
-	}
-
-	// TODO: Increase file size so that mmap doesn't crash.
-	if err = lf.bootstrap(); err != nil {
-		removeFile()
+	err := lf.open(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, vlog.opt)
+	if err != z.NewFile && err != nil {
 		return nil, err
-	}
-	if err = lf.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
-		removeFile()
-		return nil, errFile(err, lf.path, "Mmap value log file")
-	}
-	return lf, nil
-}
-
-func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
-	path := vlog.fpath(fid)
-	lf, err := vlog.newLogFile(path)
-	if err != nil {
-		return nil, err
-	}
-	lf.fid = fid
-
-	if err = syncDir(vlog.dirPath); err != nil {
-		y.Check(os.Remove(lf.Fd.Name()))
-		return nil, errFile(err, vlog.dirPath, "Sync value log dir")
 	}
 
 	vlog.filesLock.Lock()
 	vlog.filesMap[fid] = lf
+	y.AssertTrue(vlog.maxFid < fid)
 	vlog.maxFid = fid
 	// writableLogOffset is only written by write func, by read by Read func.
 	// To avoid a race condition, all reads and updates to this variable must be
@@ -650,7 +616,7 @@ func (vlog *valueLog) open(db *DB) error {
 	}
 	// If no files are found, then create a new file.
 	if len(vlog.filesMap) == 0 {
-		_, err := vlog.createVlogFile(0)
+		_, err := vlog.createVlogFile()
 		return y.Wrapf(err, "Error while creating log file in valueLog.open")
 	}
 	fids := vlog.sortedFids()
@@ -692,59 +658,51 @@ func (vlog *valueLog) open(db *DB) error {
 		// }
 		// vlog.db.opt.Infof("Replay took: %s\n", time.Since(now))
 
-		if fid < vlog.maxFid {
-			// For maxFid, the mmap would be done by the specially written code below.
-			if err := lf.init(); err != nil {
-				return err
-			}
-		}
+		// if fid < vlog.maxFid {
+		// 	// For maxFid, the mmap would be done by the specially written code below.
+		// 	if err := lf.init(); err != nil {
+		// 		return err
+		// 	}
+		// }
 	}
 	// Seek to the end to start writing.
 	last, ok := vlog.filesMap[vlog.maxFid]
 	y.AssertTrue(ok)
-	// We'll create a new vlog if the last vlog is encrypted and db is opened in
-	// plain text mode or vice versa. A single vlog file can't have both
-	// encrypted entries and plain text entries.
-	if last.encryptionEnabled() != vlog.db.shouldEncrypt() {
-		newid := vlog.maxFid + 1
-		_, err := vlog.createVlogFile(newid)
-		if err != nil {
-			return y.Wrapf(err, "Error while creating log file %d in valueLog.open", newid)
-		}
-		last, ok = vlog.filesMap[newid]
-		y.AssertTrue(ok)
-	}
-	lastOffset, err := last.Fd.Seek(0, io.SeekEnd)
-	if err != nil {
-		return errFile(err, last.path, "file.Seek to end")
-	}
-	vlog.writableLogOffset = uint32(lastOffset)
-
-	// Map the file if needed. When we create a file, it is automatically mapped.
-	if err = last.mmap(2 * vlog.opt.ValueLogFileSize); err != nil {
-		return errFile(err, last.path, "Map log file")
-	}
-	return nil
-}
-
-func (lf *logFile) init() error {
-	fstat, err := lf.Fd.Stat()
-	if err != nil {
-		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
-	}
-	sz := fstat.Size()
-	if sz == 0 {
-		// File is empty. We don't need to mmap it. Return.
+	lastOff, err := last.iterate(vlog.opt.ReadOnly, vlogHeaderSize, func(_ Entry, vp valuePointer) error {
 		return nil
+	})
+	if err != nil {
+		return y.Wrapf(err, "while iterating over: %s", last.path)
 	}
-	y.AssertTrue(sz <= math.MaxUint32)
-	lf.size = uint32(sz)
-	if err = lf.mmap(sz); err != nil {
-		_ = lf.Fd.Close()
-		return errors.Wrapf(err, "Unable to map file: %q", fstat.Name())
+	if err := last.Truncate(int64(lastOff)); err != nil {
+		return y.Wrapf(err, "while truncating last value log file: %s", last.path)
+	}
+
+	// Don't write to the old log file. Always create a new one.
+	if _, err := vlog.createVlogFile(); err != nil {
+		return y.Wrapf(err, "Error while creating log file in valueLog.open")
 	}
 	return nil
 }
+
+// func (lf *logFile) init() error {
+// 	fstat, err := lf.Fd.Stat()
+// 	if err != nil {
+// 		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
+// 	}
+// 	sz := fstat.Size()
+// 	if sz == 0 {
+// 		// File is empty. We don't need to mmap it. Return.
+// 		return nil
+// 	}
+// 	y.AssertTrue(sz <= math.MaxUint32)
+// 	lf.size = uint32(sz)
+// 	if err = lf.mmap(sz); err != nil {
+// 		_ = lf.Fd.Close()
+// 		return errors.Wrapf(err, "Unable to map file: %q", fstat.Name())
+// 	}
+// 	return nil
+// }
 
 func (vlog *valueLog) Close() error {
 	if vlog == nil || vlog.db == nil || vlog.db.opt.InMemory {
@@ -925,7 +883,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 	// Validate writes before writing to vlog. Because, we don't want to partially write and return
 	// an error.
 	if err := vlog.validateWrites(reqs); err != nil {
-		return err
+		return errors.Wrapf(err, "while validating writes")
 	}
 
 	vlog.filesLock.RLock()
@@ -947,8 +905,10 @@ func (vlog *valueLog) write(reqs []*request) error {
 		}
 		n := uint32(buf.Len())
 		endOffset := atomic.AddUint32(&vlog.writableLogOffset, n)
+		vlog.opt.Debugf("n: %d endOffset: %d\n", n, endOffset)
 		if int(endOffset) >= len(curlf.Data) {
-			return ErrTxnTooBig
+			return errors.Wrapf(ErrTxnTooBig, "endOffset: %d len: %d\n", endOffset, len(curlf.Data))
+			// return ErrTxnTooBig
 		}
 
 		start := int(endOffset - n)
@@ -965,9 +925,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 				return err
 			}
 
-			newid := vlog.maxFid + 1
-			y.AssertTruef(newid > 0, "newid has overflown uint32: %v", newid)
-			newlf, err := vlog.createVlogFile(newid)
+			newlf, err := vlog.createVlogFile()
 			if err != nil {
 				return err
 			}
