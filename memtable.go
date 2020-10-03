@@ -173,28 +173,10 @@ func (mt *memTable) DecrRef() {
 	}
 
 	mt.sl.ReclaimMem()
-	// TODO: delete wal file.
+	mt.wal.Delete()
 }
 
 func (mt *memTable) replayFunction(opt Options) func(Entry, valuePointer) error {
-	var txn []*Entry
-	var lastCommit uint64
-
-	toLSM := func(txnEntries []*Entry) {
-		for _, e := range txnEntries {
-			v := y.ValueStruct{
-				Value:     e.Value,
-				Meta:      e.meta,
-				UserMeta:  e.UserMeta,
-				ExpiresAt: e.ExpiresAt,
-			}
-			// This is already encoded correctly. Value would be either a vptr, or a full value
-			// depending upon how big the original value was.
-			// Skiplist makes a copy of the key and value.
-			mt.sl.Put(e.Key, v)
-		}
-	}
-
 	first := true
 	return func(e Entry, _ valuePointer) error { // Function for replaying.
 		if first {
@@ -204,43 +186,16 @@ func (mt *memTable) replayFunction(opt Options) func(Entry, valuePointer) error 
 		if ts := y.ParseTs(e.Key); ts > mt.nextTxnTs {
 			mt.nextTxnTs = ts
 		}
-
-		switch {
-		case e.meta&bitFinTxn > 0:
-			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
-			if err != nil {
-				return errors.Wrapf(err, "Unable to parse txn fin: %q", e.Value)
-			}
-			y.AssertTrue(lastCommit == txnTs)
-			y.AssertTrue(len(txn) > 0)
-
-			// Got the end of txn. Now we can store them.
-			toLSM(txn)
-
-			txn = txn[:0]
-			lastCommit = 0
-
-		case e.meta&bitTxn > 0:
-			txnTs := y.ParseTs(e.Key)
-			if lastCommit == 0 {
-				lastCommit = txnTs
-			}
-			if lastCommit != txnTs {
-				opt.Warningf("Found an incomplete txn at timestamp %d. Discarding it.\n",
-					lastCommit)
-				txn = txn[:0]
-				lastCommit = txnTs
-			}
-			txn = append(txn, &e)
-
-		default:
-			// This entry is from a rewrite or via SetEntryAt(..).
-			toLSM([]*Entry{&e})
-
-			// We shouldn't get this entry in the middle of a transaction.
-			y.AssertTrue(lastCommit == 0)
-			y.AssertTrue(len(txn) == 0)
+		v := y.ValueStruct{
+			Value:     e.Value,
+			Meta:      e.meta,
+			UserMeta:  e.UserMeta,
+			ExpiresAt: e.ExpiresAt,
 		}
+		// This is already encoded correctly. Value would be either a vptr, or a full value
+		// depending upon how big the original value was.
+		// Skiplist makes a copy of the key and value.
+		mt.sl.Put(e.Key, v)
 		return nil
 	}
 }
@@ -500,6 +455,9 @@ func (lf *logFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint32, e
 	var lastCommit uint64
 	var validEndOffset uint32 = offset
 
+	var entries []*Entry
+	var vptrs []valuePointer
+
 loop:
 	for {
 		e, err := read.Entry(reader)
@@ -533,6 +491,8 @@ loop:
 			if lastCommit != txnTs {
 				break loop
 			}
+			entries = append(entries, e)
+			vptrs = append(vptrs, vp)
 
 		case e.meta&bitFinTxn > 0:
 			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
@@ -543,6 +503,18 @@ loop:
 			lastCommit = 0
 			validEndOffset = read.recordOffset
 
+			for i, e := range entries {
+				vp := vptrs[i]
+				if err := fn(*e, vp); err != nil {
+					if err == errStop {
+						break
+					}
+					return 0, errFile(err, lf.path, "Iteration function")
+				}
+			}
+			entries = entries[:0]
+			vptrs = vptrs[:0]
+
 		default:
 			if lastCommit != 0 {
 				// This is most likely an entry which was moved as part of GC.
@@ -550,13 +522,13 @@ loop:
 				break loop
 			}
 			validEndOffset = read.recordOffset
-		}
 
-		if err := fn(*e, vp); err != nil {
-			if err == errStop {
-				break
+			if err := fn(*e, vp); err != nil {
+				if err == errStop {
+					break
+				}
+				return 0, errFile(err, lf.path, "Iteration function")
 			}
-			return 0, errFile(err, lf.path, "Iteration function")
 		}
 	}
 	return validEndOffset, nil
