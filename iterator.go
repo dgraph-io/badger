@@ -364,7 +364,7 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		return out
 	}
 
-	out := filtered[:0]
+	var out []*table.Table
 	for _, t := range filtered {
 		if opt.pickTable(t) {
 			out = append(out, t)
