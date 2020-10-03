@@ -354,7 +354,6 @@ func (t *Table) initBiggestAndSmallest() error {
 		return errors.Wrapf(err, "failed to read index.")
 	}
 
-	y.AssertTrue(t.index != nil)
 	t.smallest = ko.KeyBytes()
 
 	it2 := t.NewIterator(REVERSED | NOCACHE)
@@ -441,21 +440,24 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !t.shouldDecrypt() {
+		// If there's no encryption, this points to the mmap'ed buffer.
+		t.index = index
+	}
 
 	if t.opt.Compression == options.None {
 		t.estimatedSize = index.EstimatedSize()
 	} else {
+		// TODO(ibrahim): This estimatedSize doesn't make any sense. If it is tracking the size of
+		// values including in value log, then index.EstimatedSize() should be used irrespective of
+		// compression or not.
+		//
 		// Due to compression the real size on disk is much
 		// smaller than what we estimate from index.EstimatedSize.
 		t.estimatedSize = uint32(t.tableSize)
 	}
 	t.hasBloomFilter = len(index.BloomFilterBytes()) > 0
 
-	// No cache
-	if t.opt.IndexCache == nil {
-		// If there's no encryption, this points to the mmap'ed buffer.
-		t.index = index
-	}
 	var bo fb.BlockOffset
 	y.AssertTrue(index.Offsets(&bo, 0))
 	return &bo, nil
@@ -488,10 +490,13 @@ func (t *Table) KeySplits(n int, prefix []byte) []string {
 }
 
 func (t *Table) fetchIndex() *fb.TableIndex {
-	if t.opt.IndexCache == nil {
+	if !t.shouldDecrypt() {
 		return t.index
 	}
 
+	if t.opt.IndexCache == nil {
+		panic("Index Cache must be set for encrypted workloads")
+	}
 	if val, ok := t.opt.IndexCache.Get(t.indexKey()); ok && val != nil {
 		return val.(*fb.TableIndex)
 	}
