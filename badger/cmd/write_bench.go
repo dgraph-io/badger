@@ -312,6 +312,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	} else {
 		go func() {
 			for {
+				time.Sleep(30 * time.Second)
 				select {
 				case <-c.HasBeenClosed():
 					return
