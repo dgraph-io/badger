@@ -387,14 +387,14 @@ func (db *DB) MaxVersion() uint64 {
 
 func (db *DB) monitorCache(c *z.Closer) {
 	defer c.Done()
-	if db.blockCache == nil {
-		return
-	}
 	count := 0
 	analyze := func(name string, metrics *ristretto.Metrics) {
 		// If the mean life expectancy is less than 10 seconds, the cache
 		// might be too small.
 		le := metrics.LifeExpectancySeconds()
+		if le == nil {
+			return
+		}
 		lifeTooShort := le.Count > 0 && float64(le.Sum)/float64(le.Count) < 10
 		hitRatioTooLow := metrics.Ratio() > 0 && metrics.Ratio() < 0.4
 		if lifeTooShort && hitRatioTooLow {
