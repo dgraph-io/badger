@@ -1101,6 +1101,8 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	bopts.IndexCache = db.indexCache
 	tableData := buildL0Table(ft, bopts)
 
+	// We've already checked if the table is empty. The tableData should never be zero.
+	y.AssertTrue(len(tableData) > 0)
 	fileID := db.lc.reserveFileID()
 	if db.opt.KeepL0InMemory {
 		tbl, err := table.OpenInMemoryTable(tableData, fileID, &bopts)
