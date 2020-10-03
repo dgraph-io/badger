@@ -21,6 +21,7 @@ import (
 	"io"
 	"sort"
 
+	"github.com/dgraph-io/badger/v2/fb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 )
@@ -198,7 +199,7 @@ func (itr *Iterator) useCache() bool {
 }
 
 func (itr *Iterator) seekToFirst() {
-	numBlocks := itr.t.noOfBlocks
+	numBlocks := itr.t.offsetsLength()
 	if numBlocks == 0 {
 		itr.err = io.EOF
 		return
@@ -215,7 +216,7 @@ func (itr *Iterator) seekToFirst() {
 }
 
 func (itr *Iterator) seekToLast() {
-	numBlocks := itr.t.noOfBlocks
+	numBlocks := itr.t.offsetsLength()
 	if numBlocks == 0 {
 		itr.err = io.EOF
 		return
@@ -252,9 +253,11 @@ func (itr *Iterator) seekFrom(key []byte, whence int) {
 	case current:
 	}
 
-	idx := sort.Search(itr.t.noOfBlocks, func(idx int) bool {
-		ko := itr.t.blockOffsets()[idx]
-		return y.CompareKeys(ko.Key, key) > 0
+	var ko fb.BlockOffset
+	idx := sort.Search(itr.t.offsetsLength(), func(idx int) bool {
+		// Offsets should never return false since we're iterating within the OffsetsLength.
+		y.AssertTrue(itr.t.offsets(&ko, idx))
+		return y.CompareKeys(ko.KeyBytes(), key) > 0
 	})
 	if idx == 0 {
 		// The smallest key in our table is already strictly > key. We can return that.
@@ -272,7 +275,7 @@ func (itr *Iterator) seekFrom(key []byte, whence int) {
 	itr.seekHelper(idx-1, key)
 	if itr.err == io.EOF {
 		// Case 1. Need to visit block[idx].
-		if idx == itr.t.noOfBlocks {
+		if idx == itr.t.offsetsLength() {
 			// If idx == len(itr.t.blockIndex), then input key is greater than ANY element of table.
 			// There's nothing we can do. Valid() should return false as we seek to end of table.
 			return
@@ -300,7 +303,7 @@ func (itr *Iterator) seekForPrev(key []byte) {
 func (itr *Iterator) next() {
 	itr.err = nil
 
-	if itr.bpos >= itr.t.noOfBlocks {
+	if itr.bpos >= itr.t.offsetsLength() {
 		itr.err = io.EOF
 		return
 	}

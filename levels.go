@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"os"
@@ -841,23 +842,16 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	return true
 }
 
-// sortByOverlap sorts tables in increasing order of overlap with next level.
-func (s *levelsController) sortByOverlap(tables []*table.Table, cd *compactDef) {
+// sortByHeuristic sorts tables in increasing order of MaxVersion, so we
+// compact older tables first.
+func (s *levelsController) sortByHeuristic(tables []*table.Table, cd *compactDef) {
 	if len(tables) == 0 || cd.nextLevel == nil {
 		return
 	}
 
-	tableOverlap := make([]int, len(tables))
-	for i := range tables {
-		// get key range for table
-		tableRange := getKeyRange(tables[i])
-		// get overlap with next level
-		left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, tableRange)
-		tableOverlap[i] = right - left
-	}
-
+	// Sort tables by max version. This is what RocksDB does.
 	sort.Slice(tables, func(i, j int) bool {
-		return tableOverlap[i] < tableOverlap[j]
+		return tables[i].MaxVersion() < tables[j].MaxVersion()
 	})
 }
 
@@ -870,15 +864,14 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	if len(tables) == 0 {
 		return false
 	}
-
-	// We want to pick files from current level in order of increasing overlap with next level
-	// tables. Idea here is to first compact file from current level which has least overlap with
-	// next level. This provides us better write amplification.
-	s.sortByOverlap(tables, cd)
+	// We pick tables, so we compact older tables first. This is similar to
+	// kOldestLargestSeqFirst in RocksDB.
+	s.sortByHeuristic(tables, cd)
 
 	for _, t := range tables {
 		cd.thisSize = t.Size()
 		cd.thisRange = getKeyRange(t)
+		// If we're already compacting this range, don't do anything.
 		if s.cstatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
 			continue
 		}
@@ -962,6 +955,13 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	s.kv.opt.Infof("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
 		thisLevel.level, nextLevel.level, len(cd.top)+len(cd.bot),
 		len(newTables), time.Since(timeStart))
+
+	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.opt.LevelSizeMultiplier {
+		s.kv.opt.Infof("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+			len(cd.top), hex.Dump(cd.thisRange.left), hex.Dump(cd.thisRange.right))
+		s.kv.opt.Infof("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+			len(cd.bot), hex.Dump(cd.nextRange.left), hex.Dump(cd.nextRange.right))
+	}
 	return nil
 }
 
@@ -999,14 +999,12 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 
 	s.kv.opt.Infof("[Compactor: %d] Running compaction: %+v for level: %d\n",
 		id, p, cd.thisLevel.level)
-	s.cstatus.toLog(cd.elog)
 	if err := s.runCompactDef(l, cd); err != nil {
 		// This compaction couldn't be done successfully.
 		s.kv.opt.Warningf("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)
 		return err
 	}
 
-	s.cstatus.toLog(cd.elog)
 	s.kv.opt.Infof("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
 	return nil
 }
@@ -1128,38 +1126,31 @@ func (s *levelsController) appendIterators(
 
 // TableInfo represents the information about a table.
 type TableInfo struct {
-	ID              uint64
-	Level           int
-	Left            []byte
-	Right           []byte
-	KeyCount        uint64 // Number of keys in the table
-	EstimatedSz     uint64
-	IndexSz         int
-	BloomFilterSize int
+	ID               uint64
+	Level            int
+	Left             []byte
+	Right            []byte
+	KeyCount         uint32 // Number of keys in the table
+	EstimatedSz      uint32
+	UncompressedSize uint32
+	IndexSz          int
+	BloomFilterSize  int
 }
 
-func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo) {
+func (s *levelsController) getTableInfo() (result []TableInfo) {
 	for _, l := range s.levels {
 		l.RLock()
 		for _, t := range l.tables {
-			var count uint64
-			if withKeysCount {
-				it := t.NewIterator(table.NOCACHE)
-				for it.Rewind(); it.Valid(); it.Next() {
-					count++
-				}
-				it.Close()
-			}
-
 			info := TableInfo{
-				ID:              t.ID(),
-				Level:           l.level,
-				Left:            t.Smallest(),
-				Right:           t.Biggest(),
-				KeyCount:        count,
-				EstimatedSz:     t.EstimatedSize(),
-				IndexSz:         t.IndexSize(),
-				BloomFilterSize: t.BloomFilterSize(),
+				ID:               t.ID(),
+				Level:            l.level,
+				Left:             t.Smallest(),
+				Right:            t.Biggest(),
+				KeyCount:         t.KeyCount(),
+				EstimatedSz:      t.EstimatedSize(),
+				IndexSz:          t.IndexSize(),
+				BloomFilterSize:  t.BloomFilterSize(),
+				UncompressedSize: t.UncompressedSize(),
 			}
 			result = append(result, info)
 		}

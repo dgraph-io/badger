@@ -24,9 +24,10 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/dgryski/go-farm"
+	"github.com/dgraph-io/badger/v2/fb"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
+	fbs "github.com/google/flatbuffers/go"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -66,6 +67,7 @@ func (h *header) Decode(buf []byte) {
 	copy(((*[headerSize]byte)(unsafe.Pointer(h))[:]), buf[:headerSize])
 }
 
+// bblock represents a block that is being compressed/encrypted in the background.
 type bblock struct {
 	data  []byte
 	start uint32 // Points to the starting offset of the block.
@@ -80,12 +82,15 @@ type Builder struct {
 	bufLock    sync.Mutex // This lock guards the buf. We acquire lock when we resize the buf.
 	actualSize uint32     // Used to store the sum of sizes of blocks after compression/encryption.
 
-	baseKey      []byte   // Base key for the current block.
-	baseOffset   uint32   // Offset for the current block.
-	entryOffsets []uint32 // Offsets of entries present in current block.
-	tableIndex   *pb.TableIndex
-	keyHashes    []uint64 // Used for building the bloomfilter.
-	opt          *Options
+	baseKey    []byte // Base key for the current block.
+	baseOffset uint32 // Offset for the current block.
+
+	entryOffsets  []uint32 // Offsets of entries present in current block.
+	offsets       *z.Buffer
+	estimatedSize uint32
+	keyHashes     []uint32 // Used for building the bloomfilter.
+	opt           *Options
+	maxVersion    uint64
 
 	// Used to concurrently compress/encrypt blocks.
 	wg        sync.WaitGroup
@@ -98,10 +103,9 @@ func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
 		// Additional 16 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
-		buf:        z.Calloc(int(opts.TableSize + 16*MB)),
-		tableIndex: &pb.TableIndex{},
-		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
-		opt:        &opts,
+		buf:     z.Calloc(int(opts.TableSize + 16*MB)),
+		opt:     &opts,
+		offsets: z.NewBuffer(1 << 20),
 	}
 
 	// If encryption or compression is not enabled, do not start compression/encryption goroutines
@@ -168,6 +172,7 @@ func (b *Builder) handleBlock() {
 
 // Close closes the TableBuilder.
 func (b *Builder) Close() {
+	b.offsets.Release()
 	z.Free(b.buf)
 }
 
@@ -185,8 +190,12 @@ func (b *Builder) keyDiff(newKey []byte) []byte {
 	return newKey[i:]
 }
 
-func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
-	b.keyHashes = append(b.keyHashes, farm.Fingerprint64(y.ParseKey(key)))
+func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
+	b.keyHashes = append(b.keyHashes, y.Hash(y.ParseKey(key)))
+
+	if version := y.ParseTs(key); version > b.maxVersion {
+		b.maxVersion = version
+	}
 
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
@@ -221,9 +230,9 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint64) {
 	b.sz += v.Encode(b.buf[b.sz:])
 
 	// Size of KV on SST.
-	sstSz := uint64(uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize())
+	sstSz := uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize()
 	// Total estimated size = size on SST + size on vlog (length of value pointer).
-	b.tableIndex.EstimatedSize += (sstSz + vpLen)
+	b.estimatedSize += (sstSz + vpLen)
 }
 
 // grow increases the size of b.buf by atleast 50%.
@@ -297,12 +306,19 @@ func (b *Builder) finishBlock() {
 func (b *Builder) addBlockToIndex() {
 	blockBuf := b.buf[b.baseOffset:b.sz]
 	// Add key to the block index.
-	bo := &pb.BlockOffset{
-		Key:    y.Copy(b.baseKey),
-		Offset: b.baseOffset,
-		Len:    uint32(len(blockBuf)),
-	}
-	b.tableIndex.Offsets = append(b.tableIndex.Offsets, bo)
+	builder := fbs.NewBuilder(64)
+	off := builder.CreateByteVector(b.baseKey)
+
+	fb.BlockOffsetStart(builder)
+	fb.BlockOffsetAddKey(builder, off)
+	fb.BlockOffsetAddOffset(builder, b.baseOffset)
+	fb.BlockOffsetAddLen(builder, uint32(len(blockBuf)))
+	uoff := fb.BlockOffsetEnd(builder)
+	builder.Finish(uoff)
+
+	out := builder.FinishedBytes()
+	dst := b.offsets.SliceAllocate(len(out))
+	copy(dst, out)
 }
 
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
@@ -342,7 +358,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 		b.baseOffset = uint32((b.sz))
 		b.entryOffsets = b.entryOffsets[:0]
 	}
-	b.addHelper(key, value, uint64(valueLen))
+	b.addHelper(key, value, valueLen)
 }
 
 // TODO: vvv this was the comment on ReachedCapacity.
@@ -358,9 +374,10 @@ func (b *Builder) ReachedCapacity(capacity uint64) bool {
 		4 + // count of all entry offsets
 		8 + // checksum bytes
 		4 // checksum length
+
 	estimateSz := blocksSize +
 		4 + // Index length
-		5*(uint32(len(b.tableIndex.Offsets))) // approximate index size
+		uint32(b.offsets.Len())
 
 	return uint64(estimateSz) > capacity
 }
@@ -378,15 +395,6 @@ The table structure looks like
 */
 // In case the data is encrypted, the "IV" is added to the end of the index.
 func (b *Builder) Finish(allocate bool) []byte {
-	if b.opt.BloomFalsePositive > 0 {
-		bf := z.NewBloomFilter(float64(len(b.keyHashes)), b.opt.BloomFalsePositive)
-		for _, h := range b.keyHashes {
-			bf.Add(h)
-		}
-		// Add bloom filter to the index.
-		b.tableIndex.BloomFilter = bf.JSONMarshal()
-	}
-
 	b.finishBlock() // This will never start a new block.
 
 	if b.blockChan != nil {
@@ -395,32 +403,44 @@ func (b *Builder) Finish(allocate bool) []byte {
 	// Wait for block handler to finish.
 	b.wg.Wait()
 
+	// We have added padding after each block so we should minus the
+	// padding from the actual table size. len(blocklist) would be zero if
+	// there is no compression/encryption.
+	uncompressedSize := b.sz - uint32(padding*len(b.blockList))
 	dst := b.buf
 	// Fix block boundaries. This includes moving the blocks so that we
 	// don't have any interleaving space between them.
+	bo, next := []byte{}, 1
 	if len(b.blockList) > 0 {
 		dstLen := uint32(0)
-		for i, bl := range b.blockList {
-			off := b.tableIndex.Offsets[i]
+		for _, bl := range b.blockList {
+			bo, next = b.offsets.Slice(next)
 			// Length of the block is end minus the start.
-			off.Len = bl.end - bl.start
+			fbo := fb.GetRootAsBlockOffset(bo, 0)
+			fbo.MutateLen(bl.end - bl.start)
 			// New offset of the block is the point in the main buffer till
 			// which we have written data.
-			off.Offset = dstLen
+			fbo.MutateOffset(dstLen)
 
 			copy(dst[dstLen:], b.buf[bl.start:bl.end])
 
 			// New length is the start of the block plus its length.
-			dstLen = off.Offset + off.Len
+			dstLen = fbo.Offset() + fbo.Len()
 		}
+		y.AssertTrue(next == 0)
 		// Start writing to the buffer from the point until which we have valid data.
 		// Fix the length because append and writeChecksum also rely on it.
 		b.sz = dstLen
 	}
 
-	index, err := proto.Marshal(b.tableIndex)
-	y.Check(err)
+	var f y.Filter
+	if b.opt.BloomFalsePositive > 0 {
+		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opt.BloomFalsePositive)
+		f = y.NewFilter(b.keyHashes, bits)
+	}
+	index := b.buildIndex(f, uncompressedSize)
 
+	var err error
 	if b.shouldEncrypt() {
 		index, err = b.encrypt(index, false)
 		y.Check(err)
@@ -517,4 +537,65 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 		return y.ZSTDCompress(dst, data, b.opt.ZSTDCompressionLevel)
 	}
 	return nil, errors.New("Unsupported compression type")
+}
+
+func (b *Builder) buildIndex(bloom []byte, tableSz uint32) []byte {
+	builder := fbs.NewBuilder(3 << 20)
+
+	boList := b.writeBlockOffsets(builder)
+	// Write block offset vector the the idxBuilder.
+	fb.TableIndexStartOffsetsVector(builder, len(boList))
+
+	// Write individual block offsets.
+	for i := 0; i < len(boList); i++ {
+		builder.PrependUOffsetT(boList[i])
+	}
+	boEnd := builder.EndVector(len(boList))
+
+	var bfoff fbs.UOffsetT
+	// Write the bloom filter.
+	if len(bloom) > 0 {
+		bfoff = builder.CreateByteVector(bloom)
+	}
+
+	fb.TableIndexStart(builder)
+	fb.TableIndexAddOffsets(builder, boEnd)
+	fb.TableIndexAddBloomFilter(builder, bfoff)
+	fb.TableIndexAddEstimatedSize(builder, b.estimatedSize)
+	fb.TableIndexAddMaxVersion(builder, b.maxVersion)
+	fb.TableIndexAddUncompressedSize(builder, tableSz)
+	fb.TableIndexAddKeyCount(builder, uint32(len(b.keyHashes)))
+	builder.Finish(fb.TableIndexEnd(builder))
+
+	return builder.FinishedBytes()
+}
+
+// writeBlockOffsets writes all the blockOffets in b.offsets and returns the
+// offsets for the newly written items.
+func (b *Builder) writeBlockOffsets(builder *fbs.Builder) []fbs.UOffsetT {
+	so := b.offsets.SliceOffsets()
+	var uoffs []fbs.UOffsetT
+	for i := len(so) - 1; i >= 0; i-- {
+		// We add these in reverse order.
+		data, _ := b.offsets.Slice(so[i])
+		uoff := b.writeBlockOffset(builder, data)
+		uoffs = append(uoffs, uoff)
+	}
+	return uoffs
+}
+
+// writeBlockOffset writes the given key,offset,len triple to the indexBuilder.
+// It returns the offset of the newly written blockoffset.
+func (b *Builder) writeBlockOffset(builder *fbs.Builder, data []byte) fbs.UOffsetT {
+	// Write the key to the buffer.
+	bo := fb.GetRootAsBlockOffset(data, 0)
+
+	k := builder.CreateByteVector(bo.KeyBytes())
+
+	// Build the blockOffset.
+	fb.BlockOffsetStart(builder)
+	fb.BlockOffsetAddKey(builder, k)
+	fb.BlockOffsetAddOffset(builder, bo.Offset())
+	fb.BlockOffsetAddLen(builder, bo.Len())
+	return fb.BlockOffsetEnd(builder)
 }

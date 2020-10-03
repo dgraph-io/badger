@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -239,27 +240,46 @@ func dur(src, dst time.Time) string {
 	return humanize.RelTime(dst, src, "earlier", "later")
 }
 
+func getInfo(fileInfos []os.FileInfo, tid uint64) int64 {
+	fileName := table.IDToFilename(tid)
+	for _, fi := range fileInfos {
+		if path.Base(fi.Name()) == fileName {
+			return fi.Size()
+		}
+	}
+	return 0
+}
+
 func tableInfo(dir, valueDir string, db *badger.DB) {
 	// we want all tables with keys count here.
-	tables := db.Tables(true)
+	tables := db.Tables()
+	fileInfos, err := ioutil.ReadDir(dir)
+	y.Check(err)
+
 	fmt.Println()
 	fmt.Println("SSTable [Li, Id, Total Keys including internal keys] " +
-		"[Left Key, Version -> Right Key, Version] [Index Size] [BF Size]")
+		"[Compression Ratio, Uncompressed Size, Index Size, BF Size] " +
+		"[Left Key, Version -> Right Key, Version]")
 	totalIndex := uint64(0)
 	totalBloomFilter := uint64(0)
+	totalCompressionRatio := float64(0.0)
 	for _, t := range tables {
 		lk, lt := y.ParseKey(t.Left), y.ParseTs(t.Left)
 		rk, rt := y.ParseKey(t.Right), y.ParseTs(t.Right)
 
+		compressionRatio := float64(t.UncompressedSize) /
+			float64(getInfo(fileInfos, t.ID)-int64(t.IndexSz))
+		fmt.Printf("SSTable [L%d, %03d, %07d] [%.2f, %s, %s, %s] [%20X, v%d -> %20X, v%d]\n",
+			t.Level, t.ID, t.KeyCount, compressionRatio, hbytes(int64(t.UncompressedSize)),
+			hbytes(int64(t.IndexSz)), hbytes(int64(t.BloomFilterSize)), lk, lt, rk, rt)
 		totalIndex += uint64(t.IndexSz)
 		totalBloomFilter += uint64(t.BloomFilterSize)
-		fmt.Printf("SSTable [L%d, %03d, %07d] [%20X, v%d -> %20X, v%d] [%s] [%s] \n",
-			t.Level, t.ID, t.KeyCount, lk, lt, rk, rt, hbytes(int64(t.IndexSz)),
-			hbytes(int64(t.BloomFilterSize)))
+		totalCompressionRatio += compressionRatio
 	}
 	fmt.Println()
 	fmt.Printf("Total Index Size: %s\n", hbytes(int64(totalIndex)))
 	fmt.Printf("Total BloomFilter Size: %s\n", hbytes(int64(totalIndex)))
+	fmt.Printf("Mean Compression Ratio: %.2f\n", totalCompressionRatio/float64(len(tables)))
 	fmt.Println()
 }
 

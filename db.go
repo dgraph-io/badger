@@ -54,12 +54,13 @@ const (
 )
 
 type closers struct {
-	updateSize *z.Closer
-	compactors *z.Closer
-	memtable   *z.Closer
-	writes     *z.Closer
-	valueGC    *z.Closer
-	pub        *z.Closer
+	updateSize  *z.Closer
+	compactors  *z.Closer
+	memtable    *z.Closer
+	writes      *z.Closer
+	valueGC     *z.Closer
+	pub         *z.Closer
+	cacheHealth *z.Closer
 }
 
 // DB provides the various functions required to interact with Badger.
@@ -249,8 +250,7 @@ func checkAndSetOptions(opt *Options) error {
 
 	needCache := (opt.Compression != options.None) || (len(opt.EncryptionKey) > 0)
 	if needCache && opt.BlockCacheSize == 0 {
-		opt.Warningf("BlockCacheSize should be set " +
-			"since compression/encryption are enabled")
+		panic("BlockCacheSize should be set since compression/encryption are enabled")
 	}
 	return nil
 }
@@ -362,6 +362,10 @@ func Open(opt Options) (db *DB, err error) {
 			return nil, errors.Wrap(err, "failed to create bf cache")
 		}
 	}
+
+	db.closers.cacheHealth = z.NewCloser(1)
+	go db.monitorCache(db.closers.cacheHealth)
+
 	if db.opt.InMemory {
 		db.opt.SyncWrites = false
 		// If badger is running in memory mode, push everything into the LSM Tree.
@@ -435,6 +439,42 @@ func Open(opt Options) (db *DB, err error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
+}
+
+func (db *DB) monitorCache(c *z.Closer) {
+	defer c.Done()
+	if db.blockCache == nil {
+		return
+	}
+	count := 0
+	analyze := func(name string, metrics *ristretto.Metrics) {
+		// If the mean life expectancy is less than 10 seconds, the cache
+		// might be too small.
+		le := metrics.LifeExpectancySeconds()
+		lifeTooShort := le.Count > 0 && float64(le.Sum)/float64(le.Count) < 10
+		hitRatioTooLow := metrics.Ratio() > 0 && metrics.Ratio() < 0.4
+		if lifeTooShort && hitRatioTooLow {
+			db.opt.Warningf("%s might be too small. Metrics: %s\n", name, metrics)
+			db.opt.Warningf("Cache life expectancy (in seconds): %+v\n", le)
+
+		} else if le.Count > 1000 && count%5 == 0 {
+			db.opt.Infof("%s metrics: %s\n", name, metrics)
+		}
+	}
+
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			return
+		case <-ticker.C:
+		}
+
+		count++
+		analyze("Block cache", db.BlockCacheMetrics())
+		analyze("Index cache", db.IndexCacheMetrics())
+	}
 }
 
 // getHead prints all the head pointer in the DB and return the max value.
@@ -562,6 +602,7 @@ func (db *DB) close() (err error) {
 	close(db.writeCh)
 
 	db.closers.pub.SignalAndWait()
+	db.closers.cacheHealth.Signal()
 
 	// Now close the value log.
 	if vlogErr := db.vlog.Close(); vlogErr != nil {
@@ -1450,15 +1491,15 @@ func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
 
 // Tables gets the TableInfo objects from the level controller. If withKeysCount
 // is true, TableInfo objects also contain counts of keys for the tables.
-func (db *DB) Tables(withKeysCount bool) []TableInfo {
-	return db.lc.getTableInfo(withKeysCount)
+func (db *DB) Tables() []TableInfo {
+	return db.lc.getTableInfo()
 }
 
 // KeySplits can be used to get rough key ranges to divide up iteration over
 // the DB.
 func (db *DB) KeySplits(prefix []byte) []string {
 	var splits []string
-	tables := db.Tables(false)
+	tables := db.Tables()
 
 	// We just want table ranges here and not keys count.
 	for _, ti := range tables {

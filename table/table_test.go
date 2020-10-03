@@ -31,7 +31,6 @@ import (
 
 	"github.com/cespare/xxhash"
 	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto"
 	"github.com/stretchr/testify/require"
@@ -80,7 +79,8 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
 	})
 	for _, kv := range keyValues {
 		y.AssertTrue(len(kv) == 2)
-		b.Add(y.KeyWithTs([]byte(kv[0]), 0), y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0}, 0)
+		b.Add(y.KeyWithTs([]byte(kv[0]), 0),
+			y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0}, 0)
 	}
 	_, err = f.Write(b.Finish(false))
 	require.NoError(t, err, "writing to file failed")
@@ -699,7 +699,7 @@ func TestTableBigValues(t *testing.T) {
 		TableSize: uint64(n) * 1 << 20}
 	builder := NewTableBuilder(opts)
 	for i := 0; i < n; i++ {
-		key := y.KeyWithTs([]byte(key("", i)), 0)
+		key := y.KeyWithTs([]byte(key("", i)), uint64(i+1))
 		vs := y.ValueStruct{Value: value(i)}
 		builder.Add(key, vs, 0)
 	}
@@ -721,6 +721,7 @@ func TestTableBigValues(t *testing.T) {
 	}
 	require.False(t, itr.Valid(), "table iterator should be invalid now")
 	require.Equal(t, n, count)
+	require.Equal(t, n, int(tbl.MaxVersion()))
 }
 
 // This test is for verifying checksum failure during table open.
@@ -739,10 +740,13 @@ func TestTableChecksum(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, n, len(rb))
 
-	_, err = OpenTable(f, opts)
-	if err == nil || !strings.Contains(err.Error(), "checksum") {
-		t.Fatal("Test should have been failed with checksum mismatch error")
-	}
+	require.Panics(t, func() {
+		// Either OpenTable will panic on corrupted data or the checksum verification will fail.
+		_, err = OpenTable(f, opts)
+		if strings.Contains(err.Error(), "checksum") {
+			panic("checksum mismatch")
+		}
+	})
 }
 
 var cacheConfig = ristretto.Config{
@@ -932,7 +936,7 @@ func TestOpenKVSize(t *testing.T) {
 		require.NoError(t, err)
 
 		// The estimated size is same as table size in case compression is enabled.
-		require.Equal(t, uint64(table.tableSize), table.EstimatedSize())
+		require.Equal(t, uint32(table.tableSize), table.EstimatedSize())
 	})
 
 	t.Run("no compressin", func(t *testing.T) {
@@ -945,7 +949,7 @@ func TestOpenKVSize(t *testing.T) {
 
 		stat, err := table.fd.Stat()
 		require.NoError(t, err)
-		require.Less(t, table.EstimatedSize(), uint64(stat.Size()))
+		require.Less(t, table.EstimatedSize(), uint32(stat.Size()))
 	})
 }
 
@@ -961,28 +965,30 @@ func TestDoesNotHaveRace(t *testing.T) {
 	wg.Add(5)
 	for i := 0; i < 5; i++ {
 		go func() {
-			require.True(t, table.DoesNotHave(uint64(1237882)))
+			require.True(t, table.DoesNotHave(uint32(1237882)))
 			wg.Done()
 		}()
 	}
 	wg.Wait()
 }
 
-var ko *pb.BlockOffset
+func TestMaxVersion(t *testing.T) {
+	opt := getTestTableOptions()
+	b := NewTableBuilder(opt)
+	defer b.Close()
 
-// Use this benchmark to manually verify block offset size calculation
-func BenchmarkBlockOffsetSizeCalculation(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		ko = &pb.BlockOffset{
-			Key: []byte{1, 23},
-		}
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Uint32())
+	f, err := y.CreateSyncedFile(filename, true)
+	require.NoError(t, err)
+
+	N := 1000
+	for i := 0; i < N; i++ {
+		b.Add(y.KeyWithTs([]byte(fmt.Sprintf("foo:%d", i)), uint64(i+1)), y.ValueStruct{}, 0)
 	}
-}
-
-func TestBlockOffsetSizeCalculation(t *testing.T) {
-	// Empty struct testing.
-	require.Equal(t, calculateOffsetsSize([]*pb.BlockOffset{&pb.BlockOffset{}}), int64(88))
-	// Testing with key bytes
-	require.Equal(t, calculateOffsetsSize([]*pb.BlockOffset{&pb.BlockOffset{Key: []byte{1, 1}}}),
-		int64(90))
+	_, err = f.Write(b.Finish(false))
+	require.NoError(t, err, "writing to file failed")
+	f.Close()
+	f, _ = y.OpenSyncedFile(filename, false)
+	table, err := OpenTable(f, opt)
+	require.Equal(t, N, int(table.MaxVersion()))
 }
