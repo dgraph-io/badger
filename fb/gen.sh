@@ -1,10 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 
-# You will need the flatbuffer compiler (flatc) https://google.github.io/flatbuffers/flatbuffers_guide_building.html
-
-# TODO: If flatc is not present, this should download the release, compile it and install it.
+## Install flatc if not present
+## ref. https://google.github.io/flatbuffers/flatbuffers_guide_building.html
+command -v flatc > /dev/null || { ./install_flatbuffers.sh ; }
 
 flatc --go flatbuffer.fbs
 # Move files to the correct directory.
