@@ -262,3 +262,12 @@ func TestBloomfilter(t *testing.T) {
 		createAndTest(t, false)
 	})
 }
+func TestEmptyBuilder(t *testing.T) {
+	opts := Options{
+		BloomFalsePositive: 0.0,
+		LoadBloomsOnOpen:   false,
+	}
+	b := NewTableBuilder(opts)
+	require.Nil(t, b.Finish(false))
+
+}

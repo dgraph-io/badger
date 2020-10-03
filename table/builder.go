@@ -279,6 +279,9 @@ Structure of Block.
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
 func (b *Builder) finishBlock() {
+	if len(b.entryOffsets) == 0 {
+		return
+	}
 	b.append(y.U32SliceToBytes(b.entryOffsets))
 	b.append(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
@@ -396,9 +399,11 @@ The table structure looks like
 // In case the data is encrypted, the "IV" is added to the end of the index.
 func (b *Builder) Finish(allocate bool) []byte {
 	b.finishBlock() // This will never start a new block.
-
 	if b.blockChan != nil {
 		close(b.blockChan)
+	}
+	if b.sz == 0 {
+		return nil
 	}
 	// Wait for block handler to finish.
 	b.wg.Wait()
