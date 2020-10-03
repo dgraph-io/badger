@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v2/table"
-	"github.com/dgryski/go-farm"
 
 	"github.com/dgraph-io/badger/v2/y"
 )
@@ -327,7 +326,8 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	}
 	// Bloom filter lookup would only work if opt.Prefix does NOT have the read
 	// timestamp as part of the key.
-	if opt.prefixIsKey && t.DoesNotHave(farm.Fingerprint64(opt.Prefix)) {
+	if opt.prefixIsKey && t.DoesNotHave(y.Hash(opt.Prefix)) {
+		y.NumLSMBloomHits.Add("pickTable", 1)
 		return false
 	}
 	return true
@@ -360,19 +360,10 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 	}
 
 	var out []*table.Table
-	hash := farm.Fingerprint64(opt.Prefix)
 	for _, t := range filtered {
-		// When we encounter the first table whose smallest key is higher than
-		// opt.Prefix, we can stop.
-		if opt.compareToPrefix(t.Smallest()) > 0 {
-			return out
+		if opt.pickTable(t) {
+			out = append(out, t)
 		}
-		// opt.Prefix is actually the key. So, we can run bloom filter checks
-		// as well.
-		if t.DoesNotHave(hash) {
-			continue
-		}
-		out = append(out, t)
 	}
 	return out
 }

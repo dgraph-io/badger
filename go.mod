@@ -7,11 +7,11 @@ replace github.com/dgraph-io/ristretto => /home/mrjn/go/src/github.com/dgraph-io
 require (
 	github.com/DataDog/zstd v1.4.1
 	github.com/cespare/xxhash v1.1.0
-	github.com/dgraph-io/ristretto v0.0.4-0.20201002035039-b807f09fa376
-	github.com/dgryski/go-farm v0.0.0-20190423205320-6a90982ecee2
+	github.com/dgraph-io/ristretto v0.0.4-0.20201003140040-36af8a316fc8
 	github.com/dustin/go-humanize v1.0.0
 	github.com/golang/protobuf v1.3.1
 	github.com/golang/snappy v0.0.1
+	github.com/google/flatbuffers v1.12.0
 	github.com/kr/pretty v0.1.0 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/spaolacci/murmur3 v1.1.0 // indirect

@@ -46,13 +46,18 @@ var (
 	txnKey       = []byte("!badger!txn") // For indicating end of entries in txn.
 )
 
+const (
+	maxNumSplits = 128
+)
+
 type closers struct {
-	updateSize *z.Closer
-	compactors *z.Closer
-	memtable   *z.Closer
-	writes     *z.Closer
-	valueGC    *z.Closer
-	pub        *z.Closer
+	updateSize  *z.Closer
+	compactors  *z.Closer
+	memtable    *z.Closer
+	writes      *z.Closer
+	valueGC     *z.Closer
+	pub         *z.Closer
+	cacheHealth *z.Closer
 }
 
 // TODO: Tables need to store the maxVersion, so we can use them to figure it out instead of relying
@@ -154,8 +159,7 @@ func checkAndSetOptions(opt *Options) error {
 
 	needCache := (opt.Compression != options.None) || (len(opt.EncryptionKey) > 0)
 	if needCache && opt.BlockCacheSize == 0 {
-		opt.Warningf("BlockCacheSize should be set " +
-			"since compression/encryption are enabled")
+		panic("BlockCacheSize should be set since compression/encryption are enabled")
 	}
 	return nil
 }
@@ -269,6 +273,10 @@ func Open(opt Options) (*DB, error) {
 			return nil, errors.Wrap(err, "failed to create bf cache")
 		}
 	}
+
+	db.closers.cacheHealth = z.NewCloser(1)
+	go db.monitorCache(db.closers.cacheHealth)
+
 	if db.opt.InMemory {
 		db.opt.SyncWrites = false
 		// If badger is running in memory mode, push everything into the LSM Tree.
@@ -369,6 +377,42 @@ func (db *DB) maxVersion() uint64 {
 	// Get Table infos and find their max version too.
 	// TODO:
 	return maxVersion
+}
+
+func (db *DB) monitorCache(c *z.Closer) {
+	defer c.Done()
+	if db.blockCache == nil {
+		return
+	}
+	count := 0
+	analyze := func(name string, metrics *ristretto.Metrics) {
+		// If the mean life expectancy is less than 10 seconds, the cache
+		// might be too small.
+		le := metrics.LifeExpectancySeconds()
+		lifeTooShort := le.Count > 0 && float64(le.Sum)/float64(le.Count) < 10
+		hitRatioTooLow := metrics.Ratio() > 0 && metrics.Ratio() < 0.4
+		if lifeTooShort && hitRatioTooLow {
+			db.opt.Warningf("%s might be too small. Metrics: %s\n", name, metrics)
+			db.opt.Warningf("Cache life expectancy (in seconds): %+v\n", le)
+
+		} else if le.Count > 1000 && count%5 == 0 {
+			db.opt.Infof("%s metrics: %s\n", name, metrics)
+		}
+	}
+
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			return
+		case <-ticker.C:
+		}
+
+		count++
+		analyze("Block cache", db.BlockCacheMetrics())
+		analyze("Index cache", db.IndexCacheMetrics())
+	}
 }
 
 const walFileName = "badger.wal"
@@ -522,6 +566,7 @@ func (db *DB) close() (err error) {
 	close(db.writeCh)
 
 	db.closers.pub.SignalAndWait()
+	db.closers.cacheHealth.Signal()
 
 	// Now close the value log.
 	if vlogErr := db.vlog.Close(); vlogErr != nil {
@@ -1366,23 +1411,89 @@ func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
 
 // Tables gets the TableInfo objects from the level controller. If withKeysCount
 // is true, TableInfo objects also contain counts of keys for the tables.
-func (db *DB) Tables(withKeysCount bool) []TableInfo {
-	return db.lc.getTableInfo(withKeysCount)
+func (db *DB) Tables() []TableInfo {
+	return db.lc.getTableInfo()
 }
 
 // KeySplits can be used to get rough key ranges to divide up iteration over
 // the DB.
 func (db *DB) KeySplits(prefix []byte) []string {
 	var splits []string
+	tables := db.Tables()
+
 	// We just want table ranges here and not keys count.
-	for _, ti := range db.Tables(false) {
+	for _, ti := range tables {
 		// We don't use ti.Left, because that has a tendency to store !badger
 		// keys.
 		if bytes.HasPrefix(ti.Right, prefix) {
 			splits = append(splits, string(ti.Right))
 		}
 	}
+
+	// If the number of splits is low, look at the offsets inside the
+	// tables to generate more splits.
+	if len(splits) < 32 {
+		numTables := len(tables)
+		if numTables == 0 {
+			numTables = 1
+		}
+		numPerTable := 32 / numTables
+		if numPerTable == 0 {
+			numPerTable = 1
+		}
+		splits = db.lc.keySplits(numPerTable, prefix)
+	}
+
+	// If the number of splits is still < 32, then look at the memtables.
+	if len(splits) < 32 {
+		maxPerSplit := 10000
+		mtSplits := func(mt *skl.Skiplist) {
+			count := 0
+			iter := mt.NewIterator()
+			for iter.SeekToFirst(); iter.Valid(); iter.Next() {
+				if count%maxPerSplit == 0 {
+					// Add a split every maxPerSplit keys.
+					if bytes.HasPrefix(iter.Key(), prefix) {
+						splits = append(splits, string(iter.Key()))
+					}
+				}
+				count += 1
+			}
+			_ = iter.Close()
+		}
+
+		db.Lock()
+		defer db.Unlock()
+		memtables := make([]*skl.Skiplist, 0)
+		memtables = append(memtables, db.imm...)
+		for _, mt := range memtables {
+			mtSplits(mt)
+		}
+		mtSplits(db.mt)
+	}
+
 	sort.Strings(splits)
+
+	// Limit the maximum number of splits returned by this function. We check against
+	// maxNumberSplits * 2 so that the jump variable has a value of at least two.
+	// Otherwise, the entire list would be returned without any reduction in size.
+	if len(splits) > maxNumSplits*2 {
+		newSplits := make([]string, 0)
+		jump := len(splits) / maxNumSplits
+		if jump < 2 {
+			jump = 2
+		}
+
+		for i := 0; i < len(splits); i += jump {
+			if i >= len(splits) {
+				i = len(splits) - 1
+			}
+			newSplits = append(newSplits, splits[i])
+		}
+
+		splits = newSplits
+	}
+
 	return splits
 }
 
