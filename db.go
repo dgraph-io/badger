@@ -22,14 +22,10 @@ import (
 	"encoding/binary"
 	"expvar"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,56 +53,6 @@ type closers struct {
 	writes     *z.Closer
 	valueGC    *z.Closer
 	pub        *z.Closer
-}
-
-// Also, memTable should have a way to open a WAL and bring SkipList up to speed.
-// On start, if there's a logfile, then create corresponding skiplist and create memtable struct.
-type memTable struct {
-	// Give skiplist z.Calloc'd []byte.
-	sl        *skl.Skiplist
-	wal       *logFile
-	ref       int32
-	nextTxnTs uint64
-	opt       Options
-}
-
-func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
-	entry := &Entry{
-		Key:       key,
-		Value:     value.Value,
-		UserMeta:  value.UserMeta,
-		meta:      value.Meta,
-		ExpiresAt: value.ExpiresAt,
-	}
-	if err := mt.wal.writeRequest(&request{Entries: []*Entry{entry}}, mt.opt); err != nil {
-		return errors.Wrapf(err, "cannot write entry to WAL file")
-	}
-	mt.sl.Put(key, value)
-	return nil
-}
-
-func (mt *memTable) UpdateSkipList() error {
-	if mt.wal == nil || mt.sl == nil {
-		return nil
-	}
-	mt.wal.iterate(true, 0, mt.replayFunction(mt.opt))
-	return nil
-}
-
-// IncrRef increases the refcount
-func (mt *memTable) IncrRef() {
-	atomic.AddInt32(&mt.ref, 1)
-}
-
-// DecrRef decrements the refcount, deallocating the Skiplist when done using it
-func (mt *memTable) DecrRef() {
-	newRef := atomic.AddInt32(&mt.ref, -1)
-	if newRef > 0 {
-		return
-	}
-
-	mt.sl.ReclaimMem()
-	// TODO: delete wal file.
 }
 
 // TODO: Tables need to store the maxVersion, so we can use them to figure it out instead of relying
@@ -158,100 +104,6 @@ type DB struct {
 const (
 	kvWriteChCapacity = 1000
 )
-
-func (mt *memTable) replayFunction(opt Options) func(Entry, valuePointer) error {
-	var txn []*Entry
-	var lastCommit uint64
-
-	toLSM := func(txnEntries []*Entry) {
-		newRequest := request{
-			Entries: txnEntries,
-		}
-		for i, e := range newRequest.Entries {
-			v := y.ValueStruct{
-				Value:     e.Value,
-				Meta:      e.meta,
-				UserMeta:  e.UserMeta,
-				ExpiresAt: e.ExpiresAt,
-			}
-
-			if opt.skipVlog(e) {
-				v.Meta = v.Meta &^ bitValuePointer
-			} else {
-				v.Value = newRequest.Ptrs[i].Encode()
-				v.Meta = v.Meta | bitValuePointer
-			}
-			// TODO: Do we need a copy of key?
-			mt.sl.Put(e.Key, v)
-		}
-	}
-
-	first := true
-	return func(e Entry, _ valuePointer) error { // Function for replaying.
-		if first {
-			opt.Debugf("First key=%q\n", e.Key)
-		}
-		first = false
-		if mt.nextTxnTs < y.ParseTs(e.Key) {
-			mt.nextTxnTs = y.ParseTs(e.Key)
-		}
-
-		// nk := make([]byte, len(e.Key))
-		// copy(nk, e.Key)
-		// var nv []byte
-		// meta := e.meta
-		// if db.skipVlog(&e) {
-		// 	nv = make([]byte, len(e.Value))
-		// 	copy(nv, e.Value)
-		// } else {
-		// 	nv = vp.Encode()
-		// 	meta = meta | bitValuePointer
-		// }
-
-		// v := y.ValueStruct{
-		// 	Value:     nv,
-		// 	Meta:      meta,
-		// 	UserMeta:  e.UserMeta,
-		// 	ExpiresAt: e.ExpiresAt,
-		// }
-
-		switch {
-		case e.meta&bitFinTxn > 0:
-			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
-			if err != nil {
-				return errors.Wrapf(err, "Unable to parse txn fin: %q", e.Value)
-			}
-			y.AssertTrue(lastCommit == txnTs)
-			y.AssertTrue(len(txn) > 0)
-			// Got the end of txn. Now we can store them.
-			toLSM(txn)
-			txn = txn[:0]
-			lastCommit = 0
-
-		case e.meta&bitTxn > 0:
-			txnTs := y.ParseTs(e.Key)
-			if lastCommit == 0 {
-				lastCommit = txnTs
-			}
-			if lastCommit != txnTs {
-				opt.Warningf("Found an incomplete txn at timestamp %d. Discarding it.\n",
-					lastCommit)
-				txn = txn[:0]
-				lastCommit = txnTs
-			}
-			txn = append(txn, &e)
-
-		default:
-			// This entry is from a rewrite or via SetEntryAt(..).
-			toLSM([]*Entry{&e})
-
-			// We shouldn't get this entry in the middle of a transaction.
-			y.AssertTrue(lastCommit == 0)
-			y.AssertTrue(len(txn) == 0)
-		}
-		return nil
-	}
-}
 
 func checkAndSetOptions(opt *Options) error {
 	// It's okay to have zero compactors which will disable all compactions but
@@ -438,7 +290,11 @@ func Open(opt Options) (db *DB, err error) {
 	db.calculateSize()
 	db.closers.updateSize = z.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
-	db.openMemTables(db.opt)
+
+	if err := db.openMemTables(db.opt); err != nil {
+		return nil, errors.Wrapf(err, "while opening memtables")
+	}
+
 	db.mt, err = db.newMemTable()
 	if err != nil {
 		return nil, errors.Wrapf(err, "cannot create memtable")
@@ -461,8 +317,8 @@ func Open(opt Options) (db *DB, err error) {
 			_ = db.flushMemtable(db.closers.memtable) // Need levels controller to be up.
 		}()
 	}
-	// TODO: Figure out a way to get the latest version.
-	// db.orc.nextTxnTs = version
+	// TODO: Do we need to do +1 from the maxVersion returned?
+	db.orc.nextTxnTs = db.maxVersion()
 
 	replayCloser := z.NewCloser(1)
 	go db.doWrites(replayCloser)
@@ -501,42 +357,16 @@ func Open(opt Options) (db *DB, err error) {
 	return db, nil
 }
 
-func (db *DB) openMemTables(opt Options) error {
-	files, err := ioutil.ReadDir(db.opt.Dir)
-	if err != nil {
-		return errFile(err, db.opt.Dir, "Unable to open mem dir.")
-	}
-
-	mts := make(map[int]*os.FileInfo)
-	var fids []int
-	for _, file := range files {
-		if !strings.HasSuffix(file.Name(), memFileExt) {
-			continue
+func (db *DB) maxVersion() uint64 {
+	var maxVersion uint64
+	for _, mt := range db.imm {
+		if mt.nextTxnTs > maxVersion {
+			maxVersion = mt.nextTxnTs
 		}
-		fsz := len(file.Name())
-		fid, err := strconv.ParseInt(file.Name()[:fsz-len(memFileExt)], 10, 32)
-		if err != nil {
-			return errFile(err, file.Name(), "Unable to parse log id.")
-		}
-		mts[int(fid)] = &file
-		fids = append(fids, int(fid))
 	}
-	// Sort in ascending order.
-	sort.Slice(fids, func(i, j int) bool {
-		return fids[i] < fids[j]
-	})
-	for _, fid := range fids {
-		mt, err := db.openMemTable(fid)
-		if err != nil {
-			return err
-		}
-		// TODO: We need the max version from the skiplist.
-		db.imm = append(db.imm, mt)
-	}
-	if len(fids) != 0 {
-		db.nextMemFid = fids[len(fids)-1] + 1
-	}
-	return nil
+	// Get Table infos and find their max version too.
+	// TODO:
+	return maxVersion
 }
 
 const walFileName = "badger.wal"
@@ -598,59 +428,6 @@ const walFileName = "badger.wal"
 // 	db.opt.Infof("Replay took: %s\n", time.Since(now))
 // 	return nil
 // }
-
-const memFileExt string = ".mem"
-
-func (db *DB) openMemTable(fid int) (*memTable, error) {
-	filepath := db.mtFilePath(fid)
-	lf := &logFile{
-		fid:         uint32(fid),
-		path:        filepath,
-		loadingMode: options.MemoryMap,
-		registry:    db.registry,
-	}
-	if err := lf.open(filepath, uint32(os.O_RDWR)); err != nil {
-		return nil, errors.Wrapf(err, "While opening mem table")
-	}
-	s := skl.NewSkiplist(arenaSize(db.opt))
-	mt := &memTable{
-		wal: lf,
-		sl:  s,
-		ref: 1,
-		opt: db.opt,
-	}
-	if err := mt.UpdateSkipList(); err != nil {
-		return nil, err
-	}
-	return mt, nil
-}
-
-func (db *DB) newMemTable() (*memTable, error) {
-	filepath := db.mtFilePath(db.nextMemFid)
-	lf := &logFile{
-		fid:         uint32(db.nextMemFid),
-		path:        filepath,
-		loadingMode: options.MemoryMap,
-		registry:    db.registry,
-		// TODO: is writeAt still needed.
-		writeAt: vlogHeaderSize,
-	}
-	db.nextMemFid++
-	if err := lf.openNew(filepath); err != nil {
-		return nil, errors.Wrapf(err, "While opening mem table")
-	}
-	s := skl.NewSkiplist(arenaSize(db.opt))
-	return &memTable{
-		wal: lf,
-		sl:  s,
-		ref: 1,
-		opt: db.opt,
-	}, nil
-}
-
-func (db *DB) mtFilePath(fid int) string {
-	return path.Join(db.opt.Dir, fmt.Sprintf("%05d%s", fid, memFileExt))
-}
 
 // func (db *DB) newSkipList() *skl.Skiplist {
 // 	f, err := os.OpenFile(db.skiplistPath(db.nextMemFid), os.O_CREATE|os.O_RDWR, 0666)
@@ -943,15 +720,14 @@ func (db *DB) writeToLSM(b *request) error {
 		return errors.Errorf("Ptrs and Entries don't match: %+v", b)
 	}
 
-	// TODO: Write it to the db.mt.wal, which is now a memTable struct first.
-	// Then, write to the db.mt.sl (skiplist).
-
 	for i, entry := range b.Entries {
 		if entry.meta&bitFinTxn != 0 {
 			continue
 		}
-		if db.opt.skipVlog(entry) { // Will include deletion / tombstone case.
-			err := db.mt.Put(entry.Key,
+		var err error
+		if db.opt.skipVlog(entry) {
+			// Will include deletion / tombstone case.
+			err = db.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value: entry.Value,
 					// Ensure value pointer flag is removed. Otherwise, the value will fail
@@ -962,22 +738,22 @@ func (db *DB) writeToLSM(b *request) error {
 					UserMeta:  entry.UserMeta,
 					ExpiresAt: entry.ExpiresAt,
 				})
-			if err != nil {
-				return err
-			}
 		} else {
 			// Write pointer to Memtable.
-			err := db.mt.Put(entry.Key,
+			err = db.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:     b.Ptrs[i].Encode(),
 					Meta:      entry.meta | bitValuePointer,
 					UserMeta:  entry.UserMeta,
 					ExpiresAt: entry.ExpiresAt,
 				})
-			if err != nil {
-				return err
-			}
 		}
+		if err != nil {
+			return errors.Wrapf(err, "while writing to memTable")
+		}
+	}
+	if db.opt.SyncWrites {
+		return db.mt.wal.sync()
 	}
 	return nil
 }

@@ -17,11 +17,7 @@
 package badger
 
 import (
-	"bufio"
 	"bytes"
-	"crypto/aes"
-	cryptorand "crypto/rand"
-	"encoding/binary"
 	"fmt"
 	"hash"
 	"hash/crc32"
@@ -38,7 +34,6 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
@@ -69,245 +64,6 @@ const (
 	// +----------------+------------------+
 	vlogHeaderSize = 20
 )
-
-type logFile struct {
-	path string
-	// This is a lock on the log file. It guards the fd’s value, the file’s
-	// existence and the file’s memory map.
-	//
-	// Use shared ownership when reading/writing the file or memory map, use
-	// exclusive ownership to open/close the descriptor, unmap or remove the file.
-	lock        sync.RWMutex
-	fd          *os.File
-	fid         uint32
-	fmap        []byte
-	size        uint32
-	loadingMode options.FileLoadingMode
-	dataKey     *pb.DataKey
-	baseIV      []byte
-	registry    *KeyRegistry
-	writeAt     uint32
-}
-
-// encodeEntry will encode entry to the buf
-// layout of entry
-// +--------+-----+-------+-------+
-// | header | key | value | crc32 |
-// +--------+-----+-------+-------+
-func (lf *logFile) encodeEntry(e *Entry, buf *bytes.Buffer, offset uint32) (int, error) {
-	h := header{
-		klen:      uint32(len(e.Key)),
-		vlen:      uint32(len(e.Value)),
-		expiresAt: e.ExpiresAt,
-		meta:      e.meta,
-		userMeta:  e.UserMeta,
-	}
-
-	hash := crc32.New(y.CastagnoliCrcTable)
-	writer := io.MultiWriter(buf, hash)
-
-	// encode header.
-	var headerEnc [maxHeaderSize]byte
-	sz := h.Encode(headerEnc[:])
-	y.Check2(writer.Write(headerEnc[:sz]))
-	// we'll encrypt only key and value.
-	if lf.encryptionEnabled() {
-		// TODO: no need to allocate the bytes. we can calculate the encrypted buf one by one
-		// since we're using ctr mode of AES encryption. Ordering won't changed. Need some
-		// refactoring in XORBlock which will work like stream cipher.
-		eBuf := make([]byte, 0, len(e.Key)+len(e.Value))
-		eBuf = append(eBuf, e.Key...)
-		eBuf = append(eBuf, e.Value...)
-		if err := y.XORBlockStream(
-			writer, eBuf, lf.dataKey.Data, lf.generateIV(offset)); err != nil {
-			return 0, y.Wrapf(err, "Error while encoding entry for vlog.")
-		}
-	} else {
-		// Encryption is disabled so writing directly to the buffer.
-		y.Check2(writer.Write(e.Key))
-		y.Check2(writer.Write(e.Value))
-	}
-	// write crc32 hash.
-	var crcBuf [crc32.Size]byte
-	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
-	y.Check2(buf.Write(crcBuf[:]))
-	// return encoded length.
-	return len(headerEnc[:sz]) + len(e.Key) + len(e.Value) + len(crcBuf), nil
-}
-
-func (lf *logFile) writeRequest(req *request, opt Options) error {
-	if !opt.UseWAL {
-		return nil
-	}
-	buf := new(bytes.Buffer)
-	for _, e := range req.Entries {
-		buf.Reset()
-		plen, err := lf.encodeEntry(e, buf, lf.writeAt)
-		if err != nil {
-			return err
-		}
-		y.AssertTrue(plen == copy(lf.fmap[lf.writeAt:], buf.Bytes()))
-		lf.writeAt += uint32(plen)
-	}
-	if opt.SyncWrites {
-		return lf.sync()
-	}
-	return nil
-}
-
-func (lf *logFile) decodeEntry(buf []byte, offset uint32) (*Entry, error) {
-	var h header
-	hlen := h.Decode(buf)
-	kv := buf[hlen:]
-	if lf.encryptionEnabled() {
-		var err error
-		// No need to worry about mmap. because, XORBlock allocates a byte array to do the
-		// xor. So, the given slice is not being mutated.
-		if kv, err = lf.decryptKV(kv, offset); err != nil {
-			return nil, err
-		}
-	}
-	e := &Entry{
-		meta:      h.meta,
-		UserMeta:  h.userMeta,
-		ExpiresAt: h.expiresAt,
-		offset:    offset,
-		Key:       kv[:h.klen],
-		Value:     kv[h.klen : h.klen+h.vlen],
-	}
-	return e, nil
-}
-
-func (lf *logFile) decryptKV(buf []byte, offset uint32) ([]byte, error) {
-	return y.XORBlockAllocate(buf, lf.dataKey.Data, lf.generateIV(offset))
-}
-
-// KeyID returns datakey's ID.
-func (lf *logFile) keyID() uint64 {
-	if lf.dataKey == nil {
-		// If there is no datakey, then we'll return 0. Which means no encryption.
-		return 0
-	}
-	return lf.dataKey.KeyId
-}
-
-func (lf *logFile) mmap(size int64) (err error) {
-	if lf.loadingMode != options.MemoryMap {
-		// Nothing to do
-		return nil
-	}
-
-	// Increase the file size so that mmap doesn't complain.
-	if err := lf.fd.Truncate(size); err != nil {
-		return err
-	}
-
-	lf.fmap, err = y.Mmap(lf.fd, true, size)
-	if err == nil {
-		err = y.Madvise(lf.fmap, false) // Disable readahead
-	}
-	return err
-}
-
-func (lf *logFile) encryptionEnabled() bool {
-	return lf.dataKey != nil
-}
-
-func (lf *logFile) munmap() (err error) {
-	if lf.loadingMode != options.MemoryMap || len(lf.fmap) == 0 {
-		// Nothing to do
-		return nil
-	}
-
-	if err := y.Munmap(lf.fmap); err != nil {
-		return errors.Wrapf(err, "Unable to munmap value log: %q", lf.path)
-	}
-	// This is important. We should set the map to nil because ummap
-	// system call doesn't change the length or capacity of the fmap slice.
-	lf.fmap = nil
-	return nil
-}
-
-// Acquire lock on mmap/file if you are calling this
-func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
-	var nbr int64
-	offset := p.Offset
-	if lf.loadingMode == options.FileIO {
-		buf = s.Resize(int(p.Len))
-		var n int
-		n, err = lf.fd.ReadAt(buf, int64(offset))
-		nbr = int64(n)
-	} else {
-		// Do not convert size to uint32, because the lf.fmap can be of size
-		// 4GB, which overflows the uint32 during conversion to make the size 0,
-		// causing the read to fail with ErrEOF. See issue #585.
-		size := int64(len(lf.fmap))
-		valsz := p.Len
-		lfsz := atomic.LoadUint32(&lf.size)
-		if int64(offset) >= size || int64(offset+valsz) > size ||
-			// Ensure that the read is within the file's actual size. It might be possible that
-			// the offset+valsz length is beyond the file's actual size. This could happen when
-			// dropAll and iterations are running simultaneously.
-			int64(offset+valsz) > int64(lfsz) {
-			err = y.ErrEOF
-		} else {
-			buf = lf.fmap[offset : offset+valsz]
-			nbr = int64(valsz)
-		}
-	}
-	y.NumReads.Add(1)
-	y.NumBytesRead.Add(nbr)
-	return buf, err
-}
-
-// generateIV will generate IV by appending given offset with the base IV.
-func (lf *logFile) generateIV(offset uint32) []byte {
-	iv := make([]byte, aes.BlockSize)
-	// baseIV is of 12 bytes.
-	y.AssertTrue(12 == copy(iv[:12], lf.baseIV))
-	// remaining 4 bytes is obtained from offset.
-	binary.BigEndian.PutUint32(iv[12:], offset)
-	return iv
-}
-
-func (lf *logFile) doneWriting(offset uint32) error {
-	// Just always sync on rotate.
-	if err := z.Msync(lf.fmap); err != nil {
-		return errors.Wrapf(err, "Unable to sync value log: %q", lf.path)
-	}
-
-	// Before we were acquiring a lock here on lf.lock, because we were invalidating the file
-	// descriptor due to reopening it as read-only. Now, we don't invalidate the fd, but unmap it,
-	// truncate it and remap it. That creates a window where we have segfaults because the mmap is
-	// no longer valid, while someone might be reading it. Therefore, we need a lock here again.
-	lf.lock.Lock()
-	defer lf.lock.Unlock()
-
-	// Unmap file before we truncate it. Windows cannot truncate a file that is mmapped.
-	if err := lf.munmap(); err != nil {
-		return errors.Wrapf(err, "failed to munmap vlog file %s", lf.fd.Name())
-	}
-
-	// TODO: Confirm if we need to run a file sync after truncation.
-	// Truncation must run after unmapping, otherwise Windows would crap itself.
-	if err := lf.fd.Truncate(int64(offset)); err != nil {
-		return errors.Wrapf(err, "Unable to truncate file: %q", lf.path)
-	}
-
-	// Reinitialize the log file. This will mmap the entire file.
-	if err := lf.init(); err != nil {
-		return errors.Wrapf(err, "failed to initialize file %s", lf.fd.Name())
-	}
-
-	// Previously we used to close the file after it was written and reopen it in read-only mode.
-	// We no longer open files in read-only mode. We keep all vlog files open in read-write mode.
-	return nil
-}
-
-// You must hold lf.lock to sync()
-func (lf *logFile) sync() error {
-	return z.Msync(lf.fmap)
-}
 
 var errStop = errors.New("Stop iteration")
 var errTruncate = errors.New("Do truncate")
@@ -414,106 +170,6 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 	e.UserMeta = h.userMeta
 	e.ExpiresAt = h.expiresAt
 	return e, nil
-}
-
-// iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
-// Therefore, the kv pair is only valid for the duration of fn call.
-func (lf *logFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint32, error) {
-	fi, err := lf.fd.Stat()
-	if err != nil {
-		return 0, err
-	}
-	if offset == 0 {
-		// If offset is set to zero, let's advance past the encryption key header.
-		offset = vlogHeaderSize
-	}
-	if int64(offset) == fi.Size() {
-		// We're at the end of the file already. No need to do anything.
-		return offset, nil
-	}
-	if readOnly {
-		// We're not at the end of the file. We'd need to replay the entries, or
-		// possibly truncate the file.
-		return 0, ErrReplayNeeded
-	}
-
-	// We're not at the end of the file. Let's Seek to the offset and start reading.
-	if _, err := lf.fd.Seek(int64(offset), io.SeekStart); err != nil {
-		return 0, errFile(err, lf.path, "Unable to seek")
-	}
-
-	// TODO: Stop reading directly from files.
-	reader := bufio.NewReader(lf.fd)
-	read := &safeRead{
-		k:            make([]byte, 10),
-		v:            make([]byte, 10),
-		recordOffset: offset,
-		lf:           lf,
-	}
-
-	var lastCommit uint64
-	var validEndOffset uint32 = offset
-
-loop:
-	for {
-		e, err := read.Entry(reader)
-		switch {
-		// We have not reached the end of the file but the entry we read is
-		// zero. This happens because we have truncated the file and
-		// zero'ed it out.
-		case err == io.EOF || e.isZero():
-			break loop
-		case err == io.ErrUnexpectedEOF || err == errTruncate:
-			break loop
-		case err != nil:
-			return 0, err
-		case e == nil:
-			continue
-		}
-
-		var vp valuePointer
-		vp.Len = uint32(int(e.hlen) + len(e.Key) + len(e.Value) + crc32.Size)
-		read.recordOffset += vp.Len
-
-		vp.Offset = e.offset
-		vp.Fid = lf.fid
-
-		switch {
-		case e.meta&bitTxn > 0:
-			txnTs := y.ParseTs(e.Key)
-			if lastCommit == 0 {
-				lastCommit = txnTs
-			}
-			if lastCommit != txnTs {
-				break loop
-			}
-
-		case e.meta&bitFinTxn > 0:
-			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
-			if err != nil || lastCommit != txnTs {
-				break loop
-			}
-			// Got the end of txn. Now we can store them.
-			lastCommit = 0
-			validEndOffset = read.recordOffset
-
-		default:
-			if lastCommit != 0 {
-				// This is most likely an entry which was moved as part of GC.
-				// We shouldn't get this entry in the middle of a transaction.
-				break loop
-			}
-			validEndOffset = read.recordOffset
-		}
-
-		if err := fn(*e, vp); err != nil {
-			if err == errStop {
-				break
-			}
-			return 0, errFile(err, lf.path, "Iteration function")
-		}
-	}
-	return validEndOffset, nil
 }
 
 func (vlog *valueLog) rewrite(f *logFile, tr trace.Trace) error {
@@ -745,11 +401,11 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 
 	path := vlog.fpath(lf.fid)
 	if err := lf.munmap(); err != nil {
-		_ = lf.fd.Close()
+		_ = lf.Fd.Close()
 		return err
 	}
-	lf.fmap = nil
-	if err := lf.fd.Close(); err != nil {
+	lf.Data = nil
+	if err := lf.Fd.Close(); err != nil {
 		return err
 	}
 	return os.Remove(path)
@@ -851,122 +507,6 @@ func (vlog *valueLog) populateFilesMap() error {
 	return nil
 }
 
-func (lf *logFile) openNew(path string) error {
-	var err error
-	if lf.fd, err = y.CreateSyncedFile(path, false); err != nil {
-		return y.Wrapf(err, "Error while opening file in logfile %s", path)
-	}
-	removeFile := func() {
-		// Remove the file so that we don't get an error when createVlogFile is
-		// called for the same fid, again. This could happen if there is an
-		// transient error because of which we couldn't create a new file
-		// and the second attempt to create the file succeeds.
-		y.Check(os.Remove(lf.fd.Name()))
-	}
-
-	// TODO: Increase file size so that mmap doesn't crash.
-	if err = lf.bootstrap(); err != nil {
-		removeFile()
-		return err
-	}
-	if err = lf.mmap(1 << 30); err != nil {
-		removeFile()
-		return errFile(err, lf.path, "Mmap value log file")
-	}
-	return nil
-}
-
-func (lf *logFile) open(path string, flags uint32) error {
-	var err error
-	if lf.fd, err = y.OpenExistingFile(path, flags); err != nil {
-		return y.Wrapf(err, "Error while opening file in logfile %s", path)
-	}
-
-	fi, err := lf.fd.Stat()
-	if err != nil {
-		return errFile(err, lf.path, "Unable to run file.Stat")
-	}
-	sz := fi.Size()
-	y.AssertTruef(
-		sz <= math.MaxUint32,
-		"file size: %d greater than %d",
-		uint32(sz), uint32(math.MaxUint32),
-	)
-	lf.size = uint32(sz)
-	if sz < vlogHeaderSize {
-		// Every vlog file should have at least vlogHeaderSize. If it is less than vlogHeaderSize
-		// then it must have been corrupted. But no need to handle here. log replayer will truncate
-		// and bootstrap the logfile. So ignoring here.
-		return nil
-	}
-	buf := make([]byte, vlogHeaderSize)
-
-	y.AssertTrue(vlogHeaderSize == copy(buf, lf.fmap))
-	// if _, err = lf.fd.Read(buf); err != nil {
-	// 	return y.Wrapf(err, "Error while reading vlog file %d", lf.fid)
-	// }
-	keyID := binary.BigEndian.Uint64(buf[:8])
-	var dk *pb.DataKey
-	// retrieve datakey.
-	if dk, err = lf.registry.dataKey(keyID); err != nil {
-		return y.Wrapf(err, "While opening vlog file %d", lf.fid)
-	}
-	lf.dataKey = dk
-	lf.baseIV = buf[8:]
-	y.AssertTrue(len(lf.baseIV) == 12)
-	return nil
-}
-
-// bootstrap will initialize the log file with key id and baseIV.
-// The below figure shows the layout of log file.
-// +----------------+------------------+------------------+
-// | keyID(8 bytes) |  baseIV(12 bytes)|	 entry...     |
-// +----------------+------------------+------------------+
-func (lf *logFile) bootstrap() error {
-	var err error
-	// delete all the data. because bootstrap is been called while creating vlog and as well
-	// as replaying log. While replaying log, there may be any data left. So we need to truncate
-	// everything.
-	if err = lf.fd.Truncate(0); err != nil {
-		return y.Wrapf(err, "Error while bootstraping.")
-	}
-
-	// TODO: Do we need this?
-	if _, err = lf.fd.Seek(0, io.SeekStart); err != nil {
-		return y.Wrapf(err, "Error while SeekStart for the logfile %d in logFile.bootstarp", lf.fid)
-	}
-	// generate data key for the log file.
-	var dk *pb.DataKey
-	if dk, err = lf.registry.latestDataKey(); err != nil {
-		return y.Wrapf(err, "Error while retrieving datakey in logFile.bootstarp")
-	}
-	lf.dataKey = dk
-	// We'll always preserve vlogHeaderSize for key id and baseIV.
-	buf := make([]byte, vlogHeaderSize)
-	// write key id to the buf.
-	// key id will be zero if the logfile is in plain text.
-	binary.BigEndian.PutUint64(buf[:8], lf.keyID())
-	// generate base IV. It'll be used with offset of the vptr to encrypt the entry.
-	if _, err := cryptorand.Read(buf[8:]); err != nil {
-		return y.Wrapf(err, "Error while creating base IV, while creating logfile")
-	}
-	// Initialize base IV.
-	lf.baseIV = buf[8:]
-	y.AssertTrue(len(lf.baseIV) == 12)
-	// write the key id and base IV to the file.
-	_, err = lf.fd.Write(buf)
-	return nil
-}
-
-func (lf *logFile) reset() {
-	// TODO: This is needed in in-memory mode.
-	if lf == nil {
-		return
-	}
-	z.ZeroOut(lf.fmap, vlogHeaderSize, int(lf.writeAt))
-	lf.writeAt = vlogHeaderSize
-}
-
 func (vlog *valueLog) newLogFile(fname string) (*logFile, error) {
 	lf := &logFile{
 		fid:         0,
@@ -981,7 +521,7 @@ func (vlog *valueLog) newLogFile(fname string) (*logFile, error) {
 	var err error
 
 	// TODO: Do we really need a synced file here. Also, do we need to create it always?
-	if lf.fd, err = y.CreateSyncedFile(lf.path, vlog.opt.SyncWrites); err != nil {
+	if lf.Fd, err = y.CreateSyncedFile(lf.path, vlog.opt.SyncWrites); err != nil {
 		return nil, errFile(err, lf.path, "Create value log file")
 	}
 
@@ -990,7 +530,7 @@ func (vlog *valueLog) newLogFile(fname string) (*logFile, error) {
 		// called for the same fid, again. This could happen if there is an
 		// transient error because of which we couldn't create a new file
 		// and the second attempt to create the file succeeds.
-		y.Check(os.Remove(lf.fd.Name()))
+		y.Check(os.Remove(lf.Fd.Name()))
 	}
 
 	// TODO: Increase file size so that mmap doesn't crash.
@@ -1014,7 +554,7 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*logFile, error) {
 	lf.fid = fid
 
 	if err = syncDir(vlog.dirPath); err != nil {
-		y.Check(os.Remove(lf.fd.Name()))
+		y.Check(os.Remove(lf.Fd.Name()))
 		return nil, errFile(err, vlog.dirPath, "Sync value log dir")
 	}
 
@@ -1037,7 +577,7 @@ func errFile(err error, path string, msg string) error {
 
 // func (db *DB) replayLog(replayFn logEntry) error {
 // 	lf := db.wal
-// 	fi, err := lf.fd.Stat()
+// 	fi, err := lf.Fd.Stat()
 // 	if err != nil {
 // 		return errFile(err, lf.path, "Unable to run file.Stat")
 // 	}
@@ -1055,7 +595,7 @@ func errFile(err error, path string, msg string) error {
 // 	// to that size.
 // 	if !db.opt.Truncate {
 // 		db.opt.Warningf("Truncate Needed. File %s size: %d Endoffset: %d",
-// 			lf.fd.Name(), fi.Size(), endOffset)
+// 			lf.Fd.Name(), fi.Size(), endOffset)
 // 		return ErrTruncateNeeded
 // 	}
 
@@ -1072,8 +612,8 @@ func errFile(err error, path string, msg string) error {
 // 	// 	return lf.bootstrap()
 // 	// }
 
-// 	db.opt.Infof("Truncating vlog file %s to offset: %d", lf.fd.Name(), endOffset)
-// 	if err := lf.fd.Truncate(int64(endOffset)); err != nil {
+// 	db.opt.Infof("Truncating vlog file %s to offset: %d", lf.Fd.Name(), endOffset)
+// 	if err := lf.Fd.Truncate(int64(endOffset)); err != nil {
 // 		return errFile(err, lf.path, fmt.Sprintf(
 // 			"Truncation needed at offset %d. Can be done manually as well.", endOffset))
 // 	}
@@ -1117,24 +657,19 @@ func (vlog *valueLog) open(db *DB) error {
 	for _, fid := range fids {
 		lf, ok := vlog.filesMap[fid]
 		y.AssertTrue(ok)
-		var flags uint32
-		switch {
-		case vlog.opt.ReadOnly:
-			// If we have read only, we don't need SyncWrites.
-			flags |= y.ReadOnly
-			// Set sync flag.
-		case vlog.opt.SyncWrites:
-			flags |= y.Sync
-		}
 
 		// We cannot mmap the files upfront here. Windows does not like mmapped files to be
 		// truncated. We might need to truncate files during a replay.
 		var err error
-		if err = lf.open(vlog.fpath(fid), flags); err != nil {
+		// Just open in RDWR mode. This should not create a new log file.
+		if err = lf.open(vlog.fpath(fid), os.O_RDWR, vlog.opt); err != nil {
 			return errors.Wrapf(err, "Open existing file: %q", lf.path)
 		}
 
 		// TODO: Use this for the WAL file.
+		// TODO: Deal with value log replay later. We do this, just to truncate the latest log file,
+		// which might have been corrupted or something.
+		//
 		// vlog.db.opt.Infof("Replaying file id: %d at offset: %d\n", fid, offset)
 		// now := time.Now()
 		// // Replay and possible truncation done. Now we can open the file as per
@@ -1144,8 +679,8 @@ func (vlog *valueLog) open(db *DB) error {
 		// 	if err == errDeleteVlogFile {
 		// 		delete(vlog.filesMap, fid)
 		// 		// Close the fd of the file before deleting the file otherwise windows complaints.
-		// 		if err := lf.fd.Close(); err != nil {
-		// 			return errors.Wrapf(err, "failed to close vlog file %s", lf.fd.Name())
+		// 		if err := lf.Fd.Close(); err != nil {
+		// 			return errors.Wrapf(err, "failed to close vlog file %s", lf.Fd.Name())
 		// 		}
 		// 		path := vlog.fpath(lf.fid)
 		// 		if err := os.Remove(path); err != nil {
@@ -1179,7 +714,7 @@ func (vlog *valueLog) open(db *DB) error {
 		last, ok = vlog.filesMap[newid]
 		y.AssertTrue(ok)
 	}
-	lastOffset, err := last.fd.Seek(0, io.SeekEnd)
+	lastOffset, err := last.Fd.Seek(0, io.SeekEnd)
 	if err != nil {
 		return errFile(err, last.path, "file.Seek to end")
 	}
@@ -1193,7 +728,7 @@ func (vlog *valueLog) open(db *DB) error {
 }
 
 func (lf *logFile) init() error {
-	fstat, err := lf.fd.Stat()
+	fstat, err := lf.Fd.Stat()
 	if err != nil {
 		return errors.Wrapf(err, "Unable to check stat for %q", lf.path)
 	}
@@ -1205,7 +740,7 @@ func (lf *logFile) init() error {
 	y.AssertTrue(sz <= math.MaxUint32)
 	lf.size = uint32(sz)
 	if err = lf.mmap(sz); err != nil {
-		_ = lf.fd.Close()
+		_ = lf.Fd.Close()
 		return errors.Wrapf(err, "Unable to map file: %q", fstat.Name())
 	}
 	return nil
@@ -1231,13 +766,13 @@ func (vlog *valueLog) Close() error {
 		// should point to end of file on all other platforms.
 		if !vlog.opt.ReadOnly && id == maxFid {
 			// truncate writable log file to correct offset.
-			if truncErr := f.fd.Truncate(
+			if truncErr := f.Fd.Truncate(
 				int64(vlog.woffset())); truncErr != nil && err == nil {
 				err = truncErr
 			}
 		}
 
-		if closeErr := f.fd.Close(); closeErr != nil && err == nil {
+		if closeErr := f.Fd.Close(); closeErr != nil && err == nil {
 			err = closeErr
 		}
 	}
@@ -1412,12 +947,12 @@ func (vlog *valueLog) write(reqs []*request) error {
 		}
 		n := uint32(buf.Len())
 		endOffset := atomic.AddUint32(&vlog.writableLogOffset, n)
-		if int(endOffset) >= len(curlf.fmap) {
+		if int(endOffset) >= len(curlf.Data) {
 			return ErrTxnTooBig
 		}
 
 		start := int(endOffset - n)
-		y.AssertTrue(copy(curlf.fmap[start:], buf.Bytes()) == int(n))
+		y.AssertTrue(copy(curlf.Data[start:], buf.Bytes()) == int(n))
 
 		atomic.StoreUint32(&curlf.size, vlog.writableLogOffset)
 		return nil
@@ -1460,7 +995,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			p.Fid = curlf.fid
 			// Use the offset including buffer length so far.
 			p.Offset = vlog.woffset() + uint32(buf.Len())
-			plen, err := curlf.encodeEntry(e, buf, p.Offset) // Now encode the entry into buffer.
+			plen, err := curlf.encodeEntry(buf, e, p.Offset) // Now encode the entry into buffer.
 			if err != nil {
 				return err
 			}
@@ -1681,7 +1216,7 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 	countPercent := samp.countRatio
 	lf := samp.lf
 
-	fi, err := lf.fd.Stat()
+	fi, err := lf.Fd.Stat()
 	if err != nil {
 		tr.LazyPrintf("Error while finding file size: %v", err)
 		tr.SetError()
@@ -1902,7 +1437,7 @@ func (vlog *valueLog) cleanVlog() error {
 		vlog.db.opt.Logger.Infof("Rewriting fid %d", fid)
 		start = time.Now()
 		if err := vlog.rewrite(lf, tr); err != nil {
-			return errors.Wrapf(err, "file: %s", lf.fd.Name())
+			return errors.Wrapf(err, "file: %s", lf.Fd.Name())
 		}
 		vlog.db.opt.Logger.Infof("Rewritten fid %d. Took: %s", fid, time.Since(start))
 	}
@@ -1952,10 +1487,10 @@ func (vlog *valueLog) getDiscardStats() ([]sampleResult, error) {
 		// Set discard ratio to 0 so that sample never returns a ErrNoRewrite error.
 		r, err := vlog.sample(samp, 0)
 		if err != nil {
-			return nil, errors.Wrapf(err, "file: %s", lf.fd.Name())
+			return nil, errors.Wrapf(err, "file: %s", lf.Fd.Name())
 		}
 
-		fstat, err := lf.fd.Stat()
+		fstat, err := lf.Fd.Stat()
 		if err != nil {
 			return nil, errors.Wrapf(err, "Unable to check stat for %q", lf.path)
 		}
