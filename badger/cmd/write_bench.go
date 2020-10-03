@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -133,7 +134,7 @@ func writeRandom(db *badger.DB, num uint64) error {
 	y.Check2(rand.Read(value))
 
 	es := uint64(keySz + valSz) // entry size is keySz + valSz
-	batch := db.NewWriteBatch()
+	batch := db.NewManagedWriteBatch()
 
 	ttlPeriod, errParse := time.ParseDuration(ttlDuration)
 	y.Check(errParse)
@@ -146,11 +147,11 @@ func writeRandom(db *badger.DB, num uint64) error {
 		if ttlPeriod != 0 {
 			e.WithTTL(ttlPeriod)
 		}
-		err := batch.SetEntry(e)
+		err := batch.SetEntryAt(e, 1)
 		for err == badger.ErrBlockedWrites {
 			time.Sleep(time.Second)
-			batch = db.NewWriteBatch()
-			err = batch.SetEntry(e)
+			batch = db.NewManagedWriteBatch()
+			err = batch.SetEntryAt(e, 1)
 		}
 		if err != nil {
 			panic(err)
@@ -285,7 +286,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Opening badger with options = %+v\n", opt)
-	db, err := badger.Open(opt)
+	db, err := badger.OpenManaged(opt)
 	if err != nil {
 		return err
 	}
@@ -335,7 +336,7 @@ func showKeysStats(db *badger.DB) {
 		validKeyCount    uint32
 	)
 
-	txn := db.NewTransaction(false)
+	txn := db.NewTransactionAt(math.MaxUint64, false)
 	defer txn.Discard()
 
 	iopt := badger.DefaultIteratorOptions

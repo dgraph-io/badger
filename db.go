@@ -446,6 +446,7 @@ func (db *DB) monitorCache(c *z.Closer) {
 	if db.blockCache == nil {
 		return
 	}
+	count := 0
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 	for {
@@ -455,6 +456,7 @@ func (db *DB) monitorCache(c *z.Closer) {
 		case <-ticker.C:
 		}
 
+		count++
 		metrics := db.BlockCacheMetrics()
 		// If the mean life expectancy is less than 10 seconds, the cache
 		// might be too small.
@@ -464,6 +466,8 @@ func (db *DB) monitorCache(c *z.Closer) {
 		if lifeTooShort && hitRatioTooLow {
 			db.opt.Warningf("Block Cache might be too small. Metrics: %s\n", metrics)
 			db.opt.Warningf("Cache life expectancy (in seconds): %+v\n", le)
+		} else if count%5 == 0 {
+			db.opt.Infof("Block Cache metrics: %s\n", metrics)
 		}
 	}
 }

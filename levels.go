@@ -848,16 +848,7 @@ func (s *levelsController) sortByOverlap(tables []*table.Table, cd *compactDef) 
 		return
 	}
 
-	// tableOverlap := make([]int, len(tables))
-	// for i := range tables {
-	// 	// get key range for table
-	// 	tableRange := getKeyRange(tables[i])
-	// 	// get overlap with next level
-	// 	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, tableRange)
-	// 	tableOverlap[i] = right - left
-	// }
-
-	// Sort tables by max version.
+	// Sort tables by max version. This is what RocksDB does.
 	sort.Slice(tables, func(i, j int) bool {
 		return tables[i].MaxVersion() < tables[j].MaxVersion()
 	})
@@ -967,7 +958,7 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		thisLevel.level, nextLevel.level, len(cd.top)+len(cd.bot),
 		len(newTables), time.Since(timeStart))
 
-	if cd.thisLevel.level != 0 && len(newTables) > 20 {
+	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.opt.LevelSizeMultiplier {
 		s.kv.opt.Infof("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
 			len(cd.top), hex.Dump(cd.thisRange.left), hex.Dump(cd.thisRange.right))
 		s.kv.opt.Infof("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",

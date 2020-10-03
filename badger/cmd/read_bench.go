@@ -19,6 +19,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"sync/atomic"
@@ -197,7 +198,7 @@ func lookupForKey(db *badger.DB, key []byte) (sz uint64) {
 func getSampleKeys(db *badger.DB) ([][]byte, error) {
 	var keys [][]byte
 	count := 0
-	stream := db.NewStream()
+	stream := db.NewStreamAt(math.MaxUint64)
 
 	// overide stream.KeyToList as we only want keys. Also
 	// we can take only first version for the key.
