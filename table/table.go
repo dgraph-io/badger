@@ -627,9 +627,16 @@ func (t *Table) indexKey() uint64 {
 	return t.id
 }
 
-// IndexSize is the size of table index in bytes
+// IndexSize returns the size of table index in bytes stored in the memory. The
+// size of on-disk representation would be less than the in-memory representation.
 func (t *Table) IndexSize() int {
 	return t.indexLen
+}
+
+// BloomFilterSize returns the size of the bloom filter in bytes stored in memory. The
+// size of on-disk representation would be less than the in-memory representation.
+func (t *Table) BloomFilterSize() int {
+	return t.bf.TotalSize()
 }
 
 // EstimatedSize returns the total size of key-values stored in this table (including the

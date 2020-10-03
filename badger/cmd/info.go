@@ -244,14 +244,22 @@ func tableInfo(dir, valueDir string, db *badger.DB) {
 	tables := db.Tables(true)
 	fmt.Println()
 	fmt.Println("SSTable [Li, Id, Total Keys including internal keys] " +
-		"[Left Key, Version -> Right Key, Version]" + "[Index Size]")
+		"[Left Key, Version -> Right Key, Version] [Index Size] [BF Size]")
+	totalIndex := uint64(0)
+	totalBloomFilter := uint64(0)
 	for _, t := range tables {
 		lk, lt := y.ParseKey(t.Left), y.ParseTs(t.Left)
 		rk, rt := y.ParseKey(t.Right), y.ParseTs(t.Right)
 
-		fmt.Printf("SSTable [L%d, %03d, %07d] [%20X, v%d -> %20X, v%d] [%s]\n",
-			t.Level, t.ID, t.KeyCount, lk, lt, rk, rt, hbytes(int64(t.IndexSz)))
+		totalIndex += uint64(t.IndexSz)
+		totalBloomFilter += uint64(t.BloomFilterSize)
+		fmt.Printf("SSTable [L%d, %03d, %07d] [%20X, v%d -> %20X, v%d] [%s] [%s] \n",
+			t.Level, t.ID, t.KeyCount, lk, lt, rk, rt, hbytes(int64(t.IndexSz)),
+			hbytes(int64(t.BloomFilterSize)))
 	}
+	fmt.Println()
+	fmt.Printf("Total Index Size: %s\n", hbytes(int64(totalIndex)))
+	fmt.Printf("Total BloomFilter Size: %s\n", hbytes(int64(totalIndex)))
 	fmt.Println()
 }
 
@@ -403,13 +411,13 @@ func printInfo(dir, valueDir string) error {
 	}
 
 	fmt.Print("\n[Summary]\n")
-	totalIndexSize := int64(0)
+	totalSSTSize := int64(0)
 	for i, sz := range levelSizes {
 		fmt.Printf("Level %d size: %12s\n", i, hbytes(sz))
-		totalIndexSize += sz
+		totalSSTSize += sz
 	}
 
-	fmt.Printf("Total index size: %8s\n", hbytes(totalIndexSize))
+	fmt.Printf("Total SST size: %8s\n", hbytes(totalSSTSize))
 	fmt.Printf("Value log size: %10s\n", hbytes(valueLogSize))
 	fmt.Println()
 	totalExtra := numExtra + numValueDirExtra

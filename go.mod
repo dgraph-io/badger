@@ -4,8 +4,6 @@ go 1.12
 
 // replace github.com/dgraph-io/ristretto => /home/mrjn/go/src/github.com/dgraph-io/ristretto
 
-// replace github.com/dgraph-io/ristretto => /home/ibrahim/Projects/go/src/github.com/dgraph-io/ristretto
-
 require (
 	github.com/DataDog/zstd v1.4.1
 	github.com/cespare/xxhash v1.1.0
