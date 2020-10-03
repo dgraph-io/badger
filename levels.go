@@ -211,7 +211,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 func closeAllTables(tables [][]*table.Table) {
 	for _, tableSlice := range tables {
 		for _, table := range tableSlice {
-			_ = table.Close()
+			_ = table.Close(-1)
 		}
 	}
 }

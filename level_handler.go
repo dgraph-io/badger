@@ -209,7 +209,7 @@ func (s *levelHandler) close() error {
 	defer s.RUnlock()
 	var err error
 	for _, t := range s.tables {
-		if closeErr := t.Close(); closeErr != nil && err == nil {
+		if closeErr := t.Close(-1); closeErr != nil && err == nil {
 			err = closeErr
 		}
 	}

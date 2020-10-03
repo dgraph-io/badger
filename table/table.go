@@ -92,14 +92,12 @@ type TableInterface interface {
 // Table represents a loaded table file with the info we have about it.
 type Table struct {
 	sync.Mutex
+	*z.MmapFile
 
-	fd        *os.File // Own fd.
-	tableSize int      // Initialized in OpenTable, using fd.Stat().
+	tableSize int // Initialized in OpenTable, using fd.Stat().
 
 	index *fb.TableIndex // Nil if encryption is enabled.
 	ref   int32          // For file garbage collection. Atomic.
-
-	mmap []byte // Memory mapped.
 
 	// The following are initialized once and const.
 	smallest, biggest []byte // Smallest and largest keys (with timestamps).
@@ -142,26 +140,7 @@ func (t *Table) DecrRef() error {
 		for i := 0; i < t.offsetsLength(); i++ {
 			t.opt.BlockCache.Del(t.blockCacheKey(i))
 		}
-
-		// It's necessary to delete windows files.
-		if err := y.Munmap(t.mmap); err != nil {
-			return err
-		}
-		t.mmap = nil
-		// fd can be nil if the table belongs to L0 and it is opened in memory. See
-		// OpenTableInMemory method.
-		if t.fd == nil {
-			return nil
-		}
-		if err := t.fd.Truncate(0); err != nil {
-			// This is very important to let the FS know that the file is deleted.
-			return err
-		}
-		filename := t.fd.Name()
-		if err := t.fd.Close(); err != nil {
-			return err
-		}
-		if err := os.Remove(filename); err != nil {
+		if err := t.Delete(); err != nil {
 			return err
 		}
 	}
@@ -271,20 +250,17 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 		return nil, errors.Errorf("Invalid filename: %s", filename)
 	}
 	t := &Table{
-		fd:         fd,
 		ref:        1, // Caller is given one reference.
 		id:         id,
 		opt:        &opts,
 		IsInmemory: false,
+		tableSize:  int(fileInfo.Size()),
 	}
-
-	t.tableSize = int(fileInfo.Size())
-
-	t.mmap, err = y.Mmap(fd, false, fileInfo.Size())
+	mf, err := z.OpenMmapFileUsing(fd, 0)
 	if err != nil {
-		_ = fd.Close()
-		return nil, y.Wrapf(err, "Unable to map file: %q", fileInfo.Name())
+		return nil, y.Wrapf(err, "Unable to open file: %s", filename)
 	}
+	t.MmapFile = mf
 
 	if err := t.initBiggestAndSmallest(); err != nil {
 		return nil, errors.Wrapf(err, "failed to initialize table")
@@ -303,10 +279,14 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 // OpenInMemoryTable is similar to OpenTable but it opens a new table from the provided data.
 // OpenInMemoryTable is used for L0 tables.
 func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
+	mf := &z.MmapFile{
+		Data: data,
+		Fd:   nil,
+	}
 	t := &Table{
+		MmapFile:   mf,
 		ref:        1, // Caller is given one reference.
 		opt:        opt,
-		mmap:       data,
 		tableSize:  len(data),
 		IsInmemory: true,
 		id:         id, // It is important that each table gets a unique ID.
@@ -337,31 +317,8 @@ func (t *Table) initBiggestAndSmallest() error {
 	return nil
 }
 
-// Close closes the open table. (Releases resources back to the OS.)
-func (t *Table) Close() error {
-	if err := y.Munmap(t.mmap); err != nil {
-		return err
-	}
-	t.mmap = nil
-	if t.fd == nil {
-		return nil
-	}
-	return t.fd.Close()
-}
-
 func (t *Table) read(off, sz int) ([]byte, error) {
-	if len(t.mmap) > 0 {
-		if len(t.mmap[off:]) < sz {
-			return nil, y.ErrEOF
-		}
-		return t.mmap[off : off+sz], nil
-	}
-
-	res := make([]byte, sz)
-	nbr, err := t.fd.ReadAt(res, int64(off))
-	y.NumReads.Add(1)
-	y.NumBytesRead.Add(int64(nbr))
-	return res, err
+	return t.Bytes(off, sz)
 }
 
 func (t *Table) readNoFail(off, sz int) []byte {
@@ -518,7 +475,7 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 	if blk.data, err = t.read(blk.offset, int(ko.Len())); err != nil {
 		return nil, errors.Wrapf(err,
 			"failed to read from file: %s at offset: %d, len: %d",
-			t.fd.Name(), blk.offset, ko.Len())
+			t.Fd.Name(), blk.offset, ko.Len())
 	}
 
 	if t.shouldDecrypt() {
@@ -531,7 +488,7 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 	if err = t.decompress(blk); err != nil {
 		return nil, errors.Wrapf(err,
 			"failed to decode compressed data in file: %s at offset: %d, len: %d",
-			t.fd.Name(), blk.offset, ko.Len())
+			t.Fd.Name(), blk.offset, ko.Len())
 	}
 
 	// Read meta data related to block.
@@ -638,7 +595,7 @@ func (t *Table) Smallest() []byte { return t.smallest }
 func (t *Table) Biggest() []byte { return t.biggest }
 
 // Filename is NOT the file name.  Just kidding, it is.
-func (t *Table) Filename() string { return t.fd.Name() }
+func (t *Table) Filename() string { return t.Fd.Name() }
 
 // ID is the table's ID number (used to make the file name).
 func (t *Table) ID() uint64 { return t.id }
