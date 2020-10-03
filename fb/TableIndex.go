@@ -120,6 +120,9 @@ func (rcv *TableIndex) MutateUncompressedSize(n uint32) bool {
 }
 
 func (rcv *TableIndex) KeyCount() uint32 {
+	if rcv == nil {
+		return 0
+	}
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(14))
 	if o != 0 {
 		return rcv._tab.GetUint32(o + rcv._tab.Pos)
