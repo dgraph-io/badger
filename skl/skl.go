@@ -73,15 +73,14 @@ type node struct {
 	tower [maxHeight]uint32
 }
 
-// TODO: Skiplist should take in a byte slice.
 type Skiplist struct {
-	height int32 // Current height. 1 <= height <= kMaxHeight. CAS.
-	head   *node
-	ref    int32
-	arena  *Arena
+	height  int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	head    *node
+	ref     int32
+	arena   *Arena
+	OnClose func()
 }
 
-// TODO: Remove the IncrRef and DecrRef from here and move to memTable struct in db.go.
 // IncrRef increases the refcount
 func (s *Skiplist) IncrRef() {
 	atomic.AddInt32(&s.ref, 1)
@@ -93,17 +92,10 @@ func (s *Skiplist) DecrRef() {
 	if newRef > 0 {
 		return
 	}
+	if s.OnClose != nil {
+		s.OnClose()
+	}
 
-	// Indicate we are closed. Good for testing.  Also, lets GC reclaim memory. Race condition
-	// here would suggest we are accessing skiplist when we are supposed to have no reference!
-	s.arena = nil
-	// Since the head references the arena's buf, as long as the head is kept around
-	// GC can't release the buf.
-	s.head = nil
-}
-
-// ReclaimMem sets the arena and head fields to nil so they can be reclaimed by the GC.
-func (s *Skiplist) ReclaimMem() {
 	// Indicate we are closed. Good for testing.  Also, lets GC reclaim memory. Race condition
 	// here would suggest we are accessing skiplist when we are supposed to have no reference!
 	s.arena = nil

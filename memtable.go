@@ -48,7 +48,6 @@ type memTable struct {
 	// Give skiplist z.Calloc'd []byte.
 	sl        *skl.Skiplist
 	wal       *logFile
-	ref       int32
 	nextTxnTs uint64
 	opt       Options
 	buf       *bytes.Buffer
@@ -112,8 +111,12 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 	mt := &memTable{
 		wal: lf,
 		sl:  s,
-		ref: 1,
 		opt: db.opt,
+	}
+	s.OnClose = func() {
+		if err := mt.wal.Delete(); err != nil {
+			db.opt.Errorf("while deleting file: %s, err: %v", filepath, err)
+		}
 	}
 	if lerr == z.NewFile {
 		return mt, nil
@@ -162,18 +165,12 @@ func (mt *memTable) UpdateSkipList() error {
 
 // IncrRef increases the refcount
 func (mt *memTable) IncrRef() {
-	atomic.AddInt32(&mt.ref, 1)
+	mt.sl.IncrRef()
 }
 
 // DecrRef decrements the refcount, deallocating the Skiplist when done using it
 func (mt *memTable) DecrRef() {
-	newRef := atomic.AddInt32(&mt.ref, -1)
-	if newRef > 0 {
-		return
-	}
-
-	mt.sl.ReclaimMem()
-	mt.wal.Delete()
+	mt.sl.DecrRef()
 }
 
 func (mt *memTable) replayFunction(opt Options) func(Entry, valuePointer) error {
