@@ -169,8 +169,8 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	db := item.txn.db
 	result, cb, err := db.vlog.Read(vp, item.slice)
 	if err != nil {
-		db.opt.Logger.Errorf(`Unable to read: Key: %v, Version : %v,
-				meta: %v, userMeta: %v`, key, item.version, item.meta, item.userMeta)
+		db.opt.Logger.Errorf("Unable to read: Key: %v, Version : %v, meta: %v, userMeta: %v"+
+			" Error: %v", key, item.version, item.meta, item.userMeta, err)
 	}
 	return result, cb, err
 }

@@ -959,6 +959,11 @@ func (db *DB) ensureRoomForWrite() error {
 	// db.head. Hence we are limiting no of value log files to be read to db.logRotates only.
 	forceFlush := atomic.LoadInt32(&db.logRotates) >= db.opt.LogRotatesToFlush
 
+	if !forceFlush {
+		// Force flush if memTable WAL is getting filled up.
+		forceFlush = int64(db.mt.wal.writeAt) > db.opt.ValueLogFileSize
+	}
+
 	if !forceFlush && db.mt.sl.MemSize() < db.opt.MaxTableSize {
 		return nil
 	}

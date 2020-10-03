@@ -100,9 +100,7 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 		registry: db.registry,
 		writeAt:  vlogHeaderSize,
 	}
-	fmt.Printf("openMemTable: filepath: %v\n", filepath)
 	lerr := lf.open(filepath, os.O_RDWR|os.O_CREATE, db.opt)
-	fmt.Printf("openMemTable: err: %v\n", lerr)
 	if lerr != z.NewFile && lerr != nil {
 		return nil, errors.Wrapf(lerr, "While opening mem table")
 	}
@@ -156,6 +154,9 @@ func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
 		meta:      value.Meta,
 		ExpiresAt: value.ExpiresAt,
 	}
+
+	// If WAL exceeds opt.ValueLogFileSize, we'll force flush the memTable. See logic in
+	// ensureRoomForWrite.
 	if err := mt.wal.writeEntry(mt.buf, entry, mt.opt); err != nil {
 		return errors.Wrapf(err, "cannot write entry to WAL file")
 	}
@@ -320,34 +321,9 @@ func (lf *logFile) keyID() uint64 {
 	return lf.dataKey.KeyId
 }
 
-// TODO: Do we need this?
-func (lf *logFile) mmap(size int64) (err error) {
-	// Increase the file size so that mmap doesn't complain.
-	if err := lf.Fd.Truncate(size); err != nil {
-		return err
-	}
-
-	lf.Data, err = y.Mmap(lf.Fd, true, size)
-	if err == nil {
-		err = y.Madvise(lf.Data, false) // Disable readahead
-	}
-	return err
-}
-
 func (lf *logFile) encryptionEnabled() bool {
 	return lf.dataKey != nil
 }
-
-// // TODO: Do we need this?
-// func (lf *logFile) munmap() (err error) {
-// 	if err := y.Munmap(lf.Data); err != nil {
-// 		return errors.Wrapf(err, "Unable to munmap value log: %q", lf.path)
-// 	}
-// 	// This is important. We should set the map to nil because ummap
-// 	// system call doesn't change the length or capacity of the fmap slice.
-// 	lf.Data = nil
-// 	return nil
-// }
 
 // Acquire lock on mmap/file if you are calling this
 func (lf *logFile) read(p valuePointer, s *y.Slice) (buf []byte, err error) {
@@ -526,9 +502,12 @@ func (lf *logFile) open(path string, flags int, opt Options) error {
 			os.Remove(path)
 			return err
 		}
+		lf.size = vlogHeaderSize
+
 	} else if ferr != nil {
 		return errors.Wrapf(ferr, "while opening file: %s", path)
 	}
+	lf.size = uint32(len(lf.Data))
 
 	// if sz < vlogHeaderSize {
 	// 	// Every vlog file should have at least vlogHeaderSize. If it is less than vlogHeaderSize

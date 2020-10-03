@@ -38,7 +38,7 @@ type discardStats struct {
 	nextEmptySlot int
 }
 
-const discardFname string = "vlog.discard"
+const discardFname string = "DISCARD"
 const discardFsize int = 1 << 30
 const maxSlot int = 64 << 20
 

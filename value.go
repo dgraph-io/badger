@@ -612,48 +612,21 @@ func (vlog *valueLog) open(db *DB) error {
 		lf, ok := vlog.filesMap[fid]
 		y.AssertTrue(ok)
 
-		// We cannot mmap the files upfront here. Windows does not like mmapped files to be
-		// truncated. We might need to truncate files during a replay.
-		var err error
 		// Just open in RDWR mode. This should not create a new log file.
-		if err = lf.open(vlog.fpath(fid), os.O_RDWR, vlog.opt); err != nil {
+		if err := lf.open(vlog.fpath(fid), os.O_RDWR, vlog.opt); err != nil {
 			return errors.Wrapf(err, "Open existing file: %q", lf.path)
 		}
-
-		// TODO: Use this for the WAL file.
-		// TODO: Deal with value log replay later. We do this, just to truncate the latest log file,
-		// which might have been corrupted or something.
-		//
-		// vlog.db.opt.Infof("Replaying file id: %d at offset: %d\n", fid, offset)
-		// now := time.Now()
-		// // Replay and possible truncation done. Now we can open the file as per
-		// // user specified options.
-		// if err := vlog.replayLog(lf, offset, replayFn); err != nil {
-		// 	// Log file is corrupted. Delete it.
-		// 	if err == errDeleteVlogFile {
-		// 		delete(vlog.filesMap, fid)
-		// 		// Close the fd of the file before deleting the file otherwise windows complaints.
-		// 		if err := lf.Fd.Close(); err != nil {
-		// 			return errors.Wrapf(err, "failed to close vlog file %s", lf.Fd.Name())
-		// 		}
-		// 		path := vlog.fpath(lf.fid)
-		// 		if err := os.Remove(path); err != nil {
-		// 			return y.Wrapf(err, "failed to delete empty value log file: %q", path)
-		// 		}
-		// 		continue
-		// 	}
-		// 	return err
-		// }
-		// vlog.db.opt.Infof("Replay took: %s\n", time.Since(now))
-
-		// if fid < vlog.maxFid {
-		// 	// For maxFid, the mmap would be done by the specially written code below.
-		// 	if err := lf.init(); err != nil {
-		// 		return err
-		// 	}
-		// }
+		if lf.size == vlogHeaderSize {
+			fmt.Printf("Deleting empty file: %s\n", lf.path)
+			vlog.opt.Infof("Deleting empty file: %s", lf.path)
+			if err := lf.Delete(); err != nil {
+				return errors.Wrapf(err, "while trying to delete empty file: %s", lf.path)
+			}
+			delete(vlog.filesMap, fid)
+		}
 	}
-	// Seek to the end to start writing.
+
+	// Now we can read the latest value log file, and see if it needs truncation.
 	last, ok := vlog.filesMap[vlog.maxFid]
 	y.AssertTrue(ok)
 	lastOff, err := last.iterate(vlog.opt.ReadOnly, vlogHeaderSize, func(_ Entry, vp valuePointer) error {
@@ -880,6 +853,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		if buf.Len() == 0 {
 			return nil
 		}
+
 		n := uint32(buf.Len())
 		endOffset := atomic.AddUint32(&vlog.writableLogOffset, n)
 		vlog.opt.Debugf("n: %d endOffset: %d\n", n, endOffset)
@@ -891,7 +865,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		start := int(endOffset - n)
 		y.AssertTrue(copy(curlf.Data[start:], buf.Bytes()) == int(n))
 
-		atomic.StoreUint32(&curlf.size, vlog.writableLogOffset)
+		atomic.StoreUint32(&curlf.size, endOffset)
 		return nil
 	}
 
@@ -928,8 +902,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			var p valuePointer
 
 			p.Fid = curlf.fid
-			// Use the offset including buffer length so far.
-			p.Offset = vlog.woffset() + uint32(buf.Len())
+			p.Offset = vlog.woffset()
 			plen, err := curlf.encodeEntry(buf, e, p.Offset) // Now encode the entry into buffer.
 			if err != nil {
 				return err
