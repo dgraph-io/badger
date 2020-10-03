@@ -45,11 +45,11 @@ import (
 // On start, if there's a logfile, then create corresponding skiplist and create memtable struct.
 type memTable struct {
 	// Give skiplist z.Calloc'd []byte.
-	sl        *skl.Skiplist
-	wal       *logFile
+	sl         *skl.Skiplist
+	wal        *logFile
 	maxVersion uint64
-	opt       Options
-	buf       *bytes.Buffer
+	opt        Options
+	buf        *bytes.Buffer
 }
 
 func (db *DB) openMemTables(opt Options) error {
@@ -135,7 +135,6 @@ var errExpectingNewFile = errors.New("Expecting to create a new file, but found 
 func (db *DB) newMemTable() (*memTable, error) {
 	mt, err := db.openMemTable(db.nextMemFid)
 	if err == z.NewFile {
-		db.opt.Errorf("Got error: %v for id: %d\n", err, db.nextMemFid)
 		db.nextMemFid++
 		return mt, nil
 	}

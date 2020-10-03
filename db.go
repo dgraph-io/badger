@@ -327,8 +327,9 @@ func Open(opt Options) (*DB, error) {
 			db.flushChan <- flushTask{mt: mt}
 		}
 	}
-	// TODO: Do we need to do +1 from the maxVersion returned?
-	db.orc.nextTxnTs = db.MaxVersion() + 1
+	// We do increment nextTxnTs below. So, no need to do it here.
+	db.orc.nextTxnTs = db.MaxVersion()
+	db.opt.Infof("Set nextTxnTs to %d", db.orc.nextTxnTs)
 
 	replayCloser := z.NewCloser(1)
 	go db.doWrites(replayCloser)
