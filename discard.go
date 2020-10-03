@@ -18,7 +18,6 @@ package badger
 
 import (
 	"encoding/binary"
-	"fmt"
 	"os"
 	"path"
 	"sort"
@@ -53,16 +52,8 @@ func initDiscardStats(opt Options) (*discardStats, error) {
 		opt:      opt,
 	}
 	if err == z.NewFile {
-		// TODO: Do we need to zero out the complete 1 GB of file?
-		// z.ZeroOut(mf.Data, 0, 1<<30)
-		// TODO: The following code is for verifying if we need to zero out the
-		// file. We should remove this code later.
-		for _, i := range mf.Data {
-			if i != 0 {
-				fmt.Printf("i = %+v\n", i)
-				panic("not zero")
-			}
-		}
+		// We don't need to zero out the entire 1GB.
+		lf.zeroOut()
 
 	} else if err != nil {
 		return nil, errors.Wrapf(err, "while opening file: %s\n", discardFname)
@@ -102,6 +93,12 @@ func (lf *discardStats) set(offset int, val uint64) {
 	binary.BigEndian.PutUint64(lf.Data[offset:offset+8], val)
 }
 
+// zeroOut would zero out the next slot.
+func (lf *discardStats) zeroOut() {
+	lf.set(lf.nextEmptySlot*16, 0)
+	lf.set(lf.nextEmptySlot*16+8, 0)
+}
+
 // Update would update the discard stats for the given file id. If discard is
 // 0, it would return the current value of discard for the file. If discard is
 // < 0, it would set the current value of discard to zero for the file.
@@ -135,8 +132,11 @@ func (lf *discardStats) Update(fidu uint32, discard int64) int64 {
 	idx = lf.nextEmptySlot
 	lf.set(idx*16, uint64(fid))
 	lf.set(idx*16+8, uint64(discard))
+
+	// Move to next slot.
 	lf.nextEmptySlot++
 	y.AssertTrue(lf.nextEmptySlot < maxSlot)
+	lf.zeroOut()
 
 	sort.Sort(lf)
 	return int64(discard)

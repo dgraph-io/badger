@@ -231,7 +231,7 @@ func Open(opt Options) (*DB, error) {
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
 		if err != nil {
-			opt.Errorf("Received err: %v. Cleaning up... %t", err, db == nil)
+			opt.Errorf("Received err: %v. Cleaning up...", err)
 			db.cleanup()
 			db = nil
 		}
