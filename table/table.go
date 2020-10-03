@@ -627,16 +627,24 @@ func (t *Table) indexKey() uint64 {
 	return t.id
 }
 
-// IndexSize returns the size of table index in bytes stored in the memory. The
-// size of on-disk representation would be less than the in-memory representation.
+// UncompressedSize is the size of table index in bytes.
+func (t *Table) UncompressedSize() uint32 {
+	return t.index.UncompressedSize()
+}
+
+// KeyCount is the total number of keys in this table.
+func (t *Table) KeyCount() uint32 {
+	return t.index.KeyCount()
+}
+
+// IndexSize is the size of table index in bytes.
 func (t *Table) IndexSize() int {
 	return t.indexLen
 }
 
-// BloomFilterSize returns the size of the bloom filter in bytes stored in memory. The
-// size of on-disk representation would be less than the in-memory representation.
+// BloomFilterSize returns the size of the bloom filter in bytes stored in memory.
 func (t *Table) BloomFilterSize() int {
-	return t.bf.TotalSize()
+	return t.index.BloomFilterLength()
 }
 
 // EstimatedSize returns the total size of key-values stored in this table (including the

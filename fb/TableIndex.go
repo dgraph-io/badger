@@ -104,8 +104,32 @@ func (rcv *TableIndex) MutateMaxVersion(n uint64) bool {
 	return rcv._tab.MutateUint64Slot(10, n)
 }
 
+func (rcv *TableIndex) UncompressedSize() uint32 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	if o != 0 {
+		return rcv._tab.GetUint32(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+func (rcv *TableIndex) MutateUncompressedSize(n uint32) bool {
+	return rcv._tab.MutateUint32Slot(12, n)
+}
+
+func (rcv *TableIndex) KeyCount() uint32 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(14))
+	if o != 0 {
+		return rcv._tab.GetUint32(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+func (rcv *TableIndex) MutateKeyCount(n uint32) bool {
+	return rcv._tab.MutateUint32Slot(14, n)
+}
+
 func TableIndexStart(builder *flatbuffers.Builder) {
-	builder.StartObject(4)
+	builder.StartObject(6)
 }
 func TableIndexAddOffsets(builder *flatbuffers.Builder, offsets flatbuffers.UOffsetT) {
 	builder.PrependUOffsetTSlot(0, flatbuffers.UOffsetT(offsets), 0)
@@ -124,6 +148,12 @@ func TableIndexAddEstimatedSize(builder *flatbuffers.Builder, estimatedSize uint
 }
 func TableIndexAddMaxVersion(builder *flatbuffers.Builder, maxVersion uint64) {
 	builder.PrependUint64Slot(3, maxVersion, 0)
+}
+func TableIndexAddUncompressedSize(builder *flatbuffers.Builder, uncompressedSize uint32) {
+	builder.PrependUint32Slot(4, uncompressedSize, 0)
+}
+func TableIndexAddKeyCount(builder *flatbuffers.Builder, keyCount uint32) {
+	builder.PrependUint32Slot(5, keyCount, 0)
 }
 func TableIndexEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT {
 	return builder.EndObject()

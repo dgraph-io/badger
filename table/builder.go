@@ -404,6 +404,10 @@ func (b *Builder) Finish(allocate bool) []byte {
 	// Wait for block handler to finish.
 	b.wg.Wait()
 
+	// We have added padding after each block so we should minus the
+	// padding from the actual table size. len(blocklist) would be zero if
+	// there is no compression/encryption.
+	uncompressedSize := b.sz - uint32(padding*len(b.blockList))
 	dst := b.buf
 	// Fix block boundaries. This includes moving the blocks so that we
 	// don't have any interleaving space between them.
@@ -435,7 +439,7 @@ func (b *Builder) Finish(allocate bool) []byte {
 		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opt.BloomFalsePositive)
 		f = y.NewFilter(b.keyHashes, bits)
 	}
-	index := b.buildIndex(f)
+	index := b.buildIndex(f, uncompressedSize)
 
 	var err error
 	if b.shouldEncrypt() {
@@ -536,7 +540,7 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 	return nil, errors.New("Unsupported compression type")
 }
 
-func (b *Builder) buildIndex(bloom []byte) []byte {
+func (b *Builder) buildIndex(bloom []byte, tableSz uint32) []byte {
 	builder := fbs.NewBuilder(3 << 20)
 
 	boList := b.writeBlockOffsets(builder)
@@ -560,6 +564,8 @@ func (b *Builder) buildIndex(bloom []byte) []byte {
 	fb.TableIndexAddBloomFilter(builder, bfoff)
 	fb.TableIndexAddEstimatedSize(builder, b.estimatedSize)
 	fb.TableIndexAddMaxVersion(builder, b.maxVersion)
+	fb.TableIndexAddUncompressedSize(builder, tableSz)
+	fb.TableIndexAddKeyCount(builder, uint32(len(b.keyHashes)))
 	builder.Finish(fb.TableIndexEnd(builder))
 
 	return builder.FinishedBytes()

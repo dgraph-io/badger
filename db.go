@@ -1486,15 +1486,15 @@ func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
 
 // Tables gets the TableInfo objects from the level controller. If withKeysCount
 // is true, TableInfo objects also contain counts of keys for the tables.
-func (db *DB) Tables(withKeysCount bool) []TableInfo {
-	return db.lc.getTableInfo(withKeysCount)
+func (db *DB) Tables() []TableInfo {
+	return db.lc.getTableInfo()
 }
 
 // KeySplits can be used to get rough key ranges to divide up iteration over
 // the DB.
 func (db *DB) KeySplits(prefix []byte) []string {
 	var splits []string
-	tables := db.Tables(false)
+	tables := db.Tables()
 
 	// We just want table ranges here and not keys count.
 	for _, ti := range tables {

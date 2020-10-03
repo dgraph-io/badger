@@ -842,8 +842,8 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	return true
 }
 
-// sortByOverlap sorts tables in increasing order of overlap with next level.
-func (s *levelsController) sortByOverlap(tables []*table.Table, cd *compactDef) {
+// sortByVersion sorts the tables in the increasing order of max key version in every table.
+func (s *levelsController) sortByVersion(tables []*table.Table, cd *compactDef) {
 	if len(tables) == 0 || cd.nextLevel == nil {
 		return
 	}
@@ -868,7 +868,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	// We want to pick files from current level in order of increasing overlap with next level
 	// tables. Idea here is to first compact file from current level which has least overlap with
 	// next level. This provides us better write amplification.
-	s.sortByOverlap(tables, cd)
+	s.sortByVersion(tables, cd)
 
 	for _, t := range tables {
 		cd.thisSize = t.Size()
@@ -1128,38 +1128,31 @@ func (s *levelsController) appendIterators(
 
 // TableInfo represents the information about a table.
 type TableInfo struct {
-	ID              uint64
-	Level           int
-	Left            []byte
-	Right           []byte
-	KeyCount        uint64 // Number of keys in the table
-	EstimatedSz     uint32
-	IndexSz         int
-	BloomFilterSize int
+	ID               uint64
+	Level            int
+	Left             []byte
+	Right            []byte
+	KeyCount         uint32 // Number of keys in the table
+	EstimatedSz      uint32
+	UncompressedSize uint32
+	IndexSz          int
+	BloomFilterSize  int
 }
 
-func (s *levelsController) getTableInfo(withKeysCount bool) (result []TableInfo) {
+func (s *levelsController) getTableInfo() (result []TableInfo) {
 	for _, l := range s.levels {
 		l.RLock()
 		for _, t := range l.tables {
-			var count uint64
-			if withKeysCount {
-				it := t.NewIterator(table.NOCACHE)
-				for it.Rewind(); it.Valid(); it.Next() {
-					count++
-				}
-				it.Close()
-			}
-
 			info := TableInfo{
-				ID:              t.ID(),
-				Level:           l.level,
-				Left:            t.Smallest(),
-				Right:           t.Biggest(),
-				KeyCount:        count,
-				EstimatedSz:     t.EstimatedSize(),
-				IndexSz:         t.IndexSize(),
-				BloomFilterSize: t.BloomFilterSize(),
+				ID:               t.ID(),
+				Level:            l.level,
+				Left:             t.Smallest(),
+				Right:            t.Biggest(),
+				KeyCount:         t.KeyCount(),
+				EstimatedSz:      t.EstimatedSize(),
+				IndexSz:          t.IndexSize(),
+				BloomFilterSize:  t.BloomFilterSize(),
+				UncompressedSize: t.UncompressedSize(),
 			}
 			result = append(result, info)
 		}
