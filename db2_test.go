@@ -925,8 +925,9 @@ func TestIsClosed(t *testing.T) {
 
 }
 
+// This test is failing currently because we're returning version+1 from MaxVersion()
 func TestMaxVersion(t *testing.T) {
-	N := uint64(10000)
+	N := 10000
 	key := func(i int) []byte {
 		return []byte(fmt.Sprintf("%d%10d", i, i))
 	}
@@ -937,7 +938,7 @@ func TestMaxVersion(t *testing.T) {
 				txnSet(t, db, key(i), nil, 0)
 			}
 			ver := db.MaxVersion()
-			require.Equal(t, N, ver)
+			require.Equal(t, N, int(ver))
 		})
 	})
 	t.Run("multiple versions", func(t *testing.T) {
@@ -956,13 +957,13 @@ func TestMaxVersion(t *testing.T) {
 		k := make([]byte, 100)
 		rand.Read(k)
 		// Create multiple version of the same key.
-		for i := uint64(1); i <= N; i++ {
-			wb.SetEntryAt(&Entry{Key: k}, i)
+		for i := 1; i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: k}, uint64(i))
 		}
 		require.NoError(t, wb.Flush())
 
 		ver := db.MaxVersion()
-		require.Equal(t, N, ver)
+		require.Equal(t, N, int(ver))
 
 		require.NoError(t, db.Close())
 	})
@@ -979,15 +980,37 @@ func TestMaxVersion(t *testing.T) {
 		defer wb.Cancel()
 
 		// This will create commits from 1 to N.
-		for i := uint64(1); i <= N; i++ {
-			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("%d", i))}, i)
+		for i := 1; i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("%d", i))}, uint64(i))
 		}
 		require.NoError(t, wb.Flush())
 
 		ver := db.MaxVersion()
 		require.NoError(t, err)
-		require.Equal(t, N, ver)
+		require.Equal(t, N, int(ver))
 
 		require.NoError(t, db.Close())
 	})
+}
+
+func TestTxnReadTs(t *testing.T) {
+	t.Skip()
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt := DefaultOptions(dir)
+	db, err := Open(opt)
+	require.NoError(t, err)
+	require.Equal(t, 0, int(db.orc.readTs()))
+
+	txnSet(t, db, []byte("foo"), nil, 0)
+	require.Equal(t, 1, int(db.orc.readTs()))
+	require.NoError(t, db.Close())
+	require.Equal(t, 1, int(db.orc.readTs()))
+
+	db, err = Open(opt)
+	require.NoError(t, err)
+	// Shouldn't this be 1? Why would the readTS change?
+	require.Equal(t, 2, int(db.orc.readTs()))
 }

@@ -348,7 +348,7 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 				dropPrefixes: prefixes,
 			}
 			if err := s.runCompactDef(l.level, cd); err != nil {
-				opt.Warningf("While running compact def: %+v. Error: %v", cd, err)
+				panic(err)
 				return err
 			}
 		}
@@ -402,6 +402,7 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 				case errFillTables:
 					// pass
 				default:
+					panic(err)
 					s.kv.opt.Warningf("While running doCompact: %v\n", err)
 				}
 			}

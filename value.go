@@ -611,8 +611,7 @@ func (vlog *valueLog) open(db *DB) error {
 		if err := lf.open(vlog.fpath(fid), os.O_RDWR, vlog.opt); err != nil {
 			return errors.Wrapf(err, "Open existing file: %q", lf.path)
 		}
-		if lf.size == vlogHeaderSize {
-			fmt.Printf("Deleting empty file: %s\n", lf.path)
+		if lf.size == vlogHeaderSize && fid != vlog.maxFid {
 			vlog.opt.Infof("Deleting empty file: %s", lf.path)
 			if err := lf.Delete(); err != nil {
 				return errors.Wrapf(err, "while trying to delete empty file: %s", lf.path)

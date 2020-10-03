@@ -375,6 +375,7 @@ func (db *DB) MaxVersion() uint64 {
 			maxVersion = a
 		}
 	}
+	update(db.mt.maxVersion)
 	for _, mt := range db.imm {
 		update(mt.maxVersion)
 	}
