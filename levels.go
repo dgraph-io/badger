@@ -968,10 +968,10 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 		len(newTables), time.Since(timeStart))
 
 	if cd.thisLevel.level != 0 && len(newTables) > 20 {
-		s.kv.opt.Infof("This Range\nLeft:\n%s\nRight:\n%s\n", hex.Dump(cd.thisRange.left),
-			hex.Dump(cd.thisRange.right))
-		s.kv.opt.Infof("Next Range\nLeft:\n%s\nRight:\n%s\n", hex.Dump(cd.nextRange.left),
-			hex.Dump(cd.nextRange.right))
+		s.kv.opt.Infof("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+			len(cd.top), hex.Dump(cd.thisRange.left), hex.Dump(cd.thisRange.right))
+		s.kv.opt.Infof("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+			len(cd.bot), hex.Dump(cd.nextRange.left), hex.Dump(cd.nextRange.right))
 	}
 	return nil
 }
