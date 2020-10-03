@@ -313,11 +313,10 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	} else {
 		go func() {
 			for {
-				time.Sleep(30 * time.Second)
 				select {
 				case <-c.HasBeenClosed():
 					return
-				default:
+				case <-time.After(30 * time.Second):
 					readTest(db, 5*time.Minute)
 				}
 			}

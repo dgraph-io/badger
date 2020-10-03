@@ -447,6 +447,21 @@ func (db *DB) monitorCache(c *z.Closer) {
 		return
 	}
 	count := 0
+	analyze := func(name string, metrics *ristretto.Metrics) {
+		// If the mean life expectancy is less than 10 seconds, the cache
+		// might be too small.
+		le := metrics.LifeExpectancySeconds()
+		lifeTooShort := le.Count > 0 && float64(le.Sum)/float64(le.Count) < 10
+		hitRatioTooLow := metrics.Ratio() > 0 && metrics.Ratio() < 0.4
+		if lifeTooShort && hitRatioTooLow {
+			db.opt.Warningf("%s might be too small. Metrics: %s\n", name, metrics)
+			db.opt.Warningf("Cache life expectancy (in seconds): %+v\n", le)
+
+		} else if le.Count > 1000 && count%5 == 0 {
+			db.opt.Infof("%s metrics: %s\n", name, metrics)
+		}
+	}
+
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 	for {
@@ -457,18 +472,8 @@ func (db *DB) monitorCache(c *z.Closer) {
 		}
 
 		count++
-		metrics := db.BlockCacheMetrics()
-		// If the mean life expectancy is less than 10 seconds, the cache
-		// might be too small.
-		le := metrics.LifeExpectancySeconds()
-		lifeTooShort := le.Count > 0 && float64(le.Sum)/float64(le.Count) < 10
-		hitRatioTooLow := metrics.Ratio() > 0 && metrics.Ratio() < 0.4
-		if lifeTooShort && hitRatioTooLow {
-			db.opt.Warningf("Block Cache might be too small. Metrics: %s\n", metrics)
-			db.opt.Warningf("Cache life expectancy (in seconds): %+v\n", le)
-		} else if count%5 == 0 {
-			db.opt.Infof("Block Cache metrics: %s\n", metrics)
-		}
+		analyze("Block cache", db.BlockCacheMetrics())
+		analyze("Index cache", db.IndexCacheMetrics())
 	}
 }
 

@@ -541,7 +541,8 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len())); err != nil {
 		return nil, errors.Wrapf(err,
-			"failed to read from file: %s at offset: %d, len: %d", t.fd.Name(), blk.offset, ko.Len())
+			"failed to read from file: %s at offset: %d, len: %d",
+			t.fd.Name(), blk.offset, ko.Len())
 	}
 
 	if t.shouldDecrypt() {

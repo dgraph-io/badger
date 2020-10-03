@@ -495,7 +495,7 @@ func TestCompactionFilePicking(t *testing.T) {
 	}
 
 	tables := db.lc.levels[2].tables
-	db.lc.sortByOverlap(tables, cdef)
+	db.lc.sortByHeuristic(tables, cdef)
 
 	var expKey [8]byte
 	// First table should be with smallest and biggest keys as 1 and 4.
