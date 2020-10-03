@@ -1447,9 +1447,9 @@ func (db *DB) KeySplits(prefix []byte) []string {
 	// If the number of splits is still < 32, then look at the memtables.
 	if len(splits) < 32 {
 		maxPerSplit := 10000
-		mtSplits := func(mt *skl.Skiplist) {
+		mtSplits := func(mt *memTable) {
 			count := 0
-			iter := mt.NewIterator()
+			iter := mt.sl.NewIterator()
 			for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 				if count%maxPerSplit == 0 {
 					// Add a split every maxPerSplit keys.
@@ -1464,9 +1464,9 @@ func (db *DB) KeySplits(prefix []byte) []string {
 
 		db.Lock()
 		defer db.Unlock()
-		memtables := make([]*skl.Skiplist, 0)
-		memtables = append(memtables, db.imm...)
-		for _, mt := range memtables {
+		var memTables []*memTable
+		memTables = append(memTables, db.imm...)
+		for _, mt := range memTables {
 			mtSplits(mt)
 		}
 		mtSplits(db.mt)
