@@ -93,6 +93,9 @@ func (rcv *TableIndex) MutateEstimatedSize(n uint32) bool {
 }
 
 func (rcv *TableIndex) MaxVersion() uint64 {
+	if rcv == nil {
+		return 0
+	}
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
 	if o != 0 {
 		return rcv._tab.GetUint64(o + rcv._tab.Pos)
