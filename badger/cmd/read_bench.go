@@ -179,7 +179,7 @@ func lookupForKey(db *badger.DB, key []byte) (sz uint64) {
 		defer it.Close()
 
 		cnt := 0
-		for it.Rewind(); it.Valid(); it.Next() {
+		for it.Seek(key); it.Valid(); it.Next() {
 			itm := it.Item()
 			sz += uint64(itm.EstimatedSize())
 			cnt++

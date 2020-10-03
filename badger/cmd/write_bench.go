@@ -88,7 +88,7 @@ const (
 func init() {
 	benchCmd.AddCommand(writeBenchCmd)
 	writeBenchCmd.Flags().IntVarP(&keySz, "key-size", "k", 32, "Size of key")
-	writeBenchCmd.Flags().IntVarP(&valSz, "val-size", "v", 128, "Size of value")
+	writeBenchCmd.Flags().IntVar(&valSz, "val-size", 128, "Size of value")
 	writeBenchCmd.Flags().Float64VarP(&numKeys, "keys-mil", "m", 10.0,
 		"Number of keys to add in millions")
 	writeBenchCmd.Flags().BoolVar(&syncWrites, "sync", true,
@@ -96,7 +96,7 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&force, "force-compact", "f", true,
 		"Force compact level 0 on close.")
 	writeBenchCmd.Flags().BoolVarP(&sorted, "sorted", "s", false, "Write keys in sorted order.")
-	writeBenchCmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "Show Badger logs.")
+	writeBenchCmd.Flags().BoolVarP(&showLogs, "verbose", "v", false, "Show Badger logs.")
 	writeBenchCmd.Flags().IntVarP(&valueThreshold, "value-th", "t", 1<<10, "Value threshold")
 	writeBenchCmd.Flags().IntVarP(&numVersions, "num-version", "n", 1, "Number of versions to keep")
 	writeBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache", 0,
@@ -311,14 +311,11 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		err = writeSorted(db, num)
 	} else {
 		go func() {
-			tick := time.NewTicker(10 * time.Minute)
-			defer tick.Stop()
-
 			for {
 				select {
 				case <-c.HasBeenClosed():
 					return
-				case <-tick.C:
+				default:
 					readTest(db, 5*time.Minute)
 				}
 			}

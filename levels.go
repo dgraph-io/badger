@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"os"
@@ -962,6 +963,13 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	s.kv.opt.Infof("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
 		thisLevel.level, nextLevel.level, len(cd.top)+len(cd.bot),
 		len(newTables), time.Since(timeStart))
+
+	if cd.thisLevel.level != 0 && len(newTables) > 20 {
+		s.kv.opt.Infof("This Range\nLeft: %s\nRight: %s", hex.Dump(cd.thisRange.left),
+			hex.Dump(cd.thisRange.right))
+		s.kv.opt.Infof("Next Range\nLeft: %s\nRight: %s", hex.Dump(cd.nextRange.left),
+			hex.Dump(cd.nextRange.right))
+	}
 	return nil
 }
 
@@ -999,14 +1007,12 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 
 	s.kv.opt.Infof("[Compactor: %d] Running compaction: %+v for level: %d\n",
 		id, p, cd.thisLevel.level)
-	s.cstatus.toLog(cd.elog)
 	if err := s.runCompactDef(l, cd); err != nil {
 		// This compaction couldn't be done successfully.
 		s.kv.opt.Warningf("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)
 		return err
 	}
 
-	s.cstatus.toLog(cd.elog)
 	s.kv.opt.Infof("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
 	return nil
 }
