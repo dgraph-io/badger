@@ -112,7 +112,7 @@ func init() {
 		"Load Bloom filter on DB open.")
 	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", true,
 		"If true, it badger will detect the conflicts")
-	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
+	writeBenchCmd.Flags().BoolVar(&compression, "compression", true,
 		"If true, badger will use ZSTD mode")
 	writeBenchCmd.Flags().BoolVar(&showDir, "show-dir", false,
 		"If true, the report will include the directory contents")
@@ -160,6 +160,34 @@ func writeRandom(db *badger.DB, num uint64) error {
 		atomic.AddUint64(&sizeWritten, es)
 	}
 	return batch.Flush()
+}
+
+func readTest(db *badger.DB, dur time.Duration) {
+	now := time.Now()
+	keys, err := getSampleKeys(db)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("*********************************************************")
+	fmt.Printf("Total Sampled Keys: %d, read in time: %s\n", len(keys), time.Since(now))
+	fmt.Println("*********************************************************")
+
+	if len(keys) == 0 {
+		fmt.Println("DB is empty, hence returning")
+		return
+	}
+	c := z.NewCloser(0)
+	readStartTime := time.Now()
+	for i := 0; i < numGoroutines; i++ {
+		c.AddRunning(1)
+		go readKeys(db, c, keys)
+	}
+
+	// also start printing stats
+	c.AddRunning(1)
+	go printReadStats(c, readStartTime)
+	<-time.After(dur)
+	c.SignalAndWait()
 }
 
 func writeSorted(db *badger.DB, num uint64) error {
@@ -281,6 +309,19 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	if sorted {
 		err = writeSorted(db, num)
 	} else {
+		go func() {
+			tick := time.NewTicker(10 * time.Minute)
+			defer tick.Stop()
+
+			for {
+				select {
+				case <-c.HasBeenClosed():
+					return
+				case <-tick.C:
+					readTest(db, 5*time.Minute)
+				}
+			}
+		}()
 		err = writeRandom(db, num)
 	}
 
@@ -362,7 +403,7 @@ func reportStats(c *z.Closer, db *badger.DB) {
 			entries := atomic.LoadUint64(&entriesWritten)
 			bytesRate := sz / uint64(dur.Seconds())
 			entriesRate := entries / uint64(dur.Seconds())
-			fmt.Printf("Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
+			fmt.Printf("[WRITE] Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
 				"entries written: %d, speed: %d/sec, gcSuccess: %d\n", y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate, gcSuccess)
 		}
@@ -449,6 +490,28 @@ func dropPrefix(c *z.Closer, db *badger.DB) {
 			} else {
 				fmt.Println("[DropPrefix] Successful")
 			}
+		}
+	}
+}
+
+func printReadStats(c *z.Closer, startTime time.Time) {
+	defer c.Done()
+
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			return
+		case <-t.C:
+			dur := time.Since(startTime)
+			sz := atomic.LoadUint64(&sizeRead)
+			entries := atomic.LoadUint64(&entriesRead)
+			bytesRate := sz / uint64(dur.Seconds())
+			entriesRate := entries / uint64(dur.Seconds())
+			fmt.Printf("[READ] Time elapsed: %s, bytes read: %s, speed: %s/sec, "+
+				"entries read: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
+				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
 		}
 	}
 }

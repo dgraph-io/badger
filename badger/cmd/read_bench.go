@@ -120,7 +120,6 @@ func readBench(cmd *cobra.Command, args []string) error {
 		return y.Wrapf(err, "unable to open DB")
 	}
 	defer db.Close()
-	now := time.Now()
 
 	fmt.Println("*********************************************************")
 	fmt.Println("Starting to benchmark Reads")
@@ -131,32 +130,7 @@ func readBench(cmd *cobra.Command, args []string) error {
 		fullScanDB(db)
 		return nil
 	}
-	keys, err := getSampleKeys(db)
-	if err != nil {
-		return y.Wrapf(err, "error while sampling keys")
-	}
-	fmt.Println("*********************************************************")
-	fmt.Printf("Total Sampled Keys: %d, read in time: %s\n", len(keys), time.Since(now))
-	fmt.Println("*********************************************************")
-
-	if len(keys) == 0 {
-		fmt.Println("DB is empty, hence returning")
-		return nil
-	}
-	c := z.NewCloser(0)
-	startTime = time.Now()
-	for i := 0; i < numGoroutines; i++ {
-		c.AddRunning(1)
-		go readKeys(db, c, keys)
-	}
-
-	// also start printing stats
-	c.AddRunning(1)
-	go printStats(c)
-
-	<-time.After(dur)
-	c.SignalAndWait()
-
+	readTest(db, dur)
 	return nil
 }
 
@@ -199,16 +173,20 @@ func readKeys(db *badger.DB, c *z.Closer, keys [][]byte) {
 
 func lookupForKey(db *badger.DB, key []byte) (sz uint64) {
 	err := db.View(func(txn *badger.Txn) error {
-		itm, err := txn.Get(key)
-		y.Check(err)
+		iopt := badger.DefaultIteratorOptions
+		iopt.AllVersions = true
+		it := txn.NewKeyIterator(key, iopt)
+		defer it.Close()
 
-		if keysOnly {
-			sz = uint64(itm.KeySize())
-		} else {
-			y.Check2(itm.ValueCopy(nil))
-			sz = uint64(itm.EstimatedSize())
+		cnt := 0
+		for it.Rewind(); it.Valid(); it.Next() {
+			itm := it.Item()
+			sz += uint64(itm.EstimatedSize())
+			cnt++
+			if cnt == 10 {
+				break
+			}
 		}
-
 		return nil
 	})
 	y.Check(err)
