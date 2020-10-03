@@ -21,6 +21,7 @@ import (
 	"math"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/dgryski/go-farm"
@@ -74,9 +75,10 @@ type bblock struct {
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	buf     []byte
-	sz      uint32
-	bufLock sync.Mutex // This lock guards the buf. We acquire lock when we resize the buf.
+	buf        []byte
+	sz         uint32
+	bufLock    sync.Mutex // This lock guards the buf. We acquire lock when we resize the buf.
+	actualSize uint32     // Used to store the sum of sizes of blocks after compression/encryption.
 
 	baseKey      []byte   // Base key for the current block.
 	baseOffset   uint32   // Offset for the current block.
@@ -151,6 +153,9 @@ func (b *Builder) handleBlock() {
 		// Copy over compressed/encrypted data back to the main buffer.
 		copy(b.buf[item.start:], blockBuf)
 		b.bufLock.Unlock()
+
+		// Add the actual size of current block.
+		atomic.AddUint32(&b.actualSize, uint32(len(blockBuf)))
 
 		// Fix the boundary of the block.
 		item.end = item.start + uint32(len(blockBuf))
@@ -273,6 +278,7 @@ func (b *Builder) finishBlock() {
 	// If compression/encryption is disabled, no need to send the block to the blockChan.
 	// There's nothing to be done.
 	if b.blockChan == nil {
+		atomic.StoreUint32(&b.actualSize, b.sz)
 		b.addBlockToIndex()
 		return
 	}
@@ -346,8 +352,8 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 // at the end. The diff can vary.
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
-func (b *Builder) ReachedCapacity(cap int64) bool {
-	blocksSize := b.sz + // length of current buffer
+func (b *Builder) ReachedCapacity(capacity uint64) bool {
+	blocksSize := atomic.LoadUint32(&b.actualSize) + // actual length of current buffer
 		uint32(len(b.entryOffsets)*4) + // all entry offsets size
 		4 + // count of all entry offsets
 		8 + // checksum bytes
@@ -356,7 +362,7 @@ func (b *Builder) ReachedCapacity(cap int64) bool {
 		4 + // Index length
 		5*(uint32(len(b.tableIndex.Offsets))) // approximate index size
 
-	return int64(estimateSz) > cap
+	return uint64(estimateSz) > capacity
 }
 
 // Finish finishes the table by appending the index.
