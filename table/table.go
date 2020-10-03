@@ -452,6 +452,7 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 
 	// No cache
 	if t.opt.IndexCache == nil {
+		// If there's no encryption, this points to the mmap'ed buffer.
 		t.index = index
 	}
 	var bo fb.BlockOffset
