@@ -161,7 +161,7 @@ func checkAndSetOptions(opt *Options) error {
 }
 
 // Open returns a new DB object.
-func Open(opt Options) (db *DB, err error) {
+func Open(opt Options) (*DB, error) {
 	if err := checkAndSetOptions(&opt); err != nil {
 		return nil, err
 	}
@@ -174,6 +174,7 @@ func Open(opt Options) (db *DB, err error) {
 		if err := createDirs(opt); err != nil {
 			return nil, err
 		}
+		var err error
 		if !opt.BypassLockGuard {
 			dirLockGuard, err = acquireDirectoryLock(opt.Dir, lockFile, opt.ReadOnly)
 			if err != nil {
@@ -216,7 +217,7 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}()
 
-	db = &DB{
+	db := &DB{
 		imm:           make([]*memTable, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
@@ -230,7 +231,7 @@ func Open(opt Options) (db *DB, err error) {
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
 		if err != nil {
-			opt.Errorf("Received err: %v. Cleaning up...", err)
+			opt.Errorf("Received err: %v. Cleaning up... %t", err, db == nil)
 			db.cleanup()
 			db = nil
 		}
@@ -754,7 +755,7 @@ func (db *DB) writeToLSM(b *request) error {
 		}
 	}
 	if db.opt.SyncWrites {
-		return db.mt.wal.sync()
+		return db.mt.SyncWAL()
 	}
 	return nil
 }
@@ -808,7 +809,7 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 	}
 	if db.opt.SyncWrites {
-		if err := db.mt.wal.sync(); err != nil {
+		if err := db.mt.SyncWAL(); err != nil {
 			done(err)
 			return err
 		}
@@ -959,7 +960,9 @@ func (db *DB) ensureRoomForWrite() error {
 	// db.head. Hence we are limiting no of value log files to be read to db.logRotates only.
 	forceFlush := atomic.LoadInt32(&db.logRotates) >= db.opt.LogRotatesToFlush
 
-	if !forceFlush {
+	// We don't need to force flush the memtable in in-memory mode because of
+	// the size of the wal will always be zero.
+	if !forceFlush && !db.opt.InMemory {
 		// Force flush if memTable WAL is getting filled up.
 		forceFlush = int64(db.mt.wal.writeAt) > db.opt.ValueLogFileSize
 	}
@@ -978,7 +981,7 @@ func (db *DB) ensureRoomForWrite() error {
 		if err = db.vlog.sync(); err != nil {
 			return err
 		}
-		if err = db.mt.wal.sync(); err != nil {
+		if err = db.mt.SyncWAL(); err != nil {
 			return err
 		}
 

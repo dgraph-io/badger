@@ -18,6 +18,7 @@ package badger
 
 import (
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path"
 	"sort"
@@ -52,7 +53,16 @@ func initDiscardStats(opt Options) (*discardStats, error) {
 		opt:      opt,
 	}
 	if err == z.NewFile {
-		z.ZeroOut(mf.Data, 0, 1<<30)
+		// TODO: Do we need to zero out the complete 1 GB of file?
+		// z.ZeroOut(mf.Data, 0, 1<<30)
+		// TODO: The following code is for verifying if we need to zero out the
+		// file. We should remove this code later.
+		for _, i := range mf.Data {
+			if i != 0 {
+				fmt.Printf("i = %+v\n", i)
+				panic("not zero")
+			}
+		}
 
 	} else if err != nil {
 		return nil, errors.Wrapf(err, "while opening file: %s\n", discardFname)
@@ -132,17 +142,24 @@ func (lf *discardStats) Update(fidu uint32, discard int64) int64 {
 	return int64(discard)
 }
 
+func (lf *discardStats) iterate(f func(fid, stats uint64)) {
+	for slot := 0; slot < lf.nextEmptySlot; slot++ {
+		idx := 16 * slot
+		f(lf.get(idx), lf.get(idx+8))
+	}
+}
+
 // MaxDiscard returns the file id with maximum discard bytes.
 func (lf *discardStats) MaxDiscard() (uint32, int64) {
 	lf.Lock()
 	defer lf.Unlock()
 
 	var maxFid, maxVal uint64
-	for slot := 0; slot < lf.nextEmptySlot; slot++ {
-		if val := lf.get(slot*16 + 8); maxVal < val {
+	lf.iterate(func(fid, val uint64) {
+		if maxVal < val {
 			maxVal = val
-			maxFid = lf.get(slot * 16)
+			maxFid = fid
 		}
-	}
+	})
 	return uint32(maxFid), int64(maxVal)
 }
