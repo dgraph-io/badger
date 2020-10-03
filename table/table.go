@@ -354,6 +354,7 @@ func (t *Table) initBiggestAndSmallest() error {
 		return errors.Wrapf(err, "failed to read index.")
 	}
 
+	y.AssertTrue(t.index != nil)
 	t.smallest = ko.KeyBytes()
 
 	it2 := t.NewIterator(REVERSED | NOCACHE)
