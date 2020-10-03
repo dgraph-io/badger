@@ -53,6 +53,10 @@ type memTable struct {
 }
 
 func (db *DB) openMemTables(opt Options) error {
+	// We don't need to open any tables in in-memory mode.
+	if db.opt.InMemory {
+		return nil
+	}
 	files, err := ioutil.ReadDir(db.opt.Dir)
 	if err != nil {
 		return errFile(err, db.opt.Dir, "Unable to open mem dir.")
@@ -94,22 +98,25 @@ const memFileExt string = ".mem"
 
 func (db *DB) openMemTable(fid int) (*memTable, error) {
 	filepath := db.mtFilePath(fid)
-	lf := &logFile{
+	s := skl.NewSkiplist(arenaSize(db.opt))
+	mt := &memTable{
+		sl:  s,
+		opt: db.opt,
+		buf: &bytes.Buffer{},
+	}
+	// We don't need to create the wal for the skiplist so return the mt.
+	if db.opt.InMemory {
+		return mt, z.NewFile
+	}
+	mt.wal = &logFile{
 		fid:      uint32(fid),
 		path:     filepath,
 		registry: db.registry,
 		writeAt:  vlogHeaderSize,
 	}
-	lerr := lf.open(filepath, os.O_RDWR|os.O_CREATE, db.opt)
+	lerr := mt.wal.open(filepath, os.O_RDWR|os.O_CREATE, db.opt)
 	if lerr != z.NewFile && lerr != nil {
 		return nil, errors.Wrapf(lerr, "While opening mem table")
-	}
-	s := skl.NewSkiplist(arenaSize(db.opt))
-	mt := &memTable{
-		wal: lf,
-		sl:  s,
-		opt: db.opt,
-		buf: &bytes.Buffer{},
 	}
 	s.OnClose = func() {
 		if err := mt.wal.Delete(); err != nil {
@@ -117,11 +124,9 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 		}
 	}
 	if lerr == z.NewFile {
-		db.opt.Errorf("NewFile 123")
 		return mt, lerr
 	}
 	err := mt.UpdateSkipList()
-	db.opt.Errorf("update skip list")
 	return mt, err
 }
 
@@ -146,6 +151,13 @@ func (db *DB) mtFilePath(fid int) string {
 	return path.Join(db.opt.Dir, fmt.Sprintf("%05d%s", fid, memFileExt))
 }
 
+func (mt *memTable) SyncWAL() error {
+	if mt.wal != nil {
+		return mt.wal.sync()
+	}
+	return nil
+}
+
 func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
 	entry := &Entry{
 		Key:       key,
@@ -155,10 +167,13 @@ func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
 		ExpiresAt: value.ExpiresAt,
 	}
 
-	// If WAL exceeds opt.ValueLogFileSize, we'll force flush the memTable. See logic in
-	// ensureRoomForWrite.
-	if err := mt.wal.writeEntry(mt.buf, entry, mt.opt); err != nil {
-		return errors.Wrapf(err, "cannot write entry to WAL file")
+	// wal is nil only when badger in running in in-memory mode and we don't need the wal.
+	if mt.wal != nil {
+		// If WAL exceeds opt.ValueLogFileSize, we'll force flush the memTable. See logic in
+		// ensureRoomForWrite.
+		if err := mt.wal.writeEntry(mt.buf, entry, mt.opt); err != nil {
+			return errors.Wrapf(err, "cannot write entry to WAL file")
+		}
 	}
 	mt.sl.Put(key, value)
 	return nil

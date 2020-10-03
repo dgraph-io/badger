@@ -37,11 +37,8 @@ import (
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
-	"github.com/dgraph-io/badger/v2/skl"
 	"github.com/dgraph-io/badger/v2/y"
 )
-
-var mmap = flag.Bool("vlog_mmap", true, "Specify if value log must be memory-mapped")
 
 // summary is produced when DB is closed. Currently it is used only for testing.
 type summary struct {
@@ -73,9 +70,6 @@ func getTestOptions(dir string) Options {
 		WithMaxTableSize(1 << 15). // Force more compaction.
 		WithLevelOneSize(4 << 15). // Force more compaction.
 		WithSyncWrites(false)
-	if !*mmap {
-		return opt.WithValueLogLoadingMode(options.FileIO)
-	}
 	return opt
 }
 
@@ -2019,42 +2013,7 @@ func TestSyncForRace(t *testing.T) {
 	<-doneChan
 }
 
-// Earlier, if head is not pointing to latest Vlog file, then at replay badger used to crash with
-// index out of range panic. After fix in this commit it should not.
-func TestNoCrash(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err, "cannot create badger dir")
-	defer removeDir(dir)
-
-	ops := getTestOptions(dir)
-	ops.ValueLogMaxEntries = 1
-	ops.ValueThreshold = 32
-	db, err := Open(ops)
-	require.NoError(t, err, "unable to open db")
-
-	// entering 100 entries will generate 100 vlog files
-	for i := 0; i < 100; i++ {
-		err := db.Update(func(txn *Txn) error {
-			entry := NewEntry([]byte(fmt.Sprintf("key-%d", i)), []byte(fmt.Sprintf("val-%d", i)))
-			return txn.SetEntry(entry)
-		})
-		require.NoError(t, err, "update to db failed")
-	}
-
-	db.Lock()
-	// make head to point to second file. We cannot make it point to the first
-	// vlog file because we cannot push a zero head pointer.
-	db.vhead = valuePointer{1, 0, 0}
-	db.Unlock()
-	db.Close()
-
-	// reduce size of SSTable to flush early
-	ops.MaxTableSize = 1 << 10
-	db, err = Open(ops)
-	require.Nil(t, err, "error while opening db")
-	require.NoError(t, db.Close())
-}
-
+// TODO: This test might fail.
 func TestForceFlushMemtable(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err, "temp dir for badger count not be created")
@@ -2085,18 +2044,14 @@ func TestForceFlushMemtable(t *testing.T) {
 		mt.DecrRef()
 	}
 	db.imm = db.imm[:0]
-	db.mt = skl.NewSkiplist(arenaSize(db.opt)) // Set it up for future writes.
+	db.mt, err = db.newMemTable()
+	require.NoError(t, err)
 	db.Unlock()
 
-	// get latest value of value log head
-	headKey := y.KeyWithTs(head, math.MaxUint64)
-	vs, err := db.get(headKey)
-	require.NoError(t, err)
-	var vptr valuePointer
-	vptr.Decode(vs.Value)
 	// Since we are inserting 3 entries and ValueLogMaxEntries is 1, there will be 3 rotation. For
 	// 1st and 2nd time head flushed with memtable will have fid as 0 and last time it will be 1.
-	require.True(t, vptr.Fid == 1, fmt.Sprintf("expected fid: %d, actual fid: %d", 1, vptr.Fid))
+	require.True(t, db.nextMemFid == 2,
+		fmt.Sprintf("expected fid: %d, actual fid: %d", 2, db.nextMemFid))
 }
 
 func TestVerifyChecksum(t *testing.T) {

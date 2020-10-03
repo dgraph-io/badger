@@ -358,37 +358,6 @@ func BenchmarkDBOpen(b *testing.B) {
 	}
 }
 
-// Regression test for https://github.com/dgraph-io/badger/issues/830
-func TestDiscardMapTooBig(t *testing.T) {
-	createDiscardStats := func() map[uint32]int64 {
-		stat := map[uint32]int64{}
-		for i := uint32(0); i < 8000; i++ {
-			stat[i] = 0
-		}
-		return stat
-	}
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer removeDir(dir)
-
-	db, err := Open(DefaultOptions(dir))
-	require.NoError(t, err, "error while opening db")
-
-	// Add some data so that memtable flush happens on close.
-	require.NoError(t, db.Update(func(txn *Txn) error {
-		return txn.Set([]byte("foo"), []byte("bar"))
-	}))
-
-	// overwrite discardstat with large value
-	db.vlog.discardStats.m = createDiscardStats()
-
-	require.NoError(t, db.Close())
-	// reopen the same DB
-	db, err = Open(DefaultOptions(dir))
-	require.NoError(t, err, "error while opening db")
-	require.NoError(t, db.Close())
-}
-
 // Test for values of size uint32.
 func TestBigValues(t *testing.T) {
 	if !*manual {
@@ -620,7 +589,7 @@ func TestL0GCBug(t *testing.T) {
 	opts.ValueThreshold = 2
 	opts.KeepL0InMemory = true
 	// Setting LoadingMode to mmap seems to cause segmentation fault while closing DB.
-	opts.ValueLogLoadingMode = options.FileIO
+	// opts.ValueLogLoadingMode = options.FileIO
 	opts.TableLoadingMode = options.FileIO
 
 	db1, err := Open(opts)
@@ -742,9 +711,9 @@ func TestWindowsDataLoss(t *testing.T) {
 	}
 	// Don't use vlog.Close here. We don't want to fix the file size. Only un-mmap
 	// the data so that we can truncate the file durning the next vlog.Open.
-	require.NoError(t, y.Munmap(db.vlog.filesMap[db.vlog.maxFid].fmap))
+	require.NoError(t, y.Munmap(db.vlog.filesMap[db.vlog.maxFid].Data))
 	for _, f := range db.vlog.filesMap {
-		require.NoError(t, f.fd.Close())
+		require.NoError(t, f.Fd.Close())
 	}
 	require.NoError(t, db.registry.Close())
 	require.NoError(t, db.manifest.close())
