@@ -570,81 +570,69 @@ func TestValueChecksums(t *testing.T) {
 }
 
 // TODO: Do we need this test?
-// func TestPartialAppendToValueLog(t *testing.T) {
-// 	dir, err := ioutil.TempDir("", "badger-test")
-// 	require.NoError(t, err)
-// 	defer removeDir(dir)
+func TestPartialAppendToWAL(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
 
-// 	// Create skeleton files.
-// 	opts := getTestOptions(dir)
-// 	opts.Truncate = true
-// 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
-// 	opts.ValueThreshold = 32
-// 	kv, err := Open(opts)
-// 	require.NoError(t, err)
-// 	require.NoError(t, kv.Close())
+	// Create skeleton files.
+	opts := getTestOptions(dir)
+	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
+	opts.ValueThreshold = 32
+	kv, err := Open(opts)
+	require.NoError(t, err)
+	require.NoError(t, kv.Close())
 
-// 	var (
-// 		k0 = []byte("k0")
-// 		k1 = []byte("k1")
-// 		k2 = []byte("k2")
-// 		k3 = []byte("k3")
-// 		v0 = []byte("value0-01234567890123456789012012345678901234567890123")
-// 		v1 = []byte("value1-01234567890123456789012012345678901234567890123")
-// 		v2 = []byte("value2-01234567890123456789012012345678901234567890123")
-// 		v3 = []byte("value3-01234567890123456789012012345678901234567890123")
-// 	)
-// 	// Values need to be long enough to actually get written to value log.
-// 	require.True(t, len(v3) >= kv.opt.ValueThreshold)
+	var (
+		k0 = []byte("k0")
+		k1 = []byte("k1")
+		k2 = []byte("k2")
+		k3 = []byte("k3")
+		v0 = []byte("value0-01234567890123456789012012345678901234567890123")
+		v1 = []byte("value1-01234567890123456789012012345678901234567890123")
+		v2 = []byte("value2-01234567890123456789012012345678901234567890123")
+		v3 = []byte("value3-01234567890123456789012012345678901234567890123")
+	)
+	// Values need to be long enough to actually get written to value log.
+	require.True(t, len(v3) >= kv.opt.ValueThreshold)
 
-// 	// Create truncated vlog to simulate a partial append.
-// 	// k0 - single transaction, k1 and k2 in another transaction
-// 	buf := createVlog(t, []*Entry{
-// 		{Key: k0, Value: v0},
-// 		{Key: k1, Value: v1},
-// 		{Key: k2, Value: v2},
-// 	})
-// 	buf = buf[:len(buf)-6]
-// 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
+	// Create truncated vlog to simulate a partial append.
+	// k0 - single transaction, k1 and k2 in another transaction
+	buf, offset := createMemFile(t, []*Entry{
+		{Key: k0, Value: v0},
+		{Key: k1, Value: v1},
+		{Key: k2, Value: v2},
+	})
+	buf = buf[:offset-6]
+	require.NoError(t, ioutil.WriteFile(kv.mtFilePath(1), buf, 0777))
 
-// 	// Badger should now start up
-// 	kv, err = Open(opts)
-// 	require.NoError(t, err)
+	// Badger should now start up
+	kv, err = Open(opts)
+	require.NoError(t, err)
 
-// 	require.NoError(t, kv.View(func(txn *Txn) error {
-// 		item, err := txn.Get(k0)
-// 		require.NoError(t, err)
-// 		require.Equal(t, v0, getItemValue(t, item))
+	require.NoError(t, kv.View(func(txn *Txn) error {
+		item, err := txn.Get(k0)
+		require.NoError(t, err)
+		require.Equal(t, v0, getItemValue(t, item))
 
-// 		_, err = txn.Get(k1)
-// 		require.Equal(t, ErrKeyNotFound, err)
-// 		_, err = txn.Get(k2)
-// 		require.Equal(t, ErrKeyNotFound, err)
-// 		return nil
-// 	}))
+		_, err = txn.Get(k1)
+		require.Equal(t, ErrKeyNotFound, err)
+		_, err = txn.Get(k2)
+		require.Equal(t, ErrKeyNotFound, err)
+		return nil
+	}))
 
-// 	// When K3 is set, it should be persisted after a restart.
-// 	txnSet(t, kv, k3, v3, 0)
-// 	require.NoError(t, kv.Close())
-// 	kv, err = Open(opts)
-// 	require.NoError(t, err)
-// 	checkKeys(t, kv, [][]byte{k3})
-// 	// Replay value log from beginning, badger head is past k2.
-// 	require.NoError(t, kv.vlog.Close())
+	// When K3 is set, it should be persisted after a restart.
+	txnSet(t, kv, k3, v3, 0)
+	require.NoError(t, kv.Close())
+	kv, err = Open(opts)
+	require.NoError(t, err)
+	checkKeys(t, kv, [][]byte{k3})
+	// Replay value log from beginning, badger head is past k2.
+	require.NoError(t, kv.vlog.Close())
+}
 
-// 	// clean up the current db.vhead so that we can replay from the beginning.
-// 	// If we don't clear the current vhead, badger will error out since new
-// 	// head passed while opening vlog is zero in the following lines.
-// 	kv.vhead = valuePointer{}
-
-// 	kv.vlog.init(kv)
-// 	require.NoError(
-// 		t, kv.vlog.open(kv, valuePointer{Fid: 0}, kv.replayFunction()),
-// 	)
-// 	require.NoError(t, kv.Close())
-// }
-
-func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
+func TestReadOnlyOpenWithPartialAppendToWAL(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
@@ -672,7 +660,7 @@ func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 		{Key: k1, Value: v1},
 		{Key: k2, Value: v2},
 	})
-	buf = buf[:(offset)-6]
+	buf = buf[:offset-6]
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), buf, 0777))
 
 	opts.ReadOnly = true

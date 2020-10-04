@@ -35,9 +35,11 @@ func TestBuildRegistry(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
+
 	_, err = rand.Read(encryptionKey)
 	require.NoError(t, err)
 	opt := getRegistryTestOptions(dir, encryptionKey)
+
 	kr, err := OpenKeyRegistry(opt)
 	require.NoError(t, err)
 	dk, err := kr.latestDataKey()
@@ -50,6 +52,7 @@ func TestBuildRegistry(t *testing.T) {
 	require.Equal(t, 2, len(kr.dataKeys))
 	require.NoError(t, err)
 	require.NoError(t, kr.Close())
+
 	kr2, err := OpenKeyRegistry(opt)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(kr2.dataKeys))
