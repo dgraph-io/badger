@@ -772,9 +772,6 @@ func (db *DB) writeToLSM(b *request) error {
 	}
 
 	for i, entry := range b.Entries {
-		if entry.meta&bitFinTxn != 0 {
-			continue
-		}
 		var err error
 		if db.opt.skipVlog(entry) {
 			// Will include deletion / tombstone case.

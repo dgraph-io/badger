@@ -104,7 +104,7 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 		opt: db.opt,
 		buf: &bytes.Buffer{},
 	}
-	// We don't need to create the wal for the skiplist so return the mt.
+	// We don't need to create the wal for the skiplist in in-memory mode so return the mt.
 	if db.opt.InMemory {
 		return mt, z.NewFile
 	}
@@ -173,6 +173,10 @@ func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
 		if err := mt.wal.writeEntry(mt.buf, entry, mt.opt); err != nil {
 			return y.Wrapf(err, "cannot write entry to WAL file")
 		}
+	}
+	// We insert the finish marker in the WAL but not in the memtable.
+	if entry.meta&bitFinTxn > 0 {
+		return nil
 	}
 	mt.sl.Put(key, value)
 	if ts := y.ParseTs(entry.Key); ts > mt.maxVersion {

@@ -880,10 +880,19 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 			p.Fid = curlf.fid
 			p.Offset = vlog.woffset()
+			meta := e.meta
+			// We should not store transaction marks in the vlog file because
+			// it will never have all the entries in a transaction. If we store
+			// entries with transaction marks then value GC will not be able to
+			// iterate on the entire vlog file.
+			e.meta = e.meta &^ (bitTxn | bitFinTxn)
 			plen, err := curlf.encodeEntry(buf, e, p.Offset) // Now encode the entry into buffer.
 			if err != nil {
 				return err
 			}
+			// TODO(Naman): Add a test for this.
+			// Reset the meta.
+			e.meta = meta
 			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
 			if err := write(buf); err != nil {

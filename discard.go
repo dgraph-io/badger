@@ -41,6 +41,7 @@ const discardFname string = "DISCARD"
 const discardFsize int = 1 << 30
 const maxSlot int = 64 << 20
 
+// TODO(naman): Add a test for this.
 func initDiscardStats(opt Options) (*discardStats, error) {
 	fname := path.Join(opt.ValueDir, discardFname)
 
@@ -76,8 +77,8 @@ func (lf *discardStats) Less(i, j int) bool {
 	return lf.get(16*i) < lf.get(16*j)
 }
 func (lf *discardStats) Swap(i, j int) {
-	left := lf.Data[16*i : 17*i]
-	right := lf.Data[16*j : 17*j]
+	left := lf.Data[16*i : (16*i)+16]
+	right := lf.Data[16*j : (16*j)*16]
 	var tmp [16]byte
 	copy(tmp[:], left)
 	copy(left, right)

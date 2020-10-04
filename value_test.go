@@ -24,7 +24,6 @@ import (
 	"math/rand"
 	"os"
 	"reflect"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -269,6 +268,7 @@ func TestValueGC2(t *testing.T) {
 			return nil
 		}))
 	}
+	// Moved entries.
 	for i := 10; i < 100; i++ {
 		key := []byte(fmt.Sprintf("key%d", i))
 		require.NoError(t, kv.View(func(txn *Txn) error {
@@ -470,8 +470,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 		persistedMap[fid] = val
 	})
 
-	err = db.Close()
-	require.NoError(t, err)
+	require.NoError(t, db.Close())
 
 	// Avoid running compactors on reopening badger.
 	opt.NumCompactors = 0
@@ -488,7 +487,7 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	db.vlog.discardStats.Unlock()
 }
 
-func TestChecksums(t *testing.T) {
+func TestValueChecksums(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
@@ -496,7 +495,7 @@ func TestChecksums(t *testing.T) {
 	// Set up SST with K1=V1
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
-	opts.ValueThreshold = 32
+	opts.VerifyValueChecksum = true
 	kv, err := Open(opts)
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
@@ -511,23 +510,22 @@ func TestChecksums(t *testing.T) {
 		v2 = []byte("value2-012345678901234567890123012345678901234567890123")
 		v3 = []byte("value3-012345678901234567890123012345678901234567890123")
 	)
-	// Make sure the value log would actually store the item
-	require.True(t, len(v0) >= kv.opt.ValueThreshold)
 
 	// Use a vlog with K0=V0 and a (corrupted) second transaction(k1,k2)
-	buf := createVlog(t, []*Entry{
+	buf, offset := createMemFile(t, []*Entry{
 		{Key: k0, Value: v0},
 		{Key: k1, Value: v1},
 		{Key: k2, Value: v2},
 	})
-	buf[len(buf)-1]++ // Corrupt last byte
-	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
+	buf[offset-1]++ // Corrupt last byte
+	require.NoError(t, ioutil.WriteFile(kv.mtFilePath(1), buf, 0777))
 
 	// K1 should exist, but K2 shouldn't.
 	kv, err = Open(opts)
 	require.NoError(t, err)
 
 	require.NoError(t, kv.View(func(txn *Txn) error {
+		// Replay should have added K0.
 		item, err := txn.Get(k0)
 		require.NoError(t, err)
 		require.Equal(t, getItemValue(t, item), v0)
@@ -544,7 +542,7 @@ func TestChecksums(t *testing.T) {
 	txnSet(t, kv, k3, v3, 0)
 	require.NoError(t, kv.Close())
 
-	// The vlog should contain K0 and K3 (K1 and k2 was lost when Badger started up
+	// The DB should contain K0 and K3 (K1 and k2 was lost when Badger started up
 	// last due to checksum failure).
 	kv, err = Open(opts)
 	require.NoError(t, err)
@@ -669,12 +667,12 @@ func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 
 	// Create truncated vlog to simulate a partial append.
 	// k0 - single transaction, k1 and k2 in another transaction
-	buf := createVlog(t, []*Entry{
+	buf, offset := createMemFile(t, []*Entry{
 		{Key: k0, Value: v0},
 		{Key: k1, Value: v1},
 		{Key: k2, Value: v2},
 	})
-	buf = buf[:len(buf)-6]
+	buf = buf[:(offset)-6]
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), buf, 0777))
 
 	opts.ReadOnly = true
@@ -721,7 +719,8 @@ func TestValueLogTrigger(t *testing.T) {
 	require.Equal(t, ErrRejected, err, "Error should be returned after closing DB.")
 }
 
-func createVlog(t *testing.T, entries []*Entry) []byte {
+// createMemFile creates a new memFile and returns the last valid offset.
+func createMemFile(t *testing.T, entries []*Entry) ([]byte, uint32) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
@@ -730,46 +729,62 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
 	kv, err := Open(opts)
 	require.NoError(t, err)
+	defer kv.Close()
+
 	txnSet(t, kv, entries[0].Key, entries[0].Value, entries[0].meta)
+
 	entries = entries[1:]
 	txn := kv.NewTransaction(true)
 	for _, entry := range entries {
 		require.NoError(t, txn.SetEntry(NewEntry(entry.Key, entry.Value).WithMeta(entry.meta)))
 	}
 	require.NoError(t, txn.Commit())
-	require.NoError(t, kv.Close())
 
-	filename := vlogFilePath(dir, 1)
+	filename := kv.mtFilePath(1)
 	buf, err := ioutil.ReadFile(filename)
 	require.NoError(t, err)
-	return buf
+	return buf, kv.mt.wal.writeAt
 }
 
-func TestPenultimateLogCorruption(t *testing.T) {
+// This test creates two mem files and corrupts the last bit of the first file.
+func TestPenultimateMemCorruption(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
-	// Each txn generates at least two entries. 3 txns will fit each file.
-	opt.ValueLogMaxEntries = 5
-	opt.LogRotatesToFlush = 1000
 
 	db0, err := Open(opt)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, db0.Close()) }()
 
 	h := testHelper{db: db0, t: t}
-	h.writeRange(0, 7)
+	h.writeRange(0, 2) // 00001.mem
+
+	// Move the current memtable to the db.imm and create a new memtable so
+	// that we can have more than one mem files.
+	require.Zero(t, len(db0.imm))
+	db0.imm = append(db0.imm, db0.mt)
+	db0.mt, err = db0.newMemTable()
+
+	h.writeRange(3, 7) // 00002.mem
+
+	// Verify we have all the data we wrote.
 	h.readRange(0, 7)
 
-	for i := 2; i >= 0; i-- {
-		fpath := vlogFilePath(dir, uint32(i))
+	for i := 2; i >= 1; i-- {
+		fpath := db0.mtFilePath(i)
 		fi, err := os.Stat(fpath)
 		require.NoError(t, err)
 		require.True(t, fi.Size() > 0, "Empty file at log=%d", i)
-		if i == 0 {
-			err := os.Truncate(fpath, fi.Size()-1)
+		if i == 1 {
+			// This should corrupt the last entry in the first memtable (that is entry number 2)
+			wal := db0.imm[0].wal
+			wal.Fd.WriteAt([]byte{0}, int64(wal.writeAt-1))
 			require.NoError(t, err)
+			// We have corrupted the file. We can remove it. If we don't remove
+			// the imm here, the db.close in defer will crash since db0.mt !=
+			// db0.imm[0]
+			db0.imm = db0.imm[:0]
 		}
 	}
 	// Simulate a crash by not closing db0, but releasing the locks.
@@ -785,7 +800,8 @@ func TestPenultimateLogCorruption(t *testing.T) {
 	db1, err := Open(opt)
 	require.NoError(t, err)
 	h.db = db1
-	h.readRange(0, 1) // Only 2 should be gone, because it is at the end of logfile 0.
+	// Only 2 should be gone because it is at the end of 0001.mem (first memfile).
+	h.readRange(0, 1)
 	h.readRange(3, 7)
 	err = db1.View(func(txn *Txn) error {
 		_, err := txn.Get(h.key(2)) // Verify that 2 is gone.
