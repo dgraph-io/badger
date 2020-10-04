@@ -102,11 +102,6 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		return nil, err
 	}
 
-	var flags int
-	if db.opt.ReadOnly {
-		flags |= os.O_RDONLY
-	}
-
 	var mu sync.Mutex
 	tables := make([][]*table.Table, db.opt.MaxLevels)
 	var maxFileID uint64
@@ -154,7 +149,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			topt.BlockCache = db.blockCache
 			topt.IndexCache = db.indexCache
 
-			mf, err := z.OpenMmapFile(fname, flags, 0)
+			mf, err := z.OpenMmapFile(fname, db.opt.getFileFlags(), 0)
 			if err != nil {
 				rerr = y.Wrapf(err, "Opening file: %q", fname)
 				return

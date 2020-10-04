@@ -131,7 +131,7 @@ func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold 
 	*manifestFile, Manifest, error) {
 
 	path := filepath.Join(dir, ManifestFilename)
-	var flags uint32
+	var flags y.Flags
 	if readOnly {
 		flags |= y.ReadOnly
 	}

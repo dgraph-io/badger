@@ -81,6 +81,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 		})
 		require.NoError(t, err)
 	}
+
 	// Read it back to ensure that we can read it now.
 	for i := 0; i < 32; i++ {
 		err := db.View(func(txn *Txn) error {

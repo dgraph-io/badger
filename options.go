@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"os"
 	"time"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -600,4 +601,15 @@ func (opt Options) WithIndexCacheSize(size int64) Options {
 func (opt Options) WithDetectConflicts(b bool) Options {
 	opt.DetectConflicts = b
 	return opt
+}
+
+func (opt Options) getFileFlags() int {
+	var flags int
+	// opt.SyncWrites would be using msync to sync. All writes go through mmap.
+	if opt.ReadOnly {
+		flags |= os.O_RDONLY
+	} else {
+		flags |= os.O_RDWR
+	}
+	return flags
 }

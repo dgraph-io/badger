@@ -47,11 +47,13 @@ var (
 	ErrCommitAfterFinish = errors.New("Batch commit not permitted after finish")
 )
 
+type Flags int
+
 const (
 	// Sync indicates that O_DSYNC should be set on the underlying file,
 	// ensuring that data writes do not return until the data is flushed
 	// to disk.
-	Sync = 1 << iota
+	Sync Flags = 1 << iota
 	// ReadOnly opens the underlying file on a read-only basis.
 	ReadOnly
 )
@@ -65,7 +67,7 @@ var (
 )
 
 // OpenExistingFile opens an existing file, errors if it doesn't exist.
-func OpenExistingFile(filename string, flags uint32) (*os.File, error) {
+func OpenExistingFile(filename string, flags Flags) (*os.File, error) {
 	openFlags := os.O_RDWR
 	if flags&ReadOnly != 0 {
 		openFlags = os.O_RDONLY
