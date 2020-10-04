@@ -315,6 +315,8 @@ func (lf *logFile) writeEntry(buf *bytes.Buffer, e *Entry, opt Options) error {
 	}
 	y.AssertTrue(plen == copy(lf.Data[lf.writeAt:], buf.Bytes()))
 	lf.writeAt += uint32(plen)
+
+	lf.zeroNextEntry()
 	return nil
 }
 
@@ -521,6 +523,11 @@ loop:
 	return validEndOffset, nil
 }
 
+// Zero out the next entry to deal with any crashes.
+func (lf *logFile) zeroNextEntry() {
+	z.ZeroOut(lf.Data, int(lf.writeAt), int(lf.writeAt+maxHeaderSize))
+}
+
 func (lf *logFile) open(path string, flags int, opt Options) error {
 	lf.opt = opt
 
@@ -597,5 +604,8 @@ func (lf *logFile) bootstrap() error {
 
 	// Copy over to the logFile.
 	y.AssertTrue(vlogHeaderSize == copy(lf.Data[0:], buf))
+
+	// Zero out the next entry.
+	lf.zeroNextEntry()
 	return nil
 }

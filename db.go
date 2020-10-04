@@ -620,7 +620,7 @@ func (db *DB) close() (err error) {
 			// This error only means that there might be enough tables to do a compaction. So, we
 			// should not report it to the end user to avoid confusing them.
 		case nil:
-			db.opt.Infof("Force compaction on level 0 done")
+			db.opt.Debugf("Force compaction on level 0 done")
 		default:
 			db.opt.Warningf("While forcing compaction on level 0: %v", err)
 		}

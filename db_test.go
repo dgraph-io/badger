@@ -792,7 +792,7 @@ func TestLoad(t *testing.T) {
 		}
 		kv, err := Open(opt)
 		require.NoError(t, err)
-		require.Equal(t, 10001, int(kv.orc.readTs()))
+		require.Equal(t, 10000, int(kv.orc.readTs()))
 
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
@@ -836,6 +836,7 @@ func TestLoad(t *testing.T) {
 		opt := getTestOptions("")
 		opt.EncryptionKey = key
 		opt.BlockCacheSize = 100 << 20
+		opt.IndexCacheSize = 100 << 20
 		opt.Compression = options.None
 		testLoad(t, opt)
 	})
@@ -847,6 +848,7 @@ func TestLoad(t *testing.T) {
 		opt.EncryptionKey = key
 		opt.Compression = options.ZSTD
 		opt.BlockCacheSize = 100 << 20
+		opt.IndexCacheSize = 100 << 20
 		testLoad(t, opt)
 	})
 	t.Run("TestLoad without Encryption and with compression", func(t *testing.T) {
@@ -2103,6 +2105,7 @@ func TestVerifyChecksum(t *testing.T) {
 		opt := getTestOptions("")
 		opt.EncryptionKey = key
 		opt.BlockCacheSize = 1 << 20
+		opt.IndexCacheSize = 1 << 20
 		testVerfiyCheckSum(t, opt)
 	})
 }
