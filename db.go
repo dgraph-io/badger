@@ -375,10 +375,12 @@ func (db *DB) MaxVersion() uint64 {
 			maxVersion = a
 		}
 	}
+	db.Lock()
 	update(db.mt.maxVersion)
 	for _, mt := range db.imm {
 		update(mt.maxVersion)
 	}
+	db.Unlock()
 	for _, ti := range db.Tables() {
 		update(ti.MaxVersion)
 	}
