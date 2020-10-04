@@ -2019,9 +2019,7 @@ func TestSyncForRace(t *testing.T) {
 	<-doneChan
 }
 
-// TODO: This test might fail.
 func TestForceFlushMemtable(t *testing.T) {
-	t.Skip()
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err, "temp dir for badger count not be created")
 
@@ -2055,9 +2053,8 @@ func TestForceFlushMemtable(t *testing.T) {
 	require.NoError(t, err)
 	db.Unlock()
 
-	// Since we are inserting 3 entries and ValueLogMaxEntries is 1, there will be 3 rotation. For
-	// 1st and 2nd time head flushed with memtable will have fid as 0 and last time it will be 1.
-	require.True(t, db.nextMemFid == 2,
+	// Since we are inserting 3 entries and ValueLogMaxEntries is 1, there will be 3 rotation.
+	require.True(t, db.nextMemFid == 3,
 		fmt.Sprintf("expected fid: %d, actual fid: %d", 2, db.nextMemFid))
 }
 

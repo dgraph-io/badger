@@ -974,46 +974,37 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
+	// Initialize the data directory.
 	db, err := Open(DefaultOptions(dir))
 	require.NoError(t, err)
-	// Insert 1 entry so that we have valid data in first vlog file
+	// Insert 1 entry so that we have valid data in first mem file
 	require.NoError(t, db.Update(func(txn *Txn) error {
 		return txn.Set([]byte("foo"), nil)
 	}))
 
-	fileCountBeforeCorruption := len(db.vlog.filesMap)
-
+	fileCountBeforeCorruption := 1
 	require.NoError(t, db.Close())
 
-	// Create two vlog files corrupted data. These will be truncated when DB starts next time
-	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), []byte("foo"), 0664))
-	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 2), []byte("foo"), 0664))
+	// Create two mem files with corrupted data. These will be truncated when DB starts next time
+	require.NoError(t, ioutil.WriteFile(db.mtFilePath(2), []byte("foo"), 0664))
+	require.NoError(t, ioutil.WriteFile(db.mtFilePath(3), []byte("foo"), 0664))
 
 	db, err = Open(DefaultOptions(dir))
 	require.NoError(t, err)
 
-	// Ensure vlog file with id=1 is not present
-	require.Nil(t, db.vlog.filesMap[1])
+	// Ensure we have only one SST file.
+	require.Equal(t, 1, len(db.Tables()))
 
-	// Ensure filesize of fid=2 is zero
-	zeroFile, ok := db.vlog.filesMap[2]
-	require.True(t, ok)
-	fileStat, err := zeroFile.Fd.Stat()
+	// Ensure mem file with ID 4 is zero.
+	require.Equal(t, 4, int(db.mt.wal.fid))
+	fileStat, err := db.mt.wal.Fd.Stat()
 	require.NoError(t, err)
+	require.Equal(t, 2*db.opt.ValueLogFileSize, fileStat.Size())
 
-	// The size of last vlog file in windows is equal to 2*opt.ValueLogFileSize. This is because
-	// we mmap the last value log file and windows doesn't allow us to mmap a file more than
-	// it's acutal size. So we increase the file size and then mmap it. See mmap_windows.go file.
-	if runtime.GOOS == "windows" {
-		require.Equal(t, 2*db.opt.ValueLogFileSize, fileStat.Size())
-	} else {
-		require.Equal(t, int64(vlogHeaderSize), fileStat.Size())
-	}
-	fileCountAfterCorruption := len(db.vlog.filesMap)
-	// +1 because the file with id=2 will be completely truncated. It won't be deleted.
-	// There would be two files. fid=0 with valid data, fid=2 with zero data (truncated).
+	fileCountAfterCorruption := len(db.Tables()) + len(db.imm) + 1 // +1 for db.mt
+	// We should have one memtable and one sst file.
 	require.Equal(t, fileCountBeforeCorruption+1, fileCountAfterCorruption)
-	// Max file ID would point to the last vlog file, which is fid=2 in this case
+	// maxFid will be 2 because we increment the max fid on DB open everytime.
 	require.Equal(t, 2, int(db.vlog.maxFid))
 	require.NoError(t, db.Close())
 }
@@ -1081,7 +1072,7 @@ func TestValueEntryChecksum(t *testing.T) {
 		require.Greater(t, len(v), db.opt.ValueThreshold)
 		txnSet(t, db, k, v, 0)
 
-		path := db.vlog.fpath(0)
+		path := db.vlog.fpath(1)
 		require.NoError(t, db.Close())
 
 		file, err := os.OpenFile(path, os.O_RDWR, 0644)
