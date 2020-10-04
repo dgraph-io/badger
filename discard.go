@@ -77,8 +77,8 @@ func (lf *discardStats) Less(i, j int) bool {
 	return lf.get(16*i) < lf.get(16*j)
 }
 func (lf *discardStats) Swap(i, j int) {
-	left := lf.Data[16*i : (16*i)+16]
-	right := lf.Data[16*j : (16*j)*16]
+	left := lf.Data[16*i : 16*i+16]
+	right := lf.Data[16*j : 16*j+16]
 	var tmp [16]byte
 	copy(tmp[:], left)
 	copy(left, right)

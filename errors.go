@@ -30,7 +30,7 @@ const (
 var (
 	// ErrValueLogSize is returned when opt.ValueLogFileSize option is not within the valid
 	// range.
-	ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be between 1MB and 2GB")
+	ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be in range [1MB, 2GB)")
 
 	// ErrKeyNotFound is returned when key isn't found on a txn.Get.
 	ErrKeyNotFound = errors.New("Key not found")

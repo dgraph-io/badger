@@ -300,7 +300,7 @@ func TestPushValueLogLimit(t *testing.T) {
 	// Passing an empty directory since it will be filled by runBadgerTest.
 	opt := DefaultOptions("").
 		WithValueLogMaxEntries(64).
-		WithValueLogFileSize(2 << 30)
+		WithValueLogFileSize(2<<30 - 1)
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		data := []byte(fmt.Sprintf("%30d", 1))
 		key := func(i int) string {
