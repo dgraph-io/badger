@@ -664,10 +664,8 @@ nextTable:
 			defer inflightBuilders.Done(err)
 
 			build := func(fileID uint64) (*table.Table, error) {
-				tbl, err := table.CreateTable(
-					table.NewFilename(fileID, s.kv.opt.Dir), builder.Finish(false), bopts)
-				// decrRef is added below.
-				return tbl, y.Wrapf(err, "Unable to open table: %q", tbl.Fd.Name())
+				fname := table.NewFilename(fileID, s.kv.opt.Dir)
+				return table.CreateTable(fname, builder.Finish(false), bopts)
 			}
 
 			var tbl *table.Table
