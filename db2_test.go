@@ -765,7 +765,6 @@ func TestDropAllDropPrefix(t *testing.T) {
 			defer wg.Done()
 			err := db.DropPrefix([]byte("000"))
 			for err == ErrBlockedWrites {
-				fmt.Printf("DropPrefix 000 err: %v", err)
 				err = db.DropPrefix([]byte("000"))
 				time.Sleep(time.Millisecond * 500)
 			}
@@ -775,7 +774,6 @@ func TestDropAllDropPrefix(t *testing.T) {
 			defer wg.Done()
 			err := db.DropPrefix([]byte("111"))
 			for err == ErrBlockedWrites {
-				fmt.Printf("DropPrefix 111 err: %v", err)
 				err = db.DropPrefix([]byte("111"))
 				time.Sleep(time.Millisecond * 500)
 			}
@@ -786,7 +784,6 @@ func TestDropAllDropPrefix(t *testing.T) {
 			defer wg.Done()
 			err := db.DropAll()
 			for err == ErrBlockedWrites {
-				fmt.Printf("dropAll err: %v", err)
 				err = db.DropAll()
 				time.Sleep(time.Millisecond * 300)
 			}

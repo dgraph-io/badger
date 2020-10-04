@@ -275,8 +275,7 @@ func (w *sortedWriter) handleRequests() {
 		for i, e := range req.Entries {
 			// If badger is running in InMemory mode, len(req.Ptrs) == 0.
 			var vs y.ValueStruct
-			vptr := req.Ptrs[i]
-			if vptr.IsZero() {
+			if w.db.opt.skipVlog(e) {
 				vs = y.ValueStruct{
 					Value:     e.Value,
 					Meta:      e.meta,
@@ -284,6 +283,7 @@ func (w *sortedWriter) handleRequests() {
 					ExpiresAt: e.ExpiresAt,
 				}
 			} else {
+				vptr := req.Ptrs[i]
 				vs = y.ValueStruct{
 					Value:     vptr.Encode(),
 					Meta:      e.meta | bitValuePointer,

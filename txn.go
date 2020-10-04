@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -93,6 +94,7 @@ func (o *oracle) readTs() uint64 {
 	var readTs uint64
 	o.Lock()
 	readTs = o.nextTxnTs - 1
+	fmt.Printf("RM Begin readTs = %+v\n", readTs)
 	o.readMark.Begin(readTs)
 	o.Unlock()
 
@@ -200,6 +202,7 @@ func (o *oracle) newCommitTs(txn *Txn) uint64 {
 func (o *oracle) doneRead(txn *Txn) {
 	if !txn.doneRead {
 		txn.doneRead = true
+		fmt.Printf("RM txn.readTs = %+v\n", txn.readTs)
 		o.readMark.Done(txn.readTs)
 	}
 }

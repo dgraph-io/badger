@@ -1099,8 +1099,13 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	bopts.IndexCache = db.indexCache
 	tableData := buildL0Table(ft, bopts)
 
-	// We've already checked if the table is empty. The tableData should never be zero.
-	y.AssertTrue(len(tableData) > 0)
+	// buildL0Table can return nil if the none of the items in the skiplist are
+	// added to the builder. This can happen when drop prefix is set and all
+	// the items are skipped.
+	if len(tableData) == 0 {
+		return nil
+	}
+
 	fileID := db.lc.reserveFileID()
 	if db.opt.KeepL0InMemory {
 		tbl, err := table.OpenInMemoryTable(tableData, fileID, &bopts)

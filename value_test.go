@@ -145,6 +145,9 @@ func TestValueGCManaged(t *testing.T) {
 		t.Logf("File: %s. Size: %s\n", fi.Name(), humanize.Bytes(uint64(fi.Size())))
 	}
 
+	db.SetDiscardTs(math.MaxUint32)
+	db.Flatten(3)
+
 	for i := 0; i < 100; i++ {
 		// Try at max 100 times to GC even a single value log file.
 		if err := db.RunValueLogGC(0.0001); err == nil {

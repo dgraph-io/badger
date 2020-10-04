@@ -345,7 +345,7 @@ func TestStreamWriter6(t *testing.T) {
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
 		tables := db.Tables()
-		require.Equal(t, 4, len(tables), "Count of tables not matching")
+		require.Equal(t, 3, len(tables), "Count of tables not matching")
 		for _, tab := range tables {
 			if tab.Level > 0 {
 				require.Equal(t, 2, int(tab.KeyCount),
@@ -492,6 +492,8 @@ func TestStreamWriterEncrypted(t *testing.T) {
 	defer removeDir(dir)
 
 	opts = opts.WithEncryptionKey([]byte("badgerkey16bytes"))
+	opts.BlockCacheSize = 100 << 20
+	opts.IndexCacheSize = 100 << 20
 	db, err := Open(opts)
 	require.NoError(t, err)
 	key := []byte("mykey")
@@ -520,7 +522,6 @@ func TestStreamWriterEncrypted(t *testing.T) {
 	require.NoError(t, err, "Error while retrieving key")
 	require.NoError(t, db.Close())
 
-	opts = opts.WithEncryptionKey([]byte("badgerkey16bytes"))
 	db, err = Open(opts)
 	require.NoError(t, err)
 	require.NoError(t, db.Close())

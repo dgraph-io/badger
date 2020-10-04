@@ -2,12 +2,10 @@ module github.com/dgraph-io/badger/v2
 
 go 1.12
 
-replace github.com/dgraph-io/ristretto => /home/mrjn/go/src/github.com/dgraph-io/ristretto
-
 require (
 	github.com/DataDog/zstd v1.4.1
 	github.com/cespare/xxhash v1.1.0
-	github.com/dgraph-io/ristretto v0.0.4-0.20201003140040-36af8a316fc8
+	github.com/dgraph-io/ristretto v0.0.4-0.20201004020044-7b373362e7d5
 	github.com/dustin/go-humanize v1.0.0
 	github.com/golang/protobuf v1.3.1
 	github.com/golang/snappy v0.0.1

@@ -611,6 +611,7 @@ func (vlog *valueLog) open(db *DB) error {
 		if err := lf.open(vlog.fpath(fid), os.O_RDWR, vlog.opt); err != nil {
 			return y.Wrapf(err, "Open existing file: %q", lf.path)
 		}
+		// We shouldn't delete the maxFid file.
 		if lf.size == vlogHeaderSize && fid != vlog.maxFid {
 			vlog.opt.Infof("Deleting empty file: %s", lf.path)
 			if err := lf.Delete(); err != nil {
@@ -620,18 +621,19 @@ func (vlog *valueLog) open(db *DB) error {
 		}
 	}
 
+	// TODO(ibrahim): Do we need to truncate the last vlog file?
 	// Now we can read the latest value log file, and see if it needs truncation.
-	last, ok := vlog.filesMap[vlog.maxFid]
-	y.AssertTrue(ok)
-	lastOff, err := last.iterate(vlog.opt.ReadOnly, vlogHeaderSize, func(_ Entry, vp valuePointer) error {
-		return nil
-	})
-	if err != nil {
-		return y.Wrapf(err, "while iterating over: %s", last.path)
-	}
-	if err := last.Truncate(int64(lastOff)); err != nil {
-		return y.Wrapf(err, "while truncating last value log file: %s", last.path)
-	}
+	// last, ok := vlog.filesMap[vlog.maxFid]
+	// y.AssertTrue(ok)
+	// lastOff, err := last.iterate(vlog.opt.ReadOnly, vlogHeaderSize, func(_ Entry, vp valuePointer) error {
+	// 	return nil
+	// })
+	// if err != nil {
+	// 	return y.Wrapf(err, "while iterating over: %s", last.path)
+	// }
+	// if err := last.Truncate(int64(lastOff)); err != nil {
+	// 	return y.Wrapf(err, "while truncating last value log file: %s", last.path)
+	// }
 
 	// Don't write to the old log file. Always create a new one.
 	if _, err := vlog.createVlogFile(); err != nil {
@@ -1003,8 +1005,15 @@ func (vlog *valueLog) pickLog(tr trace.Trace) (files []*logFile) {
 	}
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 
+	// TODO(naman): Add a test for MaxDiscard which checks for the zero value.
 	// Pick a candidate that contains the largest amount of discardable data
 	fid, discard := vlog.discardStats.MaxDiscard()
+
+	// MaxDiscard will return fid=0 if it doesn't have any discard data. The
+	// vlog files start from 1.
+	if fid == 0 {
+		return nil
+	}
 	if fid < maxFid {
 		vlog.opt.Infof("Found value log max discard fid: %d discard: %d\n", fid, discard)
 		files = append(files, vlog.filesMap[fid])
@@ -1090,7 +1099,6 @@ func (vlog *valueLog) runGC(discardRatio float64) error {
 		var err error
 		files := vlog.pickLog(tr)
 		if len(files) == 0 {
-			tr.LazyPrintf("PickLog returned zero results.")
 			return ErrNoRewrite
 		}
 		tried := make(map[uint32]bool)
