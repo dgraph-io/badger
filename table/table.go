@@ -231,6 +231,8 @@ func CreateTable(fname string, data []byte, opts Options) (*Table, error) {
 		// Expected.
 	} else if err != nil {
 		return nil, y.Wrapf(err, "while creating table: %s", fname)
+	} else {
+		return nil, errors.Errorf("file already exists: %s", fname)
 	}
 
 	copy(mf.Data, data)

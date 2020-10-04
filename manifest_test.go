@@ -31,7 +31,6 @@ import (
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
-	"github.com/dgraph-io/ristretto/z"
 	"github.com/stretchr/testify/require"
 )
 
@@ -152,7 +151,7 @@ func buildTable(t *testing.T, keyValues [][]string, bopts table.Options) *table.
 	}
 
 	tbl, err := table.CreateTable(filename, b.Finish(false), bopts)
-	require.Equal(t, err, z.NewFile)
+	require.NoError(t, err)
 	return tbl
 }
 
