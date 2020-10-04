@@ -30,7 +30,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
@@ -1071,19 +1070,6 @@ func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64) (err error) {
 	return nil
 }
 
-type sampler struct {
-	lf            *logFile
-	tr            trace.Trace
-	sizeRatio     float64
-	countRatio    float64
-	fromBeginning bool
-}
-
-// TODO: Clean this up.
-func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, error) {
-	return &reason{}, nil
-}
-
 func (vlog *valueLog) waitOnGC(lc *z.Closer) {
 	defer lc.Done()
 
@@ -1133,120 +1119,4 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 	for fid, discard := range stats {
 		vlog.discardStats.Update(fid, discard)
 	}
-}
-
-func (vlog *valueLog) cleanVlog() error {
-	// Check if gc is not already running.
-	select {
-	case vlog.garbageCh <- struct{}{}:
-	default:
-		return errors.New("Gc already running")
-	}
-	defer func() { <-vlog.garbageCh }()
-
-	vlog.filesLock.RLock()
-	filesToGC := vlog.sortedFids()
-	vlog.filesLock.RUnlock()
-
-	head := atomic.LoadUint32(&vlog.maxFid)
-	for _, fid := range filesToGC {
-		tr := trace.New("Badger.ValueLog Sampling", "Sampling")
-		start := time.Now()
-		// stop on the head fid.
-		if fid == head {
-			break
-		}
-		vlog.filesLock.RLock()
-		lf, ok := vlog.filesMap[fid]
-		vlog.filesLock.RUnlock()
-		if !ok {
-			return errors.Errorf("Unknown fid %d", fid)
-		}
-
-		s := &sampler{
-			lf:            lf,
-			tr:            tr,
-			countRatio:    1, // 1% of num entries.
-			sizeRatio:     1, // 10% of the file as window.
-			fromBeginning: true,
-		}
-		vlog.db.opt.Logger.Infof("Sampling fid %d", fid)
-		r, err := vlog.sample(s, 0)
-		if err != nil {
-			return err
-		}
-		vlog.db.opt.Logger.Infof("Sampled fid %d. Took: %s", fid, time.Since(start))
-
-		// Skip vlog files with < 0.5 discard ratio.
-		if r.discard/r.total < 0.5 {
-			continue
-		}
-		vlog.db.opt.Logger.Infof("Rewriting fid %d", fid)
-		start = time.Now()
-		if err := vlog.rewrite(lf); err != nil {
-			return y.Wrapf(err, "file: %s", lf.Fd.Name())
-		}
-		vlog.db.opt.Logger.Infof("Rewritten fid %d. Took: %s", fid, time.Since(start))
-	}
-
-	return nil
-}
-
-type sampleResult struct {
-	Fid          uint32
-	FileSize     int64
-	DiscardRatio float64
-}
-
-// getDiscardStats is used to collect and return the discard stats for all the files.
-func (vlog *valueLog) getDiscardStats() ([]sampleResult, error) {
-	vlog.filesLock.RLock()
-	filesToSample := vlog.sortedFids()
-	vlog.filesLock.RUnlock()
-
-	head := atomic.LoadUint32(&vlog.maxFid)
-
-	tr := trace.New("Badger.ValueLog Sampling", "Sampling")
-	tr.SetMaxEvents(100)
-	samp := &sampler{
-		countRatio:    1,    // 100% of entries in the file.
-		sizeRatio:     1,    // 100% of the file size.
-		fromBeginning: true, // Start reading from the start.
-		tr:            tr,
-	}
-
-	var result []sampleResult
-	for _, fid := range filesToSample {
-		// Skip the head file since it is actively being written.
-		if fid == head {
-			continue
-		}
-		start := time.Now()
-		vlog.db.opt.Logger.Infof("Sampling fid %d", fid)
-
-		vlog.filesLock.RLock()
-		lf, ok := vlog.filesMap[fid]
-		vlog.filesLock.RUnlock()
-		if !ok {
-			return nil, errors.Errorf("Unknown fid %d", fid)
-		}
-		samp.lf = lf
-		// Set discard ratio to 0 so that sample never returns a ErrNoRewrite error.
-		r, err := vlog.sample(samp, 0)
-		if err != nil {
-			return nil, y.Wrapf(err, "file: %s", lf.Fd.Name())
-		}
-
-		fstat, err := lf.Fd.Stat()
-		if err != nil {
-			return nil, y.Wrapf(err, "Unable to check stat for %q", lf.path)
-		}
-
-		result = append(result, sampleResult{
-			Fid:          fid,
-			DiscardRatio: r.discard / r.total,
-			FileSize:     fstat.Size()})
-		vlog.db.opt.Logger.Infof("Sampled fid %d. Took: %s", fid, time.Since(start))
-	}
-	return result, nil
 }
