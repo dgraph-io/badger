@@ -98,8 +98,6 @@ func TestTableIndex(t *testing.T) {
 			opt := tt.opts
 			builder := NewTableBuilder(opt)
 			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
-			f, err := y.OpenSyncedFile(filename, true)
-			require.NoError(t, err)
 
 			blockFirstKeys := make([][]byte, 0)
 			blockCount := 0
@@ -116,10 +114,7 @@ func TestTableIndex(t *testing.T) {
 				}
 				builder.Add(k, vs, 0)
 			}
-			_, err = f.Write(builder.Finish(false))
-			require.NoError(t, err, "unable to write to file")
-
-			tbl, err := OpenTable(f, opt)
+			tbl, err := CreateTable(filename, builder.Finish(false), opt)
 			require.NoError(t, err, "unable to open table")
 
 			if opt.DataKey == nil {
@@ -137,7 +132,7 @@ func TestTableIndex(t *testing.T) {
 				require.Equal(t, blockFirstKeys[i], bo.KeyBytes())
 			}
 			require.Equal(t, keysCount, int(tbl.MaxVersion()))
-			f.Close()
+			tbl.Close(-1)
 			require.NoError(t, os.RemoveAll(filename))
 		})
 	}
@@ -146,15 +141,16 @@ func TestTableIndex(t *testing.T) {
 func TestInvalidCompression(t *testing.T) {
 	keyPrefix := "key"
 	opts := Options{BlockSize: 4 << 10, Compression: options.ZSTD}
-	f := buildTestTable(t, keyPrefix, 1000, opts)
+	tbl := buildTestTable(t, keyPrefix, 1000, opts)
+	mf := tbl.MmapFile
 	t.Run("with correct decompression algo", func(t *testing.T) {
-		_, err := OpenTable(f, opts)
+		_, err := OpenTable(mf, opts)
 		require.NoError(t, err)
 	})
 	t.Run("with incorrect decompression algo", func(t *testing.T) {
 		// Set incorrect compression algorithm.
 		opts.Compression = options.Snappy
-		_, err := OpenTable(f, opts)
+		_, err := OpenTable(mf, opts)
 		require.Error(t, err)
 	})
 }
@@ -238,9 +234,7 @@ func TestBloomfilter(t *testing.T) {
 		if withBlooms {
 			opts.BloomFalsePositive = 0.01
 		}
-		f := buildTestTable(t, keyPrefix, keyCount, opts)
-		tab, err := OpenTable(f, opts)
-		require.NoError(t, err)
+		tab := buildTestTable(t, keyPrefix, keyCount, opts)
 		require.Equal(t, withBlooms, tab.hasBloomFilter)
 		// Forward iteration
 		it := tab.NewIterator(0)
