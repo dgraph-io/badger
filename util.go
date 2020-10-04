@@ -31,7 +31,7 @@ import (
 func (s *levelsController) validate() error {
 	for _, l := range s.levels {
 		if err := l.validate(); err != nil {
-			return errors.Wrap(err, "Levels Controller")
+			return y.Wrap(err, "Levels Controller")
 		}
 	}
 	return nil

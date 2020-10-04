@@ -50,6 +50,9 @@ const intSize = int(unsafe.Sizeof(int(0)))
 type Options struct {
 	// Options for Opening/Building Table.
 
+	// Open tables in read only mode.
+	ReadOnly bool
+
 	// Maximum size of the table.
 	TableSize uint64
 
@@ -76,10 +79,6 @@ type Options struct {
 
 	// ZSTDCompressionLevel is the ZSTD compression level used for compressing blocks.
 	ZSTDCompressionLevel int
-
-	// When LoadBloomsOnOpen is set, bloom filters will be loaded while opening
-	// the table. Otherwise, they will be loaded lazily when they're accessed.
-	LoadBloomsOnOpen bool
 }
 
 // TableInterface is useful for testing.
@@ -96,8 +95,8 @@ type Table struct {
 
 	tableSize int // Initialized in OpenTable, using fd.Stat().
 
-	index *fb.TableIndex // Nil if encryption is enabled.
-	ref   int32          // For file garbage collection. Atomic.
+	_index *fb.TableIndex // Nil if encryption is enabled. Use fetchIndex to access.
+	ref    int32          // For file garbage collection. Atomic.
 
 	// The following are initialized once and const.
 	smallest, biggest []byte // Smallest and largest keys (with timestamps).
@@ -240,7 +239,7 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 		// It's OK to ignore fd.Close() errs in this function because we have only read
 		// from the file.
 		_ = fd.Close()
-		return nil, y.Wrap(err)
+		return nil, y.Wrap(err, "")
 	}
 
 	filename := fileInfo.Name()
@@ -256,20 +255,20 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 		IsInmemory: false,
 		tableSize:  int(fileInfo.Size()),
 	}
-	mf, err := z.OpenMmapFileUsing(fd, 0)
+	mf, err := z.OpenMmapFileUsing(fd, 0, !opts.ReadOnly)
 	if err != nil {
 		return nil, y.Wrapf(err, "Unable to open file: %s", filename)
 	}
 	t.MmapFile = mf
 
 	if err := t.initBiggestAndSmallest(); err != nil {
-		return nil, errors.Wrapf(err, "failed to initialize table")
+		return nil, y.Wrapf(err, "failed to initialize table")
 	}
 
 	if opts.ChkMode == options.OnTableRead || opts.ChkMode == options.OnTableAndBlockRead {
 		if err := t.VerifyChecksum(); err != nil {
 			_ = fd.Close()
-			return nil, errors.Wrapf(err, "failed to verify checksum")
+			return nil, y.Wrapf(err, "failed to verify checksum")
 		}
 	}
 
@@ -302,7 +301,7 @@ func (t *Table) initBiggestAndSmallest() error {
 	var err error
 	var ko *fb.BlockOffset
 	if ko, err = t.initIndex(); err != nil {
-		return errors.Wrapf(err, "failed to read index.")
+		return y.Wrapf(err, "failed to read index.")
 	}
 
 	t.smallest = ko.KeyBytes()
@@ -311,7 +310,7 @@ func (t *Table) initBiggestAndSmallest() error {
 	defer it2.Close()
 	it2.Rewind()
 	if !it2.Valid() {
-		return errors.Wrapf(it2.err, "failed to initialize biggest for table %s", t.Filename())
+		return y.Wrapf(it2.err, "failed to initialize biggest for table %s", t.Filename())
 	}
 	t.biggest = it2.Key()
 	return nil
@@ -368,7 +367,7 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 	}
 	if !t.shouldDecrypt() {
 		// If there's no encryption, this points to the mmap'ed buffer.
-		t.index = index
+		t._index = index
 	}
 
 	if t.opt.Compression == options.None {
@@ -417,7 +416,7 @@ func (t *Table) KeySplits(n int, prefix []byte) []string {
 
 func (t *Table) fetchIndex() *fb.TableIndex {
 	if !t.shouldDecrypt() {
-		return t.index
+		return t._index
 	}
 
 	if t.opt.IndexCache == nil {
@@ -473,7 +472,7 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 
 	var err error
 	if blk.data, err = t.read(blk.offset, int(ko.Len())); err != nil {
-		return nil, errors.Wrapf(err,
+		return nil, y.Wrapf(err,
 			"failed to read from file: %s at offset: %d, len: %d",
 			t.Fd.Name(), blk.offset, ko.Len())
 	}
@@ -486,7 +485,7 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 	}
 
 	if err = t.decompress(blk); err != nil {
-		return nil, errors.Wrapf(err,
+		return nil, y.Wrapf(err,
 			"failed to decode compressed data in file: %s at offset: %d, len: %d",
 			t.Fd.Name(), blk.offset, ko.Len())
 	}
@@ -563,12 +562,12 @@ func (t *Table) indexKey() uint64 {
 
 // UncompressedSize is the size of table index in bytes.
 func (t *Table) UncompressedSize() uint32 {
-	return t.index.UncompressedSize()
+	return t.fetchIndex().UncompressedSize()
 }
 
 // KeyCount is the total number of keys in this table.
 func (t *Table) KeyCount() uint32 {
-	return t.index.KeyCount()
+	return t.fetchIndex().KeyCount()
 }
 
 // IndexSize is the size of table index in bytes.
@@ -578,7 +577,7 @@ func (t *Table) IndexSize() int {
 
 // BloomFilterSize returns the size of the bloom filter in bytes stored in memory.
 func (t *Table) BloomFilterSize() int {
-	return t.index.BloomFilterLength()
+	return t.fetchIndex().BloomFilterLength()
 }
 
 // EstimatedSize returns the total size of key-values stored in this table (including the
@@ -686,7 +685,7 @@ func (t *Table) decrypt(data []byte) ([]byte, error) {
 	// TODO: Check if this is done via Calloc. Otherwise, we'll have a memory leak.
 	dst := make([]byte, len(data))
 	if err := y.XORBlock(dst, data, t.opt.DataKey.Data, iv); err != nil {
-		return nil, errors.Wrapf(err, "while decrypt")
+		return nil, y.Wrapf(err, "while decrypt")
 	}
 	return dst, nil
 }
@@ -736,7 +735,7 @@ func (t *Table) decompress(b *block) error {
 		b.data, err = snappy.Decode(dst, b.data)
 		if err != nil {
 			z.Free(dst)
-			return errors.Wrap(err, "failed to decompress")
+			return y.Wrap(err, "failed to decompress")
 		}
 	case options.ZSTD:
 		sz := int(float64(t.opt.BlockSize) * 1.2)
@@ -744,7 +743,7 @@ func (t *Table) decompress(b *block) error {
 		b.data, err = y.ZSTDDecompress(dst, b.data)
 		if err != nil {
 			z.Free(dst)
-			return errors.Wrap(err, "failed to decompress")
+			return y.Wrap(err, "failed to decompress")
 		}
 	default:
 		return errors.New("Unsupported compression type")

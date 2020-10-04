@@ -151,8 +151,6 @@ func checkAndSetOptions(opt *Options) error {
 	opt.CompactL0OnClose = opt.CompactL0OnClose || opt.KeepL0InMemory
 
 	if opt.ReadOnly {
-		// Can't truncate if the DB is read only.
-		opt.Truncate = false
 		// Do not perform compaction in read only mode.
 		opt.CompactL0OnClose = false
 	}
@@ -253,7 +251,7 @@ func Open(opt Options) (*DB, error) {
 		}
 		db.blockCache, err = ristretto.NewCache(&config)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to create data cache")
+			return nil, y.Wrap(err, "failed to create data cache")
 		}
 	}
 
@@ -270,7 +268,7 @@ func Open(opt Options) (*DB, error) {
 		}
 		db.indexCache, err = ristretto.NewCache(&config)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to create bf cache")
+			return nil, y.Wrap(err, "failed to create bf cache")
 		}
 	}
 
@@ -298,12 +296,12 @@ func Open(opt Options) (*DB, error) {
 	go db.updateSize(db.closers.updateSize)
 
 	if err := db.openMemTables(db.opt); err != nil {
-		return nil, errors.Wrapf(err, "while opening memtables")
+		return nil, y.Wrapf(err, "while opening memtables")
 	}
 
 	db.mt, err = db.newMemTable()
 	if err != nil {
-		return nil, errors.Wrapf(err, "cannot create memtable")
+		return nil, y.Wrapf(err, "cannot create memtable")
 	}
 
 	// newLevelsController potentially loads files in directory.
@@ -467,7 +465,7 @@ const walFileName = "badger.wal"
 // 		// 	delete(vlog.filesMap, fid)
 // 		// 	// Close the fd of the file before deleting the file otherwise windows complaints.
 // 		// 	if err := lf.fd.Close(); err != nil {
-// 		// 		return errors.Wrapf(err, "failed to close vlog file %s", lf.fd.Name())
+// 		// 		return y.Wrapf(err, "failed to close vlog file %s", lf.fd.Name())
 // 		// 	}
 // 		// 	path := vlog.fpath(lf.fid)
 // 		// 	if err := os.Remove(path); err != nil {
@@ -576,7 +574,7 @@ func (db *DB) close() (err error) {
 
 	// Now close the value log.
 	if vlogErr := db.vlog.Close(); vlogErr != nil {
-		err = errors.Wrap(vlogErr, "DB.Close")
+		err = y.Wrap(vlogErr, "DB.Close")
 	}
 
 	// Make sure that block writer is done pushing stuff into memtable!
@@ -629,7 +627,7 @@ func (db *DB) close() (err error) {
 	}
 
 	if lcErr := db.lc.close(); err == nil {
-		err = errors.Wrap(lcErr, "DB.Close")
+		err = y.Wrap(lcErr, "DB.Close")
 	}
 	db.opt.Debugf("Waiting for closer")
 	db.closers.updateSize.SignalAndWait()
@@ -645,29 +643,29 @@ func (db *DB) close() (err error) {
 
 	if db.dirLockGuard != nil {
 		if guardErr := db.dirLockGuard.release(); err == nil {
-			err = errors.Wrap(guardErr, "DB.Close")
+			err = y.Wrap(guardErr, "DB.Close")
 		}
 	}
 	if db.valueDirGuard != nil {
 		if guardErr := db.valueDirGuard.release(); err == nil {
-			err = errors.Wrap(guardErr, "DB.Close")
+			err = y.Wrap(guardErr, "DB.Close")
 		}
 	}
 	if manifestErr := db.manifest.close(); err == nil {
-		err = errors.Wrap(manifestErr, "DB.Close")
+		err = y.Wrap(manifestErr, "DB.Close")
 	}
 	if registryErr := db.registry.Close(); err == nil {
-		err = errors.Wrap(registryErr, "DB.Close")
+		err = y.Wrap(registryErr, "DB.Close")
 	}
 
 	// Fsync directories to ensure that lock file, and any other removed files whose directory
 	// we haven't specifically fsynced, are guaranteed to have their directory entry removal
 	// persisted to disk.
 	if syncErr := db.syncDir(db.opt.Dir); err == nil {
-		err = errors.Wrap(syncErr, "DB.Close")
+		err = y.Wrap(syncErr, "DB.Close")
 	}
 	if syncErr := db.syncDir(db.opt.ValueDir); err == nil {
-		err = errors.Wrap(syncErr, "DB.Close")
+		err = y.Wrap(syncErr, "DB.Close")
 	}
 
 	return err
@@ -802,7 +800,7 @@ func (db *DB) writeToLSM(b *request) error {
 				})
 		}
 		if err != nil {
-			return errors.Wrapf(err, "while writing to memTable")
+			return y.Wrapf(err, "while writing to memTable")
 		}
 	}
 	if db.opt.SyncWrites {
@@ -852,11 +850,11 @@ func (db *DB) writeRequests(reqs []*request) error {
 		}
 		if err != nil {
 			done(err)
-			return errors.Wrap(err, "writeRequests")
+			return y.Wrap(err, "writeRequests")
 		}
 		if err := db.writeToLSM(b); err != nil {
 			done(err)
-			return errors.Wrap(err, "writeRequests")
+			return y.Wrap(err, "writeRequests")
 		}
 	}
 	if db.opt.SyncWrites {
@@ -1042,7 +1040,7 @@ func (db *DB) ensureRoomForWrite() error {
 		db.imm = append(db.imm, db.mt)
 		db.mt, err = db.newMemTable()
 		if err != nil {
-			return errors.Wrapf(err, "cannot create new mem table")
+			return y.Wrapf(err, "cannot create new mem table")
 		}
 		// New memtable is empty. We certainly have room.
 		return nil
@@ -1107,14 +1105,14 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	if db.opt.KeepL0InMemory {
 		tbl, err := table.OpenInMemoryTable(tableData, fileID, &bopts)
 		if err != nil {
-			return errors.Wrapf(err, "failed to open table in memory")
+			return y.Wrapf(err, "failed to open table in memory")
 		}
 		return db.lc.addLevel0Table(tbl)
 	}
 
 	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
 	if err != nil {
-		return y.Wrap(err)
+		return y.Wrap(err, "")
 	}
 
 	// Don't block just to sync the directory entry.
@@ -1714,7 +1712,7 @@ func (db *DB) dropAll() (func(), error) {
 	db.imm = db.imm[:0]
 	db.mt, err = db.newMemTable() // Set it up for future writes.
 	if err != nil {
-		return resume, errors.Wrapf(err, "cannot open new memtable")
+		return resume, y.Wrapf(err, "cannot open new memtable")
 	}
 
 	num, err := db.lc.dropTree()
@@ -1780,7 +1778,7 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 	db.imm = db.imm[:0]
 	db.mt, err = db.newMemTable()
 	if err != nil {
-		return errors.Wrapf(err, "cannot create new mem table")
+		return y.Wrapf(err, "cannot create new mem table")
 	}
 
 	// Drop prefixes from the levels.
@@ -1898,12 +1896,12 @@ func (db *DB) StreamDB(outOptions Options) error {
 	// Open output DB.
 	outDB, err := OpenManaged(outOptions)
 	if err != nil {
-		return errors.Wrapf(err, "cannot open out DB at %s", outDir)
+		return y.Wrapf(err, "cannot open out DB at %s", outDir)
 	}
 	defer outDB.Close()
 	writer := outDB.NewStreamWriter()
 	if err := writer.Prepare(); err != nil {
-		errors.Wrapf(err, "cannot create stream writer in out DB at %s", outDir)
+		y.Wrapf(err, "cannot create stream writer in out DB at %s", outDir)
 	}
 
 	// Stream contents of DB to the output DB.
@@ -1913,10 +1911,10 @@ func (db *DB) StreamDB(outOptions Options) error {
 		return writer.Write(kvs)
 	}
 	if err := stream.Orchestrate(context.Background()); err != nil {
-		return errors.Wrapf(err, "cannot stream DB to out DB at %s", outDir)
+		return y.Wrapf(err, "cannot stream DB to out DB at %s", outDir)
 	}
 	if err := writer.Flush(); err != nil {
-		return errors.Wrapf(err, "cannot flush writer")
+		return y.Wrapf(err, "cannot flush writer")
 	}
 	return nil
 }

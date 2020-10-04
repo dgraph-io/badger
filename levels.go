@@ -45,8 +45,6 @@ type levelsController struct {
 	kv     *DB
 
 	cstatus compactStatus
-	// This is for getting timings between stalls.
-	lastUnstalled time.Time
 }
 
 // revertToManifest checks that all necessary table files exist and removes all table files not
@@ -147,12 +145,12 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			}()
 			fd, err := y.OpenExistingFile(fname, flags)
 			if err != nil {
-				rerr = errors.Wrapf(err, "Opening file: %q", fname)
+				rerr = y.Wrapf(err, "Opening file: %q", fname)
 				return
 			}
 			dk, err := db.registry.dataKey(tf.KeyID)
 			if err != nil {
-				rerr = errors.Wrapf(err, "Error while reading datakey")
+				rerr = y.Wrapf(err, "Error while reading datakey")
 				return
 			}
 			topt := buildTableOptions(db.opt)
@@ -168,7 +166,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 					db.opt.Errorf("Ignoring table %s", fd.Name())
 					// Do not set rerr. We will continue without this table.
 				} else {
-					rerr = errors.Wrapf(err, "Opening table: %q", fname)
+					rerr = y.Wrapf(err, "Opening table: %q", fname)
 				}
 				return
 			}
@@ -192,7 +190,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 	// Make sure key ranges do not overlap etc.
 	if err := s.validate(); err != nil {
 		_ = s.cleanupLevels()
-		return nil, errors.Wrap(err, "Level validation")
+		return nil, y.Wrap(err, "Level validation")
 	}
 
 	// Sync directory (because we have at least removed some files, or previously created the
@@ -669,15 +667,15 @@ nextTable:
 			build := func(fileID uint64) (*table.Table, error) {
 				fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
 				if err != nil {
-					return nil, errors.Wrapf(err, "While opening new table: %d", fileID)
+					return nil, y.Wrapf(err, "While opening new table: %d", fileID)
 				}
 
 				if _, err := fd.Write(builder.Finish(false)); err != nil {
-					return nil, errors.Wrapf(err, "Unable to write to file: %d", fileID)
+					return nil, y.Wrapf(err, "Unable to write to file: %d", fileID)
 				}
 				tbl, err := table.OpenTable(fd, bopts)
 				// decrRef is added below.
-				return tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())
+				return tbl, y.Wrapf(err, "Unable to open table: %q", fd.Name())
 			}
 
 			var tbl *table.Table
@@ -716,7 +714,7 @@ nextTable:
 		// An error happened.  Delete all the newly created table files (by calling DecrRef
 		// -- we're the only holders of a ref).
 		_ = decrRefs(newTables)
-		return nil, nil, errors.Wrapf(err, "while running compactions for: %+v", cd)
+		return nil, nil, y.Wrapf(err, "while running compactions for: %+v", cd)
 	}
 
 	sort.Slice(newTables, func(i, j int) bool {
@@ -953,9 +951,11 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
 
-	s.kv.opt.Infof("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
-		thisLevel.level, nextLevel.level, len(cd.top)+len(cd.bot),
-		len(newTables), time.Since(timeStart))
+	if dur := time.Since(timeStart); dur > 3*time.Second {
+		s.kv.opt.Infof("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
+			thisLevel.level, nextLevel.level, len(cd.top)+len(cd.bot),
+			len(newTables), dur)
+	}
 
 	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.opt.LevelSizeMultiplier {
 		s.kv.opt.Infof("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
@@ -998,7 +998,7 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 	}
 	defer s.cstatus.delete(cd) // Remove the ranges from compaction status.
 
-	s.kv.opt.Infof("[Compactor: %d] Running compaction: %+v for level: %d\n",
+	s.kv.opt.Debugf("[Compactor: %d] Running compaction: %+v for level: %d\n",
 		id, p, cd.thisLevel.level)
 	if err := s.runCompactDef(l, cd); err != nil {
 		// This compaction couldn't be done successfully.
@@ -1006,7 +1006,7 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 		return err
 	}
 
-	s.kv.opt.Infof("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
+	s.kv.opt.Debugf("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
 	return nil
 }
 
@@ -1028,17 +1028,14 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 
 	for !s.levels[0].tryAddLevel0Table(t) {
 		// Stall. Make sure all levels are healthy before we unstall.
-		var timeStart time.Time
-		{
-			s.kv.opt.Infof("STALLED STALLED STALLED: %v\n", time.Since(s.lastUnstalled))
-			s.cstatus.RLock()
-			for i := 0; i < s.kv.opt.MaxLevels; i++ {
-				s.kv.opt.Debugf("level=%d. Status=%s Size=%d\n",
-					i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
-			}
-			s.cstatus.RUnlock()
-			timeStart = time.Now()
+		s.cstatus.RLock()
+		for i := 0; i < s.kv.opt.MaxLevels; i++ {
+			s.kv.opt.Debugf("level=%d. Status=%s Size=%d\n",
+				i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
 		}
+		s.cstatus.RUnlock()
+		timeStart := time.Now()
+
 		// Before we unstall, we need to make sure that level 0 is healthy. Otherwise, we
 		// will very quickly fill up level 0 again.
 		for i := 0; ; i++ {
@@ -1055,9 +1052,8 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 				i = 0
 			}
 		}
-		{
-			s.kv.opt.Debugf("UNSTALLED UNSTALLED UNSTALLED: %v\n", time.Since(timeStart))
-			s.lastUnstalled = time.Now()
+		if dur := time.Since(timeStart); dur > time.Second {
+			s.kv.opt.Infof("L0 was stalled for %s\n", dur.Round(time.Millisecond))
 		}
 	}
 
@@ -1066,7 +1062,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 
 func (s *levelsController) close() error {
 	err := s.cleanupLevels()
-	return errors.Wrap(err, "levelsController.Close")
+	return y.Wrap(err, "levelsController.Close")
 }
 
 // get searches for a given key in all the levels of the LSM tree. It returns
@@ -1090,7 +1086,7 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) 
 		}
 		vs, err := h.get(key) // Calls h.RLock() and h.RUnlock().
 		if err != nil {
-			return y.ValueStruct{}, errors.Wrapf(err, "get key: %q", key)
+			return y.ValueStruct{}, y.Wrapf(err, "get key: %q", key)
 		}
 		if vs.Value == nil && vs.Meta == 0 {
 			continue

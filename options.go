@@ -43,7 +43,6 @@ type Options struct {
 	SyncWrites        bool
 	NumVersionsToKeep int
 	ReadOnly          bool
-	Truncate          bool
 	Logger            Logger
 	Compression       options.CompressionType
 	InMemory          bool
@@ -62,7 +61,6 @@ type Options struct {
 	KeepL0InMemory     bool
 	BlockCacheSize     int64
 	IndexCacheSize     int64
-	LoadBloomsOnOpen   bool
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -131,7 +129,6 @@ func DefaultOptions(path string) Options {
 		Compression:             options.None,
 		BlockCacheSize:          0,
 		IndexCacheSize:          0,
-		LoadBloomsOnOpen:        true,
 
 		// The following benchmarks were done on a 4 KB block size (default block size). The
 		// compression is ratio supposed to increase with increasing compression level but since the
@@ -152,7 +149,6 @@ func DefaultOptions(path string) Options {
 
 		ValueLogMaxEntries:            1000000,
 		ValueThreshold:                1 << 10, // 1 KB.
-		Truncate:                      false,
 		Logger:                        defaultLogger(INFO),
 		LogRotatesToFlush:             2,
 		EncryptionKey:                 []byte{},
@@ -163,10 +159,10 @@ func DefaultOptions(path string) Options {
 
 func buildTableOptions(opt Options) table.Options {
 	return table.Options{
+		ReadOnly:             opt.ReadOnly,
 		TableSize:            uint64(opt.MaxTableSize),
 		BlockSize:            opt.BlockSize,
 		BloomFalsePositive:   opt.BloomFalsePositive,
-		LoadBloomsOnOpen:     opt.LoadBloomsOnOpen,
 		ChkMode:              opt.ChecksumVerificationMode,
 		Compression:          opt.Compression,
 		ZSTDCompressionLevel: opt.ZSTDCompressionLevel,
@@ -246,17 +242,6 @@ func (opt Options) WithNumVersionsToKeep(val int) Options {
 // The default value of ReadOnly is false.
 func (opt Options) WithReadOnly(val bool) Options {
 	opt.ReadOnly = val
-	return opt
-}
-
-// WithTruncate returns a new Options value with Truncate set to the given value.
-//
-// Truncate indicates whether value log files should be truncated to delete corrupt data, if any.
-// This option is ignored when ReadOnly is true.
-//
-// The default value of Truncate is false.
-func (opt Options) WithTruncate(val bool) Options {
-	opt.Truncate = val
 	return opt
 }
 
@@ -581,18 +566,6 @@ func (opt Options) WithZSTDCompressionLevel(cLevel int) Options {
 // The default value of BypassLockGuard is false.
 func (opt Options) WithBypassLockGuard(b bool) Options {
 	opt.BypassLockGuard = b
-	return opt
-}
-
-// WithLoadBloomsOnOpen returns a new Options value with LoadBloomsOnOpen set to the given value.
-//
-// Badger uses bloom filters to speed up key lookups. When LoadBloomsOnOpen is set
-// to false, bloom filters will be loaded lazily and not on DB open. Set this
-// option to false to reduce the time taken to open the DB.
-//
-// The default value of LoadBloomsOnOpen is true.
-func (opt Options) WithLoadBloomsOnOpen(b bool) Options {
-	opt.LoadBloomsOnOpen = b
 	return opt
 }
 

@@ -266,7 +266,6 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	}
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
-		WithTruncate(truncate).
 		WithSyncWrites(syncWrites).
 		WithCompactL0OnClose(force).
 		WithValueThreshold(valueThreshold).
@@ -275,7 +274,6 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithIndexCacheSize(indexCacheSize << 20).
 		WithValueLogMaxEntries(vlogMaxEntries).
 		WithEncryptionKey([]byte(encryptionKey)).
-		WithLoadBloomsOnOpen(loadBloomsOnOpen).
 		WithDetectConflicts(detectConflicts).
 		WithCompression(cmode).
 		WithLoggingLevel(badger.INFO)

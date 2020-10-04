@@ -25,7 +25,6 @@ import (
 
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
-	"github.com/pkg/errors"
 )
 
 // discardStats keeps track of the amount of data that could be discarded for
@@ -56,7 +55,7 @@ func initDiscardStats(opt Options) (*discardStats, error) {
 		lf.zeroOut()
 
 	} else if err != nil {
-		return nil, errors.Wrapf(err, "while opening file: %s\n", discardFname)
+		return nil, y.Wrapf(err, "while opening file: %s\n", discardFname)
 	}
 
 	for slot := 0; slot < maxSlot; slot++ {

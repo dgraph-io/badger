@@ -36,6 +36,7 @@ import (
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/stretchr/testify/require"
 )
 
@@ -56,7 +57,6 @@ func TestTruncateVlogWithClose(t *testing.T) {
 
 	opt := getTestOptions(dir)
 	opt.SyncWrites = true
-	opt.Truncate = true
 	opt.ValueThreshold = 1 // Force all reads from value log.
 
 	db, err := Open(opt)
@@ -128,7 +128,6 @@ func TestTruncateVlogNoClose(t *testing.T) {
 	dir := "p"
 	opts := getTestOptions(dir)
 	opts.SyncWrites = true
-	opts.Truncate = true
 
 	kv, err := Open(opts)
 	require.NoError(t, err)
@@ -149,7 +148,6 @@ func TestTruncateVlogNoClose2(t *testing.T) {
 	dir := "p"
 	opts := getTestOptions(dir)
 	opts.SyncWrites = true
-	opts.Truncate = true
 
 	kv, err := Open(opts)
 	require.NoError(t, err)
@@ -183,7 +181,6 @@ func TestTruncateVlogNoClose3(t *testing.T) {
 	dir := "p"
 	opts := getTestOptions(dir)
 	opts.SyncWrites = true
-	opts.Truncate = true
 
 	kv, err := Open(opts)
 	require.NoError(t, err)
@@ -701,7 +698,6 @@ func TestWindowsDataLoss(t *testing.T) {
 	}
 	require.NoError(t, db.Close())
 
-	opt.Truncate = true
 	db, err = Open(opt)
 	require.NoError(t, err)
 	// Return after reading one entry. We're simulating a crash.
@@ -714,7 +710,7 @@ func TestWindowsDataLoss(t *testing.T) {
 	}
 	// Don't use vlog.Close here. We don't want to fix the file size. Only un-mmap
 	// the data so that we can truncate the file durning the next vlog.Open.
-	require.NoError(t, y.Munmap(db.vlog.filesMap[db.vlog.maxFid].Data))
+	require.NoError(t, z.Munmap(db.vlog.filesMap[db.vlog.maxFid].Data))
 	for _, f := range db.vlog.filesMap {
 		require.NoError(t, f.Fd.Close())
 	}
@@ -722,7 +718,6 @@ func TestWindowsDataLoss(t *testing.T) {
 	require.NoError(t, db.manifest.close())
 	require.NoError(t, db.lc.close())
 
-	opt.Truncate = true
 	db, err = Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
@@ -1007,6 +1002,5 @@ func TestTxnReadTs(t *testing.T) {
 
 	db, err = Open(opt)
 	require.NoError(t, err)
-	// Shouldn't this be 1? Why would the readTS change?
-	require.Equal(t, 2, int(db.orc.readTs()))
+	require.Equal(t, 1, int(db.orc.readTs()))
 }

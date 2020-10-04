@@ -23,6 +23,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2"
 	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -44,7 +45,6 @@ func init() {
 	RootCmd.AddCommand(streamCmd)
 	streamCmd.Flags().StringVarP(&outDir, "out", "o", "",
 		"Path to output DB. The directory should be empty.")
-	streamCmd.Flags().BoolVarP(&truncate, "truncate", "", false, "Option to truncate the DBs")
 	streamCmd.Flags().BoolVarP(&readOnly, "read_only", "", true,
 		"Option to open input DB in read-only mode")
 	streamCmd.Flags().IntVarP(&numVersions, "num_versions", "", 0,
@@ -76,7 +76,6 @@ func stream(cmd *cobra.Command, args []string) error {
 	}
 	inOpt := badger.DefaultOptions(sstDir).
 		WithReadOnly(readOnly).
-		WithTruncate(truncate).
 		WithValueThreshold(1 << 10 /* 1KB */).
 		WithNumVersionsToKeep(numVersions)
 
@@ -90,7 +89,7 @@ func stream(cmd *cobra.Command, args []string) error {
 
 	inDB, err := badger.OpenManaged(inOpt)
 	if err != nil {
-		return errors.Wrapf(err, "cannot open DB at %s", sstDir)
+		return y.Wrapf(err, "cannot open DB at %s", sstDir)
 	}
 	defer inDB.Close()
 	return inDB.StreamDB(outOpt)

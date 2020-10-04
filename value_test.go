@@ -358,7 +358,6 @@ func TestValueGC4(t *testing.T) {
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
-	opt.Truncate = true
 
 	kv, err := Open(opt)
 	require.NoError(t, err)
@@ -431,7 +430,6 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
 	opt.ValueLogFileSize = 1 << 20
-	opt.Truncate = true
 	// avoid compaction on close, so that discard map remains same
 	opt.CompactL0OnClose = false
 
@@ -494,7 +492,6 @@ func TestChecksums(t *testing.T) {
 
 	// Set up SST with K1=V1
 	opts := getTestOptions(dir)
-	opts.Truncate = true
 	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
 	opts.ValueThreshold = 32
 	kv, err := Open(opts)
@@ -675,13 +672,13 @@ func TestReadOnlyOpenWithPartialAppendToValueLog(t *testing.T) {
 		{Key: k2, Value: v2},
 	})
 	buf = buf[:len(buf)-6]
-	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 0), buf, 0777))
+	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), buf, 0777))
 
 	opts.ReadOnly = true
 	// Badger should fail a read-only open with values to replay
 	_, err = Open(opts)
 	require.Error(t, err)
-	require.Regexp(t, "Database was not properly closed, cannot open read-only|Read-only mode is not supported on Windows", err.Error())
+	require.Regexp(t, "Log truncate required", err.Error())
 }
 
 func TestValueLogTrigger(t *testing.T) {
@@ -739,7 +736,7 @@ func createVlog(t *testing.T, entries []*Entry) []byte {
 	require.NoError(t, txn.Commit())
 	require.NoError(t, kv.Close())
 
-	filename := vlogFilePath(dir, 0)
+	filename := vlogFilePath(dir, 1)
 	buf, err := ioutil.ReadFile(filename)
 	require.NoError(t, err)
 	return buf
@@ -782,7 +779,6 @@ func TestPenultimateLogCorruption(t *testing.T) {
 		db0.valueDirGuard = nil
 	}
 
-	opt.Truncate = true
 	db1, err := Open(opt)
 	require.NoError(t, err)
 	h.db = db1
@@ -959,7 +955,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	db, err := Open(DefaultOptions(dir).WithTruncate(true))
+	db, err := Open(DefaultOptions(dir))
 	require.NoError(t, err)
 	// Insert 1 entry so that we have valid data in first vlog file
 	require.NoError(t, db.Update(func(txn *Txn) error {
@@ -974,7 +970,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 1), []byte("foo"), 0664))
 	require.NoError(t, ioutil.WriteFile(vlogFilePath(dir, 2), []byte("foo"), 0664))
 
-	db, err = Open(DefaultOptions(dir).WithTruncate(true))
+	db, err = Open(DefaultOptions(dir))
 	require.NoError(t, err)
 
 	// Ensure vlog file with id=1 is not present

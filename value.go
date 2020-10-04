@@ -609,12 +609,12 @@ func (vlog *valueLog) open(db *DB) error {
 
 		// Just open in RDWR mode. This should not create a new log file.
 		if err := lf.open(vlog.fpath(fid), os.O_RDWR, vlog.opt); err != nil {
-			return errors.Wrapf(err, "Open existing file: %q", lf.path)
+			return y.Wrapf(err, "Open existing file: %q", lf.path)
 		}
 		if lf.size == vlogHeaderSize && fid != vlog.maxFid {
 			vlog.opt.Infof("Deleting empty file: %s", lf.path)
 			if err := lf.Delete(); err != nil {
-				return errors.Wrapf(err, "while trying to delete empty file: %s", lf.path)
+				return y.Wrapf(err, "while trying to delete empty file: %s", lf.path)
 			}
 			delete(vlog.filesMap, fid)
 		}
@@ -808,7 +808,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 	// Validate writes before writing to vlog. Because, we don't want to partially write and return
 	// an error.
 	if err := vlog.validateWrites(reqs); err != nil {
-		return errors.Wrapf(err, "while validating writes")
+		return y.Wrapf(err, "while validating writes")
 	}
 
 	vlog.filesLock.RLock()
@@ -833,7 +833,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		endOffset := atomic.AddUint32(&vlog.writableLogOffset, n)
 		vlog.opt.Debugf("n: %d endOffset: %d\n", n, endOffset)
 		if int(endOffset) >= len(curlf.Data) {
-			return errors.Wrapf(ErrTxnTooBig, "endOffset: %d len: %d\n", endOffset, len(curlf.Data))
+			return y.Wrapf(ErrTxnTooBig, "endOffset: %d len: %d\n", endOffset, len(curlf.Data))
 			// return ErrTxnTooBig
 		}
 
@@ -946,13 +946,13 @@ func (vlog *valueLog) Read(vp valuePointer, s *y.Slice) ([]byte, func(), error) 
 		hash := crc32.New(y.CastagnoliCrcTable)
 		if _, err := hash.Write(buf[:len(buf)-crc32.Size]); err != nil {
 			runCallback(cb)
-			return nil, nil, errors.Wrapf(err, "failed to write hash for vp %+v", vp)
+			return nil, nil, y.Wrapf(err, "failed to write hash for vp %+v", vp)
 		}
 		// Fetch checksum from the end of the buffer.
 		checksum := buf[len(buf)-crc32.Size:]
 		if hash.Sum32() != y.BytesToU32(checksum) {
 			runCallback(cb)
-			return nil, nil, errors.Wrapf(y.ErrChecksumMismatch, "value corrupted for vp: %+v", vp)
+			return nil, nil, y.Wrapf(y.ErrChecksumMismatch, "value corrupted for vp: %+v", vp)
 		}
 	}
 	var h header
@@ -1167,7 +1167,7 @@ func (vlog *valueLog) cleanVlog() error {
 		vlog.db.opt.Logger.Infof("Rewriting fid %d", fid)
 		start = time.Now()
 		if err := vlog.rewrite(lf); err != nil {
-			return errors.Wrapf(err, "file: %s", lf.Fd.Name())
+			return y.Wrapf(err, "file: %s", lf.Fd.Name())
 		}
 		vlog.db.opt.Logger.Infof("Rewritten fid %d. Took: %s", fid, time.Since(start))
 	}
@@ -1217,12 +1217,12 @@ func (vlog *valueLog) getDiscardStats() ([]sampleResult, error) {
 		// Set discard ratio to 0 so that sample never returns a ErrNoRewrite error.
 		r, err := vlog.sample(samp, 0)
 		if err != nil {
-			return nil, errors.Wrapf(err, "file: %s", lf.Fd.Name())
+			return nil, y.Wrapf(err, "file: %s", lf.Fd.Name())
 		}
 
 		fstat, err := lf.Fd.Stat()
 		if err != nil {
-			return nil, errors.Wrapf(err, "Unable to check stat for %q", lf.path)
+			return nil, y.Wrapf(err, "Unable to check stat for %q", lf.path)
 		}
 
 		result = append(result, sampleResult{

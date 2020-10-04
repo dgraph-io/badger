@@ -82,7 +82,7 @@ func (db *DB) openMemTables(opt Options) error {
 	for _, fid := range fids {
 		mt, err := db.openMemTable(fid)
 		if err != nil {
-			return err
+			return y.Wrapf(err, "while opening fid: %d", fid)
 		}
 		// These should no longer be written to. So, make them part of the imm.
 		db.imm = append(db.imm, mt)
@@ -116,7 +116,7 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 	}
 	lerr := mt.wal.open(filepath, os.O_RDWR|os.O_CREATE, db.opt)
 	if lerr != z.NewFile && lerr != nil {
-		return nil, errors.Wrapf(lerr, "While opening mem table")
+		return nil, y.Wrapf(lerr, "While opening mem table: %s", filepath)
 	}
 	s.OnClose = func() {
 		if err := mt.wal.Delete(); err != nil {
@@ -127,7 +127,7 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 		return mt, lerr
 	}
 	err := mt.UpdateSkipList()
-	return mt, err
+	return mt, y.Wrapf(err, "while updating skiplist")
 }
 
 var errExpectingNewFile = errors.New("Expecting to create a new file, but found an existing file")
@@ -141,7 +141,7 @@ func (db *DB) newMemTable() (*memTable, error) {
 
 	if err != nil {
 		db.opt.Errorf("Got error: %v for id: %d\n", err, db.nextMemFid)
-		return nil, errors.Wrapf(err, "newMemTable")
+		return nil, y.Wrapf(err, "newMemTable")
 	}
 	return nil, errors.Errorf("File %s already exists", mt.wal.Fd.Name())
 }
@@ -171,7 +171,7 @@ func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
 		// If WAL exceeds opt.ValueLogFileSize, we'll force flush the memTable. See logic in
 		// ensureRoomForWrite.
 		if err := mt.wal.writeEntry(mt.buf, entry, mt.opt); err != nil {
-			return errors.Wrapf(err, "cannot write entry to WAL file")
+			return y.Wrapf(err, "cannot write entry to WAL file")
 		}
 	}
 	mt.sl.Put(key, value)
@@ -187,7 +187,10 @@ func (mt *memTable) UpdateSkipList() error {
 	}
 	endOff, err := mt.wal.iterate(true, 0, mt.replayFunction(mt.opt))
 	if err != nil {
-		return errors.Wrapf(err, "while iterating wal: %s", mt.wal.Fd.Name())
+		return y.Wrapf(err, "while iterating wal: %s", mt.wal.Fd.Name())
+	}
+	if endOff < mt.wal.size && mt.opt.ReadOnly {
+		return y.Wrapf(ErrTruncateNeeded, "end offset: %d < size: %d", endOff, mt.wal.size)
 	}
 
 	// TODO: Figure out whether the Truncate option should be respected or not.
@@ -243,9 +246,17 @@ type logFile struct {
 	baseIV   []byte
 	registry *KeyRegistry
 	writeAt  uint32
+	opt      Options
 }
 
 func (lf *logFile) Truncate(end int64) error {
+	if lf.size == uint32(end) {
+		return nil
+	}
+	if lf.opt.ReadOnly {
+		return y.Wrapf(ErrTruncateNeeded,
+			"truncate to %d from %d for file: %s", end, lf.size, lf.path)
+	}
 	lf.size = uint32(end)
 	return lf.MmapFile.Truncate(end)
 }
@@ -385,7 +396,7 @@ func (lf *logFile) generateIV(offset uint32) []byte {
 func (lf *logFile) doneWriting(offset uint32) error {
 	// Just always sync on rotate.
 	if err := z.Msync(lf.Data); err != nil {
-		return errors.Wrapf(err, "Unable to sync value log: %q", lf.path)
+		return y.Wrapf(err, "Unable to sync value log: %q", lf.path)
 	}
 
 	// Before we were acquiring a lock here on lf.lock, because we were invalidating the file
@@ -396,7 +407,7 @@ func (lf *logFile) doneWriting(offset uint32) error {
 	defer lf.lock.Unlock()
 
 	if err := lf.Truncate(int64(offset)); err != nil {
-		return errors.Wrapf(err, "Unable to truncate file: %q", lf.path)
+		return y.Wrapf(err, "Unable to truncate file: %q", lf.path)
 	}
 
 	// Previously we used to close the file after it was written and reopen it in read-only mode.
@@ -416,12 +427,6 @@ func (lf *logFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint32, e
 		// If offset is set to zero, let's advance past the encryption key header.
 		offset = vlogHeaderSize
 	}
-	// TODO: Don't know what the end of file is. We just have to read it to know it.
-	// if readOnly {
-	// 	// We're not at the end of the file. We'd need to replay the entries, or
-	// 	// possibly truncate the file.
-	// 	return 0, ErrReplayNeeded
-	// }
 
 	// For now, read directly from file, because it allows
 	reader := bufio.NewReader(lf.NewReader(int(offset)))
@@ -517,8 +522,11 @@ loop:
 }
 
 func (lf *logFile) open(path string, flags int, opt Options) error {
+	lf.opt = opt
+
 	mf, ferr := z.OpenMmapFile(path, flags, 2*int(opt.ValueLogFileSize))
 	lf.MmapFile = mf
+
 	if ferr == z.NewFile {
 		if err := lf.bootstrap(); err != nil {
 			os.Remove(path)
@@ -527,21 +535,22 @@ func (lf *logFile) open(path string, flags int, opt Options) error {
 		lf.size = vlogHeaderSize
 
 	} else if ferr != nil {
-		return errors.Wrapf(ferr, "while opening file: %s", path)
+		return y.Wrapf(ferr, "while opening file: %s", path)
 	}
 	lf.size = uint32(len(lf.Data))
 
-	// if sz < vlogHeaderSize {
-	// 	// Every vlog file should have at least vlogHeaderSize. If it is less than vlogHeaderSize
-	// 	// then it must have been corrupted. But no need to handle here. log replayer will truncate
-	// 	// and bootstrap the logfile. So ignoring here.
-	// 	return nil
-	// }
+	if lf.size < vlogHeaderSize {
+		// Every vlog file should have at least vlogHeaderSize. If it is less than vlogHeaderSize
+		// then it must have been corrupted. But no need to handle here. log replayer will truncate
+		// and bootstrap the logfile. So ignoring here.
+		return nil
+	}
 
 	// Copy over the encryption registry data.
 	buf := make([]byte, vlogHeaderSize)
 
-	y.AssertTrue(vlogHeaderSize == copy(buf, lf.Data))
+	y.AssertTruef(vlogHeaderSize == copy(buf, lf.Data),
+		"Unable to copy from %s, size %d", path, lf.size)
 	keyID := binary.BigEndian.Uint64(buf[:8])
 	// retrieve datakey.
 	if dk, err := lf.registry.dataKey(keyID); err != nil {
@@ -589,13 +598,4 @@ func (lf *logFile) bootstrap() error {
 	// Copy over to the logFile.
 	y.AssertTrue(vlogHeaderSize == copy(lf.Data[0:], buf))
 	return nil
-}
-
-func (lf *logFile) reset() {
-	// TODO: This is needed in in-memory mode.
-	if lf == nil {
-		return
-	}
-	z.ZeroOut(lf.Data, vlogHeaderSize, int(lf.writeAt))
-	lf.writeAt = vlogHeaderSize
 }
