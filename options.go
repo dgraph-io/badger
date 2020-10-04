@@ -122,7 +122,7 @@ func DefaultOptions(path string) Options {
 		NumMemtables:            5,
 		BloomFalsePositive:      0.01,
 		BlockSize:               4 * 1024,
-		SyncWrites:              true,
+		SyncWrites:              false,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
 		KeepL0InMemory:          false,
@@ -215,10 +215,13 @@ func (opt Options) WithValueDir(val string) Options {
 
 // WithSyncWrites returns a new Options value with SyncWrites set to the given value.
 //
-// When SyncWrites is true all writes are synced to disk. Setting this to false would achieve better
-// performance, but may cause data loss in case of crash.
+// Badger passes all writes via mmap. So, all writes can survive process crashes or k8s environments
+// with SyncWrites set to false.
 //
-// The default value of SyncWrites is true.
+// When set to true, Badger would call an additional msync after writes to flush mmap buffer over to
+// disk to survive hard reboots. Most users of Badger should be OK setting this to false.
+//
+// The default value of SyncWrites is false.
 func (opt Options) WithSyncWrites(val bool) Options {
 	opt.SyncWrites = val
 	return opt

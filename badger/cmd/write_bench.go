@@ -142,7 +142,9 @@ func writeRandom(db *badger.DB, num uint64) error {
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, keySz)
 		y.Check2(rand.Read(key))
-		e := badger.NewEntry(key, value)
+
+		vsz := rand.Intn(valSz) + 1
+		e := badger.NewEntry(key, value[:vsz])
 
 		if ttlPeriod != 0 {
 			e.WithTTL(ttlPeriod)
