@@ -29,6 +29,7 @@ import (
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto"
 )
 
 func TestTableIndex(t *testing.T) {
@@ -36,6 +37,12 @@ func TestTableIndex(t *testing.T) {
 	keysCount := 100000
 	key := make([]byte, 32)
 	_, err := rand.Read(key)
+	require.NoError(t, err)
+	cache, err := ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1000,
+		MaxCost:     1 << 20,
+		BufferItems: 64,
+	})
 	require.NoError(t, err)
 	subTest := []struct {
 		name string
@@ -57,6 +64,7 @@ func TestTableIndex(t *testing.T) {
 				BloomFalsePositive: 0.01,
 				TableSize:          30 << 20,
 				DataKey:            &pb.DataKey{Data: key},
+				IndexCache:         cache,
 			},
 		},
 		{
@@ -80,6 +88,7 @@ func TestTableIndex(t *testing.T) {
 				Compression:          options.ZSTD,
 				ZSTDCompressionLevel: 3,
 				DataKey:              &pb.DataKey{Data: key},
+				IndexCache:           cache,
 			},
 		},
 	}
@@ -188,6 +197,13 @@ func BenchmarkBuilder(b *testing.B) {
 	})
 	b.Run("encryption", func(b *testing.B) {
 		var opt Options
+		cache, err := ristretto.NewCache(&ristretto.Config{
+			NumCounters: 1000,
+			MaxCost:     1 << 20,
+			BufferItems: 64,
+		})
+		require.NoError(b, err)
+		opt.IndexCache = cache
 		key := make([]byte, 32)
 		rand.Read(key)
 		opt.DataKey = &pb.DataKey{Data: key}
@@ -218,13 +234,9 @@ func TestBloomfilter(t *testing.T) {
 	createAndTest := func(t *testing.T, withBlooms bool) {
 		opts := Options{
 			BloomFalsePositive: 0.0,
-			LoadBloomsOnOpen:   false,
 		}
 		if withBlooms {
-			opts = Options{
-				BloomFalsePositive: 0.01,
-				LoadBloomsOnOpen:   true,
-			}
+			opts.BloomFalsePositive = 0.01
 		}
 		f := buildTestTable(t, keyPrefix, keyCount, opts)
 		tab, err := OpenTable(f, opts)
@@ -263,10 +275,7 @@ func TestBloomfilter(t *testing.T) {
 	})
 }
 func TestEmptyBuilder(t *testing.T) {
-	opts := Options{
-		BloomFalsePositive: 0.0,
-		LoadBloomsOnOpen:   false,
-	}
+	opts := Options{BloomFalsePositive: 0.1}
 	b := NewTableBuilder(opts)
 	require.Nil(t, b.Finish(false))
 

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 )
@@ -104,8 +103,6 @@ func main() {
 	os.RemoveAll(dir)
 
 	db, err := badger.Open(badger.DefaultOptions(dir).
-		WithTableLoadingMode(options.MemoryMap).
-		WithValueLogLoadingMode(options.FileIO).
 		WithSyncWrites(false))
 	if err != nil {
 		log.Fatal(err)

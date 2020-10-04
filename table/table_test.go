@@ -44,7 +44,6 @@ func getTestTableOptions() Options {
 	return Options{
 		Compression:          options.ZSTD,
 		ZSTDCompressionLevel: 15,
-		LoadingMode:          options.LoadToRAM,
 		BlockSize:            4 * 1024,
 		BloomFalsePositive:   0.01,
 	}
@@ -284,7 +283,6 @@ func TestIterateFromEnd(t *testing.T) {
 
 func TestTable(t *testing.T) {
 	opts := getTestTableOptions()
-	opts.LoadingMode = options.FileIO
 	f := buildTestTable(t, "key", 10000, opts)
 	table, err := OpenTable(f, opts)
 	require.NoError(t, err)
@@ -932,7 +930,7 @@ func TestOpenKVSize(t *testing.T) {
 		opts := getTestTableOptions()
 		opts.Compression = options.ZSTD
 		table, err := OpenTable(buildTestTable(t, "foo", 1000, opts), opts)
-		defer table.Close()
+		defer table.DecrRef()
 		require.NoError(t, err)
 
 		// The estimated size is same as table size in case compression is enabled.
@@ -945,9 +943,9 @@ func TestOpenKVSize(t *testing.T) {
 		opts.Compression = options.None
 		table, err := OpenTable(buildTestTable(t, "foo", 1, opts), opts)
 		require.NoError(t, err)
-		defer table.Close()
+		defer table.DecrRef()
 
-		stat, err := table.fd.Stat()
+		stat, err := table.Fd.Stat()
 		require.NoError(t, err)
 		require.Less(t, table.EstimatedSize(), uint32(stat.Size()))
 	})
