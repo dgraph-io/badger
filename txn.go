@@ -249,8 +249,8 @@ func (o *oracle) doneCommit(cts uint64) {
 type Txn struct {
 	readTs   uint64
 	commitTs uint64
-	size     int
-	count    int
+	size     int64
+	count    int64
 	db       *DB
 
 	reads []uint64 // contains fingerprints of keys read.
@@ -343,12 +343,13 @@ func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
 }
 
 func (txn *Txn) checkSize(e *Entry) error {
-	if txn.count >= int(txn.db.opt.maxBatchCount) || txn.size >= int(txn.db.opt.maxBatchSize) {
+	count := txn.count + 1
+	// Extra bytes for the version in key.
+	size := txn.size + int64(e.estimateSize(txn.db.opt.ValueThreshold)) + 10
+	if count >= txn.db.opt.maxBatchCount || size >= txn.db.opt.maxBatchSize {
 		return ErrTxnTooBig
 	}
-	txn.count++
-	// Extra bytes for the version in key.
-	txn.size += len(e.Key) + 8 + len(e.Value) + 2
+	txn.count, txn.size = count, size
 	return nil
 }
 
@@ -766,8 +767,8 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 	txn := &Txn{
 		update: update,
 		db:     db,
-		count:  1,                // One extra entry for BitFin.
-		size:   len(txnKey) + 10, // Some buffer for the extra entry.
+		count:  1,                       // One extra entry for BitFin.
+		size:   int64(len(txnKey) + 10), // Some buffer for the extra entry.
 	}
 	if update {
 		if db.opt.DetectConflicts {
