@@ -31,6 +31,7 @@ import (
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/stretchr/testify/require"
 )
 
@@ -112,7 +113,7 @@ func key(prefix string, i int) string {
 	return prefix + fmt.Sprintf("%04d", i)
 }
 
-func buildTestTable(t *testing.T, prefix string, n int, opts table.Options) *os.File {
+func buildTestTable(t *testing.T, prefix string, n int, opts table.Options) *table.Table {
 	y.AssertTrue(n <= 10000)
 	keyValues := make([][]string, n)
 	for i := 0; i < n; i++ {
@@ -125,7 +126,7 @@ func buildTestTable(t *testing.T, prefix string, n int, opts table.Options) *os.
 
 // TODO - Move these to somewhere where table package can also use it.
 // keyValues is n by 2 where n is number of pairs.
-func buildTable(t *testing.T, keyValues [][]string, bopts table.Options) *os.File {
+func buildTable(t *testing.T, keyValues [][]string, bopts table.Options) *table.Table {
 	if bopts.BloomFalsePositive == 0 {
 		bopts.BloomFalsePositive = 0.01
 	}
@@ -137,12 +138,6 @@ func buildTable(t *testing.T, keyValues [][]string, bopts table.Options) *os.Fil
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-	f, err := y.OpenSyncedFile(filename, true)
-	if t != nil {
-		require.NoError(t, err)
-	} else {
-		y.Check(err)
-	}
 
 	sort.Slice(keyValues, func(i, j int) bool {
 		return keyValues[i][0] < keyValues[j][0]
@@ -155,11 +150,10 @@ func buildTable(t *testing.T, keyValues [][]string, bopts table.Options) *os.Fil
 			UserMeta: 0,
 		}, 0)
 	}
-	_, err = f.Write(b.Finish(false))
-	require.NoError(t, err, "unable to write to file.")
-	f.Close()
-	f, _ = y.OpenSyncedFile(filename, true)
-	return f
+
+	tbl, err := table.CreateTable(filename, b.Finish(false), bopts)
+	require.Equal(t, err, z.NewFile)
+	return tbl
 }
 
 func TestOverlappingKeyRangeError(t *testing.T) {
@@ -173,9 +167,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lh0 := newLevelHandler(kv, 0)
 	lh1 := newLevelHandler(kv, 1)
 	opts := table.Options{ChkMode: options.OnTableAndBlockRead}
-	f := buildTestTable(t, "k", 2, opts)
-	t1, err := table.OpenTable(f, opts)
-	require.NoError(t, err)
+	t1 := buildTestTable(t, "k", 2, opts)
 	defer t1.DecrRef()
 
 	done := lh0.tryAddLevel0Table(t1)
@@ -194,9 +186,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	require.Equal(t, true, done)
 	lc.runCompactDef(0, cd)
 
-	f = buildTestTable(t, "l", 2, opts)
-	t2, err := table.OpenTable(f, opts)
-	require.NoError(t, err)
+	t2 := buildTestTable(t, "l", 2, opts)
 	defer t2.DecrRef()
 	done = lh0.tryAddLevel0Table(t2)
 	require.Equal(t, true, done)

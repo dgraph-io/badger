@@ -50,6 +50,7 @@ const intSize = int(unsafe.Sizeof(int(0)))
 type Options struct {
 	// Options for Opening/Building Table.
 
+	SyncWrites bool
 	// Open tables in read only mode.
 	ReadOnly bool
 
@@ -224,42 +225,53 @@ func (b block) verifyCheckSum() error {
 	return y.VerifyChecksum(b.data, cs)
 }
 
+func CreateTable(fname string, data []byte, opts Options) (*Table, error) {
+	mf, err := z.OpenMmapFile(fname, os.O_CREATE|os.O_RDWR|os.O_EXCL, len(data))
+	if err == z.NewFile {
+		// Expected.
+	} else if err != nil {
+		return nil, y.Wrapf(err, "while creating table: %s", fname)
+	}
+
+	copy(mf.Data, data)
+	if opts.SyncWrites {
+		if err := z.Msync(mf.Data); err != nil {
+			return nil, y.Wrapf(err, "while calling msync on %s", fname)
+		}
+	}
+	return OpenTable(mf, opts)
+}
+
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function
 // entry. Returns a table with one reference count on it (decrementing which may delete the file!
 // -- consider t.Close() instead). The fd has to writeable because we call Truncate on it before
 // deleting. Checksum for all blocks of table is verified based on value of chkMode.
-func OpenTable(fd *os.File, opts Options) (*Table, error) {
+func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 	// BlockSize is used to compute the approximate size of the decompressed
 	// block. It should not be zero if the table is compressed.
 	if opts.BlockSize == 0 && opts.Compression != options.None {
 		return nil, errors.New("Block size cannot be zero")
 	}
-	fileInfo, err := fd.Stat()
+	fileInfo, err := mf.Fd.Stat()
 	if err != nil {
-		// It's OK to ignore fd.Close() errs in this function because we have only read
-		// from the file.
-		_ = fd.Close()
+		mf.Close(-1)
 		return nil, y.Wrap(err, "")
 	}
 
 	filename := fileInfo.Name()
 	id, ok := ParseFileID(filename)
 	if !ok {
-		_ = fd.Close()
+		mf.Close(-1)
 		return nil, errors.Errorf("Invalid filename: %s", filename)
 	}
 	t := &Table{
+		MmapFile:   mf,
 		ref:        1, // Caller is given one reference.
 		id:         id,
 		opt:        &opts,
 		IsInmemory: false,
 		tableSize:  int(fileInfo.Size()),
 	}
-	mf, err := z.OpenMmapFileUsing(fd, 0, !opts.ReadOnly)
-	if err != nil {
-		return nil, y.Wrapf(err, "Unable to open file: %s", filename)
-	}
-	t.MmapFile = mf
 
 	if err := t.initBiggestAndSmallest(); err != nil {
 		return nil, y.Wrapf(err, "failed to initialize table")
@@ -267,7 +279,7 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 
 	if opts.ChkMode == options.OnTableRead || opts.ChkMode == options.OnTableAndBlockRead {
 		if err := t.VerifyChecksum(); err != nil {
-			_ = fd.Close()
+			mf.Close(-1)
 			return nil, y.Wrapf(err, "failed to verify checksum")
 		}
 	}

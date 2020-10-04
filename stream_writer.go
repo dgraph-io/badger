@@ -391,14 +391,9 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 			return err
 		}
 	} else {
-		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, w.db.opt.Dir), true)
-		if err != nil {
-			return err
-		}
-		if _, err := fd.Write(data); err != nil {
-			return err
-		}
-		if tbl, err = table.OpenTable(fd, opts); err != nil {
+		var err error
+		if tbl, err = table.CreateTable(
+			table.NewFilename(fileID, w.db.opt.Dir), data, opts); err != nil {
 			return err
 		}
 	}

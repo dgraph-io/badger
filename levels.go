@@ -102,10 +102,9 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		return nil, err
 	}
 
-	// Some files may be deleted. Let's reload.
-	var flags uint32 = y.Sync
+	var flags int
 	if db.opt.ReadOnly {
-		flags |= y.ReadOnly
+		flags |= os.O_RDONLY
 	}
 
 	var mu sync.Mutex
@@ -143,11 +142,6 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				throttle.Done(rerr)
 				atomic.AddInt32(&numOpened, 1)
 			}()
-			fd, err := y.OpenExistingFile(fname, flags)
-			if err != nil {
-				rerr = y.Wrapf(err, "Opening file: %q", fname)
-				return
-			}
 			dk, err := db.registry.dataKey(tf.KeyID)
 			if err != nil {
 				rerr = y.Wrapf(err, "Error while reading datakey")
@@ -159,11 +153,17 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			topt.DataKey = dk
 			topt.BlockCache = db.blockCache
 			topt.IndexCache = db.indexCache
-			t, err := table.OpenTable(fd, topt)
+
+			mf, err := z.OpenMmapFile(fname, flags, 0)
+			if err != nil {
+				rerr = y.Wrapf(err, "Opening file: %q", fname)
+				return
+			}
+			t, err := table.OpenTable(mf, topt)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "CHECKSUM_MISMATCH:") {
 					db.opt.Errorf(err.Error())
-					db.opt.Errorf("Ignoring table %s", fd.Name())
+					db.opt.Errorf("Ignoring table %s", mf.Fd.Name())
 					// Do not set rerr. We will continue without this table.
 				} else {
 					rerr = y.Wrapf(err, "Opening table: %q", fname)
@@ -669,17 +669,10 @@ nextTable:
 			defer inflightBuilders.Done(err)
 
 			build := func(fileID uint64) (*table.Table, error) {
-				fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.kv.opt.Dir), true)
-				if err != nil {
-					return nil, y.Wrapf(err, "While opening new table: %d", fileID)
-				}
-
-				if _, err := fd.Write(builder.Finish(false)); err != nil {
-					return nil, y.Wrapf(err, "Unable to write to file: %d", fileID)
-				}
-				tbl, err := table.OpenTable(fd, bopts)
+				tbl, err := table.CreateTable(
+					table.NewFilename(fileID, s.kv.opt.Dir), builder.Finish(false), bopts)
 				// decrRef is added below.
-				return tbl, y.Wrapf(err, "Unable to open table: %q", fd.Name())
+				return tbl, y.Wrapf(err, "Unable to open table: %q", tbl.Fd.Name())
 			}
 
 			var tbl *table.Table

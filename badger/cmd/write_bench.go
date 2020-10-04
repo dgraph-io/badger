@@ -308,16 +308,6 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	if sorted {
 		err = writeSorted(db, num)
 	} else {
-		go func() {
-			for {
-				select {
-				case <-c.HasBeenClosed():
-					return
-				case <-time.After(30 * time.Second):
-					readTest(db, 5*time.Minute)
-				}
-			}
-		}()
 		err = writeRandom(db, num)
 	}
 

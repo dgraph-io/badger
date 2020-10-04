@@ -1116,28 +1116,9 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return db.lc.addLevel0Table(tbl)
 	}
 
-	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
+	tbl, err := table.CreateTable(table.NewFilename(fileID, db.opt.Dir), tableData, bopts)
 	if err != nil {
-		return y.Wrap(err, "")
-	}
-
-	// Don't block just to sync the directory entry.
-	dirSyncCh := make(chan error, 1)
-	go func() { dirSyncCh <- db.syncDir(db.opt.Dir) }()
-
-	if _, err = fd.Write(tableData); err != nil {
-		db.opt.Errorf("ERROR while writing to level 0: %v", err)
-		return err
-	}
-
-	if dirSyncErr := <-dirSyncCh; dirSyncErr != nil {
-		// Do dir sync as best effort. No need to return due to an error there.
-		db.opt.Errorf("ERROR while syncing level directory: %v", dirSyncErr)
-	}
-	tbl, err := table.OpenTable(fd, bopts)
-	if err != nil {
-		db.opt.Debugf("ERROR while opening table: %v", err)
-		return err
+		return y.Wrap(err, "error while creating table")
 	}
 	// We own a ref on tbl.
 	err = db.lc.addLevel0Table(tbl) // This will incrRef

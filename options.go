@@ -159,6 +159,7 @@ func DefaultOptions(path string) Options {
 
 func buildTableOptions(opt Options) table.Options {
 	return table.Options{
+		SyncWrites:           opt.SyncWrites,
 		ReadOnly:             opt.ReadOnly,
 		TableSize:            uint64(opt.MaxTableSize),
 		BlockSize:            opt.BlockSize,

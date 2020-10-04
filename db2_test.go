@@ -513,13 +513,7 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	}
 
 	fileID := db.lc.reserveFileID()
-	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
-	require.NoError(t, err)
-
-	_, err = fd.Write(b.Finish(false))
-	require.NoError(t, err, "unable to write to file")
-
-	tab, err := table.OpenTable(fd, bopts)
+	tab, err := table.CreateTable(table.NewFilename(fileID, db.opt.Dir), b.Finish(false), bopts)
 	require.NoError(t, err)
 	return tab
 }
