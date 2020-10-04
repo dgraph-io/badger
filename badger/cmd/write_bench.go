@@ -92,7 +92,7 @@ func init() {
 	writeBenchCmd.Flags().IntVar(&valSz, "val-size", 128, "Size of value")
 	writeBenchCmd.Flags().Float64VarP(&numKeys, "keys-mil", "m", 10.0,
 		"Number of keys to add in millions")
-	writeBenchCmd.Flags().BoolVar(&syncWrites, "sync", true,
+	writeBenchCmd.Flags().BoolVar(&syncWrites, "sync", false,
 		"If true, sync writes to disk.")
 	writeBenchCmd.Flags().BoolVarP(&force, "force-compact", "f", true,
 		"Force compact level 0 on close.")
