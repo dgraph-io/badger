@@ -170,11 +170,17 @@ func (r *safeRead) Entry(reader io.Reader) (*Entry, error) {
 
 func (vlog *valueLog) rewrite(f *logFile) error {
 	vlog.filesLock.RLock()
+	for _, fid := range vlog.filesToBeDeleted {
+		if fid == f.fid {
+			vlog.filesLock.RUnlock()
+			return errors.Errorf("value log file already marked for deletion fid: %d", fid)
+		}
+	}
 	maxFid := vlog.maxFid
-	vlog.filesLock.RUnlock()
 	y.AssertTruef(uint32(f.fid) < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
-	vlog.opt.Infof("Rewriting fid: %d", f.fid)
+	vlog.filesLock.RUnlock()
 
+	vlog.opt.Infof("Rewriting fid: %d", f.fid)
 	wb := make([]*Entry, 0, 1000)
 	var size int64
 
@@ -959,45 +965,49 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, *logF
 	return buf, lf, err
 }
 
-func (vlog *valueLog) pickLog(discardRatio float64) (files []*logFile) {
+func (vlog *valueLog) pickLog(discardRatio float64) *logFile {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
-	fids := vlog.sortedFids()
-	if len(fids) <= 1 {
-		return nil
-	}
-	maxFid := atomic.LoadUint32(&vlog.maxFid)
 
+LOOP:
 	// TODO(naman): Add a test for MaxDiscard which checks for the zero value.
 	// Pick a candidate that contains the largest amount of discardable data
 	fid, discard := vlog.discardStats.MaxDiscard()
 
-	lf, ok := vlog.filesMap[fid]
-	if !ok {
-		vlog.opt.Errorf("Unable to find value log fid: %d", fid)
-		return
+	// MaxDiscard will return fid=0 if it doesn't have any discard data. The
+	// vlog files start from 1.
+	if fid == 0 {
+		return nil
 	}
+	lf, ok := vlog.filesMap[fid]
+	// This file was deleted but it's discard stats increased because of
+	// compactions. The file doesn't exist so we don't need to do anything.
+	// Skip it and retry.
+	if !ok {
+		vlog.discardStats.Update(fid, -1)
+		goto LOOP
+	}
+	// We have a valid file.
 	fi, err := lf.Fd.Stat()
 	if err != nil {
 		vlog.opt.Errorf("Unable to get stats for value log fid: %d err: %+v", fi, err)
-		return
+		return nil
 	}
-	// MaxDiscard will return fid=0 if it doesn't have any discard data. The
-	// vlog files start from 1.
-	if fid == 0 || float64(discard) < discardRatio*float64(fi.Size()) {
+	if float64(discard) < discardRatio*float64(fi.Size()) {
 		vlog.opt.Debugf("Discard: %d less than DiscardRatio: %f for file: %s",
 			discard, discardRatio, fi.Name())
 		return nil
 	}
+	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	if fid < maxFid {
 		vlog.opt.Infof("Found value log max discard fid: %d discard: %d\n", fid, discard)
 		lf, ok := vlog.filesMap[fid]
 		y.AssertTrue(ok)
-		files = append(files, lf)
+		return lf
 	}
 
 	// Don't randomly pick any value log file.
-	return files
+	return nil
 }
 
 func discardEntry(e Entry, vs y.ValueStruct, db *DB) bool {
@@ -1025,7 +1035,7 @@ type reason struct {
 	count   int
 }
 
-func (vlog *valueLog) doRunGC(lf *logFile, discardRatio float64) (err error) {
+func (vlog *valueLog) doRunGC(lf *logFile) (err error) {
 	// Update stats before exiting
 	defer func() {
 		if err == nil {
@@ -1057,21 +1067,11 @@ func (vlog *valueLog) runGC(discardRatio float64) error {
 			<-vlog.garbageCh
 		}()
 
-		files := vlog.pickLog(discardRatio)
-		if len(files) == 0 {
+		lf := vlog.pickLog(discardRatio)
+		if lf == nil {
 			return ErrNoRewrite
 		}
-		tried := make(map[uint32]bool)
-		var err error
-		for _, lf := range files {
-			if _, done := tried[lf.fid]; done {
-				continue
-			}
-			if err = vlog.doRunGC(lf, discardRatio); err == nil {
-				return nil
-			}
-		}
-		return err
+		return vlog.doRunGC(lf)
 	default:
 		return ErrRejected
 	}
