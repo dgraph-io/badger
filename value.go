@@ -34,7 +34,6 @@ import (
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
-	"golang.org/x/net/trace"
 )
 
 // maxVlogFileSize is the maximum size of the vlog file which can be created. Vlog Offset is of
@@ -960,12 +959,11 @@ func (vlog *valueLog) readValueBytes(vp valuePointer, s *y.Slice) ([]byte, *logF
 	return buf, lf, err
 }
 
-func (vlog *valueLog) pickLog(tr trace.Trace) (files []*logFile) {
+func (vlog *valueLog) pickLog(discardRatio float64) (files []*logFile) {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
 	fids := vlog.sortedFids()
 	if len(fids) <= 1 {
-		tr.LazyPrintf("Only one or less value log file.")
 		return nil
 	}
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
@@ -974,9 +972,21 @@ func (vlog *valueLog) pickLog(tr trace.Trace) (files []*logFile) {
 	// Pick a candidate that contains the largest amount of discardable data
 	fid, discard := vlog.discardStats.MaxDiscard()
 
+	lf, ok := vlog.filesMap[fid]
+	if !ok {
+		vlog.opt.Errorf("Unable to find value log fid: %d", fid)
+		return
+	}
+	fi, err := lf.Fd.Stat()
+	if err != nil {
+		vlog.opt.Errorf("Unable to get stats for value log fid: %d err: %+v", fi, err)
+		return
+	}
 	// MaxDiscard will return fid=0 if it doesn't have any discard data. The
 	// vlog files start from 1.
-	if fid == 0 {
+	if fid == 0 || float64(discard) < discardRatio*float64(fi.Size()) {
+		vlog.opt.Debugf("Discard: %d less than DiscardRatio: %f for file: %s",
+			discard, discardRatio, fi.Name())
 		return nil
 	}
 	if fid < maxFid {
@@ -1043,24 +1053,20 @@ func (vlog *valueLog) runGC(discardRatio float64) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
 		// Pick a log file for GC.
-		tr := trace.New("Badger.ValueLog", "GC")
-		tr.SetMaxEvents(100)
 		defer func() {
-			tr.Finish()
 			<-vlog.garbageCh
 		}()
 
-		var err error
-		files := vlog.pickLog(tr)
+		files := vlog.pickLog(discardRatio)
 		if len(files) == 0 {
 			return ErrNoRewrite
 		}
 		tried := make(map[uint32]bool)
+		var err error
 		for _, lf := range files {
 			if _, done := tried[lf.fid]; done {
 				continue
 			}
-			tried[lf.fid] = true
 			if err = vlog.doRunGC(lf, discardRatio); err == nil {
 				return nil
 			}
