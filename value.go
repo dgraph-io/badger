@@ -979,7 +979,9 @@ func (vlog *valueLog) pickLog(tr trace.Trace) (files []*logFile) {
 	}
 	if fid < maxFid {
 		vlog.opt.Infof("Found value log max discard fid: %d discard: %d\n", fid, discard)
-		files = append(files, vlog.filesMap[fid])
+		lf, ok := vlog.filesMap[fid]
+		y.AssertTrue(ok)
+		files = append(files, lf)
 	}
 
 	// Don't randomly pick any value log file.
