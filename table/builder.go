@@ -103,7 +103,8 @@ func NewTableBuilder(opts Options) *Builder {
 	b := &Builder{
 		// Additional 16 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
-		buf:     z.Calloc(int(opts.TableSize + 16*MB)),
+		// TODO: Switch this buf over to z.Buffer.
+		buf:     make([]byte, int(opts.TableSize+16*MB)),
 		opt:     &opts,
 		offsets: z.NewBuffer(1 << 20),
 	}
@@ -173,7 +174,6 @@ func (b *Builder) handleBlock() {
 // Close closes the TableBuilder.
 func (b *Builder) Close() {
 	b.offsets.Release()
-	z.Free(b.buf)
 }
 
 // Empty returns whether it's empty.
@@ -241,12 +241,11 @@ func (b *Builder) grow(n uint32) {
 	if n < l/2 {
 		n = l / 2
 	}
-	newBuf := z.Calloc(int(l + n))
+	newBuf := make([]byte, l+n)
 	y.AssertTrue(uint32(len(newBuf)) == l+n)
 
 	b.bufLock.Lock()
 	copy(newBuf, b.buf)
-	z.Free(b.buf)
 	b.buf = newBuf
 	b.bufLock.Unlock()
 }
