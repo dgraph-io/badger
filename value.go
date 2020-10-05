@@ -391,6 +391,8 @@ func (vlog *valueLog) deleteLogFile(lf *logFile) error {
 	}
 	lf.lock.Lock()
 	defer lf.lock.Unlock()
+	// Delete fid from discard stats as well.
+	vlog.discardStats.Update(lf.fid, -1)
 
 	return lf.Delete()
 }
