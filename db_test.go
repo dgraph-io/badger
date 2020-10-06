@@ -380,7 +380,7 @@ func TestStreamDB(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
-	opts := getTestOptions(dir).WithCompression(options.ZSTD)
+	opts := getTestOptions(dir).WithCompression(options.ZSTD).WithBlockCacheSize(100 << 20)
 
 	db, err := OpenManaged(opts)
 	require.NoError(t, err)
@@ -838,6 +838,7 @@ func TestLoad(t *testing.T) {
 		require.NoError(t, err)
 		opt := getTestOptions("")
 		opt.EncryptionKey = key
+		opt.BlockCacheSize = 100 << 20
 		opt.Compression = options.None
 		testLoad(t, opt)
 	})
@@ -848,11 +849,13 @@ func TestLoad(t *testing.T) {
 		opt := getTestOptions("")
 		opt.EncryptionKey = key
 		opt.Compression = options.ZSTD
+		opt.BlockCacheSize = 100 << 20
 		testLoad(t, opt)
 	})
 	t.Run("TestLoad without Encryption and with compression", func(t *testing.T) {
 		opt := getTestOptions("")
 		opt.Compression = options.ZSTD
+		opt.BlockCacheSize = 100 << 20
 		testLoad(t, opt)
 	})
 }

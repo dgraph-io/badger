@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -88,7 +89,7 @@ const (
 func init() {
 	benchCmd.AddCommand(writeBenchCmd)
 	writeBenchCmd.Flags().IntVarP(&keySz, "key-size", "k", 32, "Size of key")
-	writeBenchCmd.Flags().IntVarP(&valSz, "val-size", "v", 128, "Size of value")
+	writeBenchCmd.Flags().IntVar(&valSz, "val-size", 128, "Size of value")
 	writeBenchCmd.Flags().Float64VarP(&numKeys, "keys-mil", "m", 10.0,
 		"Number of keys to add in millions")
 	writeBenchCmd.Flags().BoolVar(&syncWrites, "sync", true,
@@ -96,12 +97,12 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&force, "force-compact", "f", true,
 		"Force compact level 0 on close.")
 	writeBenchCmd.Flags().BoolVarP(&sorted, "sorted", "s", false, "Write keys in sorted order.")
-	writeBenchCmd.Flags().BoolVarP(&showLogs, "logs", "l", false, "Show Badger logs.")
+	writeBenchCmd.Flags().BoolVarP(&showLogs, "verbose", "v", false, "Show Badger logs.")
 	writeBenchCmd.Flags().IntVarP(&valueThreshold, "value-th", "t", 1<<10, "Value threshold")
 	writeBenchCmd.Flags().IntVarP(&numVersions, "num-version", "n", 1, "Number of versions to keep")
-	writeBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache", 0,
+	writeBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache-mb", 0,
 		"Size of block cache in MB")
-	writeBenchCmd.Flags().Int64Var(&indexCacheSize, "index-cache", 0,
+	writeBenchCmd.Flags().Int64Var(&indexCacheSize, "index-cache-mb", 0,
 		"Size of index cache in MB.")
 	writeBenchCmd.Flags().Uint32Var(&vlogMaxEntries, "vlog-maxe", 1000000, "Value log Max Entries")
 	writeBenchCmd.Flags().StringVarP(&encryptionKey, "encryption-key", "e", "",
@@ -112,7 +113,7 @@ func init() {
 		"Load Bloom filter on DB open.")
 	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", true,
 		"If true, it badger will detect the conflicts")
-	writeBenchCmd.Flags().BoolVar(&compression, "compression", false,
+	writeBenchCmd.Flags().BoolVar(&compression, "compression", true,
 		"If true, badger will use ZSTD mode")
 	writeBenchCmd.Flags().BoolVar(&showDir, "show-dir", false,
 		"If true, the report will include the directory contents")
@@ -133,7 +134,7 @@ func writeRandom(db *badger.DB, num uint64) error {
 	y.Check2(rand.Read(value))
 
 	es := uint64(keySz + valSz) // entry size is keySz + valSz
-	batch := db.NewWriteBatch()
+	batch := db.NewManagedWriteBatch()
 
 	ttlPeriod, errParse := time.ParseDuration(ttlDuration)
 	y.Check(errParse)
@@ -146,11 +147,11 @@ func writeRandom(db *badger.DB, num uint64) error {
 		if ttlPeriod != 0 {
 			e.WithTTL(ttlPeriod)
 		}
-		err := batch.SetEntry(e)
+		err := batch.SetEntryAt(e, 1)
 		for err == badger.ErrBlockedWrites {
 			time.Sleep(time.Second)
-			batch = db.NewWriteBatch()
-			err = batch.SetEntry(e)
+			batch = db.NewManagedWriteBatch()
+			err = batch.SetEntryAt(e, 1)
 		}
 		if err != nil {
 			panic(err)
@@ -160,6 +161,34 @@ func writeRandom(db *badger.DB, num uint64) error {
 		atomic.AddUint64(&sizeWritten, es)
 	}
 	return batch.Flush()
+}
+
+func readTest(db *badger.DB, dur time.Duration) {
+	now := time.Now()
+	keys, err := getSampleKeys(db)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("*********************************************************")
+	fmt.Printf("Total Sampled Keys: %d, read in time: %s\n", len(keys), time.Since(now))
+	fmt.Println("*********************************************************")
+
+	if len(keys) == 0 {
+		fmt.Println("DB is empty, hence returning")
+		return
+	}
+	c := z.NewCloser(0)
+	readStartTime := time.Now()
+	for i := 0; i < numGoroutines; i++ {
+		c.AddRunning(1)
+		go readKeys(db, c, keys)
+	}
+
+	// also start printing stats
+	c.AddRunning(1)
+	go printReadStats(c, readStartTime)
+	<-time.After(dur)
+	c.SignalAndWait()
 }
 
 func writeSorted(db *badger.DB, num uint64) error {
@@ -257,7 +286,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Opening badger with options = %+v\n", opt)
-	db, err := badger.Open(opt)
+	db, err := badger.OpenManaged(opt)
 	if err != nil {
 		return err
 	}
@@ -282,6 +311,16 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	if sorted {
 		err = writeSorted(db, num)
 	} else {
+		go func() {
+			for {
+				select {
+				case <-c.HasBeenClosed():
+					return
+				case <-time.After(30 * time.Second):
+					readTest(db, 5*time.Minute)
+				}
+			}
+		}()
 		err = writeRandom(db, num)
 	}
 
@@ -296,7 +335,7 @@ func showKeysStats(db *badger.DB) {
 		validKeyCount    uint32
 	)
 
-	txn := db.NewTransaction(false)
+	txn := db.NewTransactionAt(math.MaxUint64, false)
 	defer txn.Discard()
 
 	iopt := badger.DefaultIteratorOptions
@@ -363,7 +402,7 @@ func reportStats(c *z.Closer, db *badger.DB) {
 			entries := atomic.LoadUint64(&entriesWritten)
 			bytesRate := sz / uint64(dur.Seconds())
 			entriesRate := entries / uint64(dur.Seconds())
-			fmt.Printf("Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
+			fmt.Printf("[WRITE] Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
 				"entries written: %d, speed: %d/sec, gcSuccess: %d\n", y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate, gcSuccess)
 		}
@@ -450,6 +489,28 @@ func dropPrefix(c *z.Closer, db *badger.DB) {
 			} else {
 				fmt.Println("[DropPrefix] Successful")
 			}
+		}
+	}
+}
+
+func printReadStats(c *z.Closer, startTime time.Time) {
+	defer c.Done()
+
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.HasBeenClosed():
+			return
+		case <-t.C:
+			dur := time.Since(startTime)
+			sz := atomic.LoadUint64(&sizeRead)
+			entries := atomic.LoadUint64(&entriesRead)
+			bytesRate := sz / uint64(dur.Seconds())
+			entriesRate := entries / uint64(dur.Seconds())
+			fmt.Printf("[READ] Time elapsed: %s, bytes read: %s, speed: %s/sec, "+
+				"entries read: %d, speed: %d/sec\n", y.FixedDuration(time.Since(startTime)),
+				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate)
 		}
 	}
 }

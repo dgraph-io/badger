@@ -495,26 +495,29 @@ func TestCompactionFilePicking(t *testing.T) {
 	}
 
 	tables := db.lc.levels[2].tables
-	db.lc.sortByOverlap(tables, cdef)
+	db.lc.sortByHeuristic(tables, cdef)
 
 	var expKey [8]byte
-	// First table should be with smallest and biggest keys as 1 and 4.
+	// First table should be with smallest and biggest keys as 1 and 4 which
+	// has the lowest version.
 	binary.BigEndian.PutUint64(expKey[:], uint64(1))
 	require.Equal(t, expKey[:], y.ParseKey(tables[0].Smallest()))
 	binary.BigEndian.PutUint64(expKey[:], uint64(4))
 	require.Equal(t, expKey[:], y.ParseKey(tables[0].Biggest()))
 
-	// Second table should be with smallest and biggest keys as 13 and 18.
+	// Second table should be with smallest and biggest keys as 13 and 18
+	// which has the second lowest version.
 	binary.BigEndian.PutUint64(expKey[:], uint64(13))
-	require.Equal(t, expKey[:], y.ParseKey(tables[1].Smallest()))
-	binary.BigEndian.PutUint64(expKey[:], uint64(18))
-	require.Equal(t, expKey[:], y.ParseKey(tables[1].Biggest()))
-
-	// Third table should be with smallest and biggest keys as 5 and 12.
-	binary.BigEndian.PutUint64(expKey[:], uint64(5))
 	require.Equal(t, expKey[:], y.ParseKey(tables[2].Smallest()))
-	binary.BigEndian.PutUint64(expKey[:], uint64(12))
+	binary.BigEndian.PutUint64(expKey[:], uint64(18))
 	require.Equal(t, expKey[:], y.ParseKey(tables[2].Biggest()))
+
+	// Third table should be with smallest and biggest keys as 5 and 12 which
+	// has the maximum version.
+	binary.BigEndian.PutUint64(expKey[:], uint64(5))
+	require.Equal(t, expKey[:], y.ParseKey(tables[1].Smallest()))
+	binary.BigEndian.PutUint64(expKey[:], uint64(12))
+	require.Equal(t, expKey[:], y.ParseKey(tables[1].Biggest()))
 }
 
 // addToManifest function is used in TestCompactionFilePicking. It adds table to db manifest.

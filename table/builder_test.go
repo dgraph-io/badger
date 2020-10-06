@@ -23,9 +23,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgryski/go-farm"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dgraph-io/badger/v2/fb"
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
@@ -95,7 +95,7 @@ func TestTableIndex(t *testing.T) {
 			blockFirstKeys := make([][]byte, 0)
 			blockCount := 0
 			for i := 0; i < keysCount; i++ {
-				k := []byte(fmt.Sprintf("%016x", i))
+				k := y.KeyWithTs([]byte(fmt.Sprintf("%016x", i)), uint64(i+1))
 				v := fmt.Sprintf("%d", i)
 				vs := y.ValueStruct{Value: []byte(v)}
 				if i == 0 { // This is first key for first block.
@@ -119,12 +119,15 @@ func TestTableIndex(t *testing.T) {
 			}
 
 			// Ensure index is built correctly
-			require.Equal(t, blockCount, tbl.noOfBlocks)
+			require.Equal(t, blockCount, tbl.offsetsLength())
 			idx, err := tbl.readTableIndex()
 			require.NoError(t, err)
-			for i, ko := range idx.Offsets {
-				require.Equal(t, ko.Key, blockFirstKeys[i])
+			for i := 0; i < idx.OffsetsLength(); i++ {
+				var bo fb.BlockOffset
+				require.True(t, idx.Offsets(&bo, i))
+				require.Equal(t, blockFirstKeys[i], bo.KeyBytes())
 			}
+			require.Equal(t, keysCount, int(tbl.MaxVersion()))
 			f.Close()
 			require.NoError(t, os.RemoveAll(filename))
 		})
@@ -232,7 +235,7 @@ func TestBloomfilter(t *testing.T) {
 		c := 0
 		for it.Rewind(); it.Valid(); it.Next() {
 			c++
-			hash := farm.Fingerprint64(y.ParseKey(it.Key()))
+			hash := y.Hash(y.ParseKey(it.Key()))
 			require.False(t, tab.DoesNotHave(hash))
 		}
 		require.Equal(t, keyCount, c)
@@ -242,13 +245,13 @@ func TestBloomfilter(t *testing.T) {
 		c = 0
 		for it.Rewind(); it.Valid(); it.Next() {
 			c++
-			hash := farm.Fingerprint64(y.ParseKey(it.Key()))
+			hash := y.Hash(y.ParseKey(it.Key()))
 			require.False(t, tab.DoesNotHave(hash))
 		}
 		require.Equal(t, keyCount, c)
 
 		// Ensure tab.DoesNotHave works
-		hash := farm.Fingerprint64([]byte("foo"))
+		hash := y.Hash([]byte("foo"))
 		require.Equal(t, withBlooms, tab.DoesNotHave(hash))
 	}
 

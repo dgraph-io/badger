@@ -344,7 +344,7 @@ func TestStreamWriter6(t *testing.T) {
 		require.NoError(t, sw.Write(list), "sw.Write() failed")
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
-		tables := db.Tables(true)
+		tables := db.Tables()
 		require.Equal(t, 4, len(tables), "Count of tables not matching")
 		for _, tab := range tables {
 			if tab.Level > 0 {
