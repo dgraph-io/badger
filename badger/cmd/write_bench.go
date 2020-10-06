@@ -111,7 +111,7 @@ func init() {
 		"Mode for accessing SSTables")
 	writeBenchCmd.Flags().BoolVar(&loadBloomsOnOpen, "load-blooms", true,
 		"Load Bloom filter on DB open.")
-	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", true,
+	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", false,
 		"If true, it badger will detect the conflicts")
 	writeBenchCmd.Flags().BoolVar(&compression, "compression", true,
 		"If true, badger will use ZSTD mode")
