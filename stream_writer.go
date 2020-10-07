@@ -279,6 +279,15 @@ func (sw *StreamWriter) Cancel() {
 			writer.closer.Signal()
 		}
 	}
+	for _, writer := range sw.writers {
+		if writer != nil {
+			writer.closer.Wait()
+		}
+	}
+
+	if err := sw.throttle.Finish(); err != nil {
+		sw.db.opt.Errorf("error in throttle.Finish: %+v", err)
+	}
 
 	// Handle Cancel() being called before Prepare().
 	if sw.done != nil {
