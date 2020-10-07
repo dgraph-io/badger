@@ -47,7 +47,6 @@ type StreamWriter struct {
 	writeLock  sync.Mutex
 	db         *DB
 	done       func()
-	isDone     bool
 	throttle   *y.Throttle
 	maxVersion uint64
 	writers    map[uint32]*sortedWriter
@@ -77,13 +76,10 @@ func (sw *StreamWriter) Prepare() error {
 	defer sw.writeLock.Unlock()
 
 	done, err := sw.db.dropAll()
-	sw.done = func() {
-		if sw.isDone {
-			return
-		}
-		done()
-		sw.isDone = true
-	}
+
+	// Ensure that done() is never called more than once.
+	var once sync.Once
+	sw.done = func() { once.Do(done) }
 
 	return err
 }
@@ -278,12 +274,15 @@ func (sw *StreamWriter) Cancel() {
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
 
-	defer sw.done()
-
 	for _, writer := range sw.writers {
 		if writer != nil {
-			writer.closer.SignalAndWait()
+			writer.closer.Signal()
 		}
+	}
+
+	// Handle Cancel() being called before Prepare().
+	if sw.done != nil {
+		sw.done()
 	}
 }
 
