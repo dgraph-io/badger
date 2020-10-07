@@ -236,6 +236,11 @@ func Open(opt Options) (*DB, error) {
 
 	if opt.BlockCacheSize > 0 {
 		numInCache := opt.BlockCacheSize / int64(opt.BlockSize)
+		if numInCache == 0 {
+			// Make the value of this variable at least one since the cache requires
+			// the number of counters to be greater than zero.
+			numInCache = 1
+		}
 
 		config := ristretto.Config{
 			NumCounters: numInCache * 8,
@@ -254,6 +259,11 @@ func Open(opt Options) (*DB, error) {
 		// Index size is around 5% of the table size.
 		indexSz := int64(float64(opt.MaxTableSize) * 0.05)
 		numInCache := opt.IndexCacheSize / indexSz
+		if numInCache == 0 {
+			// Make the value of this variable at least one since the cache requires
+			// the number of counters to be greater than zero.
+			numInCache = 1
+		}
 
 		config := ristretto.Config{
 			NumCounters: numInCache * 8,
@@ -407,9 +417,9 @@ func (db *DB) monitorCache(c *z.Closer) {
 		case <-ticker.C:
 		}
 
-		count++
 		analyze("Block cache", db.BlockCacheMetrics())
 		analyze("Index cache", db.IndexCacheMetrics())
+		count++
 	}
 }
 

@@ -2145,6 +2145,19 @@ func TestWriteInemory(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestMinCacheSize(t *testing.T) {
+	opt := DefaultOptions("").
+		WithInMemory(true).
+		WithIndexCacheSize(16).
+		WithBlockCacheSize(16)
+	db, err := Open(opt)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
+
+}
+
 func TestUpdateMaxCost(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err, "temp dir for badger count not be created")
@@ -2154,10 +2167,6 @@ func TestUpdateMaxCost(t *testing.T) {
 		WithBlockCacheSize(1 << 20).
 		WithIndexCacheSize(2 << 20)
 	db, err := Open(ops)
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, db.Close())
-	}()
 
 	cost, err := db.CacheMaxCost(BlockCache, -1)
 	require.NoError(t, err)
