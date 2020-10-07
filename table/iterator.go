@@ -23,7 +23,6 @@ import (
 
 	"github.com/dgraph-io/badger/v2/fb"
 	"github.com/dgraph-io/badger/v2/y"
-	"github.com/pkg/errors"
 )
 
 type blockIterator struct {
@@ -538,7 +537,7 @@ func (s *ConcatIterator) Close() error {
 			continue
 		}
 		if err := it.Close(); err != nil {
-			return errors.Wrap(err, "ConcatIterator")
+			return y.Wrap(err, "ConcatIterator")
 		}
 	}
 	return nil

@@ -23,7 +23,6 @@ import (
 
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
-	"github.com/pkg/errors"
 )
 
 type levelHandler struct {
@@ -209,11 +208,11 @@ func (s *levelHandler) close() error {
 	defer s.RUnlock()
 	var err error
 	for _, t := range s.tables {
-		if closeErr := t.Close(); closeErr != nil && err == nil {
+		if closeErr := t.Close(-1); closeErr != nil && err == nil {
 			err = closeErr
 		}
 	}
-	return errors.Wrap(err, "levelHandler.close")
+	return y.Wrap(err, "levelHandler.close")
 }
 
 // getTableForKey acquires a read-lock to access s.tables. It returns a list of tableHandlers.

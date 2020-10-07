@@ -52,7 +52,6 @@ func flatten(cmd *cobra.Command, args []string) error {
 	}
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
-		WithTruncate(truncate).
 		WithNumVersionsToKeep(numVersions).
 		WithNumCompactors(0)
 	fmt.Printf("Opening badger with options = %+v\n", opt)

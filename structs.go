@@ -147,8 +147,11 @@ type Entry struct {
 	meta      byte
 
 	// Fields maintained internally.
-	skipVlog bool
-	hlen     int // Length of the header.
+	hlen int // Length of the header.
+}
+
+func (e *Entry) isZero() bool {
+	return len(e.Key) == 0
 }
 
 func (e *Entry) estimateSize(threshold int) int {

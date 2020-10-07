@@ -19,7 +19,6 @@ package badger
 import (
 	"encoding/hex"
 	"fmt"
-	"math"
 	"sync"
 
 	"github.com/dgraph-io/badger/v2/pb"
@@ -29,8 +28,6 @@ import (
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 )
-
-const headStreamId uint32 = math.MaxUint32
 
 // StreamWriter is used to write data coming from multiple streams. The streams must not have any
 // overlapping key ranges. Within each stream, the keys must be sorted. Badger Stream framework is
@@ -50,7 +47,6 @@ type StreamWriter struct {
 	throttle   *y.Throttle
 	maxVersion uint64
 	writers    map[uint32]*sortedWriter
-	maxHead    valuePointer
 }
 
 // NewStreamWriter creates a StreamWriter. Right after creating StreamWriter, Prepare must be
@@ -123,7 +119,6 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 		}
 		// If the value can be collocated with the key in LSM tree, we can skip
 		// writing the value to value log.
-		e.skipVlog = sw.db.shouldWriteValueToLSM(*e)
 		req := streamReqs[kv.StreamId]
 		if req == nil {
 			req = &request{}
@@ -152,7 +147,7 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 			var err error
 			writer, err = sw.newWriter(streamID)
 			if err != nil {
-				return errors.Wrapf(err, "failed to create writer with ID %d", streamID)
+				return y.Wrapf(err, "failed to create writer with ID %d", streamID)
 			}
 			sw.writers[streamID] = writer
 		}
@@ -177,10 +172,6 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 		writer.closer.SignalAndWait()
 		if err := writer.Done(); err != nil {
 			return err
-		}
-
-		if sw.maxHead.Less(writer.head) {
-			sw.maxHead = writer.head
 		}
 
 		sw.writers[streamId] = nil
@@ -209,27 +200,6 @@ func (sw *StreamWriter) Flush() error {
 		if err := writer.Done(); err != nil {
 			return err
 		}
-		if sw.maxHead.Less(writer.head) {
-			sw.maxHead = writer.head
-		}
-	}
-
-	// Encode and write the value log head into a new table.
-	data := sw.maxHead.Encode()
-	headWriter, err := sw.newWriter(headStreamId)
-	if err != nil {
-		return errors.Wrap(err, "failed to create head writer")
-	}
-	if err := headWriter.Add(
-		y.KeyWithTs(head, sw.maxVersion),
-		y.ValueStruct{Value: data}); err != nil {
-		return err
-	}
-
-	headWriter.closer.SignalAndWait()
-
-	if err := headWriter.Done(); err != nil {
-		return err
 	}
 
 	if !sw.db.opt.managedTxns {
@@ -273,7 +243,6 @@ type sortedWriter struct {
 	lastKey  []byte
 	streamID uint32
 	reqCh    chan *request
-	head     valuePointer
 	// Have separate closer for each writer, as it can be closed at any time.
 	closer *z.Closer
 }
@@ -305,15 +274,8 @@ func (w *sortedWriter) handleRequests() {
 	process := func(req *request) {
 		for i, e := range req.Entries {
 			// If badger is running in InMemory mode, len(req.Ptrs) == 0.
-			if i < len(req.Ptrs) {
-				vptr := req.Ptrs[i]
-				if !vptr.IsZero() {
-					y.AssertTrue(w.head.Less(vptr))
-					w.head = vptr
-				}
-			}
 			var vs y.ValueStruct
-			if e.skipVlog {
+			if w.db.opt.skipVlog(e) {
 				vs = y.ValueStruct{
 					Value:     e.Value,
 					Meta:      e.meta,
@@ -413,6 +375,7 @@ func (w *sortedWriter) Done() error {
 
 func (w *sortedWriter) createTable(builder *table.Builder) error {
 	data := builder.Finish(w.db.opt.InMemory)
+
 	if len(data) == 0 {
 		return nil
 	}
@@ -428,23 +391,16 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 			return err
 		}
 	} else {
-		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, w.db.opt.Dir), true)
-		if err != nil {
-			return err
-		}
-		if _, err := fd.Write(data); err != nil {
-			return err
-		}
-		if tbl, err = table.OpenTable(fd, opts); err != nil {
+		var err error
+		if tbl, err = table.CreateTable(
+			table.NewFilename(fileID, w.db.opt.Dir), data, opts); err != nil {
 			return err
 		}
 	}
 	lc := w.db.lc
 
 	var lhandler *levelHandler
-	// We should start the levels from 1, because we need level 0 to set the !badger!head key. We
-	// cannot mix up this key with other keys from the DB, otherwise we would introduce a range
-	// overlap violation.
+	// We should start the levels from 1.
 	y.AssertTrue(len(lc.levels) > 1)
 	for _, l := range lc.levels[1:] {
 		ratio := float64(l.getTotalSize()) / float64(l.maxTotalSize)
@@ -457,11 +413,6 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 		// If we're exceeding the size of the lowest level, shove it in the lowest level. Can't do
 		// better than that.
 		lhandler = lc.levels[len(lc.levels)-1]
-	}
-	if w.streamID == headStreamId {
-		// This is a special !badger!head key. We should store it at level 0, separate from all the
-		// other keys to avoid an overlap.
-		lhandler = lc.levels[0]
 	}
 	// Now that table can be opened successfully, let's add this to the MANIFEST.
 	change := &pb.ManifestChange{

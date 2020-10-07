@@ -62,6 +62,9 @@ func (r keyRange) overlapsWith(dst keyRange) bool {
 	return true
 }
 
+// getKeyRange returns the smallest and the biggest in the list of tables.
+// TODO(naman): Write a test for this. The smallest and the biggest should
+// be the smallest of the leftmost table and the biggest of the right most table.
 func getKeyRange(tables ...*table.Table) keyRange {
 	if len(tables) == 0 {
 		return keyRange{}

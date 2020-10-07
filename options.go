@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"os"
 	"time"
 
 	"github.com/dgraph-io/badger/v2/options"
@@ -40,15 +41,12 @@ type Options struct {
 
 	// Usually modified options.
 
-	SyncWrites          bool
-	TableLoadingMode    options.FileLoadingMode
-	ValueLogLoadingMode options.FileLoadingMode
-	NumVersionsToKeep   int
-	ReadOnly            bool
-	Truncate            bool
-	Logger              Logger
-	Compression         options.CompressionType
-	InMemory            bool
+	SyncWrites        bool
+	NumVersionsToKeep int
+	ReadOnly          bool
+	Logger            Logger
+	Compression       options.CompressionType
+	InMemory          bool
 
 	// Fine tuning options.
 
@@ -61,10 +59,8 @@ type Options struct {
 	// read from the block index stored at the end of the table.
 	BlockSize          int
 	BloomFalsePositive float64
-	KeepL0InMemory     bool
 	BlockCacheSize     int64
 	IndexCacheSize     int64
-	LoadBloomsOnOpen   bool
 
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
@@ -113,14 +109,10 @@ type Options struct {
 // Feel free to modify these to suit your needs with the WithX methods.
 func DefaultOptions(path string) Options {
 	return Options{
-		Dir:                 path,
-		ValueDir:            path,
-		LevelOneSize:        256 << 20,
-		LevelSizeMultiplier: 15,
-		TableLoadingMode:    options.MemoryMap,
-		ValueLogLoadingMode: options.MemoryMap,
-		// table.MemoryMap to mmap() the tables.
-		// table.Nothing to not preload the tables.
+		Dir:                     path,
+		ValueDir:                path,
+		LevelOneSize:            256 << 20,
+		LevelSizeMultiplier:     15,
 		MaxLevels:               7,
 		MaxTableSize:            64 << 20,
 		NumCompactors:           2, // Run at least 2 compactors. One is dedicated for L0.
@@ -129,15 +121,13 @@ func DefaultOptions(path string) Options {
 		NumMemtables:            5,
 		BloomFalsePositive:      0.01,
 		BlockSize:               4 * 1024,
-		SyncWrites:              true,
+		SyncWrites:              false,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
-		KeepL0InMemory:          false,
 		VerifyValueChecksum:     false,
 		Compression:             options.None,
 		BlockCacheSize:          0,
 		IndexCacheSize:          0,
-		LoadBloomsOnOpen:        true,
 
 		// The following benchmarks were done on a 4 KB block size (default block size). The
 		// compression is ratio supposed to increase with increasing compression level but since the
@@ -158,7 +148,6 @@ func DefaultOptions(path string) Options {
 
 		ValueLogMaxEntries:            1000000,
 		ValueThreshold:                1 << 10, // 1 KB.
-		Truncate:                      false,
 		Logger:                        defaultLogger(INFO),
 		LogRotatesToFlush:             2,
 		EncryptionKey:                 []byte{},
@@ -169,11 +158,11 @@ func DefaultOptions(path string) Options {
 
 func buildTableOptions(opt Options) table.Options {
 	return table.Options{
+		SyncWrites:           opt.SyncWrites,
+		ReadOnly:             opt.ReadOnly,
 		TableSize:            uint64(opt.MaxTableSize),
 		BlockSize:            opt.BlockSize,
 		BloomFalsePositive:   opt.BloomFalsePositive,
-		LoadBloomsOnOpen:     opt.LoadBloomsOnOpen,
-		LoadingMode:          opt.TableLoadingMode,
 		ChkMode:              opt.ChecksumVerificationMode,
 		Compression:          opt.Compression,
 		ZSTDCompressionLevel: opt.ZSTDCompressionLevel,
@@ -224,34 +213,15 @@ func (opt Options) WithValueDir(val string) Options {
 
 // WithSyncWrites returns a new Options value with SyncWrites set to the given value.
 //
-// When SyncWrites is true all writes are synced to disk. Setting this to false would achieve better
-// performance, but may cause data loss in case of crash.
+// Badger does all writes via mmap. So, all writes can survive process crashes or k8s environments
+// with SyncWrites set to false.
 //
-// The default value of SyncWrites is true.
+// When set to true, Badger would call an additional msync after writes to flush mmap buffer over to
+// disk to survive hard reboots. Most users of Badger should not need to do this.
+//
+// The default value of SyncWrites is false.
 func (opt Options) WithSyncWrites(val bool) Options {
 	opt.SyncWrites = val
-	return opt
-}
-
-// WithTableLoadingMode returns a new Options value with TableLoadingMode set to the given value.
-//
-// TableLoadingMode indicates which file loading mode should be used for the LSM tree data files.
-//
-// The default value of TableLoadingMode is options.MemoryMap.
-func (opt Options) WithTableLoadingMode(val options.FileLoadingMode) Options {
-	opt.TableLoadingMode = val
-	return opt
-}
-
-// WithValueLogLoadingMode returns a new Options value with ValueLogLoadingMode set to the given
-// value.
-//
-// ValueLogLoadingMode indicates which file loading mode should be used for the value log data
-// files.
-//
-// The default value of ValueLogLoadingMode is options.MemoryMap.
-func (opt Options) WithValueLogLoadingMode(val options.FileLoadingMode) Options {
-	opt.ValueLogLoadingMode = val
 	return opt
 }
 
@@ -275,17 +245,6 @@ func (opt Options) WithNumVersionsToKeep(val int) Options {
 // The default value of ReadOnly is false.
 func (opt Options) WithReadOnly(val bool) Options {
 	opt.ReadOnly = val
-	return opt
-}
-
-// WithTruncate returns a new Options value with Truncate set to the given value.
-//
-// Truncate indicates whether value log files should be truncated to delete corrupt data, if any.
-// This option is ignored when ReadOnly is true.
-//
-// The default value of Truncate is false.
-func (opt Options) WithTruncate(val bool) Options {
-	opt.Truncate = val
 	return opt
 }
 
@@ -504,19 +463,6 @@ func (opt Options) WithEncryptionKeyRotationDuration(d time.Duration) Options {
 	return opt
 }
 
-// WithKeepL0InMemory returns a new Options value with KeepL0InMemory set to the given value.
-//
-// When KeepL0InMemory is set to true we will keep all Level 0 tables in memory. This leads to
-// better performance in writes as well as compactions. In case of DB crash, the value log replay
-// will take longer to complete since memtables and all level 0 tables will have to be recreated.
-// This option also sets CompactL0OnClose option to true.
-//
-// The default value of KeepL0InMemory is false.
-func (opt Options) WithKeepL0InMemory(val bool) Options {
-	opt.KeepL0InMemory = val
-	return opt
-}
-
 // WithCompression returns a new Options value with Compression set to the given value.
 //
 // When compression is enabled, every block will be compressed using the specified algorithm.
@@ -613,18 +559,6 @@ func (opt Options) WithBypassLockGuard(b bool) Options {
 	return opt
 }
 
-// WithLoadBloomsOnOpen returns a new Options value with LoadBloomsOnOpen set to the given value.
-//
-// Badger uses bloom filters to speed up key lookups. When LoadBloomsOnOpen is set
-// to false, bloom filters will be loaded lazily and not on DB open. Set this
-// option to false to reduce the time taken to open the DB.
-//
-// The default value of LoadBloomsOnOpen is true.
-func (opt Options) WithLoadBloomsOnOpen(b bool) Options {
-	opt.LoadBloomsOnOpen = b
-	return opt
-}
-
 // WithIndexCacheSize returns a new Options value with IndexCacheSize set to
 // the given value.
 //
@@ -655,4 +589,15 @@ func (opt Options) WithIndexCacheSize(size int64) Options {
 func (opt Options) WithDetectConflicts(b bool) Options {
 	opt.DetectConflicts = b
 	return opt
+}
+
+func (opt Options) getFileFlags() int {
+	var flags int
+	// opt.SyncWrites would be using msync to sync. All writes go through mmap.
+	if opt.ReadOnly {
+		flags |= os.O_RDONLY
+	} else {
+		flags |= os.O_RDWR
+	}
+	return flags
 }

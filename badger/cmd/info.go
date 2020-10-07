@@ -31,7 +31,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v2"
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
 	humanize "github.com/dustin/go-humanize"
@@ -93,18 +92,16 @@ to the Dgraph team.
 
 func handleInfo(cmd *cobra.Command, args []string) error {
 	if err := printInfo(sstDir, vlogDir); err != nil {
-		return errors.Wrap(err, "failed to print information in MANIFEST file")
+		return y.Wrap(err, "failed to print information in MANIFEST file")
 	}
 
 	// Open DB
 	db, err := badger.Open(badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(opt.readOnly).
-		WithTruncate(opt.truncate).
-		WithTableLoadingMode(options.MemoryMap).
 		WithEncryptionKey([]byte(opt.encryptionKey)))
 	if err != nil {
-		return errors.Wrap(err, "failed to open database")
+		return y.Wrap(err, "failed to open database")
 	}
 	defer db.Close()
 
@@ -114,7 +111,7 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 
 	prefix, err := hex.DecodeString(opt.withPrefix)
 	if err != nil {
-		return errors.Wrapf(err, "failed to decode hex prefix: %s", opt.withPrefix)
+		return y.Wrapf(err, "failed to decode hex prefix: %s", opt.withPrefix)
 	}
 	if opt.showHistogram {
 		db.PrintHistogram(prefix)
@@ -128,7 +125,7 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 
 	if len(opt.keyLookup) > 0 {
 		if err := lookup(db); err != nil {
-			return errors.Wrapf(err, "failed to perform lookup for the key: %x", opt.keyLookup)
+			return y.Wrapf(err, "failed to perform lookup for the key: %x", opt.keyLookup)
 		}
 	}
 	return nil
@@ -153,7 +150,7 @@ func showKeys(db *badger.DB, prefix []byte) error {
 	for it.Rewind(); it.Valid(); it.Next() {
 		item := it.Item()
 		if err := printKey(item, false); err != nil {
-			return errors.Wrapf(err, "failed to print information about key: %x(%d)",
+			return y.Wrapf(err, "failed to print information about key: %x(%d)",
 				item.Key(), item.Version())
 		}
 		totalKeys++
@@ -170,7 +167,7 @@ func lookup(db *badger.DB) error {
 
 	key, err := hex.DecodeString(opt.keyLookup)
 	if err != nil {
-		return errors.Wrapf(err, "failed to decode key: %q", opt.keyLookup)
+		return y.Wrapf(err, "failed to decode key: %q", opt.keyLookup)
 	}
 
 	iopts := badger.DefaultIteratorOptions
@@ -186,7 +183,7 @@ func lookup(db *badger.DB) error {
 	fmt.Println()
 	item := itr.Item()
 	if err := printKey(item, true); err != nil {
-		return errors.Wrapf(err, "failed to print information about key: %x(%d)",
+		return y.Wrapf(err, "failed to print information about key: %x(%d)",
 			item.Key(), item.Version())
 	}
 
@@ -201,7 +198,7 @@ func lookup(db *badger.DB) error {
 			break
 		}
 		if err := printKey(item, true); err != nil {
-			return errors.Wrapf(err, "failed to print information about key: %x(%d)",
+			return y.Wrapf(err, "failed to print information about key: %x(%d)",
 				item.Key(), item.Version())
 		}
 	}
@@ -223,7 +220,7 @@ func printKey(item *badger.Item, showValue bool) error {
 	if showValue {
 		val, err := item.ValueCopy(nil)
 		if err != nil {
-			return errors.Wrapf(err,
+			return y.Wrapf(err,
 				"failed to copy value of the key: %x(%d)", item.Key(), item.Version())
 		}
 		fmt.Fprintf(&buf, "\n\tvalue: %v", val)

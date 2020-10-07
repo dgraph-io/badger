@@ -24,7 +24,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pkg/errors"
+	"github.com/dgraph-io/badger/v2/y"
 	"golang.org/x/sys/unix"
 )
 
@@ -48,11 +48,11 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (
 	// chdir in the meantime.
 	absPidFilePath, err := filepath.Abs(filepath.Join(dirPath, pidFileName))
 	if err != nil {
-		return nil, errors.Wrap(err, "cannot get absolute path for pid lock file")
+		return nil, y.Wrapf(err, "cannot get absolute path for pid lock file")
 	}
 	f, err := os.Open(dirPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "cannot open directory %q", dirPath)
+		return nil, y.Wrapf(err, "cannot open directory %q", dirPath)
 	}
 	opts := unix.LOCK_EX | unix.LOCK_NB
 	if readOnly {
@@ -62,7 +62,7 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (
 	err = unix.Flock(int(f.Fd()), opts)
 	if err != nil {
 		f.Close()
-		return nil, errors.Wrapf(err,
+		return nil, y.Wrapf(err,
 			"Cannot acquire directory lock on %q.  Another process is using this Badger database.",
 			dirPath)
 	}
@@ -73,7 +73,7 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (
 		err = ioutil.WriteFile(absPidFilePath, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0666)
 		if err != nil {
 			f.Close()
-			return nil, errors.Wrapf(err,
+			return nil, y.Wrapf(err,
 				"Cannot write pid file %q", absPidFilePath)
 		}
 	}
@@ -106,13 +106,13 @@ func openDir(path string) (*os.File, error) { return os.Open(path) }
 func syncDir(dir string) error {
 	f, err := openDir(dir)
 	if err != nil {
-		return errors.Wrapf(err, "While opening directory: %s.", dir)
+		return y.Wrapf(err, "While opening directory: %s.", dir)
 	}
 
 	err = f.Sync()
 	closeErr := f.Close()
 	if err != nil {
-		return errors.Wrapf(err, "While syncing directory: %s.", dir)
+		return y.Wrapf(err, "While syncing directory: %s.", dir)
 	}
-	return errors.Wrapf(closeErr, "While closing directory: %s.", dir)
+	return y.Wrapf(closeErr, "While closing directory: %s.", dir)
 }

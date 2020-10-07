@@ -33,10 +33,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,7 +57,6 @@ func TestTruncateVlogWithClose(t *testing.T) {
 
 	opt := getTestOptions(dir)
 	opt.SyncWrites = true
-	opt.Truncate = true
 	opt.ValueThreshold = 1 // Force all reads from value log.
 
 	db, err := Open(opt)
@@ -70,7 +69,8 @@ func TestTruncateVlogWithClose(t *testing.T) {
 
 	// Close the DB.
 	require.NoError(t, db.Close())
-	require.NoError(t, os.Truncate(path.Join(dir, "000000.vlog"), 4090))
+	// We start value logs at 1.
+	require.NoError(t, os.Truncate(path.Join(dir, "000001.vlog"), 4090))
 
 	// Reopen and write some new data.
 	db, err = Open(opt)
@@ -81,6 +81,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 		})
 		require.NoError(t, err)
 	}
+
 	// Read it back to ensure that we can read it now.
 	for i := 0; i < 32; i++ {
 		err := db.View(func(txn *Txn) error {
@@ -128,7 +129,6 @@ func TestTruncateVlogNoClose(t *testing.T) {
 	dir := "p"
 	opts := getTestOptions(dir)
 	opts.SyncWrites = true
-	opts.Truncate = true
 
 	kv, err := Open(opts)
 	require.NoError(t, err)
@@ -149,7 +149,6 @@ func TestTruncateVlogNoClose2(t *testing.T) {
 	dir := "p"
 	opts := getTestOptions(dir)
 	opts.SyncWrites = true
-	opts.Truncate = true
 
 	kv, err := Open(opts)
 	require.NoError(t, err)
@@ -183,7 +182,6 @@ func TestTruncateVlogNoClose3(t *testing.T) {
 	dir := "p"
 	opts := getTestOptions(dir)
 	opts.SyncWrites = true
-	opts.Truncate = true
 
 	kv, err := Open(opts)
 	require.NoError(t, err)
@@ -303,7 +301,7 @@ func TestPushValueLogLimit(t *testing.T) {
 	// Passing an empty directory since it will be filled by runBadgerTest.
 	opt := DefaultOptions("").
 		WithValueLogMaxEntries(64).
-		WithValueLogFileSize(2 << 30)
+		WithValueLogFileSize(2<<30 - 1)
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		data := []byte(fmt.Sprintf("%30d", 1))
 		key := func(i int) string {
@@ -356,37 +354,6 @@ func BenchmarkDBOpen(b *testing.B) {
 		require.NoError(b, err)
 		require.NoError(b, db.Close())
 	}
-}
-
-// Regression test for https://github.com/dgraph-io/badger/issues/830
-func TestDiscardMapTooBig(t *testing.T) {
-	createDiscardStats := func() map[uint32]int64 {
-		stat := map[uint32]int64{}
-		for i := uint32(0); i < 8000; i++ {
-			stat[i] = 0
-		}
-		return stat
-	}
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer removeDir(dir)
-
-	db, err := Open(DefaultOptions(dir))
-	require.NoError(t, err, "error while opening db")
-
-	// Add some data so that memtable flush happens on close.
-	require.NoError(t, db.Update(func(txn *Txn) error {
-		return txn.Set([]byte("foo"), []byte("bar"))
-	}))
-
-	// overwrite discardstat with large value
-	db.vlog.lfDiscardStats.m = createDiscardStats()
-
-	require.NoError(t, db.Close())
-	// reopen the same DB
-	db, err = Open(DefaultOptions(dir))
-	require.NoError(t, err, "error while opening db")
-	require.NoError(t, db.Close())
 }
 
 // Test for values of size uint32.
@@ -459,7 +426,7 @@ func TestCompactionFilePicking(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	db, err := Open(DefaultOptions(dir).WithTableLoadingMode(options.LoadToRAM))
+	db, err := Open(DefaultOptions(dir))
 	require.NoError(t, err, "error while opening db")
 	defer func() {
 		require.NoError(t, db.Close())
@@ -547,13 +514,7 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	}
 
 	fileID := db.lc.reserveFileID()
-	fd, err := y.CreateSyncedFile(table.NewFilename(fileID, db.opt.Dir), true)
-	require.NoError(t, err)
-
-	_, err = fd.Write(b.Finish(false))
-	require.NoError(t, err, "unable to write to file")
-
-	tab, err := table.OpenTable(fd, bopts)
+	tab, err := table.CreateTable(table.NewFilename(fileID, db.opt.Dir), b.Finish(false), bopts)
 	require.NoError(t, err)
 	return tab
 }
@@ -611,6 +572,8 @@ func TestReadSameVlog(t *testing.T) {
 // The test ensures we don't lose data when badger is opened with KeepL0InMemory and GC is being
 // done.
 func TestL0GCBug(t *testing.T) {
+	t.Skipf("TestL0GCBug is DISABLED. TODO(ibrahim): Do we need this?")
+
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
@@ -621,10 +584,7 @@ func TestL0GCBug(t *testing.T) {
 	opts.NumLevelZeroTablesStall = 51
 	opts.ValueLogMaxEntries = 2
 	opts.ValueThreshold = 2
-	opts.KeepL0InMemory = true
 	// Setting LoadingMode to mmap seems to cause segmentation fault while closing DB.
-	opts.ValueLogLoadingMode = options.FileIO
-	opts.TableLoadingMode = options.FileIO
 
 	db1, err := Open(opts)
 	require.NoError(t, err)
@@ -732,7 +692,6 @@ func TestWindowsDataLoss(t *testing.T) {
 	}
 	require.NoError(t, db.Close())
 
-	opt.Truncate = true
 	db, err = Open(opt)
 	require.NoError(t, err)
 	// Return after reading one entry. We're simulating a crash.
@@ -745,15 +704,14 @@ func TestWindowsDataLoss(t *testing.T) {
 	}
 	// Don't use vlog.Close here. We don't want to fix the file size. Only un-mmap
 	// the data so that we can truncate the file durning the next vlog.Open.
-	require.NoError(t, y.Munmap(db.vlog.filesMap[db.vlog.maxFid].fmap))
+	require.NoError(t, z.Munmap(db.vlog.filesMap[db.vlog.maxFid].Data))
 	for _, f := range db.vlog.filesMap {
-		require.NoError(t, f.fd.Close())
+		require.NoError(t, f.Fd.Close())
 	}
 	require.NoError(t, db.registry.Close())
 	require.NoError(t, db.manifest.close())
 	require.NoError(t, db.lc.close())
 
-	opt.Truncate = true
 	db, err = Open(opt)
 	require.NoError(t, err)
 	defer db.Close()
@@ -801,7 +759,6 @@ func TestDropAllDropPrefix(t *testing.T) {
 			defer wg.Done()
 			err := db.DropPrefix([]byte("000"))
 			for err == ErrBlockedWrites {
-				fmt.Printf("DropPrefix 000 err: %v", err)
 				err = db.DropPrefix([]byte("000"))
 				time.Sleep(time.Millisecond * 500)
 			}
@@ -811,7 +768,6 @@ func TestDropAllDropPrefix(t *testing.T) {
 			defer wg.Done()
 			err := db.DropPrefix([]byte("111"))
 			for err == ErrBlockedWrites {
-				fmt.Printf("DropPrefix 111 err: %v", err)
 				err = db.DropPrefix([]byte("111"))
 				time.Sleep(time.Millisecond * 500)
 			}
@@ -822,7 +778,6 @@ func TestDropAllDropPrefix(t *testing.T) {
 			defer wg.Done()
 			err := db.DropAll()
 			for err == ErrBlockedWrites {
-				fmt.Printf("dropAll err: %v", err)
 				err = db.DropAll()
 				time.Sleep(time.Millisecond * 300)
 			}
@@ -832,95 +787,6 @@ func TestDropAllDropPrefix(t *testing.T) {
 	})
 }
 
-func TestCleanVlog(t *testing.T) {
-	opt := DefaultOptions("")
-	opt.ValueLogMaxEntries = 2
-	val := make([]byte, 2<<10)
-	rand.Read(val)
-
-	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-		for i := 0; i < 100; i++ {
-			db.Update(func(txn *Txn) error {
-				txn.Set([]byte(fmt.Sprintf("foo-%d", i)), val)
-				return nil
-			})
-		}
-		// Use separate transaction for foo and bar writes so that they go into
-		// different files.
-		for i := 0; i < 100; i++ {
-			db.Update(func(txn *Txn) error {
-				txn.Set([]byte(fmt.Sprintf("bar-%d", i)), val)
-				return nil
-			})
-		}
-		count := 0
-		db.View(func(txn *Txn) error {
-			iopt := DefaultIteratorOptions
-			it := txn.NewIterator(iopt)
-			defer it.Close()
-			for it.Rewind(); it.Valid(); it.Next() {
-				count++
-				vs, err := it.Item().ValueCopy(nil)
-				require.NoError(t, err)
-				require.Equal(t, val, vs)
-			}
-			return nil
-		})
-
-		fileCount := len(db.vlog.filesMap)
-
-		// Drop all the foo-%d keys
-		require.NoError(t, db.DropPrefix([]byte("foo")))
-
-		res, err := db.SampleVlog()
-		require.NoError(t, err)
-		fullStaleFiles := 0
-		for _, r := range res {
-			fmt.Printf("r.Fid:%d, Ratio: %f Size: %d\n", r.Fid, r.DiscardRatio, r.FileSize)
-			if r.DiscardRatio == 1 {
-				fullStaleFiles++
-			}
-		}
-		require.Equal(t, 50, fullStaleFiles)
-
-		count2 := 0
-		db.View(func(txn *Txn) error {
-			iopt := DefaultIteratorOptions
-			it := txn.NewIterator(iopt)
-			defer it.Close()
-			for it.Rewind(); it.Valid(); it.Next() {
-				count2++
-				vs, err := it.Item().ValueCopy(nil)
-				require.NoError(t, err)
-				require.Equal(t, val, vs)
-			}
-			return nil
-		})
-
-		// We've dropped half the keys.
-		require.Equal(t, count/2, count2)
-
-		// Clean the vlog files.
-		require.NoError(t, db.GCVlog())
-		// Files should be less now.
-		require.Less(t, len(db.vlog.filesMap), fileCount)
-		count3 := 0
-		db.View(func(txn *Txn) error {
-			iopt := DefaultIteratorOptions
-			it := txn.NewIterator(iopt)
-			defer it.Close()
-			for it.Rewind(); it.Valid(); it.Next() {
-				count3++
-				vs, err := it.Item().ValueCopy(nil)
-				require.NoError(t, err)
-				require.Equal(t, val, vs)
-			}
-			return nil
-		})
-		// The amount of keys should be same.
-		require.Equal(t, count2, count3)
-	})
-}
 func TestIsClosed(t *testing.T) {
 	test := func(inMemory bool) {
 		opt := DefaultOptions("")
@@ -951,8 +817,9 @@ func TestIsClosed(t *testing.T) {
 
 }
 
+// This test is failing currently because we're returning version+1 from MaxVersion()
 func TestMaxVersion(t *testing.T) {
-	N := uint64(10000)
+	N := 10000
 	key := func(i int) []byte {
 		return []byte(fmt.Sprintf("%d%10d", i, i))
 	}
@@ -962,9 +829,8 @@ func TestMaxVersion(t *testing.T) {
 			for i := 0; i < int(N); i++ {
 				txnSet(t, db, key(i), nil, 0)
 			}
-			ver, err := db.MaxVersion()
-			require.NoError(t, err)
-			require.Equal(t, N, ver)
+			ver := db.MaxVersion()
+			require.Equal(t, N, int(ver))
 		})
 	})
 	t.Run("multiple versions", func(t *testing.T) {
@@ -983,14 +849,13 @@ func TestMaxVersion(t *testing.T) {
 		k := make([]byte, 100)
 		rand.Read(k)
 		// Create multiple version of the same key.
-		for i := uint64(1); i <= N; i++ {
-			wb.SetEntryAt(&Entry{Key: k}, i)
+		for i := 1; i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: k}, uint64(i))
 		}
 		require.NoError(t, wb.Flush())
 
-		ver, err := db.MaxVersion()
-		require.NoError(t, err)
-		require.Equal(t, N, ver)
+		ver := db.MaxVersion()
+		require.Equal(t, N, int(ver))
 
 		require.NoError(t, db.Close())
 	})
@@ -1007,15 +872,35 @@ func TestMaxVersion(t *testing.T) {
 		defer wb.Cancel()
 
 		// This will create commits from 1 to N.
-		for i := uint64(1); i <= N; i++ {
-			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("%d", i))}, i)
+		for i := 1; i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("%d", i))}, uint64(i))
 		}
 		require.NoError(t, wb.Flush())
 
-		ver, err := db.MaxVersion()
+		ver := db.MaxVersion()
 		require.NoError(t, err)
-		require.Equal(t, N, ver)
+		require.Equal(t, N, int(ver))
 
 		require.NoError(t, db.Close())
 	})
+}
+
+func TestTxnReadTs(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt := DefaultOptions(dir)
+	db, err := Open(opt)
+	require.NoError(t, err)
+	require.Equal(t, 0, int(db.orc.readTs()))
+
+	txnSet(t, db, []byte("foo"), nil, 0)
+	require.Equal(t, 1, int(db.orc.readTs()))
+	require.NoError(t, db.Close())
+	require.Equal(t, 1, int(db.orc.readTs()))
+
+	db, err = Open(opt)
+	require.NoError(t, err)
+	require.Equal(t, 1, int(db.orc.readTs()))
 }

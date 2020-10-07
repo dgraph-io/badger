@@ -22,7 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 // directoryLockGuard holds a lock on a directory and a pid file inside.  The pid file isn't part
@@ -47,7 +47,7 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (
 	// chdir in the meantime.
 	absPidFilePath, err := filepath.Abs(filepath.Join(dirPath, pidFileName))
 	if err != nil {
-		return nil, errors.Wrap(err, "cannot get absolute path for pid lock file")
+		return nil, y.Wrap(err, "cannot get absolute path for pid lock file")
 	}
 
 	// If the file was unpacked or created by some other program, it might not
@@ -63,7 +63,7 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (
 	if fi, err := os.Stat(absPidFilePath); err == nil {
 		if fi.Mode()&os.ModeExclusive == 0 {
 			if err := os.Chmod(absPidFilePath, fi.Mode()|os.ModeExclusive); err != nil {
-				return nil, errors.Wrapf(err, "could not set exclusive mode bit")
+				return nil, y.Wrapf(err, "could not set exclusive mode bit")
 			}
 		}
 	} else if !os.IsNotExist(err) {
@@ -72,16 +72,16 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (
 	f, err := os.OpenFile(absPidFilePath, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0666|os.ModeExclusive)
 	if err != nil {
 		if isLocked(err) {
-			return nil, errors.Wrapf(err,
+			return nil, y.Wrapf(err,
 				"Cannot open pid lock file %q.  Another process is using this Badger database",
 				absPidFilePath)
 		}
-		return nil, errors.Wrapf(err, "Cannot open pid lock file %q", absPidFilePath)
+		return nil, y.Wrapf(err, "Cannot open pid lock file %q", absPidFilePath)
 	}
 
 	if _, err = fmt.Fprintf(f, "%d\n", os.Getpid()); err != nil {
 		f.Close()
-		return nil, errors.Wrapf(err, "could not write pid")
+		return nil, y.Wrapf(err, "could not write pid")
 	}
 	return &directoryLockGuard{f, absPidFilePath}, nil
 }
@@ -109,15 +109,15 @@ func openDir(path string) (*os.File, error) { return os.Open(path) }
 func syncDir(dir string) error {
 	f, err := openDir(dir)
 	if err != nil {
-		return errors.Wrapf(err, "While opening directory: %s.", dir)
+		return y.Wrapf(err, "While opening directory: %s.", dir)
 	}
 
 	err = f.Sync()
 	closeErr := f.Close()
 	if err != nil {
-		return errors.Wrapf(err, "While syncing directory: %s.", dir)
+		return y.Wrapf(err, "While syncing directory: %s.", dir)
 	}
-	return errors.Wrapf(closeErr, "While closing directory: %s.", dir)
+	return y.Wrapf(closeErr, "While closing directory: %s.", dir)
 }
 
 // Opening an exclusive-use file returns an error.

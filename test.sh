@@ -27,20 +27,13 @@ go test -v -run='TestTruncateVlogNoClose2$' --manual=true
 go test -v -run='TestTruncateVlogNoClose3$' --manual=true
 rm -rf p
 
-# Then the normal tests.
-echo
-echo "==> Starting test for table, skl and y package"
-go test -v -race github.com/dgraph-io/badger/v2/skl
-# Run test for all package except the top level package. The top level package support the
-# `vlog_mmap` flag which rest of the packages don't support.
-go test -v -race $packages
+# Run the normal tests.
+echo "==> Starting tests.. "
+# go test -timeout=25m -v -race github.com/dgraph-io/badger/v2/...
+for pkg in $packages; do
+  echo "===> Testing $pkg"
+  go test -timeout=25m -v -race $pkg
+done
 
-echo
-echo "==> Starting tests with value log mmapped..."
-# Run top level package tests with mmap flag.
-go test -timeout=25m -v -race github.com/dgraph-io/badger/v2 --vlog_mmap=true
-
-echo
-echo "==> Starting tests with value log not mmapped..."
-go test -timeout=25m -v -race github.com/dgraph-io/badger/v2 --vlog_mmap=false
-
+echo "===> Testing root level"
+go test -timeout=25m -v . -race

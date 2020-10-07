@@ -34,7 +34,6 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 	opts := table.Options{
 		BlockSize:          db.opt.BlockSize,
 		BloomFalsePositive: db.opt.BloomFalsePositive,
-		LoadingMode:        options.LoadToRAM,
 		ChkMode:            options.NoVerification,
 	}
 	b := table.NewTableBuilder(opts)
@@ -45,15 +44,8 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 		val := y.ValueStruct{Value: []byte(item.val), Meta: item.meta}
 		b.Add(key, val, 0)
 	}
-	fd, err := y.CreateSyncedFile(table.NewFilename(db.lc.reserveFileID(), db.opt.Dir), true)
-	if err != nil {
-		panic(err)
-	}
-
-	if _, err = fd.Write(b.Finish(false)); err != nil {
-		panic(err)
-	}
-	tab, err := table.OpenTable(fd, opts)
+	fname := table.NewFilename(db.lc.reserveFileID(), db.opt.Dir)
+	tab, err := table.CreateTable(fname, b.Finish(false), opts)
 	if err != nil {
 		panic(err)
 	}
@@ -526,40 +518,6 @@ func TestCompactionAllVersions(t *testing.T) {
 	})
 }
 
-func TestHeadKeyCleanup(t *testing.T) {
-	// Disable compactions and keep single version of each key.
-	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(1)
-	opt.managedTxns = true
-
-	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-		l0 := []keyValVersion{
-			{string(head), "foo", 5, 0}, {string(head), "bar", 4, 0}, {string(head), "baz", 3, 0},
-		}
-		l1 := []keyValVersion{{string(head), "fooz", 2, 0}, {string(head), "foozbaz", 1, 0}}
-		// Level 0 has table l0 and l01.
-		createAndOpen(db, l0, 0)
-		// Level 1 has table l1.
-		createAndOpen(db, l1, 1)
-
-		// Set a high discard timestamp so that all the keys are below the discard timestamp.
-		db.SetDiscardTs(10)
-
-		getAllAndCheck(t, db, []keyValVersion{
-			{string(head), "foo", 5, 0}, {string(head), "bar", 4, 0}, {string(head), "baz", 3, 0},
-			{string(head), "fooz", 2, 0}, {string(head), "foozbaz", 1, 0},
-		})
-		cdef := compactDef{
-			thisLevel: db.lc.levels[0],
-			nextLevel: db.lc.levels[1],
-			top:       db.lc.levels[0].tables,
-			bot:       db.lc.levels[1].tables,
-		}
-		require.NoError(t, db.lc.runCompactDef(0, cdef))
-		// foo version 2 should be dropped after compaction.
-		getAllAndCheck(t, db, []keyValVersion{{string(head), "foo", 5, 0}})
-	})
-}
-
 func TestDiscardTs(t *testing.T) {
 	// Disable compactions and keep single version of each key.
 	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(1)
@@ -763,7 +721,6 @@ func TestL1Stall(t *testing.T) {
 func createEmptyTable(db *DB) *table.Table {
 	opts := table.Options{
 		BloomFalsePositive: db.opt.BloomFalsePositive,
-		LoadingMode:        options.LoadToRAM,
 		ChkMode:            options.NoVerification,
 	}
 	b := table.NewTableBuilder(opts)
