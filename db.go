@@ -1801,3 +1801,42 @@ func (db *DB) StreamDB(outOptions Options) error {
 func (db *DB) Opts() Options {
 	return db.opt
 }
+
+type CacheType int
+
+const (
+	BlockCache CacheType = iota
+	IndexCache
+)
+
+// CacheMaxCost updates the max cost of the given cache (either block or index cache).
+// The call will have an effect only if the DB was created with the cache. Otherwise it is
+// a no-op. If you pass a negative value, the function will return the current value
+// without updating it.
+func (db *DB) CacheMaxCost(cache CacheType, maxCost int64) (int64, error) {
+	if db == nil {
+		return 0, nil
+	}
+
+	if maxCost < 0 {
+		switch cache {
+		case BlockCache:
+			return db.blockCache.MaxCost(), nil
+		case IndexCache:
+			return db.indexCache.MaxCost(), nil
+		default:
+			return 0, errors.Errorf("invalid cache type")
+		}
+	}
+
+	switch cache {
+	case BlockCache:
+		db.blockCache.UpdateMaxCost(maxCost)
+		return maxCost, nil
+	case IndexCache:
+		db.indexCache.UpdateMaxCost(maxCost)
+		return maxCost, nil
+	default:
+		return 0, errors.Errorf("invalid cache type")
+	}
+}

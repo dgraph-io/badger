@@ -2157,3 +2157,33 @@ func TestMinCacheSize(t *testing.T) {
 	}()
 
 }
+
+func TestUpdateMaxCost(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err, "temp dir for badger count not be created")
+	defer os.RemoveAll(dir)
+
+	ops := getTestOptions(dir).
+		WithBlockCacheSize(1 << 20).
+		WithIndexCacheSize(2 << 20)
+	db, err := Open(ops)
+	require.NoError(t, err)
+
+	cost, err := db.CacheMaxCost(BlockCache, -1)
+	require.NoError(t, err)
+	require.Equal(t, int64(1<<20), cost)
+	cost, err = db.CacheMaxCost(IndexCache, -1)
+	require.NoError(t, err)
+	require.Equal(t, int64(2<<20), cost)
+
+	_, err = db.CacheMaxCost(BlockCache, 2<<20)
+	require.NoError(t, err)
+	cost, err = db.CacheMaxCost(BlockCache, -1)
+	require.NoError(t, err)
+	require.Equal(t, int64(2<<20), cost)
+	_, err = db.CacheMaxCost(IndexCache, 4<<20)
+	require.NoError(t, err)
+	cost, err = db.CacheMaxCost(IndexCache, -1)
+	require.NoError(t, err)
+	require.Equal(t, int64(4<<20), cost)
+}
