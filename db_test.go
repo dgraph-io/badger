@@ -2144,3 +2144,16 @@ func TestWriteInemory(t *testing.T) {
 	})
 	require.NoError(t, err)
 }
+
+func TestMinCacheSize(t *testing.T) {
+	opt := DefaultOptions("").
+		WithInMemory(true).
+		WithIndexCacheSize(16).
+		WithBlockCacheSize(16)
+	db, err := Open(opt)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
+
+}
