@@ -73,12 +73,12 @@ type node struct {
 	tower [maxHeight]uint32
 }
 
-// Skiplist maps keys to values (in memory)
 type Skiplist struct {
-	height int32 // Current height. 1 <= height <= kMaxHeight. CAS.
-	head   *node
-	ref    int32
-	arena  *Arena
+	height  int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	head    *node
+	ref     int32
+	arena   *Arena
+	OnClose func()
 }
 
 // IncrRef increases the refcount
@@ -92,8 +92,10 @@ func (s *Skiplist) DecrRef() {
 	if newRef > 0 {
 		return
 	}
+	if s.OnClose != nil {
+		s.OnClose()
+	}
 
-	s.arena.reset()
 	// Indicate we are closed. Good for testing.  Also, lets GC reclaim memory. Race condition
 	// here would suggest we are accessing skiplist when we are supposed to have no reference!
 	s.arena = nil

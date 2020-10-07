@@ -92,7 +92,7 @@ func init() {
 	writeBenchCmd.Flags().IntVar(&valSz, "val-size", 128, "Size of value")
 	writeBenchCmd.Flags().Float64VarP(&numKeys, "keys-mil", "m", 10.0,
 		"Number of keys to add in millions")
-	writeBenchCmd.Flags().BoolVar(&syncWrites, "sync", true,
+	writeBenchCmd.Flags().BoolVar(&syncWrites, "sync", false,
 		"If true, sync writes to disk.")
 	writeBenchCmd.Flags().BoolVarP(&force, "force-compact", "f", true,
 		"Force compact level 0 on close.")
@@ -100,7 +100,7 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&showLogs, "verbose", "v", false, "Show Badger logs.")
 	writeBenchCmd.Flags().IntVarP(&valueThreshold, "value-th", "t", 1<<10, "Value threshold")
 	writeBenchCmd.Flags().IntVarP(&numVersions, "num-version", "n", 1, "Number of versions to keep")
-	writeBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache-mb", 0,
+	writeBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache-mb", 1024,
 		"Size of block cache in MB")
 	writeBenchCmd.Flags().Int64Var(&indexCacheSize, "index-cache-mb", 0,
 		"Size of index cache in MB.")
@@ -111,7 +111,7 @@ func init() {
 		"Mode for accessing SSTables")
 	writeBenchCmd.Flags().BoolVar(&loadBloomsOnOpen, "load-blooms", true,
 		"Load Bloom filter on DB open.")
-	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", true,
+	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", false,
 		"If true, it badger will detect the conflicts")
 	writeBenchCmd.Flags().BoolVar(&compression, "compression", true,
 		"If true, badger will use ZSTD mode")
@@ -142,7 +142,9 @@ func writeRandom(db *badger.DB, num uint64) error {
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, keySz)
 		y.Check2(rand.Read(key))
-		e := badger.NewEntry(key, value)
+
+		vsz := rand.Intn(valSz) + 1
+		e := badger.NewEntry(key, value[:vsz])
 
 		if ttlPeriod != 0 {
 			e.WithTTL(ttlPeriod)
@@ -264,10 +266,8 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	} else {
 		cmode = options.None
 	}
-	mode := getLoadingMode(loadingMode)
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
-		WithTruncate(truncate).
 		WithSyncWrites(syncWrites).
 		WithCompactL0OnClose(force).
 		WithValueThreshold(valueThreshold).
@@ -275,11 +275,10 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithBlockCacheSize(blockCacheSize << 20).
 		WithIndexCacheSize(indexCacheSize << 20).
 		WithValueLogMaxEntries(vlogMaxEntries).
-		WithTableLoadingMode(mode).
 		WithEncryptionKey([]byte(encryptionKey)).
-		WithLoadBloomsOnOpen(loadBloomsOnOpen).
 		WithDetectConflicts(detectConflicts).
-		WithCompression(cmode)
+		WithCompression(cmode).
+		WithLoggingLevel(badger.INFO)
 
 	if !showLogs {
 		opt = opt.WithLogger(nil)
@@ -311,16 +310,6 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	if sorted {
 		err = writeSorted(db, num)
 	} else {
-		go func() {
-			for {
-				select {
-				case <-c.HasBeenClosed():
-					return
-				case <-time.After(30 * time.Second):
-					readTest(db, 5*time.Minute)
-				}
-			}
-		}()
 		err = writeRandom(db, num)
 	}
 

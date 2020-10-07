@@ -35,12 +35,12 @@ import (
 	"github.com/pkg/errors"
 )
 
-var debugMode = true
+var debugMode = false
 
 // Check logs fatal if err != nil.
 func Check(err error) {
 	if err != nil {
-		log.Fatalf("%+v", Wrap(err))
+		log.Fatalf("%+v", Wrap(err, ""))
 	}
 }
 
@@ -64,11 +64,14 @@ func AssertTruef(b bool, format string, args ...interface{}) {
 }
 
 // Wrap wraps errors from external lib.
-func Wrap(err error) error {
+func Wrap(err error, msg string) error {
 	if !debugMode {
-		return err
+		if err == nil {
+			return nil
+		}
+		return fmt.Errorf("%s err: %+v", msg, err)
 	}
-	return errors.Wrap(err, "")
+	return errors.Wrap(err, msg)
 }
 
 // Wrapf is Wrap with extra info.

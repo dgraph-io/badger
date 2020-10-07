@@ -24,7 +24,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/pkg/errors"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 // FILE_ATTRIBUTE_TEMPORARY - A file that is being used for temporary storage.
@@ -76,7 +76,7 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*d
 	// chdir in the meantime.
 	absLockFilePath, err := filepath.Abs(filepath.Join(dirPath, pidFileName))
 	if err != nil {
-		return nil, errors.Wrap(err, "Cannot get absolute path for pid lock file")
+		return nil, y.Wrap(err, "Cannot get absolute path for pid lock file")
 	}
 
 	// This call creates a file handler in memory that only one process can use at a time. When
@@ -91,7 +91,7 @@ func acquireDirectoryLock(dirPath string, pidFileName string, readOnly bool) (*d
 		uint32(FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE),
 		0)
 	if err != nil {
-		return nil, errors.Wrapf(err,
+		return nil, y.Wrapf(err,
 			"Cannot create lock file %q.  Another process is using this Badger database",
 			absLockFilePath)
 	}

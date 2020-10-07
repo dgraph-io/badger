@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -29,7 +28,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dgraph-io/badger/v2"
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
@@ -107,12 +105,9 @@ func readBench(cmd *cobra.Command, args []string) error {
 		return y.Wrapf(err, "unable to parse duration")
 	}
 	y.AssertTrue(numGoroutines > 0)
-	mode := getLoadingMode(loadingMode)
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(readOnly).
-		WithTableLoadingMode(mode).
-		WithValueLogLoadingMode(mode).
 		WithBlockCacheSize(blockCacheSize << 20).
 		WithIndexCacheSize(indexCacheSize << 20)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
@@ -238,19 +233,4 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 	})
 
 	return keys, nil
-}
-
-func getLoadingMode(m string) options.FileLoadingMode {
-	m = strings.ToLower(m)
-	var mode options.FileLoadingMode
-	switch m {
-	case "fileio":
-		mode = options.FileIO
-	case "mmap":
-		mode = options.MemoryMap
-	default:
-		panic("loading mode not supported")
-	}
-
-	return mode
 }

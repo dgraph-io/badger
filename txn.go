@@ -469,7 +469,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	seek := y.KeyWithTs(key, txn.readTs)
 	vs, err := txn.db.get(seek)
 	if err != nil {
-		return nil, errors.Wrapf(err, "DB::Get key: %q", key)
+		return nil, y.Wrapf(err, "DB::Get key: %q", key)
 	}
 	if vs.Value == nil && vs.Meta == 0 {
 		return nil, ErrKeyNotFound

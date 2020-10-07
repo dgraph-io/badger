@@ -131,7 +131,7 @@ func helpOpenOrCreateManifestFile(dir string, readOnly bool, deletionsThreshold 
 	*manifestFile, Manifest, error) {
 
 	path := filepath.Join(dir, ManifestFilename)
-	var flags uint32
+	var flags y.Flags
 	if readOnly {
 		flags |= y.ReadOnly
 	}
@@ -238,7 +238,7 @@ func (mf *manifestFile) addChanges(changesParam []*pb.ManifestChange) error {
 var magicText = [4]byte{'B', 'd', 'g', 'r'}
 
 // The magic version number.
-const magicVersion = 7
+const magicVersion = 8
 
 func helpRewrite(dir string, m *Manifest) (*os.File, int, error) {
 	rewritePath := filepath.Join(dir, manifestRewriteFilename)

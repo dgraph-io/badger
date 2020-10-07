@@ -31,10 +31,12 @@ func TestRotate(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
+
 	// Creating sample key.
 	key := make([]byte, 32)
 	_, err = rand.Read(key)
 	require.NoError(t, err)
+
 	fp, err := ioutil.TempFile("", "*.key")
 	require.NoError(t, err)
 	_, err = fp.Write(key)
@@ -44,6 +46,8 @@ func TestRotate(t *testing.T) {
 	// Opening DB with the encryption key.
 	opts := badger.DefaultOptions(dir)
 	opts.EncryptionKey = key
+	opts.BlockCacheSize = 1 << 20
+
 	db, err := badger.Open(opts)
 	require.NoError(t, err)
 	// Closing the db.
@@ -126,6 +130,7 @@ func TestRotatePlainTextToEncrypted(t *testing.T) {
 	require.Nil(t, doRotate(nil, []string{}))
 
 	// Try opening DB without the key.
+	opts.BlockCacheSize = 1 << 20
 	_, err = badger.Open(opts)
 	require.EqualError(t, err, badger.ErrEncryptionKeyMismatch.Error())
 

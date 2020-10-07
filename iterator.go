@@ -25,7 +25,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/table"
 
 	"github.com/dgraph-io/badger/v2/y"
@@ -169,8 +168,8 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	db := item.txn.db
 	result, cb, err := db.vlog.Read(vp, item.slice)
 	if err != nil {
-		db.opt.Logger.Errorf(`Unable to read: Key: %v, Version : %v,
-				meta: %v, userMeta: %v`, key, item.version, item.meta, item.userMeta)
+		db.opt.Logger.Errorf("Unable to read: Key: %v, Version : %v, meta: %v, userMeta: %v"+
+			" Error: %v", key, item.version, item.meta, item.userMeta, err)
 	}
 	return result, cb, err
 }
@@ -190,13 +189,9 @@ func (item *Item) prefetchValue() {
 	if val == nil {
 		return
 	}
-	if item.txn.db.opt.ValueLogLoadingMode == options.MemoryMap {
-		buf := item.slice.Resize(len(val))
-		copy(buf, val)
-		item.val = buf
-	} else {
-		item.val = val
-	}
+	buf := item.slice.Resize(len(val))
+	copy(buf, val)
+	item.val = buf
 }
 
 // EstimatedSize returns the approximate size of the key-value pair.
@@ -433,7 +428,7 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 		iters = append(iters, itr)
 	}
 	for i := 0; i < len(tables); i++ {
-		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
+		iters = append(iters, tables[i].sl.NewUniIterator(opt.Reverse))
 	}
 	iters = txn.db.lc.appendIterators(iters, &opt) // This will increment references.
 

@@ -86,7 +86,7 @@ func OpenKeyRegistry(opt KeyRegistryOptions) (*KeyRegistry, error) {
 		return newKeyRegistry(opt), nil
 	}
 	path := filepath.Join(opt.Dir, KeyRegistryFileName)
-	var flags uint32
+	var flags y.Flags
 	if opt.ReadOnly {
 		flags |= y.ReadOnly
 	} else {
