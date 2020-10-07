@@ -2167,6 +2167,7 @@ func TestUpdateMaxCost(t *testing.T) {
 		WithBlockCacheSize(1 << 20).
 		WithIndexCacheSize(2 << 20)
 	db, err := Open(ops)
+	require.NoError(t, err)
 
 	cost, err := db.CacheMaxCost(BlockCache, -1)
 	require.NoError(t, err)
@@ -2178,9 +2179,11 @@ func TestUpdateMaxCost(t *testing.T) {
 	_, err = db.CacheMaxCost(BlockCache, 2<<20)
 	require.NoError(t, err)
 	cost, err = db.CacheMaxCost(BlockCache, -1)
+	require.NoError(t, err)
 	require.Equal(t, int64(2<<20), cost)
 	_, err = db.CacheMaxCost(IndexCache, 4<<20)
 	require.NoError(t, err)
 	cost, err = db.CacheMaxCost(IndexCache, -1)
+	require.NoError(t, err)
 	require.Equal(t, int64(4<<20), cost)
 }
