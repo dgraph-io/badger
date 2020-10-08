@@ -434,7 +434,7 @@ func printInfo(dir, valueDir string) error {
 		totalSSTSize += sz
 	}
 
-	fmt.Printf("Total SST size: %8s\n", hbytes(totalSSTSize))
+	fmt.Printf("Total SST size: %10s\n", hbytes(totalSSTSize))
 	fmt.Printf("Value log size: %10s\n", hbytes(valueLogSize))
 	fmt.Println()
 	totalExtra := numExtra + numValueDirExtra
