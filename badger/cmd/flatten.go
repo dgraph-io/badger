@@ -61,6 +61,8 @@ func flatten(cmd *cobra.Command, args []string) error {
 		WithValueDir(vlogDir).
 		WithNumVersionsToKeep(numVersions).
 		WithNumCompactors(0).
+		WithBlockCacheSize(100 << 20).
+		WithIndexCacheSize(200 << 20).
 		WithEncryptionKey(encKey)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
 	db, err := badger.Open(opt)
