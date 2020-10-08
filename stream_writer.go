@@ -269,7 +269,9 @@ func (sw *StreamWriter) Flush() error {
 	return sw.db.lc.validate()
 }
 
-// Cancel signals all goroutines to exit.
+// Cancel signals all goroutines to exit. Calling defer sw.Cancel() immediately after creating a new StreamWriter
+// ensures that writes are unblocked even upon early return. Note that dropAll() is not called here, so any
+// partially written data will not be erased until a new StreamWriter is initialized.
 func (sw *StreamWriter) Cancel() {
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
