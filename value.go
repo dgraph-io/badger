@@ -995,9 +995,9 @@ LOOP:
 		vlog.opt.Errorf("Unable to get stats for value log fid: %d err: %+v", fi, err)
 		return nil
 	}
-	if float64(discard) < discardRatio*float64(fi.Size()) {
-		vlog.opt.Debugf("Discard: %d less than DiscardRatio: %f for file: %s",
-			discard, discardRatio, fi.Name())
+	if thr := discardRatio * float64(fi.Size()); float64(discard) < thr {
+		vlog.opt.Debugf("Discard: %d less than threshold: %.0f for file: %s",
+			discard, thr, fi.Name())
 		return nil
 	}
 	maxFid := atomic.LoadUint32(&vlog.maxFid)

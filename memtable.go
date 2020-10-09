@@ -257,7 +257,9 @@ type logFile struct {
 }
 
 func (lf *logFile) Truncate(end int64) error {
-	if lf.size == uint32(end) {
+	if fi, err := lf.Fd.Stat(); err != nil {
+		return fmt.Errorf("while file.stat on file: %s, error: %v\n", lf.Fd.Name(), err)
+	} else if fi.Size() == end {
 		return nil
 	}
 	if lf.opt.ReadOnly {
