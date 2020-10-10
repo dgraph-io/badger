@@ -23,9 +23,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/golang/protobuf/proto"
 )
@@ -80,11 +82,33 @@ type Stream struct {
 	rangeCh      chan keyRange
 	kvChan       chan *pb.KVList
 	nextStreamId uint32
+
+	// Use allocators to generate KVs.
+	allocatorsMu sync.RWMutex
+	allocators   map[int]*z.Allocator
+}
+
+var kvsz = int(unsafe.Sizeof(pb.KV{}))
+
+func newKV(alloc *z.Allocator) *pb.KV {
+	b := alloc.Allocate(kvsz)
+	return (*pb.KV)(unsafe.Pointer(&b[0]))
+}
+
+func (st *Stream) getAllocator(threadId int) *z.Allocator {
+	st.allocatorsMu.RLock()
+	defer st.allocatorsMu.RUnlock()
+	return st.allocators[threadId]
 }
 
 // ToList is a default implementation of KeyToList. It picks up all valid versions of the key,
 // skipping over deleted or expired keys.
 func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
+	alloc := st.getAllocator(itr.ThreadId)
+
+	// ka := alloc.Allocate(len(key))
+	// copy(ka, key)
+
 	list := &pb.KVList{}
 	for ; itr.Valid(); itr.Next() {
 		item := itr.Item()
@@ -96,17 +120,25 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 			break
 		}
 
-		valCopy, err := item.ValueCopy(nil)
-		if err != nil {
+		kv := newKV(alloc)
+		kv.Key = alloc.Allocate(len(item.Key()))
+		copy(kv.Key, item.Key())
+
+		if err := item.Value(func(val []byte) error {
+			out := alloc.Allocate(len(val))
+			copy(out, val)
+
+			kv.Value = out
+			return nil
+		}); err != nil {
 			return nil, err
 		}
-		kv := &pb.KV{
-			Key:       item.KeyCopy(nil),
-			Value:     valCopy,
-			UserMeta:  []byte{item.UserMeta()},
-			Version:   item.Version(),
-			ExpiresAt: item.ExpiresAt(),
-		}
+		kv.Version = item.Version()
+		kv.ExpiresAt = item.ExpiresAt()
+
+		kv.UserMeta = alloc.Allocate(1)
+		kv.UserMeta[0] = item.UserMeta()
+
 		list.Kv = append(list.Kv, kv)
 		if st.db.opt.NumVersionsToKeep == 1 {
 			break
@@ -151,6 +183,18 @@ func (st *Stream) produceRanges(ctx context.Context) {
 	close(st.rangeCh)
 }
 
+func (st *Stream) newAllocator(threadId int) *z.Allocator {
+	st.allocatorsMu.Lock()
+	// prev := st.allocators[threadId]
+	// if prev != nil {
+	// 	prev.Release()
+	// }
+	a := z.NewAllocator(batchSize)
+	st.allocators[threadId] = a
+	st.allocatorsMu.Unlock()
+	return a
+}
+
 // produceKVs picks up ranges from rangeCh, generates KV lists and sends them to kvChan.
 func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	var size int
@@ -175,6 +219,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		streamId := atomic.AddUint32(&st.nextStreamId, 1)
 
 		outList := new(pb.KVList)
+		outList.AllocatorId = st.newAllocator(threadId).Ref
 
 		sendIt := func() error {
 			select {
@@ -182,10 +227,13 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			}
+			st.newAllocator(threadId)
 			outList = new(pb.KVList)
+			outList.AllocatorId = st.newAllocator(threadId).Ref
 			size = 0
 			return nil
 		}
+
 		var prevKey []byte
 		for itr.Seek(kr.left); itr.Valid(); {
 			// it.Valid would only return true for keys with the provided Prefix in iterOpts.
@@ -258,6 +306,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	defer t.Stop()
 	now := time.Now()
 
+	var allocs []*z.Allocator
 	sendBatch := func(batch *pb.KVList) error {
 		sz := uint64(proto.Size(batch))
 		bytesSent += sz
@@ -268,6 +317,11 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 		}
 		st.db.opt.Infof("%s Created batch of size: %s in %s.\n",
 			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
+
+		for _, a := range allocs {
+			a.Release()
+		}
+		allocs = allocs[:0]
 		return nil
 	}
 
@@ -288,6 +342,8 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 				}
 				y.AssertTrue(kvs != nil)
 				batch.Kv = append(batch.Kv, kvs.Kv...)
+				allocs = append(allocs, z.AllocatorFrom(kvs.AllocatorId))
+
 			default:
 				break loop
 			}
@@ -309,8 +365,9 @@ outer:
 				continue
 			}
 			speed := bytesSent / durSec
-			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec\n", st.LogPrefix,
-				y.FixedDuration(dur), humanize.Bytes(bytesSent), humanize.Bytes(speed))
+			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, mem: %s\n", st.LogPrefix,
+				y.FixedDuration(dur), humanize.IBytes(bytesSent),
+				humanize.IBytes(speed), humanize.IBytes(uint64(z.NumAllocBytes())))
 
 		case kvs, ok := <-st.kvChan:
 			if !ok {
@@ -318,6 +375,7 @@ outer:
 			}
 			y.AssertTrue(kvs != nil)
 			batch = kvs
+			allocs = append(allocs, z.AllocatorFrom(kvs.AllocatorId))
 
 			// Otherwise, slurp more keys into this batch.
 			if err := slurp(batch); err != nil {
@@ -389,7 +447,12 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 }
 
 func (db *DB) newStream() *Stream {
-	return &Stream{db: db, NumGo: 16, LogPrefix: "Badger.Stream"}
+	return &Stream{
+		db:         db,
+		NumGo:      16,
+		LogPrefix:  "Badger.Stream",
+		allocators: make(map[int]*z.Allocator),
+	}
 }
 
 // NewStream creates a new Stream.
