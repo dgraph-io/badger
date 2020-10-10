@@ -23,6 +23,7 @@ import (
 	"runtime"
 
 	"github.com/dgraph-io/badger/v2/badger/cmd"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 func main() {
@@ -38,5 +39,10 @@ func main() {
 	}()
 	runtime.SetBlockProfileRate(100)
 	runtime.GOMAXPROCS(128)
+
+	out := z.CallocNoRef(1)
+	fmt.Printf("jemalloc enabled: %v\n", len(out) > 0)
+	z.Free(out)
+
 	cmd.Execute()
 }

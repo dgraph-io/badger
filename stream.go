@@ -91,11 +91,11 @@ type Stream struct {
 var kvsz = int(unsafe.Sizeof(pb.KV{}))
 
 func newKV(alloc *z.Allocator) *pb.KV {
-	b := alloc.Allocate(kvsz)
+	b := alloc.AllocateAligned(kvsz)
 	return (*pb.KV)(unsafe.Pointer(&b[0]))
 }
 
-func (st *Stream) getAllocator(threadId int) *z.Allocator {
+func (st *Stream) Allocator(threadId int) *z.Allocator {
 	st.allocatorsMu.RLock()
 	defer st.allocatorsMu.RUnlock()
 	return st.allocators[threadId]
@@ -104,10 +104,9 @@ func (st *Stream) getAllocator(threadId int) *z.Allocator {
 // ToList is a default implementation of KeyToList. It picks up all valid versions of the key,
 // skipping over deleted or expired keys.
 func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
-	alloc := st.getAllocator(itr.ThreadId)
+	alloc := st.Allocator(itr.ThreadId)
 
-	// ka := alloc.Allocate(len(key))
-	// copy(ka, key)
+	ka := alloc.Copy(key)
 
 	list := &pb.KVList{}
 	for ; itr.Valid(); itr.Next() {
@@ -121,15 +120,12 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 		}
 
 		kv := newKV(alloc)
-		kv.Key = alloc.Allocate(len(item.Key()))
-		copy(kv.Key, item.Key())
+		kv.Key = ka
 
 		if err := item.Value(func(val []byte) error {
-			out := alloc.Allocate(len(val))
-			copy(out, val)
-
-			kv.Value = out
+			kv.Value = alloc.Copy(val)
 			return nil
+
 		}); err != nil {
 			return nil, err
 		}
@@ -185,10 +181,6 @@ func (st *Stream) produceRanges(ctx context.Context) {
 
 func (st *Stream) newAllocator(threadId int) *z.Allocator {
 	st.allocatorsMu.Lock()
-	// prev := st.allocators[threadId]
-	// if prev != nil {
-	// 	prev.Release()
-	// }
 	a := z.NewAllocator(batchSize)
 	st.allocators[threadId] = a
 	st.allocatorsMu.Unlock()
@@ -443,6 +435,11 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 
 	// Wait for key streaming to be over.
 	err := <-kvErr
+
+	for _, a := range st.allocators {
+		a.Release()
+		a.Release()
+	}
 	return err
 }
 
