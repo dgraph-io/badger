@@ -23,7 +23,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
@@ -88,13 +87,6 @@ type Stream struct {
 	allocators   map[int]*z.Allocator
 }
 
-var kvsz = int(unsafe.Sizeof(pb.KV{}))
-
-func newKV(alloc *z.Allocator) *pb.KV {
-	b := alloc.AllocateAligned(kvsz)
-	return (*pb.KV)(unsafe.Pointer(&b[0]))
-}
-
 func (st *Stream) Allocator(threadId int) *z.Allocator {
 	st.allocatorsMu.RLock()
 	defer st.allocatorsMu.RUnlock()
@@ -119,7 +111,7 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 			break
 		}
 
-		kv := newKV(alloc)
+		kv := y.NewKV(alloc)
 		kv.Key = ka
 
 		if err := item.Value(func(val []byte) error {
