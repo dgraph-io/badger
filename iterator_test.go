@@ -80,7 +80,8 @@ func TestPickSortTables(t *testing.T) {
 		out := make([]*table.Table, 0)
 		for _, mk := range mks {
 			opts := table.Options{ChkMode: options.OnTableAndBlockRead}
-			tbl := buildTable(t, [][]string{{mk.small, "some value"}, {mk.large, "some value"}}, opts)
+			tbl := buildTable(t, [][]string{{mk.small, "some value"},
+				{mk.large, "some value"}}, opts)
 			out = append(out, tbl)
 		}
 		return out

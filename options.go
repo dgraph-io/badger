@@ -59,7 +59,6 @@ type Options struct {
 	// read from the block index stored at the end of the table.
 	BlockSize          int
 	BloomFalsePositive float64
-	KeepL0InMemory     bool
 	BlockCacheSize     int64
 	IndexCacheSize     int64
 
@@ -125,7 +124,6 @@ func DefaultOptions(path string) Options {
 		SyncWrites:              false,
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
-		KeepL0InMemory:          false,
 		VerifyValueChecksum:     false,
 		Compression:             options.None,
 		BlockCacheSize:          0,
@@ -215,11 +213,11 @@ func (opt Options) WithValueDir(val string) Options {
 
 // WithSyncWrites returns a new Options value with SyncWrites set to the given value.
 //
-// Badger passes all writes via mmap. So, all writes can survive process crashes or k8s environments
+// Badger does all writes via mmap. So, all writes can survive process crashes or k8s environments
 // with SyncWrites set to false.
 //
 // When set to true, Badger would call an additional msync after writes to flush mmap buffer over to
-// disk to survive hard reboots. Most users of Badger should be OK setting this to false.
+// disk to survive hard reboots. Most users of Badger should not need to do this.
 //
 // The default value of SyncWrites is false.
 func (opt Options) WithSyncWrites(val bool) Options {
@@ -462,19 +460,6 @@ func (opt Options) WithEncryptionKey(key []byte) Options {
 // key exceed the given duration. Then the key registry will create new key.
 func (opt Options) WithEncryptionKeyRotationDuration(d time.Duration) Options {
 	opt.EncryptionKeyRotationDuration = d
-	return opt
-}
-
-// WithKeepL0InMemory returns a new Options value with KeepL0InMemory set to the given value.
-//
-// When KeepL0InMemory is set to true we will keep all Level 0 tables in memory. This leads to
-// better performance in writes as well as compactions. In case of DB crash, the value log replay
-// will take longer to complete since memtables and all level 0 tables will have to be recreated.
-// This option also sets CompactL0OnClose option to true.
-//
-// The default value of KeepL0InMemory is false.
-func (opt Options) WithKeepL0InMemory(val bool) Options {
-	opt.KeepL0InMemory = val
 	return opt
 }
 

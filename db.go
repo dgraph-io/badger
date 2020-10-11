@@ -140,12 +140,10 @@ func checkAndSetOptions(opt *Options) error {
 	if opt.Compression == options.ZSTD && !y.CgoEnabled {
 		return y.ErrZstdCgo
 	}
-	// Keep L0 in memory if either KeepL0InMemory is set or if InMemory is set.
-	opt.KeepL0InMemory = opt.KeepL0InMemory || opt.InMemory
 
 	// Compact L0 on close if either it is set or if KeepL0InMemory is set. When
 	// keepL0InMemory is set we need to compact L0 on close otherwise we might lose data.
-	opt.CompactL0OnClose = opt.CompactL0OnClose || opt.KeepL0InMemory
+	opt.CompactL0OnClose = opt.CompactL0OnClose
 
 	if opt.ReadOnly {
 		// Do not perform compaction in read only mode.
@@ -1011,14 +1009,6 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	}
 
 	fileID := db.lc.reserveFileID()
-	if db.opt.KeepL0InMemory {
-		tbl, err := table.OpenInMemoryTable(tableData, fileID, &bopts)
-		if err != nil {
-			return y.Wrapf(err, "failed to open table in memory")
-		}
-		return db.lc.addLevel0Table(tbl)
-	}
-
 	tbl, err := table.CreateTable(table.NewFilename(fileID, db.opt.Dir), tableData, bopts)
 	if err != nil {
 		return y.Wrap(err, "error while creating table")

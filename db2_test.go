@@ -572,7 +572,7 @@ func TestReadSameVlog(t *testing.T) {
 // The test ensures we don't lose data when badger is opened with KeepL0InMemory and GC is being
 // done.
 func TestL0GCBug(t *testing.T) {
-	t.Skipf("For now, just skip this one")
+	t.Skipf("TestL0GCBug is DISABLED. TODO(ibrahim): Do we need this?")
 
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
@@ -584,7 +584,6 @@ func TestL0GCBug(t *testing.T) {
 	opts.NumLevelZeroTablesStall = 51
 	opts.ValueLogMaxEntries = 2
 	opts.ValueThreshold = 2
-	opts.KeepL0InMemory = true
 	// Setting LoadingMode to mmap seems to cause segmentation fault while closing DB.
 
 	db1, err := Open(opts)

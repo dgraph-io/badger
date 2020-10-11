@@ -4,6 +4,8 @@ set -e
 
 go version
 
+packages=$(go list ./... | grep github.com/dgraph-io/badger/v2/)
+
 if [[ ! -z "$TEAMCITY_VERSION" ]]; then
   export GOFLAGS="-json"
 fi
@@ -27,5 +29,11 @@ rm -rf p
 
 # Run the normal tests.
 echo "==> Starting tests.. "
-go test -timeout=25m -v -race github.com/dgraph-io/badger/v2/...
+# go test -timeout=25m -v -race github.com/dgraph-io/badger/v2/...
+for pkg in $packages; do
+  echo "===> Testing $pkg"
+  go test -timeout=25m -v -race $pkg
+done
 
+echo "===> Testing root level"
+go test -timeout=25m -v . -race
