@@ -1083,7 +1083,7 @@ func TestValueEntryChecksum(t *testing.T) {
 
 		x, err := entry.ValueCopy(nil)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "checksum mismatch")
+		require.Contains(t, err.Error(), "ErrEOF")
 		require.Nil(t, x)
 
 		require.NoError(t, db.Close())

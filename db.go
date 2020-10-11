@@ -60,10 +60,6 @@ type closers struct {
 	cacheHealth *z.Closer
 }
 
-// TODO: Tables need to store the maxVersion, so we can use them to figure it out instead of relying
-// on head.
-// TODO: Value log discard stats should be an mmapped file.
-
 // DB provides the various functions required to interact with Badger.
 // DB is thread-safe.
 type DB struct {
@@ -75,11 +71,10 @@ type DB struct {
 
 	closers closers
 
-	// TODO: Switch to memTable
 	mt  *memTable   // Our latest (actively written) in-memory table
 	imm []*memTable // Add here only AFTER pushing to flushChan.
 
-	// TODO: This needs to be initialized during Open.
+	// Initialized via openMemTables.
 	nextMemFid int
 
 	opt       Options
@@ -338,9 +333,6 @@ func Open(opt Options) (*DB, error) {
 		replayCloser.SignalAndWait()
 		return db, y.Wrapf(err, "During db.vlog.open")
 	}
-	// if err := db.openWALFile(); err != nil {
-	// 	return db, y.Wrapf(err, "During db.openWAL")
-	// }
 	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 
 	// Let's advance nextTxnTs to one more than whatever we observed via
@@ -422,81 +414,6 @@ func (db *DB) monitorCache(c *z.Closer) {
 		analyze("Index cache", db.IndexCacheMetrics())
 	}
 }
-
-const walFileName = "badger.wal"
-
-// func (db *DB) openWALFile() error {
-// 	if db.opt.InMemory {
-// 		return nil
-// 	}
-// 	var flags uint32
-// 	switch {
-// 	case db.opt.ReadOnly:
-// 		// If we have read only, we don't need SyncWrites.
-// 		flags |= y.ReadOnly
-// 		// Set sync flag.
-// 	case db.opt.SyncWrites:
-// 		flags |= y.Sync
-// 	}
-// 	filepath := path.Join(db.opt.Dir, walFileName)
-// 	// Create new file
-// 	if _, err := os.Stat(filepath); os.IsNotExist(err) {
-// 		lf, err := db.vlog.newLogFile(filepath)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		//TODO: Do not create wal files in in-memory mode.
-// 		if db.opt.InMemory {
-// 			return nil
-// 		}
-// 		if err = syncDir(db.opt.Dir); err != nil {
-// 			y.Check(os.Remove(lf.fd.Name()))
-// 			return errFile(err, db.opt.Dir, "Sync wal dir")
-// 		}
-// 		db.wal = lf
-// 		return nil
-// 	}
-// 	// Open existing file.
-// 	lf.open(filepath, flags)
-// 	db.opt.Infof("Replaying file %s", db.wal.fd.Name())
-// 	now := time.Now()
-// 	// Replay and possible truncation done. Now we can open the file as per
-// 	// user specified options.
-// 	if err := db.replayLog(db.replayFunction()); err != nil {
-// 		// TODO: What if replay fails?
-// 		// Log file is corrupted. Delete it.
-// 		// if err == errDeleteVlogFile {
-// 		// 	delete(vlog.filesMap, fid)
-// 		// 	// Close the fd of the file before deleting the file otherwise windows complaints.
-// 		// 	if err := lf.fd.Close(); err != nil {
-// 		// 		return y.Wrapf(err, "failed to close vlog file %s", lf.fd.Name())
-// 		// 	}
-// 		// 	path := vlog.fpath(lf.fid)
-// 		// 	if err := os.Remove(path); err != nil {
-// 		// 		return y.Wrapf(err, "failed to delete empty value log file: %q", path)
-// 		// 	}
-// 		// 	continue
-// 		// }
-// 		return err
-// 	}
-// 	db.opt.Infof("Replay took: %s\n", time.Since(now))
-// 	return nil
-// }
-
-// func (db *DB) newSkipList() *skl.Skiplist {
-// 	f, err := os.OpenFile(db.skiplistPath(db.nextMemFid), os.O_CREATE|os.O_RDWR, 0666)
-// 	y.Check(err)
-// 	db.nextMemFid++
-
-// 	sz := arenaSize(db.opt)
-// 	y.Check(f.Truncate(sz))
-
-// 	data, err := z.Mmap(f, true, sz)
-// 	y.Check(err)
-// 	z.ZeroOut(data, 0, len(data))
-
-// 	return skl.NewSkiplist(data, f)
-// }
 
 // cleanup stops all the goroutines started by badger. This is used in open to
 // cleanup goroutines in case of an error.
@@ -858,12 +775,6 @@ func (db *DB) writeRequests(reqs []*request) error {
 			return y.Wrap(err, "writeRequests")
 		}
 	}
-	if db.opt.SyncWrites {
-		if err := db.mt.SyncWAL(); err != nil {
-			done(err)
-			return err
-		}
-	}
 	done(nil)
 	db.opt.Debugf("%d entries written", count)
 	return nil
@@ -1010,8 +921,8 @@ func (db *DB) ensureRoomForWrite() error {
 	// db.head. Hence we are limiting no of value log files to be read to db.logRotates only.
 	forceFlush := atomic.LoadInt32(&db.logRotates) >= db.opt.LogRotatesToFlush
 
-	// We don't need to force flush the memtable in in-memory mode because of
-	// the size of the wal will always be zero.
+	// We don't need to force flush the memtable in in-memory mode because the size of the WAL will
+	// always be zero.
 	if !forceFlush && !db.opt.InMemory {
 		// Force flush if memTable WAL is getting filled up.
 		forceFlush = int64(db.mt.wal.writeAt) > db.opt.ValueLogFileSize
@@ -1026,14 +937,6 @@ func (db *DB) ensureRoomForWrite() error {
 	case db.flushChan <- flushTask{mt: db.mt}:
 		// After every memtable flush, let's reset the counter.
 		atomic.StoreInt32(&db.logRotates, 0)
-
-		// Ensure value log is synced to disk so this memtable's contents wouldn't be lost.
-		if err = db.vlog.sync(); err != nil {
-			return err
-		}
-		if err = db.mt.SyncWAL(); err != nil {
-			return err
-		}
 
 		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 			db.mt.sl.MemSize(), len(db.flushChan))

@@ -582,19 +582,18 @@ func (vlog *valueLog) open(db *DB) error {
 		}
 	}
 
-	// TODO(ibrahim): Do we need to truncate the last vlog file?
 	// Now we can read the latest value log file, and see if it needs truncation.
-	// last, ok := vlog.filesMap[vlog.maxFid]
-	// y.AssertTrue(ok)
-	// lastOff, err := last.iterate(vlog.opt.ReadOnly, vlogHeaderSize, func(_ Entry, vp valuePointer) error {
-	// 	return nil
-	// })
-	// if err != nil {
-	// 	return y.Wrapf(err, "while iterating over: %s", last.path)
-	// }
-	// if err := last.Truncate(int64(lastOff)); err != nil {
-	// 	return y.Wrapf(err, "while truncating last value log file: %s", last.path)
-	// }
+	last, ok := vlog.filesMap[vlog.maxFid]
+	y.AssertTrue(ok)
+	lastOff, err := last.iterate(vlog.opt.ReadOnly, vlogHeaderSize, func(_ Entry, vp valuePointer) error {
+		return nil
+	})
+	if err != nil {
+		return y.Wrapf(err, "while iterating over: %s", last.path)
+	}
+	if err := last.Truncate(int64(lastOff)); err != nil {
+		return y.Wrapf(err, "while truncating last value log file: %s", last.path)
+	}
 
 	// Don't write to the old log file. Always create a new one.
 	if _, err := vlog.createVlogFile(); err != nil {
