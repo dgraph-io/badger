@@ -698,7 +698,6 @@ func (t *Table) decrypt(data []byte, viaCalloc bool) ([]byte, error) {
 	// Rest all bytes are data.
 	data = data[:len(data)-aes.BlockSize]
 
-	// TODO: Check if this is done via Calloc. Otherwise, we'll have a memory leak.
 	var dst []byte
 	if viaCalloc {
 		dst = z.Calloc(len(data))
