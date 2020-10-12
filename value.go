@@ -582,12 +582,15 @@ func (vlog *valueLog) open(db *DB) error {
 		}
 	}
 
-	// Now we can read the latest value log file, and see if it needs truncation.
+	// Now we can read the latest value log file, and see if it needs truncation. We could
+	// technically do this over all the value log files, but that would mean slowing down the value
+	// log open.
 	last, ok := vlog.filesMap[vlog.maxFid]
 	y.AssertTrue(ok)
-	lastOff, err := last.iterate(vlog.opt.ReadOnly, vlogHeaderSize, func(_ Entry, vp valuePointer) error {
-		return nil
-	})
+	lastOff, err := last.iterate(vlog.opt.ReadOnly, vlogHeaderSize,
+		func(_ Entry, vp valuePointer) error {
+			return nil
+		})
 	if err != nil {
 		return y.Wrapf(err, "while iterating over: %s", last.path)
 	}
@@ -793,10 +796,8 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 		n := uint32(buf.Len())
 		endOffset := atomic.AddUint32(&vlog.writableLogOffset, n)
-		vlog.opt.Debugf("n: %d endOffset: %d\n", n, endOffset)
 		if int(endOffset) >= len(curlf.Data) {
 			return y.Wrapf(ErrTxnTooBig, "endOffset: %d len: %d\n", endOffset, len(curlf.Data))
-			// return ErrTxnTooBig
 		}
 
 		start := int(endOffset - n)
@@ -840,19 +841,22 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 			p.Fid = curlf.fid
 			p.Offset = vlog.woffset()
-			meta := e.meta
-			// We should not store transaction marks in the vlog file because
-			// it will never have all the entries in a transaction. If we store
-			// entries with transaction marks then value GC will not be able to
-			// iterate on the entire vlog file.
+
+			// We should not store transaction marks in the vlog file because it will never have all
+			// the entries in a transaction. If we store entries with transaction marks then value
+			// GC will not be able to iterate on the entire vlog file.
+			// But, we still want the entry to stay intact for the memTable WAL. So, store the meta
+			// in a temporary variable and reassign it after writing to the value log.
+			tmpMeta := e.meta
 			e.meta = e.meta &^ (bitTxn | bitFinTxn)
 			plen, err := curlf.encodeEntry(buf, e, p.Offset) // Now encode the entry into buffer.
 			if err != nil {
 				return err
 			}
-			// TODO(Naman): Add a test for this.
-			// Reset the meta.
-			e.meta = meta
+			// TODO(Naman): Add a test to check that meta bits are correctly set?
+			// Restore the meta.
+			e.meta = tmpMeta
+
 			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
 			if err := write(buf); err != nil {
