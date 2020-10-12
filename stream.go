@@ -97,7 +97,6 @@ func (st *Stream) Allocator(threadId int) *z.Allocator {
 // skipping over deleted or expired keys.
 func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 	alloc := st.Allocator(itr.ThreadId)
-
 	ka := alloc.Copy(key)
 
 	list := &pb.KVList{}
@@ -211,7 +210,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-			st.newAllocator(threadId)
 			outList = new(pb.KVList)
 			outList.AllocatorId = st.newAllocator(threadId).Ref
 			size = 0
@@ -349,8 +347,8 @@ outer:
 				continue
 			}
 			speed := bytesSent / durSec
-			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, mem: %s\n", st.LogPrefix,
-				y.FixedDuration(dur), humanize.IBytes(bytesSent),
+			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, mem: %s\n",
+				st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(bytesSent),
 				humanize.IBytes(speed), humanize.IBytes(uint64(z.NumAllocBytes())))
 
 		case kvs, ok := <-st.kvChan:
@@ -429,7 +427,6 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	err := <-kvErr
 
 	for _, a := range st.allocators {
-		a.Release()
 		a.Release()
 	}
 	return err
