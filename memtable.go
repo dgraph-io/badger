@@ -565,7 +565,7 @@ func (lf *logFile) open(path string, flags int, opt Options) error {
 		"Unable to copy from %s, size %d", path, lf.size)
 	keyID := binary.BigEndian.Uint64(buf[:8])
 	// retrieve datakey.
-	if dk, err := lf.registry.dataKey(keyID); err != nil {
+	if dk, err := lf.registry.DataKey(keyID); err != nil {
 		return y.Wrapf(err, "While opening vlog file %d", lf.fid)
 	} else {
 		lf.dataKey = dk
@@ -587,7 +587,7 @@ func (lf *logFile) bootstrap() error {
 
 	// generate data key for the log file.
 	var dk *pb.DataKey
-	if dk, err = lf.registry.latestDataKey(); err != nil {
+	if dk, err = lf.registry.LatestDataKey(); err != nil {
 		return y.Wrapf(err, "Error while retrieving datakey in logFile.bootstarp")
 	}
 	lf.dataKey = dk

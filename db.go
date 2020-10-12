@@ -1000,7 +1000,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return nil
 	}
 
-	dk, err := db.registry.latestDataKey()
+	dk, err := db.registry.LatestDataKey()
 	if err != nil {
 		return y.Wrapf(err, "failed to get datakey in db.handleFlushTask")
 	}
