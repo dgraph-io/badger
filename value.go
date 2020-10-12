@@ -47,7 +47,7 @@ import (
 
 // maxVlogFileSize is the maximum size of the vlog file which can be created. Vlog Offset is of
 // uint32, so limiting at max uint32.
-var maxVlogFileSize = math.MaxUint32
+var maxVlogFileSize uint32 = math.MaxUint32
 
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
 // a key that has never been seen and a key that has been explicitly deleted.
