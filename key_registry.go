@@ -294,7 +294,7 @@ func WriteKeyRegistry(reg *KeyRegistry, opt KeyRegistryOptions) error {
 	return syncDir(opt.Dir)
 }
 
-// dataKey returns datakey of the given key id.
+// DataKey returns datakey of the given key id.
 func (kr *KeyRegistry) DataKey(id uint64) (*pb.DataKey, error) {
 	kr.RLock()
 	defer kr.RUnlock()
@@ -309,7 +309,7 @@ func (kr *KeyRegistry) DataKey(id uint64) (*pb.DataKey, error) {
 	return dk, nil
 }
 
-// LatestDataKey( will give you the latest generated datakey based on the rotation
+// LatestDataKey will give you the latest generated datakey based on the rotation
 // period. If the last generated datakey lifetime exceeds the rotation period.
 // It'll create new datakey.
 func (kr *KeyRegistry) LatestDataKey() (*pb.DataKey, error) {
