@@ -318,7 +318,7 @@ func (t *Table) initBiggestAndSmallest() error {
 		return y.Wrapf(err, "failed to read index.")
 	}
 
-	t.smallest = ko.KeyBytes()
+	t.smallest = y.Copy(ko.KeyBytes())
 
 	it2 := t.NewIterator(REVERSED | NOCACHE)
 	defer it2.Close()
@@ -326,7 +326,7 @@ func (t *Table) initBiggestAndSmallest() error {
 	if !it2.Valid() {
 		return y.Wrapf(it2.err, "failed to initialize biggest for table %s", t.Filename())
 	}
-	t.biggest = it2.Key()
+	t.biggest = y.Copy(it2.Key())
 	return nil
 }
 
