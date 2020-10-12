@@ -42,12 +42,12 @@ func TestBuildRegistry(t *testing.T) {
 
 	kr, err := OpenKeyRegistry(opt)
 	require.NoError(t, err)
-	dk, err := kr.latestDataKey()
+	dk, err := kr.LatestDataKey()
 	require.NoError(t, err)
 	// We're resetting the last created timestamp. So, it creates
 	// new datakey.
 	kr.lastCreated = 0
-	dk1, err := kr.latestDataKey()
+	dk1, err := kr.LatestDataKey()
 	// We generated two key. So, checking the length.
 	require.Equal(t, 2, len(kr.dataKeys))
 	require.NoError(t, err)
@@ -72,12 +72,12 @@ func TestRewriteRegistry(t *testing.T) {
 	opt := getRegistryTestOptions(dir, encryptionKey)
 	kr, err := OpenKeyRegistry(opt)
 	require.NoError(t, err)
-	_, err = kr.latestDataKey()
+	_, err = kr.LatestDataKey()
 	require.NoError(t, err)
 	// We're resetting the last created timestamp. So, it creates
 	// new datakey.
 	kr.lastCreated = 0
-	_, err = kr.latestDataKey()
+	_, err = kr.LatestDataKey()
 	require.NoError(t, err)
 	require.NoError(t, kr.Close())
 	delete(kr.dataKeys, 1)
@@ -123,14 +123,14 @@ func TestEncryptionAndDecryption(t *testing.T) {
 	opt := getRegistryTestOptions(dir, encryptionKey)
 	kr, err := OpenKeyRegistry(opt)
 	require.NoError(t, err)
-	dk, err := kr.latestDataKey()
+	dk, err := kr.LatestDataKey()
 	require.NoError(t, err)
 	require.NoError(t, kr.Close())
 	// Checking the correctness of the datakey after closing and
 	// opening the key registry.
 	kr, err = OpenKeyRegistry(opt)
 	require.NoError(t, err)
-	dk1, err := kr.dataKey(dk.GetKeyId())
+	dk1, err := kr.DataKey(dk.GetKeyId())
 	require.NoError(t, err)
 	require.Equal(t, dk.Data, dk1.Data)
 	require.NoError(t, kr.Close())
@@ -146,12 +146,12 @@ func TestKeyRegistryInMemory(t *testing.T) {
 
 	kr, err := OpenKeyRegistry(opt)
 	require.NoError(t, err)
-	_, err = kr.latestDataKey()
+	_, err = kr.LatestDataKey()
 	require.NoError(t, err)
 	// We're resetting the last created timestamp. So, it creates
 	// new datakey.
 	kr.lastCreated = 0
-	_, err = kr.latestDataKey()
+	_, err = kr.LatestDataKey()
 	// We generated two key. So, checking the length.
 	require.Equal(t, 2, len(kr.dataKeys))
 	require.NoError(t, err)

@@ -309,7 +309,7 @@ func (kr *KeyRegistry) DataKey(id uint64) (*pb.DataKey, error) {
 	return dk, nil
 }
 
-// latestDataKey will give you the latest generated datakey based on the rotation
+// LatestDataKey( will give you the latest generated datakey based on the rotation
 // period. If the last generated datakey lifetime exceeds the rotation period.
 // It'll create new datakey.
 func (kr *KeyRegistry) LatestDataKey() (*pb.DataKey, error) {
