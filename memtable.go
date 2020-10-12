@@ -41,10 +41,11 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Also, memTable should have a way to open a WAL and bring SkipList up to speed.
-// On start, if there's a logfile, then create corresponding skiplist and create memtable struct.
+// memTable structure stores a skiplist and a corresponding WAL. Writes to memTable are written
+// both to the WAL and the skiplist. On a crash, the WAL is replayed to bring the skiplist back to
+// its pre-crash form.
 type memTable struct {
-	// Give skiplist z.Calloc'd []byte.
+	// TODO: Give skiplist z.Calloc'd []byte.
 	sl         *skl.Skiplist
 	wal        *logFile
 	maxVersion uint64
@@ -108,6 +109,7 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 	if db.opt.InMemory {
 		return mt, z.NewFile
 	}
+
 	mt.wal = &logFile{
 		fid:      uint32(fid),
 		path:     filepath,
@@ -116,13 +118,17 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 	}
 	lerr := mt.wal.open(filepath, os.O_RDWR|os.O_CREATE, db.opt)
 	if lerr != z.NewFile && lerr != nil {
-		return nil, y.Wrapf(lerr, "While opening mem table: %s", filepath)
+		return nil, y.Wrapf(lerr, "While opening memtable: %s", filepath)
 	}
+
+	// Have a callback set to delete WAL when skiplist reference count goes down to zero. That is,
+	// when it gets flushed to L0.
 	s.OnClose = func() {
 		if err := mt.wal.Delete(); err != nil {
 			db.opt.Errorf("while deleting file: %s, err: %v", filepath, err)
 		}
 	}
+
 	if lerr == z.NewFile {
 		return mt, lerr
 	}
@@ -151,10 +157,7 @@ func (db *DB) mtFilePath(fid int) string {
 }
 
 func (mt *memTable) SyncWAL() error {
-	if mt.wal != nil {
-		return mt.wal.sync()
-	}
-	return nil
+	return mt.wal.Sync()
 }
 
 func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
@@ -178,6 +181,8 @@ func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
 	if entry.meta&bitFinTxn > 0 {
 		return nil
 	}
+
+	// Write to skiplist and update maxVersion encountered.
 	mt.sl.Put(key, value)
 	if ts := y.ParseTs(entry.Key); ts > mt.maxVersion {
 		mt.maxVersion = ts
@@ -196,8 +201,6 @@ func (mt *memTable) UpdateSkipList() error {
 	if endOff < mt.wal.size && mt.opt.ReadOnly {
 		return y.Wrapf(ErrTruncateNeeded, "end offset: %d < size: %d", endOff, mt.wal.size)
 	}
-
-	// TODO: Figure out whether the Truncate option should be respected or not.
 	return mt.wal.Truncate(int64(endOff))
 }
 
@@ -228,8 +231,8 @@ func (mt *memTable) replayFunction(opt Options) func(Entry, valuePointer) error 
 			ExpiresAt: e.ExpiresAt,
 		}
 		// This is already encoded correctly. Value would be either a vptr, or a full value
-		// depending upon how big the original value was.
-		// Skiplist makes a copy of the key and value.
+		// depending upon how big the original value was. Skiplist makes a copy of the key and
+		// value.
 		mt.sl.Put(e.Key, v)
 		return nil
 	}
@@ -400,9 +403,10 @@ func (lf *logFile) generateIV(offset uint32) []byte {
 }
 
 func (lf *logFile) doneWriting(offset uint32) error {
-	// Just always sync on rotate.
-	if err := z.Msync(lf.Data); err != nil {
-		return y.Wrapf(err, "Unable to sync value log: %q", lf.path)
+	if lf.opt.SyncWrites {
+		if err := lf.Sync(); err != nil {
+			return y.Wrapf(err, "Unable to sync value log: %q", lf.path)
+		}
 	}
 
 	// Before we were acquiring a lock here on lf.lock, because we were invalidating the file
@@ -419,11 +423,6 @@ func (lf *logFile) doneWriting(offset uint32) error {
 	// Previously we used to close the file after it was written and reopen it in read-only mode.
 	// We no longer open files in read-only mode. We keep all vlog files open in read-write mode.
 	return nil
-}
-
-// You must hold lf.lock to sync()
-func (lf *logFile) sync() error {
-	return z.Msync(lf.Data)
 }
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.

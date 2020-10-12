@@ -721,7 +721,7 @@ func (vlog *valueLog) sync() error {
 	curlf.lock.RLock()
 	vlog.filesLock.RUnlock()
 
-	err := curlf.sync()
+	err := curlf.Sync()
 	curlf.lock.RUnlock()
 	return err
 }
@@ -783,7 +783,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 	defer func() {
 		if vlog.opt.SyncWrites {
-			if err := curlf.sync(); err != nil {
+			if err := curlf.Sync(); err != nil {
 				vlog.opt.Errorf("Error while curlf sync: %v\n", err)
 			}
 		}
@@ -983,9 +983,8 @@ LOOP:
 		return nil
 	}
 	lf, ok := vlog.filesMap[fid]
-	// This file was deleted but it's discard stats increased because of
-	// compactions. The file doesn't exist so we don't need to do anything.
-	// Skip it and retry.
+	// This file was deleted but it's discard stats increased because of compactions. The file
+	// doesn't exist so we don't need to do anything. Skip it and retry.
 	if !ok {
 		vlog.discardStats.Update(fid, -1)
 		goto LOOP
@@ -1038,17 +1037,12 @@ type reason struct {
 	count   int
 }
 
-func (vlog *valueLog) doRunGC(lf *logFile) (err error) {
-	// Update stats before exiting
-	defer func() {
-		if err == nil {
-			vlog.discardStats.Update(lf.fid, -1)
-		}
-	}()
-
-	if err = vlog.rewrite(lf); err != nil {
+func (vlog *valueLog) doRunGC(lf *logFile) error {
+	if err := vlog.rewrite(lf); err != nil {
 		return err
 	}
+	// Remove the file from discardStats.
+	vlog.discardStats.Update(lf.fid, -1)
 	return nil
 }
 
