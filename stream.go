@@ -71,7 +71,9 @@ type Stream struct {
 	//
 	// KeyToList has access to z.Allocator accessible via stream.Allocator(itr.ThreadId). This
 	// allocator can be used to allocate KVs, to decrease the memory pressure on Go GC. Stream
-	// framework takes care of releasing those resources after calling Send.
+	// framework takes care of releasing those resources after calling Send. AllocRef does
+	// NOT need to be set in the returned KVList, as Stream framework would ignore that field,
+	// instead using the allocator assigned to that thread id.
 	//
 	// Note: Calls to KeyToList are concurrent.
 	KeyToList func(key []byte, itr *Iterator) (*pb.KVList, error)
@@ -355,7 +357,7 @@ outer:
 				continue
 			}
 			speed := bytesSent / durSec
-			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, mem: %s\n",
+			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, jemalloc: %s\n",
 				st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(bytesSent),
 				humanize.IBytes(speed), humanize.IBytes(uint64(z.NumAllocBytes())))
 
