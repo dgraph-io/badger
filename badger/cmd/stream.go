@@ -17,6 +17,7 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -24,6 +25,8 @@ import (
 	"github.com/dgraph-io/badger/v2"
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
+	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -105,5 +108,7 @@ func stream(cmd *cobra.Command, args []string) error {
 		return y.Wrapf(err, "cannot open DB at %s", sstDir)
 	}
 	defer inDB.Close()
-	return inDB.StreamDB(outOpt)
+	err = inDB.StreamDB(outOpt)
+	fmt.Printf("jemalloc: %v\n", humanize.IBytes(uint64(z.NumAllocBytes())))
+	return err
 }
