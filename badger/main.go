@@ -43,6 +43,7 @@ func main() {
 
 	out := z.CallocNoRef(1)
 	fmt.Printf("jemalloc enabled: %v\n", len(out) > 0)
+	z.StatsPrint()
 	z.Free(out)
 
 	cmd.Execute()
