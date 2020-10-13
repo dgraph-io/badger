@@ -25,8 +25,6 @@ import (
 	"github.com/dgraph-io/badger/v2"
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/y"
-	"github.com/dgraph-io/ristretto/z"
-	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -109,7 +107,6 @@ func stream(cmd *cobra.Command, args []string) error {
 	}
 	defer inDB.Close()
 	err = inDB.StreamDB(outOpt)
-	fmt.Printf("jemalloc: %v\n", humanize.IBytes(uint64(z.NumAllocBytes())))
 	fmt.Println("Done.")
 	return err
 }

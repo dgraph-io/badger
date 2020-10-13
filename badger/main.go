@@ -24,6 +24,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2/badger/cmd"
 	"github.com/dgraph-io/ristretto/z"
+	"github.com/dustin/go-humanize"
 )
 
 func main() {
@@ -45,5 +46,6 @@ func main() {
 	z.Free(out)
 
 	cmd.Execute()
-	fmt.Printf("Num Allocated Bytes at program end: %d\n", z.NumAllocBytes())
+	fmt.Printf("Num Allocated Bytes at program end: %s\n",
+		humanize.IBytes(uint64(z.NumAllocBytes())))
 }
