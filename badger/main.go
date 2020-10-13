@@ -45,4 +45,5 @@ func main() {
 	z.Free(out)
 
 	cmd.Execute()
+	fmt.Printf("Num Allocated Bytes at program end: %d\n", z.NumAllocBytes())
 }
