@@ -15,7 +15,8 @@ pushd badger
 go build -v .
 popd
 
-tags="-tags=jemalloc"
+# tags="-tags=jemalloc"
+tags=""
 
 # Run the memory intensive tests first.
 go test -v $tags -run='TestBigKeyValuePairs$' --manual=true
