@@ -33,6 +33,7 @@ This command would compact all the LSM tables into one level.
 	RunE: flatten,
 }
 
+var keyPath string
 var numWorkers int
 
 func init() {
@@ -43,6 +44,8 @@ func init() {
 	flattenCmd.Flags().IntVarP(&numVersions, "num_versions", "", 1,
 		"Option to configure the maximum number of versions per key. "+
 			"Values <= 0 will be considered to have the max number of versions.")
+	flattenCmd.Flags().StringVar(&keyPath, "encryption-key-file", "",
+		"Path of the encryption key file.")
 }
 
 func flatten(cmd *cobra.Command, args []string) error {
@@ -50,10 +53,17 @@ func flatten(cmd *cobra.Command, args []string) error {
 		// Keep all versions.
 		numVersions = math.MaxInt32
 	}
+	encKey, err := getKey(keyPath)
+	if err != nil {
+		return err
+	}
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithNumVersionsToKeep(numVersions).
-		WithNumCompactors(0)
+		WithNumCompactors(0).
+		WithBlockCacheSize(100 << 20).
+		WithIndexCacheSize(200 << 20).
+		WithEncryptionKey(encKey)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
 	db, err := badger.Open(opt)
 	if err != nil {
