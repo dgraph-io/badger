@@ -126,9 +126,7 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 		}
 		kv.Version = item.Version()
 		kv.ExpiresAt = item.ExpiresAt()
-
-		kv.UserMeta = alloc.Allocate(1)
-		kv.UserMeta[0] = item.UserMeta()
+		kv.UserMeta = alloc.Copy([]byte{item.UserMeta()})
 
 		list.Kv = append(list.Kv, kv)
 		if st.db.opt.NumVersionsToKeep == 1 {
@@ -206,7 +204,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		streamId := atomic.AddUint32(&st.nextStreamId, 1)
 
 		outList := new(pb.KVList)
-		outList.AllocatorId = st.newAllocator(threadId).Ref
+		outList.AllocRef = st.newAllocator(threadId).Ref
 
 		sendIt := func() error {
 			select {
@@ -215,7 +213,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				return ctx.Err()
 			}
 			outList = new(pb.KVList)
-			outList.AllocatorId = st.newAllocator(threadId).Ref
+			outList.AllocRef = st.newAllocator(threadId).Ref
 			size = 0
 			return nil
 		}
@@ -334,7 +332,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 				}
 				y.AssertTrue(kvs != nil)
 				batch.Kv = append(batch.Kv, kvs.Kv...)
-				allocs = append(allocs, z.AllocatorFrom(kvs.AllocatorId))
+				allocs = append(allocs, z.AllocatorFrom(kvs.AllocRef))
 
 			default:
 				break loop
@@ -367,7 +365,7 @@ outer:
 			}
 			y.AssertTrue(kvs != nil)
 			batch = kvs
-			allocs = append(allocs, z.AllocatorFrom(kvs.AllocatorId))
+			allocs = append(allocs, z.AllocatorFrom(kvs.AllocRef))
 
 			// Otherwise, slurp more keys into this batch.
 			if err := slurp(batch); err != nil {
