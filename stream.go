@@ -260,13 +260,12 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				}
 			}
 		}
-		if len(outList.Kv) > 0 {
-			// TODO: Think of a way to indicate that a stream is over.
-			if err := sendIt(); err != nil {
-				return err
-			}
-		}
-		return nil
+		// Mark the stream as done.
+		outList.Kv = append(outList.Kv, &pb.KV{
+			StreamId:   streamId,
+			StreamDone: true,
+		})
+		return sendIt()
 	}
 
 	for {
