@@ -53,6 +53,9 @@ type collector struct {
 
 func (c *collector) Send(list *bpb.KVList) error {
 	for _, kv := range list.Kv {
+		if kv.StreamDone == true {
+			continue
+		}
 		cp := proto.Clone(kv).(*bpb.KV)
 		c.kv = append(c.kv, cp)
 	}
