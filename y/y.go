@@ -471,6 +471,9 @@ func (r *PageBufferReader) Read(p []byte) (int, error) {
 const kvsz = int(unsafe.Sizeof(pb.KV{}))
 
 func NewKV(alloc *z.Allocator) *pb.KV {
+	if alloc == nil {
+		return &pb.KV{}
+	}
 	b := alloc.AllocateAligned(kvsz)
 	return (*pb.KV)(unsafe.Pointer(&b[0]))
 }

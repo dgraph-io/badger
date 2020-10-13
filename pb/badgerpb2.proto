@@ -38,8 +38,8 @@ message KV {
 message KVList {
   repeated KV kv = 1;
 
-  // allocator_id used internally for memory management.
-  uint64 allocator_id = 10;
+  // alloc_ref used internally for memory management.
+  uint64 alloc_ref = 10;
 }
 
 message ManifestChangeSet {

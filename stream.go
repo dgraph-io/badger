@@ -69,6 +69,12 @@ type Stream struct {
 	// with a mismatching key. See example usage in ToList function. Can be left nil to use ToList
 	// function by default.
 	//
+	// KeyToList has access to z.Allocator accessible via stream.Allocator(itr.ThreadId). This
+	// allocator can be used to allocate KVs, to decrease the memory pressure on Go GC. Stream
+	// framework takes care of releasing those resources after calling Send. AllocRef does
+	// NOT need to be set in the returned KVList, as Stream framework would ignore that field,
+	// instead using the allocator assigned to that thread id.
+	//
 	// Note: Calls to KeyToList are concurrent.
 	KeyToList func(key []byte, itr *Iterator) (*pb.KVList, error)
 
@@ -97,7 +103,6 @@ func (st *Stream) Allocator(threadId int) *z.Allocator {
 // skipping over deleted or expired keys.
 func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 	alloc := st.Allocator(itr.ThreadId)
-
 	ka := alloc.Copy(key)
 
 	list := &pb.KVList{}
@@ -123,9 +128,7 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 		}
 		kv.Version = item.Version()
 		kv.ExpiresAt = item.ExpiresAt()
-
-		kv.UserMeta = alloc.Allocate(1)
-		kv.UserMeta[0] = item.UserMeta()
+		kv.UserMeta = alloc.Copy([]byte{item.UserMeta()})
 
 		list.Kv = append(list.Kv, kv)
 		if st.db.opt.NumVersionsToKeep == 1 {
@@ -203,7 +206,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		streamId := atomic.AddUint32(&st.nextStreamId, 1)
 
 		outList := new(pb.KVList)
-		outList.AllocatorId = st.newAllocator(threadId).Ref
+		outList.AllocRef = st.newAllocator(threadId).Ref
 
 		sendIt := func() error {
 			select {
@@ -211,9 +214,8 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-			st.newAllocator(threadId)
 			outList = new(pb.KVList)
-			outList.AllocatorId = st.newAllocator(threadId).Ref
+			outList.AllocRef = st.newAllocator(threadId).Ref
 			size = 0
 			return nil
 		}
@@ -291,6 +293,12 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	now := time.Now()
 
 	var allocs []*z.Allocator
+	defer func() {
+		for _, a := range allocs {
+			a.Release()
+		}
+	}()
+
 	sendBatch := func(batch *pb.KVList) error {
 		sz := uint64(proto.Size(batch))
 		bytesSent += sz
@@ -326,7 +334,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 				}
 				y.AssertTrue(kvs != nil)
 				batch.Kv = append(batch.Kv, kvs.Kv...)
-				allocs = append(allocs, z.AllocatorFrom(kvs.AllocatorId))
+				allocs = append(allocs, z.AllocatorFrom(kvs.AllocRef))
 
 			default:
 				break loop
@@ -349,8 +357,8 @@ outer:
 				continue
 			}
 			speed := bytesSent / durSec
-			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, mem: %s\n", st.LogPrefix,
-				y.FixedDuration(dur), humanize.IBytes(bytesSent),
+			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, jemalloc: %s\n",
+				st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(bytesSent),
 				humanize.IBytes(speed), humanize.IBytes(uint64(z.NumAllocBytes())))
 
 		case kvs, ok := <-st.kvChan:
@@ -359,7 +367,7 @@ outer:
 			}
 			y.AssertTrue(kvs != nil)
 			batch = kvs
-			allocs = append(allocs, z.AllocatorFrom(kvs.AllocatorId))
+			allocs = append(allocs, z.AllocatorFrom(kvs.AllocRef))
 
 			// Otherwise, slurp more keys into this batch.
 			if err := slurp(batch); err != nil {
@@ -429,7 +437,6 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	err := <-kvErr
 
 	for _, a := range st.allocators {
-		a.Release()
 		a.Release()
 	}
 	return err

@@ -318,7 +318,7 @@ func (t *Table) initBiggestAndSmallest() error {
 		return y.Wrapf(err, "failed to read index.")
 	}
 
-	t.smallest = ko.KeyBytes()
+	t.smallest = y.Copy(ko.KeyBytes())
 
 	it2 := t.NewIterator(REVERSED | NOCACHE)
 	defer it2.Close()
@@ -326,7 +326,7 @@ func (t *Table) initBiggestAndSmallest() error {
 	if !it2.Valid() {
 		return y.Wrapf(it2.err, "failed to initialize biggest for table %s", t.Filename())
 	}
-	t.biggest = it2.Key()
+	t.biggest = y.Copy(it2.Key())
 	return nil
 }
 
@@ -493,9 +493,11 @@ func (t *Table) block(idx int, useCache bool) (*block, error) {
 
 	if t.shouldDecrypt() {
 		// Decrypt the block if it is encrypted.
-		if blk.data, err = t.decrypt(blk.data); err != nil {
+		if blk.data, err = t.decrypt(blk.data, true); err != nil {
 			return nil, err
 		}
+		// blk.data is allocated via Calloc. So, do free.
+		blk.freeMe = true
 	}
 
 	if err = t.decompress(blk); err != nil {
@@ -641,7 +643,7 @@ func (t *Table) readTableIndex() (*fb.TableIndex, error) {
 	var err error
 	// Decrypt the table index if it is encrypted.
 	if t.shouldDecrypt() {
-		if data, err = t.decrypt(data); err != nil {
+		if data, err = t.decrypt(data, false); err != nil {
 			return nil, y.Wrapf(err,
 				"Error while decrypting table index for the table %d in readTableIndex", t.id)
 		}
@@ -690,14 +692,18 @@ func (t *Table) KeyID() uint64 {
 }
 
 // decrypt decrypts the given data. It should be called only after checking shouldDecrypt.
-func (t *Table) decrypt(data []byte) ([]byte, error) {
+func (t *Table) decrypt(data []byte, viaCalloc bool) ([]byte, error) {
 	// Last BlockSize bytes of the data is the IV.
 	iv := data[len(data)-aes.BlockSize:]
 	// Rest all bytes are data.
 	data = data[:len(data)-aes.BlockSize]
 
-	// TODO: Check if this is done via Calloc. Otherwise, we'll have a memory leak.
-	dst := make([]byte, len(data))
+	var dst []byte
+	if viaCalloc {
+		dst = z.Calloc(len(data))
+	} else {
+		dst = make([]byte, len(data))
+	}
 	if err := y.XORBlock(dst, data, t.opt.DataKey.Data, iv); err != nil {
 		return nil, y.Wrapf(err, "while decrypt")
 	}
@@ -736,6 +742,9 @@ func (t *Table) decompress(b *block) error {
 	var dst []byte
 	var err error
 
+	// Point to the original b.data
+	src := b.data
+
 	switch t.opt.Compression {
 	case options.None:
 		// Nothing to be done here.
@@ -761,6 +770,11 @@ func (t *Table) decompress(b *block) error {
 		}
 	default:
 		return errors.New("Unsupported compression type")
+	}
+
+	if b.freeMe == true {
+		z.Free(src)
+		b.freeMe = false
 	}
 
 	if len(b.data) > 0 && len(dst) > 0 && &dst[0] != &b.data[0] {
