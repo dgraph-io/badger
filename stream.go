@@ -176,8 +176,15 @@ func (st *Stream) produceRanges(ctx context.Context) {
 
 func (st *Stream) newAllocator(threadId int) *z.Allocator {
 	st.allocatorsMu.Lock()
-	a := z.NewAllocator(batchSize)
-	st.allocators[threadId] = a
+	var a *z.Allocator
+	if cur, ok := st.allocators[threadId]; ok && cur.Size() == 0 {
+		a = cur // Reuse.
+	} else {
+		// Current allocator has been used already. Create a new one.
+		a = z.NewAllocator(batchSize)
+		// a.Tag = fmt.Sprintf("Stream %d: %s", threadId, st.LogPrefix)
+		st.allocators[threadId] = a
+	}
 	st.allocatorsMu.Unlock()
 	return a
 }

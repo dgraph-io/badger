@@ -106,6 +106,7 @@ func stream(cmd *cobra.Command, args []string) error {
 		return y.Wrapf(err, "cannot open DB at %s", sstDir)
 	}
 	defer inDB.Close()
+
 	err = inDB.StreamDB(outOpt)
 	fmt.Println("Done.")
 	return err
