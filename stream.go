@@ -26,6 +26,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/golang/protobuf/proto"
 )
@@ -68,6 +69,12 @@ type Stream struct {
 	// with a mismatching key. See example usage in ToList function. Can be left nil to use ToList
 	// function by default.
 	//
+	// KeyToList has access to z.Allocator accessible via stream.Allocator(itr.ThreadId). This
+	// allocator can be used to allocate KVs, to decrease the memory pressure on Go GC. Stream
+	// framework takes care of releasing those resources after calling Send. AllocRef does
+	// NOT need to be set in the returned KVList, as Stream framework would ignore that field,
+	// instead using the allocator assigned to that thread id.
+	//
 	// Note: Calls to KeyToList are concurrent.
 	KeyToList func(key []byte, itr *Iterator) (*pb.KVList, error)
 
@@ -80,11 +87,24 @@ type Stream struct {
 	rangeCh      chan keyRange
 	kvChan       chan *pb.KVList
 	nextStreamId uint32
+
+	// Use allocators to generate KVs.
+	allocatorsMu sync.RWMutex
+	allocators   map[int]*z.Allocator
+}
+
+func (st *Stream) Allocator(threadId int) *z.Allocator {
+	st.allocatorsMu.RLock()
+	defer st.allocatorsMu.RUnlock()
+	return st.allocators[threadId]
 }
 
 // ToList is a default implementation of KeyToList. It picks up all valid versions of the key,
 // skipping over deleted or expired keys.
 func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
+	alloc := st.Allocator(itr.ThreadId)
+	ka := alloc.Copy(key)
+
 	list := &pb.KVList{}
 	for ; itr.Valid(); itr.Next() {
 		item := itr.Item()
@@ -96,17 +116,20 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 			break
 		}
 
-		valCopy, err := item.ValueCopy(nil)
-		if err != nil {
+		kv := y.NewKV(alloc)
+		kv.Key = ka
+
+		if err := item.Value(func(val []byte) error {
+			kv.Value = alloc.Copy(val)
+			return nil
+
+		}); err != nil {
 			return nil, err
 		}
-		kv := &pb.KV{
-			Key:       item.KeyCopy(nil),
-			Value:     valCopy,
-			UserMeta:  []byte{item.UserMeta()},
-			Version:   item.Version(),
-			ExpiresAt: item.ExpiresAt(),
-		}
+		kv.Version = item.Version()
+		kv.ExpiresAt = item.ExpiresAt()
+		kv.UserMeta = alloc.Copy([]byte{item.UserMeta()})
+
 		list.Kv = append(list.Kv, kv)
 		if st.db.opt.NumVersionsToKeep == 1 {
 			break
@@ -151,6 +174,21 @@ func (st *Stream) produceRanges(ctx context.Context) {
 	close(st.rangeCh)
 }
 
+func (st *Stream) newAllocator(threadId int) *z.Allocator {
+	st.allocatorsMu.Lock()
+	var a *z.Allocator
+	if cur, ok := st.allocators[threadId]; ok && cur.Size() == 0 {
+		a = cur // Reuse.
+	} else {
+		// Current allocator has been used already. Create a new one.
+		a = z.NewAllocator(batchSize)
+		// a.Tag = fmt.Sprintf("Stream %d: %s", threadId, st.LogPrefix)
+		st.allocators[threadId] = a
+	}
+	st.allocatorsMu.Unlock()
+	return a
+}
+
 // produceKVs picks up ranges from rangeCh, generates KV lists and sends them to kvChan.
 func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	var size int
@@ -175,6 +213,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		streamId := atomic.AddUint32(&st.nextStreamId, 1)
 
 		outList := new(pb.KVList)
+		outList.AllocRef = st.newAllocator(threadId).Ref
 
 		sendIt := func() error {
 			select {
@@ -183,9 +222,11 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				return ctx.Err()
 			}
 			outList = new(pb.KVList)
+			outList.AllocRef = st.newAllocator(threadId).Ref
 			size = 0
 			return nil
 		}
+
 		var prevKey []byte
 		for itr.Seek(kr.left); itr.Valid(); {
 			// it.Valid would only return true for keys with the provided Prefix in iterOpts.
@@ -226,13 +267,12 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				}
 			}
 		}
-		if len(outList.Kv) > 0 {
-			// TODO: Think of a way to indicate that a stream is over.
-			if err := sendIt(); err != nil {
-				return err
-			}
-		}
-		return nil
+		// Mark the stream as done.
+		outList.Kv = append(outList.Kv, &pb.KV{
+			StreamId:   streamId,
+			StreamDone: true,
+		})
+		return sendIt()
 	}
 
 	for {
@@ -258,6 +298,13 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	defer t.Stop()
 	now := time.Now()
 
+	var allocs []*z.Allocator
+	defer func() {
+		for _, a := range allocs {
+			a.Release()
+		}
+	}()
+
 	sendBatch := func(batch *pb.KVList) error {
 		sz := uint64(proto.Size(batch))
 		bytesSent += sz
@@ -268,6 +315,11 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 		}
 		st.db.opt.Infof("%s Created batch of size: %s in %s.\n",
 			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
+
+		for _, a := range allocs {
+			a.Release()
+		}
+		allocs = allocs[:0]
 		return nil
 	}
 
@@ -288,6 +340,8 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 				}
 				y.AssertTrue(kvs != nil)
 				batch.Kv = append(batch.Kv, kvs.Kv...)
+				allocs = append(allocs, z.AllocatorFrom(kvs.AllocRef))
+
 			default:
 				break loop
 			}
@@ -309,8 +363,9 @@ outer:
 				continue
 			}
 			speed := bytesSent / durSec
-			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec\n", st.LogPrefix,
-				y.FixedDuration(dur), humanize.Bytes(bytesSent), humanize.Bytes(speed))
+			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, jemalloc: %s\n",
+				st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(bytesSent),
+				humanize.IBytes(speed), humanize.IBytes(uint64(z.NumAllocBytes())))
 
 		case kvs, ok := <-st.kvChan:
 			if !ok {
@@ -318,6 +373,7 @@ outer:
 			}
 			y.AssertTrue(kvs != nil)
 			batch = kvs
+			allocs = append(allocs, z.AllocatorFrom(kvs.AllocRef))
 
 			// Otherwise, slurp more keys into this batch.
 			if err := slurp(batch); err != nil {
@@ -385,11 +441,20 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 
 	// Wait for key streaming to be over.
 	err := <-kvErr
+
+	for _, a := range st.allocators {
+		a.Release()
+	}
 	return err
 }
 
 func (db *DB) newStream() *Stream {
-	return &Stream{db: db, NumGo: 16, LogPrefix: "Badger.Stream"}
+	return &Stream{
+		db:         db,
+		NumGo:      16,
+		LogPrefix:  "Badger.Stream",
+		allocators: make(map[int]*z.Allocator),
+	}
 }
 
 // NewStream creates a new Stream.

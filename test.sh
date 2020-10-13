@@ -15,16 +15,19 @@ pushd badger
 go build -v .
 popd
 
+# tags="-tags=jemalloc"
+tags=""
+
 # Run the memory intensive tests first.
-go test -v -run='TestBigKeyValuePairs$' --manual=true
-go test -v -run='TestPushValueLogLimit' --manual=true
+go test -v $tags -run='TestBigKeyValuePairs$' --manual=true
+go test -v $tags -run='TestPushValueLogLimit' --manual=true
 
 # Run the special Truncate test.
 rm -rf p
-go test -v -run='TestTruncateVlogNoClose$' --manual=true
+go test -v $tags -run='TestTruncateVlogNoClose$' --manual=true
 truncate --size=4096 p/000000.vlog
-go test -v -run='TestTruncateVlogNoClose2$' --manual=true
-go test -v -run='TestTruncateVlogNoClose3$' --manual=true
+go test -v $tags -run='TestTruncateVlogNoClose2$' --manual=true
+go test -v $tags -run='TestTruncateVlogNoClose3$' --manual=true
 rm -rf p
 
 # Run the normal tests.
@@ -32,8 +35,8 @@ echo "==> Starting tests.. "
 # go test -timeout=25m -v -race github.com/dgraph-io/badger/v2/...
 for pkg in $packages; do
   echo "===> Testing $pkg"
-  go test -timeout=25m -v -race $pkg
+  go test $tags -timeout=25m -v -race $pkg
 done
 
 echo "===> Testing root level"
-go test -timeout=25m -v . -race
+go test $tags -timeout=25m -v . -race
