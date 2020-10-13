@@ -93,8 +93,12 @@ func stream(cmd *cobra.Command, args []string) error {
 		return errors.Errorf(
 			"compression value must be one of 0 (disabled), 1 (Snappy), or 2 (ZSTD)")
 	}
-	outOpt := inOpt.WithDir(outDir).WithValueDir(outDir).
-		WithCompression(options.CompressionType(compressionType)).WithReadOnly(false)
+	outOpt := inOpt.
+		WithDir(outDir).
+		WithValueDir(outDir).
+		WithNumVersionsToKeep(numVersions).
+		WithCompression(options.CompressionType(compressionType)).
+		WithReadOnly(false).
 
 	inDB, err := badger.OpenManaged(inOpt)
 	if err != nil {
