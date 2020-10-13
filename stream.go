@@ -69,6 +69,10 @@ type Stream struct {
 	// with a mismatching key. See example usage in ToList function. Can be left nil to use ToList
 	// function by default.
 	//
+	// KeyToList has access to z.Allocator accessible via stream.Allocator(itr.ThreadId). This
+	// allocator can be used to allocate KVs, to decrease the memory pressure on Go GC. Stream
+	// framework takes care of releasing those resources after calling Send.
+	//
 	// Note: Calls to KeyToList are concurrent.
 	KeyToList func(key []byte, itr *Iterator) (*pb.KVList, error)
 
@@ -289,6 +293,12 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	now := time.Now()
 
 	var allocs []*z.Allocator
+	defer func() {
+		for _, a := range allocs {
+			a.Release()
+		}
+	}()
+
 	sendBatch := func(batch *pb.KVList) error {
 		sz := uint64(proto.Size(batch))
 		bytesSent += sz
