@@ -98,7 +98,7 @@ func stream(cmd *cobra.Command, args []string) error {
 		WithValueDir(outDir).
 		WithNumVersionsToKeep(numVersions).
 		WithCompression(options.CompressionType(compressionType)).
-		WithReadOnly(false).
+		WithReadOnly(false)
 
 	inDB, err := badger.OpenManaged(inOpt)
 	if err != nil {
