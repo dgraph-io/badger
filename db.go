@@ -417,9 +417,9 @@ func (db *DB) monitorCache(c *z.Closer) {
 		case <-ticker.C:
 		}
 
-		count++
 		analyze("Block cache", db.BlockCacheMetrics())
 		analyze("Index cache", db.IndexCacheMetrics())
+		count++
 	}
 }
 
