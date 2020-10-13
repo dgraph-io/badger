@@ -110,5 +110,6 @@ func stream(cmd *cobra.Command, args []string) error {
 	defer inDB.Close()
 	err = inDB.StreamDB(outOpt)
 	fmt.Printf("jemalloc: %v\n", humanize.IBytes(uint64(z.NumAllocBytes())))
+	fmt.Println("Done.")
 	return err
 }
