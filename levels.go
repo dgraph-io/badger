@@ -137,7 +137,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				throttle.Done(rerr)
 				atomic.AddInt32(&numOpened, 1)
 			}()
-			dk, err := db.registry.dataKey(tf.KeyID)
+			dk, err := db.registry.DataKey(tf.KeyID)
 			if err != nil {
 				rerr = y.Wrapf(err, "Error while reading datakey")
 				return
@@ -552,7 +552,7 @@ nextTable:
 	inflightBuilders := y.NewThrottle(5)
 	for it.Valid() {
 		timeStart := time.Now()
-		dk, err := s.kv.registry.latestDataKey()
+		dk, err := s.kv.registry.LatestDataKey()
 		if err != nil {
 			return nil, nil,
 				y.Wrapf(err, "Error while retrieving datakey in levelsController.compactBuildTables")
