@@ -87,6 +87,7 @@ type Stream struct {
 	rangeCh      chan keyRange
 	kvChan       chan *pb.KVList
 	nextStreamId uint32
+	doneMarkers  bool
 
 	// Use allocators to generate KVs.
 	allocatorsMu sync.RWMutex
@@ -97,6 +98,11 @@ func (st *Stream) Allocator(threadId int) *z.Allocator {
 	st.allocatorsMu.RLock()
 	defer st.allocatorsMu.RUnlock()
 	return st.allocators[threadId]
+}
+
+// SendDoneMarkers when true would send out done markers on the stream. False by default.
+func (st *Stream) SendDoneMarkers(done bool) {
+	st.doneMarkers = done
 }
 
 // ToList is a default implementation of KeyToList. It picks up all valid versions of the key,
@@ -268,11 +274,16 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			}
 		}
 		// Mark the stream as done.
-		outList.Kv = append(outList.Kv, &pb.KV{
-			StreamId:   streamId,
-			StreamDone: true,
-		})
-		return sendIt()
+		if st.doneMarkers {
+			outList.Kv = append(outList.Kv, &pb.KV{
+				StreamId:   streamId,
+				StreamDone: true,
+			})
+		}
+		if len(outList.Kv) > 0 {
+			return sendIt()
+		}
+		return nil
 	}
 
 	for {
