@@ -30,6 +30,9 @@ go test -v $tags -run='TestTruncateVlogNoClose2$' --manual=true
 go test -v $tags -run='TestTruncateVlogNoClose3$' --manual=true
 rm -rf p
 
+# Run the key count test for stream writer.
+go test -v -tags jemalloc -run='TestKeyCount' --manual=true
+
 # Run the normal tests.
 echo "==> Starting tests.. "
 # go test -timeout=25m -v -race github.com/dgraph-io/badger/v2/...

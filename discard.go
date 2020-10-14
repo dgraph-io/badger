@@ -41,7 +41,6 @@ const discardFname string = "DISCARD"
 const discardFsize int = 1 << 30
 const maxSlot int = 64 << 20
 
-// TODO(naman): Add a test for this.
 func initDiscardStats(opt Options) (*discardStats, error) {
 	fname := path.Join(opt.ValueDir, discardFname)
 
