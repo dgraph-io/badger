@@ -33,6 +33,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/v2/options"
+
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
@@ -903,4 +905,108 @@ func TestTxnReadTs(t *testing.T) {
 	db, err = Open(opt)
 	require.NoError(t, err)
 	require.Equal(t, 1, int(db.orc.readTs()))
+}
+
+// This tests failed for stream writer with jemalloc and compression enabled.
+func TestKeyCount(t *testing.T) {
+	if !*manual {
+		t.Skip("Skipping test meant to be run manually.")
+		return
+	}
+
+	writeSorted := func(db *DB, num uint64) {
+		valSz := 128
+		value := make([]byte, valSz)
+		y.Check2(rand.Read(value))
+		es := 8 + valSz // key size is 8 bytes and value size is valSz
+
+		writer := db.NewStreamWriter()
+		require.NoError(t, writer.Prepare())
+
+		wg := &sync.WaitGroup{}
+		writeCh := make(chan *pb.KVList, 3)
+		writeRange := func(start, end uint64, streamId uint32) {
+			// end is not included.
+			defer wg.Done()
+			kvs := &pb.KVList{}
+			var sz int
+			for i := start; i < end; i++ {
+				key := make([]byte, 8)
+				binary.BigEndian.PutUint64(key, i)
+				kvs.Kv = append(kvs.Kv, &pb.KV{
+					Key:      key,
+					Value:    value,
+					Version:  1,
+					StreamId: streamId,
+				})
+
+				sz += es
+
+				if sz >= 4<<20 { // 4 MB
+					writeCh <- kvs
+					kvs = &pb.KVList{}
+					sz = 0
+				}
+			}
+			writeCh <- kvs
+		}
+
+		// Let's create some streams.
+		width := num / 16
+		streamID := uint32(0)
+		for start := uint64(0); start < num; start += width {
+			end := start + width
+			if end > num {
+				end = num
+			}
+			streamID++
+			wg.Add(1)
+			go writeRange(start, end, streamID)
+		}
+		go func() {
+			wg.Wait()
+			close(writeCh)
+		}()
+		for kvs := range writeCh {
+			require.NoError(t, writer.Write(kvs))
+		}
+		require.NoError(t, writer.Flush())
+	}
+
+	N := uint64(10 * 1e6) // 10 million entries
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+	opt := DefaultOptions(dir).
+		WithBlockCacheSize(100 << 20).
+		WithCompression(options.ZSTD)
+
+	db, err := Open(opt)
+	y.Check(err)
+	defer db.Close()
+	writeSorted(db, N)
+	require.NoError(t, db.Close())
+
+	// Read the db
+	db2, err := Open(DefaultOptions(dir))
+	y.Check(err)
+	defer db.Close()
+	lastKey := -1
+	count := 0
+	db2.View(func(txn *Txn) error {
+		iopt := DefaultIteratorOptions
+		iopt.AllVersions = true
+		it := txn.NewIterator(iopt)
+		defer it.Close()
+		for it.Rewind(); it.Valid(); it.Next() {
+			count++
+			i := it.Item()
+			key := binary.BigEndian.Uint64(i.Key())
+			// The following should happen as we're writing sorted data.
+			require.Equalf(t, lastKey+1, int(key), "Expected key: %d, Found Key: %d", lastKey+1, int(key))
+			lastKey = int(key)
+		}
+		return nil
+	})
+	require.Equal(t, N, uint64(count))
 }

@@ -1150,3 +1150,60 @@ func TestValidateWrite(t *testing.T) {
 	err = log.validateWrites([]*request{req1, req})
 	require.Error(t, err)
 }
+
+func TestValueLogMeta(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	y.Check(err)
+	defer removeDir(dir)
+
+	opt := getTestOptions(dir).WithValueThreshold(16)
+	db, _ := Open(opt)
+	defer db.Close()
+	txn := db.NewTransaction(true)
+	for i := 0; i < 10; i++ {
+		k := []byte(fmt.Sprintf("key=%d", i))
+		v := []byte(fmt.Sprintf("val=%020d", i))
+		require.NoError(t, txn.SetEntry(NewEntry(k, v)))
+	}
+	require.NoError(t, txn.Commit())
+	fids := db.vlog.sortedFids()
+	require.Equal(t, 1, len(fids))
+
+	// vlog entries must not have txn meta.
+	db.vlog.filesMap[fids[0]].iterate(true, 0, func(e Entry, vp valuePointer) error {
+		require.Zero(t, e.meta&(bitTxn|bitFinTxn))
+		return nil
+	})
+
+	// Entries in LSM tree must have txn bit of meta set
+	txn = db.NewTransaction(false)
+	defer txn.Discard()
+	iopt := DefaultIteratorOptions
+	key := []byte("key")
+	iopt.Prefix = key
+	itr := txn.NewIterator(iopt)
+	defer itr.Close()
+	var count int
+	for itr.Seek(key); itr.ValidForPrefix(key); itr.Next() {
+		item := itr.Item()
+		require.Equal(t, bitTxn, item.meta&(bitTxn|bitFinTxn))
+		count++
+	}
+	require.Equal(t, 10, count)
+}
+
+// This tests asserts the condition that vlog fids start from 1.
+// TODO(naman): should this be changed to assert instead?
+func TestFirstVlogFile(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt := DefaultOptions(dir)
+	db, err := Open(opt)
+	defer db.Close()
+
+	fids := db.vlog.sortedFids()
+	require.NotZero(t, len(fids))
+	require.Equal(t, uint32(1), fids[0])
+}
