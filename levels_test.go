@@ -680,7 +680,7 @@ func TestL1Stall(t *testing.T) {
 	// Addition of new tables will stall if there are 4 or more L0 tables.
 	opt.NumLevelZeroTablesStall = 4
 	// Level 1 size is 10 bytes.
-	opt.LevelOneSize = 10
+	opt.BaseLevelSize = 10
 
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		// Level 0 has 4 tables.
@@ -886,8 +886,7 @@ func TestKeyVersions(t *testing.T) {
 	inMemoryOpt := DefaultOptions("").
 		WithSyncWrites(false).
 		WithInMemory(true).
-		WithLogRotatesToFlush(math.MaxInt32).
-		WithMaxTableSize(4 << 20)
+		WithBaseTableSize(4 << 20)
 
 	t.Run("disk", func(t *testing.T) {
 		t.Run("small table", func(t *testing.T) {

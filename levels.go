@@ -87,7 +87,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			// Do nothing.
 		case 1:
 			// Level 1 probably shouldn't be too much bigger than level 0.
-			s.levels[i].maxTotalSize = db.opt.LevelOneSize
+			s.levels[i].maxTotalSize = db.opt.BaseLevelSize
 		default:
 			s.levels[i].maxTotalSize = s.levels[i-1].maxTotalSize * int64(db.opt.LevelSizeMultiplier)
 		}
@@ -584,7 +584,7 @@ nextTable:
 			}
 
 			if !y.SameKey(it.Key(), lastKey) {
-				if builder.ReachedCapacity(uint64(float64(s.kv.opt.MaxTableSize) * 0.9)) {
+				if builder.ReachedCapacity(uint64(float64(s.kv.opt.BaseTableSize) * 0.9)) {
 					// Only break if we are on a different key, and have reached capacity. We want
 					// to ensure that all versions of the key are stored in the same sstable, and
 					// not divided across multiple tables at the same level.

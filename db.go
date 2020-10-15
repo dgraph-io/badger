@@ -85,11 +85,6 @@ type DB struct {
 	flushChan chan flushTask // For flushing memtables.
 	closeOnce sync.Once      // For closing DB only once.
 
-	// Number of log rotates since the last memtable flush. We will access this field via atomic
-	// functions. Since we are not going to use any 64bit atomic functions, there is no need for
-	// 64 bit alignment of this struct(see #311).
-	logRotates int32
-
 	blockWrites int32
 	isClosed    uint32
 
@@ -115,7 +110,7 @@ func checkAndSetOptions(opt *Options) error {
 	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
 		return errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
 	}
-	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
+	opt.maxBatchSize = (15 * opt.BaseTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
 	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
@@ -257,7 +252,7 @@ func Open(opt Options) (*DB, error) {
 
 	if opt.IndexCacheSize > 0 {
 		// Index size is around 5% of the table size.
-		indexSz := int64(float64(opt.MaxTableSize) * 0.05)
+		indexSz := int64(float64(opt.BaseTableSize) * 0.05)
 		numInCache := opt.IndexCacheSize / indexSz
 		if numInCache == 0 {
 			// Make the value of this variable at least one since the cache requires
@@ -917,18 +912,7 @@ func (db *DB) ensureRoomForWrite() error {
 	db.Lock()
 	defer db.Unlock()
 
-	// Here we determine if we need to force flush memtable. Given we rotated log file, it would
-	// make sense to force flush a memtable, so the updated value head would have a chance to be
-	// pushed to L0. Otherwise, it would not go to L0, until the memtable has been fully filled,
-	// which can take a lot longer if the write load has fewer keys and larger values. This force
-	// flush, thus avoids the need to read through a lot of log files on a crash and restart.
-	// Above approach is quite simple with small drawback. We are calling ensureRoomForWrite before
-	// inserting every entry in Memtable. We will get latest db.head after all entries for a request
-	// are inserted in Memtable. If we have done >= db.logRotates rotations, then while inserting
-	// first entry in Memtable, below condition will be true and we will endup flushing old value of
-	// db.head. Hence we are limiting no of value log files to be read to db.logRotates only.
-	forceFlush := atomic.LoadInt32(&db.logRotates) >= db.opt.LogRotatesToFlush
-
+	var forceFlush bool
 	// We don't need to force flush the memtable in in-memory mode because the size of the WAL will
 	// always be zero.
 	if !forceFlush && !db.opt.InMemory {
@@ -936,16 +920,13 @@ func (db *DB) ensureRoomForWrite() error {
 		forceFlush = int64(db.mt.wal.writeAt) > db.opt.ValueLogFileSize
 	}
 
-	if !forceFlush && db.mt.sl.MemSize() < db.opt.MaxTableSize {
+	if !forceFlush && db.mt.sl.MemSize() < db.opt.BaseTableSize {
 		return nil
 	}
 
 	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	select {
 	case db.flushChan <- flushTask{mt: db.mt}:
-		// After every memtable flush, let's reset the counter.
-		atomic.StoreInt32(&db.logRotates, 0)
-
 		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 			db.mt.sl.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
@@ -963,7 +944,7 @@ func (db *DB) ensureRoomForWrite() error {
 }
 
 func arenaSize(opt Options) int64 {
-	return opt.MaxTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
+	return opt.BaseTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
 
 // buildL0Table builds a new table from the memtable.
@@ -994,8 +975,7 @@ type flushTask struct {
 
 // handleFlushTask must be run serially.
 func (db *DB) handleFlushTask(ft flushTask) error {
-	// There can be a scenario, when empty memtable is flushed. For example, memtable is empty and
-	// after writing request to value log, rotation count exceeds db.LogRotatesToFlush.
+	// There can be a scenario, when empty memtable is flushed.
 	if ft.mt.sl.Empty() {
 		return nil
 	}

@@ -605,7 +605,7 @@ func TestWriteBatchManagedMode(t *testing.T) {
 	}
 	opt := DefaultOptions("")
 	opt.managedTxns = true
-	opt.MaxTableSize = 1 << 20 // This would create multiple transactions in write batch.
+	opt.BaseTableSize = 1 << 20 // This would create multiple transactions in write batch.
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		wb := db.NewWriteBatchAt(1)
 		defer wb.Cancel()
@@ -651,7 +651,7 @@ func TestWriteBatchManaged(t *testing.T) {
 	}
 	opt := DefaultOptions("")
 	opt.managedTxns = true
-	opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+	opt.BaseTableSize = 1 << 15 // This would create multiple transactions in write batch.
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		wb := db.NewManagedWriteBatch()
 		defer wb.Cancel()
@@ -720,7 +720,7 @@ func TestWriteBatchDuplicate(t *testing.T) {
 
 	t.Run("writebatch", func(t *testing.T) {
 		opt := DefaultOptions("")
-		opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+		opt.BaseTableSize = 1 << 15 // This would create multiple transactions in write batch.
 
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			wb := db.NewWriteBatch()
@@ -736,7 +736,7 @@ func TestWriteBatchDuplicate(t *testing.T) {
 	})
 	t.Run("writebatch at", func(t *testing.T) {
 		opt := DefaultOptions("")
-		opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+		opt.BaseTableSize = 1 << 15 // This would create multiple transactions in write batch.
 		opt.managedTxns = true
 
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
@@ -755,7 +755,7 @@ func TestWriteBatchDuplicate(t *testing.T) {
 	t.Run("managed writebatch", func(t *testing.T) {
 		opt := DefaultOptions("")
 		opt.managedTxns = true
-		opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
+		opt.BaseTableSize = 1 << 15 // This would create multiple transactions in write batch.
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			wb := db.NewManagedWriteBatch()
 			defer wb.Cancel()

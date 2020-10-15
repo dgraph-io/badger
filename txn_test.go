@@ -844,8 +844,8 @@ func TestArmV7Issue311Fix(t *testing.T) {
 
 	db, err := Open(DefaultOptions(dir).
 		WithValueLogFileSize(16 << 20).
-		WithLevelOneSize(8 << 20).
-		WithMaxTableSize(2 << 20).
+		WithBaseLevelSize(8 << 20).
+		WithBaseTableSize(2 << 20).
 		WithSyncWrites(false))
 
 	require.NoError(t, err)

@@ -868,7 +868,7 @@ func TestBug578(t *testing.T) {
 
 	db, err := Open(DefaultOptions(dir).
 		WithValueLogMaxEntries(64).
-		WithMaxTableSize(1 << 13))
+		WithBaseTableSize(1 << 13))
 	require.NoError(t, err)
 
 	h := testHelper{db: db, t: t}
