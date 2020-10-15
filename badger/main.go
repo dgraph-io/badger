@@ -39,7 +39,7 @@ func main() {
 			}
 		}
 	}()
-	zpages.Handle(nil, "/debug")
+	zpages.Handle(nil, "/z")
 	runtime.SetBlockProfileRate(100)
 	runtime.GOMAXPROCS(128)
 
