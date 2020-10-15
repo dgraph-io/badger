@@ -36,10 +36,9 @@ type levelHandler struct {
 	totalSize int64
 
 	// The following are initialized once and const.
-	level        int
-	strLevel     string
-	maxTotalSize int64
-	db           *DB
+	level    int
+	strLevel string
+	db       *DB
 }
 
 func (s *levelHandler) getTotalSize() int64 {

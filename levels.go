@@ -42,8 +42,9 @@ type levelsController struct {
 	nextFileID uint64 // Atomic
 
 	// The following are initialized once and const.
-	levels []*levelHandler
-	kv     *DB
+	levels    []*levelHandler
+	kv        *DB
+	baseLevel *levelHandler
 
 	cstatus compactStatus
 }
@@ -83,15 +84,6 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 
 	for i := 0; i < db.opt.MaxLevels; i++ {
 		s.levels[i] = newLevelHandler(db, i)
-		switch i {
-		case 0:
-			// Do nothing.
-		case 1:
-			// Level 1 probably shouldn't be too much bigger than level 0.
-			s.levels[i].maxTotalSize = db.opt.BaseLevelSize
-		default:
-			s.levels[i].maxTotalSize = s.levels[i-1].maxTotalSize * int64(db.opt.LevelSizeMultiplier)
-		}
 		s.cstatus.levels[i] = new(levelCompactStatus)
 	}
 
@@ -189,6 +181,36 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		return nil, y.Wrap(err, "Level validation")
 	}
 
+	var baseLevel int
+	// Set dbSize to the last level.
+	// dbSize := s.levels[len(s.levels)-1].getTotalSize()
+	// for i := len(s.levels) - 1; i > 0; i-- {
+	// 	if l.getTotalSize() == 0 {
+	// 		baseLevel = i
+	// 	}
+	// }
+	for i, l := range s.levels {
+		if i == 0 {
+			continue
+		}
+		if l.getTotalSize() > 0 {
+			baseLevel = i
+			break
+		}
+	}
+	db.opt.Infof("Setting base level to %d\n", baseLevel)
+
+	// for i, l := range s.levels {
+	// 	switch i {
+	// 	case 0:
+	// 		// Do nothing.
+	// 	case 1:
+	// 		// Level 1 probably shouldn't be too much bigger than level 0.
+	// 		s.levels[i].targetSize = db.opt.BaseLevelSize
+	// 	default:
+	// 		s.levels[i].targetSize = s.levels[i-1].targetSize * int64(db.opt.LevelSizeMultiplier)
+	// 	}
+	// }
 	// Sync directory (because we have at least removed some files, or previously created the
 	// manifest file).
 	if err := syncDir(db.opt.Dir); err != nil {
@@ -363,6 +385,48 @@ func (s *levelsController) startCompact(lc *z.Closer) {
 	}
 }
 
+type targets struct {
+	baseLevel int
+	targetSz  []int64
+	fileSz    []int64
+}
+
+// TODO: Should we get a lock?
+func (s *levelsController) levelTargets() targets {
+	adjust := func(sz int64) int64 {
+		if sz < s.kv.opt.BaseLevelSize {
+			return s.kv.opt.BaseLevelSize
+		}
+		return sz
+	}
+
+	t := targets{
+		targetSz: make([]int64, len(s.levels)),
+		fileSz:   make([]int64, len(s.levels)),
+	}
+	// DB size is the size of the last level.
+	dbSize := s.lastLevel().getTotalSize()
+	for i := len(s.levels) - 1; i > 0; i-- {
+		ltarget := adjust(dbSize)
+		t.targetSz[i] = ltarget
+		if t.baseLevel == 0 && ltarget <= s.kv.opt.BaseLevelSize {
+			t.baseLevel = i
+		}
+		dbSize /= int64(s.kv.opt.LevelSizeMultiplier)
+	}
+
+	tsz := s.kv.opt.BaseTableSize
+	for i := 0; i < len(s.levels); i++ {
+		if i <= t.baseLevel {
+			t.fileSz[i] = tsz
+		} else {
+			tsz *= int64(s.kv.opt.TableSizeMultiplier)
+			t.fileSz[i] = tsz
+		}
+	}
+	return t
+}
+
 func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 	defer lc.Done()
 
@@ -417,19 +481,25 @@ func (s *levelsController) isLevel0Compactable() bool {
 // Returns true if the non-zero level may be compacted.  delSize provides the size of the tables
 // which are currently being compacted so that we treat them as already having started being
 // compacted (because they have been, yet their size is already counted in getTotalSize).
-func (l *levelHandler) isCompactable(delSize int64) bool {
-	return l.getTotalSize()-delSize >= l.maxTotalSize
-}
+// func (l *levelHandler) isCompactable(delSize int64) bool {
+// 	return l.getTotalSize()-delSize >= l.targetSize
+// }
 
 type compactionPriority struct {
 	level        int
 	score        float64
 	dropPrefixes [][]byte
+	t            targets
+}
+
+func (s *levelsController) lastLevel() *levelHandler {
+	return s.levels[len(s.levels)-1]
 }
 
 // pickCompactLevel determines which level to compact.
 // Based on: https://github.com/facebook/rocksdb/wiki/Leveled-Compaction
 func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
+	t := s.levelTargets()
 	// This function must use identical criteria for guaranteeing compaction's progress that
 	// addLevel0Table uses.
 
@@ -438,18 +508,22 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 		pri := compactionPriority{
 			level: 0,
 			score: float64(s.levels[0].numTables()) / float64(s.kv.opt.NumLevelZeroTables),
+			t:     t,
 		}
 		prios = append(prios, pri)
 	}
 
-	for i, l := range s.levels[1:] {
+	// Don't consider L0 and the last level.
+	for i := 1; i < len(s.levels)-1; i++ {
 		// Don't consider those tables that are already being compacted right now.
-		delSize := s.cstatus.delSize(i + 1)
+		delSize := s.cstatus.delSize(i)
 
-		if l.isCompactable(delSize) {
+		l := s.levels[i]
+		if sz := l.getTotalSize() - delSize; sz >= t.targetSz[i] {
 			pri := compactionPriority{
-				level: i + 1,
-				score: float64(l.getTotalSize()-delSize) / float64(l.maxTotalSize),
+				level: i,
+				score: float64(sz) / float64(t.targetSz[i]),
+				t:     t,
 			}
 			prios = append(prios, pri)
 		}
@@ -482,6 +556,7 @@ func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
 // compactBuildTables merges topTables and botTables to form a list of new tables.
 func (s *levelsController) compactBuildTables(
 	lev int, cd compactDef) ([]*table.Table, func() error, error) {
+
 	topTables := cd.top
 	botTables := cd.bot
 
@@ -569,6 +644,9 @@ nextTable:
 		// Builder does not need cache but the same options are used for opening table.
 		bopts.BlockCache = s.kv.blockCache
 		bopts.IndexCache = s.kv.indexCache
+
+		// Set TableSize to the target file size for that level.
+		bopts.TableSize = uint64(cd.t.fileSz[cd.nextLevel.level])
 		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
@@ -591,7 +669,9 @@ nextTable:
 			}
 
 			if !y.SameKey(it.Key(), lastKey) {
-				if builder.ReachedCapacity(uint64(float64(s.kv.opt.BaseTableSize) * 0.9)) {
+				// TODO: Also check how much overlap this table already has with the next level. If
+				// it exceeds 10 tables, then stop writing to the file.
+				if builder.ReachedCapacity() {
 					// Only break if we are on a different key, and have reached capacity. We want
 					// to ensure that all versions of the key are stored in the same sstable, and
 					// not divided across multiple tables at the same level.
@@ -777,6 +857,7 @@ func containsAnyPrefixes(smallValue, largeValue []byte, listOfPrefixes [][]byte)
 type compactDef struct {
 	span *otrace.Span
 
+	t         targets
 	thisLevel *levelHandler
 	nextLevel *levelHandler
 
@@ -947,10 +1028,20 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
 
-	if dur := time.Since(timeStart); dur > 3*time.Second {
-		s.kv.opt.Infof("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
-			thisLevel.level, nextLevel.level, len(cd.top)+len(cd.bot),
-			len(newTables), dur)
+	toStr := func(tables []*table.Table) []string {
+		var res []string
+		for _, t := range tables {
+			res = append(res, fmt.Sprintf("%05d", t.ID()))
+		}
+		return res
+	}
+
+	from := append(toStr(cd.top), toStr(cd.bot)...)
+	to := toStr(newTables)
+
+	if dur := time.Since(timeStart); dur > 0 {
+		s.kv.opt.Infof("LOG Compact %d->%d. [%s] -> [%s], took %v\n",
+			thisLevel.level, nextLevel.level, strings.Join(from, " "), strings.Join(to, " "), dur)
 	}
 
 	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.opt.LevelSizeMultiplier {
@@ -968,34 +1059,34 @@ var errFillTables = errors.New("Unable to fill tables")
 func (s *levelsController) doCompact(id int, p compactionPriority) error {
 	l := p.level
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
+
 	_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
-	span.Annotatef(nil, "Compaction level: %v", l)
 	defer span.End()
+
 	cd := compactDef{
 		span:         span,
+		t:            p.t,
 		thisLevel:    s.levels[l],
-		nextLevel:    s.levels[l+1],
 		dropPrefixes: p.dropPrefixes,
 	}
-
-	s.kv.opt.Debugf("[Compactor: %d] Attempting to run compaction: %+v", id, p)
 
 	// While picking tables to be compacted, both levels' tables are expected to
 	// remain unchanged.
 	if l == 0 {
+		cd.nextLevel = s.levels[p.t.baseLevel]
 		if !s.fillTablesL0(&cd) {
 			return errFillTables
 		}
-
 	} else {
+		cd.nextLevel = s.levels[l+1]
 		if !s.fillTables(&cd) {
 			return errFillTables
 		}
 	}
 	defer s.cstatus.delete(cd) // Remove the ranges from compaction status.
 
-	s.kv.opt.Debugf("[Compactor: %d] Running compaction: %+v for level: %d\n",
-		id, p, cd.thisLevel.level)
+	span.Annotatef(nil, "Compaction: %+v", cd)
+	// s.kv.opt.Infof("Compaction: %+v\n", cd)
 	if err := s.runCompactDef(l, cd); err != nil {
 		// This compaction couldn't be done successfully.
 		s.kv.opt.Warningf("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)
@@ -1158,6 +1249,32 @@ func (s *levelsController) getTableInfo() (result []TableInfo) {
 		return result[i].ID < result[j].ID
 	})
 	return
+}
+
+type LevelInfo struct {
+	Level          int
+	NumTables      int
+	Size           int64
+	TargetSize     int64
+	TargetFileSize int64
+	IsBaseLevel    bool
+}
+
+func (s *levelsController) getLevelInfo() []LevelInfo {
+	t := s.levelTargets()
+	result := make([]LevelInfo, len(s.levels))
+	for i, l := range s.levels {
+		l.RLock()
+		result[i].Level = i
+		result[i].Size = l.totalSize
+		result[i].NumTables = len(l.tables)
+		l.RUnlock()
+
+		result[i].TargetSize = t.targetSz[i]
+		result[i].TargetFileSize = t.fileSz[i]
+		result[i].IsBaseLevel = t.baseLevel == i
+	}
+	return result
 }
 
 // verifyChecksum verifies checksum for all tables on all levels.

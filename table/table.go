@@ -55,7 +55,8 @@ type Options struct {
 	ReadOnly bool
 
 	// Maximum size of the table.
-	TableSize uint64
+	TableSize     uint64
+	tableCapacity uint64 // 0.9x TableSize.
 
 	// ChkMode is the checksum verification mode for Table.
 	ChkMode options.ChecksumVerificationMode

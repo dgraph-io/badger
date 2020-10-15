@@ -37,7 +37,6 @@ import (
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto"
 	"github.com/dgraph-io/ristretto/z"
-	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 )
 
@@ -927,7 +926,7 @@ func (db *DB) ensureRoomForWrite() error {
 	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	select {
 	case db.flushChan <- flushTask{mt: db.mt}:
-		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
+		db.opt.Infof("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 			db.mt.sl.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
 		db.imm = append(db.imm, db.mt)
@@ -944,7 +943,7 @@ func (db *DB) ensureRoomForWrite() error {
 }
 
 func arenaSize(opt Options) int64 {
-	return opt.BaseTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
+	return opt.MemTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
 
 // buildL0Table builds a new table from the memtable.
@@ -1291,6 +1290,11 @@ func (db *DB) Tables() []TableInfo {
 	return db.lc.getTableInfo()
 }
 
+// Levels gets the LevelInfo.
+func (db *DB) Levels() []LevelInfo {
+	return db.lc.getLevelInfo()
+}
+
 // KeySplits can be used to get rough key ranges to divide up iteration over
 // the DB.
 func (db *DB) KeySplits(prefix []byte) []string {
@@ -1422,71 +1426,71 @@ func (db *DB) startMemoryFlush() {
 // levels, which is necessary after a restore from backup. During Flatten, live compactions are
 // stopped. Ideally, no writes are going on during Flatten. Otherwise, it would create competition
 // between flattening the tree and new tables being created at level zero.
-func (db *DB) Flatten(workers int) error {
-	db.stopCompactions()
-	defer db.startCompactions()
+// func (db *DB) Flatten(workers int) error {
+// 	db.stopCompactions()
+// 	defer db.startCompactions()
 
-	compactAway := func(cp compactionPriority) error {
-		db.opt.Infof("Attempting to compact with %+v\n", cp)
-		errCh := make(chan error, 1)
-		for i := 0; i < workers; i++ {
-			go func() {
-				errCh <- db.lc.doCompact(175, cp)
-			}()
-		}
-		var success int
-		var rerr error
-		for i := 0; i < workers; i++ {
-			err := <-errCh
-			if err != nil {
-				rerr = err
-				db.opt.Warningf("While running doCompact with %+v. Error: %v\n", cp, err)
-			} else {
-				success++
-			}
-		}
-		if success == 0 {
-			return rerr
-		}
-		// We could do at least one successful compaction. So, we'll consider this a success.
-		db.opt.Infof("%d compactor(s) succeeded. One or more tables from level %d compacted.\n",
-			success, cp.level)
-		return nil
-	}
+// 	compactAway := func(cp compactionPriority) error {
+// 		db.opt.Infof("Attempting to compact with %+v\n", cp)
+// 		errCh := make(chan error, 1)
+// 		for i := 0; i < workers; i++ {
+// 			go func() {
+// 				errCh <- db.lc.doCompact(175, cp)
+// 			}()
+// 		}
+// 		var success int
+// 		var rerr error
+// 		for i := 0; i < workers; i++ {
+// 			err := <-errCh
+// 			if err != nil {
+// 				rerr = err
+// 				db.opt.Warningf("While running doCompact with %+v. Error: %v\n", cp, err)
+// 			} else {
+// 				success++
+// 			}
+// 		}
+// 		if success == 0 {
+// 			return rerr
+// 		}
+// 		// We could do at least one successful compaction. So, we'll consider this a success.
+// 		db.opt.Infof("%d compactor(s) succeeded. One or more tables from level %d compacted.\n",
+// 			success, cp.level)
+// 		return nil
+// 	}
 
-	hbytes := func(sz int64) string {
-		return humanize.Bytes(uint64(sz))
-	}
+// 	hbytes := func(sz int64) string {
+// 		return humanize.Bytes(uint64(sz))
+// 	}
 
-	for {
-		db.opt.Infof("\n")
-		var levels []int
-		for i, l := range db.lc.levels {
-			sz := l.getTotalSize()
-			db.opt.Infof("Level: %d. %8s Size. %8s Max.\n",
-				i, hbytes(l.getTotalSize()), hbytes(l.maxTotalSize))
-			if sz > 0 {
-				levels = append(levels, i)
-			}
-		}
-		if len(levels) <= 1 {
-			prios := db.lc.pickCompactLevels()
-			if len(prios) == 0 || prios[0].score <= 1.0 {
-				db.opt.Infof("All tables consolidated into one level. Flattening done.\n")
-				return nil
-			}
-			if err := compactAway(prios[0]); err != nil {
-				return err
-			}
-			continue
-		}
-		// Create an artificial compaction priority, to ensure that we compact the level.
-		cp := compactionPriority{level: levels[0], score: 1.71}
-		if err := compactAway(cp); err != nil {
-			return err
-		}
-	}
-}
+// 	for {
+// 		db.opt.Infof("\n")
+// 		var levels []int
+// 		for i, l := range db.lc.levels {
+// 			sz := l.getTotalSize()
+// 			db.opt.Infof("Level: %d. %8s Size. %8s Max.\n",
+// 				i, hbytes(l.getTotalSize()), hbytes(l.targetSize))
+// 			if sz > 0 {
+// 				levels = append(levels, i)
+// 			}
+// 		}
+// 		if len(levels) <= 1 {
+// 			prios := db.lc.pickCompactLevels()
+// 			if len(prios) == 0 || prios[0].score <= 1.0 {
+// 				db.opt.Infof("All tables consolidated into one level. Flattening done.\n")
+// 				return nil
+// 			}
+// 			if err := compactAway(prios[0]); err != nil {
+// 				return err
+// 			}
+// 			continue
+// 		}
+// 		// Create an artificial compaction priority, to ensure that we compact the level.
+// 		cp := compactionPriority{level: levels[0], score: 1.71}
+// 		if err := compactAway(cp); err != nil {
+// 			return err
+// 		}
+// 	}
+// }
 
 func (db *DB) blockWrite() error {
 	// Stop accepting new writes.

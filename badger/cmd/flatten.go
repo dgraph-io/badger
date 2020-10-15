@@ -71,5 +71,6 @@ func flatten(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	return db.Flatten(numWorkers)
+	// return db.Flatten(numWorkers)
+	return nil
 }
