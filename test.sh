@@ -13,7 +13,9 @@ fi
 function InstallJemalloc() {
   pushd .
   if [ ! -f /usr/local/lib/libjemalloc.a ]; then
-    JEMALLOC_URL="https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jemalloc-5.2.1.tar.bz2"
+		USER_ID=`id -u`
+    	JEMALLOC_URL="https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jemalloc-5.2.1.tar.bz2"
+
 		mkdir -p /tmp/jemalloc-temp && cd /tmp/jemalloc-temp ;
 		echo "Downloading jemalloc" ;
 		curl -s -L ${JEMALLOC_URL} -o jemalloc.tar.bz2 ;
@@ -21,7 +23,7 @@ function InstallJemalloc() {
 		cd jemalloc-5.2.1 ;
 		./configure --with-jemalloc-prefix='je_' ;
 		make ;
-		if [ "$(USER_ID)" = "0" ]; then
+		if [ "$USER_ID" -eq "0" ]; then
 			make install ;
 		else
 			echo "==== Need sudo access to install jemalloc" ;
