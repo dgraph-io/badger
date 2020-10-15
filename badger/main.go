@@ -25,6 +25,7 @@ import (
 	"github.com/dgraph-io/badger/v2/badger/cmd"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/dustin/go-humanize"
+	"go.opencensus.io/zpages"
 )
 
 func main() {
@@ -38,6 +39,7 @@ func main() {
 			}
 		}
 	}()
+	zpages.Handle(nil, "/z")
 	runtime.SetBlockProfileRate(100)
 	runtime.GOMAXPROCS(128)
 

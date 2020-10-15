@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math/rand"
@@ -28,7 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/net/trace"
+	otrace "go.opencensus.io/trace"
 
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
@@ -329,11 +330,14 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 		if len(tableGroups) == 0 {
 			continue
 		}
-
+		_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
+		span.Annotatef(nil, "Compaction level: %v", l.level)
+		span.Annotatef(nil, "Drop Prefixes: %v", prefixes)
+		defer span.End()
 		opt.Infof("Dropping prefix at level %d (%d tableGroups)", l.level, len(tableGroups))
 		for _, operation := range tableGroups {
 			cd := compactDef{
-				elog:         trace.New(fmt.Sprintf("Badger.L%d", l.level), "Compact"),
+				span:         span,
 				thisLevel:    l,
 				nextLevel:    l,
 				top:          nil,
@@ -484,6 +488,9 @@ func (s *levelsController) compactBuildTables(
 	numTables := int64(len(topTables) + len(botTables))
 	y.NumCompactionTables.Add(numTables)
 	defer y.NumCompactionTables.Add(-numTables)
+
+	cd.span.Annotatef(nil, "Top tables count: %v Bottom tables count: %v",
+		len(topTables), len(botTables))
 
 	// Check overlap of the top level with the levels which are not being
 	// compacted in this compaction.
@@ -768,7 +775,7 @@ func containsAnyPrefixes(smallValue, largeValue []byte, listOfPrefixes [][]byte)
 }
 
 type compactDef struct {
-	elog trace.Trace
+	span *otrace.Span
 
 	thisLevel *levelHandler
 	nextLevel *levelHandler
@@ -961,15 +968,15 @@ var errFillTables = errors.New("Unable to fill tables")
 func (s *levelsController) doCompact(id int, p compactionPriority) error {
 	l := p.level
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
-
+	_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
+	span.Annotatef(nil, "Compaction level: %v", l)
+	defer span.End()
 	cd := compactDef{
-		elog:         trace.New(fmt.Sprintf("Badger.L%d", l), "Compact"),
+		span:         span,
 		thisLevel:    s.levels[l],
 		nextLevel:    s.levels[l+1],
 		dropPrefixes: p.dropPrefixes,
 	}
-	cd.elog.SetMaxEvents(100)
-	defer cd.elog.Finish()
 
 	s.kv.opt.Debugf("[Compactor: %d] Attempting to run compaction: %+v", id, p)
 
