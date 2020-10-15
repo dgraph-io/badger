@@ -17,6 +17,7 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -53,6 +54,8 @@ func init() {
 	streamCmd.Flags().Uint32VarP(&compressionType, "compression", "", 0,
 		"Option to configure the compression type in output DB. "+
 			"0 to disable, 1 for Snappy, and 2 for ZSTD.")
+	streamCmd.Flags().StringVarP(&keyPath, "encryption-key-file", "e", "",
+		"Path of the encryption key file.")
 }
 
 func stream(cmd *cobra.Command, args []string) error {
@@ -74,23 +77,37 @@ func stream(cmd *cobra.Command, args []string) error {
 	if numVersions <= 0 {
 		numVersions = math.MaxInt32
 	}
+	encKey, err := getKey(keyPath)
+	if err != nil {
+		return err
+	}
 	inOpt := badger.DefaultOptions(sstDir).
 		WithReadOnly(readOnly).
 		WithValueThreshold(1 << 10 /* 1KB */).
-		WithNumVersionsToKeep(numVersions)
+		WithNumVersionsToKeep(numVersions).
+		WithBlockCacheSize(100 << 20).
+		WithIndexCacheSize(200 << 20).
+		WithEncryptionKey(encKey)
 
 	// Options for output DB.
 	if compressionType < 0 || compressionType > 2 {
 		return errors.Errorf(
 			"compression value must be one of 0 (disabled), 1 (Snappy), or 2 (ZSTD)")
 	}
-	outOpt := inOpt.WithDir(outDir).WithValueDir(outDir).
-		WithCompression(options.CompressionType(compressionType)).WithReadOnly(false)
+	outOpt := inOpt.
+		WithDir(outDir).
+		WithValueDir(outDir).
+		WithNumVersionsToKeep(numVersions).
+		WithCompression(options.CompressionType(compressionType)).
+		WithReadOnly(false)
 
 	inDB, err := badger.OpenManaged(inOpt)
 	if err != nil {
 		return y.Wrapf(err, "cannot open DB at %s", sstDir)
 	}
 	defer inDB.Close()
-	return inDB.StreamDB(outOpt)
+
+	err = inDB.StreamDB(outOpt)
+	fmt.Println("Done.")
+	return err
 }

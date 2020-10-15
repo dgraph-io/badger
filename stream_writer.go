@@ -112,7 +112,7 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 		}
 		e := &Entry{
 			Key:       y.KeyWithTs(kv.Key, kv.Version),
-			Value:     kv.Value,
+			Value:     y.Copy(kv.Value),
 			UserMeta:  userMeta,
 			ExpiresAt: kv.ExpiresAt,
 			meta:      meta,

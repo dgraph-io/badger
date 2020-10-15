@@ -29,6 +29,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 )
 
@@ -464,4 +466,14 @@ func (r *PageBufferReader) Read(p []byte) (int, error) {
 	}
 
 	return read, nil
+}
+
+const kvsz = int(unsafe.Sizeof(pb.KV{}))
+
+func NewKV(alloc *z.Allocator) *pb.KV {
+	if alloc == nil {
+		return &pb.KV{}
+	}
+	b := alloc.AllocateAligned(kvsz)
+	return (*pb.KV)(unsafe.Pointer(&b[0]))
 }
