@@ -852,7 +852,6 @@ func (vlog *valueLog) write(reqs []*request) error {
 			if err != nil {
 				return err
 			}
-			// TODO(Naman): Add a test to check that meta bits are correctly set?
 			// Restore the meta.
 			e.meta = tmpMeta
 
@@ -972,7 +971,6 @@ func (vlog *valueLog) pickLog(discardRatio float64) *logFile {
 	defer vlog.filesLock.RUnlock()
 
 LOOP:
-	// TODO(naman): Add a test for MaxDiscard which checks for the zero value.
 	// Pick a candidate that contains the largest amount of discardable data
 	fid, discard := vlog.discardStats.MaxDiscard()
 
