@@ -20,7 +20,6 @@ import (
 	"bytes"
 
 	"github.com/dgraph-io/badger/v2/y"
-	"github.com/pkg/errors"
 )
 
 // MergeIterator merges multiple iterators.
@@ -201,9 +200,9 @@ func (mi *MergeIterator) Close() error {
 	err1 := mi.left.iter.Close()
 	err2 := mi.right.iter.Close()
 	if err1 != nil {
-		return errors.Wrap(err1, "MergeIterator")
+		return y.Wrap(err1, "MergeIterator")
 	}
-	return errors.Wrap(err2, "MergeIterator")
+	return y.Wrap(err2, "MergeIterator")
 }
 
 // NewMergeIterator creates a merge iterator.

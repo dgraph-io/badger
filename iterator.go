@@ -25,9 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/table"
-	"github.com/dgryski/go-farm"
 
 	"github.com/dgraph-io/badger/v2/y"
 )
@@ -41,20 +39,21 @@ const (
 // Item is returned during iteration. Both the Key() and Value() output is only valid until
 // iterator.Next() is called.
 type Item struct {
-	status    prefetchStatus
-	err       error
-	wg        sync.WaitGroup
-	db        *DB
 	key       []byte
 	vptr      []byte
-	meta      byte // We need to store meta to know about bitValuePointer.
-	userMeta  byte
-	expiresAt uint64
 	val       []byte
-	slice     *y.Slice // Used only during prefetching.
-	next      *Item
 	version   uint64
-	txn       *Txn
+	expiresAt uint64
+
+	slice *y.Slice // Used only during prefetching.
+	next  *Item
+	txn   *Txn
+
+	err      error
+	wg       sync.WaitGroup
+	status   prefetchStatus
+	meta     byte // We need to store meta to know about bitValuePointer.
+	userMeta byte
 }
 
 // String returns a string representation of Item
@@ -150,65 +149,29 @@ func (item *Item) DiscardEarlierVersions() bool {
 
 func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	key := item.Key() // No need to copy.
-	for {
-		if !item.hasValue() {
-			return nil, nil, nil
-		}
-
-		if item.slice == nil {
-			item.slice = new(y.Slice)
-		}
-
-		if (item.meta & bitValuePointer) == 0 {
-			val := item.slice.Resize(len(item.vptr))
-			copy(val, item.vptr)
-			return val, nil, nil
-		}
-
-		var vp valuePointer
-		vp.Decode(item.vptr)
-		result, cb, err := item.db.vlog.Read(vp, item.slice)
-		if err != ErrRetry {
-			if err != nil {
-				item.db.opt.Logger.Errorf(`Unable to read: Key: %v, Version : %v,
-				meta: %v, userMeta: %v`, key, item.version, item.meta, item.userMeta)
-			}
-			return result, cb, err
-		}
-		if bytes.HasPrefix(key, badgerMove) {
-			// err == ErrRetry
-			// Error is retry even after checking the move keyspace. So, let's
-			// just assume that value is not present.
-			return nil, cb, nil
-		}
-
-		// The value pointer is pointing to a deleted value log. Look for the
-		// move key and read that instead.
-		runCallback(cb)
-		// Do not put badgerMove on the left in append. It seems to cause some sort of manipulation.
-		keyTs := y.KeyWithTs(item.Key(), item.Version())
-		key = make([]byte, len(badgerMove)+len(keyTs))
-		n := copy(key, badgerMove)
-		copy(key[n:], keyTs)
-		// Note that we can't set item.key to move key, because that would
-		// change the key user sees before and after this call. Also, this move
-		// logic is internal logic and should not impact the external behavior
-		// of the retrieval.
-		vs, err := item.db.get(key)
-		if err != nil {
-			return nil, nil, err
-		}
-		if vs.Version != item.Version() {
-			return nil, nil, nil
-		}
-		// Bug fix: Always copy the vs.Value into vptr here. Otherwise, when item is reused this
-		// slice gets overwritten.
-		item.vptr = y.SafeCopy(item.vptr, vs.Value)
-		item.meta &^= bitValuePointer // Clear the value pointer bit.
-		if vs.Meta&bitValuePointer > 0 {
-			item.meta |= bitValuePointer // This meta would only be about value pointer.
-		}
+	if !item.hasValue() {
+		return nil, nil, nil
 	}
+
+	if item.slice == nil {
+		item.slice = new(y.Slice)
+	}
+
+	if (item.meta & bitValuePointer) == 0 {
+		val := item.slice.Resize(len(item.vptr))
+		copy(val, item.vptr)
+		return val, nil, nil
+	}
+
+	var vp valuePointer
+	vp.Decode(item.vptr)
+	db := item.txn.db
+	result, cb, err := db.vlog.Read(vp, item.slice)
+	if err != nil {
+		db.opt.Logger.Errorf("Unable to read: Key: %v, Version : %v, meta: %v, userMeta: %v"+
+			" Error: %v", key, item.version, item.meta, item.userMeta, err)
+	}
+	return result, cb, err
 }
 
 func runCallback(cb func()) {
@@ -226,13 +189,9 @@ func (item *Item) prefetchValue() {
 	if val == nil {
 		return
 	}
-	if item.db.opt.ValueLogLoadingMode == options.MemoryMap {
-		buf := item.slice.Resize(len(val))
-		copy(buf, val)
-		item.val = buf
-	} else {
-		item.val = val
-	}
+	buf := item.slice.Resize(len(val))
+	copy(buf, val)
+	item.val = buf
 }
 
 // EstimatedSize returns the approximate size of the key-value pair.
@@ -329,20 +288,21 @@ func (l *list) pop() *Item {
 // should work for most applications. Consider using that as a starting point
 // before customizing it for your own needs.
 type IteratorOptions struct {
-	// Indicates whether we should prefetch values during iteration and store them.
-	PrefetchValues bool
-	// How many KV pairs to prefetch while iterating. Valid only if PrefetchValues is true.
+	// PrefetchSize is the number of KV pairs to prefetch while iterating.
+	// Valid only if PrefetchValues is true.
 	PrefetchSize int
-	Reverse      bool // Direction of iteration. False is forward, true is backward.
-	AllVersions  bool // Fetch all valid versions of the same key.
-
-	// The following option is used to narrow down the SSTables that iterator picks up. If
-	// Prefix is specified, only tables which could have this prefix are picked based on their range
-	// of keys.
-	Prefix      []byte // Only iterate over this given prefix.
-	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
-
+	// PrefetchValues Indicates whether we should prefetch values during
+	// iteration and store them.
+	PrefetchValues bool
+	Reverse        bool // Direction of iteration. False is forward, true is backward.
+	AllVersions    bool // Fetch all valid versions of the same key.
 	InternalAccess bool // Used to allow internal access to badger keys.
+
+	// The following option is used to narrow down the SSTables that iterator
+	// picks up. If Prefix is specified, only tables which could have this
+	// prefix are picked based on their range of keys.
+	prefixIsKey bool   // If set, use the prefix for bloom filter lookup.
+	Prefix      []byte // Only iterate over this given prefix.
 }
 
 func (opt *IteratorOptions) compareToPrefix(key []byte) int {
@@ -366,7 +326,8 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	}
 	// Bloom filter lookup would only work if opt.Prefix does NOT have the read
 	// timestamp as part of the key.
-	if opt.prefixIsKey && t.DoesNotHave(farm.Fingerprint64(opt.Prefix)) {
+	if opt.prefixIsKey && t.DoesNotHave(y.Hash(opt.Prefix)) {
+		y.NumLSMBloomHits.Add("pickTable", 1)
 		return false
 	}
 	return true
@@ -399,19 +360,10 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 	}
 
 	var out []*table.Table
-	hash := farm.Fingerprint64(opt.Prefix)
 	for _, t := range filtered {
-		// When we encounter the first table whose smallest key is higher than
-		// opt.Prefix, we can stop.
-		if opt.compareToPrefix(t.Smallest()) > 0 {
-			return out
+		if opt.pickTable(t) {
+			out = append(out, t)
 		}
-		// opt.Prefix is actually the key. So, we can run bloom filter checks
-		// as well.
-		if t.DoesNotHave(hash) {
-			continue
-		}
-		out = append(out, t)
 	}
 	return out
 }
@@ -476,7 +428,7 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 		iters = append(iters, itr)
 	}
 	for i := 0; i < len(tables); i++ {
-		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))
+		iters = append(iters, tables[i].sl.NewUniIterator(opt.Reverse))
 	}
 	iters = txn.db.lc.appendIterators(iters, &opt) // This will increment references.
 
@@ -505,7 +457,7 @@ func (txn *Txn) NewKeyIterator(key []byte, opt IteratorOptions) *Iterator {
 func (it *Iterator) newItem() *Item {
 	item := it.waste.pop()
 	if item == nil {
-		item = &Item{slice: new(y.Slice), db: it.txn.db, txn: it.txn}
+		item = &Item{slice: new(y.Slice), txn: it.txn}
 	}
 	return item
 }

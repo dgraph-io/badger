@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -33,7 +34,6 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 	opts := table.Options{
 		BlockSize:          db.opt.BlockSize,
 		BloomFalsePositive: db.opt.BloomFalsePositive,
-		LoadingMode:        options.LoadToRAM,
 		ChkMode:            options.NoVerification,
 	}
 	b := table.NewTableBuilder(opts)
@@ -44,15 +44,8 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 		val := y.ValueStruct{Value: []byte(item.val), Meta: item.meta}
 		b.Add(key, val, 0)
 	}
-	fd, err := y.CreateSyncedFile(table.NewFilename(db.lc.reserveFileID(), db.opt.Dir), true)
-	if err != nil {
-		panic(err)
-	}
-
-	if _, err = fd.Write(b.Finish(false)); err != nil {
-		panic(err)
-	}
-	tab, err := table.OpenTable(fd, opts)
+	fname := table.NewFilename(db.lc.reserveFileID(), db.opt.Dir)
+	tab, err := table.CreateTable(fname, b.Finish(false), opts)
 	if err != nil {
 		panic(err)
 	}
@@ -192,6 +185,36 @@ func TestCompaction(t *testing.T) {
 			require.NoError(t, db.lc.runCompactDef(0, cdef))
 			// foo version 2 should be dropped after compaction.
 			getAllAndCheck(t, db, []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}})
+		})
+	})
+	t.Run("level 0 to level 1 with duplicates", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			// We have foo version 3 on L0 because we gc'ed it.
+			l0 := []keyValVersion{{"foo", "barNew", 3, 0}, {"fooz", "baz", 1, 0}}
+			l01 := []keyValVersion{{"foo", "bar", 4, 0}}
+			l1 := []keyValVersion{{"foo", "bar", 3, 0}}
+			// Level 0 has table l0 and l01.
+			createAndOpen(db, l0, 0)
+			createAndOpen(db, l01, 0)
+			// Level 1 has table l1.
+			createAndOpen(db, l1, 1)
+
+			// Set a high discard timestamp so that all the keys are below the discard timestamp.
+			db.SetDiscardTs(10)
+
+			getAllAndCheck(t, db, []keyValVersion{
+				{"foo", "bar", 4, 0}, {"foo", "barNew", 3, 0},
+				{"fooz", "baz", 1, 0},
+			})
+			cdef := compactDef{
+				thisLevel: db.lc.levels[0],
+				nextLevel: db.lc.levels[1],
+				top:       db.lc.levels[0].tables,
+				bot:       db.lc.levels[1].tables,
+			}
+			require.NoError(t, db.lc.runCompactDef(0, cdef))
+			// foo version 3 (both) should be dropped after compaction.
+			getAllAndCheck(t, db, []keyValVersion{{"foo", "bar", 4, 0}, {"fooz", "baz", 1, 0}})
 		})
 	})
 
@@ -495,40 +518,6 @@ func TestCompactionAllVersions(t *testing.T) {
 	})
 }
 
-func TestHeadKeyCleanup(t *testing.T) {
-	// Disable compactions and keep single version of each key.
-	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(1)
-	opt.managedTxns = true
-
-	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-		l0 := []keyValVersion{
-			{string(head), "foo", 5, 0}, {string(head), "bar", 4, 0}, {string(head), "baz", 3, 0},
-		}
-		l1 := []keyValVersion{{string(head), "fooz", 2, 0}, {string(head), "foozbaz", 1, 0}}
-		// Level 0 has table l0 and l01.
-		createAndOpen(db, l0, 0)
-		// Level 1 has table l1.
-		createAndOpen(db, l1, 1)
-
-		// Set a high discard timestamp so that all the keys are below the discard timestamp.
-		db.SetDiscardTs(10)
-
-		getAllAndCheck(t, db, []keyValVersion{
-			{string(head), "foo", 5, 0}, {string(head), "bar", 4, 0}, {string(head), "baz", 3, 0},
-			{string(head), "fooz", 2, 0}, {string(head), "foozbaz", 1, 0},
-		})
-		cdef := compactDef{
-			thisLevel: db.lc.levels[0],
-			nextLevel: db.lc.levels[1],
-			top:       db.lc.levels[0].tables,
-			bot:       db.lc.levels[1].tables,
-		}
-		require.NoError(t, db.lc.runCompactDef(0, cdef))
-		// foo version 2 should be dropped after compaction.
-		getAllAndCheck(t, db, []keyValVersion{{string(head), "foo", 5, 0}})
-	})
-}
-
 func TestDiscardTs(t *testing.T) {
 	// Disable compactions and keep single version of each key.
 	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(1)
@@ -732,7 +721,6 @@ func TestL1Stall(t *testing.T) {
 func createEmptyTable(db *DB) *table.Table {
 	opts := table.Options{
 		BloomFalsePositive: db.opt.BloomFalsePositive,
-		LoadingMode:        options.LoadToRAM,
 		ChkMode:            options.NoVerification,
 	}
 	b := table.NewTableBuilder(opts)
@@ -799,42 +787,181 @@ func TestL0Stall(t *testing.T) {
 	})
 }
 
-// Regression test for https://github.com/dgraph-io/dgraph/issues/5573
-func TestDropPrefixMoveBug(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		// l1 is used to verify that drop prefix actually drops move keys from all the levels.
-		l1 := []keyValVersion{{string(append(badgerMove, "F"...)), "", 0, 0}}
-		createAndOpen(db, l1, 1)
+func TestLevelGet(t *testing.T) {
+	createLevel := func(db *DB, level int, data [][]keyValVersion) {
+		for _, v := range data {
+			createAndOpen(db, v, level)
+		}
+	}
+	type testData struct {
+		name string
+		// Keys on each level. keyValVersion[0] is the first table and so on.
+		levelData map[int][][]keyValVersion
+		expect    []keyValVersion
+	}
+	test := func(t *testing.T, ti testData, db *DB) {
+		for level, data := range ti.levelData {
+			createLevel(db, level, data)
+		}
+		for _, item := range ti.expect {
+			key := y.KeyWithTs([]byte(item.key), uint64(item.version))
+			vs, err := db.get(key)
+			require.NoError(t, err)
+			require.Equal(t, item.val, string(vs.Value), "key:%s ver:%d", item.key, item.version)
+		}
+	}
+	tt := []testData{
+		{
+			"Normal",
+			map[int][][]keyValVersion{
+				0: { // Level 0 has 2 tables and each table has single key.
+					{{"foo", "bar10", 10, 0}},
+					{{"foo", "barSeven", 7, 0}},
+				},
+				1: { // Level 1 has 1 table with a single key.
+					{{"foo", "bar", 1, 0}},
+				},
+			},
+			[]keyValVersion{
+				{"foo", "bar", 1, 0},
+				{"foo", "barSeven", 7, 0},
+				{"foo", "bar10", 10, 0},
+				{"foo", "bar10", 11, 0},     // ver 11 doesn't exist so we should get bar10.
+				{"foo", "barSeven", 9, 0},   // ver 9 doesn't exist so we should get barSeven.
+				{"foo", "bar10", 100000, 0}, // ver doesn't exist so we should get bar10.
+			},
+		},
+		{"after gc",
+			map[int][][]keyValVersion{
+				0: { // Level 0 has 3 tables and each table has single key.
+					{{"foo", "barNew", 1, 0}}, // foo1 is above foo10 because of the GC.
+					{{"foo", "bar10", 10, 0}},
+					{{"foo", "barSeven", 7, 0}},
+				},
+				1: { // Level 1 has 1 table with a single key.
+					{{"foo", "bar", 1, 0}},
+				},
+			},
+			[]keyValVersion{
+				{"foo", "barNew", 1, 0},
+				{"foo", "barSeven", 7, 0},
+				{"foo", "bar10", 10, 0},
+				{"foo", "bar10", 11, 0}, // Should return biggest version.
+			},
+		},
+		{"after two gc",
+			map[int][][]keyValVersion{
+				0: { // Level 0 has 4 tables and each table has single key.
+					{{"foo", "barL0", 1, 0}}, // foo1 is above foo10 because of the GC.
+					{{"foo", "bar10", 10, 0}},
+					{{"foo", "barSeven", 7, 0}},
+				},
+				1: { // Level 1 has 1 table with a single key.
+					// Level 1 also has a foo because it was moved twice during GC.
+					{{"foo", "barL1", 1, 0}},
+				},
+				2: { // Level 1 has 1 table with a single key.
+					{{"foo", "bar", 1, 0}},
+				},
+			},
+			[]keyValVersion{
+				{"foo", "barL0", 1, 0},
+				{"foo", "barSeven", 7, 0},
+				{"foo", "bar10", 10, 0},
+				{"foo", "bar10", 11, 0}, // Should return biggest version.
+			},
+		},
+	}
+	for _, ti := range tt {
+		t.Run(ti.name, func(t *testing.T) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				test(t, ti, db)
+			})
 
-		// Mutiple levels can have the exact same move key with version.
-		l2 := []keyValVersion{{string(append(badgerMove, "F"...)), "", 0, 0}, {"A", "", 0, 0}}
-		l21 := []keyValVersion{{"B", "", 0, 0}, {"C", "", 0, 0}}
-		l22 := []keyValVersion{{"F", "", 0, 0}, {"G", "", 0, 0}}
-
-		// Level 2 has all the tables.
-		createAndOpen(db, l2, 2)
-		createAndOpen(db, l21, 2)
-		createAndOpen(db, l22, 2)
-
-		require.NoError(t, db.lc.validate())
-		require.NoError(t, db.DropPrefix([]byte("F")))
-
-		db.View(func(txn *Txn) error {
-			iopt := DefaultIteratorOptions
-			iopt.AllVersions = true
-
-			it := txn.NewIterator(iopt)
-			defer it.Close()
-
-			specialKey := []byte("F")
-			droppedPrefixes := [][]byte{specialKey, append(badgerMove, specialKey...)}
-			for it.Rewind(); it.Valid(); it.Next() {
-				key := it.Item().Key()
-				// Ensure we don't have any "F" or "!badger!move!F" left
-				require.False(t, hasAnyPrefixes(key, droppedPrefixes))
-			}
-			return nil
 		})
-		require.NoError(t, db.lc.validate())
+	}
+}
+
+func TestKeyVersions(t *testing.T) {
+	inMemoryOpt := DefaultOptions("").
+		WithSyncWrites(false).
+		WithInMemory(true).
+		WithLogRotatesToFlush(math.MaxInt32).
+		WithMaxTableSize(4 << 20)
+
+	t.Run("disk", func(t *testing.T) {
+		t.Run("small table", func(t *testing.T) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				l0 := make([]keyValVersion, 0)
+				for i := 0; i < 10; i++ {
+					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
+				}
+				createAndOpen(db, l0, 0)
+				require.Equal(t, 1, len(db.KeySplits(nil)))
+			})
+		})
+		t.Run("medium table", func(t *testing.T) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				l0 := make([]keyValVersion, 0)
+				for i := 0; i < 1000; i++ {
+					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
+				}
+				createAndOpen(db, l0, 0)
+				require.Equal(t, 7, len(db.KeySplits(nil)))
+			})
+		})
+		t.Run("large table", func(t *testing.T) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				l0 := make([]keyValVersion, 0)
+				for i := 0; i < 10000; i++ {
+					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
+				}
+				createAndOpen(db, l0, 0)
+				require.Equal(t, 61, len(db.KeySplits(nil)))
+			})
+		})
+		t.Run("prefix", func(t *testing.T) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+				l0 := make([]keyValVersion, 0)
+				for i := 0; i < 1000; i++ {
+					l0 = append(l0, keyValVersion{fmt.Sprintf("%05d", i), "foo", 1, 0})
+				}
+				createAndOpen(db, l0, 0)
+				require.Equal(t, 0, len(db.KeySplits([]byte("a"))))
+			})
+		})
+	})
+
+	t.Run("in-memory", func(t *testing.T) {
+		t.Run("small table", func(t *testing.T) {
+			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
+				writer := db.newWriteBatch(false)
+				for i := 0; i < 10; i++ {
+					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
+				}
+				require.NoError(t, writer.Flush())
+				require.Equal(t, 1, len(db.KeySplits(nil)))
+			})
+		})
+		t.Run("large table", func(t *testing.T) {
+			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
+				writer := db.newWriteBatch(false)
+				for i := 0; i < 100000; i++ {
+					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
+				}
+				require.NoError(t, writer.Flush())
+				require.Equal(t, 11, len(db.KeySplits(nil)))
+			})
+		})
+		t.Run("prefix", func(t *testing.T) {
+			runBadgerTest(t, &inMemoryOpt, func(t *testing.T, db *DB) {
+				writer := db.newWriteBatch(false)
+				for i := 0; i < 10000; i++ {
+					writer.Set([]byte(fmt.Sprintf("%05d", i)), []byte("foo"))
+				}
+				require.NoError(t, writer.Flush())
+				require.Equal(t, 0, len(db.KeySplits([]byte("a"))))
+			})
+		})
 	})
 }

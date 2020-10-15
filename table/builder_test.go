@@ -23,12 +23,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgryski/go-farm"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dgraph-io/badger/v2/fb"
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto"
 )
 
 func TestTableIndex(t *testing.T) {
@@ -36,6 +37,12 @@ func TestTableIndex(t *testing.T) {
 	keysCount := 100000
 	key := make([]byte, 32)
 	_, err := rand.Read(key)
+	require.NoError(t, err)
+	cache, err := ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1000,
+		MaxCost:     1 << 20,
+		BufferItems: 64,
+	})
 	require.NoError(t, err)
 	subTest := []struct {
 		name string
@@ -57,6 +64,7 @@ func TestTableIndex(t *testing.T) {
 				BloomFalsePositive: 0.01,
 				TableSize:          30 << 20,
 				DataKey:            &pb.DataKey{Data: key},
+				IndexCache:         cache,
 			},
 		},
 		{
@@ -80,6 +88,7 @@ func TestTableIndex(t *testing.T) {
 				Compression:          options.ZSTD,
 				ZSTDCompressionLevel: 3,
 				DataKey:              &pb.DataKey{Data: key},
+				IndexCache:           cache,
 			},
 		},
 	}
@@ -89,13 +98,11 @@ func TestTableIndex(t *testing.T) {
 			opt := tt.opts
 			builder := NewTableBuilder(opt)
 			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
-			f, err := y.OpenSyncedFile(filename, true)
-			require.NoError(t, err)
 
 			blockFirstKeys := make([][]byte, 0)
 			blockCount := 0
 			for i := 0; i < keysCount; i++ {
-				k := []byte(fmt.Sprintf("%016x", i))
+				k := y.KeyWithTs([]byte(fmt.Sprintf("%016x", i)), uint64(i+1))
 				v := fmt.Sprintf("%d", i)
 				vs := y.ValueStruct{Value: []byte(v)}
 				if i == 0 { // This is first key for first block.
@@ -107,10 +114,7 @@ func TestTableIndex(t *testing.T) {
 				}
 				builder.Add(k, vs, 0)
 			}
-			_, err = f.Write(builder.Finish(false))
-			require.NoError(t, err, "unable to write to file")
-
-			tbl, err := OpenTable(f, opt)
+			tbl, err := CreateTable(filename, builder.Finish(false), opt)
 			require.NoError(t, err, "unable to open table")
 
 			if opt.DataKey == nil {
@@ -119,13 +123,16 @@ func TestTableIndex(t *testing.T) {
 			}
 
 			// Ensure index is built correctly
-			require.Equal(t, blockCount, tbl.noOfBlocks)
+			require.Equal(t, blockCount, tbl.offsetsLength())
 			idx, err := tbl.readTableIndex()
 			require.NoError(t, err)
-			for i, ko := range idx.Offsets {
-				require.Equal(t, ko.Key, blockFirstKeys[i])
+			for i := 0; i < idx.OffsetsLength(); i++ {
+				var bo fb.BlockOffset
+				require.True(t, idx.Offsets(&bo, i))
+				require.Equal(t, blockFirstKeys[i], bo.KeyBytes())
 			}
-			f.Close()
+			require.Equal(t, keysCount, int(tbl.MaxVersion()))
+			tbl.Close(-1)
 			require.NoError(t, os.RemoveAll(filename))
 		})
 	}
@@ -134,15 +141,16 @@ func TestTableIndex(t *testing.T) {
 func TestInvalidCompression(t *testing.T) {
 	keyPrefix := "key"
 	opts := Options{BlockSize: 4 << 10, Compression: options.ZSTD}
-	f := buildTestTable(t, keyPrefix, 1000, opts)
+	tbl := buildTestTable(t, keyPrefix, 1000, opts)
+	mf := tbl.MmapFile
 	t.Run("with correct decompression algo", func(t *testing.T) {
-		_, err := OpenTable(f, opts)
+		_, err := OpenTable(mf, opts)
 		require.NoError(t, err)
 	})
 	t.Run("with incorrect decompression algo", func(t *testing.T) {
 		// Set incorrect compression algorithm.
 		opts.Compression = options.Snappy
-		_, err := OpenTable(f, opts)
+		_, err := OpenTable(mf, opts)
 		require.Error(t, err)
 	})
 }
@@ -185,6 +193,13 @@ func BenchmarkBuilder(b *testing.B) {
 	})
 	b.Run("encryption", func(b *testing.B) {
 		var opt Options
+		cache, err := ristretto.NewCache(&ristretto.Config{
+			NumCounters: 1000,
+			MaxCost:     1 << 20,
+			BufferItems: 64,
+		})
+		require.NoError(b, err)
+		opt.IndexCache = cache
 		key := make([]byte, 32)
 		rand.Read(key)
 		opt.DataKey = &pb.DataKey{Data: key}
@@ -215,24 +230,18 @@ func TestBloomfilter(t *testing.T) {
 	createAndTest := func(t *testing.T, withBlooms bool) {
 		opts := Options{
 			BloomFalsePositive: 0.0,
-			LoadBloomsOnOpen:   false,
 		}
 		if withBlooms {
-			opts = Options{
-				BloomFalsePositive: 0.01,
-				LoadBloomsOnOpen:   true,
-			}
+			opts.BloomFalsePositive = 0.01
 		}
-		f := buildTestTable(t, keyPrefix, keyCount, opts)
-		tab, err := OpenTable(f, opts)
-		require.NoError(t, err)
+		tab := buildTestTable(t, keyPrefix, keyCount, opts)
 		require.Equal(t, withBlooms, tab.hasBloomFilter)
 		// Forward iteration
 		it := tab.NewIterator(0)
 		c := 0
 		for it.Rewind(); it.Valid(); it.Next() {
 			c++
-			hash := farm.Fingerprint64(y.ParseKey(it.Key()))
+			hash := y.Hash(y.ParseKey(it.Key()))
 			require.False(t, tab.DoesNotHave(hash))
 		}
 		require.Equal(t, keyCount, c)
@@ -242,13 +251,13 @@ func TestBloomfilter(t *testing.T) {
 		c = 0
 		for it.Rewind(); it.Valid(); it.Next() {
 			c++
-			hash := farm.Fingerprint64(y.ParseKey(it.Key()))
+			hash := y.Hash(y.ParseKey(it.Key()))
 			require.False(t, tab.DoesNotHave(hash))
 		}
 		require.Equal(t, keyCount, c)
 
 		// Ensure tab.DoesNotHave works
-		hash := farm.Fingerprint64([]byte("foo"))
+		hash := y.Hash([]byte("foo"))
 		require.Equal(t, withBlooms, tab.DoesNotHave(hash))
 	}
 
@@ -258,4 +267,10 @@ func TestBloomfilter(t *testing.T) {
 	t.Run("build without bloom filter", func(t *testing.T) {
 		createAndTest(t, false)
 	})
+}
+func TestEmptyBuilder(t *testing.T) {
+	opts := Options{BloomFalsePositive: 0.1}
+	b := NewTableBuilder(opts)
+	require.Nil(t, b.Finish(false))
+
 }

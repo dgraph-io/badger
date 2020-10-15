@@ -23,6 +23,8 @@ import (
 	"runtime"
 
 	"github.com/dgraph-io/badger/v2/badger/cmd"
+	"github.com/dgraph-io/ristretto/z"
+	"github.com/dustin/go-humanize"
 )
 
 func main() {
@@ -38,5 +40,16 @@ func main() {
 	}()
 	runtime.SetBlockProfileRate(100)
 	runtime.GOMAXPROCS(128)
+
+	out := z.CallocNoRef(1)
+	fmt.Printf("jemalloc enabled: %v\n", len(out) > 0)
+	z.StatsPrint()
+	z.Free(out)
+
 	cmd.Execute()
+	fmt.Printf("Num Allocated Bytes at program end: %s\n",
+		humanize.IBytes(uint64(z.NumAllocBytes())))
+	if z.NumAllocBytes() > 0 {
+		z.PrintLeaks()
+	}
 }

@@ -17,12 +17,14 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
 	"math"
 	"os"
 
 	"github.com/dgraph-io/badger/v2"
 	"github.com/dgraph-io/badger/v2/options"
+	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -44,7 +46,6 @@ func init() {
 	RootCmd.AddCommand(streamCmd)
 	streamCmd.Flags().StringVarP(&outDir, "out", "o", "",
 		"Path to output DB. The directory should be empty.")
-	streamCmd.Flags().BoolVarP(&truncate, "truncate", "", false, "Option to truncate the DBs")
 	streamCmd.Flags().BoolVarP(&readOnly, "read_only", "", true,
 		"Option to open input DB in read-only mode")
 	streamCmd.Flags().IntVarP(&numVersions, "num_versions", "", 0,
@@ -53,6 +54,8 @@ func init() {
 	streamCmd.Flags().Uint32VarP(&compressionType, "compression", "", 0,
 		"Option to configure the compression type in output DB. "+
 			"0 to disable, 1 for Snappy, and 2 for ZSTD.")
+	streamCmd.Flags().StringVarP(&keyPath, "encryption-key-file", "e", "",
+		"Path of the encryption key file.")
 }
 
 func stream(cmd *cobra.Command, args []string) error {
@@ -74,24 +77,37 @@ func stream(cmd *cobra.Command, args []string) error {
 	if numVersions <= 0 {
 		numVersions = math.MaxInt32
 	}
+	encKey, err := getKey(keyPath)
+	if err != nil {
+		return err
+	}
 	inOpt := badger.DefaultOptions(sstDir).
 		WithReadOnly(readOnly).
-		WithTruncate(truncate).
 		WithValueThreshold(1 << 10 /* 1KB */).
-		WithNumVersionsToKeep(numVersions)
+		WithNumVersionsToKeep(numVersions).
+		WithBlockCacheSize(100 << 20).
+		WithIndexCacheSize(200 << 20).
+		WithEncryptionKey(encKey)
 
 	// Options for output DB.
 	if compressionType < 0 || compressionType > 2 {
 		return errors.Errorf(
 			"compression value must be one of 0 (disabled), 1 (Snappy), or 2 (ZSTD)")
 	}
-	outOpt := inOpt.WithDir(outDir).WithValueDir(outDir).
-		WithCompression(options.CompressionType(compressionType)).WithReadOnly(false)
+	outOpt := inOpt.
+		WithDir(outDir).
+		WithValueDir(outDir).
+		WithNumVersionsToKeep(numVersions).
+		WithCompression(options.CompressionType(compressionType)).
+		WithReadOnly(false)
 
 	inDB, err := badger.OpenManaged(inOpt)
 	if err != nil {
-		return errors.Wrapf(err, "cannot open DB at %s", sstDir)
+		return y.Wrapf(err, "cannot open DB at %s", sstDir)
 	}
 	defer inDB.Close()
-	return inDB.StreamDB(outOpt)
+
+	err = inDB.StreamDB(outOpt)
+	fmt.Println("Done.")
+	return err
 }

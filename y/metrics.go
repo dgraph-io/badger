@@ -48,6 +48,8 @@ var (
 	NumBlockedPuts *expvar.Int
 	// NumMemtableGets is number of memtable gets
 	NumMemtableGets *expvar.Int
+	// NumCompactionTables is the number of tables being compacted
+	NumCompactionTables *expvar.Int
 )
 
 // These variables are global and have cumulative values for all kv stores.
@@ -65,4 +67,5 @@ func init() {
 	LSMSize = expvar.NewMap("badger_v2_lsm_size_bytes")
 	VlogSize = expvar.NewMap("badger_v2_vlog_size_bytes")
 	PendingWrites = expvar.NewMap("badger_v2_pending_writes_total")
+	NumCompactionTables = expvar.NewInt("badger_v2_compactions_current")
 }

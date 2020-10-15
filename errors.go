@@ -30,7 +30,7 @@ const (
 var (
 	// ErrValueLogSize is returned when opt.ValueLogFileSize option is not within the valid
 	// range.
-	ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be between 1MB and 2GB")
+	ErrValueLogSize = errors.New("Invalid ValueLogFileSize, must be in range [1MB, 2GB)")
 
 	// ErrKeyNotFound is returned when key isn't found on a txn.Get.
 	ErrKeyNotFound = errors.New("Key not found")
@@ -54,11 +54,6 @@ var (
 	// ErrInvalidKey is returned if the key has a special !badger! prefix,
 	// reserved for internal usage.
 	ErrInvalidKey = errors.New("Key is using a reserved !badger! prefix")
-
-	// ErrRetry is returned when a log file containing the value is not found.
-	// This usually indicates that it may have been garbage collected, and the
-	// operation needs to be retried.
-	ErrRetry = errors.New("Unable to find log file. Please retry")
 
 	// ErrThresholdZero is returned if threshold is set to zero, and value log GC is called.
 	// In such a case, GC can't be run.
@@ -91,10 +86,6 @@ var (
 	// within the valid range
 	ErrInvalidLoadingMode = errors.New("Invalid ValueLogLoadingMode, must be FileIO or MemoryMap")
 
-	// ErrReplayNeeded is returned when opt.ReadOnly is set but the
-	// database requires a value log replay.
-	ErrReplayNeeded = errors.New("Database was not properly closed, cannot open read-only")
-
 	// ErrWindowsNotSupported is returned when opt.ReadOnly is used on Windows
 	ErrWindowsNotSupported = errors.New("Read-only mode is not supported on Windows")
 
@@ -104,7 +95,7 @@ var (
 	// ErrTruncateNeeded is returned when the value log gets corrupt, and requires truncation of
 	// corrupt data to allow Badger to run properly.
 	ErrTruncateNeeded = errors.New(
-		"Value log truncate required to run DB. This might result in data loss")
+		"Log truncate required to run DB. This might result in data loss")
 
 	// ErrBlockedWrites is returned if the user called DropAll. During the process of dropping all
 	// data from Badger, we stop accepting new writes, by returning this error.

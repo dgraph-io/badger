@@ -364,11 +364,10 @@ func runTest(cmd *cobra.Command, args []string) error {
 		WithNumVersionsToKeep(int(math.MaxInt32)).
 		WithValueThreshold(1). // Make all values go to value log
 		WithCompression(options.ZSTD).
-		WithKeepL0InMemory(false).
 		WithBlockCacheSize(10 << 20)
 
-	if mmap {
-		opts = opts.WithTableLoadingMode(options.MemoryMap)
+	if verbose {
+		opts = opts.WithLoggingLevel(badger.DEBUG)
 	}
 
 	if encryptionKey != "" {

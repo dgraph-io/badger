@@ -23,8 +23,6 @@ import (
 	"math"
 	"sync"
 
-	"golang.org/x/net/trace"
-
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
 )
@@ -64,6 +62,9 @@ func (r keyRange) overlapsWith(dst keyRange) bool {
 	return true
 }
 
+// getKeyRange returns the smallest and the biggest in the list of tables.
+// TODO(naman): Write a test for this. The smallest and the biggest should
+// be the smallest of the leftmost table and the biggest of the right most table.
 func getKeyRange(tables ...*table.Table) keyRange {
 	if len(tables) == 0 {
 		return keyRange{}
@@ -126,19 +127,6 @@ func (lcs *levelCompactStatus) remove(dst keyRange) bool {
 type compactStatus struct {
 	sync.RWMutex
 	levels []*levelCompactStatus
-}
-
-func (cs *compactStatus) toLog(tr trace.Trace) {
-	cs.RLock()
-	defer cs.RUnlock()
-
-	tr.LazyPrintf("Compaction status:")
-	for i, l := range cs.levels {
-		if l.debug() == "" {
-			continue
-		}
-		tr.LazyPrintf("[%d] %s", i, l.debug())
-	}
 }
 
 func (cs *compactStatus) overlapsWith(level int, this keyRange) bool {

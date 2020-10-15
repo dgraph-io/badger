@@ -29,29 +29,33 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 )
 
 var (
 	// ErrEOF indicates an end of file when trying to read from a memory mapped file
 	// and encountering the end of slice.
-	ErrEOF = errors.New("End of mapped region")
+	ErrEOF = errors.New("ErrEOF: End of file")
 
 	// ErrZstdCgo indicates that badger was built without cgo but ZSTD
 	// compression algorithm is being used for compression. ZSTD cannot work
 	// without CGO.
-	ErrZstdCgo = errors.New("zstd compression requires building badger with cgo enabled")
+	ErrZstdCgo = errors.New("ErrZstdCgo: zstd compression requires building badger with cgo enabled")
 
 	// ErrCommitAfterFinish indicates that write batch commit was called after
 	// finish
 	ErrCommitAfterFinish = errors.New("Batch commit not permitted after finish")
 )
 
+type Flags int
+
 const (
 	// Sync indicates that O_DSYNC should be set on the underlying file,
 	// ensuring that data writes do not return until the data is flushed
 	// to disk.
-	Sync = 1 << iota
+	Sync Flags = 1 << iota
 	// ReadOnly opens the underlying file on a read-only basis.
 	ReadOnly
 )
@@ -65,7 +69,7 @@ var (
 )
 
 // OpenExistingFile opens an existing file, errors if it doesn't exist.
-func OpenExistingFile(filename string, flags uint32) (*os.File, error) {
+func OpenExistingFile(filename string, flags Flags) (*os.File, error) {
 	openFlags := os.O_RDWR
 	if flags&ReadOnly != 0 {
 		openFlags = os.O_RDONLY
@@ -462,4 +466,14 @@ func (r *PageBufferReader) Read(p []byte) (int, error) {
 	}
 
 	return read, nil
+}
+
+const kvsz = int(unsafe.Sizeof(pb.KV{}))
+
+func NewKV(alloc *z.Allocator) *pb.KV {
+	if alloc == nil {
+		return &pb.KV{}
+	}
+	b := alloc.AllocateAligned(kvsz)
+	return (*pb.KV)(unsafe.Pointer(&b[0]))
 }

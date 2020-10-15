@@ -140,15 +140,18 @@ func (h *header) DecodeFrom(reader *hashReader) (int, error) {
 type Entry struct {
 	Key       []byte
 	Value     []byte
-	UserMeta  byte
 	ExpiresAt uint64 // time.Unix
-	meta      byte
 	version   uint64
+	offset    uint32 // offset is an internal field.
+	UserMeta  byte
+	meta      byte
 
 	// Fields maintained internally.
-	offset   uint32
-	skipVlog bool
-	hlen     int // Length of the header.
+	hlen int // Length of the header.
+}
+
+func (e *Entry) isZero() bool {
+	return len(e.Key) == 0
 }
 
 func (e *Entry) estimateSize(threshold int) int {

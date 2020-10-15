@@ -116,11 +116,17 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 
 	var maxVersion uint64
 	stream.Send = func(list *pb.KVList) error {
+		out := list.Kv[:0]
 		for _, kv := range list.Kv {
 			if maxVersion < kv.Version {
 				maxVersion = kv.Version
 			}
+			if !kv.StreamDone {
+				// Don't pick stream done changes.
+				out = append(out, kv)
+			}
 		}
+		list.Kv = out
 		return writeTo(list, w)
 	}
 

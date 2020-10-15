@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -30,7 +31,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v2"
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
 	humanize "github.com/dustin/go-humanize"
@@ -92,18 +92,16 @@ to the Dgraph team.
 
 func handleInfo(cmd *cobra.Command, args []string) error {
 	if err := printInfo(sstDir, vlogDir); err != nil {
-		return errors.Wrap(err, "failed to print information in MANIFEST file")
+		return y.Wrap(err, "failed to print information in MANIFEST file")
 	}
 
 	// Open DB
 	db, err := badger.Open(badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(opt.readOnly).
-		WithTruncate(opt.truncate).
-		WithTableLoadingMode(options.MemoryMap).
 		WithEncryptionKey([]byte(opt.encryptionKey)))
 	if err != nil {
-		return errors.Wrap(err, "failed to open database")
+		return y.Wrap(err, "failed to open database")
 	}
 	defer db.Close()
 
@@ -113,7 +111,7 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 
 	prefix, err := hex.DecodeString(opt.withPrefix)
 	if err != nil {
-		return errors.Wrapf(err, "failed to decode hex prefix: %s", opt.withPrefix)
+		return y.Wrapf(err, "failed to decode hex prefix: %s", opt.withPrefix)
 	}
 	if opt.showHistogram {
 		db.PrintHistogram(prefix)
@@ -127,7 +125,7 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 
 	if len(opt.keyLookup) > 0 {
 		if err := lookup(db); err != nil {
-			return errors.Wrapf(err, "failed to perform lookup for the key: %x", opt.keyLookup)
+			return y.Wrapf(err, "failed to perform lookup for the key: %x", opt.keyLookup)
 		}
 	}
 	return nil
@@ -152,7 +150,7 @@ func showKeys(db *badger.DB, prefix []byte) error {
 	for it.Rewind(); it.Valid(); it.Next() {
 		item := it.Item()
 		if err := printKey(item, false); err != nil {
-			return errors.Wrapf(err, "failed to print information about key: %x(%d)",
+			return y.Wrapf(err, "failed to print information about key: %x(%d)",
 				item.Key(), item.Version())
 		}
 		totalKeys++
@@ -169,7 +167,7 @@ func lookup(db *badger.DB) error {
 
 	key, err := hex.DecodeString(opt.keyLookup)
 	if err != nil {
-		return errors.Wrapf(err, "failed to decode key: %q", opt.keyLookup)
+		return y.Wrapf(err, "failed to decode key: %q", opt.keyLookup)
 	}
 
 	iopts := badger.DefaultIteratorOptions
@@ -185,7 +183,7 @@ func lookup(db *badger.DB) error {
 	fmt.Println()
 	item := itr.Item()
 	if err := printKey(item, true); err != nil {
-		return errors.Wrapf(err, "failed to print information about key: %x(%d)",
+		return y.Wrapf(err, "failed to print information about key: %x(%d)",
 			item.Key(), item.Version())
 	}
 
@@ -200,7 +198,7 @@ func lookup(db *badger.DB) error {
 			break
 		}
 		if err := printKey(item, true); err != nil {
-			return errors.Wrapf(err, "failed to print information about key: %x(%d)",
+			return y.Wrapf(err, "failed to print information about key: %x(%d)",
 				item.Key(), item.Version())
 		}
 	}
@@ -222,7 +220,7 @@ func printKey(item *badger.Item, showValue bool) error {
 	if showValue {
 		val, err := item.ValueCopy(nil)
 		if err != nil {
-			return errors.Wrapf(err,
+			return y.Wrapf(err,
 				"failed to copy value of the key: %x(%d)", item.Key(), item.Version())
 		}
 		fmt.Fprintf(&buf, "\n\tvalue: %v", val)
@@ -239,19 +237,46 @@ func dur(src, dst time.Time) string {
 	return humanize.RelTime(dst, src, "earlier", "later")
 }
 
+func getInfo(fileInfos []os.FileInfo, tid uint64) int64 {
+	fileName := table.IDToFilename(tid)
+	for _, fi := range fileInfos {
+		if path.Base(fi.Name()) == fileName {
+			return fi.Size()
+		}
+	}
+	return 0
+}
+
 func tableInfo(dir, valueDir string, db *badger.DB) {
 	// we want all tables with keys count here.
-	tables := db.Tables(true)
+	tables := db.Tables()
+	fileInfos, err := ioutil.ReadDir(dir)
+	y.Check(err)
+
 	fmt.Println()
 	fmt.Println("SSTable [Li, Id, Total Keys including internal keys] " +
-		"[Left Key, Version -> Right Key, Version]" + "[Index Size]")
+		"[Compression Ratio, Uncompressed Size, Index Size, BF Size] " +
+		"[Left Key, Version -> Right Key, Version]")
+	totalIndex := uint64(0)
+	totalBloomFilter := uint64(0)
+	totalCompressionRatio := float64(0.0)
 	for _, t := range tables {
 		lk, lt := y.ParseKey(t.Left), y.ParseTs(t.Left)
 		rk, rt := y.ParseKey(t.Right), y.ParseTs(t.Right)
 
-		fmt.Printf("SSTable [L%d, %03d, %07d] [%20X, v%d -> %20X, v%d] [%s]\n",
-			t.Level, t.ID, t.KeyCount, lk, lt, rk, rt, hbytes(int64(t.IndexSz)))
+		compressionRatio := float64(t.UncompressedSize) /
+			float64(getInfo(fileInfos, t.ID)-int64(t.IndexSz))
+		fmt.Printf("SSTable [L%d, %03d, %07d] [%.2f, %s, %s, %s] [%20X, v%d -> %20X, v%d]\n",
+			t.Level, t.ID, t.KeyCount, compressionRatio, hbytes(int64(t.UncompressedSize)),
+			hbytes(int64(t.IndexSz)), hbytes(int64(t.BloomFilterSize)), lk, lt, rk, rt)
+		totalIndex += uint64(t.IndexSz)
+		totalBloomFilter += uint64(t.BloomFilterSize)
+		totalCompressionRatio += compressionRatio
 	}
+	fmt.Println()
+	fmt.Printf("Total Index Size: %s\n", hbytes(int64(totalIndex)))
+	fmt.Printf("Total BloomFilter Size: %s\n", hbytes(int64(totalIndex)))
+	fmt.Printf("Mean Compression Ratio: %.2f\n", totalCompressionRatio/float64(len(tables)))
 	fmt.Println()
 }
 
@@ -403,13 +428,13 @@ func printInfo(dir, valueDir string) error {
 	}
 
 	fmt.Print("\n[Summary]\n")
-	totalIndexSize := int64(0)
+	totalSSTSize := int64(0)
 	for i, sz := range levelSizes {
 		fmt.Printf("Level %d size: %12s\n", i, hbytes(sz))
-		totalIndexSize += sz
+		totalSSTSize += sz
 	}
 
-	fmt.Printf("Total index size: %8s\n", hbytes(totalIndexSize))
+	fmt.Printf("Total SST size: %8s\n", hbytes(totalSSTSize))
 	fmt.Printf("Value log size: %10s\n", hbytes(valueLogSize))
 	fmt.Println()
 	totalExtra := numExtra + numValueDirExtra
