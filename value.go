@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"hash"
 	"hash/crc32"
@@ -34,6 +35,7 @@ import (
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
+	otrace "go.opencensus.io/trace"
 )
 
 // maxVlogFileSize is the maximum size of the vlog file which can be created. Vlog Offset is of
@@ -978,6 +980,7 @@ LOOP:
 	// MaxDiscard will return fid=0 if it doesn't have any discard data. The
 	// vlog files start from 1.
 	if fid == 0 {
+		vlog.opt.Debugf("No file with discard stats")
 		return nil
 	}
 	lf, ok := vlog.filesMap[fid]
@@ -1036,6 +1039,9 @@ type reason struct {
 }
 
 func (vlog *valueLog) doRunGC(lf *logFile) error {
+	_, span := otrace.StartSpan(context.Background(), "Badger.GC")
+	span.Annotatef(nil, "GC rewrite for: %v", lf.path)
+	defer span.End()
 	if err := vlog.rewrite(lf); err != nil {
 		return err
 	}
