@@ -22,6 +22,7 @@ import (
 	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 // ArenaMmap should be lock-free.
@@ -38,7 +39,7 @@ func newArenaMmap(n int64) *ArenaMmap {
 
 	// mtype := unix.PROT_READ | unix.PROT_WRITE
 	// data, err := unix.Mmap(-1, 0, int(sz), mtype, unix.MAP_SHARED|unix.MAP_ANONYMOUS)
-	data, err := y.Mmap(fd, true, n)
+	data, err := z.Mmap(fd, true, n)
 	y.Check(err)
 	zeroOut(data, 0)
 	// Don't store data at position 0 in order to reserve offset=0 as a kind
