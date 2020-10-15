@@ -1191,3 +1191,19 @@ func TestValueLogMeta(t *testing.T) {
 	}
 	require.Equal(t, 10, count)
 }
+
+// This tests asserts the condition that vlog fids start from 1.
+// TODO(naman): should this be changed to assert instead?
+func TestFirstVlogFile(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	opt := DefaultOptions(dir).WithValueThreshold(0)
+	db, err := Open(opt)
+	defer db.Close()
+
+	fids := db.vlog.sortedFids()
+	require.NotZero(t, len(fids))
+	require.Equal(t, uint32(1), fids[0])
+}

@@ -31,6 +31,10 @@ func TestDiscardStats(t *testing.T) {
 	opt := DefaultOptions(dir)
 	ds, err := initDiscardStats(opt)
 	require.NoError(t, err)
+	require.Zero(t, ds.nextEmptySlot)
+	fid, _ := ds.MaxDiscard()
+	require.Zero(t, fid)
+
 	for i := uint32(0); i < 20; i++ {
 		require.Equal(t, int64(i*100), ds.Update(i, int64(i*100)))
 	}
@@ -47,27 +51,6 @@ func TestDiscardStats(t *testing.T) {
 		}
 		require.Equal(t, int(id*100), int(val))
 	})
-}
-
-// This tests asserts the condition that vlog fids start from 1.
-func TestFirstVlogFile(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer removeDir(dir)
-
-	opt := DefaultOptions(dir).WithValueThreshold(0)
-	db, err := Open(opt)
-	defer db.Close()
-	require.NoError(t, err)
-	ds := db.vlog.discardStats
-	require.Zero(t, ds.nextEmptySlot)
-	fid, _ := ds.MaxDiscard()
-	require.Zero(t, fid)
-
-	db.vlog.createVlogFile()
-	fids := db.vlog.sortedFids()
-	require.NotZero(t, len(fids))
-	require.Equal(t, uint32(1), fids[0])
 }
 
 func TestReloadDiscardStats(t *testing.T) {
