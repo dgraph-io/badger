@@ -1199,7 +1199,7 @@ func TestFirstVlogFile(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	opt := DefaultOptions(dir).WithValueThreshold(0)
+	opt := DefaultOptions(dir)
 	db, err := Open(opt)
 	defer db.Close()
 
