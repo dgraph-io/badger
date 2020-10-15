@@ -332,6 +332,7 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 		}
 		_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
 		span.Annotatef(nil, "Compaction level: %v", l.level)
+		span.Annotatef(nil, "Drop Prefixes: %v", prefixes)
 		defer span.End()
 		opt.Infof("Dropping prefix at level %d (%d tableGroups)", l.level, len(tableGroups))
 		for _, operation := range tableGroups {

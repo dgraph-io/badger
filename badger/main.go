@@ -23,6 +23,7 @@ import (
 	"runtime"
 
 	"github.com/dgraph-io/badger/v2/badger/cmd"
+	"go.opencensus.io/zpages"
 )
 
 func main() {
@@ -36,6 +37,7 @@ func main() {
 			}
 		}
 	}()
+	zpages.Handle(nil, "/debug")
 	runtime.SetBlockProfileRate(100)
 	runtime.GOMAXPROCS(128)
 	cmd.Execute()
