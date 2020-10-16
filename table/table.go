@@ -105,7 +105,7 @@ type Table struct {
 
 	Checksum []byte
 	// Stores the total size of key-values stored in this table (including the size on vlog).
-	estimatedSize  uint32
+	onDiskSize     uint32
 	indexStart     int
 	indexLen       int
 	hasBloomFilter bool
@@ -384,17 +384,7 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 		t._index = index
 	}
 
-	if t.opt.Compression == options.None {
-		t.estimatedSize = index.EstimatedSize()
-	} else {
-		// TODO(ibrahim): This estimatedSize doesn't make any sense. If it is tracking the size of
-		// values including in value log, then index.EstimatedSize() should be used irrespective of
-		// compression or not.
-		//
-		// Due to compression the real size on disk is much
-		// smaller than what we estimate from index.EstimatedSize.
-		t.estimatedSize = uint32(t.tableSize)
-	}
+	t.onDiskSize = index.OnDiskSize()
 	t.hasBloomFilter = len(index.BloomFilterBytes()) > 0
 
 	var bo fb.BlockOffset
@@ -576,7 +566,7 @@ func (t *Table) indexKey() uint64 {
 	return t.id
 }
 
-// UncompressedSize is the size of table index in bytes.
+// UncompressedSize is the size uncompressed data stored in this file.
 func (t *Table) UncompressedSize() uint32 {
 	return t.fetchIndex().UncompressedSize()
 }
@@ -596,9 +586,9 @@ func (t *Table) BloomFilterSize() int {
 	return t.fetchIndex().BloomFilterLength()
 }
 
-// EstimatedSize returns the total size of key-values stored in this table (including the
+// OnDiskSize returns the total size of key-values stored in this table (including the
 // disk space occupied on the value log).
-func (t *Table) EstimatedSize() uint32 { return t.estimatedSize }
+func (t *Table) OnDiskSize() uint32 { return t.onDiskSize }
 
 // Size is its file size in bytes
 func (t *Table) Size() int64 { return int64(t.tableSize) }
