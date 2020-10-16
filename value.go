@@ -561,7 +561,7 @@ func (vlog *valueLog) open(db *DB) error {
 		return err
 	}
 	// If no files are found, then create a new file.
-	if len(vlog.filesMap) == 0 {
+	if len(vlog.filesMap) == 0 && !vlog.opt.ReadOnly {
 		_, err := vlog.createVlogFile()
 		return y.Wrapf(err, "Error while creating log file in valueLog.open")
 	}
@@ -584,6 +584,9 @@ func (vlog *valueLog) open(db *DB) error {
 		}
 	}
 
+	if vlog.opt.ReadOnly {
+		return nil
+	}
 	// Now we can read the latest value log file, and see if it needs truncation. We could
 	// technically do this over all the value log files, but that would mean slowing down the value
 	// log open.

@@ -304,9 +304,11 @@ func Open(opt Options) (*DB, error) {
 		return nil, y.Wrapf(err, "while opening memtables")
 	}
 
-	db.mt, err = db.newMemTable()
-	if err != nil {
-		return nil, y.Wrapf(err, "cannot create memtable")
+	if !db.opt.ReadOnly {
+		db.mt, err = db.newMemTable()
+		if err != nil {
+			return nil, y.Wrapf(err, "cannot create memtable")
+		}
 	}
 
 	// newLevelsController potentially loads files in directory.
