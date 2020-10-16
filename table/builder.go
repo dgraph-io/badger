@@ -379,7 +379,7 @@ func (b *Builder) ReachedCapacity(capacity uint64) bool {
 
 	estimateSz := blocksSize +
 		4 + // Index length
-		uint32(b.offsets.Len())
+		uint32(b.offsets.LenNoPadding())
 
 	return uint64(estimateSz) > capacity
 }
@@ -414,7 +414,7 @@ func (b *Builder) Finish(allocate bool) []byte {
 	dst := b.buf
 	// Fix block boundaries. This includes moving the blocks so that we
 	// don't have any interleaving space between them.
-	bo, next := []byte{}, 1
+	bo, next := []byte{}, b.offsets.StartOffset()
 	if len(b.blockList) > 0 {
 		dstLen := uint32(0)
 		for _, bl := range b.blockList {
