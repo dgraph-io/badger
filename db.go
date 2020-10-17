@@ -371,6 +371,7 @@ func Open(opt Options) (*DB, error) {
 }
 
 func (db *DB) MaxVersion() uint64 {
+	return 0
 	var maxVersion uint64
 	update := func(a uint64) {
 		if a > maxVersion {
@@ -541,6 +542,10 @@ func (db *DB) close() (err error) {
 	}
 	db.stopMemoryFlush()
 	db.stopCompactions()
+
+	if db.mt != nil {
+		db.mt.DecrRef()
+	}
 
 	// Force Compact L0
 	// We don't need to care about cstatus since no parallel compaction is running.

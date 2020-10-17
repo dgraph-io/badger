@@ -2187,3 +2187,24 @@ func TestUpdateMaxCost(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(4<<20), cost)
 }
+
+func TestOpenDB(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	ops := getTestOptions(dir)
+	ops.ReadOnly = false
+	db, err := Open(ops)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	ops.ReadOnly = true
+	db, err = Open(ops)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	db, err = Open(ops)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+}
