@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -511,73 +512,79 @@ func randomKey(rng *rand.Rand) []byte {
 
 // Standard test. Some fraction is read. Some fraction is write. Writes have
 // to go through mutex lock.
-//func BenchmarkReadWrite(b *testing.B) {
-//	value := newValue(123)
-//	for i := 0; i <= 10; i++ {
-//		readFrac := float32(i) / 10.0
-//		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
-//			l := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
-//			defer l.DecrRef()
-//			b.ResetTimer()
-//			var count int
-//			b.RunParallel(func(pb *testing.PB) {
-//				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-//				for pb.Next() {
-//					if rng.Float32() < readFrac {
-//						v := l.Get(randomKey(rng))
-//						if v.Value != nil {
-//							count++
-//						}
-//					} else {
-//						l.Put(randomKey(rng), y.ValueStruct{Value: value, Meta: 0, UserMeta: 0})
-//					}
-//				}
-//			})
-//		})
-//	}
-//}
+func BenchmarkReadWrite(b *testing.B) {
+	value := newValue(123)
+	for i := 0; i <= 10; i++ {
+		readFrac := float32(i) / 10.0
+		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
+			buf, err := z.NewBufferWith(int((b.N+1)*MaxNodeSize), int((b.N+1)*MaxNodeSize),
+				z.UseCalloc)
+			y.Check(err)
+			l := NewSkiplist(buf, y.CompareKeys)
+			defer l.DecrRef()
+			b.ResetTimer()
+			var count int
+			b.RunParallel(func(pb *testing.PB) {
+				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+				for pb.Next() {
+					if rng.Float32() < readFrac {
+						v := l.Get(randomKey(rng))
+						if v.Value != nil {
+							count++
+						}
+					} else {
+						l.Put(randomKey(rng), y.ValueStruct{Value: value, Meta: 0, UserMeta: 0})
+					}
+				}
+			})
+		})
+	}
+}
 
 // Standard test. Some fraction is read. Some fraction is write. Writes have
 // to go through mutex lock.
-//func BenchmarkReadWriteMap(b *testing.B) {
-//	value := newValue(123)
-//	for i := 0; i <= 10; i++ {
-//		readFrac := float32(i) / 10.0
-//		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
-//			m := make(map[string][]byte)
-//			var mutex sync.RWMutex
-//			b.ResetTimer()
-//			var count int
-//			b.RunParallel(func(pb *testing.PB) {
-//				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-//				for pb.Next() {
-//					if rng.Float32() < readFrac {
-//						mutex.RLock()
-//						_, ok := m[string(randomKey(rng))]
-//						mutex.RUnlock()
-//						if ok {
-//							count++
-//						}
-//					} else {
-//						mutex.Lock()
-//						m[string(randomKey(rng))] = value
-//						mutex.Unlock()
-//					}
-//				}
-//			})
-//		})
-//	}
-//}
-//
-//func BenchmarkWrite(b *testing.B) {
-//	value := newValue(123)
-//	l := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
-//	defer l.DecrRef()
-//	b.ResetTimer()
-//	b.RunParallel(func(pb *testing.PB) {
-//		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-//		for pb.Next() {
-//			l.Put(randomKey(rng), y.ValueStruct{Value: value, Meta: 0, UserMeta: 0})
-//		}
-//	})
-//}
+func BenchmarkReadWriteMap(b *testing.B) {
+	value := newValue(123)
+	for i := 0; i <= 10; i++ {
+		readFrac := float32(i) / 10.0
+		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
+			m := make(map[string][]byte)
+			var mutex sync.RWMutex
+			b.ResetTimer()
+			var count int
+			b.RunParallel(func(pb *testing.PB) {
+				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+				for pb.Next() {
+					if rng.Float32() < readFrac {
+						mutex.RLock()
+						_, ok := m[string(randomKey(rng))]
+						mutex.RUnlock()
+						if ok {
+							count++
+						}
+					} else {
+						mutex.Lock()
+						m[string(randomKey(rng))] = value
+						mutex.Unlock()
+					}
+				}
+			})
+		})
+	}
+}
+
+func BenchmarkWrite(b *testing.B) {
+	value := newValue(123)
+	buf, err := z.NewBufferWith(int((b.N+1)*MaxNodeSize), int((b.N+1)*MaxNodeSize),
+		z.UseCalloc)
+	y.Check(err)
+	l := NewSkiplist(buf, y.CompareKeys)
+	defer l.DecrRef()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+		for pb.Next() {
+			l.Put(randomKey(rng), y.ValueStruct{Value: value, Meta: 0, UserMeta: 0})
+		}
+	})
+}
