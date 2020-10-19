@@ -334,14 +334,9 @@ func Open(opt Options) (*DB, error) {
 	db.orc.nextTxnTs = db.MaxVersion()
 	db.opt.Infof("Set nextTxnTs to %d", db.orc.nextTxnTs)
 
-	replayCloser := z.NewCloser(1)
-	go db.doWrites(replayCloser)
-
 	if err = db.vlog.open(db); err != nil {
-		replayCloser.SignalAndWait()
 		return db, y.Wrapf(err, "During db.vlog.open")
 	}
-	replayCloser.SignalAndWait() // Wait for replay to be applied first.
 
 	// Let's advance nextTxnTs to one more than whatever we observed via
 	// replaying the logs.
