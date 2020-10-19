@@ -90,12 +90,10 @@ func TestEmpty(t *testing.T) {
 
 // TestBasic tests single-threaded inserts and updates and gets.
 func TestBasic(t *testing.T) {
-	buf, err := z.NewBufferWith(1<<20, 1<<20, z.UseCalloc)
+	buf, err := z.NewBufferWith(2<<20, 2<<20, z.UseCalloc)
 	y.Check(err)
 	//l := NewSkiplist(buf)
 	// l := NewSkiplist(arenaSize)
-	fmt.Println("Size", buf.Len())
-	z.ZeroOut(buf.Bytes(), 0, 1<<20)
 	l := NewSkiplist(buf, y.CompareKeys)
 
 	val1 := newValue(42)
@@ -103,7 +101,6 @@ func TestBasic(t *testing.T) {
 	val3 := newValue(62)
 	val4 := newValue(72)
 	val5 := []byte(fmt.Sprintf("%0102400d", 1)) // Have size 100 KB which is > math.MaxUint16.
-
 	// Try inserting values.
 	// Somehow require.Nil doesn't work when checking for unsafe.Pointer(nil).
 	l.Put(y.KeyWithTs([]byte("key1"), 0), y.ValueStruct{Value: val1, Meta: 55, UserMeta: 0})
@@ -148,7 +145,7 @@ func TestConcurrentBasic(t *testing.T) {
 
 	//l := NewSkiplist(buf)
 
-	l := NewSkiplist(buf, bytes.Compare)
+	l := NewSkiplist(buf, y.CompareKeys)
 
 	//l := NewSkiplist(arenaSize)
 	var wg sync.WaitGroup
@@ -181,7 +178,7 @@ func TestConcurrentBasic(t *testing.T) {
 func TestConcurrentBasicBigValues(t *testing.T) {
 	const n = 100
 	//arenaSize := int64(120 << 20) // 120 MB
-	buf, err := z.NewBufferWith(1<<20, 1<<20, z.UseCalloc)
+	buf, err := z.NewBufferWith(120<<20, 120<<20, z.UseCalloc)
 	y.Check(err)
 
 	//l := NewSkiplist(buf)

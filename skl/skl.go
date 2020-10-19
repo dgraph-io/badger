@@ -33,12 +33,11 @@ Key differences:
 package skl
 
 import (
-	"fmt"
 	"math"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 )
@@ -52,7 +51,10 @@ const (
 const MaxNodeSize = int(unsafe.Sizeof(node{}))
 
 type node struct {
-	// Actual value
+	// Multiple parts of the value are encoded as a single uint64 so that it
+	// can be atomically loaded and stored:
+	//   value offset: uint32 (bits 0-31)
+	//   value size  : uint16 (bits 32-63)
 	value uint64
 
 	// A byte slice is 24 bytes. We are trying to save space here.
@@ -130,11 +132,12 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 // NewSkiplist makes a new empty skiplist, with a given arena size
 // NewSkiplist(z.Buffer) => Size of arena.
 func NewSkiplist(buf *z.Buffer, keyComparator comparator) *Skiplist {
-	arena := &Arena{buf}
+	var lock sync.RWMutex
+	arena := &Arena{buf, lock}
 	offset := arena.allocateValue(y.ValueStruct{})
 	head := newNode(arena, nil, offset, maxHeight)
-	fmt.Println("head while creation", head)
-	spew.Dump(head)
+	//	fmt.Println("head.tower while creation", head.tower)
+	//spew.Dump(head)
 	return &Skiplist{
 		height:        1,
 		head:          head,
@@ -158,7 +161,6 @@ func (s *node) setUint64(u uint64) {
 }
 
 func (s *node) getNextOffset(h int) uint32 {
-	fmt.Println(s.tower)
 	return atomic.LoadUint32(&s.tower[h])
 }
 
@@ -215,7 +217,6 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 			return x, false
 		}
 		nextKey := next.key(s.arena)
-		//cmp := y.CompareKeys(key, nextKey)
 		cmp := s.keyComparator(key, nextKey)
 		if cmp > 0 {
 			// x.key < next.key < key. We can continue to move right.
@@ -271,7 +272,6 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 			return before, next
 		}
 		nextKey := next.key(s.arena)
-		//cmp := y.CompareKeys(key, nextKey)
 		cmp := s.keyComparator(key, nextKey)
 		if cmp == 0 {
 			// Equality case.
@@ -304,10 +304,10 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 	var next [maxHeight + 1]*node
 	prev[listHeight] = s.head
 	next[listHeight] = nil
-	spew.Dump(s.head)
+	// fmt.Println("head.tower after", s.head.tower)
+	// spew.Dump(s.head)
 	for i := int(listHeight) - 1; i >= 0; i-- {
 		// Use higher level to speed up for current level.
-		fmt.Println("head after", prev[i+1])
 		prev[i], next[i] = s.findSpliceForLevel(key, prev[i+1], i)
 		if prev[i] == next[i] {
 			prev[i].setUint64(u)

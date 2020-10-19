@@ -17,6 +17,7 @@
 package skl
 
 import (
+	"sync"
 	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/y"
@@ -36,38 +37,11 @@ const (
 // Arena should be lock-free.
 type Arena struct {
 	*z.Buffer
-	//	n   uint32
-	//	buf []byte
+	lock sync.RWMutex
 }
-
-// newArena returns a new arena.
-//func newArena(n int64, mmaped bool) *Arena {
-//	// Don't store data at position 0 in order to reserve offset=0 as a kind
-//	// of nil pointer.
-//	var data []byte
-//	if mmaped {
-//		fd, err := ioutil.TempFile("", "arena")
-//		y.Check(err)
-//		fd.Truncate(n)
-//		// mtype := unix.PROT_READ | unix.PROT_WRITE
-//		// data, err := unix.Mmap(-1, 0, int(sz), mtype, unix.MAP_SHARED|unix.MAP_ANONYMOUS)
-//		data, err := z.Mmap(fd, true, n)
-//		y.Check(err)
-//		zeroOut(data, 0)
-//	} else {
-//		data = make([]byte, n)
-//	}
-//
-//	out := &Arena{
-//		n:   1,
-//		buf: data,
-//	}
-//	return out
-//}
 
 func (s *Arena) size() int64 {
 	return int64(s.Len() - 1)
-	// return int64(atomic.LoadUint32(&s.n))
 }
 
 // allocateValue encodes valueStruct and put it in the arena buffer.
@@ -75,12 +49,13 @@ func (s *Arena) size() int64 {
 func (s *Arena) allocateValue(v y.ValueStruct) uint64 {
 	valOffset := s.putVal(v)
 	return encodeValue(valOffset, v.EncodedSize())
-
 }
 
 // putNode allocates a node in the arena. The node is aligned on a pointer-sized
 // boundary. The arena offset of the node is returned.
 func (s *Arena) putNode(height int) uint32 {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	// Compute the amount of the tower that will never be used, since the height
 	// is less than maxHeight.
 	unusedSize := (maxHeight - height) * offsetSize
@@ -103,6 +78,8 @@ func (s *Arena) putNode(height int) uint32 {
 // size of val. We could also store this size inside arena but the encoding and
 // decoding will incur some overhead.
 func (s *Arena) putVal(v y.ValueStruct) uint32 {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	l := uint32(v.EncodedSize())
 	//n := atomic.AddUint32(&s.n, l)
 	//l := uint32(MaxNodeSize - unusedSize + nodeAlign)
@@ -118,6 +95,8 @@ func (s *Arena) putVal(v y.ValueStruct) uint32 {
 }
 
 func (s *Arena) putKey(key []byte) uint32 {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	l := uint32(len(key))
 	//n := atomic.AddUint32(&s.n, l)
 	n := uint32(s.AllocateOffset(int(l))) + l
@@ -136,15 +115,18 @@ func (s *Arena) putKey(key []byte) uint32 {
 // getNode returns a pointer to the node located at offset. If the offset is
 // zero, then the nil node pointer is returned.
 func (s *Arena) getNode(offset uint32) *node {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	if offset == 0 {
 		return nil
 	}
-	buf := s.Bytes()[offset]
-	return (*node)(unsafe.Pointer(&buf))
+	return (*node)(unsafe.Pointer(&s.Bytes()[offset]))
 }
 
 // getKey returns byte slice at offset.
 func (s *Arena) getKey(offset uint32, size uint16) []byte {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	return s.Bytes()[offset : offset+uint32(size)]
 	//return s.buf[offset : offset+uint32(size)]
 }
@@ -152,6 +134,8 @@ func (s *Arena) getKey(offset uint32, size uint16) []byte {
 // getVal returns byte slice at offset. The given size should be just the value
 // size and should NOT include the meta bytes.
 func (s *Arena) getVal(offset uint32, size uint32) (ret y.ValueStruct) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	ret.Decode(s.Bytes()[offset : offset+size])
 	return
 }
@@ -159,9 +143,12 @@ func (s *Arena) getVal(offset uint32, size uint32) (ret y.ValueStruct) {
 // getNodeOffset returns the offset of node in the arena. If the node pointer is
 // nil, then the zero offset is returned.
 func (s *Arena) getNodeOffset(nd *node) uint32 {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	if nd == nil {
 		return 0
 	}
+	val := uint32(uintptr(unsafe.Pointer(nd)) - uintptr(unsafe.Pointer(&s.Bytes()[0])))
+	return val
 
-	return uint32(uintptr(unsafe.Pointer(nd)) - uintptr(unsafe.Pointer(&s.Bytes()[0])))
 }
