@@ -17,10 +17,12 @@
 package skl
 
 import (
+	"io/ioutil"
 	"sync/atomic"
 	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 const (
@@ -43,15 +45,33 @@ type Arena struct {
 func newArena(n int64) *Arena {
 	// Don't store data at position 0 in order to reserve offset=0 as a kind
 	// of nil pointer.
+	fd, err := ioutil.TempFile("", "arena")
+	y.Check(err)
+	fd.Truncate(n)
+
+	// mtype := unix.PROT_READ | unix.PROT_WRITE
+	// data, err := unix.Mmap(-1, 0, int(sz), mtype, unix.MAP_SHARED|unix.MAP_ANONYMOUS)
+	data, err := z.Mmap(fd, true, n)
+	y.Check(err)
+	z.ZeroOut(data, 0)
+
 	out := &Arena{
 		n:   1,
-		buf: make([]byte, n),
+		buf: data, //make([]byte, n),
 	}
 	return out
 }
 
 func (s *Arena) size() int64 {
 	return int64(atomic.LoadUint32(&s.n))
+}
+
+// allocateValue encodes valueStruct and put it in the arena buffer.
+// It returns the encoded uint64 => | size | offset |
+func (s *Arena) allocateValue(v y.ValueStruct) uint64 {
+	valOffset := s.putVal(v)
+	return encodeValue(valOffset, v.EncodedSize())
+
 }
 
 // putNode allocates a node in the arena. The node is aligned on a pointer-sized

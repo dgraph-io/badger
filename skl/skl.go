@@ -50,10 +50,7 @@ const (
 const MaxNodeSize = int(unsafe.Sizeof(node{}))
 
 type node struct {
-	// Multiple parts of the value are encoded as a single uint64 so that it
-	// can be atomically loaded and stored:
-	//   value offset: uint32 (bits 0-31)
-	//   value size  : uint16 (bits 32-63)
+	// Actual value
 	value uint64
 
 	// A byte slice is 24 bytes. We are trying to save space here.
@@ -104,14 +101,14 @@ func (s *Skiplist) DecrRef() {
 	s.head = nil
 }
 
-func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
+func newNode(arena *Arena, key []byte, u uint64, height int) *node {
 	// The base level is already allocated in the node struct.
 	offset := arena.putNode(height)
 	node := arena.getNode(offset)
 	node.keyOffset = arena.putKey(key)
 	node.keySize = uint16(len(key))
 	node.height = uint16(height)
-	node.value = encodeValue(arena.putVal(v), v.EncodedSize())
+	node.value = u
 	return node
 }
 
@@ -126,9 +123,11 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 }
 
 // NewSkiplist makes a new empty skiplist, with a given arena size
+// NewSkiplist(z.Buffer) => Size of arena.
 func NewSkiplist(arenaSize int64) *Skiplist {
 	arena := newArena(arenaSize)
-	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
+	offset := arena.allocateValue(y.ValueStruct{})
+	head := newNode(arena, nil, offset, maxHeight)
 	return &Skiplist{
 		height: 1,
 		head:   head,
@@ -146,10 +145,8 @@ func (s *node) key(arena *Arena) []byte {
 	return arena.getKey(s.keyOffset, s.keySize)
 }
 
-func (s *node) setValue(arena *Arena, v y.ValueStruct) {
-	valOffset := arena.putVal(v)
-	value := encodeValue(valOffset, v.EncodedSize())
-	atomic.StoreUint64(&s.value, value)
+func (s *node) setUint64(u uint64) {
+	atomic.StoreUint64(&s.value, u)
 }
 
 func (s *node) getNextOffset(h int) uint32 {
@@ -284,6 +281,11 @@ func (s *Skiplist) getHeight() int32 {
 
 // Put inserts the key-value pair.
 func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
+	val := s.arena.allocateValue(v)
+	s.PutUint64(key, val)
+}
+
+func (s *Skiplist) PutUint64(key []byte, u uint64) {
 	// Since we allow overwrite, we may not need to create a new node. We might not even need to
 	// increase the height. Let's defer these actions.
 
@@ -296,14 +298,14 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 		// Use higher level to speed up for current level.
 		prev[i], next[i] = s.findSpliceForLevel(key, prev[i+1], i)
 		if prev[i] == next[i] {
-			prev[i].setValue(s.arena, v)
+			prev[i].setUint64(u)
 			return
 		}
 	}
 
 	// We do need to create a new node.
 	height := s.randomHeight()
-	x := newNode(s.arena, key, v, height)
+	x := newNode(s.arena, key, u, height)
 
 	// Try to increase s.height via CAS.
 	listHeight = s.getHeight()
@@ -340,7 +342,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 			prev[i], next[i] = s.findSpliceForLevel(key, prev[i], i)
 			if prev[i] == next[i] {
 				y.AssertTruef(i == 0, "Equality can happen only on base level: %d", i)
-				prev[i].setValue(s.arena, v)
+				prev[i].setUint64(u)
 				return
 			}
 		}
@@ -376,11 +378,10 @@ func (s *Skiplist) findLast() *node {
 // Get gets the value associated with the key. It returns a valid value if it finds equal or earlier
 // version of the same key.
 func (s *Skiplist) Get(key []byte) y.ValueStruct {
-	n, _ := s.findNear(key, false, true) // findGreaterOrEqual.
+	n := s.getNode(key)
 	if n == nil {
 		return y.ValueStruct{}
 	}
-
 	nextKey := s.arena.getKey(n.keyOffset, n.keySize)
 	if !y.SameKey(key, nextKey) {
 		return y.ValueStruct{}
@@ -390,6 +391,27 @@ func (s *Skiplist) Get(key []byte) y.ValueStruct {
 	vs := s.arena.getVal(valOffset, valSize)
 	vs.Version = y.ParseTs(nextKey)
 	return vs
+
+}
+
+func (s *Skiplist) GetUint64(key []byte) (uint64, bool) {
+	n := s.getNode(key)
+	if n == nil {
+		return 0, false
+	}
+	return n.value, true
+}
+
+func (s *Skiplist) getNode(key []byte) *node {
+	n, _ := s.findNear(key, false, true) // findGreaterOrEqual.
+	if n == nil {
+		return nil
+	}
+	nextKey := s.arena.getKey(n.keyOffset, n.keySize)
+	if !y.SameKey(key, nextKey) {
+		return nil
+	}
+	return n
 }
 
 // NewIterator returns a skiplist iterator.  You have to Close() the iterator.
