@@ -45,7 +45,7 @@ func (s *Arena) size() int64 {
 }
 
 // allocateValue encodes valueStruct and put it in the arena buffer.
-// It returns the encoded uint64 => | size | offset |
+// It returns the encoded uint64 => | size (32 bits) | offset (32 bits) |
 func (s *Arena) allocateValue(v y.ValueStruct) uint64 {
 	valOffset := s.putVal(v)
 	return encodeValue(valOffset, v.EncodedSize())
@@ -81,13 +81,7 @@ func (s *Arena) putVal(v y.ValueStruct) uint32 {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	l := uint32(v.EncodedSize())
-	//n := atomic.AddUint32(&s.n, l)
-	//l := uint32(MaxNodeSize - unusedSize + nodeAlign)
-	//n := atomic.AddUint32(&s.n, l)
 	n := uint32(s.AllocateOffset(int(l))) + l
-	//.AssertTruef(int(n) <= len(s.buf),
-	//	"Arena too small, toWrite:%d newTotal:%d limit:%d",
-	//	l, n, len(s.buf))
 	m := n - l
 	buf := s.Bytes()[m : m+l]
 	v.Encode(buf)
@@ -98,15 +92,10 @@ func (s *Arena) putKey(key []byte) uint32 {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	l := uint32(len(key))
-	//n := atomic.AddUint32(&s.n, l)
 	n := uint32(s.AllocateOffset(int(l))) + l
-	//y.AssertTruef(int(n) <= len(s.buf),
-	//	"Arena too small, toWrite:%d newTotal:%d limit:%d",
-	//	l, n, len(s.buf))
 	// m is the offset where you should write.
 	// n = new len - key len give you the offset at which you should write.
 	m := n - l
-	// Copy to buffer from m:n
 	buf := s.Bytes()[m:n]
 	y.AssertTrue(len(key) == copy(buf, key))
 	return m
@@ -128,7 +117,6 @@ func (s *Arena) getKey(offset uint32, size uint16) []byte {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	return s.Bytes()[offset : offset+uint32(size)]
-	//return s.buf[offset : offset+uint32(size)]
 }
 
 // getVal returns byte slice at offset. The given size should be just the value

@@ -74,15 +74,15 @@ type node struct {
 	tower [maxHeight]uint32
 }
 
-type comparator func([]byte, []byte) int
+type comparatorFunc func([]byte, []byte) int
 
 type Skiplist struct {
-	height        int32 // Current height. 1 <= height <= kMaxHeight. CAS.
-	head          *node
-	ref           int32
-	arena         *Arena
-	keyComparator comparator
-	OnClose       func()
+	height     int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	head       *node
+	ref        int32
+	arena      *Arena
+	comparator comparatorFunc
+	OnClose    func()
 }
 
 // IncrRef increases the refcount
@@ -131,7 +131,7 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 
 // NewSkiplist makes a new empty skiplist, with a given arena size
 // NewSkiplist(z.Buffer) => Size of arena.
-func NewSkiplist(buf *z.Buffer, keyComparator comparator) *Skiplist {
+func NewSkiplist(buf *z.Buffer, comparator comparatorFunc) *Skiplist {
 	var lock sync.RWMutex
 	arena := &Arena{buf, lock}
 	offset := arena.allocateValue(y.ValueStruct{})
@@ -139,11 +139,11 @@ func NewSkiplist(buf *z.Buffer, keyComparator comparator) *Skiplist {
 	//	fmt.Println("head.tower while creation", head.tower)
 	//spew.Dump(head)
 	return &Skiplist{
-		height:        1,
-		head:          head,
-		arena:         arena,
-		ref:           1,
-		keyComparator: keyComparator,
+		height:     1,
+		head:       head,
+		arena:      arena,
+		ref:        1,
+		comparator: comparator,
 	}
 }
 
@@ -217,7 +217,7 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 			return x, false
 		}
 		nextKey := next.key(s.arena)
-		cmp := s.keyComparator(key, nextKey)
+		cmp := s.comparator(key, nextKey)
 		if cmp > 0 {
 			// x.key < next.key < key. We can continue to move right.
 			x = next
@@ -272,7 +272,7 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 			return before, next
 		}
 		nextKey := next.key(s.arena)
-		cmp := s.keyComparator(key, nextKey)
+		cmp := s.comparator(key, nextKey)
 		if cmp == 0 {
 			// Equality case.
 			return next, next
@@ -295,6 +295,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 	s.PutUint64(key, val)
 }
 
+// PutUint64 inserts the key-value pair, with a uint64 value.
 func (s *Skiplist) PutUint64(key []byte, u uint64) {
 	// Since we allow overwrite, we may not need to create a new node. We might not even need to
 	// increase the height. Let's defer these actions.
@@ -420,7 +421,7 @@ func (s *Skiplist) getNode(key []byte) *node {
 		return nil
 	}
 	nextKey := s.arena.getKey(n.keyOffset, n.keySize)
-	if !y.SameKey(key, nextKey) {
+	if s.comparator(key, nextKey) != 0 {
 		return nil
 	}
 	return n
