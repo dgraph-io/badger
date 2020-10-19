@@ -17,8 +17,6 @@
 package skl
 
 import (
-	"io/ioutil"
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/y"
@@ -37,33 +35,39 @@ const (
 
 // Arena should be lock-free.
 type Arena struct {
-	n   uint32
-	buf []byte
+	*z.Buffer
+	//	n   uint32
+	//	buf []byte
 }
 
 // newArena returns a new arena.
-func newArena(n int64) *Arena {
-	// Don't store data at position 0 in order to reserve offset=0 as a kind
-	// of nil pointer.
-	fd, err := ioutil.TempFile("", "arena")
-	y.Check(err)
-	fd.Truncate(n)
-
-	// mtype := unix.PROT_READ | unix.PROT_WRITE
-	// data, err := unix.Mmap(-1, 0, int(sz), mtype, unix.MAP_SHARED|unix.MAP_ANONYMOUS)
-	data, err := z.Mmap(fd, true, n)
-	y.Check(err)
-	z.ZeroOut(data, 0)
-
-	out := &Arena{
-		n:   1,
-		buf: data, //make([]byte, n),
-	}
-	return out
-}
+//func newArena(n int64, mmaped bool) *Arena {
+//	// Don't store data at position 0 in order to reserve offset=0 as a kind
+//	// of nil pointer.
+//	var data []byte
+//	if mmaped {
+//		fd, err := ioutil.TempFile("", "arena")
+//		y.Check(err)
+//		fd.Truncate(n)
+//		// mtype := unix.PROT_READ | unix.PROT_WRITE
+//		// data, err := unix.Mmap(-1, 0, int(sz), mtype, unix.MAP_SHARED|unix.MAP_ANONYMOUS)
+//		data, err := z.Mmap(fd, true, n)
+//		y.Check(err)
+//		zeroOut(data, 0)
+//	} else {
+//		data = make([]byte, n)
+//	}
+//
+//	out := &Arena{
+//		n:   1,
+//		buf: data,
+//	}
+//	return out
+//}
 
 func (s *Arena) size() int64 {
-	return int64(atomic.LoadUint32(&s.n))
+	return int64(s.Len() - 1)
+	// return int64(atomic.LoadUint32(&s.n))
 }
 
 // allocateValue encodes valueStruct and put it in the arena buffer.
@@ -83,10 +87,11 @@ func (s *Arena) putNode(height int) uint32 {
 
 	// Pad the allocation with enough bytes to ensure pointer alignment.
 	l := uint32(MaxNodeSize - unusedSize + nodeAlign)
-	n := atomic.AddUint32(&s.n, l)
-	y.AssertTruef(int(n) <= len(s.buf),
-		"Arena too small, toWrite:%d newTotal:%d limit:%d",
-		l, n, len(s.buf))
+	//n := atomic.AddUint32(&s.n, l)
+	n := uint32(s.AllocateOffset(int(l))) + l
+	//y.AssertTruef(int(n) <= len(n),
+	//	"Arena too small, toWrite:%d newTotal:%d limit:%d",
+	//	l, n, len(s.buf))
 
 	// Return the aligned offset.
 	m := (n - l + uint32(nodeAlign)) & ^uint32(nodeAlign)
@@ -99,26 +104,32 @@ func (s *Arena) putNode(height int) uint32 {
 // decoding will incur some overhead.
 func (s *Arena) putVal(v y.ValueStruct) uint32 {
 	l := uint32(v.EncodedSize())
-	n := atomic.AddUint32(&s.n, l)
-	y.AssertTruef(int(n) <= len(s.buf),
-		"Arena too small, toWrite:%d newTotal:%d limit:%d",
-		l, n, len(s.buf))
+	//n := atomic.AddUint32(&s.n, l)
+	//l := uint32(MaxNodeSize - unusedSize + nodeAlign)
+	//n := atomic.AddUint32(&s.n, l)
+	n := uint32(s.AllocateOffset(int(l))) + l
+	//.AssertTruef(int(n) <= len(s.buf),
+	//	"Arena too small, toWrite:%d newTotal:%d limit:%d",
+	//	l, n, len(s.buf))
 	m := n - l
-	v.Encode(s.buf[m:])
+	buf := s.Bytes()[m : m+l]
+	v.Encode(buf)
 	return m
 }
 
 func (s *Arena) putKey(key []byte) uint32 {
 	l := uint32(len(key))
-	n := atomic.AddUint32(&s.n, l)
-	y.AssertTruef(int(n) <= len(s.buf),
-		"Arena too small, toWrite:%d newTotal:%d limit:%d",
-		l, n, len(s.buf))
+	//n := atomic.AddUint32(&s.n, l)
+	n := uint32(s.AllocateOffset(int(l))) + l
+	//y.AssertTruef(int(n) <= len(s.buf),
+	//	"Arena too small, toWrite:%d newTotal:%d limit:%d",
+	//	l, n, len(s.buf))
 	// m is the offset where you should write.
 	// n = new len - key len give you the offset at which you should write.
 	m := n - l
 	// Copy to buffer from m:n
-	y.AssertTrue(len(key) == copy(s.buf[m:n], key))
+	buf := s.Bytes()[m:n]
+	y.AssertTrue(len(key) == copy(buf, key))
 	return m
 }
 
@@ -128,19 +139,20 @@ func (s *Arena) getNode(offset uint32) *node {
 	if offset == 0 {
 		return nil
 	}
-
-	return (*node)(unsafe.Pointer(&s.buf[offset]))
+	buf := s.Bytes()[offset]
+	return (*node)(unsafe.Pointer(&buf))
 }
 
 // getKey returns byte slice at offset.
 func (s *Arena) getKey(offset uint32, size uint16) []byte {
-	return s.buf[offset : offset+uint32(size)]
+	return s.Bytes()[offset : offset+uint32(size)]
+	//return s.buf[offset : offset+uint32(size)]
 }
 
 // getVal returns byte slice at offset. The given size should be just the value
 // size and should NOT include the meta bytes.
 func (s *Arena) getVal(offset uint32, size uint32) (ret y.ValueStruct) {
-	ret.Decode(s.buf[offset : offset+size])
+	ret.Decode(s.Bytes()[offset : offset+size])
 	return
 }
 
@@ -151,5 +163,5 @@ func (s *Arena) getNodeOffset(nd *node) uint32 {
 		return 0
 	}
 
-	return uint32(uintptr(unsafe.Pointer(nd)) - uintptr(unsafe.Pointer(&s.buf[0])))
+	return uint32(uintptr(unsafe.Pointer(nd)) - uintptr(unsafe.Pointer(&s.Bytes()[0])))
 }

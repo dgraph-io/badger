@@ -17,6 +17,7 @@
 package skl
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -24,11 +25,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 const arenaSize = 1 << 20
@@ -52,7 +53,10 @@ func length(s *Skiplist) int {
 
 func TestEmpty(t *testing.T) {
 	key := []byte("aaa")
-	l := NewSkiplist(arenaSize)
+	//buf := z.NewBuffer(1 << 20)
+	buf, err := z.NewBufferWith(1<<20, 1<<20, z.UseCalloc)
+	y.Check(err)
+	l := NewSkiplist(buf, bytes.Compare)
 
 	v := l.Get(key)
 	require.True(t, v.Value == nil) // Cannot use require.Nil for unsafe.Pointer nil.
@@ -86,7 +90,14 @@ func TestEmpty(t *testing.T) {
 
 // TestBasic tests single-threaded inserts and updates and gets.
 func TestBasic(t *testing.T) {
-	l := NewSkiplist(arenaSize)
+	buf, err := z.NewBufferWith(1<<20, 1<<20, z.UseCalloc)
+	y.Check(err)
+	//l := NewSkiplist(buf)
+	// l := NewSkiplist(arenaSize)
+	fmt.Println("Size", buf.Len())
+	z.ZeroOut(buf.Bytes(), 0, 1<<20)
+	l := NewSkiplist(buf, y.CompareKeys)
+
 	val1 := newValue(42)
 	val2 := newValue(52)
 	val3 := newValue(62)
@@ -131,7 +142,15 @@ func TestBasic(t *testing.T) {
 // TestConcurrentBasic tests concurrent writes followed by concurrent reads.
 func TestConcurrentBasic(t *testing.T) {
 	const n = 1000
-	l := NewSkiplist(arenaSize)
+	//buf := z.NewBuffer(1 << 20)
+	buf, err := z.NewBufferWith(1<<20, 1<<20, z.UseCalloc)
+	y.Check(err)
+
+	//l := NewSkiplist(buf)
+
+	l := NewSkiplist(buf, bytes.Compare)
+
+	//l := NewSkiplist(arenaSize)
 	var wg sync.WaitGroup
 	key := func(i int) []byte {
 		return y.KeyWithTs([]byte(fmt.Sprintf("%05d", i)), 0)
@@ -161,8 +180,14 @@ func TestConcurrentBasic(t *testing.T) {
 
 func TestConcurrentBasicBigValues(t *testing.T) {
 	const n = 100
-	arenaSize := int64(120 << 20) // 120 MB
-	l := NewSkiplist(arenaSize)
+	//arenaSize := int64(120 << 20) // 120 MB
+	buf, err := z.NewBufferWith(1<<20, 1<<20, z.UseCalloc)
+	y.Check(err)
+
+	//l := NewSkiplist(buf)
+
+	l := NewSkiplist(buf, bytes.Compare)
+
 	var wg sync.WaitGroup
 	key := func(i int) []byte {
 		return y.KeyWithTs([]byte(fmt.Sprintf("%05d", i)), 0)
@@ -197,7 +222,13 @@ func TestConcurrentBasicBigValues(t *testing.T) {
 func TestOneKey(t *testing.T) {
 	const n = 100
 	key := y.KeyWithTs([]byte("thekey"), 0)
-	l := NewSkiplist(arenaSize)
+	buf, err := z.NewBufferWith(1<<20, 1<<20, z.UseCalloc)
+	y.Check(err)
+
+	//	l := NewSkiplist(buf)
+
+	l := NewSkiplist(buf, bytes.Compare)
+
 	defer l.DecrRef()
 
 	var wg sync.WaitGroup
@@ -230,7 +261,13 @@ func TestOneKey(t *testing.T) {
 }
 
 func TestFindNear(t *testing.T) {
-	l := NewSkiplist(arenaSize)
+	buf, err := z.NewBufferWith(1<<20, 1<<20, z.UseCalloc)
+	y.Check(err)
+
+	//l := NewSkiplist(buf)
+
+	l := NewSkiplist(buf, bytes.Compare)
+
 	defer l.DecrRef()
 	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("%05d", i*10+5)
@@ -337,7 +374,13 @@ func TestFindNear(t *testing.T) {
 // TestIteratorNext tests a basic iteration over all nodes from the beginning.
 func TestIteratorNext(t *testing.T) {
 	const n = 100
-	l := NewSkiplist(arenaSize)
+	buf, err := z.NewBufferWith(1<<20, 1<<20, z.UseCalloc)
+	y.Check(err)
+
+	//l := NewSkiplist(buf)
+
+	l := NewSkiplist(buf, bytes.Compare)
+
 	defer l.DecrRef()
 	it := l.NewIterator()
 	defer it.Close()
@@ -361,7 +404,13 @@ func TestIteratorNext(t *testing.T) {
 // TestIteratorPrev tests a basic iteration over all nodes from the end.
 func TestIteratorPrev(t *testing.T) {
 	const n = 100
-	l := NewSkiplist(arenaSize)
+	buf, err := z.NewBufferWith(1<<20, 1<<20, z.UseCalloc)
+	y.Check(err)
+
+	//	l := NewSkiplist(buf)
+
+	l := NewSkiplist(buf, bytes.Compare)
+
 	defer l.DecrRef()
 	it := l.NewIterator()
 	defer it.Close()
@@ -385,7 +434,13 @@ func TestIteratorPrev(t *testing.T) {
 // TestIteratorSeek tests Seek and SeekForPrev.
 func TestIteratorSeek(t *testing.T) {
 	const n = 100
-	l := NewSkiplist(arenaSize)
+	buf, err := z.NewBufferWith(1<<20, 1<<20, z.UseCalloc)
+	y.Check(err)
+
+	//	l := NewSkiplist(buf)
+
+	l := NewSkiplist(buf, bytes.Compare)
+
 	defer l.DecrRef()
 
 	it := l.NewIterator()
@@ -459,73 +514,73 @@ func randomKey(rng *rand.Rand) []byte {
 
 // Standard test. Some fraction is read. Some fraction is write. Writes have
 // to go through mutex lock.
-func BenchmarkReadWrite(b *testing.B) {
-	value := newValue(123)
-	for i := 0; i <= 10; i++ {
-		readFrac := float32(i) / 10.0
-		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
-			l := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
-			defer l.DecrRef()
-			b.ResetTimer()
-			var count int
-			b.RunParallel(func(pb *testing.PB) {
-				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-				for pb.Next() {
-					if rng.Float32() < readFrac {
-						v := l.Get(randomKey(rng))
-						if v.Value != nil {
-							count++
-						}
-					} else {
-						l.Put(randomKey(rng), y.ValueStruct{Value: value, Meta: 0, UserMeta: 0})
-					}
-				}
-			})
-		})
-	}
-}
+//func BenchmarkReadWrite(b *testing.B) {
+//	value := newValue(123)
+//	for i := 0; i <= 10; i++ {
+//		readFrac := float32(i) / 10.0
+//		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
+//			l := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
+//			defer l.DecrRef()
+//			b.ResetTimer()
+//			var count int
+//			b.RunParallel(func(pb *testing.PB) {
+//				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+//				for pb.Next() {
+//					if rng.Float32() < readFrac {
+//						v := l.Get(randomKey(rng))
+//						if v.Value != nil {
+//							count++
+//						}
+//					} else {
+//						l.Put(randomKey(rng), y.ValueStruct{Value: value, Meta: 0, UserMeta: 0})
+//					}
+//				}
+//			})
+//		})
+//	}
+//}
 
 // Standard test. Some fraction is read. Some fraction is write. Writes have
 // to go through mutex lock.
-func BenchmarkReadWriteMap(b *testing.B) {
-	value := newValue(123)
-	for i := 0; i <= 10; i++ {
-		readFrac := float32(i) / 10.0
-		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
-			m := make(map[string][]byte)
-			var mutex sync.RWMutex
-			b.ResetTimer()
-			var count int
-			b.RunParallel(func(pb *testing.PB) {
-				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-				for pb.Next() {
-					if rng.Float32() < readFrac {
-						mutex.RLock()
-						_, ok := m[string(randomKey(rng))]
-						mutex.RUnlock()
-						if ok {
-							count++
-						}
-					} else {
-						mutex.Lock()
-						m[string(randomKey(rng))] = value
-						mutex.Unlock()
-					}
-				}
-			})
-		})
-	}
-}
-
-func BenchmarkWrite(b *testing.B) {
-	value := newValue(123)
-	l := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
-	defer l.DecrRef()
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-		for pb.Next() {
-			l.Put(randomKey(rng), y.ValueStruct{Value: value, Meta: 0, UserMeta: 0})
-		}
-	})
-}
+//func BenchmarkReadWriteMap(b *testing.B) {
+//	value := newValue(123)
+//	for i := 0; i <= 10; i++ {
+//		readFrac := float32(i) / 10.0
+//		b.Run(fmt.Sprintf("frac_%d", i), func(b *testing.B) {
+//			m := make(map[string][]byte)
+//			var mutex sync.RWMutex
+//			b.ResetTimer()
+//			var count int
+//			b.RunParallel(func(pb *testing.PB) {
+//				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+//				for pb.Next() {
+//					if rng.Float32() < readFrac {
+//						mutex.RLock()
+//						_, ok := m[string(randomKey(rng))]
+//						mutex.RUnlock()
+//						if ok {
+//							count++
+//						}
+//					} else {
+//						mutex.Lock()
+//						m[string(randomKey(rng))] = value
+//						mutex.Unlock()
+//					}
+//				}
+//			})
+//		})
+//	}
+//}
+//
+//func BenchmarkWrite(b *testing.B) {
+//	value := newValue(123)
+//	l := NewSkiplist(int64((b.N + 1) * MaxNodeSize))
+//	defer l.DecrRef()
+//	b.ResetTimer()
+//	b.RunParallel(func(pb *testing.PB) {
+//		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+//		for pb.Next() {
+//			l.Put(randomKey(rng), y.ValueStruct{Value: value, Meta: 0, UserMeta: 0})
+//		}
+//	})
+//}

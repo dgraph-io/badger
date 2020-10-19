@@ -33,10 +33,12 @@ Key differences:
 package skl
 
 import (
+	"fmt"
 	"math"
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 )
@@ -70,12 +72,15 @@ type node struct {
 	tower [maxHeight]uint32
 }
 
+type comparator func([]byte, []byte) int
+
 type Skiplist struct {
-	height  int32 // Current height. 1 <= height <= kMaxHeight. CAS.
-	head    *node
-	ref     int32
-	arena   *Arena
-	OnClose func()
+	height        int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	head          *node
+	ref           int32
+	arena         *Arena
+	keyComparator comparator
+	OnClose       func()
 }
 
 // IncrRef increases the refcount
@@ -124,15 +129,18 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 
 // NewSkiplist makes a new empty skiplist, with a given arena size
 // NewSkiplist(z.Buffer) => Size of arena.
-func NewSkiplist(arenaSize int64) *Skiplist {
-	arena := newArena(arenaSize)
+func NewSkiplist(buf *z.Buffer, keyComparator comparator) *Skiplist {
+	arena := &Arena{buf}
 	offset := arena.allocateValue(y.ValueStruct{})
 	head := newNode(arena, nil, offset, maxHeight)
+	fmt.Println("head while creation", head)
+	spew.Dump(head)
 	return &Skiplist{
-		height: 1,
-		head:   head,
-		arena:  arena,
-		ref:    1,
+		height:        1,
+		head:          head,
+		arena:         arena,
+		ref:           1,
+		keyComparator: keyComparator,
 	}
 }
 
@@ -150,6 +158,7 @@ func (s *node) setUint64(u uint64) {
 }
 
 func (s *node) getNextOffset(h int) uint32 {
+	fmt.Println(s.tower)
 	return atomic.LoadUint32(&s.tower[h])
 }
 
@@ -205,9 +214,9 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 			}
 			return x, false
 		}
-
 		nextKey := next.key(s.arena)
-		cmp := y.CompareKeys(key, nextKey)
+		//cmp := y.CompareKeys(key, nextKey)
+		cmp := s.keyComparator(key, nextKey)
 		if cmp > 0 {
 			// x.key < next.key < key. We can continue to move right.
 			x = next
@@ -262,7 +271,8 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 			return before, next
 		}
 		nextKey := next.key(s.arena)
-		cmp := y.CompareKeys(key, nextKey)
+		//cmp := y.CompareKeys(key, nextKey)
+		cmp := s.keyComparator(key, nextKey)
 		if cmp == 0 {
 			// Equality case.
 			return next, next
@@ -294,8 +304,10 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 	var next [maxHeight + 1]*node
 	prev[listHeight] = s.head
 	next[listHeight] = nil
+	spew.Dump(s.head)
 	for i := int(listHeight) - 1; i >= 0; i-- {
 		// Use higher level to speed up for current level.
+		fmt.Println("head after", prev[i+1])
 		prev[i], next[i] = s.findSpliceForLevel(key, prev[i+1], i)
 		if prev[i] == next[i] {
 			prev[i].setUint64(u)
@@ -412,6 +424,14 @@ func (s *Skiplist) getNode(key []byte) *node {
 		return nil
 	}
 	return n
+}
+
+func zeroOut(data []byte, offset int) {
+	data = data[offset:]
+	data[0] = 0x00
+	for bp := 1; bp < len(data); bp *= 2 {
+		copy(data[bp:], data[:bp])
+	}
 }
 
 // NewIterator returns a skiplist iterator.  You have to Close() the iterator.
