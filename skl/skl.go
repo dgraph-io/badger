@@ -450,14 +450,6 @@ func (s *Skiplist) getInternal(key []byte) (*node, uint64) {
 	return n, 0
 }
 
-func zeroOut(data []byte, offset int) {
-	data = data[offset:]
-	data[0] = 0x00
-	for bp := 1; bp < len(data); bp *= 2 {
-		copy(data[bp:], data[:bp])
-	}
-}
-
 // NewIterator returns a skiplist iterator.  You have to Close() the iterator.
 func (s *Skiplist) NewIterator() *Iterator {
 	s.IncrRef()
