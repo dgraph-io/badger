@@ -129,6 +129,7 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 	return
 }
 
+// NewSkiplist makes a new empty skiplist, with a given arena size.
 func NewSkiplist(arenaSize int64) *Skiplist {
 	buf, err := z.NewBufferWith(int(arenaSize), int(arenaSize), z.UseCalloc)
 	y.Check(err)
@@ -137,8 +138,7 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 	return skl
 }
 
-// NewSkiplist makes a new empty skiplist, with a given arena size
-// NewSkiplist(z.Buffer) => Size of arena.
+// NewSkiplistWithBuffer makes a new skiplist, with a given buffer.
 func NewSkiplistWithBuffer(buf *z.Buffer) *Skiplist {
 	arena := new(Arena)
 	arena.Buffer = buf
