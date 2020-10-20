@@ -151,11 +151,10 @@ func (cs *compactStatus) compareAndAdd(_ thisAndNextLevelRLocked, cd compactDef)
 	cs.Lock()
 	defer cs.Unlock()
 
-	level := cd.thisLevel.level
-
-	y.AssertTruef(level < len(cs.levels)-1, "Got level %d. Max levels: %d", level, len(cs.levels))
-	thisLevel := cs.levels[level]
-	nextLevel := cs.levels[level+1]
+	tl := cd.thisLevel.level
+	y.AssertTruef(tl < len(cs.levels)-1, "Got level %d. Max levels: %d", tl, len(cs.levels))
+	thisLevel := cs.levels[cd.thisLevel.level]
+	nextLevel := cs.levels[cd.nextLevel.level]
 
 	if thisLevel.overlapsWith(cd.thisRange) {
 		return false
@@ -178,11 +177,11 @@ func (cs *compactStatus) delete(cd compactDef) {
 	cs.Lock()
 	defer cs.Unlock()
 
-	level := cd.thisLevel.level
-	y.AssertTruef(level < len(cs.levels)-1, "Got level %d. Max levels: %d", level, len(cs.levels))
+	tl := cd.thisLevel.level
+	y.AssertTruef(tl < len(cs.levels)-1, "Got level %d. Max levels: %d", tl, len(cs.levels))
 
-	thisLevel := cs.levels[level]
-	nextLevel := cs.levels[level+1]
+	thisLevel := cs.levels[cd.thisLevel.level]
+	nextLevel := cs.levels[cd.nextLevel.level]
 
 	thisLevel.delSize -= cd.thisSize
 	found := thisLevel.remove(cd.thisRange)
