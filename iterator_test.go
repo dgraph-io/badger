@@ -199,36 +199,32 @@ func TestIteratePrefix(t *testing.T) {
 	}
 
 	t.Run("With Default options", func(t *testing.T) {
-		t.Parallel()
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
 			testIteratorPrefix(t, db)
 		})
 	})
 
 	t.Run("With Block Offsets in Cache", func(t *testing.T) {
-		t.Parallel()
 		opts := getTestOptions("")
 		opts.IndexCacheSize = 100 << 20
-		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, &opts, func(t *testing.T, db *DB) {
 			testIteratorPrefix(t, db)
 		})
 	})
 
 	t.Run("With Block Offsets and Blocks in Cache", func(t *testing.T) {
-		t.Parallel()
 		opts := getTestOptions("")
 		opts.BlockCacheSize = 100 << 20
 		opts.IndexCacheSize = 100 << 20
-		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, &opts, func(t *testing.T, db *DB) {
 			testIteratorPrefix(t, db)
 		})
 	})
 
 	t.Run("With Blocks in Cache", func(t *testing.T) {
-		t.Parallel()
 		opts := getTestOptions("")
 		opts.BlockCacheSize = 100 << 20
-		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, &opts, func(t *testing.T, db *DB) {
 			testIteratorPrefix(t, db)
 		})
 	})

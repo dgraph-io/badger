@@ -52,7 +52,7 @@ func getSortedKVList(valueSize, listSize int) *pb.KVList {
 // check if we can read values after writing using stream writer
 func TestStreamWriter1(t *testing.T) {
 	test := func(t *testing.T, opts *Options) {
-		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
 			valueSize := 128
@@ -103,7 +103,7 @@ func TestStreamWriter1(t *testing.T) {
 // write more keys to db after writing keys using stream writer
 func TestStreamWriter2(t *testing.T) {
 	test := func(t *testing.T, opts *Options) {
-		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
 			valueSize := 128
@@ -165,7 +165,7 @@ func TestStreamWriter2(t *testing.T) {
 
 func TestStreamWriter3(t *testing.T) {
 	test := func(t *testing.T, opts *Options) {
-		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
 			noOfKeys := 1000
 			valueSize := 128
@@ -259,7 +259,7 @@ func TestStreamWriter3(t *testing.T) {
 // Oracle reinitialization is happening. Try commenting line 171 in stream_writer.go with code
 // (sw.db.orc = newOracle(sw.db.opt), this test should fail.
 func TestStreamWriter4(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
 		// first insert some entries in db
 		for i := 0; i < 10; i++ {
 			err := db.Update(func(txn *Txn) error {
@@ -285,7 +285,7 @@ func TestStreamWriter4(t *testing.T) {
 }
 
 func TestStreamWriter5(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
 		list := &pb.KVList{}
 
 		left := make([]byte, 6)
@@ -323,7 +323,7 @@ func TestStreamWriter5(t *testing.T) {
 // This test tries to insert multiple equal keys(without version) and verifies
 // if those are going to same table.
 func TestStreamWriter6(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
 		list := &pb.KVList{}
 		str := []string{"a", "a", "b", "b", "c", "c"}
 		ver := 1
@@ -362,7 +362,7 @@ func TestStreamWriter6(t *testing.T) {
 }
 
 func TestStreamDone(t *testing.T) {
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
 		sw := db.NewStreamWriter()
 		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
 

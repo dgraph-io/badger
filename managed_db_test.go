@@ -606,7 +606,7 @@ func TestWriteBatchManagedMode(t *testing.T) {
 	opt := DefaultOptions("")
 	opt.managedTxns = true
 	opt.MaxTableSize = 1 << 20 // This would create multiple transactions in write batch.
-	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+	runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
 		wb := db.NewWriteBatchAt(1)
 		defer wb.Cancel()
 
@@ -652,7 +652,7 @@ func TestWriteBatchManaged(t *testing.T) {
 	opt := DefaultOptions("")
 	opt.managedTxns = true
 	opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
-	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+	runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
 		wb := db.NewManagedWriteBatch()
 		defer wb.Cancel()
 
@@ -722,7 +722,7 @@ func TestWriteBatchDuplicate(t *testing.T) {
 		opt := DefaultOptions("")
 		opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
 
-		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
 			wb := db.NewWriteBatch()
 			defer wb.Cancel()
 
@@ -739,7 +739,7 @@ func TestWriteBatchDuplicate(t *testing.T) {
 		opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
 		opt.managedTxns = true
 
-		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
 			wb := db.NewWriteBatchAt(10)
 			defer wb.Cancel()
 
@@ -756,7 +756,7 @@ func TestWriteBatchDuplicate(t *testing.T) {
 		opt := DefaultOptions("")
 		opt.managedTxns = true
 		opt.MaxTableSize = 1 << 15 // This would create multiple transactions in write batch.
-		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
 			wb := db.NewManagedWriteBatch()
 			defer wb.Cancel()
 
@@ -783,7 +783,7 @@ func TestZeroDiscardStats(t *testing.T) {
 	t.Run("after rewrite", func(t *testing.T) {
 		opts := getTestOptions("")
 		opts.ValueLogFileSize = 5 << 20
-		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, &opts, func(t *testing.T, db *DB) {
 			populate(t, db)
 			require.Equal(t, int(N), numKeys(db))
 
@@ -810,7 +810,7 @@ func TestZeroDiscardStats(t *testing.T) {
 	t.Run("after dropall", func(t *testing.T) {
 		opts := getTestOptions("")
 		opts.ValueLogFileSize = 5 << 20
-		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, &opts, func(t *testing.T, db *DB) {
 			populate(t, db)
 			require.Equal(t, int(N), numKeys(db))
 

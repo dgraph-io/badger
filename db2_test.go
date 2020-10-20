@@ -213,7 +213,7 @@ func TestBigKeyValuePairs(t *testing.T) {
 	opts := DefaultOptions("").
 		WithMaxTableSize(1 << 20).
 		WithValueLogMaxEntries(64)
-	runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+	runBadgerTestParallel(t, &opts, func(t *testing.T, db *DB) {
 		bigK := make([]byte, 65001)
 		bigV := make([]byte, db.opt.ValueLogFileSize+1)
 		small := make([]byte, 65000)
@@ -304,7 +304,7 @@ func TestPushValueLogLimit(t *testing.T) {
 	opt := DefaultOptions("").
 		WithValueLogMaxEntries(64).
 		WithValueLogFileSize(2<<30 - 1)
-	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+	runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
 		data := []byte(fmt.Sprintf("%30d", 1))
 		key := func(i int) string {
 			return fmt.Sprintf("%100d", i)
@@ -405,7 +405,7 @@ func TestBigValues(t *testing.T) {
 		}
 	}
 	t.Run("disk mode", func(t *testing.T) {
-		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, &opts, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
@@ -551,7 +551,7 @@ func TestReadSameVlog(t *testing.T) {
 		opt := getTestOptions("")
 		// Forcing to read from vlog
 		opt.ValueThreshold = 1
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
 			testReadingSameKey(t, db)
 		})
 
@@ -565,7 +565,7 @@ func TestReadSameVlog(t *testing.T) {
 		_, err := rand.Read(eKey)
 		require.NoError(t, err)
 		opt.EncryptionKey = eKey
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
 			testReadingSameKey(t, db)
 		})
 	})
@@ -744,7 +744,7 @@ func TestDropAllDropPrefix(t *testing.T) {
 	val := func(i int) []byte {
 		return []byte(fmt.Sprintf("%128d", i))
 	}
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
 		wb := db.NewWriteBatch()
 		defer wb.Cancel()
 
@@ -826,7 +826,7 @@ func TestMaxVersion(t *testing.T) {
 		return []byte(fmt.Sprintf("%d%10d", i, i))
 	}
 	t.Run("normal", func(t *testing.T) {
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
 			// This will create commits from 1 to N.
 			for i := 0; i < int(N); i++ {
 				txnSet(t, db, key(i), nil, 0)
