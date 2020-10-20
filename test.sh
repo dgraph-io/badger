@@ -62,7 +62,7 @@ echo "==> Starting tests.. "
 # go test -timeout=25m -v -race github.com/dgraph-io/badger/v2/...
 for pkg in $packages; do
   echo "===> Testing $pkg"
-  go test $tags -timeout=25m -v -race $pkg
+  go test $tags -timeout=25m -v -race $pkg -parallel 16
 done
 
 echo "===> Testing root level"
