@@ -321,8 +321,6 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 	var next [maxHeight + 1]*node
 	prev[listHeight] = s.head
 	next[listHeight] = nil
-	// fmt.Println("head.tower after", s.head.tower)
-	// spew.Dump(s.head)
 	for i := int(listHeight) - 1; i >= 0; i-- {
 		// Use higher level to speed up for current level.
 		prev[i], next[i] = s.findSpliceForLevel(key, prev[i+1], i)

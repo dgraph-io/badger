@@ -62,11 +62,7 @@ func (s *Arena) putNode(height int) uint32 {
 
 	// Pad the allocation with enough bytes to ensure pointer alignment.
 	l := uint32(MaxNodeSize - unusedSize + nodeAlign)
-	//n := atomic.AddUint32(&s.n, l)
 	n := uint32(s.AllocateOffset(int(l))) + l
-	//y.AssertTruef(int(n) <= len(n),
-	//	"Arena too small, toWrite:%d newTotal:%d limit:%d",
-	//	l, n, len(s.buf))
 
 	// Return the aligned offset.
 	m := (n - l + uint32(nodeAlign)) & ^uint32(nodeAlign)
