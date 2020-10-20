@@ -431,6 +431,7 @@ func applyManifestChange(build *Manifest, tc *pb.ManifestChange) error {
 		build.Creations++
 	case pb.ManifestChange_DELETE:
 		tm, ok := build.Tables[tc.Id]
+		fmt.Printf("Deleting %d\n", tc.Id)
 		if !ok {
 			return fmt.Errorf("MANIFEST removes non-existing table %d", tc.Id)
 		}

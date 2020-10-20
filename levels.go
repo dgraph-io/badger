@@ -366,7 +366,7 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 				bot:          operation,
 				dropPrefixes: prefixes,
 			}
-			if err := s.runCompactDef(l.level, cd); err != nil {
+			if err := s.runCompactDef(-1, l.level, cd); err != nil {
 				opt.Warningf("While running compact def: %+v. Error: %v", cd, err)
 				return err
 			}
@@ -448,14 +448,14 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 			prios := s.pickCompactLevels()
 		loop:
 			for _, p := range prios {
-				if id == 0 && p.level > 1 {
-					// If I'm ID zero, I only compact L0 and L1.
-					continue
-				}
-				if id != 0 && p.level <= 1 {
-					// If I'm ID non-zero, I do NOT compact L0 and L1.
-					continue
-				}
+				// if id == 0 && p.level > 1 {
+				// 	// If I'm ID zero, I only compact L0 and Lbase.
+				// 	continue
+				// }
+				// if id != 0 && p.level <= 1 {
+				// 	// If I'm ID non-zero, I do NOT compact L0 and L1.
+				// 	continue
+				// }
 				err := s.doCompact(id, p)
 				switch err {
 				case nil:
@@ -990,11 +990,14 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	return false
 }
 
-func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
+func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	timeStart := time.Now()
 
 	thisLevel := cd.thisLevel
 	nextLevel := cd.nextLevel
+
+	s.kv.opt.Infof("-----> Compacting tables. L%d -> L%d . This level: %s Next Level: %s\n",
+		thisLevel.level, nextLevel.level, tablesToString(cd.top), tablesToString(cd.bot))
 
 	// Table should never be moved directly between levels, always be rewritten to allow discarding
 	// invalid versions.
@@ -1028,20 +1031,12 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
 
-	toStr := func(tables []*table.Table) []string {
-		var res []string
-		for _, t := range tables {
-			res = append(res, fmt.Sprintf("%05d", t.ID()))
-		}
-		return res
-	}
-
-	from := append(toStr(cd.top), toStr(cd.bot)...)
-	to := toStr(newTables)
+	from := append(tablesToString(cd.top), tablesToString(cd.bot)...)
+	to := tablesToString(newTables)
 
 	if dur := time.Since(timeStart); dur > 0 {
-		s.kv.opt.Infof("LOG Compact %d->%d. [%s] -> [%s], took %v\n",
-			thisLevel.level, nextLevel.level, strings.Join(from, " "), strings.Join(to, " "), dur)
+		s.kv.opt.Infof("[%d] LOG Compact %d->%d. [%s] -> [%s], took %v\n",
+			id, thisLevel.level, nextLevel.level, strings.Join(from, " "), strings.Join(to, " "), dur)
 	}
 
 	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.opt.LevelSizeMultiplier {
@@ -1051,6 +1046,15 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 			len(cd.bot), hex.Dump(cd.nextRange.left), hex.Dump(cd.nextRange.right))
 	}
 	return nil
+}
+
+func tablesToString(tables []*table.Table) []string {
+	var res []string
+	for _, t := range tables {
+		res = append(res, fmt.Sprintf("%05d", t.ID()))
+	}
+	res = append(res, ".")
+	return res
 }
 
 var errFillTables = errors.New("Unable to fill tables")
@@ -1087,13 +1091,13 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 
 	span.Annotatef(nil, "Compaction: %+v", cd)
 	// s.kv.opt.Infof("Compaction: %+v\n", cd)
-	if err := s.runCompactDef(l, cd); err != nil {
+	if err := s.runCompactDef(id, l, cd); err != nil {
 		// This compaction couldn't be done successfully.
 		s.kv.opt.Warningf("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)
 		return err
 	}
 
-	s.kv.opt.Debugf("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
+	s.kv.opt.Infof("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
 	return nil
 }
 

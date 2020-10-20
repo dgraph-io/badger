@@ -103,9 +103,12 @@ func checkAndSetOptions(opt *Options) error {
 	// It's okay to have zero compactors which will disable all compactions but
 	// we cannot have just one compactor otherwise we will end up with all data
 	// on level 2.
-	if opt.NumCompactors == 1 {
-		return errors.New("Cannot have 1 compactor. Need at least 2")
-	}
+	// if opt.NumCompactors == 1 {
+	// 	return errors.New("Cannot have 1 compactor. Need at least 2")
+	// }
+	// HACK HACK
+	opt.NumCompactors = 1
+
 	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
 		return errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
 	}
