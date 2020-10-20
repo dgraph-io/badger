@@ -927,7 +927,7 @@ func TestConflict(t *testing.T) {
 			var wg sync.WaitGroup
 			wg.Add(numGo)
 			setCount = 0
-			runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 				for j := 0; j < numGo; j++ {
 					go fn(&wg, db)
 				}
