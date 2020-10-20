@@ -107,7 +107,7 @@ func checkAndSetOptions(opt *Options) error {
 	// 	return errors.New("Cannot have 1 compactor. Need at least 2")
 	// }
 	// HACK HACK
-	opt.NumCompactors = 1
+	opt.NumCompactors = 3
 
 	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
 		return errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
@@ -929,7 +929,7 @@ func (db *DB) ensureRoomForWrite() error {
 	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	select {
 	case db.flushChan <- flushTask{mt: db.mt}:
-		db.opt.Infof("Flushing memtable, mt.size=%d size of flushChan: %d\n",
+		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 			db.mt.sl.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
 		db.imm = append(db.imm, db.mt)

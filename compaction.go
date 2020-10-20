@@ -33,6 +33,10 @@ type keyRange struct {
 	inf   bool
 }
 
+func (r keyRange) isEmpty() bool {
+	return len(r.left) == 0 && len(r.right) == 0 && !r.inf
+}
+
 var infRange = keyRange{inf: true}
 
 func (r keyRange) String() string {
@@ -46,6 +50,10 @@ func (r keyRange) equals(dst keyRange) bool {
 }
 
 func (r keyRange) overlapsWith(dst keyRange) bool {
+	// Empty keyRange always overlaps.
+	if r.isEmpty() {
+		return true
+	}
 	if r.inf || dst.inf {
 		return true
 	}
@@ -127,6 +135,7 @@ func (lcs *levelCompactStatus) remove(dst keyRange) bool {
 type compactStatus struct {
 	sync.RWMutex
 	levels []*levelCompactStatus
+	tables map[uint64]struct{}
 }
 
 func (cs *compactStatus) overlapsWith(level int, this keyRange) bool {
@@ -170,6 +179,9 @@ func (cs *compactStatus) compareAndAdd(_ thisAndNextLevelRLocked, cd compactDef)
 	thisLevel.ranges = append(thisLevel.ranges, cd.thisRange)
 	nextLevel.ranges = append(nextLevel.ranges, cd.nextRange)
 	thisLevel.delSize += cd.thisSize
+	for _, t := range append(cd.top, cd.bot...) {
+		cs.tables[t.ID()] = struct{}{}
+	}
 	return true
 }
 
@@ -185,16 +197,23 @@ func (cs *compactStatus) delete(cd compactDef) {
 
 	thisLevel.delSize -= cd.thisSize
 	found := thisLevel.remove(cd.thisRange)
-	found = nextLevel.remove(cd.nextRange) && found
+	if !cd.nextRange.isEmpty() {
+		found = nextLevel.remove(cd.nextRange) && found
+	}
 
 	if !found {
 		this := cd.thisRange
 		next := cd.nextRange
-		fmt.Printf("Looking for: [%q, %q, %v] in this level.\n", this.left, this.right, this.inf)
+		fmt.Printf("Looking for: %s in this level %d.\n", this, tl)
 		fmt.Printf("This Level:\n%s\n", thisLevel.debug())
 		fmt.Println()
-		fmt.Printf("Looking for: [%q, %q, %v] in next level.\n", next.left, next.right, next.inf)
+		fmt.Printf("Looking for: %s in next level %d.\n", next, cd.nextLevel.level)
 		fmt.Printf("Next Level:\n%s\n", nextLevel.debug())
 		log.Fatal("keyRange not found")
+	}
+	for _, t := range append(cd.top, cd.bot...) {
+		_, ok := cs.tables[t.ID()]
+		y.AssertTrue(ok)
+		delete(cs.tables, t.ID())
 	}
 }
