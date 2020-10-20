@@ -41,7 +41,7 @@ type Arena struct {
 }
 
 func (s *Arena) size() int64 {
-	return int64(s.Len() - 1)
+	return int64(s.LenNoPadding() - 1)
 }
 
 // allocateValue encodes valueStruct and put it in the arena buffer.
@@ -54,8 +54,8 @@ func (s *Arena) allocateValue(v y.ValueStruct) uint64 {
 // putNode allocates a node in the arena. The node is aligned on a pointer-sized
 // boundary. The arena offset of the node is returned.
 func (s *Arena) putNode(height int) uint32 {
-	s.Lock()
-	defer s.Unlock()
+	//s.Lock()
+	//defer s.Unlock()
 	// Compute the amount of the tower that will never be used, since the height
 	// is less than maxHeight.
 	unusedSize := (maxHeight - height) * offsetSize
@@ -74,19 +74,20 @@ func (s *Arena) putNode(height int) uint32 {
 // size of val. We could also store this size inside arena but the encoding and
 // decoding will incur some overhead.
 func (s *Arena) putVal(v y.ValueStruct) uint32 {
-	s.Lock()
-	defer s.Unlock()
+	//s.Lock()
+	// defer s.Unlock()
 	l := uint32(v.EncodedSize())
 	n := uint32(s.AllocateOffset(int(l))) + l
 	m := n - l
+	//m := uint32(s.CurrentOffset())
 	buf := s.Bytes()[m : m+l]
 	v.Encode(buf)
 	return m
 }
 
 func (s *Arena) putKey(key []byte) uint32 {
-	s.Lock()
-	defer s.Unlock()
+	//s.Lock()
+	//defer s.Unlock()
 	l := uint32(len(key))
 	n := uint32(s.AllocateOffset(int(l))) + l
 	// m is the offset where you should write.
@@ -100,8 +101,8 @@ func (s *Arena) putKey(key []byte) uint32 {
 // getNode returns a pointer to the node located at offset. If the offset is
 // zero, then the nil node pointer is returned.
 func (s *Arena) getNode(offset uint32) *node {
-	s.RLock()
-	defer s.RUnlock()
+	//s.RLock()
+	//defer s.RUnlock()
 	if offset == 0 {
 		return nil
 	}
@@ -110,16 +111,16 @@ func (s *Arena) getNode(offset uint32) *node {
 
 // getKey returns byte slice at offset.
 func (s *Arena) getKey(offset uint32, size uint16) []byte {
-	s.RLock()
-	defer s.RUnlock()
+	//s.RLock()
+	//defer s.RUnlock()
 	return s.Bytes()[offset : offset+uint32(size)]
 }
 
 // getVal returns byte slice at offset. The given size should be just the value
 // size and should NOT include the meta bytes.
 func (s *Arena) getVal(offset uint32, size uint32) (ret y.ValueStruct) {
-	s.RLock()
-	defer s.RUnlock()
+	//s.RLock()
+	//defer s.RUnlock()
 	ret.Decode(s.Bytes()[offset : offset+size])
 	return
 }
@@ -127,8 +128,8 @@ func (s *Arena) getVal(offset uint32, size uint32) (ret y.ValueStruct) {
 // getNodeOffset returns the offset of node in the arena. If the node pointer is
 // nil, then the zero offset is returned.
 func (s *Arena) getNodeOffset(nd *node) uint32 {
-	s.RLock()
-	defer s.RUnlock()
+	//s.RLock()
+	//defer s.RUnlock()
 	if nd == nil {
 		return 0
 	}

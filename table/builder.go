@@ -379,7 +379,7 @@ func (b *Builder) ReachedCapacity(capacity uint64) bool {
 
 	estimateSz := blocksSize +
 		4 + // Index length
-		uint32(b.offsets.Len())
+		uint32(b.offsets.LenNoPadding())
 
 	return uint64(estimateSz) > capacity
 }
