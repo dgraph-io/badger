@@ -99,9 +99,7 @@ const memFileExt string = ".mem"
 
 func (db *DB) openMemTable(fid int) (*memTable, error) {
 	filepath := db.mtFilePath(fid)
-	buf, err := z.NewBufferWith(int(arenaSize(db.opt)), int(arenaSize(db.opt)), z.UseCalloc)
-	y.Check(err)
-	s := skl.NewSkiplist(buf, y.CompareKeys)
+	s := skl.NewSkiplist(arenaSize(db.opt))
 	mt := &memTable{
 		sl:  s,
 		opt: db.opt,
@@ -134,7 +132,7 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 	if lerr == z.NewFile {
 		return mt, lerr
 	}
-	err = mt.UpdateSkipList()
+	err := mt.UpdateSkipList()
 	return mt, y.Wrapf(err, "while updating skiplist")
 }
 

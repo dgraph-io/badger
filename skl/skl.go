@@ -33,8 +33,8 @@ Key differences:
 package skl
 
 import (
+	"bytes"
 	"math"
-	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -77,12 +77,12 @@ type node struct {
 type comparatorFunc func([]byte, []byte) int
 
 type Skiplist struct {
-	height     int32 // Current height. 1 <= height <= kMaxHeight. CAS.
-	head       *node
-	ref        int32
-	arena      *Arena
-	comparator comparatorFunc
-	OnClose    func()
+	height      int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	head        *node
+	ref         int32
+	arena       *Arena
+	hasVersions bool
+	OnClose     func()
 }
 
 // IncrRef increases the refcount
@@ -129,21 +129,27 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 	return
 }
 
+func NewSkiplist(arenaSize int64) *Skiplist {
+	buf, err := z.NewBufferWith(int(arenaSize), int(arenaSize), z.UseCalloc)
+	y.Check(err)
+	skl := NewSkiplistWithBuffer(buf)
+	skl.hasVersions = true
+	return skl
+}
+
 // NewSkiplist makes a new empty skiplist, with a given arena size
 // NewSkiplist(z.Buffer) => Size of arena.
-func NewSkiplist(buf *z.Buffer, comparator comparatorFunc) *Skiplist {
-	var lock sync.RWMutex
-	arena := &Arena{buf, lock}
+func NewSkiplistWithBuffer(buf *z.Buffer) *Skiplist {
+	arena := new(Arena)
+	arena.Buffer = buf
 	offset := arena.allocateValue(y.ValueStruct{})
 	head := newNode(arena, nil, offset, maxHeight)
-	//	fmt.Println("head.tower while creation", head.tower)
-	//spew.Dump(head)
 	return &Skiplist{
-		height:     1,
-		head:       head,
-		arena:      arena,
-		ref:        1,
-		comparator: comparator,
+		height:      1,
+		head:        head,
+		arena:       arena,
+		ref:         1,
+		hasVersions: false,
 	}
 }
 
@@ -217,7 +223,12 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 			return x, false
 		}
 		nextKey := next.key(s.arena)
-		cmp := s.comparator(key, nextKey)
+		var cmp int
+		if s.hasVersions {
+			cmp = y.CompareKeys(key, nextKey)
+		} else {
+			cmp = bytes.Compare(key, nextKey)
+		}
 		if cmp > 0 {
 			// x.key < next.key < key. We can continue to move right.
 			x = next
@@ -272,7 +283,12 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 			return before, next
 		}
 		nextKey := next.key(s.arena)
-		cmp := s.comparator(key, nextKey)
+		var cmp int
+		if s.hasVersions {
+			cmp = y.CompareKeys(key, nextKey)
+		} else {
+			cmp = bytes.Compare(key, nextKey)
+		}
 		if cmp == 0 {
 			// Equality case.
 			return next, next
@@ -391,40 +407,49 @@ func (s *Skiplist) findLast() *node {
 // Get gets the value associated with the key. It returns a valid value if it finds equal or earlier
 // version of the same key.
 func (s *Skiplist) Get(key []byte) y.ValueStruct {
-	n := s.getNode(key)
+	n, version := s.getInternal(key)
 	if n == nil {
 		return y.ValueStruct{}
 	}
-	nextKey := s.arena.getKey(n.keyOffset, n.keySize)
-	if !y.SameKey(key, nextKey) {
-		return y.ValueStruct{}
-	}
-
 	valOffset, valSize := n.getValueOffset()
 	vs := s.arena.getVal(valOffset, valSize)
-	vs.Version = y.ParseTs(nextKey)
+	vs.Version = version
 	return vs
 
 }
 
 func (s *Skiplist) GetUint64(key []byte) (uint64, bool) {
-	n := s.getNode(key)
+	n, _ := s.getInternal(key)
 	if n == nil {
 		return 0, false
 	}
 	return n.value, true
 }
 
-func (s *Skiplist) getNode(key []byte) *node {
+// getInternal finds the node which is greater than or equal to the given key
+// from the skiplist. It returns the fetched node and it's version.
+func (s *Skiplist) getInternal(key []byte) (*node, uint64) {
 	n, _ := s.findNear(key, false, true) // findGreaterOrEqual.
 	if n == nil {
-		return nil
+		return nil, 0
 	}
-	nextKey := s.arena.getKey(n.keyOffset, n.keySize)
-	if s.comparator(key, nextKey) != 0 {
-		return nil
+	fetchedKey := s.arena.getKey(n.keyOffset, n.keySize)
+
+	// If the node has version, it means it is a badger kv and we should
+	// compare it's key without the version.
+	if s.hasVersions {
+		if !y.SameKey(key, fetchedKey) {
+			return nil, 0
+		}
+		version := y.ParseTs(fetchedKey)
+		return n, version
 	}
-	return n
+
+	// This is a key without version.
+	if !bytes.Equal(key, fetchedKey) {
+		return nil, 0
+	}
+	return n, 0
 }
 
 func zeroOut(data []byte, offset int) {
