@@ -17,7 +17,6 @@
 package skl
 
 import (
-	"sync"
 	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/y"
@@ -36,7 +35,6 @@ const (
 
 // Arena should be lock-free.
 type Arena struct {
-	sync.RWMutex
 	*z.Buffer
 }
 
