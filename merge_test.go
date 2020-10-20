@@ -164,6 +164,6 @@ func bytesToUint64(b []byte) uint64 {
 }
 
 // Merge function to add two uint64 numbers
-func add(existing, new []byte) []byte {
-	return uint64ToBytes(bytesToUint64(existing) + bytesToUint64(new))
+func add(existing, latest []byte) []byte {
+	return uint64ToBytes(bytesToUint64(existing) + bytesToUint64(latest))
 }
