@@ -46,7 +46,8 @@ type levelsController struct {
 	kv        *DB
 	baseLevel *levelHandler
 
-	cstatus compactStatus
+	cstatus    compactStatus
+	l0stallsMs int64
 }
 
 // revertToManifest checks that all necessary table files exist and removes all table files not
@@ -556,23 +557,18 @@ func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
 	return false
 }
 
-// compactBuildTables merges topTables and botTables to form a list of new tables.
-func (s *levelsController) compactBuildTables(
-	lev int, cd compactDef) ([]*table.Table, func() error, error) {
+func (s *levelsController) buildTables(it y.Iterator, kr keyRange, cd compactDef,
+	inflightBuilders *y.Throttle, res chan *table.Table) {
 
-	topTables := cd.top
-	botTables := cd.bot
-
-	numTables := int64(len(topTables) + len(botTables))
-	y.NumCompactionTables.Add(numTables)
-	defer y.NumCompactionTables.Add(-numTables)
-
-	cd.span.Annotatef(nil, "Top tables count: %v Bottom tables count: %v",
-		len(topTables), len(botTables))
-
+	fmt.Printf("running buildTables with kr: %s L%d -> L%d\n", kr, cd.thisLevel.level, cd.nextLevel.level)
 	// Check overlap of the top level with the levels which are not being
 	// compacted in this compaction.
 	hasOverlap := s.checkOverlap(cd.allTables(), cd.nextLevel.level+1)
+
+	// Pick a discard ts, so we can discard versions below this ts. We should
+	// never discard any versions starting from above this timestamp, because
+	// that would affect the snapshot view guarantee provided by transactions.
+	discardTs := s.kv.orc.discardAtOrBelow()
 
 	// Try to collect stats so that we can inform value log about GC. That would help us find which
 	// value log file should be GCed.
@@ -589,68 +585,12 @@ func (s *levelsController) compactBuildTables(
 		}
 	}
 
-	// Create iterators across all the tables involved first.
-	var iters []y.Iterator
-	switch {
-	case lev == 0:
-		iters = appendIteratorsReversed(iters, topTables, table.NOCACHE)
-	case len(topTables) > 0:
-		y.AssertTrue(len(topTables) == 1)
-		iters = []y.Iterator{topTables[0].NewIterator(table.NOCACHE)}
-	}
-
-	// Next level has level>=1 and we can use ConcatIterator as key ranges do not overlap.
-	var valid []*table.Table
-
-nextTable:
-	for _, table := range botTables {
-		if len(cd.dropPrefixes) > 0 {
-			for _, prefix := range cd.dropPrefixes {
-				if bytes.HasPrefix(table.Smallest(), prefix) &&
-					bytes.HasPrefix(table.Biggest(), prefix) {
-					// All the keys in this table have the dropPrefix. So, this
-					// table does not need to be in the iterator and can be
-					// dropped immediately.
-					continue nextTable
-				}
-			}
-		}
-		valid = append(valid, table)
-	}
-	iters = append(iters, table.NewConcatIterator(valid, table.NOCACHE))
-	it := table.NewMergeIterator(iters, false)
-	defer it.Close() // Important to close the iterator to do ref counting.
-
-	it.Rewind()
-
-	// Pick a discard ts, so we can discard versions below this ts. We should
-	// never discard any versions starting from above this timestamp, because
-	// that would affect the snapshot view guarantee provided by transactions.
-	discardTs := s.kv.orc.discardAtOrBelow()
-
-	var numBuilds, numVersions int
 	var lastKey, skipKey []byte
+	var numBuilds, numVersions int
 	var vp valuePointer
-	var newTables []*table.Table
-	mu := new(sync.Mutex) // Guards newTables
 
-	inflightBuilders := y.NewThrottle(5)
-	for it.Valid() {
+	addKeys := func(builder *table.Builder) {
 		timeStart := time.Now()
-		dk, err := s.kv.registry.LatestDataKey()
-		if err != nil {
-			return nil, nil,
-				y.Wrapf(err, "Error while retrieving datakey in levelsController.compactBuildTables")
-		}
-		bopts := buildTableOptions(s.kv.opt)
-		bopts.DataKey = dk
-		// Builder does not need cache but the same options are used for opening table.
-		bopts.BlockCache = s.kv.blockCache
-		bopts.IndexCache = s.kv.indexCache
-
-		// Set TableSize to the target file size for that level.
-		bopts.TableSize = uint64(cd.t.fileSz[cd.nextLevel.level])
-		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64
 		for ; it.Valid(); it.Next() {
 			// See if we need to skip the prefix.
@@ -672,6 +612,9 @@ nextTable:
 			}
 
 			if !y.SameKey(it.Key(), lastKey) {
+				if len(kr.right) > 0 && y.CompareKeys(it.Key(), kr.right) >= 0 {
+					break
+				}
 				// TODO: Also check how much overlap this table already has with the next level. If
 				// it exceeds 10 tables, then stop writing to the file.
 				if builder.ReachedCapacity() {
@@ -732,10 +675,40 @@ nextTable:
 			}
 			builder.Add(it.Key(), vs, vp.Len)
 		}
-		// It was true that it.Valid() at least once in the loop above, which means we
-		// called Add() at least once, and builder is not Empty().
 		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			numKeys, numSkips, time.Since(timeStart).Round(time.Millisecond))
+	} // End of function: addKeys
+
+	if len(kr.left) > 0 {
+		it.Seek(kr.left)
+	} else {
+		it.Rewind()
+	}
+	for it.Valid() {
+		if len(kr.right) > 0 && y.CompareKeys(it.Key(), kr.right) >= 0 {
+			break
+		}
+
+		dk, err := s.kv.registry.LatestDataKey()
+		if err != nil {
+			inflightBuilders.Done(y.Wrapf(err, "Error while retrieving datakey in levelsController.compactBuildTables"))
+			return
+		}
+		bopts := buildTableOptions(s.kv.opt)
+		bopts.DataKey = dk
+		// Builder does not need cache but the same options are used for opening table.
+		bopts.BlockCache = s.kv.blockCache
+		bopts.IndexCache = s.kv.indexCache
+
+		// Set TableSize to the target file size for that level.
+		bopts.TableSize = uint64(cd.t.fileSz[cd.nextLevel.level])
+		builder := table.NewTableBuilder(bopts)
+
+		// This would do the iteration and add keys to builder.
+		addKeys(builder)
+
+		// It was true that it.Valid() at least once in the loop above, which means we
+		// called Add() at least once, and builder is not Empty().
 		if builder.Empty() {
 			// Cleanup builder resources:
 			builder.Finish(false)
@@ -769,19 +742,91 @@ nextTable:
 			if err != nil {
 				return
 			}
-
-			mu.Lock()
-			newTables = append(newTables, tbl)
-			// num := atomic.LoadInt32(&table.NumBlocks)
-			mu.Unlock()
-
+			res <- tbl
 			// TODO(ibrahim): When ristretto PR #186 merges, bring this back.
 			// s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, (z.NumAllocBytes() / 1 << 20))
 		}(builder)
 	}
+	s.kv.vlog.updateDiscardStats(discardStats)
+	s.kv.opt.Debugf("Discard stats: %v", discardStats)
+	inflightBuilders.Done(nil)
+}
+
+// compactBuildTables merges topTables and botTables to form a list of new tables.
+func (s *levelsController) compactBuildTables(
+	lev int, cd compactDef) ([]*table.Table, func() error, error) {
+
+	topTables := cd.top
+	botTables := cd.bot
+
+	numTables := int64(len(topTables) + len(botTables))
+	y.NumCompactionTables.Add(numTables)
+	defer y.NumCompactionTables.Add(-numTables)
+
+	cd.span.Annotatef(nil, "Top tables count: %v Bottom tables count: %v",
+		len(topTables), len(botTables))
+
+	keepTable := func(t *table.Table) bool {
+		for _, prefix := range cd.dropPrefixes {
+			if bytes.HasPrefix(t.Smallest(), prefix) &&
+				bytes.HasPrefix(t.Biggest(), prefix) {
+				// All the keys in this table have the dropPrefix. So, this
+				// table does not need to be in the iterator and can be
+				// dropped immediately.
+				return false
+			}
+		}
+		return true
+	}
+	var valid []*table.Table
+	for _, table := range botTables {
+		if keepTable(table) {
+			valid = append(valid, table)
+		}
+	}
+
+	newIterator := func() []y.Iterator {
+		// Create iterators across all the tables involved first.
+		var iters []y.Iterator
+		switch {
+		case lev == 0:
+			iters = appendIteratorsReversed(iters, topTables, table.NOCACHE)
+		case len(topTables) > 0:
+			y.AssertTrue(len(topTables) == 1)
+			iters = []y.Iterator{topTables[0].NewIterator(table.NOCACHE)}
+		}
+		// Next level has level>=1 and we can use ConcatIterator as key ranges do not overlap.
+		return append(iters, table.NewConcatIterator(valid, table.NOCACHE))
+	}
+
+	{
+		// Just create one iterator to close.
+		it := table.NewMergeIterator(newIterator(), false)
+		defer it.Close() // Important to close the iterator to do ref counting.
+	}
+
+	res := make(chan *table.Table, 3)
+	inflightBuilders := y.NewThrottle(5 + len(cd.splits))
+	for _, kr := range cd.splits {
+		// Initiate Do here so we can register the goroutines for buildTables too.
+		inflightBuilders.Do()
+		go func(kr keyRange) {
+			it := table.NewMergeIterator(newIterator(), false)
+			s.buildTables(it, kr, cd, inflightBuilders, res)
+		}(kr)
+	}
+
+	var newTables []*table.Table
+	go func() {
+		for t := range res {
+			newTables = append(newTables, t)
+		}
+	}()
 
 	// Wait for all table builders to finish and also for newTables accumulator to finish.
 	err := inflightBuilders.Finish()
+	close(res)
+
 	if err == nil {
 		// Ensure created files' directory entries are visible.  We don't mind the extra latency
 		// from not doing this ASAP after all file creation has finished because this is a
@@ -799,8 +844,6 @@ nextTable:
 	sort.Slice(newTables, func(i, j int) bool {
 		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
-	s.kv.vlog.updateDiscardStats(discardStats)
-	s.kv.opt.Debugf("Discard stats: %v", discardStats)
 	return newTables, func() error { return decrRefs(newTables) }, nil
 }
 
@@ -869,10 +912,35 @@ type compactDef struct {
 
 	thisRange keyRange
 	nextRange keyRange
+	splits    []keyRange
 
 	thisSize int64
 
 	dropPrefixes [][]byte
+}
+
+// addSplits can allow us to run multiple sub-compactions in parallel across the split key ranges.
+func (cd *compactDef) addSplits() {
+	cd.splits = cd.splits[:0]
+
+	// Pick one every 3 tables.
+	const N = 3
+	skr := cd.thisRange
+	skr.extend(cd.nextRange)
+	skr.left = []byte{}
+	for i, t := range cd.bot {
+		// last entry in bottom table.
+		if i == len(cd.bot)-1 {
+			skr.right = []byte{}
+			cd.splits = append(cd.splits, skr)
+
+		} else if i%N == N-1 {
+			skr.right = y.Copy(t.Biggest())
+			cd.splits = append(cd.splits, skr)
+
+			skr.left = skr.right
+		}
+	}
 }
 
 func (cd *compactDef) lockLevels() {
@@ -965,7 +1033,6 @@ func (s *levelsController) fillTablesL0ToLbase(cd *compactDef) bool {
 	} else {
 		cd.nextRange = getKeyRange(cd.bot...)
 	}
-
 	return s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd)
 }
 
@@ -978,11 +1045,11 @@ func (s *levelsController) fillTablesL0ToLbase(cd *compactDef) bool {
 // Then, L0 -> L0 must finish for the next L0 -> Lbase to begin.
 func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	if ok := s.fillTablesL0ToLbase(cd); ok {
-		fmt.Printf("~~~~~~ Filled Tables L0 to Lbase. Num tables L0: %d. kr: %s next: %d\n",
-			len(cd.top), cd.thisRange, cd.nextLevel.level)
+		// fmt.Printf("~~~~~~ Filled Tables L0 to Lbase. Num tables L0: %d. kr: %s next: %d\n",
+		// 	len(cd.top), cd.thisRange, cd.nextLevel.level)
 		return true
 	}
-	fmt.Println("~~~~ Couldn't fill L0 to Lbase. Trying L0 to L0")
+	// fmt.Println("~~~~ Couldn't fill L0 to Lbase. Trying L0 to L0")
 	return s.fillTablesL0ToL0(cd)
 }
 
@@ -1064,6 +1131,16 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	thisLevel := cd.thisLevel
 	nextLevel := cd.nextLevel
 
+	y.AssertTrue(len(cd.splits) == 0)
+	if thisLevel.level == 0 && nextLevel.level == 0 {
+		// don't do anything for L0 -> L0.
+	} else {
+		cd.addSplits()
+	}
+	if len(cd.splits) == 0 {
+		cd.splits = append(cd.splits, keyRange{})
+	}
+
 	// Table should never be moved directly between levels, always be rewritten to allow discarding
 	// invalid versions.
 
@@ -1100,8 +1177,9 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	to := tablesToString(newTables)
 
 	if dur := time.Since(timeStart); dur > 0 {
-		s.kv.opt.Infof("[%d] LOG Compact %d->%d. [%s] -> [%s], took %v\n",
-			id, thisLevel.level, nextLevel.level, strings.Join(from, " "), strings.Join(to, " "), dur)
+		s.kv.opt.Infof("[%d] LOG Compact %d->%d (%d->%d tables). [%s] -> [%s], took %v\n",
+			id, thisLevel.level, nextLevel.level, len(cd.top)+len(cd.bot), len(newTables),
+			strings.Join(from, " "), strings.Join(to, " "), dur)
 	}
 
 	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.opt.LevelSizeMultiplier {
@@ -1193,10 +1271,10 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 				i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
 		}
 		s.cstatus.RUnlock()
-		timeStart := time.Now()
 
 		// Before we unstall, we need to make sure that level 0 is healthy. Otherwise, we
 		// will very quickly fill up level 0 again.
+		timeStart := time.Now()
 		for i := 0; ; i++ {
 			// It's crucial that this behavior replicates pickCompactLevels' behavior in
 			// computing compactability in order to guarantee progress.
@@ -1207,13 +1285,15 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 			time.Sleep(10 * time.Millisecond)
 			if i%100 == 0 {
 				prios := s.pickCompactLevels()
-				s.kv.opt.Debugf("Waiting to add level 0 table. Compaction priorities: %+v\n", prios)
+				s.kv.opt.Infof("Waiting to add level 0 table. Compaction priorities: %+v\n", prios)
 				i = 0
 			}
 		}
-		if dur := time.Since(timeStart); dur > time.Second {
+		dur := time.Since(timeStart)
+		if dur > time.Second {
 			s.kv.opt.Infof("L0 was stalled for %s\n", dur.Round(time.Millisecond))
 		}
+		atomic.AddInt64(&s.l0stallsMs, int64(dur.Round(time.Millisecond)))
 	}
 
 	return nil

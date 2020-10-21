@@ -49,6 +49,21 @@ func (r keyRange) equals(dst keyRange) bool {
 		r.inf == dst.inf
 }
 
+func (r *keyRange) extend(kr keyRange) {
+	if r.isEmpty() {
+		*r = kr
+	}
+	if len(r.left) == 0 || y.CompareKeys(kr.left, r.left) < 0 {
+		r.left = kr.left
+	}
+	if len(r.right) == 0 || y.CompareKeys(kr.right, r.right) > 0 {
+		r.right = kr.right
+	}
+	if kr.inf {
+		r.inf = true
+	}
+}
+
 func (r keyRange) overlapsWith(dst keyRange) bool {
 	// Empty keyRange always overlaps.
 	if r.isEmpty() {

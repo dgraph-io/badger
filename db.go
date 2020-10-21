@@ -481,6 +481,7 @@ func (db *DB) IsClosed() bool {
 
 func (db *DB) close() (err error) {
 	db.opt.Debugf("Closing database")
+	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(db.lc.l0stallsMs))
 
 	atomic.StoreInt32(&db.blockWrites, 1)
 
@@ -1429,7 +1430,10 @@ func (db *DB) startMemoryFlush() {
 // levels, which is necessary after a restore from backup. During Flatten, live compactions are
 // stopped. Ideally, no writes are going on during Flatten. Otherwise, it would create competition
 // between flattening the tree and new tables being created at level zero.
-// func (db *DB) Flatten(workers int) error {
+func (db *DB) Flatten(workers int) error {
+	return nil
+}
+
 // 	db.stopCompactions()
 // 	defer db.startCompactions()
 
