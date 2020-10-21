@@ -37,6 +37,7 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 		ChkMode:            options.NoVerification,
 	}
 	b := table.NewTableBuilder(opts)
+	defer b.Close()
 
 	// Add all keys and versions to the table.
 	for _, item := range td {
@@ -724,6 +725,7 @@ func createEmptyTable(db *DB) *table.Table {
 		ChkMode:            options.NoVerification,
 	}
 	b := table.NewTableBuilder(opts)
+	defer b.Close()
 	// Add one key so that we can open this table.
 	b.Add(y.KeyWithTs([]byte("foo"), 1), y.ValueStruct{}, 0)
 
