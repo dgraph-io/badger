@@ -315,6 +315,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	}
 
 	c.SignalAndWait()
+	printLevels(db)
 	return err
 }
 
@@ -398,23 +399,27 @@ func reportStats(c *z.Closer, db *badger.DB) {
 				"entries written: %d, speed: %d/sec, gcSuccess: %d\n", y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate, gcSuccess)
 			if count%10 == 0 {
-				levels := db.Levels()
-				h := func(sz int64) string {
-					return humanize.IBytes(uint64(sz))
-				}
-				base := func(b bool) string {
-					if b {
-						return "B"
-					}
-					return " "
-				}
-				for _, li := range levels {
-					fmt.Printf("Level %d [%s]: NumTables: %02d. Size: %s of %s. FileSize: %s\n",
-						li.Level, base(li.IsBaseLevel), li.NumTables,
-						h(li.Size), h(li.TargetSize), h(li.TargetFileSize))
-				}
+				printLevels(db)
 			}
 		}
+	}
+}
+
+func printLevels(db *badger.DB) {
+	levels := db.Levels()
+	h := func(sz int64) string {
+		return humanize.IBytes(uint64(sz))
+	}
+	base := func(b bool) string {
+		if b {
+			return "B"
+		}
+		return " "
+	}
+	for _, li := range levels {
+		fmt.Printf("Level %d [%s]: NumTables: %02d. Size: %s of %s. FileSize: %s\n",
+			li.Level, base(li.IsBaseLevel), li.NumTables,
+			h(li.Size), h(li.TargetSize), h(li.TargetFileSize))
 	}
 }
 

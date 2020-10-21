@@ -443,33 +443,37 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
+	runOnce := func() bool {
+		prios := s.pickCompactLevels()
+		for _, p := range prios {
+			// if id == 0 && p.level > 1 {
+			// 	// TODO: We should find something for this thread to do.
+			// 	// Probably do L0 -> L0 compaction.
+			// 	// If I'm ID zero, I only compact L0.
+			// 	continue
+			// }
+			// if id != 0 && p.level <= 1 {
+			// 	// If I'm ID non-zero, I do NOT compact L0 and L1.
+			// 	continue
+			// }
+			err := s.doCompact(id, p)
+			switch err {
+			case nil:
+				return true
+			case errFillTables:
+				// pass
+			default:
+				s.kv.opt.Warningf("While running doCompact: %v\n", err)
+			}
+		}
+		return false
+	}
+
 	for {
 		select {
 		// Can add a done channel or other stuff.
 		case <-ticker.C:
-			prios := s.pickCompactLevels()
-		loop:
-			for _, p := range prios {
-				// if id == 0 && p.level > 1 {
-				// 	// TODO: We should find something for this thread to do.
-				// 	// Probably do L0 -> L0 compaction.
-				// 	// If I'm ID zero, I only compact L0.
-				// 	continue
-				// }
-				// if id != 0 && p.level <= 1 {
-				// 	// If I'm ID non-zero, I do NOT compact L0 and L1.
-				// 	continue
-				// }
-				err := s.doCompact(id, p)
-				switch err {
-				case nil:
-					break loop
-				case errFillTables:
-					// pass
-				default:
-					s.kv.opt.Warningf("While running doCompact: %v\n", err)
-				}
-			}
+			runOnce()
 		case <-lc.HasBeenClosed():
 			return
 		}
@@ -560,7 +564,6 @@ func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
 func (s *levelsController) buildTables(it y.Iterator, kr keyRange, cd compactDef,
 	inflightBuilders *y.Throttle, res chan *table.Table) {
 
-	fmt.Printf("running buildTables with kr: %s L%d -> L%d\n", kr, cd.thisLevel.level, cd.nextLevel.level)
 	// Check overlap of the top level with the levels which are not being
 	// compacted in this compaction.
 	hasOverlap := s.checkOverlap(cd.allTables(), cd.nextLevel.level+1)
@@ -994,7 +997,6 @@ func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
 	for _, t := range out {
 		s.cstatus.tables[t.ID()] = struct{}{}
 	}
-	fmt.Printf("~~~ L0 -> L0 compaction. %s\n", tablesToString(cd.top))
 	return true
 }
 
@@ -1177,15 +1179,15 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	to := tablesToString(newTables)
 
 	if dur := time.Since(timeStart); dur > 0 {
-		s.kv.opt.Infof("[%d] LOG Compact %d->%d (%d->%d tables). [%s] -> [%s], took %v\n",
-			id, thisLevel.level, nextLevel.level, len(cd.top)+len(cd.bot), len(newTables),
-			strings.Join(from, " "), strings.Join(to, " "), dur)
+		s.kv.opt.Infof("[%d] LOG Compact %d->%d (%d->%d tables with %d splits). [%s] -> [%s], took %v\n",
+			id, thisLevel.level, nextLevel.level, len(cd.top)+len(cd.bot), len(newTables), len(cd.splits),
+			strings.Join(from, " "), strings.Join(to, " "), dur.Round(time.Millisecond))
 	}
 
 	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.opt.LevelSizeMultiplier {
-		s.kv.opt.Infof("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+		s.kv.opt.Debugf("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
 			len(cd.top), hex.Dump(cd.thisRange.left), hex.Dump(cd.thisRange.right))
-		s.kv.opt.Infof("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+		s.kv.opt.Debugf("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
 			len(cd.bot), hex.Dump(cd.nextRange.left), hex.Dump(cd.nextRange.right))
 	}
 	return nil
