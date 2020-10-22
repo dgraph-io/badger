@@ -134,13 +134,12 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 func NewSkiplist(arenaSize int64) *Skiplist {
 	buf, err := z.NewBufferWith(int(arenaSize), int(arenaSize), z.UseCalloc)
 	y.Check(err)
-	skl := NewSkiplistWithBuffer(buf)
-	skl.hasVersions = true
+	skl := NewSkiplistWithBuffer(buf, true)
 	return skl
 }
 
 // NewSkiplistWithBuffer makes a new skiplist, with a given buffer.
-func NewSkiplistWithBuffer(buf *z.Buffer) *Skiplist {
+func NewSkiplistWithBuffer(buf *z.Buffer, hasVersions bool) *Skiplist {
 	arena := new(Arena)
 	arena.Buffer = buf
 	offset := arena.allocateValue(y.ValueStruct{})
@@ -150,7 +149,7 @@ func NewSkiplistWithBuffer(buf *z.Buffer) *Skiplist {
 		head:        head,
 		arena:       arena,
 		ref:         1,
-		hasVersions: false,
+		hasVersions: hasVersions,
 		comparator:  bytes.Compare,
 	}
 	if sl.hasVersions {
