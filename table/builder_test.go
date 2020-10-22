@@ -97,6 +97,7 @@ func TestTableIndex(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			opt := tt.opts
 			builder := NewTableBuilder(opt)
+			defer builder.Close()
 			filename := fmt.Sprintf("%s%c%d.sst", os.TempDir(), os.PathSeparator, rand.Uint32())
 
 			blockFirstKeys := make([][]byte, 0)
@@ -183,6 +184,7 @@ func BenchmarkBuilder(b *testing.B) {
 				builder.Add(keyList[j], vs, 0)
 			}
 			_ = builder.Finish(false)
+			builder.Close()
 		}
 	}
 
@@ -271,6 +273,7 @@ func TestBloomfilter(t *testing.T) {
 func TestEmptyBuilder(t *testing.T) {
 	opts := Options{BloomFalsePositive: 0.1}
 	b := NewTableBuilder(opts)
+	defer b.Close()
 	require.Nil(t, b.Finish(false))
 
 }
