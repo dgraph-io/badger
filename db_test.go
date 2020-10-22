@@ -1751,10 +1751,11 @@ func TestLSMOnly(t *testing.T) {
 	// Also test for error, when ValueThresholdSize is greater than maxBatchSize.
 	dopts.ValueThreshold = LSMOnlyOptions(dir).ValueThreshold
 	// maxBatchSize is calculated from MaxTableSize.
-	dopts.BaseTableSize = int64(LSMOnlyOptions(dir).ValueThreshold)
+	dopts.MemTableSize = int64(LSMOnlyOptions(dir).ValueThreshold)
 	_, err = Open(dopts)
 	require.Error(t, err, "db creation should have been failed")
-	require.Contains(t, err.Error(), "Valuethreshold greater than max batch size")
+	require.Contains(t, err.Error(),
+		fmt.Sprintf("Valuethreshold %d greater than max batch size", dopts.ValueThreshold))
 
 	opts.ValueLogMaxEntries = 100
 	db, err := Open(opts)

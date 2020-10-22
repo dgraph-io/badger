@@ -416,13 +416,14 @@ func TestDropPrefix(t *testing.T) {
 	populate(db)
 	require.Equal(t, int(N), numKeys(db))
 	require.NoError(t, db.DropPrefix([]byte("key")))
-	db.Close()
+	require.Equal(t, 0, numKeys(db))
+	require.NoError(t, db.Close())
 
 	// Ensure that value log is correctly replayed.
 	db2, err := Open(opts)
 	require.NoError(t, err)
 	require.Equal(t, 0, numKeys(db2))
-	db2.Close()
+	require.NoError(t, db2.Close())
 }
 
 func TestDropPrefixWithPendingTxn(t *testing.T) {

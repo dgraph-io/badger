@@ -178,7 +178,9 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 		thisLevel: lh0,
 		nextLevel: lh1,
 		span:      span,
+		t:         kv.lc.levelTargets(),
 	}
+	cd.t.baseLevel = 1
 
 	manifest := createManifest()
 	lc, err := newLevelsController(kv, &manifest)
@@ -199,7 +201,9 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 		thisLevel: lh0,
 		nextLevel: lh1,
 		span:      span,
+		t:         kv.lc.levelTargets(),
 	}
+	cd.t.baseLevel = 1
 	lc.fillTablesL0(&cd)
 	lc.runCompactDef(-1, 0, cd)
 }

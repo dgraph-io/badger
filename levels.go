@@ -367,7 +367,10 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 				top:          nil,
 				bot:          operation,
 				dropPrefixes: prefixes,
+				// TODO(ibrahim): Would this work?
+				t: s.levelTargets(),
 			}
+			cd.t.baseLevel = l.level
 			if err := s.runCompactDef(-1, l.level, cd); err != nil {
 				opt.Warningf("While running compact def: %+v. Error: %v", cd, err)
 				return err
@@ -567,6 +570,7 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	// Now pick the priorities which are over 1.0.
 	out := prios[:0]
 	for _, p := range prios[:len(prios)-1] {
+		// if p.score > 1.0 {
 		if p.score >= 1.0 {
 			out = append(out, p)
 		}
@@ -872,11 +876,12 @@ func (s *levelsController) compactBuildTables(
 		return append(iters, table.NewConcatIterator(valid, table.NOCACHE))
 	}
 
-	{
-		// Just create one iterator to close.
-		it := table.NewMergeIterator(newIterator(), false)
-		defer it.Close() // Important to close the iterator to do ref counting.
-	}
+	// TODO(ibrahim): Why was this iterator created?
+	// {
+	// 	// Just create one iterator to close.
+	// 	it := table.NewMergeIterator(newIterator(), false)
+	// 	defer it.Close() // Important to close the iterator to do ref counting.
+	// }
 
 	res := make(chan *table.Table, 3)
 	inflightBuilders := y.NewThrottle(8 + len(cd.splits))
@@ -885,20 +890,26 @@ func (s *levelsController) compactBuildTables(
 		inflightBuilders.Do()
 		go func(kr keyRange) {
 			it := table.NewMergeIterator(newIterator(), false)
+			defer it.Close()
 			s.buildTables(it, kr, cd, inflightBuilders, res)
 		}(kr)
 	}
 
-	var newTables []*table.Table
+	readyTables := make(chan []*table.Table)
 	go func() {
+		var newTables []*table.Table
 		for t := range res {
 			newTables = append(newTables, t)
 		}
+		readyTables <- newTables
+
 	}()
 
 	// Wait for all table builders to finish and also for newTables accumulator to finish.
 	err := inflightBuilders.Finish()
 	close(res)
+	// Receive all the tables from res chan.
+	newTables := <-readyTables
 
 	if err == nil {
 		// Ensure created files' directory entries are visible.  We don't mind the extra latency
@@ -1097,15 +1108,20 @@ func (s *levelsController) fillTablesL0ToLbase(cd *compactDef) bool {
 			break
 		}
 	}
-	cd.thisRange = kr
+	// Use all tables if drop prefix is set. We don't want to compact only a
+	// sub-range. We want to compact all the tables
+	if len(cd.dropPrefixes) > 0 {
+		out = top
+	}
+	cd.thisRange = getKeyRange(out...)
 	cd.top = out
 
-	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, kr)
+	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, cd.thisRange)
 	cd.bot = make([]*table.Table, right-left)
 	copy(cd.bot, cd.nextLevel.tables[left:right])
 
 	if len(cd.bot) == 0 {
-		cd.nextRange = kr
+		cd.nextRange = cd.thisRange
 	} else {
 		cd.nextRange = getKeyRange(cd.bot...)
 	}
@@ -1202,6 +1218,9 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 }
 
 func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
+	if len(cd.t.fileSz) == 0 {
+		return errors.New("Filesizes cannot be zero. Targets are not set")
+	}
 	timeStart := time.Now()
 
 	thisLevel := cd.thisLevel

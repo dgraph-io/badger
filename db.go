@@ -37,6 +37,7 @@ import (
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto"
 	"github.com/dgraph-io/ristretto/z"
+	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 )
 
@@ -103,16 +104,14 @@ func checkAndSetOptions(opt *Options) error {
 	// It's okay to have zero compactors which will disable all compactions but
 	// we cannot have just one compactor otherwise we will end up with all data
 	// on level 2.
-	// if opt.NumCompactors == 1 {
-	// 	return errors.New("Cannot have 1 compactor. Need at least 2")
-	// }
-	// HACK HACK
-	opt.NumCompactors = 3
+	if opt.NumCompactors == 1 {
+		return errors.New("Cannot have 1 compactor. Need at least 2")
+	}
 
 	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
 		return errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
 	}
-	opt.maxBatchSize = (15 * opt.BaseTableSize) / 100
+	opt.maxBatchSize = (15 * opt.MemTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
 	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
@@ -124,8 +123,8 @@ func checkAndSetOptions(opt *Options) error {
 	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
 	if int64(opt.ValueThreshold) > opt.maxBatchSize {
-		return errors.Errorf("Valuethreshold greater than max batch size of %d. Either "+
-			"reduce opt.ValueThreshold or increase opt.MaxTableSize.", opt.maxBatchSize)
+		return errors.Errorf("Valuethreshold %d greater than max batch size of %d. Either "+
+			"reduce opt.ValueThreshold or increase opt.MaxTableSize.", opt.ValueThreshold, opt.maxBatchSize)
 	}
 	// ValueLogFileSize should be stricly LESS than 2<<30 otherwise we will
 	// overflow the uint32 when we mmap it in OpenMemtable.
@@ -923,7 +922,7 @@ func (db *DB) ensureRoomForWrite() error {
 		forceFlush = int64(db.mt.wal.writeAt) > db.opt.ValueLogFileSize
 	}
 
-	if !forceFlush && db.mt.sl.MemSize() < db.opt.BaseTableSize {
+	if !forceFlush && db.mt.sl.MemSize() < db.opt.MemTableSize {
 		return nil
 	}
 
@@ -1002,7 +1001,12 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	}
 
 	fileID := db.lc.reserveFileID()
-	tbl, err := table.CreateTable(table.NewFilename(fileID, db.opt.Dir), tableData, bopts)
+	var tbl *table.Table
+	if db.opt.InMemory {
+		tbl, err = table.OpenInMemoryTable(tableData, fileID, &bopts)
+	} else {
+		tbl, err = table.CreateTable(table.NewFilename(fileID, db.opt.Dir), tableData, bopts)
+	}
 	if err != nil {
 		return y.Wrap(err, "error while creating table")
 	}
@@ -1431,73 +1435,72 @@ func (db *DB) startMemoryFlush() {
 // stopped. Ideally, no writes are going on during Flatten. Otherwise, it would create competition
 // between flattening the tree and new tables being created at level zero.
 func (db *DB) Flatten(workers int) error {
-	return nil
+
+	db.stopCompactions()
+	defer db.startCompactions()
+
+	compactAway := func(cp compactionPriority) error {
+		db.opt.Infof("Attempting to compact with %+v\n", cp)
+		errCh := make(chan error, 1)
+		for i := 0; i < workers; i++ {
+			go func() {
+				errCh <- db.lc.doCompact(175, cp)
+			}()
+		}
+		var success int
+		var rerr error
+		for i := 0; i < workers; i++ {
+			err := <-errCh
+			if err != nil {
+				rerr = err
+				db.opt.Warningf("While running doCompact with %+v. Error: %v\n", cp, err)
+			} else {
+				success++
+			}
+		}
+		if success == 0 {
+			return rerr
+		}
+		// We could do at least one successful compaction. So, we'll consider this a success.
+		db.opt.Infof("%d compactor(s) succeeded. One or more tables from level %d compacted.\n",
+			success, cp.level)
+		return nil
+	}
+
+	hbytes := func(sz int64) string {
+		return humanize.Bytes(uint64(sz))
+	}
+
+	t := db.lc.levelTargets()
+	for {
+		db.opt.Infof("\n")
+		var levels []int
+		for i, l := range db.lc.levels {
+			sz := l.getTotalSize()
+			db.opt.Infof("Level: %d. %8s Size. %8s Max.\n",
+				i, hbytes(l.getTotalSize()), hbytes(t.targetSz[i]))
+			if sz > 0 {
+				levels = append(levels, i)
+			}
+		}
+		if len(levels) <= 1 {
+			prios := db.lc.pickCompactLevels()
+			if len(prios) == 0 || prios[0].score <= 1.0 {
+				db.opt.Infof("All tables consolidated into one level. Flattening done.\n")
+				return nil
+			}
+			if err := compactAway(prios[0]); err != nil {
+				return err
+			}
+			continue
+		}
+		// Create an artificial compaction priority, to ensure that we compact the level.
+		cp := compactionPriority{level: levels[0], score: 1.71}
+		if err := compactAway(cp); err != nil {
+			return err
+		}
+	}
 }
-
-// 	db.stopCompactions()
-// 	defer db.startCompactions()
-
-// 	compactAway := func(cp compactionPriority) error {
-// 		db.opt.Infof("Attempting to compact with %+v\n", cp)
-// 		errCh := make(chan error, 1)
-// 		for i := 0; i < workers; i++ {
-// 			go func() {
-// 				errCh <- db.lc.doCompact(175, cp)
-// 			}()
-// 		}
-// 		var success int
-// 		var rerr error
-// 		for i := 0; i < workers; i++ {
-// 			err := <-errCh
-// 			if err != nil {
-// 				rerr = err
-// 				db.opt.Warningf("While running doCompact with %+v. Error: %v\n", cp, err)
-// 			} else {
-// 				success++
-// 			}
-// 		}
-// 		if success == 0 {
-// 			return rerr
-// 		}
-// 		// We could do at least one successful compaction. So, we'll consider this a success.
-// 		db.opt.Infof("%d compactor(s) succeeded. One or more tables from level %d compacted.\n",
-// 			success, cp.level)
-// 		return nil
-// 	}
-
-// 	hbytes := func(sz int64) string {
-// 		return humanize.Bytes(uint64(sz))
-// 	}
-
-// 	for {
-// 		db.opt.Infof("\n")
-// 		var levels []int
-// 		for i, l := range db.lc.levels {
-// 			sz := l.getTotalSize()
-// 			db.opt.Infof("Level: %d. %8s Size. %8s Max.\n",
-// 				i, hbytes(l.getTotalSize()), hbytes(l.targetSize))
-// 			if sz > 0 {
-// 				levels = append(levels, i)
-// 			}
-// 		}
-// 		if len(levels) <= 1 {
-// 			prios := db.lc.pickCompactLevels()
-// 			if len(prios) == 0 || prios[0].score <= 1.0 {
-// 				db.opt.Infof("All tables consolidated into one level. Flattening done.\n")
-// 				return nil
-// 			}
-// 			if err := compactAway(prios[0]); err != nil {
-// 				return err
-// 			}
-// 			continue
-// 		}
-// 		// Create an artificial compaction priority, to ensure that we compact the level.
-// 		cp := compactionPriority{level: levels[0], score: 1.71}
-// 		if err := compactAway(cp); err != nil {
-// 			return err
-// 		}
-// 	}
-// }
 
 func (db *DB) blockWrite() error {
 	// Stop accepting new writes.
@@ -1626,7 +1629,7 @@ func (db *DB) dropAll() (func(), error) {
 // - Compact rest of the levels, Li->Li, picking tables which have Kp.
 // - Resume memtable flushes, compactions and writes.
 func (db *DB) DropPrefix(prefixes ...[]byte) error {
-	db.opt.Infof("DropPrefix Called")
+	db.opt.Infof("DropPrefix Called %s", prefixes)
 	f, err := db.prepareToDrop()
 	if err != nil {
 		return err

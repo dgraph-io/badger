@@ -328,6 +328,16 @@ func (opt Options) WithNumMemtables(val int) Options {
 	return opt
 }
 
+// WithMemTableSize returns a new Options value with MemTableSize set to the given value.
+//
+// MemTableSize sets the maximum size in bytes for memtable table.
+//
+// The default value of MemTableSize is 64MB.
+func (opt Options) WithMemTableSize(val int64) Options {
+	opt.MemTableSize = val
+	return opt
+}
+
 // WithBloomFalsePositive returns a new Options value with BloomFalsePositive set
 // to the given value.
 //

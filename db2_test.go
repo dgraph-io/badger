@@ -103,7 +103,7 @@ func TestTruncateVlogWithClose(t *testing.T) {
 	for i := 0; i < 32; i++ {
 		err := db.View(func(txn *Txn) error {
 			item, err := txn.Get(key(i))
-			require.NoError(t, err)
+			require.NoError(t, err, "key: %s", key(i))
 			val := getItemValue(t, item)
 			require.Equal(t, 10, len(val))
 			return nil
