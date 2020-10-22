@@ -82,6 +82,7 @@ type Skiplist struct {
 	ref         int32
 	arena       *Arena
 	hasVersions bool
+	comparator  comparatorFunc
 	OnClose     func()
 }
 
@@ -99,7 +100,7 @@ func (s *Skiplist) DecrRef() {
 	if s.OnClose != nil {
 		s.OnClose()
 	}
-
+	s.arena.Release()
 	// Indicate we are closed. Good for testing.  Also, lets GC reclaim memory. Race condition
 	// here would suggest we are accessing skiplist when we are supposed to have no reference!
 	s.arena = nil
@@ -144,13 +145,18 @@ func NewSkiplistWithBuffer(buf *z.Buffer) *Skiplist {
 	arena.Buffer = buf
 	offset := arena.allocateValue(y.ValueStruct{})
 	head := newNode(arena, nil, offset, maxHeight)
-	return &Skiplist{
+	sl := &Skiplist{
 		height:      1,
 		head:        head,
 		arena:       arena,
 		ref:         1,
 		hasVersions: false,
+		comparator:  bytes.Compare,
 	}
+	if sl.hasVersions {
+		sl.comparator = y.CompareKeys
+	}
+	return sl
 }
 
 func (s *node) getValueOffset() (uint32, uint32) {
@@ -223,12 +229,8 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 			return x, false
 		}
 		nextKey := next.key(s.arena)
-		var cmp int
-		if s.hasVersions {
-			cmp = y.CompareKeys(key, nextKey)
-		} else {
-			cmp = bytes.Compare(key, nextKey)
-		}
+
+		cmp := s.comparator(key, nextKey)
 		if cmp > 0 {
 			// x.key < next.key < key. We can continue to move right.
 			x = next
@@ -283,12 +285,7 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 			return before, next
 		}
 		nextKey := next.key(s.arena)
-		var cmp int
-		if s.hasVersions {
-			cmp = y.CompareKeys(key, nextKey)
-		} else {
-			cmp = bytes.Compare(key, nextKey)
-		}
+		cmp := s.comparator(key, nextKey)
 		if cmp == 0 {
 			// Equality case.
 			return next, next
