@@ -512,30 +512,67 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	// addLevel0Table uses.
 
 	// cstatus is checked to see if level 0's tables are already being compacted
-	if !s.cstatus.overlapsWith(0, infRange) && s.isLevel0Compactable() {
+
+	addPriority := func(level int, score float64) {
 		pri := compactionPriority{
-			level: 0,
-			score: float64(s.levels[0].numTables()) / float64(s.kv.opt.NumLevelZeroTables),
+			level: level,
+			score: score,
 			t:     t,
 		}
 		prios = append(prios, pri)
 	}
 
-	// Don't consider L0 and the last level.
-	for i := 1; i < len(s.levels)-1; i++ {
+	if !s.cstatus.overlapsWith(0, infRange) && s.isLevel0Compactable() {
+		addPriority(0, float64(s.levels[0].numTables())/float64(s.kv.opt.NumLevelZeroTables))
+	} else {
+		addPriority(0, 0)
+	}
+
+	// Don't consider L0.
+	for i := 1; i < len(s.levels); i++ {
 		// Don't consider those tables that are already being compacted right now.
 		delSize := s.cstatus.delSize(i)
 
 		l := s.levels[i]
-		if sz := l.getTotalSize() - delSize; sz >= t.targetSz[i] {
-			pri := compactionPriority{
-				level: i,
-				score: float64(sz) / float64(t.targetSz[i]),
-				t:     t,
-			}
-			prios = append(prios, pri)
+		sz := l.getTotalSize() - delSize
+		addPriority(i, float64(sz)/float64(t.targetSz[i]))
+	}
+	y.AssertTrue(len(prios) == len(s.levels))
+
+	// for _, p := range prios {
+	// 	fmt.Printf("L%d Priority: %.2f\n", p.level, p.score)
+	// }
+
+	// if false {
+	// 	var prevLevel int
+	// 	for level := t.baseLevel; level < len(s.levels); level++ {
+	// 		if prios[prevLevel].score >= 1 {
+	// 			// Avoid absurdly large scores by placing a floor on the score that we'll
+	// 			// adjust a level by. The value of 0.01 was chosen somewhat arbitrarily
+	// 			const minScore = 0.01
+	// 			if prios[level].score >= minScore {
+	// 				prios[prevLevel].score /= prios[level].score
+	// 			} else {
+	// 				prios[prevLevel].score /= minScore
+	// 			}
+	// 		}
+	// 		prevLevel = level
+	// 	}
+	// }
+
+	// for _, p := range prios {
+	// 	fmt.Printf("After adjustment L%d Priority: %.2f\n", p.level, p.score)
+	// }
+
+	// Now pick the priorities which are over 1.0.
+	out := prios[:0]
+	for _, p := range prios[:len(prios)-1] {
+		if p.score >= 1.0 {
+			out = append(out, p)
 		}
 	}
+	prios = out
+
 	// We should continue to sort the compaction priorities by score. Now that we have a dedicated
 	// compactor for L0 and L1, we don't need to sort by level here.
 	sort.Slice(prios, func(i, j int) bool {
@@ -588,6 +625,21 @@ func (s *levelsController) buildTables(it y.Iterator, kr keyRange, cd compactDef
 		}
 	}
 
+	// var numOverlappingTables = s.kv.opt.LevelSizeMultiplier / s.kv.opt.TableSizeMultiplier
+	exceedsAllowedOverlap := func(kr keyRange) bool {
+		n2n := cd.nextLevel.level + 1
+		if n2n <= 1 || n2n >= len(s.levels) {
+			return false
+		}
+		n2nl := s.levels[n2n]
+		n2nl.RLock()
+		defer n2nl.RUnlock()
+
+		l, r := n2nl.overlappingTables(levelHandlerRLocked{}, kr)
+		// return r-l >= numOverlappingTables
+		return r-l >= 10
+	}
+
 	var lastKey, skipKey []byte
 	var numBuilds, numVersions int
 	var vp valuePointer
@@ -595,6 +647,8 @@ func (s *levelsController) buildTables(it y.Iterator, kr keyRange, cd compactDef
 	addKeys := func(builder *table.Builder) {
 		timeStart := time.Now()
 		var numKeys, numSkips uint64
+		var rangeCheck int
+		var tableKr keyRange
 		for ; it.Valid(); it.Next() {
 			// See if we need to skip the prefix.
 			if len(cd.dropPrefixes) > 0 && hasAnyPrefixes(it.Key(), cd.dropPrefixes) {
@@ -618,8 +672,6 @@ func (s *levelsController) buildTables(it y.Iterator, kr keyRange, cd compactDef
 				if len(kr.right) > 0 && y.CompareKeys(it.Key(), kr.right) >= 0 {
 					break
 				}
-				// TODO: Also check how much overlap this table already has with the next level. If
-				// it exceeds 10 tables, then stop writing to the file.
 				if builder.ReachedCapacity() {
 					// Only break if we are on a different key, and have reached capacity. We want
 					// to ensure that all versions of the key are stored in the same sstable, and
@@ -628,6 +680,24 @@ func (s *levelsController) buildTables(it y.Iterator, kr keyRange, cd compactDef
 				}
 				lastKey = y.SafeCopy(lastKey, it.Key())
 				numVersions = 0
+
+				if len(tableKr.left) == 0 {
+					tableKr.left = y.SafeCopy(tableKr.left, it.Key())
+				}
+				tableKr.right = lastKey
+
+				rangeCheck++
+				if rangeCheck%5000 == 0 {
+					// This table's range exceeds the allowed range overlap with the level after
+					// next. So, we stop writing to this table. If we don't do this, then we end up
+					// doing very expensive compactions involving too many tables. To amortize the
+					// cost of this check, we do it only every N keys.
+					if exceedsAllowedOverlap(tableKr) {
+						// s.kv.opt.Debugf("L%d -> L%d Breaking due to exceedsAllowedOverlap with
+						// kr: %s\n", cd.thisLevel.level, cd.nextLevel.level, tableKr)
+						break
+					}
+				}
 			}
 
 			vs := it.Value()
@@ -809,7 +879,7 @@ func (s *levelsController) compactBuildTables(
 	}
 
 	res := make(chan *table.Table, 3)
-	inflightBuilders := y.NewThrottle(5 + len(cd.splits))
+	inflightBuilders := y.NewThrottle(8 + len(cd.splits))
 	for _, kr := range cd.splits {
 		// Initiate Do here so we can register the goroutines for buildTables too.
 		inflightBuilders.Do()
@@ -923,25 +993,29 @@ type compactDef struct {
 }
 
 // addSplits can allow us to run multiple sub-compactions in parallel across the split key ranges.
-func (cd *compactDef) addSplits() {
+func (s *levelsController) addSplits(cd *compactDef) {
 	cd.splits = cd.splits[:0]
 
 	// Pick one every 3 tables.
 	const N = 3
 	skr := cd.thisRange
 	skr.extend(cd.nextRange)
-	skr.left = []byte{}
+
+	addRange := func(right []byte) {
+		skr.right = y.Copy(right)
+		cd.splits = append(cd.splits, skr)
+
+		skr.left = skr.right
+	}
+
 	for i, t := range cd.bot {
 		// last entry in bottom table.
 		if i == len(cd.bot)-1 {
-			skr.right = []byte{}
-			cd.splits = append(cd.splits, skr)
-
-		} else if i%N == N-1 {
-			skr.right = y.Copy(t.Biggest())
-			cd.splits = append(cd.splits, skr)
-
-			skr.left = skr.right
+			addRange([]byte{})
+			return
+		}
+		if i%N == N-1 {
+			addRange(t.Biggest())
 		}
 	}
 }
@@ -1137,7 +1211,7 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	if thisLevel.level == 0 && nextLevel.level == 0 {
 		// don't do anything for L0 -> L0.
 	} else {
-		cd.addSplits()
+		s.addSplits(&cd)
 	}
 	if len(cd.splits) == 0 {
 		cd.splits = append(cd.splits, keyRange{})
@@ -1179,9 +1253,14 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	to := tablesToString(newTables)
 
 	if dur := time.Since(timeStart); dur > 0 {
-		s.kv.opt.Infof("[%d] LOG Compact %d->%d (%d->%d tables with %d splits). [%s] -> [%s], took %v\n",
-			id, thisLevel.level, nextLevel.level, len(cd.top)+len(cd.bot), len(newTables), len(cd.splits),
-			strings.Join(from, " "), strings.Join(to, " "), dur.Round(time.Millisecond))
+		var expensive string
+		if dur > time.Second {
+			expensive = " [E]"
+		}
+		s.kv.opt.Infof("[%d]%s LOG Compact %d->%d (%d->%d tables with %d splits). [%s] -> [%s], took %v\n",
+			id, expensive, thisLevel.level, nextLevel.level, len(cd.top)+len(cd.bot),
+			len(newTables), len(cd.splits), strings.Join(from, " "), strings.Join(to, " "),
+			dur.Round(time.Millisecond))
 	}
 
 	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.opt.LevelSizeMultiplier {
