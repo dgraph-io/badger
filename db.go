@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -552,6 +553,7 @@ func (db *DB) close() (err error) {
 		}
 	}
 
+	db.opt.Infof(db.LevelsToString())
 	if lcErr := db.lc.close(); err == nil {
 		err = y.Wrap(lcErr, "DB.Close")
 	}
@@ -1833,4 +1835,27 @@ func (db *DB) CacheMaxCost(cache CacheType, maxCost int64) (int64, error) {
 	default:
 		return 0, errors.Errorf("invalid cache type")
 	}
+}
+
+func (db *DB) LevelsToString() string {
+	levels := db.Levels()
+	h := func(sz int64) string {
+		return humanize.IBytes(uint64(sz))
+	}
+	base := func(b bool) string {
+		if b {
+			return "B"
+		}
+		return " "
+	}
+
+	var b strings.Builder
+	b.WriteRune('\n')
+	for _, li := range levels {
+		b.WriteString(fmt.Sprintf(
+			"Level %d [%s]: NumTables: %02d. Size: %s of %s. Target FileSize: %s\n",
+			li.Level, base(li.IsBaseLevel), li.NumTables,
+			h(li.Size), h(li.TargetSize), h(li.TargetFileSize)))
+	}
+	return b.String()
 }

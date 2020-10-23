@@ -422,7 +422,13 @@ func (s *levelsController) levelTargets() targets {
 
 	tsz := s.kv.opt.BaseTableSize
 	for i := 0; i < len(s.levels); i++ {
-		if i <= t.baseLevel {
+		if i == 0 {
+			// Use MemTableSize for Level 0. Because at Level 0, we stop compactions based on the
+			// number of tables, not the size of the level. So, having a direct correlation between
+			// mem table size and the size of L0 files is better than churning out 32 files per
+			// memtable (assuming 64MB MemTableSize and 2MB BaseTableSize).
+			t.fileSz[i] = s.kv.opt.MemTableSize
+		} else if i <= t.baseLevel {
 			t.fileSz[i] = tsz
 		} else {
 			tsz *= int64(s.kv.opt.TableSizeMultiplier)
@@ -542,35 +548,29 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	}
 	y.AssertTrue(len(prios) == len(s.levels))
 
-	// for _, p := range prios {
-	// 	fmt.Printf("L%d Priority: %.2f\n", p.level, p.score)
-	// }
-
-	// if false {
-	// 	var prevLevel int
-	// 	for level := t.baseLevel; level < len(s.levels); level++ {
-	// 		if prios[prevLevel].score >= 1 {
-	// 			// Avoid absurdly large scores by placing a floor on the score that we'll
-	// 			// adjust a level by. The value of 0.01 was chosen somewhat arbitrarily
-	// 			const minScore = 0.01
-	// 			if prios[level].score >= minScore {
-	// 				prios[prevLevel].score /= prios[level].score
-	// 			} else {
-	// 				prios[prevLevel].score /= minScore
-	// 			}
+	// The following code is borrowed from PebbleDB, but actually causes more L0 stalls, because it
+	// always prioritizes compacting lower levels. When writing 100M random keys using badger
+	// benchmark write, I see lifetime L0 stalls for 2m10s using this code below, v/s 1m15s without
+	// this code. So, disabling it.
+	//
+	// var prevLevel int
+	// for level := t.baseLevel; level < len(s.levels); level++ {
+	// 	if prios[prevLevel].score >= 1 {
+	// 		// Avoid absurdly large scores by placing a floor on the score that we'll
+	// 		// adjust a level by. The value of 0.01 was chosen somewhat arbitrarily
+	// 		const minScore = 0.01
+	// 		if prios[level].score >= minScore {
+	// 			prios[prevLevel].score /= prios[level].score
+	// 		} else {
+	// 			prios[prevLevel].score /= minScore
 	// 		}
-	// 		prevLevel = level
 	// 	}
-	// }
-
-	// for _, p := range prios {
-	// 	fmt.Printf("After adjustment L%d Priority: %.2f\n", p.level, p.score)
+	// 	prevLevel = level
 	// }
 
 	// Now pick the priorities which are over 1.0.
 	out := prios[:0]
 	for _, p := range prios[:len(prios)-1] {
-		// if p.score > 1.0 {
 		if p.score >= 1.0 {
 			out = append(out, p)
 		}
@@ -895,21 +895,20 @@ func (s *levelsController) compactBuildTables(
 		}(kr)
 	}
 
-	readyTables := make(chan []*table.Table)
+	var newTables []*table.Table
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		var newTables []*table.Table
+		defer wg.Done()
 		for t := range res {
 			newTables = append(newTables, t)
 		}
-		readyTables <- newTables
-
 	}()
 
 	// Wait for all table builders to finish and also for newTables accumulator to finish.
 	err := inflightBuilders.Finish()
 	close(res)
-	// Receive all the tables from res chan.
-	newTables := <-readyTables
+	wg.Wait() // Wait for all tables to be picked up.
 
 	if err == nil {
 		// Ensure created files' directory entries are visible.  We don't mind the extra latency
