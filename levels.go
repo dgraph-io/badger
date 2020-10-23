@@ -384,8 +384,6 @@ func (s *levelsController) startCompact(lc *z.Closer) {
 	n := s.kv.opt.NumCompactors
 	lc.AddRunning(n - 1)
 	for i := 0; i < n; i++ {
-		// The worker with id=0 is dedicated to L0 and L1. This is not counted
-		// towards the user specified NumCompactors.
 		go s.runCompactor(i, lc)
 	}
 }
@@ -488,6 +486,12 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 			prios = moveL0toFront(prios)
 		}
 		for _, p := range prios {
+			if id == 0 && p.level == 0 {
+				// Allow worker zero to run level 0, irrespective of its adjusted score.
+			} else if p.adjusted < 1.0 {
+				break
+			}
+
 			err := s.doCompact(id, p)
 			switch err {
 			case nil:
@@ -528,6 +532,7 @@ func (s *levelsController) isLevel0Compactable() bool {
 type compactionPriority struct {
 	level        int
 	score        float64
+	adjusted     float64
 	dropPrefixes [][]byte
 	t            targets
 }
@@ -547,18 +552,20 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 
 	addPriority := func(level int, score float64) {
 		pri := compactionPriority{
-			level: level,
-			score: score,
-			t:     t,
+			level:    level,
+			score:    score,
+			adjusted: score,
+			t:        t,
 		}
 		prios = append(prios, pri)
 	}
 
-	if !s.cstatus.overlapsWith(0, infRange) && s.isLevel0Compactable() {
-		addPriority(0, float64(s.levels[0].numTables())/float64(s.kv.opt.NumLevelZeroTables))
-	} else {
-		addPriority(0, 0)
-	}
+	addPriority(0, float64(s.levels[0].numTables())/float64(s.kv.opt.NumLevelZeroTables))
+	// if !s.cstatus.overlapsWith(0, infRange) && s.isLevel0Compactable() {
+	// 	addPriority(0, float64(s.levels[0].numTables())/float64(s.kv.opt.NumLevelZeroTables))
+	// } else {
+	// 	addPriority(0, 0)
+	// }
 
 	// Don't consider L0.
 	for i := 1; i < len(s.levels); i++ {
@@ -581,20 +588,22 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	// above level.
 	var prevLevel int
 	for level := t.baseLevel; level < len(s.levels); level++ {
-		if prios[prevLevel].score >= 1 {
+		if prios[prevLevel].adjusted >= 1 {
 			// Avoid absurdly large scores by placing a floor on the score that we'll
 			// adjust a level by. The value of 0.01 was chosen somewhat arbitrarily
 			const minScore = 0.01
 			if prios[level].score >= minScore {
-				prios[prevLevel].score /= prios[level].score
+				prios[prevLevel].adjusted /= prios[level].adjusted
 			} else {
-				prios[prevLevel].score /= minScore
+				prios[prevLevel].adjusted /= minScore
 			}
 		}
 		prevLevel = level
 	}
 
-	// Now pick the priorities which are over 1.0.
+	// Pick all the levels whose original score is >= 1.0, irrespective of their adjusted score.
+	// We'll still sort them by their adjusted score below. Having both these scores allows us to
+	// make better decisions about when to compact L0.
 	out := prios[:0]
 	for _, p := range prios[:len(prios)-1] {
 		if p.score >= 1.0 {
@@ -606,7 +615,7 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	// We should continue to sort the compaction priorities by score. Now that we have a dedicated
 	// compactor for L0 and L1, we don't need to sort by level here.
 	sort.Slice(prios, func(i, j int) bool {
-		return prios[i].score > prios[j].score
+		return prios[i].adjusted > prios[j].adjusted
 	})
 	return prios
 }
@@ -1012,9 +1021,11 @@ func containsAnyPrefixes(smallValue, largeValue []byte, listOfPrefixes [][]byte)
 type compactDef struct {
 	span *otrace.Span
 
-	t         targets
-	thisLevel *levelHandler
-	nextLevel *levelHandler
+	compactorId int
+	t           targets
+	p           compactionPriority
+	thisLevel   *levelHandler
+	nextLevel   *levelHandler
 
 	top []*table.Table
 	bot []*table.Table
@@ -1074,6 +1085,11 @@ func (cd *compactDef) allTables() []*table.Table {
 }
 
 func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
+	if cd.compactorId != 0 {
+		// Only compactor zero can work on this.
+		return false
+	}
+
 	cd.nextLevel = s.levels[0]
 	cd.nextRange = keyRange{}
 	cd.bot = nil
@@ -1086,7 +1102,12 @@ func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
 
 	top := cd.thisLevel.tables
 	var out []*table.Table
+	now := time.Now()
 	for _, t := range top {
+		if now.Sub(t.CreatedAt) < 10*time.Second {
+			// Just created it 10s ago. Don't pick for compaction.
+			continue
+		}
 		if _, beingCompacted := s.cstatus.tables[t.ID()]; beingCompacted {
 			continue
 		}
@@ -1095,7 +1116,6 @@ func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
 
 	if len(out) < 3 {
 		// If we don't have enough tables to merge in L0, don't do it. 3 is arbitrarily chosen.
-		fmt.Printf("~~~ Don't have enough tables: %d\n", len(out))
 		return false
 	}
 	cd.thisRange = infRange
@@ -1113,6 +1133,10 @@ func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
 func (s *levelsController) fillTablesL0ToLbase(cd *compactDef) bool {
 	if cd.nextLevel.level == 0 {
 		panic("Base level can't be zero.")
+	}
+	if cd.p.adjusted > 0.0 && cd.p.adjusted < 1.0 {
+		// Do not compact to Lbase if adjusted score is less than 1.0.
+		return false
 	}
 	cd.lockLevels()
 	defer cd.unlockLevels()
@@ -1339,7 +1363,9 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 	defer span.End()
 
 	cd := compactDef{
+		compactorId:  id,
 		span:         span,
+		p:            p,
 		t:            p.t,
 		thisLevel:    s.levels[l],
 		dropPrefixes: p.dropPrefixes,
@@ -1536,6 +1562,7 @@ type LevelInfo struct {
 	TargetFileSize int64
 	IsBaseLevel    bool
 	Score          float64
+	Adjusted       float64
 }
 
 func (s *levelsController) getLevelInfo() []LevelInfo {
@@ -1555,6 +1582,7 @@ func (s *levelsController) getLevelInfo() []LevelInfo {
 	}
 	for _, p := range prios {
 		result[p.level].Score = p.score
+		result[p.level].Adjusted = p.adjusted
 	}
 	return result
 }
