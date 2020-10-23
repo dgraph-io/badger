@@ -396,7 +396,19 @@ type targets struct {
 	fileSz    []int64
 }
 
-// TODO: Should we get a lock?
+// levelTargets calculates the targets for levels in the LSM tree. The idea comes from Dynamic Level
+// Sizes ( https://rocksdb.org/blog/2015/07/23/dynamic-level.html ) in RocksDB. The sizes of levels
+// are calculated based on the size of the lowest level, typically L6. So, if L6 size is 1GB, then
+// L5 target size is 100MB, L4 target size is 10MB and so on.
+//
+// L0 files don't automatically go to L1. Instead, they get compacted to Lbase, where Lbase is
+// chosen based on the first level which is non-empty, starting from bottom: L6, then L5, then L4
+// and so on.
+//
+// Lbase is advanced to the upper levels when its target size exceeds BaseLevelSize. For
+// example, when L6 reaches 1.1GB, then L4 target sizes becomes 11MB, thus exceeding the
+// BaseLevelSize of 10MB. L3 would then become the new Lbase, with a target size of 1MB <
+// BaseLevelSize.
 func (s *levelsController) levelTargets() targets {
 	adjust := func(sz int64) int64 {
 		if sz < s.kv.opt.BaseLevelSize {
@@ -602,7 +614,14 @@ func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
 	return false
 }
 
-func (s *levelsController) buildTables(it y.Iterator, kr keyRange, cd compactDef,
+// subcompact runs a single sub-compaction, iterating over the specified key-range only.
+//
+// We use splits to do a single compaction concurrently. If we have >= 3 tables
+// involved in the bottom level during compaction, we choose key ranges to
+// split the main compaction up into sub-compactions. Each sub-compaction runs
+// concurrently, only iterating over the provided key range, generating tables.
+// This speeds up the compaction significantly.
+func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	inflightBuilders *y.Throttle, res chan *table.Table) {
 
 	// Check overlap of the top level with the levels which are not being
@@ -876,13 +895,6 @@ func (s *levelsController) compactBuildTables(
 		return append(iters, table.NewConcatIterator(valid, table.NOCACHE))
 	}
 
-	// TODO(ibrahim): Why was this iterator created?
-	// {
-	// 	// Just create one iterator to close.
-	// 	it := table.NewMergeIterator(newIterator(), false)
-	// 	defer it.Close() // Important to close the iterator to do ref counting.
-	// }
-
 	res := make(chan *table.Table, 3)
 	inflightBuilders := y.NewThrottle(8 + len(cd.splits))
 	for _, kr := range cd.splits {
@@ -891,7 +903,7 @@ func (s *levelsController) compactBuildTables(
 		go func(kr keyRange) {
 			it := table.NewMergeIterator(newIterator(), false)
 			defer it.Close()
-			s.buildTables(it, kr, cd, inflightBuilders, res)
+			s.subcompact(it, kr, cd, inflightBuilders, res)
 		}(kr)
 	}
 
