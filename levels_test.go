@@ -219,7 +219,7 @@ func TestCompaction(t *testing.T) {
 	})
 
 	t.Run("level 0 to level 1 with lower overlap", func(t *testing.T) {
-		runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			l0 := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
 			l01 := []keyValVersion{{"foo", "bar", 2, 0}}
 			l1 := []keyValVersion{{"foo", "bar", 1, 0}}
@@ -254,7 +254,7 @@ func TestCompaction(t *testing.T) {
 	})
 
 	t.Run("level 1 to level 2", func(t *testing.T) {
-		runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			l1 := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0}}
 			l2 := []keyValVersion{{"foo", "bar", 2, 0}}
 			createAndOpen(db, l1, 1)
@@ -280,7 +280,7 @@ func TestCompaction(t *testing.T) {
 
 	t.Run("level 1 to level 2 with delete", func(t *testing.T) {
 		t.Run("with overlap", func(t *testing.T) {
-			runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
+			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 				l1 := []keyValVersion{{"foo", "bar", 3, bitDelete}, {"fooz", "baz", 1, bitDelete}}
 				l2 := []keyValVersion{{"foo", "bar", 2, 0}}
 				l3 := []keyValVersion{{"foo", "bar", 1, 0}}
@@ -327,7 +327,7 @@ func TestCompaction(t *testing.T) {
 			})
 		})
 		t.Run("with bottom overlap", func(t *testing.T) {
-			runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
+			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 				l1 := []keyValVersion{{"foo", "bar", 3, bitDelete}}
 				l2 := []keyValVersion{{"foo", "bar", 2, 0}, {"fooz", "baz", 2, bitDelete}}
 				l3 := []keyValVersion{{"fooz", "baz", 1, 0}}
@@ -361,7 +361,7 @@ func TestCompaction(t *testing.T) {
 			})
 		})
 		t.Run("without overlap", func(t *testing.T) {
-			runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
+			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 				l1 := []keyValVersion{{"foo", "bar", 3, bitDelete}, {"fooz", "baz", 1, bitDelete}}
 				l2 := []keyValVersion{{"fooo", "barr", 2, 0}}
 				createAndOpen(db, l1, 1)
