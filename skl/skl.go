@@ -483,6 +483,11 @@ func (s *Iterator) Value() y.ValueStruct {
 	return s.list.arena.getVal(valOffset, valSize)
 }
 
+// ValueUint64 returns the uint64 value of the current node.
+func (s *Iterator) ValueUint64() uint64 {
+	return s.n.value
+}
+
 // Next advances to the next position.
 func (s *Iterator) Next() {
 	y.AssertTrue(s.Valid())
