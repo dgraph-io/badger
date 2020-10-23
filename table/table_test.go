@@ -645,6 +645,7 @@ func TestTableBigValues(t *testing.T) {
 	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
 		TableSize: uint64(n) * 1 << 20}
 	builder := NewTableBuilder(opts)
+	defer builder.Close()
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), uint64(i+1))
 		vs := y.ValueStruct{Value: value(i)}
@@ -766,6 +767,7 @@ func BenchmarkReadMerged(b *testing.B) {
 		}
 		tbl, err := CreateTable(filename, builder.Finish(false), opts)
 		y.Check(err)
+		builder.Close()
 		tables = append(tables, tbl)
 		defer tbl.DecrRef()
 	}
@@ -845,6 +847,7 @@ func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Tab
 	}
 	opts.BlockCache = cache
 	builder := NewTableBuilder(opts)
+	defer builder.Close()
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	for i := 0; i < count; i++ {
 		k := fmt.Sprintf("%016x", i)
