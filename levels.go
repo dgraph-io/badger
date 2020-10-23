@@ -464,14 +464,30 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
+	moveL0toFront := func(prios []compactionPriority) []compactionPriority {
+		idx := -1
+		for i, p := range prios {
+			if p.level == 0 {
+				idx = i
+				break
+			}
+		}
+		if idx > 0 {
+			out := append([]compactionPriority{}, prios[idx])
+			out = append(out, prios[:idx]...)
+			out = append(out, prios[idx+1:]...)
+			return out
+		}
+		return prios
+	}
+
 	runOnce := func() bool {
 		prios := s.pickCompactLevels()
+		if id == 0 {
+			// Worker ID zero prefers to compact L0 always.
+			prios = moveL0toFront(prios)
+		}
 		for _, p := range prios {
-			if id == 0 && p.level > 1 {
-				// If I'm ID zero, I only compact L0. Other workers can still compact L0. So,
-				// essentially we have an extra dedicated worker for L0.
-				continue
-			}
 			err := s.doCompact(id, p)
 			switch err {
 			case nil:
@@ -1519,10 +1535,12 @@ type LevelInfo struct {
 	TargetSize     int64
 	TargetFileSize int64
 	IsBaseLevel    bool
+	Score          float64
 }
 
 func (s *levelsController) getLevelInfo() []LevelInfo {
 	t := s.levelTargets()
+	prios := s.pickCompactLevels()
 	result := make([]LevelInfo, len(s.levels))
 	for i, l := range s.levels {
 		l.RLock()
@@ -1534,6 +1552,9 @@ func (s *levelsController) getLevelInfo() []LevelInfo {
 		result[i].TargetSize = t.targetSz[i]
 		result[i].TargetFileSize = t.fileSz[i]
 		result[i].IsBaseLevel = t.baseLevel == i
+	}
+	for _, p := range prios {
+		result[p.level].Score = p.score
 	}
 	return result
 }

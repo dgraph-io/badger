@@ -1853,9 +1853,9 @@ func (db *DB) LevelsToString() string {
 	b.WriteRune('\n')
 	for _, li := range levels {
 		b.WriteString(fmt.Sprintf(
-			"Level %d [%s]: NumTables: %02d. Size: %s of %s. Target FileSize: %s\n",
+			"Level %d [%s]: NumTables: %02d. Size: %s of %s. Score: %.1f Target FileSize: %s\n",
 			li.Level, base(li.IsBaseLevel), li.NumTables,
-			h(li.Size), h(li.TargetSize), h(li.TargetFileSize)))
+			h(li.Size), h(li.TargetSize), li.Score, h(li.TargetFileSize)))
 	}
 	return b.String()
 }
