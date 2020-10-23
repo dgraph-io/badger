@@ -66,7 +66,7 @@ var (
 	vlogMaxEntries   uint32
 	loadBloomsOnOpen bool
 	detectConflicts  bool
-	compression      bool
+	zstdComp         bool
 	showDir          bool
 	ttlDuration      string
 	showKeysCount    bool
@@ -113,8 +113,8 @@ func init() {
 		"Load Bloom filter on DB open.")
 	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", false,
 		"If true, it badger will detect the conflicts")
-	writeBenchCmd.Flags().BoolVar(&compression, "compression", true,
-		"If true, badger will use ZSTD mode")
+	writeBenchCmd.Flags().BoolVar(&zstdComp, "zstd", false,
+		"If true, badger will use ZSTD mode. Otherwise, use default.")
 	writeBenchCmd.Flags().BoolVar(&showDir, "show-dir", false,
 		"If true, the report will include the directory contents")
 	writeBenchCmd.Flags().StringVar(&dropAllPeriod, "dropall", "0s",
@@ -260,12 +260,6 @@ func writeSorted(db *badger.DB, num uint64) error {
 }
 
 func writeBench(cmd *cobra.Command, args []string) error {
-	var cmode options.CompressionType
-	if compression {
-		cmode = options.ZSTD
-	} else {
-		cmode = options.None
-	}
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithSyncWrites(syncWrites).
@@ -277,8 +271,10 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithValueLogMaxEntries(vlogMaxEntries).
 		WithEncryptionKey([]byte(encryptionKey)).
 		WithDetectConflicts(detectConflicts).
-		WithCompression(cmode).
 		WithLoggingLevel(badger.INFO)
+	if zstdComp {
+		opt = opt.WithCompression(options.ZSTD)
+	}
 
 	if !showLogs {
 		opt = opt.WithLogger(nil)
