@@ -278,8 +278,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithEncryptionKey([]byte(encryptionKey)).
 		WithDetectConflicts(detectConflicts).
 		WithCompression(cmode).
-		WithLoggingLevel(badger.INFO).
-		WithNumCompactors(3)
+		WithLoggingLevel(badger.INFO)
 
 	if !showLogs {
 		opt = opt.WithLogger(nil)
@@ -396,8 +395,9 @@ func reportStats(c *z.Closer, db *badger.DB) {
 			bytesRate := sz / uint64(dur.Seconds())
 			entriesRate := entries / uint64(dur.Seconds())
 			fmt.Printf("[WRITE] Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
-				"entries written: %d, speed: %d/sec, gcSuccess: %d\n", y.FixedDuration(time.Since(startTime)),
-				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate, gcSuccess)
+				"entries written: %d, speed: %d/sec, Memory: %s\n", y.FixedDuration(time.Since(startTime)),
+				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate,
+				humanize.IBytes(uint64(z.NumAllocBytes())))
 			if count%10 == 0 {
 				fmt.Printf(db.LevelsToString())
 			}

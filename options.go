@@ -121,7 +121,7 @@ func DefaultOptions(path string) Options {
 		LevelSizeMultiplier: 10,
 		MaxLevels:           7,
 
-		NumCompactors:           2, // Run at least 2 compactors. One is dedicated for L0.
+		NumCompactors:           5, // Run at least 2 compactors. One is dedicated for L0.
 		NumLevelZeroTables:      5,
 		NumLevelZeroTablesStall: 15,
 		NumMemtables:            5,

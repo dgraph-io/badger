@@ -467,16 +467,11 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 	runOnce := func() bool {
 		prios := s.pickCompactLevels()
 		for _, p := range prios {
-			// if id == 0 && p.level > 1 {
-			// 	// TODO: We should find something for this thread to do.
-			// 	// Probably do L0 -> L0 compaction.
-			// 	// If I'm ID zero, I only compact L0.
-			// 	continue
-			// }
-			// if id != 0 && p.level <= 1 {
-			// 	// If I'm ID non-zero, I do NOT compact L0 and L1.
-			// 	continue
-			// }
+			if id == 0 && p.level > 1 {
+				// If I'm ID zero, I only compact L0. Other workers can still compact L0. So,
+				// essentially we have an extra dedicated worker for L0.
+				continue
+			}
 			err := s.doCompact(id, p)
 			switch err {
 			case nil:
@@ -560,25 +555,28 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	}
 	y.AssertTrue(len(prios) == len(s.levels))
 
-	// The following code is borrowed from PebbleDB, but actually causes more L0 stalls, because it
-	// always prioritizes compacting lower levels. When writing 100M random keys using badger
-	// benchmark write, I see lifetime L0 stalls for 2m10s using this code below, v/s 1m15s without
-	// this code. So, disabling it.
-	//
-	// var prevLevel int
-	// for level := t.baseLevel; level < len(s.levels); level++ {
-	// 	if prios[prevLevel].score >= 1 {
-	// 		// Avoid absurdly large scores by placing a floor on the score that we'll
-	// 		// adjust a level by. The value of 0.01 was chosen somewhat arbitrarily
-	// 		const minScore = 0.01
-	// 		if prios[level].score >= minScore {
-	// 			prios[prevLevel].score /= prios[level].score
-	// 		} else {
-	// 			prios[prevLevel].score /= minScore
-	// 		}
-	// 	}
-	// 	prevLevel = level
-	// }
+	// The following code is borrowed from PebbleDB and results in healthier LSM tree structure.
+	// If Li-1 has score > 1.0, then we'll divide Li-1 score by Li. If Li score is >= 1.0, then Li-1
+	// score is reduced, which means we'll prioritize the compaction of lower levels (L5, L4 and so
+	// on) over the higher levels (L0, L1 and so on). On the other hand, if Li score is < 1.0, then
+	// we'll increase the priority of Li-1.
+	// Overall what this means is, if the bottom level is already overflowing, then de-prioritize
+	// compaction of the above level. If the bottom level is not full, then increase the priority of
+	// above level.
+	var prevLevel int
+	for level := t.baseLevel; level < len(s.levels); level++ {
+		if prios[prevLevel].score >= 1 {
+			// Avoid absurdly large scores by placing a floor on the score that we'll
+			// adjust a level by. The value of 0.01 was chosen somewhat arbitrarily
+			const minScore = 0.01
+			if prios[level].score >= minScore {
+				prios[prevLevel].score /= prios[level].score
+			} else {
+				prios[prevLevel].score /= minScore
+			}
+		}
+		prevLevel = level
+	}
 
 	// Now pick the priorities which are over 1.0.
 	out := prios[:0]
