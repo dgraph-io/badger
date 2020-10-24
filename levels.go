@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"sort"
@@ -1104,6 +1105,10 @@ func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
 	var out []*table.Table
 	now := time.Now()
 	for _, t := range top {
+		if t.Size() >= 2*cd.t.fileSz[0] {
+			// This file is already big, don't include it.
+			continue
+		}
 		if now.Sub(t.CreatedAt) < 10*time.Second {
 			// Just created it 10s ago. Don't pick for compaction.
 			continue
@@ -1115,7 +1120,7 @@ func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
 	}
 
 	if len(out) < 3 {
-		// If we don't have enough tables to merge in L0, don't do it. 3 is arbitrarily chosen.
+		// If we don't have enough tables to merge in L0, don't do it.
 		return false
 	}
 	cd.thisRange = infRange
@@ -1127,6 +1132,8 @@ func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
 	for _, t := range out {
 		s.cstatus.tables[t.ID()] = struct{}{}
 	}
+	// Set the target file size to max, so the output is always one file.
+	cd.t.fileSz[0] = math.MaxUint32
 	return true
 }
 
