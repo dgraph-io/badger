@@ -1443,7 +1443,7 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 			time.Sleep(10 * time.Millisecond)
 			if i%100 == 0 {
 				prios := s.pickCompactLevels()
-				s.kv.opt.Infof("Waiting to add level 0 table. Compaction priorities: %+v\n", prios)
+				s.kv.opt.Debugf("Waiting to add level 0 table. Compaction priorities: %+v\n", prios)
 				i = 0
 			}
 		}
