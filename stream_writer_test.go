@@ -329,7 +329,7 @@ func TestStreamWriter6(t *testing.T) {
 		ver := 1
 		for i := range str {
 			kv := &pb.KV{
-				Key:     bytes.Repeat([]byte(str[i]), int(db.opt.MaxTableSize)),
+				Key:     bytes.Repeat([]byte(str[i]), int(db.opt.BaseTableSize)),
 				Value:   []byte("val"),
 				Version: uint64(ver),
 			}

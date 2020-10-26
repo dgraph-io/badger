@@ -29,6 +29,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
@@ -55,7 +56,8 @@ type Options struct {
 	ReadOnly bool
 
 	// Maximum size of the table.
-	TableSize uint64
+	TableSize     uint64
+	tableCapacity uint64 // 0.9x TableSize.
 
 	// ChkMode is the checksum verification mode for Table.
 	ChkMode options.ChecksumVerificationMode
@@ -103,7 +105,8 @@ type Table struct {
 	smallest, biggest []byte // Smallest and largest keys (with timestamps).
 	id                uint64 // file id, part of filename
 
-	Checksum []byte
+	Checksum  []byte
+	CreatedAt time.Time
 	// Stores the total size of key-values stored in this table (including the size on vlog).
 	estimatedSize  uint32
 	indexStart     int
@@ -273,6 +276,7 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 		opt:        &opts,
 		IsInmemory: false,
 		tableSize:  int(fileInfo.Size()),
+		CreatedAt:  fileInfo.ModTime(),
 	}
 
 	if err := t.initBiggestAndSmallest(); err != nil {

@@ -178,14 +178,16 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 		thisLevel: lh0,
 		nextLevel: lh1,
 		span:      span,
+		t:         kv.lc.levelTargets(),
 	}
+	cd.t.baseLevel = 1
 
 	manifest := createManifest()
 	lc, err := newLevelsController(kv, &manifest)
 	require.NoError(t, err)
 	done = lc.fillTablesL0(&cd)
 	require.Equal(t, true, done)
-	lc.runCompactDef(0, cd)
+	lc.runCompactDef(-1, 0, cd)
 	span.End()
 
 	_, span = otrace.StartSpan(context.Background(), "Badger.Compaction")
@@ -199,9 +201,11 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 		thisLevel: lh0,
 		nextLevel: lh1,
 		span:      span,
+		t:         kv.lc.levelTargets(),
 	}
+	cd.t.baseLevel = 1
 	lc.fillTablesL0(&cd)
-	lc.runCompactDef(0, cd)
+	lc.runCompactDef(-1, 0, cd)
 }
 
 func TestManifestRewrite(t *testing.T) {

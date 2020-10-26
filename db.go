@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -85,11 +86,6 @@ type DB struct {
 	flushChan chan flushTask // For flushing memtables.
 	closeOnce sync.Once      // For closing DB only once.
 
-	// Number of log rotates since the last memtable flush. We will access this field via atomic
-	// functions. Since we are not going to use any 64bit atomic functions, there is no need for
-	// 64 bit alignment of this struct(see #311).
-	logRotates int32
-
 	blockWrites int32
 	isClosed    uint32
 
@@ -112,10 +108,11 @@ func checkAndSetOptions(opt *Options) error {
 	if opt.NumCompactors == 1 {
 		return errors.New("Cannot have 1 compactor. Need at least 2")
 	}
+
 	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
 		return errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
 	}
-	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
+	opt.maxBatchSize = (15 * opt.MemTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
 	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
@@ -127,8 +124,9 @@ func checkAndSetOptions(opt *Options) error {
 	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
 	if int64(opt.ValueThreshold) > opt.maxBatchSize {
-		return errors.Errorf("Valuethreshold greater than max batch size of %d. Either "+
-			"reduce opt.ValueThreshold or increase opt.MaxTableSize.", opt.maxBatchSize)
+		return errors.Errorf("Valuethreshold %d greater than max batch size of %d. Either "+
+			"reduce opt.ValueThreshold or increase opt.MaxTableSize.",
+			opt.ValueThreshold, opt.maxBatchSize)
 	}
 	// ValueLogFileSize should be stricly LESS than 2<<30 otherwise we will
 	// overflow the uint32 when we mmap it in OpenMemtable.
@@ -140,10 +138,6 @@ func checkAndSetOptions(opt *Options) error {
 	if opt.Compression == options.ZSTD && !y.CgoEnabled {
 		return y.ErrZstdCgo
 	}
-
-	// Compact L0 on close if either it is set or if KeepL0InMemory is set. When
-	// keepL0InMemory is set we need to compact L0 on close otherwise we might lose data.
-	opt.CompactL0OnClose = opt.CompactL0OnClose
 
 	if opt.ReadOnly {
 		// Do not perform compaction in read only mode.
@@ -257,7 +251,7 @@ func Open(opt Options) (*DB, error) {
 
 	if opt.IndexCacheSize > 0 {
 		// Index size is around 5% of the table size.
-		indexSz := int64(float64(opt.MaxTableSize) * 0.05)
+		indexSz := int64(float64(opt.BaseTableSize) * 0.05)
 		numInCache := opt.IndexCacheSize / indexSz
 		if numInCache == 0 {
 			// Make the value of this variable at least one since the cache requires
@@ -479,6 +473,7 @@ func (db *DB) IsClosed() bool {
 
 func (db *DB) close() (err error) {
 	db.opt.Debugf("Closing database")
+	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(db.lc.l0stallsMs))
 
 	atomic.StoreInt32(&db.blockWrites, 1)
 
@@ -550,6 +545,7 @@ func (db *DB) close() (err error) {
 		}
 	}
 
+	db.opt.Infof(db.LevelsToString())
 	if lcErr := db.lc.close(); err == nil {
 		err = y.Wrap(lcErr, "DB.Close")
 	}
@@ -912,18 +908,7 @@ func (db *DB) ensureRoomForWrite() error {
 	db.Lock()
 	defer db.Unlock()
 
-	// Here we determine if we need to force flush memtable. Given we rotated log file, it would
-	// make sense to force flush a memtable, so the updated value head would have a chance to be
-	// pushed to L0. Otherwise, it would not go to L0, until the memtable has been fully filled,
-	// which can take a lot longer if the write load has fewer keys and larger values. This force
-	// flush, thus avoids the need to read through a lot of log files on a crash and restart.
-	// Above approach is quite simple with small drawback. We are calling ensureRoomForWrite before
-	// inserting every entry in Memtable. We will get latest db.head after all entries for a request
-	// are inserted in Memtable. If we have done >= db.logRotates rotations, then while inserting
-	// first entry in Memtable, below condition will be true and we will endup flushing old value of
-	// db.head. Hence we are limiting no of value log files to be read to db.logRotates only.
-	forceFlush := atomic.LoadInt32(&db.logRotates) >= db.opt.LogRotatesToFlush
-
+	var forceFlush bool
 	// We don't need to force flush the memtable in in-memory mode because the size of the WAL will
 	// always be zero.
 	if !forceFlush && !db.opt.InMemory {
@@ -931,16 +916,13 @@ func (db *DB) ensureRoomForWrite() error {
 		forceFlush = int64(db.mt.wal.writeAt) > db.opt.ValueLogFileSize
 	}
 
-	if !forceFlush && db.mt.sl.MemSize() < db.opt.MaxTableSize {
+	if !forceFlush && db.mt.sl.MemSize() < db.opt.MemTableSize {
 		return nil
 	}
 
 	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	select {
 	case db.flushChan <- flushTask{mt: db.mt}:
-		// After every memtable flush, let's reset the counter.
-		atomic.StoreInt32(&db.logRotates, 0)
-
 		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
 			db.mt.sl.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
@@ -958,7 +940,7 @@ func (db *DB) ensureRoomForWrite() error {
 }
 
 func arenaSize(opt Options) int64 {
-	return opt.MaxTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
+	return opt.MemTableSize + opt.maxBatchSize + opt.maxBatchCount*int64(skl.MaxNodeSize)
 }
 
 // buildL0Table builds a new table from the memtable.
@@ -989,8 +971,7 @@ type flushTask struct {
 
 // handleFlushTask must be run serially.
 func (db *DB) handleFlushTask(ft flushTask) error {
-	// There can be a scenario, when empty memtable is flushed. For example, memtable is empty and
-	// after writing request to value log, rotation count exceeds db.LogRotatesToFlush.
+	// There can be a scenario, when empty memtable is flushed.
 	if ft.mt.sl.Empty() {
 		return nil
 	}
@@ -1014,7 +995,12 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	}
 
 	fileID := db.lc.reserveFileID()
-	tbl, err := table.CreateTable(table.NewFilename(fileID, db.opt.Dir), tableData, bopts)
+	var tbl *table.Table
+	if db.opt.InMemory {
+		tbl, err = table.OpenInMemoryTable(tableData, fileID, &bopts)
+	} else {
+		tbl, err = table.CreateTable(table.NewFilename(fileID, db.opt.Dir), tableData, bopts)
+	}
 	if err != nil {
 		return y.Wrap(err, "error while creating table")
 	}
@@ -1306,6 +1292,11 @@ func (db *DB) Tables() []TableInfo {
 	return db.lc.getTableInfo()
 }
 
+// Levels gets the LevelInfo.
+func (db *DB) Levels() []LevelInfo {
+	return db.lc.getLevelInfo()
+}
+
 // KeySplits can be used to get rough key ranges to divide up iteration over
 // the DB.
 func (db *DB) KeySplits(prefix []byte) []string {
@@ -1438,6 +1429,7 @@ func (db *DB) startMemoryFlush() {
 // stopped. Ideally, no writes are going on during Flatten. Otherwise, it would create competition
 // between flattening the tree and new tables being created at level zero.
 func (db *DB) Flatten(workers int) error {
+
 	db.stopCompactions()
 	defer db.startCompactions()
 
@@ -1473,13 +1465,14 @@ func (db *DB) Flatten(workers int) error {
 		return humanize.Bytes(uint64(sz))
 	}
 
+	t := db.lc.levelTargets()
 	for {
 		db.opt.Infof("\n")
 		var levels []int
 		for i, l := range db.lc.levels {
 			sz := l.getTotalSize()
 			db.opt.Infof("Level: %d. %8s Size. %8s Max.\n",
-				i, hbytes(l.getTotalSize()), hbytes(l.maxTotalSize))
+				i, hbytes(l.getTotalSize()), hbytes(t.targetSz[i]))
 			if sz > 0 {
 				levels = append(levels, i)
 			}
@@ -1630,7 +1623,7 @@ func (db *DB) dropAll() (func(), error) {
 // - Compact rest of the levels, Li->Li, picking tables which have Kp.
 // - Resume memtable flushes, compactions and writes.
 func (db *DB) DropPrefix(prefixes ...[]byte) error {
-	db.opt.Infof("DropPrefix Called")
+	db.opt.Infof("DropPrefix Called %s", prefixes)
 	f, err := db.prepareToDrop()
 	if err != nil {
 		return err
@@ -1834,4 +1827,29 @@ func (db *DB) CacheMaxCost(cache CacheType, maxCost int64) (int64, error) {
 	default:
 		return 0, errors.Errorf("invalid cache type")
 	}
+}
+
+func (db *DB) LevelsToString() string {
+	levels := db.Levels()
+	h := func(sz int64) string {
+		return humanize.IBytes(uint64(sz))
+	}
+	base := func(b bool) string {
+		if b {
+			return "B"
+		}
+		return " "
+	}
+
+	var b strings.Builder
+	b.WriteRune('\n')
+	for _, li := range levels {
+		b.WriteString(fmt.Sprintf(
+			"Level %d [%s]: NumTables: %02d. Size: %s of %s. Score: %.2f->%.2f"+
+				" Target FileSize: %s\n",
+			li.Level, base(li.IsBaseLevel), li.NumTables,
+			h(li.Size), h(li.TargetSize), li.Score, li.Adjusted, h(li.TargetFileSize)))
+	}
+	b.WriteString("Level Done\n")
+	return b.String()
 }
