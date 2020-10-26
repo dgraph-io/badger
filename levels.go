@@ -594,7 +594,7 @@ func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
 // concurrently, only iterating over the provided key range, generating tables.
 // This speeds up the compaction significantly.
 func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
-	inflightBuilders *y.Throttle, res chan *table.Table) {
+	inflightBuilders *y.Throttle, res chan<- *table.Table) {
 
 	// Check overlap of the top level with the levels which are not being
 	// compacted in this compaction.
