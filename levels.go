@@ -1119,7 +1119,7 @@ func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
 		out = append(out, t)
 	}
 
-	if len(out) < 3 {
+	if len(out) < 4 {
 		// If we don't have enough tables to merge in L0, don't do it.
 		return false
 	}
@@ -1422,30 +1422,10 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	}
 
 	for !s.levels[0].tryAddLevel0Table(t) {
-		// Stall. Make sure all levels are healthy before we unstall.
-		s.cstatus.RLock()
-		for i := 0; i < s.kv.opt.MaxLevels; i++ {
-			s.kv.opt.Debugf("level=%d. Status=%s Size=%d\n",
-				i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
-		}
-		s.cstatus.RUnlock()
-
-		// Before we unstall, we need to make sure that level 0 is healthy. Otherwise, we
-		// will very quickly fill up level 0 again.
+		// Before we unstall, we need to make sure that level 0 is healthy.
 		timeStart := time.Now()
-		for i := 0; ; i++ {
-			// It's crucial that this behavior replicates pickCompactLevels' behavior in
-			// computing compactability in order to guarantee progress.
-			// Break the loop once L0 has enough space to accommodate new tables.
-			if !s.isLevel0Compactable() {
-				break
-			}
+		for s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTablesStall {
 			time.Sleep(10 * time.Millisecond)
-			if i%100 == 0 {
-				prios := s.pickCompactLevels()
-				s.kv.opt.Debugf("Waiting to add level 0 table. Compaction priorities: %+v\n", prios)
-				i = 0
-			}
 		}
 		dur := time.Since(timeStart)
 		if dur > time.Second {
