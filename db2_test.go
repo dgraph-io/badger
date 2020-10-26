@@ -506,6 +506,7 @@ func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	bopts := buildTableOptions(db.opt)
 	b := table.NewTableBuilder(bopts)
+	defer b.Close()
 	nums := []int{start, end}
 	for _, i := range nums {
 		key := make([]byte, 8)

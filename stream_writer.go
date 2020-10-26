@@ -365,6 +365,7 @@ func (w *sortedWriter) send(done bool) error {
 // to sortedWriter. It completes writing current SST to disk.
 func (w *sortedWriter) Done() error {
 	if w.builder.Empty() {
+		w.builder.Close()
 		// Assign builder as nil, so that underlying memory can be garbage collected.
 		w.builder = nil
 		return nil
