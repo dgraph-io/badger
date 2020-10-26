@@ -125,7 +125,8 @@ func checkAndSetOptions(opt *Options) error {
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
 	if int64(opt.ValueThreshold) > opt.maxBatchSize {
 		return errors.Errorf("Valuethreshold %d greater than max batch size of %d. Either "+
-			"reduce opt.ValueThreshold or increase opt.MaxTableSize.", opt.ValueThreshold, opt.maxBatchSize)
+			"reduce opt.ValueThreshold or increase opt.MaxTableSize.",
+			opt.ValueThreshold, opt.maxBatchSize)
 	}
 	// ValueLogFileSize should be stricly LESS than 2<<30 otherwise we will
 	// overflow the uint32 when we mmap it in OpenMemtable.
@@ -137,10 +138,6 @@ func checkAndSetOptions(opt *Options) error {
 	if opt.Compression == options.ZSTD && !y.CgoEnabled {
 		return y.ErrZstdCgo
 	}
-
-	// Compact L0 on close if either it is set or if KeepL0InMemory is set. When
-	// keepL0InMemory is set we need to compact L0 on close otherwise we might lose data.
-	opt.CompactL0OnClose = opt.CompactL0OnClose
 
 	if opt.ReadOnly {
 		// Do not perform compaction in read only mode.
@@ -1848,7 +1845,8 @@ func (db *DB) LevelsToString() string {
 	b.WriteRune('\n')
 	for _, li := range levels {
 		b.WriteString(fmt.Sprintf(
-			"Level %d [%s]: NumTables: %02d. Size: %s of %s. Score: %.2f->%.2f Target FileSize: %s\n",
+			"Level %d [%s]: NumTables: %02d. Size: %s of %s. Score: %.2f->%.2f"+
+				" Target FileSize: %s\n",
 			li.Level, base(li.IsBaseLevel), li.NumTables,
 			h(li.Size), h(li.TargetSize), li.Score, li.Adjusted, h(li.TargetFileSize)))
 	}

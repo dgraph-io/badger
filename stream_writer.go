@@ -255,6 +255,9 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 
 	bopts := buildTableOptions(sw.db.opt)
 	bopts.DataKey = dk
+	for i := 2; i < sw.db.opt.MaxLevels; i++ {
+		bopts.TableSize *= uint64(sw.db.opt.TableSizeMultiplier)
+	}
 	w := &sortedWriter{
 		db:       sw.db,
 		streamID: streamID,
