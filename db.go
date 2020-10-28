@@ -509,7 +509,7 @@ func (db *DB) close() (err error) {
 	// and remove them completely, while the block / memtable writer is still
 	// trying to push stuff into the memtable. This will also resolve the value
 	// offset problem: as we push into memtable, we update value offsets there.
-	if !db.mt.sl.Empty() {
+	if !db.opt.ReadOnly && !db.mt.sl.Empty() {
 		db.opt.Debugf("Flushing memtable")
 		for {
 			pushedFlushTask := func() bool {
@@ -538,6 +538,7 @@ func (db *DB) close() (err error) {
 	db.stopMemoryFlush()
 	db.stopCompactions()
 
+	// Delete the mem table if not already deleted.
 	if db.mt != nil {
 		db.mt.DecrRef()
 	}
