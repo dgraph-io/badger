@@ -77,9 +77,9 @@ type bblock struct {
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	bufLock sync.Mutex // This lock guards the buf. We acquire lock when we resize the buf.
 	buf     *z.Buffer
 	sz      uint32
+	bufLock sync.Mutex // This lock guards the buf. We acquire lock when we resize the buf.
 
 	actualSize uint32 // Used to store the sum of sizes of blocks after compression/encryption.
 
@@ -134,7 +134,6 @@ func (b *Builder) handleBlock() {
 	for item := range b.blockChan {
 		// Extract the block.
 		blockBuf := item.data[item.start:item.end]
-
 		// Compress the block.
 		if doCompress {
 			var err error
@@ -155,6 +154,8 @@ func (b *Builder) handleBlock() {
 		y.AssertTruef(uint32(len(blockBuf)) <= allocatedSpace, "newend: %d oldend: %d padding: %d",
 			item.start+uint32(len(blockBuf)), item.end, padding)
 
+		// Acquire the buflock here. The z.buffer.Allocation might change
+		// the b.buf while this goroutine is running.
 		b.bufLock.Lock()
 		// Copy over compressed/encrypted data back to the main buffer.
 		copy(b.buf.Bytes()[item.start:item.start+uint32(len(blockBuf))], blockBuf)
