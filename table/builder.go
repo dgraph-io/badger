@@ -77,11 +77,11 @@ type bblock struct {
 // Builder is used in building a table.
 type Builder struct {
 	// Typically tens or hundreds of meg. This is for one single file.
-	//buf        []byte
-	buf        *z.Buffer
-	sz         uint32
-	bufLock    sync.Mutex // This lock guards the buf. We acquire lock when we resize the buf.
-	actualSize uint32     // Used to store the sum of sizes of blocks after compression/encryption.
+	bufLock sync.Mutex // This lock guards the buf. We acquire lock when we resize the buf.
+	buf     *z.Buffer
+	sz      uint32
+
+	actualSize uint32 // Used to store the sum of sizes of blocks after compression/encryption.
 
 	baseKey    []byte // Base key for the current block.
 	baseOffset uint32 // Offset for the current block.
@@ -105,7 +105,6 @@ func NewTableBuilder(opts Options) *Builder {
 		// Additional 16 MB to store index (approximate).
 		// We trim the additional space in table.Finish().
 		// TODO: Switch this buf over to z.Buffer.
-		//buf:     make([]byte, int(opts.TableSize+16*MB)),
 		buf:     z.NewBuffer(int(opts.TableSize + 16*MB)),
 		opt:     &opts,
 		offsets: z.NewBuffer(1 << 20),
@@ -156,8 +155,6 @@ func (b *Builder) handleBlock() {
 		y.AssertTruef(uint32(len(blockBuf)) <= allocatedSpace, "newend: %d oldend: %d padding: %d",
 			item.start+uint32(len(blockBuf)), item.end, padding)
 
-		// Acquire the buflock here. The builder.grow function might change
-		// the b.buf while this goroutine was running.
 		b.bufLock.Lock()
 		// Copy over compressed/encrypted data back to the main buffer.
 		copy(b.buf.Bytes()[item.start:], blockBuf)
@@ -228,10 +225,9 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	b.append(h.Encode())
 	b.append(diffKey)
 
-	// if uint32(len(b.buf)) < b.sz+v.EncodedSize() {
-	// 	b.grow(v.EncodedSize())
-	// }
+	b.bufLock.Lock()
 	buf := b.buf.Allocate(int(v.EncodedSize()))
+	b.bufLock.Unlock()
 	b.sz += v.Encode(buf)
 	// Size of KV on SST.
 	sstSz := uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize()
@@ -239,38 +235,18 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	b.estimatedSize += (sstSz + vpLen)
 }
 
-// grow increases the size of b.buf by atleast 50%.
-func (b *Builder) grow(n uint32) {
-	//l := uint32(len(b.buf))
-	// if n < l/2 {
-	// 	n = l / 2
-	// }
-	// newBuf := make([]byte, l+n)
-	// y.AssertTrue(uint32(len(newBuf)) == l+n)
-
-	b.bufLock.Lock()
-	// copy(newBuf, b.buf)
-	// b.buf = newBuf
-	b.buf.AllocateOffset(int(n))
-	b.bufLock.Unlock()
-}
 func (b *Builder) append(data []byte) {
-	// Ensure we have enough space to store new data.
-	// if uint32(len(b.buf)) < b.sz+uint32(len(data)) {
-	// 	b.grow(uint32(len(data)))
-	// }
-	//buf := b.buf.Allocate(len(data))
+	b.bufLock.Lock()
+	defer b.bufLock.Unlock()
+	// Allocate enough space to store new data.
 	b.buf.AllocateOffset(len(data))
-	//copy(b.buf[b.sz:], data)
-
 	copy(b.buf.Bytes()[b.sz:], data)
 	b.sz += uint32(len(data))
 }
 
 func (b *Builder) addPadding(sz uint32) {
-	// if uint32(len(b.buf)) < b.sz+sz {
-	// 	b.grow(sz)
-	// }
+	b.bufLock.Lock()
+	defer b.bufLock.Unlock()
 	b.buf.AllocateOffset(int(sz))
 	b.sz += sz
 }
@@ -294,7 +270,6 @@ func (b *Builder) finishBlock() {
 	b.append(y.U32SliceToBytes(b.entryOffsets))
 	b.append(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
-	//b.writeChecksum(b.buf[b.baseOffset:b.sz])
 	b.writeChecksum(b.buf.Bytes()[b.baseOffset:b.sz])
 
 	// If compression/encryption is disabled, no need to send the block to the blockChan.
@@ -307,9 +282,7 @@ func (b *Builder) finishBlock() {
 
 	b.addPadding(padding)
 	// Block end is the actual end of the block ignoring the padding.
-	// block := &bblock{start: b.baseOffset, end: uint32(b.sz - padding), data: b.buf}
 	block := &bblock{start: b.baseOffset, end: uint32(b.sz - padding), data: b.buf.Bytes()}
-	//block := &bblock{start: b.baseOffset, end: uint32(b.sz), data: b.buf.Bytes()}
 
 	b.blockList = append(b.blockList, block)
 
