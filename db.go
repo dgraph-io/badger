@@ -367,7 +367,10 @@ func (db *DB) MaxVersion() uint64 {
 		}
 	}
 	db.Lock()
-	update(db.mt.maxVersion)
+	// In read only mode, we do not create new mem table.
+	if !db.opt.ReadOnly {
+		update(db.mt.maxVersion)
+	}
 	for _, mt := range db.imm {
 		update(mt.maxVersion)
 	}
