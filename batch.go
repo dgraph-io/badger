@@ -89,8 +89,6 @@ func (wb *WriteBatch) callback(err error) {
 		return
 	}
 
-	wb.Lock()
-	defer wb.Unlock()
 	if wb.err != nil {
 		return
 	}
