@@ -3,6 +3,7 @@
 set -e
 
 go version
+lscpu
 
 packages=$(go list ./... | grep github.com/dgraph-io/badger/v2/)
 
