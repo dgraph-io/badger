@@ -566,13 +566,17 @@ func (b *Builder) buildIndex(bloom []byte, tableSz uint32) []byte {
 	fb.TableIndexStart(builder)
 	fb.TableIndexAddOffsets(builder, boEnd)
 	fb.TableIndexAddBloomFilter(builder, bfoff)
-	fb.TableIndexAddOnDiskSize(builder, b.onDiskSize)
 	fb.TableIndexAddMaxVersion(builder, b.maxVersion)
 	fb.TableIndexAddUncompressedSize(builder, tableSz)
 	fb.TableIndexAddKeyCount(builder, uint32(len(b.keyHashes)))
+	fb.TableIndexAddOnDiskSize(builder, b.onDiskSize)
 	builder.Finish(fb.TableIndexEnd(builder))
 
-	return builder.FinishedBytes()
+	buf := builder.FinishedBytes()
+	index := fb.GetRootAsTableIndex(buf, 0)
+	// Mutate the ondisk size to include the size of the index as well.
+	y.AssertTrue(index.MutateOnDiskSize(index.OnDiskSize() + uint32(len(buf))))
+	return buf
 }
 
 // writeBlockOffsets writes all the blockOffets in b.offsets and returns the
