@@ -360,7 +360,6 @@ func Open(opt Options) (*DB, error) {
 }
 
 func (db *DB) MaxVersion() uint64 {
-	return 0
 	var maxVersion uint64
 	update := func(a uint64) {
 		if a > maxVersion {
