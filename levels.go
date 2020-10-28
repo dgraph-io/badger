@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"sort"
@@ -45,7 +46,8 @@ type levelsController struct {
 	levels []*levelHandler
 	kv     *DB
 
-	cstatus compactStatus
+	cstatus    compactStatus
+	l0stallsMs int64
 }
 
 // revertToManifest checks that all necessary table files exist and removes all table files not
@@ -79,19 +81,11 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 		kv:     db,
 		levels: make([]*levelHandler, db.opt.MaxLevels),
 	}
+	s.cstatus.tables = make(map[uint64]struct{})
 	s.cstatus.levels = make([]*levelCompactStatus, db.opt.MaxLevels)
 
 	for i := 0; i < db.opt.MaxLevels; i++ {
 		s.levels[i] = newLevelHandler(db, i)
-		switch i {
-		case 0:
-			// Do nothing.
-		case 1:
-			// Level 1 probably shouldn't be too much bigger than level 0.
-			s.levels[i].maxTotalSize = db.opt.LevelOneSize
-		default:
-			s.levels[i].maxTotalSize = s.levels[i-1].maxTotalSize * int64(db.opt.LevelSizeMultiplier)
-		}
 		s.cstatus.levels[i] = new(levelCompactStatus)
 	}
 
@@ -343,8 +337,10 @@ func (s *levelsController) dropPrefixes(prefixes [][]byte) error {
 				top:          nil,
 				bot:          operation,
 				dropPrefixes: prefixes,
+				t:            s.levelTargets(),
 			}
-			if err := s.runCompactDef(l.level, cd); err != nil {
+			cd.t.baseLevel = l.level
+			if err := s.runCompactDef(-1, l.level, cd); err != nil {
 				opt.Warningf("While running compact def: %+v. Error: %v", cd, err)
 				return err
 			}
@@ -357,10 +353,68 @@ func (s *levelsController) startCompact(lc *z.Closer) {
 	n := s.kv.opt.NumCompactors
 	lc.AddRunning(n - 1)
 	for i := 0; i < n; i++ {
-		// The worker with id=0 is dedicated to L0 and L1. This is not counted
-		// towards the user specified NumCompactors.
 		go s.runCompactor(i, lc)
 	}
+}
+
+type targets struct {
+	baseLevel int
+	targetSz  []int64
+	fileSz    []int64
+}
+
+// levelTargets calculates the targets for levels in the LSM tree. The idea comes from Dynamic Level
+// Sizes ( https://rocksdb.org/blog/2015/07/23/dynamic-level.html ) in RocksDB. The sizes of levels
+// are calculated based on the size of the lowest level, typically L6. So, if L6 size is 1GB, then
+// L5 target size is 100MB, L4 target size is 10MB and so on.
+//
+// L0 files don't automatically go to L1. Instead, they get compacted to Lbase, where Lbase is
+// chosen based on the first level which is non-empty from top (check L1 through L6). For an empty
+// DB, that would be L6.  So, L0 compactions go to L6, then L5, L4 and so on.
+//
+// Lbase is advanced to the upper levels when its target size exceeds BaseLevelSize. For
+// example, when L6 reaches 1.1GB, then L4 target sizes becomes 11MB, thus exceeding the
+// BaseLevelSize of 10MB. L3 would then become the new Lbase, with a target size of 1MB <
+// BaseLevelSize.
+func (s *levelsController) levelTargets() targets {
+	adjust := func(sz int64) int64 {
+		if sz < s.kv.opt.BaseLevelSize {
+			return s.kv.opt.BaseLevelSize
+		}
+		return sz
+	}
+
+	t := targets{
+		targetSz: make([]int64, len(s.levels)),
+		fileSz:   make([]int64, len(s.levels)),
+	}
+	// DB size is the size of the last level.
+	dbSize := s.lastLevel().getTotalSize()
+	for i := len(s.levels) - 1; i > 0; i-- {
+		ltarget := adjust(dbSize)
+		t.targetSz[i] = ltarget
+		if t.baseLevel == 0 && ltarget <= s.kv.opt.BaseLevelSize {
+			t.baseLevel = i
+		}
+		dbSize /= int64(s.kv.opt.LevelSizeMultiplier)
+	}
+
+	tsz := s.kv.opt.BaseTableSize
+	for i := 0; i < len(s.levels); i++ {
+		if i == 0 {
+			// Use MemTableSize for Level 0. Because at Level 0, we stop compactions based on the
+			// number of tables, not the size of the level. So, having a 1:1 size ratio between
+			// memtable size and the size of L0 files is better than churning out 32 files per
+			// memtable (assuming 64MB MemTableSize and 2MB BaseTableSize).
+			t.fileSz[i] = s.kv.opt.MemTableSize
+		} else if i <= t.baseLevel {
+			t.fileSz[i] = tsz
+		} else {
+			tsz *= int64(s.kv.opt.TableSizeMultiplier)
+			t.fileSz[i] = tsz
+		}
+	}
+	return t
 }
 
 func (s *levelsController) runCompactor(id int, lc *z.Closer) {
@@ -374,90 +428,143 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 		return
 	}
 
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
+
+	moveL0toFront := func(prios []compactionPriority) []compactionPriority {
+		idx := -1
+		for i, p := range prios {
+			if p.level == 0 {
+				idx = i
+				break
+			}
+		}
+		// If idx == -1, we didn't find L0.
+		// If idx == 0, then we don't need to do anything. L0 is already at the front.
+		if idx > 0 {
+			out := append([]compactionPriority{}, prios[idx])
+			out = append(out, prios[:idx]...)
+			out = append(out, prios[idx+1:]...)
+			return out
+		}
+		return prios
+	}
+
+	runOnce := func() bool {
+		prios := s.pickCompactLevels()
+		if id == 0 {
+			// Worker ID zero prefers to compact L0 always.
+			prios = moveL0toFront(prios)
+		}
+		for _, p := range prios {
+			if id == 0 && p.level == 0 {
+				// Allow worker zero to run level 0, irrespective of its adjusted score.
+			} else if p.adjusted < 1.0 {
+				break
+			}
+
+			err := s.doCompact(id, p)
+			switch err {
+			case nil:
+				return true
+			case errFillTables:
+				// pass
+			default:
+				s.kv.opt.Warningf("While running doCompact: %v\n", err)
+			}
+		}
+		return false
+	}
 
 	for {
 		select {
 		// Can add a done channel or other stuff.
 		case <-ticker.C:
-			prios := s.pickCompactLevels()
-		loop:
-			for _, p := range prios {
-				if id == 0 && p.level > 1 {
-					// If I'm ID zero, I only compact L0 and L1.
-					continue
-				}
-				if id != 0 && p.level <= 1 {
-					// If I'm ID non-zero, I do NOT compact L0 and L1.
-					continue
-				}
-				err := s.doCompact(id, p)
-				switch err {
-				case nil:
-					break loop
-				case errFillTables:
-					// pass
-				default:
-					s.kv.opt.Warningf("While running doCompact: %v\n", err)
-				}
-			}
+			runOnce()
 		case <-lc.HasBeenClosed():
 			return
 		}
 	}
 }
 
-// Returns true if level zero may be compacted, without accounting for compactions that already
-// might be happening.
-func (s *levelsController) isLevel0Compactable() bool {
-	return s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTables
-}
-
-// Returns true if the non-zero level may be compacted.  delSize provides the size of the tables
-// which are currently being compacted so that we treat them as already having started being
-// compacted (because they have been, yet their size is already counted in getTotalSize).
-func (l *levelHandler) isCompactable(delSize int64) bool {
-	return l.getTotalSize()-delSize >= l.maxTotalSize
-}
-
 type compactionPriority struct {
 	level        int
 	score        float64
+	adjusted     float64
 	dropPrefixes [][]byte
+	t            targets
+}
+
+func (s *levelsController) lastLevel() *levelHandler {
+	return s.levels[len(s.levels)-1]
 }
 
 // pickCompactLevel determines which level to compact.
 // Based on: https://github.com/facebook/rocksdb/wiki/Leveled-Compaction
 func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
-	// This function must use identical criteria for guaranteeing compaction's progress that
-	// addLevel0Table uses.
-
-	// cstatus is checked to see if level 0's tables are already being compacted
-	if !s.cstatus.overlapsWith(0, infRange) && s.isLevel0Compactable() {
+	t := s.levelTargets()
+	addPriority := func(level int, score float64) {
 		pri := compactionPriority{
-			level: 0,
-			score: float64(s.levels[0].numTables()) / float64(s.kv.opt.NumLevelZeroTables),
+			level:    level,
+			score:    score,
+			adjusted: score,
+			t:        t,
 		}
 		prios = append(prios, pri)
 	}
 
-	for i, l := range s.levels[1:] {
-		// Don't consider those tables that are already being compacted right now.
-		delSize := s.cstatus.delSize(i + 1)
+	// Add L0 priority based on the number of tables.
+	addPriority(0, float64(s.levels[0].numTables())/float64(s.kv.opt.NumLevelZeroTables))
 
-		if l.isCompactable(delSize) {
-			pri := compactionPriority{
-				level: i + 1,
-				score: float64(l.getTotalSize()-delSize) / float64(l.maxTotalSize),
+	// All other levels use size to calculate priority.
+	for i := 1; i < len(s.levels); i++ {
+		// Don't consider those tables that are already being compacted right now.
+		delSize := s.cstatus.delSize(i)
+
+		l := s.levels[i]
+		sz := l.getTotalSize() - delSize
+		addPriority(i, float64(sz)/float64(t.targetSz[i]))
+	}
+	y.AssertTrue(len(prios) == len(s.levels))
+
+	// The following code is borrowed from PebbleDB and results in healthier LSM tree structure.
+	// If Li-1 has score > 1.0, then we'll divide Li-1 score by Li. If Li score is >= 1.0, then Li-1
+	// score is reduced, which means we'll prioritize the compaction of lower levels (L5, L4 and so
+	// on) over the higher levels (L0, L1 and so on). On the other hand, if Li score is < 1.0, then
+	// we'll increase the priority of Li-1.
+	// Overall what this means is, if the bottom level is already overflowing, then de-prioritize
+	// compaction of the above level. If the bottom level is not full, then increase the priority of
+	// above level.
+	var prevLevel int
+	for level := t.baseLevel; level < len(s.levels); level++ {
+		if prios[prevLevel].adjusted >= 1 {
+			// Avoid absurdly large scores by placing a floor on the score that we'll
+			// adjust a level by. The value of 0.01 was chosen somewhat arbitrarily
+			const minScore = 0.01
+			if prios[level].score >= minScore {
+				prios[prevLevel].adjusted /= prios[level].adjusted
+			} else {
+				prios[prevLevel].adjusted /= minScore
 			}
-			prios = append(prios, pri)
+		}
+		prevLevel = level
+	}
+
+	// Pick all the levels whose original score is >= 1.0, irrespective of their adjusted score.
+	// We'll still sort them by their adjusted score below. Having both these scores allows us to
+	// make better decisions about compacting L0. If we see a score >= 1.0, we can do L0->L0
+	// compactions. If the adjusted score >= 1.0, then we can do L0->Lbase compactions.
+	out := prios[:0]
+	for _, p := range prios[:len(prios)-1] {
+		if p.score >= 1.0 {
+			out = append(out, p)
 		}
 	}
-	// We should continue to sort the compaction priorities by score. Now that we have a dedicated
-	// compactor for L0 and L1, we don't need to sort by level here.
+	prios = out
+
+	// Sort by the adjusted score.
 	sort.Slice(prios, func(i, j int) bool {
-		return prios[i].score > prios[j].score
+		return prios[i].adjusted > prios[j].adjusted
 	})
 	return prios
 }
@@ -479,22 +586,24 @@ func (s *levelsController) checkOverlap(tables []*table.Table, lev int) bool {
 	return false
 }
 
-// compactBuildTables merges topTables and botTables to form a list of new tables.
-func (s *levelsController) compactBuildTables(
-	lev int, cd compactDef) ([]*table.Table, func() error, error) {
-	topTables := cd.top
-	botTables := cd.bot
-
-	numTables := int64(len(topTables) + len(botTables))
-	y.NumCompactionTables.Add(numTables)
-	defer y.NumCompactionTables.Add(-numTables)
-
-	cd.span.Annotatef(nil, "Top tables count: %v Bottom tables count: %v",
-		len(topTables), len(botTables))
+// subcompact runs a single sub-compaction, iterating over the specified key-range only.
+//
+// We use splits to do a single compaction concurrently. If we have >= 3 tables
+// involved in the bottom level during compaction, we choose key ranges to
+// split the main compaction up into sub-compactions. Each sub-compaction runs
+// concurrently, only iterating over the provided key range, generating tables.
+// This speeds up the compaction significantly.
+func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
+	inflightBuilders *y.Throttle, res chan<- *table.Table) {
 
 	// Check overlap of the top level with the levels which are not being
 	// compacted in this compaction.
 	hasOverlap := s.checkOverlap(cd.allTables(), cd.nextLevel.level+1)
+
+	// Pick a discard ts, so we can discard versions below this ts. We should
+	// never discard any versions starting from above this timestamp, because
+	// that would affect the snapshot view guarantee provided by transactions.
+	discardTs := s.kv.orc.discardAtOrBelow()
 
 	// Try to collect stats so that we can inform value log about GC. That would help us find which
 	// value log file should be GCed.
@@ -511,66 +620,31 @@ func (s *levelsController) compactBuildTables(
 		}
 	}
 
-	// Create iterators across all the tables involved first.
-	var iters []y.Iterator
-	switch {
-	case lev == 0:
-		iters = appendIteratorsReversed(iters, topTables, table.NOCACHE)
-	case len(topTables) > 0:
-		y.AssertTrue(len(topTables) == 1)
-		iters = []y.Iterator{topTables[0].NewIterator(table.NOCACHE)}
-	}
-
-	// Next level has level>=1 and we can use ConcatIterator as key ranges do not overlap.
-	var valid []*table.Table
-
-nextTable:
-	for _, table := range botTables {
-		if len(cd.dropPrefixes) > 0 {
-			for _, prefix := range cd.dropPrefixes {
-				if bytes.HasPrefix(table.Smallest(), prefix) &&
-					bytes.HasPrefix(table.Biggest(), prefix) {
-					// All the keys in this table have the dropPrefix. So, this
-					// table does not need to be in the iterator and can be
-					// dropped immediately.
-					continue nextTable
-				}
-			}
+	// exceedsAllowedOverlap returns true if the given key range would overlap with more than 10
+	// tables from level below nextLevel (nextLevel+1). This helps avoid generating tables at Li
+	// with huge overlaps with Li+1.
+	exceedsAllowedOverlap := func(kr keyRange) bool {
+		n2n := cd.nextLevel.level + 1
+		if n2n <= 1 || n2n >= len(s.levels) {
+			return false
 		}
-		valid = append(valid, table)
+		n2nl := s.levels[n2n]
+		n2nl.RLock()
+		defer n2nl.RUnlock()
+
+		l, r := n2nl.overlappingTables(levelHandlerRLocked{}, kr)
+		return r-l >= 10
 	}
-	iters = append(iters, table.NewConcatIterator(valid, table.NOCACHE))
-	it := table.NewMergeIterator(iters, false)
-	defer it.Close() // Important to close the iterator to do ref counting.
 
-	it.Rewind()
-
-	// Pick a discard ts, so we can discard versions below this ts. We should
-	// never discard any versions starting from above this timestamp, because
-	// that would affect the snapshot view guarantee provided by transactions.
-	discardTs := s.kv.orc.discardAtOrBelow()
-
-	var numBuilds, numVersions int
 	var lastKey, skipKey []byte
+	var numBuilds, numVersions int
 	var vp valuePointer
-	var newTables []*table.Table
-	mu := new(sync.Mutex) // Guards newTables
 
-	inflightBuilders := y.NewThrottle(5)
-	for it.Valid() {
+	addKeys := func(builder *table.Builder) {
 		timeStart := time.Now()
-		dk, err := s.kv.registry.LatestDataKey()
-		if err != nil {
-			return nil, nil,
-				y.Wrapf(err, "Error while retrieving datakey in levelsController.compactBuildTables")
-		}
-		bopts := buildTableOptions(s.kv.opt)
-		bopts.DataKey = dk
-		// Builder does not need cache but the same options are used for opening table.
-		bopts.BlockCache = s.kv.blockCache
-		bopts.IndexCache = s.kv.indexCache
-		builder := table.NewTableBuilder(bopts)
 		var numKeys, numSkips uint64
+		var rangeCheck int
+		var tableKr keyRange
 		for ; it.Valid(); it.Next() {
 			// See if we need to skip the prefix.
 			if len(cd.dropPrefixes) > 0 && hasAnyPrefixes(it.Key(), cd.dropPrefixes) {
@@ -591,7 +665,10 @@ nextTable:
 			}
 
 			if !y.SameKey(it.Key(), lastKey) {
-				if builder.ReachedCapacity(uint64(float64(s.kv.opt.MaxTableSize) * 0.9)) {
+				if len(kr.right) > 0 && y.CompareKeys(it.Key(), kr.right) >= 0 {
+					break
+				}
+				if builder.ReachedCapacity() {
 					// Only break if we are on a different key, and have reached capacity. We want
 					// to ensure that all versions of the key are stored in the same sstable, and
 					// not divided across multiple tables at the same level.
@@ -599,6 +676,24 @@ nextTable:
 				}
 				lastKey = y.SafeCopy(lastKey, it.Key())
 				numVersions = 0
+
+				if len(tableKr.left) == 0 {
+					tableKr.left = y.SafeCopy(tableKr.left, it.Key())
+				}
+				tableKr.right = lastKey
+
+				rangeCheck++
+				if rangeCheck%5000 == 0 {
+					// This table's range exceeds the allowed range overlap with the level after
+					// next. So, we stop writing to this table. If we don't do this, then we end up
+					// doing very expensive compactions involving too many tables. To amortize the
+					// cost of this check, we do it only every N keys.
+					if exceedsAllowedOverlap(tableKr) {
+						// s.kv.opt.Debugf("L%d -> L%d Breaking due to exceedsAllowedOverlap with
+						// kr: %s\n", cd.thisLevel.level, cd.nextLevel.level, tableKr)
+						break
+					}
+				}
 			}
 
 			vs := it.Value()
@@ -649,10 +744,40 @@ nextTable:
 			}
 			builder.Add(it.Key(), vs, vp.Len)
 		}
+		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
+			numKeys, numSkips, time.Since(timeStart).Round(time.Millisecond))
+	} // End of function: addKeys
+
+	if len(kr.left) > 0 {
+		it.Seek(kr.left)
+	} else {
+		it.Rewind()
+	}
+	for it.Valid() {
+		if len(kr.right) > 0 && y.CompareKeys(it.Key(), kr.right) >= 0 {
+			break
+		}
+
+		dk, err := s.kv.registry.LatestDataKey()
+		if err != nil {
+			inflightBuilders.Done(y.Wrapf(err, "Error while retrieving datakey in levelsController.compactBuildTables"))
+			return
+		}
+		bopts := buildTableOptions(s.kv.opt)
+		bopts.DataKey = dk
+		// Builder does not need cache but the same options are used for opening table.
+		bopts.BlockCache = s.kv.blockCache
+		bopts.IndexCache = s.kv.indexCache
+
+		// Set TableSize to the target file size for that level.
+		bopts.TableSize = uint64(cd.t.fileSz[cd.nextLevel.level])
+		builder := table.NewTableBuilder(bopts)
+
+		// This would do the iteration and add keys to builder.
+		addKeys(builder)
+
 		// It was true that it.Valid() at least once in the loop above, which means we
 		// called Add() at least once, and builder is not Empty().
-		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
-			numKeys, numSkips, time.Since(timeStart))
 		if builder.Empty() {
 			// Cleanup builder resources:
 			builder.Finish(false)
@@ -686,19 +811,88 @@ nextTable:
 			if err != nil {
 				return
 			}
-
-			mu.Lock()
-			newTables = append(newTables, tbl)
-			// num := atomic.LoadInt32(&table.NumBlocks)
-			mu.Unlock()
-
-			// TODO(ibrahim): When ristretto PR #186 merges, bring this back.
-			// s.kv.opt.Debugf("Num Blocks: %d. Num Allocs (MB): %.2f\n", num, (z.NumAllocBytes() / 1 << 20))
+			res <- tbl
 		}(builder)
 	}
+	s.kv.vlog.updateDiscardStats(discardStats)
+	s.kv.opt.Debugf("Discard stats: %v", discardStats)
+	inflightBuilders.Done(nil)
+}
+
+// compactBuildTables merges topTables and botTables to form a list of new tables.
+func (s *levelsController) compactBuildTables(
+	lev int, cd compactDef) ([]*table.Table, func() error, error) {
+
+	topTables := cd.top
+	botTables := cd.bot
+
+	numTables := int64(len(topTables) + len(botTables))
+	y.NumCompactionTables.Add(numTables)
+	defer y.NumCompactionTables.Add(-numTables)
+
+	cd.span.Annotatef(nil, "Top tables count: %v Bottom tables count: %v",
+		len(topTables), len(botTables))
+
+	keepTable := func(t *table.Table) bool {
+		for _, prefix := range cd.dropPrefixes {
+			if bytes.HasPrefix(t.Smallest(), prefix) &&
+				bytes.HasPrefix(t.Biggest(), prefix) {
+				// All the keys in this table have the dropPrefix. So, this
+				// table does not need to be in the iterator and can be
+				// dropped immediately.
+				return false
+			}
+		}
+		return true
+	}
+	var valid []*table.Table
+	for _, table := range botTables {
+		if keepTable(table) {
+			valid = append(valid, table)
+		}
+	}
+
+	newIterator := func() []y.Iterator {
+		// Create iterators across all the tables involved first.
+		var iters []y.Iterator
+		switch {
+		case lev == 0:
+			iters = appendIteratorsReversed(iters, topTables, table.NOCACHE)
+		case len(topTables) > 0:
+			y.AssertTrue(len(topTables) == 1)
+			iters = []y.Iterator{topTables[0].NewIterator(table.NOCACHE)}
+		}
+		// Next level has level>=1 and we can use ConcatIterator as key ranges do not overlap.
+		return append(iters, table.NewConcatIterator(valid, table.NOCACHE))
+	}
+
+	res := make(chan *table.Table, 3)
+	inflightBuilders := y.NewThrottle(8 + len(cd.splits))
+	for _, kr := range cd.splits {
+		// Initiate Do here so we can register the goroutines for buildTables too.
+		inflightBuilders.Do()
+		go func(kr keyRange) {
+			it := table.NewMergeIterator(newIterator(), false)
+			defer it.Close()
+			s.subcompact(it, kr, cd, inflightBuilders, res)
+		}(kr)
+	}
+
+	var newTables []*table.Table
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for t := range res {
+			newTables = append(newTables, t)
+		}
+	}()
 
 	// Wait for all table builders to finish and also for newTables accumulator to finish.
 	err := inflightBuilders.Finish()
+	close(res)
+	wg.Wait() // Wait for all tables to be picked up.
+
 	if err == nil {
 		// Ensure created files' directory entries are visible.  We don't mind the extra latency
 		// from not doing this ASAP after all file creation has finished because this is a
@@ -716,8 +910,6 @@ nextTable:
 	sort.Slice(newTables, func(i, j int) bool {
 		return y.CompareKeys(newTables[i].Biggest(), newTables[j].Biggest()) < 0
 	})
-	s.kv.vlog.updateDiscardStats(discardStats)
-	s.kv.opt.Debugf("Discard stats: %v", discardStats)
 	return newTables, func() error { return decrRefs(newTables) }, nil
 }
 
@@ -777,18 +969,50 @@ func containsAnyPrefixes(smallValue, largeValue []byte, listOfPrefixes [][]byte)
 type compactDef struct {
 	span *otrace.Span
 
-	thisLevel *levelHandler
-	nextLevel *levelHandler
+	compactorId int
+	t           targets
+	p           compactionPriority
+	thisLevel   *levelHandler
+	nextLevel   *levelHandler
 
 	top []*table.Table
 	bot []*table.Table
 
 	thisRange keyRange
 	nextRange keyRange
+	splits    []keyRange
 
 	thisSize int64
 
 	dropPrefixes [][]byte
+}
+
+// addSplits can allow us to run multiple sub-compactions in parallel across the split key ranges.
+func (s *levelsController) addSplits(cd *compactDef) {
+	cd.splits = cd.splits[:0]
+
+	// Pick one every 3 tables.
+	const N = 3
+	skr := cd.thisRange
+	skr.extend(cd.nextRange)
+
+	addRange := func(right []byte) {
+		skr.right = y.Copy(right)
+		cd.splits = append(cd.splits, skr)
+
+		skr.left = skr.right
+	}
+
+	for i, t := range cd.bot {
+		// last entry in bottom table.
+		if i == len(cd.bot)-1 {
+			addRange([]byte{})
+			return
+		}
+		if i%N == N-1 {
+			addRange(t.Biggest())
+		}
+	}
 }
 
 func (cd *compactDef) lockLevels() {
@@ -808,33 +1032,127 @@ func (cd *compactDef) allTables() []*table.Table {
 	return ret
 }
 
-func (s *levelsController) fillTablesL0(cd *compactDef) bool {
+func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
+	if cd.compactorId != 0 {
+		// Only compactor zero can work on this.
+		return false
+	}
+
+	cd.nextLevel = s.levels[0]
+	cd.nextRange = keyRange{}
+	cd.bot = nil
+
 	cd.lockLevels()
 	defer cd.unlockLevels()
 
-	cd.top = make([]*table.Table, len(cd.thisLevel.tables))
-	copy(cd.top, cd.thisLevel.tables)
-	if len(cd.top) == 0 {
+	s.cstatus.Lock()
+	defer s.cstatus.Unlock()
+
+	top := cd.thisLevel.tables
+	var out []*table.Table
+	now := time.Now()
+	for _, t := range top {
+		if t.Size() >= 2*cd.t.fileSz[0] {
+			// This file is already big, don't include it.
+			continue
+		}
+		if now.Sub(t.CreatedAt) < 10*time.Second {
+			// Just created it 10s ago. Don't pick for compaction.
+			continue
+		}
+		if _, beingCompacted := s.cstatus.tables[t.ID()]; beingCompacted {
+			continue
+		}
+		out = append(out, t)
+	}
+
+	if len(out) < 4 {
+		// If we don't have enough tables to merge in L0, don't do it.
 		return false
 	}
 	cd.thisRange = infRange
+	cd.top = out
 
-	kr := getKeyRange(cd.top...)
-	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, kr)
+	// Avoid any other L0 -> Lbase from happening, while this is going on.
+	thisLevel := s.cstatus.levels[cd.thisLevel.level]
+	thisLevel.ranges = append(thisLevel.ranges, infRange)
+	for _, t := range out {
+		s.cstatus.tables[t.ID()] = struct{}{}
+	}
+
+	// For L0->L0 compaction, we set the target file size to max, so the output is always one file.
+	// This significantly decreases the L0 table stalls and improves the performance.
+	cd.t.fileSz[0] = math.MaxUint32
+	return true
+}
+
+func (s *levelsController) fillTablesL0ToLbase(cd *compactDef) bool {
+	if cd.nextLevel.level == 0 {
+		panic("Base level can't be zero.")
+	}
+	// We keep cd.p.adjusted > 0.0 here to allow functions in db.go to artificially trigger
+	// L0->Lbase compactions. Those functions wouldn't be setting the adjusted score.
+	if cd.p.adjusted > 0.0 && cd.p.adjusted < 1.0 {
+		// Do not compact to Lbase if adjusted score is less than 1.0.
+		return false
+	}
+	cd.lockLevels()
+	defer cd.unlockLevels()
+
+	top := cd.thisLevel.tables
+	if len(top) == 0 {
+		return false
+	}
+
+	var out []*table.Table
+	if len(cd.dropPrefixes) > 0 {
+		// Use all tables if drop prefix is set. We don't want to compact only a
+		// sub-range. We want to compact all the tables.
+		out = top
+
+	} else {
+		var kr keyRange
+		// cd.top[0] is the oldest file. So we start from the oldest file first.
+		for _, t := range top {
+			dkr := getKeyRange(t)
+			if kr.overlapsWith(dkr) {
+				out = append(out, t)
+				kr.extend(dkr)
+			} else {
+				break
+			}
+		}
+	}
+	cd.thisRange = getKeyRange(out...)
+	cd.top = out
+
+	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, cd.thisRange)
 	cd.bot = make([]*table.Table, right-left)
 	copy(cd.bot, cd.nextLevel.tables[left:right])
 
 	if len(cd.bot) == 0 {
-		cd.nextRange = kr
+		cd.nextRange = cd.thisRange
 	} else {
 		cd.nextRange = getKeyRange(cd.bot...)
 	}
+	return s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd)
+}
 
-	if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
-		return false
+// fillTablesL0 would try to fill tables from L0 to be compacted with Lbase. If
+// it can not do that, it would try to compact tables from L0 -> L0.
+//
+// Say L0 has 10 tables.
+// fillTablesL0ToLbase picks up 5 tables to compact from L0 -> L5.
+// Next call to fillTablesL0 would run L0ToLbase again, which fails this time.
+// So, instead, we run fillTablesL0ToL0, which picks up rest of the 5 tables to
+// be compacted within L0. Additionally, it would set the compaction range in
+// cstatus to inf, so no other L0 -> Lbase compactions can happen.
+// Thus, L0 -> L0 must finish for the next L0 -> Lbase to begin.
+func (s *levelsController) fillTablesL0(cd *compactDef) bool {
+	if ok := s.fillTablesL0ToLbase(cd); ok {
+		return true
 	}
-
-	return true
+	return s.fillTablesL0ToL0(cd)
 }
 
 // sortByHeuristic sorts tables in increasing order of MaxVersion, so we
@@ -909,11 +1227,24 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	return false
 }
 
-func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
+func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
+	if len(cd.t.fileSz) == 0 {
+		return errors.New("Filesizes cannot be zero. Targets are not set")
+	}
 	timeStart := time.Now()
 
 	thisLevel := cd.thisLevel
 	nextLevel := cd.nextLevel
+
+	y.AssertTrue(len(cd.splits) == 0)
+	if thisLevel.level == 0 && nextLevel.level == 0 {
+		// don't do anything for L0 -> L0.
+	} else {
+		s.addSplits(&cd)
+	}
+	if len(cd.splits) == 0 {
+		cd.splits = append(cd.splits, keyRange{})
+	}
 
 	// Table should never be moved directly between levels, always be rewritten to allow discarding
 	// invalid versions.
@@ -947,19 +1278,37 @@ func (s *levelsController) runCompactDef(l int, cd compactDef) (err error) {
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
 
-	if dur := time.Since(timeStart); dur > 3*time.Second {
-		s.kv.opt.Infof("LOG Compact %d->%d, del %d tables, add %d tables, took %v\n",
-			thisLevel.level, nextLevel.level, len(cd.top)+len(cd.bot),
-			len(newTables), dur)
+	from := append(tablesToString(cd.top), tablesToString(cd.bot)...)
+	to := tablesToString(newTables)
+
+	if dur := time.Since(timeStart); dur > 2*time.Second {
+		var expensive string
+		if dur > time.Second {
+			expensive = " [E]"
+		}
+		s.kv.opt.Infof("[%d]%s LOG Compact %d->%d (%d, %d -> %d tables with %d splits)."+
+			" [%s] -> [%s], took %v\n",
+			id, expensive, thisLevel.level, nextLevel.level, len(cd.top), len(cd.bot),
+			len(newTables), len(cd.splits), strings.Join(from, " "), strings.Join(to, " "),
+			dur.Round(time.Millisecond))
 	}
 
 	if cd.thisLevel.level != 0 && len(newTables) > 2*s.kv.opt.LevelSizeMultiplier {
-		s.kv.opt.Infof("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+		s.kv.opt.Debugf("This Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
 			len(cd.top), hex.Dump(cd.thisRange.left), hex.Dump(cd.thisRange.right))
-		s.kv.opt.Infof("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
+		s.kv.opt.Debugf("Next Range (numTables: %d)\nLeft:\n%s\nRight:\n%s\n",
 			len(cd.bot), hex.Dump(cd.nextRange.left), hex.Dump(cd.nextRange.right))
 	}
 	return nil
+}
+
+func tablesToString(tables []*table.Table) []string {
+	var res []string
+	for _, t := range tables {
+		res = append(res, fmt.Sprintf("%05d", t.ID()))
+	}
+	res = append(res, ".")
+	return res
 }
 
 var errFillTables = errors.New("Unable to fill tables")
@@ -968,35 +1317,39 @@ var errFillTables = errors.New("Unable to fill tables")
 func (s *levelsController) doCompact(id int, p compactionPriority) error {
 	l := p.level
 	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
-	_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
-	span.Annotatef(nil, "Compaction level: %v", l)
-	defer span.End()
-	cd := compactDef{
-		span:         span,
-		thisLevel:    s.levels[l],
-		nextLevel:    s.levels[l+1],
-		dropPrefixes: p.dropPrefixes,
+	if p.t.baseLevel == 0 {
+		p.t = s.levelTargets()
 	}
 
-	s.kv.opt.Debugf("[Compactor: %d] Attempting to run compaction: %+v", id, p)
+	_, span := otrace.StartSpan(context.Background(), "Badger.Compaction")
+	defer span.End()
+
+	cd := compactDef{
+		compactorId:  id,
+		span:         span,
+		p:            p,
+		t:            p.t,
+		thisLevel:    s.levels[l],
+		dropPrefixes: p.dropPrefixes,
+	}
 
 	// While picking tables to be compacted, both levels' tables are expected to
 	// remain unchanged.
 	if l == 0 {
+		cd.nextLevel = s.levels[p.t.baseLevel]
 		if !s.fillTablesL0(&cd) {
 			return errFillTables
 		}
-
 	} else {
+		cd.nextLevel = s.levels[l+1]
 		if !s.fillTables(&cd) {
 			return errFillTables
 		}
 	}
 	defer s.cstatus.delete(cd) // Remove the ranges from compaction status.
 
-	s.kv.opt.Debugf("[Compactor: %d] Running compaction: %+v for level: %d\n",
-		id, p, cd.thisLevel.level)
-	if err := s.runCompactDef(l, cd); err != nil {
+	span.Annotatef(nil, "Compaction: %+v", cd)
+	if err := s.runCompactDef(id, l, cd); err != nil {
 		// This compaction couldn't be done successfully.
 		s.kv.opt.Warningf("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)
 		return err
@@ -1023,34 +1376,16 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 	}
 
 	for !s.levels[0].tryAddLevel0Table(t) {
-		// Stall. Make sure all levels are healthy before we unstall.
-		s.cstatus.RLock()
-		for i := 0; i < s.kv.opt.MaxLevels; i++ {
-			s.kv.opt.Debugf("level=%d. Status=%s Size=%d\n",
-				i, s.cstatus.levels[i].debug(), s.levels[i].getTotalSize())
-		}
-		s.cstatus.RUnlock()
+		// Before we unstall, we need to make sure that level 0 is healthy.
 		timeStart := time.Now()
-
-		// Before we unstall, we need to make sure that level 0 is healthy. Otherwise, we
-		// will very quickly fill up level 0 again.
-		for i := 0; ; i++ {
-			// It's crucial that this behavior replicates pickCompactLevels' behavior in
-			// computing compactability in order to guarantee progress.
-			// Break the loop once L0 has enough space to accommodate new tables.
-			if !s.isLevel0Compactable() {
-				break
-			}
+		for s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTablesStall {
 			time.Sleep(10 * time.Millisecond)
-			if i%100 == 0 {
-				prios := s.pickCompactLevels()
-				s.kv.opt.Debugf("Waiting to add level 0 table. Compaction priorities: %+v\n", prios)
-				i = 0
-			}
 		}
-		if dur := time.Since(timeStart); dur > time.Second {
+		dur := time.Since(timeStart)
+		if dur > time.Second {
 			s.kv.opt.Infof("L0 was stalled for %s\n", dur.Round(time.Millisecond))
 		}
+		atomic.AddInt64(&s.l0stallsMs, int64(dur.Round(time.Millisecond)))
 	}
 
 	return nil
@@ -1158,6 +1493,39 @@ func (s *levelsController) getTableInfo() (result []TableInfo) {
 		return result[i].ID < result[j].ID
 	})
 	return
+}
+
+type LevelInfo struct {
+	Level          int
+	NumTables      int
+	Size           int64
+	TargetSize     int64
+	TargetFileSize int64
+	IsBaseLevel    bool
+	Score          float64
+	Adjusted       float64
+}
+
+func (s *levelsController) getLevelInfo() []LevelInfo {
+	t := s.levelTargets()
+	prios := s.pickCompactLevels()
+	result := make([]LevelInfo, len(s.levels))
+	for i, l := range s.levels {
+		l.RLock()
+		result[i].Level = i
+		result[i].Size = l.totalSize
+		result[i].NumTables = len(l.tables)
+		l.RUnlock()
+
+		result[i].TargetSize = t.targetSz[i]
+		result[i].TargetFileSize = t.fileSz[i]
+		result[i].IsBaseLevel = t.baseLevel == i
+	}
+	for _, p := range prios {
+		result[p.level].Score = p.score
+		result[p.level].Adjusted = p.adjusted
+	}
+	return result
 }
 
 // verifyChecksum verifies checksum for all tables on all levels.

@@ -66,7 +66,7 @@ var (
 	vlogMaxEntries   uint32
 	loadBloomsOnOpen bool
 	detectConflicts  bool
-	compression      bool
+	zstdComp         bool
 	showDir          bool
 	ttlDuration      string
 	showKeysCount    bool
@@ -113,8 +113,8 @@ func init() {
 		"Load Bloom filter on DB open.")
 	writeBenchCmd.Flags().BoolVar(&detectConflicts, "conficts", false,
 		"If true, it badger will detect the conflicts")
-	writeBenchCmd.Flags().BoolVar(&compression, "compression", true,
-		"If true, badger will use ZSTD mode")
+	writeBenchCmd.Flags().BoolVar(&zstdComp, "zstd", false,
+		"If true, badger will use ZSTD mode. Otherwise, use default.")
 	writeBenchCmd.Flags().BoolVar(&showDir, "show-dir", false,
 		"If true, the report will include the directory contents")
 	writeBenchCmd.Flags().StringVar(&dropAllPeriod, "dropall", "0s",
@@ -260,12 +260,6 @@ func writeSorted(db *badger.DB, num uint64) error {
 }
 
 func writeBench(cmd *cobra.Command, args []string) error {
-	var cmode options.CompressionType
-	if compression {
-		cmode = options.ZSTD
-	} else {
-		cmode = options.None
-	}
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithSyncWrites(syncWrites).
@@ -277,8 +271,10 @@ func writeBench(cmd *cobra.Command, args []string) error {
 		WithValueLogMaxEntries(vlogMaxEntries).
 		WithEncryptionKey([]byte(encryptionKey)).
 		WithDetectConflicts(detectConflicts).
-		WithCompression(cmode).
 		WithLoggingLevel(badger.INFO)
+	if zstdComp {
+		opt = opt.WithCompression(options.ZSTD)
+	}
 
 	if !showLogs {
 		opt = opt.WithLogger(nil)
@@ -314,6 +310,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	}
 
 	c.SignalAndWait()
+	fmt.Printf(db.LevelsToString())
 	return err
 }
 
@@ -354,11 +351,13 @@ func reportStats(c *z.Closer, db *badger.DB) {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 
+	var count int
 	for {
 		select {
 		case <-c.HasBeenClosed():
 			return
 		case <-t.C:
+			count++
 			if showKeysCount {
 				showKeysStats(db)
 			}
@@ -392,8 +391,13 @@ func reportStats(c *z.Closer, db *badger.DB) {
 			bytesRate := sz / uint64(dur.Seconds())
 			entriesRate := entries / uint64(dur.Seconds())
 			fmt.Printf("[WRITE] Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
-				"entries written: %d, speed: %d/sec, gcSuccess: %d\n", y.FixedDuration(time.Since(startTime)),
-				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate, gcSuccess)
+				"entries written: %d, speed: %d/sec, Memory: %s\n",
+				y.FixedDuration(time.Since(startTime)),
+				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate,
+				humanize.IBytes(uint64(z.NumAllocBytes())))
+			if count%10 == 0 {
+				fmt.Printf(db.LevelsToString())
+			}
 		}
 	}
 }

@@ -108,6 +108,7 @@ func NewTableBuilder(opts Options) *Builder {
 		opt:     &opts,
 		offsets: z.NewBuffer(1 << 20),
 	}
+	b.opt.tableCapacity = uint64(float64(b.opt.TableSize) * 0.9)
 
 	// If encryption or compression is not enabled, do not start compression/encryption goroutines
 	// and write directly to the buffer.
@@ -370,7 +371,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 // at the end. The diff can vary.
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
-func (b *Builder) ReachedCapacity(capacity uint64) bool {
+func (b *Builder) ReachedCapacity() bool {
 	blocksSize := atomic.LoadUint32(&b.actualSize) + // actual length of current buffer
 		uint32(len(b.entryOffsets)*4) + // all entry offsets size
 		4 + // count of all entry offsets
@@ -381,7 +382,7 @@ func (b *Builder) ReachedCapacity(capacity uint64) bool {
 		4 + // Index length
 		uint32(b.offsets.LenNoPadding())
 
-	return uint64(estimateSz) > capacity
+	return uint64(estimateSz) > b.opt.tableCapacity
 }
 
 // Finish finishes the table by appending the index.

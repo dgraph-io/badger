@@ -255,6 +255,9 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 
 	bopts := buildTableOptions(sw.db.opt)
 	bopts.DataKey = dk
+	for i := 2; i < sw.db.opt.MaxLevels; i++ {
+		bopts.TableSize *= uint64(sw.db.opt.TableSizeMultiplier)
+	}
 	w := &sortedWriter{
 		db:       sw.db,
 		streamID: streamID,
@@ -320,7 +323,7 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 
 	sameKey := y.SameKey(key, w.lastKey)
 	// Same keys should go into the same SSTable.
-	if !sameKey && w.builder.ReachedCapacity(uint64(float64(w.db.opt.MaxTableSize)*0.9)) {
+	if !sameKey && w.builder.ReachedCapacity() {
 		if err := w.send(false); err != nil {
 			return err
 		}
@@ -400,21 +403,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	}
 	lc := w.db.lc
 
-	var lhandler *levelHandler
-	// We should start the levels from 1.
-	y.AssertTrue(len(lc.levels) > 1)
-	for _, l := range lc.levels[1:] {
-		ratio := float64(l.getTotalSize()) / float64(l.maxTotalSize)
-		if ratio < 1.0 {
-			lhandler = l
-			break
-		}
-	}
-	if lhandler == nil {
-		// If we're exceeding the size of the lowest level, shove it in the lowest level. Can't do
-		// better than that.
-		lhandler = lc.levels[len(lc.levels)-1]
-	}
+	lhandler := lc.levels[len(lc.levels)-1]
 	// Now that table can be opened successfully, let's add this to the MANIFEST.
 	change := &pb.ManifestChange{
 		Id:          tbl.ID(),

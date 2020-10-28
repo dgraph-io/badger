@@ -67,8 +67,8 @@ func (s *DB) validate() error { return s.lc.validate() }
 
 func getTestOptions(dir string) Options {
 	opt := DefaultOptions(dir).
-		WithMaxTableSize(1 << 15). // Force more compaction.
-		WithLevelOneSize(4 << 15). // Force more compaction.
+		WithBaseTableSize(1 << 15). // Force more compaction.
+		WithBaseLevelSize(4 << 15). // Force more compaction.
 		WithSyncWrites(false)
 	return opt
 }
@@ -457,8 +457,8 @@ func BenchmarkDbGrowth(b *testing.B) {
 	maxWrites := 200
 	opts := getTestOptions(dir)
 	opts.ValueLogFileSize = 64 << 15
-	opts.MaxTableSize = 4 << 15
-	opts.LevelOneSize = 16 << 15
+	opts.BaseTableSize = 4 << 15
+	opts.BaseLevelSize = 16 << 15
 	opts.NumVersionsToKeep = 1
 	opts.NumLevelZeroTables = 1
 	opts.NumLevelZeroTablesStall = 2
@@ -1751,10 +1751,11 @@ func TestLSMOnly(t *testing.T) {
 	// Also test for error, when ValueThresholdSize is greater than maxBatchSize.
 	dopts.ValueThreshold = LSMOnlyOptions(dir).ValueThreshold
 	// maxBatchSize is calculated from MaxTableSize.
-	dopts.MaxTableSize = int64(LSMOnlyOptions(dir).ValueThreshold)
+	dopts.MemTableSize = int64(LSMOnlyOptions(dir).ValueThreshold)
 	_, err = Open(dopts)
 	require.Error(t, err, "db creation should have been failed")
-	require.Contains(t, err.Error(), "Valuethreshold greater than max batch size")
+	require.Contains(t, err.Error(),
+		fmt.Sprintf("Valuethreshold %d greater than max batch size", dopts.ValueThreshold))
 
 	opts.ValueLogMaxEntries = 100
 	db, err := Open(opts)
@@ -2024,7 +2025,6 @@ func TestForceFlushMemtable(t *testing.T) {
 
 	ops := getTestOptions(dir)
 	ops.ValueLogMaxEntries = 1
-	ops.LogRotatesToFlush = 1
 
 	db, err := Open(ops)
 	require.NoError(t, err, "error while openning db")
