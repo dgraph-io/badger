@@ -157,9 +157,8 @@ func (b *Builder) handleBlock() {
 
 		b.bufLock.Lock()
 		// Copy over compressed/encrypted data back to the main buffer.
-		copy(b.buf.Bytes()[item.start:], blockBuf)
+		copy(b.buf.Bytes()[item.start:item.start+uint32(len(blockBuf))], blockBuf)
 		b.bufLock.Unlock()
-
 		// Add the actual size of current block.
 		atomic.AddUint32(&b.actualSize, uint32(len(blockBuf)))
 
