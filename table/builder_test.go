@@ -274,6 +274,6 @@ func TestEmptyBuilder(t *testing.T) {
 	opts := Options{BloomFalsePositive: 0.1}
 	b := NewTableBuilder(opts)
 	defer b.Close()
-	require.Nil(t, b.Finish())
+	require.Equal(t, []byte{}, b.Finish())
 
 }

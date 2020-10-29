@@ -69,12 +69,33 @@ func (h *header) Decode(buf []byte) {
 
 // bblock represents a block that is being compressed/encrypted in the background.
 type bblock struct {
-	baseKey []byte
-	data    []byte
-	end     int // Points to the end offset of the block.
+	data         []byte
+	baseKey      []byte   // Base key for the current block.
+	entryOffsets []uint32 // Offsets of entries present in current block.
+	end          int      // Points to the end offset of the block.
 }
 
-// Append appends to curBlock.data
+// Builder is used in building a table.
+type Builder struct {
+	// Typically tens or hundreds of meg. This is for one single file.
+	alloc            *z.Allocator
+	curBlock         *bblock
+	compressedSize   uint32
+	uncompressedSize uint32
+
+	offsets       *z.Buffer
+	estimatedSize uint32
+	keyHashes     []uint32 // Used for building the bloomfilter.
+	opt           *Options
+	maxVersion    uint64
+
+	// Used to concurrently compress/encrypt blocks.
+	wg        sync.WaitGroup
+	blockChan chan *bblock
+	blockList []*bblock
+}
+
+// appendToCurBlock appends to curBlock.data
 func (b *Builder) appendToCurBlock(data []byte) {
 	bb := b.curBlock
 	if len(bb.data[bb.end:]) < len(data) {
@@ -93,32 +114,6 @@ func (b *Builder) appendToCurBlock(data []byte) {
 		"block size insufficient")
 	n := copy(bb.data[bb.end:], data)
 	bb.end += n
-}
-
-// Builder is used in building a table.
-type Builder struct {
-	// Typically tens or hundreds of meg. This is for one single file.
-	alloc            *z.Allocator
-	curBlock         *bblock
-	compressedSize   uint32
-	uncompressedSize uint32
-
-	// TODO: baseKey should be in bblock. And baseOffset is going to be wrong. We'll have to
-	// calculate all that in the Finish.
-	// baseKey []byte // Base key for the current block.
-	// baseOffset uint32 // Offset for the current block.
-
-	entryOffsets  []uint32 // Offsets of entries present in current block.
-	offsets       *z.Buffer
-	estimatedSize uint32
-	keyHashes     []uint32 // Used for building the bloomfilter.
-	opt           *Options
-	maxVersion    uint64
-
-	// Used to concurrently compress/encrypt blocks.
-	wg        sync.WaitGroup
-	blockChan chan *bblock
-	blockList []*bblock
 }
 
 // NewTableBuilder makes a new TableBuilder.
@@ -200,8 +195,8 @@ func (b *Builder) Empty() bool { return len(b.keyHashes) == 0 }
 // keyDiff returns a suffix of newKey that is different from b.baseKey.
 func (b *Builder) keyDiff(newKey []byte) []byte {
 	var i int
-	for i = 0; i < len(newKey) && i < len(b.baseKey); i++ {
-		if newKey[i] != b.baseKey[i] {
+	for i = 0; i < len(newKey) && i < len(b.curBlock.baseKey); i++ {
+		if newKey[i] != b.curBlock.baseKey[i] {
 			break
 		}
 	}
@@ -217,10 +212,10 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 
 	// diffKey stores the difference of key with baseKey.
 	var diffKey []byte
-	if len(b.baseKey) == 0 {
+	if len(b.curBlock.baseKey) == 0 {
 		// Make a copy. Builder should not keep references. Otherwise, caller has to be very careful
 		// and will have to make copies of keys every time they add to builder, which is even worse.
-		b.baseKey = append(b.baseKey[:0], key...)
+		b.curBlock.baseKey = append(b.curBlock.baseKey[:0], key...)
 		diffKey = key
 	} else {
 		diffKey = b.keyDiff(key)
@@ -235,16 +230,15 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	}
 
 	// store current entry's offset
-	b.entryOffsets = append(b.entryOffsets, uint32(b.curBlock.end))
+	b.curBlock.entryOffsets = append(b.curBlock.entryOffsets, uint32(b.curBlock.end))
 
 	// Layout: header, diffKey, value.
 	b.appendToCurBlock(h.Encode())
 	b.appendToCurBlock(diffKey)
-
 	tmp := make([]byte, int(v.EncodedSize()))
-	//fmt.Printf("[addHelper] tmp size: %v\n", len(tmp))
 	v.Encode(tmp)
 	b.appendToCurBlock(tmp)
+
 	// Size of KV on SST.
 	sstSz := uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize()
 	// Total estimated size = size on SST + size on vlog (length of value pointer).
@@ -264,39 +258,38 @@ Structure of Block.
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
 func (b *Builder) finishBlock() {
-	if len(b.entryOffsets) == 0 {
+	if len(b.curBlock.entryOffsets) == 0 {
 		return
 	}
-	// fmt.Printf("[finish block] only entries %v\n", b.curBlock.end)
-	b.appendToCurBlock(y.U32SliceToBytes(b.entryOffsets))
-	b.appendToCurBlock(y.U32ToBytes(uint32(len(b.entryOffsets))))
+	// Append the entryOffsets and its length.
+	b.appendToCurBlock(y.U32SliceToBytes(b.curBlock.entryOffsets))
+	b.appendToCurBlock(y.U32ToBytes(uint32(len(b.curBlock.entryOffsets))))
 
 	checksum := b.calculateChecksum(b.curBlock.data[:b.curBlock.end])
+
+	// Append the block checksum and its length.
 	b.appendToCurBlock(checksum)
 	b.appendToCurBlock(y.U32ToBytes(uint32(len(checksum))))
 
 	b.blockList = append(b.blockList, b.curBlock)
-	b.addBlockToIndex()
-
 	atomic.AddUint32(&b.uncompressedSize, uint32(b.curBlock.end))
-	// If compression/encryption is disabled, no need to send the block to the blockChan.
-	// There's nothing to be done.
-	if b.blockChan == nil {
-		return
+
+	// If compression/encryption is enabled, we need to send the block to the blockChan.
+	if b.blockChan != nil {
+		b.blockChan <- b.curBlock
 	}
-	// Push to the block handler.
-	b.blockChan <- b.curBlock
+	return
 }
 
-func (b *Builder) addBlockToIndex() {
-	blockBuf := b.curBlock.data[:b.curBlock.end]
+func (b *Builder) addBlockToIndex(blk *bblock, blockOffset uint32) {
+	blockBuf := blk.data[:blk.end]
 	// Add key to the block index.
 	builder := fbs.NewBuilder(64)
-	off := builder.CreateByteVector(b.baseKey)
+	off := builder.CreateByteVector(blk.baseKey)
 
 	fb.BlockOffsetStart(builder)
 	fb.BlockOffsetAddKey(builder, off)
-	fb.BlockOffsetAddOffset(builder, b.baseOffset)
+	fb.BlockOffsetAddOffset(builder, blockOffset)
 	fb.BlockOffsetAddLen(builder, uint32(len(blockBuf)))
 	uoff := fb.BlockOffsetEnd(builder)
 	builder.Finish(uoff)
@@ -308,14 +301,14 @@ func (b *Builder) addBlockToIndex() {
 
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	// If there is no entry till now, we will return false.
-	if len(b.entryOffsets) <= 0 {
+	if len(b.curBlock.entryOffsets) <= 0 {
 		return false
 	}
 
 	// Integer overflow check for statements below.
-	y.AssertTrue((uint32(len(b.entryOffsets))+1)*4+4+8+4 < math.MaxUint32)
+	y.AssertTrue((uint32(len(b.curBlock.entryOffsets))+1)*4+4+8+4 < math.MaxUint32)
 	// We should include current entry also in size, that's why +1 to len(b.entryOffsets).
-	entriesOffsetsSize := uint32((len(b.entryOffsets)+1)*4 +
+	entriesOffsetsSize := uint32((len(b.curBlock.entryOffsets)+1)*4 +
 		4 + // size of list
 		8 + // Sum64 in checksum proto
 		4) // checksum length
@@ -338,11 +331,6 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 	if b.shouldFinishBlock(key, value) {
 		b.finishBlock()
-		// Start a new block. Initialize the block.
-		b.baseKey = []byte{}
-		b.baseOffset = b.baseOffset + uint32(b.curBlock.end)
-		b.entryOffsets = b.entryOffsets[:0]
-
 		// Create a new block and start writing.
 		b.curBlock = &bblock{
 			data: b.alloc.Allocate(b.opt.BlockSize + padding),
@@ -359,8 +347,13 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity() bool {
-	blocksSize := atomic.LoadUint32(&b.compressedSize) + // actual length of current buffer
-		uint32(len(b.entryOffsets)*4) + // all entry offsets size
+	// If encryption/compression is enabled then use the compresssed size.
+	sumBlockSizes := atomic.LoadUint32(&b.compressedSize)
+	if b.opt.Compression == options.None && b.opt.DataKey == nil {
+		sumBlockSizes = b.uncompressedSize
+	}
+	blocksSize := sumBlockSizes + // actual length of current buffer
+		uint32(len(b.curBlock.entryOffsets)*4) + // all entry offsets size
 		4 + // count of all entry offsets
 		8 + // checksum bytes
 		4 // checksum length
@@ -402,27 +395,14 @@ func (b *Builder) FinishBuffer() *z.Buffer {
 
 	dst := z.NewBuffer(int(b.opt.TableSize) + 16*MB)
 
-	// Fix block boundaries. This includes moving the blocks so that we
-	// don't have any interleaving space between them.
-	if len(b.blockList) > 0 {
-		i, dstLen := 0, uint32(0)
-		b.offsets.SliceIterate(func(slice []byte) error {
-
-			bl := b.blockList[i]
-			// Length of the block is end minus the start.
-			fbo := fb.GetRootAsBlockOffset(slice, 0)
-			fbo.MutateLen(uint32(bl.end))
-			// New offset of the block is the point in the main buffer till
-			// which we have written data.
-			fbo.MutateOffset(dstLen)
-
-			// Copy over to z.Buffer here.
-			dst.Write(bl.data[:bl.end])
-			// New length is the start of the block plus its length.
-			dstLen = fbo.Offset() + fbo.Len()
-			i++
-			return nil
-		})
+	blockOffset := uint32(0)
+	// Iterate over the blocks and write it to the dst buffer.
+	// Also calculate the index of the blocks.
+	for i := 0; i < len(b.blockList); i++ {
+		bl := b.blockList[i]
+		b.addBlockToIndex(bl, blockOffset)
+		blockOffset += uint32(bl.end)
+		dst.Write(bl.data[:bl.end])
 	}
 	if dst.IsEmpty() {
 		return dst
@@ -470,8 +450,6 @@ func (b *Builder) calculateChecksum(data []byte) []byte {
 	// Write checksum to the file.
 	chksum, err := proto.Marshal(&checksum)
 	y.Check(err)
-	// b.append(chksum)
-
 	// Write checksum size.
 	return chksum
 }
