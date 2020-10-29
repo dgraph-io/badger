@@ -170,7 +170,7 @@ func (b *Builder) handleBlock() {
 
 		// Copy over compressed/encrypted data back to the main buffer and update its end.
 		item.end = copy(item.data, blockBuf)
-		atomic.AddUint32(&b.szTotal, uint32(len(blockBuf)))
+		//atomic.AddUint32(&b.szTotal, uint32(len(blockBuf)))
 
 		if doCompress {
 			z.Free(blockBuf)
@@ -267,10 +267,10 @@ func (b *Builder) finishBlock() {
 	b.blockList = append(b.blockList, b.curBlock)
 	b.addBlockToIndex()
 
+	atomic.AddUint32(&b.szTotal, uint32(b.curBlock.end))
 	// If compression/encryption is disabled, no need to send the block to the blockChan.
 	// There's nothing to be done.
 	if b.blockChan == nil {
-		atomic.AddUint32(&b.szTotal, uint32(b.curBlock.end))
 		return
 	}
 	// Push to the block handler.
@@ -384,7 +384,7 @@ func (b *Builder) Finish(allocate bool) []byte {
 	// We have added padding after each block so we should minus the
 	// padding from the actual table size. len(blocklist) would be zero if
 	// there is no compression/encryption.
-	uncompressedSize := 0                            //b.sz - uint32(padding*len(b.blockList))
+	uncompressedSize := b.szTotal                    //b.sz - uint32(padding*len(b.blockList))
 	dst := z.NewBuffer(int(b.opt.TableSize) + 16*MB) //b.buf.Bytes()
 	// Fix block boundaries. This includes moving the blocks so that we
 	// don't have any interleaving space between them.
@@ -403,7 +403,6 @@ func (b *Builder) Finish(allocate bool) []byte {
 			// Copy over to z.Buffer here.
 			buf := dst.Allocate(bl.end)
 			copy(buf, bl.data[:bl.end])
-			uncompressedSize += bl.end
 			// New length is the start of the block plus its length.
 			dstLen = fbo.Offset() + fbo.Len()
 			i++
@@ -411,8 +410,9 @@ func (b *Builder) Finish(allocate bool) []byte {
 		})
 		// Start writing to the buffer from the point until which we have valid data.
 		// Fix the length because append and writeChecksum also rely on it.
+		b.szTotal = dstLen
 	}
-	if uncompressedSize == 0 {
+	if b.szTotal == 0 {
 		return nil
 	}
 
@@ -429,17 +429,17 @@ func (b *Builder) Finish(allocate bool) []byte {
 		y.Check(err)
 	}
 
-	sz := uncompressedSize
-	y.AssertTrue(uint32(sz) == atomic.LoadUint32(&b.szTotal))
+	sz := b.szTotal
+
 	// Write index the buffer.
 	b.appendToBuf(dst, index)
 	b.appendToBuf(dst, y.U32ToBytes(uint32(len(index))))
-	sz += len(index) + len(y.U32ToBytes(uint32(len(index))))
+	sz += uint32(len(index) + len(y.U32ToBytes(uint32(len(index)))))
 
 	checksum, chkSize := b.calculateChecksum(index)
 	b.appendToBuf(dst, checksum)
 	b.appendToBuf(dst, chkSize)
-	sz += len(checksum) + len(chkSize)
+	sz += uint32(len(checksum) + len(chkSize))
 
 	atomic.StoreUint32(&b.szTotal, uint32(sz))
 	if allocate {
@@ -553,7 +553,6 @@ func (b *Builder) buildIndex(bloom []byte, tableSz uint32) []byte {
 	if len(bloom) > 0 {
 		bfoff = builder.CreateByteVector(bloom)
 	}
-
 	fb.TableIndexStart(builder)
 	fb.TableIndexAddOffsets(builder, boEnd)
 	fb.TableIndexAddBloomFilter(builder, bfoff)
