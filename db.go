@@ -961,7 +961,7 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 		}
 		b.Add(iter.Key(), iter.Value(), vp.Len)
 	}
-	return b.Finish(true)
+	return b.Finish()
 }
 
 type flushTask struct {
@@ -1773,6 +1773,7 @@ func (db *DB) StreamDB(outOptions Options) error {
 	// Stream contents of DB to the output DB.
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = fmt.Sprintf("Streaming DB to new DB at %s", outDir)
+
 	stream.Send = func(kvs *pb.KVList) error {
 		return writer.Write(kvs)
 	}

@@ -780,7 +780,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 		// called Add() at least once, and builder is not Empty().
 		if builder.Empty() {
 			// Cleanup builder resources:
-			builder.Finish(false)
+			builder.Finish()
 			builder.Close()
 			continue
 		}
@@ -796,13 +796,15 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 
 			build := func(fileID uint64) (*table.Table, error) {
 				fname := table.NewFilename(fileID, s.kv.opt.Dir)
-				return table.CreateTable(fname, builder.Finish(false), bopts)
+				zbuf := builder.FinishBuffer()
+				defer zbuf.Release()
+				return table.CreateTable(fname, zbuf.Bytes(), bopts)
 			}
 
 			var tbl *table.Table
 			var err error
 			if s.kv.opt.InMemory {
-				tbl, err = table.OpenInMemoryTable(builder.Finish(true), fileID, &bopts)
+				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
 			} else {
 				tbl, err = build(fileID)
 			}

@@ -79,7 +79,7 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *Table {
 		b.Add(y.KeyWithTs([]byte(kv[0]), 0),
 			y.ValueStruct{Value: []byte(kv[1]), Meta: 'A', UserMeta: 0}, 0)
 	}
-	tbl, err := CreateTable(filename, b.Finish(false), opts)
+	tbl, err := CreateTable(filename, b.Finish(), opts)
 	require.NoError(t, err, "writing to file failed")
 	return tbl
 }

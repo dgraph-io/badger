@@ -378,11 +378,10 @@ func (w *sortedWriter) Done() error {
 }
 
 func (w *sortedWriter) createTable(builder *table.Builder) error {
-	data := builder.Finish(w.db.opt.InMemory)
-
-	if len(data) == 0 {
+	if builder.Empty() {
 		return nil
 	}
+
 	fileID := w.db.lc.reserveFileID()
 	opts := buildTableOptions(w.db.opt)
 	opts.DataKey = builder.DataKey()
@@ -390,14 +389,17 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	opts.IndexCache = w.db.indexCache
 	var tbl *table.Table
 	if w.db.opt.InMemory {
+		data := builder.Finish()
 		var err error
 		if tbl, err = table.OpenInMemoryTable(data, fileID, &opts); err != nil {
 			return err
 		}
 	} else {
+		zbuf := builder.FinishBuffer()
+		defer zbuf.Release()
 		var err error
-		if tbl, err = table.CreateTable(
-			table.NewFilename(fileID, w.db.opt.Dir), data, opts); err != nil {
+		fname := table.NewFilename(fileID, w.db.opt.Dir)
+		if tbl, err = table.CreateTable(fname, zbuf.Bytes(), opts); err != nil {
 			return err
 		}
 	}
