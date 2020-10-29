@@ -74,6 +74,8 @@ type bblock struct {
 }
 
 func (bb *bblock) Append(data []byte) {
+	y.AssertTruef(len(bb.data[bb.end:]) >= len(data),
+		"block size insufficient")
 	n := copy(bb.data[bb.end:], data)
 	bb.end += n
 }
@@ -84,8 +86,6 @@ type Builder struct {
 	alloc    *z.Allocator
 	szTotal  uint32
 	curBlock *bblock
-
-	actualSize uint32 // Used to store the sum of sizes of blocks after compression/encryption.
 
 	baseKey    []byte // Base key for the current block.
 	baseOffset uint32 // Offset for the current block.
@@ -114,7 +114,7 @@ func NewTableBuilder(opts Options) *Builder {
 		offsets: z.NewBuffer(1 << 20),
 	}
 	b.curBlock = &bblock{
-		data: b.alloc.Allocate(opts.BlockSize + padding),
+		data: b.alloc.Allocate(opts.BlockSize*1000 + padding),
 	}
 	b.opt.tableCapacity = uint64(float64(b.opt.TableSize) * 0.9)
 
@@ -157,22 +157,13 @@ func (b *Builder) handleBlock() {
 		// than allocated space that means the data from this block cannot be stored in its
 		// existing location and trying to copy it over would mean we would over-write some data
 		// of the next block.
-		// allocatedSpace := (item.end - item.start) + padding + 1
-		// y.AssertTruef(uint32(len(blockBuf)) <= allocatedSpace, "newend: %d oldend: %d padding: %d",
-		// 	item.start+uint32(len(blockBuf)), item.end, padding)
+		allocatedSpace := (item.end) + padding + 1
+		y.AssertTruef(len(blockBuf) <= allocatedSpace, "newend: %d oldend: %d padding: %d",
+			len(blockBuf), item.end, padding)
 
-		// Acquire the buflock here. The z.buffer.Allocation might change
-		// the b.buf while this goroutine is running.
-		y.AssertTrue(&blockBuf != &item.data)
-		// Copy over compressed/encrypted data back to the main buffer.
+		// Copy over compressed/encrypted data back to the main buffer and update its end.
 		item.end = copy(item.data, blockBuf)
 		atomic.AddUint32(&b.szTotal, uint32(len(blockBuf)))
-
-		// Add the actual size of current block.
-		atomic.AddUint32(&b.actualSize, uint32(len(blockBuf)))
-
-		// Fix the boundary of the block.
-		//item.end = item.start + uint32(len(blockBuf))
 
 		if doCompress {
 			z.Free(blockBuf)
@@ -229,24 +220,17 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	b.entryOffsets = append(b.entryOffsets, uint32(b.curBlock.end))
 
 	// Layout: header, diffKey, value.
-	b.append(h.Encode())
-	b.append(diffKey)
+	b.curBlock.Append(h.Encode())
+	b.curBlock.Append(diffKey)
 
 	tmp := make([]byte, int(v.EncodedSize()))
+	//fmt.Printf("[addHelper] tmp size: %v\n", len(tmp))
 	v.Encode(tmp)
 	b.curBlock.Append(tmp)
 	// Size of KV on SST.
 	sstSz := uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize()
 	// Total estimated size = size on SST + size on vlog (length of value pointer).
 	b.estimatedSize += (sstSz + vpLen)
-}
-
-func (b *Builder) append(data []byte) {
-	b.curBlock.Append(data)
-}
-
-// TODO: Remove this func.
-func (b *Builder) addPadding(sz uint32) {
 }
 
 /*
@@ -265,28 +249,25 @@ func (b *Builder) finishBlock() {
 	if len(b.entryOffsets) == 0 {
 		return
 	}
+	// fmt.Printf("[finish block] only entries %v\n", b.curBlock.end)
 	b.curBlock.Append(y.U32SliceToBytes(b.entryOffsets))
 	b.curBlock.Append(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
 	checksum, checksumSize := b.calculateChecksum(b.curBlock.data[:b.curBlock.end])
 	b.curBlock.Append(checksum)
 	b.curBlock.Append(checksumSize)
-	// Block end is the actual end of the block ignoring the padding.
-	block := &bblock{end: b.curBlock.end, data: b.curBlock.data}
 
-	b.blockList = append(b.blockList, block)
-
+	b.blockList = append(b.blockList, b.curBlock)
 	b.addBlockToIndex()
 
 	// If compression/encryption is disabled, no need to send the block to the blockChan.
 	// There's nothing to be done.
 	if b.blockChan == nil {
-		atomic.StoreUint32(&b.actualSize, uint32(b.curBlock.end))
 		atomic.AddUint32(&b.szTotal, uint32(b.curBlock.end))
 		return
 	}
-	// Push to the block handler.f
-	b.blockChan <- block
+	// Push to the block handler.
+	b.blockChan <- b.curBlock
 }
 
 func (b *Builder) addBlockToIndex() {
@@ -346,7 +327,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 
 		// Create a new block and start writing.
 		b.curBlock = &bblock{
-			data: b.alloc.Allocate(b.opt.BlockSize + padding),
+			data: b.alloc.Allocate(b.opt.BlockSize*1000 + padding),
 		}
 	}
 	b.addHelper(key, value, valueLen)
@@ -360,7 +341,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
 func (b *Builder) ReachedCapacity() bool {
-	blocksSize := atomic.LoadUint32(&b.actualSize) + // actual length of current buffer
+	blocksSize := atomic.LoadUint32(&b.szTotal) + // actual length of current buffer
 		uint32(len(b.entryOffsets)*4) + // all entry offsets size
 		4 + // count of all entry offsets
 		8 + // checksum bytes
@@ -389,9 +370,6 @@ func (b *Builder) Finish(allocate bool) []byte {
 	b.finishBlock() // This will never start a new block.
 	if b.blockChan != nil {
 		close(b.blockChan)
-	}
-	if b.szTotal == 0 {
-		return nil
 	}
 	// Wait for block handler to finish.
 	b.wg.Wait()
@@ -426,6 +404,9 @@ func (b *Builder) Finish(allocate bool) []byte {
 		})
 		// Start writing to the buffer from the point until which we have valid data.
 		// Fix the length because append and writeChecksum also rely on it.
+	}
+	if uncompressedSize == 0 {
+		return nil
 	}
 
 	var f y.Filter
