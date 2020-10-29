@@ -73,7 +73,14 @@ type bblock struct {
 	end  int // Points to the end offset of the block.
 }
 
-func (bb *bblock) Append(data []byte) {
+// Append appends to curBlock.data
+func (b *Builder) appendToCurBlock(data []byte) {
+	bb := b.curBlock
+	if len(bb.data[bb.end:]) < len(data) {
+		tmp := b.alloc.Allocate(bb.end + len(data))
+		copy(tmp, bb.data)
+		bb.data = tmp
+	}
 	y.AssertTruef(len(bb.data[bb.end:]) >= len(data),
 		"block size insufficient")
 	n := copy(bb.data[bb.end:], data)
@@ -114,7 +121,7 @@ func NewTableBuilder(opts Options) *Builder {
 		offsets: z.NewBuffer(1 << 20),
 	}
 	b.curBlock = &bblock{
-		data: b.alloc.Allocate(opts.BlockSize*1000 + padding),
+		data: b.alloc.Allocate(opts.BlockSize + padding),
 	}
 	b.opt.tableCapacity = uint64(float64(b.opt.TableSize) * 0.9)
 
@@ -220,13 +227,13 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	b.entryOffsets = append(b.entryOffsets, uint32(b.curBlock.end))
 
 	// Layout: header, diffKey, value.
-	b.curBlock.Append(h.Encode())
-	b.curBlock.Append(diffKey)
+	b.appendToCurBlock(h.Encode())
+	b.appendToCurBlock(diffKey)
 
 	tmp := make([]byte, int(v.EncodedSize()))
 	//fmt.Printf("[addHelper] tmp size: %v\n", len(tmp))
 	v.Encode(tmp)
-	b.curBlock.Append(tmp)
+	b.appendToCurBlock(tmp)
 	// Size of KV on SST.
 	sstSz := uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize()
 	// Total estimated size = size on SST + size on vlog (length of value pointer).
@@ -250,12 +257,12 @@ func (b *Builder) finishBlock() {
 		return
 	}
 	// fmt.Printf("[finish block] only entries %v\n", b.curBlock.end)
-	b.curBlock.Append(y.U32SliceToBytes(b.entryOffsets))
-	b.curBlock.Append(y.U32ToBytes(uint32(len(b.entryOffsets))))
+	b.appendToCurBlock(y.U32SliceToBytes(b.entryOffsets))
+	b.appendToCurBlock(y.U32ToBytes(uint32(len(b.entryOffsets))))
 
 	checksum, checksumSize := b.calculateChecksum(b.curBlock.data[:b.curBlock.end])
-	b.curBlock.Append(checksum)
-	b.curBlock.Append(checksumSize)
+	b.appendToCurBlock(checksum)
+	b.appendToCurBlock(checksumSize)
 
 	b.blockList = append(b.blockList, b.curBlock)
 	b.addBlockToIndex()
@@ -327,7 +334,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 
 		// Create a new block and start writing.
 		b.curBlock = &bblock{
-			data: b.alloc.Allocate(b.opt.BlockSize*1000 + padding),
+			data: b.alloc.Allocate(b.opt.BlockSize + padding),
 		}
 	}
 	b.addHelper(key, value, valueLen)
