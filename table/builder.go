@@ -69,8 +69,9 @@ func (h *header) Decode(buf []byte) {
 
 // bblock represents a block that is being compressed/encrypted in the background.
 type bblock struct {
-	data []byte
-	end  int // Points to the end offset of the block.
+	baseKey []byte
+	data    []byte
+	end     int // Points to the end offset of the block.
 }
 
 // Append appends to curBlock.data
@@ -102,8 +103,10 @@ type Builder struct {
 	compressedSize   uint32
 	uncompressedSize uint32
 
-	baseKey    []byte // Base key for the current block.
-	baseOffset uint32 // Offset for the current block.
+	// TODO: baseKey should be in bblock. And baseOffset is going to be wrong. We'll have to
+	// calculate all that in the Finish.
+	// baseKey []byte // Base key for the current block.
+	// baseOffset uint32 // Offset for the current block.
 
 	entryOffsets  []uint32 // Offsets of entries present in current block.
 	offsets       *z.Buffer

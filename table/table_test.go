@@ -653,7 +653,7 @@ func TestTableBigValues(t *testing.T) {
 	}
 
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
-	tbl, err := CreateTable(filename, builder.Finish(false), opts)
+	tbl, err := CreateTable(filename, builder.Finish(), opts)
 	require.NoError(t, err, "unable to open table")
 	defer tbl.DecrRef()
 
@@ -738,7 +738,7 @@ func BenchmarkReadAndBuild(b *testing.B) {
 				vs := it.Value()
 				newBuilder.Add(it.Key(), vs, 0)
 			}
-			newBuilder.Finish(false)
+			newBuilder.Finish()
 		}()
 	}
 }
@@ -765,7 +765,7 @@ func BenchmarkReadMerged(b *testing.B) {
 			v := fmt.Sprintf("%d", id)
 			builder.Add([]byte(k), y.ValueStruct{Value: []byte(v), Meta: 123, UserMeta: 0}, 0)
 		}
-		tbl, err := CreateTable(filename, builder.Finish(false), opts)
+		tbl, err := CreateTable(filename, builder.Finish(), opts)
 		y.Check(err)
 		builder.Close()
 		tables = append(tables, tbl)
@@ -855,7 +855,7 @@ func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Tab
 		builder.Add([]byte(k), y.ValueStruct{Value: []byte(v)}, 0)
 	}
 
-	tbl, err := CreateTable(filename, builder.Finish(false), opts)
+	tbl, err := CreateTable(filename, builder.Finish(), opts)
 	require.NoError(b, err, "unable to open table")
 	return tbl
 }
@@ -917,7 +917,7 @@ func TestMaxVersion(t *testing.T) {
 	for i := 0; i < N; i++ {
 		b.Add(y.KeyWithTs([]byte(fmt.Sprintf("foo:%d", i)), uint64(i+1)), y.ValueStruct{}, 0)
 	}
-	table, err := CreateTable(filename, b.Finish(false), opt)
+	table, err := CreateTable(filename, b.Finish(), opt)
 	require.NoError(t, err)
 	require.Equal(t, N, int(table.MaxVersion()))
 }
