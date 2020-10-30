@@ -67,6 +67,7 @@ func (s *DB) validate() error { return s.lc.validate() }
 
 func getTestOptions(dir string) Options {
 	opt := DefaultOptions(dir).
+		WithMemTableSize(1 << 15).
 		WithBaseTableSize(1 << 15). // Force more compaction.
 		WithBaseLevelSize(4 << 15). // Force more compaction.
 		WithSyncWrites(false)

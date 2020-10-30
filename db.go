@@ -251,7 +251,7 @@ func Open(opt Options) (*DB, error) {
 
 	if opt.IndexCacheSize > 0 {
 		// Index size is around 5% of the table size.
-		indexSz := int64(float64(opt.BaseTableSize) * 0.05)
+		indexSz := int64(float64(opt.MemTableSize) * 0.05)
 		numInCache := opt.IndexCacheSize / indexSz
 		if numInCache == 0 {
 			// Make the value of this variable at least one since the cache requires
