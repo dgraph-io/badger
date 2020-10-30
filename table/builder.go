@@ -95,34 +95,39 @@ type Builder struct {
 	blockList []*bblock
 }
 
-// appendToCurBlock appends to curBlock.data
-func (b *Builder) appendToCurBlock(data []byte) {
+func (b *Builder) allocate(need int) []byte {
 	bb := b.curBlock
-	if len(bb.data[bb.end:]) < len(data) {
-		// We need to reallocate. Do twice the current size or size of data, whichever is bigger.
-		// TODO: Allocator currently has no way to free an allocated slice. Would be useful to have
-		// it.
+	if len(bb.data[bb.end:]) < need {
+		// We need to reallocate.
 		sz := 2 * len(bb.data)
-		if bb.end+len(data) > sz {
-			sz = bb.end + len(data)
+		if bb.end+need > sz {
+			sz = bb.end + need
 		}
 		tmp := b.alloc.Allocate(sz)
 		copy(tmp, bb.data)
+		b.alloc.Return(bb.data) // Return the current buffer back to be recycled.
 		bb.data = tmp
 	}
-	y.AssertTruef(len(bb.data[bb.end:]) >= len(data),
-		"block size insufficient")
-	n := copy(bb.data[bb.end:], data)
-	bb.end += n
+	bb.end += need
+	return bb.data[bb.end-need : bb.end]
 }
+
+// append appends to curBlock.data
+func (b *Builder) append(data []byte) {
+	dst := b.allocate(len(data))
+	y.AssertTrue(len(data) == copy(dst, data))
+}
+
+const maxAllocatorInitialSz = 256 << 20
 
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
+	sz := 2 * int(opts.TableSize)
+	if sz > maxAllocatorInitialSz {
+		sz = maxAllocatorInitialSz
+	}
 	b := &Builder{
-		// Additional 16 MB to store index (approximate).
-		// We trim the additional space in table.Finish().
-		// TODO: Switch this buf over to z.Buffer.
-		alloc:   z.NewAllocator(16 * MB),
+		alloc:   z.NewAllocator(sz),
 		opt:     &opts,
 		offsets: z.NewBuffer(1 << 20),
 	}
@@ -156,31 +161,32 @@ func (b *Builder) handleBlock() {
 		blockBuf := item.data[:item.end]
 		// Compress the block.
 		if doCompress {
-			var err error
-			blockBuf, err = b.compressData(blockBuf)
+			out, err := b.compressData(blockBuf)
 			y.Check(err)
+			if (&out[0]) != (&item.data[0]) {
+				b.alloc.Return(item.data)
+			}
+			blockBuf = out
 		}
 		if b.shouldEncrypt() {
-			eBlock, err := b.encrypt(blockBuf, doCompress)
+			out, err := b.encrypt(blockBuf)
 			y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
-			blockBuf = eBlock
+			if (&out[0]) != (&blockBuf[0]) {
+				b.alloc.Return(blockBuf)
+			}
+			blockBuf = out
 		}
 
 		// BlockBuf should always less than or equal to allocated space. If the blockBuf is greater
 		// than allocated space that means the data from this block cannot be stored in its
-		// existing location and trying to copy it over would mean we would over-write some data
-		// of the next block.
+		// existing location.
 		allocatedSpace := (item.end) + padding + 1
-		y.AssertTruef(len(blockBuf) <= allocatedSpace, "newend: %d oldend: %d padding: %d",
-			len(blockBuf), item.end, padding)
+		y.AssertTrue(len(blockBuf) <= allocatedSpace)
 
-		// Copy over compressed/encrypted data back to the main buffer and update its end.
-		item.end = copy(item.data, blockBuf)
+		// blockBuf was allocated on allocator. So, we don't need to copy it over.
+		item.data = blockBuf
+		item.end = len(blockBuf)
 		atomic.AddUint32(&b.compressedSize, uint32(len(blockBuf)))
-
-		if doCompress {
-			z.Free(blockBuf)
-		}
 	}
 }
 
@@ -233,11 +239,11 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	b.curBlock.entryOffsets = append(b.curBlock.entryOffsets, uint32(b.curBlock.end))
 
 	// Layout: header, diffKey, value.
-	b.appendToCurBlock(h.Encode())
-	b.appendToCurBlock(diffKey)
-	tmp := make([]byte, int(v.EncodedSize()))
-	v.Encode(tmp)
-	b.appendToCurBlock(tmp)
+	b.append(h.Encode())
+	b.append(diffKey)
+
+	dst := b.allocate(int(v.EncodedSize()))
+	v.Encode(dst)
 
 	// Size of KV on SST.
 	sstSz := uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize()
@@ -262,14 +268,14 @@ func (b *Builder) finishBlock() {
 		return
 	}
 	// Append the entryOffsets and its length.
-	b.appendToCurBlock(y.U32SliceToBytes(b.curBlock.entryOffsets))
-	b.appendToCurBlock(y.U32ToBytes(uint32(len(b.curBlock.entryOffsets))))
+	b.append(y.U32SliceToBytes(b.curBlock.entryOffsets))
+	b.append(y.U32ToBytes(uint32(len(b.curBlock.entryOffsets))))
 
 	checksum := b.calculateChecksum(b.curBlock.data[:b.curBlock.end])
 
 	// Append the block checksum and its length.
-	b.appendToCurBlock(checksum)
-	b.appendToCurBlock(y.U32ToBytes(uint32(len(checksum))))
+	b.append(checksum)
+	b.append(y.U32ToBytes(uint32(len(checksum))))
 
 	b.blockList = append(b.blockList, b.curBlock)
 	atomic.AddUint32(&b.uncompressedSize, uint32(b.curBlock.end))
@@ -384,7 +390,9 @@ func (b *Builder) Finish() []byte {
 }
 
 func (b *Builder) FinishBuffer() *z.Buffer {
-	defer b.alloc.Release()
+	defer func() {
+		b.alloc.Release()
+	}()
 
 	b.finishBlock() // This will never start a new block.
 	if b.blockChan != nil {
@@ -417,7 +425,7 @@ func (b *Builder) FinishBuffer() *z.Buffer {
 
 	var err error
 	if b.shouldEncrypt() {
-		index, err = b.encrypt(index, false)
+		index, err = b.encrypt(index)
 		y.Check(err)
 	}
 
@@ -461,32 +469,21 @@ func (b *Builder) DataKey() *pb.DataKey {
 
 // encrypt will encrypt the given data and appends IV to the end of the encrypted data.
 // This should be only called only after checking shouldEncrypt method.
-func (b *Builder) encrypt(data []byte, viaC bool) ([]byte, error) {
+func (b *Builder) encrypt(data []byte) ([]byte, error) {
 	iv, err := y.GenerateIV()
 	if err != nil {
 		return data, y.Wrapf(err, "Error while generating IV in Builder.encrypt")
 	}
 	needSz := len(data) + len(iv)
-	var dst []byte
-	if viaC {
-		dst = z.Calloc(needSz)
-	} else {
-		dst = make([]byte, needSz)
-	}
+	dst := b.alloc.Allocate(needSz)
 	dst = dst[:len(data)]
 
 	if err = y.XORBlock(dst, data, b.DataKey().Data, iv); err != nil {
-		if viaC {
-			z.Free(dst)
-		}
 		return data, y.Wrapf(err, "Error while encrypting in Builder.encrypt")
 	}
-	if viaC {
-		z.Free(data)
-	}
 
-	y.AssertTrue(cap(dst)-len(dst) >= len(iv))
-	return append(dst, iv...), nil
+	y.AssertTrue(len(iv) == copy(dst[len(data):], iv))
+	return dst, nil
 }
 
 // shouldEncrypt tells us whether to encrypt the data or not.
@@ -502,11 +499,11 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 		return data, nil
 	case options.Snappy:
 		sz := snappy.MaxEncodedLen(len(data))
-		dst := z.Calloc(sz)
+		dst := b.alloc.Allocate(sz)
 		return snappy.Encode(dst, data), nil
 	case options.ZSTD:
 		sz := y.ZSTDCompressBound(len(data))
-		dst := z.Calloc(sz)
+		dst := b.alloc.Allocate(sz)
 		return y.ZSTDCompress(dst, data, b.opt.ZSTDCompressionLevel)
 	}
 	return nil, errors.New("Unsupported compression type")
