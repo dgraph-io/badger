@@ -799,7 +799,8 @@ func (vlog *valueLog) write(reqs []*request) error {
 		n := uint32(buf.Len())
 		endOffset := atomic.AddUint32(&vlog.writableLogOffset, n)
 		if int(endOffset) >= len(curlf.Data) {
-			return y.Wrapf(ErrTxnTooBig, "endOffset: %d len: %d\n", endOffset, len(curlf.Data))
+			curlf.Truncate(int64(endOffset))
+			// return y.Wrapf(ErrTxnTooBig, "endOffset: %d len: %d\n", endOffset, len(curlf.Data))
 		}
 
 		start := int(endOffset - n)
@@ -809,22 +810,18 @@ func (vlog *valueLog) write(reqs []*request) error {
 		return nil
 	}
 
-	newLogFile := func() error {
-		if err := curlf.doneWriting(vlog.woffset()); err != nil {
-			return err
-		}
-
-		newlf, err := vlog.createVlogFile()
-		if err != nil {
-			return err
-		}
-		curlf = newlf
-		return nil
-	}
 	toDisk := func() error {
 		if vlog.woffset() > uint32(vlog.opt.ValueLogFileSize) ||
 			vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
-			newLogFile()
+			if err := curlf.doneWriting(vlog.woffset()); err != nil {
+				return err
+			}
+
+			newlf, err := vlog.createVlogFile()
+			if err != nil {
+				return err
+			}
+			curlf = newlf
 		}
 		return nil
 	}
@@ -834,12 +831,6 @@ func (vlog *valueLog) write(reqs []*request) error {
 		b := reqs[i]
 		b.Ptrs = b.Ptrs[:0]
 		var written, bytesWritten int
-		newSz := int64(estimateRequestSize(b)) + int64(vlog.woffset())
-		newCount := uint32(len(b.Entries)) + vlog.numEntriesWritten
-		// Create a new file if the next transaction cannot fit into the current log file.
-		if newSz > vlog.db.opt.ValueLogFileSize || newCount > vlog.opt.ValueLogMaxEntries {
-			newLogFile()
-		}
 		for j := range b.Entries {
 			buf.Reset()
 
