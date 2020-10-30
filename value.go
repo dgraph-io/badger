@@ -850,7 +850,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			var p valuePointer
 
 			p.Fid = curlf.fid
-			p.Offset = vlog.woffset()
+			p.Offset = vlog.woffset() + uint32(buf.Len())
 
 			// We should not store transaction marks in the vlog file because it will never have all
 			// the entries in a transaction. If we store entries with transaction marks then value
