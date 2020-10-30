@@ -30,7 +30,8 @@ type WriteBatch struct {
 	txn      *Txn
 	db       *DB
 	throttle *y.Throttle
-	err      error
+	err      chan error
+	errored  bool
 
 	isManaged bool
 	commitTs  uint64
@@ -53,6 +54,7 @@ func (db *DB) newWriteBatch(isManaged bool) *WriteBatch {
 	return &WriteBatch{
 		db:        db,
 		isManaged: isManaged,
+		err:       make(chan error),
 		txn:       db.newTransaction(true, isManaged),
 		throttle:  y.NewThrottle(16),
 	}
@@ -89,12 +91,9 @@ func (wb *WriteBatch) callback(err error) {
 		return
 	}
 
-	wb.Lock()
-	defer wb.Unlock()
-	if wb.err != nil {
-		return
+	if err != nil {
+		wb.setError(err)
 	}
-	wb.err = err
 }
 
 func (wb *WriteBatch) Write(kvList *pb.KVList) error {
@@ -136,7 +135,7 @@ func (wb *WriteBatch) handleEntry(e *Entry) error {
 	// This time the error must not be ErrTxnTooBig, otherwise, we make the
 	// error permanent.
 	if err := wb.txn.SetEntry(e); err != nil {
-		wb.err = err
+		wb.setError(err)
 		return err
 	}
 	return nil
@@ -173,28 +172,36 @@ func (wb *WriteBatch) Delete(k []byte) error {
 		return err
 	}
 	if err := wb.txn.Delete(k); err != nil {
-		wb.err = err
+		wb.setError(err)
 		return err
 	}
 	return nil
 }
 
+func (wb *WriteBatch) setError(err error) {
+	select {
+	case wb.err <- err:
+	default:
+	}
+}
+
 // Caller to commit must hold a write lock.
 func (wb *WriteBatch) commit() error {
-	if wb.err != nil {
-		return wb.err
+	if err := wb.Error(); err != nil {
+		return err
 	}
 	if wb.finished {
-		return y.ErrCommitAfterFinish
+		wb.setError(y.ErrCommitAfterFinish)
+		return wb.Error()
 	}
 	if err := wb.throttle.Do(); err != nil {
-		wb.err = err
-		return wb.err
+		wb.setError(err)
+		return err
 	}
 	wb.txn.CommitWith(wb.callback)
 	wb.txn = wb.db.newTransaction(true, wb.isManaged)
 	wb.txn.commitTs = wb.commitTs
-	return wb.err
+	return nil
 }
 
 // Flush must be called at the end to ensure that any pending writes get committed to Badger. Flush
@@ -211,18 +218,24 @@ func (wb *WriteBatch) Flush() error {
 	wb.Unlock()
 
 	if err := wb.throttle.Finish(); err != nil {
-		if wb.err != nil {
-			return errors.Errorf("wb.err: %s err: %s", wb.err, err)
+		werr := wb.Error()
+		if werr != nil {
+			return errors.Errorf("werr: %s err: %s", werr, err)
 		}
 		return err
 	}
-
-	return wb.err
+	return wb.Error()
 }
 
 // Error returns any errors encountered so far. No commits would be run once an error is detected.
 func (wb *WriteBatch) Error() error {
-	wb.Lock()
-	defer wb.Unlock()
-	return wb.err
+	var err error
+	select {
+	case err = <-wb.err:
+		// Push what read into the same channel so that the next call to
+		// Error() also returns the same error.
+		wb.err <- err
+	default:
+	}
+	return err
 }

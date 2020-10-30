@@ -783,6 +783,8 @@ func (vlog *valueLog) write(reqs []*request) error {
 	curlf := vlog.filesMap[maxFid]
 	vlog.filesLock.RUnlock()
 
+	entryCount := uint32(0)
+
 	defer func() {
 		if vlog.opt.SyncWrites {
 			if err := curlf.Sync(); err != nil {
@@ -791,9 +793,33 @@ func (vlog *valueLog) write(reqs []*request) error {
 		}
 	}()
 
+	toDisk := func(sz int, entries uint32) error {
+		newSz := int(vlog.woffset()) + sz
+		newEntries := vlog.numEntriesWritten + entries
+
+		// We have enough space to store "sz" bytes and "entries" count entries.
+		if int64(newSz) < vlog.opt.ValueLogFileSize && newEntries < vlog.opt.ValueLogMaxEntries {
+			return nil
+		}
+
+		if err := curlf.doneWriting(vlog.woffset()); err != nil {
+			return err
+		}
+
+		newlf, err := vlog.createVlogFile()
+		if err != nil {
+			return err
+		}
+		curlf = newlf
+		return nil
+	}
+
 	write := func(buf *bytes.Buffer) error {
 		if buf.Len() == 0 {
 			return nil
+		}
+		if err := toDisk(buf.Len(), entryCount); err != nil {
+			return err
 		}
 
 		n := uint32(buf.Len())
@@ -806,22 +832,6 @@ func (vlog *valueLog) write(reqs []*request) error {
 		y.AssertTrue(copy(curlf.Data[start:], buf.Bytes()) == int(n))
 
 		atomic.StoreUint32(&curlf.size, endOffset)
-		return nil
-	}
-
-	toDisk := func() error {
-		if vlog.woffset() > uint32(vlog.opt.ValueLogFileSize) ||
-			vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
-			if err := curlf.doneWriting(vlog.woffset()); err != nil {
-				return err
-			}
-
-			newlf, err := vlog.createVlogFile()
-			if err != nil {
-				return err
-			}
-			curlf = newlf
-		}
 		return nil
 	}
 
@@ -873,11 +883,11 @@ func (vlog *valueLog) write(reqs []*request) error {
 		vlog.numEntriesWritten += uint32(written)
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
-		if err := toDisk(); err != nil {
+		if err := toDisk(0, 0); err != nil {
 			return err
 		}
 	}
-	return toDisk()
+	return toDisk(0, 0)
 }
 
 // Gets the logFile and acquires and RLock() for the mmap. You must call RUnlock on the file
