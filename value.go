@@ -791,7 +791,9 @@ func (vlog *valueLog) write(reqs []*request) error {
 		}
 	}()
 
-	write := func(buf *bytes.Buffer) error {
+	var buf bytes.Buffer
+	var numEntriesToWrite uint32
+	write := func() error {
 		if buf.Len() == 0 {
 			return nil
 		}
@@ -805,44 +807,41 @@ func (vlog *valueLog) write(reqs []*request) error {
 		start := int(endOffset - n)
 		y.AssertTrue(copy(curlf.Data[start:], buf.Bytes()) == int(n))
 
+		y.NumWrites.Add(int64(numEntriesToWrite))
+		y.NumBytesWritten.Add(int64(buf.Len()))
+
+		vlog.numEntriesWritten += uint32(numEntriesToWrite)
 		atomic.StoreUint32(&curlf.size, endOffset)
+		buf.Reset()
 		return nil
 	}
 
-	newLogFile := func() error {
-		if err := curlf.doneWriting(vlog.woffset()); err != nil {
-			return err
-		}
-
-		newlf, err := vlog.createVlogFile()
-		if err != nil {
-			return err
-		}
-		curlf = newlf
-		return nil
-	}
 	toDisk := func() error {
-		if vlog.woffset() > uint32(vlog.opt.ValueLogFileSize) ||
-			vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
-			newLogFile()
+		newSize := vlog.woffset() + uint32(buf.Len())
+		newCount := vlog.numEntriesWritten + numEntriesToWrite
+		// Create a new file if the current file doesn't have enough space to write buf.
+		if newSize > uint32(vlog.opt.ValueLogFileSize) ||
+			newCount > vlog.opt.ValueLogMaxEntries {
+			if err := curlf.doneWriting(vlog.woffset()); err != nil {
+				return err
+			}
+
+			newlf, err := vlog.createVlogFile()
+			if err != nil {
+				return err
+			}
+			curlf = newlf
+		}
+		if err := write(); err != nil {
+			return err
 		}
 		return nil
 	}
 
-	buf := new(bytes.Buffer)
 	for i := range reqs {
 		b := reqs[i]
 		b.Ptrs = b.Ptrs[:0]
-		var written, bytesWritten int
-		newSz := int64(estimateRequestSize(b)) + int64(vlog.woffset())
-		newCount := uint32(len(b.Entries)) + vlog.numEntriesWritten
-		// Create a new file if the next transaction cannot fit into the current log file.
-		if newSz > vlog.db.opt.ValueLogFileSize || newCount > vlog.opt.ValueLogMaxEntries {
-			newLogFile()
-		}
 		for j := range b.Entries {
-			buf.Reset()
-
 			e := b.Entries[j]
 			if vlog.db.opt.skipVlog(e) {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
@@ -860,7 +859,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			// in a temporary variable and reassign it after writing to the value log.
 			tmpMeta := e.meta
 			e.meta = e.meta &^ (bitTxn | bitFinTxn)
-			plen, err := curlf.encodeEntry(buf, e, p.Offset) // Now encode the entry into buffer.
+			plen, err := curlf.encodeEntry(&buf, e, p.Offset) // Now encode the entry into buffer.
 			if err != nil {
 				return err
 			}
@@ -869,18 +868,10 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 			p.Len = uint32(plen)
 			b.Ptrs = append(b.Ptrs, p)
-			if err := write(buf); err != nil {
-				return err
-			}
-			written++
-			bytesWritten += buf.Len()
-
+			numEntriesToWrite++
 			// No need to flush anything, we write to file directly via mmap.
 		}
-		y.NumWrites.Add(int64(written))
-		y.NumBytesWritten.Add(int64(bytesWritten))
 
-		vlog.numEntriesWritten += uint32(written)
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
 		if err := toDisk(); err != nil {
