@@ -960,6 +960,7 @@ func BenchmarkReadWrite(b *testing.B) {
 }
 
 // Regression test for https://github.com/dgraph-io/badger/issues/817
+// This test verifies if fully corrupted memtables are deleted on reopen.
 func TestValueLogTruncate(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
