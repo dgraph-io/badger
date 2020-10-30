@@ -17,6 +17,7 @@
 package table
 
 import (
+	"bytes"
 	"crypto/aes"
 	"math"
 	"runtime"
@@ -127,7 +128,7 @@ func NewTableBuilder(opts Options) *Builder {
 		sz = maxAllocatorInitialSz
 	}
 	b := &Builder{
-		alloc:   z.NewAllocator(sz),
+		alloc:   z.GetAllocatorFromPool(sz),
 		opt:     &opts,
 		offsets: z.NewBuffer(1 << 20),
 	}
@@ -384,14 +385,8 @@ The table structure looks like
 */
 // In case the data is encrypted, the "IV" is added to the end of the index.
 func (b *Builder) Finish() []byte {
-	zbuf := b.FinishBuffer()
-	defer zbuf.Release()
-	return append([]byte{}, zbuf.Bytes()...)
-}
-
-func (b *Builder) FinishBuffer() *z.Buffer {
 	defer func() {
-		b.alloc.Release()
+		z.ReturnAllocator(b.alloc)
 	}()
 
 	b.finishBlock() // This will never start a new block.
@@ -401,7 +396,8 @@ func (b *Builder) FinishBuffer() *z.Buffer {
 	// Wait for block handler to finish.
 	b.wg.Wait()
 
-	dst := z.NewBuffer(int(b.opt.TableSize) + 16*MB)
+	dst := &bytes.Buffer{}
+	dst.Grow(int(b.opt.TableSize) + 16*MB)
 
 	blockOffset := uint32(0)
 	// Iterate over the blocks and write it to the dst buffer.
@@ -412,8 +408,8 @@ func (b *Builder) FinishBuffer() *z.Buffer {
 		blockOffset += uint32(bl.end)
 		dst.Write(bl.data[:bl.end])
 	}
-	if dst.IsEmpty() {
-		return dst
+	if dst.Len() == 0 {
+		return nil
 	}
 
 	var f y.Filter
@@ -437,7 +433,7 @@ func (b *Builder) FinishBuffer() *z.Buffer {
 	dst.Write(checksum)
 	dst.Write(y.U32ToBytes(uint32(len(checksum))))
 
-	return dst
+	return dst.Bytes()
 }
 
 func (b *Builder) calculateChecksum(data []byte) []byte {
@@ -476,9 +472,8 @@ func (b *Builder) encrypt(data []byte) ([]byte, error) {
 	}
 	needSz := len(data) + len(iv)
 	dst := b.alloc.Allocate(needSz)
-	dst = dst[:len(data)]
 
-	if err = y.XORBlock(dst, data, b.DataKey().Data, iv); err != nil {
+	if err = y.XORBlock(dst[:len(data)], data, b.DataKey().Data, iv); err != nil {
 		return data, y.Wrapf(err, "Error while encrypting in Builder.encrypt")
 	}
 

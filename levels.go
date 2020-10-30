@@ -796,9 +796,8 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 
 			build := func(fileID uint64) (*table.Table, error) {
 				fname := table.NewFilename(fileID, s.kv.opt.Dir)
-				zbuf := builder.FinishBuffer()
-				defer zbuf.Release()
-				return table.CreateTable(fname, zbuf.Bytes(), bopts)
+				data := builder.Finish()
+				return table.CreateTable(fname, data, bopts)
 			}
 
 			var tbl *table.Table
