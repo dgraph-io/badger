@@ -311,6 +311,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 
 	c.SignalAndWait()
 	fmt.Printf(db.LevelsToString())
+	z.Done()
 	return err
 }
 

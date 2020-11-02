@@ -106,7 +106,6 @@ func (b *Builder) allocate(need int) []byte {
 		}
 		tmp := b.alloc.Allocate(sz)
 		copy(tmp, bb.data)
-		b.alloc.Return(bb.data) // Return the current buffer back to be recycled.
 		bb.data = tmp
 	}
 	bb.end += need
@@ -164,17 +163,11 @@ func (b *Builder) handleBlock() {
 		if doCompress {
 			out, err := b.compressData(blockBuf)
 			y.Check(err)
-			if (&out[0]) != (&item.data[0]) {
-				b.alloc.Return(item.data)
-			}
 			blockBuf = out
 		}
 		if b.shouldEncrypt() {
 			out, err := b.encrypt(blockBuf)
 			y.Check(y.Wrapf(err, "Error while encrypting block in table builder."))
-			if (&out[0]) != (&blockBuf[0]) {
-				b.alloc.Return(blockBuf)
-			}
 			blockBuf = out
 		}
 
@@ -385,6 +378,13 @@ The table structure looks like
 */
 // In case the data is encrypted, the "IV" is added to the end of the index.
 func (b *Builder) Finish() []byte {
+	buf := &bytes.Buffer{}
+	buf.Grow(int(b.opt.TableSize) + 16*MB)
+	b.FinishBuffer(buf)
+	return buf.Bytes()
+}
+
+func (b *Builder) FinishBuffer(dst *bytes.Buffer) {
 	defer func() {
 		z.ReturnAllocator(b.alloc)
 	}()
@@ -396,9 +396,6 @@ func (b *Builder) Finish() []byte {
 	// Wait for block handler to finish.
 	b.wg.Wait()
 
-	dst := &bytes.Buffer{}
-	dst.Grow(int(b.opt.TableSize) + 16*MB)
-
 	blockOffset := uint32(0)
 	// Iterate over the blocks and write it to the dst buffer.
 	// Also calculate the index of the blocks.
@@ -409,7 +406,7 @@ func (b *Builder) Finish() []byte {
 		dst.Write(bl.data[:bl.end])
 	}
 	if dst.Len() == 0 {
-		return nil
+		return
 	}
 
 	var f y.Filter
@@ -432,8 +429,6 @@ func (b *Builder) Finish() []byte {
 	checksum := b.calculateChecksum(index)
 	dst.Write(checksum)
 	dst.Write(y.U32ToBytes(uint32(len(checksum))))
-
-	return dst.Bytes()
 }
 
 func (b *Builder) calculateChecksum(data []byte) []byte {
