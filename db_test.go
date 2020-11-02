@@ -2199,7 +2199,7 @@ func TestOpenDBReadOnly(t *testing.T) {
 	ops := getTestOptions(dir)
 	ops.ReadOnly = false
 	db, err := Open(ops)
-
+	require.NoError(t, err)
 	// Add bunch of entries that go into value log.
 	require.NoError(t, db.Update(func(txn *Txn) error {
 		val := make([]byte, db.opt.ValueThreshold+10)
@@ -2211,7 +2211,6 @@ func TestOpenDBReadOnly(t *testing.T) {
 		}
 		return nil
 	}))
-	require.NoError(t, err)
 	require.NoError(t, db.Close())
 
 	ops.ReadOnly = true

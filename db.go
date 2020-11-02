@@ -299,8 +299,7 @@ func Open(opt Options) (*DB, error) {
 	}
 
 	if !db.opt.ReadOnly {
-		db.mt, err = db.newMemTable()
-		if err != nil {
+		if db.mt, err = db.newMemTable(); err != nil {
 			return nil, y.Wrapf(err, "cannot create memtable")
 		}
 	}
@@ -1359,7 +1358,7 @@ func (db *DB) KeySplits(prefix []byte) []string {
 		for _, mt := range memTables {
 			mtSplits(mt)
 		}
-		if !db.opt.ReadOnly {
+		if db.mt != nil {
 			mtSplits(db.mt)
 		}
 	}
