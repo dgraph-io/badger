@@ -897,7 +897,7 @@ func (vlog *valueLog) getFileRLocked(vp valuePointer) (*logFile, error) {
 
 	// Check for valid offset if we are reading from writable log.
 	maxFid := vlog.maxFid
-	if vp.Fid == maxFid {
+	if vp.Fid == maxFid && !vlog.opt.ReadOnly {
 		currentOffset := vlog.woffset()
 		if vp.Offset >= currentOffset {
 			return nil, errors.Errorf(

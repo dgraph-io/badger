@@ -506,7 +506,7 @@ func (db *DB) close() (err error) {
 	// and remove them completely, while the block / memtable writer is still
 	// trying to push stuff into the memtable. This will also resolve the value
 	// offset problem: as we push into memtable, we update value offsets there.
-	if !db.opt.ReadOnly && !db.mt.sl.Empty() {
+	if !db.opt.ReadOnly {
 		db.opt.Debugf("Flushing memtable")
 		for {
 			pushedFlushTask := func() bool {
@@ -534,11 +534,6 @@ func (db *DB) close() (err error) {
 	}
 	db.stopMemoryFlush()
 	db.stopCompactions()
-
-	// Delete the mem table if not already deleted.
-	if db.mt != nil {
-		db.mt.DecrRef()
-	}
 
 	// Force Compact L0
 	// We don't need to care about cstatus since no parallel compaction is running.
@@ -622,17 +617,19 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 	db.RLock()
 	defer db.RUnlock()
 
-	tables := make([]*memTable, len(db.imm)+1)
+	var tables []*memTable
 
-	// Get mutable memtable.
-	tables[0] = db.mt
-	tables[0].IncrRef()
+	if !db.opt.ReadOnly {
+		// Get mutable memtable.
+		tables = append(tables, db.mt)
+		db.mt.IncrRef()
+	}
 
 	// Get immutable memtables.
 	last := len(db.imm) - 1
 	for i := range db.imm {
-		tables[i+1] = db.imm[last-i]
-		tables[i+1].IncrRef()
+		tables = append(tables, db.imm[last-i])
+		db.imm[last-i].IncrRef()
 	}
 	return tables, func() {
 		for _, tbl := range tables {
