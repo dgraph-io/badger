@@ -2232,7 +2232,6 @@ func TestOpenDBReadOnly(t *testing.T) {
 					require.Equal(t, mp[string(item.Key())], val)
 					return nil
 				}))
-				// require.Equal(t, item.Value(nil), mp[string(item.Key())])
 				count++
 			}
 			return nil
