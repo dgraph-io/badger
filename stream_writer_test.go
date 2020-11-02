@@ -364,6 +364,36 @@ func TestStreamWriter6(t *testing.T) {
 	})
 }
 
+// This test uses a StreamWriter without calling Flush() at the end.
+func TestStreamWriterCancel(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		list := &pb.KVList{}
+		str := []string{"a", "a", "b", "b", "c", "c"}
+		ver := 1
+		for i := range str {
+			kv := &pb.KV{
+				Key:     bytes.Repeat([]byte(str[i]), int(db.opt.MaxTableSize)),
+				Value:   []byte("val"),
+				Version: uint64(ver),
+			}
+			list.Kv = append(list.Kv, kv)
+			ver = (ver + 1) % 2
+		}
+
+		sw := db.NewStreamWriter()
+		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
+		require.NoError(t, sw.Write(list), "sw.Write() failed")
+		sw.Cancel()
+
+		// Use the API incorrectly.
+		sw1 := db.NewStreamWriter()
+		defer sw1.Cancel()
+		require.NoError(t, sw1.Prepare())
+		defer sw1.Cancel()
+		sw1.Flush()
+	})
+}
+
 func TestStreamDone(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		sw := db.NewStreamWriter()

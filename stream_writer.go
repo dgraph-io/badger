@@ -71,8 +71,12 @@ func (sw *StreamWriter) Prepare() error {
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
 
-	var err error
-	sw.done, err = sw.db.dropAll()
+	done, err := sw.db.dropAll()
+
+	// Ensure that done() is never called more than once.
+	var once sync.Once
+	sw.done = func() { once.Do(done) }
+
 	return err
 }
 
@@ -233,6 +237,34 @@ func (sw *StreamWriter) Flush() error {
 		return err
 	}
 	return sw.db.lc.validate()
+}
+
+// Cancel signals all goroutines to exit. Calling defer sw.Cancel() immediately after creating a new StreamWriter
+// ensures that writes are unblocked even upon early return. Note that dropAll() is not called here, so any
+// partially written data will not be erased until a new StreamWriter is initialized.
+func (sw *StreamWriter) Cancel() {
+	sw.writeLock.Lock()
+	defer sw.writeLock.Unlock()
+
+	for _, writer := range sw.writers {
+		if writer != nil {
+			writer.closer.Signal()
+		}
+	}
+	for _, writer := range sw.writers {
+		if writer != nil {
+			writer.closer.Wait()
+		}
+	}
+
+	if err := sw.throttle.Finish(); err != nil {
+		sw.db.opt.Errorf("error in throttle.Finish: %+v", err)
+	}
+
+	// Handle Cancel() being called before Prepare().
+	if sw.done != nil {
+		sw.done()
+	}
 }
 
 type sortedWriter struct {
