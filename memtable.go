@@ -85,6 +85,12 @@ func (db *DB) openMemTables(opt Options) error {
 		if err != nil {
 			return y.Wrapf(err, "while opening fid: %d", fid)
 		}
+		// If this memtable is empty we don't need to add it. This is a
+		// memtable that was completely truncated.
+		if mt.sl.Empty() {
+			mt.DecrRef()
+			continue
+		}
 		// These should no longer be written to. So, make them part of the imm.
 		db.imm = append(db.imm, mt)
 	}

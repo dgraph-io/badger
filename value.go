@@ -798,8 +798,9 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 		n := uint32(buf.Len())
 		endOffset := atomic.AddUint32(&vlog.writableLogOffset, n)
+		// Increase the file size if we cannot accommodate this entry.
 		if int(endOffset) >= len(curlf.Data) {
-			return y.Wrapf(ErrTxnTooBig, "endOffset: %d len: %d\n", endOffset, len(curlf.Data))
+			curlf.Truncate(int64(endOffset))
 		}
 
 		start := int(endOffset - n)

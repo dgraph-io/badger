@@ -18,6 +18,7 @@ package badger
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
@@ -30,7 +31,7 @@ type WriteBatch struct {
 	txn      *Txn
 	db       *DB
 	throttle *y.Throttle
-	err      error
+	err      atomic.Value
 
 	isManaged bool
 	commitTs  uint64
@@ -88,13 +89,10 @@ func (wb *WriteBatch) callback(err error) {
 	if err == nil {
 		return
 	}
-
-	wb.Lock()
-	defer wb.Unlock()
-	if wb.err != nil {
+	if err := wb.Error(); err != nil {
 		return
 	}
-	wb.err = err
+	wb.err.Store(err)
 }
 
 func (wb *WriteBatch) Write(kvList *pb.KVList) error {
@@ -136,7 +134,7 @@ func (wb *WriteBatch) handleEntry(e *Entry) error {
 	// This time the error must not be ErrTxnTooBig, otherwise, we make the
 	// error permanent.
 	if err := wb.txn.SetEntry(e); err != nil {
-		wb.err = err
+		wb.err.Store(err)
 		return err
 	}
 	return nil
@@ -173,7 +171,7 @@ func (wb *WriteBatch) Delete(k []byte) error {
 		return err
 	}
 	if err := wb.txn.Delete(k); err != nil {
-		wb.err = err
+		wb.err.Store(err)
 		return err
 	}
 	return nil
@@ -181,20 +179,20 @@ func (wb *WriteBatch) Delete(k []byte) error {
 
 // Caller to commit must hold a write lock.
 func (wb *WriteBatch) commit() error {
-	if wb.err != nil {
-		return wb.err
+	if err := wb.Error(); err != nil {
+		return err
 	}
 	if wb.finished {
 		return y.ErrCommitAfterFinish
 	}
 	if err := wb.throttle.Do(); err != nil {
-		wb.err = err
-		return wb.err
+		wb.err.Store(err)
+		return err
 	}
 	wb.txn.CommitWith(wb.callback)
 	wb.txn = wb.db.newTransaction(true, wb.isManaged)
 	wb.txn.commitTs = wb.commitTs
-	return wb.err
+	return wb.Error()
 }
 
 // Flush must be called at the end to ensure that any pending writes get committed to Badger. Flush
@@ -211,18 +209,18 @@ func (wb *WriteBatch) Flush() error {
 	wb.Unlock()
 
 	if err := wb.throttle.Finish(); err != nil {
-		if wb.err != nil {
-			return errors.Errorf("wb.err: %s err: %s", wb.err, err)
+		if wb.Error() != nil {
+			return errors.Errorf("wb.err: %s err: %s", wb.Error(), err)
 		}
 		return err
 	}
 
-	return wb.err
+	return wb.Error()
 }
 
 // Error returns any errors encountered so far. No commits would be run once an error is detected.
 func (wb *WriteBatch) Error() error {
-	wb.Lock()
-	defer wb.Unlock()
-	return wb.err
+	// If the interface conversion fails, the err will be nil.
+	err, _ := wb.err.Load().(error)
+	return err
 }

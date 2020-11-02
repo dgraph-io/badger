@@ -325,16 +325,23 @@ func TestStreamWriter5(t *testing.T) {
 func TestStreamWriter6(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		list := &pb.KVList{}
-		str := []string{"a", "a", "b", "b", "c", "c"}
-		ver := 1
+		str := []string{"a", "b", "c"}
+		ver := uint64(0)
+		// The baseTable size is 32 KB (1<<15) and the max table size for level
+		// 6 table is 1 mb (look at newWrite function). Since all the tables
+		// will be written to level 6, we need to insert at least 1 mb of data.
+		// Setting keycount below 32 would cause this test to fail.
+		keyCount := 40
 		for i := range str {
-			kv := &pb.KV{
-				Key:     bytes.Repeat([]byte(str[i]), int(db.opt.BaseTableSize)),
-				Value:   []byte("val"),
-				Version: uint64(ver),
+			for j := 0; j < keyCount; j++ {
+				ver++
+				kv := &pb.KV{
+					Key:     bytes.Repeat([]byte(str[i]), int(db.opt.BaseTableSize)),
+					Value:   []byte("val"),
+					Version: uint64(keyCount - j),
+				}
+				list.Kv = append(list.Kv, kv)
 			}
-			list.Kv = append(list.Kv, kv)
-			ver = (ver + 1) % 2
 		}
 
 		// list has 3 pairs for equal keys. Since each Key has size equal to MaxTableSize
@@ -347,12 +354,8 @@ func TestStreamWriter6(t *testing.T) {
 		tables := db.Tables()
 		require.Equal(t, 3, len(tables), "Count of tables not matching")
 		for _, tab := range tables {
-			if tab.Level > 0 {
-				require.Equal(t, 2, int(tab.KeyCount),
-					fmt.Sprintf("failed for level: %d", tab.Level))
-			} else {
-				require.Equal(t, 1, int(tab.KeyCount)) // level 0 table will have head key
-			}
+			require.Equal(t, keyCount, int(tab.KeyCount),
+				fmt.Sprintf("failed for level: %d", tab.Level))
 		}
 		require.NoError(t, db.Close())
 		db, err := Open(db.opt)
