@@ -214,6 +214,10 @@ func TestStreamWithThreadId(t *testing.T) {
 }
 
 func TestBigStream(t *testing.T) {
+	if !*manual {
+		t.Skip("Skipping test meant to be run manually.")
+		return
+	}
 	// Set the maxStreamSize to 1MB for the duration of the test so that the it can use a smaller
 	// dataset than it would otherwise need.
 	originalMaxStreamSize := maxStreamSize

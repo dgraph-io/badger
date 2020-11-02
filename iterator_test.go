@@ -123,6 +123,10 @@ func TestPickSortTables(t *testing.T) {
 }
 
 func TestIteratePrefix(t *testing.T) {
+	if !*manual {
+		t.Skip("Skipping test meant to be run manually.")
+		return
+	}
 	testIteratorPrefix := func(t *testing.T, db *DB) {
 		bkey := func(i int) []byte {
 			return []byte(fmt.Sprintf("%04d", i))
