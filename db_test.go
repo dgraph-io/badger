@@ -373,7 +373,6 @@ func TestForceCompactL0(t *testing.T) {
 }
 
 func TestStreamDB(t *testing.T) {
-	t.Parallel()
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
