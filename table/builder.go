@@ -85,12 +85,12 @@ type Builder struct {
 	baseKey    []byte // Base key for the current block.
 	baseOffset uint32 // Offset for the current block.
 
-	entryOffsets  []uint32 // Offsets of entries present in current block.
-	offsets       *z.Buffer
-	estimatedSize uint32
-	keyHashes     []uint32 // Used for building the bloomfilter.
-	opt           *Options
-	maxVersion    uint64
+	entryOffsets []uint32 // Offsets of entries present in current block.
+	offsets      *z.Buffer
+	onDiskSize   uint32
+	keyHashes    []uint32 // Used for building the bloomfilter.
+	opt          *Options
+	maxVersion   uint64
 
 	// Used to concurrently compress/encrypt blocks.
 	wg        sync.WaitGroup
@@ -108,6 +108,7 @@ func NewTableBuilder(opts Options) *Builder {
 		opt:     &opts,
 		offsets: z.NewBuffer(1 << 20),
 	}
+	b.opt.tableCapacity = uint64(float64(b.opt.TableSize) * 0.9)
 
 	// If encryption or compression is not enabled, do not start compression/encryption goroutines
 	// and write directly to the buffer.
@@ -229,10 +230,9 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	}
 	b.sz += v.Encode(b.buf[b.sz:])
 
-	// Size of KV on SST.
-	sstSz := uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize()
-	// Total estimated size = size on SST + size on vlog (length of value pointer).
-	b.estimatedSize += (sstSz + vpLen)
+	// Add the vpLen to the onDisk size. We'll add the size of the block to
+	// onDisk size in Finish() function.
+	b.onDiskSize += vpLen
 }
 
 // grow increases the size of b.buf by atleast 50%.
@@ -370,7 +370,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 // at the end. The diff can vary.
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
-func (b *Builder) ReachedCapacity(capacity uint64) bool {
+func (b *Builder) ReachedCapacity() bool {
 	blocksSize := atomic.LoadUint32(&b.actualSize) + // actual length of current buffer
 		uint32(len(b.entryOffsets)*4) + // all entry offsets size
 		4 + // count of all entry offsets
@@ -379,9 +379,9 @@ func (b *Builder) ReachedCapacity(capacity uint64) bool {
 
 	estimateSz := blocksSize +
 		4 + // Index length
-		uint32(b.offsets.Len())
+		uint32(b.offsets.LenNoPadding())
 
-	return uint64(estimateSz) > capacity
+	return uint64(estimateSz) > b.opt.tableCapacity
 }
 
 // Finish finishes the table by appending the index.
@@ -414,13 +414,12 @@ func (b *Builder) Finish(allocate bool) []byte {
 	dst := b.buf
 	// Fix block boundaries. This includes moving the blocks so that we
 	// don't have any interleaving space between them.
-	bo, next := []byte{}, 1
 	if len(b.blockList) > 0 {
-		dstLen := uint32(0)
-		for _, bl := range b.blockList {
-			bo, next = b.offsets.Slice(next)
+		i, dstLen := 0, uint32(0)
+		b.offsets.SliceIterate(func(slice []byte) error {
+			bl := b.blockList[i]
 			// Length of the block is end minus the start.
-			fbo := fb.GetRootAsBlockOffset(bo, 0)
+			fbo := fb.GetRootAsBlockOffset(slice, 0)
 			fbo.MutateLen(bl.end - bl.start)
 			// New offset of the block is the point in the main buffer till
 			// which we have written data.
@@ -430,13 +429,16 @@ func (b *Builder) Finish(allocate bool) []byte {
 
 			// New length is the start of the block plus its length.
 			dstLen = fbo.Offset() + fbo.Len()
-		}
-		y.AssertTrue(next == 0)
+			i++
+			return nil
+		})
 		// Start writing to the buffer from the point until which we have valid data.
 		// Fix the length because append and writeChecksum also rely on it.
 		b.sz = dstLen
 	}
 
+	// b.sz is the total size of the compressed table without the index.
+	b.onDiskSize += b.sz
 	var f y.Filter
 	if b.opt.BloomFalsePositive > 0 {
 		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opt.BloomFalsePositive)
@@ -565,13 +567,17 @@ func (b *Builder) buildIndex(bloom []byte, tableSz uint32) []byte {
 	fb.TableIndexStart(builder)
 	fb.TableIndexAddOffsets(builder, boEnd)
 	fb.TableIndexAddBloomFilter(builder, bfoff)
-	fb.TableIndexAddEstimatedSize(builder, b.estimatedSize)
 	fb.TableIndexAddMaxVersion(builder, b.maxVersion)
 	fb.TableIndexAddUncompressedSize(builder, tableSz)
 	fb.TableIndexAddKeyCount(builder, uint32(len(b.keyHashes)))
+	fb.TableIndexAddOnDiskSize(builder, b.onDiskSize)
 	builder.Finish(fb.TableIndexEnd(builder))
 
-	return builder.FinishedBytes()
+	buf := builder.FinishedBytes()
+	index := fb.GetRootAsTableIndex(buf, 0)
+	// Mutate the ondisk size to include the size of the index as well.
+	y.AssertTrue(index.MutateOnDiskSize(index.OnDiskSize() + uint32(len(buf))))
+	return buf
 }
 
 // writeBlockOffsets writes all the blockOffets in b.offsets and returns the

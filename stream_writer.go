@@ -71,8 +71,12 @@ func (sw *StreamWriter) Prepare() error {
 	sw.writeLock.Lock()
 	defer sw.writeLock.Unlock()
 
-	var err error
-	sw.done, err = sw.db.dropAll()
+	done, err := sw.db.dropAll()
+
+	// Ensure that done() is never called more than once.
+	var once sync.Once
+	sw.done = func() { once.Do(done) }
+
 	return err
 }
 
@@ -235,6 +239,34 @@ func (sw *StreamWriter) Flush() error {
 	return sw.db.lc.validate()
 }
 
+// Cancel signals all goroutines to exit. Calling defer sw.Cancel() immediately after creating a new StreamWriter
+// ensures that writes are unblocked even upon early return. Note that dropAll() is not called here, so any
+// partially written data will not be erased until a new StreamWriter is initialized.
+func (sw *StreamWriter) Cancel() {
+	sw.writeLock.Lock()
+	defer sw.writeLock.Unlock()
+
+	for _, writer := range sw.writers {
+		if writer != nil {
+			writer.closer.Signal()
+		}
+	}
+	for _, writer := range sw.writers {
+		if writer != nil {
+			writer.closer.Wait()
+		}
+	}
+
+	if err := sw.throttle.Finish(); err != nil {
+		sw.db.opt.Errorf("error in throttle.Finish: %+v", err)
+	}
+
+	// Handle Cancel() being called before Prepare().
+	if sw.done != nil {
+		sw.done()
+	}
+}
+
 type sortedWriter struct {
 	db       *DB
 	throttle *y.Throttle
@@ -255,6 +287,9 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 
 	bopts := buildTableOptions(sw.db.opt)
 	bopts.DataKey = dk
+	for i := 2; i < sw.db.opt.MaxLevels; i++ {
+		bopts.TableSize *= uint64(sw.db.opt.TableSizeMultiplier)
+	}
 	w := &sortedWriter{
 		db:       sw.db,
 		streamID: streamID,
@@ -320,7 +355,7 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 
 	sameKey := y.SameKey(key, w.lastKey)
 	// Same keys should go into the same SSTable.
-	if !sameKey && w.builder.ReachedCapacity(uint64(float64(w.db.opt.MaxTableSize)*0.9)) {
+	if !sameKey && w.builder.ReachedCapacity() {
 		if err := w.send(false); err != nil {
 			return err
 		}
@@ -365,6 +400,7 @@ func (w *sortedWriter) send(done bool) error {
 // to sortedWriter. It completes writing current SST to disk.
 func (w *sortedWriter) Done() error {
 	if w.builder.Empty() {
+		w.builder.Close()
 		// Assign builder as nil, so that underlying memory can be garbage collected.
 		w.builder = nil
 		return nil
@@ -399,21 +435,7 @@ func (w *sortedWriter) createTable(builder *table.Builder) error {
 	}
 	lc := w.db.lc
 
-	var lhandler *levelHandler
-	// We should start the levels from 1.
-	y.AssertTrue(len(lc.levels) > 1)
-	for _, l := range lc.levels[1:] {
-		ratio := float64(l.getTotalSize()) / float64(l.maxTotalSize)
-		if ratio < 1.0 {
-			lhandler = l
-			break
-		}
-	}
-	if lhandler == nil {
-		// If we're exceeding the size of the lowest level, shove it in the lowest level. Can't do
-		// better than that.
-		lhandler = lc.levels[len(lc.levels)-1]
-	}
+	lhandler := lc.levels[len(lc.levels)-1]
 	// Now that table can be opened successfully, let's add this to the MANIFEST.
 	change := &pb.ManifestChange{
 		Id:          tbl.ID(),

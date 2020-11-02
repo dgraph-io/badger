@@ -29,6 +29,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
@@ -55,7 +56,8 @@ type Options struct {
 	ReadOnly bool
 
 	// Maximum size of the table.
-	TableSize uint64
+	TableSize     uint64
+	tableCapacity uint64 // 0.9x TableSize.
 
 	// ChkMode is the checksum verification mode for Table.
 	ChkMode options.ChecksumVerificationMode
@@ -103,9 +105,10 @@ type Table struct {
 	smallest, biggest []byte // Smallest and largest keys (with timestamps).
 	id                uint64 // file id, part of filename
 
-	Checksum []byte
+	Checksum  []byte
+	CreatedAt time.Time
 	// Stores the total size of key-values stored in this table (including the size on vlog).
-	estimatedSize  uint32
+	onDiskSize     uint32
 	indexStart     int
 	indexLen       int
 	hasBloomFilter bool
@@ -273,6 +276,7 @@ func OpenTable(mf *z.MmapFile, opts Options) (*Table, error) {
 		opt:        &opts,
 		IsInmemory: false,
 		tableSize:  int(fileInfo.Size()),
+		CreatedAt:  fileInfo.ModTime(),
 	}
 
 	if err := t.initBiggestAndSmallest(); err != nil {
@@ -384,17 +388,7 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 		t._index = index
 	}
 
-	if t.opt.Compression == options.None {
-		t.estimatedSize = index.EstimatedSize()
-	} else {
-		// TODO(ibrahim): This estimatedSize doesn't make any sense. If it is tracking the size of
-		// values including in value log, then index.EstimatedSize() should be used irrespective of
-		// compression or not.
-		//
-		// Due to compression the real size on disk is much
-		// smaller than what we estimate from index.EstimatedSize.
-		t.estimatedSize = uint32(t.tableSize)
-	}
+	t.onDiskSize = index.OnDiskSize()
 	t.hasBloomFilter = len(index.BloomFilterBytes()) > 0
 
 	var bo fb.BlockOffset
@@ -576,7 +570,7 @@ func (t *Table) indexKey() uint64 {
 	return t.id
 }
 
-// UncompressedSize is the size of table index in bytes.
+// UncompressedSize is the size uncompressed data stored in this file.
 func (t *Table) UncompressedSize() uint32 {
 	return t.fetchIndex().UncompressedSize()
 }
@@ -596,9 +590,9 @@ func (t *Table) BloomFilterSize() int {
 	return t.fetchIndex().BloomFilterLength()
 }
 
-// EstimatedSize returns the total size of key-values stored in this table (including the
+// OnDiskSize returns the total size of key-values stored in this table (including the
 // disk space occupied on the value log).
-func (t *Table) EstimatedSize() uint32 { return t.estimatedSize }
+func (t *Table) OnDiskSize() uint32 { return t.onDiskSize }
 
 // Size is its file size in bytes
 func (t *Table) Size() int64 { return int64(t.tableSize) }

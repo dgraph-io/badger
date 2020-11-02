@@ -50,11 +50,15 @@ type Options struct {
 
 	// Fine tuning options.
 
-	MaxTableSize        int64
+	MemTableSize        int64
+	BaseTableSize       int64
+	BaseLevelSize       int64
 	LevelSizeMultiplier int
+	TableSizeMultiplier int
 	MaxLevels           int
-	ValueThreshold      int
-	NumMemtables        int
+
+	ValueThreshold int
+	NumMemtables   int
 	// Changing BlockSize across DB runs will not break badger. The block size is
 	// read from the block index stored at the end of the table.
 	BlockSize          int
@@ -65,13 +69,11 @@ type Options struct {
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
 
-	LevelOneSize       int64
 	ValueLogFileSize   int64
 	ValueLogMaxEntries uint32
 
 	NumCompactors        int
 	CompactL0OnClose     bool
-	LogRotatesToFlush    int32
 	ZSTDCompressionLevel int
 
 	// When set, checksum will be validated for each entry read from the value log file.
@@ -109,13 +111,17 @@ type Options struct {
 // Feel free to modify these to suit your needs with the WithX methods.
 func DefaultOptions(path string) Options {
 	return Options{
-		Dir:                     path,
-		ValueDir:                path,
-		LevelOneSize:            256 << 20,
-		LevelSizeMultiplier:     15,
-		MaxLevels:               7,
-		MaxTableSize:            64 << 20,
-		NumCompactors:           2, // Run at least 2 compactors. One is dedicated for L0.
+		Dir:      path,
+		ValueDir: path,
+
+		MemTableSize:        64 << 20,
+		BaseTableSize:       2 << 20,
+		BaseLevelSize:       10 << 20,
+		TableSizeMultiplier: 2,
+		LevelSizeMultiplier: 10,
+		MaxLevels:           7,
+
+		NumCompactors:           4, // Run at least 2 compactors. Zero-th compactor prioritizes L0.
 		NumLevelZeroTables:      5,
 		NumLevelZeroTablesStall: 15,
 		NumMemtables:            5,
@@ -125,8 +131,8 @@ func DefaultOptions(path string) Options {
 		NumVersionsToKeep:       1,
 		CompactL0OnClose:        true,
 		VerifyValueChecksum:     false,
-		Compression:             options.None,
-		BlockCacheSize:          0,
+		Compression:             options.Snappy,
+		BlockCacheSize:          256 << 20,
 		IndexCacheSize:          0,
 
 		// The following benchmarks were done on a 4 KB block size (default block size). The
@@ -149,7 +155,6 @@ func DefaultOptions(path string) Options {
 		ValueLogMaxEntries:            1000000,
 		ValueThreshold:                1 << 10, // 1 KB.
 		Logger:                        defaultLogger(INFO),
-		LogRotatesToFlush:             2,
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
 		DetectConflicts:               true,
@@ -160,7 +165,7 @@ func buildTableOptions(opt Options) table.Options {
 	return table.Options{
 		SyncWrites:           opt.SyncWrites,
 		ReadOnly:             opt.ReadOnly,
-		TableSize:            uint64(opt.MaxTableSize),
+		TableSize:            uint64(opt.BaseTableSize),
 		BlockSize:            opt.BlockSize,
 		BloomFalsePositive:   opt.BloomFalsePositive,
 		ChkMode:              opt.ChecksumVerificationMode,
@@ -269,13 +274,13 @@ func (opt Options) WithLoggingLevel(val loggingLevel) Options {
 	return opt
 }
 
-// WithMaxTableSize returns a new Options value with MaxTableSize set to the given value.
+// WithBaseTableSize returns a new Options value with MaxTableSize set to the given value.
 //
-// MaxTableSize sets the maximum size in bytes for each LSM table or file.
+// BaseTableSize sets the maximum size in bytes for LSM table or file in the base level.
 //
-// The default value of MaxTableSize is 64MB.
-func (opt Options) WithMaxTableSize(val int64) Options {
-	opt.MaxTableSize = val
+// The default value of BaseTableSize is 2MB.
+func (opt Options) WithBaseTableSize(val int64) Options {
+	opt.BaseTableSize = val
 	return opt
 }
 
@@ -286,7 +291,7 @@ func (opt Options) WithMaxTableSize(val int64) Options {
 // Once a level grows to be larger than this ratio allowed, the compaction process will be
 //  triggered.
 //
-// The default value of LevelSizeMultiplier is 15.
+// The default value of LevelSizeMultiplier is 10.
 func (opt Options) WithLevelSizeMultiplier(val int) Options {
 	opt.LevelSizeMultiplier = val
 	return opt
@@ -323,6 +328,16 @@ func (opt Options) WithNumMemtables(val int) Options {
 	return opt
 }
 
+// WithMemTableSize returns a new Options value with MemTableSize set to the given value.
+//
+// MemTableSize sets the maximum size in bytes for memtable table.
+//
+// The default value of MemTableSize is 64MB.
+func (opt Options) WithMemTableSize(val int64) Options {
+	opt.MemTableSize = val
+	return opt
+}
+
 // WithBloomFalsePositive returns a new Options value with BloomFalsePositive set
 // to the given value.
 //
@@ -350,10 +365,7 @@ func (opt Options) WithBlockSize(val int) Options {
 	return opt
 }
 
-// WithNumLevelZeroTables returns a new Options value with NumLevelZeroTables set to the given
-// value.
-//
-// NumLevelZeroTables sets the maximum number of Level 0 tables before compaction starts.
+// WithNumLevelZeroTables sets the maximum number of Level 0 tables before compaction starts.
 //
 // The default value of NumLevelZeroTables is 5.
 func (opt Options) WithNumLevelZeroTables(val int) Options {
@@ -361,10 +373,7 @@ func (opt Options) WithNumLevelZeroTables(val int) Options {
 	return opt
 }
 
-// WithNumLevelZeroTablesStall returns a new Options value with NumLevelZeroTablesStall set to the
-// given value.
-//
-// NumLevelZeroTablesStall sets the number of Level 0 tables that once reached causes the DB to
+// WithNumLevelZeroTablesStall sets the number of Level 0 tables that once reached causes the DB to
 // stall until compaction succeeds.
 //
 // The default value of NumLevelZeroTablesStall is 10.
@@ -373,19 +382,15 @@ func (opt Options) WithNumLevelZeroTablesStall(val int) Options {
 	return opt
 }
 
-// WithLevelOneSize returns a new Options value with LevelOneSize set to the given value.
+// WithBaseLevelSize sets the maximum size target for the base level.
 //
-// LevelOneSize sets the maximum total size for Level 1.
-//
-// The default value of LevelOneSize is 20MB.
-func (opt Options) WithLevelOneSize(val int64) Options {
-	opt.LevelOneSize = val
+// The default value is 10MB.
+func (opt Options) WithBaseLevelSize(val int64) Options {
+	opt.BaseLevelSize = val
 	return opt
 }
 
-// WithValueLogFileSize returns a new Options value with ValueLogFileSize set to the given value.
-//
-// ValueLogFileSize sets the maximum size of a single value log file.
+// WithValueLogFileSize sets the maximum size of a single value log file.
 //
 // The default value of ValueLogFileSize is 1GB.
 func (opt Options) WithValueLogFileSize(val int64) Options {
@@ -393,12 +398,9 @@ func (opt Options) WithValueLogFileSize(val int64) Options {
 	return opt
 }
 
-// WithValueLogMaxEntries returns a new Options value with ValueLogMaxEntries set to the given
-// value.
-//
-// ValueLogMaxEntries sets the maximum number of entries a value log file can hold approximately.
-// A actual size limit of a value log file is the minimum of ValueLogFileSize and
-// ValueLogMaxEntries.
+// WithValueLogMaxEntries sets the maximum number of entries a value log file
+// can hold approximately.  A actual size limit of a value log file is the
+// minimum of ValueLogFileSize and ValueLogMaxEntries.
 //
 // The default value of ValueLogMaxEntries is one million (1000000).
 func (opt Options) WithValueLogMaxEntries(val uint32) Options {
@@ -406,10 +408,8 @@ func (opt Options) WithValueLogMaxEntries(val uint32) Options {
 	return opt
 }
 
-// WithNumCompactors returns a new Options value with NumCompactors set to the given value.
-//
-// NumCompactors sets the number of compaction workers to run concurrently.
-// Setting this to zero stops compactions, which could eventually cause writes to block forever.
+// WithNumCompactors sets the number of compaction workers to run concurrently.  Setting this to
+// zero stops compactions, which could eventually cause writes to block forever.
 //
 // The default value of NumCompactors is 2. One is dedicated just for L0 and L1.
 func (opt Options) WithNumCompactors(val int) Options {
@@ -417,11 +417,9 @@ func (opt Options) WithNumCompactors(val int) Options {
 	return opt
 }
 
-// WithCompactL0OnClose returns a new Options value with CompactL0OnClose set to the given value.
-//
-// CompactL0OnClose determines whether Level 0 should be compacted before closing the DB.
-// This ensures that both reads and writes are efficient when the DB is opened later.
-// CompactL0OnClose is set to true if KeepL0InMemory is set to true.
+// WithCompactL0OnClose determines whether Level 0 should be compacted before closing the DB.  This
+// ensures that both reads and writes are efficient when the DB is opened later.  CompactL0OnClose
+// is set to true if KeepL0InMemory is set to true.
 //
 // The default value of CompactL0OnClose is true.
 func (opt Options) WithCompactL0OnClose(val bool) Options {
@@ -429,23 +427,7 @@ func (opt Options) WithCompactL0OnClose(val bool) Options {
 	return opt
 }
 
-// WithLogRotatesToFlush returns a new Options value with LogRotatesToFlush set to the given value.
-//
-// LogRotatesToFlush sets the number of value log file rotates after which the Memtables are
-// flushed to disk. This is useful in write loads with fewer keys and larger values. This work load
-// would fill up the value logs quickly, while not filling up the Memtables. Thus, on a crash
-// and restart, the value log head could cause the replay of a good number of value log files
-// which can slow things on start.
-//
-// The default value of LogRotatesToFlush is 2.
-func (opt Options) WithLogRotatesToFlush(val int32) Options {
-	opt.LogRotatesToFlush = val
-	return opt
-}
-
-// WithEncryptionKey return a new Options value with EncryptionKey set to the given value.
-//
-// EncryptionKey is used to encrypt the data with AES. Type of AES is used based on the key
+// WithEncryptionKey is used to encrypt the data with AES. Type of AES is used based on the key
 // size. For example 16 bytes will use AES-128. 24 bytes will use AES-192. 32 bytes will
 // use AES-256.
 func (opt Options) WithEncryptionKey(key []byte) Options {
@@ -463,10 +445,9 @@ func (opt Options) WithEncryptionKeyRotationDuration(d time.Duration) Options {
 	return opt
 }
 
-// WithCompression returns a new Options value with Compression set to the given value.
-//
-// When compression is enabled, every block will be compressed using the specified algorithm.
-// This option doesn't affect existing tables. Only the newly created tables will be compressed.
+// WithCompression is used to enable or disable compression. When compression is enabled, every
+// block will be compressed using the specified algorithm.  This option doesn't affect existing
+// tables. Only the newly created tables will be compressed.
 //
 // The default compression algorithm used is zstd when built with Cgo. Without Cgo, the default is
 // snappy. Compression is enabled by default.
@@ -475,12 +456,9 @@ func (opt Options) WithCompression(cType options.CompressionType) Options {
 	return opt
 }
 
-// WithVerifyValueChecksum returns a new Options value with VerifyValueChecksum set to
-// the given value.
-//
-// When VerifyValueChecksum is set to true, checksum will be verified for every entry read
-// from the value log. If the value is stored in SST (value size less than value threshold) then the
-// checksum validation will not be done.
+// WithVerifyValueChecksum is used to set VerifyValueChecksum. When VerifyValueChecksum is set to
+// true, checksum will be verified for every entry read from the value log. If the value is stored
+// in SST (value size less than value threshold) then the checksum validation will not be done.
 //
 // The default value of VerifyValueChecksum is False.
 func (opt Options) WithVerifyValueChecksum(val bool) Options {

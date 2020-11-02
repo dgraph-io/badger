@@ -645,6 +645,7 @@ func TestTableBigValues(t *testing.T) {
 	opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01,
 		TableSize: uint64(n) * 1 << 20}
 	builder := NewTableBuilder(opts)
+	defer builder.Close()
 	for i := 0; i < n; i++ {
 		key := y.KeyWithTs([]byte(key("", i)), uint64(i+1))
 		vs := y.ValueStruct{Value: value(i)}
@@ -766,6 +767,7 @@ func BenchmarkReadMerged(b *testing.B) {
 		}
 		tbl, err := CreateTable(filename, builder.Finish(false), opts)
 		y.Check(err)
+		builder.Close()
 		tables = append(tables, tbl)
 		defer tbl.DecrRef()
 	}
@@ -845,6 +847,7 @@ func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Tab
 	}
 	opts.BlockCache = cache
 	builder := NewTableBuilder(opts)
+	defer builder.Close()
 	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
 	for i := 0; i < count; i++ {
 		k := fmt.Sprintf("%016x", i)
@@ -860,31 +863,6 @@ func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Tab
 func TestMain(m *testing.M) {
 	rand.Seed(time.Now().UTC().UnixNano())
 	os.Exit(m.Run())
-}
-
-func TestOpenKVSize(t *testing.T) {
-	t.Run("compression", func(t *testing.T) {
-		// When compression is on
-		opts := getTestTableOptions()
-		opts.Compression = options.ZSTD
-		table := buildTestTable(t, "foo", 1000, opts)
-		defer table.DecrRef()
-
-		// The estimated size is same as table size in case compression is enabled.
-		require.Equal(t, uint32(table.tableSize), table.EstimatedSize())
-	})
-
-	t.Run("no compressin", func(t *testing.T) {
-		// When compression is off
-		opts := getTestTableOptions()
-		opts.Compression = options.None
-		table := buildTestTable(t, "foo", 1, opts)
-		defer table.DecrRef()
-
-		stat, err := table.Fd.Stat()
-		require.NoError(t, err)
-		require.Less(t, table.EstimatedSize(), uint32(stat.Size()))
-	})
 }
 
 // Run this test with command "go test -race -run TestDoesNotHaveRace"
