@@ -354,10 +354,8 @@ func TestStreamWriter6(t *testing.T) {
 		tables := db.Tables()
 		require.Equal(t, 3, len(tables), "Count of tables not matching")
 		for _, tab := range tables {
-			if tab.Level > 0 {
-				require.Equal(t, keyCount, int(tab.KeyCount),
-					fmt.Sprintf("failed for level: %d", tab.Level))
-			}
+			require.Equal(t, keyCount, int(tab.KeyCount),
+				fmt.Sprintf("failed for level: %d", tab.Level))
 		}
 		require.NoError(t, db.Close())
 		db, err := Open(db.opt)
