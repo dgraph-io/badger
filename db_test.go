@@ -70,7 +70,8 @@ func getTestOptions(dir string) Options {
 		WithMemTableSize(1 << 15).
 		WithBaseTableSize(1 << 15). // Force more compaction.
 		WithBaseLevelSize(4 << 15). // Force more compaction.
-		WithSyncWrites(false)
+		WithSyncWrites(false).
+		WithLoggingLevel(WARNING)
 	return opt
 }
 
@@ -910,6 +911,10 @@ func TestIterateDeleted(t *testing.T) {
 }
 
 func TestIterateParallel(t *testing.T) {
+	if !*manual {
+		t.Skip("Skipping test meant to be run manually.")
+		return
+	}
 	key := func(account int) []byte {
 		var b [4]byte
 		binary.BigEndian.PutUint32(b[:], uint32(account))
@@ -1816,6 +1821,10 @@ func TestMinReadTs(t *testing.T) {
 }
 
 func TestGoroutineLeak(t *testing.T) {
+	if !*manual {
+		t.Skip("Skipping test meant to be run manually.")
+		return
+	}
 	test := func(t *testing.T, opt *Options) {
 		time.Sleep(1 * time.Second)
 		before := runtime.NumGoroutine()

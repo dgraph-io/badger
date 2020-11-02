@@ -123,6 +123,10 @@ func TestPickSortTables(t *testing.T) {
 }
 
 func TestIteratePrefix(t *testing.T) {
+	if !*manual {
+		t.Skip("Skipping test meant to be run manually.")
+		return
+	}
 	testIteratorPrefix := func(t *testing.T, db *DB) {
 		bkey := func(i int) []byte {
 			return []byte(fmt.Sprintf("%04d", i))
@@ -199,14 +203,12 @@ func TestIteratePrefix(t *testing.T) {
 	}
 
 	t.Run("With Default options", func(t *testing.T) {
-		t.Parallel()
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			testIteratorPrefix(t, db)
 		})
 	})
 
 	t.Run("With Block Offsets in Cache", func(t *testing.T) {
-		t.Parallel()
 		opts := getTestOptions("")
 		opts.IndexCacheSize = 100 << 20
 		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
@@ -215,7 +217,6 @@ func TestIteratePrefix(t *testing.T) {
 	})
 
 	t.Run("With Block Offsets and Blocks in Cache", func(t *testing.T) {
-		t.Parallel()
 		opts := getTestOptions("")
 		opts.BlockCacheSize = 100 << 20
 		opts.IndexCacheSize = 100 << 20
@@ -225,7 +226,6 @@ func TestIteratePrefix(t *testing.T) {
 	})
 
 	t.Run("With Blocks in Cache", func(t *testing.T) {
-		t.Parallel()
 		opts := getTestOptions("")
 		opts.BlockCacheSize = 100 << 20
 		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
