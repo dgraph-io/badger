@@ -1359,7 +1359,9 @@ func (db *DB) KeySplits(prefix []byte) []string {
 		for _, mt := range memTables {
 			mtSplits(mt)
 		}
-		mtSplits(db.mt)
+		if !db.opt.ReadOnly {
+			mtSplits(db.mt)
+		}
 	}
 
 	sort.Strings(splits)
