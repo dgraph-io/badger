@@ -55,8 +55,10 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 	}); err != nil {
 		panic(err)
 	}
+	db.lc.levels[level].Lock()
 	// Add table to the given level.
 	db.lc.levels[level].tables = append(db.lc.levels[level].tables, tab)
+	db.lc.levels[level].Unlock()
 }
 
 type keyValVersion struct {

@@ -4,7 +4,6 @@ set -e
 
 go version
 
-packages=$(go list ./... | grep github.com/dgraph-io/badger/v2/)
 
 if [[ ! -z "$TEAMCITY_VERSION" ]]; then
   export GOFLAGS="-json"
@@ -38,32 +37,53 @@ pushd badger
 go build -v .
 popd
 
-# tags="-tags=jemalloc"
-tags=""
+tags="-tags=jemalloc"
+# tags=""
+InstallJemalloc
 
 # Run the memory intensive tests first.
-go test -v $tags -run='TestBigKeyValuePairs$' --manual=true
-go test -v $tags -run='TestPushValueLogLimit' --manual=true
+manual() {
+  echo "==> Running manual tests"
+  # Run the special Truncate test.
+  rm -rf p
+  go test -v $tags -run='TestTruncateVlogNoClose$' --manual=true
+  truncate --size=4096 p/000000.vlog
+  go test -v $tags -run='TestTruncateVlogNoClose2$' --manual=true
+  go test -v $tags -run='TestTruncateVlogNoClose3$' --manual=true
+  rm -rf p
 
-# Run the special Truncate test.
-rm -rf p
-go test -v $tags -run='TestTruncateVlogNoClose$' --manual=true
-truncate --size=4096 p/000000.vlog
-go test -v $tags -run='TestTruncateVlogNoClose2$' --manual=true
-go test -v $tags -run='TestTruncateVlogNoClose3$' --manual=true
-rm -rf p
+  go test -v $tags -run='TestBigKeyValuePairs$' --manual=true
+  go test -v $tags -run='TestPushValueLogLimit' --manual=true
+  go test -v $tags -run='TestKeyCount' --manual=true
+  go test -v $tags -run='TestIteratePrefix' --manual=true
+  go test -v $tags -run='TestIterateParallel' --manual=true
+  go test -v $tags -run='TestBigStream' --manual=true
+  go test -v $tags -run='TestGoroutineLeak' --manual=true
 
-InstallJemalloc
-# Run the key count test for stream writer.
-go test -v -tags jemalloc -run='TestKeyCount' --manual=true
+  echo "==> DONE manual tests"
+}
 
-# Run the normal tests.
-echo "==> Starting tests.. "
-# go test -timeout=25m -v -race github.com/dgraph-io/badger/v2/...
-for pkg in $packages; do
-  echo "===> Testing $pkg"
-  go test $tags -timeout=25m -v -race $pkg
-done
+pkgs() {
+  packages=$(go list ./... | grep github.com/dgraph-io/badger/v2/)
+  echo "==> Running package tests for $packages"
+  for pkg in $packages; do
+    echo "===> Testing $pkg"
+    go test $tags -timeout=25m -v -race $pkg -parallel 16
+  done
+  echo "==> DONE package tests"
+}
 
-echo "===> Testing root level"
-go test $tags -timeout=25m -v . -race
+root() {
+  # Run the normal tests.
+  # go test -timeout=25m -v -race github.com/dgraph-io/badger/v2/...
+
+  echo "==> Running root level tests."
+  go test $tags -timeout=25m -v . -race -parallel 16
+  echo "==> DONE root level tests"
+}
+
+export -f manual
+export -f pkgs
+export -f root
+
+parallel --progress --line-buffer ::: manual pkgs root

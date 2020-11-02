@@ -19,10 +19,10 @@ namespace fb;
 table TableIndex {
   offsets:[BlockOffset];
   bloom_filter:[ubyte];
-  estimated_size:uint32;
   max_version:uint64;
-  uncompressed_size:uint32;
   key_count:uint32;
+  uncompressed_size:uint32;
+  on_disk_size:uint32;
 }
 
 table BlockOffset {

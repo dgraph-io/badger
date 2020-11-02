@@ -89,6 +89,7 @@ type Builder struct {
 	keyHashes     []uint32 // Used for building the bloomfilter.
 	opt           *Options
 	maxVersion    uint64
+	onDiskSize    uint32
 
 	// Used to concurrently compress/encrypt blocks.
 	wg        sync.WaitGroup
@@ -239,10 +240,9 @@ func (b *Builder) addHelper(key []byte, v y.ValueStruct, vpLen uint32) {
 	dst := b.allocate(int(v.EncodedSize()))
 	v.Encode(dst)
 
-	// Size of KV on SST.
-	sstSz := uint32(headerSize) + uint32(len(diffKey)) + v.EncodedSize()
-	// Total estimated size = size on SST + size on vlog (length of value pointer).
-	b.estimatedSize += (sstSz + vpLen)
+	// Add the vpLen to the onDisk size. We'll add the size of the block to
+	// onDisk size in Finish() function.
+	b.onDiskSize += vpLen
 }
 
 /*
@@ -409,6 +409,8 @@ func (b *Builder) FinishBuffer(dst *bytes.Buffer) {
 		return
 	}
 
+	// b.sz is the total size of the compressed table without the index.
+	b.onDiskSize += uint32(dst.Len())
 	var f y.Filter
 	if b.opt.BloomFalsePositive > 0 {
 		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opt.BloomFalsePositive)
@@ -520,13 +522,17 @@ func (b *Builder) buildIndex(bloom []byte, tableSz uint32) []byte {
 	fb.TableIndexStart(builder)
 	fb.TableIndexAddOffsets(builder, boEnd)
 	fb.TableIndexAddBloomFilter(builder, bfoff)
-	fb.TableIndexAddEstimatedSize(builder, b.estimatedSize)
 	fb.TableIndexAddMaxVersion(builder, b.maxVersion)
 	fb.TableIndexAddUncompressedSize(builder, tableSz)
 	fb.TableIndexAddKeyCount(builder, uint32(len(b.keyHashes)))
+	fb.TableIndexAddOnDiskSize(builder, b.onDiskSize)
 	builder.Finish(fb.TableIndexEnd(builder))
 
-	return builder.FinishedBytes()
+	buf := builder.FinishedBytes()
+	index := fb.GetRootAsTableIndex(buf, 0)
+	// Mutate the ondisk size to include the size of the index as well.
+	y.AssertTrue(index.MutateOnDiskSize(index.OnDiskSize() + uint32(len(buf))))
+	return buf
 }
 
 // writeBlockOffsets writes all the blockOffets in b.offsets and returns the
