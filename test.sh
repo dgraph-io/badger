@@ -44,9 +44,6 @@ InstallJemalloc
 # Run the memory intensive tests first.
 manual() {
   echo "==> Running manual tests"
-  go test -v $tags -run='TestBigKeyValuePairs$' --manual=true
-  go test -v $tags -run='TestPushValueLogLimit' --manual=true
-
   # Run the special Truncate test.
   rm -rf p
   go test -v $tags -run='TestTruncateVlogNoClose$' --manual=true
@@ -55,10 +52,13 @@ manual() {
   go test -v $tags -run='TestTruncateVlogNoClose3$' --manual=true
   rm -rf p
 
+  go test -v $tags -run='TestBigKeyValuePairs$' --manual=true
+  go test -v $tags -run='TestPushValueLogLimit' --manual=true
   go test -v $tags -run='TestKeyCount' --manual=true
   go test -v $tags -run='TestIteratePrefix' --manual=true
   go test -v $tags -run='TestIterateParallel' --manual=true
   go test -v $tags -run='TestBigStream' --manual=true
+  go test -v $tags -run='TestGoroutineLeak' --manual=true
 
   echo "==> DONE manual tests"
 }
@@ -78,7 +78,7 @@ root() {
   # go test -timeout=25m -v -race github.com/dgraph-io/badger/v2/...
 
   echo "==> Running root level tests."
-  go test $tags -timeout=25m -v . -race
+  go test $tags -timeout=25m -v . -race -parallel 16
   echo "==> DONE root level tests"
 }
 

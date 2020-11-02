@@ -27,7 +27,6 @@ import (
 
 	bpb "github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
-	"github.com/dgraph-io/ristretto/z"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/require"
 )
@@ -164,7 +163,6 @@ func TestStream(t *testing.T) {
 		require.Equal(t, 50, count, "Count mismatch for pred: %s", pred)
 	}
 	require.NoError(t, db.Close())
-	require.Equal(t, int64(0), z.NumAllocBytes())
 }
 
 func TestStreamWithThreadId(t *testing.T) {

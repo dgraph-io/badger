@@ -27,7 +27,7 @@ import (
 
 func TestGetMergeOperator(t *testing.T) {
 	t.Run("Get before Add", func(t *testing.T) {
-		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator([]byte("merge"), add, 200*time.Millisecond)
 			defer m.Stop()
 
@@ -38,7 +38,7 @@ func TestGetMergeOperator(t *testing.T) {
 	})
 	t.Run("Add and Get", func(t *testing.T) {
 		key := []byte("merge")
-		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator(key, add, 200*time.Millisecond)
 			defer m.Stop()
 
@@ -60,7 +60,7 @@ func TestGetMergeOperator(t *testing.T) {
 		add := func(originalValue, newValue []byte) []byte {
 			return append(originalValue, newValue...)
 		}
-		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator([]byte("fooprefix"), add, 2*time.Millisecond)
 			defer m.Stop()
 
@@ -75,7 +75,7 @@ func TestGetMergeOperator(t *testing.T) {
 	})
 	t.Run("Get Before Compact", func(t *testing.T) {
 		key := []byte("merge")
-		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator(key, add, 500*time.Millisecond)
 			defer m.Stop()
 
@@ -94,7 +94,7 @@ func TestGetMergeOperator(t *testing.T) {
 
 	t.Run("Get after Stop", func(t *testing.T) {
 		key := []byte("merge")
-		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			m := db.GetMergeOperator(key, add, 1*time.Second)
 
 			err := m.Add(uint64ToBytes(1))

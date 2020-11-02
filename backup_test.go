@@ -310,14 +310,14 @@ func TestBackup(t *testing.T) {
 
 		defer removeDir(tmpdir)
 		opt := DefaultOptions(filepath.Join(tmpdir, "backup0"))
-		runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
 	t.Run("InMemory mode", func(t *testing.T) {
 		opt := DefaultOptions("")
 		opt.InMemory = true
-		runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})

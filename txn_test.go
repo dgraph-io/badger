@@ -33,7 +33,7 @@ import (
 )
 
 func TestTxnSimple(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		txn := db.NewTransaction(true)
 
 		for i := 0; i < 10; i++ {
@@ -82,7 +82,7 @@ func TestTxnReadAfterWrite(t *testing.T) {
 		wg.Wait()
 	}
 	t.Run("disk mode", func(t *testing.T) {
-		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
@@ -101,7 +101,7 @@ func TestTxnCommitAsync(t *testing.T) {
 		return []byte(fmt.Sprintf("key=%d", i))
 	}
 
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		txn := db.NewTransaction(true)
 		for i := 0; i < 40; i++ {
 			err := txn.SetEntry(NewEntry(key(i), []byte(strconv.Itoa(100))))
@@ -163,7 +163,7 @@ func TestTxnCommitAsync(t *testing.T) {
 }
 
 func TestTxnVersions(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		k := []byte("key")
 		for i := 1; i < 10; i++ {
 			txn := db.NewTransaction(true)
@@ -267,7 +267,7 @@ func TestTxnVersions(t *testing.T) {
 }
 
 func TestTxnWriteSkew(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// Accounts
 		ax := []byte("x")
 		ay := []byte("y")
@@ -335,7 +335,7 @@ func TestTxnWriteSkew(t *testing.T) {
 // Read at ts=2 -> a2, c2
 // Read at ts=1 -> c1
 func TestTxnIterationEdgeCase(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		ka := []byte("a")
 		kb := []byte("b")
 		kc := []byte("c")
@@ -425,7 +425,7 @@ func TestTxnIterationEdgeCase(t *testing.T) {
 // Read at ts=2 -> a2, c2
 // Read at ts=1 -> c1
 func TestTxnIterationEdgeCase2(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		ka := []byte("a")
 		kb := []byte("aa")
 		kc := []byte("aaa")
@@ -518,7 +518,7 @@ func TestTxnIterationEdgeCase2(t *testing.T) {
 }
 
 func TestTxnIterationEdgeCase3(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		kb := []byte("abc")
 		kc := []byte("acd")
 		kd := []byte("ade")
@@ -676,7 +676,7 @@ func TestIteratorAllVersionsWithDeleted(t *testing.T) {
 		require.NoError(t, err)
 	}
 	t.Run("disk mode", func(t *testing.T) {
-		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
@@ -691,7 +691,7 @@ func TestIteratorAllVersionsWithDeleted(t *testing.T) {
 }
 
 func TestIteratorAllVersionsWithDeleted2(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// Set and delete alternatively
 		for i := 0; i < 4; i++ {
 			err := db.Update(func(txn *Txn) error {

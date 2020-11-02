@@ -27,7 +27,7 @@ import (
 )
 
 func TestPublisherOrdering(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		order := []string{}
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -65,7 +65,7 @@ func TestPublisherOrdering(t *testing.T) {
 }
 
 func TestMultiplePrefix(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		var wg sync.WaitGroup
 		wg.Add(1)
 		var subWg sync.WaitGroup

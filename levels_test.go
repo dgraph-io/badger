@@ -74,7 +74,7 @@ func TestCheckOverlap(t *testing.T) {
 		// There is an overlap amongst the tables but there is no overlap
 		// with rest of the levels.
 		t.Run("same keys", func(t *testing.T) {
-			runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 				l0 := []keyValVersion{{"foo", "bar", 3, 0}}
 				l1 := []keyValVersion{{"foo", "bar", 2, 0}}
 				createAndOpen(db, l0, 0)
@@ -93,7 +93,7 @@ func TestCheckOverlap(t *testing.T) {
 			})
 		})
 		t.Run("overlapping keys", func(t *testing.T) {
-			runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 				l0 := []keyValVersion{{"a", "x", 1, 0}, {"b", "x", 1, 0}, {"foo", "bar", 3, 0}}
 				l1 := []keyValVersion{{"foo", "bar", 2, 0}}
 				createAndOpen(db, l0, 0)
@@ -111,7 +111,7 @@ func TestCheckOverlap(t *testing.T) {
 		})
 	})
 	t.Run("non-overlapping", func(t *testing.T) {
-		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			l0 := []keyValVersion{{"a", "x", 1, 0}, {"b", "x", 1, 0}, {"c", "bar", 3, 0}}
 			l1 := []keyValVersion{{"foo", "bar", 2, 0}}
 			createAndOpen(db, l0, 0)
@@ -411,7 +411,7 @@ func TestCompactionTwoVersions(t *testing.T) {
 	opt := DefaultOptions("").WithNumCompactors(0).WithNumVersionsToKeep(2)
 	opt.managedTxns = true
 	t.Run("with overlap", func(t *testing.T) {
-		runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			l1 := []keyValVersion{{"foo", "bar", 3, 0}, {"fooz", "baz", 1, bitDelete}}
 			l2 := []keyValVersion{{"foo", "bar", 2, 0}}
 			l3 := []keyValVersion{{"foo", "bar", 1, 0}}
@@ -659,7 +659,7 @@ func TestDiscardFirstVersion(t *testing.T) {
 	opt.NumVersionsToKeep = math.MaxInt32
 	opt.managedTxns = true
 
-	runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		l0 := []keyValVersion{{"foo", "bar", 1, 0}}
 		l01 := []keyValVersion{{"foo", "bar", 2, bitDiscardEarlierVersions}}
 		l02 := []keyValVersion{{"foo", "bar", 3, 0}}
@@ -721,7 +721,7 @@ func TestL1Stall(t *testing.T) {
 	// Level 1 size is 10 bytes.
 	opt.BaseLevelSize = 10
 
-	runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		// Level 0 has 4 tables.
 		db.lc.levels[0].Lock()
 		db.lc.levels[0].tables = []*table.Table{createEmptyTable(db), createEmptyTable(db),
@@ -787,7 +787,7 @@ func TestL0Stall(t *testing.T) {
 	// Addition of new tables will stall if there are 4 or more L0 tables.
 	opt.NumLevelZeroTablesStall = 4
 
-	runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		db.lc.levels[0].Lock()
 		// Add NumLevelZeroTableStall+1 number of tables to level 0. This would fill up level
 		// zero and all new additions are expected to stall if L0 is in memory.
@@ -916,7 +916,7 @@ func TestLevelGet(t *testing.T) {
 	}
 	for _, ti := range tt {
 		t.Run(ti.name, func(t *testing.T) {
-			runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+			runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 				test(t, ti, db)
 			})
 

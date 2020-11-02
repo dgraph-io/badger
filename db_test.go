@@ -107,12 +107,6 @@ func txnDelete(t *testing.T, kv *DB, key []byte) {
 }
 
 // Opens a badger db and runs a a test on it.
-func runBadgerTestParallel(t *testing.T, opts *Options, test func(t *testing.T, db *DB)) {
-	t.Parallel()
-	runBadgerTest(t, opts, test)
-}
-
-// Opens a badger db and runs a a test on it.
 func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB)) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
@@ -138,7 +132,7 @@ func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB))
 }
 
 func TestWrite(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		for i := 0; i < 100; i++ {
 			txnSet(t, db, []byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)), 0x00)
 		}
@@ -146,7 +140,7 @@ func TestWrite(t *testing.T) {
 }
 
 func TestUpdateAndView(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		err := db.Update(func(txn *Txn) error {
 			for i := 0; i < 10; i++ {
 				entry := NewEntry([]byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)))
@@ -182,7 +176,7 @@ func TestUpdateAndView(t *testing.T) {
 }
 
 func TestConcurrentWrite(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// Not a benchmark. Just a simple test for concurrent writes.
 		n := 20
 		m := 500
@@ -277,7 +271,7 @@ func TestGet(t *testing.T) {
 		txn.Discard()
 	}
 	t.Run("disk mode", func(t *testing.T) {
-		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
@@ -290,14 +284,14 @@ func TestGet(t *testing.T) {
 	})
 	t.Run("cache enabled", func(t *testing.T) {
 		opts := DefaultOptions("").WithBlockCacheSize(10 << 20)
-		runBadgerTestParallel(t, &opts, func(t *testing.T, db *DB) {
+		runBadgerTest(t, &opts, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
 }
 
 func TestGetAfterDelete(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// populate with one entry
 		key := []byte("key")
 		txnSet(t, db, key, []byte("val1"), 0x00)
@@ -313,7 +307,7 @@ func TestGetAfterDelete(t *testing.T) {
 }
 
 func TestTxnTooBig(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		data := func(i int) []byte {
 			return []byte(fmt.Sprintf("%b", i))
 		}
@@ -527,7 +521,7 @@ func BenchmarkDbGrowth(b *testing.B) {
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestGetMore(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 
 		data := func(i int) []byte {
 			return []byte(fmt.Sprintf("%b", i))
@@ -689,7 +683,7 @@ func TestExistsMore(t *testing.T) {
 		fmt.Println("Done and closing")
 	}
 	t.Run("disk mode", func(t *testing.T) {
-		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
@@ -763,7 +757,7 @@ func TestIterate2Basic(t *testing.T) {
 		it.Close()
 	}
 	t.Run("disk mode", func(t *testing.T) {
-		runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			test(t, db)
 		})
 	})
@@ -868,7 +862,7 @@ func TestLoad(t *testing.T) {
 }
 
 func TestIterateDeleted(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		txnSet(t, db, []byte("Key1"), []byte("Value1"), 0x00)
 		txnSet(t, db, []byte("Key2"), []byte("Value2"), 0x00)
 
@@ -950,7 +944,7 @@ func TestIterateParallel(t *testing.T) {
 	}
 
 	opt := DefaultOptions("")
-	runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		var wg sync.WaitGroup
 		var txns []*Txn
 		for i := 0; i < N; i++ {
@@ -1043,7 +1037,7 @@ func TestDeleteWithoutSyncWrite(t *testing.T) {
 }
 
 func TestPidFile(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// Reopen database
 		_, err := Open(getTestOptions(db.opt.Dir))
 		require.Error(t, err)
@@ -1052,7 +1046,7 @@ func TestPidFile(t *testing.T) {
 }
 
 func TestInvalidKey(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		err := db.Update(func(txn *Txn) error {
 			err := txn.SetEntry(NewEntry([]byte("!badger!head"), nil))
 			require.Equal(t, ErrInvalidKey, err)
@@ -1081,7 +1075,7 @@ func TestInvalidKey(t *testing.T) {
 }
 
 func TestIteratorPrefetchSize(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 
 		bkey := func(i int) []byte {
 			return []byte(fmt.Sprintf("%09d", i))
@@ -1168,7 +1162,7 @@ func TestSetIfAbsentAsync(t *testing.T) {
 }
 
 func TestGetSetRace(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 
 		data := make([]byte, 4096)
 		_, err := rand.Read(data)
@@ -1216,7 +1210,7 @@ func TestGetSetRace(t *testing.T) {
 }
 
 func TestDiscardVersionsBelow(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// Write 4 versions of the same key
 		for i := 0; i < 4; i++ {
 			err := db.Update(func(txn *Txn) error {
@@ -1273,7 +1267,7 @@ func TestDiscardVersionsBelow(t *testing.T) {
 }
 
 func TestExpiry(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// Write two keys, one with a TTL
 		err := db.Update(func(txn *Txn) error {
 			return txn.SetEntry(NewEntry([]byte("answer1"), []byte("42")))
@@ -1556,7 +1550,7 @@ func TestSequence(t *testing.T) {
 	key0 := []byte("seq0")
 	key1 := []byte("seq1")
 
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		seq0, err := db.GetSequence(key0, 10)
 		require.NoError(t, err)
 		seq1, err := db.GetSequence(key1, 100)
@@ -1604,7 +1598,7 @@ func TestSequence(t *testing.T) {
 }
 
 func TestSequence_Release(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// get sequence, use once and release
 		key := []byte("key")
 		seq, err := db.GetSequence(key, 1000)
@@ -1650,7 +1644,7 @@ func TestSequence_Release(t *testing.T) {
 }
 
 func TestTestSequence2(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		key := []byte("key")
 		seq1, err := db.GetSequence(key, 2)
 		require.NoError(t, err)
@@ -1786,7 +1780,7 @@ func TestLSMOnly(t *testing.T) {
 
 // This test function is doing some intricate sorcery.
 func TestMinReadTs(t *testing.T) {
-	runBadgerTestParallel(t, nil, func(t *testing.T, db *DB) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		for i := 0; i < 10; i++ {
 			require.NoError(t, db.Update(func(txn *Txn) error {
 				return txn.SetEntry(NewEntry([]byte("x"), []byte("y")))
@@ -1828,6 +1822,10 @@ func TestMinReadTs(t *testing.T) {
 }
 
 func TestGoroutineLeak(t *testing.T) {
+	if !*manual {
+		t.Skip("Skipping test meant to be run manually.")
+		return
+	}
 	test := func(t *testing.T, opt *Options) {
 		time.Sleep(1 * time.Second)
 		before := runtime.NumGoroutine()
@@ -2078,7 +2076,7 @@ func TestVerifyChecksum(t *testing.T) {
 		opt.ValueDir = path
 		opt.Dir = path
 		// use stream write for writing.
-		runBadgerTestParallel(t, &opt, func(t *testing.T, db *DB) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			value := make([]byte, 32)
 			y.Check2(rand.Read(value))
 			l := &pb.KVList{}
