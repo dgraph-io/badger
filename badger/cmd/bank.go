@@ -364,7 +364,8 @@ func runTest(cmd *cobra.Command, args []string) error {
 		WithNumVersionsToKeep(int(math.MaxInt32)).
 		WithValueThreshold(1). // Make all values go to value log
 		WithCompression(options.ZSTD).
-		WithBlockCacheSize(10 << 20)
+		WithBlockCacheSize(10 << 20).
+		WithIndexCacheSize(10 << 20)
 
 	if verbose {
 		opts = opts.WithLoggingLevel(badger.DEBUG)
