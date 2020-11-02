@@ -432,8 +432,10 @@ func TestPersistLFDiscardStats(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opt := getTestOptions(dir)
+	// Force more compaction by reducing the number of L0 tables.
+	opt.NumLevelZeroTables = 1
 	opt.ValueLogFileSize = 1 << 20
-	// avoid compaction on close, so that discard map remains same
+	// Avoid compaction on close so that the discard map remains the same.
 	opt.CompactL0OnClose = false
 
 	db, err := Open(opt)
@@ -868,7 +870,7 @@ func TestBug578(t *testing.T) {
 
 	db, err := Open(DefaultOptions(dir).
 		WithValueLogMaxEntries(64).
-		WithMaxTableSize(1 << 13))
+		WithBaseTableSize(1 << 13))
 	require.NoError(t, err)
 
 	h := testHelper{db: db, t: t}
@@ -957,6 +959,7 @@ func BenchmarkReadWrite(b *testing.B) {
 }
 
 // Regression test for https://github.com/dgraph-io/badger/issues/817
+// This test verifies if fully corrupted memtables are deleted on reopen.
 func TestValueLogTruncate(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)

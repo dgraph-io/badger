@@ -17,10 +17,10 @@
 package skl
 
 import (
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 const (
@@ -35,23 +35,18 @@ const (
 
 // Arena should be lock-free.
 type Arena struct {
-	n   uint32
-	buf []byte
-}
-
-// newArena returns a new arena.
-func newArena(n int64) *Arena {
-	// Don't store data at position 0 in order to reserve offset=0 as a kind
-	// of nil pointer.
-	out := &Arena{
-		n:   1,
-		buf: make([]byte, n),
-	}
-	return out
+	*z.Buffer
 }
 
 func (s *Arena) size() int64 {
-	return int64(atomic.LoadUint32(&s.n))
+	return int64(s.LenNoPadding())
+}
+
+// allocateValue encodes valueStruct and put it in the arena buffer.
+// It returns the encoded uint64 => | size (32 bits) | offset (32 bits) |
+func (s *Arena) allocateValue(v y.ValueStruct) uint64 {
+	valOffset := s.putVal(v)
+	return encodeValue(valOffset, v.EncodedSize())
 }
 
 // putNode allocates a node in the arena. The node is aligned on a pointer-sized
@@ -63,13 +58,9 @@ func (s *Arena) putNode(height int) uint32 {
 
 	// Pad the allocation with enough bytes to ensure pointer alignment.
 	l := uint32(MaxNodeSize - unusedSize + nodeAlign)
-	n := atomic.AddUint32(&s.n, l)
-	y.AssertTruef(int(n) <= len(s.buf),
-		"Arena too small, toWrite:%d newTotal:%d limit:%d",
-		l, n, len(s.buf))
-
+	n := s.IncrementOffset(int(l))
 	// Return the aligned offset.
-	m := (n - l + uint32(nodeAlign)) & ^uint32(nodeAlign)
+	m := (uint32(n) - l + uint32(nodeAlign)) & ^uint32(nodeAlign)
 	return m
 }
 
@@ -79,27 +70,20 @@ func (s *Arena) putNode(height int) uint32 {
 // decoding will incur some overhead.
 func (s *Arena) putVal(v y.ValueStruct) uint32 {
 	l := uint32(v.EncodedSize())
-	n := atomic.AddUint32(&s.n, l)
-	y.AssertTruef(int(n) <= len(s.buf),
-		"Arena too small, toWrite:%d newTotal:%d limit:%d",
-		l, n, len(s.buf))
-	m := n - l
-	v.Encode(s.buf[m:])
-	return m
+	m := s.IncrementOffset(int(l))
+	buf := s.Bytes()[uint32(m)-l : m]
+	v.Encode(buf)
+	return uint32(m) - l
 }
 
+// putKey puts the key and returns its offset
 func (s *Arena) putKey(key []byte) uint32 {
-	l := uint32(len(key))
-	n := atomic.AddUint32(&s.n, l)
-	y.AssertTruef(int(n) <= len(s.buf),
-		"Arena too small, toWrite:%d newTotal:%d limit:%d",
-		l, n, len(s.buf))
-	// m is the offset where you should write.
-	// n = new len - key len give you the offset at which you should write.
-	m := n - l
-	// Copy to buffer from m:n
-	y.AssertTrue(len(key) == copy(s.buf[m:n], key))
-	return m
+	keySz := uint32(len(key))
+	n := s.IncrementOffset(int(keySz))
+	offset := uint32(n) - keySz
+	buf := s.Bytes()[offset : offset+keySz]
+	y.AssertTrue(len(key) == copy(buf, key))
+	return offset
 }
 
 // getNode returns a pointer to the node located at offset. If the offset is
@@ -108,19 +92,18 @@ func (s *Arena) getNode(offset uint32) *node {
 	if offset == 0 {
 		return nil
 	}
-
-	return (*node)(unsafe.Pointer(&s.buf[offset]))
+	return (*node)(unsafe.Pointer(&s.Bytes()[offset]))
 }
 
 // getKey returns byte slice at offset.
 func (s *Arena) getKey(offset uint32, size uint16) []byte {
-	return s.buf[offset : offset+uint32(size)]
+	return s.Bytes()[offset : offset+uint32(size)]
 }
 
 // getVal returns byte slice at offset. The given size should be just the value
 // size and should NOT include the meta bytes.
 func (s *Arena) getVal(offset uint32, size uint32) (ret y.ValueStruct) {
-	ret.Decode(s.buf[offset : offset+size])
+	ret.Decode(s.Bytes()[offset : offset+size])
 	return
 }
 
@@ -130,6 +113,7 @@ func (s *Arena) getNodeOffset(nd *node) uint32 {
 	if nd == nil {
 		return 0
 	}
+	val := uint32(uintptr(unsafe.Pointer(nd)) - uintptr(unsafe.Pointer(&s.Bytes()[0])))
+	return val
 
-	return uint32(uintptr(unsafe.Pointer(nd)) - uintptr(unsafe.Pointer(&s.buf[0])))
 }

@@ -357,14 +357,15 @@ func runTest(cmd *cobra.Command, args []string) error {
 	// Open DB
 	opts := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
-		WithMaxTableSize(4 << 20). // Force more compactions.
+		WithBaseTableSize(4 << 20). // Force more compactions.
 		WithNumLevelZeroTables(2).
 		WithNumMemtables(2).
 		// Do not GC any versions, because we need them for the disect..
 		WithNumVersionsToKeep(int(math.MaxInt32)).
 		WithValueThreshold(1). // Make all values go to value log
 		WithCompression(options.ZSTD).
-		WithBlockCacheSize(10 << 20)
+		WithBlockCacheSize(10 << 20).
+		WithIndexCacheSize(10 << 20)
 
 	if verbose {
 		opts = opts.WithLoggingLevel(badger.DEBUG)

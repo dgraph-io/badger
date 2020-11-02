@@ -108,6 +108,7 @@ func NewTableBuilder(opts Options) *Builder {
 		opt:     &opts,
 		offsets: z.NewBuffer(1 << 20),
 	}
+	b.opt.tableCapacity = uint64(float64(b.opt.TableSize) * 0.9)
 
 	// If encryption or compression is not enabled, do not start compression/encryption goroutines
 	// and write directly to the buffer.
@@ -369,7 +370,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 // at the end. The diff can vary.
 
 // ReachedCapacity returns true if we... roughly (?) reached capacity?
-func (b *Builder) ReachedCapacity(capacity uint64) bool {
+func (b *Builder) ReachedCapacity() bool {
 	blocksSize := atomic.LoadUint32(&b.actualSize) + // actual length of current buffer
 		uint32(len(b.entryOffsets)*4) + // all entry offsets size
 		4 + // count of all entry offsets
@@ -378,9 +379,9 @@ func (b *Builder) ReachedCapacity(capacity uint64) bool {
 
 	estimateSz := blocksSize +
 		4 + // Index length
-		uint32(b.offsets.Len())
+		uint32(b.offsets.LenNoPadding())
 
-	return uint64(estimateSz) > capacity
+	return uint64(estimateSz) > b.opt.tableCapacity
 }
 
 // Finish finishes the table by appending the index.
@@ -413,13 +414,12 @@ func (b *Builder) Finish(allocate bool) []byte {
 	dst := b.buf
 	// Fix block boundaries. This includes moving the blocks so that we
 	// don't have any interleaving space between them.
-	bo, next := []byte{}, 1
 	if len(b.blockList) > 0 {
-		dstLen := uint32(0)
-		for _, bl := range b.blockList {
-			bo, next = b.offsets.Slice(next)
+		i, dstLen := 0, uint32(0)
+		b.offsets.SliceIterate(func(slice []byte) error {
+			bl := b.blockList[i]
 			// Length of the block is end minus the start.
-			fbo := fb.GetRootAsBlockOffset(bo, 0)
+			fbo := fb.GetRootAsBlockOffset(slice, 0)
 			fbo.MutateLen(bl.end - bl.start)
 			// New offset of the block is the point in the main buffer till
 			// which we have written data.
@@ -429,8 +429,9 @@ func (b *Builder) Finish(allocate bool) []byte {
 
 			// New length is the start of the block plus its length.
 			dstLen = fbo.Offset() + fbo.Len()
-		}
-		y.AssertTrue(next == 0)
+			i++
+			return nil
+		})
 		// Start writing to the buffer from the point until which we have valid data.
 		// Fix the length because append and writeChecksum also rely on it.
 		b.sz = dstLen
