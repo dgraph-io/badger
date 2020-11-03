@@ -510,8 +510,8 @@ func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
 	// Write block offset vector the the idxBuilder.
 	fb.TableIndexStartOffsetsVector(builder, len(boList))
 
-	// Write individual block offsets.
-	for i := 0; i < len(boList); i++ {
+	// Write individual block offsets in reverse order to work around how Flatbuffers expects it.
+	for i := len(boList) - 1; i >= 0; i-- {
 		builder.PrependUOffsetT(boList[i])
 	}
 	boEnd := builder.EndVector(len(boList))
@@ -547,10 +547,6 @@ func (b *Builder) writeBlockOffsets(builder *fbs.Builder) ([]fbs.UOffsetT, uint3
 		uoff := b.writeBlockOffset(builder, bl, startOffset)
 		uoffs = append(uoffs, uoff)
 		startOffset += uint32(bl.end)
-	}
-	// Reverse the offsets because flatbuffers needs it in reverse order.
-	for i, j := 0, len(uoffs)-1; i < j; i, j = i+1, j-1 {
-		uoffs[i], uoffs[j] = uoffs[j], uoffs[i]
 	}
 	return uoffs, startOffset
 }
