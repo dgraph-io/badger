@@ -948,8 +948,6 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 	iter := ft.mt.sl.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder(bopts)
-	defer b.Close()
-
 	var vp valuePointer
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 		if len(ft.dropPrefixes) > 0 && hasAnyPrefixes(iter.Key(), ft.dropPrefixes) {
