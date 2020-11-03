@@ -38,7 +38,6 @@ import (
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
-	"github.com/dgraph-io/ristretto/z"
 )
 
 // summary is produced when DB is closed. Currently it is used only for testing.
@@ -2124,7 +2123,6 @@ func TestVerifyChecksum(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	flag.Parse()
-	z.StatsPrint()
 	os.Exit(m.Run())
 }
 
