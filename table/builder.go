@@ -17,7 +17,6 @@
 package table
 
 import (
-	"bytes"
 	"crypto/aes"
 	"math"
 	"runtime"
@@ -188,6 +187,7 @@ func (b *Builder) handleBlock() {
 // Close closes the TableBuilder.
 func (b *Builder) Close() {
 	b.offsets.Release()
+	z.ReturnAllocator(b.alloc)
 }
 
 // Empty returns whether it's empty.
@@ -378,17 +378,35 @@ The table structure looks like
 */
 // In case the data is encrypted, the "IV" is added to the end of the index.
 func (b *Builder) Finish() []byte {
-	buf := &bytes.Buffer{}
-	buf.Grow(int(b.opt.TableSize) + 16*MB)
-	b.FinishBuffer(buf)
-	return buf.Bytes()
+	bd := b.Done()
+	buf := make([]byte, bd.Size)
+	written := bd.Copy(buf)
+	y.AssertTrue(written == len(buf))
+	return buf
 }
 
-func (b *Builder) FinishBuffer(dst *bytes.Buffer) {
-	defer func() {
-		z.ReturnAllocator(b.alloc)
-	}()
+type buildData struct {
+	blockList []*bblock
+	index     []byte
+	checksum  []byte
+	Size      int
+	alloc     *z.Allocator
+}
 
+func (bd *buildData) Copy(dst []byte) int {
+	var written int
+	for _, bl := range bd.blockList {
+		written += copy(dst[written:], bl.data[:bl.end])
+	}
+	written += copy(dst[written:], bd.index)
+	written += copy(dst[written:], y.U32ToBytes(uint32(len(bd.index))))
+
+	written += copy(dst[written:], bd.checksum)
+	written += copy(dst[written:], y.U32ToBytes(uint32(len(bd.checksum))))
+	return written
+}
+
+func (b *Builder) Done() buildData {
 	b.finishBlock() // This will never start a new block.
 	if b.blockChan != nil {
 		close(b.blockChan)
@@ -399,18 +417,21 @@ func (b *Builder) FinishBuffer(dst *bytes.Buffer) {
 	blockOffset := uint32(0)
 	// Iterate over the blocks and write it to the dst buffer.
 	// Also calculate the index of the blocks.
-	for i := 0; i < len(b.blockList); i++ {
-		bl := b.blockList[i]
+	for _, bl := range b.blockList {
 		b.addBlockToIndex(bl, blockOffset)
 		blockOffset += uint32(bl.end)
-		dst.Write(bl.data[:bl.end])
 	}
-	if dst.Len() == 0 {
-		return
+	if blockOffset == 0 {
+		return buildData{}
+	}
+	bd := buildData{
+		blockList: b.blockList,
+		alloc:     b.alloc,
+		Size:      int(blockOffset),
 	}
 
 	// b.sz is the total size of the compressed table without the index.
-	b.onDiskSize += uint32(dst.Len())
+	b.onDiskSize += blockOffset
 	var f y.Filter
 	if b.opt.BloomFalsePositive > 0 {
 		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opt.BloomFalsePositive)
@@ -423,14 +444,12 @@ func (b *Builder) FinishBuffer(dst *bytes.Buffer) {
 		index, err = b.encrypt(index)
 		y.Check(err)
 	}
-
-	// Write index the buffer.
-	dst.Write(index)
-	dst.Write(y.U32ToBytes(uint32(len(index))))
-
 	checksum := b.calculateChecksum(index)
-	dst.Write(checksum)
-	dst.Write(y.U32ToBytes(uint32(len(checksum))))
+
+	bd.index = index
+	bd.checksum = checksum
+	bd.Size += len(index) + len(checksum) + 4 + 4
+	return bd
 }
 
 func (b *Builder) calculateChecksum(data []byte) []byte {

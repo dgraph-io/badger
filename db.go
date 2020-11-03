@@ -944,7 +944,7 @@ func arenaSize(opt Options) int64 {
 }
 
 // buildL0Table builds a new table from the memtable.
-func buildL0Table(ft flushTask, bopts table.Options) []byte {
+func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 	iter := ft.mt.sl.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder(bopts)
@@ -961,7 +961,7 @@ func buildL0Table(ft flushTask, bopts table.Options) []byte {
 		}
 		b.Add(iter.Key(), iter.Value(), vp.Len)
 	}
-	return b.Finish()
+	return b
 }
 
 type flushTask struct {
@@ -985,21 +985,24 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	// Builder does not need cache but the same options are used for opening table.
 	bopts.BlockCache = db.blockCache
 	bopts.IndexCache = db.indexCache
-	tableData := buildL0Table(ft, bopts)
+	builder := buildL0Table(ft, bopts)
+	defer builder.Close()
 
 	// buildL0Table can return nil if the none of the items in the skiplist are
 	// added to the builder. This can happen when drop prefix is set and all
 	// the items are skipped.
-	if len(tableData) == 0 {
+	if builder.Empty() {
+		builder.Finish()
 		return nil
 	}
 
 	fileID := db.lc.reserveFileID()
 	var tbl *table.Table
 	if db.opt.InMemory {
-		tbl, err = table.OpenInMemoryTable(tableData, fileID, &bopts)
+		data := builder.Finish()
+		tbl, err = table.OpenInMemoryTable(data, fileID, &bopts)
 	} else {
-		tbl, err = table.CreateTable(table.NewFilename(fileID, db.opt.Dir), tableData, bopts)
+		tbl, err = table.CreateTable(table.NewFilename(fileID, db.opt.Dir), builder)
 	}
 	if err != nil {
 		return y.Wrap(err, "error while creating table")

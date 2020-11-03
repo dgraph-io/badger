@@ -796,23 +796,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 
 			build := func(fileID uint64) (*table.Table, error) {
 				fname := table.NewFilename(fileID, s.kv.opt.Dir)
-				mf, err := z.OpenMmapFile(fname, os.O_CREATE|os.O_RDWR|os.O_EXCL, math.MaxUint32)
-				if err == z.NewFile {
-					// Expected.
-				} else if err != nil {
-					return nil, y.Wrapf(err, "while creating table: %s", fname)
-				} else {
-					return nil, errors.Errorf("file already exists: %s", fname)
-				}
-
-				buf := bytes.NewBuffer(mf.Data[:0])
-				builder.FinishBuffer(buf)
-				y.AssertTrue(cap(mf.Data) >= buf.Len())
-				if err := mf.Truncate(int64(buf.Len())); err != nil {
-					return nil, y.Wrapf(err, "while truncating to final size: %d\n", buf.Len())
-				}
-
-				return table.OpenTable(mf, bopts)
+				return table.CreateTable(fname, builder)
 			}
 
 			var tbl *table.Table
