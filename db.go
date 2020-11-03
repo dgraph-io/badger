@@ -505,30 +505,36 @@ func (db *DB) close() (err error) {
 	// and remove them completely, while the block / memtable writer is still
 	// trying to push stuff into the memtable. This will also resolve the value
 	// offset problem: as we push into memtable, we update value offsets there.
-	if !db.opt.ReadOnly {
-		db.opt.Debugf("Flushing memtable")
-		for {
-			pushedFlushTask := func() bool {
-				db.Lock()
-				defer db.Unlock()
-				y.AssertTrue(db.mt != nil)
-				select {
-				case db.flushChan <- flushTask{mt: db.mt}:
-					db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
-					db.mt = nil                    // Will segfault if we try writing!
-					db.opt.Debugf("pushed to flush chan\n")
-					return true
-				default:
-					// If we fail to push, we need to unlock and wait for a short while.
-					// The flushing operation needs to update s.imm. Otherwise, we have a deadlock.
-					// TODO: Think about how to do this more cleanly, maybe without any locks.
+	if db.mt != nil {
+		if db.mt.sl.Empty() {
+			// Remove the memtable if empty.
+			db.mt.DecrRef()
+		} else {
+			db.opt.Debugf("Flushing memtable")
+			for {
+				pushedFlushTask := func() bool {
+					db.Lock()
+					defer db.Unlock()
+					y.AssertTrue(db.mt != nil)
+					select {
+					case db.flushChan <- flushTask{mt: db.mt}:
+						db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
+						db.mt = nil                    // Will segfault if we try writing!
+						db.opt.Debugf("pushed to flush chan\n")
+						return true
+					default:
+						// If we fail to push, we need to unlock and wait for a short while.
+						// The flushing operation needs to update s.imm. Otherwise, we have a
+						// deadlock.
+						// TODO: Think about how to do this more cleanly, maybe without any locks.
+					}
+					return false
+				}()
+				if pushedFlushTask {
+					break
 				}
-				return false
-			}()
-			if pushedFlushTask {
-				break
+				time.Sleep(10 * time.Millisecond)
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
 	}
 	db.stopMemoryFlush()
@@ -1337,6 +1343,9 @@ func (db *DB) KeySplits(prefix []byte) []string {
 	if len(splits) < 32 {
 		maxPerSplit := 10000
 		mtSplits := func(mt *memTable) {
+			if mt == nil {
+				return
+			}
 			count := 0
 			iter := mt.sl.NewIterator()
 			for iter.SeekToFirst(); iter.Valid(); iter.Next() {
@@ -1358,9 +1367,7 @@ func (db *DB) KeySplits(prefix []byte) []string {
 		for _, mt := range memTables {
 			mtSplits(mt)
 		}
-		if db.mt != nil {
-			mtSplits(db.mt)
-		}
+		mtSplits(db.mt)
 	}
 
 	sort.Strings(splits)

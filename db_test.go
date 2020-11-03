@@ -2200,12 +2200,12 @@ func TestOpenDBReadOnly(t *testing.T) {
 	ops.ReadOnly = false
 	db, err := Open(ops)
 	require.NoError(t, err)
-	// Add bunch of entries that go into value log.
+	// Add bunch of entries that don't go into value log.
 	require.NoError(t, db.Update(func(txn *Txn) error {
-		val := make([]byte, db.opt.ValueThreshold+10)
+		val := make([]byte, 10)
 		rand.Read(val)
 		for i := 0; i < 10; i++ {
-			key := fmt.Sprintf("KEY-%05d", i)
+			key := fmt.Sprintf("key-%05d", i)
 			require.NoError(t, txn.Set([]byte(key), val))
 			mp[key] = val
 		}
@@ -2220,8 +2220,9 @@ func TestOpenDBReadOnly(t *testing.T) {
 
 	db, err = Open(ops)
 	require.NoError(t, err)
-	count := 0
+	var count int
 	read := func() {
+		count = 0
 		db.View(func(txn *Txn) error {
 			it := txn.NewIterator(DefaultIteratorOptions)
 			defer it.Close()
@@ -2243,13 +2244,13 @@ func TestOpenDBReadOnly(t *testing.T) {
 	ops.ReadOnly = false
 	db, err = Open(ops)
 	require.NoError(t, err)
-	// Add bunch of entries that don't go into value log.
+	// Add bunch of entries that go into value log.
 	require.NoError(t, db.Update(func(txn *Txn) error {
 		require.Greater(t, db.opt.ValueThreshold, 10)
-		val := make([]byte, 10)
+		val := make([]byte, db.opt.ValueThreshold+10)
 		rand.Read(val)
 		for i := 0; i < 10; i++ {
-			key := fmt.Sprintf("key-%05d", i)
+			key := fmt.Sprintf("KEY-%05d", i)
 			require.NoError(t, txn.Set([]byte(key), val))
 			mp[key] = val
 		}
@@ -2260,7 +2261,6 @@ func TestOpenDBReadOnly(t *testing.T) {
 	ops.ReadOnly = true
 	db, err = Open(ops)
 	require.NoError(t, err)
-	count = 0
 	read()
 	require.Equal(t, 20, count)
 	require.NoError(t, db.Close())
