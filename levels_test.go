@@ -46,7 +46,7 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 		b.Add(key, val, 0)
 	}
 	fname := table.NewFilename(db.lc.reserveFileID(), db.opt.Dir)
-	tab, err := table.CreateTable(fname, b.Finish(false), opts)
+	tab, err := table.CreateTable(fname, b)
 	if err != nil {
 		panic(err)
 	}
@@ -768,7 +768,7 @@ func createEmptyTable(db *DB) *table.Table {
 	b.Add(y.KeyWithTs([]byte("foo"), 1), y.ValueStruct{}, 0)
 
 	// Open table in memory to avoid adding changes to manifest file.
-	tab, err := table.OpenInMemoryTable(b.Finish(true), db.lc.reserveFileID(), &opts)
+	tab, err := table.OpenInMemoryTable(b.Finish(), db.lc.reserveFileID(), &opts)
 	if err != nil {
 		panic(err)
 	}

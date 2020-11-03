@@ -323,6 +323,7 @@ func TestStreamWriter5(t *testing.T) {
 // This test tries to insert multiple equal keys(without version) and verifies
 // if those are going to same table.
 func TestStreamWriter6(t *testing.T) {
+
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		list := &pb.KVList{}
 		str := []string{"a", "b", "c"}

@@ -391,7 +391,7 @@ func reportStats(c *z.Closer, db *badger.DB) {
 			bytesRate := sz / uint64(dur.Seconds())
 			entriesRate := entries / uint64(dur.Seconds())
 			fmt.Printf("[WRITE] Time elapsed: %s, bytes written: %s, speed: %s/sec, "+
-				"entries written: %d, speed: %d/sec, Memory: %s\n",
+				"entries written: %d, speed: %d/sec, jemalloc: %s\n",
 				y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate,
 				humanize.IBytes(uint64(z.NumAllocBytes())))

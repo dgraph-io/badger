@@ -115,7 +115,7 @@ func TestTableIndex(t *testing.T) {
 				}
 				builder.Add(k, vs, 0)
 			}
-			tbl, err := CreateTable(filename, builder.Finish(false), opt)
+			tbl, err := CreateTable(filename, builder)
 			require.NoError(t, err, "unable to open table")
 
 			if opt.DataKey == nil {
@@ -183,7 +183,7 @@ func BenchmarkBuilder(b *testing.B) {
 			for j := 0; j < keysCount; j++ {
 				builder.Add(keyList[j], vs, 0)
 			}
-			_ = builder.Finish(false)
+			_ = builder.Finish()
 			builder.Close()
 		}
 	}
@@ -274,6 +274,6 @@ func TestEmptyBuilder(t *testing.T) {
 	opts := Options{BloomFalsePositive: 0.1}
 	b := NewTableBuilder(opts)
 	defer b.Close()
-	require.Nil(t, b.Finish(false))
+	require.Equal(t, []byte{}, b.Finish())
 
 }

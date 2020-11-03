@@ -137,12 +137,10 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 				rerr = y.Wrapf(err, "Error while reading datakey")
 				return
 			}
-			topt := buildTableOptions(db.opt)
-			// Set compression from table manifest.
+			topt := buildTableOptions(db)
+			// Explicitly set Compression and DataKey based on how the table was generated.
 			topt.Compression = tf.Compression
 			topt.DataKey = dk
-			topt.BlockCache = db.blockCache
-			topt.IndexCache = db.indexCache
 
 			mf, err := z.OpenMmapFile(fname, db.opt.getFileFlags(), 0)
 			if err != nil {
@@ -758,17 +756,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			break
 		}
 
-		dk, err := s.kv.registry.LatestDataKey()
-		if err != nil {
-			inflightBuilders.Done(y.Wrapf(err, "Error while retrieving datakey in levelsController.compactBuildTables"))
-			return
-		}
-		bopts := buildTableOptions(s.kv.opt)
-		bopts.DataKey = dk
-		// Builder does not need cache but the same options are used for opening table.
-		bopts.BlockCache = s.kv.blockCache
-		bopts.IndexCache = s.kv.indexCache
-
+		bopts := buildTableOptions(s.kv)
 		// Set TableSize to the target file size for that level.
 		bopts.TableSize = uint64(cd.t.fileSz[cd.nextLevel.level])
 		builder := table.NewTableBuilder(bopts)
@@ -780,7 +768,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 		// called Add() at least once, and builder is not Empty().
 		if builder.Empty() {
 			// Cleanup builder resources:
-			builder.Finish(false)
+			builder.Finish()
 			builder.Close()
 			continue
 		}
@@ -791,18 +779,18 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			break
 		}
 		go func(builder *table.Builder) {
+			var err error
 			defer builder.Close()
 			defer inflightBuilders.Done(err)
 
 			build := func(fileID uint64) (*table.Table, error) {
 				fname := table.NewFilename(fileID, s.kv.opt.Dir)
-				return table.CreateTable(fname, builder.Finish(false), bopts)
+				return table.CreateTable(fname, builder)
 			}
 
 			var tbl *table.Table
-			var err error
 			if s.kv.opt.InMemory {
-				tbl, err = table.OpenInMemoryTable(builder.Finish(true), fileID, &bopts)
+				tbl, err = table.OpenInMemoryTable(builder.Finish(), fileID, &bopts)
 			} else {
 				tbl, err = build(fileID)
 			}

@@ -373,6 +373,19 @@ func TestForceCompactL0(t *testing.T) {
 }
 
 func TestStreamDB(t *testing.T) {
+	check := func(db *DB) {
+		for i := 0; i < 100; i++ {
+			key := []byte(fmt.Sprintf("key%d", i))
+			val := []byte(fmt.Sprintf("val%d", i))
+			txn := db.NewTransactionAt(1, false)
+			item, err := txn.Get(key)
+			require.NoError(t, err)
+			require.EqualValues(t, val, getItemValue(t, item))
+			require.Equal(t, byte(0x00), item.UserMeta())
+			txn.Discard()
+		}
+	}
+
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
@@ -393,6 +406,7 @@ func TestStreamDB(t *testing.T) {
 		require.NoError(t, writer.SetEntryAt(NewEntry(key, val).WithMeta(0x00), 1))
 	}
 	require.NoError(t, writer.Flush())
+	check(db)
 
 	outDir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
@@ -404,17 +418,7 @@ func TestStreamDB(t *testing.T) {
 	defer func() {
 		require.NoError(t, outDB.Close())
 	}()
-
-	for i := 0; i < 100; i++ {
-		key := []byte(fmt.Sprintf("key%d", i))
-		val := []byte(fmt.Sprintf("val%d", i))
-		txn := outDB.NewTransactionAt(1, false)
-		item, err := txn.Get(key)
-		require.NoError(t, err)
-		require.EqualValues(t, val, getItemValue(t, item))
-		require.Equal(t, byte(0x00), item.UserMeta())
-		txn.Discard()
-	}
+	check(outDB)
 }
 
 func dirSize(path string) (int64, error) {

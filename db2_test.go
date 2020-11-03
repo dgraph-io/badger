@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -504,7 +505,7 @@ func addToManifest(t *testing.T, db *DB, tab *table.Table, level uint32) {
 // createTableWithRange function is used in TestCompactionFilePicking. It creates
 // a table with key starting from start and ending with end.
 func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
-	bopts := buildTableOptions(db.opt)
+	bopts := buildTableOptions(db)
 	b := table.NewTableBuilder(bopts)
 	defer b.Close()
 	nums := []int{start, end}
@@ -517,7 +518,7 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	}
 
 	fileID := db.lc.reserveFileID()
-	tab, err := table.CreateTable(table.NewFilename(fileID, db.opt.Dir), b.Finish(false), bopts)
+	tab, err := table.CreateTable(table.NewFilename(fileID, db.opt.Dir), b)
 	require.NoError(t, err)
 	return tab
 }
@@ -987,6 +988,7 @@ func TestKeyCount(t *testing.T) {
 	defer db.Close()
 	writeSorted(db, N)
 	require.NoError(t, db.Close())
+	t.Logf("Writing DONE\n")
 
 	// Read the db
 	db2, err := Open(DefaultOptions(dir))
@@ -994,20 +996,22 @@ func TestKeyCount(t *testing.T) {
 	defer db.Close()
 	lastKey := -1
 	count := 0
-	db2.View(func(txn *Txn) error {
-		iopt := DefaultIteratorOptions
-		iopt.AllVersions = true
-		it := txn.NewIterator(iopt)
-		defer it.Close()
-		for it.Rewind(); it.Valid(); it.Next() {
-			count++
-			i := it.Item()
-			key := binary.BigEndian.Uint64(i.Key())
+
+	streams := make(map[uint32]int)
+	stream := db2.NewStream()
+	stream.Send = func(list *pb.KVList) error {
+		count += len(list.Kv)
+		for _, kv := range list.Kv {
+			last := streams[kv.StreamId]
+			key := binary.BigEndian.Uint64(kv.Key)
 			// The following should happen as we're writing sorted data.
-			require.Equalf(t, lastKey+1, int(key), "Expected key: %d, Found Key: %d", lastKey+1, int(key))
-			lastKey = int(key)
+			if last > 0 {
+				require.Equalf(t, last+1, int(key), "Expected key: %d, Found Key: %d", lastKey+1, int(key))
+			}
+			streams[kv.StreamId] = int(key)
 		}
 		return nil
-	})
+	}
+	require.NoError(t, stream.Orchestrate(context.Background()))
 	require.Equal(t, N, uint64(count))
 }

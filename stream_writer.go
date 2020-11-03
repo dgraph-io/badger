@@ -280,13 +280,7 @@ type sortedWriter struct {
 }
 
 func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
-	dk, err := sw.db.registry.LatestDataKey()
-	if err != nil {
-		return nil, err
-	}
-
-	bopts := buildTableOptions(sw.db.opt)
-	bopts.DataKey = dk
+	bopts := buildTableOptions(sw.db)
 	for i := 2; i < sw.db.opt.MaxLevels; i++ {
 		bopts.TableSize *= uint64(sw.db.opt.TableSizeMultiplier)
 	}
@@ -375,7 +369,6 @@ func (w *sortedWriter) send(done bool) error {
 		return err
 	}
 	go func(builder *table.Builder) {
-		defer builder.Close()
 		err := w.createTable(builder)
 		w.throttle.Done(err)
 	}(w.builder)
@@ -386,12 +379,7 @@ func (w *sortedWriter) send(done bool) error {
 		return nil
 	}
 
-	dk, err := w.db.registry.LatestDataKey()
-	if err != nil {
-		return y.Wrapf(err, "Error while retriving datakey in sortedWriter.send")
-	}
-	bopts := buildTableOptions(w.db.opt)
-	bopts.DataKey = dk
+	bopts := buildTableOptions(w.db)
 	w.builder = table.NewTableBuilder(bopts)
 	return nil
 }
@@ -410,26 +398,24 @@ func (w *sortedWriter) Done() error {
 }
 
 func (w *sortedWriter) createTable(builder *table.Builder) error {
-	data := builder.Finish(w.db.opt.InMemory)
-
-	if len(data) == 0 {
+	defer builder.Close()
+	if builder.Empty() {
+		builder.Finish()
 		return nil
 	}
+
 	fileID := w.db.lc.reserveFileID()
-	opts := buildTableOptions(w.db.opt)
-	opts.DataKey = builder.DataKey()
-	opts.BlockCache = w.db.blockCache
-	opts.IndexCache = w.db.indexCache
 	var tbl *table.Table
 	if w.db.opt.InMemory {
+		data := builder.Finish()
 		var err error
-		if tbl, err = table.OpenInMemoryTable(data, fileID, &opts); err != nil {
+		if tbl, err = table.OpenInMemoryTable(data, fileID, builder.Opts()); err != nil {
 			return err
 		}
 	} else {
 		var err error
-		if tbl, err = table.CreateTable(
-			table.NewFilename(fileID, w.db.opt.Dir), data, opts); err != nil {
+		fname := table.NewFilename(fileID, w.db.opt.Dir)
+		if tbl, err = table.CreateTable(fname, builder); err != nil {
 			return err
 		}
 	}
