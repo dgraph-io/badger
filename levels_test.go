@@ -46,7 +46,7 @@ func createAndOpen(db *DB, td []keyValVersion, level int) {
 		b.Add(key, val, 0)
 	}
 	fname := table.NewFilename(db.lc.reserveFileID(), db.opt.Dir)
-	tab, err := table.CreateTable(fname, b.Finish(), opts)
+	tab, err := table.CreateTable(fname, b)
 	if err != nil {
 		panic(err)
 	}

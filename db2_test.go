@@ -518,7 +518,7 @@ func createTableWithRange(t *testing.T, db *DB, start, end int) *table.Table {
 	}
 
 	fileID := db.lc.reserveFileID()
-	tab, err := table.CreateTable(table.NewFilename(fileID, db.opt.Dir), b.Finish(), bopts)
+	tab, err := table.CreateTable(table.NewFilename(fileID, db.opt.Dir), b)
 	require.NoError(t, err)
 	return tab
 }
