@@ -298,9 +298,10 @@ func Open(opt Options) (*DB, error) {
 		return nil, y.Wrapf(err, "while opening memtables")
 	}
 
-	db.mt, err = db.newMemTable()
-	if err != nil {
-		return nil, y.Wrapf(err, "cannot create memtable")
+	if !db.opt.ReadOnly {
+		if db.mt, err = db.newMemTable(); err != nil {
+			return nil, y.Wrapf(err, "cannot create memtable")
+		}
 	}
 
 	// newLevelsController potentially loads files in directory.
@@ -365,7 +366,10 @@ func (db *DB) MaxVersion() uint64 {
 		}
 	}
 	db.Lock()
-	update(db.mt.maxVersion)
+	// In read only mode, we do not create new mem table.
+	if !db.opt.ReadOnly {
+		update(db.mt.maxVersion)
+	}
 	for _, mt := range db.imm {
 		update(mt.maxVersion)
 	}
@@ -501,30 +505,36 @@ func (db *DB) close() (err error) {
 	// and remove them completely, while the block / memtable writer is still
 	// trying to push stuff into the memtable. This will also resolve the value
 	// offset problem: as we push into memtable, we update value offsets there.
-	if !db.mt.sl.Empty() {
-		db.opt.Debugf("Flushing memtable")
-		for {
-			pushedFlushTask := func() bool {
-				db.Lock()
-				defer db.Unlock()
-				y.AssertTrue(db.mt != nil)
-				select {
-				case db.flushChan <- flushTask{mt: db.mt}:
-					db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
-					db.mt = nil                    // Will segfault if we try writing!
-					db.opt.Debugf("pushed to flush chan\n")
-					return true
-				default:
-					// If we fail to push, we need to unlock and wait for a short while.
-					// The flushing operation needs to update s.imm. Otherwise, we have a deadlock.
-					// TODO: Think about how to do this more cleanly, maybe without any locks.
+	if db.mt != nil {
+		if db.mt.sl.Empty() {
+			// Remove the memtable if empty.
+			db.mt.DecrRef()
+		} else {
+			db.opt.Debugf("Flushing memtable")
+			for {
+				pushedFlushTask := func() bool {
+					db.Lock()
+					defer db.Unlock()
+					y.AssertTrue(db.mt != nil)
+					select {
+					case db.flushChan <- flushTask{mt: db.mt}:
+						db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
+						db.mt = nil                    // Will segfault if we try writing!
+						db.opt.Debugf("pushed to flush chan\n")
+						return true
+					default:
+						// If we fail to push, we need to unlock and wait for a short while.
+						// The flushing operation needs to update s.imm. Otherwise, we have a
+						// deadlock.
+						// TODO: Think about how to do this more cleanly, maybe without any locks.
+					}
+					return false
+				}()
+				if pushedFlushTask {
+					break
 				}
-				return false
-			}()
-			if pushedFlushTask {
-				break
+				time.Sleep(10 * time.Millisecond)
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
 	}
 	db.stopMemoryFlush()
@@ -612,17 +622,20 @@ func (db *DB) getMemTables() ([]*memTable, func()) {
 	db.RLock()
 	defer db.RUnlock()
 
-	tables := make([]*memTable, len(db.imm)+1)
+	var tables []*memTable
 
-	// Get mutable memtable.
-	tables[0] = db.mt
-	tables[0].IncrRef()
+	// Mutable memtable does not exist in read-only mode.
+	if !db.opt.ReadOnly {
+		// Get mutable memtable.
+		tables = append(tables, db.mt)
+		db.mt.IncrRef()
+	}
 
 	// Get immutable memtables.
 	last := len(db.imm) - 1
 	for i := range db.imm {
-		tables[i+1] = db.imm[last-i]
-		tables[i+1].IncrRef()
+		tables = append(tables, db.imm[last-i])
+		db.imm[last-i].IncrRef()
 	}
 	return tables, func() {
 		for _, tbl := range tables {
@@ -1330,6 +1343,9 @@ func (db *DB) KeySplits(prefix []byte) []string {
 	if len(splits) < 32 {
 		maxPerSplit := 10000
 		mtSplits := func(mt *memTable) {
+			if mt == nil {
+				return
+			}
 			count := 0
 			iter := mt.sl.NewIterator()
 			for iter.SeekToFirst(); iter.Valid(); iter.Next() {

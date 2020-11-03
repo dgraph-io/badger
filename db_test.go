@@ -2197,3 +2197,80 @@ func TestUpdateMaxCost(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(4<<20), cost)
 }
+
+func TestOpenDBReadOnly(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	mp := make(map[string][]byte)
+
+	ops := getTestOptions(dir)
+	ops.ReadOnly = false
+	db, err := Open(ops)
+	require.NoError(t, err)
+	// Add bunch of entries that don't go into value log.
+	require.NoError(t, db.Update(func(txn *Txn) error {
+		val := make([]byte, 10)
+		rand.Read(val)
+		for i := 0; i < 10; i++ {
+			key := fmt.Sprintf("key-%05d", i)
+			require.NoError(t, txn.Set([]byte(key), val))
+			mp[key] = val
+		}
+		return nil
+	}))
+	require.NoError(t, db.Close())
+
+	ops.ReadOnly = true
+	db, err = Open(ops)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	db, err = Open(ops)
+	require.NoError(t, err)
+	var count int
+	read := func() {
+		count = 0
+		db.View(func(txn *Txn) error {
+			it := txn.NewIterator(DefaultIteratorOptions)
+			defer it.Close()
+			for it.Rewind(); it.Valid(); it.Next() {
+				item := it.Item()
+				require.NoError(t, item.Value(func(val []byte) error {
+					require.Equal(t, mp[string(item.Key())], val)
+					return nil
+				}))
+				count++
+			}
+			return nil
+		})
+	}
+	read()
+	require.Equal(t, 10, count)
+	require.NoError(t, db.Close())
+
+	ops.ReadOnly = false
+	db, err = Open(ops)
+	require.NoError(t, err)
+	// Add bunch of entries that go into value log.
+	require.NoError(t, db.Update(func(txn *Txn) error {
+		require.Greater(t, db.opt.ValueThreshold, 10)
+		val := make([]byte, db.opt.ValueThreshold+10)
+		rand.Read(val)
+		for i := 0; i < 10; i++ {
+			key := fmt.Sprintf("KEY-%05d", i)
+			require.NoError(t, txn.Set([]byte(key), val))
+			mp[key] = val
+		}
+		return nil
+	}))
+	require.NoError(t, db.Close())
+
+	ops.ReadOnly = true
+	db, err = Open(ops)
+	require.NoError(t, err)
+	read()
+	require.Equal(t, 20, count)
+	require.NoError(t, db.Close())
+}
