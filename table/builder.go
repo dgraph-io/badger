@@ -83,7 +83,6 @@ type Builder struct {
 	compressedSize   uint32
 	uncompressedSize uint32
 
-	offsets       *z.Buffer
 	lenOffsets    uint32
 	estimatedSize uint32
 	keyHashes     []uint32 // Used for building the bloomfilter.
@@ -128,9 +127,8 @@ func NewTableBuilder(opts Options) *Builder {
 		sz = maxAllocatorInitialSz
 	}
 	b := &Builder{
-		alloc:   z.GetAllocatorFromPool(sz),
-		opt:     &opts,
-		offsets: z.NewBuffer(1 << 20),
+		alloc: z.GetAllocatorFromPool(sz),
+		opt:   &opts,
 	}
 	b.curBlock = &bblock{
 		data: b.alloc.Allocate(opts.BlockSize + padding),
@@ -187,7 +185,6 @@ func (b *Builder) handleBlock() {
 
 // Close closes the TableBuilder.
 func (b *Builder) Close() {
-	b.offsets.Release()
 	z.ReturnAllocator(b.alloc)
 }
 
@@ -289,24 +286,6 @@ func (b *Builder) finishBlock() {
 		b.blockChan <- b.curBlock
 	}
 	return
-}
-
-func (b *Builder) addBlockToIndex(blk *bblock, blockOffset uint32) {
-	blockBuf := blk.data[:blk.end]
-	// Add key to the block index.
-	builder := fbs.NewBuilder(64)
-	off := builder.CreateByteVector(blk.baseKey)
-
-	fb.BlockOffsetStart(builder)
-	fb.BlockOffsetAddKey(builder, off)
-	fb.BlockOffsetAddOffset(builder, blockOffset)
-	fb.BlockOffsetAddLen(builder, uint32(len(blockBuf)))
-	uoff := fb.BlockOffsetEnd(builder)
-	builder.Finish(uoff)
-
-	out := builder.FinishedBytes()
-	dst := b.offsets.SliceAllocate(len(out))
-	copy(dst, out)
 }
 
 func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
@@ -424,30 +403,20 @@ func (b *Builder) Done() buildData {
 	// Wait for block handler to finish.
 	b.wg.Wait()
 
-	blockOffset := uint32(0)
-	// Iterate over the blocks and write it to the dst buffer.
-	// Also calculate the index of the blocks.
-	for _, bl := range b.blockList {
-		b.addBlockToIndex(bl, blockOffset)
-		blockOffset += uint32(bl.end)
-	}
-	if blockOffset == 0 {
+	if len(b.blockList) == 0 {
 		return buildData{}
 	}
 	bd := buildData{
 		blockList: b.blockList,
 		alloc:     b.alloc,
-		Size:      int(blockOffset),
 	}
 
-	// b.sz is the total size of the compressed table without the index.
-	b.onDiskSize += blockOffset
 	var f y.Filter
 	if b.opt.BloomFalsePositive > 0 {
 		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opt.BloomFalsePositive)
 		f = y.NewFilter(b.keyHashes, bits)
 	}
-	index := b.buildIndex(f, b.uncompressedSize)
+	index, dataSize := b.buildIndex(f)
 
 	var err error
 	if b.shouldEncrypt() {
@@ -458,7 +427,7 @@ func (b *Builder) Done() buildData {
 
 	bd.index = index
 	bd.checksum = checksum
-	bd.Size += len(index) + len(checksum) + 4 + 4
+	bd.Size = int(dataSize) + len(index) + len(checksum) + 4 + 4
 	return bd
 }
 
@@ -530,10 +499,10 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 	return nil, errors.New("Unsupported compression type")
 }
 
-func (b *Builder) buildIndex(bloom []byte, tableSz uint32) []byte {
+func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
 	builder := fbs.NewBuilder(3 << 20)
 
-	boList := b.writeBlockOffsets(builder)
+	boList, dataSize := b.writeBlockOffsets(builder)
 	// Write block offset vector the the idxBuilder.
 	fb.TableIndexStartOffsetsVector(builder, len(boList))
 
@@ -548,11 +517,12 @@ func (b *Builder) buildIndex(bloom []byte, tableSz uint32) []byte {
 	if len(bloom) > 0 {
 		bfoff = builder.CreateByteVector(bloom)
 	}
+	b.onDiskSize += dataSize
 	fb.TableIndexStart(builder)
 	fb.TableIndexAddOffsets(builder, boEnd)
 	fb.TableIndexAddBloomFilter(builder, bfoff)
 	fb.TableIndexAddMaxVersion(builder, b.maxVersion)
-	fb.TableIndexAddUncompressedSize(builder, tableSz)
+	fb.TableIndexAddUncompressedSize(builder, b.uncompressedSize)
 	fb.TableIndexAddKeyCount(builder, uint32(len(b.keyHashes)))
 	fb.TableIndexAddOnDiskSize(builder, b.onDiskSize)
 	builder.Finish(fb.TableIndexEnd(builder))
@@ -561,35 +531,37 @@ func (b *Builder) buildIndex(bloom []byte, tableSz uint32) []byte {
 	index := fb.GetRootAsTableIndex(buf, 0)
 	// Mutate the ondisk size to include the size of the index as well.
 	y.AssertTrue(index.MutateOnDiskSize(index.OnDiskSize() + uint32(len(buf))))
-	return buf
+	return buf, dataSize
 }
 
 // writeBlockOffsets writes all the blockOffets in b.offsets and returns the
 // offsets for the newly written items.
-func (b *Builder) writeBlockOffsets(builder *fbs.Builder) []fbs.UOffsetT {
-	so := b.offsets.SliceOffsets()
+func (b *Builder) writeBlockOffsets(builder *fbs.Builder) ([]fbs.UOffsetT, uint32) {
+	var startOffset uint32
 	var uoffs []fbs.UOffsetT
-	for i := len(so) - 1; i >= 0; i-- {
-		// We add these in reverse order.
-		data, _ := b.offsets.Slice(so[i])
-		uoff := b.writeBlockOffset(builder, data)
+	for _, bl := range b.blockList {
+		uoff := b.writeBlockOffset(builder, bl, startOffset)
 		uoffs = append(uoffs, uoff)
+		startOffset += uint32(bl.end)
 	}
-	return uoffs
+	// Reverse the offsets because flatbuffers needs it in reverse order.
+	for i, j := 0, len(uoffs)-1; i < j; i, j = i+1, j-1 {
+		uoffs[i], uoffs[j] = uoffs[j], uoffs[i]
+	}
+	return uoffs, startOffset
 }
 
 // writeBlockOffset writes the given key,offset,len triple to the indexBuilder.
 // It returns the offset of the newly written blockoffset.
-func (b *Builder) writeBlockOffset(builder *fbs.Builder, data []byte) fbs.UOffsetT {
+func (b *Builder) writeBlockOffset(
+	builder *fbs.Builder, bl *bblock, startOffset uint32) fbs.UOffsetT {
 	// Write the key to the buffer.
-	bo := fb.GetRootAsBlockOffset(data, 0)
-
-	k := builder.CreateByteVector(bo.KeyBytes())
+	k := builder.CreateByteVector(bl.baseKey)
 
 	// Build the blockOffset.
 	fb.BlockOffsetStart(builder)
 	fb.BlockOffsetAddKey(builder, k)
-	fb.BlockOffsetAddOffset(builder, bo.Offset())
-	fb.BlockOffsetAddLen(builder, bo.Len())
+	fb.BlockOffsetAddOffset(builder, startOffset)
+	fb.BlockOffsetAddLen(builder, uint32(bl.end))
 	return fb.BlockOffsetEnd(builder)
 }
