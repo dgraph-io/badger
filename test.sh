@@ -62,6 +62,12 @@ manual() {
   go test $tags -run='TestTruncateVlogNoClose3$' --manual=true
   rm -rf p
 
+  # TODO(ibrahim): Let's make these tests have Manual prefix.
+  # go test $tags -run='TestManual' --manual=true --parallel=2
+  # TestWriteBatch
+  # TestValueGCManaged
+  # TestDropPrefix
+  # TestDropAllManaged
   go test $tags -run='TestBigKeyValuePairs$' --manual=true
   go test $tags -run='TestPushValueLogLimit' --manual=true
   go test $tags -run='TestKeyCount' --manual=true
@@ -69,6 +75,7 @@ manual() {
   go test $tags -run='TestIterateParallel' --manual=true
   go test $tags -run='TestBigStream' --manual=true
   go test $tags -run='TestGoroutineLeak' --manual=true
+
   echo "==> DONE manual tests"
 }
 
