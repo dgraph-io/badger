@@ -84,6 +84,7 @@ type Builder struct {
 	uncompressedSize uint32
 
 	offsets       *z.Buffer
+	lenOffsets    uint32
 	estimatedSize uint32
 	keyHashes     []uint32 // Used for building the bloomfilter.
 	opt           *Options
@@ -274,6 +275,15 @@ func (b *Builder) finishBlock() {
 	b.blockList = append(b.blockList, b.curBlock)
 	atomic.AddUint32(&b.uncompressedSize, uint32(b.curBlock.end))
 
+	// Add length of baseKey (rounded to next multiple of 4 because of alignment).
+	// Add another 40 Bytes, these additional 40 bytes consists of
+	// 12 bytes of metadata of flatbuffer
+	// 8 bytes for Key in flat buffer
+	// 8 bytes for offset
+	// 8 bytes for the len
+	// 4 bytes for the size of slice while SliceAllocate
+	b.lenOffsets += uint32(int(math.Ceil(float64(len(b.curBlock.baseKey))/4))*4) + 40
+
 	// If compression/encryption is enabled, we need to send the block to the blockChan.
 	if b.blockChan != nil {
 		b.blockChan <- b.curBlock
@@ -360,7 +370,7 @@ func (b *Builder) ReachedCapacity() bool {
 
 	estimateSz := blocksSize +
 		4 + // Index length
-		uint32(b.offsets.LenNoPadding())
+		b.lenOffsets
 
 	return uint64(estimateSz) > b.opt.tableCapacity
 }
