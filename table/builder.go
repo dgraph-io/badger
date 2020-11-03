@@ -458,6 +458,10 @@ func (b *Builder) DataKey() *pb.DataKey {
 	return b.opt.DataKey
 }
 
+func (b *Builder) Opts() *Options {
+	return b.opt
+}
+
 // encrypt will encrypt the given data and appends IV to the end of the encrypted data.
 // This should be only called only after checking shouldEncrypt method.
 func (b *Builder) encrypt(data []byte) ([]byte, error) {

@@ -987,15 +987,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 		return nil
 	}
 
-	dk, err := db.registry.LatestDataKey()
-	if err != nil {
-		return y.Wrapf(err, "failed to get datakey in db.handleFlushTask")
-	}
-	bopts := buildTableOptions(db.opt)
-	bopts.DataKey = dk
-	// Builder does not need cache but the same options are used for opening table.
-	bopts.BlockCache = db.blockCache
-	bopts.IndexCache = db.indexCache
+	bopts := buildTableOptions(db)
 	builder := buildL0Table(ft, bopts)
 	defer builder.Close()
 
@@ -1009,6 +1001,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 
 	fileID := db.lc.reserveFileID()
 	var tbl *table.Table
+	var err error
 	if db.opt.InMemory {
 		data := builder.Finish()
 		tbl, err = table.OpenInMemoryTable(data, fileID, &bopts)
