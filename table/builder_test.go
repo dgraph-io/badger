@@ -115,7 +115,7 @@ func TestTableIndex(t *testing.T) {
 				}
 				builder.Add(k, vs, 0)
 			}
-			tbl, err := CreateTable(filename, builder.Finish(), opt)
+			tbl, err := CreateTable(filename, builder)
 			require.NoError(t, err, "unable to open table")
 
 			if opt.DataKey == nil {
