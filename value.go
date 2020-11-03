@@ -562,6 +562,9 @@ func (vlog *valueLog) open(db *DB) error {
 	}
 	// If no files are found, then create a new file.
 	if len(vlog.filesMap) == 0 {
+		if vlog.opt.ReadOnly {
+			return nil
+		}
 		_, err := vlog.createVlogFile()
 		return y.Wrapf(err, "Error while creating log file in valueLog.open")
 	}
@@ -584,6 +587,9 @@ func (vlog *valueLog) open(db *DB) error {
 		}
 	}
 
+	if vlog.opt.ReadOnly {
+		return nil
+	}
 	// Now we can read the latest value log file, and see if it needs truncation. We could
 	// technically do this over all the value log files, but that would mean slowing down the value
 	// log open.
@@ -894,7 +900,9 @@ func (vlog *valueLog) getFileRLocked(vp valuePointer) (*logFile, error) {
 
 	// Check for valid offset if we are reading from writable log.
 	maxFid := vlog.maxFid
-	if vp.Fid == maxFid {
+	// In read-only mode we don't need to check for writable offset as we are not writing anything.
+	// Moreover, this offset is not set in readonly mode.
+	if !vlog.opt.ReadOnly && vp.Fid == maxFid {
 		currentOffset := vlog.woffset()
 		if vp.Offset >= currentOffset {
 			return nil, errors.Errorf(

@@ -46,6 +46,7 @@ manual() {
   echo "==> Running manual tests"
   # Run the special Truncate test.
   rm -rf p
+  set -e
   go test -v $tags -run='TestTruncateVlogNoClose$' --manual=true
   truncate --size=4096 p/000000.vlog
   go test -v $tags -run='TestTruncateVlogNoClose2$' --manual=true
@@ -66,6 +67,7 @@ manual() {
 pkgs() {
   packages=$(go list ./... | grep github.com/dgraph-io/badger/v2/)
   echo "==> Running package tests for $packages"
+  set -e
   for pkg in $packages; do
     echo "===> Testing $pkg"
     go test $tags -timeout=25m -v -race $pkg -parallel 16
@@ -78,6 +80,7 @@ root() {
   # go test -timeout=25m -v -race github.com/dgraph-io/badger/v2/...
 
   echo "==> Running root level tests."
+  set -e
   go test $tags -timeout=25m -v . -race -parallel 16
   echo "==> DONE root level tests"
 }
@@ -86,4 +89,4 @@ export -f manual
 export -f pkgs
 export -f root
 
-parallel --progress --line-buffer ::: manual pkgs root
+parallel --halt now,fail=1 --progress --line-buffer ::: manual pkgs root
