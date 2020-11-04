@@ -4,6 +4,9 @@ set -e
 
 go version
 
+# Run `go list` BEFORE setting GOFLAGS so that the output is in the right
+# format for grep.
+packages=$(go list ./... | grep github.com/dgraph-io/badger/v2/)
 
 if [[ ! -z "$TEAMCITY_VERSION" ]]; then
   export GOFLAGS="-json"
@@ -43,7 +46,6 @@ InstallJemalloc
 
 # Run the memory intensive tests first.
 manual() {
-  packages=$(go list ./... | grep github.com/dgraph-io/badger/v2/)
   echo "==> Running package tests for $packages"
   set -e
   for pkg in $packages; do
