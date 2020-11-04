@@ -228,8 +228,9 @@ func (b block) verifyCheckSum() error {
 	return y.VerifyChecksum(b.data, cs)
 }
 
-func CreateTable(fname string, data []byte, opts Options) (*Table, error) {
-	mf, err := z.OpenMmapFile(fname, os.O_CREATE|os.O_RDWR|os.O_EXCL, len(data))
+func CreateTable(fname string, builder *Builder) (*Table, error) {
+	bd := builder.Done()
+	mf, err := z.OpenMmapFile(fname, os.O_CREATE|os.O_RDWR|os.O_EXCL, bd.Size)
 	if err == z.NewFile {
 		// Expected.
 	} else if err != nil {
@@ -238,13 +239,14 @@ func CreateTable(fname string, data []byte, opts Options) (*Table, error) {
 		return nil, errors.Errorf("file already exists: %s", fname)
 	}
 
-	copy(mf.Data, data)
-	if opts.SyncWrites {
+	written := bd.Copy(mf.Data)
+	y.AssertTrue(written == len(mf.Data))
+	if builder.opt.SyncWrites {
 		if err := z.Msync(mf.Data); err != nil {
 			return nil, y.Wrapf(err, "while calling msync on %s", fname)
 		}
 	}
-	return OpenTable(mf, opts)
+	return OpenTable(mf, *builder.opt)
 }
 
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function

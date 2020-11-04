@@ -151,7 +151,7 @@ func buildTable(t *testing.T, keyValues [][]string, bopts table.Options) *table.
 		}, 0)
 	}
 
-	tbl, err := table.CreateTable(filename, b.Finish(false), bopts)
+	tbl, err := table.CreateTable(filename, b)
 	require.NoError(t, err)
 	return tbl
 }

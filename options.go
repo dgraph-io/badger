@@ -22,6 +22,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/badger/v2/y"
 )
 
 // Note: If you add a new option X make sure you also add a WithX method on Options.
@@ -161,7 +162,10 @@ func DefaultOptions(path string) Options {
 	}
 }
 
-func buildTableOptions(opt Options) table.Options {
+func buildTableOptions(db *DB) table.Options {
+	opt := db.opt
+	dk, err := db.registry.LatestDataKey()
+	y.Check(err)
 	return table.Options{
 		SyncWrites:           opt.SyncWrites,
 		ReadOnly:             opt.ReadOnly,
@@ -171,6 +175,9 @@ func buildTableOptions(opt Options) table.Options {
 		ChkMode:              opt.ChecksumVerificationMode,
 		Compression:          opt.Compression,
 		ZSTDCompressionLevel: opt.ZSTDCompressionLevel,
+		BlockCache:           db.blockCache,
+		IndexCache:           db.indexCache,
+		DataKey:              dk,
 	}
 }
 
