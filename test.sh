@@ -6,7 +6,8 @@ go version
 
 # Run `go list` BEFORE setting GOFLAGS so that the output is in the right
 # format for grep.
-packages=$(go list ./... | grep github.com/dgraph-io/badger/v2/)
+# export packages because the test will run in a sub process.
+export packages=$(go list ./... | grep "github.com/dgraph-io/badger/v2/")
 
 if [[ ! -z "$TEAMCITY_VERSION" ]]; then
   export GOFLAGS="-json"
