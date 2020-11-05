@@ -780,8 +780,8 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 		}
 		go func(builder *table.Builder) {
 			var err error
-			defer builder.Close()
 			defer inflightBuilders.Done(err)
+			defer builder.Close()
 
 			build := func(fileID uint64) (*table.Table, error) {
 				fname := table.NewFilename(fileID, s.kv.opt.Dir)
@@ -804,7 +804,6 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	}
 	s.kv.vlog.updateDiscardStats(discardStats)
 	s.kv.opt.Debugf("Discard stats: %v", discardStats)
-	inflightBuilders.Done(nil)
 }
 
 // compactBuildTables merges topTables and botTables to form a list of new tables.
@@ -858,8 +857,12 @@ func (s *levelsController) compactBuildTables(
 	inflightBuilders := y.NewThrottle(8 + len(cd.splits))
 	for _, kr := range cd.splits {
 		// Initiate Do here so we can register the goroutines for buildTables too.
-		inflightBuilders.Do()
+		if err := inflightBuilders.Do(); err != nil {
+			s.kv.opt.Errorf("cannot start subcompaction: %+v", err)
+			return nil, nil, err
+		}
 		go func(kr keyRange) {
+			defer inflightBuilders.Done(nil)
 			it := table.NewMergeIterator(newIterator(), false)
 			defer it.Close()
 			s.subcompact(it, kr, cd, inflightBuilders, res)
