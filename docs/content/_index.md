@@ -4,95 +4,79 @@ date: 2020-07-06T17:43:29+05:30
 draft: false
 ---
 
-![Badger mascot](/images/diggy-shadow.png)
-
-**Welcome to the official Badger documentation.**
-
-BadgerDB is an embeddable, persistent and fast key-value (KV) database written
-in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
+<div class="landing">
+  <div class="hero">
+    <p>
+BadgerDB is an embeddable, persistent, and fast key-value (KV) database written
+in pure Go. It is the underlying database for <a href="https://dgraph.io">Dgraph</a>, a
 fast, distributed graph database. It's meant to be a performant alternative to
 non-Go-based key-value stores like RocksDB.
-
-## Table of Contents
-
-<section class="toc">
-  <div class="container">
-    <div class="row row-no-padding">
-      <div class="col-12 col-sm-6">
-        <div class="section-item">
-          <div class="section-name">
-            <a href="{{< relref "get-started/_index.md">}}">
-              Quickstart Guide
-            </a>
-          </div>
-          <p class="section-desc">
-            A single page quickstart guide to get started with BadgerDB
-          </p>
-        </div>
-      </div>
-      <div class="col-12 col-sm-6">
-        <div class="section-item">
-          <div class="section-name">
-            <a href="{{< relref "resources/_index.md">}}">
-              Resources
-            </a>
-          </div>
-          <p class="section-desc">
-            Additional resources and information
-          </p>
-        </div>
-      </div>
-      <div class="col-12 col-sm-6">
-        <div class="section-item">
-          <div class="section-name">
-            <a href="{{< relref "design/_index.md">}}">
-              Design
-            </a>
-          </div>
-          <p class="section-desc">
-            Design goals behind BadgerDB
-          </p>
-        </div>
-      </div>
-      <div class="col-12 col-sm-6">
-        <div class="section-item">
-          <div class="section-name">
-            <a href="{{< relref "projects-using-badger/_index.md">}}">
-              Projects using Badger
-            </a>
-          </div>
-          <p class="section-desc">
-            A list of known projects that use BadgerDB
-          </p>
-        </div>
-      </div>
-      <div class="col-12 col-sm-6">
-        <div class="section-item">
-          <div class="section-name">
-            <a href="/faq">
-              FAQ
-            </a>
-          </div>
-          <p class="section-desc">
-            Frequently asked questions
-          </p>
-        </div>
-      </div>
-      <div class="col-12 col-sm-6">
-        <div class="section-item">
-          <div class="section-name">
-            <a href="https://dgraph.io/badger">
-              Badger
-            </a>
-          </div>
-          <p class="section-desc">
-            Embeddable, persistent and fast key-value database that powers Dgraph
-          </p>
-        </div>
-      </div>
-    </div>
+    </p>
+    <img class="hero-deco" src="/images/diggy-shadow.png" />
   </div>
-</section>
+  <div class="item">
+    <div class="icon"><i class="lni lni-play" aria-hidden="true"></i></div>
+    <a  href="{{< relref "get-started/_index.md">}}">
+      <h3>Quickstart Guide</h3>
+      <p>
+        A single page quickstart guide to get started with BadgerDB
+      </p>
+    </a>
+  </div>
+  <div class="item">
+    <div class="icon"><i class="lni lni-book" aria-hidden="true"></i></div>
+    <a href="{{< relref "resources/_index.md">}}">
+      <h3>Resources</h3>
+      <p>
+        Additional resources and information
+      </p>
+    </a>
+  </div>
+  <div class="item">
+    <div class="icon"><i class="lni lni-layers" aria-hidden="true"></i></div>
+    <a href="{{< relref "design/_index.md">}}">
+      <h3>Design</h3>
+      <p>
+        Design goals behind BadgerDB
+      </p>
+    </a>
+  </div>
+
+  <div class="item">
+    <div class="icon"><i class="lni lni-direction-alt" aria-hidden="true"></i></div>
+    <a href="{{< relref "projects-using-badger/_index.md">}}">
+      <h3>Projects using Badger</h3>
+      <p>
+        A list of known projects that use BadgerDB
+      </p>
+    </a>
+  </div>
+  <div class="item">
+    <div class="icon"><i class="lni lni-question-circle" aria-hidden="true"></i></div>
+    <a href="{{< relref "faq/_index.md">}}">
+      <h3>FAQ</h3>
+      <p>
+        Frequently asked questions
+      </p>
+    </a>
+  </div>
+  <div class="item">
+    <div class="icon"><i class="lni lni-database" aria-hidden="true"></i></div>
+    <a href="https://dgraph.io/badger">
+      <h3>Badger</h3>
+      <p>
+        Embeddable, persistent, and fast key-value database that powers Dgraph
+      </p>
+    </a>
+  </div>
+
+</div>
+
+<style>
+  ul.contents {
+    display: none;
+  }
+</style>
 
 ## Changelog
 

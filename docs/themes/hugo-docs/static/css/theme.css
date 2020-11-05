@@ -621,3 +621,128 @@ section.toc .section-item {
     border-top: 1px solid #ccc !important;
   }
 }
+
+:root {
+  --cols: 1;
+  --width: 90vw;
+  --gap: 5vw;
+}
+@media screen and (min-width: 680px) {
+  :root {
+    --cols: 2;
+    --width: 300px;
+    --gap: 10px;
+  }
+}
+@media screen and (min-width: 1000px) {
+  :root {
+    --cols: 3;
+    --width: 300px;
+    --gap: 10px;
+  }
+}
+@media screen and (min-width: 1200px) {
+  :root {
+    --cols: 3;
+    --width: 320px;
+    --gap: 30px;
+  }
+}
+.landing {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  flex-wrap: wrap;
+
+  margin: 0 calc(0px - var(--gap));
+  width: calc(var(--cols) * (var(--width) + 2 * var(--gap)));
+}
+.landing .hero {
+  width: calc(var(--cols) * (var(--width) + 2 * var(--gap)));
+  padding: 0 var(--gap);
+}
+.landing .hero p {
+  width: 50%;
+}
+@media screen and (max-width: 1000px) {
+  .landing .hero img {
+    display: none;
+  }
+  .landing .hero p {
+    width: 100%;
+  }
+}
+
+.landing .hero img {
+  right: var(--gap);
+}
+.landing .item {
+  padding: 72px 32px 32px;
+  border-radius: 4px;
+  box-shadow: 0 0 6px 1px #ccc;
+  display: inline-block;
+  margin-bottom: 24px;
+  position: relative;
+
+  box-sizing: border-box;
+  width: var(--width);
+  margin: var(--gap);
+}
+
+.landing .item h3 {
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 1rem;
+  font-weight: bold;
+}
+.landing .item h3:hover, .landing .item .cta:hover  {
+  text-decoration: underline;
+}
+
+.landing .item .icon {
+  position: absolute;
+  left: 32px;
+  top: 32px;
+  height: 24px;
+  width: 24px;
+  font-size: 24px;
+  line-height: 24px;
+}
+
+.landing .item .icon * {
+  fill: #fb5812;
+  color: #fb5812;
+}
+
+.landing .item p {
+  margin: 0 0 16px;
+  padding: 0;
+  color: #000;
+}
+.landing .item a:hover {
+  text-decoration: none;
+}
+
+.landing .item p.cta {
+  margin: 0 0 16px;
+  padding: 0;
+  color: #fb5812;
+}
+
+.landing .hero {
+  position: relative;
+  height: 160px;
+  margin-bottom: 32px;
+}
+.landing .hero h1 {
+  padding: 24px 0 8px;
+  font-size: 24px;
+}
+.landing .hero img {
+  position: absolute;
+  border-radius: 4px;
+  overflow: hidden;
+  height: 160px;
+  top: 0;
+  max-width: 45%;
+}
