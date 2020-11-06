@@ -1001,7 +1001,8 @@ func (s *levelsController) addSplits(cd *compactDef) {
 			return
 		}
 		if i%N == N-1 {
-			addRange(t.Biggest())
+			right := y.KeyWithTs(y.ParseKey(t.Biggest()), math.MaxUint64)
+			addRange(right)
 		}
 	}
 }
