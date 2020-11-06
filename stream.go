@@ -309,13 +309,6 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	defer t.Stop()
 	now := time.Now()
 
-	var allocs []*z.Allocator
-	defer func() {
-		for _, a := range allocs {
-			a.Release()
-		}
-	}()
-
 	sendBatch := func(batch *pb.KVList) error {
 		sz := uint64(proto.Size(batch))
 		bytesSent += sz
@@ -327,10 +320,6 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 		st.db.opt.Infof("%s Created batch of size: %s in %s.\n",
 			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
 
-		for _, a := range allocs {
-			a.Release()
-		}
-		allocs = allocs[:0]
 		return nil
 	}
 
@@ -351,7 +340,6 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 				}
 				y.AssertTrue(kvs != nil)
 				batch.Kv = append(batch.Kv, kvs.Kv...)
-				allocs = append(allocs, z.AllocatorFrom(kvs.AllocRef))
 
 			default:
 				break loop
@@ -384,7 +372,6 @@ outer:
 			}
 			y.AssertTrue(kvs != nil)
 			batch = kvs
-			allocs = append(allocs, z.AllocatorFrom(kvs.AllocRef))
 
 			// Otherwise, slurp more keys into this batch.
 			if err := slurp(batch); err != nil {
