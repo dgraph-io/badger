@@ -529,8 +529,8 @@ func TestGetMore(t *testing.T) {
 		data := func(i int) []byte {
 			return []byte(fmt.Sprintf("%b", i))
 		}
-		//	n := 500000
-		n := 10000
+		n := 500000
+		// n := 10000
 		m := 45 // Increasing would cause ErrTxnTooBig
 		for i := 0; i < n; i += m {
 			txn := db.NewTransaction(true)
