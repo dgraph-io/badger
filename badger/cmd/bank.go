@@ -69,7 +69,6 @@ var (
 	numPrevious     int
 	duration        string
 	stopAll         int32
-	mmap            bool
 	checkStream     bool
 	checkSubscriber bool
 	verbose         bool
@@ -91,7 +90,6 @@ func init() {
 	bankTest.Flags().IntVarP(
 		&numGoroutines, "conc", "c", 16, "Number of concurrent transactions to run.")
 	bankTest.Flags().StringVarP(&duration, "duration", "d", "3m", "How long to run the test.")
-	bankTest.Flags().BoolVarP(&mmap, "mmap", "m", false, "If true, mmap LSM tree. Default is RAM.")
 	bankTest.Flags().BoolVarP(&checkStream, "check_stream", "s", false,
 		"If true, the test will send transactions to another badger instance via the stream "+
 			"interface in order to verify that all data is streamed correctly.")
