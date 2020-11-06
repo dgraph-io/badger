@@ -524,15 +524,20 @@ func BenchmarkDbGrowth(b *testing.B) {
 // Put a lot of data to move some data to disk.
 // WARNING: This test might take a while but it should pass!
 func TestGetMore(t *testing.T) {
+	if !*manual {
+		t.Skip("Skipping test meant to be run manually.")
+		return
+	}
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-
 		data := func(i int) []byte {
 			return []byte(fmt.Sprintf("%b", i))
 		}
-		//	n := 500000
-		n := 10000
+		n := 500000
 		m := 45 // Increasing would cause ErrTxnTooBig
 		for i := 0; i < n; i += m {
+			if (i % 10000) == 0 {
+				fmt.Printf("Inserting i=%d\n", i)
+			}
 			txn := db.NewTransaction(true)
 			for j := i; j < i+m && j < n; j++ {
 				require.NoError(t, txn.SetEntry(NewEntry(data(j), data(j))))

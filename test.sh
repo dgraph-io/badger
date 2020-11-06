@@ -78,6 +78,7 @@ manual() {
   go test $tags -run='TestIterateParallel' --manual=true
   go test $tags -run='TestBigStream' --manual=true
   go test $tags -run='TestGoroutineLeak' --manual=true
+  go test $tags -run='TestGetMore' --manual=true
 
   echo "==> DONE manual tests"
 }
