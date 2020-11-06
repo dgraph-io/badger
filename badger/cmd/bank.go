@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/spf13/cobra"
@@ -69,7 +68,6 @@ var (
 	numPrevious     int
 	duration        string
 	stopAll         int32
-	mmap            bool
 	checkStream     bool
 	checkSubscriber bool
 	verbose         bool
@@ -91,7 +89,6 @@ func init() {
 	bankTest.Flags().IntVarP(
 		&numGoroutines, "conc", "c", 16, "Number of concurrent transactions to run.")
 	bankTest.Flags().StringVarP(&duration, "duration", "d", "3m", "How long to run the test.")
-	bankTest.Flags().BoolVarP(&mmap, "mmap", "m", false, "If true, mmap LSM tree. Default is RAM.")
 	bankTest.Flags().BoolVarP(&checkStream, "check_stream", "s", false,
 		"If true, the test will send transactions to another badger instance via the stream "+
 			"interface in order to verify that all data is streamed correctly.")
@@ -313,7 +310,7 @@ func runDisect(cmd *cobra.Command, args []string) error {
 		WithValueDir(vlogDir).
 		WithReadOnly(true).
 		WithEncryptionKey([]byte(encryptionKey)).
-		WithIndexCacheSize(10 << 20))
+		WithIndexCacheSize(1 << 30))
 	if err != nil {
 		return err
 	}
@@ -358,16 +355,11 @@ func runTest(cmd *cobra.Command, args []string) error {
 	// Open DB
 	opts := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
-		WithBaseTableSize(4 << 20). // Force more compactions.
-		WithNumLevelZeroTables(2).
-		WithNumMemtables(2).
-		// Do not GC any versions, because we need them for the disect..
+		// Do not GC any versions, because we need them for the disect.
 		WithNumVersionsToKeep(int(math.MaxInt32)).
-		WithValueThreshold(1). // Make all values go to value log
-		WithCompression(options.Snappy).
-		WithBlockCacheSize(10 << 20).
-		WithIndexCacheSize(10 << 20)
-
+		WithBlockCacheSize(1 << 30).
+		WithIndexCacheSize(1 << 30)
+ 
 	if verbose {
 		opts = opts.WithLoggingLevel(badger.DEBUG)
 	}
