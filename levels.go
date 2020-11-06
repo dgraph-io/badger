@@ -747,7 +747,8 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	} // End of function: addKeys
 
 	if len(kr.left) > 0 {
-		it.Seek(kr.left)
+		left := y.KeyWithTs(y.ParseKey(kr.left), math.MaxUint64)
+		it.Seek(left)
 	} else {
 		it.Rewind()
 	}
