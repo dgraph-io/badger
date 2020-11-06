@@ -312,7 +312,8 @@ func runDisect(cmd *cobra.Command, args []string) error {
 	db, err := badger.OpenManaged(badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(true).
-		WithEncryptionKey([]byte(encryptionKey)))
+		WithEncryptionKey([]byte(encryptionKey)).
+		WithIndexCacheSize(10 << 20))
 	if err != nil {
 		return err
 	}
@@ -363,7 +364,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		// Do not GC any versions, because we need them for the disect..
 		WithNumVersionsToKeep(int(math.MaxInt32)).
 		WithValueThreshold(1). // Make all values go to value log
-		WithCompression(options.ZSTD).
+		WithCompression(options.Snappy).
 		WithBlockCacheSize(10 << 20).
 		WithIndexCacheSize(10 << 20)
 
