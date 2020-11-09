@@ -1001,7 +1001,15 @@ func (s *levelsController) addSplits(cd *compactDef) {
 			return
 		}
 		if i%N == N-1 {
-			addRange(t.Biggest())
+			// Right should always have ts=maxUint64 otherwise we'll lose keys
+			// in subcompaction. Consider the following.
+			// Top table is [A1...C3(deleted)]
+			// bot table is [B1....C2]
+			// This will generate splits like [A1 ... C2] . Notice that we
+			// dropped the C3 which is the last key of the top table.
+			// See TestCompaction/with_split test.
+			right := y.KeyWithTs(y.ParseKey(t.Biggest()), math.MaxUint64)
+			addRange(right)
 		}
 	}
 }

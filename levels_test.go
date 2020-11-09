@@ -403,6 +403,49 @@ func TestCompaction(t *testing.T) {
 				getAllAndCheck(t, db, []keyValVersion{{"fooo", "barr", 2, 0}})
 			})
 		})
+		t.Run("with splits", func(t *testing.T) {
+			runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+				l1 := []keyValVersion{{"C", "bar", 3, bitDelete}}
+				l21 := []keyValVersion{{"A", "bar", 2, 0}}
+				l22 := []keyValVersion{{"B", "bar", 2, 0}}
+				l23 := []keyValVersion{{"C", "bar", 2, 0}}
+				l24 := []keyValVersion{{"D", "bar", 2, 0}}
+				l3 := []keyValVersion{{"fooz", "baz", 1, 0}}
+				createAndOpen(db, l1, 1)
+				createAndOpen(db, l21, 2)
+				createAndOpen(db, l22, 2)
+				createAndOpen(db, l23, 2)
+				createAndOpen(db, l24, 2)
+				createAndOpen(db, l3, 3)
+
+				// Set a high discard timestamp so that all the keys are below the discard timestamp.
+				db.SetDiscardTs(10)
+
+				getAllAndCheck(t, db, []keyValVersion{
+					{"A", "bar", 2, 0},
+					{"B", "bar", 2, 0},
+					{"C", "bar", 3, bitDelete},
+					{"C", "bar", 2, 0},
+					{"D", "bar", 2, 0},
+					{"fooz", "baz", 1, 0},
+				})
+				cdef := compactDef{
+					thisLevel: db.lc.levels[1],
+					nextLevel: db.lc.levels[2],
+					top:       db.lc.levels[1].tables,
+					bot:       db.lc.levels[2].tables,
+					t:         db.lc.levelTargets(),
+				}
+				cdef.t.baseLevel = 2
+				require.NoError(t, db.lc.runCompactDef(-1, 1, cdef))
+				getAllAndCheck(t, db, []keyValVersion{
+					{"A", "bar", 2, 0},
+					{"B", "bar", 2, 0},
+					{"D", "bar", 2, 0},
+					{"fooz", "baz", 1, 0},
+				})
+			})
+		})
 	})
 }
 
