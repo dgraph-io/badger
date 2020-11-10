@@ -40,7 +40,7 @@ type Arena struct {
 }
 
 func (s *Arena) size() int64 {
-	return int64(len(s.data))
+	return int64(atomic.LoadUint32(&s.offset))
 }
 
 // allocateValue encodes valueStruct and put it in the arena buffer.
