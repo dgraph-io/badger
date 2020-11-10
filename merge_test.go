@@ -115,7 +115,8 @@ func TestGetMergeOperator(t *testing.T) {
 		require.NoError(t, err)
 		defer removeDir(dir)
 
-		opts := getTestOptions(dir)
+		// This test relies on CompactL0OnClose
+		opts := getTestOptions(dir).WithCompactL0OnClose(true)
 		db, err := Open(opts)
 		require.NoError(t, err)
 		mergeKey := []byte("foo")
