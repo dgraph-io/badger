@@ -132,8 +132,7 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 // NewSkiplist makes a new empty skiplist, with a given arena size.
 func NewSkiplist(arenaSize int64) *Skiplist {
 	buf := z.Calloc(int(arenaSize))
-	skl := NewSkiplistWith(buf, true)
-	return skl
+	return NewSkiplistWith(buf, true)
 }
 
 // NewSkiplistWithBuffer makes a new skiplist, with a given byte slice.
