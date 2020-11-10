@@ -130,7 +130,7 @@ func DefaultOptions(path string) Options {
 		BlockSize:               4 * 1024,
 		SyncWrites:              false,
 		NumVersionsToKeep:       1,
-		CompactL0OnClose:        true,
+		CompactL0OnClose:        false,
 		VerifyValueChecksum:     false,
 		Compression:             options.Snappy,
 		BlockCacheSize:          256 << 20,
@@ -425,10 +425,9 @@ func (opt Options) WithNumCompactors(val int) Options {
 }
 
 // WithCompactL0OnClose determines whether Level 0 should be compacted before closing the DB.  This
-// ensures that both reads and writes are efficient when the DB is opened later.  CompactL0OnClose
-// is set to true if KeepL0InMemory is set to true.
+// ensures that both reads and writes are efficient when the DB is opened later.
 //
-// The default value of CompactL0OnClose is true.
+// The default value of CompactL0OnClose is false.
 func (opt Options) WithCompactL0OnClose(val bool) Options {
 	opt.CompactL0OnClose = val
 	return opt

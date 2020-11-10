@@ -342,7 +342,8 @@ func TestForceCompactL0(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 
-	opts := getTestOptions(dir)
+	// This test relies on CompactL0OnClose
+	opts := getTestOptions(dir).WithCompactL0OnClose(true)
 	opts.ValueLogFileSize = 15 << 20
 	opts.managedTxns = true
 	db, err := Open(opts)
