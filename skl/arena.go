@@ -37,10 +37,25 @@ const (
 type Arena struct {
 	data   []byte
 	offset uint32
+	// Grow is not thread-safe, if it is defined then skiplist will not be thread-safe
+	Grow func(uint32) []byte
 }
 
 func (s *Arena) size() int64 {
 	return int64(atomic.LoadUint32(&s.offset))
+}
+
+func (s *Arena) allocate(sz uint32) uint32 {
+	// limit is hit
+	if atomic.LoadUint32(&s.offset)+sz > uint32(cap(s.data)-1) {
+		if s.Grow == nil {
+			panic("Grow not defined")
+		}
+		x := s.Grow(sz)
+		//y.AssertTrue(bytes.Compare(x[:s.offset], s.data[:s.offset]) == 0)
+		s.data = x
+	}
+	return atomic.AddUint32(&s.offset, sz)
 }
 
 // allocateValue encodes valueStruct and put it in the arena buffer.
@@ -59,7 +74,7 @@ func (s *Arena) putNode(height int) uint32 {
 
 	// Pad the allocation with enough bytes to ensure pointer alignment.
 	l := uint32(MaxNodeSize - unusedSize + nodeAlign)
-	n := atomic.AddUint32(&s.offset, l)
+	n := s.allocate(l)
 
 	// Return the aligned offset.
 	m := (n - l + uint32(nodeAlign)) & ^uint32(nodeAlign)
@@ -72,7 +87,7 @@ func (s *Arena) putNode(height int) uint32 {
 // decoding will incur some overhead.
 func (s *Arena) putVal(v y.ValueStruct) uint32 {
 	l := uint32(v.EncodedSize())
-	m := atomic.AddUint32(&s.offset, l)
+	m := s.allocate(l)
 	buf := s.data[uint32(m)-l : m]
 	v.Encode(buf)
 	return uint32(m) - l
@@ -81,7 +96,7 @@ func (s *Arena) putVal(v y.ValueStruct) uint32 {
 // putKey puts the key and returns its offset
 func (s *Arena) putKey(key []byte) uint32 {
 	keySz := uint32(len(key))
-	offset := atomic.AddUint32(&s.offset, keySz) - keySz
+	offset := s.allocate(keySz) - keySz
 	buf := s.data[offset : offset+keySz]
 	y.AssertTrue(len(key) == copy(buf, key))
 	return offset

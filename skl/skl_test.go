@@ -19,6 +19,7 @@ package skl
 import (
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -29,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 const arenaSize = 1 << 20
@@ -126,6 +128,49 @@ func TestBasic(t *testing.T) {
 	require.NotNil(t, v.Value)
 	require.EqualValues(t, val5, v.Value)
 	require.EqualValues(t, 60, v.Meta)
+}
+
+func TestMoreData(t *testing.T) {
+	//buf := z.Calloc(1 << 10)
+	//	grow := func(old []byte, sz uint32) []byte {
+	//		nb := z.Calloc(int(sz) + len(old))
+	//		copy(nb, old)
+	//		return nb
+	//	}
+	fd, err := ioutil.TempFile("", "skiplist")
+	y.Check(err)
+	mf, err := z.OpenMmapFileUsing(fd, 1<<5, true)
+	if err != z.NewFile {
+		y.Check(err)
+	}
+
+	grow := func(sz uint32) []byte {
+		fmt.Println("Growing")
+		var newSz int
+		if cap(mf.Data) > int(sz) {
+			newSz = cap(mf.Data) * 2
+		} else {
+			newSz = cap(mf.Data) + int(sz)
+		}
+		err := mf.Truncate(int64(newSz))
+		y.Check(err)
+		y.AssertTrue(cap(mf.Data) == newSz)
+		return mf.Data
+	}
+
+	l := NewSkiplistWith(mf.Data, false, grow)
+	n := 100000
+	for i := 0; i < n; i++ {
+		x := []byte(fmt.Sprintf("%d", i))
+		l.PutUint64(x, uint64(i))
+	}
+	fmt.Println("now getting")
+	for i := 0; i < n; i++ {
+		x := []byte(fmt.Sprintf("%d", i))
+		val, err := l.GetUint64(x)
+		require.True(t, err)
+		require.Equal(t, val, uint64(i))
+	}
 }
 
 // TestConcurrentBasic tests concurrent writes followed by concurrent reads.

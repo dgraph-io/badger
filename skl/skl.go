@@ -79,6 +79,7 @@ type comparatorFunc func([]byte, []byte) int
 type Skiplist struct {
 	height      int32 // Current height. 1 <= height <= kMaxHeight. CAS.
 	head        *node
+	headOff     uint32
 	ref         int32
 	arena       *Arena
 	hasVersions bool
@@ -108,15 +109,16 @@ func (s *Skiplist) DecrRef() {
 	s.head = nil
 }
 
-func newNode(arena *Arena, key []byte, u uint64, height int) *node {
+func newNode(arena *Arena, key []byte, u uint64, height int) uint32 {
 	// The base level is already allocated in the node struct.
 	offset := arena.putNode(height)
+	keyOffset := arena.putKey(key)
 	node := arena.getNode(offset)
-	node.keyOffset = arena.putKey(key)
+	node.keyOffset = keyOffset
 	node.keySize = uint16(len(key))
 	node.height = uint16(height)
 	node.value = u
-	return node
+	return offset
 }
 
 func encodeValue(valOffset uint32, valSize uint32) uint64 {
@@ -132,7 +134,7 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 // NewSkiplist makes a new empty skiplist, with a given arena size.
 func NewSkiplist(arenaSize int64) *Skiplist {
 	buf := z.Calloc(int(arenaSize))
-	s := NewSkiplistWith(buf, true)
+	s := NewSkiplistWith(buf, true, nil)
 	s.OnClose = func() {
 		z.Free(s.arena.data)
 	}
@@ -140,14 +142,16 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 }
 
 // NewSkiplistWithBuffer makes a new skiplist, with a given byte slice.
-func NewSkiplistWith(buf []byte, hasVersions bool) *Skiplist {
+func NewSkiplistWith(buf []byte, hasVersions bool, grow func(uint32) []byte) *Skiplist {
 	arena := new(Arena)
 	arena.data = buf
+	arena.Grow = grow
 	offset := arena.allocateValue(y.ValueStruct{})
-	head := newNode(arena, nil, offset, maxHeight)
+	headoff := newNode(arena, nil, offset, maxHeight)
 	sl := &Skiplist{
 		height:      1,
-		head:        head,
+		head:        nil,
+		headOff:     headoff,
 		arena:       arena,
 		ref:         1,
 		hasVersions: hasVersions,
@@ -199,6 +203,10 @@ func (s *Skiplist) getNext(nd *node, height int) *node {
 	return s.arena.getNode(nd.getNextOffset(height))
 }
 
+func (s *Skiplist) getHead() *node {
+	return s.arena.getNode(s.headOff)
+}
+
 // findNear finds the node near to key.
 // If less=true, it finds rightmost node such that node.key < key (if allowEqual=false) or
 // node.key <= key (if allowEqual=true).
@@ -206,7 +214,8 @@ func (s *Skiplist) getNext(nd *node, height int) *node {
 // node.key >= key (if allowEqual=true).
 // Returns the node found. The bool returned is true if the node has key equal to given key.
 func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool) {
-	x := s.head
+	//x := s.head
+	x := s.getHead()
 	level := int(s.getHeight() - 1)
 	for {
 		// Assume x.key < key.
@@ -223,7 +232,7 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 				return nil, false
 			}
 			// Try to return x. Make sure it is not a head node.
-			if x == s.head {
+			if x == s.getHead() {
 				return nil, false
 			}
 			return x, false
@@ -251,7 +260,7 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 				continue
 			}
 			// On base level. Return x.
-			if x == s.head {
+			if x == s.getHead() {
 				return nil, false
 			}
 			return x, false
@@ -266,7 +275,7 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 			return next, false
 		}
 		// Try to return x. Make sure it is not a head node.
-		if x == s.head {
+		if x == s.getHead() {
 			return nil, false
 		}
 		return x, false
@@ -277,24 +286,27 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 // The input "before" tells us where to start looking.
 // If we found a node with the same key, then we return outBefore = outAfter.
 // Otherwise, outBefore.key < key < outAfter.key.
-func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*node, *node) {
+func (s *Skiplist) findSpliceForLevel(key []byte, beforeOff uint32, level int) (uint32, uint32) {
 	for {
 		// Assume before.key < key.
-		next := s.getNext(before, level)
+		before := s.arena.getNode(beforeOff)
+		nextOff := before.getNextOffset(level)
+		next := s.arena.getNode(nextOff) //s.getNext(before, level)
 		if next == nil {
-			return before, next
+			return beforeOff, nextOff
 		}
 		nextKey := next.key(s.arena)
 		cmp := s.comparator(key, nextKey)
 		if cmp == 0 {
 			// Equality case.
-			return next, next
+			return nextOff, nextOff
 		}
 		if cmp < 0 {
 			// before.key < key < next.key. We are done for this level.
-			return before, next
+			return beforeOff, nextOff
 		}
-		before = next // Keep moving right on this level.
+		beforeOff = nextOff
+		// before = next // Keep moving right on this level.
 	}
 }
 
@@ -314,23 +326,24 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 	// increase the height. Let's defer these actions.
 
 	listHeight := s.getHeight()
-	var prev [maxHeight + 1]*node
-	var next [maxHeight + 1]*node
-	prev[listHeight] = s.head
-	next[listHeight] = nil
+	var prev [maxHeight + 1]uint32
+	var next [maxHeight + 1]uint32
+	prev[listHeight] = s.headOff
+	next[listHeight] = 0
 	for i := int(listHeight) - 1; i >= 0; i-- {
 		// Use higher level to speed up for current level.
 		prev[i], next[i] = s.findSpliceForLevel(key, prev[i+1], i)
 		if prev[i] == next[i] {
-			prev[i].setUint64(u)
+			nd := s.arena.getNode(prev[i])
+			nd.setUint64(u)
 			return
 		}
 	}
 
 	// We do need to create a new node.
 	height := s.randomHeight()
-	x := newNode(s.arena, key, u, height)
-
+	xo := newNode(s.arena, key, u, height)
+	x := s.arena.getNode(xo)
 	// Try to increase s.height via CAS.
 	listHeight = s.getHeight()
 	for height > int(listHeight) {
@@ -345,18 +358,19 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 	// create a node in the level above because it would have discovered the node in the base level.
 	for i := 0; i < height; i++ {
 		for {
-			if prev[i] == nil {
+			nd := s.arena.getNode(prev[i])
+			if nd == nil {
 				y.AssertTrue(i > 1) // This cannot happen in base level.
 				// We haven't computed prev, next for this level because height exceeds old listHeight.
 				// For these levels, we expect the lists to be sparse, so we can just search from head.
-				prev[i], next[i] = s.findSpliceForLevel(key, s.head, i)
+				prev[i], next[i] = s.findSpliceForLevel(key, s.headOff, i)
 				// Someone adds the exact same key before we are able to do so. This can only happen on
 				// the base level. But we know we are not on the base level.
 				y.AssertTrue(prev[i] != next[i])
 			}
-			nextOffset := s.arena.getNodeOffset(next[i])
-			x.tower[i] = nextOffset
-			if prev[i].casNextOffset(i, nextOffset, s.arena.getNodeOffset(x)) {
+			x.tower[i] = next[i]
+			pnode := s.arena.getNode(prev[i])
+			if pnode.casNextOffset(i, next[i], s.arena.getNodeOffset(x)) {
 				// Managed to insert x between prev[i] and next[i]. Go to the next level.
 				break
 			}
@@ -366,7 +380,8 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 			prev[i], next[i] = s.findSpliceForLevel(key, prev[i], i)
 			if prev[i] == next[i] {
 				y.AssertTruef(i == 0, "Equality can happen only on base level: %d", i)
-				prev[i].setUint64(u)
+				pnode := s.arena.getNode(prev[i])
+				pnode.setUint64(u)
 				return
 			}
 		}
@@ -381,7 +396,7 @@ func (s *Skiplist) Empty() bool {
 // findLast returns the last element. If head (empty list), we return nil. All the find functions
 // will NEVER return the head nodes.
 func (s *Skiplist) findLast() *node {
-	n := s.head
+	n := s.getHead()
 	level := int(s.getHeight()) - 1
 	for {
 		next := s.getNext(n, level)
@@ -390,7 +405,7 @@ func (s *Skiplist) findLast() *node {
 			continue
 		}
 		if level == 0 {
-			if n == s.head {
+			if n == s.getHead() {
 				return nil
 			}
 			return n
@@ -514,7 +529,7 @@ func (s *Iterator) SeekForPrev(target []byte) {
 // SeekToFirst seeks position at the first entry in list.
 // Final state of iterator is Valid() iff list is not empty.
 func (s *Iterator) SeekToFirst() {
-	s.n = s.list.getNext(s.list.head, 0)
+	s.n = s.list.getNext(s.list.getHead(), 0)
 }
 
 // SeekToLast seeks position at the last entry in list.
