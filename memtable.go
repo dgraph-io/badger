@@ -273,10 +273,6 @@ func (lf *logFile) Truncate(end int64) error {
 	} else if fi.Size() == end {
 		return nil
 	}
-	if lf.opt.ReadOnly {
-		return y.Wrapf(ErrTruncateNeeded,
-			"truncate to %d from %d for file: %s", end, lf.size, lf.path)
-	}
 	lf.size = uint32(end)
 	return lf.MmapFile.Truncate(end)
 }
