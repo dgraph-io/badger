@@ -137,7 +137,7 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 	return s
 }
 
-// NewSkiplistWithBuffer makes a new skiplist, with a given byte slice.
+// NewSkiplistWith makes a new skiplist, with a given byte slice.
 func NewSkiplistWith(buf []byte, hasVersions bool, grow func(uint32) []byte) *Skiplist {
 	arena := new(Arena)
 	arena.data = buf
@@ -350,8 +350,7 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 	// create a node in the level above because it would have discovered the node in the base level.
 	for i := 0; i < height; i++ {
 		for {
-			nd := s.arena.getNode(prev[i])
-			if nd == nil {
+			if s.arena.getNode(prev[i]) == nil {
 				y.AssertTrue(i > 1) // This cannot happen in base level.
 				// We haven't computed prev, next for this level because height exceeds old listHeight.
 				// For these levels, we expect the lists to be sparse, so we can just search from head.
