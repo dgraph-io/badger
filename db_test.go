@@ -534,49 +534,43 @@ func TestGetMore(t *testing.T) {
 			return []byte(fmt.Sprintf("%b", i))
 		}
 		n := 500000
-		m := 45 // Increasing would cause ErrTxnTooBig
-		for i := 0; i < n; i += m {
+		wb := db.NewWriteBatch()
+		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
 				fmt.Printf("Inserting i=%d\n", i)
 			}
-			txn := db.NewTransaction(true)
-			for j := i; j < i+m && j < n; j++ {
-				require.NoError(t, txn.SetEntry(NewEntry(data(j), data(j))))
-			}
-			require.NoError(t, txn.Commit())
+			require.NoError(t, wb.SetEntry(NewEntry(data(i), data(i))))
 		}
+		require.NoError(t, wb.Flush())
 		require.NoError(t, db.validate())
 
+		txn := db.NewTransaction(false)
 		for i := 0; i < n; i++ {
-			txn := db.NewTransaction(false)
 			item, err := txn.Get(data(i))
-			if err != nil {
-				t.Error(err)
-			}
+			require.NoError(t, err)
 			require.EqualValues(t, string(data(i)), string(getItemValue(t, item)))
-			txn.Discard()
 		}
+		txn.Discard()
 
+		wb = db.NewWriteBatch()
 		// Overwrite
-		for i := 0; i < n; i += m {
-			txn := db.NewTransaction(true)
-			for j := i; j < i+m && j < n; j++ {
-				require.NoError(t, txn.SetEntry(NewEntry(data(j),
-					// Use a long value that will certainly exceed value threshold.
-					[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", j)))))
+		for i := 0; i < n; i++ {
+			if (i % 10000) == 0 {
+				fmt.Printf("Overwriting i=%d\n", i)
 			}
-			require.NoError(t, txn.Commit())
+			require.NoError(t, wb.SetEntry(NewEntry(data(i),
+				// Use a long value that will certainly exceed value threshold.
+				[]byte(fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", i)))))
 		}
+		require.NoError(t, wb.Flush())
 		require.NoError(t, db.validate())
 
+		txn = db.NewTransaction(false)
 		for i := 0; i < n; i++ {
 			expectedValue := fmt.Sprintf("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz%9d", i)
 			k := data(i)
-			txn := db.NewTransaction(false)
 			item, err := txn.Get(k)
-			if err != nil {
-				t.Error(err)
-			}
+			require.NoError(t, err)
 			got := string(getItemValue(t, item))
 			if expectedValue != got {
 
@@ -598,32 +592,30 @@ func TestGetMore(t *testing.T) {
 				txn.Discard()
 			}
 			require.EqualValues(t, expectedValue, string(getItemValue(t, item)), "wanted=%q Item: %s\n", k, item)
-			txn.Discard()
 		}
+		txn.Discard()
 
+		wb = db.NewWriteBatch()
 		// "Delete" key.
-		for i := 0; i < n; i += m {
+		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
 				fmt.Printf("Deleting i=%d\n", i)
 			}
-			txn := db.NewTransaction(true)
-			for j := i; j < i+m && j < n; j++ {
-				require.NoError(t, txn.Delete(data(j)))
-			}
-			require.NoError(t, txn.Commit())
+			require.NoError(t, wb.Delete(data(i)))
 		}
+		require.NoError(t, wb.Flush())
 		db.validate()
+		txn = db.NewTransaction(false)
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {
 				// Display some progress. Right now, it's not very fast with no caching.
 				fmt.Printf("Testing i=%d\n", i)
 			}
 			k := data(i)
-			txn := db.NewTransaction(false)
 			_, err := txn.Get([]byte(k))
 			require.Equal(t, ErrKeyNotFound, err, "should not have found k: %q", k)
-			txn.Discard()
 		}
+		txn.Discard()
 	})
 }
 
