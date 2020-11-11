@@ -36,12 +36,13 @@ function InstallJemalloc() {
   popd
 }
 
+tags="-tags=jemalloc"
+
 # Ensure that we can compile the binary.
 pushd badger
-go build -v .
+go build -v $tags .
 popd
 
-tags="-tags=jemalloc"
 # tags=""
 InstallJemalloc
 
@@ -93,7 +94,22 @@ root() {
   echo "==> DONE root level tests"
 }
 
+stream() {
+  pushd badger
+  baseDir=$(mktemp -d -p .)
+  ./badger benchmark write -s --dir=$baseDir/test | tee $baseDir/log.txt
+  ./badger stream --dir=$baseDir/test -o "$baseDir/test2" | tee --append $baseDir/log.txt
+  count=$(cat "$baseDir/log.txt" | grep "at program end: 0 B" | wc -l)
+  rm -rf $baseDir
+  if [ $count -ne 2 ]; then
+    echo "LEAK detected in Badger stream."
+    return 1
+  fi
+  return 0
+}
+
+export -f stream
 export -f manual
 export -f root
 
-parallel --halt now,fail=1 --progress --line-buffer ::: manual root
+parallel --halt now,fail=1 --progress --line-buffer ::: stream manual root
