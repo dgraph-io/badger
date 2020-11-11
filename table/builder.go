@@ -86,7 +86,7 @@ type Builder struct {
 	lenOffsets    uint32
 	estimatedSize uint32
 	keyHashes     []uint32 // Used for building the bloomfilter.
-	opt           *Options
+	opts          *Options
 	maxVersion    uint64
 	onDiskSize    uint32
 
@@ -127,17 +127,18 @@ func NewTableBuilder(opts Options) *Builder {
 		sz = maxAllocatorInitialSz
 	}
 	b := &Builder{
-		alloc: z.GetAllocatorFromPool(sz),
-		opt:   &opts,
+		alloc: opts.AllocPool.Get(sz),
+		opts:  &opts,
 	}
+	b.alloc.Tag = "Builder"
 	b.curBlock = &bblock{
 		data: b.alloc.Allocate(opts.BlockSize + padding),
 	}
-	b.opt.tableCapacity = uint64(float64(b.opt.TableSize) * 0.9)
+	b.opts.tableCapacity = uint64(float64(b.opts.TableSize) * 0.95)
 
 	// If encryption or compression is not enabled, do not start compression/encryption goroutines
 	// and write directly to the buffer.
-	if b.opt.Compression == options.None && b.opt.DataKey == nil {
+	if b.opts.Compression == options.None && b.opts.DataKey == nil {
 		return b
 	}
 
@@ -154,7 +155,7 @@ func NewTableBuilder(opts Options) *Builder {
 func (b *Builder) handleBlock() {
 	defer b.wg.Done()
 
-	doCompress := b.opt.Compression != options.None
+	doCompress := b.opts.Compression != options.None
 	for item := range b.blockChan {
 		// Extract the block.
 		blockBuf := item.data[:item.end]
@@ -185,7 +186,7 @@ func (b *Builder) handleBlock() {
 
 // Close closes the TableBuilder.
 func (b *Builder) Close() {
-	z.ReturnAllocator(b.alloc)
+	b.opts.AllocPool.Return(b.alloc)
 }
 
 // Empty returns whether it's empty.
@@ -313,7 +314,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	// Integer overflow check for table size.
 	y.AssertTrue(uint64(b.curBlock.end)+uint64(estimatedSize) < math.MaxUint32)
 
-	return estimatedSize > uint32(b.opt.BlockSize)
+	return estimatedSize > uint32(b.opts.BlockSize)
 }
 
 // Add adds a key-value pair to the block.
@@ -322,7 +323,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 		b.finishBlock()
 		// Create a new block and start writing.
 		b.curBlock = &bblock{
-			data: b.alloc.Allocate(b.opt.BlockSize + padding),
+			data: b.alloc.Allocate(b.opts.BlockSize + padding),
 		}
 	}
 	b.addHelper(key, value, valueLen)
@@ -338,7 +339,7 @@ func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
 func (b *Builder) ReachedCapacity() bool {
 	// If encryption/compression is enabled then use the compresssed size.
 	sumBlockSizes := atomic.LoadUint32(&b.compressedSize)
-	if b.opt.Compression == options.None && b.opt.DataKey == nil {
+	if b.opts.Compression == options.None && b.opts.DataKey == nil {
 		sumBlockSizes = b.uncompressedSize
 	}
 	blocksSize := sumBlockSizes + // actual length of current buffer
@@ -351,7 +352,7 @@ func (b *Builder) ReachedCapacity() bool {
 		4 + // Index length
 		b.lenOffsets
 
-	return uint64(estimateSz) > b.opt.tableCapacity
+	return uint64(estimateSz) > b.opts.tableCapacity
 }
 
 // Finish finishes the table by appending the index.
@@ -412,8 +413,8 @@ func (b *Builder) Done() buildData {
 	}
 
 	var f y.Filter
-	if b.opt.BloomFalsePositive > 0 {
-		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opt.BloomFalsePositive)
+	if b.opts.BloomFalsePositive > 0 {
+		bits := y.BloomBitsPerKey(len(b.keyHashes), b.opts.BloomFalsePositive)
 		f = y.NewFilter(b.keyHashes, bits)
 	}
 	index, dataSize := b.buildIndex(f)
@@ -455,11 +456,11 @@ func (b *Builder) calculateChecksum(data []byte) []byte {
 
 // DataKey returns datakey of the builder.
 func (b *Builder) DataKey() *pb.DataKey {
-	return b.opt.DataKey
+	return b.opts.DataKey
 }
 
 func (b *Builder) Opts() *Options {
-	return b.opt
+	return b.opts
 }
 
 // encrypt will encrypt the given data and appends IV to the end of the encrypted data.
@@ -483,12 +484,12 @@ func (b *Builder) encrypt(data []byte) ([]byte, error) {
 // shouldEncrypt tells us whether to encrypt the data or not.
 // We encrypt only if the data key exist. Otherwise, not.
 func (b *Builder) shouldEncrypt() bool {
-	return b.opt.DataKey != nil
+	return b.opts.DataKey != nil
 }
 
 // compressData compresses the given data.
 func (b *Builder) compressData(data []byte) ([]byte, error) {
-	switch b.opt.Compression {
+	switch b.opts.Compression {
 	case options.None:
 		return data, nil
 	case options.Snappy:
@@ -498,7 +499,7 @@ func (b *Builder) compressData(data []byte) ([]byte, error) {
 	case options.ZSTD:
 		sz := y.ZSTDCompressBound(len(data))
 		dst := b.alloc.Allocate(sz)
-		return y.ZSTDCompress(dst, data, b.opt.ZSTDCompressionLevel)
+		return y.ZSTDCompress(dst, data, b.opts.ZSTDCompressionLevel)
 	}
 	return nil, errors.New("Unsupported compression type")
 }

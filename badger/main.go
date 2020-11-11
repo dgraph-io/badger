@@ -49,7 +49,6 @@ func main() {
 	z.Free(out)
 
 	cmd.Execute()
-	z.Done()
 	fmt.Printf("Num Allocated Bytes at program end: %s\n",
 		humanize.IBytes(uint64(z.NumAllocBytes())))
 	if z.NumAllocBytes() > 0 {
