@@ -105,16 +105,16 @@ func (s *Skiplist) DecrRef() {
 	s.arena = nil
 }
 
-func newNode(arena *Arena, key []byte, u uint64, height int) uint32 {
+func newNode(arena *Arena, key []byte, val uint64, height int) uint32 {
 	// The base level is already allocated in the node struct.
-	offset := arena.putNode(height)
+	nodeOffset := arena.putNode(height)
 	keyOffset := arena.putKey(key)
-	node := arena.getNode(offset)
+	node := arena.getNode(nodeOffset)
 	node.keyOffset = keyOffset
 	node.keySize = uint16(len(key))
 	node.height = uint16(height)
-	node.value = u
-	return offset
+	node.value = val
+	return nodeOffset
 }
 
 func encodeValue(valOffset uint32, valSize uint32) uint64 {
@@ -142,8 +142,8 @@ func NewSkiplistWith(buf []byte, hasVersions bool, grow func(uint32) []byte) *Sk
 	arena := new(Arena)
 	arena.data = buf
 	arena.Grow = grow
-	offset := arena.allocateValue(y.ValueStruct{})
-	headoff := newNode(arena, nil, offset, maxHeight)
+	valOffset := arena.allocateValue(y.ValueStruct{})
+	headoff := newNode(arena, nil, valOffset, maxHeight)
 	sl := &Skiplist{
 		height:      1,
 		headOff:     headoff,
@@ -286,7 +286,7 @@ func (s *Skiplist) findSpliceForLevel(key []byte, beforeOff uint32, level int) (
 		// Assume before.key < key.
 		before := s.arena.getNode(beforeOff)
 		nextOff := before.getNextOffset(level)
-		next := s.arena.getNode(nextOff) //s.getNext(before, level)
+		next := s.arena.getNode(nextOff)
 		if next == nil {
 			return beforeOff, nextOff
 		}
@@ -300,8 +300,7 @@ func (s *Skiplist) findSpliceForLevel(key []byte, beforeOff uint32, level int) (
 			// before.key < key < next.key. We are done for this level.
 			return beforeOff, nextOff
 		}
-		beforeOff = nextOff
-		// before = next // Keep moving right on this level.
+		beforeOff = nextOff // Keep moving right on this level.
 	}
 }
 
@@ -329,8 +328,8 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 		// Use higher level to speed up for current level.
 		prev[i], next[i] = s.findSpliceForLevel(key, prev[i+1], i)
 		if prev[i] == next[i] {
-			nd := s.arena.getNode(prev[i])
-			nd.setUint64(u)
+			prevNode := s.arena.getNode(prev[i])
+			prevNode.setUint64(u)
 			return
 		}
 	}
@@ -375,8 +374,8 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 			prev[i], next[i] = s.findSpliceForLevel(key, prev[i], i)
 			if prev[i] == next[i] {
 				y.AssertTruef(i == 0, "Equality can happen only on base level: %d", i)
-				pnode := s.arena.getNode(prev[i])
-				pnode.setUint64(u)
+				prevNode := s.arena.getNode(prev[i])
+				prevNode.setUint64(u)
 				return
 			}
 		}

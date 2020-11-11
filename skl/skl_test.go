@@ -130,6 +130,7 @@ func TestBasic(t *testing.T) {
 	require.EqualValues(t, 60, v.Meta)
 }
 
+// TestGrow tests growing the skiplist.
 func TestGrow(t *testing.T) {
 	fd, err := ioutil.TempFile("", "skiplist")
 	y.Check(err)
@@ -153,10 +154,13 @@ func TestGrow(t *testing.T) {
 
 	l := NewSkiplistWith(mf.Data, false, grow)
 	n := 100000
+
+	// Write entries, this will trigger grow.
 	for i := 0; i < n; i++ {
 		x := []byte(fmt.Sprintf("%d", i))
 		l.PutUint64(x, uint64(i))
 	}
+
 	for i := 0; i < n; i++ {
 		x := []byte(fmt.Sprintf("%d", i))
 		val, err := l.GetUint64(x)
@@ -167,7 +171,7 @@ func TestGrow(t *testing.T) {
 
 // TestConcurrentBasic tests concurrent writes followed by concurrent reads.
 func TestConcurrentBasic(t *testing.T) {
-	const n = 1
+	const n = 1000
 	l := NewSkiplist(arenaSize)
 	var wg sync.WaitGroup
 	key := func(i int) []byte {

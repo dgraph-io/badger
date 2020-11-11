@@ -17,6 +17,7 @@
 package skl
 
 import (
+	"log"
 	"sync/atomic"
 	"unsafe"
 
@@ -46,14 +47,14 @@ func (s *Arena) size() int64 {
 }
 
 func (s *Arena) allocate(sz uint32) uint32 {
-	// limit is hit
+	// limit is hit, need to grow.
 	if atomic.LoadUint32(&s.offset)+sz > uint32(cap(s.data)-1) {
 		if s.Grow == nil {
-			panic("Grow not defined")
+			log.Fatalf("Arena too small, toWrite:%d newTotal:%d limit:%d",
+				sz, len(s.data)+int(sz), cap(s.data))
 		}
-		x := s.Grow(sz)
-		//y.AssertTrue(bytes.Compare(x[:s.offset], s.data[:s.offset]) == 0)
-		s.data = x
+		s.data = s.Grow(sz)
+		y.AssertTrue(uint32(cap(s.data))-1 > atomic.LoadUint32(&s.offset)+sz)
 	}
 	return atomic.AddUint32(&s.offset, sz)
 }
@@ -87,10 +88,10 @@ func (s *Arena) putNode(height int) uint32 {
 // decoding will incur some overhead.
 func (s *Arena) putVal(v y.ValueStruct) uint32 {
 	l := uint32(v.EncodedSize())
-	m := s.allocate(l)
-	buf := s.data[uint32(m)-l : m]
+	offset := s.allocate(l) - l
+	buf := s.data[offset : offset+l]
 	v.Encode(buf)
-	return uint32(m) - l
+	return offset
 }
 
 // putKey puts the key and returns its offset
