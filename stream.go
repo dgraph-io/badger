@@ -306,12 +306,14 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	now := time.Now()
 
 	allocs := make(map[uint64]struct{})
-	defer func() {
+	returnAllocs := func() {
 		for ref := range allocs {
 			a := z.AllocatorFrom(ref)
 			st.allocPool.Return(a)
+			delete(allocs, ref)
 		}
-	}()
+	}
+	defer returnAllocs()
 
 	sendBatch := func(batch *pb.KVList) error {
 		sz := uint64(proto.Size(batch))
@@ -324,11 +326,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 		st.db.opt.Infof("%s Created batch of size: %s in %s.\n",
 			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
 
-		for ref := range allocs {
-			a := z.AllocatorFrom(ref)
-			st.allocPool.Return(a)
-			delete(allocs, ref)
-		}
+		returnAllocs()
 		return nil
 	}
 
