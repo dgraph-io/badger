@@ -43,7 +43,7 @@ func newValue(v int) []byte {
 
 // length iterates over skiplist to give exact size.
 func length(s *Skiplist) int {
-	x := s.getNext(s.arena.getNode(s.headOff), 0)
+	x := s.getNext(s.getHead(), 0)
 	count := 0
 	for x != nil {
 		count++

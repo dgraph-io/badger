@@ -105,7 +105,7 @@ func (s *Skiplist) DecrRef() {
 	s.arena = nil
 }
 
-func newNode(arena *Arena, key []byte, val uint64, height int) uint32 {
+func newNode(arena *Arena, key []byte, val uint64, height int) *node {
 	// The base level is already allocated in the node struct.
 	nodeOffset := arena.putNode(height)
 	keyOffset := arena.putKey(key)
@@ -114,7 +114,7 @@ func newNode(arena *Arena, key []byte, val uint64, height int) uint32 {
 	node.keySize = uint16(len(key))
 	node.height = uint16(height)
 	node.value = val
-	return nodeOffset
+	return node
 }
 
 func encodeValue(valOffset uint32, valSize uint32) uint64 {
@@ -143,7 +143,8 @@ func NewSkiplistWith(buf []byte, hasVersions bool, grow func(uint32) []byte) *Sk
 	arena.data = buf
 	arena.Grow = grow
 	valOffset := arena.allocateValue(y.ValueStruct{})
-	headoff := newNode(arena, nil, valOffset, maxHeight)
+	head := newNode(arena, nil, valOffset, maxHeight)
+	headoff := arena.getNodeOffset(head)
 	sl := &Skiplist{
 		height:      1,
 		headOff:     headoff,
@@ -209,7 +210,6 @@ func (s *Skiplist) getHead() *node {
 // node.key >= key (if allowEqual=true).
 // Returns the node found. The bool returned is true if the node has key equal to given key.
 func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool) {
-	//x := s.head
 	x := s.getHead()
 	level := int(s.getHeight() - 1)
 	for {
@@ -336,8 +336,7 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 
 	// We do need to create a new node.
 	height := s.randomHeight()
-	xo := newNode(s.arena, key, u, height)
-	x := s.arena.getNode(xo)
+	x := newNode(s.arena, key, u, height)
 	// Try to increase s.height via CAS.
 	listHeight = s.getHeight()
 	for height > int(listHeight) {
