@@ -400,7 +400,15 @@ outer:
 // return that error. Orchestrate can be called multiple times, but in serial order.
 func (st *Stream) Orchestrate(ctx context.Context) error {
 	st.allocPool = z.NewAllocatorPool(st.NumGo)
-	defer st.allocPool.Release()
+	defer func() {
+		for _, a := range st.allocators {
+			// Using AllocatorFrom is better because if the allocator is already freed up, it would
+			// return nil.
+			a = z.AllocatorFrom(a.Ref)
+			a.Release()
+		}
+		st.allocPool.Release()
+	}()
 
 	st.rangeCh = make(chan keyRange, 3) // Contains keys for posting lists.
 
@@ -450,13 +458,6 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 
 	// Wait for key streaming to be over.
 	err := <-kvErr
-
-	for _, a := range st.allocators {
-		// Using AllocatorFrom is better because if the allocator is already freed up, it would
-		// return nil.
-		a = z.AllocatorFrom(a.Ref)
-		a.Release()
-	}
 	return err
 }
 
