@@ -19,6 +19,7 @@ package badger
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -181,16 +182,10 @@ func (st *Stream) produceRanges(ctx context.Context) {
 }
 
 func (st *Stream) newAllocator(threadId int) *z.Allocator {
+	a := z.NewAllocator(batchSize)
+	a.Tag = fmt.Sprintf("Stream %d: %s", threadId, st.LogPrefix)
 	st.allocatorsMu.Lock()
-	var a *z.Allocator
-	if cur, ok := st.allocators[threadId]; ok && cur.Size() == 0 {
-		a = cur // Reuse.
-	} else {
-		// Current allocator has been used already. Create a new one.
-		a = z.NewAllocator(batchSize)
-		// a.Tag = fmt.Sprintf("Stream %d: %s", threadId, st.LogPrefix)
-		st.allocators[threadId] = a
-	}
+	st.allocators[threadId] = a
 	st.allocatorsMu.Unlock()
 	return a
 }
@@ -206,6 +201,8 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	}
 	defer txn.Discard()
 
+	outList := new(pb.KVList)
+	outList.AllocRef = st.newAllocator(threadId).Ref
 	iterate := func(kr keyRange) error {
 		iterOpts := DefaultIteratorOptions
 		iterOpts.AllVersions = true
@@ -217,9 +214,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 
 		// This unique stream id is used to identify all the keys from this iteration.
 		streamId := atomic.AddUint32(&st.nextStreamId, 1)
-
-		outList := new(pb.KVList)
-		outList.AllocRef = st.newAllocator(threadId).Ref
 
 		sendIt := func() error {
 			select {
