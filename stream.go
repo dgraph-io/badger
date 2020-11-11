@@ -184,15 +184,9 @@ func (st *Stream) produceRanges(ctx context.Context) {
 
 func (st *Stream) newAllocator(threadId int) *z.Allocator {
 	st.allocatorsMu.Lock()
-	var a *z.Allocator
-	if cur, ok := st.allocators[threadId]; ok && cur.Size() == 0 {
-		a = cur // Reuse.
-	} else {
-		// Current allocator has been used already. Create a new one.
-		a = st.allocPool.Get(batchSize)
-		a.Tag = "Stream " + st.LogPrefix
-		st.allocators[threadId] = a
-	}
+	a := st.allocPool.Get(batchSize)
+	a.Tag = "Stream " + st.LogPrefix
+	st.allocators[threadId] = a
 	st.allocatorsMu.Unlock()
 	return a
 }
@@ -329,9 +323,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 
 		for ref := range allocs {
 			a := z.AllocatorFrom(ref)
-			if a.Size() > 0 {
-				st.allocPool.Return(a)
-			}
+			st.allocPool.Return(a)
 			delete(allocs, ref)
 		}
 		return nil
@@ -460,6 +452,9 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	err := <-kvErr
 
 	for _, a := range st.allocators {
+		// Using AllocatorFrom is better because if the allocator is already freed up, it would
+		// return nil.
+		a = z.AllocatorFrom(a.Ref)
 		a.Release()
 	}
 	return err
