@@ -43,7 +43,7 @@ func newValue(v int) []byte {
 
 // length iterates over skiplist to give exact size.
 func length(s *Skiplist) int {
-	x := s.getNext(s.head, 0)
+	x := s.getNext(s.arena.getNode(s.headOff), 0)
 	count := 0
 	for x != nil {
 		count++
@@ -130,13 +130,7 @@ func TestBasic(t *testing.T) {
 	require.EqualValues(t, 60, v.Meta)
 }
 
-func TestMoreData(t *testing.T) {
-	//buf := z.Calloc(1 << 10)
-	//	grow := func(old []byte, sz uint32) []byte {
-	//		nb := z.Calloc(int(sz) + len(old))
-	//		copy(nb, old)
-	//		return nb
-	//	}
+func TestGrow(t *testing.T) {
 	fd, err := ioutil.TempFile("", "skiplist")
 	y.Check(err)
 	mf, err := z.OpenMmapFileUsing(fd, 1<<5, true)
@@ -145,7 +139,6 @@ func TestMoreData(t *testing.T) {
 	}
 
 	grow := func(sz uint32) []byte {
-		fmt.Println("Growing")
 		var newSz int
 		if cap(mf.Data) > int(sz) {
 			newSz = cap(mf.Data) * 2
@@ -164,7 +157,6 @@ func TestMoreData(t *testing.T) {
 		x := []byte(fmt.Sprintf("%d", i))
 		l.PutUint64(x, uint64(i))
 	}
-	fmt.Println("now getting")
 	for i := 0; i < n; i++ {
 		x := []byte(fmt.Sprintf("%d", i))
 		val, err := l.GetUint64(x)
@@ -175,7 +167,7 @@ func TestMoreData(t *testing.T) {
 
 // TestConcurrentBasic tests concurrent writes followed by concurrent reads.
 func TestConcurrentBasic(t *testing.T) {
-	const n = 1000
+	const n = 1
 	l := NewSkiplist(arenaSize)
 	var wg sync.WaitGroup
 	key := func(i int) []byte {

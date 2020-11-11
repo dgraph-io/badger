@@ -78,7 +78,6 @@ type comparatorFunc func([]byte, []byte) int
 
 type Skiplist struct {
 	height      int32 // Current height. 1 <= height <= kMaxHeight. CAS.
-	head        *node
 	headOff     uint32
 	ref         int32
 	arena       *Arena
@@ -104,9 +103,6 @@ func (s *Skiplist) DecrRef() {
 	// Indicate we are closed. Good for testing.  Also, lets GC reclaim memory. Race condition
 	// here would suggest we are accessing skiplist when we are supposed to have no reference!
 	s.arena = nil
-	// Since the head references the arena's buf, as long as the head is kept around
-	// GC can't release the buf.
-	s.head = nil
 }
 
 func newNode(arena *Arena, key []byte, u uint64, height int) uint32 {
@@ -150,7 +146,6 @@ func NewSkiplistWith(buf []byte, hasVersions bool, grow func(uint32) []byte) *Sk
 	headoff := newNode(arena, nil, offset, maxHeight)
 	sl := &Skiplist{
 		height:      1,
-		head:        nil,
 		headOff:     headoff,
 		arena:       arena,
 		ref:         1,
@@ -444,7 +439,6 @@ func (s *Skiplist) getInternal(key []byte) (*node, uint64) {
 		return nil, 0
 	}
 	fetchedKey := s.arena.getKey(n.keyOffset, n.keySize)
-
 	// If the node has version, it means it is a badger kv and we should
 	// compare it's key without the version.
 	if s.hasVersions {
