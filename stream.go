@@ -92,6 +92,8 @@ type Stream struct {
 	// Use allocators to generate KVs.
 	allocatorsMu sync.RWMutex
 	allocators   map[int]*z.Allocator
+
+	allocPool *z.AllocatorPool
 }
 
 func (st *Stream) Allocator(threadId int) *z.Allocator {
@@ -182,15 +184,9 @@ func (st *Stream) produceRanges(ctx context.Context) {
 
 func (st *Stream) newAllocator(threadId int) *z.Allocator {
 	st.allocatorsMu.Lock()
-	var a *z.Allocator
-	if cur, ok := st.allocators[threadId]; ok && cur.Size() == 0 {
-		a = cur // Reuse.
-	} else {
-		// Current allocator has been used already. Create a new one.
-		a = z.NewAllocator(batchSize)
-		// a.Tag = fmt.Sprintf("Stream %d: %s", threadId, st.LogPrefix)
-		st.allocators[threadId] = a
-	}
+	a := st.allocPool.Get(batchSize)
+	a.Tag = "Stream " + st.LogPrefix
+	st.allocators[threadId] = a
 	st.allocatorsMu.Unlock()
 	return a
 }
@@ -206,6 +202,12 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	}
 	defer txn.Discard()
 
+	// produceKVs is running iterate serially. So, we can define the outList here.
+	outList := new(pb.KVList)
+	// There would be one last remaining Allocator for this threadId when produceKVs finishes, which
+	// would be released by Orchestrate.
+	outList.AllocRef = st.newAllocator(threadId).Ref
+
 	iterate := func(kr keyRange) error {
 		iterOpts := DefaultIteratorOptions
 		iterOpts.AllVersions = true
@@ -217,9 +219,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 
 		// This unique stream id is used to identify all the keys from this iteration.
 		streamId := atomic.AddUint32(&st.nextStreamId, 1)
-
-		outList := new(pb.KVList)
-		outList.AllocRef = st.newAllocator(threadId).Ref
 
 		sendIt := func() error {
 			select {
@@ -280,10 +279,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				StreamDone: true,
 			})
 		}
-		if len(outList.Kv) > 0 {
-			return sendIt()
-		}
-		return nil
+		return sendIt()
 	}
 
 	for {
@@ -309,6 +305,16 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	defer t.Stop()
 	now := time.Now()
 
+	allocs := make(map[uint64]struct{})
+	returnAllocs := func() {
+		for ref := range allocs {
+			a := z.AllocatorFrom(ref)
+			st.allocPool.Return(a)
+			delete(allocs, ref)
+		}
+	}
+	defer returnAllocs()
+
 	sendBatch := func(batch *pb.KVList) error {
 		sz := uint64(proto.Size(batch))
 		bytesSent += sz
@@ -320,6 +326,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 		st.db.opt.Infof("%s Created batch of size: %s in %s.\n",
 			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
 
+		returnAllocs()
 		return nil
 	}
 
@@ -340,6 +347,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 				}
 				y.AssertTrue(kvs != nil)
 				batch.Kv = append(batch.Kv, kvs.Kv...)
+				allocs[kvs.AllocRef] = struct{}{}
 
 			default:
 				break loop
@@ -372,6 +380,7 @@ outer:
 			}
 			y.AssertTrue(kvs != nil)
 			batch = kvs
+			allocs[kvs.AllocRef] = struct{}{}
 
 			// Otherwise, slurp more keys into this batch.
 			if err := slurp(batch); err != nil {
@@ -391,6 +400,17 @@ outer:
 // are serial. In case any of these steps encounter an error, Orchestrate would stop execution and
 // return that error. Orchestrate can be called multiple times, but in serial order.
 func (st *Stream) Orchestrate(ctx context.Context) error {
+	st.allocPool = z.NewAllocatorPool(st.NumGo)
+	defer func() {
+		for _, a := range st.allocators {
+			// Using AllocatorFrom is better because if the allocator is already freed up, it would
+			// return nil.
+			a = z.AllocatorFrom(a.Ref)
+			a.Release()
+		}
+		st.allocPool.Release()
+	}()
+
 	st.rangeCh = make(chan keyRange, 3) // Contains keys for posting lists.
 
 	// kvChan should only have a small capacity to ensure that we don't buffer up too much data if
@@ -439,17 +459,13 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 
 	// Wait for key streaming to be over.
 	err := <-kvErr
-
-	for _, a := range st.allocators {
-		a.Release()
-	}
 	return err
 }
 
 func (db *DB) newStream() *Stream {
 	return &Stream{
 		db:         db,
-		NumGo:      16,
+		NumGo:      8,
 		LogPrefix:  "Badger.Stream",
 		allocators: make(map[int]*z.Allocator),
 	}
