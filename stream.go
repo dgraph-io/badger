@@ -216,6 +216,11 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 
 		outList := new(pb.KVList)
 		outList.AllocRef = st.newAllocator(threadId).Ref
+		defer func() {
+			// We should free up the last outList that sendIt function creates.
+			y.AssertTrue(len(outList.Kv) == 0)
+			z.AllocatorFrom(outList.AllocRef).Release()
+		}()
 
 		sendIt := func() error {
 			select {
