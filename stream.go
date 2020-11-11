@@ -202,6 +202,12 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	}
 	defer txn.Discard()
 
+	// produceKVs is running iterate serially. So, we can define the outList here.
+	outList := new(pb.KVList)
+	// There would be one last remaining Allocator for this threadId when produceKVs finishes, which
+	// would be released by Orchestrate.
+	outList.AllocRef = st.newAllocator(threadId).Ref
+
 	iterate := func(kr keyRange) error {
 		iterOpts := DefaultIteratorOptions
 		iterOpts.AllVersions = true
@@ -213,14 +219,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 
 		// This unique stream id is used to identify all the keys from this iteration.
 		streamId := atomic.AddUint32(&st.nextStreamId, 1)
-
-		outList := new(pb.KVList)
-		outList.AllocRef = st.newAllocator(threadId).Ref
-		defer func() {
-			// We should free up the last outList that sendIt function creates.
-			y.AssertTrue(len(outList.Kv) == 0)
-			z.AllocatorFrom(outList.AllocRef).Release()
-		}()
 
 		sendIt := func() error {
 			select {
