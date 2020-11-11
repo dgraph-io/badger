@@ -533,7 +533,7 @@ func TestGetMore(t *testing.T) {
 		data := func(i int) []byte {
 			return []byte(fmt.Sprintf("%b", i))
 		}
-		n := 500000
+		n := 200000
 		m := 45 // Increasing would cause ErrTxnTooBig
 		for i := 0; i < n; i += m {
 			if (i % 10000) == 0 {

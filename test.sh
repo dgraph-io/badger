@@ -48,6 +48,7 @@ InstallJemalloc
 
 # Run the memory intensive tests first.
 manual() {
+  timeout="-timeout 2m"
   echo "==> Running package tests for $packages"
   set -e
   for pkg in $packages; do
@@ -60,10 +61,10 @@ manual() {
   # Run the special Truncate test.
   rm -rf p
   set -e
-  go test $tags -run='TestTruncateVlogNoClose$' --manual=true
+  go test $tags $timeout -run='TestTruncateVlogNoClose$' --manual=true
   truncate --size=4096 p/000000.vlog
-  go test $tags -run='TestTruncateVlogNoClose2$' --manual=true
-  go test $tags -run='TestTruncateVlogNoClose3$' --manual=true
+  go test $tags $timeout -run='TestTruncateVlogNoClose2$' --manual=true
+  go test $tags $timeout -run='TestTruncateVlogNoClose3$' --manual=true
   rm -rf p
 
   # TODO(ibrahim): Let's make these tests have Manual prefix.
@@ -72,14 +73,14 @@ manual() {
   # TestValueGCManaged
   # TestDropPrefix
   # TestDropAllManaged
-  go test $tags -run='TestBigKeyValuePairs$' --manual=true
-  go test $tags -run='TestPushValueLogLimit' --manual=true
-  go test $tags -run='TestKeyCount' --manual=true
-  go test $tags -run='TestIteratePrefix' --manual=true
-  go test $tags -run='TestIterateParallel' --manual=true
-  go test $tags -run='TestBigStream' --manual=true
-  go test $tags -run='TestGoroutineLeak' --manual=true
-  go test $tags -run='TestGetMore' --manual=true
+  go test $tags $timeout -run='TestBigKeyValuePairs$' --manual=true
+  go test $tags $timeout -run='TestPushValueLogLimit' --manual=true
+  go test $tags $timeout -run='TestKeyCount' --manual=true
+  go test $tags $timeout -run='TestIteratePrefix' --manual=true
+  go test $tags $timeout -run='TestIterateParallel' --manual=true
+  go test $tags $timeout -run='TestBigStream' --manual=true
+  go test $tags $timeout -run='TestGoroutineLeak' --manual=true
+  go test $tags $timeout -run='TestGetMore' --manual=true
 
   echo "==> DONE manual tests"
 }
@@ -90,7 +91,7 @@ root() {
 
   echo "==> Running root level tests."
   set -e
-  go test $tags -timeout=25m . -race -parallel 16
+  go test $tags -timeout=25m . -v -race -parallel 16
   echo "==> DONE root level tests"
 }
 
@@ -105,6 +106,7 @@ stream() {
     echo "LEAK detected in Badger stream."
     return 1
   fi
+  echo "==> DONE stream test"
   return 0
 }
 
