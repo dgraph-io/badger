@@ -323,7 +323,6 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 	var prev [maxHeight + 1]uint32
 	var next [maxHeight + 1]uint32
 	prev[listHeight] = s.headOff
-	next[listHeight] = 0
 	for i := int(listHeight) - 1; i >= 0; i-- {
 		// Use higher level to speed up for current level.
 		prev[i], next[i] = s.findSpliceForLevel(key, prev[i+1], i)
