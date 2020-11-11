@@ -270,6 +270,7 @@ func (sw *StreamWriter) Cancel() {
 type sortedWriter struct {
 	db       *DB
 	throttle *y.Throttle
+	opts     table.Options
 
 	builder  *table.Builder
 	lastKey  []byte
@@ -286,6 +287,7 @@ func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
 	}
 	w := &sortedWriter{
 		db:       sw.db,
+		opts:     bopts,
 		streamID: streamID,
 		throttle: sw.throttle,
 		builder:  table.NewTableBuilder(bopts),
@@ -379,8 +381,7 @@ func (w *sortedWriter) send(done bool) error {
 		return nil
 	}
 
-	bopts := buildTableOptions(w.db)
-	w.builder = table.NewTableBuilder(bopts)
+	w.builder = table.NewTableBuilder(w.opts)
 	return nil
 }
 

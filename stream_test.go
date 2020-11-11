@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dgraph-io/badger/v2/pb"
 	bpb "github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/golang/protobuf/proto"
@@ -264,4 +265,55 @@ func TestBigStream(t *testing.T) {
 		require.Equal(t, testSize, count, "Count mismatch for pred: %s", pred)
 	}
 	require.NoError(t, db.Close())
+}
+
+// There was a bug in the stream writer code which would cause allocators to be
+// freed up twice if the default keyToList was not used. This test verifies that issue.
+func TestStreamCustomKeyToList(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err)
+	defer removeDir(dir)
+
+	db, err := OpenManaged(DefaultOptions(dir))
+	require.NoError(t, err)
+
+	var count int
+	for _, key := range []string{"p0", "p1", "p2"} {
+		for i := 1; i <= 100; i++ {
+			txn := db.NewTransactionAt(math.MaxUint64, true)
+			require.NoError(t, txn.SetEntry(NewEntry([]byte(key), value(i))))
+			count++
+			require.NoError(t, txn.CommitAt(uint64(i), nil))
+		}
+	}
+
+	stream := db.NewStreamAt(math.MaxUint64)
+	stream.LogPrefix = "Testing"
+	stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
+		item := itr.Item()
+		val, err := item.ValueCopy(nil)
+		if err != nil {
+			return nil, err
+		}
+		kv := &pb.KV{
+			Key:   y.Copy(item.Key()),
+			Value: val,
+		}
+		return &pb.KVList{
+			Kv: []*pb.KV{kv},
+		}, nil
+	}
+	res := map[string]struct{}{"p0": {}, "p1": {}, "p2": {}}
+	stream.Send = func(list *pb.KVList) error {
+		for _, kv := range list.Kv {
+			key := string(kv.Key)
+			if _, ok := res[key]; !ok {
+				panic(fmt.Sprintf("%s key not found", key))
+			}
+			delete(res, key)
+		}
+		return nil
+	}
+	require.NoError(t, stream.Orchestrate(ctxb))
+	require.Zero(t, len(res))
 }

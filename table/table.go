@@ -80,6 +80,8 @@ type Options struct {
 	BlockCache *ristretto.Cache
 	IndexCache *ristretto.Cache
 
+	AllocPool *z.AllocatorPool
+
 	// ZSTDCompressionLevel is the ZSTD compression level used for compressing blocks.
 	ZSTDCompressionLevel int
 }
@@ -241,12 +243,12 @@ func CreateTable(fname string, builder *Builder) (*Table, error) {
 
 	written := bd.Copy(mf.Data)
 	y.AssertTrue(written == len(mf.Data))
-	if builder.opt.SyncWrites {
+	if builder.opts.SyncWrites {
 		if err := z.Msync(mf.Data); err != nil {
 			return nil, y.Wrapf(err, "while calling msync on %s", fname)
 		}
 	}
-	return OpenTable(mf, *builder.opt)
+	return OpenTable(mf, *builder.opts)
 }
 
 // OpenTable assumes file has only one table and opens it. Takes ownership of fd upon function

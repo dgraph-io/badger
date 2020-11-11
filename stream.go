@@ -92,6 +92,8 @@ type Stream struct {
 	// Use allocators to generate KVs.
 	allocatorsMu sync.RWMutex
 	allocators   map[int]*z.Allocator
+
+	allocPool *z.AllocatorPool
 }
 
 func (st *Stream) Allocator(threadId int) *z.Allocator {
@@ -187,8 +189,8 @@ func (st *Stream) newAllocator(threadId int) *z.Allocator {
 		a = cur // Reuse.
 	} else {
 		// Current allocator has been used already. Create a new one.
-		a = z.NewAllocator(batchSize)
-		// a.Tag = fmt.Sprintf("Stream %d: %s", threadId, st.LogPrefix)
+		a = st.allocPool.Get(batchSize)
+		a.Tag = "Stream " + st.LogPrefix
 		st.allocators[threadId] = a
 	}
 	st.allocatorsMu.Unlock()
@@ -280,10 +282,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				StreamDone: true,
 			})
 		}
-		if len(outList.Kv) > 0 {
-			return sendIt()
-		}
-		return nil
+		return sendIt()
 	}
 
 	for {
@@ -309,10 +308,11 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	defer t.Stop()
 	now := time.Now()
 
-	var allocs []*z.Allocator
+	allocs := make(map[uint64]struct{})
 	defer func() {
-		for _, a := range allocs {
-			a.Release()
+		for ref := range allocs {
+			a := z.AllocatorFrom(ref)
+			st.allocPool.Return(a)
 		}
 	}()
 
@@ -327,10 +327,13 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 		st.db.opt.Infof("%s Created batch of size: %s in %s.\n",
 			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
 
-		for _, a := range allocs {
-			a.Release()
+		for ref := range allocs {
+			a := z.AllocatorFrom(ref)
+			if a.Size() > 0 {
+				st.allocPool.Return(a)
+			}
+			delete(allocs, ref)
 		}
-		allocs = allocs[:0]
 		return nil
 	}
 
@@ -351,7 +354,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 				}
 				y.AssertTrue(kvs != nil)
 				batch.Kv = append(batch.Kv, kvs.Kv...)
-				allocs = append(allocs, z.AllocatorFrom(kvs.AllocRef))
+				allocs[kvs.AllocRef] = struct{}{}
 
 			default:
 				break loop
@@ -384,7 +387,7 @@ outer:
 			}
 			y.AssertTrue(kvs != nil)
 			batch = kvs
-			allocs = append(allocs, z.AllocatorFrom(kvs.AllocRef))
+			allocs[kvs.AllocRef] = struct{}{}
 
 			// Otherwise, slurp more keys into this batch.
 			if err := slurp(batch); err != nil {
@@ -404,6 +407,9 @@ outer:
 // are serial. In case any of these steps encounter an error, Orchestrate would stop execution and
 // return that error. Orchestrate can be called multiple times, but in serial order.
 func (st *Stream) Orchestrate(ctx context.Context) error {
+	st.allocPool = z.NewAllocatorPool(st.NumGo)
+	defer st.allocPool.Release()
+
 	st.rangeCh = make(chan keyRange, 3) // Contains keys for posting lists.
 
 	// kvChan should only have a small capacity to ensure that we don't buffer up too much data if
@@ -462,7 +468,7 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 func (db *DB) newStream() *Stream {
 	return &Stream{
 		db:         db,
-		NumGo:      16,
+		NumGo:      8,
 		LogPrefix:  "Badger.Stream",
 		allocators: make(map[int]*z.Allocator),
 	}
