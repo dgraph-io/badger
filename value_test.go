@@ -635,6 +635,7 @@ func TestPartialAppendToWAL(t *testing.T) {
 }
 
 func TestReadOnlyOpenWithPartialAppendToWAL(t *testing.T) {
+	// TODO: Is this test needed?
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
 	defer removeDir(dir)
@@ -666,10 +667,8 @@ func TestReadOnlyOpenWithPartialAppendToWAL(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(kv.mtFilePath(1), buf, 0777))
 
 	opts.ReadOnly = true
-	// Badger should fail a read-only open with values to replay
 	_, err = Open(opts)
-	require.Error(t, err)
-	require.Regexp(t, "Log truncate required", err.Error())
+	require.NoError(t, err)
 }
 
 func TestValueLogTrigger(t *testing.T) {
