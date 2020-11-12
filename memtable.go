@@ -81,7 +81,11 @@ func (db *DB) openMemTables(opt Options) error {
 		return fids[i] < fids[j]
 	})
 	for _, fid := range fids {
-		mt, err := db.openMemTable(fid)
+		flags := os.O_RDWR
+		if db.opt.ReadOnly {
+			flags = os.O_RDONLY
+		}
+		mt, err := db.openMemTable(fid, flags)
 		if err != nil {
 			return y.Wrapf(err, "while opening fid: %d", fid)
 		}
@@ -103,7 +107,7 @@ func (db *DB) openMemTables(opt Options) error {
 
 const memFileExt string = ".mem"
 
-func (db *DB) openMemTable(fid int) (*memTable, error) {
+func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 	filepath := db.mtFilePath(fid)
 	s := skl.NewSkiplist(arenaSize(db.opt))
 	mt := &memTable{
@@ -122,7 +126,7 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 		registry: db.registry,
 		writeAt:  vlogHeaderSize,
 	}
-	lerr := mt.wal.open(filepath, os.O_RDWR|os.O_CREATE, db.opt)
+	lerr := mt.wal.open(filepath, flags, db.opt)
 	if lerr != z.NewFile && lerr != nil {
 		return nil, y.Wrapf(lerr, "While opening memtable: %s", filepath)
 	}
@@ -145,7 +149,7 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 var errExpectingNewFile = errors.New("Expecting to create a new file, but found an existing file")
 
 func (db *DB) newMemTable() (*memTable, error) {
-	mt, err := db.openMemTable(db.nextMemFid)
+	mt, err := db.openMemTable(db.nextMemFid, os.O_CREATE|os.O_RDWR)
 	if err == z.NewFile {
 		db.nextMemFid++
 		return mt, nil
@@ -268,10 +272,7 @@ func (lf *logFile) Truncate(end int64) error {
 	} else if fi.Size() == end {
 		return nil
 	}
-	if lf.opt.ReadOnly {
-		return y.Wrapf(ErrTruncateNeeded,
-			"truncate to %d from %d for file: %s", end, lf.size, lf.path)
-	}
+	y.AssertTrue(!lf.opt.ReadOnly)
 	lf.size = uint32(end)
 	return lf.MmapFile.Truncate(end)
 }
