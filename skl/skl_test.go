@@ -134,7 +134,7 @@ func TestBasic(t *testing.T) {
 func TestGrow(t *testing.T) {
 	fd, err := ioutil.TempFile("", "skiplist")
 	y.Check(err)
-	mf, err := z.OpenMmapFileUsing(fd, 1<<5, true)
+	mf, err := z.OpenMmapFileUsing(fd, 1<<10, true)
 	if err != z.NewFile {
 		y.Check(err)
 	}
@@ -154,7 +154,8 @@ func TestGrow(t *testing.T) {
 		return mf.Data
 	}
 
-	l := NewSkiplistWith(mf.Data, false, grow)
+	l := NewSkiplistWith(mf.Data, false)
+	l.SetGrow(grow)
 	n := 100000
 
 	// Write entries, this will trigger grow.

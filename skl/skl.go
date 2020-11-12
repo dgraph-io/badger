@@ -34,6 +34,7 @@ package skl
 
 import (
 	"bytes"
+	"log"
 	"math"
 	"sync/atomic"
 	"unsafe"
@@ -134,18 +135,25 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 // NewSkiplist makes a new empty skiplist, with a given arena size.
 func NewSkiplist(arenaSize int64) *Skiplist {
 	buf := z.Calloc(int(arenaSize))
-	s := NewSkiplistWith(buf, true, nil)
+	s := NewSkiplistWith(buf, true)
 	s.OnClose = func() {
 		z.Free(s.arena.data)
 	}
 	return s
 }
 
+func (s *Skiplist) SetGrow(grow func(uint32) []byte) {
+	s.arena.grow = grow
+}
+
 // NewSkiplistWith makes a new skiplist, with a given byte slice.
-func NewSkiplistWith(buf []byte, hasVersions bool, grow func(uint32) []byte) *Skiplist {
+func NewSkiplistWith(buf []byte, hasVersions bool) *Skiplist {
+	// Sanity check for the buffer size
+	if len(buf) < 1<<10 {
+		log.Fatalf("Initial size of buffer cannot be less than 1KB")
+	}
 	arena := new(Arena)
 	arena.data = buf
-	arena.grow = grow
 	valOffset := arena.allocateValue(y.ValueStruct{})
 	head := newNode(arena, nil, valOffset, maxHeight)
 	headoff := arena.getNodeOffset(head)
