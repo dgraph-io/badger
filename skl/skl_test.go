@@ -142,11 +142,9 @@ func TestGrow(t *testing.T) {
 	grown := false
 	grow := func(sz uint32) []byte {
 		grown = true
-		var newSz int
-		if cap(mf.Data) > int(sz) {
-			newSz = cap(mf.Data) * 2
-		} else {
-			newSz = cap(mf.Data) + int(sz)
+		newSz := 2 * len(mf.Data)
+		if newSz < len(mf.Data)+int(sz) {
+			newSz = len(mf.Data) + int(sz)
 		}
 		err := mf.Truncate(int64(newSz))
 		y.Check(err)
