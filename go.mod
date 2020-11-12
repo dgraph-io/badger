@@ -9,7 +9,7 @@ require (
 	github.com/cespare/xxhash v1.1.0
 	github.com/dgraph-io/ristretto v0.0.4-0.20201111235953-24ae56eee4ab
 	github.com/dustin/go-humanize v1.0.0
-	github.com/golang/protobuf v1.3.2
+	github.com/golang/protobuf v1.3.1
 	github.com/golang/snappy v0.0.1
 	github.com/google/flatbuffers v1.12.0
 	github.com/kr/pretty v0.1.0 // indirect
