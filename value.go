@@ -508,8 +508,9 @@ func (vlog *valueLog) createVlogFile() (*logFile, error) {
 		path:     path,
 		registry: vlog.db.registry,
 		writeAt:  vlogHeaderSize,
+		opt:      vlog.opt,
 	}
-	err := lf.open(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, vlog.opt)
+	err := lf.open(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 2*vlog.opt.ValueLogFileSize)
 	if err != z.NewFile && err != nil {
 		return nil, err
 	}
@@ -574,7 +575,9 @@ func (vlog *valueLog) open(db *DB) error {
 		y.AssertTrue(ok)
 
 		// Just open in RDWR mode. This should not create a new log file.
-		if err := lf.open(vlog.fpath(fid), os.O_RDWR, vlog.opt); err != nil {
+		lf.opt = vlog.opt
+		if err := lf.open(vlog.fpath(fid), os.O_RDWR,
+			2*vlog.opt.ValueLogFileSize); err != nil {
 			return y.Wrapf(err, "Open existing file: %q", lf.path)
 		}
 		// We shouldn't delete the maxFid file.

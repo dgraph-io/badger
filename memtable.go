@@ -125,8 +125,9 @@ func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 		path:     filepath,
 		registry: db.registry,
 		writeAt:  vlogHeaderSize,
+		opt:      db.opt,
 	}
-	lerr := mt.wal.open(filepath, flags, db.opt)
+	lerr := mt.wal.open(filepath, flags, 2*db.opt.MemTableSize)
 	if lerr != z.NewFile && lerr != nil {
 		return nil, y.Wrapf(lerr, "While opening memtable: %s", filepath)
 	}
@@ -168,6 +169,17 @@ func (db *DB) mtFilePath(fid int) string {
 
 func (mt *memTable) SyncWAL() error {
 	return mt.wal.Sync()
+}
+
+func (mt *memTable) isFull() bool {
+	if mt.sl.MemSize() >= mt.opt.MemTableSize {
+		return true
+	}
+	if mt.opt.InMemory {
+		// InMemory mode doesn't have any WAL.
+		return false
+	}
+	return int64(mt.wal.writeAt) >= mt.opt.MemTableSize
 }
 
 func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
@@ -540,10 +552,8 @@ func (lf *logFile) zeroNextEntry() {
 	z.ZeroOut(lf.Data, int(lf.writeAt), int(lf.writeAt+maxHeaderSize))
 }
 
-func (lf *logFile) open(path string, flags int, opt Options) error {
-	lf.opt = opt
-
-	mf, ferr := z.OpenMmapFile(path, flags, 2*int(opt.ValueLogFileSize))
+func (lf *logFile) open(path string, flags int, fsize int64) error {
+	mf, ferr := z.OpenMmapFile(path, flags, int(fsize))
 	lf.MmapFile = mf
 
 	if ferr == z.NewFile {
