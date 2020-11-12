@@ -38,8 +38,8 @@ const (
 type Arena struct {
 	data   []byte
 	offset uint32
-	// Grow is not thread-safe, if it is defined then skiplist will not be thread-safe
-	Grow func(uint32) []byte
+	// grow is not thread-safe, if it is defined then skiplist will not be thread-safe
+	grow func(uint32) []byte
 }
 
 func (s *Arena) size() int64 {
@@ -47,16 +47,21 @@ func (s *Arena) size() int64 {
 }
 
 func (s *Arena) allocate(sz uint32) uint32 {
-	// limit is hit, need to grow.
-	if atomic.LoadUint32(&s.offset)+sz > uint32(cap(s.data)-1) {
-		if s.Grow == nil {
-			log.Fatalf("Arena too small, toWrite:%d newTotal:%d limit:%d",
-				sz, len(s.data)+int(sz), cap(s.data))
+	for {
+		offset := atomic.LoadUint32(&s.offset)
+		// limit is hit, need to grow.
+		if offset+sz >= uint32(len(s.data)) {
+			if s.grow == nil {
+				log.Fatalf("Arena too small, toWrite:%d newTotal:%d limit:%d",
+					sz, offset+sz, len(s.data))
+			}
+			s.data = s.grow(sz)
+			y.AssertTrue(uint32(len(s.data)) > atomic.LoadUint32(&s.offset)+sz)
 		}
-		s.data = s.Grow(sz)
-		y.AssertTrue(uint32(cap(s.data))-1 > atomic.LoadUint32(&s.offset)+sz)
+		if atomic.CompareAndSwapUint32(&s.offset, offset, offset+sz) {
+			return offset + sz
+		}
 	}
-	return atomic.AddUint32(&s.offset, sz)
 }
 
 // allocateValue encodes valueStruct and put it in the arena buffer.

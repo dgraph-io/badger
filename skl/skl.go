@@ -109,6 +109,10 @@ func newNode(arena *Arena, key []byte, val uint64, height int) *node {
 	// The base level is already allocated in the node struct.
 	nodeOffset := arena.putNode(height)
 	keyOffset := arena.putKey(key)
+
+	// Both the putNode and putKey should happen before we take
+	// the pointer of the node for processing because put operation
+	// can change the underlying buffer and the pointer would change.
 	node := arena.getNode(nodeOffset)
 	node.keyOffset = keyOffset
 	node.keySize = uint16(len(key))
@@ -141,7 +145,7 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 func NewSkiplistWith(buf []byte, hasVersions bool, grow func(uint32) []byte) *Skiplist {
 	arena := new(Arena)
 	arena.data = buf
-	arena.Grow = grow
+	arena.grow = grow
 	valOffset := arena.allocateValue(y.ValueStruct{})
 	head := newNode(arena, nil, valOffset, maxHeight)
 	headoff := arena.getNodeOffset(head)

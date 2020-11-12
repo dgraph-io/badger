@@ -139,7 +139,9 @@ func TestGrow(t *testing.T) {
 		y.Check(err)
 	}
 
+	grown := false
 	grow := func(sz uint32) []byte {
+		grown = true
 		var newSz int
 		if cap(mf.Data) > int(sz) {
 			newSz = cap(mf.Data) * 2
@@ -160,6 +162,7 @@ func TestGrow(t *testing.T) {
 		x := []byte(fmt.Sprintf("%d", i))
 		l.PutUint64(x, uint64(i))
 	}
+	require.True(t, grown)
 
 	for i := 0; i < n; i++ {
 		x := []byte(fmt.Sprintf("%d", i))
