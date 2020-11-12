@@ -208,9 +208,8 @@ func (mt *memTable) UpdateSkipList() error {
 	if err != nil {
 		return y.Wrapf(err, "while iterating wal: %s", mt.wal.Fd.Name())
 	}
-	if mt.opt.ReadOnly {
-		// Do not truncate the file in read-only mode.
-		return nil
+	if endOff < mt.wal.size && mt.opt.ReadOnly {
+		return y.Wrapf(ErrTruncateNeeded, "end offset: %d < size: %d", endOff, mt.wal.size)
 	}
 	return mt.wal.Truncate(int64(endOff))
 }
@@ -273,6 +272,7 @@ func (lf *logFile) Truncate(end int64) error {
 	} else if fi.Size() == end {
 		return nil
 	}
+	y.AssertTrue(!lf.opt.ReadOnly)
 	lf.size = uint32(end)
 	return lf.MmapFile.Truncate(end)
 }
