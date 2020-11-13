@@ -47,21 +47,18 @@ func (s *Arena) size() int64 {
 }
 
 func (s *Arena) allocate(sz uint32) uint32 {
-	for {
-		offset := atomic.LoadUint32(&s.offset)
-		// limit is hit, need to grow.
-		if offset+sz >= uint32(len(s.data)) {
-			if s.grow == nil {
-				log.Fatalf("Arena too small, toWrite:%d newTotal:%d limit:%d",
-					sz, offset+sz, len(s.data))
-			}
-			s.data = s.grow(sz)
-			y.AssertTrue(uint32(len(s.data)) > atomic.LoadUint32(&s.offset)+sz)
-		}
-		if atomic.CompareAndSwapUint32(&s.offset, offset, offset+sz) {
-			return offset + sz
-		}
+	offset := atomic.AddUint32(&s.offset, sz)
+	if offset < uint32(len(s.data)) {
+		return offset
 	}
+	// limit is hit, we need to grow.
+	if s.grow == nil {
+		log.Fatalf("Arena too small, toWrite:%d newTotal:%d limit:%d",
+			sz, offset+sz, len(s.data))
+	}
+	s.data = s.grow(sz)
+	y.AssertTrue(offset < uint32(len(s.data)))
+	return offset
 }
 
 // allocateValue encodes valueStruct and put it in the arena buffer.
