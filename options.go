@@ -122,19 +122,20 @@ func DefaultOptions(path string) Options {
 		LevelSizeMultiplier: 10,
 		MaxLevels:           7,
 
-		NumCompactors:           4, // Run at least 2 compactors. Zero-th compactor prioritizes L0.
-		NumLevelZeroTables:      5,
-		NumLevelZeroTablesStall: 15,
-		NumMemtables:            5,
-		BloomFalsePositive:      0.01,
-		BlockSize:               4 * 1024,
-		SyncWrites:              false,
-		NumVersionsToKeep:       1,
-		CompactL0OnClose:        false,
-		VerifyValueChecksum:     false,
-		Compression:             options.Snappy,
-		BlockCacheSize:          256 << 20,
-		IndexCacheSize:          0,
+		NumCompactors:            4, // Run at least 2 compactors. Zero-th compactor prioritizes L0.
+		NumLevelZeroTables:       5,
+		NumLevelZeroTablesStall:  15,
+		NumMemtables:             5,
+		BloomFalsePositive:       0.01,
+		BlockSize:                4 * 1024,
+		SyncWrites:               false,
+		NumVersionsToKeep:        1,
+		CompactL0OnClose:         false,
+		VerifyValueChecksum:      false,
+		ChecksumVerificationMode: options.OnTableRead,
+		Compression:              options.Snappy,
+		BlockCacheSize:           256 << 20,
+		IndexCacheSize:           0,
 
 		// The following benchmarks were done on a 4 KB block size (default block size). The
 		// compression is ratio supposed to increase with increasing compression level but since the
