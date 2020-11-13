@@ -149,11 +149,11 @@ func writeRandom(db *badger.DB, num uint64) error {
 		if ttlPeriod != 0 {
 			e.WithTTL(ttlPeriod)
 		}
-		err := batch.SetEntryAt(e, 1)
+		err := batch.DeleteAt(e.Key, i)
 		for err == badger.ErrBlockedWrites {
 			time.Sleep(time.Second)
 			batch = db.NewManagedWriteBatch()
-			err = batch.SetEntryAt(e, 1)
+			err = batch.DeleteAt(e.Key, i)
 		}
 		if err != nil {
 			panic(err)
@@ -285,6 +285,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	db.SetDiscardTs(2)
 	defer func() {
 		start := time.Now()
 		err := db.Close()

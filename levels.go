@@ -450,6 +450,12 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 
 	runOnce := func() bool {
 		prios := s.pickCompactLevels()
+		for _, p := range prios {
+			level := s.levels[p.level]
+			level.RLock()
+			fmt.Printf("[%d] level: %d score: %.2f  Sz: %d\n", id, p.level, p.score, level.getTotalStaleSize())
+			level.RUnlock()
+		}
 		if id == 0 {
 			// Worker ID zero prefers to compact L0 always.
 			prios = moveL0toFront(prios)
@@ -521,7 +527,10 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 
 		l := s.levels[i]
 		sz := l.getTotalSize() - delSize
-		addPriority(i, float64(sz)/float64(t.targetSz[i]))
+		targetSz := float64(t.targetSz[i])
+		szScore := float64(sz) / targetSz
+		staleScore := float64(l.getTotalStaleSize()) / targetSz
+		addPriority(i, szScore+staleScore)
 	}
 	y.AssertTrue(len(prios) == len(s.levels))
 
@@ -535,6 +544,7 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	// above level.
 	var prevLevel int
 	for level := t.baseLevel; level < len(s.levels); level++ {
+		// fmt.Printf("level = %+v\n", level)
 		if prios[prevLevel].adjusted >= 1 {
 			// Avoid absurdly large scores by placing a floor on the score that we'll
 			// adjust a level by. The value of 0.01 was chosen somewhat arbitrarily
@@ -634,9 +644,14 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 		return r-l >= 10
 	}
 
-	var lastKey, skipKey []byte
-	var numBuilds, numVersions int
-	var vp valuePointer
+	var (
+		lastKey, skipKey       []byte
+		numBuilds, numVersions int
+		vp                     valuePointer
+		// Denotes if the first key is a series of duplicate keys had
+		// "DiscardEarlierVersions" set
+		firstKeyHasDiscardSet bool
+	)
 
 	addKeys := func(builder *table.Builder) {
 		timeStart := time.Now()
@@ -663,6 +678,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			}
 
 			if !y.SameKey(it.Key(), lastKey) {
+				firstKeyHasDiscardSet = false
 				if len(kr.right) > 0 && y.CompareKeys(it.Key(), kr.right) >= 0 {
 					break
 				}
@@ -696,6 +712,9 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 
 			vs := it.Value()
 			version := y.ParseTs(it.Key())
+
+			isExpired := isDeletedOrExpired(vs.Meta, vs.ExpiresAt)
+
 			// Do not discard entries inserted by merge operator. These entries will be
 			// discarded once they're merged
 			if version <= discardTs && vs.Meta&bitMergeEntry == 0 {
@@ -710,9 +729,9 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				// (including the current item being processed)
 				lastValidVersion := vs.Meta&bitDiscardEarlierVersions > 0 ||
 					numVersions == s.kv.opt.NumVersionsToKeep
-
-				isExpired := isDeletedOrExpired(vs.Meta, vs.ExpiresAt)
-
+				if !y.SameKey(it.Key(), lastKey) {
+					firstKeyHasDiscardSet = lastValidVersion
+				}
 				if isExpired || lastValidVersion {
 					// If this version of the key is deleted or expired, skip all the rest of the
 					// versions. Ensure that we're only removing versions below readTs.
@@ -740,10 +759,22 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			if vs.Meta&bitValuePointer > 0 {
 				vp.Decode(vs.Value)
 			}
-			builder.Add(it.Key(), vs, vp.Len)
+			switch {
+			case firstKeyHasDiscardSet && y.SameKey(it.Key(), lastKey):
+				// This key is same as the last key which had "DiscardEarlierVersions" set. The
+				// the next compactions will drop this key if its ts >
+				// discardTs (of the next compaction).
+				builder.AddStaleKey(it.Key(), vs, vp.Len)
+			case isExpired:
+				// If the key is expired, the next compaction will drop it if
+				// its ts > discardTs (of the next compaction).
+				builder.AddStaleKey(it.Key(), vs, vp.Len)
+			default:
+				builder.Add(it.Key(), vs, vp.Len)
+			}
 		}
-		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
-			numKeys, numSkips, time.Since(timeStart).Round(time.Millisecond))
+		s.kv.opt.Infof("[%d] LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
+			cd.compactorId, numKeys, numSkips, time.Since(timeStart).Round(time.Millisecond))
 	} // End of function: addKeys
 
 	if len(kr.left) > 0 {
@@ -1154,6 +1185,18 @@ func (s *levelsController) fillTablesL0(cd *compactDef) bool {
 	return s.fillTablesL0ToL0(cd)
 }
 
+// sortByStaleData sorts tables based on the amount of stale data they have.
+// This is useful in removing tombstones.
+func (s *levelsController) sortByStaleDataSize(tables []*table.Table, cd *compactDef) {
+	if len(tables) == 0 || cd.nextLevel == nil {
+		return
+	}
+
+	sort.Slice(tables, func(i, j int) bool {
+		return tables[i].StaleDataSize() < tables[j].StaleDataSize()
+	})
+}
+
 // sortByHeuristic sorts tables in increasing order of MaxVersion, so we
 // compact older tables first.
 func (s *levelsController) sortByHeuristic(tables []*table.Table, cd *compactDef) {
@@ -1167,6 +1210,61 @@ func (s *levelsController) sortByHeuristic(tables []*table.Table, cd *compactDef
 	})
 }
 
+// This function should be called with lock on levels.
+func (s *levelsController) fillSameLevelTables(tables []*table.Table, cd *compactDef) bool {
+	s.sortByStaleDataSize(tables, cd)
+	if len(tables) > 0 && tables[0].StaleDataSize() == 0 {
+		// This is a maxLevel to maxLevel compaction and we don't have any stale data.
+		return false
+	}
+	for i, t := range tables {
+		// If the maxVersion is less than discardTs, we won't clean anything in
+		// the compaction. So skip this table.
+		if t.MaxVersion() < s.kv.orc.discardAtOrBelow() {
+			continue
+		}
+		cd.thisSize = t.Size()
+		cd.thisRange = getKeyRange(t)
+		// If we're already compacting this range, don't do anything.
+		if s.cstatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
+			continue
+		}
+
+		// Found a valid table!
+		cd.top = []*table.Table{t}
+		i++
+
+		needFileSz := cd.t.fileSz[cd.thisLevel.level]
+		// The table size is what we want so no need to collect more tables.
+		if t.Size() >= needFileSz {
+			continue
+		}
+		totalSize := t.Size()
+		// TableSize is less than what we want. Collect more tables for compaction.
+		for ; i < len(tables); i++ {
+			if s.cstatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
+				break
+			}
+			newT := tables[i]
+			totalSize += newT.Size()
+			if totalSize >= needFileSz {
+				break
+			}
+			cd.bot = append(cd.bot, newT)
+			cd.nextRange.extend(getKeyRange(newT))
+		}
+		if len(cd.bot) == 0 {
+			cd.bot = []*table.Table{}
+			cd.nextRange = cd.thisRange
+		}
+		if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func (s *levelsController) fillTables(cd *compactDef) bool {
 	cd.lockLevels()
 	defer cd.unlockLevels()
@@ -1175,6 +1273,10 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	copy(tables, cd.thisLevel.tables)
 	if len(tables) == 0 {
 		return false
+	}
+	// We're doing a maxLevel to maxLevel compaction. Pick tables based on the stale data size.
+	if cd.thisLevel.isLastLevel() {
+		return s.fillSameLevelTables(tables, cd)
 	}
 	// We pick tables, so we compact older tables first. This is similar to
 	// kOldestLargestSeqFirst in RocksDB.
@@ -1244,6 +1346,11 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	if len(cd.splits) == 0 {
 		cd.splits = append(cd.splits, keyRange{})
 	}
+
+	if thisLevel.level == 6 {
+		fmt.Printf("\n\n HORAYYY \n\n")
+	}
+	s.kv.opt.Infof("\n[%d] LOG Compact %d->%d (%d, %d)\n", id, thisLevel.level, nextLevel.level, len(cd.top), len(cd.bot))
 
 	// Table should never be moved directly between levels, always be rewritten to allow discarding
 	// invalid versions.
@@ -1315,7 +1422,7 @@ var errFillTables = errors.New("Unable to fill tables")
 // doCompact picks some table on level l and compacts it away to the next level.
 func (s *levelsController) doCompact(id int, p compactionPriority) error {
 	l := p.level
-	y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
+	// y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
 	if p.t.baseLevel == 0 {
 		p.t = s.levelTargets()
 	}
@@ -1340,7 +1447,12 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 			return errFillTables
 		}
 	} else {
-		cd.nextLevel = s.levels[l+1]
+		// We're compacting the last level.
+		if cd.thisLevel.isLastLevel() {
+			cd.nextLevel = cd.thisLevel
+		} else {
+			cd.nextLevel = s.levels[l+1]
+		}
 		if !s.fillTables(&cd) {
 			return errFillTables
 		}
@@ -1354,7 +1466,7 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 		return err
 	}
 
-	s.kv.opt.Debugf("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
+	s.kv.opt.Infof("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
 	return nil
 }
 
@@ -1459,6 +1571,7 @@ type TableInfo struct {
 	Right            []byte
 	KeyCount         uint32 // Number of keys in the table
 	OnDiskSize       uint32
+	StaleDataSize    uint32
 	UncompressedSize uint32
 	MaxVersion       uint64
 	IndexSz          int
@@ -1476,6 +1589,7 @@ func (s *levelsController) getTableInfo() (result []TableInfo) {
 				Right:            t.Biggest(),
 				KeyCount:         t.KeyCount(),
 				OnDiskSize:       t.OnDiskSize(),
+				StaleDataSize:    t.StaleDataSize(),
 				IndexSz:          t.IndexSize(),
 				BloomFilterSize:  t.BloomFilterSize(),
 				UncompressedSize: t.UncompressedSize(),

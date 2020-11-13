@@ -176,7 +176,7 @@ func (cs *compactStatus) compareAndAdd(_ thisAndNextLevelRLocked, cd compactDef)
 	defer cs.Unlock()
 
 	tl := cd.thisLevel.level
-	y.AssertTruef(tl < len(cs.levels)-1, "Got level %d. Max levels: %d", tl, len(cs.levels))
+	y.AssertTruef(tl < len(cs.levels), "Got level %d. Max levels: %d", tl, len(cs.levels))
 	thisLevel := cs.levels[cd.thisLevel.level]
 	nextLevel := cs.levels[cd.nextLevel.level]
 
@@ -194,6 +194,9 @@ func (cs *compactStatus) compareAndAdd(_ thisAndNextLevelRLocked, cd compactDef)
 	thisLevel.ranges = append(thisLevel.ranges, cd.thisRange)
 	nextLevel.ranges = append(nextLevel.ranges, cd.nextRange)
 	thisLevel.delSize += cd.thisSize
+	if cd.thisLevel.level == 6 {
+		fmt.Printf("tableT = [%s -> %s]\n", tablesToString(cd.top), tablesToString(cd.bot))
+	}
 	for _, t := range append(cd.top, cd.bot...) {
 		cs.tables[t.ID()] = struct{}{}
 	}
@@ -205,7 +208,7 @@ func (cs *compactStatus) delete(cd compactDef) {
 	defer cs.Unlock()
 
 	tl := cd.thisLevel.level
-	y.AssertTruef(tl < len(cs.levels)-1, "Got level %d. Max levels: %d", tl, len(cs.levels))
+	y.AssertTruef(tl < len(cs.levels), "Got level %d. Max levels: %d", tl, len(cs.levels))
 
 	thisLevel := cs.levels[cd.thisLevel.level]
 	nextLevel := cs.levels[cd.nextLevel.level]

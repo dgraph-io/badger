@@ -107,10 +107,8 @@ type Table struct {
 	smallest, biggest []byte // Smallest and largest keys (with timestamps).
 	id                uint64 // file id, part of filename
 
-	Checksum  []byte
-	CreatedAt time.Time
-	// Stores the total size of key-values stored in this table (including the size on vlog).
-	onDiskSize     uint32
+	Checksum       []byte
+	CreatedAt      time.Time
 	indexStart     int
 	indexLen       int
 	hasBloomFilter bool
@@ -392,7 +390,6 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 		t._index = index
 	}
 
-	t.onDiskSize = index.OnDiskSize()
 	t.hasBloomFilter = len(index.BloomFilterBytes()) > 0
 
 	var bo fb.BlockOffset
@@ -596,10 +593,13 @@ func (t *Table) BloomFilterSize() int {
 
 // OnDiskSize returns the total size of key-values stored in this table (including the
 // disk space occupied on the value log).
-func (t *Table) OnDiskSize() uint32 { return t.onDiskSize }
+func (t *Table) OnDiskSize() uint32 { return t.fetchIndex().OnDiskSize() }
 
 // Size is its file size in bytes
 func (t *Table) Size() int64 { return int64(t.tableSize) }
+
+// StaleDataSize is the amount of stale data (that can be dropped by a compaction )in this SST.
+func (t *Table) StaleDataSize() uint32 { return t.fetchIndex().StaleDataSize() }
 
 // Smallest is its smallest key, or nil if there are none
 func (t *Table) Smallest() []byte { return t.smallest }
