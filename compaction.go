@@ -50,6 +50,9 @@ func (r keyRange) equals(dst keyRange) bool {
 }
 
 func (r *keyRange) extend(kr keyRange) {
+	if kr.isEmpty() {
+		return
+	}
 	if r.isEmpty() {
 		*r = kr
 	}
@@ -68,6 +71,10 @@ func (r keyRange) overlapsWith(dst keyRange) bool {
 	// Empty keyRange always overlaps.
 	if r.isEmpty() {
 		return true
+	}
+	// Empty dst doesn't overlap with anything.
+	if dst.isEmpty() {
+		return false
 	}
 	if r.inf || dst.inf {
 		return true
@@ -194,9 +201,6 @@ func (cs *compactStatus) compareAndAdd(_ thisAndNextLevelRLocked, cd compactDef)
 	thisLevel.ranges = append(thisLevel.ranges, cd.thisRange)
 	nextLevel.ranges = append(nextLevel.ranges, cd.nextRange)
 	thisLevel.delSize += cd.thisSize
-	if cd.thisLevel.level == 6 {
-		fmt.Printf("tableT = [%s -> %s]\n", tablesToString(cd.top), tablesToString(cd.bot))
-	}
 	for _, t := range append(cd.top, cd.bot...) {
 		cs.tables[t.ID()] = struct{}{}
 	}

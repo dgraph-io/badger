@@ -450,12 +450,6 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 
 	runOnce := func() bool {
 		prios := s.pickCompactLevels()
-		for _, p := range prios {
-			level := s.levels[p.level]
-			level.RLock()
-			fmt.Printf("[%d] level: %d score: %.2f  Sz: %d\n", id, p.level, p.score, level.getTotalStaleSize())
-			level.RUnlock()
-		}
 		if id == 0 {
 			// Worker ID zero prefers to compact L0 always.
 			prios = moveL0toFront(prios)
@@ -563,7 +557,7 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	// make better decisions about compacting L0. If we see a score >= 1.0, we can do L0->L0
 	// compactions. If the adjusted score >= 1.0, then we can do L0->Lbase compactions.
 	out := prios[:0]
-	for _, p := range prios[:len(prios)-1] {
+	for _, p := range prios {
 		if p.score >= 1.0 {
 			out = append(out, p)
 		}
@@ -773,7 +767,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				builder.Add(it.Key(), vs, vp.Len)
 			}
 		}
-		s.kv.opt.Infof("[%d] LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
+		s.kv.opt.Debugf("[%d] LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			cd.compactorId, numKeys, numSkips, time.Since(timeStart).Round(time.Millisecond))
 	} // End of function: addKeys
 
@@ -1212,12 +1206,15 @@ func (s *levelsController) sortByHeuristic(tables []*table.Table, cd *compactDef
 
 // This function should be called with lock on levels.
 func (s *levelsController) fillSameLevelTables(tables []*table.Table, cd *compactDef) bool {
-	s.sortByStaleDataSize(tables, cd)
-	if len(tables) > 0 && tables[0].StaleDataSize() == 0 {
+	sortedTables := make([]*table.Table, len(tables))
+	copy(sortedTables, tables)
+	s.sortByStaleDataSize(sortedTables, cd)
+	if len(sortedTables) > 0 && sortedTables[0].StaleDataSize() == 0 {
 		// This is a maxLevel to maxLevel compaction and we don't have any stale data.
 		return false
 	}
-	for i, t := range tables {
+	cd.bot = []*table.Table{}
+	for _, t := range sortedTables {
 		// If the maxVersion is less than discardTs, we won't clean anything in
 		// the compaction. So skip this table.
 		if t.MaxVersion() < s.kv.orc.discardAtOrBelow() {
@@ -1232,30 +1229,34 @@ func (s *levelsController) fillSameLevelTables(tables []*table.Table, cd *compac
 
 		// Found a valid table!
 		cd.top = []*table.Table{t}
-		i++
 
 		needFileSz := cd.t.fileSz[cd.thisLevel.level]
 		// The table size is what we want so no need to collect more tables.
 		if t.Size() >= needFileSz {
-			continue
+			break
 		}
 		totalSize := t.Size()
 		// TableSize is less than what we want. Collect more tables for compaction.
-		for ; i < len(tables); i++ {
+		var j int
+		for ; j < len(tables); j++ {
+			// Move forward until we find the correct table.
+			if tables[j].ID() == t.ID() {
+				break
+			}
+		}
+		j++
+		for j < len(tables) {
 			if s.cstatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
 				break
 			}
-			newT := tables[i]
+			newT := tables[j]
 			totalSize += newT.Size()
 			if totalSize >= needFileSz {
 				break
 			}
 			cd.bot = append(cd.bot, newT)
 			cd.nextRange.extend(getKeyRange(newT))
-		}
-		if len(cd.bot) == 0 {
-			cd.bot = []*table.Table{}
-			cd.nextRange = cd.thisRange
+			j++
 		}
 		if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
 			continue
@@ -1292,18 +1293,6 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 		cd.top = []*table.Table{t}
 		left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, cd.thisRange)
 
-		// Sometimes below line(make([]*table.Table, right-left)) panics with error
-		// (runtime error: makeslice: len out of range). One of the reason for this can be when
-		// right < left. We don't know how to reproduce it as of now. We are just logging it so
-		// that we can get more context.
-		if right < left {
-			s.kv.opt.Errorf("right: %d is less than left: %d in overlappingTables for current "+
-				"level: %d, next level: %d, key range(%s, %s)", right, left, cd.thisLevel.level,
-				cd.nextLevel.level, cd.thisRange.left, cd.thisRange.right)
-
-			continue
-		}
-
 		cd.bot = make([]*table.Table, right-left)
 		copy(cd.bot, cd.nextLevel.tables[left:right])
 
@@ -1338,19 +1327,14 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	nextLevel := cd.nextLevel
 
 	y.AssertTrue(len(cd.splits) == 0)
-	if thisLevel.level == 0 && nextLevel.level == 0 {
-		// don't do anything for L0 -> L0.
+	if thisLevel.level == nextLevel.level {
+		// don't do anything for L0 -> L0 and Lmax -> Lmax.
 	} else {
-		s.addSplits(&cd)
+		// s.addSplits(&cd)
 	}
 	if len(cd.splits) == 0 {
 		cd.splits = append(cd.splits, keyRange{})
 	}
-
-	if thisLevel.level == 6 {
-		fmt.Printf("\n\n HORAYYY \n\n")
-	}
-	s.kv.opt.Infof("\n[%d] LOG Compact %d->%d (%d, %d)\n", id, thisLevel.level, nextLevel.level, len(cd.top), len(cd.bot))
 
 	// Table should never be moved directly between levels, always be rewritten to allow discarding
 	// invalid versions.
@@ -1380,6 +1364,9 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	if err := thisLevel.deleteTables(cd.top); err != nil {
 		return err
 	}
+	// if err := s.validate(); err != nil {
+	// 	panic(err)
+	// }
 
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
