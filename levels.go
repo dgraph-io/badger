@@ -625,7 +625,6 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	// that would affect the snapshot view guarantee provided by transactions.
 	discardTs := s.kv.orc.discardAtOrBelow()
 
-	fmt.Printf("discardTs = %+v\n", discardTs)
 	// Try to collect stats so that we can inform value log about GC. That would help us find which
 	// value log file should be GCed.
 	discardStats := make(map[uint32]int64)
