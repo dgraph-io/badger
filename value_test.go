@@ -990,7 +990,7 @@ func TestValueLogTruncate(t *testing.T) {
 	require.Equal(t, 4, int(db.mt.wal.fid))
 	fileStat, err := db.mt.wal.Fd.Stat()
 	require.NoError(t, err)
-	require.Equal(t, 2*db.opt.ValueLogFileSize, fileStat.Size())
+	require.Equal(t, 2*db.opt.MemTableSize, fileStat.Size())
 
 	fileCountAfterCorruption := len(db.Tables()) + len(db.imm) + 1 // +1 for db.mt
 	// We should have one memtable and one sst file.
