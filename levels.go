@@ -535,10 +535,6 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	// Add L0 priority based on the number of tables.
 	addPriority(0, float64(s.levels[0].numTables())/float64(s.kv.opt.NumLevelZeroTables))
 
-	// Add LMax prioriy based on the stale data.
-	// lastLevel := s.levels[s.kv.opt.MaxLevels-1]
-	// addPriority(lastLevel.level, float64(lastLevel.getTotalStaleSize()))
-
 	// All other levels use size to calculate priority.
 	// Ignore the level 0 and the last level.
 	for i := 1; i < len(s.levels); i++ {
@@ -579,7 +575,7 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	// make better decisions about compacting L0. If we see a score >= 1.0, we can do L0->L0
 	// compactions. If the adjusted score >= 1.0, then we can do L0->Lbase compactions.
 	out := prios[:0]
-	for _, p := range prios {
+	for _, p := range prios[:len(prios)-1] {
 		if p.score >= 1.0 {
 			out = append(out, p)
 		}
@@ -1299,9 +1295,7 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	}
 	// We're doing a maxLevel to maxLevel compaction. Pick tables based on the stale data size.
 	if cd.thisLevel.isLastLevel() {
-		b := s.fillMaxLevelTables(tables, cd)
-		// fmt.Printf("[%d] same level tables ======== %+v\n", cd.compactorId, b)
-		return b
+		return s.fillMaxLevelTables(tables, cd)
 	}
 	// We pick tables, so we compact older tables first. This is similar to
 	// kOldestLargestSeqFirst in RocksDB.
@@ -1351,7 +1345,6 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	nextLevel := cd.nextLevel
 
 	y.AssertTrue(len(cd.splits) == 0)
-	// if thisLevel.level == 0 && nextLevel.level == 0 {
 	if thisLevel.level == nextLevel.level {
 		// don't do anything for L0 -> L0 and Lmax -> Lmax.
 	} else {
@@ -1361,10 +1354,6 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 		cd.splits = append(cd.splits, keyRange{})
 	}
 
-	s.kv.opt.Infof("[%d] RUNNING LOG Compact %d->%d (%d, %d -> ### tables with %d splits)."+
-		" [%s] -> [%s], took %v\n",
-		id, thisLevel.level, nextLevel.level, len(cd.top), len(cd.bot),
-		len(cd.splits), tablesToString(cd.top), tablesToString(cd.bot))
 	// Table should never be moved directly between levels, always be rewritten to allow discarding
 	// invalid versions.
 
@@ -1393,6 +1382,7 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	if err := thisLevel.deleteTables(cd.top); err != nil {
 		return err
 	}
+	// TODO(ibrahim): Remove this.
 	if err := s.validate(); err != nil {
 		panic(err)
 	}
@@ -1403,7 +1393,7 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	from := append(tablesToString(cd.top), tablesToString(cd.bot)...)
 	to := tablesToString(newTables)
 
-	if dur := time.Since(timeStart); true || dur > 2*time.Second {
+	if dur := time.Since(timeStart); dur > 2*time.Second {
 		var expensive string
 		if dur > time.Second {
 			expensive = " [E]"
@@ -1438,7 +1428,7 @@ var errFillTables = errors.New("Unable to fill tables")
 // doCompact picks some table on level l and compacts it away to the next level.
 func (s *levelsController) doCompact(id int, p compactionPriority) error {
 	l := p.level
-	// y.AssertTrue(l+1 < s.kv.opt.MaxLevels) // Sanity check.
+	y.AssertTrue(l < s.kv.opt.MaxLevels) // Sanity check.
 	if p.t.baseLevel == 0 {
 		p.t = s.levelTargets()
 	}
@@ -1481,7 +1471,7 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 		return err
 	}
 
-	s.kv.opt.Infof("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
+	s.kv.opt.Debugf("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.level)
 	return nil
 }
 

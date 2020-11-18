@@ -138,7 +138,7 @@ func getAllAndCheck(t *testing.T, db *DB, expected []keyValVersion) {
 			item := it.Item()
 			v, err := item.ValueCopy(nil)
 			require.NoError(t, err)
-			fmt.Printf("k: %s v: %d val: %s\n", item.key, item.Version(), v)
+			// fmt.Printf("k: %s v: %d val: %s\n", item.key, item.Version(), v)
 			require.Less(t, i, len(expected), "DB has more number of key than expected")
 			expect := expected[i]
 			require.Equal(t, expect.key, string(item.Key()), "expected key: %s actual key: %s",
