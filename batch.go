@@ -103,7 +103,10 @@ func (wb *WriteBatch) Write(kvList *pb.KVList) error {
 		if len(kv.UserMeta) > 0 {
 			e.UserMeta = kv.UserMeta[0]
 		}
-		y.AssertTrue(kv.Version != 0)
+		if kv.Version == 0 {
+			wb.db.opt.Errorf("Invalid KV received: %+v\n", kv)
+			continue
+		}
 		e.version = kv.Version
 		if err := wb.handleEntry(&e); err != nil {
 			return err
