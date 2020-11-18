@@ -448,6 +448,18 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 		return prios
 	}
 
+	run := func(p compactionPriority) bool {
+		err := s.doCompact(id, p)
+		switch err {
+		case nil:
+			return true
+		case errFillTables:
+			// pass
+		default:
+			s.kv.opt.Warningf("While running doCompact: %v\n", err)
+		}
+		return false
+	}
 	runOnce := func() bool {
 		prios := s.pickCompactLevels()
 		if id == 0 {
@@ -460,25 +472,34 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 			} else if p.adjusted < 1.0 {
 				break
 			}
-
-			err := s.doCompact(id, p)
-			switch err {
-			case nil:
+			if run(p) {
 				return true
-			case errFillTables:
-				// pass
-			default:
-				s.kv.opt.Warningf("While running doCompact: %v\n", err)
 			}
 		}
+
 		return false
 	}
 
+	tryLmaxToLmaxCompaction := func() {
+		p := compactionPriority{
+			level: s.lastLevel().level,
+			t:     s.levelTargets(),
+		}
+		run(p)
+
+	}
+	lMaxTicker := time.NewTicker(5 * time.Minute)
+	defer lMaxTicker.Stop()
 	for {
 		select {
 		// Can add a done channel or other stuff.
 		case <-ticker.C:
-			runOnce()
+			select {
+			case <-lMaxTicker.C:
+				tryLmaxToLmaxCompaction()
+			default:
+				runOnce()
+			}
 		case <-lc.HasBeenClosed():
 			return
 		}
@@ -514,17 +535,18 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	// Add L0 priority based on the number of tables.
 	addPriority(0, float64(s.levels[0].numTables())/float64(s.kv.opt.NumLevelZeroTables))
 
+	// Add LMax prioriy based on the stale data.
+	// lastLevel := s.levels[s.kv.opt.MaxLevels-1]
+	// addPriority(lastLevel.level, float64(lastLevel.getTotalStaleSize()))
+
 	// All other levels use size to calculate priority.
+	// Ignore the level 0 and the last level.
 	for i := 1; i < len(s.levels); i++ {
 		// Don't consider those tables that are already being compacted right now.
 		delSize := s.cstatus.delSize(i)
 
 		l := s.levels[i]
-		sz := l.getTotalSize() - delSize
-		targetSz := float64(t.targetSz[i])
-		szScore := float64(sz) / targetSz
-		staleScore := float64(l.getTotalStaleSize()) / targetSz
-		addPriority(i, szScore+staleScore)
+		addPriority(i, float64(l.getTotalSize()-delSize)/float64(t.targetSz[i]))
 	}
 	y.AssertTrue(len(prios) == len(s.levels))
 
@@ -607,6 +629,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	// that would affect the snapshot view guarantee provided by transactions.
 	discardTs := s.kv.orc.discardAtOrBelow()
 
+	fmt.Printf("discardTs = %+v\n", discardTs)
 	// Try to collect stats so that we can inform value log about GC. That would help us find which
 	// value log file should be GCed.
 	discardStats := make(map[uint32]int64)
@@ -1187,7 +1210,7 @@ func (s *levelsController) sortByStaleDataSize(tables []*table.Table, cd *compac
 	}
 
 	sort.Slice(tables, func(i, j int) bool {
-		return tables[i].StaleDataSize() < tables[j].StaleDataSize()
+		return tables[i].StaleDataSize() > tables[j].StaleDataSize()
 	})
 }
 
@@ -1205,7 +1228,7 @@ func (s *levelsController) sortByHeuristic(tables []*table.Table, cd *compactDef
 }
 
 // This function should be called with lock on levels.
-func (s *levelsController) fillSameLevelTables(tables []*table.Table, cd *compactDef) bool {
+func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compactDef) bool {
 	sortedTables := make([]*table.Table, len(tables))
 	copy(sortedTables, tables)
 	s.sortByStaleDataSize(sortedTables, cd)
@@ -1246,9 +1269,6 @@ func (s *levelsController) fillSameLevelTables(tables []*table.Table, cd *compac
 		}
 		j++
 		for j < len(tables) {
-			if s.cstatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
-				break
-			}
 			newT := tables[j]
 			totalSize += newT.Size()
 			if totalSize >= needFileSz {
@@ -1259,6 +1279,8 @@ func (s *levelsController) fillSameLevelTables(tables []*table.Table, cd *compac
 			j++
 		}
 		if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
+			cd.bot = nil
+			cd.nextRange = keyRange{}
 			continue
 		}
 		return true
@@ -1277,7 +1299,9 @@ func (s *levelsController) fillTables(cd *compactDef) bool {
 	}
 	// We're doing a maxLevel to maxLevel compaction. Pick tables based on the stale data size.
 	if cd.thisLevel.isLastLevel() {
-		return s.fillSameLevelTables(tables, cd)
+		b := s.fillMaxLevelTables(tables, cd)
+		// fmt.Printf("[%d] same level tables ======== %+v\n", cd.compactorId, b)
+		return b
 	}
 	// We pick tables, so we compact older tables first. This is similar to
 	// kOldestLargestSeqFirst in RocksDB.
@@ -1327,15 +1351,20 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	nextLevel := cd.nextLevel
 
 	y.AssertTrue(len(cd.splits) == 0)
+	// if thisLevel.level == 0 && nextLevel.level == 0 {
 	if thisLevel.level == nextLevel.level {
 		// don't do anything for L0 -> L0 and Lmax -> Lmax.
 	} else {
-		// s.addSplits(&cd)
+		s.addSplits(&cd)
 	}
 	if len(cd.splits) == 0 {
 		cd.splits = append(cd.splits, keyRange{})
 	}
 
+	s.kv.opt.Infof("[%d] RUNNING LOG Compact %d->%d (%d, %d -> ### tables with %d splits)."+
+		" [%s] -> [%s], took %v\n",
+		id, thisLevel.level, nextLevel.level, len(cd.top), len(cd.bot),
+		len(cd.splits), tablesToString(cd.top), tablesToString(cd.bot))
 	// Table should never be moved directly between levels, always be rewritten to allow discarding
 	// invalid versions.
 
@@ -1364,9 +1393,9 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	if err := thisLevel.deleteTables(cd.top); err != nil {
 		return err
 	}
-	// if err := s.validate(); err != nil {
-	// 	panic(err)
-	// }
+	if err := s.validate(); err != nil {
+		panic(err)
+	}
 
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.
 	// However, the tables are added only to the end, so it is ok to just delete the first table.
@@ -1374,7 +1403,7 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	from := append(tablesToString(cd.top), tablesToString(cd.bot)...)
 	to := tablesToString(newTables)
 
-	if dur := time.Since(timeStart); dur > 2*time.Second {
+	if dur := time.Since(timeStart); true || dur > 2*time.Second {
 		var expensive string
 		if dur > time.Second {
 			expensive = " [E]"
@@ -1434,10 +1463,9 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 			return errFillTables
 		}
 	} else {
-		// We're compacting the last level.
-		if cd.thisLevel.isLastLevel() {
-			cd.nextLevel = cd.thisLevel
-		} else {
+		cd.nextLevel = cd.thisLevel
+		// We're not compacting the last level so pick the next level.
+		if !cd.thisLevel.isLastLevel() {
 			cd.nextLevel = s.levels[l+1]
 		}
 		if !s.fillTables(&cd) {
@@ -1604,6 +1632,7 @@ type LevelInfo struct {
 	IsBaseLevel    bool
 	Score          float64
 	Adjusted       float64
+	StaleDatSize   int64
 }
 
 func (s *levelsController) getLevelInfo() []LevelInfo {
@@ -1615,6 +1644,8 @@ func (s *levelsController) getLevelInfo() []LevelInfo {
 		result[i].Level = i
 		result[i].Size = l.totalSize
 		result[i].NumTables = len(l.tables)
+		result[i].StaleDatSize = l.totalStaleSize
+
 		l.RUnlock()
 
 		result[i].TargetSize = t.targetSz[i]

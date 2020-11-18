@@ -957,7 +957,11 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 	iter := ft.mt.sl.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder(bopts)
-	var vp valuePointer
+	var (
+		lastKey               []byte
+		firstKeyHasDiscardSet bool
+		vp                    valuePointer
+	)
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 		if len(ft.dropPrefixes) > 0 && hasAnyPrefixes(iter.Key(), ft.dropPrefixes) {
 			continue
@@ -966,7 +970,19 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 		if vs.Meta&bitValuePointer > 0 {
 			vp.Decode(vs.Value)
 		}
-		b.Add(iter.Key(), iter.Value(), vp.Len)
+		switch {
+		case firstKeyHasDiscardSet && y.SameKey(lastKey, iter.Key()):
+			b.AddStaleKey(iter.Key(), iter.Value(), vp.Len)
+		case isDeletedOrExpired(vs.Meta, vs.ExpiresAt):
+			b.AddStaleKey(iter.Key(), iter.Value(), vp.Len)
+		default:
+			b.Add(iter.Key(), iter.Value(), vp.Len)
+
+			if !y.SameKey(lastKey, iter.Key()) {
+				firstKeyHasDiscardSet = vs.Meta&bitDiscardEarlierVersions > 0
+			}
+		}
+		lastKey = iter.Key()
 	}
 	return b
 }
@@ -1856,9 +1872,10 @@ func (db *DB) LevelsToString() string {
 	for _, li := range levels {
 		b.WriteString(fmt.Sprintf(
 			"Level %d [%s]: NumTables: %02d. Size: %s of %s. Score: %.2f->%.2f"+
-				" Target FileSize: %s\n",
+				" StaleData: %s Target FileSize: %s\n",
 			li.Level, base(li.IsBaseLevel), li.NumTables,
-			h(li.Size), h(li.TargetSize), li.Score, li.Adjusted, h(li.TargetFileSize)))
+			h(li.Size), h(li.TargetSize), li.Score, li.Adjusted, h(li.StaleDatSize),
+			h(li.TargetFileSize)))
 	}
 	b.WriteString("Level Done\n")
 	return b.String()

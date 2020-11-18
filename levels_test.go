@@ -138,7 +138,7 @@ func getAllAndCheck(t *testing.T, db *DB, expected []keyValVersion) {
 			item := it.Item()
 			v, err := item.ValueCopy(nil)
 			require.NoError(t, err)
-			// fmt.Printf("k: %s v: %d val: %s\n", item.key, item.Version(), v)
+			fmt.Printf("k: %s v: %d val: %s\n", item.key, item.Version(), v)
 			require.Less(t, i, len(expected), "DB has more number of key than expected")
 			expect := expected[i]
 			require.Equal(t, expect.key, string(item.Key()), "expected key: %s actual key: %s",
@@ -1047,5 +1047,81 @@ func TestKeyVersions(t *testing.T) {
 				require.Equal(t, 0, len(db.KeySplits([]byte("a"))))
 			})
 		})
+	})
+}
+
+func TestSameLevel(t *testing.T) {
+	opt := DefaultOptions("")
+	opt.NumCompactors = 0
+	opt.NumVersionsToKeep = math.MaxInt32
+	opt.managedTxns = true
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		l6 := []keyValVersion{
+			{"A", "bar", 4, bitDiscardEarlierVersions}, {"A", "bar", 3, 0},
+			{"A", "bar", 2, 0}, {"Afoo", "baz", 2, 0},
+		}
+		l61 := []keyValVersion{
+			{"B", "bar", 4, bitDiscardEarlierVersions}, {"B", "bar", 3, 0},
+			{"B", "bar", 2, 0}, {"Bfoo", "baz", 2, 0},
+		}
+		l62 := []keyValVersion{
+			{"C", "bar", 4, bitDiscardEarlierVersions}, {"C", "bar", 3, 0},
+			{"C", "bar", 2, 0}, {"Cfoo", "baz", 2, 0},
+		}
+		// l6 := []keyValVersion{{"foo", "bbb", 1, 0}}
+		// createAndOpen(db, l0, 0)
+		createAndOpen(db, l6, 6)
+		createAndOpen(db, l61, 6)
+		createAndOpen(db, l62, 6)
+
+		require.NoError(t, db.lc.validate())
+
+		fmt.Println("first")
+		getAllAndCheck(t, db, []keyValVersion{
+			{"A", "bar", 4, bitDiscardEarlierVersions}, {"A", "bar", 3, 0},
+			{"A", "bar", 2, 0}, {"Afoo", "baz", 2, 0},
+			{"B", "bar", 4, bitDiscardEarlierVersions}, {"B", "bar", 3, 0},
+			{"B", "bar", 2, 0}, {"Bfoo", "baz", 2, 0},
+			{"C", "bar", 4, bitDiscardEarlierVersions}, {"C", "bar", 3, 0},
+			{"C", "bar", 2, 0}, {"Cfoo", "baz", 2, 0},
+		})
+
+		cdef := compactDef{
+			thisLevel: db.lc.levels[6],
+			nextLevel: db.lc.levels[6],
+			top:       []*table.Table{db.lc.levels[6].tables[0]},
+			bot:       db.lc.levels[6].tables[1:],
+			t:         db.lc.levelTargets(),
+		}
+		cdef.t.baseLevel = 1
+		// Set dicardTs to 3. foo2 and foo1 should be dropped.
+		db.SetDiscardTs(3)
+		require.NoError(t, db.lc.runCompactDef(-1, 6, cdef))
+		getAllAndCheck(t, db, []keyValVersion{
+			{"A", "bar", 4, bitDiscardEarlierVersions}, {"A", "bar", 3, 0},
+			{"A", "bar", 2, 0}, {"Afoo", "baz", 2, 0},
+			{"B", "bar", 4, bitDiscardEarlierVersions}, {"B", "bar", 3, 0},
+			{"B", "bar", 2, 0}, {"Bfoo", "baz", 2, 0},
+			{"C", "bar", 4, bitDiscardEarlierVersions}, {"C", "bar", 3, 0},
+			{"C", "bar", 2, 0}, {"Cfoo", "baz", 2, 0},
+		})
+
+		require.NoError(t, db.lc.validate())
+		// Set dicardTs to 7.
+		db.SetDiscardTs(7)
+		cdef = compactDef{
+			thisLevel: db.lc.levels[6],
+			nextLevel: db.lc.levels[6],
+			top:       []*table.Table{db.lc.levels[6].tables[0]},
+			bot:       db.lc.levels[6].tables[1:],
+			t:         db.lc.levelTargets(),
+		}
+		cdef.t.baseLevel = 1
+		require.NoError(t, db.lc.runCompactDef(-1, 6, cdef))
+		getAllAndCheck(t, db, []keyValVersion{
+			{"A", "bar", 4, bitDiscardEarlierVersions}, {"Afoo", "baz", 2, 0},
+			{"B", "bar", 4, bitDiscardEarlierVersions}, {"Bfoo", "baz", 2, 0},
+			{"C", "bar", 4, bitDiscardEarlierVersions}, {"Cfoo", "baz", 2, 0}})
+		require.NoError(t, db.lc.validate())
 	})
 }
