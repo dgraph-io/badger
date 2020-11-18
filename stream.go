@@ -110,8 +110,7 @@ func (st *Stream) SendDoneMarkers(done bool) {
 // ToList is a default implementation of KeyToList. It picks up all valid versions of the key,
 // skipping over deleted or expired keys.
 func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
-	alloc := st.Allocator(itr.ThreadId)
-	ka := alloc.Copy(key)
+	ka := y.Copy(key)
 
 	list := &pb.KVList{}
 	for ; itr.Valid(); itr.Next() {
@@ -124,11 +123,11 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 			break
 		}
 
-		kv := y.NewKV(alloc)
+		kv := &pb.KV{}
 		kv.Key = ka
 
 		if err := item.Value(func(val []byte) error {
-			kv.Value = alloc.Copy(val)
+			kv.Value = y.Copy(val)
 			return nil
 
 		}); err != nil {
@@ -136,7 +135,7 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 		}
 		kv.Version = item.Version()
 		kv.ExpiresAt = item.ExpiresAt()
-		kv.UserMeta = alloc.Copy([]byte{item.UserMeta()})
+		kv.UserMeta = []byte{item.UserMeta()}
 
 		list.Kv = append(list.Kv, kv)
 		if st.db.opt.NumVersionsToKeep == 1 {
