@@ -328,6 +328,7 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 	// We do need to create a new node.
 	height := s.randomHeight()
 	x := newNode(s.arena, key, u, height)
+
 	// Try to increase s.height via CAS.
 	listHeight = s.getHeight()
 	for height > int(listHeight) {
@@ -426,6 +427,7 @@ func (s *Skiplist) getInternal(key []byte) (*node, uint64) {
 		return nil, 0
 	}
 	fetchedKey := s.arena.getKey(n.keyOffset, n.keySize)
+
 	// If the node has version, it means it is a badger kv and we should
 	// compare it's key without the version.
 	if s.hasVersions {
