@@ -1784,6 +1784,8 @@ func (db *DB) StreamDB(outOptions Options) error {
 	stream.LogPrefix = fmt.Sprintf("Streaming DB to new DB at %s", outDir)
 
 	stream.Send = func(kvs *pb.KVList) error {
+		_, err := kvs.Marshal()
+		y.Check(err)
 		return writer.Write(kvs)
 	}
 	if err := stream.Orchestrate(context.Background()); err != nil {
