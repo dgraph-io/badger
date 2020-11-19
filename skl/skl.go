@@ -84,6 +84,7 @@ type Skiplist struct {
 	hasVersions bool
 	comparator  comparatorFunc
 	OnClose     func()
+	Release     func()
 }
 
 // IncrRef increases the refcount
@@ -100,8 +101,8 @@ func (s *Skiplist) DecrRef() {
 	if s.OnClose != nil {
 		s.OnClose()
 	}
-	if s.arena.Release != nil {
-		s.arena.Release()
+	if s.Release != nil {
+		s.Release()
 	}
 	// Indicate we are closed. Good for testing.  Also, lets GC reclaim memory. Race condition
 	// here would suggest we are accessing skiplist when we are supposed to have no reference!
@@ -136,7 +137,7 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 func NewSkiplist(arenaSize int64) *Skiplist {
 	buf := z.Calloc(int(arenaSize))
 	s := NewSkiplistWith(buf, true)
-	s.arena.Release = func() {
+	s.Release = func() {
 		z.Free(s.arena.data)
 	}
 	return s

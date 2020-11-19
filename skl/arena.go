@@ -36,9 +36,8 @@ const (
 
 // Arena should be lock-free.
 type Arena struct {
-	data    []byte
-	offset  uint32
-	Release func()
+	data   []byte
+	offset uint32
 }
 
 func (s *Arena) size() int64 {
@@ -49,7 +48,7 @@ func (s *Arena) allocate(sz uint32) uint32 {
 	offset := atomic.AddUint32(&s.offset, sz)
 	if offset >= uint32(len(s.data)) {
 		log.Fatalf("Arena too small, toWrite:%d newTotal:%d limit:%d",
-			sz, offset+sz, len(s.data))
+			sz, offset, len(s.data))
 	}
 	return offset
 }
