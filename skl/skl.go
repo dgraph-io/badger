@@ -107,7 +107,6 @@ func (s *Skiplist) DecrRef() {
 	// Since the head references the arena's buf, as long as the head is kept around
 	// GC can't release the buf.
 	s.head = nil
-
 }
 
 func newNode(arena *Arena, key []byte, u uint64, height int) *node {
