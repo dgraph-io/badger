@@ -19,7 +19,6 @@ package skl
 import (
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -30,7 +29,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/badger/v2/y"
-	"github.com/dgraph-io/ristretto/z"
 )
 
 const arenaSize = 1 << 20
@@ -128,47 +126,6 @@ func TestBasic(t *testing.T) {
 	require.NotNil(t, v.Value)
 	require.EqualValues(t, val5, v.Value)
 	require.EqualValues(t, 60, v.Meta)
-}
-
-// TestGrow tests growing the skiplist.
-func TestGrow(t *testing.T) {
-	fd, err := ioutil.TempFile("", "skiplist")
-	y.Check(err)
-	mf, err := z.OpenMmapFileUsing(fd, 1<<10, true)
-	if err != z.NewFile {
-		y.Check(err)
-	}
-
-	grown := false
-	grow := func(sz uint32) []byte {
-		grown = true
-		newSz := 2 * len(mf.Data)
-		if newSz < len(mf.Data)+int(sz) {
-			newSz = len(mf.Data) + int(sz)
-		}
-		err := mf.Truncate(int64(newSz))
-		y.Check(err)
-		y.AssertTrue(cap(mf.Data) == newSz)
-		return mf.Data
-	}
-
-	l := NewSkiplistWith(mf.Data, false)
-	l.SetGrow(grow)
-	n := 100000
-
-	// Write entries, this will trigger grow.
-	for i := 0; i < n; i++ {
-		x := []byte(fmt.Sprintf("%d", i))
-		l.PutUint64(x, uint64(i))
-	}
-	require.True(t, grown)
-
-	for i := 0; i < n; i++ {
-		x := []byte(fmt.Sprintf("%d", i))
-		val, err := l.GetUint64(x)
-		require.True(t, err)
-		require.Equal(t, val, uint64(i))
-	}
 }
 
 // TestConcurrentBasic tests concurrent writes followed by concurrent reads.

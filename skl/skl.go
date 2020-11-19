@@ -142,10 +142,6 @@ func NewSkiplist(arenaSize int64) *Skiplist {
 	return s
 }
 
-func (s *Skiplist) SetGrow(grow func(uint32) []byte) {
-	s.arena.grow = grow
-}
-
 // NewSkiplistWith makes a new skiplist, with a given byte slice.
 func NewSkiplistWith(buf []byte, hasVersions bool) *Skiplist {
 	// Sanity check for the buffer size
