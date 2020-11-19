@@ -84,6 +84,7 @@ type Skiplist struct {
 	hasVersions bool
 	comparator  comparatorFunc
 	OnClose     func()
+	Release     func()
 }
 
 // IncrRef increases the refcount
@@ -100,7 +101,9 @@ func (s *Skiplist) DecrRef() {
 	if s.OnClose != nil {
 		s.OnClose()
 	}
-	s.arena.Release()
+	if s.Release != nil {
+		s.Release()
+	}
 	// Indicate we are closed. Good for testing.  Also, lets GC reclaim memory. Race condition
 	// here would suggest we are accessing skiplist when we are supposed to have no reference!
 	s.arena = nil
@@ -132,16 +135,18 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 
 // NewSkiplist makes a new empty skiplist, with a given arena size.
 func NewSkiplist(arenaSize int64) *Skiplist {
-	buf, err := z.NewBufferWith(int(arenaSize), int(arenaSize), z.UseCalloc)
-	y.Check(err)
-	skl := NewSkiplistWithBuffer(buf, true)
-	return skl
+	buf := z.Calloc(int(arenaSize))
+	s := NewSkiplistWith(buf, true)
+	s.Release = func() {
+		z.Free(s.arena.data)
+	}
+	return s
 }
 
-// NewSkiplistWithBuffer makes a new skiplist, with a given buffer.
-func NewSkiplistWithBuffer(buf *z.Buffer, hasVersions bool) *Skiplist {
+// NewSkiplistWith makes a new skiplist, with a given byte slice.
+func NewSkiplistWith(buf []byte, hasVersions bool) *Skiplist {
 	arena := new(Arena)
-	arena.Buffer = buf
+	arena.data = buf
 	offset := arena.allocateValue(y.ValueStruct{})
 	head := newNode(arena, nil, offset, maxHeight)
 	sl := &Skiplist{
