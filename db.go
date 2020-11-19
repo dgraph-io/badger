@@ -39,6 +39,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
+	"github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 )
 
@@ -1784,7 +1785,7 @@ func (db *DB) StreamDB(outOptions Options) error {
 	stream.LogPrefix = fmt.Sprintf("Streaming DB to new DB at %s", outDir)
 
 	stream.Send = func(kvs *pb.KVList) error {
-		_, err := kvs.Marshal()
+		_, err := proto.Marshal(kvs)
 		y.Check(err)
 		return writer.Write(kvs)
 	}
