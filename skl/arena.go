@@ -36,8 +36,9 @@ const (
 
 // Arena should be lock-free.
 type Arena struct {
-	data   []byte
-	offset uint32
+	data    []byte
+	offset  uint32
+	Release func()
 }
 
 func (s *Arena) size() int64 {

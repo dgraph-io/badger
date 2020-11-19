@@ -100,7 +100,9 @@ func (s *Skiplist) DecrRef() {
 	if s.OnClose != nil {
 		s.OnClose()
 	}
-	z.Free(s.arena.data)
+	if s.arena.Release != nil {
+		s.arena.Release()
+	}
 	// Indicate we are closed. Good for testing.  Also, lets GC reclaim memory. Race condition
 	// here would suggest we are accessing skiplist when we are supposed to have no reference!
 	s.arena = nil
@@ -134,6 +136,9 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 func NewSkiplist(arenaSize int64) *Skiplist {
 	buf := z.Calloc(int(arenaSize))
 	s := NewSkiplistWith(buf, true)
+	s.arena.Release = func() {
+		z.Free(s.arena.data)
+	}
 	return s
 }
 
