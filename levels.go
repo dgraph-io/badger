@@ -741,6 +741,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				vp.Decode(vs.Value)
 			}
 			builder.Add(it.Key(), vs, vp.Len)
+			vp.Fid, vp.Len, vp.Offset = 0, 0, 0
 		}
 		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			numKeys, numSkips, time.Since(timeStart).Round(time.Millisecond))
