@@ -71,6 +71,7 @@ func (r *keyRange) extend(kr keyRange) {
 func (r keyRange) overlapsWith(dst keyRange) bool {
 	// Empty keyRange always overlaps.
 	if r.isEmpty() {
+		fmt.Println("r empty")
 		return true
 	}
 	// TODO(ibrahim): Do you need this?
@@ -166,6 +167,7 @@ func (cs *compactStatus) overlapsWith(level int, this keyRange) bool {
 	cs.RLock()
 	defer cs.RUnlock()
 
+	fmt.Printf("overlaps with cs.tables = %+v\n", cs.tables)
 	thisLevel := cs.levels[level]
 	return thisLevel.overlapsWith(this)
 }
@@ -184,6 +186,7 @@ func (cs *compactStatus) compareAndAdd(_ thisAndNextLevelRLocked, cd compactDef)
 	cs.Lock()
 	defer cs.Unlock()
 
+	fmt.Printf("cs.tables = %+v\n", cs.tables)
 	tl := cd.thisLevel.level
 	y.AssertTruef(tl < len(cs.levels), "Got level %d. Max levels: %d", tl, len(cs.levels))
 	thisLevel := cs.levels[cd.thisLevel.level]

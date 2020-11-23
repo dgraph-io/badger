@@ -3,6 +3,7 @@ module github.com/dgraph-io/badger/v2
 go 1.12
 
 // replace github.com/dgraph-io/ristretto => /home/mrjn/go/src/github.com/dgraph-io/ristretto
+replace github.com/dgraph-io/ristretto => /home/ibrahim/Projects/go/src/github.com/dgraph-io/ristretto
 
 require (
 	github.com/DataDog/zstd v1.4.1
