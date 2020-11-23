@@ -177,7 +177,6 @@ func buildTableOptions(db *DB) table.Options {
 		ZSTDCompressionLevel: opt.ZSTDCompressionLevel,
 		BlockCache:           db.blockCache,
 		IndexCache:           db.indexCache,
-		AllocPool:            db.allocPool,
 		DataKey:              dk,
 	}
 }

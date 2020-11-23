@@ -95,7 +95,6 @@ type DB struct {
 	registry   *KeyRegistry
 	blockCache *ristretto.Cache
 	indexCache *ristretto.Cache
-	allocPool  *z.AllocatorPool
 }
 
 const (
@@ -219,7 +218,6 @@ func Open(opt Options) (*DB, error) {
 		valueDirGuard: valueDirLockGuard,
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
-		allocPool:     z.NewAllocatorPool(8),
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
@@ -478,8 +476,6 @@ func (db *DB) IsClosed() bool {
 }
 
 func (db *DB) close() (err error) {
-	defer db.allocPool.Release()
-
 	db.opt.Debugf("Closing database")
 	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(db.lc.l0stallsMs))
 

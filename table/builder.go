@@ -127,7 +127,7 @@ func NewTableBuilder(opts Options) *Builder {
 		sz = maxAllocatorInitialSz
 	}
 	b := &Builder{
-		alloc: opts.AllocPool.Get(sz),
+		alloc: z.NewAllocator(sz),
 		opts:  &opts,
 	}
 	b.alloc.Tag = "Builder"
@@ -186,7 +186,7 @@ func (b *Builder) handleBlock() {
 
 // Close closes the TableBuilder.
 func (b *Builder) Close() {
-	b.opts.AllocPool.Return(b.alloc)
+	b.alloc.Release()
 }
 
 // Empty returns whether it's empty.
