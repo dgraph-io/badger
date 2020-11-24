@@ -87,18 +87,6 @@ type Stream struct {
 	kvChan       chan *z.Buffer
 	nextStreamId uint32
 	doneMarkers  bool
-
-	// Use allocators to generate KVs.
-	allocatorsMu sync.RWMutex
-	allocators   map[int]*z.Allocator
-
-	allocPool *z.AllocatorPool
-}
-
-func (st *Stream) Allocator(threadId int) *z.Allocator {
-	st.allocatorsMu.RLock()
-	defer st.allocatorsMu.RUnlock()
-	return st.allocators[threadId]
 }
 
 // SendDoneMarkers when true would send out done markers on the stream. False by default.
@@ -109,8 +97,7 @@ func (st *Stream) SendDoneMarkers(done bool) {
 // ToList is a default implementation of KeyToList. It picks up all valid versions of the key,
 // skipping over deleted or expired keys.
 func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
-	alloc := st.Allocator(itr.ThreadId)
-	ka := alloc.Copy(key)
+	ka := y.Copy(key)
 
 	list := &pb.KVList{}
 	for ; itr.Valid(); itr.Next() {
@@ -123,11 +110,11 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 			break
 		}
 
-		kv := y.NewKV(alloc)
+		kv := &pb.KV{}
 		kv.Key = ka
 
 		if err := item.Value(func(val []byte) error {
-			kv.Value = alloc.Copy(val)
+			kv.Value = y.Copy(val)
 			return nil
 
 		}); err != nil {
@@ -135,7 +122,7 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 		}
 		kv.Version = item.Version()
 		kv.ExpiresAt = item.ExpiresAt()
-		kv.UserMeta = alloc.Copy([]byte{item.UserMeta()})
+		kv.UserMeta = y.Copy([]byte{item.UserMeta()})
 
 		list.Kv = append(list.Kv, kv)
 		if st.db.opt.NumVersionsToKeep == 1 {
@@ -179,15 +166,6 @@ func (st *Stream) produceRanges(ctx context.Context) {
 	// keyRange output.
 	st.rangeCh <- keyRange{left: start}
 	close(st.rangeCh)
-}
-
-func (st *Stream) newAllocator(threadId int) *z.Allocator {
-	st.allocatorsMu.Lock()
-	a := st.allocPool.Get(batchSize)
-	a.Tag = "Stream " + st.LogPrefix
-	st.allocators[threadId] = a
-	st.allocatorsMu.Unlock()
-	return a
 }
 
 // produceKVs picks up ranges from rangeCh, generates KV lists and sends them to kvChan.
@@ -307,16 +285,6 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	defer t.Stop()
 	now := time.Now()
 
-	allocs := make(map[uint64]struct{})
-	returnAllocs := func() {
-		for ref := range allocs {
-			a := z.AllocatorFrom(ref)
-			st.allocPool.Return(a)
-			delete(allocs, ref)
-		}
-	}
-	defer returnAllocs()
-
 	sendBatch := func(batch *z.Buffer) error {
 		sz := uint64(batch.LenNoPadding())
 		bytesSent += sz
@@ -327,10 +295,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 		}
 		st.db.opt.Infof("%s Created batch of size: %s in %s.\n",
 			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
-		y.Check(batch.Release())
-
-		returnAllocs()
-		return nil
+		return batch.Release()
 	}
 
 	slurp := func(batch *z.Buffer) error {
@@ -407,17 +372,6 @@ outer:
 // are serial. In case any of these steps encounter an error, Orchestrate would stop execution and
 // return that error. Orchestrate can be called multiple times, but in serial order.
 func (st *Stream) Orchestrate(ctx context.Context) error {
-	st.allocPool = z.NewAllocatorPool(st.NumGo)
-	defer func() {
-		for _, a := range st.allocators {
-			// Using AllocatorFrom is better because if the allocator is already freed up, it would
-			// return nil.
-			a = z.AllocatorFrom(a.Ref)
-			a.Release()
-		}
-		st.allocPool.Release()
-	}()
-
 	st.rangeCh = make(chan keyRange, 3) // Contains keys for posting lists.
 
 	// kvChan should only have a small capacity to ensure that we don't buffer up too much data if
@@ -471,10 +425,9 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 
 func (db *DB) newStream() *Stream {
 	return &Stream{
-		db:         db,
-		NumGo:      8,
-		LogPrefix:  "Badger.Stream",
-		allocators: make(map[int]*z.Allocator),
+		db:        db,
+		NumGo:     8,
+		LogPrefix: "Badger.Stream",
 	}
 }
 

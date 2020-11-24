@@ -236,7 +236,7 @@ func writeSorted(db *badger.DB, num uint64) error {
 	}
 
 	// Let's create some streams.
-	width := num / 8
+	width := num / 4
 	streamID := uint32(0)
 	for start := uint64(0); start < num; start += width {
 		end := start + width
@@ -398,6 +398,8 @@ func reportStats(c *z.Closer, db *badger.DB) {
 				y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate,
 				humanize.IBytes(uint64(z.NumAllocBytes())))
+
+			z.PrintAllocators()
 			if count%10 == 0 {
 				fmt.Printf(db.LevelsToString())
 			}
