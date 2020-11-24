@@ -980,6 +980,7 @@ func TestKeyCount(t *testing.T) {
 					return err
 				}
 			}
+			writer.Write(buf)
 			return nil
 		}
 
@@ -1013,8 +1014,11 @@ func TestKeyCount(t *testing.T) {
 
 	streams := make(map[uint32]int)
 	stream := db2.NewStream()
-	stream.Send = func(list *pb.KVList) error {
-		count += len(list.Kv)
+	stream.Send = func(buf *z.Buffer) error {
+		list, err := BufferToKVList(buf)
+		if err != nil {
+			return err
+		}
 		for _, kv := range list.Kv {
 			last := streams[kv.StreamId]
 			key := binary.BigEndian.Uint64(kv.Key)
@@ -1024,6 +1028,7 @@ func TestKeyCount(t *testing.T) {
 			}
 			streams[kv.StreamId] = int(key)
 		}
+		count += len(list.Kv)
 		return nil
 	}
 	require.NoError(t, stream.Orchestrate(context.Background()))

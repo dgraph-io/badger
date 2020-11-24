@@ -117,21 +117,21 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 
 	var maxVersion uint64
 	stream.Send = func(buf *z.Buffer) error {
-		var list *pb.KVList
-		err := buf.SliceIterate(func(s []byte) error {
-			kv := new(pb.KV)
-			if err := kv.Unmarshal(s); err != nil {
-				return err
-			}
-			if maxVersion < kv.Version {
-				maxVersion = kv.Version
-			}
-			list.Kv = append(list.Kv, kv)
-			return nil
-		})
+		list, err := BufferToKVList(buf)
 		if err != nil {
 			return err
 		}
+		out := list.Kv[:0]
+		for _, kv := range list.Kv {
+			if maxVersion < kv.Version {
+				maxVersion = kv.Version
+			}
+			if !kv.StreamDone {
+				// Don't pick stream done changes.
+				out = append(out, kv)
+			}
+		}
+		list.Kv = out
 		return writeTo(list, w)
 	}
 

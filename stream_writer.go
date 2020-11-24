@@ -94,8 +94,8 @@ func (sw *StreamWriter) Write(buf *z.Buffer) error {
 	closedStreams := make(map[uint32]struct{})
 	streamReqs := make(map[uint32]*request)
 
-	var kv pb.KV
 	err := buf.SliceIterate(func(s []byte) error {
+		var kv pb.KV
 		if err := kv.Unmarshal(s); err != nil {
 			return err
 		}
