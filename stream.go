@@ -91,6 +91,8 @@ type Stream struct {
 	// Use allocators to generate KVs.
 	allocatorsMu sync.RWMutex
 	allocators   map[int]*z.Allocator
+
+	allocPool *z.AllocatorPool
 }
 
 func (st *Stream) Allocator(threadId int) *z.Allocator {
@@ -181,7 +183,7 @@ func (st *Stream) produceRanges(ctx context.Context) {
 
 func (st *Stream) newAllocator(threadId int) *z.Allocator {
 	st.allocatorsMu.Lock()
-	a := z.NewAllocator(batchSize)
+	a := st.allocPool.Get(batchSize)
 	a.Tag = "Stream " + st.LogPrefix
 	st.allocators[threadId] = a
 	st.allocatorsMu.Unlock()
@@ -309,7 +311,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	returnAllocs := func() {
 		for ref := range allocs {
 			a := z.AllocatorFrom(ref)
-			a.Release()
+			st.allocPool.Return(a)
 			delete(allocs, ref)
 		}
 	}
@@ -405,6 +407,7 @@ outer:
 // are serial. In case any of these steps encounter an error, Orchestrate would stop execution and
 // return that error. Orchestrate can be called multiple times, but in serial order.
 func (st *Stream) Orchestrate(ctx context.Context) error {
+	st.allocPool = z.NewAllocatorPool(st.NumGo)
 	defer func() {
 		for _, a := range st.allocators {
 			// Using AllocatorFrom is better because if the allocator is already freed up, it would
@@ -412,6 +415,7 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 			a = z.AllocatorFrom(a.Ref)
 			a.Release()
 		}
+		st.allocPool.Release()
 	}()
 
 	st.rangeCh = make(chan keyRange, 3) // Contains keys for posting lists.

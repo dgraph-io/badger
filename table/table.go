@@ -80,6 +80,8 @@ type Options struct {
 	BlockCache *ristretto.Cache
 	IndexCache *ristretto.Cache
 
+	AllocPool *z.AllocatorPool
+
 	// ZSTDCompressionLevel is the ZSTD compression level used for compressing blocks.
 	ZSTDCompressionLevel int
 }
