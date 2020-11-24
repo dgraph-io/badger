@@ -277,7 +277,8 @@ type sortedWriter struct {
 	streamID uint32
 	reqCh    chan *request
 	// Have separate closer for each writer, as it can be closed at any time.
-	closer *z.Closer
+	closer             *z.Closer
+	firstKeyHasDiscard bool
 }
 
 func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
@@ -350,6 +351,7 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	}
 
 	sameKey := y.SameKey(key, w.lastKey)
+
 	// Same keys should go into the same SSTable.
 	if !sameKey && w.builder.ReachedCapacity() {
 		if err := w.send(false); err != nil {
@@ -362,7 +364,16 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	if vs.Meta&bitValuePointer > 0 {
 		vp.Decode(vs.Value)
 	}
-	w.builder.Add(key, vs, vp.Len)
+
+	switch {
+	case sameKey && w.firstKeyHasDiscard:
+		w.builder.AddStaleKey(key, vs, vp.Len)
+	case isDeletedOrExpired(vs.Meta, vs.ExpiresAt):
+		w.builder.AddStaleKey(key, vs, vp.Len)
+	default:
+		w.builder.Add(key, vs, vp.Len)
+		w.firstKeyHasDiscard = vs.Meta&bitDiscardEarlierVersions > 0
+	}
 	return nil
 }
 
