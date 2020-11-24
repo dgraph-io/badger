@@ -485,7 +485,6 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 			level: s.lastLevel().level,
 			t:     s.levelTargets(),
 		}
-		fmt.Println("=========== Lmax compaction")
 		run(p)
 
 	}
@@ -772,18 +771,15 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			}
 			switch {
 			case firstKeyHasDiscardSet && y.SameKey(it.Key(), lastKey):
-				// fmt.Printf("lastKey: %x key: %x[%d], true \n", lastKey, it.Key(), y.ParseTs(it.Key()))
 				// This key is same as the last key which had "DiscardEarlierVersions" set. The
 				// the next compactions will drop this key if its ts >
 				// discardTs (of the next compaction).
 				builder.AddStaleKey(it.Key(), vs, vp.Len)
 			case isExpired:
-				// fmt.Printf("lastKey: %x key: %x[%d], true \n", lastKey, it.Key(), y.ParseTs(it.Key()))
 				// If the key is expired, the next compaction will drop it if
 				// its ts > discardTs (of the next compaction).
 				builder.AddStaleKey(it.Key(), vs, vp.Len)
 			default:
-				// fmt.Printf("lastKey: %x key: %x[%d], false \n", lastKey, it.Key(), y.ParseTs(it.Key()))
 				builder.Add(it.Key(), vs, vp.Len)
 			}
 		}
@@ -1248,6 +1244,7 @@ func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compact
 		for j < len(tables) {
 			newT := tables[j]
 			totalSize += newT.Size()
+
 			if totalSize >= needSz {
 				break
 			}
@@ -1275,6 +1272,9 @@ func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compact
 
 		cd.thisSize = t.Size()
 		cd.thisRange = getKeyRange(t)
+		// Set the next range as the same as the current range. If we don't do
+		// this, we won't be able to run more than one max level compactions.
+		cd.nextRange = cd.thisRange
 		// If we're already compacting this range, don't do anything.
 		if s.cstatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
 			continue
@@ -1369,7 +1369,6 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	y.AssertTrue(len(cd.splits) == 0)
 	if thisLevel.level == nextLevel.level {
 		// don't do anything for L0 -> L0 and Lmax -> Lmax.
-		fmt.Printf("========== running for thislevel = %+v id: %d\n", thisLevel.level, id)
 	} else {
 		s.addSplits(&cd)
 	}

@@ -221,7 +221,10 @@ func (cs *compactStatus) delete(cd compactDef) {
 
 	thisLevel.delSize -= cd.thisSize
 	found := thisLevel.remove(cd.thisRange)
-	if !cd.nextRange.isEmpty() {
+	// The following check makes sense only if we're compacting more than one
+	// table. In case of the max level, we might rewrite a single table to
+	// remove stale data.
+	if cd.thisLevel != cd.nextLevel && !cd.nextRange.isEmpty() {
 		found = nextLevel.remove(cd.nextRange) && found
 	}
 
