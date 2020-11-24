@@ -25,6 +25,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/golang/protobuf/proto"
 )
 
@@ -115,18 +116,22 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 	}
 
 	var maxVersion uint64
-	stream.Send = func(list *pb.KVList) error {
-		out := list.Kv[:0]
-		for _, kv := range list.Kv {
+	stream.Send = func(buf *z.Buffer) error {
+		var list *pb.KVList
+		err := buf.SliceIterate(func(s []byte) error {
+			kv := new(pb.KV)
+			if err := kv.Unmarshal(s); err != nil {
+				return err
+			}
 			if maxVersion < kv.Version {
 				maxVersion = kv.Version
 			}
-			if !kv.StreamDone {
-				// Don't pick stream done changes.
-				out = append(out, kv)
-			}
+			list.Kv = append(list.Kv, kv)
+			return nil
+		})
+		if err != nil {
+			return err
 		}
-		list.Kv = out
 		return writeTo(list, w)
 	}
 

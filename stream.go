@@ -28,7 +28,6 @@ import (
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
-	"github.com/golang/protobuf/proto"
 )
 
 const batchSize = 16 << 20 // 16 MB
@@ -80,12 +79,12 @@ type Stream struct {
 
 	// This is the method where Stream sends the final output. All calls to Send are done by a
 	// single goroutine, i.e. logic within Send method can expect single threaded execution.
-	Send func(*pb.KVList) error
+	Send func(buf *z.Buffer) error
 
 	readTs       uint64
 	db           *DB
 	rangeCh      chan keyRange
-	kvChan       chan *pb.KVList
+	kvChan       chan *z.Buffer
 	nextStreamId uint32
 	doneMarkers  bool
 
@@ -191,7 +190,6 @@ func (st *Stream) newAllocator(threadId int) *z.Allocator {
 
 // produceKVs picks up ranges from rangeCh, generates KV lists and sends them to kvChan.
 func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
-	var size int
 	var txn *Txn
 	if st.readTs > 0 {
 		txn = st.db.NewTransactionAt(st.readTs, false)
@@ -200,11 +198,12 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	}
 	defer txn.Discard()
 
+	outList := z.NewBuffer(2 * batchSize)
 	// produceKVs is running iterate serially. So, we can define the outList here.
-	outList := new(pb.KVList)
+	// outList := new(pb.KVList)
 	// There would be one last remaining Allocator for this threadId when produceKVs finishes, which
 	// would be released by Orchestrate.
-	outList.AllocRef = st.newAllocator(threadId).Ref
+	// outList.AllocRef = st.newAllocator(threadId).Ref
 
 	iterate := func(kr keyRange) error {
 		iterOpts := DefaultIteratorOptions
@@ -224,9 +223,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-			outList = new(pb.KVList)
-			outList.AllocRef = st.newAllocator(threadId).Ref
-			size = 0
+			outList = z.NewBuffer(2 * batchSize)
 			return nil
 		}
 
@@ -258,11 +255,12 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				continue
 			}
 			for _, kv := range list.Kv {
-				size += proto.Size(kv)
 				kv.StreamId = streamId
-				outList.Kv = append(outList.Kv, kv)
-
-				if size < batchSize {
+				out := outList.SliceAllocate(kv.Size())
+				if _, err := kv.MarshalToSizedBuffer(out); err != nil {
+					return err
+				}
+				if outList.LenNoPadding() < batchSize {
 					continue
 				}
 				if err := sendIt(); err != nil {
@@ -272,10 +270,14 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		}
 		// Mark the stream as done.
 		if st.doneMarkers {
-			outList.Kv = append(outList.Kv, &pb.KV{
+			kv := &pb.KV{
 				StreamId:   streamId,
 				StreamDone: true,
-			})
+			}
+			out := outList.SliceAllocate(kv.Size())
+			if _, err := kv.MarshalToSizedBuffer(out); err != nil {
+				return err
+			}
 		}
 		return sendIt()
 	}
@@ -313,29 +315,29 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 	}
 	defer returnAllocs()
 
-	sendBatch := func(batch *pb.KVList) error {
-		sz := uint64(proto.Size(batch))
+	sendBatch := func(batch *z.Buffer) error {
+		sz := uint64(batch.LenNoPadding())
 		bytesSent += sz
-		count += len(batch.Kv)
+		// count += len(batch.Kv)
 		t := time.Now()
 		if err := st.Send(batch); err != nil {
 			return err
 		}
 		st.db.opt.Infof("%s Created batch of size: %s in %s.\n",
 			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
+		y.Check(batch.Release())
 
 		returnAllocs()
 		return nil
 	}
 
-	slurp := func(batch *pb.KVList) error {
+	slurp := func(batch *z.Buffer) error {
 	loop:
 		for {
 			// Send the batch immediately if it already exceeds the maximum allowed size.
 			// If the size of the batch exceeds maxStreamSize, break from the loop to
 			// avoid creating a batch that is so big that certain limits are reached.
-			sz := uint64(proto.Size(batch))
-			if sz > maxStreamSize {
+			if batch.LenNoPadding() > int(maxStreamSize) {
 				break loop
 			}
 			select {
@@ -344,8 +346,13 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 					break loop
 				}
 				y.AssertTrue(kvs != nil)
-				batch.Kv = append(batch.Kv, kvs.Kv...)
-				allocs[kvs.AllocRef] = struct{}{}
+				if _, err := batch.Write(kvs.Bytes()); err != nil {
+					return err
+				}
+				if err := kvs.Release(); err != nil {
+					return err
+				}
+				// allocs[kvs.AllocRef] = struct{}{}
 
 			default:
 				break loop
@@ -356,7 +363,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 
 outer:
 	for {
-		var batch *pb.KVList
+		var batch *z.Buffer
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -378,7 +385,7 @@ outer:
 			}
 			y.AssertTrue(kvs != nil)
 			batch = kvs
-			allocs[kvs.AllocRef] = struct{}{}
+			// allocs[kvs.AllocRef] = struct{}{}
 
 			// Otherwise, slurp more keys into this batch.
 			if err := slurp(batch); err != nil {
@@ -412,7 +419,7 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	// kvChan should only have a small capacity to ensure that we don't buffer up too much data if
 	// sending is slow. Page size is set to 4MB, which is used to lazily cap the size of each
 	// KVList. To get 128MB buffer, we can set the channel size to 32.
-	st.kvChan = make(chan *pb.KVList, 32)
+	st.kvChan = make(chan *z.Buffer, 32)
 
 	if st.KeyToList == nil {
 		st.KeyToList = st.ToList

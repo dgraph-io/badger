@@ -25,6 +25,7 @@ import (
 	"time"
 
 	humanize "github.com/dustin/go-humanize"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/dgraph-io/badger/v2"
@@ -205,21 +206,30 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 		return l, nil
 	}
 
+	errStop := errors.Errorf("Stop iterating")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream.Send = func(l *pb.KVList) error {
+	stream.Send = func(buf *z.Buffer) error {
 		if count >= sampleSize {
 			return nil
 		}
-		for _, kv := range l.Kv {
+		var kv pb.KV
+		err := buf.SliceIterate(func(s []byte) error {
+			if err := kv.Unmarshal(s); err != nil {
+				return err
+			}
 			keys = append(keys, kv.Key)
 			count++
 			if count >= sampleSize {
 				cancel()
-				return nil
+				return errStop
 			}
+			return nil
+		})
+		if err == errStop || err == nil {
+			return nil
 		}
-		return nil
+		return err
 	}
 
 	if err := stream.Orchestrate(ctx); err != nil && err != context.Canceled {

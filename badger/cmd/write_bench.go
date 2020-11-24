@@ -204,21 +204,23 @@ func writeSorted(db *badger.DB, num uint64) error {
 	}
 
 	wg := &sync.WaitGroup{}
-	writeCh := make(chan *pb.KVList, 3)
+	writeCh := make(chan *z.Buffer, 3)
 	writeRange := func(start, end uint64, streamId uint32) {
 		// end is not included.
 		defer wg.Done()
-		kvs := &pb.KVList{}
+		kvs := z.NewBuffer(5 << 20)
 		var sz int
 		for i := start; i < end; i++ {
 			key := make([]byte, 8)
 			binary.BigEndian.PutUint64(key, i)
-			kvs.Kv = append(kvs.Kv, &pb.KV{
+			kv := &pb.KV{
 				Key:      key,
 				Value:    value,
 				Version:  1,
 				StreamId: streamId,
-			})
+			}
+			out := kvs.SliceAllocate(kv.Size())
+			y.Check2(kv.MarshalToSizedBuffer(out))
 
 			sz += es
 			atomic.AddUint64(&entriesWritten, 1)
@@ -226,7 +228,7 @@ func writeSorted(db *badger.DB, num uint64) error {
 
 			if sz >= 4<<20 { // 4 MB
 				writeCh <- kvs
-				kvs = &pb.KVList{}
+				kvs = z.NewBuffer(1 << 20)
 				sz = 0
 			}
 		}
@@ -254,6 +256,7 @@ func writeSorted(db *badger.DB, num uint64) error {
 		if err := writer.Write(kvs); err != nil {
 			panic(err)
 		}
+		y.Check(kvs.Release())
 	}
 	log.Println("DONE streaming. Flushing...")
 	return writer.Flush()
