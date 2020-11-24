@@ -489,21 +489,17 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 		run(p)
 
 	}
-	lMaxTicker := time.NewTicker(10 * time.Second)
-	defer lMaxTicker.Stop()
+	count := 0
 	for {
 		select {
 		// Can add a done channel or other stuff.
 		case <-ticker.C:
-			// if id != 2 {
-			// 	runOnce()
-			// 	return
-			// }
-
-			select {
-			case <-lMaxTicker.C:
+			count++
+			// Each ticker is 50ms so 50*200=10seconds.
+			if id == 2 && count == 200 {
 				tryLmaxToLmaxCompaction()
-			default:
+				count = 0
+			} else {
 				runOnce()
 			}
 		case <-lc.HasBeenClosed():
@@ -562,7 +558,6 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	// above level.
 	var prevLevel int
 	for level := t.baseLevel; level < len(s.levels); level++ {
-		// fmt.Printf("level = %+v\n", level)
 		if prios[prevLevel].adjusted >= 1 {
 			// Avoid absurdly large scores by placing a floor on the score that we'll
 			// adjust a level by. The value of 0.01 was chosen somewhat arbitrarily
@@ -630,7 +625,6 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	// never discard any versions starting from above this timestamp, because
 	// that would affect the snapshot view guarantee provided by transactions.
 	discardTs := s.kv.orc.discardAtOrBelow()
-	fmt.Printf("compaction discardTs = %+v\n", discardTs)
 
 	// Try to collect stats so that we can inform value log about GC. That would help us find which
 	// value log file should be GCed.
@@ -1240,21 +1234,49 @@ func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compact
 		return false
 	}
 	cd.bot = []*table.Table{}
-	count := 0
+	collectBotTables := func(t *table.Table, needSz int64) {
+		totalSize := t.Size()
+		var j int
+		for ; j < len(tables); j++ {
+			// Move forward until we find the correct table.
+			if tables[j].ID() == t.ID() {
+				break
+			}
+		}
+		j++
+		// Collect tables until we reach the the required size.
+		for j < len(tables) {
+			newT := tables[j]
+			totalSize += newT.Size()
+			if totalSize >= needSz {
+				break
+			}
+			cd.bot = append(cd.bot, newT)
+			cd.nextRange.extend(getKeyRange(newT))
+			j++
+		}
+	}
+	now := time.Now()
 	for _, t := range sortedTables {
 		// If the maxVersion is less than discardTs, we won't clean anything in
 		// the compaction. So skip this table.
 		if t.MaxVersion() > s.kv.orc.discardAtOrBelow() {
-			fmt.Printf("below discardTS t.ID() = %+v MV: %d DTS:%d\n", t.ID(), t.MaxVersion(), s.kv.orc.discardAtOrBelow())
-			count++
 			continue
 		}
-		fmt.Printf("below discardTS t.ID() = %+v\n", t.ID())
+		if now.Sub(t.CreatedAt) < 10*time.Second {
+			// Just created it 10s ago. Don't pick for compaction.
+			continue
+		}
+		// If the stale data size is less than 10 MB, it might not be worth
+		// rewriting the table. Skip it.
+		if t.StaleDataSize() < 10<<20 {
+			continue
+		}
+
 		cd.thisSize = t.Size()
 		cd.thisRange = getKeyRange(t)
 		// If we're already compacting this range, don't do anything.
 		if s.cstatus.overlapsWith(cd.thisLevel.level, cd.thisRange) {
-			fmt.Printf("Already compacting t.ID() = %+v\n", t.ID())
 			continue
 		}
 
@@ -1264,44 +1286,24 @@ func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compact
 		needFileSz := cd.t.fileSz[cd.thisLevel.level]
 		// The table size is what we want so no need to collect more tables.
 		if t.Size() >= needFileSz {
-			// fmt.Println("Size sufficient", t.Size(), needFileSz)
 			break
 		}
-		// fmt.Println("collecting more tables", t.Size(), needFileSz)
-		totalSize := t.Size()
 		// TableSize is less than what we want. Collect more tables for compaction.
-		var j int
-		for ; j < len(tables); j++ {
-			// Move forward until we find the correct table.
-			if tables[j].ID() == t.ID() {
-				break
-			}
-		}
-		j++
-		for j < len(tables) {
-			newT := tables[j]
-			totalSize += newT.Size()
-			if totalSize >= needFileSz {
-				break
-			}
-			cd.bot = append(cd.bot, newT)
-			cd.nextRange.extend(getKeyRange(newT))
-			j++
-		}
+		// If the level has multiple small tables, we collect all of them
+		// together to form a bigger table.
+		collectBotTables(t, needFileSz)
 		if !s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
-			cd.bot = nil
+			cd.bot = cd.bot[:0]
 			cd.nextRange = keyRange{}
 			continue
 		}
 		return true
 	}
 	if len(cd.top) == 0 {
-		fmt.Println("empty top")
 		return false
 	}
-	fmt.Printf("trying cd.top = %+v\n", cd.top[0].ID())
-	tt := s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd)
-	return tt
+
+	return s.cstatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd)
 }
 
 func (s *levelsController) fillTables(cd *compactDef) bool {
@@ -1486,7 +1488,6 @@ func (s *levelsController) doCompact(id int, p compactionPriority) error {
 	defer s.cstatus.delete(cd) // Remove the ranges from compaction status.
 
 	span.Annotatef(nil, "Compaction: %+v", cd)
-	// fmt.Printf("[%d] Compacting Level = %d\n", id, l)
 	if err := s.runCompactDef(id, l, cd); err != nil {
 		// This compaction couldn't be done successfully.
 		s.kv.opt.Warningf("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)
