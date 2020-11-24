@@ -969,8 +969,22 @@ func TestKeyCount(t *testing.T) {
 			wg.Wait()
 			close(writeCh)
 		}()
+
+		write := func(kvs *pb.KVList) error {
+			buf := z.NewBuffer(1 << 20)
+			defer buf.Release()
+
+			for _, kv := range kvs.Kv {
+				out := buf.SliceAllocate(kv.Size())
+				if _, err := kv.MarshalToSizedBuffer(out); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+
 		for kvs := range writeCh {
-			require.NoError(t, writer.Write(kvs))
+			require.NoError(t, write(kvs))
 		}
 		require.NoError(t, writer.Flush())
 	}

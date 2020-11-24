@@ -236,7 +236,7 @@ func writeSorted(db *badger.DB, num uint64) error {
 	}
 
 	// Let's create some streams.
-	width := num / 16
+	width := num / 8
 	streamID := uint32(0)
 	for start := uint64(0); start < num; start += width {
 		end := start + width
