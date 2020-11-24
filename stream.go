@@ -448,3 +448,16 @@ func (db *DB) NewStreamAt(readTs uint64) *Stream {
 	stream.readTs = readTs
 	return stream
 }
+
+func BufferToKVList(buf *z.Buffer) (*pb.KVList, error) {
+	var list pb.KVList
+	err := buf.SliceIterate(func(s []byte) error {
+		kv := new(pb.KV)
+		if err := kv.Unmarshal(s); err != nil {
+			return err
+		}
+		list.Kv = append(list.Kv, kv)
+		return nil
+	})
+	return &list, err
+}
