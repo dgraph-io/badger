@@ -286,8 +286,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 			return nil
 		}
 		bytesSent += sz
-		st.db.opt.Infof("%s Sending batch of size: %s.\n",
-			st.LogPrefix, humanize.Bytes(sz))
+		st.db.opt.Infof("%s Sending batch of size: %s.\n", st.LogPrefix, humanize.Bytes(sz))
 		if err := st.Send(batch); err != nil {
 			st.db.opt.Warningf("Error while sending: %v\n", err)
 			return err
