@@ -170,8 +170,28 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	if err != nil {
 		db.opt.Logger.Errorf("Unable to read: Key: %v, Version : %v, meta: %v, userMeta: %v"+
 			" Error: %v", key, item.version, item.meta, item.userMeta, err)
+		txn := db.NewTransaction(false)
+		defer txn.Discard()
+
+		iopt := DefaultIteratorOptions
+		iopt.AllVersions = true
+		iopt.InternalAccess = true
+		iopt.PrefetchValues = false
+
+		it := txn.NewKeyIterator(item.Key(), iopt)
+		defer it.Close()
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			var vp valuePointer
+			if item.meta&bitValuePointer > 0 {
+				vp.Decode(item.vptr)
+			}
+			db.opt.Logger.Errorf("Key: %v, Version : %v, meta: %v, userMeta: %v valuePointer: %+v",
+				item.Key(), item.version, item.meta, item.userMeta, vp)
+		}
 	}
-	return result, cb, err
+	// Don't return error if we cannot read the value. Just log the error.
+	return result, cb, nil
 }
 
 func runCallback(cb func()) {
