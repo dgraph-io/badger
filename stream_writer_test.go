@@ -40,11 +40,11 @@ func getSortedKVList(valueSize, listSize int) *z.Buffer {
 	for i := 0; i < listSize; i++ {
 		key := make([]byte, 8)
 		binary.BigEndian.PutUint64(key, uint64(i))
-		KVToBuffer(buf, &pb.KV{
+		KVToBuffer(&pb.KV{
 			Key:     key,
 			Value:   value,
 			Version: 20,
-		})
+		}, buf)
 	}
 
 	return buf
@@ -180,11 +180,11 @@ func TestStreamWriter3(t *testing.T) {
 			for i := 0; i < noOfKeys; i++ {
 				key := make([]byte, 8)
 				binary.BigEndian.PutUint64(key, uint64(counter))
-				KVToBuffer(buf, &pb.KV{
+				KVToBuffer(&pb.KV{
 					Key:     key,
 					Value:   value,
 					Version: 20,
-				})
+				}, buf)
 				counter = counter + 2
 			}
 
@@ -274,11 +274,11 @@ func TestStreamWriter4(t *testing.T) {
 
 		buf := z.NewBuffer(10 << 20)
 		defer buf.Release()
-		KVToBuffer(buf, &pb.KV{
+		KVToBuffer(&pb.KV{
 			Key:     []byte("key-1"),
 			Value:   []byte("value-1"),
 			Version: 1,
-		})
+		}, buf)
 
 		sw := db.NewStreamWriter()
 		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
@@ -299,16 +299,16 @@ func TestStreamWriter5(t *testing.T) {
 
 		buf := z.NewBuffer(10 << 20)
 		defer buf.Release()
-		KVToBuffer(buf, &pb.KV{
+		KVToBuffer(&pb.KV{
 			Key:     left,
 			Value:   []byte("val"),
 			Version: 1,
-		})
-		KVToBuffer(buf, &pb.KV{
+		}, buf)
+		KVToBuffer(&pb.KV{
 			Key:     right,
 			Value:   []byte("val"),
 			Version: 1,
-		})
+		}, buf)
 
 		sw := db.NewStreamWriter()
 		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
@@ -345,7 +345,7 @@ func TestStreamWriter6(t *testing.T) {
 					Value:   []byte("val"),
 					Version: uint64(keyCount - j),
 				}
-				KVToBuffer(buf, kv)
+				KVToBuffer(kv, buf)
 			}
 		}
 
@@ -382,7 +382,7 @@ func TestStreamWriterCancel(t *testing.T) {
 				Value:   []byte("val"),
 				Version: uint64(ver),
 			}
-			KVToBuffer(buf, kv)
+			KVToBuffer(kv, buf)
 			ver = (ver + 1) % 2
 		}
 
@@ -420,8 +420,8 @@ func TestStreamDone(t *testing.T) {
 				StreamId:   uint32(i),
 				StreamDone: true,
 			}
-			KVToBuffer(buf, kv1)
-			KVToBuffer(buf, kv2)
+			KVToBuffer(kv1, buf)
+			KVToBuffer(kv2, buf)
 			require.NoError(t, sw.Write(buf), "sw.Write() failed")
 		}
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
@@ -461,8 +461,8 @@ func TestSendOnClosedStream(t *testing.T) {
 		StreamId:   uint32(1),
 		StreamDone: true,
 	}
-	KVToBuffer(buf, kv1)
-	KVToBuffer(buf, kv2)
+	KVToBuffer(kv1, buf)
+	KVToBuffer(kv2, buf)
 	require.NoError(t, sw.Write(buf), "sw.Write() failed")
 
 	// Defer for panic.
@@ -480,7 +480,7 @@ func TestSendOnClosedStream(t *testing.T) {
 		Version:  1,
 		StreamId: uint32(1),
 	}
-	KVToBuffer(buf1, kv1)
+	KVToBuffer(kv1, buf1)
 	sw.Write(buf1)
 }
 
@@ -517,9 +517,9 @@ func TestSendOnClosedStream2(t *testing.T) {
 		Version:  1,
 		StreamId: uint32(1),
 	}
-	KVToBuffer(buf, kv1)
-	KVToBuffer(buf, kv2)
-	KVToBuffer(buf, kv3)
+	KVToBuffer(kv1, buf)
+	KVToBuffer(kv2, buf)
+	KVToBuffer(kv3, buf)
 
 	// Defer for panic.
 	defer func() {
@@ -548,11 +548,11 @@ func TestStreamWriterEncrypted(t *testing.T) {
 
 	buf := z.NewBuffer(10 << 20)
 	defer buf.Release()
-	KVToBuffer(buf, &pb.KV{
+	KVToBuffer(&pb.KV{
 		Key:     key,
 		Value:   value,
 		Version: 20,
-	})
+	}, buf)
 
 	sw := db.NewStreamWriter()
 	require.NoError(t, sw.Prepare(), "Prepare failed")

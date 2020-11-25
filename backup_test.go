@@ -481,7 +481,6 @@ func TestBackupLoadIncremental(t *testing.T) {
 		var count int
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
-			fmt.Printf("item.Key() = %+v\n", item.Key())
 			idx, err := strconv.Atoi(string(item.Key())[3:])
 			if err != nil {
 				return err

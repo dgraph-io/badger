@@ -2096,12 +2096,12 @@ func TestVerifyChecksum(t *testing.T) {
 			for i := 0; i < 1000; i++ {
 				key := make([]byte, 8)
 				binary.BigEndian.PutUint64(key, uint64(i))
-				KVToBuffer(buf, &pb.KV{
+				KVToBuffer(&pb.KV{
 					Key:      key,
 					Value:    value,
 					StreamId: uint32(st),
 					Version:  1,
-				})
+				}, buf)
 				if i%100 == 0 {
 					st++
 				}

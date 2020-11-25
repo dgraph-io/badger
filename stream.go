@@ -468,7 +468,7 @@ func BufferToKVList(buf *z.Buffer) (*pb.KVList, error) {
 	return &list, err
 }
 
-func KVToBuffer(buf *z.Buffer, kv *pb.KV) {
+func KVToBuffer(kv *pb.KV, buf *z.Buffer) {
 	out := buf.SliceAllocate(kv.Size())
 	y.Check2(kv.MarshalToSizedBuffer(out))
 }
