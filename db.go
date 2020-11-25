@@ -95,6 +95,7 @@ type DB struct {
 	registry   *KeyRegistry
 	blockCache *ristretto.Cache
 	indexCache *ristretto.Cache
+	allocPool  *z.AllocatorPool
 }
 
 const (
@@ -218,6 +219,7 @@ func Open(opt Options) (*DB, error) {
 		valueDirGuard: valueDirLockGuard,
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
+		allocPool:     z.NewAllocatorPool(8),
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
@@ -476,6 +478,8 @@ func (db *DB) IsClosed() bool {
 }
 
 func (db *DB) close() (err error) {
+	defer db.allocPool.Release()
+
 	db.opt.Debugf("Closing database")
 	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(atomic.LoadInt64(&db.lc.l0stallsMs)))
 
@@ -1779,8 +1783,8 @@ func (db *DB) StreamDB(outOptions Options) error {
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = fmt.Sprintf("Streaming DB to new DB at %s", outDir)
 
-	stream.Send = func(kvs *pb.KVList) error {
-		return writer.Write(kvs)
+	stream.Send = func(buf *z.Buffer) error {
+		return writer.Write(buf)
 	}
 	if err := stream.Orchestrate(context.Background()); err != nil {
 		return y.Wrapf(err, "cannot stream DB to out DB at %s", outDir)

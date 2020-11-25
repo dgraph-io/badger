@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -eo pipefail
 
 go version
 
@@ -96,13 +96,16 @@ root() {
 }
 
 stream() {
+  set -eo pipefail
   pushd badger
   baseDir=$(mktemp -d -p .)
   ./badger benchmark write -s --dir=$baseDir/test | tee $baseDir/log.txt
+  ./badger benchmark read --dir=$baseDir/test --full-scan | tee --append $baseDir/log.txt
+  ./badger benchmark read --dir=$baseDir/test -d=30s | tee --append $baseDir/log.txt
   ./badger stream --dir=$baseDir/test -o "$baseDir/test2" | tee --append $baseDir/log.txt
   count=$(cat "$baseDir/log.txt" | grep "at program end: 0 B" | wc -l)
   rm -rf $baseDir
-  if [ $count -ne 2 ]; then
+  if [ $count -ne 4 ]; then
     echo "LEAK detected in Badger stream."
     return 1
   fi

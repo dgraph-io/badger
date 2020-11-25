@@ -38,6 +38,7 @@ import (
 	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 // summary is produced when DB is closed. Currently it is used only for testing.
@@ -2088,17 +2089,19 @@ func TestVerifyChecksum(t *testing.T) {
 		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 			value := make([]byte, 32)
 			y.Check2(rand.Read(value))
-			l := &pb.KVList{}
 			st := 0
+
+			buf := z.NewBuffer(10 << 20)
+			defer buf.Release()
 			for i := 0; i < 1000; i++ {
 				key := make([]byte, 8)
 				binary.BigEndian.PutUint64(key, uint64(i))
-				l.Kv = append(l.Kv, &pb.KV{
+				KVToBuffer(&pb.KV{
 					Key:      key,
 					Value:    value,
 					StreamId: uint32(st),
 					Version:  1,
-				})
+				}, buf)
 				if i%100 == 0 {
 					st++
 				}
@@ -2106,7 +2109,7 @@ func TestVerifyChecksum(t *testing.T) {
 
 			sw := db.NewStreamWriter()
 			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
-			require.NoError(t, sw.Write(l), "sw.Write() failed")
+			require.NoError(t, sw.Write(buf), "sw.Write() failed")
 			require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
 			require.NoError(t, db.VerifyChecksum(), "checksum verification failed for DB")

@@ -33,6 +33,7 @@ import (
 	"github.com/dgraph-io/badger/v2"
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/spf13/cobra"
 )
 
@@ -359,7 +360,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		WithNumVersionsToKeep(int(math.MaxInt32)).
 		WithBlockCacheSize(1 << 30).
 		WithIndexCacheSize(1 << 30)
- 
+
 	if verbose {
 		opts = opts.WithLoggingLevel(badger.DEBUG)
 	}
@@ -498,13 +499,15 @@ func runTest(cmd *cobra.Command, args []string) error {
 				batch := tmpDb.NewWriteBatch()
 
 				stream := db.NewStream()
-				stream.Send = func(list *pb.KVList) error {
-					for _, kv := range list.Kv {
-						if err := batch.Set(kv.Key, kv.Value); err != nil {
+				stream.Send = func(buf *z.Buffer) error {
+					err := buf.SliceIterate(func(s []byte) error {
+						var kv pb.KV
+						if err := kv.Unmarshal(s); err != nil {
 							return err
 						}
-					}
-					return nil
+						return batch.Set(kv.Key, kv.Value)
+					})
+					return err
 				}
 				y.Check(stream.Orchestrate(context.Background()))
 				y.Check(batch.Flush())

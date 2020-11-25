@@ -22,6 +22,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/pkg/errors"
 )
 
@@ -95,17 +96,35 @@ func (wb *WriteBatch) callback(err error) {
 	wb.err.Store(err)
 }
 
-func (wb *WriteBatch) Write(kvList *pb.KVList) error {
+func (wb *WriteBatch) writeKV(kv *pb.KV) error {
+	e := Entry{Key: kv.Key, Value: kv.Value}
+	if len(kv.UserMeta) > 0 {
+		e.UserMeta = kv.UserMeta[0]
+	}
+	y.AssertTrue(kv.Version != 0)
+	e.version = kv.Version
+	return wb.handleEntry(&e)
+}
+
+func (wb *WriteBatch) Write(buf *z.Buffer) error {
+	wb.Lock()
+	defer wb.Unlock()
+
+	err := buf.SliceIterate(func(s []byte) error {
+		kv := &pb.KV{}
+		if err := kv.Unmarshal(s); err != nil {
+			return err
+		}
+		return wb.writeKV(kv)
+	})
+	return err
+}
+
+func (wb *WriteBatch) WriteList(kvList *pb.KVList) error {
 	wb.Lock()
 	defer wb.Unlock()
 	for _, kv := range kvList.Kv {
-		e := Entry{Key: kv.Key, Value: kv.Value}
-		if len(kv.UserMeta) > 0 {
-			e.UserMeta = kv.UserMeta[0]
-		}
-		y.AssertTrue(kv.Version != 0)
-		e.version = kv.Version
-		if err := wb.handleEntry(&e); err != nil {
+		if err := wb.writeKV(kv); err != nil {
 			return err
 		}
 	}

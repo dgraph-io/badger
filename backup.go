@@ -25,6 +25,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/golang/protobuf/proto"
 )
 
@@ -115,7 +116,11 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 	}
 
 	var maxVersion uint64
-	stream.Send = func(list *pb.KVList) error {
+	stream.Send = func(buf *z.Buffer) error {
+		list, err := BufferToKVList(buf)
+		if err != nil {
+			return err
+		}
 		out := list.Kv[:0]
 		for _, kv := range list.Kv {
 			if maxVersion < kv.Version {

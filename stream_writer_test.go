@@ -30,23 +30,24 @@ import (
 
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 )
 
-func getSortedKVList(valueSize, listSize int) *pb.KVList {
+func getSortedKVList(valueSize, listSize int) *z.Buffer {
 	value := make([]byte, valueSize)
 	y.Check2(rand.Read(value))
-	list := &pb.KVList{}
+	buf := z.NewBuffer(10 << 20)
 	for i := 0; i < listSize; i++ {
 		key := make([]byte, 8)
 		binary.BigEndian.PutUint64(key, uint64(i))
-		list.Kv = append(list.Kv, &pb.KV{
+		KVToBuffer(&pb.KV{
 			Key:     key,
 			Value:   value,
 			Version: 20,
-		})
+		}, buf)
 	}
 
-	return list
+	return buf
 }
 
 // check if we can read values after writing using stream writer
@@ -54,7 +55,7 @@ func TestStreamWriter1(t *testing.T) {
 	test := func(t *testing.T, opts *Options) {
 		runBadgerTest(t, opts, func(t *testing.T, db *DB) {
 			// write entries using stream writer
-			noOfKeys := 1000
+			noOfKeys := 10
 			valueSize := 128
 			list := getSortedKVList(valueSize, noOfKeys)
 			sw := db.NewStreamWriter()
@@ -173,22 +174,23 @@ func TestStreamWriter3(t *testing.T) {
 			// insert keys which are even
 			value := make([]byte, valueSize)
 			y.Check2(rand.Read(value))
-			list := &pb.KVList{}
 			counter := 0
+			buf := z.NewBuffer(10 << 20)
+			defer buf.Release()
 			for i := 0; i < noOfKeys; i++ {
 				key := make([]byte, 8)
 				binary.BigEndian.PutUint64(key, uint64(counter))
-				list.Kv = append(list.Kv, &pb.KV{
+				KVToBuffer(&pb.KV{
 					Key:     key,
 					Value:   value,
 					Version: 20,
-				})
+				}, buf)
 				counter = counter + 2
 			}
 
 			sw := db.NewStreamWriter()
 			require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
-			require.NoError(t, sw.Write(list), "sw.Write() failed")
+			require.NoError(t, sw.Write(buf), "sw.Write() failed")
 			// get max version of sw, will be used in transactions for managed mode
 			maxVs := sw.maxVersion
 			require.NoError(t, sw.Flush(), "sw.Flush() failed")
@@ -270,24 +272,23 @@ func TestStreamWriter4(t *testing.T) {
 			require.NoError(t, err, "error while updating db")
 		}
 
-		list := &pb.KVList{}
-		list.Kv = append(list.Kv, &pb.KV{
+		buf := z.NewBuffer(10 << 20)
+		defer buf.Release()
+		KVToBuffer(&pb.KV{
 			Key:     []byte("key-1"),
 			Value:   []byte("value-1"),
 			Version: 1,
-		})
+		}, buf)
 
 		sw := db.NewStreamWriter()
 		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
-		require.NoError(t, sw.Write(list), "sw.Write() failed")
+		require.NoError(t, sw.Write(buf), "sw.Write() failed")
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
 	})
 }
 
 func TestStreamWriter5(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		list := &pb.KVList{}
-
 		left := make([]byte, 6)
 		left[0] = 0x00
 		copy(left[1:], []byte("break"))
@@ -296,20 +297,22 @@ func TestStreamWriter5(t *testing.T) {
 		right[0] = 0xff
 		copy(right[1:], []byte("break"))
 
-		list.Kv = append(list.Kv, &pb.KV{
+		buf := z.NewBuffer(10 << 20)
+		defer buf.Release()
+		KVToBuffer(&pb.KV{
 			Key:     left,
 			Value:   []byte("val"),
 			Version: 1,
-		})
-		list.Kv = append(list.Kv, &pb.KV{
+		}, buf)
+		KVToBuffer(&pb.KV{
 			Key:     right,
 			Value:   []byte("val"),
 			Version: 1,
-		})
+		}, buf)
 
 		sw := db.NewStreamWriter()
 		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
-		require.NoError(t, sw.Write(list), "sw.Write() failed")
+		require.NoError(t, sw.Write(buf), "sw.Write() failed")
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
 		require.NoError(t, db.Close())
 
@@ -325,7 +328,6 @@ func TestStreamWriter5(t *testing.T) {
 func TestStreamWriter6(t *testing.T) {
 
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		list := &pb.KVList{}
 		str := []string{"a", "b", "c"}
 		ver := uint64(0)
 		// The baseTable size is 32 KB (1<<15) and the max table size for level
@@ -333,6 +335,8 @@ func TestStreamWriter6(t *testing.T) {
 		// will be written to level 6, we need to insert at least 1 mb of data.
 		// Setting keycount below 32 would cause this test to fail.
 		keyCount := 40
+		buf := z.NewBuffer(10 << 20)
+		defer buf.Release()
 		for i := range str {
 			for j := 0; j < keyCount; j++ {
 				ver++
@@ -341,7 +345,7 @@ func TestStreamWriter6(t *testing.T) {
 					Value:   []byte("val"),
 					Version: uint64(keyCount - j),
 				}
-				list.Kv = append(list.Kv, kv)
+				KVToBuffer(kv, buf)
 			}
 		}
 
@@ -349,7 +353,7 @@ func TestStreamWriter6(t *testing.T) {
 		// we would have 6 tables, if keys are not equal. Here we should have 3 tables.
 		sw := db.NewStreamWriter()
 		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
-		require.NoError(t, sw.Write(list), "sw.Write() failed")
+		require.NoError(t, sw.Write(buf), "sw.Write() failed")
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
 
 		tables := db.Tables()
@@ -368,22 +372,23 @@ func TestStreamWriter6(t *testing.T) {
 // This test uses a StreamWriter without calling Flush() at the end.
 func TestStreamWriterCancel(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-		list := &pb.KVList{}
 		str := []string{"a", "a", "b", "b", "c", "c"}
 		ver := 1
+		buf := z.NewBuffer(10 << 20)
+		defer buf.Release()
 		for i := range str {
 			kv := &pb.KV{
 				Key:     bytes.Repeat([]byte(str[i]), int(db.opt.BaseTableSize)),
 				Value:   []byte("val"),
 				Version: uint64(ver),
 			}
-			list.Kv = append(list.Kv, kv)
+			KVToBuffer(kv, buf)
 			ver = (ver + 1) % 2
 		}
 
 		sw := db.NewStreamWriter()
 		require.NoError(t, sw.Prepare(), "sw.Prepare() failed")
-		require.NoError(t, sw.Write(list), "sw.Write() failed")
+		require.NoError(t, sw.Write(buf), "sw.Write() failed")
 		sw.Cancel()
 
 		// Use the API incorrectly.
@@ -403,7 +408,8 @@ func TestStreamDone(t *testing.T) {
 		var val [10]byte
 		rand.Read(val[:])
 		for i := 0; i < 10; i++ {
-			list := &pb.KVList{}
+			buf := z.NewBuffer(10 << 20)
+			defer buf.Release()
 			kv1 := &pb.KV{
 				Key:      []byte(fmt.Sprintf("%d", i)),
 				Value:    val[:],
@@ -414,8 +420,9 @@ func TestStreamDone(t *testing.T) {
 				StreamId:   uint32(i),
 				StreamDone: true,
 			}
-			list.Kv = append(list.Kv, kv1, kv2)
-			require.NoError(t, sw.Write(list), "sw.Write() failed")
+			KVToBuffer(kv1, buf)
+			KVToBuffer(kv2, buf)
+			require.NoError(t, sw.Write(buf), "sw.Write() failed")
 		}
 		require.NoError(t, sw.Flush(), "sw.Flush() failed")
 		require.NoError(t, db.Close())
@@ -442,7 +449,8 @@ func TestSendOnClosedStream(t *testing.T) {
 
 	var val [10]byte
 	rand.Read(val[:])
-	list := &pb.KVList{}
+	buf := z.NewBuffer(10 << 20)
+	defer buf.Release()
 	kv1 := &pb.KV{
 		Key:      []byte(fmt.Sprintf("%d", 1)),
 		Value:    val[:],
@@ -453,8 +461,9 @@ func TestSendOnClosedStream(t *testing.T) {
 		StreamId:   uint32(1),
 		StreamDone: true,
 	}
-	list.Kv = append(list.Kv, kv1, kv2)
-	require.NoError(t, sw.Write(list), "sw.Write() failed")
+	KVToBuffer(kv1, buf)
+	KVToBuffer(kv2, buf)
+	require.NoError(t, sw.Write(buf), "sw.Write() failed")
 
 	// Defer for panic.
 	defer func() {
@@ -463,15 +472,16 @@ func TestSendOnClosedStream(t *testing.T) {
 		require.NoError(t, db.Close())
 	}()
 	// Send once stream is closed.
-	list = &pb.KVList{}
+	buf1 := z.NewBuffer(10 << 20)
+	defer buf1.Release()
 	kv1 = &pb.KV{
 		Key:      []byte(fmt.Sprintf("%d", 2)),
 		Value:    val[:],
 		Version:  1,
 		StreamId: uint32(1),
 	}
-	list.Kv = append(list.Kv, kv1)
-	sw.Write(list)
+	KVToBuffer(kv1, buf1)
+	sw.Write(buf1)
 }
 
 func TestSendOnClosedStream2(t *testing.T) {
@@ -489,7 +499,8 @@ func TestSendOnClosedStream2(t *testing.T) {
 
 	var val [10]byte
 	rand.Read(val[:])
-	list := &pb.KVList{}
+	buf := z.NewBuffer(10 << 20)
+	defer buf.Release()
 	kv1 := &pb.KV{
 		Key:      []byte(fmt.Sprintf("%d", 1)),
 		Value:    val[:],
@@ -506,7 +517,9 @@ func TestSendOnClosedStream2(t *testing.T) {
 		Version:  1,
 		StreamId: uint32(1),
 	}
-	list.Kv = append(list.Kv, kv1, kv2, kv3)
+	KVToBuffer(kv1, buf)
+	KVToBuffer(kv2, buf)
+	KVToBuffer(kv3, buf)
 
 	// Defer for panic.
 	defer func() {
@@ -515,7 +528,7 @@ func TestSendOnClosedStream2(t *testing.T) {
 		require.NoError(t, db.Close())
 	}()
 
-	require.NoError(t, sw.Write(list), "sw.Write() failed")
+	require.NoError(t, sw.Write(buf), "sw.Write() failed")
 }
 
 func TestStreamWriterEncrypted(t *testing.T) {
@@ -533,16 +546,17 @@ func TestStreamWriterEncrypted(t *testing.T) {
 	key := []byte("mykey")
 	value := []byte("myvalue")
 
-	list := &pb.KVList{}
-	list.Kv = append(list.Kv, &pb.KV{
+	buf := z.NewBuffer(10 << 20)
+	defer buf.Release()
+	KVToBuffer(&pb.KV{
 		Key:     key,
 		Value:   value,
 		Version: 20,
-	})
+	}, buf)
 
 	sw := db.NewStreamWriter()
 	require.NoError(t, sw.Prepare(), "Prepare failed")
-	require.NoError(t, sw.Write(list), "Write failed")
+	require.NoError(t, sw.Write(buf), "Write failed")
 	require.NoError(t, sw.Flush(), "Flush failed")
 
 	err = db.View(func(txn *Txn) error {
