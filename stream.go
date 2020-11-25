@@ -299,12 +299,11 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 		}
 		bytesSent += sz
 		// count += len(batch.Kv)
-		t := time.Now()
+		st.db.opt.Infof("%s Sending batch of size: %s.\n",
+			st.LogPrefix, humanize.Bytes(sz))
 		if err := st.Send(batch); err != nil {
 			return err
 		}
-		st.db.opt.Infof("%s Sent batch of size: %s in %s.\n",
-			st.LogPrefix, humanize.Bytes(sz), time.Since(t))
 		return nil
 	}
 
@@ -351,9 +350,12 @@ outer:
 				continue
 			}
 			speed := bytesSent / durSec
-			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, jemalloc: %s\n",
+
+			ms := z.MemStats{}
+			z.ReadMemStats(&ms)
+			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, jemalloc: %s %s\n",
 				st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(bytesSent),
-				humanize.IBytes(speed), humanize.IBytes(uint64(z.NumAllocBytes())))
+				humanize.IBytes(speed), humanize.IBytes(ms.Active), humanize.IBytes(ms.Resident))
 
 		case kvs, ok := <-st.kvChan:
 			if !ok {
