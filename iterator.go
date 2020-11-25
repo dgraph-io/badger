@@ -176,6 +176,7 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 		iopt := DefaultIteratorOptions
 		iopt.AllVersions = true
 		iopt.InternalAccess = true
+		iopt.PrefetchValues = false
 
 		it := txn.NewKeyIterator(item.Key(), iopt)
 		defer it.Close()
