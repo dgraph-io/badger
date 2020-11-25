@@ -178,18 +178,13 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 	}
 	defer txn.Discard()
 
+	// produceKVs is running iterate serially. So, we can define the outList here.
 	outList := z.NewBuffer(2 * batchSize)
 	defer func() {
 		// The outList variable changes. So, we need to evaluate the variable in the defer. DO NOT
 		// call `defer outList.Release()`.
 		outList.Release()
 	}()
-
-	// produceKVs is running iterate serially. So, we can define the outList here.
-	// outList := new(pb.KVList)
-	// There would be one last remaining Allocator for this threadId when produceKVs finishes, which
-	// would be released by Orchestrate.
-	// outList.AllocRef = st.newAllocator(threadId).Ref
 
 	iterate := func(kr keyRange) error {
 		iterOpts := DefaultIteratorOptions
@@ -242,10 +237,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			}
 			for _, kv := range list.Kv {
 				kv.StreamId = streamId
-				out := outList.SliceAllocate(kv.Size())
-				if _, err := kv.MarshalToSizedBuffer(out); err != nil {
-					return err
-				}
+				KVToBuffer(kv, outList)
 				if outList.LenNoPadding() < batchSize {
 					continue
 				}
@@ -260,10 +252,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				StreamId:   streamId,
 				StreamDone: true,
 			}
-			out := outList.SliceAllocate(kv.Size())
-			if _, err := kv.MarshalToSizedBuffer(out); err != nil {
-				return err
-			}
+			KVToBuffer(kv, outList)
 		}
 		return sendIt()
 	}
@@ -285,7 +274,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 }
 
 func (st *Stream) streamKVs(ctx context.Context) error {
-	var count int
 	var bytesSent uint64
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
@@ -298,7 +286,6 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 			return nil
 		}
 		bytesSent += sz
-		// count += len(batch.Kv)
 		st.db.opt.Infof("%s Sending batch of size: %s.\n",
 			st.LogPrefix, humanize.Bytes(sz))
 		if err := st.Send(batch); err != nil {
@@ -351,11 +338,11 @@ outer:
 			}
 			speed := bytesSent / durSec
 
-			ms := z.MemStats{}
+			var ms z.MemStats
 			z.ReadMemStats(&ms)
-			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, jemalloc: %s %s\n",
+			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, jemalloc: %s\n",
 				st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(bytesSent),
-				humanize.IBytes(speed), humanize.IBytes(ms.Active), humanize.IBytes(ms.Resident))
+				humanize.IBytes(speed), humanize.IBytes(ms.Active))
 
 		case kvs, ok := <-st.kvChan:
 			if !ok {
@@ -371,7 +358,7 @@ outer:
 		}
 	}
 
-	st.db.opt.Infof("%s Sent %d keys\n", st.LogPrefix, count)
+	st.db.opt.Infof("%s Sent data of size %s\n", st.LogPrefix, humanize.IBytes(bytesSent))
 	return nil
 }
 

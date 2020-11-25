@@ -208,7 +208,7 @@ func writeSorted(db *badger.DB, num uint64) error {
 	writeRange := func(start, end uint64, streamId uint32) {
 		// end is not included.
 		defer wg.Done()
-		kvs := z.NewBuffer(5 << 20)
+		kvBuf := z.NewBuffer(5 << 20)
 		var sz int
 		for i := start; i < end; i++ {
 			key := make([]byte, 8)
@@ -219,20 +219,19 @@ func writeSorted(db *badger.DB, num uint64) error {
 				Version:  1,
 				StreamId: streamId,
 			}
-			out := kvs.SliceAllocate(kv.Size())
-			y.Check2(kv.MarshalToSizedBuffer(out))
+			badger.KVToBuffer(kv, kvBuf)
 
 			sz += es
 			atomic.AddUint64(&entriesWritten, 1)
 			atomic.AddUint64(&sizeWritten, uint64(es))
 
 			if sz >= 4<<20 { // 4 MB
-				writeCh <- kvs
-				kvs = z.NewBuffer(1 << 20)
+				writeCh <- kvBuf
+				kvBuf = z.NewBuffer(1 << 20)
 				sz = 0
 			}
 		}
-		writeCh <- kvs
+		writeCh <- kvBuf
 	}
 
 	// Let's create some streams.
@@ -399,7 +398,6 @@ func reportStats(c *z.Closer, db *badger.DB) {
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate,
 				humanize.IBytes(uint64(z.NumAllocBytes())))
 
-			z.PrintAllocators()
 			if count%10 == 0 {
 				fmt.Printf(db.LevelsToString())
 			}

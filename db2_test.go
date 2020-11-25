@@ -975,10 +975,7 @@ func TestKeyCount(t *testing.T) {
 			defer buf.Release()
 
 			for _, kv := range kvs.Kv {
-				out := buf.SliceAllocate(kv.Size())
-				if _, err := kv.MarshalToSizedBuffer(out); err != nil {
-					return err
-				}
+				KVToBuffer(kv, buf)
 			}
 			writer.Write(buf)
 			return nil
