@@ -41,13 +41,13 @@ import (
 
 type levelsController struct {
 	nextFileID uint64 // Atomic
+	l0stallsMs int64  // Atomic
 
 	// The following are initialized once and const.
 	levels []*levelHandler
 	kv     *DB
 
-	cstatus    compactStatus
-	l0stallsMs int64
+	cstatus compactStatus
 }
 
 // revertToManifest checks that all necessary table files exist and removes all table files not

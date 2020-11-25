@@ -477,7 +477,7 @@ func (db *DB) IsClosed() bool {
 
 func (db *DB) close() (err error) {
 	db.opt.Debugf("Closing database")
-	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(db.lc.l0stallsMs))
+	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(atomic.LoadInt64(&db.lc.l0stallsMs)))
 
 	atomic.StoreInt32(&db.blockWrites, 1)
 
