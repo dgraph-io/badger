@@ -289,6 +289,7 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 		st.db.opt.Infof("%s Sending batch of size: %s.\n",
 			st.LogPrefix, humanize.Bytes(sz))
 		if err := st.Send(batch); err != nil {
+			st.db.opt.Warningf("Error while sending: %v\n", err)
 			return err
 		}
 		return nil
@@ -309,12 +310,8 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 					break loop
 				}
 				y.AssertTrue(kvs != nil)
-				if _, err := batch.Write(kvs.Bytes()); err != nil {
-					return err
-				}
-				if err := kvs.Release(); err != nil {
-					return err
-				}
+				y.Check2(batch.Write(kvs.Bytes()))
+				y.Check(kvs.Release())
 
 			default:
 				break loop
@@ -414,6 +411,12 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	}()
 	wg.Wait()        // Wait for produceKVs to be over.
 	close(st.kvChan) // Now we can close kvChan.
+	defer func() {
+		// If due to some error, we have buffers left in kvChan, we should release them.
+		for buf := range st.kvChan {
+			buf.Release()
+		}
+	}()
 
 	select {
 	case err := <-errCh: // Check error from produceKVs.

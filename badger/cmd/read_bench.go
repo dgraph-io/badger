@@ -80,7 +80,7 @@ func init() {
 
 // Scan the whole database using the iterators
 func fullScanDB(db *badger.DB) {
-	txn := db.NewTransaction(false)
+	txn := db.NewTransactionAt(math.MaxUint64, false)
 	defer txn.Discard()
 
 	startTime = time.Now()

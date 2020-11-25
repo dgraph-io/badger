@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -eo pipefail
 
 go version
 
@@ -96,6 +96,7 @@ root() {
 }
 
 stream() {
+  set -eo pipefail
   pushd badger
   baseDir=$(mktemp -d -p .)
   ./badger benchmark write -s --dir=$baseDir/test | tee $baseDir/log.txt
