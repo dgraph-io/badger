@@ -500,8 +500,8 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 				stream := db.NewStream()
 				stream.Send = func(buf *z.Buffer) error {
-					var kv pb.KV
 					err := buf.SliceIterate(func(s []byte) error {
+						var kv pb.KV
 						if err := kv.Unmarshal(s); err != nil {
 							return err
 						}

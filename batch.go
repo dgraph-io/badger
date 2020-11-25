@@ -110,8 +110,8 @@ func (wb *WriteBatch) Write(buf *z.Buffer) error {
 	wb.Lock()
 	defer wb.Unlock()
 
-	kv := &pb.KV{}
 	err := buf.SliceIterate(func(s []byte) error {
+		kv := &pb.KV{}
 		if err := kv.Unmarshal(s); err != nil {
 			return err
 		}
