@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"hash/crc32"
+	"math"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -170,7 +171,12 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	if err != nil {
 		db.opt.Logger.Errorf("Unable to read: Key: %v, Version : %v, meta: %v, userMeta: %v"+
 			" Error: %v", key, item.version, item.meta, item.userMeta, err)
-		txn := db.NewTransaction(false)
+		var txn *Txn
+		if db.opt.managedTxns {
+			txn = db.NewTransactionAt(math.MaxUint64, false)
+		} else {
+			txn = db.NewTransaction(false)
+		}
 		defer txn.Discard()
 
 		iopt := DefaultIteratorOptions
