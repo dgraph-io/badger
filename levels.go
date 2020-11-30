@@ -636,7 +636,6 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 
 	var lastKey, skipKey []byte
 	var numBuilds, numVersions int
-	var vp valuePointer
 
 	addKeys := func(builder *table.Builder) {
 		timeStart := time.Now()
@@ -737,11 +736,11 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				}
 			}
 			numKeys++
+			var vp valuePointer
 			if vs.Meta&bitValuePointer > 0 {
 				vp.Decode(vs.Value)
 			}
 			builder.Add(it.Key(), vs, vp.Len)
-			vp.Fid, vp.Len, vp.Offset = 0, 0, 0
 		}
 		s.kv.opt.Debugf("LOG Compact. Added %d keys. Skipped %d keys. Iteration took: %v",
 			numKeys, numSkips, time.Since(timeStart).Round(time.Millisecond))
