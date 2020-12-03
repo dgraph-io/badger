@@ -101,7 +101,8 @@ type Table struct {
 	tableSize int // Initialized in OpenTable, using fd.Stat().
 
 	_index *fb.TableIndex // Nil if encryption is enabled. Use fetchIndex to access.
-	ref    int32          // For file garbage collection. Atomic.
+	_cheap *cheapIndex
+	ref    int32 // For file garbage collection. Atomic.
 
 	// The following are initialized once and const.
 	smallest, biggest []byte // Smallest and largest keys (with timestamps).
@@ -119,10 +120,35 @@ type Table struct {
 	opt        *Options
 }
 
-// MaxVersion returns the maximum version across all keys stored in this table.
-func (t *Table) MaxVersion() uint64 {
-	return t.fetchIndex().MaxVersion()
+type cheapIndex struct {
+	MaxVersion        uint64
+	KeyCount          uint32
+	UncompressedSize  uint32
+	OnDiskSize        uint32
+	BloomFilterLength int
+	OffsetsLength     int
 }
+
+func (t *Table) cheapIndex() *cheapIndex {
+	return t._cheap
+}
+func (t *Table) offsetsLength() int { return t.cheapIndex().OffsetsLength }
+
+// MaxVersion returns the maximum version across all keys stored in this table.
+func (t *Table) MaxVersion() uint64 { return t.cheapIndex().MaxVersion }
+
+// BloomFilterSize returns the size of the bloom filter in bytes stored in memory.
+func (t *Table) BloomFilterSize() int { return t.cheapIndex().BloomFilterLength }
+
+// UncompressedSize is the size uncompressed data stored in this file.
+func (t *Table) UncompressedSize() uint32 { return t.cheapIndex().UncompressedSize }
+
+// KeyCount is the total number of keys in this table.
+func (t *Table) KeyCount() uint32 { return t.cheapIndex().KeyCount }
+
+// OnDiskSize returns the total size of key-values stored in this table (including the
+// disk space occupied on the value log).
+func (t *Table) OnDiskSize() uint32 { return t.cheapIndex().OnDiskSize }
 
 // CompressionType returns the compression algorithm used for block compression.
 func (t *Table) CompressionType() options.CompressionType {
@@ -391,8 +417,15 @@ func (t *Table) initIndex() (*fb.BlockOffset, error) {
 		// If there's no encryption, this points to the mmap'ed buffer.
 		t._index = index
 	}
+	t._cheap = &cheapIndex{
+		MaxVersion:        index.MaxVersion(),
+		KeyCount:          index.KeyCount(),
+		UncompressedSize:  index.UncompressedSize(),
+		OnDiskSize:        index.OnDiskSize(),
+		OffsetsLength:     index.OffsetsLength(),
+		BloomFilterLength: index.BloomFilterLength(),
+	}
 
-	t.onDiskSize = index.OnDiskSize()
 	t.hasBloomFilter = len(index.BloomFilterBytes()) > 0
 
 	var bo fb.BlockOffset
@@ -442,10 +475,6 @@ func (t *Table) fetchIndex() *fb.TableIndex {
 	y.Check(err)
 	t.opt.IndexCache.Set(t.indexKey(), index, int64(t.indexLen))
 	return index
-}
-
-func (t *Table) offsetsLength() int {
-	return t.fetchIndex().OffsetsLength()
 }
 
 func (t *Table) offsets(ko *fb.BlockOffset, i int) bool {
@@ -574,29 +603,10 @@ func (t *Table) indexKey() uint64 {
 	return t.id
 }
 
-// UncompressedSize is the size uncompressed data stored in this file.
-func (t *Table) UncompressedSize() uint32 {
-	return t.fetchIndex().UncompressedSize()
-}
-
-// KeyCount is the total number of keys in this table.
-func (t *Table) KeyCount() uint32 {
-	return t.fetchIndex().KeyCount()
-}
-
 // IndexSize is the size of table index in bytes.
 func (t *Table) IndexSize() int {
 	return t.indexLen
 }
-
-// BloomFilterSize returns the size of the bloom filter in bytes stored in memory.
-func (t *Table) BloomFilterSize() int {
-	return t.fetchIndex().BloomFilterLength()
-}
-
-// OnDiskSize returns the total size of key-values stored in this table (including the
-// disk space occupied on the value log).
-func (t *Table) OnDiskSize() uint32 { return t.onDiskSize }
 
 // Size is its file size in bytes
 func (t *Table) Size() int64 { return int64(t.tableSize) }
@@ -623,16 +633,6 @@ func (t *Table) DoesNotHave(hash uint32) bool {
 	index := t.fetchIndex()
 	bf := index.BloomFilterBytes()
 	return !y.Filter(bf).MayContain(hash)
-}
-
-// readBloomFilter reads the bloom filter from the SST and returns its length
-// along with the bloom filter.
-func (t *Table) readBloomFilter() (*z.Bloom, int) {
-	index := t.fetchIndex()
-	// Read bloom filter from the index.
-	bf, err := z.JSONUnmarshal(index.BloomFilterBytes())
-	y.Check(err)
-	return bf, index.BloomFilterLength()
 }
 
 // readTableIndex reads table index from the sst and returns its pb format.
