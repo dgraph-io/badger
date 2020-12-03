@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 
 	"github.com/dgraph-io/badger/v2/y"
@@ -421,6 +422,8 @@ type Iterator struct {
 	// the iterator. It can be used, for example, to uniquely identify each of the
 	// iterators created by the stream interface
 	ThreadId int
+
+	reuse []*pb.KV
 }
 
 // NewIterator returns a new iterator. Depending upon the options, either only keys, or both
@@ -478,6 +481,20 @@ func (txn *Txn) NewKeyIterator(key []byte, opt IteratorOptions) *Iterator {
 	opt.prefixIsKey = true
 	opt.AllVersions = true
 	return txn.NewIterator(opt)
+}
+
+// NewKV must be called serially. It is NOT thread-safe.
+func (it *Iterator) NewKV() *pb.KV {
+	if len(it.reuse) == 0 {
+		return &pb.KV{}
+	}
+	kv := it.reuse[len(it.reuse)-1]
+	it.reuse = it.reuse[:len(it.reuse)-1]
+	if kv == nil {
+		kv = &pb.KV{}
+	}
+	kv.Reset()
+	return kv
 }
 
 func (it *Iterator) newItem() *Item {

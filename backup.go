@@ -87,7 +87,8 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 
 			// clear txn bits
 			meta := item.meta &^ (bitTxn | bitFinTxn)
-			kv := &pb.KV{
+			kv := itr.NewKV()
+			*kv = pb.KV{
 				Key:       item.KeyCopy(nil),
 				Value:     valCopy,
 				UserMeta:  []byte{item.UserMeta()},
