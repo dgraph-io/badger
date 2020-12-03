@@ -354,7 +354,6 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	// Bloom filter lookup would only work if opt.Prefix does NOT have the read
 	// timestamp as part of the key.
 	if opt.prefixIsKey && t.DoesNotHave(y.Hash(opt.Prefix)) {
-		y.NumLSMBloomHits.Add("pickTable", 1)
 		return false
 	}
 	return true
@@ -369,6 +368,8 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		return out
 	}
 	sIdx := sort.Search(len(all), func(i int) bool {
+		// table.Biggest >= opt.prefix
+		// if opt.Prefix < table.Biggest, then surely it is not in any of the preceding tables.
 		return opt.compareToPrefix(all[i].Biggest()) >= 0
 	})
 	if sIdx == len(all) {
@@ -386,11 +387,23 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		return out
 	}
 
+	// opt.prefixIsKey == true. This code is optimizing for opt.prefixIsKey part.
 	var out []*table.Table
+	hash := y.Hash(opt.Prefix)
 	for _, t := range filtered {
-		if opt.pickTable(t) {
-			out = append(out, t)
+		// When we encounter the first table whose smallest key is higher than opt.Prefix, we can
+		// stop. This is an IMPORTANT optimization, just considering how often we call
+		// NewKeyIterator.
+		if opt.compareToPrefix(t.Smallest()) > 0 {
+			// if table.Smallest > opt.Prefix, then this and all tables after this can be ignored.
+			break
 		}
+		// opt.Prefix is actually the key. So, we can run bloom filter checks
+		// as well.
+		if t.DoesNotHave(hash) {
+			continue
+		}
+		out = append(out, t)
 	}
 	return out
 }

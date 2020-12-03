@@ -630,9 +630,14 @@ func (t *Table) DoesNotHave(hash uint32) bool {
 		return false
 	}
 
+	y.NumLSMBloomHits.Add("DoesNotHave_ALL", 1)
 	index := t.fetchIndex()
 	bf := index.BloomFilterBytes()
-	return !y.Filter(bf).MayContain(hash)
+	mayContain := y.Filter(bf).MayContain(hash)
+	if !mayContain {
+		y.NumLSMBloomHits.Add("DoesNotHave_HIT", 1)
+	}
+	return !mayContain
 }
 
 // readTableIndex reads table index from the sst and returns its pb format.
