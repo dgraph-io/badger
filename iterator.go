@@ -483,7 +483,7 @@ func (txn *Txn) NewKeyIterator(key []byte, opt IteratorOptions) *Iterator {
 	return txn.NewIterator(opt)
 }
 
-// newKV must be called serially. It is NOT thread-safe.
+// NewKV must be called serially. It is NOT thread-safe.
 func (it *Iterator) NewKV() *pb.KV {
 	if len(it.reuse) == 0 {
 		return &pb.KV{}
