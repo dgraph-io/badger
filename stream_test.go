@@ -300,7 +300,8 @@ func TestStreamCustomKeyToList(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		kv := &pb.KV{
+		kv := itr.NewKV()
+		*kv = pb.KV{
 			Key:   y.Copy(item.Key()),
 			Value: val,
 		}

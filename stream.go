@@ -110,7 +110,7 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 			break
 		}
 
-		kv := &pb.KV{}
+		kv := itr.NewKV()
 		kv.Key = ka
 
 		if err := item.Value(func(val []byte) error {
@@ -244,6 +244,9 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				if err := sendIt(); err != nil {
 					return err
 				}
+			}
+			if len(itr.reuse) < 100 {
+				itr.reuse = append(itr.reuse, list.Kv...)
 			}
 		}
 		// Mark the stream as done.
