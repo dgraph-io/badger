@@ -339,11 +339,9 @@ outer:
 			}
 			speed := bytesSent / durSec
 
-			var ms z.MemStats
-			z.ReadMemStats(&ms)
 			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, jemalloc: %s\n",
 				st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(bytesSent),
-				humanize.IBytes(speed), humanize.IBytes(ms.Active))
+				humanize.IBytes(speed), humanize.IBytes(uint64(z.NumAllocBytes())))
 
 		case kvs, ok := <-st.kvChan:
 			if !ok {
