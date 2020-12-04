@@ -436,7 +436,7 @@ type Iterator struct {
 	// iterators created by the stream interface
 	ThreadId int
 
-	alloc *z.Allocator
+	Alloc *z.Allocator
 }
 
 // NewIterator returns a new iterator. Depending upon the options, either only keys, or both

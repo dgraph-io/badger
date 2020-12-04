@@ -62,7 +62,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 	stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
 		list := &pb.KVList{}
-		a := itr.alloc
+		a := itr.Alloc
 		for ; itr.Valid(); itr.Next() {
 			item := itr.Item()
 			if !bytes.Equal(item.Key(), key) {
