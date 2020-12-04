@@ -197,6 +197,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		defer itr.Close()
 
 		itr.alloc = z.NewAllocator(1 << 20)
+		itr.alloc.Tag = "Stream.Iterate"
 		defer itr.alloc.Release()
 
 		// This unique stream id is used to identify all the keys from this iteration.
