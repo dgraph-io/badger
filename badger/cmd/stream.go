@@ -18,12 +18,10 @@ package cmd
 
 import (
 	"fmt"
-	"io"
 	"math"
 	"os"
 
 	"github.com/dgraph-io/badger/v2"
-	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -60,18 +58,18 @@ func init() {
 
 func stream(cmd *cobra.Command, args []string) error {
 	// Check that outDir doesn't exist or is empty.
-	if _, err := os.Stat(outDir); err == nil {
-		f, err := os.Open(outDir)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
+	// if _, err := os.Stat(outDir); err == nil {
+	// 	f, err := os.Open(outDir)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	defer f.Close()
 
-		_, err = f.Readdirnames(1)
-		if err != io.EOF {
-			return errors.Errorf("cannot run stream tool on non-empty output directory %s", outDir)
-		}
-	}
+	// 	_, err = f.Readdirnames(1)
+	// 	if err != io.EOF {
+	// 		return errors.Errorf("cannot run stream tool on non-empty output directory %s", outDir)
+	// 	}
+	// }
 
 	// Options for input DB.
 	if numVersions <= 0 {
@@ -94,12 +92,12 @@ func stream(cmd *cobra.Command, args []string) error {
 		return errors.Errorf(
 			"compression value must be one of 0 (disabled), 1 (Snappy), or 2 (ZSTD)")
 	}
-	outOpt := inOpt.
-		WithDir(outDir).
-		WithValueDir(outDir).
-		WithNumVersionsToKeep(numVersions).
-		WithCompression(options.CompressionType(compressionType)).
-		WithReadOnly(false)
+	// outOpt := inOpt.
+	// 	WithDir(outDir).
+	// 	WithValueDir(outDir).
+	// 	WithNumVersionsToKeep(numVersions).
+	// 	WithCompression(options.CompressionType(compressionType)).
+	// 	WithReadOnly(false)
 
 	inDB, err := badger.OpenManaged(inOpt)
 	if err != nil {
@@ -107,7 +105,13 @@ func stream(cmd *cobra.Command, args []string) error {
 	}
 	defer inDB.Close()
 
-	err = inDB.StreamDB(outOpt)
+	f, err := os.OpenFile("/dev/null", os.O_RDWR, 0666)
+	y.Check(err)
+
+	stream := inDB.NewStreamAt(math.MaxUint64)
+	stream.LogPrefix = "DB.Backup"
+	_, err = stream.Backup(f, 0)
+	// err = inDB.StreamDB(outOpt)
 	fmt.Println("Done.")
 	return err
 }
