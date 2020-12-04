@@ -236,7 +236,8 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			itr.Alloc.Reset()
 			list, err := st.KeyToList(item.KeyCopy(nil), itr)
 			if err != nil {
-				return err
+				st.db.opt.Warningf("While reading key: %x, got error: %v", item.Key(), err)
+				continue
 			}
 			if list == nil || len(list.Kv) == 0 {
 				continue
