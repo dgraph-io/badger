@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger/v2/pb"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/stretchr/testify/require"
 )
 
@@ -275,4 +277,30 @@ func TestEncodedSize(t *testing.T) {
 	}
 
 	require.Equal(t, valBufSize+uint32(2)+expVarintSize, valStruct.EncodedSize())
+}
+
+func TestAllocatorReuse(t *testing.T) {
+	a := z.NewAllocator(1024)
+	defer a.Release()
+
+	N := 1024
+	buf := make([]byte, 4096)
+	rand.Read(buf)
+
+	for i := 0; i < N; i++ {
+		a.Reset()
+		var list pb.KVList
+		for j := 0; j < N; j++ {
+			kv := NewKV(a)
+			sz := rand.Intn(1024)
+			kv.Key = a.Copy(buf[:sz])
+			kv.Value = a.Copy(buf[:4*sz])
+			kv.Meta = a.Copy([]byte{1})
+			kv.Version = uint64(sz)
+			list.Kv = append(list.Kv, kv)
+		}
+		_, err := list.Marshal()
+		require.NoError(t, err)
+	}
+	t.Logf("Allocator: %s\n", a)
 }
