@@ -51,7 +51,7 @@ func init() {
 	streamCmd.Flags().IntVarP(&numVersions, "num_versions", "", 0,
 		"Option to configure the maximum number of versions per key. "+
 			"Values <= 0 will be considered to have the max number of versions.")
-	streamCmd.Flags().Uint32VarP(&compressionType, "compression", "", 0,
+	streamCmd.Flags().Uint32VarP(&compressionType, "compression", "", 1,
 		"Option to configure the compression type in output DB. "+
 			"0 to disable, 1 for Snappy, and 2 for ZSTD.")
 	streamCmd.Flags().StringVarP(&keyPath, "encryption-key-file", "e", "",
