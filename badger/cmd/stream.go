@@ -18,10 +18,12 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"os"
 
 	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/y"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -37,6 +39,7 @@ This command streams the contents of this DB into another DB with the given opti
 }
 
 var outDir string
+var outFile string
 var compressionType uint32
 
 func init() {
@@ -44,6 +47,8 @@ func init() {
 	RootCmd.AddCommand(streamCmd)
 	streamCmd.Flags().StringVarP(&outDir, "out", "o", "",
 		"Path to output DB. The directory should be empty.")
+	streamCmd.Flags().StringVarP(&outFile, "", "f", "",
+		"Run a backup to this file.")
 	streamCmd.Flags().BoolVarP(&readOnly, "read_only", "", true,
 		"Option to open input DB in read-only mode")
 	streamCmd.Flags().IntVarP(&numVersions, "num_versions", "", 0,
@@ -57,20 +62,6 @@ func init() {
 }
 
 func stream(cmd *cobra.Command, args []string) error {
-	// Check that outDir doesn't exist or is empty.
-	// if _, err := os.Stat(outDir); err == nil {
-	// 	f, err := os.Open(outDir)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	defer f.Close()
-
-	// 	_, err = f.Readdirnames(1)
-	// 	if err != io.EOF {
-	// 		return errors.Errorf("cannot run stream tool on non-empty output directory %s", outDir)
-	// 	}
-	// }
-
 	// Options for input DB.
 	if numVersions <= 0 {
 		numVersions = math.MaxInt32
@@ -92,26 +83,44 @@ func stream(cmd *cobra.Command, args []string) error {
 		return errors.Errorf(
 			"compression value must be one of 0 (disabled), 1 (Snappy), or 2 (ZSTD)")
 	}
-	// outOpt := inOpt.
-	// 	WithDir(outDir).
-	// 	WithValueDir(outDir).
-	// 	WithNumVersionsToKeep(numVersions).
-	// 	WithCompression(options.CompressionType(compressionType)).
-	// 	WithReadOnly(false)
-
 	inDB, err := badger.OpenManaged(inOpt)
 	if err != nil {
 		return y.Wrapf(err, "cannot open DB at %s", sstDir)
 	}
 	defer inDB.Close()
 
-	f, err := os.OpenFile("/dev/null", os.O_RDWR, 0666)
-	y.Check(err)
-
 	stream := inDB.NewStreamAt(math.MaxUint64)
-	stream.LogPrefix = "DB.Backup"
-	_, err = stream.Backup(f, 0)
-	// err = inDB.StreamDB(outOpt)
+
+	if len(outDir) > 0 {
+		if _, err := os.Stat(outDir); err == nil {
+			f, err := os.Open(outDir)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+
+			_, err = f.Readdirnames(1)
+			if err != io.EOF {
+				return errors.Errorf(
+					"cannot run stream tool on non-empty output directory %s", outDir)
+			}
+		}
+
+		stream.LogPrefix = "DB.Stream"
+		outOpt := inOpt.
+			WithDir(outDir).
+			WithValueDir(outDir).
+			WithNumVersionsToKeep(numVersions).
+			WithCompression(options.CompressionType(compressionType)).
+			WithReadOnly(false)
+		err = inDB.StreamDB(outOpt)
+
+	} else if len(outFile) > 0 {
+		stream.LogPrefix = "DB.Backup"
+		f, err := os.OpenFile(outFile, os.O_RDWR|os.O_CREATE, 0666)
+		y.Check(err)
+		_, err = stream.Backup(f, 0)
+	}
 	fmt.Println("Done.")
 	return err
 }
