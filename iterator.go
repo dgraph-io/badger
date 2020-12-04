@@ -26,7 +26,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/ristretto/z"
 
@@ -495,13 +494,6 @@ func (txn *Txn) NewKeyIterator(key []byte, opt IteratorOptions) *Iterator {
 	opt.prefixIsKey = true
 	opt.AllVersions = true
 	return txn.NewIterator(opt)
-}
-
-// NewKV must be called serially. It is NOT thread-safe.
-func (it *Iterator) NewKV() *pb.KV {
-	kv := y.NewKV(it.alloc)
-	kv.Reset()
-	return kv
 }
 
 func (it *Iterator) newItem() *Item {

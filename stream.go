@@ -111,7 +111,7 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 			break
 		}
 
-		kv := itr.NewKV()
+		kv := y.NewKV(a)
 		kv.Key = ka
 
 		if err := item.Value(func(val []byte) error {
