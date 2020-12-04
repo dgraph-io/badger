@@ -19,6 +19,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dgraph-io/ristretto v0.0.4-0.20201125174811-766bca5e9938 h1:FdSJif9oUVeH+MpsScsrL6OAbdW0pUYvXmkdhDSWWcQ=
 github.com/dgraph-io/ristretto v0.0.4-0.20201125174811-766bca5e9938/go.mod h1:tv2ec8nA7vRpSYX7/MbP52ihrUMXIHit54CQMq8npXQ=
+github.com/dgraph-io/ristretto v0.0.4-0.20201204194510-b7ca2e90f544 h1:6vntPuznvHo+vxTe3KZYzJeorSUt5wkY+1ICtn1GEj0=
+github.com/dgraph-io/ristretto v0.0.4-0.20201204194510-b7ca2e90f544/go.mod h1:tv2ec8nA7vRpSYX7/MbP52ihrUMXIHit54CQMq8npXQ=
 github.com/dgryski/go-farm v0.0.0-20190423205320-6a90982ecee2 h1:tdlZCpZ/P9DhczCTSixgIKmwPv6+wP5DGjqLYw5SUiA=
 github.com/dgryski/go-farm v0.0.0-20190423205320-6a90982ecee2/go.mod h1:SqUrOPUnsFjfmXRMNPybcSiG0BgUW2AuFH8PAnS2iTw=
 github.com/dustin/go-humanize v1.0.0 h1:VSnTsYCnlFHaM2/igO1h6X3HA71jcobQuxemgkq4zYo=
