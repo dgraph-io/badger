@@ -99,6 +99,8 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 	db, err := badger.Open(badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithReadOnly(opt.readOnly).
+		WithBlockCacheSize(100 << 20).
+		WithIndexCacheSize(200 << 20).
 		WithEncryptionKey([]byte(opt.encryptionKey)))
 	if err != nil {
 		return y.Wrap(err, "failed to open database")
@@ -434,7 +436,7 @@ func printInfo(dir, valueDir string) error {
 		totalSSTSize += sz
 	}
 
-	fmt.Printf("Total SST size: %8s\n", hbytes(totalSSTSize))
+	fmt.Printf("Total SST size: %10s\n", hbytes(totalSSTSize))
 	fmt.Printf("Value log size: %10s\n", hbytes(valueLogSize))
 	fmt.Println()
 	totalExtra := numExtra + numValueDirExtra
