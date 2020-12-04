@@ -97,7 +97,8 @@ func (st *Stream) SendDoneMarkers(done bool) {
 // ToList is a default implementation of KeyToList. It picks up all valid versions of the key,
 // skipping over deleted or expired keys.
 func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
-	ka := y.Copy(key)
+	a := itr.alloc
+	ka := a.Copy(key)
 
 	list := &pb.KVList{}
 	for ; itr.Valid(); itr.Next() {
@@ -114,7 +115,7 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 		kv.Key = ka
 
 		if err := item.Value(func(val []byte) error {
-			kv.Value = y.Copy(val)
+			kv.Value = a.Copy(val)
 			return nil
 
 		}); err != nil {
@@ -122,7 +123,7 @@ func (st *Stream) ToList(key []byte, itr *Iterator) (*pb.KVList, error) {
 		}
 		kv.Version = item.Version()
 		kv.ExpiresAt = item.ExpiresAt()
-		kv.UserMeta = y.Copy([]byte{item.UserMeta()})
+		kv.UserMeta = a.Copy([]byte{item.UserMeta()})
 
 		list.Kv = append(list.Kv, kv)
 		if st.db.opt.NumVersionsToKeep == 1 {
@@ -195,6 +196,9 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		itr.ThreadId = threadId
 		defer itr.Close()
 
+		itr.alloc = z.NewAllocator(1 << 20)
+		defer itr.alloc.Release()
+
 		// This unique stream id is used to identify all the keys from this iteration.
 		streamId := atomic.AddUint32(&st.nextStreamId, 1)
 
@@ -228,6 +232,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			}
 
 			// Now convert to key value.
+			itr.alloc.Reset()
 			list, err := st.KeyToList(item.KeyCopy(nil), itr)
 			if err != nil {
 				return err
@@ -244,9 +249,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 				if err := sendIt(); err != nil {
 					return err
 				}
-			}
-			if len(itr.reuse) < 100 {
-				itr.reuse = append(itr.reuse, list.Kv...)
 			}
 		}
 		// Mark the stream as done.
