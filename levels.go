@@ -996,7 +996,7 @@ func (s *levelsController) addSplits(cd *compactDef) {
 	// In an edge case, 142 tables in bottom led to 48 splits. That's too many splits, because it
 	// then uses up a lot of memory for table builder.
 	// We should keep it so we have at max 5 splits.
-	width := int(math.Ceil(float64(len(cd.bot) / 5.0)))
+	width := int(math.Ceil(float64(len(cd.bot)) / 5.0))
 	if width < 3 {
 		width = 3
 	}
