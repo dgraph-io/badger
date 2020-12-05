@@ -426,9 +426,6 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 		return
 	}
 
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-
 	moveL0toFront := func(prios []compactionPriority) []compactionPriority {
 		idx := -1
 		for i, p := range prios {
@@ -474,10 +471,21 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 		return false
 	}
 
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	var backOff int
 	for {
 		select {
 		// Can add a done channel or other stuff.
 		case <-ticker.C:
+			if z.NumAllocBytes() > 16<<30 {
+				// Back off. We're already using a lot of memory.
+				backOff++
+				if backOff%1000 == 0 {
+					s.kv.opt.Infof("Compaction backed off %d times\n", backOff)
+				}
+				break
+			}
 			runOnce()
 		case <-lc.HasBeenClosed():
 			return
@@ -982,8 +990,16 @@ type compactDef struct {
 func (s *levelsController) addSplits(cd *compactDef) {
 	cd.splits = cd.splits[:0]
 
-	// Pick one every 3 tables.
-	const N = 3
+	// Let's say we have 10 tables in cd.bot and min width = 3. Then, we'll pick
+	// 0, 1, 2 (pick), 3, 4, 5 (pick), 6, 7, 8 (pick), 9 (pick, because last table).
+	// This gives us 4 picks for 10 tables.
+	// In an edge case, 142 tables in bottom led to 48 splits. That's too many splits, because it
+	// then uses up a lot of memory for table builder.
+	// We should keep it so we have at max 5 splits.
+	width := int(math.Ceil(float64(len(cd.bot) / 5.0)))
+	if width < 3 {
+		width = 3
+	}
 	skr := cd.thisRange
 	skr.extend(cd.nextRange)
 
@@ -1000,7 +1016,7 @@ func (s *levelsController) addSplits(cd *compactDef) {
 			addRange([]byte{})
 			return
 		}
-		if i%N == N-1 {
+		if i%width == width-1 {
 			// Right should always have ts=maxUint64 otherwise we'll lose keys
 			// in subcompaction. Consider the following.
 			// Top table is [A1...C3(deleted)]
