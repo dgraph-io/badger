@@ -4,13 +4,13 @@
 <head>
   <meta charset="utf-8"> {{ partial "meta.html" . }}
   <title>{{ .Title }}</title>
-  <link href="{{ .Site.BaseURL }}/css/nucleus.css" rel="stylesheet">
-  <link href="{{ .Site.BaseURL }}/css/font-awesome.min.css" rel="stylesheet">
-  <link href="{{ .Site.BaseURL }}/css/hybrid.css" rel="stylesheet">
-  <link href="{{ .Site.BaseURL }}/css/featherlight.min.css" rel="stylesheet">
-  <link href="{{ .Site.BaseURL }}/css/perfect-scrollbar.min.css" rel="stylesheet">
-  <link href="{{ .Site.BaseURL }}/css/theme.css" rel="stylesheet">
-  <link href="{{ .Site.BaseURL }}/css/hugo-theme.css" rel="stylesheet">
+  <link href='{{ relURL "/css/nucleus.css"}}' rel="stylesheet">
+  <link href='{{ relURL "/css/font-awesome.min.css"}}' rel="stylesheet">
+  <link href='{{ relURL "/css/hybrid.css"}}' rel="stylesheet">
+  <link href='{{ relURL "/css/featherlight.min.css"}}' rel="stylesheet">
+  <link href='{{ relURL "/css/perfect-scrollbar.min.css"}}' rel="stylesheet">
+  <link href='{{ relURL "/css/theme.css"}}' rel="stylesheet">
+  <link href='{{ relURL "/css/hugo-theme.css"}}' rel="stylesheet">
   <style type="text/css">
     :root #header + #content > #left > #rlblock_left {
       display: none !important;
@@ -41,8 +41,8 @@
           </p>
           <p>Woops. Looks like this page doesn't exist.</p>
           <p></p>
-          <p><a href="{{.Site.BaseURL}}">Go to homepage</a></p>
-          <p><img src="{{ .Site.BaseURL }}/images/gopher-404.jpg" style="width:50%"></img></p>
+          <p><a href='{{relURL "/"}}'>Go to homepage</a></p>
+          <p><img src='{{ relURL  "/images/gopher-404.jpg"}}' style="width:50%"></img></p>
         </div>
       </div>
 
