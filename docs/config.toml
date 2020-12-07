@@ -1,5 +1,7 @@
 languageCode = "en-us"
 theme = "hugo-docs"
+canonifyURLs = false
+relativeURLs = true
 
 [markup.goldmark.renderer]
 unsafe = true
