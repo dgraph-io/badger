@@ -681,13 +681,19 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 		}
 		// Found the required version of the key, return immediately.
 		if vs.Version == version {
+			vs.Level = "memtable"
 			return vs, nil
 		}
 		if maxVs.Version < vs.Version {
 			maxVs = vs
+			maxVs.Level = "memtable"
 		}
 	}
-	return db.lc.get(key, maxVs, 0)
+	x, err := db.lc.get(key, maxVs, 0)
+	if len(x.Value) > 0 {
+		y.AssertTrue(len(x.Level) > 0)
+	}
+	return x, err
 }
 
 var requestPool = sync.Pool{
@@ -1151,7 +1157,7 @@ func (db *DB) RunValueLogGC(discardRatio float64) error {
 	if db.opt.InMemory {
 		return ErrGCInMemoryMode
 	}
-	if discardRatio >= 1.0 || discardRatio <= 0.0 {
+	if discardRatio >= 1.0 || discardRatio < 0.0 {
 		return ErrInvalidRequest
 	}
 

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"math"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,7 @@ type Item struct {
 	key       []byte
 	vptr      []byte
 	val       []byte
+	level     string
 	version   uint64
 	expiresAt uint64
 
@@ -170,8 +172,8 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	db := item.txn.db
 	result, cb, err := db.vlog.Read(vp, item.slice)
 	if err != nil {
-		db.opt.Logger.Errorf("Unable to read: Key: %v, Version : %v, meta: %v, userMeta: %v"+
-			" Error: %v", key, item.version, item.meta, item.userMeta, err)
+		db.opt.Logger.Errorf("Unable to read: Key: %x, Version : %v, meta: %v, userMeta: %v"+
+			" vptr: %+v val: %+v level: %s Error: %v", key, item.version, item.meta, item.userMeta, item.vptr, item.val, item.level, err)
 		var txn *Txn
 		if db.opt.managedTxns {
 			txn = db.NewTransactionAt(math.MaxUint64, false)
@@ -179,6 +181,18 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 			txn = db.NewTransaction(false)
 		}
 		defer txn.Discard()
+
+		//
+		item1, err := txn.Get(item.Key())
+		if err != nil {
+			panic(err)
+		}
+		var vp valuePointer
+		if item1.meta&bitValuePointer > 0 {
+			vp.Decode(item1.vptr)
+		}
+		db.opt.Logger.Errorf("From Get. Key: %x, Version : %v, meta: %v, userMeta: %v val: %v level: %s valuePointer: %+v",
+			item1.Key(), item1.version, item1.meta, item1.userMeta, item.val, item.level, vp)
 
 		iopt := DefaultIteratorOptions
 		iopt.AllVersions = true
@@ -193,9 +207,10 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 			if item.meta&bitValuePointer > 0 {
 				vp.Decode(item.vptr)
 			}
-			db.opt.Logger.Errorf("Key: %v, Version : %v, meta: %v, userMeta: %v valuePointer: %+v",
-				item.Key(), item.version, item.meta, item.userMeta, vp)
+			db.opt.Logger.Errorf("Key: %x, Version : %v, meta: %v, userMeta: %v val: %v level: %s valuePointer: %+v",
+				item.Key(), item.version, item.meta, item.userMeta, item.val, item.level, vp)
 		}
+		debug.PrintStack()
 	}
 	// Don't return error if we cannot read the value. Just log the error.
 	return result, cb, nil
@@ -672,6 +687,7 @@ FILL:
 
 func (it *Iterator) fill(item *Item) {
 	vs := it.iitr.Value()
+	y.AssertTrue(len(vs.Value) > 0)
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta
 	item.expiresAt = vs.ExpiresAt
@@ -680,6 +696,7 @@ func (it *Iterator) fill(item *Item) {
 	item.key = y.SafeCopy(item.key, y.ParseKey(it.iitr.Key()))
 
 	item.vptr = y.SafeCopy(item.vptr, vs.Value)
+	y.AssertTrue(len(item.vptr) > 0)
 	item.val = nil
 	if it.opt.PrefetchValues {
 		item.wg.Add(1)

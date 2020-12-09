@@ -240,6 +240,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			// Ensure length and size of wb is within transaction limits.
 			if int64(len(wb)+1) >= vlog.opt.maxBatchCount ||
 				size+es >= vlog.opt.maxBatchSize {
+				fmt.Println("Writing", len(wb))
 				if err := vlog.db.batchSet(wb); err != nil {
 					return err
 				}
@@ -898,7 +899,7 @@ func (vlog *valueLog) getFileRLocked(vp valuePointer) (*logFile, error) {
 	ret, ok := vlog.filesMap[vp.Fid]
 	if !ok {
 		// log file has gone away, we can't do anything. Return.
-		return nil, errors.Errorf("file with ID: %d not found", vp.Fid)
+		return nil, errors.Errorf("file with ID: %d not found. ValuePointer: %+v", vp.Fid, vp)
 	}
 
 	// Check for valid offset if we are reading from writable log.
@@ -987,6 +988,7 @@ func (vlog *valueLog) pickLog(discardRatio float64) *logFile {
 LOOP:
 	// Pick a candidate that contains the largest amount of discardable data
 	fid, discard := vlog.discardStats.MaxDiscard()
+	fmt.Println("Candidate", fid, discard)
 
 	// MaxDiscard will return fid=0 if it doesn't have any discard data. The
 	// vlog files start from 1.
@@ -1054,6 +1056,7 @@ func (vlog *valueLog) doRunGC(lf *logFile) error {
 	span.Annotatef(nil, "GC rewrite for: %v", lf.path)
 	defer span.End()
 	if err := vlog.rewrite(lf); err != nil {
+		fmt.Printf("rewrite returned err = %+v\n", err)
 		return err
 	}
 	// Remove the file from discardStats.
@@ -1079,10 +1082,18 @@ func (vlog *valueLog) runGC(discardRatio float64) error {
 			<-vlog.garbageCh
 		}()
 
-		lf := vlog.pickLog(discardRatio)
-		if lf == nil {
+		// 		lf := vlog.pickLog(discardRatio)
+		// 		if lf == nil {
+		// 			return ErrNoRewrite
+		// 		}
+		fid := vlog.sortedFids()[0]
+		if fid == vlog.maxFid {
 			return ErrNoRewrite
 		}
+		vlog.filesLock.RLock()
+		lf := vlog.filesMap[fid]
+		vlog.filesLock.RUnlock()
+
 		return vlog.doRunGC(lf)
 	default:
 		return ErrRejected

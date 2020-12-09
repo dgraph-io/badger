@@ -1441,8 +1441,12 @@ func (s *levelsController) get(key []byte, maxVs y.ValueStruct, startLevel int) 
 			return vs, nil
 		}
 		if maxVs.Version < vs.Version {
+			maxVs.Level = h.strLevel
 			maxVs = vs
 		}
+	}
+	if len(maxVs.Value) > 0 {
+		y.AssertTrue(len(maxVs.Level) > 0)
 	}
 	return maxVs, nil
 }

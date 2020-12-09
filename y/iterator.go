@@ -28,6 +28,7 @@ type ValueStruct struct {
 	UserMeta  byte
 	ExpiresAt uint64
 	Value     []byte
+	Level     string
 
 	Version uint64 // This field is not serialized. Only for internal usage.
 }
@@ -89,6 +90,7 @@ type Iterator interface {
 	Key() []byte
 	Value() ValueStruct
 	Valid() bool
+	String() string
 
 	// All iterators should be closed so that file garbage collection works.
 	Close() error

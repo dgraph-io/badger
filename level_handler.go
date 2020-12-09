@@ -278,6 +278,7 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 			}
 		}
 	}
+	maxVs.Level = s.strLevel
 	return maxVs, decr()
 }
 

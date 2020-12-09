@@ -18,6 +18,7 @@ package table
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/dgraph-io/badger/v2/y"
 )
@@ -43,6 +44,10 @@ type node struct {
 	// interface's function.
 	merge  *MergeIterator
 	concat *ConcatIterator
+}
+
+func (n *node) string() string {
+	return n.iter.String()
 }
 
 func (n *node) setIterator(iter y.Iterator) {
@@ -193,6 +198,10 @@ func (mi *MergeIterator) Key() []byte {
 // Value returns the value associated with the iterator.
 func (mi *MergeIterator) Value() y.ValueStruct {
 	return mi.small.iter.Value()
+}
+
+func (mi *MergeIterator) String() string {
+	return fmt.Sprintf("Merge Iterator. Left: %s Right: %s", mi.left.string(), mi.right.string())
 }
 
 // Close implements y.Iterator.

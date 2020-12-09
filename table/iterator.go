@@ -18,6 +18,7 @@ package table
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"sort"
 
@@ -175,6 +176,10 @@ func (t *Table) NewIterator(opt int) *Iterator {
 	t.IncrRef() // Important.
 	ti := &Iterator{t: t, opt: opt}
 	return ti
+}
+
+func (itr *Iterator) String() string {
+	return fmt.Sprintf("TableITerator: %d", itr.t.ID())
 }
 
 // Close closes the iterator (and it must be called).
@@ -435,6 +440,15 @@ func NewConcatIterator(tbls []*Table, opt int) *ConcatIterator {
 		tables:  tbls,
 		idx:     -1, // Not really necessary because s.it.Valid()=false, but good to have.
 	}
+}
+
+func (s *ConcatIterator) String() string {
+	var buf bytes.Buffer
+	buf.Write([]byte(fmt.Sprintf("Concat: ")))
+	for _, t := range s.tables {
+		buf.Write([]byte(fmt.Sprintf("%d ", t.ID())))
+	}
+	return string(buf.Bytes())
 }
 
 func (s *ConcatIterator) setIdx(idx int) {

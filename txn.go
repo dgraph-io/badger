@@ -455,6 +455,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 			item.val = e.Value
 			item.userMeta = e.UserMeta
 			item.key = key
+			item.level = "txncache"
 			item.status = prefetched
 			item.version = txn.readTs
 			item.expiresAt = e.ExpiresAt
@@ -478,12 +479,14 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 		return nil, ErrKeyNotFound
 	}
 
+	y.AssertTrue(len(vs.Level) > 0)
 	item.key = key
 	item.version = vs.Version
 	item.meta = vs.Meta
 	item.userMeta = vs.UserMeta
 	item.vptr = y.SafeCopy(item.vptr, vs.Value)
 	item.txn = txn
+	item.level = vs.Level
 	item.expiresAt = vs.ExpiresAt
 	return item, nil
 }
