@@ -543,6 +543,10 @@ func (s *Skiplist) NewUniIterator(reversed bool) *UniIterator {
 	}
 }
 
+func (s *UniIterator) String() string {
+	return "UniIterator"
+}
+
 // Next implements y.Interface
 func (s *UniIterator) Next() {
 	if !s.reversed {

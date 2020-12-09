@@ -314,6 +314,9 @@ func (pi *pendingWritesIterator) Value() y.ValueStruct {
 func (pi *pendingWritesIterator) Valid() bool {
 	return pi.nextIdx < len(pi.entries)
 }
+func (pi *pendingWritesIterator) String() string {
+	return "PendingWritesIterator"
+}
 
 func (pi *pendingWritesIterator) Close() error {
 	return nil
