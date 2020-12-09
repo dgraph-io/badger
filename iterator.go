@@ -696,7 +696,17 @@ func (it *Iterator) fill(item *Item) {
 	item.key = y.SafeCopy(item.key, y.ParseKey(it.iitr.Key()))
 
 	item.vptr = y.SafeCopy(item.vptr, vs.Value)
-	y.AssertTrue(len(item.vptr) > 0)
+
+	isZeros := func(bs []byte) bool {
+		for _, b := range bs {
+			if b != 0 {
+				return false
+			}
+		}
+		return true
+	}
+	y.AssertTrue(!isZeros(item.vptr))
+
 	item.val = nil
 	if it.opt.PrefetchValues {
 		item.wg.Add(1)
