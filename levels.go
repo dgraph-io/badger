@@ -660,7 +660,12 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 
 			// See if we need to skip this key.
 			if len(skipKey) > 0 {
-				if y.SameKey(it.Key(), skipKey) {
+				// Do not drop this key if there is an overlap with the lower
+				// levels. Keys are reinserted because of the value log GC and
+				// if we drop the keys here, we might drop valid version (which
+				// are moved) and the older keys would show up. The keys would
+				// be dropped with they all are at the same level.
+				if !hasOverlap && y.SameKey(it.Key(), skipKey) {
 					numSkips++
 					updateStats(it.Value())
 					continue

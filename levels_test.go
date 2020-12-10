@@ -257,7 +257,20 @@ func TestCompaction(t *testing.T) {
 			require.NoError(t, db.lc.runCompactDef(-1, 0, cdef))
 			// foo version 2 and version 1 should be dropped after compaction.
 			getAllAndCheck(t, db, []keyValVersion{
-				{"foo", "bar", 3, 0}, {"foo", "bar", 0, 0}, {"fooz", "baz", 1, 0},
+				{"foo", "bar", 3, 0}, {"foo", "bar", 2, 0}, {"foo", "bar", 1, 0},
+				{"foo", "bar", 0, 0}, {"fooz", "baz", 1, 0},
+			})
+			cdef = compactDef{
+				thisLevel: db.lc.levels[1],
+				nextLevel: db.lc.levels[2],
+				top:       db.lc.levels[1].tables,
+				bot:       db.lc.levels[2].tables,
+				t:         db.lc.levelTargets(),
+			}
+			cdef.t.baseLevel = 2
+			require.NoError(t, db.lc.runCompactDef(-1, 1, cdef))
+			getAllAndCheck(t, db, []keyValVersion{
+				{"foo", "bar", 3, 0}, {"fooz", "baz", 1, 0},
 			})
 		})
 	})
@@ -306,7 +319,7 @@ func TestCompaction(t *testing.T) {
 					{"foo", "bar", 3, 1},
 					{"foo", "bar", 2, 0},
 					{"foo", "bar", 1, 0},
-					{"fooz", "baz", 1, 1},
+					{"fooz", "baz", 1, bitDelete},
 				})
 				cdef := compactDef{
 					thisLevel: db.lc.levels[1],
@@ -317,15 +330,13 @@ func TestCompaction(t *testing.T) {
 				}
 				cdef.t.baseLevel = 2
 				require.NoError(t, db.lc.runCompactDef(-1, 1, cdef))
-				// foo bar version 2 should be dropped after compaction. fooz
-				// baz version 1 will remain because overlap exists, which is
-				// expected because `hasOverlap` is only checked once at the
-				// beginning of `compactBuildTables` method.
-				// everything from level 1 is now in level 2.
+
+				// Nothing should be dropped here because we have an overlap with the lower level.
 				getAllAndCheck(t, db, []keyValVersion{
 					{"foo", "bar", 3, bitDelete},
+					{"foo", "bar", 2, 0},
 					{"foo", "bar", 1, 0},
-					{"fooz", "baz", 1, 1},
+					{"fooz", "baz", 1, bitDelete},
 				})
 
 				cdef = compactDef{
@@ -372,9 +383,21 @@ func TestCompaction(t *testing.T) {
 				// does, delete keys should not be removed.
 				getAllAndCheck(t, db, []keyValVersion{
 					{"foo", "bar", 3, bitDelete},
+					{"foo", "bar", 2, 0},
 					{"fooz", "baz", 2, bitDelete},
 					{"fooz", "baz", 1, 0},
 				})
+				cdef = compactDef{
+					thisLevel: db.lc.levels[2],
+					nextLevel: db.lc.levels[3],
+					top:       db.lc.levels[2].tables,
+					bot:       db.lc.levels[3].tables,
+					t:         db.lc.levelTargets(),
+				}
+				cdef.t.baseLevel = 3
+				require.NoError(t, db.lc.runCompactDef(-1, 2, cdef))
+				// everything should be removed now
+				getAllAndCheck(t, db, []keyValVersion{})
 			})
 		})
 		t.Run("without overlap", func(t *testing.T) {
@@ -469,7 +492,7 @@ func TestCompactionTwoVersions(t *testing.T) {
 				{"foo", "bar", 3, 0},
 				{"foo", "bar", 2, 0},
 				{"foo", "bar", 1, 0},
-				{"fooz", "baz", 1, 1},
+				{"fooz", "baz", 1, bitDelete},
 			})
 			cdef := compactDef{
 				thisLevel: db.lc.levels[1],
@@ -486,7 +509,7 @@ func TestCompactionTwoVersions(t *testing.T) {
 				{"foo", "bar", 3, 0},
 				{"foo", "bar", 2, 0},
 				{"foo", "bar", 1, 0},
-				{"fooz", "baz", 1, 1},
+				{"fooz", "baz", 1, bitDelete},
 			})
 
 			cdef = compactDef{
@@ -702,50 +725,111 @@ func TestDiscardFirstVersion(t *testing.T) {
 	opt.NumVersionsToKeep = math.MaxInt32
 	opt.managedTxns = true
 
-	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
-		l0 := []keyValVersion{{"foo", "bar", 1, 0}}
-		l01 := []keyValVersion{{"foo", "bar", 2, bitDiscardEarlierVersions}}
-		l02 := []keyValVersion{{"foo", "bar", 3, 0}}
-		l03 := []keyValVersion{{"foo", "bar", 4, 0}}
-		l04 := []keyValVersion{{"foo", "bar", 9, 0}}
-		l05 := []keyValVersion{{"foo", "bar", 10, bitDiscardEarlierVersions}}
+	t.Run("level 0", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			l0 := []keyValVersion{{"foo", "bar", 1, 0}}
+			l01 := []keyValVersion{{"foo", "bar", 2, bitDiscardEarlierVersions}}
+			l02 := []keyValVersion{{"foo", "bar", 3, 0}}
+			l03 := []keyValVersion{{"foo", "bar", 4, 0}}
+			l04 := []keyValVersion{{"foo", "bar", 9, 0}}
+			l05 := []keyValVersion{{"foo", "bar", 10, bitDiscardEarlierVersions}}
 
-		// Level 0 has all the tables.
-		createAndOpen(db, l0, 0)
-		createAndOpen(db, l01, 0)
-		createAndOpen(db, l02, 0)
-		createAndOpen(db, l03, 0)
-		createAndOpen(db, l04, 0)
-		createAndOpen(db, l05, 0)
+			// Level 0 has all the tables.
+			createAndOpen(db, l0, 0)
+			createAndOpen(db, l01, 0)
+			createAndOpen(db, l02, 0)
+			createAndOpen(db, l03, 0)
+			createAndOpen(db, l04, 0)
+			createAndOpen(db, l05, 0)
 
-		// Discard Time stamp is set to 7.
-		db.SetDiscardTs(7)
+			// Discard Time stamp is set to 7.
+			db.SetDiscardTs(7)
 
-		// Compact L0 to L1
-		cdef := compactDef{
-			thisLevel: db.lc.levels[0],
-			nextLevel: db.lc.levels[1],
-			top:       db.lc.levels[0].tables,
-			bot:       db.lc.levels[1].tables,
-			t:         db.lc.levelTargets(),
-		}
-		cdef.t.baseLevel = 1
-		require.NoError(t, db.lc.runCompactDef(-1, 0, cdef))
+			// Compact L0 to L1
+			cdef := compactDef{
+				thisLevel: db.lc.levels[0],
+				nextLevel: db.lc.levels[1],
+				top:       db.lc.levels[0].tables,
+				bot:       db.lc.levels[1].tables,
+				t:         db.lc.levelTargets(),
+			}
+			cdef.t.baseLevel = 1
+			require.NoError(t, db.lc.runCompactDef(-1, 0, cdef))
 
-		// - Version 10, 9 lie above version 7 so they should be there.
-		// - Version 4, 3, 2 lie below the discardTs but they don't have the
-		//   "bitDiscardEarlierVersions" versions set so they should not be removed because number
-		//    of versions to keep is set to infinite.
-		// - Version 1 is below DiscardTS and below the first "bitDiscardEarlierVersions"
-		//   marker so IT WILL BE REMOVED.
-		ExpectedKeys := []keyValVersion{
-			{"foo", "bar", 10, bitDiscardEarlierVersions},
-			{"foo", "bar", 9, 0},
-			{"foo", "bar", 4, 0},
-			{"foo", "bar", 3, 0},
-			{"foo", "bar", 2, bitDiscardEarlierVersions}}
+			// - Version 10, 9 lie above version 7 so they should be there.
+			// - Version 4, 3, 2 lie below the discardTs but they don't have the
+			//   "bitDiscardEarlierVersions" versions set so they should not be removed because number
+			//    of versions to keep is set to infinite.
+			// - Version 1 is below DiscardTS and below the first "bitDiscardEarlierVersions"
+			//   marker so IT WILL BE REMOVED.
+			ExpectedKeys := []keyValVersion{
+				{"foo", "bar", 10, bitDiscardEarlierVersions},
+				{"foo", "bar", 9, 0},
+				{"foo", "bar", 4, 0},
+				{"foo", "bar", 3, 0},
+				{"foo", "bar", 2, bitDiscardEarlierVersions}}
 
-		getAllAndCheck(t, db, ExpectedKeys)
+			getAllAndCheck(t, db, ExpectedKeys)
+
+		})
+	})
+	t.Run("multiple level", func(t *testing.T) {
+		runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+			l0 := []keyValVersion{{"foo", "bar", 2, 0}}
+			l1 := []keyValVersion{{"foo", "bar", 5, bitDiscardEarlierVersions}}
+			l2 := []keyValVersion{{"foo", "bar", 3, 0}}
+			l3 := []keyValVersion{{"foo", "barOld", 2, 0}}
+
+			createAndOpen(db, l0, 0)
+			createAndOpen(db, l1, 1)
+			createAndOpen(db, l2, 2)
+			createAndOpen(db, l3, 3)
+
+			db.SetDiscardTs(10)
+
+			// Compact L0 to L1
+			cdef := compactDef{
+				thisLevel: db.lc.levels[0],
+				nextLevel: db.lc.levels[1],
+				top:       db.lc.levels[0].tables,
+				bot:       db.lc.levels[1].tables,
+				t:         db.lc.levelTargets(),
+			}
+			cdef.t.baseLevel = 3
+			require.NoError(t, db.lc.runCompactDef(-1, 0, cdef))
+
+			ExpectedKeys := []keyValVersion{
+				{"foo", "bar", 5, bitDiscardEarlierVersions},
+				{"foo", "bar", 3, 0},
+				{"foo", "bar", 2, 0},
+			}
+
+			getAllAndCheck(t, db, ExpectedKeys)
+			cdef = compactDef{
+				thisLevel: db.lc.levels[1],
+				nextLevel: db.lc.levels[2],
+				top:       db.lc.levels[1].tables,
+				bot:       db.lc.levels[2].tables,
+				t:         db.lc.levelTargets(),
+			}
+			cdef.t.baseLevel = 3
+			// Nothing would be dropped because we have an overlap.
+			require.NoError(t, db.lc.runCompactDef(-1, 1, cdef))
+			getAllAndCheck(t, db, ExpectedKeys)
+
+			cdef = compactDef{
+				thisLevel: db.lc.levels[2],
+				nextLevel: db.lc.levels[3],
+				top:       db.lc.levels[2].tables,
+				bot:       db.lc.levels[3].tables,
+				t:         db.lc.levelTargets(),
+			}
+			cdef.t.baseLevel = 3
+			require.NoError(t, db.lc.runCompactDef(-1, 2, cdef))
+			// Only the key with bitDiscardEarlierVersions set will be kept.
+			getAllAndCheck(t, db, []keyValVersion{{"foo", "bar", 5, bitDiscardEarlierVersions}})
+
+		})
 	})
 }
 
