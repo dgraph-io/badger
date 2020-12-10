@@ -226,7 +226,9 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			moved++
 			// This new entry only contains the key, and a pointer to the value.
 			ne := new(Entry)
-			ne.meta = 0 // Remove all bits. Different keyspace doesn't need these bits.
+			// Remove only the bitValuePointer and transaction markers. We
+			// should keep the other bits.
+			ne.meta = e.meta &^ (bitValuePointer | bitTxn | bitFinTxn)
 			ne.UserMeta = e.UserMeta
 			ne.ExpiresAt = e.ExpiresAt
 			ne.Key = append([]byte{}, e.Key...)
