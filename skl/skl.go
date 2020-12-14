@@ -33,7 +33,6 @@ Key differences:
 package skl
 
 import (
-	"bytes"
 	"math"
 	"sync/atomic"
 	"unsafe"
@@ -74,17 +73,12 @@ type node struct {
 	tower [maxHeight]uint32
 }
 
-type comparatorFunc func([]byte, []byte) int
-
 type Skiplist struct {
-	height      int32 // Current height. 1 <= height <= kMaxHeight. CAS.
-	head        *node
-	ref         int32
-	arena       *Arena
-	hasVersions bool
-	comparator  comparatorFunc
-	OnClose     func()
-	Release     func()
+	height  int32 // Current height. 1 <= height <= kMaxHeight. CAS.
+	head    *node
+	ref     int32
+	arena   *Arena
+	OnClose func()
 }
 
 // IncrRef increases the refcount
@@ -101,9 +95,7 @@ func (s *Skiplist) DecrRef() {
 	if s.OnClose != nil {
 		s.OnClose()
 	}
-	if s.Release != nil {
-		s.Release()
-	}
+
 	// Indicate we are closed. Good for testing.  Also, lets GC reclaim memory. Race condition
 	// here would suggest we are accessing skiplist when we are supposed to have no reference!
 	s.arena = nil
@@ -112,14 +104,14 @@ func (s *Skiplist) DecrRef() {
 	s.head = nil
 }
 
-func newNode(arena *Arena, key []byte, u uint64, height int) *node {
+func newNode(arena *Arena, key []byte, v y.ValueStruct, height int) *node {
 	// The base level is already allocated in the node struct.
 	offset := arena.putNode(height)
 	node := arena.getNode(offset)
 	node.keyOffset = arena.putKey(key)
 	node.keySize = uint16(len(key))
 	node.height = uint16(height)
-	node.value = u
+	node.value = encodeValue(arena.putVal(v), v.EncodedSize())
 	return node
 }
 
@@ -133,34 +125,16 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 	return
 }
 
-// NewSkiplist makes a new empty skiplist, with a given arena size.
+// NewSkiplist makes a new empty skiplist, with a given arena size
 func NewSkiplist(arenaSize int64) *Skiplist {
-	buf := z.Calloc(int(arenaSize))
-	s := NewSkiplistWith(buf, true)
-	s.Release = func() {
-		z.Free(s.arena.data)
+	arena := newArena(arenaSize)
+	head := newNode(arena, nil, y.ValueStruct{}, maxHeight)
+	return &Skiplist{
+		height: 1,
+		head:   head,
+		arena:  arena,
+		ref:    1,
 	}
-	return s
-}
-
-// NewSkiplistWith makes a new skiplist, with a given byte slice.
-func NewSkiplistWith(buf []byte, hasVersions bool) *Skiplist {
-	arena := new(Arena)
-	arena.data = buf
-	offset := arena.allocateValue(y.ValueStruct{})
-	head := newNode(arena, nil, offset, maxHeight)
-	sl := &Skiplist{
-		height:      1,
-		head:        head,
-		arena:       arena,
-		ref:         1,
-		hasVersions: hasVersions,
-		comparator:  bytes.Compare,
-	}
-	if sl.hasVersions {
-		sl.comparator = y.CompareKeys
-	}
-	return sl
 }
 
 func (s *node) getValueOffset() (uint32, uint32) {
@@ -172,8 +146,10 @@ func (s *node) key(arena *Arena) []byte {
 	return arena.getKey(s.keyOffset, s.keySize)
 }
 
-func (s *node) setUint64(u uint64) {
-	atomic.StoreUint64(&s.value, u)
+func (s *node) setValue(arena *Arena, v y.ValueStruct) {
+	valOffset := arena.putVal(v)
+	value := encodeValue(valOffset, v.EncodedSize())
+	atomic.StoreUint64(&s.value, value)
 }
 
 func (s *node) getNextOffset(h int) uint32 {
@@ -232,9 +208,9 @@ func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool
 			}
 			return x, false
 		}
-		nextKey := next.key(s.arena)
 
-		cmp := s.comparator(key, nextKey)
+		nextKey := next.key(s.arena)
+		cmp := y.CompareKeys(key, nextKey)
 		if cmp > 0 {
 			// x.key < next.key < key. We can continue to move right.
 			x = next
@@ -289,7 +265,7 @@ func (s *Skiplist) findSpliceForLevel(key []byte, before *node, level int) (*nod
 			return before, next
 		}
 		nextKey := next.key(s.arena)
-		cmp := s.comparator(key, nextKey)
+		cmp := y.CompareKeys(key, nextKey)
 		if cmp == 0 {
 			// Equality case.
 			return next, next
@@ -308,12 +284,6 @@ func (s *Skiplist) getHeight() int32 {
 
 // Put inserts the key-value pair.
 func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
-	val := s.arena.allocateValue(v)
-	s.PutUint64(key, val)
-}
-
-// PutUint64 inserts the key-value pair, with a uint64 value.
-func (s *Skiplist) PutUint64(key []byte, u uint64) {
 	// Since we allow overwrite, we may not need to create a new node. We might not even need to
 	// increase the height. Let's defer these actions.
 
@@ -326,14 +296,14 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 		// Use higher level to speed up for current level.
 		prev[i], next[i] = s.findSpliceForLevel(key, prev[i+1], i)
 		if prev[i] == next[i] {
-			prev[i].setUint64(u)
+			prev[i].setValue(s.arena, v)
 			return
 		}
 	}
 
 	// We do need to create a new node.
 	height := s.randomHeight()
-	x := newNode(s.arena, key, u, height)
+	x := newNode(s.arena, key, v, height)
 
 	// Try to increase s.height via CAS.
 	listHeight = s.getHeight()
@@ -370,7 +340,7 @@ func (s *Skiplist) PutUint64(key []byte, u uint64) {
 			prev[i], next[i] = s.findSpliceForLevel(key, prev[i], i)
 			if prev[i] == next[i] {
 				y.AssertTruef(i == 0, "Equality can happen only on base level: %d", i)
-				prev[i].setUint64(u)
+				prev[i].setValue(s.arena, v)
 				return
 			}
 		}
@@ -406,49 +376,20 @@ func (s *Skiplist) findLast() *node {
 // Get gets the value associated with the key. It returns a valid value if it finds equal or earlier
 // version of the same key.
 func (s *Skiplist) Get(key []byte) y.ValueStruct {
-	n, version := s.getInternal(key)
+	n, _ := s.findNear(key, false, true) // findGreaterOrEqual.
 	if n == nil {
 		return y.ValueStruct{}
 	}
+
+	nextKey := s.arena.getKey(n.keyOffset, n.keySize)
+	if !y.SameKey(key, nextKey) {
+		return y.ValueStruct{}
+	}
+
 	valOffset, valSize := n.getValueOffset()
 	vs := s.arena.getVal(valOffset, valSize)
-	vs.Version = version
+	vs.Version = y.ParseTs(nextKey)
 	return vs
-
-}
-
-func (s *Skiplist) GetUint64(key []byte) (uint64, bool) {
-	n, _ := s.getInternal(key)
-	if n == nil {
-		return 0, false
-	}
-	return n.value, true
-}
-
-// getInternal finds the node which is greater than or equal to the given key
-// from the skiplist. It returns the fetched node and it's version.
-func (s *Skiplist) getInternal(key []byte) (*node, uint64) {
-	n, _ := s.findNear(key, false, true) // findGreaterOrEqual.
-	if n == nil {
-		return nil, 0
-	}
-	fetchedKey := s.arena.getKey(n.keyOffset, n.keySize)
-
-	// If the node has version, it means it is a badger kv and we should
-	// compare it's key without the version.
-	if s.hasVersions {
-		if !y.SameKey(key, fetchedKey) {
-			return nil, 0
-		}
-		version := y.ParseTs(fetchedKey)
-		return n, version
-	}
-
-	// This is a key without version.
-	if !bytes.Equal(key, fetchedKey) {
-		return nil, 0
-	}
-	return n, 0
 }
 
 // NewIterator returns a skiplist iterator.  You have to Close() the iterator.
