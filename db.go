@@ -961,7 +961,6 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 		lastKey               []byte
 		firstKeyHasDiscardSet bool
 	)
-	count := 0
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 		if len(ft.dropPrefixes) > 0 && hasAnyPrefixes(iter.Key(), ft.dropPrefixes) {
 			continue
@@ -973,7 +972,6 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 		}
 		switch {
 		case firstKeyHasDiscardSet && y.SameKey(lastKey, iter.Key()):
-			count++
 			b.AddStaleKey(iter.Key(), iter.Value(), vp.Len)
 		case isDeletedOrExpired(vs.Meta, vs.ExpiresAt):
 			b.AddStaleKey(iter.Key(), iter.Value(), vp.Len)

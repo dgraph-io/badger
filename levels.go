@@ -545,13 +545,13 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	addPriority(0, float64(s.levels[0].numTables())/float64(s.kv.opt.NumLevelZeroTables))
 
 	// All other levels use size to calculate priority.
-	// Ignore the level 0 and the last level.
 	for i := 1; i < len(s.levels); i++ {
 		// Don't consider those tables that are already being compacted right now.
 		delSize := s.cstatus.delSize(i)
 
 		l := s.levels[i]
-		addPriority(i, float64(l.getTotalSize()-delSize)/float64(t.targetSz[i]))
+		sz := l.getTotalSize() - delSize
+		addPriority(i, float64(sz)/float64(t.targetSz[i]))
 	}
 	y.AssertTrue(len(prios) == len(s.levels))
 
@@ -1430,8 +1430,7 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 
 	from := append(tablesToString(cd.top), tablesToString(cd.bot)...)
 	to := tablesToString(newTables)
-	sameLevel := thisLevel.level == nextLevel.level
-	if dur := time.Since(timeStart); sameLevel || dur > 2*time.Second {
+	if dur := time.Since(timeStart); dur > 2*time.Second {
 		var expensive string
 		if dur > time.Second {
 			expensive = " [E]"
