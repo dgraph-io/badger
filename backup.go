@@ -25,6 +25,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/golang/protobuf/proto"
 )
 
@@ -61,6 +62,7 @@ func (db *DB) Backup(w io.Writer, since uint64) (uint64, error) {
 func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 	stream.KeyToList = func(key []byte, itr *Iterator) (*pb.KVList, error) {
 		list := &pb.KVList{}
+		a := itr.Alloc
 		for ; itr.Valid(); itr.Next() {
 			item := itr.Item()
 			if !bytes.Equal(item.Key(), key) {
@@ -76,7 +78,10 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 			if !item.IsDeletedOrExpired() {
 				// No need to copy value, if item is deleted or expired.
 				var err error
-				valCopy, err = item.ValueCopy(nil)
+				err = item.Value(func(val []byte) error {
+					valCopy = a.Copy(val)
+					return nil
+				})
 				if err != nil {
 					stream.db.opt.Errorf("Key [%x, %d]. Error while fetching value [%v]\n",
 						item.Key(), item.Version(), err)
@@ -86,13 +91,14 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 
 			// clear txn bits
 			meta := item.meta &^ (bitTxn | bitFinTxn)
-			kv := &pb.KV{
-				Key:       item.KeyCopy(nil),
+			kv := y.NewKV(a)
+			*kv = pb.KV{
+				Key:       a.Copy(item.Key()),
 				Value:     valCopy,
-				UserMeta:  []byte{item.UserMeta()},
+				UserMeta:  a.Copy([]byte{item.UserMeta()}),
 				Version:   item.Version(),
 				ExpiresAt: item.ExpiresAt(),
-				Meta:      []byte{meta},
+				Meta:      a.Copy([]byte{meta}),
 			}
 			list.Kv = append(list.Kv, kv)
 
@@ -115,7 +121,11 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 	}
 
 	var maxVersion uint64
-	stream.Send = func(list *pb.KVList) error {
+	stream.Send = func(buf *z.Buffer) error {
+		list, err := BufferToKVList(buf)
+		if err != nil {
+			return err
+		}
 		out := list.Kv[:0]
 		for _, kv := range list.Kv {
 			if maxVersion < kv.Version {

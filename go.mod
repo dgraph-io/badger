@@ -8,7 +8,7 @@ replace github.com/dgraph-io/ristretto => /home/ibrahim/Projects/go/src/github.c
 require (
 	github.com/DataDog/zstd v1.4.1
 	github.com/cespare/xxhash v1.1.0
-	github.com/dgraph-io/ristretto v0.0.4-0.20201118204411-eeefcb8bb4ef
+	github.com/dgraph-io/ristretto v0.0.4-0.20201205013540-bafef7527542
 	github.com/dustin/go-humanize v1.0.0
 	github.com/golang/protobuf v1.3.1
 	github.com/golang/snappy v0.0.1

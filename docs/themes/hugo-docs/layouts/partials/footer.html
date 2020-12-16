@@ -22,9 +22,9 @@
       }
     </script>
 
-    <script src="{{ .Site.BaseURL }}/js/clipboard.min.js"></script>
+    <script src='{{ relURL "/js/clipboard.min.js"}}'></script>
     <script
-      src='{{ .Site.BaseURL }}/js/dgraph.js?{{ md5 (readFile "themes/hugo-docs/static/js/dgraph.js") }}'
+      src='{{ relURL "/js/dgraph.js"}}?{{ md5 (readFile "themes/hugo-docs/static/js/dgraph.js") }}'
       ></script>
     <script>
       hljs.initHighlightingOnLoad();

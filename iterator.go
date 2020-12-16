@@ -20,12 +20,14 @@ import (
 	"bytes"
 	"fmt"
 	"hash/crc32"
+	"math"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/dgraph-io/badger/v2/table"
+	"github.com/dgraph-io/ristretto/z"
 
 	"github.com/dgraph-io/badger/v2/y"
 )
@@ -170,8 +172,33 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 	if err != nil {
 		db.opt.Logger.Errorf("Unable to read: Key: %v, Version : %v, meta: %v, userMeta: %v"+
 			" Error: %v", key, item.version, item.meta, item.userMeta, err)
+		var txn *Txn
+		if db.opt.managedTxns {
+			txn = db.NewTransactionAt(math.MaxUint64, false)
+		} else {
+			txn = db.NewTransaction(false)
+		}
+		defer txn.Discard()
+
+		iopt := DefaultIteratorOptions
+		iopt.AllVersions = true
+		iopt.InternalAccess = true
+		iopt.PrefetchValues = false
+
+		it := txn.NewKeyIterator(item.Key(), iopt)
+		defer it.Close()
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			var vp valuePointer
+			if item.meta&bitValuePointer > 0 {
+				vp.Decode(item.vptr)
+			}
+			db.opt.Logger.Errorf("Key: %v, Version : %v, meta: %v, userMeta: %v valuePointer: %+v",
+				item.Key(), item.version, item.meta, item.userMeta, vp)
+		}
 	}
-	return result, cb, err
+	// Don't return error if we cannot read the value. Just log the error.
+	return result, cb, nil
 }
 
 func runCallback(cb func()) {
@@ -327,7 +354,6 @@ func (opt *IteratorOptions) pickTable(t table.TableInterface) bool {
 	// Bloom filter lookup would only work if opt.Prefix does NOT have the read
 	// timestamp as part of the key.
 	if opt.prefixIsKey && t.DoesNotHave(y.Hash(opt.Prefix)) {
-		y.NumLSMBloomHits.Add("pickTable", 1)
 		return false
 	}
 	return true
@@ -342,6 +368,8 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		return out
 	}
 	sIdx := sort.Search(len(all), func(i int) bool {
+		// table.Biggest >= opt.prefix
+		// if opt.Prefix < table.Biggest, then surely it is not in any of the preceding tables.
 		return opt.compareToPrefix(all[i].Biggest()) >= 0
 	})
 	if sIdx == len(all) {
@@ -359,11 +387,23 @@ func (opt *IteratorOptions) pickTables(all []*table.Table) []*table.Table {
 		return out
 	}
 
+	// opt.prefixIsKey == true. This code is optimizing for opt.prefixIsKey part.
 	var out []*table.Table
+	hash := y.Hash(opt.Prefix)
 	for _, t := range filtered {
-		if opt.pickTable(t) {
-			out = append(out, t)
+		// When we encounter the first table whose smallest key is higher than opt.Prefix, we can
+		// stop. This is an IMPORTANT optimization, just considering how often we call
+		// NewKeyIterator.
+		if opt.compareToPrefix(t.Smallest()) > 0 {
+			// if table.Smallest > opt.Prefix, then this and all tables after this can be ignored.
+			break
 		}
+		// opt.Prefix is actually the key. So, we can run bloom filter checks
+		// as well.
+		if t.DoesNotHave(hash) {
+			continue
+		}
+		out = append(out, t)
 	}
 	return out
 }
@@ -395,6 +435,8 @@ type Iterator struct {
 	// the iterator. It can be used, for example, to uniquely identify each of the
 	// iterators created by the stream interface
 	ThreadId int
+
+	Alloc *z.Allocator
 }
 
 // NewIterator returns a new iterator. Depending upon the options, either only keys, or both

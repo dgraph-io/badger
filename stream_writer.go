@@ -83,8 +83,8 @@ func (sw *StreamWriter) Prepare() error {
 // Write writes KVList to DB. Each KV within the list contains the stream id which StreamWriter
 // would use to demux the writes. Write is thread safe and can be called concurrently by multiple
 // goroutines.
-func (sw *StreamWriter) Write(kvs *pb.KVList) error {
-	if len(kvs.GetKv()) == 0 {
+func (sw *StreamWriter) Write(buf *z.Buffer) error {
+	if buf.LenNoPadding() == 0 {
 		return nil
 	}
 
@@ -93,10 +93,15 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 	// the valid kvs.
 	closedStreams := make(map[uint32]struct{})
 	streamReqs := make(map[uint32]*request)
-	for _, kv := range kvs.Kv {
+
+	err := buf.SliceIterate(func(s []byte) error {
+		var kv pb.KV
+		if err := kv.Unmarshal(s); err != nil {
+			return err
+		}
 		if kv.StreamDone {
 			closedStreams[kv.StreamId] = struct{}{}
-			continue
+			return nil
 		}
 
 		// Panic if some kv comes after stream has been marked as closed.
@@ -129,7 +134,12 @@ func (sw *StreamWriter) Write(kvs *pb.KVList) error {
 			streamReqs[kv.StreamId] = req
 		}
 		req.Entries = append(req.Entries, e)
+		return nil
+	})
+	if err != nil {
+		return err
 	}
+
 	all := make([]*request, 0, len(streamReqs))
 	for _, req := range streamReqs {
 		all = append(all, req)

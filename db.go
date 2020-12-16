@@ -481,7 +481,7 @@ func (db *DB) close() (err error) {
 	defer db.allocPool.Release()
 
 	db.opt.Debugf("Closing database")
-	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(db.lc.l0stallsMs))
+	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(atomic.LoadInt64(&db.lc.l0stallsMs)))
 
 	atomic.StoreInt32(&db.blockWrites, 1)
 
@@ -960,7 +960,6 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 	var (
 		lastKey               []byte
 		firstKeyHasDiscardSet bool
-		vp                    valuePointer
 	)
 	count := 0
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
@@ -968,6 +967,7 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 			continue
 		}
 		vs := iter.Value()
+		var vp valuePointer
 		if vs.Meta&bitValuePointer > 0 {
 			vp.Decode(vs.Value)
 		}
@@ -1800,8 +1800,8 @@ func (db *DB) StreamDB(outOptions Options) error {
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = fmt.Sprintf("Streaming DB to new DB at %s", outDir)
 
-	stream.Send = func(kvs *pb.KVList) error {
-		return writer.Write(kvs)
+	stream.Send = func(buf *z.Buffer) error {
+		return writer.Write(buf)
 	}
 	if err := stream.Orchestrate(context.Background()); err != nil {
 		return y.Wrapf(err, "cannot stream DB to out DB at %s", outDir)
