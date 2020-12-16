@@ -130,42 +130,37 @@ func init() {
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
-
-	// db.SetDiscardTs(num + 100)
 	value := make([]byte, valSz)
 	y.Check2(rand.Read(value))
+
 	es := uint64(keySz + valSz) // entry size is keySz + valSz
 	batch := db.NewManagedWriteBatch()
 
-	timer := time.NewTicker(time.Second * 10)
-	defer timer.Stop()
-	for i := uint64(1); i <= 9; i++ {
-		k := make([]byte, keySz+1)
-		y.Check2(rand.Read(k))
-		key := append([]byte(fmt.Sprintf("%d", i)), k...)
+	ttlPeriod, errParse := time.ParseDuration(ttlDuration)
+	y.Check(errParse)
+
+	for i := uint64(1); i <= num; i++ {
+		key := make([]byte, keySz)
+		y.Check2(rand.Read(key))
 
 		vsz := rand.Intn(valSz) + 1
-		for j := uint64(1); j <= num; j++ {
-			e := badger.NewEntry(key, value[:vsz])
-			if err := batch.SetEntryAt(e, uint64(j)); err != nil {
-				panic(err)
-			}
-			atomic.AddUint64(&entriesWritten, 1)
-			atomic.AddUint64(&sizeWritten, es)
-			if j%100000 == 0 {
-				fmt.Printf("i: %d j: %d\n", i, j)
-			}
-		}
 		e := badger.NewEntry(key, value[:vsz])
-		if err := batch.SetEntryAt(e.WithDiscard(), num+1); err != nil {
+
+		if ttlPeriod != 0 {
+			e.WithTTL(ttlPeriod)
+		}
+		err := batch.SetEntryAt(e, 1)
+		for err == badger.ErrBlockedWrites {
+			time.Sleep(time.Second)
+			batch = db.NewManagedWriteBatch()
+			err = batch.SetEntryAt(e, 1)
+		}
+		if err != nil {
 			panic(err)
 		}
-		select {
-		case <-timer.C:
-			fmt.Printf("discardTs i = %+v\n", i)
-			db.SetDiscardTs(num)
-		default:
-		}
+
+		atomic.AddUint64(&entriesWritten, 1)
+		atomic.AddUint64(&sizeWritten, es)
 	}
 	return batch.Flush()
 }
