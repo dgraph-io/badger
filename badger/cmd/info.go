@@ -31,8 +31,10 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
 	"github.com/dgraph-io/badger/v2/table"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
@@ -361,10 +363,31 @@ func printInfo(dir, valueDir string) error {
 					emptyString = " [EMPTY]"
 					numEmpty++
 				}
+
+				opts := table.Options{
+					Compression:          options.Snappy,
+					ZSTDCompressionLevel: 15,
+					BlockSize:            4 * 1024,
+					BloomFalsePositive:   0.01,
+				}
+				mf, err := z.OpenMmapFile(path.Join(dir, tableFile), os.O_RDWR|os.O_EXCL, 0)
+				y.Check(err)
+
+				tbl, err := table.OpenTable(mf, opts)
+				y.Check(err)
+				it := tbl.NewIterator(0)
+				ds := ""
+				for it.Rewind(); it.Valid(); it.Next() {
+					if it.Value().Meta&(1<<2) > 0 {
+						ds = " {DISCARD}"
+						break
+					}
+				}
+				it.Close()
 				levelSizes[level] += fileSize
 				// (Put level on every line to make easier to process with sed/perl.)
-				fmt.Printf("[%25s] %-12s %6s L%d %s\n", dur(baseTime, file.ModTime()),
-					tableFile, hbytes(fileSize), level, emptyString)
+				fmt.Printf("[%25s] %-12s %6s L%d %s %s\n", dur(baseTime, file.ModTime()),
+					tableFile, hbytes(fileSize), level, emptyString, ds)
 			} else {
 				fmt.Printf("%s [MISSING]\n", tableFile)
 				numMissing++
