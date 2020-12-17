@@ -1693,7 +1693,6 @@ func (db *DB) filterPrefixesToDrop(prefixes [][]byte) ([][]byte, error) {
 			iopts := DefaultIteratorOptions
 			iopts.Prefix = prefix
 			iopts.PrefetchValues = false
-			iopts.AllVersions = true
 			itr := txn.NewIterator(iopts)
 			defer itr.Close()
 			itr.Rewind()
