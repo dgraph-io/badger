@@ -238,6 +238,7 @@ func (itr *Iterator) seekFrom(key []byte, whence int) {
 		itr.reset()
 	case current:
 	}
+
 	idx := sort.Search(itr.t.noOfBlocks, func(idx int) bool {
 		ko := itr.t.blockOffsets()[idx]
 		return y.CompareKeys(ko.Key, key) > 0
