@@ -19,6 +19,9 @@ package badger
 import (
 	"fmt"
 	"math"
+	"math/rand"
+	"os"
+	"sort"
 	"testing"
 	"time"
 
@@ -1048,4 +1051,43 @@ func TestKeyVersions(t *testing.T) {
 			})
 		})
 	})
+}
+
+func TestTableContainsPrefix(t *testing.T) {
+	opts := table.Options{
+		BlockSize:          4 * 1024,
+		BloomFalsePositive: 0.01,
+	}
+
+	buildTable := func(keys []string) *table.Table {
+		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Uint32())
+		b := table.NewTableBuilder(opts)
+		defer b.Close()
+
+		v := []byte("value")
+		sort.Slice(keys, func(i, j int) bool {
+			return keys[i] < keys[j]
+		})
+		for _, k := range keys {
+			b.Add(y.KeyWithTs([]byte(k), 1), y.ValueStruct{Value: v}, 0)
+			b.Add(y.KeyWithTs([]byte(k), 2), y.ValueStruct{Value: v}, 0)
+		}
+		tbl, err := table.CreateTable(filename, b)
+		require.NoError(t, err)
+		return tbl
+	}
+
+	tbl := buildTable([]string{"key1", "key3", "key31", "key32", "key4"})
+	defer tbl.DecrRef()
+
+	require.True(t, containsPrefix(tbl, []byte("key")))
+	require.True(t, containsPrefix(tbl, []byte("key1")))
+	require.True(t, containsPrefix(tbl, []byte("key3")))
+	require.True(t, containsPrefix(tbl, []byte("key32")))
+	require.True(t, containsPrefix(tbl, []byte("key4")))
+
+	require.False(t, containsPrefix(tbl, []byte("key0")))
+	require.False(t, containsPrefix(tbl, []byte("key2")))
+	require.False(t, containsPrefix(tbl, []byte("key323")))
+	require.False(t, containsPrefix(tbl, []byte("key5")))
 }
