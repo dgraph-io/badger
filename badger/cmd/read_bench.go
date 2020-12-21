@@ -72,7 +72,7 @@ func init() {
 		&ro.readOnly, "read-only", true, "If true, DB will be opened in read only mode.")
 	readBenchCmd.Flags().BoolVar(
 		&ro.fullScan, "full-scan", false, "If true, full db will be scanned using iterators.")
-	readBenchCmd.Flags().Int64Var(&ro.blockCacheSize, "block-cache", 0, "Max size of block cache in MB")
+	readBenchCmd.Flags().Int64Var(&ro.blockCacheSize, "block-cache", 1024, "Max size of block cache in MB")
 	readBenchCmd.Flags().Int64Var(&ro.indexCacheSize, "index-cache", 0, "Max size of index cache in MB")
 }
 
