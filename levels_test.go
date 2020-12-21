@@ -1055,15 +1055,12 @@ func TestKeyVersions(t *testing.T) {
 
 func TestTableContainsPrefix(t *testing.T) {
 	opts := table.Options{
-		LoadingMode:        options.LoadToRAM,
 		BlockSize:          4 * 1024,
-		BloomFalsePositive: 0.001,
+		BloomFalsePositive: 0.01,
 	}
 
-	buildTable := func(keys []string) *os.File {
+	buildTable := func(keys []string) *table.Table {
 		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Uint32())
-		f, err := y.CreateSyncedFile(filename, true)
-		require.NoError(t, err)
 		b := table.NewTableBuilder(opts)
 		defer b.Close()
 
@@ -1075,16 +1072,12 @@ func TestTableContainsPrefix(t *testing.T) {
 			b.Add(y.KeyWithTs([]byte(k), 1), y.ValueStruct{Value: v}, 0)
 			b.Add(y.KeyWithTs([]byte(k), 2), y.ValueStruct{Value: v}, 0)
 		}
-		_, err = f.Write(b.Finish())
+		tbl, err := table.CreateTable(filename, b)
 		require.NoError(t, err)
-		f.Close()
-		f, _ = y.OpenSyncedFile(filename, true)
-		return f
+		return tbl
 	}
 
-	f := buildTable([]string{"key1", "key3", "key31", "key32", "key4"})
-	tbl, err := table.OpenTable(f, opts)
-	require.NoError(t, err)
+	tbl := buildTable([]string{"key1", "key3", "key31", "key32", "key4"})
 	defer tbl.DecrRef()
 
 	require.True(t, containsPrefix(tbl, []byte("key")))
