@@ -52,7 +52,7 @@ func init() {
 			"Values <= 0 will be considered to have the max number of versions.")
 	flattenCmd.Flags().StringVar(&fo.keyPath, "encryption-key-file", "",
 		"Path of the encryption key file.")
-	streamCmd.Flags().Uint32VarP(&fo.compressionType, "compression", "", 1,
+	flattenCmd.Flags().Uint32VarP(&fo.compressionType, "compression", "", 1,
 		"Option to configure the compression type in output DB. "+
 			"0 to disable, 1 for Snappy, and 2 for ZSTD.")
 }
