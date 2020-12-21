@@ -104,7 +104,7 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&wo.showLogs, "verbose", "v", false, "Show Badger logs.")
 	writeBenchCmd.Flags().IntVarP(&wo.valueThreshold, "value-th", "t", 1<<10, "Value threshold")
 	writeBenchCmd.Flags().IntVarP(&wo.numVersions, "num-version", "n", 1, "Number of versions to keep")
-	writeBenchCmd.Flags().Int64Var(&wo.blockCacheSize, "block-cache-mb", 1024,
+	writeBenchCmd.Flags().Int64Var(&wo.blockCacheSize, "block-cache-mb", 256,
 		"Size of block cache in MB")
 	writeBenchCmd.Flags().Int64Var(&wo.indexCacheSize, "index-cache-mb", 0,
 		"Size of index cache in MB.")
