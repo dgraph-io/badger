@@ -1088,5 +1088,6 @@ func TestTableContainsPrefix(t *testing.T) {
 
 	require.False(t, containsPrefix(tbl, []byte("key0")))
 	require.False(t, containsPrefix(tbl, []byte("key2")))
+	require.False(t, containsPrefix(tbl, []byte("key323")))
 	require.False(t, containsPrefix(tbl, []byte("key5")))
 }
