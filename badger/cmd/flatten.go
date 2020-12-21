@@ -33,33 +33,36 @@ This command would compact all the LSM tables into one level.
 	RunE: flatten,
 }
 
-var keyPath string
-var numWorkers int
+var fo = struct {
+	keyPath     string
+	numWorkers  int
+	numVersions int
+}{}
 
 func init() {
 	RootCmd.AddCommand(flattenCmd)
-	flattenCmd.Flags().IntVarP(&numWorkers, "num-workers", "w", 1,
+	flattenCmd.Flags().IntVarP(&fo.numWorkers, "num-workers", "w", 1,
 		"Number of concurrent compactors to run. More compactors would use more"+
 			" server resources to potentially achieve faster compactions.")
-	flattenCmd.Flags().IntVarP(&numVersions, "num_versions", "", 1,
+	flattenCmd.Flags().IntVarP(&fo.numVersions, "num_versions", "", 0,
 		"Option to configure the maximum number of versions per key. "+
 			"Values <= 0 will be considered to have the max number of versions.")
-	flattenCmd.Flags().StringVar(&keyPath, "encryption-key-file", "",
+	flattenCmd.Flags().StringVar(&fo.keyPath, "encryption-key-file", "",
 		"Path of the encryption key file.")
 }
 
 func flatten(cmd *cobra.Command, args []string) error {
-	if numVersions <= 0 {
+	if fo.numVersions <= 0 {
 		// Keep all versions.
-		numVersions = math.MaxInt32
+		fo.numVersions = math.MaxInt32
 	}
-	encKey, err := getKey(keyPath)
+	encKey, err := getKey(fo.keyPath)
 	if err != nil {
 		return err
 	}
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
-		WithNumVersionsToKeep(numVersions).
+		WithNumVersionsToKeep(fo.numVersions).
 		WithNumCompactors(0).
 		WithBlockCacheSize(100 << 20).
 		WithIndexCacheSize(200 << 20).
@@ -71,5 +74,5 @@ func flatten(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	return db.Flatten(numWorkers)
+	return db.Flatten(fo.numWorkers)
 }
