@@ -21,6 +21,8 @@ import (
 	"math"
 
 	"github.com/dgraph-io/badger/v2"
+	"github.com/dgraph-io/badger/v2/options"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -34,9 +36,10 @@ This command would compact all the LSM tables into one level.
 }
 
 var fo = struct {
-	keyPath     string
-	numWorkers  int
-	numVersions int
+	keyPath         string
+	numWorkers      int
+	numVersions     int
+	compressionType uint32
 }{}
 
 func init() {
@@ -49,6 +52,9 @@ func init() {
 			"Values <= 0 will be considered to have the max number of versions.")
 	flattenCmd.Flags().StringVar(&fo.keyPath, "encryption-key-file", "",
 		"Path of the encryption key file.")
+	streamCmd.Flags().Uint32VarP(&fo.compressionType, "compression", "", 1,
+		"Option to configure the compression type in output DB. "+
+			"0 to disable, 1 for Snappy, and 2 for ZSTD.")
 }
 
 func flatten(cmd *cobra.Command, args []string) error {
@@ -60,12 +66,17 @@ func flatten(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if fo.compressionType < 0 || fo.compressionType > 2 {
+		return errors.Errorf(
+			"compression value must be one of 0 (disabled), 1 (Snappy), or 2 (ZSTD)")
+	}
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
 		WithNumVersionsToKeep(fo.numVersions).
 		WithNumCompactors(0).
 		WithBlockCacheSize(100 << 20).
 		WithIndexCacheSize(200 << 20).
+		WithCompression(options.CompressionType(fo.compressionType)).
 		WithEncryptionKey(encKey)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
 	db, err := badger.Open(opt)
