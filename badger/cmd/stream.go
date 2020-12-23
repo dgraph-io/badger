@@ -71,7 +71,6 @@ func stream(cmd *cobra.Command, args []string) error {
 	if so.numVersions <= 0 {
 		so.numVersions = math.MaxInt32
 	}
-	fmt.Printf("numVersions = %+v\n", so.numVersions)
 	encKey, err := getKey(so.keyPath)
 	if err != nil {
 		return err
