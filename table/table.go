@@ -51,7 +51,6 @@ const intSize = int(unsafe.Sizeof(int(0)))
 type Options struct {
 	// Options for Opening/Building Table.
 
-	SyncWrites bool
 	// Open tables in read only mode.
 	ReadOnly bool
 
@@ -269,10 +268,8 @@ func CreateTable(fname string, builder *Builder) (*Table, error) {
 
 	written := bd.Copy(mf.Data)
 	y.AssertTrue(written == len(mf.Data))
-	if builder.opts.SyncWrites {
-		if err := z.Msync(mf.Data); err != nil {
-			return nil, y.Wrapf(err, "while calling msync on %s", fname)
-		}
+	if err := z.Msync(mf.Data); err != nil {
+		return nil, y.Wrapf(err, "while calling msync on %s", fname)
 	}
 	return OpenTable(mf, *builder.opts)
 }
