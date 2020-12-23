@@ -38,48 +38,53 @@ This command streams the contents of this DB into another DB with the given opti
 	RunE: stream,
 }
 
-var outDir string
-var outFile string
-var compressionType uint32
+var so = struct {
+	outDir          string
+	outFile         string
+	compressionType uint32
+	numVersions     int
+	readOnly        bool
+	keyPath         string
+}{}
 
 func init() {
 	// TODO: Add more options.
 	RootCmd.AddCommand(streamCmd)
-	streamCmd.Flags().StringVarP(&outDir, "out", "o", "",
+	streamCmd.Flags().StringVarP(&so.outDir, "out", "o", "",
 		"Path to output DB. The directory should be empty.")
-	streamCmd.Flags().StringVarP(&outFile, "", "f", "",
+	streamCmd.Flags().StringVarP(&so.outFile, "", "f", "",
 		"Run a backup to this file.")
-	streamCmd.Flags().BoolVarP(&readOnly, "read_only", "", true,
+	streamCmd.Flags().BoolVarP(&so.readOnly, "read_only", "", true,
 		"Option to open input DB in read-only mode")
-	streamCmd.Flags().IntVarP(&numVersions, "num_versions", "", 0,
+	streamCmd.Flags().IntVarP(&so.numVersions, "num_versions", "", 0,
 		"Option to configure the maximum number of versions per key. "+
 			"Values <= 0 will be considered to have the max number of versions.")
-	streamCmd.Flags().Uint32VarP(&compressionType, "compression", "", 1,
+	streamCmd.Flags().Uint32VarP(&so.compressionType, "compression", "", 1,
 		"Option to configure the compression type in output DB. "+
 			"0 to disable, 1 for Snappy, and 2 for ZSTD.")
-	streamCmd.Flags().StringVarP(&keyPath, "encryption-key-file", "e", "",
+	streamCmd.Flags().StringVarP(&so.keyPath, "encryption-key-file", "e", "",
 		"Path of the encryption key file.")
 }
 
 func stream(cmd *cobra.Command, args []string) error {
 	// Options for input DB.
-	if numVersions <= 0 {
-		numVersions = math.MaxInt32
+	if so.numVersions <= 0 {
+		so.numVersions = math.MaxInt32
 	}
-	encKey, err := getKey(keyPath)
+	encKey, err := getKey(so.keyPath)
 	if err != nil {
 		return err
 	}
 	inOpt := badger.DefaultOptions(sstDir).
-		WithReadOnly(readOnly).
+		WithReadOnly(so.readOnly).
 		WithValueThreshold(1 << 10 /* 1KB */).
-		WithNumVersionsToKeep(numVersions).
+		WithNumVersionsToKeep(so.numVersions).
 		WithBlockCacheSize(100 << 20).
 		WithIndexCacheSize(200 << 20).
 		WithEncryptionKey(encKey)
 
 	// Options for output DB.
-	if compressionType < 0 || compressionType > 2 {
+	if so.compressionType < 0 || so.compressionType > 2 {
 		return errors.Errorf(
 			"compression value must be one of 0 (disabled), 1 (Snappy), or 2 (ZSTD)")
 	}
@@ -91,9 +96,9 @@ func stream(cmd *cobra.Command, args []string) error {
 
 	stream := inDB.NewStreamAt(math.MaxUint64)
 
-	if len(outDir) > 0 {
-		if _, err := os.Stat(outDir); err == nil {
-			f, err := os.Open(outDir)
+	if len(so.outDir) > 0 {
+		if _, err := os.Stat(so.outDir); err == nil {
+			f, err := os.Open(so.outDir)
 			if err != nil {
 				return err
 			}
@@ -102,22 +107,22 @@ func stream(cmd *cobra.Command, args []string) error {
 			_, err = f.Readdirnames(1)
 			if err != io.EOF {
 				return errors.Errorf(
-					"cannot run stream tool on non-empty output directory %s", outDir)
+					"cannot run stream tool on non-empty output directory %s", so.outDir)
 			}
 		}
 
 		stream.LogPrefix = "DB.Stream"
 		outOpt := inOpt.
-			WithDir(outDir).
-			WithValueDir(outDir).
-			WithNumVersionsToKeep(numVersions).
-			WithCompression(options.CompressionType(compressionType)).
+			WithDir(so.outDir).
+			WithValueDir(so.outDir).
+			WithNumVersionsToKeep(so.numVersions).
+			WithCompression(options.CompressionType(so.compressionType)).
 			WithReadOnly(false)
 		err = inDB.StreamDB(outOpt)
 
-	} else if len(outFile) > 0 {
+	} else if len(so.outFile) > 0 {
 		stream.LogPrefix = "DB.Backup"
-		f, err := os.OpenFile(outFile, os.O_RDWR|os.O_CREATE, 0666)
+		f, err := os.OpenFile(so.outFile, os.O_RDWR|os.O_CREATE, 0666)
 		y.Check(err)
 		_, err = stream.Backup(f, 0)
 	}
