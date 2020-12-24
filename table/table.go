@@ -379,8 +379,12 @@ func (t *Table) initBiggestAndSmallest() error {
 			checksumLen := int(y.BytesToU32(buf))
 			fmt.Fprintf(&debugBuf, "checksumLen: %d ", checksumLen)
 
-			// Skip reading the checksum.
+			// Read checksum.
+			checksum := &pb.Checksum{}
 			readPos -= checksumLen
+			buf = t.readNoFail(readPos, checksumLen)
+			proto.Unmarshal(buf, checksum)
+			fmt.Fprintf(&debugBuf, "checksum: %d ", checksum)
 
 			// Read index size from the footer.
 			readPos -= 4
