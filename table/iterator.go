@@ -18,7 +18,10 @@ package table
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"os"
+	"runtime/debug"
 	"sort"
 
 	"github.com/dgraph-io/badger/v2/fb"
@@ -35,6 +38,8 @@ type blockIterator struct {
 	entryOffsets []uint32
 	block        *block
 
+	tableID uint64
+	blockID int
 	// prevOverlap stores the overlap of the previous key with the base key.
 	// This avoids unnecessary copy of base key when the overlap is same for multiple keys.
 	prevOverlap uint16
@@ -83,6 +88,16 @@ func (itr *blockIterator) setIdx(i int) {
 		// EndOffset of the current entry is the start offset of the next entry.
 		endOffset = int(itr.entryOffsets[itr.idx+1])
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("==== Recovered====\n%s", string(debug.Stack()))
+			fmt.Printf("Table ID: %d\nBlock ID: %d\nEntry Idx: %d\nData len: %d\n"+
+				"StartOffset: %d\nEndOffset: %d\nEntryOffsets len: %d\nEntryOffsets: %v\n",
+				itr.tableID, itr.blockID, itr.idx, len(itr.data), startOffset, endOffset,
+				len(itr.entryOffsets), itr.entryOffsets)
+			os.Exit(1)
+		}
+	}()
 
 	entryData := itr.data[startOffset:endOffset]
 	var h header
@@ -209,6 +224,8 @@ func (itr *Iterator) seekToFirst() {
 		itr.err = err
 		return
 	}
+	itr.bi.tableID = itr.t.id
+	itr.bi.blockID = itr.bpos
 	itr.bi.setBlock(block)
 	itr.bi.seekToFirst()
 	itr.err = itr.bi.Error()
@@ -226,6 +243,8 @@ func (itr *Iterator) seekToLast() {
 		itr.err = err
 		return
 	}
+	itr.bi.tableID = itr.t.id
+	itr.bi.blockID = itr.bpos
 	itr.bi.setBlock(block)
 	itr.bi.seekToLast()
 	itr.err = itr.bi.Error()
@@ -238,6 +257,8 @@ func (itr *Iterator) seekHelper(blockIdx int, key []byte) {
 		itr.err = err
 		return
 	}
+	itr.bi.tableID = itr.t.id
+	itr.bi.blockID = itr.bpos
 	itr.bi.setBlock(block)
 	itr.bi.seek(key, origin)
 	itr.err = itr.bi.Error()
@@ -313,6 +334,8 @@ func (itr *Iterator) next() {
 			itr.err = err
 			return
 		}
+		itr.bi.tableID = itr.t.id
+		itr.bi.blockID = itr.bpos
 		itr.bi.setBlock(block)
 		itr.bi.seekToFirst()
 		itr.err = itr.bi.Error()
@@ -341,6 +364,8 @@ func (itr *Iterator) prev() {
 			itr.err = err
 			return
 		}
+		itr.bi.tableID = itr.t.id
+		itr.bi.blockID = itr.bpos
 		itr.bi.setBlock(block)
 		itr.bi.seekToLast()
 		itr.err = itr.bi.Error()
