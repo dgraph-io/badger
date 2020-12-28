@@ -1440,7 +1440,14 @@ func (vlog *valueLog) write(reqs []*request) error {
 
 	vlog.filesLock.RLock()
 	maxFid := vlog.maxFid
-	curlf := vlog.filesMap[maxFid]
+	curlf, ok := vlog.filesMap[maxFid]
+	if !ok {
+		var fids []uint32
+		for fid := range vlog.filesMap {
+			fids = append(fids, fid)
+		}
+		return errors.Errorf("Cannot find MaxFid: %d in filesMap: %+v", maxFid, fids)
+	}
 	vlog.filesLock.RUnlock()
 
 	var buf bytes.Buffer
