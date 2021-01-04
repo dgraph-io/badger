@@ -19,6 +19,7 @@ package badger
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -87,6 +88,7 @@ type Stream struct {
 	kvChan       chan *z.Buffer
 	nextStreamId uint32
 	doneMarkers  bool
+	estimatedSz  uint64
 }
 
 // SendDoneMarkers when true would send out done markers on the stream. False by default.
@@ -340,9 +342,17 @@ outer:
 				continue
 			}
 			speed := bytesSent / durSec
+			var timeInfo string
+			if st.estimatedSz > bytesSent {
+				eta := time.Duration((st.estimatedSz-bytesSent)/speed) * time.Second
+				timeInfo = fmt.Sprintf("Time elapsed: %s, Time remaining: %s",
+					y.FixedDuration(dur), y.FixedDuration(eta))
+			} else {
+				timeInfo = fmt.Sprintf("Time elapsed: %s,", y.FixedDuration(dur))
+			}
 
-			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, jemalloc: %s\n",
-				st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(bytesSent),
+			st.db.opt.Infof("%s %s, bytes sent: %s, speed: %s/sec, jemalloc: %s\n",
+				st.LogPrefix, timeInfo, humanize.IBytes(bytesSent),
 				humanize.IBytes(speed), humanize.IBytes(uint64(z.NumAllocBytes())))
 
 		case kvs, ok := <-st.kvChan:
@@ -382,6 +392,11 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	if st.KeyToList == nil {
 		st.KeyToList = st.ToList
 	}
+
+	onDiskSize, uncompressedSize := st.db.EstimateSize(st.Prefix)
+	st.estimatedSz = onDiskSize
+	st.db.opt.Infof("%s Streaming about %s of uncompressed data (%s on disk)\n",
+		st.LogPrefix, humanize.Bytes(uncompressedSize), humanize.Bytes(onDiskSize))
 
 	// Picks up ranges from Badger, and sends them to rangeCh.
 	go st.produceRanges(ctx)

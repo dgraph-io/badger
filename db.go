@@ -1300,6 +1300,19 @@ func (db *DB) Levels() []LevelInfo {
 	return db.lc.getLevelInfo()
 }
 
+// EstimateSize can be used to get rough estimate of data size for a given prefix.
+func (db *DB) EstimateSize(prefix []byte) (uint64, uint64) {
+	var onDiskSize, uncompressedSize uint64
+	tables := db.Tables()
+	for _, ti := range tables {
+		if bytes.HasPrefix(ti.Left, prefix) && bytes.HasPrefix(ti.Right, prefix) {
+			onDiskSize += uint64(ti.OnDiskSize)
+			uncompressedSize += uint64(ti.UncompressedSize)
+		}
+	}
+	return onDiskSize, uncompressedSize
+}
+
 // KeySplits can be used to get rough key ranges to divide up iteration over
 // the DB.
 func (db *DB) KeySplits(prefix []byte) []string {
