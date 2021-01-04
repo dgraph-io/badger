@@ -360,6 +360,7 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	}
 
 	sameKey := y.SameKey(key, w.lastKey)
+
 	// Same keys should go into the same SSTable.
 	if !sameKey && w.builder.ReachedCapacity() {
 		if err := w.send(false); err != nil {
@@ -372,6 +373,7 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 	if vs.Meta&bitValuePointer > 0 {
 		vp.Decode(vs.Value)
 	}
+
 	w.builder.Add(key, vs, vp.Len)
 	return nil
 }

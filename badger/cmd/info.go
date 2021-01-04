@@ -256,8 +256,9 @@ func tableInfo(dir, valueDir string, db *badger.DB) {
 	y.Check(err)
 
 	fmt.Println()
-	fmt.Println("SSTable [Li, Id, Total Keys including internal keys] " +
-		"[Compression Ratio, Uncompressed Size, Index Size, BF Size] " +
+	// Total keys includes the internal keys as well.
+	fmt.Println("SSTable [Li, Id, Total Keys] " +
+		"[Compression Ratio, StaleData Ratio, Uncompressed Size, Index Size, BF Size] " +
 		"[Left Key, Version -> Right Key, Version]")
 	totalIndex := uint64(0)
 	totalBloomFilter := uint64(0)
@@ -268,9 +269,11 @@ func tableInfo(dir, valueDir string, db *badger.DB) {
 
 		compressionRatio := float64(t.UncompressedSize) /
 			float64(getInfo(fileInfos, t.ID)-int64(t.IndexSz))
-		fmt.Printf("SSTable [L%d, %03d, %07d] [%.2f, %s, %s, %s] [%20X, v%d -> %20X, v%d]\n",
-			t.Level, t.ID, t.KeyCount, compressionRatio, hbytes(int64(t.UncompressedSize)),
-			hbytes(int64(t.IndexSz)), hbytes(int64(t.BloomFilterSize)), lk, lt, rk, rt)
+		staleDataRatio := float64(t.StaleDataSize) / float64(t.UncompressedSize)
+		fmt.Printf("SSTable [L%d, %03d, %07d] [%.2f, %.2f, %s, %s, %s] [%20X, v%d -> %20X, v%d]\n",
+			t.Level, t.ID, t.KeyCount, compressionRatio, staleDataRatio,
+			hbytes(int64(t.UncompressedSize)), hbytes(int64(t.IndexSz)),
+			hbytes(int64(t.BloomFilterSize)), lk, lt, rk, rt)
 		totalIndex += uint64(t.IndexSz)
 		totalBloomFilter += uint64(t.BloomFilterSize)
 		totalCompressionRatio += compressionRatio

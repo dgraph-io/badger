@@ -89,6 +89,7 @@ type Builder struct {
 	opts          *Options
 	maxVersion    uint64
 	onDiskSize    uint32
+	staleDataSize int
 
 	// Used to concurrently compress/encrypt blocks.
 	wg        sync.WaitGroup
@@ -317,9 +318,26 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 	return estimatedSize > uint32(b.opts.BlockSize)
 }
 
+// AddStaleKey is same is Add function but it also increments the internal
+// staleDataSize counter. This value will be used to prioritize this table for
+// compaction.
+func (b *Builder) AddStaleKey(key []byte, v y.ValueStruct, valueLen uint32) {
+	// Rough estimate based on how much space it will occupy in the SST.
+	b.staleDataSize += len(key) + len(v.Value) + 4 /* entry offset */ + 4 /* header size */
+	b.addInternal(key, v, valueLen, true)
+}
+
 // Add adds a key-value pair to the block.
 func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
+	b.addInternal(key, value, valueLen, false)
+}
+
+func (b *Builder) addInternal(key []byte, value y.ValueStruct, valueLen uint32, isStale bool) {
 	if b.shouldFinishBlock(key, value) {
+		if isStale {
+			// This key will be added to tableIndex and it is stale.
+			b.staleDataSize += len(key) + 4 /* len */ + 4 /* offset */
+		}
 		b.finishBlock()
 		// Create a new block and start writing.
 		b.curBlock = &bblock{
@@ -530,6 +548,7 @@ func (b *Builder) buildIndex(bloom []byte) ([]byte, uint32) {
 	fb.TableIndexAddUncompressedSize(builder, b.uncompressedSize)
 	fb.TableIndexAddKeyCount(builder, uint32(len(b.keyHashes)))
 	fb.TableIndexAddOnDiskSize(builder, b.onDiskSize)
+	fb.TableIndexAddStaleDataSize(builder, uint32(b.staleDataSize))
 	builder.Finish(fb.TableIndexEnd(builder))
 
 	buf := builder.FinishedBytes()

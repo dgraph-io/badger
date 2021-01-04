@@ -1053,6 +1053,79 @@ func TestKeyVersions(t *testing.T) {
 	})
 }
 
+func TestSameLevel(t *testing.T) {
+	opt := DefaultOptions("")
+	opt.NumCompactors = 0
+	opt.NumVersionsToKeep = math.MaxInt32
+	opt.managedTxns = true
+	opt.LmaxCompaction = true
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		l6 := []keyValVersion{
+			{"A", "bar", 4, bitDiscardEarlierVersions}, {"A", "bar", 3, 0},
+			{"A", "bar", 2, 0}, {"Afoo", "baz", 2, 0},
+		}
+		l61 := []keyValVersion{
+			{"B", "bar", 4, bitDiscardEarlierVersions}, {"B", "bar", 3, 0},
+			{"B", "bar", 2, 0}, {"Bfoo", "baz", 2, 0},
+		}
+		l62 := []keyValVersion{
+			{"C", "bar", 4, bitDiscardEarlierVersions}, {"C", "bar", 3, 0},
+			{"C", "bar", 2, 0}, {"Cfoo", "baz", 2, 0},
+		}
+		createAndOpen(db, l6, 6)
+		createAndOpen(db, l61, 6)
+		createAndOpen(db, l62, 6)
+		require.NoError(t, db.lc.validate())
+
+		getAllAndCheck(t, db, []keyValVersion{
+			{"A", "bar", 4, bitDiscardEarlierVersions}, {"A", "bar", 3, 0},
+			{"A", "bar", 2, 0}, {"Afoo", "baz", 2, 0},
+			{"B", "bar", 4, bitDiscardEarlierVersions}, {"B", "bar", 3, 0},
+			{"B", "bar", 2, 0}, {"Bfoo", "baz", 2, 0},
+			{"C", "bar", 4, bitDiscardEarlierVersions}, {"C", "bar", 3, 0},
+			{"C", "bar", 2, 0}, {"Cfoo", "baz", 2, 0},
+		})
+
+		cdef := compactDef{
+			thisLevel: db.lc.levels[6],
+			nextLevel: db.lc.levels[6],
+			top:       []*table.Table{db.lc.levels[6].tables[0]},
+			bot:       db.lc.levels[6].tables[1:],
+			t:         db.lc.levelTargets(),
+		}
+		cdef.t.baseLevel = 1
+		// Set dicardTs to 3. foo2 and foo1 should be dropped.
+		db.SetDiscardTs(3)
+		require.NoError(t, db.lc.runCompactDef(-1, 6, cdef))
+		getAllAndCheck(t, db, []keyValVersion{
+			{"A", "bar", 4, bitDiscardEarlierVersions}, {"A", "bar", 3, 0},
+			{"A", "bar", 2, 0}, {"Afoo", "baz", 2, 0},
+			{"B", "bar", 4, bitDiscardEarlierVersions}, {"B", "bar", 3, 0},
+			{"B", "bar", 2, 0}, {"Bfoo", "baz", 2, 0},
+			{"C", "bar", 4, bitDiscardEarlierVersions}, {"C", "bar", 3, 0},
+			{"C", "bar", 2, 0}, {"Cfoo", "baz", 2, 0},
+		})
+
+		require.NoError(t, db.lc.validate())
+		// Set dicardTs to 7.
+		db.SetDiscardTs(7)
+		cdef = compactDef{
+			thisLevel: db.lc.levels[6],
+			nextLevel: db.lc.levels[6],
+			top:       []*table.Table{db.lc.levels[6].tables[0]},
+			bot:       db.lc.levels[6].tables[1:],
+			t:         db.lc.levelTargets(),
+		}
+		cdef.t.baseLevel = 1
+		require.NoError(t, db.lc.runCompactDef(-1, 6, cdef))
+		getAllAndCheck(t, db, []keyValVersion{
+			{"A", "bar", 4, bitDiscardEarlierVersions}, {"Afoo", "baz", 2, 0},
+			{"B", "bar", 4, bitDiscardEarlierVersions}, {"Bfoo", "baz", 2, 0},
+			{"C", "bar", 4, bitDiscardEarlierVersions}, {"Cfoo", "baz", 2, 0}})
+		require.NoError(t, db.lc.validate())
+	})
+}
+
 func TestTableContainsPrefix(t *testing.T) {
 	opts := table.Options{
 		BlockSize:          4 * 1024,
@@ -1090,4 +1163,62 @@ func TestTableContainsPrefix(t *testing.T) {
 	require.False(t, containsPrefix(tbl, []byte("key2")))
 	require.False(t, containsPrefix(tbl, []byte("key323")))
 	require.False(t, containsPrefix(tbl, []byte("key5")))
+}
+
+func TestStaleDataCleanup(t *testing.T) {
+	opt := DefaultOptions("")
+	opt.managedTxns = true
+	opt.LmaxCompaction = true
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		opts := table.Options{
+			BlockSize:          4 * 1024,
+			BloomFalsePositive: 0.01,
+		}
+		buildStaleTable := func(prefix byte) *table.Table {
+			filename := table.NewFilename(db.lc.reserveFileID(), db.opt.Dir)
+			b := table.NewTableBuilder(opts)
+			defer b.Close()
+			key := make([]byte, 100)
+			val := make([]byte, 500)
+			rand.Read(val)
+
+			copy(key, []byte{prefix})
+			count := uint64(40000)
+			for i := count; i > 0; i-- {
+				var meta byte
+				if i == 0 {
+					meta = bitDiscardEarlierVersions
+				}
+				b.AddStaleKey(y.KeyWithTs(key, i), y.ValueStruct{Meta: meta, Value: val}, 0)
+			}
+			tbl, err := table.CreateTable(filename, b)
+			require.NoError(t, err)
+			return tbl
+		}
+
+		level := 6
+		lh := db.lc.levels[level]
+		for i := byte(1); i < 5; i++ {
+			tab := buildStaleTable(i)
+			require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{
+				newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
+			}))
+			tab.CreatedAt = time.Now().Add(-10 * time.Hour)
+			// Add table to the given level.
+			lh.addTable(tab)
+		}
+		require.NoError(t, db.lc.validate())
+
+		require.NotZero(t, lh.getTotalStaleSize())
+
+		db.SetDiscardTs(1 << 30)
+		// Modify the target file size so that we can compact all tables at once.
+		tt := db.lc.levelTargets()
+		tt.fileSz[6] = 1 << 30
+		prio := compactionPriority{level: 6, t: tt}
+		require.NoError(t, db.lc.doCompact(-1, prio))
+
+		require.Zero(t, lh.getTotalStaleSize())
+
+	})
 }

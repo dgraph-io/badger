@@ -75,6 +75,7 @@ type Options struct {
 
 	NumCompactors        int
 	CompactL0OnClose     bool
+	LmaxCompaction       bool
 	ZSTDCompressionLevel int
 
 	// When set, checksum will be validated for each entry read from the value log file.

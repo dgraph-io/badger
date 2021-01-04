@@ -128,8 +128,20 @@ func (rcv *TableIndex) MutateOnDiskSize(n uint32) bool {
 	return rcv._tab.MutateUint32Slot(14, n)
 }
 
+func (rcv *TableIndex) StaleDataSize() uint32 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(16))
+	if o != 0 {
+		return rcv._tab.GetUint32(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+func (rcv *TableIndex) MutateStaleDataSize(n uint32) bool {
+	return rcv._tab.MutateUint32Slot(16, n)
+}
+
 func TableIndexStart(builder *flatbuffers.Builder) {
-	builder.StartObject(6)
+	builder.StartObject(7)
 }
 func TableIndexAddOffsets(builder *flatbuffers.Builder, offsets flatbuffers.UOffsetT) {
 	builder.PrependUOffsetTSlot(0, flatbuffers.UOffsetT(offsets), 0)
@@ -154,6 +166,9 @@ func TableIndexAddUncompressedSize(builder *flatbuffers.Builder, uncompressedSiz
 }
 func TableIndexAddOnDiskSize(builder *flatbuffers.Builder, onDiskSize uint32) {
 	builder.PrependUint32Slot(5, onDiskSize, 0)
+}
+func TableIndexAddStaleDataSize(builder *flatbuffers.Builder, staleDataSize uint32) {
+	builder.PrependUint32Slot(6, staleDataSize, 0)
 }
 func TableIndexEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT {
 	return builder.EndObject()

@@ -23,6 +23,7 @@ table TableIndex {
   key_count:uint32;
   uncompressed_size:uint32;
   on_disk_size:uint32;
+  stale_data_size:uint32;
 }
 
 table BlockOffset {
