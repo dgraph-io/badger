@@ -503,7 +503,7 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 				break
 			}
 			// Each ticker is 50ms so 50*200=10seconds.
-			if id == 2 && count >= 200 {
+			if s.kv.opt.LmaxCompaction && id == 2 && count >= 200 {
 				tryLmaxToLmaxCompaction()
 				count = 0
 			} else {

@@ -1058,6 +1058,7 @@ func TestSameLevel(t *testing.T) {
 	opt.NumCompactors = 0
 	opt.NumVersionsToKeep = math.MaxInt32
 	opt.managedTxns = true
+	opt.LmaxCompaction = true
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		l6 := []keyValVersion{
 			{"A", "bar", 4, bitDiscardEarlierVersions}, {"A", "bar", 3, 0},
@@ -1167,6 +1168,7 @@ func TestTableContainsPrefix(t *testing.T) {
 func TestStaleDataCleanup(t *testing.T) {
 	opt := DefaultOptions("")
 	opt.managedTxns = true
+	opt.LmaxCompaction = true
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		opts := table.Options{
 			BlockSize:          4 * 1024,
