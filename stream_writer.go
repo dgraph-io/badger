@@ -287,8 +287,7 @@ type sortedWriter struct {
 	streamID uint32
 	reqCh    chan *request
 	// Have separate closer for each writer, as it can be closed at any time.
-	closer             *z.Closer
-	firstKeyHasDiscard bool
+	closer *z.Closer
 }
 
 func (sw *StreamWriter) newWriter(streamID uint32) (*sortedWriter, error) {
@@ -375,15 +374,7 @@ func (w *sortedWriter) Add(key []byte, vs y.ValueStruct) error {
 		vp.Decode(vs.Value)
 	}
 
-	switch {
-	case sameKey && w.firstKeyHasDiscard:
-		w.builder.AddStaleKey(key, vs, vp.Len)
-	case isDeletedOrExpired(vs.Meta, vs.ExpiresAt):
-		w.builder.AddStaleKey(key, vs, vp.Len)
-	default:
-		w.builder.Add(key, vs, vp.Len)
-		w.firstKeyHasDiscard = vs.Meta&bitDiscardEarlierVersions > 0
-	}
+	w.builder.Add(key, vs, vp.Len)
 	return nil
 }
 

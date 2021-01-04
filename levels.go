@@ -503,7 +503,7 @@ func (s *levelsController) runCompactor(id int, lc *z.Closer) {
 				break
 			}
 			// Each ticker is 50ms so 50*200=10seconds.
-			if id == 2 && count == 200 {
+			if id == 2 && count >= 200 {
 				tryLmaxToLmaxCompaction()
 				count = 0
 			} else {
@@ -778,7 +778,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 				vp.Decode(vs.Value)
 			}
 			switch {
-			case firstKeyHasDiscardSet && y.SameKey(it.Key(), lastKey):
+			case firstKeyHasDiscardSet:
 				// This key is same as the last key which had "DiscardEarlierVersions" set. The
 				// the next compactions will drop this key if its ts >
 				// discardTs (of the next compaction).
@@ -1260,6 +1260,7 @@ func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compact
 	sortedTables := make([]*table.Table, len(tables))
 	copy(sortedTables, tables)
 	s.sortByStaleDataSize(sortedTables, cd)
+
 	if len(sortedTables) > 0 && sortedTables[0].StaleDataSize() == 0 {
 		// This is a maxLevel to maxLevel compaction and we don't have any stale data.
 		return false
@@ -1267,13 +1268,11 @@ func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compact
 	cd.bot = []*table.Table{}
 	collectBotTables := func(t *table.Table, needSz int64) {
 		totalSize := t.Size()
-		var j int
-		for ; j < len(tables); j++ {
-			// Move forward until we find the correct table.
-			if tables[j].ID() == t.ID() {
-				break
-			}
-		}
+
+		j := sort.Search(len(tables), func(i int) bool {
+			return y.CompareKeys(tables[i].Smallest(), t.Smallest()) >= 0
+		})
+		y.AssertTrue(tables[j].ID() == t.ID())
 		j++
 		// Collect tables until we reach the the required size.
 		for j < len(tables) {
@@ -1290,13 +1289,13 @@ func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compact
 	}
 	now := time.Now()
 	for _, t := range sortedTables {
-		// If the maxVersion is less than discardTs, we won't clean anything in
+		// If the maxVersion is above the discardTs, we won't clean anything in
 		// the compaction. So skip this table.
 		if t.MaxVersion() > s.kv.orc.discardAtOrBelow() {
 			continue
 		}
-		if now.Sub(t.CreatedAt) < 10*time.Second {
-			// Just created it 10s ago. Don't pick for compaction.
+		if now.Sub(t.CreatedAt) < time.Hour {
+			// Just created it an hour ago. Don't pick for compaction.
 			continue
 		}
 		// If the stale data size is less than 10 MB, it might not be worth
@@ -1438,10 +1437,6 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 	}
 	if err := thisLevel.deleteTables(cd.top); err != nil {
 		return err
-	}
-	// TODO(ibrahim): Remove this.
-	if err := s.validate(); err != nil {
-		panic(err)
 	}
 
 	// Note: For level 0, while doCompact is running, it is possible that new tables are added.

@@ -1071,15 +1071,11 @@ func TestSameLevel(t *testing.T) {
 			{"C", "bar", 4, bitDiscardEarlierVersions}, {"C", "bar", 3, 0},
 			{"C", "bar", 2, 0}, {"Cfoo", "baz", 2, 0},
 		}
-		// l6 := []keyValVersion{{"foo", "bbb", 1, 0}}
-		// createAndOpen(db, l0, 0)
 		createAndOpen(db, l6, 6)
 		createAndOpen(db, l61, 6)
 		createAndOpen(db, l62, 6)
-
 		require.NoError(t, db.lc.validate())
 
-		fmt.Println("first")
 		getAllAndCheck(t, db, []keyValVersion{
 			{"A", "bar", 4, bitDiscardEarlierVersions}, {"A", "bar", 3, 0},
 			{"A", "bar", 2, 0}, {"Afoo", "baz", 2, 0},
@@ -1166,4 +1162,58 @@ func TestTableContainsPrefix(t *testing.T) {
 	require.False(t, containsPrefix(tbl, []byte("key2")))
 	require.False(t, containsPrefix(tbl, []byte("key323")))
 	require.False(t, containsPrefix(tbl, []byte("key5")))
+}
+
+func TestStaleDataCleanup(t *testing.T) {
+	opts := table.Options{
+		BlockSize:          4 * 1024,
+		BloomFalsePositive: 0.01,
+	}
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		buildStaleTable := func(prefix byte) *table.Table {
+			filename := table.NewFilename(db.lc.reserveFileID(), db.opt.Dir)
+			b := table.NewTableBuilder(opts)
+			defer b.Close()
+			key := make([]byte, 10)
+			val := make([]byte, 100)
+			rand.Read(val)
+
+			copy(key, []byte{prefix})
+			count := uint64(40000)
+			for i := count; i > 0; i-- {
+				var meta byte
+				if i == 0 {
+					meta = bitDiscardEarlierVersions
+				}
+				b.AddStaleKey(y.KeyWithTs(key, i), y.ValueStruct{Meta: meta, Value: val}, 0)
+			}
+			tbl, err := table.CreateTable(filename, b)
+			require.NoError(t, err)
+			return tbl
+		}
+
+		level := 6
+		lh := db.lc.levels[level]
+		for i := byte(1); i < 5; i++ {
+			tab := buildStaleTable(i)
+			require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{
+				newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
+			}))
+			tab.CreatedAt = time.Now().Add(-10 * time.Minute)
+			// Add table to the given level.
+			lh.addTable(tab)
+		}
+		require.NoError(t, db.lc.validate())
+
+		require.NotZero(t, lh.getTotalStaleSize())
+
+		// Modify the target file size so that we can compact all tables at once.
+		tt := db.lc.levelTargets()
+		tt.fileSz[6] = 1 << 30
+		prio := compactionPriority{level: 6, t: tt}
+		require.NoError(t, db.lc.doCompact(-1, prio))
+
+		require.Zero(t, lh.getTotalStaleSize())
+
+	})
 }

@@ -957,10 +957,6 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 	iter := ft.mt.sl.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder(bopts)
-	var (
-		lastKey               []byte
-		firstKeyHasDiscardSet bool
-	)
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 		if len(ft.dropPrefixes) > 0 && hasAnyPrefixes(iter.Key(), ft.dropPrefixes) {
 			continue
@@ -970,18 +966,7 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 		if vs.Meta&bitValuePointer > 0 {
 			vp.Decode(vs.Value)
 		}
-		switch {
-		case firstKeyHasDiscardSet && y.SameKey(lastKey, iter.Key()):
-			b.AddStaleKey(iter.Key(), iter.Value(), vp.Len)
-		case isDeletedOrExpired(vs.Meta, vs.ExpiresAt):
-			b.AddStaleKey(iter.Key(), iter.Value(), vp.Len)
-		default:
-			b.Add(iter.Key(), iter.Value(), vp.Len)
-			if !y.SameKey(lastKey, iter.Key()) {
-				firstKeyHasDiscardSet = vs.Meta&bitDiscardEarlierVersions > 0
-			}
-		}
-		lastKey = iter.Key()
+		b.Add(iter.Key(), iter.Value(), vp.Len)
 	}
 	return b
 }
