@@ -54,6 +54,9 @@ type Stream struct {
 	// be used to help differentiate them from other activities. Default is "Badger.Stream".
 	LogPrefix string
 
+	// Set this value to overwrite the default logger.
+	Logger Logger
+
 	// ChooseKey is invoked each time a new key is encountered. Note that this is not called
 	// on every version of the value, only the first encountered version (i.e. the highest version
 	// of the value a key has). ChooseKey can be left nil to select all keys.
@@ -236,7 +239,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			itr.Alloc.Reset()
 			list, err := st.KeyToList(item.KeyCopy(nil), itr)
 			if err != nil {
-				st.db.opt.Warningf("While reading key: %x, got error: %v", item.Key(), err)
+				st.Logger.Warningf("While reading key: %x, got error: %v", item.Key(), err)
 				continue
 			}
 			if list == nil || len(list.Kv) == 0 {
@@ -293,9 +296,9 @@ func (st *Stream) streamKVs(ctx context.Context) error {
 			return nil
 		}
 		bytesSent += sz
-		st.db.opt.Infof("%s Sending batch of size: %s.\n", st.LogPrefix, humanize.Bytes(sz))
+		st.Logger.Infof("%s Sending batch of size: %s.\n", st.LogPrefix, humanize.Bytes(sz))
 		if err := st.Send(batch); err != nil {
-			st.db.opt.Warningf("Error while sending: %v\n", err)
+			st.Logger.Warningf("Error while sending: %v\n", err)
 			return err
 		}
 		return nil
@@ -341,7 +344,7 @@ outer:
 			}
 			speed := bytesSent / durSec
 
-			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, jemalloc: %s\n",
+			st.Logger.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, jemalloc: %s\n",
 				st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(bytesSent),
 				humanize.IBytes(speed), humanize.IBytes(uint64(z.NumAllocBytes())))
 
@@ -359,7 +362,7 @@ outer:
 		}
 	}
 
-	st.db.opt.Infof("%s Sent data of size %s\n", st.LogPrefix, humanize.IBytes(bytesSent))
+	st.Logger.Infof("%s Sent data of size %s\n", st.LogPrefix, humanize.IBytes(bytesSent))
 	return nil
 }
 
@@ -438,6 +441,7 @@ func (db *DB) newStream() *Stream {
 		db:        db,
 		NumGo:     8,
 		LogPrefix: "Badger.Stream",
+		Logger:    db.opt.Logger,
 	}
 }
 
