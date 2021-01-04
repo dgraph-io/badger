@@ -1199,7 +1199,7 @@ func TestStaleDataCleanup(t *testing.T) {
 			require.NoError(t, db.manifest.addChanges([]*pb.ManifestChange{
 				newCreateChange(tab.ID(), level, 0, tab.CompressionType()),
 			}))
-			tab.CreatedAt = time.Now().Add(-10 * time.Minute)
+			tab.CreatedAt = time.Now().Add(-10 * time.Hour)
 			// Add table to the given level.
 			lh.addTable(tab)
 		}
