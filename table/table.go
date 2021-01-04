@@ -25,7 +25,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -347,12 +346,10 @@ func (t *Table) initBiggestAndSmallest() error {
 	// This defer will help gathering debugging info incase initIndex crashes.
 	defer func() {
 		if r := recover(); r != nil {
-			debug.PrintStack()
 			// Use defer for printing info because there may be an intermediate panic.
 			var debugBuf bytes.Buffer
 			defer func() {
-				fmt.Printf("%s\n== Recovered ==\n", debugBuf.String())
-				t.initIndex()
+				panic(fmt.Sprintf("%s\n== Recovered ==\n", debugBuf.String()))
 			}()
 
 			// Get the count of null bytes at the end of file. This is to make sure if there was an
