@@ -352,7 +352,7 @@ func (t *Table) initBiggestAndSmallest() error {
 			var debugBuf bytes.Buffer
 			defer func() {
 				fmt.Printf("%s\n== Recovered ==\n", debugBuf.String())
-				os.Exit(1)
+				t.initIndex()
 			}()
 
 			// Get the count of null bytes at the end of file. This is to make sure if there was an
@@ -369,9 +369,7 @@ func (t *Table) initBiggestAndSmallest() error {
 			fmt.Fprintf(&debugBuf, "File Info: [ID: %d, Size: %d, Zeros: %d]\n",
 				t.id, t.tableSize, count)
 
-			if t.shouldDecrypt() {
-				fmt.Fprintf(&debugBuf, "dataKey: %+v ", t.opt.DataKey)
-			}
+			fmt.Fprintf(&debugBuf, "isEnrypted: %v ", t.shouldDecrypt())
 
 			readPos := t.tableSize
 
@@ -386,7 +384,7 @@ func (t *Table) initBiggestAndSmallest() error {
 			readPos -= checksumLen
 			buf = t.readNoFail(readPos, checksumLen)
 			proto.Unmarshal(buf, checksum)
-			fmt.Fprintf(&debugBuf, "checksum: %d ", checksum)
+			fmt.Fprintf(&debugBuf, "checksum: %+v ", checksum)
 
 			// Read index size from the footer.
 			readPos -= 4
