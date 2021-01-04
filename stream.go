@@ -19,7 +19,6 @@ package badger
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -88,6 +87,7 @@ type Stream struct {
 	kvChan       chan *z.Buffer
 	nextStreamId uint32
 	doneMarkers  bool
+	scanned      uint64 // used to estimate the ETA for data scan.
 }
 
 // SendDoneMarkers when true would send out done markers on the stream. False by default.
@@ -218,6 +218,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		for itr.Seek(kr.left); itr.Valid(); {
 			// it.Valid would only return true for keys with the provided Prefix in iterOpts.
 			item := itr.Item()
+			atomic.AddUint64(&st.scanned, uint64(len(item.key)+len(item.vptr)+len(item.val)))
 			if bytes.Equal(item.Key(), prevKey) {
 				itr.Next()
 				continue
@@ -345,16 +346,13 @@ outer:
 				continue
 			}
 			speed := bytesSent / durSec
-			var timeInfo string
-			if uncompressedSize > bytesSent {
-				eta := time.Duration((uncompressedSize-bytesSent)/speed) * time.Second
-				timeInfo = fmt.Sprintf("Time elapsed: %s, Time remaining: %s",
-					y.FixedDuration(dur), y.FixedDuration(eta))
-			} else {
-				timeInfo = fmt.Sprintf("Time elapsed: %s,", y.FixedDuration(dur))
+			scanned := atomic.LoadUint64(&st.scanned)
+			if scanned > uncompressedSize {
+				scanned = uncompressedSize
 			}
-			st.db.opt.Infof("%s %s, bytes sent: %s, speed: %s/sec, jemalloc: %s\n",
-				st.LogPrefix, timeInfo, humanize.IBytes(bytesSent),
+			st.db.opt.Infof("%s Time elapsed: %s, scanned: ~%s/%s, bytes sent: %s, speed: %s/sec,"+
+				"jemalloc: %s\n", st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(scanned),
+				humanize.IBytes(uncompressedSize), humanize.IBytes(bytesSent),
 				humanize.IBytes(speed), humanize.IBytes(uint64(z.NumAllocBytes())))
 
 		case kvs, ok := <-st.kvChan:
