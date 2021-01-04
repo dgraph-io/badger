@@ -1165,17 +1165,19 @@ func TestTableContainsPrefix(t *testing.T) {
 }
 
 func TestStaleDataCleanup(t *testing.T) {
-	opts := table.Options{
-		BlockSize:          4 * 1024,
-		BloomFalsePositive: 0.01,
-	}
-	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+	opt := DefaultOptions("")
+	opt.managedTxns = true
+	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
+		opts := table.Options{
+			BlockSize:          4 * 1024,
+			BloomFalsePositive: 0.01,
+		}
 		buildStaleTable := func(prefix byte) *table.Table {
 			filename := table.NewFilename(db.lc.reserveFileID(), db.opt.Dir)
 			b := table.NewTableBuilder(opts)
 			defer b.Close()
-			key := make([]byte, 10)
-			val := make([]byte, 100)
+			key := make([]byte, 100)
+			val := make([]byte, 500)
 			rand.Read(val)
 
 			copy(key, []byte{prefix})
@@ -1207,6 +1209,7 @@ func TestStaleDataCleanup(t *testing.T) {
 
 		require.NotZero(t, lh.getTotalStaleSize())
 
+		db.SetDiscardTs(1 << 30)
 		// Modify the target file size so that we can compact all tables at once.
 		tt := db.lc.levelTargets()
 		tt.fileSz[6] = 1 << 30
