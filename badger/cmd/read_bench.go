@@ -47,14 +47,15 @@ var (
 	entriesRead uint64    // will store entries read till now
 	startTime   time.Time // start time of read benchmarking
 
-	blockCacheSize int64
-	indexCacheSize int64
+	ro = struct {
+		blockCacheSize int64
+		indexCacheSize int64
 
-	sampleSize  int
-	loadingMode string
-	keysOnly    bool
-	readOnly    bool
-	fullScan    bool
+		sampleSize int
+		keysOnly   bool
+		readOnly   bool
+		fullScan   bool
+	}{}
 )
 
 func init() {
@@ -64,18 +65,15 @@ func init() {
 	readBenchCmd.Flags().StringVarP(
 		&duration, "duration", "d", "1m", "How long to run the benchmark.")
 	readBenchCmd.Flags().IntVar(
-		&sampleSize, "sample-size", 1000000, "Keys sample size to be used for random lookup.")
+		&ro.sampleSize, "sample-size", 1000000, "Keys sample size to be used for random lookup.")
 	readBenchCmd.Flags().BoolVar(
-		&keysOnly, "keys-only", false, "If false, values will also be read.")
+		&ro.keysOnly, "keys-only", false, "If false, values will also be read.")
 	readBenchCmd.Flags().BoolVar(
-		&readOnly, "read-only", true, "If true, DB will be opened in read only mode.")
-	readBenchCmd.Flags().StringVar(
-		&loadingMode, "loading-mode", "mmap", "Mode for accessing SSTables and value log files. "+
-			"Valid loading modes are fileio and mmap.")
+		&ro.readOnly, "read-only", true, "If true, DB will be opened in read only mode.")
 	readBenchCmd.Flags().BoolVar(
-		&fullScan, "full-scan", false, "If true, full db will be scanned using iterators.")
-	readBenchCmd.Flags().Int64Var(&blockCacheSize, "block-cache", 0, "Max size of block cache in MB")
-	readBenchCmd.Flags().Int64Var(&indexCacheSize, "index-cache", 0, "Max size of index cache in MB")
+		&ro.fullScan, "full-scan", false, "If true, full db will be scanned using iterators.")
+	readBenchCmd.Flags().Int64Var(&ro.blockCacheSize, "block-cache", 256, "Max size of block cache in MB")
+	readBenchCmd.Flags().Int64Var(&ro.indexCacheSize, "index-cache", 0, "Max size of index cache in MB")
 }
 
 // Scan the whole database using the iterators
@@ -108,9 +106,9 @@ func readBench(cmd *cobra.Command, args []string) error {
 	y.AssertTrue(numGoroutines > 0)
 	opt := badger.DefaultOptions(sstDir).
 		WithValueDir(vlogDir).
-		WithReadOnly(readOnly).
-		WithBlockCacheSize(blockCacheSize << 20).
-		WithIndexCacheSize(indexCacheSize << 20)
+		WithReadOnly(ro.readOnly).
+		WithBlockCacheSize(ro.blockCacheSize << 20).
+		WithIndexCacheSize(ro.indexCacheSize << 20)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
 	db, err := badger.OpenManaged(opt)
 	if err != nil {
@@ -123,7 +121,7 @@ func readBench(cmd *cobra.Command, args []string) error {
 	fmt.Println("*********************************************************")
 
 	// if fullScan is true then do a complete scan of the db and return
-	if fullScan {
+	if ro.fullScan {
 		fullScanDB(db)
 		return nil
 	}
@@ -210,7 +208,7 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream.Send = func(buf *z.Buffer) error {
-		if count >= sampleSize {
+		if count >= ro.sampleSize {
 			return nil
 		}
 		err := buf.SliceIterate(func(s []byte) error {
@@ -220,7 +218,7 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 			}
 			keys = append(keys, kv.Key)
 			count++
-			if count >= sampleSize {
+			if count >= ro.sampleSize {
 				cancel()
 				return errStop
 			}

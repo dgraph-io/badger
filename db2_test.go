@@ -739,6 +739,30 @@ func TestWindowsDataLoss(t *testing.T) {
 	require.ElementsMatch(t, keyList, result)
 }
 
+func TestDropPrefixWithNoData(t *testing.T) {
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		val := []byte("value")
+		require.NoError(t, db.Update(func(txn *Txn) error {
+			require.NoError(t, txn.Set([]byte("aaa"), val))
+			require.NoError(t, txn.Set([]byte("aab"), val))
+			require.NoError(t, txn.Set([]byte("aba"), val))
+			require.NoError(t, txn.Set([]byte("aca"), val))
+			return nil
+		}))
+
+		// If we drop prefix, we flush the memtables and create a new mutable memtable. Hence, the
+		// nextMemFid increases by 1. But if there does not exist any data for the prefixes, we
+		// don't do that.
+		memFid := db.nextMemFid
+		prefixes := [][]byte{[]byte("bbb")}
+		require.NoError(t, db.DropPrefix(prefixes...))
+		require.Equal(t, memFid, db.nextMemFid)
+		prefixes = [][]byte{[]byte("aba"), []byte("bbb")}
+		require.NoError(t, db.DropPrefix(prefixes...))
+		require.Equal(t, memFid+1, db.nextMemFid)
+	})
+}
+
 func TestDropAllDropPrefix(t *testing.T) {
 	key := func(i int) []byte {
 		return []byte(fmt.Sprintf("%10d", i))

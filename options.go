@@ -167,7 +167,6 @@ func buildTableOptions(db *DB) table.Options {
 	dk, err := db.registry.LatestDataKey()
 	y.Check(err)
 	return table.Options{
-		SyncWrites:           opt.SyncWrites,
 		ReadOnly:             opt.ReadOnly,
 		TableSize:            uint64(opt.BaseTableSize),
 		BlockSize:            opt.BlockSize,
