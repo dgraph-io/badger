@@ -119,7 +119,7 @@ func Hash(b []byte) uint32 {
 		seed = 0xbc9f1d34
 		m    = 0xc6a4a793
 	)
-	h := uint32(seed) ^ uint32(len(b)*m)
+	h := uint32(seed) ^ uint32(len(b))*m
 	for ; len(b) >= 4; b = b[4:] {
 		h += uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
 		h *= m
