@@ -341,6 +341,60 @@ func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
 }
 
 func (t *Table) initBiggestAndSmallest() error {
+	// This defer will help gathering debugging info incase initIndex crashes.
+	defer func() {
+		if r := recover(); r != nil {
+			// Use defer for printing info because there may be an intermediate panic.
+			var debugBuf bytes.Buffer
+			defer func() {
+				panic(fmt.Sprintf("%s\n== Recovered ==\n", debugBuf.String()))
+			}()
+
+			// Get the count of null bytes at the end of file. This is to make sure if there was an
+			// issue with mmap sync or file copy.
+			count := 0
+			for i := len(t.Data) - 1; i >= 0; i-- {
+				if t.Data[i] != 0 {
+					break
+				}
+				count++
+			}
+
+			fmt.Fprintf(&debugBuf, "\n== Recovering from initIndex crash ==\n")
+			fmt.Fprintf(&debugBuf, "File Info: [ID: %d, Size: %d, Zeros: %d]\n",
+				t.id, t.tableSize, count)
+
+			fmt.Fprintf(&debugBuf, "isEnrypted: %v ", t.shouldDecrypt())
+
+			readPos := t.tableSize
+
+			// Read checksum size.
+			readPos -= 4
+			buf := t.readNoFail(readPos, 4)
+			checksumLen := int(y.BytesToU32(buf))
+			fmt.Fprintf(&debugBuf, "checksumLen: %d ", checksumLen)
+
+			// Read checksum.
+			checksum := &pb.Checksum{}
+			readPos -= checksumLen
+			buf = t.readNoFail(readPos, checksumLen)
+			proto.Unmarshal(buf, checksum)
+			fmt.Fprintf(&debugBuf, "checksum: %+v ", checksum)
+
+			// Read index size from the footer.
+			readPos -= 4
+			buf = t.readNoFail(readPos, 4)
+			indexLen := int(y.BytesToU32(buf))
+			fmt.Fprintf(&debugBuf, "indexLen: %d ", indexLen)
+
+			// Read index.
+			readPos -= t.indexLen
+			t.indexStart = readPos
+			indexData := t.readNoFail(readPos, t.indexLen)
+			fmt.Fprintf(&debugBuf, "index: %v ", indexData)
+		}
+	}()
+
 	var err error
 	var ko *fb.BlockOffset
 	if ko, err = t.initIndex(); err != nil {
