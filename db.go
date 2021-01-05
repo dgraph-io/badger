@@ -153,7 +153,7 @@ func checkAndSetOptions(opt *Options) error {
 }
 
 // Open returns a new DB object.
-func Open(opt Options) (*DB, error) {
+func fOpen(opt Options) (*DB, error) {
 	if err := checkAndSetOptions(&opt); err != nil {
 		return nil, err
 	}
@@ -798,7 +798,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	}
 	var count, size int64
 	for _, e := range entries {
-		size += int64(e.estimateSize(db.opt.ValueThreshold))
+		size += e.estimateSize(db.opt.ValueThreshold)
 		count++
 	}
 	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {

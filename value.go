@@ -233,7 +233,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			ne.ExpiresAt = e.ExpiresAt
 			ne.Key = append([]byte{}, e.Key...)
 			ne.Value = append([]byte{}, e.Value...)
-			es := int64(ne.estimateSize(vlog.opt.ValueThreshold))
+			es := ne.estimateSize(vlog.opt.ValueThreshold)
 			// Consider size of value as well while considering the total size
 			// of the batch. There have been reports of high memory usage in
 			// rewrite because we don't consider the value size. See #1292.
@@ -438,25 +438,6 @@ func (vlog *valueLog) dropAll() (int, error) {
 	return count, nil
 }
 
-type vLogThreshold struct {
-	sync.RWMutex
-	// Metrics contains a running log of statistics like amount of data stored etc.
-	vlMetrics      *z.HistogramData
-	valueThreshold int
-}
-
-func (v *vLogThreshold) update(val int) {
-	v.Lock()
-	defer v.Unlock()
-	v.valueThreshold = val
-}
-
-func (v *vLogThreshold) threshold() int {
-	v.RLock()
-	defer v.RUnlock()
-	return v.valueThreshold
-}
-
 type valueLog struct {
 	dirPath string
 
@@ -474,13 +455,12 @@ type valueLog struct {
 	opt               Options
 
 	garbageCh    chan struct{}
-	valueCh      chan int64
+	valueCh      chan *request
 	vCloser      *z.Closer
 	discardStats *discardStats
 
 	// Metrics contains a running log of statistics like amount of data stored etc.
 	vlMetrics      *z.HistogramData
-	valueThreshold int
 }
 
 func vlogFilePath(dirPath string, fid uint32) string {
@@ -488,7 +468,7 @@ func vlogFilePath(dirPath string, fid uint32) string {
 }
 
 func (vlog *valueLog) skipVlog(e *Entry) bool {
-	return len(e.Value) < vlog.valueThreshold
+	return int64(len(e.Value)) < vlog.opt.ValueThreshold
 }
 
 func (vlog *valueLog) fpath(fid uint32) string {
@@ -575,22 +555,28 @@ func (vlog *valueLog) init(db *DB) {
 		return
 	}
 	vlog.dirPath = vlog.opt.ValueDir
-	vlog.valueThreshold = db.opt.ValueThreshold
 
 	if db.opt.DynamicValueThreshold {
-		vlog.valueCh = make(chan int64, 1000)
+		vlog.valueCh = make(chan *request, 1000)
 		// setting histogram bound between vlogMinBound-vlogMaxBound with default 1KB-1MB
 		// this will give histogram range between 1kb-1mb
 		// each bucket would be of size vlogBoundStep default 1kb
-		size := int(math.Ceil((db.opt.ValueMaxBound - db.opt.ValueMinBound) / db.opt.
-			ValueBoundStep))
+		mxbd := math.Max(maxValueThreshold, float64(vlog.opt.maxBatchSize))
+		mnbd := float64(vlog.opt.ValueThreshold)
+		size := 1000.0
+		y.AssertTruef(mxbd > mnbd && mxbd - mnbd > size,
+			"maximum threshold bound is less than the min threshold or diff is less than 1000")
+		bdstp := (mxbd - mnbd) / size
 		bounds := make([]float64, size)
 		for i := range bounds {
 			if i == 0 {
-				bounds[0] = db.opt.ValueMinBound
+				bounds[0] = mnbd
 				continue
 			}
-			bounds[i] = bounds[i-1] + db.opt.ValueBoundStep
+			if i == int(size - 1) {
+				bounds[i] = mxbd
+			}
+			bounds[i] = bounds[i-1] + bdstp
 		}
 		vlog.vlMetrics = z.NewHistogramData(bounds)
 		vlog.vCloser = z.NewCloser(1)
@@ -599,14 +585,16 @@ func (vlog *valueLog) init(db *DB) {
 			for {
 				select {
 				case v := <-vlog.valueCh:
-					vlog.vlMetrics.Update(v)
+					for _, e := range v.Entries {
+						vlog.vlMetrics.Update(int64(len(e.Value)))
+					}
 					// we are making it to get 99 percentile so that only values
 					// in range of 1 percentile will make it to the value log
-					p := int(vlog.vlMetrics.Percentile(0.99))
-					if vlog.valueThreshold != p {
+					p := int64(vlog.vlMetrics.Percentile(0.99))
+					if vlog.opt.ValueThreshold != p {
 						vlog.opt.Infof("updating value threshold from: %d to: %d",
-							vlog.valueThreshold, p)
-						vlog.valueThreshold = p
+							vlog.opt.ValueThreshold, p)
+						atomic.StoreInt64(&vlog.opt.ValueThreshold, p)
 					}
 				case <-vlog.vCloser.HasBeenClosed():
 					return
@@ -945,14 +933,17 @@ func (vlog *valueLog) write(reqs []*request) error {
 			written++
 			bytesWritten += buf.Len()
 
-			vlog.vlMetrics.Update(int64(len(e.Value)))
-			vlog.valueThreshold = int(math.Round(vlog.vlMetrics.Percentile(1)))
+			//vlog.valueCh <- int64(len(e.Value))
+
+			//vlog.vlMetrics.Update(int64(len(e.Value)))
+			//vlog.valueThreshold = int(math.Round(vlog.vlMetrics.Percentile(1)))
 			// No need to flush anything, we write to file directly via mmap.
 		}
 		y.NumWrites.Add(int64(written))
 		y.NumBytesWritten.Add(int64(bytesWritten))
 
 		vlog.numEntriesWritten += uint32(written)
+		vlog.valueCh <- b
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
 		if err := toDisk(); err != nil {
