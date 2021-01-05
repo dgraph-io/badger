@@ -28,6 +28,7 @@ import (
 	"github.com/dgraph-io/badger/v2/pb"
 	bpb "github.com/dgraph-io/badger/v2/pb"
 	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/ristretto/z"
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/require"
 )
@@ -51,15 +52,19 @@ type collector struct {
 	kv []*bpb.KV
 }
 
-func (c *collector) Send(list *bpb.KVList) error {
+func (c *collector) Send(buf *z.Buffer) error {
+	list, err := BufferToKVList(buf)
+	if err != nil {
+		return err
+	}
 	for _, kv := range list.Kv {
 		if kv.StreamDone == true {
-			continue
+			return nil
 		}
 		cp := proto.Clone(kv).(*bpb.KV)
 		c.kv = append(c.kv, cp)
 	}
-	return nil
+	return err
 }
 
 var ctxb = context.Background()
@@ -304,7 +309,9 @@ func TestStreamCustomKeyToList(t *testing.T) {
 		}, nil
 	}
 	res := map[string]struct{}{"p0": {}, "p1": {}, "p2": {}}
-	stream.Send = func(list *pb.KVList) error {
+	stream.Send = func(buf *z.Buffer) error {
+		list, err := BufferToKVList(buf)
+		require.NoError(t, err)
 		for _, kv := range list.Kv {
 			key := string(kv.Key)
 			if _, ok := res[key]; !ok {

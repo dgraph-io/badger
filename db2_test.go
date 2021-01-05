@@ -969,8 +969,20 @@ func TestKeyCount(t *testing.T) {
 			wg.Wait()
 			close(writeCh)
 		}()
+
+		write := func(kvs *pb.KVList) error {
+			buf := z.NewBuffer(1 << 20)
+			defer buf.Release()
+
+			for _, kv := range kvs.Kv {
+				KVToBuffer(kv, buf)
+			}
+			writer.Write(buf)
+			return nil
+		}
+
 		for kvs := range writeCh {
-			require.NoError(t, writer.Write(kvs))
+			require.NoError(t, write(kvs))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -999,8 +1011,11 @@ func TestKeyCount(t *testing.T) {
 
 	streams := make(map[uint32]int)
 	stream := db2.NewStream()
-	stream.Send = func(list *pb.KVList) error {
-		count += len(list.Kv)
+	stream.Send = func(buf *z.Buffer) error {
+		list, err := BufferToKVList(buf)
+		if err != nil {
+			return err
+		}
 		for _, kv := range list.Kv {
 			last := streams[kv.StreamId]
 			key := binary.BigEndian.Uint64(kv.Key)
@@ -1010,6 +1025,7 @@ func TestKeyCount(t *testing.T) {
 			}
 			streams[kv.StreamId] = int(key)
 		}
+		count += len(list.Kv)
 		return nil
 	}
 	require.NoError(t, stream.Orchestrate(context.Background()))

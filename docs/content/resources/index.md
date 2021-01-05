@@ -12,8 +12,7 @@ Go](https://open.dgraph.io/post/badger/)
 4. [Concurrent ACID Transactions in Badger](https://blog.dgraph.io/post/badger-txn/)
 
 ## Contact
-- Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, feature requests and discussions.
-- Please use [Github issue tracker](https://github.com/dgraph-io/badger/issues) for filing bugs or feature requests.
+- Please use [discuss.dgraph.io](https://discuss.dgraph.io) for questions, bugs, feature requests, and discussions.
 - Follow us on Twitter [@dgraphlabs](https://twitter.com/dgraphlabs).
 
 ## Contributing

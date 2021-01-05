@@ -52,6 +52,6 @@ func main() {
 	fmt.Printf("Num Allocated Bytes at program end: %s\n",
 		humanize.IBytes(uint64(z.NumAllocBytes())))
 	if z.NumAllocBytes() > 0 {
-		z.PrintLeaks()
+		fmt.Println(z.Leaks())
 	}
 }

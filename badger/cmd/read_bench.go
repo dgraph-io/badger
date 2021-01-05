@@ -25,6 +25,7 @@ import (
 	"time"
 
 	humanize "github.com/dustin/go-humanize"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/dgraph-io/badger/v2"
@@ -79,7 +80,7 @@ func init() {
 
 // Scan the whole database using the iterators
 func fullScanDB(db *badger.DB) {
-	txn := db.NewTransaction(false)
+	txn := db.NewTransactionAt(math.MaxUint64, false)
 	defer txn.Discard()
 
 	startTime = time.Now()
@@ -111,7 +112,7 @@ func readBench(cmd *cobra.Command, args []string) error {
 		WithBlockCacheSize(blockCacheSize << 20).
 		WithIndexCacheSize(indexCacheSize << 20)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
-	db, err := badger.Open(opt)
+	db, err := badger.OpenManaged(opt)
 	if err != nil {
 		return y.Wrapf(err, "unable to open DB")
 	}
@@ -205,21 +206,30 @@ func getSampleKeys(db *badger.DB) ([][]byte, error) {
 		return l, nil
 	}
 
+	errStop := errors.Errorf("Stop iterating")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream.Send = func(l *pb.KVList) error {
+	stream.Send = func(buf *z.Buffer) error {
 		if count >= sampleSize {
 			return nil
 		}
-		for _, kv := range l.Kv {
+		err := buf.SliceIterate(func(s []byte) error {
+			var kv pb.KV
+			if err := kv.Unmarshal(s); err != nil {
+				return err
+			}
 			keys = append(keys, kv.Key)
 			count++
 			if count >= sampleSize {
 				cancel()
-				return nil
+				return errStop
 			}
+			return nil
+		})
+		if err == errStop || err == nil {
+			return nil
 		}
-		return nil
+		return err
 	}
 
 	if err := stream.Orchestrate(ctx); err != nil && err != context.Canceled {

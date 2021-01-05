@@ -38,14 +38,12 @@ type discardStats struct {
 }
 
 const discardFname string = "DISCARD"
-const discardFsize int = 1 << 30
-const maxSlot int = 64 << 20
 
 func initDiscardStats(opt Options) (*discardStats, error) {
 	fname := path.Join(opt.ValueDir, discardFname)
 
 	// 1GB file can store 67M discard entries. Each entry is 16 bytes.
-	mf, err := z.OpenMmapFile(fname, os.O_CREATE|os.O_RDWR, discardFsize)
+	mf, err := z.OpenMmapFile(fname, os.O_CREATE|os.O_RDWR, 1<<20)
 	lf := &discardStats{
 		MmapFile: mf,
 		opt:      opt,
@@ -58,7 +56,7 @@ func initDiscardStats(opt Options) (*discardStats, error) {
 		return nil, y.Wrapf(err, "while opening file: %s\n", discardFname)
 	}
 
-	for slot := 0; slot < maxSlot; slot++ {
+	for slot := 0; slot < lf.maxSlot(); slot++ {
 		if lf.get(16*slot) == 0 {
 			lf.nextEmptySlot = slot
 			break
@@ -98,6 +96,10 @@ func (lf *discardStats) zeroOut() {
 	lf.set(lf.nextEmptySlot*16+8, 0)
 }
 
+func (lf *discardStats) maxSlot() int {
+	return len(lf.Data) / 16
+}
+
 // Update would update the discard stats for the given file id. If discard is
 // 0, it would return the current value of discard for the file. If discard is
 // < 0, it would set the current value of discard to zero for the file.
@@ -134,7 +136,9 @@ func (lf *discardStats) Update(fidu uint32, discard int64) int64 {
 
 	// Move to next slot.
 	lf.nextEmptySlot++
-	y.AssertTrue(lf.nextEmptySlot < maxSlot)
+	for lf.nextEmptySlot >= lf.maxSlot() {
+		y.Check(lf.Truncate(2 * int64(len(lf.Data))))
+	}
 	lf.zeroOut()
 
 	sort.Sort(lf)

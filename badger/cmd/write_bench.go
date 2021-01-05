@@ -204,37 +204,38 @@ func writeSorted(db *badger.DB, num uint64) error {
 	}
 
 	wg := &sync.WaitGroup{}
-	writeCh := make(chan *pb.KVList, 3)
+	writeCh := make(chan *z.Buffer, 3)
 	writeRange := func(start, end uint64, streamId uint32) {
 		// end is not included.
 		defer wg.Done()
-		kvs := &pb.KVList{}
+		kvBuf := z.NewBuffer(5 << 20)
 		var sz int
 		for i := start; i < end; i++ {
 			key := make([]byte, 8)
 			binary.BigEndian.PutUint64(key, i)
-			kvs.Kv = append(kvs.Kv, &pb.KV{
+			kv := &pb.KV{
 				Key:      key,
 				Value:    value,
 				Version:  1,
 				StreamId: streamId,
-			})
+			}
+			badger.KVToBuffer(kv, kvBuf)
 
 			sz += es
 			atomic.AddUint64(&entriesWritten, 1)
 			atomic.AddUint64(&sizeWritten, uint64(es))
 
 			if sz >= 4<<20 { // 4 MB
-				writeCh <- kvs
-				kvs = &pb.KVList{}
+				writeCh <- kvBuf
+				kvBuf = z.NewBuffer(1 << 20)
 				sz = 0
 			}
 		}
-		writeCh <- kvs
+		writeCh <- kvBuf
 	}
 
 	// Let's create some streams.
-	width := num / 16
+	width := num / 4
 	streamID := uint32(0)
 	for start := uint64(0); start < num; start += width {
 		end := start + width
@@ -254,6 +255,7 @@ func writeSorted(db *badger.DB, num uint64) error {
 		if err := writer.Write(kvs); err != nil {
 			panic(err)
 		}
+		y.Check(kvs.Release())
 	}
 	log.Println("DONE streaming. Flushing...")
 	return writer.Flush()
@@ -395,6 +397,7 @@ func reportStats(c *z.Closer, db *badger.DB) {
 				y.FixedDuration(time.Since(startTime)),
 				humanize.Bytes(sz), humanize.Bytes(bytesRate), entries, entriesRate,
 				humanize.IBytes(uint64(z.NumAllocBytes())))
+
 			if count%10 == 0 {
 				fmt.Printf(db.LevelsToString())
 			}

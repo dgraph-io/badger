@@ -481,7 +481,7 @@ func (db *DB) close() (err error) {
 	defer db.allocPool.Release()
 
 	db.opt.Debugf("Closing database")
-	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(db.lc.l0stallsMs))
+	db.opt.Infof("Lifetime L0 stalled for: %s\n", time.Duration(atomic.LoadInt64(&db.lc.l0stallsMs)))
 
 	atomic.StoreInt32(&db.blockWrites, 1)
 
@@ -925,19 +925,11 @@ func (db *DB) ensureRoomForWrite() error {
 	db.Lock()
 	defer db.Unlock()
 
-	var forceFlush bool
-	// We don't need to force flush the memtable in in-memory mode because the size of the WAL will
-	// always be zero.
-	if !forceFlush && !db.opt.InMemory {
-		// Force flush if memTable WAL is getting filled up.
-		forceFlush = int64(db.mt.wal.writeAt) > db.opt.ValueLogFileSize
-	}
-
-	if !forceFlush && db.mt.sl.MemSize() < db.opt.MemTableSize {
+	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
+	if !db.mt.isFull() {
 		return nil
 	}
 
-	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
 	select {
 	case db.flushChan <- flushTask{mt: db.mt}:
 		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
@@ -965,12 +957,12 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 	iter := ft.mt.sl.NewIterator()
 	defer iter.Close()
 	b := table.NewTableBuilder(bopts)
-	var vp valuePointer
 	for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 		if len(ft.dropPrefixes) > 0 && hasAnyPrefixes(iter.Key(), ft.dropPrefixes) {
 			continue
 		}
 		vs := iter.Value()
+		var vp valuePointer
 		if vs.Meta&bitValuePointer > 0 {
 			vp.Decode(vs.Value)
 		}
@@ -1637,7 +1629,10 @@ func (db *DB) dropAll() (func(), error) {
 // - Compact rest of the levels, Li->Li, picking tables which have Kp.
 // - Resume memtable flushes, compactions and writes.
 func (db *DB) DropPrefix(prefixes ...[]byte) error {
-	db.opt.Infof("DropPrefix Called %s", prefixes)
+	if len(prefixes) == 0 {
+		return nil
+	}
+	db.opt.Infof("DropPrefix called for %s", prefixes)
 	f, err := db.prepareToDrop()
 	if err != nil {
 		return err
@@ -1788,8 +1783,8 @@ func (db *DB) StreamDB(outOptions Options) error {
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = fmt.Sprintf("Streaming DB to new DB at %s", outDir)
 
-	stream.Send = func(kvs *pb.KVList) error {
-		return writer.Write(kvs)
+	stream.Send = func(buf *z.Buffer) error {
+		return writer.Write(buf)
 	}
 	if err := stream.Orchestrate(context.Background()); err != nil {
 		return y.Wrapf(err, "cannot stream DB to out DB at %s", outDir)

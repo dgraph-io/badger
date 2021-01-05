@@ -81,7 +81,11 @@ func (db *DB) openMemTables(opt Options) error {
 		return fids[i] < fids[j]
 	})
 	for _, fid := range fids {
-		mt, err := db.openMemTable(fid)
+		flags := os.O_RDWR
+		if db.opt.ReadOnly {
+			flags = os.O_RDONLY
+		}
+		mt, err := db.openMemTable(fid, flags)
 		if err != nil {
 			return y.Wrapf(err, "while opening fid: %d", fid)
 		}
@@ -103,7 +107,7 @@ func (db *DB) openMemTables(opt Options) error {
 
 const memFileExt string = ".mem"
 
-func (db *DB) openMemTable(fid int) (*memTable, error) {
+func (db *DB) openMemTable(fid, flags int) (*memTable, error) {
 	filepath := db.mtFilePath(fid)
 	s := skl.NewSkiplist(arenaSize(db.opt))
 	mt := &memTable{
@@ -121,8 +125,9 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 		path:     filepath,
 		registry: db.registry,
 		writeAt:  vlogHeaderSize,
+		opt:      db.opt,
 	}
-	lerr := mt.wal.open(filepath, os.O_RDWR|os.O_CREATE, db.opt)
+	lerr := mt.wal.open(filepath, flags, 2*db.opt.MemTableSize)
 	if lerr != z.NewFile && lerr != nil {
 		return nil, y.Wrapf(lerr, "While opening memtable: %s", filepath)
 	}
@@ -145,7 +150,7 @@ func (db *DB) openMemTable(fid int) (*memTable, error) {
 var errExpectingNewFile = errors.New("Expecting to create a new file, but found an existing file")
 
 func (db *DB) newMemTable() (*memTable, error) {
-	mt, err := db.openMemTable(db.nextMemFid)
+	mt, err := db.openMemTable(db.nextMemFid, os.O_CREATE|os.O_RDWR)
 	if err == z.NewFile {
 		db.nextMemFid++
 		return mt, nil
@@ -164,6 +169,17 @@ func (db *DB) mtFilePath(fid int) string {
 
 func (mt *memTable) SyncWAL() error {
 	return mt.wal.Sync()
+}
+
+func (mt *memTable) isFull() bool {
+	if mt.sl.MemSize() >= mt.opt.MemTableSize {
+		return true
+	}
+	if mt.opt.InMemory {
+		// InMemory mode doesn't have any WAL.
+		return false
+	}
+	return int64(mt.wal.writeAt) >= mt.opt.MemTableSize
 }
 
 func (mt *memTable) Put(key []byte, value y.ValueStruct) error {
@@ -268,10 +284,7 @@ func (lf *logFile) Truncate(end int64) error {
 	} else if fi.Size() == end {
 		return nil
 	}
-	if lf.opt.ReadOnly {
-		return y.Wrapf(ErrTruncateNeeded,
-			"truncate to %d from %d for file: %s", end, lf.size, lf.path)
-	}
+	y.AssertTrue(!lf.opt.ReadOnly)
 	lf.size = uint32(end)
 	return lf.MmapFile.Truncate(end)
 }
@@ -539,10 +552,8 @@ func (lf *logFile) zeroNextEntry() {
 	z.ZeroOut(lf.Data, int(lf.writeAt), int(lf.writeAt+maxHeaderSize))
 }
 
-func (lf *logFile) open(path string, flags int, opt Options) error {
-	lf.opt = opt
-
-	mf, ferr := z.OpenMmapFile(path, flags, 2*int(opt.ValueLogFileSize))
+func (lf *logFile) open(path string, flags int, fsize int64) error {
+	mf, ferr := z.OpenMmapFile(path, flags, int(fsize))
 	lf.MmapFile = mf
 
 	if ferr == z.NewFile {
