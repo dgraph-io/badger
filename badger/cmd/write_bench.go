@@ -59,7 +59,7 @@ var (
 		sorted     bool
 		showLogs   bool
 
-		valueThreshold   int
+		valueThreshold   int64
 		numVersions      int
 		vlogMaxEntries   uint32
 		loadBloomsOnOpen bool
@@ -102,7 +102,7 @@ func init() {
 		"Force compact level 0 on close.")
 	writeBenchCmd.Flags().BoolVarP(&wo.sorted, "sorted", "s", false, "Write keys in sorted order.")
 	writeBenchCmd.Flags().BoolVarP(&wo.showLogs, "verbose", "v", false, "Show Badger logs.")
-	writeBenchCmd.Flags().IntVarP(&wo.valueThreshold, "value-th", "t", 1<<10, "Value threshold")
+	writeBenchCmd.Flags().Int64VarP(&wo.valueThreshold, "value-th", "t", 1<<10, "Value threshold")
 	writeBenchCmd.Flags().IntVarP(&wo.numVersions, "num-version", "n", 1, "Number of versions to keep")
 	writeBenchCmd.Flags().Int64Var(&wo.blockCacheSize, "block-cache-mb", 256,
 		"Size of block cache in MB")

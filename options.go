@@ -59,10 +59,7 @@ type Options struct {
 	MaxLevels           int
 
 	DynamicValueThreshold bool
-	ValueMinBound         float64
-	ValueMaxBound         float64
-	ValueBoundStep        float64
-	ValueThreshold        int
+	ValueThreshold        int64
 	NumMemtables          int
 	// Changing BlockSize across DB runs will not break badger. The block size is
 	// read from the block index stored at the end of the table.
@@ -159,13 +156,9 @@ func DefaultOptions(path string) Options {
 
 		ValueLogMaxEntries:            1000000,
 
-		// todo change this ot vald ones
+		// todo change this to old ones
 		DynamicValueThreshold:         true,
-		ValueThreshold:                32, // 1 KB.
-		ValueBoundStep:                4, // 1 KB
-		ValueMinBound:                 32, // 1 KB
-		ValueMaxBound:                 512, // 1 MB
-
+		ValueThreshold:                1 << 10, // 1 KB.
 
 		Logger:                        defaultLogger(INFO),
 		EncryptionKey:                 []byte{},
@@ -332,7 +325,7 @@ func (opt Options) WithMaxLevels(val int) Options {
 // tree or separately in the log value files.
 //
 // The default value of ValueThreshold is 1 KB, but LSMOnlyOptions sets it to maxValueThreshold.
-func (opt Options) WithValueThreshold(val int) Options {
+func (opt Options) WithValueThreshold(val int64) Options {
 	opt.ValueThreshold = val
 	return opt
 }

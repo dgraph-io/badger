@@ -38,32 +38,43 @@ func TestDynamicValueThreshold(t *testing.T) {
 	y.Check(err)
 	defer removeDir(dir)
 
-	getRandString := func(n int) string {
-		letters := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-		b := make([]byte, n)
-		for i := range b {
-			b[i] = letters[rand.Intn(len(letters))]
-		}
-		return string(b)
-	}
-
 	kv, _ := Open(getTestOptions(dir).WithValueThreshold(32))
 	defer kv.Close()
 	log := &kv.vlog
-	for vl := 16; vl <= 1024; vl = vl + 4 {
+	for vl := 32; vl <= 1024; vl = vl + 4 {
+		fmt.Printf("doing it for %d \n", vl)
 		for i := 0; i < 1000; i++ {
-			val := getRandString(vl)
+			val := make([]byte, vl)
+			y.Check2(rand.Read(val))
+			e1 := &Entry{
+				Key:   []byte(fmt.Sprintf("samplekey_%d_%d", vl, i)),
+				Value: val,
+				meta:  bitValuePointer,
+			}
+			b := new(request)
+			b.Entries = []*Entry{e1}
+			log.write([]*request{b})
+		}
+		t.Logf("count is %d", log.vlMetrics.Count)
+		t.Logf("value threshold is %d \n", log.opt.ValueThreshold)
+	}
+
+	for vl := 511; vl >=31 ; vl = vl - 4 {
+		fmt.Printf("doing it for %d \n", vl)
+		for i := 0; i < 2000; i++ {
+			val := make([]byte, vl)
+			y.Check2(rand.Read(val))
 			e1 := &Entry{
 				Key:   []byte(fmt.Sprintf("samplekey_%d_%d", vl, i)),
 				Value: []byte(val),
 				meta:  bitValuePointer,
 			}
-
 			b := new(request)
 			b.Entries = []*Entry{e1}
 			log.write([]*request{b})
-			//t.Logf("Pointer written: %+v", b.Ptrs[0])
 		}
+		t.Logf("count is %d", log.vlMetrics.Count)
+		t.Logf("value threshold is %d \n", log.opt.ValueThreshold)
 	}
 }
 
@@ -79,7 +90,7 @@ func TestValueBasic(t *testing.T) {
 	// Use value big enough that the value log writes them even if SyncWrites is false.
 	const val1 = "sampleval012345678901234567890123"
 	const val2 = "samplevalb012345678901234567890123"
-	require.True(t, len(val1) >= kv.opt.ValueThreshold)
+	require.True(t, int64(len(val1)) >= kv.opt.ValueThreshold)
 
 	e1 := &Entry{
 		Key:   []byte("samplekey"),
@@ -630,7 +641,7 @@ func TestPartialAppendToWAL(t *testing.T) {
 		v3 = []byte("value3-01234567890123456789012012345678901234567890123")
 	)
 	// Values need to be long enough to actually get written to value log.
-	require.True(t, len(v3) >= kv.opt.ValueThreshold)
+	require.True(t, int64(len(v3)) >= kv.opt.ValueThreshold)
 
 	// Create truncated vlog to simulate a partial append.
 	// k0 - single transaction, k1 and k2 in another transaction
