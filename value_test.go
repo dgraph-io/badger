@@ -33,6 +33,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDynamicValueThreshold(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	y.Check(err)
+	defer removeDir(dir)
+
+	getRandString := func(n int) string {
+		letters := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = letters[rand.Intn(len(letters))]
+		}
+		return string(b)
+	}
+
+	kv, _ := Open(getTestOptions(dir).WithValueThreshold(32))
+	defer kv.Close()
+	log := &kv.vlog
+	for vl := 16; vl <= 1024; vl = vl + 4 {
+		for i := 0; i < 1000; i++ {
+			val := getRandString(vl)
+			e1 := &Entry{
+				Key:   []byte(fmt.Sprintf("samplekey_%d_%d", vl, i)),
+				Value: []byte(val),
+				meta:  bitValuePointer,
+			}
+
+			b := new(request)
+			b.Entries = []*Entry{e1}
+			log.write([]*request{b})
+			//t.Logf("Pointer written: %+v", b.Ptrs[0])
+		}
+	}
+}
+
 func TestValueBasic(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	y.Check(err)

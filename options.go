@@ -58,8 +58,12 @@ type Options struct {
 	TableSizeMultiplier int
 	MaxLevels           int
 
-	ValueThreshold int
-	NumMemtables   int
+	DynamicValueThreshold bool
+	ValueMinBound         float64
+	ValueMaxBound         float64
+	ValueBoundStep        float64
+	ValueThreshold        int
+	NumMemtables          int
 	// Changing BlockSize across DB runs will not break badger. The block size is
 	// read from the block index stored at the end of the table.
 	BlockSize          int
@@ -154,7 +158,15 @@ func DefaultOptions(path string) Options {
 		ValueLogFileSize: 1<<30 - 1,
 
 		ValueLogMaxEntries:            1000000,
-		ValueThreshold:                1 << 10, // 1 KB.
+
+		// todo change this ot vald ones
+		DynamicValueThreshold:         true,
+		ValueThreshold:                32, // 1 KB.
+		ValueBoundStep:                4, // 1 KB
+		ValueMinBound:                 32, // 1 KB
+		ValueMaxBound:                 512, // 1 MB
+
+
 		Logger:                        defaultLogger(INFO),
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
