@@ -156,8 +156,7 @@ func DefaultOptions(path string) Options {
 
 		ValueLogMaxEntries:            1000000,
 
-		// todo change this to old ones
-		DynamicValueThreshold:         true,
+		DynamicValueThreshold:         false,
 		ValueThreshold:                1 << 10, // 1 KB.
 
 		Logger:                        defaultLogger(INFO),
@@ -327,6 +326,17 @@ func (opt Options) WithMaxLevels(val int) Options {
 // The default value of ValueThreshold is 1 KB, but LSMOnlyOptions sets it to maxValueThreshold.
 func (opt Options) WithValueThreshold(val int64) Options {
 	opt.ValueThreshold = val
+	return opt
+}
+
+// WithDynamicValueThreshold returns a new Options value with DynamicValueThreshold set to true.
+//
+// DynamicValueThreshold with true enabled the valueThreshold to be dynamic based on the 1
+// percentile values badger has seen.
+//
+// The default value of DynamicValueThreshold is false.
+func (opt Options) WithDynamicValueThreshold() Options {
+	opt.DynamicValueThreshold = true
 	return opt
 }
 
