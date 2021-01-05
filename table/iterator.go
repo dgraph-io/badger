@@ -20,8 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
-	"runtime/debug"
 	"sort"
 
 	"github.com/dgraph-io/badger/v2/fb"
@@ -90,12 +88,13 @@ func (itr *blockIterator) setIdx(i int) {
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("==== Recovered====\n%s", string(debug.Stack()))
-			fmt.Printf("Table ID: %d\nBlock ID: %d\nEntry Idx: %d\nData len: %d\n"+
+			var debugBuf bytes.Buffer
+			fmt.Fprintf(&debugBuf, "==== Recovered====\n")
+			fmt.Fprintf(&debugBuf, "Table ID: %d\nBlock ID: %d\nEntry Idx: %d\nData len: %d\n"+
 				"StartOffset: %d\nEndOffset: %d\nEntryOffsets len: %d\nEntryOffsets: %v\n",
 				itr.tableID, itr.blockID, itr.idx, len(itr.data), startOffset, endOffset,
 				len(itr.entryOffsets), itr.entryOffsets)
-			os.Exit(1)
+			panic(debugBuf.String())
 		}
 	}()
 
