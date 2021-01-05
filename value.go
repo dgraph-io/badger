@@ -438,6 +438,25 @@ func (vlog *valueLog) dropAll() (int, error) {
 	return count, nil
 }
 
+type vLogThreshold struct {
+	sync.RWMutex
+	// Metrics contains a running log of statistics like amount of data stored etc.
+	vlMetrics      *z.HistogramData
+	valueThreshold int
+}
+
+func (v *vLogThreshold) update(val int) {
+	v.Lock()
+	defer v.Unlock()
+	v.valueThreshold = val
+}
+
+func (v *vLogThreshold) threshold() int {
+	v.RLock()
+	defer v.RUnlock()
+	return v.valueThreshold
+}
+
 type valueLog struct {
 	dirPath string
 
@@ -455,11 +474,21 @@ type valueLog struct {
 	opt               Options
 
 	garbageCh    chan struct{}
+	valueCh      chan int64
+	vCloser      *z.Closer
 	discardStats *discardStats
+
+	// Metrics contains a running log of statistics like amount of data stored etc.
+	vlMetrics      *z.HistogramData
+	valueThreshold int
 }
 
 func vlogFilePath(dirPath string, fid uint32) string {
 	return fmt.Sprintf("%s%s%06d.vlog", dirPath, string(os.PathSeparator), fid)
+}
+
+func (vlog *valueLog) skipVlog(e *Entry) bool {
+	return len(e.Value) < vlog.valueThreshold
 }
 
 func (vlog *valueLog) fpath(fid uint32) string {
@@ -546,6 +575,45 @@ func (vlog *valueLog) init(db *DB) {
 		return
 	}
 	vlog.dirPath = vlog.opt.ValueDir
+	vlog.valueThreshold = db.opt.ValueThreshold
+
+	if db.opt.DynamicValueThreshold {
+		vlog.valueCh = make(chan int64, 1000)
+		// setting histogram bound between vlogMinBound-vlogMaxBound with default 1KB-1MB
+		// this will give histogram range between 1kb-1mb
+		// each bucket would be of size vlogBoundStep default 1kb
+		size := int(math.Ceil((db.opt.ValueMaxBound - db.opt.ValueMinBound) / db.opt.
+			ValueBoundStep))
+		bounds := make([]float64, size)
+		for i := range bounds {
+			if i == 0 {
+				bounds[0] = db.opt.ValueMinBound
+				continue
+			}
+			bounds[i] = bounds[i-1] + db.opt.ValueBoundStep
+		}
+		vlog.vlMetrics = z.NewHistogramData(bounds)
+		vlog.vCloser = z.NewCloser(1)
+		go func() {
+			defer vlog.vCloser.Done()
+			for {
+				select {
+				case v := <-vlog.valueCh:
+					vlog.vlMetrics.Update(v)
+					// we are making it to get 99 percentile so that only values
+					// in range of 1 percentile will make it to the value log
+					p := int(vlog.vlMetrics.Percentile(0.99))
+					if vlog.valueThreshold != p {
+						vlog.opt.Infof("updating value threshold from: %d to: %d",
+							vlog.valueThreshold, p)
+						vlog.valueThreshold = p
+					}
+				case <-vlog.vCloser.HasBeenClosed():
+					return
+				}
+			}
+		}()
+	}
 
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 	lf, err := initDiscardStats(vlog.opt)
@@ -624,7 +692,7 @@ func (vlog *valueLog) Close() error {
 	}
 
 	vlog.opt.Debugf("Stopping garbage collection of values.")
-
+	vlog.vCloser.SignalAndWait()
 	var err error
 	for id, lf := range vlog.filesMap {
 		lf.lock.Lock() // We won’t release the lock.
@@ -846,7 +914,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			buf.Reset()
 
 			e := b.Entries[j]
-			if vlog.db.opt.skipVlog(e) {
+			if vlog.skipVlog(e) {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
 				continue
 			}
@@ -877,6 +945,8 @@ func (vlog *valueLog) write(reqs []*request) error {
 			written++
 			bytesWritten += buf.Len()
 
+			vlog.vlMetrics.Update(int64(len(e.Value)))
+			vlog.valueThreshold = int(math.Round(vlog.vlMetrics.Percentile(1)))
 			// No need to flush anything, we write to file directly via mmap.
 		}
 		y.NumWrites.Add(int64(written))

@@ -696,10 +696,6 @@ var requestPool = sync.Pool{
 	},
 }
 
-func (opt Options) skipVlog(e *Entry) bool {
-	return len(e.Value) < opt.ValueThreshold
-}
-
 func (db *DB) writeToLSM(b *request) error {
 	// We should check the length of b.Prts and b.Entries only when badger is not
 	// running in InMemory mode. In InMemory mode, we don't write anything to the
@@ -710,7 +706,7 @@ func (db *DB) writeToLSM(b *request) error {
 
 	for i, entry := range b.Entries {
 		var err error
-		if db.opt.skipVlog(entry) {
+		if db.vlog.skipVlog(entry) {
 			// Will include deletion / tombstone case.
 			err = db.mt.Put(entry.Key,
 				y.ValueStruct{
