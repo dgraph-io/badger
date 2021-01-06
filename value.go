@@ -457,7 +457,7 @@ type valueLog struct {
 	garbageCh    chan struct{}
 	discardStats *discardStats
 
-	vlogThreshold *valueThreshold
+	threshold *vlogThreshold
 }
 
 func vlogFilePath(dirPath string, fid uint32) string {
@@ -552,8 +552,8 @@ func (vlog *valueLog) init(db *DB) {
 		return
 	}
 	vlog.dirPath = vlog.opt.ValueDir
-	vlog.vlogThreshold = initVlogThreshold(vlog.opt)
-	vlog.vlogThreshold.listenForValueThresholdUpdate()
+	vlog.threshold = initVlogThreshold(vlog.opt)
+	vlog.threshold.listenForValueThresholdUpdate()
 
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 	lf, err := initDiscardStats(vlog.opt)
@@ -632,7 +632,7 @@ func (vlog *valueLog) Close() error {
 	}
 
 	vlog.opt.Debugf("Stopping garbage collection of values.")
-	vlog.vlogThreshold.vCloser.SignalAndWait()
+	vlog.threshold.vCloser.SignalAndWait()
 	var err error
 	for id, lf := range vlog.filesMap {
 		lf.lock.Lock() // We won’t release the lock.
@@ -890,7 +890,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 		y.NumBytesWritten.Add(int64(bytesWritten))
 
 		vlog.numEntriesWritten += uint32(written)
-		vlog.vlogThreshold.update(b)
+		vlog.threshold.update(b)
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
 		if err := toDisk(); err != nil {
@@ -1108,7 +1108,7 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 	}
 }
 
-type valueThreshold struct {
+type vlogThreshold struct {
 	opt Options
 
 	valueCh          chan *request
@@ -1118,7 +1118,7 @@ type valueThreshold struct {
 	vlMetrics *z.HistogramData
 }
 
-func initVlogThreshold(opt Options) *valueThreshold {
+func initVlogThreshold(opt Options) *vlogThreshold {
 	getBounds := func() []float64 {
 		// setting histogram bound between vlogMinBound-vlogMaxBound with default 1KB-1MB
 		// this will give histogram range between 1kb-1mb
@@ -1142,7 +1142,7 @@ func initVlogThreshold(opt Options) *valueThreshold {
 		return bounds
 	}
 
-	return &valueThreshold{
+	return &vlogThreshold{
 		opt:              opt,
 		valueCh:          make(chan *request, 1000),
 		vCloser:          z.NewCloser(1),
@@ -1150,14 +1150,14 @@ func initVlogThreshold(opt Options) *valueThreshold {
 	}
 }
 
-func (v *valueThreshold) update(request *request) {
+func (v *vlogThreshold) update(request *request) {
 	if !v.opt.DynamicValueThreshold {
 		return
 	}
 	v.valueCh <- request
 }
 
-func (v *valueThreshold)  listenForValueThresholdUpdate() {
+func (v *vlogThreshold)  listenForValueThresholdUpdate() {
 	// dynamic value threshold is set to false, return, no need to listen
 	if !v.opt.DynamicValueThreshold {
 		return
