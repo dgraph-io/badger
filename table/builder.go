@@ -24,15 +24,15 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/dgraph-io/badger/v2/fb"
+	"github.com/dgraph-io/badger/v3/fb"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/snappy"
 	fbs "github.com/google/flatbuffers/go"
 	"github.com/pkg/errors"
 
-	"github.com/dgraph-io/badger/v2/options"
-	"github.com/dgraph-io/badger/v2/pb"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/v3/options"
+	"github.com/dgraph-io/badger/v3/pb"
+	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 )
 

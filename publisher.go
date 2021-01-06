@@ -19,9 +19,9 @@ package badger
 import (
 	"sync"
 
-	"github.com/dgraph-io/badger/v2/pb"
-	"github.com/dgraph-io/badger/v2/trie"
-	"github.com/dgraph-io/badger/v2/y"
+	"github.com/dgraph-io/badger/v3/pb"
+	"github.com/dgraph-io/badger/v3/trie"
+	"github.com/dgraph-io/badger/v3/y"
 	"github.com/dgraph-io/ristretto/z"
 )
 
