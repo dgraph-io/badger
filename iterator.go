@@ -564,8 +564,9 @@ func (it *Iterator) Next() {
 
 	// Set next item to current
 	it.item = it.data.pop()
-	it.scanned = len(it.item.key) + len(it.item.val) + len(it.item.vptr) + 1 + 1 // meta + usermeta
-
+	if it.item != nil {
+		it.scanned += len(it.item.key) + len(it.item.val) + len(it.item.vptr) + 2 // meta + usermeta
+	}
 	for it.iitr.Valid() {
 		if it.parseItem() {
 			// parseItem calls one extra next.
