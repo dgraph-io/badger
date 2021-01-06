@@ -562,11 +562,9 @@ func (it *Iterator) Next() {
 	it.item.wg.Wait() // Just cleaner to wait before pushing to avoid doing ref counting.
 	it.waste.push(it.item)
 
+	it.scanned += len(it.item.key) + len(it.item.val) + len(it.item.vptr) + 2 // meta + usermeta
 	// Set next item to current
 	it.item = it.data.pop()
-	if it.item != nil {
-		it.scanned += len(it.item.key) + len(it.item.val) + len(it.item.vptr) + 2 // meta + usermeta
-	}
 	for it.iitr.Valid() {
 		if it.parseItem() {
 			// parseItem calls one extra next.
