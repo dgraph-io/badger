@@ -632,7 +632,7 @@ func (vlog *valueLog) Close() error {
 	}
 
 	vlog.opt.Debugf("Stopping garbage collection of values.")
-	vlog.threshold.vCloser.SignalAndWait()
+	vlog.threshold.close()
 	var err error
 	for id, lf := range vlog.filesMap {
 		lf.lock.Lock() // We won’t release the lock.
@@ -1119,11 +1119,14 @@ type vlogThreshold struct {
 }
 
 func initVlogThreshold(opt Options) *vlogThreshold {
+	if !opt.DynamicValueThreshold {
+		return &vlogThreshold{
+			opt: opt,
+		}
+	}
+
 	getBounds := func() []float64 {
-		// setting histogram bound between vlogMinBound-vlogMaxBound with default 1KB-1MB
-		// this will give histogram range between 1kb-1mb
-		// each bucket would be of size vlogBoundStep default 1kb
-		mxbd := math.Max(maxValueThreshold, float64(opt.maxBatchSize))
+		mxbd := math.Min(maxValueThreshold, float64(opt.maxBatchSize))
 		mnbd := float64(opt.ValueThreshold)
 		y.AssertTruef(mxbd > mnbd, "maximum threshold bound is less than the min threshold")
 		size := math.Min(mxbd - mnbd, 1024.0)
@@ -1148,6 +1151,11 @@ func initVlogThreshold(opt Options) *vlogThreshold {
 		vCloser:          z.NewCloser(1),
 		vlMetrics:        z.NewHistogramData(getBounds()),
 	}
+}
+
+func (v *vlogThreshold) close() {
+	if !v.opt.DynamicValueThreshold { return }
+	v.vCloser.SignalAndWait()
 }
 
 func (v *vlogThreshold) update(request *request) {

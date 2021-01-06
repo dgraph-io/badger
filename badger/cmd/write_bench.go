@@ -60,6 +60,7 @@ var (
 		showLogs   bool
 
 		valueThreshold   int64
+		dynamicThreshold bool
 		numVersions      int
 		vlogMaxEntries   uint32
 		loadBloomsOnOpen bool
@@ -103,6 +104,8 @@ func init() {
 	writeBenchCmd.Flags().BoolVarP(&wo.sorted, "sorted", "s", false, "Write keys in sorted order.")
 	writeBenchCmd.Flags().BoolVarP(&wo.showLogs, "verbose", "v", false, "Show Badger logs.")
 	writeBenchCmd.Flags().Int64VarP(&wo.valueThreshold, "value-th", "t", 1<<10, "Value threshold")
+	writeBenchCmd.Flags().BoolVar(&wo.dynamicThreshold, "dynamic-th",  false,
+		"Dynamic value threshold")
 	writeBenchCmd.Flags().IntVarP(&wo.numVersions, "num-version", "n", 1, "Number of versions to keep")
 	writeBenchCmd.Flags().Int64Var(&wo.blockCacheSize, "block-cache-mb", 256,
 		"Size of block cache in MB")
@@ -282,6 +285,10 @@ func writeBench(cmd *cobra.Command, args []string) error {
 
 	if !wo.showLogs {
 		opt = opt.WithLogger(nil)
+	}
+
+	if wo.dynamicThreshold {
+		opt = opt.WithDynamicValueThreshold()
 	}
 
 	fmt.Printf("Opening badger with options = %+v\n", opt)
