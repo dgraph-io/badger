@@ -560,9 +560,9 @@ func (it *Iterator) Close() {
 func (it *Iterator) Next() {
 	// Reuse current item
 	it.item.wg.Wait() // Just cleaner to wait before pushing to avoid doing ref counting.
+	it.scanned += len(it.item.key) + len(it.item.val) + len(it.item.vptr) + 2
 	it.waste.push(it.item)
 
-	it.scanned += len(it.item.key) + len(it.item.val) + len(it.item.vptr) + 2 // meta + usermeta
 	// Set next item to current
 	it.item = it.data.pop()
 	for it.iitr.Valid() {
