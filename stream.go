@@ -228,13 +228,14 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			if len(kr.right) > 0 && bytes.Compare(item.Key(), kr.right) >= 0 {
 				break
 			}
+
+			sz := uint64(len(item.key)+len(item.vptr)+len(item.val)) + 1 + 1 // meta + usermeta
+			atomic.AddUint64(&st.scanned, sz)
+
 			// Check if we should pick this key.
 			if st.ChooseKey != nil && !st.ChooseKey(item) {
 				continue
 			}
-
-			sz := uint64(len(item.key)+len(item.vptr)+len(item.val)) + 1 + 1 // meta + usermeta
-			atomic.AddUint64(&st.scanned, sz)
 
 			// Now convert to key value.
 			itr.Alloc.Reset()
