@@ -124,7 +124,7 @@ func checkAndSetOptions(opt *Options) error {
 
 	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
 	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
-	if int64(opt.ValueThreshold) > opt.maxBatchSize {
+	if opt.ValueThreshold > opt.maxBatchSize {
 		return errors.Errorf("Valuethreshold %d greater than max batch size of %d. Either "+
 			"reduce opt.ValueThreshold or increase opt.MaxTableSize.",
 			opt.ValueThreshold, opt.maxBatchSize)
