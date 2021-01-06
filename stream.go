@@ -218,7 +218,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 		for itr.Seek(kr.left); itr.Valid(); {
 			// it.Valid would only return true for keys with the provided Prefix in iterOpts.
 			item := itr.Item()
-			atomic.AddUint64(&st.scanned, uint64(len(item.key)+len(item.vptr)+len(item.val)))
 			if bytes.Equal(item.Key(), prevKey) {
 				itr.Next()
 				continue
@@ -233,6 +232,9 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			if st.ChooseKey != nil && !st.ChooseKey(item) {
 				continue
 			}
+
+			sz := uint64(len(item.key)+len(item.vptr)+len(item.val)) + 1 + 1 // meta + usermeta
+			atomic.AddUint64(&st.scanned, sz)
 
 			// Now convert to key value.
 			itr.Alloc.Reset()
@@ -285,7 +287,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 func (st *Stream) streamKVs(ctx context.Context) error {
 	onDiskSize, uncompressedSize := st.db.EstimateSize(st.Prefix)
 	st.db.opt.Infof("%s Streaming about %s of uncompressed data (%s on disk)\n",
-		st.LogPrefix, humanize.Bytes(uncompressedSize), humanize.Bytes(onDiskSize))
+		st.LogPrefix, humanize.IBytes(uncompressedSize), humanize.IBytes(onDiskSize))
 
 	var bytesSent uint64
 	t := time.NewTicker(time.Second)
@@ -347,9 +349,6 @@ outer:
 			}
 			speed := bytesSent / durSec
 			scanned := atomic.LoadUint64(&st.scanned)
-			if scanned > uncompressedSize {
-				scanned = uncompressedSize
-			}
 			st.db.opt.Infof("%s Time elapsed: %s, scanned: ~%s/%s, bytes sent: %s, speed: %s/sec,"+
 				"jemalloc: %s\n", st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(scanned),
 				humanize.IBytes(uncompressedSize), humanize.IBytes(bytesSent),
