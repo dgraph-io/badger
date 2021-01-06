@@ -455,12 +455,9 @@ type valueLog struct {
 	opt               Options
 
 	garbageCh    chan struct{}
-	valueCh      chan *request
-	vCloser      *z.Closer
 	discardStats *discardStats
 
-	// Metrics contains a running log of statistics like amount of data stored etc.
-	vlMetrics      *z.HistogramData
+	vlogThreshold *valueThreshold
 }
 
 func vlogFilePath(dirPath string, fid uint32) string {
@@ -555,53 +552,8 @@ func (vlog *valueLog) init(db *DB) {
 		return
 	}
 	vlog.dirPath = vlog.opt.ValueDir
-
-	if db.opt.DynamicValueThreshold {
-		vlog.valueCh = make(chan *request, 1000)
-		// setting histogram bound between vlogMinBound-vlogMaxBound with default 1KB-1MB
-		// this will give histogram range between 1kb-1mb
-		// each bucket would be of size vlogBoundStep default 1kb
-		mxbd := math.Max(maxValueThreshold, float64(vlog.opt.maxBatchSize))
-		mnbd := float64(vlog.opt.ValueThreshold)
-		size := 1000.0
-		y.AssertTruef(mxbd > mnbd && mxbd - mnbd > size,
-			"maximum threshold bound is less than the min threshold or diff is less than 1000")
-		bdstp := (mxbd - mnbd) / size
-		bounds := make([]float64, size)
-		for i := range bounds {
-			if i == 0 {
-				bounds[0] = mnbd
-				continue
-			}
-			if i == int(size - 1) {
-				bounds[i] = mxbd
-			}
-			bounds[i] = bounds[i-1] + bdstp
-		}
-		vlog.vlMetrics = z.NewHistogramData(bounds)
-		vlog.vCloser = z.NewCloser(1)
-		go func() {
-			defer vlog.vCloser.Done()
-			for {
-				select {
-				case v := <-vlog.valueCh:
-					for _, e := range v.Entries {
-						vlog.vlMetrics.Update(int64(len(e.Value)))
-					}
-					// we are making it to get 99 percentile so that only values
-					// in range of 1 percentile will make it to the value log
-					p := int64(vlog.vlMetrics.Percentile(0.99))
-					if vlog.opt.ValueThreshold != p {
-						vlog.opt.Infof("updating value threshold from: %d to: %d",
-							vlog.opt.ValueThreshold, p)
-						atomic.StoreInt64(&vlog.opt.ValueThreshold, p)
-					}
-				case <-vlog.vCloser.HasBeenClosed():
-					return
-				}
-			}
-		}()
-	}
+	vlog.vlogThreshold = initVlogThreshold(vlog.opt)
+	vlog.vlogThreshold.listenForValueThresholdUpdate()
 
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
 	lf, err := initDiscardStats(vlog.opt)
@@ -680,7 +632,7 @@ func (vlog *valueLog) Close() error {
 	}
 
 	vlog.opt.Debugf("Stopping garbage collection of values.")
-	vlog.vCloser.SignalAndWait()
+	vlog.vlogThreshold.vCloser.SignalAndWait()
 	var err error
 	for id, lf := range vlog.filesMap {
 		lf.lock.Lock() // We won’t release the lock.
@@ -932,18 +884,13 @@ func (vlog *valueLog) write(reqs []*request) error {
 			}
 			written++
 			bytesWritten += buf.Len()
-
-			//vlog.valueCh <- int64(len(e.Value))
-
-			//vlog.vlMetrics.Update(int64(len(e.Value)))
-			//vlog.valueThreshold = int(math.Round(vlog.vlMetrics.Percentile(1)))
 			// No need to flush anything, we write to file directly via mmap.
 		}
 		y.NumWrites.Add(int64(written))
 		y.NumBytesWritten.Add(int64(bytesWritten))
 
 		vlog.numEntriesWritten += uint32(written)
-		vlog.valueCh <- b
+		vlog.vlogThreshold.update(b)
 		// We write to disk here so that all entries that are part of the same transaction are
 		// written to the same vlog file.
 		if err := toDisk(); err != nil {
@@ -1159,4 +1106,82 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 	for fid, discard := range stats {
 		vlog.discardStats.Update(fid, discard)
 	}
+}
+
+type valueThreshold struct {
+	opt Options
+
+	valueCh          chan *request
+	vCloser          *z.Closer
+
+	// Metrics contains a running log of statistics like amount of data stored etc.
+	vlMetrics *z.HistogramData
+}
+
+func initVlogThreshold(opt Options) *valueThreshold {
+	getBounds := func() []float64 {
+		// setting histogram bound between vlogMinBound-vlogMaxBound with default 1KB-1MB
+		// this will give histogram range between 1kb-1mb
+		// each bucket would be of size vlogBoundStep default 1kb
+		mxbd := math.Max(maxValueThreshold, float64(opt.maxBatchSize))
+		mnbd := float64(opt.ValueThreshold)
+		y.AssertTruef(mxbd > mnbd, "maximum threshold bound is less than the min threshold")
+		size := math.Min(mxbd - mnbd, 1024.0)
+		bdstp := (mxbd - mnbd) / size
+		bounds := make([]float64, size)
+		for i := range bounds {
+			if i == 0 {
+				bounds[0] = mnbd
+				continue
+			}
+			if i == int(size-1) {
+				bounds[i] = mxbd
+			}
+			bounds[i] = bounds[i-1] + bdstp
+		}
+		return bounds
+	}
+
+	return &valueThreshold{
+		opt:              opt,
+		valueCh:          make(chan *request, 1000),
+		vCloser:          z.NewCloser(1),
+		vlMetrics:        z.NewHistogramData(getBounds()),
+	}
+}
+
+func (v *valueThreshold) update(request *request) {
+	if !v.opt.DynamicValueThreshold {
+		return
+	}
+	v.valueCh <- request
+}
+
+func (v *valueThreshold)  listenForValueThresholdUpdate() {
+	// dynamic value threshold is set to false, return, no need to listen
+	if !v.opt.DynamicValueThreshold {
+		return
+	}
+
+	go func() {
+		defer v.vCloser.Done()
+		for {
+			select {
+			case val := <-v.valueCh:
+				for _, e := range val.Entries {
+					v.vlMetrics.Update(int64(len(e.Value)))
+				}
+				// we are making it to get 99 percentile so that only values
+				// in range of 1 percentile will make it to the value log
+				p := int64(v.vlMetrics.Percentile(0.99))
+				if v.opt.ValueThreshold != p {
+					v.opt.Infof("updating value threshold from: %d to: %d",
+						v.opt.ValueThreshold, p)
+					atomic.StoreInt64(&v.opt.ValueThreshold, p)
+				}
+			case <-v.vCloser.HasBeenClosed():
+				return
+			}
+		}
+	}()
 }
