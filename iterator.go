@@ -429,7 +429,8 @@ type Iterator struct {
 
 	lastKey []byte // Used to skip over multiple versions of the same key.
 
-	closed bool
+	closed  bool
+	scanned int // Used to estimate the size of data scanned by iterator.
 
 	// ThreadId is an optional value that can be set to identify which goroutine created
 	// the iterator. It can be used, for example, to uniquely identify each of the
@@ -563,6 +564,7 @@ func (it *Iterator) Next() {
 
 	// Set next item to current
 	it.item = it.data.pop()
+	it.scanned = len(it.item.key) + len(it.item.val) + len(it.item.vptr) + 1 + 1 // meta + usermeta
 
 	for it.iitr.Valid() {
 		if it.parseItem() {

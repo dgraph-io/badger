@@ -203,11 +203,14 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 
 		// This unique stream id is used to identify all the keys from this iteration.
 		streamId := atomic.AddUint32(&st.nextStreamId, 1)
+		var scanned int
 
 		sendIt := func() error {
 			select {
 			case st.kvChan <- outList:
 				outList = z.NewBuffer(2 * batchSize)
+				atomic.AddUint64(&st.scanned, uint64(itr.scanned-scanned))
+				scanned = itr.scanned
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -228,9 +231,6 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			if len(kr.right) > 0 && bytes.Compare(item.Key(), kr.right) >= 0 {
 				break
 			}
-
-			sz := uint64(len(item.key)+len(item.vptr)+len(item.val)) + 1 + 1 // meta + usermeta
-			atomic.AddUint64(&st.scanned, sz)
 
 			// Check if we should pick this key.
 			if st.ChooseKey != nil && !st.ChooseKey(item) {
