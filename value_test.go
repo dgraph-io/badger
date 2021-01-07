@@ -58,20 +58,21 @@ func TestDynamicValueThreshold(t *testing.T) {
 	}
 
 	for vl := 511; vl >=31 ; vl = vl - 4 {
-		for i := 0; i < 2000; i++ {
+		for i := 0; i < 5000; i++ {
 			val := make([]byte, vl)
 			y.Check2(rand.Read(val))
 			e1 := &Entry{
 				Key:   []byte(fmt.Sprintf("samplekey_%d_%d", vl, i)),
-				Value: []byte(val),
+				Value: val,
 				meta:  bitValuePointer,
 			}
 			b := new(request)
 			b.Entries = []*Entry{e1}
 			log.write([]*request{b})
 		}
-		t.Logf("value threshold is %d \n", log.opt.ValueThreshold)
+		t.Logf("value threshold is %d \n", log.db.opt.ValueThreshold)
 	}
+	require.Equal(t, log.db.opt.ValueThreshold, int64(993))
 }
 
 func TestValueBasic(t *testing.T) {

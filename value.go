@@ -465,7 +465,7 @@ func vlogFilePath(dirPath string, fid uint32) string {
 }
 
 func (vlog *valueLog) skipVlog(e *Entry) bool {
-	return int64(len(e.Value)) < vlog.opt.ValueThreshold
+	return int64(len(e.Value)) < vlog.db.opt.ValueThreshold
 }
 
 func (vlog *valueLog) fpath(fid uint32) string {
@@ -552,7 +552,7 @@ func (vlog *valueLog) init(db *DB) {
 		return
 	}
 	vlog.dirPath = vlog.opt.ValueDir
-	vlog.threshold = initVlogThreshold(vlog.opt)
+	vlog.threshold = initVlogThreshold(&db.opt)
 	vlog.threshold.listenForValueThresholdUpdate()
 
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
@@ -1109,19 +1109,18 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 }
 
 type vlogThreshold struct {
-	opt Options
+	opt *Options
 
-	valueCh          chan *request
-	vCloser          *z.Closer
-
+	valueCh        chan *request
+	vCloser        *z.Closer
 	// Metrics contains a running log of statistics like amount of data stored etc.
 	vlMetrics *z.HistogramData
 }
 
-func initVlogThreshold(opt Options) *vlogThreshold {
+func initVlogThreshold(opt *Options) *vlogThreshold {
 	if !opt.DynamicValueThreshold {
 		return &vlogThreshold{
-			opt: opt,
+			opt:            opt,
 		}
 	}
 
@@ -1129,7 +1128,7 @@ func initVlogThreshold(opt Options) *vlogThreshold {
 		mxbd := math.Min(maxValueThreshold, float64(opt.maxBatchSize))
 		mnbd := float64(opt.ValueThreshold)
 		y.AssertTruef(mxbd > mnbd, "maximum threshold bound is less than the min threshold")
-		size := math.Min(mxbd - mnbd, 1024.0)
+		size := math.Min(mxbd-mnbd, 1024.0)
 		bdstp := (mxbd - mnbd) / size
 		bounds := make([]float64, int64(size))
 		for i := range bounds {
@@ -1146,10 +1145,10 @@ func initVlogThreshold(opt Options) *vlogThreshold {
 	}
 
 	return &vlogThreshold{
-		opt:              opt,
-		valueCh:          make(chan *request, 1000),
-		vCloser:          z.NewCloser(1),
-		vlMetrics:        z.NewHistogramData(getBounds()),
+		opt:            opt,
+		valueCh:        make(chan *request, 1000),
+		vCloser:        z.NewCloser(1),
+		vlMetrics:      z.NewHistogramData(getBounds()),
 	}
 }
 
