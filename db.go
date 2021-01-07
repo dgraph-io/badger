@@ -798,7 +798,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	}
 	var count, size int64
 	for _, e := range entries {
-		size += e.estimateSize(db.opt.ValueThreshold)
+		size += e.estimateSize(db.vlog.valueThreshold())
 		count++
 	}
 	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {

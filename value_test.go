@@ -54,7 +54,7 @@ func TestDynamicValueThreshold(t *testing.T) {
 			b.Entries = []*Entry{e1}
 			log.write([]*request{b})
 		}
-		t.Logf("value threshold is %d \n", log.opt.ValueThreshold)
+		t.Logf("value threshold is %d \n", log.valueThreshold())
 	}
 
 	for vl := 511; vl >=31 ; vl = vl - 4 {
@@ -70,9 +70,9 @@ func TestDynamicValueThreshold(t *testing.T) {
 			b.Entries = []*Entry{e1}
 			log.write([]*request{b})
 		}
-		t.Logf("value threshold is %d \n", log.db.opt.ValueThreshold)
+		t.Logf("value threshold is %d \n", log.valueThreshold())
 	}
-	require.Equal(t, log.db.opt.ValueThreshold, int64(993))
+	require.Equal(t, log.valueThreshold(), int64(995))
 }
 
 func TestValueBasic(t *testing.T) {
@@ -87,7 +87,7 @@ func TestValueBasic(t *testing.T) {
 	// Use value big enough that the value log writes them even if SyncWrites is false.
 	const val1 = "sampleval012345678901234567890123"
 	const val2 = "samplevalb012345678901234567890123"
-	require.True(t, int64(len(val1)) >= kv.opt.ValueThreshold)
+	require.True(t, int64(len(val1)) >= kv.vlog.valueThreshold())
 
 	e1 := &Entry{
 		Key:   []byte("samplekey"),
@@ -638,7 +638,7 @@ func TestPartialAppendToWAL(t *testing.T) {
 		v3 = []byte("value3-01234567890123456789012012345678901234567890123")
 	)
 	// Values need to be long enough to actually get written to value log.
-	require.True(t, int64(len(v3)) >= kv.opt.ValueThreshold)
+	require.True(t, int64(len(v3)) >= kv.vlog.valueThreshold())
 
 	// Create truncated vlog to simulate a partial append.
 	// k0 - single transaction, k1 and k2 in another transaction
@@ -1073,7 +1073,7 @@ func TestValueEntryChecksum(t *testing.T) {
 		db, err := Open(opt)
 		require.NoError(t, err)
 
-		require.Greater(t, int64(len(v)), db.opt.ValueThreshold)
+		require.Greater(t, int64(len(v)), db.vlog.valueThreshold())
 		txnSet(t, db, k, v, 0)
 		require.NoError(t, db.Close())
 
@@ -1102,7 +1102,7 @@ func TestValueEntryChecksum(t *testing.T) {
 		db, err := Open(opt)
 		require.NoError(t, err)
 
-		require.Greater(t, int64(len(v)), db.opt.ValueThreshold)
+		require.Greater(t, int64(len(v)), db.vlog.valueThreshold())
 		txnSet(t, db, k, v, 0)
 
 		path := db.vlog.fpath(1)

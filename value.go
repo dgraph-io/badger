@@ -233,7 +233,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			ne.ExpiresAt = e.ExpiresAt
 			ne.Key = append([]byte{}, e.Key...)
 			ne.Value = append([]byte{}, e.Value...)
-			es := ne.estimateSize(vlog.opt.ValueThreshold)
+			es := ne.estimateSize(vlog.valueThreshold())
 			// Consider size of value as well while considering the total size
 			// of the batch. There have been reports of high memory usage in
 			// rewrite because we don't consider the value size. See #1292.
@@ -438,6 +438,10 @@ func (vlog *valueLog) dropAll() (int, error) {
 	return count, nil
 }
 
+func (vlog *valueLog) valueThreshold() int64 {
+	return atomic.LoadInt64(vlog.threshold.valueThreshold)
+}
+
 type valueLog struct {
 	dirPath string
 
@@ -465,7 +469,7 @@ func vlogFilePath(dirPath string, fid uint32) string {
 }
 
 func (vlog *valueLog) skipVlog(e *Entry) bool {
-	return int64(len(e.Value)) < vlog.db.opt.ValueThreshold
+	return int64(len(e.Value)) < vlog.valueThreshold()
 }
 
 func (vlog *valueLog) fpath(fid uint32) string {
@@ -546,13 +550,13 @@ func errFile(err error, path string, msg string) error {
 func (vlog *valueLog) init(db *DB) {
 	vlog.opt = db.opt
 	vlog.db = db
+	vlog.threshold = initVlogThreshold(&db.opt)
 	// We don't need to open any vlog files or collect stats for GC if DB is opened
 	// in InMemory mode. InMemory mode doesn't create any files/directories on disk.
 	if vlog.opt.InMemory {
 		return
 	}
 	vlog.dirPath = vlog.opt.ValueDir
-	vlog.threshold = initVlogThreshold(&db.opt)
 	vlog.threshold.listenForValueThresholdUpdate()
 
 	vlog.garbageCh = make(chan struct{}, 1) // Only allow one GC at a time.
@@ -1110,7 +1114,8 @@ func (vlog *valueLog) updateDiscardStats(stats map[uint32]int64) {
 
 type vlogThreshold struct {
 	opt *Options
-
+	valueThreshold *int64
+	dynamicValueThreshold bool
 	valueCh        chan *request
 	vCloser        *z.Closer
 	// Metrics contains a running log of statistics like amount of data stored etc.
@@ -1120,7 +1125,8 @@ type vlogThreshold struct {
 func initVlogThreshold(opt *Options) *vlogThreshold {
 	if !opt.DynamicValueThreshold {
 		return &vlogThreshold{
-			opt:            opt,
+			opt: opt,
+			valueThreshold: &opt.ValueThreshold,
 		}
 	}
 
@@ -1145,7 +1151,9 @@ func initVlogThreshold(opt *Options) *vlogThreshold {
 	}
 
 	return &vlogThreshold{
-		opt:            opt,
+		opt: opt,
+		dynamicValueThreshold: opt.DynamicValueThreshold,
+		valueThreshold: &opt.ValueThreshold,
 		valueCh:        make(chan *request, 1000),
 		vCloser:        z.NewCloser(1),
 		vlMetrics:      z.NewHistogramData(getBounds()),
@@ -1153,12 +1161,12 @@ func initVlogThreshold(opt *Options) *vlogThreshold {
 }
 
 func (v *vlogThreshold) close() {
-	if !v.opt.DynamicValueThreshold { return }
+	if !v.dynamicValueThreshold { return }
 	v.vCloser.SignalAndWait()
 }
 
 func (v *vlogThreshold) update(request *request) {
-	if !v.opt.DynamicValueThreshold {
+	if !v.dynamicValueThreshold {
 		return
 	}
 	v.valueCh <- request
@@ -1166,7 +1174,7 @@ func (v *vlogThreshold) update(request *request) {
 
 func (v *vlogThreshold)  listenForValueThresholdUpdate() {
 	// dynamic value threshold is set to false, return, no need to listen
-	if !v.opt.DynamicValueThreshold {
+	if !v.dynamicValueThreshold {
 		return
 	}
 
@@ -1181,10 +1189,10 @@ func (v *vlogThreshold)  listenForValueThresholdUpdate() {
 				// we are making it to get 99 percentile so that only values
 				// in range of 1 percentile will make it to the value log
 				p := int64(v.vlMetrics.Percentile(0.99))
-				if v.opt.ValueThreshold != p {
+				if atomic.LoadInt64(v.valueThreshold) != p {
 					v.opt.Infof("updating value threshold from: %d to: %d",
-						v.opt.ValueThreshold, p)
-					atomic.StoreInt64(&v.opt.ValueThreshold, p)
+						v.valueThreshold, p)
+					atomic.StoreInt64(v.valueThreshold, p)
 				}
 			case <-v.vCloser.HasBeenClosed():
 				return
