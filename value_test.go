@@ -38,7 +38,7 @@ func TestDynamicValueThreshold(t *testing.T) {
 	y.Check(err)
 	defer removeDir(dir)
 
-	kv, _ := Open(getTestOptions(dir).WithValueThreshold(32))
+	kv, _ := Open(getTestOptions(dir).WithValueThreshold(32).WithDynamicValueThreshold())
 	defer kv.Close()
 	log := &kv.vlog
 	for vl := 32; vl <= 1024; vl = vl + 4 {
@@ -55,7 +55,7 @@ func TestDynamicValueThreshold(t *testing.T) {
 			b.Entries = []*Entry{e1}
 			log.write([]*request{b})
 		}
-		t.Logf("count is %d", log.vlMetrics.Count)
+		t.Logf("count is %d", log.threshold.vlMetrics.Count)
 		t.Logf("value threshold is %d \n", log.opt.ValueThreshold)
 	}
 
@@ -73,7 +73,7 @@ func TestDynamicValueThreshold(t *testing.T) {
 			b.Entries = []*Entry{e1}
 			log.write([]*request{b})
 		}
-		t.Logf("count is %d", log.vlMetrics.Count)
+		t.Logf("count is %d", log.threshold.vlMetrics.Count)
 		t.Logf("value threshold is %d \n", log.opt.ValueThreshold)
 	}
 }
