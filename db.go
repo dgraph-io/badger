@@ -153,7 +153,7 @@ func checkAndSetOptions(opt *Options) error {
 }
 
 // Open returns a new DB object.
-func fOpen(opt Options) (*DB, error) {
+func Open(opt Options) (*DB, error) {
 	if err := checkAndSetOptions(&opt); err != nil {
 		return nil, err
 	}

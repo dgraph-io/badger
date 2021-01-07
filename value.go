@@ -1131,7 +1131,7 @@ func initVlogThreshold(opt Options) *vlogThreshold {
 		y.AssertTruef(mxbd > mnbd, "maximum threshold bound is less than the min threshold")
 		size := math.Min(mxbd - mnbd, 1024.0)
 		bdstp := (mxbd - mnbd) / size
-		bounds := make([]float64, size)
+		bounds := make([]float64, int64(size))
 		for i := range bounds {
 			if i == 0 {
 				bounds[0] = mnbd
