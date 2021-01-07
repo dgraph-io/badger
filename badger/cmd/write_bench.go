@@ -94,7 +94,7 @@ const (
 func init() {
 	benchCmd.AddCommand(writeBenchCmd)
 	writeBenchCmd.Flags().IntVarP(&wo.keySz, "key-size", "k", 32, "Size of key")
-	writeBenchCmd.Flags().IntVar(&wo.valSz, "val-size", 128, "Size of value")
+	writeBenchCmd.Flags().IntVar(&wo.valSz, "val-size", 2048, "Size of value")
 	writeBenchCmd.Flags().Float64VarP(&wo.numKeys, "keys-mil", "m", 10.0,
 		"Number of keys to add in millions")
 	writeBenchCmd.Flags().BoolVar(&wo.syncWrites, "sync", false,
@@ -135,6 +135,11 @@ func init() {
 }
 
 func writeRandom(db *badger.DB, num uint64) error {
+	vsz80 := 512
+	vsz19 := 256
+	vsz099 := 256
+	vsz001 := wo.valSz - vsz80 - vsz19 - vsz099
+
 	value := make([]byte, wo.valSz)
 	y.Check2(rand.Read(value))
 
@@ -143,13 +148,25 @@ func writeRandom(db *badger.DB, num uint64) error {
 
 	ttlPeriod, errParse := time.ParseDuration(wo.ttlDuration)
 	y.Check(errParse)
-
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, wo.keySz)
 		y.Check2(rand.Read(key))
 
-		vsz := rand.Intn(wo.valSz) + 1
-		e := badger.NewEntry(key, value[:vsz])
+		var e *badger.Entry
+		p := rand.Intn(1000)
+		if p >=0 && p < 800 {
+			vsz := rand.Intn(vsz80) + 1
+			e = badger.NewEntry(key, value[:vsz])
+		} else if p >= 800 && p < 990 {
+			vsz := rand.Intn(vsz19) + vsz80 + 1
+			e = badger.NewEntry(key, value[:vsz])
+		} else if p >= 990 && p < 999 {
+			vsz := rand.Intn(vsz099) + vsz80 + vsz19 + 1
+			e = badger.NewEntry(key, value[:vsz])
+		} else {
+			vsz := rand.Intn(vsz001) + vsz80 + vsz19 + vsz099 + 1
+			e = badger.NewEntry(key, value[:vsz])
+		}
 
 		if ttlPeriod != 0 {
 			e.WithTTL(ttlPeriod)
