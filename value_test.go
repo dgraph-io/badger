@@ -42,7 +42,6 @@ func TestDynamicValueThreshold(t *testing.T) {
 	defer kv.Close()
 	log := &kv.vlog
 	for vl := 32; vl <= 1024; vl = vl + 4 {
-		fmt.Printf("doing it for %d \n", vl)
 		for i := 0; i < 1000; i++ {
 			val := make([]byte, vl)
 			y.Check2(rand.Read(val))
@@ -55,12 +54,10 @@ func TestDynamicValueThreshold(t *testing.T) {
 			b.Entries = []*Entry{e1}
 			log.write([]*request{b})
 		}
-		t.Logf("count is %d", log.threshold.vlMetrics.Count)
 		t.Logf("value threshold is %d \n", log.opt.ValueThreshold)
 	}
 
 	for vl := 511; vl >=31 ; vl = vl - 4 {
-		fmt.Printf("doing it for %d \n", vl)
 		for i := 0; i < 2000; i++ {
 			val := make([]byte, vl)
 			y.Check2(rand.Read(val))
@@ -73,7 +70,6 @@ func TestDynamicValueThreshold(t *testing.T) {
 			b.Entries = []*Entry{e1}
 			log.write([]*request{b})
 		}
-		t.Logf("count is %d", log.threshold.vlMetrics.Count)
 		t.Logf("value threshold is %d \n", log.opt.ValueThreshold)
 	}
 }
@@ -1076,7 +1072,7 @@ func TestValueEntryChecksum(t *testing.T) {
 		db, err := Open(opt)
 		require.NoError(t, err)
 
-		require.Greater(t, len(v), db.opt.ValueThreshold)
+		require.Greater(t, int64(len(v)), db.opt.ValueThreshold)
 		txnSet(t, db, k, v, 0)
 		require.NoError(t, db.Close())
 
@@ -1105,7 +1101,7 @@ func TestValueEntryChecksum(t *testing.T) {
 		db, err := Open(opt)
 		require.NoError(t, err)
 
-		require.Greater(t, len(v), db.opt.ValueThreshold)
+		require.Greater(t, int64(len(v)), db.opt.ValueThreshold)
 		txnSet(t, db, k, v, 0)
 
 		path := db.vlog.fpath(1)
