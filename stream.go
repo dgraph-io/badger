@@ -87,6 +87,7 @@ type Stream struct {
 	kvChan       chan *z.Buffer
 	nextStreamId uint32
 	doneMarkers  bool
+	scanned      uint64 // used to estimate the ETA for data scan.
 }
 
 // SendDoneMarkers when true would send out done markers on the stream. False by default.
@@ -202,11 +203,14 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 
 		// This unique stream id is used to identify all the keys from this iteration.
 		streamId := atomic.AddUint32(&st.nextStreamId, 1)
+		var scanned int
 
 		sendIt := func() error {
 			select {
 			case st.kvChan <- outList:
 				outList = z.NewBuffer(2 * batchSize)
+				atomic.AddUint64(&st.scanned, uint64(itr.scanned-scanned))
+				scanned = itr.scanned
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -227,6 +231,7 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 			if len(kr.right) > 0 && bytes.Compare(item.Key(), kr.right) >= 0 {
 				break
 			}
+
 			// Check if we should pick this key.
 			if st.ChooseKey != nil && !st.ChooseKey(item) {
 				continue
@@ -281,6 +286,10 @@ func (st *Stream) produceKVs(ctx context.Context, threadId int) error {
 }
 
 func (st *Stream) streamKVs(ctx context.Context) error {
+	onDiskSize, uncompressedSize := st.db.EstimateSize(st.Prefix)
+	st.db.opt.Infof("%s Streaming about %s of uncompressed data (%s on disk)\n",
+		st.LogPrefix, humanize.IBytes(uncompressedSize), humanize.IBytes(onDiskSize))
+
 	var bytesSent uint64
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
@@ -340,9 +349,10 @@ outer:
 				continue
 			}
 			speed := bytesSent / durSec
-
-			st.db.opt.Infof("%s Time elapsed: %s, bytes sent: %s, speed: %s/sec, jemalloc: %s\n",
-				st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(bytesSent),
+			scanned := atomic.LoadUint64(&st.scanned)
+			st.db.opt.Infof("%s Time elapsed: %s, scanned: ~%s/%s, bytes sent: %s, speed: %s/sec,"+
+				"jemalloc: %s\n", st.LogPrefix, y.FixedDuration(dur), humanize.IBytes(scanned),
+				humanize.IBytes(uncompressedSize), humanize.IBytes(bytesSent),
 				humanize.IBytes(speed), humanize.IBytes(uint64(z.NumAllocBytes())))
 
 		case kvs, ok := <-st.kvChan:
