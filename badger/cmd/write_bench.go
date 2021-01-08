@@ -138,7 +138,7 @@ func writeRandom(db *badger.DB, num uint64) error {
 	vsz80 := 512
 	vsz19 := 256
 	vsz099 := 256
-	vsz001 := wo.valSz - vsz80 - vsz19 - vsz099
+	vsz001 := 1024
 
 	value := make([]byte, wo.valSz)
 	y.Check2(rand.Read(value))

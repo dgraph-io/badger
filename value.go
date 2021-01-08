@@ -184,6 +184,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 
 	vlog.opt.Infof("Rewriting fid: %d", f.fid)
 	wb := make([]*Entry, 0, 1000)
+	valThreshold := vlog.valueThreshold()
 	var size int64
 
 	y.AssertTrue(vlog.db != nil)
@@ -233,7 +234,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			ne.ExpiresAt = e.ExpiresAt
 			ne.Key = append([]byte{}, e.Key...)
 			ne.Value = append([]byte{}, e.Value...)
-			es := ne.estimateSize(vlog.valueThreshold())
+			es := ne.estimateSize(valThreshold)
 			// Consider size of value as well while considering the total size
 			// of the batch. There have been reports of high memory usage in
 			// rewrite because we don't consider the value size. See #1292.
@@ -242,7 +243,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 			// Ensure length and size of wb is within transaction limits.
 			if int64(len(wb)+1) >= vlog.opt.maxBatchCount ||
 				size+es >= vlog.opt.maxBatchSize {
-				if err := vlog.db.batchSet(wb); err != nil {
+				if err := vlog.db.batchSet(wb, valThreshold); err != nil {
 					return err
 				}
 				size = 0
@@ -324,7 +325,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 		if end > len(wb) {
 			end = len(wb)
 		}
-		if err := vlog.db.batchSet(wb[i:end]); err != nil {
+		if err := vlog.db.batchSet(wb[i:end], valThreshold); err != nil {
 			if err == ErrTxnTooBig {
 				// Decrease the batch size to half.
 				batchSize = batchSize / 2
@@ -468,8 +469,8 @@ func vlogFilePath(dirPath string, fid uint32) string {
 	return fmt.Sprintf("%s%s%06d.vlog", dirPath, string(os.PathSeparator), fid)
 }
 
-func (vlog *valueLog) skipVlog(e *Entry) bool {
-	return int64(len(e.Value)) < vlog.valueThreshold()
+func (vlog *valueLog) skipVlog(e *Entry, threshold int64) bool {
+	return int64(len(e.Value)) < threshold
 }
 
 func (vlog *valueLog) fpath(fid uint32) string {
@@ -679,6 +680,8 @@ type request struct {
 	Wg   sync.WaitGroup
 	Err  error
 	ref  int32
+
+	valueThreshold int64
 }
 
 func (req *request) reset() {
@@ -858,7 +861,7 @@ func (vlog *valueLog) write(reqs []*request) error {
 			buf.Reset()
 
 			e := b.Entries[j]
-			if vlog.skipVlog(e) {
+			if vlog.skipVlog(e, b.valueThreshold) {
 				b.Ptrs = append(b.Ptrs, valuePointer{})
 				continue
 			}
@@ -1131,7 +1134,7 @@ func initVlogThreshold(opt *Options) *vlogThreshold {
 	}
 
 	getBounds := func() []float64 {
-		mxbd := math.Min(maxValueThreshold, float64(opt.maxBatchSize))
+		mxbd := opt.maxValueThreshold
 		mnbd := float64(opt.ValueThreshold)
 		y.AssertTruef(mxbd > mnbd, "maximum threshold bound is less than the min threshold")
 		size := math.Min(mxbd-mnbd, 1024.0)
@@ -1183,15 +1186,18 @@ func (v *vlogThreshold)  listenForValueThresholdUpdate() {
 		for {
 			select {
 			case val := <-v.valueCh:
+				if val == nil || val.Entries == nil {
+					continue
+				}
 				for _, e := range val.Entries {
 					v.vlMetrics.Update(int64(len(e.Value)))
 				}
 				// we are making it to get 99 percentile so that only values
 				// in range of 1 percentile will make it to the value log
 				p := int64(v.vlMetrics.Percentile(0.99))
-				if atomic.LoadInt64(v.valueThreshold) != p {
-					v.opt.Infof("updating value threshold from: %d to: %d",
-						v.valueThreshold, p)
+				vt := atomic.LoadInt64(v.valueThreshold)
+				if vt != p {
+					v.opt.Infof("updating value threshold from: %d to: %d", vt, p)
 					atomic.StoreInt64(v.valueThreshold, p)
 				}
 			case <-v.vCloser.HasBeenClosed():
