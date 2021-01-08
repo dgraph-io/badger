@@ -115,6 +115,8 @@ func checkAndSetOptions(opt *Options) error {
 	}
 	opt.maxBatchSize = (15 * opt.MemTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
+	//opt.maxValueThreshold = 1024.0
+	opt.maxValueThreshold = math.Min(maxValueThreshold, float64(opt.maxBatchSize))
 
 	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
 	if opt.ValueThreshold > maxValueThreshold {
@@ -706,7 +708,7 @@ func (db *DB) writeToLSM(b *request) error {
 
 	for i, entry := range b.Entries {
 		var err error
-		if db.vlog.skipVlog(entry) {
+		if db.vlog.skipVlog(entry, b.valueThreshold) {
 			// Will include deletion / tombstone case.
 			err = db.mt.Put(entry.Key,
 				y.ValueStruct{
@@ -793,12 +795,16 @@ func (db *DB) writeRequests(reqs []*request) error {
 }
 
 func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
+	return db.sendToWriteChWithThreshold(entries, db.vlog.valueThreshold())
+}
+
+func (db *DB) sendToWriteChWithThreshold(entries []*Entry, threshold int64) (*request, error) {
 	if atomic.LoadInt32(&db.blockWrites) == 1 {
 		return nil, ErrBlockedWrites
 	}
 	var count, size int64
 	for _, e := range entries {
-		size += e.estimateSize(db.vlog.valueThreshold())
+		size += e.estimateSize(threshold)
 		count++
 	}
 	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
@@ -809,6 +815,7 @@ func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	// Txns should not interleave among other txns or rewrites.
 	req := requestPool.Get().(*request)
 	req.reset()
+	req.valueThreshold = threshold
 	req.Entries = entries
 	req.Wg.Add(1)
 	req.IncrRef()     // for db write
@@ -885,8 +892,8 @@ func (db *DB) doWrites(lc *z.Closer) {
 // batchSet applies a list of badger.Entry. If a request level error occurs it
 // will be returned.
 //   Check(kv.BatchSet(entries))
-func (db *DB) batchSet(entries []*Entry) error {
-	req, err := db.sendToWriteCh(entries)
+func (db *DB) batchSet(entries []*Entry, threshold int64) error {
+	req, err := db.sendToWriteChWithThreshold(entries, threshold)
 	if err != nil {
 		return err
 	}
