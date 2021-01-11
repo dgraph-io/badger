@@ -43,8 +43,9 @@ import (
 )
 
 var (
-	badgerPrefix = []byte("!badger!")    // Prefix for internal keys used by badger.
-	txnKey       = []byte("!badger!txn") // For indicating end of entries in txn.
+	badgerPrefix    = []byte("!badger!")       // Prefix for internal keys used by badger.
+	txnKey          = []byte("!badger!txn")    // For indicating end of entries in txn.
+	bannedPrefixKey = []byte("!badger!prefix") // For indicating end of entries in txn.
 )
 
 const (
@@ -59,6 +60,11 @@ type closers struct {
 	valueGC     *z.Closer
 	pub         *z.Closer
 	cacheHealth *z.Closer
+}
+
+type lockedKeys struct {
+	sync.RWMutex
+	keys [][]byte
 }
 
 // DB provides the various functions required to interact with Badger.
@@ -89,7 +95,8 @@ type DB struct {
 	blockWrites int32
 	isClosed    uint32
 
-	orc *oracle
+	orc            *oracle
+	bannedPrefixes lockedKeys
 
 	pub        *publisher
 	registry   *KeyRegistry
@@ -333,6 +340,17 @@ func Open(opt Options) (*DB, error) {
 
 	if err = db.vlog.open(db); err != nil {
 		return db, y.Wrapf(err, "During db.vlog.open")
+	}
+
+	prefixKey := y.KeyWithTs(bannedPrefixKey, math.MaxUint64)
+	// Need to pass with timestamp, lsm get removes the last 8 bytes and compares key
+	vs, err := db.get(prefixKey)
+	if err != nil {
+		return db, errors.Wrap(err, "Retrieving head")
+	}
+	// TODO: Handle case where keys are stored in vlog files and decoding vs is required.
+	db.bannedPrefixes = lockedKeys{
+		keys: decodePrefixes(vs.Value),
 	}
 
 	// Let's advance nextTxnTs to one more than whatever we observed via
@@ -795,10 +813,24 @@ func (db *DB) writeRequests(reqs []*request) error {
 	db.opt.Debugf("%d entries written", count)
 	return nil
 }
+func (db *DB) validateEntries(entries []*Entry) error {
+	bannedPrefixes := db.GetBannedPrefixes()
+	for _, prefix := range bannedPrefixes {
+		for _, entry := range entries {
+			if bytes.HasPrefix(entry.Key, prefix) {
+				return ErrBannedKey
+			}
+		}
+	}
+	return nil
+}
 
 func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
 	if atomic.LoadInt32(&db.blockWrites) == 1 {
 		return nil, ErrBlockedWrites
+	}
+	if err := db.validateEntries(entries); err != nil {
+		return nil, err
 	}
 	var count, size int64
 	for _, e := range entries {
@@ -1719,6 +1751,71 @@ func (db *DB) filterPrefixesToDrop(prefixes [][]byte) ([][]byte, error) {
 		}
 	}
 	return filtered, nil
+}
+
+// encodePrefixes lays out the prefixes on byte array in format:
+// [len, prefix], [len, prefix], ...
+func encodePrefixes(prefixes [][]byte) []byte {
+	var encoded []byte
+	for _, prefix := range prefixes {
+		var sz [4]byte
+		binary.BigEndian.PutUint32(sz[:], uint32(len(prefix)))
+		encoded = append(encoded, sz[:]...)
+		encoded = append(encoded, prefix...)
+	}
+	return encoded
+}
+
+func decodePrefixes(encoded []byte) [][]byte {
+	if len(encoded) == 0 {
+		return make([][]byte, 0)
+	}
+	var prefixes [][]byte
+	for len(encoded) > 0 {
+		sz := binary.BigEndian.Uint32(encoded[:4])
+		encoded = encoded[4:]
+		prefixes = append(prefixes, encoded[:sz])
+		encoded = encoded[sz:]
+	}
+	return prefixes
+}
+
+func (db *DB) isBanned(key []byte) bool {
+	for _, prefix := range db.GetBannedPrefixes() {
+		if bytes.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// BanPrefix bans a prefix. Read/write to keys prefixed with any of such prefix is denied.
+func (db *DB) BanPrefix(prefix []byte) error {
+	db.opt.Infof("Banning prefix: %s", prefix)
+	// First set the banned prefixes in DB and then update the in-memory structure.
+	prefixes := append(db.GetBannedPrefixes(), prefix)
+	entries := []*Entry{{
+		Key:   y.KeyWithTs(bannedPrefixKey, 1),
+		Value: encodePrefixes(prefixes),
+	}}
+	req, err := db.sendToWriteCh(entries)
+	if err != nil {
+		return err
+	}
+	if err := req.Wait(); err != nil {
+		return err
+	}
+	db.bannedPrefixes.Lock()
+	defer db.bannedPrefixes.Unlock()
+	db.bannedPrefixes.keys = append(db.bannedPrefixes.keys, prefix)
+	return nil
+}
+
+// GetBannedPrefixes returns the list of prefixes banned for DB.
+func (db *DB) GetBannedPrefixes() [][]byte {
+	db.bannedPrefixes.RLock()
+	defer db.bannedPrefixes.RUnlock()
+	return db.bannedPrefixes.keys
 }
 
 // KVList contains a list of key-value pairs.

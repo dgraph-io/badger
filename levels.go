@@ -869,6 +869,9 @@ func (s *levelsController) compactBuildTables(
 	cd.span.Annotatef(nil, "Top tables count: %v Bottom tables count: %v",
 		len(topTables), len(botTables))
 
+	// We can delete the banned prefixes as well.
+	cd.dropPrefixes = append(cd.dropPrefixes, s.kv.GetBannedPrefixes()...)
+
 	keepTable := func(t *table.Table) bool {
 		for _, prefix := range cd.dropPrefixes {
 			if bytes.HasPrefix(t.Smallest(), prefix) &&

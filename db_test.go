@@ -2287,3 +2287,70 @@ func TestOpenDBReadOnly(t *testing.T) {
 	require.Equal(t, 20, count)
 	require.NoError(t, db.Close())
 }
+
+func TestBannedPrefixes(t *testing.T) {
+	dir, err := ioutil.TempDir("", "badger-test")
+	require.NoError(t, err, "temp dir for badger count not be created")
+	defer os.RemoveAll(dir)
+
+	ops := getTestOptions(dir)
+	db, err := Open(ops)
+	require.NoError(t, err)
+
+	var keys [10][]byte
+	var bannedPrefixes [][]byte
+	isBanned := func(key []byte) bool {
+		for _, prefix := range bannedPrefixes {
+			if bytes.HasPrefix(key, prefix) {
+				return true
+			}
+		}
+		return false
+	}
+	validate := func() {
+		// Validate read/write.
+		for _, key := range keys {
+			var rerr, werr error
+			txn := db.NewTransaction(true)
+			_, rerr = txn.Get(key)
+			if werr = txn.Set(key, []byte("value")); err == nil {
+				werr = txn.Commit()
+			}
+			txn.Discard()
+			if isBanned(key) {
+				require.Equal(t, ErrBannedKey, rerr)
+				require.Equal(t, ErrBannedKey, werr)
+			} else {
+				require.NoError(t, rerr)
+				require.NoError(t, werr)
+			}
+		}
+	}
+
+	for i := 0; i < 10; i++ {
+		keys[i] = []byte(fmt.Sprintf("key%02d", i))
+	}
+	for _, key := range keys {
+		require.NoError(t, db.Update(func(txn *Txn) error {
+			return txn.SetEntry(NewEntry([]byte(key), []byte("value")))
+		}))
+	}
+	validate()
+
+	// Ban a couple of prefix and validate that we should not be able to read/write them.
+	prefix := []byte(fmt.Sprintf("key%02d", 1))
+	bannedPrefixes = append(bannedPrefixes, prefix)
+	require.NoError(t, db.BanPrefix(prefix))
+	validate()
+
+	prefix = []byte(fmt.Sprintf("key%02d", 5))
+	bannedPrefixes = append(bannedPrefixes, prefix)
+	require.NoError(t, db.BanPrefix(prefix))
+	validate()
+
+	require.NoError(t, db.Close())
+
+	db, err = Open(ops)
+	require.NoError(t, err)
+	validate()
+}

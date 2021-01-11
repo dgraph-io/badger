@@ -442,6 +442,8 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 		return nil, ErrEmptyKey
 	} else if txn.discarded {
 		return nil, ErrDiscardedTxn
+	} else if txn.db.isBanned(key) {
+		return nil, ErrBannedKey
 	}
 
 	item = new(Item)
