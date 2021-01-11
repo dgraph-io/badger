@@ -50,6 +50,10 @@ func (r keyRange) equals(dst keyRange) bool {
 }
 
 func (r *keyRange) extend(kr keyRange) {
+	// TODO(ibrahim): Is this needed?
+	if kr.isEmpty() {
+		return
+	}
 	if r.isEmpty() {
 		*r = kr
 	}
@@ -68,6 +72,11 @@ func (r keyRange) overlapsWith(dst keyRange) bool {
 	// Empty keyRange always overlaps.
 	if r.isEmpty() {
 		return true
+	}
+	// TODO(ibrahim): Do you need this?
+	// Empty dst doesn't overlap with anything.
+	if dst.isEmpty() {
+		return false
 	}
 	if r.inf || dst.inf {
 		return true
@@ -176,7 +185,7 @@ func (cs *compactStatus) compareAndAdd(_ thisAndNextLevelRLocked, cd compactDef)
 	defer cs.Unlock()
 
 	tl := cd.thisLevel.level
-	y.AssertTruef(tl < len(cs.levels)-1, "Got level %d. Max levels: %d", tl, len(cs.levels))
+	y.AssertTruef(tl < len(cs.levels), "Got level %d. Max levels: %d", tl, len(cs.levels))
 	thisLevel := cs.levels[cd.thisLevel.level]
 	nextLevel := cs.levels[cd.nextLevel.level]
 
@@ -205,14 +214,17 @@ func (cs *compactStatus) delete(cd compactDef) {
 	defer cs.Unlock()
 
 	tl := cd.thisLevel.level
-	y.AssertTruef(tl < len(cs.levels)-1, "Got level %d. Max levels: %d", tl, len(cs.levels))
+	y.AssertTruef(tl < len(cs.levels), "Got level %d. Max levels: %d", tl, len(cs.levels))
 
 	thisLevel := cs.levels[cd.thisLevel.level]
 	nextLevel := cs.levels[cd.nextLevel.level]
 
 	thisLevel.delSize -= cd.thisSize
 	found := thisLevel.remove(cd.thisRange)
-	if !cd.nextRange.isEmpty() {
+	// The following check makes sense only if we're compacting more than one
+	// table. In case of the max level, we might rewrite a single table to
+	// remove stale data.
+	if cd.thisLevel != cd.nextLevel && !cd.nextRange.isEmpty() {
 		found = nextLevel.remove(cd.nextRange) && found
 	}
 

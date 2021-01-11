@@ -32,13 +32,24 @@ type levelHandler struct {
 	// For level >= 1, tables are sorted by key ranges, which do not overlap.
 	// For level 0, tables are sorted by time.
 	// For level 0, newest table are at the back. Compact the oldest one first, which is at the front.
-	tables    []*table.Table
-	totalSize int64
+	tables         []*table.Table
+	totalSize      int64
+	totalStaleSize int64
 
 	// The following are initialized once and const.
 	level    int
 	strLevel string
 	db       *DB
+}
+
+func (s *levelHandler) isLastLevel() bool {
+	return s.level == s.db.opt.MaxLevels-1
+}
+
+func (s *levelHandler) getTotalStaleSize() int64 {
+	s.RLock()
+	defer s.RUnlock()
+	return s.totalStaleSize
 }
 
 func (s *levelHandler) getTotalSize() int64 {
@@ -54,8 +65,9 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 
 	s.tables = tables
 	s.totalSize = 0
+	s.totalStaleSize = 0
 	for _, t := range tables {
-		s.totalSize += t.Size()
+		s.addSize(t)
 	}
 
 	if s.level == 0 {
@@ -89,7 +101,7 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) error {
 			newTables = append(newTables, t)
 			continue
 		}
-		s.totalSize -= t.Size()
+		s.subtractSize(t)
 	}
 	s.tables = newTables
 
@@ -117,12 +129,12 @@ func (s *levelHandler) replaceTables(toDel, toAdd []*table.Table) error {
 			newTables = append(newTables, t)
 			continue
 		}
-		s.totalSize -= t.Size()
+		s.subtractSize(t)
 	}
 
 	// Increase totalSize first.
 	for _, t := range toAdd {
-		s.totalSize += t.Size()
+		s.addSize(t)
 		t.IncrRef()
 		newTables = append(newTables, t)
 	}
@@ -145,7 +157,7 @@ func (s *levelHandler) addTable(t *table.Table) {
 	s.Lock()
 	defer s.Unlock()
 
-	s.totalSize += t.Size() // Increase totalSize first.
+	s.addSize(t) // Increase totalSize first.
 	t.IncrRef()
 	s.tables = append(s.tables, t)
 }
@@ -191,11 +203,22 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 
 	s.tables = append(s.tables, t)
 	t.IncrRef()
-	s.totalSize += t.Size()
+	s.addSize(t)
 
 	return true
 }
 
+// This should be called while holding the lock on the level.
+func (s *levelHandler) addSize(t *table.Table) {
+	s.totalSize += t.Size()
+	s.totalStaleSize += int64(t.StaleDataSize())
+}
+
+// This should be called while holding the lock on the level.
+func (s *levelHandler) subtractSize(t *table.Table) {
+	s.totalSize -= t.Size()
+	s.totalStaleSize -= int64(t.StaleDataSize())
+}
 func (s *levelHandler) numTables() int {
 	s.RLock()
 	defer s.RUnlock()

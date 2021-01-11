@@ -1303,6 +1303,19 @@ func (db *DB) Levels() []LevelInfo {
 	return db.lc.getLevelInfo()
 }
 
+// EstimateSize can be used to get rough estimate of data size for a given prefix.
+func (db *DB) EstimateSize(prefix []byte) (uint64, uint64) {
+	var onDiskSize, uncompressedSize uint64
+	tables := db.Tables()
+	for _, ti := range tables {
+		if bytes.HasPrefix(ti.Left, prefix) && bytes.HasPrefix(ti.Right, prefix) {
+			onDiskSize += uint64(ti.OnDiskSize)
+			uncompressedSize += uint64(ti.UncompressedSize)
+		}
+	}
+	return onDiskSize, uncompressedSize
+}
+
 // KeySplits can be used to get rough key ranges to divide up iteration over
 // the DB.
 func (db *DB) KeySplits(prefix []byte) []string {
@@ -1891,9 +1904,10 @@ func (db *DB) LevelsToString() string {
 	for _, li := range levels {
 		b.WriteString(fmt.Sprintf(
 			"Level %d [%s]: NumTables: %02d. Size: %s of %s. Score: %.2f->%.2f"+
-				" Target FileSize: %s\n",
+				" StaleData: %s Target FileSize: %s\n",
 			li.Level, base(li.IsBaseLevel), li.NumTables,
-			h(li.Size), h(li.TargetSize), li.Score, li.Adjusted, h(li.TargetFileSize)))
+			h(li.Size), h(li.TargetSize), li.Score, li.Adjusted, h(li.StaleDatSize),
+			h(li.TargetFileSize)))
 	}
 	b.WriteString("Level Done\n")
 	return b.String()

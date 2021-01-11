@@ -41,12 +41,8 @@ script: >-
     if [ $TRAVIS_OS_NAME = "linux" ] && [ $go_32 ]; then
       uname -a
       GOOS=linux GOARCH=arm go test -v ./...
-      # Another round of tests after turning off mmap.
-      GOOS=linux GOARCH=arm go test -v -vlog_mmap=false github.com/dgraph-io/badger
     else
       go test -v ./...
-      # Another round of tests after turning off mmap.
-      go test -v -vlog_mmap=false github.com/dgraph-io/badger
       # Cross-compile for Plan 9
       GOOS=plan9 go build ./...
     fi
